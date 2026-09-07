@@ -53,7 +53,9 @@ export class Background {
           void main(){ vec4 c = texture2D(tMap, vec2(fract(vUv.x + uScroll), vUv.y)); if (c.a < 0.5) discard; gl_FragColor = vec4(c.rgb * uTint, 1.0); }`,
         depthTest: false,
         depthWrite: false,
-        transparent: true,
+        // Opaque on purpose: the shader discards clear pixels, and staying in the
+        // opaque pass is what keeps renderOrder meaningful against the sprites.
+        transparent: false,
       })
     this.farMat = layerMat(this.farTex)
     this.nearMat = layerMat(this.nearTex)
@@ -179,14 +181,19 @@ function drawLayer(tex: CanvasTexture, backdrop: string, layer: 'far' | 'near', 
   tex.needsUpdate = true
 }
 
-/** Soft cloud puffs on a transparent strip; the night city gets a thin haze instead. */
+/**
+ * Cloud puffs on a strip. The layer shader discards anything under 50 % alpha
+ * and draws the rest solid, so softness comes from pre-blending the puff
+ * colour with the sky rather than from alpha.
+ */
 function drawClouds(tex: CanvasTexture, p: Palette, night: boolean): void {
   const c = tex.image as HTMLCanvasElement
   c.width = LAYER_W
   c.height = LAYER_H
   const g = c.getContext('2d')!
   g.clearRect(0, 0, LAYER_W, LAYER_H)
-  const col = new Color(p.clouds)
+  const sky = new Color(p.skyTop).lerp(new Color(p.skyBottom), 0.5)
+  const col = new Color(p.clouds).lerp(sky, night ? 0.75 : 0.42)
   const rnd = (i: number) => {
     const x = Math.sin(i * 12.9898 + 4.1) * 43758.5453
     return x - Math.floor(x)
@@ -196,8 +203,8 @@ function drawClouds(tex: CanvasTexture, p: Palette, night: boolean): void {
     const x = rnd(i) * LAYER_W
     const y = 70 + rnd(i + 50) * 70
     const w = 50 + rnd(i + 100) * 110
-    const alpha = night ? 0.06 : 0.2 + rnd(i + 150) * 0.15
-    g.fillStyle = `rgba(${Math.round(col.r * 255)},${Math.round(col.g * 255)},${Math.round(col.b * 255)},${alpha})`
+    const shade = 0.82 + rnd(i + 150) * 0.18
+    g.fillStyle = `rgb(${Math.round(col.r * 255 * shade)},${Math.round(col.g * 255 * shade)},${Math.round(col.b * 255 * shade)})`
     for (let k = 0; k < 5; k++) {
       g.beginPath()
       g.ellipse(x + (k - 2) * w * 0.22, y + (k % 2) * 4, w * 0.28, 9 + rnd(i + k) * 7, 0, 0, Math.PI * 2)

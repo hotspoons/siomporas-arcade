@@ -26,15 +26,15 @@ export class Background {
 
   constructor() {
     this.skyMat = new ShaderMaterial({
-      uniforms: { uTop: { value: new Color() }, uBottom: { value: new Color() }, uSun: { value: new Color() }, uSunPos: { value: [0.7, 0.62] }, uNight: { value: 0 } },
+      uniforms: { uTop: { value: new Color() }, uBottom: { value: new Color() }, uSun: { value: new Color() }, uSunPos: { value: [0.7, 0.62] }, uSunSize: { value: 1 }, uNight: { value: 0 } },
       vertexShader: /* glsl */ `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
-      fragmentShader: /* glsl */ `precision highp float; varying vec2 vUv; uniform vec3 uTop, uBottom, uSun; uniform vec2 uSunPos; uniform float uNight;
+      fragmentShader: /* glsl */ `precision highp float; varying vec2 vUv; uniform vec3 uTop, uBottom, uSun; uniform vec2 uSunPos; uniform float uNight, uSunSize;
         float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
         void main(){
           vec3 c = mix(uBottom, uTop, smoothstep(0.0, 1.0, vUv.y));
           float d = distance(vUv * vec2(1.6, 1.0), uSunPos * vec2(1.6, 1.0));
-          float sunR = mix(0.05, 0.028, uNight);
-          c += uSun * (smoothstep(sunR, sunR - 0.008, d) * mix(0.9, 0.55, uNight) + mix(0.25, 0.08, uNight) * smoothstep(0.25, 0.0, d));
+          float sunR = mix(0.05, 0.028, uNight) * uSunSize;
+          c += uSun * (smoothstep(sunR, sunR - 0.008, d) * mix(0.9, 0.55, uNight) + mix(0.25, 0.08, uNight) * smoothstep(0.25 * uSunSize, 0.0, d));
           if (uNight > 0.5) { float s = step(0.997, hash(floor(vUv * vec2(320.0, 224.0)))); c += vec3(s) * 0.8; }
           gl_FragColor = vec4(c, 1.0);
         }`,
@@ -74,6 +74,8 @@ export class Background {
     ;(this.skyMat.uniforms.uBottom.value as Color).set(p.skyBottom)
     ;(this.skyMat.uniforms.uSun.value as Color).set(p.sun)
     this.skyMat.uniforms.uNight.value = backdrop === 'city' ? 1 : 0
+    this.skyMat.uniforms.uSunPos.value = p.sunPos ?? [0.7, 0.62]
+    this.skyMat.uniforms.uSunSize.value = p.sunSize ?? 1
     if (backdrop !== this.backdrop) {
       this.backdrop = backdrop
       drawLayer(this.farTex, backdrop, 'far', p)

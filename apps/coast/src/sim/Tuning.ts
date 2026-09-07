@@ -52,6 +52,20 @@ export let CRASH_MIN_SPEED = 20
 
 // --- traffic ---
 export const TRAFFIC_COUNT = 14
+/** Extra pool of cars that cross the road at intersections (themes with `crossings`). */
+export const CROSSER_COUNT = 4
+export const TRAFFIC_TOTAL = TRAFFIC_COUNT + CROSSER_COUNT
+/** Head-on or side impacts faster than this (closing speed, m/s) are a wreck: a long roll instead of a bump. */
+export let WRECK_SPEED = 26
+/** Rear-ending same-direction traffic faster than this closing speed is a crash rather than a bump. */
+export let REAREND_CRASH_SPEED = 30
+/** Seconds lost rolling after a wreck (Rad Mobile took about five). */
+export let WRECK_TIME = 3.6
+/** Segments between intersections on `crossings` themes, and how fast crossing cars go (road widths / s). */
+export const CROSSING_EVERY = 140
+export let CROSSER_SPEED = 0.55
+/** Banked turns: fraction of the centrifugal push the banking cancels at bank = 1. */
+export let BANK_ASSIST = 0.55
 export let TRAFFIC_MIN_SPEED = 22
 export let TRAFFIC_MAX_SPEED = 48
 export const TRAFFIC_SPAWN_AHEAD = 300 // segments
@@ -86,6 +100,11 @@ export const SIM_TUNE: TuneSection = {
     tune('CRASH_TIME', () => CRASH_TIME, (v) => (CRASH_TIME = v)),
     tune('BUMP_KEEP', () => BUMP_KEEP, (v) => (BUMP_KEEP = v)),
     tune('CRASH_MIN_SPEED', () => CRASH_MIN_SPEED, (v) => (CRASH_MIN_SPEED = v)),
+    tune('WRECK_SPEED', () => WRECK_SPEED, (v) => (WRECK_SPEED = v)),
+    tune('REAREND_CRASH_SPEED', () => REAREND_CRASH_SPEED, (v) => (REAREND_CRASH_SPEED = v)),
+    tune('WRECK_TIME', () => WRECK_TIME, (v) => (WRECK_TIME = v)),
+    tune('CROSSER_SPEED', () => CROSSER_SPEED, (v) => (CROSSER_SPEED = v)),
+    tune('BANK_ASSIST', () => BANK_ASSIST, (v) => (BANK_ASSIST = v)),
     tune('TIME_START', () => TIME_START, (v) => (TIME_START = v)),
     tune('TIME_CHECKPOINT', () => TIME_CHECKPOINT, (v) => (TIME_CHECKPOINT = v)),
     tune('BAND_SEGMENTS', () => BAND_SEGMENTS, (v) => (BAND_SEGMENTS = v)),

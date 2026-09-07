@@ -5,9 +5,9 @@ import { Rng } from '@apex/engine/math/Rng'
 import { clamp, expApproach } from '@apex/engine/math/scalar'
 import { EventQueue } from './Events'
 import type { InputFrame } from './InputFrame'
-import { Stage, type StageDesc } from './Road'
+import { Stage, type StageDesc, type Theme } from './Road'
 import { Snapshot, type RunPhase } from './Snapshot'
-import { STAGE_BY_ID, THEMES } from './Stages'
+import { ROUTE_LENGTH, STAGE_BY_ID, THEMES } from './Stages'
 import * as T from './Tuning'
 
 export const TRAFFIC_KINDS = ['sedan', 'sedanSports', 'suv', 'van', 'truck', 'taxi', 'police', 'delivery'] as const
@@ -20,6 +20,11 @@ interface Car {
   /** Target lane the car drifts toward. */
   lane: number
   passed: boolean
+  /** +1 same way as you, -1 head-on, 0 crossing the road at an intersection. */
+  dir: 1 | -1 | 0
+  /** Crossers: which way across (+1 = left→right) and the intersection's z. */
+  side: number
+  crossZ: number
 }
 
 /** Sprite hit half-widths in road widths, by kind family; anything unlisted uses the default. */
@@ -47,14 +52,20 @@ export class Sim {
   curveAccum = 0
   offroad = false
   checkpointFlash = 0
+  wreck = false
+  wipersOn = false
+  lightsOn = false
+  theme!: Theme
   private readonly cars: Car[] = []
+  private readonly crossers: Car[] = []
   private readonly seed: number
   private stageDesc!: StageDesc
 
   constructor(seed: number) {
     this.seed = seed
     this.rng = new Rng(seed)
-    for (let i = 0; i < T.TRAFFIC_COUNT; i++) this.cars.push({ z: 0, x: 0, speed: 0, kind: 0, lane: 0, passed: false })
+    for (let i = 0; i < T.TRAFFIC_COUNT; i++) this.cars.push({ z: 0, x: 0, speed: 0, kind: 0, lane: 0, passed: false, dir: 1, side: 1, crossZ: 0 })
+    for (let i = 0; i < T.CROSSER_COUNT; i++) this.crossers.push({ z: -1e9, x: 9, speed: 0, kind: 0, lane: 0, passed: true, dir: 0, side: 1, crossZ: 0 })
     this.reset()
   }
 
@@ -78,6 +89,9 @@ export class Sim {
     this.curveAccum = 0
     this.offroad = false
     this.checkpointFlash = 0
+    this.wreck = false
+    this.wipersOn = false
+    this.lightsOn = false
     this.events.clear()
     this.loadStage('A')
   }
@@ -85,19 +99,43 @@ export class Sim {
   private loadStage(id: string): void {
     const desc = STAGE_BY_ID[id]
     this.stageDesc = desc
-    this.stage = new Stage(desc, THEMES[desc.theme], this.seed * 31 + this.route.length * 7 + id.charCodeAt(0))
+    this.theme = THEMES[desc.theme]
+    this.stage = new Stage(desc, this.theme, this.seed * 31 + this.route.length * 7 + id.charCodeAt(0))
     this.route.push(id)
     this.z = 0
     for (const c of this.cars) this.spawnCar(c, this.rng.range(40, T.TRAFFIC_SPAWN_AHEAD * 3) * T.SEG_LENGTH)
+    for (const c of this.crossers) this.spawnCrosser(c)
   }
 
   private spawnCar(c: Car, z: number): void {
     c.z = z
-    c.lane = [-0.62, -0.2, 0.2, 0.62][this.rng.int(4)]
+    // Head-on traffic keeps to the far side of the crown; yours keeps right.
+    c.dir = this.rng.next() < (this.theme.oncoming ?? 0) ? -1 : 1
+    c.lane = c.dir < 0 ? [-0.62, -0.25][this.rng.int(2)] : this.theme.oncoming ? [0.25, 0.62][this.rng.int(2)] : [-0.62, -0.2, 0.2, 0.62][this.rng.int(4)]
     c.x = c.lane
     c.speed = this.rng.range(T.TRAFFIC_MIN_SPEED, T.TRAFFIC_MAX_SPEED)
     c.kind = this.rng.int(TRAFFIC_KINDS.length)
     c.passed = z < this.z
+  }
+
+  /** Park a crosser on the next intersection ahead (or nowhere when the theme has none). */
+  private spawnCrosser(c: Car): void {
+    const ahead = this.stage.crossings.filter((i) => i * T.SEG_LENGTH > this.z + 60)
+    if (!ahead.length) {
+      c.z = -1e9
+      c.x = 9
+      return
+    }
+    const i = ahead[this.rng.int(Math.min(2, ahead.length))]
+    c.crossZ = i * T.SEG_LENGTH + T.SEG_LENGTH / 2
+    c.z = c.crossZ
+    c.side = this.rng.next() < 0.5 ? 1 : -1
+    // Start off-screen on one shoulder, with a random hold before rolling out.
+    c.x = -c.side * (3.2 + this.rng.range(0, 6))
+    c.speed = T.CROSSER_SPEED * this.rng.range(0.8, 1.25)
+    c.kind = this.rng.int(TRAFFIC_KINDS.length)
+    c.dir = 0
+    c.passed = false
   }
 
   private isFinished(): boolean {
@@ -140,6 +178,15 @@ export class Sim {
     }
     if (this.turboTimer > 0) this.turboTimer -= dt
     else this.turbo = Math.min(1, this.turbo + dt / T.TURBO_RECHARGE)
+    // Manual switches, arcade style: nothing comes on by itself.
+    if (input.wipers) {
+      this.wipersOn = !this.wipersOn
+      this.events.push('wipers', this.wipersOn ? 1 : 0)
+    }
+    if (input.lights) {
+      this.lightsOn = !this.lightsOn
+      this.events.push('lights', this.lightsOn ? 1 : 0)
+    }
 
     // Longitudinal.
     const max = this.maxSpeed
@@ -156,7 +203,8 @@ export class Sim {
     // Lateral: steering scales with speed; curves push you outward.
     const sp = this.speed / T.MAX_SPEED_HI
     this.x += input.steer * T.STEER_RATE * sp * dt
-    this.x -= seg.curve * sp * sp * T.CENTRIFUGAL * dt
+    // Banked turns carry you round: the banking cancels part of the push.
+    this.x -= seg.curve * sp * sp * T.CENTRIFUGAL * (1 - (this.theme.bank ?? 0) * T.BANK_ASSIST) * dt
     this.x = clamp(this.x, -2.4, 2.4)
     this.steerVisual = expApproach(this.steerVisual, input.steer, 10, dt)
     this.curveAccum += seg.curve * sp * dt * 60
@@ -175,7 +223,7 @@ export class Sim {
           if (!sp2.collide) continue
           const hw = (HIT_HALF_WIDTH[sp2.kind] ?? 0.12) * sp2.scale
           if (Math.abs(this.x - sp2.offset) < hw + T.CAR_HALF_WIDTH_ROAD) {
-            this.crash()
+            this.crash(false)
             return
           }
         }
@@ -205,8 +253,8 @@ export class Sim {
     }
   }
 
-  private crash(): void {
-    if (this.speed < T.CRASH_MIN_SPEED) {
+  private crash(wreck: boolean): void {
+    if (!wreck && this.speed < T.CRASH_MIN_SPEED) {
       // Scrape: bounce back onto the road with a speed hit.
       this.speed *= 0.5
       this.x = clamp(this.x, -1, 1) * 0.9
@@ -214,18 +262,20 @@ export class Sim {
       return
     }
     this.phase = 'crashed'
-    this.crashTimer = T.CRASH_TIME
-    this.events.push('crash', this.speed)
+    this.wreck = wreck
+    this.crashTimer = wreck ? T.WRECK_TIME : T.CRASH_TIME
+    this.events.push(wreck ? 'wreck' : 'crash', this.speed)
   }
 
   private tickCrash(dt: number): void {
     this.crashTimer -= dt
-    // Tumble to a stop, drifting back toward the road.
-    this.speed = Math.max(0, this.speed - 60 * dt)
+    // Tumble to a stop, drifting back toward the road. A wreck rolls a long way.
+    this.speed = Math.max(0, this.speed - (this.wreck ? 24 : 60) * dt)
     this.z += this.speed * dt * 0.5
     this.x = expApproach(this.x, clamp(this.x, -0.8, 0.8), 2, dt)
     if (this.crashTimer <= 0) {
       this.phase = 'driving'
+      this.wreck = false
       this.speed = 0
       this.x = clamp(this.x, -0.8, 0.8)
     }
@@ -234,27 +284,68 @@ export class Sim {
   private tickTraffic(dt: number): void {
     const stageLen = this.stage.metres
     for (const c of this.cars) {
-      c.z += c.speed * dt
-      // Lane discipline with occasional changes.
-      if (this.rng.next() < 0.002) c.lane = [-0.62, -0.2, 0.2, 0.62][this.rng.int(4)]
+      c.z += c.dir * c.speed * dt
+      // Lane discipline with occasional changes (head-on traffic stays on its side).
+      if (this.rng.next() < 0.002) c.lane = c.dir < 0 ? [-0.62, -0.25][this.rng.int(2)] : this.theme.oncoming ? [0.25, 0.62][this.rng.int(2)] : [-0.62, -0.2, 0.2, 0.62][this.rng.int(4)]
       c.x = expApproach(c.x, c.lane, 1.2, dt)
       // Recycle: far behind, or beyond the stage end.
       if (c.z < this.z - T.TRAFFIC_DESPAWN_BEHIND * T.SEG_LENGTH || c.z > stageLen + 200) {
         this.spawnCar(c, this.z + this.rng.range(T.TRAFFIC_SPAWN_MIN, T.TRAFFIC_SPAWN_AHEAD) * T.SEG_LENGTH)
         continue
       }
-      // Passing.
+      // Passing (only traffic going your way counts; head-on just whooshes).
       if (!c.passed && c.z < this.z) {
         c.passed = true
-        this.score += T.SCORE_PER_PASS
+        if (c.dir > 0) this.score += T.SCORE_PER_PASS
         this.events.push('pass', c.kind)
       }
       // Collision: same place along the road and overlapping laterally.
-      if (this.phase === 'driving' && Math.abs(c.z - this.z) < 4 && Math.abs(c.x - this.x) < T.CAR_HALF_WIDTH_ROAD * 2 && this.speed > c.speed) {
-        this.speed = c.speed * T.BUMP_KEEP
-        this.x += this.x < c.x ? -0.12 : 0.12
-        c.z += 3
-        this.events.push('bump', 0)
+      if (this.phase === 'driving' && Math.abs(c.z - this.z) < 4 && Math.abs(c.x - this.x) < T.CAR_HALF_WIDTH_ROAD * 2) {
+        if (c.dir < 0) {
+          // Head-on: closing speed is the sum. Fast means a wreck; slow, a hard shove.
+          if (this.speed + c.speed > T.WRECK_SPEED) this.crash(true)
+          else {
+            this.speed = 0
+            this.x += this.x < c.x ? -0.2 : 0.2
+            this.events.push('bump', 1)
+          }
+          c.z -= 6
+        } else if (this.speed > c.speed) {
+          if (this.speed - c.speed > T.REAREND_CRASH_SPEED) this.crash(false)
+          else {
+            this.speed = c.speed * T.BUMP_KEEP
+            this.x += this.x < c.x ? -0.12 : 0.12
+            this.events.push('bump', 0)
+          }
+          c.z += 3
+        }
+      }
+    }
+    // Crossers: roll across the intersection, park off the far shoulder, then take the next one.
+    for (const c of this.crossers) {
+      if (c.z < -1e8) continue
+      if (c.crossZ < this.z - 30) {
+        this.spawnCrosser(c)
+        continue
+      }
+      c.x += c.side * c.speed * dt
+      if (c.side * c.x > 3.4) {
+        // Across; wait a beat off-road then come back the other way or move on.
+        if (this.rng.next() < 0.01) {
+          if (this.rng.next() < 0.5) {
+            c.side = -c.side
+            c.speed = T.CROSSER_SPEED * this.rng.range(0.8, 1.25)
+          } else this.spawnCrosser(c)
+        }
+        continue
+      }
+      if (this.phase === 'driving' && Math.abs(c.crossZ - this.z) < 5 && Math.abs(c.x - this.x) < T.CAR_HALF_WIDTH_ROAD * 2.4) {
+        if (this.speed > T.WRECK_SPEED * 0.8) this.crash(true)
+        else {
+          this.speed *= 0.3
+          this.events.push('bump', 1)
+        }
+        c.x += c.side * 0.6
       }
     }
   }
@@ -268,7 +359,10 @@ export class Sim {
     out.speed = this.speed
     out.maxSpeed = this.maxSpeed
     out.steer = this.steerVisual
-    out.crashT = this.phase === 'crashed' ? 1 - this.crashTimer / T.CRASH_TIME : 0
+    out.crashT = this.phase === 'crashed' ? 1 - this.crashTimer / (this.wreck ? T.WRECK_TIME : T.CRASH_TIME) : 0
+    out.wreck = this.phase === 'crashed' && this.wreck
+    out.wipersOn = this.wipersOn
+    out.lightsOn = this.lightsOn
     out.stageIndex = this.stageIndex
     out.stageId = this.stageDesc.id
     out.curveAccum = this.curveAccum
@@ -279,7 +373,9 @@ export class Sim {
     h.turbo = this.turbo
     h.turboActive = this.turboTimer > 0
     h.stage = this.stageIndex + 1
-    h.stagesTotal = 3
+    h.stagesTotal = ROUTE_LENGTH
+    h.wipers = this.wipersOn
+    h.lights = this.lightsOn
     h.speedKmh = this.speed * 3.6
     h.checkpointFlash = this.checkpointFlash
     h.route = this.route.join(' › ')
@@ -289,6 +385,16 @@ export class Sim {
       out.trafficX[n] = c.x
       out.trafficKind[n] = c.kind
       out.trafficSpeed[n] = c.speed
+      out.trafficYaw[n] = c.dir < 0 ? 180 : 0
+      n++
+    }
+    for (const c of this.crossers) {
+      if (c.z < -1e8 || Math.abs(c.x) > 3.6) continue
+      out.trafficZ[n] = c.crossZ
+      out.trafficX[n] = c.x
+      out.trafficKind[n] = c.kind
+      out.trafficSpeed[n] = 0
+      out.trafficYaw[n] = c.side > 0 ? 90 : -90
       n++
     }
     out.trafficCount = n

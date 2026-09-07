@@ -62,3 +62,13 @@ Settings → EXPERIMENTS holds rule-breaking switches. `Crashes` off turns a har
 landing into `resumeInPlace(0.6)` (back on your wheels, 60 % of your speed).
 Airborne with the throttle down the fake gearbox revs away through the gears
 (`AIR_REV_RATE`), Stunts-style, and snaps back to the speed-derived note on landing.
+
+## Big pieces, half-pipe tunnels, grass (2026-09-07)
+Tunnel is two cells and `TUBE_RADIUS` 11: `lateral` inside a tube is arc length around the
+wall, gravity pulls you back down and the curve's centrifugal push rides you up, and an
+airborne car is caught on whatever part of the wall it reaches. Banked sweeper is 4×4,
+corkscrew 4×1 (`CORK_RADIUS`), loop radius 12. Grass barely slows a straight line
+(`GRASS_DRAG` 1.5) but throttle/brake force is scaled by `GRASS_TRACTION` and steering by
+`GRASS_STEER`; leaving the road keeps your lateral slide (no more "bounce" at the kerb).
+Air glitch arms at 60 % of top speed and pins almost instantly. Hood camera gets a canvas
+dashboard (`app/Dash.ts`); the start piece gets a chequered gantry.

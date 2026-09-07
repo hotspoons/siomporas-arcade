@@ -24,6 +24,7 @@ import { Snapshot } from '../sim/Snapshot'
 import { Track, type TrackData } from '../sim/Track'
 import { MAX_SUBSTEPS, SEGMENT_PENALTY, SIM_HZ } from '../sim/Tuning'
 import { BUILTIN_TRACKS } from '../sim/tracks'
+import { Dash } from './Dash'
 import { Hud } from './Hud'
 import { buildMenus } from './menus'
 import { Settings } from './Settings'
@@ -37,6 +38,7 @@ export class Game implements LoopClient {
   readonly input: InputMap
   readonly view: RenderWorld
   readonly hud: Hud
+  readonly dash: Dash
   readonly menus: MenuStack
   readonly perf: PerfOverlay
   readonly tune: TunePanel
@@ -78,6 +80,7 @@ export class Game implements LoopClient {
     this.view = new RenderWorld(canvas, carById(s.carId))
     this.view.setTrack(this.track)
     this.hud = new Hud(container)
+    this.dash = new Dash(container)
     this.hud.units = s.units
     this.hud.setTrack(this.track)
     this.menus = new MenuStack(container)
@@ -268,6 +271,7 @@ export class Game implements LoopClient {
   applyCamera(): void {
     if (this.state === 'title') return
     this.view.rig.mode = this.settings.data.camera === 'hood' ? 'hood' : 'chase'
+    this.dash.units = this.settings.data.units
   }
 
   applyAccessibility(): void {
@@ -343,6 +347,9 @@ export class Game implements LoopClient {
     if (events.length) events.drain(this.onEventBound)
     this.view.update(this.prev, this.curr, alpha, dt)
     if (this.state !== 'title') this.hud.update(this.curr, dt, this.sim.targetLaps)
+    const hood = this.state !== 'title' && this.view.rig.mode === 'hood'
+    this.dash.setVisible(hood)
+    if (hood) this.dash.update(this.curr, dt)
     this.audio.update(this.curr)
     this.feel(dt)
     this.perf.update(this.loop.stats, this.view.stats, dt, `${this.curr.car.mode} lane=${this.curr.car.laneId} s=${this.curr.car.s.toFixed(0)} v=${this.curr.car.speed.toFixed(1)} ${this.settings.data.style}`)

@@ -1,7 +1,7 @@
 import type { KeyBindings, PadBindings } from '@apex/engine/input/bindings'
 
-export type Action = 'steerLeft' | 'steerRight' | 'throttle' | 'brake' | 'gear' | 'turbo' | 'view' | 'pause' | 'confirm'
-export const ACTIONS: Action[] = ['steerLeft', 'steerRight', 'throttle', 'brake', 'gear', 'turbo', 'view', 'pause', 'confirm']
+export type Action = 'steerLeft' | 'steerRight' | 'throttle' | 'brake' | 'gear' | 'turbo' | 'wipers' | 'lights' | 'view' | 'pause' | 'confirm'
+export const ACTIONS: Action[] = ['steerLeft', 'steerRight', 'throttle', 'brake', 'gear', 'turbo', 'wipers', 'lights', 'view', 'pause', 'confirm']
 export const ACTION_LABELS: Record<Action, string> = {
   steerLeft: 'Steer left',
   steerRight: 'Steer right',
@@ -9,6 +9,8 @@ export const ACTION_LABELS: Record<Action, string> = {
   brake: 'Brake',
   gear: 'Gear hi / lo',
   turbo: 'Turbo',
+  wipers: 'Wipers',
+  lights: 'Headlights',
   view: 'View (chase / cockpit)',
   pause: 'Pause',
   confirm: 'Confirm',
@@ -20,6 +22,8 @@ export const DEFAULT_KEYS: KeyBindings = {
   brake: ['KeyS', 'ArrowDown'],
   gear: ['ShiftLeft', 'ShiftRight'],
   turbo: ['Space'],
+  wipers: ['KeyR'],
+  lights: ['KeyL'],
   view: ['KeyC'],
   pause: ['Escape', 'KeyP'],
   confirm: ['Enter', 'Space'],
@@ -31,6 +35,8 @@ export const DEFAULT_PAD: PadBindings = {
   brake: ['b6'],
   gear: ['b0'],
   turbo: ['b1'],
+  wipers: ['b2'],
+  lights: ['b8'],
   view: ['b3'],
   pause: ['b9'],
   confirm: ['b0', 'b9'],

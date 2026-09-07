@@ -1,3 +1,5 @@
+import { buildStartGantry } from './StartGantry'
+import { PIECE_BY_TYPE } from '../sim/pieces'
 // Turns baked lanes into meshes: a ribbon with raised curbs for roads, a ring
 // tube around the road for tunnels, and pillars under anything elevated.
 // Built once per track; nothing here runs per frame.
@@ -13,6 +15,7 @@ const STEP = 2
 
 export class RoadBuilder {
   readonly root = new Group()
+  private extras: Group[] = []
   private readonly frame = makeLaneFrame()
   private readonly v = new Vec3()
   private meshes: Mesh[] = []
@@ -30,7 +33,15 @@ export class RoadBuilder {
   build(track: Track, tubeSegments: number): void {
     this.clear()
     const pillarMatrices: Matrix4[] = []
+    let gantryDone = false
     for (const lane of track.lanes) {
+      // Start / finish gantry over the middle of the start piece (one per track).
+      if (!gantryDone && PIECE_BY_TYPE[track.data.pieces[lane.pieceIndex]?.type]?.isStart) {
+        gantryDone = true
+        const gantry = buildStartGantry(lane.table.frameAt(lane.table.length / 2, this.frame))
+        this.root.add(gantry)
+        this.extras.push(gantry)
+      }
       const mesh = new Mesh(lane.profile === 'tube' ? this.tube(lane, tubeSegments) : this.ribbon(lane), this.material)
       mesh.frustumCulled = true
       mesh.geometry.computeBoundingSphere()
@@ -60,6 +71,8 @@ export class RoadBuilder {
       m.geometry.dispose()
     }
     this.meshes = []
+    for (const e of this.extras) this.root.remove(e)
+    this.extras = []
     if (this.pillars) {
       this.root.remove(this.pillars)
       this.pillars.geometry.dispose()

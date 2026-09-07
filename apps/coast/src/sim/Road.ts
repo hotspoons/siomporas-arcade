@@ -5,7 +5,7 @@
 // lateral offset in road widths (|offset| > 1 is off the tarmac).
 
 import { Rng } from '@apex/engine/math/Rng'
-import { FORK_SEGMENTS, ROLL_AMPLITUDE, RUNWAY_SEGMENTS, SEG_LENGTH, STAGE_SCALE } from './Tuning'
+import { CROSSING_EVERY, FORK_SEGMENTS, ROLL_AMPLITUDE, RUNWAY_SEGMENTS, SEG_LENGTH, STAGE_SCALE } from './Tuning'
 
 export interface SpriteRef {
   kind: string
@@ -30,6 +30,8 @@ export interface Segment {
   checkpoint: boolean
   /** Beyond the stage's real end (filler for the horizon). */
   runway: boolean
+  /** An intersection: a road crosses here and so does traffic. */
+  crossing: boolean
 }
 
 export interface Theme {
@@ -51,6 +53,14 @@ export interface Theme {
   rails: boolean
   night?: boolean
   rain?: boolean
+  /** Share of traffic driving toward you (two-lane country roads). */
+  oncoming?: number
+  /** Intersections with crossing traffic every CROSSING_EVERY segments. */
+  crossings?: boolean
+  /** Banked turns: 0 = flat, 1 = full Rad Mobile tilt (horizon rolls, centrifugal push is eased). */
+  bank?: number
+  /** Everything roadside and on the horizon is drawn as a black silhouette against the sky (the sunset). */
+  silhouette?: boolean
 }
 
 export type Section =
@@ -82,7 +92,7 @@ export class Stage {
     let y = 0
     const segs = this.segments
     const push = (curve: number, y1: number) => {
-      segs.push({ index: segs.length, curve, y0: y, y1, sprites: [], fork: -1, checkpoint: false, runway: false })
+      segs.push({ index: segs.length, curve, y0: y, y1, sprites: [], fork: -1, checkpoint: false, runway: false, crossing: false })
       y = y1
     }
     const ease = (a: number, b: number, t: number) => a + (b - a) * (0.5 - Math.cos(t * Math.PI) / 2)
@@ -147,10 +157,21 @@ export class Stage {
         s.curve = 0
       }
     }
+    // Intersections: on straight-ish road, well clear of the split and the start.
+    if (theme.crossings) {
+      for (let i = CROSSING_EVERY; i < this.length - FORK_SEGMENTS - 20; i += CROSSING_EVERY) {
+        const s = segs[i]
+        if (Math.abs(s.curve) > 1.2) continue
+        // Two segments deep so the crossing road reads as a road, not a stripe.
+        s.crossing = true
+        segs[i + 1].crossing = true
+      }
+    }
     // Scenery.
     for (let i = 8; i < this.length; i++) {
       const seg = segs[i]
       if (seg.fork > 0.15) continue // keep the split clear
+      if (segs[Math.max(0, i - 3)].crossing || segs[Math.min(this.length - 1, i + 3)].crossing || seg.crossing) continue // keep intersections open
       for (const side of [-1, 1]) {
         if (rng.next() < theme.density) {
           const total = theme.roadside.reduce((a, r) => a + r.weight, 0)
@@ -176,13 +197,20 @@ export class Stage {
     if (segs.length > 2) segs[2].sprites.push({ kind: 'gantry', offset: 0, scale: 1, collide: false })
     // Runway for the renderer.
     for (let i = 0; i < RUNWAY_SEGMENTS; i++) {
-      segs.push({ index: segs.length, curve: 0, y0: y, y1: y, sprites: [], fork: this.forks ? 1 : -1, checkpoint: false, runway: true })
+      segs.push({ index: segs.length, curve: 0, y0: y, y1: y, sprites: [], fork: this.forks ? 1 : -1, checkpoint: false, runway: true, crossing: false })
     }
   }
 
   /** Metres of real road. */
   get metres(): number {
     return this.length * SEG_LENGTH
+  }
+
+  /** Segment indices of the intersections, in order. */
+  get crossings(): number[] {
+    const out: number[] = []
+    for (let i = 0; i < this.length; i++) if (this.segments[i].crossing) out.push(i)
+    return out
   }
 
   segmentAt(z: number): Segment {

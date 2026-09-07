@@ -146,7 +146,7 @@ export class TunePanel {
   private build(): void {
     const head = document.createElement('div')
     head.className = 'tune-head'
-    head.innerHTML = `<strong>TUNING · ${this.game.toUpperCase()}</strong><span class="tune-hint">F6 toggles · drag sliders, the game updates live · changes persist in this browser</span>`
+    head.innerHTML = `<strong>TUNING · ${this.game.toUpperCase()}</strong><span class="tune-hint">F6 or T toggles · drag sliders, the game updates live · changes persist in this browser</span>`
     const actions = document.createElement('div')
     actions.className = 'tune-actions'
     for (const [label, act] of [

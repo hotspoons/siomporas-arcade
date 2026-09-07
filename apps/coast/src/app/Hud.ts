@@ -14,6 +14,8 @@ export class Hud {
   private readonly message: HTMLElement
   private readonly fork: HTMLElement
   private readonly station: HTMLElement
+  private readonly lights: HTMLElement
+  private readonly wipers: HTMLElement
   private readonly viewhint: HTMLElement
   private acc = 0
   private messageTimer = 0
@@ -29,6 +31,7 @@ export class Hud {
       <div class="message" data-message></div>
       <div class="fork" data-fork><span class="l">◄ LEFT</span><span class="r">RIGHT ►</span></div>
       <div class="speedo"><span class="value" data-speed>0</span><span class="unit" data-unit>KM/H</span><span class="gear" data-gear>HI</span><div class="turbo"><div class="fill" data-turbo></div></div></div>
+      <div class="switches"><span data-lights>● LIGHTS</span><span data-wipers>● WIPERS</span></div>
       <div class="station" data-station></div>
       <div class="viewhint" data-viewhint></div>`
     parent.appendChild(this.el)
@@ -43,6 +46,8 @@ export class Hud {
     this.message = q('[data-message]')
     this.fork = q('[data-fork]')
     this.station = q('[data-station]')
+    this.lights = q('[data-lights]')
+    this.wipers = q('[data-wipers]')
     this.viewhint = q('[data-viewhint]')
   }
   setVisible(v: boolean): void {
@@ -70,6 +75,8 @@ export class Hud {
     this.time.classList.toggle('low', snap.hud.time < 10)
     this.time.classList.toggle('bonus', snap.hud.checkpointFlash > 0)
     this.el.classList.toggle('cockpit', cockpit)
+    this.lights.classList.toggle('on', snap.hud.lights)
+    this.wipers.classList.toggle('on', snap.hud.wipers)
     this.acc += dt
     if (this.acc < 1 / 20) return
     this.acc = 0

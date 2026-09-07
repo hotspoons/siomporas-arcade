@@ -39,7 +39,7 @@ export function buildMenus(game: Game) {
       {
         kind: 'choice',
         label: 'STYLE',
-        hint: 'F2 toggles any time',
+        hint: 'F2 or ` toggles any time',
         options: ['MODERN', 'RETRO'],
         get: () => (s().style === 'retro' ? 1 : 0),
         set: (i) => {
@@ -50,7 +50,7 @@ export function buildMenus(game: Game) {
       { kind: 'action', label: 'SETTINGS', onSelect: () => game.menus.push(settings()) },
       { kind: 'action', label: 'CONTROLS', onSelect: () => game.menus.push(controls()) },
     ],
-    footer: game.touch ? 'Tap to select · tilt to steer · GAS right, BRAKE left' : 'Enter / A select · Shift = gear · Space = turbo · C = view · F3 perf',
+    footer: game.touch ? 'Tap to select · tilt to steer · GAS right, BRAKE left' : 'Enter / A select · Shift = gear · Space = turbo · C = view · F3 or 0 perf',
     onBack: () => {},
   })
 
@@ -98,7 +98,7 @@ export function buildMenus(game: Game) {
       toggle('Phosphor bleed', () => s().retro.phosphor, (v) => set((d) => (d.retro.phosphor = v))),
       { kind: 'slider', label: 'Palette levels', min: 2, max: 12, step: 1, get: () => s().retro.paletteLevels, set: (v) => set((d) => (d.retro.paletteLevels = v)) },
       { kind: 'info', label: '— GAME —' },
-      { kind: 'action', label: 'TUNING PANEL', hint: 'F6 · live sliders; Copy JSON to send new defaults', onSelect: () => { game.tune.toggle(true); game.menus.refresh() } },
+      { kind: 'action', label: 'TUNING PANEL', hint: 'F6 or T · live sliders; Copy JSON to send new defaults', onSelect: () => { game.tune.toggle(true); game.menus.refresh() } },
       { kind: 'choice', label: 'Units', options: ['KM/H', 'MPH'], get: () => (s().units === 'mph' ? 1 : 0), set: (i) => { set((d) => (d.units = i === 1 ? 'mph' : 'kmh')); game.hud.units = s().units } },
       { kind: 'info', label: '— AUDIO —' },
       slider('Master', () => s().audio.master, (v) => set((d) => (d.audio.master = v))),

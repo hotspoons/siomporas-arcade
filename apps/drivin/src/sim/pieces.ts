@@ -6,7 +6,7 @@
 // whether the surface exists there (gaps).
 
 import { smoothstep } from '@apex/engine/math/scalar'
-import { CELL, LEVEL_H, LOOP_RADIUS, LOOP_SHIFT } from './Tuning'
+import { CELL, CORK_RADIUS, LEVEL_H, LOOP_RADIUS, LOOP_SHIFT } from './Tuning'
 
 export type Side = 'N' | 'E' | 'S' | 'W'
 
@@ -75,6 +75,7 @@ const HALF = CELL / 2
 
 // --- straights ------------------------------------------------------------------
 const straight: LaneDef = { from: 0, to: 1, length: CELL, path: (t, o) => set(o, t * CELL, 0, HALF) }
+const straight2: LaneDef = { from: 0, to: 1, length: 2 * CELL, path: (t, o) => set(o, t * 2 * CELL, 0, HALF) }
 
 /** Quarter circle from the W port of cell (0,0) to the N port of the corner cell, radius r. */
 function arc(r: number): LaneDef {
@@ -212,14 +213,14 @@ export const PIECES: PieceDef[] = [
   },
   {
     type: 'bank2',
-    label: 'Banked curve',
-    w: 2,
-    h: 2,
+    label: 'Banked sweeper',
+    w: 4,
+    h: 4,
     ports: [
       { cx: 0, cz: 0, side: 'W', dLevel: 0 },
-      { cx: 1, cz: 1, side: 'N', dLevel: 0 },
+      { cx: 3, cz: 3, side: 'N', dLevel: 0 },
     ],
-    lanes: [bankedArc(CELL + HALF, 0.5)],
+    lanes: [bankedArc(3 * CELL + HALF, 0.55)],
     profile: 'road',
     group: 'curves',
   },
@@ -273,22 +274,22 @@ export const PIECES: PieceDef[] = [
   {
     type: 'corkscrew',
     label: 'Corkscrew',
-    w: 2,
+    w: 4,
     h: 1,
     ports: [
       { cx: 0, cz: 0, side: 'W', dLevel: 0 },
-      { cx: 1, cz: 0, side: 'E', dLevel: 0 },
+      { cx: 3, cz: 0, side: 'E', dLevel: 0 },
     ],
     lanes: [
       {
         from: 0,
         to: 1,
-        length: Math.hypot(2 * CELL, 2 * Math.PI * LOOP_RADIUS),
+        length: Math.hypot(4 * CELL, 2 * Math.PI * CORK_RADIUS),
         path: (t, o) => {
-          // A helix about the axis (x, R, HALF): one full turn over two cells,
+          // A helix about the axis (x, R, HALF): one full turn over four cells,
           // eased so the ends are tangent to the straights on either side.
           const a = Math.PI * 2 * smoothstep(0, 1, t)
-          set(o, t * 2 * CELL, LOOP_RADIUS - LOOP_RADIUS * Math.cos(a), HALF + LOOP_RADIUS * Math.sin(a))
+          set(o, t * 4 * CELL, CORK_RADIUS - CORK_RADIUS * Math.cos(a), HALF + CORK_RADIUS * Math.sin(a))
           o.ux = 0
           o.uy = Math.cos(a)
           o.uz = -Math.sin(a)
@@ -335,13 +336,13 @@ export const PIECES: PieceDef[] = [
   {
     type: 'tunnel',
     label: 'Tunnel',
-    w: 1,
+    w: 2,
     h: 1,
     ports: [
       { cx: 0, cz: 0, side: 'W', dLevel: 0 },
-      { cx: 0, cz: 0, side: 'E', dLevel: 0 },
+      { cx: 1, cz: 0, side: 'E', dLevel: 0 },
     ],
-    lanes: [straight],
+    lanes: [straight2],
     profile: 'tube',
     group: 'basic',
   },

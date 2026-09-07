@@ -20,7 +20,7 @@ export interface ModelDef {
 
 const N = (kind: string, file: string, heightM: number, cell = 128): ModelDef => ({ kind, file: `assets/nature/${file}.glb`, heightM, yaws: [0], cell })
 const P = (kind: string, file: string, heightM: number, cell = 128): ModelDef => ({ kind, file: `assets/props/${file}.glb`, heightM, yaws: [0], cell })
-const C = (kind: string, file: string): ModelDef => ({ kind, file: `assets/cars/${file}.glb`, heightM: 1.5, yaws: [0, 20, -20], cell: 128 })
+const C = (kind: string, file: string): ModelDef => ({ kind, file: `assets/cars/${file}.glb`, heightM: 1.5, yaws: [0, 20, -20, 90, -90, 180], cell: 128 })
 
 export const MODELS: ModelDef[] = [
   N('palm', 'tree_palm', 10, 192),
@@ -51,7 +51,7 @@ export const MODELS: ModelDef[] = [
   P('pitsOffice', 'pitsOffice', 6, 256),
   P('gantry', 'overheadLights', 8.5, 256),
   // Hero prototypes, one per livery; the chase view picks the selected one.
-  ...Object.entries(LIVERIES).map(([id, l]): ModelDef => ({ kind: `hero_${id}`, file: '', build: () => buildPrototype(l), heightM: 1.1, yaws: [0, 12, 24, 38, -12, -24, -38], cell: 192 })),
+  ...Object.entries(LIVERIES).map(([id, l]): ModelDef => ({ kind: `hero_${id}`, file: '', build: () => buildPrototype(l), heightM: 1.1, yaws: [0, 12, 24, 38, -12, -24, -38], cell: 160 })),
   { kind: 'formula', file: 'assets/cars/race.glb', heightM: 1.1, yaws: [0, 12, 24, 38, -12, -24, -38], cell: 160 },
   // Roadside architecture and signage.
   { kind: 'diner', file: '', build: buildDiner, heightM: 6.4, yaws: [0], cell: 256 },

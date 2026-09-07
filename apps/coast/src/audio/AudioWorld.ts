@@ -261,6 +261,15 @@ export class AudioWorld {
   onEvent(e: SimEvent): void {
     if (!this.ctx) return
     switch (e.type) {
+      case 'wreck':
+        this.thud(110, 24, 1.4, 1)
+        this.burst(1.2, 1, 2200)
+        for (let i = 1; i < 4; i++) setTimeout(() => this.ctx && this.thud(150 - i * 20, 40, 0.5, 0.6), i * 420)
+        break
+      case 'wipers':
+      case 'lights':
+        this.blip(e.a ? 520 : 400, 0.05, 0.15, 'square')
+        break
       case 'crash':
         this.thud(140, 30, 0.9, 1)
         this.burst(0.9, 0.9, 2500)

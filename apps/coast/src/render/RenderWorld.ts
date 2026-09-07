@@ -3,7 +3,8 @@
 // far → near, then sprites far → near with hill clipping, then the player car
 // or the cockpit. The sim is never touched.
 
-import { Color, LinearFilter, NearestFilter, OrthographicCamera, Scene, WebGLRenderer } from 'three'
+import { Color, Group, LinearFilter, NearestFilter, OrthographicCamera, Scene, WebGLRenderer } from 'three'
+import { expApproach } from '@apex/engine/math/scalar'
 import type { RenderStats } from '@apex/engine/render/RenderStats'
 import type { Style, StyleFrameInfo } from '@apex/engine/render/styles/Style'
 import type { SimEvent } from '../sim/Events'
@@ -15,7 +16,7 @@ import { BAND_SEGMENTS, DRAW_SEGMENTS, FORK_SPREAD, ROAD_HALF_WIDTH, SEG_LENGTH 
 import { Background } from './Background'
 import { Cockpit } from './Cockpit'
 import { Projection } from './Projection'
-import { CURVE_UNIT, FOG_MODERN, FOG_RETRO, HEADLIGHT_REACH, LANE_WIDTH, LOGICAL_HEIGHT, MAX_SPRITES, NIGHT_AMBIENT, PALETTES, RAIL_HEIGHT, RUMBLE_WIDTH, SHOULDER_WIDTH, VIEWS, type Palette } from './RenderTuning'
+import { BANK_ROLL, HORIZON_ROLL_SHARE, STEER_ROLL, CURVE_UNIT, FOG_MODERN, FOG_RETRO, HEADLIGHT_REACH, LANE_WIDTH, LIGHTS_OFF_AMBIENT, LOGICAL_HEIGHT, MAX_SPRITES, NIGHT_AMBIENT, PALETTES, RAIL_HEIGHT, RUMBLE_WIDTH, SHOULDER_WIDTH, VIEWS, type Palette } from './RenderTuning'
 import { LIVERIES } from './procgen'
 import { Rain } from './Rain'
 import type { Theme } from '../sim/Road'
@@ -38,6 +39,11 @@ export class RenderWorld {
   readonly background = new Background()
   readonly cockpit = new Cockpit()
   readonly rain = new Rain()
+  /** Everything that tilts in a banked turn (the cockpit and the rain on the glass do not). */
+  private readonly world = new Group()
+  private readonly inner = new Group()
+  private roll = 0
+  private lightsOn = false
   private theme: Theme | null = null
   private heroKind = 'hero_gulf'
   /** Dev: when set, one sprite kind is drawn huge in the middle of the screen. */
@@ -72,7 +78,9 @@ export class RenderWorld {
     this.renderer = new WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance', stencil: false, alpha: false })
     this.renderer.info.autoReset = false
     this.renderer.setClearColor(new Color(0x000000), 1)
-    this.scene.add(this.background.sky, this.background.clouds, this.background.far, this.background.near, this.road.mesh, this.sprites.mesh, this.rain.mesh, this.cockpit.mesh)
+    this.inner.add(this.background.sky, this.background.clouds, this.background.far, this.background.near, this.road.mesh, this.sprites.mesh)
+    this.world.add(this.inner)
+    this.scene.add(this.world, this.rain.mesh, this.cockpit.mesh)
     this.background.sky.renderOrder = 0
     this.background.clouds.renderOrder = 1
     this.background.far.renderOrder = 2
@@ -138,13 +146,16 @@ export class RenderWorld {
     this.camera.top = H
     this.camera.bottom = 0
     this.camera.updateProjectionMatrix()
+    // The world pivots about the screen centre for banked turns.
+    this.world.position.set(W / 2, H / 2, 0)
+    this.inner.position.set(-W / 2, -H / 2, 0)
     this.cockpit.layout(W, H)
     this.rain.layout(W, H)
     this.style?.resize(width, height, pixelRatio)
   }
 
   onEvent(e: SimEvent): void {
-    if (e.type === 'crash') this.hit = 1
+    if (e.type === 'crash' || e.type === 'wreck') this.hit = 1
     if (e.type === 'bump') this.hit = Math.max(this.hit, 0.5)
   }
 
@@ -160,6 +171,7 @@ export class RenderWorld {
     const P = this.proj
     const W = P.width
     const H = P.height
+    this.lightsOn = curr.lightsOn
 
     // Camera follows the road height under the player, smoothly; bounce with speed.
     const groundY = stage.heightAt(z)
@@ -178,6 +190,23 @@ export class RenderWorld {
     const segAt = (i: number) => segs[Math.max(0, Math.min(i, last))]
     const fogK = this.retro ? FOG_RETRO : FOG_MODERN
 
+    // Roll: a transient while the wheel is turning, a steady lean when you ride up the
+    // outer lanes of a banked curve (curve × how far out you sit), and a wreck shakes it.
+    // The cockpit takes the whole roll; the horizon only a subtle share.
+    const bankK = (this.theme?.bank ?? 0) * BANK_ROLL
+    const curveHere = segAt(base + 2).curve
+    const bankLean = bankK ? curveHere * bankK * Math.max(0, Math.min(1, -Math.sign(curveHere) * x + 0.3)) * 2 : 0
+    const target = curr.steer * STEER_ROLL * Math.min(1, speed / 40) + bankLean
+    this.roll = expApproach(this.roll, target, 4, dt)
+    let roll = this.roll
+    if (curr.wreck) roll += Math.sin(this.time * 26) * 0.14 * (1 - curr.crashT)
+    this.world.rotation.z = roll * HORIZON_ROLL_SHARE
+    const cover = 1 + Math.abs(roll * HORIZON_ROLL_SHARE) * 1.6
+    this.world.scale.set(cover, cover, 1)
+    this.cockpit.mesh.rotation.z = -roll
+    const ccover = 1 + Math.abs(roll) * 1.3
+    this.cockpit.mesh.scale.set(W * ccover, H * ccover, 1)
+
     // Pass 1, near → far: accumulate the curve, project rows, resolve hill clipping.
     let xOff = 0
     let dx = -(segAt(base).curve * CURVE_UNIT * pct)
@@ -185,12 +214,11 @@ export class RenderWorld {
     for (let n = 0; n <= DRAW_SEGMENTS; n++) {
       const seg = segAt(base + n)
       let zRel = (base + n) * SEG_LENGTH - camZ
-      // The row under the camera projects behind it; pin it just in front so the
-      // nearest quad always reaches the bottom of the screen instead of popping.
-      if (n === 0 && zRel < 0.6) zRel = 0.6
-      if (zRel < 0.3) {
-        this.rowValid[n] = 0
-      } else {
+      // Rows at or behind the camera project behind it; pin them just in front (in
+      // order) so the nearest quads always reach the bottom of the screen. Dropping a
+      // row instead left a one-frame gap whenever the camera crossed a segment edge.
+      if (zRel < 0.6 + n * 0.01) zRel = 0.6 + n * 0.01
+      {
         const scale = P.scaleAt(zRel)
         this.rowScale[n] = scale
         this.rowX[n] = P.screenX(xOff - camX, scale)
@@ -229,9 +257,14 @@ export class RenderWorld {
       const s2 = this.rowScale[n + 1]
       const fog = this.rowFog[n]
       const zRel = (base + n) * SEG_LENGTH - camZ
-      const dim = night ? NIGHT_AMBIENT + (1 - NIGHT_AMBIENT) * Math.exp(-zRel / HEADLIGHT_REACH) : 1
-      this.road.setDim(dim)
+      this.road.setDim(night ? this.brightAt(zRel) : 1)
       this.road.quad(W / 2, y1, W, W / 2, y2, W, band ? pal.grassA : pal.grassB, fog)
+      // An intersection: a road crosses the whole screen with its own edge lines.
+      if (seg.crossing) {
+        this.road.quad(W / 2, y1, W, W / 2, y2, W, pal.roadA, fog)
+        this.road.quad(W / 2, y1, W, W / 2, y1 + (y2 - y1) * 0.12, W, pal.lane, fog)
+        this.road.quad(W / 2, y2 - (y2 - y1) * 0.12, W, W / 2, y2, W, pal.lane, fog)
+      }
       const roads = seg.fork >= 0 ? 2 : 1
       const spread = seg.fork >= 0 ? seg.fork * FORK_SPREAD * ROAD_HALF_WIDTH : 0
       for (let r = 0; r < roads; r++) {
@@ -288,7 +321,9 @@ export class RenderWorld {
           const sy = this.rowY[n] + (this.rowY[n + 1] - this.rowY[n]) * t
           const kind = TRAFFIC_KINDS[curr.trafficKind[ci]]
           const rel = curr.trafficX[ci] - x
-          const frame = this.atlas.frame(kind, rel > 0.3 ? -20 : rel < -0.3 ? 20 : 0)
+          const yaw = curr.trafficYaw[ci]
+          // Same-way traffic shows a flank as you offset from it; head-on and crossing cars use their baked views.
+          const frame = this.atlas.frame(kind, yaw === 0 ? (rel > 0.3 ? -20 : rel < -0.3 ? 20 : 0) : yaw)
           if (frame) this.sprites.add(sx + curr.trafficX[ci] * ROAD_HALF_WIDTH * sc, sy, frame.heightM * sc, frame, this.rowFog[n], this.brightAt((base + n) * SEG_LENGTH - camZ), clip)
         }
       }
@@ -300,11 +335,26 @@ export class RenderWorld {
       const scale = P.scaleAt(view.playerAhead)
       const py = P.screenY(groundY - camY, scale)
       let steerFrame = Math.round(curr.steer * 3)
-      if (curr.crashT > 0) steerFrame = Math.round(Math.sin(curr.crashT * 40) * 3)
+      // A wreck rolls the car over and over (frames cycle); a tumble just wobbles.
+      if (curr.crashT > 0) steerFrame = curr.wreck ? (Math.floor(curr.crashT * 26) % 7) - 3 : Math.round(Math.sin(curr.crashT * 40) * 3)
       // Baked yaw > 0 shows the car's right flank (nose left); steering right must show the left flank.
       const yaw = steerFrame === 0 ? 0 : steerFrame > 0 ? -[12, 24, 38][steerFrame - 1] : [12, 24, 38][-steerFrame - 1]
       const frame = this.atlas.frame(this.heroKind, yaw)
-      if (frame) this.sprites.add(W / 2 + curr.steer * 2, py + (curr.crashT > 0 ? Math.abs(Math.sin(curr.crashT * 20)) * 12 : 0), frame.heightM * scale, frame, 0, 1, -1e9)
+      let hop = curr.crashT > 0 ? Math.abs(Math.sin(curr.crashT * 20)) * 12 : 0
+      let squash = 1
+      if (curr.wreck) {
+        // The classic: yeeted into the air, a couple of bounces, then it lies there crushed until the reset.
+        const t = curr.crashT
+        if (t < 0.4) hop = Math.sin((t / 0.4) * Math.PI) * H * 0.42
+        else if (t < 0.58) hop = Math.abs(Math.sin(((t - 0.4) / 0.18) * Math.PI)) * H * 0.12
+        else if (t < 0.7) hop = Math.abs(Math.sin(((t - 0.58) / 0.12) * Math.PI)) * H * 0.04
+        else {
+          hop = 0
+          squash = 0.62
+        }
+        if (t >= 0.7) steerFrame = 0
+      }
+      if (frame) this.sprites.add(W / 2 + curr.steer * 2, py + hop, frame.heightM * scale * squash, frame, 0, 1, -1e9)
     }
     if (this.previewKind) {
       const f = this.atlas.frame(this.previewKind, this.previewYaw)
@@ -333,6 +383,8 @@ export class RenderWorld {
 
   private brightAt(zRel: number): number {
     if (!this.theme?.night) return 1
+    // Headlights are a switch you have to find; without them the night is very dark.
+    if (!this.lightsOn) return NIGHT_AMBIENT * LIGHTS_OFF_AMBIENT
     return NIGHT_AMBIENT + (1 - NIGHT_AMBIENT) * Math.exp(-Math.max(0, zRel) / HEADLIGHT_REACH)
   }
 
@@ -342,8 +394,8 @@ export class RenderWorld {
       const frame = this.atlas.frame(sp.kind)
       if (!frame) continue
       const sx = this.rowX[n] + sp.offset * ROAD_HALF_WIDTH * sc
-      // Lit signage and towers glow through the night.
-      const glow = sp.kind.startsWith('sign') || sp.kind.startsWith('tower') || sp.kind === 'diner' || sp.kind === 'motel' || sp.kind === 'gas' || sp.kind === 'arch' ? Math.max(bright, 0.85) : bright
+      // The sunset stage is all silhouettes; otherwise lit signage and towers glow through the night.
+      const glow = this.theme?.silhouette ? 0.04 : sp.kind.startsWith('sign') || sp.kind.startsWith('tower') || sp.kind === 'diner' || sp.kind === 'motel' || sp.kind === 'gas' || sp.kind === 'arch' ? Math.max(bright, 0.85) : bright
       this.sprites.add(sx, this.rowY[n], frame.heightM * sp.scale * sc, frame, this.rowFog[n], glow, clip)
     }
   }

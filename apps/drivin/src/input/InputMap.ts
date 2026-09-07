@@ -73,10 +73,10 @@ export class InputMap {
     ui.pause = this.keyPressed('pause') || this.padPressed('pause')
     ui.confirm = this.keyPressed('confirm') || this.padPressed('confirm')
     ui.back = this.keyboard.wasPressed('Escape') || this.keyboard.wasPressed('Backspace') || gp.pressed('b1')
-    ui.toggleStyle = this.keyboard.wasPressed('F2')
-    ui.togglePerf = this.keyboard.wasPressed('F3')
+    ui.toggleStyle = this.keyboard.wasPressed('F2') || this.keyboard.wasPressed('Backquote')
+    ui.togglePerf = this.keyboard.wasPressed('F3') || this.keyboard.wasPressed('Digit0')
     ui.toggleDebug = this.keyboard.wasPressed('F4')
-    ui.toggleTune = this.keyboard.wasPressed('F6')
+    ui.toggleTune = this.keyboard.wasPressed('F6') || this.keyboard.wasPressed('KeyT')
     ui.any = this.keyboard.anyEdge || gp.lastPressed !== ''
 
     const dirY = (this.keyboard.isDown('ArrowDown') || this.keyboard.isDown('KeyS') || gp.value('a1+') > 0.5 || gp.down('b13') ? 1 : 0) -

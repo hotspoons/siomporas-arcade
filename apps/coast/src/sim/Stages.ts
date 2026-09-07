@@ -1,6 +1,8 @@
-// The route tree and its themes. Stage A forks into B1/B2, each of which forks
-// again into the C stages (B1 → C1|C2, B2 → C2|C3), so a run is three stages
-// and there are four distinct routes. Sprite kinds name atlas entries.
+// The coast-to-coast route and its themes. You start on the OutRun coast and
+// head east: the roads narrow, traffic comes at you, turns bank, weather and
+// night arrive, until the run ends on a city bridge. Forks split the route at
+// A, B and D; everything converges on the plains and again on the final stage.
+// Sprite kinds name atlas entries.
 
 import type { StageDesc, Theme } from './Road'
 
@@ -29,6 +31,8 @@ export const THEMES: Record<string, Theme> = {
     backdrop: 'mesas',
     lanes: 2,
     rails: false,
+    bank: 0.8,
+    oncoming: 0.35,
     density: 0.24,
     roadside: [
       { kind: 'rockTall', weight: 4, minOffset: 1.25, maxOffset: 2.1 },
@@ -46,6 +50,8 @@ export const THEMES: Record<string, Theme> = {
     lanes: 2,
     rails: true,
     rain: true,
+    oncoming: 0.3,
+    bank: 0.3,
     density: 0.38,
     roadside: [
       { kind: 'pine', weight: 5, minOffset: 1.15, maxOffset: 2.3 },
@@ -63,6 +69,7 @@ export const THEMES: Record<string, Theme> = {
     backdrop: 'dunes',
     lanes: 4,
     rails: false,
+    crossings: true,
     density: 0.14,
     roadside: [
       { kind: 'cactus', weight: 4, minOffset: 1.2, maxOffset: 2.6 },
@@ -97,6 +104,8 @@ export const THEMES: Record<string, Theme> = {
     lanes: 2,
     rails: true,
     rain: true,
+    bank: 0.6,
+    oncoming: 0.3,
     density: 0.34,
     roadside: [
       { kind: 'pineTall', weight: 5, minOffset: 1.15, maxOffset: 2.3 },
@@ -107,9 +116,104 @@ export const THEMES: Record<string, Theme> = {
     landmarks: ['signDrive', 'arch', 'billboard', 'lightpost'],
     landmarkEvery: 90,
   },
+  sunset: {
+    id: 'sunset',
+    palette: 'sunset',
+    backdrop: 'sea',
+    lanes: 3,
+    rails: false,
+    silhouette: true,
+    density: 0.42,
+    roadside: [
+      { kind: 'palm', weight: 5, minOffset: 1.15, maxOffset: 2.2 },
+      { kind: 'palmTall', weight: 4, minOffset: 1.2, maxOffset: 2.4 },
+      { kind: 'palmBend', weight: 3, minOffset: 1.15, maxOffset: 2.0 },
+      { kind: 'bush', weight: 2, minOffset: 1.1, maxOffset: 1.6, scale: 1.3 },
+    ],
+    landmarks: ['signCoast', 'lightpost', 'billboardLow', 'motel'],
+    landmarkEvery: 70,
+  },
+  cliffs: {
+    id: 'cliffs',
+    palette: 'cliffs',
+    backdrop: 'sea',
+    lanes: 2,
+    rails: true,
+    bank: 0.45,
+    oncoming: 0.25,
+    density: 0.3,
+    roadside: [
+      { kind: 'rockTall', weight: 4, minOffset: 1.2, maxOffset: 2.0 },
+      { kind: 'rock', weight: 4, minOffset: 1.2, maxOffset: 2.4 },
+      { kind: 'bushLarge', weight: 3, minOffset: 1.12, maxOffset: 1.9 },
+      { kind: 'pineRound', weight: 2, minOffset: 1.3, maxOffset: 2.6 },
+      { kind: 'flower', weight: 2, minOffset: 1.08, maxOffset: 1.5, collide: false, scale: 1.6 },
+    ],
+    landmarks: ['signCoast', 'lightpost', 'billboardLow', 'gas'],
+    landmarkEvery: 90,
+  },
+  plains: {
+    id: 'plains',
+    palette: 'plains',
+    backdrop: 'hills',
+    lanes: 2,
+    rails: false,
+    oncoming: 0.4,
+    crossings: true,
+    density: 0.16,
+    roadside: [
+      { kind: 'oak', weight: 3, minOffset: 1.4, maxOffset: 2.8 },
+      { kind: 'tree', weight: 3, minOffset: 1.4, maxOffset: 2.8 },
+      { kind: 'bush', weight: 3, minOffset: 1.12, maxOffset: 1.8, scale: 1.2 },
+      { kind: 'stump', weight: 1, minOffset: 1.15, maxOffset: 1.8 },
+      { kind: 'barrier', weight: 1, minOffset: 1.1, maxOffset: 1.2 },
+    ],
+    landmarks: ['gas', 'billboardLow', 'diner', 'signDrive', 'motel'],
+    landmarkEvery: 110,
+  },
+  storm: {
+    id: 'storm',
+    palette: 'storm',
+    backdrop: 'hills',
+    lanes: 2,
+    rails: true,
+    night: true,
+    rain: true,
+    oncoming: 0.3,
+    density: 0.36,
+    roadside: [
+      { kind: 'pine', weight: 5, minOffset: 1.15, maxOffset: 2.3 },
+      { kind: 'pineTall', weight: 3, minOffset: 1.25, maxOffset: 2.6 },
+      { kind: 'oak', weight: 2, minOffset: 1.3, maxOffset: 2.8 },
+      { kind: 'lightpost', weight: 2, minOffset: 1.12, maxOffset: 1.25 },
+    ],
+    landmarks: ['motel', 'gas', 'signDrive', 'diner'],
+    landmarkEvery: 100,
+  },
+  ridge: {
+    id: 'ridge',
+    palette: 'ridge',
+    backdrop: 'hills',
+    lanes: 2,
+    rails: true,
+    bank: 0.7,
+    oncoming: 0.35,
+    density: 0.4,
+    roadside: [
+      { kind: 'oak', weight: 4, minOffset: 1.2, maxOffset: 2.6 },
+      { kind: 'tree', weight: 4, minOffset: 1.2, maxOffset: 2.6 },
+      { kind: 'pineRound', weight: 3, minOffset: 1.25, maxOffset: 2.6 },
+      { kind: 'bushLarge', weight: 2, minOffset: 1.12, maxOffset: 1.9 },
+      { kind: 'rock', weight: 1, minOffset: 1.3, maxOffset: 2.4 },
+    ],
+    landmarks: ['signDrive', 'billboard', 'motel', 'gas'],
+    landmarkEvery: 95,
+  },
 }
 
+
 export const STAGES: StageDesc[] = [
+  // --- West coast: OutRun ---
   {
     id: 'A',
     name: 'Coastal Highway',
@@ -129,6 +233,37 @@ export const STAGES: StageDesc[] = [
   },
   {
     id: 'B1',
+    name: 'Sunset Strip',
+    theme: 'sunset',
+    sections: [
+      { kind: 'straight', n: 160 },
+      { kind: 'curve', n: 160, curve: -2.4 },
+      { kind: 'straight', n: 120, hill: 10 },
+      { kind: 's', n: 240, curve: 2.8 },
+      { kind: 'straight', n: 100, hill: -10 },
+      { kind: 'curve', n: 160, curve: 3.0 },
+      { kind: 'straight', n: 160 },
+    ],
+    next: ['C1', 'C2'],
+  },
+  {
+    id: 'B2',
+    name: 'Big Cliff Road',
+    theme: 'cliffs',
+    sections: [
+      { kind: 'straight', n: 80 },
+      { kind: 'curve', n: 160, curve: 3.8, hill: 18 },
+      { kind: 'curve', n: 140, curve: -4.2 },
+      { kind: 'hills', n: 160, height: 20, count: 2 },
+      { kind: 's', n: 220, curve: 3.6 },
+      { kind: 'curve', n: 160, curve: 4.4, hill: -18 },
+      { kind: 'straight', n: 120 },
+    ],
+    next: ['C2', 'C3'],
+  },
+  // --- The West: canyon, flats, mountains ---
+  {
+    id: 'C1',
     name: 'Red Canyon',
     theme: 'canyon',
     sections: [
@@ -141,25 +276,10 @@ export const STAGES: StageDesc[] = [
       { kind: 'curve', n: 160, curve: -4.2, hill: 20 },
       { kind: 'straight', n: 130, hill: -20 },
     ],
-    next: ['C1', 'C2'],
+    next: ['D'],
   },
   {
-    id: 'B2',
-    name: 'Pine Ridge',
-    theme: 'forest',
-    sections: [
-      { kind: 'straight', n: 60 },
-      { kind: 's', n: 220, curve: 2.4 },
-      { kind: 'hills', n: 200, height: 26, count: 4 },
-      { kind: 'curve', n: 180, curve: 4.0 },
-      { kind: 'straight', n: 100 },
-      { kind: 'curve', n: 160, curve: -3.0, hill: 24 },
-      { kind: 'straight', n: 140, hill: -24 },
-    ],
-    next: ['C2', 'C3'],
-  },
-  {
-    id: 'C1',
+    id: 'C2',
     name: 'Salt Flats',
     theme: 'desert',
     sections: [
@@ -169,21 +289,7 @@ export const STAGES: StageDesc[] = [
       { kind: 's', n: 260, curve: 4.4 },
       { kind: 'straight', n: 220 },
     ],
-    next: [],
-  },
-  {
-    id: 'C2',
-    name: 'Neon Bay',
-    theme: 'night',
-    sections: [
-      { kind: 'straight', n: 90 },
-      { kind: 's', n: 260, curve: 3.6 },
-      { kind: 'curve', n: 160, curve: -4.6 },
-      { kind: 'hills', n: 140, height: 12, count: 3 },
-      { kind: 'curve', n: 200, curve: 4.6 },
-      { kind: 'straight', n: 180 },
-    ],
-    next: [],
+    next: ['D'],
   },
   {
     id: 'C3',
@@ -197,8 +303,102 @@ export const STAGES: StageDesc[] = [
       { kind: 'curve', n: 180, curve: 4.4, hill: -40 },
       { kind: 'straight', n: 160, hill: -20 },
     ],
+    next: ['D'],
+  },
+  // --- The middle: everything converges on the plains ---
+  {
+    id: 'D',
+    name: 'Great Plains',
+    theme: 'plains',
+    sections: [
+      { kind: 'straight', n: 240 },
+      { kind: 'curve', n: 140, curve: 1.6 },
+      { kind: 'straight', n: 200 },
+      { kind: 'hills', n: 160, height: 8, count: 2 },
+      { kind: 'curve', n: 140, curve: -2.0 },
+      { kind: 'straight', n: 260 },
+    ],
+    next: ['E1', 'E2'],
+  },
+  {
+    id: 'E1',
+    name: 'Storm Front',
+    theme: 'storm',
+    sections: [
+      { kind: 'straight', n: 80 },
+      { kind: 's', n: 220, curve: 2.6 },
+      { kind: 'hills', n: 180, height: 18, count: 3 },
+      { kind: 'curve', n: 160, curve: -3.4 },
+      { kind: 'straight', n: 120 },
+      { kind: 'curve', n: 160, curve: 3.0, hill: 16 },
+      { kind: 'straight', n: 120, hill: -16 },
+    ],
+    next: ['F1'],
+  },
+  {
+    id: 'E2',
+    name: 'Twin Cities',
+    theme: 'night',
+    sections: [
+      { kind: 'straight', n: 90 },
+      { kind: 's', n: 260, curve: 3.6 },
+      { kind: 'curve', n: 160, curve: -4.6 },
+      { kind: 'hills', n: 140, height: 12, count: 3 },
+      { kind: 'curve', n: 200, curve: 4.6 },
+      { kind: 'straight', n: 180 },
+    ],
+    next: ['F2'],
+  },
+  // --- The East: ridges and the run into the city ---
+  {
+    id: 'F1',
+    name: 'Pine Ridge',
+    theme: 'forest',
+    sections: [
+      { kind: 'straight', n: 60 },
+      { kind: 's', n: 220, curve: 2.4 },
+      { kind: 'hills', n: 200, height: 26, count: 4 },
+      { kind: 'curve', n: 180, curve: 4.0 },
+      { kind: 'straight', n: 100 },
+      { kind: 'curve', n: 160, curve: -3.0, hill: 24 },
+      { kind: 'straight', n: 140, hill: -24 },
+    ],
+    next: ['G'],
+  },
+  {
+    id: 'F2',
+    name: 'Blue Ridge',
+    theme: 'ridge',
+    sections: [
+      { kind: 'straight', n: 60, hill: 16 },
+      { kind: 'curve', n: 170, curve: 4.2 },
+      { kind: 'curve', n: 170, curve: -4.6 },
+      { kind: 'hills', n: 200, height: 28, count: 3 },
+      { kind: 's', n: 240, curve: 3.8 },
+      { kind: 'straight', n: 120, hill: -16 },
+    ],
+    next: ['G'],
+  },
+  {
+    id: 'G',
+    name: 'Skyline Bridge',
+    theme: 'night',
+    sections: [
+      { kind: 'straight', n: 140, hill: 20 },
+      { kind: 'curve', n: 180, curve: 2.8 },
+      { kind: 'straight', n: 200 },
+      { kind: 'curve', n: 160, curve: -3.2, hill: -20 },
+      { kind: 's', n: 220, curve: 2.6 },
+      { kind: 'straight', n: 200 },
+    ],
     next: [],
   },
 ]
 
 export const STAGE_BY_ID: Record<string, StageDesc> = Object.fromEntries(STAGES.map((s) => [s.id, s]))
+
+/** Stages in the longest run from the start (every route is the same length by construction). */
+export const ROUTE_LENGTH: number = (function depth(id: string): number {
+  const nxt = STAGE_BY_ID[id].next
+  return 1 + (nxt.length ? Math.max(...nxt.map(depth)) : 0)
+})('A')

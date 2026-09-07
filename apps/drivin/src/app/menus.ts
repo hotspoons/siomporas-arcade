@@ -39,7 +39,7 @@ export function buildMenus(game: Game) {
         {
           kind: 'choice',
           label: 'STYLE',
-          hint: 'F2 toggles any time',
+          hint: 'F2 or ` toggles any time',
           options: ['MODERN', 'RETRO'],
           get: () => (s().style === 'retro' ? 1 : 0),
           set: (i) => {
@@ -50,7 +50,7 @@ export function buildMenus(game: Game) {
         { kind: 'action', label: 'SETTINGS', onSelect: () => game.menus.push(settings()) },
         { kind: 'action', label: 'CONTROLS', onSelect: () => game.menus.push(controls()) },
       ],
-      footer: game.touch ? 'Tap to select · tilt to steer, ⟲ recalibrates · GAS right thumb, BRAKE left' : 'Enter / A select · Esc / B back · F3 perf',
+      footer: game.touch ? 'Tap to select · tilt to steer, ⟲ recalibrates · GAS right thumb, BRAKE left' : 'Enter / A select · Esc / B back · F3 or 0 perf',
       onBack: () => {},
     }
   }
@@ -123,7 +123,7 @@ export function buildMenus(game: Game) {
       toggle('Vertex snapping', () => s().retro.quantizeVerts, (v) => set((d) => (d.retro.quantizeVerts = v)), () => game.applyStyle()),
       { kind: 'slider', label: 'Palette levels', min: 2, max: 12, step: 1, get: () => s().retro.paletteLevels, set: (v) => set((d) => (d.retro.paletteLevels = v)) },
       { kind: 'info', label: '— GAME —' },
-      { kind: 'action', label: 'TUNING PANEL', hint: 'F6 · live sliders; Copy JSON to send new defaults', onSelect: () => { game.tune.toggle(true); game.menus.refresh() } },
+      { kind: 'action', label: 'TUNING PANEL', hint: 'F6 or T · live sliders; Copy JSON to send new defaults', onSelect: () => { game.tune.toggle(true); game.menus.refresh() } },
       { kind: 'choice', label: 'Units', options: ['MPH', 'KM/H'], get: () => (s().units === 'kmh' ? 1 : 0), set: (i) => { set((d) => (d.units = i === 1 ? 'kmh' : 'mph')); game.hud.units = s().units } },
       { kind: 'choice', label: 'Camera', options: ['Chase', 'Hood'], get: () => (s().camera === 'hood' ? 1 : 0), set: (i) => { set((d) => (d.camera = i === 1 ? 'hood' : 'chase')); game.applyCamera() } },
       { kind: 'info', label: '— EXPERIMENTS —' },

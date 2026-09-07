@@ -268,6 +268,8 @@ export class Game implements LoopClient {
     h.brake = 0
     h.gear = false
     h.turbo = false
+    h.wipers = false
+    h.lights = false
     if (this.sim.phase !== 'driving' || this.sim.timeLeft < 20) {
       this.sim.reset()
       this.syncStage()
@@ -311,12 +313,33 @@ export class Game implements LoopClient {
     if (this.curr.hud.turboActive) this.haptics.triggers(0, 0.6, 110)
   }
 
+  /** Arcade nag: the switches are manual, so remind the driver when the weather turns. */
+  private switchHints(): void {
+    const t = this.sim.theme
+    const need: string[] = []
+    if (t.rain && !this.sim.wipersOn) need.push('R · WIPERS')
+    if (t.night && !this.sim.lightsOn) need.push('L · LIGHTS')
+    if (need.length) setTimeout(() => this.state === 'running' && this.hud.showMessage(need.join('   '), 2.4), 2400)
+  }
+
   private readonly onEventBound = (e: SimEvent): void => this.onEvent(e)
   private onEvent(e: SimEvent): void {
     this.view.onEvent(e)
     this.audio.onEvent(e)
     const hp = this.haptics
     switch (e.type) {
+      case 'wreck':
+        this.hud.showMessage('WRECK!', 2.4, 'bad')
+        hp.rumble(1, 1, 1200)
+        hp.triggers(1, 1, 900)
+        hp.mobile([200, 60, 200, 60, 300])
+        break
+      case 'wipers':
+        this.hud.showMessage(e.a ? 'WIPERS ON' : 'WIPERS OFF', 0.8)
+        break
+      case 'lights':
+        this.hud.showMessage(e.a ? 'LIGHTS ON' : 'LIGHTS OFF', 0.8)
+        break
       case 'crash':
         this.hud.showMessage('CRASH', 1.6, 'bad')
         hp.rumble(1, 1, 600)
@@ -331,6 +354,7 @@ export class Game implements LoopClient {
         const id = this.sim.stage.desc.id
         this.hud.showMessage(`CHECKPOINT · ${STAGE_BY_ID[id].name.toUpperCase()}`, 2.2, 'good')
         hp.mobile(40)
+        this.switchHints()
         break
       }
       case 'turbo':

@@ -102,6 +102,7 @@ export class SpriteAtlas {
         shelfY += shelfH
         shelfH = 0
       }
+      if (shelfY + size > ATLAS_SIZE) console.warn(`sprite atlas overflow: ${ATLAS_SIZE}px is too small for the manifest`)
       const cell = { x: cursorX, y: shelfY, size }
       cursorX += size
       shelfH = Math.max(shelfH, size)
@@ -109,7 +110,9 @@ export class SpriteAtlas {
     }
 
     let done = 0
-    for (const def of MODELS) {
+    // Big cells first: shelf packing wastes far less that way.
+    const order = [...MODELS].sort((a, b) => b.cell - a.cell)
+    for (const def of order) {
       let model: Object3D | null = null
       if (def.build) model = def.build()
       else {

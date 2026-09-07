@@ -21,3 +21,24 @@
    flat-out, with 75 s on the clock and +62 s per checkpoint.
 7. **Cockpit view is a canvas texture**: dash, wheel, speedo, gear/turbo, and
    the dice on a pendulum driven by lateral acceleration.
+
+## Coast to coast (2026-09-07)
+The run is a west→east rally (`ROUTE_LENGTH` stages, forks at A, B and D, converging on
+the plains and the final bridge). It opens OutRun (coast, the sunset strip of silhouettes)
+and turns into Rad Mobile as it goes: two-lane roads with head-on traffic (`Theme.oncoming`),
+intersections with crossing cars (`Theme.crossings`, `CROSSING_EVERY`), banked sweepers
+(`Theme.bank`), weather and night.
+
+## Manual switches
+Wipers (R / X) and headlights (L / Select) are toggled by the driver, arcade style. Rain lands
+on the cockpit glass as droplets + haze in an offscreen canvas; the single bottom-pivot wiper
+clears the wedge it sweeps. Night without lights is `NIGHT_AMBIENT × LIGHTS_OFF_AMBIENT`.
+
+## Wrecks
+Head-on or side impacts above `WRECK_SPEED` (closing) are a wreck: `WRECK_TIME` of launch,
+two bounces and a crushed rest in the chase view; a lurching, cracked cabin in the cockpit.
+Rear-ending faster than `REAREND_CRASH_SPEED` is an ordinary crash; slower is a bump.
+
+## Roll
+Roll = steering transient (`STEER_ROLL`) + steady lean riding the outer lanes of a banked
+curve (`BANK_ROLL`). The cockpit shows all of it; the horizon only `HORIZON_ROLL_SHARE`.

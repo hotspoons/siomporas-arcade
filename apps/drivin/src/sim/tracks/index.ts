@@ -29,7 +29,6 @@ export const HIGHLINE: TrackData = layTrack('Highline', 12, 3, 3, [
   S('straight'),
   S('curve2'),
   S('tunnel'),
-  S('straight'),
   S('curve2'),
   S('straight'),
   S('hump'),
@@ -52,10 +51,10 @@ export function portExit(p: PlacedPiece, portIndex: number): Cursor {
   return { cx: p.x + rc.cx + o.dx, cz: p.z + rc.cz + o.dz, side: opposite(side), level: p.level + port.dLevel }
 }
 
-/** Everything once: loop, jump, corkscrew, tunnel, banked curve, split/join with a humped alternate. */
+/** Everything once: loop, jump, corkscrew, tunnel, banked sweeper, split/join with a humped alternate. */
 export function stuntPark(): TrackData {
   const pieces: PlacedPiece[] = []
-  layFrom({ cx: 5, cz: 2, side: 'W', level: 0 }, [
+  layFrom({ cx: 9, cz: 2, side: 'W', level: 0 }, [
     S('start'),
     S('loop'),
     S('jump'),
@@ -71,14 +70,21 @@ export function stuntPark(): TrackData {
     S('curve2'),
     S('straight'),
     S('straight'),
+    S('straight'),
+    S('straight'),
+    S('straight'),
     S('curve'),
+    S('straight'),
+    S('straight'),
+    S('straight'),
+    S('straight'),
     S('straight'),
     S('straight'),
     S('straight'),
   ], pieces)
   const split = pieces.find((p) => p.type === 'split')!
   layFrom(portExit(split, 2), [S('hump'), S('hump')], pieces)
-  return { name: 'Stunt Park', size: 14, pieces }
+  return { name: 'Stunt Park', size: 18, pieces }
 }
 
 export const STUNT_PARK: TrackData = stuntPark()

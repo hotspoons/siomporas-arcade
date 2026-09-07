@@ -63,14 +63,16 @@ export class InputMap {
     f.brake = Math.max(this.keyDown('brake') ? 1 : 0, this.padValue('brake'))
     f.gear = this.keyPressed('gear') || this.padPressed('gear')
     f.turbo = this.keyPressed('turbo') || this.padPressed('turbo')
+    f.wipers = this.keyPressed('wipers') || this.padPressed('wipers')
+    f.lights = this.keyPressed('lights') || this.padPressed('lights')
     this.viewEdge = this.keyPressed('view') || this.padPressed('view')
     ui.pause = this.keyPressed('pause') || this.padPressed('pause')
     ui.confirm = this.keyPressed('confirm') || this.padPressed('confirm')
     ui.back = this.keyboard.wasPressed('Escape') || this.keyboard.wasPressed('Backspace') || gp.pressed('b1')
-    ui.toggleStyle = this.keyboard.wasPressed('F2')
-    ui.togglePerf = this.keyboard.wasPressed('F3')
+    ui.toggleStyle = this.keyboard.wasPressed('F2') || this.keyboard.wasPressed('Backquote')
+    ui.togglePerf = this.keyboard.wasPressed('F3') || this.keyboard.wasPressed('Digit0')
     ui.toggleDebug = this.keyboard.wasPressed('F4')
-    ui.toggleTune = this.keyboard.wasPressed('F6')
+    ui.toggleTune = this.keyboard.wasPressed('F6') || this.keyboard.wasPressed('KeyT')
     ui.any = this.keyboard.anyEdge || gp.lastPressed !== ''
     const dirY = (this.keyboard.isDown('ArrowDown') || this.keyboard.isDown('KeyS') || gp.value('a1+') > 0.5 || gp.down('b13') ? 1 : 0) - (this.keyboard.isDown('ArrowUp') || this.keyboard.isDown('KeyW') || gp.value('a1-') > 0.5 || gp.down('b12') ? 1 : 0)
     const dirX = (this.keyboard.isDown('ArrowRight') || this.keyboard.isDown('KeyD') || gp.value('a0+') > 0.5 || gp.down('b15') ? 1 : 0) - (this.keyboard.isDown('ArrowLeft') || this.keyboard.isDown('KeyA') || gp.value('a0-') > 0.5 || gp.down('b14') ? 1 : 0)
@@ -100,6 +102,8 @@ export class InputMap {
       f.brake = 0
       f.gear = false
       f.turbo = false
+      f.wipers = false
+      f.lights = false
       this.viewEdge = false
     }
     this.keyboard.endFrame()

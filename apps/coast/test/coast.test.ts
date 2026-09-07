@@ -3,18 +3,19 @@ import { makeInputFrame } from '../src/sim/InputFrame'
 import { Stage } from '../src/sim/Road'
 import { Sim } from '../src/sim/Sim'
 import { Snapshot } from '../src/sim/Snapshot'
-import { STAGES, STAGE_BY_ID, THEMES } from '../src/sim/Stages'
+import { ROUTE_LENGTH, STAGES, STAGE_BY_ID, THEMES } from '../src/sim/Stages'
 import { SIM_DT, TIME_START } from '../src/sim/Tuning'
 
 describe('route tree', () => {
-  it('every next id exists and every route is three stages long', () => {
+  it('every next id exists and every route is the same length', () => {
     for (const s of STAGES) for (const n of s.next) expect(STAGE_BY_ID[n], `${s.id} → ${n}`).toBeDefined()
     const walk = (id: string, depth: number): number[] => {
       const s = STAGE_BY_ID[id]
       if (s.next.length === 0) return [depth]
       return s.next.flatMap((n) => walk(n, depth + 1))
     }
-    for (const d of walk('A', 1)) expect(d).toBe(3)
+    expect(ROUTE_LENGTH).toBeGreaterThanOrEqual(5)
+    for (const d of walk('A', 1)) expect(d).toBe(ROUTE_LENGTH)
   })
   it('builds stages with continuous curves and level ends', () => {
     for (const desc of STAGES) {
@@ -89,11 +90,11 @@ describe('Sim', () => {
 })
 
 describe('full run', () => {
-  it('drives all three stages to the finish with the autopilot', () => {
-    const { snap, events } = run(420, autopilot)
-    expect(events.filter((e) => e === 'checkpoint').length).toBe(2)
+  it('drives coast to coast to the finish with the autopilot', () => {
+    const { snap, events } = run(900, autopilot)
+    expect(events.filter((e) => e === 'checkpoint').length).toBe(ROUTE_LENGTH - 1)
     expect(events).toContain('fork')
     expect(snap.phase).toBe('finished')
-    expect(snap.hud.route.split(' › ').length).toBe(3)
+    expect(snap.hud.route.split(' › ').length).toBe(ROUTE_LENGTH)
   })
 })

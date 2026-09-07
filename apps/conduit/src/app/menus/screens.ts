@@ -31,7 +31,7 @@ export function buildMenus(game: Game) {
       {
         kind: 'choice',
         label: 'STYLE',
-        hint: 'F2 toggles any time',
+        hint: 'F2 or ` toggles any time',
         options: ['MODERN', 'RETRO'],
         get: () => (s().style === 'retro' ? 1 : 0),
         set: (i) => {
@@ -46,7 +46,7 @@ export function buildMenus(game: Game) {
         ? [{ kind: 'action', label: 'ENTER VR', hint: 'Quest / SteamVR browser', onSelect: () => void game.xr.enter() } as MenuItem]
         : []),
     ],
-    footer: game.touch ? 'Tap to select · tilt to steer, ⟲ recalibrates · thrust/brake/fire are the side pads' : 'Enter / A to select · Esc / B to back · F3 perf overlay',
+    footer: game.touch ? 'Tap to select · tilt to steer, ⟲ recalibrates · thrust/brake/fire are the side pads' : 'Enter / A to select · Esc / B to back · F3 or 0 perf overlay',
     onBack: () => {},
   })
 
@@ -79,7 +79,7 @@ export function buildMenus(game: Game) {
     title: 'SETTINGS',
     wide: true,
     items: [
-      { kind: 'action', label: 'TUNING PANEL', hint: 'F6 · live sliders; Copy JSON to send new defaults', onSelect: () => { game.tune.toggle(true); game.menus.refresh() } },
+      { kind: 'action', label: 'TUNING PANEL', hint: 'F6 or T · live sliders; Copy JSON to send new defaults', onSelect: () => { game.tune.toggle(true); game.menus.refresh() } },
       { kind: 'info', label: '— MODERN —' },
       toggle('Bloom', () => s().modern.bloom, (v) => set((d) => (d.modern.bloom = v)), () => game.applyStyle()),
       toggle('Motion blur', () => s().modern.motionBlur, (v) => set((d) => (d.modern.motionBlur = v)), () => game.applyStyle()),

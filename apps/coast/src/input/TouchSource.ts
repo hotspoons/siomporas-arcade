@@ -6,14 +6,14 @@ import type { UiEdges } from '@apex/engine/input/UiEdges'
 import type { InputFrame } from '../sim/InputFrame'
 import type { ExtraSource } from './InputMap'
 
-type Zone = 'gas' | 'brake' | 'gear' | 'turbo' | 'view' | 'pause' | 'calib' | 'none'
+type Zone = 'gas' | 'brake' | 'gear' | 'turbo' | 'wipers' | 'lights' | 'view' | 'pause' | 'calib' | 'none'
 
 export class TouchSource implements ExtraSource {
   readonly el: HTMLElement
   readonly tilt = new TiltSensor()
   viewEdge = false
   private readonly pointers = new Map<number, { zone: Zone; x0: number; x: number }>()
-  private edges = { gear: false, turbo: false, view: false, pause: false, calib: false }
+  private edges = { gear: false, turbo: false, wipers: false, lights: false, view: false, pause: false, calib: false }
   private readonly zones = new Map<Zone, HTMLElement>()
 
   constructor(parent: HTMLElement) {
@@ -24,6 +24,8 @@ export class TouchSource implements ExtraSource {
       <div class="zone gas" data-zone="gas"><span>GAS</span></div>
       <div class="zone gear" data-zone="gear"><span>GEAR</span></div>
       <div class="zone turbo" data-zone="turbo"><span>TURBO</span></div>
+      <div class="zone wipers" data-zone="wipers"><span>WIPERS</span></div>
+      <div class="zone lights" data-zone="lights"><span>LIGHTS</span></div>
       <div class="zone view" data-zone="view"><span>VIEW</span></div>
       <div class="zone pause" data-zone="pause"><span>II</span></div>
       <div class="zone calib" data-zone="calib"><span>⟲ TILT</span></div>
@@ -60,7 +62,7 @@ export class TouchSource implements ExtraSource {
     this.requestSensors()
     const zone = this.zoneAt(e.clientX, e.clientY)
     this.pointers.set(e.pointerId, { zone, x0: e.clientX, x: e.clientX })
-    if (zone === 'gear' || zone === 'turbo' || zone === 'view' || zone === 'pause' || zone === 'calib') this.edges[zone] = true
+    if (zone === 'gear' || zone === 'turbo' || zone === 'wipers' || zone === 'lights' || zone === 'view' || zone === 'pause' || zone === 'calib') this.edges[zone] = true
     this.zones.get(zone)?.classList.add('held')
   }
   private readonly onMove = (e: PointerEvent) => {
@@ -89,10 +91,12 @@ export class TouchSource implements ExtraSource {
     if (brake) frame.brake = 1
     if (this.edges.gear) frame.gear = true
     if (this.edges.turbo) frame.turbo = true
+    if (this.edges.wipers) frame.wipers = true
+    if (this.edges.lights) frame.lights = true
     if (this.edges.pause) ui.pause = true
     if (this.edges.calib) this.calibrate()
     this.viewEdge = this.edges.view
     if (this.pointers.size) ui.any = true
-    this.edges = { gear: false, turbo: false, view: false, pause: false, calib: false }
+    this.edges = { gear: false, turbo: false, wipers: false, lights: false, view: false, pause: false, calib: false }
   }
 }

@@ -1,4 +1,4 @@
-import { TRAFFIC_COUNT } from './Tuning'
+import { TRAFFIC_TOTAL } from './Tuning'
 
 export type RunPhase = 'driving' | 'crashed' | 'finished' | 'timeout'
 
@@ -16,6 +16,11 @@ export class Snapshot {
   steer = 0
   /** Tumble progress 0..1 while crashed. */
   crashT = 0
+  /** The current crash is a full wreck (head-on / side impact): long roll. */
+  wreck = false
+  /** Manual switches. */
+  wipersOn = false
+  lightsOn = false
   /** Which stage (index into the route) we are on and its id. */
   stageIndex = 0
   stageId = 'A'
@@ -32,12 +37,16 @@ export class Snapshot {
     speedKmh: 0,
     checkpointFlash: 0,
     route: '' as string,
+    wipers: false,
+    lights: false,
   }
   trafficCount = 0
-  readonly trafficZ = new Float32Array(TRAFFIC_COUNT)
-  readonly trafficX = new Float32Array(TRAFFIC_COUNT)
-  readonly trafficKind = new Uint8Array(TRAFFIC_COUNT)
-  readonly trafficSpeed = new Float32Array(TRAFFIC_COUNT)
+  readonly trafficZ = new Float32Array(TRAFFIC_TOTAL)
+  readonly trafficX = new Float32Array(TRAFFIC_TOTAL)
+  readonly trafficKind = new Uint8Array(TRAFFIC_TOTAL)
+  readonly trafficSpeed = new Float32Array(TRAFFIC_TOTAL)
+  /** View yaw of each car's sprite: 0 seen from behind, 180 head-on, ±90 crossing. */
+  readonly trafficYaw = new Int16Array(TRAFFIC_TOTAL)
   /** Fork choice hint: -1 left, +1 right, 0 none (for the HUD arrow during the split). */
   forkSide = 0
   forkT = -1

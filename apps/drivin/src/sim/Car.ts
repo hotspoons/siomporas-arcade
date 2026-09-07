@@ -25,6 +25,9 @@ import {
   FALL_LIMIT,
   GRASS_DRAG,
   GRASS_GRIP_SCALE,
+  GRASS_STEER,
+  GRASS_TRACTION,
+  TUBE_RADIUS,
   GRAVITY,
   GRIP_LATERAL,
   HEADING_MAX,
@@ -159,11 +162,13 @@ export class Car {
     const spec = this.spec
     const v = this.speed
     const ratio = clamp(Math.abs(v) / spec.topSpeed, 0, 1)
-    let a = input.throttle * spec.accel * Math.max(0.15, 1 - ratio * ratio)
-    if (v > 0.5) a -= input.brake * spec.brake
-    else if (input.brake > 0) a -= input.brake * spec.accel * 0.6 // reverse
+    // Grass barely slows a straight line, but the tyres can't put much power or braking down.
+    const traction = grassDrag > 0 ? GRASS_TRACTION : 1
+    let a = input.throttle * spec.accel * Math.max(0.15, 1 - ratio * ratio) * traction
+    if (v > 0.5) a -= input.brake * spec.brake * traction
+    else if (input.brake > 0) a -= input.brake * spec.accel * 0.6 * traction // reverse
     a -= Math.sign(v) * (DRAG_ROLLING + DRAG_AERO * v * v + grassDrag)
-    if (input.handbrake) a -= Math.sign(v) * spec.brake * 0.6
+    if (input.handbrake) a -= Math.sign(v) * spec.brake * 0.6 * traction
     a += gTan
     this.speed = v + a * dt
     if (Math.abs(this.speed) < 0.05 && input.throttle === 0 && input.brake === 0) this.speed = 0
@@ -188,12 +193,17 @@ export class Car {
 
     // Lateral dynamics in the path frame: centrifugal force from the path's own
     // curvature, gravity from banking, and tyres pulling lateral velocity toward
-    // what the heading asks for — limited by grip.
+    // what the heading asks for — limited by grip. In a tunnel `lateral` is arc
+    // length around the tube, so gravity pulls you back down the wall and the
+    // curve's centrifugal push rides you up it.
+    const tube = lane.profile === 'tube'
+    const wallA = tube ? this.lateral / TUBE_RADIUS : 0
     const grip = GRIP_LATERAL * spec.grip * (this.onGrass ? GRASS_GRIP_SCALE : 1) * (input.handbrake ? 0.55 : 1)
-    const centrifugal = -v * v * f.kRight
+    const centrifugal = -v * v * f.kRight * (tube ? Math.cos(wallA) : 1)
+    const wallG = tube ? -GRAVITY * Math.sin(wallA) * Math.max(0.2, f.up.y) : 0
     const wanted = v * Math.sin(this.heading)
     const tyre = clamp((wanted - this.lateralVel) * TYRE_STIFFNESS, -grip, grip)
-    this.lateralVel += (centrifugal + gRight + tyre) * dt
+    this.lateralVel += (centrifugal + gRight + wallG + tyre) * dt
     this.slip = clamp(Math.abs(wanted - this.lateralVel) / 6, 0, 1)
     this.lateral += this.lateralVel * dt
     this.s += v * Math.cos(this.heading) * dt
@@ -209,11 +219,14 @@ export class Car {
     const edge = ROAD_HALF_WIDTH + CURB_WIDTH
     if (Math.abs(this.lateral) > ROAD_HALF_WIDTH) {
       if (lane.profile === 'tube') {
-        // Tunnel walls: bounce back in.
-        this.lateral = Math.sign(this.lateral) * ROAD_HALF_WIDTH
-        this.lateralVel *= -0.35
-        this.speed -= CURB_SLOW * dt * 4
-        this.event = 'curb'
+        // Half-pipe: ride the wall up to well past horizontal, then scrape the roof.
+        const maxArc = TUBE_RADIUS * 2.2
+        if (Math.abs(this.lateral) > maxArc) {
+          this.lateral = Math.sign(this.lateral) * maxArc
+          this.lateralVel *= -0.3
+          this.speed -= CURB_SLOW * dt * 4
+          this.event = 'curb'
+        }
       } else if (Math.abs(this.lateral) > edge) {
         const elevated = f.pos.y - lane.baseY > 1.5 || lane.baseY > 0 || f.up.y < 0.7
         if (elevated) {
@@ -237,6 +250,11 @@ export class Car {
       if (!next) {
         this.launch(f)
         return
+      }
+      // Leaving a tunnel wall for flat road: drop back onto the tarmac.
+      if (lane.profile === 'tube' && next.profile !== 'tube') {
+        this.lateral = clamp(this.lateral, -ROAD_HALF_WIDTH * 0.9, ROAD_HALF_WIDTH * 0.9)
+        this.lateralVel *= 0.3
       }
       this.lane = next
       this.s = over
@@ -284,8 +302,15 @@ export class Car {
 
   private toGround(f: LaneFrame): void {
     this.mode = 'ground'
-    this.vA.copy(f.tan).rotateAxis(f.up, -this.heading)
-    this.yaw = Math.atan2(this.vA.z, this.vA.x)
+    // Keep the slide: world velocity is the heading direction plus the lateral drift,
+    // so leaving a curve carries you off it instead of stopping you at the kerb.
+    this.vA.copy(f.tan).rotateAxis(f.up, -this.heading).scale(this.speed).addScaled(f.right, this.lateralVel)
+    this.vA.y = 0
+    const sp = this.vA.length()
+    if (sp > 0.5) {
+      this.yaw = Math.atan2(this.vA.z, this.vA.x)
+      this.speed = Math.sign(this.speed || 1) * sp
+    } else this.yaw = Math.atan2(f.tan.z, f.tan.x)
     this.pos.copy(f.pos).addScaled(f.right, this.lateral)
     this.pos.y = CAR_RIDE
     this.onGrass = true
@@ -347,6 +372,15 @@ export class Car {
         lane.table.project(this.pos, this.scratch, this.hit)
         const h = this.hit
         if (!this.scratch.surface || h.over > 0.5) continue
+        if (lane.profile === 'tube') {
+          // Inside the tube: catch the car on whatever part of the wall it reaches.
+          const r = Math.hypot(h.x, h.h - TUBE_RADIUS)
+          if (r < TUBE_RADIUS - CAR_RIDE - 1.5 || r > TUBE_RADIUS + 2) continue
+          const a = Math.atan2(h.x, TUBE_RADIUS - h.h)
+          if (Math.abs(a) > 2.2) continue
+          this.landOn(lane, h.s, a * TUBE_RADIUS, this.scratch)
+          return
+        }
         if (Math.abs(h.x) > ROAD_HALF_WIDTH + CURB_WIDTH) continue
         const into = this.vel.dot(this.scratch.up)
         if (h.h > CAR_RIDE + LAND_TOLERANCE || h.h < CAR_RIDE - 2.5 || into > 0) continue
@@ -379,7 +413,7 @@ export class Car {
     const v = this.speed
     const authority = 1 - (1 - STEER_HIGH_SPEED_FACTOR) * clamp((Math.abs(v) - STEER_FULL_SPEED) / (this.spec.topSpeed - STEER_FULL_SPEED), 0, 1)
     // forward = (cos yaw, 0, sin yaw); right = forward × up = +z at yaw 0, so steering right increases yaw.
-    this.yaw += input.steer * STEER_RATE * authority * dt * Math.sign(v || 1)
+    this.yaw += input.steer * STEER_RATE * GRASS_STEER * authority * dt * Math.sign(v || 1)
     this.forward.set(Math.cos(this.yaw), 0, Math.sin(this.yaw))
     this.pos.addScaled(this.forward, v * dt)
     this.pos.y = CAR_RIDE
@@ -405,6 +439,15 @@ export class Car {
   private updatePose(): void {
     if (this.mode === 'track' && this.lane) {
       const f = this.lane.table.frameAt(this.s, this.frame)
+      if (this.lane.profile === 'tube') {
+        // On the tube wall: lateral is arc length; up is the inward normal.
+        const a = this.lateral / TUBE_RADIUS
+        this.up.copy(f.right).scale(-Math.sin(a)).addScaled(f.up, Math.cos(a))
+        this.pos.copy(f.pos).addScaled(f.right, Math.sin(a) * TUBE_RADIUS).addScaled(f.up, TUBE_RADIUS - Math.cos(a) * TUBE_RADIUS).addScaled(this.up, CAR_RIDE)
+        this.forward.copy(f.tan).rotateAxis(this.up, -this.heading)
+        this.right.cross(this.forward, this.up).normalize()
+        return
+      }
       this.pos.copy(f.pos).addScaled(f.right, this.lateral).addScaled(f.up, CAR_RIDE)
       this.up.copy(f.up)
       this.forward.copy(f.tan).rotateAxis(f.up, -this.heading)

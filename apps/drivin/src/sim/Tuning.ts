@@ -18,9 +18,11 @@ export const CURB_WIDTH = 0.8
 /** Metres between baked path samples. */
 export const PATH_STEP = 1
 /** Radius of vertical loops and corkscrews. */
-export const LOOP_RADIUS = 9
+export const LOOP_RADIUS = 12
+/** Corkscrew helix radius (metres). */
+export const CORK_RADIUS = 14
 /** Round tunnel radius (the road is the floor). */
-export const TUBE_RADIUS = 7
+export const TUBE_RADIUS = 11
 /** Lateral shift across a loop so the exit clears the entry, metres. */
 export const LOOP_SHIFT = 2 * (ROAD_HALF_WIDTH + CURB_WIDTH) + 2.4
 /** How far off the road (grass) you can wander on ground-level pieces before you are simply lost. */
@@ -52,8 +54,11 @@ export let GRIP_LATERAL = 22
 export let DRAG_ROLLING = 0.5
 export let DRAG_AERO = 0.0006
 /** Extra deceleration on grass and the grip left there. */
-export let GRASS_DRAG = 6
+export let GRASS_DRAG = 1.5
 export let GRASS_GRIP_SCALE = 0.35
+/** Grass: how much throttle / brake force the tyres can put down, and how much steering bite you keep. */
+export let GRASS_TRACTION = 0.45
+export let GRASS_STEER = 0.6
 /** Speed lost per second while scraping a curb/wall. */
 export let CURB_SLOW = 4
 
@@ -64,8 +69,8 @@ export let CURB_SLOW = 4
  * airborne the car accelerates straight back to top speed — even after a
  * corner scrubbed it off. Let go of the accelerator and it stops.
  */
-export let AIR_GLITCH_THRESHOLD = 0.85
-export let AIR_GLITCH_ACCEL = 90
+export let AIR_GLITCH_THRESHOLD = 0.6
+export let AIR_GLITCH_ACCEL = 400
 export let LAND_TOLERANCE = 1.2
 /** Land only if the car's up and the surface normal roughly agree. */
 export let LAND_MIN_ALIGN = 0.35
@@ -99,6 +104,8 @@ export const SIM_TUNE: TuneSection = {
     tune('DRAG_AERO', () => DRAG_AERO, (v) => (DRAG_AERO = v)),
     tune('GRASS_DRAG', () => GRASS_DRAG, (v) => (GRASS_DRAG = v)),
     tune('GRASS_GRIP_SCALE', () => GRASS_GRIP_SCALE, (v) => (GRASS_GRIP_SCALE = v)),
+    tune('GRASS_TRACTION', () => GRASS_TRACTION, (v) => (GRASS_TRACTION = v)),
+    tune('GRASS_STEER', () => GRASS_STEER, (v) => (GRASS_STEER = v)),
     tune('CURB_SLOW', () => CURB_SLOW, (v) => (CURB_SLOW = v)),
     tune('LAND_TOLERANCE', () => LAND_TOLERANCE, (v) => (LAND_TOLERANCE = v)),
     tune('LAND_MIN_ALIGN', () => LAND_MIN_ALIGN, (v) => (LAND_MIN_ALIGN = v)),

@@ -112,10 +112,10 @@ export let LASER_DPS = 100
 export let LASER_RANGE = 900
 /** rad (~8°) auto-aim cone about the vehicle's forward. */
 export let LASER_AIM_CONE = 0.14
-export let LASER_HEAT_PER_SEC = 55
+export let LASER_HEAT_PER_SEC = 22
 export const LASER_HEAT_MAX = 100
-export let LASER_COOL_PER_SEC = 40
-export const LASER_OVERHEAT_LOCK = 1.2
+export let LASER_COOL_PER_SEC = 110
+export const LASER_OVERHEAT_LOCK = 0.5
 export const SHOCKWAVE_MAX_CHARGES = 3
 export const SHOCKWAVE_START_CHARGES = 3
 export let SHOCKWAVE_RADIUS = 700

@@ -33,6 +33,9 @@ canvas.game { position: absolute; inset: 0; width: 100%; height: 100%; display: 
 .hud .turbo { width: 18vw; max-width: 260px; height: 0.5em; margin-top: 6px; margin-left: auto; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.25); overflow: hidden; }
 .hud .turbo .fill { height: 100%; background: var(--accent2); transition: width 0.1s linear; }
 .hud .turbo .fill.active { background: #ff5fd2; }
+.hud .switches { position: absolute; bottom: 11vh; left: 4vw; display: flex; gap: 1.2em; font-size: 0.7em; letter-spacing: 0.25em; opacity: 0.55; }
+.hud .switches .on { color: #5cff8a; opacity: 1; text-shadow: 0 0 10px rgba(92,255,138,0.6); }
+.hud .switches [data-wipers].on { color: #6ab8ff; text-shadow: 0 0 10px rgba(106,184,255,0.6); }
 .hud .station { position: absolute; bottom: 4vh; left: 4vw; opacity: 0.75; letter-spacing: 0.15em; }
 .hud .viewhint { position: absolute; bottom: 8vh; left: 4vw; opacity: 0.45; font-size: 0.75em; letter-spacing: 0.25em; }
 .hud .message { position: absolute; top: 24%; left: 0; right: 0; text-align: center; font-size: 2.4em; font-weight: 800; letter-spacing: 0.2em; opacity: 0; transform: translateY(10px); transition: opacity 0.15s, transform 0.15s; text-shadow: 0 0 20px rgba(0,0,0,0.6); }
@@ -81,6 +84,8 @@ canvas.game { position: absolute; inset: 0; width: 100%; height: 100%; display: 
 .touch .gear { left: 26vw; bottom: 4vh; width: 14vw; height: 11vh; border-radius: 999px; }
 .touch .turbo { right: 26vw; bottom: 4vh; width: 14vw; height: 11vh; border-radius: 999px; border-color: rgba(255,95,210,0.4); }
 .touch .turbo.held { background: rgba(255,95,210,0.3); }
+.touch .wipers { left: 4vw; top: 30vh; width: 12vw; height: 8vh; font-size: 11px; border-color: rgba(106,184,255,0.4); }
+.touch .lights { right: 4vw; top: 30vh; width: 12vw; height: 8vh; font-size: 11px; border-color: rgba(92,255,138,0.4); }
 .touch .view { left: 50%; bottom: 4vh; width: 12vw; height: 11vh; transform: translateX(-50%); font-size: 11px; }
 .touch .pause { right: 2vw; top: 2vh; width: 9vw; height: 12vh; }
 .touch .calib { left: 2vw; top: 2vh; width: 16vw; height: 12vh; font-size: 11px; }

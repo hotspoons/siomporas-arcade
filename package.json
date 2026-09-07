@@ -10,26 +10,24 @@
     "lint": "oxlint",
     "typecheck": "tsc -b",
     "bridge": "node scripts/bridge.mjs",
-    "smoke": "node scripts/smoke.mjs"
+    "smoke": "node scripts/smoke.mjs",
+    "test": "vitest run",
+    "check": "oxlint && tsc -b && vitest run"
   },
   "dependencies": {
-    "@react-three/drei": "^10.7.7",
-    "@react-three/fiber": "^9.6.1",
-    "react": "^19.2.7",
-    "react-dom": "^19.2.7",
+    "postprocessing": "^6.39.4",
     "three": "^0.185.1"
   },
   "devDependencies": {
     "@types/node": "^24.13.2",
-    "@types/react": "^19.2.17",
-    "@types/react-dom": "^19.2.3",
     "@types/three": "^0.185.0",
+    "@types/webxr": "^0.5.24",
     "@types/ws": "^8.18.1",
-    "@vitejs/plugin-react": "^6.0.3",
     "oxlint": "^1.71.0",
     "playwright": "^1.61.1",
     "typescript": "~6.0.2",
     "vite": "^8.1.1",
+    "vitest": "^5.0.0",
     "ws": "^8.18.3"
   }
 }

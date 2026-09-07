@@ -416,6 +416,10 @@ export class AudioWorld {
         this.thud(160, 50, 0.2, 0.6)
         this.noiseBurst(0.2, 0.3, 1200)
         break
+      case 'spinout':
+        this.thud(150, 40, 0.8, 0.9)
+        this.noiseBurst(0.7, 0.6, 2000, 'lowpass', 150)
+        break
       case 'crash':
         this.thud(120, 20, 1.2, 1.0)
         this.noiseBurst(1.2, 0.9, 3000, 'lowpass', 80)

@@ -57,6 +57,8 @@ export class RenderWorld {
     // Clear day: deep blue overhead, pale haze at the horizon, no stars.
     this.sky.setColors(0x2f6fd0, 0xa9d3f5, BG_COLOR)
     this.sky.setStars(false)
+    // Keep the dome well inside the camera's far plane or its facets get clipped into shapes.
+    this.sky.root.scale.setScalar(0.4)
     this.car = new CarMesh(spec.look)
     this.root.add(this.car.root)
     this.root.add(this.particles.points)

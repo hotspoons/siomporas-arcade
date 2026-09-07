@@ -274,7 +274,7 @@ export class Car {
     this.mode = 'air'
     this.airTime = 0
     // World velocity: along tangent (rotated by heading) plus lateral.
-    this.vA.copy(f.tan).rotateAxis(f.up, -this.heading)
+    this.vA.copy(f.tan).rotateAxis(f.up, this.heading)
     this.vel.copy(this.vA).scale(this.speed).addScaled(f.right, this.lateralVel)
     this.pos.copy(f.pos).addScaled(f.right, this.lateral).addScaled(f.up, CAR_RIDE)
     this.forward.copy(this.vA)
@@ -285,7 +285,7 @@ export class Car {
 
   private toGround(f: LaneFrame): void {
     this.mode = 'ground'
-    this.vA.copy(f.tan).rotateAxis(f.up, -this.heading)
+    this.vA.copy(f.tan).rotateAxis(f.up, this.heading)
     this.yaw = Math.atan2(-this.vA.z, this.vA.x)
     this.pos.copy(f.pos).addScaled(f.right, this.lateral)
     this.pos.y = CAR_RIDE
@@ -379,7 +379,8 @@ export class Car {
     this.longitudinal(dt, input, 0, GRASS_DRAG)
     const v = this.speed
     const authority = 1 - (1 - STEER_HIGH_SPEED_FACTOR) * clamp((Math.abs(v) - STEER_FULL_SPEED) / (this.spec.topSpeed - STEER_FULL_SPEED), 0, 1)
-    this.yaw += -input.steer * STEER_RATE * authority * dt * Math.sign(v || 1)
+    // forward = (cos yaw, 0, -sin yaw); right is -z, so steering right increases yaw.
+    this.yaw += input.steer * STEER_RATE * authority * dt * Math.sign(v || 1)
     this.forward.set(Math.cos(this.yaw), 0, -Math.sin(this.yaw))
     this.pos.addScaled(this.forward, v * dt)
     this.pos.y = CAR_RIDE
@@ -407,7 +408,7 @@ export class Car {
       const f = this.lane.table.frameAt(this.s, this.frame)
       this.pos.copy(f.pos).addScaled(f.right, this.lateral).addScaled(f.up, CAR_RIDE)
       this.up.copy(f.up)
-      this.forward.copy(f.tan).rotateAxis(f.up, -this.heading)
+      this.forward.copy(f.tan).rotateAxis(f.up, this.heading)
       this.right.cross(this.up, this.forward).normalize()
     } else if (this.mode === 'ground') {
       this.right.cross(this.up, this.forward).normalize()

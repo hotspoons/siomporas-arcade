@@ -40,6 +40,9 @@ export class RenderWorld {
   readonly rain = new Rain()
   private theme: Theme | null = null
   private heroKind = 'hero_gulf'
+  /** Dev: when set, one sprite kind is drawn huge in the middle of the screen. */
+  previewKind: string | null = null
+  previewYaw = 0
   readonly stats: RenderStats = { drawCalls: 0, triangles: 0, chunks: 0 }
   style: Style | null = null
   view: ViewMode = 'chase'
@@ -166,18 +169,20 @@ export class RenderWorld {
     const camY = this.camY + this.bounce
     const camZ = z - view.playerAhead
     const camX = x * ROAD_HALF_WIDTH
-    const base = Math.max(0, Math.floor(camZ / SEG_LENGTH))
+    // Negative when the camera trails the stage start; those rows reuse segment 0 (a straight lead-in).
+    const base = Math.floor(camZ / SEG_LENGTH)
     const pct = (camZ - base * SEG_LENGTH) / SEG_LENGTH
     const segs = stage.segments
     const last = segs.length - 1
+    const segAt = (i: number) => segs[Math.max(0, Math.min(i, last))]
     const fogK = this.retro ? FOG_RETRO : FOG_MODERN
 
     // Pass 1, near → far: accumulate the curve, project rows, resolve hill clipping.
     let xOff = 0
-    let dx = -(segs[Math.min(base, last)].curve * CURVE_UNIT * pct)
+    let dx = -(segAt(base).curve * CURVE_UNIT * pct)
     let maxY = -Infinity
     for (let n = 0; n <= DRAW_SEGMENTS; n++) {
-      const seg = segs[Math.min(base + n, last)]
+      const seg = segAt(base + n)
       let zRel = (base + n) * SEG_LENGTH - camZ
       // The row under the camera projects behind it; pin it just in front so the
       // nearest quad always reaches the bottom of the screen instead of popping.
@@ -212,7 +217,7 @@ export class RenderWorld {
     const rails = Boolean(this.theme?.rails)
     for (let n = DRAW_SEGMENTS - 1; n >= 0; n--) {
       if (!this.segVisible[n]) continue
-      const seg = segs[Math.min(base + n, last)]
+      const seg = segAt(base + n)
       const band = Math.floor((base + n) / BAND_SEGMENTS) % 2
       const x1 = this.rowX[n]
       const y1 = this.rowY[n]
@@ -267,7 +272,7 @@ export class RenderWorld {
     let carPtr = 0
     for (let n = DRAW_SEGMENTS - 1; n >= 0; n--) {
       if (!this.rowValid[n]) continue
-      const seg = segs[Math.min(base + n, last)]
+      const seg = segAt(base + n)
       const clip = Math.max(this.rowClip[n], -1e9)
       // Cars whose z falls in this segment.
       const zStart = (base + n) * SEG_LENGTH
@@ -285,7 +290,7 @@ export class RenderWorld {
           if (frame) this.sprites.add(sx + curr.trafficX[ci] * ROAD_HALF_WIDTH * sc, sy, frame.heightM * sc, frame, this.rowFog[n], this.brightAt((base + n) * SEG_LENGTH - camZ), clip)
         }
       }
-      if (seg.runway) continue
+      if (seg.runway || base + n < 0) continue
       this.drawSegmentSprites(seg, n, clip, this.brightAt((base + n) * SEG_LENGTH - camZ))
     }
     // Player car.
@@ -298,6 +303,10 @@ export class RenderWorld {
       const yaw = steerFrame === 0 ? 0 : steerFrame > 0 ? -[12, 24, 38][steerFrame - 1] : [12, 24, 38][-steerFrame - 1]
       const frame = this.atlas.frame(this.heroKind, yaw)
       if (frame) this.sprites.add(W / 2 + curr.steer * 2, py + (curr.crashT > 0 ? Math.abs(Math.sin(curr.crashT * 20)) * 12 : 0), frame.heightM * scale, frame, 0, 1, -1e9)
+    }
+    if (this.previewKind) {
+      const f = this.atlas.frame(this.previewKind, this.previewYaw)
+      if (f) this.sprites.add(W / 2, H * 0.12, H * 0.75, f, 0, 1, -1e9)
     }
     this.sprites.end()
 

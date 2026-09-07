@@ -18,7 +18,7 @@ export function buildMenus(game: Game) {
     const ti = Math.max(0, tracks.findIndex((t) => t.id === s().trackId))
     return {
       id: 'title',
-      title: 'HARD LINE',
+      title: 'DRIVIN',
       subtitle: 'Stunt-track driving · working title',
       items: [
         { kind: 'action', label: 'DRIVE', hint: tracks[ti]?.name ?? '', onSelect: () => game.startDrive() },

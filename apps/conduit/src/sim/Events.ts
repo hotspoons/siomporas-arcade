@@ -29,6 +29,7 @@ export type SimEventType =
   | 'boss_spawn'
   | 'boss_dead'
   | 'train'
+  | 'spinout'
 
 export interface SimEvent {
   type: SimEventType

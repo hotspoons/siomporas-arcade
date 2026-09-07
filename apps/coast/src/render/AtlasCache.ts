@@ -6,6 +6,7 @@ import { NearestFilter, LinearFilter, SRGBColorSpace, Texture, type WebGLRendere
 import type { SpriteKind } from './SpriteAtlas'
 import { ATLAS_SIZE } from './RenderTuning'
 import { MODELS } from './models'
+import { PROCGEN_VERSION } from './procgen'
 
 const DB = 'apex-coast'
 const STORE = 'atlas'
@@ -26,7 +27,7 @@ export function atlasKey(): string {
     h ^= manifest.charCodeAt(i)
     h = Math.imul(h, 16777619)
   }
-  return `v${BAKE_VERSION}-${(h >>> 0).toString(16)}-${ATLAS_SIZE}`
+  return `v${BAKE_VERSION}.${PROCGEN_VERSION}-${(h >>> 0).toString(16)}-${ATLAS_SIZE}`
 }
 
 function open(): Promise<IDBDatabase> {

@@ -1,5 +1,5 @@
 // The flat world: a huge plane with a cell grid that fades with distance and
-// a soft horizon. Retro mode gets hard lines and no gradient.
+// a soft horizon. Retro mode gets drivins and no gradient.
 
 import { Color, Mesh, PlaneGeometry, ShaderMaterial, Vector3 } from 'three'
 import { CELL } from '../sim/Tuning'

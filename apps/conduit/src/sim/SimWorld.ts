@@ -8,9 +8,13 @@ import { type InputFrame } from './InputFrame'
 import { Rng } from '@apex/engine/math/Rng'
 import { SimSnapshot, type RunPhase } from './SimSnapshot'
 import {
+  SPEED_MIN,
   SCORE_BOOST_PER_SEC,
   SCORE_TIME_LEFT_PER_SEC,
+  OFFTRACK_TIME_PENALTY,
   SHIELD_GATE_RESTORE,
+  SPINOUT_SPEED_KEEP,
+  SPINOUT_TIME,
   SHIELD_MAX,
   SHIELD_REGEN_PER_SEC,
   TIMER_GATE_BONUS,
@@ -148,12 +152,12 @@ export class SimWorld {
     this.writeSnapshot(out)
   }
 
-  /** Shield damage from any source. Zero shield + another hit = crash. */
+  /** Shield damage from any source. Zero shield + another hit = a spin-out, never a wreck. */
   damage(amount: number, pos: Vec3 | null, kind: 'collision' | 'shot' | 'scrape'): void {
     if (this.phase !== 'running') return
     if (this.invuln > 0 && kind !== 'scrape') return
     if (this.shield <= 0.5 && kind !== 'scrape') {
-      this.crash()
+      this.spinOut(pos)
       return
     }
     this.shield = Math.max(0, this.shield - amount)
@@ -166,10 +170,22 @@ export class SimWorld {
 
   readonly isRingTakenBound = (i: number): boolean => this.ringTaken[i] === 1
 
+  /** The worst thing that can happen to you: a long spin and a lot of lost speed. */
+  spinOut(pos: Vec3 | null): void {
+    const v = this.vehicle
+    v.speed = Math.max(SPEED_MIN * 0.6, v.speed * SPINOUT_SPEED_KEEP)
+    v.spinTimer = SPINOUT_TIME
+    v.spinDir = v.thetaVel >= 0 ? 1 : -1
+    this.invuln = Math.max(this.invuln, SPINOUT_TIME + 0.4)
+    this.events.push('spinout', pos ?? v.pos)
+  }
+
+  /** Leaving the track entirely (missed landing, fell off an edge): dropped back on it, minus a little time. */
   crash(): void {
     if (this.phase !== 'running') return
-    this.phase = 'crashed'
-    this.events.push('crash', this.vehicle.pos)
+    this.vehicle.recoverOnTrack(this.track)
+    this.timer = Math.max(0.5, this.timer - OFFTRACK_TIME_PENALTY)
+    this.events.push('crash', this.vehicle.pos, OFFTRACK_TIME_PENALTY)
   }
 
   private onBoostStrip(s: number, theta: number): boolean {

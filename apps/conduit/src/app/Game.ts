@@ -452,9 +452,14 @@ export class Game implements LoopClient {
         this.hud.showMessage('AIRBORNE', 0.9)
         break
       case 'crash':
-        this.hud.showMessage('WRECKED', 2.5, 'bad')
+        this.hud.showMessage(`OFF THE TRACK  −${e.a}s`, 1.6, 'bad')
         this.hud.hitFlash(1)
-        pad.rumble(1, 1, 600)
+        pad.rumble(1, 1, 500)
+        break
+      case 'spinout':
+        this.hud.showMessage('SPIN OUT', 1.2, 'bad')
+        this.hud.hitFlash(1)
+        pad.rumble(1, 0.8, 700)
         break
       case 'fall':
         this.hud.showMessage('OVER THE EDGE', 2, 'bad')

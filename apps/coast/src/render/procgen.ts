@@ -34,55 +34,154 @@ const flat = (color: number, extra: FlatExtra = {}) => {
   return m
 }
 
-/** A late-'60s endurance prototype: low, wide, long tail, fender humps, round lamps, fin. Faces +z. */
+/** Bump when any procedural model changes shape; part of the atlas cache key. */
+export const PROCGEN_VERSION = 2
+
+interface Slice {
+  z: number
+  /** Half width at the widest point. */
+  hw: number
+  /** Body top height at the centre line. */
+  top: number
+  /** Extra height at the outer edge — the fender arch swell. */
+  bulge: number
+  /** Floor height. */
+  floor: number
+}
+
+/** Half-profile of a slice, from floor-centre up around to top-centre (right side). */
+function slicePoints(sl: Slice, n: number): [number, number][] {
+  const pts: [number, number][] = []
+  for (let i = 0; i <= n; i++) {
+    const t = i / n
+    // Squarish superellipse: flat floor and top, soft rounded flank.
+    const a = t * Math.PI * 0.5
+    const x = sl.hw * Math.pow(Math.cos(a), 0.55)
+    let y = sl.floor + (sl.top - sl.floor) * Math.pow(Math.sin(a), 1.7)
+    // Fender swell: a hump centred ~72 % of the way out, only on the upper half.
+    const u = x / Math.max(1e-3, sl.hw)
+    y += sl.bulge * Math.exp(-Math.pow((u - 0.7) / 0.24, 2)) * Math.pow(Math.sin(a), 0.8)
+    pts.push([x, y])
+  }
+  return pts
+}
+
+/** Loft a closed hull through slices (mirrored left/right), with fan caps at both ends. */
+function loft(slices: Slice[], n: number, m: MeshStandardMaterial): Mesh {
+  const rings: number[][] = []
+  for (const sl of slices) {
+    const half = slicePoints(sl, n)
+    const ring: number[] = []
+    // Right side bottom→top, then left side top→bottom (skip the duplicated centre points).
+    for (const [x, y] of half) ring.push(x, y, sl.z)
+    for (let i = half.length - 2; i >= 1; i--) ring.push(-half[i][0], half[i][1], sl.z)
+    rings.push(ring)
+  }
+  const per = rings[0].length / 3
+  const pos: number[] = []
+  const push = (r: number[], i: number) => pos.push(r[i * 3], r[i * 3 + 1], r[i * 3 + 2])
+  for (let s = 0; s < rings.length - 1; s++) {
+    const a = rings[s]
+    const b = rings[s + 1]
+    for (let i = 0; i < per; i++) {
+      const j = (i + 1) % per
+      push(a, i); push(b, i); push(b, j)
+      push(a, i); push(b, j); push(a, j)
+    }
+  }
+  // Caps.
+  for (const [r, flip] of [[rings[0], false], [rings[rings.length - 1], true]] as const) {
+    let cx = 0, cy = 0, cz = 0
+    for (let i = 0; i < per; i++) { cx += r[i * 3] / per; cy += r[i * 3 + 1] / per; cz += r[i * 3 + 2] / per }
+    for (let i = 0; i < per; i++) {
+      const j = (i + 1) % per
+      if (flip) { pos.push(cx, cy, cz); push(r, j); push(r, i) }
+      else { pos.push(cx, cy, cz); push(r, i); push(r, j) }
+    }
+  }
+  const g = new BufferGeometry()
+  g.setAttribute('position', new BufferAttribute(new Float32Array(pos), 3))
+  g.computeVertexNormals()
+  return new Mesh(g, m)
+}
+
+/** A late-'60s endurance prototype: lofted low hull with wheel-arch swells, blended canopy, long flat tail. Faces +z. */
 export function buildPrototype(livery: Livery): Object3D {
   const g = new Group()
-  const body = flat(livery.body, { metalness: 0.35, roughness: 0.35 })
+  const body = flat(livery.body, { metalness: 0.35, roughness: 0.3 })
   const dark = flat(0x14151a)
-  const glass = flat(0x243448, { metalness: 0.8, roughness: 0.2 })
+  const glass = flat(0x1e2c40, { metalness: 0.85, roughness: 0.15 })
   const stripe = flat(livery.stripe)
-  // Main tub.
-  g.add(box(3.6, 0.55, 1.95, 0, 0.5, -0.2, body))
-  // Long nose sloping down.
-  g.add(wedge([[-0.98, 0.25, 1.6], [0.98, 0.25, 1.6], [0.98, 0.78, 0.2], [-0.98, 0.78, 0.2], [-0.98, 0.25, 0.2], [0.98, 0.25, 0.2]], body))
-  // Fender humps front and rear.
-  for (const z of [1.15, -1.55])
-    for (const x of [-0.78, 0.78]) {
-      const hump = new Mesh(new SphereGeometry(0.42, 10, 8), body)
-      hump.scale.set(1.05, 0.75, 1.35)
-      hump.position.set(x, 0.68, z)
-      g.add(hump)
-    }
-  // Canopy: low bubble + windscreen.
-  g.add(wedge([[-0.62, 0.78, 0.7], [0.62, 0.78, 0.7], [0.5, 1.22, -0.1], [-0.5, 1.22, -0.1], [-0.55, 0.78, -0.5], [0.55, 0.78, -0.5]], glass))
-  g.add(box(1.0, 0.44, 1.0, 0, 1.0, -0.9, body))
-  // Tail deck and fin.
-  g.add(box(1.9, 0.3, 1.2, 0, 0.9, -1.85, body))
-  g.add(box(1.8, 0.06, 0.5, 0, 1.3, -2.2, dark))
-  for (const x of [-0.85, 0.85]) g.add(box(0.06, 0.5, 0.7, x, 1.05, -2.1, stripe))
-  // Central stripe and roundel.
-  g.add(box(0.5, 0.02, 3.4, 0, 0.8, 0, stripe))
-  const roundel = new Mesh(new CylinderGeometry(0.28, 0.28, 0.02, 16), flat(0xffffff))
-  roundel.rotation.x = Math.PI / 2
-  roundel.position.set(0, 0.85, -0.55)
-  g.add(roundel)
-  const num = textPlane(livery.number, 0.42, '#111', 'transparent', 96)
-  num.position.set(0, 0.87, -0.55)
-  num.rotation.x = -Math.PI / 2
-  g.add(num)
-  // Headlamps and tail lamps.
-  for (const x of [-0.7, 0.7]) {
-    g.add(cyl(0.16, 0.05, x, 0.6, 1.55, flat(0xfff6c8, { emissive: 0xffe0a0, emissiveIntensity: 0.9 })))
-    g.add(box(0.28, 0.1, 0.05, x, 0.9, -2.45, flat(0xff2a2a, { emissive: 0xff2a2a, emissiveIntensity: 0.8 })))
+  // Hull: nose → front arches → cockpit → rear arches → tail.
+  const hull: Slice[] = [
+    { z: 2.35, hw: 0.28, top: 0.42, bulge: 0, floor: 0.2 },
+    { z: 2.0, hw: 0.62, top: 0.5, bulge: 0.02, floor: 0.16 },
+    { z: 1.55, hw: 0.9, top: 0.6, bulge: 0.14, floor: 0.13 },
+    { z: 1.15, hw: 1.0, top: 0.66, bulge: 0.24, floor: 0.12 },
+    { z: 0.7, hw: 0.98, top: 0.7, bulge: 0.14, floor: 0.12 },
+    { z: 0.1, hw: 0.96, top: 0.72, bulge: 0.06, floor: 0.12 },
+    { z: -0.6, hw: 0.97, top: 0.74, bulge: 0.08, floor: 0.12 },
+    { z: -1.2, hw: 1.0, top: 0.76, bulge: 0.22, floor: 0.12 },
+    { z: -1.7, hw: 0.98, top: 0.74, bulge: 0.16, floor: 0.13 },
+    { z: -2.3, hw: 0.9, top: 0.68, bulge: 0.04, floor: 0.16 },
+    { z: -2.6, hw: 0.84, top: 0.6, bulge: 0, floor: 0.22 },
+  ]
+  g.add(loft(hull, 7, body))
+  // Canopy: a narrower loft rising out of the hull top, blended front and back.
+  const canopy: Slice[] = [
+    { z: 0.95, hw: 0.5, top: 0.72, bulge: 0, floor: 0.6 },
+    { z: 0.55, hw: 0.56, top: 0.98, bulge: 0, floor: 0.6 },
+    { z: 0.1, hw: 0.58, top: 1.14, bulge: 0, floor: 0.6 },
+    { z: -0.5, hw: 0.56, top: 1.12, bulge: 0, floor: 0.6 },
+    { z: -1.0, hw: 0.5, top: 0.96, bulge: 0, floor: 0.6 },
+    { z: -1.35, hw: 0.42, top: 0.78, bulge: 0, floor: 0.6 },
+  ]
+  g.add(loft(canopy, 6, glass))
+  // Roof spine in body colour over the glass (Group 6 cars had a painted centre section).
+  g.add(box(0.36, 0.06, 1.3, 0, 1.13, -0.35, body))
+  // Ducktail spoiler: low, wide, integrated on two small fins.
+  g.add(box(1.7, 0.05, 0.42, 0, 0.88, -2.45, dark))
+  for (const x of [-0.72, 0.72]) g.add(box(0.05, 0.3, 0.5, x, 0.72, -2.4, stripe))
+  // Centre stripe: a ribbon lying on the hull top, following its height.
+  for (let i = 0; i < hull.length - 1; i++) {
+    const a = hull[i]
+    const b = hull[i + 1]
+    const seg = box(0.34, 0.015, Math.abs(a.z - b.z) + 0.02, 0, (a.top + b.top) / 2 + 0.012, (a.z + b.z) / 2, stripe)
+    seg.rotation.x = Math.atan2(a.top - b.top, a.z - b.z)
+    if (b.z < 0.95 && b.z > -1.4) seg.visible = false // hidden under the canopy
+    g.add(seg)
   }
-  // Wheels (exposed a little), exhausts.
-  for (const [x, z] of [[-0.95, 1.1], [0.95, 1.1], [-0.95, -1.5], [0.95, -1.5]]) {
-    const w = new Mesh(new CylinderGeometry(0.34, 0.34, 0.32, 12), dark)
+  // Number roundel on the nose.
+  const roundel = new Mesh(new CylinderGeometry(0.27, 0.27, 0.02, 18), flat(0xffffff))
+  roundel.position.set(0, 0.62, 1.55)
+  roundel.rotation.x = -0.28
+  g.add(roundel)
+  const num = textPlane(livery.number, 0.4, '#111', 'transparent', 96)
+  num.position.set(0, 0.64, 1.55)
+  num.rotation.x = -1.29
+  g.add(num)
+  // Faired headlamps in the fender fronts; tail lamps as slim bars.
+  for (const x of [-0.66, 0.66]) {
+    const lamp = new Mesh(new SphereGeometry(0.15, 10, 8), flat(0xfff6c8, { emissive: 0xffe0a0, emissiveIntensity: 0.9 }))
+    lamp.scale.set(1, 0.7, 0.5)
+    lamp.position.set(x, 0.62, 1.9)
+    g.add(lamp)
+    g.add(box(0.36, 0.09, 0.05, x * 0.95, 0.5, -2.62, flat(0xff2a2a, { emissive: 0xff2a2a, emissiveIntensity: 0.8 })))
+  }
+  // Intake and exhausts.
+  g.add(box(0.5, 0.12, 0.06, 0, 0.36, 2.34, dark))
+  for (const x of [-0.22, 0.22]) g.add(cyl(0.055, 0.35, x, 0.3, -2.65, dark, true))
+  // Wheels, mostly enclosed by the arches.
+  for (const [x, z] of [[-0.86, 1.2], [0.86, 1.2], [-0.86, -1.25], [0.86, -1.25]]) {
+    const w = new Mesh(new CylinderGeometry(0.34, 0.34, 0.3, 14), dark)
     w.rotation.z = Math.PI / 2
     w.position.set(x, 0.34, z)
     g.add(w)
+    const rim = new Mesh(new CylinderGeometry(0.2, 0.2, 0.32, 8), flat(0xbfc6d0, { metalness: 0.8, roughness: 0.3 }))
+    rim.rotation.z = Math.PI / 2
+    rim.position.set(x, 0.34, z)
+    g.add(rim)
   }
-  for (const x of [-0.25, 0.25]) g.add(cyl(0.06, 0.4, x, 0.45, -2.5, dark, true))
   return g
 }
 
@@ -176,43 +275,6 @@ function cyl(r: number, h: number, x: number, y: number, z: number, m: MeshStand
   c.rotation.x = alongZ ? Math.PI / 2 : Math.PI / 2
   c.position.set(x, y, z)
   return c
-}
-/** Six-vertex wedge: bottom quad (0-3) then two ridge/back points; convex enough to be wound outward. */
-function wedge(v: number[][], m: MeshStandardMaterial): Mesh {
-  const faces = [
-    [0, 1, 2], [0, 2, 3], // top slope
-    [4, 5, 1], [4, 1, 0], // front lower
-    [3, 2, 5], [3, 5, 4], // back
-    [0, 3, 4], [1, 5, 2], // sides
-  ]
-  return new Mesh(fromFaces(v, faces), m)
-}
-function fromFaces(v: number[][], faces: number[][]): BufferGeometry {
-  const c = [0, 0, 0]
-  for (const p of v) for (let k = 0; k < 3; k++) c[k] += p[k] / v.length
-  const pos = new Float32Array(faces.length * 9)
-  let n = 0
-  for (const f of faces) {
-    const [a, b, d] = [v[f[0]], v[f[1]], v[f[2]]]
-    const e1 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]]
-    const e2 = [d[0] - a[0], d[1] - a[1], d[2] - a[2]]
-    const nx = e1[1] * e2[2] - e1[2] * e2[1]
-    const ny = e1[2] * e2[0] - e1[0] * e2[2]
-    const nz = e1[0] * e2[1] - e1[1] * e2[0]
-    const mx = (a[0] + b[0] + d[0]) / 3 - c[0]
-    const my = (a[1] + b[1] + d[1]) / 3 - c[1]
-    const mz = (a[2] + b[2] + d[2]) / 3 - c[2]
-    const order = nx * mx + ny * my + nz * mz >= 0 ? f : [f[0], f[2], f[1]]
-    for (const i of order) {
-      pos[n++] = v[i][0]
-      pos[n++] = v[i][1]
-      pos[n++] = v[i][2]
-    }
-  }
-  const g = new BufferGeometry()
-  g.setAttribute('position', new BufferAttribute(pos, 3))
-  g.computeVertexNormals()
-  return g
 }
 /** A plane with text drawn on a canvas, `widthM` metres wide. */
 function textPlane(text: string, widthM: number, fg: string, bg: string, px: number): Mesh {

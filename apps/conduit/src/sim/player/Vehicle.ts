@@ -115,6 +115,26 @@ export class Vehicle {
     this.worldVel.set(0, 0, 0)
   }
 
+  /** Drop back onto the track surface at the current arc length, slow and upright. Never ends the run. */
+  recoverOnTrack(track: Track): void {
+    this.airborne = false
+    this.falling = false
+    this.fallTimer = 0
+    this.theta = 0
+    this.thetaVel = 0
+    this.speed = SPEED_MIN
+    this.spinTimer = 0
+    this.alignTimer = 0
+    // If the surface here is missing (mid-gap), walk forward to the next surface.
+    for (let tries = 0; tries < 200; tries++) {
+      const f = track.frameAt(this.s, this.branch, this.frame)
+      if (hasSurface(f.arc)) break
+      this.s += 5
+    }
+    this.branch = track.splitAt(this.s) ? this.branch : 0
+    this.updatePose(track)
+  }
+
   /** Called by the collision system. Slows, spins, never stops. */
   applyCollision(speedKeep: number, spinDir: number): void {
     this.speed = Math.max(SPEED_MIN * 0.85, this.speed * speedKeep)

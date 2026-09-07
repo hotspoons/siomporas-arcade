@@ -205,6 +205,11 @@ export class RenderWorld {
         this.particles.burst(p, 30, 35, 0.5, 0.8, 0.9, 1, 3)
         this.rig.addShake(0.4)
         break
+      case 'spinout':
+        this.particles.burst(p, 90, 45, 1.0, 1, 0.5, 0.2, 4)
+        this.rig.addShake(1.2)
+        this.hitFlash = 1
+        break
       case 'crash':
         this.particles.burst(p, 200, 70, 1.6, 1, 0.5, 0.2, 6)
         this.particles.burst(p, 80, 40, 1.2, 1, 0.9, 0.6, 5)

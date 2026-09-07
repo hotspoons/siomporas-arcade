@@ -138,6 +138,11 @@ export const COLLISION_SPEED_KEEP = 0.72
 /** Seconds of the post-collision barrel spin (visual + steering impulse). */
 export const COLLISION_SPIN_TIME = 0.7
 export const COLLISION_INVULN = 0.8
+/** Shield empty + another hit: a spin-out, not a wreck. Speed kept and seconds of lost control. */
+export const SPINOUT_SPEED_KEEP = 0.45
+export const SPINOUT_TIME = 1.4
+/** Seconds docked when you leave the track entirely and get dropped back on it. */
+export const OFFTRACK_TIME_PENALTY = 2
 
 // --- timer / score --------------------------------------------------------------
 /**

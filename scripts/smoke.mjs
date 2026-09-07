@@ -37,7 +37,7 @@ try {
   // pickups and the chunk recycler rather than just the first frame.
   await page.keyboard.press('Enter')
   // Conduit: fire (Space) and shockwave (E) while weaving. Drivin: just drive — Space is the handbrake there.
-  const isDrivin = /hard line/i.test(await page.title())
+  const isDrivin = /drivin/i.test(await page.title())
   const deadline = Date.now() + seconds * 1000
   await page.keyboard.down('KeyW')
   if (!isDrivin) await page.keyboard.down('Space')

@@ -58,3 +58,7 @@ handoff, or where the handoff left a choice open. Newest last.
     describe publicly — banked lobes, narrow flats, tunnel under construction,
     branching — from written descriptions only. No layout data, art or audio
     from the original was viewed or used; everything remains authored here.
+15. **You can't wreck.** Per the owner (and the original): an empty shield plus
+    a hit is a spin-out — most of your speed and a second or two of control —
+    never game over; leaving the track (missed landing, over an edge) drops you
+    back on the surface minus `OFFTRACK_TIME_PENALTY`. Only the clock ends a run.

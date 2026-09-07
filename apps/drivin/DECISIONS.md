@@ -41,3 +41,7 @@
     interrupted.
 11. **Blue sky by default.** The original's sky was odd; ours is a clear day
     with light haze fog, no stars.
+12. **Heading sign.** `forward = tan rotated by +heading about up` (right =
+    up × forward = −z when facing +x). An earlier `-heading` pointed the nose
+    left while the car drifted right, and `toGround` inherited it — which is
+    what made leaving the road feel like bouncing off a wall.

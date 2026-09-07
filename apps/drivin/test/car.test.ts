@@ -127,3 +127,39 @@ describe('free roaming', () => {
     expect(pen && pen.a).toBeGreaterThan(5)
   })
 })
+
+describe('grass steering', () => {
+  it('steers the same way on grass as on the road', () => {
+    const sim = new Sim(new Track(OVAL), CARS[0], 0)
+    const snap = new Snapshot()
+    const input = makeInputFrame()
+    input.throttle = 1
+    // Get rolling, swing right off the road, straighten to get clear of it, then steer right again on the grass.
+    for (let i = 0; i < 120 * 4; i++) {
+      input.steer = i >= 240 && i < 330 ? 1 : 0
+      sim.tick(SIM_DT, input, snap)
+    }
+    expect(sim.car.mode).toBe('ground')
+    input.steer = 1
+    const f0 = sim.car.forward.clone()
+    for (let i = 0; i < 60; i++) sim.tick(SIM_DT, input, snap)
+    const f1 = sim.car.forward
+    // Right = toward -z (right = up × forward). For f0 ≈ +x that means cross(f0, f1).y > 0.
+    const crossY = f0.z * f1.x - f0.x * f1.z
+    expect(crossY).toBeGreaterThan(0)
+  })
+})
+
+describe('heading convention', () => {
+  it('steering right on the road points the nose right (toward -z when heading +x)', () => {
+    const sim = new Sim(new Track(OVAL), CARS[0], 0)
+    const snap = new Snapshot()
+    const input = makeInputFrame()
+    input.throttle = 1
+    for (let i = 0; i < 120; i++) sim.tick(SIM_DT, input, snap)
+    input.steer = 1
+    for (let i = 0; i < 30; i++) sim.tick(SIM_DT, input, snap)
+    expect(sim.car.lateral).toBeGreaterThan(0) // moved right
+    expect(sim.car.forward.z).toBeLessThan(0) // nose right
+  })
+})

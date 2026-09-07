@@ -27,8 +27,14 @@ if (process.env.PROBE_JS_END) console.log('end:', JSON.stringify(await page.eval
 const state = await page.evaluate(() => {
   const a = window.__apex
   if (!a) return 'no apex'
-  const s = a.snap
-  return { s: s.vehicle.s, theta: s.vehicle.theta, speed: s.vehicle.speed, phase: s.phase, shield: s.hud.shield, traffic: s.trafficCount, fps: a.loop.stats.fps, draws: a.view.stats.drawCalls, tris: a.view.stats.triangles, chunks: a.view.stats.chunks, state: a.game.state }
+  try {
+    const s = a.snap
+    // Conduit and drivin expose different snapshots; summarise whichever is present.
+    const core = s.vehicle ? { s: s.vehicle.s, theta: s.vehicle.theta, speed: s.vehicle.speed, phase: s.phase, shield: s.hud.shield, traffic: s.trafficCount } : { mode: s.car?.mode, speed: s.car?.speed, s: s.car?.s, lane: s.car?.laneId, phase: s.phase }
+    return { ...core, fps: a.loop.stats.fps, draws: a.view.stats.drawCalls, tris: a.view.stats.triangles, state: a.game.state }
+  } catch (e) {
+    return 'summary failed: ' + e
+  }
 })
 console.log(JSON.stringify(state))
 console.log(logs.join('\n').slice(0, 4000))

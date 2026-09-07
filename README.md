@@ -8,7 +8,7 @@ apps never import each other, and `packages/engine` never imports an app.
 | Path | What | Dev port |
 |---|---|---|
 | [`apps/conduit`](apps/conduit) | **APEX CONDUIT** — tunnel racer-shooter (wall-riding craft, roof laser, shockwave, checkpoints, VR, phone tilt) | 5180 |
-| [`apps/drivin`](apps/drivin) | **working title "HARD LINE"** — stunt-track driving game with a tile-grid track editor (loops, corkscrews, banked turns, splits, tunnels) | 5181 |
+| [`apps/drivin`](apps/drivin) | **working title "HARD LINE"** — stunt-track driving game with a tile-grid track editor (loops, corkscrews, banked turns, splits/joins, jumps, tunnels), crash replays | 5181 |
 | [`packages/engine`](packages/engine) | `@apex/engine` — fixed-step loop, modern/retro styles, input sources, menus, settings store, math, sky, particles, dev bridge | — |
 
 ## Run

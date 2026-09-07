@@ -81,7 +81,7 @@ void main() {
 
   // Posterise with optional ordered dithering.
   float levels = max(uLevels, 2.0);
-  float d = uDither > 0.0 ? (bayer(px) - 0.5) / levels : 0.0;
+  float d = uDither > 0.0 ? (bayer(px) - 0.5) * 0.55 / levels : 0.0;
   col = floor((col + d) * levels + 0.5) / levels;
 
   if (uScan > 0.0) {

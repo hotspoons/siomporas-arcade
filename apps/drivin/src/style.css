@@ -1,0 +1,78 @@
+:root {
+  --accent: #ff7a1a;
+  --accent2: #4de1ff;
+  --amber: #ffc857;
+  --danger: #ff3b5c;
+  --bg: #0b1020;
+  --hud-scale: 1;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); overflow: hidden; }
+body { font-family: "Rajdhani", "Bahnschrift", "DIN Alternate", ui-sans-serif, system-ui, sans-serif; color: #e8f6ff; user-select: none; -webkit-user-select: none; }
+#app { position: fixed; inset: 0; }
+canvas.game { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+.hidden { display: none !important; }
+
+/* ---- HUD ---- */
+.hud { position: absolute; inset: 0; pointer-events: none; font-size: calc(16px * var(--hud-scale)); }
+.hud .label { display: block; font-size: 0.7em; letter-spacing: 0.25em; opacity: 0.7; }
+.hud .laps { position: absolute; top: 2.5vh; left: 4vw; }
+.hud .laps .value { font-size: 1.8em; font-weight: 700; }
+.hud .timer { position: absolute; top: 2.5vh; left: 50%; transform: translateX(-50%); font-size: 3em; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: 0.05em; text-shadow: 0 0 16px rgba(255,122,26,0.5); }
+.hud .times { position: absolute; top: 2.5vh; right: 4vw; text-align: right; font-variant-numeric: tabular-nums; }
+.hud .times div { margin-bottom: 4px; font-size: 1.1em; font-weight: 700; }
+.hud .speedo { position: absolute; bottom: 4vh; right: 4vw; text-align: right; }
+.hud .speedo .value { font-size: 3.4em; font-weight: 800; font-variant-numeric: tabular-nums; }
+.hud .speedo .unit { margin-left: 0.3em; opacity: 0.6; letter-spacing: 0.2em; }
+.hud .speedo .gear { display: block; font-size: 1.6em; font-weight: 700; color: var(--accent); }
+.hud .rpm { width: 22vw; max-width: 320px; height: 0.5em; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.25); margin-bottom: 6px; overflow: hidden; }
+.hud .rpm .fill { height: 100%; background: linear-gradient(90deg, var(--accent2), var(--accent) 70%, var(--danger)); transition: width 0.05s linear; }
+.hud .minimap { position: absolute; bottom: 4vh; left: 4vw; width: 180px; height: 180px; opacity: 0.85; }
+.hud .message { position: absolute; top: 26%; left: 0; right: 0; text-align: center; font-size: 2.6em; font-weight: 800; letter-spacing: 0.2em; opacity: 0; transform: translateY(10px); transition: opacity 0.15s, transform 0.15s; text-shadow: 0 0 20px rgba(255,122,26,0.6); }
+.hud .message.show { opacity: 1; transform: none; }
+.hud .message.bad { color: var(--danger); }
+.hud .message.good { color: var(--amber); }
+
+/* ---- menus (shared look) ---- */
+.menu { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); min-width: 380px; max-width: 92vw; max-height: 92vh; overflow: auto; padding: 28px 36px; background: rgba(11,16,32,0.85); border: 1px solid rgba(255,122,26,0.35); border-radius: 6px; backdrop-filter: blur(6px); z-index: 5; }
+.menu.wide { min-width: 640px; }
+.menu.title-screen { top: auto; bottom: 5vh; transform: translateX(-50%); }
+.menu h1 { margin: 0 0 4px; font-size: 2.2em; letter-spacing: 0.25em; font-weight: 800; color: var(--accent); text-shadow: 0 0 18px rgba(255,122,26,0.5); }
+.menu .subtitle { margin: 0 0 18px; opacity: 0.7; letter-spacing: 0.1em; }
+.menu .items { display: flex; flex-direction: column; gap: 4px; }
+.menu .item { display: flex; justify-content: space-between; gap: 24px; padding: 8px 12px; border-left: 3px solid transparent; cursor: pointer; font-size: 1.15em; letter-spacing: 0.08em; }
+.menu .item.info { opacity: 0.75; cursor: default; font-size: 1em; }
+.menu .item.selected { border-left-color: var(--accent); background: rgba(255,122,26,0.1); }
+.menu .item.danger.selected { border-left-color: var(--danger); background: rgba(255,59,92,0.1); }
+.menu .item .value { color: var(--amber); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.menu .item .hint { display: block; font-size: 0.7em; opacity: 0.55; }
+.menu .footer { margin: 18px 0 0; opacity: 0.55; font-size: 0.9em; }
+.perf { position: absolute; top: 8px; left: 8px; pointer-events: none; z-index: 6; }
+.title-card { position: absolute; top: 10vh; left: 0; right: 0; text-align: center; pointer-events: none; }
+.title-card h1 { margin: 0; font-size: 6vmin; letter-spacing: 0.5em; font-weight: 900; color: #fff; text-shadow: 0 0 30px var(--accent), 0 0 60px var(--accent2); }
+.title-card p { margin: 6px 0 0; letter-spacing: 0.3em; opacity: 0.7; }
+.loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: var(--bg); font-size: 1.4em; letter-spacing: 0.4em; color: var(--accent); z-index: 10; }
+.fatal { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; background: rgba(11,16,32,0.95); z-index: 20; text-align: center; padding: 24px; }
+.fatal h2 { color: var(--danger); letter-spacing: 0.3em; margin: 0; }
+.fatal pre { max-width: 90vw; overflow: auto; opacity: 0.7; font-size: 12px; text-align: left; }
+.fatal button { font: inherit; color: var(--bg); background: var(--accent); border: 0; padding: 10px 24px; letter-spacing: 0.2em; cursor: pointer; }
+
+/* ---- editor ---- */
+.editor { position: absolute; inset: 0; display: flex; flex-direction: column; background: #0d1326; z-index: 4; font-size: 14px; }
+.editor .toolbar { display: flex; align-items: center; gap: 6px; padding: 8px 12px; background: rgba(255,255,255,0.04); border-bottom: 1px solid rgba(255,255,255,0.08); flex-wrap: wrap; }
+.editor .toolbar .sep { width: 1px; height: 22px; background: rgba(255,255,255,0.15); margin: 0 6px; }
+.editor button, .editor select, .editor input.name, .editor label.import { font: inherit; color: #e8f6ff; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15); padding: 6px 10px; border-radius: 3px; cursor: pointer; letter-spacing: 0.05em; }
+.editor button:hover, .editor label.import:hover { background: rgba(255,255,255,0.16); }
+.editor button.primary { background: var(--accent); color: #111; font-weight: 700; }
+.editor input.name { width: 180px; cursor: text; }
+.editor .body { flex: 1; display: flex; min-height: 0; }
+.editor .palette { width: 230px; overflow: auto; padding: 8px; border-right: 1px solid rgba(255,255,255,0.08); }
+.editor .palette h3 { margin: 10px 4px 4px; font-size: 11px; letter-spacing: 0.3em; opacity: 0.5; }
+.editor .palette .piece { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; margin-bottom: 4px; padding: 4px 8px; background: rgba(255,255,255,0.04); border-color: transparent; font-size: 12px; white-space: nowrap; overflow: hidden; }
+.editor .palette .piece.selected { border-color: var(--accent); background: rgba(255,122,26,0.15); }
+.editor .palette .piece canvas { width: 36px; height: 36px; flex: none; }
+.editor canvas.grid { flex: 1; width: 100%; height: 100%; display: block; cursor: crosshair; }
+.editor .status { padding: 6px 12px; font-family: ui-monospace, monospace; font-size: 12px; opacity: 0.85; border-top: 1px solid rgba(255,255,255,0.08); white-space: pre; }
+.editor .status.flash { color: var(--amber); }
+@media (max-height: 500px) { .menu { padding: 14px 22px; min-width: 300px; font-size: 13px; } .menu h1 { font-size: 1.5em; } }

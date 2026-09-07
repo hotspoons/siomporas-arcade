@@ -36,29 +36,37 @@ try {
   // Launch, then hold thrust and weave, so the run exercises collision,
   // pickups and the chunk recycler rather than just the first frame.
   await page.keyboard.press('Enter')
+  // Conduit: fire (Space) and shockwave (E) while weaving. Drivin: just drive — Space is the handbrake there.
+  const isDrivin = /hard line/i.test(await page.title())
   const deadline = Date.now() + seconds * 1000
   await page.keyboard.down('KeyW')
-  await page.keyboard.down('Space')
+  if (!isDrivin) await page.keyboard.down('Space')
   while (Date.now() < deadline) {
     await page.keyboard.down('KeyD')
-    await page.waitForTimeout(400)
+    await page.waitForTimeout(isDrivin ? 150 : 400)
     await page.keyboard.up('KeyD')
-    await page.keyboard.press('KeyE')
+    if (!isDrivin) await page.keyboard.press('KeyE')
     await page.keyboard.down('KeyA')
-    await page.waitForTimeout(400)
+    await page.waitForTimeout(isDrivin ? 150 : 400)
     await page.keyboard.up('KeyA')
+    await page.waitForTimeout(isDrivin ? 500 : 0)
   }
-  await page.keyboard.up('Space')
+  if (!isDrivin) await page.keyboard.up('Space')
   await page.keyboard.up('KeyW')
   await page.screenshot({ path: `${outDir}/run.png` })
 
   // The run must have actually moved: a frozen frame is the failure this
   // catches that a screenshot alone would not.
-  const progress = await page.evaluate(() => parseFloat(document.querySelector('.hud [data-progress]')?.style.width ?? '0'))
-  if (!Number.isFinite(progress) || progress < 1) {
-    errors.push(`craft barely moved: ${progress}% of the course after ${seconds}s`)
+  // Conduit shows course progress; drivin shows a speedometer. Either proves the sim moved.
+  const moved = await page.evaluate(() => {
+    const progress = parseFloat(document.querySelector('.hud [data-progress]')?.style.width ?? '0')
+    const speed = parseFloat(document.querySelector('.hud [data-speed]')?.textContent ?? '0')
+    return { progress, speed }
+  })
+  if (!(moved.progress > 1 || moved.speed > 5)) {
+    errors.push(`nothing moved after ${seconds}s: ${JSON.stringify(moved)}`)
   }
-  console.log(`smoke: ${progress.toFixed(1)}% of the course in ${seconds}s → ${outDir}/run.png`)
+  console.log(`smoke: ${JSON.stringify(moved)} after ${seconds}s → ${outDir}/run.png`)
 } finally {
   await browser.close()
 }

@@ -25,3 +25,4 @@ _*.mjs
 shots/
 shots/
 .tunnel-url
+apps/*/test/_*.test.ts

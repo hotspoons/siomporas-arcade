@@ -70,6 +70,14 @@ export class Sky {
     ;(u.uBottom.value as Color).copy(bg)
   }
 
+  /** Direct colour control for games that want a specific dusk/night. */
+  setColors(top: number, horizon: number, bottom: number): void {
+    const u = this.domeMat.uniforms
+    ;(u.uTop.value as Color).set(top)
+    ;(u.uHorizon.value as Color).set(horizon)
+    ;(u.uBottom.value as Color).set(bottom)
+  }
+
   update(cameraWorldPos: Vector3): void {
     this.root.position.copy(cameraWorldPos)
   }

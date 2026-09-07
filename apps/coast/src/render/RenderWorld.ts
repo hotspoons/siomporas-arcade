@@ -15,7 +15,10 @@ import { BAND_SEGMENTS, DRAW_SEGMENTS, FORK_SPREAD, ROAD_HALF_WIDTH, SEG_LENGTH 
 import { Background } from './Background'
 import { Cockpit } from './Cockpit'
 import { Projection } from './Projection'
-import { CURVE_UNIT, FOG_MODERN, FOG_RETRO, LANE_WIDTH, LOGICAL_HEIGHT, MAX_SPRITES, PALETTES, RUMBLE_WIDTH, VIEWS, type Palette } from './RenderTuning'
+import { CURVE_UNIT, FOG_MODERN, FOG_RETRO, HEADLIGHT_REACH, LANE_WIDTH, LOGICAL_HEIGHT, MAX_SPRITES, NIGHT_AMBIENT, PALETTES, RAIL_HEIGHT, RUMBLE_WIDTH, SHOULDER_WIDTH, VIEWS, type Palette } from './RenderTuning'
+import { LIVERIES } from './procgen'
+import { Rain } from './Rain'
+import type { Theme } from '../sim/Road'
 import { RoadMesh } from './RoadMesh'
 import { SpriteAtlas } from './SpriteAtlas'
 import { SpriteBatch } from './SpriteBatch'
@@ -34,6 +37,9 @@ export class RenderWorld {
   readonly sprites = new SpriteBatch(MAX_SPRITES)
   readonly background = new Background()
   readonly cockpit = new Cockpit()
+  readonly rain = new Rain()
+  private theme: Theme | null = null
+  private heroKind = 'hero_gulf'
   readonly stats: RenderStats = { drawCalls: 0, triangles: 0, chunks: 0 }
   style: Style | null = null
   view: ViewMode = 'chase'
@@ -63,13 +69,15 @@ export class RenderWorld {
     this.renderer = new WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance', stencil: false, alpha: false })
     this.renderer.info.autoReset = false
     this.renderer.setClearColor(new Color(0x000000), 1)
-    this.scene.add(this.background.sky, this.background.far, this.background.near, this.road.mesh, this.sprites.mesh, this.cockpit.mesh)
+    this.scene.add(this.background.sky, this.background.clouds, this.background.far, this.background.near, this.road.mesh, this.sprites.mesh, this.rain.mesh, this.cockpit.mesh)
     this.background.sky.renderOrder = 0
-    this.background.far.renderOrder = 1
-    this.background.near.renderOrder = 2
-    this.road.mesh.renderOrder = 3
-    this.sprites.mesh.renderOrder = 4
-    this.cockpit.mesh.renderOrder = 5
+    this.background.clouds.renderOrder = 1
+    this.background.far.renderOrder = 2
+    this.background.near.renderOrder = 3
+    this.road.mesh.renderOrder = 4
+    this.sprites.mesh.renderOrder = 5
+    this.rain.mesh.renderOrder = 6
+    this.cockpit.mesh.renderOrder = 7
   }
 
   async bake(onProgress?: (d: number, t: number) => void): Promise<void> {
@@ -83,12 +91,22 @@ export class RenderWorld {
   setStage(stage: Stage): void {
     this.stage = stage
     const theme = THEMES[stage.desc.theme]
+    this.theme = theme
     this.palette = PALETTES[theme.palette] ?? PALETTES.coast
     this.background.setPalette(this.palette, theme.backdrop, this.retro)
     this.road.setFog(this.palette.fog)
     this.sprites.setFog(this.palette.fog)
     this.renderer.setClearColor(new Color(this.palette.skyBottom), 1)
     this.themeId = theme.id
+    this.cockpit.rain = Boolean(theme.rain)
+    this.cockpit.night = Boolean(theme.night)
+    this.rain.enabled = Boolean(theme.rain)
+  }
+
+  /** Hero car: a prototype livery id or 'formula'. */
+  setCar(id: string): void {
+    this.heroKind = id === 'formula' ? 'formula' : `hero_${id in LIVERIES ? id : 'gulf'}`
+    this.cockpit.livery = LIVERIES[id] ?? LIVERIES.gulf
   }
 
   setStyle(style: Style): void {
@@ -116,6 +134,7 @@ export class RenderWorld {
     this.camera.bottom = 0
     this.camera.updateProjectionMatrix()
     this.cockpit.layout(W, H)
+    this.rain.layout(W, H)
     this.style?.resize(width, height, pixelRatio)
   }
 
@@ -179,9 +198,13 @@ export class RenderWorld {
       dx += seg.curve * CURVE_UNIT
     }
 
-    // Pass 2, far → near: road bands.
+    // Pass 2, far → near: grass, shoulders, rumble, tarmac, lanes, guardrails.
+    // At night everything outside the headlight cone falls to NIGHT_AMBIENT.
     this.road.begin()
     const pal = this.palette
+    const night = Boolean(this.theme?.night)
+    const lanes = this.theme?.lanes ?? 3
+    const rails = Boolean(this.theme?.rails)
     for (let n = DRAW_SEGMENTS - 1; n >= 0; n--) {
       if (!this.segVisible[n]) continue
       const seg = segs[Math.min(base + n, last)]
@@ -193,6 +216,9 @@ export class RenderWorld {
       const y2 = this.rowY[n + 1]
       const s2 = this.rowScale[n + 1]
       const fog = this.rowFog[n]
+      const zRel = (base + n) * SEG_LENGTH - camZ
+      const dim = night ? NIGHT_AMBIENT + (1 - NIGHT_AMBIENT) * Math.exp(-zRel / HEADLIGHT_REACH) : 1
+      this.road.setDim(dim)
       this.road.quad(W / 2, y1, W, W / 2, y2, W, band ? pal.grassA : pal.grassB, fog)
       const roads = seg.fork >= 0 ? 2 : 1
       const spread = seg.fork >= 0 ? seg.fork * FORK_SPREAD * ROAD_HALF_WIDTH : 0
@@ -202,15 +228,29 @@ export class RenderWorld {
         const cx2 = x2 + side * spread * s2
         const w1 = ROAD_HALF_WIDTH * s1
         const w2 = ROAD_HALF_WIDTH * s2
+        this.road.quad(cx1, y1, w1 + (RUMBLE_WIDTH + SHOULDER_WIDTH) * s1, cx2, y2, w2 + (RUMBLE_WIDTH + SHOULDER_WIDTH) * s2, pal.shoulder, fog)
         this.road.quad(cx1, y1, w1 + RUMBLE_WIDTH * s1, cx2, y2, w2 + RUMBLE_WIDTH * s2, band ? pal.rumbleA : pal.rumbleB, fog)
         this.road.quad(cx1, y1, w1, cx2, y2, w2, band ? pal.roadA : pal.roadB, fog)
+        // Solid edge lines, dashed lane dividers.
+        for (const e of [-1, 1]) this.road.quad(cx1 + e * (w1 - LANE_WIDTH * s1 * 1.5), y1, LANE_WIDTH * s1 * 0.8, cx2 + e * (w2 - LANE_WIDTH * s2 * 1.5), y2, LANE_WIDTH * s2 * 0.8, pal.lane, fog)
         if (band) {
-          for (const lane of [-1 / 3, 1 / 3]) {
-            this.road.quad(cx1 + lane * w1 * 2 * 0.5, y1, LANE_WIDTH * s1, cx2 + lane * w2 * 2 * 0.5, y2, LANE_WIDTH * s2, pal.lane, fog)
+          for (let l = 1; l < lanes; l++) {
+            const f = -1 + (2 * l) / lanes
+            this.road.quad(cx1 + f * w1, y1, LANE_WIDTH * s1, cx2 + f * w2, y2, LANE_WIDTH * s2, pal.lane, fog)
+          }
+        }
+        if (rails && seg.fork < 0) {
+          // Guardrail: a thin bright band standing RAIL_HEIGHT above the shoulder edge, with a dark post every other segment.
+          for (const e of [-1, 1]) {
+            const rx1 = cx1 + e * (w1 + (RUMBLE_WIDTH + 0.6) * s1)
+            const rx2 = cx2 + e * (w2 + (RUMBLE_WIDTH + 0.6) * s2)
+            this.road.quad(rx1, y1 + RAIL_HEIGHT * s1 * 0.75, 0.12 * s1, rx2, y2 + RAIL_HEIGHT * s2 * 0.75, 0.12 * s2, pal.rail, fog)
+            if (band) this.road.quad(rx1, y1, 0.08 * s1, rx1, y1 + RAIL_HEIGHT * s1, 0.08 * s1, 0x444444, fog)
           }
         }
       }
     }
+    this.road.setDim(1)
     this.road.end()
 
     // Pass 3, far → near: scenery and traffic sprites.
@@ -237,11 +277,11 @@ export class RenderWorld {
           const kind = TRAFFIC_KINDS[curr.trafficKind[ci]]
           const rel = curr.trafficX[ci] - x
           const frame = this.atlas.frame(kind, rel > 0.3 ? -20 : rel < -0.3 ? 20 : 0)
-          if (frame) this.sprites.add(sx + curr.trafficX[ci] * ROAD_HALF_WIDTH * sc, sy, frame.heightM * sc, frame, this.rowFog[n], 1, clip)
+          if (frame) this.sprites.add(sx + curr.trafficX[ci] * ROAD_HALF_WIDTH * sc, sy, frame.heightM * sc, frame, this.rowFog[n], this.brightAt((base + n) * SEG_LENGTH - camZ), clip)
         }
       }
       if (seg.runway) continue
-      this.drawSegmentSprites(seg, n, clip)
+      this.drawSegmentSprites(seg, n, clip, this.brightAt((base + n) * SEG_LENGTH - camZ))
     }
     // Player car.
     if (view.drawPlayer) {
@@ -250,7 +290,7 @@ export class RenderWorld {
       let steerFrame = Math.round(curr.steer * 3)
       if (curr.crashT > 0) steerFrame = Math.round(Math.sin(curr.crashT * 40) * 3)
       const yaw = steerFrame === 0 ? 0 : steerFrame > 0 ? [12, 24, 38][steerFrame - 1] : -[12, 24, 38][-steerFrame - 1]
-      const frame = this.atlas.frame('player', yaw)
+      const frame = this.atlas.frame(this.heroKind, yaw)
       if (frame) this.sprites.add(W / 2 + curr.steer * 2, py + (curr.crashT > 0 ? Math.abs(Math.sin(curr.crashT * 20)) * 12 : 0), frame.heightM * scale, frame, 0, 1, -1e9)
     }
     this.sprites.end()
@@ -261,6 +301,8 @@ export class RenderWorld {
     this.background.update(curr.curveAccum, groundY)
     this.cockpit.mesh.visible = this.view === 'cockpit'
     if (this.cockpit.mesh.visible) this.cockpit.update(curr, dt)
+    this.rain.update(dt, speed, curr.curveAccum)
+    this.background.updateClouds(dt, speed)
 
     this.hit = Math.max(0, this.hit - dt * 3)
     const info = this.info
@@ -272,13 +314,20 @@ export class RenderWorld {
     this.stats.chunks = this.atlas.kinds.size
   }
 
-  private drawSegmentSprites(seg: Segment, n: number, clip: number): void {
+  private brightAt(zRel: number): number {
+    if (!this.theme?.night) return 1
+    return NIGHT_AMBIENT + (1 - NIGHT_AMBIENT) * Math.exp(-Math.max(0, zRel) / HEADLIGHT_REACH)
+  }
+
+  private drawSegmentSprites(seg: Segment, n: number, clip: number, bright: number): void {
     const sc = this.rowScale[n]
     for (const sp of seg.sprites) {
       const frame = this.atlas.frame(sp.kind)
       if (!frame) continue
       const sx = this.rowX[n] + sp.offset * ROAD_HALF_WIDTH * sc
-      this.sprites.add(sx, this.rowY[n], frame.heightM * sp.scale * sc, frame, this.rowFog[n], 1, clip)
+      // Lit signage and towers glow through the night.
+      const glow = sp.kind.startsWith('sign') || sp.kind.startsWith('tower') || sp.kind === 'diner' || sp.kind === 'motel' || sp.kind === 'gas' || sp.kind === 'arch' ? Math.max(bright, 0.85) : bright
+      this.sprites.add(sx, this.rowY[n], frame.heightM * sp.scale * sc, frame, this.rowFog[n], glow, clip)
     }
   }
 

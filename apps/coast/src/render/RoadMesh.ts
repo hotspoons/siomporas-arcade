@@ -16,6 +16,7 @@ export class RoadMesh {
   private quads = 0
   private readonly c = new Color()
   private readonly fog = new Color()
+  private dim = 1
 
   constructor() {
     this.pos = new Float32BufferAttribute(new Float32Array(MAX_QUADS * 4 * 3), 3)
@@ -48,6 +49,11 @@ export class RoadMesh {
     this.fog.set(color)
   }
 
+  /** Brightness multiplier for subsequent quads (night headlights). */
+  setDim(d: number): void {
+    this.dim = d
+  }
+
   begin(): void {
     this.quads = 0
   }
@@ -56,6 +62,7 @@ export class RoadMesh {
   quad(x1: number, y1: number, w1: number, x2: number, y2: number, w2: number, color: number, fogT: number): void {
     if (this.quads >= MAX_QUADS) return
     this.c.set(color).lerp(this.fog, fogT)
+    if (this.dim !== 1) this.c.multiplyScalar(this.dim)
     const v = this.quads * 4
     this.pos.setXYZ(v, x1 - w1, y1, 0)
     this.pos.setXYZ(v + 1, x1 + w1, y1, 0)

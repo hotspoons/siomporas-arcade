@@ -72,6 +72,7 @@ export class Game implements LoopClient {
     this.loop = new GameLoop(this, this.view.renderer, { simHz: SIM_HZ, maxSubsteps: MAX_SUBSTEPS })
     this.applyStyle()
     this.applyView()
+    this.applyCar()
     this.applyAccessibility()
     this.settings.onChange(() => {
       this.applyAccessibility()
@@ -200,6 +201,10 @@ export class Game implements LoopClient {
   }
   applyView(): void {
     this.view.view = this.settings.data.view
+    this.hud.setViewHint(this.settings.data.view)
+  }
+  applyCar(): void {
+    this.view.setCar(this.settings.data.car)
   }
   applyStation(): void {
     this.audio.setStation(this.settings.data.station)

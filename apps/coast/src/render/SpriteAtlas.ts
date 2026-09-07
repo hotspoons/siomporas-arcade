@@ -89,12 +89,15 @@ export class SpriteAtlas {
     let done = 0
     for (const def of MODELS) {
       let model: Object3D | null = null
-      try {
-        const gltf = await loader.loadAsync(def.file)
-        model = gltf.scene
-      } catch (err) {
-        console.warn(`sprite bake: ${def.file} failed, using placeholder`, err)
-        model = placeholder(def)
+      if (def.build) model = def.build()
+      else {
+        try {
+          const gltf = await loader.loadAsync(def.file)
+          model = gltf.scene
+        } catch (err) {
+          console.warn(`sprite bake: ${def.file} failed, using placeholder`, err)
+          model = placeholder(def)
+        }
       }
       // Flat-shaded, no textures beyond the kit's colour map: keep it crisp.
       model.traverse((o) => {

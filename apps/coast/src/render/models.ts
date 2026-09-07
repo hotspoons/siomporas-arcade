@@ -1,9 +1,14 @@
 // Sprite manifest: which CC0 model renders which sprite kind, how tall it is
 // in metres, and from which yaw angles (degrees; 0 = seen from behind).
 
+import type { Object3D } from 'three'
+import { buildArch, buildDiner, buildGasStation, buildMotel, buildPrototype, buildSign, buildTower, LIVERIES } from './procgen'
+
 export interface ModelDef {
   kind: string
+  /** GLB path, or empty when `build` supplies the model. */
   file: string
+  build?: () => Object3D
   heightM: number
   /** Yaw angles to bake; sprites pick the nearest. */
   yaws: number[]
@@ -45,7 +50,19 @@ export const MODELS: ModelDef[] = [
   P('tent', 'tent', 4, 192),
   P('pitsOffice', 'pitsOffice', 6, 256),
   P('gantry', 'overheadLights', 8.5, 256),
-  { kind: 'player', file: 'assets/cars/race.glb', heightM: 1.3, yaws: [0, 12, 24, 38, -12, -24, -38], cell: 160 },
+  // Hero prototypes, one per livery; the chase view picks the selected one.
+  ...Object.entries(LIVERIES).map(([id, l]): ModelDef => ({ kind: `hero_${id}`, file: '', build: () => buildPrototype(l), heightM: 1.25, yaws: [0, 12, 24, 38, -12, -24, -38], cell: 192 })),
+  { kind: 'formula', file: 'assets/cars/race.glb', heightM: 1.1, yaws: [0, 12, 24, 38, -12, -24, -38], cell: 160 },
+  // Roadside architecture and signage.
+  { kind: 'diner', file: '', build: buildDiner, heightM: 6.4, yaws: [0], cell: 256 },
+  { kind: 'motel', file: '', build: buildMotel, heightM: 7.6, yaws: [0], cell: 256 },
+  { kind: 'gas', file: '', build: buildGasStation, heightM: 4.6, yaws: [0], cell: 256 },
+  { kind: 'tower', file: '', build: () => buildTower(34, 0x3a4a6a), heightM: 37, yaws: [0], cell: 256 },
+  { kind: 'tower2', file: '', build: () => buildTower(22, 0x5a4a5a), heightM: 25, yaws: [0], cell: 256 },
+  { kind: 'signCoast', file: '', build: () => buildSign('COAST HWY 1', '#ffffff', '#1a5a2a'), heightM: 7.3, yaws: [0], cell: 192 },
+  { kind: 'signDrive', file: '', build: () => buildSign('DRIVE SAFE', '#ffe28a', '#7a1a1a'), heightM: 7.3, yaws: [0], cell: 192 },
+  { kind: 'signBay', file: '', build: () => buildSign('NEON BAY 12', '#ff5fd2', '#101030'), heightM: 7.3, yaws: [0], cell: 192 },
+  { kind: 'arch', file: '', build: buildArch, heightM: 10.2, yaws: [0], cell: 256 },
   C('sedan', 'sedan'),
   C('sedanSports', 'sedan-sports'),
   C('suv', 'suv'),

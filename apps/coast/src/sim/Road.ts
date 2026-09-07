@@ -45,6 +45,12 @@ export interface Theme {
   landmarkEvery: number
   /** Far background layer id. */
   backdrop: string
+  /** Drivable lanes drawn (2–4). */
+  lanes: number
+  /** Continuous guardrail along the road edges. */
+  rails: boolean
+  night?: boolean
+  rain?: boolean
 }
 
 export type Section =

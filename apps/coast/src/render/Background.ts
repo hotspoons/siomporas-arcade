@@ -13,6 +13,10 @@ export class Background {
   readonly sky: Mesh
   readonly far: Mesh
   readonly near: Mesh
+  readonly clouds: Mesh
+  private readonly cloudMat: ShaderMaterial
+  private cloudTex: CanvasTexture
+  private cloudScroll = 0
   private readonly skyMat: ShaderMaterial
   private readonly farMat: ShaderMaterial
   private readonly nearMat: ShaderMaterial
@@ -29,7 +33,8 @@ export class Background {
         void main(){
           vec3 c = mix(uBottom, uTop, smoothstep(0.0, 1.0, vUv.y));
           float d = distance(vUv * vec2(1.6, 1.0), uSunPos * vec2(1.6, 1.0));
-          c += uSun * (smoothstep(0.055, 0.045, d) * 0.9 + 0.25 * smoothstep(0.25, 0.0, d)) * (1.0 - uNight * 0.6);
+          float sunR = mix(0.05, 0.028, uNight);
+          c += uSun * (smoothstep(sunR, sunR - 0.008, d) * mix(0.9, 0.55, uNight) + mix(0.25, 0.08, uNight) * smoothstep(0.25, 0.0, d));
           if (uNight > 0.5) { float s = step(0.997, hash(floor(vUv * vec2(320.0, 224.0)))); c += vec3(s) * 0.8; }
           gl_FragColor = vec4(c, 1.0);
         }`,
@@ -52,6 +57,10 @@ export class Background {
       })
     this.farMat = layerMat(this.farTex)
     this.nearMat = layerMat(this.nearTex)
+    this.cloudTex = new CanvasTexture(document.createElement('canvas'))
+    this.cloudMat = layerMat(this.cloudTex)
+    this.clouds = new Mesh(new PlaneGeometry(1, 1), this.cloudMat)
+    this.clouds.frustumCulled = false
     this.far = new Mesh(new PlaneGeometry(1, 1), this.farMat)
     this.near = new Mesh(new PlaneGeometry(1, 1), this.nearMat)
     this.far.frustumCulled = false
@@ -67,8 +76,9 @@ export class Background {
       this.backdrop = backdrop
       drawLayer(this.farTex, backdrop, 'far', p)
       drawLayer(this.nearTex, backdrop, 'near', p)
+      drawClouds(this.cloudTex, p, backdrop === 'city')
     }
-    for (const t of [this.farTex, this.nearTex]) {
+    for (const t of [this.farTex, this.nearTex, this.cloudTex]) {
       t.minFilter = t.magFilter = retro ? NearestFilter : LinearFilter
       t.wrapS = RepeatWrapping
       t.needsUpdate = true
@@ -79,12 +89,19 @@ export class Background {
   layout(width: number, height: number, horizonY: number): void {
     this.sky.scale.set(width, height, 1)
     this.sky.position.set(width / 2, height / 2, 0)
+    this.clouds.scale.set(width, height * 0.26, 1)
+    this.clouds.position.set(width / 2, horizonY + height * 0.26 * 0.5 + 18, 0)
     const farH = height * 0.36
     this.far.scale.set(width, farH, 1)
     this.far.position.set(width / 2, horizonY + farH / 2 - 2, 0)
     const nearH = height * 0.22
     this.near.scale.set(width, nearH, 1)
     this.near.position.set(width / 2, horizonY + nearH / 2 - 4, 0)
+  }
+
+  updateClouds(dt: number, speed: number): void {
+    this.cloudScroll += dt * (0.004 + speed * 0.00002)
+    this.cloudMat.uniforms.uScroll.value = this.cloudScroll + this.farMat.uniforms.uScroll.value * 0.5
   }
 
   /** Scroll by accumulated curve; nudge with hill height. */
@@ -158,6 +175,34 @@ function drawLayer(tex: CanvasTexture, backdrop: string, layer: 'far' | 'near', 
     g.fillRect(0, LAYER_H - 24, LAYER_W, 24)
     g.fillStyle = 'rgba(255,255,255,0.35)'
     for (let i = 0; i < 120; i++) g.fillRect(rnd(i) * LAYER_W, LAYER_H - 22 + rnd(i + 1) * 20, 6 + rnd(i + 2) * 14, 1)
+  }
+  tex.needsUpdate = true
+}
+
+/** Soft cloud puffs on a transparent strip; the night city gets a thin haze instead. */
+function drawClouds(tex: CanvasTexture, p: Palette, night: boolean): void {
+  const c = tex.image as HTMLCanvasElement
+  c.width = LAYER_W
+  c.height = LAYER_H
+  const g = c.getContext('2d')!
+  g.clearRect(0, 0, LAYER_W, LAYER_H)
+  const col = new Color(p.clouds)
+  const rnd = (i: number) => {
+    const x = Math.sin(i * 12.9898 + 4.1) * 43758.5453
+    return x - Math.floor(x)
+  }
+  const puffs = night ? 5 : 16
+  for (let i = 0; i < puffs; i++) {
+    const x = rnd(i) * LAYER_W
+    const y = 70 + rnd(i + 50) * 70
+    const w = 30 + rnd(i + 100) * 70
+    const alpha = night ? 0.08 : 0.28 + rnd(i + 150) * 0.22
+    g.fillStyle = `rgba(${Math.round(col.r * 255)},${Math.round(col.g * 255)},${Math.round(col.b * 255)},${alpha})`
+    for (let k = 0; k < 5; k++) {
+      g.beginPath()
+      g.ellipse(x + (k - 2) * w * 0.22, y + (k % 2) * 4, w * 0.26, 8 + rnd(i + k) * 6, 0, 0, Math.PI * 2)
+      g.fill()
+    }
   }
   tex.needsUpdate = true
 }

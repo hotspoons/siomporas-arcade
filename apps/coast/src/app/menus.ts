@@ -1,6 +1,7 @@
 import type { MenuItem, MenuScreen } from '@apex/engine/app/Menus'
 import { keyLabel, padBindingLabel } from '@apex/engine/input/bindings'
 import { STATIONS } from '../audio/AudioWorld'
+import { LIVERIES } from '../render/procgen'
 import { ACTIONS, ACTION_LABELS, type Action } from '../input/bindings'
 import type { Snapshot } from '../sim/Snapshot'
 import { STAGE_BY_ID } from '../sim/Stages'
@@ -27,7 +28,14 @@ export function buildMenus(game: Game) {
           game.applyStation()
         },
       },
-      { kind: 'choice', label: 'VIEW', options: ['CHASE', 'COCKPIT'], get: () => (s().view === 'cockpit' ? 1 : 0), set: (i) => { set((d) => (d.view = i === 1 ? 'cockpit' : 'chase')); game.applyView() } },
+      { kind: 'choice', label: 'VIEW', hint: 'C / Y switches while driving', options: ['CHASE', 'COCKPIT'], get: () => (s().view === 'cockpit' ? 1 : 0), set: (i) => { set((d) => (d.view = i === 1 ? 'cockpit' : 'chase')); game.applyView() } },
+      {
+        kind: 'choice',
+        label: 'CAR',
+        options: [...Object.keys(LIVERIES).map((k) => `Prototype · ${k}`), 'Formula'],
+        get: () => { const keys = [...Object.keys(LIVERIES), 'formula']; return Math.max(0, keys.indexOf(s().car)) },
+        set: (i) => { const keys = [...Object.keys(LIVERIES), 'formula']; set((d) => (d.car = keys[i])); game.applyCar() },
+      },
       {
         kind: 'choice',
         label: 'STYLE',

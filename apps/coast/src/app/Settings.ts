@@ -12,6 +12,8 @@ export interface SettingsData {
   keys: KeyBindings
   pad: PadBindings
   view: 'chase' | 'cockpit'
+  /** Hero livery id (see procgen LIVERIES) or 'formula'. */
+  car: string
   station: number
   units: 'kmh' | 'mph'
   access: { reducedMotion: boolean; hudScale: number }
@@ -30,6 +32,7 @@ export const DEFAULT_SETTINGS: SettingsData = {
   keys: DEFAULT_KEYS,
   pad: DEFAULT_PAD,
   view: 'chase',
+  car: 'gulf',
   station: 0,
   units: 'kmh',
   access: { reducedMotion: false, hudScale: 1 },

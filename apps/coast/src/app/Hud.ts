@@ -14,6 +14,7 @@ export class Hud {
   private readonly message: HTMLElement
   private readonly fork: HTMLElement
   private readonly station: HTMLElement
+  private readonly viewhint: HTMLElement
   private acc = 0
   private messageTimer = 0
   units: 'kmh' | 'mph' = 'kmh'
@@ -28,7 +29,8 @@ export class Hud {
       <div class="message" data-message></div>
       <div class="fork" data-fork><span class="l">◄ LEFT</span><span class="r">RIGHT ►</span></div>
       <div class="speedo"><span class="value" data-speed>0</span><span class="unit" data-unit>KM/H</span><span class="gear" data-gear>HI</span><div class="turbo"><div class="fill" data-turbo></div></div></div>
-      <div class="station" data-station></div>`
+      <div class="station" data-station></div>
+      <div class="viewhint" data-viewhint></div>`
     parent.appendChild(this.el)
     const q = (s: string) => this.el.querySelector(s) as HTMLElement
     this.time = q('[data-time]')
@@ -41,9 +43,13 @@ export class Hud {
     this.message = q('[data-message]')
     this.fork = q('[data-fork]')
     this.station = q('[data-station]')
+    this.viewhint = q('[data-viewhint]')
   }
   setVisible(v: boolean): void {
     this.el.classList.toggle('hidden', !v)
+  }
+  setViewHint(view: string): void {
+    this.viewhint.textContent = view === 'cockpit' ? 'C · CHASE VIEW' : 'C · COCKPIT VIEW'
   }
   setStation(name: string): void {
     this.station.textContent = name ? `♫ ${name}` : ''

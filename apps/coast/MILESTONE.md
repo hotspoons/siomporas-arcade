@@ -15,6 +15,18 @@ Started 2026-09-07. Verified in headless SwiftShader Chromium and unit tests onl
   menus with radio tuner, settings, remap, phone controls, haptics.
 - Audio: engine, tyres, bumps, checkpoint jingle, three sequenced stations.
 
+## Aesthetic pass (same day, Rad Mobile as the bar)
+- Procedural Group-6-style hero prototype (four liveries) baked into the atlas
+  for the chase view; the cockpit is now inside that car — fender humps in the
+  corners, long nose with the stripe, thin rim wheel, three round gauges,
+  offset mirror with dice, wipers in the rain.
+- Per-theme road: 2–4 lanes with solid edge lines, sand/gravel/kerb shoulders,
+  guardrails with posts, procedural diners/motels/gas stations/towers/signs
+  (original slogans) and arches among the CC0 scenery.
+- Weather and time: rain on the forest and alpine stages; night city with
+  headlight fall-off, glowing signage and lit windows; clouds layer.
+- Car choice (liveries or the formula car) and a view hint on the HUD.
+
 ## Not yet
 - Hero car catalogue (one car), rival cars, high-score table, route map on
   the results screen, weather/time-of-day variants, more landmarks (signs with

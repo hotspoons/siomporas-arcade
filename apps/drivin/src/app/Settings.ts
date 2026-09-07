@@ -19,6 +19,8 @@ export interface SettingsData {
   trackId: string
   laps: number
   access: { reducedMotion: boolean; hudScale: number }
+  /** 0..1 rumble / trigger / phone vibration strength. */
+  haptics: number
   showPerf: boolean
   playerName: string
 }
@@ -38,6 +40,7 @@ export const DEFAULT_SETTINGS: SettingsData = {
   trackId: 'builtin:0',
   laps: 3,
   access: { reducedMotion: false, hudScale: 1 },
+  haptics: 1,
   showPerf: false,
   playerName: 'ACE',
 }

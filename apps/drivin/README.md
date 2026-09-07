@@ -27,6 +27,15 @@ Laps are timed; crashing (landing inverted, hitting anything at over ~80 km/h
 vertically, falling off the world) plays a trackside replay of the last few
 seconds and respawns you one piece back with a rolling start.
 
+**Phones** (landscape): tilt to steer (⟲ TILT recalibrates), GAS right thumb,
+BRAKE left thumb, HANDBRAKE pill, RESET / CAM / II pads. Needs HTTPS for the
+motion sensors — use `just tunnel drivin`.
+
+**Haptics:** gamepads rumble on crashes, landings, curbs and slides; Xbox pads
+with impulse triggers get brake/throttle trigger rumble in Chromium; Android
+phones vibrate. Strength is in Settings. (Browsers cannot drive force-feedback
+wheels.)
+
 ## Editor
 
 Title → **TRACK EDITOR**. Pick a piece from the palette, click a cell to place

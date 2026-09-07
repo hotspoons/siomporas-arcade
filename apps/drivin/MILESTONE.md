@@ -21,8 +21,17 @@ headless SwiftShader Chromium (`just probe`, `just smoke drivin`) and unit tests
   fully over, all built-ins closed, autopilot laps the oval and the stunt park
   without crashing, a crawling car falls off the loop.
 
+- Phones: tilt steering (shared `@apex/engine/input/TiltSensor`), GAS / BRAKE
+  thumb pads, handbrake pill, reset / cam / pause / recalibrate, drag-steer
+  fallback, fullscreen + landscape lock, compact HUD. Verified in emulated
+  touch over the tunnel; tilt untested on a real phone.
+- Haptics (`@apex/engine/input/Haptics`): gamepad dual-rumble, Xbox impulse
+  **trigger rumble** (Chromium `trigger-rumble`: brake trigger under braking
+  slip, throttle trigger on power slides), phone vibration (Android). Crash,
+  landing, curbs, grass, slides. Strength slider in Settings. Real
+  force-feedback wheels are not reachable from the web platform.
+
 ## Not yet
-- Phone controls (tilt/touch) — engine has the pattern from conduit.
 - Ghost/replay of whole laps (tape recording exists in conduit, not here).
 - Editor: pan/zoom for big grids, undo, multi-select, non-90° pieces.
 - More cars, damage model, opponents, split-time/ghost comparisons.

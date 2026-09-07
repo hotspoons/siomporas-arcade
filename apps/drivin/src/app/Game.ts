@@ -9,6 +9,9 @@ import { RetroStyle } from '@apex/engine/render/styles/RetroStyle'
 import { AudioWorld } from '../audio/AudioWorld'
 import { Editor } from '../editor/Editor'
 import { InputMap } from '../input/InputMap'
+import { TouchSource } from '../input/TouchSource'
+import { isTouchDevice } from '@apex/engine/app/platform'
+import { Haptics } from '@apex/engine/input/Haptics'
 import { RenderWorld } from '../render/RenderWorld'
 import { carById } from '../sim/CarSpec'
 import type { SimEvent } from '../sim/Events'
@@ -36,6 +39,8 @@ export class Game implements LoopClient {
   readonly loop: GameLoop
   readonly audio = new AudioWorld()
   readonly editor: Editor
+  readonly touch: TouchSource | null = null
+  readonly haptics: Haptics
   sim: Sim
   track: Track
   trackData: TrackData
@@ -55,6 +60,13 @@ export class Game implements LoopClient {
     const s = this.settings.data
     this.input = new InputMap(s.keys, s.pad)
     this.input.attach(window)
+    this.haptics = new Haptics(this.input.gamepad)
+    this.haptics.strength = s.haptics
+    if (isTouchDevice()) {
+      this.touch = new TouchSource(container)
+      this.input.extras.push(this.touch)
+      container.classList.add('is-touch')
+    }
     this.trackData = this.tracks.get(s.trackId) ?? BUILTIN_TRACKS[0]
     this.track = new Track(this.trackData)
     this.sim = new Sim(this.track, carById(s.carId), s.laps)
@@ -77,6 +89,7 @@ export class Game implements LoopClient {
     this.settings.onChange(() => {
       this.applyAccessibility()
       this.audio.setVolumes(this.settings.data.audio)
+      this.haptics.strength = this.settings.data.haptics
     })
     this.menus.onNavigate = () => this.audio.ui('move')
     this.menus.onSelect = () => this.audio.ui('select')
@@ -100,6 +113,8 @@ export class Game implements LoopClient {
     this.fromEditor = false
     this.editor.hide()
     this.hud.setVisible(false)
+    this.touch?.setVisible(false)
+    this.container.classList.remove('is-driving')
     this.input.suppressGameplay = true
     this.loop.paused = false
     this.previewTrack()
@@ -145,6 +160,10 @@ export class Game implements LoopClient {
     this.menus.closeAll()
     this.showTitleCard(false)
     this.hud.setVisible(true)
+    this.touch?.setVisible(true)
+    this.touch?.calibrate()
+    this.goImmersive()
+    this.container.classList.add('is-driving')
     this.input.suppressGameplay = false
     this.loop.paused = false
     this.applyCamera()
@@ -154,11 +173,25 @@ export class Game implements LoopClient {
     this.audio.setRunning(true)
   }
 
+  /** Phones: fullscreen + landscape when a drive starts (must run inside a gesture). */
+  private goImmersive(): void {
+    if (!this.touch) return
+    this.touch.requestSensors()
+    const el = document.documentElement
+    if (!document.fullscreenElement && el.requestFullscreen) {
+      el.requestFullscreen({ navigationUI: 'hide' })
+        .then(() => (screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void> }).lock?.('landscape').catch(() => {}))
+        .catch(() => {})
+    }
+  }
+
   openEditor(): void {
     this.state = 'editor'
     this.menus.closeAll()
     this.showTitleCard(false)
     this.hud.setVisible(false)
+    this.touch?.setVisible(false)
+    this.container.classList.remove('is-driving')
     this.input.suppressGameplay = true
     this.loop.paused = true
     this.editor.setData(this.fromEditor ? this.editor.current : this.trackData, null)
@@ -171,6 +204,7 @@ export class Game implements LoopClient {
     this.state = 'paused'
     this.loop.paused = true
     this.input.suppressGameplay = true
+    this.touch?.setVisible(false)
     this.menus.replace(buildMenus(this).pause())
     this.audio.setRunning(false)
   }
@@ -180,6 +214,7 @@ export class Game implements LoopClient {
     this.state = 'driving'
     this.loop.paused = false
     this.input.suppressGameplay = false
+    this.touch?.setVisible(true)
     this.menus.closeAll()
     this.audio.setRunning(true)
   }
@@ -197,6 +232,7 @@ export class Game implements LoopClient {
     this.resultsShown = true
     this.state = 'results'
     this.input.suppressGameplay = true
+    this.touch?.setVisible(false)
     this.menus.replace(buildMenus(this).results(this.curr))
     this.audio.setRunning(false)
   }
@@ -238,7 +274,7 @@ export class Game implements LoopClient {
   resize(): void {
     const w = window.innerWidth
     const h = window.innerHeight
-    const pr = this.settings.data.style === 'retro' ? 1 : Math.min(window.devicePixelRatio || 1, 2)
+    const pr = this.settings.data.style === 'retro' ? 1 : Math.min(window.devicePixelRatio || 1, this.touch ? 1.5 : 2)
     this.view.resize(w, h, pr)
   }
 
@@ -267,7 +303,7 @@ export class Game implements LoopClient {
     if (this.menus.open) this.menus.handle(ui)
     else if (this.state === 'driving') {
       if (ui.pause) this.pause()
-      if (this.input.cameraEdge) {
+      if (this.input.cameraEdge || this.touch?.cameraEdge) {
         this.settings.update((d) => (d.camera = d.camera === 'hood' ? 'chase' : 'hood'))
         this.applyCamera()
       }
@@ -296,8 +332,30 @@ export class Game implements LoopClient {
     this.view.update(this.prev, this.curr, alpha, dt)
     if (this.state !== 'title') this.hud.update(this.curr, dt, this.sim.targetLaps)
     this.audio.update(this.curr)
+    this.feel(dt)
     this.perf.update(this.loop.stats, this.view.stats, dt, `${this.curr.car.mode} lane=${this.curr.car.laneId} s=${this.curr.car.s.toFixed(0)} v=${this.curr.car.speed.toFixed(1)} ${this.settings.data.style}`)
     this.view.render()
+  }
+
+  private feelAcc = 0
+
+  /** Continuous haptics: slide → weak rumble, braking with slip → left trigger, wheelspin-ish → right. */
+  private feel(dt: number): void {
+    if (this.state !== 'driving') return
+    this.feelAcc += dt
+    if (this.feelAcc < 0.1) return
+    this.feelAcc = 0
+    const c = this.curr.car
+    if (c.mode !== 'track') return
+    const h = this.held
+    if (c.slip > 0.35) {
+      this.haptics.rumble(0, c.slip * 0.6, 110)
+      if (c.onGrass) this.haptics.mobile(15)
+    }
+    if (c.onGrass && c.speed > 8) this.haptics.rumble(0.15, 0.35, 110)
+    const left = h.brake > 0.5 && c.slip > 0.3 ? Math.min(1, c.slip) : 0
+    const right = h.throttle > 0.5 && c.slip > 0.5 ? Math.min(1, c.slip * 0.7) : 0
+    if (left > 0 || right > 0) this.haptics.triggers(left, right, 110)
   }
 
   private readonly onEventBound = (e: SimEvent): void => this.onEvent(e)
@@ -305,20 +363,33 @@ export class Game implements LoopClient {
   private onEvent(e: SimEvent): void {
     this.view.onEvent(e)
     this.audio.onEvent(e)
-    const pad = this.input.gamepad
+    const hp = this.haptics
     switch (e.type) {
       case 'crash':
         this.hud.showMessage('CRASH', 2.5, 'bad')
-        pad.rumble(1, 1, 500)
+        hp.rumble(1, 1, 500)
+        hp.triggers(1, 1, 400)
+        hp.mobile([120, 40, 200])
         break
       case 'lap':
         this.hud.showMessage(`LAP ${e.a}`, 1.2, 'good')
+        hp.mobile(30)
         break
       case 'land':
-        pad.rumble(0.5, 0.3, 120)
+        hp.rumble(Math.min(1, e.a / 50), 0.4, 140)
+        hp.triggers(0.5, 0.5, 120)
+        hp.mobile(40)
+        break
+      case 'launch':
+        hp.rumble(0.2, 0.2, 60)
         break
       case 'curb':
-        pad.rumble(0.1, 0.4, 60)
+        hp.rumble(0.05, 0.45, 50)
+        hp.mobile(8)
+        break
+      case 'offroad':
+        hp.rumble(0.3, 0.5, 150)
+        hp.mobile(25)
         break
       case 'lost':
         this.hud.showMessage('LOST — BACK ON TRACK', 1.5, 'bad')

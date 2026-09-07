@@ -50,7 +50,7 @@ export function buildMenus(game: Game) {
         { kind: 'action', label: 'SETTINGS', onSelect: () => game.menus.push(settings()) },
         { kind: 'action', label: 'CONTROLS', onSelect: () => game.menus.push(controls()) },
       ],
-      footer: 'Enter / A select · Esc / B back · F3 perf',
+      footer: game.touch ? 'Tap to select · tilt to steer, ⟲ recalibrates · GAS right thumb, BRAKE left' : 'Enter / A select · Esc / B back · F3 perf',
       onBack: () => {},
     }
   }
@@ -129,6 +129,7 @@ export function buildMenus(game: Game) {
       slider('Master', () => s().audio.master, (v) => set((d) => (d.audio.master = v))),
       slider('SFX', () => s().audio.sfx, (v) => set((d) => (d.audio.sfx = v))),
       slider('Engine', () => s().audio.engine, (v) => set((d) => (d.audio.engine = v))),
+      slider('Haptics (rumble / triggers / phone)', () => s().haptics, (v) => set((d) => (d.haptics = v))),
       { kind: 'info', label: '— ACCESS —' },
       toggle('Reduced motion', () => s().access.reducedMotion, (v) => set((d) => (d.access.reducedMotion = v))),
       slider('HUD scale', () => s().access.hudScale, (v) => set((d) => (d.access.hudScale = v)), 0.7, 1.6),

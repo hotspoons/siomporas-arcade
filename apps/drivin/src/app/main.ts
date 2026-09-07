@@ -12,6 +12,11 @@ loading.className = 'loading'
 loading.textContent = 'COMPILING'
 app.appendChild(loading)
 
+const rotate = document.createElement('div')
+rotate.className = 'rotate'
+rotate.textContent = 'ROTATE TO LANDSCAPE'
+app.appendChild(rotate)
+
 const canvas = document.createElement('canvas')
 canvas.className = 'game'
 app.appendChild(canvas)

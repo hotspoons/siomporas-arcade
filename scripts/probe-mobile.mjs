@@ -12,16 +12,18 @@ await page.goto(url, { waitUntil: 'networkidle', timeout: 60000 })
 await page.waitForTimeout(3000)
 await page.screenshot({ path: out.replace('.png', '-title.png') })
 // Tap "SINGLE COURSE", then hold thrust + fire via CDP touch events.
-await page.getByText('SINGLE COURSE').tap()
+await page.locator('.menu .item').filter({ hasText: process.env.PROBE_TAP ?? 'SINGLE COURSE' }).first().tap()
 await page.waitForTimeout(500)
 const cdp = await ctx.newCDPSession(page)
 const touch = (type, points) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: points })
-const thrust = { x: 60, y: 130, id: 1 }
-const fire = { x: 790, y: 200, id: 2 }
+// Hold points (viewport px); default matches conduit's pads, PROBE_TOUCH="x,y;x,y" overrides (drivin: gas bottom-right).
+const pts = (process.env.PROBE_TOUCH ?? '60,130;790,200').split(';').map((p, i) => { const [x, y] = p.split(',').map(Number); return { x, y, id: i + 1 } })
+const thrust = pts[0]
+const fire = pts[1] ?? pts[0]
 await touch('touchStart', [thrust])
 await touch('touchStart', [thrust, fire])
 await page.waitForTimeout(2500)
-const mid = await page.evaluate(() => { const a = window.__apex; return a ? { state: a.game.state, speed: a.snap.vehicle.speed, s: a.snap.vehicle.s, fire: a.input.frame.fire, throttle: a.input.frame.throttle, touch: !!a.game.touch, sensors: a.game.touch?.sensorsOk, extras: a.input.extras.length } : 'no apex' })
+const mid = await page.evaluate(() => { const a = window.__apex; if (!a) return 'no apex'; const s = a.snap; const speed = s.vehicle ? s.vehicle.speed : s.car.speed; return { state: a.game.state, speed, fire: a.input.frame.fire, throttle: a.input.frame.throttle, touch: !!a.game.touch, sensors: a.game.touch?.sensorsOk ?? a.game.touch?.tilt?.ok, extras: a.input.extras.length } })
 await page.screenshot({ path: out })
 await touch('touchEnd', [])
 // Drag steering fallback: swipe in the free centre band.

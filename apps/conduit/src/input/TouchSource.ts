@@ -3,14 +3,13 @@
 // fallback for steering when sensors are unavailable. The overlay is DOM;
 // zones are tracked per pointer so several fingers work at once.
 
+import { TiltSensor } from '@apex/engine/input/TiltSensor'
 import type { InputFrame } from '../sim/InputFrame'
 import type { ExtraSource, UiEdges } from './InputMap'
 
 /** Degrees of tilt from neutral that equals full steer. */
 const TILT_RANGE_DEG = 22
 const TILT_DEADZONE_DEG = 1.5
-/** Low-pass time constant for the gravity vector, seconds. */
-const TILT_SMOOTH = 0.06
 /** Drag fallback: pixels for full steer. */
 const DRAG_RANGE_PX = 140
 
@@ -19,17 +18,12 @@ type Zone = 'throttle' | 'brake' | 'fire' | 'shock' | 'pause' | 'calib' | 'none'
 export class TouchSource implements ExtraSource {
   readonly el: HTMLElement
   enabled = true
-  sensorsOk = false
+  readonly sensor = new TiltSensor()
   private readonly pointers = new Map<number, { zone: Zone; x0: number; x: number }>()
-  private gx = 0
-  private gy = 0
-  private gz = 0
-  private neutral = 0
   private tilt = 0
   private shockEdge = false
   private pauseEdge = false
   private calibrateEdge = false
-  private lastT = 0
   private readonly zones = new Map<Zone, HTMLElement>()
 
   constructor(parent: HTMLElement) {
@@ -46,6 +40,7 @@ export class TouchSource implements ExtraSource {
     `
     parent.appendChild(this.el)
     for (const z of this.el.querySelectorAll<HTMLElement>('[data-zone]')) this.zones.set(z.dataset.zone as Zone, z)
+    this.sensor.onFirstReading = () => this.el.classList.add('sensors')
     this.el.addEventListener('pointerdown', this.onDown, { passive: false })
     this.el.addEventListener('pointermove', this.onMove, { passive: false })
     this.el.addEventListener('pointerup', this.onUp)
@@ -58,71 +53,18 @@ export class TouchSource implements ExtraSource {
     if (!v) this.pointers.clear()
   }
 
-  /**
-   * Must be called from a user gesture: iOS gates motion sensors behind a
-   * permission prompt. Safe to call repeatedly.
-   */
+  get sensorsOk(): boolean {
+    return this.sensor.ok
+  }
+
+  /** Must be called from a user gesture (iOS permission prompt). Safe to repeat. */
   async requestSensors(): Promise<void> {
-    const DME = (window as unknown as { DeviceMotionEvent?: { requestPermission?: () => Promise<string> } }).DeviceMotionEvent
-    try {
-      if (DME?.requestPermission) {
-        const r = await DME.requestPermission()
-        if (r !== 'granted') return
-      }
-    } catch {
-      /* not iOS, or denied */
-    }
-    if (!this.sensorsOk) {
-      window.addEventListener('devicemotion', this.onMotion)
-    }
+    await this.sensor.requestSensors()
   }
 
   /** Take the current hold as "straight ahead". */
   calibrate(): void {
-    this.neutral = this.rawTiltDeg()
-  }
-
-  private readonly onMotion = (e: DeviceMotionEvent) => {
-    const g = e.accelerationIncludingGravity
-    if (!g || g.x === null || g.y === null || g.z === null) return
-    const now = performance.now()
-    const dt = this.lastT ? Math.min(0.1, (now - this.lastT) / 1000) : TILT_SMOOTH
-    this.lastT = now
-    const k = 1 - Math.exp(-dt / TILT_SMOOTH)
-    this.gx += (g.x - this.gx) * k
-    this.gy += (g.y - this.gy) * k
-    this.gz += (g.z - this.gz) * k
-    if (!this.sensorsOk) {
-      this.sensorsOk = true
-      this.neutral = this.rawTiltDeg()
-      this.el.classList.add('sensors')
-    }
-  }
-
-  /**
-   * Tilt about the screen's vertical axis, in degrees, from the gravity
-   * component along the screen's horizontal axis. Which device axis that is
-   * depends on the current orientation.
-   */
-  private rawTiltDeg(): number {
-    const angle = (screen.orientation?.angle ?? (window as unknown as { orientation?: number }).orientation ?? 0) as number
-    const mag = Math.hypot(this.gx, this.gy, this.gz) || 9.81
-    let along: number
-    switch (angle) {
-      case 90:
-        along = -this.gy
-        break
-      case 180:
-        along = -this.gx
-        break
-      case 270:
-      case -90:
-        along = this.gy
-        break
-      default:
-        along = this.gx
-    }
-    return (Math.asin(Math.max(-1, Math.min(1, along / mag))) * 180) / Math.PI
+    this.sensor.calibrate()
   }
 
   private zoneAt(x: number, y: number): Zone {
@@ -180,14 +122,7 @@ export class TouchSource implements ExtraSource {
       else if (p.zone === 'none') drag = Math.max(-1, Math.min(1, (p.x - p.x0) / DRAG_RANGE_PX))
     }
     // Steering: tilt when we have it, otherwise a horizontal drag anywhere free.
-    if (this.sensorsOk) {
-      const deg = this.rawTiltDeg() - this.neutral
-      const mag = Math.max(0, Math.abs(deg) - TILT_DEADZONE_DEG) / (TILT_RANGE_DEG - TILT_DEADZONE_DEG)
-      const shaped = Math.min(1, mag) ** 1.5
-      this.tilt = Math.sign(deg) * shaped
-    } else {
-      this.tilt = drag
-    }
+    this.tilt = this.sensor.ok ? this.sensor.steer(TILT_RANGE_DEG, TILT_DEADZONE_DEG) : drag
     if (this.tilt !== 0) frame.steer = Math.max(-1, Math.min(1, frame.steer + this.tilt))
     if (throttle) {
       frame.throttle = 1

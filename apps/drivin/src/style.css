@@ -76,3 +76,30 @@ canvas.game { position: absolute; inset: 0; width: 100%; height: 100%; display: 
 .editor .status { padding: 6px 12px; font-family: ui-monospace, monospace; font-size: 12px; opacity: 0.85; border-top: 1px solid rgba(255,255,255,0.08); white-space: pre; }
 .editor .status.flash { color: var(--amber); }
 @media (max-height: 500px) { .menu { padding: 14px 22px; min-width: 300px; font-size: 13px; } .menu h1 { font-size: 1.5em; } }
+
+/* ---- touch controls ---- */
+.touch { position: absolute; inset: 0; z-index: 2; touch-action: none; user-select: none; -webkit-user-select: none; }
+.touch .zone { position: absolute; display: flex; align-items: center; justify-content: center; border: 1px solid rgba(255,122,26,0.25); border-radius: 12px; color: rgba(232,246,255,0.55); font-size: 13px; letter-spacing: 0.25em; font-weight: 700; background: rgba(255,122,26,0.04); transition: background 0.08s; }
+.touch .zone.held { background: rgba(255,122,26,0.25); color: #fff; }
+.touch .brake { left: 2vw; bottom: 4vh; width: 22vw; height: 42vh; border-color: rgba(255,59,92,0.35); }
+.touch .brake.held { background: rgba(255,59,92,0.25); }
+.touch .gas { right: 2vw; bottom: 4vh; width: 22vw; height: 42vh; border-color: rgba(92,255,138,0.35); }
+.touch .gas.held { background: rgba(92,255,138,0.22); }
+.touch .hand { left: 50%; bottom: 4vh; width: 24vw; height: 11vh; transform: translateX(-50%); border-radius: 999px; border-color: rgba(255,200,87,0.4); }
+.touch .hand.held { background: rgba(255,200,87,0.3); }
+.touch .reset { left: 26vw; bottom: 4vh; width: 10vw; height: 11vh; font-size: 11px; }
+.touch .camera { right: 26vw; bottom: 4vh; width: 10vw; height: 11vh; font-size: 11px; }
+.touch .pause { right: 2vw; top: 2vh; width: 9vw; height: 12vh; }
+.touch .calib { left: 2vw; top: 2vh; width: 16vw; height: 12vh; font-size: 11px; }
+.touch .tilt-hint { position: absolute; top: 16vh; left: 50%; transform: translateX(-50%); font-size: 11px; letter-spacing: 0.3em; opacity: 0.45; }
+.touch.sensors .tilt-hint { display: none; }
+.touch:not(.sensors) .tilt-hint::after { content: ' · or drag'; }
+.is-touch .hud .laps { left: 20vw; }
+.is-touch .hud .times { right: 13vw; }
+.is-touch .hud .speedo { right: 26vw; bottom: 17vh; }
+.is-touch .hud .rpm { width: 16vw; }
+.is-touch .hud .minimap { left: 26vw; bottom: 17vh; width: 110px; height: 110px; }
+.is-touch .hud .timer { font-size: 2.4em; }
+.is-touch .editor .palette { width: 170px; }
+.rotate { display: none; position: absolute; inset: 0; z-index: 9; align-items: center; justify-content: center; background: var(--bg); letter-spacing: 0.3em; text-align: center; padding: 24px; }
+@media (orientation: portrait) and (pointer: coarse) { .is-driving .rotate { display: flex; } }

@@ -1,0 +1,14 @@
+{
+  "name": "@apex/engine",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Shared game runtime: fixed-step loop, modern/retro presentation styles, input sources, menus, math, dev bridge.",
+  "exports": {
+    "./*": "./src/*.ts"
+  },
+  "dependencies": {
+    "postprocessing": "^6.39.4",
+    "three": "^0.185.1"
+  }
+}

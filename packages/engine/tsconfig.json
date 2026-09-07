@@ -1,0 +1,6 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": { "tsBuildInfoFile": "../../node_modules/.tmp/engine.tsbuildinfo" },
+  "include": ["src", "test"],
+  "exclude": ["src/dev/bridge-plugin.ts"]
+}

@@ -1,0 +1,24 @@
+import { defineConfig } from 'vite'
+import { devBridge } from '@apex/engine/dev/bridge-plugin'
+
+export default defineConfig({
+  // devBridge is inert unless APEX_BRIDGE is set — see packages/engine/src/dev/bridge-plugin.ts.
+  plugins: [devBridge()],
+  server: {
+    // Keep in sync with forwardPorts in .devcontainer/devcontainer.json and the justfile.
+    port: 5180,
+    strictPort: true,
+    host: true,
+    // tunnel hostnames rotate per-start; this is a dev tool
+    allowedHosts: true,
+  },
+  build: {
+    target: 'es2022',
+    rollupOptions: {
+      input: { main: 'index.html', preview: 'tools/preview.html' },
+    },
+    // three is ~1MB minified on its own — the default 500kB warning is pure
+    // noise for a game that ships one big scene bundle.
+    chunkSizeWarningLimit: 1500,
+  },
+})

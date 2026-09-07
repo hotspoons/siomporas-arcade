@@ -13,7 +13,7 @@ PORT="${PORT:-5180}"
 
 if ! (ss -ltn 2>/dev/null || netstat -ltn 2>/dev/null) | grep -q ":$PORT "; then
   echo "no dev server on :$PORT — starting one (bridge enabled)"
-  APEX_BRIDGE="${APEX_BRIDGE:-apex-dev}" npm run dev >/dev/null 2>&1 &
+  APEX_BRIDGE="${APEX_BRIDGE:-apex-dev}" npm run dev -w "apps/${APP:-conduit}" >/dev/null 2>&1 &
   DEV=$!
   trap 'kill $DEV 2>/dev/null || true' EXIT
   for _ in $(seq 1 30); do

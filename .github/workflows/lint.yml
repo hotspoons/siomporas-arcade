@@ -24,4 +24,4 @@ jobs:
           npm run lint
           npx tsc -b
           npx vitest run
-          npm run build
+          npm run build -ws --if-present

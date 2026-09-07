@@ -66,17 +66,41 @@ export const EDGE_BOUNCE = -0.25
 // --- air ---------------------------------------------------------------------
 /** m/s². Heavier than real gravity for an arcade arc. World -Y. */
 export const G_AIR = 22
-export const AIR_PITCH_AUTHORITY = 0.8
-export const AIR_YAW_AUTHORITY = 0.5
+/**
+ * Air control is deliberately limited and expressed as accelerations, not as
+ * rotation of the velocity: at 400 m/s even a few degrees of nose-up turns a
+ * jump into a two-kilometre flight. Pitch input adds/removes m/s² of lift,
+ * steer input strafes.
+ */
+export const AIR_LIFT_AUTHORITY = 0.3
+export const AIR_STRAFE_AUTHORITY = 30
+/**
+ * Air gravity scales with (speed / GAP_DESIGN_SPEED)² so the flight traces the
+ * authored arc at any speed — speed changes how fast you cross a gap, never
+ * whether you make it. Clamped so a near-stalled or boosted craft stays sane.
+ */
+export const AIR_G_SCALE_MIN = 0.6
+export const AIR_G_SCALE_MAX = 5
+/** Lateral (sideways) speed allowed at launch; a spin must not fling you off the line. */
+export const LAUNCH_LATERAL_MAX = 6
+/** Soft spring pulling an un-steered flight back over the centreline (1/s², 1/s). */
+export const AIR_CENTERING_K = 2.5
+export const AIR_CENTERING_C = 3.0
 /** How far (metres) inside the tube surface counts as touching down. */
 export const LAND_TOLERANCE = 3.0
+/** Metres below/through the surface that still count as clipping the lip (harsh landing). */
+export const LAND_UNDERSHOOT = 9.0
 export const LAND_ALIGN_TIME = 0.15
 /** Speed kept on landing, at worst angle. */
 export const LAND_SPEED_KEEP_MIN = 0.7
 /** Depth below/outside the tube after which a fall is a crash. */
 export const FALL_DEPTH = 45
-/** Ballistic speed the builder assumes when shaping a GAP's centreline. */
-export const GAP_DESIGN_SPEED = 290
+/**
+ * Ballistic speed the builder assumes when shaping a GAP's centreline. Kept
+ * just under SPEED_MIN so the slowest craft still makes the far side; faster
+ * craft fly higher and land further down the (long, levelling) receiver.
+ */
+export const GAP_DESIGN_SPEED = 235
 /** Metres searched each side of the last known s when re-acquiring the track. */
 export const REACQUIRE_RANGE = 150
 /** Metres of straight run-up over which a fall off an OPEN edge is forgiven. */

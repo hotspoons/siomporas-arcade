@@ -74,7 +74,7 @@ export function buildTrack(course: CourseDesc): Track {
       continue
     }
     const dYaw = ((d.curve?.yaw ?? 0) * DEG) / steps
-    const dPitch = ((d.curve?.pitch ?? 0) * DEG) / steps
+    const dPitch = d.levelOut ? -pitch / steps : ((d.curve?.pitch ?? 0) * DEG) / steps
     for (let k = 0; k < steps; k++) {
       pushCp(si)
       yaw += dYaw
@@ -88,6 +88,7 @@ export function buildTrack(course: CourseDesc): Track {
 
   // --- split offsets: trunk goes left, branch goes right ------------------------
   const branchCps = new Map<number, Vec3[]>()
+  const branchPhantoms = new Map<number, [Vec3, Vec3]>()
   for (let si = 0; si < descs.length; si++) {
     const d = descs[si]
     if (d.type !== 'SPLIT') continue
@@ -97,7 +98,7 @@ export function buildTrack(course: CourseDesc): Track {
     const first = idx[0]
     const last = idx[idx.length - 1] + 1 // the CP that starts the next segment
     const half = (d.separation ?? 22) / 2
-    const other: Vec3[] = [cps[first - 1]?.p.clone() ?? cps[first].p.clone()]
+    const other: Vec3[] = []
     for (let i = first; i <= last && i < cps.length; i++) {
       const u = (i - first) / (last - first)
       const w = smoothstep(0, SPLIT_RAMP, u) * (1 - smoothstep(1 - SPLIT_RAMP, 1, u))
@@ -105,8 +106,8 @@ export function buildTrack(course: CourseDesc): Track {
       other.push(cp.p.clone().addScaled(cp.right, half * w))
       cp.p.addScaled(cp.right, -half * w)
     }
-    other.push(cps[Math.min(last + 1, cps.length - 1)].p.clone())
     branchCps.set(si, other)
+    branchPhantoms.set(si, [cps[Math.max(0, first - 1)].p.clone(), cps[Math.min(last + 1, cps.length - 1)].p.clone()])
   }
 
   // --- resample the trunk by arc length ----------------------------------------
@@ -156,7 +157,8 @@ export function buildTrack(course: CourseDesc): Track {
   for (const [si, pts] of branchCps) {
     const seg = segments[si]
     const segIds = pts.map(() => si)
-    const { spline: bs } = resample(pts, segIds)
+    const ph = branchPhantoms.get(si)!
+    const { spline: bs } = resample(pts, segIds, ph[0], ph[1])
     const r = descs[si].radius ?? TUNNEL_RADIUS_DEFAULT
     bs.radius.fill(r)
     bs.arc.fill(ARC_TUBE)
@@ -217,10 +219,10 @@ export function buildTrack(course: CourseDesc): Track {
  * TRACK_SAMPLE_STEP metres of arc length. `spanSeg[i]` is the segment owning
  * the span that starts at point i.
  */
-function resample(points: Vec3[], spanSeg: number[]): { spline: TrackSpline; sampleSeg: number[] } {
+function resample(points: Vec3[], spanSeg: number[], phantomStart?: Vec3, phantomEnd?: Vec3): { spline: TrackSpline; sampleSeg: number[] } {
   const n = points.length
-  const phantom0 = points[0].clone().sub(points[1]).add(points[0])
-  const phantomN = points[n - 1].clone().sub(points[n - 2]).add(points[n - 1])
+  const phantom0 = phantomStart ?? points[0].clone().sub(points[1]).add(points[0])
+  const phantomN = phantomEnd ?? points[n - 1].clone().sub(points[n - 2]).add(points[n - 1])
   const P = (i: number) => (i < 0 ? phantom0 : i >= n ? phantomN : points[i])
 
   const outPos: number[] = []

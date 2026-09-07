@@ -15,6 +15,9 @@ export default defineConfig({
   },
   build: {
     target: 'es2022',
+    rollupOptions: {
+      input: { main: 'index.html', preview: 'tools/preview.html' },
+    },
     // three is ~1MB minified on its own — the default 500kB warning is pure
     // noise for a game that ships one big scene bundle.
     chunkSizeWarningLimit: 1500,

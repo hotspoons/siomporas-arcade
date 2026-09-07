@@ -37,28 +37,28 @@ try {
   // pickups and the chunk recycler rather than just the first frame.
   await page.keyboard.press('Enter')
   const deadline = Date.now() + seconds * 1000
-  await page.keyboard.down('ArrowUp')
+  await page.keyboard.down('KeyW')
+  await page.keyboard.down('Space')
   while (Date.now() < deadline) {
-    await page.keyboard.down('ArrowRight')
+    await page.keyboard.down('KeyD')
     await page.waitForTimeout(400)
-    await page.keyboard.up('ArrowRight')
-    await page.keyboard.press('Space')
-    await page.keyboard.down('ArrowLeft')
+    await page.keyboard.up('KeyD')
+    await page.keyboard.press('KeyE')
+    await page.keyboard.down('KeyA')
     await page.waitForTimeout(400)
-    await page.keyboard.up('ArrowLeft')
+    await page.keyboard.up('KeyA')
   }
-  await page.keyboard.up('ArrowUp')
+  await page.keyboard.up('Space')
+  await page.keyboard.up('KeyW')
   await page.screenshot({ path: `${outDir}/run.png` })
 
   // The run must have actually moved: a frozen frame is the failure this
   // catches that a screenshot alone would not.
-  const distance = await page.evaluate(() =>
-    Number(document.querySelector('.progress .label')?.textContent?.match(/([\d,]+) m/)?.[1]?.replace(/,/g, '') ?? 0),
-  )
-  if (!Number.isFinite(distance) || distance < 200) {
-    errors.push(`craft barely moved: ${distance}m after ${seconds}s`)
+  const progress = await page.evaluate(() => parseFloat(document.querySelector('.hud [data-progress]')?.style.width ?? '0'))
+  if (!Number.isFinite(progress) || progress < 1) {
+    errors.push(`craft barely moved: ${progress}% of the course after ${seconds}s`)
   }
-  console.log(`smoke: ${distance}m covered in ${seconds}s → ${outDir}/run.png`)
+  console.log(`smoke: ${progress.toFixed(1)}% of the course in ${seconds}s → ${outDir}/run.png`)
 } finally {
   await browser.close()
 }

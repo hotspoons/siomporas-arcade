@@ -22,10 +22,15 @@ preview:
 
 # --- checks -----------------------------------------------------------------
 
-# lint (oxlint) + typecheck (tsc project refs)
+# lint (oxlint) + typecheck (tsc project refs) + unit tests (vitest)
 check:
     npm run lint
     npx tsc -b
+    npx vitest run
+
+# unit tests only
+test:
+    npx vitest run
 
 lint:
     npm run lint
@@ -59,6 +64,10 @@ bridge-clients:
 # few seconds, screenshots to shots/ and fails on any console error
 smoke:
     node scripts/smoke.mjs
+
+# headless screenshot probe against the dev server (see scripts/probe.mjs)
+probe out="shots/probe.png" seconds="0" *keys:
+    node scripts/probe.mjs {{ out }} {{ seconds }} {{ keys }}
 
 # (re)install the headless Chromium the smoke harness drives
 browser:

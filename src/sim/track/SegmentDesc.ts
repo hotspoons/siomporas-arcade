@@ -57,6 +57,8 @@ export interface SegmentDesc {
   radius?: number
   /** Total degrees turned over the segment. */
   curve?: { yaw?: number; pitch?: number }
+  /** Pitch back to level over this segment (after a GAP, whose exit pitch is computed). */
+  levelOut?: boolean
   /** Banking in degrees (TUBE only; open profiles always level themselves). */
   roll?: number
   /** Override the profile's player clamp (radians, symmetric about the floor). */

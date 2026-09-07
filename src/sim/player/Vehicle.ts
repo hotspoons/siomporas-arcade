@@ -4,8 +4,14 @@
 
 import {
   ACCEL,
-  AIR_PITCH_AUTHORITY,
-  AIR_YAW_AUTHORITY,
+  AIR_CENTERING_C,
+  AIR_CENTERING_K,
+  AIR_G_SCALE_MAX,
+  AIR_G_SCALE_MIN,
+  AIR_LIFT_AUTHORITY,
+  AIR_STRAFE_AUTHORITY,
+  GAP_DESIGN_SPEED,
+  LAUNCH_LATERAL_MAX,
   BANK_RATE,
   BANK_VISUAL_MAX,
   BOOST_ACCEL,
@@ -20,6 +26,7 @@ import {
   LAND_ALIGN_TIME,
   LAND_SPEED_KEEP_MIN,
   LAND_TOLERANCE,
+  LAND_UNDERSHOOT,
   REACQUIRE_RANGE,
   SCRAPE_SHIELD_PER_SEC,
   SCRAPE_SPEED_LOSS,
@@ -167,15 +174,17 @@ export class Vehicle {
       if (this.theta > clampAngle || this.theta < -clampAngle) {
         const sign = this.theta > 0 ? 1 : -1
         const outward = this.thetaVel * sign > 0
-        if (f.arc < 1.2 && outward && Math.abs(this.thetaVel) > 0.9) {
-          // OPEN roadway: a committed push over the edge is a fall.
+        const pushing = input.steer * sign > 0.5
+        if (f.arc < 1.2 && pushing) {
+          // OPEN roadway: keep pushing into the lip and you go over it.
           this.fallTimer += dt
           if (this.fallTimer > FALL_GRACE) {
+            this.thetaVel = sign * 1.2
             this.launch(track, true)
             return
           }
         } else {
-          this.fallTimer = 0
+          this.fallTimer = Math.max(0, this.fallTimer - dt * 2)
         }
         this.theta = sign * clampAngle
         if (outward) this.thetaVel *= EDGE_BOUNCE
@@ -224,7 +233,8 @@ export class Vehicle {
     // theta motion (so a sideways fall actually goes sideways).
     Track.radial(f, this.theta, this.vA)
     this.vB.cross(f.tan, this.vA) // tangential direction around the tube at theta
-    this.worldVel.copy(f.tan).scale(this.speed).addScaled(this.vB, -this.thetaVel * f.radius)
+    const lateral = clamp(-this.thetaVel * f.radius, -LAUNCH_LATERAL_MAX, LAUNCH_LATERAL_MAX)
+    this.worldVel.copy(f.tan).scale(this.speed).addScaled(this.vB, lateral)
     this.airUp.copy(this.vA).scale(-1)
     this.airborne = true
     this.airTime = 0
@@ -235,15 +245,18 @@ export class Vehicle {
 
   private tickAir(dt: number, input: InputFrame, track: Track): void {
     this.airTime += dt
-    // Light air control: pitch and yaw the velocity vector directly.
+    // Gravity scaled so the arc shape is speed-independent (see Tuning).
     const speed = this.worldVel.length()
+    const gScale = clamp((speed / GAP_DESIGN_SPEED) ** 2, AIR_G_SCALE_MIN, AIR_G_SCALE_MAX)
+    const g = G_AIR * gScale
     if (speed > 1) {
       this.forward.copy(this.worldVel).scale(1 / speed)
       this.right.cross(this.forward, this.airUp).normalize()
-      if (input.pitch !== 0) this.worldVel.rotateAxis(this.right, input.pitch * AIR_PITCH_AUTHORITY * dt)
-      if (input.steer !== 0) this.worldVel.rotateAxis(this.airUp, -input.steer * AIR_YAW_AUTHORITY * dt)
+      // Light air control: lift as a fraction of gravity, strafe as an acceleration.
+      if (input.pitch !== 0) this.worldVel.addScaled(this.airUp, input.pitch * AIR_LIFT_AUTHORITY * g * dt)
+      if (input.steer !== 0) this.worldVel.addScaled(this.right, input.steer * AIR_STRAFE_AUTHORITY * Math.sqrt(gScale) * dt)
     }
-    this.worldVel.y -= G_AIR * dt
+    this.worldVel.y -= g * dt
     this.worldPos.addScaled(this.worldVel, dt)
     // Roll the craft's up gently back toward world up during flight.
     this.airUp.x = expApproach(this.airUp.x, 0, 2, dt)
@@ -261,6 +274,14 @@ export class Vehicle {
     this.s = Math.max(this.s, p.s) // never go backwards along the course
     const f = track.frameAt(p.s, this.branch, this.frame)
 
+    // Centring assist: with no steer input, spring the flight back over the
+    // centreline sideways (never vertically — that's the player's arc).
+    if (Math.abs(input.steer) < 0.2 && !this.falling) {
+      const lateralOffset = p.radial * Math.sin(p.theta) // along bin
+      const lateralVel = this.worldVel.dot(f.bin)
+      this.worldVel.addScaled(f.bin, (-AIR_CENTERING_K * lateralOffset - AIR_CENTERING_C * lateralVel) * dt)
+    }
+
     const surface = hasSurface(f.arc)
     const withinArc = Math.abs(wrapAngle(p.theta)) <= f.arc
     // Radial velocity: positive = moving toward the wall.
@@ -268,12 +289,14 @@ export class Vehicle {
     const radialVel = this.worldVel.dot(this.vA)
 
     if (surface && withinArc && p.radial >= f.radius - VEHICLE_HOVER - LAND_TOLERANCE && radialVel > -5) {
-      if (p.radial <= f.radius + LAND_TOLERANCE * 2) {
+      if (p.radial <= f.radius + LAND_UNDERSHOOT) {
+        // Below the surface = clipped the lip: land anyway, pay in speed.
+        if (p.radial > f.radius) this.speed *= 0.85
         this.land(f, p)
         return
       }
     }
-    if (p.radial > f.radius + FALL_DEPTH || (surface && withinArc && p.radial > f.radius + LAND_TOLERANCE * 2 && this.airTime > 0.3)) {
+    if (p.radial > f.radius + FALL_DEPTH || (surface && withinArc && p.radial > f.radius + LAND_UNDERSHOOT && this.airTime > 0.3)) {
       // Way outside the tube, or through the wall from outside: gone.
       this.event = 'crashed'
       return

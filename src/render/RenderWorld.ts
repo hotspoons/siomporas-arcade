@@ -17,6 +17,7 @@ import { TunnelMeshPool } from './tunnel/TunnelMeshPool'
 import { LaserBeam } from './vfx/LaserBeam'
 import { Particles } from './vfx/Particles'
 import { ShockwaveRing } from './vfx/ShockwaveRing'
+import { Sky } from './vfx/Sky'
 import { SpeedLines } from './vfx/SpeedLines'
 import { TrackProps } from './vfx/TrackProps'
 import type { Style, StyleFrameInfo } from './styles/Style'
@@ -35,12 +36,15 @@ export class RenderWorld {
   readonly rig: CameraRig
   readonly tunnel: TunnelMeshPool
   readonly craft = new Craft()
+  /** Best-run ghost, drawn translucent; hidden when there is no ghost. */
+  readonly ghost = new Craft()
   readonly traffic = new TrafficRenderer()
   readonly particles = new Particles()
   readonly speedLines = new SpeedLines()
   readonly laser = new LaserBeam()
   readonly shock = new ShockwaveRing()
   readonly props = new TrackProps()
+  readonly sky = new Sky()
   readonly tunnelUniforms = makeTunnelUniforms()
   readonly headlight: PointLight
   readonly stats: RenderStats = { drawCalls: 0, triangles: 0, chunks: 0 }
@@ -78,12 +82,22 @@ export class RenderWorld {
     this.tunnel = new TunnelMeshPool(track, tunnelMat)
     this.root.add(this.tunnel.root)
     this.root.add(this.craft.root)
+    this.ghost.root.visible = false
+    this.ghost.bodyMaterial.transparent = true
+    this.ghost.bodyMaterial.opacity = 0.35
+    this.ghost.bodyMaterial.depthWrite = false
+    this.ghost.accentMaterial.transparent = true
+    this.ghost.accentMaterial.opacity = 0.5
+    this.ghost.shadow.visible = false
+    this.ghost.engine.visible = false
+    this.root.add(this.ghost.root)
     this.root.add(this.traffic.root)
     this.root.add(this.particles.points)
     this.root.add(this.speedLines.mesh)
     this.root.add(this.laser.root)
     this.root.add(this.shock.mesh)
     this.root.add(this.props.root)
+    this.scene.add(this.sky.root)
 
     this.root.add(new AmbientLight(0x334466, 0.6))
     this.root.add(new HemisphereLight(0x8899cc, 0x221133, 0.7))
@@ -110,6 +124,7 @@ export class RenderWorld {
     u.uBoostColor.value.setHSL((hue + 0.45) % 1, 1, 0.62)
     u.uFogColor.value.copy(this.bg)
     this.craft.setTint(u.uLineColor.value)
+    this.sky.setPalette(hue, this.bg)
   }
 
   setStyle(style: Style): void {
@@ -250,6 +265,7 @@ export class RenderWorld {
     u.uSpeed.value = v.speed
     u.uBoostPulse.value = this.boostGlow
     this.rig.camera.getWorldPosition(u.uCameraPos.value)
+    this.sky.update(u.uCameraPos.value)
     this.traffic.update(prev, curr, alpha)
     this.particles.update(dt)
     this.speedLines.update(this.track, v.s - 10, v.branch, v.speed, v.airborne, v.theta)
@@ -266,6 +282,23 @@ export class RenderWorld {
     info.time = this.time
     info.shield = curr.hud.shield
     info.hit = this.hitFlash
+  }
+
+  /** Pose the ghost from its own snapshot (or hide it). */
+  updateGhost(snap: SimSnapshot | null): void {
+    const g = this.ghost.root
+    if (!snap || snap.phase !== 'running') {
+      g.visible = false
+      return
+    }
+    g.visible = true
+    const v = snap.vehicle
+    g.position.set(v.pos.x, v.pos.y, v.pos.z)
+    this.v3.set(v.forward.x, v.forward.y, v.forward.z)
+    this.v3b.set(v.up.x, v.up.y, v.up.z)
+    g.up.copy(this.v3b)
+    g.lookAt(this.v3.add(g.position))
+    g.rotateZ(v.bank)
   }
 
   render(): void {

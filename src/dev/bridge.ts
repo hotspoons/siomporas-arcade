@@ -78,7 +78,9 @@ function safe(v: unknown, depth = 0, seen = new WeakSet<object>()): unknown {
  * a no-op build when the bridge is off, so nothing is exposed by default.
  */
 export function registerBridgeContext(ctx: Record<string, unknown>): void {
-  context = { ...context, ...ctx }
+  // Copy descriptors, not values: `get snap()` must stay live, not be frozen
+  // to whatever it returned at registration time.
+  Object.defineProperties(context, Object.getOwnPropertyDescriptors(ctx))
   ;(window as unknown as Record<string, unknown>).__apex = context
 }
 

@@ -333,6 +333,7 @@ export class Game implements LoopClient {
     const events = this.world.events
     if (events.length) events.drain((e) => this.onEvent(e))
     this.view.update(this.prev, this.curr, alpha, dt, (i) => this.world.isRingTaken(i))
+    this.view.updateGhost(this.ghost && this.state === 'running' ? this.ghostSnap : null)
     this.xr.update(this.curr, dt)
     if (this.state === 'running' || this.state === 'paused' || this.state === 'summary') {
       this.hud.update(this.curr, dt, this.view.interpolated.speed * MPH_PER_MS)

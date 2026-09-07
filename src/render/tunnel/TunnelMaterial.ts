@@ -116,6 +116,14 @@ void main() {
   }
   vec3 V = normalize(uCameraPos - vWorld);
   float dist = length(uCameraPos - vWorld);
+  // Seen from outside (open sections, flight): a dark hull with faint ribs.
+  if (dot(N, V) < 0.0) {
+    float ribO = gridLine(s / (RING * 5.0), 0.01);
+    vec3 hull = uWallColor * 0.5 + uLineColor * ribO * 0.25 * uGlow;
+    float fogO = 1.0 - exp(-dist * dist * uFogDensity * uFogDensity);
+    gl_FragColor = vec4(mix(hull, uFogColor, clamp(fogO, 0.0, 1.0)), 1.0);
+    return;
+  }
 
   // Cheap headlight: walls near the camera pick up light, far ones don't.
   float ndv = max(dot(N, V), 0.0);
@@ -141,7 +149,7 @@ void main() {
   float ribPulse = 0.75 + 0.25 * sin(s * 0.05 - uTime * 9.0);
   col += uLineColor * fine * 0.22 * uGlow;
   col += uLineColor * longi * 0.2 * uGlow;
-  col += uRibColor * rib * ribPulse * 0.9 * uGlow;
+  col += uRibColor * rib * ribPulse * 0.65 * uGlow;
 
   // Boost strips: hot chevrons scrolling toward the player.
   if (vTrack.z > 0.01) {
@@ -153,8 +161,8 @@ void main() {
   }
 
   // Open-profile edges glow like a warning lip.
-  float edge = 1.0 - smoothstep(0.0, 1.6, vTrack.y);
-  col += uEdgeColor * edge * 1.8 * uGlow;
+  float edge = 1.0 - smoothstep(0.0, 0.9, vTrack.y);
+  col += uEdgeColor * edge * 1.1 * uGlow;
 
   // Distance fog to the background colour hides the chunk window.
   float fog = 1.0 - exp(-dist * dist * uFogDensity * uFogDensity);

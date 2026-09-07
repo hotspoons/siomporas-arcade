@@ -154,7 +154,18 @@ export const SCORE_PER_KILL: Record<string, number> = {
   INTERCEPTOR: 300,
   ARMORED: 500,
   GATE_BOSS: 2000,
+  HAULER: 250,
+  SWARM: 60,
+  TURRET: 200,
 }
+/** Transit train: cars and car length (metres) — one agent, many collision bodies. */
+export const TRAIN_CARS = 6
+export const TRAIN_CAR_LENGTH = 9
+/** Spinner bar half-arc around the tube, radians. */
+export const SPINNER_HALF_ARC = 0.5
+export const SPINNER_RATE = 0.9
+/** Shockwave shoves indestructible light-cycles this far ahead instead of killing them. */
+export const SHOCK_BIKE_SHOVE = 260
 export const SCORE_RING = 250
 export const SCORE_BOOST_PER_SEC = 80
 export const SCORE_TIME_LEFT_PER_SEC = 50

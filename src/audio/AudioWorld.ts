@@ -117,24 +117,49 @@ export class AudioWorld {
     noiseSrc.connect(bp).connect(this.engineNoiseGain).connect(this.engineBus)
     noiseSrc.start()
 
-    // Laser: a pulsed tone, gated by laserGain.
-    this.laserOsc = ctx.createOscillator()
-    this.laserOsc.type = 'sawtooth'
-    this.laserOsc.frequency.value = 1400
-    const lfo = ctx.createOscillator()
-    lfo.type = 'square'
-    lfo.frequency.value = 22
-    const lfoGain = ctx.createGain()
-    lfoGain.gain.value = 600
-    lfo.connect(lfoGain).connect(this.laserOsc.frequency)
+    // Laser: a continuous beam — two detuned saws under a high whine, through a
+    // resonant lowpass whose cutoff is swept by a smooth sine LFO. No hard
+    // gating: square-wave chopping is what made the old one yap.
     this.laserGain = ctx.createGain()
     this.laserGain.gain.value = 0
-    const lp = ctx.createBiquadFilter()
-    lp.type = 'lowpass'
-    lp.frequency.value = 3200
-    this.laserOsc.connect(lp).connect(this.laserGain).connect(this.sfxBus)
-    this.laserOsc.start()
+    const beamLp = ctx.createBiquadFilter()
+    beamLp.type = 'lowpass'
+    beamLp.frequency.value = 2600
+    beamLp.Q.value = 6
+    const lfo = ctx.createOscillator()
+    lfo.type = 'sine'
+    lfo.frequency.value = 17
+    const lfoGain = ctx.createGain()
+    lfoGain.gain.value = 900
+    lfo.connect(lfoGain).connect(beamLp.frequency)
     lfo.start()
+    for (const [f, det, g] of [
+      [330, 0, 0.5],
+      [330, 9, 0.5],
+    ] as const) {
+      const o = ctx.createOscillator()
+      o.type = 'sawtooth'
+      o.frequency.value = f
+      o.detune.value = det
+      const og = ctx.createGain()
+      og.gain.value = g
+      o.connect(og).connect(beamLp)
+      o.start()
+    }
+    this.laserOsc = ctx.createOscillator()
+    this.laserOsc.type = 'triangle'
+    this.laserOsc.frequency.value = 2100
+    const vib = ctx.createOscillator()
+    vib.frequency.value = 6
+    const vibGain = ctx.createGain()
+    vibGain.gain.value = 40
+    vib.connect(vibGain).connect(this.laserOsc.frequency)
+    vib.start()
+    const whineGain = ctx.createGain()
+    whineGain.gain.value = 0.35
+    this.laserOsc.connect(whineGain).connect(beamLp)
+    this.laserOsc.start()
+    beamLp.connect(this.laserGain).connect(this.sfxBus)
 
     this.applyVolumes()
     this.started = true
@@ -193,8 +218,8 @@ export class AudioWorld {
     this.openness += (this.openTarget - this.openness) * Math.min(1, dt * 3)
     this.reverbSend.gain.setTargetAtTime(0.45 - 0.38 * this.openness, now, 0.2)
     // Laser gate.
-    this.laserGain.gain.setTargetAtTime(snap.laserFiring ? (snap.laserHit ? 0.16 : 0.1) : 0, now, 0.02)
-    this.laserOsc.frequency.setTargetAtTime(snap.laserHit ? 1900 : 1400, now, 0.03)
+    this.laserGain.gain.setTargetAtTime(snap.laserFiring ? (snap.laserHit ? 0.2 : 0.13) : 0, now, snap.laserFiring ? 0.015 : 0.05)
+    this.laserOsc.frequency.setTargetAtTime(snap.laserHit ? 2600 : 2100, now, 0.04)
 
     // Music scheduler.
     const bpm = (BPM_BASE + Math.max(0, speed - 150) * BPM_PER_MS) * (this.scene === 'run' ? 1 : 0.8)
@@ -314,6 +339,29 @@ export class AudioWorld {
     o.stop(t + dur + 0.02)
   }
 
+  private horn(freq: number, dur: number): void {
+    const ctx = this.ctx!
+    const t = ctx.currentTime
+    const g = ctx.createGain()
+    g.gain.setValueAtTime(0, t)
+    g.gain.linearRampToValueAtTime(0.35, t + 0.05)
+    g.gain.setValueAtTime(0.35, t + dur - 0.1)
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur)
+    const lp = ctx.createBiquadFilter()
+    lp.type = 'lowpass'
+    lp.frequency.value = 1400
+    for (const det of [0, 5, -1200]) {
+      const o = ctx.createOscillator()
+      o.type = 'sawtooth'
+      o.frequency.value = freq
+      o.detune.value = det
+      o.connect(lp)
+      o.start(t)
+      o.stop(t + dur + 0.05)
+    }
+    lp.connect(g).connect(this.sfxBus)
+  }
+
   private duckFor(ms: number, depth: number): void {
     const t = this.ctx!.currentTime
     this.duck.gain.cancelScheduledValues(t)
@@ -392,6 +440,14 @@ export class AudioWorld {
         break
       case 'boss_spawn':
         this.thud(60, 30, 1.0, 0.7)
+        break
+      case 'train':
+        // Two-tone horn, a beat apart.
+        this.horn(220, 0.5)
+        setTimeout(() => this.ctx && this.horn(277, 0.7), 180)
+        break
+      case 'shot_fired':
+        if (e.a > 0 && Math.random() < 0.5) this.noiseBurst(0.05, 0.12, 4000, 'bandpass')
         break
       default:
         break

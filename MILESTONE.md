@@ -84,6 +84,19 @@ pixel-ratio cap on first run. Verified in emulated Chromium touch over the
 tunnel; **tilt never tried on a real phone** (emulation has no sensors).
 `just tunnel` gives an anonymous HTTPS URL for that.
 
+## Owner pass 2 (same day) ✅
+- **Laser sound** rebuilt as a continuous beam (detuned saws + whine through a
+  sine-swept resonant lowpass) — the square-wave gated version "yapped".
+- **Craft** redesigned: red angular rocket-bike, rider tuck, passenger seat,
+  twin cannons, flank shield plates that fade/flicker with the shield.
+- **Six new vehicle kinds** (12 hostile total): TRAIN (6-car transit line, one
+  agent / many bodies, horn + HUD warning, indestructible), LIGHTBIKE
+  (indestructible weaving cycle with a light ribbon; shockwave shoves it),
+  HAULER (drops a shield pod), SWARM (formation of four), TURRET (static gun),
+  SPINNER (bar sweeping the tube). Auto-aim ignores indestructibles.
+- **Course 4 "Cloverleaf"**: four banked lobes, construction gaps in closed
+  tubes, narrow flats, split, transit line. Circuit order is now 1 → 2 → 4 → 3.
+
 ## Tuning changes from the handoff table (§9)
 | Constant | Spec | Now | Why |
 |---|---|---|---|

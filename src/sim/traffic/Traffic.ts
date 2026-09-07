@@ -5,7 +5,7 @@
 import { EventQueue } from '../Events'
 import { hash2, Rng } from '../Rng'
 import { SimSnapshot, TRAFFIC_KIND_CODES, type TrafficKindCode } from '../SimSnapshot'
-import { DESPAWN_BEHIND, MAX_PROJECTILES, MAX_TRAFFIC, SPAWN_CELL, SPAWN_LEAD, TRAFFIC_MAX_RANGE } from '../Tuning'
+import { DESPAWN_BEHIND, MAX_PROJECTILES, MAX_TRAFFIC, SPAWN_CELL, SPAWN_LEAD, SPINNER_RATE, TRAFFIC_MAX_RANGE, TRAIN_CARS, TRAIN_CAR_LENGTH } from '../Tuning'
 import { angleDelta, clamp, expApproach, TAU, wrapAngle } from '../math/scalar'
 import { Vec3 } from '../math/Vec3'
 import type { TrafficKind } from '../track/SegmentDesc'
@@ -36,6 +36,12 @@ export const KIND_DEFS: Record<TrafficKindCode, KindDef> = {
   INTERCEPTOR: { hp: 45, r: 2.8, hover: 4.5, hostile: true, destructible: true, speed: 0 },
   ARMORED: { hp: 220, r: 3.8, hover: 3.0, hostile: true, destructible: true, speed: 190 },
   GATE_BOSS: { hp: 650, r: 6.5, hover: 8, hostile: true, destructible: true, speed: 0 },
+  TRAIN: { hp: 1e9, r: 3.4, hover: 3.0, hostile: true, destructible: false, speed: 205 },
+  LIGHTBIKE: { hp: 1e9, r: 1.7, hover: 1.4, hostile: true, destructible: false, speed: 0 },
+  HAULER: { hp: 150, r: 4.4, hover: 3.2, hostile: true, destructible: true, speed: 110 },
+  SWARM: { hp: 8, r: 1.5, hover: 4.2, hostile: true, destructible: true, speed: 150 },
+  TURRET: { hp: 55, r: 2.4, hover: 1.8, hostile: true, destructible: true, speed: 0 },
+  SPINNER: { hp: 1e9, r: 2.5, hover: 2.5, hostile: true, destructible: false, speed: 0 },
   POD_SHOCK: { hp: 1, r: 3.2, hover: 3.2, hostile: false, destructible: false, speed: 0 },
   POD_SHIELD: { hp: 1, r: 3.2, hover: 3.2, hostile: false, destructible: false, speed: 0 },
   RING: { hp: 1, r: 7, hover: 0, hostile: false, destructible: false, speed: 0 },
@@ -48,7 +54,17 @@ const DEFAULT_MIX: Record<TrafficKind, number> = {
   INTERCEPTOR: 0,
   ARMORED: 0,
   GATE_BOSS: 0,
+  TRAIN: 0,
+  LIGHTBIKE: 0,
+  HAULER: 0,
+  SWARM: 0,
+  TURRET: 0,
+  SPINNER: 0,
 }
+/** Light-cycles hold this far ahead and weave. */
+const LIGHTBIKE_HOLD_DISTANCE = 150
+const TURRET_FIRE_PERIOD = 2.0
+const TURRET_RANGE = 650
 const MIX_KEYS = Object.keys(DEFAULT_MIX) as TrafficKind[]
 
 /** Interceptor / boss fire cadence, seconds. */
@@ -83,6 +99,9 @@ export class Agent {
   flash = 99
   /** Pending chain-detonation fuse for mines; <0 = none. */
   fuse = -1
+  /** Behaviour anchor (spawn theta for weavers, formation phase for swarms). */
+  theta0 = 0
+  phase = 0
   readonly pos = new Vec3()
 }
 
@@ -208,6 +227,14 @@ export class Traffic {
         }
       } else if (kind === 'BLOCKER') {
         this.spawn('BLOCKER', s, theta * 0.5, 0)
+      } else if (kind === 'SWARM') {
+        for (let i = 0; i < 4; i++) {
+          const a = this.spawn('SWARM', s + i * 6, theta, 0)
+          if (a) a.phase = (i * Math.PI) / 2
+        }
+      } else if (kind === 'TRAIN') {
+        const a = this.spawn('TRAIN', s, theta * 0.6, 0)
+        if (a) this.events.push('train', a.pos)
       } else {
         this.spawn(kind, s, theta, 0)
       }
@@ -242,6 +269,8 @@ export class Traffic {
     a.anim = this.rng.range(0, TAU)
     a.flash = 99
     a.fuse = -1
+    a.theta0 = a.theta
+    a.phase = 0
     this.placeAgent(a)
     return a
   }
@@ -257,7 +286,8 @@ export class Traffic {
       a.anim += dt
       a.flash += dt
       // Recycle: far behind, or far ahead (only possible after a shockwave clears space).
-      if (a.s < v.s - DESPAWN_BEHIND || a.s > v.s + TRAFFIC_MAX_RANGE) {
+      const tail = a.kind === KIND_INDEX.TRAIN ? TRAIN_CARS * TRAIN_CAR_LENGTH : 0
+      if (a.s + tail < v.s - DESPAWN_BEHIND || a.s > v.s + TRAFFIC_MAX_RANGE) {
         a.active = false
         continue
       }
@@ -309,12 +339,41 @@ export class Traffic {
           }
           break
         }
+        case 'TRAIN':
+          a.s += a.speed * dt
+          break
+        case 'HAULER':
+          a.s += a.speed * dt
+          a.theta = wrapAngle(a.theta0 + Math.sin(a.anim * 0.5) * 0.15)
+          break
+        case 'LIGHTBIKE': {
+          // Indestructible, fast, weaving across the lane it was born in.
+          const want = v.s + LIGHTBIKE_HOLD_DISTANCE
+          a.speed = clamp(v.speed + (want - a.s) * 0.9, 80, 560)
+          a.s += a.speed * dt
+          a.theta = wrapAngle(a.theta0 + Math.sin(a.anim * 2.6) * 1.0)
+          break
+        }
+        case 'SWARM':
+          a.s += (a.speed + Math.sin(a.anim * 3 + a.phase) * 25) * dt
+          a.theta = wrapAngle(a.theta0 + Math.sin(a.anim * 4 + a.phase) * 0.6)
+          break
+        case 'TURRET':
+          a.timer -= dt
+          if (a.timer <= 0 && a.s - v.s < TURRET_RANGE && a.s > v.s) {
+            a.timer = TURRET_FIRE_PERIOD
+            this.fire(a, world)
+          }
+          break
+        case 'SPINNER':
+          a.theta = wrapAngle(a.theta + SPINNER_RATE * dt)
+          break
         default:
           break
       }
-      // Keep the agent inside whatever profile it is over.
+      // Keep the agent inside whatever profile it is over (spinners sweep the whole tube).
       const clampAngle = this.track.clampAt(a.s, a.branch)
-      if (Number.isFinite(clampAngle)) a.theta = clamp(a.theta, -clampAngle + 0.05, clampAngle - 0.05)
+      if (Number.isFinite(clampAngle) && kind !== 'SPINNER') a.theta = clamp(a.theta, -clampAngle + 0.05, clampAngle - 0.05)
       this.placeAgent(a)
     }
   }
@@ -408,6 +467,7 @@ export class Traffic {
     this.events.push('kill', a.pos, a.kind, byPlayer ? 1 : 0)
     if (kind === 'GATE_BOSS') this.events.push('boss_dead', a.pos)
     if (byPlayer) world.combat.onKill(kind, world)
+    if (kind === 'HAULER') this.spawn('POD_SHIELD', a.s + 25, a.theta, a.branch)
     if (kind === 'MINE') {
       // Chain reaction: light the fuse on neighbours.
       for (const b of this.agents) {
@@ -439,6 +499,9 @@ export class Traffic {
       out.trafficPos[i * 3] = a.pos.x
       out.trafficPos[i * 3 + 1] = a.pos.y
       out.trafficPos[i * 3 + 2] = a.pos.z
+      out.trafficS[i] = a.s
+      out.trafficTheta[i] = a.theta
+      out.trafficBranch[i] = a.branch
       const f = this.track.frameAt(a.s, a.branch, this.frame)
       Track.radial(f, a.theta, this.vA)
       out.trafficUp[i * 3] = -this.vA.x

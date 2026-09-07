@@ -6,7 +6,7 @@ import { angleDelta, clamp, expApproach } from '../sim/math/scalar'
 import { Vec3 } from '../sim/math/Vec3'
 import type { SimEvent } from '../sim/Events'
 import { SimSnapshot, TRAFFIC_KIND_CODES, type VehicleSnap } from '../sim/SimSnapshot'
-import { SPEED_CRUISE, SPEED_MAX } from '../sim/Tuning'
+import { SHIELD_MAX, SPEED_CRUISE, SPEED_MAX } from '../sim/Tuning'
 import type { Track } from '../sim/track/Track'
 import { CameraRig } from './CameraRig'
 import { Craft } from './Craft'
@@ -83,9 +83,11 @@ export class RenderWorld {
     this.root.add(this.tunnel.root)
     this.root.add(this.craft.root)
     this.ghost.root.visible = false
-    this.ghost.bodyMaterial.transparent = true
-    this.ghost.bodyMaterial.opacity = 0.35
-    this.ghost.bodyMaterial.depthWrite = false
+    for (const m of this.ghost.materials) {
+      m.transparent = true
+      m.opacity = 0.3
+      m.depthWrite = false
+    }
     this.ghost.accentMaterial.transparent = true
     this.ghost.accentMaterial.opacity = 0.5
     this.ghost.shadow.visible = false
@@ -123,7 +125,6 @@ export class RenderWorld {
     u.uWallColor.value.setHSL((hue + 0.05) % 1, 0.45, 0.06)
     u.uBoostColor.value.setHSL((hue + 0.45) % 1, 1, 0.62)
     u.uFogColor.value.copy(this.bg)
-    this.craft.setTint(u.uLineColor.value)
     this.sky.setPalette(hue, this.bg)
   }
 
@@ -252,6 +253,7 @@ export class RenderWorld {
     const throttleGlow = clamp((v.speed - SPEED_CRUISE) / (SPEED_MAX - SPEED_CRUISE), 0, 1)
     this.boostGlow = expApproach(this.boostGlow, v.onBoost ? 1 : 0, 8, dt)
     this.craft.setEngine(Math.max(throttleGlow, this.boostGlow), v.onBoost)
+    this.craft.setShield(curr.hud.shield / SHIELD_MAX, dt)
     this.headlight.position.copy(c.position).addScaledVector(this.v3b, 3)
 
     // Camera.
@@ -266,7 +268,7 @@ export class RenderWorld {
     u.uBoostPulse.value = this.boostGlow
     this.rig.camera.getWorldPosition(u.uCameraPos.value)
     this.sky.update(u.uCameraPos.value)
-    this.traffic.update(prev, curr, alpha)
+    this.traffic.update(prev, curr, alpha, this.track)
     this.particles.update(dt)
     this.speedLines.update(this.track, v.s - 10, v.branch, v.speed, v.airborne, v.theta)
     this.laser.update(curr, dt, this.time)

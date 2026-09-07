@@ -4,9 +4,9 @@
 
 import type { CourseDesc, SegmentDesc } from '../SegmentDesc'
 
-const MID = { DRONE: 5, BLOCKER: 3, MINE: 3, INTERCEPTOR: 2, ARMORED: 0 }
-const HARD = { DRONE: 4, BLOCKER: 3, MINE: 4, INTERCEPTOR: 3, ARMORED: 1 }
-const BRUTAL = { DRONE: 3, BLOCKER: 3, MINE: 4, INTERCEPTOR: 3, ARMORED: 2 }
+const MID = { DRONE: 5, BLOCKER: 3, MINE: 3, INTERCEPTOR: 2, HAULER: 1, TURRET: 1 }
+const HARD = { DRONE: 4, BLOCKER: 3, MINE: 4, INTERCEPTOR: 3, ARMORED: 1, LIGHTBIKE: 2, TRAIN: 1 }
+const BRUTAL = { DRONE: 3, BLOCKER: 3, MINE: 4, INTERCEPTOR: 3, ARMORED: 2, LIGHTBIKE: 2, SPINNER: 1, SWARM: 2 }
 
 const segments: SegmentDesc[] = [
   { type: 'TUBE', length: 400, radius: 13 },

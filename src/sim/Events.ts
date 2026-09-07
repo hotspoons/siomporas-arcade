@@ -28,6 +28,7 @@ export type SimEventType =
   | 'charge_earned'
   | 'boss_spawn'
   | 'boss_dead'
+  | 'train'
 
 export interface SimEvent {
   type: SimEventType

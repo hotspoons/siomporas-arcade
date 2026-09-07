@@ -12,7 +12,19 @@ export type SegmentType =
   | 'SPLIT'
   | 'GATE'
 
-export type TrafficKind = 'DRONE' | 'BLOCKER' | 'MINE' | 'INTERCEPTOR' | 'ARMORED' | 'GATE_BOSS'
+export type TrafficKind =
+  | 'DRONE'
+  | 'BLOCKER'
+  | 'MINE'
+  | 'INTERCEPTOR'
+  | 'ARMORED'
+  | 'GATE_BOSS'
+  | 'TRAIN'
+  | 'LIGHTBIKE'
+  | 'HAULER'
+  | 'SWARM'
+  | 'TURRET'
+  | 'SPINNER'
 
 export type PickupKind = 'POD_SHOCK' | 'POD_SHIELD' | 'RING'
 

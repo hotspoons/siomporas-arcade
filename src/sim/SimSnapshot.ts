@@ -44,7 +44,7 @@ export interface HudSnap {
 }
 
 /** Kind codes shared with the render layer; see TRAFFIC_KIND_CODES. */
-export const TRAFFIC_KIND_CODES = ['DRONE', 'BLOCKER', 'MINE', 'INTERCEPTOR', 'ARMORED', 'GATE_BOSS', 'POD_SHOCK', 'POD_SHIELD', 'RING'] as const
+export const TRAFFIC_KIND_CODES = ['DRONE', 'BLOCKER', 'MINE', 'INTERCEPTOR', 'ARMORED', 'GATE_BOSS', 'POD_SHOCK', 'POD_SHIELD', 'RING', 'TRAIN', 'LIGHTBIKE', 'HAULER', 'SWARM', 'TURRET', 'SPINNER'] as const
 export type TrafficKindCode = (typeof TRAFFIC_KIND_CODES)[number]
 
 export class SimSnapshot {
@@ -90,6 +90,10 @@ export class SimSnapshot {
   readonly trafficId = new Int32Array(MAX_TRAFFIC)
   readonly trafficKind = new Uint8Array(MAX_TRAFFIC)
   readonly trafficPos = new Float32Array(MAX_TRAFFIC * 3)
+  /** Track-space coordinates, for renderers that extend along the track (train cars, trails). */
+  readonly trafficS = new Float32Array(MAX_TRAFFIC)
+  readonly trafficTheta = new Float32Array(MAX_TRAFFIC)
+  readonly trafficBranch = new Uint8Array(MAX_TRAFFIC)
   readonly trafficUp = new Float32Array(MAX_TRAFFIC * 3)
   readonly trafficFwd = new Float32Array(MAX_TRAFFIC * 3)
   readonly trafficHp = new Float32Array(MAX_TRAFFIC)

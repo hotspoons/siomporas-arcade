@@ -49,3 +49,12 @@ handoff, or where the handoff left a choice open. Newest last.
     on SwiftShader for render/regression checks. Neither reaches a build.
 13. **Head-tracked turret not built.** Listed as optional/advanced in the
     handoff; the setting exists in `Settings` but is not surfaced or wired.
+14. **Homage, not replica.** After the owner asked for more of the original's
+    flavour, the craft became a red rocket-bike (rider in a tuck over a tank,
+    angular shell, second seat, twin roof cannons, shield plates on the flanks
+    that dim with the shield) and six vehicle types were added (transit train,
+    indestructible light-cycles with ribbons, hauler, swarm, turret, spinner).
+    Course 4 "Cloverleaf" borrows the *vocabulary* the original's level names
+    describe publicly — banked lobes, narrow flats, tunnel under construction,
+    branching — from written descriptions only. No layout data, art or audio
+    from the original was viewed or used; everything remains authored here.

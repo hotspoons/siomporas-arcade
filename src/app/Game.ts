@@ -468,6 +468,10 @@ export class Game implements LoopClient {
       case 'boss_spawn':
         this.hud.showMessage('GATE GUARDIAN', 1.5, 'bad')
         break
+      case 'train':
+        this.hud.showMessage('TRANSIT INBOUND', 1.4, 'bad')
+        pad.rumble(0.2, 0.4, 200)
+        break
       case 'pickup':
         this.hud.showMessage(e.a === 0 ? 'SHOCKWAVE CHARGE' : 'SHIELD', 0.8, 'good')
         break

@@ -4,7 +4,8 @@ A browser tunnel racer-shooter: pilot a low-slung craft down glowing tubes at
 700–1000 mph, roll around the wall to dodge, burn traffic with a roof laser,
 clear the screen with a shockwave, ride jumps into open air, and beat a
 countdown that only checkpoints extend. Two looks — a modern post-processed
-one and a deliberate 20 fps flat-shaded CRT one — plus a WebXR mode.
+one and a deliberate 20 fps flat-shaded CRT one — plus WebXR and phone (tilt)
+modes. Four courses, twelve hostile vehicle types, a circuit mode.
 
 TypeScript · Vite · three.js · postprocessing · Vitest · oxlint. No framework.
 See [MILESTONE.md](MILESTONE.md) for what is done and verified,

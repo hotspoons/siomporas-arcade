@@ -29,6 +29,10 @@ import {
   SHOCKWAVE_MAX_CHARGES,
   SHOCKWAVE_RADIUS,
   SHOCKWAVE_START_CHARGES,
+  SHOCK_BIKE_SHOVE,
+  SPINNER_HALF_ARC,
+  TRAIN_CARS,
+  TRAIN_CAR_LENGTH,
   VEHICLE_HALF_LENGTH,
   VEHICLE_HALF_WIDTH,
   VEHICLE_HOVER,
@@ -142,12 +146,25 @@ export class Combat {
       const a = traffic.agents[traffic.order[i]]
       if (a.s > s1 + margin) break
       if (a.branch !== v.branch) continue
+      const kind = TRAFFIC_KIND_CODES[a.kind]
       // Swept capsule: the craft's path this tick in (s, lateral) space.
       const y0 = angleDelta(a.theta, this.prevTheta) * radius
       const y1 = angleDelta(a.theta, v.theta) * radius
-      const d = segmentPointDistance(this.prevS - VEHICLE_HALF_LENGTH, y0, v.s + VEHICLE_HALF_LENGTH, y1, a.s, 0)
-      if (d > a.r + VEHICLE_HALF_WIDTH) continue
-      const kind = TRAFFIC_KIND_CODES[a.kind]
+      let hit = false
+      if (kind === 'TRAIN') {
+        // One agent, TRAIN_CARS bodies trailing behind the head.
+        for (let k = 0; k < TRAIN_CARS && !hit; k++) {
+          const cs = a.s - k * TRAIN_CAR_LENGTH
+          hit = segmentPointDistance(this.prevS - VEHICLE_HALF_LENGTH, y0, v.s + VEHICLE_HALF_LENGTH, y1, cs, 0) <= a.r + VEHICLE_HALF_WIDTH
+        }
+      } else if (kind === 'SPINNER') {
+        // A bar sweeping around the tube: thin along s, wide in theta.
+        const ds = Math.abs(a.s - v.s)
+        hit = ds < 3 + VEHICLE_HALF_LENGTH && Math.abs(y1) < SPINNER_HALF_ARC * radius + VEHICLE_HALF_WIDTH
+      } else {
+        hit = segmentPointDistance(this.prevS - VEHICLE_HALF_LENGTH, y0, v.s + VEHICLE_HALF_LENGTH, y1, a.s, 0) <= a.r + VEHICLE_HALF_WIDTH
+      }
+      if (!hit) continue
       const def = KIND_DEFS[kind]
       if (!def.hostile) {
         this.pickup(kind, a, world)
@@ -163,9 +180,10 @@ export class Combat {
       }
       if (kind === 'ARMORED' || kind === 'GATE_BOSS') {
         traffic.damage(a, 30, world, false)
-      } else {
+      } else if (def.destructible) {
         traffic.kill(a, world, false)
       }
+      // Trains, light-cycles and spinners shrug it off.
     }
   }
 
@@ -217,7 +235,9 @@ export class Combat {
       if (dx > LASER_RANGE) break
       if (a.branch !== v.branch) continue
       const kind = TRAFFIC_KIND_CODES[a.kind]
-      if (!KIND_DEFS[kind].hostile) continue
+      const def = KIND_DEFS[kind]
+      // Auto-aim only wants things it can actually hurt.
+      if (!def.hostile || !def.destructible) continue
       const lateral = Math.abs(angleDelta(v.theta, a.theta)) * radius
       // Generous near, tighter far: cone plus the target's own radius.
       const angle = Math.atan2(Math.max(0, lateral - a.r), dx)
@@ -257,7 +277,8 @@ export class Combat {
       const kind = TRAFFIC_KIND_CODES[a.kind]
       if (!KIND_DEFS[kind].hostile) continue
       if (kind === 'GATE_BOSS') traffic.damage(a, SHOCK_BOSS_DAMAGE, world, true)
-      else traffic.kill(a, world, true)
+      else if (kind === 'LIGHTBIKE') a.s += SHOCK_BIKE_SHOVE
+      else if (KIND_DEFS[kind].destructible) traffic.kill(a, world, true)
     }
     for (const p of traffic.projectiles) p.active = false
     this.events.push('shockwave', v.pos)

@@ -5,7 +5,7 @@
 // lateral offset in road widths (|offset| > 1 is off the tarmac).
 
 import { Rng } from '@apex/engine/math/Rng'
-import { FORK_SEGMENTS, RUNWAY_SEGMENTS, SEG_LENGTH, STAGE_SCALE } from './Tuning'
+import { FORK_SEGMENTS, ROLL_AMPLITUDE, RUNWAY_SEGMENTS, SEG_LENGTH, STAGE_SCALE } from './Tuning'
 
 export interface SpriteRef {
   kind: string
@@ -115,10 +115,11 @@ export class Stage {
           break
         }
         case 'hills': {
+          // Each hump climbs then drops, so a hills section ends where it began.
           const per = Math.floor(s.n / s.count)
           for (let i = 0; i < s.count; i++) {
-            addRoad(0, Math.floor(per / 2), 0, 0, s.height * (i % 2 === 0 ? 1 : -1))
-            addRoad(0, per - Math.floor(per / 2), 0, 0, 0)
+            addRoad(0, Math.floor(per / 2), 0, 0, s.height)
+            addRoad(0, per - Math.floor(per / 2), 0, 0, -s.height)
           }
           break
         }
@@ -127,6 +128,17 @@ export class Stage {
     // Return to level ground before the end so stages join cleanly.
     if (Math.abs(y) > 0.01) addRoad(0, 40, 0, 0, -y)
     this.length = segs.length
+    // Rolling undulation everywhere: a gentle swell that crests every ~50
+    // segments and completes whole periods over the stage, so the road is
+    // always rising or falling a little — the classic rhythm.
+    const periods = Math.max(1, Math.round(this.length / 52))
+    for (let i = 0; i < this.length; i++) {
+      const s0 = segs[i]
+      const a0 = (i / this.length) * Math.PI * 2 * periods
+      const a1 = ((i + 1) / this.length) * Math.PI * 2 * periods
+      s0.y0 += ROLL_AMPLITUDE * Math.sin(a0)
+      s0.y1 += ROLL_AMPLITUDE * Math.sin(a1)
+    }
     if (segs.length) segs[0].checkpoint = true
     if (this.forks) {
       for (let i = 0; i < FORK_SEGMENTS && i < segs.length; i++) {

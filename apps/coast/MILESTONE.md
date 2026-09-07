@@ -27,6 +27,14 @@ Started 2026-09-07. Verified in headless SwiftShader Chromium and unit tests onl
   headlight fall-off, glowing signage and lit windows; clouds layer.
 - Car choice (liveries or the formula car) and a view hint on the HUD.
 
+## Feel pass (after the first look)
+- Bottom-of-road popping fixed: the row under the camera is pinned just in
+  front of it instead of being skipped every segment.
+- Hills: each hump climbs and returns; a gentle whole-period swell
+  (`ROLL_AMPLITUDE`) runs under every stage so the road always rolls.
+- Speed cues: 2-segment bands, lower/closer chase camera, 78° FOV.
+- Sprite atlas cached in IndexedDB (keyed by manifest hash + bake version).
+
 ## Not yet
 - Hero car catalogue (one car), rival cars, high-score table, route map on
   the results screen, weather/time-of-day variants, more landmarks (signs with

@@ -178,7 +178,10 @@ export class RenderWorld {
     let maxY = -Infinity
     for (let n = 0; n <= DRAW_SEGMENTS; n++) {
       const seg = segs[Math.min(base + n, last)]
-      const zRel = (base + n) * SEG_LENGTH - camZ
+      let zRel = (base + n) * SEG_LENGTH - camZ
+      // The row under the camera projects behind it; pin it just in front so the
+      // nearest quad always reaches the bottom of the screen instead of popping.
+      if (n === 0 && zRel < 0.6) zRel = 0.6
       if (zRel < 0.3) {
         this.rowValid[n] = 0
       } else {

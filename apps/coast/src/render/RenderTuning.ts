@@ -3,10 +3,10 @@
 
 export const LOGICAL_HEIGHT = 224
 /** Vertical field of view for the pseudo-3D projection. */
-export const FOV_DEG = 72
+export const FOV_DEG = 78
 /** Camera height (m) and how far ahead of the camera the player car sits, per view. */
 export const VIEWS = {
-  chase: { camHeight: 5.6, playerAhead: 9.5, drawPlayer: true },
+  chase: { camHeight: 4.4, playerAhead: 8.5, drawPlayer: true },
   cockpit: { camHeight: 1.35, playerAhead: 2.2, drawPlayer: false },
 }
 /** Exponential fog per metre of depth, modern / retro. */

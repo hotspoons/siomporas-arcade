@@ -19,8 +19,10 @@ export const FORK_SEGMENTS = 70
 export const FORK_SPREAD = 1.6
 /** Multiplier on authored section lengths (stages are authored long, then scaled to ~a minute). */
 export const STAGE_SCALE = 0.7
-/** Alternate road bands every N segments. */
-export const BAND_SEGMENTS = 3
+/** Alternate road bands every N segments (shorter = faster strobe = more speed). */
+export const BAND_SEGMENTS = 2
+/** Metres of gentle swell layered over every stage's hills. */
+export const ROLL_AMPLITUDE = 3.2
 
 // --- player ---
 export const MAX_SPEED_HI = 84

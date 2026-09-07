@@ -1,5 +1,14 @@
 {
   "extends": "../../tsconfig.base.json",
-  "compilerOptions": { "tsBuildInfoFile": "../../node_modules/.tmp/conduit.tsbuildinfo" },
-  "include": ["src", "test", "tools"]
+  "compilerOptions": {
+    "tsBuildInfoFile": "../../node_modules/.tmp/conduit.tsbuildinfo"
+  },
+  "include": [
+    "src",
+    "test",
+    "tools"
+  ],
+  "exclude": [
+    "test/_*.test.ts"
+  ]
 }

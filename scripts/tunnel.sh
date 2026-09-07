@@ -5,7 +5,7 @@
 # prints the public https URL and keeps streaming cloudflared's log.
 #
 #   just tunnel            # prints  ➜  TUNNEL: https://<random>.trycloudflare.com
-#   cat .tunnel-url        # the same URL, for scripts
+#   cat .tunnel-url.conduit   # the same URL, for scripts (.tunnel-url.<app>)
 #
 # HTTPS matters: phones only expose motion sensors on secure origins.
 set -euo pipefail
@@ -22,11 +22,12 @@ if ! (ss -ltn 2>/dev/null || netstat -ltn 2>/dev/null) | grep -q ":$PORT "; then
   done
 fi
 
-rm -f .tunnel-url
+OUT=".tunnel-url${APP:+.$APP}"
+rm -f "$OUT"
 cloudflared tunnel --url "http://localhost:$PORT" --no-autoupdate 2>&1 | while IFS= read -r line; do
   if [[ -z "${URL:-}" && "$line" =~ (https://[a-z0-9-]+\.trycloudflare\.com) ]]; then
     URL="${BASH_REMATCH[1]}"
-    echo "$URL" > .tunnel-url
+    echo "$URL" > "$OUT"
     printf '\n  \033[32m➜\033[0m  TUNNEL: \033[1m%s\033[0m\n\n' "$URL"
   elif [[ "$line" == *ERR* || "$line" == *error* ]]; then
     echo "$line"

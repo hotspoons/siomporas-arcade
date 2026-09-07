@@ -31,6 +31,14 @@ headless SwiftShader Chromium (`just probe`, `just smoke drivin`) and unit tests
   landing, curbs, grass, slides. Strength slider in Settings. Real
   force-feedback wheels are not reachable from the web platform.
 
+## Owner rules (same day)
+- **Free roaming**: infinite grass, no auto-reset, crashes resume in place,
+  `R` rights the car where it is; laps always count at the line, skipped
+  required segments add 5 s each (split alternatives are optional).
+- **Blue daytime sky** with light haze fog replaces the dusk look.
+- **The Stunts air glitch**: near-vmax take-off + throttle held → speed pins
+  back to vmax mid-air. Tested.
+
 ## Not yet
 - Ghost/replay of whole laps (tape recording exists in conduit, not here).
 - Editor: pan/zoom for big grids, undo, multi-select, non-90° pieces.

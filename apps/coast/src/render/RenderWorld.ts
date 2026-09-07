@@ -289,7 +289,8 @@ export class RenderWorld {
       const py = P.screenY(groundY - camY, scale)
       let steerFrame = Math.round(curr.steer * 3)
       if (curr.crashT > 0) steerFrame = Math.round(Math.sin(curr.crashT * 40) * 3)
-      const yaw = steerFrame === 0 ? 0 : steerFrame > 0 ? [12, 24, 38][steerFrame - 1] : -[12, 24, 38][-steerFrame - 1]
+      // Baked yaw > 0 shows the car's right flank (nose left); steering right must show the left flank.
+      const yaw = steerFrame === 0 ? 0 : steerFrame > 0 ? -[12, 24, 38][steerFrame - 1] : [12, 24, 38][-steerFrame - 1]
       const frame = this.atlas.frame(this.heroKind, yaw)
       if (frame) this.sprites.add(W / 2 + curr.steer * 2, py + (curr.crashT > 0 ? Math.abs(Math.sin(curr.crashT * 20)) * 12 : 0), frame.heightM * scale, frame, 0, 1, -1e9)
     }

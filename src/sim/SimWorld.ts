@@ -104,7 +104,7 @@ export class SimWorld {
       this.wasOnBoost = v.onBoost
       if (v.onBoost) this.score += SCORE_BOOST_PER_SEC * dt
 
-      v.tick(dt, input, this.track, this.params.speedScale, (amt) => this.drainShield(amt))
+      v.tick(dt, input, this.track, this.params.speedScale, this.drainShieldBound)
       switch (v.event) {
         case 'launched':
           this.events.push('launch', v.pos)
@@ -160,9 +160,11 @@ export class SimWorld {
     if (kind !== 'scrape') this.events.push(kind === 'collision' ? 'collision' : 'hit', pos ?? this.vehicle.pos, amount)
   }
 
-  private drainShield(amount: number): void {
+  private readonly drainShieldBound = (amount: number): void => {
     this.shield = Math.max(0, this.shield - amount)
   }
+
+  readonly isRingTakenBound = (i: number): boolean => this.ringTaken[i] === 1
 
   crash(): void {
     if (this.phase !== 'running') return

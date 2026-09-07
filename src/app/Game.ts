@@ -15,6 +15,7 @@ import { Hud } from '../render/hud/Hud'
 import { ModernStyle } from '../render/styles/ModernStyle'
 import { RetroStyle } from '../render/styles/RetroStyle'
 import { MIN_TIME_SCALE } from '../render/RenderTuning'
+import { TIMER_GATE_BONUS } from '../sim/Tuning'
 import { GameLoop, type LoopClient } from './GameLoop'
 import { MenuStack } from './Menus'
 import { PerfOverlay } from './PerfOverlay'
@@ -64,6 +65,10 @@ export class Game implements LoopClient {
   private readonly container: HTMLElement
   private summaryShown = false
   private endTimer = 0
+  /** Circuit mode: all courses back to back, score and clock carried over. */
+  circuit = false
+  private carriedScore = 0
+  private carriedTimer = 0
 
   constructor(canvas: HTMLCanvasElement, container: HTMLElement) {
     this.container = container
@@ -125,13 +130,46 @@ export class Game implements LoopClient {
   }
 
   startRun(): void {
+    this.circuit = false
     this.seed = (Date.now() & 0xffff) || 1
     this.startRunSeeded(this.seed)
+  }
+
+  /** Every playable course in order, with score and remaining time carried across. */
+  startCircuit(): void {
+    this.circuit = true
+    this.carriedScore = 0
+    this.carriedTimer = 0
+    this.setCourse(0)
+    this.seed = (Date.now() & 0xffff) || 1
+    this.startRunSeeded(this.seed)
+  }
+
+  private advanceCircuit(): void {
+    const snap = this.curr
+    this.carriedScore = snap.hud.score
+    this.carriedTimer = snap.hud.timer
+    this.setCourse(this.courseIndex + 1)
+    this.startRunSeeded(this.seed + this.courseIndex)
+    this.hud.showMessage(`NEXT: ${this.course.name.toUpperCase()}`, 2.2, 'good')
+  }
+
+  /** Index of the last course a circuit visits (the proving run is excluded). */
+  private get lastCircuitIndex(): number {
+    let last = 0
+    COURSES.forEach((c, i) => {
+      if (c.id !== 'test') last = i
+    })
+    return last
   }
 
   startRunSeeded(seed: number): void {
     this.seed = seed
     this.world.reset(seed)
+    if (this.circuit) {
+      this.world.score = this.carriedScore
+      this.world.timer += this.carriedTimer
+    }
     this.world.tick(0, this.held, this.curr)
     this.prev = this.curr
     this.curr = new SimSnapshot()
@@ -153,7 +191,7 @@ export class Game implements LoopClient {
   }
 
   private setupGhost(): void {
-    const best = this.records.bestTape(this.course.id)
+    const best = this.circuit ? null : this.records.bestTape(this.course.id)
     if (best && best.seed === this.seed) {
       this.ghostTape = best.tape
       this.ghost = new SimWorld(this.track, best.seed)
@@ -182,7 +220,8 @@ export class Game implements LoopClient {
   }
 
   restart(): void {
-    this.startRunSeeded(this.seed)
+    if (this.circuit) this.startCircuit()
+    else this.startRunSeeded(this.seed)
   }
 
   quitToTitle(): void {
@@ -195,7 +234,7 @@ export class Game implements LoopClient {
     this.state = 'summary'
     this.input.suppressGameplay = true
     const snap = this.curr
-    const entry = this.records.submit(this.course.id, {
+    const entry = this.records.submit(this.circuit ? 'circuit' : this.course.id, {
       name: this.settings.data.playerName,
       score: snap.hud.score,
       kills: snap.hud.kills,
@@ -325,14 +364,17 @@ export class Game implements LoopClient {
     if (this.state === 'running' && this.world.phase !== 'running') {
       // Let the crash/finish play out for a beat before the summary.
       this.endTimer += dt
-      if (this.endTimer > 1.6 && !this.summaryShown) this.showSummary()
+      if (this.endTimer > 1.6 && !this.summaryShown) {
+        if (this.circuit && this.world.phase === 'finished' && this.courseIndex < this.lastCircuitIndex) this.advanceCircuit()
+        else this.showSummary()
+      }
     }
   }
 
   render(alpha: number, dt: number): void {
     const events = this.world.events
-    if (events.length) events.drain((e) => this.onEvent(e))
-    this.view.update(this.prev, this.curr, alpha, dt, (i) => this.world.isRingTaken(i))
+    if (events.length) events.drain(this.onEventBound)
+    this.view.update(this.prev, this.curr, alpha, dt, this.world.isRingTakenBound)
     this.view.updateGhost(this.ghost && this.state === 'running' ? this.ghostSnap : null)
     this.xr.update(this.curr, dt)
     if (this.state === 'running' || this.state === 'paused' || this.state === 'summary') {
@@ -344,13 +386,15 @@ export class Game implements LoopClient {
     this.view.render()
   }
 
+  private readonly onEventBound = (e: SimEvent): void => this.onEvent(e)
+
   private onEvent(e: SimEvent): void {
     this.view.onEvent(e)
     this.audio.onEvent(e)
     const pad = this.input.gamepad
     switch (e.type) {
       case 'gate':
-        this.hud.showMessage(`CHECKPOINT  +20s`, 1.4, 'good')
+        this.hud.showMessage(`CHECKPOINT  +${TIMER_GATE_BONUS}s`, 1.4, 'good')
         pad.rumble(0.3, 0.6, 120)
         break
       case 'collision':

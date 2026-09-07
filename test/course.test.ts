@@ -4,6 +4,7 @@ import { SimSnapshot } from '../src/sim/SimSnapshot'
 import { SimWorld } from '../src/sim/SimWorld'
 import { SIM_DT } from '../src/sim/Tuning'
 import { COURSE_01 } from '../src/sim/track/courses/course01'
+import { COURSES } from '../src/sim/track/courses'
 import { buildTrack } from '../src/sim/track/TrackBuilder'
 import { makeFrame } from '../src/sim/track/TrackSpline'
 
@@ -73,4 +74,35 @@ describe('Course 01', () => {
       expect(world.phase).toBe('finished')
     })
   }
+})
+
+describe.each(COURSES.filter((c) => c.id !== 'test').map((c) => [c.name, c] as const))('%s', (_name, course) => {
+  const track = buildTrack(course)
+
+  it('levels every open section and builds every split', () => {
+    const f = makeFrame()
+    for (const seg of track.segments) {
+      if (seg.type === 'OPEN' || seg.type === 'HALFPIPE') {
+        track.frameAt((seg.sStart + seg.sEnd) / 2, 0, f)
+        expect(f.nor.y).toBeLessThan(-0.85)
+      }
+      if (seg.type === 'SPLIT') expect(seg.branch).not.toBeNull()
+    }
+  })
+
+  it('is completable at cruise with no steering and no traffic', () => {
+    const world = new SimWorld(track, 11)
+    const snap = new SimSnapshot()
+    const input = makeInputFrame()
+    for (let i = 0; i < 120 * 120 && world.phase === 'running'; i++) {
+      for (const a of world.traffic.agents) a.active = false
+      world.shield = 100
+      world.timer = 999
+      world.tick(SIM_DT, input, snap)
+      world.events.drain((e) => {
+        if (e.type === 'crash') throw new Error(`crashed at s=${world.vehicle.s.toFixed(0)}`)
+      })
+    }
+    expect(world.phase).toBe('finished')
+  })
 })

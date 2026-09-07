@@ -1,68 +1,71 @@
-# Apex Conduit
+# APEX CONDUIT (working title)
 
-A retro-inspired tube racer built with Three.js — ride the inside wall of a
-neon wireframe conduit, roll around it to dodge pylons, graze boost pads, and
-reach each checkpoint arch before the clock runs out. In the spirit of
-**S.T.U.N. Runner**.
+A browser tunnel racer-shooter: pilot a low-slung craft down glowing tubes at
+700–1000 mph, roll around the wall to dodge, burn traffic with a roof laser,
+clear the screen with a shockwave, ride jumps into open air, and beat a
+countdown that only checkpoints extend. Two looks — a modern post-processed
+one and a deliberate 20 fps flat-shaded CRT one — plus a WebXR mode.
 
-> Early prototype. See [HANDOFF.md](HANDOFF.md) for current state and where to
-> take it next.
+TypeScript · Vite · three.js · postprocessing · Vitest · oxlint. No framework.
+See [MILESTONE.md](MILESTONE.md) for what is done and verified,
+[DECISIONS.md](DECISIONS.md) for where the build departs from the design
+handoff, and [HANDOFF.md](HANDOFF.md) for the next agent.
 
-## Stack
+## Run it
 
-Vite · React 19 · TypeScript · Three.js + react-three-fiber · oxlint ·
-Playwright, in a Node 22 dev container. React owns the canvas element, the HUD
-and the menus; everything that runs per frame is plain Three.js reading a
-mutable game state (`src/game/world.ts`).
-
-## Getting started
-
-Open the repo in the dev container (VS Code: *Reopen in Container*).
-`post-create.sh` installs `just`, the npm deps and headless Chromium.
+Open in the dev container (VS Code → *Reopen in Container*), then:
 
 ```bash
-just dev        # Vite dev server on http://localhost:5180
-just check      # oxlint + tsc -b
-just build      # typecheck + production bundle into dist/
-just smoke      # headless Chromium plays a run and screenshots it
-just            # list every recipe
+just dev          # http://localhost:5180
+just check        # oxlint + tsc + vitest
+just build        # production bundle in dist/
+just              # every recipe
 ```
+
+`?style=retro` and `?perf=1` are honoured on the URL.
 
 ## Controls
 
-| Input | Action |
-| --- | --- |
-| `←` `→` / `A` `D` | roll around the conduit |
-| `↑` / `W` | thrust |
-| `↓` / `S` | brake |
-| `Shift` | boost (burns the meter) |
-| `Space` | hop off the wall |
-| `Enter` | launch / restart |
+| Action | Keyboard | Gamepad |
+|---|---|---|
+| Steer around the tube | A / D, ← / → | left stick |
+| Throttle / brake | W or Shift / S | RT / LT |
+| Fire laser | Space or LMB | A / RB |
+| Shockwave | E or RMB | B / LB |
+| Air lift / dive | W / S while airborne | left stick Y |
+| Pause | Esc | Start |
+| Style toggle / perf overlay | F2 / F3 | — |
 
-Gamepad and touch are supported: on touch, horizontal position steers, any
-contact thrusts, and a tap in the top third hops.
-
-## Dev operator shell
-
-An opt-in JS shell into the live page, for driving the running game from a
-terminal on a real GPU. **Off by default and impossible to build into
-production** — details in [HANDOFF.md](HANDOFF.md#the-dev-operator-shell-optin-devonly).
-
-```bash
-just bridge-dev                           # dev server with the shell enabled
-just bridge 'apex.game.v'                 # current speed
-just bridge 'apex.three.gl.info.render'   # draw calls, triangles
-```
+Everything is remappable from *Controls*; bindings persist in localStorage.
 
 ## Layout
 
 ```
-.devcontainer/  container definition + post-create
-dev/            dev-server-only Vite plugin (the operator shell)
-scripts/        operator CLI + Playwright smoke harness
-src/game/       track, course, input, state, simulation, scene
-src/ui/         HUD and menus
+src/sim/       deterministic gameplay — no three.js, unit-tested headlessly
+  math/        Vec3, scalar helpers, Catmull-Rom
+  track/       TrackSpline (baked table), TrackBuilder, Track, profiles, courses/
+  player/      Vehicle (ground + air)
+  combat/      laser, shockwave, shield, collision, score
+  traffic/     agent pool, spawner, behaviours, projectiles
+  SimWorld.ts  fixed-step tick(); SimSnapshot.ts is what the renderer reads
+src/render/    three.js scene: tunnel chunk pool + shader, craft, traffic
+               instancing, VFX, camera rig, styles/ (modern, retro), hud/
+src/input/     keyboard, gamepad, bindings, InputMap
+src/xr/        WebXR session, cockpit, comfort vignette, in-world HUD
+src/audio/     procedural Web Audio
+src/app/       main, GameLoop, Game (flow), Settings, Menus, Records, PerfOverlay
+tools/         preview.html — top-down / side view of any course
+test/          vitest: spline invariants, determinism, courses, jumps
+scripts/       probe.mjs (headless screenshots), smoke.mjs, bridge.mjs
+dev/           Vite plugin for the dev operator shell
 ```
 
-Tuning lives in [src/game/constants.ts](src/game/constants.ts) — speeds, turn
-rate, timers, collision envelopes, camera and fog, all in one file.
+## Dev tools
+
+```bash
+just bridge-dev                    # dev server with the live JS shell enabled
+just bridge 'apex.snap.vehicle.s'  # evaluate in the attached browser tab
+just probe shots/x.png 5 KeyW KeyD # headless SwiftShader run + screenshot
+just smoke                         # headless play-test, fails on console errors
+# course authoring preview: http://localhost:5180/tools/preview.html
+```

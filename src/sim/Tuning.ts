@@ -140,8 +140,13 @@ export const COLLISION_SPIN_TIME = 0.7
 export const COLLISION_INVULN = 0.8
 
 // --- timer / score --------------------------------------------------------------
-export const TIMER_START = 60
-export const TIMER_GATE_BONUS = 20
+/**
+ * Spec started at 60 / +20, but at 313 m/s a 1 km gate spacing is ~3 s, so the
+ * clock never threatened. 20 / +8 keeps a clean run comfortable and makes
+ * collisions, scrapes and braking actually cost you.
+ */
+export const TIMER_START = 20
+export const TIMER_GATE_BONUS = 8
 export const SCORE_PER_KILL: Record<string, number> = {
   DRONE: 100,
   BLOCKER: 150,

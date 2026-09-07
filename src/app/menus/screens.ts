@@ -15,7 +15,8 @@ export function buildMenus(game: Game) {
     title: 'APEX CONDUIT',
     subtitle: 'Ride the wall. Kill the traffic. Beat the clock.',
     items: [
-      { kind: 'action', label: 'START RUN', hint: COURSES[game.courseIndex].name, onSelect: () => game.startRun() },
+      { kind: 'action', label: 'START CIRCUIT', hint: 'All courses back to back — score and clock carry over', onSelect: () => game.startCircuit() },
+      { kind: 'action', label: 'SINGLE COURSE', hint: COURSES[game.courseIndex].name, onSelect: () => game.startRun() },
       {
         kind: 'choice',
         label: 'COURSE',
@@ -178,7 +179,6 @@ export function buildMenus(game: Game) {
         set: (i) => set((d) => (d.vr.comfort = ['intense', 'standard', 'maximum'][i] as typeof d.vr.comfort)),
       },
       slider('VR roll follow', () => s().vr.rollBlend, (v) => set((d) => (d.vr.rollBlend = v)), 0, 1),
-      toggle('Head-tracked turret (advanced)', () => s().vr.headTurret, (v) => set((d) => (d.vr.headTurret = v))),
     ],
     footer: '← → adjust · Esc back',
   })
@@ -244,13 +244,25 @@ export function buildMenus(game: Game) {
   }
 
   const records = (): MenuScreen => {
+    const circuit = game.records.list('circuit')
     const list = game.records.list(COURSES[game.courseIndex].id)
     return {
       id: 'records',
       title: 'RECORDS',
-      subtitle: COURSES[game.courseIndex].name,
+      subtitle: `Circuit · ${COURSES[game.courseIndex].name}`,
       wide: true,
       items: [
+        { kind: 'info', label: '— CIRCUIT —' },
+        ...(circuit.length
+          ? circuit.slice(0, 5).map(
+              (r, i): MenuItem => ({
+                kind: 'info',
+                label: `${i + 1}. ${r.name}  ${r.finished ? '✓' : ''}`,
+                value: () => `${r.score.toLocaleString()} pts · ${r.kills} kills · ${r.gates} gates`,
+              }),
+            )
+          : [{ kind: 'info', label: 'No circuit runs yet.' } as MenuItem]),
+        { kind: 'info', label: `— ${COURSES[game.courseIndex].name.toUpperCase()} —` },
         ...(list.length
           ? list.map(
               (r, i): MenuItem => ({
@@ -279,7 +291,7 @@ export function buildMenus(game: Game) {
     return {
       id: 'summary',
       title: outcome,
-      subtitle: isBest ? 'NEW BEST — your ghost will race you next time' : rank > 0 ? `Rank #${rank} on this course` : '',
+      subtitle: isBest ? (game.circuit ? 'NEW BEST CIRCUIT' : 'NEW BEST — your ghost will race you next time') : rank > 0 ? `Rank #${rank}` : '',
       items: [
         { kind: 'info', label: 'Score', value: () => snap.hud.score.toLocaleString() },
         { kind: 'info', label: 'Kills', value: () => String(snap.hud.kills) },

@@ -18,9 +18,10 @@ jobs:
           node-version: 22
           cache: npm
 
-      - name: Lint + typecheck + build
+      - name: Lint + typecheck + test + build
         run: |
           npm ci
           npm run lint
           npx tsc -b
+          npx vitest run
           npm run build

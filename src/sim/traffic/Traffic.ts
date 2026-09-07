@@ -113,6 +113,7 @@ export class Traffic {
   private bossCursor = 0
   private readonly frame = makeFrame()
   private readonly vA = new Vec3()
+  private readonly weights = new Float32Array(MIX_KEYS.length)
 
   constructor(track: Track, seed: number, events: EventQueue) {
     this.track = track
@@ -147,8 +148,22 @@ export class Traffic {
 
   private spawnAhead(playerS: number): void {
     const track = this.track
+    // Hand-placed pickups and bosses first: they must never lose a slot to filler.
+    const pickups = track.pickups
+    while (this.pickupCursor < pickups.length && pickups[this.pickupCursor].s < playerS + SPAWN_LEAD) {
+      const p = pickups[this.pickupCursor++]
+      this.spawn(p.pickup, p.s, p.theta, 0)
+    }
+    const bosses = track.bosses
+    while (this.bossCursor < bosses.length && bosses[this.bossCursor] < playerS + SPAWN_LEAD) {
+      const s = bosses[this.bossCursor++]
+      const a = this.spawn('GATE_BOSS', s, 0, 0)
+      if (a) this.events.push('boss_spawn', a.pos)
+    }
     const lastCell = Math.floor((playerS + SPAWN_LEAD) / SPAWN_CELL)
-    if (this.spawnedCell < 0) this.spawnedCell = Math.floor(playerS / SPAWN_CELL) + 2
+    const leadCells = Math.ceil(SPAWN_LEAD / SPAWN_CELL)
+    // First tick, or a teleport: only ever fill the lead window, never the whole course.
+    if (this.spawnedCell < 0 || lastCell - this.spawnedCell > leadCells + 4) this.spawnedCell = Math.max(this.spawnedCell, lastCell - leadCells + 2)
     while (this.spawnedCell < lastCell) {
       this.spawnedCell++
       const cell = this.spawnedCell
@@ -169,12 +184,16 @@ export class Traffic {
       }
       if (seg.difficulty <= 0 || roll > seg.difficulty * 0.92) continue
       const mix = seg.mix ?? DEFAULT_MIX
-      const weights = MIX_KEYS.map((k) => mix[k] ?? 0)
-      const total = weights.reduce((a, b) => a + b, 0)
+      const weights = this.weights
+      let total = 0
+      for (let k = 0; k < MIX_KEYS.length; k++) {
+        weights[k] = mix[MIX_KEYS[k]] ?? 0
+        total += weights[k]
+      }
       if (total <= 0) continue
       let pick = roll2 * total
       let ki = 0
-      for (; ki < weights.length - 1; ki++) {
+      for (; ki < MIX_KEYS.length - 1; ki++) {
         pick -= weights[ki]
         if (pick < 0) break
       }
@@ -194,18 +213,6 @@ export class Traffic {
       }
       // Splits: mirror onto branch 1 so both routes have traffic.
       if (seg.type === 'SPLIT') this.spawn(kind === 'MINE' ? 'DRONE' : kind, s, -theta, 1)
-    }
-    // Hand-placed pickups and bosses.
-    const pickups = track.pickups
-    while (this.pickupCursor < pickups.length && pickups[this.pickupCursor].s < playerS + SPAWN_LEAD) {
-      const p = pickups[this.pickupCursor++]
-      this.spawn(p.pickup, p.s, p.theta, 0)
-    }
-    const bosses = track.bosses
-    while (this.bossCursor < bosses.length && bosses[this.bossCursor] < playerS + SPAWN_LEAD) {
-      const s = bosses[this.bossCursor++]
-      const a = this.spawn('GATE_BOSS', s, 0, 0)
-      if (a) this.events.push('boss_spawn', a.pos)
     }
   }
 

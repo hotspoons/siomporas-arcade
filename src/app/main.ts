@@ -82,21 +82,4 @@ registerBridgeContext({
     game.view.render()
     return game.view.renderer.domElement.toDataURL('image/jpeg', quality)
   },
-  /** Drive the craft from the shell: hold inputs for `ms`. */
-  hold(partial: Record<string, number | boolean>, ms: number): Promise<void> {
-    const held = game.held
-    Object.assign(held, partial)
-    game.input.suppressGameplay = true
-    const restore = () => {
-      game.input.suppressGameplay = false
-    }
-    ;(game as unknown as { _bridgeHold?: Record<string, unknown> })._bridgeHold = partial
-    return new Promise((r) =>
-      setTimeout(() => {
-        delete (game as unknown as { _bridgeHold?: Record<string, unknown> })._bridgeHold
-        restore()
-        r()
-      }, ms),
-    )
-  },
 })

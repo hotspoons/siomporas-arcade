@@ -1,0 +1,24 @@
+# Node
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# Logs
+*.log
+npm-debug.log*
+
+# Editor/OS
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea
+.DS_Store
+
+# Claude Code local state (worktrees, session scratch)
+.claude/
+
+# ad-hoc dev probe scripts (throwaway; kept local, never committed)
+probes/
+_*.mjs
+shots/

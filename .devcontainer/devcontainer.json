@@ -1,0 +1,35 @@
+{
+	"name": "apex-conduit",
+	// Node-only image: this repo is a single Vite/React/Three.js app at the
+	// root — no pipeline, no second language toolchain.
+	"image": "mcr.microsoft.com/devcontainers/typescript-node:22",
+	"features": {
+		"ghcr.io/devcontainers/features/git:1": {}
+	},
+	"postCreateCommand": "bash .devcontainer/post-create.sh",
+	// Share the host's network namespace so the Vite dev server is reachable
+	// directly from the host browser. On Docker Desktop (macOS/Windows) this
+	// requires "Enable host networking" in Settings > Resources > Network.
+	"runArgs": ["--network=host"],
+	// Vite dev server.
+	"forwardPorts": [5180],
+	"initializeCommand": "cmd.exe /c powershell -NoProfile -Command \"$ErrorActionPreference='SilentlyContinue'; New-Item -ItemType Directory -Force -Path $env:USERPROFILE\\.claude | Out-Null; if (!(Test-Path $env:USERPROFILE\\.claude.json)) { Set-Content -Path $env:USERPROFILE\\.claude.json -Value '{}' }\" || sh -c 'mkdir -p \"$HOME/.claude\" && touch \"$HOME/.claude.json\"'",
+	"mounts": [
+		"source=${localEnv:HOME}${localEnv:USERPROFILE}/.claude.json,target=/home/node/.claude.json,type=bind",
+		"source=${localEnv:HOME}${localEnv:USERPROFILE}/.claude,target=/home/node/.claude,type=bind"
+	],
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"oxc.oxc-vscode",
+				"esbenp.prettier-vscode",
+				"slevesque.shader",
+				"anthropic.claude-code"
+			],
+			"settings": {
+				"editor.formatOnSave": false,
+				"typescript.tsdk": "node_modules/typescript/lib"
+			}
+		}
+	}
+}

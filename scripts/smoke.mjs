@@ -1,0 +1,71 @@
+#!/usr/bin/env node
+// Headless verification loop: boot the running dev server in Chromium, launch
+// a run, play it for a few seconds, screenshot, and fail on any console error
+// or unhandled rejection. This is the "did I break the game" check that a
+// typecheck can't make.
+//
+//   just dev      # in one terminal
+//   just smoke    # in another
+//
+// APEX_URL overrides the target; SMOKE_SECONDS the play time.
+
+import { mkdirSync } from 'node:fs'
+import { chromium } from 'playwright'
+
+const url = process.env.APEX_URL ?? 'http://localhost:5180'
+const seconds = Number(process.env.SMOKE_SECONDS ?? 6)
+const outDir = 'shots'
+
+const errors = []
+
+const browser = await chromium.launch({
+  // SwiftShader: the container has no GPU, and WebGL must still initialise.
+  args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader'],
+})
+const page = await browser.newPage({ viewport: { width: 1280, height: 720 } })
+page.on('console', (msg) => {
+  if (msg.type() === 'error') errors.push(`console: ${msg.text()}`)
+})
+page.on('pageerror', (err) => errors.push(`pageerror: ${err.message}`))
+
+try {
+  await page.goto(url, { waitUntil: 'networkidle', timeout: 30_000 })
+  mkdirSync(outDir, { recursive: true })
+  await page.screenshot({ path: `${outDir}/title.png` })
+
+  // Launch, then hold thrust and weave, so the run exercises collision,
+  // pickups and the chunk recycler rather than just the first frame.
+  await page.keyboard.press('Enter')
+  const deadline = Date.now() + seconds * 1000
+  await page.keyboard.down('ArrowUp')
+  while (Date.now() < deadline) {
+    await page.keyboard.down('ArrowRight')
+    await page.waitForTimeout(400)
+    await page.keyboard.up('ArrowRight')
+    await page.keyboard.press('Space')
+    await page.keyboard.down('ArrowLeft')
+    await page.waitForTimeout(400)
+    await page.keyboard.up('ArrowLeft')
+  }
+  await page.keyboard.up('ArrowUp')
+  await page.screenshot({ path: `${outDir}/run.png` })
+
+  // The run must have actually moved: a frozen frame is the failure this
+  // catches that a screenshot alone would not.
+  const distance = await page.evaluate(() =>
+    Number(document.querySelector('.progress .label')?.textContent?.match(/([\d,]+) m/)?.[1]?.replace(/,/g, '') ?? 0),
+  )
+  if (!Number.isFinite(distance) || distance < 200) {
+    errors.push(`craft barely moved: ${distance}m after ${seconds}s`)
+  }
+  console.log(`smoke: ${distance}m covered in ${seconds}s → ${outDir}/run.png`)
+} finally {
+  await browser.close()
+}
+
+if (errors.length) {
+  console.error('\nsmoke FAILED:')
+  for (const e of errors) console.error('  ' + e)
+  process.exit(1)
+}
+console.log('smoke OK')

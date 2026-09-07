@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <!-- full-screen game canvas: the canvas owns all pointer/touch gestures,
+         so browser PAGE pinch-zoom and double-tap zoom must be off -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <!-- the game is dark chrome throughout: tell the browser so its own
+         surfaces (mobile toolbar band, overscroll) match instead of white -->
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#05030f" />
+    <title>Apex Conduit</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

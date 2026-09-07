@@ -6,6 +6,7 @@ import { AmbientLight, Box3, BoxGeometry, Color, Vector4, DirectionalLight, Grou
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { ATLAS_SIZE } from './RenderTuning'
 import { MODELS, type ModelDef } from './models'
+import { applyAtlasFilters, atlasKey, loadCachedAtlas, saveCachedAtlas } from './AtlasCache'
 
 export interface SpriteFrame {
   /** UV rect in the atlas (0..1). */
@@ -48,7 +49,28 @@ export class SpriteAtlas {
     return k.frames[best]
   }
 
+  /** Whether the last bake() came from the IndexedDB cache. */
+  fromCache = false
+
   async bake(renderer: WebGLRenderer, retro: boolean, onProgress?: (done: number, total: number) => void): Promise<void> {
+    const key = atlasKey()
+    const cached = await loadCachedAtlas(key)
+    if (cached) {
+      applyAtlasFilters(cached.texture, retro)
+      this.texture = cached.texture
+      this.kinds.clear()
+      for (const [k, v] of cached.kinds) this.kinds.set(k, v)
+      this.ready = true
+      this.fromCache = true
+      onProgress?.(MODELS.length, MODELS.length)
+      return
+    }
+    await this.render(renderer, retro, onProgress)
+    if (this.rt) void saveCachedAtlas(key, renderer, this.rt, this.kinds)
+  }
+
+  /** The actual bake: load every model and render its cells into the atlas target. */
+  private async render(renderer: WebGLRenderer, retro: boolean, onProgress?: (done: number, total: number) => void): Promise<void> {
     const loader = new GLTFLoader()
     const scene = new Scene()
     scene.add(new AmbientLight(0xffffff, 0.35))
@@ -168,6 +190,7 @@ export class SpriteAtlas {
     renderer.autoClear = prevClear
     this.texture = this.rt.texture
     this.ready = true
+    this.fromCache = false
   }
 }
 

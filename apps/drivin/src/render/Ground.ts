@@ -39,9 +39,14 @@ export class Ground {
           gl_FragColor = vec4(mix(col, uFogColor, clamp(fog, 0.0, 1.0)), 1.0);
         }`,
     })
+    // Pushed back in depth so a level-0 road never fights it, whatever the camera distance.
+    this.material.polygonOffset = true
+    this.material.polygonOffsetFactor = 2
+    this.material.polygonOffsetUnits = 4
     this.mesh = new Mesh(new PlaneGeometry(GROUND_SIZE, GROUND_SIZE), this.material)
     this.mesh.rotation.x = -Math.PI / 2
-    this.mesh.position.y = -0.02
+    this.mesh.position.y = -0.05
+    this.mesh.renderOrder = -5
     this.mesh.frustumCulled = false
   }
 }

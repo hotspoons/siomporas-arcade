@@ -2,7 +2,7 @@
 
 /** Daylight haze: fog and clear colour. */
 export const BG_COLOR = 0xbcd8f2
-export const GROUND_SIZE = 4000
+export const GROUND_SIZE = 2600
 export const FOG_DENSITY_MODERN = 0.0011
 export const FOG_DENSITY_RETRO = 0.0016
 

@@ -29,7 +29,7 @@ export class CameraRig {
   private time = 0
 
   constructor(aspect: number) {
-    this.camera = new PerspectiveCamera(FOV_BASE, aspect, 0.2, 6000)
+    this.camera = new PerspectiveCamera(FOV_BASE, aspect, 0.5, 3000)
   }
 
   reset(): void {

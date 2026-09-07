@@ -57,6 +57,7 @@ canvas.addEventListener('webglcontextrestored', () => {
 game.view
   .bake((d, t) => (loading.textContent = `BAKING SPRITES ${d}/${t}`))
   .then(() => {
+    if (game.view.atlas.fromCache) console.info('%c[atlas] loaded from cache', 'color:#39ff81')
     loading.classList.add('hidden')
     game.loop.start()
   })

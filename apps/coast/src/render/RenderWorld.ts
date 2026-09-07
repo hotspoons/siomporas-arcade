@@ -3,7 +3,7 @@
 // far → near, then sprites far → near with hill clipping, then the player car
 // or the cockpit. The sim is never touched.
 
-import { Color, OrthographicCamera, Scene, WebGLRenderer } from 'three'
+import { Color, LinearFilter, NearestFilter, OrthographicCamera, Scene, WebGLRenderer } from 'three'
 import type { RenderStats } from '@apex/engine/render/RenderStats'
 import type { Style, StyleFrameInfo } from '@apex/engine/render/styles/Style'
 import type { SimEvent } from '../sim/Events'
@@ -115,6 +115,8 @@ export class RenderWorld {
     style.attach(this.renderer, this.scene, this.camera)
     this.retro = style.name === 'retro'
     this.cockpit.setRetro(this.retro)
+    if (this.atlas.texture) this.atlas.texture.minFilter = this.atlas.texture.magFilter = this.retro ? NearestFilter : LinearFilter
+    if (this.atlas.texture) this.atlas.texture.needsUpdate = true
     if (this.stage) this.background.setPalette(this.palette, THEMES[this.stage.desc.theme].backdrop, this.retro)
     this.resize(this.width, this.height, this.pixelRatio)
   }

@@ -75,8 +75,9 @@ export class RoadBuilder {
     // Cross-section lateral offsets and heights: outer curb edge, curb top, road edge, centre, road edge, curb top, outer curb edge.
     const W = ROAD_HALF_WIDTH
     const C = CURB_WIDTH
+    // Tarmac sits a few centimetres proud of the ground plane; curbs a little more.
     const xs = [-W - C, -W, -W, 0, W, W, W + C]
-    const ys = [0.15, 0.15, 0, 0, 0, 0.15, 0.15]
+    const ys = [0.2, 0.2, 0.06, 0.06, 0.06, 0.2, 0.2]
     const kinds = [1, 1, 0, 0, 0, 1, 1]
     const across = xs.length
     const pos = new Float32Array(rings * across * 3)

@@ -32,7 +32,7 @@ export const DEFAULT_SETTINGS: SettingsData = {
   keys: DEFAULT_KEYS,
   pad: DEFAULT_PAD,
   view: 'chase',
-  car: 'gulf',
+  car: 'rosso',
   station: 0,
   units: 'kmh',
   access: { reducedMotion: false, hudScale: 1 },

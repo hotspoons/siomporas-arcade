@@ -195,12 +195,12 @@ function drawClouds(tex: CanvasTexture, p: Palette, night: boolean): void {
   for (let i = 0; i < puffs; i++) {
     const x = rnd(i) * LAYER_W
     const y = 70 + rnd(i + 50) * 70
-    const w = 30 + rnd(i + 100) * 70
-    const alpha = night ? 0.06 : 0.16 + rnd(i + 150) * 0.14
+    const w = 50 + rnd(i + 100) * 110
+    const alpha = night ? 0.06 : 0.2 + rnd(i + 150) * 0.15
     g.fillStyle = `rgba(${Math.round(col.r * 255)},${Math.round(col.g * 255)},${Math.round(col.b * 255)},${alpha})`
     for (let k = 0; k < 5; k++) {
       g.beginPath()
-      g.ellipse(x + (k - 2) * w * 0.22, y + (k % 2) * 4, w * 0.26, 8 + rnd(i + k) * 6, 0, 0, Math.PI * 2)
+      g.ellipse(x + (k - 2) * w * 0.22, y + (k % 2) * 4, w * 0.28, 9 + rnd(i + k) * 7, 0, 0, Math.PI * 2)
       g.fill()
     }
   }

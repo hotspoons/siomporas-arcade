@@ -10,8 +10,8 @@ export const VIEWS = {
   cockpit: { camHeight: 1.35, playerAhead: 2.2, drawPlayer: false },
 }
 /** Exponential fog per metre of depth, modern / retro. */
-export const FOG_MODERN = 0.0032
-export const FOG_RETRO = 0.0045
+export const FOG_MODERN = 0.0042
+export const FOG_RETRO = 0.0052
 /** Lane marker width (m) and dash length in segments. */
 export const LANE_WIDTH = 0.28
 export const RUMBLE_WIDTH = 1.6

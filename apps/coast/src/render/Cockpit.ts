@@ -56,9 +56,9 @@ export class Cockpit {
     this.acc = 0
     const c = this.ctx
     c.clearRect(0, 0, W, H)
-    const body = '#' + this.livery.body.toString(16).padStart(6, '0')
-    const bodyDark = shade(this.livery.body, 0.55)
-    const bodyLight = shade(this.livery.body, 1.12)
+    const bodyDark = shade(this.livery.body, 0.42)
+    const bodyLight = shade(this.livery.body, 0.95)
+    const bodyMid = shade(this.livery.body, 0.72)
     const stripe = '#' + this.livery.stripe.toString(16).padStart(6, '0')
 
     // Fender humps: big rounded shapes in the lower corners, lit from above.
@@ -66,7 +66,7 @@ export class Cockpit {
       const cx = W / 2 + side * 470
       const grad = c.createRadialGradient(cx - side * 60, H - 40, 40, cx, H + 60, 420)
       grad.addColorStop(0, bodyLight)
-      grad.addColorStop(0.55, body)
+      grad.addColorStop(0.45, bodyMid)
       grad.addColorStop(1, bodyDark)
       c.fillStyle = grad
       c.beginPath()
@@ -85,7 +85,7 @@ export class Cockpit {
     }
     // Nose between the humps: low, with the central stripe running away from us.
     const noseGrad = c.createLinearGradient(0, H - 210, 0, H)
-    noseGrad.addColorStop(0, body)
+    noseGrad.addColorStop(0, bodyMid)
     noseGrad.addColorStop(1, bodyDark)
     c.fillStyle = noseGrad
     c.beginPath()

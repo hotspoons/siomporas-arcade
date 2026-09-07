@@ -196,7 +196,7 @@ function drawClouds(tex: CanvasTexture, p: Palette, night: boolean): void {
     const x = rnd(i) * LAYER_W
     const y = 70 + rnd(i + 50) * 70
     const w = 30 + rnd(i + 100) * 70
-    const alpha = night ? 0.08 : 0.28 + rnd(i + 150) * 0.22
+    const alpha = night ? 0.06 : 0.16 + rnd(i + 150) * 0.14
     g.fillStyle = `rgba(${Math.round(col.r * 255)},${Math.round(col.g * 255)},${Math.round(col.b * 255)},${alpha})`
     for (let k = 0; k < 5; k++) {
       g.beginPath()

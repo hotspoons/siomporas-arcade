@@ -51,6 +51,14 @@ export const GRASS_GRIP_SCALE = 0.35
 export const CURB_SLOW = 4
 
 // --- air / crash ---
+/**
+ * The happy glitch (a homage to a 1990 stunt-driving sim): leave the ground at
+ * or above this fraction of top speed with the throttle held, and while
+ * airborne the car accelerates straight back to top speed — even after a
+ * corner scrubbed it off. Let go of the accelerator and it stops.
+ */
+export const AIR_GLITCH_THRESHOLD = 0.85
+export const AIR_GLITCH_ACCEL = 90
 export const LAND_TOLERANCE = 1.2
 /** Land only if the car's up and the surface normal roughly agree. */
 export const LAND_MIN_ALIGN = 0.35
@@ -64,6 +72,6 @@ export const REPLAY_SECONDS = 6
 export const REPLAY_PLAY_SECONDS = 4.5
 
 // --- run rules ---
-/** Rolling start after a crash so stunts right after the respawn point are makeable. */
-export const RESPAWN_SPEED = 20
+/** Seconds added to a lap for every required track segment you skipped. */
+export const SEGMENT_PENALTY = 5
 export const CRASH_TIME_PENALTY = 5

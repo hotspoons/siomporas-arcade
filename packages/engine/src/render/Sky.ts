@@ -10,6 +10,7 @@ const STAR_RADIUS = 2600
 export class Sky {
   readonly root = new Group()
   private readonly dome: Mesh
+  private readonly stars: Points
   private readonly domeMat: ShaderMaterial
 
   constructor() {
@@ -31,9 +32,9 @@ export class Sky {
     const g = new BufferGeometry()
     g.setAttribute('position', new BufferAttribute(pos, 3))
     g.setAttribute('color', new BufferAttribute(col, 3))
-    const stars = new Points(g, new PointsMaterial({ size: 2.2, sizeAttenuation: false, vertexColors: true, depthWrite: false }))
-    stars.frustumCulled = false
-    this.root.add(stars)
+    this.stars = new Points(g, new PointsMaterial({ size: 2.2, sizeAttenuation: false, vertexColors: true, depthWrite: false }))
+    this.stars.frustumCulled = false
+    this.root.add(this.stars)
 
     this.domeMat = new ShaderMaterial({
       side: BackSide,
@@ -68,6 +69,10 @@ export class Sky {
     ;(u.uHorizon.value as Color).setHSL((hue + 0.25) % 1, 0.45, 0.13)
     ;(u.uTop.value as Color).setHSL((hue + 0.2) % 1, 0.5, 0.05)
     ;(u.uBottom.value as Color).copy(bg)
+  }
+
+  setStars(visible: boolean): void {
+    this.stars.visible = visible
   }
 
   /** Direct colour control for games that want a specific dusk/night. */

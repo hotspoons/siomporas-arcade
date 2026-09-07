@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "../../node_modules/.tmp/coast.tsbuildinfo"
+  },
+  "include": [
+    "src",
+    "test",
+    "tools"
+  ],
+  "exclude": [
+    "test/_*.test.ts"
+  ]
+}

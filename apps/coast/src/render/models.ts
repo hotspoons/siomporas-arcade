@@ -1,0 +1,60 @@
+// Sprite manifest: which CC0 model renders which sprite kind, how tall it is
+// in metres, and from which yaw angles (degrees; 0 = seen from behind).
+
+export interface ModelDef {
+  kind: string
+  file: string
+  heightM: number
+  /** Yaw angles to bake; sprites pick the nearest. */
+  yaws: number[]
+  /** Cell size in the atlas. */
+  cell: number
+  /** Extra uniform scale on the model before fitting (some kits are tiny). */
+  fit?: number
+}
+
+const N = (kind: string, file: string, heightM: number, cell = 128): ModelDef => ({ kind, file: `assets/nature/${file}.glb`, heightM, yaws: [0], cell })
+const P = (kind: string, file: string, heightM: number, cell = 128): ModelDef => ({ kind, file: `assets/props/${file}.glb`, heightM, yaws: [0], cell })
+const C = (kind: string, file: string): ModelDef => ({ kind, file: `assets/cars/${file}.glb`, heightM: 1.5, yaws: [0, 20, -20], cell: 128 })
+
+export const MODELS: ModelDef[] = [
+  N('palm', 'tree_palm', 10, 192),
+  N('palmTall', 'tree_palmTall', 13, 192),
+  N('palmBend', 'tree_palmBend', 9.5, 192),
+  N('pine', 'tree_pineDefaultA', 9, 192),
+  N('pineTall', 'tree_pineTallA', 13, 192),
+  N('pineRound', 'tree_pineRoundA', 8, 192),
+  N('oak', 'tree_oak', 9, 192),
+  N('tree', 'tree_default', 8, 192),
+  N('bush', 'plant_bush', 1.6, 96),
+  N('bushLarge', 'plant_bushLarge', 2.4, 96),
+  N('rock', 'rock_largeA', 2.6, 96),
+  N('rockTall', 'rock_tallA', 4.2, 128),
+  N('stoneTall', 'stone_tallA', 3.5, 128),
+  N('cactus', 'cactus_short', 2.4, 96),
+  N('cactusTall', 'cactus_tall', 4.0, 128),
+  N('flower', 'flower_redA', 0.8, 64),
+  N('stump', 'stump_old', 1.0, 64),
+  P('billboard', 'billboard', 7.5, 256),
+  P('billboardLow', 'billboardLow', 5.5, 256),
+  P('lightpost', 'lightPostModern', 8, 128),
+  P('lightpostTall', 'lightPostLarge', 10, 128),
+  P('barrier', 'barrierWall', 1.2, 96),
+  P('banner', 'bannerTowerRed', 6, 128),
+  P('grandstand', 'grandStand', 7, 256),
+  P('tent', 'tent', 4, 192),
+  P('pitsOffice', 'pitsOffice', 6, 256),
+  P('gantry', 'overheadLights', 8.5, 256),
+  { kind: 'player', file: 'assets/cars/race.glb', heightM: 1.3, yaws: [0, 12, 24, 38, -12, -24, -38], cell: 160 },
+  C('sedan', 'sedan'),
+  C('sedanSports', 'sedan-sports'),
+  C('suv', 'suv'),
+  C('van', 'van'),
+  C('truck', 'truck'),
+  C('taxi', 'taxi'),
+  C('police', 'police'),
+  C('delivery', 'delivery'),
+]
+
+/** Width in road-halves is derived from the baked aspect; these are height metres for the sim's hit tests elsewhere. */
+export const MODEL_BY_KIND: Record<string, ModelDef> = Object.fromEntries(MODELS.map((m) => [m.kind, m]))

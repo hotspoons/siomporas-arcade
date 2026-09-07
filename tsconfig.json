@@ -1,9 +1,20 @@
 {
   "files": [],
   "references": [
-    { "path": "./packages/engine" },
-    { "path": "./apps/conduit" },
-    { "path": "./apps/drivin" },
-    { "path": "./tsconfig.node.json" }
+    {
+      "path": "./packages/engine"
+    },
+    {
+      "path": "./apps/conduit"
+    },
+    {
+      "path": "./apps/drivin"
+    },
+    {
+      "path": "./apps/coast"
+    },
+    {
+      "path": "./tsconfig.node.json"
+    }
   ]
 }

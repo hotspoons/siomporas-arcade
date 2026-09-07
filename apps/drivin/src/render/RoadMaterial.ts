@@ -23,7 +23,7 @@ export function makeRoadUniforms(): RoadUniforms {
   return {
     uTime: { value: 0 },
     uCameraPos: { value: new Vector3() },
-    uFogColor: { value: new Color(0x0b1020) },
+    uFogColor: { value: new Color(0xbcd8f2) },
     uFogDensity: { value: 0.0011 },
     uAsphalt: { value: new Color(0x2a2e38) },
     uLine: { value: new Color(0xf2f4ff) },

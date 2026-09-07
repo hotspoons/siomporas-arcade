@@ -1,6 +1,7 @@
 # Apex monorepo — task recipes (https://just.systems)
 #   apps/conduit  tunnel racer-shooter        :5180
 #   apps/drivin   stunt-track driving game    :5181
+#   apps/coast    pseudo-3D sprite racer      :5182
 #   packages/engine  shared runtime (loop, styles, input, menus, math, dev bridge)
 
 set shell := ["bash", "-euo", "pipefail", "-c"]
@@ -11,7 +12,7 @@ default:
 
 # --- dev loop ---------------------------------------------------------------
 
-# Vite dev server for an app (conduit :5180, drivin :5181)
+# Vite dev server for an app (conduit :5180, drivin :5181, coast :5182)
 dev app="conduit":
     npm run dev -w apps/{{ app }}
 
@@ -62,7 +63,7 @@ bridge-clients app="conduit":
     APEX_BRIDGE="${APEX_BRIDGE:-apex-dev}" APEX_ORIGIN="http://localhost:$(just _port {{ app }})" node scripts/bridge.mjs --clients
 
 _port app:
-    @[ "{{ app }}" = "drivin" ] && echo 5181 || echo 5180
+    @case "{{ app }}" in drivin) echo 5181;; coast) echo 5182;; *) echo 5180;; esac
 
 # --- remote testing ---------------------------------------------------------
 

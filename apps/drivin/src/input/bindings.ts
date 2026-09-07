@@ -10,7 +10,7 @@ export const ACTION_LABELS: Record<Action, string> = {
   throttle: 'Throttle',
   brake: 'Brake / reverse',
   handbrake: 'Handbrake',
-  reset: 'Reset to track',
+  reset: 'Recover (right the car in place)',
   camera: 'Camera',
   pause: 'Pause',
   confirm: 'Confirm',

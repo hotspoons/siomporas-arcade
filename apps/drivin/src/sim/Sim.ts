@@ -7,7 +7,7 @@ import { EventQueue } from './Events'
 import type { InputFrame } from './InputFrame'
 import { Snapshot, type RunPhase } from './Snapshot'
 import type { Lane, Track } from './Track'
-import { CRASH_TIME_PENALTY, REPLAY_PLAY_SECONDS, REPLAY_SECONDS, RESPAWN_SPEED, SIM_HZ } from './Tuning'
+import { CRASH_TIME_PENALTY, REPLAY_PLAY_SECONDS, REPLAY_SECONDS, SEGMENT_PENALTY, SIM_HZ } from './Tuning'
 
 const REPLAY_FRAMES = REPLAY_SECONDS * SIM_HZ
 
@@ -28,9 +28,10 @@ export class Sim {
   targetLaps: number
   private lapArmed = false
   private prevLane: Lane | null = null
-  /** Start of the lane before the current one: the respawn point with a run-up. */
-  private respawnLane: Lane | null = null
-  private currentLaneStart: Lane | null = null
+  /** Lanes a lap must visit (the main route, minus split alternatives) and what this lap has covered. */
+  private readonly required: Lane[] = []
+  private readonly visited = new Set<number>()
+  lastPenalty = 0
   // Replay ring: pos(3) + forward(3) + up(3) per tick.
   private readonly ring = new Float32Array(REPLAY_FRAMES * 9)
   private ringHead = 0
@@ -45,7 +46,53 @@ export class Sim {
     this.spec = spec
     this.targetLaps = targetLaps
     this.car = new Car(track, spec)
+    this.computeRequired()
     this.reset()
+  }
+
+  /** Main-route lanes, excluding anything inside a split/join alternative. */
+  private computeRequired(): void {
+    this.required.length = 0
+    const start = this.track.startLane
+    if (!start) return
+    // Lanes on any branch of a split are optional; find them by walking each alternative to its rejoin.
+    const optional = new Set<number>()
+    let lane: Lane | undefined = start
+    const seen = new Set<number>()
+    while (lane && !seen.has(lane.id)) {
+      seen.add(lane.id)
+      if (lane.next.length === 2) {
+        const mainWalk = new Set<number>()
+        let a: Lane | undefined = lane.next[0]
+        for (let i = 0; a && i < 64; i++) {
+          mainWalk.add(a.id)
+          a = a.next[0]
+        }
+        let b: Lane | undefined = lane.next[1]
+        const branch: number[] = []
+        for (let i = 0; b && i < 64 && !mainWalk.has(b.id); i++) {
+          branch.push(b.id)
+          b = b.next[0]
+        }
+        // Everything on the main side up to the rejoin is optional too.
+        if (b) {
+          let m: Lane | undefined = lane.next[0]
+          while (m && m !== b) {
+            optional.add(m.id)
+            m = m.next[0]
+          }
+          for (const id of branch) optional.add(id)
+        }
+      }
+      lane = lane.next[0]
+    }
+    lane = start
+    seen.clear()
+    while (lane && !seen.has(lane.id)) {
+      seen.add(lane.id)
+      if (!optional.has(lane.id)) this.required.push(lane)
+      lane = lane.next[0]
+    }
   }
 
   reset(): void {
@@ -61,11 +108,11 @@ export class Sim {
     this.ringCount = 0
     this.ringHead = 0
     this.events.clear()
+    this.visited.clear()
+    this.lastPenalty = 0
     const start = this.track.startLane
     if (start) {
       this.car.placeOn(start, 4)
-      this.respawnLane = start
-      this.currentLaneStart = start
       this.prevLane = start
     }
   }
@@ -76,7 +123,11 @@ export class Sim {
       this.time += dt
       this.tickCount++
       this.lapTime += dt
-      if (input.reset) this.respawn(false)
+      if (input.reset) {
+        // Manual recover: back on your wheels, right here.
+        this.car.resumeInPlace()
+        this.events.push('respawn', this.car.pos, 0)
+      }
       car.tick(dt, input)
       this.recordPose()
       switch (car.event) {
@@ -101,23 +152,24 @@ export class Sim {
         default:
           break
       }
-      // Lap: entering the start lane from its predecessor.
+      // Segments visited this lap; laps complete at the start line however you got there,
+      // and every required segment you skipped costs SEGMENT_PENALTY.
+      if (car.mode === 'track' && car.lane) this.visited.add(car.lane.id)
       if (car.mode === 'track' && car.lane && car.lane !== this.prevLane) {
-        // Respawn one lane back from wherever you get into trouble.
-        if (this.prevLane && this.prevLane.next.includes(car.lane)) {
-          this.respawnLane = this.currentLaneStart
-          this.currentLaneStart = car.lane
-        }
         if (car.lane.isStart && car.lane === this.track.startLane) {
-          // A lap is the start line crossed from the piece before it — not a
-          // shortcut across the grass.
-          const legit = this.prevLane !== null && this.prevLane.next.includes(car.lane)
-          if (this.lapArmed && legit) {
+          if (this.lapArmed) {
+            let missed = 0
+            for (const r of this.required) if (!this.visited.has(r.id) && r !== car.lane) missed++
+            const penalty = missed * SEGMENT_PENALTY
             this.laps++
-            this.lastLap = this.lapTime
+            this.lastPenalty = penalty
+            this.lastLap = this.lapTime + penalty
             if (this.bestLap === 0 || this.lastLap < this.bestLap) this.bestLap = this.lastLap
             this.lapTime = 0
+            this.visited.clear()
+            this.visited.add(car.lane.id)
             this.events.push('lap', car.pos, this.laps)
+            if (missed > 0) this.events.push('penalty', car.pos, missed)
             if (this.targetLaps > 0 && this.laps >= this.targetLaps) this.phase = 'finished'
           }
         } else {
@@ -125,29 +177,18 @@ export class Sim {
         }
         this.prevLane = car.lane
       }
-      // Wandered off into the void on grass.
-      if (car.mode === 'ground' && !this.nearAnyLane()) {
-        this.events.push('lost', car.pos)
-        this.respawn(true)
-      }
     } else if (this.phase === 'replay') {
       this.replayTime += dt
       if (this.replayTime >= REPLAY_PLAY_SECONDS) {
         this.events.push('replay_end', null)
-        this.respawn(true)
+        // No teleport: you continue from where you came to rest.
+        this.car.resumeInPlace()
+        this.prevLane = this.car.lane
+        this.events.push('respawn', this.car.pos, 1)
         this.phase = 'driving'
       }
     }
     this.write(out)
-  }
-
-  private nearAnyLane(): boolean {
-    const c = this.car.pos
-    for (const lane of this.track.lanes) {
-      const t = lane.table
-      if (c.x > t.minX - 60 && c.x < t.maxX + 60 && c.z > t.minZ - 60 && c.z < t.maxZ + 60) return true
-    }
-    return false
   }
 
   private recordPose(): void {
@@ -179,15 +220,6 @@ export class Sim {
     this.replayCam.y = Math.max(c.pos.y + 6, 4)
     this.replayLook.copy(c.pos)
     this.events.push('replay_start', c.pos)
-  }
-
-  private respawn(fromCrash: boolean): void {
-    const lane = this.respawnLane ?? this.track.startLane
-    if (!lane) return
-    this.car.placeOn(lane, 2, RESPAWN_SPEED)
-    this.prevLane = lane
-    this.currentLaneStart = lane
-    this.events.push('respawn', this.car.pos, fromCrash ? 1 : 0)
   }
 
   private write(out: Snapshot): void {
@@ -228,6 +260,7 @@ export class Sim {
     h.bestLap = this.bestLap
     h.laps = this.laps
     h.crashes = this.crashes
+    h.penalty = this.lastPenalty
     // Fake gearbox for the engine note and HUD.
     const ratio = Math.abs(c.speed) / this.spec.topSpeed
     h.gear = Math.min(6, 1 + Math.floor(ratio * 6))

@@ -35,6 +35,8 @@ export class Snapshot {
     bestLap: 0,
     laps: 0,
     crashes: 0,
+    /** Seconds added to the last lap for skipped segments. */
+    penalty: 0,
     gear: 1,
     rpm: 0,
   }

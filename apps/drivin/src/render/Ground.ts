@@ -13,10 +13,10 @@ export class Ground {
     this.material = new ShaderMaterial({
       uniforms: {
         uCameraPos: { value: new Vector3() },
-        uFogColor: { value: new Color(0x0b1020) },
+        uFogColor: { value: new Color(0xbcd8f2) },
         uFogDensity: { value: 0.0011 },
-        uGrass: { value: new Color(0x1d3a2a) },
-        uGrid: { value: new Color(0x2f6b4a) },
+        uGrass: { value: new Color(0x4a9a3e) },
+        uGrid: { value: new Color(0x3b7a30) },
         uFlat: { value: 0 },
         uCell: { value: CELL },
       },
@@ -34,7 +34,7 @@ export class Ground {
           float g = max(lineAt(vWorld.x / uCell, 0.012), lineAt(vWorld.z / uCell, 0.012));
           float fine = max(lineAt(vWorld.x / (uCell * 0.25), 0.02), lineAt(vWorld.z / (uCell * 0.25), 0.02)) * 0.35;
           if (uFlat > 0.5) { g = step(0.5, g); fine = 0.0; }
-          vec3 col = uGrass + uGrid * (g + fine) * 0.9;
+          vec3 col = mix(uGrass, uGrid, clamp(g + fine, 0.0, 1.0) * 0.8);
           float fog = 1.0 - exp(-dist * dist * uFogDensity * uFogDensity);
           gl_FragColor = vec4(mix(col, uFogColor, clamp(fog, 0.0, 1.0)), 1.0);
         }`,

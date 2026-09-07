@@ -54,14 +54,15 @@ export class RenderWorld {
     this.root.add(this.roads.root)
     this.root.add(this.ground.mesh)
     this.scene.add(this.sky.root)
-    // Dusk: deep navy overhead, a warm band at the horizon.
-    this.sky.setColors(0x070a18, 0x5a3320, BG_COLOR)
+    // Clear day: deep blue overhead, pale haze at the horizon, no stars.
+    this.sky.setColors(0x2f6fd0, 0xa9d3f5, BG_COLOR)
+    this.sky.setStars(false)
     this.car = new CarMesh(spec.look)
     this.root.add(this.car.root)
     this.root.add(this.particles.points)
-    this.root.add(new AmbientLight(0x6070a0, 0.5))
-    this.root.add(new HemisphereLight(0xa0b8ff, 0x203018, 0.8))
-    const sun = new DirectionalLight(0xfff2d8, 1.6)
+    this.root.add(new AmbientLight(0x8fa8d0, 0.6))
+    this.root.add(new HemisphereLight(0xcfe4ff, 0x4a7a3a, 0.9))
+    const sun = new DirectionalLight(0xfff6e0, 1.8)
     sun.position.set(300, 500, 200)
     this.root.add(sun)
     this.topSpeed = spec.topSpeed

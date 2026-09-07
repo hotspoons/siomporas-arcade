@@ -3,7 +3,10 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "workspaces": ["packages/*", "apps/*"],
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
   "scripts": {
     "dev": "npm run dev -w apps/conduit",
     "dev:conduit": "npm run dev -w apps/conduit",
@@ -13,7 +16,8 @@
     "typecheck": "tsc -b",
     "test": "vitest run",
     "bridge": "node scripts/bridge.mjs",
-    "smoke": "node scripts/smoke.mjs"
+    "smoke": "node scripts/smoke.mjs",
+    "dev:coast": "npm run dev -w apps/coast"
   },
   "devDependencies": {
     "@types/node": "^24.13.2",

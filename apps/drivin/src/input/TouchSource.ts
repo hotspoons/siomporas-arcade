@@ -28,7 +28,7 @@ export class TouchSource implements ExtraSource {
       <div class="zone brake" data-zone="brake"><span>BRAKE</span></div>
       <div class="zone gas" data-zone="gas"><span>GAS</span></div>
       <div class="zone hand" data-zone="hand"><span>HANDBRAKE</span></div>
-      <div class="zone reset" data-zone="reset"><span>RESET</span></div>
+      <div class="zone reset" data-zone="reset"><span>RECOVER</span></div>
       <div class="zone camera" data-zone="camera"><span>CAM</span></div>
       <div class="zone pause" data-zone="pause"><span>II</span></div>
       <div class="zone calib" data-zone="calib"><span>⟲ TILT</span></div>

@@ -13,6 +13,8 @@ import type { InputFrame } from './InputFrame'
 import { makeLaneFrame, type LaneFrame, type LaneHit } from './PathTable'
 import type { Lane, Track } from './Track'
 import {
+  AIR_GLITCH_ACCEL,
+  AIR_GLITCH_THRESHOLD,
   ALIGN_RATE,
   CAR_RIDE,
   CRASH_IMPACT_SPEED,
@@ -65,6 +67,8 @@ export class Car {
   // air / ground state
   readonly vel = new Vec3()
   yaw = 0
+  /** Armed when you took off near vmax with the throttle down; see AIR_GLITCH_THRESHOLD. */
+  airGlitch = false
 
   private readonly frame = makeLaneFrame()
   private readonly scratch = makeLaneFrame()
@@ -79,6 +83,41 @@ export class Car {
   constructor(track: Track, spec: CarSpec) {
     this.track = track
     this.spec = spec
+  }
+
+  /**
+   * Put the car back on its wheels where it is: on the lane surface beneath it
+   * if there is one, else on the grass. Never teleports.
+   */
+  resumeInPlace(): void {
+    const lanes = this.track.lanesNear(this.pos, this.nearby)
+    for (const lane of lanes) {
+      lane.table.project(this.pos, this.scratch, this.hit)
+      const h = this.hit
+      if (!this.scratch.surface || h.over > 0.5 || Math.abs(h.x) > ROAD_HALF_WIDTH + CURB_WIDTH) continue
+      if (h.h < -2 || h.h > 3) continue
+      this.mode = 'track'
+      this.lane = lane
+      this.s = h.s
+      this.lateral = clamp(h.x, -ROAD_HALF_WIDTH, ROAD_HALF_WIDTH)
+      this.speed = 0
+      this.heading = 0
+      this.lateralVel = 0
+      this.vel.set(0, 0, 0)
+      this.airGlitch = false
+      this.updatePose()
+      return
+    }
+    this.mode = 'ground'
+    this.pos.y = CAR_RIDE
+    this.yaw = Math.atan2(-this.forward.z, this.forward.x)
+    this.forward.set(Math.cos(this.yaw), 0, -Math.sin(this.yaw))
+    this.up.set(0, 1, 0)
+    this.speed = 0
+    this.vel.set(0, 0, 0)
+    this.onGrass = true
+    this.airGlitch = false
+    this.updatePose()
   }
 
   /** Place on a lane, optionally rolling. */
@@ -240,6 +279,7 @@ export class Car {
     this.pos.copy(f.pos).addScaled(f.right, this.lateral).addScaled(f.up, CAR_RIDE)
     this.forward.copy(this.vA)
     this.up.copy(f.up)
+    this.airGlitch = this.speed >= this.spec.topSpeed * AIR_GLITCH_THRESHOLD
     this.event = 'launch'
   }
 
@@ -260,7 +300,20 @@ export class Car {
     // No air control: the car noses along its arc and its roll settles toward
     // level, like a thrown brick with good manners. Landings are about speed
     // and angle, never about button timing.
-    void input
+    // The glitch: throttle held after a near-vmax take-off pins you back to vmax.
+    if (this.airGlitch && input.throttle > 0.5) {
+      const hx = this.vel.x
+      const hz = this.vel.z
+      const h = Math.hypot(hx, hz)
+      if (h > 1) {
+        const target = this.spec.topSpeed
+        const nh = h < target ? Math.min(target, h + AIR_GLITCH_ACCEL * dt) : h
+        this.vel.x = (hx / h) * nh
+        this.vel.z = (hz / h) * nh
+      }
+    } else if (input.throttle <= 0.5) {
+      this.airGlitch = false
+    }
     if (this.speed > 1) {
       this.vA.copy(this.vel).normalize()
       this.forward.lerpVectors(this.forward, this.vA, Math.min(1, dt * 2.5)).normalize()

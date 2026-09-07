@@ -19,7 +19,7 @@ import { copyInput, makeInputFrame } from '../sim/InputFrame'
 import { Sim } from '../sim/Sim'
 import { Snapshot } from '../sim/Snapshot'
 import { Track, type TrackData } from '../sim/Track'
-import { MAX_SUBSTEPS, SIM_HZ } from '../sim/Tuning'
+import { MAX_SUBSTEPS, SEGMENT_PENALTY, SIM_HZ } from '../sim/Tuning'
 import { BUILTIN_TRACKS } from '../sim/tracks'
 import { Hud } from './Hud'
 import { buildMenus } from './menus'
@@ -391,11 +391,11 @@ export class Game implements LoopClient {
         hp.rumble(0.3, 0.5, 150)
         hp.mobile(25)
         break
-      case 'lost':
-        this.hud.showMessage('LOST — BACK ON TRACK', 1.5, 'bad')
+      case 'penalty':
+        this.hud.showMessage(`+${e.a * SEGMENT_PENALTY}s · ${e.a} SEGMENT${e.a > 1 ? 'S' : ''} SKIPPED`, 2.2, 'bad')
         break
       case 'respawn':
-        if (e.a === 0) this.hud.showMessage('RESET', 0.8)
+        if (e.a === 0) this.hud.showMessage('RECOVERED', 0.8)
         break
       default:
         break

@@ -1,6 +1,7 @@
 // Presentation constants for the driving game. Nothing here affects gameplay.
 
-export const BG_COLOR = 0x0b1020
+/** Daylight haze: fog and clear colour. */
+export const BG_COLOR = 0xbcd8f2
 export const GROUND_SIZE = 4000
 export const FOG_DENSITY_MODERN = 0.0011
 export const FOG_DENSITY_RETRO = 0.0016

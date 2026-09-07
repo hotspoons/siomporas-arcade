@@ -75,6 +75,15 @@ grew 3.8 MB over 19 s including menus and HUD strings — inconclusive), browser
 matrix (only Chromium), gamepad on real XInput/DualSense, accessibility pass
 beyond the above.
 
+## Mobile (owner request, overrides the handoff's non-goal) ✅
+`TouchSource`: tilt steering from `devicemotion` gravity (orientation-aware,
+neutral calibrated at run start, iOS permission prompt in the start gesture),
+hot zones for thrust/brake/fire/shockwave/pause, drag fallback, fullscreen +
+landscape lock, portrait "rotate" card, lighter post defaults and a 1.5
+pixel-ratio cap on first run. Verified in emulated Chromium touch over the
+tunnel; **tilt never tried on a real phone** (emulation has no sensors).
+`just tunnel` gives an anonymous HTTPS URL for that.
+
 ## Tuning changes from the handoff table (§9)
 | Constant | Spec | Now | Why |
 |---|---|---|---|

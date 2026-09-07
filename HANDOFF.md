@@ -19,6 +19,7 @@ audio, two visual styles, and a WebXR mode. Three courses plus a proving run.
 | Gamepad | done, **never held** (no pad here) |
 | VR | code-complete, **never entered** (no headset) |
 | Real-GPU look and feel | **not yet observed** — see below |
+| Mobile touch/tilt | done, verified in emulation; tilt untested on a real phone |
 
 ### The one thing to do first
 
@@ -29,6 +30,11 @@ screenshots at 960×540 — bloom width, line thickness and the steering feel
 all need eyes on a real GPU. `just bridge 'apex.screenshot()'` returns a JPEG
 data URL of the live frame; `apex.snap`, `apex.world`, `apex.settings`,
 `apex.loop.stats`, `apex.view.stats` are live.
+
+### Remote testing
+
+`just tunnel` prints an anonymous `https://…trycloudflare.com` URL (also in
+`.tunnel-url`); phones opened on it attach to the bridge like any tab.
 
 ### Working agreement (unchanged)
 

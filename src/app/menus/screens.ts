@@ -46,7 +46,7 @@ export function buildMenus(game: Game) {
         ? [{ kind: 'action', label: 'ENTER VR', hint: 'Quest / SteamVR browser', onSelect: () => void game.xr.enter() } as MenuItem]
         : []),
     ],
-    footer: 'Enter / A to select · Esc / B to back · F3 perf overlay',
+    footer: game.touch ? 'Tap to select · tilt to steer, ⟲ recalibrates · thrust/brake/fire are the side pads' : 'Enter / A to select · Esc / B to back · F3 perf overlay',
     onBack: () => {},
   })
 

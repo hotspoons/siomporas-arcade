@@ -44,7 +44,8 @@ export class InputMap {
   }
   keys: KeyBindings
   pad: PadBindings
-  extra: ExtraSource | null = null
+  /** Pluggable sources (touch overlay, XR controllers), applied in order. */
+  readonly extras: ExtraSource[] = []
   /** When true, gameplay actions are suppressed (menus open). */
   suppressGameplay = false
   /** Frames left to zero UI edges (after a remap capture). */
@@ -144,7 +145,7 @@ export class InputMap {
     }
     this.lastMenuDir = dir
 
-    this.extra?.apply(f, ui)
+    for (const x of this.extras) x.apply(f, ui)
     if (this.swallowFrames > 0) {
       this.swallowFrames--
       ui.pause = ui.confirm = ui.back = ui.toggleStyle = ui.togglePerf = ui.toggleDebug = ui.any = false

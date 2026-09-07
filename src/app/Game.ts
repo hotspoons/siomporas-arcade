@@ -25,6 +25,8 @@ import { COURSES } from '../sim/track/courses'
 import { AudioWorld } from '../audio/AudioWorld'
 import { Records } from './Records'
 import { XrSession } from '../xr/XrSession'
+import { TouchSource } from '../input/TouchSource'
+import { isTouchDevice } from './platform'
 
 export type GameState = 'title' | 'running' | 'paused' | 'summary'
 
@@ -43,6 +45,8 @@ export class Game implements LoopClient {
   readonly audio = new AudioWorld()
   readonly records = new Records()
   readonly xr: XrSession
+  /** Present only on touch devices. */
+  readonly touch: TouchSource | null = null
   world: SimWorld
   track: Track
   course: CourseDesc
@@ -85,6 +89,11 @@ export class Game implements LoopClient {
     this.modern = new ModernStyle(s.modern)
     this.retro = new RetroStyle(s.retro)
     this.xr = new XrSession(this)
+    if (isTouchDevice()) {
+      this.touch = new TouchSource(container)
+      this.input.extras.push(this.touch)
+      container.classList.add('is-touch')
+    }
     this.loop = new GameLoop(this, this.view.renderer)
     this.applyStyle()
     this.applyAccessibility()
@@ -109,6 +118,7 @@ export class Game implements LoopClient {
   enterTitle(): void {
     this.state = 'title'
     this.hud.setVisible(false)
+    this.touch?.setVisible(false)
     this.setCourse(this.courseIndex)
     this.world.reset(this.seed)
     this.view.rig.reset(0)
@@ -129,7 +139,20 @@ export class Game implements LoopClient {
     }
   }
 
+  /** Best-effort immersive presentation on phones; must run inside a gesture. */
+  private goImmersive(): void {
+    if (!this.touch || this.xr.active) return
+    void this.touch.requestSensors()
+    const el = document.documentElement
+    if (!document.fullscreenElement && el.requestFullscreen) {
+      el.requestFullscreen({ navigationUI: 'hide' })
+        .then(() => (screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void> }).lock?.('landscape').catch(() => {}))
+        .catch(() => {})
+    }
+  }
+
   startRun(): void {
+    this.goImmersive()
     this.circuit = false
     this.seed = (Date.now() & 0xffff) || 1
     this.startRunSeeded(this.seed)
@@ -137,6 +160,7 @@ export class Game implements LoopClient {
 
   /** Every playable course in order, with score and remaining time carried across. */
   startCircuit(): void {
+    this.goImmersive()
     this.circuit = true
     this.carriedScore = 0
     this.carriedTimer = 0
@@ -181,6 +205,8 @@ export class Game implements LoopClient {
     this.menus.closeAll()
     this.showTitleCard(false)
     this.hud.setVisible(true)
+    this.touch?.setVisible(!this.xr.active)
+    this.touch?.calibrate()
     this.input.suppressGameplay = false
     this.view.rig.reset(0)
     this.loop.paused = false
@@ -206,6 +232,7 @@ export class Game implements LoopClient {
     this.state = 'paused'
     this.loop.paused = true
     this.input.suppressGameplay = true
+    this.touch?.setVisible(false)
     this.menus.replace(buildMenus(this).pause())
     this.audio.setScene('paused')
   }
@@ -215,6 +242,7 @@ export class Game implements LoopClient {
     this.state = 'running'
     this.loop.paused = false
     this.input.suppressGameplay = false
+    this.touch?.setVisible(!this.xr.active)
     this.menus.closeAll()
     this.audio.setScene('run')
   }
@@ -233,6 +261,7 @@ export class Game implements LoopClient {
     this.summaryShown = true
     this.state = 'summary'
     this.input.suppressGameplay = true
+    this.touch?.setVisible(false)
     const snap = this.curr
     const entry = this.records.submit(this.circuit ? 'circuit' : this.course.id, {
       name: this.settings.data.playerName,
@@ -288,7 +317,8 @@ export class Game implements LoopClient {
   resize(): void {
     const w = window.innerWidth
     const h = window.innerHeight
-    const pr = this.settings.data.style === 'retro' ? 1 : Math.min(window.devicePixelRatio || 1, 2)
+    const cap = this.touch ? 1.5 : 2
+    const pr = this.settings.data.style === 'retro' ? 1 : Math.min(window.devicePixelRatio || 1, cap)
     this.view.resize(w, h, pr)
   }
 

@@ -2,6 +2,7 @@
 // presentation or control — nothing in the sim reads Settings.
 
 import { DEFAULT_KEYS, DEFAULT_PAD, type KeyBindings, type PadBindings } from '../input/bindings'
+import { isTouchDevice } from './platform'
 
 export type StyleName = 'modern' | 'retro'
 export type ComfortPreset = 'intense' | 'standard' | 'maximum'
@@ -86,7 +87,16 @@ export class Settings {
   private readonly listeners = new Set<Listener>()
 
   constructor() {
+    const stored = hasStored()
     this.data = load()
+    // First run on a phone: keep the look, drop the expensive passes.
+    if (!stored && isTouchDevice()) {
+      this.data.modern.motionBlur = false
+      this.data.modern.chromatic = false
+      this.data.modern.grain = false
+      this.data.modern.smaa = false
+      this.data.access.hudScale = 0.85
+    }
     const params = new URLSearchParams(location.search)
     const style = params.get('style')
     if (style === 'retro' || style === 'modern') this.data.style = style
@@ -110,6 +120,14 @@ export class Settings {
       d.keys = structuredClone(DEFAULT_KEYS)
       d.pad = structuredClone(DEFAULT_PAD)
     })
+  }
+}
+
+function hasStored(): boolean {
+  try {
+    return localStorage.getItem(KEY) !== null
+  } catch {
+    return false
   }
 }
 

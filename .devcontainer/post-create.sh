@@ -19,4 +19,12 @@ npm install
 (sudo npx playwright install-deps chromium && npx playwright install chromium) \
     || echo "WARN: playwright setup failed — run 'just browser' to retry"
 
-echo "Done. \`just dev\` starts the dev server on :5180."
+# cloudflared for `just tunnel` (anonymous quick tunnels; no account needed).
+if ! command -v cloudflared >/dev/null 2>&1; then
+    case "$(uname -m)" in aarch64|arm64) CF_ARCH=arm64 ;; *) CF_ARCH=amd64 ;; esac
+    (curl -sSL -o /tmp/cloudflared "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-$CF_ARCH" \
+        && chmod +x /tmp/cloudflared && sudo mv /tmp/cloudflared /usr/local/bin/cloudflared) \
+        || echo "WARN: cloudflared install failed — 'just tunnel' will not work"
+fi
+
+echo "Done. \`just dev\` starts the dev server on :5180; \`just tunnel\` shares it."

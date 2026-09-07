@@ -38,6 +38,20 @@ just              # every recipe
 
 Everything is remappable from *Controls*; bindings persist in localStorage.
 
+**Phones** (landscape): tilt to steer (⟲ recalibrates the neutral hold; drag
+steers if sensors are unavailable), left pads = thrust / brake, right pad =
+fire, bottom pill = shockwave, II = pause. Starting a run goes fullscreen.
+Motion sensors need HTTPS — use the tunnel below.
+
+## Test remotely
+
+```bash
+just tunnel   # anonymous Cloudflare quick tunnel; prints https://…trycloudflare.com
+```
+Attaches to a running dev server or starts one (bridge enabled). The URL is
+also written to `.tunnel-url`. Pages opened through it attach to the bridge
+too, so `just bridge 'apex.snap.vehicle.speed'` works against your phone.
+
 ## Layout
 
 ```
@@ -50,13 +64,14 @@ src/sim/       deterministic gameplay — no three.js, unit-tested headlessly
   SimWorld.ts  fixed-step tick(); SimSnapshot.ts is what the renderer reads
 src/render/    three.js scene: tunnel chunk pool + shader, craft, traffic
                instancing, VFX, camera rig, styles/ (modern, retro), hud/
-src/input/     keyboard, gamepad, bindings, InputMap
+src/input/     keyboard, gamepad, touch (tilt + hot zones), bindings, InputMap
 src/xr/        WebXR session, cockpit, comfort vignette, in-world HUD
 src/audio/     procedural Web Audio
 src/app/       main, GameLoop, Game (flow), Settings, Menus, Records, PerfOverlay
 tools/         preview.html — top-down / side view of any course
 test/          vitest: spline invariants, determinism, courses, jumps
-scripts/       probe.mjs (headless screenshots), smoke.mjs, bridge.mjs
+scripts/       probe.mjs / probe-mobile.mjs (headless screenshots), smoke.mjs,
+               bridge.mjs, tunnel.sh
 dev/           Vite plugin for the dev operator shell
 ```
 

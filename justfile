@@ -58,6 +58,12 @@ bridge code:
 bridge-clients:
     APEX_BRIDGE="${APEX_BRIDGE:-apex-dev}" node scripts/bridge.mjs --clients
 
+# --- remote testing ---------------------------------------------------------
+
+# anonymous Cloudflare quick tunnel to the dev server; prints the public URL
+tunnel:
+    bash scripts/tunnel.sh
+
 # --- verification loop ------------------------------------------------------
 
 # drive the running dev server in headless Chromium: boots the game, plays a

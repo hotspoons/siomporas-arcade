@@ -80,7 +80,6 @@ export class XrSession {
   private lastSpeed = 0
   private lastThetaVel = 0
   private stress = 0
-  private prevExtra: ExtraSource | null = null
 
   constructor(game: Game) {
     this.game = game
@@ -113,8 +112,7 @@ export class XrSession {
       this.session = session
       this.active = true
       this.controllers.session = session
-      this.prevExtra = this.game.input.extra
-      this.game.input.extra = this.controllers
+      this.game.input.extras.push(this.controllers)
       session.addEventListener('end', () => this.onEnd())
       this.applyState()
       return true
@@ -132,7 +130,8 @@ export class XrSession {
     this.session = null
     this.active = false
     this.controllers.session = null
-    this.game.input.extra = this.prevExtra
+    const i = this.game.input.extras.indexOf(this.controllers)
+    if (i >= 0) this.game.input.extras.splice(i, 1)
     this.game.view.renderer.xr.enabled = false
     this.applyState()
   }

@@ -294,7 +294,7 @@ export class Game implements LoopClient {
     if (!card) {
       card = document.createElement('div')
       card.className = 'title-card'
-      card.innerHTML = `<h1>DRIVIN</h1><p>STUNT TRACK DRIVING · WORKING TITLE</p>`
+      card.innerHTML = `<h1>Drivin’</h1><p>STUNT TRACK DRIVING · WORKING TITLE</p>`
       this.container.appendChild(card)
     }
     card.classList.toggle('hidden', !v)

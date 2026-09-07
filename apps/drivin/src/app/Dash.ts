@@ -120,9 +120,9 @@ function gauge(c: CanvasRenderingContext2D, x: number, y: number, r: number, t: 
   c.stroke()
   c.fillStyle = '#e8f6ff'
   c.textAlign = 'center'
-  c.font = `bold ${Math.round(r * 0.42)}px ui-sans-serif, system-ui`
+  c.font = `${Math.round(r * 0.52)}px "VT323", ui-monospace, monospace`
   c.fillText(big, x, y + r * 0.35)
-  c.font = `${Math.round(r * 0.2)}px ui-sans-serif, system-ui`
+  c.font = `${Math.round(r * 0.26)}px "VT323", ui-monospace, monospace`
   c.fillStyle = '#9fb8c8'
   c.fillText(small, x, y + r * 0.62)
 }

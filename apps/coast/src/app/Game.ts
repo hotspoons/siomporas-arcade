@@ -232,7 +232,7 @@ export class Game implements LoopClient {
     if (!card) {
       card = document.createElement('div')
       card.className = 'title-card'
-      card.innerHTML = `<h1>COASTLINE</h1><p>SPRITE-SCALED ROAD RACER · WORKING TITLE</p>`
+      card.innerHTML = `<h1>Coastline</h1><p>SPRITE-SCALED ROAD RACER · WORKING TITLE</p>`
       this.container.appendChild(card)
     }
     card.classList.toggle('hidden', !v)
@@ -292,7 +292,8 @@ export class Game implements LoopClient {
   render(alpha: number, dt: number): void {
     const events = this.sim.events
     if (events.length) events.drain(this.onEventBound)
-    this.view.update(this.prev, this.curr, alpha, dt)
+    // Paused: freeze the renderer's clock so bounce, rain and wipers hold still.
+    this.view.update(this.prev, this.curr, alpha, this.state === 'paused' ? 0 : dt)
     if (this.state !== 'title') this.hud.update(this.curr, dt, this.view.view === 'cockpit')
     this.audio.update(this.curr, Math.abs(this.held.steer) > 0.6 && this.curr.speed > 40)
     this.feel(dt)

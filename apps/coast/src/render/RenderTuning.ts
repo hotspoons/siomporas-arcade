@@ -28,7 +28,10 @@ export let LIGHTS_OFF_AMBIENT = 0.45
 /** Roll model (Rad Mobile): a transient roll while the wheel is turning, plus a steady roll when you ride
  * up the outer lanes of a banked curve. The cockpit shows the whole roll; the horizon only a fraction. */
 export let STEER_ROLL = 0.16
-export let BANK_ROLL = 0.05
+/** Cockpit roll per banked lane tier (radians); Rad Mobile-style stepped berms. */
+export let BANK_ROLL = 0.085
+/** How many outer lanes step up the bank before it plateaus. */
+export let BANK_TIERS = 2
 export let HORIZON_ROLL_SHARE = 0.3
 /** Cockpit glass: droplets per second of rain, haze build-up per second, and the single wiper's sweep rate (sweeps/s). */
 export let RAIN_DROPS_PER_SEC = 26
@@ -92,7 +95,8 @@ export const RENDER_TUNE: TuneSection = {
     tune('HEADLIGHT_REACH', () => HEADLIGHT_REACH, (v) => (HEADLIGHT_REACH = v)),
     tune('LIGHTS_OFF_AMBIENT', () => LIGHTS_OFF_AMBIENT, (v) => (LIGHTS_OFF_AMBIENT = v)),
     tune('STEER_ROLL', () => STEER_ROLL, (v) => (STEER_ROLL = v)),
-    tune('BANK_ROLL', () => BANK_ROLL, (v) => (BANK_ROLL = v)),
+    tune('BANK_ROLL', () => BANK_ROLL, (v) => (BANK_ROLL = v), [0, 0.3], 0.005, 'cockpit roll per bank tier'),
+    tune('BANK_TIERS', () => BANK_TIERS, (v) => (BANK_TIERS = v), [1, 4], 1),
     tune('HORIZON_ROLL_SHARE', () => HORIZON_ROLL_SHARE, (v) => (HORIZON_ROLL_SHARE = v)),
     tune('RAIN_DROPS_PER_SEC', () => RAIN_DROPS_PER_SEC, (v) => (RAIN_DROPS_PER_SEC = v)),
     tune('RAIN_HAZE_PER_SEC', () => RAIN_HAZE_PER_SEC, (v) => (RAIN_HAZE_PER_SEC = v)),

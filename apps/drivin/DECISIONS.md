@@ -72,3 +72,6 @@ corkscrew 4×1 (`CORK_RADIUS`), loop radius 12. Grass barely slows a straight li
 `GRASS_STEER`; leaving the road keeps your lateral slide (no more "bounce" at the kerb).
 Air glitch arms at 60 % of top speed and pins almost instantly. Hood camera gets a canvas
 dashboard (`app/Dash.ts`); the start piece gets a chequered gantry.
+
+## Type (2026-09-07)
+Hard Drivin' / Stunts references: brush-script logo (Yellowtail, Apache 2.0) over DOS terminal body text (VT323) with arcade bitmap caps for labels and menu titles (Press Start 2P). Fonts are bundled under `public/fonts` (latin woff2 subsets, `scripts/fetch-fonts.mjs` regenerates them; licenses alongside). The hood-cam dash digits use VT323 too.

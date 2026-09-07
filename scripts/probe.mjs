@@ -6,10 +6,11 @@
 //   just probe shots/run.png 5 KeyW KeyD
 //   PROBE_JS='window.__apex.world.vehicle.s = 4700' just probe shots/split.png 2 KeyW
 //   PROBE_URL='http://localhost:5180/?style=retro' just probe shots/retro.png 3
+//   PROBE_W=1280 PROBE_H=900 just probe shots/tall.png   (viewport override)
 import { chromium } from 'playwright'
 const [out = 'shots/probe.png', play = '0', ...keys] = process.argv.slice(2)
 const browser = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--enable-precise-memory-info'] })
-const page = await browser.newPage({ viewport: { width: 960, height: 540 } })
+const page = await browser.newPage({ viewport: { width: Number(process.env.PROBE_W || 960), height: Number(process.env.PROBE_H || 540) } })
 const logs = []
 page.on('console', (m) => { if (m.type() !== 'debug' && !/GL Driver|vite\]/.test(m.text())) logs.push(`[${m.type()}] ${m.text()}`) })
 page.on('pageerror', (e) => logs.push(`[pageerror] ${e.message}\n${e.stack}`))

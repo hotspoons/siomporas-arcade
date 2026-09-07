@@ -37,3 +37,7 @@ on the clipboard — paste it into chat and the `changed` block becomes the new
 defaults in `src/sim/Tuning.ts` / `src/render/RenderTuning.ts`. **Paste JSON**
 accepts the same document (or a flat `{NAME: value}` map); **Reset all** returns
 to shipped defaults. `P` pauses in every game alongside Escape.
+
+## Fonts
+
+Each app bundles its own free typefaces under `apps/<app>/public/fonts` (latin woff2 subsets from Google Fonts, all OFL or Apache 2.0, license texts alongside). Regenerate with `node scripts/fetch-fonts.mjs`. Drivin: Yellowtail + VT323 + Press Start 2P. Coast: Pacifico + Racing Sans One + Righteous + Press Start 2P. Conduit: Audiowide + Orbitron + Rajdhani + Press Start 2P.

@@ -5,54 +5,63 @@
   --danger: #ff3b5c;
   --bg: #1a0b2e;
   --hud-scale: 1;
+  /* OutRun → Rad Mobile: a surf brush-script logo, heavy slanted outlined HUD digits, arcade bitmap credit lines. */
+  --font-body: "Righteous", "Arial Rounded MT Bold", ui-sans-serif, sans-serif;
+  --font-display: "Pacifico", "Brush Script MT", cursive;
+  --font-hud: "Racing Sans One", "Arial Black", Impact, sans-serif;
+  --font-arcade: "Press Start 2P", monospace;
+  --ink: #3a1208;
+  --hud-yellow: #ffd93a;
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; background: var(--bg); overflow: hidden; }
-body { font-family: "Rajdhani", "Bahnschrift", "DIN Alternate", ui-sans-serif, system-ui, sans-serif; color: #e8f6ff; user-select: none; -webkit-user-select: none; }
+body { font-family: var(--font-body); font-size: 15px; color: #e8f6ff; user-select: none; -webkit-user-select: none; }
 #app { position: fixed; inset: 0; }
 canvas.game { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
 .hidden { display: none !important; }
 
 /* ---- HUD ---- */
 .hud { position: absolute; inset: 0; pointer-events: none; font-size: calc(16px * var(--hud-scale)); }
-.hud .label { display: block; font-size: 0.7em; letter-spacing: 0.25em; opacity: 0.7; }
+.hud .label { display: block; font-family: var(--font-arcade); font-size: 0.5em; letter-spacing: 0.1em; margin-bottom: 0.5em; color: #ffe27a; text-shadow: 2px 2px 0 var(--ink); }
+/* Rad Mobile numerals: heavy, yellow, dark-outlined. */
+.hud .score .value, .hud .stage .value, .hud .speedo .value, .hud .speedo .gear, .hud .time, .hud .message, .hud .fork { font-family: var(--font-hud); font-weight: 400; color: var(--hud-yellow); paint-order: stroke fill; -webkit-text-stroke: 0.1em var(--ink); text-shadow: 0.09em 0.09em 0 rgba(0,0,0,0.45); }
 .hud .score { position: absolute; top: 2.5vh; left: 4vw; }
-.hud .score .value { font-size: 1.8em; font-weight: 700; font-variant-numeric: tabular-nums; }
-.hud .time { position: absolute; top: 1.5vh; left: 50%; transform: translateX(-50%); font-size: 4em; font-weight: 900; font-variant-numeric: tabular-nums; color: var(--accent2); text-shadow: 0 0 18px rgba(255,212,95,0.5); }
+.hud .score .value { font-size: 1.9em; font-variant-numeric: tabular-nums; }
+.hud .time { position: absolute; top: 1.5vh; left: 50%; transform: translateX(-50%); font-size: 4.2em; font-variant-numeric: tabular-nums; }
 .hud .time.low { color: var(--danger); animation: pulse 0.4s infinite alternate; }
 .hud .time.bonus { color: #5cff8a; transform: translateX(-50%) scale(1.15); }
 @keyframes pulse { from { opacity: 1; } to { opacity: 0.5; } }
 .hud .stage { position: absolute; top: 2.5vh; right: 4vw; text-align: right; }
-.hud .stage .value { font-size: 1.8em; font-weight: 700; }
+.hud .stage .value { font-size: 1.9em; }
 .hud .speedo { position: absolute; bottom: 4vh; right: 4vw; text-align: right; }
 .hud.cockpit .speedo { display: none; }
-.hud .speedo .value { font-size: 3.2em; font-weight: 800; font-variant-numeric: tabular-nums; }
-.hud .speedo .unit { margin-left: 0.3em; opacity: 0.6; letter-spacing: 0.2em; }
-.hud .speedo .gear { display: block; font-size: 1.4em; font-weight: 700; color: var(--accent); }
+.hud .speedo .value { font-size: 3.2em; font-variant-numeric: tabular-nums; }
+.hud .speedo .unit { margin-left: 0.3em; font-family: var(--font-arcade); font-size: 0.5em; opacity: 0.8; letter-spacing: 0.05em; }
+.hud .speedo .gear { display: block; font-size: 1.4em; color: #ff8a3c; }
 .hud .turbo { width: 18vw; max-width: 260px; height: 0.5em; margin-top: 6px; margin-left: auto; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.25); overflow: hidden; }
 .hud .turbo .fill { height: 100%; background: var(--accent2); transition: width 0.1s linear; }
 .hud .turbo .fill.active { background: #ff5fd2; }
-.hud .switches { position: absolute; bottom: 11vh; left: 4vw; display: flex; gap: 1.2em; font-size: 0.7em; letter-spacing: 0.25em; opacity: 0.55; }
+.hud .switches { position: absolute; bottom: 11vh; left: 4vw; display: flex; gap: 1.6em; font-family: var(--font-arcade); font-size: 0.5em; letter-spacing: 0.05em; opacity: 0.55; text-shadow: 2px 2px 0 var(--ink); }
 .hud .switches .on { color: #5cff8a; opacity: 1; text-shadow: 0 0 10px rgba(92,255,138,0.6); }
 .hud .switches [data-wipers].on { color: #6ab8ff; text-shadow: 0 0 10px rgba(106,184,255,0.6); }
-.hud .station { position: absolute; bottom: 4vh; left: 4vw; opacity: 0.75; letter-spacing: 0.15em; }
-.hud .viewhint { position: absolute; bottom: 8vh; left: 4vw; opacity: 0.45; font-size: 0.75em; letter-spacing: 0.25em; }
-.hud .message { position: absolute; top: 24%; left: 0; right: 0; text-align: center; font-size: 2.4em; font-weight: 800; letter-spacing: 0.2em; opacity: 0; transform: translateY(10px); transition: opacity 0.15s, transform 0.15s; text-shadow: 0 0 20px rgba(0,0,0,0.6); }
+.hud .station { position: absolute; bottom: 4vh; left: 4vw; opacity: 0.85; letter-spacing: 0.12em; color: #ffb3e6; text-shadow: 2px 2px 0 var(--ink); }
+.hud .viewhint { position: absolute; bottom: 8vh; left: 4vw; opacity: 0.5; font-family: var(--font-arcade); font-size: 0.45em; letter-spacing: 0.05em; }
+.hud .message { position: absolute; top: 24%; left: 0; right: 0; text-align: center; font-size: 3em; font-style: italic; letter-spacing: 0.06em; opacity: 0; transform: translateY(10px); transition: opacity 0.15s, transform 0.15s; text-shadow: 0 0 20px rgba(0,0,0,0.6); }
 .hud .message.show { opacity: 1; transform: none; }
 .hud .message.bad { color: var(--danger); }
-.hud .message.good { color: var(--accent2); }
-.hud .fork { position: absolute; top: 38%; left: 0; right: 0; display: none; justify-content: space-between; padding: 0 12vw; font-size: 2em; font-weight: 800; letter-spacing: 0.15em; }
+.hud .message.good { color: #7dff9a; }
+.hud .fork { position: absolute; top: 38%; left: 0; right: 0; display: none; justify-content: space-between; padding: 0 12vw; font-size: 2.2em; letter-spacing: 0.08em; }
 .hud .fork.show { display: flex; }
 .hud .fork span { opacity: 0.35; transition: opacity 0.1s; }
-.hud .fork.left .l, .hud .fork.right .r { opacity: 1; color: var(--accent2); }
+.hud .fork.left .l, .hud .fork.right .r { opacity: 1; color: #7dff9a; }
 
 /* ---- menus (shared look) ---- */
 .menu { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); min-width: 380px; max-width: 92vw; max-height: 92vh; overflow: auto; padding: 28px 36px; background: rgba(11,16,32,0.85); border: 1px solid rgba(255,122,26,0.35); border-radius: 6px; backdrop-filter: blur(6px); z-index: 5; }
 .menu.wide { min-width: 640px; }
 .menu.title-screen { top: auto; bottom: 5vh; transform: translateX(-50%); }
-.menu h1 { margin: 0 0 4px; font-size: 2.2em; letter-spacing: 0.25em; font-weight: 800; color: var(--accent); text-shadow: 0 0 18px rgba(255,122,26,0.5); }
-.menu .subtitle { margin: 0 0 18px; opacity: 0.7; letter-spacing: 0.1em; }
+.menu h1 { margin: 0 0 4px; font-family: var(--font-hud); font-size: 2.4em; letter-spacing: 0.1em; font-weight: 400; color: var(--hud-yellow); paint-order: stroke fill; -webkit-text-stroke: 0.09em var(--ink); text-shadow: 0.09em 0.09em 0 rgba(0,0,0,0.45); }
+.menu .subtitle { margin: 0 0 18px; font-family: var(--font-arcade); font-size: 0.6em; line-height: 1.6; opacity: 0.75; letter-spacing: 0.05em; }
 .menu .items { display: flex; flex-direction: column; gap: 4px; }
 .menu .item { display: flex; justify-content: space-between; gap: 24px; padding: 8px 12px; border-left: 3px solid transparent; cursor: pointer; font-size: 1.15em; letter-spacing: 0.08em; }
 .menu .item.info { opacity: 0.75; cursor: default; font-size: 1em; }
@@ -60,14 +69,14 @@ canvas.game { position: absolute; inset: 0; width: 100%; height: 100%; display: 
 .menu .item.danger.selected { border-left-color: var(--danger); background: rgba(255,59,92,0.1); }
 .menu .item .value { color: var(--amber); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .menu .item .hint { display: block; font-size: 0.7em; opacity: 0.55; }
-.menu .footer { margin: 18px 0 0; opacity: 0.55; font-size: 0.9em; }
+.menu .footer { margin: 18px 0 0; opacity: 0.6; font-family: var(--font-arcade); font-size: 0.55em; line-height: 1.7; }
 .perf { position: absolute; top: 8px; left: 8px; pointer-events: none; z-index: 6; }
 .title-card { position: absolute; top: 10vh; left: 0; right: 0; text-align: center; pointer-events: none; }
-.title-card h1 { margin: 0; font-size: 6vmin; letter-spacing: 0.5em; font-weight: 900; color: #fff; text-shadow: 0 0 30px var(--accent), 0 0 60px var(--accent2); }
-.title-card p { margin: 6px 0 0; letter-spacing: 0.3em; opacity: 0.7; }
-.loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: var(--bg); font-size: 1.4em; letter-spacing: 0.4em; color: var(--accent); z-index: 10; }
+.title-card h1 { margin: 0; display: inline-block; padding: 0.1em 0.25em 0.25em; font-family: var(--font-display); font-size: 15vmin; line-height: 1; letter-spacing: 0; font-weight: 400; background: linear-gradient(180deg, #ffb0e0 0%, #ff5fb8 46%, #5ef0e0 54%, #1fb0d6 100%); -webkit-background-clip: text; background-clip: text; color: transparent; filter: drop-shadow(0.03em 0.04em 0 #fff) drop-shadow(0 0 0.25em rgba(255,95,210,0.55)); }
+.title-card p { margin: 10px 0 0; font-family: var(--font-arcade); font-size: 0.55em; letter-spacing: 0.1em; color: #ffe27a; text-shadow: 2px 2px 0 var(--ink); opacity: 0.95; }
+.loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: var(--bg); font-family: var(--font-arcade); font-size: 0.8em; letter-spacing: 0.3em; color: var(--accent); z-index: 10; }
 .fatal { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; background: rgba(11,16,32,0.95); z-index: 20; text-align: center; padding: 24px; }
-.fatal h2 { color: var(--danger); letter-spacing: 0.3em; margin: 0; }
+.fatal h2 { color: var(--danger); letter-spacing: 0.3em; margin: 0; font-family: var(--font-hud); }
 .fatal pre { max-width: 90vw; overflow: auto; opacity: 0.7; font-size: 12px; text-align: left; }
 .fatal button { font: inherit; color: var(--bg); background: var(--accent); border: 0; padding: 10px 24px; letter-spacing: 0.2em; cursor: pointer; }
 
@@ -75,7 +84,7 @@ canvas.game { position: absolute; inset: 0; width: 100%; height: 100%; display: 
 
 /* ---- touch controls ---- */
 .touch { position: absolute; inset: 0; z-index: 2; touch-action: none; user-select: none; -webkit-user-select: none; }
-.touch .zone { position: absolute; display: flex; align-items: center; justify-content: center; border: 1px solid rgba(255,122,26,0.25); border-radius: 12px; color: rgba(232,246,255,0.55); font-size: 13px; letter-spacing: 0.25em; font-weight: 700; background: rgba(255,122,26,0.04); transition: background 0.08s; }
+.touch .zone { position: absolute; display: flex; align-items: center; justify-content: center; border: 1px solid rgba(255,122,26,0.25); border-radius: 12px; color: rgba(232,246,255,0.55); font-size: 13px; letter-spacing: 0.2em; font-weight: 400; background: rgba(255,122,26,0.04); transition: background 0.08s; }
 .touch .zone.held { background: rgba(255,122,26,0.25); color: #fff; }
 .touch .brake { left: 2vw; bottom: 4vh; width: 22vw; height: 42vh; border-color: rgba(255,59,92,0.35); }
 .touch .brake.held { background: rgba(255,59,92,0.25); }

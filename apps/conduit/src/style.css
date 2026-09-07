@@ -5,12 +5,19 @@
   --danger: #ff3b5c;
   --bg: #06040f;
   --hud-scale: 1;
+  /* S.T.U.N. Runner / Tron: squared techno display type, wide geometric numerals, Eurostile-ish body. */
+  --font-body: "Rajdhani", "Bahnschrift", "DIN Alternate", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Audiowide", "Eurostile", "Bahnschrift", sans-serif;
+  --font-num: "Orbitron", "Eurostile", "Bahnschrift", monospace;
+  --font-arcade: "Press Start 2P", monospace;
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; background: var(--bg); overflow: hidden; }
 body {
-  font-family: "Rajdhani", "Eurostile", "Bahnschrift", "DIN Alternate", ui-sans-serif, system-ui, sans-serif;
+  font-family: var(--font-body);
+  font-size: 17px;
+  font-weight: 600;
   color: #e8f6ff;
   user-select: none;
   -webkit-user-select: none;
@@ -29,10 +36,10 @@ canvas.game { position: absolute; inset: 0; width: 100%; height: 100%; display: 
 .hud .flash { position: absolute; inset: 0; background: #ff3b5c; opacity: 0; mix-blend-mode: screen; }
 .hud .top { position: absolute; top: 2.5vh; left: 4vw; right: 4vw; display: flex; justify-content: space-between; align-items: flex-start; }
 .hud .label { display: block; font-size: 0.7em; letter-spacing: 0.25em; opacity: 0.7; }
-.hud .value { font-size: 1.6em; font-weight: 700; letter-spacing: 0.05em; font-variant-numeric: tabular-nums; }
-.hud .score .combo { margin-left: 0.6em; color: var(--neon2); font-weight: 700; font-size: 1.2em; }
+.hud .value { font-family: var(--font-num); font-size: 1.4em; font-weight: 700; letter-spacing: 0.04em; font-variant-numeric: tabular-nums; }
+.hud .score .combo { margin-left: 0.6em; color: var(--neon2); font-weight: 700; font-size: 1em; }
 .hud .timer {
-  font-size: 3.4em; font-weight: 800; letter-spacing: 0.06em; font-variant-numeric: tabular-nums;
+  font-family: var(--font-num); font-size: 2.9em; font-weight: 900; letter-spacing: 0.04em; font-variant-numeric: tabular-nums;
   text-shadow: 0 0 18px rgba(37, 232, 255, 0.55); transition: color 0.2s, transform 0.2s;
 }
 .hud .timer.bonus { color: var(--amber); transform: scale(1.12); text-shadow: 0 0 24px rgba(255, 200, 87, 0.8); }
@@ -48,7 +55,7 @@ canvas.game { position: absolute; inset: 0; width: 100%; height: 100%; display: 
 .hud .heat .fill.locked { background: var(--danger); animation: pulse 0.2s infinite alternate; }
 .hud .heat { text-align: right; }
 .hud .speed { text-align: center; }
-.hud .speed .value { font-size: 2.6em; }
+.hud .speed .value { font-size: 2.3em; }
 .hud .speed .unit { margin-left: 0.3em; opacity: 0.6; font-size: 0.8em; letter-spacing: 0.2em; }
 .hud .charges { position: absolute; bottom: 11vh; left: 50%; transform: translateX(-50%); display: flex; gap: 0.5em; }
 .hud .charge { width: 1.1em; height: 1.1em; border: 2px solid var(--neon2); transform: rotate(45deg); opacity: 0.3; }
@@ -57,7 +64,7 @@ canvas.game { position: absolute; inset: 0; width: 100%; height: 100%; display: 
 .hud .progress .fill { height: 100%; background: var(--neon); }
 .hud .message {
   position: absolute; top: 28%; left: 0; right: 0; text-align: center;
-  font-size: 2.4em; font-weight: 800; letter-spacing: 0.2em; opacity: 0; transform: translateY(10px);
+  font-family: var(--font-display); font-size: 2em; font-weight: 400; letter-spacing: 0.25em; opacity: 0; transform: translateY(10px);
   text-shadow: 0 0 20px rgba(37,232,255,0.7); transition: opacity 0.15s, transform 0.15s;
 }
 .hud .message.show { opacity: 1; transform: none; }
@@ -73,14 +80,14 @@ canvas.game { position: absolute; inset: 0; width: 100%; height: 100%; display: 
 }
 .menu.wide { min-width: 640px; }
 .menu.title-screen { top: auto; bottom: 5vh; transform: translateX(-50%); }
-.menu h1 { margin: 0 0 4px; font-size: 2.2em; letter-spacing: 0.25em; font-weight: 800; color: var(--neon); text-shadow: 0 0 18px rgba(37,232,255,0.6); }
+.menu h1 { margin: 0 0 4px; font-family: var(--font-display); font-size: 1.8em; letter-spacing: 0.3em; font-weight: 400; color: var(--neon); text-shadow: 0 0 18px rgba(37,232,255,0.6); }
 .menu .subtitle { margin: 0 0 18px; opacity: 0.7; letter-spacing: 0.1em; }
 .menu .items { display: flex; flex-direction: column; gap: 4px; }
 .menu .item { display: flex; justify-content: space-between; gap: 24px; padding: 8px 12px; border-left: 3px solid transparent; cursor: pointer; font-size: 1.15em; letter-spacing: 0.08em; }
 .menu .item.info { opacity: 0.75; cursor: default; font-size: 1em; }
 .menu .item.selected { border-left-color: var(--neon); background: rgba(37,232,255,0.1); }
 .menu .item.danger.selected { border-left-color: var(--danger); background: rgba(255,59,92,0.1); }
-.menu .item .value { color: var(--amber); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.menu .item .value { color: var(--amber); font-family: var(--font-num); font-size: 0.8em; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .menu .item .hint { display: block; font-size: 0.7em; opacity: 0.55; letter-spacing: 0.05em; }
 .menu .footer { margin: 18px 0 0; opacity: 0.55; font-size: 0.9em; letter-spacing: 0.08em; }
 
@@ -89,14 +96,14 @@ canvas.game { position: absolute; inset: 0; width: 100%; height: 100%; display: 
 .title-card {
   position: absolute; top: 12vh; left: 0; right: 0; text-align: center; pointer-events: none;
 }
-.title-card h1 { margin: 0; font-size: 6vmin; letter-spacing: 0.5em; font-weight: 900; color: #fff; text-shadow: 0 0 30px var(--neon), 0 0 60px var(--neon2); }
-.title-card p { margin: 6px 0 0; letter-spacing: 0.3em; opacity: 0.7; }
-.loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: var(--bg); font-size: 1.4em; letter-spacing: 0.4em; color: var(--neon); z-index: 10; }
+.title-card h1 { margin: 0; font-family: var(--font-display); font-size: 7vmin; letter-spacing: 0.4em; font-weight: 400; color: #fff; text-shadow: 0 0 30px var(--neon), 0 0 60px var(--neon2); }
+.title-card p { margin: 12px 0 0; font-family: var(--font-arcade); font-size: 0.55em; letter-spacing: 0.15em; color: var(--neon); opacity: 0.8; }
+.loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: var(--bg); font-family: var(--font-display); font-size: 1.1em; letter-spacing: 0.4em; color: var(--neon); z-index: 10; }
 .fatal { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; background: rgba(6,4,15,0.95); z-index: 20; text-align: center; padding: 24px; }
-.fatal h2 { color: var(--danger); letter-spacing: 0.3em; margin: 0; }
+.fatal h2 { color: var(--danger); letter-spacing: 0.3em; margin: 0; font-family: var(--font-display); font-weight: 400; }
 .fatal pre { max-width: 90vw; overflow: auto; opacity: 0.7; font-size: 12px; text-align: left; }
 .fatal button, .menu button { font: inherit; color: var(--bg); background: var(--neon); border: 0; padding: 10px 24px; letter-spacing: 0.2em; cursor: pointer; }
-.hud .toast { position: absolute; top: 12%; right: 4vw; font-size: 1.1em; letter-spacing: 0.15em; color: var(--amber); opacity: 0.9; }
+.hud .toast { position: absolute; top: 12%; right: 4vw; font-family: var(--font-num); font-size: 0.9em; letter-spacing: 0.12em; color: var(--amber); opacity: 0.9; }
 
 @media (prefers-reduced-motion: reduce) {
   .hud .timer.low { animation: none; }

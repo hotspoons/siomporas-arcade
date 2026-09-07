@@ -323,7 +323,7 @@ function telltale(c: CanvasRenderingContext2D, x: number, y: number, on: boolean
   }
   c.fillStyle = on ? '#e8f6ff' : '#6a6e7a'
   c.textAlign = 'center'
-  c.font = '11px ui-sans-serif, system-ui'
+  c.font = '10px "Righteous", ui-sans-serif, system-ui'
   c.fillText(label, x, y + 22)
 }
 
@@ -352,9 +352,9 @@ function gauge(c: CanvasRenderingContext2D, x: number, y: number, r: number, t: 
   c.stroke()
   c.fillStyle = '#e8f6ff'
   c.textAlign = 'center'
-  c.font = `bold ${Math.round(r * 0.42)}px ui-sans-serif, system-ui`
+  c.font = `${Math.round(r * 0.44)}px "Racing Sans One", "Arial Black", sans-serif`
   c.fillText(big, x, y + r * 0.35)
-  c.font = `${Math.round(r * 0.2)}px ui-sans-serif, system-ui`
+  c.font = `${Math.round(r * 0.2)}px "Righteous", ui-sans-serif, system-ui`
   c.fillStyle = '#9fb8c8'
   c.fillText(small, x, y + r * 0.62)
 }

@@ -62,3 +62,6 @@ handoff, or where the handoff left a choice open. Newest last.
     a hit is a spin-out — most of your speed and a second or two of control —
     never game over; leaving the track (missed landing, over an edge) drops you
     back on the surface minus `OFFTRACK_TIME_PENALTY`. Only the clock ends a run.
+
+## Type (2026-09-07)
+S.T.U.N. Runner / Tron: Audiowide for titles and messages, Orbitron (variable) for numerals, Rajdhani 500–700 for body, Press Start 2P for the arcade credit line. Bundled in `public/fonts` (OFL); `scripts/fetch-fonts.mjs` regenerates the latin woff2 subsets and license file.

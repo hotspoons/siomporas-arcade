@@ -14,7 +14,7 @@ export function buildMenus(game: Game) {
   const title = (): MenuScreen => ({
     id: 'title',
     title: 'COASTLINE',
-    subtitle: 'Three stages, two forks, one clock',
+    subtitle: 'Coast to coast · seven stages · one clock',
     items: [
       { kind: 'action', label: 'START', onSelect: () => game.startRun() },
       {

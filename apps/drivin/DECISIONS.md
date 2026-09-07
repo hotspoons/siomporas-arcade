@@ -45,3 +45,20 @@
     up × forward = −z when facing +x). An earlier `-heading` pointed the nose
     left while the car drifted right, and `toGround` inherited it — which is
     what made leaving the road feel like bouncing off a wall.
+
+## Frame handedness (2026-09-07)
+`right = tan × up` is the driver's right (+z when heading +x, y up). `heading > 0`
+turns right, so world forward is `tan.rotateAxis(up, -heading)`; on grass
+`forward = (cos yaw, 0, sin yaw)` and steering right increases yaw. An earlier
+`up × tan` "right" was physically the left, which is why steering read mirrored.
+
+## Loop is two tiles (2026-09-07)
+The loop drifts sideways by a full road width (`LOOP_SHIFT`) across the circle so
+the exit clears the entry instead of the tube intersecting itself; it needs a
+cell either side to ease in and out, hence `w: 2`.
+
+## Experiments (2026-09-07)
+Settings → EXPERIMENTS holds rule-breaking switches. `Crashes` off turns a hard
+landing into `resumeInPlace(0.6)` (back on your wheels, 60 % of your speed).
+Airborne with the throttle down the fake gearbox revs away through the gears
+(`AIR_REV_RATE`), Stunts-style, and snaps back to the speed-derived note on landing.

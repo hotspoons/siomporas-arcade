@@ -19,7 +19,7 @@ export interface LaneFrame {
 }
 
 export function makeLaneFrame(): LaneFrame {
-  return { pos: new Vec3(), tan: new Vec3(1, 0, 0), up: new Vec3(0, 1, 0), right: new Vec3(0, 0, -1), kUp: 0, kRight: 0, surface: true }
+  return { pos: new Vec3(), tan: new Vec3(1, 0, 0), up: new Vec3(0, 1, 0), right: new Vec3(0, 0, 1), kUp: 0, kRight: 0, surface: true }
 }
 
 export interface LaneHit {
@@ -72,7 +72,7 @@ export class PathTable {
     lerp3(this.tan, i, j, t, out.tan).normalize()
     lerp3(this.up, i, j, t, out.up)
     out.up.projectOntoPlane(out.tan).normalize()
-    out.right.cross(out.up, out.tan).normalize()
+    out.right.cross(out.tan, out.up).normalize()
     out.kUp = this.kUp[i] + (this.kUp[j] - this.kUp[i]) * t
     out.kRight = this.kRight[i] + (this.kRight[j] - this.kRight[i]) * t
     out.surface = t < 0.5 ? this.surface[i] === 1 : this.surface[j] === 1

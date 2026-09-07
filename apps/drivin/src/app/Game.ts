@@ -3,6 +3,9 @@
 
 import { GameLoop, type LoopClient } from '@apex/engine/app/GameLoop'
 import { MenuStack } from '@apex/engine/app/Menus'
+import { TunePanel } from '@apex/engine/app/TunePanel'
+import { SIM_TUNE } from '../sim/Tuning'
+import { RENDER_TUNE } from '../render/RenderTuning'
 import { PerfOverlay } from '@apex/engine/app/PerfOverlay'
 import { ModernStyle } from '@apex/engine/render/styles/ModernStyle'
 import { RetroStyle } from '@apex/engine/render/styles/RetroStyle'
@@ -36,6 +39,7 @@ export class Game implements LoopClient {
   readonly hud: Hud
   readonly menus: MenuStack
   readonly perf: PerfOverlay
+  readonly tune: TunePanel
   readonly loop: GameLoop
   readonly audio = new AudioWorld()
   readonly editor: Editor
@@ -70,6 +74,7 @@ export class Game implements LoopClient {
     this.trackData = this.tracks.get(s.trackId) ?? BUILTIN_TRACKS[0]
     this.track = new Track(this.trackData)
     this.sim = new Sim(this.track, carById(s.carId), s.laps)
+    this.applyExperiments()
     this.view = new RenderWorld(canvas, carById(s.carId))
     this.view.setTrack(this.track)
     this.hud = new Hud(container)
@@ -77,6 +82,7 @@ export class Game implements LoopClient {
     this.hud.setTrack(this.track)
     this.menus = new MenuStack(container)
     this.perf = new PerfOverlay(container)
+    this.tune = new TunePanel(container, 'drivin', [SIM_TUNE, RENDER_TUNE])
     this.editor = new Editor(container, this.tracks, {
       onTest: (data) => this.startDrive(data, true),
       onExit: () => this.enterTitle(),
@@ -135,6 +141,7 @@ export class Game implements LoopClient {
     this.track = new Track(data)
     const spec = carById(this.settings.data.carId)
     this.sim = new Sim(this.track, spec, this.settings.data.laps)
+    this.applyExperiments()
     this.view.setCar(spec)
     this.view.setTrack(this.track)
     this.hud.setTrack(this.track)
@@ -289,12 +296,17 @@ export class Game implements LoopClient {
     card.classList.toggle('hidden', !v)
   }
 
+  applyExperiments(): void {
+    this.sim.crashesEnabled = this.settings.data.experiments.crashes
+  }
+
   // --- LoopClient ---
 
   beginFrame(dt: number): number {
     const ui = this.input.ui
     this.input.poll(dt)
     if (ui.togglePerf) this.perf.toggle()
+    if (ui.toggleTune) this.tune.toggle()
     if (ui.toggleStyle) this.toggleStyle()
     if (this.state === 'editor') {
       this.editor.tick()

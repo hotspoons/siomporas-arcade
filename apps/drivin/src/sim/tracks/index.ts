@@ -75,7 +75,6 @@ export function stuntPark(): TrackData {
     S('straight'),
     S('straight'),
     S('straight'),
-    S('straight'),
   ], pieces)
   const split = pieces.find((p) => p.type === 'split')!
   layFrom(portExit(split, 2), [S('hump'), S('hump')], pieces)

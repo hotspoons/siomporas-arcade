@@ -98,6 +98,7 @@ export function buildMenus(game: Game) {
       toggle('Phosphor bleed', () => s().retro.phosphor, (v) => set((d) => (d.retro.phosphor = v))),
       { kind: 'slider', label: 'Palette levels', min: 2, max: 12, step: 1, get: () => s().retro.paletteLevels, set: (v) => set((d) => (d.retro.paletteLevels = v)) },
       { kind: 'info', label: '— GAME —' },
+      { kind: 'action', label: 'TUNING PANEL', hint: 'F6 · live sliders; Copy JSON to send new defaults', onSelect: () => { game.tune.toggle(true); game.menus.refresh() } },
       { kind: 'choice', label: 'Units', options: ['KM/H', 'MPH'], get: () => (s().units === 'mph' ? 1 : 0), set: (i) => { set((d) => (d.units = i === 1 ? 'mph' : 'kmh')); game.hud.units = s().units } },
       { kind: 'info', label: '— AUDIO —' },
       slider('Master', () => s().audio.master, (v) => set((d) => (d.audio.master = v))),

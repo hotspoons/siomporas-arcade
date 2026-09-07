@@ -76,6 +76,7 @@ export class InputMap {
     ui.toggleStyle = this.keyboard.wasPressed('F2')
     ui.togglePerf = this.keyboard.wasPressed('F3')
     ui.toggleDebug = this.keyboard.wasPressed('F4')
+    ui.toggleTune = this.keyboard.wasPressed('F6')
     ui.any = this.keyboard.anyEdge || gp.lastPressed !== ''
 
     const dirY = (this.keyboard.isDown('ArrowDown') || this.keyboard.isDown('KeyS') || gp.value('a1+') > 0.5 || gp.down('b13') ? 1 : 0) -
@@ -100,7 +101,7 @@ export class InputMap {
     for (const x of this.extras) x.apply(f, ui)
     if (this.swallowFrames > 0) {
       this.swallowFrames--
-      ui.pause = ui.confirm = ui.back = ui.toggleStyle = ui.togglePerf = ui.toggleDebug = ui.any = false
+      ui.pause = ui.confirm = ui.back = ui.toggleStyle = ui.togglePerf = ui.toggleDebug = ui.toggleTune = ui.any = false
       ui.menuUp = ui.menuDown = ui.menuLeft = ui.menuRight = false
     }
     if (this.suppressGameplay) {

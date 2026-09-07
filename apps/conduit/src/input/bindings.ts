@@ -44,7 +44,7 @@ export const DEFAULT_KEYS: KeyBindings = {
   shockwave: ['KeyE', 'Mouse2'],
   pitchUp: ['KeyW', 'ArrowUp'],
   pitchDown: ['KeyS', 'ArrowDown'],
-  pause: ['Escape'],
+  pause: ['Escape', 'KeyP'],
   confirm: ['Enter', 'Space'],
 }
 

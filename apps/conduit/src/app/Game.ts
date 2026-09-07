@@ -18,6 +18,9 @@ import { MIN_TIME_SCALE } from '../render/RenderTuning'
 import { MAX_SUBSTEPS, SIM_HZ, TIMER_GATE_BONUS } from '../sim/Tuning'
 import { GameLoop, type LoopClient } from '@apex/engine/app/GameLoop'
 import { MenuStack } from '@apex/engine/app/Menus'
+import { TunePanel } from '@apex/engine/app/TunePanel'
+import { SIM_TUNE } from '../sim/Tuning'
+import { RENDER_TUNE } from '../render/RenderTuning'
 import { PerfOverlay } from '@apex/engine/app/PerfOverlay'
 import { Settings } from './Settings'
 import { buildMenus } from './menus/screens'
@@ -41,6 +44,7 @@ export class Game implements LoopClient {
   readonly hud: Hud
   readonly menus: MenuStack
   readonly perf: PerfOverlay
+  readonly tune: TunePanel
   readonly loop: GameLoop
   readonly audio = new AudioWorld()
   readonly records = new Records()
@@ -86,6 +90,7 @@ export class Game implements LoopClient {
     this.hud = new Hud(container)
     this.menus = new MenuStack(container)
     this.perf = new PerfOverlay(container)
+    this.tune = new TunePanel(container, 'conduit', [SIM_TUNE, RENDER_TUNE])
     this.modern = new ModernStyle(s.modern)
     this.retro = new RetroStyle(s.retro)
     this.xr = new XrSession(this)
@@ -340,6 +345,7 @@ export class Game implements LoopClient {
     const ui = this.input.ui
     this.input.poll(dt)
     if (ui.togglePerf) this.perf.toggle()
+    if (ui.toggleTune) this.tune.toggle()
     if (ui.toggleStyle) this.toggleStyle()
     if (this.menus.open) {
       this.menus.handle(ui)

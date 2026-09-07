@@ -7,7 +7,7 @@ import { EventQueue } from './Events'
 import type { InputFrame } from './InputFrame'
 import { Snapshot, type RunPhase } from './Snapshot'
 import type { Lane, Track } from './Track'
-import { CRASH_TIME_PENALTY, REPLAY_PLAY_SECONDS, REPLAY_SECONDS, SEGMENT_PENALTY, SIM_HZ } from './Tuning'
+import { AIR_REV_RATE, CRASH_TIME_PENALTY, REPLAY_PLAY_SECONDS, REPLAY_SECONDS, SEGMENT_PENALTY, SIM_HZ } from './Tuning'
 
 const REPLAY_FRAMES = REPLAY_SECONDS * SIM_HZ
 
@@ -24,6 +24,12 @@ export class Sim {
   lastLap = 0
   bestLap = 0
   crashes = 0
+  /** Experiments: when false a would-be crash is forgiven — you're set back on your wheels and keep some speed. */
+  crashesEnabled = true
+  /** Airborne engine: with the throttle down the revs climb through the gears with no load, and reset on landing. */
+  private airRpm = 0
+  private airGear = 1
+  private airborneRevving = false
   /** Laps to drive; 0 = free run. */
   targetLaps: number
   private lapArmed = false
@@ -130,6 +136,7 @@ export class Sim {
       }
       car.tick(dt, input)
       this.recordPose()
+      this.tickAirRevs(dt, input)
       switch (car.event) {
         case 'crash':
           this.crash()
@@ -208,6 +215,11 @@ export class Sim {
   }
 
   private crash(): void {
+    if (!this.crashesEnabled) {
+      this.car.resumeInPlace(0.6)
+      this.events.push('land', this.car.pos, this.car.speed)
+      return
+    }
     this.crashes++
     this.lapTime += CRASH_TIME_PENALTY
     this.events.push('crash', this.car.pos, this.car.speed)
@@ -263,7 +275,39 @@ export class Sim {
     h.penalty = this.lastPenalty
     // Fake gearbox for the engine note and HUD.
     const ratio = Math.abs(c.speed) / this.spec.topSpeed
-    h.gear = Math.min(6, 1 + Math.floor(ratio * 6))
-    h.rpm = ((ratio * 6) % 1) * 0.7 + 0.3
+    if (this.airborneRevving) {
+      h.gear = this.airGear
+      h.rpm = this.airRpm
+    } else {
+      h.gear = Math.min(6, 1 + Math.floor(ratio * 6))
+      h.rpm = ((ratio * 6) % 1) * 0.7 + 0.3
+    }
+  }
+
+  private tickAirRevs(dt: number, input: InputFrame): void {
+    const c = this.car
+    if (c.mode !== 'air') {
+      this.airborneRevving = false
+      return
+    }
+    if (!this.airborneRevving) {
+      // Take over from the speed-derived note where it currently sits.
+      const ratio = Math.abs(c.speed) / this.spec.topSpeed
+      this.airGear = Math.min(6, 1 + Math.floor(ratio * 6))
+      this.airRpm = ((ratio * 6) % 1) * 0.7 + 0.3
+      this.airborneRevving = true
+    }
+    if (input.throttle > 0.1) {
+      // No load on the wheels: the revs run away, shifting up until the last gear pins at the limiter.
+      this.airRpm += input.throttle * AIR_REV_RATE * dt
+      if (this.airRpm >= 1) {
+        if (this.airGear < 6) {
+          this.airGear++
+          this.airRpm = 0.35
+        } else this.airRpm = 1
+      }
+    } else {
+      this.airRpm = Math.max(0.3, this.airRpm - AIR_REV_RATE * 0.6 * dt)
+    }
   }
 }

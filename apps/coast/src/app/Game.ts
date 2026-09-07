@@ -2,6 +2,9 @@
 
 import { GameLoop, type LoopClient } from '@apex/engine/app/GameLoop'
 import { MenuStack } from '@apex/engine/app/Menus'
+import { TunePanel } from '@apex/engine/app/TunePanel'
+import { SIM_TUNE } from '../sim/Tuning'
+import { RENDER_TUNE } from '../render/RenderTuning'
 import { PerfOverlay } from '@apex/engine/app/PerfOverlay'
 import { isTouchDevice } from '@apex/engine/app/platform'
 import { Haptics } from '@apex/engine/input/Haptics'
@@ -30,6 +33,7 @@ export class Game implements LoopClient {
   readonly hud: Hud
   readonly menus: MenuStack
   readonly perf: PerfOverlay
+  readonly tune: TunePanel
   readonly loop: GameLoop
   readonly audio = new AudioWorld()
   readonly haptics: Haptics
@@ -67,6 +71,7 @@ export class Game implements LoopClient {
     this.hud.units = s.units
     this.menus = new MenuStack(container)
     this.perf = new PerfOverlay(container)
+    this.tune = new TunePanel(container, 'coast', [SIM_TUNE, RENDER_TUNE])
     this.modern = new ModernStyle(s.modern)
     this.retro = new RetroStyle(s.retro)
     this.loop = new GameLoop(this, this.view.renderer, { simHz: SIM_HZ, maxSubsteps: MAX_SUBSTEPS })
@@ -238,6 +243,7 @@ export class Game implements LoopClient {
     const ui = this.input.ui
     this.input.poll(dt)
     if (ui.togglePerf) this.perf.toggle()
+    if (ui.toggleTune) this.tune.toggle()
     if (ui.toggleStyle) this.toggleStyle()
     if (this.menus.open) this.menus.handle(ui)
     else if (this.state === 'running') {

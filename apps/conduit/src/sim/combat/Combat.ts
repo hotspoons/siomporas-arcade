@@ -123,6 +123,10 @@ export class Combat {
 
   /** Timers that keep running while dead/finished so VFX wind down. */
   coast(dt: number): void {
+    // Gameplay is frozen: the beam must drop even if fire is still held.
+    this.firing = false
+    this.hit = false
+    this.target = null
     if (this.shockAge >= 0) this.shockAge += dt
     if (this.shockAge > 3) this.shockAge = -1
     if (this.slowmoTimer > 0) this.slowmoTimer = Math.max(0, this.slowmoTimer - dt)

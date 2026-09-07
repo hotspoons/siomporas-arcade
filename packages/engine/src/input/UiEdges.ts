@@ -8,6 +8,7 @@ export interface UiEdges {
   toggleStyle: boolean
   togglePerf: boolean
   toggleDebug: boolean
+  toggleTune: boolean
   any: boolean
   menuUp: boolean
   menuDown: boolean
@@ -23,6 +24,7 @@ export function makeUiEdges(): UiEdges {
     toggleStyle: false,
     togglePerf: false,
     toggleDebug: false,
+    toggleTune: false,
     any: false,
     menuUp: false,
     menuDown: false,

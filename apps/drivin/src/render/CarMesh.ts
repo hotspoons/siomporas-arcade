@@ -59,7 +59,7 @@ export class CarMesh {
 
   update(wheelSpin: number, steer: number, braking: boolean): void {
     for (const w of this.wheels) w.rotation.z = -wheelSpin
-    for (const g of this.frontWheels) g.rotation.y = steer
+    for (const g of this.frontWheels) g.rotation.y = -steer // +y rotation turns toward -z; right is +z
     this.brakeMaterial.color.set(braking ? 0xff2a2a : 0x3a0000)
   }
 }

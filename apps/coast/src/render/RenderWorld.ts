@@ -163,11 +163,12 @@ export class RenderWorld {
 
     // Camera follows the road height under the player, smoothly; bounce with speed.
     const groundY = stage.heightAt(z)
-    const targetCamY = groundY + view.camHeight
-    this.camY = this.camY === 0 ? targetCamY : this.camY + (targetCamY - this.camY) * Math.min(1, dt * 8)
+    const camZ = z - view.playerAhead
+    // Ride the ground directly under the camera: any lag here lets the near row
+    // climb above the bottom edge on hills (the flashing band).
+    this.camY = stage.heightAt(camZ) + view.camHeight
     this.bounce = speed > 5 ? Math.sin(this.time * 28) * 0.05 * (speed / 84) : 0
     const camY = this.camY + this.bounce
-    const camZ = z - view.playerAhead
     const camX = x * ROAD_HALF_WIDTH
     // Negative when the camera trails the stage start; those rows reuse segment 0 (a straight lead-in).
     const base = Math.floor(camZ / SEG_LENGTH)
@@ -194,6 +195,7 @@ export class RenderWorld {
         this.rowScale[n] = scale
         this.rowX[n] = P.screenX(xOff - camX, scale)
         this.rowY[n] = P.screenY(seg.y0 - camY, scale)
+        if (n === 0) this.rowY[n] = Math.min(this.rowY[n], -4)
         this.rowValid[n] = 1
         this.rowFog[n] = 1 - Math.exp(-((zRel * fogK) ** 2))
       }

@@ -246,10 +246,9 @@ export class RenderWorld {
     this.v3b.set(v.up.x, v.up.y, v.up.z)
     c.up.copy(this.v3b)
     c.lookAt(this.v3.add(c.position))
-    // Bank into turns plus the post-collision barrel roll.
-    let roll = v.bank
-    if (v.spin > 0) roll += (v.spin / 0.7) * Math.PI * 2 * (v.thetaVel >= 0 ? 1 : -1)
-    c.rotateZ(roll)
+    // A spin-out yaws the craft about its own up axis, like a car spinning on tarmac.
+    if (v.spin > 0) c.rotateY((v.spin / 0.7) * Math.PI * 2 * (v.thetaVel >= 0 ? 1 : -1))
+    c.rotateZ(v.bank)
     this.craft.shadow.visible = !v.airborne
     const throttleGlow = clamp((v.speed - SPEED_CRUISE) / (SPEED_MAX - SPEED_CRUISE), 0, 1)
     this.boostGlow = expApproach(this.boostGlow, v.onBoost ? 1 : 0, 8, dt)

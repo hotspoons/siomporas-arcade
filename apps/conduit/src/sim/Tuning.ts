@@ -2,6 +2,7 @@
 // angles are radians unless the name says DEG, time is seconds. These are the
 // spec's starting values; anything changed by feel is logged in MILESTONE.md.
 
+import { tune, type TuneSection } from '@apex/engine/app/TunePanel'
 import { DEG } from '@apex/engine/math/scalar'
 
 // --- loop -------------------------------------------------------------------
@@ -13,32 +14,32 @@ export const MAX_SUBSTEPS = 8
 
 // --- speed ------------------------------------------------------------------
 /** m/s (~537 mph). The floor: you are never slow. */
-export const SPEED_MIN = 240
+export let SPEED_MIN = 240
 /** m/s (~700 mph). Where speed settles with no throttle or brake. */
-export const SPEED_CRUISE = 313
+export let SPEED_CRUISE = 313
 /** m/s (~1000 mph). Full throttle ceiling. */
-export const SPEED_MAX = 447
+export let SPEED_MAX = 447
 /** m/s. Only reachable on boost strips. */
-export const SPEED_BOOST_MAX = 500
-export const ACCEL = 40
-export const BRAKE_DECEL = 90
+export let SPEED_BOOST_MAX = 500
+export let ACCEL = 40
+export let BRAKE_DECEL = 90
 /** m/s² pull toward cruise when neither throttle nor brake is held. */
-export const DRAG_TO_CRUISE = 25
+export let DRAG_TO_CRUISE = 25
 /** m/s² while riding a boost strip. Strips should feel like a slingshot. */
-export const BOOST_ACCEL = 140
+export let BOOST_ACCEL = 140
 /** m/s² decay from boost speed back toward SPEED_MAX after leaving a strip. */
 export const BOOST_DECAY = 30
 
 // --- steering (theta = angle around the tube) --------------------------------
 /** rad/s² of theta acceleration at SPEED_CRUISE in a default-radius tube. */
-export const THETA_ACCEL = 9.0
-export const THETA_DAMP = 6.0
+export let THETA_ACCEL = 9.0
+export let THETA_DAMP = 6.0
 /** Steering authority multiplier at SPEED_MAX. Never 0: still nimble. */
-export const THETA_SPEED_FALLOFF = 0.55
+export let THETA_SPEED_FALLOFF = 0.55
 /** Hard cap on angular rate so a wide tube can't be lapped in a blink. */
-export const THETA_VEL_MAX = 3.4
+export let THETA_VEL_MAX = 3.4
 /** rad of craft roll into a turn, for the chase view. */
-export const BANK_VISUAL_MAX = 0.6
+export let BANK_VISUAL_MAX = 0.6
 /** How fast the visual bank follows theta velocity. */
 export const BANK_RATE = 8
 
@@ -107,17 +108,17 @@ export const REACQUIRE_RANGE = 150
 export const FALL_GRACE = 0.35
 
 // --- combat -------------------------------------------------------------------
-export const LASER_DPS = 100
-export const LASER_RANGE = 900
+export let LASER_DPS = 100
+export let LASER_RANGE = 900
 /** rad (~8°) auto-aim cone about the vehicle's forward. */
-export const LASER_AIM_CONE = 0.14
-export const LASER_HEAT_PER_SEC = 55
+export let LASER_AIM_CONE = 0.14
+export let LASER_HEAT_PER_SEC = 55
 export const LASER_HEAT_MAX = 100
-export const LASER_COOL_PER_SEC = 40
+export let LASER_COOL_PER_SEC = 40
 export const LASER_OVERHEAT_LOCK = 1.2
 export const SHOCKWAVE_MAX_CHARGES = 3
 export const SHOCKWAVE_START_CHARGES = 3
-export const SHOCKWAVE_RADIUS = 700
+export let SHOCKWAVE_RADIUS = 700
 export const SHOCKWAVE_INVULN = 1.0
 /** Kills in a row (within KILL_STREAK_WINDOW s) that earn a shockwave charge. */
 export const KILL_STREAK_FOR_CHARGE = 8
@@ -125,22 +126,22 @@ export const KILL_STREAK_WINDOW = 2.5
 
 // --- survivability -------------------------------------------------------------
 export const SHIELD_MAX = 100
-export const SHIELD_REGEN_PER_SEC = 2.5
-export const SHIELD_GATE_RESTORE = 60
+export let SHIELD_REGEN_PER_SEC = 2.5
+export let SHIELD_GATE_RESTORE = 60
 export const SHIELD_POD_RESTORE = 35
 /** m/s lost per second of wall contact in HALFPIPE/OPEN. */
-export const SCRAPE_SPEED_LOSS = 35
+export let SCRAPE_SPEED_LOSS = 35
 export const SCRAPE_SHIELD_PER_SEC = 6
-export const COLLISION_SHIELD_COST = 25
+export let COLLISION_SHIELD_COST = 25
 export const ENEMY_SHOT_SHIELD_COST = 12
 /** Speed multiplier applied on a traffic collision. Never stops progress. */
-export const COLLISION_SPEED_KEEP = 0.72
+export let COLLISION_SPEED_KEEP = 0.72
 /** Seconds of the post-collision barrel spin (visual + steering impulse). */
 export const COLLISION_SPIN_TIME = 0.7
 export const COLLISION_INVULN = 0.8
 /** Shield empty + another hit: a spin-out, not a wreck. Speed kept and seconds of lost control. */
-export const SPINOUT_SPEED_KEEP = 0.45
-export const SPINOUT_TIME = 1.4
+export let SPINOUT_SPEED_KEEP = 0.45
+export let SPINOUT_TIME = 1.4
 /** Seconds docked when you leave the track entirely and get dropped back on it. */
 export const OFFTRACK_TIME_PENALTY = 2
 
@@ -150,8 +151,8 @@ export const OFFTRACK_TIME_PENALTY = 2
  * clock never threatened. 20 / +8 keeps a clean run comfortable and makes
  * collisions, scrapes and braking actually cost you.
  */
-export const TIMER_START = 20
-export const TIMER_GATE_BONUS = 8
+export let TIMER_START = 20
+export let TIMER_GATE_BONUS = 8
 export const SCORE_PER_KILL: Record<string, number> = {
   DRONE: 100,
   BLOCKER: 150,
@@ -191,3 +192,38 @@ export const TRAFFIC_MAX_RANGE = SPAWN_LEAD + 200
 
 // --- world -----------------------------------------------------------------------------
 export const FLOATING_ORIGIN_REBASE = 20000
+
+/** Live-tunable knobs for the tuning panel (F6). Values persist per browser; Copy JSON to ship new defaults. */
+export const SIM_TUNE: TuneSection = {
+  title: 'Sim · speed, steering, combat, clock',
+  keys: [
+    tune('SPEED_MIN', () => SPEED_MIN, (v) => (SPEED_MIN = v)),
+    tune('SPEED_CRUISE', () => SPEED_CRUISE, (v) => (SPEED_CRUISE = v)),
+    tune('SPEED_MAX', () => SPEED_MAX, (v) => (SPEED_MAX = v)),
+    tune('SPEED_BOOST_MAX', () => SPEED_BOOST_MAX, (v) => (SPEED_BOOST_MAX = v)),
+    tune('ACCEL', () => ACCEL, (v) => (ACCEL = v)),
+    tune('BRAKE_DECEL', () => BRAKE_DECEL, (v) => (BRAKE_DECEL = v)),
+    tune('DRAG_TO_CRUISE', () => DRAG_TO_CRUISE, (v) => (DRAG_TO_CRUISE = v)),
+    tune('BOOST_ACCEL', () => BOOST_ACCEL, (v) => (BOOST_ACCEL = v)),
+    tune('THETA_ACCEL', () => THETA_ACCEL, (v) => (THETA_ACCEL = v)),
+    tune('THETA_DAMP', () => THETA_DAMP, (v) => (THETA_DAMP = v)),
+    tune('THETA_SPEED_FALLOFF', () => THETA_SPEED_FALLOFF, (v) => (THETA_SPEED_FALLOFF = v)),
+    tune('THETA_VEL_MAX', () => THETA_VEL_MAX, (v) => (THETA_VEL_MAX = v)),
+    tune('BANK_VISUAL_MAX', () => BANK_VISUAL_MAX, (v) => (BANK_VISUAL_MAX = v)),
+    tune('LASER_DPS', () => LASER_DPS, (v) => (LASER_DPS = v)),
+    tune('LASER_RANGE', () => LASER_RANGE, (v) => (LASER_RANGE = v)),
+    tune('LASER_AIM_CONE', () => LASER_AIM_CONE, (v) => (LASER_AIM_CONE = v)),
+    tune('LASER_HEAT_PER_SEC', () => LASER_HEAT_PER_SEC, (v) => (LASER_HEAT_PER_SEC = v)),
+    tune('LASER_COOL_PER_SEC', () => LASER_COOL_PER_SEC, (v) => (LASER_COOL_PER_SEC = v)),
+    tune('SHOCKWAVE_RADIUS', () => SHOCKWAVE_RADIUS, (v) => (SHOCKWAVE_RADIUS = v)),
+    tune('SHIELD_REGEN_PER_SEC', () => SHIELD_REGEN_PER_SEC, (v) => (SHIELD_REGEN_PER_SEC = v)),
+    tune('SHIELD_GATE_RESTORE', () => SHIELD_GATE_RESTORE, (v) => (SHIELD_GATE_RESTORE = v)),
+    tune('COLLISION_SHIELD_COST', () => COLLISION_SHIELD_COST, (v) => (COLLISION_SHIELD_COST = v)),
+    tune('COLLISION_SPEED_KEEP', () => COLLISION_SPEED_KEEP, (v) => (COLLISION_SPEED_KEEP = v)),
+    tune('SPINOUT_SPEED_KEEP', () => SPINOUT_SPEED_KEEP, (v) => (SPINOUT_SPEED_KEEP = v)),
+    tune('SPINOUT_TIME', () => SPINOUT_TIME, (v) => (SPINOUT_TIME = v)),
+    tune('TIMER_START', () => TIMER_START, (v) => (TIMER_START = v)),
+    tune('TIMER_GATE_BONUS', () => TIMER_GATE_BONUS, (v) => (TIMER_GATE_BONUS = v)),
+    tune('SCRAPE_SPEED_LOSS', () => SCRAPE_SPEED_LOSS, (v) => (SCRAPE_SPEED_LOSS = v)),
+  ],
+}

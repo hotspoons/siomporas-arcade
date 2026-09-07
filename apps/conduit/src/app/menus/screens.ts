@@ -79,6 +79,7 @@ export function buildMenus(game: Game) {
     title: 'SETTINGS',
     wide: true,
     items: [
+      { kind: 'action', label: 'TUNING PANEL', hint: 'F6 · live sliders; Copy JSON to send new defaults', onSelect: () => { game.tune.toggle(true); game.menus.refresh() } },
       { kind: 'info', label: '— MODERN —' },
       toggle('Bloom', () => s().modern.bloom, (v) => set((d) => (d.modern.bloom = v)), () => game.applyStyle()),
       toggle('Motion blur', () => s().modern.motionBlur, (v) => set((d) => (d.modern.motionBlur = v)), () => game.applyStyle()),

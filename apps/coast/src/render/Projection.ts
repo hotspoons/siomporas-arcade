@@ -5,7 +5,9 @@ import { FOV_DEG } from './RenderTuning'
 export class Projection {
   width = 320
   height = 224
-  readonly camDepth = 1 / Math.tan(((FOV_DEG / 2) * Math.PI) / 180)
+  get camDepth(): number {
+    return 1 / Math.tan(((FOV_DEG / 2) * Math.PI) / 180)
+  }
 
   /** Camera-relative (cx, cy, cz) → screen x, y and the per-metre scale. */
   scaleAt(cz: number): number {

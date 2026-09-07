@@ -27,7 +27,7 @@ export interface PathPoint {
   ux: number
   uy: number
   uz: number
-  /** Banking roll about the tangent, radians. Positive lowers the LEFT edge (helps a left turn). */
+  /** Banking roll about the tangent, radians. Positive leans up toward the right, lowering the RIGHT edge (helps a right turn). */
   roll: number
   /** Surface present here. */
   surface: boolean
@@ -96,7 +96,7 @@ function bankedArc(r: number, bank: number): LaneDef {
     ...base,
     path: (t, o) => {
       base.path(t, o)
-      // Bank in over the first quarter, out over the last; the arc turns left, so the left edge drops.
+      // Bank in over the first quarter, out over the last; the arc turns right (toward +z), so up leans right and the outer (left) edge rises.
       const ramp = smoothstep(0, 0.25, t) * (1 - smoothstep(0.75, 1, t))
       o.roll = bank * ramp
     },
@@ -226,27 +226,28 @@ export const PIECES: PieceDef[] = [
   {
     type: 'loop',
     label: 'Loop',
-    w: 1,
+    w: 2,
     h: 1,
     ports: [
       { cx: 0, cz: 0, side: 'W', dLevel: 0 },
-      { cx: 0, cz: 0, side: 'E', dLevel: 0 },
+      { cx: 1, cz: 0, side: 'E', dLevel: 0 },
     ],
     lanes: [
       {
         from: 0,
         to: 1,
-        length: CELL + 2 * Math.PI * LOOP_RADIUS,
+        length: 2 * CELL + 2 * Math.PI * LOOP_RADIUS,
         path: (t, o) => {
-          // Distance-parameterised: straight in, full vertical circle, straight out.
-          const L = CELL + 2 * Math.PI * LOOP_RADIUS
-          const d = t * L
-          const lead = CELL * 0.3
+          // Distance-parameterised over two cells: ease out to the entry lane over
+          // the first cell, a full vertical circle that drifts sideways by a whole
+          // road width so the exit clears the entry, then ease back over the last.
           const loopLen = 2 * Math.PI * LOOP_RADIUS
+          const L = 2 * CELL + loopLen
+          const d = t * L
+          const lead = CELL
           const shift = LOOP_SHIFT
           if (d < lead) {
-            // Ease from the centreline to the loop's entry lane.
-            set(o, d, 0, HALF - (shift / 2) * smoothstep(0.1, 0.9, d / lead))
+            set(o, d, 0, HALF - (shift / 2) * smoothstep(0.15, 0.85, d / lead))
             return
           }
           if (d < lead + loopLen) {
@@ -261,9 +262,8 @@ export const PIECES: PieceDef[] = [
             return
           }
           const rest = d - lead - loopLen
-          const tail = CELL - lead
-          // Ease from the exit lane back to the centreline.
-          set(o, lead + rest, 0, HALF + (shift / 2) * (1 - smoothstep(0.1, 0.9, rest / tail)))
+          const tail = CELL
+          set(o, lead + rest, 0, HALF + (shift / 2) * (1 - smoothstep(0.15, 0.85, rest / tail)))
         },
       },
     ],

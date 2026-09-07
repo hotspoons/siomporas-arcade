@@ -144,14 +144,14 @@ describe('grass steering', () => {
     const f0 = sim.car.forward.clone()
     for (let i = 0; i < 60; i++) sim.tick(SIM_DT, input, snap)
     const f1 = sim.car.forward
-    // Right = toward -z (right = up × forward). For f0 ≈ +x that means cross(f0, f1).y > 0.
+    // Right = toward +z (right = forward × up). For f0 ≈ +x that means cross(f0, f1).y < 0.
     const crossY = f0.z * f1.x - f0.x * f1.z
-    expect(crossY).toBeGreaterThan(0)
+    expect(crossY).toBeLessThan(0)
   })
 })
 
 describe('heading convention', () => {
-  it('steering right on the road points the nose right (toward -z when heading +x)', () => {
+  it('steering right on the road points the nose right (toward +z when heading +x)', () => {
     const sim = new Sim(new Track(OVAL), CARS[0], 0)
     const snap = new Snapshot()
     const input = makeInputFrame()
@@ -160,6 +160,6 @@ describe('heading convention', () => {
     input.steer = 1
     for (let i = 0; i < 30; i++) sim.tick(SIM_DT, input, snap)
     expect(sim.car.lateral).toBeGreaterThan(0) // moved right
-    expect(sim.car.forward.z).toBeLessThan(0) // nose right
+    expect(sim.car.forward.z).toBeGreaterThan(0) // nose right
   })
 })

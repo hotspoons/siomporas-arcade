@@ -333,7 +333,7 @@ function bakeLane(def: PieceDef, p: PlacedPiece, laneIndex: number, reversed: bo
     up.normalize()
     const roll = table.kUp[i]
     if (roll !== 0) up.rotateAxis(tan, roll)
-    right.cross(up, tan).normalize()
+    right.cross(tan, up).normalize()
     table.tan[i * 3] = tan.x
     table.tan[i * 3 + 1] = tan.y
     table.tan[i * 3 + 2] = tan.z

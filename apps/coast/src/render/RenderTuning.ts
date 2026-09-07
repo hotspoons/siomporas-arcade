@@ -1,27 +1,28 @@
 // Presentation constants. The game is designed on a 224-line logical screen
 // (the classic arcade height); width follows the window's aspect.
 
+import { tune, type TuneSection } from '@apex/engine/app/TunePanel'
 export const LOGICAL_HEIGHT = 224
 /** Vertical field of view for the pseudo-3D projection. */
-export const FOV_DEG = 78
+export let FOV_DEG = 78
 /** Camera height (m) and how far ahead of the camera the player car sits, per view. */
 export const VIEWS = {
   chase: { camHeight: 4.4, playerAhead: 8.5, drawPlayer: true },
   cockpit: { camHeight: 1.35, playerAhead: 2.2, drawPlayer: false },
 }
 /** Exponential fog per metre of depth, modern / retro. */
-export const FOG_MODERN = 0.0042
-export const FOG_RETRO = 0.0052
+export let FOG_MODERN = 0.0042
+export let FOG_RETRO = 0.0052
 /** Lane marker width (m) and dash length in segments. */
-export const LANE_WIDTH = 0.28
-export const RUMBLE_WIDTH = 1.6
+export let LANE_WIDTH = 0.28
+export let RUMBLE_WIDTH = 1.6
 /** Shoulder width beyond the rumble strip, metres. */
-export const SHOULDER_WIDTH = 4.5
+export let SHOULDER_WIDTH = 4.5
 /** Guardrail height above the road, metres. */
-export const RAIL_HEIGHT = 0.7
+export let RAIL_HEIGHT = 0.7
 /** Night: brightness at the fringe vs in the headlight cone. */
-export const NIGHT_AMBIENT = 0.32
-export const HEADLIGHT_REACH = 120
+export let NIGHT_AMBIENT = 0.32
+export let HEADLIGHT_REACH = 120
 export const ATLAS_SIZE = 2048
 export const MAX_SPRITES = 1400
 export const PLAYER_FRAMES = 7
@@ -55,4 +56,20 @@ export const PALETTES: Record<string, Palette> = {
   desert: { skyTop: 0x3a6ab0, skyBottom: 0xf8e8c0, sun: 0xffffff, fog: 0xf0e0b8, grassA: 0xd8b878, grassB: 0xd0b070, roadA: 0x6a6660, roadB: 0x6e6a64, rumbleA: 0xf8f0e0, rumbleB: 0xc84040, lane: 0xf8f0e0, far: 0xb08a5a, near: 0xc8a068, shoulder: 0xe0c890, rail: 0xc0b8a8, clouds: 0xffffff },
   night: { skyTop: 0x050515, skyBottom: 0x2a1a5a, sun: 0xffffff, fog: 0x1a1030, grassA: 0x142018, grassB: 0x101c14, roadA: 0x2a2c34, roadB: 0x2e3038, rumbleA: 0xc0c0d0, rumbleB: 0xa02838, lane: 0xe0e0ff, far: 0x18103a, near: 0x2a1a4a, shoulder: 0x3a3a48, rail: 0x8a90b0, clouds: 0x201838 },
   alpine: { skyTop: 0x244a80, skyBottom: 0xc8dcf0, sun: 0xffffff, fog: 0xc0d0e0, grassA: 0x5a8a4a, grassB: 0x548246, roadA: 0x505458, roadB: 0x54585c, rumbleA: 0xf0f0f0, rumbleB: 0xd03838, lane: 0xf0f0f0, far: 0x8a9ab0, near: 0x4a6a5a, shoulder: 0x8a8a80, rail: 0xc8ccd4, clouds: 0xd8dde4 },
+}
+
+/** Live-tunable knobs for the tuning panel (F6). Values persist per browser; Copy JSON to ship new defaults. */
+export const RENDER_TUNE: TuneSection = {
+  title: 'Render · camera, fog, road',
+  keys: [
+    tune('FOV_DEG', () => FOV_DEG, (v) => (FOV_DEG = v)),
+    tune('FOG_MODERN', () => FOG_MODERN, (v) => (FOG_MODERN = v)),
+    tune('FOG_RETRO', () => FOG_RETRO, (v) => (FOG_RETRO = v)),
+    tune('LANE_WIDTH', () => LANE_WIDTH, (v) => (LANE_WIDTH = v)),
+    tune('RUMBLE_WIDTH', () => RUMBLE_WIDTH, (v) => (RUMBLE_WIDTH = v)),
+    tune('SHOULDER_WIDTH', () => SHOULDER_WIDTH, (v) => (SHOULDER_WIDTH = v)),
+    tune('RAIL_HEIGHT', () => RAIL_HEIGHT, (v) => (RAIL_HEIGHT = v)),
+    tune('NIGHT_AMBIENT', () => NIGHT_AMBIENT, (v) => (NIGHT_AMBIENT = v)),
+    tune('HEADLIGHT_REACH', () => HEADLIGHT_REACH, (v) => (HEADLIGHT_REACH = v)),
+  ],
 }

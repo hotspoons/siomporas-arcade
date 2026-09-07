@@ -24,7 +24,7 @@ export const DEFAULT_KEYS: KeyBindings = {
   handbrake: ['Space'],
   reset: ['KeyR'],
   camera: ['KeyC'],
-  pause: ['Escape'],
+  pause: ['Escape', 'KeyP'],
   confirm: ['Enter', 'Space'],
 }
 

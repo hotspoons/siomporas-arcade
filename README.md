@@ -26,3 +26,14 @@ just                  # every recipe
 ```
 
 Each app has its own README, MILESTONE, DECISIONS and HANDOFF.
+
+## Tuning panel (all games)
+
+Press **F6** (or Settings → **TUNING PANEL**) for live sliders over every gameplay
+and camera constant worth tuning. Changes apply instantly and persist per browser
+(`localStorage` `apex-<game>.tune.v1`). **Copy JSON** puts a document like
+`{"game":"coast","changed":{"MAX_SPEED_HI":{"from":96,"to":110}},"values":{…}}`
+on the clipboard — paste it into chat and the `changed` block becomes the new
+defaults in `src/sim/Tuning.ts` / `src/render/RenderTuning.ts`. **Paste JSON**
+accepts the same document (or a flat `{NAME: value}` map); **Reset all** returns
+to shipped defaults. `P` pauses in every game alongside Escape.

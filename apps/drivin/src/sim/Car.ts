@@ -33,15 +33,13 @@ import {
   ROAD_HALF_WIDTH,
   STEER_FULL_SPEED,
   STEER_HIGH_SPEED_FACTOR,
+  STEER_RATE,
+  TYRE_STIFFNESS,
 } from './Tuning'
 import type { CarMode } from './Snapshot'
 
 export type CarEvent = 'none' | 'launch' | 'land' | 'crash' | 'offroad' | 'onroad' | 'lost' | 'curb'
 
-/** Steering rate at full lock, rad/s of heading change at low speed. */
-const STEER_RATE = 2.4
-/** Lateral velocity the tyres can correct per second per m/s of mismatch. */
-const TYRE_STIFFNESS = 6
 
 export class Car {
   mode: CarMode = 'track'
@@ -89,7 +87,8 @@ export class Car {
    * Put the car back on its wheels where it is: on the lane surface beneath it
    * if there is one, else on the grass. Never teleports.
    */
-  resumeInPlace(): void {
+  resumeInPlace(keepSpeed = 0): void {
+    const keep = Math.abs(this.speed) * keepSpeed
     const lanes = this.track.lanesNear(this.pos, this.nearby)
     for (const lane of lanes) {
       lane.table.project(this.pos, this.scratch, this.hit)
@@ -100,7 +99,7 @@ export class Car {
       this.lane = lane
       this.s = h.s
       this.lateral = clamp(h.x, -ROAD_HALF_WIDTH, ROAD_HALF_WIDTH)
-      this.speed = 0
+      this.speed = keep
       this.heading = 0
       this.lateralVel = 0
       this.vel.set(0, 0, 0)
@@ -111,7 +110,7 @@ export class Car {
     this.mode = 'ground'
     this.pos.y = CAR_RIDE
     this.yaw = Math.atan2(-this.forward.z, this.forward.x)
-    this.forward.set(Math.cos(this.yaw), 0, -Math.sin(this.yaw))
+    this.forward.set(Math.cos(this.yaw), 0, Math.sin(this.yaw))
     this.up.set(0, 1, 0)
     this.speed = 0
     this.vel.set(0, 0, 0)
@@ -274,7 +273,7 @@ export class Car {
     this.mode = 'air'
     this.airTime = 0
     // World velocity: along tangent (rotated by heading) plus lateral.
-    this.vA.copy(f.tan).rotateAxis(f.up, this.heading)
+    this.vA.copy(f.tan).rotateAxis(f.up, -this.heading)
     this.vel.copy(this.vA).scale(this.speed).addScaled(f.right, this.lateralVel)
     this.pos.copy(f.pos).addScaled(f.right, this.lateral).addScaled(f.up, CAR_RIDE)
     this.forward.copy(this.vA)
@@ -285,8 +284,8 @@ export class Car {
 
   private toGround(f: LaneFrame): void {
     this.mode = 'ground'
-    this.vA.copy(f.tan).rotateAxis(f.up, this.heading)
-    this.yaw = Math.atan2(-this.vA.z, this.vA.x)
+    this.vA.copy(f.tan).rotateAxis(f.up, -this.heading)
+    this.yaw = Math.atan2(this.vA.z, this.vA.x)
     this.pos.copy(f.pos).addScaled(f.right, this.lateral)
     this.pos.y = CAR_RIDE
     this.onGrass = true
@@ -335,7 +334,7 @@ export class Car {
       }
       this.pos.y = CAR_RIDE
       this.mode = 'ground'
-      this.yaw = Math.atan2(-this.forward.z, this.forward.x)
+      this.yaw = Math.atan2(this.forward.z, this.forward.x)
       this.speed = Math.hypot(this.vel.x, this.vel.z)
       this.onGrass = true
       this.event = 'land'
@@ -379,9 +378,9 @@ export class Car {
     this.longitudinal(dt, input, 0, GRASS_DRAG)
     const v = this.speed
     const authority = 1 - (1 - STEER_HIGH_SPEED_FACTOR) * clamp((Math.abs(v) - STEER_FULL_SPEED) / (this.spec.topSpeed - STEER_FULL_SPEED), 0, 1)
-    // forward = (cos yaw, 0, -sin yaw); right is -z, so steering right increases yaw.
+    // forward = (cos yaw, 0, sin yaw); right = forward × up = +z at yaw 0, so steering right increases yaw.
     this.yaw += input.steer * STEER_RATE * authority * dt * Math.sign(v || 1)
-    this.forward.set(Math.cos(this.yaw), 0, -Math.sin(this.yaw))
+    this.forward.set(Math.cos(this.yaw), 0, Math.sin(this.yaw))
     this.pos.addScaled(this.forward, v * dt)
     this.pos.y = CAR_RIDE
     this.up.set(0, 1, 0)
@@ -408,12 +407,12 @@ export class Car {
       const f = this.lane.table.frameAt(this.s, this.frame)
       this.pos.copy(f.pos).addScaled(f.right, this.lateral).addScaled(f.up, CAR_RIDE)
       this.up.copy(f.up)
-      this.forward.copy(f.tan).rotateAxis(f.up, this.heading)
-      this.right.cross(this.up, this.forward).normalize()
+      this.forward.copy(f.tan).rotateAxis(f.up, -this.heading)
+      this.right.cross(this.forward, this.up).normalize()
     } else if (this.mode === 'ground') {
-      this.right.cross(this.up, this.forward).normalize()
+      this.right.cross(this.forward, this.up).normalize()
     } else {
-      this.right.cross(this.up, this.forward).normalize()
+      this.right.cross(this.forward, this.up).normalize()
     }
   }
 

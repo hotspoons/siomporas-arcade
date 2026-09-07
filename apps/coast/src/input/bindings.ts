@@ -21,7 +21,7 @@ export const DEFAULT_KEYS: KeyBindings = {
   gear: ['ShiftLeft', 'ShiftRight'],
   turbo: ['Space'],
   view: ['KeyC'],
-  pause: ['Escape'],
+  pause: ['Escape', 'KeyP'],
   confirm: ['Enter', 'Space'],
 }
 export const DEFAULT_PAD: PadBindings = {

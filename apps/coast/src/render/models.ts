@@ -51,7 +51,7 @@ export const MODELS: ModelDef[] = [
   P('pitsOffice', 'pitsOffice', 6, 256),
   P('gantry', 'overheadLights', 8.5, 256),
   // Hero prototypes, one per livery; the chase view picks the selected one.
-  ...Object.entries(LIVERIES).map(([id, l]): ModelDef => ({ kind: `hero_${id}`, file: '', build: () => buildPrototype(l), heightM: 1.25, yaws: [0, 12, 24, 38, -12, -24, -38], cell: 192 })),
+  ...Object.entries(LIVERIES).map(([id, l]): ModelDef => ({ kind: `hero_${id}`, file: '', build: () => buildPrototype(l), heightM: 1.1, yaws: [0, 12, 24, 38, -12, -24, -38], cell: 192 })),
   { kind: 'formula', file: 'assets/cars/race.glb', heightM: 1.1, yaws: [0, 12, 24, 38, -12, -24, -38], cell: 160 },
   // Roadside architecture and signage.
   { kind: 'diner', file: '', build: buildDiner, heightM: 6.4, yaws: [0], cell: 256 },

@@ -61,47 +61,51 @@ export class Cockpit {
     const bodyMid = shade(this.livery.body, 0.72)
     const stripe = '#' + this.livery.stripe.toString(16).padStart(6, '0')
 
-    // Fender humps: big rounded shapes in the lower corners, lit from above.
+    // Bonnet: a low, wide deck that dives away between the fenders (917-style),
+    // with the central stripe running off toward the nose.
+    const noseGrad = c.createLinearGradient(0, H - 130, 0, H)
+    noseGrad.addColorStop(0, bodyMid)
+    noseGrad.addColorStop(1, bodyDark)
+    c.fillStyle = noseGrad
+    c.beginPath()
+    c.moveTo(0, H)
+    c.lineTo(0, H - 60)
+    c.quadraticCurveTo(W * 0.3, H - 120, W / 2, H - 118)
+    c.quadraticCurveTo(W * 0.7, H - 120, W, H - 60)
+    c.lineTo(W, H)
+    c.closePath()
+    c.fill()
+    c.fillStyle = stripe
+    c.beginPath()
+    c.moveTo(W / 2 - 46, H)
+    c.lineTo(W / 2 - 16, H - 116)
+    c.lineTo(W / 2 + 16, H - 116)
+    c.lineTo(W / 2 + 46, H)
+    c.closePath()
+    c.fill()
+    // Fender humps: tall rounded swells right out at the sides, lit from above,
+    // standing well proud of the bonnet between them.
     for (const side of [-1, 1]) {
-      const cx = W / 2 + side * 470
-      const grad = c.createRadialGradient(cx - side * 60, H - 40, 40, cx, H + 60, 420)
+      const cx = W / 2 + side * 560
+      const grad = c.createRadialGradient(cx - side * 40, H - 120, 40, cx, H + 40, 380)
       grad.addColorStop(0, bodyLight)
       grad.addColorStop(0.45, bodyMid)
       grad.addColorStop(1, bodyDark)
       c.fillStyle = grad
       c.beginPath()
-      c.moveTo(cx - side * 420, H)
-      c.bezierCurveTo(cx - side * 380, H - 150, cx - side * 140, H - 210, cx + side * 60, H - 205)
-      c.bezierCurveTo(cx + side * 260, H - 200, cx + side * 380, H - 120, cx + side * 460, H)
+      c.moveTo(cx - side * 300, H)
+      c.bezierCurveTo(cx - side * 290, H - 130, cx - side * 160, H - 240, cx + side * 20, H - 245)
+      c.bezierCurveTo(cx + side * 200, H - 240, cx + side * 300, H - 140, cx + side * 320, H)
       c.closePath()
       c.fill()
       // Highlight line along the hump.
       c.strokeStyle = 'rgba(255,255,255,0.18)'
       c.lineWidth = 4
       c.beginPath()
-      c.moveTo(cx - side * 300, H - 120)
-      c.bezierCurveTo(cx - side * 120, H - 190, cx + side * 120, H - 190, cx + side * 300, H - 130)
+      c.moveTo(cx - side * 240, H - 110)
+      c.bezierCurveTo(cx - side * 120, H - 220, cx + side * 100, H - 225, cx + side * 260, H - 130)
       c.stroke()
     }
-    // Nose between the humps: low, with the central stripe running away from us.
-    const noseGrad = c.createLinearGradient(0, H - 210, 0, H)
-    noseGrad.addColorStop(0, bodyMid)
-    noseGrad.addColorStop(1, bodyDark)
-    c.fillStyle = noseGrad
-    c.beginPath()
-    c.moveTo(W / 2 - 330, H)
-    c.quadraticCurveTo(W / 2 - 250, H - 190, W / 2, H - 200)
-    c.quadraticCurveTo(W / 2 + 250, H - 190, W / 2 + 330, H)
-    c.closePath()
-    c.fill()
-    c.fillStyle = stripe
-    c.beginPath()
-    c.moveTo(W / 2 - 40, H)
-    c.lineTo(W / 2 - 14, H - 196)
-    c.lineTo(W / 2 + 14, H - 196)
-    c.lineTo(W / 2 + 40, H)
-    c.closePath()
-    c.fill()
     // Windscreen frame: thin A-pillars at the edges and a header bar with the mirror.
     c.fillStyle = '#15161c'
     c.fillRect(0, 0, 26, H)

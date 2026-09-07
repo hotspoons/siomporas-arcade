@@ -35,7 +35,7 @@ const flat = (color: number, extra: FlatExtra = {}) => {
 }
 
 /** Bump when any procedural model changes shape; part of the atlas cache key. */
-export const PROCGEN_VERSION = 2
+export const PROCGEN_VERSION = 3
 
 interface Slice {
   z: number
@@ -114,34 +114,36 @@ export function buildPrototype(livery: Livery): Object3D {
   const stripe = flat(livery.stripe)
   // Hull: nose → front arches → cockpit → rear arches → tail.
   const hull: Slice[] = [
-    { z: 2.35, hw: 0.28, top: 0.42, bulge: 0, floor: 0.2 },
-    { z: 2.0, hw: 0.62, top: 0.5, bulge: 0.02, floor: 0.16 },
-    { z: 1.55, hw: 0.9, top: 0.6, bulge: 0.14, floor: 0.13 },
-    { z: 1.15, hw: 1.0, top: 0.66, bulge: 0.24, floor: 0.12 },
-    { z: 0.7, hw: 0.98, top: 0.7, bulge: 0.14, floor: 0.12 },
-    { z: 0.1, hw: 0.96, top: 0.72, bulge: 0.06, floor: 0.12 },
-    { z: -0.6, hw: 0.97, top: 0.74, bulge: 0.08, floor: 0.12 },
-    { z: -1.2, hw: 1.0, top: 0.76, bulge: 0.22, floor: 0.12 },
-    { z: -1.7, hw: 0.98, top: 0.74, bulge: 0.16, floor: 0.13 },
-    { z: -2.3, hw: 0.9, top: 0.68, bulge: 0.04, floor: 0.16 },
-    { z: -2.6, hw: 0.84, top: 0.6, bulge: 0, floor: 0.22 },
+    // Group 6 proportions: ~2.3 m across the arches and barely 0.9 m to the roof;
+    // the centre of the bonnet dives between the two fender swells.
+    { z: 2.35, hw: 0.4, top: 0.34, bulge: 0, floor: 0.18 },
+    { z: 2.0, hw: 0.82, top: 0.42, bulge: 0.04, floor: 0.14 },
+    { z: 1.55, hw: 1.08, top: 0.5, bulge: 0.22, floor: 0.12 },
+    { z: 1.15, hw: 1.16, top: 0.54, bulge: 0.32, floor: 0.11 },
+    { z: 0.7, hw: 1.12, top: 0.58, bulge: 0.2, floor: 0.11 },
+    { z: 0.1, hw: 1.08, top: 0.6, bulge: 0.08, floor: 0.11 },
+    { z: -0.6, hw: 1.1, top: 0.62, bulge: 0.12, floor: 0.11 },
+    { z: -1.2, hw: 1.16, top: 0.64, bulge: 0.3, floor: 0.11 },
+    { z: -1.7, hw: 1.14, top: 0.62, bulge: 0.24, floor: 0.12 },
+    { z: -2.3, hw: 1.04, top: 0.56, bulge: 0.06, floor: 0.15 },
+    { z: -2.6, hw: 0.96, top: 0.5, bulge: 0, floor: 0.2 },
   ]
   g.add(loft(hull, 7, body))
-  // Canopy: a narrower loft rising out of the hull top, blended front and back.
+  // Canopy: a low, wide bubble rising out of the hull top, blended front and back.
   const canopy: Slice[] = [
-    { z: 0.95, hw: 0.5, top: 0.72, bulge: 0, floor: 0.6 },
-    { z: 0.55, hw: 0.56, top: 0.98, bulge: 0, floor: 0.6 },
-    { z: 0.1, hw: 0.58, top: 1.14, bulge: 0, floor: 0.6 },
-    { z: -0.5, hw: 0.56, top: 1.12, bulge: 0, floor: 0.6 },
-    { z: -1.0, hw: 0.5, top: 0.96, bulge: 0, floor: 0.6 },
-    { z: -1.35, hw: 0.42, top: 0.78, bulge: 0, floor: 0.6 },
+    { z: 0.95, hw: 0.58, top: 0.6, bulge: 0, floor: 0.5 },
+    { z: 0.55, hw: 0.66, top: 0.8, bulge: 0, floor: 0.5 },
+    { z: 0.1, hw: 0.7, top: 0.92, bulge: 0, floor: 0.5 },
+    { z: -0.5, hw: 0.68, top: 0.9, bulge: 0, floor: 0.5 },
+    { z: -1.0, hw: 0.6, top: 0.78, bulge: 0, floor: 0.5 },
+    { z: -1.35, hw: 0.5, top: 0.64, bulge: 0, floor: 0.5 },
   ]
   g.add(loft(canopy, 6, glass))
   // Roof spine in body colour over the glass (Group 6 cars had a painted centre section).
-  g.add(box(0.36, 0.06, 1.3, 0, 1.13, -0.35, body))
+  g.add(box(0.4, 0.05, 1.3, 0, 0.92, -0.35, body))
   // Ducktail spoiler: low, wide, integrated on two small fins.
-  g.add(box(1.7, 0.05, 0.42, 0, 0.88, -2.45, dark))
-  for (const x of [-0.72, 0.72]) g.add(box(0.05, 0.3, 0.5, x, 0.72, -2.4, stripe))
+  g.add(box(2.0, 0.05, 0.42, 0, 0.74, -2.45, dark))
+  for (const x of [-0.86, 0.86]) g.add(box(0.05, 0.26, 0.5, x, 0.6, -2.4, stripe))
   // Centre stripe: a ribbon lying on the hull top, following its height.
   for (let i = 0; i < hull.length - 1; i++) {
     const a = hull[i]
@@ -153,26 +155,26 @@ export function buildPrototype(livery: Livery): Object3D {
   }
   // Number roundel on the nose.
   const roundel = new Mesh(new CylinderGeometry(0.27, 0.27, 0.02, 18), flat(0xffffff))
-  roundel.position.set(0, 0.62, 1.55)
+  roundel.position.set(0, 0.5, 1.55)
   roundel.rotation.x = -0.28
   g.add(roundel)
   const num = textPlane(livery.number, 0.4, '#111', 'transparent', 96)
-  num.position.set(0, 0.64, 1.55)
+  num.position.set(0, 0.52, 1.55)
   num.rotation.x = -1.29
   g.add(num)
   // Faired headlamps in the fender fronts; tail lamps as slim bars.
-  for (const x of [-0.66, 0.66]) {
+  for (const x of [-0.82, 0.82]) {
     const lamp = new Mesh(new SphereGeometry(0.15, 10, 8), flat(0xfff6c8, { emissive: 0xffe0a0, emissiveIntensity: 0.9 }))
     lamp.scale.set(1, 0.7, 0.5)
-    lamp.position.set(x, 0.62, 1.9)
+    lamp.position.set(x, 0.5, 1.9)
     g.add(lamp)
-    g.add(box(0.36, 0.09, 0.05, x * 0.95, 0.5, -2.62, flat(0xff2a2a, { emissive: 0xff2a2a, emissiveIntensity: 0.8 })))
+    g.add(box(0.4, 0.09, 0.05, x * 0.95, 0.42, -2.62, flat(0xff2a2a, { emissive: 0xff2a2a, emissiveIntensity: 0.8 })))
   }
   // Intake and exhausts.
-  g.add(box(0.5, 0.12, 0.06, 0, 0.36, 2.34, dark))
+  g.add(box(0.6, 0.12, 0.06, 0, 0.28, 2.34, dark))
   for (const x of [-0.22, 0.22]) g.add(cyl(0.055, 0.35, x, 0.3, -2.65, dark, true))
   // Wheels, mostly enclosed by the arches.
-  for (const [x, z] of [[-0.86, 1.2], [0.86, 1.2], [-0.86, -1.25], [0.86, -1.25]]) {
+  for (const [x, z] of [[-1.0, 1.2], [1.0, 1.2], [-1.0, -1.25], [1.0, -1.25]]) {
     const w = new Mesh(new CylinderGeometry(0.34, 0.34, 0.3, 14), dark)
     w.rotation.z = Math.PI / 2
     w.position.set(x, 0.34, z)

@@ -7,7 +7,13 @@ const COUNT = 420
 
 export class Rain {
   readonly mesh: LineSegments
-  enabled = false
+  /**
+   * How hard it is raining, 0..1. A vibe can bring the weather in gradually, so this
+   * fades the curtain in rather than switching it on: fewer drops and thinner streaks
+   * in drizzle, the full four hundred in a downpour.
+   */
+  intensity = 0
+  private readonly material: LineBasicMaterial
   private readonly pos: Float32BufferAttribute
   private readonly x = new Float32Array(COUNT)
   private readonly y = new Float32Array(COUNT)
@@ -19,7 +25,8 @@ export class Rain {
     this.pos = new Float32BufferAttribute(new Float32Array(COUNT * 6), 3)
     const g = new BufferGeometry()
     g.setAttribute('position', this.pos)
-    this.mesh = new LineSegments(g, new LineBasicMaterial({ color: 0xb8c8dc, transparent: true, opacity: 0.32, depthTest: false, depthWrite: false }))
+    this.material = new LineBasicMaterial({ color: 0xb8c8dc, transparent: true, opacity: 0.32, depthTest: false, depthWrite: false })
+    this.mesh = new LineSegments(g, this.material)
     this.mesh.frustumCulled = false
     this.mesh.visible = false
     for (let i = 0; i < COUNT; i++) {
@@ -35,8 +42,12 @@ export class Rain {
   }
 
   update(dt: number, carSpeed: number, curveAccum: number): void {
-    this.mesh.visible = this.enabled
-    if (!this.enabled) return
+    const wet = Math.max(0, Math.min(1, this.intensity))
+    this.mesh.visible = wet > 0.02
+    if (!this.mesh.visible) return
+    this.material.opacity = 0.32 * wet
+    // Drops past the intensity's share are parked off-screen rather than drawn short.
+    const live = Math.max(1, Math.round(COUNT * (0.35 + 0.65 * wet)))
     const W = this.width
     const H = this.height
     // Driving into rain: drops fall, but they also rush past you — outward from the vanishing
@@ -47,7 +58,11 @@ export class Rain {
     const drift = -Math.sin(curveAccum * 0.002) * 0.12
     const vpx = 0.5
     const vpy = 0.58
-    for (let i = 0; i < COUNT; i++) {
+    for (let i = live; i < COUNT; i++) {
+      this.pos.setXYZ(i * 2, -10, -10, 0)
+      this.pos.setXYZ(i * 2 + 1, -10, -10, 0)
+    }
+    for (let i = 0; i < live; i++) {
       const ox = this.x[i] - vpx
       const oy = this.y[i] - vpy
       this.y[i] -= this.speed[i] * dt * (1.0 + k * 0.4) - oy * k * 1.4 * dt

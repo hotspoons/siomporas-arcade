@@ -35,7 +35,8 @@ export class Background {
           float d = distance(vUv * vec2(1.6, 1.0), uSunPos * vec2(1.6, 1.0));
           float sunR = mix(0.05, 0.028, uNight) * uSunSize;
           c += uSun * (smoothstep(sunR, sunR - 0.008, d) * mix(0.9, 0.55, uNight) + mix(0.25, 0.08, uNight) * smoothstep(0.25 * uSunSize, 0.0, d));
-          if (uNight > 0.5) { float s = step(0.997, hash(floor(vUv * vec2(320.0, 224.0)))); c += vec3(s) * 0.8; }
+          float stars = smoothstep(0.3, 0.85, uNight);
+          if (stars > 0.01) { float s = step(0.997, hash(floor(vUv * vec2(320.0, 224.0)))); c += vec3(s) * 0.8 * stars; }
           gl_FragColor = vec4(c, 1.0);
         }`,
       depthTest: false,
@@ -69,24 +70,36 @@ export class Background {
     this.near.frustumCulled = false
   }
 
-  setPalette(p: Palette, backdrop: string, retro: boolean, night = backdrop === 'city'): void {
-    ;(this.skyMat.uniforms.uTop.value as Color).set(p.skyTop)
-    ;(this.skyMat.uniforms.uBottom.value as Color).set(p.skyBottom)
-    ;(this.skyMat.uniforms.uSun.value as Color).set(p.sun)
-    this.skyMat.uniforms.uNight.value = night ? 1 : 0
-    this.skyMat.uniforms.uSunPos.value = p.sunPos ?? [0.7, 0.62]
-    this.skyMat.uniforms.uSunSize.value = p.sunSize ?? 1
-    if (backdrop !== this.backdrop) {
-      this.backdrop = backdrop
+  /** The expensive one: re-draws the parallax canvases. `key` decides when that is needed. */
+  setPalette(p: Palette, backdrop: string, retro: boolean, night = backdrop === 'city' ? 1 : 0, key = backdrop): void {
+    this.setSky(p, night, 0xffffff)
+    if (key !== this.backdrop) {
+      this.backdrop = key
       drawLayer(this.farTex, backdrop, 'far', p)
       drawLayer(this.nearTex, backdrop, 'near', p)
-      drawClouds(this.cloudTex, p, night)
+      drawClouds(this.cloudTex, p, night > 0.5)
     }
     for (const t of [this.farTex, this.nearTex, this.cloudTex]) {
       t.minFilter = t.magFilter = retro ? NearestFilter : LinearFilter
       t.wrapS = RepeatWrapping
       t.needsUpdate = true
     }
+  }
+
+  /**
+   * The cheap half of setPalette: sky colours, the sun's place, how much night there is,
+   * and a tint over the parallax layers. Safe to call every frame — a vibe sliding from
+   * dusk into night goes through here, while the layer canvases (which cost a texture
+   * upload each) are only re-drawn when the scene under them actually changes.
+   */
+  setSky(p: Palette, night: number, layerTint: number): void {
+    ;(this.skyMat.uniforms.uTop.value as Color).set(p.skyTop)
+    ;(this.skyMat.uniforms.uBottom.value as Color).set(p.skyBottom)
+    ;(this.skyMat.uniforms.uSun.value as Color).set(p.sun)
+    this.skyMat.uniforms.uNight.value = night
+    this.skyMat.uniforms.uSunPos.value = p.sunPos ?? [0.7, 0.62]
+    this.skyMat.uniforms.uSunSize.value = p.sunSize ?? 1
+    for (const m of [this.farMat, this.nearMat, this.cloudMat]) (m.uniforms.uTint.value as Color).set(layerTint)
   }
 
   /** Lay out the layers for the logical screen; horizonY is where the road meets the sky. */

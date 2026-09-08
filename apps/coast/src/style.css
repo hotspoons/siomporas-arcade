@@ -141,3 +141,63 @@ canvas.game { position: absolute; inset: 0; width: 100%; height: 100%; display: 
 .press-start .line { display: block; font-family: var(--font-arcade); font-size: clamp(13px, 2.6vmin, 26px); letter-spacing: 0.18em; color: #fff; text-shadow: 0 0 0.6em rgba(0,0,0,0.9), 0 2px 0 rgba(0,0,0,0.8); animation: press-blink 1.1s steps(1, end) infinite; }
 .press-start .sub { display: block; margin-top: 1.1em; font-family: var(--font-arcade); font-size: clamp(9px, 1.5vmin, 15px); letter-spacing: 0.14em; opacity: 0.55; text-shadow: 0 2px 0 rgba(0,0,0,0.8); }
 @keyframes press-blink { 0%, 55% { opacity: 1; } 56%, 100% { opacity: 0.12; } }
+
+/* ---- track editor ---------------------------------------------------------
+   The plan-view world builder (src/editor/Editor.ts). Deliberately plain and
+   dense: this is a tool, not the game, so it borrows the drivin editor's look
+   rather than the arcade HUD's.                                            */
+.editor { position: absolute; inset: 0; display: flex; flex-direction: column; background: #150a24; z-index: 6; font-size: 16px; color: #e8f6ff; }
+.editor .toolbar { display: flex; align-items: center; gap: 6px; padding: 7px 12px; background: rgba(255,255,255,0.05); border-bottom: 1px solid rgba(255,255,255,0.1); flex-wrap: wrap; }
+.editor .toolbar .sep { width: 1px; height: 22px; background: rgba(255,255,255,0.16); margin: 0 5px; }
+.editor .toolbar .title { font-family: var(--font-hud); font-size: 20px; color: var(--amber); padding: 0 6px; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.editor .toolbar .crumb { opacity: 0.6; font-size: 14px; }
+.editor .toolbar .spring { flex: 1 1 auto; }
+.editor button, .editor select, .editor label.import { font: inherit; font-size: 15px; color: #e8f6ff; background: rgba(255,255,255,0.09); border: 1px solid rgba(255,255,255,0.16); padding: 5px 10px; border-radius: 3px; cursor: pointer; letter-spacing: 0.04em; }
+.editor button:hover, .editor label.import:hover { background: rgba(255,255,255,0.18); }
+.editor button.primary { background: var(--accent); color: #1a0b2e; font-weight: 700; }
+.editor button.active { background: rgba(255,200,87,0.24); border-color: var(--amber); color: var(--amber); }
+.editor .body { flex: 1 1 auto; display: flex; min-height: 0; }
+.editor .palette { flex: none; width: 232px; overflow-y: auto; padding: 8px; position: relative; border-right: 1px solid rgba(255,255,255,0.08); }
+.editor .palette h3 { margin: 12px 4px 4px; font-family: var(--font-arcade); font-size: 8px; letter-spacing: 0.18em; opacity: 0.5; }
+.editor .palette h3:first-child { margin-top: 2px; }
+.editor .palette .tool { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; margin-bottom: 3px; padding: 4px 8px; background: rgba(255,255,255,0.04); border-color: transparent; font-size: 13px; white-space: nowrap; overflow: hidden; }
+.editor .palette .tool.selected { border-color: var(--accent); background: rgba(255,138,60,0.18); }
+.editor .palette .tool .swatch { flex: none; width: 22px; height: 14px; border-radius: 2px; border: 1px solid rgba(0,0,0,0.4); }
+.editor .palette .tool canvas { width: 26px; height: 18px; flex: none; }
+.editor .palette.collapsed { width: 54px; }
+.editor .palette.collapsed h3, .editor .palette.collapsed .tool span { display: none; }
+.editor .palette.collapsed .tool { justify-content: center; padding: 4px 0; }
+.editor .palette-grip { flex: none; width: 6px; cursor: col-resize; background: rgba(255,255,255,0.06); }
+.editor .palette-grip:hover { background: rgba(255,200,87,0.45); }
+.editor .stack { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; }
+.editor canvas.plan { flex: 1 1 0; min-height: 0; width: 100%; display: block; cursor: crosshair; touch-action: none; }
+.editor canvas.strip { flex: none; width: 100%; display: block; border-top: 1px solid rgba(255,255,255,0.1); cursor: pointer; touch-action: none; }
+.editor .status { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 5px 12px; font-size: 14px; opacity: 0.9; border-top: 1px solid rgba(255,255,255,0.1); min-height: 34px; }
+.editor .status .hints { opacity: 0.5; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: right; }
+.editor .status.flash .info { color: var(--amber); }
+.editor .status .info { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.editor-menu { position: absolute; z-index: 30; min-width: 200px; background: rgba(21,10,36,0.98); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; box-shadow: 0 8px 30px rgba(0,0,0,0.6); padding: 4px; font-size: 15px; }
+.editor-menu .item { display: flex; justify-content: space-between; gap: 18px; padding: 5px 10px; border-radius: 3px; cursor: pointer; }
+.editor-menu .item:hover { background: rgba(255,138,60,0.22); }
+.editor-menu .item.head { cursor: default; opacity: 0.6; font-size: 13px; border-bottom: 1px solid rgba(255,255,255,0.12); margin-bottom: 3px; }
+.editor-menu .item.head:hover { background: none; }
+.editor-menu .item.danger { color: var(--danger); }
+.editor-menu kbd { opacity: 0.45; font-family: inherit; }
+.editor-dialog-back { position: absolute; inset: 0; z-index: 40; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.55); }
+.editor-dialog { min-width: 340px; max-width: 90vw; padding: 18px 22px; background: #150a24; border: 1px solid rgba(255,138,60,0.45); border-radius: 6px; box-shadow: 0 10px 40px rgba(0,0,0,0.7); }
+.editor-dialog p { margin: 0 0 12px; font-size: 17px; }
+.editor-dialog input { font: inherit; width: 100%; padding: 6px 10px; margin-bottom: 12px; color: #e8f6ff; background: rgba(255,255,255,0.09); border: 1px solid rgba(255,255,255,0.22); border-radius: 3px; }
+.editor-dialog .report { margin: 0 0 12px; padding: 0; list-style: none; max-height: 40vh; overflow: auto; font-size: 14px; line-height: 1.5; }
+.editor-dialog .report .err { color: var(--danger); }
+.editor-dialog .report .warn { color: var(--amber); }
+.editor-dialog .buttons { display: flex; gap: 8px; justify-content: flex-end; }
+.editor-tip { position: absolute; z-index: 25; max-width: 300px; padding: 6px 9px; pointer-events: none; background: rgba(12,6,22,0.96); border: 1px solid rgba(255,255,255,0.2); border-radius: 4px; font-size: 14px; line-height: 1.4; }
+.editor-tip strong { display: block; color: var(--amber); font-weight: 400; }
+
+/* A long value (a world name, say) must not squeeze the label column down to one word per
+   line: the label keeps a floor, the value takes what it needs beside it, and the title
+   screen — which has the room and the longest hints — is given a wider box to do it in. */
+.menu .item .label { flex: 1 1 auto; min-width: 9em; }
+.menu .item .value { flex: 0 0 auto; }
+.menu .item .hint { max-width: 30em; }
+.menu.title-screen { min-width: min(92vw, 44em); }

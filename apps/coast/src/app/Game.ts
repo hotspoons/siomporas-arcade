@@ -20,7 +20,12 @@ import type { SimEvent } from '../sim/Events'
 import { copyInput, makeInputFrame } from '../sim/InputFrame'
 import { Sim } from '../sim/Sim'
 import { Snapshot } from '../sim/Snapshot'
-import { STAGE_BY_ID } from '../sim/Stages'
+import { Editor } from '../editor/Editor'
+import { BUILTIN_WORLD, WorldStore } from '../world/WorldStore'
+import { WorldRoute, type RouteSource } from '../world/Route'
+import { builtinAsWorld } from '../world/builtin'
+import { checkWorld } from '../world/types'
+import type { WorldData } from '../world/types'
 import { keyLabel } from '@apex/engine/input/bindings'
 
 /** Short label for a standard-mapping pad button id like 'b2'. */
@@ -33,7 +38,7 @@ import { Hud } from './Hud'
 import { buildMenus } from './menus'
 import { Settings } from './Settings'
 
-export type GameState = 'title' | 'running' | 'paused' | 'results'
+export type GameState = 'title' | 'running' | 'paused' | 'results' | 'editor'
 
 export class Game implements LoopClient {
   readonly settings = new Settings()
@@ -49,6 +54,16 @@ export class Game implements LoopClient {
   readonly audio = new AudioWorld()
   readonly haptics: Haptics
   readonly touch: TouchSource | null = null
+  /** Worlds: the built-in coast-to-coast route plus anything built in the editor. */
+  readonly worlds = new WorldStore()
+  readonly editor: Editor
+  /** The world the next run will drive. */
+  route: RouteSource
+  /** A world handed straight over from the editor's Test drive, unsaved and all. */
+  private testWorld: WorldData | null = null
+  private testStart = ''
+  /** The editor is holding a world we came out of (Test drive), so we can go back to it. */
+  fromEditor = false
   sim: Sim
   state: GameState = 'title'
   prev = new Snapshot()
@@ -75,7 +90,8 @@ export class Game implements LoopClient {
       this.input.extras.push(this.touch)
       container.classList.add('is-touch')
     }
-    this.sim = new Sim(this.seed)
+    this.route = this.worlds.route(s.world ?? BUILTIN_WORLD, this.seed)
+    this.sim = new Sim(this.seed, s.startStage, this.route)
     this.view = new RenderWorld(canvas)
     this.view.setStage(this.sim.stage)
     this.hud = new Hud(container)
@@ -89,8 +105,9 @@ export class Game implements LoopClient {
       const sim = this.sim
       return {
         state: this.state,
+        world: this.route.worldName,
         stage: sim.stage.desc.id,
-        stageName: STAGE_BY_ID[sim.stage.desc.id]?.name,
+        stageName: sim.stage.desc.name,
         stageIndex: sim.stageIndex,
         route: sim.route.join(' › '),
         startStage: this.settings.data.startStage,
@@ -101,6 +118,9 @@ export class Game implements LoopClient {
         gearbox: this.settings.data.gearbox,
         z: round(sim.z),
         x: round(sim.x),
+        vibe: this.view.vibe?.id ?? sim.stage.theme.id,
+        night: round(sim.nightAmount),
+        rain: round(sim.rainAmount),
         segment: Math.floor(sim.z / 6),
         speed: round(sim.speed),
         gear: sim.gear,
@@ -109,6 +129,10 @@ export class Game implements LoopClient {
         timeLeft: round(sim.timeLeft),
       }
     }
+    this.editor = new Editor(container, this.worlds, {
+      onTest: (world, trackId) => this.testWorldRun(world, trackId),
+      onExit: () => this.closeEditor(),
+    })
     this.modern = new ModernStyle(s.modern)
     this.retro = new RetroStyle(s.retro)
     this.loop = new GameLoop(this, this.view.renderer, { simHz: SIM_HZ, maxSubsteps: MAX_SUBSTEPS })
@@ -152,7 +176,10 @@ export class Game implements LoopClient {
 
   startRun(): void {
     this.seed = (Date.now() & 0xffff) || 1
-    this.sim = new Sim(this.seed, this.settings.data.startStage)
+    this.route = this.testWorld ? new WorldRoute(this.testWorld, this.seed) : this.worlds.route(this.settings.data.world ?? BUILTIN_WORLD, this.seed)
+    const start = this.route.has(this.testStart || this.settings.data.startStage) ? this.testStart || this.settings.data.startStage : this.route.start
+    this.sim = new Sim(this.seed, start, this.route)
+    this.lastStageId = ''
     this.applyGearbox()
     this.syncStage()
     this.sim.tick(0, this.held, this.curr)
@@ -171,9 +198,77 @@ export class Game implements LoopClient {
     this.container.classList.add('is-driving')
     this.input.suppressGameplay = false
     this.loop.paused = false
-    this.say(STAGE_BY_ID[this.sim.startId].name.toUpperCase(), 1.8, 'good')
+    this.say(this.route.name(this.sim.startId).toUpperCase(), 1.8, 'good')
     this.audio.resume()
     this.audio.setRunning(true)
+  }
+
+  /**
+   * Open the world builder. It keeps whatever it was editing when you came back from a
+   * test drive; otherwise it opens the world the title screen is pointing at (the built-in
+   * route arrives traced into waypoints, since sections cannot be dragged about).
+   */
+  openEditor(): void {
+    this.state = 'editor'
+    this.menus.closeAll()
+    this.showTitleCard(false)
+    this.hud.setVisible(false)
+    this.touch?.setVisible(false)
+    this.container.classList.remove('is-driving')
+    this.input.suppressGameplay = true
+    this.loop.paused = true
+    if (!this.fromEditor) {
+      const id = this.settings.data.world ?? BUILTIN_WORLD
+      const data = this.worlds.get(id)
+      if (data) this.editor.setWorld(data, id)
+      else this.editor.setWorld(builtinAsWorld(this.worlds.freeName('Coast to Coast (copy)')), null)
+    }
+    this.fromEditor = true
+    this.editor.show()
+    this.audio.setRunning(false)
+  }
+
+  private closeEditor(): void {
+    this.editor.hide()
+    // fromEditor stays set: the editor is still holding that world, unsaved edits and all,
+    // so the title screen offers a way straight back into it.
+    this.testWorld = null
+    this.testStart = ''
+    this.loop.paused = false
+    this.applyWorld()
+    this.enterTitle()
+  }
+
+  /** Test drive: run the editor's world exactly as it stands, saved or not. */
+  private testWorldRun(world: WorldData, trackId: string): void {
+    const problems = checkWorld(world).filter((p) => p.level === 'error')
+    if (problems.length) {
+      this.editor.hide()
+      this.state = 'title'
+      this.menus.replace(buildMenus(this).title())
+      this.say(`CAN'T DRIVE: ${problems[0].text.toUpperCase()}`, 4, 'bad')
+      this.editor.show()
+      this.state = 'editor'
+      return
+    }
+    this.editor.hide()
+    this.testWorld = structuredClone(world)
+    this.testStart = trackId
+    this.startRun()
+  }
+
+  /** Point the title screen's sim at whichever world is selected. */
+  applyWorld(): void {
+    const id = this.settings.data.world ?? BUILTIN_WORLD
+    this.route = this.worlds.route(id, this.seed)
+    if (!this.route.has(this.settings.data.startStage)) this.settings.update((d) => (d.startStage = this.route.start))
+    this.sim = new Sim(this.seed, this.settings.data.startStage, this.route)
+    this.lastStageId = ''
+    this.applyGearbox()
+    this.syncStage()
+    this.sim.tick(0, this.held, this.curr)
+    this.sim.tick(0, this.held, this.prev)
+    this.menus.refresh()
   }
 
   private goImmersive(): void {
@@ -210,6 +305,10 @@ export class Game implements LoopClient {
   }
   quitToTitle(): void {
     this.loop.paused = false
+    // A test drive's world was never saved; back at the title we drive whatever is selected there.
+    this.testWorld = null
+    this.testStart = ''
+    this.applyWorld()
     this.enterTitle()
   }
   private showResults(): void {
@@ -334,6 +433,10 @@ export class Game implements LoopClient {
     const ui = this.input.ui
     this.input.poll(dt)
     if (ui.togglePerf) this.perf.toggle()
+    if (this.state === 'editor') {
+      this.editor.tick()
+      return 1
+    }
     if (ui.toggleTune) this.tune.toggle()
     if (ui.toggleStyle) this.toggleStyle()
     // The pause key toggles: while the pause menu is up it resumes, at any menu depth.
@@ -373,7 +476,7 @@ export class Game implements LoopClient {
   }
 
   simTick(dt: number): void {
-    if (this.state === 'paused' || this.state === 'results') return
+    if (this.state === 'paused' || this.state === 'results' || this.state === 'editor') return
     const tmp = this.prev
     this.prev = this.curr
     this.curr = tmp
@@ -389,6 +492,7 @@ export class Game implements LoopClient {
   }
 
   render(alpha: number, dt: number): void {
+    if (this.state === 'editor') return
     this.syncHudRetro()
     const events = this.sim.events
     if (events.length) events.drain(this.onEventBound)
@@ -397,14 +501,14 @@ export class Game implements LoopClient {
     if (this.state !== 'title') {
       this.hud.update(this.curr, dt, this.view.view === 'cockpit')
       // Prompt the manual switches while they are needed and off, labelled for whatever you're holding.
-      const t = this.sim.theme
       const pad = this.input.gamepad.connected
       const k = this.settings.data.keys
       const p = this.settings.data.pad
       const wipersKey = pad ? padLabel(p.wipers?.[0]) : keyLabel(k.wipers?.[0] ?? 'KeyR')
       const lightsKey = pad ? padLabel(p.lights?.[0]) : keyLabel(k.lights?.[0] ?? 'KeyL')
-      const needWipers = Boolean(t.rain) && !this.curr.wipersOn && this.state === 'running'
-      const needLights = Boolean(t.night) && !this.curr.lightsOn && this.state === 'running'
+      // A vibe brings the weather on gradually, so the nag follows the amount, not a flag.
+      const needWipers = this.curr.rain > 0.25 && !this.curr.wipersOn && this.state === 'running'
+      const needLights = this.curr.night > 0.45 && !this.curr.lightsOn && this.state === 'running'
       this.hud.setSwitchLabels(wipersKey, lightsKey)
       this.hud.setSwitchNeeds(needWipers, needLights)
       this.view.hudLayer.setSwitchLabels(wipersKey, lightsKey)
@@ -431,10 +535,9 @@ export class Game implements LoopClient {
 
   /** Arcade nag: the switches are manual, so remind the driver when the weather turns. */
   private switchHints(): void {
-    const t = this.sim.theme
     const need: string[] = []
-    if (t.rain && !this.sim.wipersOn) need.push('R · WIPERS')
-    if (t.night && !this.sim.lightsOn) need.push('L · LIGHTS')
+    if (this.sim.rainAmount > 0.25 && !this.sim.wipersOn) need.push('R · WIPERS')
+    if (this.sim.nightAmount > 0.45 && !this.sim.lightsOn) need.push('L · LIGHTS')
     if (need.length) setTimeout(() => this.state === 'running' && this.say(need.join('   '), 2.4), 2400)
   }
 
@@ -479,8 +582,7 @@ export class Game implements LoopClient {
         hp.mobile(30)
         break
       case 'checkpoint': {
-        const id = this.sim.stage.desc.id
-        this.say(`CHECKPOINT · ${STAGE_BY_ID[id].name.toUpperCase()}`, 2.2, 'good')
+        this.say(`CHECKPOINT · ${this.sim.stage.desc.name.toUpperCase()}`, 2.2, 'good')
         hp.mobile(40)
         this.switchHints()
         break

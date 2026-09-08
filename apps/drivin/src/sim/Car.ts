@@ -266,13 +266,19 @@ export class Car {
       this.slide -= (yawDemand - yawRate) * Math.abs(v) * 0.35 * dt
       this.slip = 1
     }
-    // Tunnel wall: gravity along the wall drags you back down toward the floor.
+    // Tunnel wall: gravity along the wall drags you back down toward the floor — least at the bottom
+    // and at the very top (where it pulls you off the ceiling instead; see the stick check below).
     if (tube) this.slide += -GRAVITY * Math.sin(wallA) * Math.max(0.2, f.up.y) * wallW * dt
     else this.slide = expApproach(this.slide, 0, SLIDE_DECAY, dt)
     if (tube) this.slide = expApproach(this.slide, 0, 1.2, dt)
     this.lateralVel = v * Math.sin(this.heading) + this.slide
     this.lateral += this.lateralVel * dt
     this.s += v * Math.cos(this.heading) * dt
+    // Inside the tube `lateral` is arc length; wrap it so a full lap of the wall is one continuous ride.
+    if (tube) {
+      const circ = 2 * Math.PI * TUBE_RADIUS
+      this.lateral = ((((this.lateral + circ / 2) % circ) + circ) % circ) - circ / 2
+    }
 
     // Pointing too far off the road: on a ground-level lane you simply leave it (open
     // world, no invisible rails); anywhere else the edge will take care of you.
@@ -292,23 +298,28 @@ export class Car {
       return
     }
 
+    // On the upper half of a tube the wall is above you: you hang there only while you are travelling
+    // round it fast enough (lateralVel² / R against the part of gravity pulling you off). Otherwise you
+    // drop off the wall and fall back to the floor — no invisible ceiling, no bounce.
+    if (tube && wallW > 0.5) {
+      const a = this.lateral / TUBE_RADIUS
+      const pull = -Math.cos(a) * GRAVITY * Math.max(0.2, f.up.y) // > 0 past horizontal
+      if (pull > 0 && (this.lateralVel * this.lateralVel) / TUBE_RADIUS < pull) {
+        this.launchFromWall()
+        return
+      }
+    }
+
     // Edges.
     const edge = ROAD_HALF_WIDTH + CURB_WIDTH
     if (Math.abs(this.lateral) > ROAD_HALF_WIDTH) {
       if (lane.profile === 'tube') {
-        // Half-pipe: ride the wall up to well past horizontal, then scrape the roof. At the
-        // mouths the wall is still rising from curb height, so there you just run off the side.
+        // At a mouth the wall is still rising from curb height, so running past it puts you on the
+        // grass; inside the bore there is no edge at all — the arc wrapped above.
         const maxArc = this.tubeMaxArc(lane, this.s)
-        if (Math.abs(this.lateral) > maxArc) {
-          if (wallW < 0.5) {
-            this.toGround(f)
-            return
-          }
-          this.lateral = Math.sign(this.lateral) * maxArc
-          this.slide *= -0.3
-          this.heading *= 0.5
-          this.speed -= CURB_SLOW * dt * 4
-          this.event = 'curb'
+        if (wallW < 0.5 && Math.abs(this.lateral) > maxArc) {
+          this.toGround(f)
+          return
         }
       } else if (Math.abs(this.lateral) > edge) {
         const elevated = f.pos.y - this.track.groundHeight(f.pos.x, f.pos.z) > 1.5 || f.up.y < 0.7
@@ -386,10 +397,11 @@ export class Car {
     return (lane.mouthIn === false ? 1 : smoothstep(0, TUBE_RAMP, s)) * (lane.mouthOut === false ? 1 : smoothstep(0, TUBE_RAMP, len - s))
   }
 
-  /** Arc length up the wall you can occupy here (curb at the mouths, past horizontal inside). */
+  /** Arc length up the wall you can occupy here: the whole bore inside, only the curb at a mouth. */
   private tubeMaxArc(lane: Lane, s: number): number {
     const w = this.tubeWall(lane, s)
-    return ROAD_HALF_WIDTH + CURB_WIDTH + (TUBE_RADIUS * 2.2 - ROAD_HALF_WIDTH - CURB_WIDTH) * w
+    const full = Math.PI * TUBE_RADIUS
+    return ROAD_HALF_WIDTH + CURB_WIDTH + (full - ROAD_HALF_WIDTH - CURB_WIDTH) * w
   }
 
   private chooseNext(lane: Lane): Lane | null {
@@ -423,6 +435,16 @@ export class Car {
     this.pos.copy(f.pos).addScaled(f.right, this.lateral).addScaled(f.up, CAR_RIDE)
     this.forward.copy(this.vA)
     this.up.copy(f.up)
+    this.airGlitch = this.speed >= this.spec.topSpeed * AIR_GLITCH_THRESHOLD
+    this.event = 'launch'
+  }
+
+  /** Fall off a tunnel wall: keep the pose we are already in and turn the wall motion into world velocity. */
+  private launchFromWall(): void {
+    this.mode = 'air'
+    this.airTime = 0
+    this.updatePose()
+    this.vel.copy(this.forward).scale(this.speed).addScaled(this.right, this.lateralVel)
     this.airGlitch = this.speed >= this.spec.topSpeed * AIR_GLITCH_THRESHOLD
     this.event = 'launch'
   }
@@ -507,12 +529,12 @@ export class Car {
         const h = this.hit
         if (!this.scratch.surface || h.over > 0.5) continue
         if (lane.profile === 'tube') {
-          // Inside the tube: catch the car on whatever part of the wall it reaches.
+          // Inside the tube: catch the car on whatever part of the wall it reaches, ceiling included.
           const r = Math.hypot(h.x, h.h - TUBE_RADIUS)
           if (r < TUBE_RADIUS - CAR_RIDE - 1.5 || r > TUBE_RADIUS + 2) continue
           const a = Math.atan2(h.x, TUBE_RADIUS - h.h)
           if (Math.abs(a) * TUBE_RADIUS > this.tubeMaxArc(lane, h.s)) continue
-          this.landOn(lane, h.s, a * TUBE_RADIUS, this.scratch)
+          this.landOn(lane, h.s, a * TUBE_RADIUS, this.scratch, a)
           return
         }
         if (Math.abs(h.x) > ROAD_HALF_WIDTH + CURB_WIDTH) continue
@@ -529,17 +551,24 @@ export class Car {
     }
   }
 
-  private landOn(lane: Lane, s: number, x: number, f: LaneFrame): void {
+  private landOn(lane: Lane, s: number, x: number, f: LaneFrame, wallA?: number): void {
     this.mode = 'track'
     this.lane = lane
     this.s = clamp(s, 0, lane.table.length)
     this.lateral = x
     this.speed = this.vel.dot(f.tan)
-    this.lateralVel = this.vel.dot(f.right)
-    this.slide = 0
+    // On a tube wall the sideways direction is the wall's tangent, not the floor's right.
+    if (wallA !== undefined) {
+      this.vB.copy(f.right).scale(Math.cos(wallA)).addScaled(f.up, Math.sin(wallA))
+      this.lateralVel = this.vel.dot(this.vB)
+      this.slide = this.lateralVel
+    } else {
+      this.lateralVel = this.vel.dot(f.right)
+      this.slide = 0
+    }
     // Heading from the car's forward projected into the surface plane.
-    this.vA.copy(this.forward).projectOntoPlane(f.up).normalize()
-    this.heading = clamp(wrapAngle(Math.atan2(this.vA.dot(f.right), this.vA.dot(f.tan))), -HEADING_MAX, HEADING_MAX)
+    this.vA.copy(this.forward).projectOntoPlane(wallA !== undefined ? this.up : f.up).normalize()
+    this.heading = clamp(wrapAngle(Math.atan2(this.vA.dot(wallA !== undefined ? this.vB : f.right), this.vA.dot(f.tan))), -HEADING_MAX, HEADING_MAX)
     this.onGrass = false
     this.event = 'land'
   }

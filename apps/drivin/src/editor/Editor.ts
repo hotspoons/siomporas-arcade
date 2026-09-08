@@ -74,6 +74,10 @@ export class Editor {
   private level = 0
   /** Primed piece flipped across its travel axis (M). */
   private mirror = false
+  /** A piece being dragged out of the palette: primed for this gesture only, the selection is untouched. */
+  private dragType: string | null = null
+  private dragFrom: { x: number; y: number } | null = null
+  private suppressPaletteClick = false
   /** World cell under the pointer (may be outside the grid), or null when the pointer left the canvas. */
   private hover: Cell | null = null
   private selection = new Set<number>()
@@ -209,6 +213,8 @@ export class Editor {
       if (this.mode === 'terrain') return
       if (!(e.shiftKey && e.altKey)) this.openMenu(e)
     })
+    window.addEventListener('pointermove', (e) => this.onPaletteDrag(e))
+    window.addEventListener('pointerup', (e) => this.onPaletteDrop(e))
     window.addEventListener('keydown', (e) => this.onKey(e))
     window.addEventListener('keyup', (e) => {
       if (e.code === 'Space') this.spaceHeld = false
@@ -264,6 +270,11 @@ export class Editor {
 
   // --- palette / load / save ------------------------------------------------------
 
+  /** The piece about to be placed: whatever is being dragged out of the palette, else the selected one. */
+  private get primedType(): string {
+    return this.dragType ?? this.selectedType
+  }
+
   private buildPalette(): void {
     const groups: PieceDef['group'][] = ['basic', 'curves', 'stunts', 'flow', 'scenery']
     for (const g of groups) {
@@ -284,14 +295,52 @@ export class Editor {
         label.textContent = def.label
         b.appendChild(label)
         b.addEventListener('click', () => {
+          // A drag that ended on the grid already placed a piece; don't also change the selection.
+          if (this.suppressPaletteClick) {
+            this.suppressPaletteClick = false
+            return
+          }
           this.selectedType = def.type
-          this.rot = 0
           for (const x of this.palette.querySelectorAll('.piece')) x.classList.toggle('selected', x === b)
           this.dirty = true
+        })
+        // Drag straight onto the grid without touching the selection.
+        b.addEventListener('pointerdown', (e) => {
+          if (e.button !== 0) return
+          this.dragType = def.type
+          this.dragFrom = { x: e.clientX, y: e.clientY }
+          this.suppressPaletteClick = false
         })
         this.palette.appendChild(b)
       }
     }
+  }
+
+  /** While dragging out of the palette: follow the pointer over the grid and preview the piece there. */
+  private onPaletteDrag(e: PointerEvent): void {
+    if (!this.dragType || !this.dragFrom) return
+    if (Math.hypot(e.clientX - this.dragFrom.x, e.clientY - this.dragFrom.y) < 6) return
+    this.hideTip()
+    const r = this.canvas.getBoundingClientRect()
+    const over = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom
+    this.hover = over ? this.cellAt(e) : null
+    this.dirty = true
+  }
+
+  /** Dropping on the grid places the dragged piece; dropping anywhere else just cancels the drag. */
+  private onPaletteDrop(e: PointerEvent): void {
+    if (!this.dragType || !this.dragFrom) return
+    const moved = Math.hypot(e.clientX - this.dragFrom.x, e.clientY - this.dragFrom.y) >= 6
+    const r = this.canvas.getBoundingClientRect()
+    const over = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom
+    if (moved && over && this.mode === 'pieces') {
+      const c = this.cellAt(e)
+      if (this.inGrid(c)) this.place(c, false)
+      this.suppressPaletteClick = true
+    }
+    this.dragType = null
+    this.dragFrom = null
+    this.dirty = true
   }
 
   private refreshLoadList(): void {
@@ -1328,25 +1377,60 @@ export class Editor {
   }
 
   private place(c: Cell, force: boolean): void {
-    const def = PIECE_BY_TYPE[this.selectedType]
-    const size = rotatedSize(def, this.rot)
+    const type = this.primedType
+    const def = PIECE_BY_TYPE[type]
+    // Orientation first: a piece dropped beside an open connector turns to meet it, so a straight
+    // continues the line it is next to instead of sitting across it.
+    const rot = this.orientFor(def, c, this.rot)
+    const size = rotatedSize(def, rot)
     if (c.x + size.w > this.data.size || c.z + size.h > this.data.size || c.x < 0 || c.z < 0) {
       if (!force) return
       this.growTo({ x: c.x + size.w - 1, z: c.z + size.h - 1 })
     }
-    const clash = this.overlapping(this.selectedType, this.rot, c.x, c.z, this.level)
+    const clash = this.overlapping(type, rot, c.x, c.z, this.level)
     if (clash.length && !force) return
     this.pushUndo()
     if (clash.length) this.removePieces(new Set(clash))
     // Only one start piece.
     if (def.isStart) this.data.pieces = this.data.pieces.filter((p) => !PIECE_BY_TYPE[p.type].isStart)
-    // Jump pieces face their landing: if another open connector lies along one of the rotations' lip line, take it.
-    let rot = this.rot
-    if (def.ports.some((p) => p.open)) rot = this.faceJump(def, c, rot)
-    this.data.pieces.push({ type: this.selectedType, x: c.x, z: c.z, rot, level: this.level, mirror: this.mirror || undefined })
+    this.data.pieces.push({ type, x: c.x, z: c.z, rot, level: this.level, mirror: this.mirror || undefined })
+    this.rot = rot // remember it: the next piece starts where this one ended up
     this.selection.clear()
     this.settleTerrain()
     this.dirty = true
+  }
+
+  /**
+   * The rotation to place at: the one whose connectors meet the most open connectors already on the
+   * grid (a jump lip instead looks down its line for another lip). Ties keep the rotation you had, so
+   * rotating by hand still wins when nothing is adjacent.
+   */
+  private orientFor(def: PieceDef, c: Cell, rot: number): number {
+    if (def.decor || !def.ports.length) return rot
+    if (def.ports.some((p) => p.open)) return this.faceJump(def, c, rot)
+    const open = portStatus(this.data.pieces, this.data.links ?? []).filter((p) => !p.matched)
+    if (!open.length) return rot
+    let best = rot
+    let bestScore = -1
+    for (const r of [rot, (rot + 1) % 4, (rot + 2) % 4, (rot + 3) % 4]) {
+      const size = rotatedSize(def, r)
+      if (c.x + size.w > this.data.size || c.z + size.h > this.data.size) continue
+      if (!this.fits(def.type, r, c.x, c.z, this.level)) continue
+      let score = 0
+      for (const port of def.ports) {
+        const pp = portPlacement(def, { rot: r, mirror: this.mirror }, port)
+        const o = sideOffset(pp.side)
+        const cx = c.x + pp.cx
+        const cz = c.z + pp.cz
+        const level = this.level + port.dLevel
+        if (open.some((q) => q.cx === cx + o.dx && q.cz === cz + o.dz && q.side === opposite(pp.side) && q.level === level)) score++
+      }
+      if (score > bestScore) {
+        bestScore = score
+        best = r
+      }
+    }
+    return bestScore > 0 ? best : rot
   }
 
   /** Pick the rotation (current first, then its opposite, then the rest) whose open lip looks straight at another open connector. */
@@ -1532,7 +1616,7 @@ export class Editor {
         { label: 'Delete', key: '⌫', danger: true, run: () => this.deletePieces(targets) },
       )
     } else {
-      const def = PIECE_BY_TYPE[this.selectedType]
+      const def = PIECE_BY_TYPE[this.primedType]
       items.push({ label: `Place ${def.label} here`, run: () => this.place(c, false) })
       if (!this.inGrid(c)) items.push({ label: 'Grow grid to here', run: () => this.growTo(c) })
       if (this.selection.size) items.push({ label: 'Clear selection', key: 'Esc', run: () => this.selection.clear() })
@@ -1667,7 +1751,8 @@ export class Editor {
         for (const port of def.ports) {
           const pp = portPlacement(def, p, port)
           const o = sideOffset(pp.side)
-          const q = this.toPx(p.x + pp.cx + 0.5 + o.dx * 0.32, p.z + pp.cz + 0.5 + o.dz * 0.32)
+          // Just outside the footprint, so they never sit on the road itself.
+          const q = this.toPx(p.x + pp.cx + 0.5 + o.dx * 0.78, p.z + pp.cz + 0.5 + o.dz * 0.78)
           const up = port.dLevel === hi
           c.fillStyle = up ? '#5cff8a' : '#ffc857'
           c.font = `${Math.max(12, cell * 0.34)}px "VT323", ui-monospace, monospace`
@@ -1797,13 +1882,15 @@ export class Editor {
     if (this.mode === 'pieces' && this.hover && !this.drag && !this.pan) {
       if (this.inGrid(this.hover)) {
         if (hoverIdx < 0) {
-          const def = PIECE_BY_TYPE[this.selectedType]
-          const size = rotatedSize(def, this.rot)
-          const ok = this.fits(this.selectedType, this.rot, this.hover.x, this.hover.z, this.level)
+          const def = PIECE_BY_TYPE[this.primedType]
+          // Preview the rotation it would actually be placed at.
+          const rot = this.orientFor(def, this.hover, this.rot)
+          const size = rotatedSize(def, rot)
+          const ok = this.fits(this.primedType, rot, this.hover.x, this.hover.z, this.level)
           const a = toPx(this.hover.x * CELL, (this.hover.z + size.h) * CELL)
           c.fillStyle = ok ? 'rgba(255,255,255,0.12)' : 'rgba(255,59,92,0.25)'
           c.fillRect(a.x, a.y, size.w * cell, size.h * cell)
-          drawLanes(c, def, { type: def.type, x: this.hover.x, z: this.hover.z, rot: this.rot, level: this.level, mirror: this.mirror }, toPx, cell / CELL, ok ? 'rgba(255,255,255,0.7)' : 'rgba(255,59,92,0.8)', null)
+          drawLanes(c, def, { type: def.type, x: this.hover.x, z: this.hover.z, rot, level: this.level, mirror: this.mirror }, toPx, cell / CELL, ok ? 'rgba(255,255,255,0.7)' : 'rgba(255,59,92,0.8)', null)
         }
       } else {
         const shift = Math.max(0, -this.hover.x, -this.hover.z)

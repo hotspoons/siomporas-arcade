@@ -7,7 +7,7 @@ import { EventQueue } from './Events'
 import type { InputFrame } from './InputFrame'
 import { Snapshot, type RunPhase } from './Snapshot'
 import type { Lane, Track } from './Track'
-import { AIR_REV_RATE, CELL, CRASH_TIME_PENALTY, RESUME_ADVANCE, REPLAY_PLAY_SECONDS, REPLAY_SECONDS, SEGMENT_PENALTY, SIM_HZ } from './Tuning'
+import { AIR_REV_RATE, CELL, CRASH_TIME_PENALTY, RESET_PENALTY, RESUME_ADVANCE, REPLAY_PLAY_SECONDS, REPLAY_SECONDS, SEGMENT_PENALTY, SIM_HZ } from './Tuning'
 
 const REPLAY_FRAMES = REPLAY_SECONDS * SIM_HZ
 
@@ -200,6 +200,12 @@ export class Sim {
         this.prevLane = car.lane
       }
     } else if (this.phase === 'replay') {
+      // Reset skips the replay: back to the road where the footage began, stopped, for a time penalty.
+      if (input.reset) {
+        this.resetToReplayStart()
+        this.write(out)
+        return
+      }
       this.replayTime += dt
       if (this.replayTime >= REPLAY_PLAY_SECONDS) {
         this.events.push('replay_end', null)
@@ -212,6 +218,32 @@ export class Sim {
       }
     }
     this.write(out)
+  }
+
+  /**
+   * Skip the crash replay: put the car back on the road at the pose the replay opens on (a few seconds
+   * before the incident), stopped, and charge RESET_PENALTY seconds for the privilege.
+   */
+  private resetToReplayStart(): void {
+    if (this.ringCount > 0) {
+      const framesBack = Math.min(Math.round(REPLAY_PLAY_SECONDS * SIM_HZ), this.ringCount - 1)
+      const idx = (((this.ringHead - 1 - framesBack) % REPLAY_FRAMES) + REPLAY_FRAMES) % REPLAY_FRAMES
+      const k = idx * 9
+      const c = this.car
+      c.pos.set(this.ring[k], this.ring[k + 1], this.ring[k + 2])
+      c.forward.set(this.ring[k + 3], this.ring[k + 4], this.ring[k + 5])
+      c.up.set(this.ring[k + 6], this.ring[k + 7], this.ring[k + 8])
+      c.vel.set(0, 0, 0)
+    }
+    this.car.resumeInPlace()
+    this.lapTime += RESET_PENALTY
+    this.crashStreak = 0
+    this.sinceCrash = 0
+    this.ringCount = 0
+    this.prevLane = this.car.lane
+    this.events.push('replay_end', null)
+    this.events.push('respawn', this.car.pos, 2)
+    this.phase = 'driving'
   }
 
   private recordPose(): void {

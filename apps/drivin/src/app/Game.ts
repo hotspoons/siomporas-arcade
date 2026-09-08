@@ -22,7 +22,7 @@ import { copyInput, makeInputFrame } from '../sim/InputFrame'
 import { Sim } from '../sim/Sim'
 import { Snapshot } from '../sim/Snapshot'
 import { Track, type TrackData } from '../sim/Track'
-import { MAX_SUBSTEPS, SEGMENT_PENALTY, SIM_HZ } from '../sim/Tuning'
+import { MAX_SUBSTEPS, RESET_PENALTY, SEGMENT_PENALTY, SIM_HZ } from '../sim/Tuning'
 import { BUILTIN_TRACKS } from '../sim/tracks'
 import { Dash } from './Dash'
 import { Hud } from './Hud'
@@ -444,6 +444,7 @@ export class Game implements LoopClient {
         break
       case 'respawn':
         if (e.a === 0) this.hud.showMessage('RECOVERED', 0.8)
+        else if (e.a === 2) this.hud.showMessage(`RESET · +${RESET_PENALTY}s`, 1.6, 'bad')
         break
       default:
         break

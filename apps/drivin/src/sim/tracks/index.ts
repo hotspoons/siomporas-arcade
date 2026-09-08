@@ -3,6 +3,7 @@
 import { PIECE_BY_TYPE, opposite, portPlacement, sideOffset } from '../pieces'
 import type { PlacedPiece, TrackData } from '../Track'
 import { layFrom, layTrack, type Cursor } from './lay'
+import { RICH2 } from './rich2'
 
 const S = (type: string) => ({ type })
 
@@ -91,4 +92,4 @@ export function stuntPark(): TrackData {
 
 export const STUNT_PARK: TrackData = stuntPark()
 
-export const BUILTIN_TRACKS: TrackData[] = [OVAL, HIGHLINE, STUNT_PARK]
+export const BUILTIN_TRACKS: TrackData[] = [OVAL, HIGHLINE, STUNT_PARK, RICH2]

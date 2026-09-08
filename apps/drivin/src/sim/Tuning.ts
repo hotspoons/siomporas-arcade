@@ -96,6 +96,8 @@ export let REPLAY_PLAY_SECONDS = 4.5
 /** Seconds added to a lap for every required track segment you skipped. */
 export let SEGMENT_PENALTY = 5
 export const CRASH_TIME_PENALTY = 5
+/** Seconds added for skipping a crash replay with the reset key (you restart from before the incident). */
+export let RESET_PENALTY = 5
 /** Metres further along the road you resume for each consecutive crash on the same spot (~50 ft). */
 export let RESUME_ADVANCE = 15
 
@@ -124,6 +126,7 @@ export const SIM_TUNE: TuneSection = {
     tune('CRASH_IMPACT_SPEED', () => CRASH_IMPACT_SPEED, (v) => (CRASH_IMPACT_SPEED = v)),
     tune('REPLAY_PLAY_SECONDS', () => REPLAY_PLAY_SECONDS, (v) => (REPLAY_PLAY_SECONDS = v)),
     tune('SEGMENT_PENALTY', () => SEGMENT_PENALTY, (v) => (SEGMENT_PENALTY = v)),
+    tune('RESET_PENALTY', () => RESET_PENALTY, (v) => (RESET_PENALTY = v), [0, 20], 1),
     tune('AIR_GLITCH_THRESHOLD', () => AIR_GLITCH_THRESHOLD, (v) => (AIR_GLITCH_THRESHOLD = v)),
     tune('AIR_GLITCH_ACCEL', () => AIR_GLITCH_ACCEL, (v) => (AIR_GLITCH_ACCEL = v)),
     tune('AIR_REV_RATE', () => AIR_REV_RATE, (v) => (AIR_REV_RATE = v)),

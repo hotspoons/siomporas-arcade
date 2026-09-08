@@ -300,8 +300,10 @@ export class Editor {
             this.suppressPaletteClick = false
             return
           }
-          this.selectedType = def.type
-          for (const x of this.palette.querySelectorAll('.piece')) x.classList.toggle('selected', x === b)
+          // Clicking the piece you already have primed puts the pointer back to plain editing.
+          const same = this.selectedType === def.type
+          this.selectedType = same ? '' : def.type
+          for (const x of this.palette.querySelectorAll('.piece')) x.classList.toggle('selected', !same && x === b)
           this.dirty = true
         })
         // Drag straight onto the grid without touching the selection.
@@ -997,6 +999,11 @@ export class Editor {
         break
       case 'Escape':
         if (this.menu) this.closeMenu()
+        else if (this.selectedType) {
+          this.selectedType = ''
+          for (const x of this.palette.querySelectorAll('.piece')) x.classList.remove('selected')
+          this.dirty = true
+        }
         else if (this.linking) {
           this.linking = null
           this.dirty = true
@@ -1378,7 +1385,8 @@ export class Editor {
 
   private place(c: Cell, force: boolean): void {
     const type = this.primedType
-    const def = PIECE_BY_TYPE[type]
+    const def = type ? PIECE_BY_TYPE[type] : undefined
+    if (!def) return // nothing primed: clicking empty grid just clears the selection
     // Orientation first: a piece dropped beside an open connector turns to meet it, so a straight
     // continues the line it is next to instead of sitting across it.
     const rot = this.orientFor(def, c, this.rot)
@@ -1616,8 +1624,8 @@ export class Editor {
         { label: 'Delete', key: '⌫', danger: true, run: () => this.deletePieces(targets) },
       )
     } else {
-      const def = PIECE_BY_TYPE[this.primedType]
-      items.push({ label: `Place ${def.label} here`, run: () => this.place(c, false) })
+      const def = this.primedType ? PIECE_BY_TYPE[this.primedType] : undefined
+      if (def) items.push({ label: `Place ${def.label} here`, run: () => this.place(c, false) })
       if (!this.inGrid(c)) items.push({ label: 'Grow grid to here', run: () => this.growTo(c) })
       if (this.selection.size) items.push({ label: 'Clear selection', key: 'Esc', run: () => this.selection.clear() })
     }
@@ -1881,7 +1889,7 @@ export class Editor {
     // Hover: a placement ghost inside the grid, a grow ghost outside it.
     if (this.mode === 'pieces' && this.hover && !this.drag && !this.pan) {
       if (this.inGrid(this.hover)) {
-        if (hoverIdx < 0) {
+        if (hoverIdx < 0 && this.primedType) {
           const def = PIECE_BY_TYPE[this.primedType]
           // Preview the rotation it would actually be placed at.
           const rot = this.orientFor(def, this.hover, this.rot)

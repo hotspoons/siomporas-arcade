@@ -140,6 +140,7 @@ export class Game implements LoopClient {
       this.course = course
       this.track = buildTrack(course)
       this.world = new SimWorld(this.track, this.seed)
+      this.applyHandling()
       this.view.setTrack(this.track)
     }
   }
@@ -226,6 +227,7 @@ export class Game implements LoopClient {
     if (best && best.seed === this.seed) {
       this.ghostTape = best.tape
       this.ghost = new SimWorld(this.track, best.seed)
+      this.ghost.vehicle.steerScale = best.steering
     } else {
       this.ghost = null
       this.ghostTape = null
@@ -277,7 +279,7 @@ export class Game implements LoopClient {
       finished: snap.phase === 'finished',
       seed: this.seed,
       date: Date.now(),
-    }, this.tape.subarray(0, this.tapeLength))
+    }, this.tape.subarray(0, this.tapeLength), this.settings.data.steering ?? 1.5)
     this.menus.replace(buildMenus(this).summary(snap, entry.rank, entry.isBest))
     this.audio.setScene('summary')
   }
@@ -307,7 +309,12 @@ export class Game implements LoopClient {
     this.hud.showMessage(this.settings.data.style.toUpperCase(), 0.8)
   }
 
+  applyHandling(): void {
+    this.world.vehicle.steerScale = this.settings.data.steering ?? 1.5
+  }
+
   applyAccessibility(): void {
+    this.applyHandling()
     const a = this.settings.data.access
     document.documentElement.style.setProperty('--hud-scale', String(a.hudScale))
     const gain = this.settings.data.visualSpeedGain * (a.reducedMotion ? 0.35 : 1)

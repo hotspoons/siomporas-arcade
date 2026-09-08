@@ -65,3 +65,6 @@ handoff, or where the handoff left a choice open. Newest last.
 
 ## Type (2026-09-07)
 S.T.U.N. Runner / Tron: Audiowide for titles and messages, Orbitron (variable) for numerals, Rajdhani 500–700 for body, Press Start 2P for the arcade credit line. Bundled in `public/fonts` (OFL); `scripts/fetch-fonts.mjs` regenerates the latin woff2 subsets and license file.
+
+## Steering speed option (2026-09-08)
+Settings → Handling → Steering speed (50–250%). It multiplies both the theta acceleration and the angular-rate cap in `Vehicle.steerScale`; 100% is the original feel, 150% is the new default (Rich found the original sluggish). Best-run tapes record the steering scale they were driven at and the ghost replays under it, so older records still play back correctly.

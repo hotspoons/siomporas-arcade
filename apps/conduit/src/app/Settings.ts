@@ -33,6 +33,8 @@ export interface SettingsData {
     hudScale: number
   }
   visualSpeedGain: number
+  /** Steering speed, 1 = the original feel. */
+  steering: number
   showPerf: boolean
   playerName: string
 }
@@ -60,6 +62,7 @@ export const DEFAULT_SETTINGS: SettingsData = {
   vr: { comfort: 'standard', rollBlend: 0, headTurret: false },
   access: { reducedMotion: false, colorblind: 'none', hudScale: 1 },
   visualSpeedGain: 1,
+  steering: 1.5,
   showPerf: false,
   playerName: 'ACE',
 }

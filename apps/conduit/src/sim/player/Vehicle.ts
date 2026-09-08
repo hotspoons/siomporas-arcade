@@ -51,6 +51,8 @@ import { hasSurface } from '../track/TrackProfile'
 export type VehicleEvent = 'none' | 'launched' | 'landed' | 'crashed' | 'fell'
 
 export class Vehicle {
+  /** Steering speed multiplier from the options (1 = the original feel; default 1.5). Scales response and the rate cap alike. */
+  steerScale = 1.5
   // --- track-space state ---
   s = 0
   theta = 0
@@ -181,9 +183,9 @@ export class Vehicle {
     const radiusScale = TUNNEL_RADIUS_DEFAULT / f.radius
     const spinning = this.spinTimer > 0
     const steer = spinning ? input.steer * 0.35 : input.steer
-    this.thetaVel += steer * THETA_ACCEL * falloff * radiusScale * dt
+    this.thetaVel += steer * THETA_ACCEL * this.steerScale * falloff * radiusScale * dt
     this.thetaVel = expApproach(this.thetaVel, 0, THETA_DAMP, dt)
-    const velMax = THETA_VEL_MAX * radiusScale
+    const velMax = THETA_VEL_MAX * this.steerScale * radiusScale
     this.thetaVel = clamp(this.thetaVel, -velMax, velMax)
     this.theta += this.thetaVel * dt
 

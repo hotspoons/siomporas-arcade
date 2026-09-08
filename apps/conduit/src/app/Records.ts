@@ -14,7 +14,7 @@ export interface RecordEntry {
 
 interface CourseRecords {
   entries: RecordEntry[]
-  bestTape?: { seed: number; tape: string; score: number }
+  bestTape?: { seed: number; tape: string; score: number; steering?: number }
 }
 
 const KEY = 'apex-conduit.records.v1'
@@ -31,22 +31,23 @@ export class Records {
     return this.data[courseId]?.entries ?? []
   }
 
-  submit(courseId: string, entry: RecordEntry, tape: Int32Array): { rank: number; isBest: boolean } {
+  submit(courseId: string, entry: RecordEntry, tape: Int32Array, steering = 1): { rank: number; isBest: boolean } {
     const rec = (this.data[courseId] ??= { entries: [] })
     rec.entries.push(entry)
     rec.entries.sort((a, b) => b.score - a.score)
     const rank = rec.entries.indexOf(entry) + 1
     rec.entries.length = Math.min(rec.entries.length, MAX_ENTRIES)
     const isBest = rank === 1 && entry.score > 0
-    if (isBest || !rec.bestTape) rec.bestTape = { seed: entry.seed, tape: packTape(tape), score: entry.score }
+    // The tape only replays faithfully under the steering speed it was driven with, so keep that too.
+    if (isBest || !rec.bestTape) rec.bestTape = { seed: entry.seed, tape: packTape(tape), score: entry.score, steering }
     save(this.data)
     return { rank: rank <= MAX_ENTRIES ? rank : 0, isBest }
   }
 
-  bestTape(courseId: string): { seed: number; tape: Int32Array } | null {
+  bestTape(courseId: string): { seed: number; tape: Int32Array; steering: number } | null {
     const t = this.data[courseId]?.bestTape
     if (!t) return null
-    return { seed: t.seed, tape: unpackTape(t.tape) }
+    return { seed: t.seed, tape: unpackTape(t.tape), steering: t.steering ?? 1 }
   }
 
   clear(): void {

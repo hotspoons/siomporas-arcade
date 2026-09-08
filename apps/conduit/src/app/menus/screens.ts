@@ -154,6 +154,21 @@ export function buildMenus(game: Game) {
           game.menus.refresh()
         },
       },
+      { kind: 'info', label: '— HANDLING —' },
+      {
+        kind: 'slider',
+        label: 'Steering speed',
+        hint: '100% is the original feel; 150% is the new default',
+        min: 50,
+        max: 250,
+        step: 10,
+        get: () => Math.round((s().steering ?? 1.5) * 100),
+        set: (v) => {
+          set((d) => (d.steering = v / 100))
+          game.applyHandling()
+        },
+        format: (v) => `‹ ${v}% ›`,
+      },
       { kind: 'info', label: '— AUDIO —' },
       slider('Master', () => s().audio.master, (v) => set((d) => (d.audio.master = v))),
       slider('Music', () => s().audio.music, (v) => set((d) => (d.audio.music = v))),

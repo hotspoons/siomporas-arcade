@@ -91,6 +91,25 @@ export class Game implements LoopClient {
     this.menus = new MenuStack(container)
     this.perf = new PerfOverlay(container)
     this.tune = new TunePanel(container, 'conduit', [SIM_TUNE, RENDER_TUNE])
+    this.tune.context = () => {
+      const round = (v: number) => Math.round(v * 100) / 100
+      const v = this.world.vehicle
+      return {
+        state: this.state,
+        course: this.course.id,
+        courseName: this.course.name,
+        circuit: this.circuit,
+        seed: this.seed,
+        style: this.settings.data.style,
+        steering: this.settings.data.steering,
+        s: round(v.s),
+        theta: round(v.theta),
+        speed: round(v.speed),
+        mode: this.curr.vehicle.airborne ? 'air' : 'tube',
+        shield: this.curr.hud.shield,
+        score: this.curr.hud.score,
+      }
+    }
     this.modern = new ModernStyle(s.modern)
     this.retro = new RetroStyle(s.retro)
     this.xr = new XrSession(this)

@@ -66,7 +66,7 @@ export class Ground {
     const h = track.heights
     if (!h) return
     const N = track.data.size
-    const sub = 4 // quads per cell (10 m): close enough to the roads draped over it
+    const sub = 6 // quads per cell (~6.7 m): fine enough that the facets stay under the road slab
     const n = N * sub + 1
     const pos = new Float32Array(n * n * 3)
     const idx: number[] = []
@@ -76,7 +76,7 @@ export class Ground {
         const z = (j / sub) * CELL
         const k = (j * n + i) * 3
         pos[k] = x
-        pos[k + 1] = track.groundHeight(x, z) - 0.04
+        pos[k + 1] = track.groundHeight(x, z) - 0.06
         pos[k + 2] = z
         if (i < n - 1 && j < n - 1) {
           const a = j * n + i

@@ -98,9 +98,10 @@ export class RoadBuilder {
     // Cross-section lateral offsets and heights: outer curb edge, curb top, road edge, centre, road edge, curb top, outer curb edge.
     const W = ROAD_HALF_WIDTH
     const C = CURB_WIDTH
-    // Tarmac sits a few centimetres proud of the ground plane; curbs a little more.
+    // The road is a built-up slab: the tarmac stands clear of the ground and the curbs higher still, so
+    // the graded landscape (which is only sampled every few metres) can never show through it.
     const xs = [-W - C, -W, -W, 0, W, W, W + C]
-    const ys = [0.2, 0.2, 0.06, 0.06, 0.06, 0.2, 0.2]
+    const ys = [0.34, 0.34, 0.16, 0.16, 0.16, 0.34, 0.34]
     const kinds = [1, 1, 0, 0, 0, 1, 1]
     const across = xs.length
     const pos = new Float32Array(rings * across * 3)

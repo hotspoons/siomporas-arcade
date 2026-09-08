@@ -22,7 +22,7 @@ import { copyInput, makeInputFrame } from '../sim/InputFrame'
 import { Sim } from '../sim/Sim'
 import { Snapshot } from '../sim/Snapshot'
 import { Track, type TrackData } from '../sim/Track'
-import { MAX_SUBSTEPS, RESET_PENALTY, SEGMENT_PENALTY, SIM_HZ } from '../sim/Tuning'
+import { CELL, MAX_SUBSTEPS, RESET_PENALTY, SEGMENT_PENALTY, SIM_HZ } from '../sim/Tuning'
 import { BUILTIN_TRACKS } from '../sim/tracks'
 import { Dash } from './Dash'
 import { Hud } from './Hud'
@@ -86,6 +86,26 @@ export class Game implements LoopClient {
     this.menus = new MenuStack(container)
     this.perf = new PerfOverlay(container)
     this.tune = new TunePanel(container, 'drivin', [SIM_TUNE, RENDER_TUNE])
+    this.tune.context = () => {
+      const c = this.sim.car
+      const round = (v: number) => Math.round(v * 100) / 100
+      return {
+        state: this.state,
+        track: this.trackData.name,
+        camera: this.view.rig.mode,
+        style: this.settings.data.style,
+        car: this.settings.data.carId,
+        pos: [round(c.pos.x), round(c.pos.y), round(c.pos.z)],
+        forward: [round(c.forward.x), round(c.forward.y), round(c.forward.z)],
+        cell: [Math.floor(c.pos.x / CELL), Math.floor(c.pos.z / CELL)],
+        mode: c.mode,
+        lanePiece: c.lane?.pieceIndex ?? -1,
+        laneS: round(c.s),
+        speed: round(c.speed),
+        lap: this.sim.laps + 1,
+        lapTime: round(this.sim.lapTime),
+      }
+    }
     this.editor = new Editor(container, this.tracks, {
       onTest: (data, force) => this.startDrive(data, true, force),
       onExit: () => this.enterTitle(),

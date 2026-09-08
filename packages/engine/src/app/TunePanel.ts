@@ -39,6 +39,12 @@ export class TunePanel {
   private readonly numbers = new Map<string, HTMLInputElement>()
   onChange: ((name: string, value: number) => void) | null = null
 
+  /**
+   * Where the copied JSON came from — track / stage, view, position, style… The game supplies it so a
+   * paste is a repro: whoever reads it can put the camera back exactly where the report was taken.
+   */
+  context: (() => Record<string, unknown>) | null = null
+
   constructor(parent: HTMLElement, game: string, sections: TuneSection[]) {
     this.game = game
     this.key = `apex-${game}.tune.v1`
@@ -99,11 +105,17 @@ export class TunePanel {
         values[k.name] = round(k.get())
         if (k.get() !== k.default) changed[k.name] = { from: k.default, to: round(k.get()) }
       }
-    return JSON.stringify({ game: this.game, changed, values }, null, 2)
+    let where: Record<string, unknown> | undefined
+    try {
+      where = this.context?.() ?? undefined
+    } catch {
+      where = { error: 'context unavailable' }
+    }
+    return JSON.stringify({ game: this.game, at: new Date().toISOString(), where, changed, values }, null, 2)
   }
 
   applyJSON(text: string): number {
-    const data = JSON.parse(text) as { values?: Record<string, number>; changed?: Record<string, { to: number }> } | Record<string, number>
+    const data = JSON.parse(text) as { values?: Record<string, number>; changed?: Record<string, { to: number }>; where?: unknown; game?: string; at?: string } | Record<string, number>
     const values: Record<string, number> = {}
     if ('values' in data && data.values) Object.assign(values, data.values)
     else if ('changed' in data && data.changed) for (const [k, v] of Object.entries(data.changed)) values[k] = v.to

@@ -115,3 +115,6 @@ Placing a piece orients it for you: `orientFor` scores each rotation by how many
 
 ## Menu steppers and retro framing (2026-09-08, engine-wide)
 Choice and slider rows render ‹ and › as real buttons: clicking ‹ steps back, › steps forward, clicking the row steps forward, and the keyboard is unchanged. Values no longer bake the arrows into their text. Retro mode fills the window instead of letterboxing: the chosen resolution sets the line count and the low-res buffer is cut to the window's aspect (rebuilt when that changes), so the barrel distortion curves over the whole picture rather than a 4:3 island.
+
+## Copy JSON carries a repro (2026-09-08)
+`TunePanel.context` lets each game attach where the copy was taken — drivin: track, camera, style, car, world position, cell, lane piece and s, speed, lap; coast: stage and route, seed, view, gearbox, z/x and segment, switches; conduit: course, seed, s/theta, speed. It rides in the copied JSON as `where` (with `at`, a timestamp), so pasting a tuning dump is enough to put the camera back exactly where a problem was seen. Roads are also a built-up slab now (tarmac 0.16 m, curbs 0.34 m), the ground mesh is finer (~6.7 m) and drawn a little lower, and the graded corridor feathers out into the sculpted land over a couple of cells instead of ending in a step.

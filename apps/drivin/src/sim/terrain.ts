@@ -115,6 +115,13 @@ export function flattenUnderPieces(heights: number[], size: number, pieces: Plac
         heights[i] = sampleHeight(original, size, best.x, best.z)
       }
   }
+  const pinned = new Set<number>()
+  for (const p of pieces) {
+    const def = PIECE_BY_TYPE[p.type]
+    if (!def || def.decor) continue
+    const s = rotatedSize(def, p.rot)
+    for (let z = p.z; z <= p.z + s.h; z++) for (let x = p.x; x <= p.x + s.w; x++) if (x >= 0 && z >= 0 && x <= size && z <= size) pinned.add(terrainIndex(size, x, z))
+  }
   // Pads last: their level ground wins over any corridor that reaches the same corner.
   const pads: { p: PlacedPiece; y: number; s: { w: number; h: number } }[] = []
   for (const p of pieces) {
@@ -126,6 +133,26 @@ export function flattenUnderPieces(heights: number[], size: number, pieces: Plac
   for (const { p, s, y } of pads)
     for (let z = p.z; z <= p.z + s.h; z++)
       for (let x = p.x; x <= p.x + s.w; x++) if (x >= 0 && z >= 0 && x <= size && z <= size) heights[terrainIndex(size, x, z)] = y
+  // Feather: the corners a road did not claim relax toward their neighbours, so the graded shelf runs
+  // out into the sculpted land as a slope instead of a step at the footprint edge.
+  for (let pass = 0; pass < 2; pass++) {
+    const before = heights.slice()
+    for (let z = 0; z <= size; z++)
+      for (let x = 0; x <= size; x++) {
+        const i = terrainIndex(size, x, z)
+        if (pinned.has(i) || wet.has(i)) continue
+        let sum = 0
+        let n = 0
+        for (const [dx, dz] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+          const nx = x + dx
+          const nz = z + dz
+          if (nx < 0 || nz < 0 || nx > size || nz > size) continue
+          sum += before[terrainIndex(size, nx, nz)]
+          n++
+        }
+        if (n) heights[i] = before[i] * 0.45 + (sum / n) * 0.55
+      }
+  }
 }
 
 /**

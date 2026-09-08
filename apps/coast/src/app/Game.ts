@@ -79,6 +79,31 @@ export class Game implements LoopClient {
     this.menus = new MenuStack(container)
     this.perf = new PerfOverlay(container)
     this.tune = new TunePanel(container, 'coast', [SIM_TUNE, RENDER_TUNE])
+    this.tune.context = () => {
+      const round = (v: number) => Math.round(v * 100) / 100
+      const sim = this.sim
+      return {
+        state: this.state,
+        stage: sim.stage.desc.id,
+        stageName: STAGE_BY_ID[sim.stage.desc.id]?.name,
+        stageIndex: sim.stageIndex,
+        route: sim.route.join(' › '),
+        startStage: this.settings.data.startStage,
+        seed: this.seed,
+        view: this.view.view,
+        style: this.settings.data.style,
+        car: this.settings.data.car,
+        gearbox: this.settings.data.gearbox,
+        z: round(sim.z),
+        x: round(sim.x),
+        segment: Math.floor(sim.z / 6),
+        speed: round(sim.speed),
+        gear: sim.gear,
+        lights: sim.lightsOn,
+        wipers: sim.wipersOn,
+        timeLeft: round(sim.timeLeft),
+      }
+    }
     this.modern = new ModernStyle(s.modern)
     this.retro = new RetroStyle(s.retro)
     this.loop = new GameLoop(this, this.view.renderer, { simHz: SIM_HZ, maxSubsteps: MAX_SUBSTEPS })

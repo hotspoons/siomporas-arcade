@@ -44,7 +44,7 @@ import { BANK_ROLL, BANK_SLOPE, BANK_TIER_COUNT, BANK_TIER_H, BANK_TIER_W, BEACH
 import { LIVERIES } from './procgen'
 import { Rain } from './Rain'
 import type { Theme } from '../sim/Road'
-import { RoadMesh, bermLift } from './RoadMesh'
+import { RoadMesh, bermLift, deckHalf } from './RoadMesh'
 import { SpriteAtlas } from './SpriteAtlas'
 import { SpriteBatch } from './SpriteBatch'
 
@@ -343,9 +343,10 @@ export class RenderWorld {
           this.road.quad4(x1 - hw * s1, y1, x1 - hw * s1, y1 + ch * s1, x1 + hw * s1, y1 + ch * s1, x1 + hw * s1, y1, 0x0c0c10, 0)
         }
       }
-      if (this.rowTilt[n] !== 0 || this.rowTilt[n + 1] !== 0) {
-        // The high side of a banked deck stands on a wall down to the grass.
-        const side = -Math.sign(seg.curve)
+      if (this.rowTilt[n] !== 0 && Math.sign(this.rowTilt[n]) === Math.sign(this.rowTilt[n + 1] || this.rowTilt[n])) {
+        // The high side of a banked deck stands on a wall down to the grass (only where both rows agree
+        // on which side is high — across an S-bend's crossover the wall would twist into a black sliver).
+        const side = Math.sign(this.rowTilt[n])
         const bo = ROAD_HALF_WIDTH + RUMBLE_WIDTH + SHOULDER_WIDTH
         const wx1 = x1 + side * bo * s1
         const wx2 = x2 + side * bo * s2
@@ -528,11 +529,22 @@ export class RenderWorld {
       const frame = this.atlas.frame(sp.kind)
       if (!frame) continue
       const sx = this.rowX[n] + sp.offset * ROAD_HALF_WIDTH * sc
-      const sy = this.rowY[n] + this.tiltLift(n, sp.offset * ROAD_HALF_WIDTH)
+      const lat = sp.offset * ROAD_HALF_WIDTH
+      const sy = this.rowY[n] + this.tiltLift(n, lat)
+      const clipHere = Math.max(clip, this.deckWallTop(n, lat))
       // The sunset stage is all silhouettes; otherwise lit signage and towers glow through the night.
       const glow = this.theme?.silhouette ? 0.04 : sp.kind.startsWith('sign') || sp.kind.startsWith('tower') || sp.kind === 'diner' || sp.kind === 'motel' || sp.kind === 'gas' || sp.kind === 'arch' ? Math.max(bright, 0.85) : bright
-      this.sprites.add(sx, sy, frame.heightM * sp.scale * sc, frame, this.rowFog[n], glow, clip)
+      this.sprites.add(sx, sy, frame.heightM * sp.scale * sc, frame, this.rowFog[n], glow, clipHere)
     }
+  }
+
+  /** For something standing on the grass beyond a banked deck's high side: the screen y of the deck's wall top, else -∞. */
+  private deckWallTop(n: number, lateralM: number): number {
+    const t = this.rowTilt[n]
+    if (!t) return -1e9
+    const e = Math.sign(t) * lateralM + deckHalf()
+    if (e <= 2 * deckHalf()) return -1e9
+    return this.rowY[n] + Math.abs(t) * 2 * deckHalf() * this.rowScale[n]
   }
 
   /** Screen-y lift of the banked road at a lateral offset (metres) on row n. */

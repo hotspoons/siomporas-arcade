@@ -40,7 +40,7 @@ function nearestYaw(yaw: number): number {
 import { Background } from './Background'
 import { Cockpit } from './Cockpit'
 import { Projection } from './Projection'
-import { BANK_ROLL, BANK_TIERS, BANK_TIER_COUNT, BANK_TIER_H, BANK_TIER_W, BEACH_WIDTH, CAM_BOUNCE, TUNNEL_DARK, TUNNEL_HALF_WIDTH, TUNNEL_HEIGHT, HORIZON_ROLL_SHARE, STEER_ROLL, CURVE_UNIT, FOG_MODERN, FOG_RETRO, HEADLIGHT_REACH, LANE_WIDTH, LIGHTS_OFF_AMBIENT, LOGICAL_HEIGHT, MAX_SPRITES, NIGHT_AMBIENT, PALETTES, RAIL_HEIGHT, RUMBLE_WIDTH, SHOULDER_WIDTH, VIEWS, type Palette } from './RenderTuning'
+import { BANK_ROLL, BANK_SLOPE, BANK_TIERS, BANK_TIER_COUNT, BANK_TIER_H, BANK_TIER_W, BEACH_WIDTH, CAM_BOUNCE, TUNNEL_DARK, TUNNEL_HALF_WIDTH, TUNNEL_HEIGHT, HORIZON_ROLL_SHARE, STEER_ROLL, CURVE_UNIT, FOG_MODERN, FOG_RETRO, HEADLIGHT_REACH, LANE_WIDTH, LIGHTS_OFF_AMBIENT, LOGICAL_HEIGHT, MAX_SPRITES, NIGHT_AMBIENT, PALETTES, RAIL_HEIGHT, RUMBLE_WIDTH, SHOULDER_WIDTH, VIEWS, type Palette } from './RenderTuning'
 import { LIVERIES } from './procgen'
 import { Rain } from './Rain'
 import type { Theme } from '../sim/Road'
@@ -94,6 +94,8 @@ export class RenderWorld {
   private readonly rowValid = new Uint8Array(ROWS)
   private readonly rowClip = new Float32Array(ROWS)
   private readonly rowFog = new Float32Array(ROWS)
+  /** Banking slope per row (screen-y per lateral metre, ×scale), so sprites sit on the tilted road. */
+  private readonly rowTilt = new Float32Array(ROWS)
   private readonly segVisible = new Uint8Array(ROWS)
   private readonly carOrder: number[] = []
   private themeId = ''
@@ -204,7 +206,10 @@ export class RenderWorld {
     // Ride the ground directly under the camera: any lag here lets the near row
     // climb above the bottom edge on hills (the flashing band).
     // Airborne: the cockpit rides the whole jump; the chase camera lifts only part way so the car visibly leaves the road.
-    this.camY = stage.heightAt(camZ) + view.camHeight + curr.airY * (view.drawPlayer ? 0.4 : 1)
+    // On a banked curve the camera rides the tilted surface at its own lateral position.
+    const camSeg = stage.segmentAt(camZ)
+    const camTilt = camSeg.bank > 0.02 && Math.abs(camSeg.curve) > 0.02 ? -Math.sign(camSeg.curve) * camSeg.bank * BANK_SLOPE : 0
+    this.camY = stage.heightAt(camZ) + view.camHeight + curr.airY * (view.drawPlayer ? 0.4 : 1) + camTilt * Math.max(-40, Math.min(40, x * ROAD_HALF_WIDTH))
     // Road bounce only while actually driving: a finished or timed-out run sits still.
     this.bounce = curr.phase === 'driving' && speed > 5 ? Math.sin(this.time * 28) * CAM_BOUNCE * (speed / 84) : 0
     const camY = this.camY + this.bounce
@@ -300,6 +305,10 @@ export class RenderWorld {
       const s2 = this.rowScale[n + 1]
       const fog = this.rowFog[n]
       const zRel = (base + n) * SEG_LENGTH - camZ
+      // Banked curve: tilt this row's plane about the centreline, outer edge up (Rad Mobile's berms).
+      const tilt = seg.bank > 0.02 && Math.abs(seg.curve) > 0.02 ? -Math.sign(seg.curve) * seg.bank * BANK_SLOPE : 0
+      this.rowTilt[n] = tilt
+      this.road.setTilt(x1, s1, x2, s2, tilt)
       // Inside a tunnel it is night whatever the sky says: headlights or a dim bore, lit strips on the ceiling.
       const inTunnel = seg.tunnel
       this.road.setDim(inTunnel ? (curr.lightsOn ? Math.max(TUNNEL_DARK, this.brightAt(zRel) * 0.9 + 0.1) : TUNNEL_DARK) : night ? this.brightAt(zRel) : 1)
@@ -423,7 +432,7 @@ export class RenderWorld {
           const t = (cz - zStart) / SEG_LENGTH
           const sc = this.rowScale[n] + (this.rowScale[n + 1] - this.rowScale[n]) * t
           const sx = this.rowX[n] + (this.rowX[n + 1] - this.rowX[n]) * t
-          const sy = this.rowY[n] + (this.rowY[n + 1] - this.rowY[n]) * t
+          const sy = this.rowY[n] + (this.rowY[n + 1] - this.rowY[n]) * t + this.tiltLift(n, curr.trafficX[ci] * ROAD_HALF_WIDTH)
           const kind = TRAFFIC_KINDS[curr.trafficKind[ci]]
           const yaw = curr.trafficYaw[ci]
           // Pose from the real view geometry: how far off to the side the car sits versus how far ahead
@@ -443,7 +452,7 @@ export class RenderWorld {
     // Player car.
     if (view.drawPlayer) {
       const scale = P.scaleAt(view.playerAhead)
-      const py = P.screenY(groundY + curr.airY - camY, scale)
+      const py = P.screenY(groundY + curr.airY - camY, scale) + this.tiltLift(1, curr.x * ROAD_HALF_WIDTH) * (scale / Math.max(1e-6, this.rowScale[1]))
       const steerFrame = Math.round(curr.steer * 3)
       // Baked yaw > 0 shows the car's right flank (nose left); steering right must show the left flank.
       let yaw = steerFrame === 0 ? 0 : steerFrame > 0 ? -[12, 24, 38][steerFrame - 1] : [12, 24, 38][-steerFrame - 1]
@@ -507,10 +516,18 @@ export class RenderWorld {
       const frame = this.atlas.frame(sp.kind)
       if (!frame) continue
       const sx = this.rowX[n] + sp.offset * ROAD_HALF_WIDTH * sc
+      const sy = this.rowY[n] + this.tiltLift(n, sp.offset * ROAD_HALF_WIDTH)
       // The sunset stage is all silhouettes; otherwise lit signage and towers glow through the night.
       const glow = this.theme?.silhouette ? 0.04 : sp.kind.startsWith('sign') || sp.kind.startsWith('tower') || sp.kind === 'diner' || sp.kind === 'motel' || sp.kind === 'gas' || sp.kind === 'arch' ? Math.max(bright, 0.85) : bright
-      this.sprites.add(sx, this.rowY[n], frame.heightM * sp.scale * sc, frame, this.rowFog[n], glow, clip)
+      this.sprites.add(sx, sy, frame.heightM * sp.scale * sc, frame, this.rowFog[n], glow, clip)
     }
+  }
+
+  /** Screen-y lift of the banked road at a lateral offset (metres) on row n. */
+  private tiltLift(n: number, lateralM: number): number {
+    const t = this.rowTilt[n]
+    if (!t) return 0
+    return Math.max(-40, Math.min(40, lateralM)) * t * this.rowScale[n]
   }
 
   render(): void {

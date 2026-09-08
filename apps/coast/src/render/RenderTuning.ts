@@ -21,9 +21,11 @@ export let BEACH_WIDTH = 9
 export let TUNNEL_HALF_WIDTH = 13.5
 export let TUNNEL_HEIGHT = 7.5
 export let TUNNEL_DARK = 0.42
-/** Banked curves: terraces on the outer side, each this wide (m) and this much higher (m at bank 1). */
+/** Banked curves: the road plane tilts about its centreline by this rise per lateral metre at bank 1 (0.4 ≈ 22°). */
+export let BANK_SLOPE = 0.4
+/** Terraces on the outer side above the tilted plane, each this wide (m) and this much higher (m at bank 1). */
 export let BANK_TIER_W = 7
-export let BANK_TIER_H = 2.6
+export let BANK_TIER_H = 1.8
 export let BANK_TIER_COUNT = 3
 export let RUMBLE_WIDTH = 1.6
 /** Shoulder width beyond the rumble strip, metres. */
@@ -107,6 +109,7 @@ export const RENDER_TUNE: TuneSection = {
     tune('TUNNEL_HALF_WIDTH', () => TUNNEL_HALF_WIDTH, (v) => (TUNNEL_HALF_WIDTH = v), [9, 30], 0.5),
     tune('TUNNEL_HEIGHT', () => TUNNEL_HEIGHT, (v) => (TUNNEL_HEIGHT = v), [4, 16], 0.5),
     tune('TUNNEL_DARK', () => TUNNEL_DARK, (v) => (TUNNEL_DARK = v), [0.1, 1], 0.02),
+    tune('BANK_SLOPE', () => BANK_SLOPE, (v) => (BANK_SLOPE = v), [0, 1], 0.02, 'road tilt per lateral metre'),
     tune('BANK_TIER_W', () => BANK_TIER_W, (v) => (BANK_TIER_W = v), [2, 20], 0.5),
     tune('BANK_TIER_H', () => BANK_TIER_H, (v) => (BANK_TIER_H = v), [0, 8], 0.1),
     tune('BANK_TIER_COUNT', () => BANK_TIER_COUNT, (v) => (BANK_TIER_COUNT = v), [1, 6], 1),

@@ -285,7 +285,8 @@ export class Sim {
     } else {
       // Five gears, like everything short of a 959.
       h.gear = Math.min(5, 1 + Math.floor(ratio * 5))
-      h.rpm = (Math.min(4.999, ratio * 5) % 1) * 0.7 + 0.3
+      // Idle sits at ~800 of 8000; each gear runs the band from there to the limiter.
+      h.rpm = Math.abs(c.speed) < 0.3 ? 0.1 : (Math.min(4.999, ratio * 5) % 1) * 0.75 + 0.22
     }
   }
 
@@ -299,7 +300,7 @@ export class Sim {
       // Take over from the speed-derived note where it currently sits.
       const ratio = Math.abs(c.speed) / this.spec.topSpeed
       this.airGear = Math.min(5, 1 + Math.floor(ratio * 5))
-      this.airRpm = (Math.min(4.999, ratio * 5) % 1) * 0.7 + 0.3
+      this.airRpm = (Math.min(4.999, ratio * 5) % 1) * 0.75 + 0.22
       this.airborneRevving = true
     }
     if (input.throttle > 0.1) {
@@ -312,7 +313,7 @@ export class Sim {
         } else this.airRpm = 1
       }
     } else {
-      this.airRpm = Math.max(0.3, this.airRpm - AIR_REV_RATE * 0.6 * dt)
+      this.airRpm = Math.max(0.1, this.airRpm - AIR_REV_RATE * 0.6 * dt)
     }
   }
 }

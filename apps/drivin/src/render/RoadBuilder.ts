@@ -48,7 +48,7 @@ export class RoadBuilder {
       mesh.geometry.computeBoundingSphere()
       this.root.add(mesh)
       this.meshes.push(mesh)
-      this.pillarsFor(lane, pillarMatrices)
+      this.pillarsFor(lane, pillarMatrices, track)
       if (lane.profile === 'tube') {
         // Tubes still get their road surface.
         const road = new Mesh(this.ribbon(lane), this.material)
@@ -200,7 +200,7 @@ export class RoadBuilder {
     return g
   }
 
-  private pillarsFor(lane: Lane, out: Matrix4[]): void {
+  private pillarsFor(lane: Lane, out: Matrix4[], track: Track): void {
     const t = lane.table
     const f = this.frame
     const m = new Matrix4()
@@ -208,7 +208,7 @@ export class RoadBuilder {
     const sc = new Vector3()
     for (let s = PILLAR_SPACING / 2; s < t.length; s += PILLAR_SPACING) {
       t.frameAt(s, f)
-      const h = f.pos.y - 0.4
+      const h = f.pos.y - track.groundHeight(f.pos.x, f.pos.z) - 0.4
       // Only under upright, elevated road.
       if (h < 1.5 || f.up.y < 0.7 || !f.surface) continue
       for (const side of [-PILLAR_SIDE, PILLAR_SIDE]) {

@@ -87,6 +87,8 @@ export class Car {
   private readonly vA = new Vec3()
   private readonly vB = new Vec3()
   private readonly nearby: Lane[] = []
+  /** Vertical speed the ground under us had last tick (grass over hills). */
+  private groundVy = 0
   private readonly spec: CarSpec
   private readonly track: Track
   private airTime = 0
@@ -122,7 +124,7 @@ export class Car {
       return
     }
     this.mode = 'ground'
-    this.pos.y = CAR_RIDE
+    this.pos.y = this.track.groundHeight(this.pos.x, this.pos.z) + CAR_RIDE
     this.yaw = Math.atan2(-this.forward.z, this.forward.x)
     this.forward.set(Math.cos(this.yaw), 0, Math.sin(this.yaw))
     this.up.set(0, 1, 0)
@@ -406,7 +408,8 @@ export class Car {
       this.speed = dir * sp
     } else this.yaw = Math.atan2(f.tan.z, f.tan.x)
     this.pos.copy(f.pos).addScaled(f.right, this.lateral)
-    this.pos.y = CAR_RIDE
+    this.pos.y = this.track.groundHeight(this.pos.x, this.pos.z) + CAR_RIDE
+    this.groundVy = 0
     this.onGrass = true
     this.event = 'offroad'
   }
@@ -445,13 +448,15 @@ export class Car {
       this.event = 'crash'
       return
     }
-    // Ground plane. Speedlocked landings never wreck you (the glitch is a gift).
-    if (this.pos.y <= CAR_RIDE && this.vel.y < 0) {
+    // Ground (the landscape). Speedlocked landings never wreck you (the glitch is a gift).
+    const gh = this.track.groundHeight(this.pos.x, this.pos.z)
+    if (this.pos.y <= gh + CAR_RIDE && this.vel.y < 0) {
       if (this.up.y < LAND_MIN_ALIGN || (-this.vel.y > CRASH_IMPACT_SPEED && !this.airGlitch)) {
         this.event = 'crash'
         return
       }
-      this.pos.y = CAR_RIDE
+      this.pos.y = gh + CAR_RIDE
+      this.groundVy = 0
       this.mode = 'ground'
       this.yaw = Math.atan2(this.forward.z, this.forward.x)
       this.speed = Math.hypot(this.vel.x, this.vel.z)
@@ -504,17 +509,41 @@ export class Car {
   }
 
   private tickGround(dt: number, input: InputFrame): void {
-    this.longitudinal(dt, input, 0, GRASS_DRAG)
+    // Landscape slope along the nose: downhill pulls, uphill drags.
+    const gAhead = this.track.groundHeight(this.pos.x + this.forward.x * 2, this.pos.z + this.forward.z * 2)
+    const gBehind = this.track.groundHeight(this.pos.x - this.forward.x * 2, this.pos.z - this.forward.z * 2)
+    const slope = (gAhead - gBehind) / 4
+    this.longitudinal(dt, input, -GRAVITY * slope / Math.hypot(1, slope), GRASS_DRAG)
     const v = this.speed
     const authority = 1 - (1 - STEER_HIGH_SPEED_FACTOR) * clamp((Math.abs(v) - STEER_FULL_SPEED) / (this.spec.topSpeed - STEER_FULL_SPEED), 0, 1)
     // forward = (cos yaw, 0, sin yaw); right = forward × up = +z at yaw 0, so steering right increases yaw.
     this.yaw += input.steer * STEER_RATE * GRASS_STEER * authority * dt * Math.sign(v || 1)
     this.forward.set(Math.cos(this.yaw), 0, Math.sin(this.yaw))
+    this.up.set(0, 1, 0)
     const px = this.pos.x
     const pz = this.pos.z
+    const prevY = this.pos.y
     this.pos.addScaled(this.forward, v * dt)
-    this.pos.y = CAR_RIDE
-    this.up.set(0, 1, 0)
+    const gh = this.track.groundHeight(this.pos.x, this.pos.z)
+    // Over a crest the ground falls away faster than gravity can follow: airborne, Stunts style.
+    const groundVy = dt > 0 ? (gh + CAR_RIDE - prevY) / dt : 0
+    if (this.track.heights && Math.abs(v) > 12 && groundVy < this.groundVy - GRAVITY * dt * 1.5 && this.groundVy > -2) {
+      this.mode = 'air'
+      this.airTime = 0
+      this.vel.copy(this.forward).scale(v)
+      this.vel.y = this.groundVy
+      this.pos.y = prevY
+      this.airGlitch = Math.abs(v) >= this.spec.topSpeed * AIR_GLITCH_THRESHOLD
+      this.event = 'launch'
+      return
+    }
+    this.groundVy = groundVy
+    this.pos.y = gh + CAR_RIDE
+    // Ride the slope: up follows the local ground normal.
+    const gx = (this.track.groundHeight(this.pos.x + 1.5, this.pos.z) - this.track.groundHeight(this.pos.x - 1.5, this.pos.z)) / 3
+    const gz = (this.track.groundHeight(this.pos.x, this.pos.z + 1.5) - this.track.groundHeight(this.pos.x, this.pos.z - 1.5)) / 3
+    this.up.set(-gx, 1, -gz).normalize()
+    this.forward.projectOntoPlane(this.up).normalize()
     this.slip = 0
     const lanes = this.track.lanesNear(this.pos, this.nearby)
     // Water: the car is gone.

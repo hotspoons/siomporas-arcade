@@ -19,6 +19,7 @@ import {
 } from './pieces'
 import { PathTable } from './PathTable'
 import { solidsOf, type Solid } from './decor'
+import { flattenUnderPieces, sampleHeight } from './terrain'
 
 export interface PlacedPiece {
   type: string
@@ -36,6 +37,8 @@ export interface TrackData {
   /** Grid size in cells (square). */
   size: number
   pieces: PlacedPiece[]
+  /** Landscape heights at cell corners, (size+1)² metres row-major by z; absent = flat. See terrain.ts. */
+  terrain?: number[]
 }
 
 /** A world-space port: which grid edge, which level. */
@@ -81,11 +84,17 @@ export class Track {
   /** Scenery pieces (no lanes) for the renderer, with what they block for the sim. */
   readonly decor: PlacedPiece[] = []
   readonly solids: Solid[] = []
+  /** Landscape actually driven on: the data's heightmap with the ground under every road pinned to its base. */
+  readonly heights: number[] | undefined
   private readonly waterCells = new Set<number>()
   private readonly cells = new Map<number, Lane[]>()
 
   constructor(data: TrackData) {
     this.data = data
+    if (data.terrain && data.terrain.length === (data.size + 1) * (data.size + 1)) {
+      this.heights = data.terrain.slice()
+      flattenUnderPieces(this.heights, data.size, data.pieces)
+    }
     const ports: WorldPort[] = []
     const occupancy = new Map<number, number>()
     data.pieces.forEach((p, i) => {
@@ -268,6 +277,11 @@ export class Track {
 
   get valid(): boolean {
     return this.errors.length === 0 && this.startLane !== null
+  }
+
+  /** Ground (grass) height under a world point. */
+  groundHeight(x: number, z: number): number {
+    return this.heights ? sampleHeight(this.heights, this.data.size, x, z) : 0
   }
 
   /** Whether a world point is over a water cell. */

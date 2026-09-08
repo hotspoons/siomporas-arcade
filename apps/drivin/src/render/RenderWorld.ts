@@ -84,6 +84,7 @@ export class RenderWorld {
     this.currentTrack = track
     this.roads.build(track, this.retro ? TUBE_SEGMENTS_RETRO : TUBE_SEGMENTS_MODERN)
     this.scenery.build(track)
+    this.ground.setTrack(track)
     this.stats.chunks = track.lanes.length
     this.rig.reset()
   }

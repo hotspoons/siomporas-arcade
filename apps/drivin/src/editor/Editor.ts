@@ -12,11 +12,14 @@
 //   Q / E            level − / +                 ⌘Z / ⌘⇧Z          undo / redo
 //   wheel            zoom under the pointer      middle-drag, space-drag, ⇧wheel   pan
 //   click outside    grow the grid to reach that cell (the world is as big as you make it)
+//   G                landscape mode: drag to raise, ⌥/right-drag to lower, ⇧-drag to flatten; [ ] brush size
 
 import { PIECES, PIECE_BY_TYPE, makePathPoint, rotateLocal, rotatedSize, type PieceDef } from '../sim/pieces'
 import { CELL } from '../sim/Tuning'
 import { Track, portStatus, type PlacedPiece, type TrackData } from '../sim/Track'
 import type { TrackStore } from '../app/TrackStore'
+import { brushTerrain, flatTerrain, flattenUnderPieces, resizeTerrain, sampleHeight, terrainIndex } from '../sim/terrain'
+import { LEVEL_H } from '../sim/Tuning'
 
 const GROUP_COLORS: Record<PieceDef['group'], string> = { basic: '#2f6b8a', curves: '#3b8a5c', stunts: '#a3552a', flow: '#7a4aa0', scenery: '#4a7a3a' }
 const DECOR_COLORS: Record<string, string> = { water: '#2f7fbf', trees: '#2f7a2c', building: '#8a8a94', gas: '#c0703a' }
@@ -27,6 +30,7 @@ const MAX_SCALE = 160
 const UNDO_DEPTH = 60
 const IS_MAC = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
 const MOD = IS_MAC ? '⌘' : 'Ctrl'
+const TERRAIN_HINTS = 'drag raise · ⌥-drag / right-drag lower · ⇧-drag flatten to the primed level · [ ] brush · G back to pieces'
 const HINTS = `${MOD}-click multi · ⇧-click range · ⌥-click delete · ${MOD}⇧ force insert · ${MOD}⌥ rotate · ⇧⌥ click/right-click raise/lower · Z X rotate · Q E level · wheel zoom · middle-drag pan · right-click menu`
 
 export interface EditorCallbacks {
@@ -73,6 +77,10 @@ export class Editor {
   private undoStack: string[] = []
   private redoStack: string[] = []
   private menu: HTMLElement | null = null
+  /** Landscape sculpting instead of piece placement. */
+  private mode: 'pieces' | 'terrain' = 'pieces'
+  private brush = 2
+  private sculpt: { kind: 'raise' | 'lower' | 'flatten' } | null = null
   private readonly store: TrackStore
   private readonly cb: EditorCallbacks
 
@@ -96,6 +104,9 @@ export class Editor {
         <span class="sep"></span>
         <button data-act="rotate-" title="Z">↺</button><button data-act="rotate" title="X / R">↻</button>
         <button data-act="level-" title="Q">Level −</button><span data-level>L0</span><button data-act="level+" title="E">Level +</button>
+        <span class="sep"></span>
+        <button data-act="mode" data-mode title="G">⛰ Landscape</button>
+        <button data-act="brush-" title="[">[</button><span data-brush>brush 2</span><button data-act="brush+" title="]">]</button>
         <span class="sep"></span>
         <button data-act="export">Export JSON</button>
         <label class="import">Import<input type="file" accept="application/json" hidden /></label>
@@ -151,6 +162,7 @@ export class Editor {
     this.canvas.addEventListener('wheel', (e) => this.onWheel(e), { passive: false })
     this.canvas.addEventListener('contextmenu', (e) => {
       e.preventDefault()
+      if (this.mode === 'terrain') return
       if (!(e.shiftKey && e.altKey)) this.openMenu(e)
     })
     window.addEventListener('keydown', (e) => this.onKey(e))
@@ -410,6 +422,17 @@ export class Editor {
       case 'zoom-fit':
         this.fit()
         break
+      case 'mode':
+        this.mode = this.mode === 'pieces' ? 'terrain' : 'pieces'
+        if (this.mode === 'terrain') this.ensureTerrain()
+        this.selection.clear()
+        break
+      case 'brush-':
+        this.brush = Math.max(1, this.brush - 1)
+        break
+      case 'brush+':
+        this.brush = Math.min(8, this.brush + 1)
+        break
       case 'rotate':
         this.rotate(1)
         break
@@ -447,6 +470,31 @@ export class Editor {
 
   private syncToolbar(): void {
     ;(this.el.querySelector('[data-level]') as HTMLElement).textContent = `L${this.level}`
+    ;(this.el.querySelector('[data-brush]') as HTMLElement).textContent = `brush ${this.brush}`
+    const modeBtn = this.el.querySelector('[data-mode]') as HTMLElement
+    modeBtn.classList.toggle('active', this.mode === 'terrain')
+    modeBtn.textContent = this.mode === 'terrain' ? '⛰ Landscape ✓' : '⛰ Landscape'
+  }
+
+  /** The heightmap, created flat on first use. */
+  private ensureTerrain(): number[] {
+    const n = (this.data.size + 1) * (this.data.size + 1)
+    if (!this.data.terrain || this.data.terrain.length !== n) this.data.terrain = flatTerrain(this.data.size)
+    return this.data.terrain
+  }
+
+  /** Keep the ground pinned under every road piece (call after pieces move). */
+  private settleTerrain(): void {
+    if (this.data.terrain) flattenUnderPieces(this.data.terrain, this.data.size, this.data.pieces)
+  }
+
+  private applyBrush(c: { x: number; z: number }, kind: 'raise' | 'lower' | 'flatten'): void {
+    const h = this.ensureTerrain()
+    const step = 0.22 * Math.sqrt(this.brush)
+    if (kind === 'flatten') brushTerrain(h, this.data.size, c.x, c.z, this.brush, 0, this.level * LEVEL_H)
+    else brushTerrain(h, this.data.size, c.x, c.z, this.brush, kind === 'raise' ? step : -step)
+    this.settleTerrain()
+    this.dirty = true
   }
 
   private test(): void {
@@ -564,6 +612,15 @@ export class Editor {
     }
     if (mod) return
     switch (e.code) {
+      case 'KeyG':
+        void this.action('mode')
+        break
+      case 'BracketLeft':
+        void this.action('brush-')
+        break
+      case 'BracketRight':
+        void this.action('brush+')
+        break
       case 'KeyR':
       case 'KeyX':
         this.rotate(1)
@@ -642,6 +699,12 @@ export class Editor {
     return { x: Math.floor(w.x), z: Math.floor(w.z) }
   }
 
+  /** Fractional cell coordinates under the pointer (for the brush). */
+  private pointerCell(e: PointerEvent): { x: number; z: number } {
+    const { px, py } = this.canvasPoint(e)
+    return this.toWorld(px, py)
+  }
+
   private inGrid(c: Cell): boolean {
     return c.x >= 0 && c.z >= 0 && c.x < this.data.size && c.z < this.data.size
   }
@@ -692,6 +755,11 @@ export class Editor {
       return
     }
     const c = this.cellAt(e)
+    if (this.sculpt) {
+      this.applyBrush(this.pointerCell(e), this.sculpt.kind)
+      this.hover = c
+      return
+    }
     if (this.drag) {
       const dx = c.x - this.drag.start.x
       const dz = c.z - this.drag.start.z
@@ -726,6 +794,15 @@ export class Editor {
     const c = this.cellAt(e)
     this.hover = c
     this.dirty = true
+    if (this.mode === 'terrain') {
+      if (e.button !== 0 && e.button !== 2) return
+      e.preventDefault()
+      this.pushUndo()
+      this.sculpt = { kind: e.shiftKey ? 'flatten' : e.button === 2 || e.altKey ? 'lower' : 'raise' }
+      this.applyBrush(this.pointerCell(e), this.sculpt.kind)
+      this.canvas.setPointerCapture(e.pointerId)
+      return
+    }
     const under = this.pieceAt(c.x, c.z)
     if (e.button === 2) {
       // ⇧⌥ right-click lowers a level; plain right-click is the menu (contextmenu event).
@@ -788,6 +865,10 @@ export class Editor {
       this.pan = null
       return
     }
+    if (this.sculpt) {
+      this.sculpt = null
+      return
+    }
     const d = this.drag
     if (!d) return
     this.drag = null
@@ -814,6 +895,7 @@ export class Editor {
       this.data.pieces[i].z = after[k].z
     })
     this.growToFit()
+    this.settleTerrain()
     this.dirty = true
     void e
   }
@@ -873,6 +955,7 @@ export class Editor {
     if (def.isStart) this.data.pieces = this.data.pieces.filter((p) => !PIECE_BY_TYPE[p.type].isStart)
     this.data.pieces.push({ type: this.selectedType, x: c.x, z: c.z, rot: this.rot, level: this.level })
     this.selection.clear()
+    this.settleTerrain()
     this.dirty = true
   }
 
@@ -890,6 +973,7 @@ export class Editor {
       p.x += shift
       p.z += shift
     }
+    if (this.data.terrain) this.data.terrain = resizeTerrain(this.data.terrain, this.data.size, need, shift)
     this.data.size = need
     if (shift) {
       this.view.cx += shift
@@ -917,10 +1001,13 @@ export class Editor {
         p.x += shift
         p.z += shift
       }
-      this.data.size = Math.min(MAX_SIZE, Math.max(maxX, maxZ) + shift)
+      const size = Math.min(MAX_SIZE, Math.max(maxX, maxZ) + shift)
+      if (this.data.terrain) this.data.terrain = resizeTerrain(this.data.terrain, this.data.size, size, shift)
+      this.data.size = size
       this.view.cx += shift
       this.view.cz += shift
     }
+    this.settleTerrain()
   }
 
   // --- selection ---------------------------------------------------------------------
@@ -1105,6 +1192,24 @@ export class Editor {
     c.strokeStyle = 'rgba(255,255,255,0.25)'
     c.strokeRect(o.x, o.y, e.x - o.x, e.y - o.y)
     const toPx = (wx: number, wz: number) => this.toPx(wx / CELL, wz / CELL)
+    // Landscape: tint each cell by its height (cool below grade, warm above), on-screen cells only.
+    const terr = this.data.terrain
+    if (terr && terr.length === (N + 1) * (N + 1) && cell >= 4) {
+      for (let z = z0; z < z1; z++)
+        for (let x = x0; x < x1; x++) {
+          const h = (terr[terrainIndex(N, x, z)] + terr[terrainIndex(N, x + 1, z)] + terr[terrainIndex(N, x, z + 1)] + terr[terrainIndex(N, x + 1, z + 1)]) / 4
+          if (Math.abs(h) < 0.25) continue
+          const a = this.toPx(x, z + 1)
+          const t = Math.min(1, Math.abs(h) / 40)
+          c.fillStyle = h > 0 ? `rgba(${Math.round(200 + 55 * t)}, ${Math.round(170 - 110 * t)}, ${Math.round(60 - 40 * t)}, ${(0.18 + 0.5 * t).toFixed(2)})` : `rgba(60, 120, 220, ${(0.15 + 0.5 * t).toFixed(2)})`
+          c.fillRect(a.x, a.y, cell, cell)
+          if (cell >= 34 && this.mode === 'terrain') {
+            c.fillStyle = 'rgba(255,255,255,0.7)'
+            c.font = `${Math.max(10, cell * 0.26)}px "VT323", ui-monospace, monospace`
+            c.fillText(h.toFixed(0), a.x + 3, a.y + cell * 0.3)
+          }
+        }
+    }
     // Pieces, low levels first so bridges draw over what they cross.
     const order = this.data.pieces.map((_, i) => i).sort((a, b) => this.data.pieces[a].level - this.data.pieces[b].level)
     const hoverIdx = this.hover ? this.pieceAt(this.hover.x, this.hover.z) : -1
@@ -1151,8 +1256,19 @@ export class Editor {
         c.fill()
       }
     }
+    // Landscape brush.
+    if (this.mode === 'terrain' && this.hover && !this.pan) {
+      const p = this.toPx(this.hover.x + 0.5, this.hover.z + 0.5)
+      c.strokeStyle = 'rgba(255,200,87,0.9)'
+      c.lineWidth = 2
+      c.setLineDash([5, 4])
+      c.beginPath()
+      c.arc(p.x, p.y, this.brush * cell, 0, Math.PI * 2)
+      c.stroke()
+      c.setLineDash([])
+    }
     // Hover: a placement ghost inside the grid, a grow ghost outside it.
-    if (this.hover && !this.drag && !this.pan) {
+    if (this.mode === 'pieces' && this.hover && !this.drag && !this.pan) {
       if (this.inGrid(this.hover)) {
         if (hoverIdx < 0) {
           const def = PIECE_BY_TYPE[this.selectedType]
@@ -1185,7 +1301,8 @@ export class Editor {
     if (t.errors.length) bits.push('⚠ ' + t.errors.slice(0, 2).join(' · '))
     else if (t.warnings.length) bits.push('· ' + t.warnings[0])
     else bits.push('✓ ready to drive')
-    if (!this.status.classList.contains('flash')) this.status.innerHTML = `<span>${bits.join('   ')}</span><span class="hints">${HINTS}</span>`
+    if (this.mode === 'terrain' && this.hover && terr) bits.push(`ground ${sampleHeight(terr, N, (this.hover.x + 0.5) * CELL, (this.hover.z + 0.5) * CELL).toFixed(1)} m`)
+    if (!this.status.classList.contains('flash')) this.status.innerHTML = `<span>${bits.join('   ')}</span><span class="hints">${this.mode === 'terrain' ? TERRAIN_HINTS : HINTS}</span>`
   }
 }
 

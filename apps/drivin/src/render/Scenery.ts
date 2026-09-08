@@ -39,7 +39,7 @@ export class Scenery {
       const size = rotatedSize(def, piece.rot)
       const cx = (piece.x + size.w / 2) * CELL
       const cz = (piece.z + size.h / 2) * CELL
-      const y = piece.level * 8
+      const y = piece.level * 8 + (piece.level === 0 ? track.groundHeight(cx, cz) : 0)
       switch (def.decor) {
         case 'water': {
           const w = new Mesh(new PlaneGeometry(size.w * CELL, size.h * CELL), this.water)

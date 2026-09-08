@@ -26,7 +26,7 @@ export const TUBE_RADIUS = 11
 /** Metres over which a tunnel's walls rise from curb height at each mouth (and sink again at the exit). */
 export const TUBE_RAMP = 18
 /** Lateral shift across a loop so the exit clears the entry, metres. */
-export const LOOP_SHIFT = 2 * (ROAD_HALF_WIDTH + CURB_WIDTH) + 2.4
+export const LOOP_SHIFT = CELL
 /** How far off the road (grass) you can wander on ground-level pieces before you are simply lost. */
 export const GRASS_LIMIT = 60
 
@@ -53,8 +53,10 @@ export let AIR_REV_RATE = 1.6
 export let STEER_RATE = 2.4
 /** Lateral velocity the tyres can correct per second per m/s of mismatch. */
 export let TYRE_STIFFNESS = 6
-/** Handbrake: how fast the rear-end slide bleeds off once you let go (1/s). */
-export let SLIDE_DECAY = 4
+/** How fast a sideways slide bleeds off (1/s): handbrake, and gravity on a bank or corkscrew. */
+export let SLIDE_DECAY = 2
+/** Share of banking gravity the tyres hold on their own; the rest slides the car and you steer against it (Stunts). */
+export let BANK_HOLD = 0.3
 /** Lateral grip: max lateral acceleration the tyres provide, m/s². */
 export let GRIP_LATERAL = 22
 /** Rolling drag and aero drag. */
@@ -106,6 +108,7 @@ export const SIM_TUNE: TuneSection = {
     tune('STEER_RATE', () => STEER_RATE, (v) => (STEER_RATE = v)),
     tune('TYRE_STIFFNESS', () => TYRE_STIFFNESS, (v) => (TYRE_STIFFNESS = v)),
     tune('SLIDE_DECAY', () => SLIDE_DECAY, (v) => (SLIDE_DECAY = v)),
+    tune('BANK_HOLD', () => BANK_HOLD, (v) => (BANK_HOLD = v), [0, 1], 0.05, 'gravity the tyres hold on banks; the rest you steer against'),
     tune('GRIP_LATERAL', () => GRIP_LATERAL, (v) => (GRIP_LATERAL = v)),
     tune('DRAG_ROLLING', () => DRAG_ROLLING, (v) => (DRAG_ROLLING = v)),
     tune('DRAG_AERO', () => DRAG_AERO, (v) => (DRAG_AERO = v)),

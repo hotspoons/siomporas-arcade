@@ -65,7 +65,20 @@ export class Dash {
     const kmh = Math.abs(snap.car.speed) * 3.6
     const shown = this.units === 'kmh' ? kmh : kmh / 1.609
     gauge(c, W / 2 - 170, 190, 72, Math.min(1, Math.abs(snap.car.speed) / 95), String(Math.round(shown)), this.units === 'kmh' ? 'KM/H' : 'MPH', false)
-    gauge(c, W / 2 + 170, 190, 72, h.rpm, snap.car.speed < -0.5 ? 'R' : String(h.gear), 'RPM', h.rpm > 0.92)
+    // Tacho reads revs; the gear sits in its own window between the dials.
+    gauge(c, W / 2 + 170, 190, 72, h.rpm, String(Math.round((h.rpm * 8000) / 100) * 100), 'RPM', h.rpm > 0.92)
+    c.fillStyle = '#0c0e14'
+    c.fillRect(W / 2 - 26, 206, 52, 40)
+    c.strokeStyle = '#3a3f4c'
+    c.lineWidth = 2
+    c.strokeRect(W / 2 - 26, 206, 52, 40)
+    c.fillStyle = h.rpm > 0.92 ? '#ff5a3c' : '#ffc857'
+    c.textAlign = 'center'
+    c.font = '30px "VT323", ui-monospace, monospace'
+    c.fillText(snap.car.speed < -0.5 ? 'R' : String(h.gear), W / 2, 238)
+    c.fillStyle = '#7a8090'
+    c.font = '12px "VT323", ui-monospace, monospace'
+    c.fillText('GEAR', W / 2, 200)
     // Wheel: rim, three spokes, hub; turns with the steer.
     c.save()
     c.translate(W / 2, H + 40)

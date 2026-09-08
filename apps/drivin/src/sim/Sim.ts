@@ -283,8 +283,9 @@ export class Sim {
       h.gear = this.airGear
       h.rpm = this.airRpm
     } else {
-      h.gear = Math.min(6, 1 + Math.floor(ratio * 6))
-      h.rpm = ((ratio * 6) % 1) * 0.7 + 0.3
+      // Five gears, like everything short of a 959.
+      h.gear = Math.min(5, 1 + Math.floor(ratio * 5))
+      h.rpm = (Math.min(4.999, ratio * 5) % 1) * 0.7 + 0.3
     }
   }
 
@@ -297,15 +298,15 @@ export class Sim {
     if (!this.airborneRevving) {
       // Take over from the speed-derived note where it currently sits.
       const ratio = Math.abs(c.speed) / this.spec.topSpeed
-      this.airGear = Math.min(6, 1 + Math.floor(ratio * 6))
-      this.airRpm = ((ratio * 6) % 1) * 0.7 + 0.3
+      this.airGear = Math.min(5, 1 + Math.floor(ratio * 5))
+      this.airRpm = (Math.min(4.999, ratio * 5) % 1) * 0.7 + 0.3
       this.airborneRevving = true
     }
     if (input.throttle > 0.1) {
       // No load on the wheels: the revs run away, shifting up until the last gear pins at the limiter.
       this.airRpm += input.throttle * AIR_REV_RATE * dt
       if (this.airRpm >= 1) {
-        if (this.airGear < 6) {
+        if (this.airGear < 5) {
           this.airGear++
           this.airRpm = 0.35
         } else this.airRpm = 1

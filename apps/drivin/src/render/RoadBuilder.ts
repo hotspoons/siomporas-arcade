@@ -156,9 +156,10 @@ export class RoadBuilder {
     for (let r = 0; r < rings; r++) {
       const s = Math.min(t.length, r * STEP)
       t.frameAt(s, f)
-      // The wall rises from curb height at each mouth over TUBE_RAMP metres (matches Car.tubeMaxArc).
+      // A full ring inside; at each mouth it pinches down over TUBE_RAMP metres to a lip at road level,
+      // so the tube's threshold flows out of the tarmac instead of standing as a wall.
       const wall = smoothstep(0, TUBE_RAMP, s) * smoothstep(0, TUBE_RAMP, t.length - s)
-      const maxA = (ROAD_HALF_WIDTH + CURB_WIDTH + (TUBE_RADIUS * 2.2 - ROAD_HALF_WIDTH - CURB_WIDTH) * wall) / R
+      const maxA = 0.03 + (Math.PI - 0.03) * Math.pow(wall, 0.7)
       for (let k = 0; k < across; k++) {
         const i = r * across + k
         // Angle from the floor (0) around the tube, folded onto the wall's current top so the mouth flares open.

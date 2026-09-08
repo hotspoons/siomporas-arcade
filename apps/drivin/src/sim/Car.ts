@@ -15,6 +15,7 @@ import type { Lane, Track } from './Track'
 import {
   AIR_GLITCH_ACCEL,
   AIR_GLITCH_THRESHOLD,
+  BANK_HOLD,
   SLIDE_DECAY,
   TUBE_RAMP,
   BUMP_BOUNCE,
@@ -221,10 +222,14 @@ export class Car {
     const authority = spec.agility * (1 - (1 - STEER_HIGH_SPEED_FACTOR) * clamp((Math.abs(v) - STEER_FULL_SPEED) / (spec.topSpeed - STEER_FULL_SPEED), 0, 1))
     // Yaw the wheel asks for; nothing turns at a standstill.
     const yawDemand = input.steer * STEER_RATE * authority * clamp(Math.abs(v) / STEER_FULL_SPEED, 0, 1) * Math.sign(v || 1)
-    const bankG = tube ? 0 : gRight // banking: gravity across the road the tyres must hold or can use
-    const need = v * yawDemand - bankG
+    // Banking / corkscrew gravity across the road: the tyres hold only BANK_HOLD of it; the rest
+    // slides the car down the surface, and you steer into the hill to hold your line (Stunts).
+    const bankG = tube ? 0 : gRight
+    const held = bankG * BANK_HOLD
+    const need = v * yawDemand - held
     const tyreF = clamp(need, -grip, grip)
-    const yawRate = Math.abs(v) > 0.5 ? (tyreF + bankG) / v : 0
+    const yawRate = Math.abs(v) > 0.5 ? (tyreF + held) / v : 0
+    if (!tube) this.slide += bankG * (1 - BANK_HOLD) * dt
     this.slip = clamp((Math.abs(need) - grip) / (grip + 1e-6), 0, 1)
     this.heading += (yawRate - f.kRight * v) * dt
     // Handbrake: the rear lets go — you rotate past what grip allows and slide outward.

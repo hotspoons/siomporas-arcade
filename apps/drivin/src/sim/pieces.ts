@@ -278,43 +278,39 @@ export const PIECES: PieceDef[] = [
     type: 'loop',
     label: 'Loop',
     w: 2,
-    h: 1,
+    h: 2,
     ports: [
       { cx: 0, cz: 0, side: 'W', dLevel: 0 },
-      { cx: 1, cz: 0, side: 'E', dLevel: 0 },
+      { cx: 1, cz: 1, side: 'E', dLevel: 0 },
     ],
     lanes: [
       {
         from: 0,
         to: 1,
-        length: 2 * CELL + 2 * Math.PI * LOOP_RADIUS,
+        length: 2 * CELL + Math.hypot(2 * Math.PI * LOOP_RADIUS, LOOP_SHIFT),
         path: (t, o) => {
-          // Distance-parameterised over two cells: ease out to the entry lane over
-          // the first cell, a full vertical circle that drifts sideways by a whole
-          // road width so the exit clears the entry, then ease back over the last.
-          const loopLen = 2 * Math.PI * LOOP_RADIUS
+          // Straight in, a full vertical circle that drifts one cell sideways as a helix so the
+          // exit clears the entry, straight out on the next row. No sideways bends at either
+          // end: the only line through the loop is the one you are on.
+          const loopLen = Math.hypot(2 * Math.PI * LOOP_RADIUS, LOOP_SHIFT)
           const L = 2 * CELL + loopLen
           const d = t * L
           const lead = CELL
-          const shift = LOOP_SHIFT
           if (d < lead) {
-            set(o, d, 0, HALF - (shift / 2) * smoothstep(0.15, 0.85, d / lead))
+            set(o, d, 0, HALF)
             return
           }
           if (d < lead + loopLen) {
-            const a = ((d - lead) / loopLen) * Math.PI * 2
-            const cx = lead
-            const cy = LOOP_RADIUS
-            set(o, cx + LOOP_RADIUS * Math.sin(a), cy - LOOP_RADIUS * Math.cos(a), HALF - shift / 2 + (shift * (d - lead)) / loopLen)
+            const u = (d - lead) / loopLen
+            const a = u * Math.PI * 2
+            set(o, lead + LOOP_RADIUS * Math.sin(a), LOOP_RADIUS - LOOP_RADIUS * Math.cos(a), HALF + LOOP_SHIFT * smoothstep(0, 1, u))
             // Up points at the loop centre.
             o.ux = -Math.sin(a)
             o.uy = Math.cos(a)
             o.uz = 0
             return
           }
-          const rest = d - lead - loopLen
-          const tail = CELL
-          set(o, lead + rest, 0, HALF + (shift / 2) * (1 - smoothstep(0.15, 0.85, rest / tail)))
+          set(o, lead + (d - lead - loopLen), 0, HALF + LOOP_SHIFT)
         },
       },
     ],

@@ -73,6 +73,7 @@ export function stuntPark(): TrackData {
     S('straight'),
     S('straight'),
     S('straight'),
+    S('straight'), // one more: the loop's helix exits a row over
     S('curve'),
     S('straight'),
     S('straight'),

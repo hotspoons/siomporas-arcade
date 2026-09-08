@@ -20,6 +20,7 @@ import {
   BUMP_BOUNCE,
   PILLAR_SIDE,
   PILLAR_SPACING,
+  CAR_HALF_WIDTH,
   CAR_RIDE,
   CRASH_IMPACT_SPEED,
   CURB_SLOW,
@@ -290,11 +291,11 @@ export class Car {
       }
     }
 
-    // Lane end → next lane (split: choose by side).
+    // Lane end → next lane (split: choose by side). A jump lip launches you at the far side.
     if (this.s >= lane.table.length) {
       const over = this.s - lane.table.length
       const next = this.chooseNext(lane)
-      if (!next) {
+      if (!next || lane.gap) {
         this.launch(f)
         return
       }
@@ -516,8 +517,13 @@ export class Car {
     this.up.set(0, 1, 0)
     this.slip = 0
     const lanes = this.track.lanesNear(this.pos, this.nearby)
-    // Structures in the way: elevated slabs at bumper height, banked berms, tunnel skins, pillars.
-    if (this.hitsStructure(lanes)) {
+    // Water: the car is gone.
+    if (this.track.isWater(this.pos.x, this.pos.z)) {
+      this.event = 'crash'
+      return
+    }
+    // Structures in the way: elevated slabs at bumper height, banked berms, tunnel skins, pillars, scenery.
+    if (this.hitsStructure(lanes) || this.hitsScenery()) {
       this.pos.x = px
       this.pos.z = pz
       if (Math.abs(v) > CRASH_IMPACT_SPEED) {
@@ -583,6 +589,15 @@ export class Car {
           }
         }
       }
+    }
+    return false
+  }
+
+  /** Scenery solids (trees, buildings, pumps) as boxes grown by the car's half width. */
+  private hitsScenery(): boolean {
+    const m = CAR_HALF_WIDTH
+    for (const s of this.track.solids) {
+      if (Math.abs(this.pos.x - s.x) < s.hw + m && Math.abs(this.pos.z - s.z) < s.hh + m) return true
     }
     return false
   }

@@ -234,10 +234,15 @@ export class RenderWorld {
     const shake = curr.wreck ? Math.sin(this.time * 26) * 0.14 * (1 - curr.crashT) : 0
     const horizon = (this.steerRoll + this.bankRoll + shake) * HORIZON_ROLL_SHARE
     const roll = this.bankRoll + shake
-    // First person: a crash spins the whole view round once (a wreck, twice) — the Rad Mobile tumble.
-    const spin = !view.drawPlayer && curr.crashT > 0 ? (curr.wreck ? Math.min(1, curr.crashT / 0.7) * 2 : Math.min(1, curr.crashT / 0.85)) * Math.PI * 2 : 0
-    this.world.rotation.z = horizon + spin
-    const cover = 1 + Math.abs(horizon) * 1.6 + Math.abs(Math.sin(spin)) * 1.1
+    // First person: a crash spins the car round once (a wreck, twice) — a yaw, the same spin the
+    // chase camera shows from outside. Rows shear sideways by depth × tan(yaw), the road leaves the
+    // screen, and while you face backwards there is only grass and sky; the skyline wraps once per turn.
+    const spinYaw = !view.drawPlayer && curr.crashT > 0 ? (curr.wreck ? Math.min(1, curr.crashT / 0.7) * 2 : Math.min(1, curr.crashT / 0.85)) * Math.PI * 2 : 0
+    const yawWrapped = Math.atan2(Math.sin(spinYaw), Math.cos(spinYaw))
+    const behind = Math.abs(yawWrapped) > Math.PI / 2 - 0.1
+    const yawTan = behind ? 0 : Math.tan(yawWrapped)
+    this.world.rotation.z = horizon
+    const cover = 1 + Math.abs(horizon) * 1.6
     this.world.scale.set(cover, cover, 1)
     this.cockpit.mesh.rotation.z = -roll
     const ccover = 1 + Math.abs(roll) * 1.3
@@ -257,10 +262,10 @@ export class RenderWorld {
       {
         const scale = P.scaleAt(zRel)
         this.rowScale[n] = scale
-        this.rowX[n] = P.screenX(xOff - camX, scale)
+        this.rowX[n] = P.screenX(xOff - camX + zRel * yawTan, scale)
         this.rowY[n] = P.screenY(seg.y0 - camY, scale)
         if (n === 0) this.rowY[n] = Math.min(this.rowY[n], -4)
-        this.rowValid[n] = 1
+        this.rowValid[n] = behind ? 0 : 1
         this.rowFog[n] = 1 - Math.exp(-((zRel * fogK) ** 2))
       }
       this.rowClip[n] = maxY
@@ -279,6 +284,8 @@ export class RenderWorld {
     this.road.begin()
     const pal = this.palette
     const night = Boolean(this.theme?.night)
+    // Facing away from the road mid-spin: just the ground up to the horizon.
+    if (behind) this.road.quad(W / 2, -H, W, W / 2, H * 0.5, W, pal.grassA, 0)
     const lanes = this.theme?.lanes ?? 3
     const rails = Boolean(this.theme?.rails)
     for (let n = DRAW_SEGMENTS - 1; n >= 0; n--) {
@@ -445,7 +452,7 @@ export class RenderWorld {
     // Background parallax and horizon.
     const slopeAhead = stage.heightAt(z + 60) - groundY
     this.background.layout(W, H, H / 2 - slopeAhead * 0.9 - (this.camY - groundY - view.camHeight) * 0.5)
-    this.background.update(curr.curveAccum, groundY)
+    this.background.update(curr.curveAccum + spinYaw / (Math.PI * 2) / 0.0006, groundY)
     this.cockpit.mesh.visible = this.view === 'cockpit'
     if (this.cockpit.mesh.visible) this.cockpit.update(curr, dt)
     this.rain.update(dt, speed, curr.curveAccum)

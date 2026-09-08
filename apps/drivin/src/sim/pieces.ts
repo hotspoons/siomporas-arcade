@@ -17,6 +17,8 @@ export interface Port {
   side: Side
   /** Elevation change relative to the piece's base level. */
   dLevel: number
+  /** A jump lip: this end needs no partner. The track looks straight ahead for another open port facing back and links them as a gap you fly across. */
+  open?: boolean
 }
 
 export interface PathPoint {
@@ -53,9 +55,11 @@ export interface PieceDef {
   lanes: LaneDef[]
   profile: Profile
   /** Editor palette group. */
-  group: 'basic' | 'curves' | 'stunts' | 'flow'
+  group: 'basic' | 'curves' | 'stunts' | 'flow' | 'scenery'
   /** Show a start/finish line. */
   isStart?: boolean
+  /** Scenery: no lanes or ports, just something on the ground (see decor.ts for what it blocks). */
+  decor?: 'water' | 'trees' | 'building' | 'gas'
 }
 
 const UP = { ux: 0, uy: 1, uz: 0 }
@@ -318,6 +322,29 @@ export const PIECES: PieceDef[] = [
     group: 'stunts',
   },
   {
+    type: 'drawbridge',
+    label: 'Drawbridge half',
+    w: 1,
+    h: 1,
+    ports: [
+      { cx: 0, cz: 0, side: 'W', dLevel: 0 },
+      { cx: 0, cz: 0, side: 'E', dLevel: 0, open: true },
+    ],
+    lanes: [
+      {
+        from: 0,
+        to: 1,
+        length: CELL,
+        // A raised leaf that steepens toward the lip. Place two facing each other across
+        // open cells (water, say) and the gap between them is the jump.
+        // Convex all the way (the slope only ever steepens) so the car stays planted until the lip.
+        path: (t, o) => set(o, t * CELL, 6 * Math.max(0, (t - 0.1) / 0.9) ** 2, HALF),
+      },
+    ],
+    profile: 'road',
+    group: 'stunts',
+  },
+  {
     type: 'corkscrew',
     label: 'Corkscrew',
     w: 4,
@@ -406,6 +433,16 @@ export const PIECES: PieceDef[] = [
     group: 'curves',
   },
 ]
+
+const SCENERY: PieceDef[] = [
+  { type: 'water', label: 'Water', w: 1, h: 1, ports: [], lanes: [], profile: 'road', group: 'scenery', decor: 'water' },
+  { type: 'lake', label: 'Lake', w: 3, h: 3, ports: [], lanes: [], profile: 'road', group: 'scenery', decor: 'water' },
+  { type: 'trees', label: 'Trees', w: 1, h: 1, ports: [], lanes: [], profile: 'road', group: 'scenery', decor: 'trees' },
+  { type: 'forest', label: 'Forest', w: 2, h: 2, ports: [], lanes: [], profile: 'road', group: 'scenery', decor: 'trees' },
+  { type: 'building', label: 'Building', w: 2, h: 2, ports: [], lanes: [], profile: 'road', group: 'scenery', decor: 'building' },
+  { type: 'gas', label: 'Gas station', w: 2, h: 1, ports: [], lanes: [], profile: 'road', group: 'scenery', decor: 'gas' },
+]
+PIECES.push(...SCENERY)
 
 export const PIECE_BY_TYPE: Record<string, PieceDef> = Object.fromEntries(PIECES.map((p) => [p.type, p]))
 

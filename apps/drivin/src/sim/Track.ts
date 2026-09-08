@@ -18,6 +18,7 @@ import {
   type Side,
 } from './pieces'
 import { PathTable } from './PathTable'
+import { solidsOf, type Solid } from './decor'
 
 export interface PlacedPiece {
   type: string
@@ -63,6 +64,8 @@ export interface Lane {
   prev: Lane[]
   /** Piece base height (metres) for pillar rendering. */
   baseY: number
+  /** The end of this lane is a jump lip: `next` is where you should land, reached through the air, not along the path. */
+  gap?: boolean
 }
 
 export class Track {
@@ -75,6 +78,10 @@ export class Track {
   readonly closed: boolean
   /** Total length of the main loop (first branch at every split). */
   readonly loopLength: number
+  /** Scenery pieces (no lanes) for the renderer, with what they block for the sim. */
+  readonly decor: PlacedPiece[] = []
+  readonly solids: Solid[] = []
+  private readonly waterCells = new Set<number>()
   private readonly cells = new Map<number, Lane[]>()
 
   constructor(data: TrackData) {
@@ -95,6 +102,12 @@ export class Track {
           if (occupancy.has(k)) this.errors.push(`Pieces overlap at (${p.x + dx}, ${p.z + dz})`)
           occupancy.set(k, i)
         }
+      if (def.decor) {
+        this.decor.push(p)
+        this.solids.push(...solidsOf(p))
+        if (def.decor === 'water') for (let dx = 0; dx < size.w; dx++) for (let dz = 0; dz < size.h; dz++) this.waterCells.add(cellKey(p.x + dx, p.z + dz))
+        return
+      }
       def.ports.forEach((port, pi) => {
         const rc = rotatePortCell(def, p.rot, port.cx, port.cz)
         const side = rotateSide(port.side, p.rot)
@@ -169,7 +182,21 @@ export class Track {
         const ldef = def.lanes[lane.laneIndex]
         const exitPortIndex = lane.reversed ? ldef.from : ldef.to
         const exitPort = portsOf(lane.pieceIndex).find((w) => w.portIndex === exitPortIndex)!
-        const other = partner(exitPort)
+        let other = partner(exitPort)
+        if (!other && def.ports[exitPortIndex].open) {
+          // A jump lip: the far side is another open port facing back along this one's line.
+          const o = sideOffset(exitPort.side)
+          for (let d = 2; d <= 14 && !other; d++) {
+            const cx = exitPort.cx + o.dx * d
+            const cz = exitPort.cz + o.dz * d
+            other = ports.find((w) => w.cx === cx && w.cz === cz && w.side === opposite(exitPort.side) && w.level === exitPort.level && w.pieceIndex !== lane.pieceIndex && PIECE_BY_TYPE[data.pieces[w.pieceIndex].type].ports[w.portIndex].open) ?? null
+          }
+          if (other) lane.gap = true
+          else {
+            this.warnings.push(`Jump at cell (${exitPort.cx}, ${exitPort.cz}) has nothing to land on`)
+            continue
+          }
+        }
         if (!other) {
           this.errors.push(`Open end at cell (${exitPort.cx}, ${exitPort.cz}) ${exitPort.side}, level ${exitPort.level}`)
           continue
@@ -185,7 +212,7 @@ export class Track {
       }
       const reachedPieces = new Set(this.lanes.map((l) => l.pieceIndex))
       data.pieces.forEach((p, i) => {
-        if (!reachedPieces.has(i)) this.warnings.push(`Piece at (${p.x}, ${p.z}) is not connected to the start`)
+        if (!reachedPieces.has(i) && !PIECE_BY_TYPE[p.type]?.decor) this.warnings.push(`Piece at (${p.x}, ${p.z}) is not connected to the start`)
       })
     }
     this.startLane = start
@@ -241,6 +268,11 @@ export class Track {
 
   get valid(): boolean {
     return this.errors.length === 0 && this.startLane !== null
+  }
+
+  /** Whether a world point is over a water cell. */
+  isWater(x: number, z: number): boolean {
+    return this.waterCells.size > 0 && this.waterCells.has(cellKey(Math.floor(x / CELL), Math.floor(z / CELL)))
   }
 }
 

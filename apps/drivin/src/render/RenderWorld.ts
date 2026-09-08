@@ -14,6 +14,7 @@ import { CarMesh } from './CarMesh'
 import { Ground } from './Ground'
 import { BG_COLOR, FOG_DENSITY_MODERN, FOG_DENSITY_RETRO, MAX_PARTICLES, TUBE_SEGMENTS_MODERN, TUBE_SEGMENTS_RETRO } from './RenderTuning'
 import { RoadBuilder } from './RoadBuilder'
+import { Scenery } from './Scenery'
 import { makeRoadMaterial, makeRoadUniforms } from './RoadMaterial'
 
 export class RenderWorld {
@@ -22,6 +23,7 @@ export class RenderWorld {
   readonly root = new Group()
   readonly rig: CameraRig
   readonly roads: RoadBuilder
+  readonly scenery = new Scenery()
   readonly ground = new Ground()
   readonly sky = new Sky()
   readonly particles = new Particles(MAX_PARTICLES)
@@ -52,6 +54,7 @@ export class RenderWorld {
     this.root.add(this.rig.camera)
     this.roads = new RoadBuilder(makeRoadMaterial(this.roadUniforms), new MeshStandardMaterial({ color: 0x3a4250, roughness: 0.8, flatShading: true }))
     this.root.add(this.roads.root)
+    this.root.add(this.scenery.root)
     this.root.add(this.ground.mesh)
     this.scene.add(this.sky.root)
     // Clear day: deep blue overhead, pale haze at the horizon, no stars.
@@ -80,6 +83,7 @@ export class RenderWorld {
   setTrack(track: Track): void {
     this.currentTrack = track
     this.roads.build(track, this.retro ? TUBE_SEGMENTS_RETRO : TUBE_SEGMENTS_MODERN)
+    this.scenery.build(track)
     this.stats.chunks = track.lanes.length
     this.rig.reset()
   }

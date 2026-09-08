@@ -18,7 +18,8 @@ import { CELL } from '../sim/Tuning'
 import { Track, portStatus, type PlacedPiece, type TrackData } from '../sim/Track'
 import type { TrackStore } from '../app/TrackStore'
 
-const GROUP_COLORS: Record<PieceDef['group'], string> = { basic: '#2f6b8a', curves: '#3b8a5c', stunts: '#a3552a', flow: '#7a4aa0' }
+const GROUP_COLORS: Record<PieceDef['group'], string> = { basic: '#2f6b8a', curves: '#3b8a5c', stunts: '#a3552a', flow: '#7a4aa0', scenery: '#4a7a3a' }
+const DECOR_COLORS: Record<string, string> = { water: '#2f7fbf', trees: '#2f7a2c', building: '#8a8a94', gas: '#c0703a' }
 const LEVEL_TINT = ['', '#ffc857', '#ff9a3c', '#ff6a5c', '#ff5fd2', '#b08cff', '#6ab8ff']
 const MAX_SIZE = 200
 const MIN_SCALE = 6
@@ -206,7 +207,7 @@ export class Editor {
   // --- palette / load / save ------------------------------------------------------
 
   private buildPalette(): void {
-    const groups: PieceDef['group'][] = ['basic', 'curves', 'stunts', 'flow']
+    const groups: PieceDef['group'][] = ['basic', 'curves', 'stunts', 'flow', 'scenery']
     for (const g of groups) {
       const h = document.createElement('h3')
       h.textContent = g.toUpperCase()
@@ -1113,8 +1114,9 @@ export class Editor {
       const size = rotatedSize(def, p.rot)
       const a = toPx(p.x * CELL, (p.z + size.h) * CELL)
       const sel = this.selection.has(i)
-      c.fillStyle = GROUP_COLORS[def.group] + (sel ? 'cc' : i === hoverIdx ? '99' : '66')
+      c.fillStyle = (def.decor ? DECOR_COLORS[def.decor] : GROUP_COLORS[def.group]) + (sel ? 'cc' : i === hoverIdx ? '99' : def.decor ? '88' : '66')
       c.fillRect(a.x + 1, a.y + 1, size.w * cell - 2, size.h * cell - 2)
+      if (def.decor) drawDecor(c, def, a.x, a.y, size.w * cell, size.h * cell)
       if (p.level > 0) {
         c.strokeStyle = LEVEL_TINT[Math.min(6, p.level)]
         c.lineWidth = 2
@@ -1216,12 +1218,60 @@ function drawLanes(c: CanvasRenderingContext2D, def: PieceDef, p: PlacedPiece, t
   }
 }
 
+/** Scenery glyphs: wave lines for water, tree blobs, a block, a canopy. */
+function drawDecor(c: CanvasRenderingContext2D, def: PieceDef, x: number, y: number, w: number, h: number): void {
+  c.save()
+  c.beginPath()
+  c.rect(x, y, w, h)
+  c.clip()
+  const u = Math.min(w, h)
+  switch (def.decor) {
+    case 'water':
+      c.strokeStyle = 'rgba(255,255,255,0.55)'
+      c.lineWidth = Math.max(1, u * 0.03)
+      for (let k = 1; k <= 3; k++) {
+        c.beginPath()
+        for (let i = 0; i <= 8; i++) c.lineTo(x + (w * i) / 8, y + (h * k) / 4 + Math.sin(i * 1.6 + k) * u * 0.04)
+        c.stroke()
+      }
+      break
+    case 'trees':
+      c.fillStyle = 'rgba(120,220,110,0.9)'
+      for (let i = 0; i < 5 * (w / u) * (h / u); i++) {
+        const fx = 0.2 + 0.6 * ((Math.sin(i * 12.9898) * 43758.5453) % 1 + 1) % 1
+        const fz = 0.2 + 0.6 * ((Math.sin(i * 78.233) * 43758.5453) % 1 + 1) % 1
+        c.beginPath()
+        c.arc(x + fx * w, y + fz * h, u * 0.09, 0, Math.PI * 2)
+        c.fill()
+      }
+      break
+    case 'building':
+      c.fillStyle = 'rgba(230,230,240,0.85)'
+      c.fillRect(x + w * 0.2, y + h * 0.2, w * 0.6, h * 0.6)
+      c.fillStyle = 'rgba(40,50,70,0.8)'
+      for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) c.fillRect(x + w * (0.27 + i * 0.18), y + h * (0.27 + j * 0.18), w * 0.09, h * 0.09)
+      break
+    case 'gas':
+      c.fillStyle = 'rgba(255,240,200,0.9)'
+      c.fillRect(x + w * 0.15, y + h * 0.25, w * 0.7, h * 0.35)
+      c.fillStyle = 'rgba(255,80,60,0.9)'
+      c.fillRect(x + w * 0.3, y + h * 0.7, w * 0.1, h * 0.15)
+      c.fillRect(x + w * 0.6, y + h * 0.7, w * 0.1, h * 0.15)
+      break
+  }
+  c.restore()
+}
+
 function drawPieceIcon(canvas: HTMLCanvasElement, def: PieceDef): void {
   const c = canvas.getContext('2d')!
   const cells = Math.max(def.w, def.h)
   const scale = (canvas.width - 8) / (cells * CELL)
-  c.fillStyle = GROUP_COLORS[def.group] + '55'
+  c.fillStyle = (def.decor ? DECOR_COLORS[def.decor] : GROUP_COLORS[def.group]) + '55'
   c.fillRect(4, 4 + (cells - def.h) * CELL * scale, def.w * CELL * scale, def.h * CELL * scale)
+  if (def.decor) {
+    drawDecor(c, def, 4, 4 + (cells - def.h) * CELL * scale, def.w * CELL * scale, def.h * CELL * scale)
+    return
+  }
   const toPx = (x: number, z: number) => ({ x: 4 + x * scale, y: canvas.height - 4 - z * scale })
   drawLanes(c, def, { type: def.type, x: 0, z: 0, rot: 0, level: 0 }, toPx, scale, '#e8f6ff', null)
 }

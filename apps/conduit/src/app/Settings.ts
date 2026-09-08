@@ -11,6 +11,8 @@ export type ComfortPreset = 'intense' | 'standard' | 'maximum'
 export type RetroPresentHz = 20 | 30 | 60 | 0
 
 export interface SettingsData {
+  /** Bindings migration version (see the constructor). */
+  keysV?: number
   style: StyleName
   retro: RetroOptions
   modern: ModernOptions
@@ -44,6 +46,7 @@ export interface SettingsData {
 const KEY = 'apex-conduit.settings.v1'
 
 export const DEFAULT_SETTINGS: SettingsData = {
+  keysV: 2,
   style: 'modern',
   retro: {
     width: 320,
@@ -74,6 +77,17 @@ export class Settings extends SettingsStore<SettingsData> {
   constructor() {
     const stored = SettingsStore.hasStored(KEY)
     super(KEY, DEFAULT_SETTINGS)
+    // Bindings are saved per browser, so aliases added later (P for pause, say) never reached anyone
+    // who had already played. Merge in any default key an action is missing, once.
+    if ((this.data.keysV ?? 0) < 2) {
+      for (const [action, keys] of Object.entries(DEFAULT_KEYS)) {
+        const mine = this.data.keys[action as keyof typeof DEFAULT_KEYS]
+        if (!mine) this.data.keys[action as keyof typeof DEFAULT_KEYS] = [...keys]
+        else for (const k of keys) if (!mine.includes(k)) mine.push(k)
+      }
+      this.data.keysV = 2
+      this.save()
+    }
     // First run on a phone: keep the look, drop the expensive passes.
     if (!stored && isTouchDevice()) {
       this.data.modern.motionBlur = false

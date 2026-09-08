@@ -7,6 +7,8 @@ import type { ModernOptions, RetroOptions } from '@apex/engine/render/styles/Sty
 import { DEFAULT_KEYS, DEFAULT_PAD } from '../input/bindings'
 
 export interface SettingsData {
+  /** Bindings migration version (see the constructor). */
+  keysV?: number
   style: 'modern' | 'retro'
   retro: RetroOptions
   modern: ModernOptions
@@ -32,6 +34,7 @@ export interface SettingsData {
 const KEY = 'apex-drivin.settings.v1'
 
 export const DEFAULT_SETTINGS: SettingsData = {
+  keysV: 2,
   style: 'modern',
   retro: { width: 320, height: 240, presentHz: 20, scanlines: true, barrel: true, dither: true, phosphor: true, paletteLevels: 6, quantizeVerts: true, ringSegments: 10 },
   modern: { bloom: true, motionBlur: true, chromatic: false, grain: true, smaa: true, slowmo: false },
@@ -55,6 +58,17 @@ export class Settings extends SettingsStore<SettingsData> {
   constructor() {
     const stored = SettingsStore.hasStored(KEY)
     super(KEY, DEFAULT_SETTINGS)
+    // Bindings are saved per browser, so aliases added later (P for pause, say) never reached anyone
+    // who had already played. Merge in any default key an action is missing, once.
+    if ((this.data.keysV ?? 0) < 2) {
+      for (const [action, keys] of Object.entries(DEFAULT_KEYS)) {
+        const mine = this.data.keys[action as keyof typeof DEFAULT_KEYS]
+        if (!mine) this.data.keys[action as keyof typeof DEFAULT_KEYS] = [...keys]
+        else for (const k of keys) if (!mine.includes(k)) mine.push(k)
+      }
+      this.data.keysV = 2
+      this.save()
+    }
     if (!stored && isTouchDevice()) {
       this.data.modern.motionBlur = false
       this.data.modern.smaa = false

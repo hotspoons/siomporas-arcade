@@ -47,6 +47,7 @@ export function buildMenus(game: Game) {
             game.applyStyle()
           },
         },
+        { kind: 'action', label: 'REPLAYS · A:\\', hint: 'Watch a saved run', onSelect: () => game.menus.push(replays()) },
         { kind: 'action', label: 'SETTINGS', onSelect: () => game.menus.push(settings()) },
         { kind: 'action', label: 'CONTROLS', onSelect: () => game.menus.push(controls()) },
       ],
@@ -60,6 +61,7 @@ export function buildMenus(game: Game) {
     title: 'PAUSED',
     items: [
       { kind: 'action', label: 'RESUME', onSelect: () => game.resume() },
+      { kind: 'action', label: 'REPLAY', hint: 'I or F7 any time while driving', onSelect: () => game.menus.push(replayMenu()) },
       { kind: 'action', label: 'RESTART', onSelect: () => game.restart() },
       { kind: 'choice', label: 'CAMERA', options: ['CHASE', 'HOOD'], get: () => (s().camera === 'hood' ? 1 : 0), set: (i) => { set((d) => (d.camera = i === 1 ? 'hood' : 'chase')); game.applyCamera() } },
       {
@@ -205,6 +207,7 @@ export function buildMenus(game: Game) {
       { kind: 'info', label: 'Last lap', value: () => fmtTime(snap.hud.lastLap) },
       { kind: 'info', label: 'Total', value: () => fmtTime(snap.time) },
       { kind: 'info', label: 'Crashes', value: () => String(snap.hud.crashes) },
+      { kind: 'action', label: 'REPLAY', onSelect: () => game.menus.push(replayMenu()) },
       { kind: 'action', label: 'RETRY', onSelect: () => game.restart() },
       ...(game.fromEditor ? [{ kind: 'action', label: 'BACK TO EDITOR', onSelect: () => game.openEditor() } as MenuItem] : []),
       { kind: 'action', label: 'TITLE', onSelect: () => game.quitToTitle() },
@@ -212,7 +215,90 @@ export function buildMenus(game: Game) {
     onBack: () => game.quitToTitle(),
   })
 
-  return { title, pause, settings, controls, results }
+  /** The run in the buffer: watch it, or keep it on A:\ */
+  const replayMenu = (): MenuScreen => ({
+    id: 'replay',
+    title: 'REPLAY',
+    subtitle: game.hasRecording ? `${game.recordingSeconds.toFixed(0)}s recorded · ${game.currentTrackName}` : 'Nothing recorded yet',
+    items: [
+      { kind: 'action', label: 'WATCH THIS RUN', onSelect: () => game.watchReplay() },
+      {
+        kind: 'choice',
+        label: 'CAMERA',
+        hint: 'C or 1–4 while watching',
+        options: ['THIRD PERSON', 'FIRST PERSON', 'HELICOPTER', 'TV CAMERA'],
+        get: () => ['chase', 'hood', 'heli', 'tv'].indexOf(game.replayCameraName),
+        set: (i) => game.setReplayCamera((['chase', 'hood', 'heli', 'tv'] as const)[i]),
+      },
+      { kind: 'action', label: 'SAVE TO A:\\', hint: 'Keeps the track with it, so later edits change nothing', onSelect: () => void saveFlow() },
+      { kind: 'action', label: 'REPLAYS ON A:\\', onSelect: () => game.menus.push(replays()) },
+    ],
+    footer: 'While watching · Space pause · ← → scrub · ↑ ↓ speed · C camera · Esc back',
+  })
+
+  /** Ask for a name, then write the buffer to the floppy. */
+  const saveFlow = async (): Promise<void> => {
+    const name = await game.prompt('Save replay as', 'RUN')
+    if (name === null) return
+    game.saveRecording(name)
+    game.menus.refresh()
+  }
+
+  /** The floppy's directory. */
+  const replays = (): MenuScreen => {
+    const files = game.replays.list()
+    const items: MenuItem[] = files.length
+      ? files.map(
+          (m): MenuItem => ({
+            kind: 'action',
+            label: m.file,
+            hint: `${m.track} · ${m.seconds.toFixed(0)}s · ${m.laps} lap${m.laps === 1 ? '' : 's'} · ${new Date(m.recorded).toLocaleDateString()}`,
+            onSelect: () => game.menus.push(replayFile(m.id)),
+          }),
+        )
+      : [{ kind: 'info', label: 'A:\\ is empty', value: () => '' } as MenuItem]
+    return {
+      id: 'replays',
+      title: 'A:\\*.RPL',
+      subtitle: `${files.length} replay${files.length === 1 ? '' : 's'} on the floppy`,
+      wide: true,
+      items: [...items, { kind: 'action', label: 'IMPORT FROM DISK', onSelect: () => importReplay() }],
+      footer: 'Each file carries the track it was driven on',
+    }
+  }
+
+  /** One file: watch, export, or bin it. */
+  const replayFile = (id: string): MenuScreen => {
+    const f = game.replays.get(id)
+    return {
+      id: 'replay-file',
+      title: f ? f.file : 'MISSING',
+      subtitle: f ? `${f.track} · ${f.car} · ${f.seconds.toFixed(0)}s` : 'That file is gone',
+      items: f
+        ? [
+            { kind: 'info', label: 'Laps', value: () => String(f.laps) },
+            { kind: 'info', label: 'Best lap', value: () => fmtTime(f.bestLap) },
+            { kind: 'action', label: 'WATCH', onSelect: () => game.watchReplay(f) },
+            { kind: 'action', label: 'EXPORT TO DISK', onSelect: () => game.exportReplay(f) },
+            { kind: 'action', label: 'DELETE', danger: true, onSelect: () => { game.replays.remove(id); game.menus.pop() } },
+          ]
+        : [{ kind: 'info', label: 'Nothing here' }],
+    }
+  }
+
+  /** A file picker that hands the text to the game. */
+  const importReplay = (): void => {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = '.rpl,application/json'
+    input.addEventListener('change', () => {
+      const file = input.files?.[0]
+      if (file) void file.text().then((t) => game.importReplay(t))
+    })
+    input.click()
+  }
+
+  return { title, pause, settings, controls, results, replayMenu, replays }
 }
 
 function toggle(label: string, get: () => boolean, setV: (v: boolean) => void, after?: () => void): MenuItem {

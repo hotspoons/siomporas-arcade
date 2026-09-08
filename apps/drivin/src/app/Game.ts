@@ -11,6 +11,8 @@ import { ModernStyle } from '@apex/engine/render/styles/ModernStyle'
 import { RetroStyle } from '@apex/engine/render/styles/RetroStyle'
 import { AudioWorld } from '../audio/AudioWorld'
 import { Editor } from '../editor/Editor'
+import { ReplayPlayer, ReplayRecorder, ReplayStore, fileName, parseReplay, type ReplayFile } from './Replay'
+import type { CameraMode } from '../render/CameraRig'
 import { InputMap } from '../input/InputMap'
 import { TouchSource } from '../input/TouchSource'
 import { isTouchDevice } from '@apex/engine/app/platform'
@@ -30,7 +32,7 @@ import { buildMenus } from './menus'
 import { Settings } from './Settings'
 import { TrackStore } from './TrackStore'
 
-export type GameState = 'title' | 'driving' | 'paused' | 'results' | 'editor'
+export type GameState = 'title' | 'driving' | 'paused' | 'results' | 'editor' | 'replay'
 
 export class Game implements LoopClient {
   readonly settings = new Settings()
@@ -45,6 +47,12 @@ export class Game implements LoopClient {
   readonly loop: GameLoop
   readonly audio = new AudioWorld()
   readonly editor: Editor
+  readonly replays = new ReplayStore()
+  private readonly recorder = new ReplayRecorder()
+  /** The replay being watched, and where we came from so Esc goes back there. */
+  player: ReplayPlayer | null = null
+  private replayFrom: GameState = 'title'
+  private replayCamera: CameraMode = 'chase'
   readonly touch: TouchSource | null = null
   readonly haptics: Haptics
   sim: Sim
@@ -201,6 +209,7 @@ export class Game implements LoopClient {
     this.loop.paused = false
     this.applyCamera()
     this.view.rig.reset()
+    this.recorder.start(this.trackData, this.settings.data.carId)
     this.hud.showMessage(this.trackData.name.toUpperCase(), 1.6, 'good')
     this.audio.resume()
     this.audio.setRunning(true)
@@ -375,22 +384,184 @@ export class Game implements LoopClient {
     if (this.menus.open) this.menus.handle(ui)
     else if (this.state === 'driving') {
       if (ui.pause) this.pause()
+      if (this.input.keyboard.wasPressed('KeyI') || this.input.keyboard.wasPressed('F7')) this.watchReplay()
       if (this.input.cameraEdge || this.touch?.cameraEdge) {
         this.settings.update((d) => (d.camera = d.camera === 'hood' ? 'chase' : 'hood'))
         this.applyCamera()
       }
     }
+    if (this.state === 'replay') this.replayKeys(dt)
     if (this.state === 'driving') copyInput(this.input.frame, this.held)
     else this.held.throttle = this.held.brake = this.held.steer = 0
     return 1
   }
 
+  /** While watching: space plays/pauses, ← → scrub, ↑ ↓ speed, C or 1–4 pick a camera, Esc leaves. */
+  private replayKeys(dt: number): void {
+    const p = this.player
+    if (!p) return
+    const kb = this.input.keyboard
+    if (kb.wasPressed('Space')) p.playing = !p.playing
+    if (kb.isDown('ArrowLeft')) p.seek(p.time - dt * 6)
+    if (kb.isDown('ArrowRight')) p.seek(p.time + dt * 6)
+    if (kb.wasPressed('ArrowUp')) p.speed = Math.min(4, p.speed * 2)
+    if (kb.wasPressed('ArrowDown')) p.speed = Math.max(0.125, p.speed / 2)
+    const cams: CameraMode[] = ['chase', 'hood', 'heli', 'tv']
+    for (let i = 0; i < cams.length; i++) if (kb.wasPressed(`Digit${i + 1}`)) this.setReplayCamera(cams[i])
+    if (kb.wasPressed('KeyC') || this.input.cameraEdge) this.setReplayCamera(cams[(cams.indexOf(this.replayCamera) + 1) % cams.length])
+    if (this.input.ui.back || this.input.ui.pause) this.stopReplay()
+  }
+
+  // --- replays -------------------------------------------------------------------
+
+  /** Is there a run in the buffer worth watching or saving? */
+  get hasRecording(): boolean {
+    return !this.recorder.empty
+  }
+
+  get recordingSeconds(): number {
+    return this.recorder.length
+  }
+
+  /** Watch a file (or the run just driven when `file` is omitted). */
+  watchReplay(file?: ReplayFile): void {
+    const f = file ?? this.recorder.build('LASTRUN', this.curr)
+    if (!f) {
+      this.hud.showMessage('NOTHING RECORDED', 1.6, 'bad')
+      return
+    }
+    this.replayFrom = this.state === 'replay' ? this.replayFrom : this.state
+    this.player = new ReplayPlayer(f)
+    if (this.player.count < 2) {
+      this.player = null
+      this.hud.showMessage('REPLAY IS EMPTY', 1.6, 'bad')
+      return
+    }
+    // The replay's own copy of the track, so later edits can't change what you watch.
+    this.loadTrack(f.trackData)
+    this.state = 'replay'
+    this.loop.paused = false
+    this.input.suppressGameplay = true
+    this.touch?.setVisible(false)
+    this.menus.closeAll()
+    this.showTitleCard(false)
+    this.hud.setVisible(true)
+    this.setReplayCamera(this.replayCamera)
+    this.view.rig.reset()
+    this.hud.showMessage(`${f.file} · ${f.track.toUpperCase()}`, 2.4, 'good')
+  }
+
+  setReplayCamera(mode: CameraMode): void {
+    this.replayCamera = mode
+    this.view.rig.mode = mode
+    this.hud.showMessage(`${mode === 'hood' ? 'FIRST PERSON' : mode === 'chase' ? 'THIRD PERSON' : mode === 'heli' ? 'HELICOPTER' : 'TV CAMERA'} · C CYCLES`, 1.2)
+  }
+
+  get replayCameraName(): CameraMode {
+    return this.replayCamera
+  }
+
+  stopReplay(): void {
+    if (this.state !== 'replay') return
+    this.player = null
+    this.input.suppressGameplay = false
+    if (this.replayFrom === 'paused' || this.replayFrom === 'results') {
+      // Back to the run we were watching from: its track, its state, its menu.
+      this.loadTrack(this.trackData)
+      this.state = this.replayFrom
+      this.loop.paused = true
+      this.menus.replace(this.replayFrom === 'paused' ? buildMenus(this).pause() : buildMenus(this).results(this.curr))
+      this.applyCamera()
+      return
+    }
+    this.enterTitle()
+  }
+
+  /** A one-line text prompt over the game (the menus are keyboard-driven, this is not). */
+  prompt(message: string, value = ''): Promise<string | null> {
+    return new Promise((resolve) => {
+      const back = document.createElement('div')
+      back.className = 'editor-dialog-back'
+      const box = document.createElement('div')
+      box.className = 'editor-dialog'
+      const p = document.createElement('p')
+      p.textContent = message
+      const input = document.createElement('input')
+      input.type = 'text'
+      input.value = value
+      input.spellcheck = false
+      const row = document.createElement('div')
+      row.className = 'buttons'
+      const ok = document.createElement('button')
+      ok.className = 'primary'
+      ok.textContent = 'OK'
+      const cancel = document.createElement('button')
+      cancel.textContent = 'Cancel'
+      row.append(ok, cancel)
+      box.append(p, input, row)
+      back.appendChild(box)
+      this.container.appendChild(back)
+      const finish = (v: string | null) => {
+        back.remove()
+        this.input.swallowFrames = 2
+        resolve(v)
+      }
+      ok.addEventListener('click', () => finish(input.value))
+      cancel.addEventListener('click', () => finish(null))
+      input.addEventListener('keydown', (e) => {
+        e.stopPropagation()
+        if (e.key === 'Enter') finish(input.value)
+        if (e.key === 'Escape') finish(null)
+      })
+      input.focus()
+      input.select()
+    })
+  }
+
+  /** Save what is in the buffer to A:\ under `name`. */
+  saveRecording(name: string): string | null {
+    const f = this.recorder.build(name, this.curr)
+    if (!f) {
+      this.hud.showMessage('NOTHING RECORDED', 1.6, 'bad')
+      return null
+    }
+    const id = this.replays.save(f)
+    this.hud.showMessage(id ? `SAVED ${fileName(name)}` : 'A:\\ IS FULL', 2, id ? 'good' : 'bad')
+    return id
+  }
+
+  /** Write a replay out as a real file (and read one back in). */
+  exportReplay(f: ReplayFile): void {
+    const blob = new Blob([JSON.stringify(f)], { type: 'application/json' })
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = `${f.file.replace(/^A:\\/, '')}`
+    a.click()
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000)
+  }
+
+  importReplay(text: string): void {
+    const f = parseReplay(text)
+    if (!f) {
+      this.hud.showMessage('NOT A REPLAY FILE', 1.8, 'bad')
+      return
+    }
+    const id = this.replays.save(f)
+    if (id) this.menus.refresh()
+    this.hud.showMessage(id ? `COPIED TO ${f.file}` : 'A:\\ IS FULL', 2, id ? 'good' : 'bad')
+  }
+
   simTick(dt: number): void {
+    if (this.state === 'replay') {
+      this.player?.advance(dt)
+      return
+    }
     if (this.state !== 'driving') return
     const tmp = this.prev
     this.prev = this.curr
     this.curr = tmp
     this.sim.tick(dt, this.held, this.curr)
+    this.recorder.sample(this.curr, dt)
     if (this.sim.phase === 'finished' && !this.resultsShown) {
       this.endTimer += dt
       if (this.endTimer > 1.2) this.showResults()
@@ -400,6 +571,20 @@ export class Game implements LoopClient {
   render(alpha: number, dt: number): void {
     this.syncHudRetro()
     if (this.state === 'editor') return
+    if (this.state === 'replay' && this.player) {
+      const tmp = this.prev
+      this.prev = this.curr
+      this.curr = tmp
+      this.player.write(this.curr)
+      this.view.update(this.prev, this.curr, 1, dt)
+      this.hud.update(this.curr, dt, 0)
+      const hood = this.view.rig.mode === 'hood'
+      this.dash.setVisible(hood)
+      if (hood) this.dash.update(this.curr, dt)
+      this.view.render()
+      this.perf.update(this.loop.stats, this.view.stats, dt, `replay ${this.player.time.toFixed(1)}/${this.player.duration.toFixed(1)}s ${this.replayCamera}`)
+      return
+    }
     const events = this.sim.events
     if (events.length) events.drain(this.onEventBound)
     this.view.update(this.prev, this.curr, alpha, dt)

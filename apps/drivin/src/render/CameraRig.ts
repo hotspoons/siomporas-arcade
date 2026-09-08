@@ -1,12 +1,23 @@
 // Cameras: chase (follows the car's up, so loops turn the world over), hood,
-// trackside replay, and an orbiting overview for the editor's test view.
+// helicopter and TV (both for replays), the trackside crash camera, and an
+// orbiting overview for the editor's test view.
 
 import { PerspectiveCamera, Vector3 } from 'three'
 import { expApproach } from '@apex/engine/math/scalar'
 import type { Snapshot } from '../sim/Snapshot'
 import { CAM_BACK, CAM_LOOK_AHEAD, CAM_POS_RATE, CAM_UP, CAM_UP_RATE, FOV_AT_TOP_SPEED, FOV_BASE } from './RenderTuning'
 
-export type CameraMode = 'chase' | 'hood' | 'orbit'
+/** Helicopter: how far behind and above it hangs. */
+const HELI_BACK = 26
+const HELI_UP = 22
+/** TV: how far to the side and ahead a camera is planted, how high, and the distances that trigger a cut. */
+const TV_SIDE = 34
+const TV_AHEAD = 55
+const TV_UP = 9
+const TV_RANGE = 190
+const TV_NEAR = 12
+
+export type CameraMode = 'chase' | 'hood' | 'orbit' | 'heli' | 'tv'
 
 export class CameraRig {
   readonly camera: PerspectiveCamera
@@ -15,6 +26,9 @@ export class CameraRig {
   effectGain = 1
   shake = 0
   orbitAngle = 0
+  private readonly tvPos = new Vector3()
+  private tvHas = false
+  private tvFlip = false
   private readonly pos = new Vector3()
   private readonly look = new Vector3()
   private readonly up = new Vector3(0, 1, 0)
@@ -35,6 +49,7 @@ export class CameraRig {
   reset(): void {
     this.initialised = false
     this.shake = 0
+    this.tvHas = false
   }
 
   addShake(a: number): void {
@@ -59,7 +74,32 @@ export class CameraRig {
       return
     }
 
-    if (this.mode === 'orbit') {
+    if (this.mode === 'heli') {
+      // A helicopter holding station behind and above, drifting into line with the car's heading.
+      this.tmp.set(this.carFwd.x, 0, this.carFwd.z)
+      if (this.tmp.lengthSq() < 1e-4) this.tmp.set(1, 0, 0)
+      this.tmp.normalize()
+      this.pos.copy(this.carPos).addScaledVector(this.tmp, -HELI_BACK).setY(this.carPos.y + HELI_UP)
+      this.look.copy(this.carPos).addScaledVector(this.tmp, 12)
+      this.up.set(0, 1, 0)
+    } else if (this.mode === 'tv') {
+      // TV: a stationary camera off to the side that pans to follow, jumping to a fresh spot once the
+      // car has run past it (as if the broadcast cut to the next camera down the track).
+      const gone = this.tvPos.distanceTo(this.carPos)
+      if (!this.tvHas || gone > TV_RANGE || gone < TV_NEAR) {
+        this.tmp.set(-this.carFwd.z, 0, this.carFwd.x)
+        if (this.tmp.lengthSq() < 1e-4) this.tmp.set(0, 0, 1)
+        this.tmp.normalize()
+        const side = this.tvFlip ? 1 : -1
+        this.tvFlip = !this.tvFlip
+        this.tvPos.copy(this.carPos).addScaledVector(this.tmp, side * TV_SIDE).addScaledVector(this.carFwd, TV_AHEAD)
+        this.tvPos.y = this.carPos.y + TV_UP
+        this.tvHas = true
+      }
+      this.pos.copy(this.tvPos)
+      this.look.copy(this.carPos)
+      this.up.set(0, 1, 0)
+    } else if (this.mode === 'orbit') {
       this.orbitAngle += dt * 0.25
       this.pos.set(this.carPos.x + Math.cos(this.orbitAngle) * 60, this.carPos.y + 35, this.carPos.z + Math.sin(this.orbitAngle) * 60)
       this.look.copy(this.carPos)
@@ -86,8 +126,10 @@ export class CameraRig {
       this.initialised = true
     }
     const kp = 1 - Math.exp(-CAM_POS_RATE * dt)
-    this.smoothPos.lerp(this.pos, this.mode === 'hood' ? 1 : kp)
-    this.smoothLook.lerp(this.look, this.mode === 'hood' ? 1 : 1 - Math.exp(-18 * dt))
+    const posK = this.mode === 'hood' || this.mode === 'tv' ? 1 : this.mode === 'heli' ? 1 - Math.exp(-1.6 * dt) : kp
+    const lookK = this.mode === 'hood' ? 1 : this.mode === 'heli' ? 1 - Math.exp(-3 * dt) : 1 - Math.exp(-18 * dt)
+    this.smoothPos.lerp(this.pos, posK)
+    this.smoothLook.lerp(this.look, lookK)
     if (this.shake > 0.001) {
       const a = this.shake * 0.25
       this.tmp.set(Math.sin(this.time * 61.3) * a, Math.sin(this.time * 47.7 + 1.3) * a * 0.6, Math.sin(this.time * 53.1 + 2.1) * a * 0.4)
@@ -98,7 +140,7 @@ export class CameraRig {
     cam.up.copy(this.up)
     cam.lookAt(this.smoothLook)
     const t = Math.min(1.2, Math.abs(c.speed) / topSpeed)
-    const target = this.mode === 'orbit' ? 55 : FOV_BASE + (FOV_AT_TOP_SPEED - FOV_BASE) * t * this.effectGain
+    const target = this.mode === 'orbit' ? 55 : this.mode === 'tv' ? 32 : this.mode === 'heli' ? 48 : FOV_BASE + (FOV_AT_TOP_SPEED - FOV_BASE) * t * this.effectGain
     this.fov = expApproach(this.fov, target, 5, dt)
     if (Math.abs(cam.fov - this.fov) > 0.01) {
       cam.fov = this.fov

@@ -169,15 +169,3 @@ canvas.game { position: absolute; inset: 0; width: 100%; height: 100%; display: 
 .menu .footer { margin-top: 1em; }
 .perf { font-size: clamp(11px, 1.5vmin, 18px); }
 
-/* HUD_RETRO: lay the HUD out on the retro buffer's pixel grid and lay scanlines over it, so you can
-   judge the arcade look without the menus going with it. --retro-px is set by the game on resize. */
-.is-hud-retro .hud { font-size: calc(var(--retro-px, 2px) * 7 * var(--hud-scale)); letter-spacing: 0.06em; }
-.is-hud-retro .hud .label, .is-hud-retro .hud .switches, .is-hud-retro .hud .viewhint { letter-spacing: 0.02em; }
-.is-hud-retro .hud::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background: repeating-linear-gradient(to bottom, rgba(0,0,0,0.34) 0, rgba(0,0,0,0.34) calc(var(--retro-px, 2px) * 1), transparent calc(var(--retro-px, 2px) * 1), transparent calc(var(--retro-px, 2px) * 3));
-}
-.is-hud-retro .hud, .is-hud-retro .title-card { filter: saturate(1.25) contrast(1.12); }

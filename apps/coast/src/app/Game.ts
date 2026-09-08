@@ -158,13 +158,14 @@ export class Game implements LoopClient {
     this.showTitleCard(false)
     this.hud.setVisible(true)
     this.hud.setStation(STATIONS[this.settings.data.station]?.name ?? '')
+    this.view.hudLayer.setStation(STATIONS[this.settings.data.station]?.name ?? '')
     this.touch?.setVisible(true)
     this.touch?.calibrate()
     this.goImmersive()
     this.container.classList.add('is-driving')
     this.input.suppressGameplay = false
     this.loop.paused = false
-    this.hud.showMessage(STAGE_BY_ID[this.sim.startId].name.toUpperCase(), 1.8, 'good')
+    this.say(STAGE_BY_ID[this.sim.startId].name.toUpperCase(), 1.8, 'good')
     this.audio.resume()
     this.audio.setRunning(true)
   }
@@ -219,6 +220,12 @@ export class Game implements LoopClient {
     if (this.sim.automatic && this.sim.speed < 1) this.sim.gear = 0 // an automatic pulls away in LO
   }
 
+  /** Say something on both HUDs; only one of them is visible. */
+  private say(text: string, seconds: number, cls = ''): void {
+    this.hud.showMessage(text, seconds, cls)
+    this.view.hudLayer.showMessage(text, seconds, cls)
+  }
+
   private syncStage(): void {
     if (this.sim.stage.desc.id !== this.lastStageId) {
       this.lastStageId = this.sim.stage.desc.id
@@ -240,7 +247,7 @@ export class Game implements LoopClient {
   toggleStyle(): void {
     this.settings.update((d) => (d.style = d.style === 'retro' ? 'modern' : 'retro'))
     this.applyStyle()
-    this.hud.showMessage(this.settings.data.style.toUpperCase(), 0.8)
+    this.say(this.settings.data.style.toUpperCase(), 0.8)
   }
   applyView(): void {
     this.view.view = this.settings.data.view
@@ -252,6 +259,7 @@ export class Game implements LoopClient {
   applyStation(): void {
     this.audio.setStation(this.settings.data.station)
     this.hud.setStation(STATIONS[this.settings.data.station]?.name ?? '')
+    this.view.hudLayer.setStation(STATIONS[this.settings.data.station]?.name ?? '')
   }
   applyAccessibility(): void {
     const a = this.settings.data.access
@@ -260,14 +268,14 @@ export class Game implements LoopClient {
     this.modern.reducedMotion = a.reducedMotion
     this.hud.units = this.settings.data.units
   }
-  /** Keep the HUD's retro look (and its pixel size) in step with the tunable and the window. */
+  /**
+   * The HUD is either the DOM overlay (crisp, modern) or the one painted inside the low-res buffer
+   * (chunky, arcade). Only one of them is ever up, and the in-buffer one needs the retro pipeline.
+   */
   private syncHudRetro(): void {
-    const on = HUD_RETRO > 0.5
-    this.container.classList.toggle('is-hud-retro', on)
-    if (on) {
-      const px = window.innerHeight / Math.max(1, this.retro.bufferHeight)
-      this.container.style.setProperty('--retro-px', `${px.toFixed(3)}px`)
-    }
+    const inBuffer = HUD_RETRO > 0.5 && this.settings.data.style === 'retro'
+    this.hud.setVisible(this.state !== 'title' && !inBuffer)
+    this.view.hudLayer.units = this.settings.data.units
   }
 
   resize(): void {
@@ -382,7 +390,7 @@ export class Game implements LoopClient {
     const need: string[] = []
     if (t.rain && !this.sim.wipersOn) need.push('R · WIPERS')
     if (t.night && !this.sim.lightsOn) need.push('L · LIGHTS')
-    if (need.length) setTimeout(() => this.state === 'running' && this.hud.showMessage(need.join('   '), 2.4), 2400)
+    if (need.length) setTimeout(() => this.state === 'running' && this.say(need.join('   '), 2.4), 2400)
   }
 
   private readonly onEventBound = (e: SimEvent): void => this.onEvent(e)
@@ -392,19 +400,19 @@ export class Game implements LoopClient {
     const hp = this.haptics
     switch (e.type) {
       case 'wreck':
-        this.hud.showMessage('WRECK!', 2.4, 'bad')
+        this.say('WRECK!', 2.4, 'bad')
         hp.rumble(1, 1, 1200)
         hp.triggers(1, 1, 900)
         hp.mobile([200, 60, 200, 60, 300])
         break
       case 'wipers':
-        this.hud.showMessage(e.a ? 'WIPERS ON' : 'WIPERS OFF', 0.8)
+        this.say(e.a ? 'WIPERS ON' : 'WIPERS OFF', 0.8)
         break
       case 'lights':
-        this.hud.showMessage(e.a ? 'LIGHTS ON' : 'LIGHTS OFF', 0.8)
+        this.say(e.a ? 'LIGHTS ON' : 'LIGHTS OFF', 0.8)
         break
       case 'crash':
-        this.hud.showMessage('CRASH', 1.6, 'bad')
+        this.say('CRASH', 1.6, 'bad')
         hp.rumble(1, 1, 600)
         hp.triggers(1, 1, 400)
         hp.mobile([100, 40, 160])
@@ -417,7 +425,7 @@ export class Game implements LoopClient {
         hp.rumble(0.15, 0.2, 60)
         break
       case 'nearmiss':
-        this.hud.showMessage(`NEAR MISS +${e.a}`, 1.1, 'gold')
+        this.say(`NEAR MISS +${e.a}`, 1.1, 'gold')
         hp.rumble(0.2, 0.5, 90)
         hp.mobile(15)
         break
@@ -427,7 +435,7 @@ export class Game implements LoopClient {
         break
       case 'checkpoint': {
         const id = this.sim.stage.desc.id
-        this.hud.showMessage(`CHECKPOINT · ${STAGE_BY_ID[id].name.toUpperCase()}`, 2.2, 'good')
+        this.say(`CHECKPOINT · ${STAGE_BY_ID[id].name.toUpperCase()}`, 2.2, 'good')
         hp.mobile(40)
         this.switchHints()
         break
@@ -436,10 +444,10 @@ export class Game implements LoopClient {
         hp.rumble(0.4, 0.8, 300)
         break
       case 'timeout':
-        this.hud.showMessage('TIME UP', 2, 'bad')
+        this.say('TIME UP', 2, 'bad')
         break
       case 'finish':
-        this.hud.showMessage('GOAL!', 3, 'good')
+        this.say('GOAL!', 3, 'good')
         break
       default:
         break

@@ -96,13 +96,13 @@ export const PALETTES: Record<string, Palette> = {
 }
 
 /** Live-tunable knobs for the tuning panel (F6). Values persist per browser; Copy JSON to ship new defaults. */
-/** 1 = lay the HUD out on the retro buffer's pixel grid with scanlines over it (menus stay crisp). */
+/** 1 = paint the HUD inside the low-res buffer, so it is pixels in the same framebuffer as the road (retro style only). */
 export let HUD_RETRO = 0
 
 export const RENDER_TUNE: TuneSection = {
   title: 'Render · camera, fog, road',
   keys: [
-    tune('HUD_RETRO', () => HUD_RETRO, (v) => (HUD_RETRO = v), [0, 1], 1, 'HUD through the retro filter'),
+    tune('HUD_RETRO', () => HUD_RETRO, (v) => (HUD_RETRO = v), [0, 1], 1, 'draw the HUD inside the low-res buffer'),
     tune('FOV_DEG', () => FOV_DEG, (v) => (FOV_DEG = v)),
     tune('FOG_MODERN', () => FOG_MODERN, (v) => (FOG_MODERN = v)),
     tune('FOG_RETRO', () => FOG_RETRO, (v) => (FOG_RETRO = v)),

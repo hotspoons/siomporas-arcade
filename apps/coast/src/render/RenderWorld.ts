@@ -39,8 +39,9 @@ function nearestYaw(yaw: number): number {
 }
 import { Background } from './Background'
 import { COCKPIT_H, COCKPIT_W, Cockpit } from './Cockpit'
+import { HudLayer } from './HudLayer'
 import { Projection } from './Projection'
-import { BANK_ROLL, BANK_SLOPE, BANK_TIER_COUNT, BANK_TIER_H, BANK_TIER_W, BEACH_WIDTH, CAM_BOUNCE, TUNNEL_DARK, TUNNEL_HALF_WIDTH, TUNNEL_HEIGHT, HORIZON_ROLL_SHARE, STEER_ROLL, CURVE_UNIT, FOG_MODERN, FOG_RETRO, HEADLIGHT_REACH, LANE_WIDTH, LIGHTS_OFF_AMBIENT, LOGICAL_HEIGHT, MAX_SPRITES, NIGHT_AMBIENT, PALETTES, RAIL_HEIGHT, RUMBLE_WIDTH, SHOULDER_WIDTH, VIEWS, type Palette } from './RenderTuning'
+import { BANK_ROLL, BANK_SLOPE, BANK_TIER_COUNT, BANK_TIER_H, BANK_TIER_W, BEACH_WIDTH, CAM_BOUNCE, TUNNEL_DARK, TUNNEL_HALF_WIDTH, TUNNEL_HEIGHT, HUD_RETRO, HORIZON_ROLL_SHARE, STEER_ROLL, CURVE_UNIT, FOG_MODERN, FOG_RETRO, HEADLIGHT_REACH, LANE_WIDTH, LIGHTS_OFF_AMBIENT, LOGICAL_HEIGHT, MAX_SPRITES, NIGHT_AMBIENT, PALETTES, RAIL_HEIGHT, RUMBLE_WIDTH, SHOULDER_WIDTH, VIEWS, type Palette } from './RenderTuning'
 import { LIVERIES } from './procgen'
 import { Rain } from './Rain'
 import type { Theme } from '../sim/Road'
@@ -96,6 +97,8 @@ export class RenderWorld {
   private readonly rowFog = new Float32Array(ROWS)
   /** Banking slope per row (screen-y per lateral metre, ×scale), so sprites sit on the tilted road. */
   private readonly rowTilt = new Float32Array(ROWS)
+  /** The arcade HUD drawn inside the low-res buffer (retro only; see HudLayer). */
+  readonly hudLayer = new HudLayer()
   private readonly segVisible = new Uint8Array(ROWS)
   private readonly carOrder: number[] = []
   private themeId = ''
@@ -107,7 +110,7 @@ export class RenderWorld {
     this.renderer.setClearColor(new Color(0x000000), 1)
     this.inner.add(this.background.sky, this.background.clouds, this.background.far, this.background.near, this.road.mesh, this.sprites.mesh)
     this.world.add(this.inner)
-    this.scene.add(this.world, this.rain.mesh, this.cockpit.mesh)
+    this.scene.add(this.world, this.rain.mesh, this.cockpit.mesh, this.hudLayer.mesh)
     this.background.sky.renderOrder = 0
     this.background.clouds.renderOrder = 1
     this.background.far.renderOrder = 2
@@ -116,6 +119,7 @@ export class RenderWorld {
     this.sprites.mesh.renderOrder = 5
     this.rain.mesh.renderOrder = 6
     this.cockpit.mesh.renderOrder = 7
+    this.hudLayer.mesh.renderOrder = 8
   }
 
   async bake(onProgress?: (d: number, t: number) => void): Promise<void> {
@@ -177,6 +181,7 @@ export class RenderWorld {
     this.world.position.set(W / 2, H / 2, 0)
     this.inner.position.set(-W / 2, -H / 2, 0)
     this.cockpit.layout(W, H)
+    this.hudLayer.layout(W, H)
     this.rain.layout(W, H)
     this.style?.resize(width, height, pixelRatio)
   }
@@ -518,6 +523,10 @@ export class RenderWorld {
     this.background.update(curr.curveAccum + spinYaw / (Math.PI * 2) / 0.0006, groundY)
     this.cockpit.mesh.visible = this.view === 'cockpit'
     if (this.cockpit.mesh.visible) this.cockpit.update(curr, dt)
+    // The in-buffer HUD only exists in the retro pipeline, and only when asked for.
+    this.hudLayer.mesh.visible = this.retro && HUD_RETRO > 0.5
+    this.hudLayer.cockpit = this.view === 'cockpit'
+    if (this.hudLayer.mesh.visible) this.hudLayer.update(curr, dt)
     this.rain.update(dt, speed, curr.curveAccum)
     this.background.updateClouds(dt, speed)
 

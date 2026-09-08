@@ -406,7 +406,15 @@ function bakeLane(def: PieceDef, p: PlacedPiece, laneIndex: number, reversed: bo
     // rotateLocal translates; undo by rotating the origin too.
     const o = { x: 0, z: 0 }
     rotateLocal(def, p.rot, 0, 0, o)
-    ups.push(u.x - o.x, pt.uy, u.z - o.z)
+    if (drape && ground && pt.uy > 0.99 && Math.abs(pt.ux) < 1e-6 && Math.abs(pt.uz) < 1e-6) {
+      // A flat road on the landscape takes the ground's normal, so it cambers with the hillside instead of
+      // cutting a level shelf into it.
+      const d = 2
+      const gx = (ground(wx + d, wz) - ground(wx - d, wz)) / (2 * d)
+      const gz = (ground(wx, wz + d) - ground(wx, wz - d)) / (2 * d)
+      const len = Math.hypot(gx, 1, gz)
+      ups.push(-gx / len, 1 / len, -gz / len)
+    } else ups.push(u.x - o.x, pt.uy, u.z - o.z)
     rolls.push(reversed ? -pt.roll : pt.roll)
     surf.push(pt.surface ? 1 : 0)
   }

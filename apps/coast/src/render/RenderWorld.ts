@@ -242,7 +242,10 @@ export class RenderWorld {
     const behind = Math.abs(yawWrapped) > Math.PI / 2 - 0.1
     const yawTan = behind ? 0 : Math.tan(yawWrapped)
     this.world.rotation.z = horizon
-    const cover = 1 + Math.abs(horizon) * 1.6
+    // A W×H picture rotated by the roll must scale up to keep the viewport corners covered, or the clear
+    // colour shows as flickering dark wedges at the edges (worse the wider the window).
+    const aspect = Math.max(W, H) / Math.min(W, H)
+    const cover = Math.cos(horizon) + aspect * Math.abs(Math.sin(horizon)) + 0.02
     this.world.scale.set(cover, cover, 1)
     this.cockpit.mesh.rotation.z = -roll
     // The cockpit keeps its own aspect: scale to cover the screen and crop (sides on tall windows, top on wide ones).
@@ -367,22 +370,22 @@ export class RenderWorld {
         const side = seg.shore
         const b0 = ROAD_HALF_WIDTH + RUMBLE_WIDTH + SHOULDER_WIDTH
         const b1 = b0 + BEACH_WIDTH
-        this.road.quad(x1 + side * ((b0 + b1) / 2) * s1, y1, ((b1 - b0) / 2) * s1, x2 + side * ((b0 + b1) / 2) * s2, y2, ((b1 - b0) / 2) * s2, pal.sand ?? pal.shoulder, fog)
-        this.road.quad(x1 + side * (b1 * s1 + W), y1, W, x2 + side * (b1 * s2 + W), y2, W, pal.water, fog)
+        this.road.quadFlat(x1 + side * ((b0 + b1) / 2) * s1, y1, ((b1 - b0) / 2) * s1, x2 + side * ((b0 + b1) / 2) * s2, y2, ((b1 - b0) / 2) * s2, pal.sand ?? pal.shoulder, fog)
+        this.road.quadFlat(x1 + side * (b1 * s1 + W), y1, W, x2 + side * (b1 * s2 + W), y2, W, pal.water, fog)
         // Surf: a foam line that runs up the beach and slides back, each stretch of shore on its own beat,
         // with a paler wash behind it where the last wave just broke.
         const beat = this.time * 1.9 + (base + n) * 0.23
         const run = Math.max(0, Math.sin(beat)) ** 1.6 * 3.2
         const foamW = 0.9 + 0.6 * Math.max(0, Math.sin(beat * 2.1))
         const wash = 1.6 + 1.2 * Math.max(0, Math.sin(beat - 1.2))
-        this.road.quad(x1 + side * (b1 - run + wash / 2) * s1, y1, (wash / 2) * s1, x2 + side * (b1 - run + wash / 2) * s2, y2, (wash / 2) * s2, shade(pal.water, 1.35), fog)
-        this.road.quad(x1 + side * (b1 - run) * s1, y1, (foamW / 2) * s1, x2 + side * (b1 - run) * s2, y2, (foamW / 2) * s2, 0xf4fbff, fog)
+        this.road.quadFlat(x1 + side * (b1 - run + wash / 2) * s1, y1, (wash / 2) * s1, x2 + side * (b1 - run + wash / 2) * s2, y2, (wash / 2) * s2, shade(pal.water, 1.35), fog)
+        this.road.quadFlat(x1 + side * (b1 - run) * s1, y1, (foamW / 2) * s1, x2 + side * (b1 - run) * s2, y2, (foamW / 2) * s2, 0xf4fbff, fog)
       }
       // An intersection: a road crosses the whole screen with its own edge lines.
       if (seg.crossing) {
-        this.road.quad(W / 2, y1, W, W / 2, y2, W, pal.roadA, fog)
-        this.road.quad(W / 2, y1, W, W / 2, y1 + (y2 - y1) * 0.12, W, pal.lane, fog)
-        this.road.quad(W / 2, y2 - (y2 - y1) * 0.12, W, W / 2, y2, W, pal.lane, fog)
+        this.road.quadFlat(W / 2, y1, W, W / 2, y2, W, pal.roadA, fog)
+        this.road.quadFlat(W / 2, y1, W, W / 2, y1 + (y2 - y1) * 0.12, W, pal.lane, fog)
+        this.road.quadFlat(W / 2, y2 - (y2 - y1) * 0.12, W, W / 2, y2, W, pal.lane, fog)
       }
       const roads = seg.fork >= 0 ? 2 : 1
       const spread = seg.fork >= 0 ? seg.fork * FORK_SPREAD * ROAD_HALF_WIDTH : 0
@@ -456,7 +459,8 @@ export class RenderWorld {
           const viewYaw = yaw === 0 ? (Math.atan2((curr.trafficX[ci] - x) * ROAD_HALF_WIDTH, dz) * 180) / Math.PI : yaw
           const viewPitch = (view.drawPlayer ? 9 : 2) + (Math.atan2(camY - stage.heightAt(cz), dz) * 180) / Math.PI
           const frame = this.atlas.frame(kind, viewYaw, viewPitch)
-          if (frame) this.sprites.add(sx + curr.trafficX[ci] * ROAD_HALF_WIDTH * sc, sy, frame.heightM * sc, frame, this.rowFog[n], this.brightAt((base + n) * SEG_LENGTH - camZ), clip, Math.atan(this.rowTilt[n]))
+          const tsx = sx + curr.trafficX[ci] * ROAD_HALF_WIDTH * sc
+          if (frame) this.sprites.add(tsx, sy, frame.heightM * sc, frame, this.rowFog[n], this.brightAt((base + n) * SEG_LENGTH - camZ), Math.max(clip, this.deckWallTop(n, curr.trafficX[ci] * ROAD_HALF_WIDTH, tsx)), Math.atan(this.rowTilt[n]))
         }
       }
       if (seg.runway || base + n < 0) continue
@@ -531,20 +535,39 @@ export class RenderWorld {
       const sx = this.rowX[n] + sp.offset * ROAD_HALF_WIDTH * sc
       const lat = sp.offset * ROAD_HALF_WIDTH
       const sy = this.rowY[n] + this.tiltLift(n, lat)
-      const clipHere = Math.max(clip, this.deckWallTop(n, lat))
+      const clipHere = Math.max(clip, this.deckWallTop(n, lat, sx))
       // The sunset stage is all silhouettes; otherwise lit signage and towers glow through the night.
       const glow = this.theme?.silhouette ? 0.04 : sp.kind.startsWith('sign') || sp.kind.startsWith('tower') || sp.kind === 'diner' || sp.kind === 'motel' || sp.kind === 'gas' || sp.kind === 'arch' ? Math.max(bright, 0.85) : bright
       this.sprites.add(sx, sy, frame.heightM * sp.scale * sc, frame, this.rowFog[n], glow, clipHere)
     }
   }
 
-  /** For something standing on the grass beyond a banked deck's high side: the screen y of the deck's wall top, else -∞. */
-  private deckWallTop(n: number, lateralM: number): number {
+  /**
+   * Clip line for a sprite at row n and screen x: below the wall top of its own row's deck if it stands on
+   * the grass beyond the high side, and below the top of any nearer raised deck that lies in front of it
+   * on screen (a raised bank ahead of a far tree hides the tree's feet, as it would in the world).
+   */
+  private deckWallTop(n: number, lateralM: number, screenX: number): number {
+    let clip = -1e9
     const t = this.rowTilt[n]
-    if (!t) return -1e9
-    const e = Math.sign(t) * lateralM + deckHalf()
-    if (e <= 2 * deckHalf()) return -1e9
-    return this.rowY[n] + Math.abs(t) * 2 * deckHalf() * this.rowScale[n]
+    if (t) {
+      const e = Math.sign(t) * lateralM + deckHalf()
+      if (e > 2 * deckHalf()) clip = this.rowY[n] + Math.abs(t) * 2 * deckHalf() * this.rowScale[n]
+    }
+    for (let m = Math.max(0, n - 40); m < n; m++) {
+      const tm = this.rowTilt[m]
+      if (!tm || !this.rowValid[m]) continue
+      const sm = this.rowScale[m]
+      const dh = deckHalf()
+      const lo = this.rowX[m] - dh * sm
+      const hi = this.rowX[m] + dh * sm
+      if (screenX < lo || screenX > hi) continue
+      // Height of that deck's surface at this screen x.
+      const u = (screenX - this.rowX[m]) / sm
+      const top = this.rowY[m] + bermLift(u, tm, 2 * dh) * sm
+      if (top > clip) clip = top
+    }
+    return clip
   }
 
   /** Screen-y lift of the banked road at a lateral offset (metres) on row n. */

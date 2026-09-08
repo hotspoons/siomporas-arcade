@@ -45,6 +45,7 @@ canvas.game { position: absolute; inset: 0; width: 100%; height: 100%; display: 
 .hud .switches { position: absolute; bottom: 11vh; left: 4vw; display: flex; gap: 1.6em; font-family: var(--font-arcade); font-size: 0.5em; letter-spacing: 0.05em; opacity: 0.55; text-shadow: 2px 2px 0 var(--ink); }
 .hud .switches .on { color: #5cff8a; opacity: 1; text-shadow: 0 0 10px rgba(92,255,138,0.6); }
 .hud .switches [data-wipers].on { color: #6ab8ff; text-shadow: 0 0 10px rgba(106,184,255,0.6); }
+.hud .switches .need { color: var(--hud-yellow); opacity: 1; font-size: 1.35em; text-shadow: 2px 2px 0 var(--ink), 0 0 14px rgba(255,217,58,0.7); animation: pulse 0.55s infinite alternate; }
 .hud .station { position: absolute; bottom: 4vh; left: 4vw; opacity: 0.85; letter-spacing: 0.12em; color: #ffb3e6; text-shadow: 2px 2px 0 var(--ink); }
 .hud .viewhint { position: absolute; bottom: 8vh; left: 4vw; opacity: 0.5; font-family: var(--font-arcade); font-size: 0.45em; letter-spacing: 0.05em; }
 .hud .message { position: absolute; top: 24%; left: 0; right: 0; text-align: center; font-size: 3em; font-style: italic; letter-spacing: 0.06em; opacity: 0; transform: translateY(10px); transition: opacity 0.15s, transform 0.15s; text-shadow: 0 0 20px rgba(0,0,0,0.6); }

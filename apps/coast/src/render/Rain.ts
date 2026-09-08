@@ -39,21 +39,36 @@ export class Rain {
     if (!this.enabled) return
     const W = this.width
     const H = this.height
-    const len = 3 + carSpeed * 0.12
+    // Driving into rain: drops fall, but they also rush past you — outward from the vanishing
+    // point and toward the camera, faster the faster you go — so streaks lean away from the
+    // road's centre instead of hanging straight down. Curves push the whole curtain sideways.
+    const k = Math.min(1.6, carSpeed / 60)
+    const len = 3 + carSpeed * 0.1
     const drift = -Math.sin(curveAccum * 0.002) * 0.12
+    const vpx = 0.5
+    const vpy = 0.58
     for (let i = 0; i < COUNT; i++) {
-      this.y[i] -= this.speed[i] * dt * (1.2 + carSpeed / 60)
-      this.x[i] += drift * dt
-      if (this.y[i] < -0.05) {
-        this.y[i] = 1.05
-        this.x[i] = Math.random()
+      const ox = this.x[i] - vpx
+      const oy = this.y[i] - vpy
+      this.y[i] -= this.speed[i] * dt * (1.0 + k * 0.4) - oy * k * 1.4 * dt
+      this.x[i] += drift * dt + ox * k * 1.4 * dt
+      if (this.y[i] < -0.05 || this.x[i] < -0.05 || this.x[i] > 1.05 || (this.y[i] > 1.05 && oy > 0)) {
+        // Respawn: mostly at the top, some near the vanishing point so the flow field stays fed.
+        if (Math.random() < 0.7) {
+          this.y[i] = 1.05
+          this.x[i] = Math.random()
+        } else {
+          this.x[i] = vpx + (Math.random() - 0.5) * 0.5
+          this.y[i] = vpy + (Math.random() - 0.5) * 0.3
+        }
       }
-      if (this.x[i] < 0) this.x[i] += 1
-      if (this.x[i] > 1) this.x[i] -= 1
       const px = this.x[i] * W
       const py = this.y[i] * H
+      // Streak along the drop's own motion: down, plus outward with speed.
+      const sx = (drift + ox * k * 1.4) * len * 1.2
+      const sy = len * (1 + k * 0.4) - oy * k * 1.4 * len * 1.2
       this.pos.setXYZ(i * 2, px, py, 0)
-      this.pos.setXYZ(i * 2 + 1, px + drift * len * 4, py + len, 0)
+      this.pos.setXYZ(i * 2 + 1, px - sx, py + sy, 0)
     }
     this.pos.needsUpdate = true
   }

@@ -56,6 +56,16 @@ export class Hud {
   setViewHint(view: string): void {
     this.viewhint.textContent = view === 'cockpit' ? 'C · CHASE VIEW' : 'C · COCKPIT VIEW'
   }
+  /** Label the manual switches with the key (or pad button) that works them. */
+  setSwitchLabels(wipers: string, lights: string): void {
+    this.lights.textContent = `● LIGHTS · ${lights}`
+    this.wipers.textContent = `● WIPERS · ${wipers}`
+  }
+  /** Flag a switch you should have on right now (rain without wipers, night without lights). */
+  setSwitchNeeds(wipers: boolean, lights: boolean): void {
+    this.wipers.classList.toggle('need', wipers)
+    this.lights.classList.toggle('need', lights)
+  }
   setStation(name: string): void {
     this.station.textContent = name ? `♫ ${name}` : ''
   }

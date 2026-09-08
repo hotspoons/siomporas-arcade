@@ -19,6 +19,13 @@ import { copyInput, makeInputFrame } from '../sim/InputFrame'
 import { Sim } from '../sim/Sim'
 import { Snapshot } from '../sim/Snapshot'
 import { STAGE_BY_ID } from '../sim/Stages'
+import { keyLabel } from '@apex/engine/input/bindings'
+
+/** Short label for a standard-mapping pad button id like 'b2'. */
+function padLabel(b: string | undefined): string {
+  const names: Record<string, string> = { b0: 'A', b1: 'B', b2: 'X', b3: 'Y', b4: 'LB', b5: 'RB', b6: 'LT', b7: 'RT', b8: 'SELECT', b9: 'START', b10: 'LS', b11: 'RS', b12: '↑', b13: '↓', b14: '←', b15: '→' }
+  return names[b ?? ''] ?? (b ?? '?').toUpperCase()
+}
 import { MAX_SUBSTEPS, SIM_HZ } from '../sim/Tuning'
 import { Hud } from './Hud'
 import { buildMenus } from './menus'
@@ -297,7 +304,16 @@ export class Game implements LoopClient {
     if (events.length) events.drain(this.onEventBound)
     // Paused: freeze the renderer's clock so bounce, rain and wipers hold still.
     this.view.update(this.prev, this.curr, alpha, this.state === 'paused' ? 0 : dt)
-    if (this.state !== 'title') this.hud.update(this.curr, dt, this.view.view === 'cockpit')
+    if (this.state !== 'title') {
+      this.hud.update(this.curr, dt, this.view.view === 'cockpit')
+      // Prompt the manual switches while they are needed and off, labelled for whatever you're holding.
+      const t = this.sim.theme
+      const pad = this.input.gamepad.connected
+      const k = this.settings.data.keys
+      const p = this.settings.data.pad
+      this.hud.setSwitchLabels(pad ? padLabel(p.wipers?.[0]) : keyLabel(k.wipers?.[0] ?? 'KeyR'), pad ? padLabel(p.lights?.[0]) : keyLabel(k.lights?.[0] ?? 'KeyL'))
+      this.hud.setSwitchNeeds(Boolean(t.rain) && !this.curr.wipersOn && this.state === 'running', Boolean(t.night) && !this.curr.lightsOn && this.state === 'running')
+    }
     this.audio.update(this.curr, Math.abs(this.held.steer) > 0.6 && this.curr.speed > 40)
     this.feel(dt)
     this.perf.update(this.loop.stats, this.view.stats, dt, `z=${this.curr.z.toFixed(0)} x=${this.curr.x.toFixed(2)} v=${this.curr.speed.toFixed(0)} stage=${this.curr.stageId} ${this.settings.data.style}`)

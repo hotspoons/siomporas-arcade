@@ -2,8 +2,9 @@
 // reachable lane baked (in driving direction) into a PathTable. Also the
 // spatial index the car uses to find surfaces while airborne or on grass.
 
+import { smoothstep } from '@apex/engine/math/scalar'
 import { Vec3 } from '@apex/engine/math/Vec3'
-import { CELL, LEVEL_H, PATH_STEP } from './Tuning'
+import { CELL, LEVEL_H, PATH_STEP, ROAD_HALF_WIDTH } from './Tuning'
 import {
   makePathPoint,
   opposite,
@@ -17,10 +18,10 @@ import {
   type Profile,
   type Side,
 } from './pieces'
-import { PathTable } from './PathTable'
+import { PathTable, makeLaneFrame } from './PathTable'
 import { solidsOf, type Solid } from './decor'
 import { drapes, flattenUnderPieces, sampleHeight } from './terrain'
-import { linkPiece, type Link } from './links'
+import { linkPiece, type Link, type LinkRolls } from './links'
 
 export interface PlacedPiece {
   type: string
@@ -98,6 +99,7 @@ export class Track {
   readonly heights: number[] | undefined
   private readonly waterCells = new Set<number>()
   private readonly cells = new Map<number, Lane[]>()
+  private readonly rollFrameStore = makeLaneFrame()
 
   constructor(data: TrackData) {
     this.data = data
@@ -293,6 +295,37 @@ export class Track {
     }
     this.startLane = start
     for (const lane of this.lanes) for (const n of lane.next) if (!n.prev.includes(lane)) n.prev.push(lane)
+    // Banks: a bank ramps down only against unbanked road; bank-to-bank joints stay fully banked, and a
+    // spline link between two banks carries the roll across, blended end to end.
+    const rollFrame = this.rollFrameStore
+    const isBanked = (l: Lane | undefined): boolean => Boolean(l && defAt(l.pieceIndex).banked)
+    const rollAt = (l: Lane, s: number): number => {
+      // Recover the roll baked into the frame: how far up is tipped along the flat right.
+      const f = l.table.frameAt(s, rollFrame)
+      const rx = -f.tan.z
+      const rz = f.tan.x // flat right = tan × (0,1,0)
+      const len = Math.hypot(rx, rz) || 1
+      return Math.asin(Math.max(-1, Math.min(1, (f.up.x * rx + f.up.z * rz) / len)))
+    }
+    for (const lane of this.lanes) {
+      if (lane.pieceIndex >= data.pieces.length) continue
+      const def = defAt(lane.pieceIndex)
+      if (!def.banked) continue
+      const rampIn = !lane.prev.some((p) => isBanked(p) || (p.pieceIndex >= data.pieces.length && isBanked(p.prev[0])))
+      const rampOut = !lane.next.some((n) => isBanked(n) || (n.pieceIndex >= data.pieces.length && isBanked(n.next[0])))
+      if (!rampIn || !rampOut) lane.table = bakeLane(def, placedAt(lane.pieceIndex), lane.laneIndex, lane.reversed, this.heights ? (x, z) => sampleHeight(this.heights, data.size, x, z) : null, rampIn, rampOut)
+    }
+    for (const lane of this.lanes) {
+      if (lane.pieceIndex < data.pieces.length) continue
+      const prev = lane.prev[0]
+      const next = lane.next[0]
+      if (!isBanked(prev) || !isBanked(next)) continue
+      const li = lane.pieceIndex - data.pieces.length
+      const rolls: LinkRolls = { a: rollAt(prev, prev.table.length), b: rollAt(next, 0) }
+      const r = linkPiece(data.pieces, data.links![li], li, lane.reversed ? { a: -rolls.b, b: -rolls.a } : rolls)
+      if ('error' in r) continue
+      lane.table = bakeLane(r.def, r.placed, 0, lane.reversed, null, false, false)
+    }
     // Tunnel mouths: only where a tube lane meets plain road (chained tube sections run seamlessly).
     for (const lane of this.lanes) {
       if (lane.profile !== 'tube') continue
@@ -378,7 +411,7 @@ function edgeKey(cx: number, cz: number, side: Side, level: number): string {
 }
 
 /** Sample a lane in world space, in driving direction, with frames. */
-function bakeLane(def: PieceDef, p: PlacedPiece, laneIndex: number, reversed: boolean, ground: ((x: number, z: number) => number) | null): PathTable {
+function bakeLane(def: PieceDef, p: PlacedPiece, laneIndex: number, reversed: boolean, ground: ((x: number, z: number) => number) | null, rampIn = true, rampOut = true): PathTable {
   const ldef = def.lanes[laneIndex]
   // Roads drape over the landscape point by point; pad pieces sit on the level ground pinned under them.
   const size = rotatedSize(def, p.rot)
@@ -395,12 +428,21 @@ function bakeLane(def: PieceDef, p: PlacedPiece, laneIndex: number, reversed: bo
   const surf: number[] = []
   for (let i = 0; i <= fine; i++) {
     let t = i / fine
+    const tl = t // along the lane in driving direction
     if (reversed) t = 1 - t
     ldef.path(t, pt)
+    // Banked road: ramp the roll in/out only at ends that meet unbanked road, and lift the centreline
+    // so the inner (lower) edge stays at grade — full banking runs straight across bank-to-bank joints.
+    let roll = pt.roll
+    let lift = 0
+    if (def.banked) {
+      roll *= (rampIn ? smoothstep(0, 0.25, tl) : 1) * (rampOut ? 1 - smoothstep(0.75, 1, tl) : 1)
+      lift = Math.sin(Math.abs(roll)) * ROAD_HALF_WIDTH
+    }
     rotateLocal(def, p.rot, pt.x, pt.z, rot)
     const wx = p.x * CELL + rot.x
     const wz = p.z * CELL + rot.z
-    pts.push(wx, p.level * LEVEL_H + pt.y + (drape ? ground!(wx, wz) : padY), wz)
+    pts.push(wx, p.level * LEVEL_H + pt.y + lift + (drape ? ground!(wx, wz) : padY), wz)
     const u = { x: 0, z: 0 }
     rotateLocal(def, p.rot, pt.ux, pt.uz, u)
     // rotateLocal translates; undo by rotating the origin too.
@@ -415,7 +457,7 @@ function bakeLane(def: PieceDef, p: PlacedPiece, laneIndex: number, reversed: bo
       const len = Math.hypot(gx, 1, gz)
       ups.push(-gx / len, 1 / len, -gz / len)
     } else ups.push(u.x - o.x, pt.uy, u.z - o.z)
-    rolls.push(reversed ? -pt.roll : pt.roll)
+    rolls.push(reversed ? -roll : roll)
     surf.push(pt.surface ? 1 : 0)
   }
   // Cumulative length along the fine polyline.

@@ -104,7 +104,16 @@ export function linkLength(a: PortWorld, b: PortWorld, tightness: number): numbe
  * match by edge key) and one lane along the curve, in world coordinates (the placed
  * piece sits at the origin with no rotation).
  */
-export function linkPiece(pieces: PlacedPiece[], link: Link, index: number): { def: PieceDef; placed: PlacedPiece } | { error: string } {
+/**
+ * Roll to carry along a link (radians, in the link's direction): the roll of the banked lane it leaves
+ * and of the one it arrives at. Set by the track once it knows both neighbours.
+ */
+export interface LinkRolls {
+  a: number
+  b: number
+}
+
+export function linkPiece(pieces: PlacedPiece[], link: Link, index: number, rolls?: LinkRolls): { def: PieceDef; placed: PlacedPiece } | { error: string } {
   const a = portWorld(pieces, link.a)
   const b = portWorld(pieces, link.b)
   if (!a || !b) return { error: `Link ${index + 1} points at a missing port` }
@@ -137,8 +146,10 @@ export function linkPiece(pieces: PlacedPiece[], link: Link, index: number): { d
           o.uy = 1
           o.uz = 0
           o.surface = true
-          // Camber: roll into the turn by curvature (sign of the cross of tangent and its change).
-          if (bank > 0) {
+          // Between two banks the link carries the banking across (blended end to end); otherwise an optional
+          // camber rolls into the turn by curvature (sign of the cross of tangent and its change).
+          if (rolls) o.roll = rolls.a + (rolls.b - rolls.a) * smoothstep(0, 1, t)
+          else if (bank > 0) {
             const eps = 0.002
             const s2 = { x: 0, y: 0, z: 0, tx: 0, tz: 0 }
             linkPoint(a, b, tight, Math.min(1, t + eps), s2)
@@ -153,6 +164,7 @@ export function linkPiece(pieces: PlacedPiece[], link: Link, index: number): { d
     // Tunnel to tunnel: the link is a tube too, so a bore can curve freely between two tunnel sections.
     profile: PIECE_BY_TYPE[pieces[link.a.piece].type].profile === 'tube' && PIECE_BY_TYPE[pieces[link.b.piece].type].profile === 'tube' ? 'tube' : 'road',
     group: 'flow',
+    banked: Boolean(rolls),
   }
   return { def, placed: { type: def.type, x: 0, z: 0, rot: 0, level: 0 } }
 }

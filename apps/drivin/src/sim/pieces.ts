@@ -6,7 +6,7 @@
 // whether the surface exists there (gaps).
 
 import { smoothstep } from '@apex/engine/math/scalar'
-import { CELL, CORK_RADIUS, LEVEL_H, LOOP_RADIUS, LOOP_SHIFT, ROAD_HALF_WIDTH } from './Tuning'
+import { CELL, CORK_RADIUS, LEVEL_H, LOOP_RADIUS, LOOP_SHIFT } from './Tuning'
 
 export type Side = 'N' | 'E' | 'S' | 'W'
 
@@ -60,6 +60,8 @@ export interface PieceDef {
   isStart?: boolean
   /** Scenery: no lanes or ports, just something on the ground (see decor.ts for what it blocks). */
   decor?: 'water' | 'trees' | 'building' | 'gas'
+  /** Banked road: roll ramps in/out only against unbanked neighbours and the centreline lifts so the inner edge stays at grade. */
+  banked?: boolean
 }
 
 const UP = { ux: 0, uy: 1, uz: 0 }
@@ -101,12 +103,10 @@ function bankedArc(r: number, bank: number): LaneDef {
     ...base,
     path: (t, o) => {
       base.path(t, o)
-      // Bank in over the first quarter, out over the last; the arc turns right (toward +z), so up leans right and the outer (left) edge rises.
-      // The centreline lifts with the bank so the inner (right) edge stays at grass level: you can drive onto
-      // the berm anywhere along it, and the outer edge becomes a wall the grass-side collision respects.
-      const ramp = smoothstep(0, 0.25, t) * (1 - smoothstep(0.75, 1, t))
-      o.roll = bank * ramp
-      o.y += Math.sin(o.roll) * ROAD_HALF_WIDTH
+      // Full bank all the way; the arc turns right (toward +z), so up leans right and the outer (left) edge rises.
+      // Ramping in and out (only where a neighbour isn't banked) and lifting the centreline so the inner edge
+      // stays at grass level happen when the lane is baked, once the track knows what's next door.
+      o.roll = bank
     },
   }
 }
@@ -243,6 +243,7 @@ export const PIECES: PieceDef[] = [
     lanes: [bankedArc(3 * CELL + HALF, 0.55)],
     profile: 'road',
     group: 'curves',
+    banked: true,
   },
   {
     type: 'bank6',
@@ -257,6 +258,7 @@ export const PIECES: PieceDef[] = [
     lanes: [bankedArc(5 * CELL + HALF, 0.95)],
     profile: 'road',
     group: 'curves',
+    banked: true,
   },
   {
     type: 'cross',

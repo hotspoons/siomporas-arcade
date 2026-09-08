@@ -100,6 +100,8 @@ export class Track {
   readonly solids: Solid[] = []
   /** Landscape actually driven on: the data's heightmap with the ground under every road pinned to its base. */
   readonly heights: number[] | undefined
+  /** Ground height the grading pinned under each pad piece, by piece index. */
+  private padHeights = new Map<number, number>()
   private readonly waterCells = new Set<number>()
   private readonly cells = new Map<number, Lane[]>()
   private readonly rollFrameStore = makeLaneFrame()
@@ -108,7 +110,7 @@ export class Track {
     this.data = data
     if (data.terrain && data.terrain.length === (data.size + 1) * (data.size + 1)) {
       this.heights = data.terrain.slice()
-      flattenUnderPieces(this.heights, data.size, data.pieces)
+      this.padHeights = flattenUnderPieces(this.heights, data.size, data.pieces)
     }
     const ports: WorldPort[] = []
     const occupancy = new Map<number, number>()
@@ -227,7 +229,7 @@ export class Track {
         pieceIndex,
         laneIndex,
         reversed,
-        table: bakeLane(def, p, laneIndex, reversed, this.heights ? (x, z) => sampleHeight(this.heights, data.size, x, z) : null),
+        table: bakeLane(def, p, laneIndex, reversed, this.heights ? (x, z) => sampleHeight(this.heights, data.size, x, z) : null, true, true, this.padHeights.get(pieceIndex)),
         profile: def.profile,
         isStart: Boolean(def.isStart),
         next: [],
@@ -330,7 +332,7 @@ export class Track {
       const lean = lane.reversed ? -1 : 1
       const rampIn = !lane.prev.some((p) => leanOf(p, 'prev') === lean)
       const rampOut = !lane.next.some((n) => leanOf(n, 'next') === lean)
-      if (!rampIn || !rampOut) lane.table = bakeLane(def, placedAt(lane.pieceIndex), lane.laneIndex, lane.reversed, this.heights ? (x, z) => sampleHeight(this.heights, data.size, x, z) : null, rampIn, rampOut)
+      if (!rampIn || !rampOut) lane.table = bakeLane(def, placedAt(lane.pieceIndex), lane.laneIndex, lane.reversed, this.heights ? (x, z) => sampleHeight(this.heights, data.size, x, z) : null, rampIn, rampOut, this.padHeights.get(lane.pieceIndex))
     }
     for (const lane of this.lanes) {
       if (lane.pieceIndex < data.pieces.length) continue
@@ -428,11 +430,13 @@ function edgeKey(cx: number, cz: number, side: Side, level: number): string {
 }
 
 /** Sample a lane in world space, in driving direction, with frames. */
-function bakeLane(def: PieceDef, p: PlacedPiece, laneIndex: number, reversed: boolean, ground: ((x: number, z: number) => number) | null, rampIn = true, rampOut = true): PathTable {
+function bakeLane(def: PieceDef, p: PlacedPiece, laneIndex: number, reversed: boolean, ground: ((x: number, z: number) => number) | null, rampIn = true, rampOut = true, padOverride?: number): PathTable {
   const ldef = def.lanes[laneIndex]
   // Roads drape over the landscape point by point; pad pieces sit on the level ground pinned under them.
   const size = rotatedSize(def, p.rot)
-  const padY = ground ? ground((p.x + size.w / 2) * CELL, (p.z + size.h / 2) * CELL) : 0
+  // The grading tells us where the pad was pinned: reading it back off the ground would follow the
+  // cutting dug under a tunnel floor and sink the tunnel with it.
+  const padY = padOverride ?? (ground ? ground((p.x + size.w / 2) * CELL, (p.z + size.h / 2) * CELL) : 0)
   const drape = ground !== null && drapes(def.type)
   const n = Math.max(2, Math.round(ldef.length / PATH_STEP) + 1)
   // Oversample the path to get arc-length-uniform output.

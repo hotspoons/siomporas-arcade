@@ -3,7 +3,7 @@
 // flatten the ground under their footprint to their base height, so a raised
 // road sits on an embankment and the grass always meets the tarmac cleanly.
 
-import { CELL } from './Tuning'
+import { CELL, LEVEL_H, TUBE_RADIUS } from './Tuning'
 import { PIECE_BY_TYPE, applyMirror, makePathPoint, rotateLocal, rotatedSize } from './pieces'
 import type { PlacedPiece } from './Track'
 
@@ -78,6 +78,66 @@ function centreline(p: PlacedPiece): { x: number; y: number; z: number }[] {
   return out
 }
 
+/** How far a cutting reaches past the road, in cells. */
+const CUT_REACH = 1.6
+/** Cells of level apron around a tunnel, so the ground inside the bore is flat and stays under the floor. */
+const TUBE_FLAT = 1.5
+/** How fast a cutting's banks may climb away from the road, metres per cell. */
+const CUT_RISE = 12
+/** Ground this far above a road clears the tube around it, so a hill may carry on over a tunnel. */
+const TUNNEL_OVERBURDEN = TUBE_RADIUS * 2 + 6
+
+/**
+ * Cut the land down to the roads that dip below it.
+ *
+ * Grading pins the ground under a piece's footprint, which is enough while the road runs along the
+ * surface. It is not enough where the road drops — into a dip, down to a tunnel mouth, or under a
+ * hillside — because the land beside it keeps its own height and simply grows over the tarmac. So
+ * every corner near a road is pushed down to just under the driving surface, with a bank that climbs
+ * away at CUT_RISE per cell so the cutting has sides instead of walls.
+ *
+ * A tunnel is the exception worth making: ground already high enough to clear the tube is left alone,
+ * so a hill still passes over the bore rather than being sliced into a trench.
+ *
+ * Returns the corners it pinned, which the clamp then treats as fixed.
+ */
+function cutForRoads(heights: number[], size: number, roads: { x: number; z: number; y: number; tube: boolean }[]): Set<number> {
+  const limit = new Map<number, { max: number; over: number }>()
+  for (const s of roads) {
+    const cx = s.x / CELL
+    const cz = s.z / CELL
+    // A tunnel needs a flat apron, not a bank: the ground is interpolated through the corners a cell
+    // either side, so a step that close bulges the surface up inside the bore.
+    const reach = s.tube ? TUBE_FLAT + 1 : CUT_REACH
+    const x0 = Math.max(0, Math.floor(cx - reach))
+    const x1 = Math.min(size, Math.ceil(cx + reach))
+    const z0 = Math.max(0, Math.floor(cz - reach))
+    const z1 = Math.min(size, Math.ceil(cz + reach))
+    for (let z = z0; z <= z1; z++)
+      for (let x = x0; x <= x1; x++) {
+        // Half a cell of slack: the corners of the cell the road runs through are cut to the road itself.
+        const d = Math.max(0, Math.hypot(x - cx, z - cz) - 0.7)
+        if (d > reach) continue
+        const flat = s.tube && d <= TUBE_FLAT
+        // Down to the driving surface and no further: the tarmac and the tube floor are both built
+        // to stand clear of the ground, so cutting to the lane height leaves them proud of the grass
+        // without a step at the shoulder. Around a tunnel the apron stays level, then banks away.
+        const max = s.y + (flat ? 0 : Math.max(0, d - (s.tube ? TUBE_FLAT : 0)) * CUT_RISE)
+        const i = terrainIndex(size, x, z)
+        const had = limit.get(i)
+        // Only land well clear of a tunnel's apron may stand: that is the hill the bore runs into.
+        if (!had || max < had.max) limit.set(i, { max, over: s.tube && !flat ? s.y + TUNNEL_OVERBURDEN : Infinity })
+      }
+  }
+  const pinned = new Set<number>()
+  for (const [i, l] of limit) {
+    pinned.add(i)
+    if (heights[i] > l.over) continue // high enough to pass over the tube: leave the hill alone
+    if (heights[i] > l.max) heights[i] = l.max
+  }
+  return pinned
+}
+
 /**
  * Grade the landscape to the roads. Two passes:
  *
@@ -90,7 +150,7 @@ function centreline(p: PlacedPiece): { x: number; y: number; z: number }[] {
  *
  * Water keeps its own level, so a lake stays flat under a bridge.
  */
-export function flattenUnderPieces(heights: number[], size: number, pieces: PlacedPiece[]): void {
+export function flattenUnderPieces(heights: number[], size: number, pieces: PlacedPiece[]): Map<number, number> {
   const original = heights.slice()
   const wet = new Set<number>()
   for (const p of pieces) {
@@ -132,13 +192,16 @@ export function flattenUnderPieces(heights: number[], size: number, pieces: Plac
     for (let z = p.z; z <= p.z + s.h; z++) for (let x = p.x; x <= p.x + s.w; x++) if (x >= 0 && z >= 0 && x <= size && z <= size) pinned.add(terrainIndex(size, x, z))
   }
   // Pads last: their level ground wins over any corridor that reaches the same corner.
+  const padY = new Map<number, number>()
   const pads: { p: PlacedPiece; y: number; s: { w: number; h: number } }[] = []
-  for (const p of pieces) {
+  pieces.forEach((p, i) => {
     const def = PIECE_BY_TYPE[p.type]
-    if (!def || def.decor || drapes(p.type)) continue
+    if (!def || def.decor || drapes(p.type)) return
     const s = rotatedSize(def, p.rot)
-    pads.push({ p, s, y: sampleHeight(original, size, (p.x + s.w / 2) * CELL, (p.z + s.h / 2) * CELL) })
-  }
+    const y = sampleHeight(original, size, (p.x + s.w / 2) * CELL, (p.z + s.h / 2) * CELL)
+    padY.set(i, y)
+    pads.push({ p, s, y })
+  })
   for (const { p, s, y } of pads)
     for (let z = p.z; z <= p.z + s.h; z++)
       for (let x = p.x; x <= p.x + s.w; x++) if (x >= 0 && z >= 0 && x <= size && z <= size) heights[terrainIndex(size, x, z)] = y
@@ -162,7 +225,22 @@ export function flattenUnderPieces(heights: number[], size: number, pieces: Plac
         if (n) heights[i] = before[i] * 0.45 + (sum / n) * 0.55
       }
   }
-  clampTerrain(heights, size)
+  // Where the tarmac actually is, so the cutting knows what to dig down to.
+  const roads: { x: number; z: number; y: number; tube: boolean }[] = []
+  pieces.forEach((p, i) => {
+    const def = PIECE_BY_TYPE[p.type]
+    if (!def || def.decor) return
+    const tube = def.profile === 'tube'
+    const draped = drapes(p.type)
+    for (const q of centreline(p)) {
+      const base = draped ? sampleHeight(heights, size, q.x, q.z) : (padY.get(i) ?? 0)
+      roads.push({ x: q.x, z: q.z, y: p.level * LEVEL_H + q.y + base, tube })
+    }
+  })
+  clampTerrain(heights, size, TERRAIN_MAX_STEP, cutForRoads(heights, size, roads))
+  // The pad heights the grading settled on. The ground under a tunnel is cut below its floor, so a
+  // piece that reads its height back off the graded ground would sink with it, every build.
+  return padY
 }
 
 /** How far two neighbouring corners may differ, in metres. Corners are CELL apart, so this is the steepest cliff the land can hold. */
@@ -184,7 +262,7 @@ export const TERRAIN_MAX = 160
  *
  * Returns true when it had to change something.
  */
-export function clampTerrain(heights: number[], size: number, maxStep = TERRAIN_MAX_STEP): boolean {
+export function clampTerrain(heights: number[], size: number, maxStep = TERRAIN_MAX_STEP, pinned?: Set<number>): boolean {
   let touched = false
   for (let i = 0; i < heights.length; i++) {
     const v = heights[i]
@@ -209,9 +287,18 @@ export function clampTerrain(heights: number[], size: number, maxStep = TERRAIN_
           const j = terrainIndex(size, nx, nz)
           const d = heights[j] - heights[i]
           if (Math.abs(d) <= maxStep) continue
-          const fix = (Math.abs(d) - maxStep) / 2 * Math.sign(d)
-          heights[i] += fix
-          heights[j] -= fix
+          const excess = (Math.abs(d) - maxStep) * Math.sign(d)
+          // A pinned corner is ground a road stands on: the other side gives way instead, otherwise
+          // the hill beside a cutting would drag the cutting back up over the tarmac.
+          const iFixed = pinned?.has(i) ?? false
+          const jFixed = pinned?.has(j) ?? false
+          if (iFixed && jFixed) continue
+          if (iFixed) heights[j] -= excess
+          else if (jFixed) heights[i] += excess
+          else {
+            heights[i] += excess / 2
+            heights[j] -= excess / 2
+          }
           changed = true
         }
       }

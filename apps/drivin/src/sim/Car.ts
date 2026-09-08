@@ -713,12 +713,20 @@ export class Car {
         }
         continue
       }
-      if (ax <= ROAD_HALF_WIDTH + CURB_WIDTH) {
-        // Surface above the bumper line: a slab you'd hit, or a berm you'd drive into.
-        const tilted = f.up.y < 0.95
-        if (h.h < 0.3 && (tilted ? h.h > -6 : h.h > -1.4)) return tilted ? 'the embankment' : `the underside of the ${this.track.data.pieces[lane.pieceIndex]?.type ?? 'road'}`
-        // A slab far above is a bridge — drive under it, minding the pillars below.
-      }
+      // Both of these were measured in the lane's own frame, which is fine for road lying flat and wrong
+      // for anything banked: the frame leans out over the grass, so a car driving comfortably past an
+      // embankment fell inside the band, and the along-the-normal height made a steep deck solid for ten
+      // metres underneath itself. Hence crashing into an embankment thirty feet away, with nothing there.
+      // Measure the structure where it actually is: its footprint looking down, and its height straight up.
+      const lean = Math.hypot(f.right.x, f.right.z)
+      const dx = this.pos.x - f.pos.x
+      const dz = this.pos.z - f.pos.z
+      const across = lean > 1e-3 ? Math.abs((dx * f.right.x + dz * f.right.z) / lean) : Math.hypot(dx, dz)
+      // How far the surface stands above the car: within the body's height it is something you hit, well
+      // above it is a bridge or the high side of a bank to drive under, below it is behind you.
+      const rise = f.pos.y - this.pos.y
+      if (across <= (ROAD_HALF_WIDTH + CURB_WIDTH) * Math.max(lean, 0.3) + CAR_HALF_WIDTH && rise > -0.3 && rise < 1.4)
+        return f.up.y < 0.95 ? 'the embankment' : `the underside of the ${this.track.data.pieces[lane.pieceIndex]?.type ?? 'road'}`
       const clearance = f.pos.y - 0.4
       if (clearance >= 1.5 && f.up.y >= 0.7 && ax < PILLAR_SIDE + 3) {
         const k = Math.round((h.s - PILLAR_SPACING / 2) / PILLAR_SPACING)

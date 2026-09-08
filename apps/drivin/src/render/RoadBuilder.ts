@@ -15,6 +15,9 @@ import { smoothstep } from '@apex/engine/math/scalar'
 import { PILLAR_SIDE, PILLAR_SPACING } from '../sim/Tuning'
 
 const STEP = 2
+/** How far the tarmac stands above the graded ground, and the curbs above that (metres). */
+const SLAB_LIFT = 0.16
+const CURB_LIFT = 0.34
 /** Bridge spans: sampling step along the lane, parapet height and how far the deck skirt hangs below the tarmac. */
 const BRIDGE_STEP = 4
 const PARAPET_HEIGHT = 0.95
@@ -101,7 +104,7 @@ export class RoadBuilder {
     // The road is a built-up slab: the tarmac stands clear of the ground and the curbs higher still, so
     // the graded landscape (which is only sampled every few metres) can never show through it.
     const xs = [-W - C, -W, -W, 0, W, W, W + C]
-    const ys = [0.34, 0.34, 0.16, 0.16, 0.16, 0.34, 0.34]
+    const ys = [CURB_LIFT, CURB_LIFT, SLAB_LIFT, SLAB_LIFT, SLAB_LIFT, CURB_LIFT, CURB_LIFT]
     const kinds = [1, 1, 0, 0, 0, 1, 1]
     const across = xs.length
     const pos = new Float32Array(rings * across * 3)
@@ -151,7 +154,7 @@ export class RoadBuilder {
     return g
   }
 
-  /** Ring tube around the road; the tube's floor is the road, so the centre is up by R. */
+  /** Ring tube around the road; the tube's floor is the tarmac, so the centre is up by R from there. */
   private tube(lane: Lane, segments: number): BufferGeometry {
     const t = lane.table
     const rings = Math.max(2, Math.ceil(t.length / STEP) + 1)
@@ -176,7 +179,9 @@ export class RoadBuilder {
         let a = -Math.PI + (k / segments) * Math.PI * 2
         a = Math.max(-maxA, Math.min(maxA, a))
         const ox = Math.sin(a) * R
-        const oy = R - Math.cos(a) * R
+        // The floor stands as proud of the ground as the tarmac does, so the graded landscape cannot
+        // speckle up through the bore the way it did when the two were at exactly the same height.
+        const oy = SLAB_LIFT + R - Math.cos(a) * R
         this.v.copy(f.pos).addScaled(f.right, ox).addScaled(f.up, oy)
         pos[i * 3] = this.v.x
         pos[i * 3 + 1] = this.v.y

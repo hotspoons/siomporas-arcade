@@ -92,6 +92,20 @@ export function buildMenus(game: Game) {
       { kind: 'info', label: '— RETRO —' },
       {
         kind: 'choice',
+        label: 'Internal resolution',
+        hint: '320×224 is OutRun; 416×224 the System 32 boards',
+        options: ['320 × 224', '416 × 224', '512 × 288', '640 × 360'],
+        get: () => Math.max(0, [320, 416, 512, 640].indexOf(s().retro.width)),
+        set: (i) => {
+          set((d) => {
+            d.retro.width = [320, 416, 512, 640][i]
+            d.retro.height = [224, 224, 288, 360][i]
+          })
+          game.applyStyle()
+        },
+      },
+      {
+        kind: 'choice',
         label: 'Present rate',
         options: ['20 Hz', '30 Hz', '60 Hz', 'Uncapped'],
         get: () => [20, 30, 60, 0].indexOf(s().retro.presentHz),

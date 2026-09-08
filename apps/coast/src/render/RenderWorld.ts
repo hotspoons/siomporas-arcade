@@ -40,7 +40,7 @@ function nearestYaw(yaw: number): number {
 import { Background } from './Background'
 import { Cockpit } from './Cockpit'
 import { Projection } from './Projection'
-import { BANK_ROLL, BANK_TIERS, BANK_TIER_COUNT, BANK_TIER_H, BANK_TIER_W, BEACH_WIDTH, HORIZON_ROLL_SHARE, STEER_ROLL, CURVE_UNIT, FOG_MODERN, FOG_RETRO, HEADLIGHT_REACH, LANE_WIDTH, LIGHTS_OFF_AMBIENT, LOGICAL_HEIGHT, MAX_SPRITES, NIGHT_AMBIENT, PALETTES, RAIL_HEIGHT, RUMBLE_WIDTH, SHOULDER_WIDTH, VIEWS, type Palette } from './RenderTuning'
+import { BANK_ROLL, BANK_TIERS, BANK_TIER_COUNT, BANK_TIER_H, BANK_TIER_W, BEACH_WIDTH, CAM_BOUNCE, HORIZON_ROLL_SHARE, STEER_ROLL, CURVE_UNIT, FOG_MODERN, FOG_RETRO, HEADLIGHT_REACH, LANE_WIDTH, LIGHTS_OFF_AMBIENT, LOGICAL_HEIGHT, MAX_SPRITES, NIGHT_AMBIENT, PALETTES, RAIL_HEIGHT, RUMBLE_WIDTH, SHOULDER_WIDTH, VIEWS, type Palette } from './RenderTuning'
 import { LIVERIES } from './procgen'
 import { Rain } from './Rain'
 import type { Theme } from '../sim/Road'
@@ -205,7 +205,8 @@ export class RenderWorld {
     // climb above the bottom edge on hills (the flashing band).
     // Airborne: the cockpit rides the whole jump; the chase camera lifts only part way so the car visibly leaves the road.
     this.camY = stage.heightAt(camZ) + view.camHeight + curr.airY * (view.drawPlayer ? 0.4 : 1)
-    this.bounce = speed > 5 ? Math.sin(this.time * 28) * 0.05 * (speed / 84) : 0
+    // Road bounce only while actually driving: a finished or timed-out run sits still.
+    this.bounce = curr.phase === 'driving' && speed > 5 ? Math.sin(this.time * 28) * CAM_BOUNCE * (speed / 84) : 0
     const camY = this.camY + this.bounce
     const camX = x * ROAD_HALF_WIDTH
     // Negative when the camera trails the stage start; those rows reuse segment 0 (a straight lead-in).

@@ -33,6 +33,8 @@ export let HEADLIGHT_REACH = 120
 export let LIGHTS_OFF_AMBIENT = 0.45
 /** Roll model (Rad Mobile): a transient roll while the wheel is turning, plus a steady roll when you ride
  * up the outer lanes of a banked curve. The cockpit shows the whole roll; the horizon only a fraction. */
+/** Chase-camera bob amplitude (metres at 84 m/s). */
+export let CAM_BOUNCE = 0.022
 export let STEER_ROLL = 0.16
 /** Cockpit roll per banked lane tier (radians); Rad Mobile-style stepped berms. */
 export let BANK_ROLL = 0.085
@@ -107,6 +109,7 @@ export const RENDER_TUNE: TuneSection = {
     tune('NIGHT_AMBIENT', () => NIGHT_AMBIENT, (v) => (NIGHT_AMBIENT = v)),
     tune('HEADLIGHT_REACH', () => HEADLIGHT_REACH, (v) => (HEADLIGHT_REACH = v)),
     tune('LIGHTS_OFF_AMBIENT', () => LIGHTS_OFF_AMBIENT, (v) => (LIGHTS_OFF_AMBIENT = v)),
+    tune('CAM_BOUNCE', () => CAM_BOUNCE, (v) => (CAM_BOUNCE = v), [0, 0.1], 0.002, 'camera bob'),
     tune('STEER_ROLL', () => STEER_ROLL, (v) => (STEER_ROLL = v)),
     tune('BANK_ROLL', () => BANK_ROLL, (v) => (BANK_ROLL = v), [0, 0.3], 0.005, 'cockpit roll per bank tier'),
     tune('BANK_TIERS', () => BANK_TIERS, (v) => (BANK_TIERS = v), [1, 4], 1),

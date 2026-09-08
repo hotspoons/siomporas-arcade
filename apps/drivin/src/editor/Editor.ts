@@ -1,6 +1,17 @@
-// The track editor: a grid of cells, a palette of pieces, click to place with
-// the current rotation and level, live connectivity feedback, save/load/export,
-// and a Test Drive button that hands the track to the game.
+// The track editor: an unbounded grid you pan and zoom, a palette of pieces,
+// click to place with the current rotation and level, modern selection and
+// modifier conventions (see HINTS below), a right-click menu, undo, and a
+// Test Drive button that hands the track to the game.
+//
+// Conventions (⌘ on a Mac, Ctrl elsewhere):
+//   click empty      place the primed piece      click piece        select (drag to move)
+//   ⌘ click          add / remove from selection ⇧ click            select the run between the last pick and this one
+//   ⌥ click / Del    delete under the pointer    ⌘⇧ click           force-insert over whatever is there
+//   ⌘⌥ click         rotate the piece            ⇧⌥ click / ⇧⌥ right-click   raise / lower its level
+//   right-click      menu                        Z / X (or R)       rotate the primed piece or the selection
+//   Q / E            level − / +                 ⌘Z / ⌘⇧Z          undo / redo
+//   wheel            zoom under the pointer      middle-drag, space-drag, ⇧wheel   pan
+//   click outside    grow the grid to reach that cell (the world is as big as you make it)
 
 import { PIECES, PIECE_BY_TYPE, makePathPoint, rotateLocal, rotatedSize, type PieceDef } from '../sim/pieces'
 import { CELL } from '../sim/Tuning'
@@ -8,10 +19,29 @@ import { Track, portStatus, type PlacedPiece, type TrackData } from '../sim/Trac
 import type { TrackStore } from '../app/TrackStore'
 
 const GROUP_COLORS: Record<PieceDef['group'], string> = { basic: '#2f6b8a', curves: '#3b8a5c', stunts: '#a3552a', flow: '#7a4aa0' }
+const LEVEL_TINT = ['', '#ffc857', '#ff9a3c', '#ff6a5c', '#ff5fd2', '#b08cff', '#6ab8ff']
+const MAX_SIZE = 200
+const MIN_SCALE = 6
+const MAX_SCALE = 160
+const UNDO_DEPTH = 60
+const IS_MAC = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
+const MOD = IS_MAC ? '⌘' : 'Ctrl'
+const HINTS = `${MOD}-click multi · ⇧-click range · ⌥-click delete · ${MOD}⇧ force insert · ${MOD}⌥ rotate · ⇧⌥ click/right-click raise/lower · Z X rotate · Q E level · wheel zoom · middle-drag pan · right-click menu`
 
 export interface EditorCallbacks {
   onTest(data: TrackData): void
   onExit(): void
+}
+
+interface Cell {
+  x: number
+  z: number
+}
+
+interface DialogButton {
+  label: string
+  value: string
+  primary?: boolean
 }
 
 export class Editor {
@@ -19,7 +49,7 @@ export class Editor {
   private readonly canvas: HTMLCanvasElement
   private readonly ctx: CanvasRenderingContext2D
   private readonly status: HTMLElement
-  private readonly nameInput: HTMLInputElement
+  private readonly title: HTMLElement
   private readonly palette: HTMLElement
   private readonly loadSelect: HTMLSelectElement
   private data: TrackData = { name: 'Untitled', size: 16, pieces: [] }
@@ -27,10 +57,21 @@ export class Editor {
   private selectedType = 'straight'
   private rot = 0
   private level = 0
-  private hover: { x: number; z: number } | null = null
-  private selected = -1
+  /** World cell under the pointer (may be outside the grid), or null when the pointer left the canvas. */
+  private hover: Cell | null = null
+  private selection = new Set<number>()
+  /** Last piece picked by a plain or ⌘ click: the start of a ⇧-click run. */
+  private anchor = -1
   private dirty = true
   private visible = false
+  private spaceHeld = false
+  // View: world cell coordinates at the canvas centre and pixels per cell.
+  private view = { cx: 8, cz: 8, scale: 40 }
+  private pan: { px: number; py: number; cx: number; cz: number } | null = null
+  private drag: { start: Cell; indices: number[]; origin: { x: number; z: number }[]; dx: number; dz: number; moved: boolean } | null = null
+  private undoStack: string[] = []
+  private redoStack: string[] = []
+  private menu: HTMLElement | null = null
   private readonly store: TrackStore
   private readonly cb: EditorCallbacks
 
@@ -41,15 +82,18 @@ export class Editor {
     this.el.className = 'editor hidden'
     this.el.innerHTML = `
       <div class="toolbar">
-        <input class="name" value="Untitled" spellcheck="false" />
+        <span class="title" data-title>Untitled</span>
+        <button data-act="rename" title="Rename this track">Rename</button>
         <button data-act="new">New</button>
-        <button data-act="save">Save</button>
+        <button data-act="save" title="${MOD}S">Save</button>
         <select data-load><option value="">Load…</option></select>
         <button data-act="delete-track" title="Delete the loaded user track">Delete</button>
         <span class="sep"></span>
-        <button data-act="size-" title="Smaller grid">−</button><span data-size>16</span><button data-act="size+" title="Bigger grid">+</button>
+        <button data-act="undo" title="${MOD}Z">↶</button><button data-act="redo" title="${MOD}⇧Z">↷</button>
         <span class="sep"></span>
-        <button data-act="rotate" title="R">Rotate ↻</button>
+        <button data-act="zoom-" title="−">−</button><button data-act="zoom-fit" title="0">Fit</button><button data-act="zoom+" title="+">+</button>
+        <span class="sep"></span>
+        <button data-act="rotate-" title="Z">↺</button><button data-act="rotate" title="X / R">↻</button>
         <button data-act="level-" title="Q">Level −</button><span data-level>L0</span><button data-act="level+" title="E">Level +</button>
         <span class="sep"></span>
         <button data-act="export">Export JSON</button>
@@ -68,21 +112,19 @@ export class Editor {
     this.canvas = this.el.querySelector('canvas')!
     this.ctx = this.canvas.getContext('2d')!
     this.status = this.el.querySelector('.status')!
-    this.nameInput = this.el.querySelector('input.name')!
+    this.title = this.el.querySelector('[data-title]')!
     this.palette = this.el.querySelector('.palette')!
     this.loadSelect = this.el.querySelector('[data-load]')!
     this.buildPalette()
     this.el.addEventListener('click', (e) => {
       const act = (e.target as HTMLElement).closest<HTMLElement>('[data-act]')?.dataset.act
-      if (act) this.action(act)
+      if (act) void this.action(act)
     })
     this.loadSelect.addEventListener('change', () => {
       const id = this.loadSelect.value
       if (id) this.load(id)
       this.loadSelect.value = ''
     })
-    this.nameInput.addEventListener('input', () => (this.data.name = this.nameInput.value || 'Untitled'))
-    this.nameInput.addEventListener('keydown', (e) => e.stopPropagation())
     const file = this.el.querySelector<HTMLInputElement>('.import input')!
     file.addEventListener('change', () => {
       const f = file.files?.[0]
@@ -98,26 +140,39 @@ export class Editor {
         file.value = ''
       })
     })
-    this.canvas.addEventListener('pointermove', (e) => this.onPointer(e, false))
-    this.canvas.addEventListener('pointerdown', (e) => this.onPointer(e, true))
+    this.canvas.addEventListener('pointermove', (e) => this.onMove(e))
+    this.canvas.addEventListener('pointerdown', (e) => this.onDown(e))
+    this.canvas.addEventListener('pointerup', (e) => this.onUp(e))
     this.canvas.addEventListener('pointerleave', () => {
       this.hover = null
       this.dirty = true
     })
-    this.canvas.addEventListener('contextmenu', (e) => e.preventDefault())
+    this.canvas.addEventListener('wheel', (e) => this.onWheel(e), { passive: false })
+    this.canvas.addEventListener('contextmenu', (e) => {
+      e.preventDefault()
+      if (!(e.shiftKey && e.altKey)) this.openMenu(e)
+    })
     window.addEventListener('keydown', (e) => this.onKey(e))
+    window.addEventListener('keyup', (e) => {
+      if (e.code === 'Space') this.spaceHeld = false
+    })
     window.addEventListener('resize', () => (this.dirty = true))
+    window.addEventListener('pointerdown', (e) => {
+      if (this.menu && !this.menu.contains(e.target as Node)) this.closeMenu()
+    })
   }
 
   show(): void {
     this.visible = true
     this.el.classList.remove('hidden')
     this.refreshLoadList()
+    this.fit()
     this.dirty = true
   }
 
   hide(): void {
     this.visible = false
+    this.closeMenu()
     this.el.classList.add('hidden')
   }
 
@@ -132,8 +187,12 @@ export class Editor {
   setData(d: TrackData, id: string | null): void {
     this.data = structuredClone(d)
     this.currentId = id
-    this.nameInput.value = this.data.name
-    this.selected = -1
+    this.title.textContent = this.data.name
+    this.selection.clear()
+    this.anchor = -1
+    this.undoStack = []
+    this.redoStack = []
+    this.fit()
     this.dirty = true
   }
 
@@ -144,7 +203,7 @@ export class Editor {
     this.draw()
   }
 
-  // ---------------------------------------------------------------------------
+  // --- palette / load / save ------------------------------------------------------
 
   private buildPalette(): void {
     const groups: PieceDef['group'][] = ['basic', 'curves', 'stunts', 'flow']
@@ -190,42 +249,177 @@ export class Editor {
     if (d) this.setData(d, id.startsWith('user') ? id : null)
   }
 
-  private action(act: string): void {
+  private nameTaken(name: string): boolean {
+    const n = name.trim().toLowerCase()
+    return this.store.list().some((t) => t.name.trim().toLowerCase() === n && t.id !== this.currentId)
+  }
+
+  private async save(): Promise<void> {
+    if (this.currentId) {
+      const choice = await this.dialog(`Save changes to “${this.data.name}”?`, [
+        { label: 'Save over', value: 'over', primary: true },
+        { label: 'Save as…', value: 'as' },
+        { label: 'Cancel', value: 'cancel' },
+      ])
+      if (choice === 'cancel') return
+      if (choice === 'over') {
+        this.store.save(this.data, this.currentId)
+        this.refreshLoadList()
+        this.flash(new Track(this.data).valid ? 'Saved' : 'Saved (track has errors)')
+        return
+      }
+    }
+    await this.saveAs()
+  }
+
+  private async saveAs(): Promise<void> {
+    let name = this.data.name === 'Untitled' ? '' : this.data.name
+    for (;;) {
+      const r = await this.dialog('Save as', [{ label: 'Save', value: 'ok', primary: true }, { label: 'Cancel', value: 'cancel' }], { placeholder: 'Track title', value: name })
+      if (r === 'cancel') return
+      name = (this.dialogText ?? '').trim()
+      if (!name) {
+        this.flash('A title is needed')
+        continue
+      }
+      // Titles are unique: a new save with a taken title is refused rather than silently duplicated.
+      if (this.store.list().some((t) => t.name.trim().toLowerCase() === name.toLowerCase())) {
+        this.flash(`“${name}” already exists — pick another title`)
+        continue
+      }
+      break
+    }
+    this.data.name = name
+    this.title.textContent = name
+    this.currentId = this.store.save(this.data)
+    this.refreshLoadList()
+    this.flash(new Track(this.data).valid ? `Saved “${name}”` : `Saved “${name}” (track has errors)`)
+  }
+
+  private async rename(): Promise<void> {
+    const r = await this.dialog('Rename track', [{ label: 'Rename', value: 'ok', primary: true }, { label: 'Cancel', value: 'cancel' }], { placeholder: 'Track title', value: this.data.name })
+    if (r === 'cancel') return
+    const name = (this.dialogText ?? '').trim()
+    if (!name) return
+    if (this.nameTaken(name)) {
+      this.flash(`“${name}” already exists`)
+      return
+    }
+    this.data.name = name
+    this.title.textContent = name
+    if (this.currentId) {
+      this.store.save(this.data, this.currentId)
+      this.refreshLoadList()
+    }
+  }
+
+  private dialogText: string | null = null
+
+  /** A small modal with buttons (and optionally a text field); resolves with the chosen button's value. */
+  private dialog(message: string, buttons: DialogButton[], input?: { placeholder: string; value: string }): Promise<string> {
+    this.closeMenu()
+    return new Promise((resolve) => {
+      const back = document.createElement('div')
+      back.className = 'editor-dialog-back'
+      const box = document.createElement('div')
+      box.className = 'editor-dialog'
+      const msg = document.createElement('p')
+      msg.textContent = message
+      box.appendChild(msg)
+      let field: HTMLInputElement | null = null
+      if (input) {
+        field = document.createElement('input')
+        field.type = 'text'
+        field.placeholder = input.placeholder
+        field.value = input.value
+        field.spellcheck = false
+        field.addEventListener('keydown', (e) => {
+          e.stopPropagation()
+          if (e.key === 'Enter') finish(buttons.find((b) => b.primary)?.value ?? buttons[0].value)
+          if (e.key === 'Escape') finish('cancel')
+        })
+        box.appendChild(field)
+      }
+      const row = document.createElement('div')
+      row.className = 'buttons'
+      for (const b of buttons) {
+        const btn = document.createElement('button')
+        btn.textContent = b.label
+        if (b.primary) btn.className = 'primary'
+        btn.addEventListener('click', () => finish(b.value))
+        row.appendChild(btn)
+      }
+      box.appendChild(row)
+      back.appendChild(box)
+      this.el.appendChild(back)
+      const onKey = (e: KeyboardEvent) => {
+        if (e.key === 'Escape') {
+          e.stopPropagation()
+          finish('cancel')
+        }
+      }
+      back.addEventListener('keydown', onKey)
+      const finish = (v: string) => {
+        this.dialogText = field ? field.value : null
+        back.remove()
+        resolve(v)
+      }
+      if (field) {
+        field.focus()
+        field.select()
+      } else (row.querySelector('button.primary') as HTMLButtonElement | null)?.focus()
+    })
+  }
+
+  // --- actions -----------------------------------------------------------------------
+
+  private async action(act: string): Promise<void> {
     switch (act) {
       case 'new':
         this.setData({ name: 'Untitled', size: 16, pieces: [] }, null)
         break
-      case 'save': {
-        const t = new Track(this.data)
-        this.currentId = this.store.save(this.data, this.currentId ?? undefined)
-        this.refreshLoadList()
-        this.flash(t.valid ? 'Saved' : 'Saved (track has errors)')
+      case 'save':
+        await this.save()
         break
-      }
+      case 'rename':
+        await this.rename()
+        break
       case 'delete-track':
         if (this.currentId) {
+          const r = await this.dialog(`Delete “${this.data.name}” from your saved tracks?`, [{ label: 'Delete', value: 'ok', primary: true }, { label: 'Cancel', value: 'cancel' }])
+          if (r !== 'ok') break
           this.store.remove(this.currentId)
           this.currentId = null
           this.refreshLoadList()
           this.flash('Deleted saved track')
         }
         break
-      case 'size-':
-        this.data.size = Math.max(6, this.data.size - 2)
+      case 'undo':
+        this.undo()
         break
-      case 'size+':
-        this.data.size = Math.min(40, this.data.size + 2)
+      case 'redo':
+        this.redo()
+        break
+      case 'zoom-':
+        this.zoomBy(1 / 1.25)
+        break
+      case 'zoom+':
+        this.zoomBy(1.25)
+        break
+      case 'zoom-fit':
+        this.fit()
         break
       case 'rotate':
-        this.rotate()
+        this.rotate(1)
+        break
+      case 'rotate-':
+        this.rotate(-1)
         break
       case 'level-':
-        this.level = Math.max(0, this.level - 1)
-        if (this.selected >= 0) this.data.pieces[this.selected].level = this.level
+        this.changeLevel(-1)
         break
       case 'level+':
-        this.level = Math.min(6, this.level + 1)
-        if (this.selected >= 0) this.data.pieces[this.selected].level = this.level
+        this.changeLevel(1)
         break
       case 'export': {
         const json = JSON.stringify(this.data)
@@ -246,9 +440,12 @@ export class Editor {
         this.cb.onExit()
         break
     }
-    ;(this.el.querySelector('[data-size]') as HTMLElement).textContent = String(this.data.size)
-    ;(this.el.querySelector('[data-level]') as HTMLElement).textContent = `L${this.level}`
+    this.syncToolbar()
     this.dirty = true
+  }
+
+  private syncToolbar(): void {
+    ;(this.el.querySelector('[data-level]') as HTMLElement).textContent = `L${this.level}`
   }
 
   private test(): void {
@@ -260,39 +457,158 @@ export class Editor {
     this.cb.onTest(this.data)
   }
 
-  private rotate(): void {
-    if (this.selected >= 0) {
-      const p = this.data.pieces[this.selected]
-      p.rot = (p.rot + 1) % 4
-    } else this.rot = (this.rot + 1) % 4
+  private pushUndo(): void {
+    this.undoStack.push(JSON.stringify(this.data))
+    if (this.undoStack.length > UNDO_DEPTH) this.undoStack.shift()
+    this.redoStack = []
+  }
+
+  private undo(): void {
+    const s = this.undoStack.pop()
+    if (!s) return
+    this.redoStack.push(JSON.stringify(this.data))
+    this.data = JSON.parse(s) as TrackData
+    this.title.textContent = this.data.name
+    this.selection.clear()
+    this.dirty = true
+  }
+
+  private redo(): void {
+    const s = this.redoStack.pop()
+    if (!s) return
+    this.undoStack.push(JSON.stringify(this.data))
+    this.data = JSON.parse(s) as TrackData
+    this.selection.clear()
+    this.dirty = true
+  }
+
+  /** Rotate the selection (or the hovered piece for the menu) in place, else the primed piece. */
+  private rotate(dir: 1 | -1, indices?: number[]): void {
+    const targets = indices ?? [...this.selection]
+    if (targets.length) {
+      this.pushUndo()
+      for (const i of targets) {
+        const p = this.data.pieces[i]
+        const before = rotatedSize(PIECE_BY_TYPE[p.type], p.rot)
+        p.rot = (p.rot + dir + 4) % 4
+        // Keep the footprint centred where it was.
+        const after = rotatedSize(PIECE_BY_TYPE[p.type], p.rot)
+        p.x += Math.floor((before.w - after.w) / 2)
+        p.z += Math.floor((before.h - after.h) / 2)
+      }
+    } else this.rot = (this.rot + dir + 4) % 4
+    this.dirty = true
+  }
+
+  private changeLevel(d: number, indices?: number[]): void {
+    const targets = indices ?? [...this.selection]
+    if (targets.length) {
+      this.pushUndo()
+      for (const i of targets) this.data.pieces[i].level = Math.max(0, Math.min(6, this.data.pieces[i].level + d))
+      this.level = this.data.pieces[targets[0]].level
+    } else this.level = Math.max(0, Math.min(6, this.level + d))
+    this.syncToolbar()
+    this.dirty = true
+  }
+
+  private deletePieces(indices: number[]): void {
+    if (!indices.length) return
+    this.pushUndo()
+    const drop = new Set(indices)
+    this.data.pieces = this.data.pieces.filter((_, i) => !drop.has(i))
+    this.selection.clear()
+    this.anchor = -1
+    this.dirty = true
+  }
+
+  private duplicate(indices: number[]): void {
+    if (!indices.length) return
+    this.pushUndo()
+    const copies = indices.map((i) => ({ ...this.data.pieces[i] }))
+    // Offset by the selection's width so the copy lands beside it.
+    const minX = Math.min(...copies.map((p) => p.x))
+    const maxX = Math.max(...copies.map((p) => p.x + rotatedSize(PIECE_BY_TYPE[p.type], p.rot).w))
+    for (const c of copies) c.x += maxX - minX
+    const first = this.data.pieces.length
+    this.data.pieces.push(...copies)
+    this.selection = new Set(copies.map((_, k) => first + k))
+    this.growToFit()
     this.dirty = true
   }
 
   private onKey(e: KeyboardEvent): void {
-    if (!this.visible || e.target instanceof HTMLInputElement) return
+    if (!this.visible || e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return
+    const mod = e.metaKey || e.ctrlKey
+    if (e.code === 'Space') {
+      this.spaceHeld = true
+      e.preventDefault()
+      return
+    }
+    if (mod && e.code === 'KeyZ') {
+      e.preventDefault()
+      if (e.shiftKey) this.redo()
+      else this.undo()
+      return
+    }
+    if (mod && e.code === 'KeyS') {
+      e.preventDefault()
+      void this.save()
+      return
+    }
+    if (mod && e.code === 'KeyA') {
+      e.preventDefault()
+      this.selection = new Set(this.data.pieces.map((_, i) => i))
+      this.dirty = true
+      return
+    }
+    if (mod) return
     switch (e.code) {
       case 'KeyR':
-        this.rotate()
+      case 'KeyX':
+        this.rotate(1)
+        break
+      case 'KeyZ':
+        this.rotate(-1)
         break
       case 'KeyQ':
-        this.action('level-')
+        this.changeLevel(-1)
         break
       case 'KeyE':
-        this.action('level+')
+        this.changeLevel(1)
+        break
+      case 'KeyD':
+        this.duplicate([...this.selection])
         break
       case 'Delete':
-      case 'Backspace':
-        if (this.selected >= 0) {
-          this.data.pieces.splice(this.selected, 1)
-          this.selected = -1
-          this.dirty = true
+      case 'Backspace': {
+        // Delete the selection, else whatever is under the pointer.
+        if (this.selection.size) this.deletePieces([...this.selection])
+        else if (this.hover) {
+          const i = this.pieceAt(this.hover.x, this.hover.z)
+          if (i >= 0) this.deletePieces([i])
         }
         break
+      }
       case 'KeyT':
         this.test()
         break
+      case 'Equal':
+      case 'NumpadAdd':
+        this.zoomBy(1.25)
+        break
+      case 'Minus':
+      case 'NumpadSubtract':
+        this.zoomBy(1 / 1.25)
+        break
+      case 'Digit0':
+        this.fit()
+        break
       case 'Escape':
-        this.cb.onExit()
+        if (this.menu) this.closeMenu()
+        else if (this.selection.size) {
+          this.selection.clear()
+          this.dirty = true
+        } else this.cb.onExit()
         break
     }
   }
@@ -300,138 +616,574 @@ export class Editor {
   private flash(text: string): void {
     this.status.textContent = text
     this.status.classList.add('flash')
-    setTimeout(() => this.status.classList.remove('flash'), 1200)
+    setTimeout(() => this.status.classList.remove('flash'), 1600)
   }
 
-  private layout(): { ox: number; oy: number; cell: number } {
+  // --- view --------------------------------------------------------------------------
+
+  private toPx(wx: number, wz: number): { x: number; y: number } {
+    // World cell units (fractional) → canvas pixels; z runs up the screen.
+    return { x: this.canvas.width / 2 + (wx - this.view.cx) * this.view.scale, y: this.canvas.height / 2 - (wz - this.view.cz) * this.view.scale }
+  }
+
+  private toWorld(px: number, py: number): { x: number; z: number } {
+    return { x: this.view.cx + (px - this.canvas.width / 2) / this.view.scale, z: this.view.cz - (py - this.canvas.height / 2) / this.view.scale }
+  }
+
+  private canvasPoint(e: PointerEvent | WheelEvent | MouseEvent): { px: number; py: number } {
+    const r = this.canvas.getBoundingClientRect()
+    return { px: ((e.clientX - r.left) / r.width) * this.canvas.width, py: ((e.clientY - r.top) / r.height) * this.canvas.height }
+  }
+
+  private cellAt(e: PointerEvent | MouseEvent): Cell {
+    const { px, py } = this.canvasPoint(e)
+    const w = this.toWorld(px, py)
+    return { x: Math.floor(w.x), z: Math.floor(w.z) }
+  }
+
+  private inGrid(c: Cell): boolean {
+    return c.x >= 0 && c.z >= 0 && c.x < this.data.size && c.z < this.data.size
+  }
+
+  private fit(): void {
+    this.ensureCanvasSize()
     const w = this.canvas.width
     const h = this.canvas.height
-    const cell = Math.floor(Math.min(w, h) / (this.data.size + 1))
-    const ox = Math.floor((w - cell * this.data.size) / 2)
-    const oy = Math.floor((h - cell * this.data.size) / 2)
-    return { ox, oy, cell }
+    this.view.scale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, Math.floor(Math.min(w, h) / (this.data.size + 1))))
+    this.view.cx = this.data.size / 2
+    this.view.cz = this.data.size / 2
+    this.dirty = true
   }
 
-  private cellAt(e: PointerEvent): { x: number; z: number } | null {
-    const r = this.canvas.getBoundingClientRect()
-    const px = ((e.clientX - r.left) / r.width) * this.canvas.width
-    const py = ((e.clientY - r.top) / r.height) * this.canvas.height
-    const { ox, oy, cell } = this.layout()
-    const x = Math.floor((px - ox) / cell)
-    const z = this.data.size - 1 - Math.floor((py - oy) / cell)
-    if (x < 0 || z < 0 || x >= this.data.size || z >= this.data.size) return null
-    return { x, z }
-  }
-
-  private pieceAt(x: number, z: number): number {
-    for (let i = this.data.pieces.length - 1; i >= 0; i--) {
-      const p = this.data.pieces[i]
-      const size = rotatedSize(PIECE_BY_TYPE[p.type], p.rot)
-      if (x >= p.x && x < p.x + size.w && z >= p.z && z < p.z + size.h) return i
+  private zoomBy(f: number, at?: { px: number; py: number }): void {
+    const before = at ? this.toWorld(at.px, at.py) : null
+    this.view.scale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, this.view.scale * f))
+    if (before && at) {
+      // Keep the world point under the pointer fixed.
+      const after = this.toWorld(at.px, at.py)
+      this.view.cx += before.x - after.x
+      this.view.cz += before.z - after.z
     }
-    return -1
+    this.dirty = true
   }
 
-  private fits(type: string, rot: number, x: number, z: number, ignore = -1): boolean {
-    const size = rotatedSize(PIECE_BY_TYPE[type], rot)
-    if (x + size.w > this.data.size || z + size.h > this.data.size) return false
-    for (let dx = 0; dx < size.w; dx++) for (let dz = 0; dz < size.h; dz++) if (this.pieceAt(x + dx, z + dz) !== -1 && this.pieceAt(x + dx, z + dz) !== ignore) return false
-    return true
+  private onWheel(e: WheelEvent): void {
+    e.preventDefault()
+    const at = this.canvasPoint(e)
+    if (e.shiftKey || (Math.abs(e.deltaX) > Math.abs(e.deltaY) && !e.ctrlKey)) {
+      // Horizontal (or ⇧) scroll pans.
+      this.view.cx += (e.shiftKey ? e.deltaY : e.deltaX) / this.view.scale
+      this.dirty = true
+      return
+    }
+    const f = Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0022))
+    this.zoomBy(f, at)
   }
 
-  private onPointer(e: PointerEvent, down: boolean): void {
+  // --- pointer -----------------------------------------------------------------------
+
+  private onMove(e: PointerEvent): void {
+    const { px, py } = this.canvasPoint(e)
+    if (this.pan) {
+      this.view.cx = this.pan.cx - (px - this.pan.px) / this.view.scale
+      this.view.cz = this.pan.cz + (py - this.pan.py) / this.view.scale
+      this.dirty = true
+      return
+    }
+    const c = this.cellAt(e)
+    if (this.drag) {
+      const dx = c.x - this.drag.start.x
+      const dz = c.z - this.drag.start.z
+      if (dx !== this.drag.dx || dz !== this.drag.dz) {
+        this.drag.dx = dx
+        this.drag.dz = dz
+        this.drag.moved = this.drag.moved || dx !== 0 || dz !== 0
+        this.drag.indices.forEach((i, k) => {
+          this.data.pieces[i].x = this.drag!.origin[k].x + dx
+          this.data.pieces[i].z = this.drag!.origin[k].z + dz
+        })
+        this.dirty = true
+      }
+    }
+    if (!this.hover || this.hover.x !== c.x || this.hover.z !== c.z) {
+      this.hover = c
+      this.dirty = true
+    }
+  }
+
+  private onDown(e: PointerEvent): void {
+    this.closeMenu()
+    const { px, py } = this.canvasPoint(e)
+    const mod = e.metaKey || e.ctrlKey
+    // Pan: middle button, or space + drag.
+    if (e.button === 1 || (e.button === 0 && this.spaceHeld)) {
+      e.preventDefault()
+      this.pan = { px, py, cx: this.view.cx, cz: this.view.cz }
+      this.canvas.setPointerCapture(e.pointerId)
+      return
+    }
     const c = this.cellAt(e)
     this.hover = c
     this.dirty = true
-    if (!down || !c) return
-    e.preventDefault()
-    const existing = this.pieceAt(c.x, c.z)
+    const under = this.pieceAt(c.x, c.z)
     if (e.button === 2) {
-      if (existing >= 0) this.data.pieces.splice(existing, 1)
-      this.selected = -1
+      // ⇧⌥ right-click lowers a level; plain right-click is the menu (contextmenu event).
+      if (e.shiftKey && e.altKey && under >= 0) this.changeLevel(-1, [under])
       return
     }
-    if (existing >= 0) {
-      this.selected = existing
-      this.level = this.data.pieces[existing].level
-      ;(this.el.querySelector('[data-level]') as HTMLElement).textContent = `L${this.level}`
+    if (e.button !== 0) return
+    e.preventDefault()
+    if (e.altKey && !mod && !e.shiftKey) {
+      if (under >= 0) this.deletePieces([under])
       return
     }
-    if (this.fits(this.selectedType, this.rot, c.x, c.z)) {
-      // Only one start piece.
-      if (PIECE_BY_TYPE[this.selectedType].isStart) this.data.pieces = this.data.pieces.filter((p) => !PIECE_BY_TYPE[p.type].isStart)
-      this.data.pieces.push({ type: this.selectedType, x: c.x, z: c.z, rot: this.rot, level: this.level })
-      this.selected = -1
+    if (mod && e.altKey) {
+      if (under >= 0) this.rotate(1, [under])
+      return
+    }
+    if (e.shiftKey && e.altKey) {
+      if (under >= 0) this.changeLevel(1, [under])
+      return
+    }
+    if (mod && e.shiftKey) {
+      this.place(c, true)
+      return
+    }
+    if (mod) {
+      if (under >= 0) {
+        if (this.selection.has(under)) this.selection.delete(under)
+        else this.selection.add(under)
+        this.anchor = under
+      }
+      return
+    }
+    if (e.shiftKey) {
+      if (under >= 0) this.selectRun(this.anchor, under)
+      return
+    }
+    if (under >= 0) {
+      if (!this.selection.has(under)) {
+        this.selection = new Set([under])
+      }
+      this.anchor = under
+      this.level = this.data.pieces[under].level
+      this.syncToolbar()
+      // Start a drag-move of the selection; it commits on release if everything still fits.
+      const indices = [...this.selection]
+      this.drag = { start: c, indices, origin: indices.map((i) => ({ x: this.data.pieces[i].x, z: this.data.pieces[i].z })), dx: 0, dz: 0, moved: false }
+      this.canvas.setPointerCapture(e.pointerId)
+      return
+    }
+    if (!this.inGrid(c)) {
+      this.growTo(c)
+      return
+    }
+    this.selection.clear()
+    this.place(c, false)
+  }
+
+  private onUp(e: PointerEvent): void {
+    if (this.pan) {
+      this.pan = null
+      return
+    }
+    const d = this.drag
+    if (!d) return
+    this.drag = null
+    if (!d.moved) return
+    // Commit the move if the pieces fit at their new places (at their own levels), else snap back.
+    const moved = new Set(d.indices)
+    const ok = d.indices.every((i) => {
+      const p = this.data.pieces[i]
+      return this.fits(p.type, p.rot, p.x, p.z, p.level, moved)
+    })
+    const after = d.indices.map((i) => ({ x: this.data.pieces[i].x, z: this.data.pieces[i].z }))
+    d.indices.forEach((i, k) => {
+      this.data.pieces[i].x = d.origin[k].x
+      this.data.pieces[i].z = d.origin[k].z
+    })
+    if (!ok) {
+      this.flash('Doesn’t fit there')
+      this.dirty = true
+      return
+    }
+    this.pushUndo()
+    d.indices.forEach((i, k) => {
+      this.data.pieces[i].x = after[k].x
+      this.data.pieces[i].z = after[k].z
+    })
+    this.growToFit()
+    this.dirty = true
+    void e
+  }
+
+  /** Topmost piece covering a cell (highest level wins), or -1. */
+  private pieceAt(x: number, z: number, level?: number): number {
+    let best = -1
+    for (let i = this.data.pieces.length - 1; i >= 0; i--) {
+      const p = this.data.pieces[i]
+      if (level !== undefined && p.level !== level) continue
+      const size = rotatedSize(PIECE_BY_TYPE[p.type], p.rot)
+      if (x >= p.x && x < p.x + size.w && z >= p.z && z < p.z + size.h) {
+        if (best < 0 || p.level > this.data.pieces[best].level) best = i
+      }
+    }
+    return best
+  }
+
+  /** Whether a piece fits: inside the grid and clear of other pieces on the same level (bridges may cross). */
+  private fits(type: string, rot: number, x: number, z: number, level: number, ignore: Set<number> = new Set()): boolean {
+    const size = rotatedSize(PIECE_BY_TYPE[type], rot)
+    if (x < 0 || z < 0 || x + size.w > this.data.size || z + size.h > this.data.size) return false
+    for (let dx = 0; dx < size.w; dx++)
+      for (let dz = 0; dz < size.h; dz++) {
+        const i = this.pieceAt(x + dx, z + dz, level)
+        if (i !== -1 && !ignore.has(i)) return false
+      }
+    return true
+  }
+
+  private overlapping(type: string, rot: number, x: number, z: number, level: number): number[] {
+    const size = rotatedSize(PIECE_BY_TYPE[type], rot)
+    const out = new Set<number>()
+    for (let dx = 0; dx < size.w; dx++)
+      for (let dz = 0; dz < size.h; dz++) {
+        const i = this.pieceAt(x + dx, z + dz, level)
+        if (i !== -1) out.add(i)
+      }
+    return [...out]
+  }
+
+  private place(c: Cell, force: boolean): void {
+    const def = PIECE_BY_TYPE[this.selectedType]
+    const size = rotatedSize(def, this.rot)
+    if (c.x + size.w > this.data.size || c.z + size.h > this.data.size || c.x < 0 || c.z < 0) {
+      if (!force) return
+      this.growTo({ x: c.x + size.w - 1, z: c.z + size.h - 1 })
+    }
+    const clash = this.overlapping(this.selectedType, this.rot, c.x, c.z, this.level)
+    if (clash.length && !force) return
+    this.pushUndo()
+    if (clash.length) {
+      const drop = new Set(clash)
+      this.data.pieces = this.data.pieces.filter((_, i) => !drop.has(i))
+    }
+    // Only one start piece.
+    if (def.isStart) this.data.pieces = this.data.pieces.filter((p) => !PIECE_BY_TYPE[p.type].isStart)
+    this.data.pieces.push({ type: this.selectedType, x: c.x, z: c.z, rot: this.rot, level: this.level })
+    this.selection.clear()
+    this.dirty = true
+  }
+
+  /** Grow the grid so `c` is inside it; cells at negative coordinates shift the whole world over. */
+  private growTo(c: Cell): void {
+    let shift = 0
+    if (c.x < 0 || c.z < 0) shift = Math.max(-c.x, -c.z)
+    const need = Math.max(this.data.size, c.x + 1 + shift, c.z + 1 + shift)
+    if (need > MAX_SIZE) {
+      this.flash(`Grid is capped at ${MAX_SIZE} cells`)
+      return
+    }
+    this.pushUndo()
+    if (shift) for (const p of this.data.pieces) {
+      p.x += shift
+      p.z += shift
+    }
+    this.data.size = need
+    if (shift) {
+      this.view.cx += shift
+      this.view.cz += shift
+    }
+    this.flash(`Grid grown to ${need} × ${need}`)
+    this.dirty = true
+  }
+
+  private growToFit(): void {
+    let maxX = this.data.size
+    let maxZ = this.data.size
+    let minX = 0
+    let minZ = 0
+    for (const p of this.data.pieces) {
+      const s = rotatedSize(PIECE_BY_TYPE[p.type], p.rot)
+      maxX = Math.max(maxX, p.x + s.w)
+      maxZ = Math.max(maxZ, p.z + s.h)
+      minX = Math.min(minX, p.x)
+      minZ = Math.min(minZ, p.z)
+    }
+    if (minX < 0 || minZ < 0 || maxX > this.data.size || maxZ > this.data.size) {
+      const shift = Math.max(-minX, -minZ, 0)
+      for (const p of this.data.pieces) {
+        p.x += shift
+        p.z += shift
+      }
+      this.data.size = Math.min(MAX_SIZE, Math.max(maxX, maxZ) + shift)
+      this.view.cx += shift
+      this.view.cz += shift
+    }
+  }
+
+  // --- selection ---------------------------------------------------------------------
+
+  /** Piece adjacency through matched ports (undirected). */
+  private adjacency(): Map<number, Set<number>> {
+    const byKey = new Map<string, number[]>()
+    for (const port of portStatus(this.data.pieces)) {
+      const list = byKey.get(port.key) ?? []
+      list.push(port.pieceIndex)
+      byKey.set(port.key, list)
+    }
+    const adj = new Map<number, Set<number>>()
+    for (const list of byKey.values()) {
+      for (const a of list) for (const b of list) {
+        if (a === b) continue
+        if (!adj.has(a)) adj.set(a, new Set())
+        adj.get(a)!.add(b)
+      }
+    }
+    return adj
+  }
+
+  /** ⇧-click: the run of connected pieces from the anchor to the target; without a path, everything in their box. */
+  private selectRun(from: number, to: number): void {
+    if (from < 0 || from >= this.data.pieces.length) {
+      this.selection.add(to)
+      this.anchor = to
+      this.dirty = true
+      return
+    }
+    const adj = this.adjacency()
+    const prev = new Map<number, number>([[from, -1]])
+    const queue = [from]
+    while (queue.length) {
+      const cur = queue.shift()!
+      if (cur === to) break
+      for (const n of adj.get(cur) ?? []) {
+        if (!prev.has(n)) {
+          prev.set(n, cur)
+          queue.push(n)
+        }
+      }
+    }
+    if (prev.has(to)) {
+      for (let cur = to; cur !== -1; cur = prev.get(cur)!) this.selection.add(cur)
+    } else {
+      const a = this.data.pieces[from]
+      const b = this.data.pieces[to]
+      const sa = rotatedSize(PIECE_BY_TYPE[a.type], a.rot)
+      const sb = rotatedSize(PIECE_BY_TYPE[b.type], b.rot)
+      const x0 = Math.min(a.x, b.x)
+      const z0 = Math.min(a.z, b.z)
+      const x1 = Math.max(a.x + sa.w, b.x + sb.w)
+      const z1 = Math.max(a.z + sa.h, b.z + sb.h)
+      this.data.pieces.forEach((p, i) => {
+        const s = rotatedSize(PIECE_BY_TYPE[p.type], p.rot)
+        if (p.x >= x0 && p.z >= z0 && p.x + s.w <= x1 && p.z + s.h <= z1) this.selection.add(i)
+      })
+    }
+    this.dirty = true
+  }
+
+  private selectConnected(i: number): void {
+    const adj = this.adjacency()
+    const seen = new Set<number>([i])
+    const queue = [i]
+    while (queue.length) {
+      const cur = queue.shift()!
+      for (const n of adj.get(cur) ?? []) if (!seen.has(n)) {
+        seen.add(n)
+        queue.push(n)
+      }
+    }
+    this.selection = seen
+    this.dirty = true
+  }
+
+  // --- context menu ------------------------------------------------------------------
+
+  private openMenu(e: MouseEvent): void {
+    this.closeMenu()
+    const c = this.cellAt(e)
+    const under = this.pieceAt(c.x, c.z)
+    const items: { label: string; key?: string; run: () => void; danger?: boolean }[] = []
+    if (under >= 0) {
+      const targets = this.selection.has(under) ? [...this.selection] : [under]
+      const p = this.data.pieces[under]
+      items.push(
+        { label: `${PIECE_BY_TYPE[p.type].label}${targets.length > 1 ? ` (+${targets.length - 1} selected)` : ''} · L${p.level}`, run: () => {} },
+        { label: 'Rotate ↻', key: 'X', run: () => this.rotate(1, targets) },
+        { label: 'Rotate ↺', key: 'Z', run: () => this.rotate(-1, targets) },
+        { label: 'Level +', key: 'E', run: () => this.changeLevel(1, targets) },
+        { label: 'Level −', key: 'Q', run: () => this.changeLevel(-1, targets) },
+        { label: 'Duplicate', key: 'D', run: () => this.duplicate(targets) },
+        { label: 'Select connected', run: () => this.selectConnected(under) },
+        { label: 'Delete', key: '⌫', danger: true, run: () => this.deletePieces(targets) },
+      )
+    } else {
+      const def = PIECE_BY_TYPE[this.selectedType]
+      items.push({ label: `Place ${def.label} here`, run: () => this.place(c, false) })
+      if (!this.inGrid(c)) items.push({ label: 'Grow grid to here', run: () => this.growTo(c) })
+      if (this.selection.size) items.push({ label: 'Clear selection', key: 'Esc', run: () => this.selection.clear() })
+    }
+    const m = document.createElement('div')
+    m.className = 'editor-menu'
+    items.forEach((it, k) => {
+      const row = document.createElement('div')
+      row.className = 'item' + (k === 0 && under >= 0 ? ' head' : '') + (it.danger ? ' danger' : '')
+      row.innerHTML = `<span>${it.label}</span>${it.key ? `<kbd>${it.key}</kbd>` : ''}`
+      if (!(k === 0 && under >= 0)) row.addEventListener('click', () => {
+        it.run()
+        this.closeMenu()
+        this.dirty = true
+      })
+      m.appendChild(row)
+    })
+    const r = this.el.getBoundingClientRect()
+    m.style.left = `${Math.min(e.clientX - r.left, r.width - 230)}px`
+    m.style.top = `${Math.min(e.clientY - r.top, r.height - items.length * 30 - 20)}px`
+    this.el.appendChild(m)
+    this.menu = m
+  }
+
+  private closeMenu(): void {
+    this.menu?.remove()
+    this.menu = null
+  }
+
+  // --- drawing -----------------------------------------------------------------------
+
+  private ensureCanvasSize(): void {
+    const dpr = Math.min(2, window.devicePixelRatio || 1)
+    const rect = this.canvas.getBoundingClientRect()
+    const w = Math.max(1, Math.floor(rect.width * dpr))
+    const h = Math.max(1, Math.floor(rect.height * dpr))
+    if (this.canvas.width !== w || this.canvas.height !== h) {
+      this.canvas.width = w
+      this.canvas.height = h
     }
   }
 
   private draw(): void {
-    const dpr = Math.min(2, window.devicePixelRatio || 1)
-    const rect = this.canvas.getBoundingClientRect()
-    if (this.canvas.width !== Math.floor(rect.width * dpr)) {
-      this.canvas.width = Math.floor(rect.width * dpr)
-      this.canvas.height = Math.floor(rect.height * dpr)
-    }
+    this.ensureCanvasSize()
     const c = this.ctx
-    const { ox, oy, cell } = this.layout()
+    const W = this.canvas.width
+    const H = this.canvas.height
     const N = this.data.size
-    c.clearRect(0, 0, this.canvas.width, this.canvas.height)
-    // Grid.
+    const cell = this.view.scale
+    c.clearRect(0, 0, W, H)
+    // Outside the grid: a darker field, so the buildable area reads clearly.
+    const o = this.toPx(0, N)
+    const e = this.toPx(N, 0)
+    c.fillStyle = 'rgba(255,255,255,0.025)'
+    c.fillRect(o.x, o.y, e.x - o.x, e.y - o.y)
+    // Grid lines (only the ones on screen).
     c.strokeStyle = 'rgba(255,255,255,0.08)'
     c.lineWidth = 1
-    for (let i = 0; i <= N; i++) {
+    const tl = this.toWorld(0, 0)
+    const br = this.toWorld(W, H)
+    const x0 = Math.max(0, Math.floor(tl.x))
+    const x1 = Math.min(N, Math.ceil(br.x))
+    const z0 = Math.max(0, Math.floor(br.z))
+    const z1 = Math.min(N, Math.ceil(tl.z))
+    if (cell >= 8) {
       c.beginPath()
-      c.moveTo(ox + i * cell, oy)
-      c.lineTo(ox + i * cell, oy + N * cell)
-      c.moveTo(ox, oy + i * cell)
-      c.lineTo(ox + N * cell, oy + i * cell)
+      for (let i = x0; i <= x1; i++) {
+        const a = this.toPx(i, 0)
+        const b = this.toPx(i, N)
+        c.moveTo(a.x, a.y)
+        c.lineTo(b.x, b.y)
+      }
+      for (let i = z0; i <= z1; i++) {
+        const a = this.toPx(0, i)
+        const b = this.toPx(N, i)
+        c.moveTo(a.x, a.y)
+        c.lineTo(b.x, b.y)
+      }
       c.stroke()
     }
-    const toPx = (wx: number, wz: number) => ({ x: ox + (wx / CELL) * cell, y: oy + (N - wz / CELL) * cell })
-    // Pieces.
-    this.data.pieces.forEach((p, i) => {
+    // Border.
+    c.strokeStyle = 'rgba(255,255,255,0.25)'
+    c.strokeRect(o.x, o.y, e.x - o.x, e.y - o.y)
+    const toPx = (wx: number, wz: number) => this.toPx(wx / CELL, wz / CELL)
+    // Pieces, low levels first so bridges draw over what they cross.
+    const order = this.data.pieces.map((_, i) => i).sort((a, b) => this.data.pieces[a].level - this.data.pieces[b].level)
+    const hoverIdx = this.hover ? this.pieceAt(this.hover.x, this.hover.z) : -1
+    for (const i of order) {
+      const p = this.data.pieces[i]
       const def = PIECE_BY_TYPE[p.type]
       const size = rotatedSize(def, p.rot)
       const a = toPx(p.x * CELL, (p.z + size.h) * CELL)
-      c.fillStyle = GROUP_COLORS[def.group] + (i === this.selected ? 'cc' : '66')
+      const sel = this.selection.has(i)
+      c.fillStyle = GROUP_COLORS[def.group] + (sel ? 'cc' : i === hoverIdx ? '99' : '66')
       c.fillRect(a.x + 1, a.y + 1, size.w * cell - 2, size.h * cell - 2)
-      drawLanes(c, def, p, toPx, cell / CELL, i === this.selected ? '#ffffff' : '#e8f6ff', def.isStart ? '#ff7a1a' : null)
       if (p.level > 0) {
-        c.fillStyle = '#ffc857'
-        c.font = `${Math.max(10, cell * 0.28)}px ui-monospace, monospace`
+        c.strokeStyle = LEVEL_TINT[Math.min(6, p.level)]
+        c.lineWidth = 2
+        c.strokeRect(a.x + 2, a.y + 2, size.w * cell - 4, size.h * cell - 4)
+      }
+      drawLanes(c, def, p, toPx, cell / CELL, sel ? '#ffffff' : '#e8f6ff', def.isStart ? '#ff7a1a' : null)
+      if (p.level > 0 && cell >= 14) {
+        c.fillStyle = LEVEL_TINT[Math.min(6, p.level)]
+        c.font = `${Math.max(10, cell * 0.28)}px "VT323", ui-monospace, monospace`
         c.fillText(`L${p.level}`, a.x + 4, a.y + cell * 0.32)
       }
-    })
-    // Ports.
-    for (const port of portStatus(this.data.pieces)) {
-      const cx = port.cx * CELL + CELL / 2
-      const cz = port.cz * CELL + CELL / 2
-      const off = CELL / 2 - 2
-      const dx = port.side === 'E' ? off : port.side === 'W' ? -off : 0
-      const dz = port.side === 'N' ? off : port.side === 'S' ? -off : 0
-      const p = toPx(cx + dx, cz + dz)
-      c.fillStyle = port.matched ? '#5cff8a' : '#ff3b5c'
-      c.beginPath()
-      c.arc(p.x, p.y, Math.max(2, cell * 0.06), 0, Math.PI * 2)
-      c.fill()
+      if (sel) {
+        c.strokeStyle = '#ffffff'
+        c.lineWidth = 2
+        c.setLineDash([6, 4])
+        c.strokeRect(a.x + 1, a.y + 1, size.w * cell - 2, size.h * cell - 2)
+        c.setLineDash([])
+      }
     }
-    // Hover ghost.
-    if (this.hover && this.pieceAt(this.hover.x, this.hover.z) < 0) {
-      const def = PIECE_BY_TYPE[this.selectedType]
-      const size = rotatedSize(def, this.rot)
-      const ok = this.fits(this.selectedType, this.rot, this.hover.x, this.hover.z)
-      const a = toPx(this.hover.x * CELL, (this.hover.z + size.h) * CELL)
-      c.fillStyle = ok ? 'rgba(255,255,255,0.12)' : 'rgba(255,59,92,0.25)'
-      c.fillRect(a.x, a.y, size.w * cell, size.h * cell)
-      drawLanes(c, def, { type: def.type, x: this.hover.x, z: this.hover.z, rot: this.rot, level: this.level }, toPx, cell / CELL, ok ? 'rgba(255,255,255,0.7)' : 'rgba(255,59,92,0.8)', null)
+    // Ports.
+    if (cell >= 10) {
+      for (const port of portStatus(this.data.pieces)) {
+        const cx = port.cx * CELL + CELL / 2
+        const cz = port.cz * CELL + CELL / 2
+        const off = CELL / 2 - 2
+        const dx = port.side === 'E' ? off : port.side === 'W' ? -off : 0
+        const dz = port.side === 'N' ? off : port.side === 'S' ? -off : 0
+        const p = toPx(cx + dx, cz + dz)
+        c.fillStyle = port.matched ? '#5cff8a' : '#ff3b5c'
+        c.beginPath()
+        c.arc(p.x, p.y, Math.max(2, cell * 0.06), 0, Math.PI * 2)
+        c.fill()
+      }
+    }
+    // Hover: a placement ghost inside the grid, a grow ghost outside it.
+    if (this.hover && !this.drag && !this.pan) {
+      if (this.inGrid(this.hover)) {
+        if (hoverIdx < 0) {
+          const def = PIECE_BY_TYPE[this.selectedType]
+          const size = rotatedSize(def, this.rot)
+          const ok = this.fits(this.selectedType, this.rot, this.hover.x, this.hover.z, this.level)
+          const a = toPx(this.hover.x * CELL, (this.hover.z + size.h) * CELL)
+          c.fillStyle = ok ? 'rgba(255,255,255,0.12)' : 'rgba(255,59,92,0.25)'
+          c.fillRect(a.x, a.y, size.w * cell, size.h * cell)
+          drawLanes(c, def, { type: def.type, x: this.hover.x, z: this.hover.z, rot: this.rot, level: this.level }, toPx, cell / CELL, ok ? 'rgba(255,255,255,0.7)' : 'rgba(255,59,92,0.8)', null)
+        }
+      } else {
+        const shift = Math.max(0, -this.hover.x, -this.hover.z)
+        const need = Math.max(N, this.hover.x + 1 + shift, this.hover.z + 1 + shift)
+        const g0 = this.toPx(-shift, need - shift)
+        const g1 = this.toPx(need - shift, -shift)
+        c.strokeStyle = 'rgba(255,200,87,0.6)'
+        c.setLineDash([8, 6])
+        c.lineWidth = 1.5
+        c.strokeRect(g0.x, g0.y, g1.x - g0.x, g1.y - g0.y)
+        c.setLineDash([])
+        c.fillStyle = 'rgba(255,200,87,0.9)'
+        c.font = `${Math.max(11, Math.min(18, cell * 0.4))}px "VT323", ui-monospace, monospace`
+        c.fillText(`click to grow the grid to ${need} × ${need}`, g0.x + 8, g0.y - 6)
+      }
     }
     // Status.
     const t = new Track(this.data)
-    const bits = [`${this.data.pieces.length} pieces`, t.closed ? `loop ${t.loopLength.toFixed(0)} m` : 'not closed']
+    const bits = [`${this.data.pieces.length} pieces · ${N}×${N}`, t.closed ? `loop ${t.loopLength.toFixed(0)} m` : 'not closed']
+    if (this.selection.size) bits.push(`${this.selection.size} selected`)
     if (t.errors.length) bits.push('⚠ ' + t.errors.slice(0, 2).join(' · '))
     else if (t.warnings.length) bits.push('· ' + t.warnings[0])
     else bits.push('✓ ready to drive')
-    if (!this.status.classList.contains('flash')) this.status.textContent = bits.join('   ')
+    if (!this.status.classList.contains('flash')) this.status.innerHTML = `<span>${bits.join('   ')}</span><span class="hints">${HINTS}</span>`
   }
 }
 

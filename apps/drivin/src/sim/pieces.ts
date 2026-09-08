@@ -149,6 +149,19 @@ export const PIECES: PieceDef[] = [
     group: 'basic',
   },
   {
+    type: 'rampDown',
+    label: 'Ramp down',
+    w: 1,
+    h: 1,
+    ports: [
+      { cx: 0, cz: 0, side: 'W', dLevel: 1 },
+      { cx: 0, cz: 0, side: 'E', dLevel: 0 },
+    ],
+    lanes: [{ from: 0, to: 1, length: CELL, path: (t, o) => set(o, t * CELL, LEVEL_H * (1 - smoothstep(0, 1, t)), HALF) }],
+    profile: 'road',
+    group: 'basic',
+  },
+  {
     type: 'hump',
     label: 'Hump',
     w: 1,

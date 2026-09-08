@@ -90,7 +90,8 @@ export class Track {
       const size = rotatedSize(def, p.rot)
       for (let dx = 0; dx < size.w; dx++)
         for (let dz = 0; dz < size.h; dz++) {
-          const k = cellKey(p.x + dx, p.z + dz)
+          // Footprints may share a cell at different levels (a bridge over a road); the same level is a clash.
+          const k = cellKey(p.x + dx, p.z + dz) * 8 + p.level
           if (occupancy.has(k)) this.errors.push(`Pieces overlap at (${p.x + dx}, ${p.z + dz})`)
           occupancy.set(k, i)
         }
@@ -361,7 +362,7 @@ function bakeLane(def: PieceDef, p: PlacedPiece, laneIndex: number, reversed: bo
 }
 
 /** Every port of every piece with its world edge key and whether it has a partner (editor overlay). */
-export function portStatus(pieces: PlacedPiece[]): { pieceIndex: number; cx: number; cz: number; side: Side; level: number; matched: boolean }[] {
+export function portStatus(pieces: PlacedPiece[]): { pieceIndex: number; cx: number; cz: number; side: Side; level: number; key: string; matched: boolean }[] {
   const out: { pieceIndex: number; cx: number; cz: number; side: Side; level: number; key: string; matched: boolean }[] = []
   pieces.forEach((p, i) => {
     const def = PIECE_BY_TYPE[p.type]

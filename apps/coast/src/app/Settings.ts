@@ -27,8 +27,8 @@ const KEY = 'apex-coast.settings.v1'
 
 export const DEFAULT_SETTINGS: SettingsData = {
   style: 'modern',
-  // 320×224 at 30 Hz: the arcade board's own numbers.
-  retro: { width: 320, height: 224, presentHz: 30, scanlines: true, barrel: true, dither: false, phosphor: true, paletteLevels: 8, quantizeVerts: false, ringSegments: 12 },
+  // 320×224 at 60 Hz: the arcade board's own numbers (OutRun ran a full 60).
+  retro: { width: 320, height: 224, presentHz: 60, scanlines: true, barrel: true, dither: false, phosphor: true, paletteLevels: 8, quantizeVerts: false, ringSegments: 12 },
   modern: { bloom: true, motionBlur: false, chromatic: true, grain: true, smaa: true, slowmo: false },
   audio: { master: 0.8, music: 0.6, sfx: 0.9, engine: 0.6 },
   keys: DEFAULT_KEYS,

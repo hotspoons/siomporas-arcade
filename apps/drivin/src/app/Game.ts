@@ -223,7 +223,12 @@ export class Game implements LoopClient {
     this.container.classList.remove('is-driving')
     this.input.suppressGameplay = true
     this.loop.paused = true
-    this.editor.setData(this.fromEditor ? this.editor.current : this.trackData, null)
+    // Coming back from a test drive the editor still holds its track (and its saved id); otherwise open the
+    // track we were previewing, remembering which saved track it is so Save can save over it.
+    if (!this.fromEditor) {
+      const id = this.settings.data.trackId
+      this.editor.setData(this.trackData, id && id.startsWith('user') && this.tracks.get(id) === this.trackData ? id : this.tracks.list().find((t) => !t.builtin && t.name === this.trackData.name)?.id ?? null)
+    }
     this.editor.show()
     this.audio.setRunning(false)
   }

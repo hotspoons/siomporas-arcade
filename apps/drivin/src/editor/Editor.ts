@@ -330,10 +330,22 @@ export class Editor {
         this.flash('A title is needed')
         continue
       }
-      // Titles are unique: a new save with a taken title is refused rather than silently duplicated.
-      if (this.store.list().some((t) => t.name.trim().toLowerCase() === name.toLowerCase())) {
-        this.flash(`“${name}” already exists — pick another title`)
+      // Titles are unique. A built-in's name is off limits; one of your own you may replace.
+      const taken = this.store.list().find((t) => t.name.trim().toLowerCase() === name.toLowerCase())
+      if (taken?.builtin) {
+        this.flash(`“${name}” is a built-in track — pick another title`)
         continue
+      }
+      if (taken) {
+        const rr = await this.dialog(`You already have a track called “${name}”.`, [{ label: 'Replace it', value: 'replace', primary: true }, { label: 'Pick another title', value: 'again' }, { label: 'Cancel', value: 'cancel' }])
+        if (rr === 'cancel') return
+        if (rr === 'again') continue
+        this.data.name = name
+        this.title.textContent = name
+        this.currentId = this.store.save(this.data, taken.id)
+        this.refreshLoadList()
+        this.flash(`Replaced “${name}”`)
+        return
       }
       break
     }

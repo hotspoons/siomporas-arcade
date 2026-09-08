@@ -372,8 +372,12 @@ export class Game implements LoopClient {
       this.editor.tick()
       return 1
     }
-    if (this.menus.open) this.menus.handle(ui)
-    else if (this.state === 'driving') {
+    // The pause key toggles: while the pause menu is up it resumes, at any menu depth. Without this it
+    // only ever paused (the menu swallowed the edge) and you had to find Escape.
+    if (this.menus.open) {
+      if (ui.pause && this.state === 'paused') this.resume()
+      else this.menus.handle(ui)
+    } else if (this.state === 'driving') {
       if (ui.pause) this.pause()
       if (this.input.keyboard.wasPressed('KeyI') || this.input.keyboard.wasPressed('F7')) this.watchReplay()
       if (this.input.cameraEdge || this.touch?.cameraEdge) {

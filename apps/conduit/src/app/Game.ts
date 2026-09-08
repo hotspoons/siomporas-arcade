@@ -375,8 +375,10 @@ export class Game implements LoopClient {
     if (ui.togglePerf) this.perf.toggle()
     if (ui.toggleTune) this.tune.toggle()
     if (ui.toggleStyle) this.toggleStyle()
+    // The pause key toggles: while the pause menu is up it resumes, at any menu depth.
     if (this.menus.open) {
-      this.menus.handle(ui)
+      if (ui.pause && this.state === 'paused') this.resume()
+      else this.menus.handle(ui)
     } else if (this.state === 'running') {
       if (ui.pause) this.pause()
     }

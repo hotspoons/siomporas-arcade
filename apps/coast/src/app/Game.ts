@@ -252,6 +252,7 @@ export class Game implements LoopClient {
   applyView(): void {
     this.view.view = this.settings.data.view
     this.hud.setViewHint(this.settings.data.view)
+    this.view.hudLayer.setViewHint(this.settings.data.view === 'cockpit' ? 'C - CHASE VIEW' : 'C - COCKPIT VIEW')
   }
   applyCar(): void {
     this.view.setCar(this.settings.data.car)
@@ -302,8 +303,11 @@ export class Game implements LoopClient {
     if (ui.togglePerf) this.perf.toggle()
     if (ui.toggleTune) this.tune.toggle()
     if (ui.toggleStyle) this.toggleStyle()
-    if (this.menus.open) this.menus.handle(ui)
-    else if (this.state === 'running') {
+    // The pause key toggles: while the pause menu is up it resumes, at any menu depth.
+    if (this.menus.open) {
+      if (ui.pause && this.state === 'paused') this.resume()
+      else this.menus.handle(ui)
+    } else if (this.state === 'running') {
       if (ui.pause) this.pause()
       if (this.input.viewEdge || this.touch?.viewEdge) {
         this.settings.update((d) => (d.view = d.view === 'cockpit' ? 'chase' : 'cockpit'))
@@ -362,8 +366,14 @@ export class Game implements LoopClient {
       const pad = this.input.gamepad.connected
       const k = this.settings.data.keys
       const p = this.settings.data.pad
-      this.hud.setSwitchLabels(pad ? padLabel(p.wipers?.[0]) : keyLabel(k.wipers?.[0] ?? 'KeyR'), pad ? padLabel(p.lights?.[0]) : keyLabel(k.lights?.[0] ?? 'KeyL'))
-      this.hud.setSwitchNeeds(Boolean(t.rain) && !this.curr.wipersOn && this.state === 'running', Boolean(t.night) && !this.curr.lightsOn && this.state === 'running')
+      const wipersKey = pad ? padLabel(p.wipers?.[0]) : keyLabel(k.wipers?.[0] ?? 'KeyR')
+      const lightsKey = pad ? padLabel(p.lights?.[0]) : keyLabel(k.lights?.[0] ?? 'KeyL')
+      const needWipers = Boolean(t.rain) && !this.curr.wipersOn && this.state === 'running'
+      const needLights = Boolean(t.night) && !this.curr.lightsOn && this.state === 'running'
+      this.hud.setSwitchLabels(wipersKey, lightsKey)
+      this.hud.setSwitchNeeds(needWipers, needLights)
+      this.view.hudLayer.setSwitchLabels(wipersKey, lightsKey)
+      this.view.hudLayer.setSwitchNeeds(needWipers, needLights)
     }
     this.audio.update(this.curr, Math.abs(this.held.steer) > 0.6 && this.curr.speed > 40)
     this.feel(dt)

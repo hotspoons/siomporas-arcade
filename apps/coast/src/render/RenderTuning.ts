@@ -96,8 +96,12 @@ export const PALETTES: Record<string, Palette> = {
 }
 
 /** Live-tunable knobs for the tuning panel (F6). Values persist per browser; Copy JSON to ship new defaults. */
-/** 1 = paint the HUD inside the low-res buffer, so it is pixels in the same framebuffer as the road (retro style only). */
-export let HUD_RETRO = 0
+/**
+ * 1 = paint the HUD inside the low-res buffer, so it is pixels in the same framebuffer as the road
+ * (retro style only). On by default: for this game the chunky in-buffer HUD *is* the look — a crisp
+ * overlay on top of a 320-line road reads like a debug layer. Set it to 0 to compare.
+ */
+export let HUD_RETRO = 1
 
 export const RENDER_TUNE: TuneSection = {
   title: 'Render · camera, fog, road',

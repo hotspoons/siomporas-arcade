@@ -4,7 +4,7 @@
 // road sits on an embankment and the grass always meets the tarmac cleanly.
 
 import { CELL } from './Tuning'
-import { PIECE_BY_TYPE, rotatedSize } from './pieces'
+import { PIECE_BY_TYPE, applyMirror, makePathPoint, rotateLocal, rotatedSize } from './pieces'
 import type { PlacedPiece } from './Track'
 
 export function terrainIndex(size: number, cx: number, cz: number): number {
@@ -53,17 +53,75 @@ export function drapes(type: string): boolean {
   return !PAD_PIECES.has(type)
 }
 
+/** World-space centreline samples of a placed piece's lanes. */
+function centreline(p: PlacedPiece): { x: number; y: number; z: number }[] {
+  const def = PIECE_BY_TYPE[p.type]
+  const out: { x: number; y: number; z: number }[] = []
+  const pt = makePathPoint()
+  const r = { x: 0, z: 0 }
+  for (const lane of def.lanes)
+    for (let i = 0; i <= 24; i++) {
+      lane.path(i / 24, pt)
+      applyMirror(def, p, pt)
+      rotateLocal(def, p.rot, pt.x, pt.z, r)
+      out.push({ x: p.x * CELL + r.x, y: pt.y, z: p.z * CELL + r.z })
+    }
+  return out
+}
+
 /**
- * Pin the corners under pad pieces (loops, tunnels, banks…) to the ground height at the piece's
- * centre so their fixed geometry has level ground; draping neighbours meet them at that height.
+ * Grade the landscape to the roads. Two passes:
+ *
+ * - Pad pieces (loops, tunnels, banks…) pin their footprint to the ground height at their centre,
+ *   since their geometry is fixed and needs level ground.
+ * - Draped pieces (roads, ramps, humps…) cut a corridor: every corner of their footprint takes the
+ *   ground height of the nearest point on the piece's own centreline. Corners are 40 m apart, so the
+ *   cell a road runs through becomes a shelf that follows the road's rise and fall instead of a
+ *   hillside the tarmac has to slice through — which is what left terrain poking up through the road.
+ *
+ * Water keeps its own level, so a lake stays flat under a bridge.
  */
 export function flattenUnderPieces(heights: number[], size: number, pieces: PlacedPiece[]): void {
+  const original = heights.slice()
+  const wet = new Set<number>()
+  for (const p of pieces) {
+    if (PIECE_BY_TYPE[p.type]?.decor !== 'water') continue
+    const s = rotatedSize(PIECE_BY_TYPE[p.type], p.rot)
+    for (let z = p.z; z <= p.z + s.h; z++) for (let x = p.x; x <= p.x + s.w; x++) wet.add(terrainIndex(size, x, z))
+  }
+  // Corridor under draped road: each corner follows the nearest point of the road through its cell.
+  for (const p of pieces) {
+    const def = PIECE_BY_TYPE[p.type]
+    if (!def || def.decor || !drapes(p.type)) continue
+    const line = centreline(p)
+    if (!line.length) continue
+    const s = rotatedSize(def, p.rot)
+    for (let z = p.z; z <= p.z + s.h; z++)
+      for (let x = p.x; x <= p.x + s.w; x++) {
+        if (x < 0 || z < 0 || x > size || z > size) continue
+        const i = terrainIndex(size, x, z)
+        if (wet.has(i)) continue
+        const wx = x * CELL
+        const wz = z * CELL
+        let best = line[0]
+        let bestD = Infinity
+        for (const q of line) {
+          const d = (q.x - wx) ** 2 + (q.z - wz) ** 2
+          if (d < bestD) {
+            bestD = d
+            best = q
+          }
+        }
+        heights[i] = sampleHeight(original, size, best.x, best.z)
+      }
+  }
+  // Pads last: their level ground wins over any corridor that reaches the same corner.
   const pads: { p: PlacedPiece; y: number; s: { w: number; h: number } }[] = []
   for (const p of pieces) {
     const def = PIECE_BY_TYPE[p.type]
     if (!def || def.decor || drapes(p.type)) continue
     const s = rotatedSize(def, p.rot)
-    pads.push({ p, s, y: sampleHeight(heights, size, (p.x + s.w / 2) * CELL, (p.z + s.h / 2) * CELL) })
+    pads.push({ p, s, y: sampleHeight(original, size, (p.x + s.w / 2) * CELL, (p.z + s.h / 2) * CELL) })
   }
   for (const { p, s, y } of pads)
     for (let z = p.z; z <= p.z + s.h; z++)

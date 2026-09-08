@@ -27,6 +27,8 @@ export interface SettingsData {
     rollBlend: number
     headTurret: boolean
   }
+  /** Phone tilt steering the other way round from this game's default. */
+  tiltInvert?: boolean
   access: {
     reducedMotion: boolean
     colorblind: 'none' | 'deuteranopia' | 'protanopia' | 'tritanopia'
@@ -60,6 +62,7 @@ export const DEFAULT_SETTINGS: SettingsData = {
   keys: DEFAULT_KEYS,
   pad: DEFAULT_PAD,
   vr: { comfort: 'standard', rollBlend: 0, headTurret: false },
+  tiltInvert: false,
   access: { reducedMotion: false, colorblind: 'none', hudScale: 1 },
   visualSpeedGain: 1,
   steering: 1.5,

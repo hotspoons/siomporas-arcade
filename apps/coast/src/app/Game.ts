@@ -230,6 +230,7 @@ export class Game implements LoopClient {
   }
   applyAccessibility(): void {
     const a = this.settings.data.access
+    this.touch?.setTiltInvert(Boolean(this.settings.data.tiltInvert))
     document.documentElement.style.setProperty('--hud-scale', String(a.hudScale))
     this.modern.reducedMotion = a.reducedMotion
     this.hud.units = this.settings.data.units

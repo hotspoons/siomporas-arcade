@@ -94,3 +94,9 @@ Roads follow the landscape point by point; only pad pieces (loop, corkscrew, tun
 ## Banks join like tunnels (2026-09-08)
 Bank pieces bake at full roll; the ramp in/out (first/last quarter) and the centreline lift (so the inner edge stays at grade) are applied when the lane is baked, and only against unbanked neighbours — a bank meeting a bank stays fully banked through the joint with matching heights. Spline links between two banked connectors carry the roll across (read back from the neighbours' end frames and blended end to end), lifted the same way, so an oval of banks and links is one continuous embankment.
 Only banks leaning the same way (in driving direction) run through a joint; a left bank into a right bank eases to flat over the last/first quarter of each, and a link between opposite banks blends its roll through zero.
+
+## Mirrored pieces (2026-09-08)
+`PlacedPiece.mirror` flips a piece across its own direction of travel, before rotation: `portPlacement` swaps N/S ports and `applyMirror` mirrors the path point's z, up-z and roll. So a loop can shift its helix left instead of right, a corkscrew can wind the other way, and a bank can lean the other way without changing which way you enter it — the things that matter when a two-cell stunt piece has to fit an existing layout. The editor primes it with M (or the ⇅ Mirror button), the right-click menu mirrors a selection, and the ghost and top-down previews draw the mirrored path.
+
+## Tilt steering direction (2026-09-08)
+A car steers like a wheel: tilt the phone left and you go left (`TiltSensor.sign = -1` in both driving games). The tube racer keeps the craft leaning into the tilt (`sign = +1`), which is what it read like from the start. Settings → Invert tilt steering flips whichever default the game has, and only appears on touch devices.

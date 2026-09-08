@@ -300,6 +300,7 @@ export class Game implements LoopClient {
 
   applyAccessibility(): void {
     const a = this.settings.data.access
+    this.touch?.setTiltInvert(Boolean(this.settings.data.tiltInvert))
     document.documentElement.style.setProperty('--hud-scale', String(a.hudScale))
     this.view.rig.effectGain = a.reducedMotion ? 0.35 : 1
     this.modern.reducedMotion = a.reducedMotion

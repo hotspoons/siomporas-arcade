@@ -11,6 +11,13 @@ type Zone = 'gas' | 'brake' | 'gear' | 'turbo' | 'wipers' | 'lights' | 'view' | 
 export class TouchSource implements ExtraSource {
   readonly el: HTMLElement
   readonly tilt = new TiltSensor()
+  /** Base: a car steers like a wheel — tilt the phone left and you go left. */
+  private readonly tiltBase: 1 | -1 = -1
+
+  /** Settings: flip which way a tilt steers (the game's own default is applied on top of this). */
+  setTiltInvert(invert: boolean): void {
+    this.tilt.sign = invert ? ((-this.tiltBase) as 1 | -1) : this.tiltBase
+  }
   viewEdge = false
   private readonly pointers = new Map<number, { zone: Zone; x0: number; x: number }>()
   private edges = { gear: false, turbo: false, wipers: false, lights: false, view: false, pause: false, calib: false }

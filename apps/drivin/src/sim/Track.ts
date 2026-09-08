@@ -10,8 +10,8 @@ import {
   opposite,
   PIECE_BY_TYPE,
   rotateLocal,
-  rotatePortCell,
-  rotateSide,
+  applyMirror,
+  portPlacement,
   rotatedSize,
   sideOffset,
   type PieceDef,
@@ -32,6 +32,8 @@ export interface PlacedPiece {
   rot: number
   /** Base elevation level. */
   level: number
+  /** Flipped across the direction of travel (before rotation): a loop that exits left, a bank that leans the other way. */
+  mirror?: boolean
 }
 
 export interface TrackData {
@@ -135,10 +137,10 @@ export class Track {
         return
       }
       def.ports.forEach((port, pi) => {
-        const rc = rotatePortCell(def, p.rot, port.cx, port.cz)
-        const side = rotateSide(port.side, p.rot)
-        const cx = p.x + rc.cx
-        const cz = p.z + rc.cz
+        const pp = portPlacement(def, p, port)
+        const side = pp.side
+        const cx = p.x + pp.cx
+        const cz = p.z + pp.cz
         const level = p.level + port.dLevel
         ports.push({ key: edgeKey(cx, cz, side, level), pieceIndex: i, portIndex: pi, cx, cz, side, level })
       })
@@ -442,6 +444,7 @@ function bakeLane(def: PieceDef, p: PlacedPiece, laneIndex: number, reversed: bo
     const tl = t // along the lane in driving direction
     if (reversed) t = 1 - t
     ldef.path(t, pt)
+    applyMirror(def, p, pt)
     // Banked road: ramp the roll in/out only at ends that meet unbanked road, and lift the centreline
     // so the inner (lower) edge stays at grade — full banking runs straight across bank-to-bank joints.
     let roll = pt.roll
@@ -554,10 +557,10 @@ export function portStatus(pieces: PlacedPiece[], links: Link[] = []): { pieceIn
     const def = PIECE_BY_TYPE[p.type]
     if (!def) return
     def.ports.forEach((port, pi) => {
-      const rc = rotatePortCell(def, p.rot, port.cx, port.cz)
-      const side = rotateSide(port.side, p.rot)
-      const cx = p.x + rc.cx
-      const cz = p.z + rc.cz
+      const pp = portPlacement(def, p, port)
+      const side = pp.side
+      const cx = p.x + pp.cx
+      const cz = p.z + pp.cz
       const level = p.level + port.dLevel
       out.push({ pieceIndex: i, portIndex: pi, cx, cz, side, level, key: edgeKey(cx, cz, side, level), matched: false, linked: false })
     })

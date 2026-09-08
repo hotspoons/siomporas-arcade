@@ -21,6 +21,13 @@ export class TouchSource implements ExtraSource {
   readonly sensor = new TiltSensor()
   private readonly pointers = new Map<number, { zone: Zone; x0: number; x: number }>()
   private tilt = 0
+  /** Base: the craft leans into the tilt, which reads right for a tube racer. */
+  private readonly tiltBase: 1 | -1 = 1
+
+  /** Settings: flip which way a tilt steers (the game's own default is applied on top of this). */
+  setTiltInvert(invert: boolean): void {
+    this.sensor.sign = invert ? ((-this.tiltBase) as 1 | -1) : this.tiltBase
+  }
   private shockEdge = false
   private pauseEdge = false
   private calibrateEdge = false

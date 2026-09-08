@@ -11,7 +11,7 @@
 
 import { smoothstep } from '@apex/engine/math/scalar'
 import { CELL, LEVEL_H } from './Tuning'
-import { PIECE_BY_TYPE, opposite, rotatePortCell, rotateSide, sideOffset, type PieceDef, type Side } from './pieces'
+import { PIECE_BY_TYPE, opposite, portPlacement, sideOffset, type PieceDef, type Side } from './pieces'
 import type { PlacedPiece } from './Track'
 
 export interface PortRef {
@@ -48,11 +48,11 @@ export function portWorld(pieces: PlacedPiece[], ref: PortRef): PortWorld | null
   const def = p ? PIECE_BY_TYPE[p.type] : undefined
   const port = def?.ports[ref.port]
   if (!p || !def || !port) return null
-  const rc = rotatePortCell(def, p.rot, port.cx, port.cz)
-  const side = rotateSide(port.side, p.rot)
+  const pp = portPlacement(def, p, port)
+  const side = pp.side
   const o = sideOffset(side)
-  const cx = p.x + rc.cx
-  const cz = p.z + rc.cz
+  const cx = p.x + pp.cx
+  const cz = p.z + pp.cz
   const level = p.level + port.dLevel
   return { x: (cx + 0.5 + o.dx * 0.5) * CELL, y: level * LEVEL_H, z: (cz + 0.5 + o.dz * 0.5) * CELL, dx: o.dx, dz: o.dz, level, cx, cz, side }
 }

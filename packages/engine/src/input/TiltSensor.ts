@@ -11,6 +11,11 @@ export class TiltSensor {
   private lastT = 0
   /** Low-pass time constant, seconds. */
   smooth = 0.06
+  /**
+   * Which way a tilt steers: +1 = tilting the phone left steers right (the craft leans into the tilt,
+   * how the tube racer reads), -1 = tilting left steers left (a steering wheel, how a car reads).
+   */
+  sign: 1 | -1 = 1
   onFirstReading: (() => void) | null = null
 
   async requestSensors(): Promise<void> {
@@ -79,6 +84,6 @@ export class TiltSensor {
     if (!this.ok) return 0
     const deg = this.rawTiltDeg() - this.neutral
     const mag = Math.max(0, Math.abs(deg) - deadzoneDeg) / (rangeDeg - deadzoneDeg)
-    return Math.sign(deg) * Math.min(1, mag) ** curve
+    return this.sign * Math.sign(deg) * Math.min(1, mag) ** curve
   }
 }

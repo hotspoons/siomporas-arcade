@@ -21,6 +21,8 @@ export interface SettingsData {
   startStage: string
   units: 'kmh' | 'mph'
   access: { reducedMotion: boolean; hudScale: number }
+  /** Phone tilt steering the other way round from this game's default. */
+  tiltInvert?: boolean
   haptics: number
   showPerf: boolean
 }
@@ -42,6 +44,7 @@ export const DEFAULT_SETTINGS: SettingsData = {
   startStage: 'A',
   units: 'kmh',
   access: { reducedMotion: false, hudScale: 1 },
+  tiltInvert: false,
   haptics: 1,
   showPerf: false,
 }

@@ -514,6 +514,26 @@ export function rotatePortCell(def: PieceDef, rot: number, cx: number, cz: numbe
   }
 }
 
+/** N ↔ S: the side swap for a piece mirrored across its direction of travel. */
+export function mirrorSide(side: Side): Side {
+  return side === 'N' ? 'S' : side === 'S' ? 'N' : side
+}
+
+/** Where a port lands on a placed piece's footprint (mirror first, then rotation), relative to the anchor cell. */
+export function portPlacement(def: PieceDef, p: { rot: number; mirror?: boolean }, port: Port): { cx: number; cz: number; side: Side } {
+  const cz = p.mirror ? def.h - 1 - port.cz : port.cz
+  const rc = rotatePortCell(def, p.rot, port.cx, cz)
+  return { cx: rc.cx, cz: rc.cz, side: rotateSide(p.mirror ? mirrorSide(port.side) : port.side, p.rot) }
+}
+
+/** Mirror a path point across the piece's travel axis (flips banking and helix handedness too). Call before rotateLocal. */
+export function applyMirror(def: PieceDef, p: { mirror?: boolean }, pt: PathPoint): void {
+  if (!p.mirror) return
+  pt.z = def.h * CELL - pt.z
+  pt.uz = -pt.uz
+  pt.roll = -pt.roll
+}
+
 export function opposite(side: Side): Side {
   return SIDES[(SIDES.indexOf(side) + 2) % 4]
 }

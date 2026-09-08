@@ -131,6 +131,7 @@ export function buildMenus(game: Game) {
       slider('Haptics', () => s().haptics, (v) => set((d) => (d.haptics = v))),
       { kind: 'info', label: '— ACCESS —' },
       toggle('Reduced motion', () => s().access.reducedMotion, (v) => set((d) => (d.access.reducedMotion = v))),
+      ...(game.touch ? [toggle('Invert tilt steering', () => Boolean(s().tiltInvert), (v) => set((d) => (d.tiltInvert = v)), () => game.applyAccessibility())] : []),
       slider('HUD scale', () => s().access.hudScale, (v) => set((d) => (d.access.hudScale = v)), 0.7, 1.6),
     ],
     footer: '← → adjust · Esc back',

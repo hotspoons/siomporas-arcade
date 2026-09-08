@@ -19,6 +19,8 @@ export interface SettingsData {
   trackId: string
   laps: number
   access: { reducedMotion: boolean; hudScale: number }
+  /** Phone tilt steering the other way round from this game's default. */
+  tiltInvert?: boolean
   /** 0..1 rumble / trigger / phone vibration strength. */
   haptics: number
   showPerf: boolean
@@ -42,6 +44,7 @@ export const DEFAULT_SETTINGS: SettingsData = {
   trackId: 'builtin:0',
   laps: 3,
   access: { reducedMotion: false, hudScale: 1 },
+  tiltInvert: false,
   haptics: 1,
   showPerf: false,
   playerName: 'ACE',

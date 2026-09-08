@@ -16,7 +16,7 @@
 //   click a red connector, then another   a smooth spline road links them; click the link to select it,
 //   , / .            tighter / wider curve   B camber on/off   ⌥-click or Delete unlinks
 
-import { PIECES, PIECE_BY_TYPE, makePathPoint, opposite, rotateLocal, rotatePortCell, rotateSide, rotatedSize, sideOffset, type PieceDef } from '../sim/pieces'
+import { PIECES, PIECE_BY_TYPE, applyMirror, makePathPoint, opposite, portPlacement, rotateLocal, rotatedSize, sideOffset, type PieceDef } from '../sim/pieces'
 import { CELL } from '../sim/Tuning'
 import { Track, portStatus, type PlacedPiece, type TrackData } from '../sim/Track'
 import type { TrackStore } from '../app/TrackStore'
@@ -34,7 +34,7 @@ const UNDO_DEPTH = 60
 const IS_MAC = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
 const MOD = IS_MAC ? '⌘' : 'Ctrl'
 const TERRAIN_HINTS = 'drag raise · ⌥-drag / right-drag lower · ⇧-drag flatten to the primed level · [ ] brush · G back to pieces'
-const HINTS = `click red connectors to link · ${MOD}-click multi · ⇧-click range · ⌥-click delete · ${MOD}⇧ force insert · ${MOD}⌥ rotate · ⇧⌥ click/right-click raise/lower · Z X rotate · Q E level · wheel zoom · middle-drag pan · right-click menu`
+const HINTS = `click red connectors to link · ${MOD}-click multi · ⇧-click range · ⌥-click delete · ${MOD}⇧ force insert · ${MOD}⌥ rotate · ⇧⌥ click/right-click raise/lower · Z X rotate · M mirror · Q E level · wheel zoom · middle-drag pan · right-click menu`
 
 export interface EditorCallbacks {
   /** `force` drives a track that fails validation (the editor asked and the user said yes). */
@@ -66,6 +66,8 @@ export class Editor {
   private selectedType = 'straight'
   private rot = 0
   private level = 0
+  /** Primed piece flipped across its travel axis (M). */
+  private mirror = false
   /** World cell under the pointer (may be outside the grid), or null when the pointer left the canvas. */
   private hover: Cell | null = null
   private selection = new Set<number>()
@@ -112,7 +114,7 @@ export class Editor {
         <span class="sep"></span>
         <button data-act="zoom-" title="−">−</button><button data-act="zoom-fit" title="0">Fit</button><button data-act="zoom+" title="+">+</button>
         <span class="sep"></span>
-        <button data-act="rotate-" title="Z">↺</button><button data-act="rotate" title="X / R">↻</button>
+        <button data-act="rotate-" title="Z">↺</button><button data-act="rotate" title="X / R">↻</button><button data-act="mirror" data-mirror title="M · flip across the direction of travel (left-hand loops, corkscrews, banks)">⇅ Mirror</button>
         <button data-act="level-" title="Q">Level −</button><span data-level>L0</span><button data-act="level+" title="E">Level +</button>
         <span class="sep"></span>
         <button data-act="mode" data-mode title="G">⛰ Landscape</button>
@@ -495,6 +497,9 @@ export class Editor {
       case 'brush+':
         this.brush = Math.min(8, this.brush + 1)
         break
+      case 'mirror':
+        this.toggleMirror()
+        break
       case 'rotate':
         this.rotate(1)
         break
@@ -536,6 +541,7 @@ export class Editor {
   private syncToolbar(): void {
     ;(this.el.querySelector('[data-level]') as HTMLElement).textContent = `L${this.level}`
     ;(this.el.querySelector('[data-brush]') as HTMLElement).textContent = `brush ${this.brush}`
+    this.el.querySelector('[data-mirror]')?.classList.toggle('active', this.mirror)
     const modeBtn = this.el.querySelector('[data-mode]') as HTMLElement
     modeBtn.classList.toggle('active', this.mode === 'terrain')
     modeBtn.textContent = this.mode === 'terrain' ? '⛰ Landscape ✓' : '⛰ Landscape'
@@ -688,6 +694,18 @@ export class Editor {
         p.z += Math.floor((before.h - after.h) / 2)
       }
     } else this.rot = (this.rot + dir + 4) % 4
+    this.dirty = true
+  }
+
+  /** Flip the selection (or the hovered piece for the menu) across its travel axis, else the primed piece. */
+  private toggleMirror(indices?: number[]): void {
+    const targets = indices ?? [...this.selection]
+    if (targets.length) {
+      this.pushUndo()
+      for (const i of targets) this.data.pieces[i].mirror = !this.data.pieces[i].mirror
+      this.settleTerrain()
+    } else this.mirror = !this.mirror
+    this.syncToolbar()
     this.dirty = true
   }
 
@@ -867,6 +885,9 @@ export class Editor {
       case 'KeyR':
       case 'KeyX':
         this.rotate(1)
+        break
+      case 'KeyM':
+        this.toggleMirror()
         break
       case 'KeyZ':
         this.rotate(-1)
@@ -1243,7 +1264,7 @@ export class Editor {
     // Jump pieces face their landing: if another open connector lies along one of the rotations' lip line, take it.
     let rot = this.rot
     if (def.ports.some((p) => p.open)) rot = this.faceJump(def, c, rot)
-    this.data.pieces.push({ type: this.selectedType, x: c.x, z: c.z, rot, level: this.level })
+    this.data.pieces.push({ type: this.selectedType, x: c.x, z: c.z, rot, level: this.level, mirror: this.mirror || undefined })
     this.selection.clear()
     this.settleTerrain()
     this.dirty = true
@@ -1257,11 +1278,11 @@ export class Editor {
       if (rotatedSize(def, r).w !== rotatedSize(def, rot).w && !this.fits(def.type, r, c.x, c.z, this.level)) continue
       for (const port of def.ports) {
         if (!port.open) continue
-        const rc = rotatePortCell(def, r, port.cx, port.cz)
-        const side = rotateSide(port.side, r)
+        const pp = portPlacement(def, { rot: r, mirror: this.mirror }, port)
+        const side = pp.side
         const o = sideOffset(side)
-        const cx = c.x + rc.cx
-        const cz = c.z + rc.cz
+        const cx = c.x + pp.cx
+        const cz = c.z + pp.cz
         for (let d = 2; d <= 14; d++) {
           const hit = openPorts.find((p) => p.cx === cx + o.dx * d && p.cz === cz + o.dz * d && p.side === opposite(side) && p.level === this.level + port.dLevel)
           if (hit) return r
@@ -1421,9 +1442,10 @@ export class Editor {
       const targets = this.selection.has(under) ? [...this.selection] : [under]
       const p = this.data.pieces[under]
       items.push(
-        { label: `${PIECE_BY_TYPE[p.type].label}${targets.length > 1 ? ` (+${targets.length - 1} selected)` : ''} · L${p.level}`, run: () => {} },
+        { label: `${PIECE_BY_TYPE[p.type].label}${targets.length > 1 ? ` (+${targets.length - 1} selected)` : ''} · L${p.level}${p.mirror ? ' · mirrored' : ''}`, run: () => {} },
         { label: 'Rotate ↻', key: 'X', run: () => this.rotate(1, targets) },
         { label: 'Rotate ↺', key: 'Z', run: () => this.rotate(-1, targets) },
+        { label: p.mirror ? 'Unmirror' : 'Mirror ⇅', key: 'M', run: () => this.toggleMirror(targets) },
         { label: 'Level +', key: 'E', run: () => this.changeLevel(1, targets) },
         { label: 'Level −', key: 'Q', run: () => this.changeLevel(-1, targets) },
         { label: 'Duplicate', key: 'D', run: () => this.duplicate(targets) },
@@ -1669,7 +1691,7 @@ export class Editor {
           const a = toPx(this.hover.x * CELL, (this.hover.z + size.h) * CELL)
           c.fillStyle = ok ? 'rgba(255,255,255,0.12)' : 'rgba(255,59,92,0.25)'
           c.fillRect(a.x, a.y, size.w * cell, size.h * cell)
-          drawLanes(c, def, { type: def.type, x: this.hover.x, z: this.hover.z, rot: this.rot, level: this.level }, toPx, cell / CELL, ok ? 'rgba(255,255,255,0.7)' : 'rgba(255,59,92,0.8)', null)
+          drawLanes(c, def, { type: def.type, x: this.hover.x, z: this.hover.z, rot: this.rot, level: this.level, mirror: this.mirror }, toPx, cell / CELL, ok ? 'rgba(255,255,255,0.7)' : 'rgba(255,59,92,0.8)', null)
         }
       } else {
         const shift = Math.max(0, -this.hover.x, -this.hover.z)
@@ -1711,6 +1733,7 @@ function drawLanes(c: CanvasRenderingContext2D, def: PieceDef, p: PlacedPiece, t
     const n = 24
     for (let i = 0; i <= n; i++) {
       lane.path(i / n, pt)
+      applyMirror(def, p, pt)
       rotateLocal(def, p.rot, pt.x, pt.z, r)
       const q = toPx(p.x * CELL + r.x, p.z * CELL + r.z)
       if (i === 0) c.moveTo(q.x, q.y)

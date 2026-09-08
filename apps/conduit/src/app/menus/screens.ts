@@ -155,6 +155,7 @@ export function buildMenus(game: Game) {
         },
       },
       { kind: 'info', label: '— HANDLING —' },
+      ...(game.touch ? [toggle('Invert tilt steering', () => Boolean(s().tiltInvert), (v) => set((d) => (d.tiltInvert = v)), () => game.applyAccessibility())] : []),
       {
         kind: 'slider',
         label: 'Steering speed',

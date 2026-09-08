@@ -1,6 +1,6 @@
 // Built-in tracks, laid out with the turtle so connectivity is by construction.
 
-import { PIECE_BY_TYPE, opposite, rotatePortCell, rotateSide, sideOffset } from '../pieces'
+import { PIECE_BY_TYPE, opposite, portPlacement, sideOffset } from '../pieces'
 import type { PlacedPiece, TrackData } from '../Track'
 import { layFrom, layTrack, type Cursor } from './lay'
 
@@ -45,8 +45,9 @@ export const HIGHLINE: TrackData = layTrack('Highline', 12, 3, 3, [
 export function portExit(p: PlacedPiece, portIndex: number): Cursor {
   const def = PIECE_BY_TYPE[p.type]
   const port = def.ports[portIndex]
-  const rc = rotatePortCell(def, p.rot, port.cx, port.cz)
-  const side = rotateSide(port.side, p.rot)
+  const pp = portPlacement(def, p, port)
+  const side = pp.side
+  const rc = pp
   const o = sideOffset(side)
   return { cx: p.x + rc.cx + o.dx, cz: p.z + rc.cz + o.dz, side: opposite(side), level: p.level + port.dLevel }
 }

@@ -38,13 +38,13 @@ function nearestYaw(yaw: number): number {
   return best
 }
 import { Background } from './Background'
-import { Cockpit } from './Cockpit'
+import { COCKPIT_H, COCKPIT_W, Cockpit } from './Cockpit'
 import { Projection } from './Projection'
-import { BANK_ROLL, BANK_SLOPE, BANK_TIERS, BANK_TIER_COUNT, BANK_TIER_H, BANK_TIER_W, BEACH_WIDTH, CAM_BOUNCE, TUNNEL_DARK, TUNNEL_HALF_WIDTH, TUNNEL_HEIGHT, HORIZON_ROLL_SHARE, STEER_ROLL, CURVE_UNIT, FOG_MODERN, FOG_RETRO, HEADLIGHT_REACH, LANE_WIDTH, LIGHTS_OFF_AMBIENT, LOGICAL_HEIGHT, MAX_SPRITES, NIGHT_AMBIENT, PALETTES, RAIL_HEIGHT, RUMBLE_WIDTH, SHOULDER_WIDTH, VIEWS, type Palette } from './RenderTuning'
+import { BANK_ROLL, BANK_SLOPE, BANK_TIER_COUNT, BANK_TIER_H, BANK_TIER_W, BEACH_WIDTH, CAM_BOUNCE, TUNNEL_DARK, TUNNEL_HALF_WIDTH, TUNNEL_HEIGHT, HORIZON_ROLL_SHARE, STEER_ROLL, CURVE_UNIT, FOG_MODERN, FOG_RETRO, HEADLIGHT_REACH, LANE_WIDTH, LIGHTS_OFF_AMBIENT, LOGICAL_HEIGHT, MAX_SPRITES, NIGHT_AMBIENT, PALETTES, RAIL_HEIGHT, RUMBLE_WIDTH, SHOULDER_WIDTH, VIEWS, type Palette } from './RenderTuning'
 import { LIVERIES } from './procgen'
 import { Rain } from './Rain'
 import type { Theme } from '../sim/Road'
-import { RoadMesh } from './RoadMesh'
+import { RoadMesh, bermLift } from './RoadMesh'
 import { SpriteAtlas } from './SpriteAtlas'
 import { SpriteBatch } from './SpriteBatch'
 
@@ -209,7 +209,7 @@ export class RenderWorld {
     // On a banked curve the camera rides the tilted surface at its own lateral position.
     const camSeg = stage.segmentAt(camZ)
     const camTilt = camSeg.bank > 0.02 && Math.abs(camSeg.curve) > 0.02 ? -Math.sign(camSeg.curve) * camSeg.bank * BANK_SLOPE : 0
-    this.camY = stage.heightAt(camZ) + view.camHeight + curr.airY * (view.drawPlayer ? 0.4 : 1) + camTilt * Math.max(-40, Math.min(40, x * ROAD_HALF_WIDTH))
+    this.camY = stage.heightAt(camZ) + view.camHeight + curr.airY * (view.drawPlayer ? 0.4 : 1) + bermLift(x * ROAD_HALF_WIDTH, camTilt, this.road.plateau)
     // Road bounce only while actually driving: a finished or timed-out run sits still.
     this.bounce = curr.phase === 'driving' && speed > 5 ? Math.sin(this.time * 28) * CAM_BOUNCE * (speed / 84) : 0
     const camY = this.camY + this.bounce
@@ -226,19 +226,14 @@ export class RenderWorld {
     // wheel is turned (the cockpit stays level). Banked curves step the cockpit up in lane
     // tiers, Rad Mobile style: each outer lane you climb adds BANK_ROLL, plateauing after
     // BANK_TIERS lanes; the horizon takes the same subtle share of that steady lean.
-    const bank = segAt(base + 2).bank
-    const curveHere = segAt(base + 2).curve
-    let bankTarget = 0
-    if (bank > 0 && Math.abs(curveHere) > 0.05) {
-      const outside = Math.max(0, -Math.sign(curveHere) * x) // 0 at centre, 1 at the high edge
-      const tier = Math.min(BANK_TIERS, Math.floor(outside / LANE_WIDTH + 0.5))
-      bankTarget = Math.sign(curveHere) * bank * tier * BANK_ROLL
-    }
+    // The car sits on the banked surface, so the whole view rolls by the bank angle under it: the road
+    // reads level beneath you and the horizon tilts (Rad Mobile). Steering adds a subtle transient.
+    const bankTarget = -Math.atan(camTilt) * BANK_ROLL
     this.steerRoll = expApproach(this.steerRoll, curr.steer * STEER_ROLL * Math.min(1, speed / 40), 4, dt)
     this.bankRoll = expApproach(this.bankRoll, bankTarget, 5, dt)
     const shake = curr.wreck ? Math.sin(this.time * 26) * 0.14 * (1 - curr.crashT) : 0
-    const horizon = (this.steerRoll + this.bankRoll + shake) * HORIZON_ROLL_SHARE
-    const roll = this.bankRoll + shake
+    const horizon = this.steerRoll * HORIZON_ROLL_SHARE + this.bankRoll + shake * HORIZON_ROLL_SHARE
+    const roll = shake
     // First person: a crash spins the car round once (a wreck, twice) — a yaw, the same spin the
     // chase camera shows from outside. Rows shear sideways by depth × tan(yaw), the road leaves the
     // screen, and while you face backwards there is only grass and sky; the skyline wraps once per turn.
@@ -250,8 +245,11 @@ export class RenderWorld {
     const cover = 1 + Math.abs(horizon) * 1.6
     this.world.scale.set(cover, cover, 1)
     this.cockpit.mesh.rotation.z = -roll
+    // The cockpit keeps its own aspect: scale to cover the screen and crop (sides on tall windows, top on wide ones).
     const ccover = 1 + Math.abs(roll) * 1.3
-    this.cockpit.mesh.scale.set(W * ccover, H * ccover, 1)
+    const cf = Math.max(W / COCKPIT_W, H / COCKPIT_H) * ccover
+    this.cockpit.mesh.scale.set(COCKPIT_W * cf, COCKPIT_H * cf, 1)
+    this.cockpit.mesh.position.set(W / 2, (COCKPIT_H * cf) / 2, 0)
 
     // Pass 1, near → far: accumulate the curve, project rows, resolve hill clipping.
     let xOff = 0
@@ -267,6 +265,7 @@ export class RenderWorld {
       {
         const scale = P.scaleAt(zRel)
         this.rowScale[n] = scale
+        this.rowTilt[n] = seg.bank > 0.02 && Math.abs(seg.curve) > 0.02 ? -Math.sign(seg.curve) * seg.bank * BANK_SLOPE : 0
         this.rowX[n] = P.screenX(xOff - camX + zRel * yawTan, scale)
         this.rowY[n] = P.screenY(seg.y0 - camY, scale)
         if (n === 0) this.rowY[n] = Math.min(this.rowY[n], -4)
@@ -305,10 +304,9 @@ export class RenderWorld {
       const s2 = this.rowScale[n + 1]
       const fog = this.rowFog[n]
       const zRel = (base + n) * SEG_LENGTH - camZ
-      // Banked curve: tilt this row's plane about the centreline, outer edge up (Rad Mobile's berms).
-      const tilt = seg.bank > 0.02 && Math.abs(seg.curve) > 0.02 ? -Math.sign(seg.curve) * seg.bank * BANK_SLOPE : 0
-      this.rowTilt[n] = tilt
-      this.road.setTilt(x1, s1, x2, s2, tilt)
+      // Banked curve: tilt the plane about the centreline, outer edge up (Rad Mobile's berms). Each row
+      // edge uses its own slope so neighbouring quads share vertices exactly.
+      this.road.setTilt(x1, s1, this.rowTilt[n], x2, s2, this.rowTilt[n + 1])
       // Inside a tunnel it is night whatever the sky says: headlights or a dim bore, lit strips on the ceiling.
       const inTunnel = seg.tunnel
       this.road.setDim(inTunnel ? (curr.lightsOn ? Math.max(TUNNEL_DARK, this.brightAt(zRel) * 0.9 + 0.1) : TUNNEL_DARK) : night ? this.brightAt(zRel) : 1)
@@ -443,7 +441,7 @@ export class RenderWorld {
           const viewYaw = yaw === 0 ? (Math.atan2((curr.trafficX[ci] - x) * ROAD_HALF_WIDTH, dz) * 180) / Math.PI : yaw
           const viewPitch = (view.drawPlayer ? 9 : 2) + (Math.atan2(camY - stage.heightAt(cz), dz) * 180) / Math.PI
           const frame = this.atlas.frame(kind, viewYaw, viewPitch)
-          if (frame) this.sprites.add(sx + curr.trafficX[ci] * ROAD_HALF_WIDTH * sc, sy, frame.heightM * sc, frame, this.rowFog[n], this.brightAt((base + n) * SEG_LENGTH - camZ), clip)
+          if (frame) this.sprites.add(sx + curr.trafficX[ci] * ROAD_HALF_WIDTH * sc, sy, frame.heightM * sc, frame, this.rowFog[n], this.brightAt((base + n) * SEG_LENGTH - camZ), clip, -Math.atan(this.rowTilt[n]))
         }
       }
       if (seg.runway || base + n < 0) continue
@@ -476,7 +474,7 @@ export class RenderWorld {
           squash = 0.62
         }
       }
-      if (frame) this.sprites.add(W / 2 + curr.steer * 2, py + hop, frame.heightM * scale * squash, frame, 0, 1, -1e9)
+      if (frame) this.sprites.add(W / 2 + curr.steer * 2, py + hop, frame.heightM * scale * squash, frame, 0, 1, -1e9, -Math.atan(this.rowTilt[1]))
     }
     if (this.previewKind) {
       const f = this.atlas.frame(this.previewKind, this.previewYaw)
@@ -527,7 +525,7 @@ export class RenderWorld {
   private tiltLift(n: number, lateralM: number): number {
     const t = this.rowTilt[n]
     if (!t) return 0
-    return Math.max(-40, Math.min(40, lateralM)) * t * this.rowScale[n]
+    return bermLift(lateralM, t, this.road.plateau) * this.rowScale[n]
   }
 
   render(): void {

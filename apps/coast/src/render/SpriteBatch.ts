@@ -7,12 +7,14 @@ import type { SpriteFrame } from './SpriteAtlas'
 const VERT = /* glsl */ `
 attribute vec4 aRect;   // x, y (bottom-centre, screen), w, h
 attribute vec4 aUv;     // u0 v0 u1 v1
-attribute vec4 aTint;   // fogT, brightness, unused, clipY
+attribute vec4 aTint;   // fogT, brightness, roll (radians about the anchor), clipY
 varying vec2 vUv;
 varying vec4 vTint;
 varying float vScreenY;
 void main() {
-  vec2 p = vec2(aRect.x + (position.x - 0.5) * aRect.z, aRect.y + position.y * aRect.w);
+  vec2 o = vec2((position.x - 0.5) * aRect.z, position.y * aRect.w);
+  float c = cos(aTint.z), s = sin(aTint.z);
+  vec2 p = vec2(aRect.x + o.x * c - o.y * s, aRect.y + o.x * s + o.y * c);
   vUv = vec2(mix(aUv.x, aUv.z, position.x), mix(aUv.y, aUv.w, position.y));
   vTint = aTint;
   vScreenY = p.y;
@@ -79,7 +81,7 @@ export class SpriteBatch {
   }
 
   /** Add a sprite by bottom-centre screen position, height in screen px, frame, fog weight, brightness and clip. */
-  add(x: number, y: number, h: number, f: SpriteFrame, fogT: number, bright: number, clipY: number): void {
+  add(x: number, y: number, h: number, f: SpriteFrame, fogT: number, bright: number, clipY: number, roll = 0): void {
     if (this.count >= this.capacity) return
     const i = this.count++
     const w = h * (f.widthM / f.heightM)
@@ -87,7 +89,7 @@ export class SpriteBatch {
     const ry = y - f.baseline * h
     this.rect.setXYZW(i, x, ry, w, h)
     this.uv.setXYZW(i, f.u0, f.v0, f.u1, f.v1)
-    this.tint.setXYZW(i, fogT, bright, 0, clipY)
+    this.tint.setXYZW(i, fogT, bright, roll, clipY)
   }
 
   end(): void {

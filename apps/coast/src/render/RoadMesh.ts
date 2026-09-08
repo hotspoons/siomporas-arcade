@@ -3,10 +3,16 @@
 // coloured in alternating bands and blended toward the fog colour.
 
 import { BufferGeometry, Color, DoubleSide, DynamicDrawUsage, Float32BufferAttribute, Mesh, ShaderMaterial } from 'three'
-import { DRAW_SEGMENTS } from '../sim/Tuning'
+import { DRAW_SEGMENTS, ROAD_HALF_WIDTH } from '../sim/Tuning'
 
 const QUADS_PER_SEGMENT = 18
 const MAX_QUADS = (DRAW_SEGMENTS + 4) * QUADS_PER_SEGMENT
+
+/** Height (metres) of a banked road's surface at lateral offset u (m, + right): 0 at the inner edge, |tilt| per metre outward, plateauing past the outer shoulder. */
+export function bermLift(u: number, tilt: number, plateau: number): number {
+  const d = Math.sign(tilt) * u + ROAD_HALF_WIDTH // distance from the inner edge toward the outside
+  return Math.abs(tilt) * Math.max(0, Math.min(2 * ROAD_HALF_WIDTH + plateau, d))
+}
 
 export class RoadMesh {
   readonly mesh: Mesh
@@ -19,11 +25,14 @@ export class RoadMesh {
   private dim = 1
   // Banked rows: the road plane tilts about its centreline; every quad vertex is lifted by its
   // lateral distance from the row centre × slope (clamped so the far grass doesn't fly away).
-  private tilt = 0
+  private t1 = 0
+  private t2 = 0
   private tx1 = 0
   private ts1 = 1
   private tx2 = 0
   private ts2 = 1
+  /** Lateral metres over which the plane tilts; beyond it the ground plateaus at the edge height (a berm, not a cliff). */
+  plateau = 13
 
   constructor() {
     this.pos = new Float32BufferAttribute(new Float32Array(MAX_QUADS * 4 * 3), 3)
@@ -64,22 +73,23 @@ export class RoadMesh {
 
   begin(): void {
     this.quads = 0
-    this.tilt = 0
+    this.t1 = this.t2 = 0
   }
 
-  /** Set the current row's tilt: centre x and scale of the near and far rows, and the slope (screen-y per lateral metre). */
-  setTilt(x1: number, s1: number, x2: number, s2: number, slope: number): void {
-    this.tilt = slope
+  /** Set the current row pair's tilt: centre x, scale and slope (screen-y per lateral metre) of the near and far rows. */
+  setTilt(x1: number, s1: number, slope1: number, x2: number, s2: number, slope2: number): void {
+    this.t1 = slope1
+    this.t2 = slope2
     this.tx1 = x1
     this.ts1 = s1
     this.tx2 = x2
     this.ts2 = s2
   }
 
-  private lift(x: number, xr: number, s: number): number {
-    if (this.tilt === 0) return 0
-    const u = Math.max(-40, Math.min(40, (x - xr) / s))
-    return u * this.tilt * s
+  /** Berm profile: level at the inner edge, rising toward the outer edge, flat again past the plateau. */
+  private lift(x: number, xr: number, s: number, tilt: number): number {
+    if (tilt === 0) return 0
+    return bermLift((x - xr) / s, tilt, this.plateau) * s
   }
 
   /** Trapezoid between two screen rows: (x1 ± w1) at y1 and (x2 ± w2) at y2. */
@@ -88,10 +98,10 @@ export class RoadMesh {
     this.c.set(color).lerp(this.fog, fogT)
     if (this.dim !== 1) this.c.multiplyScalar(this.dim)
     const v = this.quads * 4
-    this.pos.setXYZ(v, x1 - w1, y1 + this.lift(x1 - w1, this.tx1, this.ts1), 0)
-    this.pos.setXYZ(v + 1, x1 + w1, y1 + this.lift(x1 + w1, this.tx1, this.ts1), 0)
-    this.pos.setXYZ(v + 2, x2 + w2, y2 + this.lift(x2 + w2, this.tx2, this.ts2), 0)
-    this.pos.setXYZ(v + 3, x2 - w2, y2 + this.lift(x2 - w2, this.tx2, this.ts2), 0)
+    this.pos.setXYZ(v, x1 - w1, y1 + this.lift(x1 - w1, this.tx1, this.ts1, this.t1), 0)
+    this.pos.setXYZ(v + 1, x1 + w1, y1 + this.lift(x1 + w1, this.tx1, this.ts1, this.t1), 0)
+    this.pos.setXYZ(v + 2, x2 + w2, y2 + this.lift(x2 + w2, this.tx2, this.ts2, this.t2), 0)
+    this.pos.setXYZ(v + 3, x2 - w2, y2 + this.lift(x2 - w2, this.tx2, this.ts2, this.t2), 0)
     for (let k = 0; k < 4; k++) this.col.setXYZ(v + k, this.c.r, this.c.g, this.c.b)
     this.quads++
   }

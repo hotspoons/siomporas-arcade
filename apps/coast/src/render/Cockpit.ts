@@ -11,8 +11,11 @@ import type { Snapshot } from '../sim/Snapshot'
 import { RAIN_DROPS_PER_SEC, RAIN_HAZE_PER_SEC, WIPER_RATE } from './RenderTuning'
 import type { Livery } from './procgen'
 
-const W = 1280
-const H = 560
+/** Design size of the cockpit art; the mesh covers the screen at this aspect and crops, never stretches. */
+export const COCKPIT_W = 1280
+export const COCKPIT_H = 560
+const W = COCKPIT_W
+const H = COCKPIT_H
 /** Single wiper: pivot just below the screen, long blade, sweep half-angle from vertical, and where it parks. */
 const WIPER_PIVOT_Y = H + 30
 const WIPER_LEN = H * 0.98

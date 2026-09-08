@@ -87,6 +87,9 @@ export class Editor {
   /** Spline linking: the first connector picked, and the selected link. */
   private linking: PortRef | null = null
   private selectedLink = -1
+  /** Palette width (px) and whether it is collapsed to icons; remembered per browser. */
+  private paletteW = Number(localStorage.getItem('apex-drivin.editor.paletteW') ?? 230) || 230
+  private paletteCollapsed = localStorage.getItem('apex-drivin.editor.paletteCollapsed') === '1'
   private readonly store: TrackStore
   private readonly cb: EditorCallbacks
 
@@ -121,7 +124,8 @@ export class Editor {
         <button data-act="exit" title="Esc">Menu</button>
       </div>
       <div class="body">
-        <div class="palette"></div>
+        <div class="palette"><button class="collapse" data-act="palette-toggle" title="Collapse / expand the palette">«</button></div>
+        <div class="palette-grip" title="Drag to resize · double-click to collapse"></div>
         <canvas class="grid"></canvas>
       </div>
       <div class="status"></div>
@@ -134,6 +138,27 @@ export class Editor {
     this.palette = this.el.querySelector('.palette')!
     this.loadSelect = this.el.querySelector('[data-load]')!
     this.buildPalette()
+    this.applyPalette()
+    const grip = this.el.querySelector<HTMLElement>('.palette-grip')!
+    grip.addEventListener('pointerdown', (e) => {
+      e.preventDefault()
+      grip.setPointerCapture(e.pointerId)
+      const startX = e.clientX
+      const startW = this.paletteCollapsed ? 56 : this.paletteW
+      const move = (ev: PointerEvent) => {
+        const w = Math.max(56, Math.min(440, startW + ev.clientX - startX))
+        this.paletteCollapsed = w < 110
+        if (!this.paletteCollapsed) this.paletteW = Math.max(150, w)
+        this.applyPalette()
+      }
+      const up = () => {
+        grip.removeEventListener('pointermove', move)
+        grip.removeEventListener('pointerup', up)
+      }
+      grip.addEventListener('pointermove', move)
+      grip.addEventListener('pointerup', up)
+    })
+    grip.addEventListener('dblclick', () => void this.action('palette-toggle'))
     this.el.addEventListener('click', (e) => {
       const act = (e.target as HTMLElement).closest<HTMLElement>('[data-act]')?.dataset.act
       if (act) void this.action(act)
@@ -428,6 +453,10 @@ export class Editor {
       case 'zoom-fit':
         this.fit()
         break
+      case 'palette-toggle':
+        this.paletteCollapsed = !this.paletteCollapsed
+        this.applyPalette()
+        break
       case 'mode':
         this.mode = this.mode === 'pieces' ? 'terrain' : 'pieces'
         if (this.mode === 'terrain') this.ensureTerrain()
@@ -482,6 +511,20 @@ export class Editor {
     modeBtn.textContent = this.mode === 'terrain' ? '⛰ Landscape ✓' : '⛰ Landscape'
   }
 
+  private applyPalette(): void {
+    this.palette.classList.toggle('collapsed', this.paletteCollapsed)
+    this.palette.style.width = this.paletteCollapsed ? '56px' : `${this.paletteW}px`
+    const btn = this.palette.querySelector<HTMLElement>('.collapse')
+    if (btn) btn.textContent = this.paletteCollapsed ? '»' : '«'
+    try {
+      localStorage.setItem('apex-drivin.editor.paletteW', String(this.paletteW))
+      localStorage.setItem('apex-drivin.editor.paletteCollapsed', this.paletteCollapsed ? '1' : '0')
+    } catch {
+      /* fine */
+    }
+    this.dirty = true
+  }
+
   /** The heightmap, created flat on first use. */
   private ensureTerrain(): number[] {
     const n = (this.data.size + 1) * (this.data.size + 1)
@@ -495,6 +538,27 @@ export class Editor {
   }
 
   private applyBrush(c: { x: number; z: number }, kind: 'raise' | 'lower' | 'flatten'): void {
+    // Painting past the edge grows the world to reach the brush (shifting everything if you go negative).
+    const reach = this.brush
+    const minX = Math.floor(c.x - reach)
+    const minZ = Math.floor(c.z - reach)
+    const maxX = Math.ceil(c.x + reach)
+    const maxZ = Math.ceil(c.z + reach)
+    if (minX < 0 || minZ < 0 || maxX > this.data.size || maxZ > this.data.size) {
+      const shift = Math.max(0, -minX, -minZ)
+      const need = Math.min(MAX_SIZE, Math.max(this.data.size + shift, maxX + shift, maxZ + shift))
+      if (need > this.data.size || shift > 0) {
+        if (shift) for (const p of this.data.pieces) {
+          p.x += shift
+          p.z += shift
+        }
+        this.data.terrain = resizeTerrain(this.ensureTerrain(), this.data.size, need, shift)
+        this.data.size = need
+        this.view.cx += shift
+        this.view.cz += shift
+        c = { x: c.x + shift, z: c.z + shift }
+      }
+    }
     const h = this.ensureTerrain()
     const step = 0.22 * Math.sqrt(this.brush)
     if (kind === 'flatten') brushTerrain(h, this.data.size, c.x, c.z, this.brush, 0, this.level * LEVEL_H)

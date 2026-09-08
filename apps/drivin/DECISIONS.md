@@ -84,3 +84,6 @@ The editor is an unbounded pan/zoom grid with the conventions in Editor.ts' head
 
 ## Spline links (2026-09-08)
 Anchor pieces plus auto-filled road: clicking two open connectors creates a `Link` (sim/links.ts) — a cubic Hermite curve leaving along one port's facing and arriving against the other's, tangent length = tightness × distance (`,`/`.` or the menu), height eased between levels, optional camber into the curve (B). Each link is a synthetic piece appended after the real ones, with two ports on the linked edges (same edge keys) and one lane baked in world coordinates, so the lane graph, laps, reversing, landing and rendering need nothing special. Deleting or force-replacing pieces remaps link indices. The editor status bar has a fixed height so a flash never resizes the canvas mid-gesture.
+
+## Editor palette (2026-09-08)
+The palette is out of the flex negotiation (`flex: none`; the canvas is `flex: 1 1 0; min-width: 0`) — before, the canvas's pixel width fed back into layout every redraw and squeezed the palette on each mouse move. It has a drag grip to resize (56–440 px), collapses to icons below ~110 px or via the «/» button, and remembers both per browser. The landscape brush grows the grid when you paint past its edge.

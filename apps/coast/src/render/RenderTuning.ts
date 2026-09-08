@@ -22,7 +22,7 @@ export let TUNNEL_HALF_WIDTH = 13.5
 export let TUNNEL_HEIGHT = 7.5
 export let TUNNEL_DARK = 0.42
 /** Banked curves: the road plane tilts about its centreline by this rise per lateral metre at bank 1 (0.4 ≈ 22°). */
-export let BANK_SLOPE = 0.4
+export let BANK_SLOPE = 0.22
 /** Terraces on the outer side above the tilted plane, each this wide (m) and this much higher (m at bank 1). */
 export let BANK_TIER_W = 7
 export let BANK_TIER_H = 1.8
@@ -42,10 +42,8 @@ export let LIGHTS_OFF_AMBIENT = 0.45
 /** Chase-camera bob amplitude (metres at 84 m/s). */
 export let CAM_BOUNCE = 0.022
 export let STEER_ROLL = 0.16
-/** Cockpit roll per banked lane tier (radians); Rad Mobile-style stepped berms. */
-export let BANK_ROLL = 0.085
-/** How many outer lanes step up the bank before it plateaus. */
-export let BANK_TIERS = 2
+/** How much of the bank angle under the car the view rolls by (1 = the road reads level beneath you). */
+export let BANK_ROLL = 1
 export let HORIZON_ROLL_SHARE = 0.3
 /** Cockpit glass: droplets per second of rain, haze build-up per second, and the single wiper's sweep rate (sweeps/s). */
 export let RAIN_DROPS_PER_SEC = 26
@@ -121,8 +119,7 @@ export const RENDER_TUNE: TuneSection = {
     tune('LIGHTS_OFF_AMBIENT', () => LIGHTS_OFF_AMBIENT, (v) => (LIGHTS_OFF_AMBIENT = v)),
     tune('CAM_BOUNCE', () => CAM_BOUNCE, (v) => (CAM_BOUNCE = v), [0, 0.1], 0.002, 'camera bob'),
     tune('STEER_ROLL', () => STEER_ROLL, (v) => (STEER_ROLL = v)),
-    tune('BANK_ROLL', () => BANK_ROLL, (v) => (BANK_ROLL = v), [0, 0.3], 0.005, 'cockpit roll per bank tier'),
-    tune('BANK_TIERS', () => BANK_TIERS, (v) => (BANK_TIERS = v), [1, 4], 1),
+    tune('BANK_ROLL', () => BANK_ROLL, (v) => (BANK_ROLL = v), [0, 1.5], 0.05, 'view roll as a share of the bank angle'),
     tune('HORIZON_ROLL_SHARE', () => HORIZON_ROLL_SHARE, (v) => (HORIZON_ROLL_SHARE = v)),
     tune('RAIN_DROPS_PER_SEC', () => RAIN_DROPS_PER_SEC, (v) => (RAIN_DROPS_PER_SEC = v)),
     tune('RAIN_HAZE_PER_SEC', () => RAIN_HAZE_PER_SEC, (v) => (RAIN_HAZE_PER_SEC = v)),

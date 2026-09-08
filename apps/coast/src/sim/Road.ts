@@ -32,6 +32,12 @@ export interface Segment {
   runway: boolean
   /** An intersection: a road crosses here and so does traffic. */
   crossing: boolean
+  /** The sea comes right up to the road on this side (-1 left, +1 right, 0 none): a sliver of beach, then water. */
+  shore: number
+  /** Roadworks: the outer lane on this side (-1/+1) is shut behind a jersey barrier; 0 = open. */
+  closed: number
+  /** Banking strength 0..1: the outer side of the curve rises in terraces and the cockpit leans. */
+  bank: number
 }
 
 export interface Theme {
@@ -57,16 +63,20 @@ export interface Theme {
   oncoming?: number
   /** Intersections with crossing traffic every CROSSING_EVERY segments. */
   crossings?: boolean
-  /** Banked turns: 0 = flat, 1 = full Rad Mobile tilt (horizon rolls, centrifugal push is eased). */
+  /** Default banking for every curve in this theme (0 = flat, 1 = full Rad Mobile terraces); sections can override with `bank`. */
   bank?: number
   /** Everything roadside and on the horizon is drawn as a black silhouette against the sky (the sunset). */
   silhouette?: boolean
+  /** OutRun's first stage: stretches where the ocean touches the road edge past a narrow beach. */
+  shore?: boolean
+  /** Occasional roadworks: barriers taper the outer lane shut, a jersey barrier runs along it, then it reopens. */
+  workZones?: boolean
 }
 
 export type Section =
   | { kind: 'straight'; n: number; hill?: number }
-  | { kind: 'curve'; n: number; curve: number; hill?: number }
-  | { kind: 's'; n: number; curve: number }
+  | { kind: 'curve'; n: number; curve: number; hill?: number; bank?: number }
+  | { kind: 's'; n: number; curve: number; bank?: number }
   | { kind: 'hills'; n: number; height: number; count: number }
 
 export interface StageDesc {
@@ -91,20 +101,21 @@ export class Stage {
     const rng = new Rng(seed)
     let y = 0
     const segs = this.segments
-    const push = (curve: number, y1: number) => {
-      segs.push({ index: segs.length, curve, y0: y, y1, sprites: [], fork: -1, checkpoint: false, runway: false, crossing: false })
+    const push = (curve: number, y1: number, bank = 0) => {
+      segs.push({ index: segs.length, curve, y0: y, y1, sprites: [], fork: -1, checkpoint: false, runway: false, crossing: false, shore: 0, closed: 0, bank })
       y = y1
     }
     const ease = (a: number, b: number, t: number) => a + (b - a) * (0.5 - Math.cos(t * Math.PI) / 2)
     const easeIn = (a: number, b: number, t: number) => a + (b - a) * t * t
     const easeOut = (a: number, b: number, t: number) => a + (b - a) * (1 - (1 - t) * (1 - t))
-    const addRoad = (enter: number, hold: number, leave: number, curve: number, hill: number) => {
+    const addRoad = (enter: number, hold: number, leave: number, curve: number, hill: number, bank = 0) => {
       const startY = y
       const total = enter + hold + leave
       let n = 0
-      for (let i = 0; i < enter; i++, n++) push(easeIn(0, curve, i / enter), ease(startY, startY + hill, (n + 1) / total))
-      for (let i = 0; i < hold; i++, n++) push(curve, ease(startY, startY + hill, (n + 1) / total))
-      for (let i = 0; i < leave; i++, n++) push(easeOut(curve, 0, i / leave), ease(startY, startY + hill, (n + 1) / total))
+      // Banking builds with the curve and fades out with it.
+      for (let i = 0; i < enter; i++, n++) push(easeIn(0, curve, i / enter), ease(startY, startY + hill, (n + 1) / total), bank * easeIn(0, 1, i / enter))
+      for (let i = 0; i < hold; i++, n++) push(curve, ease(startY, startY + hill, (n + 1) / total), bank)
+      for (let i = 0; i < leave; i++, n++) push(easeOut(curve, 0, i / leave), ease(startY, startY + hill, (n + 1) / total), bank * easeOut(1, 0, i / leave))
     }
     for (const raw of desc.sections) {
       const s = { ...raw, n: Math.max(12, Math.round(raw.n * STAGE_SCALE)) }
@@ -114,14 +125,14 @@ export class Stage {
           break
         case 'curve': {
           const e = Math.max(3, Math.floor(s.n * 0.3))
-          addRoad(e, s.n - 2 * e, e, s.curve, s.hill ?? 0)
+          addRoad(e, s.n - 2 * e, e, s.curve, s.hill ?? 0, s.bank ?? theme.bank ?? 0)
           break
         }
         case 's': {
           const half = Math.floor(s.n / 2)
           const e = Math.max(3, Math.floor(half * 0.3))
-          addRoad(e, half - 2 * e, e, s.curve, 0)
-          addRoad(e, half - 2 * e, e, -s.curve, 0)
+          addRoad(e, half - 2 * e, e, s.curve, 0, s.bank ?? theme.bank ?? 0)
+          addRoad(e, half - 2 * e, e, -s.curve, 0, s.bank ?? theme.bank ?? 0)
           break
         }
         case 'hills': {
@@ -167,12 +178,38 @@ export class Stage {
         segs[i + 1].crossing = true
       }
     }
+    // Shoreline: runs of sea against the road, alternating sides, with dry land between.
+    if (theme.shore) {
+      let i = 30 + rng.int(40)
+      let side = rng.next() < 0.5 ? -1 : 1
+      while (i < this.length - FORK_SEGMENTS - 10) {
+        const run = 40 + rng.int(60)
+        for (let k = 0; k < run && i + k < this.length; k++) segs[i + k].shore = side
+        i += run + 30 + rng.int(70)
+        side = -side
+      }
+    }
+    // Roadworks: a few construction barriers steer you out of the outer lane, then a jersey
+    // barrier runs along the lane line for the closed stretch, and the cones taper back out.
+    if (theme.workZones) {
+      let i = 120 + rng.int(160)
+      while (i + 90 < this.length - FORK_SEGMENTS - 30) {
+        const side = rng.next() < 0.5 ? -1 : 1
+        const len = 40 + rng.int(40)
+        const taper = [0.98, 0.84, 0.7, 0.58]
+        taper.forEach((o, k) => segs[i + k * 2].sprites.push({ kind: 'barrier', offset: side * o, scale: 0.8, collide: true }))
+        for (let k = 8; k < len - 8; k++) segs[i + k].closed = side
+        taper.forEach((o, k) => segs[i + len - 1 - k * 2].sprites.push({ kind: 'barrier', offset: side * o, scale: 0.8, collide: true }))
+        i += len + 260 + rng.int(220)
+      }
+    }
     // Scenery.
     for (let i = 8; i < this.length; i++) {
       const seg = segs[i]
       if (seg.fork > 0.15) continue // keep the split clear
       if (segs[Math.max(0, i - 3)].crossing || segs[Math.min(this.length - 1, i + 3)].crossing || seg.crossing) continue // keep intersections open
       for (const side of [-1, 1]) {
+        if (seg.shore === side) continue // nothing grows in the sea
         if (rng.next() < theme.density) {
           const total = theme.roadside.reduce((a, r) => a + r.weight, 0)
           let pick = rng.next() * total
@@ -197,7 +234,7 @@ export class Stage {
     if (segs.length > 2) segs[2].sprites.push({ kind: 'gantry', offset: 0, scale: 1, collide: false })
     // Runway for the renderer.
     for (let i = 0; i < RUNWAY_SEGMENTS; i++) {
-      segs.push({ index: segs.length, curve: 0, y0: y, y1: y, sprites: [], fork: this.forks ? 1 : -1, checkpoint: false, runway: true, crossing: false })
+      segs.push({ index: segs.length, curve: 0, y0: y, y1: y, sprites: [], fork: this.forks ? 1 : -1, checkpoint: false, runway: true, crossing: false, shore: 0, closed: 0, bank: 0 })
     }
   }
 

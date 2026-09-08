@@ -82,6 +82,9 @@ export let TIME_START = 75
 export let TIME_CHECKPOINT = 62
 export const SCORE_PER_METRE = 2
 export const SCORE_PER_PASS = 120
+/** Near miss: passing within this lateral gap (road widths, bumper to bumper) scores up to NEAR_MISS_SCORE, more the closer you are. */
+export let NEAR_MISS_GAP = 0.22
+export let NEAR_MISS_SCORE = 800
 export const SCORE_TIME_BONUS = 400
 
 /** Live-tunable knobs for the tuning panel (F6). Values persist per browser; Copy JSON to ship new defaults. */
@@ -109,6 +112,8 @@ export const SIM_TUNE: TuneSection = {
     tune('CRASH_TIME', () => CRASH_TIME, (v) => (CRASH_TIME = v)),
     tune('BUMP_KEEP', () => BUMP_KEEP, (v) => (BUMP_KEEP = v)),
     tune('CRASH_MIN_SPEED', () => CRASH_MIN_SPEED, (v) => (CRASH_MIN_SPEED = v)),
+    tune('NEAR_MISS_GAP', () => NEAR_MISS_GAP, (v) => (NEAR_MISS_GAP = v), [0.05, 0.6], 0.01),
+    tune('NEAR_MISS_SCORE', () => NEAR_MISS_SCORE, (v) => (NEAR_MISS_SCORE = v), [0, 5000], 50),
     tune('WRECK_SPEED', () => WRECK_SPEED, (v) => (WRECK_SPEED = v)),
     tune('REAREND_CRASH_SPEED', () => REAREND_CRASH_SPEED, (v) => (REAREND_CRASH_SPEED = v)),
     tune('WRECK_TIME', () => WRECK_TIME, (v) => (WRECK_TIME = v)),

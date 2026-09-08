@@ -280,6 +280,10 @@ export class AudioWorld {
         this.thud(200, 80, 0.2, 0.6)
         this.burst(0.15, 0.4, 1500)
         break
+      case 'nearmiss':
+        this.blip(1320, 0.12, 0.25, 'triangle')
+        setTimeout(() => this.ctx && this.blip(1760, 0.16, 0.2, 'triangle'), 70)
+        break
       case 'land':
         this.thud(160, 60, 0.25, Math.min(1, 0.3 + e.a / 30))
         this.burst(0.2, 0.3, 1200)

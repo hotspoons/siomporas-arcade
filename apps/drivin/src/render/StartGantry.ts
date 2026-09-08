@@ -36,13 +36,13 @@ export function buildStartGantry(f: LaneFrame): Group {
   const banner = new Mesh(new PlaneGeometry(halfSpan * 2 - 1, 1.6), new MeshStandardMaterial({ map: tex, roughness: 0.9, side: 2 }))
   banner.position.copy(base).addScaledVector(up, height - 1.1)
   g.add(banner)
-  // Orient the whole gantry to the lane frame: x along right, y up, z along the tangent.
+  // Orient the flat pieces to the lane frame: x along right (across the road), y up. The third axis must
+  // make a right-handed basis (right × up = -tan) or the quaternion comes out a quarter turn off.
   const m = g.matrix
-  m.makeBasis(right, up, tan)
+  m.makeBasis(right, up, tan.clone().negate())
   for (const child of g.children) {
     // Children were positioned in world space already; only the flat pieces need rotating.
     if (child === banner || child === beam) child.quaternion.setFromRotationMatrix(m)
   }
-  for (const side of [-1, 1]) void side
   return g
 }

@@ -228,6 +228,36 @@ export const PIECES: PieceDef[] = [
     group: 'curves',
   },
   {
+    type: 'bank6',
+    label: 'Speedbowl bank',
+    w: 6,
+    h: 6,
+    ports: [
+      { cx: 0, cz: 0, side: 'W', dLevel: 0 },
+      { cx: 5, cz: 5, side: 'N', dLevel: 0 },
+    ],
+    // The vmax test-track turn: huge radius, steep wall. Hit it flat out and the banking holds you.
+    lanes: [bankedArc(5 * CELL + HALF, 0.95)],
+    profile: 'road',
+    group: 'curves',
+  },
+  {
+    type: 'cross',
+    label: 'Crossroads',
+    w: 1,
+    h: 1,
+    ports: [
+      { cx: 0, cz: 0, side: 'W', dLevel: 0 },
+      { cx: 0, cz: 0, side: 'E', dLevel: 0 },
+      { cx: 0, cz: 0, side: 'S', dLevel: 0 },
+      { cx: 0, cz: 0, side: 'N', dLevel: 0 },
+    ],
+    // Two straights through each other: the track can cross its own path.
+    lanes: [straight, { from: 2, to: 3, length: CELL, path: (t, o) => set(o, HALF, 0, t * CELL) }],
+    profile: 'road',
+    group: 'flow',
+  },
+  {
     type: 'loop',
     label: 'Loop',
     w: 2,

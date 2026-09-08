@@ -23,9 +23,14 @@ export interface SpriteFrame {
 
 export interface SpriteKind {
   def: ModelDef
+  /** frames[pitchIndex * yaws.length + yawIndex] */
   frames: SpriteFrame[]
   yaws: number[]
+  pitches: number[]
 }
+
+/** Camera pitch (degrees above horizontal) baked for models that declare none. */
+export const DEFAULT_PITCH = 9
 
 export class SpriteAtlas {
   readonly kinds = new Map<string, SpriteKind>()
@@ -33,20 +38,30 @@ export class SpriteAtlas {
   ready = false
   private rt: WebGLRenderTarget | null = null
 
-  /** Frame for a kind at a view yaw (degrees), or null when unknown. */
-  frame(kind: string, yaw = 0): SpriteFrame | null {
+  /** Frame for a kind at a view yaw and camera pitch (degrees), or null when unknown. Nearest baked pose. */
+  frame(kind: string, yaw = 0, pitch = DEFAULT_PITCH): SpriteFrame | null {
     const k = this.kinds.get(kind)
     if (!k) return null
     let best = 0
     let bestD = Infinity
     for (let i = 0; i < k.yaws.length; i++) {
-      const d = Math.abs(k.yaws[i] - yaw)
+      let d = Math.abs(k.yaws[i] - yaw)
+      if (d > 180) d = 360 - d
       if (d < bestD) {
         bestD = d
         best = i
       }
     }
-    return k.frames[best]
+    let bp = 0
+    bestD = Infinity
+    for (let i = 0; i < k.pitches.length; i++) {
+      const d = Math.abs(k.pitches[i] - pitch)
+      if (d < bestD) {
+        bestD = d
+        bp = i
+      }
+    }
+    return k.frames[bp * k.yaws.length + best]
   }
 
   /** Whether the last bake() came from the IndexedDB cache. */
@@ -150,18 +165,22 @@ export class SpriteAtlas {
       const fitted = new Box3().setFromObject(model)
       const fs = new Vector3()
       fitted.getSize(fs)
-      const radius = Math.max(fs.x, fs.z) * 0.5
       const frames: SpriteFrame[] = []
-      for (const yaw of def.yaws) {
+      const pitches = def.pitches ?? [DEFAULT_PITCH]
+      for (const pitchDeg of pitches) for (const yaw of def.yaws) {
         const cell = place(def.cell)
-        // Camera behind the model looking forward (+z is the model's front in the kits), slightly from above.
+        // Camera behind the model looking forward (+z is the model's front in the kits), from the baked pitch.
         const cam = new OrthographicCamera(-1, 1, 1, -1, 0.1, 200)
         const yawR = (yaw * Math.PI) / 180
-        const pitch = 0.16
+        const pitch = (pitchDeg * Math.PI) / 180
         cam.position.set(Math.sin(yawR) * 40, fs.y / 2 + Math.sin(pitch) * 40, -Math.cos(yawR) * 40)
         cam.lookAt(0, fs.y / 2, 0)
-        const halfW = Math.max(radius, fs.y / 2) * 1.02
-        const halfH = fs.y / 2 * 1.02 + Math.sin(pitch) * radius
+        // Fit the frame to what this view actually shows (a car from behind is half as wide as
+        // from the side) so the cell's pixels go on the car, not on empty margin.
+        const projW = Math.abs(Math.cos(yawR)) * fs.x + Math.abs(Math.sin(yawR)) * fs.z
+        const projD = Math.abs(Math.sin(yawR)) * fs.x + Math.abs(Math.cos(yawR)) * fs.z
+        const halfW = Math.max(projW / 2, fs.y / 2) * 1.02
+        const halfH = (fs.y / 2) * 1.02 + Math.sin(pitch) * (projD / 2)
         const half = Math.max(halfW, halfH)
         cam.left = -half
         cam.right = half
@@ -179,10 +198,10 @@ export class SpriteAtlas {
           v1: (cell.y + cell.size) / ATLAS_SIZE,
           widthM: half * 2,
           heightM: half * 2,
-          baseline: 0.5 - fs.y / 2 / (half * 2) - (Math.sin(pitch) * radius) / (half * 2) * 0.5,
+          baseline: 0.5 - fs.y / 2 / (half * 2) - ((Math.sin(pitch) * projD) / 2 / (half * 2)) * 0.5,
         })
       }
-      this.kinds.set(def.kind, { def, frames, yaws: def.yaws })
+      this.kinds.set(def.kind, { def, frames, yaws: def.yaws, pitches })
       done++
       onProgress?.(done, MODELS.length)
     }

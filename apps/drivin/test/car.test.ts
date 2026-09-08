@@ -119,6 +119,9 @@ describe('free roaming', () => {
     input.throttle = 0.4
     const events: { type: string; a: number }[] = []
     for (let i = 0; i < 120 * 10; i++) {
+      // No rails any more: hold the centreline through the curve.
+      const c = sim.car
+      input.steer = Math.max(-1, Math.min(1, -c.lateral * 0.3 - c.lateralVel * 0.2))
       sim.tick(SIM_DT, input, snap)
       sim.events.drain((e) => events.push({ type: e.type, a: e.a }))
     }

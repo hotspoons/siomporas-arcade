@@ -15,6 +15,12 @@ export let FOG_MODERN = 0.0042
 export let FOG_RETRO = 0.0052
 /** Lane marker width (m) and dash length in segments. */
 export let LANE_WIDTH = 0.28
+/** Metres of beach between the shoulder and the water on shoreline segments. */
+export let BEACH_WIDTH = 9
+/** Banked curves: terraces on the outer side, each this wide (m) and this much higher (m at bank 1). */
+export let BANK_TIER_W = 7
+export let BANK_TIER_H = 2.6
+export let BANK_TIER_COUNT = 3
 export let RUMBLE_WIDTH = 1.6
 /** Shoulder width beyond the rumble strip, metres. */
 export let SHOULDER_WIDTH = 4.5
@@ -49,6 +55,9 @@ export interface Palette {
   fog: number
   grassA: number
   grassB: number
+  /** Shoreline colours (themes with `shore`). */
+  sand?: number
+  water?: number
   roadA: number
   roadB: number
   rumbleA: number
@@ -66,7 +75,7 @@ export interface Palette {
 }
 
 export const PALETTES: Record<string, Palette> = {
-  coast: { skyTop: 0x1a4a9a, skyBottom: 0x8fd0ff, sun: 0xfff1b0, fog: 0x9fd8ff, grassA: 0x3f9a3a, grassB: 0x3a8e35, roadA: 0x66666e, roadB: 0x6a6a72, rumbleA: 0xf5f5f5, rumbleB: 0xd93838, lane: 0xf4f4f4, far: 0x2e6aa8, near: 0x2f7fbf, shoulder: 0xd8c89a, rail: 0xd0d4dc, clouds: 0xffffff },
+  coast: { skyTop: 0x1a4a9a, skyBottom: 0x8fd0ff, sun: 0xfff1b0, fog: 0x9fd8ff, grassA: 0x3f9a3a, grassB: 0x3a8e35, roadA: 0x66666e, roadB: 0x6a6a72, rumbleA: 0xf5f5f5, rumbleB: 0xd93838, lane: 0xf4f4f4, far: 0x2e6aa8, near: 0x2f7fbf, shoulder: 0xd8c89a, rail: 0xd0d4dc, clouds: 0xffffff, sand: 0xe8d8a4, water: 0x2f86c8 },
   canyon: { skyTop: 0x5a1f4a, skyBottom: 0xffa060, sun: 0xffe0a0, fog: 0xffb070, grassA: 0xb0703a, grassB: 0xa66835, roadA: 0x5c5a5a, roadB: 0x605e5e, rumbleA: 0xf0e0c0, rumbleB: 0xb03030, lane: 0xf0e8d8, far: 0x8a3a3a, near: 0xa8503c, shoulder: 0xc08858, rail: 0xb0a090, clouds: 0xffd0a0 },
   forest: { skyTop: 0x2a5aa0, skyBottom: 0xb0e0ff, sun: 0xffffe0, fog: 0xb8dcc8, grassA: 0x2f7a2c, grassB: 0x2a6f28, roadA: 0x585c60, roadB: 0x5c6064, rumbleA: 0xeeeeee, rumbleB: 0xc83030, lane: 0xf0f0f0, far: 0x1f4f6a, near: 0x1f5a3a, shoulder: 0x6a6a5a, rail: 0xa8b0b8, clouds: 0xb8c4cc },
   desert: { skyTop: 0x3a6ab0, skyBottom: 0xf8e8c0, sun: 0xffffff, fog: 0xf0e0b8, grassA: 0xd8b878, grassB: 0xd0b070, roadA: 0x6a6660, roadB: 0x6e6a64, rumbleA: 0xf8f0e0, rumbleB: 0xc84040, lane: 0xf8f0e0, far: 0xb08a5a, near: 0xc8a068, shoulder: 0xe0c890, rail: 0xc0b8a8, clouds: 0xffffff },
@@ -76,6 +85,7 @@ export const PALETTES: Record<string, Palette> = {
   plains: { skyTop: 0x2a70c8, skyBottom: 0xc8e8ff, sun: 0xffffff, fog: 0xd0e4f0, grassA: 0xc8b060, grassB: 0xc0a858, roadA: 0x626266, roadB: 0x66666a, rumbleA: 0xf0f0f0, rumbleB: 0xc84040, lane: 0xf0f0e0, far: 0x7a9a5a, near: 0x9ab060, shoulder: 0xb09860, rail: 0xc0c0c0, clouds: 0xffffff },
   storm: { skyTop: 0x080a14, skyBottom: 0x26303e, sun: 0xffffff, fog: 0x1a2028, grassA: 0x121a14, grassB: 0x0e160f, roadA: 0x2a2e34, roadB: 0x2e3238, rumbleA: 0xb8c0c8, rumbleB: 0x8a2a30, lane: 0xd8e0e8, far: 0x0c1016, near: 0x121a1c, shoulder: 0x2a2e2a, rail: 0x7a8290, clouds: 0x1a2028 },
   ridge: { skyTop: 0x2a5aa8, skyBottom: 0xb8d8f8, sun: 0xfff8e0, fog: 0xb8ccd8, grassA: 0x3a8a3a, grassB: 0x348234, roadA: 0x585c60, roadB: 0x5c6064, rumbleA: 0xeeeeee, rumbleB: 0xc83030, lane: 0xf0f0f0, far: 0x3a5a8a, near: 0x2a6a4a, shoulder: 0x7a7a60, rail: 0xa8b0b8, clouds: 0xe8eef4 },
+  city: { skyTop: 0x4a78b8, skyBottom: 0xc8d4dc, sun: 0xffffff, fog: 0xc8ccd4, grassA: 0x8c8e94, grassB: 0x86888e, roadA: 0x585a60, roadB: 0x5c5e64, rumbleA: 0xf0f0f0, rumbleB: 0xe0a020, lane: 0xf0e8c0, far: 0x6a7a90, near: 0x7c8898, shoulder: 0xa0a0a4, rail: 0xc0c0c0, clouds: 0xffffff },
   alpine: { skyTop: 0x244a80, skyBottom: 0xc8dcf0, sun: 0xffffff, fog: 0xc0d0e0, grassA: 0x5a8a4a, grassB: 0x548246, roadA: 0x505458, roadB: 0x54585c, rumbleA: 0xf0f0f0, rumbleB: 0xd03838, lane: 0xf0f0f0, far: 0x8a9ab0, near: 0x4a6a5a, shoulder: 0x8a8a80, rail: 0xc8ccd4, clouds: 0xd8dde4 },
 }
 
@@ -87,6 +97,10 @@ export const RENDER_TUNE: TuneSection = {
     tune('FOG_MODERN', () => FOG_MODERN, (v) => (FOG_MODERN = v)),
     tune('FOG_RETRO', () => FOG_RETRO, (v) => (FOG_RETRO = v)),
     tune('LANE_WIDTH', () => LANE_WIDTH, (v) => (LANE_WIDTH = v)),
+    tune('BEACH_WIDTH', () => BEACH_WIDTH, (v) => (BEACH_WIDTH = v), [2, 40], 1),
+    tune('BANK_TIER_W', () => BANK_TIER_W, (v) => (BANK_TIER_W = v), [2, 20], 0.5),
+    tune('BANK_TIER_H', () => BANK_TIER_H, (v) => (BANK_TIER_H = v), [0, 8], 0.1),
+    tune('BANK_TIER_COUNT', () => BANK_TIER_COUNT, (v) => (BANK_TIER_COUNT = v), [1, 6], 1),
     tune('RUMBLE_WIDTH', () => RUMBLE_WIDTH, (v) => (RUMBLE_WIDTH = v)),
     tune('SHOULDER_WIDTH', () => SHOULDER_WIDTH, (v) => (SHOULDER_WIDTH = v)),
     tune('RAIL_HEIGHT', () => RAIL_HEIGHT, (v) => (RAIL_HEIGHT = v)),

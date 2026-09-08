@@ -247,6 +247,18 @@ export function buildTower(h: number, tint: number): Object3D {
   return g
 }
 
+/** A downtown mid-rise: a slab with a grid of daytime (unlit) windows and a parapet. */
+export function buildBlock(h: number, w: number, tint: number): Object3D {
+  const g = new Group()
+  g.add(box(w, h, w * 0.8, 0, h / 2, 0, flat(tint)))
+  const glass = flat(0x2a3a52, { metalness: 0.2 })
+  for (let y = 1.6; y < h - 1.2; y += 2.6)
+    for (let x = -w / 2 + 1.2; x < w / 2 - 0.6; x += 2.0) g.add(box(1.2, 1.4, 0.1, x, y, (w * 0.8) / 2 + 0.05, glass))
+  g.add(box(w + 0.4, 0.5, w * 0.8 + 0.4, 0, h + 0.2, 0, flat(0x6a6a70)))
+  g.add(box(2.4, 2.2, 2.4, w / 4, h + 1.5, 0, flat(0x7a7a80)))
+  return g
+}
+
 export function buildSign(text: string, fg: string, bg: string): Object3D {
   const g = new Group()
   g.add(box(0.3, 4.5, 0.3, -2.6, 2.25, 0, flat(0x777)))

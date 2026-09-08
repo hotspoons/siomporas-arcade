@@ -8,7 +8,8 @@ import { BoxGeometry, BufferAttribute, BufferGeometry, Group, InstancedMesh, Mat
 import { Vec3 } from '@apex/engine/math/Vec3'
 import { makeLaneFrame } from '../sim/PathTable'
 import type { Lane, Track } from '../sim/Track'
-import { CURB_WIDTH, ROAD_HALF_WIDTH, TUBE_RADIUS } from '../sim/Tuning'
+import { CURB_WIDTH, ROAD_HALF_WIDTH, TUBE_RADIUS, TUBE_RAMP } from '../sim/Tuning'
+import { smoothstep } from '@apex/engine/math/scalar'
 import { PILLAR_SIDE, PILLAR_SPACING } from '../sim/Tuning'
 
 const STEP = 2
@@ -155,10 +156,14 @@ export class RoadBuilder {
     for (let r = 0; r < rings; r++) {
       const s = Math.min(t.length, r * STEP)
       t.frameAt(s, f)
+      // The wall rises from curb height at each mouth over TUBE_RAMP metres (matches Car.tubeMaxArc).
+      const wall = smoothstep(0, TUBE_RAMP, s) * smoothstep(0, TUBE_RAMP, t.length - s)
+      const maxA = (ROAD_HALF_WIDTH + CURB_WIDTH + (TUBE_RADIUS * 2.2 - ROAD_HALF_WIDTH - CURB_WIDTH) * wall) / R
       for (let k = 0; k < across; k++) {
         const i = r * across + k
-        // Angle from the floor (0) around the tube; skip the very bottom so the road shows.
-        const a = -Math.PI + (k / segments) * Math.PI * 2
+        // Angle from the floor (0) around the tube, folded onto the wall's current top so the mouth flares open.
+        let a = -Math.PI + (k / segments) * Math.PI * 2
+        a = Math.max(-maxA, Math.min(maxA, a))
         const ox = Math.sin(a) * R
         const oy = R - Math.cos(a) * R
         this.v.copy(f.pos).addScaled(f.right, ox).addScaled(f.up, oy)

@@ -28,7 +28,7 @@ interface Car {
 }
 
 /** Sprite hit half-widths in road widths, by kind family; anything unlisted uses the default. */
-const HIT_HALF_WIDTH: Record<string, number> = { palm: 0.08, palmTall: 0.08, pine: 0.1, pineTall: 0.1, pineRound: 0.12, oak: 0.14, tree: 0.14, bush: 0.12, bushLarge: 0.16, rock: 0.14, rockTall: 0.12, stoneTall: 0.1, cactus: 0.07, cactusTall: 0.07, billboard: 0.3, billboardLow: 0.3, lightpost: 0.04, lightpostTall: 0.04, barrier: 0.2, banner: 0.06, grandstand: 0.6, tent: 0.3, pitsOffice: 0.5, stump: 0.08, flower: 0, diner: 0.55, motel: 0.85, gas: 0.7, tower: 0.4, tower2: 0.4, signCoast: 0.36, signDrive: 0.36, signBay: 0.36, arch: 0 }
+const HIT_HALF_WIDTH: Record<string, number> = { block: 0.7, block2: 0.62, palm: 0.08, palmTall: 0.08, pine: 0.1, pineTall: 0.1, pineRound: 0.12, oak: 0.14, tree: 0.14, bush: 0.12, bushLarge: 0.16, rock: 0.14, rockTall: 0.12, stoneTall: 0.1, cactus: 0.07, cactusTall: 0.07, billboard: 0.3, billboardLow: 0.3, lightpost: 0.04, lightpostTall: 0.04, barrier: 0.2, banner: 0.06, grandstand: 0.6, tent: 0.3, pitsOffice: 0.5, stump: 0.08, flower: 0, diner: 0.55, motel: 0.85, gas: 0.7, tower: 0.4, tower2: 0.4, signCoast: 0.36, signDrive: 0.36, signBay: 0.36, arch: 0 }
 
 export class Sim {
   readonly events = new EventQueue()
@@ -224,12 +224,25 @@ export class Sim {
     if (this.offroad !== wasOff) this.events.push(this.offroad ? 'offroad' : 'onroad')
     this.speed = clamp(this.speed, 0, max)
 
+    // Roadworks: the jersey barrier along the lane line is a wall.
+    if (seg.closed && !air) {
+      const wall = seg.closed * 0.5
+      if (Math.sign(this.x) === seg.closed && Math.abs(this.x) > Math.abs(wall) - T.CAR_HALF_WIDTH_ROAD && Math.abs(this.x) < Math.abs(wall) + 0.25) {
+        if (this.speed > T.CRASH_MIN_SPEED * 1.5) {
+          this.crash(false)
+          return
+        }
+        this.x = wall - seg.closed * (T.CAR_HALF_WIDTH_ROAD + 0.02)
+        this.speed *= 0.6
+        this.events.push('bump', 1)
+      }
+    }
     // Lateral: steering scales with speed; curves push you outward. Neither applies in the air.
     const sp = this.speed / T.MAX_SPEED_HI
     if (!air) {
       this.x += input.steer * T.STEER_RATE * sp * dt
       // Banked turns carry you round: the banking cancels part of the push.
-      this.x -= seg.curve * sp * sp * T.CENTRIFUGAL * (1 - (this.theme.bank ?? 0) * T.BANK_ASSIST) * dt
+      this.x -= seg.curve * sp * sp * T.CENTRIFUGAL * (1 - seg.bank * T.BANK_ASSIST) * dt
     }
     this.x = clamp(this.x, -2.4 - forkC, 2.4 + forkC)
     this.steerVisual = expApproach(this.steerVisual, input.steer, 10, dt)
@@ -348,8 +361,10 @@ export class Sim {
       c.z += c.dir * c.speed * dt
       // Lane discipline with occasional changes (head-on traffic stays on its side).
       if (this.rng.next() < 0.002) c.lane = c.dir < 0 ? [-0.62, -0.25][this.rng.int(2)] : this.theme.oncoming ? [0.25, 0.62][this.rng.int(2)] : [-0.62, -0.2, 0.2, 0.62][this.rng.int(4)]
-      // Through the fork zone traffic follows its carriageway out to the side.
-      const fk = this.stage.segmentAt(c.z).fork
+      // Through the fork zone traffic follows its carriageway out to the side; roadworks close a lane.
+      const cs = this.stage.segmentAt(c.z + 40)
+      const fk = cs.fork
+      if (cs.closed && Math.sign(c.lane) === cs.closed && Math.abs(c.lane) > 0.4) c.lane = cs.closed * 0.2
       c.x = expApproach(c.x, fk >= 0 ? Math.sign(c.lane) * fk * T.FORK_SPREAD + c.lane : c.lane, 1.2, dt)
       // Recycle: far behind, or beyond the stage end.
       if (c.z < this.z - T.TRAFFIC_DESPAWN_BEHIND * T.SEG_LENGTH || c.z > stageLen + 200) {
@@ -361,6 +376,15 @@ export class Sim {
         c.passed = true
         if (c.dir > 0) this.score += T.SCORE_PER_PASS
         this.events.push('pass', c.kind)
+        // Near miss: the tighter the squeeze past a car (either direction) the bigger the bonus.
+        const gap = Math.abs(c.x - this.x) - T.CAR_HALF_WIDTH_ROAD * 2
+        if (this.phase === 'driving' && this.speed > 30 && gap < T.NEAR_MISS_GAP) {
+          const bonus = Math.round((T.NEAR_MISS_SCORE * (1 - Math.max(0, gap) / T.NEAR_MISS_GAP)) / 10) * 10
+          if (bonus > 0) {
+            this.score += bonus
+            this.events.push('nearmiss', bonus)
+          }
+        }
       }
       // Collision: same place along the road and overlapping laterally.
       if (this.phase === 'driving' && Math.abs(c.z - this.z) < 4 && Math.abs(c.x - this.x) < T.CAR_HALF_WIDTH_ROAD * 2) {

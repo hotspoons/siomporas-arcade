@@ -282,6 +282,9 @@ export class Game implements LoopClient {
     this.prev = this.curr
     this.curr = tmp
     this.sim.tick(dt, this.held, this.curr)
+    // Edges are one-shot: the sim may tick several times per frame and must see each press once,
+    // or a toggle (wipers, lights, gear) flips twice and appears dead.
+    this.held.gear = this.held.turbo = this.held.wipers = this.held.lights = false
     this.syncStage()
     if (this.state === 'running' && (this.sim.phase === 'finished' || this.sim.phase === 'timeout') && !this.resultsShown) {
       this.endTimer += dt
@@ -353,6 +356,11 @@ export class Game implements LoopClient {
         break
       case 'launch':
         hp.rumble(0.15, 0.2, 60)
+        break
+      case 'nearmiss':
+        this.hud.showMessage(`NEAR MISS +${e.a}`, 1.1, 'gold')
+        hp.rumble(0.2, 0.5, 90)
+        hp.mobile(15)
         break
       case 'land':
         hp.rumble(Math.min(1, e.a / 25), 0.4, 160)

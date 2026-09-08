@@ -69,18 +69,18 @@ export class Background {
     this.near.frustumCulled = false
   }
 
-  setPalette(p: Palette, backdrop: string, retro: boolean): void {
+  setPalette(p: Palette, backdrop: string, retro: boolean, night = backdrop === 'city'): void {
     ;(this.skyMat.uniforms.uTop.value as Color).set(p.skyTop)
     ;(this.skyMat.uniforms.uBottom.value as Color).set(p.skyBottom)
     ;(this.skyMat.uniforms.uSun.value as Color).set(p.sun)
-    this.skyMat.uniforms.uNight.value = backdrop === 'city' ? 1 : 0
+    this.skyMat.uniforms.uNight.value = night ? 1 : 0
     this.skyMat.uniforms.uSunPos.value = p.sunPos ?? [0.7, 0.62]
     this.skyMat.uniforms.uSunSize.value = p.sunSize ?? 1
     if (backdrop !== this.backdrop) {
       this.backdrop = backdrop
       drawLayer(this.farTex, backdrop, 'far', p)
       drawLayer(this.nearTex, backdrop, 'near', p)
-      drawClouds(this.cloudTex, p, backdrop === 'city')
+      drawClouds(this.cloudTex, p, night)
     }
     for (const t of [this.farTex, this.nearTex, this.cloudTex]) {
       t.minFilter = t.magFilter = retro ? NearestFilter : LinearFilter

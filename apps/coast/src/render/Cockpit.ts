@@ -36,6 +36,8 @@ export class Cockpit {
   private seed = 1
   livery: Livery = { body: 0x7fc6e8, stripe: 0xff7a1a, number: '17' }
   rain = false
+  /** Seconds of drying left after the rain stops. */
+  private wet = 0
   night = false
 
   constructor() {
@@ -136,11 +138,7 @@ export class Cockpit {
       c.bezierCurveTo(cx - side * 120, H - 220, cx + side * 100, H - 225, cx + side * 260, H - 130)
       c.stroke()
     }
-    // Windscreen frame: thin A-pillars at the edges and a header bar with the mirror.
-    c.fillStyle = '#15161c'
-    c.fillRect(0, 0, 26, H)
-    c.fillRect(W - 26, 0, 26, H)
-    c.fillRect(0, 0, W, 22)
+    // No pillars or header bar: the fenders and dash frame the view, the glass runs edge to edge.
     // Dash: a dark cowl behind the wheel with three round gauges.
     c.fillStyle = '#1b1c22'
     c.beginPath()
@@ -257,7 +255,16 @@ export class Cockpit {
       }
       g.fillStyle = `rgba(196,208,224,${Math.min(0.08, RAIN_HAZE_PER_SEC * step).toFixed(4)})`
       g.fillRect(0, 0, W, H)
+    } else if (this.wet > 0) {
+      // Out of the rain: what's on the glass dries off over a few seconds.
+      this.wet = Math.max(0, this.wet - step)
+      g.save()
+      g.globalCompositeOperation = 'destination-out'
+      g.fillStyle = `rgba(0,0,0,${Math.min(1, step * 0.45).toFixed(4)})`
+      g.fillRect(0, 0, W, H)
+      g.restore()
     }
+    if (this.rain) this.wet = 6
     // Wiper motion: a smooth back-and-forth when on, a slow return to the park position when off.
     const prev = this.wiperAngle
     if (snap.wipersOn) {

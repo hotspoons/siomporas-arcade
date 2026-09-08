@@ -51,6 +51,13 @@ canvas.game { position: absolute; inset: 0; width: 100%; height: 100%; display: 
 .hud .message.show { opacity: 1; transform: none; }
 .hud .message.bad { color: var(--danger); }
 .hud .message.good { color: #7dff9a; }
+/* Near miss: gold, with a glint that sweeps through as it lands. */
+.hud .message.gold { color: #ffd93a; animation: nearmiss 1.1s ease-out; }
+.hud .message.gold::before, .hud .message.gold::after { content: '✦'; position: absolute; font-size: 0.6em; color: #fff7c0; -webkit-text-stroke: 0; text-shadow: 0 0 12px #ffe680, 0 0 24px #ffb000; animation: sparkle 1.1s ease-out; }
+.hud .message.gold::before { left: 30%; top: -0.4em; animation-delay: 0.05s; }
+.hud .message.gold::after { right: 30%; top: 0.5em; animation-delay: 0.22s; }
+@keyframes nearmiss { 0% { transform: scale(0.7); filter: brightness(2.2); } 25% { transform: scale(1.12); filter: brightness(1.6); } 45% { transform: none; filter: none; } 100% { filter: none; } }
+@keyframes sparkle { 0% { opacity: 0; transform: scale(0.2) rotate(0deg); } 30% { opacity: 1; transform: scale(1.3) rotate(90deg); } 100% { opacity: 0; transform: scale(0.4) rotate(200deg); } }
 .hud .fork { position: absolute; top: 38%; left: 0; right: 0; display: none; justify-content: space-between; padding: 0 12vw; font-size: 2.2em; letter-spacing: 0.08em; }
 .hud .fork.show { display: flex; }
 .hud .fork span { opacity: 0.35; transition: opacity 0.1s; }

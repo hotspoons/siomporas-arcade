@@ -6,7 +6,7 @@
 //  - ground: flat grass in world space; rejoin a ground-level lane by driving onto it.
 // Hand-rolled, allocation-free, deterministic.
 
-import { clamp, expApproach, wrapAngle } from '@apex/engine/math/scalar'
+import { clamp, expApproach, smoothstep, wrapAngle } from '@apex/engine/math/scalar'
 import { Vec3 } from '@apex/engine/math/Vec3'
 import type { CarSpec } from './CarSpec'
 import type { InputFrame } from './InputFrame'
@@ -15,7 +15,8 @@ import type { Lane, Track } from './Track'
 import {
   AIR_GLITCH_ACCEL,
   AIR_GLITCH_THRESHOLD,
-  ALIGN_RATE,
+  SLIDE_DECAY,
+  TUBE_RAMP,
   BUMP_BOUNCE,
   PILLAR_SIDE,
   PILLAR_SPACING,
@@ -40,7 +41,6 @@ import {
   STEER_FULL_SPEED,
   STEER_HIGH_SPEED_FACTOR,
   STEER_RATE,
-  TYRE_STIFFNESS,
 } from './Tuning'
 import type { CarMode } from './Snapshot'
 
@@ -71,8 +71,14 @@ export class Car {
   // air / ground state
   readonly vel = new Vec3()
   yaw = 0
-  /** Armed when you took off near vmax with the throttle down; see AIR_GLITCH_THRESHOLD. */
+  /**
+   * Speedlock (the Stunts vmax glitch): armed when you take off near vmax with the
+   * throttle down, and held — in the air, on the road, on the grass — for as long as
+   * you keep the throttle pinned. Let off and it is gone.
+   */
   airGlitch = false
+  /** Rear-end slide (handbrake / tunnel wall gravity), m/s lateral on top of the heading's own drift. */
+  private slide = 0
 
   private readonly frame = makeLaneFrame()
   private readonly scratch = makeLaneFrame()
@@ -108,6 +114,7 @@ export class Car {
       this.speed = keep
       this.heading = 0
       this.lateralVel = 0
+      this.slide = 0
       this.vel.set(0, 0, 0)
       this.airGlitch = false
       this.updatePose()
@@ -134,6 +141,7 @@ export class Car {
     this.speed = speed
     this.heading = 0
     this.lateralVel = 0
+    this.slide = 0
     this.slip = 0
     this.onGrass = false
     this.vel.set(0, 0, 0)
@@ -175,6 +183,18 @@ export class Car {
     a += gTan
     this.speed = v + a * dt
     if (Math.abs(this.speed) < 0.05 && input.throttle === 0 && input.brake === 0) this.speed = 0
+    this.speedlock(dt, input)
+  }
+
+  /** Speedlock: with the glitch armed and the throttle down, nothing slows you below vmax. */
+  private speedlock(dt: number, input: InputFrame): void {
+    if (!this.airGlitch) return
+    if (input.throttle <= 0.5) {
+      this.airGlitch = false
+      return
+    }
+    const top = this.spec.topSpeed
+    if (this.speed < top) this.speed = Math.min(top, this.speed + AIR_GLITCH_ACCEL * dt)
   }
 
   private tickTrack(dt: number, input: InputFrame): void {
@@ -187,29 +207,47 @@ export class Car {
     this.longitudinal(dt, input, gTan, this.onGrass ? GRASS_DRAG : 0)
     const v = this.speed
 
-    // Steering: heading offset from the tangent, with authority falling with speed.
-    const authority = spec.agility * (1 - (1 - STEER_HIGH_SPEED_FACTOR) * clamp((Math.abs(v) - STEER_FULL_SPEED) / (spec.topSpeed - STEER_FULL_SPEED), 0, 1))
-    this.heading += input.steer * STEER_RATE * authority * dt
-    const align = input.handbrake ? ALIGN_RATE * 0.3 : ALIGN_RATE
-    this.heading = expApproach(this.heading, 0, align * clamp(Math.abs(v) / 8, 0.2, 1), dt)
-    this.heading = clamp(this.heading, -HEADING_MAX, HEADING_MAX)
-
-    // Lateral dynamics in the path frame: centrifugal force from the path's own
-    // curvature, gravity from banking, and tyres pulling lateral velocity toward
-    // what the heading asks for — limited by grip. In a tunnel `lateral` is arc
-    // length around the tube, so gravity pulls you back down the wall and the
-    // curve's centrifugal push rides you up it.
+    // An open-world car on a surface, not a bead on a wire. The car keeps its own heading:
+    // as the path bends under it the offset from the tangent grows unless you steer with
+    // it, and where it points is where it goes. Steering asks for a yaw rate; the tyres
+    // deliver what grip allows (banking gravity helps or hurts), and no more.
     const tube = lane.profile === 'tube'
     const wallA = tube ? this.lateral / TUBE_RADIUS : 0
+    const wallW = tube ? this.tubeWall(lane, this.s) : 1
     const grip = GRIP_LATERAL * spec.grip * (this.onGrass ? GRASS_GRIP_SCALE : 1) * (input.handbrake ? 0.55 : 1)
-    const centrifugal = -v * v * f.kRight * (tube ? Math.cos(wallA) : 1)
-    const wallG = tube ? -GRAVITY * Math.sin(wallA) * Math.max(0.2, f.up.y) : 0
-    const wanted = v * Math.sin(this.heading)
-    const tyre = clamp((wanted - this.lateralVel) * TYRE_STIFFNESS, -grip, grip)
-    this.lateralVel += (centrifugal + gRight + wallG + tyre) * dt
-    this.slip = clamp(Math.abs(wanted - this.lateralVel) / 6, 0, 1)
+    const authority = spec.agility * (1 - (1 - STEER_HIGH_SPEED_FACTOR) * clamp((Math.abs(v) - STEER_FULL_SPEED) / (spec.topSpeed - STEER_FULL_SPEED), 0, 1))
+    // Yaw the wheel asks for; nothing turns at a standstill.
+    const yawDemand = input.steer * STEER_RATE * authority * clamp(Math.abs(v) / STEER_FULL_SPEED, 0, 1) * Math.sign(v || 1)
+    const bankG = tube ? 0 : gRight // banking: gravity across the road the tyres must hold or can use
+    const need = v * yawDemand - bankG
+    const tyreF = clamp(need, -grip, grip)
+    const yawRate = Math.abs(v) > 0.5 ? (tyreF + bankG) / v : 0
+    this.slip = clamp((Math.abs(need) - grip) / (grip + 1e-6), 0, 1)
+    this.heading += (yawRate - f.kRight * v) * dt
+    // Handbrake: the rear lets go — you rotate past what grip allows and slide outward.
+    if (input.handbrake && Math.abs(v) > 3) {
+      this.heading += (yawDemand - yawRate) * 0.7 * dt
+      this.slide -= (yawDemand - yawRate) * Math.abs(v) * 0.35 * dt
+      this.slip = 1
+    }
+    // Tunnel wall: gravity along the wall drags you back down toward the floor.
+    if (tube) this.slide += -GRAVITY * Math.sin(wallA) * Math.max(0.2, f.up.y) * wallW * dt
+    else this.slide = expApproach(this.slide, 0, SLIDE_DECAY, dt)
+    if (tube) this.slide = expApproach(this.slide, 0, 1.2, dt)
+    this.lateralVel = v * Math.sin(this.heading) + this.slide
     this.lateral += this.lateralVel * dt
     this.s += v * Math.cos(this.heading) * dt
+
+    // Pointing too far off the road: on a ground-level lane you simply leave it (open
+    // world, no invisible rails); anywhere else the edge will take care of you.
+    if (Math.abs(this.heading) > HEADING_MAX) {
+      const groundLevel = !tube && lane.baseY <= 0 && f.pos.y - lane.baseY < 1.5 && f.up.y > 0.7
+      if (groundLevel) {
+        this.toGround(f)
+        return
+      }
+      this.heading = clamp(this.heading, -HEADING_MAX, HEADING_MAX)
+    }
 
     // Normal force: leave the surface over crests or when too slow in a loop.
     const normal = v * v * f.kUp + GRAVITY * f.up.y
@@ -222,11 +260,17 @@ export class Car {
     const edge = ROAD_HALF_WIDTH + CURB_WIDTH
     if (Math.abs(this.lateral) > ROAD_HALF_WIDTH) {
       if (lane.profile === 'tube') {
-        // Half-pipe: ride the wall up to well past horizontal, then scrape the roof.
-        const maxArc = TUBE_RADIUS * 2.2
+        // Half-pipe: ride the wall up to well past horizontal, then scrape the roof. At the
+        // mouths the wall is still rising from curb height, so there you just run off the side.
+        const maxArc = this.tubeMaxArc(lane, this.s)
         if (Math.abs(this.lateral) > maxArc) {
+          if (wallW < 0.5) {
+            this.toGround(f)
+            return
+          }
           this.lateral = Math.sign(this.lateral) * maxArc
-          this.lateralVel *= -0.3
+          this.slide *= -0.3
+          this.heading *= 0.5
           this.speed -= CURB_SLOW * dt * 4
           this.event = 'curb'
         }
@@ -300,6 +344,18 @@ export class Car {
     return best
   }
 
+  /** 0 at a tunnel mouth rising to 1 inside: how much of the wall is there. */
+  private tubeWall(lane: Lane, s: number): number {
+    const len = lane.table.length
+    return smoothstep(0, TUBE_RAMP, s) * smoothstep(0, TUBE_RAMP, len - s)
+  }
+
+  /** Arc length up the wall you can occupy here (curb at the mouths, past horizontal inside). */
+  private tubeMaxArc(lane: Lane, s: number): number {
+    const w = this.tubeWall(lane, s)
+    return ROAD_HALF_WIDTH + CURB_WIDTH + (TUBE_RADIUS * 2.2 - ROAD_HALF_WIDTH - CURB_WIDTH) * w
+  }
+
   private chooseNext(lane: Lane): Lane | null {
     if (lane.next.length === 0) return null
     if (lane.next.length === 1) return lane.next[0]
@@ -325,9 +381,9 @@ export class Car {
   private launch(f: LaneFrame): void {
     this.mode = 'air'
     this.airTime = 0
-    // World velocity: along tangent (rotated by heading) plus lateral.
+    // World velocity: along the heading (which already carries the lateral drift) plus any rear-end slide.
     this.vA.copy(f.tan).rotateAxis(f.up, -this.heading)
-    this.vel.copy(this.vA).scale(this.speed).addScaled(f.right, this.lateralVel)
+    this.vel.copy(this.vA).scale(this.speed).addScaled(f.right, this.slide)
     this.pos.copy(f.pos).addScaled(f.right, this.lateral).addScaled(f.up, CAR_RIDE)
     this.forward.copy(this.vA)
     this.up.copy(f.up)
@@ -339,12 +395,14 @@ export class Car {
     this.mode = 'ground'
     // Keep the slide: world velocity is the heading direction plus the lateral drift,
     // so leaving a curve carries you off it instead of stopping you at the kerb.
-    this.vA.copy(f.tan).rotateAxis(f.up, -this.heading).scale(this.speed).addScaled(f.right, this.lateralVel)
+    this.vA.copy(f.tan).rotateAxis(f.up, -this.heading).scale(this.speed).addScaled(f.right, this.slide)
     this.vA.y = 0
     const sp = this.vA.length()
     if (sp > 0.5) {
-      this.yaw = Math.atan2(this.vA.z, this.vA.x)
-      this.speed = Math.sign(this.speed || 1) * sp
+      // Reversing: the velocity points backwards, the nose the other way.
+      const dir = this.speed < 0 ? -1 : 1
+      this.yaw = Math.atan2(this.vA.z * dir, this.vA.x * dir)
+      this.speed = dir * sp
     } else this.yaw = Math.atan2(f.tan.z, f.tan.x)
     this.pos.copy(f.pos).addScaled(f.right, this.lateral)
     this.pos.y = CAR_RIDE
@@ -386,9 +444,9 @@ export class Car {
       this.event = 'crash'
       return
     }
-    // Ground plane.
+    // Ground plane. Speedlocked landings never wreck you (the glitch is a gift).
     if (this.pos.y <= CAR_RIDE && this.vel.y < 0) {
-      if (this.up.y < LAND_MIN_ALIGN || -this.vel.y > CRASH_IMPACT_SPEED) {
+      if (this.up.y < LAND_MIN_ALIGN || (-this.vel.y > CRASH_IMPACT_SPEED && !this.airGlitch)) {
         this.event = 'crash'
         return
       }
@@ -412,14 +470,14 @@ export class Car {
           const r = Math.hypot(h.x, h.h - TUBE_RADIUS)
           if (r < TUBE_RADIUS - CAR_RIDE - 1.5 || r > TUBE_RADIUS + 2) continue
           const a = Math.atan2(h.x, TUBE_RADIUS - h.h)
-          if (Math.abs(a) > 2.2) continue
+          if (Math.abs(a) * TUBE_RADIUS > this.tubeMaxArc(lane, h.s)) continue
           this.landOn(lane, h.s, a * TUBE_RADIUS, this.scratch)
           return
         }
         if (Math.abs(h.x) > ROAD_HALF_WIDTH + CURB_WIDTH) continue
         const into = this.vel.dot(this.scratch.up)
         if (h.h > CAR_RIDE + LAND_TOLERANCE || h.h < CAR_RIDE - 2.5 || into > 0) continue
-        if (this.up.dot(this.scratch.up) < LAND_MIN_ALIGN || -into > CRASH_IMPACT_SPEED) {
+        if (this.up.dot(this.scratch.up) < LAND_MIN_ALIGN || (-into > CRASH_IMPACT_SPEED && !this.airGlitch)) {
           this.event = 'crash'
           return
         }
@@ -436,6 +494,7 @@ export class Car {
     this.lateral = x
     this.speed = this.vel.dot(f.tan)
     this.lateralVel = this.vel.dot(f.right)
+    this.slide = 0
     // Heading from the car's forward projected into the surface plane.
     this.vA.copy(this.forward).projectOntoPlane(f.up).normalize()
     this.heading = clamp(wrapAngle(Math.atan2(this.vA.dot(f.right), this.vA.dot(f.tan))), -HEADING_MAX, HEADING_MAX)
@@ -500,7 +559,7 @@ export class Car {
       const ax = Math.abs(h.x)
       if (lane.profile === 'tube') {
         // Outside the half-pipe skin (the road itself is entered through the mouth, via rejoin).
-        if (ax > ROAD_HALF_WIDTH && ax < TUBE_RADIUS + 1 && Math.abs(h.h) < 4) return true
+        if (ax > ROAD_HALF_WIDTH && ax < TUBE_RADIUS + 1 && Math.abs(h.h) < 4 && this.tubeWall(lane, h.s) > 0.3) return true
         continue
       }
       if (ax <= ROAD_HALF_WIDTH + CURB_WIDTH) {

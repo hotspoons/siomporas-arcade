@@ -2,7 +2,7 @@
 // in metres, and from which yaw angles (degrees; 0 = seen from behind).
 
 import type { Object3D } from 'three'
-import { buildArch, buildDiner, buildGasStation, buildMotel, buildPrototype, buildSign, buildTower, LIVERIES } from './procgen'
+import { buildArch, buildBlock, buildDiner, buildGasStation, buildMotel, buildPrototype, buildSign, buildTower, LIVERIES } from './procgen'
 
 export interface ModelDef {
   kind: string
@@ -12,6 +12,8 @@ export interface ModelDef {
   heightM: number
   /** Yaw angles to bake; sprites pick the nearest. */
   yaws: number[]
+  /** Camera pitch angles to bake (degrees above the horizontal); default one, slightly from above. */
+  pitches?: number[]
   /** Cell size in the atlas. */
   cell: number
   /** Extra uniform scale on the model before fitting (some kits are tiny). */
@@ -24,7 +26,7 @@ export interface ModelDef {
  * of silently overflowing it.
  */
 export function atlasSizeFor(defs: ModelDef[]): number {
-  const cells = defs.flatMap((d) => d.yaws.map(() => d.cell)).sort((a, b) => b - a)
+  const cells = defs.flatMap((d) => d.yaws.flatMap(() => (d.pitches ?? [0]).map(() => d.cell))).sort((a, b) => b - a)
   for (const size of [1024, 2048, 4096, 8192]) {
     let x = 0
     let y = 0
@@ -52,7 +54,10 @@ export function atlasSizeFor(defs: ModelDef[]): number {
 export const HERO_YAWS = [0, 12, 24, 38, 60, 90, 120, 150, 180, -12, -24, -38, -60, -90, -120, -150]
 const N = (kind: string, file: string, heightM: number, cell = 128): ModelDef => ({ kind, file: `assets/nature/${file}.glb`, heightM, yaws: [0], cell })
 const P = (kind: string, file: string, heightM: number, cell = 128): ModelDef => ({ kind, file: `assets/props/${file}.glb`, heightM, yaws: [0], cell })
-const C = (kind: string, file: string): ModelDef => ({ kind, file: `assets/cars/${file}.glb`, heightM: 1.5, yaws: [0, 20, -20, 90, -90, 180], cell: 128 })
+/** Traffic: fine flank steps for cars near your lane, quarter views for crossers, head-on, and four pitches for hills. */
+export const TRAFFIC_YAWS = [0, 6, 13, 22, 35, 90, 180, -6, -13, -22, -35, -90]
+export const TRAFFIC_PITCHES = [-5, 4, 13, 22]
+const C = (kind: string, file: string): ModelDef => ({ kind, file: `assets/cars/${file}.glb`, heightM: 1.5, yaws: TRAFFIC_YAWS, pitches: TRAFFIC_PITCHES, cell: 128 })
 
 export const MODELS: ModelDef[] = [
   N('palm', 'tree_palm', 10, 192),
@@ -83,10 +88,12 @@ export const MODELS: ModelDef[] = [
   P('pitsOffice', 'pitsOffice', 6, 256),
   P('gantry', 'overheadLights', 8.5, 256),
   // Hero prototypes, one per livery; the chase view picks the selected one.
-  ...Object.entries(LIVERIES).map(([id, l]): ModelDef => ({ kind: `hero_${id}`, file: '', build: () => buildPrototype(l), heightM: 1.1, yaws: HERO_YAWS, cell: 160 })),
-  { kind: 'formula', file: 'assets/cars/race.glb', heightM: 1.1, yaws: HERO_YAWS, cell: 160 },
+  ...Object.entries(LIVERIES).map(([id, l]): ModelDef => ({ kind: `hero_${id}`, file: '', build: () => buildPrototype(l), heightM: 1.1, yaws: HERO_YAWS, cell: 288 })),
+  { kind: 'formula', file: 'assets/cars/race.glb', heightM: 1.1, yaws: HERO_YAWS, cell: 288 },
   // Roadside architecture and signage.
   { kind: 'diner', file: '', build: buildDiner, heightM: 6.4, yaws: [0], cell: 256 },
+  { kind: 'block', file: '', build: () => buildBlock(15, 14, 0x9aa4ae), heightM: 15, yaws: [0], cell: 192 },
+  { kind: 'block2', file: '', build: () => buildBlock(11, 12, 0xb08a70), heightM: 11, yaws: [0], cell: 192 },
   { kind: 'motel', file: '', build: buildMotel, heightM: 7.6, yaws: [0], cell: 256 },
   { kind: 'gas', file: '', build: buildGasStation, heightM: 4.6, yaws: [0], cell: 256 },
   { kind: 'tower', file: '', build: () => buildTower(34, 0x3a4a6a), heightM: 37, yaws: [0], cell: 256 },

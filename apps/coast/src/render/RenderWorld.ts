@@ -15,6 +15,14 @@ import { THEMES } from '../sim/Stages'
 import { BAND_SEGMENTS, DRAW_SEGMENTS, FORK_SPREAD, ROAD_HALF_WIDTH, SEG_LENGTH } from '../sim/Tuning'
 import { HERO_YAWS } from './models'
 
+/** Darken (f < 1) or lighten a packed RGB colour. */
+function shade(c: number, f: number): number {
+  const r = Math.min(255, Math.round(((c >> 16) & 255) * f))
+  const g = Math.min(255, Math.round(((c >> 8) & 255) * f))
+  const b = Math.min(255, Math.round((c & 255) * f))
+  return (r << 16) | (g << 8) | b
+}
+
 /** Closest baked hero view to a yaw in (-180, 180]. */
 function nearestYaw(yaw: number): number {
   let best = 0
@@ -32,7 +40,7 @@ function nearestYaw(yaw: number): number {
 import { Background } from './Background'
 import { Cockpit } from './Cockpit'
 import { Projection } from './Projection'
-import { BANK_ROLL, BANK_TIERS, HORIZON_ROLL_SHARE, STEER_ROLL, CURVE_UNIT, FOG_MODERN, FOG_RETRO, HEADLIGHT_REACH, LANE_WIDTH, LIGHTS_OFF_AMBIENT, LOGICAL_HEIGHT, MAX_SPRITES, NIGHT_AMBIENT, PALETTES, RAIL_HEIGHT, RUMBLE_WIDTH, SHOULDER_WIDTH, VIEWS, type Palette } from './RenderTuning'
+import { BANK_ROLL, BANK_TIERS, BANK_TIER_COUNT, BANK_TIER_H, BANK_TIER_W, BEACH_WIDTH, HORIZON_ROLL_SHARE, STEER_ROLL, CURVE_UNIT, FOG_MODERN, FOG_RETRO, HEADLIGHT_REACH, LANE_WIDTH, LIGHTS_OFF_AMBIENT, LOGICAL_HEIGHT, MAX_SPRITES, NIGHT_AMBIENT, PALETTES, RAIL_HEIGHT, RUMBLE_WIDTH, SHOULDER_WIDTH, VIEWS, type Palette } from './RenderTuning'
 import { LIVERIES } from './procgen'
 import { Rain } from './Rain'
 import type { Theme } from '../sim/Road'
@@ -121,7 +129,7 @@ export class RenderWorld {
     const theme = THEMES[stage.desc.theme]
     this.theme = theme
     this.palette = PALETTES[theme.palette] ?? PALETTES.coast
-    this.background.setPalette(this.palette, theme.backdrop, this.retro)
+    this.background.setPalette(this.palette, theme.backdrop, this.retro, Boolean(theme.night))
     this.road.setFog(this.palette.fog)
     this.sprites.setFog(this.palette.fog)
     this.renderer.setClearColor(new Color(this.palette.skyBottom), 1)
@@ -145,7 +153,7 @@ export class RenderWorld {
     this.cockpit.setRetro(this.retro)
     if (this.atlas.texture) this.atlas.texture.minFilter = this.atlas.texture.magFilter = this.retro ? NearestFilter : LinearFilter
     if (this.atlas.texture) this.atlas.texture.needsUpdate = true
-    if (this.stage) this.background.setPalette(this.palette, THEMES[this.stage.desc.theme].backdrop, this.retro)
+    if (this.stage) this.background.setPalette(this.palette, THEMES[this.stage.desc.theme].backdrop, this.retro, Boolean(THEMES[this.stage.desc.theme].night))
     this.resize(this.width, this.height, this.pixelRatio)
   }
 
@@ -212,7 +220,7 @@ export class RenderWorld {
     // wheel is turned (the cockpit stays level). Banked curves step the cockpit up in lane
     // tiers, Rad Mobile style: each outer lane you climb adds BANK_ROLL, plateauing after
     // BANK_TIERS lanes; the horizon takes the same subtle share of that steady lean.
-    const bank = this.theme?.bank ?? 0
+    const bank = segAt(base + 2).bank
     const curveHere = segAt(base + 2).curve
     let bankTarget = 0
     if (bank > 0 && Math.abs(curveHere) > 0.05) {
@@ -225,8 +233,10 @@ export class RenderWorld {
     const shake = curr.wreck ? Math.sin(this.time * 26) * 0.14 * (1 - curr.crashT) : 0
     const horizon = (this.steerRoll + this.bankRoll + shake) * HORIZON_ROLL_SHARE
     const roll = this.bankRoll + shake
-    this.world.rotation.z = horizon
-    const cover = 1 + Math.abs(horizon) * 1.6
+    // First person: a crash spins the whole view round once (a wreck, twice) — the Rad Mobile tumble.
+    const spin = !view.drawPlayer && curr.crashT > 0 ? (curr.wreck ? Math.min(1, curr.crashT / 0.7) * 2 : Math.min(1, curr.crashT / 0.85)) * Math.PI * 2 : 0
+    this.world.rotation.z = horizon + spin
+    const cover = 1 + Math.abs(horizon) * 1.6 + Math.abs(Math.sin(spin)) * 1.1
     this.world.scale.set(cover, cover, 1)
     this.cockpit.mesh.rotation.z = -roll
     const ccover = 1 + Math.abs(roll) * 1.3
@@ -284,6 +294,34 @@ export class RenderWorld {
       const zRel = (base + n) * SEG_LENGTH - camZ
       this.road.setDim(night ? this.brightAt(zRel) : 1)
       this.road.quad(W / 2, y1, W, W / 2, y2, W, band ? pal.grassA : pal.grassB, fog)
+      if (seg.bank > 0.05 && Math.abs(seg.curve) > 0.05) {
+        // Terraced banking on the outside of the curve: stepped shelves climbing away from the road.
+        const side = -Math.sign(seg.curve)
+        const b0 = ROAD_HALF_WIDTH + RUMBLE_WIDTH + SHOULDER_WIDTH
+        for (let k = 0; k < BANK_TIER_COUNT; k++) {
+          const lo = b0 + k * BANK_TIER_W
+          const hi = lo + BANK_TIER_W + (k === BANK_TIER_COUNT - 1 ? 60 : 0)
+          const h = (k + 1) * BANK_TIER_H * seg.bank
+          const col = shade(k % 2 ? pal.grassB : pal.grassA, 1 - 0.12 * (k + 1))
+          this.road.quad(x1 + side * ((lo + hi) / 2) * s1, y1 + h * s1, ((hi - lo) / 2) * s1, x2 + side * ((lo + hi) / 2) * s2, y2 + h * s2, ((hi - lo) / 2) * s2, col, fog)
+        }
+      }
+      if (seg.shore && pal.water !== undefined) {
+        // The sea against the road: a sliver of beach past the shoulder, then water to the screen edge.
+        const side = seg.shore
+        const b0 = ROAD_HALF_WIDTH + RUMBLE_WIDTH + SHOULDER_WIDTH
+        const b1 = b0 + BEACH_WIDTH
+        this.road.quad(x1 + side * ((b0 + b1) / 2) * s1, y1, ((b1 - b0) / 2) * s1, x2 + side * ((b0 + b1) / 2) * s2, y2, ((b1 - b0) / 2) * s2, pal.sand ?? pal.shoulder, fog)
+        this.road.quad(x1 + side * (b1 * s1 + W), y1, W, x2 + side * (b1 * s2 + W), y2, W, pal.water, fog)
+        // Surf: a foam line that runs up the beach and slides back, each stretch of shore on its own beat,
+        // with a paler wash behind it where the last wave just broke.
+        const beat = this.time * 1.9 + (base + n) * 0.23
+        const run = Math.max(0, Math.sin(beat)) ** 1.6 * 3.2
+        const foamW = 0.9 + 0.6 * Math.max(0, Math.sin(beat * 2.1))
+        const wash = 1.6 + 1.2 * Math.max(0, Math.sin(beat - 1.2))
+        this.road.quad(x1 + side * (b1 - run + wash / 2) * s1, y1, (wash / 2) * s1, x2 + side * (b1 - run + wash / 2) * s2, y2, (wash / 2) * s2, shade(pal.water, 1.35), fog)
+        this.road.quad(x1 + side * (b1 - run) * s1, y1, (foamW / 2) * s1, x2 + side * (b1 - run) * s2, y2, (foamW / 2) * s2, 0xf4fbff, fog)
+      }
       // An intersection: a road crosses the whole screen with its own edge lines.
       if (seg.crossing) {
         this.road.quad(W / 2, y1, W, W / 2, y2, W, pal.roadA, fog)
@@ -308,6 +346,14 @@ export class RenderWorld {
             const f = -1 + (2 * l) / lanes
             this.road.quad(cx1 + f * w1, y1, LANE_WIDTH * s1, cx2 + f * w2, y2, LANE_WIDTH * s2, pal.lane, fog)
           }
+        }
+        if (seg.closed && side === 0) {
+          // Roadworks: a concrete jersey barrier along the lane line with an orange stripe on top.
+          const e = seg.closed
+          const jx1 = cx1 + e * 0.5 * w1
+          const jx2 = cx2 + e * 0.5 * w2
+          this.road.quad(jx1, y1 + 0.45 * s1, 0.36 * s1, jx2, y2 + 0.45 * s2, 0.36 * s2, 0xd4d2ca, fog)
+          this.road.quad(jx1, y1 + 0.85 * s1, 0.3 * s1, jx2, y2 + 0.85 * s2, 0.3 * s2, 0xe8801a, fog)
         }
         if (rails && seg.fork < 0) {
           // Guardrail: a thin bright band standing RAIL_HEIGHT above the shoulder edge, with a dark post every other segment.
@@ -345,11 +391,15 @@ export class RenderWorld {
           const sx = this.rowX[n] + (this.rowX[n + 1] - this.rowX[n]) * t
           const sy = this.rowY[n] + (this.rowY[n + 1] - this.rowY[n]) * t
           const kind = TRAFFIC_KINDS[curr.trafficKind[ci]]
-          const rel = curr.trafficX[ci] - x
           const yaw = curr.trafficYaw[ci]
-          // Same-way traffic shows a flank as you offset from it (car to your right shows the side facing you);
-          // head-on and crossing cars use their baked views.
-          const frame = this.atlas.frame(kind, yaw === 0 ? (rel > 0.3 ? 20 : rel < -0.3 ? -20 : 0) : yaw)
+          // Pose from the real view geometry: how far off to the side the car sits versus how far ahead
+          // gives the flank angle, and the height difference (hills) versus distance gives the pitch —
+          // descending you look down onto roofs, climbing you look up at bumpers. The chase camera sits
+          // higher than the cockpit's eye line, so it adds more downward pitch.
+          const dz = Math.max(6, cz - camZ)
+          const viewYaw = yaw === 0 ? (Math.atan2((curr.trafficX[ci] - x) * ROAD_HALF_WIDTH, dz) * 180) / Math.PI : yaw
+          const viewPitch = (view.drawPlayer ? 9 : 2) + (Math.atan2(camY - stage.heightAt(cz), dz) * 180) / Math.PI
+          const frame = this.atlas.frame(kind, viewYaw, viewPitch)
           if (frame) this.sprites.add(sx + curr.trafficX[ci] * ROAD_HALF_WIDTH * sc, sy, frame.heightM * sc, frame, this.rowFog[n], this.brightAt((base + n) * SEG_LENGTH - camZ), clip)
         }
       }

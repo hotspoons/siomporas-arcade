@@ -3,7 +3,7 @@
 // and rendering ~80 cells. Any change to models.ts invalidates it.
 
 import { NearestFilter, LinearFilter, SRGBColorSpace, Texture, type WebGLRenderer, type WebGLRenderTarget } from 'three'
-import type { SpriteKind } from './SpriteAtlas'
+import { DEFAULT_PITCH, type SpriteKind } from './SpriteAtlas'
 
 import { ATLAS_SIZE, MODELS } from './models'
 import { PROCGEN_VERSION } from './procgen'
@@ -11,17 +11,17 @@ import { PROCGEN_VERSION } from './procgen'
 const DB = 'apex-coast'
 const STORE = 'atlas'
 /** Bump when the bake itself changes (lighting, camera, cell layout). */
-const BAKE_VERSION = 3
+const BAKE_VERSION = 4
 
 interface CachedAtlas {
   key: string
   png: Blob
-  kinds: [string, { def: SpriteKind['def']; frames: SpriteKind['frames']; yaws: number[] }][]
+  kinds: [string, { def: SpriteKind['def']; frames: SpriteKind['frames']; yaws: number[]; pitches?: number[] }][]
 }
 
 export function atlasKey(): string {
   // The manifest fully determines the atlas; `build` functions are identified by kind name.
-  const manifest = MODELS.map((m) => `${m.kind}|${m.file}|${m.heightM}|${m.yaws.join(',')}|${m.cell}|${m.fit ?? 1}|${m.build ? 'b' : 'f'}`).join(';')
+  const manifest = MODELS.map((m) => `${m.kind}|${m.file}|${m.heightM}|${m.yaws.join(',')}|${(m.pitches ?? []).join(',')}|${m.cell}|${m.fit ?? 1}|${m.build ? 'b' : 'f'}`).join(';')
   let h = 2166136261
   for (let i = 0; i < manifest.length; i++) {
     h ^= manifest.charCodeAt(i)
@@ -57,7 +57,7 @@ export async function loadCachedAtlas(key: string): Promise<{ texture: Texture; 
     texture.generateMipmaps = false
     texture.needsUpdate = true
     const kinds = new Map<string, SpriteKind>()
-    for (const [k, v] of rec.kinds) kinds.set(k, { def: v.def, frames: v.frames, yaws: v.yaws })
+    for (const [k, v] of rec.kinds) kinds.set(k, { def: v.def, frames: v.frames, yaws: v.yaws, pitches: v.pitches ?? [DEFAULT_PITCH] })
     return { texture, kinds }
   } catch (err) {
     console.warn('atlas cache read failed', err)
@@ -79,7 +79,7 @@ export async function saveCachedAtlas(key: string, renderer: WebGLRenderer, rt: 
     const rec: CachedAtlas = {
       key,
       png,
-      kinds: [...kinds.entries()].map(([k, v]) => [k, { def: { ...v.def, build: undefined }, frames: v.frames, yaws: v.yaws }]),
+      kinds: [...kinds.entries()].map(([k, v]) => [k, { def: { ...v.def, build: undefined }, frames: v.frames, yaws: v.yaws, pitches: v.pitches }]),
     }
     const db = await open()
     await new Promise<void>((resolve, reject) => {

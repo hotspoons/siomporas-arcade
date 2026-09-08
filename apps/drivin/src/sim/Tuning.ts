@@ -18,11 +18,13 @@ export const CURB_WIDTH = 0.8
 /** Metres between baked path samples. */
 export const PATH_STEP = 1
 /** Radius of vertical loops and corkscrews. */
-export const LOOP_RADIUS = 12
+export const LOOP_RADIUS = 18
 /** Corkscrew helix radius (metres). */
 export const CORK_RADIUS = 14
 /** Round tunnel radius (the road is the floor). */
 export const TUBE_RADIUS = 11
+/** Metres over which a tunnel's walls rise from curb height at each mouth (and sink again at the exit). */
+export const TUBE_RAMP = 18
 /** Lateral shift across a loop so the exit clears the entry, metres. */
 export const LOOP_SHIFT = 2 * (ROAD_HALF_WIDTH + CURB_WIDTH) + 2.4
 /** How far off the road (grass) you can wander on ground-level pieces before you are simply lost. */
@@ -39,7 +41,7 @@ export const PILLAR_SIDE = 3.2
 export const BUMP_BOUNCE = 0.25
 export const CAR_HALF_LENGTH = 2.2
 export const CAR_HALF_WIDTH = 0.95
-/** Max heading offset from the path tangent (rad) while gripping. */
+/** Heading offset from the path tangent (rad) beyond which a ground-level lane hands the car to the grass (elevated lanes clamp here). */
 export let HEADING_MAX = 1.1
 /** Speed below which steering authority is at its maximum (m/s). */
 export let STEER_FULL_SPEED = 12
@@ -51,18 +53,18 @@ export let AIR_REV_RATE = 1.6
 export let STEER_RATE = 2.4
 /** Lateral velocity the tyres can correct per second per m/s of mismatch. */
 export let TYRE_STIFFNESS = 6
-/** Self-aligning torque: how fast the heading returns to the tangent (1/s). */
-export let ALIGN_RATE = 3.2
+/** Handbrake: how fast the rear-end slide bleeds off once you let go (1/s). */
+export let SLIDE_DECAY = 4
 /** Lateral grip: max lateral acceleration the tyres provide, m/s². */
 export let GRIP_LATERAL = 22
 /** Rolling drag and aero drag. */
 export let DRAG_ROLLING = 0.5
 export let DRAG_AERO = 0.0006
 /** Extra deceleration on grass and the grip left there. */
-export let GRASS_DRAG = 1.5
+export let GRASS_DRAG = 0.4
 export let GRASS_GRIP_SCALE = 0.35
 /** Grass: how much throttle / brake force the tyres can put down, and how much steering bite you keep. */
-export let GRASS_TRACTION = 0.45
+export let GRASS_TRACTION = 0.75
 export let GRASS_STEER = 0.6
 /** Speed lost per second while scraping a curb/wall. */
 export let CURB_SLOW = 4
@@ -80,7 +82,7 @@ export let LAND_TOLERANCE = 1.2
 /** Land only if the car's up and the surface normal roughly agree. */
 export let LAND_MIN_ALIGN = 0.35
 /** Impact speed into a surface (m/s) that wrecks the car. */
-export let CRASH_IMPACT_SPEED = 22
+export let CRASH_IMPACT_SPEED = 30
 /** Below this world height you are gone. */
 export const FALL_LIMIT = -30
 /** How many seconds of poses the crash replay keeps. */
@@ -103,7 +105,7 @@ export const SIM_TUNE: TuneSection = {
     tune('STEER_HIGH_SPEED_FACTOR', () => STEER_HIGH_SPEED_FACTOR, (v) => (STEER_HIGH_SPEED_FACTOR = v)),
     tune('STEER_RATE', () => STEER_RATE, (v) => (STEER_RATE = v)),
     tune('TYRE_STIFFNESS', () => TYRE_STIFFNESS, (v) => (TYRE_STIFFNESS = v)),
-    tune('ALIGN_RATE', () => ALIGN_RATE, (v) => (ALIGN_RATE = v)),
+    tune('SLIDE_DECAY', () => SLIDE_DECAY, (v) => (SLIDE_DECAY = v)),
     tune('GRIP_LATERAL', () => GRIP_LATERAL, (v) => (GRIP_LATERAL = v)),
     tune('DRAG_ROLLING', () => DRAG_ROLLING, (v) => (DRAG_ROLLING = v)),
     tune('DRAG_AERO', () => DRAG_AERO, (v) => (DRAG_AERO = v)),

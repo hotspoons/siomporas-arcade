@@ -80,6 +80,19 @@ export let CURB_SLOW = 4
  */
 export let AIR_GLITCH_THRESHOLD = 0.6
 export let AIR_GLITCH_ACCEL = 400
+/**
+ * The rocket jump — Stunts' "jump bug 3", where gravity went insane and threw the car so high that
+ * buildings looked like holes in the ground. In the original it fired unpredictably when a car at the
+ * top of its rev range crossed a seam between differently-sloped pieces (a ramp, a loop, a corkscrew),
+ * out of the same slope-and-transition handling that gives power gear its speed. Ours needs the same
+ * three things: near top speed (or speedlocked), a seam where the surface tilts by at least
+ * ROCKET_SLOPE, and luck — ROCKET_CHANCE of those crossings. Then the car leaves at ROCKET_SPEED
+ * upward and, like the original, can fall a very long way without wrecking.
+ */
+export let ROCKET_CHANCE = 0.2
+export let ROCKET_SPEED = 75
+export let ROCKET_MIN_SPEED = 0.94
+export let ROCKET_SLOPE = 0.01
 export let LAND_TOLERANCE = 1.2
 /** Land only if the car's up and the surface normal roughly agree. */
 export let LAND_MIN_ALIGN = 0.35
@@ -129,6 +142,10 @@ export const SIM_TUNE: TuneSection = {
     tune('RESET_PENALTY', () => RESET_PENALTY, (v) => (RESET_PENALTY = v), [0, 20], 1),
     tune('AIR_GLITCH_THRESHOLD', () => AIR_GLITCH_THRESHOLD, (v) => (AIR_GLITCH_THRESHOLD = v)),
     tune('AIR_GLITCH_ACCEL', () => AIR_GLITCH_ACCEL, (v) => (AIR_GLITCH_ACCEL = v)),
+    tune('ROCKET_CHANCE', () => ROCKET_CHANCE, (v) => (ROCKET_CHANCE = v), [0, 1], 0.05, 'share of qualifying seams that fire'),
+    tune('ROCKET_SPEED', () => ROCKET_SPEED, (v) => (ROCKET_SPEED = v), [20, 400], 10, 'launch speed straight up, m/s'),
+    tune('ROCKET_MIN_SPEED', () => ROCKET_MIN_SPEED, (v) => (ROCKET_MIN_SPEED = v), [0.5, 1], 0.02, 'share of top speed needed'),
+    tune('ROCKET_SLOPE', () => ROCKET_SLOPE, (v) => (ROCKET_SLOPE = v), [0, 0.3], 0.01, 'surface tilt across the seam needed'),
     tune('AIR_REV_RATE', () => AIR_REV_RATE, (v) => (AIR_REV_RATE = v)),
   ],
 }

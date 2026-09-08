@@ -16,6 +16,10 @@ import {
   AIR_GLITCH_ACCEL,
   AIR_GLITCH_THRESHOLD,
   BANK_HOLD,
+  ROCKET_CHANCE,
+  ROCKET_MIN_SPEED,
+  ROCKET_SLOPE,
+  ROCKET_SPEED,
   SLIDE_DECAY,
   TUBE_RAMP,
   BUMP_BOUNCE,
@@ -46,7 +50,7 @@ import {
 } from './Tuning'
 import type { CarMode } from './Snapshot'
 
-export type CarEvent = 'none' | 'launch' | 'land' | 'crash' | 'offroad' | 'onroad' | 'lost' | 'curb' | 'bump'
+export type CarEvent = 'none' | 'launch' | 'land' | 'crash' | 'offroad' | 'onroad' | 'lost' | 'curb' | 'bump' | 'rocket'
 
 
 export class Car {
@@ -83,6 +87,11 @@ export class Car {
   airGlitch = false
   /** Rear-end slide (handbrake / tunnel wall gravity), m/s lateral on top of the heading's own drift. */
   private slide = 0
+  /** The rocket jump is armed (experiments) and, while airborne, whether this flight is one. */
+  rocketsEnabled = true
+  rocket = false
+  /** Ticks, for the deterministic dice the rocket jump rolls at a seam. */
+  private ticks = 0
 
   private readonly frame = makeLaneFrame()
   private readonly scratch = makeLaneFrame()
@@ -179,6 +188,7 @@ export class Car {
 
   tick(dt: number, input: InputFrame): void {
     this.event = 'none'
+    this.ticks++
     switch (this.mode) {
       case 'track':
         this.tickTrack(dt, input)
@@ -437,9 +447,29 @@ export class Car {
     this.up.copy(f.up)
     this.airGlitch = this.speed >= this.spec.topSpeed * AIR_GLITCH_THRESHOLD
     this.event = 'launch'
+    // Stunts' jump bug: leave a ramp, a lip or a crest at the top of the rev range and gravity
+    // occasionally goes insane instead, throwing the car straight up.
+    const fast = this.airGlitch || Math.abs(this.speed) >= this.spec.topSpeed * ROCKET_MIN_SPEED
+    // Sloped, crested, or the lip of a jump (where the surface has run out) — the places the original
+    // tripped over. A flat kerb or an embankment edge is not enough.
+    const sloped = !f.surface || Math.abs(f.kUp) > 0.0008 || 1 - f.up.y > ROCKET_SLOPE
+    if (this.rocketsEnabled && fast && sloped && this.dice() < ROCKET_CHANCE) {
+      this.vel.y = ROCKET_SPEED
+      this.rocket = true
+      this.airGlitch = true
+      this.event = 'rocket'
+    }
   }
 
   /** Fall off a tunnel wall: keep the pose we are already in and turn the wall motion into world velocity. */
+  /** A deterministic 0..1 per tick: the same run always rockets in the same places. */
+  private dice(): number {
+    let h = (this.ticks * 2654435761) ^ 0x9e3779b9
+    h = Math.imul(h ^ (h >>> 15), 2246822519)
+    h = Math.imul(h ^ (h >>> 13), 3266489917)
+    return ((h ^ (h >>> 16)) >>> 0) / 4294967296
+  }
+
   private launchFromWall(): void {
     this.mode = 'air'
     this.airTime = 0
@@ -507,7 +537,7 @@ export class Car {
     // Ground (the landscape). Speedlocked landings never wreck you (the glitch is a gift).
     const gh = this.track.groundHeight(this.pos.x, this.pos.z)
     if (this.pos.y <= gh + CAR_RIDE && this.vel.y < 0) {
-      if (this.up.y < LAND_MIN_ALIGN || (-this.vel.y > CRASH_IMPACT_SPEED && !this.airGlitch)) {
+      if ((this.up.y < LAND_MIN_ALIGN && !this.rocket) || (-this.vel.y > CRASH_IMPACT_SPEED && !this.airGlitch && !this.rocket)) {
         this.crashCause = this.up.y < LAND_MIN_ALIGN ? 'landed upside down' : `landed too hard · ${(-this.vel.y).toFixed(0)} m/s`
         this.event = 'crash'
         return
@@ -515,6 +545,7 @@ export class Car {
       this.pos.y = gh + CAR_RIDE
       this.groundVy = 0
       this.mode = 'ground'
+      this.rocket = false
       this.yaw = Math.atan2(this.forward.z, this.forward.x)
       this.speed = Math.hypot(this.vel.x, this.vel.z)
       this.onGrass = true
@@ -540,7 +571,7 @@ export class Car {
         if (Math.abs(h.x) > ROAD_HALF_WIDTH + CURB_WIDTH) continue
         const into = this.vel.dot(this.scratch.up)
         if (h.h > CAR_RIDE + LAND_TOLERANCE || h.h < CAR_RIDE - 2.5 || into > 0) continue
-        if (this.up.dot(this.scratch.up) < LAND_MIN_ALIGN || (-into > CRASH_IMPACT_SPEED && !this.airGlitch)) {
+        if ((this.up.dot(this.scratch.up) < LAND_MIN_ALIGN && !this.rocket) || (-into > CRASH_IMPACT_SPEED && !this.airGlitch && !this.rocket)) {
           this.crashCause = this.up.dot(this.scratch.up) < LAND_MIN_ALIGN ? 'landed upside down on the road' : `landed too hard on the road · ${(-into).toFixed(0)} m/s`
           this.event = 'crash'
           return
@@ -552,6 +583,7 @@ export class Car {
   }
 
   private landOn(lane: Lane, s: number, x: number, f: LaneFrame, wallA?: number): void {
+    this.rocket = false
     this.mode = 'track'
     this.lane = lane
     this.s = clamp(s, 0, lane.table.length)

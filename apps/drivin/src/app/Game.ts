@@ -357,6 +357,7 @@ export class Game implements LoopClient {
 
   applyExperiments(): void {
     this.sim.crashesEnabled = this.settings.data.experiments.crashes
+    this.sim.car.rocketsEnabled = this.settings.data.experiments.rockets !== false
   }
 
   // --- LoopClient ---
@@ -465,6 +466,11 @@ export class Game implements LoopClient {
       case 'bump':
         hp.rumble(Math.min(1, e.a / 30), 0.6, 180)
         hp.mobile(35)
+        break
+      case 'rocket':
+        this.hud.showMessage('ROCKET JUMP!', 2.4, 'good')
+        hp.rumble(1, 0.7, 700)
+        hp.mobile([60, 40, 220])
         break
       case 'offroad':
         hp.rumble(0.3, 0.5, 150)

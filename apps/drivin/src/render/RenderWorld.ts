@@ -137,6 +137,10 @@ export class RenderWorld {
         this.particles.burst(p, 18, 8, 1.2, 0.6, 0.6, 0.55, 3)
         this.rig.addShake(Math.min(1, e.a / 40))
         break
+      case 'rocket':
+        this.particles.burst(p, 90, 26, 2.2, 1, 0.85, 0.4, 6)
+        this.rig.addShake(1)
+        break
       case 'offroad':
         this.particles.burst(p, 20, 6, 0.9, 0.3, 0.45, 0.2, 3)
         break

@@ -128,6 +128,7 @@ export function buildMenus(game: Game) {
       { kind: 'choice', label: 'Camera', options: ['Chase', 'Hood'], get: () => (s().camera === 'hood' ? 1 : 0), set: (i) => { set((d) => (d.camera = i === 1 ? 'hood' : 'chase')); game.applyCamera() } },
       { kind: 'info', label: '— EXPERIMENTS —' },
       toggle('Crashes', () => s().experiments.crashes, (v) => set((d) => (d.experiments.crashes = v)), () => game.applyExperiments()),
+      toggle('Rocket jumps', () => s().experiments.rockets !== false, (v) => set((d) => (d.experiments.rockets = v)), () => game.applyExperiments()),
       { kind: 'info', label: '— AUDIO —' },
       slider('Master', () => s().audio.master, (v) => set((d) => (d.audio.master = v))),
       slider('SFX', () => s().audio.sfx, (v) => set((d) => (d.audio.sfx = v))),

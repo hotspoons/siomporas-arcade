@@ -170,6 +170,9 @@ export class Sim {
         case 'bump':
           this.events.push('bump', car.pos, Math.abs(car.speed))
           break
+        case 'rocket':
+          this.events.push('rocket', car.pos, Math.abs(car.speed))
+          break
         default:
           break
       }

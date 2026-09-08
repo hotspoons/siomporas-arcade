@@ -148,6 +148,11 @@ export class AudioWorld {
         this.thud(110, 40, 0.2, Math.min(1, 0.3 + e.a / 30))
         this.noiseBurst(Math.min(0.6, 0.1 + e.a / 40), 0.2, 900)
         break
+      case 'rocket':
+        // A rising whistle: gravity has left the building.
+        this.noiseBurst(0.5, 1.4, 4000)
+        for (let i = 0; i < 6; i++) setTimeout(() => this.ctx && this.blip(400 + i * 260, 0.18, 0.12, 'sine'), i * 90)
+        break
       case 'lap':
         this.blip(659, 0.2, 0.3, 'triangle')
         setTimeout(() => this.ctx && this.blip(988, 0.3, 0.3, 'triangle'), 110)

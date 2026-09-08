@@ -26,7 +26,7 @@ export interface SettingsData {
   showPerf: boolean
   playerName: string
   /** Experiments: gameplay switches that are not part of the intended rules. */
-  experiments: { crashes: boolean }
+  experiments: { crashes: boolean; rockets?: boolean }
 }
 
 const KEY = 'apex-drivin.settings.v1'
@@ -48,7 +48,7 @@ export const DEFAULT_SETTINGS: SettingsData = {
   haptics: 1,
   showPerf: false,
   playerName: 'ACE',
-  experiments: { crashes: true },
+  experiments: { crashes: true, rockets: true },
 }
 
 export class Settings extends SettingsStore<SettingsData> {

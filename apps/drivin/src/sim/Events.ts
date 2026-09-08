@@ -2,7 +2,7 @@
 
 import { Vec3 } from '@apex/engine/math/Vec3'
 
-export type SimEventType = 'crash' | 'land' | 'launch' | 'lap' | 'respawn' | 'curb' | 'offroad' | 'onroad' | 'penalty' | 'gear' | 'replay_start' | 'replay_end' | 'bump'
+export type SimEventType = 'crash' | 'land' | 'launch' | 'lap' | 'respawn' | 'curb' | 'offroad' | 'onroad' | 'penalty' | 'gear' | 'replay_start' | 'replay_end' | 'bump' | 'rocket'
 
 export interface SimEvent {
   type: SimEventType

@@ -20,7 +20,7 @@ import { PIECES, PIECE_BY_TYPE, applyMirror, canShareCell, makePathPoint, opposi
 import { CELL } from '../sim/Tuning'
 import { Track, portStatus, type PlacedPiece, type TrackData } from '../sim/Track'
 import type { TrackStore } from '../app/TrackStore'
-import { brushTerrain, flatTerrain, flattenUnderPieces, resizeTerrain, sampleHeight, terrainIndex } from '../sim/terrain'
+import { brushTerrain, clampTerrain, flatTerrain, resizeTerrain, sampleHeight, terrainIndex } from '../sim/terrain'
 import { LINK_TIGHTNESS_DEFAULT, linkPoint, portWorld, type Link, type PortRef } from '../sim/links'
 import { LEVEL_H } from '../sim/Tuning'
 
@@ -256,6 +256,9 @@ export class Editor {
     this.anchor = -1
     this.undoStack = []
     this.redoStack = []
+    // A track sculpted before the runaway grading was fixed can carry impossible spikes: settle them
+    // on the way in rather than leaving the landscape unusable.
+    if (this.data.terrain && clampTerrain(this.data.terrain, this.data.size)) this.flash('Landscape had impossible slopes — settled them to something drivable')
     this.pruneLinks()
     this.fit()
     this.dirty = true
@@ -629,9 +632,15 @@ export class Editor {
     return this.data.terrain
   }
 
-  /** After pieces move: keep the ground pinned under roads and drop links whose connectors now meet a piece. */
+  /**
+   * After pieces move: drop links whose connectors now meet a piece.
+   *
+   * The heightmap is left exactly as it was sculpted. Grading the ground under the roads happens when
+   * the track is built (see Track), on a copy — doing it here wrote the graded result back over the
+   * sculpted data, so every brush sample re-graded its own output and the spline overshoot compounded
+   * into six-figure spikes.
+   */
   private settleTerrain(): void {
-    if (this.data.terrain) flattenUnderPieces(this.data.terrain, this.data.size, this.data.pieces)
     this.pruneLinks()
   }
 
@@ -683,6 +692,7 @@ export class Editor {
     const step = 0.22 * Math.sqrt(this.brush)
     if (kind === 'flatten') brushTerrain(h, this.data.size, c.x, c.z, this.brush, 0, this.level * LEVEL_H)
     else brushTerrain(h, this.data.size, c.x, c.z, this.brush, kind === 'raise' ? step : -step)
+    clampTerrain(h, this.data.size)
     this.settleTerrain()
     this.dirty = true
   }

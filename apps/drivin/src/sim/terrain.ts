@@ -162,6 +162,63 @@ export function flattenUnderPieces(heights: number[], size: number, pieces: Plac
         if (n) heights[i] = before[i] * 0.45 + (sum / n) * 0.55
       }
   }
+  clampTerrain(heights, size)
+}
+
+/** How far two neighbouring corners may differ, in metres. Corners are CELL apart, so this is the steepest cliff the land can hold. */
+export const TERRAIN_MAX_STEP = 30
+/** Absolute limits, a little wider than the sculpting brush's own range so grading has room to work. */
+export const TERRAIN_MIN = -60
+export const TERRAIN_MAX = 160
+
+/**
+ * Keep a heightmap sane: finite, within range, and with no cliff between neighbouring corners taller
+ * than `maxStep`. Excess is split between the two corners, so the pair keeps its average and the whole
+ * surface settles like a sandpile instead of being flattened.
+ *
+ * This is a backstop, not a sculpting tool. Grading the land under the roads used to be written back
+ * over the sculpted heightmap, so every brush sample re-graded its own output; the corridor resamples
+ * the surface with a spline, that spline can overshoot by a quarter, and a few hundred strokes of
+ * compounding overshoot turned a hillside into six-figure spikes. The feedback is gone, and this makes
+ * sure nothing like it can put an Escher landscape on the grid again.
+ *
+ * Returns true when it had to change something.
+ */
+export function clampTerrain(heights: number[], size: number, maxStep = TERRAIN_MAX_STEP): boolean {
+  let touched = false
+  for (let i = 0; i < heights.length; i++) {
+    const v = heights[i]
+    const c = Number.isFinite(v) ? Math.max(TERRAIN_MIN, Math.min(TERRAIN_MAX, v)) : 0
+    if (c !== v) {
+      heights[i] = c
+      touched = true
+    }
+  }
+  for (let pass = 0; pass < 24; pass++) {
+    let changed = false
+    for (let z = 0; z <= size; z++)
+      for (let x = 0; x <= size; x++) {
+        const i = terrainIndex(size, x, z)
+        for (const [dx, dz] of [
+          [1, 0],
+          [0, 1],
+        ]) {
+          const nx = x + dx
+          const nz = z + dz
+          if (nx > size || nz > size) continue
+          const j = terrainIndex(size, nx, nz)
+          const d = heights[j] - heights[i]
+          if (Math.abs(d) <= maxStep) continue
+          const fix = (Math.abs(d) - maxStep) / 2 * Math.sign(d)
+          heights[i] += fix
+          heights[j] -= fix
+          changed = true
+        }
+      }
+    if (!changed) break
+    touched = true
+  }
+  return touched
 }
 
 /**

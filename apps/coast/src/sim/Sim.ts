@@ -170,6 +170,8 @@ export class Sim {
       this.tickCount++
       this.timeLeft -= dt
       if (this.checkpointFlash > 0) this.checkpointFlash -= dt
+      // Gear, wipers and lights work whatever the car is doing — nothing is locked out mid-spin.
+      this.tickSwitches(input)
       if (this.phase === 'crashed') this.tickCrash(dt)
       else this.tickDrive(dt, input)
       this.tickTraffic(dt)
@@ -180,6 +182,22 @@ export class Sim {
       }
     }
     this.write(out)
+  }
+
+  /** The manual switches — gear (manual box), wipers, lights — arcade style: nothing comes on by itself, and none of them care whether you're spinning. */
+  private tickSwitches(input: InputFrame): void {
+    if (!this.automatic && input.gear) {
+      this.gear = this.gear === 1 ? 0 : 1
+      this.events.push('gear', this.gear)
+    }
+    if (input.wipers) {
+      this.wipersOn = !this.wipersOn
+      this.events.push('wipers', this.wipersOn ? 1 : 0)
+    }
+    if (input.lights) {
+      this.lightsOn = !this.lightsOn
+      this.events.push('lights', this.lightsOn ? 1 : 0)
+    }
   }
 
   private tickDrive(dt: number, input: InputFrame): void {
@@ -195,9 +213,6 @@ export class Sim {
         this.gear = 0
         this.events.push('gear', 0)
       }
-    } else if (input.gear) {
-      this.gear = this.gear === 1 ? 0 : 1
-      this.events.push('gear', this.gear)
     }
     if (input.turbo && this.turbo >= 1 && this.turboTimer <= 0) {
       this.turboTimer = T.TURBO_TIME
@@ -206,15 +221,6 @@ export class Sim {
     }
     if (this.turboTimer > 0) this.turboTimer -= dt
     else this.turbo = Math.min(1, this.turbo + dt / T.TURBO_RECHARGE)
-    // Manual switches, arcade style: nothing comes on by itself.
-    if (input.wipers) {
-      this.wipersOn = !this.wipersOn
-      this.events.push('wipers', this.wipersOn ? 1 : 0)
-    }
-    if (input.lights) {
-      this.lightsOn = !this.lightsOn
-      this.events.push('lights', this.lightsOn ? 1 : 0)
-    }
 
     // Longitudinal.
     const max = this.maxSpeed

@@ -58,7 +58,7 @@ export function buildMenus(game: Game) {
       { kind: 'action', label: 'SETTINGS', onSelect: () => game.menus.push(settings()) },
       { kind: 'action', label: 'CONTROLS', onSelect: () => game.menus.push(controls()) },
     ],
-    footer: game.touch ? 'Tap to select · tilt to steer · GAS right, BRAKE left' : 'Enter / A select · Shift = gear · Space = turbo · C = view · F3 or 0 perf',
+    footer: game.touch ? 'Tap to select · tilt to steer · GAS right, BRAKE left' : 'Enter / A select · Shift = gear · C = view · F3 or 0 perf',
     onBack: () => {},
   })
 

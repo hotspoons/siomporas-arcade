@@ -13,12 +13,15 @@
 //   wheel            zoom under the pointer      middle-drag, space-drag, ⇧wheel   pan
 //   click outside    grow the grid to reach that cell (the world is as big as you make it)
 //   G                landscape mode: drag to raise, ⌥/right-drag to lower, ⇧-drag to flatten; [ ] brush size
+//   click a red connector, then another   a smooth spline road links them; click the link to select it,
+//   , / .            tighter / wider curve   B camber on/off   ⌥-click or Delete unlinks
 
 import { PIECES, PIECE_BY_TYPE, makePathPoint, rotateLocal, rotatedSize, type PieceDef } from '../sim/pieces'
 import { CELL } from '../sim/Tuning'
 import { Track, portStatus, type PlacedPiece, type TrackData } from '../sim/Track'
 import type { TrackStore } from '../app/TrackStore'
 import { brushTerrain, flatTerrain, flattenUnderPieces, resizeTerrain, sampleHeight, terrainIndex } from '../sim/terrain'
+import { LINK_TIGHTNESS_DEFAULT, linkPoint, portWorld, type Link, type PortRef } from '../sim/links'
 import { LEVEL_H } from '../sim/Tuning'
 
 const GROUP_COLORS: Record<PieceDef['group'], string> = { basic: '#2f6b8a', curves: '#3b8a5c', stunts: '#a3552a', flow: '#7a4aa0', scenery: '#4a7a3a' }
@@ -31,7 +34,7 @@ const UNDO_DEPTH = 60
 const IS_MAC = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
 const MOD = IS_MAC ? '⌘' : 'Ctrl'
 const TERRAIN_HINTS = 'drag raise · ⌥-drag / right-drag lower · ⇧-drag flatten to the primed level · [ ] brush · G back to pieces'
-const HINTS = `${MOD}-click multi · ⇧-click range · ⌥-click delete · ${MOD}⇧ force insert · ${MOD}⌥ rotate · ⇧⌥ click/right-click raise/lower · Z X rotate · Q E level · wheel zoom · middle-drag pan · right-click menu`
+const HINTS = `click red connectors to link · ${MOD}-click multi · ⇧-click range · ⌥-click delete · ${MOD}⇧ force insert · ${MOD}⌥ rotate · ⇧⌥ click/right-click raise/lower · Z X rotate · Q E level · wheel zoom · middle-drag pan · right-click menu`
 
 export interface EditorCallbacks {
   onTest(data: TrackData): void
@@ -81,6 +84,9 @@ export class Editor {
   private mode: 'pieces' | 'terrain' = 'pieces'
   private brush = 2
   private sculpt: { kind: 'raise' | 'lower' | 'flatten' } | null = null
+  /** Spline linking: the first connector picked, and the selected link. */
+  private linking: PortRef | null = null
+  private selectedLink = -1
   private readonly store: TrackStore
   private readonly cb: EditorCallbacks
 
@@ -563,11 +569,112 @@ export class Editor {
   private deletePieces(indices: number[]): void {
     if (!indices.length) return
     this.pushUndo()
-    const drop = new Set(indices)
-    this.data.pieces = this.data.pieces.filter((_, i) => !drop.has(i))
+    this.removePieces(new Set(indices))
     this.selection.clear()
     this.anchor = -1
     this.dirty = true
+  }
+
+  /** Remove pieces and keep the links pointing at the right survivors. */
+  private removePieces(drop: Set<number>): void {
+    const remap = new Map<number, number>()
+    let k = 0
+    this.data.pieces.forEach((_, i) => {
+      if (!drop.has(i)) remap.set(i, k++)
+    })
+    this.data.pieces = this.data.pieces.filter((_, i) => !drop.has(i))
+    if (this.data.links) {
+      this.data.links = this.data.links
+        .filter((l) => remap.has(l.a.piece) && remap.has(l.b.piece))
+        .map((l) => ({ ...l, a: { piece: remap.get(l.a.piece)!, port: l.a.port }, b: { piece: remap.get(l.b.piece)!, port: l.b.port } }))
+    }
+    this.selectedLink = -1
+    this.settleTerrain()
+  }
+
+  private get links(): Link[] {
+    if (!this.data.links) this.data.links = []
+    return this.data.links
+  }
+
+  private deleteLink(i: number): void {
+    if (!this.data.links?.[i]) return
+    this.pushUndo()
+    this.data.links.splice(i, 1)
+    this.selectedLink = -1
+    this.dirty = true
+  }
+
+  private adjustLink(d: number): void {
+    const l = this.data.links?.[this.selectedLink]
+    if (!l) return
+    this.pushUndo()
+    l.tightness = Math.max(0.25, Math.min(2.5, Math.round((l.tightness + d) * 100) / 100))
+    this.flash(`Link tightness ${l.tightness.toFixed(2)}`)
+    this.dirty = true
+  }
+
+  private toggleLinkBank(): void {
+    const l = this.data.links?.[this.selectedLink]
+    if (!l) return
+    this.pushUndo()
+    l.bank = l.bank ? 0 : 1
+    this.flash(l.bank ? 'Link cambers into its curves' : 'Link is flat')
+    this.dirty = true
+  }
+
+  /** Screen position of a port's edge midpoint. */
+  private portPx(p: { cx: number; cz: number; side: string }): { x: number; y: number } {
+    const off = 0.5 - 2 / CELL
+    const dx = p.side === 'E' ? off : p.side === 'W' ? -off : 0
+    const dz = p.side === 'N' ? off : p.side === 'S' ? -off : 0
+    return this.toPx(p.cx + 0.5 + dx, p.cz + 0.5 + dz)
+  }
+
+  /** An unconnected connector near the pointer. */
+  private portAt(e: PointerEvent | MouseEvent): PortRef | null {
+    const { px, py } = this.canvasPoint(e)
+    const r = Math.max(8, this.view.scale * 0.14)
+    for (const port of portStatus(this.data.pieces, this.data.links ?? [])) {
+      if (port.matched && !port.linked) continue
+      const p = this.portPx(port)
+      if (Math.hypot(p.x - px, p.y - py) < r) return { piece: port.pieceIndex, port: port.portIndex }
+    }
+    return null
+  }
+
+  private linkSamples(l: Link, n = 40): { x: number; y: number }[] | null {
+    const a = portWorld(this.data.pieces, l.a)
+    const b = portWorld(this.data.pieces, l.b)
+    if (!a || !b) return null
+    const out: { x: number; y: number }[] = []
+    const s = { x: 0, y: 0, z: 0, tx: 0, tz: 0 }
+    for (let i = 0; i <= n; i++) {
+      linkPoint(a, b, l.tightness || LINK_TIGHTNESS_DEFAULT, i / n, s)
+      out.push(this.toPx(s.x / CELL, s.z / CELL))
+    }
+    return out
+  }
+
+  /** The link whose curve passes near the pointer. */
+  private linkAt(e: PointerEvent | MouseEvent): number {
+    const { px, py } = this.canvasPoint(e)
+    const tol = Math.max(7, this.view.scale * 0.14)
+    const links = this.data.links ?? []
+    for (let i = 0; i < links.length; i++) {
+      const pts = this.linkSamples(links[i])
+      if (!pts) continue
+      for (let k = 1; k < pts.length; k++) {
+        const ax = pts[k - 1].x
+        const ay = pts[k - 1].y
+        const bx = pts[k].x
+        const by = pts[k].y
+        const l2 = (bx - ax) ** 2 + (by - ay) ** 2 || 1
+        const t = Math.max(0, Math.min(1, ((px - ax) * (bx - ax) + (py - ay) * (by - ay)) / l2))
+        if (Math.hypot(ax + (bx - ax) * t - px, ay + (by - ay) * t - py) < tol) return i
+      }
+    }
+    return -1
   }
 
   private duplicate(indices: number[]): void {
@@ -640,7 +747,8 @@ export class Editor {
       case 'Delete':
       case 'Backspace': {
         // Delete the selection, else whatever is under the pointer.
-        if (this.selection.size) this.deletePieces([...this.selection])
+        if (this.selectedLink >= 0) this.deleteLink(this.selectedLink)
+        else if (this.selection.size) this.deletePieces([...this.selection])
         else if (this.hover) {
           const i = this.pieceAt(this.hover.x, this.hover.z)
           if (i >= 0) this.deletePieces([i])
@@ -661,10 +769,21 @@ export class Editor {
       case 'Digit0':
         this.fit()
         break
+      case 'Comma':
+      case 'Period':
+        this.adjustLink(e.code === 'Period' ? 0.15 : -0.15)
+        break
+      case 'KeyB':
+        this.toggleLinkBank()
+        break
       case 'Escape':
         if (this.menu) this.closeMenu()
-        else if (this.selection.size) {
+        else if (this.linking) {
+          this.linking = null
+          this.dirty = true
+        } else if (this.selection.size || this.selectedLink >= 0) {
           this.selection.clear()
+          this.selectedLink = -1
           this.dirty = true
         } else this.cb.onExit()
         break
@@ -804,6 +923,37 @@ export class Editor {
       return
     }
     const under = this.pieceAt(c.x, c.z)
+    if (e.button === 0) {
+      // Connectors: pick one, then another, and a spline road joins them.
+      const port = this.portAt(e)
+      if (port) {
+        e.preventDefault()
+        if (!this.linking) {
+          this.linking = port
+          this.flash('Now click the connector to join it to (Esc cancels)')
+        } else if (this.linking.piece === port.piece && this.linking.port === port.port) this.linking = null
+        else {
+          this.pushUndo()
+          this.links.push({ a: this.linking, b: port, tightness: LINK_TIGHTNESS_DEFAULT })
+          this.selectedLink = this.links.length - 1
+          this.linking = null
+          this.selection.clear()
+        }
+        this.dirty = true
+        return
+      }
+      const li = this.linkAt(e)
+      if (li >= 0) {
+        e.preventDefault()
+        if (e.altKey) this.deleteLink(li)
+        else {
+          this.selectedLink = li
+          this.selection.clear()
+        }
+        this.dirty = true
+        return
+      }
+    }
     if (e.button === 2) {
       // ⇧⌥ right-click lowers a level; plain right-click is the menu (contextmenu event).
       if (e.shiftKey && e.altKey && under >= 0) this.changeLevel(-1, [under])
@@ -840,6 +990,7 @@ export class Editor {
       return
     }
     if (under >= 0) {
+      this.selectedLink = -1
       if (!this.selection.has(under)) {
         this.selection = new Set([under])
       }
@@ -947,10 +1098,7 @@ export class Editor {
     const clash = this.overlapping(this.selectedType, this.rot, c.x, c.z, this.level)
     if (clash.length && !force) return
     this.pushUndo()
-    if (clash.length) {
-      const drop = new Set(clash)
-      this.data.pieces = this.data.pieces.filter((_, i) => !drop.has(i))
-    }
+    if (clash.length) this.removePieces(new Set(clash))
     // Only one start piece.
     if (def.isStart) this.data.pieces = this.data.pieces.filter((p) => !PIECE_BY_TYPE[p.type].isStart)
     this.data.pieces.push({ type: this.selectedType, x: c.x, z: c.z, rot: this.rot, level: this.level })
@@ -1015,11 +1163,12 @@ export class Editor {
   /** Piece adjacency through matched ports (undirected). */
   private adjacency(): Map<number, Set<number>> {
     const byKey = new Map<string, number[]>()
-    for (const port of portStatus(this.data.pieces)) {
+    for (const port of portStatus(this.data.pieces, this.data.links ?? [])) {
       const list = byKey.get(port.key) ?? []
       list.push(port.pieceIndex)
       byKey.set(port.key, list)
     }
+    for (const l of this.data.links ?? []) byKey.set(`link:${l.a.piece}:${l.a.port}`, [l.a.piece, l.b.piece])
     const adj = new Map<number, Set<number>>()
     for (const list of byKey.values()) {
       for (const a of list) for (const b of list) {
@@ -1093,7 +1242,18 @@ export class Editor {
     const c = this.cellAt(e)
     const under = this.pieceAt(c.x, c.z)
     const items: { label: string; key?: string; run: () => void; danger?: boolean }[] = []
-    if (under >= 0) {
+    const li = this.linkAt(e)
+    if (li >= 0) {
+      const l = this.data.links![li]
+      this.selectedLink = li
+      items.push(
+        { label: `Spline link · tightness ${(l.tightness || LINK_TIGHTNESS_DEFAULT).toFixed(2)}`, run: () => {} },
+        { label: 'Tighter curve', key: ',', run: () => this.adjustLink(-0.15) },
+        { label: 'Wider curve', key: '.', run: () => this.adjustLink(0.15) },
+        { label: l.bank ? 'Flat (no camber)' : 'Camber into curves', key: 'B', run: () => this.toggleLinkBank() },
+        { label: 'Unlink', key: '⌫', danger: true, run: () => this.deleteLink(li) },
+      )
+    } else if (under >= 0) {
       const targets = this.selection.has(under) ? [...this.selection] : [under]
       const p = this.data.pieces[under]
       items.push(
@@ -1114,11 +1274,12 @@ export class Editor {
     }
     const m = document.createElement('div')
     m.className = 'editor-menu'
+    const hasHead = under >= 0 || li >= 0
     items.forEach((it, k) => {
       const row = document.createElement('div')
-      row.className = 'item' + (k === 0 && under >= 0 ? ' head' : '') + (it.danger ? ' danger' : '')
+      row.className = 'item' + (k === 0 && hasHead ? ' head' : '') + (it.danger ? ' danger' : '')
       row.innerHTML = `<span>${it.label}</span>${it.key ? `<kbd>${it.key}</kbd>` : ''}`
-      if (!(k === 0 && under >= 0)) row.addEventListener('click', () => {
+      if (!(k === 0 && hasHead)) row.addEventListener('click', () => {
         it.run()
         this.closeMenu()
         this.dirty = true
@@ -1241,19 +1402,69 @@ export class Editor {
         c.setLineDash([])
       }
     }
-    // Ports.
-    if (cell >= 10) {
-      for (const port of portStatus(this.data.pieces)) {
-        const cx = port.cx * CELL + CELL / 2
-        const cz = port.cz * CELL + CELL / 2
-        const off = CELL / 2 - 2
-        const dx = port.side === 'E' ? off : port.side === 'W' ? -off : 0
-        const dz = port.side === 'N' ? off : port.side === 'S' ? -off : 0
-        const p = toPx(cx + dx, cz + dz)
-        c.fillStyle = port.matched ? '#5cff8a' : '#ff3b5c'
+    // Spline links: road-coloured curves; the selected one brighter with an ✕ at its middle.
+    const links = this.data.links ?? []
+    links.forEach((l, i) => {
+      const pts = this.linkSamples(l)
+      if (!pts) return
+      const sel = i === this.selectedLink
+      c.strokeStyle = sel ? '#ffffff' : GROUP_COLORS.flow
+      c.lineWidth = Math.max(3, 11 * (cell / CELL))
+      c.lineCap = 'round'
+      c.beginPath()
+      pts.forEach((p, k) => (k ? c.lineTo(p.x, p.y) : c.moveTo(p.x, p.y)))
+      c.stroke()
+      c.strokeStyle = sel ? GROUP_COLORS.flow : '#e8f6ff'
+      c.lineWidth = Math.max(1.5, 5 * (cell / CELL))
+      c.stroke()
+      if (sel) {
+        const m = pts[Math.floor(pts.length / 2)]
+        c.fillStyle = 'rgba(13,19,38,0.9)'
         c.beginPath()
-        c.arc(p.x, p.y, Math.max(2, cell * 0.06), 0, Math.PI * 2)
+        c.arc(m.x, m.y, 9, 0, Math.PI * 2)
         c.fill()
+        c.strokeStyle = '#ff3b5c'
+        c.lineWidth = 2
+        c.beginPath()
+        c.moveTo(m.x - 4, m.y - 4)
+        c.lineTo(m.x + 4, m.y + 4)
+        c.moveTo(m.x + 4, m.y - 4)
+        c.lineTo(m.x - 4, m.y + 4)
+        c.stroke()
+      }
+    })
+    // Connectors: green when joined (by a neighbour or a link), red when open; the one you're linking from glows.
+    if (cell >= 10) {
+      for (const port of portStatus(this.data.pieces, links)) {
+        const p = this.portPx(port)
+        const isFrom = this.linking && this.linking.piece === port.pieceIndex && this.linking.port === port.portIndex
+        c.fillStyle = port.matched ? (port.linked ? '#7a4aa0' : '#5cff8a') : '#ff3b5c'
+        c.beginPath()
+        c.arc(p.x, p.y, Math.max(2, cell * (port.matched ? 0.06 : 0.09)), 0, Math.PI * 2)
+        c.fill()
+        if (isFrom) {
+          c.strokeStyle = '#ffc857'
+          c.lineWidth = 2
+          c.beginPath()
+          c.arc(p.x, p.y, Math.max(6, cell * 0.16), 0, Math.PI * 2)
+          c.stroke()
+        }
+      }
+      if (this.linking) {
+        // Preview from the picked connector to the pointer.
+        const from = portWorld(this.data.pieces, this.linking)
+        if (from && this.hover) {
+          const a = this.toPx(from.x / CELL, from.z / CELL)
+          const b = this.toPx(this.hover.x + 0.5, this.hover.z + 0.5)
+          c.strokeStyle = 'rgba(255,200,87,0.7)'
+          c.setLineDash([6, 5])
+          c.lineWidth = 2
+          c.beginPath()
+          c.moveTo(a.x, a.y)
+          c.lineTo(b.x, b.y)
+          c.stroke()
+          c.setLineDash([])
+        }
       }
     }
     // Landscape brush.
@@ -1298,6 +1509,8 @@ export class Editor {
     const t = new Track(this.data)
     const bits = [`${this.data.pieces.length} pieces · ${N}×${N}`, t.closed ? `loop ${t.loopLength.toFixed(0)} m` : 'not closed']
     if (this.selection.size) bits.push(`${this.selection.size} selected`)
+    if (links.length) bits.push(`${links.length} link${links.length > 1 ? 's' : ''}`)
+    if (this.linking) bits.push('linking: pick the second connector')
     if (t.errors.length) bits.push('⚠ ' + t.errors.slice(0, 2).join(' · '))
     else if (t.warnings.length) bits.push('· ' + t.warnings[0])
     else bits.push('✓ ready to drive')

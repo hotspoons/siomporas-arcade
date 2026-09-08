@@ -39,7 +39,7 @@ canvas.game { position: absolute; inset: 0; width: 100%; height: 100%; display: 
 .hud .speedo .value { font-size: 3.2em; font-variant-numeric: tabular-nums; }
 .hud .speedo .unit { margin-left: 0.3em; font-family: var(--font-arcade); font-size: 0.5em; opacity: 0.8; letter-spacing: 0.05em; }
 .hud .speedo .gear { display: block; font-size: 1.4em; color: #ff8a3c; }
-.hud .turbo { width: 18vw; max-width: 260px; height: 0.5em; margin-top: 6px; margin-left: auto; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.25); overflow: hidden; }
+.hud .turbo { display: none; width: 18vw; max-width: 260px; height: 0.5em; margin-top: 6px; margin-left: auto; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.25); overflow: hidden; }
 .hud .turbo .fill { height: 100%; background: var(--accent2); transition: width 0.1s linear; }
 .hud .turbo .fill.active { background: #ff5fd2; }
 .hud .switches { position: absolute; bottom: 11vh; left: 4vw; display: flex; gap: 1.6em; font-family: var(--font-arcade); font-size: 0.5em; letter-spacing: 0.05em; opacity: 0.55; text-shadow: 2px 2px 0 var(--ink); }

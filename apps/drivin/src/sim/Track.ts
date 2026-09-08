@@ -20,6 +20,7 @@ import {
 import { PathTable } from './PathTable'
 import { solidsOf, type Solid } from './decor'
 import { flattenUnderPieces, sampleHeight } from './terrain'
+import { linkPiece, type Link } from './links'
 
 export interface PlacedPiece {
   type: string
@@ -39,6 +40,8 @@ export interface TrackData {
   pieces: PlacedPiece[]
   /** Landscape heights at cell corners, (size+1)² metres row-major by z; absent = flat. See terrain.ts. */
   terrain?: number[]
+  /** Spline roads between two open ports (see links.ts). */
+  links?: Link[]
 }
 
 /** A world-space port: which grid edge, which level. */
@@ -126,6 +129,26 @@ export class Track {
         ports.push({ key: edgeKey(cx, cz, side, level), pieceIndex: i, portIndex: pi, cx, cz, side, level })
       })
     })
+    // Spline links become synthetic pieces after the real ones: two ports on the linked edges, one lane.
+    const linkDefs: PieceDef[] = []
+    const linkPlaced: PlacedPiece[] = []
+    ;(data.links ?? []).forEach((link, li) => {
+      const r = linkPiece(data.pieces, link, li)
+      if ('error' in r) {
+        this.errors.push(r.error)
+        return
+      }
+      for (const port of r.def.ports) {
+        const key = edgeKey(port.cx, port.cz, port.side, port.dLevel)
+        if (ports.filter((w) => w.key === key).length > 1) this.errors.push(`Link ${li + 1} joins a connector that is already connected`)
+      }
+      const idx = data.pieces.length + linkDefs.length
+      linkDefs.push(r.def)
+      linkPlaced.push(r.placed)
+      r.def.ports.forEach((port, pi) => ports.push({ key: edgeKey(port.cx, port.cz, port.side, port.dLevel), pieceIndex: idx, portIndex: pi, cx: port.cx, cz: port.cz, side: port.side, level: port.dLevel }))
+    })
+    const defAt = (i: number): PieceDef => (i < data.pieces.length ? PIECE_BY_TYPE[data.pieces[i].type] : linkDefs[i - data.pieces.length])
+    const placedAt = (i: number): PlacedPiece => (i < data.pieces.length ? data.pieces[i] : linkPlaced[i - data.pieces.length])
     // Match ports pairwise by edge key.
     const byKey = new Map<string, WorldPort[]>()
     for (const wp of ports) {
@@ -151,8 +174,8 @@ export class Track {
       const key = `${pieceIndex}:${laneIndex}:${reversed ? 'r' : 'f'}`
       let lane = laneMemo.get(key)
       if (lane) return lane
-      const p = data.pieces[pieceIndex]
-      const def = PIECE_BY_TYPE[p.type]
+      const p = placedAt(pieceIndex)
+      const def = defAt(pieceIndex)
       lane = {
         id: this.lanes.length,
         pieceIndex,
@@ -171,7 +194,7 @@ export class Track {
     }
     /** Directed lanes of a piece that begin at the given port index. */
     const lanesFromPort = (pieceIndex: number, portIndex: number): Lane[] => {
-      const def = PIECE_BY_TYPE[data.pieces[pieceIndex].type]
+      const def = defAt(pieceIndex)
       const out: Lane[] = []
       def.lanes.forEach((l, li) => {
         if (l.from === portIndex) out.push(getLane(pieceIndex, li, false))
@@ -187,7 +210,7 @@ export class Track {
       const seen = new Set<number>([start.id])
       while (queue.length) {
         const lane = queue.shift()!
-        const def = PIECE_BY_TYPE[data.pieces[lane.pieceIndex].type]
+        const def = defAt(lane.pieceIndex)
         const ldef = def.lanes[lane.laneIndex]
         const exitPortIndex = lane.reversed ? ldef.from : ldef.to
         const exitPort = portsOf(lane.pieceIndex).find((w) => w.portIndex === exitPortIndex)!
@@ -198,7 +221,7 @@ export class Track {
           for (let d = 2; d <= 14 && !other; d++) {
             const cx = exitPort.cx + o.dx * d
             const cz = exitPort.cz + o.dz * d
-            other = ports.find((w) => w.cx === cx && w.cz === cz && w.side === opposite(exitPort.side) && w.level === exitPort.level && w.pieceIndex !== lane.pieceIndex && PIECE_BY_TYPE[data.pieces[w.pieceIndex].type].ports[w.portIndex].open) ?? null
+            other = ports.find((w) => w.cx === cx && w.cz === cz && w.side === opposite(exitPort.side) && w.level === exitPort.level && w.pieceIndex !== lane.pieceIndex && defAt(w.pieceIndex).ports[w.portIndex].open) ?? null
           }
           if (other) lane.gap = true
           else {
@@ -211,7 +234,7 @@ export class Track {
           continue
         }
         lane.next = lanesFromPort(other.pieceIndex, other.portIndex)
-        if (lane.next.length === 0) this.errors.push(`Piece at (${data.pieces[other.pieceIndex].x}, ${data.pieces[other.pieceIndex].z}) cannot be entered from that side`)
+        if (lane.next.length === 0) this.errors.push(`Piece at (${placedAt(other.pieceIndex).x}, ${placedAt(other.pieceIndex).z}) cannot be entered from that side`)
         for (const n of lane.next) {
           if (!seen.has(n.id)) {
             seen.add(n.id)
@@ -407,24 +430,31 @@ function bakeLane(def: PieceDef, p: PlacedPiece, laneIndex: number, reversed: bo
   return table
 }
 
-/** Every port of every piece with its world edge key and whether it has a partner (editor overlay). */
-export function portStatus(pieces: PlacedPiece[]): { pieceIndex: number; cx: number; cz: number; side: Side; level: number; key: string; matched: boolean }[] {
-  const out: { pieceIndex: number; cx: number; cz: number; side: Side; level: number; key: string; matched: boolean }[] = []
+/** Every port of every piece with its world edge key and whether it has a partner — a neighbouring piece or a spline link (editor overlay). */
+export function portStatus(pieces: PlacedPiece[], links: Link[] = []): { pieceIndex: number; portIndex: number; cx: number; cz: number; side: Side; level: number; key: string; matched: boolean; linked: boolean }[] {
+  const out: { pieceIndex: number; portIndex: number; cx: number; cz: number; side: Side; level: number; key: string; matched: boolean; linked: boolean }[] = []
   pieces.forEach((p, i) => {
     const def = PIECE_BY_TYPE[p.type]
     if (!def) return
-    for (const port of def.ports) {
+    def.ports.forEach((port, pi) => {
       const rc = rotatePortCell(def, p.rot, port.cx, port.cz)
       const side = rotateSide(port.side, p.rot)
       const cx = p.x + rc.cx
       const cz = p.z + rc.cz
       const level = p.level + port.dLevel
-      out.push({ pieceIndex: i, cx, cz, side, level, key: edgeKey(cx, cz, side, level), matched: false })
-    }
+      out.push({ pieceIndex: i, portIndex: pi, cx, cz, side, level, key: edgeKey(cx, cz, side, level), matched: false, linked: false })
+    })
   })
   const count = new Map<string, number>()
   for (const o of out) count.set(o.key, (count.get(o.key) ?? 0) + 1)
   for (const o of out) o.matched = (count.get(o.key) ?? 0) >= 2
+  for (const l of links) for (const ref of [l.a, l.b]) {
+    const o = out.find((x) => x.pieceIndex === ref.piece && x.portIndex === ref.port)
+    if (o) {
+      o.matched = true
+      o.linked = true
+    }
+  }
   return out
 }
 

@@ -2,6 +2,8 @@
 // snapshots → render/HUD/audio through the engine loop.
 
 import { GameLoop, type LoopClient } from '@apex/engine/app/GameLoop'
+import { PressStart } from '@apex/engine/app/PressStart'
+import type { UiEdges } from '@apex/engine/input/UiEdges'
 import { MenuStack } from '@apex/engine/app/Menus'
 import { TunePanel } from '@apex/engine/app/TunePanel'
 import { SIM_TUNE } from '../sim/Tuning'
@@ -12,6 +14,7 @@ import { RetroStyle } from '@apex/engine/render/styles/RetroStyle'
 import { AudioWorld } from '../audio/AudioWorld'
 import { Editor } from '../editor/Editor'
 import { ReplayPlayer, ReplayRecorder, ReplayStore, fileName, parseReplay, type ReplayFile } from './Replay'
+import { ReplayBar, SPEEDS } from './ReplayBar'
 import type { CameraMode } from '../render/CameraRig'
 import { InputMap } from '../input/InputMap'
 import { TouchSource } from '../input/TouchSource'
@@ -41,7 +44,11 @@ export class Game implements LoopClient {
   readonly view: RenderWorld
   readonly hud: Hud
   readonly dash: Dash
+  /** The transport along the bottom while watching: play/pause, timeline, speed, cameras. */
+  readonly replayBar: ReplayBar
   readonly menus: MenuStack
+  /** Attract-mode prompt, shown when the title menu is put aside. */
+  private readonly pressStart: PressStart
   readonly perf: PerfOverlay
   readonly tune: TunePanel
   readonly loop: GameLoop
@@ -89,9 +96,19 @@ export class Game implements LoopClient {
     this.view.setTrack(this.track)
     this.hud = new Hud(container)
     this.dash = new Dash(container)
+    this.replayBar = new ReplayBar(container, {
+      togglePlay: () => this.toggleReplayPlay(),
+      seek: (s) => this.player?.seek(s),
+      setSpeed: (v) => {
+        if (this.player) this.player.speed = v
+      },
+      setCamera: (m) => this.setReplayCamera(m),
+      exit: () => this.stopReplay(),
+    })
     this.hud.units = s.units
     this.hud.setTrack(this.track)
     this.menus = new MenuStack(container)
+    this.pressStart = new PressStart(container, Boolean(this.touch))
     this.perf = new PerfOverlay(container)
     this.tune = new TunePanel(container, 'drivin', [SIM_TUNE, RENDER_TUNE])
     this.tune.context = () => {
@@ -157,6 +174,7 @@ export class Game implements LoopClient {
     this.previewTrack()
     this.view.rig.mode = 'orbit'
     this.menus.replace(buildMenus(this).title())
+    this.showAttract(false)
     this.showTitleCard(true)
     this.audio.setRunning(false)
   }
@@ -362,6 +380,32 @@ export class Game implements LoopClient {
 
   // --- LoopClient ---
 
+  /**
+   * Title-screen attract mode. Escape puts the menu aside so the logo and the road behind it have the
+   * screen to themselves, with a PRESS ENTER prompt; Enter or Start begins, anything else brings the
+   * menu back. Returns true when it took the frame.
+   */
+  private attractTick(ui: UiEdges): boolean {
+    if (this.menus.isSuppressed) {
+      if (ui.confirm) {
+        this.showAttract(false)
+        this.startDrive()
+      } else if (ui.any) this.showAttract(false)
+      return true // the menu is aside: it does not see this frame either way
+    }
+    if (ui.back) {
+      this.showAttract(true)
+      return true
+    }
+    return false
+  }
+
+  private showAttract(on: boolean): void {
+    this.menus.setSuppressed(on)
+    this.pressStart.setPad(this.input.gamepad.connected)
+    this.pressStart.setVisible(on)
+  }
+
   beginFrame(dt: number): number {
     const ui = this.input.ui
     this.input.poll(dt)
@@ -374,9 +418,11 @@ export class Game implements LoopClient {
     }
     // The pause key toggles: while the pause menu is up it resumes, at any menu depth. Without this it
     // only ever paused (the menu swallowed the edge) and you had to find Escape.
-    if (this.menus.open) {
+    if (this.state === 'title' && this.menus.open && this.attractTick(ui)) {
+      // the title screen's menu is set aside or coming back: nothing else looks at this frame
+    } else if (this.menus.open) {
       if (ui.pause && this.state === 'paused') this.resume()
-      else this.menus.handle(ui)
+      else if (!this.menus.isSuppressed) this.menus.handle(ui)
     } else if (this.state === 'driving') {
       if (ui.pause) this.pause()
       if (this.input.keyboard.wasPressed('KeyI') || this.input.keyboard.wasPressed('F7')) this.watchReplay()
@@ -396,11 +442,18 @@ export class Game implements LoopClient {
     const p = this.player
     if (!p) return
     const kb = this.input.keyboard
-    if (kb.wasPressed('Space')) p.playing = !p.playing
+    if (kb.anyEdge) this.replayBar.wake()
+    // Confirm rather than Space itself, so Enter and a pad's A button work the transport too (and
+    // Space isn't counted twice, since it is bound to confirm).
+    if (this.input.ui.confirm) this.toggleReplayPlay()
     if (kb.isDown('ArrowLeft')) p.seek(p.time - dt * 6)
     if (kb.isDown('ArrowRight')) p.seek(p.time + dt * 6)
-    if (kb.wasPressed('ArrowUp')) p.speed = Math.min(4, p.speed * 2)
-    if (kb.wasPressed('ArrowDown')) p.speed = Math.max(0.125, p.speed / 2)
+    const step = (d: number) => {
+      const i = SPEEDS.indexOf(p.speed)
+      p.speed = SPEEDS[Math.max(0, Math.min(SPEEDS.length - 1, (i < 0 ? SPEEDS.indexOf(1) : i) + d))]
+    }
+    if (kb.wasPressed('ArrowUp')) step(1)
+    if (kb.wasPressed('ArrowDown')) step(-1)
     const cams: CameraMode[] = ['chase', 'hood', 'heli', 'tv']
     for (let i = 0; i < cams.length; i++) if (kb.wasPressed(`Digit${i + 1}`)) this.setReplayCamera(cams[i])
     if (kb.wasPressed('KeyC') || this.input.cameraEdge) this.setReplayCamera(cams[(cams.indexOf(this.replayCamera) + 1) % cams.length])
@@ -443,7 +496,17 @@ export class Game implements LoopClient {
     this.hud.setVisible(true)
     this.setReplayCamera(this.replayCamera)
     this.view.rig.reset()
-    this.hud.showMessage(`${f.file} · ${f.track.toUpperCase()}`, 2.4, 'good')
+    this.replayBar.setTitle(`${f.file} · ${f.track.toUpperCase()}${f.laps ? ` · ${f.laps} LAP${f.laps === 1 ? '' : 'S'}` : ''}`)
+    this.replayBar.setVisible(true)
+  }
+
+  /** Play/pause. At the end of the run, play starts it again from the top rather than doing nothing. */
+  private toggleReplayPlay(): void {
+    const p = this.player
+    if (!p) return
+    if (!p.playing && p.time >= p.duration - 0.01) p.seek(0)
+    p.playing = !p.playing
+    this.replayBar.wake()
   }
 
   setReplayCamera(mode: CameraMode): void {
@@ -459,6 +522,7 @@ export class Game implements LoopClient {
   stopReplay(): void {
     if (this.state !== 'replay') return
     this.player = null
+    this.replayBar.setVisible(false)
     this.input.suppressGameplay = false
     if (this.replayFrom === 'paused' || this.replayFrom === 'results') {
       // Back to the run we were watching from: its track, its state, its menu.
@@ -570,6 +634,7 @@ export class Game implements LoopClient {
       this.prev = this.curr
       this.curr = tmp
       this.player.write(this.curr)
+      this.replayBar.update(this.player, this.replayCamera, dt)
       this.view.update(this.prev, this.curr, 1, dt)
       this.hud.update(this.curr, dt, 0)
       const hood = this.view.rig.mode === 'hood'

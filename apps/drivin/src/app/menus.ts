@@ -1,6 +1,7 @@
 // Menu screens for the driving game, built against the live Game.
 
 import type { MenuItem, MenuScreen } from '@apex/engine/app/Menus'
+import { BindingCapture, applyBinding, holdMeter } from '@apex/engine/app/BindingCapture'
 import { keyLabel, padBindingLabel } from '@apex/engine/input/bindings'
 import { CARS } from '../sim/CarSpec'
 import { ACTIONS, ACTION_LABELS, type Action } from '../input/bindings'
@@ -173,29 +174,47 @@ export function buildMenus(game: Game) {
         },
       },
     ],
-    footer: 'Select an action, then press the new key or button. Escape cancels.',
+    footer: 'Select an action, then tap a key to set it — or hold a key to add it alongside the ones already bound.',
   })
 
   const remap = (action: Action): MenuScreen => {
+    // Escape belongs to pause and nothing else: bound to the throttle it would trap you in the game.
+    const escapable = action === 'pause'
+    let hold = 0
     const finish = () => {
-      game.input.keyboard.onAny = null
-      game.input.gamepad.onAny = null
+      capture.finish()
       game.input.swallowFrames = 2
       game.input.keys = s().keys
       game.input.pad = s().pad
       game.menus.pop()
       game.menus.refresh()
     }
-    game.input.keyboard.onAny = (code) => {
-      if (code === 'Escape') return finish()
-      set((d) => (d.keys[action] = [code]))
-      finish()
+    const capture = new BindingCapture(game.input.keyboard, game.input.gamepad, {
+      allowEscape: escapable,
+      onKey: (code, mode) => {
+        set((d) => (d.keys[action] = applyBinding(d.keys[action], code, mode)))
+        finish()
+      },
+      onPad: (binding) => {
+        set((d) => (d.pad[action] = [binding]))
+        finish()
+      },
+      onCancel: finish,
+      onProgress: (f) => {
+        hold = f
+        game.menus.refresh()
+      },
+    })
+    return {
+      id: 'remap',
+      title: ACTION_LABELS[action].toUpperCase(),
+      subtitle: 'Tap a key to set it · hold it to add a second',
+      items: [{ kind: 'info', label: escapable ? 'Escape cancels · hold Escape to bind it' : 'Escape cancels', value: () => holdMeter(hold) }],
+      // When Escape can be bound the capture owns it: a tap cancels in there, a hold binds it.
+      onBack: () => {
+        if (!escapable || capture.finished) finish()
+      },
     }
-    game.input.gamepad.onAny = (binding) => {
-      set((d) => (d.pad[action] = [binding]))
-      finish()
-    }
-    return { id: 'remap', title: ACTION_LABELS[action].toUpperCase(), subtitle: 'Press a key or gamepad button…', items: [{ kind: 'info', label: 'Escape to cancel' }], onBack: finish }
   }
 
   const results = (snap: Snapshot): MenuScreen => ({

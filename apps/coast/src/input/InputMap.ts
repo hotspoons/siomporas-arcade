@@ -51,6 +51,7 @@ export class InputMap {
 
   poll(dt: number): InputFrame {
     const gp = this.gamepad
+    this.keyboard.beginFrame()
     gp.poll()
     const f = this.frame
     const ui = this.ui

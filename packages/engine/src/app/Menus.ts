@@ -30,6 +30,9 @@ export class MenuStack {
   private cursor = 0
   private rows: HTMLElement[] = []
   private dirty = true
+  /** Which row we last scrolled to, so the list only moves when the selection does. */
+  private scrolled = -1
+  private suppressed = false
   onNavigate: (() => void) | null = null
   onSelect: (() => void) | null = null
 
@@ -43,6 +46,23 @@ export class MenuStack {
     return this.stack.length > 0
   }
 
+  /**
+   * Put the panel aside without losing it (the title screen's attract mode). The stack is untouched,
+   * so bringing it back shows the same screen with the same selection.
+   */
+  setSuppressed(v: boolean): void {
+    this.suppressed = v
+    this.syncVisibility()
+  }
+
+  get isSuppressed(): boolean {
+    return this.suppressed
+  }
+
+  private syncVisibility(): void {
+    this.el.classList.toggle('hidden', this.suppressed || this.stack.length === 0)
+  }
+
   get current(): MenuScreen | null {
     return this.stack[this.stack.length - 1] ?? null
   }
@@ -50,8 +70,10 @@ export class MenuStack {
   push(screen: MenuScreen): void {
     this.stack.push(screen)
     this.cursor = 0
+    this.scrolled = -1
+    this.el.scrollTop = 0
     this.dirty = true
-    this.el.classList.remove('hidden')
+    this.syncVisibility()
     this.render()
   }
 
@@ -63,6 +85,7 @@ export class MenuStack {
   pop(): void {
     this.stack.pop()
     this.cursor = 0
+    this.scrolled = -1
     this.dirty = true
     if (this.stack.length === 0) this.el.classList.add('hidden')
     else this.render()
@@ -70,7 +93,8 @@ export class MenuStack {
 
   closeAll(): void {
     this.stack.length = 0
-    this.el.classList.add('hidden')
+    this.suppressed = false
+    this.syncVisibility()
   }
 
   /** Re-render values (toggles etc.) without rebuilding structure. */
@@ -234,5 +258,24 @@ export class MenuStack {
         : value
       row.innerHTML = `<span class="label">${item.label}${hint}</span><span class="value">${cell}</span>`
     })
+    if (this.cursor !== this.scrolled) {
+      this.scrolled = this.cursor
+      this.scrollToCursor()
+    }
+  }
+
+  /**
+   * Keep the selection in view on a list too long for the screen. Done against the menu's own
+   * scrollTop rather than scrollIntoView(), which would also drag whatever is behind the menu.
+   */
+  private scrollToCursor(): void {
+    const row = this.rows[this.cursor]
+    const box = this.el
+    if (!row || box.scrollHeight <= box.clientHeight) return
+    const margin = row.offsetHeight * 0.75 // show a neighbour, so there is somewhere to go
+    const top = row.offsetTop - margin
+    const bottom = row.offsetTop + row.offsetHeight + margin
+    if (top < box.scrollTop) box.scrollTop = Math.max(0, top)
+    else if (bottom > box.scrollTop + box.clientHeight) box.scrollTop = bottom - box.clientHeight
   }
 }

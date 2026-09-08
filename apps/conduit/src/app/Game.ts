@@ -17,6 +17,8 @@ import { RetroStyle } from '@apex/engine/render/styles/RetroStyle'
 import { MIN_TIME_SCALE } from '../render/RenderTuning'
 import { MAX_SUBSTEPS, SIM_HZ, TIMER_GATE_BONUS } from '../sim/Tuning'
 import { GameLoop, type LoopClient } from '@apex/engine/app/GameLoop'
+import { PressStart } from '@apex/engine/app/PressStart'
+import type { UiEdges } from '@apex/engine/input/UiEdges'
 import { MenuStack } from '@apex/engine/app/Menus'
 import { TunePanel } from '@apex/engine/app/TunePanel'
 import { SIM_TUNE } from '../sim/Tuning'
@@ -43,6 +45,8 @@ export class Game implements LoopClient {
   readonly view: RenderWorld
   readonly hud: Hud
   readonly menus: MenuStack
+  /** Attract-mode prompt, shown when the title menu is put aside. */
+  private readonly pressStart: PressStart
   readonly perf: PerfOverlay
   readonly tune: TunePanel
   readonly loop: GameLoop
@@ -89,6 +93,7 @@ export class Game implements LoopClient {
     this.view = new RenderWorld(canvas, this.track)
     this.hud = new Hud(container)
     this.menus = new MenuStack(container)
+    this.pressStart = new PressStart(container, Boolean(this.touch))
     this.perf = new PerfOverlay(container)
     this.tune = new TunePanel(container, 'conduit', [SIM_TUNE, RENDER_TUNE])
     this.tune.context = () => {
@@ -148,6 +153,7 @@ export class Game implements LoopClient {
     this.view.rig.reset(0)
     this.input.suppressGameplay = true
     this.menus.replace(buildMenus(this).title())
+    this.showAttract(false)
     this.showTitleCard(true)
     this.audio.setScene('title')
   }
@@ -369,6 +375,32 @@ export class Game implements LoopClient {
   // ---------------------------------------------------------------------------
   // LoopClient
 
+  /**
+   * Title-screen attract mode. Escape puts the menu aside so the logo and the road behind it have the
+   * screen to themselves, with a PRESS ENTER prompt; Enter or Start begins, anything else brings the
+   * menu back. Returns true when it took the frame.
+   */
+  private attractTick(ui: UiEdges): boolean {
+    if (this.menus.isSuppressed) {
+      if (ui.confirm) {
+        this.showAttract(false)
+        this.startCircuit()
+      } else if (ui.any) this.showAttract(false)
+      return true // the menu is aside: it does not see this frame either way
+    }
+    if (ui.back) {
+      this.showAttract(true)
+      return true
+    }
+    return false
+  }
+
+  private showAttract(on: boolean): void {
+    this.menus.setSuppressed(on)
+    this.pressStart.setPad(this.input.gamepad.connected)
+    this.pressStart.setVisible(on)
+  }
+
   beginFrame(dt: number): number {
     const ui = this.input.ui
     this.input.poll(dt)
@@ -376,9 +408,11 @@ export class Game implements LoopClient {
     if (ui.toggleTune) this.tune.toggle()
     if (ui.toggleStyle) this.toggleStyle()
     // The pause key toggles: while the pause menu is up it resumes, at any menu depth.
-    if (this.menus.open) {
+    if (this.state === 'title' && this.menus.open && this.attractTick(ui)) {
+      // the title screen's menu is set aside or coming back: nothing else looks at this frame
+    } else if (this.menus.open) {
       if (ui.pause && this.state === 'paused') this.resume()
-      else this.menus.handle(ui)
+      else if (!this.menus.isSuppressed) this.menus.handle(ui)
     } else if (this.state === 'running') {
       if (ui.pause) this.pause()
     }

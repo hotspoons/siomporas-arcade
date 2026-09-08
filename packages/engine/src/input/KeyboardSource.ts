@@ -6,8 +6,12 @@ export class KeyboardSource {
   private readonly pressed = new Set<string>()
   /** Codes pressed since the last poll (edge). */
   private readonly edges = new Set<string>()
-  /** Any key pressed, for "press any key" prompts. */
-  anyEdge = false
+  /**
+   * The edges of the frame that was just polled, kept until the next one starts. Game code often reads
+   * keys *after* calling poll() — a replay's transport keys, say — and without this those reads would
+   * all be false, because poll() ends by clearing the edge set.
+   */
+  private readonly frameEdges = new Set<string>()
   lastCode = ''
   onAny: ((code: string) => void) | null = null
 
@@ -34,20 +38,29 @@ export class KeyboardSource {
   }
 
   wasPressed(code: string): boolean {
-    return this.edges.has(code)
+    return this.edges.has(code) || this.frameEdges.has(code)
   }
 
-  /** Clear edges after the frame consumed them. */
+  /** Any key pressed this frame, for "press any key" prompts. */
+  get anyEdge(): boolean {
+    return this.edges.size > 0 || this.frameEdges.size > 0
+  }
+
+  /** Start of a frame: last frame's edges are done with. */
+  beginFrame(): void {
+    this.frameEdges.clear()
+  }
+
+  /** Hand the edges to the rest of the frame, so reads after poll() still see them. */
   endFrame(): void {
+    for (const c of this.edges) this.frameEdges.add(c)
     this.edges.clear()
-    this.anyEdge = false
   }
 
   private press(code: string): void {
     if (!this.pressed.has(code)) {
       this.pressed.add(code)
       this.edges.add(code)
-      this.anyEdge = true
       this.lastCode = code
       this.onAny?.(code)
     }

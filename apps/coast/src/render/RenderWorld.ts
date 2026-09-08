@@ -99,6 +99,8 @@ export class RenderWorld {
   private readonly rowTilt = new Float32Array(ROWS)
   /** The arcade HUD drawn inside the low-res buffer (retro only; see HudLayer). */
   readonly hudLayer = new HudLayer()
+  /** False on the title screen, where a score and a clock over the logo make no sense. */
+  hudEnabled = true
   private readonly segVisible = new Uint8Array(ROWS)
   private readonly carOrder: number[] = []
   private themeId = ''
@@ -524,7 +526,7 @@ export class RenderWorld {
     this.cockpit.mesh.visible = this.view === 'cockpit'
     if (this.cockpit.mesh.visible) this.cockpit.update(curr, dt)
     // The in-buffer HUD only exists in the retro pipeline, and only when asked for.
-    this.hudLayer.mesh.visible = this.retro && HUD_RETRO > 0.5
+    this.hudLayer.mesh.visible = this.hudEnabled && this.retro && HUD_RETRO > 0.5
     this.hudLayer.cockpit = this.view === 'cockpit'
     if (this.hudLayer.mesh.visible) this.hudLayer.update(curr, dt)
     this.rain.update(dt, speed, curr.curveAccum)

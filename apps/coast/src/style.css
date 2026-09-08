@@ -67,7 +67,7 @@ canvas.game { position: absolute; inset: 0; width: 100%; height: 100%; display: 
 /* ---- menus (shared look) ---- */
 .menu { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); min-width: 380px; max-width: 92vw; max-height: 92vh; overflow: auto; padding: 28px 36px; background: rgba(11,16,32,0.85); border: 1px solid rgba(255,122,26,0.35); border-radius: 6px; backdrop-filter: blur(6px); z-index: 5; }
 .menu.wide { min-width: 640px; }
-.menu.title-screen { top: auto; bottom: 5vh; transform: translateX(-50%); }
+.menu.title-screen { top: auto; bottom: 4vh; transform: translateX(-50%); max-height: 64vh; }
 .menu h1 { margin: 0 0 4px; font-family: var(--font-hud); font-size: 2.4em; letter-spacing: 0.1em; font-weight: 400; color: var(--hud-yellow); paint-order: stroke fill; -webkit-text-stroke: 0.09em var(--ink); text-shadow: 0.09em 0.09em 0 rgba(0,0,0,0.45); }
 .menu .subtitle { margin: 0 0 18px; font-family: var(--font-arcade); font-size: 0.6em; line-height: 1.6; opacity: 0.75; letter-spacing: 0.05em; }
 .menu .items { display: flex; flex-direction: column; gap: 4px; }
@@ -136,3 +136,8 @@ canvas.game { position: absolute; inset: 0; width: 100%; height: 100%; display: 
 .menu .footer { margin-top: 1em; }
 .perf { font-size: clamp(11px, 1.5vmin, 18px); }
 
+/* ---- Attract mode: the menu set aside, the logo and the road left to themselves ---- */
+.press-start { position: absolute; left: 0; right: 0; bottom: 12vh; text-align: center; pointer-events: none; z-index: 5; }
+.press-start .line { display: block; font-family: var(--font-arcade); font-size: clamp(13px, 2.6vmin, 26px); letter-spacing: 0.18em; color: #fff; text-shadow: 0 0 0.6em rgba(0,0,0,0.9), 0 2px 0 rgba(0,0,0,0.8); animation: press-blink 1.1s steps(1, end) infinite; }
+.press-start .sub { display: block; margin-top: 1.1em; font-family: var(--font-arcade); font-size: clamp(9px, 1.5vmin, 15px); letter-spacing: 0.14em; opacity: 0.55; text-shadow: 0 2px 0 rgba(0,0,0,0.8); }
+@keyframes press-blink { 0%, 55% { opacity: 1; } 56%, 100% { opacity: 0.12; } }

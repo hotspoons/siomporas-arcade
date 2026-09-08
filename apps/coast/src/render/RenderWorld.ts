@@ -11,7 +11,7 @@ import type { SimEvent } from '../sim/Events'
 import type { Segment, Stage } from '../sim/Road'
 import type { Snapshot } from '../sim/Snapshot'
 import { TRAFFIC_KINDS } from '../sim/Sim'
-import { THEMES } from '../sim/Stages'
+import { blendPalette, gradeColor, paletteFor, vibeAt, type VibeDef } from '../world/vibes'
 import { BAND_SEGMENTS, DRAW_SEGMENTS, FORK_SPREAD, ROAD_HALF_WIDTH, SEG_LENGTH } from '../sim/Tuning'
 import { HERO_YAWS } from './models'
 
@@ -52,6 +52,8 @@ import { SpriteBatch } from './SpriteBatch'
 export type ViewMode = keyof typeof VIEWS
 
 const ROWS = DRAW_SEGMENTS + 2
+/** Segments either side of a scene change over which the ground colours crossfade. */
+const SCENE_FADE = 60
 
 export class RenderWorld {
   readonly renderer: WebGLRenderer
@@ -70,7 +72,6 @@ export class RenderWorld {
   private steerRoll = 0
   private bankRoll = 0
   private lightsOn = false
-  private theme: Theme | null = null
   private heroKind = 'hero_gulf'
   /** Dev: when set, one sprite kind is drawn huge in the middle of the screen. */
   previewKind: string | null = null
@@ -103,6 +104,18 @@ export class RenderWorld {
   private readonly carOrder: number[] = []
   private themeId = ''
   private hit = 0
+  /** Ungraded ground palette per scene the stage runs through (Segment.scene indexes it). */
+  private scenePals: Palette[] = [PALETTES.coast]
+  /** The vibe in force at the camera, or null on a stage that has none (the built-in route). */
+  vibe: VibeDef | null = null
+  private nightAmt = 0
+  private rainAmt = 0
+  private silAmt = 0
+  private fogScale = 1
+  private bgKey = ''
+  private clearRgb = -1
+  private readonly clearColor = new Color()
+  private lastZ = 0
 
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance', stencil: false, alpha: false })
@@ -132,17 +145,95 @@ export class RenderWorld {
 
   setStage(stage: Stage): void {
     this.stage = stage
-    const theme = THEMES[stage.desc.theme]
-    this.theme = theme
-    this.palette = PALETTES[theme.palette] ?? PALETTES.coast
-    this.background.setPalette(this.palette, theme.backdrop, this.retro, Boolean(theme.night))
+    this.scenePals = stage.scenes.map((s) => PALETTES[s.palette] ?? PALETTES.coast)
+    this.themeId = stage.theme.id
+    this.bgKey = ''
+    this.refreshLook(0, false)
+  }
+
+  /**
+   * Work out what the world looks like at z and push it at the renderer: the scene's
+   * own ground colours (crossfaded where one scene hands over to the next), under the
+   * vibe's sky, with night and rain as amounts rather than switches.
+   *
+   * Built-in stages carry no vibes, so they take their theme's palette untouched — the
+   * hand-picked look of the coast-to-coast route is not up for reinterpretation.
+   */
+  private refreshLook(z: number, lightsOn: boolean): void {
+    const stage = this.stage
+    if (!stage) return
+    const base = this.sceneBase(Math.floor(z / SEG_LENGTH))
+    const theme = stage.themeAt(z)
+    const vibe = stage.vibes.length ? vibeAt(stage.vibes, stage.fractionAt(z)) : null
+    this.vibe = vibe
+    if (vibe) {
+      this.nightAmt = vibe.night
+      this.rainAmt = vibe.rain
+      this.silAmt = vibe.silhouette
+      this.palette = paletteFor(base, vibe)
+      this.fogScale = vibe.fogK
+    } else {
+      this.nightAmt = theme.night ? 1 : 0
+      this.rainAmt = theme.rain ? 1 : 0
+      this.silAmt = theme.silhouette ? 1 : 0
+      this.palette = base
+      this.fogScale = 1
+    }
+    // The parallax layers are canvas textures, so re-drawing them costs an upload:
+    // only do it when the scene (or the pipeline's filtering) under them changes.
+    const key = `${theme.backdrop}|${base.far.toString(16)}|${base.near.toString(16)}|${base.clouds.toString(16)}|${this.retro ? 'r' : 'm'}`
+    if (key !== this.bgKey) {
+      this.bgKey = key
+      this.background.setPalette(base, theme.backdrop, this.retro, this.nightAmt, key)
+    }
+    this.background.setSky(this.palette, this.nightAmt, vibe ? gradeColor(0xffffff, vibe) : 0xffffff)
     this.road.setFog(this.palette.fog)
     this.sprites.setFog(this.palette.fog)
-    this.renderer.setClearColor(new Color(this.palette.skyBottom), 1)
-    this.themeId = theme.id
-    this.cockpit.rain = Boolean(theme.rain)
-    this.cockpit.night = Boolean(theme.night)
-    this.rain.enabled = Boolean(theme.rain)
+    if (this.palette.skyBottom !== this.clearRgb) {
+      this.clearRgb = this.palette.skyBottom
+      this.renderer.setClearColor(this.clearColor.set(this.clearRgb), 1)
+    }
+    this.rain.intensity = this.rainAmt
+    this.cockpit.rain = this.rainAmt > 0.2
+    this.cockpit.night = this.nightAmt > 0.5
+    void lightsOn
+  }
+
+  /**
+   * The scene's ungraded palette at a segment, crossfaded across a scene change so
+   * the ground does not switch colour on one row.
+   */
+  private sceneBase(segIndex: number): Palette {
+    const stage = this.stage
+    if (!stage) return PALETTES.coast
+    const segs = stage.segments
+    const last = Math.max(0, stage.length - 1)
+    const i = Math.max(0, Math.min(last, segIndex))
+    const here = segs[i].scene
+    if (this.scenePals.length < 2) return this.scenePals[0] ?? PALETTES.coast
+    let other = here
+    let mix = 0
+    for (let k = 1; k <= SCENE_FADE; k++) {
+      const b = segs[Math.max(0, i - k)].scene
+      if (b !== here) {
+        other = b
+        mix = 0.5 - k / (2 * SCENE_FADE)
+        break
+      }
+    }
+    if (!mix) {
+      for (let k = 1; k <= SCENE_FADE; k++) {
+        const f = segs[Math.min(last, i + k)].scene
+        if (f !== here) {
+          other = f
+          mix = 0.5 - k / (2 * SCENE_FADE)
+          break
+        }
+      }
+    }
+    const a = this.scenePals[here] ?? PALETTES.coast
+    if (!mix || other === here) return a
+    return blendPalette(a, this.scenePals[other] ?? a, Math.max(0, mix))
   }
 
   /** Hero car: a prototype livery id or 'formula'. */
@@ -159,7 +250,9 @@ export class RenderWorld {
     this.cockpit.setRetro(this.retro)
     if (this.atlas.texture) this.atlas.texture.minFilter = this.atlas.texture.magFilter = this.retro ? NearestFilter : LinearFilter
     if (this.atlas.texture) this.atlas.texture.needsUpdate = true
-    if (this.stage) this.background.setPalette(this.palette, THEMES[this.stage.desc.theme].backdrop, this.retro, Boolean(THEMES[this.stage.desc.theme].night))
+    // The layer textures are filtered per pipeline, so a style change re-bakes them.
+    this.bgKey = ''
+    if (this.stage) this.refreshLook(this.lastZ, this.lightsOn)
     this.resize(this.width, this.height, this.pixelRatio)
   }
 
@@ -204,6 +297,10 @@ export class RenderWorld {
     const W = P.width
     const H = P.height
     this.lightsOn = curr.lightsOn
+    this.lastZ = z
+    // Time of day and weather can move under you along a track, so the look is a
+    // per-frame question now, not a per-stage one.
+    this.refreshLook(z, curr.lightsOn)
 
     // Camera follows the road height under the player, smoothly; bounce with speed.
     const groundY = stage.heightAt(z)
@@ -225,7 +322,7 @@ export class RenderWorld {
     const segs = stage.segments
     const last = segs.length - 1
     const segAt = (i: number) => segs[Math.max(0, Math.min(i, last))]
-    const fogK = this.retro ? FOG_RETRO : FOG_MODERN
+    const fogK = (this.retro ? FOG_RETRO : FOG_MODERN) * this.fogScale
 
     // Roll has two sources. Steering gives the horizon a subtle transient lean while the
     // wheel is turned (the cockpit stays level). Banked curves step the cockpit up in lane
@@ -295,14 +392,20 @@ export class RenderWorld {
     // At night everything outside the headlight cone falls to NIGHT_AMBIENT.
     this.road.begin()
     const pal = this.palette
-    const night = Boolean(this.theme?.night)
+    // Night is an amount, not a switch: a vibe can bring it on over a few hundred metres.
+    const nightAmt = this.nightAmt
+    const night = nightAmt > 0.02
     // Facing away from the road mid-spin: just the ground up to the horizon.
     if (behind) this.road.quad(W / 2, -H, W, W / 2, H * 0.5, W, pal.grassA, 0)
-    const lanes = this.theme?.lanes ?? 3
-    const rails = Boolean(this.theme?.rails)
+    const scenes = stage.scenes
     for (let n = DRAW_SEGMENTS - 1; n >= 0; n--) {
       if (!this.segVisible[n]) continue
       const seg = segAt(base + n)
+      // Road width and guardrail follow the scene this segment belongs to, so a track
+      // can narrow from a four-lane city street to a two-lane coast road as you drive.
+      const rowTheme: Theme = scenes[seg.scene] ?? scenes[0]
+      const lanes = rowTheme.lanes
+      const rails = rowTheme.rails
       const band = Math.floor((base + n) / BAND_SEGMENTS) % 2
       const x1 = this.rowX[n]
       const y1 = this.rowY[n]
@@ -319,8 +422,9 @@ export class RenderWorld {
       const inTunnel = seg.tunnel
       // Night: everything sits at one dark ambient (no distance wedges); the headlights paint two lit strips
       // on the tarmac below, Rad Mobile style, so the light is on the road ahead, not smeared over the scene.
-      const ambientDim = inTunnel ? (curr.lightsOn ? Math.max(TUNNEL_DARK, 0.5) : TUNNEL_DARK) : night ? NIGHT_AMBIENT * (curr.lightsOn ? 1 : LIGHTS_OFF_AMBIENT) : 1
-      const beam = (night || inTunnel) && curr.lightsOn ? Math.exp(-Math.max(0, zRel) / HEADLIGHT_REACH) : 0
+      const nightDim = NIGHT_AMBIENT * (curr.lightsOn ? 1 : LIGHTS_OFF_AMBIENT)
+      const ambientDim = inTunnel ? (curr.lightsOn ? Math.max(TUNNEL_DARK, 0.5) : TUNNEL_DARK) : 1 + (nightDim - 1) * nightAmt
+      const beam = (nightAmt > 0.15 || inTunnel) && curr.lightsOn ? Math.exp(-Math.max(0, zRel) / HEADLIGHT_REACH) * (inTunnel ? 1 : nightAmt) : 0
       this.road.setDim(ambientDim)
       const grassCol = inTunnel ? 0x2a2a30 : band ? pal.grassA : pal.grassB
       if (this.rowTilt[n] !== 0 || this.rowTilt[n + 1] !== 0) {
@@ -541,10 +645,11 @@ export class RenderWorld {
   }
 
   private brightAt(zRel: number): number {
-    if (!this.theme?.night) return 1
+    const nightAmt = this.nightAmt
+    if (nightAmt <= 0.02) return 1
     // Headlights are a switch you have to find; without them the night is very dark.
-    if (!this.lightsOn) return NIGHT_AMBIENT * LIGHTS_OFF_AMBIENT
-    return NIGHT_AMBIENT + (1 - NIGHT_AMBIENT) * Math.exp(-Math.max(0, zRel) / HEADLIGHT_REACH)
+    const dark = this.lightsOn ? NIGHT_AMBIENT + (1 - NIGHT_AMBIENT) * Math.exp(-Math.max(0, zRel) / HEADLIGHT_REACH) : NIGHT_AMBIENT * LIGHTS_OFF_AMBIENT
+    return 1 + (dark - 1) * nightAmt
   }
 
   private drawSegmentSprites(seg: Segment, n: number, clip: number, bright: number): void {
@@ -556,8 +661,10 @@ export class RenderWorld {
       const lat = sp.offset * ROAD_HALF_WIDTH
       const sy = this.rowY[n] + this.tiltLift(n, lat)
       const clipHere = Math.max(clip, this.deckWallTop(n, lat, sx))
-      // The sunset stage is all silhouettes; otherwise lit signage and towers glow through the night.
-      const glow = this.theme?.silhouette ? 0.04 : sp.kind.startsWith('sign') || sp.kind.startsWith('tower') || sp.kind === 'diner' || sp.kind === 'motel' || sp.kind === 'gas' || sp.kind === 'arch' ? Math.max(bright, 0.85) : bright
+      // Lit signage and towers glow through the night; a silhouette vibe (the sunset) flattens
+      // everything roadside to a cut-out instead, and blends in as the sun goes down.
+      const lit = sp.kind.startsWith('sign') || sp.kind.startsWith('tower') || sp.kind === 'diner' || sp.kind === 'motel' || sp.kind === 'gas' || sp.kind === 'arch' ? Math.max(bright, 0.85) : bright
+      const glow = this.silAmt > 0.01 ? lit + (0.04 - lit) * this.silAmt : lit
       this.sprites.add(sx, sy, frame.heightM * sp.scale * sc, frame, this.rowFog[n], glow, clipHere)
     }
   }

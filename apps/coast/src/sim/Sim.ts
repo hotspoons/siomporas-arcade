@@ -5,9 +5,10 @@ import { Rng } from '@apex/engine/math/Rng'
 import { clamp, expApproach } from '@apex/engine/math/scalar'
 import { EventQueue } from './Events'
 import type { InputFrame } from './InputFrame'
-import { Stage, type StageDesc, type Theme } from './Road'
+import type { Stage, StageDesc, Theme } from './Road'
 import { Snapshot, type RunPhase } from './Snapshot'
-import { routeLength, STAGE_BY_ID, THEMES } from './Stages'
+import { BUILTIN_ROUTE, type RouteSource } from '../world/Route'
+import { weatherAt } from '../world/vibes'
 import * as T from './Tuning'
 
 export const TRAFFIC_KINDS = ['sedan', 'sedanSports', 'suv', 'van', 'truck', 'taxi', 'police', 'delivery'] as const
@@ -65,14 +66,21 @@ export class Sim {
   private segPrev = -1
   theme!: Theme
   readonly startId: string
+  /** Which world this run is driving: the built-in route, or one built in the editor. */
+  readonly world: RouteSource
+  /** How dark and how wet it is here, 0..1 — a vibe can bring night on part-way along a track. */
+  nightAmount = 0
+  rainAmount = 0
+  private readonly weather = { night: 0, rain: 0 }
   private readonly cars: Car[] = []
   private readonly crossers: Car[] = []
   private readonly seed: number
   private stageDesc!: StageDesc
 
-  constructor(seed: number, startId = 'A') {
+  constructor(seed: number, startId = 'A', world: RouteSource = BUILTIN_ROUTE) {
     this.seed = seed
-    this.startId = STAGE_BY_ID[startId] ? startId : 'A'
+    this.world = world
+    this.startId = world.has(startId) ? startId : world.start
     this.rng = new Rng(seed)
     for (let i = 0; i < T.TRAFFIC_COUNT; i++) this.cars.push({ z: 0, x: 0, speed: 0, kind: 0, lane: 0, passed: false, dir: 1, side: 1, crossZ: 0 })
     for (let i = 0; i < T.CROSSER_COUNT; i++) this.crossers.push({ z: -1e9, x: 9, speed: 0, kind: 0, lane: 0, passed: true, dir: 0, side: 1, crossZ: 0 })
@@ -110,12 +118,12 @@ export class Sim {
   }
 
   private loadStage(id: string): void {
-    const desc = STAGE_BY_ID[id]
-    this.stageDesc = desc
-    this.theme = THEMES[desc.theme]
-    this.stage = new Stage(desc, this.theme, this.seed * 31 + this.route.length * 7 + id.charCodeAt(0))
+    this.stage = this.world.build(id, this.seed * 31 + this.route.length * 7 + (id.charCodeAt(0) || 1))
+    this.stageDesc = this.stage.desc
+    this.theme = this.stage.theme
     this.route.push(id)
     this.z = 0
+    this.updateWeather()
     this.airborne = false
     this.airY = 0
     this.vy = 0
@@ -125,11 +133,30 @@ export class Sim {
     for (const c of this.crossers) this.spawnCrosser(c)
   }
 
+  /**
+   * The hour and the weather where the car is. A track authored in the editor can
+   * carry several vibes and slide between them; a built-in stage has none, so its
+   * theme's own flags stand in.
+   */
+  private updateWeather(): void {
+    const st = this.stage
+    if (st.vibes.length) {
+      weatherAt(st.vibes, st.fractionAt(this.z), this.weather)
+      this.nightAmount = this.weather.night
+      this.rainAmount = this.weather.rain
+    } else {
+      this.nightAmount = st.theme.night ? 1 : 0
+      this.rainAmount = st.theme.rain ? 1 : 0
+    }
+  }
+
   private spawnCar(c: Car, z: number): void {
     c.z = z
-    // Head-on traffic keeps to the far side of the crown; yours keeps right.
-    c.dir = this.rng.next() < (this.theme.oncoming ?? 0) ? -1 : 1
-    c.lane = c.dir < 0 ? [-0.62, -0.25][this.rng.int(2)] : this.theme.oncoming ? [0.25, 0.62][this.rng.int(2)] : [-0.62, -0.2, 0.2, 0.62][this.rng.int(4)]
+    // Head-on traffic keeps to the far side of the crown; yours keeps right. Which side
+    // of the road you are on is the scene's business, so ask the scene at the car's own z.
+    const oncoming = this.stage.themeAt(z).oncoming ?? 0
+    c.dir = this.rng.next() < oncoming ? -1 : 1
+    c.lane = c.dir < 0 ? [-0.62, -0.25][this.rng.int(2)] : oncoming ? [0.25, 0.62][this.rng.int(2)] : [-0.62, -0.2, 0.2, 0.62][this.rng.int(4)]
     c.x = c.lane
     c.speed = this.rng.range(T.TRAFFIC_MIN_SPEED, T.TRAFFIC_MAX_SPEED)
     c.kind = this.rng.int(TRAFFIC_KINDS.length)
@@ -271,6 +298,7 @@ export class Sim {
     this.z += this.speed * dt
     this.score += (this.z - prevZ) * T.SCORE_PER_METRE
     this.tickHills(dt)
+    this.updateWeather()
 
     // Roadside collisions on the segments we crossed.
     if (this.speed > 2) {
@@ -378,7 +406,7 @@ export class Sim {
     for (const c of this.cars) {
       c.z += c.dir * c.speed * dt
       // Lane discipline with occasional changes (head-on traffic stays on its side).
-      if (this.rng.next() < 0.002) c.lane = c.dir < 0 ? [-0.62, -0.25][this.rng.int(2)] : this.theme.oncoming ? [0.25, 0.62][this.rng.int(2)] : [-0.62, -0.2, 0.2, 0.62][this.rng.int(4)]
+      if (this.rng.next() < 0.002) c.lane = c.dir < 0 ? [-0.62, -0.25][this.rng.int(2)] : this.stage.themeAt(c.z).oncoming ? [0.25, 0.62][this.rng.int(2)] : [-0.62, -0.2, 0.2, 0.62][this.rng.int(4)]
       // Through the fork zone traffic follows its carriageway out to the side; roadworks close a lane.
       const cs = this.stage.segmentAt(c.z + 40)
       const fk = cs.fork
@@ -472,6 +500,8 @@ export class Sim {
     out.stageIndex = this.stageIndex
     out.stageId = this.stageDesc.id
     out.curveAccum = this.curveAccum
+    out.night = this.nightAmount
+    out.rain = this.rainAmount
     const h = out.hud
     h.time = this.timeLeft
     h.score = Math.floor(this.score)
@@ -482,7 +512,7 @@ export class Sim {
     h.turbo = this.turbo
     h.turboActive = this.turboTimer > 0
     h.stage = this.stageIndex + 1
-    h.stagesTotal = routeLength(this.startId)
+    h.stagesTotal = this.world.routeLength(this.startId)
     h.wipers = this.wipersOn
     h.lights = this.lightsOn
     h.speedKmh = this.speed * 3.6

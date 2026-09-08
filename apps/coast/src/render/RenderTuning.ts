@@ -93,6 +93,9 @@ export const PALETTES: Record<string, Palette> = {
   ridge: { skyTop: 0x2a5aa8, skyBottom: 0xb8d8f8, sun: 0xfff8e0, fog: 0xb8ccd8, grassA: 0x3a8a3a, grassB: 0x348234, roadA: 0x585c60, roadB: 0x5c6064, rumbleA: 0xeeeeee, rumbleB: 0xc83030, lane: 0xf0f0f0, far: 0x3a5a8a, near: 0x2a6a4a, shoulder: 0x7a7a60, rail: 0xa8b0b8, clouds: 0xe8eef4 },
   city: { skyTop: 0x4a78b8, skyBottom: 0xc8d4dc, sun: 0xffffff, fog: 0xc8ccd4, grassA: 0x8c8e94, grassB: 0x86888e, roadA: 0x585a60, roadB: 0x5c5e64, rumbleA: 0xf0f0f0, rumbleB: 0xe0a020, lane: 0xf0e8c0, far: 0x6a7a90, near: 0x7c8898, shoulder: 0xa0a0a4, rail: 0xc0c0c0, clouds: 0xffffff },
   alpine: { skyTop: 0x244a80, skyBottom: 0xc8dcf0, sun: 0xffffff, fog: 0xc0d0e0, grassA: 0x5a8a4a, grassB: 0x548246, roadA: 0x505458, roadB: 0x54585c, rumbleA: 0xf0f0f0, rumbleB: 0xd03838, lane: 0xf0f0f0, far: 0x8a9ab0, near: 0x4a6a5a, shoulder: 0x8a8a80, rail: 0xc8ccd4, clouds: 0xd8dde4 },
+  // Editor scenes (see src/world/scenes.ts): daylight ground colours, graded by whichever vibe the track is wearing.
+  suburb: { skyTop: 0x2a68b8, skyBottom: 0xc0e0ff, sun: 0xffffff, fog: 0xc8dcec, grassA: 0x4a9a44, grassB: 0x44923e, roadA: 0x5e6064, roadB: 0x626468, rumbleA: 0xf0f0f0, rumbleB: 0xd8d8d8, lane: 0xf4f4e8, far: 0x7a8a9a, near: 0x5a8a5a, shoulder: 0xa8a8a0, rail: 0xc0c4cc, clouds: 0xffffff },
+  industrial: { skyTop: 0x46688a, skyBottom: 0xb8c0c4, sun: 0xffffff, fog: 0xb0b8bc, grassA: 0x7a7c78, grassB: 0x747670, roadA: 0x52545a, roadB: 0x56585e, rumbleA: 0xe8e8e0, rumbleB: 0xc88a20, lane: 0xf0e8c0, far: 0x66707c, near: 0x6a6e70, shoulder: 0x8a8a86, rail: 0xb0b4b8, clouds: 0xdcdcdc },
 }
 
 /** Live-tunable knobs for the tuning panel (F6). Values persist per browser; Copy JSON to ship new defaults. */

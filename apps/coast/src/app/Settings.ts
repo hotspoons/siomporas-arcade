@@ -19,8 +19,10 @@ export interface SettingsData {
   /** Hero livery id (see procgen LIVERIES) or 'formula'. */
   car: string
   station: number
-  /** Stage id to begin the run on (STAGES). */
+  /** Stage id to begin the run on, within the chosen world. */
   startStage: string
+  /** Which world to drive: 'builtin' (the coast-to-coast route) or a 'user:N' one you built. */
+  world: string
   units: 'kmh' | 'mph'
   access: { reducedMotion: boolean; hudScale: number }
   /** Phone tilt steering the other way round from this game's default. */
@@ -45,6 +47,7 @@ export const DEFAULT_SETTINGS: SettingsData = {
   car: 'rosso',
   station: 0,
   startStage: 'A',
+  world: 'builtin',
   units: 'kmh',
   access: { reducedMotion: false, hudScale: 1 },
   tiltInvert: false,

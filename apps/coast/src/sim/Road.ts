@@ -5,6 +5,7 @@
 // lateral offset in road widths (|offset| > 1 is off the tarmac).
 
 import { Rng } from '@apex/engine/math/Rng'
+import type { VibeStop } from '../world/types'
 import { CROSSING_EVERY, FORK_SEGMENTS, ROLL_AMPLITUDE, RUNWAY_SEGMENTS, SEG_LENGTH, STAGE_SCALE } from './Tuning'
 
 export interface SpriteRef {
@@ -41,6 +42,13 @@ export interface Segment {
   /** Inside a tunnel: walls and a ceiling close in, the sky is gone. `portal` marks the entrance face. */
   tunnel: boolean
   portal: boolean
+  /** Which of the stage's scenes this segment belongs to (index into Stage.scenes). Built-in stages have one. */
+  scene: number
+}
+
+/** A blank segment at grade, ready for the builders to fill in. */
+export function blankSegment(index: number, curve: number, y0: number, y1: number, bank = 0): Segment {
+  return { index, curve, y0, y1, sprites: [], fork: -1, checkpoint: false, runway: false, crossing: false, shore: 0, closed: 0, bank, tunnel: false, portal: false, scene: 0 }
 }
 
 export interface Theme {
@@ -92,21 +100,47 @@ export interface StageDesc {
   next: string[]
 }
 
+/** A stage compiled somewhere else (see src/world/compile.ts) rather than built from sections. */
+export interface StageParts {
+  segments: Segment[]
+  length: number
+  forks: boolean
+  scenes: Theme[]
+  vibes: VibeStop[]
+}
+
 export class Stage {
   readonly desc: StageDesc
   readonly segments: Segment[] = []
   /** Real (non-runway) length in segments. */
   readonly length: number
   readonly forks: boolean
+  /** The scenery recipes in play; `Segment.scene` indexes this. Built-in stages have exactly one. */
+  readonly scenes: Theme[]
+  /**
+   * Time of day and weather along the stage. Empty means "whatever the theme says",
+   * which is how the built-in route keeps its hand-picked palettes untouched.
+   */
+  readonly vibes: VibeStop[]
 
-  constructor(desc: StageDesc, theme: Theme, seed: number) {
+  constructor(desc: StageDesc, theme: Theme, seed: number, parts?: StageParts) {
     this.desc = desc
     this.forks = desc.next.length === 2
+    if (parts) {
+      this.segments = parts.segments
+      this.length = parts.length
+      this.forks = parts.forks
+      this.scenes = parts.scenes
+      this.vibes = parts.vibes
+      return
+    }
+    this.scenes = [theme]
+    this.vibes = []
     const rng = new Rng(seed)
     let y = 0
     const segs = this.segments
     const push = (curve: number, y1: number, bank = 0) => {
-      segs.push({ index: segs.length, curve, y0: y, y1, sprites: [], fork: -1, checkpoint: false, runway: false, crossing: false, shore: 0, closed: 0, bank, tunnel: false, portal: false })
+      segs.push(blankSegment(segs.length, curve, y, y1, bank))
       y = y1
     }
     const ease = (a: number, b: number, t: number) => a + (b - a) * (0.5 - Math.cos(t * Math.PI) / 2)
@@ -241,16 +275,26 @@ export class Stage {
       }
       if (theme.landmarks.length && i % theme.landmarkEvery === 0) {
         const k = theme.landmarks[Math.floor(i / theme.landmarkEvery) % theme.landmarks.length]
-        const side = Math.floor(i / theme.landmarkEvery) % 2 === 0 ? -1 : 1
-        seg.sprites.push({ kind: k, offset: side * 1.9, scale: 1, collide: true })
+        // Alternate sides, but never build a diner in the sea.
+        let side = Math.floor(i / theme.landmarkEvery) % 2 === 0 ? -1 : 1
+        if (seg.shore === side) side = -side
+        if (seg.shore !== side) seg.sprites.push({ kind: k, offset: side * 1.9, scale: 1, collide: true })
       }
     }
     // Start gantry on the first segment of the stage.
     if (segs.length > 2) segs[2].sprites.push({ kind: 'gantry', offset: 0, scale: 1, collide: false })
     // Runway for the renderer.
     for (let i = 0; i < RUNWAY_SEGMENTS; i++) {
-      segs.push({ index: segs.length, curve: 0, y0: y, y1: y, sprites: [], fork: this.forks ? 1 : -1, checkpoint: false, runway: true, crossing: false, shore: 0, closed: 0, bank: 0, tunnel: false, portal: false })
+      const s = blankSegment(segs.length, 0, y, y)
+      s.fork = this.forks ? 1 : -1
+      s.runway = true
+      segs.push(s)
     }
+  }
+
+  /** The stage's first (and for built-ins only) scenery recipe. */
+  get theme(): Theme {
+    return this.scenes[0]
   }
 
   /** Metres of real road. */
@@ -263,6 +307,17 @@ export class Stage {
     const out: number[] = []
     for (let i = 0; i < this.length; i++) if (this.segments[i].crossing) out.push(i)
     return out
+  }
+
+  /** The scenery recipe in force at z (a track may run through several). */
+  themeAt(z: number): Theme {
+    return this.scenes[this.segmentAt(z).scene] ?? this.scenes[0]
+  }
+
+  /** How far along the stage z is, 0..1 — where vibe and scene stops are addressed from. */
+  fractionAt(z: number): number {
+    const m = this.metres
+    return m > 0 ? Math.max(0, Math.min(1, z / m)) : 0
   }
 
   segmentAt(z: number): Segment {

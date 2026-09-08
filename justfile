@@ -78,6 +78,11 @@ tunnel app="conduit":
 smoke app="conduit":
     APEX_URL="http://localhost:$(just _port {{ app }})" node scripts/smoke.mjs
 
+# drive the COASTLINE world builder headlessly: builds a track with the pointer,
+# saves it, drives it, and checks the built-in route still runs (see scripts/editor-smoke.mjs)
+editor-smoke port="5182":
+    APEX_URL="http://localhost:{{ port }}" node scripts/editor-smoke.mjs
+
 # headless screenshot probe against a dev server (see scripts/probe.mjs)
 probe out="shots/probe.png" seconds="0" *keys:
     node scripts/probe.mjs {{ out }} {{ seconds }} {{ keys }}

@@ -4,27 +4,40 @@ import { STATIONS } from '../audio/AudioWorld'
 import { LIVERIES } from '../render/procgen'
 import { ACTIONS, ACTION_LABELS, type Action } from '../input/bindings'
 import type { Snapshot } from '../sim/Snapshot'
-import { STAGE_BY_ID, STAGES } from '../sim/Stages'
 import type { Game } from './Game'
 
 export function buildMenus(game: Game) {
   const s = () => game.settings.data
   const set = (fn: (d: ReturnType<typeof s>) => void) => game.settings.update(fn)
+  const worlds = () => game.worlds.list()
 
   const title = (): MenuScreen => ({
     id: 'title',
     title: 'COASTLINE',
-    subtitle: 'Coast to coast · seven stages · one clock',
+    subtitle: `${game.route.worldName} · ${game.route.routeLength(game.route.start)} stages · one clock`,
     items: [
       { kind: 'action', label: 'START', onSelect: () => game.startRun() },
+      ...(game.fromEditor ? [{ kind: 'action' as const, label: 'BACK TO THE EDITOR', hint: 'The world builder still has your work', onSelect: () => game.openEditor() }] : []),
+      {
+        kind: 'choice',
+        label: 'WORLD',
+        hint: 'The built-in coast-to-coast route, or a track set you built yourself',
+        options: worlds().map((w) => `${w.name}${w.builtin ? '' : ` · ${w.tracks} track${w.tracks === 1 ? '' : 's'}`}`),
+        get: () => Math.max(0, worlds().findIndex((w) => w.id === (s().world ?? 'builtin'))),
+        set: (i) => {
+          set((d) => (d.world = worlds()[i].id))
+          game.applyWorld()
+        },
+      },
       {
         kind: 'choice',
         label: 'START AT',
-        hint: 'Begin the run on any stage',
-        options: STAGES.map((st) => `${st.id} · ${st.name}`),
-        get: () => Math.max(0, STAGES.findIndex((st) => st.id === (s().startStage ?? 'A'))),
-        set: (i) => set((d) => (d.startStage = STAGES[i].id)),
+        hint: 'Begin the run on any stage of this world',
+        options: game.route.ids.map((id) => `${id} · ${game.route.name(id)}`),
+        get: () => Math.max(0, game.route.ids.indexOf(s().startStage)),
+        set: (i) => set((d) => (d.startStage = game.route.ids[i])),
       },
+      { kind: 'action', label: 'BUILD A WORLD', hint: 'Lay out your own tracks, wire them into a route, and drive it', onSelect: () => game.openEditor() },
       {
         kind: 'choice',
         label: 'RADIO',
@@ -69,6 +82,7 @@ export function buildMenus(game: Game) {
     items: [
       { kind: 'action', label: 'RESUME', onSelect: () => game.resume() },
       { kind: 'action', label: 'RESTART', onSelect: () => game.restart() },
+      ...(game.fromEditor ? [{ kind: 'action' as const, label: 'BACK TO THE EDITOR', onSelect: () => game.openEditor() }] : []),
       { kind: 'choice', label: 'VIEW', options: ['CHASE', 'COCKPIT'], get: () => (s().view === 'cockpit' ? 1 : 0), set: (i) => { set((d) => (d.view = i === 1 ? 'cockpit' : 'chase')); game.applyView() } },
       { kind: 'choice', label: 'RADIO', options: STATIONS.map((st) => st.name), get: () => s().station, set: (i) => { set((d) => (d.station = i)); game.applyStation() } },
       { kind: 'choice', label: 'STYLE', options: ['MODERN', 'RETRO'], get: () => (s().style === 'retro' ? 1 : 0), set: (i) => { set((d) => (d.style = i === 1 ? 'retro' : 'modern')); game.applyStyle() } },
@@ -181,7 +195,7 @@ export function buildMenus(game: Game) {
 
   const results = (snap: Snapshot): MenuScreen => {
     const finished = snap.phase === 'finished'
-    const route = snap.hud.route.split(' › ').map((id) => STAGE_BY_ID[id]?.name ?? id)
+    const route = snap.hud.route.split(' › ').map((id) => game.route.name(id))
     return {
       id: 'results',
       title: finished ? 'GOAL' : 'TIME UP',
@@ -190,7 +204,9 @@ export function buildMenus(game: Game) {
         { kind: 'info', label: 'Score', value: () => snap.hud.score.toLocaleString() },
         { kind: 'info', label: 'Stage reached', value: () => `${snap.hud.stage} / ${snap.hud.stagesTotal}` },
         { kind: 'info', label: 'Time', value: () => `${snap.time.toFixed(1)} s` },
+        { kind: 'info', label: 'World', value: () => game.route.worldName },
         { kind: 'action', label: 'AGAIN', onSelect: () => game.restart() },
+        ...(game.fromEditor ? [{ kind: 'action' as const, label: 'BACK TO THE EDITOR', onSelect: () => game.openEditor() }] : []),
         { kind: 'action', label: 'TITLE', onSelect: () => game.quitToTitle() },
       ],
       onBack: () => game.quitToTitle(),

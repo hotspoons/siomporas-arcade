@@ -28,6 +28,9 @@ export class Snapshot {
   stageId = 'A'
   /** Camera x offset accumulated from curves (renderer parallax). */
   curveAccum = 0
+  /** How dark and how wet it is right here, 0..1 (a vibe can slide from dusk into night mid-stage). */
+  night = 0
+  rain = 0
   readonly hud = {
     time: 0,
     score: 0,

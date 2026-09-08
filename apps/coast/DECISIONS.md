@@ -69,3 +69,52 @@ Rad Mobile's headlights lit strips of road toward the horizon; ours do the same.
 
 ## HUD scale and the retro HUD look (2026-09-08, all three games)
 The HUD and menus are sized in `vmin` with clamps (times `--hud-scale`), so they grow with the window instead of staying at a fixed pixel size; menu padding and widths are in `em` so they follow. `HUD_RETRO` (Render section) swaps the DOM overlay for one painted inside the low-res buffer: HudLayer draws the score, clock, stage, speed, switches, radio, fork arrows and messages onto a canvas at the logical resolution and hangs it in the scene above the cockpit, so it goes through the same nearest-neighbour upscale, scanlines and posterisation as the road — pixels in the same framebuffer, as on the board. It only exists in the retro pipeline (modern is untouched), the DOM HUD hides while it is up, messages go to both, and everything sits inside a title-safe inset because the tube's curve eats a few lines at each edge.
+
+## The world builder (2026-09-08)
+**A track is a plan-view centreline, not a list of sections.** The shipped route stays
+sections (`src/sim/Stages.ts`) — it is hand-tuned and nothing gains by re-authoring it — but
+anything you build is a poly-Bézier through waypoints in real metres (`src/world/path.ts`),
+resampled at `SEG_LENGTH` and turned into the same `Segment[]` the sim has always driven
+(`src/world/compile.ts`). Drag a node to move the road, drag its handle to change the
+curvature between two nodes; a node with no handles of its own gets the Catmull-Rom shape
+through its neighbours, so a freshly dropped waypoint already bends sensibly.
+
+**Curve is a curvature, so the mapping is one line**: `curve = Δheading × SEG_LENGTH /
+CURVE_UNIT`, which puts a 1.4 km-radius sweeper at curve 3 — exactly where the hand-authored
+stages sit. That also means the limit on a corner is the car, not the projection: the
+centrifugal push at curve *c* is `CENTRIFUGAL × c` road widths per second and full lock only
+buys back `STEER_RATE`, so past ~800 m radius you brake and past 470 m nothing holds the
+road. The compiler clamps and reports; the plan view paints those stretches amber and red;
+`◡ Smooth` relaxes the offending waypoints (and lets over-long handles go back to automatic)
+until the road is drivable. An OutRun stage really is a nearly-straight road with a gentle
+meander — the drama is all in the projection — so the plan view is honest about that rather
+than exaggerating the shape.
+
+**Scene and vibe are separate.** A scene is the prebuilt road — width, shoulders, rail,
+roadside mix, landmarks — and says nothing about the hour; a vibe is the hour and the weather
+and says nothing about the scenery. So there is one `city` scene, not a day one and a night
+one. `Segment.scene` indexes `Stage.scenes`, so road width and guardrail follow the scene
+per row and a track can narrow from a four-lane street to a two-lane coast road as you drive;
+the ground colours crossfade over `SCENE_FADE` segments either side of the change.
+
+**Night and rain are amounts, not switches.** `VibeStop`s along a track crossfade, and the
+renderer resolves the whole look per frame (`RenderWorld.refreshLook`): the scene's own
+ground colours graded by the vibe, under the vibe's sky, with `nightAmt` driving the ambient
+and `rainAmt` the curtain. That is what lets a stage leave in daylight and arrive in the rain
+after dark, two or three shifts to a track, the way Rad Mobile did it. A stage with no vibes
+takes its theme's palette untouched, which is how the shipped route's hand-picked look
+survives the change. The parallax layers are canvas textures, so they are only re-baked when
+the scene under them changes — the per-frame path just sets uniforms and a tint.
+
+**A world is a DAG with one start and at least one finish.** `next` on a track means the same
+thing it means on a `StageDesc`: two ids are a fork (left, right), one is straight on, none is
+a finish line. Branches can rejoin, so a fork can converge on a common last stage. `checkWorld`
+refuses loops, missing links, three-way forks and worlds with no finish. The sim no longer
+reads `STAGES` directly — it asks a `RouteSource` (`src/world/Route.ts`), which the built-in
+route and a compiled world both implement.
+
+**Forking the built-in route traces it.** Sections cannot be dragged about, so `⑂ Fork built-in`
+builds each stage the normal way, walks its segments integrating the curvature into a
+plan-view line, and drops a waypoint every 40 segments — coming out within a few per cent of
+the original length, with its tunnels, shoreline, roadworks and crossings recovered as macro
+elements and its theme flags read back as a vibe.

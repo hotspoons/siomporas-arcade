@@ -24,6 +24,66 @@ just tunnel coast     # phones / remote
 
 Phones: tilt to steer, GAS right, BRAKE left, GEAR / TURBO pills, VIEW pad.
 
+## Worlds and the track editor
+
+`WORLD` on the title screen picks what you drive: the built-in coast-to-coast
+route, or a **track set** you built yourself. `BUILD A WORLD` opens the editor.
+
+A world is a directed graph of tracks — one start, at least one finish, forks
+that can branch and then rejoin on a common last stage, Turbo OutRun style. The
+editor has two views (Tab switches):
+
+* **Set** — every track as a box. Drag the boxes to arrange them; drag the green
+  dot on a box's right edge onto another box to link them. Two links out of one
+  box is a fork, drawn LEFT and RIGHT in the order you made them. ⌥-click a link
+  to cut it, double-click a box to edit that track.
+* **Track** — one track's centreline, in real metres. Waypoints with Bézier
+  handles: drop them, drag them, and drag a handle to set the curvature between
+  two of them. Below the canvas, a profile strip for the hills and a timeline
+  strip carrying the scenes, the vibes, the macro elements and everything you
+  placed by hand.
+
+| Action | How |
+|---|---|
+| Extend the road | Add-waypoint tool, click past either end |
+| Insert a waypoint | double-click the road |
+| Bend the road | select a waypoint, drag its cyan handle (⌥-click a handle = back to automatic) |
+| Cusp ↔ smooth | ⇧-click a waypoint |
+| Bank in / out | `B` on a waypoint (banking eases between waypoints) |
+| Hills | drag a waypoint in the profile strip, or `Q` / `E` |
+| Rolling swell | the Hills items at the top of the palette |
+| Scene, vibe, prop, crossroads | pick it in the palette, click the road |
+| Macro elements | pick one, drag along the road (or drop it in the timeline) |
+| Move anything placed | drag it, on the canvas or in the timeline |
+| Delete | ⌥-click it, or select and `Delete` |
+| Open out corners the car can't hold | `◡ Smooth` |
+| Undo / redo | ⌘Z / ⌘⇧Z |
+| Test drive | `T` |
+
+**Scenes** are the prebuilt road: palm coast, ocean strip, cliff road, causeway,
+farm fields, pine forest, blue ridge, suburbs, red canyon, salt flats, high pass,
+downtown, neon blocks, lit boulevard, docks. Each brings its own road width,
+shoulders, guardrail, roadside mix and landmarks. A track can run through
+several — the ground colours crossfade at the change.
+
+**Vibes** are the hour and the weather, and they are separate from the scenery on
+purpose: dawn, day, overcast, sea fog, rain, sunset, twilight, night, neon night,
+rain · night, storm. Drop two or three along a track and it slides between them
+as you drive, so a stage can leave in daylight and arrive in the rain after dark.
+
+**Macro elements** run along a stretch: ocean front (a beach then water to the
+screen edge), buildings at the kerb, a tunnel, roadworks (a barrier taper in, a
+jersey barrier along the lane line, a taper out), extra barriers, or a cleared
+roadside.
+
+`⑂ Fork built-in` traces the whole coast-to-coast route into waypoints so you can
+pull it about; the shipped route itself is sections and is never edited in place.
+
+The pseudo-3D road is gentler than it looks: a 1.4 km-radius sweeper is already a
+strong curve on screen, so corners under about 800 m have to be braked for and
+ones under 470 m are opened out at compile time. The plan view colours those
+amber and red, and `◡ Smooth` fixes them.
+
 ## Sprites and assets
 
 No sprite is hand-drawn. At startup the game loads CC0 low-poly models
@@ -36,8 +96,13 @@ Blender. See [public/assets/LICENSES.md](public/assets/LICENSES.md).
 ## Layout
 
 ```
-src/sim/      Road (segments from sections, scenery, forks, runway), Stages
-              (route tree + themes), Sim (player, traffic, timer, forks), Snapshot
+src/sim/      Road (segments from sections or compiled, scenery, forks, runway),
+              Stages (built-in route tree + themes), Sim (player, traffic, timer,
+              forks), Snapshot
+src/world/    types (the authored world), path (the centreline), compile (track →
+              segments), scenes, vibes, Route (what the sim asks a world), builtin
+              (tracing the shipped route), WorldStore
+src/editor/   Editor (set view + plan view + strips)
 src/render/   Projection, RoadMesh (per-frame trapezoids), SpriteAtlas (bake),
               SpriteBatch (instanced quads with hill clipping), Background
               (sky + procedural parallax), Cockpit, RenderWorld

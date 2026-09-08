@@ -40,3 +40,40 @@ Started 2026-09-07. Verified in headless SwiftShader Chromium and unit tests onl
   the results screen, weather/time-of-day variants, more landmarks (signs with
   text), animated roadside (birds, water), a proper attract demo loop.
 - Real-GPU feel pass: sprite sizes, fog distance, curve strength, steering.
+
+## World builder (2026-09-08)
+- Worlds: `WORLD` on the title screen drives the built-in coast-to-coast route or
+  a track set you built; `BUILD A WORLD` opens the editor. Saved in localStorage,
+  exportable and importable as JSON.
+- Editor, two views: a **set** view wiring tracks into a directed route (drag a
+  box's port onto another to link; two links out = a fork, branches may rejoin on
+  a common last stage), and a **track** view laying one centreline out in real
+  metres with Bézier handles per waypoint, a profile strip for the hills and a
+  timeline strip for scenes, vibes, macro elements and placed props.
+- 15 scenes broken out of the existing themes (palm coast, ocean strip, cliff
+  road, causeway, farm fields, pine forest, blue ridge, suburbs, red canyon,
+  salt flats, high pass, downtown, neon blocks, lit boulevard, docks) and 11
+  vibes (dawn → day → overcast → sea fog → rain → sunset → twilight → night →
+  neon night → rain·night → storm). Several of each per track; both crossfade.
+- Macro elements laid along a stretch: ocean front, buildings at the kerb,
+  tunnel, roadworks (leading taper → jersey barrier → trailing taper), extra
+  barriers, cleared roadside. Crossroads and 40-odd props placed by hand.
+- Banking per waypoint (`B`), easing between them; rolling swell per track.
+- `◡ Smooth` opens out corners the car could never hold; `✓ Check` reports every
+  track's length, seconds flat out and tightest corner; `▶ Test drive` runs the
+  world as it stands, saved or not, and the pause and results screens offer a way
+  straight back into the editor.
+- `⑂ Fork built-in` traces the shipped 13-stage route into editable waypoints.
+- Verified headless: 31 unit tests over the path, compiler, vibes, DAG and the
+  traced route, plus `just editor-smoke` — 19 pointer-level checks that build a
+  track, fork it, save it and drive it.
+
+## Not yet (world builder)
+- Only the two-branch fork the sim understands; no three-way splits.
+- No per-track traffic or clock overrides: `TIME_START` and the traffic mix are
+  still global, so a very short track finishes before the clock says anything.
+- The plan view is honest about how gentle these roads are, which makes drawing
+  a recognisable shape (a bay, a loop) impossible at true scale. If that turns
+  out to matter more than the honesty, a per-track curvature exaggeration is the
+  knob to add.
+- No real-GPU pass on the editor: sizes and hit radii were picked headlessly.

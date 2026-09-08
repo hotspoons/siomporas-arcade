@@ -40,7 +40,7 @@ function nearestYaw(yaw: number): number {
 import { Background } from './Background'
 import { Cockpit } from './Cockpit'
 import { Projection } from './Projection'
-import { BANK_ROLL, BANK_TIERS, BANK_TIER_COUNT, BANK_TIER_H, BANK_TIER_W, BEACH_WIDTH, CAM_BOUNCE, HORIZON_ROLL_SHARE, STEER_ROLL, CURVE_UNIT, FOG_MODERN, FOG_RETRO, HEADLIGHT_REACH, LANE_WIDTH, LIGHTS_OFF_AMBIENT, LOGICAL_HEIGHT, MAX_SPRITES, NIGHT_AMBIENT, PALETTES, RAIL_HEIGHT, RUMBLE_WIDTH, SHOULDER_WIDTH, VIEWS, type Palette } from './RenderTuning'
+import { BANK_ROLL, BANK_TIERS, BANK_TIER_COUNT, BANK_TIER_H, BANK_TIER_W, BEACH_WIDTH, CAM_BOUNCE, TUNNEL_DARK, TUNNEL_HALF_WIDTH, TUNNEL_HEIGHT, HORIZON_ROLL_SHARE, STEER_ROLL, CURVE_UNIT, FOG_MODERN, FOG_RETRO, HEADLIGHT_REACH, LANE_WIDTH, LIGHTS_OFF_AMBIENT, LOGICAL_HEIGHT, MAX_SPRITES, NIGHT_AMBIENT, PALETTES, RAIL_HEIGHT, RUMBLE_WIDTH, SHOULDER_WIDTH, VIEWS, type Palette } from './RenderTuning'
 import { LIVERIES } from './procgen'
 import { Rain } from './Rain'
 import type { Theme } from '../sim/Road'
@@ -300,8 +300,34 @@ export class RenderWorld {
       const s2 = this.rowScale[n + 1]
       const fog = this.rowFog[n]
       const zRel = (base + n) * SEG_LENGTH - camZ
-      this.road.setDim(night ? this.brightAt(zRel) : 1)
-      this.road.quad(W / 2, y1, W, W / 2, y2, W, band ? pal.grassA : pal.grassB, fog)
+      // Inside a tunnel it is night whatever the sky says: headlights or a dim bore, lit strips on the ceiling.
+      const inTunnel = seg.tunnel
+      this.road.setDim(inTunnel ? (curr.lightsOn ? Math.max(TUNNEL_DARK, this.brightAt(zRel) * 0.9 + 0.1) : TUNNEL_DARK) : night ? this.brightAt(zRel) : 1)
+      this.road.quad(W / 2, y1, W, W / 2, y2, W, inTunnel ? 0x2a2a30 : band ? pal.grassA : pal.grassB, fog)
+      if (inTunnel) {
+        // Walls up from the road's edges, a ceiling over them, a lit strip every few segments.
+        const hw = TUNNEL_HALF_WIDTH
+        const ch = TUNNEL_HEIGHT
+        const wallCol = band ? 0x50505a : 0x484850
+        for (const e of [-1, 1]) this.road.quad4(x1 + e * hw * s1, y1, x1 + e * hw * s1, y1 + ch * s1, x2 + e * hw * s2, y2 + ch * s2, x2 + e * hw * s2, y2, wallCol, fog)
+        this.road.quad(x1, y1 + ch * s1, hw * s1, x2, y2 + ch * s2, hw * s2, 0x3a3a42, fog)
+        if ((base + n) % 5 === 0) {
+          this.road.setDim(1)
+          this.road.quad(x1, y1 + (ch - 0.2) * s1, 1.2 * s1, x2, y2 + (ch - 0.2) * s2, 1.2 * s2, 0xfff2c0, fog * 0.5)
+          this.road.setDim(inTunnel ? (curr.lightsOn ? Math.max(TUNNEL_DARK, this.brightAt(zRel) * 0.9 + 0.1) : TUNNEL_DARK) : 1)
+        }
+        if (seg.portal) {
+          // The entrance face: a wall of hillside with the bore cut out of it.
+          this.road.setDim(night ? this.brightAt(zRel) : 1)
+          const top = y1 + (ch + 9) * s1
+          const face = 0x6a6258
+          this.road.quad4(x1 - W * 3, y1, x1 - W * 3, top, x1 - hw * s1, top, x1 - hw * s1, y1, face, fog)
+          this.road.quad4(x1 + hw * s1, y1, x1 + hw * s1, top, x1 + W * 3, top, x1 + W * 3, y1, face, fog)
+          this.road.quad4(x1 - hw * s1, y1 + ch * s1, x1 - hw * s1, top, x1 + hw * s1, top, x1 + hw * s1, y1 + ch * s1, face, fog)
+          this.road.quad4(x1 - (hw + 1.2) * s1, y1, x1 - (hw + 1.2) * s1, y1 + (ch + 1.2) * s1, x1 + (hw + 1.2) * s1, y1 + (ch + 1.2) * s1, x1 + (hw + 1.2) * s1, y1, 0x3a3630, fog)
+          this.road.quad4(x1 - hw * s1, y1, x1 - hw * s1, y1 + ch * s1, x1 + hw * s1, y1 + ch * s1, x1 + hw * s1, y1, 0x0c0c10, 0)
+        }
+      }
       if (seg.bank > 0.05 && Math.abs(seg.curve) > 0.05) {
         // Terraced banking on the outside of the curve: stepped shelves climbing away from the road.
         const side = -Math.sign(seg.curve)

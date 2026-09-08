@@ -28,7 +28,7 @@ interface Car {
 }
 
 /** Sprite hit half-widths in road widths, by kind family; anything unlisted uses the default. */
-const HIT_HALF_WIDTH: Record<string, number> = { block: 0.7, block2: 0.62, palm: 0.08, palmTall: 0.08, pine: 0.1, pineTall: 0.1, pineRound: 0.12, oak: 0.14, tree: 0.14, bush: 0.12, bushLarge: 0.16, rock: 0.14, rockTall: 0.12, stoneTall: 0.1, cactus: 0.07, cactusTall: 0.07, billboard: 0.3, billboardLow: 0.3, lightpost: 0.04, lightpostTall: 0.04, barrier: 0.2, banner: 0.06, grandstand: 0.6, tent: 0.3, pitsOffice: 0.5, stump: 0.08, flower: 0, diner: 0.55, motel: 0.85, gas: 0.7, tower: 0.4, tower2: 0.4, signCoast: 0.36, signDrive: 0.36, signBay: 0.36, arch: 0 }
+const HIT_HALF_WIDTH: Record<string, number> = { facade1: 0.45, facade2: 0.4, facade3: 0.48, facade4: 0.42, facadeLit1: 0.45, facadeLit2: 0.4, block: 0.7, block2: 0.62, palm: 0.08, palmTall: 0.08, pine: 0.1, pineTall: 0.1, pineRound: 0.12, oak: 0.14, tree: 0.14, bush: 0.12, bushLarge: 0.16, rock: 0.14, rockTall: 0.12, stoneTall: 0.1, cactus: 0.07, cactusTall: 0.07, billboard: 0.3, billboardLow: 0.3, lightpost: 0.04, lightpostTall: 0.04, barrier: 0.2, banner: 0.06, grandstand: 0.6, tent: 0.3, pitsOffice: 0.5, stump: 0.08, flower: 0, diner: 0.55, motel: 0.85, gas: 0.7, tower: 0.4, tower2: 0.4, signCoast: 0.36, signDrive: 0.36, signBay: 0.36, arch: 0 }
 
 export class Sim {
   readonly events = new EventQueue()

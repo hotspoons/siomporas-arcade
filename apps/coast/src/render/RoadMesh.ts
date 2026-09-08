@@ -2,10 +2,10 @@
 // grass, rumble strips, tarmac and lane markers per segment, far to near,
 // coloured in alternating bands and blended toward the fog colour.
 
-import { BufferGeometry, Color, DynamicDrawUsage, Float32BufferAttribute, Mesh, ShaderMaterial } from 'three'
+import { BufferGeometry, Color, DoubleSide, DynamicDrawUsage, Float32BufferAttribute, Mesh, ShaderMaterial } from 'three'
 import { DRAW_SEGMENTS } from '../sim/Tuning'
 
-const QUADS_PER_SEGMENT = 12
+const QUADS_PER_SEGMENT = 18
 const MAX_QUADS = (DRAW_SEGMENTS + 4) * QUADS_PER_SEGMENT
 
 export class RoadMesh {
@@ -38,6 +38,7 @@ export class RoadMesh {
         vertexShader: /* glsl */ `varying vec3 vC; void main(){ vC = color; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
         fragmentShader: /* glsl */ `precision highp float; varying vec3 vC; void main(){ gl_FragColor = vec4(vC, 1.0); }`,
         vertexColors: true,
+        side: DoubleSide, // ceilings and walls wind the other way round
         depthTest: false,
         depthWrite: false,
       }),
@@ -68,6 +69,20 @@ export class RoadMesh {
     this.pos.setXYZ(v + 1, x1 + w1, y1, 0)
     this.pos.setXYZ(v + 2, x2 + w2, y2, 0)
     this.pos.setXYZ(v + 3, x2 - w2, y2, 0)
+    for (let k = 0; k < 4; k++) this.col.setXYZ(v + k, this.c.r, this.c.g, this.c.b)
+    this.quads++
+  }
+
+  /** Any four screen points, wound a→b→c→d (for walls and portal faces that aren't row trapezoids). */
+  quad4(xa: number, ya: number, xb: number, yb: number, xc: number, yc: number, xd: number, yd: number, color: number, fogT: number): void {
+    if (this.quads >= MAX_QUADS) return
+    this.c.set(color).lerp(this.fog, fogT)
+    if (this.dim !== 1) this.c.multiplyScalar(this.dim)
+    const v = this.quads * 4
+    this.pos.setXYZ(v, xa, ya, 0)
+    this.pos.setXYZ(v + 1, xb, yb, 0)
+    this.pos.setXYZ(v + 2, xc, yc, 0)
+    this.pos.setXYZ(v + 3, xd, yd, 0)
     for (let k = 0; k < 4; k++) this.col.setXYZ(v + k, this.c.r, this.c.g, this.c.b)
     this.quads++
   }

@@ -35,7 +35,7 @@ const flat = (color: number, extra: FlatExtra = {}) => {
 }
 
 /** Bump when any procedural model changes shape; part of the atlas cache key. */
-export const PROCGEN_VERSION = 3
+export const PROCGEN_VERSION = 4
 
 interface Slice {
   z: number
@@ -247,13 +247,44 @@ export function buildTower(h: number, tint: number): Object3D {
   return g
 }
 
+/**
+ * A street facade: the building front you drive past — a ground-floor shopfront with an
+ * awning, floors of windows above, a parapet. Narrow enough to sit right at the kerb,
+ * shallow because only the face matters. `lit` glows for the night city.
+ */
+export function buildFacade(w: number, floors: number, tint: number, awning: number, lit: boolean): Object3D {
+  const g = new Group()
+  const fh = 3.4
+  const h = 4.2 + floors * fh
+  g.add(box(w, h, 5, 0, h / 2, 0, flat(tint)))
+  // Shopfront: big glass, a dark door, an awning.
+  const glass = flat(lit ? 0xfff0b0 : 0x3a5068, lit ? { emissive: 0xffd080, emissiveIntensity: 1.1 } : { metalness: 0.3 })
+  // The atlas camera looks at the -z face, so everything worth seeing goes on that side.
+  g.add(box(w * 0.7, 2.4, 0.1, -w * 0.1, 1.6, -2.55, glass))
+  g.add(box(1.2, 2.8, 0.1, w * 0.35, 1.4, -2.55, flat(0x30282a)))
+  g.add(box(w * 0.92, 0.25, 1.6, 0, 3.4, -3.2, flat(awning)))
+  // Floors of windows.
+  const win = flat(lit ? 0xffe6a0 : 0x2a3a52, lit ? { emissive: 0xffd080, emissiveIntensity: 1.0 } : {})
+  const dark = flat(0x1a2030)
+  for (let f = 0; f < floors; f++) {
+    const y = 4.2 + f * fh + fh / 2
+    for (let x = -w / 2 + 1.1; x < w / 2 - 0.6; x += 1.9) {
+      const on = !lit || ((x * 7 + f * 13) | 0) % 4 !== 0
+      g.add(box(1.2, 1.6, 0.1, x, y, -2.55, on ? win : dark))
+    }
+    g.add(box(w + 0.1, 0.18, 0.2, 0, 4.2 + f * fh, -2.55, flat(0x8a8a90)))
+  }
+  g.add(box(w + 0.4, 0.5, 5.4, 0, h + 0.25, 0, flat(0x5a5e6a)))
+  return g
+}
+
 /** A downtown mid-rise: a slab with a grid of daytime (unlit) windows and a parapet. */
 export function buildBlock(h: number, w: number, tint: number): Object3D {
   const g = new Group()
   g.add(box(w, h, w * 0.8, 0, h / 2, 0, flat(tint)))
   const glass = flat(0x2a3a52, { metalness: 0.2 })
   for (let y = 1.6; y < h - 1.2; y += 2.6)
-    for (let x = -w / 2 + 1.2; x < w / 2 - 0.6; x += 2.0) g.add(box(1.2, 1.4, 0.1, x, y, (w * 0.8) / 2 + 0.05, glass))
+    for (let x = -w / 2 + 1.2; x < w / 2 - 0.6; x += 2.0) g.add(box(1.2, 1.4, 0.1, x, y, -(w * 0.8) / 2 - 0.05, glass))
   g.add(box(w + 0.4, 0.5, w * 0.8 + 0.4, 0, h + 0.2, 0, flat(0x6a6a70)))
   g.add(box(2.4, 2.2, 2.4, w / 4, h + 1.5, 0, flat(0x7a7a80)))
   return g

@@ -38,6 +38,9 @@ export interface Segment {
   closed: number
   /** Banking strength 0..1: the outer side of the curve rises in terraces and the cockpit leans. */
   bank: number
+  /** Inside a tunnel: walls and a ceiling close in, the sky is gone. `portal` marks the entrance face. */
+  tunnel: boolean
+  portal: boolean
 }
 
 export interface Theme {
@@ -78,6 +81,7 @@ export type Section =
   | { kind: 'curve'; n: number; curve: number; hill?: number; bank?: number }
   | { kind: 's'; n: number; curve: number; bank?: number }
   | { kind: 'hills'; n: number; height: number; count: number }
+  | { kind: 'tunnel'; n: number; curve?: number }
 
 export interface StageDesc {
   id: string
@@ -102,7 +106,7 @@ export class Stage {
     let y = 0
     const segs = this.segments
     const push = (curve: number, y1: number, bank = 0) => {
-      segs.push({ index: segs.length, curve, y0: y, y1, sprites: [], fork: -1, checkpoint: false, runway: false, crossing: false, shore: 0, closed: 0, bank })
+      segs.push({ index: segs.length, curve, y0: y, y1, sprites: [], fork: -1, checkpoint: false, runway: false, crossing: false, shore: 0, closed: 0, bank, tunnel: false, portal: false })
       y = y1
     }
     const ease = (a: number, b: number, t: number) => a + (b - a) * (0.5 - Math.cos(t * Math.PI) / 2)
@@ -135,6 +139,16 @@ export class Stage {
           addRoad(e, half - 2 * e, e, -s.curve, 0, s.bank ?? theme.bank ?? 0)
           break
         }
+        case 'tunnel': {
+          // A bore through the hill: gently curved or straight, level, marked so the renderer closes it in.
+          const first = segs.length
+          const c = s.curve ?? 0
+          const e = Math.max(3, Math.floor(s.n * 0.25))
+          addRoad(c ? e : 0, s.n - (c ? 2 * e : 0), c ? e : 0, c, 0)
+          for (let i = first; i < segs.length; i++) segs[i].tunnel = true
+          segs[first].portal = true
+          break
+        }
         case 'hills': {
           // Each hump climbs then drops, so a hills section ends where it began.
           const per = Math.floor(s.n / s.count)
@@ -151,10 +165,11 @@ export class Stage {
     this.length = segs.length
     // Rolling undulation everywhere: a gentle swell that crests every ~50
     // segments and completes whole periods over the stage, so the road is
-    // always rising or falling a little — the classic rhythm.
+    // always rising or falling a little — the classic rhythm. Tunnels stay flat.
     const periods = Math.max(1, Math.round(this.length / 52))
     for (let i = 0; i < this.length; i++) {
       const s0 = segs[i]
+      if (s0.tunnel) continue
       const a0 = (i / this.length) * Math.PI * 2 * periods
       const a1 = ((i + 1) / this.length) * Math.PI * 2 * periods
       s0.y0 += ROLL_AMPLITUDE * Math.sin(a0)
@@ -172,7 +187,7 @@ export class Stage {
     if (theme.crossings) {
       for (let i = CROSSING_EVERY; i < this.length - FORK_SEGMENTS - 20; i += CROSSING_EVERY) {
         const s = segs[i]
-        if (Math.abs(s.curve) > 1.2) continue
+        if (Math.abs(s.curve) > 1.2 || s.tunnel) continue
         // Two segments deep so the crossing road reads as a road, not a stripe.
         s.crossing = true
         segs[i + 1].crossing = true
@@ -206,7 +221,7 @@ export class Stage {
     // Scenery.
     for (let i = 8; i < this.length; i++) {
       const seg = segs[i]
-      if (seg.fork > 0.15) continue // keep the split clear
+      if (seg.fork > 0.15 || seg.tunnel) continue // keep the split clear; nothing grows in a tunnel
       if (segs[Math.max(0, i - 3)].crossing || segs[Math.min(this.length - 1, i + 3)].crossing || seg.crossing) continue // keep intersections open
       for (const side of [-1, 1]) {
         if (seg.shore === side) continue // nothing grows in the sea
@@ -234,7 +249,7 @@ export class Stage {
     if (segs.length > 2) segs[2].sprites.push({ kind: 'gantry', offset: 0, scale: 1, collide: false })
     // Runway for the renderer.
     for (let i = 0; i < RUNWAY_SEGMENTS; i++) {
-      segs.push({ index: segs.length, curve: 0, y0: y, y1: y, sprites: [], fork: this.forks ? 1 : -1, checkpoint: false, runway: true, crossing: false, shore: 0, closed: 0, bank: 0 })
+      segs.push({ index: segs.length, curve: 0, y0: y, y1: y, sprites: [], fork: this.forks ? 1 : -1, checkpoint: false, runway: true, crossing: false, shore: 0, closed: 0, bank: 0, tunnel: false, portal: false })
     }
   }
 

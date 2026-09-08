@@ -2,7 +2,7 @@
 // in metres, and from which yaw angles (degrees; 0 = seen from behind).
 
 import type { Object3D } from 'three'
-import { buildArch, buildBlock, buildDiner, buildGasStation, buildMotel, buildPrototype, buildSign, buildTower, LIVERIES } from './procgen'
+import { buildArch, buildBlock, buildDiner, buildFacade, buildGasStation, buildMotel, buildPrototype, buildSign, buildTower, LIVERIES } from './procgen'
 
 export interface ModelDef {
   kind: string
@@ -93,6 +93,12 @@ export const MODELS: ModelDef[] = [
   // Roadside architecture and signage.
   { kind: 'diner', file: '', build: buildDiner, heightM: 6.4, yaws: [0], cell: 256 },
   { kind: 'block', file: '', build: () => buildBlock(15, 14, 0x9aa4ae), heightM: 15, yaws: [0], cell: 192 },
+  { kind: 'facade1', file: '', build: () => buildFacade(8, 3, 0xc8b8a0, 0xb03a3a, false), heightM: 14.4, yaws: [0], cell: 192 },
+  { kind: 'facade2', file: '', build: () => buildFacade(7, 4, 0x9aa6b4, 0x2a6a9a, false), heightM: 17.8, yaws: [0], cell: 192 },
+  { kind: 'facade3', file: '', build: () => buildFacade(8.5, 2, 0xd8c0a8, 0x3a8a4a, false), heightM: 11, yaws: [0], cell: 160 },
+  { kind: 'facade4', file: '', build: () => buildFacade(7.5, 5, 0xb8a090, 0xc08a2a, false), heightM: 21.2, yaws: [0], cell: 224 },
+  { kind: 'facadeLit1', file: '', build: () => buildFacade(8, 4, 0x4a4a5a, 0xff5fd2, true), heightM: 17.8, yaws: [0], cell: 192 },
+  { kind: 'facadeLit2', file: '', build: () => buildFacade(7, 3, 0x3a3e4e, 0x25e8ff, true), heightM: 14.4, yaws: [0], cell: 192 },
   { kind: 'block2', file: '', build: () => buildBlock(11, 12, 0xb08a70), heightM: 11, yaws: [0], cell: 192 },
   { kind: 'motel', file: '', build: buildMotel, heightM: 7.6, yaws: [0], cell: 256 },
   { kind: 'gas', file: '', build: buildGasStation, heightM: 4.6, yaws: [0], cell: 256 },

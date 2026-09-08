@@ -17,6 +17,10 @@ export let FOG_RETRO = 0.0052
 export let LANE_WIDTH = 0.28
 /** Metres of beach between the shoulder and the water on shoreline segments. */
 export let BEACH_WIDTH = 9
+/** Tunnels: half-width of the bore (m), ceiling height (m), and how dark it is inside without headlights. */
+export let TUNNEL_HALF_WIDTH = 13.5
+export let TUNNEL_HEIGHT = 7.5
+export let TUNNEL_DARK = 0.42
 /** Banked curves: terraces on the outer side, each this wide (m) and this much higher (m at bank 1). */
 export let BANK_TIER_W = 7
 export let BANK_TIER_H = 2.6
@@ -100,6 +104,9 @@ export const RENDER_TUNE: TuneSection = {
     tune('FOG_RETRO', () => FOG_RETRO, (v) => (FOG_RETRO = v)),
     tune('LANE_WIDTH', () => LANE_WIDTH, (v) => (LANE_WIDTH = v)),
     tune('BEACH_WIDTH', () => BEACH_WIDTH, (v) => (BEACH_WIDTH = v), [2, 40], 1),
+    tune('TUNNEL_HALF_WIDTH', () => TUNNEL_HALF_WIDTH, (v) => (TUNNEL_HALF_WIDTH = v), [9, 30], 0.5),
+    tune('TUNNEL_HEIGHT', () => TUNNEL_HEIGHT, (v) => (TUNNEL_HEIGHT = v), [4, 16], 0.5),
+    tune('TUNNEL_DARK', () => TUNNEL_DARK, (v) => (TUNNEL_DARK = v), [0.1, 1], 0.02),
     tune('BANK_TIER_W', () => BANK_TIER_W, (v) => (BANK_TIER_W = v), [2, 20], 0.5),
     tune('BANK_TIER_H', () => BANK_TIER_H, (v) => (BANK_TIER_H = v), [0, 8], 0.1),
     tune('BANK_TIER_COUNT', () => BANK_TIER_COUNT, (v) => (BANK_TIER_COUNT = v), [1, 6], 1),

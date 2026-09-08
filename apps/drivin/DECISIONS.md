@@ -93,3 +93,4 @@ Roads follow the landscape point by point; only pad pieces (loop, corkscrew, tun
 
 ## Banks join like tunnels (2026-09-08)
 Bank pieces bake at full roll; the ramp in/out (first/last quarter) and the centreline lift (so the inner edge stays at grade) are applied when the lane is baked, and only against unbanked neighbours — a bank meeting a bank stays fully banked through the joint with matching heights. Spline links between two banked connectors carry the roll across (read back from the neighbours' end frames and blended end to end), lifted the same way, so an oval of banks and links is one continuous embankment.
+Only banks leaning the same way (in driving direction) run through a joint; a left bank into a right bank eases to flat over the last/first quarter of each, and a link between opposite banks blends its roll through zero.

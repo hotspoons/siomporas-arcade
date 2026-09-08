@@ -63,3 +63,6 @@ Only the deck tilts (shoulders, rumble, tarmac) as one plane pivoting on the inn
 
 ## Gearbox option (2026-09-08)
 Two speeds either way. MANUAL shifts LO/HI on the gear key; AUTOMATIC shifts for you (up past `AUTO_UP` of the LO limit, down below `AUTO_DOWN`, pulls away in LO) and gives up `AUTO_TOP_FACTOR` of top speed so manual stays worth learning. The tacho and engine note follow the real two-speed box (`hud.rpm`), not a fake four-gear sweep; the turbo dial is gone (Group 6 cars weren't turbocharged).
+
+## Night lighting (2026-09-08)
+Rad Mobile's headlights lit strips of road toward the horizon; ours do the same. At night every row sits at one ambient (no per-row distance gradient — that made converging dark wedges beside the road), and with the lights on two beam strips are painted on the tarmac per carriageway, fading with `HEADLIGHT_REACH`; lane markings brighten inside the beams. Sprites and traffic still pick up the beam by distance.

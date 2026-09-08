@@ -307,12 +307,23 @@ export class Track {
       const len = Math.hypot(rx, rz) || 1
       return Math.asin(Math.max(-1, Math.min(1, (f.up.x * rx + f.up.z * rz) / len)))
     }
+    // Which way a banked lane leans in its driving direction (+1 right edge low, -1 left edge low); links look
+    // through to the bank beyond them.
+    const leanOf = (l: Lane | undefined, through: 'prev' | 'next'): number => {
+      if (!l) return 0
+      if (l.pieceIndex >= data.pieces.length) return leanOf(l[through][0], through)
+      if (!defAt(l.pieceIndex).banked) return 0
+      return l.reversed ? -1 : 1
+    }
     for (const lane of this.lanes) {
       if (lane.pieceIndex >= data.pieces.length) continue
       const def = defAt(lane.pieceIndex)
       if (!def.banked) continue
-      const rampIn = !lane.prev.some((p) => isBanked(p) || (p.pieceIndex >= data.pieces.length && isBanked(p.prev[0])))
-      const rampOut = !lane.next.some((n) => isBanked(n) || (n.pieceIndex >= data.pieces.length && isBanked(n.next[0])))
+      // Run straight through a joint only into a bank leaning the same way; a left bank into a right
+      // bank eases out to flat and back in, so the road never flips on its side at the seam.
+      const lean = lane.reversed ? -1 : 1
+      const rampIn = !lane.prev.some((p) => leanOf(p, 'prev') === lean)
+      const rampOut = !lane.next.some((n) => leanOf(n, 'next') === lean)
       if (!rampIn || !rampOut) lane.table = bakeLane(def, placedAt(lane.pieceIndex), lane.laneIndex, lane.reversed, this.heights ? (x, z) => sampleHeight(this.heights, data.size, x, z) : null, rampIn, rampOut)
     }
     for (const lane of this.lanes) {

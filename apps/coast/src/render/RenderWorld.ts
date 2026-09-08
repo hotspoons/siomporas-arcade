@@ -312,7 +312,11 @@ export class RenderWorld {
       this.road.setTilt(x1, s1, this.rowTilt[n], x2, s2, this.rowTilt[n + 1])
       // Inside a tunnel it is night whatever the sky says: headlights or a dim bore, lit strips on the ceiling.
       const inTunnel = seg.tunnel
-      this.road.setDim(inTunnel ? (curr.lightsOn ? Math.max(TUNNEL_DARK, this.brightAt(zRel) * 0.9 + 0.1) : TUNNEL_DARK) : night ? this.brightAt(zRel) : 1)
+      // Night: everything sits at one dark ambient (no distance wedges); the headlights paint two lit strips
+      // on the tarmac below, Rad Mobile style, so the light is on the road ahead, not smeared over the scene.
+      const ambientDim = inTunnel ? (curr.lightsOn ? Math.max(TUNNEL_DARK, 0.5) : TUNNEL_DARK) : night ? NIGHT_AMBIENT * (curr.lightsOn ? 1 : LIGHTS_OFF_AMBIENT) : 1
+      const beam = (night || inTunnel) && curr.lightsOn ? Math.exp(-Math.max(0, zRel) / HEADLIGHT_REACH) : 0
+      this.road.setDim(ambientDim)
       const grassCol = inTunnel ? 0x2a2a30 : band ? pal.grassA : pal.grassB
       if (this.rowTilt[n] !== 0 || this.rowTilt[n + 1] !== 0) {
         // Banked deck: the ground is drawn as two flat strips outside the deck. A single full-width quad
@@ -332,7 +336,7 @@ export class RenderWorld {
         if ((base + n) % 5 === 0) {
           this.road.setDim(1)
           this.road.quad(x1, y1 + (ch - 0.2) * s1, 1.2 * s1, x2, y2 + (ch - 0.2) * s2, 1.2 * s2, 0xfff2c0, fog * 0.5)
-          this.road.setDim(inTunnel ? (curr.lightsOn ? Math.max(TUNNEL_DARK, this.brightAt(zRel) * 0.9 + 0.1) : TUNNEL_DARK) : 1)
+          this.road.setDim(ambientDim)
         }
         if (seg.portal) {
           // The entrance face: a wall of hillside with the bore cut out of it.
@@ -398,7 +402,13 @@ export class RenderWorld {
         this.road.quad(cx1, y1, w1 + (RUMBLE_WIDTH + SHOULDER_WIDTH) * s1, cx2, y2, w2 + (RUMBLE_WIDTH + SHOULDER_WIDTH) * s2, pal.shoulder, fog)
         this.road.quad(cx1, y1, w1 + RUMBLE_WIDTH * s1, cx2, y2, w2 + RUMBLE_WIDTH * s2, band ? pal.rumbleA : pal.rumbleB, fog)
         this.road.quad(cx1, y1, w1, cx2, y2, w2, band ? pal.roadA : pal.roadB, fog)
-        // Solid edge lines, dashed lane dividers.
+        if (beam > 0.04) {
+          // Headlight strips: one per lamp, converging on the horizon, fading with reach.
+          const lit = shade(band ? pal.roadA : pal.roadB, 1.25 + 0.25 * beam)
+          this.road.setDim(Math.min(1, ambientDim + (0.72 - ambientDim) * beam))
+          for (const e of [-1, 1]) this.road.quad(cx1 + e * 0.45 * w1, y1, 0.34 * w1, cx2 + e * 0.45 * w2, y2, 0.34 * w2, lit, fog)
+        }
+        // Solid edge lines, dashed lane dividers (bright inside the beams).
         for (const e of [-1, 1]) this.road.quad(cx1 + e * (w1 - LANE_WIDTH * s1 * 1.5), y1, LANE_WIDTH * s1 * 0.8, cx2 + e * (w2 - LANE_WIDTH * s2 * 1.5), y2, LANE_WIDTH * s2 * 0.8, pal.lane, fog)
         if (band) {
           for (let l = 1; l < lanes; l++) {
@@ -414,6 +424,7 @@ export class RenderWorld {
           this.road.quad(jx1, y1 + 0.45 * s1, 0.36 * s1, jx2, y2 + 0.45 * s2, 0.36 * s2, 0xd4d2ca, fog)
           this.road.quad(jx1, y1 + 0.85 * s1, 0.3 * s1, jx2, y2 + 0.85 * s2, 0.3 * s2, 0xe8801a, fog)
         }
+        this.road.setDim(ambientDim)
         if (rails && seg.fork < 0) {
           // Guardrail: a thin bright band standing RAIL_HEIGHT above the shoulder edge, with a dark post every other segment.
           for (const e of [-1, 1]) {

@@ -11,6 +11,7 @@ import {
   PIECE_BY_TYPE,
   rotateLocal,
   applyMirror,
+  canShareCell,
   portPlacement,
   rotatedSize,
   sideOffset,
@@ -121,14 +122,17 @@ export class Track {
       const size = rotatedSize(def, p.rot)
       for (let dx = 0; dx < size.w; dx++)
         for (let dz = 0; dz < size.h; dz++) {
-          // Footprints may share a cell at different levels (a bridge over a road); the same level is a clash.
+          // Footprints may share a cell at different levels (a bridge over a road), and a road may cross
+          // water on the same level (that is a bridge span); anything else on one cell is a clash.
           const k = cellKey(p.x + dx, p.z + dz) * 8 + p.level
-          if (occupancy.has(k)) {
-            this.errors.push(`${def.label} at (${p.x}, ${p.z}) overlaps ${PIECE_BY_TYPE[data.pieces[occupancy.get(k)!].type]?.label ?? 'a piece'} at cell (${p.x + dx}, ${p.z + dz})`)
+          const held = occupancy.get(k)
+          if (held !== undefined && !canShareCell(def, PIECE_BY_TYPE[data.pieces[held].type])) {
+            this.errors.push(`${def.label} at (${p.x}, ${p.z}) overlaps ${PIECE_BY_TYPE[data.pieces[held].type]?.label ?? 'a piece'} at cell (${p.x + dx}, ${p.z + dz})`)
             this.errorPieces.add(i)
-            this.errorPieces.add(occupancy.get(k)!)
+            this.errorPieces.add(held)
           }
-          occupancy.set(k, i)
+          // Water never hides a road: keep the road as the cell's owner so a later piece still clashes with it.
+          if (held === undefined || !def.decor) occupancy.set(k, i)
         }
       if (def.decor) {
         this.decor.push(p)

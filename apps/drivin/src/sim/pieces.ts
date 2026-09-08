@@ -60,6 +60,8 @@ export interface PieceDef {
   desc: string
   /** Show a start/finish line. */
   isStart?: boolean
+  /** Kept for saved tracks but not offered in the palette. */
+  hidden?: boolean
   /** Scenery: no lanes or ports, just something on the ground (see decor.ts for what it blocks). */
   decor?: 'water' | 'trees' | 'building' | 'gas'
   /** Banked road: roll ramps in/out only against unbanked neighbours and the centreline lifts so the inner edge stays at grade. */
@@ -145,8 +147,8 @@ export const PIECES: PieceDef[] = [
   },
   {
     type: 'ramp',
-    label: 'Ramp up',
-    desc: "Climbs one level over a cell. Use it to get up to a bridge or an elevated straight.",
+    label: 'Ramp',
+    desc: "Climbs one level over a cell — rotate it to face the other way and it is the way back down. The arrows show which end is high.",
     w: 1,
     h: 1,
     ports: [
@@ -159,7 +161,8 @@ export const PIECES: PieceDef[] = [
   },
   {
     type: 'rampDown',
-    label: 'Ramp down',
+    label: 'Ramp down (old)',
+    hidden: true,
     desc: "Drops one level over a cell — the way back down.",
     w: 1,
     h: 1,
@@ -533,6 +536,15 @@ export function rotatePortCell(def: PieceDef, rot: number, cx: number, cz: numbe
     default:
       return { cx: cz, cz: def.w - 1 - cx }
   }
+}
+
+/**
+ * Whether two pieces may share a cell on the same level. Only a road and water may: that is a bridge,
+ * and the renderer builds the span from it. Everything else is a clash.
+ */
+export function canShareCell(a: PieceDef, b: PieceDef): boolean {
+  const water = (d: PieceDef) => d.decor === 'water'
+  return (water(a) && !b.decor) || (water(b) && !a.decor)
 }
 
 /** N ↔ S: the side swap for a piece mirrored across its direction of travel. */

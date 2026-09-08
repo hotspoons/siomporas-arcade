@@ -44,7 +44,9 @@ export class Scenery {
         case 'water': {
           const w = new Mesh(new PlaneGeometry(size.w * CELL, size.h * CELL), this.water)
           w.rotation.x = -Math.PI / 2
-          w.position.set(cx, y - 0.35, cz)
+          // A shade above grade: the flat ground plane and the heightfield both sit within a few
+          // centimetres of it, and water below them simply disappears.
+          w.position.set(cx, y + 0.03, cz)
           this.add(w)
           break
         }

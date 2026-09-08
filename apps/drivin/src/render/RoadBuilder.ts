@@ -1,7 +1,9 @@
 import { buildStartGantry } from './StartGantry'
 import { PIECE_BY_TYPE } from '../sim/pieces'
 // Turns baked lanes into meshes: a ribbon with raised curbs for roads, a ring
-// tube around the road for tunnels, and pillars under anything elevated.
+// tube around the road for tunnels, pillars under anything elevated, and a
+// bridge span (parapets, deck edge, piers into the water) wherever a road
+// crosses water — no authoring needed, it follows from the water pieces.
 // Built once per track; nothing here runs per frame.
 
 import { BoxGeometry, BufferAttribute, BufferGeometry, Group, InstancedMesh, Matrix4, Mesh, MeshStandardMaterial, ShaderMaterial, Vector3 } from 'three'
@@ -13,6 +15,10 @@ import { smoothstep } from '@apex/engine/math/scalar'
 import { PILLAR_SIDE, PILLAR_SPACING } from '../sim/Tuning'
 
 const STEP = 2
+/** Bridge spans: sampling step along the lane, parapet height and how far the deck skirt hangs below the tarmac. */
+const BRIDGE_STEP = 4
+const PARAPET_HEIGHT = 0.95
+const DECK_THICKNESS = 0.7
 
 export class RoadBuilder {
   readonly root = new Group()
@@ -25,6 +31,8 @@ export class RoadBuilder {
 
   private readonly material: ShaderMaterial
   private readonly pillarMaterial: MeshStandardMaterial
+  private readonly parapetMaterial = new MeshStandardMaterial({ color: 0xd8dce4, roughness: 0.75, flatShading: true })
+  private readonly deckMaterial = new MeshStandardMaterial({ color: 0x8a8f9a, roughness: 0.85, flatShading: true, side: 2 })
 
   constructor(material: ShaderMaterial, pillarMaterial: MeshStandardMaterial) {
     this.material = material
@@ -49,6 +57,7 @@ export class RoadBuilder {
       this.root.add(mesh)
       this.meshes.push(mesh)
       this.pillarsFor(lane, pillarMatrices, track)
+      this.bridgesFor(lane, track)
       if (lane.profile === 'tube') {
         // Tubes still get their road surface.
         const road = new Mesh(this.ribbon(lane), this.material)
@@ -197,6 +206,85 @@ export class RoadBuilder {
     g.setAttribute('position', new BufferAttribute(pos, 3))
     g.setAttribute('normal', new BufferAttribute(nor, 3))
     g.setAttribute('aRoad', new BufferAttribute(road, 4))
+    g.setIndex(idx)
+    return g
+  }
+
+  /**
+   * Bridges: any run of a lane whose road surface is over water becomes a span — a parapet along each
+   * edge and a deck skirt under the tarmac, with the run extended a little onto dry land so the ends
+   * sit on the bank. Supports come from the usual elevated-road pillars, so a road at water level
+   * reads as a causeway and one up on a level gets piers standing in the water.
+   */
+  private bridgesFor(lane: Lane, track: Track): void {
+    const t = lane.table
+    const f = this.frame
+    // Where is the deck over water? Sample the centreline and both edges.
+    const over: boolean[] = []
+    const rings = Math.max(2, Math.ceil(t.length / BRIDGE_STEP) + 1)
+    for (let r = 0; r < rings; r++) {
+      t.frameAt(Math.min(t.length, r * BRIDGE_STEP), f)
+      let wet = track.isWater(f.pos.x, f.pos.z)
+      for (const side of [-1, 1]) {
+        this.v.copy(f.pos).addScaled(f.right, side * ROAD_HALF_WIDTH)
+        wet = wet || track.isWater(this.v.x, this.v.z)
+      }
+      over.push(wet)
+    }
+    if (!over.some(Boolean)) return
+    // Contiguous runs, each grown by one sample so the ends land on the bank.
+    const spans: [number, number][] = []
+    for (let r = 0; r < rings; r++) {
+      if (!over[r]) continue
+      const start = r
+      while (r + 1 < rings && over[r + 1]) r++
+      spans.push([Math.max(0, start - 1), Math.min(rings - 1, r + 1)])
+    }
+    const g = new Group()
+    for (const [r0, r1] of spans) {
+      const s0 = r0 * BRIDGE_STEP
+      const s1 = Math.min(t.length, r1 * BRIDGE_STEP)
+      if (s1 - s0 < BRIDGE_STEP) continue
+      g.add(new Mesh(this.parapetRibbon(t, s0, s1, ROAD_HALF_WIDTH + CURB_WIDTH * 0.5, PARAPET_HEIGHT), this.parapetMaterial))
+      g.add(new Mesh(this.parapetRibbon(t, s0, s1, -(ROAD_HALF_WIDTH + CURB_WIDTH * 0.5), PARAPET_HEIGHT), this.parapetMaterial))
+      // Deck skirt: the same ribbon hung below the tarmac, so the span reads as a slab from the side.
+      g.add(new Mesh(this.parapetRibbon(t, s0, s1, ROAD_HALF_WIDTH + CURB_WIDTH, -DECK_THICKNESS), this.deckMaterial))
+      g.add(new Mesh(this.parapetRibbon(t, s0, s1, -(ROAD_HALF_WIDTH + CURB_WIDTH), -DECK_THICKNESS), this.deckMaterial))
+    }
+    if (!g.children.length) return
+    this.root.add(g)
+    this.extras.push(g)
+  }
+
+  /** A vertical strip along the lane at a lateral offset: up `height` from the road (or down, when negative). */
+  private parapetRibbon(t: Lane['table'], s0: number, s1: number, lateral: number, height: number): BufferGeometry {
+    const f = this.frame
+    const rings = Math.max(2, Math.ceil((s1 - s0) / BRIDGE_STEP) + 1)
+    const pos = new Float32Array(rings * 2 * 3)
+    const nor = new Float32Array(rings * 2 * 3)
+    const idx: number[] = []
+    for (let r = 0; r < rings; r++) {
+      const s = Math.min(s1, s0 + (r * (s1 - s0)) / (rings - 1))
+      t.frameAt(s, f)
+      for (let k = 0; k < 2; k++) {
+        const i = r * 2 + k
+        this.v.copy(f.pos).addScaled(f.right, lateral).addScaled(f.up, k === 0 ? 0.06 : height)
+        pos[i * 3] = this.v.x
+        pos[i * 3 + 1] = this.v.y
+        pos[i * 3 + 2] = this.v.z
+        nor[i * 3] = f.right.x * Math.sign(lateral)
+        nor[i * 3 + 1] = f.right.y * Math.sign(lateral)
+        nor[i * 3 + 2] = f.right.z * Math.sign(lateral)
+      }
+      if (r > 0) {
+        const a = (r - 1) * 2
+        idx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3)
+        this.triangles += 2
+      }
+    }
+    const g = new BufferGeometry()
+    g.setAttribute('position', new BufferAttribute(pos, 3))
+    g.setAttribute('normal', new BufferAttribute(nor, 3))
     g.setIndex(idx)
     return g
   }

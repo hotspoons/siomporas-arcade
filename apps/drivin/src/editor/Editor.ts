@@ -16,7 +16,7 @@
 //   click a red connector, then another   a smooth spline road links them; click the link to select it,
 //   , / .            tighter / wider curve   B camber on/off   ⌥-click or Delete unlinks
 
-import { PIECES, PIECE_BY_TYPE, applyMirror, makePathPoint, opposite, portPlacement, rotateLocal, rotatedSize, sideOffset, type PieceDef } from '../sim/pieces'
+import { PIECES, PIECE_BY_TYPE, applyMirror, canShareCell, makePathPoint, opposite, portPlacement, rotateLocal, rotatedSize, sideOffset, type PieceDef } from '../sim/pieces'
 import { CELL } from '../sim/Tuning'
 import { Track, portStatus, type PlacedPiece, type TrackData } from '../sim/Track'
 import type { TrackStore } from '../app/TrackStore'
@@ -270,7 +270,7 @@ export class Editor {
       const h = document.createElement('h3')
       h.textContent = g.toUpperCase()
       this.palette.appendChild(h)
-      for (const def of PIECES.filter((p) => p.group === g)) {
+      for (const def of PIECES.filter((p) => p.group === g && !p.hidden)) {
         const b = document.createElement('button')
         b.className = 'piece' + (def.type === this.selectedType ? ' selected' : '')
         b.dataset.type = def.type
@@ -1284,7 +1284,8 @@ export class Editor {
       if (level !== undefined && p.level !== level) continue
       const size = rotatedSize(PIECE_BY_TYPE[p.type], p.rot)
       if (x >= p.x && x < p.x + size.w && z >= p.z && z < p.z + size.h) {
-        if (best < 0 || p.level > this.data.pieces[best].level) best = i
+        const b = best < 0 ? null : this.data.pieces[best]
+        if (!b || p.level > b.level || (p.level === b.level && Boolean(b.type && PIECE_BY_TYPE[b.type].decor) && !PIECE_BY_TYPE[p.type].decor)) best = i
       }
     }
     return best
@@ -1292,24 +1293,37 @@ export class Editor {
 
   /** Whether a piece fits: inside the grid and clear of other pieces on the same level (bridges may cross). */
   private fits(type: string, rot: number, x: number, z: number, level: number, ignore: Set<number> = new Set()): boolean {
-    const size = rotatedSize(PIECE_BY_TYPE[type], rot)
+    const def = PIECE_BY_TYPE[type]
+    const size = rotatedSize(def, rot)
     if (x < 0 || z < 0 || x + size.w > this.data.size || z + size.h > this.data.size) return false
     for (let dx = 0; dx < size.w; dx++)
       for (let dz = 0; dz < size.h; dz++) {
-        const i = this.pieceAt(x + dx, z + dz, level)
-        if (i !== -1 && !ignore.has(i)) return false
+        for (const i of this.piecesAt(x + dx, z + dz, level)) {
+          if (ignore.has(i)) continue
+          if (!canShareCell(def, PIECE_BY_TYPE[this.data.pieces[i].type])) return false
+        }
       }
     return true
   }
 
+  /** Every piece covering a cell (optionally on one level). */
+  private piecesAt(x: number, z: number, level?: number): number[] {
+    const out: number[] = []
+    this.data.pieces.forEach((p, i) => {
+      if (level !== undefined && p.level !== level) return
+      const size = rotatedSize(PIECE_BY_TYPE[p.type], p.rot)
+      if (x >= p.x && x < p.x + size.w && z >= p.z && z < p.z + size.h) out.push(i)
+    })
+    return out
+  }
+
   private overlapping(type: string, rot: number, x: number, z: number, level: number): number[] {
-    const size = rotatedSize(PIECE_BY_TYPE[type], rot)
+    const def = PIECE_BY_TYPE[type]
+    const size = rotatedSize(def, rot)
     const out = new Set<number>()
     for (let dx = 0; dx < size.w; dx++)
-      for (let dz = 0; dz < size.h; dz++) {
-        const i = this.pieceAt(x + dx, z + dz, level)
-        if (i !== -1) out.add(i)
-      }
+      for (let dz = 0; dz < size.h; dz++)
+        for (const i of this.piecesAt(x + dx, z + dz, level)) if (!canShareCell(def, PIECE_BY_TYPE[this.data.pieces[i].type])) out.add(i)
     return [...out]
   }
 
@@ -1645,6 +1659,24 @@ export class Editor {
         c.fillStyle = LEVEL_TINT[Math.min(6, p.level)]
         c.font = `${Math.max(10, cell * 0.28)}px "VT323", ui-monospace, monospace`
         c.fillText(`L${p.level}`, a.x + 4, a.y + cell * 0.32)
+      }
+      // A piece that changes level (a ramp) shows which end is high and which is low.
+      const lo = def.ports.reduce((m, port) => Math.min(m, port.dLevel), 0)
+      const hi = def.ports.reduce((m, port) => Math.max(m, port.dLevel), 0)
+      if (hi > lo && cell >= 18) {
+        for (const port of def.ports) {
+          const pp = portPlacement(def, p, port)
+          const o = sideOffset(pp.side)
+          const q = this.toPx(p.x + pp.cx + 0.5 + o.dx * 0.32, p.z + pp.cz + 0.5 + o.dz * 0.32)
+          const up = port.dLevel === hi
+          c.fillStyle = up ? '#5cff8a' : '#ffc857'
+          c.font = `${Math.max(12, cell * 0.34)}px "VT323", ui-monospace, monospace`
+          c.textAlign = 'center'
+          c.textBaseline = 'middle'
+          c.fillText(up ? '▲' : '▼', q.x, q.y)
+          c.textAlign = 'left'
+          c.textBaseline = 'alphabetic'
+        }
       }
       // The piece's name along the bottom of its footprint, once you are zoomed right in on it.
       if (cell >= LABEL_MIN_SCALE) {

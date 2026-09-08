@@ -127,8 +127,10 @@ export class AudioWorld {
     const ctx = this.ctx
     if (!ctx) return
     const now = ctx.currentTime
+    // Four virtual gears; at vmax the top gear pins at the limiter instead of wrapping into a phantom fifth.
+    const g = Math.min(3.999, (snap.speed / snap.maxSpeed) * 4)
     const r = snap.speed / snap.maxSpeed
-    const hz = 60 + ((r * 4) % 1) * 140 + Math.floor(r * 4) * 20
+    const hz = 60 + (g % 1) * 140 + Math.floor(g) * 20
     for (const o of this.engineOscs) o.frequency.setTargetAtTime(hz, now, 0.05)
     this.engineFilter.frequency.setTargetAtTime(500 + r * 2200 + (snap.hud.turboActive ? 1500 : 0), now, 0.08)
     this.screechGain.gain.setTargetAtTime(sliding ? 0.2 : 0, now, 0.05)
@@ -277,6 +279,10 @@ export class AudioWorld {
       case 'bump':
         this.thud(200, 80, 0.2, 0.6)
         this.burst(0.15, 0.4, 1500)
+        break
+      case 'land':
+        this.thud(160, 60, 0.25, Math.min(1, 0.3 + e.a / 30))
+        this.burst(0.2, 0.3, 1200)
         break
       case 'checkpoint':
         for (let i = 0; i < 3; i++) setTimeout(() => this.ctx && this.blip(660 * Math.pow(2, i / 6), 0.25, 0.3, 'triangle'), i * 100)

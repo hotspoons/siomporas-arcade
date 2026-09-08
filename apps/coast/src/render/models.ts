@@ -18,6 +18,38 @@ export interface ModelDef {
   fit?: number
 }
 
+/**
+ * Smallest square texture the shelf packer fits the whole manifest into, mirroring
+ * SpriteAtlas' order (big cells first). Adding views to a model grows the atlas instead
+ * of silently overflowing it.
+ */
+export function atlasSizeFor(defs: ModelDef[]): number {
+  const cells = defs.flatMap((d) => d.yaws.map(() => d.cell)).sort((a, b) => b - a)
+  for (const size of [1024, 2048, 4096, 8192]) {
+    let x = 0
+    let y = 0
+    let h = 0
+    let fits = true
+    for (const c of cells) {
+      if (x + c > size) {
+        x = 0
+        y += h
+        h = 0
+      }
+      if (y + c > size) {
+        fits = false
+        break
+      }
+      x += c
+      h = Math.max(h, c)
+    }
+    if (fits) return size
+  }
+  return 8192
+}
+
+/** Hero views: fine steps for steering, coarse ones all the way round for the crash spin. */
+export const HERO_YAWS = [0, 12, 24, 38, 60, 90, 120, 150, 180, -12, -24, -38, -60, -90, -120, -150]
 const N = (kind: string, file: string, heightM: number, cell = 128): ModelDef => ({ kind, file: `assets/nature/${file}.glb`, heightM, yaws: [0], cell })
 const P = (kind: string, file: string, heightM: number, cell = 128): ModelDef => ({ kind, file: `assets/props/${file}.glb`, heightM, yaws: [0], cell })
 const C = (kind: string, file: string): ModelDef => ({ kind, file: `assets/cars/${file}.glb`, heightM: 1.5, yaws: [0, 20, -20, 90, -90, 180], cell: 128 })
@@ -51,8 +83,8 @@ export const MODELS: ModelDef[] = [
   P('pitsOffice', 'pitsOffice', 6, 256),
   P('gantry', 'overheadLights', 8.5, 256),
   // Hero prototypes, one per livery; the chase view picks the selected one.
-  ...Object.entries(LIVERIES).map(([id, l]): ModelDef => ({ kind: `hero_${id}`, file: '', build: () => buildPrototype(l), heightM: 1.1, yaws: [0, 12, 24, 38, -12, -24, -38], cell: 160 })),
-  { kind: 'formula', file: 'assets/cars/race.glb', heightM: 1.1, yaws: [0, 12, 24, 38, -12, -24, -38], cell: 160 },
+  ...Object.entries(LIVERIES).map(([id, l]): ModelDef => ({ kind: `hero_${id}`, file: '', build: () => buildPrototype(l), heightM: 1.1, yaws: HERO_YAWS, cell: 160 })),
+  { kind: 'formula', file: 'assets/cars/race.glb', heightM: 1.1, yaws: HERO_YAWS, cell: 160 },
   // Roadside architecture and signage.
   { kind: 'diner', file: '', build: buildDiner, heightM: 6.4, yaws: [0], cell: 256 },
   { kind: 'motel', file: '', build: buildMotel, heightM: 7.6, yaws: [0], cell: 256 },
@@ -75,3 +107,6 @@ export const MODELS: ModelDef[] = [
 
 /** Width in road-halves is derived from the baked aspect; these are height metres for the sim's hit tests elsewhere. */
 export const MODEL_BY_KIND: Record<string, ModelDef> = Object.fromEntries(MODELS.map((m) => [m.kind, m]))
+
+/** Atlas texture size for the current manifest (see atlasSizeFor). */
+export const ATLAS_SIZE = atlasSizeFor(MODELS)

@@ -397,8 +397,9 @@ export const STAGES: StageDesc[] = [
 
 export const STAGE_BY_ID: Record<string, StageDesc> = Object.fromEntries(STAGES.map((s) => [s.id, s]))
 
-/** Stages in the longest run from the start (every route is the same length by construction). */
-export const ROUTE_LENGTH: number = (function depth(id: string): number {
+/** Stages in the longest run from `id` to the finish (every route from a stage is the same length by construction). */
+export function routeLength(id: string): number {
   const nxt = STAGE_BY_ID[id].next
-  return 1 + (nxt.length ? Math.max(...nxt.map(depth)) : 0)
-})('A')
+  return 1 + (nxt.length ? Math.max(...nxt.map(routeLength)) : 0)
+}
+export const ROUTE_LENGTH: number = routeLength('A')

@@ -144,6 +144,10 @@ export class AudioWorld {
       case 'curb':
         this.noiseBurst(0.04, 0.25, 500)
         break
+      case 'bump':
+        this.thud(110, 40, 0.2, Math.min(1, 0.3 + e.a / 30))
+        this.noiseBurst(Math.min(0.6, 0.1 + e.a / 40), 0.2, 900)
+        break
       case 'lap':
         this.blip(659, 0.2, 0.3, 'triangle')
         setTimeout(() => this.ctx && this.blip(988, 0.3, 0.3, 'triangle'), 110)

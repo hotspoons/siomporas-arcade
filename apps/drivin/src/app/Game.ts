@@ -406,6 +406,10 @@ export class Game implements LoopClient {
         hp.rumble(0.05, 0.45, 50)
         hp.mobile(8)
         break
+      case 'bump':
+        hp.rumble(Math.min(1, e.a / 30), 0.6, 180)
+        hp.mobile(35)
+        break
       case 'offroad':
         hp.rumble(0.3, 0.5, 150)
         hp.mobile(25)

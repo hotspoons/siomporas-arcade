@@ -15,6 +15,8 @@ export interface SettingsData {
   /** Hero livery id (see procgen LIVERIES) or 'formula'. */
   car: string
   station: number
+  /** Stage id to begin the run on (STAGES). */
+  startStage: string
   units: 'kmh' | 'mph'
   access: { reducedMotion: boolean; hudScale: number }
   haptics: number
@@ -34,6 +36,7 @@ export const DEFAULT_SETTINGS: SettingsData = {
   view: 'chase',
   car: 'rosso',
   station: 0,
+  startStage: 'A',
   units: 'kmh',
   access: { reducedMotion: false, hudScale: 1 },
   haptics: 1,

@@ -6,7 +6,7 @@
 // whether the surface exists there (gaps).
 
 import { smoothstep } from '@apex/engine/math/scalar'
-import { CELL, CORK_RADIUS, LEVEL_H, LOOP_RADIUS, LOOP_SHIFT } from './Tuning'
+import { CELL, CORK_RADIUS, LEVEL_H, LOOP_RADIUS, LOOP_SHIFT, ROAD_HALF_WIDTH } from './Tuning'
 
 export type Side = 'N' | 'E' | 'S' | 'W'
 
@@ -98,8 +98,11 @@ function bankedArc(r: number, bank: number): LaneDef {
     path: (t, o) => {
       base.path(t, o)
       // Bank in over the first quarter, out over the last; the arc turns right (toward +z), so up leans right and the outer (left) edge rises.
+      // The centreline lifts with the bank so the inner (right) edge stays at grass level: you can drive onto
+      // the berm anywhere along it, and the outer edge becomes a wall the grass-side collision respects.
       const ramp = smoothstep(0, 0.25, t) * (1 - smoothstep(0.75, 1, t))
       o.roll = bank * ramp
+      o.y += Math.sin(o.roll) * ROAD_HALF_WIDTH
     },
   }
 }

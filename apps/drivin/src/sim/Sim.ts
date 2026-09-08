@@ -156,6 +156,9 @@ export class Sim {
         case 'curb':
           this.events.push('curb', car.pos)
           break
+        case 'bump':
+          this.events.push('bump', car.pos, Math.abs(car.speed))
+          break
         default:
           break
       }
@@ -163,7 +166,8 @@ export class Sim {
       // and every required segment you skipped costs SEGMENT_PENALTY.
       if (car.mode === 'track' && car.lane) this.visited.add(car.lane.id)
       if (car.mode === 'track' && car.lane && car.lane !== this.prevLane) {
-        if (car.lane.isStart && car.lane === this.track.startLane) {
+        // Crossing the line forwards; reversing onto the start piece from the far end doesn't count.
+        if (car.lane.isStart && car.lane === this.track.startLane && car.speed > 0 && car.s < car.lane.table.length * 0.5) {
           if (this.lapArmed) {
             let missed = 0
             for (const r of this.required) if (!this.visited.has(r.id) && r !== car.lane) missed++

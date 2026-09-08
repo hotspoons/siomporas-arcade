@@ -7,7 +7,7 @@ import { EventQueue } from './Events'
 import type { InputFrame } from './InputFrame'
 import { Stage, type StageDesc, type Theme } from './Road'
 import { Snapshot, type RunPhase } from './Snapshot'
-import { ROUTE_LENGTH, STAGE_BY_ID, THEMES } from './Stages'
+import { routeLength, STAGE_BY_ID, THEMES } from './Stages'
 import * as T from './Tuning'
 
 export const TRAFFIC_KINDS = ['sedan', 'sedanSports', 'suv', 'van', 'truck', 'taxi', 'police', 'delivery'] as const
@@ -55,14 +55,22 @@ export class Sim {
   wreck = false
   wipersOn = false
   lightsOn = false
+  /** Airborne over a crest: height above the road and vertical speed. */
+  airborne = false
+  airY = 0
+  private vy = 0
+  private slopePrev = 0
+  private segPrev = -1
   theme!: Theme
+  readonly startId: string
   private readonly cars: Car[] = []
   private readonly crossers: Car[] = []
   private readonly seed: number
   private stageDesc!: StageDesc
 
-  constructor(seed: number) {
+  constructor(seed: number, startId = 'A') {
     this.seed = seed
+    this.startId = STAGE_BY_ID[startId] ? startId : 'A'
     this.rng = new Rng(seed)
     for (let i = 0; i < T.TRAFFIC_COUNT; i++) this.cars.push({ z: 0, x: 0, speed: 0, kind: 0, lane: 0, passed: false, dir: 1, side: 1, crossZ: 0 })
     for (let i = 0; i < T.CROSSER_COUNT; i++) this.crossers.push({ z: -1e9, x: 9, speed: 0, kind: 0, lane: 0, passed: true, dir: 0, side: 1, crossZ: 0 })
@@ -92,8 +100,11 @@ export class Sim {
     this.wreck = false
     this.wipersOn = false
     this.lightsOn = false
+    this.airborne = false
+    this.airY = 0
+    this.vy = 0
     this.events.clear()
-    this.loadStage('A')
+    this.loadStage(this.startId)
   }
 
   private loadStage(id: string): void {
@@ -103,6 +114,11 @@ export class Sim {
     this.stage = new Stage(desc, this.theme, this.seed * 31 + this.route.length * 7 + id.charCodeAt(0))
     this.route.push(id)
     this.z = 0
+    this.airborne = false
+    this.airY = 0
+    this.vy = 0
+    this.segPrev = -1
+    this.slopePrev = 0
     for (const c of this.cars) this.spawnCar(c, this.rng.range(40, T.TRAFFIC_SPAWN_AHEAD * 3) * T.SEG_LENGTH)
     for (const c of this.crossers) this.spawnCrosser(c)
   }
@@ -191,21 +207,31 @@ export class Sim {
     // Longitudinal.
     const max = this.maxSpeed
     const accel = (this.gear === 1 ? T.ACCEL_HI : T.ACCEL_LO) + (this.turboTimer > 0 ? T.TURBO_ACCEL : 0)
-    if (input.throttle > 0) this.speed += accel * input.throttle * (1 - 0.6 * (this.speed / max) ** 2) * dt
+    const air = this.airborne
+    if (air) this.speed -= 1.5 * dt // wheels off the ground: no drive, a little drag
+    else if (input.throttle > 0) this.speed += accel * input.throttle * (1 - 0.6 * (this.speed / max) ** 2) * dt
     else this.speed -= T.COAST_DECEL * dt
-    if (input.brake > 0) this.speed -= T.BRAKE_DECEL * input.brake * dt
+    if (input.brake > 0 && !air) this.speed -= T.BRAKE_DECEL * input.brake * dt
+    // In the fork zone the road splits into two carriageways FORK_SPREAD apart (renderer draws
+    // them at ±fork × FORK_SPREAD); "on the road" means on one of them, and the widening
+    // median nudges you onto whichever side you lean to.
+    const forkC = seg.fork >= 0 ? seg.fork * T.FORK_SPREAD : 0
+    const centre = forkC ? Math.sign(this.x || 1) * forkC : 0
+    if (forkC && Math.abs(this.x) < forkC) this.x = expApproach(this.x, centre, 3 * seg.fork, dt)
     const wasOff = this.offroad
-    this.offroad = Math.abs(this.x) > 1
-    if (this.offroad && this.speed > T.OFFROAD_MAX_SPEED) this.speed -= T.OFFROAD_DECEL * dt
+    this.offroad = Math.abs(this.x - centre) > (forkC ? 1.3 : 1)
+    if (this.offroad && !air && this.speed > T.OFFROAD_MAX_SPEED) this.speed -= T.OFFROAD_DECEL * dt
     if (this.offroad !== wasOff) this.events.push(this.offroad ? 'offroad' : 'onroad')
     this.speed = clamp(this.speed, 0, max)
 
-    // Lateral: steering scales with speed; curves push you outward.
+    // Lateral: steering scales with speed; curves push you outward. Neither applies in the air.
     const sp = this.speed / T.MAX_SPEED_HI
-    this.x += input.steer * T.STEER_RATE * sp * dt
-    // Banked turns carry you round: the banking cancels part of the push.
-    this.x -= seg.curve * sp * sp * T.CENTRIFUGAL * (1 - (this.theme.bank ?? 0) * T.BANK_ASSIST) * dt
-    this.x = clamp(this.x, -2.4, 2.4)
+    if (!air) {
+      this.x += input.steer * T.STEER_RATE * sp * dt
+      // Banked turns carry you round: the banking cancels part of the push.
+      this.x -= seg.curve * sp * sp * T.CENTRIFUGAL * (1 - (this.theme.bank ?? 0) * T.BANK_ASSIST) * dt
+    }
+    this.x = clamp(this.x, -2.4 - forkC, 2.4 + forkC)
     this.steerVisual = expApproach(this.steerVisual, input.steer, 10, dt)
     this.curveAccum += seg.curve * sp * dt * 60
 
@@ -213,6 +239,7 @@ export class Sim {
     const prevZ = this.z
     this.z += this.speed * dt
     this.score += (this.z - prevZ) * T.SCORE_PER_METRE
+    this.tickHills(dt)
 
     // Roadside collisions on the segments we crossed.
     if (this.speed > 2) {
@@ -242,8 +269,8 @@ export class Sim {
       const id = next.length === 2 ? (this.x < 0 ? next[0] : next[1]) : next[0]
       if (next.length === 2) {
         this.events.push('fork', this.x < 0 ? -1 : 1)
-        // Re-centre on the chosen road.
-        this.x = clamp(this.x + (this.x < 0 ? T.FORK_SPREAD / 2 : -T.FORK_SPREAD / 2), -1, 1)
+        // Re-centre on the chosen carriageway (they sit ±FORK_SPREAD from the old centreline).
+        this.x = clamp(this.x + (this.x < 0 ? T.FORK_SPREAD : -T.FORK_SPREAD), -1, 1)
       }
       this.stageIndex++
       this.loadStage(id)
@@ -251,6 +278,40 @@ export class Sim {
       this.checkpointFlash = 2
       this.events.push('checkpoint', this.stageIndex)
     }
+  }
+
+  /**
+   * Crests. The road is piecewise-linear in height; where the slope drops from one
+   * segment to the next the car would need speed² × curvature of downward acceleration
+   * to stay on it. Past AIR_LAUNCH_G gs the wheels leave the ground and you fly a
+   * ballistic arc until the road comes back up under you.
+   */
+  private tickHills(dt: number): void {
+    const seg = this.stage.segmentAt(this.z)
+    const slope = (seg.y1 - seg.y0) / T.SEG_LENGTH
+    // Real road only: the runway and the stage seam are flat by construction and must never launch.
+    const real = !seg.runway && seg.index < this.stage.length - 1
+    if (!this.airborne && real && this.segPrev >= 0 && seg.index !== this.segPrev && this.speed > T.AIR_MIN_SPEED) {
+      const kappa = (slope - this.slopePrev) / T.SEG_LENGTH
+      if (-kappa * this.speed * this.speed > 9.8 * T.AIR_LAUNCH_G) {
+        this.airborne = true
+        this.vy = this.speed * this.slopePrev + T.AIR_KICK
+        this.airY = 0
+        this.events.push('launch', this.speed)
+      }
+    }
+    if (this.airborne) {
+      this.vy -= T.AIR_GRAVITY * dt
+      // Height above the road: our vertical speed against the road's own rise/fall under us.
+      this.airY += (this.vy - slope * this.speed) * dt
+      if (this.airY <= 0) {
+        this.airY = 0
+        this.airborne = false
+        this.events.push('land', Math.max(0, slope * this.speed - this.vy))
+      }
+    }
+    this.segPrev = seg.index
+    this.slopePrev = slope
   }
 
   private crash(wreck: boolean): void {
@@ -287,7 +348,9 @@ export class Sim {
       c.z += c.dir * c.speed * dt
       // Lane discipline with occasional changes (head-on traffic stays on its side).
       if (this.rng.next() < 0.002) c.lane = c.dir < 0 ? [-0.62, -0.25][this.rng.int(2)] : this.theme.oncoming ? [0.25, 0.62][this.rng.int(2)] : [-0.62, -0.2, 0.2, 0.62][this.rng.int(4)]
-      c.x = expApproach(c.x, c.lane, 1.2, dt)
+      // Through the fork zone traffic follows its carriageway out to the side.
+      const fk = this.stage.segmentAt(c.z).fork
+      c.x = expApproach(c.x, fk >= 0 ? Math.sign(c.lane) * fk * T.FORK_SPREAD + c.lane : c.lane, 1.2, dt)
       // Recycle: far behind, or beyond the stage end.
       if (c.z < this.z - T.TRAFFIC_DESPAWN_BEHIND * T.SEG_LENGTH || c.z > stageLen + 200) {
         this.spawnCar(c, this.z + this.rng.range(T.TRAFFIC_SPAWN_MIN, T.TRAFFIC_SPAWN_AHEAD) * T.SEG_LENGTH)
@@ -363,6 +426,7 @@ export class Sim {
     out.wreck = this.phase === 'crashed' && this.wreck
     out.wipersOn = this.wipersOn
     out.lightsOn = this.lightsOn
+    out.airY = this.airY
     out.stageIndex = this.stageIndex
     out.stageId = this.stageDesc.id
     out.curveAccum = this.curveAccum
@@ -373,7 +437,7 @@ export class Sim {
     h.turbo = this.turbo
     h.turboActive = this.turboTimer > 0
     h.stage = this.stageIndex + 1
-    h.stagesTotal = ROUTE_LENGTH
+    h.stagesTotal = routeLength(this.startId)
     h.wipers = this.wipersOn
     h.lights = this.lightsOn
     h.speedKmh = this.speed * 3.6

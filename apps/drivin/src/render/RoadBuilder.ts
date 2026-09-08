@@ -9,7 +9,7 @@ import { Vec3 } from '@apex/engine/math/Vec3'
 import { makeLaneFrame } from '../sim/PathTable'
 import type { Lane, Track } from '../sim/Track'
 import { CURB_WIDTH, ROAD_HALF_WIDTH, TUBE_RADIUS } from '../sim/Tuning'
-import { PILLAR_SPACING } from './RenderTuning'
+import { PILLAR_SIDE, PILLAR_SPACING } from '../sim/Tuning'
 
 const STEP = 2
 
@@ -206,7 +206,7 @@ export class RoadBuilder {
       const h = f.pos.y - 0.4
       // Only under upright, elevated road.
       if (h < 1.5 || f.up.y < 0.7 || !f.surface) continue
-      for (const side of [-3.2, 3.2]) {
+      for (const side of [-PILLAR_SIDE, PILLAR_SIDE]) {
         this.v.copy(f.pos).addScaled(f.right, side)
         p.set(this.v.x, this.v.y - h / 2 - 0.2, this.v.z)
         sc.set(1, h, 1)

@@ -37,7 +37,6 @@ export let HORIZON_ROLL_SHARE = 0.3
 export let RAIN_DROPS_PER_SEC = 26
 export let RAIN_HAZE_PER_SEC = 0.06
 export let WIPER_RATE = 0.9
-export const ATLAS_SIZE = 2048
 export const MAX_SPRITES = 1400
 export const PLAYER_FRAMES = 7
 /** Curve unit: authored curve values are in the classic 2000-unit road scale. */

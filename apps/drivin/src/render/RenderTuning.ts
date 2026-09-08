@@ -20,7 +20,6 @@ export let FOV_AT_TOP_SPEED = 82
 export const ROAD_SEGMENTS_ACROSS = 6
 export const TUBE_SEGMENTS_MODERN = 20
 export const TUBE_SEGMENTS_RETRO = 10
-export const PILLAR_SPACING = 12
 export const MAX_PARTICLES = 512
 
 /** Live-tunable knobs for the tuning panel (F6). Values persist per browser; Copy JSON to ship new defaults. */

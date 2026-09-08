@@ -32,6 +32,11 @@ export let ACCEL_HI = 12
 export let ACCEL_LO = 21
 export let BRAKE_DECEL = 34
 export let COAST_DECEL = 5
+/** Airborne over crests: arcade gravity, the road curvature (× speed²) that lifts the wheels, in gs, and the speed you need. */
+export let AIR_GRAVITY = 34
+export let AIR_LAUNCH_G = 1.6
+export let AIR_KICK = 2
+export let AIR_MIN_SPEED = 55
 export let OFFROAD_MAX_SPEED = 26
 export let OFFROAD_DECEL = 40
 /** Steering: road widths per second at max speed, full lock. */
@@ -90,6 +95,10 @@ export const SIM_TUNE: TuneSection = {
     tune('BRAKE_DECEL', () => BRAKE_DECEL, (v) => (BRAKE_DECEL = v)),
     tune('COAST_DECEL', () => COAST_DECEL, (v) => (COAST_DECEL = v)),
     tune('OFFROAD_MAX_SPEED', () => OFFROAD_MAX_SPEED, (v) => (OFFROAD_MAX_SPEED = v)),
+    tune('AIR_GRAVITY', () => AIR_GRAVITY, (v) => (AIR_GRAVITY = v), [4, 40], 0.5, 'airborne gravity'),
+    tune('AIR_LAUNCH_G', () => AIR_LAUNCH_G, (v) => (AIR_LAUNCH_G = v), [0.3, 5], 0.1, 'crest curvature × v² needed to lift off, in g'),
+    tune('AIR_MIN_SPEED', () => AIR_MIN_SPEED, (v) => (AIR_MIN_SPEED = v), [0, 120], 1),
+    tune('AIR_KICK', () => AIR_KICK, (v) => (AIR_KICK = v), [0, 10], 0.5, 'extra upward m/s at take-off'),
     tune('OFFROAD_DECEL', () => OFFROAD_DECEL, (v) => (OFFROAD_DECEL = v)),
     tune('STEER_RATE', () => STEER_RATE, (v) => (STEER_RATE = v)),
     tune('CENTRIFUGAL', () => CENTRIFUGAL, (v) => (CENTRIFUGAL = v)),

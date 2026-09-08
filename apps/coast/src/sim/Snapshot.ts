@@ -18,6 +18,8 @@ export class Snapshot {
   crashT = 0
   /** The current crash is a full wreck (head-on / side impact): long roll. */
   wreck = false
+  /** Height of the car above the road while airborne over a crest (metres); 0 on the ground. */
+  airY = 0
   /** Manual switches. */
   wipersOn = false
   lightsOn = false

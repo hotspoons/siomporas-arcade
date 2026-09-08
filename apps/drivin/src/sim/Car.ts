@@ -16,6 +16,9 @@ import {
   AIR_GLITCH_ACCEL,
   AIR_GLITCH_THRESHOLD,
   ALIGN_RATE,
+  BUMP_BOUNCE,
+  PILLAR_SIDE,
+  PILLAR_SPACING,
   CAR_RIDE,
   CRASH_IMPACT_SPEED,
   CURB_SLOW,
@@ -41,7 +44,7 @@ import {
 } from './Tuning'
 import type { CarMode } from './Snapshot'
 
-export type CarEvent = 'none' | 'launch' | 'land' | 'crash' | 'offroad' | 'onroad' | 'lost' | 'curb'
+export type CarEvent = 'none' | 'launch' | 'land' | 'crash' | 'offroad' | 'onroad' | 'lost' | 'curb' | 'bump'
 
 
 export class Car {
@@ -260,9 +263,41 @@ export class Car {
       this.s = over
       // Lateral offset is relative to each lane's own centreline; splits diverge smoothly.
     } else if (this.s < 0) {
-      this.s = 0
-      this.speed = Math.max(0, this.speed)
+      // Reversing off the start of a lane: back into whichever lane feeds it.
+      const prev = this.choosePrev(lane)
+      if (!prev) {
+        this.s = 0
+        this.speed = Math.max(0, this.speed)
+        return
+      }
+      if (lane.profile === 'tube' && prev.profile !== 'tube') {
+        this.lateral = clamp(this.lateral, -ROAD_HALF_WIDTH * 0.9, ROAD_HALF_WIDTH * 0.9)
+        this.lateralVel *= 0.3
+      }
+      this.s += prev.table.length
+      this.lane = prev
     }
+  }
+
+  private choosePrev(lane: Lane): Lane | null {
+    if (lane.prev.length === 0) return null
+    if (lane.prev.length === 1) return lane.prev[0]
+    // A join seen backwards is a split: compare where each feeder sits a little way back.
+    let best: Lane | null = null
+    let bestScore = -Infinity
+    const f0 = lane.table.frameAt(0, this.frame)
+    for (const p of lane.prev) {
+      p.table.frameAt(Math.max(0, p.table.length - 20), this.scratch)
+      this.vA.copy(this.scratch.pos).sub(f0.pos)
+      const side = this.vA.dot(f0.right)
+      const intent = this.lateral - this.heading * 8
+      const score = -Math.abs(side - intent)
+      if (score > bestScore) {
+        bestScore = score
+        best = p
+      }
+    }
+    return best
   }
 
   private chooseNext(lane: Lane): Lane | null {
@@ -415,18 +450,32 @@ export class Car {
     // forward = (cos yaw, 0, sin yaw); right = forward × up = +z at yaw 0, so steering right increases yaw.
     this.yaw += input.steer * STEER_RATE * GRASS_STEER * authority * dt * Math.sign(v || 1)
     this.forward.set(Math.cos(this.yaw), 0, Math.sin(this.yaw))
+    const px = this.pos.x
+    const pz = this.pos.z
     this.pos.addScaled(this.forward, v * dt)
     this.pos.y = CAR_RIDE
     this.up.set(0, 1, 0)
     this.slip = 0
-    // Back onto a ground-level road?
     const lanes = this.track.lanesNear(this.pos, this.nearby)
+    // Structures in the way: elevated slabs at bumper height, banked berms, tunnel skins, pillars.
+    if (this.hitsStructure(lanes)) {
+      this.pos.x = px
+      this.pos.z = pz
+      if (Math.abs(v) > CRASH_IMPACT_SPEED) {
+        this.event = 'crash'
+        return
+      }
+      this.speed = -v * BUMP_BOUNCE
+      this.event = 'bump'
+      return
+    }
+    // Back onto a ground-level road (or up a berm's low edge)?
     for (const lane of lanes) {
       if (lane.baseY > 0) continue
       lane.table.project(this.pos, this.scratch, this.hit)
       const h = this.hit
       if (!this.scratch.surface || h.over > 0.5 || Math.abs(h.x) > ROAD_HALF_WIDTH || Math.abs(h.h) > 1.2) continue
-      if (this.scratch.up.y < 0.9) continue
+      if (this.scratch.up.y < 0.75) continue
       // Only rejoin a lane you are roughly driving along, never one you're crossing.
       if (this.forward.dot(this.scratch.tan) * Math.sign(v || 1) < 0.5) continue
       this.vel.copy(this.forward).scale(v)
@@ -434,6 +483,49 @@ export class Car {
       this.event = 'onroad'
       return
     }
+  }
+
+  /**
+   * Grass-mode collision against track structures near the car. The car is a box from the
+   * grass to ~1.2 m; a lane's slab blocks it when the surface passes through that band, a
+   * banked or tilted lane is solid below its surface (an embankment), a tunnel's skin blocks
+   * from outside, and elevated road stands on pillars.
+   */
+  private hitsStructure(lanes: Lane[]): boolean {
+    for (const lane of lanes) {
+      lane.table.project(this.pos, this.scratch, this.hit)
+      const h = this.hit
+      const f = this.scratch
+      if (!f.surface || h.over > 0.5) continue
+      const ax = Math.abs(h.x)
+      if (lane.profile === 'tube') {
+        // Outside the half-pipe skin (the road itself is entered through the mouth, via rejoin).
+        if (ax > ROAD_HALF_WIDTH && ax < TUBE_RADIUS + 1 && Math.abs(h.h) < 4) return true
+        continue
+      }
+      if (ax <= ROAD_HALF_WIDTH + CURB_WIDTH) {
+        // Surface above the bumper line: a slab you'd hit, or a berm you'd drive into.
+        const tilted = f.up.y < 0.95
+        if (h.h < 0.3 && (tilted ? h.h > -6 : h.h > -1.4)) return true
+        // A slab far above is a bridge — drive under it, minding the pillars below.
+      }
+      const clearance = f.pos.y - 0.4
+      if (clearance >= 1.5 && f.up.y >= 0.7 && ax < PILLAR_SIDE + 3) {
+        const k = Math.round((h.s - PILLAR_SPACING / 2) / PILLAR_SPACING)
+        const sP = PILLAR_SPACING / 2 + k * PILLAR_SPACING
+        if (sP > 0 && sP < lane.table.length) {
+          lane.table.frameAt(sP, f)
+          if (f.pos.y - 0.4 >= 1.5 && f.up.y >= 0.7 && f.surface) {
+            for (const side of [-PILLAR_SIDE, PILLAR_SIDE]) {
+              const dx = this.pos.x - (f.pos.x + f.right.x * side)
+              const dz = this.pos.z - (f.pos.z + f.right.z * side)
+              if (dx * dx + dz * dz < 1.6 * 1.6) return true
+            }
+          }
+        }
+      }
+    }
+    return false
   }
 
   private updatePose(): void {

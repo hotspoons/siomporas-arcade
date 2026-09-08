@@ -4,8 +4,8 @@
 
 import { NearestFilter, LinearFilter, SRGBColorSpace, Texture, type WebGLRenderer, type WebGLRenderTarget } from 'three'
 import type { SpriteKind } from './SpriteAtlas'
-import { ATLAS_SIZE } from './RenderTuning'
-import { MODELS } from './models'
+
+import { ATLAS_SIZE, MODELS } from './models'
 import { PROCGEN_VERSION } from './procgen'
 
 const DB = 'apex-coast'

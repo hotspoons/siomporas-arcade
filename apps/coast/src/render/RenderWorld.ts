@@ -13,6 +13,22 @@ import type { Snapshot } from '../sim/Snapshot'
 import { TRAFFIC_KINDS } from '../sim/Sim'
 import { THEMES } from '../sim/Stages'
 import { BAND_SEGMENTS, DRAW_SEGMENTS, FORK_SPREAD, ROAD_HALF_WIDTH, SEG_LENGTH } from '../sim/Tuning'
+import { HERO_YAWS } from './models'
+
+/** Closest baked hero view to a yaw in (-180, 180]. */
+function nearestYaw(yaw: number): number {
+  let best = 0
+  let bestD = Infinity
+  for (const y of HERO_YAWS) {
+    let d = Math.abs(y - yaw)
+    if (d > 180) d = 360 - d
+    if (d < bestD) {
+      bestD = d
+      best = y
+    }
+  }
+  return best
+}
 import { Background } from './Background'
 import { Cockpit } from './Cockpit'
 import { Projection } from './Projection'
@@ -179,7 +195,8 @@ export class RenderWorld {
     const camZ = z - view.playerAhead
     // Ride the ground directly under the camera: any lag here lets the near row
     // climb above the bottom edge on hills (the flashing band).
-    this.camY = stage.heightAt(camZ) + view.camHeight
+    // Airborne: the cockpit rides the whole jump; the chase camera lifts only part way so the car visibly leaves the road.
+    this.camY = stage.heightAt(camZ) + view.camHeight + curr.airY * (view.drawPlayer ? 0.4 : 1)
     this.bounce = speed > 5 ? Math.sin(this.time * 28) * 0.05 * (speed / 84) : 0
     const camY = this.camY + this.bounce
     const camX = x * ROAD_HALF_WIDTH
@@ -342,12 +359,16 @@ export class RenderWorld {
     // Player car.
     if (view.drawPlayer) {
       const scale = P.scaleAt(view.playerAhead)
-      const py = P.screenY(groundY - camY, scale)
-      let steerFrame = Math.round(curr.steer * 3)
-      // A wreck rolls the car over and over (frames cycle); a tumble just wobbles.
-      if (curr.crashT > 0) steerFrame = curr.wreck ? (Math.floor(curr.crashT * 26) % 7) - 3 : Math.round(Math.sin(curr.crashT * 40) * 3)
+      const py = P.screenY(groundY + curr.airY - camY, scale)
+      const steerFrame = Math.round(curr.steer * 3)
       // Baked yaw > 0 shows the car's right flank (nose left); steering right must show the left flank.
-      const yaw = steerFrame === 0 ? 0 : steerFrame > 0 ? -[12, 24, 38][steerFrame - 1] : [12, 24, 38][-steerFrame - 1]
+      let yaw = steerFrame === 0 ? 0 : steerFrame > 0 ? -[12, 24, 38][steerFrame - 1] : [12, 24, 38][-steerFrame - 1]
+      if (curr.crashT > 0) {
+        // A crash spins the car a full turn on the spot; a wreck spins it through the air, then it lies still.
+        const t = curr.crashT
+        const turn = curr.wreck ? (t < 0.7 ? Math.min(1, t / 0.4) * 1.5 : 0) : t
+        yaw = nearestYaw(((turn * 360 + 180) % 360) - 180)
+      }
       const frame = this.atlas.frame(this.heroKind, yaw)
       let hop = curr.crashT > 0 ? Math.abs(Math.sin(curr.crashT * 20)) * 12 : 0
       let squash = 1
@@ -361,7 +382,6 @@ export class RenderWorld {
           hop = 0
           squash = 0.62
         }
-        if (t >= 0.7) steerFrame = 0
       }
       if (frame) this.sprites.add(W / 2 + curr.steer * 2, py + hop, frame.heightM * scale * squash, frame, 0, 1, -1e9)
     }

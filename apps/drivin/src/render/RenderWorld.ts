@@ -128,6 +128,10 @@ export class RenderWorld {
       case 'curb':
         this.particles.burst(p, 3, 4, 0.4, 0.9, 0.9, 0.8, 1.5)
         break
+      case 'bump':
+        this.particles.burst(p, 18, 8, 1.2, 0.6, 0.6, 0.55, 3)
+        this.rig.addShake(Math.min(1, e.a / 40))
+        break
       case 'offroad':
         this.particles.burst(p, 20, 6, 0.9, 0.3, 0.45, 0.2, 3)
         break

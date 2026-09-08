@@ -4,7 +4,7 @@ import { STATIONS } from '../audio/AudioWorld'
 import { LIVERIES } from '../render/procgen'
 import { ACTIONS, ACTION_LABELS, type Action } from '../input/bindings'
 import type { Snapshot } from '../sim/Snapshot'
-import { STAGE_BY_ID } from '../sim/Stages'
+import { STAGE_BY_ID, STAGES } from '../sim/Stages'
 import type { Game } from './Game'
 
 export function buildMenus(game: Game) {
@@ -17,6 +17,14 @@ export function buildMenus(game: Game) {
     subtitle: 'Coast to coast · seven stages · one clock',
     items: [
       { kind: 'action', label: 'START', onSelect: () => game.startRun() },
+      {
+        kind: 'choice',
+        label: 'START AT',
+        hint: 'Begin the run on any stage',
+        options: STAGES.map((st) => `${st.id} · ${st.name}`),
+        get: () => Math.max(0, STAGES.findIndex((st) => st.id === (s().startStage ?? 'A'))),
+        set: (i) => set((d) => (d.startStage = STAGES[i].id)),
+      },
       {
         kind: 'choice',
         label: 'RADIO',

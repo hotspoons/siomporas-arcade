@@ -59,6 +59,8 @@ export interface Lane {
   isStart: boolean
   /** Lanes reachable from the end of this one (0 = dead end, 2 = split). */
   next: Lane[]
+  /** Lanes whose end feeds the start of this one (for reversing; 2 at a join). */
+  prev: Lane[]
   /** Piece base height (metres) for pillar rendering. */
   baseY: number
 }
@@ -137,6 +139,7 @@ export class Track {
         profile: def.profile,
         isStart: Boolean(def.isStart),
         next: [],
+        prev: [],
         baseY: p.level * LEVEL_H,
       }
       this.lanes.push(lane)
@@ -185,6 +188,7 @@ export class Track {
       })
     }
     this.startLane = start
+    for (const lane of this.lanes) for (const n of lane.next) if (!n.prev.includes(lane)) n.prev.push(lane)
     // Closed if following first branches returns to the start lane.
     let closed = false
     let loopLength = 0

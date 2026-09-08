@@ -32,6 +32,11 @@ export const GRASS_LIMIT = 60
 export let GRAVITY = 9.81
 /** Height of the car's reference point above the surface. */
 export const CAR_RIDE = 0.35
+/** Pillars under elevated road, one pair every this many metres (sim collides with them, renderer draws them). */
+export const PILLAR_SPACING = 12
+export const PILLAR_SIDE = 3.2
+/** Grass-mode collisions: how much of your speed you keep (reversed) after hitting a structure. */
+export const BUMP_BOUNCE = 0.25
 export const CAR_HALF_LENGTH = 2.2
 export const CAR_HALF_WIDTH = 0.95
 /** Max heading offset from the path tangent (rad) while gripping. */

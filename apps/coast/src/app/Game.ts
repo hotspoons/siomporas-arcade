@@ -114,7 +114,7 @@ export class Game implements LoopClient {
 
   startRun(): void {
     this.seed = (Date.now() & 0xffff) || 1
-    this.sim = new Sim(this.seed)
+    this.sim = new Sim(this.seed, this.settings.data.startStage)
     this.syncStage()
     this.sim.tick(0, this.held, this.curr)
     this.sim.tick(0, this.held, this.prev)
@@ -131,7 +131,7 @@ export class Game implements LoopClient {
     this.container.classList.add('is-driving')
     this.input.suppressGameplay = false
     this.loop.paused = false
-    this.hud.showMessage(STAGE_BY_ID['A'].name.toUpperCase(), 1.8, 'good')
+    this.hud.showMessage(STAGE_BY_ID[this.sim.startId].name.toUpperCase(), 1.8, 'good')
     this.audio.resume()
     this.audio.setRunning(true)
   }
@@ -349,6 +349,13 @@ export class Game implements LoopClient {
         break
       case 'bump':
         hp.rumble(0.6, 0.4, 150)
+        hp.mobile(30)
+        break
+      case 'launch':
+        hp.rumble(0.15, 0.2, 60)
+        break
+      case 'land':
+        hp.rumble(Math.min(1, e.a / 25), 0.4, 160)
         hp.mobile(30)
         break
       case 'checkpoint': {

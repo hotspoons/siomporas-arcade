@@ -4,8 +4,8 @@
 
 import { AmbientLight, Box3, BoxGeometry, Color, Vector4, DirectionalLight, Group, HemisphereLight, Mesh, MeshStandardMaterial, Object3D, OrthographicCamera, Scene, SRGBColorSpace, Vector3, WebGLRenderTarget, type Texture, type WebGLRenderer, NearestFilter, LinearFilter, RGBAFormat } from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
-import { ATLAS_SIZE } from './RenderTuning'
-import { MODELS, type ModelDef } from './models'
+
+import { ATLAS_SIZE, MODELS, type ModelDef } from './models'
 import { applyAtlasFilters, atlasKey, loadCachedAtlas, saveCachedAtlas } from './AtlasCache'
 
 export interface SpriteFrame {

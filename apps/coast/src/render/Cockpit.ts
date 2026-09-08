@@ -151,7 +151,7 @@ export class Cockpit {
     c.closePath()
     c.fill()
     gauge(c, W / 2 - 200, H - 60, 62, snap.speed / snap.maxSpeed, String(Math.round(snap.hud.speedKmh)), 'KM/H', snap.speed / snap.maxSpeed > 0.92)
-    gauge(c, W / 2, H - 78, 78, ((snap.speed / snap.maxSpeed) * 4) % 1 * 0.8 + 0.15, snap.hud.gear === 1 ? 'HI' : 'LO', 'RPM', snap.hud.turboActive)
+    gauge(c, W / 2, H - 78, 78, (Math.min(3.999, (snap.speed / snap.maxSpeed) * 4) % 1) * 0.8 + 0.15, snap.hud.gear === 1 ? 'HI' : 'LO', 'RPM', snap.hud.turboActive)
     gauge(c, W / 2 + 200, H - 60, 62, snap.hud.turbo, snap.hud.turboActive ? 'GO' : '', 'TURBO', snap.hud.turboActive)
     // Telltales on the dash: the two switches you have to remember to flick.
     telltale(c, W / 2 - 300, H - 40, snap.lightsOn, '#5cff8a', 'LIGHTS')

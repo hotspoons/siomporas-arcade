@@ -7,7 +7,7 @@ import { EventQueue } from './Events'
 import type { InputFrame } from './InputFrame'
 import { Snapshot, type RunPhase } from './Snapshot'
 import type { Lane, Track } from './Track'
-import { AIR_REV_RATE, CRASH_TIME_PENALTY, RESUME_ADVANCE, REPLAY_PLAY_SECONDS, REPLAY_SECONDS, SEGMENT_PENALTY, SIM_HZ } from './Tuning'
+import { AIR_REV_RATE, CELL, CRASH_TIME_PENALTY, RESUME_ADVANCE, REPLAY_PLAY_SECONDS, REPLAY_SECONDS, SEGMENT_PENALTY, SIM_HZ } from './Tuning'
 
 const REPLAY_FRAMES = REPLAY_SECONDS * SIM_HZ
 
@@ -125,6 +125,10 @@ export class Sim {
     if (start) {
       this.car.placeOn(start, 4)
       this.prevLane = start
+    } else {
+      // No start piece (an unfinished track in the editor's preview): stand on the grass in the middle.
+      this.car.placeOnGrass((this.track.data.size * CELL) / 2, (this.track.data.size * CELL) / 2)
+      this.prevLane = null
     }
   }
 

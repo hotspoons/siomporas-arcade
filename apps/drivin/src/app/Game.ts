@@ -135,7 +135,9 @@ export class Game implements LoopClient {
 
   /** Load the selected track for the title orbit. */
   previewTrack(): void {
-    const data = this.tracks.get(this.settings.data.trackId) ?? BUILTIN_TRACKS[0]
+    // A saved track that no longer builds (no start, errors) previews the first built-in instead of taking the title down.
+    const saved = this.tracks.get(this.settings.data.trackId)
+    const data = saved && new Track(saved).startLane ? saved : BUILTIN_TRACKS[0]
     this.loadTrack(data)
   }
 

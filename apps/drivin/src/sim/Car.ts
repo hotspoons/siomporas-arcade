@@ -145,6 +145,21 @@ export class Car {
     this.updatePose()
   }
 
+  /** Stand on the grass at a world point, facing +x. */
+  placeOnGrass(x: number, z: number): void {
+    this.mode = 'ground'
+    this.lane = null
+    this.pos.set(x, this.track.groundHeight(x, z) + CAR_RIDE, z)
+    this.yaw = 0
+    this.forward.set(1, 0, 0)
+    this.up.set(0, 1, 0)
+    this.speed = 0
+    this.vel.set(0, 0, 0)
+    this.onGrass = true
+    this.event = 'none'
+    this.updatePose()
+  }
+
   /** Place on a lane, optionally rolling. */
   placeOn(lane: Lane, s: number, speed = 0): void {
     this.mode = 'track'
@@ -211,7 +226,11 @@ export class Car {
   }
 
   private tickTrack(dt: number, input: InputFrame): void {
-    const lane = this.lane!
+    if (!this.lane) {
+      this.placeOnGrass(this.pos.x, this.pos.z)
+      return
+    }
+    const lane = this.lane
     const f = lane.table.frameAt(this.s, this.frame)
     const spec = this.spec
     // Gravity along the path (loops slow you going up) and along right (banking).

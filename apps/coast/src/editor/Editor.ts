@@ -27,7 +27,7 @@ import { ROAD_HALF_WIDTH, SEG_LENGTH } from '../sim/Tuning'
 import { PALETTES } from '../render/RenderTuning'
 import { builtinAsWorld } from '../world/builtin'
 import { compileTrack, curveToRadius, EASY_RADIUS, MAX_CURVE, MIN_RADIUS, radiusToCurve, type TrackReport } from '../world/compile'
-import { buildPath, handleIn, handleOut, TrackPath, type PathSample } from '../world/path'
+import { buildPath, handleIn, handleOut, MAX_GRADE, NODE_GRADE, STEEP_GRADE, TrackPath, type PathSample } from '../world/path'
 import { PROP_GROUPS, PROP_INFO, sceneDef, sceneGroups } from '../world/scenes'
 import { VIBES, VIBE_FADE, vibeDef, type VibeDef } from '../world/vibes'
 import { checkWorld, emptyTrack, reachable, routeLengthOf, type CoastTrack, type SpanKind, type WorldData } from '../world/types'
@@ -72,6 +72,27 @@ interface DialogButton {
 const IS_MAC = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
 const MOD = IS_MAC ? '⌘' : 'Ctrl'
 const UNDO_DEPTH = 60
+/** Where the in-progress world is parked between keystrokes, in case the tab dies. */
+const DRAFT_KEY = 'apex-coast.editor.draft.v1'
+/** How long after the last edit the draft is written (ms). */
+const DRAFT_DELAY = 700
+
+interface Draft {
+  v: 1
+  worldId: string | null
+  trackId: string
+  world: WorldData
+  at: number
+}
+
+function ago(ms: number): string {
+  const s = Math.max(0, Math.round((Date.now() - ms) / 1000))
+  if (s < 60) return `${s} second${s === 1 ? '' : 's'} ago`
+  const m = Math.round(s / 60)
+  if (m < 60) return `${m} minute${m === 1 ? '' : 's'} ago`
+  const h = Math.round(m / 60)
+  return h < 24 ? `${h} hour${h === 1 ? '' : 's'} ago` : 'a while ago'
+}
 const MIN_SCALE = 0.02
 const MAX_SCALE = 4
 const STRIP_MARGIN = 14
@@ -149,6 +170,10 @@ export class Editor {
 
   private undoStack: string[] = []
   private redoStack: string[] = []
+  /** Edits made since the last Save, and the debounce timer that parks them. */
+  private unsaved = false
+  private draftTimer = 0
+  private draftOffered = false
   private pathCache: { key: string; path: TrackPath } | null = null
   private reportCache: { key: string; report: TrackReport } | null = null
   private hover = { x: 0, z: 0, s: -1, lateral: 0, near: false }
@@ -286,6 +311,11 @@ export class Editor {
       if (e.code === 'Space') this.spaceHeld = false
     })
     window.addEventListener('resize', () => (this.dirty = true))
+    // A reload, a crash or a closed tab must not cost an hour: flush the draft on the way out.
+    window.addEventListener('beforeunload', () => this.writeDraft())
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') this.writeDraft()
+    })
     window.addEventListener('pointerdown', (e) => {
       if (this.menu && !this.menu.contains(e.target as Node)) this.closeMenu()
     })
@@ -302,12 +332,15 @@ export class Editor {
     this.buildPalette()
     this.fit()
     this.dirty = true
+    void this.offerDraft()
   }
 
   hide(): void {
     this.visible = false
     this.closeMenu()
     this.el.classList.add('hidden')
+    // Leaving for a test drive or the menu: park the work now, not in 700 ms.
+    this.writeDraft()
   }
 
   get isVisible(): boolean {
@@ -333,6 +366,8 @@ export class Editor {
     this.redoStack = []
     this.pathCache = null
     this.reportCache = null
+    this.unsaved = false
+    clearTimeout(this.draftTimer)
     this.titleEl.textContent = this.world.name
     this.mode = 'set'
     this.buildPalette()
@@ -379,6 +414,75 @@ export class Editor {
     this.pathCache = null
     this.reportCache = null
     this.dirty = true
+    this.unsaved = true
+    this.queueDraft()
+  }
+
+  // --- the draft ------------------------------------------------------------
+  //
+  // Everything here exists because a browser tab is not a safe place to keep an hour's
+  // work. Every edit parks the whole world in localStorage a beat later, and the editor
+  // offers it back the next time it opens if it is newer than what was saved.
+
+  private queueDraft(): void {
+    clearTimeout(this.draftTimer)
+    this.draftTimer = window.setTimeout(() => this.writeDraft(), DRAFT_DELAY)
+  }
+
+  private writeDraft(): void {
+    clearTimeout(this.draftTimer)
+    if (!this.unsaved) return
+    const draft: Draft = { v: 1, worldId: this.worldId, trackId: this.trackId, world: this.world, at: Date.now() }
+    try {
+      localStorage.setItem(DRAFT_KEY, JSON.stringify(draft))
+    } catch {
+      // A full quota is not worth interrupting the session over; Save still works.
+    }
+  }
+
+  private readDraft(): Draft | null {
+    try {
+      const raw = JSON.parse(localStorage.getItem(DRAFT_KEY) ?? 'null') as Draft | null
+      if (!raw || raw.v !== 1 || !raw.world || !Array.isArray(raw.world.tracks) || !raw.world.tracks.length) return null
+      return raw
+    } catch {
+      return null
+    }
+  }
+
+  private clearDraft(): void {
+    clearTimeout(this.draftTimer)
+    this.unsaved = false
+    try {
+      localStorage.removeItem(DRAFT_KEY)
+    } catch {
+      /* nothing to do */
+    }
+  }
+
+  /** Offer back any edits the last session did not save. Asked once, on first opening. */
+  private async offerDraft(): Promise<void> {
+    if (this.draftOffered) return
+    this.draftOffered = true
+    const draft = this.readDraft()
+    if (!draft) return
+    if (JSON.stringify(draft.world) === JSON.stringify(this.world)) {
+      this.clearDraft()
+      return
+    }
+    const same = draft.worldId && draft.worldId === this.worldId
+    const answer = await this.dialog(`Unsaved edits to “${draft.world.name}” from ${ago(draft.at)}${same ? '' : ' (a different world from the one open now)'}. Pick them up?`, [
+      { label: 'Pick up', value: 'ok', primary: true },
+      { label: 'Discard', value: 'drop', danger: true },
+    ])
+    if (answer === 'ok') {
+      this.setWorld(draft.world, draft.worldId)
+      if (this.world.tracks.some((t) => t.id === draft.trackId)) this.trackId = draft.trackId
+      this.unsaved = true
+      this.buildPalette()
+      this.dirty = true
+      this.flash('Picked up where you left off — Save when you are happy with it')
+    } else this.clearDraft()
   }
 
   private undo(): void {
@@ -541,6 +645,7 @@ export class Editor {
       case 'save':
         this.worldId = this.store.save(this.world, this.worldId ?? undefined)
         this.refreshLoadList()
+        this.clearDraft()
         this.flash(`Saved “${this.world.name}”`)
         break
       case 'save-as': {
@@ -550,6 +655,7 @@ export class Editor {
         this.titleEl.textContent = this.world.name
         this.worldId = this.store.save(this.world)
         this.refreshLoadList()
+        this.clearDraft()
         this.flash(`Saved “${this.world.name}”`)
         break
       }
@@ -708,7 +814,7 @@ export class Editor {
     for (const p of checkWorld(this.world)) lines.push(`${p.level === 'error' ? '<span class="err">✕</span>' : '<span class="warn">!</span>'} ${p.text}`)
     for (const t of this.world.tracks) {
       const r = compileTrack(t, 1).report
-      lines.push(`<b>${t.name}</b> — ${(r.metres / 1000).toFixed(2)} km, ${r.seconds.toFixed(0)} s flat out, ${r.minRadius === Infinity ? 'no corners' : `tightest ${Math.round(r.minRadius)} m`}`)
+      lines.push(`<b>${t.name}</b> — ${(r.metres / 1000).toFixed(2)} km, ${r.seconds.toFixed(0)} s flat out, ${r.minRadius === Infinity ? 'no corners' : `tightest ${Math.round(r.minRadius)} m`}, ${Math.round(r.climb)} m climbed at up to ${Math.round(r.maxGrade * 100)} %`)
       for (const p of r.problems) lines.push(`<span class="warn">!</span> ${p}`)
     }
     const ends = reachable(this.world).filter((t) => !t.next.length)
@@ -1500,8 +1606,7 @@ export class Editor {
         const s = this.sel
         if (this.mode !== 'track' || !s || s.kind !== 'node') break
         this.pushUndo()
-        this.track.nodes[s.i].y += e.code === 'KeyE' ? 4 : -4
-        this.changed()
+        this.setNodeHeight(s.i, this.track.nodes[s.i].y + (e.code === 'KeyE' ? 4 : -4))
         break
       }
       case 'Comma':
@@ -1668,9 +1773,7 @@ export class Editor {
     if (!d) return
     if (d.kind === 'height') {
       const p = this.canvasPoint(e, this.profile)
-      const scale = this.profileScale()
-      this.track.nodes[d.i].y = Math.round((d.y0 - (p.py - d.py) / scale) * 10) / 10
-      this.changed()
+      this.setNodeHeight(d.i, d.y0 - (p.py - d.py) / this.profileScale())
       return
     }
     if (d.kind === 'span') {
@@ -1822,16 +1925,48 @@ export class Editor {
     return 66 + Math.min(2, row) * 14
   }
 
+  /**
+   * The band the profile strip shows, from the road as it will actually be built rather
+   * than from the heights that were asked for — a waypoint dragged into orbit must not
+   * squash the hills you can see into a flat line.
+   */
+  private profileBand(): { lo: number; hi: number } {
+    const ys = this.report().profile
+    let lo = 0
+    let hi = 20
+    for (const y of ys) {
+      lo = Math.min(lo, y)
+      hi = Math.max(hi, y)
+    }
+    return { lo, hi: Math.max(hi, lo + 30) }
+  }
   private profileScale(): number {
-    const nodes = this.track.nodes
-    const lo = Math.min(0, ...nodes.map((n) => n.y))
-    const hi = Math.max(20, ...nodes.map((n) => n.y))
-    return (PROFILE_H - 26) / Math.max(30, hi - lo)
+    const b = this.profileBand()
+    return (PROFILE_H - 26) / (b.hi - b.lo)
   }
   private profileY(y: number): number {
-    const nodes = this.track.nodes
-    const lo = Math.min(0, ...nodes.map((n) => n.y))
-    return PROFILE_H - 13 - (y - lo) * this.profileScale()
+    const b = this.profileBand()
+    return Math.max(4, Math.min(PROFILE_H - 4, PROFILE_H - 13 - (y - b.lo) * this.profileScale()))
+  }
+
+  /**
+   * Set a waypoint's height, held to a gradient the road can actually climb.
+   *
+   * The limit is against its neighbours, so the way to climb higher is to space the
+   * waypoints further apart — which is what the message says, because being stopped
+   * without being told why is the worst version of this.
+   */
+  private setNodeHeight(i: number, y: number): void {
+    const n = this.track.nodes[i]
+    if (!n) return
+    const range = this.path().heightRange(i)
+    const clamped = Math.max(range.lo, Math.min(range.hi, y))
+    n.y = Math.round(clamped * 10) / 10
+    if (Math.abs(clamped - y) > 0.5) {
+      const gap = Math.round(Math.min(...[i - 1, i + 1].filter((j) => j >= 0 && j < this.path().nodeCount).map((j) => Math.abs(this.path().nodeS[j] - this.path().nodeS[i]))))
+      this.flash(`${Math.round(NODE_GRADE * 100)} % is as steep as the road climbs — ${gap} m of road buys ${Math.round(gap * NODE_GRADE)} m of height. Space the waypoints further apart.`)
+    }
+    this.changed()
   }
 
   // --- drawing --------------------------------------------------------------
@@ -1857,6 +1992,8 @@ export class Editor {
     const trackMode = this.mode === 'track'
     this.profile.classList.toggle('hidden', !trackMode)
     this.timeline.classList.toggle('hidden', !trackMode)
+    this.titleEl.textContent = `${this.unsaved ? '• ' : ''}${this.world.name}`
+    this.titleEl.title = this.unsaved ? 'Unsaved edits — parked in this browser, but Save to keep them' : this.world.name
     this.crumbEl.textContent = trackMode ? `${this.track.name}` : `${this.world.tracks.length} tracks · start ${this.nameOf(this.world.start)}`
     if (trackMode) {
       this.drawPlan()
@@ -1884,6 +2021,9 @@ export class Editor {
     const bits = [`${(r.metres / 1000).toFixed(2)} km`, `${r.seconds.toFixed(0)} s flat out`, `${t.nodes.length} waypoints`]
     bits.push(r.minRadius === Infinity ? 'straight' : `tightest ${Math.round(r.minRadius)} m`)
     if (r.clamped) bits.push(`⚠ ${r.clamped} segments too tight`)
+    bits.push(`${Math.round(r.climb)} m climbed, steepest ${Math.round(r.maxGrade * 100)} %`)
+    if (r.waypointsFlattened) bits.push(`⚠ ${r.waypointsFlattened} waypoint${r.waypointsFlattened === 1 ? '' : 's'} too high`)
+    if (r.gradeScale < 1) bits.push(`⚠ hills flattened to ${Math.round(r.gradeScale * 100)} %`)
     bits.push(`${t.scenes.length} scene${t.scenes.length === 1 ? '' : 's'}`, `${t.vibes.length} vibe${t.vibes.length === 1 ? '' : 's'}`)
     if (t.props.length) bits.push(`${t.props.length} props`)
     const s = this.sel
@@ -2311,27 +2451,54 @@ export class Editor {
     c.lineTo(w - STRIP_MARGIN, zeroY)
     c.stroke()
     c.setLineDash([])
-    // The compiled profile, swell and all.
-    const roll = t.roll ?? { amp: 3.2, period: 52 }
-    const real = Math.max(2, Math.round(path.length / SEG_LENGTH))
-    const periods = roll.amp > 0 ? Math.max(1, Math.round(real / Math.max(8, roll.period))) : 0
-    c.strokeStyle = '#5cc8ff'
+    // The road the car will actually drive — swell, end levelling and gradient guarantee
+    // included — coloured by how steep each stretch is: amber past STEEP_GRADE, red at the
+    // limit. Taken straight from the compiler so the strip cannot lie about the game.
+    const ys = this.report().profile
+    const roadAt = (at: number) => ys[Math.max(0, Math.min(ys.length - 1, Math.round(at * (ys.length - 1))))]
+    const steps = Math.min(360, Math.max(60, ys.length - 1))
     c.lineWidth = 2
-    c.beginPath()
-    for (let i = 0; i <= 240; i++) {
-      const at = i / 240
-      const y = path.elevationAt(at * path.length) + (periods ? roll.amp * Math.sin(at * Math.PI * 2 * periods) : 0)
+    let prevPx = this.stripX(0, this.profile)
+    let prevPy = this.profileY(roadAt(0))
+    for (let i = 1; i <= steps; i++) {
+      const at = i / steps
       const px = this.stripX(at, this.profile)
-      const py = this.profileY(y)
-      if (i) c.lineTo(px, py)
-      else c.moveTo(px, py)
+      const py = this.profileY(roadAt(at))
+      const grade = Math.abs(roadAt(at) - roadAt(at - 1 / steps)) / Math.max(0.001, path.length / steps)
+      c.strokeStyle = grade >= MAX_GRADE * 0.95 ? '#ff3b5c' : grade > STEEP_GRADE ? '#ffb03c' : '#5cc8ff'
+      c.beginPath()
+      c.moveTo(prevPx, prevPy)
+      c.lineTo(px, py)
+      c.stroke()
+      prevPx = px
+      prevPy = py
     }
-    c.stroke()
-    // Waypoint handles.
+    // Waypoint handles, drawn where the road ended up. A ring means the height asked for
+    // was steeper than the road climbs and had to be pulled back (only a pasted file can
+    // get here — dragging is held to the limit as you go).
     for (let i = 0; i < t.nodes.length; i++) {
-      const px = this.stripX(path.nodeS[i] / path.length, this.profile)
-      const py = this.profileY(t.nodes[i].y)
+      const at = path.length > 0 ? path.nodeS[i] / path.length : 0
+      const px = this.stripX(at, this.profile)
+      const road = roadAt(at)
+      const py = this.profileY(road)
+      const asked = path.requestedY(i)
       const selected = (this.sel?.kind === 'node' || this.sel?.kind === 'handle') && this.sel.i === i
+      // A ring means this waypoint asked for a climb the road cannot make. It deliberately
+      // does not fire for the uniform flattening, which affects every waypoint equally and
+      // is reported in the status line instead.
+      if (Math.abs(asked - path.nodeY(i)) > 0.5) {
+        c.strokeStyle = '#ff3b5c'
+        c.lineWidth = 1.5
+        c.setLineDash([3, 3])
+        c.beginPath()
+        c.moveTo(px, py)
+        c.lineTo(px, this.profileY(asked))
+        c.stroke()
+        c.setLineDash([])
+        c.beginPath()
+        c.arc(px, py, 7.5, 0, Math.PI * 2)
+        c.stroke()
+      }
       c.fillStyle = selected ? '#ffd45f' : '#ffffff'
       c.beginPath()
       c.arc(px, py, selected ? 5.5 : 4, 0, Math.PI * 2)
@@ -2341,7 +2508,7 @@ export class Editor {
         c.font = '600 10px system-ui, sans-serif'
         c.textAlign = 'center'
         c.textBaseline = 'bottom'
-        c.fillText(`${Math.round(t.nodes[i].y)} m`, px, py - 7)
+        c.fillText(`${Math.round(road)} m`, px, py - 7)
       }
     }
   }

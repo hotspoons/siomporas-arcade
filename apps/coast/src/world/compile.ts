@@ -15,7 +15,7 @@ import { Rng } from '@apex/engine/math/Rng'
 import { blankSegment, Stage, type Segment, type StageDesc, type Theme } from '../sim/Road'
 import { CROSSING_EVERY, FORK_SEGMENTS, RUNWAY_SEGMENTS, SEG_LENGTH } from '../sim/Tuning'
 import { CURVE_UNIT } from '../render/RenderTuning'
-import { buildPath, TrackPath } from './path'
+import { buildPath, MAX_GRADE, NODE_GRADE, scaleToGrade, STEEP_GRADE, TrackPath } from './path'
 import { sceneDef } from './scenes'
 import type { CoastTrack, PropRef, WorldData } from './types'
 
@@ -51,7 +51,21 @@ export interface TrackReport {
   minRadius: number
   /** Segments whose curvature had to be clamped. */
   clamped: number
+  /** Total metres climbed, and the steepest gradient the finished road reaches. */
   climb: number
+  maxGrade: number
+  /** The steepest gradient the waypoints asked for, before anything was held back. */
+  gradeAsked: number
+  /** Waypoints whose height had to be pulled toward their neighbours to stay drivable. */
+  waypointsFlattened: number
+  /** What the finished profile had to be scaled by as a last resort (1 = nothing). */
+  gradeScale: number
+  /**
+   * The finished road's height at every segment boundary — what the car will drive, after
+   * the swell, the levelling and the gradient guarantee. The editor's profile strip draws
+   * this rather than re-deriving it, so the strip cannot disagree with the game.
+   */
+  profile: number[]
   problems: string[]
 }
 
@@ -102,12 +116,39 @@ export function compileTrack(track: CoastTrack, seed: number, path?: TrackPath):
   let minRadius = Infinity
   let climb = 0
 
+  // --- elevation ------------------------------------------------------------
+  // One height per segment boundary, so the profile can be levelled and grade-limited as a
+  // whole before it becomes segments. The swell goes on first: the limit has to govern the
+  // road the car actually drives, not the profile before the ripple was added.
+  const roll = track.roll ?? { amp: 3.2, period: 52 }
+  const periods = roll.amp > 0 ? Math.max(1, Math.round(real / Math.max(8, roll.period))) : 0
+  const ys: number[] = []
+  for (let i = 0; i <= real; i++) ys.push(p.elevationAt(Math.min(p.length, i * SEG_LENGTH)) + (periods ? roll.amp * Math.sin((i / real) * Math.PI * 2 * periods) : 0))
+
+  // Bring the end back to the datum so stages join without a step, over enough road that
+  // the ramp itself is not a cliff — a smoothstep peaks at 1.5× its average gradient, and
+  // it is laid over a profile that may already be using its whole budget, so allow 3×.
+  const level = (target: number) => {
+    const drift = ys[real] - target
+    if (Math.abs(drift) < 0.05) return 0
+    const need = Math.ceil((3 * Math.abs(drift)) / (SEG_LENGTH * MAX_GRADE))
+    const n = Math.max(40, Math.min(Math.floor(real * 0.7), need))
+    for (let k = 0; k <= n; k++) {
+      const t = k / n
+      ys[real - n + k] -= drift * t * t * (3 - 2 * t)
+    }
+    return need
+  }
+  const needed = level(0)
+  const graded = scaleToGrade(ys, SEG_LENGTH)
+  if (needed > real * 0.7) problems.push('the last waypoint sits far off the datum — the run back down to the next stage eats most of the track')
+  if (p.gradeClamped) problems.push(`${p.gradeClamped} waypoint${p.gradeClamped === 1 ? '' : 's'} asked for a ${Math.round(p.worstGrade * 100)} % climb and ${p.gradeClamped === 1 ? 'was' : 'were'} pulled back to ${Math.round(NODE_GRADE * 100)} % — space them further apart to climb higher`)
+  if (graded.factor < 1) problems.push(`the hills asked for a ${Math.round(graded.worst * 100)} % gradient, which is a wall — the whole profile was flattened to ${Math.round(graded.factor * 100)} % of the height you drew`)
+
   // --- geometry -------------------------------------------------------------
   const headings: number[] = []
   for (let i = 0; i <= real; i++) headings.push(p.headingAt(Math.min(p.length, i * SEG_LENGTH)))
-  const roll = track.roll ?? { amp: 3.2, period: 52 }
-  const periods = roll.amp > 0 ? Math.max(1, Math.round(real / Math.max(8, roll.period))) : 0
-  const swell = (i: number) => (periods ? roll.amp * Math.sin((i / real) * Math.PI * 2 * periods) : 0)
+  let maxGrade = 0
   for (let i = 0; i < real; i++) {
     const dHeading = headings[i + 1] - headings[i]
     let curve = (dHeading * SEG_LENGTH) / CURVE_UNIT
@@ -116,28 +157,15 @@ export function compileTrack(track: CoastTrack, seed: number, path?: TrackPath):
       clamped++
     }
     if (Math.abs(dHeading) > 1e-6) minRadius = Math.min(minRadius, SEG_LENGTH / Math.abs(dHeading))
-    const y0 = p.elevationAt(i * SEG_LENGTH) + swell(i)
-    const y1 = p.elevationAt(Math.min(p.length, (i + 1) * SEG_LENGTH)) + swell(i + 1)
-    climb += Math.max(0, y1 - y0)
-    const seg = blankSegment(i, curve, y0, y1, p.bankAt((i + 0.5) * SEG_LENGTH))
+    climb += Math.max(0, ys[i + 1] - ys[i])
+    maxGrade = Math.max(maxGrade, Math.abs(ys[i + 1] - ys[i]) / SEG_LENGTH)
+    const seg = blankSegment(i, curve, ys[i], ys[i + 1], p.bankAt((i + 0.5) * SEG_LENGTH))
     seg.scene = sceneIndexAt(track, (i + 0.5) / real)
     segs.push(seg)
   }
   if (clamped) problems.push(`${clamped} segment${clamped === 1 ? '' : 's'} tighter than ${Math.round(MIN_RADIUS)} m had to be opened out — widen those corners`)
   if (minRadius < EASY_RADIUS) problems.push(`tightest corner is ${Math.round(minRadius)} m radius: you will have to brake for it (${EASY_RADIUS} m+ is flat out)`)
-
-  // Level the last few segments so stages join without a step.
-  const lastY = segs[real - 1].y1
-  if (Math.abs(lastY) > 0.5) {
-    const n = Math.min(40, real)
-    for (let k = 0; k < n; k++) {
-      const t = (k + 1) / n
-      const e = t * t * (3 - 2 * t)
-      const i = real - n + k
-      segs[i].y1 -= lastY * e
-      if (i + 1 < real) segs[i + 1].y0 = segs[i].y1
-    }
-  }
+  if (graded.factor === 1 && !p.gradeClamped && maxGrade > STEEP_GRADE) problems.push(`steepest climb is ${Math.round(maxGrade * 100)} % — steep, but drivable`)
 
   const forks = track.next.length === 2
   segs[0].checkpoint = true
@@ -288,7 +316,7 @@ export function compileTrack(track: CoastTrack, seed: number, path?: TrackPath):
   if (seconds < 30) problems.push(`only ${seconds.toFixed(0)} s flat out — under half a minute the clock never gets going (aim for 45–60 s)`)
   return {
     stage,
-    report: { metres, segments: real, seconds, minRadius: minRadius === Infinity ? Infinity : minRadius, clamped, climb, problems },
+    report: { metres, segments: real, seconds, minRadius: minRadius === Infinity ? Infinity : minRadius, clamped, climb, maxGrade, gradeAsked: Math.max(p.worstGrade, graded.worst), waypointsFlattened: p.gradeClamped, gradeScale: graded.factor, profile: ys, problems },
   }
 }
 

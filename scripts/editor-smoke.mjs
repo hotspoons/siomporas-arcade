@@ -133,6 +133,21 @@ await clickAt(w.tracks[0].nodes[3].x, w.tracks[0].nodes[3].z)
 w = await state()
 check('crossroads placed', w.tracks[0].crossings.length === 1)
 
+// 9a. A waypoint cannot be dragged into a cliff.
+await page.click('.editor .palette .tool span:text-is("Select / move")')
+const tall = await page.evaluate(() => {
+  const ed = window.__apex.game.editor
+  const before = ed.track.nodes[2].y
+  ed.pushUndo()
+  ed.setNodeHeight(2, 5000)
+  return { before, after: ed.track.nodes[2].y, limit: ed.path().heightRange(2).hi, grade: ed.report().maxGrade }
+})
+check('a waypoint cannot be dragged into a cliff', tall.after < tall.limit + 0.2 && tall.after < 500 && tall.grade <= 0.33, JSON.stringify(tall))
+await page.keyboard.down('Control')
+await page.keyboard.press('KeyZ')
+await page.keyboard.up('Control')
+await page.waitForTimeout(80)
+
 // 9. Elevation from the profile strip: drag a waypoint up.
 const pbox = await page.evaluate(() => {
   const r = document.querySelector('.editor canvas.profile').getBoundingClientRect()
@@ -259,6 +274,36 @@ await page.keyboard.up('KeyW')
 const builtin = await page.evaluate(() => ({ world: window.__apex.game.route.worldName, stage: window.__apex.snap.stageId, z: Math.round(window.__apex.snap.z), total: window.__apex.snap.hud.stagesTotal }))
 check('the built-in route still drives', builtin.world === 'Coast to Coast' && builtin.stage === 'A' && builtin.z > 40 && builtin.total === 7, JSON.stringify(builtin))
 await page.screenshot({ path: 'shots/ed-builtin-run.png' })
+
+// 17. Unsaved work survives a reload.
+await page.evaluate(() => {
+  const g = window.__apex.game
+  g.openEditor()
+  g.editor.action('mode-track')
+  g.editor.pushUndo()
+  g.editor.track.name = 'Survived the crash'
+  g.editor.changed()
+})
+await page.waitForTimeout(1200)
+const parked = await page.evaluate(() => Boolean(localStorage.getItem('apex-coast.editor.draft.v1')))
+check('an edit is parked in the browser a beat later', parked)
+
+await page.reload({ waitUntil: 'networkidle' })
+await page.waitForTimeout(2500)
+await page.evaluate(() => window.__apex.game.openEditor())
+await page.waitForTimeout(400)
+const prompt = await page.evaluate(() => document.querySelector('.editor-dialog p')?.textContent ?? '')
+check('the editor offers the unsaved work back after a reload', /Unsaved edits/.test(prompt), prompt.slice(0, 90))
+await page.click('.editor-dialog .buttons button.primary')
+await page.waitForTimeout(400)
+const recovered = await page.evaluate(() => ({ names: window.__apex.game.editor.current.tracks.map((t) => t.name), marked: document.querySelector('.editor [data-title]').textContent }))
+check('and picking it up restores the edit', recovered.names.includes('Survived the crash') && recovered.marked.startsWith('•'), JSON.stringify(recovered))
+
+// 18. Saving clears the draft, so the next open does not nag.
+await page.click('.editor button[data-act="save"]')
+await page.waitForTimeout(300)
+const afterSave = await page.evaluate(() => ({ draft: localStorage.getItem('apex-coast.editor.draft.v1'), title: document.querySelector('.editor [data-title]').textContent }))
+check('saving clears the draft and the unsaved marker', afterSave.draft === null && !afterSave.title.startsWith('•'), JSON.stringify(afterSave))
 
 console.log(logs.length ? `\nCONSOLE:\n${logs.join('\n').slice(0, 3000)}` : '\nno console errors')
 await browser.close()

@@ -118,3 +118,34 @@ builds each stage the normal way, walks its segments integrating the curvature i
 plan-view line, and drops a waypoint every 40 segments — coming out within a few per cent of
 the original length, with its tunnels, shoreline, roadworks and crossings recovered as macro
 elements and its theme flags read back as a vibe.
+
+## Hills the car can climb, and work that survives a crash (2026-09-08)
+**Three gradient numbers, and the relationship between them is the design.** `NODE_GRADE`
+(16 %) is what the editor holds a waypoint to against its neighbours as you drag it — so the
+way to climb higher is to space the waypoints further apart, which is what the message says.
+A cubic through two such waypoints peaks at 1.5× the straight line between them (its tangents
+are clamped to that line in `hermite1d`, which is *why* they are), and the swell every stage
+carries adds about 6 % on top, so `MAX_GRADE` (32 %, about 18°) follows arithmetically and is
+the guarantee the compiler makes about the finished road. `STEEP_GRADE` (14 %) is only a
+remark; the shipped stages top out around 12 % at this scale.
+
+**The compiler scales the profile rather than clamping it.** Clamping point by point was the
+obvious thing and it is wrong: sweeping the constraint along the profile drags the last height
+off the datum, and a stage whose end has moved no longer joins the next one — you get a step at
+the checkpoint and the car launches off it. Scaling toward the datum cannot do that: every
+gradient shrinks by the same factor, the shape survives exactly, and zero stays zero. One
+absurd hill therefore flattens the rest of its track, which is honest and is reported; because
+the editor holds waypoints as you drag them, the scale only ever fires on a pasted file.
+
+**The profile strip draws the compiler's own output**, not a re-derivation of it
+(`TrackReport.profile`), so it cannot disagree with the game about where the road is. It is
+coloured by gradient — amber past `STEEP_GRADE`, red at the limit — and a red ring on a
+waypoint means that waypoint asked for a climb the road cannot make. The ring deliberately
+does not fire for the uniform flattening, which moves every waypoint equally.
+
+**Work in progress is parked in the browser, not held in memory.** Every edit writes the whole
+world to `apex-coast.editor.draft.v1` a beat later, and again on the way out (hiding the
+editor, hiding the tab, unloading the page). Opening the editor offers the draft back if it
+differs from what loaded — once per session, with the age of the edits — and Save clears it.
+The title carries a `•` while there are unsaved edits. A browser tab is not a safe place to
+keep an hour's work, and an editor that loses it on a reload is not one you would trust.

@@ -64,9 +64,22 @@ Started 2026-09-07. Verified in headless SwiftShader Chromium and unit tests onl
   world as it stands, saved or not, and the pause and results screens offer a way
   straight back into the editor.
 - `⑂ Fork built-in` traces the shipped 13-stage route into editable waypoints.
-- Verified headless: 31 unit tests over the path, compiler, vibes, DAG and the
-  traced route, plus `just editor-smoke` — 19 pointer-level checks that build a
-  track, fork it, save it and drive it.
+- Verified headless: 39 unit tests over the path, compiler, vibes, DAG and the
+  traced route, plus `just editor-smoke` — 22 pointer-level checks that build a
+  track, fork it, save it, recover it after a reload and drive it.
+
+## World builder, second pass (2026-09-08)
+- Unsaved edits are parked in localStorage after every change and offered back on the
+  next open ("Unsaved edits to X from 3 minutes ago — pick them up?"); the title shows
+  a `•` until you Save.
+- Hills are held to a gradient the car can climb: waypoints clamp to 16 % against their
+  neighbours as you drag them (with a message saying to space them further apart), and
+  the compiler guarantees 32 % on the finished road by scaling the profile rather than
+  clamping it, so a stage's end never leaves the datum.
+- The profile strip now draws the compiler's own output, coloured by gradient, with a
+  red ring on any waypoint that asked for more climb than the road can make.
+- Menu rows no longer collapse to one word per line under a long value, START AT
+  follows the selected world, and the title menu is wide enough for its hints.
 
 ## Not yet (world builder)
 - Only the two-branch fork the sim understands; no three-way splits.

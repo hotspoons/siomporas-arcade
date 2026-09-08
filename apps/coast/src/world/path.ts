@@ -102,14 +102,94 @@ function hermite1d(xs: readonly number[], vs: readonly number[], x: number): num
   const slope = (a: number, b: number) => (vs[b] - vs[a]) / Math.max(1e-6, xs[b] - xs[a])
   const d0 = i === 0 ? slope(0, 1) : (slope(i - 1, i) + slope(i, i + 1)) / 2
   const d1 = i + 2 >= n ? slope(i, i + 1) : (slope(i, i + 1) + slope(i + 1, i + 2)) / 2
-  // Fritsch–Carlson style limiter: kill tangents at local extrema so humps stay humps.
+  // Fritsch–Carlson style limiter: kill tangents at local extrema so humps stay humps, and
+  // hold them to the secant so the cubic's own gradient never exceeds 1.5× the straight line
+  // between the two points (which is what lets MAX_GRADE follow from NODE_GRADE).
   const sec = slope(i, i + 1)
-  const lim = (d: number) => (sec === 0 ? 0 : Math.sign(d) === Math.sign(sec) ? Math.min(Math.abs(d), 3 * Math.abs(sec)) * Math.sign(sec) : 0)
+  const lim = (d: number) => (sec === 0 ? 0 : Math.sign(d) === Math.sign(sec) ? Math.min(Math.abs(d), Math.abs(sec)) * Math.sign(sec) : 0)
   const m0 = lim(d0) * h
   const m1 = lim(d1) * h
   const t2 = t * t
   const t3 = t2 * t
   return (2 * t3 - 3 * t2 + 1) * vs[i] + (t3 - 2 * t2 + t) * m0 + (-2 * t3 + 3 * t2) * vs[i + 1] + (t3 - t2) * m1
+}
+
+/**
+ * How steep the road is allowed to get, as a rise over run.
+ *
+ * Three related numbers, and the relationship between them is the point:
+ *
+ *  - `NODE_GRADE` is what the editor holds a waypoint to against its neighbours. A
+ *    cubic through waypoints that far apart peaks at 1.5× the straight-line gradient
+ *    between them (its tangents are clamped to that line, see `hermite1d`), and the
+ *    gentle swell every stage carries adds about 6 % on top.
+ *  - `MAX_GRADE` is therefore 1.5 × `NODE_GRADE` + the swell, and it is the guarantee
+ *    the compiler makes about the finished road: no segment is ever steeper.
+ *  - `STEEP_GRADE` is only a remark. The shipped stages top out around 12 % at this
+ *    scale, so anything past 14 % is worth saying out loud.
+ *
+ * 32 % is about 18°, which climbs to a third of the way up the screen over the drawn
+ * distance — dramatic, still legible, and nothing like the wall you get from dragging a
+ * waypoint 500 m into the air.
+ */
+export const MAX_GRADE = 0.32
+export const NODE_GRADE = 0.16
+export const STEEP_GRADE = 0.14
+
+/**
+ * Pull each waypoint height into the cone its neighbours allow, in place, until no
+ * step exceeds `maxGrade`. Sweeping forward then backward converges because every
+ * pass only moves points toward their neighbours. Returns how many moved and the
+ * steepest gradient that was asked for.
+ *
+ * This is for waypoint heights, where the ends are as negotiable as the middle. The
+ * finished road is guaranteed elsewhere — see `scaleToGrade`.
+ */
+export function limitGrade(ys: number[], spacing: number | readonly number[], maxGrade = NODE_GRADE): { clamped: number; worst: number } {
+  const n = ys.length
+  if (n < 2) return { clamped: 0, worst: 0 }
+  const gap = (i: number) => Math.max(0.001, typeof spacing === 'number' ? spacing : spacing[i])
+  let worst = 0
+  for (let i = 1; i < n; i++) worst = Math.max(worst, Math.abs(ys[i] - ys[i - 1]) / gap(i - 1))
+  if (worst <= maxGrade) return { clamped: 0, worst }
+  const moved = new Set<number>()
+  for (let pass = 0; pass < 24; pass++) {
+    let changed = false
+    const sweep = (i: number, j: number) => {
+      const lim = gap(Math.min(i, j)) * maxGrade
+      const y = Math.max(ys[j] - lim, Math.min(ys[j] + lim, ys[i]))
+      if (y !== ys[i]) {
+        ys[i] = y
+        moved.add(i)
+        changed = true
+      }
+    }
+    for (let i = 1; i < n; i++) sweep(i, i - 1)
+    for (let i = n - 2; i >= 0; i--) sweep(i, i + 1)
+    if (!changed) break
+  }
+  return { clamped: moved.size, worst }
+}
+
+/**
+ * Guarantee a gradient by scaling the whole profile toward the datum, in place, and
+ * return the factor applied (1 = nothing to do).
+ *
+ * Clamping point by point was the obvious thing and it is wrong here: sweeping the
+ * constraint along the profile drags the last height off the datum, and a stage whose
+ * end has moved no longer joins the next one — you get a step at the checkpoint and the
+ * car launches off it. Scaling cannot: every gradient shrinks by the same factor, the
+ * shape survives exactly, and zero stays zero. The price is that one absurd hill
+ * flattens the rest of the track with it, which is honest — and the editor holds
+ * waypoints to `NODE_GRADE` as you drag them, so this only ever fires on a pasted file.
+ */
+export function scaleToGrade(ys: number[], spacing: number, maxGrade = MAX_GRADE): { factor: number; worst: number } {
+  let worst = 0
+  for (let i = 1; i < ys.length; i++) worst = Math.max(worst, Math.abs(ys[i] - ys[i - 1]) / Math.max(0.001, spacing))
+  if (worst <= maxGrade || worst === 0) return { factor: 1, worst }
+  const factor = maxGrade / worst
+  for (let i = 0; i < ys.length; i++) ys[i] *= factor
+  return { factor, worst }
 }
 
 const SAMPLE_METRES = 2
@@ -126,6 +206,9 @@ export class TrackPath {
   private readonly nodes: readonly TrackNode[]
   private readonly ys: number[]
   private readonly banks: number[]
+  /** Waypoints whose height the grade limit had to pull back, and the steepest grade asked for. */
+  readonly gradeClamped: number
+  readonly worstGrade: number
 
   constructor(nodes: readonly TrackNode[]) {
     this.nodes = nodes
@@ -153,6 +236,8 @@ export class TrackPath {
       this.nodeS = [0]
       this.ys = [n.y ?? 0]
       this.banks = [0]
+      this.gradeClamped = 0
+      this.worstGrade = 0
       return
     }
     for (let i = 0; i < nodes.length - 1; i++) {
@@ -177,6 +262,44 @@ export class TrackPath {
     this.length = s
     this.ys = nodes.map((n) => n.y ?? 0)
     this.banks = nodes.map((n) => n.bank ?? 0)
+    // A waypoint dragged 500 m up on a 1 km track is not a hill, it is a wall: hold the
+    // profile to a gradient the game can show and the car can climb. The editor draws the
+    // waypoints where you put them and the road where it ended up, so the gap is visible.
+    const gaps = this.nodeS.slice(1).map((v, i) => v - this.nodeS[i])
+    const limited = limitGrade(this.ys, gaps)
+    this.gradeClamped = limited.clamped
+    this.worstGrade = limited.worst
+  }
+
+  /** The height a waypoint asked for, before the grade limit had its say. */
+  requestedY(i: number): number {
+    return this.nodes[i]?.y ?? 0
+  }
+
+  /** The height a waypoint ended up at once the gradient limit had been applied. */
+  nodeY(i: number): number {
+    return this.ys[i] ?? 0
+  }
+
+  /**
+   * The highest and lowest a waypoint could be set to without exceeding the gradient
+   * limit against its neighbours — what the editor clamps a height drag to.
+   */
+  heightRange(i: number, maxGrade = NODE_GRADE): { lo: number; hi: number } {
+    let lo = -Infinity
+    let hi = Infinity
+    for (const j of [i - 1, i + 1]) {
+      if (j < 0 || j >= this.ys.length) continue
+      const d = Math.abs(this.nodeS[j] - this.nodeS[i]) * maxGrade
+      lo = Math.max(lo, this.ys[j] - d)
+      hi = Math.min(hi, this.ys[j] + d)
+    }
+    // Neighbours already further apart than the limit allows: sit between them.
+    if (lo > hi) {
+      const mid = (lo + hi) / 2
+      return { lo: mid, hi: mid }
+    }
+    return { lo: lo === -Infinity ? -1e4 : lo, hi: hi === Infinity ? 1e4 : hi }
   }
 
   /** Index of the last sample at or before arc length `s`. */

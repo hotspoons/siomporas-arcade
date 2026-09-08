@@ -6,7 +6,7 @@ import { SEG_LENGTH, SIM_DT } from '../src/sim/Tuning'
 import { CURVE_UNIT } from '../src/render/RenderTuning'
 import { builtinAsWorld, trackFromStage } from '../src/world/builtin'
 import { compileTrack, curveToRadius, MAX_CURVE, radiusToCurve } from '../src/world/compile'
-import { buildPath } from '../src/world/path'
+import { buildPath, limitGrade, MAX_GRADE, NODE_GRADE, scaleToGrade, STEEP_GRADE } from '../src/world/path'
 import { WorldRoute } from '../src/world/Route'
 import { SCENES, SCENE_IDS } from '../src/world/scenes'
 import { checkWorld, emptyTrack, emptyWorld, reachable, routeLengthOf, type CoastTrack, type WorldData } from '../src/world/types'
@@ -78,6 +78,46 @@ describe('centreline', () => {
     expect(p.elevationAt(450)).toBeCloseTo(30, 1)
   })
 
+  it('limits waypoint heights to a gradient and says what it moved', () => {
+    const ys = [0, 100, 0]
+    const out = limitGrade(ys, 100)
+    expect(out.worst).toBeCloseTo(1, 5)
+    expect(out.clamped).toBeGreaterThan(0)
+    for (let i = 1; i < ys.length; i++) expect(Math.abs(ys[i] - ys[i - 1]) / 100).toBeLessThanOrEqual(NODE_GRADE + 1e-9)
+    const gentle = [0, 5, 10]
+    expect(limitGrade(gentle, 100).clamped).toBe(0)
+    expect(gentle).toEqual([0, 5, 10])
+  })
+
+  it('scales a profile to a gradient without moving the datum', () => {
+    const ys = [0, 60, 30, 0]
+    const out = scaleToGrade(ys, 100, 0.3)
+    expect(out.worst).toBeCloseTo(0.6, 6)
+    expect(out.factor).toBeCloseTo(0.5, 6)
+    // Zero stays zero, so a stage still joins the next one; the shape is untouched.
+    expect(ys[0]).toBe(0)
+    expect(ys[3]).toBe(0)
+    expect(ys[1] / ys[2]).toBeCloseTo(2, 6)
+    for (let i = 1; i < ys.length; i++) expect(Math.abs(ys[i] - ys[i - 1]) / 100).toBeLessThanOrEqual(0.3 + 1e-9)
+    const fine = [0, 10, 0]
+    expect(scaleToGrade(fine, 100, 0.3).factor).toBe(1)
+    expect(fine).toEqual([0, 10, 0])
+  })
+
+  it('tells the editor how high a waypoint may go', () => {
+    const p = buildPath([
+      { x: 0, z: 0, y: 0 },
+      { x: 0, z: 400, y: 0 },
+      { x: 0, z: 800, y: 0 },
+    ])
+    const r = p.heightRange(1)
+    expect(r.hi).toBeCloseTo(400 * NODE_GRADE, 0)
+    expect(r.lo).toBeCloseTo(-400 * NODE_GRADE, 0)
+    expect(STEEP_GRADE).toBeLessThan(NODE_GRADE)
+    // The guarantee has to cover the cubic's overshoot between two legal waypoints.
+    expect(MAX_GRADE).toBeGreaterThan(NODE_GRADE * 1.5)
+  })
+
   it('mirrors a handle on a smooth node and leaves a cusp alone', () => {
     const smooth = buildPath([
       { x: 0, z: 0, y: 0 },
@@ -122,6 +162,58 @@ describe('compiler', () => {
     expect(report.clamped).toBeGreaterThan(0)
     expect(report.problems.join(' ')).toMatch(/opened out/)
     for (let i = 0; i < stage.length; i++) expect(Math.abs(stage.segments[i].curve)).toBeLessThanOrEqual(MAX_CURVE + 1e-6)
+  })
+
+  it('flattens a cliff into a hill the car can climb', () => {
+    // 500 m of height asked for over a 1.2 km track: a wall, not a hill.
+    const t = straight(1200)
+    t.nodes[1].y = 500
+    const { stage, report } = compileTrack(t, 1)
+    expect(report.waypointsFlattened).toBeGreaterThan(0)
+    expect(report.gradeAsked).toBeGreaterThan(MAX_GRADE)
+    expect(report.maxGrade).toBeLessThanOrEqual(MAX_GRADE + 1e-6)
+    expect(report.problems.join(' ')).toMatch(/pulled back/)
+    for (let i = 0; i < stage.length; i++) {
+      const grade = Math.abs(stage.segments[i].y1 - stage.segments[i].y0) / SEG_LENGTH
+      expect(grade, `segment ${i} at ${(grade * 100).toFixed(0)} %`).toBeLessThanOrEqual(MAX_GRADE + 1e-6)
+    }
+    // And it still ends at the datum, so the next stage joins on.
+    expect(Math.abs(stage.segments[stage.length - 1].y1)).toBeLessThan(1)
+  })
+
+  it('scales the whole profile as a last resort when the waypoints alone cannot save it', () => {
+    // Waypoints far enough apart that the node limit allows the height, but the swell on
+    // top of a 16 % climb is what the scale is there to catch.
+    const t = straight(1200)
+    t.nodes[1].y = 96
+    const { stage, report } = compileTrack(t, 1)
+    expect(report.waypointsFlattened).toBe(0)
+    expect(report.maxGrade).toBeLessThanOrEqual(MAX_GRADE + 1e-6)
+    for (let i = 0; i < stage.length; i++) expect(Math.abs(stage.segments[i].y1 - stage.segments[i].y0) / SEG_LENGTH).toBeLessThanOrEqual(MAX_GRADE + 1e-6)
+  })
+
+  it('leaves a hill the game already uses alone', () => {
+    // High Pass climbs about 16 %; nothing near that should be touched.
+    const t = straight(2400)
+    t.nodes[1].y = 150
+    const { report } = compileTrack(t, 1)
+    expect(report.gradeScale).toBe(1)
+    expect(report.waypointsFlattened).toBe(0)
+    expect(report.maxGrade).toBeGreaterThan(0.1)
+  })
+
+  it('never launches the car off a step at a stage seam', () => {
+    for (const y of [40, 200, 900, -300]) {
+      const t = straight(1800)
+      t.nodes[2].y = y
+      const { stage } = compileTrack(t, 1)
+      expect(Math.abs(stage.segments[stage.length - 1].y1), `end height for y=${y}`).toBeLessThan(1)
+      // And the runway past the finish is dead flat at that height, so nothing launches there.
+      for (const seg of stage.segments.slice(stage.length)) {
+        expect(seg.y0).toBeCloseTo(stage.segments[stage.length - 1].y1, 6)
+        expect(seg.y1).toBeCloseTo(seg.y0, 6)
+      }
+    }
   })
 
   it('ends level so stages join without a step', () => {
@@ -362,6 +454,16 @@ describe('forking the built-in route', () => {
       expect(ratio, `${desc.id} length ${ratio.toFixed(2)}×`).toBeLessThan(1.1)
       expect(stage.desc.next).toEqual(desc.next)
       expect(traced.nodes.length).toBeGreaterThan(4)
+    }
+  })
+
+  it('traces hills the grade limit does not have to touch', () => {
+    const w = builtinAsWorld()
+    for (const t of w.tracks) {
+      const { report } = compileTrack(t, 7)
+      expect(report.gradeScale, `${t.name} was scaled`).toBe(1)
+      expect(report.waypointsFlattened, `${t.name} had waypoints pulled back`).toBe(0)
+      expect(report.maxGrade, `${t.name} at ${(report.maxGrade * 100).toFixed(0)} %`).toBeLessThanOrEqual(MAX_GRADE)
     }
   })
 

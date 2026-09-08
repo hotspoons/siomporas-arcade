@@ -10,34 +10,46 @@ export function buildMenus(game: Game) {
   const s = () => game.settings.data
   const set = (fn: (d: ReturnType<typeof s>) => void) => game.settings.update(fn)
   const worlds = () => game.worlds.list()
+  /**
+   * START AT lists the stages of whichever world is selected, and the menu re-reads this
+   * array on every render — so switching world refills it in place rather than rebuilding
+   * the screen, which would bounce the cursor back to START.
+   */
+  const startOptions: string[] = []
+  const refreshStartOptions = () => {
+    startOptions.length = 0
+    for (const id of game.route.ids) startOptions.push(`${id} · ${game.route.name(id)}`)
+  }
+  refreshStartOptions()
 
   const title = (): MenuScreen => ({
     id: 'title',
     title: 'COASTLINE',
-    subtitle: `${game.route.worldName} · ${game.route.routeLength(game.route.start)} stages · one clock`,
+    subtitle: 'Coast to coast · or a world of your own · one clock',
     items: [
       { kind: 'action', label: 'START', onSelect: () => game.startRun() },
-      ...(game.fromEditor ? [{ kind: 'action' as const, label: 'BACK TO THE EDITOR', hint: 'The world builder still has your work', onSelect: () => game.openEditor() }] : []),
+      ...(game.fromEditor ? [{ kind: 'action' as const, label: 'BACK TO THE EDITOR', hint: 'Your work is still there', onSelect: () => game.openEditor() }] : []),
       {
         kind: 'choice',
         label: 'WORLD',
-        hint: 'The built-in coast-to-coast route, or a track set you built yourself',
-        options: worlds().map((w) => `${w.name}${w.builtin ? '' : ` · ${w.tracks} track${w.tracks === 1 ? '' : 's'}`}`),
+        hint: 'The built-in route, or one you built',
+        options: worlds().map((w) => w.name),
         get: () => Math.max(0, worlds().findIndex((w) => w.id === (s().world ?? 'builtin'))),
         set: (i) => {
           set((d) => (d.world = worlds()[i].id))
           game.applyWorld()
+          refreshStartOptions()
         },
       },
       {
         kind: 'choice',
         label: 'START AT',
-        hint: 'Begin the run on any stage of this world',
-        options: game.route.ids.map((id) => `${id} · ${game.route.name(id)}`),
+        hint: 'Begin the run on any stage',
+        options: startOptions,
         get: () => Math.max(0, game.route.ids.indexOf(s().startStage)),
         set: (i) => set((d) => (d.startStage = game.route.ids[i])),
       },
-      { kind: 'action', label: 'BUILD A WORLD', hint: 'Lay out your own tracks, wire them into a route, and drive it', onSelect: () => game.openEditor() },
+      { kind: 'action', label: 'BUILD A WORLD', hint: 'Lay out your own tracks and drive them', onSelect: () => game.openEditor() },
       {
         kind: 'choice',
         label: 'RADIO',

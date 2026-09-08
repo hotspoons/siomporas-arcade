@@ -50,7 +50,7 @@ editor has two views (Tab switches):
 | Bend the road | select a waypoint, drag its cyan handle (⌥-click a handle = back to automatic) |
 | Cusp ↔ smooth | ⇧-click a waypoint |
 | Bank in / out | `B` on a waypoint (banking eases between waypoints) |
-| Hills | drag a waypoint in the profile strip, or `Q` / `E` |
+| Hills | drag a waypoint in the profile strip, or `Q` / `E` (held to a gradient the car can climb — to climb higher, space the waypoints further apart) |
 | Rolling swell | the Hills items at the top of the palette |
 | Scene, vibe, prop, crossroads | pick it in the palette, click the road |
 | Macro elements | pick one, drag along the road (or drop it in the timeline) |
@@ -78,6 +78,10 @@ roadside.
 
 `⑂ Fork built-in` traces the whole coast-to-coast route into waypoints so you can
 pull it about; the shipped route itself is sections and is never edited in place.
+
+Edits are parked in the browser after every change, so a reload or a crash does not cost
+them: the editor offers them back next time it opens, and the title carries a `•` until you
+Save.
 
 The pseudo-3D road is gentler than it looks: a 1.4 km-radius sweeper is already a
 strong curve on screen, so corners under about 800 m have to be braked for and

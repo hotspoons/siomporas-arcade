@@ -82,6 +82,10 @@ export let TIME_START = 75
 export let TIME_CHECKPOINT = 62
 export const SCORE_PER_METRE = 2
 export const SCORE_PER_PASS = 120
+/** Automatic gearbox: shifts up past this share of the LO limit, back down below this share; gives up this much top speed. */
+export let AUTO_UP = 0.92
+export let AUTO_DOWN = 0.6
+export let AUTO_TOP_FACTOR = 0.93
 /** Near miss: passing within this lateral gap (road widths, bumper to bumper) scores up to NEAR_MISS_SCORE, more the closer you are. */
 export let NEAR_MISS_GAP = 0.22
 export let NEAR_MISS_SCORE = 800
@@ -113,6 +117,9 @@ export const SIM_TUNE: TuneSection = {
     tune('BUMP_KEEP', () => BUMP_KEEP, (v) => (BUMP_KEEP = v)),
     tune('CRASH_MIN_SPEED', () => CRASH_MIN_SPEED, (v) => (CRASH_MIN_SPEED = v)),
     tune('NEAR_MISS_GAP', () => NEAR_MISS_GAP, (v) => (NEAR_MISS_GAP = v), [0.05, 0.6], 0.01),
+    tune('AUTO_TOP_FACTOR', () => AUTO_TOP_FACTOR, (v) => (AUTO_TOP_FACTOR = v), [0.7, 1], 0.01, 'automatic top speed share'),
+    tune('AUTO_UP', () => AUTO_UP, (v) => (AUTO_UP = v), [0.5, 1], 0.02),
+    tune('AUTO_DOWN', () => AUTO_DOWN, (v) => (AUTO_DOWN = v), [0.2, 0.9], 0.02),
     tune('NEAR_MISS_SCORE', () => NEAR_MISS_SCORE, (v) => (NEAR_MISS_SCORE = v), [0, 5000], 50),
     tune('WRECK_SPEED', () => WRECK_SPEED, (v) => (WRECK_SPEED = v)),
     tune('REAREND_CRASH_SPEED', () => REAREND_CRASH_SPEED, (v) => (REAREND_CRASH_SPEED = v)),

@@ -37,6 +37,7 @@ export function buildMenus(game: Game) {
         },
       },
       { kind: 'choice', label: 'VIEW', hint: 'C / Y switches while driving', options: ['CHASE', 'COCKPIT'], get: () => (s().view === 'cockpit' ? 1 : 0), set: (i) => { set((d) => (d.view = i === 1 ? 'cockpit' : 'chase')); game.applyView() } },
+      { kind: 'choice', label: 'GEARBOX', hint: 'Two speeds. Manual shifts on Shift; automatic shifts for you but gives up some top speed', options: ['MANUAL', 'AUTOMATIC'], get: () => (s().gearbox === 'auto' ? 1 : 0), set: (i) => { set((d) => (d.gearbox = i === 1 ? 'auto' : 'manual')); game.applyGearbox() } },
       {
         kind: 'choice',
         label: 'CAR',

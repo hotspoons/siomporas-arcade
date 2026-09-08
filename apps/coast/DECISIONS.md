@@ -60,3 +60,6 @@ Banked segments are real geometry: the road plane rises from its inner edge towa
 
 ## Banked deck, take three (2026-09-08)
 Only the deck tilts (shoulders, rumble, tarmac) as one plane pivoting on the inner shoulder edge (`bermLift`/`deckHalf`); the land beside it stays at grade and is drawn as flat strips outside the deck (a full-width grass quad had a corner on the deck and smeared the lift across the screen). A wall stands under the high side. Three earlier "artifacts" were: full-width quads interpolating a clamped lift, a per-segment quad reserve too small for banked rows (now 40), and wider shoulder/rumble quads clamped at the road edge poking through the tarmac. Vehicle sprites roll by +atan(tilt) so they sit on the plane (with the view rolled by the bank angle they read upright on a level-looking road).
+
+## Gearbox option (2026-09-08)
+Two speeds either way. MANUAL shifts LO/HI on the gear key; AUTOMATIC shifts for you (up past `AUTO_UP` of the LO limit, down below `AUTO_DOWN`, pulls away in LO) and gives up `AUTO_TOP_FACTOR` of top speed so manual stays worth learning. The tacho and engine note follow the real two-speed box (`hud.rpm`), not a fake four-gear sweep; the turbo dial is gone (Group 6 cars weren't turbocharged).

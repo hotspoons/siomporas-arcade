@@ -12,6 +12,8 @@ export interface SettingsData {
   keys: KeyBindings
   pad: PadBindings
   view: 'chase' | 'cockpit'
+  /** Two-speed box: shift it yourself, or let it shift (and give up a little top speed). */
+  gearbox: 'manual' | 'auto'
   /** Hero livery id (see procgen LIVERIES) or 'formula'. */
   car: string
   station: number
@@ -34,6 +36,7 @@ export const DEFAULT_SETTINGS: SettingsData = {
   keys: DEFAULT_KEYS,
   pad: DEFAULT_PAD,
   view: 'chase',
+  gearbox: 'manual',
   car: 'rosso',
   station: 0,
   startStage: 'A',

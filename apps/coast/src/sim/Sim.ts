@@ -40,6 +40,8 @@ export class Sim {
   x = 0
   speed = 0
   gear: 0 | 1 = 1
+  /** Automatic gearbox: shifts LO/HI itself and gives up a little top speed; manual shifts on the gear key. */
+  automatic = false
   time = 0
   tickCount = 0
   timeLeft = T.TIME_START
@@ -159,7 +161,7 @@ export class Sim {
   }
 
   get maxSpeed(): number {
-    return (this.gear === 1 ? T.MAX_SPEED_HI : T.MAX_SPEED_LO) + (this.turboTimer > 0 ? T.TURBO_TOP : 0)
+    return ((this.gear === 1 ? T.MAX_SPEED_HI : T.MAX_SPEED_LO) + (this.turboTimer > 0 ? T.TURBO_TOP : 0)) * (this.automatic ? T.AUTO_TOP_FACTOR : 1)
   }
 
   tick(dt: number, input: InputFrame, out: Snapshot): void {
@@ -183,7 +185,17 @@ export class Sim {
   private tickDrive(dt: number, input: InputFrame): void {
     const seg = this.stage.segmentAt(this.z)
     // Gear and turbo.
-    if (input.gear) {
+    if (this.automatic) {
+      // Two speeds, shifted for you with some hysteresis so it doesn't hunt.
+      const lo = T.MAX_SPEED_LO * T.AUTO_TOP_FACTOR
+      if (this.gear === 0 && this.speed > lo * T.AUTO_UP) {
+        this.gear = 1
+        this.events.push('gear', 1)
+      } else if (this.gear === 1 && this.speed < lo * T.AUTO_DOWN) {
+        this.gear = 0
+        this.events.push('gear', 0)
+      }
+    } else if (input.gear) {
       this.gear = this.gear === 1 ? 0 : 1
       this.events.push('gear', this.gear)
     }
@@ -458,6 +470,9 @@ export class Sim {
     h.time = this.timeLeft
     h.score = Math.floor(this.score)
     h.gear = this.gear
+    // Tacho for a two-speed box: LO sweeps the band to its limit; HI picks up around a third and runs to the top.
+    const loTop = T.MAX_SPEED_LO * (this.automatic ? T.AUTO_TOP_FACTOR : 1)
+    h.rpm = this.speed < 0.3 ? 0.1 : this.gear === 0 ? Math.min(1, 0.12 + (this.speed / loTop) * 0.88) : Math.max(0.15, Math.min(1, 0.12 + ((this.speed - loTop * 0.3) / (this.maxSpeed - loTop * 0.3)) * 0.88))
     h.turbo = this.turbo
     h.turboActive = this.turboTimer > 0
     h.stage = this.stageIndex + 1

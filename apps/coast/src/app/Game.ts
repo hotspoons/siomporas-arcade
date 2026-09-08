@@ -122,6 +122,7 @@ export class Game implements LoopClient {
   startRun(): void {
     this.seed = (Date.now() & 0xffff) || 1
     this.sim = new Sim(this.seed, this.settings.data.startStage)
+    this.applyGearbox()
     this.syncStage()
     this.sim.tick(0, this.held, this.curr)
     this.sim.tick(0, this.held, this.prev)
@@ -186,6 +187,11 @@ export class Game implements LoopClient {
     this.touch?.setVisible(false)
     this.menus.replace(buildMenus(this).results(this.curr))
     this.audio.setRunning(false)
+  }
+
+  applyGearbox(): void {
+    this.sim.automatic = (this.settings.data.gearbox ?? 'manual') === 'auto'
+    if (this.sim.automatic && this.sim.speed < 1) this.sim.gear = 0 // an automatic pulls away in LO
   }
 
   private syncStage(): void {

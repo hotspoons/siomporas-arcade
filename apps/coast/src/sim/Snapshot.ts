@@ -32,6 +32,8 @@ export class Snapshot {
     time: 0,
     score: 0,
     gear: 1 as 0 | 1,
+    /** Engine revs 0..1 for the tacho and the engine note. */
+    rpm: 0,
     turbo: 1,
     turboActive: false,
     stage: 1,

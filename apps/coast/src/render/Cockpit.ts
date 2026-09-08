@@ -152,7 +152,7 @@ export class Cockpit {
     c.closePath()
     c.fill()
     gauge(c, W / 2 - 200, H - 60, 62, snap.speed / snap.maxSpeed, String(Math.round(snap.hud.speedKmh)), 'KM/H', snap.speed / snap.maxSpeed > 0.92)
-    gauge(c, W / 2, H - 78, 78, (Math.min(3.999, (snap.speed / snap.maxSpeed) * 4) % 1) * 0.8 + 0.15, snap.hud.gear === 1 ? 'HI' : 'LO', 'RPM', snap.hud.turboActive)
+    gauge(c, W / 2, H - 78, 78, snap.hud.rpm, snap.hud.gear === 1 ? 'HI' : 'LO', 'RPM', snap.hud.rpm > 0.95)
     // No boost on a Group 6 car: the third dial is oil temperature, creeping up with the pace.
     gauge(c, W / 2 + 200, H - 60, 62, 0.35 + 0.45 * Math.min(1, snap.speed / snap.maxSpeed) ** 2, String(Math.round(70 + 45 * Math.min(1, snap.speed / snap.maxSpeed) ** 2)), 'OIL °C', snap.speed / snap.maxSpeed > 0.97)
     // Telltales on the dash: the two switches you have to remember to flick.

@@ -127,10 +127,9 @@ export class AudioWorld {
     const ctx = this.ctx
     if (!ctx) return
     const now = ctx.currentTime
-    // Four virtual gears; at vmax the top gear pins at the limiter instead of wrapping into a phantom fifth.
-    const g = Math.min(3.999, (snap.speed / snap.maxSpeed) * 4)
+    // Two-speed box: the note follows the tacho, a touch deeper in LO.
     const r = snap.speed / snap.maxSpeed
-    const hz = 60 + (g % 1) * 140 + Math.floor(g) * 20
+    const hz = 55 + snap.hud.rpm * 185 + snap.hud.gear * 18
     for (const o of this.engineOscs) o.frequency.setTargetAtTime(hz, now, 0.05)
     this.engineFilter.frequency.setTargetAtTime(500 + r * 2200 + (snap.hud.turboActive ? 1500 : 0), now, 0.08)
     this.screechGain.gain.setTargetAtTime(sliding ? 0.2 : 0, now, 0.05)

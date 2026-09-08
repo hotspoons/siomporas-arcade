@@ -41,3 +41,7 @@ to shipped defaults. `P` pauses in every game alongside Escape.
 ## Fonts
 
 Each app bundles its own free typefaces under `apps/<app>/public/fonts` (latin woff2 subsets from Google Fonts, all OFL or Apache 2.0, license texts alongside). Regenerate with `node scripts/fetch-fonts.mjs`. Drivin: Yellowtail + VT323 + Press Start 2P. Coast: Pacifico + Racing Sans One + Righteous + Press Start 2P. Conduit: Audiowide + Orbitron + Rajdhani + Press Start 2P.
+
+## Drivin track editor
+
+Open it from the title menu. It is an unbounded grid: wheel zooms under the pointer, middle-drag / space-drag / shift-wheel pan, click outside the grid to grow it (the world shifts if you go negative). Pieces: click to place the primed piece (Z/X rotate, Q/E level), click to select and drag to move, ⌘/Ctrl-click to multi-select, ⇧-click to select the connected run, ⌥-click or Delete to remove, ⌘⇧-click to force-insert (also lays a bridge at another level over a road), ⌘⌥-click to rotate, ⇧⌥ click / right-click to raise / lower, right-click for the menu, ⌘Z / ⌘⇧Z undo / redo, ⌘S save (save-over or save-as; titles are unique). Connectors: click a red connector and then another and a spline road links them; select a link and use , / . for tightness, B for camber, Delete to unlink. Landscape (G): drag raises, ⌥/right-drag lowers, ⇧-drag flattens to the primed level, [ ] sets the brush. Scenery pieces (water, trees, buildings, gas) block or sink the car; drawbridge halves jump the gap between them.

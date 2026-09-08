@@ -31,6 +31,10 @@ const MAX_SIZE = 200
 const MIN_SCALE = 6
 const MAX_SCALE = 160
 const UNDO_DEPTH = 60
+/** How long the pointer must rest before the tooltip appears (ms). */
+const TIP_DELAY = 900
+/** Pixels per cell above which placed pieces are captioned on the canvas. */
+const LABEL_MIN_SCALE = 52
 const IS_MAC = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
 const MOD = IS_MAC ? '⌘' : 'Ctrl'
 const TERRAIN_HINTS = 'drag raise · ⌥-drag / right-drag lower · ⇧-drag flatten to the primed level · [ ] brush · G back to pieces'
@@ -62,6 +66,7 @@ export class Editor {
   private readonly palette: HTMLElement
   private readonly loadSelect: HTMLSelectElement
   private readonly tip: HTMLElement
+  private tipTimer = 0
   private data: TrackData = { name: 'Untitled', size: 16, pieces: [] }
   private currentId: string | null = null
   private selectedType = 'straight'
@@ -195,7 +200,7 @@ export class Editor {
     this.canvas.addEventListener('pointerup', (e) => this.onUp(e))
     this.canvas.addEventListener('pointerleave', () => {
       this.hover = null
-      this.tip.classList.add('hidden')
+      this.hideTip()
       this.dirty = true
     })
     this.canvas.addEventListener('wheel', (e) => this.onWheel(e), { passive: false })
@@ -988,10 +993,10 @@ export class Editor {
    * anything the checker flagged), a link, or the piece you are about to place.
    */
   private showTip(e: PointerEvent, c: Cell): void {
-    if (this.mode === 'terrain' || this.pan || this.drag || this.sculpt || this.menu) {
-      this.tip.classList.add('hidden')
-      return
-    }
+    // A tooltip that appears while you are moving is just noise: hide it on every move and bring it
+    // back only once the pointer has rested (see TIP_DELAY).
+    this.hideTip()
+    if (this.mode === 'terrain' || this.pan || this.drag || this.sculpt || this.menu) return
     let head = ''
     let body = ''
     const li = this.linkAt(e)
@@ -1008,15 +1013,17 @@ export class Editor {
       if (p.rot) bits.push(`${p.rot * 90}°`)
       head = `${def.label} · ${bits.join(' · ')}`
       body = def.desc
-    } else {
-      const def = PIECE_BY_TYPE[this.selectedType]
-      if (!def) {
-        this.tip.classList.add('hidden')
-        return
-      }
-      head = `Place: ${def.label}${this.mirror ? ' (mirrored)' : ''}`
-      body = def.desc
-    }
+    } else return // empty grid: the palette already says what you are about to place
+    this.tipTimer = window.setTimeout(() => this.revealTip(head, body, e.clientX, e.clientY), TIP_DELAY)
+  }
+
+  private hideTip(): void {
+    clearTimeout(this.tipTimer)
+    this.tipTimer = 0
+    this.tip.classList.add('hidden')
+  }
+
+  private revealTip(head: string, body: string, clientX: number, clientY: number): void {
     this.tip.innerHTML = ''
     const h = document.createElement('strong')
     h.textContent = head
@@ -1028,8 +1035,8 @@ export class Editor {
     const r = this.el.getBoundingClientRect()
     const tw = this.tip.offsetWidth
     const th = this.tip.offsetHeight
-    const x = Math.min(e.clientX - r.left + 16, r.width - tw - 8)
-    const y = e.clientY - r.top + 20 + th > r.height - 8 ? e.clientY - r.top - th - 12 : e.clientY - r.top + 20
+    const x = Math.min(clientX - r.left + 16, r.width - tw - 8)
+    const y = clientY - r.top + 20 + th > r.height - 8 ? clientY - r.top - th - 12 : clientY - r.top + 20
     this.tip.style.left = `${Math.max(8, x)}px`
     this.tip.style.top = `${Math.max(8, y)}px`
   }
@@ -1118,6 +1125,7 @@ export class Editor {
 
   private onDown(e: PointerEvent): void {
     this.closeMenu()
+    this.hideTip()
     const { px, py } = this.canvasPoint(e)
     const mod = e.metaKey || e.ctrlKey
     // Pan: middle button, or space + drag.
@@ -1638,8 +1646,8 @@ export class Editor {
         c.font = `${Math.max(10, cell * 0.28)}px "VT323", ui-monospace, monospace`
         c.fillText(`L${p.level}`, a.x + 4, a.y + cell * 0.32)
       }
-      // The piece's name along the bottom of its footprint, once there is room for it.
-      if (cell >= 26) {
+      // The piece's name along the bottom of its footprint, once you are zoomed right in on it.
+      if (cell >= LABEL_MIN_SCALE) {
         const fs = Math.max(11, Math.min(16, cell * 0.3))
         c.font = `${fs}px "VT323", ui-monospace, monospace`
         const text = def.label + (p.mirror ? ' ⇅' : '')

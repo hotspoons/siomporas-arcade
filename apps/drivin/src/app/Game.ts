@@ -385,7 +385,7 @@ export class Game implements LoopClient {
     const hp = this.haptics
     switch (e.type) {
       case 'crash':
-        this.hud.showMessage('CRASH', 2.5, 'bad')
+        this.hud.showMessage(this.sim.crashCause ? `CRASH · ${this.sim.crashCause.toUpperCase()}` : 'CRASH', 2.5, 'bad')
         hp.rumble(1, 1, 500)
         hp.triggers(1, 1, 400)
         hp.mobile([120, 40, 200])

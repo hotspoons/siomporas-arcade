@@ -16,7 +16,7 @@
 //   click a red connector, then another   a smooth spline road links them; click the link to select it,
 //   , / .            tighter / wider curve   B camber on/off   ⌥-click or Delete unlinks
 
-import { PIECES, PIECE_BY_TYPE, makePathPoint, rotateLocal, rotatedSize, type PieceDef } from '../sim/pieces'
+import { PIECES, PIECE_BY_TYPE, makePathPoint, opposite, rotateLocal, rotatePortCell, rotateSide, rotatedSize, sideOffset, type PieceDef } from '../sim/pieces'
 import { CELL } from '../sim/Tuning'
 import { Track, portStatus, type PlacedPiece, type TrackData } from '../sim/Track'
 import type { TrackStore } from '../app/TrackStore'
@@ -233,9 +233,11 @@ export class Editor {
     this.currentId = id
     this.title.textContent = this.data.name
     this.selection.clear()
+    this.selectedLink = -1
     this.anchor = -1
     this.undoStack = []
     this.redoStack = []
+    this.pruneLinks()
     this.fit()
     this.dirty = true
   }
@@ -532,9 +534,32 @@ export class Editor {
     return this.data.terrain
   }
 
-  /** Keep the ground pinned under every road piece (call after pieces move). */
+  /** After pieces move: keep the ground pinned under roads and drop links whose connectors now meet a piece. */
   private settleTerrain(): void {
     if (this.data.terrain) flattenUnderPieces(this.data.terrain, this.data.size, this.data.pieces)
+    this.pruneLinks()
+  }
+
+  /** Remove links that no longer make sense: an endpoint met a neighbouring piece, or two links share a connector. */
+  private pruneLinks(): void {
+    const links = this.data.links
+    if (!links?.length) return
+    const status = portStatus(this.data.pieces)
+    const used = new Set<string>()
+    const keep = links.filter((l) => {
+      for (const ref of [l.a, l.b]) {
+        const p = status.find((q) => q.pieceIndex === ref.piece && q.portIndex === ref.port)
+        if (!p || p.matched || used.has(`${ref.piece}:${ref.port}`)) return false
+      }
+      used.add(`${l.a.piece}:${l.a.port}`)
+      used.add(`${l.b.piece}:${l.b.port}`)
+      return true
+    })
+    if (keep.length !== links.length) {
+      this.data.links = keep
+      this.selectedLink = -1
+      this.flash(`Removed ${links.length - keep.length} link${links.length - keep.length > 1 ? 's' : ''} whose connectors now meet a piece`)
+    }
   }
 
   private applyBrush(c: { x: number; z: number }, kind: 'raise' | 'lower' | 'flatten'): void {
@@ -570,7 +595,7 @@ export class Editor {
   private test(): void {
     const t = new Track(this.data)
     if (!t.valid) {
-      this.flash('Fix the errors first: ' + t.errors[0])
+      this.flash('Fix the red bits first: ' + t.errors.slice(0, 2).join(' · '))
       return
     }
     this.cb.onTest(this.data)
@@ -1165,10 +1190,35 @@ export class Editor {
     if (clash.length) this.removePieces(new Set(clash))
     // Only one start piece.
     if (def.isStart) this.data.pieces = this.data.pieces.filter((p) => !PIECE_BY_TYPE[p.type].isStart)
-    this.data.pieces.push({ type: this.selectedType, x: c.x, z: c.z, rot: this.rot, level: this.level })
+    // Jump pieces face their landing: if another open connector lies along one of the rotations' lip line, take it.
+    let rot = this.rot
+    if (def.ports.some((p) => p.open)) rot = this.faceJump(def, c, rot)
+    this.data.pieces.push({ type: this.selectedType, x: c.x, z: c.z, rot, level: this.level })
     this.selection.clear()
     this.settleTerrain()
     this.dirty = true
+  }
+
+  /** Pick the rotation (current first, then its opposite, then the rest) whose open lip looks straight at another open connector. */
+  private faceJump(def: PieceDef, c: Cell, rot: number): number {
+    const openPorts = portStatus(this.data.pieces, this.data.links ?? []).filter((p) => !p.matched && PIECE_BY_TYPE[this.data.pieces[p.pieceIndex].type].ports[p.portIndex].open)
+    if (!openPorts.length) return rot
+    for (const r of [rot, (rot + 2) % 4, (rot + 1) % 4, (rot + 3) % 4]) {
+      if (rotatedSize(def, r).w !== rotatedSize(def, rot).w && !this.fits(def.type, r, c.x, c.z, this.level)) continue
+      for (const port of def.ports) {
+        if (!port.open) continue
+        const rc = rotatePortCell(def, r, port.cx, port.cz)
+        const side = rotateSide(port.side, r)
+        const o = sideOffset(side)
+        const cx = c.x + rc.cx
+        const cz = c.z + rc.cz
+        for (let d = 2; d <= 14; d++) {
+          const hit = openPorts.find((p) => p.cx === cx + o.dx * d && p.cz === cz + o.dz * d && p.side === opposite(side) && p.level === this.level + port.dLevel)
+          if (hit) return r
+        }
+      }
+    }
+    return rot
   }
 
   /** Grow the grid so `c` is inside it; cells at negative coordinates shift the whole world over. */
@@ -1417,6 +1467,7 @@ export class Editor {
     c.strokeStyle = 'rgba(255,255,255,0.25)'
     c.strokeRect(o.x, o.y, e.x - o.x, e.y - o.y)
     const toPx = (wx: number, wz: number) => this.toPx(wx / CELL, wz / CELL)
+    const t = new Track(this.data)
     // Landscape: tint each cell by its height (cool below grade, warm above), on-screen cells only.
     const terr = this.data.terrain
     if (terr && terr.length === (N + 1) * (N + 1) && cell >= 4) {
@@ -1465,6 +1516,20 @@ export class Editor {
         c.strokeRect(a.x + 1, a.y + 1, size.w * cell - 2, size.h * cell - 2)
         c.setLineDash([])
       }
+      if (t.warnPieces.has(i) && !t.errorPieces.has(i)) {
+        c.strokeStyle = 'rgba(255,200,87,0.85)'
+        c.lineWidth = 2
+        c.setLineDash([4, 3])
+        c.strokeRect(a.x + 2, a.y + 2, size.w * cell - 4, size.h * cell - 4)
+        c.setLineDash([])
+      }
+      if (t.errorPieces.has(i)) {
+        // Something is wrong here: a pulsing red frame.
+        c.strokeStyle = `rgba(255,59,92,${(0.55 + 0.45 * Math.sin(performance.now() / 180)).toFixed(2)})`
+        c.lineWidth = 3
+        c.strokeRect(a.x + 2, a.y + 2, size.w * cell - 4, size.h * cell - 4)
+        this.dirty = true
+      }
     }
     // Spline links: road-coloured curves; the selected one brighter with an ✕ at its middle.
     const links = this.data.links ?? []
@@ -1472,7 +1537,9 @@ export class Editor {
       const pts = this.linkSamples(l)
       if (!pts) return
       const sel = i === this.selectedLink
-      c.strokeStyle = sel ? '#ffffff' : GROUP_COLORS.flow
+      const bad = t.errorLinks.has(i)
+      if (bad) this.dirty = true
+      c.strokeStyle = bad ? `rgba(255,59,92,${(0.6 + 0.4 * Math.sin(performance.now() / 180)).toFixed(2)})` : sel ? '#ffffff' : GROUP_COLORS.flow
       c.lineWidth = Math.max(3, 11 * (cell / CELL))
       c.lineCap = 'round'
       c.beginPath()
@@ -1570,7 +1637,6 @@ export class Editor {
       }
     }
     // Status.
-    const t = new Track(this.data)
     const bits = [`${this.data.pieces.length} pieces · ${N}×${N}`, t.closed ? `loop ${t.loopLength.toFixed(0)} m` : 'not closed']
     if (this.selection.size) bits.push(`${this.selection.size} selected`)
     if (links.length) bits.push(`${links.length} link${links.length > 1 ? 's' : ''}`)

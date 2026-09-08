@@ -19,7 +19,7 @@ import {
 } from './pieces'
 import { PathTable } from './PathTable'
 import { solidsOf, type Solid } from './decor'
-import { flattenUnderPieces, sampleHeight } from './terrain'
+import { drapes, flattenUnderPieces, sampleHeight } from './terrain'
 import { linkPiece, type Link } from './links'
 
 export interface PlacedPiece {
@@ -72,6 +72,9 @@ export interface Lane {
   baseY: number
   /** The end of this lane is a jump lip: `next` is where you should land, reached through the air, not along the path. */
   gap?: boolean
+  /** Tube lanes: whether this end opens onto plain road (a mouth that ramps up from curb height) rather than more tube. */
+  mouthIn?: boolean
+  mouthOut?: boolean
 }
 
 export class Track {
@@ -80,6 +83,10 @@ export class Track {
   readonly startLane: Lane | null
   readonly errors: string[] = []
   readonly warnings: string[] = []
+  /** What the errors point at, for the editor to highlight. */
+  readonly errorPieces = new Set<number>()
+  readonly errorLinks = new Set<number>()
+  readonly warnPieces = new Set<number>()
   /** Whether driving forward from the start returns to the start. */
   readonly closed: boolean
   /** Total length of the main loop (first branch at every split). */
@@ -103,7 +110,8 @@ export class Track {
     data.pieces.forEach((p, i) => {
       const def = PIECE_BY_TYPE[p.type]
       if (!def) {
-        this.errors.push(`Unknown piece type "${p.type}"`)
+        this.errors.push(`Unknown piece type "${p.type}" at (${p.x}, ${p.z})`)
+        this.errorPieces.add(i)
         return
       }
       const size = rotatedSize(def, p.rot)
@@ -111,7 +119,11 @@ export class Track {
         for (let dz = 0; dz < size.h; dz++) {
           // Footprints may share a cell at different levels (a bridge over a road); the same level is a clash.
           const k = cellKey(p.x + dx, p.z + dz) * 8 + p.level
-          if (occupancy.has(k)) this.errors.push(`Pieces overlap at (${p.x + dx}, ${p.z + dz})`)
+          if (occupancy.has(k)) {
+            this.errors.push(`${def.label} at (${p.x}, ${p.z}) overlaps ${PIECE_BY_TYPE[data.pieces[occupancy.get(k)!].type]?.label ?? 'a piece'} at cell (${p.x + dx}, ${p.z + dz})`)
+            this.errorPieces.add(i)
+            this.errorPieces.add(occupancy.get(k)!)
+          }
           occupancy.set(k, i)
         }
       if (def.decor) {
@@ -136,12 +148,27 @@ export class Track {
       const r = linkPiece(data.pieces, link, li)
       if ('error' in r) {
         this.errors.push(r.error)
+        this.errorLinks.add(li)
         return
       }
-      for (const port of r.def.ports) {
+      r.def.ports.forEach((port, pi) => {
         const key = edgeKey(port.cx, port.cz, port.side, port.dLevel)
-        if (ports.filter((w) => w.key === key).length > 1) this.errors.push(`Link ${li + 1} joins a connector that is already connected`)
-      }
+        const at = ports.filter((w) => w.key === key)
+        const ref = pi === 0 ? link.a : link.b
+        const own = at.find((w) => w.pieceIndex === ref.piece)
+        const where = own ? `connector at (${own.cx}, ${own.cz}) ${own.side}` : 'connector'
+        const neighbour = at.find((w) => w.pieceIndex !== ref.piece && w.pieceIndex < data.pieces.length)
+        const otherLink = at.find((w) => w.pieceIndex >= data.pieces.length)
+        if (neighbour) {
+          this.errors.push(`Link ${li + 1}: the ${where} already meets the piece beside it — unlink it`)
+          this.errorLinks.add(li)
+          this.errorPieces.add(ref.piece)
+        } else if (otherLink) {
+          this.errors.push(`Links ${otherLink.pieceIndex - data.pieces.length + 1} and ${li + 1} both use the ${where}`)
+          this.errorLinks.add(li)
+          this.errorLinks.add(otherLink.pieceIndex - data.pieces.length)
+        }
+      })
       const idx = data.pieces.length + linkDefs.length
       linkDefs.push(r.def)
       linkPlaced.push(r.placed)
@@ -155,6 +182,17 @@ export class Track {
       const list = byKey.get(wp.key) ?? []
       list.push(wp)
       byKey.set(wp.key, list)
+    }
+    // Connectors that meet edge to edge but at different levels look joined on the map and aren't: say so.
+    for (const a of ports) {
+      if (a.pieceIndex >= data.pieces.length) continue
+      const o = sideOffset(a.side)
+      const mate = ports.find((b) => b !== a && b.pieceIndex !== a.pieceIndex && b.pieceIndex < data.pieces.length && b.cx === a.cx + o.dx && b.cz === a.cz + o.dz && b.side === opposite(a.side) && b.level !== a.level)
+      if (mate && a.pieceIndex < mate.pieceIndex) {
+        this.errors.push(`Connectors meet at (${a.cx}, ${a.cz}) ${a.side} but at different levels (L${a.level} vs L${mate.level}) — use a ramp or match the levels`)
+        this.errorPieces.add(a.pieceIndex)
+        this.errorPieces.add(mate.pieceIndex)
+      }
     }
     const partner = (wp: WorldPort): WorldPort | null => {
       const list = byKey.get(wp.key)
@@ -181,7 +219,7 @@ export class Track {
         pieceIndex,
         laneIndex,
         reversed,
-        table: bakeLane(def, p, laneIndex, reversed),
+        table: bakeLane(def, p, laneIndex, reversed, this.heights ? (x, z) => sampleHeight(this.heights, data.size, x, z) : null),
         profile: def.profile,
         isStart: Boolean(def.isStart),
         next: [],
@@ -225,16 +263,22 @@ export class Track {
           }
           if (other) lane.gap = true
           else {
-            this.warnings.push(`Jump at cell (${exitPort.cx}, ${exitPort.cz}) has nothing to land on`)
+            this.warnings.push(`Jump at cell (${exitPort.cx}, ${exitPort.cz}) has nothing to land on — face another drawbridge half at it`)
+            this.warnPieces.add(lane.pieceIndex)
             continue
           }
         }
         if (!other) {
           this.errors.push(`Open end at cell (${exitPort.cx}, ${exitPort.cz}) ${exitPort.side}, level ${exitPort.level}`)
+          if (lane.pieceIndex < data.pieces.length) this.errorPieces.add(lane.pieceIndex)
+          else this.errorLinks.add(lane.pieceIndex - data.pieces.length)
           continue
         }
         lane.next = lanesFromPort(other.pieceIndex, other.portIndex)
-        if (lane.next.length === 0) this.errors.push(`Piece at (${placedAt(other.pieceIndex).x}, ${placedAt(other.pieceIndex).z}) cannot be entered from that side`)
+        if (lane.next.length === 0) {
+          this.errors.push(`Piece at (${placedAt(other.pieceIndex).x}, ${placedAt(other.pieceIndex).z}) cannot be entered from that side`)
+          this.errorPieces.add(other.pieceIndex)
+        }
         for (const n of lane.next) {
           if (!seen.has(n.id)) {
             seen.add(n.id)
@@ -249,6 +293,12 @@ export class Track {
     }
     this.startLane = start
     for (const lane of this.lanes) for (const n of lane.next) if (!n.prev.includes(lane)) n.prev.push(lane)
+    // Tunnel mouths: only where a tube lane meets plain road (chained tube sections run seamlessly).
+    for (const lane of this.lanes) {
+      if (lane.profile !== 'tube') continue
+      lane.mouthIn = lane.prev.length === 0 || lane.prev.some((p) => p.profile !== 'tube')
+      lane.mouthOut = lane.next.length === 0 || lane.next.some((n) => n.profile !== 'tube')
+    }
     // Closed if following first branches returns to the start lane.
     let closed = false
     let loopLength = 0
@@ -328,8 +378,12 @@ function edgeKey(cx: number, cz: number, side: Side, level: number): string {
 }
 
 /** Sample a lane in world space, in driving direction, with frames. */
-function bakeLane(def: PieceDef, p: PlacedPiece, laneIndex: number, reversed: boolean): PathTable {
+function bakeLane(def: PieceDef, p: PlacedPiece, laneIndex: number, reversed: boolean, ground: ((x: number, z: number) => number) | null): PathTable {
   const ldef = def.lanes[laneIndex]
+  // Roads drape over the landscape point by point; pad pieces sit on the level ground pinned under them.
+  const size = rotatedSize(def, p.rot)
+  const padY = ground ? ground((p.x + size.w / 2) * CELL, (p.z + size.h / 2) * CELL) : 0
+  const drape = ground !== null && drapes(def.type)
   const n = Math.max(2, Math.round(ldef.length / PATH_STEP) + 1)
   // Oversample the path to get arc-length-uniform output.
   const fine = n * 6
@@ -344,7 +398,9 @@ function bakeLane(def: PieceDef, p: PlacedPiece, laneIndex: number, reversed: bo
     if (reversed) t = 1 - t
     ldef.path(t, pt)
     rotateLocal(def, p.rot, pt.x, pt.z, rot)
-    pts.push(p.x * CELL + rot.x, p.level * LEVEL_H + pt.y, p.z * CELL + rot.z)
+    const wx = p.x * CELL + rot.x
+    const wz = p.z * CELL + rot.z
+    pts.push(wx, p.level * LEVEL_H + pt.y + (drape ? ground!(wx, wz) : padY), wz)
     const u = { x: 0, z: 0 }
     rotateLocal(def, p.rot, pt.ux, pt.uz, u)
     // rotateLocal translates; undo by rotating the origin too.

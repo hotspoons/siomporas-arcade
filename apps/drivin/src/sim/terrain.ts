@@ -3,7 +3,7 @@
 // flatten the ground under their footprint to their base height, so a raised
 // road sits on an embankment and the grass always meets the tarmac cleanly.
 
-import { CELL, LEVEL_H } from './Tuning'
+import { CELL } from './Tuning'
 import { PIECE_BY_TYPE, rotatedSize } from './pieces'
 import type { PlacedPiece } from './Track'
 
@@ -45,16 +45,29 @@ export function sampleHeight(heights: number[] | undefined, size: number, x: num
   return (h00 * (1 - tx) + h10 * tx) * (1 - tz) + (h01 * (1 - tx) + h11 * tx) * tz
 }
 
-/** Pin every corner under a road piece's footprint to the piece's base height. */
+/** Pieces whose geometry needs a flat pad (everything else drapes over the landscape). */
+export const PAD_PIECES = new Set(['loop', 'corkscrew', 'tunnel', 'tunnel2', 'bank2', 'bank6'])
+
+/** Whether a piece type follows the ground point by point (roads, ramps, humps, jumps…) rather than sitting on a pad. */
+export function drapes(type: string): boolean {
+  return !PAD_PIECES.has(type)
+}
+
+/**
+ * Pin the corners under pad pieces (loops, tunnels, banks…) to the ground height at the piece's
+ * centre so their fixed geometry has level ground; draping neighbours meet them at that height.
+ */
 export function flattenUnderPieces(heights: number[], size: number, pieces: PlacedPiece[]): void {
+  const pads: { p: PlacedPiece; y: number; s: { w: number; h: number } }[] = []
   for (const p of pieces) {
     const def = PIECE_BY_TYPE[p.type]
-    if (!def || def.decor) continue
+    if (!def || def.decor || drapes(p.type)) continue
     const s = rotatedSize(def, p.rot)
-    const y = p.level * LEVEL_H
+    pads.push({ p, s, y: sampleHeight(heights, size, (p.x + s.w / 2) * CELL, (p.z + s.h / 2) * CELL) })
+  }
+  for (const { p, s, y } of pads)
     for (let z = p.z; z <= p.z + s.h; z++)
       for (let x = p.x; x <= p.x + s.w; x++) if (x >= 0 && z >= 0 && x <= size && z <= size) heights[terrainIndex(size, x, z)] = y
-  }
 }
 
 /**

@@ -4,14 +4,23 @@
 
 import { BufferGeometry, Color, DoubleSide, DynamicDrawUsage, Float32BufferAttribute, Mesh, ShaderMaterial } from 'three'
 import { DRAW_SEGMENTS, ROAD_HALF_WIDTH } from '../sim/Tuning'
+import { RUMBLE_WIDTH, SHOULDER_WIDTH } from './RenderTuning'
 
-const QUADS_PER_SEGMENT = 18
+const QUADS_PER_SEGMENT = 40
 const MAX_QUADS = (DRAW_SEGMENTS + 4) * QUADS_PER_SEGMENT
 
-/** Height (metres) of a banked road's surface at lateral offset u (m, + right): 0 at the inner edge, |tilt| per metre outward, plateauing past the outer shoulder. */
-export function bermLift(u: number, tilt: number, plateau: number): number {
-  const d = Math.sign(tilt) * u + ROAD_HALF_WIDTH // distance from the inner edge toward the outside
-  return Math.abs(tilt) * Math.max(0, Math.min(2 * ROAD_HALF_WIDTH + plateau, d))
+/**
+ * Height (metres) of a banked deck at lateral offset u (m, + right). The deck — shoulders, rumble
+ * strips and tarmac — is one plane pivoting on its inner shoulder edge and rising |tilt| per metre
+ * toward the outside; the land beyond either shoulder stays at grade (a raised banked deck with a
+ * wall under its high side). Every deck quad lies in this one plane, so nothing pokes through.
+ */
+/** Half the deck width (road + rumble + shoulder); read live so the tuning panel stays coherent. */
+export const deckHalf = (): number => ROAD_HALF_WIDTH + RUMBLE_WIDTH + SHOULDER_WIDTH
+export function bermLift(u: number, tilt: number, reach: number): number {
+  const e = Math.sign(tilt) * u + deckHalf() // distance from the inner shoulder edge toward the outside
+  if (e <= 0 || e > reach) return 0
+  return Math.abs(tilt) * e
 }
 
 export class RoadMesh {
@@ -31,8 +40,10 @@ export class RoadMesh {
   private ts1 = 1
   private tx2 = 0
   private ts2 = 1
-  /** Lateral metres over which the plane tilts; beyond it the ground plateaus at the edge height (a berm, not a cliff). */
-  plateau = 13
+  /** Lateral metres from the inner shoulder edge over which the deck tilts (the whole deck). */
+  get plateau(): number {
+    return 2 * deckHalf()
+  }
 
   constructor() {
     this.pos = new Float32BufferAttribute(new Float32Array(MAX_QUADS * 4 * 3), 3)
@@ -104,6 +115,16 @@ export class RoadMesh {
     this.pos.setXYZ(v + 3, x2 - w2, y2 + this.lift(x2 - w2, this.tx2, this.ts2, this.t2), 0)
     for (let k = 0; k < 4; k++) this.col.setXYZ(v + k, this.c.r, this.c.g, this.c.b)
     this.quads++
+  }
+
+  /** A row trapezoid that ignores the current tilt (ground beside a banked deck). */
+  quadFlat(x1: number, y1: number, w1: number, x2: number, y2: number, w2: number, color: number, fogT: number): void {
+    const t1 = this.t1
+    const t2 = this.t2
+    this.t1 = this.t2 = 0
+    this.quad(x1, y1, w1, x2, y2, w2, color, fogT)
+    this.t1 = t1
+    this.t2 = t2
   }
 
   /** Any four screen points, wound a→b→c→d (for walls and portal faces that aren't row trapezoids). */

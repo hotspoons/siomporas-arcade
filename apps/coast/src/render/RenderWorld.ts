@@ -310,7 +310,15 @@ export class RenderWorld {
       // Inside a tunnel it is night whatever the sky says: headlights or a dim bore, lit strips on the ceiling.
       const inTunnel = seg.tunnel
       this.road.setDim(inTunnel ? (curr.lightsOn ? Math.max(TUNNEL_DARK, this.brightAt(zRel) * 0.9 + 0.1) : TUNNEL_DARK) : night ? this.brightAt(zRel) : 1)
-      this.road.quad(W / 2, y1, W, W / 2, y2, W, inTunnel ? 0x2a2a30 : band ? pal.grassA : pal.grassB, fog)
+      const grassCol = inTunnel ? 0x2a2a30 : band ? pal.grassA : pal.grassB
+      if (this.rowTilt[n] !== 0 || this.rowTilt[n + 1] !== 0) {
+        // Banked deck: the ground is drawn as two flat strips outside the deck. A single full-width quad
+        // would have a corner on the raised deck and smear the lift across the whole screen.
+        const bo = ROAD_HALF_WIDTH + RUMBLE_WIDTH + SHOULDER_WIDTH
+        this.road.quadFlat(x1 - bo * s1 - W, y1, W, x2 - bo * s2 - W, y2, W, grassCol, fog)
+        this.road.quadFlat(x1 + bo * s1 + W, y1, W, x2 + bo * s2 + W, y2, W, grassCol, fog)
+        this.road.quadFlat(x1, y1, bo * s1, x2, y2, bo * s2, shade(grassCol, 0.8), fog)
+      } else this.road.quad(W / 2, y1, W, W / 2, y2, W, grassCol, fog)
       if (inTunnel) {
         // Walls up from the road's edges, a ceiling over them, a lit strip every few segments.
         const hw = TUNNEL_HALF_WIDTH
@@ -335,13 +343,19 @@ export class RenderWorld {
           this.road.quad4(x1 - hw * s1, y1, x1 - hw * s1, y1 + ch * s1, x1 + hw * s1, y1 + ch * s1, x1 + hw * s1, y1, 0x0c0c10, 0)
         }
       }
-      if (seg.bank > 0.05 && Math.abs(seg.curve) > 0.05) {
-        // Terraced banking on the outside of the curve: stepped shelves climbing away from the road.
+      if (this.rowTilt[n] !== 0 || this.rowTilt[n + 1] !== 0) {
+        // The high side of a banked deck stands on a wall down to the grass.
         const side = -Math.sign(seg.curve)
-        const b0 = ROAD_HALF_WIDTH + RUMBLE_WIDTH + SHOULDER_WIDTH
+        const bo = ROAD_HALF_WIDTH + RUMBLE_WIDTH + SHOULDER_WIDTH
+        const wx1 = x1 + side * bo * s1
+        const wx2 = x2 + side * bo * s2
+        const l1 = bermLift(side * bo, this.rowTilt[n], this.road.plateau) * s1
+        const l2 = bermLift(side * bo, this.rowTilt[n + 1], this.road.plateau) * s2
+        this.road.quad4(wx1, y1, wx1, y1 + l1, wx2, y2 + l2, wx2, y2, band ? 0x6a6a72 : 0x62626a, fog)
+        // Terraces above the deck on the outside, if any are configured.
         for (let k = 0; k < BANK_TIER_COUNT; k++) {
-          const lo = b0 + k * BANK_TIER_W
-          const hi = lo + BANK_TIER_W + (k === BANK_TIER_COUNT - 1 ? 60 : 0)
+          const lo = bo + k * BANK_TIER_W
+          const hi = lo + BANK_TIER_W
           const h = (k + 1) * BANK_TIER_H * seg.bank
           const col = shade(k % 2 ? pal.grassB : pal.grassA, 1 - 0.12 * (k + 1))
           this.road.quad(x1 + side * ((lo + hi) / 2) * s1, y1 + h * s1, ((hi - lo) / 2) * s1, x2 + side * ((lo + hi) / 2) * s2, y2 + h * s2, ((hi - lo) / 2) * s2, col, fog)
@@ -441,7 +455,7 @@ export class RenderWorld {
           const viewYaw = yaw === 0 ? (Math.atan2((curr.trafficX[ci] - x) * ROAD_HALF_WIDTH, dz) * 180) / Math.PI : yaw
           const viewPitch = (view.drawPlayer ? 9 : 2) + (Math.atan2(camY - stage.heightAt(cz), dz) * 180) / Math.PI
           const frame = this.atlas.frame(kind, viewYaw, viewPitch)
-          if (frame) this.sprites.add(sx + curr.trafficX[ci] * ROAD_HALF_WIDTH * sc, sy, frame.heightM * sc, frame, this.rowFog[n], this.brightAt((base + n) * SEG_LENGTH - camZ), clip, -Math.atan(this.rowTilt[n]))
+          if (frame) this.sprites.add(sx + curr.trafficX[ci] * ROAD_HALF_WIDTH * sc, sy, frame.heightM * sc, frame, this.rowFog[n], this.brightAt((base + n) * SEG_LENGTH - camZ), clip, Math.atan(this.rowTilt[n]))
         }
       }
       if (seg.runway || base + n < 0) continue
@@ -474,7 +488,7 @@ export class RenderWorld {
           squash = 0.62
         }
       }
-      if (frame) this.sprites.add(W / 2 + curr.steer * 2, py + hop, frame.heightM * scale * squash, frame, 0, 1, -1e9, -Math.atan(this.rowTilt[1]))
+      if (frame) this.sprites.add(W / 2 + curr.steer * 2, py + hop, frame.heightM * scale * squash, frame, 0, 1, -1e9, Math.atan(this.rowTilt[1]))
     }
     if (this.previewKind) {
       const f = this.atlas.frame(this.previewKind, this.previewYaw)

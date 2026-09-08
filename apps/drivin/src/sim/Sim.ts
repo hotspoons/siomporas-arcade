@@ -7,7 +7,7 @@ import { EventQueue } from './Events'
 import type { InputFrame } from './InputFrame'
 import { Snapshot, type RunPhase } from './Snapshot'
 import type { Lane, Track } from './Track'
-import { AIR_REV_RATE, CRASH_TIME_PENALTY, REPLAY_PLAY_SECONDS, REPLAY_SECONDS, SEGMENT_PENALTY, SIM_HZ } from './Tuning'
+import { AIR_REV_RATE, CRASH_TIME_PENALTY, RESUME_ADVANCE, REPLAY_PLAY_SECONDS, REPLAY_SECONDS, SEGMENT_PENALTY, SIM_HZ } from './Tuning'
 
 const REPLAY_FRAMES = REPLAY_SECONDS * SIM_HZ
 
@@ -24,8 +24,13 @@ export class Sim {
   lastLap = 0
   bestLap = 0
   crashes = 0
+  /** Why the last crash happened (see Car.crashCause). */
+  crashCause = ''
   /** Experiments: when false a would-be crash is forgiven — you're set back on your wheels and keep some speed. */
   crashesEnabled = true
+  /** Consecutive crashes without a clean stretch of driving: each one resumes RESUME_ADVANCE further on. */
+  private crashStreak = 0
+  private sinceCrash = 0
   /** Airborne engine: with the throttle down the revs climb through the gears with no load, and reset on landing. */
   private airRpm = 0
   private airGear = 1
@@ -135,6 +140,8 @@ export class Sim {
         this.events.push('respawn', this.car.pos, 0)
       }
       car.tick(dt, input)
+      this.sinceCrash += dt
+      if (this.sinceCrash > 4) this.crashStreak = 0
       this.recordPose()
       this.tickAirRevs(dt, input)
       switch (car.event) {
@@ -192,8 +199,9 @@ export class Sim {
       this.replayTime += dt
       if (this.replayTime >= REPLAY_PLAY_SECONDS) {
         this.events.push('replay_end', null)
-        // No teleport: you continue from where you came to rest.
-        this.car.resumeInPlace()
+        // No teleport: you continue from where you came to rest — or a little further on if you keep
+        // crashing right there, so a bad spot can't trap you.
+        this.car.resumeInPlace(0, RESUME_ADVANCE * Math.max(0, this.crashStreak - 1))
         this.prevLane = this.car.lane
         this.events.push('respawn', this.car.pos, 1)
         this.phase = 'driving'
@@ -219,8 +227,11 @@ export class Sim {
   }
 
   private crash(): void {
+    this.crashStreak++
+    this.sinceCrash = 0
+    this.crashCause = this.car.crashCause
     if (!this.crashesEnabled) {
-      this.car.resumeInPlace(0.6)
+      this.car.resumeInPlace(0.6, RESUME_ADVANCE * Math.max(0, this.crashStreak - 1))
       this.events.push('land', this.car.pos, this.car.speed)
       return
     }

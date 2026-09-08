@@ -22,11 +22,11 @@ export let TUNNEL_HALF_WIDTH = 13.5
 export let TUNNEL_HEIGHT = 7.5
 export let TUNNEL_DARK = 0.42
 /** Banked curves: the road plane tilts about its centreline by this rise per lateral metre at bank 1 (0.4 ≈ 22°). */
-export let BANK_SLOPE = 0.22
+export let BANK_SLOPE = 0.24
 /** Terraces on the outer side above the tilted plane, each this wide (m) and this much higher (m at bank 1). */
 export let BANK_TIER_W = 7
 export let BANK_TIER_H = 1.8
-export let BANK_TIER_COUNT = 3
+export let BANK_TIER_COUNT = 0
 export let RUMBLE_WIDTH = 1.6
 /** Shoulder width beyond the rumble strip, metres. */
 export let SHOULDER_WIDTH = 4.5

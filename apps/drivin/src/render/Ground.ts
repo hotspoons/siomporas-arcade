@@ -76,7 +76,7 @@ export class Ground {
         const z = (j / sub) * CELL
         const k = (j * n + i) * 3
         pos[k] = x
-        pos[k + 1] = track.groundHeight(x, z) + 0.01
+        pos[k + 1] = track.groundHeight(x, z) - 0.02
         pos[k + 2] = z
         if (i < n - 1 && j < n - 1) {
           const a = j * n + i

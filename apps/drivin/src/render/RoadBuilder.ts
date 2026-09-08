@@ -158,7 +158,7 @@ export class RoadBuilder {
       t.frameAt(s, f)
       // A full ring inside; at each mouth it pinches down over TUBE_RAMP metres to a lip at road level,
       // so the tube's threshold flows out of the tarmac instead of standing as a wall.
-      const wall = smoothstep(0, TUBE_RAMP, s) * smoothstep(0, TUBE_RAMP, t.length - s)
+      const wall = (lane.mouthIn === false ? 1 : smoothstep(0, TUBE_RAMP, s)) * (lane.mouthOut === false ? 1 : smoothstep(0, TUBE_RAMP, t.length - s))
       const maxA = 0.03 + (Math.PI - 0.03) * Math.pow(wall, 0.7)
       for (let k = 0; k < across; k++) {
         const i = r * across + k

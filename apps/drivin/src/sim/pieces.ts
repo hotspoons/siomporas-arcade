@@ -403,8 +403,21 @@ export const PIECES: PieceDef[] = [
     group: 'flow',
   },
   {
+    type: 'tunnel1',
+    label: 'Tunnel section',
+    w: 1,
+    h: 1,
+    ports: [
+      { cx: 0, cz: 0, side: 'W', dLevel: 0 },
+      { cx: 0, cz: 0, side: 'E', dLevel: 0 },
+    ],
+    lanes: [straight],
+    profile: 'tube',
+    group: 'basic',
+  },
+  {
     type: 'tunnel',
-    label: 'Tunnel',
+    label: 'Tunnel (2 cells)',
     w: 2,
     h: 1,
     ports: [

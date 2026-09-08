@@ -96,6 +96,8 @@ export let REPLAY_PLAY_SECONDS = 4.5
 /** Seconds added to a lap for every required track segment you skipped. */
 export let SEGMENT_PENALTY = 5
 export const CRASH_TIME_PENALTY = 5
+/** Metres further along the road you resume for each consecutive crash on the same spot (~50 ft). */
+export let RESUME_ADVANCE = 15
 
 /** Live-tunable knobs for the tuning panel (F6). Values persist per browser; Copy JSON to ship new defaults. */
 export const SIM_TUNE: TuneSection = {

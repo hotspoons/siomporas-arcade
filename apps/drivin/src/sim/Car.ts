@@ -64,6 +64,8 @@ export class Car {
   wheelSpin = 0
   steerVisual = 0
   event: CarEvent = 'none'
+  /** What the last crash was: shown on the HUD so nothing is ever an invisible wall. */
+  crashCause = ''
 
   // world pose (valid after tick)
   readonly pos = new Vec3()
@@ -103,17 +105,23 @@ export class Car {
    * Put the car back on its wheels where it is: on the lane surface beneath it
    * if there is one, else on the grass. Never teleports.
    */
-  resumeInPlace(keepSpeed = 0): void {
+  resumeInPlace(keepSpeed = 0, advance = 0): void {
     const keep = Math.abs(this.speed) * keepSpeed
     const lanes = this.track.lanesNear(this.pos, this.nearby)
-    for (const lane of lanes) {
+    for (let lane of lanes) {
       lane.table.project(this.pos, this.scratch, this.hit)
       const h = this.hit
       if (!this.scratch.surface || h.over > 0.5 || Math.abs(h.x) > ROAD_HALF_WIDTH + CURB_WIDTH) continue
       if (h.h < -2 || h.h > 3) continue
+      // Repeated crashes on the same spot: resume a little further along the road each time.
+      let s = h.s + advance
+      for (let guard = 0; s > lane.table.length && lane.next[0] && guard < 8; guard++) {
+        s -= lane.table.length
+        lane = lane.next[0]
+      }
       this.mode = 'track'
       this.lane = lane
-      this.s = h.s
+      this.s = Math.min(s, lane.table.length)
       this.lateral = clamp(h.x, -ROAD_HALF_WIDTH, ROAD_HALF_WIDTH)
       this.speed = keep
       this.heading = 0
@@ -125,9 +133,10 @@ export class Car {
       return
     }
     this.mode = 'ground'
-    this.pos.y = this.track.groundHeight(this.pos.x, this.pos.z) + CAR_RIDE
-    this.yaw = Math.atan2(-this.forward.z, this.forward.x)
+    this.yaw = Math.atan2(this.forward.z, this.forward.x)
     this.forward.set(Math.cos(this.yaw), 0, Math.sin(this.yaw))
+    if (advance) this.pos.addScaled(this.forward, advance)
+    this.pos.y = this.track.groundHeight(this.pos.x, this.pos.z) + CAR_RIDE
     this.up.set(0, 1, 0)
     this.speed = 0
     this.vel.set(0, 0, 0)
@@ -283,7 +292,7 @@ export class Car {
           this.event = 'curb'
         }
       } else if (Math.abs(this.lateral) > edge) {
-        const elevated = f.pos.y - lane.baseY > 1.5 || lane.baseY > 0 || f.up.y < 0.7
+        const elevated = f.pos.y - this.track.groundHeight(f.pos.x, f.pos.z) > 1.5 || f.up.y < 0.7
         if (elevated) {
           this.launch(f)
           return
@@ -355,7 +364,7 @@ export class Car {
   /** 0 at a tunnel mouth rising to 1 inside: how much of the wall is there. */
   private tubeWall(lane: Lane, s: number): number {
     const len = lane.table.length
-    return smoothstep(0, TUBE_RAMP, s) * smoothstep(0, TUBE_RAMP, len - s)
+    return (lane.mouthIn === false ? 1 : smoothstep(0, TUBE_RAMP, s)) * (lane.mouthOut === false ? 1 : smoothstep(0, TUBE_RAMP, len - s))
   }
 
   /** Arc length up the wall you can occupy here (curb at the mouths, past horizontal inside). */
@@ -450,6 +459,7 @@ export class Car {
     this.speed = this.vel.length()
 
     if (this.pos.y < FALL_LIMIT) {
+      this.crashCause = 'fell off the world'
       this.event = 'crash'
       return
     }
@@ -457,6 +467,7 @@ export class Car {
     const gh = this.track.groundHeight(this.pos.x, this.pos.z)
     if (this.pos.y <= gh + CAR_RIDE && this.vel.y < 0) {
       if (this.up.y < LAND_MIN_ALIGN || (-this.vel.y > CRASH_IMPACT_SPEED && !this.airGlitch)) {
+        this.crashCause = this.up.y < LAND_MIN_ALIGN ? 'landed upside down' : `landed too hard · ${(-this.vel.y).toFixed(0)} m/s`
         this.event = 'crash'
         return
       }
@@ -489,6 +500,7 @@ export class Car {
         const into = this.vel.dot(this.scratch.up)
         if (h.h > CAR_RIDE + LAND_TOLERANCE || h.h < CAR_RIDE - 2.5 || into > 0) continue
         if (this.up.dot(this.scratch.up) < LAND_MIN_ALIGN || (-into > CRASH_IMPACT_SPEED && !this.airGlitch)) {
+          this.crashCause = this.up.dot(this.scratch.up) < LAND_MIN_ALIGN ? 'landed upside down on the road' : `landed too hard on the road · ${(-into).toFixed(0)} m/s`
           this.event = 'crash'
           return
         }
@@ -553,14 +565,17 @@ export class Car {
     const lanes = this.track.lanesNear(this.pos, this.nearby)
     // Water: the car is gone.
     if (this.track.isWater(this.pos.x, this.pos.z)) {
+      this.crashCause = 'into the water'
       this.event = 'crash'
       return
     }
     // Structures in the way: elevated slabs at bumper height, banked berms, tunnel skins, pillars, scenery.
-    if (this.hitsStructure(lanes) || this.hitsScenery()) {
+    const hit = this.hitsStructure(lanes) || this.hitsScenery()
+    if (hit) {
       this.pos.x = px
       this.pos.z = pz
       if (Math.abs(v) > CRASH_IMPACT_SPEED) {
+        this.crashCause = `hit ${hit}`
         this.event = 'crash'
         return
       }
@@ -570,7 +585,6 @@ export class Car {
     }
     // Back onto a ground-level road (or up a berm's low edge)?
     for (const lane of lanes) {
-      if (lane.baseY > 0) continue
       lane.table.project(this.pos, this.scratch, this.hit)
       const h = this.hit
       if (!this.scratch.surface || h.over > 0.5 || Math.abs(h.x) > ROAD_HALF_WIDTH || Math.abs(h.h) > 1.2) continue
@@ -590,7 +604,7 @@ export class Car {
    * banked or tilted lane is solid below its surface (an embankment), a tunnel's skin blocks
    * from outside, and elevated road stands on pillars.
    */
-  private hitsStructure(lanes: Lane[]): boolean {
+  private hitsStructure(lanes: Lane[]): string {
     for (const lane of lanes) {
       lane.table.project(this.pos, this.scratch, this.hit)
       const h = this.hit
@@ -598,14 +612,20 @@ export class Car {
       if (!f.surface || h.over > 0.5) continue
       const ax = Math.abs(h.x)
       if (lane.profile === 'tube') {
-        // Outside the half-pipe skin (the road itself is entered through the mouth, via rejoin).
-        if (ax > ROAD_HALF_WIDTH && ax < TUBE_RADIUS + 1 && Math.abs(h.h) < 4 && this.tubeWall(lane, h.s) > 0.3) return true
+        // The tube's skin is a ring of radius TUBE_RADIUS about an axis that high above the floor: at car
+        // height it sits only a little outside the road edge, and it flares away above you. Hit it when
+        // the roof line would cross the ring from outside; beside the tunnel you drive clear under the flare.
+        if (this.tubeWall(lane, h.s) > 0.3 && Math.abs(h.h) < 3) {
+          const roof = Math.max(0.2, h.h + 1.1)
+          const skinAtRoof = Math.sqrt(Math.max(0, TUBE_RADIUS * TUBE_RADIUS - (TUBE_RADIUS - roof) ** 2))
+          if (ax > ROAD_HALF_WIDTH * 0.9 && ax < skinAtRoof + CAR_HALF_WIDTH) return 'the tunnel wall'
+        }
         continue
       }
       if (ax <= ROAD_HALF_WIDTH + CURB_WIDTH) {
         // Surface above the bumper line: a slab you'd hit, or a berm you'd drive into.
         const tilted = f.up.y < 0.95
-        if (h.h < 0.3 && (tilted ? h.h > -6 : h.h > -1.4)) return true
+        if (h.h < 0.3 && (tilted ? h.h > -6 : h.h > -1.4)) return tilted ? 'the embankment' : `the underside of the ${this.track.data.pieces[lane.pieceIndex]?.type ?? 'road'}`
         // A slab far above is a bridge — drive under it, minding the pillars below.
       }
       const clearance = f.pos.y - 0.4
@@ -618,22 +638,22 @@ export class Car {
             for (const side of [-PILLAR_SIDE, PILLAR_SIDE]) {
               const dx = this.pos.x - (f.pos.x + f.right.x * side)
               const dz = this.pos.z - (f.pos.z + f.right.z * side)
-              if (dx * dx + dz * dz < 1.6 * 1.6) return true
+              if (dx * dx + dz * dz < 1.6 * 1.6) return 'a pillar'
             }
           }
         }
       }
     }
-    return false
+    return ''
   }
 
   /** Scenery solids (trees, buildings, pumps) as boxes grown by the car's half width. */
-  private hitsScenery(): boolean {
+  private hitsScenery(): string {
     const m = CAR_HALF_WIDTH
     for (const s of this.track.solids) {
-      if (Math.abs(this.pos.x - s.x) < s.hw + m && Math.abs(this.pos.z - s.z) < s.hh + m) return true
+      if (Math.abs(this.pos.x - s.x) < s.hw + m && Math.abs(this.pos.z - s.z) < s.hh + m) return s.kind === 'trunk' ? 'a tree' : s.kind === 'wall' ? 'a building' : s.kind === 'post' ? 'a canopy post' : 'a fuel pump'
     }
-    return false
+    return ''
   }
 
   private updatePose(): void {

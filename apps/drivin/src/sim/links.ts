@@ -150,7 +150,8 @@ export function linkPiece(pieces: PlacedPiece[], link: Link, index: number): { d
         },
       },
     ],
-    profile: 'road',
+    // Tunnel to tunnel: the link is a tube too, so a bore can curve freely between two tunnel sections.
+    profile: PIECE_BY_TYPE[pieces[link.a.piece].type].profile === 'tube' && PIECE_BY_TYPE[pieces[link.b.piece].type].profile === 'tube' ? 'tube' : 'road',
     group: 'flow',
   }
   return { def, placed: { type: def.type, x: 0, z: 0, rot: 0, level: 0 } }

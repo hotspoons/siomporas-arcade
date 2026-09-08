@@ -116,3 +116,7 @@ canvas.game { position: absolute; inset: 0; width: 100%; height: 100%; display: 
 .is-touch .hud .time { font-size: 3em; }
 .rotate { display: none; position: absolute; inset: 0; z-index: 9; align-items: center; justify-content: center; background: var(--bg); letter-spacing: 0.3em; text-align: center; padding: 24px; }
 @media (orientation: portrait) and (pointer: coarse) { .is-driving .rotate { display: flex; } }
+
+/* The title card already says the name in lights; the title menu keeps only its subtitle. */
+.menu.title-screen h1 { display: none; }
+.menu.title-screen .subtitle { margin-top: 2px; }

@@ -125,6 +125,7 @@ export function linkPiece(pieces: PlacedPiece[], link: Link, index: number, roll
   const def: PieceDef = {
     type: `link${index}`,
     label: 'Link',
+    desc: 'A spline road generated between two connectors.',
     w: 1,
     h: 1,
     // The link's ports sit in the cell just outside each linked port, facing back at it: same edge key.

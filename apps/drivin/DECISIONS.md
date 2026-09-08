@@ -100,3 +100,6 @@ Only banks leaning the same way (in driving direction) run through a joint; a le
 
 ## Tilt steering direction (2026-09-08)
 A car steers like a wheel: tilt the phone left and you go left (`TiltSensor.sign = -1` in both driving games). The tube racer keeps the craft leaning into the tilt (`sign = +1`), which is what it read like from the start. Settings → Invert tilt steering flips whichever default the game has, and only appears on touch devices.
+
+## Piece descriptions in the editor (2026-09-08)
+Every `PieceDef` carries a one-line `desc` ("what it is and how to use it"). The palette shows it as a native tooltip with the footprint size (so it still reads when the palette is collapsed to icons), each placed tile is labelled with its piece name once the zoom allows, and a floating tip follows the pointer with the piece under it (level, mirroring, rotation), the link under it (tightness, camber, how to change them), or the piece you are about to place.

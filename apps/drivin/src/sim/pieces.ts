@@ -56,6 +56,8 @@ export interface PieceDef {
   profile: Profile
   /** Editor palette group. */
   group: 'basic' | 'curves' | 'stunts' | 'flow' | 'scenery'
+  /** One line for the editor: what this piece is and how to use it. */
+  desc: string
   /** Show a start/finish line. */
   isStart?: boolean
   /** Scenery: no lanes or ports, just something on the ground (see decor.ts for what it blocks). */
@@ -115,6 +117,7 @@ export const PIECES: PieceDef[] = [
   {
     type: 'start',
     label: 'Start / finish',
+    desc: "Start / finish line. Every track needs exactly one; laps count as you cross it.",
     w: 1,
     h: 1,
     ports: [
@@ -129,6 +132,7 @@ export const PIECES: PieceDef[] = [
   {
     type: 'straight',
     label: 'Straight',
+    desc: "One cell of flat road. The building block for everything.",
     w: 1,
     h: 1,
     ports: [
@@ -142,6 +146,7 @@ export const PIECES: PieceDef[] = [
   {
     type: 'ramp',
     label: 'Ramp up',
+    desc: "Climbs one level over a cell. Use it to get up to a bridge or an elevated straight.",
     w: 1,
     h: 1,
     ports: [
@@ -155,6 +160,7 @@ export const PIECES: PieceDef[] = [
   {
     type: 'rampDown',
     label: 'Ramp down',
+    desc: "Drops one level over a cell — the way back down.",
     w: 1,
     h: 1,
     ports: [
@@ -168,6 +174,7 @@ export const PIECES: PieceDef[] = [
   {
     type: 'hump',
     label: 'Hump',
+    desc: "A short crest. Fun at speed: the car goes light and can leave the ground.",
     w: 1,
     h: 1,
     ports: [
@@ -181,6 +188,7 @@ export const PIECES: PieceDef[] = [
   {
     type: 'jump',
     label: 'Jump',
+    desc: "A take-off lip, a gap, then a landing. Two cells; carry speed or you drop in.",
     w: 2,
     h: 1,
     ports: [
@@ -208,6 +216,7 @@ export const PIECES: PieceDef[] = [
   {
     type: 'curve',
     label: 'Tight curve',
+    desc: "A 90° corner inside one cell. Tight — lift off or you will run wide.",
     w: 1,
     h: 1,
     ports: [
@@ -221,6 +230,7 @@ export const PIECES: PieceDef[] = [
   {
     type: 'curve2',
     label: 'Wide curve',
+    desc: "A 90° corner over two cells. Fast and flowing.",
     w: 2,
     h: 2,
     ports: [
@@ -234,6 +244,7 @@ export const PIECES: PieceDef[] = [
   {
     type: 'bank2',
     label: 'Banked sweeper',
+    desc: "A banked 90° sweeper, 4×4. The camber holds you; chain two for one long embankment.",
     w: 4,
     h: 4,
     ports: [
@@ -248,6 +259,7 @@ export const PIECES: PieceDef[] = [
   {
     type: 'bank6',
     label: 'Speedbowl bank',
+    desc: "The speedbowl: a huge, steeply banked 90° turn, 6×6. Flat out if you dare.",
     w: 6,
     h: 6,
     ports: [
@@ -263,6 +275,7 @@ export const PIECES: PieceDef[] = [
   {
     type: 'cross',
     label: 'Crossroads',
+    desc: "Crossroads. Lets the track cross over itself on the same level.",
     w: 1,
     h: 1,
     ports: [
@@ -279,6 +292,7 @@ export const PIECES: PieceDef[] = [
   {
     type: 'loop',
     label: 'Loop',
+    desc: "Vertical loop, 2×2. Needs real speed at the bottom or you fall off the top.",
     w: 2,
     h: 2,
     ports: [
@@ -322,6 +336,7 @@ export const PIECES: PieceDef[] = [
   {
     type: 'drawbridge',
     label: 'Drawbridge half',
+    desc: "Half a raised bridge. Face two of them across open cells (water, say) and jump the gap.",
     w: 1,
     h: 1,
     ports: [
@@ -345,6 +360,7 @@ export const PIECES: PieceDef[] = [
   {
     type: 'corkscrew',
     label: 'Corkscrew',
+    desc: "A full barrel roll over four cells. Steer into the turn going up, out of it coming down.",
     w: 4,
     h: 1,
     ports: [
@@ -373,6 +389,7 @@ export const PIECES: PieceDef[] = [
   {
     type: 'split',
     label: 'Split',
+    desc: "The road divides into two. Pick a side; both are driveable.",
     w: 2,
     h: 2,
     ports: [
@@ -390,6 +407,7 @@ export const PIECES: PieceDef[] = [
   {
     type: 'join',
     label: 'Join',
+    desc: "Two roads merge back into one.",
     w: 2,
     h: 2,
     ports: [
@@ -407,6 +425,7 @@ export const PIECES: PieceDef[] = [
   {
     type: 'tunnel1',
     label: 'Tunnel section',
+    desc: "One cell of tunnel. Chain them and the bore runs seamlessly; ride the walls at speed.",
     w: 1,
     h: 1,
     ports: [
@@ -420,6 +439,7 @@ export const PIECES: PieceDef[] = [
   {
     type: 'tunnel',
     label: 'Tunnel (2 cells)',
+    desc: "Two cells of tunnel in one piece.",
     w: 2,
     h: 1,
     ports: [
@@ -433,6 +453,7 @@ export const PIECES: PieceDef[] = [
   {
     type: 'tunnel2',
     label: 'Tunnel curve',
+    desc: "A 90° tunnel corner.",
     w: 2,
     h: 2,
     ports: [
@@ -446,12 +467,12 @@ export const PIECES: PieceDef[] = [
 ]
 
 const SCENERY: PieceDef[] = [
-  { type: 'water', label: 'Water', w: 1, h: 1, ports: [], lanes: [], profile: 'road', group: 'scenery', decor: 'water' },
-  { type: 'lake', label: 'Lake', w: 3, h: 3, ports: [], lanes: [], profile: 'road', group: 'scenery', decor: 'water' },
-  { type: 'trees', label: 'Trees', w: 1, h: 1, ports: [], lanes: [], profile: 'road', group: 'scenery', decor: 'trees' },
-  { type: 'forest', label: 'Forest', w: 2, h: 2, ports: [], lanes: [], profile: 'road', group: 'scenery', decor: 'trees' },
-  { type: 'building', label: 'Building', w: 2, h: 2, ports: [], lanes: [], profile: 'road', group: 'scenery', decor: 'building' },
-  { type: 'gas', label: 'Gas station', w: 2, h: 1, ports: [], lanes: [], profile: 'road', group: 'scenery', decor: 'gas' },
+  { type: 'water', label: 'Water', desc: "Water. Drive in and the run is over — good for framing a drawbridge jump.", w: 1, h: 1, ports: [], lanes: [], profile: 'road', group: 'scenery', decor: 'water' },
+  { type: 'lake', label: 'Lake', desc: "A 3×3 stretch of water.", w: 3, h: 3, ports: [], lanes: [], profile: 'road', group: 'scenery', decor: 'water' },
+  { type: 'trees', label: 'Trees', desc: "A cluster of trees. Solid: clip a trunk and you crash.", w: 1, h: 1, ports: [], lanes: [], profile: 'road', group: 'scenery', decor: 'trees' },
+  { type: 'forest', label: 'Forest', desc: "A 2×2 block of trees.", w: 2, h: 2, ports: [], lanes: [], profile: 'road', group: 'scenery', decor: 'trees' },
+  { type: 'building', label: 'Building', desc: "A building with a pavement around it. Solid.", w: 2, h: 2, ports: [], lanes: [], profile: 'road', group: 'scenery', decor: 'building' },
+  { type: 'gas', label: 'Gas station', desc: "A gas station: canopy, pumps and a kiosk. All solid.", w: 2, h: 1, ports: [], lanes: [], profile: 'road', group: 'scenery', decor: 'gas' },
 ]
 PIECES.push(...SCENERY)
 

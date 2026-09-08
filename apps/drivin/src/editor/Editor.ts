@@ -61,6 +61,7 @@ export class Editor {
   private readonly title: HTMLElement
   private readonly palette: HTMLElement
   private readonly loadSelect: HTMLSelectElement
+  private readonly tip: HTMLElement
   private data: TrackData = { name: 'Untitled', size: 16, pieces: [] }
   private currentId: string | null = null
   private selectedType = 'straight'
@@ -133,6 +134,7 @@ export class Editor {
         <canvas class="grid"></canvas>
       </div>
       <div class="status"></div>
+      <div class="editor-tip hidden"></div>
     `
     parent.appendChild(this.el)
     this.canvas = this.el.querySelector('canvas')!
@@ -141,6 +143,7 @@ export class Editor {
     this.title = this.el.querySelector('[data-title]')!
     this.palette = this.el.querySelector('.palette')!
     this.loadSelect = this.el.querySelector('[data-load]')!
+    this.tip = this.el.querySelector('.editor-tip')!
     this.buildPalette()
     this.applyPalette()
     const grip = this.el.querySelector<HTMLElement>('.palette-grip')!
@@ -192,6 +195,7 @@ export class Editor {
     this.canvas.addEventListener('pointerup', (e) => this.onUp(e))
     this.canvas.addEventListener('pointerleave', () => {
       this.hover = null
+      this.tip.classList.add('hidden')
       this.dirty = true
     })
     this.canvas.addEventListener('wheel', (e) => this.onWheel(e), { passive: false })
@@ -265,6 +269,7 @@ export class Editor {
         const b = document.createElement('button')
         b.className = 'piece' + (def.type === this.selectedType ? ' selected' : '')
         b.dataset.type = def.type
+        b.title = `${def.label} · ${def.w}×${def.h} cell${def.w * def.h > 1 ? 's' : ''}\n${def.desc}`
         const icon = document.createElement('canvas')
         icon.width = 48
         icon.height = 48
@@ -978,6 +983,57 @@ export class Editor {
     return { x: Math.floor(w.x), z: Math.floor(w.z) }
   }
 
+  /**
+   * What is under the pointer, as a floating label: the piece there (with its level, mirroring and
+   * anything the checker flagged), a link, or the piece you are about to place.
+   */
+  private showTip(e: PointerEvent, c: Cell): void {
+    if (this.mode === 'terrain' || this.pan || this.drag || this.sculpt || this.menu) {
+      this.tip.classList.add('hidden')
+      return
+    }
+    let head = ''
+    let body = ''
+    const li = this.linkAt(e)
+    const under = this.pieceAt(c.x, c.z)
+    if (li >= 0) {
+      const l = this.data.links![li]
+      head = `Link ${li + 1}`
+      body = `Spline road · tightness ${(l.tightness || LINK_TIGHTNESS_DEFAULT).toFixed(2)}${l.bank ? ' · cambered' : ''}. , / . adjust · B camber · ⌥-click unlink.`
+    } else if (under >= 0) {
+      const p = this.data.pieces[under]
+      const def = PIECE_BY_TYPE[p.type]
+      const bits = [`L${p.level}`]
+      if (p.mirror) bits.push('mirrored')
+      if (p.rot) bits.push(`${p.rot * 90}°`)
+      head = `${def.label} · ${bits.join(' · ')}`
+      body = def.desc
+    } else {
+      const def = PIECE_BY_TYPE[this.selectedType]
+      if (!def) {
+        this.tip.classList.add('hidden')
+        return
+      }
+      head = `Place: ${def.label}${this.mirror ? ' (mirrored)' : ''}`
+      body = def.desc
+    }
+    this.tip.innerHTML = ''
+    const h = document.createElement('strong')
+    h.textContent = head
+    const b = document.createElement('span')
+    b.textContent = body
+    this.tip.append(h, b)
+    this.tip.classList.remove('hidden')
+    // Keep it on screen, below-right of the pointer by default.
+    const r = this.el.getBoundingClientRect()
+    const tw = this.tip.offsetWidth
+    const th = this.tip.offsetHeight
+    const x = Math.min(e.clientX - r.left + 16, r.width - tw - 8)
+    const y = e.clientY - r.top + 20 + th > r.height - 8 ? e.clientY - r.top - th - 12 : e.clientY - r.top + 20
+    this.tip.style.left = `${Math.max(8, x)}px`
+    this.tip.style.top = `${Math.max(8, y)}px`
+  }
+
   /** Fractional cell coordinates under the pointer (for the brush). */
   private pointerCell(e: PointerEvent): { x: number; z: number } {
     const { px, py } = this.canvasPoint(e)
@@ -1057,6 +1113,7 @@ export class Editor {
       this.hover = c
       this.dirty = true
     }
+    this.showTip(e, c)
   }
 
   private onDown(e: PointerEvent): void {
@@ -1580,6 +1637,21 @@ export class Editor {
         c.fillStyle = LEVEL_TINT[Math.min(6, p.level)]
         c.font = `${Math.max(10, cell * 0.28)}px "VT323", ui-monospace, monospace`
         c.fillText(`L${p.level}`, a.x + 4, a.y + cell * 0.32)
+      }
+      // The piece's name along the bottom of its footprint, once there is room for it.
+      if (cell >= 26) {
+        const fs = Math.max(11, Math.min(16, cell * 0.3))
+        c.font = `${fs}px "VT323", ui-monospace, monospace`
+        const text = def.label + (p.mirror ? ' ⇅' : '')
+        const tw = c.measureText(text).width
+        if (tw < size.w * cell - 6) {
+          const tx = a.x + (size.w * cell - tw) / 2
+          const ty = a.y + size.h * cell - 5
+          c.fillStyle = 'rgba(6,9,20,0.62)'
+          c.fillRect(tx - 3, ty - fs + 1, tw + 6, fs + 3)
+          c.fillStyle = sel ? '#ffffff' : 'rgba(232,246,255,0.92)'
+          c.fillText(text, tx, ty)
+        }
       }
       if (sel) {
         c.strokeStyle = '#ffffff'

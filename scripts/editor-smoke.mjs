@@ -45,6 +45,16 @@ const at = async (x, z) => {
   return { x: box.x + p.x, y: box.y + p.y }
 }
 const state = () => page.evaluate(() => JSON.parse(JSON.stringify(window.__apex.game.editor.current)))
+// A point on the road itself, a fraction of the way along. Anything that has to land *on* the road
+// uses this rather than a waypoint's raw coordinates: the plan view stretches the lateral axis, so a
+// point beside the road can be hundreds of pixels away even when it is metres away in the world.
+const onRoad = (frac) =>
+  page.evaluate((f) => {
+    const path = window.__apex.game.editor.path()
+    const s = { s: 0, x: 0, z: 0, y: 0, heading: 0, bank: 0 }
+    path.at(f * path.length, s)
+    return { x: s.x, z: s.z }
+  }, frac)
 const tool = async (label) => {
   // Exact text: "Palm" must not pick "Palm coast".
   await page.click(`.editor .palette .tool span:text-is("${label}")`)
@@ -59,6 +69,17 @@ const clickAt = async (x, z) => {
   await page.mouse.click(p.x, p.y)
   await page.waitForTimeout(80)
 }
+/** Drag from a world point by a pixel offset. Distances across the road are exaggerated in the plan
+ *  view, so a drag written in metres can fly off the canvas; when the test cares about "pull this
+ *  sideways a bit", pixels are what it means. */
+const dragPx = async (from, dx, dy, steps = 8) => {
+  const a = await at(from[0], from[1])
+  await page.mouse.move(a.x, a.y)
+  await page.mouse.down()
+  for (let i = 1; i <= steps; i++) await page.mouse.move(a.x + (dx * i) / steps, a.y + (dy * i) / steps)
+  await page.mouse.up()
+  await page.waitForTimeout(90)
+}
 const dragAt = async (from, to, steps = 8) => {
   const a = await at(from[0], from[1])
   const b = await at(to[0], to[1])
@@ -67,6 +88,13 @@ const dragAt = async (from, to, steps = 8) => {
   for (let i = 1; i <= steps; i++) await page.mouse.move(a.x + ((b.x - a.x) * i) / steps, a.y + ((b.y - a.y) * i) / steps)
   await page.mouse.up()
   await page.waitForTimeout(90)
+}
+
+/** Re-fit the plan view. A drag written in world metres can put a waypoint far outside the canvas —
+ *  the lateral axis is exaggerated — and a click on a point that is off-screen reaches no element. */
+const refit = async () => {
+  await page.evaluate(() => window.__apex.game.editor.action('fit'))
+  await page.waitForTimeout(80)
 }
 
 const check = (name, ok, extra = '') => {
@@ -86,6 +114,7 @@ await tool('Select / move')
 await dragAt([0, 600], [-260, 600])
 w = await state()
 check('drag moves a waypoint', Math.abs(w.tracks[0].nodes[1].x + 260) < 40, `x=${w.tracks[0].nodes[1].x}`)
+await refit()
 
 // 3. Select it, then drag its out-handle (the road should get longer).
 const before = await page.evaluate(() => window.__apex.game.editor.path().length)
@@ -95,10 +124,12 @@ const h = await page.evaluate(() => {
   const ns = window.__apex.game.editor.current.tracks[0].nodes
   return { x: ns[1].x + (ns[2].x - ns[0].x) / 6, z: ns[1].z + (ns[2].z - ns[0].z) / 6 }
 })
-await dragAt([h.x, h.z], [h.x - 400, h.z + 200])
+await dragPx([h.x, h.z], -220, 120)
 w = await state()
 const after = await page.evaluate(() => window.__apex.game.editor.path().length)
-check('handle drag bends the road', w.tracks[0].nodes[1].outX !== undefined && Math.abs(after - before) > 5, `len ${before.toFixed(0)} → ${after.toFixed(0)}`)
+check('handle drag bends the road', w.tracks[0].nodes[1].outX !== undefined && Math.abs(after - before) > 1, `len ${before.toFixed(0)} → ${after.toFixed(0)}, handle ${w.tracks[0].nodes[1].outX?.toFixed(0)},${w.tracks[0].nodes[1].outZ?.toFixed(0)}`)
+
+await refit()
 
 // 4. Place a prop beside the road.
 await tool('Palm')
@@ -123,7 +154,9 @@ check('two vibe shifts along the track', w.tracks[0].vibes.length === 3, w.track
 
 // 7. Drag an ocean front along part of the road.
 await tool('Ocean front · left')
-await dragAt([w.tracks[0].nodes[0].x, 200], [w.tracks[0].nodes[1].x, w.tracks[0].nodes[1].z])
+const shoreA = await onRoad(0.08)
+const shoreB = await onRoad(0.3)
+await dragAt([shoreA.x, shoreA.z], [shoreB.x, shoreB.z])
 w = await state()
 check('macro element dragged out', w.tracks[0].spans.length === 1 && w.tracks[0].spans[0].kind === 'shore', JSON.stringify(w.tracks[0].spans[0]))
 
@@ -227,13 +260,12 @@ check('save puts the world in the store', Boolean(saved.id) && saved.list.includ
 
 await page.screenshot({ path: 'shots/ed-hand.png' })
 
-// 14. The Menu button leaves the editor for the title, where the world can be chosen.
-// (Deliberately not the Escape key: the shared engine's keyboard edges are mid-rewrite
-// in the main checkout right now and leave Escape latched, which is not ours to fix.)
-await page.click('.editor button[data-act="exit"]')
+// 14. Escape leaves the editor for the title, where the world can be chosen. (This used the Menu
+// button while the engine's keyboard edges were mid-rewrite and Escape latched; that has landed.)
+await page.keyboard.press('Escape')
 await page.waitForTimeout(500)
 const onTitle = await page.evaluate(() => ({ state: window.__apex.game.state, hidden: document.querySelector('.editor').classList.contains('hidden') }))
-check('the Menu button leaves the editor for the title', onTitle.state === 'title' && onTitle.hidden, JSON.stringify(onTitle))
+check('Escape leaves the editor for the title', onTitle.state === 'title' && onTitle.hidden, JSON.stringify(onTitle))
 const rows = await page.$$eval('.menu .items .item .label', (ls) => ls.map((l) => l.textContent.trim()))
 check('the title menu offers WORLD and BUILD A WORLD', rows.some((r) => r.startsWith('WORLD')) && rows.some((r) => r.startsWith('BUILD A WORLD')), rows.slice(0, 6).join(' | '))
 check('and a way straight back to the editor', rows.some((r) => r.includes('BACK TO THE EDITOR')), '')

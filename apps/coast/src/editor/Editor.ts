@@ -95,6 +95,10 @@ function ago(ms: number): string {
 }
 const MIN_SCALE = 0.02
 const MAX_SCALE = 4
+/** The widest the lateral axis may be stretched against the along-road one. */
+const MAX_STRETCH = 40
+/** The stretches the toolbar button walks through; 0 means fit it to the track. */
+const STRETCHES = [0, 1, 2, 4, 8, 16]
 const STRIP_MARGIN = 14
 const PROFILE_H = 96
 const TIMELINE_H = 122
@@ -152,7 +156,16 @@ export class Editor {
   private menu: HTMLElement | null = null
 
   /** Plan view: world metres at the canvas centre, and pixels per metre. */
-  private view = { cx: 0, cz: 500, scale: 0.22 }
+  /**
+   * The plan view. `scale` is pixels per metre along the road; `stretch` multiplies that across it.
+   *
+   * These roads are 5 km long and wander by a couple of hundred metres, so at one scale for both axes
+   * a whole stage is a hairline and there is nothing to grab. Stretching the lateral axis is the same
+   * trick a road engineer's long section uses: distances along and across are honestly labelled, they
+   * are just not the same. `stretchAuto` refits it whenever the view is fitted.
+   */
+  private view = { cx: 0, cz: 500, scale: 0.22, stretch: 1 }
+  private stretchAuto = true
   /** Set view: its own units at the canvas centre, and pixels per unit. */
   private setView = { cx: 0, cy: 0, scale: 1 }
   private pan: { px: number; py: number; cx: number; cy: number } | null = null
@@ -177,6 +190,7 @@ export class Editor {
   private pathCache: { key: string; path: TrackPath } | null = null
   private reportCache: { key: string; report: TrackReport } | null = null
   private hover = { x: 0, z: 0, s: -1, lateral: 0, near: false }
+  private readonly hoverSample: PathSample = { s: 0, x: 0, z: 0, y: 0, heading: 0, bank: 0 }
   private paletteW = Number(localStorage.getItem('apex-coast.editor.paletteW') ?? 232) || 232
   private paletteCollapsed = localStorage.getItem('apex-coast.editor.paletteCollapsed') === '1'
 
@@ -203,6 +217,7 @@ export class Editor {
         <span class="sep"></span>
         <button data-act="undo" title="${MOD}Z">↶</button><button data-act="redo" title="${MOD}⇧Z">↷</button>
         <button data-act="zoom-" title="−">−</button><button data-act="fit" title="0">Fit</button><button data-act="zoom+" title="+">+</button>
+        <button data-act="stretch" data-stretch title="How much the view exaggerates the road's wander. These roads are 5 km long and stray a couple of hundred metres, so at 1:1 a whole stage is a hairline.">⇔ Auto</button>
         <span class="spring"></span>
         <button data-act="smooth" title="Open out every corner the car could not hold">◡ Smooth</button>
         <button data-act="fork-builtin" title="Trace the built-in coast-to-coast route into editable waypoints">⑂ Fork built-in</button>
@@ -235,6 +250,20 @@ export class Editor {
     this.crumbEl = this.el.querySelector('[data-crumb]')!
     this.loadSelect = this.el.querySelector('[data-load]')!
     this.tip = this.el.querySelector('.editor-tip')!
+    // Canvases are sized from their layout box when they draw, and the editor only draws when something
+    // changed — so a canvas measured before the layout settled (or a window resized mid-edit) stayed at
+    // whatever size it was born with, stretched by CSS. Watch the box instead of hoping.
+    if (typeof ResizeObserver !== 'undefined') {
+      const ro = new ResizeObserver(() => {
+        this.dirty = true
+        if (this.visible && this.stretchAuto) this.needFit = true
+      })
+      ro.observe(this.plan)
+      ro.observe(this.el)
+    }
+    window.addEventListener('resize', () => {
+      this.dirty = true
+    })
 
     this.el.addEventListener('click', (e) => {
       const act = (e.target as HTMLElement).closest<HTMLElement>('[data-act]')?.dataset.act
@@ -706,6 +735,9 @@ export class Editor {
         setTimeout(() => URL.revokeObjectURL(a.href), 1000)
         break
       }
+      case 'stretch':
+        this.cycleStretch()
+        break
       case 'smooth':
         this.smooth()
         break
@@ -878,16 +910,21 @@ export class Editor {
     return { px: e.clientX - r.left, py: e.clientY - r.top }
   }
 
+  /** Pixels per metre across the road: the along-road scale times the lateral stretch. */
+  private get lateralScale(): number {
+    return this.view.scale * this.view.stretch
+  }
+
   private toPx(x: number, z: number): { x: number; y: number } {
     const w = this.plan.clientWidth
     const h = this.plan.clientHeight
-    return { x: (x - this.view.cx) * this.view.scale + w / 2, y: h / 2 - (z - this.view.cz) * this.view.scale }
+    return { x: (x - this.view.cx) * this.lateralScale + w / 2, y: h / 2 - (z - this.view.cz) * this.view.scale }
   }
 
   private toWorld(px: number, py: number): { x: number; z: number } {
     const w = this.plan.clientWidth
     const h = this.plan.clientHeight
-    return { x: (px - w / 2) / this.view.scale + this.view.cx, z: (h / 2 - py) / this.view.scale + this.view.cz }
+    return { x: (px - w / 2) / this.lateralScale + this.view.cx, z: (h / 2 - py) / this.view.scale + this.view.cz }
   }
 
   private setToPx(x: number, y: number): { x: number; y: number } {
@@ -930,11 +967,38 @@ export class Editor {
       const z0 = Math.min(...nodes.map((n) => n.z))
       const z1 = Math.max(...nodes.map((n) => n.z))
       const pad = 220
-      this.view.scale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, Math.min(w / (x1 - x0 + pad), h / (z1 - z0 + pad))))
+      this.view.scale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, h / (z1 - z0 + pad)))
+      if (this.stretchAuto) {
+        // Fill about four fifths of the width with however far the road wanders.
+        const across = Math.max(80, x1 - x0)
+        this.view.stretch = Math.max(1, Math.min(MAX_STRETCH, (w * 0.8) / across / this.view.scale))
+      }
       this.view.cx = (x0 + x1) / 2
       this.view.cz = (z0 + z1) / 2
+      this.syncStretchButton()
     }
     this.dirty = true
+  }
+
+  /** Walk the lateral exaggeration through its steps: fit-to-track, then 1× (the honest one) and up. */
+  private cycleStretch(): void {
+    if (this.mode !== 'track') return this.flash('The lateral stretch is for the track view')
+    const now = this.stretchAuto ? 0 : this.view.stretch
+    const i = STRETCHES.findIndex((s) => s === now)
+    const next = STRETCHES[(i + 1) % STRETCHES.length]
+    this.stretchAuto = next === 0
+    if (this.stretchAuto) this.fit()
+    else this.view.stretch = next
+    this.syncStretchButton()
+    this.flash(this.stretchAuto ? 'Lateral stretch: fitted to the track' : next === 1 ? 'Lateral stretch off — true scale, both axes' : `Lateral stretch ×${next}`)
+    this.dirty = true
+  }
+
+  private syncStretchButton(): void {
+    const b = this.el.querySelector<HTMLElement>('[data-stretch]')
+    if (!b) return
+    b.textContent = this.stretchAuto ? `⇔ Auto ×${this.view.stretch.toFixed(this.view.stretch < 10 ? 1 : 0)}` : `⇔ ×${this.view.stretch}`
+    b.classList.toggle('active', this.view.stretch > 1.05)
   }
 
   private centreOnTrack(id: string): void {
@@ -973,7 +1037,7 @@ export class Editor {
     const p = this.canvasPoint(e, this.plan)
     if (e.shiftKey) {
       if (this.mode === 'set') this.setView.cx += e.deltaY / this.setView.scale
-      else this.view.cx += e.deltaY / this.view.scale
+      else this.view.cx += e.deltaY / this.lateralScale
       this.dirty = true
       return
     }
@@ -987,10 +1051,14 @@ export class Editor {
     const w = this.toWorld(p.px, p.py)
     this.hover.x = w.x
     this.hover.z = w.z
-    const near = this.path().nearest(w.x, w.z)
+    const path = this.path()
+    const near = path.nearest(w.x, w.z)
     this.hover.s = near.s
     this.hover.lateral = near.lateral
-    this.hover.near = near.dist * this.view.scale < 90
+    // In pixels: with the lateral axis stretched, a distance in metres means different things by axis.
+    path.at(near.s, this.hoverSample)
+    const q = this.toPx(this.hoverSample.x, this.hoverSample.z)
+    this.hover.near = Math.hypot(q.x - p.px, q.y - p.py) < 90
   }
 
   private onPlanDown(e: PointerEvent): void {
@@ -1112,7 +1180,7 @@ export class Editor {
         this.setView.cx = this.pan.cx - (p.px - this.pan.px) / this.setView.scale
         this.setView.cy = this.pan.cy - (p.py - this.pan.py) / this.setView.scale
       } else {
-        this.view.cx = this.pan.cx - (p.px - this.pan.px) / this.view.scale
+        this.view.cx = this.pan.cx - (p.px - this.pan.px) / this.lateralScale
         this.view.cz = this.pan.cy + (p.py - this.pan.py) / this.view.scale
       }
       this.dirty = true
@@ -1398,7 +1466,7 @@ export class Editor {
 
   /** How far off the road the scene and vibe flags stand, in metres — a fixed 40 px at any zoom. */
   private markerStalk(): number {
-    return Math.max(ROAD_HALF_WIDTH * 2, 40 / this.view.scale)
+    return Math.max(ROAD_HALF_WIDTH * 2, 40 / this.lateralScale)
   }
 
   private markerAt(px: number, py: number): Sel {
@@ -2004,7 +2072,12 @@ export class Editor {
       this.drawSet()
       this.statusHints.textContent = 'drag boxes · drag the ● on a box onto another to link · two links out = a fork · ⌥click a link to cut it · dbl-click to edit · Tab track view'
     }
-    this.statusInfo.textContent = this.statusText()
+    const info = this.statusText()
+    this.statusInfo.textContent = info
+    // The bar is one line, and a warning is exactly the thing that gets cut off it. Keep the whole
+    // sentence reachable, and say so when there is more to read.
+    this.statusInfo.title = info
+    this.statusInfo.classList.toggle('warn', info.startsWith('⚠') || info.startsWith('✕'))
   }
 
   private statusText(): string {
@@ -2176,20 +2249,25 @@ export class Editor {
     const path = this.path()
     c.fillStyle = '#101a14'
     c.fillRect(0, 0, w, h)
-    // Grid every 100 m, brighter every kilometre.
-    const gridStep = 100 * this.view.scale > 14 ? 100 : 100 * this.view.scale > 4 ? 500 : 1000
+    // Grid, brighter every kilometre. The two axes pick their own step: with the lateral axis stretched
+    // a squared-off grid would be a lie, and a grid of the right size across is what makes the stretch
+    // readable — you can see at a glance that the squares are long and thin.
+    const stepFor = (perMetre: number) => (100 * perMetre > 14 ? 100 : 100 * perMetre > 4 ? 500 : 1000)
+    const gridStep = stepFor(this.view.scale)
+    const gridStepX = stepFor(this.lateralScale)
     const o = this.toPx(0, 0)
-    const stepPx = gridStep * this.view.scale
-    for (let i = Math.floor(-o.x / stepPx) - 1; i * stepPx + o.x < w; i++) {
-      const x = i * stepPx + o.x
-      c.strokeStyle = (i * gridStep) % 1000 === 0 ? 'rgba(255,255,255,0.11)' : 'rgba(255,255,255,0.045)'
+    const stepPxX = gridStepX * this.lateralScale
+    const stepPxZ = gridStep * this.view.scale
+    for (let i = Math.floor(-o.x / stepPxX) - 1; i * stepPxX + o.x < w; i++) {
+      const x = i * stepPxX + o.x
+      c.strokeStyle = (i * gridStepX) % 1000 === 0 ? 'rgba(255,255,255,0.11)' : 'rgba(255,255,255,0.045)'
       c.beginPath()
       c.moveTo(x, 0)
       c.lineTo(x, h)
       c.stroke()
     }
-    for (let i = Math.floor(-(h - o.y) / stepPx) - 1; o.y - i * stepPx > 0; i++) {
-      const y = o.y - i * stepPx
+    for (let i = Math.floor(-(h - o.y) / stepPxZ) - 1; o.y - i * stepPxZ > 0; i++) {
+      const y = o.y - i * stepPxZ
       c.strokeStyle = (i * gridStep) % 1000 === 0 ? 'rgba(255,255,255,0.11)' : 'rgba(255,255,255,0.045)'
       c.beginPath()
       c.moveTo(0, y)
@@ -2288,7 +2366,7 @@ export class Editor {
       const p = this.toPx(sample.x, sample.z)
       const hx = Math.sin(sample.heading)
       const hz = Math.cos(sample.heading)
-      const arm = Math.max(ROAD_HALF_WIDTH * 2.4, 18 / this.view.scale)
+      const arm = Math.max(ROAD_HALF_WIDTH * 2.4, 18 / this.lateralScale)
       const a = this.toPx(sample.x + hz * arm, sample.z - hx * arm)
       const b = this.toPx(sample.x - hz * arm, sample.z + hx * arm)
       c.strokeStyle = this.sel?.kind === 'crossing' && this.sel.i === i ? '#ffd45f' : '#f0e8c0'
@@ -2409,20 +2487,32 @@ export class Editor {
       c.stroke()
       c.globalAlpha = 1
     }
-    // A scale bar, because everything here is in real metres.
-    const barM = gridStep * (gridStep * this.view.scale < 60 ? 5 : 1)
-    const barPx = barM * this.view.scale
+    // A scale bar per axis, because everything here is in real metres and the two axes are not the
+    // same size. The corner they share is the origin of both.
+    const label = (m: number) => (m >= 1000 ? `${m / 1000} km` : `${m} m`)
+    const alongM = gridStep * (gridStep * this.view.scale < 60 ? 5 : 1)
+    const acrossM = gridStepX * (gridStepX * this.lateralScale < 60 ? 5 : 1)
     c.strokeStyle = 'rgba(255,255,255,0.6)'
     c.lineWidth = 2
     c.beginPath()
     c.moveTo(14, h - 16)
-    c.lineTo(14 + barPx, h - 16)
+    c.lineTo(14 + acrossM * this.lateralScale, h - 16)
+    c.moveTo(14, h - 16)
+    c.lineTo(14, h - 16 - alongM * this.view.scale)
     c.stroke()
     c.fillStyle = 'rgba(255,255,255,0.7)'
     c.font = '11px system-ui, sans-serif'
     c.textAlign = 'left'
     c.textBaseline = 'bottom'
-    c.fillText(barM >= 1000 ? `${barM / 1000} km` : `${barM} m`, 14, h - 20)
+    c.fillText(`${label(acrossM)} across`, 14, h - 20)
+    c.textBaseline = 'top'
+    c.fillText(`${label(alongM)} along`, 20, h - 16 - alongM * this.view.scale)
+    if (this.view.stretch > 1.05) {
+      c.fillStyle = 'rgba(255,212,95,0.75)'
+      c.textAlign = 'right'
+      c.textBaseline = 'bottom'
+      c.fillText(`across ×${this.view.stretch.toFixed(this.view.stretch < 10 ? 1 : 0)}`, w - 14, h - 14)
+    }
     if (this.hover.near && this.hover.s >= 0) {
       c.textAlign = 'right'
       c.fillText(`${Math.round(this.hover.s)} m · ${(this.hover.lateral / ROAD_HALF_WIDTH).toFixed(2)} road widths out`, w - 14, h - 20)

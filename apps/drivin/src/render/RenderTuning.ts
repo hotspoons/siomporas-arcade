@@ -23,9 +23,13 @@ export const TUBE_SEGMENTS_RETRO = 10
 export const MAX_PARTICLES = 512
 
 /** Live-tunable knobs for the tuning panel (F6). Values persist per browser; Copy JSON to ship new defaults. */
+/** 1 = lay the HUD out on the retro buffer's pixel grid with scanlines over it (menus stay crisp). */
+export let HUD_RETRO = 0
+
 export const RENDER_TUNE: TuneSection = {
   title: 'Render · camera, fog',
   keys: [
+    tune('HUD_RETRO', () => HUD_RETRO, (v) => (HUD_RETRO = v), [0, 1], 1, 'HUD through the retro filter'),
     tune('CAM_BACK', () => CAM_BACK, (v) => (CAM_BACK = v)),
     tune('CAM_UP', () => CAM_UP, (v) => (CAM_UP = v)),
     tune('CAM_LOOK_AHEAD', () => CAM_LOOK_AHEAD, (v) => (CAM_LOOK_AHEAD = v)),

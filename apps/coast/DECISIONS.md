@@ -66,3 +66,6 @@ Two speeds either way. MANUAL shifts LO/HI on the gear key; AUTOMATIC shifts for
 
 ## Night lighting (2026-09-08)
 Rad Mobile's headlights lit strips of road toward the horizon; ours do the same. At night every row sits at one ambient (no per-row distance gradient — that made converging dark wedges beside the road), and with the lights on two beam strips are painted on the tarmac per carriageway, fading with `HEADLIGHT_REACH`; lane markings brighten inside the beams. Sprites and traffic still pick up the beam by distance.
+
+## HUD scale and the retro HUD look (2026-09-08, all three games)
+The HUD and menus are sized in `vmin` with clamps (times `--hud-scale`), so they grow with the window instead of staying at a fixed pixel size; menu padding and widths are in `em` so they follow. The `HUD_RETRO` tunable (Render section) lays the HUD out on the retro buffer's pixel grid — the game publishes `--retro-px` as window height ÷ buffer lines — and lays scanlines over it at the shader's own three-line period, leaving the menus crisp so the two looks can be compared.

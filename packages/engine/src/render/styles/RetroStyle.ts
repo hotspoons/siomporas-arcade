@@ -104,6 +104,11 @@ export class RetroStyle implements Style {
   /** Size of the low-res buffer: the option's line count, widened to the window's aspect. */
   private bufW = 320
   private bufH = 240
+
+  /** Lines in the low-res buffer — one "retro pixel" is this fraction of the window's height. */
+  get bufferHeight(): number {
+    return this.bufH
+  }
   private readonly quadScene = new Scene()
   private readonly quadCamera = new OrthographicCamera(-1, 1, 1, -1, 0, 1)
   private readonly material: ShaderMaterial

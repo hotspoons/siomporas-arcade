@@ -47,9 +47,13 @@ export const FLOATING_ORIGIN_REBASE = 20000
 export const MIN_TIME_SCALE = 0.25
 
 /** Live-tunable knobs for the tuning panel (F6). Values persist per browser; Copy JSON to ship new defaults. */
+/** 1 = lay the HUD out on the retro buffer's pixel grid with scanlines over it (menus stay crisp). */
+export let HUD_RETRO = 0
+
 export const RENDER_TUNE: TuneSection = {
   title: 'Render · camera, fog, speed lines',
   keys: [
+    tune('HUD_RETRO', () => HUD_RETRO, (v) => (HUD_RETRO = v), [0, 1], 1, 'HUD through the retro filter'),
     tune('FOV_BASE', () => FOV_BASE, (v) => (FOV_BASE = v)),
     tune('FOV_AT_MAX_SPEED', () => FOV_AT_MAX_SPEED, (v) => (FOV_AT_MAX_SPEED = v)),
     tune('FOV_BOOST_KICK', () => FOV_BOOST_KICK, (v) => (FOV_BOOST_KICK = v)),

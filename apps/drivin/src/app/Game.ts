@@ -5,7 +5,7 @@ import { GameLoop, type LoopClient } from '@apex/engine/app/GameLoop'
 import { MenuStack } from '@apex/engine/app/Menus'
 import { TunePanel } from '@apex/engine/app/TunePanel'
 import { SIM_TUNE } from '../sim/Tuning'
-import { RENDER_TUNE } from '../render/RenderTuning'
+import { HUD_RETRO, RENDER_TUNE } from '../render/RenderTuning'
 import { PerfOverlay } from '@apex/engine/app/PerfOverlay'
 import { ModernStyle } from '@apex/engine/render/styles/ModernStyle'
 import { RetroStyle } from '@apex/engine/render/styles/RetroStyle'
@@ -327,6 +327,16 @@ export class Game implements LoopClient {
     this.hud.units = this.settings.data.units
   }
 
+  /** Keep the HUD's retro look (and its pixel size) in step with the tunable and the window. */
+  private syncHudRetro(): void {
+    const on = HUD_RETRO > 0.5
+    this.container.classList.toggle('is-hud-retro', on)
+    if (on) {
+      const px = window.innerHeight / Math.max(1, this.retro.bufferHeight)
+      this.container.style.setProperty('--retro-px', `${px.toFixed(3)}px`)
+    }
+  }
+
   resize(): void {
     const w = window.innerWidth
     const h = window.innerHeight
@@ -387,6 +397,7 @@ export class Game implements LoopClient {
   }
 
   render(alpha: number, dt: number): void {
+    this.syncHudRetro()
     if (this.state === 'editor') return
     const events = this.sim.events
     if (events.length) events.drain(this.onEventBound)

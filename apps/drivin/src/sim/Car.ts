@@ -43,6 +43,7 @@ import {
   HEADING_MAX,
   LAND_MIN_ALIGN,
   LAND_TOLERANCE,
+  PATH_STEP,
   ROAD_HALF_WIDTH,
   STEER_FULL_SPEED,
   STEER_HIGH_SPEED_FACTOR,
@@ -293,7 +294,8 @@ export class Car {
     // Pointing too far off the road: on a ground-level lane you simply leave it (open
     // world, no invisible rails); anywhere else the edge will take care of you.
     if (Math.abs(this.heading) > HEADING_MAX) {
-      const groundLevel = !tube && lane.baseY <= 0 && f.pos.y - lane.baseY < 1.5 && f.up.y > 0.7
+      // On a hillside the road is high above sea level but still on the ground: measure against the land.
+      const groundLevel = !tube && f.pos.y - this.track.groundHeight(f.pos.x, f.pos.z) < 1.5 && f.up.y > 0.5
       if (groundLevel) {
         this.toGround(f)
         return
@@ -359,6 +361,15 @@ export class Car {
       if (lane.profile === 'tube' && next.profile !== 'tube') {
         this.lateral = clamp(this.lateral, -ROAD_HALF_WIDTH * 0.9, ROAD_HALF_WIDTH * 0.9)
         this.lateralVel *= 0.3
+      }
+      // A crest can fall on the seam between two pieces, where neither lane carries the curvature. Compare
+      // the slopes across the joint: if the road drops away faster than gravity can hold you, you fly.
+      const drop = (f.tan.y - next.table.frameAt(0, this.scratch).tan.y) / PATH_STEP
+      if (drop > 0 && v * v * drop > GRAVITY * f.up.y) {
+        this.lane = next
+        this.s = over
+        this.launch(next.table.frameAt(over, this.frame))
+        return
       }
       this.lane = next
       this.s = over

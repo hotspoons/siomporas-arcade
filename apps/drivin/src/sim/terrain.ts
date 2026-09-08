@@ -29,7 +29,18 @@ export function resizeTerrain(old: number[] | undefined, oldSize: number, size: 
   return out
 }
 
-/** Bilinear ground height at a world point (metres); the grid's edge value beyond it. */
+/** One-dimensional Catmull-Rom through four samples. */
+function spline(p0: number, p1: number, p2: number, p3: number, t: number): number {
+  return p1 + 0.5 * t * (p2 - p0) + 0.5 * t * t * (2 * p0 - 5 * p1 + 4 * p2 - p3) + 0.5 * t * t * t * (-p0 + 3 * p1 - 3 * p2 + p3)
+}
+
+/**
+ * Ground height at a world point (metres), interpolated as a Catmull-Rom surface through the corner
+ * grid. Corners are 40 m apart, so bilinear interpolation made every cell a flat plane: a hill's crest
+ * became a corner between two cells, the road over it had no curvature at all, and the car stayed glued
+ * to the tarmac where it should have taken off. A smooth surface gives crests a real radius — and the
+ * spline passes exactly through the corners, so the roads draped on it and the mesh drawn from it agree.
+ */
 export function sampleHeight(heights: number[] | undefined, size: number, x: number, z: number): number {
   if (!heights) return 0
   const fx = Math.max(0, Math.min(size - 1e-6, x / CELL))
@@ -38,11 +49,9 @@ export function sampleHeight(heights: number[] | undefined, size: number, x: num
   const cz = Math.floor(fz)
   const tx = fx - cx
   const tz = fz - cz
-  const h00 = heights[terrainIndex(size, cx, cz)] ?? 0
-  const h10 = heights[terrainIndex(size, cx + 1, cz)] ?? 0
-  const h01 = heights[terrainIndex(size, cx, cz + 1)] ?? 0
-  const h11 = heights[terrainIndex(size, cx + 1, cz + 1)] ?? 0
-  return (h00 * (1 - tx) + h10 * tx) * (1 - tz) + (h01 * (1 - tx) + h11 * tx) * tz
+  const at = (ix: number, iz: number) => heights[terrainIndex(size, Math.max(0, Math.min(size, ix)), Math.max(0, Math.min(size, iz)))] ?? 0
+  const row = (dz: number) => spline(at(cx - 1, cz + dz), at(cx, cz + dz), at(cx + 1, cz + dz), at(cx + 2, cz + dz), tx)
+  return spline(row(-1), row(0), row(1), row(2), tz)
 }
 
 /** Pieces whose geometry needs a flat pad (everything else drapes over the landscape). */

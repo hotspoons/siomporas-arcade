@@ -28,6 +28,32 @@ export function padBindingLabel(b: string): string {
   return names[i] ?? `Button ${i}`
 }
 
+/**
+ * Merge in any default key an action is missing, keeping whatever the player has bound. Games call
+ * this once when their stored bindings predate a new alias (P for pause, say): bindings live in the
+ * browser, so a key added to the defaults never reaches anyone who has already played.
+ *
+ * Returns how many keys were added. The version this ran for MUST be read from the stored blob, not
+ * from merged settings, where a missing version field arrives from the defaults looking current.
+ */
+export function mergeMissingKeys(keys: KeyBindings, defaults: KeyBindings): number {
+  let added = 0
+  for (const [action, want] of Object.entries(defaults)) {
+    const mine = keys[action]
+    if (!mine) {
+      keys[action] = [...want]
+      added += want.length
+      continue
+    }
+    for (const k of want)
+      if (!mine.includes(k)) {
+        mine.push(k)
+        added++
+      }
+  }
+  return added
+}
+
 export function keyLabel(code: string): string {
   if (code.startsWith('Key')) return code.slice(3)
   if (code.startsWith('Arrow')) return code.slice(5)

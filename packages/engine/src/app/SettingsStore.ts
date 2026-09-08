@@ -22,6 +22,20 @@ export class SettingsStore<T extends object> {
     }
   }
 
+  /**
+   * What is actually on disk, before defaults are merged over it. Migrations must ask this rather
+   * than reading `data`: a field the stored blob has never heard of arrives from the defaults, so a
+   * version number read from `data` always looks current and the migration silently never runs.
+   */
+  static stored(key: string): Record<string, unknown> | null {
+    try {
+      const raw = localStorage.getItem(key)
+      return raw ? (JSON.parse(raw) as Record<string, unknown>) : null
+    } catch {
+      return null
+    }
+  }
+
   onChange(fn: Listener<T>): () => void {
     this.listeners.add(fn)
     return () => this.listeners.delete(fn)

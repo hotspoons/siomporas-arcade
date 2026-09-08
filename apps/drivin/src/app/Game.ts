@@ -87,7 +87,7 @@ export class Game implements LoopClient {
     this.perf = new PerfOverlay(container)
     this.tune = new TunePanel(container, 'drivin', [SIM_TUNE, RENDER_TUNE])
     this.editor = new Editor(container, this.tracks, {
-      onTest: (data) => this.startDrive(data, true),
+      onTest: (data, force) => this.startDrive(data, true, force),
       onExit: () => this.enterTitle(),
     })
     this.modern = new ModernStyle(s.modern)
@@ -156,11 +156,12 @@ export class Game implements LoopClient {
     this.sim.tick(0, this.held, this.prev)
   }
 
-  startDrive(data?: TrackData, fromEditor = false): void {
+  startDrive(data?: TrackData, fromEditor = false, force = false): void {
     const d = data ?? this.tracks.get(this.settings.data.trackId) ?? BUILTIN_TRACKS[0]
     const t = new Track(d)
-    if (!t.valid) {
-      this.hud.showMessage('TRACK HAS ERRORS', 2, 'bad')
+    if (!t.valid && !force) {
+      // From the title: say what's wrong right there (the HUD is hidden) and point at the editor.
+      this.titleNotice(`CAN'T DRIVE “${d.name.toUpperCase()}” · ${t.errors[0] ?? 'no start piece'} · open it in the editor to fix or drive anyway`)
       return
     }
     this.fromEditor = fromEditor
@@ -184,6 +185,22 @@ export class Game implements LoopClient {
     this.audio.resume()
     this.audio.setRunning(true)
   }
+
+  /** A red line under the title logo for a few seconds (the HUD isn't shown on the title). */
+  private titleNotice(text: string): void {
+    const p = this.container.querySelector('.title-card p') as HTMLElement | null
+    if (!p) return
+    const original = p.dataset.original ?? p.textContent ?? ''
+    p.dataset.original = original
+    p.textContent = text
+    p.classList.add('notice')
+    clearTimeout(this.noticeTimer)
+    this.noticeTimer = window.setTimeout(() => {
+      p.textContent = original
+      p.classList.remove('notice')
+    }, 5000)
+  }
+  private noticeTimer = 0
 
   /** Phones: fullscreen + landscape when a drive starts (must run inside a gesture). */
   private goImmersive(): void {

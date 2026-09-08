@@ -37,7 +37,8 @@ const TERRAIN_HINTS = 'drag raise · ⌥-drag / right-drag lower · ⇧-drag fla
 const HINTS = `click red connectors to link · ${MOD}-click multi · ⇧-click range · ⌥-click delete · ${MOD}⇧ force insert · ${MOD}⌥ rotate · ⇧⌥ click/right-click raise/lower · Z X rotate · Q E level · wheel zoom · middle-drag pan · right-click menu`
 
 export interface EditorCallbacks {
-  onTest(data: TrackData): void
+  /** `force` drives a track that fails validation (the editor asked and the user said yes). */
+  onTest(data: TrackData, force: boolean): void
   onExit(): void
 }
 
@@ -120,6 +121,7 @@ export class Editor {
         <button data-act="export">Export JSON</button>
         <label class="import">Import<input type="file" accept="application/json" hidden /></label>
         <span class="sep"></span>
+        <button data-act="validate" title="V">✓ Check</button>
         <button data-act="test" class="primary" title="T">▶ Test drive</button>
         <button data-act="exit" title="Esc">Menu</button>
       </div>
@@ -362,7 +364,7 @@ export class Editor {
   private dialogText: string | null = null
 
   /** A small modal with buttons (and optionally a text field); resolves with the chosen button's value. */
-  private dialog(message: string, buttons: DialogButton[], input?: { placeholder: string; value: string }): Promise<string> {
+  private dialog(message: string, buttons: DialogButton[], input?: { placeholder: string; value: string }, lines?: string[]): Promise<string> {
     this.closeMenu()
     return new Promise((resolve) => {
       const back = document.createElement('div')
@@ -372,6 +374,17 @@ export class Editor {
       const msg = document.createElement('p')
       msg.textContent = message
       box.appendChild(msg)
+      if (lines?.length) {
+        const list = document.createElement('ul')
+        list.className = 'report'
+        for (const l of lines) {
+          const li = document.createElement('li')
+          li.textContent = l
+          li.className = l.startsWith('✕') ? 'err' : 'warn'
+          list.appendChild(li)
+        }
+        box.appendChild(list)
+      }
       let field: HTMLInputElement | null = null
       if (input) {
         field = document.createElement('input')
@@ -495,7 +508,10 @@ export class Editor {
         break
       }
       case 'test':
-        this.test()
+        void this.test()
+        break
+      case 'validate':
+        await this.validate()
         break
       case 'exit':
         this.cb.onExit()
@@ -592,13 +608,32 @@ export class Editor {
     this.dirty = true
   }
 
-  private test(): void {
+  private async test(): Promise<void> {
     const t = new Track(this.data)
     if (!t.valid) {
-      this.flash('Fix the red bits first: ' + t.errors.slice(0, 2).join(' · '))
+      // From the editor you may drive a broken track anyway — handy for trying a half-built layout.
+      const r = await this.dialog('This track has problems', [{ label: 'Drive anyway', value: 'go', primary: true }, { label: 'Fix first', value: 'cancel' }], undefined, this.report(t))
+      if (r !== 'go') return
+      this.cb.onTest(this.data, true)
       return
     }
-    this.cb.onTest(this.data)
+    this.cb.onTest(this.data, false)
+  }
+
+  /** Errors first, then warnings, as short lines. */
+  private report(t: Track): string[] {
+    return [...t.errors.map((e) => `✕ ${e}`), ...t.warnings.map((w) => `△ ${w}`)]
+  }
+
+  /** The Check button: everything the track builder found, or a clean bill. */
+  private async validate(): Promise<void> {
+    const t = new Track(this.data)
+    const lines = this.report(t)
+    if (!lines.length) {
+      await this.dialog('All good — no errors or warnings.', [{ label: 'OK', value: 'ok', primary: true }])
+      return
+    }
+    await this.dialog(t.errors.length ? `${t.errors.length} error${t.errors.length > 1 ? 's' : ''}${t.warnings.length ? `, ${t.warnings.length} warning${t.warnings.length > 1 ? 's' : ''}` : ''} — the pieces and links involved are outlined red (errors) or amber (warnings)` : `${t.warnings.length} warning${t.warnings.length > 1 ? 's' : ''} — amber outlines`, [{ label: 'OK', value: 'ok', primary: true }], undefined, lines)
   }
 
   private pushUndo(): void {
@@ -845,7 +880,10 @@ export class Editor {
         break
       }
       case 'KeyT':
-        this.test()
+        void this.test()
+        break
+      case 'KeyV':
+        void this.validate()
         break
       case 'Equal':
       case 'NumpadAdd':

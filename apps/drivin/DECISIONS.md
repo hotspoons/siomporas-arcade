@@ -112,3 +112,6 @@ Placing a piece orients it for you: `orientFor` scores each rotation by how many
 
 ## Published tracks and replay reset (2026-09-08)
 `RICH2` (tracks/rich2.ts) is Rich's editor track shipped as a built-in: the layout and links are exactly as authored; the landscape is rebuilt with `brushTerrain` calls rather than a wall of exported numbers, so it reads in source and stays reproducible. Pressing reset during a crash replay skips it: the car goes back to the pose the replay opens on (a few seconds before the incident), stopped, for `RESET_PENALTY` seconds. Clicking the primed palette entry again (or Escape) clears it, so the pointer goes back to plain editing.
+
+## Menu steppers and retro framing (2026-09-08, engine-wide)
+Choice and slider rows render ‹ and › as real buttons: clicking ‹ steps back, › steps forward, clicking the row steps forward, and the keyboard is unchanged. Values no longer bake the arrows into their text. Retro mode fills the window instead of letterboxing: the chosen resolution sets the line count and the low-res buffer is cut to the window's aspect (rebuilt when that changes), so the barrel distortion curves over the whole picture rather than a 4:3 island.

@@ -51,23 +51,16 @@ float bayer(vec2 p) {
 }
 
 void main() {
+  // The low-res buffer is cut to the window's own aspect (see resize), so the picture fills the
+  // screen: no letterbox, and the tube curves over the whole area.
   vec2 uv = vUv;
-  // Aspect-preserving letterbox of the low-res image into the window.
-  float srcAspect = uRes.x / uRes.y;
-  float dstAspect = uScreen.x / uScreen.y;
-  vec2 fit = vec2(1.0);
-  if (dstAspect > srcAspect) fit.x = srcAspect / dstAspect; else fit.y = dstAspect / srcAspect;
-  uv = (uv - 0.5) / fit + 0.5;
-
   if (uBarrel > 0.0) {
     vec2 c = uv - 0.5;
     float r2 = dot(c, c);
-    uv = 0.5 + c * (1.0 + uBarrel * 0.18 * r2);
+    // Bulge, then pull back in by the same amount at the corners so the bulge can't reveal the edge.
+    uv = 0.5 + c * (1.0 + uBarrel * 0.18 * r2) / (1.0 + uBarrel * 0.09);
   }
-  if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
-    gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
-    return;
-  }
+  uv = clamp(uv, vec2(0.0), vec2(1.0));
   // Nearest sample: the whole look hinges on this.
   vec2 px = floor(uv * uRes) + 0.5;
   vec3 col = texture2D(tFrame, px / uRes).rgb;
@@ -108,6 +101,9 @@ export class RetroStyle implements Style {
   private scene: Scene | null = null
   private camera: Camera | null = null
   private target: WebGLRenderTarget | null = null
+  /** Size of the low-res buffer: the option's line count, widened to the window's aspect. */
+  private bufW = 320
+  private bufH = 240
   private readonly quadScene = new Scene()
   private readonly quadCamera = new OrthographicCamera(-1, 1, 1, -1, 0, 1)
   private readonly material: ShaderMaterial
@@ -148,7 +144,12 @@ export class RetroStyle implements Style {
   rebuild(): void {
     this.target?.dispose()
     const o = this.opts
-    this.target = new WebGLRenderTarget(o.width, o.height, {
+    // The chosen resolution sets the line count; the width follows the window so the image fills it.
+    const lines = Math.max(120, Math.round(o.height))
+    const aspect = this.height > 0 ? this.width / this.height : o.width / o.height
+    this.bufW = Math.max(lines, Math.min(lines * 3, Math.round((lines * aspect) / 2) * 2))
+    this.bufH = lines
+    this.target = new WebGLRenderTarget(this.bufW, this.bufH, {
       minFilter: NearestFilter,
       magFilter: NearestFilter,
       generateMipmaps: false,
@@ -158,7 +159,7 @@ export class RetroStyle implements Style {
       depthBuffer: true,
     })
     this.material.uniforms.tFrame.value = this.target.texture
-    this.material.uniforms.uRes.value.set(o.width, o.height)
+    this.material.uniforms.uRes.value.set(this.bufW, this.bufH)
   }
 
   detach(): void {
@@ -173,6 +174,10 @@ export class RetroStyle implements Style {
     this.renderer?.setPixelRatio(1)
     this.renderer?.setSize(width, height, false)
     this.material.uniforms.uScreen.value.set(width, height)
+    // The buffer is as wide as the window needs; rebuild when that changes.
+    const lines = Math.max(120, Math.round(this.opts.height))
+    const want = Math.max(lines, Math.min(lines * 3, Math.round((lines * (height > 0 ? width / height : 1.33)) / 2) * 2))
+    if (this.target && (want !== this.bufW || lines !== this.bufH)) this.rebuild()
   }
 
   setXr(active: boolean): void {

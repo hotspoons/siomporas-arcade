@@ -183,10 +183,10 @@ export class MenuStack {
         row.addEventListener('click', (e) => {
           if (item.kind === 'info') return
           this.cursor = i
-          const rect = row.getBoundingClientRect()
-          const right = e.clientX > rect.left + rect.width * 0.6
+          // ‹ and › are real buttons: they step back and forward. Clicking the row itself steps forward.
+          const step = Number((e.target as HTMLElement).closest<HTMLElement>('.step')?.dataset.step ?? 1)
           if (item.kind === 'toggle' || item.kind === 'choice' || item.kind === 'slider') {
-            this.adjust(item, right ? 1 : -1)
+            this.adjust(item, step >= 0 ? 1 : -1)
             this.onNavigate?.()
             this.render()
           } else this.activate(item)
@@ -214,10 +214,10 @@ export class MenuStack {
           value = item.get() ? 'ON' : 'OFF'
           break
         case 'choice':
-          value = `‹ ${item.options[item.get()] ?? ''} ›`
+          value = String(item.options[item.get()] ?? '')
           break
         case 'slider':
-          value = item.format ? item.format(item.get()) : `‹ ${item.get()} ›`
+          value = item.format ? item.format(item.get()) : String(item.get())
           break
         case 'remap':
           value = item.get()
@@ -227,7 +227,12 @@ export class MenuStack {
           break
       }
       const hint = 'hint' in item && item.hint ? `<span class="hint">${item.hint}</span>` : ''
-      row.innerHTML = `<span class="label">${item.label}${hint}</span><span class="value">${value}</span>`
+      // Steppable rows get arrows you can actually click; the rest just show their value.
+      const steppable = item.kind === 'choice' || item.kind === 'slider'
+      const cell = steppable
+        ? `<button class="step" data-step="-1" tabindex="-1">‹</button><span class="v">${value}</span><button class="step" data-step="1" tabindex="-1">›</button>`
+        : value
+      row.innerHTML = `<span class="label">${item.label}${hint}</span><span class="value">${cell}</span>`
     })
   }
 }

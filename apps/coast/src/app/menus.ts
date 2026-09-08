@@ -204,5 +204,5 @@ function toggle(label: string, get: () => boolean, setV: (v: boolean) => void, a
   return { kind: 'toggle', label, get, set: (v) => { setV(v); after?.() } }
 }
 function slider(label: string, get: () => number, setV: (v: number) => void, min = 0, max = 1): MenuItem {
-  return { kind: 'slider', label, min, max, step: 0.1, get, set: setV, format: (v) => `‹ ${Math.round(v * 100)}% ›` }
+  return { kind: 'slider', label, min, max, step: 0.1, get, set: setV, format: (v) => `${Math.round(v * 100)}%` }
 }

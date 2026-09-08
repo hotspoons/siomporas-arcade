@@ -168,7 +168,7 @@ export function buildMenus(game: Game) {
           set((d) => (d.steering = v / 100))
           game.applyHandling()
         },
-        format: (v) => `‹ ${v}% ›`,
+        format: (v) => `${v}%`,
       },
       { kind: 'info', label: '— AUDIO —' },
       slider('Master', () => s().audio.master, (v) => set((d) => (d.audio.master = v))),
@@ -346,6 +346,6 @@ function slider(label: string, get: () => number, setV: (v: number) => void, min
     step: 0.1,
     get,
     set: setV,
-    format: (v) => `‹ ${Math.round(v * 100)}% ›`,
+    format: (v) => `${Math.round(v * 100)}%`,
   }
 }

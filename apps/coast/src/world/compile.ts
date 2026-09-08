@@ -308,12 +308,15 @@ export function compileTrack(track: CoastTrack, seed: number, path?: TrackPath):
   }
 
   const desc: StageDesc = { id: track.id, name: track.name, theme: themes[0].id, sections: [], next: [...track.next] }
-  const stage = new Stage(desc, themes[0], seed, { segments: segs, length: real, forks, scenes: themes, vibes: track.vibes.length ? [...track.vibes] : [{ at: 0, vibe: 'day' }] })
+  const stage = new Stage(desc, themes[0], seed, { segments: segs, length: real, forks, scenes: themes, vibes: track.vibes.length ? [...track.vibes] : [{ at: 0, vibe: 'day' }], seconds: track.seconds })
   const metres = real * SEG_LENGTH
   const seconds = metres / 90
-  // TIME_START is 75 s and each checkpoint adds 62: a stage much under half a minute is
-  // over before the clock has said anything.
-  if (seconds < 30) problems.push(`only ${seconds.toFixed(0)} s flat out — under half a minute the clock never gets going (aim for 45–60 s)`)
+  // TIME_START is 75 s and each checkpoint adds 62: a stage much under half a minute is over before
+  // the clock has said anything — unless the track sets its own, which is what the Clock control does.
+  if (seconds < 30 && track.seconds === undefined)
+    problems.push(`only ${seconds.toFixed(0)} s flat out — under half a minute the clock never gets going (aim for 45–60 s, or set this stage's own Clock)`)
+  if (track.seconds !== undefined && track.seconds < seconds * 0.75)
+    problems.push(`the clock gives ${track.seconds} s but the road takes about ${seconds.toFixed(0)} s flat out — nobody will reach the end`)
   return {
     stage,
     report: { metres, segments: real, seconds, minRadius: minRadius === Infinity ? Infinity : minRadius, clamped, climb, maxGrade, gradeAsked: Math.max(p.worstGrade, graded.worst), waypointsFlattened: p.gradeClamped, gradeScale: graded.factor, profile: ys, problems },

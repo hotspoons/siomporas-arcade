@@ -115,6 +115,8 @@ export class Sim {
     this.vy = 0
     this.events.clear()
     this.loadStage(this.startId)
+    // The first stage sets the clock if it has an opinion about it.
+    this.timeLeft = this.stage.seconds ?? T.TIME_START
   }
 
   private loadStage(id: string): void {
@@ -333,7 +335,8 @@ export class Sim {
       }
       this.stageIndex++
       this.loadStage(id)
-      this.timeLeft += T.TIME_CHECKPOINT
+      // A stage may set its own clock; the shipped route does not, and takes the game's timings.
+      this.timeLeft += this.stage.seconds ?? T.TIME_CHECKPOINT
       this.checkpointFlash = 2
       this.events.push('checkpoint', this.stageIndex)
     }

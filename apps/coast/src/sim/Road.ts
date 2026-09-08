@@ -107,6 +107,8 @@ export interface StageParts {
   forks: boolean
   scenes: Theme[]
   vibes: VibeStop[]
+  /** Seconds this stage puts on the clock, when it says so itself. */
+  seconds?: number
 }
 
 export class Stage {
@@ -122,6 +124,8 @@ export class Stage {
    * which is how the built-in route keeps its hand-picked palettes untouched.
    */
   readonly vibes: VibeStop[]
+  /** What this stage puts on the clock, or undefined to use the game's own timings. */
+  readonly seconds?: number
 
   constructor(desc: StageDesc, theme: Theme, seed: number, parts?: StageParts) {
     this.desc = desc
@@ -132,6 +136,7 @@ export class Stage {
       this.forks = parts.forks
       this.scenes = parts.scenes
       this.vibes = parts.vibes
+      this.seconds = parts.seconds
       return
     }
     this.scenes = [theme]

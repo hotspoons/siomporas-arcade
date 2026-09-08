@@ -102,6 +102,12 @@ export interface CoastTrack {
   next: string[]
   /** Gentle swell under everything: amplitude in metres and its period in segments. */
   roll?: { amp: number; period: number }
+  /**
+   * Seconds this stage puts on the clock: the starting time when it is the first one, the checkpoint
+   * bonus when you reach it. Absent means the game's own timings, which is what the shipped route uses
+   * — a short authored track finishes before the clock has said anything unless it sets its own.
+   */
+  seconds?: number
   /** Where this track sits in the set view (grid units). */
   ui?: { x: number; y: number }
 }

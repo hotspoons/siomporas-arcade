@@ -382,7 +382,6 @@ export const STAGES: StageDesc[] = [
     id: 'E2',
     name: 'Twin Cities',
     theme: 'nightCity',
-    // (forks below: the ridge road or straight through downtown)
     sections: [
       { kind: 'straight', n: 90 },
       { kind: 's', n: 260, curve: 3.6, bank: 1 },
@@ -391,7 +390,9 @@ export const STAGES: StageDesc[] = [
       { kind: 'curve', n: 200, curve: 4.6 },
       { kind: 'straight', n: 180 },
     ],
-    next: ['F2'],
+    // The ridge road or straight through downtown. Downtown had no way in at all: the last tier of the
+    // route had lost its fork, and the city stage was unreachable from the start.
+    next: ['F2', 'F3'],
   },
   // --- The East: ridges and the run into the city ---
   {

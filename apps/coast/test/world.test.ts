@@ -500,3 +500,30 @@ describe('curve scale', () => {
     for (const s of STAGES) for (const sec of s.sections) if ('curve' in sec && sec.curve) expect(Math.abs(sec.curve)).toBeLessThan(MAX_CURVE)
   })
 })
+
+describe('a stage that sets its own clock', () => {
+  it('starts the run on its own seconds and warns when they are not enough', () => {
+    const track = { ...emptyTrack('t1', 'Short'), nodes: [{ x: 0, z: 0, y: 0 }, { x: 0, z: 900, y: 0 }] }
+    const plain = compileTrack({ ...track }, 1)
+    expect(plain.stage.seconds).toBeUndefined()
+    expect(plain.report.problems.some((p) => /clock never gets going/.test(p))).toBe(true)
+
+    const timed = compileTrack({ ...track, seconds: 45 }, 1)
+    expect(timed.stage.seconds).toBe(45)
+    expect(timed.report.problems.some((p) => /clock never gets going/.test(p))).toBe(false)
+
+    const mean = compileTrack({ ...track, seconds: 3 }, 1)
+    expect(mean.report.problems.some((p) => /nobody will reach the end/.test(p))).toBe(true)
+  })
+
+  it('puts its own time on the clock at the start of a run', () => {
+    const world = {
+      v: 1 as const,
+      name: 'Timed',
+      start: 't1',
+      tracks: [{ ...emptyTrack('t1', 'One'), nodes: [{ x: 0, z: 0, y: 0 }, { x: 0, z: 4000, y: 0 }], seconds: 40 }],
+    }
+    const sim = new Sim(7, 't1', new WorldRoute(world, 7))
+    expect(sim.timeLeft).toBe(40)
+  })
+})

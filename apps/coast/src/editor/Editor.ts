@@ -604,6 +604,26 @@ export class Editor {
       this.changed()
       this.flash(`A crest every ${next * SEG_LENGTH} m`)
     })
+    head('Clock')
+    {
+      const secs = this.track.seconds
+      const est = Math.round(this.report().seconds)
+      item(
+        secs ? `Time ${secs} s` : 'Time · game default',
+        '#ffb03c',
+        `Seconds this stage puts on the clock: the start time when it is first, the checkpoint bonus when you reach it. Flat out this track takes about ${est} s. Click to cycle; the default is the shipped route's own timings.`,
+        secs !== undefined,
+        () => {
+          this.pushUndo()
+          const steps = [undefined, 30, 40, 50, 60, 75, 90, 120]
+          const next = steps[(steps.findIndex((v) => v === secs) + 1) % steps.length]
+          if (next === undefined) delete this.track.seconds
+          else this.track.seconds = next
+          this.changed()
+          this.flash(next === undefined ? 'Clock: the game\u2019s own timings' : `Clock: ${next} s on this stage (about ${est} s of road)`)
+        },
+      )
+    }
     head('Tools')
     item('Select / move', '#c0c8d0', 'Pick things up. Drag a waypoint to move it, its handles to bend the road.', this.tool.kind === 'select', () => (this.tool = { kind: 'select' }))
     item('Add waypoint', '#ffd45f', 'Click past either end to extend the road; click on it to insert.', this.tool.kind === 'node', () => (this.tool = { kind: 'node' }))

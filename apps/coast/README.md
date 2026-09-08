@@ -52,6 +52,8 @@ editor has two views (Tab switches):
 | Bank in / out | `B` on a waypoint (banking eases between waypoints) |
 | Hills | drag a waypoint in the profile strip, or `Q` / `E` (held to a gradient the car can climb — to climb higher, space the waypoints further apart) |
 | Rolling swell | the Hills items at the top of the palette |
+| Time on the clock | the Clock item in the palette — this stage's start time, or its checkpoint bonus |
+| Widen the view across the road | `⇔` in the toolbar (Auto, true scale, or a fixed step) |
 | Scene, vibe, prop, crossroads | pick it in the palette, click the road |
 | Macro elements | pick one, drag along the road (or drop it in the timeline) |
 | Move anything placed | drag it, on the canvas or in the timeline |
@@ -87,6 +89,19 @@ The pseudo-3D road is gentler than it looks: a 1.4 km-radius sweeper is already 
 strong curve on screen, so corners under about 800 m have to be braked for and
 ones under 470 m are opened out at compile time. The plan view colours those
 amber and red, and `◡ Smooth` fixes them.
+
+Which is why the plan view exaggerates the lateral axis by default, the way a road
+engineer's long section does: a 5 km stage that wanders two hundred metres is a
+hairline at true scale. Each axis carries its own grid and its own scale bar, and
+the corner says how far the view is stretched. `⇔` walks through Auto, `×1` (true
+scale, both axes the same) and fixed steps.
+
+A stage takes the game's own timings unless you say otherwise: 75 s to start,
+62 s at each checkpoint. That suits the shipped route's 4–5 km stages and leaves a
+short authored one over before the clock has said anything, so the palette's Clock
+item sets what this stage puts on the board — its start time when it is first, its
+checkpoint bonus when you reach it. `✓ Check` complains if the clock cannot cover
+the road.
 
 ## Sprites and assets
 

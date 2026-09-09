@@ -630,7 +630,7 @@ export class RenderWorld {
       const carSize = frame ? frame.heightM * scale * squash : 0
       if (frame) this.sprites.add(carX, py + hop, carSize, frame, 0, 1, -1e9, Math.atan(this.rowTilt[1]))
       // Afterburner: boost lit and the throttle down, and not while the car is a wreck.
-      this.flames.update(carX, py + hop, carSize, curr.hud.turboActive && curr.throttle > 0.1 && curr.crashT <= 0, dt)
+      this.flames.update(carX, py + hop, scale, yaw, curr.hud.turboActive && curr.throttle > 0.1 && curr.crashT <= 0, dt)
     }
     if (this.previewKind) {
       const f = this.atlas.frame(this.previewKind, this.previewYaw)

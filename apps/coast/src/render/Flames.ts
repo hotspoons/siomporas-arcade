@@ -9,6 +9,16 @@
 
 import { AdditiveBlending, BufferAttribute, BufferGeometry, Mesh, MeshBasicMaterial } from 'three'
 
+// Everything here is in metres and turned into pixels by the caller's scale, because a sprite frame
+// is not a fixed measure of the car: a flank view's frame is twice the size of a tail-on one, so
+// anything sized against the frame doubles the moment you steer.
+/** Centre of the car to its tail, where the pipes are. */
+const TAIL_M = 1.9
+/** Each pipe, either side of the centreline. */
+const PIPE_M = 0.3
+/** The valance, below the sprite's own anchor. */
+const DROP_M = 0.32
+
 /** Quads per flame, from the pipe outward. */
 const STAGES = 4
 /** Colour at each stage: the hot core first, cooling as it comes at you. */
@@ -40,10 +50,11 @@ export class Flames {
   }
 
   /**
-   * Place the flames under a car drawn at `x`, whose base sits at screen `y` and which is `size`
-   * pixels tall. `on` is whether they should be burning at all.
+   * Place the flames on a car drawn centred at `x` with its base at screen `y`, `px` pixels to the
+   * metre at that distance, in the pose baked for `yawDeg` (positive shows the car's right flank).
+   * `on` is whether they should be burning at all.
    */
-  update(x: number, y: number, size: number, on: boolean, dt: number): void {
+  update(x: number, y: number, px: number, yawDeg: number, on: boolean, dt: number): void {
     // Light fast, die slower: a boost hits instantly and trails off.
     const target = on ? 1 : 0
     const rate = on ? 14 : 5
@@ -57,18 +68,25 @@ export class Flames {
     const p = this.pos.array as Float32Array
     const c = this.col.array as Float32Array
     let v = 0
-    // Twin pipes, close to the centreline and low, where a rear valance puts them.
+    // Twin pipes, close to the centreline and low, where a rear valance puts them — and they travel
+    // with the car's pose. Turning swings the tail across the screen, so a flame pinned to the middle
+    // of the sprite comes out of the door. The pair slides with the tail and closes up as the car
+    // turns away, which is the same foreshortening the sprite itself is showing.
+    const yaw = (yawDeg * Math.PI) / 180
+    // Turning swings the tail across the screen and closes the gap between the pipes, the same
+    // foreshortening the sprite is showing; a flame pinned to the middle would come out of the door.
+    const tailX = x + Math.sin(yaw) * TAIL_M * px
     for (const side of [-1, 1]) {
-      const px = x + side * size * 0.09
-      const py = y + size * 0.12
+      const cx = tailX + side * Math.cos(yaw) * PIPE_M * px
+      const py = y + DROP_M * px
       let tip = 0
       for (let s = 0; s < STAGES; s++) {
         // Each stage guttering on its own beat, so the two flames never pulse together.
         const gutter = 0.7 + 0.3 * Math.sin(this.flicker + s * 1.9 + (side > 0 ? 2.1 : 0))
         // Short: it is coming at the camera, so it barely climbs the screen at all.
-        const len = size * 0.038 * gutter * this.strength
+        const len = 0.1 * px * gutter * this.strength
         // And wider as it comes, the way a plume aimed at you spreads instead of tapering.
-        const halfW = size * (0.045 + s * 0.018) * (0.75 + 0.25 * gutter)
+        const halfW = (0.13 + s * 0.05) * px * (0.75 + 0.25 * gutter)
         const y0 = py + tip
         const y1 = y0 + len
         tip += len
@@ -79,12 +97,12 @@ export class Flames {
         // A quad as two triangles, opening out toward the camera.
         const wide = halfW * 1.35
         const quad = [
-          [px - halfW, y0],
-          [px + halfW, y0],
-          [px + wide, y1],
-          [px - halfW, y0],
-          [px + wide, y1],
-          [px - wide, y1],
+          [cx - halfW, y0],
+          [cx + halfW, y0],
+          [cx + wide, y1],
+          [cx - halfW, y0],
+          [cx + wide, y1],
+          [cx - wide, y1],
         ]
         for (const [qx, qy] of quad) {
           p[v * 3] = qx

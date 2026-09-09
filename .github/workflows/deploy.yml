@@ -45,7 +45,7 @@ jobs:
       matrix:
         include:
           - app: coast
-            domain: sunstrip.siomporas.com
+            domain: radrun.siomporas.com
           - app: drivin
             domain: drivin.siomporas.com
           - app: conduit

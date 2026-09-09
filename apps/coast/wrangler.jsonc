@@ -3,15 +3,15 @@
   // from the edge, no Worker code of our own. `npx wrangler deploy` from this directory publishes it.
   //
   // The custom domain is claimed by this file: Cloudflare creates and keeps the DNS record for
-  // sunstrip.siomporas.com as long as siomporas.com is a zone on the same account. See DEPLOY.md.
+  // radrun.siomporas.com as long as siomporas.com is a zone on the same account. See DEPLOY.md.
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "sunstrip",
+  "name": "turbo-radrun",
   "compatibility_date": "2026-01-01",
   "assets": {
     "directory": "./dist",
     // A single-page app: unknown paths fall back to index.html rather than 404.
     "not_found_handling": "single-page-application"
   },
-  "routes": [{ "pattern": "sunstrip.siomporas.com", "custom_domain": true }],
+  "routes": [{ "pattern": "radrun.siomporas.com", "custom_domain": true }],
   "observability": { "enabled": true }
 }

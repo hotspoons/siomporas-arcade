@@ -25,7 +25,7 @@ export function buildMenus(game: Game) {
 
   const title = (): MenuScreen => ({
     id: 'title',
-    title: 'SUNSTRIP',
+    title: 'TURBO RADRUN',
     subtitle: 'Coast to coast · or a world of your own · one clock',
     items: [
       { kind: 'action', label: 'START', onSelect: () => game.startRun() },

@@ -1,6 +1,6 @@
-# SUNSTRIP
+# TURBO RADRUN
 
-https://sunstrip.siomporas.com
+https://radrun.siomporas.com
 
 A sprite-scaling road racer in the lineage of the great 1986–1991 arcade
 cabinets: three stages joined by forks, a countdown extended at checkpoints,

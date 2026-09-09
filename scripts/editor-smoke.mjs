@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Headless check of the SUNSTRIP world builder. A typecheck cannot tell you
+// Headless check of the TURBO RADRUN world builder. A typecheck cannot tell you
 // whether dragging a waypoint moves the road, so this drives the editor with a
 // real pointer: it builds a track from nothing, bends it by its handles, places
 // a prop, a scene change, two vibe shifts, an ocean front and a crossroads,

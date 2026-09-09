@@ -78,7 +78,7 @@ tunnel app="conduit":
 smoke app="conduit":
     APEX_URL="http://localhost:$(just _port {{ app }})" node scripts/smoke.mjs
 
-# drive the SUNSTRIP world builder headlessly: builds a track with the pointer,
+# drive the TURBO RADRUN world builder headlessly: builds a track with the pointer,
 # saves it, drives it, and checks the built-in route still runs (see scripts/editor-smoke.mjs)
 editor-smoke port="5182":
     APEX_URL="http://localhost:{{ port }}" node scripts/editor-smoke.mjs

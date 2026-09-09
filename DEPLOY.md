@@ -4,7 +4,7 @@ Three games, three subdomains of `siomporas.com`, one Cloudflare account:
 
 | Game | Directory | Worker | Address |
 |---|---|---|---|
-| Sunstrip | `apps/coast` | `sunstrip` | https://sunstrip.siomporas.com |
+| Turbo Radrun | `apps/coast` | `turbo-radrun` | https://radrun.siomporas.com |
 | Drivin’ | `apps/drivin` | `drivin` | https://drivin.siomporas.com |
 | Apex Conduit | `apps/conduit` | `apex-conduit` | https://apex.siomporas.com |
 

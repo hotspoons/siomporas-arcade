@@ -443,8 +443,10 @@ export class Game implements LoopClient {
     if (this.state === 'title' && this.menus.open && this.attractTick(ui)) {
       // the title screen's menu is set aside or coming back: nothing else looks at this frame
     } else if (this.menus.open) {
-      if (ui.pause && this.state === 'paused') this.resume()
-      else if (!this.menus.isSuppressed) this.menus.handle(ui)
+      // Escape is the pause key, but inside a settings screen it should step back out of that screen,
+      // not out of the game: only the pause screen itself resumes.
+      if (ui.pause && this.state === 'paused' && this.menus.current?.id === 'pause') this.resume()
+      else if (!this.menus.isSuppressed) this.menus.handle(ui.pause && this.state === 'paused' ? { ...ui, back: true } : ui)
     } else if (this.state === 'running') {
       if (ui.pause) this.pause()
       if (this.input.viewEdge || this.touch?.viewEdge) {
@@ -509,9 +511,10 @@ export class Game implements LoopClient {
       // A vibe brings the weather on gradually, so the nag follows the amount, not a flag.
       const needWipers = this.curr.rain > 0.25 && !this.curr.wipersOn && this.state === 'running'
       const needLights = this.curr.night > 0.45 && !this.curr.lightsOn && this.state === 'running'
-      this.hud.setSwitchLabels(wipersKey, lightsKey)
+      const turboKey = pad ? padLabel(p.turbo?.[0]) : keyLabel(k.turbo?.[0] ?? 'Space')
+      this.hud.setSwitchLabels(wipersKey, lightsKey, this.touch ? '' : turboKey)
       this.hud.setSwitchNeeds(needWipers, needLights)
-      this.view.hudLayer.setSwitchLabels(wipersKey, lightsKey)
+      this.view.hudLayer.setSwitchLabels(wipersKey, lightsKey, this.touch ? '' : turboKey)
       this.view.hudLayer.setSwitchNeeds(needWipers, needLights)
     }
     this.audio.update(this.curr, Math.abs(this.held.steer) > 0.6 && this.curr.speed > 40)
@@ -589,6 +592,11 @@ export class Game implements LoopClient {
       }
       case 'turbo':
         hp.rumble(0.4, 0.8, 300)
+        this.say('BOOST', 1, 'good')
+        break
+      case 'turbo_earned':
+        this.say(`BOOST EARNED · ${e.a} IN HAND`, 1.6, 'gold')
+        hp.mobile(25)
         break
       case 'timeout':
         this.say('TIME UP', 2, 'bad')

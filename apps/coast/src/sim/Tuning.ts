@@ -47,8 +47,12 @@ export const CAR_HALF_WIDTH_ROAD = 0.11 // in road widths (~1.9 m)
 /** Turbo: extra acceleration, extra top speed, duration, recharge. */
 export let TURBO_ACCEL = 28
 export let TURBO_TOP = 14
-export let TURBO_TIME = 2.2
-export let TURBO_RECHARGE = 14
+/** How long one boost lasts, seconds. */
+export let TURBO_TIME = 7
+/** Boosts you carry. */
+export let TURBO_SLOTS = 6
+/** Points that earn one back. */
+export let TURBO_SCORE = 10000
 /** Crash tumble duration and the speed you keep after a car bump. */
 export let CRASH_TIME = 1.8
 export let BUMP_KEEP = 0.85
@@ -88,7 +92,7 @@ export let AUTO_DOWN = 0.6
 export let AUTO_TOP_FACTOR = 0.93
 /** Near miss: passing within this lateral gap (road widths, bumper to bumper) scores up to NEAR_MISS_SCORE, more the closer you are. */
 export let NEAR_MISS_GAP = 0.22
-export let NEAR_MISS_SCORE = 800
+export let NEAR_MISS_SCORE = 4000
 export const SCORE_TIME_BONUS = 400
 
 /** Live-tunable knobs for the tuning panel (F6). Values persist per browser; Copy JSON to ship new defaults. */
@@ -111,8 +115,9 @@ export const SIM_TUNE: TuneSection = {
     tune('CENTRIFUGAL', () => CENTRIFUGAL, (v) => (CENTRIFUGAL = v)),
     tune('TURBO_ACCEL', () => TURBO_ACCEL, (v) => (TURBO_ACCEL = v)),
     tune('TURBO_TOP', () => TURBO_TOP, (v) => (TURBO_TOP = v)),
-    tune('TURBO_TIME', () => TURBO_TIME, (v) => (TURBO_TIME = v)),
-    tune('TURBO_RECHARGE', () => TURBO_RECHARGE, (v) => (TURBO_RECHARGE = v)),
+    tune('TURBO_TIME', () => TURBO_TIME, (v) => (TURBO_TIME = v), [1, 20], 0.5),
+    tune('TURBO_SLOTS', () => TURBO_SLOTS, (v) => (TURBO_SLOTS = v), [1, 12], 1, 'boosts you carry'),
+    tune('TURBO_SCORE', () => TURBO_SCORE, (v) => (TURBO_SCORE = v), [1000, 50000], 500, 'points that earn one back'),
     tune('CRASH_TIME', () => CRASH_TIME, (v) => (CRASH_TIME = v)),
     tune('BUMP_KEEP', () => BUMP_KEEP, (v) => (BUMP_KEEP = v)),
     tune('CRASH_MIN_SPEED', () => CRASH_MIN_SPEED, (v) => (CRASH_MIN_SPEED = v)),
@@ -120,7 +125,7 @@ export const SIM_TUNE: TuneSection = {
     tune('AUTO_TOP_FACTOR', () => AUTO_TOP_FACTOR, (v) => (AUTO_TOP_FACTOR = v), [0.7, 1], 0.01, 'automatic top speed share'),
     tune('AUTO_UP', () => AUTO_UP, (v) => (AUTO_UP = v), [0.5, 1], 0.02),
     tune('AUTO_DOWN', () => AUTO_DOWN, (v) => (AUTO_DOWN = v), [0.2, 0.9], 0.02),
-    tune('NEAR_MISS_SCORE', () => NEAR_MISS_SCORE, (v) => (NEAR_MISS_SCORE = v), [0, 5000], 50),
+    tune('NEAR_MISS_SCORE', () => NEAR_MISS_SCORE, (v) => (NEAR_MISS_SCORE = v), [0, 20000], 100),
     tune('WRECK_SPEED', () => WRECK_SPEED, (v) => (WRECK_SPEED = v)),
     tune('REAREND_CRASH_SPEED', () => REAREND_CRASH_SPEED, (v) => (REAREND_CRASH_SPEED = v)),
     tune('WRECK_TIME', () => WRECK_TIME, (v) => (WRECK_TIME = v)),

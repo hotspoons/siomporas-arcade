@@ -411,8 +411,10 @@ export class Game implements LoopClient {
     if (this.state === 'title' && this.menus.open && this.attractTick(ui)) {
       // the title screen's menu is set aside or coming back: nothing else looks at this frame
     } else if (this.menus.open) {
-      if (ui.pause && this.state === 'paused') this.resume()
-      else if (!this.menus.isSuppressed) this.menus.handle(ui)
+      // Escape is the pause key, but inside a settings screen it should step back out of that screen,
+      // not out of the game: only the pause screen itself resumes.
+      if (ui.pause && this.state === 'paused' && this.menus.current?.id === 'pause') this.resume()
+      else if (!this.menus.isSuppressed) this.menus.handle(ui.pause && this.state === 'paused' ? { ...ui, back: true } : ui)
     } else if (this.state === 'running') {
       if (ui.pause) this.pause()
     }

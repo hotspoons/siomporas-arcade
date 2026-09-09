@@ -64,3 +64,36 @@ describe('tilt steering', () => {
     expect(Math.abs(s.steer(25, 3))).toBeLessThan(0.01)
   })
 })
+
+/** Play for a while at a fixed hold, reading the steering the way a game does each frame. */
+function play(s: TiltSensor, spin: number, seconds: number, deadzone: number): number {
+  const g = gravityAt(spin)
+  let steer = 0
+  for (let i = 0; i < seconds * 60; i++) {
+    clock += 16
+    ;(s as unknown as { onMotion(e: unknown): void }).onMotion({ accelerationIncludingGravity: g })
+    steer = s.steer(25, deadzone)
+  }
+  return steer
+}
+
+describe('learning the hold', () => {
+  it('settles on however the phone is being held, without being told', () => {
+    // Pick the phone up a few degrees off and the game absorbs it: no recentre button, no drift.
+    const s = sensorHeldAt(0)
+    play(s, 7, 0.2, 9)
+    expect(Math.abs(s.steer(25, 3)), 'the new hold pulls at first').toBeGreaterThan(0.02)
+    play(s, 7, 4, 9)
+    expect(Math.abs(s.steer(25, 3)), 'and is the new straight ahead a moment later').toBeLessThan(0.02)
+  })
+
+  it('does not quietly recentre a corner being held', () => {
+    // A long corner is a real input, not a new hold: it has to still be there four seconds later.
+    const s = sensorHeldAt(0)
+    s.sign = -1
+    const early = play(s, 18, 1, 3)
+    const late = play(s, 18, 4, 3)
+    expect(Math.abs(late)).toBeGreaterThan(0.5)
+    expect(late).toBeCloseTo(early, 2)
+  })
+})

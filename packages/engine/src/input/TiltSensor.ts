@@ -4,6 +4,8 @@
 
 /** Below this much gravity in the screen plane the phone is flat enough that "across" is guesswork. */
 const FLAT_LIMIT = 2
+/** How fast the neutral hold follows the phone while the player is not asking for steering, seconds. */
+const RECENTRE = 1.2
 
 export class TiltSensor {
   ok = false
@@ -24,6 +26,8 @@ export class TiltSensor {
   private acrossX = 1
   private acrossY = 0
   private fromGravity = false
+  /** The deadzone the game last asked for: inside it, the neutral hold follows the phone. */
+  private window = 3
 
   async requestSensors(): Promise<void> {
     const DME = (window as unknown as { DeviceMotionEvent?: { requestPermission?: () => Promise<string> } }).DeviceMotionEvent
@@ -90,6 +94,24 @@ export class TiltSensor {
       this.ok = true
       this.calibrate()
       this.onFirstReading?.()
+      return
+    }
+    // Learn the hold rather than making the player set it. Whenever the reading is inside the
+    // deadzone — the player is not asking for steering — the current hold becomes the new neutral, so
+    // picking the phone up differently, or turning it over, settles itself within a second. Outside
+    // the deadzone nothing moves, so a long corner is never quietly recentred away.
+    if (Math.abs(this.tiltDeg() - this.neutral) < this.window) {
+      const c = 1 - Math.exp(-dt / RECENTRE)
+      this.neutral += (this.tiltDeg() - this.neutral) * c
+      const inPlane = Math.hypot(this.gx, this.gy)
+      if (inPlane > FLAT_LIMIT) {
+        this.fromGravity = true
+        const ax = this.acrossX + (this.gy / inPlane - this.acrossX) * c
+        const ay = this.acrossY + (-this.gx / inPlane - this.acrossY) * c
+        const m = Math.hypot(ax, ay) || 1
+        this.acrossX = ax / m
+        this.acrossY = ay / m
+      }
     }
   }
 
@@ -125,6 +147,8 @@ export class TiltSensor {
 
   /** Shaped steer in [-1, 1] given a full-lock angle and deadzone (degrees). */
   steer(rangeDeg: number, deadzoneDeg: number, curve = 1.5): number {
+    // Remember the deadzone: it is the window inside which the hold is allowed to re-learn itself.
+    this.window = deadzoneDeg
     if (!this.ok) return 0
     const deg = this.tiltDeg() - this.neutral
     const mag = Math.max(0, Math.abs(deg) - deadzoneDeg) / (rangeDeg - deadzoneDeg)

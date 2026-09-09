@@ -1,4 +1,4 @@
-export type SimEventType = 'crash' | 'wreck' | 'bump' | 'offroad' | 'onroad' | 'checkpoint' | 'fork' | 'pass' | 'turbo' | 'gear' | 'timeout' | 'finish' | 'stage' | 'wipers' | 'lights' | 'launch' | 'land' | 'nearmiss'
+export type SimEventType = 'crash' | 'wreck' | 'bump' | 'offroad' | 'onroad' | 'checkpoint' | 'fork' | 'pass' | 'turbo' | 'turbo_earned' | 'gear' | 'timeout' | 'finish' | 'stage' | 'wipers' | 'lights' | 'launch' | 'land' | 'nearmiss'
 
 export interface SimEvent {
   type: SimEventType

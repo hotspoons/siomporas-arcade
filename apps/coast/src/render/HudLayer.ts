@@ -31,7 +31,7 @@ export class HudLayer {
   /** Hide the speed block in the cockpit view, where the dashboard shows it. */
   cockpit = false
   /** Key or pad labels for the manual switches, so you can see what works them. */
-  private switchKeys = { wipers: '', lights: '' }
+  private switchKeys = { wipers: '', lights: '', turbo: '' }
   /** A switch you should have on right now: it blinks until you do. */
   private needs = { wipers: false, lights: false }
   private viewHint = ''
@@ -76,9 +76,9 @@ export class HudLayer {
     this.acc = REPAINT_HZ
   }
 
-  setSwitchLabels(wipers: string, lights: string): void {
-    if (wipers === this.switchKeys.wipers && lights === this.switchKeys.lights) return
-    this.switchKeys = { wipers, lights }
+  setSwitchLabels(wipers: string, lights: string, turbo = ''): void {
+    if (wipers === this.switchKeys.wipers && lights === this.switchKeys.lights && turbo === this.switchKeys.turbo) return
+    this.switchKeys = { wipers, lights, turbo }
     this.acc = REPAINT_HZ
   }
 
@@ -159,12 +159,20 @@ export class HudLayer {
       c.fillRect(bx - px, by - px, bw + 2 * px, bh + 2 * px)
       c.fillStyle = 'rgba(232,246,255,0.18)'
       c.fillRect(bx, by, bw, bh)
-      const segs = 10
-      const lit = Math.round(Math.max(0, Math.min(1, snap.hud.turbo)) * segs)
+      // One pip per boost in hand, so the count is the gauge.
+      const segs = Math.max(1, snap.hud.turboMax)
+      const lit = Math.max(0, Math.min(segs, snap.hud.turbo))
       const gap = Math.max(1, Math.round(px))
       const sw = (bw - gap * (segs - 1)) / segs
       c.fillStyle = snap.hud.turboActive ? (Math.floor(this.clock * 8) % 2 ? '#fff2a0' : '#ff8a3c') : '#3ce0ff'
       for (let i = 0; i < lit; i++) c.fillRect(Math.round(bx + i * (sw + gap)), by, Math.ceil(sw), bh)
+      if (this.switchKeys.turbo) {
+        c.font = `${Math.round(5 * px)}px "Press Start 2P", monospace`
+        c.textAlign = 'right'
+        c.fillStyle = 'rgba(60,224,255,0.85)'
+        c.fillText(`BOOST ${this.switchKeys.turbo}`, W - safe, by - 4 * px)
+        c.textAlign = 'left'
+      }
     }
     // The switches you have to remember, and the radio, along the bottom left.
     c.font = `${Math.round(6 * px)}px "Press Start 2P", monospace`

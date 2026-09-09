@@ -48,8 +48,11 @@ export class Sim {
   timeLeft = T.TIME_START
   score = 0
   phase: RunPhase = 'driving'
-  turbo = 1
+  /** Boosts in hand, out of TURBO_SLOTS. */
+  turbo = 0
   turboTimer = 0
+  /** The score at which the next boost is earned back. */
+  private nextTurboAt = 0
   crashTimer = 0
   steerVisual = 0
   curveAccum = 0
@@ -100,8 +103,9 @@ export class Sim {
     this.timeLeft = T.TIME_START
     this.score = 0
     this.phase = 'driving'
-    this.turbo = 1
+    this.turbo = T.TURBO_SLOTS
     this.turboTimer = 0
+    this.nextTurboAt = T.TURBO_SCORE
     this.crashTimer = 0
     this.steerVisual = 0
     this.curveAccum = 0
@@ -243,13 +247,20 @@ export class Sim {
         this.events.push('gear', 0)
       }
     }
+    // Boosts are counted, not charged: you carry a handful and earn them back by scoring.
     if (input.turbo && this.turbo >= 1 && this.turboTimer <= 0) {
       this.turboTimer = T.TURBO_TIME
-      this.turbo = 0
+      this.turbo--
       this.events.push('turbo')
     }
     if (this.turboTimer > 0) this.turboTimer -= dt
-    else this.turbo = Math.min(1, this.turbo + dt / T.TURBO_RECHARGE)
+    while (this.score >= this.nextTurboAt) {
+      this.nextTurboAt += T.TURBO_SCORE
+      if (this.turbo < T.TURBO_SLOTS) {
+        this.turbo++
+        this.events.push('turbo_earned', this.turbo)
+      }
+    }
 
     // Longitudinal.
     const max = this.maxSpeed
@@ -513,6 +524,7 @@ export class Sim {
     const loTop = T.MAX_SPEED_LO * (this.automatic ? T.AUTO_TOP_FACTOR : 1)
     h.rpm = this.speed < 0.3 ? 0.1 : this.gear === 0 ? Math.min(1, 0.12 + (this.speed / loTop) * 0.88) : Math.max(0.15, Math.min(1, 0.12 + ((this.speed - loTop * 0.3) / (this.maxSpeed - loTop * 0.3)) * 0.88))
     h.turbo = this.turbo
+    h.turboMax = T.TURBO_SLOTS
     h.turboActive = this.turboTimer > 0
     h.stage = this.stageIndex + 1
     h.stagesTotal = this.world.routeLength(this.startId)

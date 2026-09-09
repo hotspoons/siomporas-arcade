@@ -39,9 +39,13 @@ canvas.game { position: absolute; inset: 0; width: 100%; height: 100%; display: 
 .hud .speedo .value { font-size: 3.2em; font-variant-numeric: tabular-nums; }
 .hud .speedo .unit { margin-left: 0.3em; font-family: var(--font-arcade); font-size: 0.5em; opacity: 0.8; letter-spacing: 0.05em; }
 .hud .speedo .gear { display: block; font-size: 1.4em; color: #ff8a3c; }
-.hud .turbo { display: none; width: 18vw; max-width: 260px; height: 0.5em; margin-top: 6px; margin-left: auto; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.25); overflow: hidden; }
-.hud .turbo .fill { height: 100%; background: var(--accent2); transition: width 0.1s linear; }
-.hud .turbo .fill.active { background: #ff5fd2; }
+/* Boosts in hand: a pip each, lit while you still have them. */
+.hud .turbo { display: flex; gap: 0.22em; justify-content: flex-end; margin-top: 0.35em; }
+.hud .turbo i { width: 1.1em; height: 0.42em; background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.3); }
+.hud .turbo i.on { background: var(--accent2); border-color: var(--accent2); box-shadow: 0 0 0.5em rgba(77,225,255,0.5); }
+.hud .turbo.active i.on { background: #ff5fd2; border-color: #ff5fd2; animation: boostpip 0.25s steps(1) infinite; }
+@keyframes boostpip { 0% { opacity: 1; } 50% { opacity: 0.35; } }
+.hud .boostkey { display: block; margin-top: 0.25em; font-family: var(--font-arcade); font-size: 0.34em; letter-spacing: 0.12em; color: var(--accent2); opacity: 0.75; }
 .hud .switches { position: absolute; bottom: 11vh; left: 4vw; display: flex; gap: 1.6em; font-family: var(--font-arcade); font-size: 0.5em; letter-spacing: 0.05em; opacity: 0.55; text-shadow: 2px 2px 0 var(--ink); }
 .hud .switches .on { color: #5cff8a; opacity: 1; text-shadow: 0 0 10px rgba(92,255,138,0.6); }
 .hud .switches [data-wipers].on { color: #6ab8ff; text-shadow: 0 0 10px rgba(106,184,255,0.6); }

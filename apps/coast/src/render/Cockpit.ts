@@ -153,8 +153,10 @@ export class Cockpit {
     c.fill()
     gauge(c, W / 2 - 200, H - 60, 62, snap.speed / snap.maxSpeed, String(Math.round(snap.hud.speedKmh)), 'KM/H', snap.speed / snap.maxSpeed > 0.92)
     gauge(c, W / 2, H - 78, 78, snap.hud.rpm, snap.hud.gear === 1 ? 'HI' : 'LO', 'RPM', snap.hud.rpm > 0.95)
-    // No boost on a Group 6 car: the third dial is oil temperature, creeping up with the pace.
-    gauge(c, W / 2 + 200, H - 60, 62, 0.35 + 0.45 * Math.min(1, snap.speed / snap.maxSpeed) ** 2, String(Math.round(70 + 45 * Math.min(1, snap.speed / snap.maxSpeed) ** 2)), 'OIL °C', snap.speed / snap.maxSpeed > 0.97)
+    // The third dial is the boost: how many you have left, and buried while one is running.
+    const slots = Math.max(1, snap.hud.turboMax)
+    const held = Math.max(0, Math.min(slots, snap.hud.turbo))
+    gauge(c, W / 2 + 200, H - 60, 62, snap.hud.turboActive ? 1 : held / slots, String(held), 'BOOST', snap.hud.turboActive)
     // Telltales on the dash: the two switches you have to remember to flick.
     telltale(c, W / 2 - 300, H - 40, snap.lightsOn, '#5cff8a', 'LIGHTS')
     telltale(c, W / 2 + 300, H - 40, snap.wipersOn, '#6ab8ff', 'WIPERS')

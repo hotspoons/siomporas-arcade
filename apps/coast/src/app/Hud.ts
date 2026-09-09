@@ -11,6 +11,7 @@ export class Hud {
   private readonly unit: HTMLElement
   private readonly gear: HTMLElement
   private readonly turbo: HTMLElement
+  private readonly boostKey: HTMLElement
   private readonly message: HTMLElement
   private readonly fork: HTMLElement
   private readonly station: HTMLElement
@@ -30,7 +31,7 @@ export class Hud {
       <div class="stage"><span class="label">STAGE</span><span class="value" data-stage>1</span></div>
       <div class="message" data-message></div>
       <div class="fork" data-fork><span class="l">◄ LEFT</span><span class="r">RIGHT ►</span></div>
-      <div class="speedo"><span class="value" data-speed>0</span><span class="unit" data-unit>KM/H</span><span class="gear" data-gear>HI</span><div class="turbo"><div class="fill" data-turbo></div></div></div>
+      <div class="speedo"><span class="value" data-speed>0</span><span class="unit" data-unit>KM/H</span><span class="gear" data-gear>HI</span><div class="turbo" data-turbo></div><span class="boostkey" data-boostkey></span></div>
       <div class="switches"><span data-lights>● LIGHTS</span><span data-wipers>● WIPERS</span></div>
       <div class="station" data-station></div>
       <div class="viewhint" data-viewhint></div>`
@@ -43,6 +44,7 @@ export class Hud {
     this.unit = q('[data-unit]')
     this.gear = q('[data-gear]')
     this.turbo = q('[data-turbo]')
+    this.boostKey = q('[data-boostkey]')
     this.message = q('[data-message]')
     this.fork = q('[data-fork]')
     this.station = q('[data-station]')
@@ -57,9 +59,11 @@ export class Hud {
     this.viewhint.textContent = view === 'cockpit' ? 'C · CHASE VIEW' : 'C · COCKPIT VIEW'
   }
   /** Label the manual switches with the key (or pad button) that works them. */
-  setSwitchLabels(wipers: string, lights: string): void {
+  setSwitchLabels(wipers: string, lights: string, turbo = ''): void {
     this.lights.textContent = `● LIGHTS · ${lights}`
     this.wipers.textContent = `● WIPERS · ${wipers}`
+    // Nobody finds a boost button they were never told about.
+    this.boostKey.textContent = turbo ? `BOOST · ${turbo}` : ''
   }
   /** Flag a switch you should have on right now (rain without wipers, night without lights). */
   setSwitchNeeds(wipers: boolean, lights: boolean): void {
@@ -97,7 +101,13 @@ export class Hud {
     this.speed.textContent = String(Math.round(v))
     this.unit.textContent = this.units === 'kmh' ? 'KM/H' : 'MPH'
     this.gear.textContent = snap.hud.gear === 1 ? 'HI' : 'LO'
-    this.turbo.style.width = `${Math.round(snap.hud.turbo * 100)}%`
+    // Boosts in hand, one pip each, so you can see what you are spending.
+    const max = Math.max(1, snap.hud.turboMax)
+    if (this.turbo.childElementCount !== max) {
+      this.turbo.innerHTML = ''
+      for (let i = 0; i < max; i++) this.turbo.appendChild(document.createElement('i'))
+    }
+    for (let i = 0; i < max; i++) this.turbo.children[i].className = i < snap.hud.turbo ? 'on' : ''
     this.turbo.classList.toggle('active', snap.hud.turboActive)
   }
 }

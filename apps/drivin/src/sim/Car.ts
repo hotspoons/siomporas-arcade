@@ -155,6 +155,37 @@ export class Car {
     this.updatePose()
   }
 
+  /**
+   * Manual recover: right the car and back it out of whatever it is in.
+   *
+   * Righting the car where it stands is no use for the thing people press this for — wedged under a
+   * building, or nose-first into a wall — so every press also steps back the way you came, and keeps
+   * stepping while the spot it lands on is still inside something solid.
+   */
+  recover(back: number): void {
+    this.resumeInPlace()
+    this.stepBack(back)
+    // On the road there is nothing to be inside; off it, walk out of the scenery.
+    for (let i = 0; i < 6 && this.mode === 'ground' && this.wedged(); i++) this.stepBack(back * 0.6)
+  }
+
+  /** Move back along the way the car is pointing (or back down the lane it is on). */
+  private stepBack(d: number): void {
+    if (this.mode === 'track' && this.lane) {
+      this.s = Math.max(0, this.s - d)
+      this.updatePose()
+      return
+    }
+    this.pos.addScaled(this.forward, -d)
+    this.pos.y = this.track.groundHeight(this.pos.x, this.pos.z) + CAR_RIDE
+    this.updatePose()
+  }
+
+  /** Is this spot inside a solid? Only meaningful off the road, where the scenery is. */
+  private wedged(): boolean {
+    return Boolean(this.hitsScenery() || this.hitsStructure(this.track.lanesNear(this.pos, this.nearby)))
+  }
+
   /** Stand on the grass at a world point, facing +x. */
   placeOnGrass(x: number, z: number): void {
     this.mode = 'ground'

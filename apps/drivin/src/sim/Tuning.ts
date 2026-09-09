@@ -111,6 +111,8 @@ export let SEGMENT_PENALTY = 5
 export const CRASH_TIME_PENALTY = 5
 /** Seconds added for skipping a crash replay with the reset key (you restart from before the incident). */
 export let RESET_PENALTY = 5
+/** Metres the manual recover backs you up, each press: enough to get out from under a building. */
+export let RECOVER_BACK = 9
 /** Metres further along the road you resume for each consecutive crash on the same spot (~50 ft). */
 export let RESUME_ADVANCE = 15
 
@@ -140,6 +142,7 @@ export const SIM_TUNE: TuneSection = {
     tune('REPLAY_PLAY_SECONDS', () => REPLAY_PLAY_SECONDS, (v) => (REPLAY_PLAY_SECONDS = v)),
     tune('SEGMENT_PENALTY', () => SEGMENT_PENALTY, (v) => (SEGMENT_PENALTY = v)),
     tune('RESET_PENALTY', () => RESET_PENALTY, (v) => (RESET_PENALTY = v), [0, 20], 1),
+    tune('RECOVER_BACK', () => RECOVER_BACK, (v) => (RECOVER_BACK = v), [0, 40], 1, 'metres the recover key backs you up'),
     tune('AIR_GLITCH_THRESHOLD', () => AIR_GLITCH_THRESHOLD, (v) => (AIR_GLITCH_THRESHOLD = v)),
     tune('AIR_GLITCH_ACCEL', () => AIR_GLITCH_ACCEL, (v) => (AIR_GLITCH_ACCEL = v)),
     tune('ROCKET_CHANCE', () => ROCKET_CHANCE, (v) => (ROCKET_CHANCE = v), [0, 1], 0.05, 'share of qualifying seams that fire'),

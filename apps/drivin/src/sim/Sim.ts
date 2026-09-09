@@ -7,7 +7,7 @@ import { EventQueue } from './Events'
 import type { InputFrame } from './InputFrame'
 import { Snapshot, type RunPhase } from './Snapshot'
 import type { Lane, Track } from './Track'
-import { AIR_REV_RATE, CELL, CRASH_TIME_PENALTY, RESET_PENALTY, RESUME_ADVANCE, REPLAY_PLAY_SECONDS, REPLAY_SECONDS, SEGMENT_PENALTY, SIM_HZ } from './Tuning'
+import { AIR_REV_RATE, CELL, CRASH_TIME_PENALTY, RECOVER_BACK, RESET_PENALTY, RESUME_ADVANCE, REPLAY_PLAY_SECONDS, REPLAY_SECONDS, SEGMENT_PENALTY, SIM_HZ } from './Tuning'
 
 const REPLAY_FRAMES = REPLAY_SECONDS * SIM_HZ
 
@@ -139,8 +139,8 @@ export class Sim {
       this.tickCount++
       this.lapTime += dt
       if (input.reset) {
-        // Manual recover: back on your wheels, right here.
-        this.car.resumeInPlace()
+        // Manual recover: back on your wheels, and backed up out of whatever you are wedged in.
+        this.car.recover(RECOVER_BACK)
         this.events.push('respawn', this.car.pos, 0)
       }
       car.tick(dt, input)

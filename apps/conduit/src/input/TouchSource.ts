@@ -48,6 +48,9 @@ export class TouchSource implements ExtraSource {
     parent.appendChild(this.el)
     for (const z of this.el.querySelectorAll<HTMLElement>('[data-zone]')) this.zones.set(z.dataset.zone as Zone, z)
     this.sensor.onFirstReading = () => this.el.classList.add('sensors')
+    // Turning the phone changes which way "across the screen" is: take the hold again rather than
+    // steering off the old one.
+    this.sensor.watchOrientation()
     this.el.addEventListener('pointerdown', this.onDown, { passive: false })
     this.el.addEventListener('pointermove', this.onMove, { passive: false })
     this.el.addEventListener('pointerup', this.onUp)

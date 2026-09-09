@@ -107,10 +107,13 @@ export const PALETTES: Record<string, Palette> = {
 export let HUD_RETRO = 1
 
 /**
- * 1 = draw the real meshes instead of their sprites, in the same places, at the same sizes, from the
- * same angles — the models are real, the sprites are baked from them, and this is the comparison.
- * Off by default: the sprite scaling *is* the game. Turning it on loads every model, which the atlas
- * does not keep, so there is a pause the first time.
+ * 0 = sprites, the way this game is meant to look.
+ * 1 = the real meshes in the sprites' places, at the same size and in the same baked pose: sharper,
+ *     but a car still steps between sixteen steering angles and a tree is still seen head-on.
+ * 2 = a real camera. Every model sits at its actual place in front of it and is seen from wherever
+ *     the camera is, so a turn sweeps continuously through the angles and roadside things are seen
+ *     from the side. The antithesis of the aesthetic, and worth being able to look at.
+ * Either mode loads every model, which the atlas does not keep, so there is a pause the first time.
  */
 export let MODELS_3D = 0
 
@@ -118,7 +121,7 @@ export const RENDER_TUNE: TuneSection = {
   title: 'Render · camera, fog, road',
   keys: [
     tune('HUD_RETRO', () => HUD_RETRO, (v) => (HUD_RETRO = v), [0, 1], 1, 'draw the HUD inside the low-res buffer'),
-    tune('MODELS_3D', () => MODELS_3D, (v) => (MODELS_3D = v), [0, 1], 1, 'draw the real meshes instead of their sprites'),
+    tune('MODELS_3D', () => MODELS_3D, (v) => (MODELS_3D = v), [0, 2], 1, '0 sprites · 1 meshes in the sprites\u2019 poses · 2 a real camera'),
     tune('FOV_DEG', () => FOV_DEG, (v) => (FOV_DEG = v)),
     tune('FOG_MODERN', () => FOG_MODERN, (v) => (FOG_MODERN = v)),
     tune('FOG_RETRO', () => FOG_RETRO, (v) => (FOG_RETRO = v)),

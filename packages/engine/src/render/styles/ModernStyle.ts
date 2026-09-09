@@ -140,11 +140,15 @@ export class ModernStyle implements Style {
     this.xr = active
   }
 
+  /** A second pass over the presented image; see Style.extra. */
+  extra: ((renderer: WebGLRenderer) => void) | null = null
+
   render(info: StyleFrameInfo): void {
     if (!this.renderer || !this.scene || !this.camera) return
     if (this.xr || !this.composer) {
       // Per-eye post reads as broken depth: draw straight to the XR layer.
       this.renderer.render(this.scene, this.camera)
+      this.extra?.(this.renderer)
       return
     }
     const motion = this.reducedMotion ? 0.25 : 1
@@ -162,5 +166,8 @@ export class ModernStyle implements Style {
       this.vignette.darkness = 0.5 + low * 0.35 + info.hit * 0.3
     }
     this.composer.render(info.dt)
+    // After post, not before: the composer owns its own buffers, so an extra pass lands on the
+    // presented image rather than going through the stack with it.
+    this.extra?.(this.renderer)
   }
 }

@@ -16,6 +16,12 @@ export interface StyleFrameInfo {
 
 export interface Style {
   readonly name: 'modern' | 'retro'
+  /**
+   * Optional second pass, drawn into whatever the style is rendering into, right after its own scene
+   * and before it is presented. For a game whose main scene is a screen-space projection but which
+   * wants a pass with a real camera over the top of it — the depth buffer is still the style's.
+   */
+  extra?: ((renderer: WebGLRenderer) => void) | null
   attach(renderer: WebGLRenderer, scene: Scene, camera: Camera): void
   detach(): void
   resize(width: number, height: number, pixelRatio: number): void

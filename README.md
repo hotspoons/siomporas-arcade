@@ -46,8 +46,10 @@ and camera constant worth tuning. Changes apply instantly and persist per browse
 on the clipboard — paste it into chat and the `changed` block becomes the new
 defaults in `src/sim/Tuning.ts` / `src/render/RenderTuning.ts`. **Paste JSON**
 accepts the same document (or a flat `{NAME: value}` map); **Reset all** returns
-to shipped defaults. Turbo Radrun's `MODELS_3D` swaps every sprite for the mesh
-it was baked from, in place, for comparing the two. `P` pauses in every game alongside Escape.
+to shipped defaults. Turbo Radrun's `MODELS_3D` swaps sprites for the meshes they
+were baked from: `1` poses them exactly where the sprites were, `2` puts a real
+perspective camera on them, so poses are continuous and roadside things are seen
+from the side. `P` pauses in every game alongside Escape.
 
 ## Fonts
 

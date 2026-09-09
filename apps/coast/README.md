@@ -119,6 +119,14 @@ gives the near and far ends of a car the same width, which reads as an isometric
 drawing instead of a photograph of a model, and photographs of models is what
 the arcade sprites of this era were.
 
+`MODELS_3D` in the tuning panel draws the meshes instead: `1` in the sprites' own
+poses and places, `2` through a real perspective camera matched to the game's
+projection — a sprite's screen position and scale invert straight back into the
+camera-space point it came from, so meshes land on the road with the curve,
+hills and banking already in them. Poses go continuous, roadside models are seen
+from the side, and a depth-only proxy of the road surface lets crests hide what
+is behind them. The road itself is still trapezoids.
+
 The hero car, the buildings and the signs are not from a kit — they are built in
 `src/render/procgen.ts`. Judging one of those from a 40-pixel sprite is hopeless,
 so **/model.html** puts the actual meshes on a turntable under the bake's own

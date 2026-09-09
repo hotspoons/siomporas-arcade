@@ -101,6 +101,8 @@ export class RetroStyle implements Style {
   private scene: Scene | null = null
   private camera: Camera | null = null
   private target: WebGLRenderTarget | null = null
+  /** A second pass into this style's buffer; see Style.extra. */
+  extra: ((renderer: WebGLRenderer) => void) | null = null
   /** Size of the low-res buffer: the option's line count, widened to the window's aspect. */
   private bufW = 320
   private bufH = 240
@@ -196,6 +198,7 @@ export class RetroStyle implements Style {
     if (this.xr || !this.target) {
       // XR: no CRT overlay and no offscreen present — the runtime owns the eye buffers.
       r.render(this.scene, this.camera)
+      this.extra?.(r)
       return
     }
     const prevTone = r.toneMapping
@@ -205,6 +208,7 @@ export class RetroStyle implements Style {
     r.setRenderTarget(this.target)
     r.clear()
     r.render(this.scene, this.camera)
+    this.extra?.(r)
     r.setRenderTarget(null)
     r.outputColorSpace = prevSpace
     r.toneMapping = prevTone

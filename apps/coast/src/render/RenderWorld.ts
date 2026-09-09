@@ -42,7 +42,7 @@ import { COCKPIT_H, COCKPIT_W, Cockpit } from './Cockpit'
 import { Flames } from './Flames'
 import { HudLayer } from './HudLayer'
 import { Projection } from './Projection'
-import { MODELS_3D, BANK_ROLL, BANK_SLOPE, BANK_TIER_COUNT, BANK_TIER_H, BANK_TIER_W, BEACH_WIDTH, CAM_BOUNCE, TUNNEL_DARK, TUNNEL_HALF_WIDTH, TUNNEL_HEIGHT, HUD_RETRO, HORIZON_ROLL_SHARE, STEER_ROLL, CURVE_UNIT, FOG_MODERN, FOG_RETRO, HEADLIGHT_REACH, LANE_WIDTH, LIGHTS_OFF_AMBIENT, LOGICAL_HEIGHT, MAX_SPRITES, NIGHT_AMBIENT, PALETTES, RAIL_HEIGHT, RUMBLE_WIDTH, SHOULDER_WIDTH, VIEWS, type Palette } from './RenderTuning'
+import { FOV_DEG, MODELS_3D, BANK_ROLL, BANK_SLOPE, BANK_TIER_COUNT, BANK_TIER_H, BANK_TIER_W, BEACH_WIDTH, CAM_BOUNCE, TUNNEL_DARK, TUNNEL_HALF_WIDTH, TUNNEL_HEIGHT, HUD_RETRO, HORIZON_ROLL_SHARE, STEER_ROLL, CURVE_UNIT, FOG_MODERN, FOG_RETRO, HEADLIGHT_REACH, LANE_WIDTH, LIGHTS_OFF_AMBIENT, LOGICAL_HEIGHT, MAX_SPRITES, NIGHT_AMBIENT, PALETTES, RAIL_HEIGHT, RUMBLE_WIDTH, SHOULDER_WIDTH, VIEWS, type Palette } from './RenderTuning'
 import { LIVERIES } from './procgen'
 import { Rain } from './Rain'
 import type { Theme } from '../sim/Road'
@@ -561,12 +561,18 @@ export class RenderWorld {
     this.road.end()
 
     // Pass 3, far → near: scenery and traffic sprites.
-    // 3D models instead of sprites, when asked for and once they are in memory.
-    const use3D = MODELS_3D > 0.5
-    if (use3D && !this.models.ready) void this.models.load()
-    const solid = use3D && this.models.ready
-    this.models.group.visible = solid
-    this.models.begin(W, H)
+    // 3D models instead of sprites, when asked for and once they are in memory. 1 poses the meshes
+    // exactly where the sprites were; 2 puts a real camera on them.
+    const want3D = MODELS_3D >= 1.5 ? 2 : MODELS_3D > 0.5 ? 1 : 0
+    if (want3D && !this.models.ready) void this.models.load()
+    const mode = this.models.ready ? want3D : 0
+    const posed = mode === 1
+    const solid = mode === 2
+    this.models.group.visible = posed
+    this.models.scene.visible = solid
+    if (this.style) this.style.extra = solid ? this.renderSolid : null
+    this.models.begin(W, H, FOV_DEG)
+    if (solid) this.models.setGround(this.rowX, this.rowY, this.rowScale, ROWS)
     this.sprites.begin()
     const carOrder = this.carOrder
     carOrder.length = 0
@@ -606,12 +612,15 @@ export class RenderWorld {
           // Roll comes between the rows too, so a car does not snap upright halfway through a bank.
           const roll = Math.atan(this.rowTilt[n] + (this.rowTilt[n + 1] - this.rowTilt[n]) * t)
           if (!frame) continue
-          if (solid && this.models.add(kind, tsx, sy, frame.heightM * sc, frame, viewYaw, viewPitch, roll)) continue
+          // Solid: the car's own heading, not the angle it happens to be seen from — that comes out
+          // of where it is standing once there is a real camera.
+          if (solid && this.models.addSolid(kind, tsx, sy, sc, 1, yaw, roll)) continue
+          if (posed && this.models.addPosed(kind, tsx, sy, frame.heightM * sc, frame, viewYaw, viewPitch, roll)) continue
           this.sprites.add(tsx, sy, frame.heightM * sc, frame, this.rowFog[n], this.brightAt((base + n) * SEG_LENGTH - camZ), Math.max(clip, this.deckWallTop(n, lat, tsx)), roll)
         }
       }
       if (seg.runway || base + n < 0) continue
-      this.drawSegmentSprites(seg, n, clip, this.brightAt((base + n) * SEG_LENGTH - camZ), solid)
+      this.drawSegmentSprites(seg, n, clip, this.brightAt((base + n) * SEG_LENGTH - camZ), posed, solid)
     }
     // Player car.
     if (view.drawPlayer) {
@@ -620,11 +629,15 @@ export class RenderWorld {
       const steerFrame = Math.round(curr.steer * 3)
       // Baked yaw > 0 shows the car's right flank (nose left); steering right must show the left flank.
       let yaw = steerFrame === 0 ? 0 : steerFrame > 0 ? -[12, 24, 38][steerFrame - 1] : [12, 24, 38][-steerFrame - 1]
+      // A mesh can hold any angle, so it gets the steering and the crash spin continuously rather
+      // than snapped to whichever of the sixteen baked views is nearest.
+      let spinDeg = -curr.steer * 38
       if (curr.crashT > 0) {
         // A crash spins the car a full turn on the spot; a wreck spins it through the air, then it lies still.
         const t = curr.crashT
         const turn = curr.wreck ? (t < 0.7 ? Math.min(1, t / 0.4) * 1.5 : 0) : t
-        yaw = nearestYaw(((turn * 360 + 180) % 360) - 180)
+        spinDeg = ((turn * 360 + 180) % 360) - 180
+        yaw = nearestYaw(spinDeg)
       }
       const frame = this.atlas.frame(this.heroKind, yaw)
       let hop = curr.crashT > 0 ? Math.abs(Math.sin(curr.crashT * 20)) * 12 : 0
@@ -643,8 +656,12 @@ export class RenderWorld {
       const carX = W / 2 + curr.steer * 2
       const carSize = frame ? frame.heightM * scale * squash : 0
       const heroRoll = Math.atan(this.rowTilt[1])
-      if (frame && !(solid && this.models.add(this.heroKind, carX, py + hop, carSize, frame, yaw, DEFAULT_PITCH, heroRoll)))
-        this.sprites.add(carX, py + hop, carSize, frame, 0, 1, -1e9, heroRoll)
+      // Solid takes the steering angle continuously instead of the nearest of sixteen baked ones,
+      // which is the whole point of it.
+      const drawn =
+        (solid && this.models.addSolid(this.heroKind, carX, py + hop, scale * squash, 1, spinDeg, heroRoll)) ||
+        (posed && frame !== null && this.models.addPosed(this.heroKind, carX, py + hop, carSize, frame, yaw, DEFAULT_PITCH, heroRoll))
+      if (frame && !drawn) this.sprites.add(carX, py + hop, carSize, frame, 0, 1, -1e9, heroRoll)
       // Afterburner: boost lit and the throttle down, and not while the car is a wreck.
       this.flames.update(carX, py + hop, carSize, frame, Math.atan(this.rowTilt[1]), curr.hud.turboActive && curr.throttle > 0.1 && curr.crashT <= 0, dt)
     }
@@ -686,7 +703,7 @@ export class RenderWorld {
     return 1 + (dark - 1) * nightAmt
   }
 
-  private drawSegmentSprites(seg: Segment, n: number, clip: number, bright: number, solid = false): void {
+  private drawSegmentSprites(seg: Segment, n: number, clip: number, bright: number, posed = false, solid = false): void {
     const sc = this.rowScale[n]
     for (const sp of seg.sprites) {
       const frame = this.atlas.frame(sp.kind)
@@ -700,7 +717,8 @@ export class RenderWorld {
       const lit = sp.kind.startsWith('sign') || sp.kind.startsWith('tower') || sp.kind === 'diner' || sp.kind === 'motel' || sp.kind === 'gas' || sp.kind === 'arch' ? Math.max(bright, 0.85) : bright
       const glow = this.silAmt > 0.01 ? lit + (0.04 - lit) * this.silAmt : lit
       const h = frame.heightM * sp.scale * sc
-      if (solid && this.models.add(sp.kind, sx, sy, h, frame, 0, DEFAULT_PITCH, 0)) continue
+      if (solid && this.models.addSolid(sp.kind, sx, sy, sc, sp.scale, 0, 0)) continue
+      if (posed && this.models.addPosed(sp.kind, sx, sy, h, frame, 0, DEFAULT_PITCH, 0)) continue
       this.sprites.add(sx, sy, h, frame, this.rowFog[n], glow, clipHere)
     }
   }
@@ -739,6 +757,9 @@ export class RenderWorld {
     if (!t) return 0
     return bermLift(lateralM, t, this.road.plateau) * this.rowScale[n]
   }
+
+  /** The solid-model pass, handed to the style so it lands in the style's own buffer. */
+  private readonly renderSolid = (r: WebGLRenderer): void => this.models.render(r)
 
   render(): void {
     this.renderer.info.reset()

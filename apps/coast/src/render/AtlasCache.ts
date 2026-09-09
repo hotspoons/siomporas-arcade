@@ -11,7 +11,7 @@ import { PROCGEN_VERSION } from './procgen'
 const DB = 'apex-coast'
 const STORE = 'atlas'
 /** Bump when the bake itself changes (lighting, camera, cell layout). */
-const BAKE_VERSION = 5
+const BAKE_VERSION = 6
 
 interface CachedAtlas {
   key: string

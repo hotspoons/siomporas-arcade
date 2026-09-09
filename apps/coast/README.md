@@ -114,6 +114,17 @@ steering angles — then everything on the road is a scaled quad again. Swapping
 a model in `src/render/models.ts` re-bakes automatically; nothing needs
 Blender. See [public/assets/LICENSES.md](public/assets/LICENSES.md).
 
+The bake camera is a long lens rather than an orthographic one: an ortho render
+gives the near and far ends of a car the same width, which reads as an isometric
+drawing instead of a photograph of a model, and photographs of models is what
+the arcade sprites of this era were.
+
+The hero car, the buildings and the signs are not from a kit — they are built in
+`src/render/procgen.ts`. Judging one of those from a 40-pixel sprite is hopeless,
+so **/model.html** puts the actual meshes on a turntable under the bake's own
+lights, with camera presets on the angles the atlas really bakes. `just
+model-shots` shoots the lot headlessly into `shots/model/`.
+
 ## Layout
 
 ```

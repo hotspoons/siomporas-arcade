@@ -2,11 +2,12 @@
 // with an orthographic camera into its own atlas cell, so the runtime is pure
 // sprite scaling — the 2.5D look — while the art comes from real meshes.
 
-import { AmbientLight, Box3, BoxGeometry, Color, Vector4, DirectionalLight, Group, HemisphereLight, Mesh, MeshStandardMaterial, Object3D, OrthographicCamera, Scene, SRGBColorSpace, Vector3, WebGLRenderTarget, type Texture, type WebGLRenderer, NearestFilter, LinearFilter, RGBAFormat } from 'three'
+import { AmbientLight, Box3, BoxGeometry, Color, Vector4, DirectionalLight, Group, HemisphereLight, Mesh, MeshStandardMaterial, Object3D, PerspectiveCamera, Scene, SRGBColorSpace, Vector3, WebGLRenderTarget, type Texture, type WebGLRenderer, NearestFilter, LinearFilter, RGBAFormat } from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { isTouchDevice } from '@apex/engine/app/platform'
 
 import { atlasSizeFor, cellSize, MODELS, type ModelDef } from './models'
+import { ensureFonts } from './procgen'
 import { applyAtlasFilters, atlasKey, loadCachedAtlas, saveCachedAtlas } from './AtlasCache'
 
 export interface SpriteFrame {
@@ -29,6 +30,13 @@ export interface SpriteKind {
   yaws: number[]
   pitches: number[]
 }
+
+/**
+ * How far back the bake camera stands, in multiples of the subject's own framed size. Small is a
+ * fisheye, huge is the isometric look this replaced; six and a half is about a long lens on a model
+ * on a table, which is what these sprites are pretending to be.
+ */
+const LENS = 6.5
 
 /** Camera pitch (degrees above horizontal) baked for models that declare none. */
 export const DEFAULT_PITCH = 9
@@ -126,6 +134,7 @@ export class SpriteAtlas {
 
   /** The actual bake: load every model and render its cells into the atlas target. */
   private async render(renderer: WebGLRenderer, retro: boolean, onProgress?: (done: number, total: number) => void): Promise<void> {
+    await ensureFonts()
     const loader = new GLTFLoader()
     const scene = new Scene()
     scene.add(new AmbientLight(0xffffff, 0.35))
@@ -237,23 +246,29 @@ export class SpriteAtlas {
       const pitches = def.pitches ?? [DEFAULT_PITCH]
       for (const pitchDeg of pitches) for (const yaw of def.yaws) {
         const cell = place(cellSize(def, this.cellScale))
-        // Camera behind the model looking forward (+z is the model's front in the kits), from the baked pitch.
-        const cam = new OrthographicCamera(-1, 1, 1, -1, 0.1, 200)
         const yawR = (yaw * Math.PI) / 180
         const pitch = (pitchDeg * Math.PI) / 180
-        cam.position.set(Math.sin(yawR) * 40, fs.y / 2 + Math.sin(pitch) * 40, -Math.cos(yawR) * 40)
-        cam.lookAt(0, fs.y / 2, 0)
         // Fit the frame to what this view actually shows (a car from behind is half as wide as
         // from the side) so the cell's pixels go on the car, not on empty margin.
         const projW = Math.abs(Math.cos(yawR)) * fs.x + Math.abs(Math.sin(yawR)) * fs.z
         const projD = Math.abs(Math.sin(yawR)) * fs.x + Math.abs(Math.cos(yawR)) * fs.z
         const halfW = Math.max(projW / 2, fs.y / 2) * 1.02
         const halfH = (fs.y / 2) * 1.02 + Math.sin(pitch) * (projD / 2)
-        const half = Math.max(halfW, halfH)
-        cam.left = -half
-        cam.right = half
-        cam.top = half
-        cam.bottom = -half
+        const subject = Math.max(halfW, halfH)
+        // Perspective, not orthographic. An ortho bake gives the near and far ends of a car exactly
+        // the same width, which is why these sprites read as isometric drawings rather than as
+        // photographs of a model — and photographs of models is what the arcade sprites of the era
+        // were. So: a long lens a few subject-widths back, the same lens for everything from a
+        // wheel to a tower, and the frame still measured at the model's centre plane so nothing
+        // downstream has to know the difference.
+        const dist = subject * LENS
+        // The near half of the model projects larger than the centre plane does, so the frame has to
+        // open up by that much or the nose comes off against the edge of the cell.
+        const half = subject * (dist / Math.max(dist * 0.4, dist - projD / 2))
+        const cam = new PerspectiveCamera(2 * Math.atan(half / dist) * (180 / Math.PI), 1, dist * 0.15, dist + projD + fs.y + 10)
+        const horiz = dist * Math.cos(pitch)
+        cam.position.set(Math.sin(yawR) * horiz, fs.y / 2 + Math.sin(pitch) * dist, -Math.cos(yawR) * horiz)
+        cam.lookAt(0, fs.y / 2, 0)
         cam.updateProjectionMatrix()
         renderer.setViewport(cell.x, cell.y, cell.size, cell.size)
         renderer.setScissor(cell.x, cell.y, cell.size, cell.size)

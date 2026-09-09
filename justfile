@@ -83,6 +83,10 @@ smoke app="conduit":
 editor-smoke port="5182":
     APEX_URL="http://localhost:{{ port }}" node scripts/editor-smoke.mjs
 
+# shoot the hero car from every angle the atlas bakes (coast's /model.html must be served)
+model-shots out="shots/model":
+    mkdir -p {{ out }} && OUT={{ out }} node scripts/model-shots.mjs
+
 # headless screenshot probe against a dev server (see scripts/probe.mjs)
 probe out="shots/probe.png" seconds="0" *keys:
     node scripts/probe.mjs {{ out }} {{ seconds }} {{ keys }}

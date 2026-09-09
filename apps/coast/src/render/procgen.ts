@@ -35,7 +35,7 @@ const flat = (color: number, extra: FlatExtra = {}) => {
 }
 
 /** Bump when any procedural model changes shape; part of the atlas cache key. */
-export const PROCGEN_VERSION = 14
+export const PROCGEN_VERSION = 15
 
 interface Slice {
   z: number
@@ -49,6 +49,15 @@ interface Slice {
   floor: number
 }
 
+/**
+ * Where the fender crown sits across the section, how broad it is, and how far it stands out. The
+ * crown standing further out than the sill is the whole trick: the sill tucks inboard of the tyre so
+ * the wheel is visible in its opening, and the arch above it reaches out past the tread.
+ */
+const ARCH_U = 0.74
+const ARCH_W = 0.34
+const ARCH_OUT = 1
+
 /** Half-profile of a slice, from floor-centre up around to top-centre (right side). */
 function slicePoints(sl: Slice, n: number): [number, number][] {
   const pts: [number, number][] = []
@@ -56,11 +65,16 @@ function slicePoints(sl: Slice, n: number): [number, number][] {
     const t = i / n
     // Squarish superellipse: flat floor and top, soft rounded flank.
     const a = t * Math.PI * 0.5
-    const x = sl.hw * Math.pow(Math.cos(a), 0.55)
+    let x = sl.hw * Math.pow(Math.cos(a), 0.55)
     let y = sl.floor + (sl.top - sl.floor) * Math.pow(Math.sin(a), 1.7)
-    // Fender swell: a hump centred ~72 % of the way out, only on the upper half.
+    // Fender arch: a crown over the wheel. It has to carry the flank *outward* as well as up —
+    // a purely vertical swell leaves the widest point of the body at sill height, so the tyre
+    // ends up standing beside the car instead of under an arch. Pushing the crown out puts the
+    // widest part of the section at the top of the arch, with the sill tucked in underneath.
     const u = x / Math.max(1e-3, sl.hw)
-    y += sl.bulge * Math.exp(-Math.pow((u - 0.7) / 0.24, 2)) * Math.pow(Math.sin(a), 0.8)
+    const arch = sl.bulge * Math.exp(-Math.pow((u - ARCH_U) / ARCH_W, 2)) * Math.pow(Math.sin(a), 0.6)
+    y += arch
+    x += arch * ARCH_OUT
     pts.push([x, y])
   }
   return pts
@@ -117,23 +131,27 @@ export function buildPrototype(livery: Livery): Object3D {
   // the way to the screen, with the fenders standing well proud of it in two long crowns, and a tail
   // chopped off short. Modern prototypes are the opposite — a high flat deck with a wing over it —
   // which is what this car used to look like.
+  //
+  // The crowns stand outboard of the tyres and top them, while the sills tuck inboard: on these cars
+  // you see wheel in an opening under an arch, never a wheel bolted to the side of a slab.
   const hull: Slice[] = [
     { z: 2.3, hw: 0.5, top: 0.26, bulge: 0.02, floor: 0.12 },
-    { z: 2.0, hw: 0.84, top: 0.28, bulge: 0.12, floor: 0.1 },
-    { z: 1.7, hw: 1.0, top: 0.3, bulge: 0.3, floor: 0.09 },
-    { z: 1.3, hw: 1.06, top: 0.32, bulge: 0.34, floor: 0.09 },
-    { z: 0.95, hw: 1.02, top: 0.4, bulge: 0.22, floor: 0.09 },
-    { z: 0.5, hw: 0.98, top: 0.52, bulge: 0.08, floor: 0.1 },
-    { z: 0.0, hw: 0.98, top: 0.54, bulge: 0.1, floor: 0.1 },
+    { z: 2.0, hw: 0.78, top: 0.28, bulge: 0.18, floor: 0.1 },
+    { z: 1.7, hw: 0.92, top: 0.3, bulge: 0.42, floor: 0.09 },
+    { z: 1.3, hw: 0.98, top: 0.32, bulge: 0.48, floor: 0.09 },
+    { z: 0.95, hw: 0.96, top: 0.4, bulge: 0.34, floor: 0.09 },
+    // Waisted through the doors, which is what makes the two pairs of arches read as arches.
+    { z: 0.5, hw: 0.95, top: 0.52, bulge: 0.12, floor: 0.1 },
+    { z: 0.0, hw: 0.96, top: 0.53, bulge: 0.14, floor: 0.1 },
     // Haunches: the rear arches swell up and out well past the deck between them, which is the line
     // every one of these cars has and the thing that reads first from behind.
-    { z: -0.6, hw: 1.02, top: 0.5, bulge: 0.26, floor: 0.1 },
-    { z: -1.15, hw: 1.22, top: 0.46, bulge: 0.52, floor: 0.1 },
-    { z: -1.7, hw: 1.22, top: 0.44, bulge: 0.5, floor: 0.11 },
-    { z: -2.15, hw: 1.06, top: 0.44, bulge: 0.18, floor: 0.14 },
+    { z: -0.6, hw: 1.02, top: 0.5, bulge: 0.32, floor: 0.1 },
+    { z: -1.15, hw: 1.06, top: 0.46, bulge: 0.52, floor: 0.1 },
+    { z: -1.7, hw: 1.06, top: 0.44, bulge: 0.5, floor: 0.11 },
+    { z: -2.15, hw: 1.0, top: 0.44, bulge: 0.2, floor: 0.14 },
     { z: -2.4, hw: 0.86, top: 0.42, bulge: 0.02, floor: 0.18 },
   ]
-  g.add(loft(hull, 7, body))
+  g.add(loft(hull, 9, body))
   // Canopy: small and set well back, a bubble sitting between the fender crowns rather than a
   // greenhouse spanning the car. The screen rakes hard and the roof is barely over a metre up.
   const canopy: Slice[] = [
@@ -143,80 +161,74 @@ export function buildPrototype(livery: Livery): Object3D {
     { z: -0.3, hw: 0.58, top: 0.82, bulge: 0, floor: 0.45 },
   ]
   g.add(loft(canopy, 6, glass))
-  // Flying buttresses and a near-vertical rear window between them: the roof does not just fade into
-  // the deck on these cars, it runs back as two fins that land on the haunches with the glass sunk
-  // between. It is the shape you see in every three-quarter shot of a P4 or a 512.
-  for (const side of [-1, 1]) {
-    // Narrow at the roof, wide at the haunch: a buttress leaves the top of the dome and sweeps *out*
-    // and down as it goes back. Angled the other way it reads as a pair of wings stuck on the deck.
-    // Its front sits *at* the roofline, never above it: standing proud they read as fins, and the
-    // roof has to run into them for the cabin to look like one piece with the tail.
-    const flank = box(0.12, 0.26, 1.4, side * 0.56, 0.62, -0.95, body)
-    flank.rotation.x = -0.12
-    flank.rotation.y = -side * 0.2
-    g.add(flank)
-  }
-  // The window between them is small and steep. A big dark pane across the back reads as a hole in
-  // the car from behind, which is exactly what it looked like before.
-  const rear = box(0.62, 0.3, 0.04, 0, 0.72, -0.62, glass)
+  // The teardrop: the roof does not stop behind the driver, it carries on as one unbroken painted
+  // volume that narrows and sinks all the way to the cut-off tail, sitting down between the
+  // haunches. Fins bolted either side of it read as an afterthought at sprite size; the shape is
+  // stronger without them, and glass or buttresses can be cut back into it later.
+  const dome: Slice[] = [
+    { z: 0.25, hw: 0.6, top: 0.84, bulge: 0, floor: 0.4 },
+    { z: -0.35, hw: 0.59, top: 0.83, bulge: 0, floor: 0.4 },
+    { z: -1.0, hw: 0.55, top: 0.78, bulge: 0, floor: 0.4 },
+    { z: -1.6, hw: 0.48, top: 0.68, bulge: 0, floor: 0.4 },
+    { z: -2.1, hw: 0.38, top: 0.58, bulge: 0, floor: 0.4 },
+  ]
+  g.add(loft(dome, 7, body))
+  // The rear window sits *in* the teardrop, under its crown — a pane standing above the roofline is
+  // the one thing that gives away a roof made of separate pieces.
+  const rear = box(0.58, 0.22, 0.04, 0, 0.66, -0.62, glass)
   rear.rotation.x = 0.3
   g.add(rear)
-  // The dome does not stop at the glass: it runs back between the buttresses as a raised centre
-  // section, drops sharply at the end of it, and the flat deck carries on to the tail between the
-  // haunches. That step is the shape you see in every rear-three-quarter photograph of a 512 S.
-  g.add(box(1.02, 0.06, 1.15, 0, 0.5, -1.7, body))
-  // Engine bay louvres either side of the drop, in the deck.
-  for (const side of [-1, 1]) g.add(box(0.34, 0.03, 0.5, side * 0.52, 0.54, -1.5, dark))
-  // The painted part of the dome: it picks up where the glass stops and carries the same section back
-  // between the buttresses before dropping to the deck. As a flat plate laid on the roof it read as a
-  // plank; as a continuation of the dome it reads as one piece of bodywork, which is what it is.
-  const dome: Slice[] = [
-    { z: 0.2, hw: 0.58, top: 0.84, bulge: 0, floor: 0.5 },
-    { z: -0.35, hw: 0.57, top: 0.83, bulge: 0, floor: 0.5 },
-    { z: -0.85, hw: 0.52, top: 0.79, bulge: 0, floor: 0.5 },
-    { z: -1.3, hw: 0.44, top: 0.72, bulge: 0, floor: 0.5 },
-  ]
-  g.add(loft(dome, 6, body))
-  // The roll hoop behind the glass.
-  g.add(box(0.74, 0.05, 0.07, 0, 0.76, -0.28, dark))
-  // Tail: a Kurzheck lip across the cut-off deck with a small fin at each corner — no wing. A wing on
-  // struts is the single thing that makes a car read as modern, and these cars did not have one.
-  g.add(box(1.9, 0.06, 0.28, 0, 0.56, -2.26, body))
-  // Nothing standing up off the tail: the corner fins read as two black slabs at sprite size, and a
-  // P4 or a 512 does not have them anyway. The haunches carry the shape instead.
-  g.add(box(1.5, 0.04, 0.12, 0, 0.59, -2.16, stripe))
-  // Centre stripe: a ribbon lying on the hull top, following its height.
+  // Engine bay louvres, in the deck either side of the teardrop.
+  for (const side of [-1, 1]) g.add(box(0.3, 0.03, 0.5, side * 0.7, 0.52, -1.5, dark))
+  // Tail: a Kurzheck lip across the cut-off deck — no wing. A wing on struts is the single thing
+  // that makes a car read as modern, and these cars did not have one.
+  g.add(box(1.9, 0.06, 0.28, 0, 0.52, -2.26, body))
+  g.add(box(1.05, 0.03, 0.1, 0, 0.55, -2.18, stripe))
+  // Centre stripe: a ribbon lying on the hull top up front, picked up again on the teardrop so it
+  // runs the length of the car the way a livery stripe does.
   for (let i = 0; i < hull.length - 1; i++) {
     const a = hull[i]
     const b = hull[i + 1]
+    if (b.z < 0.95) continue // from here back it is the teardrop that is on top, not the hull
     const seg = box(0.34, 0.015, Math.abs(a.z - b.z) + 0.02, 0, (a.top + b.top) / 2 + 0.012, (a.z + b.z) / 2, stripe)
     seg.rotation.x = Math.atan2(a.top - b.top, a.z - b.z)
-    if (b.z < 0.95 && b.z > -1.4) seg.visible = false // hidden under the canopy
     g.add(seg)
   }
-  // Number roundel: a white disc on the door, where a period sports car carried it, rather than lying
-  // flat on the bonnet — it is what you see of the number from the side.
+  for (let i = 0; i < dome.length - 1; i++) {
+    const a = dome[i]
+    const b = dome[i + 1]
+    const seg = box(0.3, 0.015, Math.abs(a.z - b.z) + 0.02, 0, (a.top + b.top) / 2 + 0.012, (a.z + b.z) / 2, stripe)
+    seg.rotation.x = Math.atan2(a.top - b.top, a.z - b.z)
+    if (a.z > -0.9) seg.visible = false // under the glass
+    g.add(seg)
+  }
+  // Number roundel: a white disc on the door, where a period sports car carried it, rather than
+  // lying flat on the bonnet. Sized to the door — a roundel taller than the bodywork it is painted
+  // on floats off the flank — leaned back with the tumblehome so it sits *on* the panel, with the
+  // number filling it, which is how they were actually painted.
   for (const side of [-1, 1]) {
-    // A racing roundel is about the size of a door, not bigger than one.
-    const roundel = new Mesh(new CylinderGeometry(0.19, 0.19, 0.02, 18), flat(0xffffff))
+    const decal = new Group()
+    decal.position.set(side * 0.965, 0.25, 0.3)
+    decal.rotation.z = side * 0.22
+    const roundel = new Mesh(new CylinderGeometry(0.13, 0.13, 0.02, 20), flat(0xffffff))
     roundel.rotation.z = Math.PI / 2
-    roundel.position.set(side * 1.0, 0.42, 0.3)
-    g.add(roundel)
-    const num = textPlane(livery.number, 0.26, '#111', 'transparent', 96)
-    num.position.set(side * 1.02, 0.42, 0.3)
+    decal.add(roundel)
+    const num = numberDecal(livery.number, 0.24)
+    num.position.x = side * 0.02
     num.rotation.y = (side * Math.PI) / 2
-    g.add(num)
+    decal.add(num)
+    g.add(decal)
   }
   // Faired headlamps sunk into the fender crowns, under perspex; tail lamps as small round pods.
   for (const x of [-0.78, 0.78]) {
     const lamp = new Mesh(new SphereGeometry(0.16, 10, 8), flat(0xfff6c8, { emissive: 0xffe0a0, emissiveIntensity: 0.9 }))
     lamp.scale.set(1, 0.6, 0.55)
-    lamp.position.set(x, 0.44, 1.82)
+    lamp.position.set(x, 0.47, 1.82)
     g.add(lamp)
     for (const dx of [-0.16, 0.16]) {
       const tail = new Mesh(new CylinderGeometry(0.075, 0.075, 0.05, 10), flat(0xff2a2a, { emissive: 0xff2a2a, emissiveIntensity: 0.8 }))
       tail.rotation.x = Math.PI / 2
-      tail.position.set(x + dx, 0.42, -2.42)
+      tail.position.set(x + dx * 0.9, 0.42, -2.42)
       g.add(tail)
     }
   }
@@ -224,11 +236,11 @@ export function buildPrototype(livery: Livery): Object3D {
   g.add(box(0.7, 0.08, 0.06, 0, 0.2, 2.3, dark))
   g.add(box(0.44, 0.05, 0.05, 0, 0.12, 2.24, dark))
   for (const x of [-0.3, 0.3]) g.add(cyl(0.06, 0.5, x, 0.26, -2.4, dark, true))
-  // Wheels: fat, and standing out under the crowns rather than swallowed by them. The rears are
-  // wider and taller, which is most of why one of these cars looks planted from behind.
+  // Wheels: fat, and *inside* the arches. The fronts are narrower and tucked in — a period
+  // prototype has a rear track it can barely cover and a front one it sits well within.
   for (const [x, z, r, w] of [
-    [-1.02, 1.34, 0.33, 0.3],
-    [1.02, 1.34, 0.33, 0.3],
+    [-0.94, 1.34, 0.31, 0.28],
+    [0.94, 1.34, 0.31, 0.28],
     [-0.95, -1.3, 0.35, 0.36],
     [0.95, -1.3, 0.35, 0.36],
   ]) {
@@ -378,6 +390,53 @@ function cyl(r: number, h: number, x: number, y: number, z: number, m: MeshStand
   c.position.set(x, y, z)
   return c
 }
+/**
+ * Canvas text draws in whatever is already loaded, and a woff2 declared in CSS is never fetched
+ * until something on the page asks for it. Nothing else here uses the racing face, so without this
+ * the numbers bake in the fallback.
+ */
+export async function ensureFonts(): Promise<void> {
+  if (typeof document === 'undefined' || !document.fonts) return
+  try {
+    await Promise.all([document.fonts.load('220px "Racing Sans One"'), document.fonts.load('96px "Racing Sans One"')])
+  } catch {
+    // The decals fall back to Impact, which is not the end of the world.
+  }
+}
+
+/**
+ * A racing number, `size` metres square and transparent around the digits. Drawn to fill its disc —
+ * a number timid inside a roundel is unreadable at sprite size — in the racing face, with the lean
+ * a number gets when it is painted on something meant to look quick.
+ */
+function numberDecal(text: string, size: number): Mesh {
+  const c = document.createElement('canvas')
+  c.width = 256
+  c.height = 256
+  const g = c.getContext('2d')!
+  const font = (px: number) => `${px}px "Racing Sans One", Impact, "Arial Black", ui-sans-serif, sans-serif`
+  // Fit to the glyphs themselves rather than to the em box: digits are much shorter than their
+  // font size, so a nominal 230px number ends up rattling around inside the roundel.
+  g.font = font(200)
+  const m = g.measureText(text)
+  const w = m.actualBoundingBoxLeft + m.actualBoundingBoxRight || m.width
+  const h = m.actualBoundingBoxAscent + m.actualBoundingBoxDescent || 140
+  const px = Math.floor(200 * Math.min(210 / Math.max(1, w), 200 / Math.max(1, h)))
+  g.font = font(px)
+  g.fillStyle = '#14161c'
+  g.textAlign = 'center'
+  g.textBaseline = 'middle'
+  // A little lean, the way a number is painted on something meant to look quick.
+  const slant = 0.16
+  g.setTransform(1, 0, -slant, 1, 128 * slant, 0)
+  const mm = g.measureText(text)
+  const mid = (mm.actualBoundingBoxAscent - mm.actualBoundingBoxDescent) / 2 || 0
+  g.fillText(text, 128, 128 + mid)
+  const tex = new CanvasTexture(c)
+  tex.colorSpace = SRGBColorSpace
+  return new Mesh(new PlaneGeometry(size, size), new MeshBasicMaterial({ map: tex, transparent: true }))
+}
+
 /** A plane with text drawn on a canvas, `widthM` metres wide. */
 function textPlane(text: string, widthM: number, fg: string, bg: string, px: number): Mesh {
   const c = document.createElement('canvas')

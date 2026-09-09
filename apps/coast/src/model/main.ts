@@ -12,7 +12,7 @@ import '../style.css'
 import { AmbientLight, DirectionalLight, GridHelper, Group, HemisphereLight, Mesh, MeshStandardMaterial, Object3D, PerspectiveCamera, Scene, SRGBColorSpace, WebGLRenderer } from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
-import { buildArch, buildBlock, buildDiner, buildFacade, buildGasStation, buildMotel, buildPrototype, buildSign, buildTower, LIVERIES, PROCGEN_VERSION } from '../render/procgen'
+import { buildArch, buildBlock, buildDiner, buildFacade, buildGasStation, buildMotel, buildPrototype, buildSign, buildTower, ensureFonts, LIVERIES, PROCGEN_VERSION } from '../render/procgen'
 import { MODELS } from '../render/models'
 
 const app = document.querySelector<HTMLElement>('#app')!
@@ -47,8 +47,9 @@ scene.add(grid)
 const holder = new Group()
 scene.add(holder)
 
-const camera = new PerspectiveCamera(35, 1, 0.1, 200)
-camera.position.set(6, 3, 8)
+// The bake's lens, near enough: a long one, so the viewer foreshortens the way the sprite does.
+const camera = new PerspectiveCamera(22, 1, 0.1, 200)
+camera.position.set(10, 5, 13)
 const controls = new OrbitControls(camera, canvas)
 controls.target.set(0, 0.7, 0)
 controls.enableDamping = true
@@ -115,9 +116,9 @@ wireBox.addEventListener('change', () => void show())
 // The angles the atlas bakes, so a preset here is a frame the game really draws.
 const VIEWS: [string, number, number][] = [
   ['rear', 0, 9],
-  ['¾ rear', 24, 9],
+  ['3/4 rear', 24, 9],
   ['flank', 90, 9],
-  ['¾ front', 150, 9],
+  ['3/4 front', 150, 9],
   ['front', 180, 9],
   ['from above', 24, 30],
 ]
@@ -130,7 +131,8 @@ for (const [label, yaw, pitch] of VIEWS) {
     // car is facing the way the bake has it.
     spinBox.checked = false
     holder.rotation.y = 0
-    const r = 9
+    // Far enough back for the long lens above to frame the whole car.
+    const r = 16
     const yawR = (yaw * Math.PI) / 180
     const pitchR = (pitch * Math.PI) / 180
     camera.position.set(Math.sin(yawR) * r * Math.cos(pitchR), 0.7 + Math.sin(pitchR) * r, -Math.cos(yawR) * r * Math.cos(pitchR))
@@ -139,6 +141,9 @@ for (const [label, yaw, pitch] of VIEWS) {
   })
   views.appendChild(b)
 }
+
+// A dev handle, so a headless pass can point the camera at a detail and screenshot it.
+;(window as unknown as { __model: unknown }).__model = { scene, camera, controls, holder }
 
 function resize(): void {
   const w = canvas.clientWidth
@@ -161,4 +166,6 @@ function frame(now: number): void {
   renderer.render(scene, camera)
   requestAnimationFrame(frame)
 }
-void show().then(() => requestAnimationFrame(frame))
+void ensureFonts()
+  .then(show)
+  .then(() => requestAnimationFrame(frame))

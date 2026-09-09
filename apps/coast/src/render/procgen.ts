@@ -35,7 +35,7 @@ const flat = (color: number, extra: FlatExtra = {}) => {
 }
 
 /** Bump when any procedural model changes shape; part of the atlas cache key. */
-export const PROCGEN_VERSION = 11
+export const PROCGEN_VERSION = 14
 
 interface Slice {
   z: number
@@ -149,8 +149,10 @@ export function buildPrototype(livery: Livery): Object3D {
   for (const side of [-1, 1]) {
     // Narrow at the roof, wide at the haunch: a buttress leaves the top of the dome and sweeps *out*
     // and down as it goes back. Angled the other way it reads as a pair of wings stuck on the deck.
-    const flank = box(0.12, 0.3, 1.45, side * 0.58, 0.68, -0.98, body)
-    flank.rotation.x = -0.16
+    // Its front sits *at* the roofline, never above it: standing proud they read as fins, and the
+    // roof has to run into them for the cabin to look like one piece with the tail.
+    const flank = box(0.12, 0.26, 1.4, side * 0.56, 0.62, -0.95, body)
+    flank.rotation.x = -0.12
     flank.rotation.y = -side * 0.2
     g.add(flank)
   }
@@ -162,15 +164,21 @@ export function buildPrototype(livery: Livery): Object3D {
   // The dome does not stop at the glass: it runs back between the buttresses as a raised centre
   // section, drops sharply at the end of it, and the flat deck carries on to the tail between the
   // haunches. That step is the shape you see in every rear-three-quarter photograph of a 512 S.
-  const spine = box(0.78, 0.3, 1.05, 0, 0.64, -0.84, body)
-  spine.rotation.x = -0.05
-  g.add(spine)
-  g.add(box(1.02, 0.06, 0.95, 0, 0.5, -1.8, body))
+  g.add(box(1.02, 0.06, 1.15, 0, 0.5, -1.7, body))
   // Engine bay louvres either side of the drop, in the deck.
   for (const side of [-1, 1]) g.add(box(0.34, 0.03, 0.5, side * 0.52, 0.54, -1.5, dark))
-  // Painted centre section over the roof, and the roll hoop showing behind the glass.
-  g.add(box(0.36, 0.05, 0.9, 0, 0.85, -0.1, body))
-  g.add(box(0.8, 0.06, 0.08, 0, 0.8, -0.45, dark))
+  // The painted part of the dome: it picks up where the glass stops and carries the same section back
+  // between the buttresses before dropping to the deck. As a flat plate laid on the roof it read as a
+  // plank; as a continuation of the dome it reads as one piece of bodywork, which is what it is.
+  const dome: Slice[] = [
+    { z: 0.2, hw: 0.58, top: 0.84, bulge: 0, floor: 0.5 },
+    { z: -0.35, hw: 0.57, top: 0.83, bulge: 0, floor: 0.5 },
+    { z: -0.85, hw: 0.52, top: 0.79, bulge: 0, floor: 0.5 },
+    { z: -1.3, hw: 0.44, top: 0.72, bulge: 0, floor: 0.5 },
+  ]
+  g.add(loft(dome, 6, body))
+  // The roll hoop behind the glass.
+  g.add(box(0.74, 0.05, 0.07, 0, 0.76, -0.28, dark))
   // Tail: a Kurzheck lip across the cut-off deck with a small fin at each corner — no wing. A wing on
   // struts is the single thing that makes a car read as modern, and these cars did not have one.
   g.add(box(1.9, 0.06, 0.28, 0, 0.56, -2.26, body))

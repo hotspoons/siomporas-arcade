@@ -22,12 +22,16 @@ const TAIL_M = 1.9
 const PIPE_M = 0.3
 /** The valance, below the sprite's own anchor. */
 const DROP_M = 0.32
-/** How far a puff travels toward the camera before it dies, and how long that takes. */
-const TRAVEL_M = 0.7
+/**
+ * A plume coming straight at the camera barely moves on screen — it swells. So a puff grows a lot and
+ * drifts only a little, and what drift there is goes gently *up*, the way hot gas does. Sending it
+ * down the screen instead reads as fire being poured onto the road.
+ */
+const RISE_M = 0.12
 const LIFE_S = 0.17
-/** Radius at the pipe and at the end of the run. */
-const R0_M = 0.11
-const R1_M = 0.26
+/** Radius at the pipe and at the end of the run: most of the motion is this. */
+const R0_M = 0.1
+const R1_M = 0.36
 
 /** Colour along a puff's life: white hot at the pipe, orange, then a dirty red as it goes out. */
 const COLOURS: [number, number, number][] = [
@@ -64,10 +68,12 @@ export class Flames {
 
   /**
    * Place the flames on a car drawn centred at `x` with its base at screen `y`, `px` pixels to the
-   * metre at that distance, in the pose baked for `yawDeg` (positive shows the car's right flank).
+   * metre at that distance, in the pose baked for `yawDeg` (positive shows the car's right flank) and
+   * leaning by `roll` radians — the same lean the sprite is drawn with, so the fire stays bolted to
+   * the car through a banked turn instead of hanging vertically off a tilted tail.
    * `on` is whether they should be burning at all.
    */
-  update(x: number, y: number, px: number, yawDeg: number, on: boolean, dt: number): void {
+  update(x: number, y: number, px: number, yawDeg: number, roll: number, on: boolean, dt: number): void {
     // Light fast, die slower: a boost hits instantly and trails off.
     this.strength += ((on ? 1 : 0) - this.strength) * Math.min(1, (on ? 14 : 5) * dt)
     if (this.strength < 0.02) {
@@ -80,19 +86,22 @@ export class Flames {
     const c = this.col.array as Float32Array
     let v = 0
     const yaw = (yawDeg * Math.PI) / 180
+    const rc = Math.cos(roll)
+    const rs = Math.sin(roll)
+    /** A point given relative to the car, laid down in screen space with the car's lean applied. */
+    const lean = (dx: number, dy: number): [number, number] => [x + dx * rc - dy * rs, y + dx * rs + dy * rc]
     // Turning swings the tail across the screen and closes the gap between the pipes, the same
     // foreshortening the sprite is showing; a flame pinned to the middle would come out of the door.
-    const tailX = x + Math.sin(yaw) * TAIL_M * px
+    const tailDx = Math.sin(yaw) * TAIL_M * px
     for (const side of [-1, 1]) {
-      const cx = tailX + side * Math.cos(yaw) * PIPE_M * px
-      const cy = y + DROP_M * px
+      const pipeDx = tailDx + side * Math.cos(yaw) * PIPE_M * px
+      const pipeDy = DROP_M * px
       for (let i = 0; i < PUFFS; i++) {
         // Each puff a life out of phase with the next, and the two pipes firing out of step.
         const age = (this.clock / LIFE_S + i / PUFFS + (side > 0 ? 0.37 : 0)) % 1
         const r = (R0_M + (R1_M - R0_M) * age) * px * this.strength
-        // Coming at the camera: down the screen, drifting very slightly apart as it comes.
-        const ox = cx + side * age * 0.1 * px
-        const oy = cy + age * TRAVEL_M * px
+        // Coming at the camera: swelling in place, drifting a little apart and a little upward.
+        const [ox, oy] = lean(pipeDx + side * age * 0.12 * px, pipeDy - age * RISE_M * px)
         // Brightest just off the pipe, gone by the end of the run.
         const fade = (1 - age * age) * this.strength
         const shade = COLOURS[Math.min(COLOURS.length - 1, Math.floor(age * COLOURS.length))]

@@ -163,10 +163,10 @@ export class AudioWorld {
     const boosting = snap.hud.turboActive
     this.boostAge = boosting ? this.boostAge + 1 / 60 : 0
     if (this.boostGain) {
-      this.boostGain.gain.setTargetAtTime(boosting ? 0.5 : 0, now, boosting ? 0.08 : 0.35)
+      this.boostGain.gain.setTargetAtTime(boosting ? 0.25 : 0, now, boosting ? 0.08 : 0.35)
       // Sweeping up while it runs, so a long boost keeps rising instead of sitting on one note.
       this.boostFilter.frequency.setTargetAtTime(boosting ? 420 + Math.min(1, this.boostAge / 5) * 2600 : 420, now, 0.2)
-      this.whineGain.gain.setTargetAtTime(boosting ? 0.06 : 0, now, 0.15)
+      this.whineGain.gain.setTargetAtTime(boosting ? 0.03 : 0, now, 0.15)
       this.whine.frequency.setTargetAtTime(boosting ? 760 + Math.min(1, this.boostAge / 5) * 900 + r * 300 : 760, now, 0.2)
     }
     this.screechGain.gain.setTargetAtTime(sliding ? 0.2 : 0, now, 0.05)

@@ -40,7 +40,15 @@ export class MenuStack {
     this.el = document.createElement('div')
     this.el.className = 'menu hidden'
     parent.appendChild(this.el)
+    // A real move of the mouse — not the pointer merely being somewhere — hands control back to it.
+    window.addEventListener('mousemove', (e) => {
+      if (e.movementX === 0 && e.movementY === 0) return
+      this.pointerLive = true
+    })
   }
+
+  /** Whether the mouse has moved since the last time the keyboard or pad drove the menu. */
+  private pointerLive = false
 
   get open(): boolean {
     return this.stack.length > 0
@@ -109,6 +117,8 @@ export class MenuStack {
     if (selectable.length === 0) return
     if (!selectable.includes(this.cursor)) this.cursor = selectable[0]
     const pos = selectable.indexOf(this.cursor)
+    // Keys and pads take the selection away from the mouse until the mouse moves again.
+    if (ui.menuDown || ui.menuUp || ui.confirm || ui.menuLeft || ui.menuRight) this.pointerLive = false
     if (ui.menuDown) {
       this.cursor = selectable[(pos + 1) % selectable.length]
       this.onNavigate?.()
@@ -199,7 +209,10 @@ export class MenuStack {
         const row = document.createElement('div')
         row.className = `item ${item.kind}`
         row.addEventListener('mouseenter', () => {
-          if (item.kind !== 'info') {
+          // Only when the mouse has actually moved. Re-rendering the list fires mouseenter on whatever
+          // is under a stationary pointer, so arrowing down the menu kept snapping back to wherever the
+          // mouse happened to be resting.
+          if (item.kind !== 'info' && this.pointerLive) {
             this.cursor = i
             this.render()
           }

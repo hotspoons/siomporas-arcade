@@ -217,3 +217,20 @@ canvas.game { position: absolute; inset: 0; width: 100%; height: 100%; display: 
 .gldebug p { margin: 8px 0; opacity: 0.7; }
 .gldebug canvas { display: block; width: 240px; height: 240px; image-rendering: pixelated; border: 1px solid rgba(255,255,255,0.2); }
 .gldebug button { margin-top: 12px; font: inherit; color: #e8f6ff; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.25); padding: 6px 14px; border-radius: 4px; }
+
+/* ---- /model.html: the model viewer ---- */
+/* The canvas takes what is left over and never feeds its own size back into the layout, which would
+   have it grow a pixel a frame. */
+.viewer { position: fixed; inset: 0; display: flex; overflow: hidden; }
+.viewer canvas.stage { flex: 1 1 0; min-width: 0; display: block; width: 100%; height: 100%; }
+.viewer .panel { flex: none; width: 250px; padding: 16px; background: rgba(8,10,18,0.92); border-left: 1px solid rgba(255,255,255,0.12); font-family: var(--font-body); font-size: 16px; color: #e8f6ff; overflow-y: auto; }
+.viewer .panel h1 { margin: 0 0 14px; font-family: var(--font-arcade); font-size: 10px; letter-spacing: 0.14em; color: var(--amber); line-height: 1.6; }
+.viewer .panel label { display: block; margin-bottom: 10px; opacity: 0.85; }
+.viewer .panel select { display: block; width: 100%; margin-top: 4px; font: inherit; font-size: 15px; color: #e8f6ff; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.2); border-radius: 3px; padding: 5px 6px; }
+.viewer .panel select:disabled { opacity: 0.4; }
+.viewer .panel .views { display: flex; flex-wrap: wrap; gap: 5px; margin: 12px 0 14px; }
+.viewer .panel .views button { font: inherit; font-size: 14px; color: #e8f6ff; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.2); border-radius: 3px; padding: 4px 9px; cursor: pointer; }
+.viewer .panel .views button:hover { background: rgba(255,122,26,0.25); border-color: var(--accent); }
+.viewer .panel .check { display: flex; align-items: center; gap: 7px; }
+.viewer .panel .hint { margin-top: 16px; font-size: 13px; opacity: 0.5; line-height: 1.5; }
+@media (max-width: 700px) { .viewer { flex-direction: column-reverse; } .viewer .panel { width: auto; max-height: 42vh; border-left: 0; border-top: 1px solid rgba(255,255,255,0.12); } }

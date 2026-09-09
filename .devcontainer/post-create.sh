@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Set up the dev environment for apex-conduit: a Vite/TypeScript + three.js
+# Set up the dev environment for siomporas-arcade: a Vite/TypeScript + three.js
 # game. Idempotent — safe to re-run.
 set -euo pipefail
 

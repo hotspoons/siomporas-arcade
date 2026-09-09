@@ -1,17 +1,19 @@
-# siomporas-arcade — three arcade games, one engine
+# siomporas-arcade
 
-A workspace of browser games in TypeScript + three.js that share a runtime and
-two presentation styles (a modern post-processed look and a deliberate
-low-res flat-shaded CRT look). Apps never import each other, and
-`packages/engine` never imports an app, so any one of them could leave on its own.
+A collection of games inspired by my favourites from the 80s and 90s. Three of
+them so far, in TypeScript and three.js, playable in a browser and on a phone.
 
-Each game publishes to its own address on Cloudflare Workers — see [DEPLOY.md](DEPLOY.md):
+| Game | Owes it to | Play |
+|---|---|---|
+| **Sunstrip** | OutRun, Turbo OutRun, Rad Mobile | https://sunstrip.siomporas.com |
+| **Drivin’** | Hard Drivin’, Stunts | https://drivin.siomporas.com |
+| **Apex Conduit** | S.T.U.N. Runner | https://apex.siomporas.com |
 
-| Game | Address |
-|---|---|
-| Sunstrip | https://sunstrip.siomporas.com |
-| Drivin’ | https://drivin.siomporas.com |
-| Apex Conduit | https://apex.siomporas.com |
+They share one runtime and two ways of looking: a modern post-processed one, and
+a deliberately low-res flat-shaded CRT one on the same frame. Apps never import
+each other and `packages/engine` never imports an app, so any one of them could
+leave on its own. Publishing is [DEPLOY.md](DEPLOY.md): a push to `main` builds
+all three and puts each on its own address.
 
 | Path | What | Dev port |
 |---|---|---|

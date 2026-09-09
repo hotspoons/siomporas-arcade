@@ -1,5 +1,5 @@
 {
-  "name": "apex-monorepo",
+  "name": "siomporas-arcade",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -31,5 +31,6 @@
     "vitest": "^5.0.0",
     "wrangler": "^4.130.0",
     "ws": "^8.18.3"
-  }
+  },
+  "description": "A collection of games inspired by my favourites from the 80s and 90s."
 }

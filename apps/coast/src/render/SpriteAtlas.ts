@@ -21,6 +21,14 @@ export interface SpriteFrame {
   heightM: number
   /** Where the ground contact sits inside the frame (0 = bottom). */
   baseline: number
+  /**
+   * Where this frame's exhaust pipes came out, as offsets from the centre of the frame in frame
+   * widths, plus how big a metre is at their depth (also in frame widths). Measured by projecting
+   * markers in the model through the bake camera, so the afterburner sits on the pipes at every yaw
+   * without anyone hand-fitting numbers to a sprite — and keeps sitting there when the car changes
+   * shape or the bake changes lens.
+   */
+  exhausts?: { pipes: [number, number][]; perMetre: number }
 }
 
 export interface SpriteKind {
@@ -270,6 +278,26 @@ export class SpriteAtlas {
         cam.position.set(Math.sin(yawR) * horiz, fs.y / 2 + Math.sin(pitch) * dist, -Math.cos(yawR) * horiz)
         cam.lookAt(0, fs.y / 2, 0)
         cam.updateProjectionMatrix()
+        // Where the pipes ended up in this frame, if the model declares any.
+        let exhausts: SpriteFrame['exhausts']
+        const pipes: [number, number][] = []
+        model.updateMatrixWorld(true)
+        // Projecting a point needs the camera's world matrices, and nothing has computed them yet —
+        // the renderer does that inside render(), which has not run for this cell.
+        cam.updateMatrixWorld(true)
+        cam.matrixWorldInverse.copy(cam.matrixWorld).invert()
+        for (const name of ['exhaustL', 'exhaustR']) {
+          const mark = model.getObjectByName(name)
+          if (!mark) continue
+          const ndc = mark.getWorldPosition(new Vector3()).project(cam)
+          pipes.push([ndc.x / 2, ndc.y / 2])
+        }
+        if (pipes.length) {
+          const mid = model.getObjectByName('exhaustL')!.getWorldPosition(new Vector3())
+          const at = mid.clone().project(cam)
+          const across = mid.add(new Vector3().setFromMatrixColumn(cam.matrixWorld, 0)).project(cam)
+          exhausts = { pipes, perMetre: Math.abs(across.x - at.x) / 2 }
+        }
         renderer.setViewport(cell.x, cell.y, cell.size, cell.size)
         renderer.setScissor(cell.x, cell.y, cell.size, cell.size)
         renderer.setScissorTest(true)
@@ -282,6 +310,7 @@ export class SpriteAtlas {
           widthM: half * 2,
           heightM: half * 2,
           baseline: 0.5 - fs.y / 2 / (half * 2) - ((Math.sin(pitch) * projD) / 2 / (half * 2)) * 0.5,
+          exhausts,
         })
       }
       this.kinds.set(def.kind, { def, frames, yaws: def.yaws, pitches })

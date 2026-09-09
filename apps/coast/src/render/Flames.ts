@@ -6,22 +6,21 @@
 // reddening with age. Additive, no texture — the shape is in the geometry, which stays crisp
 // through the low-res pipeline instead of smudging.
 //
-// Everything is in metres and turned into pixels by the caller's scale, because a sprite frame is
-// not a fixed measure of the car: a flank view's frame is twice the size of a tail-on one, so
-// anything sized against the frame doubles the moment you steer.
+// Where the pipes are is not guessed here. The sprite bake projects a marker at each pipe into every
+// frame it renders, so this asks the frame. Fitting metres to a sprite by hand cannot work: the car
+// is drawn through a lens, so its tail is magnified more than its middle, and a frame from the flank
+// is twice the size of one from behind.
 
 import { AdditiveBlending, BufferAttribute, BufferGeometry, Mesh, MeshBasicMaterial } from 'three'
+
+import type { SpriteFrame } from './SpriteAtlas'
 
 /** Puffs in the air per pipe at any moment. */
 const PUFFS = 4
 /** Sides on each puff: enough to read round at a few pixels across, cheap enough not to care. */
 const SIDES = 8
-/** Centre of the car to its tail, where the pipes are. */
-const TAIL_M = 1.9
-/** Each pipe, either side of the centreline. */
-const PIPE_M = 0.3
-/** The valance, below the sprite's own anchor. */
-const DROP_M = 0.32
+/** Pipes we can draw for. */
+const MAX_PIPES = 2
 /**
  * A plume coming straight at the camera barely moves on screen — it swells. So a puff grows a lot and
  * drifts only a little, and what drift there is goes gently *up*, the way hot gas does. Sending it
@@ -52,8 +51,7 @@ export class Flames {
   private clock = 0
 
   constructor() {
-    // Two pipes × PUFFS discs × SIDES triangles × 3 vertices.
-    const verts = 2 * PUFFS * SIDES * 3
+    const verts = MAX_PIPES * PUFFS * SIDES * 3
     this.pos = new BufferAttribute(new Float32Array(verts * 3), 3)
     this.col = new BufferAttribute(new Float32Array(verts * 3), 3)
     this.pos.setUsage(35048) // DynamicDraw
@@ -67,16 +65,14 @@ export class Flames {
   }
 
   /**
-   * Place the flames on a car drawn centred at `x` with its base at screen `y`, `px` pixels to the
-   * metre at that distance, in the pose baked for `yawDeg` (positive shows the car's right flank) and
-   * leaning by `roll` radians — the same lean the sprite is drawn with, so the fire stays bolted to
-   * the car through a banked turn instead of hanging vertically off a tilted tail.
-   * `on` is whether they should be burning at all.
+   * Place the flames on the car sprite drawn by `frame`, `h` pixels tall with its ground contact at
+   * screen (`x`, `y`) and leaning by `roll` radians — the same lean the sprite is drawn with, so the
+   * fire stays bolted to the car through a banked turn. `on` is whether they should be burning.
    */
-  update(x: number, y: number, px: number, yawDeg: number, roll: number, on: boolean, dt: number): void {
+  update(x: number, y: number, h: number, frame: SpriteFrame | null, roll: number, on: boolean, dt: number): void {
     // Light fast, die slower: a boost hits instantly and trails off.
     this.strength += ((on ? 1 : 0) - this.strength) * Math.min(1, (on ? 14 : 5) * dt)
-    if (this.strength < 0.02) {
+    if (this.strength < 0.02 || !frame?.exhausts) {
       this.mesh.visible = false
       return
     }
@@ -84,24 +80,27 @@ export class Flames {
     this.clock += dt
     const p = this.pos.array as Float32Array
     const c = this.col.array as Float32Array
+    p.fill(0)
     let v = 0
-    const yaw = (yawDeg * Math.PI) / 180
     const rc = Math.cos(roll)
     const rs = Math.sin(roll)
-    /** A point given relative to the car, laid down in screen space with the car's lean applied. */
-    const lean = (dx: number, dy: number): [number, number] => [x + dx * rc - dy * rs, y + dx * rs + dy * rc]
-    // Turning swings the tail across the screen and closes the gap between the pipes, the same
-    // foreshortening the sprite is showing; a flame pinned to the middle would come out of the door.
-    const tailDx = Math.sin(yaw) * TAIL_M * px
-    for (const side of [-1, 1]) {
-      const pipeDx = tailDx + side * Math.cos(yaw) * PIPE_M * px
-      const pipeDy = DROP_M * px
+    // The frame's own centre, which is what the sprite is rolled about.
+    const cx = x
+    const cy = y - frame.baseline * h + h / 2
+    /** A point given as an offset from the frame's centre, laid down in screen space with the lean. */
+    const lean = (dx: number, dy: number): [number, number] => [cx + dx * rc - dy * rs, cy + dx * rs + dy * rc]
+    /** Pixels to the metre out at the pipes, which is further from the bake camera than the car's middle. */
+    const px = frame.exhausts.perMetre * h
+    let side = -1
+    for (const [ex, ey] of frame.exhausts.pipes) {
+      const pipeDx = ex * h
+      const pipeDy = ey * h
       for (let i = 0; i < PUFFS; i++) {
         // Each puff a life out of phase with the next, and the two pipes firing out of step.
         const age = (this.clock / LIFE_S + i / PUFFS + (side > 0 ? 0.37 : 0)) % 1
         const r = (R0_M + (R1_M - R0_M) * age) * px * this.strength
         // Coming at the camera: swelling in place, drifting a little apart and a little upward.
-        const [ox, oy] = lean(pipeDx + side * age * 0.12 * px, pipeDy - age * RISE_M * px)
+        const [ox, oy] = lean(pipeDx + side * age * 0.12 * px, pipeDy + age * RISE_M * px)
         // Brightest just off the pipe, gone by the end of the run.
         const fade = (1 - age * age) * this.strength
         const shade = COLOURS[Math.min(COLOURS.length - 1, Math.floor(age * COLOURS.length))]
@@ -124,6 +123,7 @@ export class Flames {
           }
         }
       }
+      side = 1
     }
     this.pos.needsUpdate = true
     this.col.needsUpdate = true

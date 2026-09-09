@@ -47,6 +47,12 @@ interface Slice {
   bulge: number
   /** Floor height. */
   floor: number
+  /**
+   * Wheel opening: below `top`, the flank is pulled in to `x`, so the section is a fender crown with
+   * a tunnel under it rather than a closed slab. Loft that between a cut slice and an uncut one and
+   * the ends of the tunnel close up into an arch.
+   */
+  well?: { x: number; top: number }
 }
 
 /**
@@ -75,6 +81,9 @@ function slicePoints(sl: Slice, n: number): [number, number][] {
     const arch = sl.bulge * Math.exp(-Math.pow((u - ARCH_U) / ARCH_W, 2)) * Math.pow(Math.sin(a), 0.6)
     y += arch
     x += arch * ARCH_OUT
+    // The wheel opening: everything under the arch comes in to the well wall, leaving the tyre
+    // standing outside the bodywork in a cut-out instead of buried behind a flank.
+    if (sl.well && y < sl.well.top) x = Math.min(x, sl.well.x)
     pts.push([x, y])
   }
   return pts
@@ -138,7 +147,10 @@ export function buildPrototype(livery: Livery): Object3D {
     { z: 2.3, hw: 0.5, top: 0.26, bulge: 0.02, floor: 0.12 },
     { z: 2.0, hw: 0.76, top: 0.28, bulge: 0.17, floor: 0.1 },
     { z: 1.7, hw: 0.9, top: 0.3, bulge: 0.4, floor: 0.09 },
-    { z: 1.3, hw: 0.96, top: 0.32, bulge: 0.46, floor: 0.09 },
+    // Front wheel opening: the cut deepens to the wheel's centre and closes again either side of it.
+    { z: 1.62, hw: 0.93, top: 0.31, bulge: 0.43, floor: 0.09, well: { x: 0.8, top: 0.4 } },
+    { z: 1.34, hw: 0.96, top: 0.32, bulge: 0.46, floor: 0.09, well: { x: 0.72, top: 0.62 } },
+    { z: 1.06, hw: 0.95, top: 0.36, bulge: 0.4, floor: 0.09, well: { x: 0.8, top: 0.4 } },
     { z: 0.95, hw: 0.94, top: 0.4, bulge: 0.32, floor: 0.09 },
     // Waisted through the doors, which is what makes the two pairs of arches read as arches.
     { z: 0.5, hw: 0.95, top: 0.52, bulge: 0.12, floor: 0.1 },
@@ -146,7 +158,9 @@ export function buildPrototype(livery: Livery): Object3D {
     // Haunches: the rear arches swell up and out well past the deck between them, which is the line
     // every one of these cars has and the thing that reads first from behind.
     { z: -0.6, hw: 1.0, top: 0.5, bulge: 0.3, floor: 0.1 },
-    { z: -1.15, hw: 1.02, top: 0.46, bulge: 0.48, floor: 0.1 },
+    { z: -0.98, hw: 1.01, top: 0.47, bulge: 0.44, floor: 0.1, well: { x: 0.8, top: 0.44 } },
+    { z: -1.3, hw: 1.02, top: 0.46, bulge: 0.48, floor: 0.1, well: { x: 0.72, top: 0.68 } },
+    { z: -1.62, hw: 1.02, top: 0.45, bulge: 0.47, floor: 0.11, well: { x: 0.8, top: 0.44 } },
     { z: -1.7, hw: 1.02, top: 0.44, bulge: 0.46, floor: 0.11 },
     { z: -2.15, hw: 0.98, top: 0.44, bulge: 0.19, floor: 0.14 },
     { z: -2.4, hw: 0.86, top: 0.42, bulge: 0.02, floor: 0.18 },
@@ -174,9 +188,16 @@ export function buildPrototype(livery: Livery): Object3D {
     { z: -2.1, hw: 0.38, top: 0.58, bulge: 0, floor: 0.4 },
   ]
   g.add(loft(dome, 7, body))
-  // No rear window: the teardrop is unbroken for now, which is the clean starting point for either
-  // buttresses with a vertical pane between them or one long backlight down to the tail. A pane
-  // under this roofline is simply inside the bodywork, where nothing can see it.
+  // The backlight: an arched pane that follows the passenger dome straight down at the back of the
+  // cabin and then runs on down the teardrop towards the tail, which is the 512 S answer to the
+  // problem — no fins, the glass itself does the work. It is a shell a few millimetres outside the
+  // dome rather than a hole in it: same silhouette, and from behind you see the arch filled dark.
+  const backlight: Slice[] = [
+    { z: -0.32, hw: 0.607, top: 0.852, bulge: 0, floor: 0.58 },
+    { z: -1.0, hw: 0.557, top: 0.787, bulge: 0, floor: 0.54 },
+    { z: -1.62, hw: 0.487, top: 0.687, bulge: 0, floor: 0.48 },
+  ]
+  g.add(loft(backlight, 7, glass))
   // Engine bay louvres, in the deck either side of the teardrop.
   for (const side of [-1, 1]) g.add(box(0.3, 0.03, 0.5, side * 0.7, 0.52, -1.5, dark))
   // Tail: a Kurzheck lip across the cut-off deck — no wing. A wing on struts is the single thing
@@ -194,6 +215,10 @@ export function buildPrototype(livery: Livery): Object3D {
     // the other way the back end of every ribbon lifts off the bodywork and floats.
     seg.rotation.x = Math.atan2(a.top - b.top, b.z - a.z)
     g.add(seg)
+  }
+  // Liners: the inside of an opening is shadow, not paintwork.
+  for (const [z, len, h] of [[1.34, 0.62, 0.6], [-1.3, 0.68, 0.66]]) {
+    for (const side of [-1, 1]) g.add(box(0.03, h - 0.12, len, side * 0.735, (h + 0.12) / 2, z, dark))
   }
   // No stripe over the roof: the teardrop falls away steeply enough that from behind you are looking
   // straight down at it, and a ribbon up there reads as a pale panel stuck on the engine cover. The
@@ -231,7 +256,15 @@ export function buildPrototype(livery: Livery): Object3D {
   // A low nose intake, the oil cooler duct under it, and the pipes swept out of the flanks.
   g.add(box(0.7, 0.08, 0.06, 0, 0.2, 2.3, dark))
   g.add(box(0.44, 0.05, 0.05, 0, 0.12, 2.24, dark))
-  for (const x of [-0.3, 0.3]) g.add(cyl(0.06, 0.5, x, 0.26, -2.4, dark, true))
+  for (const x of [-0.3, 0.3]) {
+    g.add(cyl(0.06, 0.5, x, 0.26, -2.4, dark, true))
+    // Markers at the pipe exits. The bake projects these into every frame so the afterburner knows
+    // where its own exhausts ended up on screen, whatever the car is doing.
+    const mark = new Group()
+    mark.name = x < 0 ? 'exhaustL' : 'exhaustR'
+    mark.position.set(x, 0.26, -2.63)
+    g.add(mark)
+  }
   // Wheels: fat, and *inside* the arches. The fronts are narrower and tucked in — a period
   // prototype has a rear track it can barely cover and a front one it sits well within.
   for (const [x, z, r, w] of [

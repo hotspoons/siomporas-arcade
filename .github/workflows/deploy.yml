@@ -50,6 +50,10 @@ jobs:
             domain: drivin.siomporas.com
           - app: conduit
             domain: apex.siomporas.com
+    # Secrets cannot be read in an `if:` directly, so they come in as environment variables and the
+    # publish step checks those: no credentials yet means build-and-stop rather than a failed run.
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -60,9 +64,14 @@ jobs:
       - name: Build ${{ matrix.app }}
         run: npm run build -w apps/${{ matrix.app }}
       - name: Publish to Cloudflare
+        if: env.CLOUDFLARE_API_TOKEN != ''
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: apps/${{ matrix.app }}
           command: deploy
+      - name: No credentials yet
+        if: env.CLOUDFLARE_API_TOKEN == ''
+        run: echo "::notice title=Not published::${{ matrix.app }} built fine, but this repository has no CLOUDFLARE_API_TOKEN secret yet, so nothing was uploaded. See DEPLOY.md."
+

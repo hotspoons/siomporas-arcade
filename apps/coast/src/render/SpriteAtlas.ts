@@ -6,7 +6,7 @@ import { AmbientLight, Box3, BoxGeometry, Color, Vector4, DirectionalLight, Grou
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { isTouchDevice } from '@apex/engine/app/platform'
 
-import { atlasSizeFor, cellSize, MODELS, type ModelDef } from './models'
+import { atlasSizeFor, cellSize, MODELS, orient, type ModelDef } from './models'
 import { ensureFonts } from './procgen'
 import { applyAtlasFilters, atlasKey, loadCachedAtlas, saveCachedAtlas } from './AtlasCache'
 
@@ -246,6 +246,7 @@ export class SpriteAtlas {
         }
       })
       holder.clear()
+      model = orient(model, def)
       holder.add(model)
       const box = new Box3().setFromObject(model)
       const size = new Vector3()

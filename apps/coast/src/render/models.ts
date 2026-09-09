@@ -1,7 +1,7 @@
 // Sprite manifest: which CC0 model renders which sprite kind, how tall it is
 // in metres, and from which yaw angles (degrees; 0 = seen from behind).
 
-import type { Object3D } from 'three'
+import { Group, type Object3D } from 'three'
 import { buildArch, buildBlock, buildDiner, buildFacade, buildGasStation, buildMotel, buildPrototype, buildSign, buildTower, LIVERIES } from './procgen'
 
 export interface ModelDef {
@@ -18,6 +18,22 @@ export interface ModelDef {
   cell: number
   /** Extra uniform scale on the model before fitting (some kits are tiny). */
   fit?: number
+  /**
+   * Degrees to turn the model before anything looks at it. Yaw 0 means *seen from behind*, which is
+   * what you want of a car driving away from you and exactly wrong for anything standing beside the
+   * road: without this a diner shows the player its back wall and a light gantry shows the back of
+   * its lamps. Roadside kinds carry a half turn so the side they were built to show faces the road.
+   */
+  spin?: number
+}
+
+/** The model as everything downstream should see it: turned to face the way its kind should face. */
+export function orient(model: Object3D, def: ModelDef): Object3D {
+  if (!def.spin) return model
+  const g = new Group()
+  g.rotation.y = (def.spin * Math.PI) / 180
+  g.add(model)
+  return g
 }
 
 /**
@@ -52,8 +68,8 @@ export function atlasSizeFor(defs: ModelDef[], cellScale = 1): number {
 
 /** Hero views: fine steps for steering, coarse ones all the way round for the crash spin. */
 export const HERO_YAWS = [0, 12, 24, 38, 60, 90, 120, 150, 180, -12, -24, -38, -60, -90, -120, -150]
-const N = (kind: string, file: string, heightM: number, cell = 128): ModelDef => ({ kind, file: `assets/nature/${file}.glb`, heightM, yaws: [0], cell })
-const P = (kind: string, file: string, heightM: number, cell = 128): ModelDef => ({ kind, file: `assets/props/${file}.glb`, heightM, yaws: [0], cell })
+const N = (kind: string, file: string, heightM: number, cell = 128): ModelDef => ({ kind, file: `assets/nature/${file}.glb`, heightM, yaws: [0], cell, spin: 180 })
+const P = (kind: string, file: string, heightM: number, cell = 128): ModelDef => ({ kind, file: `assets/props/${file}.glb`, heightM, yaws: [0], cell, spin: 180 })
 /** Traffic: fine flank steps for cars near your lane, quarter views for crossers, head-on, and four pitches for hills. */
 export const TRAFFIC_YAWS = [0, 6, 13, 22, 35, 90, 180, -6, -13, -22, -35, -90]
 export const TRAFFIC_PITCHES = [-5, 4, 13, 22]
@@ -91,23 +107,23 @@ export const MODELS: ModelDef[] = [
   ...Object.entries(LIVERIES).map(([id, l]): ModelDef => ({ kind: `hero_${id}`, file: '', build: () => buildPrototype(l), heightM: 1.1, yaws: HERO_YAWS, cell: 288 })),
   { kind: 'formula', file: 'assets/cars/race.glb', heightM: 1.1, yaws: HERO_YAWS, cell: 288 },
   // Roadside architecture and signage.
-  { kind: 'diner', file: '', build: buildDiner, heightM: 6.4, yaws: [0], cell: 256 },
-  { kind: 'block', file: '', build: () => buildBlock(15, 14, 0x9aa4ae), heightM: 15, yaws: [0], cell: 192 },
-  { kind: 'facade1', file: '', build: () => buildFacade(8, 3, 0xc8b8a0, 0xb03a3a, false), heightM: 14.4, yaws: [0], cell: 192 },
-  { kind: 'facade2', file: '', build: () => buildFacade(7, 4, 0x9aa6b4, 0x2a6a9a, false), heightM: 17.8, yaws: [0], cell: 192 },
-  { kind: 'facade3', file: '', build: () => buildFacade(8.5, 2, 0xd8c0a8, 0x3a8a4a, false), heightM: 11, yaws: [0], cell: 160 },
-  { kind: 'facade4', file: '', build: () => buildFacade(7.5, 5, 0xb8a090, 0xc08a2a, false), heightM: 21.2, yaws: [0], cell: 224 },
-  { kind: 'facadeLit1', file: '', build: () => buildFacade(8, 4, 0x4a4a5a, 0xff5fd2, true), heightM: 17.8, yaws: [0], cell: 192 },
-  { kind: 'facadeLit2', file: '', build: () => buildFacade(7, 3, 0x3a3e4e, 0x25e8ff, true), heightM: 14.4, yaws: [0], cell: 192 },
-  { kind: 'block2', file: '', build: () => buildBlock(11, 12, 0xb08a70), heightM: 11, yaws: [0], cell: 192 },
-  { kind: 'motel', file: '', build: buildMotel, heightM: 7.6, yaws: [0], cell: 256 },
-  { kind: 'gas', file: '', build: buildGasStation, heightM: 4.6, yaws: [0], cell: 256 },
-  { kind: 'tower', file: '', build: () => buildTower(34, 0x3a4a6a), heightM: 37, yaws: [0], cell: 256 },
-  { kind: 'tower2', file: '', build: () => buildTower(22, 0x5a4a5a), heightM: 25, yaws: [0], cell: 256 },
-  { kind: 'signCoast', file: '', build: () => buildSign('COAST HWY 1', '#ffffff', '#1a5a2a'), heightM: 7.3, yaws: [0], cell: 192 },
-  { kind: 'signDrive', file: '', build: () => buildSign('DRIVE SAFE', '#ffe28a', '#7a1a1a'), heightM: 7.3, yaws: [0], cell: 192 },
-  { kind: 'signBay', file: '', build: () => buildSign('NEON BAY 12', '#ff5fd2', '#101030'), heightM: 7.3, yaws: [0], cell: 192 },
-  { kind: 'arch', file: '', build: buildArch, heightM: 10.2, yaws: [0], cell: 256 },
+  { kind: 'diner', file: '', build: buildDiner, heightM: 6.4, yaws: [0], cell: 256, spin: 180 },
+  { kind: 'block', file: '', build: () => buildBlock(15, 14, 0x9aa4ae), heightM: 15, yaws: [0], cell: 192, spin: 180 },
+  { kind: 'facade1', file: '', build: () => buildFacade(8, 3, 0xc8b8a0, 0xb03a3a, false), heightM: 14.4, yaws: [0], cell: 192, spin: 180 },
+  { kind: 'facade2', file: '', build: () => buildFacade(7, 4, 0x9aa6b4, 0x2a6a9a, false), heightM: 17.8, yaws: [0], cell: 192, spin: 180 },
+  { kind: 'facade3', file: '', build: () => buildFacade(8.5, 2, 0xd8c0a8, 0x3a8a4a, false), heightM: 11, yaws: [0], cell: 160, spin: 180 },
+  { kind: 'facade4', file: '', build: () => buildFacade(7.5, 5, 0xb8a090, 0xc08a2a, false), heightM: 21.2, yaws: [0], cell: 224, spin: 180 },
+  { kind: 'facadeLit1', file: '', build: () => buildFacade(8, 4, 0x4a4a5a, 0xff5fd2, true), heightM: 17.8, yaws: [0], cell: 192, spin: 180 },
+  { kind: 'facadeLit2', file: '', build: () => buildFacade(7, 3, 0x3a3e4e, 0x25e8ff, true), heightM: 14.4, yaws: [0], cell: 192, spin: 180 },
+  { kind: 'block2', file: '', build: () => buildBlock(11, 12, 0xb08a70), heightM: 11, yaws: [0], cell: 192, spin: 180 },
+  { kind: 'motel', file: '', build: buildMotel, heightM: 7.6, yaws: [0], cell: 256, spin: 180 },
+  { kind: 'gas', file: '', build: buildGasStation, heightM: 4.6, yaws: [0], cell: 256, spin: 180 },
+  { kind: 'tower', file: '', build: () => buildTower(34, 0x3a4a6a), heightM: 37, yaws: [0], cell: 256, spin: 180 },
+  { kind: 'tower2', file: '', build: () => buildTower(22, 0x5a4a5a), heightM: 25, yaws: [0], cell: 256, spin: 180 },
+  { kind: 'signCoast', file: '', build: () => buildSign('COAST HWY 1', '#ffffff', '#1a5a2a'), heightM: 7.3, yaws: [0], cell: 192, spin: 180 },
+  { kind: 'signDrive', file: '', build: () => buildSign('DRIVE SAFE', '#ffe28a', '#7a1a1a'), heightM: 7.3, yaws: [0], cell: 192, spin: 180 },
+  { kind: 'signBay', file: '', build: () => buildSign('NEON BAY 12', '#ff5fd2', '#101030'), heightM: 7.3, yaws: [0], cell: 192, spin: 180 },
+  { kind: 'arch', file: '', build: buildArch, heightM: 10.2, yaws: [0], cell: 256, spin: 180 },
   C('sedan', 'sedan'),
   C('sedanSports', 'sedan-sports'),
   C('suv', 'suv'),

@@ -11,7 +11,7 @@ import { PROCGEN_VERSION } from './procgen'
 const DB = 'apex-coast'
 const STORE = 'atlas'
 /** Bump when the bake itself changes (lighting, camera, cell layout). */
-const BAKE_VERSION = 8
+const BAKE_VERSION = 9
 
 interface CachedAtlas {
   key: string
@@ -31,7 +31,7 @@ if (import.meta.hot) import.meta.hot.on('vite:afterUpdate', () => { hotDirty = t
 
 export function atlasKey(size: number, cellScale: number): string {
   // The manifest fully determines the atlas; `build` functions are identified by kind name.
-  const manifest = MODELS.map((m) => `${m.kind}|${m.file}|${m.heightM}|${m.yaws.join(',')}|${(m.pitches ?? []).join(',')}|${m.cell}|${m.fit ?? 1}|${m.build ? 'b' : 'f'}`).join(';')
+  const manifest = MODELS.map((m) => `${m.kind}|${m.file}|${m.heightM}|${m.yaws.join(',')}|${(m.pitches ?? []).join(',')}|${m.cell}|${m.fit ?? 1}|${m.spin ?? 0}|${m.build ? 'b' : 'f'}`).join(';')
   let h = 2166136261
   for (let i = 0; i < manifest.length; i++) {
     h ^= manifest.charCodeAt(i)

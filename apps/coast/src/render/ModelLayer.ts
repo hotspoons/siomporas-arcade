@@ -24,7 +24,7 @@
 import { AmbientLight, Box3, BufferAttribute, BufferGeometry, DirectionalLight, Group, HemisphereLight, Mesh, MeshBasicMaterial, MeshStandardMaterial, Object3D, PerspectiveCamera, Scene, Vector3, type WebGLRenderer } from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 
-import { MODELS, type ModelDef } from './models'
+import { MODELS, orient, type ModelDef } from './models'
 
 const DEG = Math.PI / 180
 /** Half the ortho camera's z range, shared out among the posed meshes in a frame. */
@@ -36,7 +36,8 @@ const GROUND_HALF = 90
  * The bake's normalisation, so a mesh here is the size the sprite of it would have been: scaled to
  * the manifest's height in metres, standing on y = 0, centred over its own footprint.
  */
-function normalise(model: Object3D, def: ModelDef): Object3D {
+function normalise(raw: Object3D, def: ModelDef): Object3D {
+  const model = orient(raw, def)
   model.traverse((o) => {
     const m = o as Mesh
     if (!m.isMesh) return
@@ -198,7 +199,9 @@ export class ModelLayer {
     obj.position.set((sx - this.screenW / 2) / scale, (sy - this.screenH / 2) / scale, -cz)
     obj.scale.setScalar(size)
     obj.rotation.order = 'ZYX'
-    obj.rotation.set(0, headingDeg * DEG, roll)
+    // The half turn: these models face +z, and +z here is back towards the camera. Without it every
+    // car in the game drives at you and every sign faces away.
+    obj.rotation.set(0, (180 + headingDeg) * DEG, roll)
     return true
   }
 

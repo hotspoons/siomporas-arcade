@@ -56,7 +56,9 @@ secret**, twice:
 ## 3. Push
 
 `.github/workflows/deploy.yml` runs on every push to `main`: lint, typecheck and tests first, then it
-builds and publishes each game in turn. A red check means nothing ships.
+builds and publishes each game in turn. A red check means nothing ships. Until the two secrets exist
+the workflow still builds all three and simply says it had nothing to publish with, so the repository
+is not red while you are still setting Cloudflare up.
 
 The first deploy of each Worker also creates the DNS record for its subdomain, because the custom
 domain is declared in that app's `wrangler.jsonc`. Nothing to click.

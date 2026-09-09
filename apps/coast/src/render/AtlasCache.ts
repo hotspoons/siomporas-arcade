@@ -5,13 +5,13 @@
 import { NearestFilter, LinearFilter, SRGBColorSpace, Texture, type WebGLRenderer, type WebGLRenderTarget } from 'three'
 import { DEFAULT_PITCH, type SpriteKind } from './SpriteAtlas'
 
-import { ATLAS_SIZE, MODELS } from './models'
+import { MODELS } from './models'
 import { PROCGEN_VERSION } from './procgen'
 
 const DB = 'apex-coast'
 const STORE = 'atlas'
 /** Bump when the bake itself changes (lighting, camera, cell layout). */
-const BAKE_VERSION = 4
+const BAKE_VERSION = 5
 
 interface CachedAtlas {
   key: string
@@ -19,7 +19,7 @@ interface CachedAtlas {
   kinds: [string, { def: SpriteKind['def']; frames: SpriteKind['frames']; yaws: number[]; pitches?: number[] }][]
 }
 
-export function atlasKey(): string {
+export function atlasKey(size: number, cellScale: number): string {
   // The manifest fully determines the atlas; `build` functions are identified by kind name.
   const manifest = MODELS.map((m) => `${m.kind}|${m.file}|${m.heightM}|${m.yaws.join(',')}|${(m.pitches ?? []).join(',')}|${m.cell}|${m.fit ?? 1}|${m.build ? 'b' : 'f'}`).join(';')
   let h = 2166136261
@@ -27,7 +27,7 @@ export function atlasKey(): string {
     h ^= manifest.charCodeAt(i)
     h = Math.imul(h, 16777619)
   }
-  return `v${BAKE_VERSION}.${PROCGEN_VERSION}-${(h >>> 0).toString(16)}-${ATLAS_SIZE}`
+  return `v${BAKE_VERSION}.${PROCGEN_VERSION}-${(h >>> 0).toString(16)}-${size}x${cellScale}`
 }
 
 function open(): Promise<IDBDatabase> {
@@ -65,15 +65,23 @@ export async function loadCachedAtlas(key: string): Promise<{ texture: Texture; 
   }
 }
 
-export async function saveCachedAtlas(key: string, renderer: WebGLRenderer, rt: WebGLRenderTarget, kinds: Map<string, SpriteKind>): Promise<void> {
+export async function saveCachedAtlas(key: string, renderer: WebGLRenderer, rt: WebGLRenderTarget, kinds: Map<string, SpriteKind>, size: number): Promise<void> {
   try {
-    const px = new Uint8Array(ATLAS_SIZE * ATLAS_SIZE * 4)
-    renderer.readRenderTargetPixels(rt, 0, 0, ATLAS_SIZE, ATLAS_SIZE, px)
+    const px = new Uint8Array(size * size * 4)
+    renderer.readRenderTargetPixels(rt, 0, 0, size, size, px)
+    // An atlas that came back empty is a bake the GPU dropped. Storing it would serve black sprites
+    // from the cache on every later load, which is far worse than baking again.
+    let ink = 0
+    for (let i = 3; i < px.length && ink < 64; i += 4 * 97) if (px[i] > 8) ink++
+    if (ink < 8) {
+      console.warn('atlas cache: the bake came back blank, not caching it')
+      return
+    }
     const canvas = document.createElement('canvas')
-    canvas.width = ATLAS_SIZE
-    canvas.height = ATLAS_SIZE
+    canvas.width = size
+    canvas.height = size
     const ctx = canvas.getContext('2d')!
-    ctx.putImageData(new ImageData(new Uint8ClampedArray(px.buffer), ATLAS_SIZE, ATLAS_SIZE), 0, 0)
+    ctx.putImageData(new ImageData(new Uint8ClampedArray(px.buffer), size, size), 0, 0)
     const png = await new Promise<Blob | null>((r) => canvas.toBlob(r, 'image/png'))
     if (!png) return
     const rec: CachedAtlas = {

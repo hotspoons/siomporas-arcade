@@ -60,6 +60,8 @@ game.view
     if (game.view.atlas.fromCache) console.info('%c[atlas] loaded from cache', 'color:#39ff81')
     loading.classList.add('hidden')
     game.loop.start()
+    // A phone has no console: ?gldebug=1 puts the GPU's limits and the baked atlas on screen.
+    if (new URLSearchParams(location.search).get('gldebug') === '1') void import('./gldebug').then((m) => m.showGlDebug(app, game.view.renderer, game.view.atlas))
   })
   .catch((err) => fatal('SPRITE BAKE FAILED', String((err as Error)?.stack ?? err)))
 

@@ -25,9 +25,9 @@ export interface ModelDef {
  * SpriteAtlas' order (big cells first). Adding views to a model grows the atlas instead
  * of silently overflowing it.
  */
-export function atlasSizeFor(defs: ModelDef[]): number {
-  const cells = defs.flatMap((d) => d.yaws.flatMap(() => (d.pitches ?? [0]).map(() => d.cell))).sort((a, b) => b - a)
-  for (const size of [1024, 2048, 4096, 8192]) {
+export function atlasSizeFor(defs: ModelDef[], cellScale = 1): number {
+  const cells = defs.flatMap((d) => d.yaws.flatMap(() => (d.pitches ?? [0]).map(() => cellSize(d, cellScale)))).sort((a, b) => b - a)
+  for (const size of [512, 1024, 2048, 4096, 8192]) {
     let x = 0
     let y = 0
     let h = 0
@@ -121,5 +121,10 @@ export const MODELS: ModelDef[] = [
 /** Width in road-halves is derived from the baked aspect; these are height metres for the sim's hit tests elsewhere. */
 export const MODEL_BY_KIND: Record<string, ModelDef> = Object.fromEntries(MODELS.map((m) => [m.kind, m]))
 
-/** Atlas texture size for the current manifest (see atlasSizeFor). */
+/** A model's cell at a given scale. Never below 16 px, or the sprite is mush. */
+export function cellSize(def: ModelDef, cellScale: number): number {
+  return Math.max(16, Math.round((def.cell * cellScale) / 2) * 2)
+}
+
+/** Atlas texture size for the current manifest at full cell size (see atlasSizeFor). */
 export const ATLAS_SIZE = atlasSizeFor(MODELS)

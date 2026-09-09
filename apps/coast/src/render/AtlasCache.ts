@@ -19,6 +19,16 @@ interface CachedAtlas {
   kinds: [string, { def: SpriteKind['def']; frames: SpriteKind['frames']; yaws: number[]; pitches?: number[] }][]
 }
 
+/**
+ * Vite swaps modules under a running page, and the atlas is baked once at startup: edit the car's
+ * geometry or the bake camera mid-session and the page can end up baking half-new models with
+ * half-old frame maths, then storing the result under the *new* key — a poisoned cache that survives
+ * every reload until site data is cleared. So once anything has hot-updated, this session neither
+ * trusts nor writes the cache.
+ */
+let hotDirty = false
+if (import.meta.hot) import.meta.hot.on('vite:afterUpdate', () => { hotDirty = true })
+
 export function atlasKey(size: number, cellScale: number): string {
   // The manifest fully determines the atlas; `build` functions are identified by kind name.
   const manifest = MODELS.map((m) => `${m.kind}|${m.file}|${m.heightM}|${m.yaws.join(',')}|${(m.pitches ?? []).join(',')}|${m.cell}|${m.fit ?? 1}|${m.build ? 'b' : 'f'}`).join(';')
@@ -40,6 +50,7 @@ function open(): Promise<IDBDatabase> {
 }
 
 export async function loadCachedAtlas(key: string): Promise<{ texture: Texture; kinds: Map<string, SpriteKind> } | null> {
+  if (hotDirty) return null
   try {
     const db = await open()
     const rec = await new Promise<CachedAtlas | undefined>((resolve, reject) => {
@@ -66,6 +77,10 @@ export async function loadCachedAtlas(key: string): Promise<{ texture: Texture; 
 }
 
 export async function saveCachedAtlas(key: string, renderer: WebGLRenderer, rt: WebGLRenderTarget, kinds: Map<string, SpriteKind>, size: number): Promise<void> {
+  if (hotDirty) {
+    console.info('[atlas] not caching a bake from a hot-updated session')
+    return
+  }
   try {
     const px = new Uint8Array(size * size * 4)
     renderer.readRenderTargetPixels(rt, 0, 0, size, size, px)

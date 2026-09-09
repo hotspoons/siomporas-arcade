@@ -35,7 +35,7 @@ const flat = (color: number, extra: FlatExtra = {}) => {
 }
 
 /** Bump when any procedural model changes shape; part of the atlas cache key. */
-export const PROCGEN_VERSION = 15
+export const PROCGEN_VERSION = 16
 
 interface Slice {
   z: number
@@ -56,7 +56,7 @@ interface Slice {
  */
 const ARCH_U = 0.74
 const ARCH_W = 0.34
-const ARCH_OUT = 1
+const ARCH_OUT = 0.85
 
 /** Half-profile of a slice, from floor-centre up around to top-centre (right side). */
 function slicePoints(sl: Slice, n: number): [number, number][] {
@@ -136,19 +136,19 @@ export function buildPrototype(livery: Livery): Object3D {
   // you see wheel in an opening under an arch, never a wheel bolted to the side of a slab.
   const hull: Slice[] = [
     { z: 2.3, hw: 0.5, top: 0.26, bulge: 0.02, floor: 0.12 },
-    { z: 2.0, hw: 0.78, top: 0.28, bulge: 0.18, floor: 0.1 },
-    { z: 1.7, hw: 0.92, top: 0.3, bulge: 0.42, floor: 0.09 },
-    { z: 1.3, hw: 0.98, top: 0.32, bulge: 0.48, floor: 0.09 },
-    { z: 0.95, hw: 0.96, top: 0.4, bulge: 0.34, floor: 0.09 },
+    { z: 2.0, hw: 0.76, top: 0.28, bulge: 0.17, floor: 0.1 },
+    { z: 1.7, hw: 0.9, top: 0.3, bulge: 0.4, floor: 0.09 },
+    { z: 1.3, hw: 0.96, top: 0.32, bulge: 0.46, floor: 0.09 },
+    { z: 0.95, hw: 0.94, top: 0.4, bulge: 0.32, floor: 0.09 },
     // Waisted through the doors, which is what makes the two pairs of arches read as arches.
     { z: 0.5, hw: 0.95, top: 0.52, bulge: 0.12, floor: 0.1 },
     { z: 0.0, hw: 0.96, top: 0.53, bulge: 0.14, floor: 0.1 },
     // Haunches: the rear arches swell up and out well past the deck between them, which is the line
     // every one of these cars has and the thing that reads first from behind.
-    { z: -0.6, hw: 1.02, top: 0.5, bulge: 0.32, floor: 0.1 },
-    { z: -1.15, hw: 1.06, top: 0.46, bulge: 0.52, floor: 0.1 },
-    { z: -1.7, hw: 1.06, top: 0.44, bulge: 0.5, floor: 0.11 },
-    { z: -2.15, hw: 1.0, top: 0.44, bulge: 0.2, floor: 0.14 },
+    { z: -0.6, hw: 1.0, top: 0.5, bulge: 0.3, floor: 0.1 },
+    { z: -1.15, hw: 1.02, top: 0.46, bulge: 0.48, floor: 0.1 },
+    { z: -1.7, hw: 1.02, top: 0.44, bulge: 0.46, floor: 0.11 },
+    { z: -2.15, hw: 0.98, top: 0.44, bulge: 0.19, floor: 0.14 },
     { z: -2.4, hw: 0.86, top: 0.42, bulge: 0.02, floor: 0.18 },
   ]
   g.add(loft(hull, 9, body))
@@ -157,27 +157,26 @@ export function buildPrototype(livery: Livery): Object3D {
   const canopy: Slice[] = [
     { z: 0.9, hw: 0.42, top: 0.5, bulge: 0, floor: 0.42 },
     { z: 0.55, hw: 0.54, top: 0.72, bulge: 0, floor: 0.45 },
-    { z: 0.1, hw: 0.6, top: 0.84, bulge: 0, floor: 0.45 },
-    { z: -0.3, hw: 0.58, top: 0.82, bulge: 0, floor: 0.45 },
+    { z: 0.15, hw: 0.6, top: 0.84, bulge: 0, floor: 0.45 },
   ]
   g.add(loft(canopy, 6, glass))
   // The teardrop: the roof does not stop behind the driver, it carries on as one unbroken painted
   // volume that narrows and sinks all the way to the cut-off tail, sitting down between the
   // haunches. Fins bolted either side of it read as an afterthought at sprite size; the shape is
   // stronger without them, and glass or buttresses can be cut back into it later.
+  // Starts a little proud of where the glass stops, and a little bigger than it, so the two do not
+  // share a surface — coplanar with the canopy they fight for the same pixels and tear.
   const dome: Slice[] = [
-    { z: 0.25, hw: 0.6, top: 0.84, bulge: 0, floor: 0.4 },
-    { z: -0.35, hw: 0.59, top: 0.83, bulge: 0, floor: 0.4 },
+    { z: 0.2, hw: 0.615, top: 0.855, bulge: 0, floor: 0.4 },
+    { z: -0.35, hw: 0.6, top: 0.845, bulge: 0, floor: 0.4 },
     { z: -1.0, hw: 0.55, top: 0.78, bulge: 0, floor: 0.4 },
     { z: -1.6, hw: 0.48, top: 0.68, bulge: 0, floor: 0.4 },
     { z: -2.1, hw: 0.38, top: 0.58, bulge: 0, floor: 0.4 },
   ]
   g.add(loft(dome, 7, body))
-  // The rear window sits *in* the teardrop, under its crown — a pane standing above the roofline is
-  // the one thing that gives away a roof made of separate pieces.
-  const rear = box(0.58, 0.22, 0.04, 0, 0.66, -0.62, glass)
-  rear.rotation.x = 0.3
-  g.add(rear)
+  // No rear window: the teardrop is unbroken for now, which is the clean starting point for either
+  // buttresses with a vertical pane between them or one long backlight down to the tail. A pane
+  // under this roofline is simply inside the bodywork, where nothing can see it.
   // Engine bay louvres, in the deck either side of the teardrop.
   for (const side of [-1, 1]) g.add(box(0.3, 0.03, 0.5, side * 0.7, 0.52, -1.5, dark))
   // Tail: a Kurzheck lip across the cut-off deck — no wing. A wing on struts is the single thing
@@ -191,29 +190,26 @@ export function buildPrototype(livery: Livery): Object3D {
     const b = hull[i + 1]
     if (b.z < 0.95) continue // from here back it is the teardrop that is on top, not the hull
     const seg = box(0.34, 0.015, Math.abs(a.z - b.z) + 0.02, 0, (a.top + b.top) / 2 + 0.012, (a.z + b.z) / 2, stripe)
-    seg.rotation.x = Math.atan2(a.top - b.top, a.z - b.z)
+    // The slice list runs front to back, so the segment's own +z has to fall toward b: with the sign
+    // the other way the back end of every ribbon lifts off the bodywork and floats.
+    seg.rotation.x = Math.atan2(a.top - b.top, b.z - a.z)
     g.add(seg)
   }
-  for (let i = 0; i < dome.length - 1; i++) {
-    const a = dome[i]
-    const b = dome[i + 1]
-    const seg = box(0.3, 0.015, Math.abs(a.z - b.z) + 0.02, 0, (a.top + b.top) / 2 + 0.012, (a.z + b.z) / 2, stripe)
-    seg.rotation.x = Math.atan2(a.top - b.top, a.z - b.z)
-    if (a.z > -0.9) seg.visible = false // under the glass
-    g.add(seg)
-  }
+  // No stripe over the roof: the teardrop falls away steeply enough that from behind you are looking
+  // straight down at it, and a ribbon up there reads as a pale panel stuck on the engine cover. The
+  // nose stripe and the tail band carry the livery instead.
   // Number roundel: a white disc on the door, where a period sports car carried it, rather than
   // lying flat on the bonnet. Sized to the door — a roundel taller than the bodywork it is painted
   // on floats off the flank — leaned back with the tumblehome so it sits *on* the panel, with the
   // number filling it, which is how they were actually painted.
   for (const side of [-1, 1]) {
     const decal = new Group()
-    decal.position.set(side * 0.965, 0.25, 0.3)
-    decal.rotation.z = side * 0.22
-    const roundel = new Mesh(new CylinderGeometry(0.13, 0.13, 0.02, 20), flat(0xffffff))
+    decal.position.set(side * 0.94, 0.31, 0.3)
+    decal.rotation.z = side * 0.3
+    const roundel = new Mesh(new CylinderGeometry(0.165, 0.165, 0.02, 20), flat(0xffffff))
     roundel.rotation.z = Math.PI / 2
     decal.add(roundel)
-    const num = numberDecal(livery.number, 0.24)
+    const num = numberDecal(livery.number, 0.3)
     num.position.x = side * 0.02
     num.rotation.y = (side * Math.PI) / 2
     decal.add(num)
@@ -223,7 +219,7 @@ export function buildPrototype(livery: Livery): Object3D {
   for (const x of [-0.78, 0.78]) {
     const lamp = new Mesh(new SphereGeometry(0.16, 10, 8), flat(0xfff6c8, { emissive: 0xffe0a0, emissiveIntensity: 0.9 }))
     lamp.scale.set(1, 0.6, 0.55)
-    lamp.position.set(x, 0.47, 1.82)
+    lamp.position.set(x, 0.43, 1.82)
     g.add(lamp)
     for (const dx of [-0.16, 0.16]) {
       const tail = new Mesh(new CylinderGeometry(0.075, 0.075, 0.05, 10), flat(0xff2a2a, { emissive: 0xff2a2a, emissiveIntensity: 0.8 }))
@@ -239,10 +235,10 @@ export function buildPrototype(livery: Livery): Object3D {
   // Wheels: fat, and *inside* the arches. The fronts are narrower and tucked in — a period
   // prototype has a rear track it can barely cover and a front one it sits well within.
   for (const [x, z, r, w] of [
-    [-0.94, 1.34, 0.31, 0.28],
-    [0.94, 1.34, 0.31, 0.28],
-    [-0.95, -1.3, 0.35, 0.36],
-    [0.95, -1.3, 0.35, 0.36],
+    [-0.9, 1.34, 0.29, 0.28],
+    [0.9, 1.34, 0.29, 0.28],
+    [-0.92, -1.3, 0.32, 0.36],
+    [0.92, -1.3, 0.32, 0.36],
   ]) {
     const tyre = new Mesh(new CylinderGeometry(r, r, w, 14), dark)
     tyre.rotation.z = Math.PI / 2

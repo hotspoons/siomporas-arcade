@@ -129,6 +129,10 @@ export class Game implements LoopClient {
         speed: round(c.speed),
         lap: this.sim.laps + 1,
         lapTime: round(this.sim.lapTime),
+        // What is in the way where the car is standing, and what stopped it last: a report of
+        // "I crash into nothing here" is only useful if the paste says what the nothing was.
+        blocking: c.probeBlocking() || 'nothing',
+        lastCrash: this.sim.crashCause || 'none',
       }
     }
     this.editor = new Editor(container, this.tracks, {

@@ -35,7 +35,7 @@ const flat = (color: number, extra: FlatExtra = {}) => {
 }
 
 /** Bump when any procedural model changes shape; part of the atlas cache key. */
-export const PROCGEN_VERSION = 4
+export const PROCGEN_VERSION = 11
 
 interface Slice {
   z: number
@@ -112,38 +112,71 @@ export function buildPrototype(livery: Livery): Object3D {
   const dark = flat(0x14151a)
   const glass = flat(0x1e2c40, { metalness: 0.85, roughness: 0.15 })
   const stripe = flat(livery.stripe)
-  // Hull: nose → front arches → cockpit → rear arches → tail.
+  // Hull: a 1970 sports prototype — 917 K, 512 S, 908/3, 330 P4. What makes those cars read at a
+  // glance is not detail, it is the section: a nose that dives almost to the road and stays *low* all
+  // the way to the screen, with the fenders standing well proud of it in two long crowns, and a tail
+  // chopped off short. Modern prototypes are the opposite — a high flat deck with a wing over it —
+  // which is what this car used to look like.
   const hull: Slice[] = [
-    // Group 6 proportions: ~2.3 m across the arches and barely 0.9 m to the roof;
-    // the centre of the bonnet dives between the two fender swells.
-    { z: 2.35, hw: 0.4, top: 0.34, bulge: 0, floor: 0.18 },
-    { z: 2.0, hw: 0.82, top: 0.42, bulge: 0.04, floor: 0.14 },
-    { z: 1.55, hw: 1.08, top: 0.5, bulge: 0.22, floor: 0.12 },
-    { z: 1.15, hw: 1.16, top: 0.54, bulge: 0.32, floor: 0.11 },
-    { z: 0.7, hw: 1.12, top: 0.58, bulge: 0.2, floor: 0.11 },
-    { z: 0.1, hw: 1.08, top: 0.6, bulge: 0.08, floor: 0.11 },
-    { z: -0.6, hw: 1.1, top: 0.62, bulge: 0.12, floor: 0.11 },
-    { z: -1.2, hw: 1.16, top: 0.64, bulge: 0.3, floor: 0.11 },
-    { z: -1.7, hw: 1.14, top: 0.62, bulge: 0.24, floor: 0.12 },
-    { z: -2.3, hw: 1.04, top: 0.56, bulge: 0.06, floor: 0.15 },
-    { z: -2.6, hw: 0.96, top: 0.5, bulge: 0, floor: 0.2 },
+    { z: 2.3, hw: 0.5, top: 0.26, bulge: 0.02, floor: 0.12 },
+    { z: 2.0, hw: 0.84, top: 0.28, bulge: 0.12, floor: 0.1 },
+    { z: 1.7, hw: 1.0, top: 0.3, bulge: 0.3, floor: 0.09 },
+    { z: 1.3, hw: 1.06, top: 0.32, bulge: 0.34, floor: 0.09 },
+    { z: 0.95, hw: 1.02, top: 0.4, bulge: 0.22, floor: 0.09 },
+    { z: 0.5, hw: 0.98, top: 0.52, bulge: 0.08, floor: 0.1 },
+    { z: 0.0, hw: 0.98, top: 0.54, bulge: 0.1, floor: 0.1 },
+    // Haunches: the rear arches swell up and out well past the deck between them, which is the line
+    // every one of these cars has and the thing that reads first from behind.
+    { z: -0.6, hw: 1.02, top: 0.5, bulge: 0.26, floor: 0.1 },
+    { z: -1.15, hw: 1.22, top: 0.46, bulge: 0.52, floor: 0.1 },
+    { z: -1.7, hw: 1.22, top: 0.44, bulge: 0.5, floor: 0.11 },
+    { z: -2.15, hw: 1.06, top: 0.44, bulge: 0.18, floor: 0.14 },
+    { z: -2.4, hw: 0.86, top: 0.42, bulge: 0.02, floor: 0.18 },
   ]
   g.add(loft(hull, 7, body))
-  // Canopy: a low, wide bubble rising out of the hull top, blended front and back.
+  // Canopy: small and set well back, a bubble sitting between the fender crowns rather than a
+  // greenhouse spanning the car. The screen rakes hard and the roof is barely over a metre up.
   const canopy: Slice[] = [
-    { z: 0.95, hw: 0.58, top: 0.6, bulge: 0, floor: 0.5 },
-    { z: 0.55, hw: 0.66, top: 0.8, bulge: 0, floor: 0.5 },
-    { z: 0.1, hw: 0.7, top: 0.92, bulge: 0, floor: 0.5 },
-    { z: -0.5, hw: 0.68, top: 0.9, bulge: 0, floor: 0.5 },
-    { z: -1.0, hw: 0.6, top: 0.78, bulge: 0, floor: 0.5 },
-    { z: -1.35, hw: 0.5, top: 0.64, bulge: 0, floor: 0.5 },
+    { z: 0.9, hw: 0.42, top: 0.5, bulge: 0, floor: 0.42 },
+    { z: 0.55, hw: 0.54, top: 0.72, bulge: 0, floor: 0.45 },
+    { z: 0.1, hw: 0.6, top: 0.84, bulge: 0, floor: 0.45 },
+    { z: -0.3, hw: 0.58, top: 0.82, bulge: 0, floor: 0.45 },
   ]
   g.add(loft(canopy, 6, glass))
-  // Roof spine in body colour over the glass (Group 6 cars had a painted centre section).
-  g.add(box(0.4, 0.05, 1.3, 0, 0.92, -0.35, body))
-  // Ducktail spoiler: low, wide, integrated on two small fins.
-  g.add(box(2.0, 0.05, 0.42, 0, 0.74, -2.45, dark))
-  for (const x of [-0.86, 0.86]) g.add(box(0.05, 0.26, 0.5, x, 0.6, -2.4, stripe))
+  // Flying buttresses and a near-vertical rear window between them: the roof does not just fade into
+  // the deck on these cars, it runs back as two fins that land on the haunches with the glass sunk
+  // between. It is the shape you see in every three-quarter shot of a P4 or a 512.
+  for (const side of [-1, 1]) {
+    // Narrow at the roof, wide at the haunch: a buttress leaves the top of the dome and sweeps *out*
+    // and down as it goes back. Angled the other way it reads as a pair of wings stuck on the deck.
+    const flank = box(0.12, 0.3, 1.45, side * 0.58, 0.68, -0.98, body)
+    flank.rotation.x = -0.16
+    flank.rotation.y = -side * 0.2
+    g.add(flank)
+  }
+  // The window between them is small and steep. A big dark pane across the back reads as a hole in
+  // the car from behind, which is exactly what it looked like before.
+  const rear = box(0.62, 0.3, 0.04, 0, 0.72, -0.62, glass)
+  rear.rotation.x = 0.3
+  g.add(rear)
+  // The dome does not stop at the glass: it runs back between the buttresses as a raised centre
+  // section, drops sharply at the end of it, and the flat deck carries on to the tail between the
+  // haunches. That step is the shape you see in every rear-three-quarter photograph of a 512 S.
+  const spine = box(0.78, 0.3, 1.05, 0, 0.64, -0.84, body)
+  spine.rotation.x = -0.05
+  g.add(spine)
+  g.add(box(1.02, 0.06, 0.95, 0, 0.5, -1.8, body))
+  // Engine bay louvres either side of the drop, in the deck.
+  for (const side of [-1, 1]) g.add(box(0.34, 0.03, 0.5, side * 0.52, 0.54, -1.5, dark))
+  // Painted centre section over the roof, and the roll hoop showing behind the glass.
+  g.add(box(0.36, 0.05, 0.9, 0, 0.85, -0.1, body))
+  g.add(box(0.8, 0.06, 0.08, 0, 0.8, -0.45, dark))
+  // Tail: a Kurzheck lip across the cut-off deck with a small fin at each corner — no wing. A wing on
+  // struts is the single thing that makes a car read as modern, and these cars did not have one.
+  g.add(box(1.9, 0.06, 0.28, 0, 0.56, -2.26, body))
+  // Nothing standing up off the tail: the corner fins read as two black slabs at sprite size, and a
+  // P4 or a 512 does not have them anyway. The haunches carry the shape instead.
+  g.add(box(1.5, 0.04, 0.12, 0, 0.59, -2.16, stripe))
   // Centre stripe: a ribbon lying on the hull top, following its height.
   for (let i = 0; i < hull.length - 1; i++) {
     const a = hull[i]
@@ -153,35 +186,51 @@ export function buildPrototype(livery: Livery): Object3D {
     if (b.z < 0.95 && b.z > -1.4) seg.visible = false // hidden under the canopy
     g.add(seg)
   }
-  // Number roundel on the nose.
-  const roundel = new Mesh(new CylinderGeometry(0.27, 0.27, 0.02, 18), flat(0xffffff))
-  roundel.position.set(0, 0.5, 1.55)
-  roundel.rotation.x = -0.28
-  g.add(roundel)
-  const num = textPlane(livery.number, 0.4, '#111', 'transparent', 96)
-  num.position.set(0, 0.52, 1.55)
-  num.rotation.x = -1.29
-  g.add(num)
-  // Faired headlamps in the fender fronts; tail lamps as slim bars.
-  for (const x of [-0.82, 0.82]) {
-    const lamp = new Mesh(new SphereGeometry(0.15, 10, 8), flat(0xfff6c8, { emissive: 0xffe0a0, emissiveIntensity: 0.9 }))
-    lamp.scale.set(1, 0.7, 0.5)
-    lamp.position.set(x, 0.5, 1.9)
-    g.add(lamp)
-    g.add(box(0.4, 0.09, 0.05, x * 0.95, 0.42, -2.62, flat(0xff2a2a, { emissive: 0xff2a2a, emissiveIntensity: 0.8 })))
+  // Number roundel: a white disc on the door, where a period sports car carried it, rather than lying
+  // flat on the bonnet — it is what you see of the number from the side.
+  for (const side of [-1, 1]) {
+    // A racing roundel is about the size of a door, not bigger than one.
+    const roundel = new Mesh(new CylinderGeometry(0.19, 0.19, 0.02, 18), flat(0xffffff))
+    roundel.rotation.z = Math.PI / 2
+    roundel.position.set(side * 1.0, 0.42, 0.3)
+    g.add(roundel)
+    const num = textPlane(livery.number, 0.26, '#111', 'transparent', 96)
+    num.position.set(side * 1.02, 0.42, 0.3)
+    num.rotation.y = (side * Math.PI) / 2
+    g.add(num)
   }
-  // Intake and exhausts.
-  g.add(box(0.6, 0.12, 0.06, 0, 0.28, 2.34, dark))
-  for (const x of [-0.22, 0.22]) g.add(cyl(0.055, 0.35, x, 0.3, -2.65, dark, true))
-  // Wheels, mostly enclosed by the arches.
-  for (const [x, z] of [[-1.0, 1.2], [1.0, 1.2], [-1.0, -1.25], [1.0, -1.25]]) {
-    const w = new Mesh(new CylinderGeometry(0.34, 0.34, 0.3, 14), dark)
-    w.rotation.z = Math.PI / 2
-    w.position.set(x, 0.34, z)
-    g.add(w)
-    const rim = new Mesh(new CylinderGeometry(0.2, 0.2, 0.32, 8), flat(0xbfc6d0, { metalness: 0.8, roughness: 0.3 }))
+  // Faired headlamps sunk into the fender crowns, under perspex; tail lamps as small round pods.
+  for (const x of [-0.78, 0.78]) {
+    const lamp = new Mesh(new SphereGeometry(0.16, 10, 8), flat(0xfff6c8, { emissive: 0xffe0a0, emissiveIntensity: 0.9 }))
+    lamp.scale.set(1, 0.6, 0.55)
+    lamp.position.set(x, 0.44, 1.82)
+    g.add(lamp)
+    for (const dx of [-0.16, 0.16]) {
+      const tail = new Mesh(new CylinderGeometry(0.075, 0.075, 0.05, 10), flat(0xff2a2a, { emissive: 0xff2a2a, emissiveIntensity: 0.8 }))
+      tail.rotation.x = Math.PI / 2
+      tail.position.set(x + dx, 0.42, -2.42)
+      g.add(tail)
+    }
+  }
+  // A low nose intake, the oil cooler duct under it, and the pipes swept out of the flanks.
+  g.add(box(0.7, 0.08, 0.06, 0, 0.2, 2.3, dark))
+  g.add(box(0.44, 0.05, 0.05, 0, 0.12, 2.24, dark))
+  for (const x of [-0.3, 0.3]) g.add(cyl(0.06, 0.5, x, 0.26, -2.4, dark, true))
+  // Wheels: fat, and standing out under the crowns rather than swallowed by them. The rears are
+  // wider and taller, which is most of why one of these cars looks planted from behind.
+  for (const [x, z, r, w] of [
+    [-1.02, 1.34, 0.33, 0.3],
+    [1.02, 1.34, 0.33, 0.3],
+    [-0.95, -1.3, 0.35, 0.36],
+    [0.95, -1.3, 0.35, 0.36],
+  ]) {
+    const tyre = new Mesh(new CylinderGeometry(r, r, w, 14), dark)
+    tyre.rotation.z = Math.PI / 2
+    tyre.position.set(x, r, z)
+    g.add(tyre)
+    const rim = new Mesh(new CylinderGeometry(r * 0.58, r * 0.58, w + 0.02, 8), flat(0xbfc6d0, { metalness: 0.8, roughness: 0.3 }))
     rim.rotation.z = Math.PI / 2
-    rim.position.set(x, 0.34, z)
+    rim.position.set(x, r, z)
     g.add(rim)
   }
   return g

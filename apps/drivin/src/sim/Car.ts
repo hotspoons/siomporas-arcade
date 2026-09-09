@@ -721,6 +721,32 @@ export class Car {
   }
 
   /**
+   * What is in the way right now, and how far above the car it is — the same test the sim uses, run on
+   * demand so a report of "I crash into nothing here" can say what the nothing is. Empty when clear.
+   */
+  probeBlocking(): string {
+    const lanes = this.track.lanesNear(this.pos, this.nearby)
+    const what = this.hitsStructure(lanes) || this.hitsScenery()
+    if (!what) return ''
+    let detail = ''
+    for (const lane of lanes) {
+      lane.table.project(this.pos, this.scratch, this.hit)
+      const f = this.scratch
+      if (!f.surface || this.hit.over > 0.5) continue
+      const lean = Math.hypot(f.right.x, f.right.z)
+      const dx = this.pos.x - f.pos.x
+      const dz = this.pos.z - f.pos.z
+      const across = lean > 1e-3 ? Math.abs((dx * f.right.x + dz * f.right.z) / lean) : Math.hypot(dx, dz)
+      const rise = f.pos.y - this.pos.y
+      if (across > (ROAD_HALF_WIDTH + CURB_WIDTH) * Math.max(lean, 0.3) + CAR_HALF_WIDTH) continue
+      const type = this.track.data.pieces[lane.pieceIndex]?.type ?? `link (lane ${lane.id})`
+      detail = ` — ${type} piece ${lane.pieceIndex}, ${rise >= 0 ? 'up' : 'down'} ${Math.abs(rise).toFixed(2)} m, ${across.toFixed(2)} m across`
+      break
+    }
+    return what + detail
+  }
+
+  /**
    * Grass-mode collision against track structures near the car. The car is a box from the
    * grass to ~1.2 m; a lane's slab blocks it when the surface passes through that band, a
    * banked or tilted lane is solid below its surface (an embankment), a tunnel's skin blocks

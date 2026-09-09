@@ -142,7 +142,28 @@ export class Cockpit {
       c.stroke()
     }
     // No pillars or header bar: the fenders and dash frame the view, the glass runs edge to edge.
-    // Dash: a dark cowl behind the wheel with three round gauges.
+    // The scuttle: painted bodywork running between the fenders, above the dash. Without it a dark
+    // dash sits against a dark road and the car has no bottom edge — it melts into the tarmac,
+    // especially through the low-res filter. The paint ties the two humps together into one car.
+    const scuttle = c.createLinearGradient(0, H - 205, 0, H - 110)
+    scuttle.addColorStop(0, bodyMid)
+    scuttle.addColorStop(1, bodyDark)
+    c.fillStyle = scuttle
+    c.beginPath()
+    c.moveTo(W / 2 - 620, H)
+    c.lineTo(W / 2 - 560, H - 140)
+    c.quadraticCurveTo(W / 2, H - 190, W / 2 + 560, H - 140)
+    c.lineTo(W / 2 + 620, H)
+    c.closePath()
+    c.fill()
+    // A lit edge along its top, which is what reads as a line between car and road at a glance.
+    c.strokeStyle = 'rgba(255,255,255,0.22)'
+    c.lineWidth = 5
+    c.beginPath()
+    c.moveTo(W / 2 - 560, H - 140)
+    c.quadraticCurveTo(W / 2, H - 190, W / 2 + 560, H - 140)
+    c.stroke()
+    // Dash: a dark cowl behind the wheel with three round gauges, sitting on the scuttle.
     c.fillStyle = '#1b1c22'
     c.beginPath()
     c.moveTo(W / 2 - 360, H)

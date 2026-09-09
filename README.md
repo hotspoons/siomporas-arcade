@@ -1,15 +1,23 @@
-# apex — two arcade games, one engine
+# siomporas-arcade — three arcade games, one engine
 
 A workspace of browser games in TypeScript + three.js that share a runtime and
 two presentation styles (a modern post-processed look and a deliberate
-low-res flat-shaded CRT look). Built to be split into separate repos later:
-apps never import each other, and `packages/engine` never imports an app.
+low-res flat-shaded CRT look). Apps never import each other, and
+`packages/engine` never imports an app, so any one of them could leave on its own.
+
+Each game publishes to its own address on Cloudflare Workers — see [DEPLOY.md](DEPLOY.md):
+
+| Game | Address |
+|---|---|
+| Sunstrip | https://sunstrip.siomporas.com |
+| Drivin’ | https://drivin.siomporas.com |
+| Apex Conduit | https://apex.siomporas.com |
 
 | Path | What | Dev port |
 |---|---|---|
 | [`apps/conduit`](apps/conduit) | **APEX CONDUIT** — tunnel racer-shooter (wall-riding craft, roof laser, shockwave, checkpoints, VR, phone tilt) | 5180 |
-| [`apps/drivin`](apps/drivin) | **working title "DRIVIN"** — stunt-track driving game with a tile-grid track editor (loops, corkscrews, banked turns, splits/joins, jumps, tunnels), crash replays | 5181 |
-| [`apps/coast`](apps/coast) | **working title "COASTLINE"** — OutRun-lineage sprite-scaling road racer: forks, checkpoints, turbo, chase and cockpit views, radio; sprites baked from CC0 models | 5182 |
+| [`apps/drivin`](apps/drivin) | **DRIVIN’** — stunt-track driving game with a tile-grid track editor (loops, corkscrews, banked turns, splits/joins, jumps, tunnels), crash replays | 5181 |
+| [`apps/coast`](apps/coast) | **SUNSTRIP** — OutRun-lineage sprite-scaling road racer: forks, checkpoints, turbo, chase and cockpit views, radio; sprites baked from CC0 models | 5182 |
 | [`packages/engine`](packages/engine) | `@apex/engine` — fixed-step loop, modern/retro styles, input sources, menus, settings store, math, sky, particles, dev bridge | — |
 
 ## Run

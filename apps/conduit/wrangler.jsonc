@@ -1,0 +1,17 @@
+{
+  // Static hosting on Cloudflare Workers: the built site is uploaded as assets and served straight
+  // from the edge, no Worker code of our own. `npx wrangler deploy` from this directory publishes it.
+  //
+  // The custom domain is claimed by this file: Cloudflare creates and keeps the DNS record for
+  // apex.siomporas.com as long as siomporas.com is a zone on the same account. See DEPLOY.md.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "apex-conduit",
+  "compatibility_date": "2026-01-01",
+  "assets": {
+    "directory": "./dist",
+    // A single-page app: unknown paths fall back to index.html rather than 404.
+    "not_found_handling": "single-page-application"
+  },
+  "routes": [{ "pattern": "apex.siomporas.com", "custom_domain": true }],
+  "observability": { "enabled": true }
+}

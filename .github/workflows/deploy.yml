@@ -1,0 +1,68 @@
+# Publish each game to its own Cloudflare Worker on a push to main.
+#
+# The three sites are static: Vite builds them, Wrangler uploads the built files as Worker assets,
+# and each Worker claims its own custom domain (see the wrangler.jsonc beside each app). Nothing here
+# needs a Cloudflare Pages project, and there is no server code to deploy.
+#
+# Two repository secrets are required, both from the Cloudflare dashboard:
+#   CLOUDFLARE_API_TOKEN    a token with "Edit Cloudflare Workers", scoped to the account
+#   CLOUDFLARE_ACCOUNT_ID   Workers & Pages → the account ID in the right-hand column
+#
+# The gate below runs the same checks as the lint workflow: nothing ships that does not build clean.
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Lint, typecheck, test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npx tsc -b
+      - run: npx vitest run
+
+  deploy:
+    name: ${{ matrix.app }} → ${{ matrix.domain }}
+    needs: check
+    runs-on: ubuntu-latest
+    strategy:
+      # One at a time: a failed upload should not leave half the arcade on a new version.
+      max-parallel: 1
+      matrix:
+        include:
+          - app: coast
+            domain: sunstrip.siomporas.com
+          - app: drivin
+            domain: drivin.siomporas.com
+          - app: conduit
+            domain: apex.siomporas.com
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Build ${{ matrix.app }}
+        run: npm run build -w apps/${{ matrix.app }}
+      - name: Publish to Cloudflare
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: apps/${{ matrix.app }}
+          command: deploy

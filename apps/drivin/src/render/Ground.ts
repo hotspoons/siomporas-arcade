@@ -63,19 +63,27 @@ export class Ground {
       this.hills.geometry.dispose()
       this.hills = null
     }
+    this.mesh.position.y = -0.05
     const h = track.heights
     if (!h) return
     const N = track.data.size
     const sub = 6 // quads per cell (~6.7 m): fine enough that the facets stay under the road slab
-    const n = N * sub + 1
+    // A ring of vertices thrown far out past the grid, at the height of the edge they hang off. The
+    // world beyond the sculpted land needs a floor, and it used to be a flat plane at zero — which
+    // covered any terrain that dipped below it, so you drove under a level green sheet with the real
+    // ground somewhere below and nothing to stand on.
+    const apron = GROUND_SIZE / 2
+    const coord = (i: number): number => (i === 0 ? -apron : i > N * sub ? N * CELL + apron : ((i - 1) / sub) * CELL)
+    const n = N * sub + 3
     const pos = new Float32Array(n * n * 3)
     const idx: number[] = []
     for (let j = 0; j < n; j++)
       for (let i = 0; i < n; i++) {
-        const x = (i / sub) * CELL
-        const z = (j / sub) * CELL
+        const x = coord(i)
+        const z = coord(j)
         const k = (j * n + i) * 3
         pos[k] = x
+        // groundHeight clamps to the grid, so the apron sits level with the edge it extends.
         pos[k + 1] = track.groundHeight(x, z) - 0.06
         pos[k + 2] = z
         if (i < n - 1 && j < n - 1) {
@@ -95,5 +103,10 @@ export class Ground {
     m.frustumCulled = false
     this.hills = m
     this.mesh.parent?.add(m)
+    // The flat plane goes under the lowest ground there is, so it can never hide a dip. It is only
+    // there as a backstop now: the apron covers everything the camera can see.
+    let low = 0
+    for (const v of h) if (v < low) low = v
+    this.mesh.position.y = low - 4
   }
 }

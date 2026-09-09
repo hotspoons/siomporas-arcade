@@ -106,10 +106,19 @@ export const PALETTES: Record<string, Palette> = {
  */
 export let HUD_RETRO = 1
 
+/**
+ * 1 = draw the real meshes instead of their sprites, in the same places, at the same sizes, from the
+ * same angles — the models are real, the sprites are baked from them, and this is the comparison.
+ * Off by default: the sprite scaling *is* the game. Turning it on loads every model, which the atlas
+ * does not keep, so there is a pause the first time.
+ */
+export let MODELS_3D = 0
+
 export const RENDER_TUNE: TuneSection = {
   title: 'Render · camera, fog, road',
   keys: [
     tune('HUD_RETRO', () => HUD_RETRO, (v) => (HUD_RETRO = v), [0, 1], 1, 'draw the HUD inside the low-res buffer'),
+    tune('MODELS_3D', () => MODELS_3D, (v) => (MODELS_3D = v), [0, 1], 1, 'draw the real meshes instead of their sprites'),
     tune('FOV_DEG', () => FOV_DEG, (v) => (FOV_DEG = v)),
     tune('FOG_MODERN', () => FOG_MODERN, (v) => (FOG_MODERN = v)),
     tune('FOG_RETRO', () => FOG_RETRO, (v) => (FOG_RETRO = v)),

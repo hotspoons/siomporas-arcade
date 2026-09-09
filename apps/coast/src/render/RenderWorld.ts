@@ -42,13 +42,14 @@ import { COCKPIT_H, COCKPIT_W, Cockpit } from './Cockpit'
 import { Flames } from './Flames'
 import { HudLayer } from './HudLayer'
 import { Projection } from './Projection'
-import { BANK_ROLL, BANK_SLOPE, BANK_TIER_COUNT, BANK_TIER_H, BANK_TIER_W, BEACH_WIDTH, CAM_BOUNCE, TUNNEL_DARK, TUNNEL_HALF_WIDTH, TUNNEL_HEIGHT, HUD_RETRO, HORIZON_ROLL_SHARE, STEER_ROLL, CURVE_UNIT, FOG_MODERN, FOG_RETRO, HEADLIGHT_REACH, LANE_WIDTH, LIGHTS_OFF_AMBIENT, LOGICAL_HEIGHT, MAX_SPRITES, NIGHT_AMBIENT, PALETTES, RAIL_HEIGHT, RUMBLE_WIDTH, SHOULDER_WIDTH, VIEWS, type Palette } from './RenderTuning'
+import { MODELS_3D, BANK_ROLL, BANK_SLOPE, BANK_TIER_COUNT, BANK_TIER_H, BANK_TIER_W, BEACH_WIDTH, CAM_BOUNCE, TUNNEL_DARK, TUNNEL_HALF_WIDTH, TUNNEL_HEIGHT, HUD_RETRO, HORIZON_ROLL_SHARE, STEER_ROLL, CURVE_UNIT, FOG_MODERN, FOG_RETRO, HEADLIGHT_REACH, LANE_WIDTH, LIGHTS_OFF_AMBIENT, LOGICAL_HEIGHT, MAX_SPRITES, NIGHT_AMBIENT, PALETTES, RAIL_HEIGHT, RUMBLE_WIDTH, SHOULDER_WIDTH, VIEWS, type Palette } from './RenderTuning'
 import { LIVERIES } from './procgen'
 import { Rain } from './Rain'
 import type { Theme } from '../sim/Road'
 import { RoadMesh, bermLift, deckHalf } from './RoadMesh'
-import { SpriteAtlas } from './SpriteAtlas'
+import { DEFAULT_PITCH, SpriteAtlas } from './SpriteAtlas'
 import { SpriteBatch } from './SpriteBatch'
+import { ModelLayer } from './ModelLayer'
 
 export type ViewMode = keyof typeof VIEWS
 
@@ -59,11 +60,14 @@ const SCENE_FADE = 60
 export class RenderWorld {
   readonly renderer: WebGLRenderer
   readonly scene = new Scene()
-  readonly camera = new OrthographicCamera(0, 320, 224, 0, -10, 10)
+  // The z range is wide because the 3D-models layer stacks real geometry through it; everything
+  // else in this scene sits at z ~ 0 and is painted in order.
+  readonly camera = new OrthographicCamera(0, 320, 224, 0, -60000, 60000)
   readonly proj = new Projection()
   readonly atlas = new SpriteAtlas()
   readonly road = new RoadMesh()
   readonly sprites = new SpriteBatch(MAX_SPRITES)
+  readonly models = new ModelLayer()
   readonly flames = new Flames()
   readonly background = new Background()
   readonly cockpit = new Cockpit()
@@ -125,7 +129,7 @@ export class RenderWorld {
     this.renderer = new WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance', stencil: false, alpha: false })
     this.renderer.info.autoReset = false
     this.renderer.setClearColor(new Color(0x000000), 1)
-    this.inner.add(this.background.sky, this.background.clouds, this.background.far, this.background.near, this.road.mesh, this.flames.mesh, this.sprites.mesh)
+    this.inner.add(this.background.sky, this.background.clouds, this.background.far, this.background.near, this.road.mesh, this.flames.mesh, this.sprites.mesh, this.models.group)
     this.world.add(this.inner)
     this.scene.add(this.world, this.rain.mesh, this.cockpit.mesh, this.hudLayer.mesh)
     this.background.sky.renderOrder = 0
@@ -134,6 +138,8 @@ export class RenderWorld {
     this.background.near.renderOrder = 3
     this.road.mesh.renderOrder = 4
     this.sprites.mesh.renderOrder = 5
+    // Over the road like the sprites, and depth-sorted among themselves by their own z.
+    this.models.group.renderOrder = 5
     // Behind the car, over the road: the flames come out from under the tail.
     this.flames.mesh.renderOrder = 4
     this.rain.mesh.renderOrder = 6
@@ -555,6 +561,12 @@ export class RenderWorld {
     this.road.end()
 
     // Pass 3, far → near: scenery and traffic sprites.
+    // 3D models instead of sprites, when asked for and once they are in memory.
+    const use3D = MODELS_3D > 0.5
+    if (use3D && !this.models.ready) void this.models.load()
+    const solid = use3D && this.models.ready
+    this.models.group.visible = solid
+    this.models.begin(W, H)
     this.sprites.begin()
     const carOrder = this.carOrder
     carOrder.length = 0
@@ -593,11 +605,13 @@ export class RenderWorld {
           const tsx = sx + lat * sc
           // Roll comes between the rows too, so a car does not snap upright halfway through a bank.
           const roll = Math.atan(this.rowTilt[n] + (this.rowTilt[n + 1] - this.rowTilt[n]) * t)
-          if (frame) this.sprites.add(tsx, sy, frame.heightM * sc, frame, this.rowFog[n], this.brightAt((base + n) * SEG_LENGTH - camZ), Math.max(clip, this.deckWallTop(n, lat, tsx)), roll)
+          if (!frame) continue
+          if (solid && this.models.add(kind, tsx, sy, frame.heightM * sc, frame, viewYaw, viewPitch, roll)) continue
+          this.sprites.add(tsx, sy, frame.heightM * sc, frame, this.rowFog[n], this.brightAt((base + n) * SEG_LENGTH - camZ), Math.max(clip, this.deckWallTop(n, lat, tsx)), roll)
         }
       }
       if (seg.runway || base + n < 0) continue
-      this.drawSegmentSprites(seg, n, clip, this.brightAt((base + n) * SEG_LENGTH - camZ))
+      this.drawSegmentSprites(seg, n, clip, this.brightAt((base + n) * SEG_LENGTH - camZ), solid)
     }
     // Player car.
     if (view.drawPlayer) {
@@ -628,7 +642,9 @@ export class RenderWorld {
       }
       const carX = W / 2 + curr.steer * 2
       const carSize = frame ? frame.heightM * scale * squash : 0
-      if (frame) this.sprites.add(carX, py + hop, carSize, frame, 0, 1, -1e9, Math.atan(this.rowTilt[1]))
+      const heroRoll = Math.atan(this.rowTilt[1])
+      if (frame && !(solid && this.models.add(this.heroKind, carX, py + hop, carSize, frame, yaw, DEFAULT_PITCH, heroRoll)))
+        this.sprites.add(carX, py + hop, carSize, frame, 0, 1, -1e9, heroRoll)
       // Afterburner: boost lit and the throttle down, and not while the car is a wreck.
       this.flames.update(carX, py + hop, carSize, frame, Math.atan(this.rowTilt[1]), curr.hud.turboActive && curr.throttle > 0.1 && curr.crashT <= 0, dt)
     }
@@ -637,6 +653,7 @@ export class RenderWorld {
       if (f) this.sprites.add(W / 2, H * 0.12, H * 0.75, f, 0, 1, -1e9)
     }
     this.sprites.end()
+    this.models.end()
 
     // Background parallax and horizon.
     const slopeAhead = stage.heightAt(z + 60) - groundY
@@ -669,7 +686,7 @@ export class RenderWorld {
     return 1 + (dark - 1) * nightAmt
   }
 
-  private drawSegmentSprites(seg: Segment, n: number, clip: number, bright: number): void {
+  private drawSegmentSprites(seg: Segment, n: number, clip: number, bright: number, solid = false): void {
     const sc = this.rowScale[n]
     for (const sp of seg.sprites) {
       const frame = this.atlas.frame(sp.kind)
@@ -682,7 +699,9 @@ export class RenderWorld {
       // everything roadside to a cut-out instead, and blends in as the sun goes down.
       const lit = sp.kind.startsWith('sign') || sp.kind.startsWith('tower') || sp.kind === 'diner' || sp.kind === 'motel' || sp.kind === 'gas' || sp.kind === 'arch' ? Math.max(bright, 0.85) : bright
       const glow = this.silAmt > 0.01 ? lit + (0.04 - lit) * this.silAmt : lit
-      this.sprites.add(sx, sy, frame.heightM * sp.scale * sc, frame, this.rowFog[n], glow, clipHere)
+      const h = frame.heightM * sp.scale * sc
+      if (solid && this.models.add(sp.kind, sx, sy, h, frame, 0, DEFAULT_PITCH, 0)) continue
+      this.sprites.add(sx, sy, h, frame, this.rowFog[n], glow, clipHere)
     }
   }
 

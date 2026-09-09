@@ -29,6 +29,12 @@ export interface SpriteFrame {
    * shape or the bake changes lens.
    */
   exhausts?: { pipes: [number, number][]; perMetre: number }
+  /**
+   * How much bigger the near end of the model is than its centre plane, through the bake's lens.
+   * A sprite carries that magnification baked in; anything drawing the mesh itself flat has to put
+   * it back or the model comes out smaller than the sprite it replaces.
+   */
+  nearMag: number
 }
 
 export interface SpriteKind {
@@ -311,6 +317,7 @@ export class SpriteAtlas {
           heightM: half * 2,
           baseline: 0.5 - fs.y / 2 / (half * 2) - ((Math.sin(pitch) * projD) / 2 / (half * 2)) * 0.5,
           exhausts,
+          nearMag: half / subject,
         })
       }
       this.kinds.set(def.kind, { def, frames, yaws: def.yaws, pitches })

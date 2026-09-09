@@ -1,6 +1,8 @@
 // Local leaderboards and best-run input tapes, per course, in localStorage.
 // Tapes are stored base64-packed so a 10-minute run is ~100 KB.
 
+import { STEER_VERSION } from './Settings'
+
 export interface RecordEntry {
   name: string
   score: number
@@ -14,7 +16,7 @@ export interface RecordEntry {
 
 interface CourseRecords {
   entries: RecordEntry[]
-  bestTape?: { seed: number; tape: string; score: number; steering?: number }
+  bestTape?: { seed: number; tape: string; score: number; steering?: number; steerV?: number }
 }
 
 const KEY = 'apex-conduit.records.v1'
@@ -39,7 +41,7 @@ export class Records {
     rec.entries.length = Math.min(rec.entries.length, MAX_ENTRIES)
     const isBest = rank === 1 && entry.score > 0
     // The tape only replays faithfully under the steering speed it was driven with, so keep that too.
-    if (isBest || !rec.bestTape) rec.bestTape = { seed: entry.seed, tape: packTape(tape), score: entry.score, steering }
+    if (isBest || !rec.bestTape) rec.bestTape = { seed: entry.seed, tape: packTape(tape), score: entry.score, steering, steerV: STEER_VERSION }
     save(this.data)
     return { rank: rank <= MAX_ENTRIES ? rank : 0, isBest }
   }
@@ -47,7 +49,11 @@ export class Records {
   bestTape(courseId: string): { seed: number; tape: Int32Array; steering: number } | null {
     const t = this.data[courseId]?.bestTape
     if (!t) return null
-    return { seed: t.seed, tape: unpackTape(t.tape), steering: t.steering ?? 1 }
+    // A tape only replays faithfully under the steering speed it was driven with — and that number is a
+    // multiplier on a base rate that has since doubled, so an older tape's multiplier is halved to mean
+    // the same thing it meant when it was recorded.
+    const scale = (t.steerV ?? 1) < STEER_VERSION ? 0.5 : 1
+    return { seed: t.seed, tape: unpackTape(t.tape), steering: (t.steering ?? 1) * scale }
   }
 
   clear(): void {

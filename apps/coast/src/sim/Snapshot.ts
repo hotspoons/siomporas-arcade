@@ -14,6 +14,8 @@ export class Snapshot {
   maxSpeed = 1
   /** Visual steer -1..1 (for the car sprite frame / wheel). */
   steer = 0
+  /** How hard the throttle is down, 0..1 — the exhaust flames only burn while it is. */
+  throttle = 0
   /** Tumble progress 0..1 while crashed. */
   crashT = 0
   /** The current crash is a full wreck (head-on / side impact): long roll. */

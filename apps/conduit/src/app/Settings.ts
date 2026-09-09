@@ -11,6 +11,9 @@ export type StyleName = 'modern' | 'retro'
 export type ComfortPreset = 'intense' | 'standard' | 'maximum'
 export type RetroPresentHz = 20 | 30 | 60 | 0
 
+/** Bump when the steering scale is redefined, so a saved multiplier is not read against a new base. */
+export const STEER_VERSION = 2
+
 export interface SettingsData {
   /** Bindings migration version (see the constructor). */
   keysV?: number
@@ -40,6 +43,8 @@ export interface SettingsData {
   visualSpeedGain: number
   /** Steering speed, 1 = the original feel. */
   steering: number
+  /** Which steering scale `steering` was saved against (see STEER_VERSION). */
+  steerV?: number
   showPerf: boolean
   playerName: string
 }
@@ -72,7 +77,8 @@ export const DEFAULT_SETTINGS: SettingsData = {
   tiltInvert: false,
   access: { reducedMotion: false, colorblind: 'none', hudScale: 1 },
   visualSpeedGain: 1,
-  steering: 1.5,
+  steering: 1,
+  steerV: STEER_VERSION,
   showPerf: false,
   playerName: 'ACE',
 }
@@ -81,6 +87,7 @@ export class Settings extends SettingsStore<SettingsData> {
   constructor() {
     const stored = SettingsStore.hasStored(KEY)
     const savedKeysV = Number(SettingsStore.stored(KEY)?.keysV ?? 0)
+    const savedSteerV = Number(SettingsStore.stored(KEY)?.steerV ?? 0)
     super(KEY, DEFAULT_SETTINGS)
     // Bindings are saved per browser, so aliases added later (P for pause, say) never reached anyone
     // who had already played. Merge in any default key an action is missing, once. The version comes
@@ -88,6 +95,14 @@ export class Settings extends SettingsStore<SettingsData> {
     if (savedKeysV < KEYS_VERSION) {
       mergeMissingKeys(this.data.keys, DEFAULT_KEYS)
       this.data.keysV = KEYS_VERSION
+      this.save()
+    }
+    // The steering multiplier is read against a base rate that has changed: a 1.5 saved against the old
+    // one would be half as fast again as intended. Put it back to the standard rate rather than
+    // guessing what the player meant by a number that no longer means the same thing.
+    if (savedSteerV < STEER_VERSION) {
+      this.data.steering = DEFAULT_SETTINGS.steering
+      this.data.steerV = STEER_VERSION
       this.save()
     }
     // First run on a phone: keep the look, drop the expensive passes.

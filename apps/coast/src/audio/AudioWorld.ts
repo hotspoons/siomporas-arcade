@@ -34,6 +34,12 @@ export class AudioWorld {
   private sfxBus!: GainNode
   private musicBus!: GainNode
   private engineOscs: OscillatorNode[] = []
+  private boostFilter!: BiquadFilterNode
+  private boostGain!: GainNode
+  private whine!: OscillatorNode
+  private whineGain!: GainNode
+  /** How far into the current boost we are, for the sweep. */
+  private boostAge = 0
   private engineFilter!: BiquadFilterNode
   private screechGain!: GainNode
   private noiseBuffer!: AudioBuffer
@@ -95,6 +101,26 @@ export class AudioWorld {
     this.screechGain.gain.value = 0
     src.connect(bp).connect(this.screechGain).connect(this.sfxBus)
     src.start()
+    // Boost: air, not engine. A loop of noise swept up through a bandpass with a turbine whine over
+    // it, held open while a boost runs — the whoosh you hear from the intake, over the top of the revs.
+    const air = ctx.createBufferSource()
+    air.buffer = this.noiseBuffer
+    air.loop = true
+    this.boostFilter = ctx.createBiquadFilter()
+    this.boostFilter.type = 'bandpass'
+    this.boostFilter.frequency.value = 500
+    this.boostFilter.Q.value = 1.4
+    this.boostGain = ctx.createGain()
+    this.boostGain.gain.value = 0
+    air.connect(this.boostFilter).connect(this.boostGain).connect(this.sfxBus)
+    air.start()
+    this.whine = ctx.createOscillator()
+    this.whine.type = 'sawtooth'
+    this.whine.frequency.value = 900
+    this.whineGain = ctx.createGain()
+    this.whineGain.gain.value = 0
+    this.whine.connect(this.whineGain).connect(this.boostGain)
+    this.whine.start()
     this.nextBeat = ctx.currentTime + 0.1
     this.applyVolumes()
   }
@@ -129,9 +155,20 @@ export class AudioWorld {
     const now = ctx.currentTime
     // Two-speed box: the note follows the tacho, a touch deeper in LO.
     const r = snap.speed / snap.maxSpeed
+    // The rev counter runs past its redline on boost, and the note goes with it: an engine being asked
+    // for more than it has is the point of a boost, and it should be the loudest thing about it.
     const hz = 55 + snap.hud.rpm * 185 + snap.hud.gear * 18
     for (const o of this.engineOscs) o.frequency.setTargetAtTime(hz, now, 0.05)
     this.engineFilter.frequency.setTargetAtTime(500 + r * 2200 + (snap.hud.turboActive ? 1500 : 0), now, 0.08)
+    const boosting = snap.hud.turboActive
+    this.boostAge = boosting ? this.boostAge + 1 / 60 : 0
+    if (this.boostGain) {
+      this.boostGain.gain.setTargetAtTime(boosting ? 0.5 : 0, now, boosting ? 0.08 : 0.35)
+      // Sweeping up while it runs, so a long boost keeps rising instead of sitting on one note.
+      this.boostFilter.frequency.setTargetAtTime(boosting ? 420 + Math.min(1, this.boostAge / 5) * 2600 : 420, now, 0.2)
+      this.whineGain.gain.setTargetAtTime(boosting ? 0.06 : 0, now, 0.15)
+      this.whine.frequency.setTargetAtTime(boosting ? 760 + Math.min(1, this.boostAge / 5) * 900 + r * 300 : 760, now, 0.2)
+    }
     this.screechGain.gain.setTargetAtTime(sliding ? 0.2 : 0, now, 0.05)
     const st = STATIONS[this.station] ?? STATIONS[0]
     const beatLen = 60 / st.bpm / 2

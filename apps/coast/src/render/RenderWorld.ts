@@ -39,6 +39,7 @@ function nearestYaw(yaw: number): number {
 }
 import { Background } from './Background'
 import { COCKPIT_H, COCKPIT_W, Cockpit } from './Cockpit'
+import { Flames } from './Flames'
 import { HudLayer } from './HudLayer'
 import { Projection } from './Projection'
 import { BANK_ROLL, BANK_SLOPE, BANK_TIER_COUNT, BANK_TIER_H, BANK_TIER_W, BEACH_WIDTH, CAM_BOUNCE, TUNNEL_DARK, TUNNEL_HALF_WIDTH, TUNNEL_HEIGHT, HUD_RETRO, HORIZON_ROLL_SHARE, STEER_ROLL, CURVE_UNIT, FOG_MODERN, FOG_RETRO, HEADLIGHT_REACH, LANE_WIDTH, LIGHTS_OFF_AMBIENT, LOGICAL_HEIGHT, MAX_SPRITES, NIGHT_AMBIENT, PALETTES, RAIL_HEIGHT, RUMBLE_WIDTH, SHOULDER_WIDTH, VIEWS, type Palette } from './RenderTuning'
@@ -63,6 +64,7 @@ export class RenderWorld {
   readonly atlas = new SpriteAtlas()
   readonly road = new RoadMesh()
   readonly sprites = new SpriteBatch(MAX_SPRITES)
+  readonly flames = new Flames()
   readonly background = new Background()
   readonly cockpit = new Cockpit()
   readonly rain = new Rain()
@@ -123,7 +125,7 @@ export class RenderWorld {
     this.renderer = new WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance', stencil: false, alpha: false })
     this.renderer.info.autoReset = false
     this.renderer.setClearColor(new Color(0x000000), 1)
-    this.inner.add(this.background.sky, this.background.clouds, this.background.far, this.background.near, this.road.mesh, this.sprites.mesh)
+    this.inner.add(this.background.sky, this.background.clouds, this.background.far, this.background.near, this.road.mesh, this.flames.mesh, this.sprites.mesh)
     this.world.add(this.inner)
     this.scene.add(this.world, this.rain.mesh, this.cockpit.mesh, this.hudLayer.mesh)
     this.background.sky.renderOrder = 0
@@ -132,6 +134,8 @@ export class RenderWorld {
     this.background.near.renderOrder = 3
     this.road.mesh.renderOrder = 4
     this.sprites.mesh.renderOrder = 5
+    // Behind the car, over the road: the flames come out from under the tail.
+    this.flames.mesh.renderOrder = 4
     this.rain.mesh.renderOrder = 6
     this.cockpit.mesh.renderOrder = 7
     this.hudLayer.mesh.renderOrder = 8
@@ -570,7 +574,12 @@ export class RenderWorld {
           const t = (cz - zStart) / SEG_LENGTH
           const sc = this.rowScale[n] + (this.rowScale[n + 1] - this.rowScale[n]) * t
           const sx = this.rowX[n] + (this.rowX[n + 1] - this.rowX[n]) * t
-          const sy = this.rowY[n] + (this.rowY[n + 1] - this.rowY[n]) * t + this.tiltLift(n, curr.trafficX[ci] * ROAD_HALF_WIDTH)
+          // Every part of the sprite's position is read between the two rows it sits between, the bank
+          // lift included. Taking the lift from the near row alone made a car hop each time it crossed
+          // a row boundary — a bobbing that got comical on a banked turn, where the lift is metres.
+          const lat = curr.trafficX[ci] * ROAD_HALF_WIDTH
+          const lift0 = this.tiltLift(n, lat)
+          const sy = this.rowY[n] + (this.rowY[n + 1] - this.rowY[n]) * t + lift0 + (this.tiltLift(n + 1, lat) - lift0) * t
           const kind = TRAFFIC_KINDS[curr.trafficKind[ci]]
           const yaw = curr.trafficYaw[ci]
           // Pose from the real view geometry: how far off to the side the car sits versus how far ahead
@@ -581,8 +590,10 @@ export class RenderWorld {
           const viewYaw = yaw === 0 ? (Math.atan2((curr.trafficX[ci] - x) * ROAD_HALF_WIDTH, dz) * 180) / Math.PI : yaw
           const viewPitch = (view.drawPlayer ? 9 : 2) + (Math.atan2(camY - stage.heightAt(cz), dz) * 180) / Math.PI
           const frame = this.atlas.frame(kind, viewYaw, viewPitch)
-          const tsx = sx + curr.trafficX[ci] * ROAD_HALF_WIDTH * sc
-          if (frame) this.sprites.add(tsx, sy, frame.heightM * sc, frame, this.rowFog[n], this.brightAt((base + n) * SEG_LENGTH - camZ), Math.max(clip, this.deckWallTop(n, curr.trafficX[ci] * ROAD_HALF_WIDTH, tsx)), Math.atan(this.rowTilt[n]))
+          const tsx = sx + lat * sc
+          // Roll comes between the rows too, so a car does not snap upright halfway through a bank.
+          const roll = Math.atan(this.rowTilt[n] + (this.rowTilt[n + 1] - this.rowTilt[n]) * t)
+          if (frame) this.sprites.add(tsx, sy, frame.heightM * sc, frame, this.rowFog[n], this.brightAt((base + n) * SEG_LENGTH - camZ), Math.max(clip, this.deckWallTop(n, lat, tsx)), roll)
         }
       }
       if (seg.runway || base + n < 0) continue
@@ -615,7 +626,11 @@ export class RenderWorld {
           squash = 0.62
         }
       }
-      if (frame) this.sprites.add(W / 2 + curr.steer * 2, py + hop, frame.heightM * scale * squash, frame, 0, 1, -1e9, Math.atan(this.rowTilt[1]))
+      const carX = W / 2 + curr.steer * 2
+      const carSize = frame ? frame.heightM * scale * squash : 0
+      if (frame) this.sprites.add(carX, py + hop, carSize, frame, 0, 1, -1e9, Math.atan(this.rowTilt[1]))
+      // Afterburner: boost lit and the throttle down, and not while the car is a wreck.
+      this.flames.update(carX, py + hop, carSize, curr.hud.turboActive && curr.throttle > 0.1 && curr.crashT <= 0, dt)
     }
     if (this.previewKind) {
       const f = this.atlas.frame(this.previewKind, this.previewYaw)

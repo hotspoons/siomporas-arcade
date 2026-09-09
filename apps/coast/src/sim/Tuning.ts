@@ -26,8 +26,18 @@ export let BAND_SEGMENTS = 2
 export const ROLL_AMPLITUDE = 3.2
 
 // --- player ---
-export let MAX_SPEED_HI = 96
-export let MAX_SPEED_LO = 62
+/**
+ * Speeds are metres per second: what the world actually moves at. Flat out in the automatic — which
+ * is what most runs use — the car covers ground at about 240 mph, and about 300 mph with a boost lit.
+ * That is the sensation the game is after, and is why the road tears past the way it does. The manual
+ * box goes faster still, which is the whole reason to shift for yourself.
+ *
+ * The speedo does not say that, because an arcade speedo never did: SPEEDO_SCALE reads it back at
+ * about 220 and 275 mph. Change the numbers here to change how the game feels; change SPEEDO_SCALE
+ * to change what the dial claims.
+ */
+export let MAX_SPEED_HI = 115
+export let MAX_SPEED_LO = 74
 export let ACCEL_HI = 12
 export let ACCEL_LO = 21
 export let BRAKE_DECEL = 34
@@ -39,14 +49,23 @@ export let AIR_KICK = 2
 export let AIR_MIN_SPEED = 55
 export let OFFROAD_MAX_SPEED = 26
 export let OFFROAD_DECEL = 40
+/**
+ * What the speedo reads, as a fraction of the truth. The car really does around 240 mph flat out and
+ * 300 with a boost; the dial shows 220 and 275, which is the number that belongs on an arcade dash.
+ */
+export let SPEEDO_SCALE = 0.917
+
+/** How far past the redline a boost may wind the engine. 1 = never. */
+export let REV_LIMIT = 1.3
+
 /** Steering: road widths per second at max speed, full lock. */
 export let STEER_RATE = 1.9
 /** Centrifugal push per unit curve per (speed/max)², road widths per second. */
 export let CENTRIFUGAL = 0.36
 export const CAR_HALF_WIDTH_ROAD = 0.11 // in road widths (~1.9 m)
 /** Turbo: extra acceleration, extra top speed, duration, recharge. */
-export let TURBO_ACCEL = 28
-export let TURBO_TOP = 14
+export let TURBO_ACCEL = 34
+export let TURBO_TOP = 29
 /** How long one boost lasts, seconds. */
 export let TURBO_TIME = 7
 /** Boosts you carry. */
@@ -100,6 +119,8 @@ export const SIM_TUNE: TuneSection = {
   title: 'Sim · speed, handling, clock',
   keys: [
     tune('MAX_SPEED_HI', () => MAX_SPEED_HI, (v) => (MAX_SPEED_HI = v)),
+    tune('SPEEDO_SCALE', () => SPEEDO_SCALE, (v) => (SPEEDO_SCALE = v), [0.5, 1.5], 0.01, 'what the dial reads, as a fraction of the truth'),
+    tune('REV_LIMIT', () => REV_LIMIT, (v) => (REV_LIMIT = v), [1, 1.6], 0.05, 'how far past the redline a boost winds it'),
     tune('MAX_SPEED_LO', () => MAX_SPEED_LO, (v) => (MAX_SPEED_LO = v)),
     tune('ACCEL_HI', () => ACCEL_HI, (v) => (ACCEL_HI = v)),
     tune('ACCEL_LO', () => ACCEL_LO, (v) => (ACCEL_LO = v)),

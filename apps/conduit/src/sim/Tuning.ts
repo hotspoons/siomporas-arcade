@@ -32,12 +32,12 @@ export const BOOST_DECAY = 30
 
 // --- steering (theta = angle around the tube) --------------------------------
 /** rad/s² of theta acceleration at SPEED_CRUISE in a default-radius tube. */
-export let THETA_ACCEL = 9.0
+export let THETA_ACCEL = 18.0
 export let THETA_DAMP = 6.0
 /** Steering authority multiplier at SPEED_MAX. Never 0: still nimble. */
 export let THETA_SPEED_FALLOFF = 0.55
 /** Hard cap on angular rate so a wide tube can't be lapped in a blink. */
-export let THETA_VEL_MAX = 3.4
+export let THETA_VEL_MAX = 6.8
 /** rad of craft roll into a turn, for the chase view. */
 export let BANK_VISUAL_MAX = 0.6
 /** How fast the visual bank follows theta velocity. */

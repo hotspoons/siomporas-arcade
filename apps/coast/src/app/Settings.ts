@@ -46,7 +46,7 @@ export const DEFAULT_SETTINGS: SettingsData = {
   keys: DEFAULT_KEYS,
   pad: DEFAULT_PAD,
   view: 'chase',
-  gearbox: 'manual',
+  gearbox: 'auto',
   car: 'rosso',
   station: 0,
   startStage: 'A',

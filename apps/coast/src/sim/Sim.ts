@@ -51,6 +51,8 @@ export class Sim {
   /** Boosts in hand, out of TURBO_SLOTS. */
   turbo = 0
   turboTimer = 0
+  /** Throttle as of this tick, for anything downstream that cares (the exhaust flames do). */
+  throttle = 0
   /** The score at which the next boost is earned back. */
   private nextTurboAt = 0
   crashTimer = 0
@@ -198,6 +200,7 @@ export class Sim {
   }
 
   tick(dt: number, input: InputFrame, out: Snapshot): void {
+    this.throttle = input.throttle
     if (this.phase === 'driving' || this.phase === 'crashed') {
       this.time += dt
       this.tickCount++
@@ -506,6 +509,7 @@ export class Sim {
     out.speed = this.speed
     out.maxSpeed = this.maxSpeed
     out.steer = this.steerVisual
+    out.throttle = this.throttle
     out.crashT = this.phase === 'crashed' ? 1 - this.crashTimer / (this.wreck ? T.WRECK_TIME : T.CRASH_TIME) : 0
     out.wreck = this.phase === 'crashed' && this.wreck
     out.wipersOn = this.wipersOn
@@ -520,9 +524,13 @@ export class Sim {
     h.time = this.timeLeft
     h.score = Math.floor(this.score)
     h.gear = this.gear
-    // Tacho for a two-speed box: LO sweeps the band to its limit; HI picks up around a third and runs to the top.
+    // Tacho for a two-speed box: LO sweeps the band to its limit; HI picks up around a third and runs to
+    // the top. The band is the gear's own limit, not the boosted one, so a boost pushes the needle past
+    // the redline — over-revving, which is what a boost is, and what the engine note follows.
     const loTop = T.MAX_SPEED_LO * (this.automatic ? T.AUTO_TOP_FACTOR : 1)
-    h.rpm = this.speed < 0.3 ? 0.1 : this.gear === 0 ? Math.min(1, 0.12 + (this.speed / loTop) * 0.88) : Math.max(0.15, Math.min(1, 0.12 + ((this.speed - loTop * 0.3) / (this.maxSpeed - loTop * 0.3)) * 0.88))
+    const hiTop = T.MAX_SPEED_HI * (this.automatic ? T.AUTO_TOP_FACTOR : 1)
+    const band = this.gear === 0 ? 0.12 + (this.speed / loTop) * 0.88 : 0.12 + ((this.speed - loTop * 0.3) / (hiTop - loTop * 0.3)) * 0.88
+    h.rpm = this.speed < 0.3 ? 0.1 : Math.max(0.15, Math.min(T.REV_LIMIT, band))
     h.turbo = this.turbo
     h.turboMax = T.TURBO_SLOTS
     h.turboActive = this.turboTimer > 0
@@ -530,7 +538,7 @@ export class Sim {
     h.stagesTotal = this.world.routeLength(this.startId)
     h.wipers = this.wipersOn
     h.lights = this.lightsOn
-    h.speedKmh = this.speed * 3.6
+    h.speedKmh = this.speed * 3.6 * T.SPEEDO_SCALE
     h.checkpointFlash = this.checkpointFlash
     h.route = this.route.join(' › ')
     let n = 0

@@ -160,11 +160,11 @@ export function buildMenus(game: Game) {
       {
         kind: 'slider',
         label: 'Steering speed',
-        hint: '100% is the original feel; 150% is the new default',
+        hint: '100% is the standard rate; the original game was half of it',
         min: 50,
         max: 250,
         step: 10,
-        get: () => Math.round((s().steering ?? 1.5) * 100),
+        get: () => Math.round((s().steering ?? 1) * 100),
         set: (v) => {
           set((d) => (d.steering = v / 100))
           game.applyHandling()

@@ -52,7 +52,7 @@ export type VehicleEvent = 'none' | 'launched' | 'landed' | 'crashed' | 'fell'
 
 export class Vehicle {
   /** Steering speed multiplier from the options (1 = the original feel; default 1.5). Scales response and the rate cap alike. */
-  steerScale = 1.5
+  steerScale = 1
   // --- track-space state ---
   s = 0
   theta = 0

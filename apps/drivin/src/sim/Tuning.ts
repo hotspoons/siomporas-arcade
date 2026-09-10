@@ -98,6 +98,15 @@ export let LAND_TOLERANCE = 1.2
 export let LAND_MIN_ALIGN = 0.35
 /** Impact speed into a surface (m/s) that wrecks the car. */
 export let CRASH_IMPACT_SPEED = 30
+/**
+ * A step up onto a road that the car simply drives up rather than hits. Ground is graded to meet the
+ * roads, but a join is never exact — a banked deck's edge, a ramp's lip, the last few centimetres of
+ * a slope — and treating those centimetres as a wall is what turns a smooth transition into a place
+ * you get stuck against nothing.
+ */
+export let CLIMB_STEP = 0.7
+/** Above this much clearance overhead, a flat deck is something to drive under rather than into. */
+export let DECK_CLEARANCE = 1.4
 /** Below this world height you are gone. */
 export const FALL_LIMIT = -30
 /** How many seconds of poses the crash replay keeps. */
@@ -139,6 +148,8 @@ export const SIM_TUNE: TuneSection = {
     tune('LAND_TOLERANCE', () => LAND_TOLERANCE, (v) => (LAND_TOLERANCE = v)),
     tune('LAND_MIN_ALIGN', () => LAND_MIN_ALIGN, (v) => (LAND_MIN_ALIGN = v)),
     tune('CRASH_IMPACT_SPEED', () => CRASH_IMPACT_SPEED, (v) => (CRASH_IMPACT_SPEED = v)),
+    tune('CLIMB_STEP', () => CLIMB_STEP, (v) => (CLIMB_STEP = v), [0, 2], 0.05, 'step up onto a road the car drives up instead of hitting'),
+    tune('DECK_CLEARANCE', () => DECK_CLEARANCE, (v) => (DECK_CLEARANCE = v), [0.5, 4], 0.1, 'headroom above which a deck is something to drive under'),
     tune('REPLAY_PLAY_SECONDS', () => REPLAY_PLAY_SECONDS, (v) => (REPLAY_PLAY_SECONDS = v)),
     tune('SEGMENT_PENALTY', () => SEGMENT_PENALTY, (v) => (SEGMENT_PENALTY = v)),
     tune('RESET_PENALTY', () => RESET_PENALTY, (v) => (RESET_PENALTY = v), [0, 20], 1),

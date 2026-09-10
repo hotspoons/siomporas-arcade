@@ -27,7 +27,9 @@ import {
   PILLAR_SPACING,
   CAR_HALF_WIDTH,
   CAR_RIDE,
+  CLIMB_STEP,
   CRASH_IMPACT_SPEED,
+  DECK_CLEARANCE,
   CURB_SLOW,
   CURB_WIDTH,
   DRAG_AERO,
@@ -50,6 +52,7 @@ import {
   STEER_RATE,
 } from './Tuning'
 import type { CarMode } from './Snapshot'
+
 
 export type CarEvent = 'none' | 'launch' | 'land' | 'crash' | 'offroad' | 'onroad' | 'lost' | 'curb' | 'bump' | 'rocket'
 
@@ -709,7 +712,9 @@ export class Car {
     for (const lane of lanes) {
       lane.table.project(this.pos, this.scratch, this.hit)
       const h = this.hit
-      if (!this.scratch.surface || h.over > 0.5 || Math.abs(h.x) > ROAD_HALF_WIDTH || Math.abs(h.h) > 1.2) continue
+      // Out to the curb, the same width the car is allowed to use once it is on the road: rejoining
+      // only inside the white line leaves a metre of drivable deck you get shoved off.
+      if (!this.scratch.surface || h.over > 0.5 || Math.abs(h.x) > ROAD_HALF_WIDTH + CURB_WIDTH || Math.abs(h.h) > 1.2) continue
       if (this.scratch.up.y < 0.75) continue
       // Only rejoin a lane you are roughly driving along, never one you're crossing.
       if (this.forward.dot(this.scratch.tan) * Math.sign(v || 1) < 0.5) continue
@@ -733,17 +738,42 @@ export class Car {
       lane.table.project(this.pos, this.scratch, this.hit)
       const f = this.scratch
       if (!f.surface || this.hit.over > 0.5) continue
-      const lean = Math.hypot(f.right.x, f.right.z)
-      const dx = this.pos.x - f.pos.x
-      const dz = this.pos.z - f.pos.z
-      const across = lean > 1e-3 ? Math.abs((dx * f.right.x + dz * f.right.z) / lean) : Math.hypot(dx, dz)
-      const rise = f.pos.y - this.pos.y
-      if (across > (ROAD_HALF_WIDTH + CURB_WIDTH) * Math.max(lean, 0.3) + CAR_HALF_WIDTH) continue
+      const { across, rise, inside } = this.deckAgainst(f, this.hit)
+      if (!inside) continue
       const type = this.track.data.pieces[lane.pieceIndex]?.type ?? `link (lane ${lane.id})`
       detail = ` — ${type} piece ${lane.pieceIndex}, ${rise >= 0 ? 'up' : 'down'} ${Math.abs(rise).toFixed(2)} m, ${across.toFixed(2)} m across`
       break
     }
     return what + detail
+  }
+
+  /**
+   * Where a lane's deck is in relation to the car, measured where the deck actually is rather than in
+   * its own leaning frame.
+   *
+   * `across` is the footprint looking down — how far to the side of the deck's centre line the car
+   * stands, in ground metres, since a banked deck covers less ground than it is wide. `inside` is
+   * whether the car's box overlaps that footprint at all.
+   *
+   * `rise` is how far the deck stands above the car *at the car's own lateral offset*, clamped to the
+   * deck's edge so the surface is never extrapolated out over the grass. That clamp is the whole
+   * point: a bank's centre line can be a metre up while the edge you are standing beside is half a
+   * metre down, and measuring against the centre line reports a road overhead that is really under
+   * your wheels.
+   */
+  private deckAgainst(f: LaneFrame, h: LaneHit): { across: number; rise: number; inside: boolean; grounded: boolean } {
+    const edge = ROAD_HALF_WIDTH + CURB_WIDTH
+    const lean = Math.hypot(f.right.x, f.right.z)
+    const dx = this.pos.x - f.pos.x
+    const dz = this.pos.z - f.pos.z
+    const across = lean > 1e-3 ? Math.abs((dx * f.right.x + dz * f.right.z) / lean) : Math.hypot(dx, dz)
+    const deckY = f.pos.y + clamp(h.x, -edge, edge) * f.right.y
+    // Whether this thing comes down to the ground where you are standing. A berm's low edge is in the
+    // earth and everything under it is earth too; a bridge's edges are both up in the air and you
+    // drive under it. Without the distinction a bank is a wall you can drive through, or an elevated
+    // road is solid to the ground.
+    const grounded = f.pos.y - Math.abs(f.right.y) * edge - this.pos.y < CLIMB_STEP
+    return { across, rise: deckY - this.pos.y, inside: across <= edge * Math.max(lean, 0.3) + CAR_HALF_WIDTH, grounded }
   }
 
   /**
@@ -770,19 +800,11 @@ export class Car {
         }
         continue
       }
-      // Both of these were measured in the lane's own frame, which is fine for road lying flat and wrong
-      // for anything banked: the frame leans out over the grass, so a car driving comfortably past an
-      // embankment fell inside the band, and the along-the-normal height made a steep deck solid for ten
-      // metres underneath itself. Hence crashing into an embankment thirty feet away, with nothing there.
-      // Measure the structure where it actually is: its footprint looking down, and its height straight up.
-      const lean = Math.hypot(f.right.x, f.right.z)
-      const dx = this.pos.x - f.pos.x
-      const dz = this.pos.z - f.pos.z
-      const across = lean > 1e-3 ? Math.abs((dx * f.right.x + dz * f.right.z) / lean) : Math.hypot(dx, dz)
-      // How far the surface stands above the car: within the body's height it is something you hit, well
-      // above it is a bridge or the high side of a bank to drive under, below it is behind you.
-      const rise = f.pos.y - this.pos.y
-      if (across <= (ROAD_HALF_WIDTH + CURB_WIDTH) * Math.max(lean, 0.3) + CAR_HALF_WIDTH && rise > -0.3 && rise < 1.4)
+      const { rise, inside, grounded } = this.deckAgainst(f, h)
+      // A wall when the deck stands over the car and reaches the ground beside it — the earth of a
+      // berm, the side of a ramp — and, when it does not reach the ground, only up to the height a
+      // bonnet fits under. Above that it is a bridge to drive beneath.
+      if (inside && rise > CLIMB_STEP && (grounded || rise < DECK_CLEARANCE))
         return f.up.y < 0.95 ? 'the embankment' : `the underside of the ${this.track.data.pieces[lane.pieceIndex]?.type ?? 'road'}`
       const clearance = f.pos.y - 0.4
       if (clearance >= 1.5 && f.up.y >= 0.7 && ax < PILLAR_SIDE + 3) {
@@ -807,7 +829,12 @@ export class Car {
   private hitsScenery(): string {
     const m = CAR_HALF_WIDTH
     for (const s of this.track.solids) {
-      if (Math.abs(this.pos.x - s.x) < s.hw + m && Math.abs(this.pos.z - s.z) < s.hh + m) return s.kind === 'trunk' ? 'a tree' : s.kind === 'wall' ? 'a building' : s.kind === 'post' ? 'a canopy post' : 'a fuel pump'
+      if (Math.abs(this.pos.x - s.x) >= s.hw + m || Math.abs(this.pos.z - s.z) >= s.hh + m) continue
+      // A solid stands on the ground where it is planted, and it is only in the way while the car is
+      // beside it: over the roof of it, or well under its floor, there is nothing there to hit.
+      const base = this.track.groundHeight(s.x, s.z)
+      if (this.pos.y > base + s.height || this.pos.y < base - 4) continue
+      return s.kind === 'trunk' ? 'a tree' : s.kind === 'wall' ? 'a building' : s.kind === 'post' ? 'a canopy post' : 'a fuel pump'
     }
     return ''
   }

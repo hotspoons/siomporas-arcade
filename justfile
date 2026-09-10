@@ -28,6 +28,7 @@ preview app="conduit":
 
 # lint (oxlint) + typecheck (tsc project refs) + unit tests (vitest)
 check:
+    @node scripts/check-lockfile.mjs
     npm run lint
     npx tsc -b
     npx vitest run

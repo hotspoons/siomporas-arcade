@@ -21,6 +21,7 @@ jobs:
       - name: Lint + typecheck + test + build
         run: |
           npm ci
+          npm run check:lockfile
           npm run lint
           npx tsc -b
           npx vitest run

@@ -31,6 +31,9 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      # A lockfile written by `npm install` on one architecture describes only that one, and the
+      # first thing to fall over is the linter having no binary on the runner. See the script.
+      - run: npm run check:lockfile
       - run: npm run lint
       - run: npx tsc -b
       - run: npx vitest run

@@ -13,6 +13,7 @@
     "dev:stuntin": "npm run dev -w apps/stuntin",
     "build": "tsc -b && npm run build -ws --if-present",
     "lint": "oxlint",
+    "check:lockfile": "node scripts/check-lockfile.mjs",
     "typecheck": "tsc -b",
     "test": "vitest run",
     "bridge": "node scripts/bridge.mjs",

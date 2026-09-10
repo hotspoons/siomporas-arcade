@@ -28,7 +28,7 @@ Open in the dev container (VS Code → *Reopen in Container*), then:
 
 ```bash
 just dev conduit      # or: just dev stuntin / just dev coast
-just check            # oxlint + tsc -b + vitest across the workspace
+just check            # lockfile + oxlint + tsc -b + vitest across the workspace
 just build            # all apps → apps/*/dist
 just tunnel stuntin   # anonymous HTTPS tunnel to an app's dev server (phones)
 just bridge-dev conduit && just bridge 'apex.snap.vehicle.s'   # live JS shell into the page
@@ -36,6 +36,22 @@ just                  # every recipe
 ```
 
 Each app has its own README, MILESTONE, DECISIONS and HANDOFF.
+
+## Dependencies across machines
+
+Several dependencies ship a native binary per platform (oxlint, esbuild,
+rolldown, sharp, workerd) and the lockfile has to list all of them, because the
+dev container here is arm64 and CI is x64. **`npm install` writes a lockfile
+describing only the machine it ran on** — do that after deleting the lockfile and
+CI installs cleanly and then finds the linter has no binary to run. So regenerate
+it whole:
+
+```bash
+rm package-lock.json && npm install --package-lock-only && npm install
+```
+
+`just check` and CI both run `npm run check:lockfile`, which fails with the
+missing platforms listed rather than letting it reach the runner.
 
 ## Tuning panel (all games)
 

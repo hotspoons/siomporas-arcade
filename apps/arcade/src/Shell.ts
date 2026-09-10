@@ -202,7 +202,8 @@ export class Shell {
     }
     // Defined rather than declared, so they stay plain property reads on an object whose `this`
     // is the bridge context and not the shell.
-    Object.defineProperty(ctx, 'at', { get: () => this.mount?.id ?? null, enumerable: true })
+    // 'lobby' rather than the lobby's actual id, which is the empty string and reads as nothing.
+    Object.defineProperty(ctx, 'at', { get: () => (this.mount ? this.mount.id || 'lobby' : null), enumerable: true })
     Object.defineProperty(ctx, 'game', { get: () => this.mount?.game.bridge ?? null, enumerable: true })
     return ctx
   }

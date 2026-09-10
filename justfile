@@ -84,6 +84,12 @@ tunnel app="conduit":
 smoke app="conduit":
     APEX_URL="http://localhost:$(just _port {{ app }})" node scripts/smoke.mjs
 
+# drive the arcade shell headlessly: routes and the Back button, then mount/unmount every
+# game a few times over watching for leaked canvases, AudioContexts and heap, then play each
+# one. This is the check on the shell↔game contract (see apps/arcade/src/Shell.ts).
+arcade-smoke rounds="2":
+    ARCADE_URL="http://localhost:5183" ROUNDS={{ rounds }} node scripts/arcade-smoke.mjs
+
 # drive the TURBO RADRUN world builder headlessly: builds a track with the pointer,
 # saves it, drives it, and checks the built-in route still runs (see scripts/editor-smoke.mjs)
 editor-smoke port="5182":

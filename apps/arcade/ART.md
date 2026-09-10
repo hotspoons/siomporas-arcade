@@ -1,105 +1,119 @@
-# Cabinet art — what the 3D arcade needs, and how to generate it
+# Cabinet art — one panel at a time
 
-The lobby is a real three.js scene: cabinets standing in a dim room, the selected one lit and
-turned toward the camera. Each cabinet is one mesh whose faces are flat quads, so every panel of
-artwork maps onto its face with UVs of 0..1 — **no atlas, one image per panel**. That keeps the
-generator's job simple (draw one flat rectangle of art) and means a panel can be re-generated on
-its own without disturbing the others.
+The lobby is a real three.js scene: cabinets standing in a dim room, the selected one lit and turned
+toward the camera. Each face of a cabinet is a flat quad and takes **one image**. No atlas, no sheet,
+nothing to slice — a panel is a picture, and any one of them can be redone on its own without
+touching the others.
 
-Files live in `public/cabinets/<game>/`, where `<game>` is `radrun`, `stuntin` or `apex`:
+The loop, per panel:
 
-| File | Face | Target aspect | Required? |
-|---|---|---|---|
-| `marquee.webp` | the lit sign on top — **this is the menu item** | ~16:9 | **yes** |
-| `side.webp` | side art (mirrored onto both sides) | ~9:16 | yes |
-| `panel.webp` | control deck: wheel, buttons, shifter | ~21:9 | yes |
-| `bezel.webp` | the surround framing the screen | ~4:3 | optional |
-| `attract.webp` | what the screen shows before the live render takes over | 4:3 | optional |
+1. **Attach two images** to ChatGPT or Gemini: art you want it to match (the sheets in `ext/` are
+   ideal — it made them, and the cabinets already wear their marquees), and the layout template for
+   the panel you want, from `art-templates/`.
+2. Paste the prompt below, with the panel's line swapped in.
+3. Save whatever JPEG it hands back and install it:
 
-Only `marquee.webp` is truly required. A cabinet with no `side.webp` gets flat painted sides in the
-game's accent colour, and so on down the list — see `MISSING` handling in
-[`src/lobby/CabinetArt.ts`](src/lobby/CabinetArt.ts). So the arcade works from the first marquee and
-gets richer as art lands.
+```bash
+node scripts/cabinet-art.mjs ext/whatever-it-called-it.jpeg radrun side
+```
 
-**Aspect ratios are targets, not contracts.** The geometry measures each texture as it loads and
-sizes its face to match, so nothing is ever stretched — a 1.81:1 marquee simply makes a slightly
-taller lightbox than a 1.78:1 one. Get close and don't fight the generator over it.
+That trims any border it put round the art, crops to the shape that face wants, encodes a webp and
+drops it in `public/cabinets/radrun/`. `--dry-run` writes it to `shots/` to look at first. Reload the
+arcade and it is on the cabinet.
+
+## What a cabinet wears
+
+| Panel | Face | Template | Shape | Have it? |
+|---|---|---|---|---|
+| `marquee` | the lit sign on top — also the menu item | `art-templates/marquee.png` | 16:9 | **yes, all three** |
+| `side` | side art, mirrored onto both sides | `art-templates/side.png` | 9:16 | no |
+| `panel` | the control deck, seen from above | `art-templates/panel.png` | 21:9 | no |
+| `bezel` | the surround framing the screen | `art-templates/bezel.png` | 4:3 | no |
+| `attract` | what the screen shows before the game loads | `art-templates/attract.png` | 4:3 | no |
+
+Only the marquee actually matters and all three exist. The rest is polish: a cabinet with no side art
+shows painted body in the game's colour and looks fine. Add them in any order, whenever.
+
+The templates are mid grey with black holes where the cabinet needs holes — the wheel and buttons
+cut out of a control deck, the screen out of a bezel. Grey because white reads as paper and gets a
+border drawn round it, and black reads as part of the art. Regenerate them with
+`node scripts/cabinet-template.mjs` if the shapes ever change.
 
 ## The prompt
 
-Generators are much better at one coherent sheet than at five separate images that have to look
-like the same product. So ask for **one sheet per game** with the panels laid out flat on a plain
-magenta field. Magenta (`#FF00FF`) appears nowhere in the art, which lets
-`scripts/slice-cabinet.mjs` find each panel's exact bounding box and cut it out automatically — no
-eyeballing coordinates.
-
-Send this, with the **GAME** block swapped for the one you want:
-
-> A texture sheet of flat artwork panels for an arcade cabinet, laid out on a solid bright magenta
-> background (#FF00FF). Orthographic and perfectly flat-on: this is the printed decal artwork
-> itself, not a photograph of a cabinet. No perspective, no cabinet body, no room, no shadows, no
-> lighting effects, no glare, no reflections, no bevels, no mockup framing. Each panel is a clean
-> rectangle of finished artwork separated from the others by at least 60 pixels of bare magenta.
-> Do not write any labels, captions or panel names on the magenta.
+> Attached are two images. The first is existing artwork whose style, palette, subject and lettering
+> I want you to match exactly. The second is a blank layout template: it defines the shape of the
+> panel you are drawing, and any black shapes on it are holes that must stay solid black and stay
+> exactly where they are.
 >
-> Lay out four panels:
+> Draw **[ THE PANEL — one line from below ]** for this arcade cabinet, in the style of the first
+> image.
 >
-> 1. Top left, a wide rectangle about 16:9 — the MARQUEE. The game's logo huge and centred, with
->    the tagline beneath it in smaller type. Bordered by a thin flat black retainer frame.
-> 2. Below it, a tall narrow rectangle about 9:16 — the SIDE ART. A single dramatic scene running
->    the full height of the panel, with the logo reading vertically or set into the upper third.
-> 3. Right, a very wide short rectangle about 21:9 — the CONTROL PANEL. Seen from directly above:
->    the flat deck artwork with a dark circular void where the steering wheel is fitted, and dark
->    circles where the buttons are. Instruction text, and the logo small at one end.
-> 4. Beneath it, a rectangle about 4:3 — the BEZEL. A frame of artwork with a solid pure black
->    rectangle filling the middle where the screen sits.
->
-> Style: authentic early-1990s arcade cabinet screen-printing. Saturated, high-contrast, hard-edged
-> airbrush illustration with heavy black outlines and chrome-and-gradient lettering. Flat colour,
-> the way ink sits on a printed vinyl decal.
->
-> GAME: *(one of the three blocks below)*
+> It is flat printed decal artwork, not a photograph of an arcade machine: completely flat and
+> straight on, no perspective, no cabinet body, no room, no shadows, no glare, no reflections, no
+> bevels. The artwork fills the whole image edge to edge, matching the template's proportions — no
+> border, no frame, no margin, no background showing around it. No captions or labels beyond the
+> logo and any text I have asked for.
 
-**Turbo Radrun** — OutRun/Rad Mobile lineage. Sunset-orange and hot-pink Miami skyline, palm trees,
-a coast road curving to the horizon, a red 1960s mid-engined endurance racer drifting. Logo `TURBO
-RADRUN` in chrome-blue with orange speed streaks. Tagline `STAGES THROUGH USA & EUROPE!`. Its
-marquee already exists at `public/cabinets/radrun/marquee.webp`, cut from the sheet you generated
-— so for this game ask for the other three panels only, and tell the generator to match that
-marquee's palette.
+And the panel line:
 
-**Stuntin'** — Hard Drivin'/Stunts lineage. Bright daylight, deep blue sky, a stunt track of loops
-and corkscrews on green hills, a chunky sports car upside down at the top of a loop. Logo
-`STUNTIN'` in bold italic yellow with a red outline. Tagline `LOOP THE LOOP — DRIVE THE IMPOSSIBLE!`.
+| Panel | The line |
+|---|---|
+| `side` | *the tall side panel: one dramatic scene running its full height, with the logo set into the upper third* |
+| `panel` | *the control deck seen from directly above: a wide shallow strip of artwork, with the big black circle left of centre left untouched where the steering wheel is fitted and the three smaller black circles left untouched where the buttons go, instruction text small, logo small at the left end* |
+| `bezel` | *the bezel that surrounds the screen: artwork forming a frame around the black rectangle in the middle, which is the screen and must stay solid black, with the logo small along the bottom edge* |
+| `marquee` | *the illuminated marquee sign: the logo huge and centred with the tagline beneath it in smaller type* |
+| `attract` | *the attract screen: a title screen for the game with the logo and INSERT COIN* |
 
-**Apex Conduit** — S.T.U.N. Runner lineage. Near-black with electric cyan and magenta. A neon
-wireframe tunnel rushing at the viewer, a wedge-shaped hovercraft riding its wall, laser light. Logo
-`APEX CONDUIT` in sharp angular cyan chrome. Tagline `RIDE THE WALL — RUN THE LIGHT!`.
+If a panel comes back with a stray caption or a border, say so and ask again — they generally fix it
+on the second go.
 
-## Slicing a generated sheet
+## The three games
 
-```bash
-node scripts/slice-cabinet.mjs ext/<the-generated-sheet>.jpeg radrun
-```
+The reference image carries the look, so this is only here for when you are generating from nothing
+or want to remind it what a game is:
 
-It finds the magenta background, splits out every non-magenta island bigger than a threshold, sorts
-them by size and shape, and writes `marquee.webp` / `side.webp` / `panel.webp` / `bezel.webp` into
-`apps/arcade/public/cabinets/radrun/`. It prints what it matched to what and, with `--dry-run`,
-writes a contact sheet to `shots/` so you can check the assignment before it overwrites anything.
-Pass `--only marquee,side` to write just some of them.
+**Turbo Radrun** — OutRun / Rad Mobile. Sunset orange and hot pink, Miami skyline, palms, a coast
+road, a red 1960s mid-engined endurance racer. Logo `TURBO RADRUN`, chrome blue with orange speed
+streaks. Tagline `STAGES THROUGH USA & EUROPE!`.
 
-If a sheet comes back on a white or dark background instead of magenta, the slicer will say so and
-you can pass explicit crops: `--crop marquee=0,0,1129,625`.
+**Stuntin'** — Hard Drivin' / Stunts. Bright daylight, deep blue sky, green hills, loops and
+corkscrews, a chunky sports car upside down at the top of a loop. Logo `STUNTIN'`, bold italic yellow
+with a red outline. Tagline `LOOP THE LOOP — DRIVE THE IMPOSSIBLE!`.
 
-## The room
+**Apex Conduit** — S.T.U.N. Runner. Near-black with electric cyan and magenta, a neon wireframe
+tunnel, a wedge-shaped hovercraft riding its wall, laser light. Logo `APEX CONDUIT`, sharp angular
+cyan chrome. Tagline `RIDE THE WALL — RUN THE LIGHT!`.
 
-The room itself is geometry and light, not photographs — dark walls, a low ceiling with neon
-strips, and the cabinets' own marquees doing most of the lighting. The one texture worth generating
-is the carpet, because arcade carpet is unmistakable and tiling it is free:
+Style line, if you need to spell it out: *authentic early-1990s arcade cabinet screen printing —
+saturated, high contrast, hard-edged airbrush illustration with heavy black outlines and
+chrome-and-gradient lettering, flat colour the way ink sits on a printed vinyl decal.*
+
+## On shapes
+
+Generators offer a handful of aspect ratios and will not hit the template exactly. That is fine:
+`cabinet-art.mjs` centre-crops to the shape the face wants and tells you how much it threw away, and
+the geometry measures whatever texture it gets and sizes the face to match, so nothing is ever
+stretched. If it warns that it is cutting more than a third, the image came back the wrong shape —
+ask again, or pass `--no-crop` to keep the whole picture and let the cabinet face take the shape it
+implies.
+
+## The carpet
+
+The room is geometry and light rather than photographs — dark walls, neon ceiling strips, and the
+marquees doing most of the lighting. The floor is the one texture worth generating, because arcade
+carpet is unmistakable and tiling it is free:
 
 > A seamless tileable texture of 1990s arcade carpet, viewed from directly above, flat and
-> orthographic with completely even lighting and no shadows. Black background with a chaotic
-> pattern of neon geometric shapes — magenta and cyan triangles, yellow zigzags, teal squiggles,
-> scattered white stars. Dense, busy, edge-to-edge, no border, no vignette, tiles seamlessly.
+> orthographic with completely even lighting and no shadows. Black background with a chaotic pattern
+> of neon geometric shapes — magenta and cyan triangles, yellow zigzags, teal squiggles, scattered
+> white stars. Dense, busy, edge to edge, no border, no vignette, tiles seamlessly.
 
-Save it as `public/room/carpet.webp`. Without it the floor falls back to a dark procedural
-checker, which is fine but forgettable.
+Save it yourself to `public/room/carpet.webp`; it is not a cabinet panel, so `cabinet-art.mjs` does
+not handle it. Without it the floor is a dark procedural checker — fine, but forgettable.
+
+## If you ever do get a multi-panel sheet
+
+`scripts/slice-cabinet.mjs` cuts several panels out of one image and is where the current marquees
+came from. It needs the panels laid out on a plain magenta field to find their edges, which these
+generators manage only sometimes — hence everything above. It is still there if a sheet turns up.

@@ -14,7 +14,7 @@ const FAMILIES = {
   Rajdhani: { q: 'Rajdhani:wght@500;600;700', lic: 'ofl/rajdhani' },
 }
 const APPS = {
-  drivin: ['Yellowtail', 'VT323', 'Press Start 2P'],
+  stuntin: ['Yellowtail', 'VT323', 'Press Start 2P'],
   coast: ['Pacifico', 'Racing Sans One', 'Righteous', 'Press Start 2P'],
   conduit: ['Audiowide', 'Orbitron', 'Rajdhani', 'Press Start 2P'],
 }

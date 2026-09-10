@@ -110,7 +110,7 @@ export class Game implements LoopClient {
     this.menus = new MenuStack(container)
     this.pressStart = new PressStart(container, Boolean(this.touch))
     this.perf = new PerfOverlay(container)
-    this.tune = new TunePanel(container, 'drivin', [SIM_TUNE, RENDER_TUNE])
+    this.tune = new TunePanel(container, 'stuntin', [SIM_TUNE, RENDER_TUNE], 'drivin')
     this.tune.context = () => {
       const c = this.sim.car
       const round = (v: number) => Math.round(v * 100) / 100
@@ -371,7 +371,7 @@ export class Game implements LoopClient {
     if (!card) {
       card = document.createElement('div')
       card.className = 'title-card'
-      card.innerHTML = `<h1>Drivin’</h1><p>STUNT TRACK DRIVING · WORKING TITLE</p>`
+      card.innerHTML = `<h1>Stuntin’</h1><p>STUNT TRACK DRIVING · WORKING TITLE</p>`
       this.container.appendChild(card)
     }
     card.classList.toggle('hidden', !v)

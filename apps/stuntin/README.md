@@ -1,6 +1,6 @@
-# DRIVIN’
+# STUNTIN’
 
-https://drivin.siomporas.com
+https://stuntin.siomporas.com
 
 A stunt-track driving game in the spirit of the late-'80s sit-down racers and
 the tile-based track editors that followed: a fictitious hero sports car, a
@@ -10,8 +10,8 @@ the same modern / retro presentation as the sibling tunnel game, via
 [`packages/engine`](../../packages/engine).
 
 ```bash
-just dev drivin        # http://localhost:5181
-just tunnel drivin     # phone / remote testing over HTTPS
+just dev stuntin        # http://localhost:5181
+just tunnel stuntin     # phone / remote testing over HTTPS
 ```
 
 ## Play
@@ -31,7 +31,7 @@ seconds and respawns you one piece back with a rolling start.
 
 **Phones** (landscape): tilt to steer (⟲ TILT recalibrates), GAS right thumb,
 BRAKE left thumb, HANDBRAKE pill, RESET / CAM / II pads. Needs HTTPS for the
-motion sensors — use `just tunnel drivin`.
+motion sensors — use `just tunnel stuntin`.
 
 **Haptics:** gamepads rumble on crashes, landings, curbs and slides; Xbox pads
 with impulse triggers get brake/throttle trigger rumble in Chromium; Android

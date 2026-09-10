@@ -1,6 +1,6 @@
 # Apex monorepo — task recipes (https://just.systems)
 #   apps/conduit  tunnel racer-shooter        :5180
-#   apps/drivin   stunt-track driving game    :5181
+#   apps/stuntin  stunt-track driving game    :5181
 #   apps/coast    pseudo-3D sprite racer      :5182
 #   packages/engine  shared runtime (loop, styles, input, menus, math, dev bridge)
 
@@ -12,7 +12,7 @@ default:
 
 # --- dev loop ---------------------------------------------------------------
 
-# Vite dev server for an app (conduit :5180, drivin :5181, coast :5182)
+# Vite dev server for an app (conduit :5180, stuntin :5181, coast :5182)
 dev app="conduit":
     npm run dev -w apps/{{ app }}
 
@@ -54,7 +54,7 @@ export APEX_BRIDGE := env_var_or_default("APEX_BRIDGE", "")
 bridge-dev app="conduit":
     APEX_BRIDGE="${APEX_BRIDGE:-apex-dev}" npm run dev -w apps/{{ app }}
 
-# evaluate JS in the attached page: `just bridge 'apex.snap.vehicle.s'` (add `drivin` as the 2nd arg for the other app)
+# evaluate JS in the attached page: `just bridge 'apex.snap.vehicle.s'` (add `stuntin` as the 2nd arg for the other app)
 bridge code app="conduit":
     APEX_BRIDGE="${APEX_BRIDGE:-apex-dev}" APEX_ORIGIN="http://localhost:$(just _port {{ app }})" node scripts/bridge.mjs {{ quote(code) }}
 
@@ -63,7 +63,7 @@ bridge-clients app="conduit":
     APEX_BRIDGE="${APEX_BRIDGE:-apex-dev}" APEX_ORIGIN="http://localhost:$(just _port {{ app }})" node scripts/bridge.mjs --clients
 
 _port app:
-    @case "{{ app }}" in drivin) echo 5181;; coast) echo 5182;; *) echo 5180;; esac
+    @case "{{ app }}" in stuntin) echo 5181;; coast) echo 5182;; *) echo 5180;; esac
 
 # --- remote testing ---------------------------------------------------------
 

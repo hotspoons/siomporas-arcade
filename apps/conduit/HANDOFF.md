@@ -57,7 +57,7 @@ No tooling on the macOS host. Browsers and Playwright live in the container.
 
 On 2026-09-07 the repo became a workspace: this app moved to `apps/conduit`,
 the reusable runtime to `packages/engine` (`@apex/engine/*` imports), and a
-second game started in `apps/drivin`. Both are meant to split into their own
+second game started in `apps/stuntin`. Both are meant to split into their own
 repos later; nothing in `packages/engine` may import from an app.
 
 ## Known rough edges

@@ -37,27 +37,28 @@ try {
   // pickups and the chunk recycler rather than just the first frame.
   await page.keyboard.press('Enter')
   // Conduit: fire (Space) and shockwave (E) while weaving. Drivin: just drive — Space is the handbrake there.
-  const isDrivin = /drivin/i.test(await page.title())
+  // The stunt game drives with the keyboard alone; the other two need their fire and gear keys.
+  const isStuntin = /stuntin/i.test(await page.title())
   const deadline = Date.now() + seconds * 1000
   await page.keyboard.down('KeyW')
-  if (!isDrivin) await page.keyboard.down('Space')
+  if (!isStuntin) await page.keyboard.down('Space')
   while (Date.now() < deadline) {
     await page.keyboard.down('KeyD')
-    await page.waitForTimeout(isDrivin ? 150 : 400)
+    await page.waitForTimeout(isStuntin ? 150 : 400)
     await page.keyboard.up('KeyD')
-    if (!isDrivin) await page.keyboard.press('KeyE')
+    if (!isStuntin) await page.keyboard.press('KeyE')
     await page.keyboard.down('KeyA')
-    await page.waitForTimeout(isDrivin ? 150 : 400)
+    await page.waitForTimeout(isStuntin ? 150 : 400)
     await page.keyboard.up('KeyA')
-    await page.waitForTimeout(isDrivin ? 500 : 0)
+    await page.waitForTimeout(isStuntin ? 500 : 0)
   }
-  if (!isDrivin) await page.keyboard.up('Space')
+  if (!isStuntin) await page.keyboard.up('Space')
   await page.keyboard.up('KeyW')
   await page.screenshot({ path: `${outDir}/run.png` })
 
   // The run must have actually moved: a frozen frame is the failure this
   // catches that a screenshot alone would not.
-  // Conduit shows course progress; drivin shows a speedometer. Either proves the sim moved.
+  // Conduit shows course progress; Stuntin’ shows a speedometer. Either proves the sim moved.
   const moved = await page.evaluate(() => {
     const progress = parseFloat(document.querySelector('.hud [data-progress]')?.style.width ?? '0')
     const speed = parseFloat(document.querySelector('.hud [data-speed]')?.textContent ?? '0')

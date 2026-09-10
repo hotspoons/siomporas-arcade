@@ -177,6 +177,7 @@ export class ReplayPlayer {
   }
 }
 
+// Still `drivin`, along with the tracks and the settings: see TrackStore.
 const KEY = 'apex-drivin.replays.v1'
 
 /** The floppy: replays in localStorage, listed as files on A:\ */

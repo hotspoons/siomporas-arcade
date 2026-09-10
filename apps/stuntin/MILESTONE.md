@@ -1,7 +1,7 @@
-# Milestone log — drivin
+# Milestone log — stuntin
 
 Started 2026-09-07 in one pass after the workspace split. Verified only in
-headless SwiftShader Chromium (`just probe`, `just smoke drivin`) and unit tests.
+headless SwiftShader Chromium (`just probe`, `just smoke stuntin`) and unit tests.
 
 ## Shipped
 - Sim: 14 piece types (start, straight, ramp, hump, jump, tight/wide/banked

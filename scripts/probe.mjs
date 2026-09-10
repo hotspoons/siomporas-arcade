@@ -30,7 +30,7 @@ const state = await page.evaluate(() => {
   if (!a) return 'no apex'
   try {
     const s = a.snap
-    // Conduit and drivin expose different snapshots; summarise whichever is present.
+    // Conduit and Stuntin’ expose different snapshots; summarise whichever is present.
     const core = s.vehicle ? { s: s.vehicle.s, theta: s.vehicle.theta, speed: s.vehicle.speed, phase: s.phase, shield: s.hud.shield, traffic: s.trafficCount } : { mode: s.car?.mode, speed: s.car?.speed, s: s.car?.s, lane: s.car?.laneId, phase: s.phase }
     return { ...core, fps: a.loop.stats.fps, draws: a.view.stats.drawCalls, tris: a.view.stats.triangles, state: a.game.state }
   } catch (e) {

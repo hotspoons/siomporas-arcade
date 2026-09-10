@@ -45,9 +45,13 @@ export class TunePanel {
    */
   context: (() => Record<string, unknown>) | null = null
 
-  constructor(parent: HTMLElement, game: string, sections: TuneSection[]) {
+  /**
+   * `game` names the game in the copied JSON; `storeAs` is where its values live, which is only
+   * separate when a game has been renamed and its players' saved values are under the old name.
+   */
+  constructor(parent: HTMLElement, game: string, sections: TuneSection[], storeAs = game) {
     this.game = game
-    this.key = `apex-${game}.tune.v1`
+    this.key = `apex-${storeAs}.tune.v1`
     this.sections = sections
     this.el = document.createElement('div')
     this.el.className = 'tune hidden'

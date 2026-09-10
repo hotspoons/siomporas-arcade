@@ -11,7 +11,7 @@
 	// directly from the host browser. On Docker Desktop (macOS/Windows) this
 	// requires "Enable host networking" in Settings > Resources > Network.
 	"runArgs": ["--network=host"],
-	// Vite dev servers: conduit (5180), drivin (5181), coast/Turbo Radrun (5182).
+	// Vite dev servers: conduit (5180), Stuntin’ (5181), coast/Turbo Radrun (5182).
 	"forwardPorts": [5180, 5181, 5182],
 	"initializeCommand": "cmd.exe /c powershell -NoProfile -Command \"$ErrorActionPreference='SilentlyContinue'; New-Item -ItemType Directory -Force -Path $env:USERPROFILE\\.claude | Out-Null; if (!(Test-Path $env:USERPROFILE\\.claude.json)) { Set-Content -Path $env:USERPROFILE\\.claude.json -Value '{}' }\" || sh -c 'mkdir -p \"$HOME/.claude\" && touch \"$HOME/.claude.json\"'",
 	"mounts": [

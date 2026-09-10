@@ -31,6 +31,7 @@ export interface SettingsData {
   experiments: { crashes: boolean; rockets?: boolean }
 }
 
+// Still `drivin`, along with the tracks and the replays: see TrackStore.
 const KEY = 'apex-drivin.settings.v1'
 
 /** Bump when a new default key alias must reach players who already have bindings saved. */

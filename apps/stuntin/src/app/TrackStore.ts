@@ -3,6 +3,8 @@
 import type { TrackData } from '../sim/Track'
 import { BUILTIN_TRACKS } from '../sim/tracks'
 
+// Still `drivin`: the game was renamed, and this is where a player's saved tracks already live.
+// Renaming the key would hide every track anyone has built.
 const KEY = 'apex-drivin.tracks.v1'
 
 export interface TrackRef {

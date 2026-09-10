@@ -46,8 +46,12 @@ jobs:
         include:
           - app: coast
             domain: radrun.siomporas.com
-          - app: drivin
+          - app: stuntin
+            domain: stuntin.siomporas.com
+          # The old address, kept alive: a Worker that redirects to the new one. Nothing to build.
+          - app: drivin-redirect
             domain: drivin.siomporas.com
+            build: skip
           - app: conduit
             domain: apex.siomporas.com
     # Secrets cannot be read in an `if:` directly, so they come in as environment variables and the
@@ -62,6 +66,7 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Build ${{ matrix.app }}
+        if: matrix.build != 'skip'
         run: npm run build -w apps/${{ matrix.app }}
       - name: Publish to Cloudflare
         if: env.CLOUDFLARE_API_TOKEN != ''

@@ -5,7 +5,8 @@ Three games, three subdomains of `siomporas.com`, one Cloudflare account:
 | Game | Directory | Worker | Address |
 |---|---|---|---|
 | Turbo Radrun | `apps/coast` | `turbo-radrun` | https://radrun.siomporas.com |
-| Drivin’ | `apps/drivin` | `drivin` | https://drivin.siomporas.com |
+| Stuntin’ | `apps/stuntin` | `stuntin` | https://stuntin.siomporas.com |
+| ↳ its old address | `apps/drivin-redirect` | `drivin` | https://drivin.siomporas.com → stuntin |
 | Apex Conduit | `apps/conduit` | `apex-conduit` | https://apex.siomporas.com |
 
 Each is a static site: Vite builds it, Wrangler uploads the built files as a Worker's assets, and the
@@ -68,11 +69,28 @@ domain is declared in that app's `wrangler.jsonc`. Nothing to click.
 From a checkout, with `npx wrangler login` done once:
 
 ```bash
-npm run deploy -w apps/coast      # or drivin, or conduit
+npm run deploy -w apps/coast      # or stuntin, or conduit
 ```
 
 That builds and publishes one game. `npx wrangler deployments list` from an app directory shows what
 is live, and `npx wrangler rollback` puts the previous version back.
+
+## Renaming a game
+
+Drivin’ became Stuntin’, which is the worked example. The game's own name lives in three places (the
+app's `index.html` title, its title card in `src/app/Game.ts`, its menu title) and its address in two
+(the `routes` entry in `wrangler.jsonc` and the matrix in the deploy workflow). Renaming the Worker's
+`name` publishes a *new* Worker rather than renaming the old one, so the old one has to be dealt with
+rather than left running.
+
+Two things not to move. Players' saved data is keyed by the old name in their browsers —
+`apex-drivin.tracks.v1` and friends — so those keys stay put and say why; rename them and every track
+anyone has built disappears. And the old address keeps working: `apps/drivin-redirect` is a Worker
+with no assets and no build that holds `drivin.siomporas.com` and 301s to the new host, path and query
+intact. It is a matrix entry like any other, marked `build: skip`, and it keeps the *old* Worker name on
+purpose: a custom domain belongs to one Worker, so publishing the redirect as `drivin` replaces the
+game that used to be there. Under a new name Cloudflare would refuse it the domain and leave the old
+game running at the old address for ever.
 
 ## Changing a name or an address
 

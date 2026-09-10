@@ -5,7 +5,7 @@ export default defineConfig({
   // devBridge is inert unless APEX_BRIDGE is set — see packages/engine/src/dev/bridge-plugin.ts.
   plugins: [devBridge()],
   server: {
-    // Keep in sync with the justfile (drivin = 5181).
+    // Keep in sync with the justfile (stuntin = 5181).
     port: 5181,
     strictPort: true,
     host: true,

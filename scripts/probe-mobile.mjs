@@ -16,7 +16,7 @@ await page.locator('.menu .item').filter({ hasText: process.env.PROBE_TAP ?? 'SI
 await page.waitForTimeout(500)
 const cdp = await ctx.newCDPSession(page)
 const touch = (type, points) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: points })
-// Hold points (viewport px); default matches conduit's pads, PROBE_TOUCH="x,y;x,y" overrides (drivin: gas bottom-right).
+// Hold points (viewport px); default matches conduit's pads, PROBE_TOUCH="x,y;x,y" overrides (stuntin: gas bottom-right).
 const pts = (process.env.PROBE_TOUCH ?? '60,130;790,200').split(';').map((p, i) => { const [x, y] = p.split(',').map(Number); return { x, y, id: i + 1 } })
 const thrust = pts[0]
 const fire = pts[1] ?? pts[0]

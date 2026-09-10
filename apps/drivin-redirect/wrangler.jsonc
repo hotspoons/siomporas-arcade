@@ -1,0 +1,15 @@
+{
+  // The old address, kept alive as a redirect to the new one. No assets, no build — just the Worker
+  // in src/index.js. `npx wrangler deploy` from this directory publishes it. See DEPLOY.md.
+  //
+  // Deliberately still called `drivin`: that Worker already exists and already holds
+  // drivin.siomporas.com, and a custom domain can only be attached to one of them. Publishing under
+  // the same name replaces the game that used to be there with this redirect, which is exactly what
+  // should happen to it — a new name would be refused for the domain and leave the old game running.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "drivin",
+  "main": "src/index.js",
+  "compatibility_date": "2026-01-01",
+  "routes": [{ "pattern": "drivin.siomporas.com", "custom_domain": true }],
+  "observability": { "enabled": true }
+}

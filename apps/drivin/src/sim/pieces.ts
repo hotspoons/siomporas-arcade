@@ -280,7 +280,7 @@ export const PIECES: PieceDef[] = [
     // Four metres of lip turning the deck up to eighty-five degrees, and then seven metres of lane
     // standing at it: the third lane, near enough vertical, where the corner presses you into the
     // surface hard enough to hold three hundred miles an hour.
-    bank: { wallTo: 1.48, radius: 8, run: 7 },
+    bank: { wallTo: 1.48, radius: 8, run: 7, deckRoll: 0.95 },
   },
   {
     type: 'cross',

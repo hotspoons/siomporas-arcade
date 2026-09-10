@@ -14,6 +14,8 @@
 // Lateral offsets stay arc length along the surface, exactly as they are on a tube, so `lateral` is
 // still "how far across the road am I" and nothing downstream has to learn a new coordinate.
 
+import { smoothstep } from '@apex/engine/math/scalar'
+
 import { ROAD_HALF_WIDTH } from './Tuning'
 
 export interface Bank {
@@ -27,6 +29,13 @@ export interface Bank {
    * to sit at the angle the wall is for.
    */
   run: number
+  /**
+   * The angle the piece's own deck is banked to at full roll. The wall is scaled by how far the deck
+   * has ramped in towards it, so it grows out of the banking rather than standing up out of nothing
+   * at the mouth of the corner — where, without this, it would be at its *tallest*, because there
+   * the deck is flat and everything between flat and vertical is left for the wall to cover.
+   */
+  deckRoll: number
 }
 
 /** Where a point across the road sits, and how the surface is tilted under it. */
@@ -52,17 +61,18 @@ export interface Across {
  * and out at the ends of a piece grows and loses its wall with it, and a mirrored piece gets its wall
  * on the other side without being told.
  */
-export function wallOf(bank: Bank | undefined, rightY: number): { side: -1 | 0 | 1; maxA: number } {
+export function wallOf(bank: Bank | undefined, rightY: number): { side: -1 | 0 | 1; maxA: number; run: number } {
   const side = rightY < -1e-3 ? -1 : rightY > 1e-3 ? 1 : 0
-  if (!bank || side === 0) return { side: 0, maxA: 0 }
+  if (!bank || side === 0) return { side: 0, maxA: 0, run: 0 }
   const roll = Math.abs(Math.asin(Math.max(-1, Math.min(1, rightY))))
-  return { side, maxA: Math.max(0, bank.wallTo - roll) }
+  const ramp = smoothstep(0, 1, roll / Math.max(1e-3, bank.deckRoll))
+  return { side, maxA: Math.max(0, bank.wallTo - roll) * ramp, run: bank.run * ramp }
 }
 
 /** The furthest across the road the surface goes on a given side: the top of the wall, or the edge. */
 export function edgeOf(bank: Bank | undefined, rightY: number, sign: number): number {
-  const { side, maxA } = wallOf(bank, rightY)
-  return ROAD_HALF_WIDTH + (side !== 0 && Math.sign(sign) === side ? maxA * bank!.radius + bank!.run : 0)
+  const { side, maxA, run } = wallOf(bank, rightY)
+  return ROAD_HALF_WIDTH + (side !== 0 && Math.sign(sign) === side ? maxA * bank!.radius + run : 0)
 }
 
 /**
@@ -130,9 +140,9 @@ export function sectionAtOut(bank: Bank | undefined, rightY: number, outX: numbe
 
 /** How far across the frame the surface reaches on a side — the planar twin of `edgeOf`. */
 export function outEdgeOf(bank: Bank | undefined, rightY: number, sign: number): number {
-  const { side, maxA } = wallOf(bank, rightY)
+  const { side, maxA, run } = wallOf(bank, rightY)
   if (side === 0 || Math.sign(sign) !== side) return ROAD_HALF_WIDTH
-  return ROAD_HALF_WIDTH + bank!.radius * Math.sin(maxA) + bank!.run * Math.cos(maxA)
+  return ROAD_HALF_WIDTH + bank!.radius * Math.sin(maxA) + run * Math.cos(maxA)
 }
 
 /** Arc length across the surface for a flat offset across the frame: what `landOn` needs. */

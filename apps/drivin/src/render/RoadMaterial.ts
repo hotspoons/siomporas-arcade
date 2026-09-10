@@ -38,12 +38,15 @@ export function makeRoadUniforms(): RoadUniforms {
 
 const VERT = /* glsl */ `
 attribute vec4 aRoad; // s (m), lateral x (m), kind (0 road, 1 curb, 2 tube), curvature
+attribute float aWall; // 0 on the road, 0..1 up a speedbowl's wall (1 = its top edge)
 varying vec3 vWorld;
 varying vec3 vNormal;
 varying vec4 vRoad;
+varying float vWall;
 uniform vec2 uSnap;
 void main() {
   vRoad = aRoad;
+  vWall = aWall;
   vec4 w = modelMatrix * vec4(position, 1.0);
   vWorld = w.xyz;
   vNormal = normalize(mat3(modelMatrix) * normal);
@@ -61,6 +64,7 @@ precision highp float;
 varying vec3 vWorld;
 varying vec3 vNormal;
 varying vec4 vRoad;
+varying float vWall;
 uniform float uTime;
 uniform vec3 uCameraPos;
 uniform vec3 uFogColor;
@@ -118,6 +122,15 @@ void main() {
     float dash = (1.0 - smoothstep(0.08, 0.16, abs(x))) * step(0.5, fract(s / 6.0));
     if (uFlat > 0.5) { edge = step(0.5, edge); dash = step(0.5, dash); }
     col += uLine * (edge * 0.9 + dash * 0.7) * sun;
+    // A speedbowl's wall is a lane, so it is painted like one: a dashed line up the middle of it and
+    // a solid one along its top, laid out in how far up the wall you are rather than in metres,
+    // because how much wall there is grows with the banking.
+    if (vWall > 0.001) {
+      float wallDash = (1.0 - smoothstep(0.018, 0.032, abs(vWall - 0.5))) * step(0.5, fract(s / 6.0));
+      float wallEdge = 1.0 - smoothstep(0.018, 0.034, abs(vWall - 0.95));
+      if (uFlat > 0.5) { wallDash = step(0.5, wallDash); wallEdge = step(0.5, wallEdge); }
+      col += uLine * (wallDash * 0.7 + wallEdge * 0.9) * sun;
+    }
   }
   float fog = 1.0 - exp(-dist * dist * uFogDensity * uFogDensity);
   col = mix(col, uFogColor, clamp(fog, 0.0, 1.0));

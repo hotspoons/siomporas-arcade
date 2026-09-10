@@ -19,6 +19,8 @@ import { PILLAR_SIDE, PILLAR_SPACING } from '../sim/Tuning'
 const STEP = 2
 /** Rings across a speedbowl's wall: enough that the curve reads as a curve at speed. */
 const WALL_STEPS = 5
+/** The rumble strip along the top of a wall, as a fraction of the wall's own length. */
+const WALL_CURB = 0.09
 /** How far the tarmac stands above the graded ground, and the curbs above that (metres). */
 const SLAB_LIFT = 0.16
 const CURB_LIFT = 0.34
@@ -120,19 +122,28 @@ export class RoadBuilder {
     // The road is a built-up slab: the tarmac stands clear of the ground and the curbs higher still,
     // so the graded landscape (which is only sampled every few metres) can never show through it.
     // `wall` is a fraction of however much wall this ring has; the rest are fixed offsets.
+    // Cut positions across the road. `wall` entries are fractions of however much wall this ring
+    // has — 0 at the road's edge, 1 at its top, and past 1 the rumble strip lying along it.
     const cuts: { at: number; wall: boolean; y: number; kind: number }[] = []
     const curb = (x: number) => cuts.push({ at: x, wall: false, y: CURB_LIFT, kind: 1 })
     const road = (x: number) => cuts.push({ at: x, wall: false, y: SLAB_LIFT, kind: 0 })
-    if (side < 0) for (let i = steps; i >= 1; i--) cuts.push({ at: i / steps, wall: true, y: SLAB_LIFT, kind: 0 })
-    else {
+    const wallCurb = (at: number) => cuts.push({ at, wall: true, y: CURB_LIFT, kind: 1 })
+    if (side < 0) {
+      wallCurb(1 + WALL_CURB)
+      wallCurb(1)
+      for (let i = steps; i >= 1; i--) cuts.push({ at: i / steps, wall: true, y: SLAB_LIFT, kind: 0 })
+    } else {
       curb(-W - C)
       curb(-W)
     }
     road(-W)
     road(0)
     road(W)
-    if (side > 0) for (let i = 1; i <= steps; i++) cuts.push({ at: i / steps, wall: true, y: SLAB_LIFT, kind: 0 })
-    else {
+    if (side > 0) {
+      for (let i = 1; i <= steps; i++) cuts.push({ at: i / steps, wall: true, y: SLAB_LIFT, kind: 0 })
+      wallCurb(1)
+      wallCurb(1 + WALL_CURB)
+    } else {
       curb(W)
       curb(W + C)
     }
@@ -140,6 +151,7 @@ export class RoadBuilder {
     const pos = new Float32Array(rings * across * 3)
     const nor = new Float32Array(rings * across * 3)
     const roadAttr = new Float32Array(rings * across * 4)
+    const wallAttr = new Float32Array(rings * across)
     const idx: number[] = []
     const f = this.frame
     let n = 0
@@ -148,8 +160,8 @@ export class RoadBuilder {
       t.frameAt(s, f)
       const present = f.surface
       // How much wall this station has: none until the banking has ramped in.
-      const { side: here, maxA } = wallOf(lane.bank, f.right.y)
-      const arc = here === side && side !== 0 ? maxA * (lane.bank?.radius ?? 0) : 0
+      const { side: here, maxA, run } = wallOf(lane.bank, f.right.y)
+      const arc = here === side && side !== 0 ? maxA * (lane.bank?.radius ?? 0) + run : 0
       for (let k = 0; k < across; k++) {
         const i = r * across + k
         const cut = cuts[k]
@@ -170,6 +182,9 @@ export class RoadBuilder {
         roadAttr[i * 4 + 1] = lateral
         roadAttr[i * 4 + 2] = cut.kind
         roadAttr[i * 4 + 3] = f.kRight
+        // How far up the wall this vertex is, 0..1, so the shader can paint the third lane: a line
+        // along its top and a dashed one up the middle of it. Zero everywhere there is no wall.
+        wallAttr[i] = cut.wall && arc > 0.5 ? Math.min(1, cut.at) : 0
       }
       if (r > 0) {
         for (let k = 0; k < across - 1; k++) {
@@ -187,6 +202,7 @@ export class RoadBuilder {
     g.setAttribute('position', new BufferAttribute(pos, 3))
     g.setAttribute('normal', new BufferAttribute(nor, 3))
     g.setAttribute('aRoad', new BufferAttribute(roadAttr, 4))
+    g.setAttribute('aWall', new BufferAttribute(wallAttr, 1))
     g.setIndex(idx)
     return g
   }
@@ -199,6 +215,9 @@ export class RoadBuilder {
     const pos = new Float32Array(rings * across * 3)
     const nor = new Float32Array(rings * across * 3)
     const road = new Float32Array(rings * across * 4)
+    // The shader declares aWall for speedbowl walls; a tube has none, but every geometry using this
+    // material still has to supply it or the program will not validate.
+    const wallAttr = new Float32Array(rings * across)
     const idx: number[] = []
     const f = this.frame
     const R = TUBE_RADIUS
@@ -249,6 +268,7 @@ export class RoadBuilder {
     g.setAttribute('position', new BufferAttribute(pos, 3))
     g.setAttribute('normal', new BufferAttribute(nor, 3))
     g.setAttribute('aRoad', new BufferAttribute(road, 4))
+    g.setAttribute('aWall', new BufferAttribute(wallAttr, 1))
     g.setIndex(idx)
     return g
   }

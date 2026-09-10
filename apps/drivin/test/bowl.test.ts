@@ -85,6 +85,23 @@ describe('the speedbowl wall', () => {
     }
   })
 
+  it('grows out of the banking rather than standing up at the mouth of the corner', () => {
+    const { lane } = bowlLane()
+    const f = makeLaneFrame()
+    const at = (frac: number): number => {
+      lane!.table.frameAt(lane!.table.length * frac, f)
+      const { maxA, run } = wallOf(lane!.bank, f.right.y)
+      return maxA * lane!.bank!.radius + run
+    }
+    // Nothing where the road is still flat, and everything by the time the deck is fully banked. It
+    // is scaled by how far the banking has ramped in — without that the wall is *tallest* at the
+    // mouth, because there the deck is flat and all of the angle up to vertical is left to the wall.
+    expect(at(0.01)).toBeLessThan(1)
+    expect(at(0.06)).toBeLessThan(at(0.12))
+    expect(at(0.12)).toBeLessThan(at(0.5))
+    expect(at(0.5)).toBeGreaterThan(10)
+  })
+
   it('leaves an ordinary banked sweeper alone', () => {
     const track = new Track({ ...BOWL, pieces: [BOWL.pieces[0], BOWL.pieces[1], { type: 'bank2', x: 3, z: 7, rot: 0, level: 0 }] })
     const lane = track.lanes.find((l) => track.data.pieces[l.pieceIndex].type === 'bank2')

@@ -31,6 +31,20 @@ function parkedAtTheReportedSpot(): { sim: Sim; car: Record<string, never> & { p
   return { sim, car: car as never }
 }
 
+/** The second report: parked on the grass beside the same bank, aimed up it. */
+function aimedUpTheBank(): { sim: Sim; car: { mode: string; up: { y: number }; pos: { x: number; y: number; z: number }; speed: number } } {
+  const track = new Track(RICH2)
+  const sim = new Sim(track, CARS[0], 0)
+  const car = sim.car as unknown as { mode: string; onGrass: boolean; speed: number; yaw: number; pos: { set(x: number, y: number, z: number): void } ; forward: { set(x: number, y: number, z: number): void } }
+  car.mode = 'ground'
+  car.onGrass = true
+  car.pos.set(992.83, track.groundHeight(992.83, 610.59) + 0.35, 610.59)
+  car.yaw = Math.atan2(-0.9, -0.43)
+  car.forward.set(-0.43, 0, -0.9)
+  car.speed = 14
+  return { sim, car: sim.car as never }
+}
+
 describe('the edge of a banked piece', () => {
   it('is not something the car is under while it is standing beside it', () => {
     const { car } = parkedAtTheReportedSpot()
@@ -50,6 +64,37 @@ describe('the edge of a banked piece', () => {
     }
     expect(events).not.toContain('crash')
     expect(Math.hypot(car.pos.x - from.x, car.pos.z - from.z)).toBeGreaterThan(20)
+  })
+
+  it('is something the car climbs onto leaning, one side up and one side down', () => {
+    const { sim, car } = aimedUpTheBank()
+    const input = makeInputFrame()
+    input.throttle = 1
+    const snap = new Snapshot()
+    let leant = 0
+    let climbed = 0
+    for (let i = 0; i < 40; i++) {
+      sim.tick(SIM_DT, input, snap)
+      leant = Math.min(leant || 1, car.up.y)
+      climbed = Math.max(climbed, car.pos.y)
+    }
+    // Up the bank, and tilted with it rather than sitting flat on the grass under it.
+    expect(climbed).toBeGreaterThan(1)
+    expect(leant).toBeLessThan(0.9)
+  })
+
+  it('does not leave the car bouncing against the bank it is standing on', () => {
+    const { sim, car } = aimedUpTheBank()
+    const input = makeInputFrame()
+    input.throttle = 1
+    const snap = new Snapshot()
+    const events: string[] = []
+    for (let i = 0; i < 60 * 2; i++) {
+      sim.tick(SIM_DT, input, snap)
+      sim.events.drain((e) => events.push(e.type))
+    }
+    expect(events.filter((e) => e === 'bump').length).toBeLessThan(3)
+    expect(car.mode).not.toBe('crash')
   })
 
   it('is a road the car rejoins when it is pointed along it', () => {

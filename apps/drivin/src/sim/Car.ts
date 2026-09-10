@@ -27,6 +27,7 @@ import {
   PILLAR_SPACING,
   CAR_HALF_WIDTH,
   CAR_RIDE,
+  CLIMB_SLOPE,
   CLIMB_STEP,
   CRASH_IMPACT_SPEED,
   DECK_CLEARANCE,
@@ -102,6 +103,22 @@ export class Car {
   private readonly hit: LaneHit = { s: 0, x: 0, h: 0, over: 0 }
   private readonly vA = new Vec3()
   private readonly vB = new Vec3()
+  /** A second set, for sampling the surface under a wheel without disturbing a projection in progress. */
+  private readonly probeFrame = makeLaneFrame()
+  private readonly probeHit: LaneHit = { s: 0, x: 0, h: 0, over: 0 }
+  private readonly probePos = new Vec3()
+  /** The landscape height under the car last tick: what the airborne test watches, decks aside. */
+  private terrainY = 0
+  /**
+   * What each side's wheels were standing on last tick. A wheel rides up onto something from where
+   * *it* is, not from where the middle of the car is: on a bank steep enough to matter the outside
+   * wheels are the better part of a metre above the body, and measuring their step from the body's
+   * height is what makes a car climbing a bank suddenly decide the bank is too tall to climb.
+   */
+  private wheelL = 0
+  private wheelR = 0
+  /** Whether what the wheels were on last tick was a road deck rather than the landscape. */
+  private onDeck = false
   private readonly nearby: Lane[] = []
   /** Vertical speed the ground under us had last tick (grass over hills). */
   private groundVy = 0
@@ -621,6 +638,21 @@ export class Car {
           this.event = 'crash'
           return
         }
+        // Aligned with the lane: land on it and drive it. Crossing it: settle onto the surface and
+        // keep going the way you were going. Snapping a car that is crossing a road into the road's
+        // own direction — which is what landing does, heading clamped and all — is the thing that
+        // makes a seam throw you sideways.
+        if (Math.abs(this.forward.dot(this.scratch.tan)) < 0.5) {
+          this.pos.y = this.scratch.pos.y + h.x * this.scratch.right.y + CAR_RIDE
+          this.mode = 'ground'
+          this.rocket = false
+          this.terrainY = this.pos.y - CAR_RIDE
+          this.yaw = Math.atan2(this.forward.z, this.forward.x)
+          this.speed = Math.hypot(this.vel.x, this.vel.z)
+          this.onGrass = true
+          this.event = 'land'
+          return
+        }
         this.landOn(lane, h.s, h.x, this.scratch)
         return
       }
@@ -650,6 +682,32 @@ export class Car {
     this.event = 'land'
   }
 
+  /**
+   * The top of whatever a wheel is standing on at a point: the landscape, or a road deck built over
+   * it when the deck is close enough above to ride up onto. `refY` is the surface the car is on now,
+   * which is what makes a kerb a kerb and a wall a wall — a step the car could climb becomes the
+   * surface, a step it could not is left to the structure test.
+   */
+  private tookDeck = false
+
+  private topAt(x: number, z: number, refY: number, lanes: Lane[]): number {
+    let y = this.track.groundHeight(x, z)
+    this.probePos.set(x, refY, z)
+    for (const lane of lanes) {
+      if (lane.profile === 'tube') continue
+      lane.table.project(this.probePos, this.probeFrame, this.probeHit)
+      const f = this.probeFrame
+      const h = this.probeHit
+      if (!f.surface || h.over > 0.5 || Math.abs(h.x) > ROAD_HALF_WIDTH + CURB_WIDTH) continue
+      const deck = f.pos.y + h.x * f.right.y
+      if (deck > y && deck - refY <= CLIMB_STEP) {
+        y = deck
+        this.tookDeck = true
+      }
+    }
+    return y
+  }
+
   private tickGround(dt: number, input: InputFrame): void {
     // Landscape slope along the nose: downhill pulls, uphill drags.
     const gAhead = this.track.groundHeight(this.pos.x + this.forward.x * 2, this.pos.z + this.forward.z * 2)
@@ -666,28 +724,73 @@ export class Car {
     const pz = this.pos.z
     const prevY = this.pos.y
     this.pos.addScaled(this.forward, v * dt)
-    const gh = this.track.groundHeight(this.pos.x, this.pos.z)
-    // Over a crest the ground falls away faster than gravity can follow: airborne, Stunts style.
-    const groundVy = dt > 0 ? (gh + CAR_RIDE - prevY) / dt : 0
+    // What the wheels are on, sampled under each of them rather than at a single point under the
+    // middle of the car. At the edge of an embankment that is the whole difference: the outside
+    // wheels are up on the deck and the inside ones are still on the grass, so the car leans across
+    // the seam and rides up it, instead of the world switching from one surface to the other
+    // underneath it.
+    const lanes = this.track.lanesNear(this.pos, this.nearby)
+    const ref = prevY - CAR_RIDE
+    const rx = -this.forward.z
+    const rz = this.forward.x
+    // Held within a car's half-width of the body, so a stale value cannot survive a fall or a
+    // landing and pull the car back up onto something it has left.
+    const spread = CAR_HALF_WIDTH * 1.2
+    const refL = clamp(this.wheelL, ref - spread, ref + spread)
+    const refR = clamp(this.wheelR, ref - spread, ref + spread)
+    this.tookDeck = false
+    const yL = this.topAt(this.pos.x - rx * CAR_HALF_WIDTH, this.pos.z - rz * CAR_HALF_WIDTH, refL, lanes)
+    const yR = this.topAt(this.pos.x + rx * CAR_HALF_WIDTH, this.pos.z + rz * CAR_HALF_WIDTH, refR, lanes)
+    this.wheelL = yL
+    this.wheelR = yR
+    const yF = this.topAt(this.pos.x + this.forward.x * 1.5, this.pos.z + this.forward.z * 1.5, ref, lanes)
+    const yB = this.topAt(this.pos.x - this.forward.x * 1.5, this.pos.z - this.forward.z * 1.5, ref, lanes)
+    // The body rides on the two of them, rising no faster than the ground it is covering — a kerb is
+    // ridden up, not teleported onto, and standing still you climb nothing. The *difference* between
+    // the two is left alone, because that difference is the lean: cap each wheel instead and a car
+    // straddling a seam sits dead level.
+    const gh = Math.min((yL + yR) / 2, ref + Math.abs(v) * dt * CLIMB_SLOPE + 0.05)
+    // Over a crest the ground falls away faster than gravity can follow: airborne, Stunts style. It
+    // watches the landscape and not what the wheels are on, or the lip of every kerb would throw the
+    // car into the air.
+    // Off the side of a deck the surface does not slope away, it stops: the car should fall off it
+    // rather than be set down on the landscape a metre and a half below, which is how it ended up
+    // parked inside the bank it had just been driving on.
+    if (this.onDeck && prevY - CAR_RIDE - gh > 0.3) {
+      this.mode = 'air'
+      this.airTime = 0
+      this.vel.copy(this.forward).scale(v)
+      this.vel.y = 0
+      this.pos.y = prevY
+      this.onDeck = false
+      this.airGlitch = false
+      this.event = 'launch'
+      return
+    }
+    this.onDeck = this.tookDeck
+    const terrain = this.track.groundHeight(this.pos.x, this.pos.z)
+    const groundVy = dt > 0 ? (terrain - this.terrainY) / dt : 0
+    this.terrainY = terrain
     if (this.track.heights && Math.abs(v) > 12 && groundVy < this.groundVy - GRAVITY * dt * 1.5 && this.groundVy > -2) {
       this.mode = 'air'
       this.airTime = 0
       this.vel.copy(this.forward).scale(v)
       this.vel.y = this.groundVy
       this.pos.y = prevY
+      this.terrainY = prevY - CAR_RIDE
       this.airGlitch = Math.abs(v) >= this.spec.topSpeed * AIR_GLITCH_THRESHOLD
       this.event = 'launch'
       return
     }
     this.groundVy = groundVy
     this.pos.y = gh + CAR_RIDE
-    // Ride the slope: up follows the local ground normal.
-    const gx = (this.track.groundHeight(this.pos.x + 1.5, this.pos.z) - this.track.groundHeight(this.pos.x - 1.5, this.pos.z)) / 3
-    const gz = (this.track.groundHeight(this.pos.x, this.pos.z + 1.5) - this.track.groundHeight(this.pos.x, this.pos.z - 1.5)) / 3
-    this.up.set(-gx, 1, -gz).normalize()
+    // Lie on the plane through those four contacts: leaning away from the side that is higher and
+    // pitched by what is under the nose and the tail.
+    const roll = (yR - yL) / (2 * CAR_HALF_WIDTH)
+    const pitch = (yF - yB) / 3
+    this.up.set(-(rx * roll + this.forward.x * pitch), 1, -(rz * roll + this.forward.z * pitch)).normalize()
     this.forward.projectOntoPlane(this.up).normalize()
     this.slip = 0
-    const lanes = this.track.lanesNear(this.pos, this.nearby)
     // Water: the car is gone.
     if (this.track.isWater(this.pos.x, this.pos.z)) {
       this.crashCause = 'into the water'
@@ -768,12 +871,17 @@ export class Car {
     const dz = this.pos.z - f.pos.z
     const across = lean > 1e-3 ? Math.abs((dx * f.right.x + dz * f.right.z) / lean) : Math.hypot(dx, dz)
     const deckY = f.pos.y + clamp(h.x, -edge, edge) * f.right.y
+    // Measure from the highest thing the car is actually standing on, not from the middle of it.
+    // Straddling the edge of a bank the outside wheels are up on the deck while the body's centre is
+    // still below it — being half parked on something is not the same as being under it — and the
+    // bound keeps a stale wheel from claiming a contact the car has long since left.
+    const contact = Math.min(Math.max(this.wheelL, this.wheelR) + CAR_RIDE, this.pos.y + CAR_HALF_WIDTH * 1.2)
     // Whether this thing comes down to the ground where you are standing. A berm's low edge is in the
     // earth and everything under it is earth too; a bridge's edges are both up in the air and you
     // drive under it. Without the distinction a bank is a wall you can drive through, or an elevated
     // road is solid to the ground.
     const grounded = f.pos.y - Math.abs(f.right.y) * edge - this.pos.y < CLIMB_STEP
-    return { across, rise: deckY - this.pos.y, inside: across <= edge * Math.max(lean, 0.3) + CAR_HALF_WIDTH, grounded }
+    return { across, rise: deckY - Math.max(this.pos.y, contact), inside: across <= edge * Math.max(lean, 0.3) + CAR_HALF_WIDTH, grounded }
   }
 
   /**

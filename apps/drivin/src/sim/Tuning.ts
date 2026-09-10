@@ -105,6 +105,13 @@ export let CRASH_IMPACT_SPEED = 30
  * you get stuck against nothing.
  */
 export let CLIMB_STEP = 0.7
+/**
+ * How steeply the wheels may ride up onto something, as metres of rise per metre travelled. It is
+ * only here to stop a kerb sweeping under the car from popping it upwards in a single frame — so it
+ * has to be generous enough never to lag behind a slope the car is actually driving up. Lag and the
+ * car ends up under the deck it is climbing, which the structure test rightly calls a wall.
+ */
+export let CLIMB_SLOPE = 1.5
 /** Above this much clearance overhead, a flat deck is something to drive under rather than into. */
 export let DECK_CLEARANCE = 1.4
 /** Below this world height you are gone. */
@@ -148,6 +155,7 @@ export const SIM_TUNE: TuneSection = {
     tune('LAND_TOLERANCE', () => LAND_TOLERANCE, (v) => (LAND_TOLERANCE = v)),
     tune('LAND_MIN_ALIGN', () => LAND_MIN_ALIGN, (v) => (LAND_MIN_ALIGN = v)),
     tune('CRASH_IMPACT_SPEED', () => CRASH_IMPACT_SPEED, (v) => (CRASH_IMPACT_SPEED = v)),
+    tune('CLIMB_SLOPE', () => CLIMB_SLOPE, (v) => (CLIMB_SLOPE = v), [0.25, 6], 0.25, 'how steeply the wheels may ride up onto a kerb'),
     tune('CLIMB_STEP', () => CLIMB_STEP, (v) => (CLIMB_STEP = v), [0, 2], 0.05, 'step up onto a road the car drives up instead of hitting'),
     tune('DECK_CLEARANCE', () => DECK_CLEARANCE, (v) => (DECK_CLEARANCE = v), [0.5, 4], 0.1, 'headroom above which a deck is something to drive under'),
     tune('REPLAY_PLAY_SECONDS', () => REPLAY_PLAY_SECONDS, (v) => (REPLAY_PLAY_SECONDS = v)),

@@ -1,0 +1,19 @@
+{
+  // The whole arcade: one Worker, one address, every game on a path beneath it. Vite builds the
+  // shell and each game as its own lazily-loaded chunk; Wrangler uploads the result as static
+  // assets and serves them from the edge. There is no Worker code of our own.
+  //
+  // The custom domain is claimed by this file: Cloudflare creates and keeps the DNS record for
+  // arcade.siomporas.com as long as siomporas.com is a zone on the same account. See DEPLOY.md.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "siomporas-arcade",
+  "compatibility_date": "2026-01-01",
+  "assets": {
+    "directory": "./dist",
+    // /radrun, /apex/settings/controls and everything else are routes the shell resolves in the
+    // browser, not files. They all have to arrive as index.html.
+    "not_found_handling": "single-page-application"
+  },
+  "routes": [{ "pattern": "arcade.siomporas.com", "custom_domain": true }],
+  "observability": { "enabled": true }
+}

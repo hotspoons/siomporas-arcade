@@ -84,9 +84,10 @@ export function buildMenus(game: Game) {
       },
       { kind: 'action', label: 'SETTINGS', onSelect: () => game.menus.push(settings()) },
       { kind: 'action', label: 'CONTROLS', onSelect: () => game.menus.push(controls()) },
+      ...(game.onExit ? [{ kind: 'action', label: 'BACK TO THE ARCADE', onSelect: () => game.onExit?.() } as MenuItem] : []),
     ],
     footer: game.touch ? 'Tap to select · tilt to steer · GAS right, BRAKE left' : 'Enter / A select · Shift = gear · C = view · F3 or 0 perf',
-    onBack: () => {},
+    onBack: () => game.onExit?.(),
   })
 
   const pause = (): MenuScreen => ({

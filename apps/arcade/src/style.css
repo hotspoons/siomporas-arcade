@@ -1,0 +1,134 @@
+/* The shell's own chrome, and the lobby.
+ *
+ * A mounted game injects its own stylesheet into its mount container and takes it away again on
+ * unmount, so only ever one game's CSS is in the document — see the `style.css?inline` import in
+ * each game's module.ts. That means a game is free to restyle `body`, `#app`, `.menu` and `.hud`
+ * exactly as it does when it runs on its own. Everything here is therefore namespaced `arcade-` or
+ * `lobby`, so that nothing a game does can reach the fade, the loading card or the error page. */
+
+:root {
+  --arcade-bg: #05060b;
+  --glow: #ff7a3c;
+  --font-display: "Audiowide", "Arial Black", Impact, sans-serif;
+  --font-body: "Rajdhani", ui-sans-serif, system-ui, sans-serif;
+  --font-arcade: "Press Start 2P", monospace;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--arcade-bg); overflow: hidden; }
+body { font-family: var(--font-body); font-size: 15px; color: #e8f6ff; user-select: none; -webkit-user-select: none; }
+#app { position: fixed; inset: 0; }
+canvas.game { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+
+.arcade-mount { position: absolute; inset: 0; }
+
+/* ---- shell chrome ---- */
+
+/* Covers the swap from one game to the next. Always present, never in the way. */
+.arcade-fade {
+  position: absolute; inset: 0; z-index: 90;
+  background: #000; opacity: 0; pointer-events: none;
+  transition: opacity 220ms ease;
+}
+.arcade-fade.on { opacity: 1; }
+
+.arcade-boot {
+  position: absolute; inset: 0; z-index: 95;
+  display: none; place-items: center;
+  font-family: var(--font-arcade); font-size: 13px; letter-spacing: 0.22em;
+  color: #7fe7ff; text-shadow: 0 0 14px rgba(80, 200, 255, 0.55);
+  pointer-events: none;
+}
+.arcade-boot.on { display: grid; animation: arcade-blink 1.1s steps(2, end) infinite; }
+@keyframes arcade-blink { 50% { opacity: 0.35; } }
+
+.arcade-fatal {
+  position: absolute; inset: 0; z-index: 100;
+  display: grid; align-content: center; justify-items: center; gap: 1rem;
+  padding: 6vh 6vw; background: rgba(4, 5, 12, 0.96); overflow: auto;
+}
+.arcade-fatal h2 { margin: 0; font-family: var(--font-display); font-size: 1.5rem; letter-spacing: 0.12em; color: #ff5c7a; }
+.arcade-fatal pre {
+  max-width: 70ch; max-height: 40vh; overflow: auto; margin: 0;
+  padding: 1rem; border: 1px solid #2a3350; border-radius: 6px;
+  background: #0a0d18; color: #9fb4d8; font-size: 12px; line-height: 1.5; white-space: pre-wrap;
+}
+.arcade-fatal div { display: flex; gap: 0.75rem; }
+.arcade-fatal button {
+  padding: 0.7em 1.3em; border: 1px solid #3a4a6e; border-radius: 4px;
+  background: #131a2e; color: #cfe6ff;
+  font-family: var(--font-arcade); font-size: 10px; letter-spacing: 0.12em; cursor: pointer;
+}
+.arcade-fatal button:hover { background: #1d2846; color: #fff; }
+
+/* ---- lobby ---- */
+
+.lobby { position: absolute; inset: 0; z-index: 10; pointer-events: none; }
+.lobby > * { pointer-events: auto; }
+
+.lobby-sign {
+  position: absolute; top: 3.5vh; left: 50%; transform: translateX(-50%);
+  display: flex; align-items: baseline; gap: 0.5em;
+  font-family: var(--font-display); letter-spacing: 0.3em; white-space: nowrap;
+  pointer-events: none;
+}
+.lobby-sign span { font-size: clamp(13px, 2.1vw, 22px); color: #8fa6c8; }
+.lobby-sign em {
+  font-style: normal; font-size: clamp(18px, 3vw, 32px); color: #fff;
+  text-shadow: 0 0 18px var(--glow), 0 0 42px var(--glow);
+  transition: text-shadow 400ms ease;
+}
+
+.lobby-arrow {
+  position: absolute; top: 50%; transform: translateY(-50%);
+  width: 3.2rem; height: 3.2rem; padding: 0 0 0.2em;
+  border: 1px solid rgba(140, 180, 230, 0.25); border-radius: 50%;
+  background: rgba(10, 14, 26, 0.55); color: #cfe6ff;
+  font-size: 2rem; line-height: 1; cursor: pointer;
+  transition: background 160ms ease, border-color 160ms ease;
+}
+.lobby-arrow:hover { background: rgba(24, 34, 60, 0.9); border-color: var(--glow); }
+.lobby-arrow.left { left: 3vw; }
+.lobby-arrow.right { right: 3vw; }
+
+.lobby-plate {
+  position: absolute; left: 50%; bottom: 4vh; transform: translateX(-50%);
+  display: grid; justify-items: center; gap: 0.45rem;
+  width: min(92vw, 40rem); text-align: center;
+}
+.lobby-plate h1 {
+  margin: 0; font-family: var(--font-display);
+  font-size: clamp(20px, 4vw, 38px); letter-spacing: 0.1em; color: #fff;
+  text-shadow: 0 0 20px var(--glow);
+  transition: text-shadow 400ms ease;
+}
+.lobby-plate .lineage { margin: 0; font-family: var(--font-arcade); font-size: clamp(7px, 1.1vw, 10px); letter-spacing: 0.14em; color: var(--glow); }
+.lobby-plate .blurb { margin: 0 0 0.2rem; max-width: 34rem; font-size: clamp(13px, 1.6vw, 16px); line-height: 1.4; color: #a9bcd8; }
+
+.dots { display: flex; gap: 0.55rem; }
+.dot {
+  width: 0.6rem; height: 0.6rem; padding: 0; border: 0; border-radius: 50%;
+  background: #33405e; cursor: pointer; transition: background 220ms ease, box-shadow 220ms ease, transform 220ms ease;
+}
+.dot.on { background: var(--glow); box-shadow: 0 0 12px var(--glow); transform: scale(1.25); }
+
+.lobby-start {
+  margin-top: 0.35rem; padding: 0.85em 1.8em;
+  border: 1px solid var(--glow); border-radius: 4px;
+  background: transparent; color: #fff;
+  font-family: var(--font-arcade); font-size: clamp(8px, 1.2vw, 11px); letter-spacing: 0.18em; cursor: pointer;
+  transition: background 160ms ease, box-shadow 160ms ease;
+  animation: arcade-coin 1.6s ease-in-out infinite;
+}
+.lobby-start:hover { background: var(--glow); color: #0a0a12; box-shadow: 0 0 24px var(--glow); }
+@keyframes arcade-coin { 50% { box-shadow: 0 0 18px var(--glow); } }
+
+@media (max-width: 620px) {
+  .lobby-arrow { width: 2.6rem; height: 2.6rem; font-size: 1.6rem; }
+  .lobby-plate .blurb { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .arcade-fade, .lobby-sign em, .lobby-plate h1 { transition-duration: 1ms; }
+  .arcade-boot.on, .lobby-start { animation: none; }
+}

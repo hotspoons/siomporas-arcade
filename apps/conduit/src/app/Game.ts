@@ -32,6 +32,7 @@ import { Records } from './Records'
 import { XrSession } from '../xr/XrSession'
 import { TouchSource } from '../input/TouchSource'
 import { isTouchDevice } from '@apex/engine/app/platform'
+import { Disposer } from '@apex/engine/app/Disposer'
 
 export type GameState = 'title' | 'running' | 'paused' | 'summary'
 
@@ -50,6 +51,13 @@ export class Game implements LoopClient {
   readonly perf: PerfOverlay
   readonly tune: TunePanel
   readonly loop: GameLoop
+  /** Everything the constructor hooked onto the window, ready to be unhooked. */
+  private readonly gone = new Disposer()
+  /**
+   * Set by the arcade shell: how to leave for the marquees. Null when the game is being
+   * served on its own, where there is nowhere to go and no way out is offered.
+   */
+  onExit: (() => void) | null = null
   readonly audio = new AudioWorld()
   readonly records = new Records()
   readonly xr: XrSession
@@ -133,9 +141,9 @@ export class Game implements LoopClient {
     this.menus.onNavigate = () => this.audio.ui('move')
     this.menus.onSelect = () => this.audio.ui('select')
     this.audio.setVolumes(s.audio)
-    window.addEventListener('resize', () => this.resize())
-    window.addEventListener('blur', () => this.audio.setMuted(true))
-    window.addEventListener('focus', () => this.audio.setMuted(false))
+    this.gone.on(window, 'resize', () => this.resize())
+    this.gone.on(window, 'blur', () => this.audio.setMuted(true))
+    this.gone.on(window, 'focus', () => this.audio.setMuted(false))
     this.resize()
     if (s.showPerf) this.perf.toggle(true)
     this.enterTitle()
@@ -352,6 +360,24 @@ export class Game implements LoopClient {
     this.view.tunnelUniforms.uEdgeColor.value.set(cb === 'none' ? 0xffc857 : cb === 'tritanopia' ? 0xff3b8a : 0x4d8dff)
   }
 
+
+  /**
+   * Hand the page back: stop the loop, drop the GL context and the audio hardware, and
+   * unhook every listener. The arcade calls this when the player walks back out to the
+   * marquees; a standalone build never does, because closing the tab does the same job.
+   *
+   * The DOM is not touched here. Every overlay this game made was parented to the container
+   * the shell handed it, and the shell removes that whole element straight afterwards.
+   */
+  dispose(): void {
+    this.gone.run()
+    this.loop.stop()
+    this.input.detach(window)
+    this.xr.dispose()
+    this.menus.dispose()
+    this.view.dispose()
+    this.audio.dispose()
+  }
 
   resize(): void {
     const w = window.innerWidth

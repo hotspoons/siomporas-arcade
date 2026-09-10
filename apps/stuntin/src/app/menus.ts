@@ -51,9 +51,10 @@ export function buildMenus(game: Game) {
         { kind: 'action', label: 'REPLAYS · A:\\', hint: 'Watch a saved run', onSelect: () => game.menus.push(replays()) },
         { kind: 'action', label: 'SETTINGS', onSelect: () => game.menus.push(settings()) },
         { kind: 'action', label: 'CONTROLS', onSelect: () => game.menus.push(controls()) },
+        ...(game.onExit ? [{ kind: 'action', label: 'BACK TO THE ARCADE', onSelect: () => game.onExit?.() } as MenuItem] : []),
       ],
       footer: game.touch ? 'Tap to select · tilt to steer, ⟲ recalibrates · GAS right thumb, BRAKE left' : 'Enter / A select · Esc / B back · F3 or 0 perf',
-      onBack: () => {},
+      onBack: () => game.onExit?.(),
     }
   }
 

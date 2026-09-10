@@ -41,6 +41,11 @@ export class InputMap {
     this.gamepad.attach(target)
   }
 
+  detach(target: Window): void {
+    this.keyboard.detach(target)
+    this.gamepad.detach(target)
+  }
+
   private keyDown(action: Action): boolean {
     const codes = this.keys[action]
     if (!codes) return false

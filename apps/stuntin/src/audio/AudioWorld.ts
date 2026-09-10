@@ -95,6 +95,19 @@ export class AudioWorld {
     this.applyVolumes()
   }
 
+  /**
+   * Close the audio hardware. A browser allows only a handful of AudioContexts per page, and the
+   * arcade opens one per game entered, so leaving one running is not merely untidy — the fourth or
+   * fifth game to be started gets no sound at all.
+   */
+  dispose(): void {
+    const ctx = this.ctx
+    this.ctx = null
+    void ctx?.close().catch(() => {
+      /* already closed, or closing on a context the page is tearing down anyway */
+    })
+  }
+
   setMuted(m: boolean): void {
     this.muted = m
     this.applyVolumes()

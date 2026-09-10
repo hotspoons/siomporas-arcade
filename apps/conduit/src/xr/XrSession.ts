@@ -126,6 +126,14 @@ export class XrSession {
     void this.session?.end()
   }
 
+  /** Walking out of the game walks out of the headset too. */
+  dispose(): void {
+    void this.session?.end()
+    this.session = null
+    this.active = false
+    this.controllers.session = null
+  }
+
   private onEnd(): void {
     this.session = null
     this.active = false

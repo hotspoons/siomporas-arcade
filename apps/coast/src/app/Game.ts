@@ -27,6 +27,7 @@ import { builtinAsWorld } from '../world/builtin'
 import { checkWorld } from '../world/types'
 import type { WorldData } from '../world/types'
 import { keyLabel } from '@apex/engine/input/bindings'
+import { Disposer } from '@apex/engine/app/Disposer'
 
 /** Short label for a standard-mapping pad button id like 'b2'. */
 function padLabel(b: string | undefined): string {
@@ -51,6 +52,13 @@ export class Game implements LoopClient {
   readonly perf: PerfOverlay
   readonly tune: TunePanel
   readonly loop: GameLoop
+  /** Everything the constructor hooked onto the window, ready to be unhooked. */
+  private readonly gone = new Disposer()
+  /**
+   * Set by the arcade shell: how to leave for the marquees. Null when the game is being
+   * served on its own, where there is nowhere to go and no way out is offered.
+   */
+  onExit: (() => void) | null = null
   readonly audio = new AudioWorld()
   readonly haptics: Haptics
   readonly touch: TouchSource | null = null
@@ -149,9 +157,9 @@ export class Game implements LoopClient {
     this.menus.onSelect = () => this.audio.ui('select')
     this.audio.setVolumes(s.audio)
     this.audio.setStation(s.station)
-    window.addEventListener('resize', () => this.resize())
-    window.addEventListener('blur', () => this.audio.setMuted(true))
-    window.addEventListener('focus', () => this.audio.setMuted(false))
+    this.gone.on(window, 'resize', () => this.resize())
+    this.gone.on(window, 'blur', () => this.audio.setMuted(true))
+    this.gone.on(window, 'focus', () => this.audio.setMuted(false))
     this.resize()
     if (s.showPerf) this.perf.toggle(true)
     this.enterTitle()
@@ -383,6 +391,24 @@ export class Game implements LoopClient {
     this.hud.setVisible(this.state !== 'title' && !inBuffer)
     this.view.hudEnabled = this.state !== 'title'
     this.view.hudLayer.units = this.settings.data.units
+  }
+
+  /**
+   * Hand the page back: stop the loop, drop the GL context and the audio hardware, and
+   * unhook every listener. The arcade calls this when the player walks back out to the
+   * marquees; a standalone build never does, because closing the tab does the same job.
+   *
+   * The DOM is not touched here. Every overlay this game made was parented to the container
+   * the shell handed it, and the shell removes that whole element straight afterwards.
+   */
+  dispose(): void {
+    this.gone.run()
+    this.loop.stop()
+    this.input.detach(window)
+    this.editor.dispose()
+    this.menus.dispose()
+    this.view.dispose()
+    this.audio.dispose()
   }
 
   resize(): void {

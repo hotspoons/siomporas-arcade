@@ -5,6 +5,7 @@ import { Particles } from '@apex/engine/render/Particles'
 import { Sky } from '@apex/engine/render/Sky'
 import type { RenderStats } from '@apex/engine/render/RenderStats'
 import type { Style, StyleFrameInfo } from '@apex/engine/render/styles/Style'
+import { disposeObject3D } from '@apex/engine/render/dispose'
 import type { CarSpec } from '../sim/CarSpec'
 import type { SimEvent } from '../sim/Events'
 import type { Snapshot } from '../sim/Snapshot'
@@ -87,6 +88,20 @@ export class RenderWorld {
     this.ground.setTrack(track)
     this.stats.chunks = track.lanes.length
     this.rig.reset()
+  }
+
+  /**
+   * Give the GPU back everything. Called when the arcade unmounts the game; a standalone build
+   * never reaches it, because the tab closing does the same job.
+   */
+  dispose(): void {
+    this.style?.detach()
+    this.style = null
+    disposeObject3D(this.scene)
+    this.renderer.dispose()
+    // Release the context now rather than at the next collection: browsers cap how many live
+    // WebGL contexts a page may hold, and the arcade makes a fresh one for every game entered.
+    this.renderer.forceContextLoss()
   }
 
   setStyle(style: Style): void {

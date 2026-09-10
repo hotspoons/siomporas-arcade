@@ -1,8 +1,12 @@
-# Publish each game to its own Cloudflare Worker on a push to main.
+# Publish the arcade to Cloudflare on a push to main.
 #
-# The three sites are static: Vite builds them, Wrangler uploads the built files as Worker assets,
-# and each Worker claims its own custom domain (see the wrangler.jsonc beside each app). Nothing here
-# needs a Cloudflare Pages project, and there is no server code to deploy.
+# There is one site now — apps/arcade, which mounts all three games — and one Worker behind it.
+# The site is static: Vite builds it, Wrangler uploads the built files as Worker assets, and the
+# Worker claims arcade.siomporas.com (see apps/arcade/wrangler.jsonc). Nothing here needs a
+# Cloudflare Pages project, and there is no server code to deploy.
+#
+# The one other Worker is a redirect holding an address that predates all this. See DEPLOY.md for
+# what to do about apex/stuntin/radrun.siomporas.com, which this no longer publishes anything to.
 #
 # Two repository secrets are required, both from the Cloudflare dashboard:
 #   CLOUDFLARE_API_TOKEN    a token with "Edit Cloudflare Workers", scoped to the account
@@ -47,16 +51,12 @@ jobs:
       max-parallel: 1
       matrix:
         include:
-          - app: coast
-            domain: radrun.siomporas.com
-          - app: stuntin
-            domain: stuntin.siomporas.com
-          # The old address, kept alive: a Worker that redirects to the new one. Nothing to build.
+          - app: arcade
+            domain: arcade.siomporas.com
+          # An old address, kept alive: a Worker that redirects into the arcade. Nothing to build.
           - app: drivin-redirect
             domain: drivin.siomporas.com
             build: skip
-          - app: conduit
-            domain: apex.siomporas.com
     # Secrets cannot be read in an `if:` directly, so they come in as environment variables and the
     # publish step checks those: no credentials yet means build-and-stop rather than a failed run.
     env:

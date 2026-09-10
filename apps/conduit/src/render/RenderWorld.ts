@@ -22,6 +22,7 @@ import { SpeedLines } from './vfx/SpeedLines'
 import { TrackProps } from './vfx/TrackProps'
 import type { Style, StyleFrameInfo } from '@apex/engine/render/styles/Style'
 import type { RenderStats } from '@apex/engine/render/RenderStats'
+import { disposeObject3D } from '@apex/engine/render/dispose'
 
 
 export class RenderWorld {
@@ -122,6 +123,20 @@ export class RenderWorld {
     u.uBoostColor.value.setHSL((hue + 0.45) % 1, 1, 0.62)
     u.uFogColor.value.copy(this.bg)
     this.sky.setPalette(hue, this.bg)
+  }
+
+  /**
+   * Give the GPU back everything. Called when the arcade unmounts the game; a standalone build
+   * never reaches it, because the tab closing does the same job.
+   */
+  dispose(): void {
+    this.style?.detach()
+    this.style = null
+    disposeObject3D(this.scene)
+    this.renderer.dispose()
+    // Release the context now rather than at the next collection: browsers cap how many live
+    // WebGL contexts a page may hold, and the arcade makes a fresh one for every game entered.
+    this.renderer.forceContextLoss()
   }
 
   setStyle(style: Style): void {

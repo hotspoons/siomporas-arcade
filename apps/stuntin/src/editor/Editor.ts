@@ -23,6 +23,7 @@ import type { TrackStore } from '../app/TrackStore'
 import { brushTerrain, clampTerrain, flatTerrain, resizeTerrain, sampleHeight, terrainIndex } from '../sim/terrain'
 import { LINK_TIGHTNESS_DEFAULT, linkPoint, portWorld, type Link, type PortRef } from '../sim/links'
 import { LEVEL_H } from '../sim/Tuning'
+import { Disposer } from '@apex/engine/app/Disposer'
 
 const GROUP_COLORS: Record<PieceDef['group'], string> = { basic: '#2f6b8a', curves: '#3b8a5c', stunts: '#a3552a', flow: '#7a4aa0', scenery: '#4a7a3a' }
 const DECOR_COLORS: Record<string, string> = { water: '#2f7fbf', trees: '#2f7a2c', building: '#8a8a94', gas: '#c0703a' }
@@ -58,6 +59,9 @@ interface DialogButton {
 }
 
 export class Editor {
+  /** Everything this editor hooked onto the window, ready to be unhooked. */
+  private readonly gone = new Disposer()
+
   readonly el: HTMLElement
   private readonly canvas: HTMLCanvasElement
   private readonly ctx: CanvasRenderingContext2D
@@ -213,16 +217,21 @@ export class Editor {
       if (this.mode === 'terrain') return
       if (!(e.shiftKey && e.altKey)) this.openMenu(e)
     })
-    window.addEventListener('pointermove', (e) => this.onPaletteDrag(e))
-    window.addEventListener('pointerup', (e) => this.onPaletteDrop(e))
-    window.addEventListener('keydown', (e) => this.onKey(e))
-    window.addEventListener('keyup', (e) => {
+    this.gone.on(window, 'pointermove', (e) => this.onPaletteDrag(e))
+    this.gone.on(window, 'pointerup', (e) => this.onPaletteDrop(e))
+    this.gone.on(window, 'keydown', (e) => this.onKey(e))
+    this.gone.on(window, 'keyup', (e) => {
       if (e.code === 'Space') this.spaceHeld = false
     })
-    window.addEventListener('resize', () => (this.dirty = true))
-    window.addEventListener('pointerdown', (e) => {
+    this.gone.on(window, 'resize', () => (this.dirty = true))
+    this.gone.on(window, 'pointerdown', (e) => {
       if (this.menu && !this.menu.contains(e.target as Node)) this.closeMenu()
     })
+  }
+
+  /** The editor outlives every screen in the game, so only the game's own teardown reaches it. */
+  dispose(): void {
+    this.gone.run()
   }
 
   show(): void {

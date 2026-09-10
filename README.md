@@ -1,22 +1,58 @@
 # siomporas-arcade
 
 A collection of games inspired by my favourites from the 80s and 90s. Three of
-them so far, in TypeScript and three.js, playable in a browser and on a phone.
+them so far, in TypeScript and three.js, playable in a browser and on a phone —
+in one arcade, at https://arcade.siomporas.com.
 
 | Game | Owes it to | Play |
 |---|---|---|
-| **Turbo Radrun** | OutRun, Turbo OutRun, Rad Mobile | https://radrun.siomporas.com |
-| **Stuntin’** | Hard Drivin’, Stunts | https://stuntin.siomporas.com |
-| **Apex Conduit** | S.T.U.N. Runner | https://apex.siomporas.com |
+| **Turbo Radrun** | OutRun, Turbo OutRun, Rad Mobile | https://arcade.siomporas.com/radrun |
+| **Stuntin’** | Hard Drivin’, Stunts | https://arcade.siomporas.com/stuntin |
+| **Apex Conduit** | S.T.U.N. Runner | https://arcade.siomporas.com/apex |
 
 They share one runtime and two ways of looking: a modern post-processed one, and
-a deliberately low-res flat-shaded CRT one on the same frame. Apps never import
-each other and `packages/engine` never imports an app, so any one of them could
-leave on its own. Publishing is [DEPLOY.md](DEPLOY.md): a push to `main` builds
-all three and puts each on its own address.
+a deliberately low-res flat-shaded CRT one on the same frame. Publishing is
+[DEPLOY.md](DEPLOY.md): a push to `main` builds and puts up one Worker.
+
+## The arcade
+
+The landing page is a room: the cabinets stood in a row, marquees lit, scrolled
+left and right with the arrows, a swipe, the wheel or a gamepad. It is drawn in
+three.js by the same engine the games use, and it is mounted by the same shell
+that mounts them.
+
+Selecting a cabinet does not reload the page. `apps/arcade/src/Shell.ts` owns the
+URL and exactly one mounted module at a time; a game is a lazily-imported chunk
+that gets a fresh container and canvas on the way in and gives back its loop, its
+GL context, its audio and its listeners on the way out. three and the engine are
+shared by all four, so they are downloaded once — the first game costs about
+300 kB on top of the lobby, the second and third rather less.
+
+The URL is the whole of the app's state. `/` is the lobby, `/radrun` is a game,
+and `/radrun/settings/controls` is that game two menus deep, so the browser's
+Back button escapes one menu, then the game, then the site. Menus get this for
+free by calling `menus.bindRouter(host.router, host.route)`; see
+[`packages/engine/src/app/Router.ts`](packages/engine/src/app/Router.ts).
+
+Each game keeps its own `index.html` and dev server — `just dev coast` still
+serves Turbo Radrun on its own at :5182, which is where the tuning panel, the
+operator bridge and the smoke harness live. `apps/arcade` is the only thing that
+is deployed, and it is the only app allowed to import another: the games still
+know nothing of each other or of the shell.
+
+Cabinet artwork, and the prompt that generates more of it, is
+[apps/arcade/ART.md](apps/arcade/ART.md).
+
+**Worth trying next:** the shell gives every game a *fresh* WebGL context rather
+than sharing one, which costs a few hundred milliseconds on each switch and is
+the reason for the fade. Sharing a single renderer would make it instant, but
+each `RenderWorld` would have to stop owning its renderer first, and one game's
+leftover GPU state showing up in the next is a nasty class of bug. The teardown
+had to exist either way; that is what is in place now.
 
 | Path | What | Dev port |
 |---|---|---|
+| [`apps/arcade`](apps/arcade) | **the arcade** — 3D lobby, router, mount/unmount shell. The only deployable | 5183 |
 | [`apps/conduit`](apps/conduit) | **APEX CONDUIT** — tunnel racer-shooter (wall-riding craft, roof laser, shockwave, checkpoints, VR, phone tilt) | 5180 |
 | [`apps/stuntin`](apps/stuntin) | **STUNTIN’** — stunt-track driving game with a tile-grid track editor (loops, corkscrews, banked turns, speedbowls, splits/joins, jumps, tunnels), crash replays | 5181 |
 | [`apps/coast`](apps/coast) | **TURBO RADRUN** — OutRun-lineage sprite-scaling road racer: forks, checkpoints, turbo, chase and cockpit views, radio; sprites baked from CC0 models | 5182 |
@@ -27,9 +63,10 @@ all three and puts each on its own address.
 Open in the dev container (VS Code → *Reopen in Container*), then:
 
 ```bash
-just dev conduit      # or: just dev stuntin / just dev coast
+just dev              # the arcade, everything, :5183
+just dev conduit      # or: just dev stuntin / just dev coast — one game, on its own
 just check            # lockfile + oxlint + tsc -b + vitest across the workspace
-just build            # all apps → apps/*/dist
+just build            # everything → apps/*/dist
 just tunnel stuntin   # anonymous HTTPS tunnel to an app's dev server (phones)
 just bridge-dev conduit && just bridge 'apex.snap.vehicle.s'   # live JS shell into the page
 just                  # every recipe

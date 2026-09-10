@@ -46,9 +46,10 @@ export function buildMenus(game: Game) {
       ...(game.xr.supported
         ? [{ kind: 'action', label: 'ENTER VR', hint: 'Quest / SteamVR browser', onSelect: () => void game.xr.enter() } as MenuItem]
         : []),
+      ...(game.onExit ? [{ kind: 'action', label: 'BACK TO THE ARCADE', onSelect: () => game.onExit?.() } as MenuItem] : []),
     ],
     footer: game.touch ? 'Tap to select · tilt to steer, ⟲ recalibrates · thrust/brake/fire are the side pads' : 'Enter / A to select · Esc / B to back · F3 or 0 perf overlay',
-    onBack: () => {},
+    onBack: () => game.onExit?.(),
   })
 
   const pause = (): MenuScreen => ({

@@ -28,3 +28,7 @@ shots/
 apps/*/test/_*.test.ts
 
 ext/*
+
+# arcade: mirrored from each game's public/ by scripts/sync-arcade-assets.mjs
+apps/arcade/public/assets/
+apps/arcade/public/fonts/

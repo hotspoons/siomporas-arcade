@@ -13,6 +13,7 @@ import type { Lane, Track } from '../sim/Track'
 import { makeAcross, sectionAt, wallOf } from '../sim/bank'
 import { CURB_WIDTH, ROAD_HALF_WIDTH, TUBE_RADIUS, TUBE_RAMP } from '../sim/Tuning'
 import { smoothstep } from '@apex/engine/math/scalar'
+import { pillarHeight } from '../sim/pillars'
 import { PILLAR_SIDE, PILLAR_SPACING } from '../sim/Tuning'
 
 const STEP = 2
@@ -339,9 +340,9 @@ export class RoadBuilder {
     const sc = new Vector3()
     for (let s = PILLAR_SPACING / 2; s < t.length; s += PILLAR_SPACING) {
       t.frameAt(s, f)
-      const h = f.pos.y - track.groundHeight(f.pos.x, f.pos.z) - 0.4
-      // Only under upright, elevated road.
-      if (h < 1.5 || f.up.y < 0.7 || !f.surface) continue
+      // The same rule the sim collides against; see sim/pillars.ts.
+      const h = pillarHeight(f.pos.y, track.groundHeight(f.pos.x, f.pos.z), f.up.y, f.surface)
+      if (h <= 0) continue
       for (const side of [-PILLAR_SIDE, PILLAR_SIDE]) {
         this.v.copy(f.pos).addScaled(f.right, side)
         p.set(this.v.x, this.v.y - h / 2 - 0.2, this.v.z)

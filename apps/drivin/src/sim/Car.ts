@@ -12,6 +12,7 @@ import type { CarSpec } from './CarSpec'
 import type { InputFrame } from './InputFrame'
 import { arcFromOut, edgeOf, makeAcross, outEdgeOf, sectionAt, sectionAtOut, type Bank } from './bank'
 import { makeLaneFrame, type LaneFrame, type LaneHit } from './PathTable'
+import { pillarHeight } from './pillars'
 import type { Lane, Track } from './Track'
 import {
   AIR_GLITCH_ACCEL,
@@ -827,8 +828,18 @@ export class Car {
     // Structures in the way: elevated slabs at bumper height, banked berms, tunnel skins, pillars, scenery.
     const hit = this.hitsStructure(lanes) || this.hitsScenery()
     if (hit) {
+      const nx = this.pos.x
+      const nz = this.pos.z
       this.pos.x = px
       this.pos.z = pz
+      // Standing in the thing already, rather than running into it? Then holding the car where it is
+      // pins it there for ever: every tick it is still inside, so every tick it is stopped, and the
+      // throttle can never take it out. Let the move stand and let it drive its way out.
+      if (this.hitsStructure(lanes) || this.hitsScenery()) {
+        this.pos.x = nx
+        this.pos.z = nz
+        return
+      }
       if (Math.abs(v) > CRASH_IMPACT_SPEED) {
         this.crashCause = `hit ${hit}`
         this.event = 'crash'
@@ -956,13 +967,16 @@ export class Car {
       // bonnet fits under. Above that it is a bridge to drive beneath.
       if (inside && rise > CLIMB_STEP && (grounded || rise < DECK_CLEARANCE))
         return f.up.y < 0.95 ? 'the embankment' : `the underside of the ${this.track.data.pieces[lane.pieceIndex]?.type ?? 'road'}`
-      const clearance = f.pos.y - 0.4
-      if (clearance >= 1.5 && f.up.y >= 0.7 && ax < PILLAR_SIDE + 3) {
+      // Pillars, under the nearest place one would stand — and only where one really does. Height is
+      // measured over the landscape below, the same way the renderer decides whether to draw one: a
+      // road lying flat on a hillside is at grade however far above sea level it is.
+      const standing = pillarHeight(f.pos.y, this.track.groundHeight(f.pos.x, f.pos.z), f.up.y, f.surface)
+      if (standing > 0 && ax < PILLAR_SIDE + 3) {
         const k = Math.round((h.s - PILLAR_SPACING / 2) / PILLAR_SPACING)
         const sP = PILLAR_SPACING / 2 + k * PILLAR_SPACING
         if (sP > 0 && sP < lane.table.length) {
           lane.table.frameAt(sP, f)
-          if (f.pos.y - 0.4 >= 1.5 && f.up.y >= 0.7 && f.surface) {
+          if (pillarHeight(f.pos.y, this.track.groundHeight(f.pos.x, f.pos.z), f.up.y, f.surface) > 0) {
             for (const side of [-PILLAR_SIDE, PILLAR_SIDE]) {
               const dx = this.pos.x - (f.pos.x + f.right.x * side)
               const dz = this.pos.z - (f.pos.z + f.right.z * side)

@@ -10,6 +10,7 @@ import { clamp, expApproach, smoothstep, wrapAngle } from '@apex/engine/math/sca
 import { Vec3 } from '@apex/engine/math/Vec3'
 import type { CarSpec } from './CarSpec'
 import type { InputFrame } from './InputFrame'
+import { arcFromOut, edgeOf, makeAcross, outEdgeOf, sectionAt, sectionAtOut, type Bank } from './bank'
 import { makeLaneFrame, type LaneFrame, type LaneHit } from './PathTable'
 import type { Lane, Track } from './Track'
 import {
@@ -45,6 +46,8 @@ import {
   GRIP_LATERAL,
   HEADING_MAX,
   LAND_MIN_ALIGN,
+  BANK_GRIP,
+  LOAD_MAX,
   LAND_TOLERANCE,
   PATH_STEP,
   ROAD_HALF_WIDTH,
@@ -107,6 +110,10 @@ export class Car {
   private readonly probeFrame = makeLaneFrame()
   private readonly probeHit: LaneHit = { s: 0, x: 0, h: 0, over: 0 }
   private readonly probePos = new Vec3()
+  /** Where across the surface the car is, once the speedbowl wall past the road's edge is accounted for. */
+  private readonly section = makeAcross()
+  private readonly probeSection = makeAcross()
+  private readonly edgeSection = makeAcross()
   /** The landscape height under the car last tick: what the airborne test watches, decks aside. */
   private terrainY = 0
   /**
@@ -297,7 +304,15 @@ export class Car {
     const spec = this.spec
     // Gravity along the path (loops slow you going up) and along right (banking).
     const gTan = -GRAVITY * f.tan.y
-    const gRight = -GRAVITY * f.right.y
+    // The surface under the car, which on a speedbowl is not the deck's own plane: past the road's
+    // edge the wall keeps curving, so the way gravity falls across it — and how hard the corner
+    // presses the car into it — depend on how far up the wall the car is sitting.
+    const sec = sectionAt(lane.bank, f.right.y, this.lateral, this.section)
+    const wallCos = Math.cos(sec.a)
+    const wallSin = Math.sin(sec.a)
+    const surfRightY = f.right.y * wallCos + f.up.y * wallSin
+    const surfUpY = f.up.y * wallCos - f.right.y * wallSin
+    const gRight = -GRAVITY * surfRightY
     this.longitudinal(dt, input, gTan, this.onGrass ? GRASS_DRAG : 0)
     const v = this.speed
 
@@ -308,7 +323,16 @@ export class Car {
     const tube = lane.profile === 'tube'
     const wallA = tube ? this.lateral / TUBE_RADIUS : 0
     const wallW = tube ? this.tubeWall(lane, this.s) : 1
-    const grip = GRIP_LATERAL * spec.grip * (this.onGrass ? GRASS_GRIP_SCALE : 1) * (input.handbrake ? 0.55 : 1)
+    // What the surface under the car is worth. A flat road gives the tyres one car's weight and that
+    // is the whole budget, which is why a corner used to run out at the same speed however steeply it
+    // was banked — the banking only ever added the little that BANK_HOLD carried. Steepness now pays:
+    // the corner presses the car into the surface and the tyres hold more for it, so the way to carry
+    // more speed through a bowl is to climb it. Capped, because tyres do not scale for ever.
+    // The floor only keeps the division finite at dead vertical; put it any higher and it quietly
+    // caps the steepest part of a wall, which is the part that is supposed to pay.
+    const upright = Math.max(0.08, Math.abs(surfUpY))
+    const load = clamp(Math.abs(surfUpY) + (BANK_GRIP * Math.abs(surfRightY)) / upright, 0.2, LOAD_MAX)
+    const grip = GRIP_LATERAL * spec.grip * (tube ? 1 : load) * (this.onGrass ? GRASS_GRIP_SCALE : 1) * (input.handbrake ? 0.55 : 1)
     const authority = spec.agility * (1 - (1 - STEER_HIGH_SPEED_FACTOR) * clamp((Math.abs(v) - STEER_FULL_SPEED) / (spec.topSpeed - STEER_FULL_SPEED), 0, 1))
     // Yaw the wheel asks for; nothing turns at a standstill.
     const yawDemand = input.steer * STEER_RATE * authority * clamp(Math.abs(v) / STEER_FULL_SPEED, 0, 1) * Math.sign(v || 1)
@@ -355,7 +379,7 @@ export class Car {
     }
 
     // Normal force: leave the surface over crests or when too slow in a loop.
-    const normal = v * v * f.kUp + GRAVITY * f.up.y
+    const normal = v * v * f.kUp + GRAVITY * surfUpY
     if (!f.surface || normal < 0) {
       this.launch(f)
       return
@@ -373,9 +397,11 @@ export class Car {
       }
     }
 
-    // Edges.
-    const edge = ROAD_HALF_WIDTH + CURB_WIDTH
-    if (Math.abs(this.lateral) > ROAD_HALF_WIDTH) {
+    // Edges. On a banked piece the far side of the road is the top of its wall, which is road all
+    // the way up: the curb and the grass are only where the deck actually stops.
+    const deckEdge = edgeOf(lane.bank, f.right.y, this.lateral)
+    const edge = deckEdge + CURB_WIDTH
+    if (Math.abs(this.lateral) > deckEdge) {
       if (lane.profile === 'tube') {
         // At a mouth the wall is still rising from curb height, so running past it puts you on the
         // grass; inside the bore there is no edge at all — the arc wrapped above.
@@ -664,7 +690,7 @@ export class Car {
     this.mode = 'track'
     this.lane = lane
     this.s = clamp(s, 0, lane.table.length)
-    this.lateral = x
+    this.lateral = arcFromOut(lane.bank, f.right.y, x, this.probeSection)
     this.speed = this.vel.dot(f.tan)
     // On a tube wall the sideways direction is the wall's tangent, not the floor's right.
     if (wallA !== undefined) {
@@ -698,8 +724,9 @@ export class Car {
       lane.table.project(this.probePos, this.probeFrame, this.probeHit)
       const f = this.probeFrame
       const h = this.probeHit
-      if (!f.surface || h.over > 0.5 || Math.abs(h.x) > ROAD_HALF_WIDTH + CURB_WIDTH) continue
-      const deck = f.pos.y + h.x * f.right.y
+      if (!f.surface || h.over > 0.5 || Math.abs(h.x) > outEdgeOf(lane.bank, f.right.y, h.x) + CURB_WIDTH) continue
+      const sec = sectionAtOut(lane.bank, f.right.y, h.x, this.probeSection)
+      const deck = f.pos.y + h.x * f.right.y + sec.lift * f.up.y
       if (deck > y && deck - refY <= CLIMB_STEP) {
         y = deck
         this.tookDeck = true
@@ -807,6 +834,12 @@ export class Car {
         this.event = 'crash'
         return
       }
+      // Leaning on it rather than running into it: stop, and stop saying so. A car held against a
+      // wall by the throttle should sit there, not chatter a bump sixty times a second.
+      if (Math.abs(v) < 3) {
+        this.speed = 0
+        return
+      }
       this.speed = -v * BUMP_BOUNCE
       this.event = 'bump'
       return
@@ -841,7 +874,7 @@ export class Car {
       lane.table.project(this.pos, this.scratch, this.hit)
       const f = this.scratch
       if (!f.surface || this.hit.over > 0.5) continue
-      const { across, rise, inside } = this.deckAgainst(f, this.hit)
+      const { across, rise, inside } = this.deckAgainst(f, this.hit, lane.bank)
       if (!inside) continue
       const type = this.track.data.pieces[lane.pieceIndex]?.type ?? `link (lane ${lane.id})`
       detail = ` — ${type} piece ${lane.pieceIndex}, ${rise >= 0 ? 'up' : 'down'} ${Math.abs(rise).toFixed(2)} m, ${across.toFixed(2)} m across`
@@ -864,13 +897,22 @@ export class Car {
    * metre down, and measuring against the centre line reports a road overhead that is really under
    * your wheels.
    */
-  private deckAgainst(f: LaneFrame, h: LaneHit): { across: number; rise: number; inside: boolean; grounded: boolean } {
-    const edge = ROAD_HALF_WIDTH + CURB_WIDTH
+  private deckAgainst(f: LaneFrame, h: LaneHit, bank?: Bank): { across: number; rise: number; inside: boolean; grounded: boolean } {
+    const edge = outEdgeOf(bank, f.right.y, h.x) + CURB_WIDTH
     const lean = Math.hypot(f.right.x, f.right.z)
     const dx = this.pos.x - f.pos.x
     const dz = this.pos.z - f.pos.z
     const across = lean > 1e-3 ? Math.abs((dx * f.right.x + dz * f.right.z) / lean) : Math.hypot(dx, dz)
-    const deckY = f.pos.y + clamp(h.x, -edge, edge) * f.right.y
+    const at = clamp(h.x, -edge, edge)
+    const sec = sectionAtOut(bank, f.right.y, at, this.probeSection)
+    const deckY = f.pos.y + at * f.right.y + sec.lift * f.up.y
+    // How far the deck actually reaches over the ground on this side, wall included: a wall standing
+    // near enough vertical is nine metres of surface and three metres of footprint, and it is the
+    // footprint a car beside it has to be measured against.
+    const rim = sectionAtOut(bank, f.right.y, Math.sign(h.x || 1) * edge, this.edgeSection)
+    const rimX = rim.out * f.right.x + rim.lift * f.up.x
+    const rimZ = rim.out * f.right.z + rim.lift * f.up.z
+    const reach = Math.max(Math.hypot(rimX, rimZ), edge * Math.max(lean, 0.3))
     // Measure from the highest thing the car is actually standing on, not from the middle of it.
     // Straddling the edge of a bank the outside wheels are up on the deck while the body's centre is
     // still below it — being half parked on something is not the same as being under it — and the
@@ -880,8 +922,8 @@ export class Car {
     // earth and everything under it is earth too; a bridge's edges are both up in the air and you
     // drive under it. Without the distinction a bank is a wall you can drive through, or an elevated
     // road is solid to the ground.
-    const grounded = f.pos.y - Math.abs(f.right.y) * edge - this.pos.y < CLIMB_STEP
-    return { across, rise: deckY - Math.max(this.pos.y, contact), inside: across <= edge * Math.max(lean, 0.3) + CAR_HALF_WIDTH, grounded }
+    const grounded = f.pos.y - Math.abs(f.right.y) * ROAD_HALF_WIDTH - this.pos.y < CLIMB_STEP
+    return { across, rise: deckY - Math.max(this.pos.y, contact), inside: across <= reach + CAR_HALF_WIDTH, grounded }
   }
 
   /**
@@ -908,7 +950,7 @@ export class Car {
         }
         continue
       }
-      const { rise, inside, grounded } = this.deckAgainst(f, h)
+      const { rise, inside, grounded } = this.deckAgainst(f, h, lane.bank)
       // A wall when the deck stands over the car and reaches the ground beside it — the earth of a
       // berm, the side of a ramp — and, when it does not reach the ground, only up to the height a
       // bonnet fits under. Above that it is a bridge to drive beneath.
@@ -959,9 +1001,17 @@ export class Car {
         this.right.cross(this.forward, this.up).normalize()
         return
       }
-      this.pos.copy(f.pos).addScaled(f.right, this.lateral).addScaled(f.up, CAR_RIDE)
-      this.up.copy(f.up)
-      this.forward.copy(f.tan).rotateAxis(f.up, -this.heading)
+      // Past the road's edge a banked piece curves on up into its wall; inside the road this is the
+      // flat deck and the section is a no-op.
+      const sec = sectionAt(this.lane.bank, f.right.y, this.lateral, this.section)
+      if (sec.a !== 0) {
+        this.up.copy(f.right).scale(-Math.sin(sec.a)).addScaled(f.up, Math.cos(sec.a)).normalize()
+        this.pos.copy(f.pos).addScaled(f.right, sec.out).addScaled(f.up, sec.lift).addScaled(this.up, CAR_RIDE)
+      } else {
+        this.up.copy(f.up)
+        this.pos.copy(f.pos).addScaled(f.right, this.lateral).addScaled(f.up, CAR_RIDE)
+      }
+      this.forward.copy(f.tan).rotateAxis(this.up, -this.heading)
       this.right.cross(this.forward, this.up).normalize()
     } else if (this.mode === 'ground') {
       this.right.cross(this.forward, this.up).normalize()

@@ -2,6 +2,7 @@
 // reachable lane baked (in driving direction) into a PathTable. Also the
 // spatial index the car uses to find surfaces while airborne or on grass.
 
+import type { Bank } from './bank'
 import { smoothstep } from '@apex/engine/math/scalar'
 import { Vec3 } from '@apex/engine/math/Vec3'
 import { CELL, LEVEL_H, PATH_STEP, ROAD_HALF_WIDTH } from './Tuning'
@@ -67,6 +68,8 @@ export interface Lane {
   reversed: boolean
   table: PathTable
   profile: Profile
+  /** The speedbowl wall this lane's deck grows past its outer edge, if it has one. */
+  bank?: Bank
   isStart: boolean
   /** Lanes reachable from the end of this one (0 = dead end, 2 = split). */
   next: Lane[]
@@ -231,6 +234,7 @@ export class Track {
         reversed,
         table: bakeLane(def, p, laneIndex, reversed, this.heights ? (x, z) => sampleHeight(this.heights, data.size, x, z) : null, true, true, this.padHeights.get(pieceIndex)),
         profile: def.profile,
+        bank: def.bank,
         isStart: Boolean(def.isStart),
         next: [],
         prev: [],

@@ -6,6 +6,7 @@
 // whether the surface exists there (gaps).
 
 import { smoothstep } from '@apex/engine/math/scalar'
+import type { Bank } from './bank'
 import { CELL, CORK_RADIUS, LEVEL_H, LOOP_RADIUS, LOOP_SHIFT } from './Tuning'
 
 export type Side = 'N' | 'E' | 'S' | 'W'
@@ -66,6 +67,8 @@ export interface PieceDef {
   decor?: 'water' | 'trees' | 'building' | 'gas'
   /** Banked road: roll ramps in/out only against unbanked neighbours and the centreline lifts so the inner edge stays at grade. */
   banked?: boolean
+  /** A speedbowl wall past the outer edge of the deck: see sim/bank.ts. */
+  bank?: Bank
 }
 
 const UP = { ux: 0, uy: 1, uz: 0 }
@@ -262,7 +265,7 @@ export const PIECES: PieceDef[] = [
   {
     type: 'bank6',
     label: 'Speedbowl bank',
-    desc: "The speedbowl: a huge, steeply banked 90° turn, 6×6. Flat out if you dare.",
+    desc: "The speedbowl: a huge 90° turn banked to fifty-four degrees, with a near-vertical wall above it. Ride up the wall and it will hold three hundred.",
     w: 6,
     h: 6,
     ports: [
@@ -274,6 +277,10 @@ export const PIECES: PieceDef[] = [
     profile: 'road',
     group: 'curves',
     banked: true,
+    // Four metres of lip turning the deck up to eighty-five degrees, and then seven metres of lane
+    // standing at it: the third lane, near enough vertical, where the corner presses you into the
+    // surface hard enough to hold three hundred miles an hour.
+    bank: { wallTo: 1.48, radius: 8, run: 7 },
   },
   {
     type: 'cross',

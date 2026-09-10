@@ -10,11 +10,14 @@ import { BoxGeometry, BufferAttribute, BufferGeometry, Group, InstancedMesh, Mat
 import { Vec3 } from '@apex/engine/math/Vec3'
 import { makeLaneFrame } from '../sim/PathTable'
 import type { Lane, Track } from '../sim/Track'
+import { makeAcross, sectionAt, wallOf } from '../sim/bank'
 import { CURB_WIDTH, ROAD_HALF_WIDTH, TUBE_RADIUS, TUBE_RAMP } from '../sim/Tuning'
 import { smoothstep } from '@apex/engine/math/scalar'
 import { PILLAR_SIDE, PILLAR_SPACING } from '../sim/Tuning'
 
 const STEP = 2
+/** Rings across a speedbowl's wall: enough that the curve reads as a curve at speed. */
+const WALL_STEPS = 5
 /** How far the tarmac stands above the graded ground, and the curbs above that (metres). */
 const SLAB_LIFT = 0.16
 const CURB_LIFT = 0.34
@@ -28,6 +31,8 @@ export class RoadBuilder {
   private extras: Group[] = []
   private readonly frame = makeLaneFrame()
   private readonly v = new Vec3()
+  private readonly n = new Vec3()
+  private readonly section = makeAcross()
   private meshes: Mesh[] = []
   private pillars: InstancedMesh | null = null
   triangles = 0
@@ -94,45 +99,76 @@ export class RoadBuilder {
     this.triangles = 0
   }
 
-  /** Flat ribbon: curb | road | curb, curbs raised 0.15 m. */
+  /**
+   * Flat ribbon: curb | road | curb, curbs raised 0.15 m — and on a speedbowl, the wall past the
+   * outer edge instead of that side's curb, which is more road standing progressively on its side.
+   *
+   * The cross-section has to be laid out *in order across the road*, wall included, or the strip
+   * folds back on itself and you get a fan of stretched curb across the middle of the corner.
+   */
   private ribbon(lane: Lane): BufferGeometry {
     const t = lane.table
     const rings = Math.max(2, Math.ceil(t.length / STEP) + 1)
-    // Cross-section lateral offsets and heights: outer curb edge, curb top, road edge, centre, road edge, curb top, outer curb edge.
     const W = ROAD_HALF_WIDTH
     const C = CURB_WIDTH
-    // The road is a built-up slab: the tarmac stands clear of the ground and the curbs higher still, so
-    // the graded landscape (which is only sampled every few metres) can never show through it.
-    const xs = [-W - C, -W, -W, 0, W, W, W + C]
-    const ys = [CURB_LIFT, CURB_LIFT, SLAB_LIFT, SLAB_LIFT, SLAB_LIFT, CURB_LIFT, CURB_LIFT]
-    const kinds = [1, 1, 0, 0, 0, 1, 1]
-    const across = xs.length
+    // Which side the wall stands on, taken from the middle of the piece where the banking is at full
+    // roll: at the ends it ramps out to nothing and the wall's points fold down onto the road edge.
+    t.frameAt(t.length / 2, this.frame)
+    const side = wallOf(lane.bank, this.frame.right.y).side
+    const steps = lane.bank && side !== 0 ? WALL_STEPS : 0
+    // The road is a built-up slab: the tarmac stands clear of the ground and the curbs higher still,
+    // so the graded landscape (which is only sampled every few metres) can never show through it.
+    // `wall` is a fraction of however much wall this ring has; the rest are fixed offsets.
+    const cuts: { at: number; wall: boolean; y: number; kind: number }[] = []
+    const curb = (x: number) => cuts.push({ at: x, wall: false, y: CURB_LIFT, kind: 1 })
+    const road = (x: number) => cuts.push({ at: x, wall: false, y: SLAB_LIFT, kind: 0 })
+    if (side < 0) for (let i = steps; i >= 1; i--) cuts.push({ at: i / steps, wall: true, y: SLAB_LIFT, kind: 0 })
+    else {
+      curb(-W - C)
+      curb(-W)
+    }
+    road(-W)
+    road(0)
+    road(W)
+    if (side > 0) for (let i = 1; i <= steps; i++) cuts.push({ at: i / steps, wall: true, y: SLAB_LIFT, kind: 0 })
+    else {
+      curb(W)
+      curb(W + C)
+    }
+    const across = cuts.length
     const pos = new Float32Array(rings * across * 3)
     const nor = new Float32Array(rings * across * 3)
-    const road = new Float32Array(rings * across * 4)
+    const roadAttr = new Float32Array(rings * across * 4)
     const idx: number[] = []
     const f = this.frame
     let n = 0
     for (let r = 0; r < rings; r++) {
       const s = Math.min(t.length, r * STEP)
       t.frameAt(s, f)
-      // Gaps: collapse the ring so no surface is drawn.
       const present = f.surface
+      // How much wall this station has: none until the banking has ramped in.
+      const { side: here, maxA } = wallOf(lane.bank, f.right.y)
+      const arc = here === side && side !== 0 ? maxA * (lane.bank?.radius ?? 0) : 0
       for (let k = 0; k < across; k++) {
         const i = r * across + k
-        const x = present ? xs[k] : 0
-        const y = present ? ys[k] : -0.5
+        const cut = cuts[k]
+        const lateral = cut.wall ? side * (W + arc * cut.at) : cut.at
+        const sec = sectionAt(lane.bank, f.right.y, lateral, this.section)
+        const x = present ? sec.out : 0
+        const y = present ? cut.y + sec.lift : -0.5
         this.v.copy(f.pos).addScaled(f.right, x).addScaled(f.up, y)
         pos[i * 3] = this.v.x
         pos[i * 3 + 1] = this.v.y
         pos[i * 3 + 2] = this.v.z
-        nor[i * 3] = f.up.x
-        nor[i * 3 + 1] = f.up.y
-        nor[i * 3 + 2] = f.up.z
-        road[i * 4] = s
-        road[i * 4 + 1] = xs[k]
-        road[i * 4 + 2] = kinds[k]
-        road[i * 4 + 3] = f.kRight
+        // The wall leans away from the deck, so its normal leans with it.
+        this.n.copy(f.right).scale(-Math.sin(sec.a)).addScaled(f.up, Math.cos(sec.a))
+        nor[i * 3] = this.n.x
+        nor[i * 3 + 1] = this.n.y
+        nor[i * 3 + 2] = this.n.z
+        roadAttr[i * 4] = s
+        roadAttr[i * 4 + 1] = lateral
+        roadAttr[i * 4 + 2] = cut.kind
+        roadAttr[i * 4 + 3] = f.kRight
       }
       if (r > 0) {
         for (let k = 0; k < across - 1; k++) {
@@ -149,7 +185,7 @@ export class RoadBuilder {
     const g = new BufferGeometry()
     g.setAttribute('position', new BufferAttribute(pos, 3))
     g.setAttribute('normal', new BufferAttribute(nor, 3))
-    g.setAttribute('aRoad', new BufferAttribute(road, 4))
+    g.setAttribute('aRoad', new BufferAttribute(roadAttr, 4))
     g.setIndex(idx)
     return g
   }

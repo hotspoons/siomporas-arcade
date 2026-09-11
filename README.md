@@ -52,6 +52,13 @@ know nothing of each other or of the shell.
 Cabinet artwork, and the prompt that generates more of it, is
 [apps/arcade/ART.md](apps/arcade/ART.md).
 
+There is also a workbench page at
+[arcade.siomporas.com/modem.html](https://arcade.siomporas.com/modem.html), which
+models what a 2400 bit/s call sounds like: both carriers, the guard tone, the
+scrambler, and a V.22 bis handshake whose every duration is the Blue Book's. It
+measures its own claims out of the signal it just synthesised — nothing on it is
+a recording.
+
 **Worth trying next:** the shell gives every game a *fresh* WebGL context rather
 than sharing one, which costs a few hundred milliseconds on each switch and is
 the reason for the fade. Sharing a single renderer would make it instant, but

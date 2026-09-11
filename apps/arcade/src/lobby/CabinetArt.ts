@@ -25,6 +25,8 @@ export class CabinetArt {
    */
   private video: HTMLVideoElement | null = null
   private videoTex: VideoTexture | null = null
+  /** The shape of the glass it has to fill, once a cabinet has said what that is. */
+  private screenAspect = 0
 
   readonly gameId: string
 
@@ -86,13 +88,41 @@ export class CabinetArt {
     this.videoTex = tex
     // Decode one frame now, so a cabinet nobody is looking at shows a still of its game rather than
     // a black pane. Paused video keeps whatever frame it is on.
+    el.addEventListener('loadedmetadata', () => this.fitAttract())
     el.currentTime = 1
     try {
       await el.play()
       window.setTimeout(() => el.pause(), 120)
+      this.fitAttract()
     } catch {
       /* a browser that will not autoplay even muted: the pane stays dark, which is survivable */
     }
+  }
+
+  /**
+   * The glass is a 4:3 tube and the loop was filmed through whatever window the recorder had, so the
+   * film is cropped to fit rather than squashed into it — the same cover fit the side art gets. Both
+   * halves of this arrive late and in either order (a cabinet says what shape its screen is; the
+   * video says what shape it is), so it is worked out again whenever one of them turns up.
+   */
+  fitAttractTo(aspect: number): void {
+    this.screenAspect = aspect
+    this.fitAttract()
+  }
+
+  private fitAttract(): void {
+    const tex = this.videoTex
+    const el = this.video
+    if (!tex || !el || !el.videoWidth || !this.screenAspect) return
+    const k = el.videoWidth / el.videoHeight / this.screenAspect
+    if (k > 1) {
+      tex.repeat.set(1 / k, 1)
+      tex.offset.set((1 - 1 / k) / 2, 0)
+    } else {
+      tex.repeat.set(1, k)
+      tex.offset.set(0, (1 - k) / 2)
+    }
+    tex.needsUpdate = true
   }
 
   /** The attract loop as a texture, or null where none was filmed. */

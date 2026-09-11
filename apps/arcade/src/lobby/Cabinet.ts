@@ -30,9 +30,9 @@ import {
   Mesh,
   MeshBasicMaterial,
   MeshStandardMaterial,
-  PlaneGeometry,
   PointLight,
   Shape,
+  ShapeGeometry,
   SphereGeometry,
   TorusGeometry,
   Vector3,
@@ -40,36 +40,117 @@ import {
 import type { ArcadeGame } from '../catalog'
 import type { CabinetArt } from './CabinetArt'
 
-/** Metres. Modelled life size, so the room and the camera can be too. */
+/**
+ * The control deck sits a hand's width under the sign, which is a real light: at a white albedo it
+ * is lit at dozens of times the exposure the rest of the room is, clips, and comes out as a flat
+ * orange slab. Printed vinyl is not a white card, and this is where that gets said.
+ *
+ * The bezel has the same problem and cannot be solved the same way, because it is the one panel you
+ * put your nose against — so it is unlit instead, like the marquee and the screen either side of
+ * it, and its brightness is dialled by selection rather than by where a lamp happens to be. That
+ * keeps the artwork the colour it was drawn, which at 30 cm is the whole point of it.
+ */
+const DECK_ALBEDO = 0.34
+const BEZEL_DIM = { off: 0.34, on: 0.88 }
+
+/**
+ * Metres, traced off a scan of a real Ikari Warriors upright — 1829 tall, 840 deep, 641 wide — with
+ * the silhouette projected along its width and measured at every height. Worth doing properly,
+ * because the side of an upright is a shape people know by heart whether or not they have ever
+ * thought about it, and it is not a shape anybody guesses right.
+ *
+ * Bottom to top, the front of the machine is: a base standing back; a control panel swelling out
+ * from under it to the lip, which is the furthest-forward part of the whole cabinet; the deck
+ * running back and up; then the monitor, leaning back **19 degrees** — that tilt is the single thing
+ * that reads as "arcade" and the thing every reconstruction gets wrong; then a panel raked sharply
+ * forward over the top of it, which is where the speakers live; then the sign, vertical, tucked
+ * right back over the lip; and a top that slopes down towards the back.
+ *
+ * Everything below the sign is the scan's own measurements. The sign itself is as tall as its
+ * artwork needs, which makes ours a taller-headed machine than the one scanned: a marquee here is
+ * the menu, so it is legible first and period-correct second.
+ */
 export const CAB = {
   width: 0.72,
-  depth: 0.86,
-  /** Top of the kick panel, where the control deck starts. */
-  kickTop: 0.9,
-  /** How far the control deck reaches back, and how far it climbs over that run. */
-  deckRun: 0.24,
-  deckRise: 0.12,
-  /** The wheel on the control deck, which is geometry rather than a hole in the artwork. */
+  depth: 0.81,
+  /** Thickness of a side board, and how far behind their front edges the machine itself sits. */
+  side: 0.028,
+  recess: 0.012,
+  /** The base, standing back under the control panel. */
+  baseZ: 0.125,
+  baseTop: 0.76,
+  /** The control panel's lip: nothing on the machine stands further forward than this. */
+  lipY: 0.9,
+  /**
+   * The deck, running back and up from that lip at the scan's own rake. Two centimetres deeper than
+   * the scan, which is a joystick cabinet: a 21 cm wheel lying in the panel needs 21 cm of it, and
+   * the panel it came off has 18 cm total. Everything above rides on this number —
+   * the deck's back edge is the monitor's foot — so it is kept as close to the scan as a wheel allows.
+   */
+  deckRun: 0.2,
+  deckRise: 0.118,
+  /** The wheel itself, which is geometry rather than a hole in the artwork. */
   wheelRadius: 0.105,
-  /** The screen plane, from the back of the deck up to the shelf under the marquee. */
-  bezelTop: 1.5,
-  bezelLean: 0.13,
-  /** The marquee sits above the bezel, set back, and is as tall as its artwork demands. */
-  marqueeGap: 0.05,
-  marqueeInset: 0.04,
+  /** The monitor: how far it climbs, and how far back it leans doing it. 19.1 degrees, measured. */
+  bezelRise: 0.42,
+  bezelLean: 0.145,
+  /** The glass: a 20-inch tube, which is what the bezel was measured around. */
+  screen: { w: 0.4, h: 0.3 },
+  /** The speakers, in the panel raked over the monitor. */
+  speakerRadius: 0.052,
+  speakerX: 0.155,
+  /** The sign: how far back its face sits, and how high its foot is. */
+  marqueeZ: 0.095,
+  marqueeBottom: 1.63,
   /** Height of the sign for a game whose marquee art has not landed yet. */
-  marqueeFallbackH: 0.4,
+  marqueeFallbackH: 0.34,
+  /** The top: a lip above the sign, then flat, then sloping away to the back. */
+  topRise: 0.015,
+  topChamfer: 0.012,
+  topFlat: 0.274,
+  backDrop: 0.226,
 } as const
+
+/** The width of everything between the two boards: the body, and every face that carries art. */
+const INNER = CAB.width - 2 * CAB.side
 
 interface Pt {
   z: number
   y: number
 }
 
-const deckTop: Pt = { z: CAB.deckRun, y: CAB.kickTop + CAB.deckRise }
-const bezelBottom: Pt = { z: deckTop.z, y: deckTop.y + 0.04 }
-const bezelTop: Pt = { z: deckTop.z + CAB.bezelLean, y: CAB.bezelTop }
-const marqueeZ = bezelTop.z + CAB.marqueeInset
+const lip: Pt = { z: 0, y: CAB.lipY }
+const deckBack: Pt = { z: CAB.deckRun, y: CAB.lipY + CAB.deckRise }
+/** The monitor runs from the back of the deck up and back. */
+const bezelBottom: Pt = deckBack
+const bezelTop: Pt = { z: deckBack.z + CAB.bezelLean, y: deckBack.y + CAB.bezelRise }
+/** The sign's foot, which is also the top of the panel the speakers are in. */
+const marqueeFoot: Pt = { z: CAB.marqueeZ, y: CAB.marqueeBottom }
+
+/** Everything that carries art stands `recess` behind the boards, between them. */
+const recessed = (p: Pt): Pt => ({ z: p.z + CAB.recess, y: p.y })
+
+/** The glass, centred on the bezel face rather than inset from its edges — a tube is a fixed size. */
+const bezelLen = Math.hypot(bezelTop.z - bezelBottom.z, bezelTop.y - bezelBottom.y)
+const alongBezel = (t: number): Pt => ({
+  z: bezelBottom.z + (bezelTop.z - bezelBottom.z) * t,
+  y: bezelBottom.y + (bezelTop.y - bezelBottom.y) * t,
+})
+const screenBottom: Pt = recessed(alongBezel((1 - CAB.screen.h / bezelLen) / 2))
+const screenTop: Pt = recessed(alongBezel((1 + CAB.screen.h / bezelLen) / 2))
+
+/**
+ * What bezel artwork has to fit: the proportions of the bezel face, and where in it the hole is, as
+ * fractions of the face. A generated bezel is a frame around an opening of the generator's choosing,
+ * which is never this one, so `scripts/lib/bezel.mjs` nine-slices it onto exactly these numbers
+ * before it is installed. That script keeps its own copy of them, and apps/arcade/test/bezel.test.ts
+ * fails if the two ever drift apart.
+ */
+export const BEZEL_FIT = ((): { aspect: number; hole: { x0: number; y0: number; x1: number; y1: number } } => {
+  const x = (1 - CAB.screen.w / INNER) / 2
+  const y = (1 - CAB.screen.h / bezelLen) / 2
+  return { aspect: INNER / bezelLen, hole: { x0: x, y0: y, x1: 1 - x, y1: 1 - y } }
+})()
 
 /**
  * Where a face sits in the world: the middle of it, the outward normal, and the rotation about X
@@ -91,23 +172,65 @@ function faceFrame(a: Pt, b: Pt): { y: number; z: number; ny: number; nz: number
 /** Silhouette space to world space. */
 const zy = (p: Pt): [number, number] => [p.y, -p.z]
 
-/** The side silhouette, in silhouette space, with the front at z = 0. */
-function silhouette(marqueeH: number): Shape {
+/**
+ * The side of the machine, front at z = 0, floor at y = 0 — the board's outline and, stepped back by
+ * `recess`, the body's too. One shape: the side board is not a different silhouette from the cabinet
+ * it is bolted to, it is the same silhouette standing a centimetre proud of it, and the screen, the
+ * speakers, the deck and the sign all sit in the channel that leaves between the two boards.
+ *
+ * The deep notch between the control panel and the sign is the whole shape. Filling it in — which is
+ * what a rectangle, or a convex hull, or any amount of good intentions will do — gets you a wardrobe.
+ */
+function profilePoints(marqueeH: number): Pt[] {
+  const signTop = CAB.marqueeBottom + marqueeH
+  const top = signTop + CAB.topRise
+  return [
+    { z: CAB.baseZ, y: 0 },
+    { z: CAB.baseZ, y: CAB.baseTop }, // the base, standing back
+    { z: 0.084, y: 0.8 }, // the control panel swelling out from under it
+    { z: 0.03, y: 0.86 },
+    lip, // the lip: the front of the machine
+    deckBack, // the deck, running back and up
+    bezelTop, // the monitor, leaning back 19 degrees
+    marqueeFoot, // the speaker panel, raked forward over it
+    { z: CAB.marqueeZ, y: signTop }, // the sign, vertical
+    { z: CAB.marqueeZ + CAB.topChamfer, y: top }, // a lip above it
+    { z: CAB.topFlat, y: top }, // flat over the top
+    { z: CAB.depth, y: top - CAB.backDrop }, // sloping away to the back
+    { z: CAB.depth, y: 0 }, // down the back
+  ]
+}
+
+/** The same outline, stepped back: the machine between the boards. */
+function bodyPoints(marqueeH: number): Pt[] {
+  return profilePoints(marqueeH).map((p) => (p.z >= CAB.depth - 1e-6 ? p : recessed(p)))
+}
+
+function shapeOf(pts: Pt[]): Shape {
   const s = new Shape()
-  const mBottom = CAB.bezelTop + CAB.marqueeGap
-  const mTop = mBottom + marqueeH
-  s.moveTo(0, 0)
-  s.lineTo(0, CAB.kickTop) // front face, floor to deck
-  s.lineTo(deckTop.z, deckTop.y) // the control deck, climbing back
-  s.lineTo(bezelBottom.z, bezelBottom.y)
-  s.lineTo(bezelTop.z, bezelTop.y) // the screen, leaning back
-  s.lineTo(marqueeZ, bezelTop.y) // the shelf under the sign
-  s.lineTo(marqueeZ, mTop) // the sign
-  s.lineTo(CAB.depth, mTop) // over the top
-  s.lineTo(CAB.depth, 0) // down the back
+  s.moveTo(pts[0].z, pts[0].y)
+  for (const p of pts.slice(1)) s.lineTo(p.z, p.y)
   s.closePath()
   return s
 }
+
+/**
+ * The outline of a flank and the proportions of its bounding box, as fractions with the front of the
+ * cabinet at the left and y running down the way an image does. This is what side art is drawn to:
+ * `scripts/cabinet-template.mjs` draws a blank of exactly this shape for a generator to fill, and
+ * keeps its own copy of the numbers — apps/arcade/test/bezel.test.ts fails if the two drift apart.
+ *
+ * A nominal 16:9 marquee, because a template cannot know how tall a sign a game has not drawn yet
+ * will turn out to be. The difference between that and a real one is a few millimetres of board.
+ */
+export const FLANK_FIT = ((): { aspect: number; outline: Array<[number, number]> } => {
+  const marqueeH = INNER / (16 / 9)
+  const height = CAB.marqueeBottom + marqueeH + CAB.topRise
+  return {
+    aspect: CAB.depth / height,
+    outline: profilePoints(marqueeH).map((p) => [p.z / CAB.depth, 1 - p.y / height] as [number, number]),
+  }
+})()
 
 /**
  * A textured quad spanning silhouette-space points `a` (bottom) to `b` (top), `width` across X and
@@ -147,6 +270,76 @@ function facePlane(a: Pt, b: Pt, width: number, lift: number): BufferGeometry {
   return g
 }
 
+/**
+ * A flank: the side board's outline, not a rectangle.
+ *
+ * Side art is a decal stuck on the side of a machine, so it stops where the board does. A rectangle
+ * the size of the bounding box hangs off the back of it and over the top, which reads as a poster
+ * standing behind the cabinet rather than as artwork on it. So the board's own outline is
+ * triangulated flat and hung a couple of millimetres off it.
+ *
+ * The artwork is drawn to that bounding box (ART.md says so), and is fitted to it *covering* rather
+ * than stretched: a panel that came back the wrong shape loses a little off one pair of edges
+ * instead of making the whole machine look squashed.
+ *
+ * Two things about the mapping, both easy to get backwards:
+ *
+ *   u   runs toward the back of the cabinet on the right flank and toward the front on the left.
+ *       Those are the same direction — screen-right — because you look at the two from opposite
+ *       sides. Making both run the same way in world space is what puts one logo on mirrored.
+ *   winding   the triangles come out facing +x, which is the right way for the right flank only, so
+ *       the left one's are turned round rather than being made double-sided.
+ */
+function flankGeometry(marqueeH: number, height: number, sign: number, artAspect: number | null): BufferGeometry {
+  const g = new ShapeGeometry(shapeOf(profilePoints(marqueeH)))
+  const pos = g.getAttribute('position')
+  const uv = new Float32Array(pos.count * 2)
+  const box = CAB.depth / height
+  const a = artAspect ?? box
+  const uk = a > box ? box / a : 1
+  const vk = a > box ? 1 : a / box
+  for (let i = 0; i < pos.count; i++) {
+    // Shape space is the silhouette's: x is depth measured back from the front, y is height.
+    const sz = pos.getX(i)
+    const sy = pos.getY(i)
+    const u = sign > 0 ? sz / CAB.depth : 1 - sz / CAB.depth
+    uv[i * 2] = 0.5 + (u - 0.5) * uk
+    uv[i * 2 + 1] = 0.5 + (sy / height - 0.5) * vk
+    pos.setXYZ(i, sign * (CAB.width / 2 + 0.002), sy, -sz)
+  }
+  g.setAttribute('uv', new Float32BufferAttribute(uv, 2))
+  const index = g.getIndex()
+  if (sign < 0 && index) {
+    const tri = index.array
+    for (let i = 0; i < tri.length; i += 3) {
+      const swap = tri[i + 1]
+      tri[i + 1] = tri[i + 2]
+      tri[i + 2] = swap
+    }
+    index.needsUpdate = true
+  }
+  pos.needsUpdate = true
+  g.computeVertexNormals()
+  return g
+}
+
+/**
+ * The largest piece of a face that artwork of a given shape fits inside, centred on it.
+ *
+ * A control panel drawn as a 6:1 strip does not become a 3:1 panel by being stretched onto one. It
+ * becomes a band of artwork across the middle of a painted deck — which is what a real control panel
+ * is anyway, and is the only outcome here that neither distorts the artwork nor throws any of it
+ * away. `null` for artwork whose shape is unknown, which then simply fills the face.
+ */
+function fitFace(a: Pt, b: Pt, width: number, artAspect: number | null): { a: Pt; b: Pt; width: number } {
+  if (!artAspect) return { a, b, width }
+  const len = Math.hypot(b.z - a.z, b.y - a.y)
+  if (artAspect < width / len) return { a, b, width: len * artAspect }
+  const keep = width / artAspect / len
+  const at = (t: number): Pt => ({ z: a.z + (b.z - a.z) * t, y: a.y + (b.y - a.y) * t })
+  return { a: at((1 - keep) / 2), b: at((1 + keep) / 2), width }
+}
+
 export class Cabinet {
   readonly group = new Group()
   /** The pane the game plays on — what a pointer has to hit to zoom in on it. */
@@ -165,6 +358,7 @@ export class Cabinet {
 
   private readonly owned: Array<{ dispose(): void }> = []
   private readonly marqueeMat: MeshBasicMaterial
+  private readonly bezelMat: MeshBasicMaterial | null
   private readonly screenMat: MeshBasicMaterial
   private readonly glow: Color
   private lit = 0
@@ -176,28 +370,39 @@ export class Cabinet {
     this.art = art
     this.glow = new Color(game.glow)
     const marqueeAspect = art.aspect('marquee')
-    this.marqueeHeight = marqueeAspect ? CAB.width / marqueeAspect : CAB.marqueeFallbackH
+    this.marqueeHeight = marqueeAspect ? INNER / marqueeAspect : CAB.marqueeFallbackH
     const totalH = this.height
 
-    // --- body -------------------------------------------------------------
-    const body = new ExtrudeGeometry(silhouette(this.marqueeHeight), { depth: CAB.width, bevelEnabled: false })
-    // Extruded along its own +Z: stand it up so the silhouette lands in the world zy-plane and the
-    // extrusion runs across X, then centre it on the cabinet's middle.
-    body.rotateY(Math.PI / 2)
-    body.translate(-CAB.width / 2, 0, 0)
-    // DoubleSide because whether the extrusion's caps end up front- or back-facing depends on the
+    // --- body and boards ---------------------------------------------------
+    // DoubleSide because whether an extrusion's caps end up front- or back-facing depends on the
     // winding of a Shape that is easier to read in the order written above than in the right one.
     const bodyMat = new MeshStandardMaterial({ color: game.body, roughness: 0.62, metalness: 0.05, side: DoubleSide })
+    this.owned.push(bodyMat)
+    // Extruded along its own +Z: stood up so the profile lands in the world zy-plane and the
+    // extrusion runs across X. The body is the width between the boards, not the width of the
+    // machine, so the screen and the sign sit in a recess with a board either side of them.
+    const body = new ExtrudeGeometry(shapeOf(bodyPoints(this.marqueeHeight)), { depth: INNER, bevelEnabled: false })
+    body.rotateY(Math.PI / 2)
+    body.translate(-INNER / 2, 0, 0)
     this.group.add(new Mesh(body, bodyMat))
-    this.owned.push(body, bodyMat)
+    this.owned.push(body)
+
+    const boardShape = shapeOf(profilePoints(this.marqueeHeight))
+    for (const sign of [1, -1]) {
+      const board = new ExtrudeGeometry(boardShape, { depth: CAB.side, bevelEnabled: false })
+      board.rotateY(Math.PI / 2)
+      board.translate(sign > 0 ? INNER / 2 : -CAB.width / 2, 0, 0)
+      this.group.add(new Mesh(board, bodyMat))
+      this.owned.push(board)
+    }
 
     // --- marquee ----------------------------------------------------------
     // Basic and untone-mapped, not standard: a marquee is a lightbox. It is a source, not a
     // surface, so it must not go dark when the room does — its brightness is dialled in setSelected.
-    const mBottom = CAB.bezelTop + CAB.marqueeGap
+    const mBottom = CAB.marqueeBottom
     const hasMarquee = art.has('marquee')
     this.marqueeMat = new MeshBasicMaterial({ map: art.texture('marquee'), toneMapped: false })
-    const marqueeGeo = facePlane({ z: marqueeZ, y: mBottom }, { z: marqueeZ, y: mBottom + this.marqueeHeight }, CAB.width, 0.003)
+    const marqueeGeo = facePlane(recessed(marqueeFoot), recessed({ z: CAB.marqueeZ, y: mBottom + this.marqueeHeight }), INNER, 0.003)
     this.group.add(new Mesh(marqueeGeo, this.marqueeMat))
     this.owned.push(marqueeGeo, this.marqueeMat)
 
@@ -205,7 +410,7 @@ export class Cabinet {
     // the glass: level with it, every face below it is lit at grazing incidence and the whole lower
     // half of the cabinet renders black.
     this.marqueeLight = new PointLight(this.glow, 0, 6, 2)
-    this.marqueeLight.position.set(0, mBottom + this.marqueeHeight / 2 - 0.15, 0.55)
+    this.marqueeLight.position.set(0, mBottom + this.marqueeHeight / 2 - 0.12, 0.62)
     this.group.add(this.marqueeLight)
 
     // --- side art ---------------------------------------------------------
@@ -213,30 +418,22 @@ export class Cabinet {
     // rather than leaving a bare side, which is what happens while only half the art exists.
     // Mapped to the silhouette's bounding box, which is what ART.md tells the generator to draw to.
     for (const sign of [1, -1]) {
-      const tex = art.texture(sign > 0 ? 'side-right' : 'side-left') ?? art.texture(sign > 0 ? 'side-left' : 'side-right')
+      const name = sign > 0 ? 'side-right' : 'side-left'
+      const other = sign > 0 ? 'side-left' : 'side-right'
+      const tex = art.texture(name) ?? art.texture(other)
       if (!tex) continue
       const mat = new MeshStandardMaterial({ map: tex, roughness: 0.55 })
-      const geo = new PlaneGeometry(CAB.depth, totalH)
-      // A plane faces +z and a quarter turn each way puts one on each flank facing outward — but the
-      // two then disagree about which way is left, so one of them shows its artwork mirrored. Flip
-      // the far side's u instead of its geometry.
-      if (sign < 0) {
-        const uv = geo.getAttribute('uv')
-        for (let i = 0; i < uv.count; i++) uv.setX(i, 1 - uv.getX(i))
-        uv.needsUpdate = true
-      }
-      const m = new Mesh(geo, mat)
-      m.position.set(sign * (CAB.width / 2 + 0.002), totalH / 2, -CAB.depth / 2)
-      m.rotation.y = sign * (Math.PI / 2)
-      this.group.add(m)
+      const geo = flankGeometry(this.marqueeHeight, totalH, sign, art.aspect(name) ?? art.aspect(other))
+      this.group.add(new Mesh(geo, mat))
       this.owned.push(geo, mat)
     }
 
     // --- control deck and bezel -------------------------------------------
     const deckTex = art.texture('panel')
     if (deckTex) {
-      const g = facePlane({ z: 0, y: CAB.kickTop }, deckTop, CAB.width, 0.003)
-      const m = new MeshStandardMaterial({ map: deckTex, roughness: 0.5 })
+      const f = fitFace(recessed(lip), recessed(deckBack), INNER, art.aspect('panel'))
+      const g = facePlane(f.a, f.b, f.width, 0.003)
+      const m = new MeshStandardMaterial({ map: deckTex, roughness: 0.5, color: new Color().setScalar(DECK_ALBEDO) })
       this.group.add(new Mesh(g, m))
       this.owned.push(g, m)
     }
@@ -245,7 +442,7 @@ export class Cabinet {
     // for a wheel and three buttons is artwork with holes in it, which is a hard thing to ask a
     // generator for and a worse thing to get slightly wrong. Real controls standing proud of the
     // deck also read as a cabinet from across the room, which a dark circle does not.
-    const deck = faceFrame({ z: 0, y: CAB.kickTop }, deckTop)
+    const deck = faceFrame(recessed(lip), recessed(deckBack))
     const stand = (lift: number, x: number, along = 0): [number, number, number] => [
       x,
       deck.y + deck.ny * lift + deck.uy * along,
@@ -283,13 +480,15 @@ export class Cabinet {
       this.owned.push(stemGeo, barGeo, gripGeo)
     } else {
       const rim = new TorusGeometry(CAB.wheelRadius, CAB.wheelRadius * 0.16, 8, 28)
+      // Flat in the control surface, not raked up out of it: an arcade wheel lies in the panel at
+      // the panel's own angle, which is why you steer one with your palms rather than your arms.
       const wheel = new Mesh(rim, dark)
-      wheel.position.set(...stand(0.02, -0.04))
+      wheel.position.set(...stand(0.022, -0.04, -0.02))
       wheel.rotation.x = deck.tilt
       this.group.add(wheel)
       const hubGeo = new CylinderGeometry(CAB.wheelRadius * 0.3, CAB.wheelRadius * 0.3, 0.012, 12)
       const hub = new Mesh(hubGeo, dark)
-      hub.position.set(...stand(0.016, -0.04))
+      hub.position.set(...stand(0.018, -0.04, -0.02))
       // A cylinder stands along +y; the quarter turn puts its axis along the face's normal instead.
       hub.rotation.x = deck.tilt + Math.PI / 2
       this.group.add(hub)
@@ -320,47 +519,68 @@ export class Cabinet {
       }
       this.owned.push(buttonGeo)
 
-      // Pedals. A stand-up driving cabinet still has them, on a plate at the foot of the kick panel.
-      const plateGeo = new BoxGeometry(0.34, 0.02, 0.22)
+      // Pedals, on a plate at the foot of the machine. The plate runs back *under* the base rather
+      // than sitting out on the carpet in front of it: the base stands back from the control panel,
+      // so a plate that starts at the front of the machine leaves a hand's width of floor showing
+      // between the two and reads as a separate object someone left there.
+      const plateGeo = new BoxGeometry(0.36, 0.022, 0.34)
       const plate = new Mesh(plateGeo, dark)
-      plate.position.set(0, 0.012, CAB.depth * 0.06)
+      plate.position.set(0, 0.011, 0.03)
       this.group.add(plate)
-      const pedalGeo = new BoxGeometry(0.075, 0.016, 0.13)
+      // Hinged at the back and standing up at the front, which is what a pedal looks like from any
+      // angle you can actually see one from.
+      const pedalGeo = new BoxGeometry(0.082, 0.018, 0.15)
       for (const [px, tilt] of [
-        [-0.075, -0.32],
-        [0.075, -0.26],
+        [-0.085, -0.42],
+        [0.085, -0.34],
       ]) {
         const pedal = new Mesh(pedalGeo, px < 0 ? dark : lit)
-        pedal.position.set(px, 0.045, CAB.depth * 0.06)
+        pedal.position.set(px, 0.05, 0.1)
         pedal.rotation.x = tilt
         this.group.add(pedal)
       }
       this.owned.push(plateGeo, pedalGeo)
     }
 
+    // --- speakers ---------------------------------------------------------
+    // The panel raked forward over the monitor is a speaker baffle and nothing else; a cabinet
+    // without the two grilles in it reads as a kiosk. Rings rather than holes, because they stand
+    // proud of a face the artwork does not cover.
+    const baffle = faceFrame(recessed(bezelTop), recessed(marqueeFoot))
+    const grilleGeo = new CylinderGeometry(CAB.speakerRadius, CAB.speakerRadius, 0.012, 20)
+    const coneGeo = new CylinderGeometry(CAB.speakerRadius * 0.55, CAB.speakerRadius * 0.72, 0.01, 16)
+    for (const sx of [-1, 1]) {
+      const at = (lift: number): [number, number, number] => [sx * CAB.speakerX, baffle.y + baffle.ny * lift, baffle.z + baffle.nz * lift]
+      const ring = new Mesh(grilleGeo, dark)
+      ring.position.set(...at(0.004))
+      ring.rotation.x = baffle.tilt + Math.PI / 2
+      this.group.add(ring)
+      const cone = new Mesh(coneGeo, bodyMat)
+      cone.position.set(...at(0.001))
+      cone.rotation.x = baffle.tilt + Math.PI / 2
+      this.group.add(cone)
+    }
+    this.owned.push(grilleGeo, coneGeo)
+
     const bezelTex = art.texture('bezel')
-    if (bezelTex) {
-      const g = facePlane(bezelBottom, bezelTop, CAB.width, 0.003)
-      const m = new MeshStandardMaterial({ map: bezelTex, roughness: 0.4 })
-      this.group.add(new Mesh(g, m))
-      this.owned.push(g, m)
+    this.bezelMat = bezelTex ? new MeshBasicMaterial({ map: bezelTex }) : null
+    if (this.bezelMat) {
+      const f = fitFace(recessed(bezelBottom), recessed(bezelTop), INNER, art.aspect('bezel'))
+      const g = facePlane(f.a, f.b, f.width, 0.003)
+      this.group.add(new Mesh(g, this.bezelMat))
+      this.owned.push(g, this.bezelMat)
     }
 
     // --- screen -----------------------------------------------------------
     // Inside the bezel's opening: inset all round, and a touch further proud so it reads as glass
     // sitting in a frame rather than as another decal.
-    const inset = 0.1
-    const screenGeo = facePlane(
-      { z: bezelBottom.z + inset * 0.3, y: bezelBottom.y + inset },
-      { z: bezelTop.z - inset * 0.3, y: bezelTop.y - inset },
-      CAB.width - inset * 2,
-      bezelTex ? 0.005 : 0.004,
-    )
+    const screenGeo = facePlane(screenBottom, screenTop, CAB.screen.w, bezelTex ? 0.005 : 0.004)
+    art.fitAttractTo(CAB.screen.w / CAB.screen.h)
     const attract = art.attract()
     // With no attract art the screen is a dark pane rather than a hole: a touch of the game's own
     // colour, so an unfinished cabinet still looks switched on.
     this.screenMat = new MeshBasicMaterial({ map: attract, color: attract ? 0xffffff : new Color(game.body).multiplyScalar(0.5), toneMapped: false })
-    const screenFace = faceFrame({ z: bezelBottom.z + inset * 0.3, y: bezelBottom.y + inset }, { z: bezelTop.z - inset * 0.3, y: bezelTop.y - inset })
+    const screenFace = faceFrame(screenBottom, screenTop)
     this.screenCentre = new Vector3(0, screenFace.y + screenFace.ny * 0.006, screenFace.z + screenFace.nz * 0.006)
     this.screenNormal = new Vector3(0, screenFace.ny, screenFace.nz)
     this.screen = new Mesh(screenGeo, this.screenMat)
@@ -373,7 +593,7 @@ export class Cabinet {
 
   /** The whole cabinet's height, sign included — what the camera's framing needs to know. */
   get height(): number {
-    return CAB.bezelTop + CAB.marqueeGap + this.marqueeHeight
+    return CAB.marqueeBottom + this.marqueeHeight + CAB.topRise
   }
 
   /**
@@ -389,6 +609,7 @@ export class Cabinet {
     // Physical units with quadratic falloff: intensity is candela, so lighting a cabinet two
     // metres away wants tens, not units. Getting this wrong is why the room was black.
     this.marqueeLight.intensity = 3.5 + 24 * t
+    this.bezelMat?.color.setScalar(BEZEL_DIM.off + (BEZEL_DIM.on - BEZEL_DIM.off) * t)
     if (this.screenMat.map) this.screenMat.color.setScalar(0.25 + 0.75 * t)
     // The loop runs on the cabinet being looked at and nowhere else.
     this.art.setAttractPlaying(t > 0.35)

@@ -9,10 +9,12 @@ export class LobbyHud {
   onPick: ((index: number) => void) | null = null
   onStep: ((dir: number) => void) | null = null
   onStart: (() => void) | null = null
+  onWalk: (() => void) | null = null
 
   private readonly title: HTMLElement
   private readonly blurb: HTMLElement
   private readonly dots: HTMLElement[]
+  private readonly walkBtn: HTMLButtonElement
 
   constructor(parent: HTMLElement) {
     this.el = document.createElement('div')
@@ -22,6 +24,8 @@ export class LobbyHud {
       <button class="lobby-arrow left" aria-label="Previous game">‹</button>
       <button class="lobby-arrow right" aria-label="Next game">›</button>
       <button class="lobby-play" aria-label="Play this game">▶</button>
+      <button class="lobby-walk">WALK THE AISLE</button>
+      <p class="lobby-hint">W A S D &nbsp;WALK &nbsp;·&nbsp; DRAG &nbsp;LOOK &nbsp;·&nbsp; CLICK A MACHINE TO WALK OVER &nbsp;·&nbsp; F &nbsp;BACK TO THE ROW</p>
       <footer class="lobby-plate">
         <h1></h1>
         <p class="blurb"></p>
@@ -31,6 +35,11 @@ export class LobbyHud {
 
     this.title = this.el.querySelector('h1')!
     this.blurb = this.el.querySelector('.blurb')!
+    this.walkBtn = this.el.querySelector<HTMLButtonElement>('.lobby-walk')!
+    this.walkBtn.addEventListener('click', (e) => {
+      e.stopPropagation()
+      this.onWalk?.()
+    })
 
     this.el.querySelector<HTMLElement>('.lobby-arrow.left')!.addEventListener('click', (e) => {
       e.stopPropagation()
@@ -75,6 +84,15 @@ export class LobbyHud {
     this.el.classList.toggle('leaning', on)
   }
   private leaning = false
+
+  /**
+   * Walking the aisle: the plate still names whatever machine you are standing nearest, and the
+   * arrows and dots still work — they walk you there rather than sliding the row past you.
+   */
+  setWalking(on: boolean): void {
+    this.el.classList.toggle('walking', on)
+    this.walkBtn.textContent = on ? 'BACK TO THE ROW' : 'WALK THE AISLE'
+  }
 
   show(game: ArcadeGame): void {
     this.title.textContent = game.title

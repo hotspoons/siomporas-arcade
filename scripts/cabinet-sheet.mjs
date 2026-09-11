@@ -25,6 +25,9 @@ import { fileURLToPath } from 'node:url'
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const TEMPLATES = path.join(ROOT, 'apps/arcade/art-templates')
 const GAMES = ['radrun', 'stuntin', 'apex']
+/** The two greys the template is drawn in; see cabinet-template.mjs. */
+const FIELD = '#7a7a7a'
+const SLOT_FIELD = '#8f8f8f'
 
 function magick(args) {
   return execFileSync('magick', args, { encoding: 'utf8', maxBuffer: 1 << 28 })
@@ -85,10 +88,22 @@ for (const [name, slot] of Object.entries(layout.slots)) {
     y: Math.round(slot.y * sheet.h),
   }
   const out = path.join(outDir, `${name}.webp`)
-  magick([work, '-crop', `${box.w}x${box.h}+${box.x}+${box.y}`, '+repage', '-resize', '1024x1024>', '-quality', '88', out])
+  // Trim before encoding: a generator that fills a slot with a band of art centred in the template's
+  // grey leaves that grey in the cut, and it would end up painted on the cabinet. -trim works from
+  // the corner pixel, which in that case is the grey; where the art does reach the edges the corner
+  // is artwork and busy enough that nothing is taken.
+  const cutArgs = [work, '-crop', `${box.w}x${box.h}+${box.x}+${box.y}`, '+repage', '-fuzz', '6%', '-trim', '+repage']
+  // A bezel is a frame, so a generator leaves its middle empty — which means it leaves the
+  // template's grey there, and that grey would be painted on the cabinet around the screen. The
+  // screen is geometry sitting in front of it, so the right colour behind it is black.
+  if (name === 'bezel') cutArgs.push('-fuzz', '10%', '-fill', '#0a0a0a', '-opaque', FIELD, '-fuzz', '10%', '-fill', '#0a0a0a', '-opaque', SLOT_FIELD)
+  magick([...cutArgs, '-resize', '1024x1024>', '-quality', '88', out])
   const final = size(out)
+  const slotAspect = box.w / box.h
+  const gotAspect = final.w / final.h
   cut.push(out)
-  console.log(`  ${name.padEnd(8)} ${final.w}×${final.h} (${(final.w / final.h).toFixed(2)}:1)`)
+  const note = Math.abs(gotAspect - slotAspect) > 0.15 ? `  ← trimmed back from ${slotAspect.toFixed(2)}:1, the slot was not filled` : ''
+  console.log(`  ${name.padEnd(11)} ${final.w}×${final.h} (${gotAspect.toFixed(2)}:1)${note}`)
 }
 
 if (flags.has('--dry-run')) {

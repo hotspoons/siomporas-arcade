@@ -20,6 +20,15 @@ cutting them back out is arithmetic. `--dry-run` writes the cut panels and a con
 `shots/` so you can see whether it kept to the layout before anything is installed. If it wandered,
 say "keep every panel inside its box" and ask again, or fall back to one panel at a time.
 
+Two things it fixes up on the way through, because generators do them every time:
+
+- **A slot it did not fill.** Art drawn as a band centred in the template's grey would carry that
+  grey onto the cabinet, so each cut panel is trimmed back to its artwork. It says when it did that
+  and what the shape became.
+- **A bezel's empty middle.** A bezel is a frame, so the middle comes back as leftover template grey.
+  The screen is geometry sitting in front of it, so that grey is turned black — which is what should
+  be behind a screen.
+
 **One panel at a time.** Attach the single template for that face (`art-templates/side.png` and
 friends) with the same reference art, and install what comes back:
 

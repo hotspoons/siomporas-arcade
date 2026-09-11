@@ -53,7 +53,7 @@ Cabinet artwork, and the prompt that generates more of it, is
 [apps/arcade/ART.md](apps/arcade/ART.md).
 
 There is also a workbench page at
-[arcade.siomporas.com/modem.html](https://arcade.siomporas.com/modem.html), which
+[arcade.siomporas.com/modem](https://arcade.siomporas.com/modem), which
 models what a 2400 bit/s call sounds like: both carriers, the guard tone, the
 scrambler, and a V.22 bis handshake whose every duration is the Blue Book's. It
 measures its own claims out of the signal it just synthesised — nothing on it is

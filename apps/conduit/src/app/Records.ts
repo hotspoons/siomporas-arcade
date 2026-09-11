@@ -1,7 +1,7 @@
 // Local leaderboards and best-run input tapes, per course, in localStorage.
 // Tapes are stored base64-packed so a 10-minute run is ~100 KB.
 
-import { STEER_VERSION } from './Settings'
+import { STEER_VERSION, steerScaleFrom } from './Settings'
 
 export interface RecordEntry {
   name: string
@@ -49,11 +49,10 @@ export class Records {
   bestTape(courseId: string): { seed: number; tape: Int32Array; steering: number } | null {
     const t = this.data[courseId]?.bestTape
     if (!t) return null
-    // A tape only replays faithfully under the steering speed it was driven with — and that number is a
-    // multiplier on a base rate that has since doubled, so an older tape's multiplier is halved to mean
-    // the same thing it meant when it was recorded.
-    const scale = (t.steerV ?? 1) < STEER_VERSION ? 0.5 : 1
-    return { seed: t.seed, tape: unpackTape(t.tape), steering: (t.steering ?? 1) * scale }
+    // A tape only replays faithfully under the steering speed it was driven with — and that number is
+    // a multiplier on a base rate that has been raised twice since, so an older tape's multiplier is
+    // converted to mean the same thing it meant when it was recorded.
+    return { seed: t.seed, tape: unpackTape(t.tape), steering: (t.steering ?? 1) * steerScaleFrom(t.steerV) }
   }
 
   clear(): void {

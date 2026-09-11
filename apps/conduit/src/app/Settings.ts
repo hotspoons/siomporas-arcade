@@ -12,7 +12,20 @@ export type ComfortPreset = 'intense' | 'standard' | 'maximum'
 export type RetroPresentHz = 20 | 30 | 60 | 0
 
 /** Bump when the steering scale is redefined, so a saved multiplier is not read against a new base. */
-export const STEER_VERSION = 2
+export const STEER_VERSION = 3
+
+/**
+ * What a steering multiplier saved against an older base means today, as a factor to apply to it.
+ *
+ * The base rate has been raised twice: doubled at version 2, and raised by two thirds at version 3,
+ * where the 166% people were actually playing at became 100%. A number saved against either of those
+ * means something different now, and a replay driven under one only replays faithfully under it.
+ */
+export function steerScaleFrom(version: number | undefined): number {
+  const v = version ?? 1
+  if (v >= 3) return 1
+  return v === 2 ? 1 / 1.66 : 0.5 / 1.66
+}
 
 export interface SettingsData {
   /** Bindings migration version (see the constructor). */

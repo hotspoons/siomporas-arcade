@@ -17,41 +17,11 @@
 // melted sideways. The drawn shape is close enough to the real one that nothing needs bending.
 
 import { execFileSync } from 'node:child_process'
+import { FLANK } from './fit.mjs'
 
-/**
- * The outline of a cabinet's side, as fractions of its bounding box, front of the machine at the
- * left and y running down the way an image does.
- *
- * Traced off a scan of a real upright: base, the swell of the control panel, the deck, the monitor
- * leaning back nineteen degrees, the speaker panel raked over it, the sign, and a top sloping away
- * to the back. The deep notch between the control panel and the sign is the whole shape of the
- * thing, and artwork that ignores it loses whatever it put up there.
- *
- * These are `FLANK_FIT` in apps/arcade/src/lobby/Cabinet.ts, which derives them from the machine
- * itself; apps/arcade/test/bezel.test.ts fails if the two drift apart.
- *
- * Front at the left is the *right* flank. The left one is the mirror image: its artwork reads the
- * same way round — both flanks are seen from opposite sides, so both want their text running left to
- * right — which puts the front of the machine, and the notch above it, at the other end.
- */
-export const OUTLINE = [
-  [0.15432099, 1],
-  [0.15432099, 0.62348278],
-  [0.1037037, 0.60366609],
-  [0.03703704, 0.57394105],
-  [0, 0.55412435],
-  [0.24691358, 0.4956651],
-  [0.42592593, 0.28758979],
-  [0.11728395, 0.19246966],
-  [0.11728395, 0.00743126],
-  [0.13209877, 0],
-  [0.3382716, 0],
-  [1, 0.11196433],
-  [1, 1],
-]
+const { aspect: ASPECT, outline: OUTLINE } = FLANK
 
-/** What that outline's bounding box measures, wide over tall. */
-export const ASPECT = 0.40128809
+export { ASPECT, OUTLINE }
 
 /** How wide the dressed panel is written. A flank is the biggest thing on a cabinet. */
 const OUT_W = 640

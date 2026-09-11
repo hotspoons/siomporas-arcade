@@ -139,18 +139,14 @@ const alongBezel = (t: number): Pt => ({
 const screenBottom: Pt = recessed(alongBezel((1 - CAB.screen.h / bezelLen) / 2))
 const screenTop: Pt = recessed(alongBezel((1 + CAB.screen.h / bezelLen) / 2))
 
+/** The deck's face: from the control panel's lip back to the foot of the monitor. */
+const deckLen = Math.hypot(deckBack.z - lip.z, deckBack.y - lip.y)
 /**
- * What bezel artwork has to fit: the proportions of the bezel face, and where in it the hole is, as
- * fractions of the face. A generated bezel is a frame around an opening of the generator's choosing,
- * which is never this one, so `scripts/lib/bezel.mjs` nine-slices it onto exactly these numbers
- * before it is installed. That script keeps its own copy of them, and apps/arcade/test/bezel.test.ts
- * fails if the two ever drift apart.
+ * The sign is as tall as its own artwork, so the shape of that artwork decides how tall the machine
+ * is. Sixteen by nine is the shape the templates ask for, and asking for one shape is what keeps a
+ * row of cabinets the same height as each other.
  */
-export const BEZEL_FIT = ((): { aspect: number; hole: { x0: number; y0: number; x1: number; y1: number } } => {
-  const x = (1 - CAB.screen.w / INNER) / 2
-  const y = (1 - CAB.screen.h / bezelLen) / 2
-  return { aspect: INNER / bezelLen, hole: { x0: x, y0: y, x1: 1 - x, y1: 1 - y } }
-})()
+const MARQUEE_ASPECT = 16 / 9
 
 /**
  * Where a face sits in the world: the middle of it, the outward normal, and the rotation about X
@@ -215,20 +211,37 @@ function shapeOf(pts: Pt[]): Shape {
 }
 
 /**
- * The outline of a flank and the proportions of its bounding box, as fractions with the front of the
- * cabinet at the left and y running down the way an image does. This is what side art is drawn to:
- * `scripts/cabinet-template.mjs` draws a blank of exactly this shape for a generator to fill, and
- * keeps its own copy of the numbers — apps/arcade/test/bezel.test.ts fails if the two drift apart.
+ * Everything artwork has to fit, in one place: the shape of each face of the machine, and where the
+ * things that stand on top of a face are.
  *
- * A nominal 16:9 marquee, because a template cannot know how tall a sign a game has not drawn yet
- * will turn out to be. The difference between that and a real one is a few millimetres of board.
+ * This is the contract between the cabinet and the four scripts that prepare artwork for it —
+ * `scripts/lib/fit.mjs` is the same numbers again, because those scripts run over images at install
+ * time and never ship, so they cannot import any of this. apps/arcade/test/cabinet-art.test.ts fails
+ * if the two ever drift apart, which is the only thing keeping the templates honest.
+ *
+ * Fractions throughout, y running down the way an image does. The flank is measured with a nominal
+ * 16:9 sign, because a template cannot know how tall a sign a game has not drawn yet will be.
  */
-export const FLANK_FIT = ((): { aspect: number; outline: Array<[number, number]> } => {
-  const marqueeH = INNER / (16 / 9)
+export const ART_FIT = ((): {
+  marquee: number
+  deck: number
+  screen: number
+  bezel: { aspect: number; hole: { x0: number; y0: number; x1: number; y1: number } }
+  flank: { aspect: number; outline: Array<[number, number]> }
+} => {
+  const marqueeH = INNER / MARQUEE_ASPECT
   const height = CAB.marqueeBottom + marqueeH + CAB.topRise
+  const x = (1 - CAB.screen.w / INNER) / 2
+  const y = (1 - CAB.screen.h / bezelLen) / 2
   return {
-    aspect: CAB.depth / height,
-    outline: profilePoints(marqueeH).map((p) => [p.z / CAB.depth, 1 - p.y / height] as [number, number]),
+    marquee: MARQUEE_ASPECT,
+    deck: INNER / deckLen,
+    screen: CAB.screen.w / CAB.screen.h,
+    bezel: { aspect: INNER / bezelLen, hole: { x0: x, y0: y, x1: 1 - x, y1: 1 - y } },
+    flank: {
+      aspect: CAB.depth / height,
+      outline: profilePoints(marqueeH).map((p) => [p.z / CAB.depth, 1 - p.y / height] as [number, number]),
+    },
   }
 })()
 
@@ -370,7 +383,7 @@ export class Cabinet {
     this.art = art
     this.glow = new Color(game.glow)
     const marqueeAspect = art.aspect('marquee')
-    this.marqueeHeight = marqueeAspect ? INNER / marqueeAspect : CAB.marqueeFallbackH
+    this.marqueeHeight = marqueeAspect ? INNER / marqueeAspect : INNER / MARQUEE_ASPECT
     const totalH = this.height
 
     // --- body and boards ---------------------------------------------------

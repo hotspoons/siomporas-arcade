@@ -28,21 +28,12 @@ import { existsSync, mkdirSync, rmSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { knobs, reflowBezel } from './lib/bezel.mjs'
+import { PANELS } from './lib/fit.mjs'
 import { fillFlank } from './lib/flank.mjs'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
-/** The panels a cabinet can wear, and the shape each one wants to be. */
-const PANELS = {
-  marquee: { aspect: 16 / 9, what: 'the lit sign on top' },
-  // Not 9:16: a flank is the cabinet's side board, and its bounding box is depth over full height.
-  'side-left': { aspect: 0.40128809, what: 'the left flank' },
-  'side-right': { aspect: 0.40128809, what: 'the right flank' },
-  panel: { aspect: 21 / 9, what: 'the control deck, seen from above' },
-  bezel: { aspect: 4 / 3, what: 'the surround framing the screen' },
-  attract: { aspect: 4 / 3, what: 'the attract screen' },
-}
-
+/** The panels a cabinet can wear, and the shape each one wants — from the machine itself. */
 const GAMES = ['radrun', 'stuntin', 'apex']
 
 function magick(args) {

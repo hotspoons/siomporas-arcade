@@ -24,6 +24,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { knobs, reflowBezel } from './lib/bezel.mjs'
 import { fillFlank } from './lib/flank.mjs'
+import { PANELS } from './lib/fit.mjs'
 import { detectPanels, matchSlots } from './lib/sheet.mjs'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -135,6 +136,20 @@ for (const [name, box] of found) {
   // Only the fraction path needs trimming: it cuts the slot, so a panel drawn inside one keeps the
   // template's grey around it. A found panel is already exactly its own artwork.
   if (box.trim) args.push('-fuzz', '6%', '-trim', '+repage')
+  // A marquee is a lightbox of a fixed shape and the sign is as tall as its artwork, so a marquee
+  // that came back the wrong shape makes one machine taller than the two beside it. Square it up,
+  // taking the excess off the ends — which is what the prompt's margins are for. Everything else is
+  // installed as drawn and fitted by the geometry, because cropping a control panel loses its ends.
+  const want = PANELS[name]?.aspect
+  if (name === 'marquee' && want) {
+    const have = box.w / box.h
+    const off = Math.abs(have - want) / want
+    if (off > 0.02) {
+      const keep = have > want ? { w: Math.round(box.h * want), h: box.h } : { w: box.w, h: Math.round(box.w / want) }
+      args.push('-gravity', 'center', '-crop', `${keep.w}x${keep.h}+0+0`, '+repage')
+      console.log(`  ${name.padEnd(11)} came back ${have.toFixed(2)}:1 — cropped to ${want.toFixed(2)}:1, losing ${Math.round(100 - (100 * (keep.w * keep.h)) / (box.w * box.h))}% off the ends`)
+    }
+  }
   // sharp-yuv: saturated line art through webp's usual chroma subsampling comes back with cyan and
   // magenta fringes on every black outline, and the bloom in the lobby finds every one of them.
   magick([...args, '-resize', '1024x1024>', '-quality', '90', '-define', 'webp:use-sharp-yuv=true', out])

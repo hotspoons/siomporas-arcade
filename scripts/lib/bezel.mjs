@@ -18,14 +18,9 @@
 
 import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
+import { BEZEL as FACE } from './fit.mjs'
 
-/**
- * The shape of the bezel face and where the glass sits in it, as fractions of the face. Worked out
- * from the cabinet's silhouette — `BEZEL_FIT` in apps/arcade/src/lobby/Cabinet.ts is the same four
- * numbers computed from the geometry itself, and apps/arcade/test/bezel.test.ts fails if the two
- * ever drift apart. The rectangle is symmetric, so image space (y down) needs no flip.
- */
-export const FACE = { aspect: 1.4944005, hole: { x0: 0.1987952, y0: 0.1624095, x1: 0.8012048, y1: 0.8375905 } }
+export { FACE }
 
 /** How far the artwork tucks in under the glass, as a fraction of the panel's width. */
 const OVERLAP = 0.022

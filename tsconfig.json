@@ -17,6 +17,9 @@
       "path": "./apps/arcade"
     },
     {
+      "path": "./apps/fighter"
+    },
+    {
       "path": "./tsconfig.node.json"
     }
   ]

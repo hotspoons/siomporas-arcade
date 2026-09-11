@@ -24,7 +24,7 @@ say "keep every panel inside its box" and ask again, or fall back to one panel a
 friends) with the same reference art, and install what comes back:
 
 ```bash
-node scripts/cabinet-art.mjs ext/what-it-gave-you.jpeg radrun side
+node scripts/cabinet-art.mjs ext/what-it-gave-you.jpeg radrun side-left
 ```
 
 Use this to redo one face you are not happy with, without disturbing the others.
@@ -37,18 +37,23 @@ with. Regenerate them with `node scripts/cabinet-template.mjs` if the shapes eve
 | Panel | Face | On the sheet? | Own template | Shape | Worth it |
 |---|---|---|---|---|---|
 | `marquee` | the lit sign on top — also the menu item | yes | `marquee.png` | 16:9 | **done, all three** |
-| `side` | side art, mirrored onto both sides | yes | `side.png` | 9:16 | most of what you see |
+| `side-left` | the left flank | yes | `side.png` | 9:16 | most of what you see |
+| `side-right` | the right flank | yes | `side.png` | 9:16 | most of what you see |
 | `panel` | the control deck, seen from above | yes | `panel.png` | 21:9 | on the selected cabinet |
 | `bezel` | the surround framing the screen | yes | `bezel.png` | 4:3 | close up only |
 | `attract` | what the screen shows before the game loads | no | `attract.png` | 4:3 | barely visible |
 
+A cabinet has two flanks and they are two different pictures — the same template shape does for
+both. Give it only one and that one is mirrored onto both sides rather than leaving a bare flank.
+
 If you only ever do one more thing, make it **side art**: the cabinets either side of the selected
 one are turned, so their flanks are most of the picture.
 
-The black shapes on a template are holes the cabinet needs — the wheel and buttons cut out of the
-control deck, the screen out of the bezel — and the artwork has to leave them alone. The field is
-mid grey because white reads as paper and gets a border drawn round it, and black reads as part of
-the art; grey reads as nothing, which is what it is.
+**Nothing is cut out of the artwork.** The wheel, the buttons and the screen are geometry standing
+on top of the panels, so a panel is a plain rectangle of art with no holes to leave and nothing to
+line up. Earlier templates had black shapes for them and every generator tripped over it. The field
+is mid grey because white reads as paper and gets a border drawn round it, and black reads as part
+of the art; grey reads as nothing, which is what it is.
 
 ## The prompt
 
@@ -60,16 +65,16 @@ For the whole sheet:
 >
 > Fill in every slot with finished artwork in the style of the first image, keeping each piece of
 > artwork strictly inside its own slot and keeping the slots exactly where and what size they are.
-> Where a slot has black shapes on it — the circles on the control panel, the rectangle on the bezel
-> — leave them solid black and exactly where they are: those are the holes for the steering wheel,
-> the buttons and the screen. The grey gutters between the slots stay flat grey, and the labels can
-> go.
+> Every slot is filled edge to edge with artwork — no holes, no cut-outs, no black shapes left in
+> them. The grey gutters between the slots stay flat grey, and the labels can go.
 >
 > MARQUEE: the illuminated sign, logo huge and centred with the tagline beneath it.
-> SIDE ART: one dramatic scene running the full height, logo set into the upper third.
-> CONTROL PANEL: the deck seen from directly above, artwork around the wheel and button holes,
-> instruction text small, logo small at the left end.
-> BEZEL: artwork forming a frame around the black screen rectangle, logo small along the bottom.
+> SIDE — LEFT and SIDE — RIGHT: the two flanks of the cabinet. Two *different* scenes in the same
+> world, each running the full height of its slot, each with the logo set into its upper third.
+> CONTROL PANEL: the deck seen from directly above — a wide shallow band of artwork, instruction
+> text small, logo small at the left end.
+> BEZEL: artwork filling the panel, with the busiest detail round the edges and the middle kept
+> simple and dark.
 >
 > All of it is flat printed decal artwork, not a photograph of an arcade machine: completely flat
 > and straight on, no perspective, no cabinet body, no room, no shadows, no glare, no reflections,
@@ -78,9 +83,8 @@ For the whole sheet:
 For one panel on its own:
 
 > Attached are two images. The first is existing artwork whose style, palette, subject and lettering
-> I want you to match exactly. The second is a blank layout template: it defines the shape of the
-> panel you are drawing, and any black shapes on it are holes that must stay solid black and stay
-> exactly where they are.
+> I want you to match exactly. The second is a blank layout template, which defines the shape of the
+> panel you are drawing.
 >
 > Draw **[ THE PANEL — one line from below ]** for this arcade cabinet, in the style of the first
 > image.
@@ -88,16 +92,16 @@ For one panel on its own:
 > It is flat printed decal artwork, not a photograph of an arcade machine: completely flat and
 > straight on, no perspective, no cabinet body, no room, no shadows, no glare, no reflections, no
 > bevels. The artwork fills the whole image edge to edge, matching the template's proportions — no
-> border, no frame, no margin, no background showing around it. No captions or labels beyond the
-> logo and any text I have asked for.
+> border, no frame, no margin, no background showing around it, and no holes or cut-outs in the
+> artwork. No captions or labels beyond the logo and any text I have asked for.
 
 And the panel line:
 
 | Panel | The line |
 |---|---|
-| `side` | *the tall side panel: one dramatic scene running its full height, with the logo set into the upper third* |
-| `panel` | *the control deck seen from directly above: a wide shallow strip of artwork, with the big black circle left of centre left untouched where the steering wheel is fitted and the three smaller black circles left untouched where the buttons go, instruction text small, logo small at the left end* |
-| `bezel` | *the bezel that surrounds the screen: artwork forming a frame around the black rectangle in the middle, which is the screen and must stay solid black, with the logo small along the bottom edge* |
+| `side-left` / `side-right` | *the tall side panel of the cabinet: one dramatic scene running its full height, with the logo set into the upper third* — ask for the two flanks separately, as different scenes in the same world |
+| `panel` | *the control deck seen from directly above: a wide shallow band of artwork, instruction text small, logo small at the left end* |
+| `bezel` | *the panel surrounding the screen: artwork with the busiest detail round the edges and the middle kept simple and dark* |
 | `marquee` | *the illuminated marquee sign: the logo huge and centred with the tagline beneath it in smaller type* |
 | `attract` | *the attract screen: a title screen for the game with the logo and INSERT COIN* |
 

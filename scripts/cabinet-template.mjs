@@ -12,9 +12,13 @@
 // with no detection, no magenta, and nothing to eyeball.
 //
 // These exist because asking a chat image generator for "roughly 21:9" gets you 16:9 and a shrug.
-// Attach the template instead and it has something concrete to fill: the right shape, and the
-// black holes exactly where the cabinet needs them — the wheel and buttons cut out of a control
-// deck, the screen out of a bezel. Whatever it draws around those lands on the cabinet correctly.
+// Attach the template instead and it has a shape to fill.
+//
+// Nothing is cut out of them. Asking for artwork with holes in it — black circles where the wheel
+// and buttons go, a black rectangle where the screen goes — is a hard thing to ask and a worse
+// thing to get slightly wrong, and it confused every generator it was tried on. The cabinet draws
+// its own wheel, buttons and screen as geometry standing on top of the artwork instead, so a panel
+// is a plain rectangle of art and nothing has to line up.
 //
 // The field is mid grey on purpose. White reads as paper and gets a border drawn round it; black
 // reads as part of the art. Grey reads as nothing, which is what it is.
@@ -28,7 +32,6 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const OUT = path.join(ROOT, 'apps/arcade/art-templates')
 
 const FIELD = '#7a7a7a'
-const HOLE = '#000000'
 
 /**
  * One per panel: the size to draw at, and any holes the artwork has to leave alone. Sizes are
@@ -36,28 +39,11 @@ const HOLE = '#000000'
  * *shape* survives, and shape is the whole point.
  */
 const TEMPLATES = {
-  marquee: { w: 1600, h: 900, draw: [], what: 'the lit sign on top; logo and tagline, edge to edge' },
-  side: { w: 900, h: 1600, draw: [], what: 'side art; one tall scene, logo in the upper third' },
-  panel: {
-    w: 2100,
-    h: 900,
-    // Wheel left of centre, three buttons to the right of it, all at deck height.
-    draw: [
-      ['circle', 590, 450, 590, 180],
-      ['circle', 1180, 450, 1180, 370],
-      ['circle', 1380, 450, 1380, 370],
-      ['circle', 1580, 450, 1580, 370],
-    ],
-    what: 'the control deck seen from above; the black circles are the wheel and buttons',
-  },
-  bezel: {
-    w: 1600,
-    h: 1200,
-    // The screen: a 4:3 hole with the artwork running round it as a border.
-    draw: [['rectangle', 288, 216, 1312, 984]],
-    what: 'the surround; artwork frames the black rectangle, which is the screen',
-  },
-  attract: { w: 1600, h: 1200, draw: [], what: 'what the screen shows before the game loads' },
+  marquee: { w: 1600, h: 900, what: 'the lit sign on top; logo and tagline, edge to edge' },
+  side: { w: 900, h: 1600, what: 'side art — one tall scene; use it for both side-left and side-right' },
+  panel: { w: 2100, h: 900, what: 'the control deck seen from above; the cabinet puts the wheel and buttons on top' },
+  bezel: { w: 1600, h: 1200, what: 'the surround; the cabinet puts the screen on top of the middle of it' },
+  attract: { w: 1600, h: 1200, what: 'what the screen shows before the game loads' },
 }
 
 /**
@@ -72,19 +58,16 @@ const SHEET = { w: 2048, h: 1536 }
 const SLOTS = {
   marquee: { x: 64, y: 128, w: 1120, h: 630, label: 'MARQUEE' },
   panel: { x: 64, y: 856, w: 1120, h: 480, label: 'CONTROL PANEL' },
-  side: { x: 1272, y: 128, w: 480, h: 853, label: 'SIDE ART' },
-  bezel: { x: 1272, y: 1060, w: 560, h: 420, label: 'BEZEL' },
+  'side-left': { x: 1272, y: 128, w: 340, h: 604, label: 'SIDE — LEFT' },
+  'side-right': { x: 1644, y: 128, w: 340, h: 604, label: 'SIDE — RIGHT' },
+  bezel: { x: 1272, y: 820, w: 560, h: 420, label: 'BEZEL' },
 }
 
 function drawSheet() {
   const args = ['-size', `${SHEET.w}x${SHEET.h}`, `xc:${FIELD}`]
-  for (const [name, s] of Object.entries(SLOTS)) {
+  for (const s of Object.values(SLOTS)) {
     // The slot itself, a touch lighter than the field so its edges are unmistakable.
     args.push('-fill', '#8f8f8f', '-stroke', 'none', '-draw', `rectangle ${s.x},${s.y} ${s.x + s.w},${s.y + s.h}`)
-    // Its holes, in slot coordinates.
-    for (const [kind, ...pts] of holesFor(name, s)) {
-      args.push('-fill', HOLE, '-draw', `${kind} ${pts.join(',')}`)
-    }
     args.push('-fill', '#1a1a1a', '-pointsize', '34', '-annotate', `+${s.x}+${s.y - 18}`, `${s.label}`)
   }
   const file = path.join(OUT, 'sheet.png')
@@ -94,25 +77,6 @@ function drawSheet() {
   )
   writeFileSync(path.join(OUT, 'sheet.json'), `${JSON.stringify({ canvas: SHEET, slots }, null, 2)}\n`)
   console.log(`${path.relative(ROOT, file)}  ${SHEET.w}×${SHEET.h} — every panel at once, labelled; slots in sheet.json`)
-}
-
-/** The black holes a slot needs, placed inside it. */
-function holesFor(name, s) {
-  if (name === 'panel') {
-    const r = s.h * 0.3
-    const y = s.y + s.h * 0.5
-    return [
-      ['circle', s.x + s.w * 0.26, y, s.x + s.w * 0.26, y - r],
-      ['circle', s.x + s.w * 0.56, y, s.x + s.w * 0.56, y - r * 0.32],
-      ['circle', s.x + s.w * 0.65, y, s.x + s.w * 0.65, y - r * 0.32],
-      ['circle', s.x + s.w * 0.74, y, s.x + s.w * 0.74, y - r * 0.32],
-    ].map((d) => d.map((v) => (typeof v === 'number' ? Math.round(v) : v)))
-  }
-  if (name === 'bezel') {
-    const inset = { x: s.w * 0.18, y: s.h * 0.18 }
-    return [['rectangle', Math.round(s.x + inset.x), Math.round(s.y + inset.y), Math.round(s.x + s.w - inset.x), Math.round(s.y + s.h - inset.y)]]
-  }
-  return []
 }
 
 mkdirSync(OUT, { recursive: true })
@@ -128,10 +92,7 @@ alsoInExt(path.join(OUT, 'sheet.png'))
 
 for (const [name, t] of Object.entries(TEMPLATES)) {
   const file = path.join(OUT, `${name}.png`)
-  const args = ['-size', `${t.w}x${t.h}`, `xc:${FIELD}`, '-fill', HOLE, '-stroke', 'none']
-  for (const [kind, ...pts] of t.draw) args.push('-draw', `${kind} ${pts.join(',')}`)
-  args.push(file)
-  execFileSync('magick', args)
+  execFileSync('magick', ['-size', `${t.w}x${t.h}`, `xc:${FIELD}`, file])
   alsoInExt(file)
   console.log(`${path.relative(ROOT, file)}  ${t.w}×${t.h} (${(t.w / t.h).toFixed(2)}:1) — ${t.what}`)
 }

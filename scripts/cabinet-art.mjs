@@ -33,7 +33,8 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 /** The panels a cabinet can wear, and the shape each one wants to be. */
 const PANELS = {
   marquee: { aspect: 16 / 9, what: 'the lit sign on top' },
-  side: { aspect: 9 / 16, what: 'side art, mirrored onto both sides' },
+  'side-left': { aspect: 9 / 16, what: 'the left flank' },
+  'side-right': { aspect: 9 / 16, what: 'the right flank' },
   panel: { aspect: 21 / 9, what: 'the control deck, seen from above' },
   bezel: { aspect: 4 / 3, what: 'the surround framing the screen' },
   attract: { aspect: 4 / 3, what: 'the attract screen' },

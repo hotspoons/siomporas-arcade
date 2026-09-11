@@ -7,9 +7,9 @@
 
 import { SRGBColorSpace, type Texture, TextureLoader } from 'three'
 
-export type PanelName = 'marquee' | 'side' | 'panel' | 'bezel' | 'attract'
+export type PanelName = 'marquee' | 'side-left' | 'side-right' | 'panel' | 'bezel' | 'attract'
 
-export const PANELS: readonly PanelName[] = ['marquee', 'side', 'panel', 'bezel', 'attract']
+export const PANELS: readonly PanelName[] = ['marquee', 'side-left', 'side-right', 'panel', 'bezel', 'attract']
 
 interface Panel {
   texture: Texture

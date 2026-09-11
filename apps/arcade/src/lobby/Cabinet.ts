@@ -22,6 +22,7 @@ import {
   BufferGeometry,
   Color,
   DoubleSide,
+  CylinderGeometry,
   ExtrudeGeometry,
   Float32BufferAttribute,
   Group,
@@ -31,6 +32,7 @@ import {
   PlaneGeometry,
   PointLight,
   Shape,
+  TorusGeometry,
 } from 'three'
 import type { ArcadeGame } from '../catalog'
 import type { CabinetArt } from './CabinetArt'
@@ -44,6 +46,8 @@ export const CAB = {
   /** How far the control deck reaches back, and how far it climbs over that run. */
   deckRun: 0.24,
   deckRise: 0.12,
+  /** The wheel on the control deck, which is geometry rather than a hole in the artwork. */
+  wheelRadius: 0.105,
   /** The screen plane, from the back of the deck up to the shelf under the marquee. */
   bezelTop: 1.5,
   bezelLean: 0.13,
@@ -63,6 +67,23 @@ const deckTop: Pt = { z: CAB.deckRun, y: CAB.kickTop + CAB.deckRise }
 const bezelBottom: Pt = { z: deckTop.z, y: deckTop.y + 0.04 }
 const bezelTop: Pt = { z: deckTop.z + CAB.bezelLean, y: CAB.bezelTop }
 const marqueeZ = bezelTop.z + CAB.marqueeInset
+
+/**
+ * Where a face sits in the world: the middle of it, the outward normal, and the rotation about X
+ * that stands something up along that normal. `facePlane` works this out for its own corners; this
+ * hands the same numbers to whatever has to sit *on* the face.
+ */
+function faceFrame(a: Pt, b: Pt): { y: number; z: number; ny: number; nz: number; tilt: number } {
+  const [ay, az] = zy(a)
+  const [by, bz] = zy(b)
+  const len = Math.hypot(by - ay, bz - az)
+  const uy = (by - ay) / len
+  const uz = (bz - az) / len
+  const ny = -uz
+  const nz = uy
+  // Rx(t) takes +z to (0, -sin t, cos t), so this is the turn that lays a disc flat on the face.
+  return { y: (ay + by) / 2, z: (az + bz) / 2, ny, nz, tilt: Math.atan2(-ny, nz) }
+}
 
 /** Silhouette space to world space. */
 const zy = (p: Pt): [number, number] => [p.y, -p.z]
@@ -174,19 +195,27 @@ export class Cabinet {
     this.group.add(this.marqueeLight)
 
     // --- side art ---------------------------------------------------------
+    // A cabinet has two flanks and they are different pictures. One on its own is mirrored onto both
+    // rather than leaving a bare side, which is what happens while only half the art exists.
     // Mapped to the silhouette's bounding box, which is what ART.md tells the generator to draw to.
-    const sideTex = art.texture('side')
-    if (sideTex) {
-      const sideMat = new MeshStandardMaterial({ map: sideTex, roughness: 0.55 })
-      const sideGeo = new PlaneGeometry(CAB.depth, totalH)
-      this.owned.push(sideGeo, sideMat)
-      for (const sign of [1, -1]) {
-        const m = new Mesh(sideGeo, sideMat)
-        m.position.set(sign * (CAB.width / 2 + 0.002), totalH / 2, -CAB.depth / 2)
-        // A plane faces +z; a quarter turn each way puts one on each flank, both facing outward.
-        m.rotation.y = sign * (Math.PI / 2)
-        this.group.add(m)
+    for (const sign of [1, -1]) {
+      const tex = art.texture(sign > 0 ? 'side-right' : 'side-left') ?? art.texture(sign > 0 ? 'side-left' : 'side-right')
+      if (!tex) continue
+      const mat = new MeshStandardMaterial({ map: tex, roughness: 0.55 })
+      const geo = new PlaneGeometry(CAB.depth, totalH)
+      // A plane faces +z and a quarter turn each way puts one on each flank facing outward — but the
+      // two then disagree about which way is left, so one of them shows its artwork mirrored. Flip
+      // the far side's u instead of its geometry.
+      if (sign < 0) {
+        const uv = geo.getAttribute('uv')
+        for (let i = 0; i < uv.count; i++) uv.setX(i, 1 - uv.getX(i))
+        uv.needsUpdate = true
       }
+      const m = new Mesh(geo, mat)
+      m.position.set(sign * (CAB.width / 2 + 0.002), totalH / 2, -CAB.depth / 2)
+      m.rotation.y = sign * (Math.PI / 2)
+      this.group.add(m)
+      this.owned.push(geo, mat)
     }
 
     // --- control deck and bezel -------------------------------------------
@@ -197,6 +226,36 @@ export class Cabinet {
       this.group.add(new Mesh(g, m))
       this.owned.push(g, m)
     }
+
+    // The controls themselves, in geometry rather than painted on. Artwork that has to leave holes
+    // for a wheel and three buttons is artwork with holes in it, which is a hard thing to ask a
+    // generator for and a worse thing to get slightly wrong. A real wheel standing proud of the
+    // deck also reads as a cabinet from across the room, which a dark circle does not.
+    const deck = faceFrame({ z: 0, y: CAB.kickTop }, deckTop)
+    const stand = (lift: number, x: number): [number, number, number] => [x, deck.y + deck.ny * lift, deck.z + deck.nz * lift]
+    const dark = new MeshStandardMaterial({ color: 0x15171c, roughness: 0.45, metalness: 0.25 })
+    const rim = new TorusGeometry(CAB.wheelRadius, CAB.wheelRadius * 0.16, 8, 28)
+    const wheel = new Mesh(rim, dark)
+    wheel.position.set(...stand(0.02, 0))
+    wheel.rotation.x = deck.tilt
+    this.group.add(wheel)
+    const hubGeo = new CylinderGeometry(CAB.wheelRadius * 0.3, CAB.wheelRadius * 0.3, 0.012, 12)
+    const hub = new Mesh(hubGeo, dark)
+    hub.position.set(...stand(0.016, 0))
+    // A cylinder stands along +y; the quarter turn puts its axis along the face's normal instead.
+    hub.rotation.x = deck.tilt + Math.PI / 2
+    this.group.add(hub)
+    this.owned.push(rim, hubGeo, dark)
+
+    const buttonGeo = new CylinderGeometry(0.019, 0.019, 0.014, 12)
+    const buttonMat = new MeshStandardMaterial({ color: this.glow, roughness: 0.35, emissive: this.glow, emissiveIntensity: 0.25 })
+    for (const x of [0.18, 0.235, 0.29]) {
+      const b = new Mesh(buttonGeo, buttonMat)
+      b.position.set(...stand(0.018, x))
+      b.rotation.x = deck.tilt + Math.PI / 2
+      this.group.add(b)
+    }
+    this.owned.push(buttonGeo, buttonMat)
 
     const bezelTex = art.texture('bezel')
     if (bezelTex) {

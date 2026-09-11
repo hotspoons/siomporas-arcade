@@ -1,45 +1,81 @@
-# Cabinet art — one panel at a time
+# Cabinet art
 
-The lobby is a real three.js scene: cabinets standing in a dim room, the selected one lit and turned
-toward the camera. Each face of a cabinet is a flat quad and takes **one image**. No atlas, no sheet,
-nothing to slice — a panel is a picture, and any one of them can be redone on its own without
-touching the others.
+**You do not have to do any of this.** Every cabinet already has its marquee — the lit sign on top,
+which is also the menu item — and that is the only panel that matters. A cabinet missing the rest
+shows painted body in the game's colour, which is what the lobby looks like now and it reads fine.
 
-The loop, per panel:
+What follows is polish, in whatever order and amount you feel like. The two ways to do it:
 
-1. **Attach two images** to ChatGPT or Gemini: art you want it to match (the sheets in `ext/` are
-   ideal — it made them, and the cabinets already wear their marquees), and the layout template for
-   the panel you want, from `art-templates/`.
-2. Paste the prompt below, with the panel's line swapped in.
-3. Save whatever JPEG it hands back and install it:
+**One sheet, one prompt, a whole cabinet.** Hand a generator `art-templates/sheet.png` — a labelled
+blank with a slot for each panel — plus a picture of art you want it to match, and ask it to fill
+the slots in. Then:
 
 ```bash
-node scripts/cabinet-art.mjs ext/whatever-it-called-it.jpeg radrun side
+node scripts/cabinet-sheet.mjs ext/what-it-gave-you.jpeg radrun --dry-run   # look first
+node scripts/cabinet-sheet.mjs ext/what-it-gave-you.jpeg radrun            # install all four
 ```
 
-That trims any border it put round the art, crops to the shape that face wants, encodes a webp and
-drops it in `public/cabinets/radrun/`. `--dry-run` writes it to `shots/` to look at first. Reload the
-arcade and it is on the cabinet.
+No detection, no magenta, nothing to eyeball: we drew that template, so the slots are known and
+cutting them back out is arithmetic. `--dry-run` writes the cut panels and a contact sheet into
+`shots/` so you can see whether it kept to the layout before anything is installed. If it wandered,
+say "keep every panel inside its box" and ask again, or fall back to one panel at a time.
+
+**One panel at a time.** Attach the single template for that face (`art-templates/side.png` and
+friends) with the same reference art, and install what comes back:
+
+```bash
+node scripts/cabinet-art.mjs ext/what-it-gave-you.jpeg radrun side
+```
+
+Use this to redo one face you are not happy with, without disturbing the others.
+
+Either way the templates are also copied into `ext/`, so they are next to the art you are working
+with. Regenerate them with `node scripts/cabinet-template.mjs` if the shapes ever change.
 
 ## What a cabinet wears
 
-| Panel | Face | Template | Shape | Have it? |
-|---|---|---|---|---|
-| `marquee` | the lit sign on top — also the menu item | `art-templates/marquee.png` | 16:9 | **yes, all three** |
-| `side` | side art, mirrored onto both sides | `art-templates/side.png` | 9:16 | no |
-| `panel` | the control deck, seen from above | `art-templates/panel.png` | 21:9 | no |
-| `bezel` | the surround framing the screen | `art-templates/bezel.png` | 4:3 | no |
-| `attract` | what the screen shows before the game loads | `art-templates/attract.png` | 4:3 | no |
+| Panel | Face | On the sheet? | Own template | Shape | Worth it |
+|---|---|---|---|---|---|
+| `marquee` | the lit sign on top — also the menu item | yes | `marquee.png` | 16:9 | **done, all three** |
+| `side` | side art, mirrored onto both sides | yes | `side.png` | 9:16 | most of what you see |
+| `panel` | the control deck, seen from above | yes | `panel.png` | 21:9 | on the selected cabinet |
+| `bezel` | the surround framing the screen | yes | `bezel.png` | 4:3 | close up only |
+| `attract` | what the screen shows before the game loads | no | `attract.png` | 4:3 | barely visible |
 
-Only the marquee actually matters and all three exist. The rest is polish: a cabinet with no side art
-shows painted body in the game's colour and looks fine. Add them in any order, whenever.
+If you only ever do one more thing, make it **side art**: the cabinets either side of the selected
+one are turned, so their flanks are most of the picture.
 
-The templates are mid grey with black holes where the cabinet needs holes — the wheel and buttons
-cut out of a control deck, the screen out of a bezel. Grey because white reads as paper and gets a
-border drawn round it, and black reads as part of the art. Regenerate them with
-`node scripts/cabinet-template.mjs` if the shapes ever change.
+The black shapes on a template are holes the cabinet needs — the wheel and buttons cut out of the
+control deck, the screen out of the bezel — and the artwork has to leave them alone. The field is
+mid grey because white reads as paper and gets a border drawn round it, and black reads as part of
+the art; grey reads as nothing, which is what it is.
 
 ## The prompt
+
+For the whole sheet:
+
+> Attached are two images. The first is existing artwork whose style, palette, subject and lettering
+> I want you to match exactly. The second is a blank layout template for the decal artwork of an
+> arcade cabinet: four grey slots, each labelled, on a darker grey field.
+>
+> Fill in every slot with finished artwork in the style of the first image, keeping each piece of
+> artwork strictly inside its own slot and keeping the slots exactly where and what size they are.
+> Where a slot has black shapes on it — the circles on the control panel, the rectangle on the bezel
+> — leave them solid black and exactly where they are: those are the holes for the steering wheel,
+> the buttons and the screen. The grey gutters between the slots stay flat grey, and the labels can
+> go.
+>
+> MARQUEE: the illuminated sign, logo huge and centred with the tagline beneath it.
+> SIDE ART: one dramatic scene running the full height, logo set into the upper third.
+> CONTROL PANEL: the deck seen from directly above, artwork around the wheel and button holes,
+> instruction text small, logo small at the left end.
+> BEZEL: artwork forming a frame around the black screen rectangle, logo small along the bottom.
+>
+> All of it is flat printed decal artwork, not a photograph of an arcade machine: completely flat
+> and straight on, no perspective, no cabinet body, no room, no shadows, no glare, no reflections,
+> no bevels. No captions or labels beyond the logos and the text I have asked for.
+
+For one panel on its own:
 
 > Attached are two images. The first is existing artwork whose style, palette, subject and lettering
 > I want you to match exactly. The second is a blank layout template: it defines the shape of the
@@ -91,8 +127,10 @@ chrome-and-gradient lettering, flat colour the way ink sits on a printed vinyl d
 
 ## On shapes
 
-Generators offer a handful of aspect ratios and will not hit the template exactly. That is fine:
-`cabinet-art.mjs` centre-crops to the shape the face wants and tells you how much it threw away, and
+Generators offer a handful of aspect ratios and will not hit a template exactly. That is fine.
+`cabinet-sheet.mjs` centre-crops what comes back to the sheet's own 4:3 before cutting, so the slots
+still land where they should; `cabinet-art.mjs` centre-crops a single panel to the shape its face
+wants and tells you how much it threw away. And
 the geometry measures whatever texture it gets and sizes the face to match, so nothing is ever
 stretched. If it warns that it is cutting more than a third, the image came back the wrong shape —
 ask again, or pass `--no-crop` to keep the whole picture and let the cabinet face take the shape it

@@ -5,7 +5,7 @@
 // post-processing — which is the point. Walking from the marquees into Turbo Radrun swaps one
 // mounted module for another and nothing else about the page changes.
 
-import { AmbientLight, BoxGeometry, Color, Fog, Group, HemisphereLight, Mesh, MeshBasicMaterial, MeshStandardMaterial, PerspectiveCamera, PlaneGeometry, PointLight, RepeatWrapping, Scene, SRGBColorSpace, TextureLoader, WebGLRenderer } from 'three'
+import { AmbientLight, BoxGeometry, Color, Fog, Group, HemisphereLight, Mesh, MeshBasicMaterial, MeshStandardMaterial, type Object3D, PerspectiveCamera, PlaneGeometry, PointLight, Raycaster, RepeatWrapping, Scene, SRGBColorSpace, TextureLoader, Vector2, Vector3, WebGLRenderer } from 'three'
 import { GameLoop, type LoopClient } from '@apex/engine/app/GameLoop'
 import { Disposer } from '@apex/engine/app/Disposer'
 import type { GameHost, GameModule, MountedGame } from '@apex/engine/app/GameModule'
@@ -35,6 +35,8 @@ const GLIDE = 9
 // which puts the cabinet up in the frame, clear of the plate along the bottom, and gives the floor
 // somewhere to be. Looking at a point below the cabinet's middle is what does the lifting.
 const CAMERA = { y: 1.62, z: 3.2, lookY: 1.0 }
+/** How far out from the glass the leaned-in camera sits: close enough to read, far enough to frame. */
+const ZOOM_BACK = 0.8
 
 class Lobby implements LoopClient, MountedGame {
   private readonly gone = new Disposer()
@@ -55,6 +57,19 @@ class Lobby implements LoopClient, MountedGame {
   private entering = 1
   /** Extra camera distance for a short window — see resize(). */
   private dolly = 1
+  /**
+   * Zoomed in on the selected cabinet's screen: 0 back in the room, 1 nose against the glass. The
+   * camera glides between the two, and the play button belongs to the far end of it.
+   */
+  private zoom = 0
+  private zoomWanted = 0
+  private readonly ray = new Raycaster()
+  private readonly ndc = new Vector2()
+  private readonly camFrom = new Vector3()
+  private readonly camTo = new Vector3()
+  private readonly lookAt = new Vector3()
+  private readonly normal = new Vector3()
+  private readonly at = new Vector3()
 
   private readonly host: GameHost
   private readonly cabinets: Cabinet[]
@@ -225,9 +240,60 @@ class Lobby implements LoopClient, MountedGame {
     if (!this.drag || e.pointerId !== this.drag.id) return
     const wasDrag = this.drag.moved > 12
     this.drag = null
-    if (wasDrag) this.target = Math.round(this.target)
-    else this.start() // a tap on the cabinet in front of you is a coin in the slot
     this.clampTarget()
+    if (wasDrag) {
+      this.target = Math.round(this.target)
+      return
+    }
+    this.tap(e)
+  }
+
+  /**
+   * What a tap means depends on what it landed on. Another cabinet: walk to it. The selected
+   * cabinet's screen: lean in, and a play button appears — unless the tap was in the middle of the
+   * screen, which is someone who has already decided, so it goes straight in. Anywhere else backs
+   * out of a lean.
+   *
+   * This replaced "a tap anywhere starts the selected game", which made browsing the row by tapping
+   * the cabinet you wanted impossible: you got whatever was in front of you instead.
+   */
+  private tap(e: PointerEvent): void {
+    const hit = this.pickAt(e.clientX, e.clientY)
+    if (!hit) {
+      this.zoomWanted = 0
+      return
+    }
+    if (hit.index !== this.index) {
+      this.zoomWanted = 0
+      this.pick(hit.index)
+      return
+    }
+    if (!hit.screenUv) {
+      this.zoomWanted = 0
+      return
+    }
+    // Dead centre is a decision; the rest of the glass is curiosity.
+    const { x, y } = hit.screenUv
+    if (Math.abs(x - 0.5) < 0.22 && Math.abs(y - 0.5) < 0.22) this.start()
+    else this.zoomWanted = 1
+  }
+
+  /** The cabinet under a screen position, and where on its screen the ray landed, if it did. */
+  private pickAt(clientX: number, clientY: number): { index: number; screenUv: { x: number; y: number } | null } | null {
+    this.ndc.set((clientX / window.innerWidth) * 2 - 1, -(clientY / window.innerHeight) * 2 + 1)
+    this.ray.setFromCamera(this.ndc, this.camera)
+    const hits = this.ray.intersectObject(this.row, true)
+    if (!hits.length) return null
+    const first = hits[0]
+    for (let i = 0; i < this.cabinets.length; i++) {
+      const cab = this.cabinets[i]
+      let node: Object3D | null = first.object
+      while (node && node !== cab.group) node = node.parent
+      if (!node) continue
+      const onScreen = first.object === cab.screen
+      return { index: i, screenUv: onScreen && first.uv ? { x: first.uv.x, y: first.uv.y } : null }
+    }
+    return null
   }
 
   private step(dir: number): void {
@@ -271,13 +337,17 @@ class Lobby implements LoopClient, MountedGame {
     if (this.keys.wasPressed('ArrowRight') || this.keys.wasPressed('KeyD') || this.pad.pressed('b15')) this.step(1)
     if (this.keys.wasPressed('ArrowLeft') || this.keys.wasPressed('KeyA') || this.pad.pressed('b14')) this.step(-1)
     if (this.keys.wasPressed('Enter') || this.keys.wasPressed('Space') || this.pad.pressed('b0') || this.pad.pressed('b9')) this.start()
+    if (this.keys.wasPressed('Escape') || this.pad.pressed('b1')) this.zoomWanted = 0
     // The pad's left stick, as discrete steps rather than a continuous slide.
     const ax = this.pad.value('a0+') - this.pad.value('a0-')
     if (Math.abs(ax) > 0.6 && !this.stickHeld) {
       this.stickHeld = true
       this.step(Math.sign(ax))
     } else if (Math.abs(ax) < 0.3) this.stickHeld = false
-    if (before !== this.index) this.hud.show(this.cabinets[this.index].game)
+    if (before !== this.index) {
+      this.zoomWanted = 0
+      this.hud.show(this.cabinets[this.index].game)
+    }
 
     this.keys.endFrame()
     return 1
@@ -290,6 +360,9 @@ class Lobby implements LoopClient, MountedGame {
     this.pos += (this.target - this.pos) * (1 - Math.exp(-GLIDE * dt))
     if (Math.abs(this.target - this.pos) < 0.0005) this.pos = this.target
     this.entering = Math.max(0, this.entering - dt * 1.4)
+    this.zoom += (this.zoomWanted - this.zoom) * (1 - Math.exp(-6 * dt))
+    if (Math.abs(this.zoomWanted - this.zoom) < 0.002) this.zoom = this.zoomWanted
+    this.hud.setLeaning(this.zoom > 0.5)
   }
 
   render(_alpha: number, frameDt: number): void {
@@ -307,8 +380,24 @@ class Lobby implements LoopClient, MountedGame {
       c.setSelected(Math.max(0, 1 - Math.abs(d)))
     }
     // The room slides back into place as the lobby comes up, so arriving has some movement in it.
-    this.camera.position.z = CAMERA.z * this.dolly + this.entering * 1.2
-    this.camera.lookAt(0, CAMERA.lookY, 0)
+    this.camFrom.set(0, CAMERA.y, CAMERA.z * this.dolly + this.entering * 1.2)
+    this.lookAt.set(0, CAMERA.lookY, 0)
+    if (this.zoom > 0.001) {
+      // Where the selected cabinet's glass is, and a spot straight out in front of it. The screen
+      // leans back, so coming at it along its own normal is the only way to end up square to it.
+      const cab = this.cabinets[this.index]
+      cab.group.updateMatrixWorld(true)
+      // Where the glass is first, then a spot out along its normal: the same vector cannot be both,
+      // or the camera ends up being told to look at itself.
+      this.at.copy(cab.screenCentre).applyMatrix4(cab.group.matrixWorld)
+      const normal = this.normal.copy(cab.screenNormal).transformDirection(cab.group.matrixWorld).normalize()
+      this.camTo.copy(this.at).addScaledVector(normal, ZOOM_BACK)
+      this.camera.position.lerpVectors(this.camFrom, this.camTo, this.zoom)
+      this.lookAt.lerp(this.at, this.zoom)
+    } else {
+      this.camera.position.copy(this.camFrom)
+    }
+    this.camera.lookAt(this.lookAt)
   }
 
   private resize(): void {

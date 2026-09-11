@@ -19,6 +19,7 @@
 // `zy()` is the only place the two meet.
 
 import {
+  BoxGeometry,
   BufferGeometry,
   Color,
   DoubleSide,
@@ -32,7 +33,9 @@ import {
   PlaneGeometry,
   PointLight,
   Shape,
+  SphereGeometry,
   TorusGeometry,
+  Vector3,
 } from 'three'
 import type { ArcadeGame } from '../catalog'
 import type { CabinetArt } from './CabinetArt'
@@ -73,7 +76,7 @@ const marqueeZ = bezelTop.z + CAB.marqueeInset
  * that stands something up along that normal. `facePlane` works this out for its own corners; this
  * hands the same numbers to whatever has to sit *on* the face.
  */
-function faceFrame(a: Pt, b: Pt): { y: number; z: number; ny: number; nz: number; tilt: number } {
+function faceFrame(a: Pt, b: Pt): { y: number; z: number; ny: number; nz: number; uy: number; uz: number; tilt: number } {
   const [ay, az] = zy(a)
   const [by, bz] = zy(b)
   const len = Math.hypot(by - ay, bz - az)
@@ -82,7 +85,7 @@ function faceFrame(a: Pt, b: Pt): { y: number; z: number; ny: number; nz: number
   const ny = -uz
   const nz = uy
   // Rx(t) takes +z to (0, -sin t, cos t), so this is the turn that lays a disc flat on the face.
-  return { y: (ay + by) / 2, z: (az + bz) / 2, ny, nz, tilt: Math.atan2(-ny, nz) }
+  return { y: (ay + by) / 2, z: (az + bz) / 2, ny, nz, uy, uz, tilt: Math.atan2(-ny, nz) }
 }
 
 /** Silhouette space to world space. */
@@ -146,6 +149,16 @@ function facePlane(a: Pt, b: Pt, width: number, lift: number): BufferGeometry {
 
 export class Cabinet {
   readonly group = new Group()
+  /** The pane the game plays on — what a pointer has to hit to zoom in on it. */
+  readonly screen: Mesh
+  /**
+   * Where that pane is and which way it faces, in the cabinet's own space. `facePlane` keeps a
+   * face's offset in its geometry rather than in the mesh's transform, so a mesh's position is the
+   * cabinet's base and asking the screen where it is gets you the floor.
+   */
+  readonly screenCentre: Vector3
+  readonly screenNormal: Vector3
+  private readonly art: CabinetArt
   readonly marqueeLight: PointLight
   /** How tall the sign turned out, once its artwork was measured. */
   readonly marqueeHeight: number
@@ -160,6 +173,7 @@ export class Cabinet {
 
   constructor(game: ArcadeGame, art: CabinetArt) {
     this.game = game
+    this.art = art
     this.glow = new Color(game.glow)
     const marqueeAspect = art.aspect('marquee')
     this.marqueeHeight = marqueeAspect ? CAB.width / marqueeAspect : CAB.marqueeFallbackH
@@ -229,33 +243,100 @@ export class Cabinet {
 
     // The controls themselves, in geometry rather than painted on. Artwork that has to leave holes
     // for a wheel and three buttons is artwork with holes in it, which is a hard thing to ask a
-    // generator for and a worse thing to get slightly wrong. A real wheel standing proud of the
-    // deck also reads as a cabinet from across the room, which a dark circle does not.
+    // generator for and a worse thing to get slightly wrong. Real controls standing proud of the
+    // deck also read as a cabinet from across the room, which a dark circle does not.
     const deck = faceFrame({ z: 0, y: CAB.kickTop }, deckTop)
-    const stand = (lift: number, x: number): [number, number, number] => [x, deck.y + deck.ny * lift, deck.z + deck.nz * lift]
+    const stand = (lift: number, x: number, along = 0): [number, number, number] => [
+      x,
+      deck.y + deck.ny * lift + deck.uy * along,
+      deck.z + deck.nz * lift + deck.uz * along,
+    ]
     const dark = new MeshStandardMaterial({ color: 0x15171c, roughness: 0.45, metalness: 0.25 })
-    const rim = new TorusGeometry(CAB.wheelRadius, CAB.wheelRadius * 0.16, 8, 28)
-    const wheel = new Mesh(rim, dark)
-    wheel.position.set(...stand(0.02, 0))
-    wheel.rotation.x = deck.tilt
-    this.group.add(wheel)
-    const hubGeo = new CylinderGeometry(CAB.wheelRadius * 0.3, CAB.wheelRadius * 0.3, 0.012, 12)
-    const hub = new Mesh(hubGeo, dark)
-    hub.position.set(...stand(0.016, 0))
-    // A cylinder stands along +y; the quarter turn puts its axis along the face's normal instead.
-    hub.rotation.x = deck.tilt + Math.PI / 2
-    this.group.add(hub)
-    this.owned.push(rim, hubGeo, dark)
+    const lit = new MeshStandardMaterial({ color: this.glow, roughness: 0.35, emissive: this.glow, emissiveIntensity: 0.25 })
+    this.owned.push(dark, lit)
 
-    const buttonGeo = new CylinderGeometry(0.019, 0.019, 0.014, 12)
-    const buttonMat = new MeshStandardMaterial({ color: this.glow, roughness: 0.35, emissive: this.glow, emissiveIntensity: 0.25 })
-    for (const x of [0.18, 0.235, 0.29]) {
-      const b = new Mesh(buttonGeo, buttonMat)
-      b.position.set(...stand(0.018, x))
-      b.rotation.x = deck.tilt + Math.PI / 2
-      this.group.add(b)
+    if (game.controls === 'yoke') {
+      // S.T.U.N. Runner's yoke: a bar across the deck on a stem, with a grip at each end. Not a
+      // wheel, which is the thing everyone gets wrong about that machine.
+      const stemGeo = new CylinderGeometry(0.028, 0.034, 0.1, 10)
+      const stem = new Mesh(stemGeo, dark)
+      stem.position.set(...stand(0.05, 0, -0.01))
+      stem.rotation.x = deck.tilt + Math.PI / 2
+      this.group.add(stem)
+      const barGeo = new CylinderGeometry(0.017, 0.017, 0.3, 10)
+      const bar = new Mesh(barGeo, dark)
+      bar.position.set(...stand(0.1, 0, -0.01))
+      bar.rotation.z = Math.PI / 2
+      this.group.add(bar)
+      const gripGeo = new CylinderGeometry(0.026, 0.026, 0.075, 10)
+      for (const sx of [-1, 1]) {
+        const grip = new Mesh(gripGeo, dark)
+        grip.position.set(...stand(0.1, sx * 0.15, -0.01))
+        grip.rotation.x = deck.tilt + Math.PI / 2
+        this.group.add(grip)
+        const fire = new Mesh(new CylinderGeometry(0.013, 0.013, 0.012, 10), lit)
+        fire.position.set(...stand(0.14, sx * 0.15, -0.01))
+        fire.rotation.x = deck.tilt + Math.PI / 2
+        this.group.add(fire)
+        this.owned.push(fire.geometry)
+      }
+      this.owned.push(stemGeo, barGeo, gripGeo)
+    } else {
+      const rim = new TorusGeometry(CAB.wheelRadius, CAB.wheelRadius * 0.16, 8, 28)
+      const wheel = new Mesh(rim, dark)
+      wheel.position.set(...stand(0.02, -0.04))
+      wheel.rotation.x = deck.tilt
+      this.group.add(wheel)
+      const hubGeo = new CylinderGeometry(CAB.wheelRadius * 0.3, CAB.wheelRadius * 0.3, 0.012, 12)
+      const hub = new Mesh(hubGeo, dark)
+      hub.position.set(...stand(0.016, -0.04))
+      // A cylinder stands along +y; the quarter turn puts its axis along the face's normal instead.
+      hub.rotation.x = deck.tilt + Math.PI / 2
+      this.group.add(hub)
+
+      // The shifter, to the right of the wheel where it belongs, leaning back out of the deck.
+      const gateGeo = new BoxGeometry(0.07, 0.012, 0.1)
+      const gate = new Mesh(gateGeo, dark)
+      gate.position.set(...stand(0.012, 0.235))
+      gate.rotation.x = deck.tilt
+      this.group.add(gate)
+      const stickGeo = new CylinderGeometry(0.009, 0.011, 0.11, 8)
+      const stick = new Mesh(stickGeo, dark)
+      stick.position.set(...stand(0.06, 0.235, 0.01))
+      stick.rotation.set(deck.tilt + Math.PI / 2 - 0.35, 0, 0)
+      this.group.add(stick)
+      const knobGeo = new SphereGeometry(0.021, 12, 8)
+      const knob = new Mesh(knobGeo, lit)
+      knob.position.set(...stand(0.115, 0.235, 0.03))
+      this.group.add(knob)
+      this.owned.push(rim, hubGeo, gateGeo, stickGeo, knobGeo)
+
+      const buttonGeo = new CylinderGeometry(0.019, 0.019, 0.014, 12)
+      for (const x of [0.115, 0.17]) {
+        const b = new Mesh(buttonGeo, lit)
+        b.position.set(...stand(0.018, x, -0.06))
+        b.rotation.x = deck.tilt + Math.PI / 2
+        this.group.add(b)
+      }
+      this.owned.push(buttonGeo)
+
+      // Pedals. A stand-up driving cabinet still has them, on a plate at the foot of the kick panel.
+      const plateGeo = new BoxGeometry(0.34, 0.02, 0.22)
+      const plate = new Mesh(plateGeo, dark)
+      plate.position.set(0, 0.012, CAB.depth * 0.06)
+      this.group.add(plate)
+      const pedalGeo = new BoxGeometry(0.075, 0.016, 0.13)
+      for (const [px, tilt] of [
+        [-0.075, -0.32],
+        [0.075, -0.26],
+      ]) {
+        const pedal = new Mesh(pedalGeo, px < 0 ? dark : lit)
+        pedal.position.set(px, 0.045, CAB.depth * 0.06)
+        pedal.rotation.x = tilt
+        this.group.add(pedal)
+      }
+      this.owned.push(plateGeo, pedalGeo)
     }
-    this.owned.push(buttonGeo, buttonMat)
 
     const bezelTex = art.texture('bezel')
     if (bezelTex) {
@@ -275,11 +356,15 @@ export class Cabinet {
       CAB.width - inset * 2,
       bezelTex ? 0.005 : 0.004,
     )
-    const attract = art.texture('attract')
+    const attract = art.attract()
     // With no attract art the screen is a dark pane rather than a hole: a touch of the game's own
     // colour, so an unfinished cabinet still looks switched on.
     this.screenMat = new MeshBasicMaterial({ map: attract, color: attract ? 0xffffff : new Color(game.body).multiplyScalar(0.5), toneMapped: false })
-    this.group.add(new Mesh(screenGeo, this.screenMat))
+    const screenFace = faceFrame({ z: bezelBottom.z + inset * 0.3, y: bezelBottom.y + inset }, { z: bezelTop.z - inset * 0.3, y: bezelTop.y - inset })
+    this.screenCentre = new Vector3(0, screenFace.y + screenFace.ny * 0.006, screenFace.z + screenFace.nz * 0.006)
+    this.screenNormal = new Vector3(0, screenFace.ny, screenFace.nz)
+    this.screen = new Mesh(screenGeo, this.screenMat)
+    this.group.add(this.screen)
     this.owned.push(screenGeo, this.screenMat)
 
     if (!hasMarquee) this.marqueeMat.color.copy(this.glow)
@@ -305,6 +390,8 @@ export class Cabinet {
     // metres away wants tens, not units. Getting this wrong is why the room was black.
     this.marqueeLight.intensity = 3.5 + 24 * t
     if (this.screenMat.map) this.screenMat.color.setScalar(0.25 + 0.75 * t)
+    // The loop runs on the cabinet being looked at and nowhere else.
+    this.art.setAttractPlaying(t > 0.35)
   }
 
   get selected(): number {

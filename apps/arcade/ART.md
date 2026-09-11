@@ -149,6 +149,23 @@ stretched. If it warns that it is cutting more than a third, the image came back
 ask again, or pass `--no-crop` to keep the whole picture and let the cabinet face take the shape it
 implies.
 
+## The attract loops
+
+The screens play a few seconds of each game's own title, filmed from the game itself:
+
+```bash
+node scripts/capture-attract.mjs             # all three, their dev servers must be up
+node scripts/capture-attract.mjs radrun --seconds 14
+```
+
+It loads a game on its own dev server, hides the menu and the HUD, lets the scene settle and records
+the page — Playwright's recorder writes webm, which is what a video texture wants, so there is no
+encoder in the loop. The result lands in `public/cabinets/<game>/attract.webm` and the cabinet finds
+it. Re-run it whenever a game's title screen changes.
+
+The loop runs on the selected cabinet only; the others hold a frame of theirs, which is enough to
+stop them looking switched off.
+
 ## The carpet
 
 The room is geometry and light rather than photographs — dark walls, neon ceiling strips, and the

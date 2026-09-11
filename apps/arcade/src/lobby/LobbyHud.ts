@@ -11,7 +11,6 @@ export class LobbyHud {
   onStart: (() => void) | null = null
 
   private readonly title: HTMLElement
-  private readonly lineage: HTMLElement
   private readonly blurb: HTMLElement
   private readonly dots: HTMLElement[]
 
@@ -22,16 +21,15 @@ export class LobbyHud {
       <header class="lobby-sign"><span>SIOMPORAS</span><em>ARCADE</em></header>
       <button class="lobby-arrow left" aria-label="Previous game">‹</button>
       <button class="lobby-arrow right" aria-label="Next game">›</button>
+      <button class="lobby-play" aria-label="Play this game">▶</button>
       <footer class="lobby-plate">
         <h1></h1>
-        <p class="lineage"></p>
         <p class="blurb"></p>
         <div class="dots"></div>
         <button class="lobby-start">INSERT COIN</button>
       </footer>`
 
     this.title = this.el.querySelector('h1')!
-    this.lineage = this.el.querySelector('.lineage')!
     this.blurb = this.el.querySelector('.blurb')!
 
     this.el.querySelector<HTMLElement>('.lobby-arrow.left')!.addEventListener('click', (e) => {
@@ -43,6 +41,10 @@ export class LobbyHud {
       this.onStep?.(1)
     })
     this.el.querySelector<HTMLElement>('.lobby-start')!.addEventListener('click', (e) => {
+      e.stopPropagation()
+      this.onStart?.()
+    })
+    this.el.querySelector<HTMLElement>('.lobby-play')!.addEventListener('click', (e) => {
       e.stopPropagation()
       this.onStart?.()
     })
@@ -63,9 +65,19 @@ export class LobbyHud {
     parent.appendChild(this.el)
   }
 
+  /**
+   * Leaning in on a cabinet's screen: the row furniture goes, a play button comes up over the glass.
+   * Everything else about the lobby is still there behind it, so backing out is instant.
+   */
+  setLeaning(on: boolean): void {
+    if (this.leaning === on) return
+    this.leaning = on
+    this.el.classList.toggle('leaning', on)
+  }
+  private leaning = false
+
   show(game: ArcadeGame): void {
     this.title.textContent = game.title
-    this.lineage.textContent = game.lineage
     this.blurb.textContent = game.blurb
     const i = GAMES.indexOf(game)
     this.dots.forEach((d, j) => d.classList.toggle('on', j === i))

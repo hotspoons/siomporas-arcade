@@ -28,7 +28,7 @@ import { existsSync, mkdirSync, rmSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { knobs, reflowBezel } from './lib/bezel.mjs'
-import { conformFlank } from './lib/flank.mjs'
+import { fillFlank } from './lib/flank.mjs'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -105,10 +105,10 @@ if (panel === 'side-left' || panel === 'side-right') {
     ? path.join(ROOT, 'shots', `cabinet-${game}-${panel}.webp`)
     : path.join(ROOT, 'apps/arcade/public/cabinets', game, `${panel}.webp`)
   mkdirSync(path.dirname(dest), { recursive: true })
-  const fit = conformFlank(src, dest, { mirror: panel === 'side-left' })
+  const fit = fillFlank(src, dest, { mirror: panel === 'side-left' })
   console.log(`${path.relative(ROOT, src)} → ${game}/${panel}.webp`)
-  console.log(`  ${fit.size.w}×${fit.size.h}, conformed to the machine's outline`)
-  console.log(`  ${((fit.stretch - 1) * 100).toFixed(0)}% mean stretch, ${fit.worst.toFixed(1)}× at its worst row`)
+  console.log(`  ${fit.size.w}×${fit.size.h}, the template's field filled with the artwork's own edges`)
+  console.log(`  the drawn shape covers ${(fit.covered * 100).toFixed(0)}% of the machine`)
   console.log(flags.has('--dry-run') ? `  dry run — written to ${path.relative(ROOT, dest)} for a look, nothing installed` : `  installed`)
   process.exit(0)
 }

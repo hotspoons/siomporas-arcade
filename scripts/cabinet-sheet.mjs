@@ -23,7 +23,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { knobs, reflowBezel } from './lib/bezel.mjs'
-import { conformFlank } from './lib/flank.mjs'
+import { fillFlank } from './lib/flank.mjs'
 import { detectPanels, matchSlots } from './lib/sheet.mjs'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -119,16 +119,16 @@ for (const [name, box] of found) {
     continue
   }
   if (name === 'side-left' || name === 'side-right') {
-    // A generator follows the outline the way a painter follows a reference, not the way a cutter
-    // follows a template — near enough that the artwork's own painted edge lands a few percent off
-    // the machine's, which shows as bare body along the bottom hem. Conform it; see lib/flank.mjs.
+    // A generator draws the outline nearly right, and the geometry cuts the real one out of whatever
+    // it is given — so wherever the machine reaches past the drawn shape, the template's grey shows
+    // as a hem. Carry the artwork's own edges out over it; see lib/flank.mjs.
     const raw = path.join(ROOT, 'shots', `.cabinet-${name}-${game}.png`)
     mkdirSync(path.dirname(raw), { recursive: true })
     magick([work, '-crop', crop, '+repage', raw])
-    const fit = conformFlank(raw, out, { mirror: name === 'side-left' })
+    const fit = fillFlank(raw, out, { mirror: name === 'side-left' })
     rmSync(raw, { force: true })
     cut.push(out)
-    console.log(`  ${name.padEnd(11)} ${fit.size.w}×${fit.size.h} — conformed to the machine's outline, ${((fit.stretch - 1) * 100).toFixed(0)}% mean stretch`)
+    console.log(`  ${name.padEnd(11)} ${fit.size.w}×${fit.size.h} — drawn shape covers ${(fit.covered * 100).toFixed(0)}% of the machine, the rest is its own edges`)
     continue
   }
   const args = [work, '-crop', crop, '+repage']

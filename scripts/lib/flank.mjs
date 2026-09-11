@@ -1,16 +1,20 @@
-// The shape of a cabinet's side, and getting artwork to actually be that shape.
+// The shape of a cabinet's side, and getting artwork to sit on it without a hem showing.
 //
 // The side templates are drawn as the machine's outline, and a good generator will follow it — but
 // it follows it the way a painter follows a reference, not the way a cutter follows a template. What
 // comes back is *nearly* the shape: the notch a little shallower, the taper a little different, the
-// whole thing a few percent wide. Laid on the cabinet, the few percent is the difference between
-// artwork and a decal someone put on crooked — bare body showing along the bottom hem, and the art's
-// own painted edge cutting across the middle of the panel where the real edge is not.
+// whole thing a few percent wide. The geometry cuts the real outline out of whatever texture it is
+// given, so wherever the machine reaches past the drawn shape you get the template's flat grey
+// showing — a pale hem along the bottom of the cabinet and up one edge.
 //
-// So the drawn shape is conformed to the real one. The artwork carries its own outline (it is the
-// only thing on the template's flat grey), so each row of it is measured, and each row is stretched
-// to fill exactly the width the machine has at that height. A generator's near-miss becomes a hit,
-// and it costs a few percent of horizontal squash in the rows where it was most wrong.
+// So the grey is got rid of. Each row of artwork is measured and its own edge colour is carried out
+// to the ends of the row, which covers the few percent the generator was out by, in the artwork's
+// own colours, and is then cut away by the geometry anyway wherever the machine does not reach.
+//
+// What this deliberately does *not* do is stretch each row to fit the outline. That was the first
+// attempt and it is a trap: the measured edge of a drawn shape jitters by a pixel or two from row to
+// row, every one of those becomes a different horizontal scale, and the artwork comes out visibly
+// melted sideways. The drawn shape is close enough to the real one that nothing needs bending.
 
 import { execFileSync } from 'node:child_process'
 
@@ -49,7 +53,7 @@ export const OUTLINE = [
 /** What that outline's bounding box measures, wide over tall. */
 export const ASPECT = 0.40128809
 
-/** How wide the conformed panel is written. A flank is the biggest thing on a cabinet. */
+/** How wide the dressed panel is written. A flank is the biggest thing on a cabinet. */
 const OUT_W = 640
 
 /** A pixel this close to neutral, at this sort of brightness, is the template's field, not artwork. */
@@ -91,59 +95,84 @@ function outlineSpan(outline, y, w, h) {
 }
 
 /**
- * Conform one flank's artwork to the machine's outline and write it.
+ * Fill the template's field around one flank's artwork with the artwork's own edges, and write it.
  *
- * Returns how much it had to move things: the mean and worst horizontal stretch, as a multiple, so a
- * generator that drew something else entirely is visible in the output rather than silently mangled.
+ * The artwork's bounding box is stretched to the panel's, which squares up the few percent the
+ * generator drew it out by — uniformly, over the whole panel, which no eye picks up. Returns how
+ * much of the machine the drawn shape actually covered before anything was carried out, so a
+ * generator that drew something else entirely shows up as a number rather than as a mess.
  */
-export function conformFlank(src, out, { mirror = false } = {}) {
+export function fillFlank(src, out, { mirror = false } = {}) {
   const w = OUT_W
   const h = Math.round(OUT_W / ASPECT)
   const px = readPixels(src, w, h)
   const outline = mirror ? OUTLINE.map(([x, y]) => [1 - x, y]) : OUTLINE
 
-  const dst = Buffer.alloc(w * h * 3)
-  let stretchSum = 0
-  let stretchWorst = 1
-  let rows = 0
+  // Where the artwork starts and ends on each row. Measured first, then smoothed: a drawn edge is
+  // ragged by a pixel or two and the carried-out colour should not be.
+  const left = new Int32Array(h).fill(-1)
+  const right = new Int32Array(h).fill(-1)
   for (let y = 0; y < h; y++) {
     const row = y * w * 3
-    // What the artwork drew on this row: its first and last pixel that is not the template's field.
-    let sL = -1
-    let sR = -1
     for (let x = 0; x < w; x++) {
       const i = row + x * 3
       if (isField(px[i], px[i + 1], px[i + 2])) continue
-      if (sL < 0) sL = x
-      sR = x
+      if (left[y] < 0) left[y] = x
+      right[y] = x
     }
+  }
+  const median = (list) => list.slice().sort((a, b) => a - b)[list.length >> 1]
+  const smooth = (edge) => {
+    const out = Int32Array.from(edge)
+    for (let y = 0; y < h; y++) {
+      const near = []
+      for (let d = -3; d <= 3; d++) {
+        const v = edge[y + d]
+        if (y + d >= 0 && y + d < h && v >= 0) near.push(v)
+      }
+      if (near.length) out[y] = median(near)
+    }
+    return out
+  }
+  const sL = smooth(left)
+  const sR = smooth(right)
+
+  const dst = Buffer.alloc(w * h * 3)
+  let covered = 0
+  let machine = 0
+  for (let y = 0; y < h; y++) {
+    const row = y * w * 3
+    // A row with no artwork on it at all borrows the nearest row that has some, so the very top and
+    // bottom of a panel are never a grey band.
+    let from = y
+    if (left[from] < 0) {
+      for (let d = 1; d < h; d++) {
+        if (y - d >= 0 && left[y - d] >= 0) {
+          from = y - d
+          break
+        }
+        if (y + d < h && left[y + d] >= 0) {
+          from = y + d
+          break
+        }
+      }
+    }
+    const a = Math.max(0, sL[from])
+    const b = Math.max(a, sR[from])
+    const src0 = from * w * 3
     const span = outlineSpan(outline, y, w, h)
-    if (!span || sL < 0 || sR - sL < 2) {
-      // No artwork at this height, or no machine: leave the row as it arrived. Either way it is
-      // outside the outline, so the geometry never shows it.
-      px.copy(dst, row, row, row + w * 3)
-      continue
-    }
-    const [oL, oR] = span
-    const k = (sR - sL) / Math.max(1, oR - oL)
-    stretchSum += k
-    stretchWorst = Math.max(stretchWorst, k > 1 ? k : 1 / k)
-    rows++
     for (let x = 0; x < w; x++) {
-      const t = (x - oL) / Math.max(1, oR - oL)
-      // Clamped, so the rows outside the outline carry the artwork's own edge colour rather than a
-      // hard line the mipmaps would smear back across it.
-      const sx = Math.max(sL, Math.min(sR, sL + t * (sR - sL)))
-      const x0 = Math.floor(sx)
-      const x1 = Math.min(sR, x0 + 1)
-      const f = sx - x0
-      const a = row + x0 * 3
-      const b = row + x1 * 3
+      const take = src0 + Math.min(b, Math.max(a, x)) * 3
       const i = row + x * 3
-      for (let c = 0; c < 3; c++) dst[i + c] = Math.round(px[a + c] * (1 - f) + px[b + c] * f)
+      dst[i] = px[take]
+      dst[i + 1] = px[take + 1]
+      dst[i + 2] = px[take + 2]
+      if (!span || x < span[0] || x > span[1]) continue
+      machine++
+      if (x >= a && x <= b) covered++
     }
   }
 
   execFileSync('magick', ['-size', `${w}x${h}`, '-depth', '8', 'rgb:-', '-quality', '92', '-define', 'webp:use-sharp-yuv=true', out], { input: dst })
-  return { size: { w, h }, stretch: rows ? stretchSum / rows : 1, worst: stretchWorst }
+  return { size: { w, h }, covered: machine ? covered / machine : 1 }
 }

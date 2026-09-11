@@ -1,0 +1,6 @@
+# lift_poses.py and check.py only. The image-to-3D repos have their own, much heavier
+# requirements — install those in their own environment, not this one.
+#
+#   pip install -r requirements.txt --index-url https://download.pytorch.org/whl/cpu
+
+torch>=2.2

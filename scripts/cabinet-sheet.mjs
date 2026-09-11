@@ -29,7 +29,7 @@ import { detectPanels, matchSlots } from './lib/sheet.mjs'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const TEMPLATES = path.join(ROOT, 'apps/arcade/art-templates')
-const GAMES = ['radrun', 'stuntin', 'apex']
+const GAMES = ['radrun', 'stuntin', 'apex', 'crown']
 
 function magick(args) {
   return execFileSync('magick', args, { encoding: 'utf8', maxBuffer: 1 << 28 })

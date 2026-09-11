@@ -3,6 +3,7 @@
 #   apps/conduit  tunnel racer-shooter                    :5180
 #   apps/stuntin  stunt-track driving game                :5181
 #   apps/coast    pseudo-3D sprite racer                  :5182
+#   apps/fighter  2D/2.5D/3D fighting game                 :5184
 #   packages/engine  shared runtime (loop, styles, input, menus, router, math, dev bridge)
 #
 # The three games still run on their own — that is where tuning, the bridge and the smoke
@@ -17,7 +18,7 @@ default:
 
 # --- dev loop ---------------------------------------------------------------
 
-# Vite dev server for an app (arcade :5183, conduit :5180, stuntin :5181, coast :5182)
+# Vite dev server for an app (arcade :5183, conduit :5180, stuntin :5181, coast :5182, fighter :5184)
 dev app="arcade":
     npm run dev -w apps/{{ app }}
 
@@ -73,7 +74,7 @@ bridge-clients app="conduit":
     APEX_BRIDGE="${APEX_BRIDGE:-apex-dev}" APEX_ORIGIN="http://localhost:$(just _port {{ app }})" node scripts/bridge.mjs --clients
 
 _port app:
-    @case "{{ app }}" in stuntin) echo 5181;; coast) echo 5182;; arcade) echo 5183;; *) echo 5180;; esac
+    @case "{{ app }}" in stuntin) echo 5181;; coast) echo 5182;; arcade) echo 5183;; fighter) echo 5184;; *) echo 5180;; esac
 
 # --- remote testing ---------------------------------------------------------
 

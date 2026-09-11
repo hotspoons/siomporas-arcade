@@ -13,7 +13,7 @@
 
 import { Router, samePath } from '@apex/engine/app/Router'
 import type { GameHost, GameModule, MountedGame } from '@apex/engine/app/GameModule'
-import { findGame } from './catalog'
+import { findMountable } from './catalog'
 import { lobby } from './lobby/Lobby'
 
 /** Long enough to cover the swap, short enough not to be a wait. Matches the CSS transition. */
@@ -54,10 +54,13 @@ export class Shell {
     void this.sync()
   }
 
-  /** The module the current URL asks for. Anything unrecognised is the lobby. */
+  /**
+   * The module the current URL asks for. Anything unrecognised is the lobby — and "recognised"
+   * includes the unlisted games, which have no cabinet but are still addresses this app serves.
+   */
   private resolve(id: string): { id: string; load: () => Promise<GameModule> } {
     if (id === '') return { id: '', load: async () => lobby }
-    const game = findGame(id)
+    const game = findMountable(id)
     if (!game) return { id: '', load: async () => lobby }
     return { id: game.id, load: game.load }
   }

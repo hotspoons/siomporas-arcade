@@ -1,0 +1,23 @@
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: #06070a;
+  overflow: hidden;
+  font-family: ui-monospace, 'Courier New', monospace;
+}
+
+#app {
+  position: fixed;
+  inset: 0;
+}
+
+.stage {
+  display: block;
+  width: 100%;
+  height: 100%;
+}

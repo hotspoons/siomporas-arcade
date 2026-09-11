@@ -60,6 +60,35 @@ export const GAMES: readonly ArcadeGame[] = [
   },
 ]
 
+/**
+ * A game the shell will mount but the lobby does not show: no cabinet, no marquee, no place in the
+ * row. You reach it by knowing the address.
+ *
+ * This exists for a game that runs but is not ready to be walked up to — CONCRETE CROWN plays, and
+ * its stand-in renderer draws every attacking limb out of the move's own hitbox, which is both the
+ * most useful debugging view in the repo and not something to put on a lit sign. It joins the row
+ * by moving its entry into GAMES, which is when it needs a cabinet's worth of artwork.
+ */
+export interface UnlistedGame {
+  readonly id: string
+  readonly title: string
+  load: () => Promise<GameModule>
+}
+
+export const UNLISTED: readonly UnlistedGame[] = [
+  {
+    id: 'crown',
+    title: 'CONCRETE CROWN',
+    load: () => import('@apex/fighter/app/module').then((m) => m.game),
+  },
+]
+
+/** A cabinet in the row. The lobby builds itself out of these. */
 export function findGame(id: string | undefined): ArcadeGame | null {
   return GAMES.find((g) => g.id === id) ?? null
+}
+
+/** Anything the shell can mount, listed or not. This is what the URL resolves against. */
+export function findMountable(id: string | undefined): { id: string; load: () => Promise<GameModule> } | null {
+  return findGame(id) ?? UNLISTED.find((g) => g.id === id) ?? null
 }

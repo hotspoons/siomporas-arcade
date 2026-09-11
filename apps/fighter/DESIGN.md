@@ -9,6 +9,16 @@ knocked through a wall.** Not a 3D fighter with a 2D mode bolted on — those ar
 
 ---
 
+
+## Where it runs
+
+Two places, from one build. `just dev fighter` serves it standalone on :5184, which is where the
+tuning happens. The arcade mounts the same game through `src/app/module.ts` at
+[arcade.siomporas.com/crown](https://arcade.siomporas.com/crown) — **unlisted**: it resolves as a
+URL and the lobby does not draw a cabinet for it, because the stand-in renderer is not something to
+put on a lit sign. `UNLISTED` in `apps/arcade/src/catalog.ts` is that second list; moving the entry
+into `GAMES` is what puts it in the row, and that is the moment it needs a cabinet's worth of art.
+
 ## Play it
 
 **It runs, with no artwork at all.**

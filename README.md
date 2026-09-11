@@ -52,6 +52,13 @@ know nothing of each other or of the shell.
 Cabinet artwork, and the prompt that generates more of it, is
 [apps/arcade/ART.md](apps/arcade/ART.md).
 
+The fighter is wired in but deliberately not on show: `UNLISTED` in
+[`apps/arcade/src/catalog.ts`](apps/arcade/src/catalog.ts) is the shell's second
+list, resolved by the URL and ignored by the lobby. Its stand-in renderer draws
+each attacking limb out of the move's own hitbox — the most useful view of frame
+data in the repo, and not something to put on a lit sign. It joins the row by
+moving one entry from `UNLISTED` to `GAMES`.
+
 There is also a workbench page at
 [arcade.siomporas.com/modem](https://arcade.siomporas.com/modem), which
 models what a 2400 bit/s call sounds like: both carriers, the guard tone, the
@@ -72,6 +79,7 @@ had to exist either way; that is what is in place now.
 | [`apps/conduit`](apps/conduit) | **APEX CONDUIT** — tunnel racer-shooter (wall-riding craft, roof laser, shockwave, checkpoints, VR, phone tilt) | 5180 |
 | [`apps/stuntin`](apps/stuntin) | **STUNTIN’** — stunt-track driving game with a tile-grid track editor (loops, corkscrews, banked turns, speedbowls, splits/joins, jumps, tunnels), crash replays | 5181 |
 | [`apps/coast`](apps/coast) | **TURBO RADRUN** — OutRun-lineage sprite-scaling road racer: forks, checkpoints, turbo, chase and cockpit views, radio; sprites baked from CC0 models | 5182 |
+| [`apps/fighter`](apps/fighter) | **CONCRETE CROWN** — 2D fighting game: motion inputs, frame data, hit detection, rounds. Mounted but **unlisted** — it has no cabinet in the lobby until it has sprites, so it lives at `/crown` and nowhere else | 5184 |
 | [`packages/engine`](packages/engine) | `@apex/engine` — fixed-step loop, modern/retro styles, input sources, menus, settings store, math, sky, particles, dev bridge | — |
 
 ## Run

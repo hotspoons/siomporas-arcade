@@ -26,6 +26,13 @@ const url = process.env.ARCADE_URL ?? 'http://localhost:5183'
 const rounds = Number(process.env.ROUNDS ?? 2)
 const outDir = 'shots'
 const GAMES = ['radrun', 'stuntin', 'apex']
+/**
+ * Games the shell will mount that the lobby does not show — see UNLISTED in apps/arcade/catalog.ts.
+ * They are cycled for leaks like anything else, because an unlisted game holding a canvas leaks the
+ * same as a listed one. They are left out of the play pass, which drives a title menu they have not
+ * got yet.
+ */
+const UNLISTED = ['crown']
 
 const errors = []
 const note = (s) => console.log('  ' + s)
@@ -138,12 +145,13 @@ try {
   expect('an unknown path lands in the lobby', await state(), { url: '/', mount: 'lobby', menu: null })
 
   // --- leaks ----------------------------------------------------------------
-  console.log(`leaks (${rounds} rounds of all ${GAMES.length} games)`)
+  const cycle = [...GAMES, ...UNLISTED]
+  console.log(`leaks (${rounds} rounds of all ${cycle.length} games)`)
   const first = await census()
   note(`baseline ${JSON.stringify(first)}`)
   let last = first
   for (let r = 1; r <= rounds; r++) {
-    for (const id of GAMES) await go(`/${id}`)
+    for (const id of cycle) await go(`/${id}`)
     await go('/', 4000)
     last = await census()
     note(`round ${r}  ${JSON.stringify(last)}`)

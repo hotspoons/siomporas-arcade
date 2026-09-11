@@ -16,6 +16,7 @@
     "@apex/coast": "*",
     "@apex/conduit": "*",
     "@apex/engine": "*",
+    "@apex/fighter": "*",
     "@apex/stuntin": "*",
     "postprocessing": "^6.39.4",
     "three": "^0.185.1"

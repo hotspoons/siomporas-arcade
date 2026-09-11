@@ -24,7 +24,7 @@ import { fileURLToPath } from 'node:url'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const TEMPLATES = path.join(ROOT, 'apps/arcade/art-templates')
-const GAMES = ['radrun', 'stuntin', 'apex']
+const GAMES = ['radrun', 'stuntin', 'apex', 'crown']
 /** The two greys the template is drawn in; see cabinet-template.mjs. */
 const FIELD = '#7a7a7a'
 const SLOT_FIELD = '#8f8f8f'

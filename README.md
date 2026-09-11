@@ -21,6 +21,15 @@ left and right with the arrows, a swipe, the wheel or a gamepad. It is drawn in
 three.js by the same engine the games use, and it is mounted by the same shell
 that mounts them.
 
+There are two ways round it. The row is for choosing a game — whichever cabinet
+is selected stands square on, and clicking its screen leans you in against the
+glass. **Walk the aisle** (the button top right, or `F`) is for looking at the
+machines: the row stops sliding and stands still with room to get in beside one,
+and you move instead — WASD or the arrows, drag to look, click a machine to walk
+over to it. That is the only view that shows you the side art, which is most of
+what a cabinet wears. `Esc` or `F` again comes back to the row, standing at
+whatever you walked to.
+
 Selecting a cabinet does not reload the page. `apps/arcade/src/Shell.ts` owns the
 URL and exactly one mounted module at a time; a game is a lazily-imported chunk
 that gets a fresh container and canvas on the way in and gives back its loop, its
@@ -42,6 +51,13 @@ know nothing of each other or of the shell.
 
 Cabinet artwork, and the prompt that generates more of it, is
 [apps/arcade/ART.md](apps/arcade/ART.md).
+
+There is also a workbench page at
+[arcade.siomporas.com/modem](https://arcade.siomporas.com/modem), which
+models what a 2400 bit/s call sounds like: both carriers, the guard tone, the
+scrambler, and a V.22 bis handshake whose every duration is the Blue Book's. It
+measures its own claims out of the signal it just synthesised — nothing on it is
+a recording.
 
 **Worth trying next:** the shell gives every game a *fresh* WebGL context rather
 than sharing one, which costs a few hundred milliseconds on each switch and is
@@ -104,9 +120,17 @@ were baked from: `1` poses them exactly where the sprites were, `2` puts a real
 perspective camera on them, so poses are continuous and roadside things are seen
 from the side. `P` pauses in every game alongside Escape.
 
-## Fonts
+## Credits and licences
 
-Each app bundles its own free typefaces under `apps/<app>/public/fonts` (latin woff2 subsets from Google Fonts, all OFL or Apache 2.0, license texts alongside). Regenerate with `node scripts/fetch-fonts.mjs`. Stuntin’: Yellowtail + VT323 + Press Start 2P. Coast: Pacifico + Racing Sans One + Righteous + Press Start 2P. Conduit: Audiowide + Orbitron + Rajdhani + Press Start 2P.
+Every sound is synthesised and every texture the games draw is procedural, but
+the roadside scenery and the typefaces are other people's work. Turbo Radrun's
+cars, props and trees are [Kenney](https://kenney.nl)'s CC0 low-poly kits, baked
+into sprite atlases at startup; each app bundles latin woff2 subsets from Google
+Fonts under `apps/<app>/public/fonts`, all OFL or Apache 2.0, with the licence
+texts served alongside them (regenerate with `node scripts/fetch-fonts.mjs`).
+
+Who made what, under which licence, and where it came from — assets and
+software dependencies both — is [CREDITS.md](CREDITS.md).
 
 ## Stuntin’ track editor
 

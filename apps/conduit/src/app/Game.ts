@@ -312,7 +312,7 @@ export class Game implements LoopClient {
       finished: snap.phase === 'finished',
       seed: this.seed,
       date: Date.now(),
-    }, this.tape.subarray(0, this.tapeLength), this.settings.data.steering ?? 1.5)
+    }, this.tape.subarray(0, this.tapeLength), this.settings.data.steering ?? 1)
     this.menus.replace(buildMenus(this).summary(snap, entry.rank, entry.isBest))
     this.audio.setScene('summary')
   }
@@ -343,7 +343,7 @@ export class Game implements LoopClient {
   }
 
   applyHandling(): void {
-    this.world.vehicle.steerScale = this.settings.data.steering ?? 1.5
+    this.world.vehicle.steerScale = this.settings.data.steering ?? 1
   }
 
   applyAccessibility(): void {

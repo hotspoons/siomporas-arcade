@@ -49,6 +49,10 @@ typecheck:
 test:
     npx vitest run
 
+# measure every cabinet's artwork against the machine it goes on (see apps/arcade/ART.md)
+art-check *games:
+    node scripts/cabinet-check.mjs {{ games }}
+
 # --- dev operator shell (opt-in) --------------------------------------------
 # A JS shell into the LIVE page: the dev server relays code you POST to the
 # running app and returns a JSON-safe result — real browser, real GPU. OFF

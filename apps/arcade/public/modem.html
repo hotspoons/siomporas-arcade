@@ -1,0 +1,739 @@
+<!doctype html>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>CARRIER — a 2400 bit/s handshake, modelled</title>
+<link rel="icon" href="/favicon.svg" />
+<style>
+  :root {
+    --bg: #05060b;
+    --ink: #cfe6ff;
+    --dim: #6f86a8;
+    --low: #ff3f8a;
+    --high: #2fb8ff;
+    --guard: #ffb347;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 0 0 4rem; background: var(--bg); color: var(--ink);
+    font-family: var(--mono); font-size: 13px; line-height: 1.55;
+  }
+  header { padding: 2.5rem 1.5rem 1rem; max-width: 70rem; margin: 0 auto; }
+  h1 { margin: 0 0 .2rem; font-size: clamp(20px, 4vw, 34px); letter-spacing: .12em; }
+  h1 small { display: block; font-size: .42em; letter-spacing: .3em; color: var(--dim); margin-bottom: .4rem; }
+  p.lede { margin: .6rem 0 0; max-width: 52rem; color: #a9bcd8; }
+  main { max-width: 70rem; margin: 0 auto; padding: 0 1.5rem; }
+  .bar { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; margin: 1.6rem 0 1rem; }
+  button {
+    font-family: inherit; font-size: 12px; letter-spacing: .16em; cursor: pointer;
+    padding: .8em 1.4em; border-radius: 4px; border: 1px solid var(--high);
+    background: transparent; color: var(--ink); transition: background 160ms, box-shadow 160ms;
+  }
+  button:hover:enabled { background: color-mix(in srgb, var(--high) 22%, transparent); box-shadow: 0 0 20px color-mix(in srgb, var(--high) 40%, transparent); }
+  button:disabled { opacity: .4; cursor: default; }
+  button.go { border-color: var(--low); }
+  button.go:hover:enabled { background: color-mix(in srgb, var(--low) 22%, transparent); box-shadow: 0 0 20px color-mix(in srgb, var(--low) 40%, transparent); }
+  label.opt { display: inline-flex; gap: .45em; align-items: center; color: var(--dim); cursor: pointer; padding: .3em .1em; }
+  label.opt input { accent-color: var(--high); }
+  .panes { display: grid; grid-template-columns: minmax(0, 1fr) 19rem; gap: 1rem; align-items: start; }
+  @media (max-width: 860px) { .panes { grid-template-columns: minmax(0, 1fr); } }
+  .scope { position: relative; border: 1px solid #1d2740; border-radius: 6px; overflow: hidden; background: #01030a; }
+  .scope canvas { display: block; width: 100%; }
+  .axis { position: absolute; inset: 0; pointer-events: none; font-size: 10px; color: #52688c; }
+  .axis span { position: absolute; left: 4px; transform: translateY(-50%); text-shadow: 0 0 4px #000; }
+  .side { display: grid; gap: 1rem; }
+  .card { border: 1px solid #1d2740; border-radius: 6px; padding: .9rem 1rem; background: #080b16; }
+  .card h2 { margin: 0 0 .6rem; font-size: 10px; letter-spacing: .24em; color: var(--dim); font-weight: 400; }
+  ol.steps { margin: 0; padding: 0; list-style: none; counter-reset: s; font-size: 11.5px; }
+  ol.steps li { padding: .3em 0 .3em 1.9em; position: relative; color: #6d81a3; border-left: 2px solid transparent; }
+  ol.steps li::before {
+    counter-increment: s; content: counter(s); position: absolute; left: .5em; top: .3em;
+    color: #3d4f6e; font-size: 10px;
+  }
+  ol.steps li.on { color: #fff; border-left-color: var(--high); background: linear-gradient(90deg, color-mix(in srgb, var(--high) 12%, transparent), transparent); }
+  ol.steps li.done { color: #8ea6c8; }
+  ol.steps li em { font-style: normal; color: var(--dim); }
+  #meas { width: 100%; border-collapse: collapse; font-size: 11px; }
+  #meas td { padding: .22em 0; border-bottom: 1px solid #141c30; color: #8ea6c8; }
+  #meas td.n { text-align: right; color: #fff; font-variant-numeric: tabular-nums; }
+  #meas td.w { color: var(--dim); padding-left: .6em; }
+  ol.steps li.on em { color: var(--high); }
+  .log { height: 12rem; overflow: auto; font-size: 11.5px; }
+  .log div { padding: .1em 0; color: #8ea6c8; }
+  .log b { color: #fff; font-weight: 400; }
+  .log i { font-style: normal; color: var(--dim); }
+  .ch { display: flex; gap: 1rem; flex-wrap: wrap; font-size: 11px; color: var(--dim); margin-top: .5rem; }
+  .ch b { font-weight: 400; }
+  .ch .k { display: inline-block; width: .7em; height: .7em; border-radius: 2px; margin-right: .4em; vertical-align: -1px; }
+  article { max-width: 52rem; margin: 2.4rem auto 0; color: #a9bcd8; }
+  article h2 { font-size: 12px; letter-spacing: .22em; color: var(--dim); font-weight: 400; margin: 2rem 0 .6rem; }
+  article p { margin: .7rem 0; }
+  article code { color: #fff; }
+  article table { border-collapse: collapse; font-size: 11.5px; margin: .8rem 0; width: 100%; }
+  article th, article td { text-align: left; padding: .32em .7em .32em 0; border-bottom: 1px solid #17203a; vertical-align: top; }
+  article th { color: var(--dim); font-weight: 400; }
+  a { color: var(--high); }
+  .foot { max-width: 52rem; margin: 2.5rem auto 0; color: #52688c; font-size: 11px; }
+</style>
+
+<header>
+  <h1><small>SIOMPORAS ARCADE · WORKBENCH</small>CARRIER</h1>
+  <p class="lede">
+    What a 2400 bit/s modem call actually sounds like, synthesised from the specification rather than
+    sampled: ITU-T V.22&nbsp;bis, two carriers, 600 baud, 16-QAM, and a handshake whose every duration
+    below is quoted from the Blue Book. Nothing here is a recording.
+  </p>
+</header>
+
+<main>
+  <div class="bar">
+    <button class="go" id="dial">PICK UP AND DIAL</button>
+    <button id="stop" disabled>HANG UP</button>
+    <label class="opt"><input type="checkbox" id="dialling" /> dial the number first</label>
+    <label class="opt"><input type="checkbox" id="fallback" /> fall back to 1200 (no S1)</label>
+    <label class="opt"><input type="checkbox" id="bell" /> Bell 212A answer tone (2225 Hz)</label>
+    <label class="opt"><input type="checkbox" id="guard" checked /> 1800 Hz guard tone</label>
+    <label class="opt"><input type="checkbox" id="noisy" /> long-haul line</label>
+  </div>
+
+  <div class="panes">
+    <div>
+      <div class="scope">
+        <canvas id="spec" width="1400" height="420"></canvas>
+        <div class="axis" id="axis"></div>
+      </div>
+      <div class="ch">
+        <span><i class="k" style="background:var(--low)"></i><b>low channel</b> — 1200 Hz carrier, the calling modem</span>
+        <span><i class="k" style="background:var(--high)"></i><b>high channel</b> — 2400 Hz carrier, the answering modem</span>
+        <span><i class="k" style="background:var(--guard)"></i><b>guard tone</b> — 1800 Hz</span>
+      </div>
+    </div>
+
+    <div class="side">
+      <div class="card">
+        <h2>HANDSHAKE</h2>
+        <ol class="steps" id="steps"></ol>
+      </div>
+      <div class="card">
+        <h2>CONSTELLATION · 600 BAUD</h2>
+        <canvas id="const" width="420" height="420" style="width:100%;display:block"></canvas>
+      </div>
+      <div class="card">
+        <h2>MEASURED FROM THE SIGNAL</h2>
+        <table id="meas"></table>
+      </div>
+      <div class="card">
+        <h2>LINE</h2>
+        <div class="log" id="log"></div>
+      </div>
+    </div>
+  </div>
+
+  <article>
+    <h2>WHAT YOU ARE HEARING</h2>
+    <p>
+      A V.22&nbsp;bis modem is two modems in one pair of wires. The calling end transmits on a
+      <b>1200&nbsp;Hz</b> carrier and listens on <b>2400&nbsp;Hz</b>; the answering end does the
+      opposite. Both are talking the whole time, which is why the sound is a mush of two things at
+      once — and why the answering end adds an <b>1800&nbsp;Hz guard tone</b> six decibels down, to
+      keep the telephone network's own signalling gear from mistaking the high channel for a control
+      tone.
+    </p>
+    <p>
+      Both channels run at <b>600 baud</b> — six hundred symbols a second, always, at every speed.
+      1200 bit/s carries two bits per symbol as a phase change; 2400 bit/s carries four, the first
+      two as the same phase change and the last two choosing one of four amplitudes inside the new
+      quadrant. That is the whole difference between the two speeds, and it is why the handshake can
+      decide between them so late.
+    </p>
+    <p>
+      The tones you can pick out by ear fall straight out of that. <b>Unscrambled binary 1</b> is an
+      unbroken run of <code>11</code> dibits, and <code>11</code> means "turn 270°" — a quarter turn
+      backwards every symbol, six hundred times a second, which <em>is</em> a tone 150&nbsp;Hz below
+      the carrier. So the answering modem's opening signal is a pure tone at 2250&nbsp;Hz, and the
+      calling modem's reply sits at 1050&nbsp;Hz. Neither frequency appears anywhere in the
+      specification; they are what the arithmetic does.
+    </p>
+    <p>
+      The <b>S1 signal</b> — the one that means "I can do 2400" — is an alternating pattern of
+      <code>00</code> and <code>11</code> dibits: a quarter turn forward, then a quarter turn back,
+      three hundred times a second. The phase ends up where it started, so unlike the run of ones
+      this one does <em>not</em> shift the carrier; it leaves it standing and puts sidebands
+      300&nbsp;Hz either side of it — 900 and 1500&nbsp;Hz in the low channel. That is the warble in
+      the middle of the handshake, and the panel on the right measures it out of the signal rather
+      than taking my word for it.
+    </p>
+    <p>
+      After that both ends switch on their <b>scramblers</b> and everything turns to hiss. A
+      scrambler is a shift register that divides the data by
+      <code>1&nbsp;⊕&nbsp;x⁻¹⁴&nbsp;⊕&nbsp;x⁻¹⁷</code>, whose job is to guarantee the line keeps
+      changing state even when the data is a long run of the same bit — a receiver recovers its
+      clock from those transitions and would drift without them. Send it all ones and it emits
+      pseudo-random noise, which is exactly what the two modems do while they train. The
+      specification even provides for the scrambler getting stuck: sixty-four consecutive ones at
+      its output and it inverts the next bit going in.
+    </p>
+
+    <h2>THE SEQUENCE</h2>
+    <p>Every duration here is from the Recommendation, and the model uses them verbatim.</p>
+    <table>
+      <tr><th>Step</th><th>Signal</th><th>Time</th><th>Where</th></tr>
+      <tr><td>answer</td><td>2100 Hz answer tone — also disables echo suppressors on the trunk</td><td>2.6–4.0 s</td><td>V.25</td></tr>
+      <tr><td></td><td>silence</td><td>75 ms</td><td>V.25</td></tr>
+      <tr><td>answering</td><td>unscrambled binary 1 at 1200 bit/s, high channel</td><td>—</td><td>§6.3.1.1.2 a)</td></tr>
+      <tr><td>calling</td><td>silent until 155 ms of that has been detected</td><td>155 ± 10 ms</td><td>§6.3.1.1.1 b)</td></tr>
+      <tr><td></td><td>still silent</td><td>456 ± 10 ms</td><td>§6.3.1.1.1 b)</td></tr>
+      <tr><td></td><td>S1 — unscrambled double dibit 00/11, low channel</td><td>100 ± 3 ms</td><td>§6.3.1.1.1 b)</td></tr>
+      <tr><td></td><td>scrambled binary 1 at 1200 bit/s</td><td>—</td><td>§6.3.1.1.1 b)</td></tr>
+      <tr><td>answering</td><td>S1 in reply, then scrambled binary 1 at 1200</td><td>100 ± 3 ms</td><td>§6.3.1.1.2 b)</td></tr>
+      <tr><td>both</td><td>scrambled binary 1 at 2400 bit/s — 16-way decisions from 450 ms</td><td>600 ± 10 ms</td><td>§6.3.1.1.1 d)</td></tr>
+      <tr><td></td><td>ready for data</td><td>200 ± 10 ms</td><td>§6.3.1.1.1 e)</td></tr>
+      <tr><td></td><td>carrier detect, once 32 consecutive scrambled ones are seen</td><td>—</td><td>§6.3.1.1.1 f)</td></tr>
+    </table>
+    <p>
+      Tick <b>fall back to 1200</b> and the calling modem never sends S1. The answering modem hears
+      scrambled binary 1 where it was listening for the double dibit, and both ends settle for
+      1200 bit/s — the V.22 handshake, which is the same sequence with the middle taken out. That
+      is the negotiation: one 100-millisecond pattern, present or absent.
+    </p>
+
+    <h2>HOW HONEST IS THIS</h2>
+    <p>
+      The signal is real: scrambler, differential quadrant encoding, the 16-point constellation,
+      raised-cosine pulse shaping, both carriers summed on one line, guard tone at the specified
+      6&nbsp;dB down, and the whole thing band-limited to the 300–3400&nbsp;Hz a telephone circuit
+      will pass and sampled at 8&nbsp;kHz like one. Put a real demodulator on the output and the data
+      is there to be read.
+    </p>
+    <p>
+      The <em>negotiation</em> is staged rather than closed-loop: both ends are driven by the
+      specification's timings instead of each actually detecting the other, because two real
+      detectors would sound identical and take a week. The dial tone, DTMF and ringback are the
+      North American precise tone plan; the ring cadence is shortened, which is the one duration on
+      this page that is a lie.
+    </p>
+  </article>
+
+  <p class="foot">
+    Sources: ITU-T V.22 bis (Blue Book, Fascicle VIII.1, 1988) §§2.1, 2.5, 5.1, 6.3.1.1; ITU-T V.25
+    for the answer sequence. Synthesised in WebAudio, nothing sampled. Part of
+    <a href="/">Siomporas Arcade</a>.
+  </p>
+</main>
+
+<script type="module">
+  // ---------------------------------------------------------------------------
+  // A V.22 bis call, built from the Recommendation.
+  //
+  // Everything below runs at the telephone network's own sample rate. The two modems are generated
+  // separately and summed, because that is what a two-wire circuit does to them, and it is why a
+  // handshake sounds like two arguments happening at once.
+  // ---------------------------------------------------------------------------
+
+  const SR = 8000            // telephone sampling rate
+  const BAUD = 600           // §2.5.1 — always 600, at both speeds
+  const SPS = SR / BAUD      // 13.333 samples per symbol
+  const LOW = 1200           // §2.1 — calling modem's carrier
+  const HIGH = 2400          // §2.1 — answering modem's carrier
+  const GUARD = 1800         // §2.1 — guard tone, high channel only
+  const GUARD_DB = -6        // §2.2 — 6 ± 1 dB below the data signal
+
+  /** Recommendation V.22 bis §5.1: a self-synchronising scrambler, 1 ⊕ x⁻¹⁴ ⊕ x⁻¹⁷. */
+  class Scrambler {
+    constructor() { this.reg = 0; this.ones = 0 }
+    bit(input) {
+      // Guard against scrambler lock-up: 64 consecutive ones out and the next bit in is inverted.
+      if (this.ones >= 64) { input ^= 1; this.ones = 0 }
+      const out = input ^ ((this.reg >> 13) & 1) ^ ((this.reg >> 16) & 1)
+      this.reg = ((this.reg << 1) | out) & 0x1ffff
+      this.ones = out ? this.ones + 1 : 0
+      return out
+    }
+  }
+
+  /** §2.5.2, Table 1: the first two bits of a quadbit are a phase quadrant change. */
+  const QUADRANT_CHANGE = { 0b00: 1, 0b01: 0, 0b11: 3, 0b10: 2 }   // in quarter turns
+  /** §2.5.2.1, Figure 2: the last two bits choose one of four points inside the new quadrant. */
+  const POINT = { 0b00: [1, 1], 0b01: [3, 1], 0b10: [1, 3], 0b11: [3, 3] }
+  /**
+   * §2.5.2.2: at 1200 bit/s "the signalling elements corresponding to 01 in the signal constellation
+   * shall be transmitted irrespective of the quadrant concerned" — so the dibits carry a phase
+   * change and nothing else, which is V.22's QPSK. That point is also the one whose radius (√10) is
+   * the root-mean-square radius of the whole sixteen, so both speeds put the same power on the line.
+   */
+  const POINT_1200 = 0b01
+
+  /** Turns a bit stream into constellation points, carrying the differential quadrant along. */
+  class Encoder {
+    constructor() { this.quadrant = 0 }
+    symbol(bits, rate) {
+      const first = rate === 2400 ? (bits >> 2) & 3 : bits & 3
+      this.quadrant = (this.quadrant + QUADRANT_CHANGE[first]) & 3
+      const [a, b] = POINT[rate === 2400 ? bits & 3 : POINT_1200]
+      // Rotate the quadrant-1 point into the quadrant we just moved to.
+      let [x, y] = [a, b]
+      for (let i = 0; i < this.quadrant; i++) [x, y] = [-y, x]
+      return [x / 3, y / 3]
+    }
+  }
+
+  /** Raised cosine, β = 0.75, four symbols each side — §2.4's spectrum shaping, near enough. */
+  const rc = (() => {
+    const beta = 0.75
+    const span = 4
+    const taps = []
+    for (let i = -span * SPS; i <= span * SPS; i++) {
+      const t = i / SPS
+      let h
+      if (Math.abs(Math.abs(2 * beta * t) - 1) < 1e-6) h = (Math.PI / 4) * (Math.sin(Math.PI / (2 * beta)) / (Math.PI / (2 * beta)))
+      else h = (t === 0 ? 1 : Math.sin(Math.PI * t) / (Math.PI * t)) * (Math.cos(Math.PI * beta * t) / (1 - (2 * beta * t) ** 2))
+      taps.push(h)
+    }
+    return taps
+  })()
+
+  /**
+   * One modem's transmission, as a run of segments. Each segment names a signal and a duration; the
+   * bits it carries come from whatever that signal is defined to be.
+   */
+  function modulate(segments, carrier, opts = {}) {
+    const symbols = []
+    const marks = []
+    const enc = new Encoder()
+    const scram = new Scrambler()
+    let t = 0
+    for (const seg of segments) {
+      const count = Math.round((seg.ms / 1000) * BAUD)
+      marks.push({ at: t, ms: seg.ms, name: seg.name, kind: seg.kind, hz: seg.hz })
+      for (let i = 0; i < count; i++) {
+        if (seg.kind === 'silence') symbols.push([0, 0])
+        else if (seg.kind === 'usb1') symbols.push(enc.symbol(0b11, 1200))                      // all ones → dibit 11
+        else if (seg.kind === 's1') symbols.push(enc.symbol(i % 2 ? 0b11 : 0b00, 1200))         // 00/11 double dibit
+        else if (seg.kind === 'sb1' || seg.kind === 'data') {
+          const rate = seg.rate ?? 1200
+          const n = rate === 2400 ? 4 : 2
+          let bits = 0
+          for (let k = 0; k < n; k++) {
+            const src = seg.kind === 'data' ? (seg.bits?.[(seg.read = (seg.read ?? 0) + 1) - 1] ?? 1) : 1
+            bits = (bits << 1) | scram.bit(src)
+          }
+          symbols.push(enc.symbol(bits, rate))
+        } else if (seg.kind === 'tone') symbols.push([Number.NaN, seg.hz])                       // filled below, whole
+      }
+      t += count
+    }
+
+    const n = Math.ceil(symbols.length * SPS) + rc.length
+    const out = new Float32Array(n)
+    const iq = { i: new Float32Array(n), q: new Float32Array(n) }
+    // Pulse-shape the symbol impulses into a baseband waveform.
+    for (let s = 0; s < symbols.length; s++) {
+      const [a, b] = symbols[s]
+      if (Number.isNaN(a)) continue
+      if (a === 0 && b === 0) continue
+      const centre = Math.round(s * SPS)
+      for (let k = 0; k < rc.length; k++) {
+        const at = centre + k - ((rc.length - 1) >> 1)
+        if (at < 0 || at >= n) continue
+        iq.i[at] += a * rc[k]
+        iq.q[at] += b * rc[k]
+      }
+    }
+    // Tones bypass the modulator entirely, as they do in the modem — and are laid down in one
+    // continuous run. Written symbol by symbol they break phase 600 times a second, which is not a
+    // tone any more: it is a 600 Hz buzz with a tone somewhere inside it.
+    for (const m of marks) {
+      if (m.kind !== 'tone') continue
+      const from = Math.round(m.at * SPS)
+      const to = Math.min(n, Math.round((m.at + (m.ms / 1000) * BAUD) * SPS))
+      const hz = m.hz
+      for (let i = from; i < to; i++) {
+        const env = Math.min(1, (i - from) / 120, (to - i) / 120)
+        out[i] += 0.42 * env * Math.sin((2 * Math.PI * hz * i) / SR)
+      }
+    }
+    for (let i = 0; i < n; i++) {
+      const w = (2 * Math.PI * carrier * i) / SR
+      out[i] += 0.34 * (iq.i[i] * Math.cos(w) - iq.q[i] * Math.sin(w))
+    }
+    // §2.2: the guard tone rides along with everything the answering modem sends.
+    if (opts.guard) {
+      const amp = 0.34 * Math.pow(10, GUARD_DB / 20)
+      for (const m of marks) {
+        if (m.kind === 'silence' || m.kind === 'tone') continue
+        const from = Math.round(m.at * SPS)
+        const to = Math.min(n, Math.round((m.at + (m.ms / 1000) * BAUD) * SPS))
+        for (let i = from; i < to; i++) out[i] += amp * Math.sin((2 * Math.PI * GUARD * i) / SR)
+      }
+    }
+    return { wave: out, symbols, marks }
+  }
+
+  // --- the call ---------------------------------------------------------------
+
+  const DTMF = { 1: [697, 1209], 2: [697, 1336], 3: [697, 1477], 4: [770, 1209], 5: [770, 1336], 6: [770, 1477], 7: [852, 1209], 8: [852, 1336], 9: [852, 1477], 0: [941, 1336] }
+
+  function tones(buf, at, ms, freqs, amp = 0.3) {
+    const from = Math.round(at * SR), to = Math.min(buf.length, Math.round((at + ms / 1000) * SR))
+    for (let i = from; i < to; i++) {
+      const k = i - from
+      // A few milliseconds of ramp, so nothing in here clicks.
+      const env = Math.min(1, k / 80, (to - i) / 80)
+      for (const f of freqs) buf[i] += amp * env * Math.sin((2 * Math.PI * f * i) / SR)
+    }
+  }
+
+  function buildCall(o) {
+    const log = []
+    const number = '5551212'
+    // Off-hook, dial tone, dialling, ringing. The cadence is abridged; everything after is not.
+    let t = 0.25
+    const dialSecs = 1.1, digitMs = 95, gapMs = 95, ringOn = 1.6, ringOff = 1.1
+    // The handshake is a second and a half of an otherwise fifteen-second call, so the dialling is
+    // optional: with it off the line is picked up straight away and the negotiation fills the view.
+    const preSecs = o.dialling ? t + dialSecs + (number.length * (digitMs + gapMs)) / 1000 + 0.35 + 2 * (ringOn + ringOff) : 0.3
+    // The handshake, timed from the Recommendation.
+    const ansTone = 3300, ansGap = 75, usb1Detect = 155, thenSilent = 456, s1 = 100, sb1_1200 = 270, to2400 = 600, ready = 200, data = 2600
+    const billing = 1900
+
+    const answering = [
+      { kind: 'silence', ms: billing, name: 'off-hook, billing delay' },
+      { kind: 'tone', hz: o.bell ? 2225 : 2100, ms: ansTone, name: `answer tone ${o.bell ? '2225' : '2100'} Hz` },
+      { kind: 'silence', ms: ansGap, name: 'silence · 75 ms' },
+      { kind: 'usb1', ms: usb1Detect + thenSilent + s1, name: 'unscrambled binary 1 · high channel' },
+      ...(o.fallback ? [] : [{ kind: 's1', ms: s1, name: 'S1 — I can do 2400' }]),
+      { kind: 'sb1', rate: 1200, ms: o.fallback ? sb1_1200 + to2400 : to2400 - s1, name: 'scrambled binary 1 · 1200' },
+      ...(o.fallback ? [] : [{ kind: 'sb1', rate: 2400, ms: ready, name: 'scrambled binary 1 · 2400' }]),
+      { kind: 'data', rate: o.fallback ? 1200 : 2400, ms: data, name: 'data', bits: bitsOf('\r\nCONNECT ' + (o.fallback ? '1200' : '2400') + '\r\n\r\nSIOMPORAS ARCADE BBS · 3 LINES · NO RATIO\r\n') },
+    ]
+    const calling = [
+      { kind: 'silence', ms: billing + ansTone + ansGap + usb1Detect + thenSilent, name: 'silent — listening for 155 ms of binary 1' },
+      ...(o.fallback ? [] : [{ kind: 's1', ms: s1, name: 'S1 — so can I' }]),
+      // §6.3.1.1.1 c) and d): the 600 ms runs from the end of the S1 this end *receives*, and the
+      // answering modem only starts sending its S1 once this one has finished. So the two ends reach
+      // 2400 a hundred milliseconds apart, which is the spec working exactly as written.
+      { kind: 'sb1', rate: 1200, ms: o.fallback ? sb1_1200 + to2400 : to2400 + s1, name: 'scrambled binary 1 · 1200' },
+      ...(o.fallback ? [] : [{ kind: 'sb1', rate: 2400, ms: ready, name: 'scrambled binary 1 · 2400' }]),
+      { kind: 'data', rate: o.fallback ? 1200 : 2400, ms: data - s1, name: 'data', bits: bitsOf('ATDT5551212\r\n') },
+    ]
+
+    const ans = modulate(answering, HIGH, { guard: o.guard })
+    const cal = modulate(calling, LOW)
+    const total = Math.ceil((preSecs + Math.max(ans.wave.length, cal.wave.length) / SR + 0.6) * SR)
+    const buf = new Float32Array(total)
+
+    if (o.dialling) {
+      tones(buf, t, dialSecs * 1000, [350, 440], 0.22)
+      log.push([t, 'off hook', 'dial tone, 350 + 440 Hz'])
+      t += dialSecs + 0.12
+      log.push([t, 'dialling', `DTMF ${number}`])
+      for (const d of number) { tones(buf, t, digitMs, DTMF[d], 0.26); t += (digitMs + gapMs) / 1000 }
+      t += 0.35
+      log.push([t, 'ringing', '440 + 480 Hz, cadence abridged'])
+      for (let r = 0; r < 2; r++) { tones(buf, t, ringOn * 1000, [440, 480], 0.2); t += ringOn + ringOff }
+    }
+    log.push([Math.max(0, preSecs - 0.05), 'answered', 'far end off hook'])
+
+    const from = Math.round(preSecs * SR)
+    for (let i = 0; i < ans.wave.length; i++) if (from + i < total) buf[from + i] += ans.wave[i]
+    for (let i = 0; i < cal.wave.length; i++) if (from + i < total) buf[from + i] += cal.wave[i]
+
+    // The line itself: band-limited to what a telephone circuit passes, plus its own noise floor.
+    bandpass(buf, 300, 3400)
+    const hiss = o.noisy ? 0.012 : 0.003
+    for (let i = 0; i < total; i++) buf[i] += hiss * (Math.random() * 2 - 1)
+    if (o.noisy) for (let i = 0; i < total; i++) buf[i] += 0.004 * Math.sin((2 * Math.PI * 60 * i) / SR)
+
+    let peak = 0
+    for (const v of buf) peak = Math.max(peak, Math.abs(v))
+    for (let i = 0; i < total; i++) buf[i] /= Math.max(1, peak * 1.02)
+
+    // Everything the panels need: where each modem is in its sequence, second by second.
+    const steps = []
+    for (const [who, run, colour] of [['answering', ans, 'high'], ['calling', cal, 'low']]) {
+      for (const m of run.marks) {
+        if (m.kind === 'silence' && m.name.startsWith('off-hook')) continue
+        steps.push({ who, colour, name: m.name, at: preSecs + (m.at * SPS) / SR, secs: m.ms / 1000, kind: m.kind })
+      }
+    }
+    steps.sort((a, b) => a.at - b.at)
+    return { buf, steps, log, preSecs, symbols: { ans, cal }, start: preSecs }
+  }
+
+  const bitsOf = (s) => [...s].flatMap((c) => { const b = []; for (let i = 7; i >= 0; i--) b.push((c.charCodeAt(0) >> i) & 1); return b })
+
+  /** A pair of one-pole filters is all a telephone line really is, as far as the ear is concerned. */
+  function bandpass(buf, lo, hi) {
+    const a = Math.exp((-2 * Math.PI * hi) / SR)
+    let y = 0
+    for (let i = 0; i < buf.length; i++) { y = (1 - a) * buf[i] + a * y; buf[i] = y }
+    const b = Math.exp((-2 * Math.PI * lo) / SR)
+    let z = 0
+    for (let i = 0; i < buf.length; i++) { z = (1 - b) * buf[i] + b * z; buf[i] -= z }
+  }
+
+  // --- drawing ----------------------------------------------------------------
+
+  function fft(re, im) {
+    const n = re.length
+    for (let i = 1, j = 0; i < n; i++) {
+      let bit = n >> 1
+      for (; j & bit; bit >>= 1) j ^= bit
+      j ^= bit
+      if (i < j) { [re[i], re[j]] = [re[j], re[i]];[im[i], im[j]] = [im[j], im[i]] }
+    }
+    for (let len = 2; len <= n; len <<= 1) {
+      const ang = (-2 * Math.PI) / len
+      for (let i = 0; i < n; i += len) {
+        for (let k = 0; k < len / 2; k++) {
+          const w = ang * k, wr = Math.cos(w), wi = Math.sin(w)
+          const ur = re[i + k], ui = im[i + k]
+          const vr = re[i + k + len / 2] * wr - im[i + k + len / 2] * wi
+          const vi = re[i + k + len / 2] * wi + im[i + k + len / 2] * wr
+          re[i + k] = ur + vr; im[i + k] = ui + vi
+          re[i + k + len / 2] = ur - vr; im[i + k + len / 2] = ui - vi
+        }
+      }
+    }
+  }
+
+  const specCv = document.getElementById('spec')
+  const sx = specCv.getContext('2d')
+  const constCv = document.getElementById('const')
+  const cx = constCv.getContext('2d')
+  const TOP_HZ = 4000
+
+  function spectrogram(buf) {
+    const N = 512, hop = Math.max(1, Math.floor(buf.length / specCv.width))
+    const img = sx.createImageData(specCv.width, specCv.height)
+    const win = Array.from({ length: N }, (_, i) => 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / (N - 1)))
+    for (let col = 0; col < specCv.width; col++) {
+      const off = col * hop
+      const re = new Float64Array(N), im = new Float64Array(N)
+      for (let i = 0; i < N; i++) re[i] = (buf[off + i] ?? 0) * win[i]
+      fft(re, im)
+      for (let row = 0; row < specCv.height; row++) {
+        const hz = (1 - row / specCv.height) * TOP_HZ
+        const bin = Math.round((hz / SR) * N)
+        const mag = Math.hypot(re[bin] ?? 0, im[bin] ?? 0)
+        const db = 20 * Math.log10(mag + 1e-9)
+        // The floor sits just above the line's own noise, so silence reads as silence.
+        const v = Math.max(0, Math.min(1, (db + 42) / 38)) ** 1.6
+        // Tint by which channel a bin belongs to, so the two modems are told apart by eye — but only
+        // where there is something to tint. Colouring the noise floor paints stripes across nothing.
+        const near = (f) => Math.abs(hz - f) < 200
+        let r = 120, g = 170, b = 235
+        if (v > 0.12) {
+          if (near(LOW)) { r = 255; g = 63; b = 138 }
+          else if (near(GUARD)) { r = 255; g = 179; b = 71 }
+          else if (near(HIGH)) { r = 47; g = 184; b = 255 }
+        }
+        const p = (row * specCv.width + col) * 4
+        img.data[p] = r * v
+        img.data[p + 1] = g * v
+        img.data[p + 2] = b * v
+        img.data[p + 3] = 255
+      }
+    }
+    sx.putImageData(img, 0, 0)
+    const axis = document.getElementById('axis')
+    axis.innerHTML = ''
+    for (const hz of [1050, 1200, 1800, 2250, 2400, 3400]) {
+      const el = document.createElement('span')
+      el.style.top = `${(1 - hz / TOP_HZ) * 100}%`
+      el.textContent = `${hz} Hz`
+      axis.append(el)
+    }
+  }
+
+  function drawConstellation(points, rate) {
+    const w = constCv.width, h = constCv.height
+    cx.clearRect(0, 0, w, h)
+    cx.strokeStyle = '#17203a'
+    cx.lineWidth = 2
+    cx.beginPath(); cx.moveTo(w / 2, 8); cx.lineTo(w / 2, h - 8); cx.moveTo(8, h / 2); cx.lineTo(w - 8, h / 2); cx.stroke()
+    const at = (x, y) => [w / 2 + (x * w) / 2.6, h / 2 - (y * h) / 2.6]
+    cx.fillStyle = '#26344f'
+    for (const [a, b] of [[1, 1], [1, 3], [3, 1], [3, 3]]) {
+      for (const [sa, sb] of [[1, 1], [-1, 1], [-1, -1], [1, -1]]) {
+        const [px, py] = at((a * sa) / 3, (b * sb) / 3)
+        cx.beginPath(); cx.arc(px, py, rate === 2400 ? 5 : 3, 0, 7); cx.fill()
+      }
+    }
+    for (const [pt, colour] of points ?? []) {
+      if (!pt || !Number.isFinite(pt[0]) || !Number.isFinite(pt[1]) || (!pt[0] && !pt[1])) continue
+      const [px, py] = at(pt[0], pt[1])
+      cx.fillStyle = colour
+      cx.shadowColor = colour
+      cx.shadowBlur = 18
+      cx.beginPath(); cx.arc(px, py, 8, 0, 7); cx.fill()
+      cx.shadowBlur = 0
+    }
+  }
+
+  // --- running it -------------------------------------------------------------
+
+  const stepsEl = document.getElementById('steps')
+  const logEl = document.getElementById('log')
+  const dialBtn = document.getElementById('dial')
+  const stopBtn = document.getElementById('stop')
+  let ctx = null, src = null, call = null, raf = 0, t0 = 0
+
+  function renderSteps(steps, now) {
+    stepsEl.innerHTML = ''
+    for (const s of steps) {
+      const li = document.createElement('li')
+      const state = now >= s.at + s.secs ? 'done' : now >= s.at ? 'on' : ''
+      li.className = state
+      li.innerHTML = `<em>${s.who}</em> ${s.name}`
+      stepsEl.append(li)
+    }
+    const on = stepsEl.querySelector('.on')
+    if (on) on.scrollIntoView({ block: 'nearest' })
+  }
+
+  function say(text, sub) {
+    const d = document.createElement('div')
+    d.innerHTML = `<b>${text}</b>${sub ? ` <i>${sub}</i>` : ''}`
+    logEl.append(d)
+    logEl.scrollTop = logEl.scrollHeight
+  }
+
+  async function dial() {
+    stop()
+    logEl.innerHTML = ''
+    const o = {
+      fallback: document.getElementById('fallback').checked,
+      bell: document.getElementById('bell').checked,
+      guard: document.getElementById('guard').checked,
+      noisy: document.getElementById('noisy').checked,
+      dialling: document.getElementById('dialling').checked,
+    }
+    say('building the call', `${o.fallback ? 'V.22 · 1200 bit/s' : 'V.22 bis · 2400 bit/s'}`)
+    call = buildCall(o)
+    measure(call, o)
+    spectrogram(call.buf)
+    renderSteps(call.steps, 0)
+
+    ctx = ctx ?? new AudioContext()
+    await ctx.resume()
+    const audio = ctx.createBuffer(1, call.buf.length, SR)
+    audio.getChannelData(0).set(call.buf)
+    src = ctx.createBufferSource()
+    src.buffer = audio
+    src.connect(ctx.destination)
+    t0 = ctx.currentTime
+    src.start()
+    dialBtn.disabled = true
+    stopBtn.disabled = false
+    src.onended = () => { stop(); say('NO CARRIER') }
+
+    let logged = 0
+    let stepped = -1
+    const tick = () => {
+      if (!src) return
+      const now = ctx.currentTime - t0
+      while (logged < call.log.length && now >= call.log[logged][0]) {
+        say(call.log[logged][1], call.log[logged][2])
+        logged++
+      }
+      const i = call.steps.findIndex((s) => now >= s.at && now < s.at + s.secs)
+      if (i !== stepped) {
+        stepped = i
+        renderSteps(call.steps, now)
+        if (i >= 0) say(`${call.steps[i].who}: ${call.steps[i].name}`, `${Math.round(call.steps[i].secs * 1000)} ms`)
+      }
+      // The symbol each modem is transmitting under the playhead.
+      const rel = now - call.start
+      if (rel > 0) {
+        const s = Math.floor((rel * SR) / SPS)
+        drawConstellation([
+          [call.symbols.ans.symbols[s], '#2fb8ff'],
+          [call.symbols.cal.symbols[s], '#ff3f8a'],
+        ], 2400)
+      }
+      const px = Math.max(0, Math.min(1, now / (call.buf.length / SR))) * specCv.width
+      sx.save()
+      sx.globalCompositeOperation = 'source-over'
+      spectrogramPlayhead(px)
+      sx.restore()
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+  }
+
+  let lastPlayhead = null
+  function spectrogramPlayhead(px) {
+    if (lastPlayhead !== null) sx.putImageData(lastPlayhead.data, lastPlayhead.x, 0)
+    lastPlayhead = { x: Math.max(0, Math.round(px) - 1), data: sx.getImageData(Math.max(0, Math.round(px) - 1), 0, 3, specCv.height) }
+    sx.fillStyle = 'rgba(255,255,255,0.85)'
+    sx.fillRect(Math.round(px), 0, 1.5, specCv.height)
+  }
+
+  function stop() {
+    if (src) { try { src.onended = null; src.stop() } catch { /* already done */ } src.disconnect() }
+    src = null
+    cancelAnimationFrame(raf)
+    lastPlayhead = null
+    dialBtn.disabled = false
+    stopBtn.disabled = true
+  }
+
+  /**
+   * The claims made above, taken back out of the signal that was just built. Every row is a peak
+   * picked out of a window of the waveform — nothing here is read off the source that made it.
+   */
+  function measure(call, o) {
+    const el = document.getElementById('meas')
+    const win = (s, skipMs, lenMs) => {
+      const from = Math.round((s.at + skipMs / 1000) * SR)
+      return [from, from + Math.round((lenMs / 1000) * SR)]
+    }
+    const find = (who, name) => call.steps.find((s) => s.who === who && s.name.includes(name))
+    const rows = []
+    const ans = find('answering', 'answer tone')
+    if (ans) rows.push(['answer tone', peakIn(call.buf, ...win(ans, 500, 400)), o.bell ? 2225 : 2100])
+    const usb1 = find('answering', 'unscrambled')
+    if (usb1) rows.push(['unscrambled 1s', peakIn(call.buf, ...win(usb1, 40, 120), 1900, 2900), HIGH - BAUD / 4])
+    const s1 = find('calling', 'S1')
+    if (s1) {
+      rows.push(['S1 · carrier', peakIn(call.buf, ...win(s1, 10, 80), 1100, 1300), LOW])
+      rows.push(['S1 · lower', peakIn(call.buf, ...win(s1, 10, 80), 700, 1150), LOW - BAUD / 2])
+      rows.push(['S1 · upper', peakIn(call.buf, ...win(s1, 10, 80), 1250, 1700), LOW + BAUD / 2])
+    }
+    el.innerHTML = rows
+      .map(([name, got, want]) => `<tr><td>${name}</td><td class="n">${got.toFixed(0)} Hz</td><td class="w">want ${want}</td></tr>`)
+      .join('')
+  }
+
+  /** The strongest frequency in a window, by parabolic interpolation on the peak bin. */
+  function peakIn(buf, from, to, lo = 0, hi = SR / 2) {
+    const N = 4096
+    const re = new Float64Array(N), im = new Float64Array(N)
+    const n = Math.min(N, to - from)
+    for (let i = 0; i < n; i++) re[i] = (buf[from + i] ?? 0) * (0.5 - 0.5 * Math.cos((2 * Math.PI * i) / (n - 1)))
+    fft(re, im)
+    let best = 1, mag = 0
+    for (let k = Math.max(1, Math.ceil((lo * N) / SR)); k < Math.min(N / 2, (hi * N) / SR); k++) {
+      const m = Math.hypot(re[k], im[k])
+      if (m > mag) { mag = m; best = k }
+    }
+    const y0 = Math.hypot(re[best - 1], im[best - 1]), y1 = mag, y2 = Math.hypot(re[best + 1], im[best + 1])
+    const d = (0.5 * (y0 - y2)) / (y0 - 2 * y1 + y2 || 1)
+    return ((best + d) * SR) / N
+  }
+
+  // A handle on the model itself, because the claims on this page are checkable and ought to be:
+  // build a call, take a window of it, and look at what is actually in the spectrum.
+  window.CARRIER = {
+    SR, BAUD, LOW, HIGH, GUARD,
+    build: (o = {}) => buildCall({ guard: true, ...o }),
+    /** The strongest frequency in a window of samples, by parabolic interpolation on the peak bin. */
+    peak: peakIn,
+  }
+
+  dialBtn.addEventListener('click', () => void dial())
+  stopBtn.addEventListener('click', () => { stop(); say('hung up') })
+  drawConstellation(null, 2400)
+  say('ready', 'pick up and dial')
+</script>

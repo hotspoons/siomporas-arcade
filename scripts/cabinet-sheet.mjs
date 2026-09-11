@@ -1,33 +1,35 @@
 #!/usr/bin/env node
 // Cut a filled-in sheet template into every panel of one cabinet.
 //
-//   node scripts/cabinet-sheet.mjs ext/radrun-sheet.jpeg radrun --dry-run
-//   node scripts/cabinet-sheet.mjs ext/radrun-sheet.jpeg radrun
-//   node scripts/cabinet-sheet.mjs ext/radrun-sheet.jpeg radrun --only marquee,side
+//   node scripts/cabinet-sheet.mjs ext/turbo-radrun.png radrun --dry-run
+//   node scripts/cabinet-sheet.mjs ext/turbo-radrun.png radrun
+//   node scripts/cabinet-sheet.mjs ext/turbo-radrun.png radrun --only marquee,bezel
 //
 // The companion to `cabinet-template.mjs`: you hand a generator art-templates/sheet.png with a
 // reference picture, it paints every panel into the slots, and this takes them back out.
 //
-// No detection of any kind. We drew the template, so we know where every slot is — sheet.json holds
-// them as fractions of the canvas, and a generator handing back 1536×1152 instead of 2048×1536 does
-// not change where a slot is *proportionally*. The one thing that would is a different aspect
-// ratio, so if what comes back is not the sheet's shape it gets centre-cropped to it first, and
-// says so.
+// The panels are *found*, not assumed — see scripts/lib/sheet.mjs. Each one is artwork on the
+// template's flat grey, so the islands of not-grey are the panels, and each island is matched to the
+// slot it sits nearest. That survives a generator returning its own canvas shape, which they do, and
+// it cuts a panel drawn a little inside its slot to the artwork rather than to the slot. Pass
+// --slots to cut by sheet.json's fractions instead, which is exact for a sheet that came back at the
+// template's own 4:3 and wrong for one that did not.
 //
 // --dry-run writes a contact sheet to shots/ with every cut panel side by side, which is how you
-// check the generator kept to the layout before anything is installed.
+// check what it found before anything is installed.
 
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { knobs, reflowBezel } from './lib/bezel.mjs'
+import { fillFlank } from './lib/flank.mjs'
+import { PANELS } from './lib/fit.mjs'
+import { detectPanels, matchSlots } from './lib/sheet.mjs'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const TEMPLATES = path.join(ROOT, 'apps/arcade/art-templates')
 const GAMES = ['radrun', 'stuntin', 'apex', 'crown']
-/** The two greys the template is drawn in; see cabinet-template.mjs. */
-const FIELD = '#7a7a7a'
-const SLOT_FIELD = '#8f8f8f'
 
 function magick(args) {
   return execFileSync('magick', args, { encoding: 'utf8', maxBuffer: 1 << 28 })
@@ -45,7 +47,7 @@ const positional = args.filter((a) => !a.startsWith('--') && a !== onlyArg)
 const [src, game] = positional
 
 if (!src || !game || !GAMES.includes(game)) {
-  console.error(`usage: node scripts/cabinet-sheet.mjs <filled-sheet> <${GAMES.join('|')}> [--dry-run] [--only marquee,side]
+  console.error(`usage: node scripts/cabinet-sheet.mjs <filled-sheet> <${GAMES.join('|')}> [--dry-run] [--only marquee,bezel] [--slots]
 
 Hand a generator apps/arcade/art-templates/sheet.png together with art to match, ask it to fill in
 every panel, and run this on what comes back. See apps/arcade/ART.md.`)
@@ -58,57 +60,107 @@ if (!existsSync(src)) {
 
 const layout = JSON.parse(readFileSync(path.join(TEMPLATES, 'sheet.json'), 'utf8'))
 const only = onlyArg ? new Set(onlyArg.split(',').map((s) => s.trim())) : null
-
-const got = size(src)
-const want = layout.canvas.w / layout.canvas.h
-const have = got.w / got.h
-let work = src
-
-// Same proportions, or make them the same: the slots are fractions, so the shape has to match.
-if (Math.abs(have - want) > 0.02) {
-  work = path.join(ROOT, 'shots', `.cabinet-sheet-${game}.png`)
-  mkdirSync(path.dirname(work), { recursive: true })
-  const box = have > want ? { w: Math.round(got.h * want), h: got.h } : { w: got.w, h: Math.round(got.w / want) }
-  magick([src, '-crop', `${box.w}x${box.h}+${Math.round((got.w - box.w) / 2)}+${Math.round((got.h - box.h) / 2)}`, '+repage', work])
-  console.log(`came back ${got.w}×${got.h} (${have.toFixed(2)}:1) — centre-cropped to the sheet's ${want.toFixed(2)}:1`)
-}
-
-const sheet = size(work)
 const outDir = flags.has('--dry-run') ? path.join(ROOT, 'shots', `cabinet-${game}`) : path.join(ROOT, 'apps/arcade/public/cabinets', game)
 mkdirSync(outDir, { recursive: true })
 
-console.log(`${path.relative(ROOT, src)} → ${game}`)
-const cut = []
-for (const [name, slot] of Object.entries(layout.slots)) {
-  if (only && !only.has(name)) continue
-  const box = {
-    w: Math.round(slot.w * sheet.w),
-    h: Math.round(slot.h * sheet.h),
-    x: Math.round(slot.x * sheet.w),
-    y: Math.round(slot.y * sheet.h),
+/** Where each panel is in the sheet, however the sheet came back. */
+function boxes() {
+  if (flags.has('--slots')) {
+    const got = size(src)
+    const want = layout.canvas.w / layout.canvas.h
+    const have = got.w / got.h
+    let work = src
+    if (Math.abs(have - want) > 0.02) {
+      work = path.join(ROOT, 'shots', `.cabinet-sheet-${game}.png`)
+      mkdirSync(path.dirname(work), { recursive: true })
+      const box = have > want ? { w: Math.round(got.h * want), h: got.h } : { w: got.w, h: Math.round(got.w / want) }
+      magick([src, '-crop', `${box.w}x${box.h}+${Math.round((got.w - box.w) / 2)}+${Math.round((got.h - box.h) / 2)}`, '+repage', work])
+      console.log(`came back ${got.w}×${got.h} (${have.toFixed(2)}:1) — centre-cropped to the sheet's ${want.toFixed(2)}:1`)
+    }
+    const sheet = size(work)
+    const out = new Map()
+    for (const [name, slot] of Object.entries(layout.slots)) {
+      out.set(name, {
+        x: Math.round(slot.x * sheet.w),
+        y: Math.round(slot.y * sheet.h),
+        w: Math.round(slot.w * sheet.w),
+        h: Math.round(slot.h * sheet.h),
+        trim: true,
+      })
+    }
+    return { work, found: out }
   }
+  const { panels, sheet } = detectPanels(src)
+  const found = matchSlots(panels, layout.slots)
+  console.log(`came back ${sheet.w}×${sheet.h} (${(sheet.w / sheet.h).toFixed(2)}:1) — found ${found.size} of ${Object.keys(layout.slots).length} panels on it`)
+  const missing = Object.keys(layout.slots).filter((n) => !found.has(n))
+  if (missing.length) console.log(`  nothing where ${missing.join(' or ')} should be — that panel is left as it was`)
+  return { work: src, found }
+}
+
+console.log(`${path.relative(ROOT, src)} → ${game}`)
+const { work, found } = boxes()
+const cut = []
+for (const [name, box] of found) {
+  if (only && !only.has(name)) continue
   const out = path.join(outDir, `${name}.webp`)
-  // Trim before encoding: a generator that fills a slot with a band of art centred in the template's
-  // grey leaves that grey in the cut, and it would end up painted on the cabinet. -trim works from
-  // the corner pixel, which in that case is the grey; where the art does reach the edges the corner
-  // is artwork and busy enough that nothing is taken.
-  const cutArgs = [work, '-crop', `${box.w}x${box.h}+${box.x}+${box.y}`, '+repage', '-fuzz', '6%', '-trim', '+repage']
-  // A bezel is a frame, so a generator leaves its middle empty — which means it leaves the
-  // template's grey there, and that grey would be painted on the cabinet around the screen. The
-  // screen is geometry sitting in front of it, so the right colour behind it is black.
-  if (name === 'bezel') cutArgs.push('-fuzz', '10%', '-fill', '#0a0a0a', '-opaque', FIELD, '-fuzz', '10%', '-fill', '#0a0a0a', '-opaque', SLOT_FIELD)
-  magick([...cutArgs, '-resize', '1024x1024>', '-quality', '88', out])
+  const crop = `${box.w}x${box.h}+${box.x}+${box.y}`
+  if (name === 'bezel') {
+    // The one panel with a hole in it, and no generator puts that hole where the cabinet has one —
+    // see scripts/lib/bezel.mjs. Cut it whole and hand it to the fitter, which finds the opening
+    // that was drawn and re-lays the border around the opening that exists.
+    const raw = path.join(ROOT, 'shots', `.cabinet-bezel-${game}.png`)
+    mkdirSync(path.dirname(raw), { recursive: true })
+    magick([work, '-crop', crop, '+repage', raw])
+    const fit = reflowBezel(raw, out, knobs(path.join(TEMPLATES, 'bezel.json'), game))
+    rmSync(raw, { force: true })
+    cut.push(out)
+    const note = fit.mirrored.length ? `  ← nothing drawn on the ${fit.mirrored.join(' or ')}, mirrored from the opposite side` : ''
+    console.log(`  ${name.padEnd(11)} ${fit.size.w}×${fit.size.h} — fitted to the cabinet's opening${note}`)
+    continue
+  }
+  if (name === 'side-left' || name === 'side-right') {
+    // A generator draws the outline nearly right, and the geometry cuts the real one out of whatever
+    // it is given — so wherever the machine reaches past the drawn shape, the template's grey shows
+    // as a hem. Carry the artwork's own edges out over it; see lib/flank.mjs.
+    const raw = path.join(ROOT, 'shots', `.cabinet-${name}-${game}.png`)
+    mkdirSync(path.dirname(raw), { recursive: true })
+    magick([work, '-crop', crop, '+repage', raw])
+    const fit = fillFlank(raw, out, { mirror: name === 'side-left' })
+    rmSync(raw, { force: true })
+    cut.push(out)
+    console.log(`  ${name.padEnd(11)} ${fit.size.w}×${fit.size.h} — drawn shape covers ${(fit.covered * 100).toFixed(0)}% of the machine, the rest is its own edges`)
+    continue
+  }
+  const args = [work, '-crop', crop, '+repage']
+  // Only the fraction path needs trimming: it cuts the slot, so a panel drawn inside one keeps the
+  // template's grey around it. A found panel is already exactly its own artwork.
+  if (box.trim) args.push('-fuzz', '6%', '-trim', '+repage')
+  // A marquee is a lightbox of a fixed shape and the sign is as tall as its artwork, so a marquee
+  // that came back the wrong shape makes one machine taller than the two beside it. Square it up,
+  // taking the excess off the ends — which is what the prompt's margins are for. Everything else is
+  // installed as drawn and fitted by the geometry, because cropping a control panel loses its ends.
+  const want = PANELS[name]?.aspect
+  if (name === 'marquee' && want) {
+    const have = box.w / box.h
+    const off = Math.abs(have - want) / want
+    if (off > 0.02) {
+      const keep = have > want ? { w: Math.round(box.h * want), h: box.h } : { w: box.w, h: Math.round(box.w / want) }
+      args.push('-gravity', 'center', '-crop', `${keep.w}x${keep.h}+0+0`, '+repage')
+      console.log(`  ${name.padEnd(11)} came back ${have.toFixed(2)}:1 — cropped to ${want.toFixed(2)}:1, losing ${Math.round(100 - (100 * (keep.w * keep.h)) / (box.w * box.h))}% off the ends`)
+    }
+  }
+  // sharp-yuv: saturated line art through webp's usual chroma subsampling comes back with cyan and
+  // magenta fringes on every black outline, and the bloom in the lobby finds every one of them.
+  magick([...args, '-resize', '1024x1024>', '-quality', '90', '-define', 'webp:use-sharp-yuv=true', out])
   const final = size(out)
-  const slotAspect = box.w / box.h
-  const gotAspect = final.w / final.h
   cut.push(out)
-  const note = Math.abs(gotAspect - slotAspect) > 0.15 ? `  ← trimmed back from ${slotAspect.toFixed(2)}:1, the slot was not filled` : ''
-  console.log(`  ${name.padEnd(11)} ${final.w}×${final.h} (${gotAspect.toFixed(2)}:1)${note}`)
+  console.log(`  ${name.padEnd(11)} ${final.w}×${final.h} (${(final.w / final.h).toFixed(2)}:1)`)
 }
 
 if (flags.has('--dry-run')) {
   const contact = path.join(ROOT, 'shots', `cabinet-${game}-sheet.png`)
-  // Each panel padded into an even cell, so a contact sheet of four different shapes reads straight.
+  // Each panel padded into an even cell, so a contact sheet of five different shapes reads straight.
   magick([...cut, '-background', '#202020', '-resize', '360x360', '-gravity', 'center', '-extent', '380x380', '+append', contact])
   console.log(`  dry run — panels in ${path.relative(ROOT, outDir)}, contact sheet ${path.relative(ROOT, contact)}`)
   console.log(`  install them with the same command without --dry-run`)

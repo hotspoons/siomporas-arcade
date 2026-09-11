@@ -27,19 +27,13 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, rmSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { knobs, reflowBezel } from './lib/bezel.mjs'
+import { PANELS } from './lib/fit.mjs'
+import { fillFlank } from './lib/flank.mjs'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
-/** The panels a cabinet can wear, and the shape each one wants to be. */
-const PANELS = {
-  marquee: { aspect: 16 / 9, what: 'the lit sign on top' },
-  'side-left': { aspect: 9 / 16, what: 'the left flank' },
-  'side-right': { aspect: 9 / 16, what: 'the right flank' },
-  panel: { aspect: 21 / 9, what: 'the control deck, seen from above' },
-  bezel: { aspect: 4 / 3, what: 'the surround framing the screen' },
-  attract: { aspect: 4 / 3, what: 'the attract screen' },
-}
-
+/** The panels a cabinet can wear, and the shape each one wants — from the machine itself. */
 const GAMES = ['radrun', 'stuntin', 'apex']
 
 function magick(args) {
@@ -75,6 +69,39 @@ if (!GAMES.includes(game)) {
 if (!(panel in PANELS)) {
   console.error(`cabinet-art: unknown panel "${panel}" — one of ${Object.keys(PANELS).join(', ')}`)
   process.exit(1)
+}
+
+// A bezel is not centre-cropped like the others: it is a frame, and where its hole is matters more
+// than what shape it arrived in. scripts/lib/bezel.mjs re-lays it around the opening the cabinet
+// actually has; corrections that need to survive a regenerated sheet go in art-templates/bezel.json.
+if (panel === 'bezel') {
+  const dest = flags.has('--dry-run')
+    ? path.join(ROOT, 'shots', 'cabinet-' + game + '-bezel.webp')
+    : path.join(ROOT, 'apps/arcade/public/cabinets', game, 'bezel.webp')
+  mkdirSync(path.dirname(dest), { recursive: true })
+  const fit = reflowBezel(src, dest, knobs(path.join(ROOT, 'apps/arcade/art-templates/bezel.json'), game))
+  const pc = (v) => `${Math.round(v * 100)}%`
+  console.log(`${path.relative(ROOT, src)} → ${game}/bezel.webp`)
+  console.log(`  opening ${fit.detected}: ${pc(fit.opening.x0)},${pc(fit.opening.y0)} → ${pc(fit.opening.x1)},${pc(fit.opening.y1)}`)
+  if (fit.mirrored.length) console.log(`  nothing drawn on the ${fit.mirrored.join(' or ')} — mirrored from the opposite side`)
+  console.log(`  ${fit.size.w}×${fit.size.h}, fitted to the cabinet's opening`)
+  console.log(flags.has('--dry-run') ? `  dry run — written to ${path.relative(ROOT, dest)} for a look, nothing installed` : `  installed`)
+  process.exit(0)
+}
+
+// A flank is the machine's outline, and a generator only ever draws it nearly right — so it is
+// conformed to the real one rather than cropped to a rectangle. See scripts/lib/flank.mjs.
+if (panel === 'side-left' || panel === 'side-right') {
+  const dest = flags.has('--dry-run')
+    ? path.join(ROOT, 'shots', `cabinet-${game}-${panel}.webp`)
+    : path.join(ROOT, 'apps/arcade/public/cabinets', game, `${panel}.webp`)
+  mkdirSync(path.dirname(dest), { recursive: true })
+  const fit = fillFlank(src, dest, { mirror: panel === 'side-left' })
+  console.log(`${path.relative(ROOT, src)} → ${game}/${panel}.webp`)
+  console.log(`  ${fit.size.w}×${fit.size.h}, the template's field filled with the artwork's own edges`)
+  console.log(`  the drawn shape covers ${(fit.covered * 100).toFixed(0)}% of the machine`)
+  console.log(flags.has('--dry-run') ? `  dry run — written to ${path.relative(ROOT, dest)} for a look, nothing installed` : `  installed`)
+  process.exit(0)
 }
 
 const want = PANELS[panel].aspect
@@ -114,7 +141,7 @@ const out = path.join(outDir, `${panel}.webp`)
 const dest = flags.has('--dry-run') ? path.join(ROOT, 'shots', `cabinet-${game}-${panel}.webp`) : out
 
 mkdirSync(path.dirname(dest), { recursive: true })
-magick([work, '-crop', `${box.w}x${box.h}+${box.x}+${box.y}`, '+repage', '-resize', '1024x1024>', '-quality', '88', dest])
+magick([work, '-crop', `${box.w}x${box.h}+${box.x}+${box.y}`, '+repage', '-resize', '1024x1024>', '-quality', '90', '-define', 'webp:use-sharp-yuv=true', dest])
 
 rmSync(work, { force: true })
 const final = size(dest)

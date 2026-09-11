@@ -1,0 +1,6 @@
+{
+  "_": "Per-game corrections for the bezel fitter (scripts/lib/bezel.mjs). Empty is the normal case: the opening a generator drew is detected and the border re-laid around the cabinet's own. Add keys here only for a game the detector got wrong, and they survive regenerating the artwork. opening: [x0,y0,x1,y1] as fractions of the source, overriding detection. shift: [dx,dy] to nudge the detected opening. grow: widen (+) or tighten (-) it. mirror: sides to rebuild from the opposite one even if something was drawn there, any of left/top/right/bottom. overlap: how far the art tucks under the glass, fraction of the panel's width, default 0.022. dark: what sits behind the glass, default #050505.",
+  "radrun": {},
+  "stuntin": {},
+  "apex": {}
+}

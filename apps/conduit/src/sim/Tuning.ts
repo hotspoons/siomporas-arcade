@@ -31,13 +31,20 @@ export let BOOST_ACCEL = 140
 export const BOOST_DECAY = 30
 
 // --- steering (theta = angle around the tube) --------------------------------
-/** rad/s² of theta acceleration at SPEED_CRUISE in a default-radius tube. */
-export let THETA_ACCEL = 18.0
+/**
+ * rad/s² of theta acceleration at SPEED_CRUISE in a default-radius tube.
+ *
+ * Raised by two thirds in the third revision of the steering scale: the rate that made the game
+ * playable was 166% on the slider, which meant every fresh install and every reset landed on a
+ * setting nobody wants. What was 166% is now 100% — see STEER_VERSION in app/Settings.ts, which
+ * converts anything saved against an older base rather than leaving it meaning something else.
+ */
+export let THETA_ACCEL = 29.9
 export let THETA_DAMP = 6.0
 /** Steering authority multiplier at SPEED_MAX. Never 0: still nimble. */
 export let THETA_SPEED_FALLOFF = 0.55
-/** Hard cap on angular rate so a wide tube can't be lapped in a blink. */
-export let THETA_VEL_MAX = 6.8
+/** Hard cap on angular rate so a wide tube can't be lapped in a blink. Scaled with THETA_ACCEL. */
+export let THETA_VEL_MAX = 11.3
 /** rad of craft roll into a turn, for the chase view. */
 export let BANK_VISUAL_MAX = 0.6
 /** How fast the visual bank follows theta velocity. */

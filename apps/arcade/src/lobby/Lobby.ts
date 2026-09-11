@@ -13,9 +13,10 @@ import { ModernStyle } from '@apex/engine/render/styles/ModernStyle'
 import { KeyboardSource } from '@apex/engine/input/KeyboardSource'
 import { GamepadSource } from '@apex/engine/input/GamepadSource'
 import { GAMES } from '../catalog'
-import { Cabinet } from './Cabinet'
+import { CAB, Cabinet } from './Cabinet'
 import { CabinetArt } from './CabinetArt'
 import { LobbyHud } from './LobbyHud'
+import { type Block, type Bounds, Walk } from './Walk'
 
 /** Metres between cabinets along the arc, and how far the outer ones fall back and turn in. */
 const SPACING = 1.16
@@ -37,6 +38,25 @@ const GLIDE = 9
 const CAMERA = { y: 1.62, z: 3.2, lookY: 1.0 }
 /** How far out from the glass the leaned-in camera sits: close enough to read, far enough to frame. */
 const ZOOM_BACK = 0.8
+
+// --- walking ----------------------------------------------------------------
+// The carousel is for choosing a game. Walking is for looking at the machines: the row stops
+// sliding, stands still in a straight line with room to get in beside one, and you move instead.
+// Which matters because a cabinet's two flanks are most of its artwork and the carousel, which
+// keeps the selected machine square on, is the one view that never shows you either of them.
+
+/** Metres between cabinets when you are walking, and how far back off the floor they stand. */
+const WALK_SPACING = 2.05
+const WALK_Z = -1.25
+/** Where a tap on a machine puts you: out in front of its glass, facing it. */
+const WALK_STAND = 1.45
+/** How far past the end machines, and how far out into the room, you can get. */
+const WALK_MARGIN = 2.1
+const WALK_BACK = 4.4
+/** How quickly the room rearranges itself between the two views. */
+const WALK_BLEND = 4.5
+/** Nothing beyond this is worth lighting up as you walk past it. */
+const WALK_LIGHT = 3.4
 
 class Lobby implements LoopClient, MountedGame {
   private readonly gone = new Disposer()
@@ -63,6 +83,26 @@ class Lobby implements LoopClient, MountedGame {
    */
   private zoom = 0
   private zoomWanted = 0
+  /**
+   * Walking the aisle rather than scrolling the row. `walkT` is how far the room has rearranged
+   * itself between the two, 0 to 1, and everything — where a cabinet stands, how lit it is, where
+   * the camera is — is the same number blended by it, so there is one transition rather than five.
+   */
+  private walking = false
+  private walkT = 0
+  private readonly walk = new Walk()
+  private readonly move = { fwd: 0, side: 0, turn: 0, run: false }
+  /** What the move above works out to for one tick, wheel included. Kept to avoid per-tick litter. */
+  private readonly moving = { fwd: 0, side: 0, turn: 0, run: false }
+  /** The wheel, in walking: a shove forward rather than a step along the row. */
+  private wheelPush = 0
+  /** The machine the plate is currently naming, so it is only rewritten when it changes. */
+  private shown = -1
+  private readonly blocks: Block[]
+  private readonly bounds: Bounds
+  private readonly camPos = new Vector3()
+  private readonly eyeAt = new Vector3()
+  private readonly lookOut = new Vector3()
   private readonly ray = new Raycaster()
   private readonly ndc = new Vector2()
   private readonly camFrom = new Vector3()
@@ -113,6 +153,19 @@ class Lobby implements LoopClient, MountedGame {
     this.hud.onPick = (i) => this.pick(i)
     this.hud.onStep = (d) => this.step(d)
     this.hud.onStart = () => this.start()
+    this.hud.onWalk = () => this.setWalking(!this.walking)
+
+    // The aisle, in the layout walking puts the machines in — which never moves, so this is worked
+    // out once. A cabinet's footprint is its body; the artwork is flush with it.
+    this.blocks = this.cabinets.map((_, i) => ({ x: this.walkX(i), z: WALK_Z - CAB.depth / 2, hw: CAB.width / 2, hd: CAB.depth / 2 }))
+    this.bounds = {
+      minX: this.walkX(0) - WALK_MARGIN,
+      maxX: this.walkX(this.cabinets.length - 1) + WALK_MARGIN,
+      // Far enough down the gaps between machines to stand level with their backs, which is what
+      // gets you square on to a flank, and no further: behind the row there is nothing to see.
+      minZ: WALK_Z - CAB.depth + 0.15,
+      maxZ: WALK_BACK,
+    }
 
     this.keys.attach(window)
     this.pad.attach(window)
@@ -137,9 +190,52 @@ class Lobby implements LoopClient, MountedGame {
     this.loop.start()
   }
 
-  /** The cabinet the row has settled nearest. */
+  /** The cabinet the row has settled nearest — or, walking, the one you are standing nearest. */
   private get index(): number {
+    if (this.walking) {
+      let best = 0
+      let near = Infinity
+      for (let i = 0; i < this.cabinets.length; i++) {
+        const d = Math.hypot(this.walk.feet.x - this.walkX(i), this.walk.feet.z - WALK_Z)
+        if (d < near) {
+          near = d
+          best = i
+        }
+      }
+      return best
+    }
     return Math.max(0, Math.min(this.cabinets.length - 1, Math.round(this.target)))
+  }
+
+  /** Where a cabinet stands in the straight row you walk along. */
+  private walkX(i: number): number {
+    return (i - (this.cabinets.length - 1) / 2) * WALK_SPACING
+  }
+
+  /**
+   * Between the two views. Walking starts you in front of whichever machine you were looking at, so
+   * the room turns around you rather than teleporting you into the middle of it; coming back out
+   * hands the row the machine you were standing at.
+   */
+  private setWalking(on: boolean): void {
+    if (this.walking === on) return
+    const i = this.index
+    if (on) {
+      this.zoomWanted = 0
+      this.walk.reset(this.walkX(i), WALK_Z + WALK_STAND + 0.9, 0)
+    } else {
+      this.target = i
+      this.pos = i
+    }
+    this.walking = on
+    this.shown = -1
+    this.hud.setWalking(on)
+    this.hud.show(this.cabinets[this.index].game)
+  }
+
+  /** Walk over and stand in front of a machine. Also what a tap on a distant one means. */
+  private walkToCabinet(i: number): void {
+    this.walk.walkTo(this.walkX(i), WALK_Z + WALK_STAND, 0)
   }
 
   private buildRoom(): void {
@@ -210,11 +306,15 @@ class Lobby implements LoopClient, MountedGame {
 
   // --- input ---------------------------------------------------------------
 
-  private drag: { id: number; x: number; startPos: number; moved: number } | null = null
+  private drag: { id: number; x: number; y: number; startPos: number; moved: number } | null = null
 
   private onWheel(e: WheelEvent): void {
     e.preventDefault()
     const d = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY
+    if (this.walking) {
+      this.wheelPush = Math.max(-1, Math.min(1, this.wheelPush - d * 0.01))
+      return
+    }
     this.wheelAcc += d
     if (Math.abs(this.wheelAcc) > 60) {
       this.step(Math.sign(this.wheelAcc))
@@ -224,11 +324,22 @@ class Lobby implements LoopClient, MountedGame {
   private wheelAcc = 0
 
   private onPointerDown(e: PointerEvent): void {
-    this.drag = { id: e.pointerId, x: e.clientX, startPos: this.target, moved: 0 }
+    this.drag = { id: e.pointerId, x: e.clientX, y: e.clientY, startPos: this.target, moved: 0 }
   }
 
   private onPointerMove(e: PointerEvent): void {
     if (!this.drag || e.pointerId !== this.drag.id) return
+    if (this.walking) {
+      // Walking, a drag turns your head. Deltas are from the last move rather than from where the
+      // drag started, so looking round is unbounded — a drag does not run out at the screen edge.
+      const lx = e.clientX - this.drag.x
+      const ly = e.clientY - this.drag.y
+      this.drag.x = e.clientX
+      this.drag.y = e.clientY
+      this.drag.moved += Math.abs(lx) + Math.abs(ly)
+      this.walk.lookBy(lx, ly)
+      return
+    }
     const dx = e.clientX - this.drag.x
     this.drag.moved = Math.max(this.drag.moved, Math.abs(dx))
     // A drag moves the row directly, one cabinet per quarter of the viewport.
@@ -259,6 +370,16 @@ class Lobby implements LoopClient, MountedGame {
    */
   private tap(e: PointerEvent): void {
     const hit = this.pickAt(e.clientX, e.clientY)
+    if (this.walking) {
+      // Walking: a tap on the machine you are already at, dead centre of its glass, plays it.
+      // Anything else is somewhere you would like to be standing, which is the only way across the
+      // room on a phone.
+      if (!hit) return
+      const uv = hit.screenUv
+      if (hit.index === this.index && uv && Math.abs(uv.x - 0.5) < 0.22 && Math.abs(uv.y - 0.5) < 0.22) this.start()
+      else this.walkToCabinet(hit.index)
+      return
+    }
     if (!hit) {
       this.zoomWanted = 0
       return
@@ -297,12 +418,20 @@ class Lobby implements LoopClient, MountedGame {
   }
 
   private step(dir: number): void {
+    if (this.walking) {
+      this.walkToCabinet(Math.max(0, Math.min(this.cabinets.length - 1, this.index + Math.sign(dir))))
+      return
+    }
     this.target = Math.round(this.target) + Math.sign(dir)
     this.clampTarget()
     this.hud.show(this.cabinets[this.index].game)
   }
 
   private pick(i: number): void {
+    if (this.walking) {
+      this.walkToCabinet(i)
+      return
+    }
     this.target = i
     this.clampTarget()
     this.hud.show(this.cabinets[this.index].game)
@@ -332,7 +461,16 @@ class Lobby implements LoopClient, MountedGame {
   beginFrame(): number {
     this.keys.beginFrame()
     this.pad.poll()
+    // The one key that means the same thing in both views.
+    if (this.keys.wasPressed('KeyF') || this.pad.pressed('b3')) this.setWalking(!this.walking)
+    if (this.walking) this.walkKeys()
+    else this.rowKeys()
+    this.keys.endFrame()
+    return 1
+  }
+  private stickHeld = false
 
+  private rowKeys(): void {
     const before = this.index
     if (this.keys.wasPressed('ArrowRight') || this.keys.wasPressed('KeyD') || this.pad.pressed('b15')) this.step(1)
     if (this.keys.wasPressed('ArrowLeft') || this.keys.wasPressed('KeyA') || this.pad.pressed('b14')) this.step(-1)
@@ -348,11 +486,22 @@ class Lobby implements LoopClient, MountedGame {
       this.zoomWanted = 0
       this.hud.show(this.cabinets[this.index].game)
     }
-
-    this.keys.endFrame()
-    return 1
   }
-  private stickHeld = false
+
+  /**
+   * Walking: WASD or the arrows, with left and right turning rather than strafing because that is
+   * what hands expect from a keyboard; A and D strafe for the ones that expect the other thing.
+   */
+  private walkKeys(): void {
+    const k = this.keys
+    const on = (...codes: string[]): number => (codes.some((c) => k.isDown(c)) ? 1 : 0)
+    this.move.fwd = on('KeyW', 'ArrowUp') - on('KeyS', 'ArrowDown') + this.pad.value('a1-') - this.pad.value('a1+')
+    this.move.side = on('KeyD') - on('KeyA') + this.pad.value('a0+') - this.pad.value('a0-')
+    this.move.turn = on('ArrowRight') - on('ArrowLeft') + this.pad.value('a2+') - this.pad.value('a2-')
+    this.move.run = k.isDown('ShiftLeft') || k.isDown('ShiftRight') || this.pad.down('b10')
+    if (k.wasPressed('Enter') || k.wasPressed('Space') || this.pad.pressed('b0') || this.pad.pressed('b9')) this.start()
+    if (k.wasPressed('Escape') || this.pad.pressed('b1')) this.setWalking(false)
+  }
 
   simTick(dt: number): void {
     this.time += dt
@@ -363,6 +512,25 @@ class Lobby implements LoopClient, MountedGame {
     this.zoom += (this.zoomWanted - this.zoom) * (1 - Math.exp(-6 * dt))
     if (Math.abs(this.zoomWanted - this.zoom) < 0.002) this.zoom = this.zoomWanted
     this.hud.setLeaning(this.zoom > 0.5)
+
+    const want = this.walking ? 1 : 0
+    this.walkT += (want - this.walkT) * (1 - Math.exp(-WALK_BLEND * dt))
+    if (Math.abs(want - this.walkT) < 0.002) this.walkT = want
+    if (this.walking) {
+      // Into a separate object, not back into `move`: the loop can run several catch-up ticks per
+      // frame and input is read once a frame, so a shove folded into `move` would be folded in again.
+      this.moving.fwd = Math.max(-1, Math.min(1, this.move.fwd + this.wheelPush))
+      this.moving.side = this.move.side
+      this.moving.turn = this.move.turn
+      this.moving.run = this.move.run
+      this.walk.step(dt, this.moving, this.blocks, this.bounds)
+      this.wheelPush *= Math.exp(-5 * dt)
+      const near = this.index
+      if (near !== this.shown) {
+        this.shown = near
+        this.hud.show(this.cabinets[near].game)
+      }
+    }
   }
 
   render(_alpha: number, frameDt: number): void {
@@ -372,15 +540,32 @@ class Lobby implements LoopClient, MountedGame {
 
   /** Place every cabinet on the arc for the row's current position. */
   private layout(): void {
+    const w = this.walkT
+    const near = this.index
     for (let i = 0; i < this.cabinets.length; i++) {
       const c = this.cabinets[i]
       const d = i - this.pos
-      c.group.position.set(d * SPACING, 0, -Math.abs(d) * RECEDE)
-      c.group.rotation.y = BASE_YAW - d * TURN
-      c.setSelected(Math.max(0, 1 - Math.abs(d)))
+      const rx = d * SPACING
+      const rz = -Math.abs(d) * RECEDE
+      const wx = this.walkX(i)
+      c.group.position.set(rx + (wx - rx) * w, 0, rz + (WALK_Z - rz) * w)
+      // Square to the row once you are walking: every machine turned to face the same way is what
+      // makes an aisle, and the slight turn that reads well in the carousel reads as wonky in one.
+      c.group.rotation.y = (BASE_YAW - d * TURN) * (1 - w)
+      let lit = Math.max(0, 1 - Math.abs(d))
+      if (w > 0.001) {
+        const dist = Math.hypot(this.walk.feet.x - wx, this.walk.feet.z - (WALK_Z + 0.4))
+        let close = Math.max(0, Math.min(1, (WALK_LIGHT - dist) / 2.2))
+        // One attract loop plays at a time, so everything but the nearest stays under the bar that
+        // starts it — otherwise standing in the middle of the row runs every video at once.
+        if (i !== near) close = Math.min(close, 0.34)
+        lit += (close - lit) * w
+      }
+      c.setSelected(lit)
     }
     // The room slides back into place as the lobby comes up, so arriving has some movement in it.
     this.camFrom.set(0, CAMERA.y, CAMERA.z * this.dolly + this.entering * 1.2)
+    this.camPos.copy(this.camFrom)
     this.lookAt.set(0, CAMERA.lookY, 0)
     if (this.zoom > 0.001) {
       // Where the selected cabinet's glass is, and a spot straight out in front of it. The screen
@@ -392,11 +577,14 @@ class Lobby implements LoopClient, MountedGame {
       this.at.copy(cab.screenCentre).applyMatrix4(cab.group.matrixWorld)
       const normal = this.normal.copy(cab.screenNormal).transformDirection(cab.group.matrixWorld).normalize()
       this.camTo.copy(this.at).addScaledVector(normal, ZOOM_BACK)
-      this.camera.position.lerpVectors(this.camFrom, this.camTo, this.zoom)
+      this.camPos.lerpVectors(this.camFrom, this.camTo, this.zoom)
       this.lookAt.lerp(this.at, this.zoom)
-    } else {
-      this.camera.position.copy(this.camFrom)
     }
+    if (w > 0.001) {
+      this.camPos.lerp(this.walk.eye(this.eyeAt), w)
+      this.lookAt.lerp(this.walk.lookPoint(this.lookOut), w)
+    }
+    this.camera.position.copy(this.camPos)
     this.camera.lookAt(this.lookAt)
   }
 
@@ -431,6 +619,8 @@ class Lobby implements LoopClient, MountedGame {
       renderer: this.renderer,
       pick: (i: number) => this.pick(i),
       start: () => this.start(),
+      walk: (on = true) => this.setWalking(on),
+      walker: this.walk,
     }
     Object.defineProperty(ctx, 'at', { get: () => this.cabinets[this.index].game.id, enumerable: true })
     return ctx

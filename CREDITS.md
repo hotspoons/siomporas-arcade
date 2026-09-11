@@ -1,9 +1,11 @@
 # Credits and third-party licences
 
-Everything in this repository that someone else made, what it is licensed under,
-and where it came from. The short version: the code is MIT, Zlib and Apache-2.0;
-the art and models are CC0; the fonts are OFL or Apache-2.0. Nothing here is
-copyleft, and nothing conflicts with releasing this project under Apache-2.0.
+This project is released under the [Apache License 2.0](LICENSE), Copyright 2026
+Rich Siomporas. What follows is everything in the repository that someone else
+made, what it is licensed under, and where it came from. The short version: the
+third-party code is MIT, Zlib and Apache-2.0; the art and models are CC0; the
+fonts are OFL or Apache-2.0. Nothing here is copyleft and nothing conflicts with
+the Apache-2.0 release.
 
 Machine-readable copies of the licence texts ship alongside the files they cover
 and are served by the deployed site:

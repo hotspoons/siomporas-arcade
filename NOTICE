@@ -1,0 +1,17 @@
+siomporas-arcade
+Copyright 2026 Rich Siomporas
+
+This product includes software developed by Rich Siomporas, licensed under the
+Apache License, Version 2.0. See the LICENSE file for terms.
+
+Third-party components are redistributed under their own licences:
+
+  three.js                 MIT          https://threejs.org
+  postprocessing           Zlib         https://github.com/pmndrs/postprocessing
+
+Bundled artwork, models and typefaces are covered by CC0 1.0, the SIL Open Font
+License 1.1, or the Apache License 2.0, and are attributed in CREDITS.md.
+Licence texts ship alongside the files they cover:
+
+  apps/<app>/public/fonts/LICENSES.txt
+  apps/<app>/public/assets/LICENSES.md

@@ -2,6 +2,7 @@
   "name": "@apex/engine",
   "private": true,
   "version": "0.0.0",
+  "license": "Apache-2.0",
   "type": "module",
   "description": "Shared game runtime: fixed-step loop, modern/retro presentation styles, input sources, menus, math, dev bridge.",
   "exports": {

@@ -102,7 +102,9 @@ export class ModelLayer {
   async load(): Promise<void> {
     if (this.ready || this.loading) return
     this.loading = true
-    const loader = new GLTFLoader()
+    // setPath('/'), because the model paths are relative and in the arcade the game is served
+    // at /radrun — where a bare 'assets/…' would resolve against whatever menu the URL is on.
+    const loader = new GLTFLoader().setPath('/')
     for (const def of MODELS) {
       try {
         const model = def.file ? (await loader.loadAsync(def.file)).scene : def.build?.()

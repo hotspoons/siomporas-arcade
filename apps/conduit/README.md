@@ -1,6 +1,6 @@
 # APEX CONDUIT
 
-https://apex.siomporas.com
+https://arcade.siomporas.com/apex
 
 A browser tunnel racer-shooter: pilot a low-slung craft down glowing tubes at
 700–1000 mph, roll around the wall to dodge, burn traffic with a roof laser,

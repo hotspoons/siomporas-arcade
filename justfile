@@ -1,8 +1,13 @@
 # Apex monorepo — task recipes (https://just.systems)
-#   apps/conduit  tunnel racer-shooter        :5180
-#   apps/stuntin  stunt-track driving game    :5181
-#   apps/coast    pseudo-3D sprite racer      :5182
-#   packages/engine  shared runtime (loop, styles, input, menus, math, dev bridge)
+#   apps/arcade   the arcade: every game on one address   :5183   <- what ships
+#   apps/conduit  tunnel racer-shooter                    :5180
+#   apps/stuntin  stunt-track driving game                :5181
+#   apps/coast    pseudo-3D sprite racer                  :5182
+#   packages/engine  shared runtime (loop, styles, input, menus, router, math, dev bridge)
+#
+# The three games still run on their own — that is where tuning, the bridge and the smoke
+# harness live. The arcade mounts the same games into one page; `just dev arcade` is the
+# thing a player actually sees.
 
 set shell := ["bash", "-euo", "pipefail", "-c"]
 
@@ -12,8 +17,8 @@ default:
 
 # --- dev loop ---------------------------------------------------------------
 
-# Vite dev server for an app (conduit :5180, stuntin :5181, coast :5182)
-dev app="conduit":
+# Vite dev server for an app (arcade :5183, conduit :5180, stuntin :5181, coast :5182)
+dev app="arcade":
     npm run dev -w apps/{{ app }}
 
 # production build of everything (typecheck + bundles) into apps/*/dist
@@ -21,7 +26,7 @@ build:
     npm run build
 
 # serve an app's production build
-preview app="conduit":
+preview app="arcade":
     npm run build -w apps/{{ app }} && npm run preview -w apps/{{ app }}
 
 # --- checks -----------------------------------------------------------------
@@ -64,7 +69,7 @@ bridge-clients app="conduit":
     APEX_BRIDGE="${APEX_BRIDGE:-apex-dev}" APEX_ORIGIN="http://localhost:$(just _port {{ app }})" node scripts/bridge.mjs --clients
 
 _port app:
-    @case "{{ app }}" in stuntin) echo 5181;; coast) echo 5182;; *) echo 5180;; esac
+    @case "{{ app }}" in stuntin) echo 5181;; coast) echo 5182;; arcade) echo 5183;; *) echo 5180;; esac
 
 # --- remote testing ---------------------------------------------------------
 
@@ -78,6 +83,12 @@ tunnel app="conduit":
 # few seconds, screenshots to shots/ and fails on any console error
 smoke app="conduit":
     APEX_URL="http://localhost:$(just _port {{ app }})" node scripts/smoke.mjs
+
+# drive the arcade shell headlessly: routes and the Back button, then mount/unmount every
+# game a few times over watching for leaked canvases, AudioContexts and heap, then play each
+# one. This is the check on the shell↔game contract (see apps/arcade/src/Shell.ts).
+arcade-smoke rounds="2":
+    ARCADE_URL="http://localhost:5183" ROUNDS={{ rounds }} node scripts/arcade-smoke.mjs
 
 # drive the TURBO RADRUN world builder headlessly: builds a track with the pointer,
 # saves it, drives it, and checks the built-in route still runs (see scripts/editor-smoke.mjs)

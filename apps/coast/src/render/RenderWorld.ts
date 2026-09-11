@@ -7,6 +7,7 @@ import { Color, Group, LinearFilter, NearestFilter, OrthographicCamera, Scene, W
 import { expApproach } from '@apex/engine/math/scalar'
 import type { RenderStats } from '@apex/engine/render/RenderStats'
 import type { Style, StyleFrameInfo } from '@apex/engine/render/styles/Style'
+import { disposeObject3D } from '@apex/engine/render/dispose'
 import type { SimEvent } from '../sim/Events'
 import type { Segment, Stage } from '../sim/Road'
 import type { Snapshot } from '../sim/Snapshot'
@@ -252,6 +253,21 @@ export class RenderWorld {
   setCar(id: string): void {
     this.heroKind = id === 'formula' ? 'formula' : `hero_${id in LIVERIES ? id : 'gulf'}`
     this.cockpit.livery = LIVERIES[id] ?? LIVERIES.gulf
+  }
+
+  /**
+   * Give the GPU back everything. Called when the arcade unmounts the game; a standalone build
+   * never reaches it, because the tab closing does the same job.
+   */
+  dispose(): void {
+    this.atlas.dispose()
+    this.style?.detach()
+    this.style = null
+    disposeObject3D(this.scene)
+    this.renderer.dispose()
+    // Release the context now rather than at the next collection: browsers cap how many live
+    // WebGL contexts a page may hold, and the arcade makes a fresh one for every game entered.
+    this.renderer.forceContextLoss()
   }
 
   setStyle(style: Style): void {

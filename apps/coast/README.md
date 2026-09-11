@@ -1,6 +1,6 @@
 # TURBO RADRUN
 
-https://radrun.siomporas.com
+https://arcade.siomporas.com/radrun
 
 A sprite-scaling road racer in the lineage of the great 1986–1991 arcade
 cabinets: three stages joined by forks, a countdown extended at checkpoints,

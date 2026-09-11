@@ -4,6 +4,7 @@
 // handful of overlays.
 
 import type { UiEdges } from '../input/UiEdges'
+import { isPrefix, planMenuSync, type RoutePath, type Router } from './Router'
 
 export type MenuItem =
   | { kind: 'action'; label: string; hint?: string; onSelect: () => void; danger?: boolean }
@@ -40,15 +41,77 @@ export class MenuStack {
     this.el = document.createElement('div')
     this.el.className = 'menu hidden'
     parent.appendChild(this.el)
-    // A real move of the mouse — not the pointer merely being somewhere — hands control back to it.
-    window.addEventListener('mousemove', (e) => {
-      if (e.movementX === 0 && e.movementY === 0) return
-      this.pointerLive = true
-    })
+    window.addEventListener('mousemove', this.onMouseMove)
+  }
+
+  /** A real move of the mouse — not the pointer merely being somewhere — hands control back to it. */
+  private readonly onMouseMove = (e: MouseEvent): void => {
+    if (e.movementX === 0 && e.movementY === 0) return
+    this.pointerLive = true
   }
 
   /** Whether the mouse has moved since the last time the keyboard or pad drove the menu. */
   private pointerLive = false
+
+  // --- URL binding ---------------------------------------------------------
+  // Each screen below the root is one history entry, so Back escapes one menu. The root screen (a
+  // title or pause menu) is the game's own URL and adds no segment.
+
+  private router: Router | null = null
+  private routePrefix: RoutePath = []
+  /** True while the router is driving us, so we don't navigate in response to navigation. */
+  private syncing = false
+  /** Screens popped by a Back, kept so the browser's Forward can put them back. */
+  private forward: MenuScreen[] = []
+  private unbindRouter: (() => void) | null = null
+
+  /**
+   * Give the stack a URL. `prefix` is the path the root screen sits at — `['radrun']` for a game in
+   * the arcade — and nested screens append their `id` beneath it.
+   */
+  bindRouter(router: Router, prefix: RoutePath): void {
+    this.unbindRouter?.()
+    this.router = router
+    this.routePrefix = [...prefix]
+    this.unbindRouter = router.subscribe((path) => this.syncToRoute(path))
+  }
+
+  /** The path this stack's current screen corresponds to. */
+  private get routeForStack(): string[] {
+    return [...this.routePrefix, ...this.stack.slice(1).map((s) => s.id)]
+  }
+
+  private navigate(): void {
+    if (!this.router || this.syncing) return
+    this.router.push(this.routeForStack)
+  }
+
+  /**
+   * Make the stack match the URL. Idempotent by design: a Back we initiated ourselves has already
+   * popped the screen by the time the `popstate` lands here, and this then finds nothing to do.
+   */
+  private syncToRoute(path: RoutePath): void {
+    if (!this.router) return
+    if (!isPrefix(this.routePrefix, path)) return // a different part of the app owns this URL now
+    const want = path.slice(this.routePrefix.length)
+    const plan = planMenuSync(
+      this.stack.slice(1).map((s) => s.id),
+      this.forward.map((s) => s.id),
+      want,
+    )
+    this.syncing = true
+    // Back: shed screens. Each pop puts its screen at the front of the trail, which is what makes
+    // the pushes below able to find them again.
+    for (let i = 0; i < plan.pops; i++) this.pop()
+    // Forward: put back the screens we kept.
+    for (const id of plan.pushes) {
+      const i = this.forward.findIndex((s) => s.id === id)
+      if (i < 0) break
+      this.push(this.forward.splice(i, 1)[0])
+    }
+    this.syncing = false
+    if (plan.clamped) this.router.replace(this.routeForStack)
+  }
 
   get open(): boolean {
     return this.stack.length > 0
@@ -76,6 +139,12 @@ export class MenuStack {
   }
 
   push(screen: MenuScreen): void {
+    // Retracing the step we just came back from keeps the rest of the trail; going anywhere else
+    // invalidates all of it, exactly as Forward dies in a browser once you navigate.
+    if (!this.syncing) {
+      if (this.forward[0]?.id === screen.id) this.forward.shift()
+      else this.forward = []
+    }
     this.stack.push(screen)
     this.cursor = 0
     this.scrolled = -1
@@ -83,26 +152,56 @@ export class MenuStack {
     this.dirty = true
     this.syncVisibility()
     this.render()
+    this.navigate()
   }
 
   replace(screen: MenuScreen): void {
     this.stack.length = 0
-    this.push(screen)
+    this.forward = []
+    this.stack.push(screen)
+    this.cursor = 0
+    this.scrolled = -1
+    this.el.scrollTop = 0
+    this.dirty = true
+    this.syncVisibility()
+    this.render()
+    // Resetting to the root screen is not a move forward — it lands on the path we are already at,
+    // so it corrects the URL rather than leaving another entry behind.
+    if (this.router && !this.syncing) this.router.replace(this.routePrefix)
   }
 
   pop(): void {
-    this.stack.pop()
+    const wasNested = this.stack.length >= 2
+    const gone = this.stack.pop()
+    if (gone && wasNested) this.forward.unshift(gone)
     this.cursor = 0
     this.scrolled = -1
     this.dirty = true
     if (this.stack.length === 0) this.el.classList.add('hidden')
     else this.render()
+    // Only a nested screen has a history entry of its own. Popping the root leaves the URL alone —
+    // going back from there is leaving the game, which is the shell's business, not ours.
+    if (wasNested && !this.syncing) this.router?.back()
   }
 
   closeAll(): void {
     this.stack.length = 0
+    this.forward = []
     this.suppressed = false
     this.syncVisibility()
+    if (this.router && !this.syncing) this.router.replace(this.routePrefix)
+  }
+
+  /** Detach from the DOM, the window and the URL. Mounting a different game must leave nothing behind. */
+  dispose(): void {
+    window.removeEventListener('mousemove', this.onMouseMove)
+    this.unbindRouter?.()
+    this.unbindRouter = null
+    this.router = null
+    this.stack.length = 0
+    this.forward = []
+    this.rows = []
+    this.el.remove()
   }
 
   /** Re-render values (toggles etc.) without rebuilding structure. */

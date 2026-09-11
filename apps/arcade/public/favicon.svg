@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <rect width="32" height="32" rx="5" fill="#05060b"/>
+  <!-- a cabinet: lit marquee, kicked-back screen, control deck -->
+  <path d="M8 27V11l3-3h10l3 3v16z" fill="#1b2340"/>
+  <rect x="9" y="4" width="14" height="5" rx="1" fill="#ff7a3c"/>
+  <rect x="11" y="12" width="10" height="8" rx="1" fill="#35d2ff"/>
+  <rect x="10" y="21" width="12" height="2.5" rx="1" fill="#2b3a5e"/>
+</svg>

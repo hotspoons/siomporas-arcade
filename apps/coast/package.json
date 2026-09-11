@@ -3,11 +3,13 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "exports": {
+    "./*": "./src/*.ts"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview --port 5182 --strictPort --host",
-    "deploy": "npm run build && wrangler deploy"
+    "preview": "vite preview --port 5182 --strictPort --host"
   },
   "dependencies": {
     "@apex/engine": "*",

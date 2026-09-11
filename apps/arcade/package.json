@@ -1,0 +1,23 @@
+{
+  "name": "@apex/arcade",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "The arcade: one shell, one address, every game on a path beneath it.",
+  "scripts": {
+    "predev": "node ../../scripts/sync-arcade-assets.mjs",
+    "dev": "vite",
+    "prebuild": "node ../../scripts/sync-arcade-assets.mjs",
+    "build": "vite build",
+    "preview": "vite preview --port 5183 --strictPort --host",
+    "deploy": "npm run build && wrangler deploy"
+  },
+  "dependencies": {
+    "@apex/coast": "*",
+    "@apex/conduit": "*",
+    "@apex/engine": "*",
+    "@apex/stuntin": "*",
+    "postprocessing": "^6.39.4",
+    "three": "^0.185.1"
+  }
+}

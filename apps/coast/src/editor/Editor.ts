@@ -32,6 +32,7 @@ import { PROP_GROUPS, PROP_INFO, sceneDef, sceneGroups } from '../world/scenes'
 import { VIBES, VIBE_FADE, vibeDef, type VibeDef } from '../world/vibes'
 import { checkWorld, emptyTrack, reachable, routeLengthOf, type CoastTrack, type SpanKind, type WorldData } from '../world/types'
 import type { WorldStore } from '../world/WorldStore'
+import { Disposer } from '@apex/engine/app/Disposer'
 
 export interface EditorCallbacks {
   /** Drive the world as it stands, starting on `trackId`. */
@@ -128,6 +129,9 @@ function hex(c: number): string {
 }
 
 export class Editor {
+  /** Everything this editor hooked onto the window, ready to be unhooked. */
+  private readonly gone = new Disposer()
+
   readonly el: HTMLElement
   private readonly plan: HTMLCanvasElement
   private readonly profile: HTMLCanvasElement
@@ -261,7 +265,7 @@ export class Editor {
       ro.observe(this.plan)
       ro.observe(this.el)
     }
-    window.addEventListener('resize', () => {
+    this.gone.on(window, 'resize', () => {
       this.dirty = true
     })
 
@@ -335,17 +339,17 @@ export class Editor {
     this.timeline.addEventListener('pointerdown', (e) => this.onTimelineDown(e))
     this.timeline.addEventListener('pointermove', (e) => this.onStripMove(e))
     this.timeline.addEventListener('pointerup', (e) => this.onPointerUp(e))
-    window.addEventListener('keydown', (e) => this.onKey(e))
-    window.addEventListener('keyup', (e) => {
+    this.gone.on(window, 'keydown', (e) => this.onKey(e))
+    this.gone.on(window, 'keyup', (e) => {
       if (e.code === 'Space') this.spaceHeld = false
     })
-    window.addEventListener('resize', () => (this.dirty = true))
+    this.gone.on(window, 'resize', () => (this.dirty = true))
     // A reload, a crash or a closed tab must not cost an hour: flush the draft on the way out.
-    window.addEventListener('beforeunload', () => this.writeDraft())
-    document.addEventListener('visibilitychange', () => {
+    this.gone.on(window, 'beforeunload', () => this.writeDraft())
+    this.gone.on(document, 'visibilitychange', () => {
       if (document.visibilityState === 'hidden') this.writeDraft()
     })
-    window.addEventListener('pointerdown', (e) => {
+    this.gone.on(window, 'pointerdown', (e) => {
       if (this.menu && !this.menu.contains(e.target as Node)) this.closeMenu()
     })
     this.applyPalette()
@@ -353,6 +357,11 @@ export class Editor {
   }
 
   // --- lifecycle ------------------------------------------------------------
+
+  /** The editor outlives every screen in the game, so only the game's own teardown reaches it. */
+  dispose(): void {
+    this.gone.run()
+  }
 
   show(): void {
     this.visible = true

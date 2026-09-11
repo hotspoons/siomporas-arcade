@@ -5,12 +5,13 @@
 // holds the old custom domain so Cloudflare keeps the DNS record, and sends everything on to the new
 // one with the path and query intact, permanently.
 
-const TO = 'stuntin.siomporas.com'
+const TO = 'https://arcade.siomporas.com/stuntin'
 
 export default {
   fetch(request) {
     const url = new URL(request.url)
-    url.hostname = TO
-    return Response.redirect(url.toString(), 301)
+    // The whole subdomain becomes one path inside the arcade, so a bookmark of a deeper old URL
+    // has nowhere exact to land — the game's own front door is the honest answer for all of them.
+    return Response.redirect(TO + url.search, 301)
   },
 }

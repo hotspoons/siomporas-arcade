@@ -124,6 +124,20 @@ export class SpriteAtlas {
   /** Whether the last bake() came from the IndexedDB cache. */
   fromCache = false
 
+  /**
+   * Drop the atlas. The render target is not in the scene graph, so the scene walk on unmount
+   * never reaches it — and at up to 64 MB it is the single largest thing the game holds.
+   * The IndexedDB cache is untouched, so the next mount is still the fast one.
+   */
+  dispose(): void {
+    this.rt?.dispose()
+    this.rt = null
+    this.texture?.dispose()
+    this.texture = null
+    this.ready = false
+    this.kinds.clear()
+  }
+
   async bake(renderer: WebGLRenderer, retro: boolean, onProgress?: (done: number, total: number) => void): Promise<void> {
     const plan = atlasPlan(renderer)
     this.size = plan.size
@@ -149,7 +163,9 @@ export class SpriteAtlas {
   /** The actual bake: load every model and render its cells into the atlas target. */
   private async render(renderer: WebGLRenderer, retro: boolean, onProgress?: (done: number, total: number) => void): Promise<void> {
     await ensureFonts()
-    const loader = new GLTFLoader()
+    // setPath('/'), because the model paths are relative and in the arcade the game is served
+    // at /radrun — where a bare 'assets/…' would resolve against whatever menu the URL is on.
+    const loader = new GLTFLoader().setPath('/')
     const scene = new Scene()
     scene.add(new AmbientLight(0xffffff, 0.35))
     scene.add(new HemisphereLight(0xffffff, 0x8080a0, 0.7))

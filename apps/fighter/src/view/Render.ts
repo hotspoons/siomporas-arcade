@@ -471,11 +471,12 @@ function controls(ctx: CanvasRenderingContext2D): void {
     'A D walk  W jump  S crouch  hold back to block',
     'F G H punch   C V B kick   N = 3P   M = 3K',
     'fwd+heavy up close = throw',
-    '5 6 7 pick P1   8 9 0 pick P2   F1 boxes   F2 dummy',
+    '5 6 7 8 pick P1   - = P1 · 9 0 P2 through the roster',
+    'F1 boxes   F2 dummy   1 2 3 opponent   4 two players   R reset',
   ]
   font(ctx, 7, 600)
   ctx.fillStyle = DIM
-  lines.forEach((l, i) => ctx.fillText(l, VIEW_W / 2, 118 + i * 10))
+  lines.forEach((l, i) => ctx.fillText(l, VIEW_W / 2, 112 + i * 10))
 }
 
 /** The tuning readout: what each fighter is doing, this frame, in the genre's own vocabulary. */

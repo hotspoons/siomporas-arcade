@@ -22,7 +22,15 @@ export const game: GameModule = {
     style.textContent = `${css}\n.arcade-game .stage { display: block; width: 100%; height: 100%; background: #06070a; }`
     host.container.appendChild(style)
 
-    const g = new Game(host.canvas)
+    // The shell owns the path; the query string is nobody's, so the game takes it. That makes a
+    // particular matchup a link — arcade.siomporas.com/crown?p1=kestrel&p2=zangief — which is the
+    // only way to pick a fighter until there is a select screen.
+    const q = new URLSearchParams(location.search)
+    const g = new Game(host.canvas, {
+      p1: q.get('p1') ?? undefined,
+      p2: q.get('p2') ?? undefined,
+      stage: q.get('stage') ?? undefined,
+    })
     const gone = new Disposer()
     // There is no menu yet, so Escape is the way out. The shell owns the URL either way.
     gone.on(window, 'keydown', (e) => {

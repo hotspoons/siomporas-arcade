@@ -14,6 +14,9 @@ PATTERN=${PATTERN:-'sf2*'}
 # Files this big or smaller are stood in for with zeros when they are missing: PLD equations by
 # default, and on request a sound DSP (BLANK_MAX=8192), which costs audio we do not record anyway.
 BLANK_MAX=${BLANK_MAX:-300}
+# Names matching this are not counted as missing. A Neo Geo romset lists every BIOS revision ever
+# dumped and the machine runs on any one of them, so the ones we do not have are not a problem.
+SKIP_MISSING=${SKIP_MISSING:-'^$'}
 MAME=${MAME:-/usr/games/mame}
 mkdir -p "$OUT"
 TMP=$(mktemp -d)
@@ -34,10 +37,15 @@ for set in $($MAME -listfull "$PATTERN" 2>/dev/null | awk 'NR>1{print $1}'); do
       zip=$(echo "$line" | awk '{print $2}'); file=$(echo "$line" | awk '{print $3}')
       unzip -p "$zip" "$file" > "$TMP/build/$name"; found=$((found+1))
     elif [ "$size" -le "$BLANK_MAX" ]; then
-      # A PLD dump we do not have. MAME refuses to start with a file *missing* but only warns about a
-      # wrong checksum, so a blank of the right size stands in. The logic in a PLD is glue the
+      # A PLD dump we do not have. MAME refuses to start with a file *missing* but only warns about
+      # a wrong checksum, so a blank of the right size stands in. The logic in a PLD is glue the
       # emulator does not use; nothing about the game changes.
-      head -c "$size" /dev/zero > "$TMP/build/$name"; pld_missing=$((pld_missing+1))
+      #
+      # 0xFF, never 0x00: a CPS2 set that ships already decrypted declares an all-FF key region and
+      # the driver reads that as "nothing to decrypt". Fill it with zeros instead and the game
+      # decrypts itself into noise, which looks exactly like a bad dump.
+      head -c "$size" /dev/zero | tr '\0' '\377' > "$TMP/build/$name"; pld_missing=$((pld_missing+1))
+    elif echo "$name" | grep -qE "$SKIP_MISSING"; then :
     else missing="$missing $name"; fi
   done < "$TMP/want.txt"
   if [ -z "$missing" ]; then

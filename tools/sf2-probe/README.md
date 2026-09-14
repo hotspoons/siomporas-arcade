@@ -46,6 +46,8 @@ Raw logs stay under `ext/reference-artwork/rom-dumps/` (gitignored). Only the di
 | `lua/plans/react.lua` | a short plan for the *other* side of a fight: the flinches, the guards, the sweep knockdown, the throw and the stars, recorded while the character of interest is player two |
 | `lua/recon.lua` | what a board looks like from the outside: its regions, shares, screens and palette, a coin, a start, and a picture. The first thing to run on a game that is not Street Fighter II |
 | `lua/dumpvideo.lua` | `dumpgfx.lua` for a board whose graphics region has another name (`PROBE_REGION=:video`) |
+| `lua/dumpobj.lua` | one frame's sprite list, palette and screenshot from a board whose list this code knows nothing about: it finds the list by looking for a run of records that land on the screen with a non-zero tile code |
+| `lua/findobj.lua` | the same search, printing its candidates instead of dumping, for when the answer is not obvious |
 | `lua/boot.lua` | power-on → coin ×2 → 1P start → 2P start → cursor routes → picks → waits for `FF8008 & 0x0A == 0x0A` (controls live) → `machine:save(match_<p1>_<p2>)`. Deterministic frame counts; a whole boot is ≈2100 frames. |
 | `lua/record.lua` | the move recorder. Loads a state, runs a plan of tests. Every test: wait until both fighters are neutral and still, teleport them (`+0x06`, `+0x1CC`), zero velocities, refill health, settle 14 frames, then feed P1 a per-frame input script while P2 plays the dummy. Writes one JSON line per frame. The round timer is frozen by rewriting the 40-frame sub counter every frame. |
 | `lua/plans/gen.lua` | builds the standard plan for a character: calibration (idle, walks, crouch, three jumps, landing), every standing/crouching/jumping normal as whiff / close-whiff / hit / far hit / block / vs crouch / crouch block (3 hit repetitions for the damage spread), 8 throws ×3, throw range probe, close/far range probe every 2 px, specials × strength × {whiff, hit, block, crouch hit, crouch block}, two dizzy accumulation runs, dizzy-threshold pokes, and an unfrozen timer run |
@@ -187,12 +189,28 @@ from a match where it was player one, because player two wears the alternate pal
 The same two questions decide how far this travels: is there a graphics region that decodes, and is
 there a list in RAM saying what is drawn where. `lua/recon.lua` answers the first half in one run.
 
-| board | game | how it went |
-|---|---|---|
-| CPS1 | Street Fighter II (all editions) | **done.** `:gfx` decodes, the sprite list is in gfxram at the page CPS-A register 0 points to, and the palette device holds finished RGB |
-| CPS2 | Super Street Fighter II Turbo | **would work unchanged**: same `:gfx`, same `cps_a_regs`, and the sprite list moves to the `objram1`/`objram2` shares. Blocked here only by `ssf2t.key`, the twenty-byte decryption key — MAME 0.276 loads it from the romset and the MAME 2003 set predates it |
-| Neo Geo | Samurai Shodown | **blocked on the BIOS.** The 2003 set ships MAME-generated stand-ins (`mame.sm1`, `mamelo.lo`, `sfix.sfx`) where 0.276 wants the real dumps |
-| Midway T-unit | Mortal Kombat | **boots and plays**, and can be driven and screenshotted like anything else — but its 12 MB `:video` region is not a tile bank. About a third of it is zero, so the pixels are in there, but neither a linear read nor Midway's usual bank interleave produces a picture: the blitter reads an encoded stream, and decoding it is its own project. Sprites from this board would come from driving the game and capturing frames, not from decoding the ROM |
+| board | game | pixels | sprite list | how it went |
+|---|---|---|---|---|
+| CPS1 | Street Fighter II, all editions | yes | yes | **done end to end.** `:gfx` decodes, the list is in gfxram at the page CPS-A register 0 points to, the palette device holds finished RGB |
+| CPS2 | Super Street Fighter II Turbo | yes | yes | **verified.** The same decoder, unchanged: `node scripts/rom-frame.mjs ssf2t` draws the board's own frame back pixel for pixel. The list moved to `objram1`/`objram2` and the top bits of x and y are flags rather than position, both of which `dumpobj.lua` works out by itself. What a full extraction still needs is the per-game part: where the fighters' structs live and what their animation records look like |
+| Neo Geo | Samurai Shodown | probably | **no** | boots and plays, and `:cslot1:sprites` is 10 MB of what should be ordinary tiles — but the sprite list lives in video RAM that the driver keeps to itself, and no memory share exposes it. Poses from this board would have to be captured off the screen, or the driver patched |
+| Midway T-unit | Mortal Kombat | **no** | n/a | boots and plays, and can be driven and screenshotted like anything else — but its 12 MB `:video` region is not a tile bank. About a third of it is zero, so the pixels are in there, yet neither a linear read nor Midway's usual bank interleave produces a picture: the blitter reads an encoded stream, and decoding it is its own project |
+
+### Getting a set to run at all
+
+Romsets are labelled for the MAME that made them, so `rebuild-romsets.sh` matches by CRC and renames.
+Two traps, both of which look exactly like a bad dump:
+
+* **Blanks are 0xFF, never 0x00.** A CPS2 set that ships already decrypted declares an all-FF key
+  region, and the driver reads that as "nothing to decrypt". Zeros mean "decrypt with a zero key",
+  and the game boots to a screen of noise.
+* **A romset lists every BIOS revision ever dumped** and the machine runs on any one of them, so
+  `SKIP_MISSING` takes a pattern for names that are not really missing — that is what makes a Neo
+  Geo set build from a collection that has only some of them.
+
+The MAME 2003 set has no CPS2 decryption keys and only MAME-generated Neo Geo BIOS stand-ins. The
+2015 set has real BIOS dumps, and for CPS2 it has the *Phoenix* sets — bootlegs that were decrypted
+once and for all, which need no key at all. `ssf2tad` is the one this used.
 
 `tools/sf2-probe/rebuild-romsets.sh` takes a `PATTERN` for the family to rebuild, and a `BLANK_MAX`
 for how large a missing file may be before it is stood in for with zeros — 300 bytes by default,

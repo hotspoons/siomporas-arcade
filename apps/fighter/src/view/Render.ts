@@ -50,7 +50,12 @@ const BAR_RED = '#c81818'
 /** Scratch surface for tinting a sprite white on the frame it is hit. */
 let flash: HTMLCanvasElement | null = null
 
-export function render(ctx: CanvasRenderingContext2D, match: Match, scene: Scene, opts: RenderOptions): void {
+/**
+ * Put the canvas in the arcade monitor's coordinates — whole-number scale, letterboxed, clipped,
+ * nearest-neighbour — and run `draw` inside them. Every screen this game has goes through here, so
+ * the select grid is on the same 384×224 as the fight and cannot drift from it.
+ */
+export function screen(ctx: CanvasRenderingContext2D, draw: () => void): void {
   const cv = ctx.canvas
   const scale = Math.max(1, Math.floor(Math.min(cv.width / VIEW_W, cv.height / VIEW_H)))
   const ox = Math.floor((cv.width - VIEW_W * scale) / 2)
@@ -59,12 +64,22 @@ export function render(ctx: CanvasRenderingContext2D, match: Match, scene: Scene
   ctx.setTransform(1, 0, 0, 1, 0, 0)
   ctx.fillStyle = '#000'
   ctx.fillRect(0, 0, cv.width, cv.height)
+  ctx.save()
   ctx.setTransform(scale, 0, 0, scale, ox, oy)
   ctx.imageSmoothingEnabled = false
   ctx.beginPath()
   ctx.rect(0, 0, VIEW_W, VIEW_H)
   ctx.clip()
+  draw()
+  ctx.restore()
+  ctx.setTransform(1, 0, 0, 1, 0, 0)
+}
 
+export function render(ctx: CanvasRenderingContext2D, match: Match, scene: Scene, opts: RenderOptions): void {
+  screen(ctx, () => drawMatch(ctx, match, scene, opts))
+}
+
+function drawMatch(ctx: CanvasRenderingContext2D, match: Match, scene: Scene, opts: RenderOptions): void {
   const [a, b] = match.fighters
   const stageHalf = match.stageHalf
   const reach = Math.max(0, stageHalf - VIEW_W / 2)
@@ -84,7 +99,6 @@ export function render(ctx: CanvasRenderingContext2D, match: Match, scene: Scene
   drawHud(ctx, match, scene)
   drawBanner(ctx, match, opts)
   if (opts.debug) drawFrameData(ctx, match)
-  ctx.setTransform(1, 0, 0, 1, 0, 0)
 }
 
 // --- the stage ---------------------------------------------------------------------------------
@@ -471,7 +485,7 @@ function controls(ctx: CanvasRenderingContext2D): void {
     'A D walk  W jump  S crouch  hold back to block',
     'F G H punch   C V B kick   N = 3P   M = 3K',
     'fwd+heavy up close = throw',
-    '5 6 7 8 pick P1   - = P1 · 9 0 P2 through the roster',
+    'ENTER = character select   5 6 7 8 pick P1   - = 9 0 walk the roster',
     'F1 boxes   F2 dummy   1 2 3 opponent   4 two players   R reset',
   ]
   font(ctx, 7, 600)

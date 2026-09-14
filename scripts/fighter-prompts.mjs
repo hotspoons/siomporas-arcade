@@ -408,9 +408,13 @@ function portrait(c) {
 
 Draw a head-and-shoulders portrait of the same character, filling the square, facing slightly toward the viewer's left, lit hard from the upper front left, with a great deal of attitude — this is a fighting-game character-select portrait.${c.who === 'name unknown' ? ' This character is never seen unmasked.' : ''}
 
+Head and shoulders ONLY, filling the frame: the top of the head near the top edge and the chin about two thirds of the way down. Not a full figure, not a bust on a plinth, no hands, no weapon.
+
+THE SIZE THIS HAS TO SURVIVE IS 18 PIXELS. It is drawn beside the health bar at eighteen pixels square, so what must read is the silhouette of the head and two strong colours — nothing finer than about a twentieth of the frame will exist at that size. Keep the shapes large, the values separated, and the character's two signature colours dominant.
+
 ${STYLE}
 
-The background stays flat, even, unshaded grey. No text, labels, captions, watermarks, borders or frames.`
+${CLEAN}`
 }
 
 /**

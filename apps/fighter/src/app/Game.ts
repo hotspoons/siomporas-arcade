@@ -14,6 +14,8 @@ import { Match } from '../sim/Match'
 import { CHARACTERS } from '../sim/Character'
 import { Cpu, type Difficulty } from '../sim/Cpu'
 import { render, type RenderOptions, type Scene } from '../view/Render'
+import { renderSelect } from '../view/SelectScreen'
+import { Select } from './Select'
 import { loadCharacterArt, loadFxArt, loadStageArt } from '../view/Sprites'
 
 interface Pad {
@@ -58,6 +60,8 @@ export interface GameSettings {
   p1?: string
   p2?: string
   stage?: string
+  /** Open on the select screen. Defaults to true when the settings do not name a fighter. */
+  select?: boolean
 }
 
 export class Game {
@@ -67,6 +71,8 @@ export class Game {
   options: RenderOptions = { debug: false, hint: true }
   readonly scene: Scene = { chars: [null, null], stage: null, fx: null }
   stage: string
+  /** The select screen while it is up; null during a fight. */
+  select: Select | null = null
 
   private readonly ctx: CanvasRenderingContext2D
   private readonly held = new Set<string>()
@@ -83,6 +89,9 @@ export class Game {
     this.stage = settings.stage ?? 'airbase'
     this.match = new Match(settings.p1 ?? 'ryu', settings.p2 ?? 'zangief')
     void this.loadArt()
+    // A link that names its fighters is a link to that fight; anything else starts where an arcade
+    // cabinet starts, on the grid.
+    if (settings.select ?? !(settings.p1 || settings.p2)) this.openSelect()
 
     this.resize = (): void => {
       const dpr = Math.min(2, window.devicePixelRatio || 1)
@@ -112,7 +121,7 @@ export class Game {
       {
         beginFrame: () => 1,
         simTick: () => this.tick(),
-        render: () => render(this.ctx, this.match, this.scene, this.options),
+        render: () => (this.select ? renderSelect(this.ctx, this.select) : render(this.ctx, this.match, this.scene, this.options)),
       },
       null,
       { simHz: 60, maxSubsteps: 5 },
@@ -147,6 +156,33 @@ export class Game {
     this.cpu.reset()
     this.options.hint = true
     void this.loadArt()
+    this.syncUrl()
+  }
+
+  /** Put the grid up, with the cursors where the current pair already is. */
+  openSelect(): void {
+    const ids = CHARACTERS.map((c) => c.id)
+    const sel = new Select(ids, this.opponent === 'human')
+    const [p1, p2] = this.match.fighters.map((f) => f.character.id)
+    sel.preset(0, p1)
+    sel.preset(1, p2)
+    this.select = sel
+    // Every portrait at once, in the background. The grid draws whatever has landed.
+    for (const c of CHARACTERS) void loadCharacterArt(c.art)
+  }
+
+  /**
+   * Keep the address bar pointing at the fight on screen, so the URL is both how you arrive at a
+   * matchup and how you leave with one. replaceState, not push: choosing a fighter is not a page
+   * the back button should have to walk through.
+   */
+  private syncUrl(): void {
+    if (typeof location === 'undefined' || typeof history?.replaceState !== 'function') return
+    const [p1, p2] = this.match.fighters.map((f) => f.character.id)
+    const url = new URL(location.href)
+    url.searchParams.set('p1', p1)
+    url.searchParams.set('p2', p2)
+    history.replaceState(history.state, '', url)
   }
 
   /** Keys that are not fighting: toggles, difficulty, reset, who is fighting. Returns true if it was one. */
@@ -194,6 +230,10 @@ export class Game {
         this.setFighters(ids[(ids.indexOf(p1) + step) % ids.length], p2)
         return true
       }
+      case 'Enter':
+      case 'NumpadEnter':
+        if (!this.select) this.openSelect()
+        return true
       case 'KeyR':
         this.reset()
         return true
@@ -207,6 +247,7 @@ export class Game {
 
   setOpponent(o: Opponent): void {
     this.opponent = o
+    if (this.select) this.select.twoPlayer = o === 'human'
     if (o !== 'human') this.cpu.difficulty = o
     this.cpu.reset()
   }
@@ -218,6 +259,14 @@ export class Game {
   }
 
   private tick(): void {
+    if (this.select) {
+      const pick = this.select.step(this.readPad(P1, this.readGamepad()), this.opponent === 'human' ? this.readPad(P2, null) : null)
+      if (!pick) return
+      this.select = null
+      this.setFighters(pick.p1, pick.p2)
+      return
+    }
+
     const [a, b] = this.match.fighters
     if (this.match.phase === 'fight' && this.match.phaseFrame > 4) this.options.hint = false
 

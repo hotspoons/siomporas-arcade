@@ -97,7 +97,30 @@ async function loadJson<T>(url: string): Promise<T | null> {
   }
 }
 
-export async function loadCharacterArt(art: string): Promise<CharacterArt | null> {
+// One fetch per character for the life of the page. The select screen wants every atlas at once and
+// the fight wants two of them; without this, walking the roster with the switch keys re-downloads a
+// character every time you pass them.
+const pending = new Map<string, Promise<CharacterArt | null>>()
+const settled = new Map<string, CharacterArt | null>()
+
+export function loadCharacterArt(art: string): Promise<CharacterArt | null> {
+  let p = pending.get(art)
+  if (!p) {
+    p = fetchCharacterArt(art).then((a) => {
+      settled.set(art, a)
+      return a
+    })
+    pending.set(art, p)
+  }
+  return p
+}
+
+/** What has already arrived, for a caller that must draw this frame and cannot await. */
+export function cachedArt(art: string): CharacterArt | null {
+  return settled.get(art) ?? null
+}
+
+async function fetchCharacterArt(art: string): Promise<CharacterArt | null> {
   const dir = `${ASSET_ROOT}/chars/${art}`
   const j = await loadJson<FramesJson>(`${dir}/frames.json`)
   if (!j) return null

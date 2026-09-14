@@ -2349,9 +2349,13 @@ Attached are two images: a finished character reference sheet whose design, cost
 
 Draw a head-and-shoulders portrait of the same character, filling the square, facing slightly toward the viewer's left, lit hard from the upper front left, with a great deal of attitude — this is a fighting-game character-select portrait.
 
+Head and shoulders ONLY, filling the frame: the top of the head near the top edge and the chin about two thirds of the way down. Not a full figure, not a bust on a plinth, no hands, no weapon.
+
+THE SIZE THIS HAS TO SURVIVE IS 18 PIXELS. It is drawn beside the health bar at eighteen pixels square, so what must read is the silhouette of the head and two strong colours — nothing finer than about a twentieth of the frame will exist at that size. Keep the shapes large, the values separated, and the character's two signature colours dominant.
+
 Painted in the manner of early-1990s arcade character art: a photographed actor in costume, retouched into hard-edged illustration — saturated colour, heavy contrast, one strong key light from the upper front left, deep shadow under the brow and the jaw, visible airbrush modelling on the muscle, and a crisp dark outline holding the whole figure together. Solid and physical, not glossy and not cel-shaded. The costume reads as real cloth and real leather with real wear on it.
 
-The background stays flat, even, unshaded grey. No text, labels, captions, watermarks, borders or frames.
+The background inside every box is a CHROMA-KEY GREEN SCREEN and must stay one single completely flat, even, unlit, uniform bright green — exactly the green it already is, edge to edge, with no variation. It is a green screen, not a wall and not a room: it is not lit, nothing stands on it and nothing falls on it. No floor, no ground plane, no ground shadow, no cast shadow, no contact shadow, no pool of shade under the feet, no backdrop, no scenery, no gradient, no vignette, no glow, no darkening at the edges. Do not use green anywhere in the costume, skin or hair; green is the background and will be removed. No text, no labels, no captions, no watermark, no logo, no border and no frame.
 ```
 
 ## 57. BOLLARD — PORTRAIT — character select
@@ -2365,9 +2369,13 @@ Attached are two images: a finished character reference sheet whose design, cost
 
 Draw a head-and-shoulders portrait of the same character, filling the square, facing slightly toward the viewer's left, lit hard from the upper front left, with a great deal of attitude — this is a fighting-game character-select portrait.
 
+Head and shoulders ONLY, filling the frame: the top of the head near the top edge and the chin about two thirds of the way down. Not a full figure, not a bust on a plinth, no hands, no weapon.
+
+THE SIZE THIS HAS TO SURVIVE IS 18 PIXELS. It is drawn beside the health bar at eighteen pixels square, so what must read is the silhouette of the head and two strong colours — nothing finer than about a twentieth of the frame will exist at that size. Keep the shapes large, the values separated, and the character's two signature colours dominant.
+
 Painted in the manner of early-1990s arcade character art: a photographed actor in costume, retouched into hard-edged illustration — saturated colour, heavy contrast, one strong key light from the upper front left, deep shadow under the brow and the jaw, visible airbrush modelling on the muscle, and a crisp dark outline holding the whole figure together. Solid and physical, not glossy and not cel-shaded. The costume reads as real cloth and real leather with real wear on it.
 
-The background stays flat, even, unshaded grey. No text, labels, captions, watermarks, borders or frames.
+The background inside every box is a CHROMA-KEY GREEN SCREEN and must stay one single completely flat, even, unlit, uniform bright green — exactly the green it already is, edge to edge, with no variation. It is a green screen, not a wall and not a room: it is not lit, nothing stands on it and nothing falls on it. No floor, no ground plane, no ground shadow, no cast shadow, no contact shadow, no pool of shade under the feet, no backdrop, no scenery, no gradient, no vignette, no glow, no darkening at the edges. Do not use green anywhere in the costume, skin or hair; green is the background and will be removed. No text, no labels, no captions, no watermark, no logo, no border and no frame.
 ```
 
 ## 58. SABLE PRIOR — PORTRAIT — character select
@@ -2381,9 +2389,13 @@ Attached are two images: a finished character reference sheet whose design, cost
 
 Draw a head-and-shoulders portrait of the same character, filling the square, facing slightly toward the viewer's left, lit hard from the upper front left, with a great deal of attitude — this is a fighting-game character-select portrait.
 
+Head and shoulders ONLY, filling the frame: the top of the head near the top edge and the chin about two thirds of the way down. Not a full figure, not a bust on a plinth, no hands, no weapon.
+
+THE SIZE THIS HAS TO SURVIVE IS 18 PIXELS. It is drawn beside the health bar at eighteen pixels square, so what must read is the silhouette of the head and two strong colours — nothing finer than about a twentieth of the frame will exist at that size. Keep the shapes large, the values separated, and the character's two signature colours dominant.
+
 Painted in the manner of early-1990s arcade character art: a photographed actor in costume, retouched into hard-edged illustration — saturated colour, heavy contrast, one strong key light from the upper front left, deep shadow under the brow and the jaw, visible airbrush modelling on the muscle, and a crisp dark outline holding the whole figure together. Solid and physical, not glossy and not cel-shaded. The costume reads as real cloth and real leather with real wear on it.
 
-The background stays flat, even, unshaded grey. No text, labels, captions, watermarks, borders or frames.
+The background inside every box is a CHROMA-KEY GREEN SCREEN and must stay one single completely flat, even, unlit, uniform bright green — exactly the green it already is, edge to edge, with no variation. It is a green screen, not a wall and not a room: it is not lit, nothing stands on it and nothing falls on it. No floor, no ground plane, no ground shadow, no cast shadow, no contact shadow, no pool of shade under the feet, no backdrop, no scenery, no gradient, no vignette, no glow, no darkening at the edges. Do not use green anywhere in the costume, skin or hair; green is the background and will be removed. No text, no labels, no captions, no watermark, no logo, no border and no frame.
 ```
 
 ## 59. KOMBINAT — PORTRAIT — character select
@@ -2397,9 +2409,13 @@ Attached are two images: a finished character reference sheet whose design, cost
 
 Draw a head-and-shoulders portrait of the same character, filling the square, facing slightly toward the viewer's left, lit hard from the upper front left, with a great deal of attitude — this is a fighting-game character-select portrait.
 
+Head and shoulders ONLY, filling the frame: the top of the head near the top edge and the chin about two thirds of the way down. Not a full figure, not a bust on a plinth, no hands, no weapon.
+
+THE SIZE THIS HAS TO SURVIVE IS 18 PIXELS. It is drawn beside the health bar at eighteen pixels square, so what must read is the silhouette of the head and two strong colours — nothing finer than about a twentieth of the frame will exist at that size. Keep the shapes large, the values separated, and the character's two signature colours dominant.
+
 Painted in the manner of early-1990s arcade character art: a photographed actor in costume, retouched into hard-edged illustration — saturated colour, heavy contrast, one strong key light from the upper front left, deep shadow under the brow and the jaw, visible airbrush modelling on the muscle, and a crisp dark outline holding the whole figure together. Solid and physical, not glossy and not cel-shaded. The costume reads as real cloth and real leather with real wear on it.
 
-The background stays flat, even, unshaded grey. No text, labels, captions, watermarks, borders or frames.
+The background inside every box is a CHROMA-KEY GREEN SCREEN and must stay one single completely flat, even, unlit, uniform bright green — exactly the green it already is, edge to edge, with no variation. It is a green screen, not a wall and not a room: it is not lit, nothing stands on it and nothing falls on it. No floor, no ground plane, no ground shadow, no cast shadow, no contact shadow, no pool of shade under the feet, no backdrop, no scenery, no gradient, no vignette, no glow, no darkening at the edges. Do not use green anywhere in the costume, skin or hair; green is the background and will be removed. No text, no labels, no captions, no watermark, no logo, no border and no frame.
 ```
 
 ## 60. FATHOM — PORTRAIT — character select
@@ -2413,9 +2429,13 @@ Attached are two images: a finished character reference sheet whose design, cost
 
 Draw a head-and-shoulders portrait of the same character, filling the square, facing slightly toward the viewer's left, lit hard from the upper front left, with a great deal of attitude — this is a fighting-game character-select portrait.
 
+Head and shoulders ONLY, filling the frame: the top of the head near the top edge and the chin about two thirds of the way down. Not a full figure, not a bust on a plinth, no hands, no weapon.
+
+THE SIZE THIS HAS TO SURVIVE IS 18 PIXELS. It is drawn beside the health bar at eighteen pixels square, so what must read is the silhouette of the head and two strong colours — nothing finer than about a twentieth of the frame will exist at that size. Keep the shapes large, the values separated, and the character's two signature colours dominant.
+
 Painted in the manner of early-1990s arcade character art: a photographed actor in costume, retouched into hard-edged illustration — saturated colour, heavy contrast, one strong key light from the upper front left, deep shadow under the brow and the jaw, visible airbrush modelling on the muscle, and a crisp dark outline holding the whole figure together. Solid and physical, not glossy and not cel-shaded. The costume reads as real cloth and real leather with real wear on it.
 
-The background stays flat, even, unshaded grey. No text, labels, captions, watermarks, borders or frames.
+The background inside every box is a CHROMA-KEY GREEN SCREEN and must stay one single completely flat, even, unlit, uniform bright green — exactly the green it already is, edge to edge, with no variation. It is a green screen, not a wall and not a room: it is not lit, nothing stands on it and nothing falls on it. No floor, no ground plane, no ground shadow, no cast shadow, no contact shadow, no pool of shade under the feet, no backdrop, no scenery, no gradient, no vignette, no glow, no darkening at the edges. Do not use green anywhere in the costume, skin or hair; green is the background and will be removed. No text, no labels, no captions, no watermark, no logo, no border and no frame.
 ```
 
 ## 61. CANDELA — PORTRAIT — character select
@@ -2429,9 +2449,13 @@ Attached are two images: a finished character reference sheet whose design, cost
 
 Draw a head-and-shoulders portrait of the same character, filling the square, facing slightly toward the viewer's left, lit hard from the upper front left, with a great deal of attitude — this is a fighting-game character-select portrait.
 
+Head and shoulders ONLY, filling the frame: the top of the head near the top edge and the chin about two thirds of the way down. Not a full figure, not a bust on a plinth, no hands, no weapon.
+
+THE SIZE THIS HAS TO SURVIVE IS 18 PIXELS. It is drawn beside the health bar at eighteen pixels square, so what must read is the silhouette of the head and two strong colours — nothing finer than about a twentieth of the frame will exist at that size. Keep the shapes large, the values separated, and the character's two signature colours dominant.
+
 Painted in the manner of early-1990s arcade character art: a photographed actor in costume, retouched into hard-edged illustration — saturated colour, heavy contrast, one strong key light from the upper front left, deep shadow under the brow and the jaw, visible airbrush modelling on the muscle, and a crisp dark outline holding the whole figure together. Solid and physical, not glossy and not cel-shaded. The costume reads as real cloth and real leather with real wear on it.
 
-The background stays flat, even, unshaded grey. No text, labels, captions, watermarks, borders or frames.
+The background inside every box is a CHROMA-KEY GREEN SCREEN and must stay one single completely flat, even, unlit, uniform bright green — exactly the green it already is, edge to edge, with no variation. It is a green screen, not a wall and not a room: it is not lit, nothing stands on it and nothing falls on it. No floor, no ground plane, no ground shadow, no cast shadow, no contact shadow, no pool of shade under the feet, no backdrop, no scenery, no gradient, no vignette, no glow, no darkening at the edges. Do not use green anywhere in the costume, skin or hair; green is the background and will be removed. No text, no labels, no captions, no watermark, no logo, no border and no frame.
 ```
 
 ## 62. MERIDIAN — PORTRAIT — character select
@@ -2445,9 +2469,13 @@ Attached are two images: a finished character reference sheet whose design, cost
 
 Draw a head-and-shoulders portrait of the same character, filling the square, facing slightly toward the viewer's left, lit hard from the upper front left, with a great deal of attitude — this is a fighting-game character-select portrait.
 
+Head and shoulders ONLY, filling the frame: the top of the head near the top edge and the chin about two thirds of the way down. Not a full figure, not a bust on a plinth, no hands, no weapon.
+
+THE SIZE THIS HAS TO SURVIVE IS 18 PIXELS. It is drawn beside the health bar at eighteen pixels square, so what must read is the silhouette of the head and two strong colours — nothing finer than about a twentieth of the frame will exist at that size. Keep the shapes large, the values separated, and the character's two signature colours dominant.
+
 Painted in the manner of early-1990s arcade character art: a photographed actor in costume, retouched into hard-edged illustration — saturated colour, heavy contrast, one strong key light from the upper front left, deep shadow under the brow and the jaw, visible airbrush modelling on the muscle, and a crisp dark outline holding the whole figure together. Solid and physical, not glossy and not cel-shaded. The costume reads as real cloth and real leather with real wear on it.
 
-The background stays flat, even, unshaded grey. No text, labels, captions, watermarks, borders or frames.
+The background inside every box is a CHROMA-KEY GREEN SCREEN and must stay one single completely flat, even, unlit, uniform bright green — exactly the green it already is, edge to edge, with no variation. It is a green screen, not a wall and not a room: it is not lit, nothing stands on it and nothing falls on it. No floor, no ground plane, no ground shadow, no cast shadow, no contact shadow, no pool of shade under the feet, no backdrop, no scenery, no gradient, no vignette, no glow, no darkening at the edges. Do not use green anywhere in the costume, skin or hair; green is the background and will be removed. No text, no labels, no captions, no watermark, no logo, no border and no frame.
 ```
 
 ## 63. THRESHER — PORTRAIT — character select
@@ -2461,9 +2489,13 @@ Attached are two images: a finished character reference sheet whose design, cost
 
 Draw a head-and-shoulders portrait of the same character, filling the square, facing slightly toward the viewer's left, lit hard from the upper front left, with a great deal of attitude — this is a fighting-game character-select portrait.
 
+Head and shoulders ONLY, filling the frame: the top of the head near the top edge and the chin about two thirds of the way down. Not a full figure, not a bust on a plinth, no hands, no weapon.
+
+THE SIZE THIS HAS TO SURVIVE IS 18 PIXELS. It is drawn beside the health bar at eighteen pixels square, so what must read is the silhouette of the head and two strong colours — nothing finer than about a twentieth of the frame will exist at that size. Keep the shapes large, the values separated, and the character's two signature colours dominant.
+
 Painted in the manner of early-1990s arcade character art: a photographed actor in costume, retouched into hard-edged illustration — saturated colour, heavy contrast, one strong key light from the upper front left, deep shadow under the brow and the jaw, visible airbrush modelling on the muscle, and a crisp dark outline holding the whole figure together. Solid and physical, not glossy and not cel-shaded. The costume reads as real cloth and real leather with real wear on it.
 
-The background stays flat, even, unshaded grey. No text, labels, captions, watermarks, borders or frames.
+The background inside every box is a CHROMA-KEY GREEN SCREEN and must stay one single completely flat, even, unlit, uniform bright green — exactly the green it already is, edge to edge, with no variation. It is a green screen, not a wall and not a room: it is not lit, nothing stands on it and nothing falls on it. No floor, no ground plane, no ground shadow, no cast shadow, no contact shadow, no pool of shade under the feet, no backdrop, no scenery, no gradient, no vignette, no glow, no darkening at the edges. Do not use green anywhere in the costume, skin or hair; green is the background and will be removed. No text, no labels, no captions, no watermark, no logo, no border and no frame.
 ```
 
 ## 64. OSSUARY — PORTRAIT — character select
@@ -2477,9 +2509,13 @@ Attached are two images: a finished character reference sheet whose design, cost
 
 Draw a head-and-shoulders portrait of the same character, filling the square, facing slightly toward the viewer's left, lit hard from the upper front left, with a great deal of attitude — this is a fighting-game character-select portrait. This character is never seen unmasked.
 
+Head and shoulders ONLY, filling the frame: the top of the head near the top edge and the chin about two thirds of the way down. Not a full figure, not a bust on a plinth, no hands, no weapon.
+
+THE SIZE THIS HAS TO SURVIVE IS 18 PIXELS. It is drawn beside the health bar at eighteen pixels square, so what must read is the silhouette of the head and two strong colours — nothing finer than about a twentieth of the frame will exist at that size. Keep the shapes large, the values separated, and the character's two signature colours dominant.
+
 Painted in the manner of early-1990s arcade character art: a photographed actor in costume, retouched into hard-edged illustration — saturated colour, heavy contrast, one strong key light from the upper front left, deep shadow under the brow and the jaw, visible airbrush modelling on the muscle, and a crisp dark outline holding the whole figure together. Solid and physical, not glossy and not cel-shaded. The costume reads as real cloth and real leather with real wear on it.
 
-The background stays flat, even, unshaded grey. No text, labels, captions, watermarks, borders or frames.
+The background inside every box is a CHROMA-KEY GREEN SCREEN and must stay one single completely flat, even, unlit, uniform bright green — exactly the green it already is, edge to edge, with no variation. It is a green screen, not a wall and not a room: it is not lit, nothing stands on it and nothing falls on it. No floor, no ground plane, no ground shadow, no cast shadow, no contact shadow, no pool of shade under the feet, no backdrop, no scenery, no gradient, no vignette, no glow, no darkening at the edges. Do not use green anywhere in the costume, skin or hair; green is the background and will be removed. No text, no labels, no captions, no watermark, no logo, no border and no frame.
 ```
 
 ## 65. VESSEL — PORTRAIT — character select
@@ -2493,9 +2529,13 @@ Attached are two images: a finished character reference sheet whose design, cost
 
 Draw a head-and-shoulders portrait of the same character, filling the square, facing slightly toward the viewer's left, lit hard from the upper front left, with a great deal of attitude — this is a fighting-game character-select portrait.
 
+Head and shoulders ONLY, filling the frame: the top of the head near the top edge and the chin about two thirds of the way down. Not a full figure, not a bust on a plinth, no hands, no weapon.
+
+THE SIZE THIS HAS TO SURVIVE IS 18 PIXELS. It is drawn beside the health bar at eighteen pixels square, so what must read is the silhouette of the head and two strong colours — nothing finer than about a twentieth of the frame will exist at that size. Keep the shapes large, the values separated, and the character's two signature colours dominant.
+
 Painted in the manner of early-1990s arcade character art: a photographed actor in costume, retouched into hard-edged illustration — saturated colour, heavy contrast, one strong key light from the upper front left, deep shadow under the brow and the jaw, visible airbrush modelling on the muscle, and a crisp dark outline holding the whole figure together. Solid and physical, not glossy and not cel-shaded. The costume reads as real cloth and real leather with real wear on it.
 
-The background stays flat, even, unshaded grey. No text, labels, captions, watermarks, borders or frames.
+The background inside every box is a CHROMA-KEY GREEN SCREEN and must stay one single completely flat, even, unlit, uniform bright green — exactly the green it already is, edge to edge, with no variation. It is a green screen, not a wall and not a room: it is not lit, nothing stands on it and nothing falls on it. No floor, no ground plane, no ground shadow, no cast shadow, no contact shadow, no pool of shade under the feet, no backdrop, no scenery, no gradient, no vignette, no glow, no darkening at the edges. Do not use green anywhere in the costume, skin or hair; green is the background and will be removed. No text, no labels, no captions, no watermark, no logo, no border and no frame.
 ```
 
 ## 66. GLASSJAW BILL — PORTRAIT — character select
@@ -2509,9 +2549,13 @@ Attached are two images: a finished character reference sheet whose design, cost
 
 Draw a head-and-shoulders portrait of the same character, filling the square, facing slightly toward the viewer's left, lit hard from the upper front left, with a great deal of attitude — this is a fighting-game character-select portrait.
 
+Head and shoulders ONLY, filling the frame: the top of the head near the top edge and the chin about two thirds of the way down. Not a full figure, not a bust on a plinth, no hands, no weapon.
+
+THE SIZE THIS HAS TO SURVIVE IS 18 PIXELS. It is drawn beside the health bar at eighteen pixels square, so what must read is the silhouette of the head and two strong colours — nothing finer than about a twentieth of the frame will exist at that size. Keep the shapes large, the values separated, and the character's two signature colours dominant.
+
 Painted in the manner of early-1990s arcade character art: a photographed actor in costume, retouched into hard-edged illustration — saturated colour, heavy contrast, one strong key light from the upper front left, deep shadow under the brow and the jaw, visible airbrush modelling on the muscle, and a crisp dark outline holding the whole figure together. Solid and physical, not glossy and not cel-shaded. The costume reads as real cloth and real leather with real wear on it.
 
-The background stays flat, even, unshaded grey. No text, labels, captions, watermarks, borders or frames.
+The background inside every box is a CHROMA-KEY GREEN SCREEN and must stay one single completely flat, even, unlit, uniform bright green — exactly the green it already is, edge to edge, with no variation. It is a green screen, not a wall and not a room: it is not lit, nothing stands on it and nothing falls on it. No floor, no ground plane, no ground shadow, no cast shadow, no contact shadow, no pool of shade under the feet, no backdrop, no scenery, no gradient, no vignette, no glow, no darkening at the edges. Do not use green anywhere in the costume, skin or hair; green is the background and will be removed. No text, no labels, no captions, no watermark, no logo, no border and no frame.
 ```
 
 ## 67. ARCLIGHT — PORTRAIT — character select
@@ -2525,9 +2569,13 @@ Attached are two images: a finished character reference sheet whose design, cost
 
 Draw a head-and-shoulders portrait of the same character, filling the square, facing slightly toward the viewer's left, lit hard from the upper front left, with a great deal of attitude — this is a fighting-game character-select portrait.
 
+Head and shoulders ONLY, filling the frame: the top of the head near the top edge and the chin about two thirds of the way down. Not a full figure, not a bust on a plinth, no hands, no weapon.
+
+THE SIZE THIS HAS TO SURVIVE IS 18 PIXELS. It is drawn beside the health bar at eighteen pixels square, so what must read is the silhouette of the head and two strong colours — nothing finer than about a twentieth of the frame will exist at that size. Keep the shapes large, the values separated, and the character's two signature colours dominant.
+
 Painted in the manner of early-1990s arcade character art: a photographed actor in costume, retouched into hard-edged illustration — saturated colour, heavy contrast, one strong key light from the upper front left, deep shadow under the brow and the jaw, visible airbrush modelling on the muscle, and a crisp dark outline holding the whole figure together. Solid and physical, not glossy and not cel-shaded. The costume reads as real cloth and real leather with real wear on it.
 
-The background stays flat, even, unshaded grey. No text, labels, captions, watermarks, borders or frames.
+The background inside every box is a CHROMA-KEY GREEN SCREEN and must stay one single completely flat, even, unlit, uniform bright green — exactly the green it already is, edge to edge, with no variation. It is a green screen, not a wall and not a room: it is not lit, nothing stands on it and nothing falls on it. No floor, no ground plane, no ground shadow, no cast shadow, no contact shadow, no pool of shade under the feet, no backdrop, no scenery, no gradient, no vignette, no glow, no darkening at the edges. Do not use green anywhere in the costume, skin or hair; green is the background and will be removed. No text, no labels, no captions, no watermark, no logo, no border and no frame.
 ```
 
 

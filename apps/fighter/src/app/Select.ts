@@ -44,11 +44,12 @@ export interface Cursor {
   dy: number
   hold: number
   buttons: ButtonMask
-  /** CPU only: frames until the cursor hops again. */
+  /** CPU only: frames until the cursor hops again, and how many hops it has made since you locked. */
   hop: number
+  rolls: number
 }
 
-const newCursor = (cell: number): Cursor => ({ cell, locked: -1, choice: null, dx: 0, dy: 0, hold: 0, buttons: 0, hop: 0 })
+const newCursor = (cell: number): Cursor => ({ cell, locked: -1, choice: null, dx: 0, dy: 0, hold: 0, buttons: 0, hop: 0, rolls: 0 })
 
 export class Select {
   /** The roster, then one null: the random cell. */
@@ -100,6 +101,14 @@ export class Select {
   }
 
   private drive(c: Cursor, pad: PadFrame): void {
+    // Whatever was already held when the screen opened is not a press. Otherwise finishing a round
+    // on a punch and hitting select would lock that cursor before the grid had drawn a frame.
+    if (this.frame === 1) {
+      c.buttons = pad.buttons
+      c.dx = pad.x
+      c.dy = pad.y
+      return
+    }
     if (c.locked < 0) {
       // A direction fires on the frame it is pressed, then again on a repeat, so a held stick walks
       // the grid instead of flying across it.
@@ -125,8 +134,9 @@ export class Select {
     // Slow browsing before you commit, a fast slot-machine roll after.
     c.hop = decided ? 3 : 14
     c.cell = Math.floor(this.random() * this.cells.length) % this.cells.length
-    // Roughly twenty frames of rolling, then it stops on whatever it is showing.
-    if (decided && this.cursors[0].locked >= 0 && this.random() < 0.18) this.lock(c)
+    // Seven more hops once you have committed — a fifth of a second of slot machine — and then it
+    // stops on whatever it is showing. A counter and not a coin flip, so the screen always ends.
+    if (decided && ++c.rolls >= 7) this.lock(c)
   }
 
   private move(c: Cursor, dx: number, dy: number): void {

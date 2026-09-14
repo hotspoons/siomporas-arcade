@@ -76,6 +76,13 @@ export class Game {
 
   private readonly ctx: CanvasRenderingContext2D
   private readonly held = new Set<string>()
+  /**
+   * Keys pressed since the last tick, whether or not they are still down. A tap shorter than a
+   * sixtieth of a second falls between two samples of `held` and is simply lost — which nobody
+   * notices while walking and blocking, and which eats every button on a menu, where you press and
+   * let go. The board latched its inputs; so does this.
+   */
+  private readonly tapped = new Set<string>()
   private readonly loop: GameLoop
   private readonly resize: () => void
   private readonly onKeyDown: (e: KeyboardEvent) => void
@@ -105,11 +112,15 @@ export class Game {
         return
       }
       this.held.add(e.code)
+      this.tapped.add(e.code)
       // Arrows and space scroll the page otherwise, which is the whole window jumping mid-round.
       if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault()
     }
     this.onKeyUp = (e: KeyboardEvent): void => void this.held.delete(e.code)
-    this.onBlur = (): void => void this.held.clear()
+    this.onBlur = (): void => {
+      this.held.clear()
+      this.tapped.clear()
+    }
 
     window.addEventListener('keydown', this.onKeyDown)
     window.addEventListener('keyup', this.onKeyUp)
@@ -258,7 +269,13 @@ export class Game {
     this.options.hint = true
   }
 
+  /** One sim frame, and then the latched taps are spent. */
   private tick(): void {
+    this.step()
+    this.tapped.clear()
+  }
+
+  private step(): void {
     if (this.select) {
       const pick = this.select.step(this.readPad(P1, this.readGamepad()), this.opponent === 'human' ? this.readPad(P2, null) : null)
       if (!pick) return
@@ -286,11 +303,11 @@ export class Game {
   }
 
   private readPad(pad: Pad, gp: { x: number; y: number; buttons: ButtonMask } | null): { x: number; y: number; buttons: ButtonMask } {
-    const on = (codes: string[]): boolean => codes.some((c) => this.held.has(c))
+    const on = (codes: string[]): boolean => codes.some((c) => this.held.has(c) || this.tapped.has(c))
     let x = (on(pad.right) ? 1 : 0) - (on(pad.left) ? 1 : 0)
     let y = (on(pad.up) ? 1 : 0) - (on(pad.down) ? 1 : 0)
     let buttons = 0
-    for (const [code, mask] of pad.buttons) if (this.held.has(code)) buttons |= mask
+    for (const [code, mask] of pad.buttons) if (this.held.has(code) || this.tapped.has(code)) buttons |= mask
     if (gp) {
       if (gp.x !== 0) x = gp.x
       if (gp.y !== 0) y = gp.y

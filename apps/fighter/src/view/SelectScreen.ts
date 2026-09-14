@@ -56,7 +56,8 @@ function draw(ctx: CanvasRenderingContext2D, sel: Select): void {
     const x = (c.cell % COLUMNS) * CELL_W
     const y = top + Math.floor(c.cell / COLUMNS) * cellH
     const inset = both && i === 1 ? 3 : 0
-    cursor(ctx, x + inset, y + inset, CELL_W - inset * 2, cellH - inset * 2, i === 0 ? P1_INK : P2_INK, c.locked >= 0, sel.frame)
+    // Half a cycle apart, so the two of them are never both dark at once.
+    cursor(ctx, x + inset, y + inset, CELL_W - inset * 2, cellH - inset * 2, i === 0 ? P1_INK : P2_INK, c.locked >= 0, sel.frame + i * 12)
   })
 
   footer(ctx, sel)

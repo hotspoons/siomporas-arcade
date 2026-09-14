@@ -23,8 +23,9 @@ export const game: GameModule = {
     host.container.appendChild(style)
 
     // The shell owns the path; the query string is nobody's, so the game takes it. That makes a
-    // particular matchup a link — arcade.siomporas.com/crown?p1=kestrel&p2=zangief — which is the
-    // only way to pick a fighter until there is a select screen.
+    // particular matchup a link — arcade.siomporas.com/crown?p1=kestrel&p2=zangief — and the game
+    // writes the pair back into the URL as it changes, so you can always leave with the fight you
+    // are looking at. Arrive without one and you get the select screen, like any cabinet.
     const q = new URLSearchParams(location.search)
     const g = new Game(host.canvas, {
       p1: q.get('p1') ?? undefined,

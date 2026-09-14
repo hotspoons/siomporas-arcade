@@ -17,7 +17,11 @@ tuning happens. The arcade mounts the same game through `src/app/module.ts` at
 [arcade.siomporas.com/crown](https://arcade.siomporas.com/crown) — **unlisted**: it resolves as a
 URL and the lobby does not draw a cabinet for it. `UNLISTED` in `apps/arcade/src/catalog.ts` is
 that second list; moving the entry into `GAMES` is what puts it in the row, and that is the moment
-it needs a cabinet's worth of art and a character select screen.
+it needs a cabinet's worth of art.
+
+Arriving at `/crown` with nothing else opens the **select screen**. Arriving with a pair —
+`/crown?p1=kestrel&p2=zangief` — skips it and starts that fight, and the game writes the pair back
+into the address bar as it changes, so any matchup on screen is a link you can send to someone.
 
 The reference sprites and the stage are cut from Street Fighter II sheets by `scripts/sf2-rip.mjs`
 (row maps in `scripts/sf2-rip.manifest.json`) into `public/assets/crown/`. They are placeholders
@@ -50,9 +54,14 @@ Blanka — and one stage, Guile's airbase.
 | `F1` | **hitboxes and frame data** |
 | `F2` | training dummy |
 | `1` `2` `3` `4` | opponent: guard / easy / hard / second player |
+| `Enter` | character select |
 | `5` `6` `7` `8` | pick P1 from the first four of the roster |
 | `-` `=` · `9` `0` | walk P1 · P2 along the whole roster |
 | `R` `P` | reset, pause |
+
+On the select screen the movement keys walk the grid, any attack button locks your choice in, and
+the last cell is random. With one player the machine rolls its own pick once you have committed;
+press `4` first and the second cursor becomes the arrow keys and the numpad.
 
 A gamepad works: face buttons and the two right shoulders are the six buttons, the left shoulders
 are the three-punch and three-kick macros, d-pad or left stick moves.
@@ -123,7 +132,8 @@ count. A fighter with no atlas is drawn as boxes; nothing waits for art.
 | A CPU to play against | **done** — `src/sim/Cpu.ts`, reads its own character's specials |
 | Numbers from the ROM | in progress — `tools/sf2-probe` |
 | Super, EX, meter spending | designed, not built |
-| Character select screen, more stages | not built |
+| Character select screen | **done** — `src/app/Select.ts`, `src/view/SelectScreen.ts` |
+| More stages | not built |
 | 2.5D and 3D | designed, not built |
 | Tag | pencilled in, see the bottom of this file |
 

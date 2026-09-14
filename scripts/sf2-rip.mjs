@@ -1,6 +1,13 @@
 #!/usr/bin/env node
 // Rip Street Fighter II reference sheets (ext/reference-artwork, gitignored) into game-ready atlases.
 //
+// SUPERSEDED FOR CHARACTERS. Fighters now come out of the graphics ROM itself — see
+// scripts/rom-sprites.mjs, which gets every pose the game has, in the order the moves play them,
+// with anchors measured rather than guessed. This still cuts the things no ROM dump gives us as
+// neatly: the parallax stage layers and the hit sparks. The character row maps below are kept
+// because they are hand-authored and still work (`node scripts/sf2-rip.mjs zangief`), but a plain
+// run no longer touches them.
+//
 //   node scripts/sf2-rip.mjs                    # everything in the manifest
 //   node scripts/sf2-rip.mjs zangief ryu        # just those ids (chars, stages or fx)
 //   node scripts/sf2-rip.mjs zangief --debug    # also write a row-numbered overview to shots/rip-rows-<id>-N.png
@@ -607,10 +614,11 @@ async function ripFx(id, spec) {
 // ---------------------------------------------------------------------------------------------
 
 const jobs = []
-for (const [id, spec] of Object.entries(MANIFEST.chars || {})) jobs.push({ id, kind: 'char', spec })
+// Characters are not in the default set on purpose: scripts/rom-sprites.mjs owns those files now.
+for (const [id, spec] of Object.entries(MANIFEST.chars || {})) jobs.push({ id, kind: 'char', spec, optIn: true })
 for (const [id, spec] of Object.entries(MANIFEST.stages || {})) jobs.push({ id, kind: 'stage', spec })
 for (const [id, spec] of Object.entries(MANIFEST.fx || {})) jobs.push({ id, kind: 'fx', spec })
-const run = wanted.length ? jobs.filter((j) => wanted.includes(j.id)) : jobs
+const run = wanted.length ? jobs.filter((j) => wanted.includes(j.id)) : jobs.filter((j) => !j.optIn)
 if (!run.length) { console.error(`nothing matched ${wanted.join(' ')}; ids: ${jobs.map((j) => j.id).join(' ')}`); process.exit(1) }
 for (const j of run) {
   if (j.kind === 'char') await ripCharacter(j.id, j.spec)

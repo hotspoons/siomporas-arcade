@@ -22,6 +22,18 @@
 // bottom of a long prompt has not been weakly applied, it has not been applied at all — which for a
 // while looked exactly like a model that ignores instructions.
 //
+// THE CEILING IS RAISED ON THE CLUSTER AND IT DID NOT HELP MUCH. 512 is a pipeline default, not a
+// limit of the Mistral encoder, and not something the HTTP API can set — the per-request field
+// exists but `extra_params` only reaches it via plain vLLM SamplingParams, which the OpenAI server
+// never constructs. The deployment now patches the default to 2048 at container start, and the
+// probe confirms it: an instruction at char 3000 changes the picture where it used to be ignored.
+//
+// Write short prompts anyway. With the full ~3700-character bible prompt finally arriving, the
+// character came out RIGHT where truncation had got her wrong — but the sheet layout fell apart,
+// the three head boxes filled with torsos and the palette came back empty. More text arriving is
+// not more instruction followed; past about two thousand characters this model starts trading one
+// rule for another. Treat 2048 as headroom against silent loss, not as a budget to spend.
+//
 // TWO IMAGES, AND WHY IT ONCE LOOKED LIKE ONE. Attach the bible AND the layout template, both as
 // `image`. If the server answers "Only a single image is supported by this model", that is not the
 // model: it is an admission gate in vllm-omni's API server reading a capability registry that has

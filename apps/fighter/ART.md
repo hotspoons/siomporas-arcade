@@ -93,7 +93,14 @@ Nothing reports this. No error, no warning, no field in the response. A rule pas
 been weakly applied — it was never read, and that is indistinguishable from a model that ignores
 instructions until you test for it.
 
-**So the first ~1800 characters are the whole prompt**, and the order of one is a budget rather than
+The ceiling has since been raised to 2048 tokens on the cluster — it is a pipeline default rather
+than an encoder limit, and the HTTP API cannot set it, so the deployment patches it at startup. That
+removes the *silent* loss, and it is worth having for that alone. It did not make the art better:
+with the whole bible prompt arriving, the character finally came out right, and the sheet layout
+fell apart instead — heads boxes full of torsos, an empty palette. Past roughly two thousand
+characters this model trades one rule for another.
+
+**So write to the first ~1800 characters regardless**, and the order of one is a budget rather than
 a matter of taste. Two consequences worth stating plainly, because both were mis-diagnosed here
 first:
 

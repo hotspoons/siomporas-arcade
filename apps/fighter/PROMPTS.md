@@ -86,7 +86,7 @@ node scripts/pack-frames.mjs ext/art/kestrel kestrel --height 90 --contact
 **Cut with:** `node scripts/fighter-sheet.mjs ext/kestrel-bible.png kestrel reference`
 
 ```text
-Attached is a blank layout template: a dark grey field with eight lighter grey boxes on it, each labelled, and a faint horizontal floor line across the large box on the left.
+Attached is a blank layout template: a dark green field with eight bright chroma-key green boxes on it, each labelled, and a faint horizontal floor line across the large box on the left.
 
 Fill in every box with finished character art of a single original fighting-game character, described below. Keep each piece of artwork strictly inside its own box, and keep every box exactly where and what size it is. The labels can go.
 
@@ -111,11 +111,11 @@ The background inside every box is a CHROMA-KEY GREEN SCREEN and must stay one s
 **Cut with:** `node scripts/fighter-sheet.mjs ext/kestrel-idle.png kestrel cycle --untrimmed idle`
 
 ```text
-Attached are two images.
+Attached is a blank layout template: a dark green field with 6 bright chroma-key green boxes, each with a faint horizontal floor line near its bottom. The boxes carry no labels and no numbers, and none should be drawn.
 
-IMAGE 1 is the finished reference sheet for a character. Match that character exactly — the same face, build, proportions, costume, colours and gear, in every single box. Study it before you start.
+THE CHARACTER: A tall, lean Black British woman in her late twenties, shaved head, long limbs, a loose dark teal sleeveless vest and cropped rust-orange trousers, barefoot. Her right forearm is wrapped wrist to elbow in thick rust-orange rope and cloth so it reads as a club, twice the thickness of her bare left arm, which wears brass rings. Confident, relaxed, economical.
 
-IMAGE 2 is a blank layout template: a dark green field with 6 bright chroma-key green boxes, each with a faint horizontal floor line near its bottom. The boxes carry no labels and no numbers, and none should be drawn.
+Draw that character, and only that character, from the description above. If a second reference image of them is supplied, match its face, build, costume and colours exactly; if none is, the description is the whole brief and every box must agree with it and with every other box.
 
 Fill each of the 6 boxes with one frame of a SINGLE IDLE ANIMATION of that character — a FIGHTING STANCE, breathing. Knees bent, weight low and shifting gently from foot to foot, both fists raised to chest height with the elbows tucked in, side-on and ready. Braced to fight, NOT standing at rest and NOT walking. Frame 1 through frame 6 in reading order, and frame 6 must lead back into frame 1 so the loop is seamless.
 
@@ -146,11 +146,11 @@ be removed. No text, labels, captions, watermarks, logos, borders or frames. NO 
 **Cut with:** `node scripts/fighter-sheet.mjs ext/kestrel-walk-fwd.png kestrel cycle --untrimmed walk-fwd`
 
 ```text
-Attached are two images.
+Attached is a blank layout template: a dark green field with 6 bright chroma-key green boxes, each with a faint horizontal floor line near its bottom. The boxes carry no labels and no numbers, and none should be drawn.
 
-IMAGE 1 is the finished reference sheet for a character. Match that character exactly — the same face, build, proportions, costume, colours and gear, in every single box. Study it before you start.
+THE CHARACTER: A tall, lean Black British woman in her late twenties, shaved head, long limbs, a loose dark teal sleeveless vest and cropped rust-orange trousers, barefoot. Her right forearm is wrapped wrist to elbow in thick rust-orange rope and cloth so it reads as a club, twice the thickness of her bare left arm, which wears brass rings. Confident, relaxed, economical.
 
-IMAGE 2 is a blank layout template: a dark green field with 6 bright chroma-key green boxes, each with a faint horizontal floor line near its bottom. The boxes carry no labels and no numbers, and none should be drawn.
+Draw that character, and only that character, from the description above. If a second reference image of them is supplied, match its face, build, costume and colours exactly; if none is, the description is the whole brief and every box must agree with it and with every other box.
 
 Fill each of the 6 boxes with one frame of a SINGLE WALK-FWD ANIMATION of that character — WALKING FORWARD, advancing on the opponent, guard still up. A full stride cycle: the legs pass through the whole step and return to where they began. Frame 1 through frame 6 in reading order, and frame 6 must lead back into frame 1 so the loop is seamless.
 
@@ -181,11 +181,11 @@ be removed. No text, labels, captions, watermarks, logos, borders or frames. NO 
 **Cut with:** `node scripts/fighter-sheet.mjs ext/kestrel-walk-back.png kestrel cycle --untrimmed walk-back`
 
 ```text
-Attached are two images.
+Attached is a blank layout template: a dark green field with 6 bright chroma-key green boxes, each with a faint horizontal floor line near its bottom. The boxes carry no labels and no numbers, and none should be drawn.
 
-IMAGE 1 is the finished reference sheet for a character. Match that character exactly — the same face, build, proportions, costume, colours and gear, in every single box. Study it before you start.
+THE CHARACTER: A tall, lean Black British woman in her late twenties, shaved head, long limbs, a loose dark teal sleeveless vest and cropped rust-orange trousers, barefoot. Her right forearm is wrapped wrist to elbow in thick rust-orange rope and cloth so it reads as a club, twice the thickness of her bare left arm, which wears brass rings. Confident, relaxed, economical.
 
-IMAGE 2 is a blank layout template: a dark green field with 6 bright chroma-key green boxes, each with a faint horizontal floor line near its bottom. The boxes carry no labels and no numbers, and none should be drawn.
+Draw that character, and only that character, from the description above. If a second reference image of them is supplied, match its face, build, costume and colours exactly; if none is, the description is the whole brief and every box must agree with it and with every other box.
 
 Fill each of the 6 boxes with one frame of a SINGLE WALK-BACK ANIMATION of that character — WALKING BACKWARD, retreating, still facing right and still guarding. A full stride cycle that returns to where it began. Frame 1 through frame 6 in reading order, and frame 6 must lead back into frame 1 so the loop is seamless.
 
@@ -216,11 +216,11 @@ be removed. No text, labels, captions, watermarks, logos, borders or frames. NO 
 **Cut with:** `node scripts/fighter-sheet.mjs ext/kestrel-stand-hp.png kestrel cycle --untrimmed stand-hp`
 
 ```text
-Attached are two images.
+Attached is a blank layout template: a dark green field with 6 bright chroma-key green boxes, each with a faint horizontal floor line near its bottom. The boxes carry no labels and no numbers, and none should be drawn.
 
-IMAGE 1 is the finished reference sheet for a character. Match that character exactly — the same face, build, proportions, costume, colours and gear, in every single box. Study it before you start.
+THE CHARACTER: A tall, lean Black British woman in her late twenties, shaved head, long limbs, a loose dark teal sleeveless vest and cropped rust-orange trousers, barefoot. Her right forearm is wrapped wrist to elbow in thick rust-orange rope and cloth so it reads as a club, twice the thickness of her bare left arm, which wears brass rings. Confident, relaxed, economical.
 
-IMAGE 2 is a blank layout template: a dark green field with 6 bright chroma-key green boxes, each with a faint horizontal floor line near its bottom. The boxes carry no labels and no numbers, and none should be drawn.
+Draw that character, and only that character, from the description above. If a second reference image of them is supplied, match its face, build, costume and colours exactly; if none is, the description is the whole brief and every box must agree with it and with every other box.
 
 Fill each of the 6 boxes with one frame of a SINGLE STAND-HP ANIMATION of that character — a HEAVY PUNCH, thrown and recovered: guard, the shoulder and hips winding through it, the arm locked fully out at the peak, then back to guard. The peak reaches further than anything else this character does with the hands. Frame 1 through frame 6 in reading order, and frame 6 must lead back into frame 1 so the loop is seamless.
 
@@ -251,11 +251,11 @@ be removed. No text, labels, captions, watermarks, logos, borders or frames. NO 
 **Cut with:** `node scripts/fighter-sheet.mjs ext/kestrel-stand-hk.png kestrel cycle --untrimmed stand-hk`
 
 ```text
-Attached are two images.
+Attached is a blank layout template: a dark green field with 6 bright chroma-key green boxes, each with a faint horizontal floor line near its bottom. The boxes carry no labels and no numbers, and none should be drawn.
 
-IMAGE 1 is the finished reference sheet for a character. Match that character exactly — the same face, build, proportions, costume, colours and gear, in every single box. Study it before you start.
+THE CHARACTER: A tall, lean Black British woman in her late twenties, shaved head, long limbs, a loose dark teal sleeveless vest and cropped rust-orange trousers, barefoot. Her right forearm is wrapped wrist to elbow in thick rust-orange rope and cloth so it reads as a club, twice the thickness of her bare left arm, which wears brass rings. Confident, relaxed, economical.
 
-IMAGE 2 is a blank layout template: a dark green field with 6 bright chroma-key green boxes, each with a faint horizontal floor line near its bottom. The boxes carry no labels and no numbers, and none should be drawn.
+Draw that character, and only that character, from the description above. If a second reference image of them is supplied, match its face, build, costume and colours exactly; if none is, the description is the whole brief and every box must agree with it and with every other box.
 
 Fill each of the 6 boxes with one frame of a SINGLE STAND-HK ANIMATION of that character — a HEAVY ROUNDHOUSE KICK, thrown and recovered: guard, the knee lifting, the leg swung high and fully extended at the peak with the hips open, then back to guard. Frame 1 through frame 6 in reading order, and frame 6 must lead back into frame 1 so the loop is seamless.
 
@@ -286,11 +286,11 @@ be removed. No text, labels, captions, watermarks, logos, borders or frames. NO 
 **Cut with:** `node scripts/fighter-sheet.mjs ext/kestrel-crouch-hk.png kestrel cycle --untrimmed crouch-hk`
 
 ```text
-Attached are two images.
+Attached is a blank layout template: a dark green field with 6 bright chroma-key green boxes, each with a faint horizontal floor line near its bottom. The boxes carry no labels and no numbers, and none should be drawn.
 
-IMAGE 1 is the finished reference sheet for a character. Match that character exactly — the same face, build, proportions, costume, colours and gear, in every single box. Study it before you start.
+THE CHARACTER: A tall, lean Black British woman in her late twenties, shaved head, long limbs, a loose dark teal sleeveless vest and cropped rust-orange trousers, barefoot. Her right forearm is wrapped wrist to elbow in thick rust-orange rope and cloth so it reads as a club, twice the thickness of her bare left arm, which wears brass rings. Confident, relaxed, economical.
 
-IMAGE 2 is a blank layout template: a dark green field with 6 bright chroma-key green boxes, each with a faint horizontal floor line near its bottom. The boxes carry no labels and no numbers, and none should be drawn.
+Draw that character, and only that character, from the description above. If a second reference image of them is supplied, match its face, build, costume and colours exactly; if none is, the description is the whole brief and every box must agree with it and with every other box.
 
 Fill each of the 6 boxes with one frame of a SINGLE CROUCH-HK ANIMATION of that character — a SWEEP: dropping from the stance down onto one hand with the other leg swept flat along the floor, fully extended at the peak, then gathering back up. The widest and lowest thing this character does — the whole body stays low. Frame 1 through frame 6 in reading order, and frame 6 must lead back into frame 1 so the loop is seamless.
 
@@ -321,11 +321,11 @@ be removed. No text, labels, captions, watermarks, logos, borders or frames. NO 
 **Cut with:** `node scripts/fighter-sheet.mjs ext/kestrel-hit-high.png kestrel cycle-4 --untrimmed hit-high`
 
 ```text
-Attached are two images.
+Attached is a blank layout template: a dark green field with 4 bright chroma-key green boxes, each with a faint horizontal floor line near its bottom. The boxes carry no labels and no numbers, and none should be drawn.
 
-IMAGE 1 is the finished reference sheet for a character. Match that character exactly — the same face, build, proportions, costume, colours and gear, in every single box. Study it before you start.
+THE CHARACTER: A tall, lean Black British woman in her late twenties, shaved head, long limbs, a loose dark teal sleeveless vest and cropped rust-orange trousers, barefoot. Her right forearm is wrapped wrist to elbow in thick rust-orange rope and cloth so it reads as a club, twice the thickness of her bare left arm, which wears brass rings. Confident, relaxed, economical.
 
-IMAGE 2 is a blank layout template: a dark green field with 4 bright chroma-key green boxes, each with a faint horizontal floor line near its bottom. The boxes carry no labels and no numbers, and none should be drawn.
+Draw that character, and only that character, from the description above. If a second reference image of them is supplied, match its face, build, costume and colours exactly; if none is, the description is the whole brief and every box must agree with it and with every other box.
 
 Fill each of the 4 boxes with one frame of a SINGLE HIT-HIGH ANIMATION of that character — BEING HIT in the head: the head snapping back, the body recoiling, arms loose, feet still on the floor, then beginning to recover. Struck, not attacking. Frame 1 through frame 4 in reading order, and frame 4 must lead back into frame 1 so the loop is seamless.
 
@@ -356,11 +356,11 @@ be removed. No text, labels, captions, watermarks, logos, borders or frames. NO 
 **Cut with:** `node scripts/fighter-sheet.mjs ext/kestrel-knockdown.png kestrel cycle --untrimmed knockdown`
 
 ```text
-Attached are two images.
+Attached is a blank layout template: a dark green field with 6 bright chroma-key green boxes, each with a faint horizontal floor line near its bottom. The boxes carry no labels and no numbers, and none should be drawn.
 
-IMAGE 1 is the finished reference sheet for a character. Match that character exactly — the same face, build, proportions, costume, colours and gear, in every single box. Study it before you start.
+THE CHARACTER: A tall, lean Black British woman in her late twenties, shaved head, long limbs, a loose dark teal sleeveless vest and cropped rust-orange trousers, barefoot. Her right forearm is wrapped wrist to elbow in thick rust-orange rope and cloth so it reads as a club, twice the thickness of her bare left arm, which wears brass rings. Confident, relaxed, economical.
 
-IMAGE 2 is a blank layout template: a dark green field with 6 bright chroma-key green boxes, each with a faint horizontal floor line near its bottom. The boxes carry no labels and no numbers, and none should be drawn.
+Draw that character, and only that character, from the description above. If a second reference image of them is supplied, match its face, build, costume and colours exactly; if none is, the description is the whole brief and every box must agree with it and with every other box.
 
 Fill each of the 6 boxes with one frame of a SINGLE KNOCKDOWN ANIMATION of that character — BEING KNOCKED DOWN: lifted off the feet, turning through the air, landing flat on the back on the ground, limbs slack. The last frames are lying down, drawn along the floor line seen from the side. Frame 1 through frame 6 in reading order.
 
@@ -391,11 +391,11 @@ be removed. No text, labels, captions, watermarks, logos, borders or frames. NO 
 **Cut with:** `node scripts/fighter-sheet.mjs ext/kestrel-win.png kestrel cycle --untrimmed win`
 
 ```text
-Attached are two images.
+Attached is a blank layout template: a dark green field with 6 bright chroma-key green boxes, each with a faint horizontal floor line near its bottom. The boxes carry no labels and no numbers, and none should be drawn.
 
-IMAGE 1 is the finished reference sheet for a character. Match that character exactly — the same face, build, proportions, costume, colours and gear, in every single box. Study it before you start.
+THE CHARACTER: A tall, lean Black British woman in her late twenties, shaved head, long limbs, a loose dark teal sleeveless vest and cropped rust-orange trousers, barefoot. Her right forearm is wrapped wrist to elbow in thick rust-orange rope and cloth so it reads as a club, twice the thickness of her bare left arm, which wears brass rings. Confident, relaxed, economical.
 
-IMAGE 2 is a blank layout template: a dark green field with 6 bright chroma-key green boxes, each with a faint horizontal floor line near its bottom. The boxes carry no labels and no numbers, and none should be drawn.
+Draw that character, and only that character, from the description above. If a second reference image of them is supplied, match its face, build, costume and colours exactly; if none is, the description is the whole brief and every box must agree with it and with every other box.
 
 Fill each of the 6 boxes with one frame of a SINGLE WIN ANIMATION of that character — a VICTORY animation: coming out of the stance into their own gesture of triumph, in character, and holding it. Frame 1 through frame 6 in reading order.
 
@@ -433,7 +433,7 @@ Two prompts per character — the bible, then one sheet of twenty poses that is 
 **Cut with:** `node scripts/fighter-sheet.mjs ext/kestrel-bible.png kestrel reference`
 
 ```text
-Attached is a blank layout template: a dark grey field with eight lighter grey boxes on it, each labelled, and a faint horizontal floor line across the large box on the left.
+Attached is a blank layout template: a dark green field with eight bright chroma-key green boxes on it, each labelled, and a faint horizontal floor line across the large box on the left.
 
 Fill in every box with finished character art of a single original fighting-game character, described below. Keep each piece of artwork strictly inside its own box, and keep every box exactly where and what size it is. The labels can go.
 
@@ -514,7 +514,7 @@ be removed. No text, labels, captions, watermarks, logos, borders or frames.
 **Cut with:** `node scripts/fighter-sheet.mjs ext/bollard-bible.png bollard reference`
 
 ```text
-Attached is a blank layout template: a dark grey field with eight lighter grey boxes on it, each labelled, and a faint horizontal floor line across the large box on the left.
+Attached is a blank layout template: a dark green field with eight bright chroma-key green boxes on it, each labelled, and a faint horizontal floor line across the large box on the left.
 
 Fill in every box with finished character art of a single original fighting-game character, described below. Keep each piece of artwork strictly inside its own box, and keep every box exactly where and what size it is. The labels can go.
 
@@ -595,7 +595,7 @@ be removed. No text, labels, captions, watermarks, logos, borders or frames.
 **Cut with:** `node scripts/fighter-sheet.mjs ext/sable-bible.png sable reference`
 
 ```text
-Attached is a blank layout template: a dark grey field with eight lighter grey boxes on it, each labelled, and a faint horizontal floor line across the large box on the left.
+Attached is a blank layout template: a dark green field with eight bright chroma-key green boxes on it, each labelled, and a faint horizontal floor line across the large box on the left.
 
 Fill in every box with finished character art of a single original fighting-game character, described below. Keep each piece of artwork strictly inside its own box, and keep every box exactly where and what size it is. The labels can go.
 
@@ -676,7 +676,7 @@ be removed. No text, labels, captions, watermarks, logos, borders or frames.
 **Cut with:** `node scripts/fighter-sheet.mjs ext/kombinat-bible.png kombinat reference`
 
 ```text
-Attached is a blank layout template: a dark grey field with eight lighter grey boxes on it, each labelled, and a faint horizontal floor line across the large box on the left.
+Attached is a blank layout template: a dark green field with eight bright chroma-key green boxes on it, each labelled, and a faint horizontal floor line across the large box on the left.
 
 Fill in every box with finished character art of a single original fighting-game character, described below. Keep each piece of artwork strictly inside its own box, and keep every box exactly where and what size it is. The labels can go.
 
@@ -757,7 +757,7 @@ be removed. No text, labels, captions, watermarks, logos, borders or frames.
 **Cut with:** `node scripts/fighter-sheet.mjs ext/fathom-bible.png fathom reference`
 
 ```text
-Attached is a blank layout template: a dark grey field with eight lighter grey boxes on it, each labelled, and a faint horizontal floor line across the large box on the left.
+Attached is a blank layout template: a dark green field with eight bright chroma-key green boxes on it, each labelled, and a faint horizontal floor line across the large box on the left.
 
 Fill in every box with finished character art of a single original fighting-game character, described below. Keep each piece of artwork strictly inside its own box, and keep every box exactly where and what size it is. The labels can go.
 
@@ -838,7 +838,7 @@ be removed. No text, labels, captions, watermarks, logos, borders or frames.
 **Cut with:** `node scripts/fighter-sheet.mjs ext/candela-bible.png candela reference`
 
 ```text
-Attached is a blank layout template: a dark grey field with eight lighter grey boxes on it, each labelled, and a faint horizontal floor line across the large box on the left.
+Attached is a blank layout template: a dark green field with eight bright chroma-key green boxes on it, each labelled, and a faint horizontal floor line across the large box on the left.
 
 Fill in every box with finished character art of a single original fighting-game character, described below. Keep each piece of artwork strictly inside its own box, and keep every box exactly where and what size it is. The labels can go.
 
@@ -919,7 +919,7 @@ be removed. No text, labels, captions, watermarks, logos, borders or frames.
 **Cut with:** `node scripts/fighter-sheet.mjs ext/meridian-bible.png meridian reference`
 
 ```text
-Attached is a blank layout template: a dark grey field with eight lighter grey boxes on it, each labelled, and a faint horizontal floor line across the large box on the left.
+Attached is a blank layout template: a dark green field with eight bright chroma-key green boxes on it, each labelled, and a faint horizontal floor line across the large box on the left.
 
 Fill in every box with finished character art of a single original fighting-game character, described below. Keep each piece of artwork strictly inside its own box, and keep every box exactly where and what size it is. The labels can go.
 
@@ -1000,7 +1000,7 @@ be removed. No text, labels, captions, watermarks, logos, borders or frames.
 **Cut with:** `node scripts/fighter-sheet.mjs ext/thresher-bible.png thresher reference`
 
 ```text
-Attached is a blank layout template: a dark grey field with eight lighter grey boxes on it, each labelled, and a faint horizontal floor line across the large box on the left.
+Attached is a blank layout template: a dark green field with eight bright chroma-key green boxes on it, each labelled, and a faint horizontal floor line across the large box on the left.
 
 Fill in every box with finished character art of a single original fighting-game character, described below. Keep each piece of artwork strictly inside its own box, and keep every box exactly where and what size it is. The labels can go.
 
@@ -1081,7 +1081,7 @@ be removed. No text, labels, captions, watermarks, logos, borders or frames.
 **Cut with:** `node scripts/fighter-sheet.mjs ext/ossuary-bible.png ossuary reference`
 
 ```text
-Attached is a blank layout template: a dark grey field with eight lighter grey boxes on it, each labelled, and a faint horizontal floor line across the large box on the left.
+Attached is a blank layout template: a dark green field with eight bright chroma-key green boxes on it, each labelled, and a faint horizontal floor line across the large box on the left.
 
 Fill in every box with finished character art of a single original fighting-game character, described below. Keep each piece of artwork strictly inside its own box, and keep every box exactly where and what size it is. The labels can go.
 
@@ -1162,7 +1162,7 @@ be removed. No text, labels, captions, watermarks, logos, borders or frames.
 **Cut with:** `node scripts/fighter-sheet.mjs ext/vessel-bible.png vessel reference`
 
 ```text
-Attached is a blank layout template: a dark grey field with eight lighter grey boxes on it, each labelled, and a faint horizontal floor line across the large box on the left.
+Attached is a blank layout template: a dark green field with eight bright chroma-key green boxes on it, each labelled, and a faint horizontal floor line across the large box on the left.
 
 Fill in every box with finished character art of a single original fighting-game character, described below. Keep each piece of artwork strictly inside its own box, and keep every box exactly where and what size it is. The labels can go.
 
@@ -1243,7 +1243,7 @@ be removed. No text, labels, captions, watermarks, logos, borders or frames.
 **Cut with:** `node scripts/fighter-sheet.mjs ext/glassjaw-bible.png glassjaw reference`
 
 ```text
-Attached is a blank layout template: a dark grey field with eight lighter grey boxes on it, each labelled, and a faint horizontal floor line across the large box on the left.
+Attached is a blank layout template: a dark green field with eight bright chroma-key green boxes on it, each labelled, and a faint horizontal floor line across the large box on the left.
 
 Fill in every box with finished character art of a single original fighting-game character, described below. Keep each piece of artwork strictly inside its own box, and keep every box exactly where and what size it is. The labels can go.
 
@@ -1324,7 +1324,7 @@ be removed. No text, labels, captions, watermarks, logos, borders or frames.
 **Cut with:** `node scripts/fighter-sheet.mjs ext/arclight-bible.png arclight reference`
 
 ```text
-Attached is a blank layout template: a dark grey field with eight lighter grey boxes on it, each labelled, and a faint horizontal floor line across the large box on the left.
+Attached is a blank layout template: a dark green field with eight bright chroma-key green boxes on it, each labelled, and a faint horizontal floor line across the large box on the left.
 
 Fill in every box with finished character art of a single original fighting-game character, described below. Keep each piece of artwork strictly inside its own box, and keep every box exactly where and what size it is. The labels can go.
 

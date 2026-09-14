@@ -342,7 +342,7 @@ const STAGES = [
 ]
 
 function bible(c) {
-  return `Attached is a blank layout template: a dark grey field with eight lighter grey boxes on it, each labelled, and a faint horizontal floor line across the large box on the left.
+  return `Attached is a blank layout template: a dark green field with eight bright chroma-key green boxes on it, each labelled, and a faint horizontal floor line across the large box on the left.
 
 Fill in every box with finished character art of a single original fighting-game character, described below. Keep each piece of artwork strictly inside its own box, and keep every box exactly where and what size it is. The labels can go.
 
@@ -526,11 +526,11 @@ const ANIMS = [
  * rather than trusting the line to be obeyed.
  */
 function cycleSheet(c, anim, frames) {
-  return `Attached are two images.
+  return `Attached is a blank layout template: a dark green field with ${frames} bright chroma-key green boxes, each with a faint horizontal floor line near its bottom. The boxes carry no labels and no numbers, and none should be drawn.
 
-IMAGE 1 is the finished reference sheet for a character. Match that character exactly — the same face, build, proportions, costume, colours and gear, in every single box. Study it before you start.
+THE CHARACTER: ${c.seed}
 
-IMAGE 2 is a blank layout template: a dark green field with ${frames} bright chroma-key green boxes, each with a faint horizontal floor line near its bottom. The boxes carry no labels and no numbers, and none should be drawn.
+Draw that character, and only that character, from the description above. If a second reference image of them is supplied, match its face, build, costume and colours exactly; if none is, the description is the whole brief and every box must agree with it and with every other box.
 
 Fill each of the ${frames} boxes with one frame of a SINGLE ${anim.id.toUpperCase()} ANIMATION of that character — ${anim.what} Frame 1 through frame ${frames} in reading order${anim.id === 'knockdown' || anim.id === 'win' ? '.' : ', and frame ' + frames + ' must lead back into frame 1 so the loop is seamless.'}
 

@@ -52,18 +52,36 @@ described character, not eight cameras around one object, so they will not be pe
 a fold of cloth moves, the rope wraps differently, and in these the vest gained a panel it does not
 have on the sprites.
 
-**And the ring is not really eight angles.** Checked after generating: the model collapsed most of
-the 45-degree intermediates toward a front view. What you actually have is roughly four distinct
-cameras — front, left profile, back, right profile — with the in-between files being near-duplicates
-of the front. Do not assume `a-01` is 45 degrees from `a-00`; look before you fit. Getting true
-intermediates likely needs either a 3D-aware generator or a posed reference per angle, and I have
-not solved it.
+**And the ring is not really eight angles — it is three cameras, and one flank of her does not
+exist.** My first pass at this said "roughly four distinct cameras", which was wrong; the
+photogrammetry agent audited it and the correction is theirs. Measured by head-band width (rows
+60-200, which excludes the arms, since a head in profile is about 60% the width of one facing you):
+
+| A-pose | head-band | what it is |
+|---|---|---|
+| `a-00` `a-01` `a-03` `a-05` `a-07` | 264-266 px | **all five are the front.** One camera, sampled five times |
+| `a-02` `a-06` | 158, 155 px | profile — and *the same* profile |
+| `a-04` | 125 px | back |
+
+`a-02` and `a-06` are supposed to be opposite flanks. They are not: mirroring one should bring them
+together and instead it doubles the error (RMSE 0.049 direct against 0.111 mirrored), so `a-06` is
+the same side rendered twice, facing the same way. **Kestrel's other flank has never been drawn.**
+
+The T set is thinner again. By hip band (rows 600-750, excluding the outstretched arms): five views
+at 273-274 px, `t-02` at 256 and `t-06` at 200 which is a three-quarter at most, `t-04` at 191 for
+the back. **Front and back and no side at all.**
+
+So the earlier claim here that "the T-poses are the more useful set for rigging" needs qualifying:
+their limbs are unambiguous, which is real and does matter, but they carry **no depth information**.
+The A set is the one with a flank in it.
+
+The mechanism matters for anyone generating the next ring: these are honest re-generations of the
+same camera rather than mirrored or misapplied angles, which means **the angle words in the prompt
+are being ignored**, not misunderstood. Eight files fed to a multiview model as eight views would
+tell it the character is front-facing from five directions, and it would believe it.
 
 `README.md` already warns that eight nearly-consistent views often reconstruct worse than one clean
 one, and that warning was written before these existed. **Try the single A-pose front view first.**
-If the ring helps, good; if it produces a smeared mesh, that is the expected failure and not your
-bug. The T-poses are the more useful set for rigging: they are consistent with each other and the
-limbs are unambiguous.
 
 Ask me for more angles, a different pose, or a cleaner single view — a view is about 35 seconds.
 
@@ -116,6 +134,10 @@ scripts and the model is up.
 - **Do not trust a contact sheet.** Every cell is the same size and every figure fills it, so a pose
   drawn at twice the scale looks correct there. `node scripts/fighter-contact.mjs kestrel` places
   the packed frames on a common floor by their anchors, which is the view that shows the truth.
+- **The A-pose arms are flat against her thighs**, with no daylight between wrist and hip. That is
+  the wrist-welded-to-hip case `README.md` warns about, and an image-to-3D model will fuse them. The
+  pose needs arms 35-45 degrees out with visible air under them; it is the first thing to fix about
+  the ring and it is independent of the angle problem.
 - **`win[2]` is a known bad frame** — a torso close-up at roughly double scale. It will be
   regenerated. Do not fit to it.
 

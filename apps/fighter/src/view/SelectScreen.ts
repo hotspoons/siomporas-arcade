@@ -15,8 +15,12 @@ const DIM = 'rgba(244,240,228,0.5)'
 const P1_INK = '#e05a4f'
 const P2_INK = '#5aa9e0'
 
-const HEAD_H = 24
-const FOOT_H = 40
+// The portraits are 96 square, so the grid is built around showing one whole: four columns of 96
+// across a 384 screen, and two rows of 96 once the title and the footer have taken 32 between them.
+// A longer roster needs three rows, which no longer fits, and the cell scales the portrait down —
+// but at the size the roster actually is, every mugshot is drawn at 1:1.
+const HEAD_H = 12
+const FOOT_H = 20
 const CELL_W = Math.floor(VIEW_W / COLUMNS)
 const NAME_H = 9
 
@@ -33,15 +37,15 @@ function draw(ctx: CanvasRenderingContext2D, sel: Select): void {
   ctx.fillRect(0, 0, VIEW_W, VIEW_H)
 
   const rows = sel.rows
-  const cellH = Math.min(78, Math.floor((VIEW_H - HEAD_H - FOOT_H) / rows))
+  const cellH = Math.min(CELL_W, Math.floor((VIEW_H - HEAD_H - FOOT_H) / rows))
   const gridH = rows * cellH
   const top = HEAD_H + Math.floor((VIEW_H - HEAD_H - FOOT_H - gridH) / 2)
 
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
-  font(ctx, 9)
+  font(ctx, 7)
   ctx.fillStyle = INK
-  ctx.fillText('SELECT YOUR FIGHTER', VIEW_W / 2, 12)
+  ctx.fillText('SELECT YOUR FIGHTER', VIEW_W / 2, 6)
 
   for (let i = 0; i < sel.cells.length; i++) {
     const x = (i % COLUMNS) * CELL_W
@@ -73,12 +77,18 @@ function cell(ctx: CanvasRenderingContext2D, id: string | null, x: number, y: nu
 
   ctx.save()
   ctx.beginPath()
-  ctx.rect(x + 1, y + 1, w - 2, h - NAME_H - 1)
+  ctx.rect(x + 1, y + 1, w - 2, h - 2)
   ctx.clip()
-  const boxH = h - NAME_H - 2
+  const boxH = h - 2
   if (art?.portrait) {
+    // The whole mugshot, not the top of it: the thing that makes a character recognisable at this
+    // size is often below the chin — a raised fist, a colour on the shoulder — and cropping it away
+    // would mean the artist is designing for a frame we do not actually show.
     const img = art.portrait
-    ctx.drawImage(img, Math.round(x + (w - img.naturalWidth) / 2), y + 1, img.naturalWidth, img.naturalHeight)
+    const s2 = Math.min(1, (w - 2) / img.naturalWidth, boxH / img.naturalHeight)
+    const iw = Math.round(img.naturalWidth * s2)
+    const ih = Math.round(img.naturalHeight * s2)
+    ctx.drawImage(img, Math.round(x + (w - iw) / 2), y + 1 + Math.max(0, boxH - ih), iw, ih)
   } else if (art) {
     // No mugshot: stand the character in the panel, head at the top, feet cropped by the clip.
     const idle = art.anims.idle
@@ -94,7 +104,7 @@ function cell(ctx: CanvasRenderingContext2D, id: string | null, x: number, y: nu
   }
   ctx.restore()
 
-  ctx.fillStyle = 'rgba(0,0,0,0.75)'
+  ctx.fillStyle = 'rgba(0,0,0,0.72)'
   ctx.fillRect(x + 1, y + h - NAME_H - 1, w - 2, NAME_H)
   font(ctx, 6)
   ctx.fillStyle = ch ? INK : '#ffd166'
@@ -126,35 +136,30 @@ function cursor(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, 
 }
 
 function footer(ctx: CanvasRenderingContext2D, sel: Select): void {
-  const y = VIEW_H - FOOT_H + 12
+  const y = VIEW_H - 13
   const nameOf = (i: 0 | 1): string => {
     const c = sel.cursors[i]
     const id = c.locked >= 0 ? c.choice : sel.cells[c.cell]
     return CHARACTERS.find((x) => x.id === id)?.name ?? 'RANDOM'
   }
 
-  font(ctx, 10)
+  font(ctx, 9)
   ctx.textAlign = 'left'
   ctx.fillStyle = P1_INK
-  ctx.fillText(nameOf(0), 8, y)
+  ctx.fillText(nameOf(0), 6, y)
   ctx.textAlign = 'right'
   ctx.fillStyle = P2_INK
-  ctx.fillText(nameOf(1), VIEW_W - 8, y)
+  ctx.fillText(nameOf(1), VIEW_W - 6, y)
 
   ctx.textAlign = 'center'
   font(ctx, 8)
-  if (sel.settled) {
-    ctx.fillStyle = '#ffd166'
-    ctx.fillText('VS', VIEW_W / 2, y)
-  } else {
-    ctx.fillStyle = DIM
-    ctx.fillText('VS', VIEW_W / 2, y)
-  }
+  ctx.fillStyle = sel.settled ? '#ffd166' : DIM
+  ctx.fillText('VS', VIEW_W / 2, y)
 
   font(ctx, 6, 600)
   ctx.fillStyle = DIM
   const p2 = sel.twoPlayer ? 'P2 arrows + numpad' : 'P2 is the machine — press 4 for two players'
-  ctx.fillText(sel.settled ? 'HERE WE GO' : `W A S D to choose, any punch to lock in · ${p2}`, VIEW_W / 2, VIEW_H - 12)
+  ctx.fillText(sel.settled ? 'HERE WE GO' : `W A S D to choose, any punch to lock in · ${p2}`, VIEW_W / 2, VIEW_H - 4)
   ctx.textBaseline = 'alphabetic'
   ctx.textAlign = 'left'
 }

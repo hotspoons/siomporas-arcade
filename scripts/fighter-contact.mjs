@@ -85,6 +85,28 @@ for (const [r, name] of names.entries()) {
     cuts.push({ fr, left: left + 4, top: floor - fr.ay })
   }
 }
+// A committed attack reaches. The boards are emphatic about it: across the four ripped characters
+// every standing heavy's widest frame is at least 1.33x the median width of that character's idle,
+// and most are near 2x — Ryu's fierce is 108 against a 59 idle. The artists held the feet still and
+// let the drawing grow out of them, which is what an anchor is for. A generated fierce that is the
+// same width as the character standing there has not extended, and no amount of frame data will
+// make it read as a heavy. Crouching heavies are exempt: a crouch is compact on purpose, and Ryu's
+// own goes down to 1.24.
+const idleWidths = (j.anims.idle?.frames ?? []).map((f) => j.frames[f]?.w).filter(Boolean).sort((a, b) => a - b)
+const idleMedian = idleWidths[Math.floor(idleWidths.length / 2)] ?? 0
+if (idleMedian) {
+  for (const name of names) {
+    if (!/^stand-(hp|hk)$/.test(name)) continue
+    const reach = Math.max(0, ...j.anims[name].frames.map((f) => j.frames[f]?.w ?? 0))
+    if (reach && reach < idleMedian * 1.25) {
+      warnings.push(
+        `${name} reaches ${reach}px against a ${idleMedian}px idle (${(reach / idleMedian).toFixed(2)}x) — ` +
+          'a heavy on the board is 1.33x its idle at the very least, and usually near 2x. Not extending?',
+      )
+    }
+  }
+}
+
 svg.push('</svg>')
 
 fs.mkdirSync(path.dirname(out), { recursive: true })

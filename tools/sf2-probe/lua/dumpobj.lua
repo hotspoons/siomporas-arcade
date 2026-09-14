@@ -12,6 +12,7 @@ local TAG = os.getenv("PROBE_TAG") or "obj"
 local AT = tonumber(os.getenv("PROBE_SHOT_AT") or "2000")
 local MASK = tonumber(os.getenv("PROBE_XY_MASK") or "1023")
 local ENTRIES = tonumber(os.getenv("PROBE_ENTRIES") or "256")
+local STATE = os.getenv("PROBE_STATE")
 local shares = {}
 for s in (os.getenv("PROBE_SHARES") or ":objram1,:objram2,:gfxram"):gmatch("[^,]+") do shares[#shares + 1] = s end
 
@@ -31,6 +32,9 @@ end
 local n = 0
 emu.register_frame_done(function()
   n = n + 1
+  -- A savestate is the quickest way to a particular match; PROBE_SECONDS has to exceed the state's
+  -- own clock or MAME quits the moment it loads one.
+  if n == 2 and STATE then manager.machine:load(STATE); return end
   if n ~= AT then if n > AT + 10 then manager.machine:exit() end return end
 
   local best

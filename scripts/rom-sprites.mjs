@@ -60,6 +60,7 @@ const BOARDS = {
     palette: (char) => [`sf2/sf2ceea/pose-${char}.json`, 'sf2/sf2ceea/pose-idle.json'],
     research: 'apps/fighter/research/rom/sf2ce',
     out: 'apps/fighter/public/assets/crown/chars',
+    projectiles: true,
   },
   ssf2tad: {
     label: 'Super Street Fighter II Turbo',
@@ -67,7 +68,13 @@ const BOARDS = {
     gfx: 'gfx/ssf2t.bin',
     palette: () => ['gfx/obj-ssf2t.json'],
     research: 'apps/fighter/research/rom/ssf2t',
-    out: 'apps/fighter/public/assets/crown/chars-st',
+    out: 'apps/fighter/public/assets/crown/chars',
+    // The same fighters exist on both boards and are not the same fighters, so a Super Turbo rip
+    // lands beside its Champion Edition self rather than on top of it.
+    suffix: '-st',
+    // Off until it is checked: this board's projectile records point somewhere the fireball is not,
+    // and what comes back is whatever else was on that line of the screen.
+    projectiles: false,
   },
 }
 
@@ -155,6 +162,9 @@ async function minePoses(file) {
     for (const pr of d.proj ?? []) {
       if (projs.has(pr.an)) continue
       const px = pr.x - d.scr, py = 239 - pr.y
+      // A fireball is somewhere in the playfield. Anything up at the top of the screen is the
+      // scoreboard, and a projectile record that points there is one this board keeps elsewhere.
+      if (py < 60 || py > 230) continue
       const objs = (d.p1?.obj ?? []).filter((o) =>
         Math.abs(((o[0] & 0x1ff) - 64) - px) < 40 && Math.abs(((o[1] & 0x1ff) - 16) - py) < 48)
       if (objs.length) projs.set(pr.an, { key: `proj:${pr.an}`, side: 'p1', an: pr.an, objs, x: pr.x, y: pr.y, fl: pr.fl, scr: d.scr })
@@ -185,19 +195,26 @@ async function minePoses(file) {
  * the most pixels close to the fighter's own position.
  */
 function fighterPalette(poses, side) {
-  const score = new Map()
-  for (const p of poses.values()) {
-    if (p.side !== side) continue
-    const fx = p.x - (p.scr ?? 0)
-    for (const obj of p.objs) {
-      const s = sprite(obj)
-      const area = s.w * s.h
-      const near = Math.abs(s.x - fx) < 200 && s.y > 40
-      if (!near) continue
-      score.set(s.palette, (score.get(s.palette) ?? 0) + area * p.seen)
+  // Judged from the calibration test, where the two of them stand well apart: anywhere else the
+  // sprite list around one fighter also holds the other, and picking the most-covered palette then
+  // is a coin toss — which is exactly how a Super Turbo rip first came out wearing Ken's colours.
+  for (const only of [true, false]) {
+    const score = new Map()
+    for (const p of poses.values()) {
+      if (p.side !== side) continue
+      if (only && p.test !== 'calib-idle') continue
+      const fx = p.x - (p.scr ?? 0)
+      for (const obj of p.objs) {
+        const s = sprite(obj)
+        const near = Math.abs(s.x - fx) < 48 && s.y > 40
+        if (!near) continue
+        score.set(s.palette, (score.get(s.palette) ?? 0) + s.w * s.h * p.seen)
+      }
     }
+    const best = [...score].sort((a, b) => b[1] - a[1])[0]?.[0]
+    if (best != null) return best
   }
-  return [...score].sort((a, b) => b[1] - a[1])[0]?.[0] ?? 0
+  return 0
 }
 
 // --- drawing ---------------------------------------------------------------------------------
@@ -367,6 +384,15 @@ async function ripCharacter(char) {
   const moves = movesOf(char)
   const palOwn = fighterPalette(own.poses, 'p1')
   const palReact = fighterPalette(react.poses, 'p2')
+  // Is the dummy the same fighter? Each character's animation records live in their own stretch of
+  // the program ROM, so the top half of the pointer says who a pose belongs to. When the dummy is
+  // somebody else its flinches are somebody else's and must not be worn by this character.
+  const region = (poses, side) => {
+    const count = new Map()
+    for (const p of poses.values()) if (p.side === side) count.set(parseInt(p.an, 16) >> 16, (count.get(parseInt(p.an, 16) >> 16) ?? 0) + p.seen)
+    return [...count].sort((a, b) => b[1] - a[1])[0]?.[0]
+  }
+  const dummyIsUs = region(own.poses, 'p1') === region(react.poses, 'p2')
   // The character's own sixteen colours, whichever side each pose happened to be recorded on.
   const colours = all.slice(palOwn * 16, palOwn * 16 + 16)
 
@@ -412,6 +438,24 @@ async function ripCharacter(char) {
 
   // 1. the moves, in the order the frame data says they play
   for (const [id, seq] of moves) addAnim(own, id, seq, 'p1', 15)
+  // ...and any move the frame data does not cover, from the test that was named after it. The
+  // recorder runs one test per move, so the test name is the move name; this is what fills in a
+  // board whose frame data has not been worked out yet.
+  const MOVE_TEST = /^(?:stand|close|crouch|air)-(?:lp|mp|hp|lk|mk|hk)$|^[a-z]+-(?:lp|mp|hp|lk|mk|hk)$/
+  const NOT_A_MOVE = /^(?:calib|range|throwrange|throw|dizzy|dizzyprobe)-/
+  for (const key of own.order.keys()) {
+    const [side, base] = key.split('|')
+    if (side !== 'p1' || anims[base] || !MOVE_TEST.test(base) || NOT_A_MOVE.test(base)) continue
+    // Twelve records is longer than any move in the game; more than that and the test has run on
+    // into the fighter standing about afterwards.
+    const seq = seqFor(own, 'p1', base, (e) => e.st !== 0)?.slice(0, 12)
+    if (seq?.length) addAnim(own, base, seq, 'p1', 15)
+  }
+  // A special's base name is what a character file calls it; point it at the medium version.
+  for (const id of Object.keys(anims)) {
+    const m = /^(.*)-(?:mp|mk)$/.exec(id)
+    if (m && !anims[m[1]] && !/^(stand|close|crouch|air)$/.test(m[1])) anims[m[1]] = { ...anims[id] }
+  }
   // 2. the character being itself
   for (const [test, { name, keep }] of Object.entries(CALIB)) {
     const seq = seqFor(own, 'p1', test, keep)
@@ -420,11 +464,16 @@ async function ripCharacter(char) {
   }
   // 3. the throw, from the throwing end
   for (const base of ['throw-fwd-hp', 'throw-fwd-mp', 'throw-back-hp']) {
-    if (anims.throw) break
+    if (anims.throw || !dummyIsUs) break
     const seq = seqFor(own, 'p1', base, (e) => e.st !== 0)
     if (seq?.length) addAnim(own, 'throw', seq, 'p1', 10)
   }
-  // 4. and everything that is done to it, which only its turn as the dummy can show
+  // 4. and everything that is done to it, which only its turn as the dummy can show — and only
+  //    when the dummy was this character
+  if (!BOARD.projectiles) missing.push('projectile(not verified on this board)')
+  if (!dummyIsUs) missing.push('reactions(dummy was another fighter)')
+  else
+  {
   const specific = REACTIONS.filter((r) => r.base).map((r) => r.base)
   for (const r of REACTIONS) {
     let best = null
@@ -448,14 +497,15 @@ async function ripCharacter(char) {
     }
     addAnim(react, r.name, best.map((e) => e.an), 'p2', r.fps ?? 8)
   }
+  }
 
   // 5. and the fireball, which is an object in its own right
-  const projList = [...own.projs.values()]
+  const projList = BOARD.projectiles ? [...own.projs.values()] : []
   if (projList.length) {
     const score = new Map()
     for (const pr of projList) for (const o of pr.objs) {
       const sp = sprite(o)
-      if (sp.palette === palOwn) continue
+      if (sp.palette === palOwn || sp.palette === palReact) continue
       score.set(sp.palette, (score.get(sp.palette) ?? 0) + sp.w * sp.h)
     }
     const slot = [...score].sort((a, b) => b[1] - a[1])[0]?.[0]
@@ -464,7 +514,9 @@ async function ripCharacter(char) {
       const names = []
       for (const pr of projList) {
         const pic = drawPose(pr, slot, projColours, pr.scr)
-        if (!pic) continue
+        // A fireball is a small thing. Anything the size of a person is a person — the other
+        // fighter standing where the projectile was, in a palette that is not either of theirs.
+        if (!pic || pic.h > 48 || pic.w > 72) continue
         const name = `projectile-${names.length}`
         items.push({ name, ...pic, an: pr.an, side: 'fx' })
         names.push(name)
@@ -487,7 +539,7 @@ async function ripCharacter(char) {
   }
   const size = { w: width + 1, h: y + shelf + 2 }
 
-  const dir = path.join(OUT, char)
+  const dir = path.join(OUT, char + (BOARD.suffix ?? ''))
   mkdirSync(dir, { recursive: true })
   await sharp({ create: { width: size.w, height: size.h, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
     .composite(items.map((it) => ({ input: it.data, raw: { width: it.w, height: it.h, channels: 4 }, left: it.px, top: it.py })))
@@ -496,7 +548,7 @@ async function ripCharacter(char) {
   const framesJson = {}
   for (const it of items) framesJson[it.name] = { x: it.px, y: it.py, w: it.w, h: it.h, ax: it.ax, ay: it.ay, rom: { anim: it.an, side: it.side } }
   writeFileSync(path.join(dir, 'frames.json'), JSON.stringify({
-    id: char,
+    id: char + (BOARD.suffix ?? ''),
     source: `${BOARD.label} (${boardName}) graphics ROM, via tools/sf2-probe`,
     pixelScale: 1,
     atlas: 'atlas.png',
@@ -511,7 +563,7 @@ async function ripCharacter(char) {
 
   console.log(`${char}: ${own.frames + (react === own ? 0 : react.frames)} log frames -> ${items.length} sprites, atlas ${size.w}x${size.h}, ${Object.keys(anims).length} animations${missing.length ? `, missing ${missing.join(' ')}` : ''} (${((Date.now() - t0) / 1000).toFixed(0)}s)`)
 
-  if (CONTACT) await contactSheet(char, items, anims)
+  if (CONTACT) await contactSheet(char + (BOARD.suffix ?? ''), items, anims)
 }
 
 async function contactSheet(char, items, anims) {

@@ -192,9 +192,36 @@ there a list in RAM saying what is drawn where. `lua/recon.lua` answers the firs
 | board | game | pixels | sprite list | how it went |
 |---|---|---|---|---|
 | CPS1 | Street Fighter II, all editions | yes | yes | **done end to end.** `:gfx` decodes, the list is in gfxram at the page CPS-A register 0 points to, the palette device holds finished RGB |
-| CPS2 | Super Street Fighter II Turbo | yes | yes | **verified.** The same decoder, unchanged: `node scripts/rom-frame.mjs ssf2t` draws the board's own frame back pixel for pixel. The list moved to `objram1`/`objram2` and the top bits of x and y are flags rather than position, both of which `dumpobj.lua` works out by itself. What a full extraction still needs is the per-game part: where the fighters' structs live and what their animation records look like |
+| CPS2 | Super Street Fighter II Turbo | yes | yes | **running.** `node scripts/rom-frame.mjs ssf2t` draws the board's own frame back pixel for pixel, and `rom-sprites.mjs ryu --board ssf2tad` produces Ryu with 41 animations. See below for what is done and what is not |
 | Neo Geo | Samurai Shodown | probably | **no** | boots and plays, and `:cslot1:sprites` is 10 MB of what should be ordinary tiles — but the sprite list lives in video RAM that the driver keeps to itself, and no memory share exposes it. Poses from this board would have to be captured off the screen, or the driver patched |
 | Midway T-unit | Mortal Kombat | **no** | n/a | boots and plays, and can be driven and screenshotted like anything else — but its 12 MB `:video` region is not a tile bank. About a third of it is zero, so the pixels are in there, yet neither a linear read nor Midway's usual bank interleave produces a picture: the blitter reads an encoded stream, and decoding it is its own project |
+
+### Super Turbo, in detail
+
+The fighters' struct is the same shape as Champion Edition's at a different address — `0xFF844E`,
+0x400 apart, with position, state, animation pointer and health at the same offsets — which
+`findplayer.lua` confirmed by walking and diffing. So `record.lua` runs on it with nothing changed
+but the address, and `boot-st.lua` gets there (watching rather than counting, because the board
+spends forty seconds booting and throws away anything pushed at it before that).
+
+Done: Ryu's own animations — idle, both walks, the three jumps, crouch, every normal, every special
+at every strength, the throw. They are in `apps/fighter/public/assets/crown/chars/ryu-st/`, and he
+wears the dark gi because the button you confirm with on the select screen picks the colour, and the
+boot presses jab.
+
+Not done, and why:
+
+* **The frame data is wrong.** `derive.mjs` reads Champion Edition's animation-record layout, and
+  this board's is different enough that startup and recovery come back undefined. The box tables are
+  right (the ids and strides are in `common.lua`); it is the record itself that needs working out.
+  `apps/fighter/research/rom/ssf2t/ryu-ce-vs-st.md` is what that produced, and it is not to be
+  trusted past the first table.
+* **No reactions**, because the dummy in that recording was Ken, and Ken's flinches are not Ryu's.
+  The extractor now notices by itself: each character's animation records live in their own stretch
+  of ROM, so the top half of the pointer says who a pose belongs to. A recording with Ryu on both
+  sides would fix it.
+* **No fireball**: this board's projectile record points somewhere the fireball is not, and what
+  comes back is whatever else was on that line of the screen. Off until it is checked.
 
 ### Getting a set to run at all
 

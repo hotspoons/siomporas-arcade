@@ -49,10 +49,21 @@ profile, front-right.
 
 **Treat these as generated, not photographed.** They are eight separate generations of the same
 described character, not eight cameras around one object, so they will not be perfectly consistent —
-a fold of cloth will move, the rope may wrap differently. `README.md` already warns that eight
-nearly-consistent views often reconstruct worse than one clean one, and that warning was written
-before these existed. **Try the single A-pose front view first.** If the ring helps, good; if it
-produces a smeared mesh, that is the expected failure and not your bug.
+a fold of cloth moves, the rope wraps differently, and in these the vest gained a panel it does not
+have on the sprites.
+
+**And the ring is not really eight angles.** Checked after generating: the model collapsed most of
+the 45-degree intermediates toward a front view. What you actually have is roughly four distinct
+cameras — front, left profile, back, right profile — with the in-between files being near-duplicates
+of the front. Do not assume `a-01` is 45 degrees from `a-00`; look before you fit. Getting true
+intermediates likely needs either a 3D-aware generator or a posed reference per angle, and I have
+not solved it.
+
+`README.md` already warns that eight nearly-consistent views often reconstruct worse than one clean
+one, and that warning was written before these existed. **Try the single A-pose front view first.**
+If the ring helps, good; if it produces a smeared mesh, that is the expected failure and not your
+bug. The T-poses are the more useful set for rigging: they are consistent with each other and the
+limbs are unambiguous.
 
 Ask me for more angles, a different pose, or a cleaner single view — a view is about 35 seconds.
 

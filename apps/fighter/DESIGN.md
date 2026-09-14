@@ -50,7 +50,8 @@ Blanka — and one stage, Guile's airbase.
 | `F1` | **hitboxes and frame data** |
 | `F2` | training dummy |
 | `1` `2` `3` `4` | opponent: guard / easy / hard / second player |
-| `5` `6` `7` · `8` `9` `0` | pick P1 · pick P2 (Ryu, Zangief, Blanka) |
+| `5` `6` `7` `8` | pick P1 from the first four of the roster |
+| `-` `=` · `9` `0` | walk P1 · P2 along the whole roster |
 | `R` `P` | reset, pause |
 
 A gamepad works: face buttons and the two right shoulders are the six buttons, the left shoulders

@@ -28,7 +28,7 @@ const read = (f) => JSON.parse(readFileSync(f, 'utf8'))
 const write = (f, o) => writeFileSync(f, JSON.stringify(o, null, 2) + '\n')
 
 const wanted = process.argv.slice(2)
-const CHARS = ['ryu', 'zangief', 'blanka'].filter((c) => !wanted.length || wanted.includes(c))
+const CHARS = ['ryu', 'zangief', 'blanka', 'chunli'].filter((c) => !wanted.length || wanted.includes(c))
 
 const r2 = (n) => Math.round(n * 100) / 100
 const box = (b) => b.map(Math.round)
@@ -50,6 +50,17 @@ const HAND = {
       lariat: { startup: 1, hits: 3, rehit: 14, projectileInvuln: true },
     },
   },
+  chunli: {
+    hurtAir: [-20, 14, 24, 84],
+    specials: {
+      // The recorder cannot measure a mashed move: the normal that leads into it spoils the dummy
+      // before the special lands, so the per-hit damage and the hit count are set by hand here.
+      'lightning-legs': { damage: 6, hits: 6, rehit: 5, startup: 7, active: 10, recovery: 8, chip: 1 },
+      // Measured startup includes the charge the test held before releasing it; the kick itself is
+      // out in about ten frames.
+      'spinning-bird': { startup: 10, damage: 5, hits: 8, rehit: 4, rise: { vy: 3.4, vx: 0 }, travel: { vx: 3.6 }, knockdown: true },
+    },
+  },
   blanka: {
     hurtAir: [-20, 14, 26, 86],
     specials: {
@@ -64,12 +75,14 @@ const SPECIAL_MAP = {
   ryu: { hadouken: ['hadouken', 'qcf', 'P', 'projectile'], shoryuken: ['shoryuken', 'dp', 'P', 'strike'], tatsumaki: ['tatsumaki', 'qcb', 'K', 'strike'] },
   zangief: { spd: ['spd', '360', 'P', 'command-throw'], lariat: ['lariat', 'ppp', 'P', 'strike'] },
   blanka: { rolling: ['rolling-attack', 'charge-back', 'P', 'strike'], electricity: ['electric-thunder', 'mash-p', 'P', 'strike'] },
+  chunli: { lightning: ['lightning-legs', 'mash-k', 'K', 'strike'], sbk: ['spinning-bird', 'charge-down', 'K', 'strike'] },
 }
 
 const NAMES = {
   ryu: { hadouken: 'Hadouken', shoryuken: 'Shoryuken', tatsumaki: 'Tatsumaki Senpukyaku' },
   zangief: { spd: 'Spinning Piledriver', lariat: 'Double Lariat' },
   blanka: { 'rolling-attack': 'Rolling Attack', 'electric-thunder': 'Electric Thunder' },
+  chunli: { 'lightning-legs': 'Hyakuretsukyaku', 'spinning-bird': 'Spinning Bird Kick' },
 }
 
 function normal(id, n, hand = {}) {

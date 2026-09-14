@@ -172,18 +172,26 @@ export class Game {
       case 'Digit4':
         this.setOpponent('human')
         return true
+      // 5..8 pick player one from the first four; minus and equals walk player one along the whole
+      // roster and 9 and 0 walk player two, so the keys do not run out as it grows.
       case 'Digit5':
       case 'Digit6':
-      case 'Digit7': {
+      case 'Digit7':
+      case 'Digit8': {
         const id = ids[Number(code.slice(-1)) - 5]
         if (id) this.setFighters(id, p2)
         return true
       }
-      case 'Digit8':
       case 'Digit9':
       case 'Digit0': {
-        const id = ids[(Number(code.slice(-1)) + 2) % 10]
-        if (id) this.setFighters(p1, id)
+        const step = code === 'Digit0' ? 1 : ids.length - 1
+        this.setFighters(p1, ids[(ids.indexOf(p2) + step) % ids.length])
+        return true
+      }
+      case 'Minus':
+      case 'Equal': {
+        const step = code === 'Equal' ? 1 : ids.length - 1
+        this.setFighters(ids[(ids.indexOf(p1) + step) % ids.length], p2)
         return true
       }
       case 'KeyR':

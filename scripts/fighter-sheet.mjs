@@ -141,6 +141,18 @@ const installed = existsSync(manifest) ? JSON.parse(readFileSync(manifest, 'utf8
 
 console.log(`${path.relative(ROOT, src)} -> ${character}/${sheetName}${dry ? '  (dry run)' : ''}`)
 
+/**
+ * The key colour, sampled from inside the box rather than named. The generator returns its own
+ * version of the template's green — a few percent off, sometimes lighter — and hardcoding the
+ * template's value would turn that drift into a keying failure. A point 12px in from the top-left
+ * corner is background on every sheet the pipeline produces.
+ */
+function keyColour(box) {
+  const x = box.x + 12
+  const y = box.y + 12
+  return magick([work, '-format', `%[pixel:p{${x},${y}}]`, 'info:']).trim()
+}
+
 const frames = {}
 const cut = []
 let order = 0
@@ -179,7 +191,21 @@ for (const [name, slot] of Object.entries(slots)) {
       ])
         args.push('-draw', `alpha ${cx},${cy} floodfill`)
     }
-    // The fill leaves a grey halo on the antialiased edge; two passes of despeckle-free cleanup is
+    // THEN A GLOBAL PASS, because a flood fill cannot reach everywhere. The fill starts in the
+    // corners and spreads through connected background; a figure that touches the edge of its box
+    // cuts the background into pieces, and any piece with no corner in it survives — between the
+    // legs, under an arm, inside the crook of a knee. It survives as a solid lump of key colour in
+    // the middle of the sprite, which is worse than a halo and does not look like a keying failure
+    // in the numbers.
+    //
+    // This is safe here in a way it was not when the templates were grey. Grey sat in the middle of
+    // every costume's value range, so keying it globally ate shadows and cloth. Chroma green is
+    // nowhere near skin, teal, rust, tartan or bone — the prompts forbid it in the costume for
+    // exactly this reason — so anything still that colour after the fill is background by
+    // definition. `--fuzz` still governs how close is close enough.
+    args.push('-fuzz', `${fuzz}%`, '-transparent', keyColour(box))
+
+    // The fill leaves a halo on the antialiased edge; two passes of despeckle-free cleanup is
     // overkill, but pulling the matte in by half a pixel kills the fringe cheaply.
     args.push('-channel', 'A', '-blur', '0x0.5', '-level', '40%,60%', '+channel')
   }
@@ -246,16 +272,25 @@ if (untrimmed) {
   const packFile = path.join(artDir, 'pack.json')
   const pack = existsSync(packFile) ? JSON.parse(readFileSync(packFile, 'utf8')) : {}
   const templateFloor = s0.ground == null ? boxH : Math.round(boxH * (1 - s0.ground))
-  // Only ever fill in a floor we have not been given one for. `floorY` is the packer's to override
-  // — as a mode ("frame", "content") or as a per-animation map — and it gets overridden precisely
-  // when the drawing did not stand where the template's line is, which is the case where rewriting
-  // it from the template would undo the fix and put the character back in the air.
-  if (typeof pack.floorY === 'number' || pack.floorY == null) pack.floorY = templateFloor
-  else console.log(`  keeping floorY ${JSON.stringify(pack.floorY)} (template line would be ${templateFloor})`)
-  pack.anchorX = Math.round(boxW / 2)
+
+  // BOTH NUMBERS ARE PER ANIMATION, because the sheets are not all one shape. `cycle-4` has two
+  // columns where `cycle` has three, so its boxes are 967 wide against 635 and its centre line is
+  // 484 against 318. Written flat, whichever animation was cut last silently imposed its geometry
+  // on all the others — and an anchorX that is 166px wrong moves the character sideways the moment
+  // that animation plays.
+  const asMap = (v, fallback) => (v == null ? {} : typeof v === 'object' ? { ...v } : { [fallback]: v })
+  pack.floorY = asMap(pack.floorY, untrimmed)
+  pack.anchorX = asMap(pack.anchorX, untrimmed)
+
+  // anchorX is pure geometry off the template, so it is always ours to write. floorY is not: the
+  // packer overrides it ("frame", "content", a number) exactly when the drawing did not stand where
+  // the template's line is, and rewriting that would put the character back in the air.
+  pack.anchorX[untrimmed] = Math.round(boxW / 2)
+  if (pack.floorY[untrimmed] == null) pack.floorY[untrimmed] = templateFloor
+  else console.log(`  keeping floorY ${JSON.stringify(pack.floorY[untrimmed])} for ${untrimmed} (template line is ${templateFloor})`)
   writeFileSync(packFile, `${JSON.stringify(pack, null, 2)}\n`)
   console.log(`  ${cut.length} frames in ${path.relative(ROOT, outDir)}  (${boxW}x${boxH} each)`)
-  console.log(`  ${path.relative(ROOT, packFile)}  floorY ${JSON.stringify(pack.floorY)}  anchorX ${pack.anchorX}`)
+  console.log(`  ${path.relative(ROOT, packFile)}  ${untrimmed}: floorY ${JSON.stringify(pack.floorY[untrimmed])}  anchorX ${pack.anchorX[untrimmed]}`)
   console.log(`  pack them with: node scripts/pack-frames.mjs ext/art/${character} ${character} --height 90 --contact`)
   process.exit(0)
 }

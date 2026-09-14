@@ -62,11 +62,16 @@ Timings from a cold boot, at 60 frames per second:
 All addresses are player one's unless stated. Player two's structure exists at a fixed offset which
 is **not yet pinned down** — see the open questions.
 
+**The two fighters are the same structure 0x1ae4 apart.** Player one's root is at `0x31e15c`,
+player two's at `0x31fc40`, and every field below has a twin at `+0x1ae4`.
+
 | address | what it is | evidence |
 |---|---|---|
 | `0x31e15c` | **world x** | tracks the stick exactly: −1000 at rest, −3692 after walking one way, +1059 walking back |
-| `0x31e160` | **always zero** — not height; see below | zero throughout a confirmed airborne state |
+| `0x31e160` | **world y — always zero**, even mid-air; see below | zero through a jump *and* through being thrown |
 | `0x31e164` | **world z**, the axis a 2D board does not have | barely moves in a walk; **−612 in a few frames** on a sidestep, and back on the opposite one |
+| `0x31fc40` | **player two's x**, and `+4`/`+8` his y and z | walks at a constant 14.4 a frame when only he moves, with y pinned at zero |
+| `0x31fe04` onwards | the **skeleton**, in world coordinates, as (x, y, z) triples | every bone translates with the body; y is negative — about −1035 at the head — so **up is negative** |
 | `0x31e190`, `0x31e198` | **animation pointers** (KSEG, `0x8002xxxx`) | change the instant a move starts, return on idle |
 | `0x31e194`, `0x31e1a0` | **frames into the current animation** | +1 per frame, resets to zero when the animation changes |
 | `0x31e19c` | the same counter packed twice, `(n<<16)\|n` | — |
@@ -104,22 +109,54 @@ have moved almost nowhere useful.
 
 **The jump** lasts about **48 frames** airborne, counted off the animation counter at `0x31e194`.
 
+**A throw** — left punch and left kick together, which an idle opponent does not break — relocates
+the victim a very long way in the floor plane:
+
+| | |
+|---|---|
+| victim's x | 3743 → 2921 (**−822**) |
+| victim's z | −12 → **+867** |
+
+So a throw moves a body about 1200 units across the floor, most of it *sideways*. On a 2D board a
+throw is a swap of positions along one line; here it is a relocation in a plane, and the camera
+swings round with it.
+
+## Height is not simulated, and that is the most important thing found
+
+The root's y is **zero on every frame** of a standing jump — all 48 of them, with the state word
+plainly reporting airborne — and zero on every frame of being thrown, through a flip over the
+shoulder and a slam into the floor with a dust cloud.
+
+Height lives in the **skeleton**, not in the fighter's world position. The bones carry their own y
+(negative upwards, about −1035 at the head) and the model rises because the animation says so. The
+fighter's world position, as the game's own logic holds it, is a **2D point on the floor plane plus
+an animation**.
+
+That has a direct consequence for the framework this research feeds. A Street Fighter II character
+is a position with a simulated y, a launch velocity and a gravity constant — `jumpVy`, `gravity`,
+`airborne` are all real numbers in `src/data/chars/*.json`, and the sim integrates them. A Tekken 3
+character is not that. Whatever a 3D character config ends up looking like, height is something the
+animation owns, and the state machine owns x, z, and which animation is playing.
+
+**What would still falsify this:** a juggle. Being launched and falling under gravity is the one
+case not yet tested — a throw is a scripted arc, and the game could plausibly script it while still
+simulating a real juggle. The test is a launcher, and the reason it has not been run is that it
+needs a move list: `d/f+2` was tried, and Xiaoyu simply crouched.
+
 ## The open questions, with the next technique for each
 
-- **Height is not in the fighter structure.** `0x31e160` reads zero through an entire jump while the
-  state word plainly says airborne, and no word in `0x31e100`–`0x31e340` traces an arc. The
-  hypothesis worth testing: on this board a jump's height is **animation-driven** — the model's root
-  rises because the animation says so — and world y is only simulated when a body is launched. The
-  test is a juggle: get hit by a launcher and watch whether `0x31e160` comes alive.
+- ~~Height is not in the fighter structure.~~ **Settled, and it has its own section above:** the
+  root's y is zero through a jump and through a throw. Only a juggle could still overturn it.
 - **Health.** The bar's *geometry* was found and it plainly tracks damage, but the logical value has
   not been. Differential search fails here: this RAM is mostly per-frame scratch, so "a word that
   fell twice" returns forty candidates and every one oscillates when watched live. The right tool is
   a **write-watchpoint on the bar geometry**, walking backwards to whatever writes it —
   `-debug -debugger none` does expose `wpset`/`bpset` through the Lua device debugger, which the 2D
   harness never needed.
-- **Player two's structure base.** A stride of `+0x1ae4` fits twelve matrix pairs and nothing else;
-  the words that follow player two cluster around `0x31fdf0`, which would put the stride at
-  `+0x1c94`. Unresolved, and cheap to settle by watching a guessed address while only he moves.
+- ~~Player two's structure base.~~ **Settled: `0x31fc40`, a stride of `+0x1ae4`.** Found by making
+  only him walk and keeping the one word in 128KB that moved at a constant 14.4 a frame *and* had a
+  zero in the next word — the root's signature, since the fighter stands on the floor. The twenty
+  other words that walked with him were skeleton bones, whose next word is their height above it.
 - **Frame data** — startup, active, recovery — is now within reach and was not attempted: the
   animation pointer and the per-animation frame counter are exactly the two instruments the Champion
   Edition harness used, and the missing third is a damage signal, which is the watchpoint job above.

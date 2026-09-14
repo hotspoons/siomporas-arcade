@@ -211,11 +211,35 @@ boot presses jab.
 
 Not done, and why:
 
-* **The frame data is wrong.** `derive.mjs` reads Champion Edition's animation-record layout, and
-  this board's is different enough that startup and recovery come back undefined. The box tables are
-  right (the ids and strides are in `common.lua`); it is the record itself that needs working out.
-  `apps/fighter/research/rom/ssf2t/ryu-ce-vs-st.md` is what that produced, and it is not to be
-  trusted past the first table.
+* **The frame data is measured in the wrong unit, and this is the whole story.** Super Turbo runs
+  its game loop faster than it draws:
+
+  | | logic frames per displayed frame |
+  |---|---|
+  | Champion Edition | **1.000** |
+  | Super Turbo | **1.333** |
+
+  Measured by taking one full idle loop and dividing the durations the ROM's own animation records
+  declare by the frames they were actually on screen for: on CE, six records declaring 24 frames
+  occupy 24; on ST, six records declaring 24 frames occupy 18. Four ticks every three frames. That is
+  the turbo the game is named after, and it is a setting on the board rather than anything about the
+  recording.
+
+  The recorder samples once per *displayed* frame, so every count it takes from Super Turbo is three
+  quarters of the truth: a four-frame startup reads as three, and anything that resolves in one or
+  two logic frames disappears into rounding. That is why `derive.mjs` comes back with undefined
+  startups — not a layout it cannot read, but events happening between the frames it looks at.
+
+  Two ways out, neither done: turn the board's game speed down to 1x — it lives in the EEPROM rather
+  than a dip switch, so it means driving the service menu — or sample at logic rate rather than
+  display rate, which means finding the game's own tick and polling on it instead of on
+  `register_frame_done`.
+
+  **The animation record layout is NOT the problem, contrary to what this file said before.** It is
+  the same on both boards: records are 0x18 apart, `+01` is the duration in logic frames, bit 7 of
+  `+02` marks the last record of a sequence (the pointer jumps back after it), `+04` is the sprite
+  list, and the box ids are at `+08` to `+0D`. All of that was confirmed against the Super Turbo log
+  — 5351 records followed by the next record along, 722 end-flagged records followed by a jump back.
 * **No reactions**, because the dummy in that recording was Ken, and Ken's flinches are not Ryu's.
   The extractor now notices by itself: each character's animation records live in their own stretch
   of ROM, so the top half of the pointer says who a pose belongs to. A recording with Ryu on both

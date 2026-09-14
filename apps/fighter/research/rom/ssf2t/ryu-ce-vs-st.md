@@ -1,5 +1,13 @@
 # Ryu: Champion Edition against Super Turbo
 
+> **Do not trust the per-move tables below.** Super Turbo runs its game loop 1.333 times per frame
+> it draws — four logic ticks every three frames, which is the turbo the game is named after — and
+> the recorder samples once per drawn frame. Every count taken from it is therefore three quarters
+> of the truth, and anything resolving in one or two logic frames falls between the samples
+> entirely. The character-level table is fine, because speeds and distances are per-logic-frame
+> quantities the game reports directly. `tools/sf2-probe/README.md` has what a correct recording
+> would take.
+
 Both measured by `tools/sf2-probe` with the same plan — `sf2ceea` and `ssf2tad` — so the
 numbers are comparable frame for frame. Rows where nothing changed are left out.
 

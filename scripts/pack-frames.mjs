@@ -25,7 +25,14 @@
 //   { "floorY": 582, "anchorX": 318 }
 //
 // `floorY` is the canvas row the feet stand on — the row the anchor lands on, not the first empty
-// row beneath it — and `anchorX` the column the stance is centred on. The template draws both, so
+// row beneath it — and `anchorX` the column the stance is centred on. Either may be a number, or:
+//
+//   "content"   the lowest row anything in that animation puts down. Right when the drawing ignores
+//               the template's line but is at least consistent with itself.
+//   "frame"     each frame's own lowest row. Right for an animation where the fighter is standing on
+//               the ground in every frame — an idle, a walk — and it makes them stand still even when
+//               the drawings disagree about how big she is. Wrong for anything that leaves the
+//               ground: use it on a jump and the jump does not. The template draws both, so
 // saying where they are makes the anchor exact rather than inferred. For the `cycle` sheet those
 // are `boxHeight * (1 - GROUND)` and `boxWidth / 2`: on the 2048x1536 sheet the generator returns,
 // a box is 635x676 and the line is row 582, column 318. Without them the floor is taken
@@ -169,11 +176,15 @@ const drift = []
 for (const [anim, { frames, sharedCanvas }] of measured) {
   // The floor is the lowest pixel anyone in this animation puts down; the stance vertical is the
   // middle of the canvas unless pack.json says otherwise.
-  const per = (v) => (v == null ? null : typeof v === 'object' ? v[anim] ?? null : v)
-  const floor = per(settings.floorY) ?? (sharedCanvas ? Math.max(...frames.map((f) => f.box.y + f.box.h)) : null)
+  const per = (v) => (v == null ? null : typeof v === 'object' && !Array.isArray(v) ? v[anim] ?? null : v)
+  const floorMode = per(settings.floorY)
+  const contentFloor = sharedCanvas ? Math.max(...frames.map((f) => f.box.y + f.box.h)) : null
+  const floor = typeof floorMode === 'number' ? floorMode
+    : floorMode === 'frame' ? 'frame'
+      : contentFloor
   const anchorX = per(settings.anchorX) ?? (sharedCanvas ? frames[0].w / 2 : null)
   for (const [i, f] of frames.entries()) {
-    const bottom = floor ?? f.box.y + f.box.h
+    const bottom = floor === 'frame' || floor == null ? f.box.y + f.box.h : floor
     const centre = anchorX ?? f.box.x + f.box.w / 2
     let img = sharp(f.file).ensureAlpha().extract({ left: f.box.x, top: f.box.y, width: f.box.w, height: f.box.h })
     let w = f.box.w, h = f.box.h
@@ -185,7 +196,7 @@ for (const [anim, { frames, sharedCanvas }] of measured) {
       ay *= scale
       img = img.resize(w, h, { kernel: 'lanczos3', fit: 'fill' })
     }
-    drift.push({ anim, i, below: (f.box.y + f.box.h) - bottom })
+    drift.push({ anim, i, below: (f.box.y + f.box.h) - bottom, clipped: f.box.y + f.box.h >= f.h })
     items.push({
       anim,
       name: `${anim}-${i}`,
@@ -246,16 +257,28 @@ writeFileSync(path.join(OUT, 'frames.json'), JSON.stringify({
 
 console.log(`${charId}: ${items.length} frames in ${measured.size} animations, atlas ${size.w}x${size.h} -> ${path.relative(ROOT, OUT)}`)
 for (const [anim, { frames: f, sharedCanvas }] of measured) {
+  const per = (v) => (v == null ? null : typeof v === 'object' && !Array.isArray(v) ? v[anim] ?? null : v)
   // How far each frame's lowest pixel sits from the line it was supposed to stand on. A few pixels
   // is a heel or a shadow of a shoe; twenty is the baseline having slipped, and it will show up in
   // the game as the character sinking into the floor on that frame.
-  const d = drift.filter((x) => x.anim === anim).map((x) => x.below)
-  const worst = d.reduce((a, b) => (Math.abs(b) > Math.abs(a) ? b : a), 0)
+  const d = drift.filter((x) => x.anim === anim)
+  const worst = d.map((x) => x.below).reduce((a, b) => (Math.abs(b) > Math.abs(a) ? b : a), 0)
+  const clipped = d.filter((x) => x.clipped).map((x) => x.i)
   const cover = (f.reduce((s, x) => s + x.coverage, 0) / f.length * 100).toFixed(0)
   const note = !sharedCanvas
     ? '  (no shared canvas — anchors are per-frame guesses)'
     : Math.abs(worst) > 12 ? `  ! a frame stands ${worst > 0 ? worst + 'px below' : -worst + 'px above'} the floor line` : ''
   console.log(`  ${anim.padEnd(14)} ${String(f.length).padStart(2)} frames  ${String(cover).padStart(2)}% ink${note}`)
+  if (clipped.length) {
+    console.log(`    ! frames ${clipped.join(',')} run into the bottom of the canvas — the feet are cut off, so where they`)
+    console.log('      end is the edge of the box rather than the sole, and no floor line can be right for them')
+  }
+  // A declared line the drawing is nowhere near is not describing this sheet. Say so, and say what
+  // to do about it, rather than quietly anchoring every frame to a line nobody drew on.
+  if (typeof per(settings.floorY) === 'number' && worst > 40) {
+    console.log(`    the declared floor is ${worst}px above where this animation actually stands; if the fighter is on`)
+    console.log(`      the ground in every frame, "floorY": { "${anim}": "frame" } stands each one on its own feet`)
+  }
 }
 
 if (has('contact')) {

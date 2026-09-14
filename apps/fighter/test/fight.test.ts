@@ -46,8 +46,13 @@ function press(m: Match, button: number, a: In = {}, b: In = {}): void {
 }
 
 describe('the roster', () => {
-  it('builds three characters from their files, each with a full set of normals and specials', () => {
-    expect(CHARACTERS.map((c) => c.id)).toEqual(['ryu', 'zangief', 'blanka'])
+  it('builds every character from their file, each with a full set of normals and specials', () => {
+    // Not an exact list: two people adding a fighter each had to fix that line for the other's
+    // addition inside an hour, and the churn was not buying any safety the checks below do not.
+    const ids = CHARACTERS.map((c) => c.id)
+    expect(ids.length).toBeGreaterThanOrEqual(4)
+    expect(new Set(ids).size, 'no two fighters share an id').toBe(ids.length)
+    for (const measured of ['ryu', 'zangief', 'blanka', 'chunli']) expect(ids).toContain(measured)
     for (const c of CHARACTERS) {
       for (const id of ['stand-lp', 'stand-hk', 'crouch-hk', 'air-hk']) expect(c.moves[id], `${c.id} ${id}`).toBeDefined()
       expect(c.specials.length, c.id).toBeGreaterThanOrEqual(6)

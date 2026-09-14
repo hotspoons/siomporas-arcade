@@ -153,6 +153,8 @@ const CAST = [
     fire: 'the bound forearm driven straight forward at full extension from the hip, shoulder and hips rotated completely through it, back heel lifted.',
     second: 'leaping upward, the bound forearm driving up past her own ear in a rising elbow, the opposite knee coming up beneath it, both feet clear of the ground.',
     victory: 'standing straight, the bound forearm raised, turned to look at it, unimpressed.',
+    hands: 'both hands, bare, palm and back. The left wears three brass rings at the wrist and nothing else; the right is wrapped wrist to elbow in thick rust-orange rope. No gloves, no mitts, no tape, no fingerless gloves — her hands are bare skin.',
+    gear: 'the rust-orange rope and cloth from her right forearm, unwound and coiled, drawn on its own from two angles. That is the whole of her equipment: she carries NO weapon, no staff, no blade, no tool, no pack and no device of any kind.',
   },
   {
     id: 'bollard', name: 'BOLLARD', who: 'Duncan Mear',
@@ -348,10 +350,10 @@ Fill in every box with finished character art of a single original fighting-game
 
 FULL FIGURE — A POSE: the whole character standing straight on, facing the viewer, arms held a little away from the body, palms forward, legs slightly apart. Feet flat on the floor line, head near the top of the box. Neutral expression, no action, no foreshortening — this is a reference drawing, not a pose.
 HEAD — FRONT, HEAD — THREE QUARTER, HEAD — PROFILE: the same head three times, same scale, same lighting, neutral.
-HANDS: both hands, front and back, including any wrap, glove or fitting.
-FEET: both feet, including footwear, from the side and from the front.
-GEAR AND WEAPON: whatever the character carries, drawn on its own, from two angles.
-PALETTE: eight to twelve flat rectangular swatches of the exact colours used, in a row — no shading, no labels, no text.
+HANDS: ${c.hands ?? 'both hands, front and back, including any wrap, glove or fitting.'}
+FEET: this box shows FEET and nothing else — both of them, bare or shod as the character is, from the side and from the front.
+GEAR AND WEAPON: ${c.gear ?? 'whatever the character carries, drawn on its own, from two angles. If they carry nothing, leave this box empty rather than inventing equipment for them.'}
+PALETTE: this box must not be left empty. Fill it with eight to twelve flat rectangular swatches of the exact colours used ON THE CHARACTER — her skin, her cloth, her metal — in a row, no shading, no labels, no text. Take none of them from the background: the background green is not one of her colours, and a green swatch means a costume colour that gets cut out of her later.
 
 THE CHARACTER: ${c.seed}
 

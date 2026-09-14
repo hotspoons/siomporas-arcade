@@ -92,10 +92,10 @@ Fill in every box with finished character art of a single original fighting-game
 
 FULL FIGURE — A POSE: the whole character standing straight on, facing the viewer, arms held a little away from the body, palms forward, legs slightly apart. Feet flat on the floor line, head near the top of the box. Neutral expression, no action, no foreshortening — this is a reference drawing, not a pose.
 HEAD — FRONT, HEAD — THREE QUARTER, HEAD — PROFILE: the same head three times, same scale, same lighting, neutral.
-HANDS: both hands, front and back, including any wrap, glove or fitting.
-FEET: both feet, including footwear, from the side and from the front.
-GEAR AND WEAPON: whatever the character carries, drawn on its own, from two angles.
-PALETTE: eight to twelve flat rectangular swatches of the exact colours used, in a row — no shading, no labels, no text.
+HANDS: both hands, bare, palm and back. The left wears three brass rings at the wrist and nothing else; the right is wrapped wrist to elbow in thick rust-orange rope. No gloves, no mitts, no tape, no fingerless gloves — her hands are bare skin.
+FEET: this box shows FEET and nothing else — both of them, bare or shod as the character is, from the side and from the front.
+GEAR AND WEAPON: the rust-orange rope and cloth from her right forearm, unwound and coiled, drawn on its own from two angles. That is the whole of her equipment: she carries NO weapon, no staff, no blade, no tool, no pack and no device of any kind.
+PALETTE: this box must not be left empty. Fill it with eight to twelve flat rectangular swatches of the exact colours used ON THE CHARACTER — her skin, her cloth, her metal — in a row, no shading, no labels, no text. Take none of them from the background: the background green is not one of her colours, and a green swatch means a costume colour that gets cut out of her later.
 
 THE CHARACTER: A tall, lean Black British woman in her late twenties, shaved head, long limbs, a loose dark teal sleeveless vest and cropped rust-orange trousers, barefoot. Her right forearm is wrapped wrist to elbow in thick rust-orange rope and cloth so it reads as a club, twice the thickness of her bare left arm, which wears brass rings. Confident, relaxed, economical.
 
@@ -439,10 +439,10 @@ Fill in every box with finished character art of a single original fighting-game
 
 FULL FIGURE — A POSE: the whole character standing straight on, facing the viewer, arms held a little away from the body, palms forward, legs slightly apart. Feet flat on the floor line, head near the top of the box. Neutral expression, no action, no foreshortening — this is a reference drawing, not a pose.
 HEAD — FRONT, HEAD — THREE QUARTER, HEAD — PROFILE: the same head three times, same scale, same lighting, neutral.
-HANDS: both hands, front and back, including any wrap, glove or fitting.
-FEET: both feet, including footwear, from the side and from the front.
-GEAR AND WEAPON: whatever the character carries, drawn on its own, from two angles.
-PALETTE: eight to twelve flat rectangular swatches of the exact colours used, in a row — no shading, no labels, no text.
+HANDS: both hands, bare, palm and back. The left wears three brass rings at the wrist and nothing else; the right is wrapped wrist to elbow in thick rust-orange rope. No gloves, no mitts, no tape, no fingerless gloves — her hands are bare skin.
+FEET: this box shows FEET and nothing else — both of them, bare or shod as the character is, from the side and from the front.
+GEAR AND WEAPON: the rust-orange rope and cloth from her right forearm, unwound and coiled, drawn on its own from two angles. That is the whole of her equipment: she carries NO weapon, no staff, no blade, no tool, no pack and no device of any kind.
+PALETTE: this box must not be left empty. Fill it with eight to twelve flat rectangular swatches of the exact colours used ON THE CHARACTER — her skin, her cloth, her metal — in a row, no shading, no labels, no text. Take none of them from the background: the background green is not one of her colours, and a green swatch means a costume colour that gets cut out of her later.
 
 THE CHARACTER: A tall, lean Black British woman in her late twenties, shaved head, long limbs, a loose dark teal sleeveless vest and cropped rust-orange trousers, barefoot. Her right forearm is wrapped wrist to elbow in thick rust-orange rope and cloth so it reads as a club, twice the thickness of her bare left arm, which wears brass rings. Confident, relaxed, economical.
 
@@ -521,9 +521,9 @@ Fill in every box with finished character art of a single original fighting-game
 FULL FIGURE — A POSE: the whole character standing straight on, facing the viewer, arms held a little away from the body, palms forward, legs slightly apart. Feet flat on the floor line, head near the top of the box. Neutral expression, no action, no foreshortening — this is a reference drawing, not a pose.
 HEAD — FRONT, HEAD — THREE QUARTER, HEAD — PROFILE: the same head three times, same scale, same lighting, neutral.
 HANDS: both hands, front and back, including any wrap, glove or fitting.
-FEET: both feet, including footwear, from the side and from the front.
-GEAR AND WEAPON: whatever the character carries, drawn on its own, from two angles.
-PALETTE: eight to twelve flat rectangular swatches of the exact colours used, in a row — no shading, no labels, no text.
+FEET: this box shows FEET and nothing else — both of them, bare or shod as the character is, from the side and from the front.
+GEAR AND WEAPON: whatever the character carries, drawn on its own, from two angles. If they carry nothing, leave this box empty rather than inventing equipment for them.
+PALETTE: this box must not be left empty. Fill it with eight to twelve flat rectangular swatches of the exact colours used ON THE CHARACTER — her skin, her cloth, her metal — in a row, no shading, no labels, no text. Take none of them from the background: the background green is not one of her colours, and a green swatch means a costume colour that gets cut out of her later.
 
 THE CHARACTER: An enormous white Scottish man in his late fifties, bald on top with grey stubble and a broken nose, barrel-chested with short thick legs and a low, planted stance. A filthy high-visibility yellow-green work vest gone grey, a red and black tartan sash across the chest, heavy steel-toecap boots worn through to bare metal. Calm, bored, immovable.
 
@@ -602,9 +602,9 @@ Fill in every box with finished character art of a single original fighting-game
 FULL FIGURE — A POSE: the whole character standing straight on, facing the viewer, arms held a little away from the body, palms forward, legs slightly apart. Feet flat on the floor line, head near the top of the box. Neutral expression, no action, no foreshortening — this is a reference drawing, not a pose.
 HEAD — FRONT, HEAD — THREE QUARTER, HEAD — PROFILE: the same head three times, same scale, same lighting, neutral.
 HANDS: both hands, front and back, including any wrap, glove or fitting.
-FEET: both feet, including footwear, from the side and from the front.
-GEAR AND WEAPON: whatever the character carries, drawn on its own, from two angles.
-PALETTE: eight to twelve flat rectangular swatches of the exact colours used, in a row — no shading, no labels, no text.
+FEET: this box shows FEET and nothing else — both of them, bare or shod as the character is, from the side and from the front.
+GEAR AND WEAPON: whatever the character carries, drawn on its own, from two angles. If they carry nothing, leave this box empty rather than inventing equipment for them.
+PALETTE: this box must not be left empty. Fill it with eight to twelve flat rectangular swatches of the exact colours used ON THE CHARACTER — her skin, her cloth, her metal — in a row, no shading, no labels, no text. Take none of them from the background: the background green is not one of her colours, and a green swatch means a costume colour that gets cut out of her later.
 
 THE CHARACTER: A short, compact Chinese-Canadian woman in her early thirties, black hair cut blunt at the jaw, wiry and coiled. A black quilted short jacket with jade green cuffs and collar, black trousers, flat black canvas shoes. She holds a short rattan stick in each hand at different angles, close to the body. Watchful, still, about to move.
 
@@ -683,9 +683,9 @@ Fill in every box with finished character art of a single original fighting-game
 FULL FIGURE — A POSE: the whole character standing straight on, facing the viewer, arms held a little away from the body, palms forward, legs slightly apart. Feet flat on the floor line, head near the top of the box. Neutral expression, no action, no foreshortening — this is a reference drawing, not a pose.
 HEAD — FRONT, HEAD — THREE QUARTER, HEAD — PROFILE: the same head three times, same scale, same lighting, neutral.
 HANDS: both hands, front and back, including any wrap, glove or fitting.
-FEET: both feet, including footwear, from the side and from the front.
-GEAR AND WEAPON: whatever the character carries, drawn on its own, from two angles.
-PALETTE: eight to twelve flat rectangular swatches of the exact colours used, in a row — no shading, no labels, no text.
+FEET: this box shows FEET and nothing else — both of them, bare or shod as the character is, from the side and from the front.
+GEAR AND WEAPON: whatever the character carries, drawn on its own, from two angles. If they carry nothing, leave this box empty rather than inventing equipment for them.
+PALETTE: this box must not be left empty. Fill it with eight to twelve flat rectangular swatches of the exact colours used ON THE CHARACTER — her skin, her cloth, her metal — in a row, no shading, no labels, no text. Take none of them from the background: the background green is not one of her colours, and a green swatch means a costume colour that gets cut out of her later.
 
 THE CHARACTER: A tall, solidly built Ukrainian woman in her forties, ash-blonde hair scraped back, coal dust worked into the lines of her face and neck. Grey singlet, heavy canvas work trousers. Her left arm below the elbow is a salvaged mining winch: a squared steel housing painted safety red, a drum of steel cable, and a heavy hook where the hand should be, longer and heavier than her right arm. Loose cable trails behind her. Unbothered.
 
@@ -764,9 +764,9 @@ Fill in every box with finished character art of a single original fighting-game
 FULL FIGURE — A POSE: the whole character standing straight on, facing the viewer, arms held a little away from the body, palms forward, legs slightly apart. Feet flat on the floor line, head near the top of the box. Neutral expression, no action, no foreshortening — this is a reference drawing, not a pose.
 HEAD — FRONT, HEAD — THREE QUARTER, HEAD — PROFILE: the same head three times, same scale, same lighting, neutral.
 HANDS: both hands, front and back, including any wrap, glove or fitting.
-FEET: both feet, including footwear, from the side and from the front.
-GEAR AND WEAPON: whatever the character carries, drawn on its own, from two angles.
-PALETTE: eight to twelve flat rectangular swatches of the exact colours used, in a row — no shading, no labels, no text.
+FEET: this box shows FEET and nothing else — both of them, bare or shod as the character is, from the side and from the front.
+GEAR AND WEAPON: whatever the character carries, drawn on its own, from two angles. If they carry nothing, leave this box empty rather than inventing equipment for them.
+PALETTE: this box must not be left empty. Fill it with eight to twelve flat rectangular swatches of the exact colours used ON THE CHARACTER — her skin, her cloth, her metal — in a row, no shading, no labels, no text. Take none of them from the background: the background green is not one of her colours, and a green swatch means a costume colour that gets cut out of her later.
 
 THE CHARACTER: A heavyset Māori-Samoan man in his mid thirties, long black hair tied high, a full sleeve of traditional tattoo on one arm and shoulder. Bare-chested, deep ocean blue work trousers, a wide braided belt, bare feet. He carries a two-metre hardwood staff weighted with oxidised copper at one end, held diagonally across his body. Grounded, patient, heavy.
 
@@ -845,9 +845,9 @@ Fill in every box with finished character art of a single original fighting-game
 FULL FIGURE — A POSE: the whole character standing straight on, facing the viewer, arms held a little away from the body, palms forward, legs slightly apart. Feet flat on the floor line, head near the top of the box. Neutral expression, no action, no foreshortening — this is a reference drawing, not a pose.
 HEAD — FRONT, HEAD — THREE QUARTER, HEAD — PROFILE: the same head three times, same scale, same lighting, neutral.
 HANDS: both hands, front and back, including any wrap, glove or fitting.
-FEET: both feet, including footwear, from the side and from the front.
-GEAR AND WEAPON: whatever the character carries, drawn on its own, from two angles.
-PALETTE: eight to twelve flat rectangular swatches of the exact colours used, in a row — no shading, no labels, no text.
+FEET: this box shows FEET and nothing else — both of them, bare or shod as the character is, from the side and from the front.
+GEAR AND WEAPON: whatever the character carries, drawn on its own, from two angles. If they carry nothing, leave this box empty rather than inventing equipment for them.
+PALETTE: this box must not be left empty. Fill it with eight to twelve flat rectangular swatches of the exact colours used ON THE CHARACTER — her skin, her cloth, her metal — in a row, no shading, no labels, no text. Take none of them from the background: the background green is not one of her colours, and a green swatch means a costume colour that gets cut out of her later.
 
 THE CHARACTER: An athletic Equatoguinean-Spanish woman in her late twenties, dark curls tied back with a yellow cloth, mid-motion and off balance on purpose. A cropped sun-yellow top, loose blood-orange trousers cut off below the knee, bare midriff, hands wrapped, small bells at both ankles. Fluid, grinning, about to invert.
 
@@ -926,9 +926,9 @@ Fill in every box with finished character art of a single original fighting-game
 FULL FIGURE — A POSE: the whole character standing straight on, facing the viewer, arms held a little away from the body, palms forward, legs slightly apart. Feet flat on the floor line, head near the top of the box. Neutral expression, no action, no foreshortening — this is a reference drawing, not a pose.
 HEAD — FRONT, HEAD — THREE QUARTER, HEAD — PROFILE: the same head three times, same scale, same lighting, neutral.
 HANDS: both hands, front and back, including any wrap, glove or fitting.
-FEET: both feet, including footwear, from the side and from the front.
-GEAR AND WEAPON: whatever the character carries, drawn on its own, from two angles.
-PALETTE: eight to twelve flat rectangular swatches of the exact colours used, in a row — no shading, no labels, no text.
+FEET: this box shows FEET and nothing else — both of them, bare or shod as the character is, from the side and from the front.
+GEAR AND WEAPON: whatever the character carries, drawn on its own, from two angles. If they carry nothing, leave this box empty rather than inventing equipment for them.
+PALETTE: this box must not be left empty. Fill it with eight to twelve flat rectangular swatches of the exact colours used ON THE CHARACTER — her skin, her cloth, her metal — in a row, no shading, no labels, no text. Take none of them from the background: the background green is not one of her colours, and a green swatch means a costume colour that gets cut out of her later.
 
 THE CHARACTER: A lean French-Algerian woman in her late thirties, dark hair in a severe short cut, clinical and composed. A fitted white technical top with fine cyan line-work. From hip to ankle both legs are enclosed in an exposed powered brace — visible actuators, carbon struts, cable runs, cyan telemetry seams — clearly mechanism rather than armour. Oxblood leather boots. Balanced on one leg, the other cocked.
 
@@ -1007,9 +1007,9 @@ Fill in every box with finished character art of a single original fighting-game
 FULL FIGURE — A POSE: the whole character standing straight on, facing the viewer, arms held a little away from the body, palms forward, legs slightly apart. Feet flat on the floor line, head near the top of the box. Neutral expression, no action, no foreshortening — this is a reference drawing, not a pose.
 HEAD — FRONT, HEAD — THREE QUARTER, HEAD — PROFILE: the same head three times, same scale, same lighting, neutral.
 HANDS: both hands, front and back, including any wrap, glove or fitting.
-FEET: both feet, including footwear, from the side and from the front.
-GEAR AND WEAPON: whatever the character carries, drawn on its own, from two angles.
-PALETTE: eight to twelve flat rectangular swatches of the exact colours used, in a row — no shading, no labels, no text.
+FEET: this box shows FEET and nothing else — both of them, bare or shod as the character is, from the side and from the front.
+GEAR AND WEAPON: whatever the character carries, drawn on its own, from two angles. If they carry nothing, leave this box empty rather than inventing equipment for them.
+PALETTE: this box must not be left empty. Fill it with eight to twelve flat rectangular swatches of the exact colours used ON THE CHARACTER — her skin, her cloth, her metal — in a row, no shading, no labels, no text. Take none of them from the background: the background green is not one of her colours, and a green swatch means a costume colour that gets cut out of her later.
 
 THE CHARACTER: A big, run-down white American man in his fifties, sunburnt and scarred, thinning hair, a heavy gut over obvious old strength. Bare-chested under an open oil-stained denim vest, faded jeans, work boots. A length of rusted anchor chain is wrapped round his right fist and runs down to his belt, hanging loose. Bad-tempered, unhurried, filthy.
 
@@ -1088,9 +1088,9 @@ Fill in every box with finished character art of a single original fighting-game
 FULL FIGURE — A POSE: the whole character standing straight on, facing the viewer, arms held a little away from the body, palms forward, legs slightly apart. Feet flat on the floor line, head near the top of the box. Neutral expression, no action, no foreshortening — this is a reference drawing, not a pose.
 HEAD — FRONT, HEAD — THREE QUARTER, HEAD — PROFILE: the same head three times, same scale, same lighting, neutral.
 HANDS: both hands, front and back, including any wrap, glove or fitting.
-FEET: both feet, including footwear, from the side and from the front.
-GEAR AND WEAPON: whatever the character carries, drawn on its own, from two angles.
-PALETTE: eight to twelve flat rectangular swatches of the exact colours used, in a row — no shading, no labels, no text.
+FEET: this box shows FEET and nothing else — both of them, bare or shod as the character is, from the side and from the front.
+GEAR AND WEAPON: whatever the character carries, drawn on its own, from two angles. If they carry nothing, leave this box empty rather than inventing equipment for them.
+PALETTE: this box must not be left empty. Fill it with eight to twelve flat rectangular swatches of the exact colours used ON THE CHARACTER — her skin, her cloth, her metal — in a row, no shading, no labels, no text. Take none of them from the background: the background green is not one of her colours, and a green swatch means a costume colour that gets cut out of her later.
 
 THE CHARACTER: A powerfully built Mexican luchador in his thirties, classic V-tapered build. A full-head bone-white lucha mask with a raised vertical bone-ridge crest running front to back over the skull, cardinal red eye and mouth trim, gold filigree. Cardinal red trunks with gold detailing, white boots laced to the knee, bone-white wrist wraps. Bare-chested. Theatrical, arms wide.
 
@@ -1169,9 +1169,9 @@ Fill in every box with finished character art of a single original fighting-game
 FULL FIGURE — A POSE: the whole character standing straight on, facing the viewer, arms held a little away from the body, palms forward, legs slightly apart. Feet flat on the floor line, head near the top of the box. Neutral expression, no action, no foreshortening — this is a reference drawing, not a pose.
 HEAD — FRONT, HEAD — THREE QUARTER, HEAD — PROFILE: the same head three times, same scale, same lighting, neutral.
 HANDS: both hands, front and back, including any wrap, glove or fitting.
-FEET: both feet, including footwear, from the side and from the front.
-GEAR AND WEAPON: whatever the character carries, drawn on its own, from two angles.
-PALETTE: eight to twelve flat rectangular swatches of the exact colours used, in a row — no shading, no labels, no text.
+FEET: this box shows FEET and nothing else — both of them, bare or shod as the character is, from the side and from the front.
+GEAR AND WEAPON: whatever the character carries, drawn on its own, from two angles. If they carry nothing, leave this box empty rather than inventing equipment for them.
+PALETTE: this box must not be left empty. Fill it with eight to twelve flat rectangular swatches of the exact colours used ON THE CHARACTER — her skin, her cloth, her metal — in a row, no shading, no labels, no text. Take none of them from the background: the background green is not one of her colours, and a green swatch means a costume colour that gets cut out of her later.
 
 THE CHARACTER: A slight Korean girl of seventeen, wiry and fast, black hair in a high ponytail tied with vermillion cloth. A pale blue sleeveless hanbok-style top over loose white trousers gathered at the ankle, a vermillion sash, white split-toe socks. An hourglass-shaped janggu drum is slung at her left hip on a strap, and she holds a slim bamboo beater in her right hand. Light on her feet, chin up, unimpressed.
 
@@ -1250,9 +1250,9 @@ Fill in every box with finished character art of a single original fighting-game
 FULL FIGURE — A POSE: the whole character standing straight on, facing the viewer, arms held a little away from the body, palms forward, legs slightly apart. Feet flat on the floor line, head near the top of the box. Neutral expression, no action, no foreshortening — this is a reference drawing, not a pose.
 HEAD — FRONT, HEAD — THREE QUARTER, HEAD — PROFILE: the same head three times, same scale, same lighting, neutral.
 HANDS: both hands, front and back, including any wrap, glove or fitting.
-FEET: both feet, including footwear, from the side and from the front.
-GEAR AND WEAPON: whatever the character carries, drawn on its own, from two angles.
-PALETTE: eight to twelve flat rectangular swatches of the exact colours used, in a row — no shading, no labels, no text.
+FEET: this box shows FEET and nothing else — both of them, bare or shod as the character is, from the side and from the front.
+GEAR AND WEAPON: whatever the character carries, drawn on its own, from two angles. If they carry nothing, leave this box empty rather than inventing equipment for them.
+PALETTE: this box must not be left empty. Fill it with eight to twelve flat rectangular swatches of the exact colours used ON THE CHARACTER — her skin, her cloth, her metal — in a row, no shading, no labels, no text. Take none of them from the background: the background green is not one of her colours, and a green swatch means a costume colour that gets cut out of her later.
 
 THE CHARACTER: A lean Australian man of sixty-one with dark skin and close-cropped white hair, a scarred face and an immaculate upright stance. Bare-chested under an open brown tweed waistcoat, high-waisted dust-brown trousers with braces hanging loose at the hips, bare feet. Both hands are wrapped in dirty bone-white cloth, marked with blood. Utterly calm, guard low, chin tucked.
 
@@ -1331,9 +1331,9 @@ Fill in every box with finished character art of a single original fighting-game
 FULL FIGURE — A POSE: the whole character standing straight on, facing the viewer, arms held a little away from the body, palms forward, legs slightly apart. Feet flat on the floor line, head near the top of the box. Neutral expression, no action, no foreshortening — this is a reference drawing, not a pose.
 HEAD — FRONT, HEAD — THREE QUARTER, HEAD — PROFILE: the same head three times, same scale, same lighting, neutral.
 HANDS: both hands, front and back, including any wrap, glove or fitting.
-FEET: both feet, including footwear, from the side and from the front.
-GEAR AND WEAPON: whatever the character carries, drawn on its own, from two angles.
-PALETTE: eight to twelve flat rectangular swatches of the exact colours used, in a row — no shading, no labels, no text.
+FEET: this box shows FEET and nothing else — both of them, bare or shod as the character is, from the side and from the front.
+GEAR AND WEAPON: whatever the character carries, drawn on its own, from two angles. If they carry nothing, leave this box empty rather than inventing equipment for them.
+PALETTE: this box must not be left empty. Fill it with eight to twelve flat rectangular swatches of the exact colours used ON THE CHARACTER — her skin, her cloth, her metal — in a row, no shading, no labels, no text. Take none of them from the background: the background green is not one of her colours, and a green swatch means a costume colour that gets cut out of her later.
 
 THE CHARACTER: A tall, wire-thin Nepali woman in her thirties, weather-beaten, black hair in a practical braid. A dull grey climbing harness over a deep ultraviolet-purple technical jacket with black electrical tape wrapped at the forearms and shins, hazard-orange gloves, heavy boots. Coils of orange cable are slung across her back. She holds a two-metre insulated fibreglass hot stick with a hooked metal fitting at the end. Squinting, braced against wind.
 

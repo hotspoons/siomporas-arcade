@@ -2817,7 +2817,7 @@
    }
   },
   "hit-crouch-3": {
-   "x": 1215,
+   "x": 1347,
    "y": 730,
    "w": 128,
    "h": 31,
@@ -2925,7 +2925,7 @@
    }
   },
   "knockdown-4": {
-   "x": 1344,
+   "x": 1476,
    "y": 730,
    "w": 128,
    "h": 31,
@@ -3042,6 +3042,78 @@
    "rom": {
     "anim": "04e630",
     "side": "p2"
+   }
+  },
+  "projectile-0": {
+   "x": 1215,
+   "y": 730,
+   "w": 43,
+   "h": 32,
+   "ax": 23,
+   "ay": 15,
+   "rom": {
+    "anim": "0319be",
+    "side": "fx"
+   }
+  },
+  "projectile-1": {
+   "x": 1605,
+   "y": 730,
+   "w": 32,
+   "h": 28,
+   "ax": 27,
+   "ay": 13,
+   "rom": {
+    "anim": "0319ee",
+    "side": "fx"
+   }
+  },
+  "projectile-2": {
+   "x": 1259,
+   "y": 730,
+   "w": 43,
+   "h": 32,
+   "ax": 24,
+   "ay": 15,
+   "rom": {
+    "anim": "031a3a",
+    "side": "fx"
+   }
+  },
+  "projectile-3": {
+   "x": 1638,
+   "y": 730,
+   "w": 32,
+   "h": 28,
+   "ax": 28,
+   "ay": 13,
+   "rom": {
+    "anim": "031a6a",
+    "side": "fx"
+   }
+  },
+  "projectile-4": {
+   "x": 1303,
+   "y": 730,
+   "w": 43,
+   "h": 32,
+   "ax": 25,
+   "ay": 15,
+   "rom": {
+    "anim": "031ab6",
+    "side": "fx"
+   }
+  },
+  "projectile-5": {
+   "x": 1671,
+   "y": 730,
+   "w": 16,
+   "h": 26,
+   "ax": 29,
+   "ay": 12,
+   "rom": {
+    "anim": "031ae6",
+    "side": "fx"
    }
   }
  },
@@ -3650,6 +3722,18 @@
     "dizzy-3"
    ],
    "fps": 6,
+   "loop": true
+  },
+  "projectile": {
+   "frames": [
+    "projectile-0",
+    "projectile-1",
+    "projectile-2",
+    "projectile-3",
+    "projectile-4",
+    "projectile-5"
+   ],
+   "fps": 12,
    "loop": true
   }
  },

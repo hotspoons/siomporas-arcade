@@ -105,6 +105,7 @@ function sprite(obj) {
 async function minePoses(file) {
   if (!existsSync(file)) throw new Error(`no log: ${path.relative(ROOT, file)}`)
   const poses = new Map()
+  const projs = new Map()  // a fireball is an object of its own, with its own animation and palette
   const order = new Map() // "side|testbase" -> [anim, ...] first appearance order
   const rl = createInterface({ input: createReadStream(file) })
   let frames = 0
@@ -114,6 +115,15 @@ async function minePoses(file) {
     frames++
     const base = d.test.split('__')[0]
     const variant = d.test.split('__')[1] ?? ''
+    // A projectile is drawn by the same sprite list as the fighter that threw it, in a palette of
+    // its own; the objects near it that are not the fighter's are the fireball.
+    for (const pr of d.proj ?? []) {
+      if (projs.has(pr.an)) continue
+      const px = pr.x - d.scr, py = 239 - pr.y
+      const objs = (d.p1?.obj ?? []).filter((o) =>
+        Math.abs(((o[0] & 0x1ff) - 64) - px) < 40 && Math.abs(((o[1] & 0x1ff) - 16) - py) < 48)
+      if (objs.length) projs.set(pr.an, { key: `proj:${pr.an}`, side: 'p1', an: pr.an, objs, x: pr.x, y: pr.y, fl: pr.fl, scr: d.scr })
+    }
     for (const side of ['p1', 'p2']) {
       const p = d[side]
       if (!p?.obj?.length) continue
@@ -131,7 +141,7 @@ async function minePoses(file) {
       else seq.push({ an: p.an, st: p.st, in: (side === 'p1' ? d.in1 : d.in2) ?? '', n: 1 })
     }
   }
-  return { poses, order, frames }
+  return { poses, projs, order, frames }
 }
 
 /**
@@ -313,7 +323,7 @@ function reactionRuns(seq, { crouching, guard }) {
 
 async function ripCharacter(char) {
   const t0 = Date.now()
-  const { colours } = coloursFor(char)
+  const { colours, all } = coloursFor(char)
   const own = await minePoses(path.join(LOGS, `${char}.jsonl`))
   // A character never flinches in its own recording — it is the one attacking. Its reactions come
   // from a run where it was the dummy: react-<char>.jsonl, or its own log when it was both.
@@ -400,6 +410,30 @@ async function ripCharacter(char) {
       best = best.filter((e) => top.has(e.an))
     }
     addAnim(react, r.name, best.map((e) => e.an), 'p2', r.fps ?? 8)
+  }
+
+  // 5. and the fireball, which is an object in its own right
+  const projList = [...own.projs.values()]
+  if (projList.length) {
+    const score = new Map()
+    for (const pr of projList) for (const o of pr.objs) {
+      const sp = sprite(o)
+      if (sp.palette === palOwn) continue
+      score.set(sp.palette, (score.get(sp.palette) ?? 0) + sp.w * sp.h)
+    }
+    const slot = [...score].sort((a, b) => b[1] - a[1])[0]?.[0]
+    if (slot != null) {
+      const projColours = all.slice(slot * 16, slot * 16 + 16)
+      const names = []
+      for (const pr of projList) {
+        const pic = drawPose(pr, slot, projColours, pr.scr)
+        if (!pic) continue
+        const name = `projectile-${names.length}`
+        items.push({ name, ...pic, an: pr.an, side: 'fx' })
+        names.push(name)
+      }
+      if (names.length) anims.projectile = { frames: names, fps: 12, loop: true }
+    }
   }
 
   if (!items.length) throw new Error(`${char}: nothing drawn`)
@@ -499,7 +533,7 @@ function coloursFor(char) {
     }
     const slot = [...score].sort((a, b) => b[1] - a[1])[0]?.[0]
     if (slot == null) continue
-    return { slot, colours: j.palette.slice(slot * 16, slot * 16 + 16) }
+    return { slot, colours: j.palette.slice(slot * 16, slot * 16 + 16), all: j.palette }
   }
   throw new Error(`no palette for ${char}: run PROBE_STATE=match_${char}_... PROBE_TAG=${char} tools/sf2-probe/run.sh pose.lua`)
 }

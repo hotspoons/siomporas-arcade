@@ -30,10 +30,10 @@ emu.register_frame_done(function()
   n = n + 1
   if n == 400 or n == 420 then C.coin(1) end
   if n == 405 or n == 425 then C.coin(0) end
-  if n == 1150 then C.set(":IN0","1 Player Start",1) end
-  if n == 1155 then C.set(":IN0","1 Player Start",0) end
-  if n == 1250 then C.set(":IN0","2 Players Start",1) end
-  if n == 1255 then C.set(":IN0","2 Players Start",0) end
+  if n == 1150 then C.start(1, 1) end
+  if n == 1155 then C.start(1, 0) end
+  if n == 1250 then C.start(2, 1) end
+  if n == 1255 then C.start(2, 0) end
   for _, m in ipairs(plan) do
     if n == m[1] then C.hold(m[2], {m[3]}) end
     if n == m[1] + 5 then C.hold(m[2], {}) end

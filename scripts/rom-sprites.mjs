@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // Draw the fighters out of the arcade board's own graphics ROM.
 //
-//   node scripts/rom-sprites.mjs ryu zangief blanka      # or no arguments for every character logged
+//   node scripts/rom-sprites.mjs ryu zangief blanka      # or no arguments for the three it knows
 //   node scripts/rom-sprites.mjs ryu --contact           # also a labelled contact sheet in shots/
+//   node scripts/rom-sprites.mjs ryu --board ssf2tad     # the same character off a different board
 //
 // This is the other half of tools/sf2-probe. That harness measured what the moves *do*; this one
 // takes what they *look like*, from the same source and in the same pass, so a frame of animation
@@ -43,19 +44,53 @@ import { fileURLToPath } from 'node:url'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const DUMPS = path.join(ROOT, 'ext/reference-artwork/rom-dumps')
-const LOGS = path.join(DUMPS, 'sf2/sf2ceea')
-const RESEARCH = path.join(ROOT, 'apps/fighter/research/rom/sf2ce')
-const OUT = path.join(ROOT, 'apps/fighter/public/assets/crown/chars')
 const SHOTS = path.join(ROOT, 'shots')
+
+/**
+ * A board is: where its recordings are, which graphics dump goes with them, where to find the
+ * colours, and what the character's measured frame data is called. Everything else — the tile
+ * format, the sprite records, the anchor — is the same on both of these, which was the surprise.
+ */
+const BOARDS = {
+  sf2ceea: {
+    label: 'Street Fighter II: Champion Edition',
+    logs: 'sf2/sf2ceea',
+    gfx: 'gfx/gfx.bin',
+    // one dump per character, from a match where it was player one
+    palette: (char) => [`sf2/sf2ceea/pose-${char}.json`, 'sf2/sf2ceea/pose-idle.json'],
+    research: 'apps/fighter/research/rom/sf2ce',
+    out: 'apps/fighter/public/assets/crown/chars',
+  },
+  ssf2tad: {
+    label: 'Super Street Fighter II Turbo',
+    logs: 'sf2/ssf2tad',
+    gfx: 'gfx/ssf2t.bin',
+    palette: () => ['gfx/obj-ssf2t.json'],
+    research: 'apps/fighter/research/rom/ssf2t',
+    out: 'apps/fighter/public/assets/crown/chars-st',
+  },
+}
 
 const argv = process.argv.slice(2)
 const CONTACT = argv.includes('--contact')
-const wanted = argv.filter((a) => !a.startsWith('--'))
+const boardName = (() => {
+  const i = argv.indexOf('--board')
+  return i >= 0 && argv[i + 1] ? argv[i + 1] : 'sf2ceea'
+})()
+const BOARD = BOARDS[boardName]
+if (!BOARD) {
+  console.error(`unknown board ${boardName}; known: ${Object.keys(BOARDS).join(' ')}`)
+  process.exit(1)
+}
+const LOGS = path.join(DUMPS, BOARD.logs)
+const RESEARCH = path.join(ROOT, BOARD.research)
+const OUT = path.join(ROOT, BOARD.out)
+const wanted = argv.filter((a, i) => !a.startsWith('--') && argv[i - 1] !== '--board')
 
 // --- the board -------------------------------------------------------------------------------
 
 const TILE = 128
-const gfxPath = path.join(DUMPS, 'gfx/gfx.bin')
+const gfxPath = path.join(DUMPS, BOARD.gfx)
 if (!existsSync(gfxPath)) {
   console.error(`no ${path.relative(ROOT, gfxPath)} — run: PROBE_SECONDS=60 tools/sf2-probe/run.sh dumpgfx.lua`)
   process.exit(1)
@@ -323,7 +358,7 @@ function reactionRuns(seq, { crouching, guard }) {
 
 async function ripCharacter(char) {
   const t0 = Date.now()
-  const { colours, all } = coloursFor(char)
+  const all = paletteFor(char)
   const own = await minePoses(path.join(LOGS, `${char}.jsonl`))
   // A character never flinches in its own recording — it is the one attacking. Its reactions come
   // from a run where it was the dummy: react-<char>.jsonl, or its own log when it was both.
@@ -332,6 +367,8 @@ async function ripCharacter(char) {
   const moves = movesOf(char)
   const palOwn = fighterPalette(own.poses, 'p1')
   const palReact = fighterPalette(react.poses, 'p2')
+  // The character's own sixteen colours, whichever side each pose happened to be recorded on.
+  const colours = all.slice(palOwn * 16, palOwn * 16 + 16)
 
   const anims = {}
   const drawn = new Map()   // pose key -> frame name
@@ -460,7 +497,7 @@ async function ripCharacter(char) {
   for (const it of items) framesJson[it.name] = { x: it.px, y: it.py, w: it.w, h: it.h, ax: it.ax, ay: it.ay, rom: { anim: it.an, side: it.side } }
   writeFileSync(path.join(dir, 'frames.json'), JSON.stringify({
     id: char,
-    source: `Street Fighter II: Champion Edition (sf2ceea) graphics ROM, via tools/sf2-probe`,
+    source: `${BOARD.label} (${boardName}) graphics ROM, via tools/sf2-probe`,
     pixelScale: 1,
     atlas: 'atlas.png',
     atlasSize: size,
@@ -518,25 +555,19 @@ async function contactSheet(char, items, anims) {
  * is found the same way the fighter's sprites are: whichever palette covers the most of the
  * fighter's own position.
  */
-function coloursFor(char) {
-  for (const tag of [char, 'idle']) {
-    const file = path.join(LOGS, `pose-${tag}.json`)
+function paletteFor(char) {
+  for (const rel of BOARD.palette(char)) {
+    const file = path.join(DUMPS, rel)
     if (!existsSync(file)) continue
     const j = JSON.parse(readFileSync(file, 'utf8'))
-    if (tag !== 'idle' && j.players?.[0]?.char !== char) continue
-    const fx = j.players[0].x - j.screenLeft
-    const score = new Map()
-    for (const o of j.objs) {
-      const sp = sprite([o.x, o.y, o.code, o.attr])
-      if (Math.abs(sp.x - fx) > 60 || sp.y < 60) continue
-      score.set(sp.palette, (score.get(sp.palette) ?? 0) + sp.w * sp.h)
-    }
-    const slot = [...score].sort((a, b) => b[1] - a[1])[0]?.[0]
-    if (slot == null) continue
-    return { slot, colours: j.palette.slice(slot * 16, slot * 16 + 16), all: j.palette }
+    // A pose dump names who was on screen; an object dump does not, and does not need to — which
+    // slot the character wears is read off its own recording, and this only supplies the colours.
+    if (j.players && j.players[0]?.char !== char && BOARD.palette(char).length > 1 && rel.includes(char)) continue
+    return j.palette
   }
-  throw new Error(`no palette for ${char}: run PROBE_STATE=match_${char}_... PROBE_TAG=${char} tools/sf2-probe/run.sh pose.lua`)
+  throw new Error(`no palette dump for ${char} on ${boardName}: tools/sf2-probe/run.sh dumpobj.lua`)
 }
 
 const chars = wanted.length ? wanted : ['ryu', 'zangief', 'blanka']
+console.log(`${BOARD.label}`)
 for (const c of chars) await ripCharacter(c)

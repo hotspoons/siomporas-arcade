@@ -24,15 +24,7 @@ local function rd8(a) return mem:read_u8(a) end
 local function rd16(a) return mem:read_i16(a) end
 local function rd32(a) return mem:read_u32(a) end
 
--- Box table layout (sf2ce/hf); WW uses the same offsets with a different base (see README).
-local BOX_LIST = {
-  {tab = 0x0, id = 0x8, sz = 4,   type = "v1"},
-  {tab = 0x2, id = 0x9, sz = 4,   type = "v2"},
-  {tab = 0x4, id = 0xA, sz = 4,   type = "v3"},
-  {tab = 0x6, id = 0xB, sz = 4,   type = "weak"},
-  {tab = 0x8, id = 0xC, sz = 0xC, type = "atk"},
-  {tab = 0xA, id = 0xD, sz = 4,   type = "push"},
-}
+local BOX_LIST = C.BOX_LIST
 
 -- Boxes in the game's native object space: centre (cx, cy) and radii, cx positive = BEHIND the
 -- fighter (the sprites face left natively), cy positive = up from the feet.
@@ -66,23 +58,9 @@ local function hexrange(a, n)
   return table.concat(t)
 end
 
--- CPS1 OBJ list (gfxram 0x910000, 8 bytes per sprite: x, y, tile code, attr; attr = size<<8 | flipy<<6 |
--- flipx<<5 | palette; screen position = (x-64, y-16); list ends at attr >= 0xFF00). We keep the entries
--- whose x lies within +-96px of the fighter's screen x; that is enough to cut and place the sprite later.
-local OBJ_BASE = 0x910000
+-- The sprites drawn around this fighter, from whichever list this board keeps (see common.lua).
 local function read_obj(b)
-  local sx = rd16(b + 0x06) - rd16(A.screen_left) + 64
-  local t = {}
-  for i = 0, 0x3FF do
-    local a = OBJ_BASE + i * 8
-    local attr = mem:read_u16(a + 6)
-    if attr >= 0xFF00 then break end
-    local x = mem:read_u16(a) & 0x3FF
-    if x ~= 0 and math.abs(x - sx) <= 96 then
-      t[#t+1] = string.format('[%d,%d,%d,%d]', x, mem:read_u16(a + 2) & 0x3FF, mem:read_u16(a + 4), attr)
-    end
-  end
-  return "[" .. table.concat(t, ",") .. "]"
+  return C.objects(rd16(b + 0x06) - rd16(A.screen_left) + 64)
 end
 
 local function read_player(p)

@@ -17,6 +17,10 @@ import systemJson from '../data/system.json'
 import ryu from '../data/chars/ryu.json'
 import zangief from '../data/chars/zangief.json'
 import blanka from '../data/chars/blanka.json'
+import chunli from '../data/chars/chunli.json'
+import kestrel from '../data/chars/kestrel.json'
+import bollard from '../data/chars/bollard.json'
+import candela from '../data/chars/candela.json'
 import { Button, type ButtonMask } from './Motion'
 import {
   box, fromTuple, type Box, type BoxTuple, type Height, type MotionName, type Move, type MoveKind, type Stance,
@@ -282,7 +286,16 @@ export function buildCharacter(j: CharacterJson): Character {
   }
 }
 
-/** The roster as it stands: the three the proof of concept is built around. Order is select-screen order. */
-export const CHARACTERS: readonly Character[] = [ryu, zangief, blanka].map((j) => buildCharacter(j as unknown as CharacterJson))
+/**
+ * The roster as it stands, in select-screen order: the four measured out of the arcade board that
+ * the proof of concept was built around, then the three of our own that CONCRETE CROWN ships.
+ *
+ * The second three are the first three's measured numbers under our own names — written by
+ * `scripts/fighter-crown-chars.mjs`, which explains why. They are here to be played and drawn
+ * against while the art is generated; when a crown character has an atlas and numbers of her own,
+ * the archetype she was copied from comes off this list.
+ */
+export const CHARACTERS: readonly Character[] = [ryu, zangief, blanka, chunli, kestrel, bollard, candela]
+  .map((j) => buildCharacter(j as unknown as CharacterJson))
 
 export const findCharacter = (id: string): Character => CHARACTERS.find((c) => c.id === id) ?? CHARACTERS[0]

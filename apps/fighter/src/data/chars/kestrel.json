@@ -1,0 +1,567 @@
+{
+  "$comment": "KESTREL — Wren Adisa — dambe boxing crossed with kickboxing. The tutorial character. PLACEHOLDER MECHANICS: every number in this file is ryu's, measured out of Street Fighter II: Champion Edition and copied verbatim by scripts/fighter-crown-chars.mjs. Only the names, the art directory and the colours are ours. See apps/fighter/ROSTER.md for who she or he actually is, and rebalance from here.",
+  "$from": "ryu",
+  "id": "kestrel",
+  "name": "KESTREL",
+  "art": "kestrel",
+  "colors": {
+    "body": "#1f4f4a",
+    "trim": "#b4531f"
+  },
+  "health": 144,
+  "walkFwd": 3,
+  "walkBack": 2,
+  "jump": {
+    "vy": 6.81,
+    "vx": 3.48,
+    "gravity": 0.31,
+    "prejump": 4
+  },
+  "bodyHalf": 16,
+  "hurt": {
+    "stand": [
+      -26,
+      -2,
+      16,
+      87
+    ],
+    "crouch": [
+      -16,
+      -1,
+      28,
+      60
+    ],
+    "air": [
+      -22,
+      14,
+      14,
+      84
+    ]
+  },
+  "dizzyResist": 30,
+  "normals": {
+    "stand-hk": {
+      "startup": 3,
+      "active": 12,
+      "recovery": 17,
+      "damage": 19,
+      "height": "mid",
+      "hitbox": [
+        14,
+        66,
+        82,
+        98
+      ],
+      "stun": 15
+    },
+    "stand-hp": {
+      "startup": 6,
+      "active": 6,
+      "recovery": 23,
+      "damage": 19,
+      "height": "mid",
+      "hitbox": [
+        16,
+        70,
+        92,
+        84
+      ],
+      "stun": 13
+    },
+    "stand-lk": {
+      "startup": 7,
+      "active": 8,
+      "recovery": 5,
+      "damage": 6,
+      "height": "mid",
+      "hitbox": [
+        -17,
+        69,
+        49,
+        97
+      ],
+      "chain": true,
+      "cancel": true,
+      "stun": 5
+    },
+    "stand-lp": {
+      "startup": 3,
+      "active": 4,
+      "recovery": 5,
+      "damage": 4,
+      "height": "mid",
+      "hitbox": [
+        10,
+        66,
+        60,
+        84
+      ],
+      "chain": true,
+      "cancel": true,
+      "stun": 5
+    },
+    "stand-mk": {
+      "startup": 12,
+      "active": 12,
+      "recovery": 7,
+      "damage": 12,
+      "height": "mid",
+      "hitbox": [
+        -18,
+        69,
+        62,
+        97
+      ],
+      "cancel": true,
+      "stun": 8
+    },
+    "stand-mp": {
+      "startup": 4,
+      "active": 4,
+      "recovery": 7,
+      "damage": 13,
+      "height": "mid",
+      "hitbox": [
+        16,
+        70,
+        84,
+        84
+      ],
+      "cancel": true,
+      "stun": 8
+    },
+    "close-hk": {
+      "startup": 8,
+      "active": 12,
+      "recovery": 11,
+      "damage": 23,
+      "height": "mid",
+      "hitbox": [
+        21,
+        49,
+        95,
+        120
+      ],
+      "stun": 14
+    },
+    "close-hp": {
+      "startup": 4,
+      "active": 8,
+      "recovery": 23,
+      "damage": 19,
+      "height": "mid",
+      "hitbox": [
+        8,
+        58,
+        80,
+        108
+      ],
+      "stun": 13
+    },
+    "close-lk": {
+      "startup": 6,
+      "active": 6,
+      "recovery": 4,
+      "damage": 7,
+      "height": "low",
+      "hitbox": [
+        19,
+        0,
+        85,
+        42
+      ],
+      "chain": true,
+      "cancel": true,
+      "stun": 3
+    },
+    "close-lp": {
+      "startup": 3,
+      "active": 4,
+      "recovery": 5,
+      "damage": 5,
+      "height": "mid",
+      "hitbox": [
+        14,
+        77,
+        52,
+        93
+      ],
+      "chain": true,
+      "cancel": true,
+      "stun": 4
+    },
+    "close-mk": {
+      "startup": 5,
+      "active": 6,
+      "recovery": 9,
+      "damage": 14,
+      "height": "mid",
+      "hitbox": [
+        33,
+        36,
+        73,
+        78
+      ],
+      "cancel": true,
+      "stun": 9
+    },
+    "close-mp": {
+      "startup": 4,
+      "active": 2,
+      "recovery": 17,
+      "damage": 14,
+      "height": "mid",
+      "hitbox": [
+        14,
+        58,
+        66,
+        84
+      ],
+      "cancel": true,
+      "stun": 7
+    },
+    "crouch-hk": {
+      "startup": 4,
+      "active": 6,
+      "recovery": 25,
+      "damage": 18,
+      "height": "low",
+      "hitbox": [
+        15,
+        -3,
+        101,
+        21
+      ],
+      "knockdown": true,
+      "stun": 8
+    },
+    "crouch-hp": {
+      "startup": 4,
+      "active": 11,
+      "recovery": 23,
+      "damage": 18,
+      "height": "mid",
+      "hitbox": [
+        9,
+        48,
+        65,
+        115
+      ],
+      "stun": 14
+    },
+    "crouch-lk": {
+      "startup": 3,
+      "active": 4,
+      "recovery": 5,
+      "damage": 4,
+      "height": "low",
+      "hitbox": [
+        23,
+        -3,
+        89,
+        21
+      ],
+      "chain": true,
+      "cancel": true,
+      "stun": 3
+    },
+    "crouch-lp": {
+      "startup": 3,
+      "active": 4,
+      "recovery": 5,
+      "damage": 4,
+      "height": "mid",
+      "hitbox": [
+        8,
+        39,
+        70,
+        53
+      ],
+      "chain": true,
+      "cancel": true,
+      "stun": 4
+    },
+    "crouch-mk": {
+      "startup": 4,
+      "active": 6,
+      "recovery": 9,
+      "damage": 12,
+      "height": "low",
+      "hitbox": [
+        18,
+        -3,
+        98,
+        21
+      ],
+      "cancel": true,
+      "stun": 8
+    },
+    "crouch-mp": {
+      "startup": 4,
+      "active": 4,
+      "recovery": 7,
+      "damage": 13,
+      "height": "mid",
+      "hitbox": [
+        8,
+        31,
+        80,
+        53
+      ],
+      "cancel": true,
+      "stun": 8
+    },
+    "air-hk": {
+      "startup": 5,
+      "active": 7,
+      "recovery": 17,
+      "damage": 18,
+      "height": "overhead",
+      "hitbox": [
+        -26,
+        37,
+        86,
+        73
+      ],
+      "untilLand": true,
+      "stun": 14
+    },
+    "air-hp": {
+      "startup": 4,
+      "active": 8,
+      "recovery": 17,
+      "damage": 18,
+      "height": "overhead",
+      "hitbox": [
+        2,
+        50,
+        64,
+        68
+      ],
+      "untilLand": true,
+      "stun": 11
+    },
+    "air-lk": {
+      "startup": 5,
+      "active": 24,
+      "recovery": 0,
+      "damage": 6,
+      "height": "overhead",
+      "hitbox": [
+        -13,
+        41,
+        39,
+        71
+      ],
+      "untilLand": true,
+      "stun": 5
+    },
+    "air-lp": {
+      "startup": 2,
+      "active": 27,
+      "recovery": 0,
+      "damage": 7,
+      "height": "overhead",
+      "hitbox": [
+        8,
+        58,
+        50,
+        90
+      ],
+      "untilLand": true,
+      "stun": 4
+    },
+    "air-mk": {
+      "startup": 5,
+      "active": 13,
+      "recovery": 11,
+      "damage": 12,
+      "height": "overhead",
+      "hitbox": [
+        -25,
+        49,
+        73,
+        73
+      ],
+      "untilLand": true,
+      "stun": 7
+    },
+    "air-mp": {
+      "startup": 4,
+      "active": 20,
+      "recovery": 5,
+      "damage": 13,
+      "height": "overhead",
+      "hitbox": [
+        -1,
+        70,
+        61,
+        92
+      ],
+      "untilLand": true,
+      "stun": 7
+    }
+  },
+  "throw": {
+    "range": 77,
+    "damage": 32,
+    "hold": 62,
+    "name": "Hook Throw",
+    "anim": "throw"
+  },
+  "specials": [
+    {
+      "id": "updraft",
+      "name": "Updraft",
+      "motion": "dp",
+      "button": "P",
+      "type": "strike",
+      "anim": "updraft",
+      "startup": 4,
+      "active": 26,
+      "recovery": 26,
+      "damage": 27,
+      "height": "mid",
+      "hitbox": [
+        1,
+        23,
+        58,
+        123
+      ],
+      "knockdown": true,
+      "chip": 9,
+      "stun": 15,
+      "invuln": [
+        1,
+        6
+      ],
+      "strengths": {
+        "lp": {
+          "active": 18,
+          "recovery": 23,
+          "rise": {
+            "vy": 4.7,
+            "vx": 0.6
+          }
+        },
+        "mp": {
+          "rise": {
+            "vy": 6.6,
+            "vx": 0.95
+          }
+        },
+        "hp": {
+          "active": 30,
+          "recovery": 33,
+          "rise": {
+            "vy": 7.8,
+            "vx": 1.3
+          }
+        }
+      },
+      "$rom": "research/rom/sf2ce/ryu.json specials.shoryuken"
+    },
+    {
+      "id": "kite-line",
+      "name": "Kite Line",
+      "motion": "qcf",
+      "button": "P",
+      "type": "projectile",
+      "anim": "kite-line",
+      "startup": 9,
+      "active": 1,
+      "recovery": 39,
+      "damage": 11,
+      "height": "mid",
+      "hitbox": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "projectile": {
+        "speed": 4,
+        "damage": 11,
+        "hitstun": 42,
+        "blockstun": 22,
+        "at": [
+          33,
+          44,
+          95,
+          68
+        ],
+        "anim": "projectile"
+      },
+      "chip": 3,
+      "stun": 16,
+      "strengths": {
+        "lp": {
+          "damage": 9,
+          "chip": 2,
+          "projectile": {
+            "speed": 3,
+            "damage": 9
+          }
+        },
+        "hp": {
+          "damage": 12,
+          "projectile": {
+            "speed": 5,
+            "damage": 12
+          }
+        }
+      },
+      "$rom": "research/rom/sf2ce/ryu.json specials.hadouken"
+    },
+    {
+      "id": "crosswind",
+      "name": "Crosswind",
+      "motion": "qcb",
+      "button": "K",
+      "type": "strike",
+      "anim": "crosswind",
+      "startup": 11,
+      "active": 23,
+      "recovery": 21,
+      "damage": 20,
+      "height": "mid",
+      "hitbox": [
+        -69,
+        51,
+        69,
+        83
+      ],
+      "knockdown": true,
+      "chip": 13,
+      "stun": 6,
+      "hits": 1,
+      "rise": {
+        "vy": 2.4,
+        "vx": 0
+      },
+      "strengths": {
+        "lk": {
+          "active": 31,
+          "damage": 19,
+          "chip": 8,
+          "travel": {
+            "vx": 4.7
+          }
+        },
+        "mk": {
+          "travel": {
+            "vx": 4.9
+          }
+        },
+        "hk": {
+          "active": 43,
+          "chip": 39,
+          "travel": {
+            "vx": 5.1
+          }
+        }
+      },
+      "$rom": "research/rom/sf2ce/ryu.json specials.tatsumaki"
+    }
+  ]
+}

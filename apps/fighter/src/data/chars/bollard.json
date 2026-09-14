@@ -1,0 +1,447 @@
+{
+  "$comment": "BOLLARD — Duncan Mear — Scottish backhold wrestling and forty years on a door. PLACEHOLDER MECHANICS: every number in this file is zangief's, measured out of Street Fighter II: Champion Edition and copied verbatim by scripts/fighter-crown-chars.mjs. Only the names, the art directory and the colours are ours. See apps/fighter/ROSTER.md for who she or he actually is, and rebalance from here.",
+  "$from": "zangief",
+  "id": "bollard",
+  "name": "BOLLARD",
+  "art": "bollard",
+  "colors": {
+    "body": "#a8b23f",
+    "trim": "#8f2b2b"
+  },
+  "health": 144,
+  "walkFwd": 2.5,
+  "walkBack": 1.5,
+  "jump": {
+    "vy": 6.91,
+    "vx": 2.61,
+    "gravity": 0.34,
+    "prejump": 6
+  },
+  "bodyHalf": 26,
+  "hurt": {
+    "stand": [
+      -29,
+      -1,
+      39,
+      104
+    ],
+    "crouch": [
+      -24,
+      -1,
+      54,
+      63
+    ],
+    "air": [
+      -24,
+      14,
+      34,
+      100
+    ]
+  },
+  "dizzyResist": 30,
+  "normals": {
+    "stand-hk": {
+      "startup": 5,
+      "active": 8,
+      "recovery": 11,
+      "damage": 21,
+      "height": "mid",
+      "hitbox": [
+        5,
+        69,
+        91,
+        87
+      ],
+      "stun": 15
+    },
+    "stand-hp": {
+      "startup": 7,
+      "active": 6,
+      "recovery": 29,
+      "damage": 18,
+      "height": "mid",
+      "hitbox": [
+        11,
+        62,
+        113,
+        86
+      ],
+      "stun": 15
+    },
+    "stand-lk": {
+      "startup": 5,
+      "active": 5,
+      "recovery": 0,
+      "damage": 9,
+      "height": "low",
+      "hitbox": [
+        18,
+        2,
+        102,
+        30
+      ],
+      "chain": true,
+      "cancel": true,
+      "stun": 4
+    },
+    "stand-lp": {
+      "startup": 3,
+      "active": 4,
+      "recovery": 5,
+      "damage": 9,
+      "height": "mid",
+      "hitbox": [
+        19,
+        62,
+        99,
+        86
+      ],
+      "chain": true,
+      "cancel": true,
+      "stun": 4
+    },
+    "stand-mk": {
+      "startup": 7,
+      "active": 4,
+      "recovery": 9,
+      "damage": 15,
+      "height": "mid",
+      "hitbox": [
+        21,
+        69,
+        115,
+        89
+      ],
+      "cancel": true,
+      "stun": 9
+    },
+    "stand-mp": {
+      "startup": 5,
+      "active": 3,
+      "recovery": 5,
+      "damage": 14,
+      "height": "mid",
+      "hitbox": [
+        17,
+        62,
+        107,
+        86
+      ],
+      "cancel": true,
+      "stun": 8
+    },
+    "close-hk": {
+      "startup": 10,
+      "active": 14,
+      "recovery": 31,
+      "damage": 23,
+      "height": "mid",
+      "hitbox": [
+        13,
+        54,
+        109,
+        117
+      ],
+      "stun": 14
+    },
+    "close-lk": {
+      "startup": 8,
+      "active": 8,
+      "recovery": 5,
+      "damage": 10,
+      "height": "mid",
+      "hitbox": [
+        11,
+        54,
+        59,
+        88
+      ],
+      "chain": true,
+      "cancel": true,
+      "stun": 5
+    },
+    "close-lp": {
+      "startup": 3,
+      "active": 4,
+      "recovery": 15,
+      "damage": 9,
+      "height": "mid",
+      "hitbox": [
+        12,
+        61,
+        98,
+        111
+      ],
+      "chain": true,
+      "cancel": true,
+      "stun": 6
+    },
+    "close-mk": {
+      "startup": 7,
+      "active": 4,
+      "recovery": 9,
+      "damage": 15,
+      "height": "mid",
+      "hitbox": [
+        8,
+        20,
+        94,
+        76
+      ],
+      "cancel": true,
+      "stun": 9
+    },
+    "crouch-hk": {
+      "startup": 4,
+      "active": 10,
+      "recovery": 13,
+      "damage": 19,
+      "height": "low",
+      "hitbox": [
+        -1,
+        -1,
+        119,
+        31
+      ],
+      "knockdown": true,
+      "stun": 7
+    },
+    "crouch-hp": {
+      "startup": 7,
+      "active": 8,
+      "recovery": 23,
+      "damage": 18,
+      "height": "mid",
+      "hitbox": [
+        7,
+        40,
+        107,
+        64
+      ],
+      "$hand": "damage: the dummy grabbed instead of taking the strike"
+    },
+    "crouch-lk": {
+      "startup": 4,
+      "active": 18,
+      "recovery": 7,
+      "damage": 10,
+      "height": "low",
+      "hitbox": [
+        1,
+        -1,
+        83,
+        23
+      ],
+      "chain": true,
+      "cancel": true,
+      "stun": 5
+    },
+    "crouch-lp": {
+      "startup": 4,
+      "active": 5,
+      "recovery": 0,
+      "damage": 4,
+      "height": "mid",
+      "hitbox": [
+        7,
+        40,
+        81,
+        64
+      ],
+      "chain": true,
+      "cancel": true,
+      "stun": 3
+    },
+    "crouch-mk": {
+      "startup": 4,
+      "active": 6,
+      "recovery": 9,
+      "damage": 15,
+      "height": "low",
+      "hitbox": [
+        0,
+        -1,
+        100,
+        23
+      ],
+      "cancel": true,
+      "stun": 9
+    },
+    "crouch-mp": {
+      "startup": 7,
+      "active": 8,
+      "recovery": 9,
+      "damage": 14,
+      "height": "mid",
+      "hitbox": [
+        7,
+        40,
+        95,
+        64
+      ],
+      "cancel": true,
+      "$hand": "damage: the dummy grabbed instead of taking the strike"
+    },
+    "air-hk": {
+      "startup": 3,
+      "active": 8,
+      "recovery": 16,
+      "damage": 18,
+      "height": "overhead",
+      "hitbox": [
+        13,
+        35,
+        101,
+        77
+      ],
+      "untilLand": true,
+      "stun": 13
+    },
+    "air-hp": {
+      "startup": 7,
+      "active": 21,
+      "recovery": 13,
+      "damage": 18,
+      "height": "overhead",
+      "hitbox": [
+        24,
+        40,
+        108,
+        78
+      ],
+      "untilLand": true,
+      "stun": 14
+    },
+    "air-lk": {
+      "startup": 5,
+      "active": 22,
+      "recovery": 0,
+      "damage": 10,
+      "height": "overhead",
+      "hitbox": [
+        13,
+        31,
+        71,
+        71
+      ],
+      "untilLand": true,
+      "stun": 5
+    },
+    "air-lp": {
+      "startup": 2,
+      "active": 11,
+      "recovery": 14,
+      "damage": 10,
+      "height": "overhead",
+      "hitbox": [
+        19,
+        60,
+        93,
+        123
+      ],
+      "untilLand": true,
+      "stun": 4
+    },
+    "air-mk": {
+      "startup": 3,
+      "active": 16,
+      "recovery": 8,
+      "damage": 14,
+      "height": "overhead",
+      "hitbox": [
+        8,
+        30,
+        82,
+        82
+      ],
+      "untilLand": true,
+      "stun": 7
+    },
+    "air-mp": {
+      "startup": 2,
+      "active": 11,
+      "recovery": 14,
+      "damage": 16,
+      "height": "overhead",
+      "hitbox": [
+        18,
+        62,
+        105,
+        140
+      ],
+      "untilLand": true,
+      "stun": 7
+    }
+  },
+  "throw": {
+    "range": 103,
+    "damage": 32,
+    "hold": 58,
+    "name": "Doorman's Welcome",
+    "anim": "throw"
+  },
+  "specials": [
+    {
+      "id": "bear-yoke",
+      "name": "Bear Yoke",
+      "motion": "360",
+      "button": "P",
+      "type": "command-throw",
+      "anim": "bear-yoke",
+      "startup": 2,
+      "active": 2,
+      "recovery": 40,
+      "damage": 44,
+      "height": "mid",
+      "hitbox": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "knockdown": true,
+      "chip": 44,
+      "stun": 10,
+      "range": 52,
+      "hold": 56,
+      "strengths": {
+        "lp": {
+          "damage": 44
+        },
+        "mp": {
+          "damage": 44
+        },
+        "hp": {
+          "damage": 44
+        }
+      },
+      "$rom": "research/rom/sf2ce/zangief.json specials.spd"
+    },
+    {
+      "id": "bollard-drop",
+      "name": "Bollard Drop",
+      "motion": "ppp",
+      "button": "P",
+      "type": "strike",
+      "anim": "bollard-drop",
+      "startup": 1,
+      "active": 46,
+      "recovery": 3,
+      "damage": 17,
+      "height": "mid",
+      "hitbox": [
+        -69,
+        69,
+        106,
+        109
+      ],
+      "knockdown": true,
+      "chip": 8,
+      "stun": 15,
+      "hits": 3,
+      "rehit": 14,
+      "projectileInvuln": true,
+      "$rom": "research/rom/sf2ce/zangief.json specials.lariat"
+    }
+  ]
+}

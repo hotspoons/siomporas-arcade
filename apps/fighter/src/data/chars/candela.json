@@ -1,0 +1,505 @@
+{
+  "$comment": "CANDELA — Rosalía Mbeki-Ferrán — capoeira with flamenco footwork bolted on. PLACEHOLDER MECHANICS: every number in this file is blanka's, measured out of Street Fighter II: Champion Edition and copied verbatim by scripts/fighter-crown-chars.mjs. Only the names, the art directory and the colours are ours. See apps/fighter/ROSTER.md for who she or he actually is, and rebalance from here.",
+  "$from": "blanka",
+  "id": "candela",
+  "name": "CANDELA",
+  "art": "candela",
+  "colors": {
+    "body": "#e8b62c",
+    "trim": "#d2481b"
+  },
+  "health": 144,
+  "walkFwd": 2.25,
+  "walkBack": 1.875,
+  "jump": {
+    "vy": 10.56,
+    "vx": 3.48,
+    "gravity": 0.56,
+    "prejump": 5
+  },
+  "bodyHalf": 24,
+  "hurt": {
+    "stand": [
+      -24,
+      -1,
+      34,
+      88
+    ],
+    "crouch": [
+      -25,
+      -1,
+      45,
+      52
+    ],
+    "air": [
+      -20,
+      14,
+      26,
+      86
+    ]
+  },
+  "dizzyResist": 30,
+  "normals": {
+    "stand-hk": {
+      "startup": 7,
+      "active": 11,
+      "recovery": 21,
+      "damage": 16,
+      "height": "mid",
+      "hitbox": [
+        6,
+        69,
+        111,
+        109
+      ],
+      "stun": 14
+    },
+    "stand-hp": {
+      "startup": 6,
+      "active": 10,
+      "recovery": 18,
+      "damage": 17,
+      "height": "mid",
+      "hitbox": [
+        17,
+        68,
+        103,
+        114
+      ],
+      "stun": 15
+    },
+    "stand-lk": {
+      "startup": 7,
+      "active": 4,
+      "recovery": 7,
+      "damage": 11,
+      "height": "mid",
+      "hitbox": [
+        47,
+        44,
+        103,
+        76
+      ],
+      "chain": true,
+      "cancel": true,
+      "stun": 4
+    },
+    "stand-lp": {
+      "startup": 5,
+      "active": 3,
+      "recovery": 11,
+      "damage": 11,
+      "height": "mid",
+      "hitbox": [
+        16,
+        61,
+        96,
+        85
+      ],
+      "chain": true,
+      "cancel": true,
+      "stun": 4
+    },
+    "stand-mk": {
+      "startup": 7,
+      "active": 4,
+      "recovery": 7,
+      "damage": 23,
+      "height": "mid",
+      "hitbox": [
+        37,
+        74,
+        115,
+        90
+      ],
+      "cancel": true,
+      "stun": 8
+    },
+    "stand-mp": {
+      "startup": 6,
+      "active": 2,
+      "recovery": 7,
+      "damage": 15,
+      "height": "mid",
+      "hitbox": [
+        17,
+        72,
+        103,
+        104
+      ],
+      "cancel": true,
+      "stun": 8
+    },
+    "close-lk": {
+      "startup": 14,
+      "active": 4,
+      "recovery": 13,
+      "damage": 11,
+      "height": "mid",
+      "hitbox": [
+        13,
+        56,
+        67,
+        86
+      ],
+      "chain": true,
+      "cancel": true,
+      "stun": 3
+    },
+    "close-lp": {
+      "startup": 5,
+      "active": 2,
+      "recovery": 9,
+      "damage": 11,
+      "height": "mid",
+      "hitbox": [
+        28,
+        54,
+        104,
+        80
+      ],
+      "chain": true,
+      "cancel": true,
+      "stun": 4
+    },
+    "close-mk": {
+      "startup": 12,
+      "active": 6,
+      "recovery": 13,
+      "damage": 30,
+      "height": "mid",
+      "hitbox": [
+        -1,
+        39,
+        79,
+        87
+      ],
+      "cancel": true,
+      "stun": 9
+    },
+    "close-mp": {
+      "startup": 3,
+      "active": 4,
+      "recovery": 3,
+      "damage": 16,
+      "height": "mid",
+      "hitbox": [
+        15,
+        54,
+        117,
+        80
+      ],
+      "cancel": true,
+      "stun": 7
+    },
+    "crouch-hk": {
+      "startup": 8,
+      "active": 4,
+      "recovery": 18,
+      "damage": 17,
+      "height": "low",
+      "hitbox": [
+        25,
+        0,
+        127,
+        24
+      ],
+      "knockdown": true,
+      "stun": 8
+    },
+    "crouch-hp": {
+      "startup": 8,
+      "active": 6,
+      "recovery": 18,
+      "damage": 17,
+      "height": "mid",
+      "hitbox": [
+        44,
+        38,
+        142,
+        62
+      ],
+      "stun": 14
+    },
+    "crouch-lk": {
+      "startup": 5,
+      "active": 4,
+      "recovery": 7,
+      "damage": 10,
+      "height": "low",
+      "hitbox": [
+        13,
+        2,
+        91,
+        26
+      ],
+      "chain": true,
+      "cancel": true,
+      "stun": 4
+    },
+    "crouch-lp": {
+      "startup": 9,
+      "active": 3,
+      "recovery": 7,
+      "damage": 10,
+      "height": "low",
+      "hitbox": [
+        27,
+        5,
+        125,
+        29
+      ],
+      "chain": true,
+      "cancel": true,
+      "stun": 4
+    },
+    "crouch-mk": {
+      "startup": 5,
+      "active": 4,
+      "recovery": 7,
+      "damage": 14,
+      "height": "low",
+      "hitbox": [
+        15,
+        2,
+        113,
+        26
+      ],
+      "cancel": true,
+      "stun": 9
+    },
+    "crouch-mp": {
+      "startup": 7,
+      "active": 3,
+      "recovery": 17,
+      "damage": 15,
+      "height": "mid",
+      "hitbox": [
+        29,
+        27,
+        125,
+        51
+      ],
+      "cancel": true,
+      "stun": 9
+    },
+    "air-hk": {
+      "startup": 5,
+      "active": 6,
+      "recovery": 14,
+      "damage": 16,
+      "height": "overhead",
+      "hitbox": [
+        27,
+        29,
+        89,
+        61
+      ],
+      "untilLand": true,
+      "stun": 11
+    },
+    "air-hp": {
+      "startup": 5,
+      "active": 6,
+      "recovery": 14,
+      "damage": 16,
+      "height": "overhead",
+      "hitbox": [
+        17,
+        18,
+        81,
+        70
+      ],
+      "untilLand": true,
+      "stun": 12
+    },
+    "air-lk": {
+      "startup": 5,
+      "active": 20,
+      "recovery": 0,
+      "damage": 12,
+      "height": "overhead",
+      "hitbox": [
+        22,
+        30,
+        76,
+        62
+      ],
+      "untilLand": true,
+      "stun": 8
+    },
+    "air-lp": {
+      "startup": 5,
+      "active": 20,
+      "recovery": 0,
+      "damage": 12,
+      "height": "overhead",
+      "hitbox": [
+        14,
+        47,
+        86,
+        77
+      ],
+      "untilLand": true,
+      "stun": 5
+    },
+    "air-mk": {
+      "startup": 5,
+      "active": 12,
+      "recovery": 8,
+      "damage": 16,
+      "height": "overhead",
+      "hitbox": [
+        22,
+        29,
+        90,
+        69
+      ],
+      "untilLand": true,
+      "stun": 7
+    },
+    "air-mp": {
+      "startup": 5,
+      "active": 12,
+      "recovery": 8,
+      "damage": 16,
+      "height": "overhead",
+      "hitbox": [
+        8,
+        38,
+        92,
+        86
+      ],
+      "untilLand": true,
+      "stun": 7
+    }
+  },
+  "throw": {
+    "range": 93,
+    "damage": 35,
+    "hold": 20,
+    "name": "Heel Drag",
+    "anim": "throw"
+  },
+  "specials": [
+    {
+      "id": "ember-wheel",
+      "name": "Ember Wheel",
+      "motion": "charge-back",
+      "button": "P",
+      "type": "strike",
+      "anim": "ember-wheel",
+      "startup": 1,
+      "active": 25,
+      "recovery": 6,
+      "damage": 18,
+      "height": "mid",
+      "hitbox": [
+        -25,
+        35,
+        37,
+        97
+      ],
+      "chip": 4,
+      "stun": 15,
+      "bounce": {
+        "vx": -4,
+        "vy": 5
+      },
+      "strengths": {
+        "lp": {
+          "damage": 16,
+          "travel": {
+            "vx": 4.8
+          },
+          "active": 25
+        },
+        "mp": {
+          "travel": {
+            "vx": 4
+          },
+          "active": 40
+        },
+        "hp": {
+          "active": 54,
+          "damage": 19,
+          "travel": {
+            "vx": 3.6
+          }
+        }
+      },
+      "$rom": "research/rom/sf2ce/blanka.json specials.rolling"
+    },
+    {
+      "id": "zapateado",
+      "name": "Zapateado",
+      "motion": "mash-p",
+      "button": "P",
+      "type": "strike",
+      "anim": "zapateado",
+      "startup": 5,
+      "active": 34,
+      "recovery": 8,
+      "damage": 8,
+      "height": "mid",
+      "hitbox": [
+        -49,
+        -1,
+        57,
+        69
+      ],
+      "knockdown": true,
+      "chip": 23,
+      "stun": 8,
+      "hits": 5,
+      "rehit": 7,
+      "$rom": "research/rom/sf2ce/blanka.json specials.electricity"
+    },
+    {
+      "id": "rising-wheel",
+      "name": "Rising Wheel",
+      "motion": "charge-down",
+      "button": "K",
+      "type": "strike",
+      "anim": "rising-wheel",
+      "startup": 6,
+      "active": 40,
+      "recovery": 12,
+      "damage": 24,
+      "height": "mid",
+      "hitbox": [
+        -10,
+        20,
+        40,
+        100
+      ],
+      "knockdown": true,
+      "rise": {
+        "vy": 8.6,
+        "vx": 1.4
+      },
+      "chip": 5,
+      "stun": 10,
+      "invuln": [
+        1,
+        4
+      ],
+      "strengths": {
+        "lk": {
+          "rise": {
+            "vy": 7,
+            "vx": 1
+          }
+        },
+        "hk": {
+          "damage": 28,
+          "rise": {
+            "vy": 10,
+            "vx": 2
+          }
+        }
+      },
+      "$hand": "not in Champion Edition; Hyper Fighting move kept for fun"
+    }
+  ]
+}

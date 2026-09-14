@@ -22,11 +22,13 @@
 //
 // `pack.json` is worth one line even when nothing else needs saying:
 //
-//   { "floorY": 741, "anchorX": 370 }
+//   { "floorY": 582, "anchorX": 318 }
 //
 // `floorY` is the canvas row the feet stand on — the row the anchor lands on, not the first empty
 // row beneath it — and `anchorX` the column the stance is centred on. The template draws both, so
-// saying where they are makes the anchor exact rather than inferred. Without them the floor is taken
+// saying where they are makes the anchor exact rather than inferred. For the `cycle` sheet those
+// are `boxHeight * (1 - GROUND)` and `boxWidth / 2`: on the 2048x1536 sheet the generator returns,
+// a box is 635x676 and the line is row 582, column 318. Without them the floor is taken
 // to be the lowest pixel anything in that animation puts down and the centre to be the middle of the
 // canvas, which is right for a fighter standing on the line and wrong for one whose foot dips below
 // it. Either can be given per animation: `{ "floorY": { "crouch": 760 } }`.
@@ -99,21 +101,37 @@ function collect() {
   return anims
 }
 
-/** Alpha bounding box, and the lowest opaque row, of one image. */
+/**
+ * The alpha bounding box of one image, ignoring specks.
+ *
+ * An untrimmed keyed frame is mostly background, and a key rarely comes back perfect — a few
+ * survivors in a corner would stretch the box across the whole canvas and move the anchor with it.
+ * So a row or column has to carry at least `MIN_RUN` opaque pixels to count as part of the figure.
+ */
+const MIN_RUN = 3
 async function measure(file) {
   const { data, info } = await sharp(file).ensureAlpha().raw().toBuffer({ resolveWithObject: true })
   const { width: w, height: h } = info
-  let x0 = w, y0 = h, x1 = -1, y1 = -1
+  const rows = new Int32Array(h)
+  const cols = new Int32Array(w)
+  let opaque = 0
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       if (data[(y * w + x) * 4 + 3] < 8) continue
-      if (x < x0) x0 = x
-      if (x > x1) x1 = x
-      if (y < y0) y0 = y
-      if (y > y1) y1 = y
+      rows[y]++
+      cols[x]++
+      opaque++
     }
   }
-  return { file, w, h, box: x1 < 0 ? null : { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 } }
+  let x0 = -1, x1 = -1, y0 = -1, y1 = -1
+  for (let x = 0; x < w; x++) if (cols[x] >= MIN_RUN) { if (x0 < 0) x0 = x; x1 = x }
+  for (let y = 0; y < h; y++) if (rows[y] >= MIN_RUN) { if (y0 < 0) y0 = y; y1 = y }
+  return {
+    file,
+    w, h,
+    coverage: opaque / (w * h),
+    box: x1 < 0 ? null : { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 },
+  }
 }
 
 // --- pack --------------------------------------------------------------------------------------
@@ -147,6 +165,7 @@ if (TARGET_H) {
 }
 
 const items = []
+const drift = []
 for (const [anim, { frames, sharedCanvas }] of measured) {
   // The floor is the lowest pixel anyone in this animation puts down; the stance vertical is the
   // middle of the canvas unless pack.json says otherwise.
@@ -166,6 +185,7 @@ for (const [anim, { frames, sharedCanvas }] of measured) {
       ay *= scale
       img = img.resize(w, h, { kernel: 'lanczos3', fit: 'fill' })
     }
+    drift.push({ anim, i, below: (f.box.y + f.box.h) - bottom })
     items.push({
       anim,
       name: `${anim}-${i}`,
@@ -226,7 +246,16 @@ writeFileSync(path.join(OUT, 'frames.json'), JSON.stringify({
 
 console.log(`${charId}: ${items.length} frames in ${measured.size} animations, atlas ${size.w}x${size.h} -> ${path.relative(ROOT, OUT)}`)
 for (const [anim, { frames: f, sharedCanvas }] of measured) {
-  console.log(`  ${anim.padEnd(14)} ${String(f.length).padStart(2)} frames${sharedCanvas ? '' : '  (no shared canvas — anchors are per-frame guesses)'}`)
+  // How far each frame's lowest pixel sits from the line it was supposed to stand on. A few pixels
+  // is a heel or a shadow of a shoe; twenty is the baseline having slipped, and it will show up in
+  // the game as the character sinking into the floor on that frame.
+  const d = drift.filter((x) => x.anim === anim).map((x) => x.below)
+  const worst = d.reduce((a, b) => (Math.abs(b) > Math.abs(a) ? b : a), 0)
+  const cover = (f.reduce((s, x) => s + x.coverage, 0) / f.length * 100).toFixed(0)
+  const note = !sharedCanvas
+    ? '  (no shared canvas — anchors are per-frame guesses)'
+    : Math.abs(worst) > 12 ? `  ! a frame stands ${worst > 0 ? worst + 'px below' : -worst + 'px above'} the floor line` : ''
+  console.log(`  ${anim.padEnd(14)} ${String(f.length).padStart(2)} frames  ${String(cover).padStart(2)}% ink${note}`)
 }
 
 if (has('contact')) {

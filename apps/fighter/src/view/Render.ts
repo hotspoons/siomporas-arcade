@@ -1,32 +1,25 @@
-// Programmer art, drawn honestly.
+// A 384×224 arcade monitor, scaled up by a whole number and letterboxed.
 //
-// There is no character art yet and this build exists so the mechanics can be played before there
-// is any. So the fighters are a torso, a head, two legs and whichever limb is currently attacking —
-// and the attacking limb is drawn *from the move's own hitbox*, reaching out through startup,
-// locked at full extension while it is active, and pulled back through recovery.
+// Everything in the sim is in the 1991 machine's pixels, so the view is that machine's screen: the
+// camera follows the midpoint between the fighters and stops at the stage walls, the fighters can
+// never be further apart than the screen is wide, and there is no zoom. The canvas is filled with as
+// many whole copies of that screen as fit, because a sprite drawn at 3.0× is crisp and a sprite
+// drawn at 3.17× shimmers as it walks.
 //
-// That is the whole idea: the placeholder art is not a stand-in for the real art, it is a picture of
-// the frame data. If a move looks wrong here it is wrong, and you can see why. Press F1 and the
-// actual boxes come up over the top.
-//
-// THE CAMERA zooms. It is not decoration: a fixed camera either shows the whole stage, in which case
-// two fighters at jab range are thumbnails, or it frames them nicely and they walk off the sides.
-// Every game in the genre solves this the same way — the view width follows the distance between
-// the fighters, clamped at both ends — and so does this.
-//
-// Canvas 2D on purpose. The 2D layer is orthographic, side-on and made of rectangles; three.js would
-// buy nothing until the 2.5D camera exists.
+// Sprites are optional. A fighter with no atlas is drawn as a torso, a head, legs and whichever
+// limb is attacking — pulled from the move's own hitbox, so a move that looks wrong is wrong. A stage
+// with no art is a gradient and a floor line. F1 puts the real boxes over either.
 
-import { STAGE_HALF, type Fighter } from '../sim/Fighter'
+import { SYSTEM } from '../sim/Character'
+import type { Fighter } from '../sim/Fighter'
 import { ROUNDS_TO_WIN, type Match } from '../sim/Match'
-import { HURT, blockAdvantage, scaled, totalFrames, type Box } from '../sim/Moves'
+import { blockAdvantage, totalFrames, type Box } from '../sim/Moves'
+import { fxFrame, poseOf, type CharacterArt, type FrameRect, type FxArt, type StageArt } from './Sprites'
 
-/** Closest the camera will ever get, and widest it will pull back to, in world units. */
-const ZOOM_IN = 760
-const ZOOM_OUT = 1420
-/** World units of headroom the view keeps above the floor, and of floor below it. */
-const HEADROOM = 430
-const UNDERFOOT = 76
+export const VIEW_W = SYSTEM.screen[0]
+export const VIEW_H = SYSTEM.screen[1]
+/** Where the floor line sits on the monitor, from the top. */
+export const FLOOR_Y = SYSTEM.floorScreenY
 
 export interface RenderOptions {
   /** F1: hitboxes, hurtboxes and frame data. */
@@ -35,256 +28,316 @@ export interface RenderOptions {
   hint: boolean
 }
 
-/** The frame being drawn, in world units. Everything below works in these. */
+/** Everything the renderer needs that is not the match itself: the art, or the lack of it. */
+export interface Scene {
+  chars: [CharacterArt | null, CharacterArt | null]
+  stage: StageArt | null
+  fx: FxArt | null
+}
+
 interface View {
-  w: number
-  h: number
-  /** Where world y = 0 sits, measured down from the top of the view. */
-  floor: number
+  /** World x at the centre of the screen. */
   camera: number
+  /** World → screen for x. */
+  sx(x: number): number
 }
 
-const INK = '#e8e6df'
-const DIM = 'rgba(232,230,223,0.45)'
+const INK = '#f4f0e4'
+const DIM = 'rgba(244,240,228,0.5)'
+const BAR_YELLOW = '#f8d838'
+const BAR_RED = '#c81818'
 
-export function render(ctx: CanvasRenderingContext2D, match: Match, opts: RenderOptions): void {
+/** Scratch surface for tinting a sprite white on the frame it is hit. */
+let flash: HTMLCanvasElement | null = null
+
+export function render(ctx: CanvasRenderingContext2D, match: Match, scene: Scene, opts: RenderOptions): void {
   const cv = ctx.canvas
+  const scale = Math.max(1, Math.floor(Math.min(cv.width / VIEW_W, cv.height / VIEW_H)))
+  const ox = Math.floor((cv.width - VIEW_W * scale) / 2)
+  const oy = Math.floor((cv.height - VIEW_H * scale) / 2)
+
+  ctx.setTransform(1, 0, 0, 1, 0, 0)
+  ctx.fillStyle = '#000'
+  ctx.fillRect(0, 0, cv.width, cv.height)
+  ctx.setTransform(scale, 0, 0, scale, ox, oy)
+  ctx.imageSmoothingEnabled = false
+  ctx.beginPath()
+  ctx.rect(0, 0, VIEW_W, VIEW_H)
+  ctx.clip()
+
   const [a, b] = match.fighters
-
-  // Frame the pair: close in when they are trading, pull back when they are not.
-  const want = Math.max(ZOOM_IN, Math.min(ZOOM_OUT, Math.abs(a.x - b.x) + 470))
-  const scale = Math.min(cv.width / want, cv.height / (HEADROOM + UNDERFOOT))
-  const w = cv.width / scale
-  const h = cv.height / scale
-
-  const lo = -STAGE_HALF + w / 2
-  const hi = STAGE_HALF - w / 2
+  const stageHalf = match.stageHalf
+  const reach = Math.max(0, stageHalf - VIEW_W / 2)
   const mid = (a.x + b.x) / 2
-  const view: View = { w, h, floor: h - UNDERFOOT, camera: lo > hi ? 0 : Math.max(lo, Math.min(hi, mid)) }
+  const camera = Math.max(-reach, Math.min(reach, mid))
+  const view: View = { camera, sx: (x) => Math.round(x - camera + VIEW_W / 2) }
 
-  ctx.setTransform(scale, 0, 0, scale, 0, 0)
-  ctx.fillStyle = '#0b0c10'
-  ctx.fillRect(0, 0, w, h)
+  drawStage(ctx, scene.stage, view, stageHalf)
 
-  drawStage(ctx, view)
-
-  ctx.save()
-  ctx.translate(w / 2 - view.camera, 0)
   // Whoever is further away draws first, so the nearer fighter overlaps — the only depth cue a flat
-  // plane has, and it stops two overlapping bodies reading as one shape.
-  for (const f of a.y >= b.y ? [b, a] : [a, b]) drawFighter(ctx, f, view, opts.debug)
-  for (const p of match.projectiles) {
-    drawProjectile(ctx, p.x, p.y, p.box, match.fighters[p.owner].character.trim, view, opts.debug)
-  }
-  for (const im of match.impacts) drawImpact(ctx, im, view)
-  ctx.restore()
+  // plane has. A thrown body draws over the thrower.
+  const order = a.state === 'thrown' ? [b, a] : b.state === 'thrown' ? [a, b] : a.y >= b.y ? [b, a] : [a, b]
+  for (const f of order) drawFighter(ctx, f, scene.chars[match.fighters.indexOf(f)], view, opts.debug)
+  for (const p of match.projectiles) drawProjectile(ctx, p, scene.chars[p.owner], view, opts.debug)
+  for (const im of match.impacts) drawImpact(ctx, im, scene.fx, view)
 
-  drawHud(ctx, match, view)
-  drawBanner(ctx, match, view, opts)
-  if (opts.debug) drawFrameData(ctx, match, view)
+  drawHud(ctx, match, scene)
+  drawBanner(ctx, match, opts)
+  if (opts.debug) drawFrameData(ctx, match)
+  ctx.setTransform(1, 0, 0, 1, 0, 0)
 }
 
-function drawStage(ctx: CanvasRenderingContext2D, v: View): void {
-  const sky = ctx.createLinearGradient(0, 0, 0, v.floor)
+// --- the stage ---------------------------------------------------------------------------------
+
+function drawStage(ctx: CanvasRenderingContext2D, stage: StageArt | null, v: View, stageHalf: number): void {
+  if (!stage) return drawStandInStage(ctx, v, stageHalf)
+
+  ctx.fillStyle = stage.sky ?? '#000'
+  ctx.fillRect(0, 0, VIEW_W, VIEW_H)
+
+  for (const l of stage.layers) {
+    const cx = VIEW_W / 2 + l.x - v.camera * l.parallax
+    const top = FLOOR_Y + l.y - l.h
+    if (l.repeat) {
+      let x = cx - l.w / 2
+      while (x > 0) x -= l.w
+      for (; x < VIEW_W; x += l.w) ctx.drawImage(l.image, Math.round(x), Math.round(top), l.w, l.h)
+    } else {
+      ctx.drawImage(l.image, Math.round(cx - l.w / 2), Math.round(top), l.w, l.h)
+    }
+  }
+}
+
+function drawStandInStage(ctx: CanvasRenderingContext2D, v: View, stageHalf: number): void {
+  const sky = ctx.createLinearGradient(0, 0, 0, FLOOR_Y)
   sky.addColorStop(0, '#101219')
   sky.addColorStop(0.7, '#1d1c1c')
   sky.addColorStop(1, '#2e2719')
   ctx.fillStyle = sky
-  ctx.fillRect(0, 0, v.w, v.floor)
+  ctx.fillRect(0, 0, VIEW_W, FLOOR_Y)
 
-  // Chain-link fence posts, parallaxing at half speed. The only thing telling you the camera moved.
-  ctx.strokeStyle = 'rgba(255,255,255,0.055)'
-  ctx.lineWidth = 3
-  const half = v.camera * 0.5
-  for (let x = -1600; x <= 1600; x += 104) {
-    const sx = x - half + v.w / 2
-    if (sx < -20 || sx > v.w + 20) continue
-    ctx.beginPath()
-    ctx.moveTo(sx, v.floor * 0.18)
-    ctx.lineTo(sx, v.floor)
-    ctx.stroke()
+  // Fence posts parallaxing at half speed: the only thing telling you the camera moved.
+  ctx.fillStyle = 'rgba(255,255,255,0.07)'
+  for (let x = -1200; x <= 1200; x += 48) {
+    const sx = Math.round(x - v.camera * 0.5 + VIEW_W / 2)
+    if (sx < -2 || sx > VIEW_W + 2) continue
+    ctx.fillRect(sx, Math.round(FLOOR_Y * 0.3), 1, FLOOR_Y * 0.7)
   }
 
   ctx.fillStyle = '#39311f'
-  ctx.fillRect(0, v.floor, v.w, v.h - v.floor)
-  ctx.fillStyle = 'rgba(255,255,255,0.14)'
-  ctx.fillRect(0, v.floor, v.w, 2)
+  ctx.fillRect(0, FLOOR_Y, VIEW_W, VIEW_H - FLOOR_Y)
+  ctx.fillStyle = 'rgba(255,255,255,0.18)'
+  ctx.fillRect(0, FLOOR_Y, VIEW_W, 1)
+  ctx.fillStyle = 'rgba(255,255,255,0.06)'
+  for (let x = -stageHalf; x <= stageHalf; x += 32) ctx.fillRect(v.sx(x), FLOOR_Y + 2, 1, VIEW_H - FLOOR_Y)
 
-  // Floor markings, so walking reads as movement without a background to move against.
-  ctx.strokeStyle = 'rgba(255,255,255,0.06)'
-  ctx.lineWidth = 2
-  for (let x = -STAGE_HALF; x <= STAGE_HALF; x += 80) {
-    const sx = x - v.camera + v.w / 2
-    ctx.beginPath()
-    ctx.moveTo(sx, v.floor + 6)
-    ctx.lineTo(sx - 30, v.h)
-    ctx.stroke()
-  }
-
-  for (const wall of [-STAGE_HALF, STAGE_HALF]) {
-    const sx = wall - v.camera + v.w / 2
-    if (sx < -10 || sx > v.w + 10) continue
-    ctx.fillStyle = 'rgba(180,48,58,0.55)'
-    ctx.fillRect(sx - 3, v.floor - 200, 6, 200)
+  for (const wall of [-stageHalf, stageHalf]) {
+    const sx = v.sx(wall)
+    if (sx < -4 || sx > VIEW_W + 4) continue
+    ctx.fillStyle = 'rgba(180,48,58,0.6)'
+    ctx.fillRect(sx - 1, FLOOR_Y - 96, 3, 96)
   }
 }
 
-function drawFighter(ctx: CanvasRenderingContext2D, f: Fighter, v: View, debug: boolean): void {
-  const hb = HURT[f.stance]
-  const h = hb.y1 - hb.y0
-  const c = f.character
+// --- fighters ----------------------------------------------------------------------------------
+
+function drawFighter(ctx: CanvasRenderingContext2D, f: Fighter, art: CharacterArt | null, v: View, debug: boolean): void {
+  const sx = v.sx(f.x)
+  const sy = FLOOR_Y - Math.round(f.y)
 
   // The shadow shrinks with height, which is most of what tells you how high a jump is.
-  const shadow = Math.max(0.28, 1 - Math.max(0, f.y) / 260)
-  ctx.fillStyle = `rgba(0,0,0,${0.42 * shadow})`
+  const lift = Math.max(0.3, 1 - Math.max(0, f.y) / 140)
+  ctx.fillStyle = `rgba(0,0,0,${0.35 * lift})`
   ctx.beginPath()
-  ctx.ellipse(f.x, v.floor + 3, 42 * shadow, 8 * shadow, 0, 0, Math.PI * 2)
+  ctx.ellipse(sx, FLOOR_Y + 1, 18 * lift, 3 * lift, 0, 0, Math.PI * 2)
   ctx.fill()
 
-  const down = f.state === 'down' || f.state === 'ko'
-  const recoil = f.state === 'hitstun' ? 0.22 : f.state === 'blockstun' ? 0.07 : 0
   const struck = f.hitstop > 0 && (f.state === 'hitstun' || f.state === 'blockstun')
-  const body = struck ? shade(c.body, 0.72) : c.body
+  const pose = art ? poseOf(f, art) : null
+  if (pose && art) drawSprite(ctx, art.image, pose.frame, sx, sy, pose.flip, struck)
+  else drawStandInFighter(ctx, f, sx, sy, struck)
+
+  if (f.state === 'dizzy') drawStars(ctx, sx, sy - f.character.hurt.stand.y1 - 6, f.stateFrame)
+
+  if (debug) {
+    drawBox(ctx, f.hurtBox(), 'rgba(90,190,255,0.85)', v)
+    drawBox(ctx, f.bodyBox(), 'rgba(255,255,255,0.25)', v)
+    const hit = f.hitBox()
+    if (hit) drawBox(ctx, hit, 'rgba(255,70,70,0.95)', v)
+    if (f.invulnerable || f.projectileInvulnerable) {
+      const b = f.hurtBox()
+      ctx.strokeStyle = f.invulnerable ? '#ffd166' : 'rgba(255,209,102,0.5)'
+      ctx.lineWidth = 1
+      ctx.strokeRect(v.sx(b.x0) - 2, FLOOR_Y - b.y1 - 2, b.x1 - b.x0 + 4, b.y1 - b.y0 + 4)
+    }
+  }
+}
+
+function drawSprite(ctx: CanvasRenderingContext2D, img: HTMLImageElement, fr: FrameRect, sx: number, sy: number, flip: boolean, struck: boolean): void {
+  ctx.save()
+  ctx.translate(sx, sy)
+  if (flip) ctx.scale(-1, 1)
+  if (struck) {
+    // Tint the sprite, not the rectangle it sits in: draw it alone, wash it, then place it.
+    flash ??= document.createElement('canvas')
+    if (flash.width < fr.w || flash.height < fr.h) {
+      flash.width = Math.max(flash.width, fr.w)
+      flash.height = Math.max(flash.height, fr.h)
+    }
+    const fc = flash.getContext('2d')
+    if (fc) {
+      fc.clearRect(0, 0, flash.width, flash.height)
+      fc.globalCompositeOperation = 'source-over'
+      fc.drawImage(img, fr.x, fr.y, fr.w, fr.h, 0, 0, fr.w, fr.h)
+      fc.globalCompositeOperation = 'source-atop'
+      fc.fillStyle = 'rgba(255,255,255,0.75)'
+      fc.fillRect(0, 0, fr.w, fr.h)
+      ctx.drawImage(flash, 0, 0, fr.w, fr.h, -fr.ax, -fr.ay, fr.w, fr.h)
+      ctx.restore()
+      return
+    }
+  }
+  ctx.drawImage(img, fr.x, fr.y, fr.w, fr.h, -fr.ax, -fr.ay, fr.w, fr.h)
+  ctx.restore()
+}
+
+/**
+ * Programmer art, drawn honestly: the attacking limb comes from the move's own hitbox, reaching out
+ * through startup, locked at full extension while it is active, and pulled back through recovery.
+ */
+function drawStandInFighter(ctx: CanvasRenderingContext2D, f: Fighter, sx: number, sy: number, struck: boolean): void {
+  const hb = f.character.hurt[f.stance]
+  const h = hb.y1 - hb.y0
+  const c = f.character
+  const body = struck ? shade(c.body, 0.7) : c.body
+  const down = f.state === 'down' || f.state === 'ko'
 
   ctx.save()
-  ctx.translate(f.x, v.floor - f.y - hb.y0)
+  ctx.translate(sx, sy - hb.y0)
   ctx.scale(f.facing, 1)
   if (down) {
-    ctx.rotate(-1.15)
+    ctx.rotate(-1.2)
     ctx.translate(-h * 0.34, -h * 0.1)
-  } else if (recoil) {
-    ctx.rotate(-recoil)
-  }
+  } else if (f.state === 'hitstun') ctx.rotate(-0.2)
+  else if (f.state === 'dizzy') ctx.rotate(Math.sin(f.stateFrame / 6) * 0.12)
 
   const hipY = -h * 0.42
   const shoulderY = -h * 0.84
   const headR = h * 0.115
+  const legW = Math.max(3, h * 0.12)
+  const splay = f.stance === 'air' ? 3 : f.stance === 'crouch' ? 12 : 8
 
-  const splay = f.stance === 'air' ? 6 : f.stance === 'crouch' ? 26 : 17
-  const legW = h * 0.12
   ctx.strokeStyle = shade(body, -0.28)
   ctx.lineWidth = legW
   ctx.lineCap = 'round'
   for (const s of [-1, 1]) {
     ctx.beginPath()
     ctx.moveTo(0, hipY)
-    // Stop half a line-width short: a round cap hangs past its endpoint, and the floor is the floor.
     ctx.lineTo(s * splay, f.stance === 'air' ? hipY + h * 0.28 : -legW / 2)
     ctx.stroke()
   }
-
   ctx.fillStyle = body
   ctx.beginPath()
-  ctx.roundRect(-h * 0.13, shoulderY, h * 0.26, hipY - shoulderY, h * 0.055)
+  ctx.roundRect(-h * 0.13, shoulderY, h * 0.26, hipY - shoulderY, h * 0.05)
   ctx.fill()
-
   ctx.fillStyle = shade(body, 0.2)
   ctx.beginPath()
   ctx.arc(headR * 0.3, -h * 0.96, headR, 0, Math.PI * 2)
   ctx.fill()
 
-  // Guard: a slab across the front, the clearest possible reading of "this is being blocked".
   if (f.state === 'blockstun' || (f.blocking && f.free)) {
     ctx.fillStyle = 'rgba(120,190,255,0.85)'
+    ctx.fillRect(h * 0.11, f.guardLow ? hipY + h * 0.04 : shoulderY, h * 0.09, h * 0.34)
+  }
+
+  const m = f.action
+  if (m && f.state === 'attack' && (m.hitbox.x1 !== m.hitbox.x0 || m.projectile)) {
+    const begin = m.startup - 1
+    const fr = f.actionFrame
+    const t = fr < begin ? (fr / Math.max(1, begin)) * 0.88 : fr < begin + m.active ? 1 : Math.max(0, 1 - (fr - begin - m.active) / Math.max(1, m.recovery))
+    const kick = m.button === 'K' || m.id.endsWith('k')
+    const from = kick ? hipY : shoulderY
+    const box = m.projectile ? m.projectile.at : m.hitbox
+    const tx = ((box.x0 + box.x1) / 2) * t
+    const ty = -((box.y0 + box.y1) / 2) * t + from * (1 - t)
+    ctx.strokeStyle = c.trim
+    ctx.lineWidth = Math.max(3, h * (kick ? 0.105 : 0.088))
     ctx.beginPath()
-    ctx.roundRect(h * 0.11, f.guardLow ? hipY + h * 0.04 : shoulderY, h * 0.09, h * 0.34, h * 0.03)
+    ctx.moveTo(0, from)
+    ctx.lineTo(tx, ty)
+    ctx.stroke()
+    ctx.fillStyle = shade(c.trim, 0.3)
+    ctx.beginPath()
+    ctx.arc(tx, ty, Math.max(2, h * (kick ? 0.065 : 0.052)), 0, Math.PI * 2)
     ctx.fill()
   }
-
-  drawLimb(ctx, f, h, shoulderY, hipY)
   ctx.restore()
+}
 
-  if (debug) {
-    drawBox(ctx, f.hurtBox(), 'rgba(90,190,255,0.8)', v)
-    const hit = f.hitBox()
-    if (hit) drawBox(ctx, hit, 'rgba(255,70,70,0.95)', v)
-    if (f.invulnerable) {
-      const box = f.hurtBox()
-      ctx.strokeStyle = '#ffd166'
-      ctx.lineWidth = 3
-      ctx.strokeRect(box.x0 - 5, v.floor - box.y1 - 5, box.x1 - box.x0 + 10, box.y1 - box.y0 + 10)
-    }
+function drawStars(ctx: CanvasRenderingContext2D, x: number, y: number, t: number): void {
+  ctx.fillStyle = '#ffe066'
+  for (let i = 0; i < 4; i++) {
+    const a = t / 8 + (i * Math.PI) / 2
+    const px = x + Math.cos(a) * 12
+    const py = y + Math.sin(a) * 3
+    ctx.fillRect(Math.round(px) - 1, Math.round(py) - 1, 3, 3)
   }
 }
 
-/**
- * The attacking limb, drawn from the move's own hitbox: out over startup, locked at full extension
- * while the move is active, retracted over recovery. A move that looks slow here is slow.
- */
-function drawLimb(ctx: CanvasRenderingContext2D, f: Fighter, h: number, shoulderY: number, hipY: number): void {
-  const m = f.action
-  if (!m || f.state !== 'attack') return
-  const sc = scaled(m, f.character)
-  if (sc.hitbox.x1 === 0 && !m.projectile) return
-
-  // Matches hitBox()'s window exactly, so the limb is fully out on precisely the frames that hit.
-  const begin = m.startup - 1
-  const fr = f.actionFrame
-  const t = fr < begin
-    ? (fr / Math.max(1, begin)) * 0.88
-    : fr < begin + m.active
-      ? 1
-      : Math.max(0, 1 - (fr - begin - m.active) / Math.max(1, m.recovery))
-
-  const kick = m.id.endsWith('k')
-  const from = kick ? hipY : shoulderY
-  const box = m.projectile ? m.projectile.at : sc.hitbox
-  const tx = ((box.x0 + box.x1) / 2) * t
-  const ty = -((box.y0 + box.y1) / 2) * t + from * (1 - t)
-
-  ctx.strokeStyle = f.character.trim
-  ctx.lineWidth = h * (kick ? 0.105 : 0.088)
-  ctx.lineCap = 'round'
-  ctx.beginPath()
-  ctx.moveTo(0, from)
-  ctx.lineTo(tx, ty)
-  ctx.stroke()
-
-  ctx.fillStyle = shade(f.character.trim, 0.3)
-  ctx.beginPath()
-  ctx.arc(tx, ty, h * (kick ? 0.065 : 0.052), 0, Math.PI * 2)
-  ctx.fill()
-}
-
-function drawProjectile(
-  ctx: CanvasRenderingContext2D, x: number, y: number, box: Box, colour: string, v: View, debug: boolean,
-): void {
-  const cy = v.floor - y - (box.y0 + box.y1) / 2
-  const r = (box.y1 - box.y0) / 2
-  const g = ctx.createRadialGradient(x, cy, 2, x, cy, r * 1.6)
-  g.addColorStop(0, '#fff')
-  g.addColorStop(0.45, colour)
-  g.addColorStop(1, 'rgba(0,0,0,0)')
-  ctx.fillStyle = g
-  ctx.beginPath()
-  ctx.ellipse(x, cy, r * 1.6, r, 0, 0, Math.PI * 2)
-  ctx.fill()
-  if (debug) drawBox(ctx, { x0: x + box.x0, y0: y + box.y0, x1: x + box.x1, y1: y + box.y1 }, 'rgba(255,200,60,0.9)', v)
+function drawProjectile(ctx: CanvasRenderingContext2D, p: Match['projectiles'][number], art: CharacterArt | null, v: View, debug: boolean): void {
+  const sx = v.sx(p.x)
+  const cy = FLOOR_Y - p.y - (p.box.y0 + p.box.y1) / 2
+  const a = art && p.anim ? art.anims[p.anim] : undefined
+  if (art && a && a.frames.length) {
+    const fr = art.frames[a.frames[Math.floor((p.age * a.fps) / 60) % a.frames.length]]
+    if (fr) drawSprite(ctx, art.image, fr, sx, Math.round(FLOOR_Y - p.y), p.vx < 0, false)
+  } else {
+    const r = (p.box.y1 - p.box.y0) / 2
+    const g = ctx.createRadialGradient(sx, cy, 1, sx, cy, r * 1.5)
+    g.addColorStop(0, '#fff')
+    g.addColorStop(0.45, '#6fb8ff')
+    g.addColorStop(1, 'rgba(0,0,0,0)')
+    ctx.fillStyle = g
+    ctx.beginPath()
+    ctx.ellipse(sx, cy, r * 1.5, r, 0, 0, Math.PI * 2)
+    ctx.fill()
+  }
+  if (debug) drawBox(ctx, { x0: p.x + p.box.x0, y0: p.y + p.box.y0, x1: p.x + p.box.x1, y1: p.y + p.box.y1 }, 'rgba(255,200,60,0.9)', v)
 }
 
 /**
- * A hit mark. White spokes for a hit, a blue arc for a guard — the same two readings the genre has
- * used since the beginning, and the fastest way to tell at a glance whether that did anything.
+ * A hit mark. The ripped sparks if we have them; otherwise white spokes for a hit and a blue arc for
+ * a guard — the same two readings the genre has used since the beginning.
  */
-function drawImpact(ctx: CanvasRenderingContext2D, im: { x: number; y: number; blocked: boolean; life: number }, v: View): void {
-  const y = v.floor - im.y
+function drawImpact(ctx: CanvasRenderingContext2D, im: Match['impacts'][number], fx: FxArt | null, v: View): void {
+  const x = v.sx(im.x)
+  const y = Math.round(FLOOR_Y - im.y)
+  const total = im.heavy ? 17 : 13
+  const age = Math.max(0, total - im.life)
+  if (fx) {
+    const fr = fxFrame(fx, im.blocked ? 'block' : im.heavy ? 'hit-heavy' : 'hit-light', age, 'hit-light')
+    if (fr) {
+      ctx.drawImage(fx.image, fr.x, fr.y, fr.w, fr.h, x - fr.ax, y - fr.ay, fr.w, fr.h)
+      return
+    }
+  }
   const t = Math.max(0, Math.min(1, im.life / 12))
   ctx.globalAlpha = t
   if (im.blocked) {
     ctx.strokeStyle = '#7dc4ff'
-    ctx.lineWidth = 4
+    ctx.lineWidth = 2
     ctx.beginPath()
-    ctx.arc(im.x, y, 20 + (1 - t) * 26, -0.9, 0.9)
+    ctx.arc(x, y, 8 + (1 - t) * 10, -0.9, 0.9)
     ctx.stroke()
   } else {
-    const r = 14 + (1 - t) * 40
+    const r = 6 + (1 - t) * 16
     ctx.strokeStyle = '#fff6e0'
-    ctx.lineWidth = 5
+    ctx.lineWidth = 2
     for (let i = 0; i < 6; i++) {
       const a = (i / 6) * Math.PI * 2 + 0.3
       ctx.beginPath()
-      ctx.moveTo(im.x + Math.cos(a) * r * 0.35, y + Math.sin(a) * r * 0.35)
-      ctx.lineTo(im.x + Math.cos(a) * r, y + Math.sin(a) * r)
+      ctx.moveTo(x + Math.cos(a) * r * 0.35, y + Math.sin(a) * r * 0.35)
+      ctx.lineTo(x + Math.cos(a) * r, y + Math.sin(a) * r)
       ctx.stroke()
     }
   }
@@ -293,178 +346,177 @@ function drawImpact(ctx: CanvasRenderingContext2D, im: { x: number; y: number; b
 
 function drawBox(ctx: CanvasRenderingContext2D, b: Box, colour: string, v: View): void {
   ctx.strokeStyle = colour
-  ctx.lineWidth = 2
-  ctx.strokeRect(b.x0, v.floor - b.y1, b.x1 - b.x0, b.y1 - b.y0)
+  ctx.lineWidth = 1
+  ctx.strokeRect(v.sx(b.x0) + 0.5, FLOOR_Y - b.y1 + 0.5, b.x1 - b.x0, b.y1 - b.y0)
 }
 
 // --- the furniture ----------------------------------------------------------------------------
 
-function font(ctx: CanvasRenderingContext2D, px: number, weight = 600): void {
+function font(ctx: CanvasRenderingContext2D, px: number, weight = 700): void {
   ctx.font = `${weight} ${px}px ui-monospace, "Courier New", monospace`
 }
 
-function drawHud(ctx: CanvasRenderingContext2D, match: Match, v: View): void {
+function drawHud(ctx: CanvasRenderingContext2D, match: Match, scene: Scene): void {
   const [a, b] = match.fighters
-  const pad = v.w * 0.022
-  const barW = v.w * 0.37
-  const barH = v.h * 0.045
-  const top = v.h * 0.035
+  const barW = 144 // one point of health is one pixel, as it was
+  const barH = 8
+  const top = 12
+  const pad = 22
 
-  bar(ctx, pad, top, barW, barH, false, a.health / a.character.health, a.character.trim)
-  bar(ctx, v.w - pad - barW, top, barW, barH, true, b.health / b.character.health, b.character.trim)
+  bar(ctx, pad, top, barW, barH, false, a.health / a.character.health)
+  bar(ctx, VIEW_W - pad - barW, top, barW, barH, true, b.health / b.character.health)
 
-  font(ctx, v.h * 0.033, 700)
+  // Portraits sit outside the bars if the art has them.
+  for (const [i, art] of scene.chars.entries()) {
+    const img = art?.portrait
+    if (!img) continue
+    const s = 18
+    const x = i === 0 ? pad - s - 3 : VIEW_W - pad + 3
+    ctx.drawImage(img, x, top - 5, s, s)
+  }
+
+  font(ctx, 7)
   ctx.textBaseline = 'top'
   ctx.fillStyle = INK
   ctx.textAlign = 'left'
-  ctx.fillText(a.character.name, pad, top + barH + 6)
+  ctx.fillText(a.character.name, pad, top + barH + 3)
   ctx.textAlign = 'right'
-  ctx.fillText(b.character.name, v.w - pad, top + barH + 6)
+  ctx.fillText(b.character.name, VIEW_W - pad, top + barH + 3)
 
   for (let i = 0; i < ROUNDS_TO_WIN; i++) {
-    pip(ctx, pad + i * v.h * 0.042, top + barH + v.h * 0.05, v.h * 0.013, match.wins[0] > i)
-    pip(ctx, v.w - pad - i * v.h * 0.042, top + barH + v.h * 0.05, v.h * 0.013, match.wins[1] > i)
+    pip(ctx, pad + barW - 6 - i * 8, top + barH + 3, match.wins[0] > i)
+    pip(ctx, VIEW_W - pad - barW + 1 + i * 8, top + barH + 3, match.wins[1] > i)
   }
 
-  const secs = Math.min(99, Math.ceil(match.timer / 60))
+  const secs = Math.min(99, Math.ceil(match.timer / SYSTEM.timerFramesPerTick))
   ctx.textAlign = 'center'
-  font(ctx, v.h * 0.085, 700)
+  font(ctx, 16)
   ctx.fillStyle = secs <= 10 ? '#e05a4f' : INK
-  ctx.fillText(String(secs).padStart(2, '0'), v.w / 2, top)
+  ctx.fillText(String(secs).padStart(2, '0'), VIEW_W / 2, top - 4)
 
-  meter(ctx, pad, v.h - v.h * 0.05, v.w * 0.24, v.h * 0.022, false, a.meter)
-  meter(ctx, v.w - pad - v.w * 0.24, v.h - v.h * 0.05, v.w * 0.24, v.h * 0.022, true, b.meter)
+  meter(ctx, pad, VIEW_H - 12, 72, 4, false, a.meter)
+  meter(ctx, VIEW_W - pad - 72, VIEW_H - 12, 72, 4, true, b.meter)
 
   for (let i = 0; i < 2; i++) {
     if (match.combo[i] < 2) continue
     ctx.textAlign = i === 0 ? 'left' : 'right'
-    font(ctx, v.h * 0.048, 700)
+    font(ctx, 10)
     ctx.fillStyle = '#ffd166'
-    ctx.fillText(`${match.combo[i]} HITS`, i === 0 ? pad : v.w - pad, v.h * 0.22)
+    ctx.fillText(`${match.combo[i]} HITS`, i === 0 ? pad : VIEW_W - pad, 46)
   }
   ctx.textBaseline = 'alphabetic'
 }
 
-function bar(
-  ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number,
-  flip: boolean, frac: number, colour: string,
-): void {
-  ctx.fillStyle = 'rgba(0,0,0,0.65)'
-  ctx.fillRect(x - 3, y - 3, w + 6, h + 6)
-  ctx.fillStyle = '#48201f'
+/** Remaining health hugs the outer edge; the damage shows as red creeping in from the middle. */
+function bar(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, flip: boolean, frac: number): void {
+  ctx.fillStyle = '#000'
+  ctx.fillRect(x - 1, y - 1, w + 2, h + 2)
+  ctx.fillStyle = BAR_RED
   ctx.fillRect(x, y, w, h)
-  const fw = Math.max(0, Math.min(1, frac)) * w
-  ctx.fillStyle = colour
+  const fw = Math.round(Math.max(0, Math.min(1, frac)) * w)
+  ctx.fillStyle = BAR_YELLOW
   ctx.fillRect(flip ? x + w - fw : x, y, fw, h)
-  ctx.strokeStyle = 'rgba(255,255,255,0.28)'
-  ctx.lineWidth = 2
-  ctx.strokeRect(x, y, w, h)
+  ctx.fillStyle = 'rgba(255,255,255,0.35)'
+  ctx.fillRect(flip ? x + w - fw : x, y, fw, 1)
 }
 
-function meter(
-  ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, flip: boolean, value: number,
-): void {
+function meter(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, flip: boolean, value: number): void {
   const seg = w / 4
   for (let i = 0; i < 4; i++) {
     const sx = flip ? x + w - (i + 1) * seg : x + i * seg
     ctx.fillStyle = 'rgba(0,0,0,0.6)'
-    ctx.fillRect(sx + 2, y, seg - 4, h)
+    ctx.fillRect(sx + 1, y, seg - 2, h)
     const fill = Math.max(0, Math.min(1, value - i))
     if (fill <= 0) continue
     ctx.fillStyle = fill >= 1 ? '#ffd166' : 'rgba(255,209,102,0.45)'
-    ctx.fillRect(sx + 2, y, (seg - 4) * fill, h)
+    ctx.fillRect(sx + 1, y, (seg - 2) * fill, h)
   }
 }
 
-function pip(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, on: boolean): void {
-  ctx.beginPath()
-  ctx.arc(x + r, y + r, r, 0, Math.PI * 2)
-  ctx.fillStyle = on ? '#ffd166' : 'rgba(255,255,255,0.22)'
-  ctx.fill()
+function pip(ctx: CanvasRenderingContext2D, x: number, y: number, on: boolean): void {
+  ctx.fillStyle = on ? '#ffd166' : 'rgba(255,255,255,0.25)'
+  ctx.fillRect(x, y + 1, 5, 5)
 }
 
-function drawBanner(ctx: CanvasRenderingContext2D, match: Match, v: View, opts: RenderOptions): void {
+function drawBanner(ctx: CanvasRenderingContext2D, match: Match, opts: RenderOptions): void {
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
+  const shadowText = (s: string, x: number, y: number, colour: string): void => {
+    ctx.fillStyle = 'rgba(0,0,0,0.8)'
+    ctx.fillText(s, x + 1, y + 1)
+    ctx.fillStyle = colour
+    ctx.fillText(s, x, y)
+  }
 
   if (match.phase === 'intro') {
     const late = match.phaseFrame > 46
-    font(ctx, v.h * 0.13, 700)
-    ctx.fillStyle = late ? '#ffd166' : INK
-    ctx.fillText(late ? 'FIGHT' : `ROUND ${match.round}`, v.w / 2, v.h * 0.36)
-    if (opts.hint && match.round === 1) controls(ctx, v)
+    font(ctx, 22)
+    shadowText(late ? 'FIGHT!' : `ROUND ${match.round}`, VIEW_W / 2, 84, late ? '#ffd166' : INK)
+    if (opts.hint && match.round === 1) controls(ctx)
   } else if (match.phase === 'ko') {
-    font(ctx, v.h * 0.15, 700)
-    ctx.fillStyle = '#e05a4f'
-    ctx.fillText(match.roundWinner === null ? 'DRAW' : 'K.O.', v.w / 2, v.h * 0.36)
+    font(ctx, 26)
+    shadowText(match.roundWinner === null ? 'DRAW' : 'K.O.', VIEW_W / 2, 84, '#e05a4f')
   } else if (match.phase === 'over') {
     const winner = match.wins[0] > match.wins[1] ? match.fighters[0] : match.fighters[1]
-    font(ctx, v.h * 0.095, 700)
-    ctx.fillStyle = '#ffd166'
-    ctx.fillText(`${winner.character.name} WINS`, v.w / 2, v.h * 0.34)
-    font(ctx, v.h * 0.036)
-    ctx.fillStyle = DIM
-    ctx.fillText('R — RUN IT BACK', v.w / 2, v.h * 0.44)
+    font(ctx, 16)
+    shadowText(`${winner.character.name} WINS`, VIEW_W / 2, 80, '#ffd166')
+    font(ctx, 7)
+    shadowText('R — RUN IT BACK', VIEW_W / 2, 96, DIM)
   }
   ctx.textBaseline = 'alphabetic'
 }
 
-function controls(ctx: CanvasRenderingContext2D, v: View): void {
+function controls(ctx: CanvasRenderingContext2D): void {
   const lines = [
-    'A D move    W jump    S crouch    hold back to block',
-    'F G H punches    C V B kicks',
-    '236 + punch fireball        623 + punch uppercut',
-    'F1 hitboxes   F2 training   1 2 3 opponent   4 two players   R reset',
+    'A D walk  W jump  S crouch  hold back to block',
+    'F G H punch   C V B kick   N = 3P   M = 3K',
+    'fwd+heavy up close = throw',
+    '5 6 7 pick P1   8 9 0 pick P2   F1 boxes   F2 dummy',
   ]
-  font(ctx, v.h * 0.031)
+  font(ctx, 7, 600)
   ctx.fillStyle = DIM
-  lines.forEach((l, i) => ctx.fillText(l, v.w / 2, v.h * 0.52 + i * v.h * 0.045))
+  lines.forEach((l, i) => ctx.fillText(l, VIEW_W / 2, 118 + i * 10))
 }
 
 /** The tuning readout: what each fighter is doing, this frame, in the genre's own vocabulary. */
-function drawFrameData(ctx: CanvasRenderingContext2D, match: Match, v: View): void {
+function drawFrameData(ctx: CanvasRenderingContext2D, match: Match): void {
   ctx.textAlign = 'left'
   ctx.textBaseline = 'top'
-  font(ctx, v.h * 0.028)
-  const lineH = v.h * 0.036
+  font(ctx, 6, 600)
+  const lineH = 7
 
   match.fighters.forEach((f, i) => {
-    const x = i === 0 ? v.w * 0.022 : v.w * 0.76
-    let y = v.h * 0.27
+    const x = i === 0 ? 6 : VIEW_W - 110
+    let y = 56
     const put = (s: string, colour = DIM): void => {
       ctx.fillStyle = colour
       ctx.fillText(s, x, y)
       y += lineH
     }
-    put(`${f.state}  ${f.stateFrame}`, INK)
+    put(`${f.state} ${f.stateFrame}`, INK)
     const m = f.action
     if (m) {
       const begin = m.startup - 1
       const fr = f.actionFrame
       const phase = fr < begin ? 'startup' : fr < begin + m.active ? 'ACTIVE' : 'recovery'
-      put(`${m.name}  ${m.startup}/${m.active}/${m.recovery}`, INK)
-      put(`f${fr + 1}/${totalFrames(m)}  ${phase}`, phase === 'ACTIVE' ? '#ff8080' : DIM)
+      put(`${m.name} ${m.startup}/${m.active}/${m.recovery}`, INK)
+      put(`f${fr + 1}/${totalFrames(m)} ${phase}`, phase === 'ACTIVE' ? '#ff8080' : DIM)
       const adv = blockAdvantage(m)
-      put(`on block ${adv >= 0 ? '+' : ''}${adv}`)
+      put(`on block ${adv >= 0 ? '+' : ''}${adv}  dmg ${m.damage}`)
     }
     if (f.hitstop > 0) put(`hitstop ${f.hitstop}`, '#ffd166')
     if (f.invulnerable) put('INVULNERABLE', '#ffd166')
-    put(`x ${f.x.toFixed(0)}  y ${f.y.toFixed(0)}  hp ${f.health}`)
+    put(`x ${f.x.toFixed(0)} y ${f.y.toFixed(0)} hp ${f.health} stun ${f.stun}`)
   })
 
   ctx.textAlign = 'center'
   ctx.fillStyle = DIM
-  ctx.fillText(`gap ${Math.abs(match.fighters[0].x - match.fighters[1].x).toFixed(0)}`, v.w / 2, v.h * 0.27)
-  ctx.fillText(`frame ${match.frame}`, v.w / 2, v.h * 0.27 + lineH)
+  ctx.fillText(`gap ${Math.abs(match.fighters[0].x - match.fighters[1].x).toFixed(0)}  frame ${match.frame}`, VIEW_W / 2, 40)
   ctx.textBaseline = 'alphabetic'
 }
 
 /**
- * Lighten or darken a hex colour. Placeholder art needs exactly this much colour theory.
- *
- * Returns hex rather than `rgb(...)` so that shading a shade works — the hit flash is a lightened
- * body colour, and the legs are that colour darkened. Returning `rgb()` made the second call parse
- * `NaN` and paint everything black, which is a very confusing way to find out.
+ * Lighten or darken a hex colour. Returns hex rather than `rgb(...)` so that shading a shade works.
  */
 function shade(hex: string, amount: number): string {
   const n = parseInt(hex.slice(1), 16)

@@ -1,0 +1,1809 @@
+{
+ "$comment": "Street Fighter II: Champion Edition (sf2ceea, MAME 0.276) system numbers measured by tools/sf2-probe. Frames are 60Hz. Same shape as apps/fighter/src/data/system.json; fields the ROM has no single answer for keep the seed value and say so in $notes.",
+ "fps": 60,
+ "screen": [
+  384,
+  224
+ ],
+ "floorScreenY": 200,
+ "health": 144,
+ "roundSeconds": 99,
+ "roundsToWin": 2,
+ "introFrames": 80,
+ "koFrames": 150,
+ "stageHalf": 384,
+ "maxSpread": 330,
+ "gravity": 0.312,
+ "prejumpFrames": 4,
+ "landingFrames": 1,
+ "airAttackLandingFrames": 7,
+ "hitstop": {
+  "light": 14,
+  "medium": 14,
+  "heavy": 14
+ },
+ "defenderFreeze": {
+  "light": 16,
+  "medium": 16,
+  "heavy": 16
+ },
+ "hitstun": {
+  "light": 14,
+  "medium": 19,
+  "heavy": 23
+ },
+ "blockstun": {
+  "light": 15,
+  "medium": 20,
+  "heavy": 24
+ },
+ "pushback": {
+  "hit": 30,
+  "block": 30,
+  "mediumHit": 54,
+  "mediumBlock": 54,
+  "heavyHit": 78,
+  "heavyBlock": 78
+ },
+ "chipFraction": 0.25,
+ "comboScaling": false,
+ "knockdownFrames": 97,
+ "wakeupInvuln": 8,
+ "stun": {
+  "light": 5,
+  "medium": 8,
+  "heavy": 13,
+  "special": 15,
+  "decayEvery": null,
+  "threshold": 30,
+  "dizzyFrames": 242
+ },
+ "throw": {
+  "hold": 6,
+  "knockdown": true,
+  "meter": 8,
+  "victimStuck": 44
+ },
+ "meter": {
+  "hit": 6,
+  "block": 3,
+  "whiffSpecial": 2,
+  "max": 4
+ },
+ "timer": {
+  "framesPerTick": 40,
+  "realSecondsPerTick": 0.671,
+  "roundRealSeconds": 66.4
+ },
+ "$notes": {
+  "hitstop": "attacker animation freeze on contact, identical for every strength; the defender freezes 2 frames longer (defenderFreeze)",
+  "hitstun": "frames from the end of the attacker freeze until the defender can act (jump input accepted); block stun is 1 frame longer because the guard pose is held one extra frame",
+  "pushback": "total defender slide in px on a mid-screen hit: light 30, medium 54, heavy 78, identical on block; the slide decelerates (8,8,8,7,7,7,6,5,5,4,3,2,1...)",
+  "stun": "dizzy points per hit are random within a strength band (see stunRanges); the meter is cleared when its timer (stunTimer, reset by each hit to the value listed) runs out",
+  "dizzy": "dizzy when the meter would exceed 30 (30 survives, 31 does not; probe pokes 22..29 then a jab); dizzy lasts dizzyFrames if nobody mashes",
+  "knockdownFrames": "sweep: hit to the first frame the victim can act, including the 14 frame freeze",
+  "landingFrames": "empty jump landing: a normal is accepted on the frame after touchdown; landing after an air attack is airAttackLandingFrames",
+  "kept": "introFrames, koFrames, stageHalf, maxSpread, wakeupInvuln, meter, chipFraction were not measured"
+ },
+ "measured": {
+  "hitstop": {
+   "light": {
+    "mode": 14,
+    "min": 14,
+    "max": 14,
+    "n": 66
+   },
+   "medium": {
+    "mode": 14,
+    "min": 14,
+    "max": 14,
+    "n": 64
+   },
+   "heavy": {
+    "mode": 14,
+    "min": 14,
+    "max": 14,
+    "n": 47
+   }
+  },
+  "defenderFreeze": {
+   "light": {
+    "mode": 16,
+    "min": 16,
+    "max": 16,
+    "n": 66
+   },
+   "medium": {
+    "mode": 16,
+    "min": 16,
+    "max": 16,
+    "n": 64
+   },
+   "heavy": {
+    "mode": 16,
+    "min": 16,
+    "max": 16,
+    "n": 47
+   }
+  },
+  "hitstun": {
+   "light": {
+    "mode": 14,
+    "min": 14,
+    "max": 14,
+    "n": 66
+   },
+   "medium": {
+    "mode": 19,
+    "min": 14,
+    "max": 19,
+    "n": 64
+   },
+   "heavy": {
+    "mode": 23,
+    "min": 14,
+    "max": 23,
+    "n": 47
+   }
+  },
+  "blockstun": {
+   "light": {
+    "mode": 15,
+    "min": 15,
+    "max": 15,
+    "n": 56
+   },
+   "medium": {
+    "mode": 20,
+    "min": 20,
+    "max": 20,
+    "n": 56
+   },
+   "heavy": {
+    "mode": 24,
+    "min": 24,
+    "max": 24,
+    "n": 49
+   }
+  },
+  "pushbackHit": {
+   "light": {
+    "mode": 30,
+    "min": 11.5,
+    "max": 42,
+    "n": 66
+   },
+   "medium": {
+    "mode": 54,
+    "min": -0.5,
+    "max": 54,
+    "n": 64
+   },
+   "heavy": {
+    "mode": 78,
+    "min": -23.5,
+    "max": 78,
+    "n": 47
+   }
+  },
+  "pushbackBlock": {
+   "light": {
+    "mode": 30,
+    "min": -4.5,
+    "max": 35.4,
+    "n": 56
+   },
+   "medium": {
+    "mode": 54,
+    "min": 5.5,
+    "max": 66.5,
+    "n": 56
+   },
+   "heavy": {
+    "mode": 78,
+    "min": 17,
+    "max": 92,
+    "n": 49
+   }
+  },
+  "damage": {
+   "light": {
+    "mode": 6,
+    "min": 4,
+    "max": 13.9,
+    "n": 66
+   },
+   "medium": {
+    "mode": 14,
+    "min": 5.5,
+    "max": 15.8,
+    "n": 64
+   },
+   "heavy": {
+    "mode": 18,
+    "min": 10.67,
+    "max": 19.67,
+    "n": 47
+   }
+  },
+  "stunRanges": {
+   "light": {
+    "mode": 4,
+    "min": 1,
+    "max": 16,
+    "n": 132
+   },
+   "medium": {
+    "mode": 8,
+    "min": 2,
+    "max": 11,
+    "n": 128
+   },
+   "heavy": {
+    "mode": 15,
+    "min": 5,
+    "max": 17,
+    "n": 94
+   }
+  },
+  "stunTimer": {
+   "light": {
+    "mode": 40,
+    "min": 40,
+    "max": 60,
+    "n": 66
+   },
+   "medium": {
+    "mode": 60,
+    "min": 40,
+    "max": 60,
+    "n": 64
+   },
+   "heavy": {
+    "mode": 80,
+    "min": 50,
+    "max": 80,
+    "n": 47
+   }
+  },
+  "knockdownStuck": [
+   97,
+   97,
+   97,
+   97,
+   97,
+   98,
+   98,
+   98,
+   98,
+   98,
+   97,
+   97
+  ],
+  "throwDamageFrame": [
+   16,
+   6,
+   8,
+   16,
+   6,
+   6,
+   8,
+   8,
+   74,
+   74,
+   74,
+   74,
+   6,
+   6,
+   7,
+   7,
+   10,
+   10,
+   26,
+   26,
+   13,
+   13,
+   8,
+   8,
+   35,
+   35,
+   35,
+   35,
+   6,
+   6,
+   38,
+   38,
+   18,
+   4,
+   76,
+   82,
+   5,
+   5,
+   10,
+   10,
+   78,
+   84,
+   36,
+   36,
+   7,
+   7,
+   17,
+   17,
+   74,
+   74,
+   17,
+   8,
+   11,
+   11,
+   12,
+   12,
+   78,
+   78,
+   78,
+   78,
+   99,
+   98,
+   98,
+   99,
+   78,
+   78,
+   78,
+   78,
+   75,
+   70,
+   75,
+   70,
+   81,
+   75,
+   81,
+   75,
+   6,
+   6,
+   8,
+   8,
+   25,
+   25,
+   25,
+   25,
+   6,
+   6,
+   8,
+   8,
+   79,
+   79,
+   74,
+   74,
+   67,
+   67,
+   70,
+   70
+  ],
+  "throwVictimStuck": [
+   38,
+   44,
+   38,
+   38,
+   44,
+   44,
+   148,
+   136,
+   148,
+   136,
+   38,
+   38,
+   43,
+   43,
+   62,
+   62,
+   60,
+   60,
+   44,
+   44,
+   109,
+   109,
+   109,
+   108,
+   140,
+   141,
+   173,
+   173,
+   36,
+   137,
+   143,
+   37,
+   37,
+   46,
+   46,
+   151,
+   146,
+   152,
+   144,
+   39,
+   39,
+   53,
+   53,
+   147,
+   136,
+   44,
+   59,
+   59,
+   152,
+   139,
+   151,
+   139,
+   172,
+   160,
+   172,
+   160,
+   152,
+   139,
+   151,
+   139,
+   141,
+   148,
+   141,
+   148,
+   143,
+   154,
+   143,
+   154,
+   53,
+   53,
+   60,
+   60,
+   130,
+   137,
+   130,
+   130,
+   38,
+   38,
+   44,
+   44,
+   198,
+   199,
+   185,
+   173,
+   185,
+   185,
+   190,
+   189
+  ],
+  "dizzyThresholdProbe": [
+   {
+    "preloaded": 22,
+    "results": [
+     {
+      "added": 4,
+      "dizzy": false,
+      "stunAfter": 26
+     },
+     {
+      "added": 6,
+      "dizzy": false,
+      "stunAfter": 28
+     },
+     {
+      "added": 6,
+      "dizzy": false,
+      "stunAfter": 28
+     }
+    ]
+   },
+   {
+    "preloaded": 25,
+    "results": [
+     {
+      "added": 3,
+      "dizzy": false,
+      "stunAfter": 28
+     },
+     {
+      "added": 3,
+      "dizzy": false,
+      "stunAfter": 28
+     },
+     {
+      "added": 4,
+      "dizzy": false,
+      "stunAfter": 29
+     }
+    ]
+   },
+   {
+    "preloaded": 27,
+    "results": [
+     {
+      "added": 3,
+      "dizzy": false,
+      "stunAfter": 30
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     }
+    ]
+   },
+   {
+    "preloaded": 28,
+    "results": [
+     {
+      "added": 1,
+      "dizzy": false,
+      "stunAfter": 29
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": 2,
+      "dizzy": false,
+      "stunAfter": 30
+     }
+    ]
+   },
+   {
+    "preloaded": 29,
+    "results": [
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     }
+    ]
+   },
+   {
+    "preloaded": 22,
+    "results": [
+     {
+      "added": 7,
+      "dizzy": false,
+      "stunAfter": 29
+     },
+     {
+      "added": 6,
+      "dizzy": false,
+      "stunAfter": 28
+     },
+     {
+      "added": 4,
+      "dizzy": false,
+      "stunAfter": 26
+     }
+    ]
+   },
+   {
+    "preloaded": 25,
+    "results": [
+     {
+      "added": 5,
+      "dizzy": false,
+      "stunAfter": 30
+     },
+     {
+      "added": 4,
+      "dizzy": false,
+      "stunAfter": 29
+     },
+     {
+      "added": 4,
+      "dizzy": false,
+      "stunAfter": 29
+     }
+    ]
+   },
+   {
+    "preloaded": 27,
+    "results": [
+     {
+      "added": 2,
+      "dizzy": false,
+      "stunAfter": 29
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     }
+    ]
+   },
+   {
+    "preloaded": 28,
+    "results": [
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     }
+    ]
+   },
+   {
+    "preloaded": 29,
+    "results": [
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     }
+    ]
+   },
+   {
+    "preloaded": 22,
+    "results": [
+     {
+      "added": 3,
+      "dizzy": false,
+      "stunAfter": 25
+     },
+     {
+      "added": 4,
+      "dizzy": false,
+      "stunAfter": 26
+     },
+     {
+      "added": 4,
+      "dizzy": false,
+      "stunAfter": 26
+     }
+    ]
+   },
+   {
+    "preloaded": 25,
+    "results": [
+     {
+      "added": 3,
+      "dizzy": false,
+      "stunAfter": 28
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": 2,
+      "dizzy": false,
+      "stunAfter": 27
+     }
+    ]
+   },
+   {
+    "preloaded": 27,
+    "results": [
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     }
+    ]
+   },
+   {
+    "preloaded": 28,
+    "results": [
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     }
+    ]
+   },
+   {
+    "preloaded": 29,
+    "results": [
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     }
+    ]
+   },
+   {
+    "preloaded": 22,
+    "results": [
+     {
+      "added": 4,
+      "dizzy": false,
+      "stunAfter": 26
+     },
+     {
+      "added": 5,
+      "dizzy": false,
+      "stunAfter": 27
+     },
+     {
+      "added": 6,
+      "dizzy": false,
+      "stunAfter": 28
+     }
+    ]
+   },
+   {
+    "preloaded": 25,
+    "results": [
+     {
+      "added": 5,
+      "dizzy": false,
+      "stunAfter": 30
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": 5,
+      "dizzy": false,
+      "stunAfter": 30
+     }
+    ]
+   },
+   {
+    "preloaded": 27,
+    "results": [
+     {
+      "added": 2,
+      "dizzy": false,
+      "stunAfter": 29
+     },
+     {
+      "added": 2,
+      "dizzy": false,
+      "stunAfter": 29
+     },
+     {
+      "added": 3,
+      "dizzy": false,
+      "stunAfter": 30
+     }
+    ]
+   },
+   {
+    "preloaded": 28,
+    "results": [
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     }
+    ]
+   },
+   {
+    "preloaded": 29,
+    "results": [
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     }
+    ]
+   },
+   {
+    "preloaded": 22,
+    "results": [
+     {
+      "added": 6,
+      "dizzy": false,
+      "stunAfter": 28
+     },
+     {
+      "added": 1,
+      "dizzy": false,
+      "stunAfter": 23
+     },
+     {
+      "added": 5,
+      "dizzy": false,
+      "stunAfter": 27
+     }
+    ]
+   },
+   {
+    "preloaded": 25,
+    "results": [
+     {
+      "added": 5,
+      "dizzy": false,
+      "stunAfter": 30
+     },
+     {
+      "added": 1,
+      "dizzy": false,
+      "stunAfter": 26
+     },
+     {
+      "added": 5,
+      "dizzy": false,
+      "stunAfter": 30
+     }
+    ]
+   },
+   {
+    "preloaded": 27,
+    "results": [
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     }
+    ]
+   },
+   {
+    "preloaded": 28,
+    "results": [
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": 2,
+      "dizzy": false,
+      "stunAfter": 30
+     }
+    ]
+   },
+   {
+    "preloaded": 29,
+    "results": [
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     }
+    ]
+   },
+   {
+    "preloaded": 22,
+    "results": [
+     {
+      "added": 4,
+      "dizzy": false,
+      "stunAfter": 26
+     },
+     {
+      "added": 1,
+      "dizzy": false,
+      "stunAfter": 23
+     },
+     {
+      "added": 4,
+      "dizzy": false,
+      "stunAfter": 26
+     }
+    ]
+   },
+   {
+    "preloaded": 25,
+    "results": [
+     {
+      "added": 3,
+      "dizzy": false,
+      "stunAfter": 28
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": 3,
+      "dizzy": false,
+      "stunAfter": 28
+     }
+    ]
+   },
+   {
+    "preloaded": 27,
+    "results": [
+     {
+      "added": 3,
+      "dizzy": false,
+      "stunAfter": 30
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     }
+    ]
+   },
+   {
+    "preloaded": 28,
+    "results": [
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     }
+    ]
+   },
+   {
+    "preloaded": 29,
+    "results": [
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     }
+    ]
+   },
+   {
+    "preloaded": 22,
+    "results": [
+     {
+      "added": 2,
+      "dizzy": false,
+      "stunAfter": 24
+     },
+     {
+      "added": 6,
+      "dizzy": false,
+      "stunAfter": 28
+     },
+     {
+      "added": 3,
+      "dizzy": false,
+      "stunAfter": 25
+     }
+    ]
+   },
+   {
+    "preloaded": 25,
+    "results": [
+     {
+      "added": 4,
+      "dizzy": false,
+      "stunAfter": 29
+     },
+     {
+      "added": 3,
+      "dizzy": false,
+      "stunAfter": 28
+     },
+     {
+      "added": 3,
+      "dizzy": false,
+      "stunAfter": 28
+     }
+    ]
+   },
+   {
+    "preloaded": 27,
+    "results": [
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": 3,
+      "dizzy": false,
+      "stunAfter": 30
+     }
+    ]
+   },
+   {
+    "preloaded": 28,
+    "results": [
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     }
+    ]
+   },
+   {
+    "preloaded": 29,
+    "results": [
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     }
+    ]
+   },
+   {
+    "preloaded": 22,
+    "results": [
+     {
+      "added": 4,
+      "dizzy": false,
+      "stunAfter": 26
+     },
+     {
+      "added": 6,
+      "dizzy": false,
+      "stunAfter": 28
+     },
+     {
+      "added": 6,
+      "dizzy": false,
+      "stunAfter": 28
+     }
+    ]
+   },
+   {
+    "preloaded": 25,
+    "results": [
+     {
+      "added": 2,
+      "dizzy": false,
+      "stunAfter": 27
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": 2,
+      "dizzy": false,
+      "stunAfter": 27
+     }
+    ]
+   },
+   {
+    "preloaded": 27,
+    "results": [
+     {
+      "added": 2,
+      "dizzy": false,
+      "stunAfter": 29
+     },
+     {
+      "added": 3,
+      "dizzy": false,
+      "stunAfter": 30
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     }
+    ]
+   },
+   {
+    "preloaded": 28,
+    "results": [
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     }
+    ]
+   },
+   {
+    "preloaded": 29,
+    "results": [
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     }
+    ]
+   },
+   {
+    "preloaded": 22,
+    "results": [
+     {
+      "added": 2,
+      "dizzy": false,
+      "stunAfter": 24
+     },
+     {
+      "added": 6,
+      "dizzy": false,
+      "stunAfter": 28
+     },
+     {
+      "added": 2,
+      "dizzy": false,
+      "stunAfter": 24
+     }
+    ]
+   },
+   {
+    "preloaded": 25,
+    "results": [
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": 4,
+      "dizzy": false,
+      "stunAfter": 29
+     },
+     {
+      "added": 3,
+      "dizzy": false,
+      "stunAfter": 28
+     }
+    ]
+   },
+   {
+    "preloaded": 27,
+    "results": [
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": 3,
+      "dizzy": false,
+      "stunAfter": 30
+     }
+    ]
+   },
+   {
+    "preloaded": 28,
+    "results": [
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     }
+    ]
+   },
+   {
+    "preloaded": 29,
+    "results": [
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     }
+    ]
+   },
+   {
+    "preloaded": 22,
+    "results": [
+     {
+      "added": 5,
+      "dizzy": false,
+      "stunAfter": 27
+     },
+     {
+      "added": 4,
+      "dizzy": false,
+      "stunAfter": 26
+     },
+     {
+      "added": 4,
+      "dizzy": false,
+      "stunAfter": 26
+     }
+    ]
+   },
+   {
+    "preloaded": 25,
+    "results": [
+     {
+      "added": 5,
+      "dizzy": false,
+      "stunAfter": 30
+     },
+     {
+      "added": 2,
+      "dizzy": false,
+      "stunAfter": 27
+     },
+     {
+      "added": 2,
+      "dizzy": false,
+      "stunAfter": 27
+     }
+    ]
+   },
+   {
+    "preloaded": 27,
+    "results": [
+     {
+      "added": 3,
+      "dizzy": false,
+      "stunAfter": 30
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     }
+    ]
+   },
+   {
+    "preloaded": 28,
+    "results": [
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     }
+    ]
+   },
+   {
+    "preloaded": 29,
+    "results": [
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     }
+    ]
+   },
+   {
+    "preloaded": 22,
+    "results": [
+     {
+      "added": 6,
+      "dizzy": false,
+      "stunAfter": 28
+     },
+     {
+      "added": 3,
+      "dizzy": false,
+      "stunAfter": 25
+     },
+     {
+      "added": 2,
+      "dizzy": false,
+      "stunAfter": 24
+     }
+    ]
+   },
+   {
+    "preloaded": 25,
+    "results": [
+     {
+      "added": 3,
+      "dizzy": false,
+      "stunAfter": 28
+     },
+     {
+      "added": 4,
+      "dizzy": false,
+      "stunAfter": 29
+     },
+     {
+      "added": 2,
+      "dizzy": false,
+      "stunAfter": 27
+     }
+    ]
+   },
+   {
+    "preloaded": 27,
+    "results": [
+     {
+      "added": 3,
+      "dizzy": false,
+      "stunAfter": 30
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     }
+    ]
+   },
+   {
+    "preloaded": 28,
+    "results": [
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": 2,
+      "dizzy": false,
+      "stunAfter": 30
+     }
+    ]
+   },
+   {
+    "preloaded": 29,
+    "results": [
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     }
+    ]
+   },
+   {
+    "preloaded": 22,
+    "results": [
+     {
+      "added": 2,
+      "dizzy": false,
+      "stunAfter": 24
+     },
+     {
+      "added": 4,
+      "dizzy": false,
+      "stunAfter": 26
+     },
+     {
+      "added": 6,
+      "dizzy": false,
+      "stunAfter": 28
+     }
+    ]
+   },
+   {
+    "preloaded": 25,
+    "results": [
+     {
+      "added": 2,
+      "dizzy": false,
+      "stunAfter": 27
+     },
+     {
+      "added": 2,
+      "dizzy": false,
+      "stunAfter": 27
+     },
+     {
+      "added": 5,
+      "dizzy": false,
+      "stunAfter": 30
+     }
+    ]
+   },
+   {
+    "preloaded": 27,
+    "results": [
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     }
+    ]
+   },
+   {
+    "preloaded": 28,
+    "results": [
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     }
+    ]
+   },
+   {
+    "preloaded": 29,
+    "results": [
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     },
+     {
+      "added": null,
+      "dizzy": true,
+      "stunAfter": 0
+     }
+    ]
+   }
+  ],
+  "dizzyFrames": [
+   192,
+   279,
+   309,
+   218,
+   194,
+   198,
+   338,
+   339,
+   218,
+   192,
+   189
+  ],
+  "perCharacter": [
+   {
+    "id": "balrog",
+    "gravity": 0.312,
+    "vy0": 6.813,
+    "prejump": 4,
+    "walkFwd": 3.5,
+    "walkBack": 3,
+    "landing": 1,
+    "airAttackLanding": 7
+   },
+   {
+    "id": "bison",
+    "gravity": 0.375,
+    "vy0": 8.813,
+    "prejump": 3,
+    "walkFwd": 4,
+    "walkBack": 3,
+    "landing": 1,
+    "airAttackLanding": 7
+   },
+   {
+    "id": "blanka",
+    "gravity": 0.562,
+    "vy0": 10.563,
+    "prejump": 5,
+    "walkFwd": 2.25,
+    "walkBack": 1.875,
+    "landing": 1,
+    "airAttackLanding": 7
+   },
+   {
+    "id": "chunli",
+    "gravity": 0.438,
+    "vy0": 9.75,
+    "prejump": 4,
+    "walkFwd": 4,
+    "walkBack": 3,
+    "landing": 0,
+    "airAttackLanding": 7
+   },
+   {
+    "id": "dhalsim",
+    "gravity": 0.187,
+    "vy0": 5.813,
+    "prejump": 3,
+    "walkFwd": 2,
+    "walkBack": 1.375,
+    "landing": null,
+    "airAttackLanding": 7
+   },
+   {
+    "id": "guile",
+    "gravity": 0.282,
+    "vy0": 6.594,
+    "prejump": 4,
+    "walkFwd": 3.375,
+    "walkBack": 2.5,
+    "landing": 0,
+    "airAttackLanding": 7
+   },
+   {
+    "id": "honda",
+    "gravity": 0.297,
+    "vy0": 6.328,
+    "prejump": 7,
+    "walkFwd": 2.375,
+    "walkBack": 1.625,
+    "landing": null,
+    "airAttackLanding": 7
+   },
+   {
+    "id": "ken",
+    "gravity": 0.312,
+    "vy0": 6.813,
+    "prejump": 4,
+    "walkFwd": 3.188,
+    "walkBack": 2.125,
+    "landing": 1,
+    "airAttackLanding": 7
+   },
+   {
+    "id": "ryu",
+    "gravity": 0.312,
+    "vy0": 6.813,
+    "prejump": 4,
+    "walkFwd": 3,
+    "walkBack": 2,
+    "landing": 1,
+    "airAttackLanding": 7
+   },
+   {
+    "id": "sagat",
+    "gravity": 0.344,
+    "vy0": 6.906,
+    "prejump": 3,
+    "walkFwd": 2.5,
+    "walkBack": 2,
+    "landing": 1,
+    "airAttackLanding": 7
+   },
+   {
+    "id": "vega",
+    "gravity": 0.687,
+    "vy0": 11.438,
+    "prejump": 5,
+    "walkFwd": 4.5,
+    "walkBack": 3.5,
+    "landing": 2,
+    "airAttackLanding": 7
+   },
+   {
+    "id": "zangief",
+    "gravity": 0.344,
+    "vy0": 6.906,
+    "prejump": 6,
+    "walkFwd": 2.5,
+    "walkBack": 1.5,
+    "landing": 0,
+    "airAttackLanding": 7
+   }
+  ]
+ }
+}

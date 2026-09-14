@@ -1,0 +1,74 @@
+{
+  "$comment": "System-wide fight rules measured out of Street Fighter II: Champion Edition by tools/sf2-probe (see research/rom/sf2ce/system.json for the raw readings); written by tools/sf2-probe/derive/adopt.mjs. Arcade pixels, 60Hz frames, health 144.",
+  "fps": 60,
+  "screen": [
+    384,
+    224
+  ],
+  "floorScreenY": 200,
+  "health": 144,
+  "roundSeconds": 99,
+  "roundsToWin": 2,
+  "introFrames": 80,
+  "koFrames": 150,
+  "stageHalf": 384,
+  "maxSpread": 330,
+  "gravity": 0.312,
+  "prejumpFrames": 4,
+  "landingFrames": 1,
+  "hitstop": {
+    "light": 14,
+    "medium": 14,
+    "heavy": 14
+  },
+  "hitstun": {
+    "light": 14,
+    "medium": 19,
+    "heavy": 23
+  },
+  "blockstun": {
+    "light": 15,
+    "medium": 20,
+    "heavy": 24
+  },
+  "pushback": {
+    "hit": 6,
+    "block": 6,
+    "mediumHit": 10.8,
+    "mediumBlock": 10.8,
+    "heavyHit": 15.6,
+    "heavyBlock": 15.6
+  },
+  "chipFraction": 0.25,
+  "comboScaling": false,
+  "knockdownFrames": 60,
+  "wakeupInvuln": 8,
+  "stun": {
+    "light": 5,
+    "medium": 8,
+    "heavy": 13,
+    "special": 15,
+    "timer": {
+      "light": 40,
+      "medium": 60,
+      "heavy": 80,
+      "sweep": 130,
+      "special": 120
+    },
+    "dizzyFrames": 242
+  },
+  "throw": {
+    "hold": 56,
+    "knockdown": true,
+    "meter": 8
+  },
+  "meter": {
+    "hit": 6,
+    "block": 3,
+    "whiffSpecial": 2,
+    "max": 4
+  },
+  "airAttackLandingFrames": 7,
+  "defenderFreezeExtra": 2,
+  "timerFramesPerTick": 40
+}

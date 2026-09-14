@@ -4,12 +4,17 @@
 // the match ticks, because the sim reads input from history and nowhere else. A CPU pushes into the
 // same history through the same shape of frame, which is what stops it being able to do anything a
 // player cannot.
+//
+// Art loads in the background and the match does not wait for it: the sim is complete without a
+// single sprite, so the fight starts as boxes and the sprites appear as their atlases arrive.
 
 import { GameLoop } from '@apex/engine/app/GameLoop'
 import { Button, type ButtonMask } from '../sim/Motion'
 import { Match } from '../sim/Match'
+import { CHARACTERS } from '../sim/Character'
 import { Cpu, type Difficulty } from '../sim/Cpu'
-import { render, type RenderOptions } from '../view/Render'
+import { render, type RenderOptions, type Scene } from '../view/Render'
+import { loadCharacterArt, loadFxArt, loadStageArt } from '../view/Sprites'
 
 interface Pad {
   left: string[]
@@ -19,11 +24,15 @@ interface Pad {
   buttons: Array<[string, ButtonMask]>
 }
 
+const PPP = Button.LP | Button.MP | Button.HP
+const KKK = Button.LK | Button.MK | Button.HK
+
 const P1: Pad = {
   left: ['KeyA'], right: ['KeyD'], up: ['KeyW'], down: ['KeyS'],
   buttons: [
     ['KeyF', Button.LP], ['KeyG', Button.MP], ['KeyH', Button.HP],
     ['KeyC', Button.LK], ['KeyV', Button.MK], ['KeyB', Button.HK],
+    ['KeyN', PPP], ['KeyM', KKK],
   ],
 }
 
@@ -32,6 +41,7 @@ const P2: Pad = {
   buttons: [
     ['Numpad4', Button.LP], ['Numpad5', Button.MP], ['Numpad6', Button.HP],
     ['Numpad1', Button.LK], ['Numpad2', Button.MK], ['Numpad3', Button.HK],
+    ['Numpad7', PPP], ['Numpad8', KKK],
   ],
 }
 
@@ -39,15 +49,24 @@ const P2: Pad = {
 const GAMEPAD_BUTTONS: Array<[number, ButtonMask]> = [
   [2, Button.LP], [3, Button.MP], [5, Button.HP],
   [0, Button.LK], [1, Button.MK], [7, Button.HK],
+  [4, PPP], [6, KKK],
 ]
 
 export type Opponent = Difficulty | 'human'
 
+export interface GameSettings {
+  p1?: string
+  p2?: string
+  stage?: string
+}
+
 export class Game {
-  readonly match: Match
+  match: Match
   readonly cpu = new Cpu('easy')
   opponent: Opponent = 'easy'
   options: RenderOptions = { debug: false, hint: true }
+  readonly scene: Scene = { chars: [null, null], stage: null, fx: null }
+  stage: string
 
   private readonly ctx: CanvasRenderingContext2D
   private readonly held = new Set<string>()
@@ -57,11 +76,13 @@ export class Game {
   private readonly onKeyUp: (e: KeyboardEvent) => void
   private readonly onBlur: () => void
 
-  constructor(canvas: HTMLCanvasElement, leftId = 'kestrel', rightId = 'bollard') {
+  constructor(canvas: HTMLCanvasElement, settings: GameSettings = {}) {
     const ctx = canvas.getContext('2d', { alpha: false })
     if (!ctx) throw new Error('fighter: no 2D context')
     this.ctx = ctx
-    this.match = new Match(leftId, rightId)
+    this.stage = settings.stage ?? 'airbase'
+    this.match = new Match(settings.p1 ?? 'ryu', settings.p2 ?? 'zangief')
+    void this.loadArt()
 
     this.resize = (): void => {
       const dpr = Math.min(2, window.devicePixelRatio || 1)
@@ -91,7 +112,7 @@ export class Game {
       {
         beginFrame: () => 1,
         simTick: () => this.tick(),
-        render: () => render(this.ctx, this.match, this.options),
+        render: () => render(this.ctx, this.match, this.scene, this.options),
       },
       null,
       { simHz: 60, maxSubsteps: 5 },
@@ -102,8 +123,36 @@ export class Game {
     this.loop.start()
   }
 
-  /** Keys that are not fighting: toggles, difficulty, reset. Returns true if it was one. */
+  /** Fetch whatever art exists for the current pair and the stage. Missing art is not an error. */
+  private async loadArt(): Promise<void> {
+    const [a, b] = this.match.fighters.map((f) => f.character)
+    const [ca, cb, stage, fx] = await Promise.all([
+      loadCharacterArt(a.art),
+      loadCharacterArt(b.art),
+      this.scene.stage?.id === this.stage ? Promise.resolve(this.scene.stage) : loadStageArt(this.stage),
+      this.scene.fx ? Promise.resolve(this.scene.fx) : loadFxArt(),
+    ])
+    // The pair may have changed while we were fetching; only dress the fighters we fetched for.
+    const [na, nb] = this.match.fighters.map((f) => f.character)
+    if (na === a) this.scene.chars[0] = ca
+    if (nb === b) this.scene.chars[1] = cb
+    this.scene.stage = stage
+    this.scene.fx = fx
+  }
+
+  /** New pair, new match. Keeps the opponent setting and the toggles. */
+  setFighters(p1: string, p2: string): void {
+    this.match = new Match(p1, p2)
+    this.scene.chars = [null, null]
+    this.cpu.reset()
+    this.options.hint = true
+    void this.loadArt()
+  }
+
+  /** Keys that are not fighting: toggles, difficulty, reset, who is fighting. Returns true if it was one. */
   private shortcut(code: string): boolean {
+    const ids = CHARACTERS.map((c) => c.id)
+    const [p1, p2] = this.match.fighters.map((f) => f.character.id)
     switch (code) {
       case 'F1':
         this.options.debug = !this.options.debug
@@ -123,6 +172,20 @@ export class Game {
       case 'Digit4':
         this.setOpponent('human')
         return true
+      case 'Digit5':
+      case 'Digit6':
+      case 'Digit7': {
+        const id = ids[Number(code.slice(-1)) - 5]
+        if (id) this.setFighters(id, p2)
+        return true
+      }
+      case 'Digit8':
+      case 'Digit9':
+      case 'Digit0': {
+        const id = ids[(Number(code.slice(-1)) + 2) % 10]
+        if (id) this.setFighters(p1, id)
+        return true
+      }
       case 'KeyR':
         this.reset()
         return true
@@ -141,19 +204,7 @@ export class Game {
   }
 
   reset(): void {
-    const m = this.match
-    m.wins[0] = 0
-    m.wins[1] = 0
-    m.round = 1
-    m.timer = 99 * 60
-    m.projectiles.length = 0
-    m.combo[0] = 0
-    m.combo[1] = 0
-    m.roundWinner = null
-    m.fighters[0].reset(-160, 1)
-    m.fighters[1].reset(160, -1)
-    m.phase = 'intro'
-    m.phaseFrame = 0
+    this.match.restart()
     this.cpu.reset()
     this.options.hint = true
   }

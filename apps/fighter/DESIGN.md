@@ -15,21 +15,26 @@ knocked through a wall.** Not a 3D fighter with a 2D mode bolted on — those ar
 Two places, from one build. `just dev fighter` serves it standalone on :5184, which is where the
 tuning happens. The arcade mounts the same game through `src/app/module.ts` at
 [arcade.siomporas.com/crown](https://arcade.siomporas.com/crown) — **unlisted**: it resolves as a
-URL and the lobby does not draw a cabinet for it, because the stand-in renderer is not something to
-put on a lit sign. `UNLISTED` in `apps/arcade/src/catalog.ts` is that second list; moving the entry
-into `GAMES` is what puts it in the row, and that is the moment it needs a cabinet's worth of art.
+URL and the lobby does not draw a cabinet for it. `UNLISTED` in `apps/arcade/src/catalog.ts` is
+that second list; moving the entry into `GAMES` is what puts it in the row, and that is the moment
+it needs a cabinet's worth of art and a character select screen.
+
+The reference sprites and the stage are cut from Street Fighter II sheets by `scripts/sf2-rip.mjs`
+(row maps in `scripts/sf2-rip.manifest.json`) into `public/assets/crown/`. They are placeholders
+while the site is private, to be replaced by our own art — see `ART.md` for that pipeline — at
+which point the history gets scrubbed.
 
 ## Play it
 
-**It runs, with no artwork at all.**
+**It runs with no artwork at all**, and wears whatever sprites exist under `public/assets/crown/`.
 
 ```bash
 npm install
 just dev fighter          # or: npm run dev -w apps/fighter    → http://localhost:5184
 ```
 
-Two fighters made of boxes, against a CPU. Everything in the "Status" table below marked done is in
-there and playable.
+`?p1=zangief&p2=blanka` on the address picks the pairing. Three fighters so far — Ryu, Zangief,
+Blanka — and one stage, Guile's airbase.
 
 | | |
 |---|---|
@@ -37,54 +42,89 @@ there and playable.
 | `W` `S` | jump, crouch |
 | `F` `G` `H` | light / medium / heavy punch |
 | `C` `V` `B` | light / medium / heavy kick |
-| `236` + punch | fireball |
-| `623` + punch | uppercut — invincible frames 1–6, and horrible if it whiffs |
+| `N` `M` | all three punches / all three kicks (the lariat) |
+| forward + medium or heavy, up close | throw |
+| `236` + P | fireball · `623` + P uppercut · `214` + K hurricane kick (Ryu) |
+| `360` + P | Spinning Piledriver · `PPP` lariat (Zangief) |
+| hold back, forward + P | Rolling Attack · mash P Electric Thunder · hold down, up + K Vertical Roll (Blanka) |
 | `F1` | **hitboxes and frame data** |
 | `F2` | training dummy |
 | `1` `2` `3` `4` | opponent: guard / easy / hard / second player |
+| `5` `6` `7` · `8` `9` `0` | pick P1 · pick P2 (Ryu, Zangief, Blanka) |
 | `R` `P` | reset, pause |
 
-A gamepad works: face buttons and the two right shoulders are the six buttons, d-pad or left stick
-moves.
+A gamepad works: face buttons and the two right shoulders are the six buttons, the left shoulders
+are the three-punch and three-kick macros, d-pad or left stick moves.
 
-**Press F1.** The placeholder art is not a stand-in for real art, it is a drawing of the frame data
-— the attacking limb is drawn *from the move's own hitbox*, so it reaches out through startup, locks
-at full extension exactly while the move is active, and pulls back through recovery. A move that
-looks wrong is wrong. F1 puts the real boxes and the frame counter over the top of it.
+**Press F1.** With no sprite loaded the placeholder art is a drawing of the frame data — the
+attacking limb is drawn *from the move's own hitbox*, so it reaches out through startup, locks at
+full extension exactly while the move is active, and pulls back through recovery. With sprites
+loaded F1 still puts the real boxes and the frame counter over the top.
 
 Check it still works after a change:
 
 ```bash
-npm test                             # 210 tests, no browser needed
+npm test                             # sim tests, no browser needed
 node scripts/fighter-smoke.mjs       # boots it in a real browser, screenshots to shots/
 ```
+
+## The screen, and the units
+
+The 2D game is simulated and drawn in **the 1991 machine's pixels**: a 384×224 screen, scaled up by
+a whole number and letterboxed. Every hitbox, walk speed, jump arc and stage width in the config
+files is in those pixels, at 60 Hz, and health is 144 points because that is how long a life bar
+was — one point of damage is one pixel of bar. The camera follows the midpoint between the fighters,
+stops at the stage walls, and never zooms; the two can never be further apart than the screen is
+wide. Doing it in the original units is what lets numbers pulled from the original — by hand, from
+the wiki, or out of the ROM — go straight into a file without conversion.
+
+## The config layer
+
+A character is a file. `src/data/chars/<id>.json` holds everything the fighter *is* — health, walk
+speeds, jump, hurtboxes, pushbox, dizzy resistance, the throw, every normal with its frame data and
+hitbox, and every special with its motion, button group and per-strength overrides. `src/data/
+system.json` holds what is true for everyone: hitstun, blockstun and hitstop by strength, pushback,
+knockdown, dizzy, chip, meter, round length. `src/sim/Character.ts` reads them into the `Move`
+shape the state machine runs on; nothing character-specific lives in TypeScript.
+
+The goal is that a new fighter — for this game or for a different one built on the same code — is a
+JSON file and a sprite atlas, and that the numbers for the three we have come from the machine
+itself (see `../../tools/sf2-probe` and `research/`). A scripting layer for interactions that the
+tables cannot express is the next step *if* one turns out to be needed; so far none has.
+
+Per-strength variants: a special lists its base numbers once and `strengths: { lp: {...}, hp: {...} }`
+overrides only what differs. Each strength becomes its own move — `hadouken-lp`, `-mp`, `-hp` — so
+the rest of the sim never knows a special has versions.
+
+Specials are matched **in the order the file lists them**, and that is load-bearing: `6,6,2,3,6`
+contains both a dragon punch and a quarter circle, so a character who lists the dragon punch first
+uppercuts when walking forward into a fireball. That is the 1991 behaviour and there is a test for it.
+
+The sprite side of the contract is `public/assets/crown/chars/<id>/frames.json`: an atlas, frames
+with an anchor at the feet, and animations named by the same vocabulary the moves use (`stand-hp`,
+`shoryuken`, `hit-high`, …). `src/view/Sprites.ts` lays a move's animation over its frame data — the
+frames before the peak spread across startup, the peak held for every active frame, the rest over
+recovery — so the extended fist is on screen exactly while the hitbox is, whatever the sheet's frame
+count. A fighter with no atlas is drawn as boxes; nothing waits for art.
 
 ## Status
 
 | | |
 |---|---|
-| Motion input parser | **done** — `src/sim/Motion.ts`, 40 tests |
-| Art pipeline | **done** — templates, cutter, anchors, [60 prompts](PROMPTS.md) |
-| Frame data and the state machine | **done** — `src/sim/Moves.ts`, `src/sim/Fighter.ts` |
-| Hit detection, guarding, rounds | **done** — `src/sim/Match.ts`, 26 tests |
-| Fireball, uppercut, combos, meter | **done** |
-| A CPU to play against | **done** — `src/sim/Cpu.ts`, crude on purpose |
-| Placeholder renderer | **done** — `src/view/Render.ts` |
-| Throws, chains, super, EX | designed, not built |
-| Sprites instead of boxes | waiting on art |
+| Motion input parser | **done** — `src/sim/Motion.ts`: motions, charges, 360, double taps |
+| Config-driven characters | **done** — `src/data/`, `src/sim/Character.ts`; Ryu, Zangief, Blanka |
+| Frame data and the state machine | **done** — `src/sim/Fighter.ts`: normals, close normals, chains, 2-in-1 cancels, input buffer through hitstop |
+| Hit detection, guarding, rounds | **done** — `src/sim/Match.ts` |
+| Throws and command throws | **done** — forward + medium/heavy up close; the piledriver, whiffing and all |
+| Specials | **done** — projectiles, rising strikes, travelling and multi-hit strikes, bounce off guard, projectile-invulnerable spins, charge and mash and three-button inputs |
+| Dizzy | **done** — stun points per hit, decay, a helpless spell |
+| Pixel-scale renderer, sprites, parallax stage | **done** — `src/view/Render.ts`, `src/view/Sprites.ts` |
+| A CPU to play against | **done** — `src/sim/Cpu.ts`, reads its own character's specials |
+| Numbers from the ROM | in progress — `tools/sf2-probe` |
+| Super, EX, meter spending | designed, not built |
+| Character select screen, more stages | not built |
 | 2.5D and 3D | designed, not built |
 | Tag | pencilled in, see the bottom of this file |
-
-Order of work from here: **generate Kestrel and Bollard's art and swap the boxes for sprites** —
-the anchors in `frames.json` exist precisely so that is a renderer change and nothing else. Then
-throws and chains, then a third character, then the dimension shift. Nothing about the 3D layer
-should be started until two characters play well in 2D.
-
-Two fighters are defined so far — Kestrel and Bollard — and they differ only in numbers: health,
-walk speed, jump arc, reach and damage. That is deliberate, and it is why a roster of twelve was
-ever affordable in 1991. The other ten need a row in `CHARACTERS` and nothing else to be playable.
-
----
 
 ## The three planes
 

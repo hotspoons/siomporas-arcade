@@ -1,0 +1,1516 @@
+{
+ "chars": {
+  "zangief": {
+   "source": "ext/reference-artwork/sf2-spritedatabase/char-zangief.png",
+   "key": "auto",
+   "tolerance": 10,
+   "dilate": 2,
+   "rows": [
+    {
+     "row": 0,
+     "segs": [
+      {
+       "anim": "idle",
+       "count": 4,
+       "loop": true
+      },
+      {
+       "skip": true,
+       "count": 8
+      }
+     ]
+    },
+    {
+     "row": 1,
+     "segs": [
+      {
+       "anim": "walk-fwd",
+       "count": 6,
+       "loop": true
+      },
+      {
+       "anim": "walk-back",
+       "count": 6,
+       "loop": true
+      }
+     ]
+    },
+    {
+     "row": 2,
+     "segs": [
+      {
+       "anim": "stand-lp",
+       "count": 2
+      },
+      {
+       "anim": "stand-mp",
+       "count": 2
+      },
+      {
+       "anim": "stand-hp",
+       "count": 4
+      }
+     ]
+    },
+    {
+     "row": 3,
+     "segs": [
+      {
+       "anim": "close-lp",
+       "count": 2
+      },
+      {
+       "anim": "close-mp",
+       "count": 2
+      },
+      {
+       "anim": "close-hp",
+       "count": 3
+      },
+      {
+       "skip": true,
+       "count": 4
+      }
+     ]
+    },
+    {
+     "row": 4,
+     "segs": [
+      {
+       "anim": "stand-lk",
+       "count": 3
+      },
+      {
+       "anim": "stand-mk",
+       "count": 3
+      },
+      {
+       "anim": "stand-hk",
+       "count": 5
+      }
+     ]
+    },
+    {
+     "row": 5,
+     "segs": [
+      {
+       "skip": true,
+       "count": 1
+      },
+      {
+       "anim": "headbutt",
+       "count": 4
+      },
+      {
+       "skip": true,
+       "count": 2
+      }
+     ]
+    },
+    {
+     "row": 6,
+     "segs": [
+      {
+       "anim": "close-lk",
+       "count": 3
+      },
+      {
+       "anim": "close-mk",
+       "count": 3
+      }
+     ]
+    },
+    {
+     "row": 7,
+     "anim": "close-hk"
+    },
+    {
+     "row": 8,
+     "skip": true
+    },
+    {
+     "row": 9,
+     "segs": [
+      {
+       "skip": true,
+       "count": 2
+      },
+      {
+       "anim": "crouch",
+       "count": 1
+      },
+      {
+       "anim": "crouch-lp",
+       "count": 2
+      },
+      {
+       "anim": "crouch-mp",
+       "count": 2
+      },
+      {
+       "skip": true,
+       "count": 1
+      }
+     ]
+    },
+    {
+     "row": 10,
+     "skip": true
+    },
+    {
+     "row": 11,
+     "segs": [
+      {
+       "skip": true,
+       "count": 3
+      },
+      {
+       "anim": "hit-low",
+       "count": 3
+      },
+      {
+       "skip": true,
+       "count": 5
+      }
+     ]
+    },
+    {
+     "row": 12,
+     "skip": true
+    },
+    {
+     "row": 13,
+     "segs": [
+      {
+       "skip": true,
+       "count": 1
+      },
+      {
+       "anim": "crouch-idle",
+       "count": 2
+      },
+      {
+       "anim": "time-over",
+       "count": 3
+      }
+     ]
+    },
+    {
+     "row": 14,
+     "segs": [
+      {
+       "anim": "crouch-lp",
+       "count": 2
+      },
+      {
+       "anim": "crouch-hp",
+       "count": 3
+      },
+      {
+       "anim": "crouch-lk",
+       "count": 3
+      },
+      {
+       "anim": "crouch-hk",
+       "count": 2
+      }
+     ]
+    },
+    {
+     "row": 15,
+     "skip": true
+    },
+    {
+     "row": 16,
+     "segs": [
+      {
+       "skip": true,
+       "count": 6
+      },
+      {
+       "anim": "crouch-mk",
+       "count": 3
+      },
+      {
+       "skip": true,
+       "count": 2
+      }
+     ]
+    },
+    {
+     "row": 17,
+     "segs": [
+      {
+       "skip": true,
+       "count": 7
+      },
+      {
+       "anim": "air-hk",
+       "count": 3
+      },
+      {
+       "skip": true,
+       "count": 1
+      }
+     ]
+    },
+    {
+     "row": 18,
+     "segs": [
+      {
+       "skip": true,
+       "count": 6
+      },
+      {
+       "anim": "air-mk",
+       "count": 3
+      },
+      {
+       "skip": true,
+       "count": 1
+      }
+     ]
+    },
+    {
+     "row": 19,
+     "segs": [
+      {
+       "skip": true,
+       "count": 5
+      },
+      {
+       "anim": "air-lp",
+       "count": 3
+      },
+      {
+       "skip": true,
+       "count": 1
+      }
+     ]
+    },
+    {
+     "row": 20,
+     "skip": true
+    },
+    {
+     "row": 21,
+     "segs": [
+      {
+       "skip": true,
+       "count": 2
+      },
+      {
+       "anim": "air-hp",
+       "count": 6
+      },
+      {
+       "skip": true,
+       "count": 1
+      }
+     ]
+    },
+    {
+     "row": 22,
+     "skip": true
+    },
+    {
+     "row": 23,
+     "segs": [
+      {
+       "skip": true,
+       "count": 1
+      },
+      {
+       "anim": "jump-neutral",
+       "count": 3,
+       "alias": [
+        "jump-fwd",
+        "jump-back"
+       ]
+      },
+      {
+       "anim": "air-mp",
+       "count": 1
+      },
+      {
+       "skip": true,
+       "count": 1
+      },
+      {
+       "anim": "land",
+       "count": 1
+      }
+     ]
+    },
+    {
+     "row": 24,
+     "segs": [
+      {
+       "skip": true,
+       "count": 5
+      },
+      {
+       "anim": "air-lk",
+       "count": 3
+      },
+      {
+       "skip": true,
+       "count": 1
+      }
+     ]
+    },
+    {
+     "row": 25,
+     "skip": true
+    },
+    {
+     "row": 26,
+     "skip": true
+    },
+    {
+     "row": 27,
+     "skip": true
+    },
+    {
+     "row": 28,
+     "segs": [
+      {
+       "skip": true,
+       "count": 2
+      },
+      {
+       "anim": "block-stand",
+       "count": 2
+      },
+      {
+       "anim": "hit-high",
+       "count": 4
+      }
+     ]
+    },
+    {
+     "row": 29,
+     "segs": [
+      {
+       "skip": true,
+       "count": 1
+      },
+      {
+       "anim": "block-crouch",
+       "count": 4
+      },
+      {
+       "skip": true,
+       "count": 6
+      }
+     ]
+    },
+    {
+     "row": 30,
+     "segs": [
+      {
+       "skip": true,
+       "count": 7
+      },
+      {
+       "anim": "dizzy",
+       "count": 5,
+       "loop": true
+      }
+     ]
+    },
+    {
+     "row": 31,
+     "segs": [
+      {
+       "skip": true,
+       "count": 1
+      },
+      {
+       "anim": "hit-air",
+       "count": 3
+      },
+      {
+       "anim": "knockdown",
+       "count": 3
+      },
+      {
+       "anim": "down",
+       "count": 1
+      },
+      {
+       "anim": "getup",
+       "count": 2
+      },
+      {
+       "skip": true,
+       "count": 1
+      }
+     ]
+    },
+    {
+     "row": 32,
+     "skip": true
+    },
+    {
+     "row": 33,
+     "segs": [
+      {
+       "skip": true,
+       "count": 1
+      },
+      {
+       "anim": "thrown",
+       "count": 3
+      }
+     ]
+    },
+    {
+     "row": 34,
+     "skip": true
+    },
+    {
+     "row": 35,
+     "skip": true
+    },
+    {
+     "row": 36,
+     "skip": true
+    },
+    {
+     "row": 37,
+     "skip": true
+    },
+    {
+     "row": 38,
+     "segs": [
+      {
+       "skip": true,
+       "count": 1
+      },
+      {
+       "anim": "shocked",
+       "count": 2,
+       "loop": true
+      },
+      {
+       "skip": true,
+       "count": 4
+      }
+     ]
+    },
+    {
+     "row": 39,
+     "skip": true
+    },
+    {
+     "row": 40,
+     "skip": true
+    },
+    {
+     "row": 41,
+     "skip": true
+    },
+    {
+     "row": 42,
+     "skip": true
+    },
+    {
+     "row": 43,
+     "segs": [
+      {
+       "skip": true,
+       "count": 1
+      },
+      {
+       "anim": "spd",
+       "count": 5,
+       "alias": [
+        "throw"
+       ]
+      }
+     ]
+    },
+    {
+     "row": 44,
+     "skip": true
+    },
+    {
+     "row": 45,
+     "segs": [
+      {
+       "skip": true,
+       "count": 1
+      },
+      {
+       "anim": "lariat",
+       "count": 4,
+       "loop": true
+      }
+     ]
+    },
+    {
+     "row": 46,
+     "skip": true
+    },
+    {
+     "row": 47,
+     "segs": [
+      {
+       "anim": "win",
+       "count": 4
+      },
+      {
+       "skip": true,
+       "count": 9
+      }
+     ]
+    }
+   ],
+   "specials": [
+    "spd",
+    "lariat"
+   ],
+   "portrait": {
+    "source": "ext/reference-artwork/sf2/ui/portraits-select-a.png",
+    "key": "auto",
+    "tolerance": 40,
+    "dilate": 0,
+    "minArea": 2000,
+    "at": [
+     70,
+     600
+    ]
+   }
+  },
+  "ryu": {
+   "source": "ext/reference-artwork/sf2-spritedatabase/char-ryu.png",
+   "key": "auto",
+   "tolerance": 10,
+   "dilate": 2,
+   "rows": [
+    {
+     "row": 0,
+     "segs": [
+      {
+       "anim": "idle",
+       "count": 5,
+       "loop": true
+      },
+      {
+       "skip": true,
+       "count": 3
+      }
+     ]
+    },
+    {
+     "row": 1,
+     "segs": [
+      {
+       "anim": "walk-fwd",
+       "count": 6,
+       "loop": true
+      },
+      {
+       "anim": "walk-back",
+       "count": 6,
+       "loop": true
+      }
+     ]
+    },
+    {
+     "row": 2,
+     "segs": [
+      {
+       "anim": "stand-lp",
+       "count": 2
+      },
+      {
+       "anim": "stand-mp",
+       "count": 2
+      },
+      {
+       "anim": "stand-hp",
+       "count": 2
+      },
+      {
+       "anim": "stand-mk",
+       "count": 2,
+       "alias": [
+        "stand-lk"
+       ]
+      }
+     ]
+    },
+    {
+     "row": 3,
+     "segs": [
+      {
+       "anim": "stand-hk",
+       "count": 4
+      },
+      {
+       "skip": true,
+       "count": 1
+      }
+     ]
+    },
+    {
+     "row": 4,
+     "segs": [
+      {
+       "skip": true,
+       "count": 1
+      },
+      {
+       "anim": "close-lp",
+       "count": 2
+      },
+      {
+       "anim": "close-mp",
+       "count": 3
+      },
+      {
+       "skip": true,
+       "count": 1
+      },
+      {
+       "anim": "close-hp",
+       "count": 3
+      }
+     ]
+    },
+    {
+     "row": 5,
+     "segs": [
+      {
+       "skip": true,
+       "count": 1
+      },
+      {
+       "anim": "close-lk",
+       "count": 2
+      },
+      {
+       "skip": true,
+       "count": 1
+      },
+      {
+       "anim": "close-mk",
+       "count": 2
+      },
+      {
+       "skip": true,
+       "count": 1
+      },
+      {
+       "anim": "close-hk",
+       "count": 3
+      },
+      {
+       "skip": true,
+       "count": 1
+      }
+     ]
+    },
+    {
+     "row": 6,
+     "segs": [
+      {
+       "skip": true,
+       "count": 1
+      },
+      {
+       "anim": "jump-neutral",
+       "count": 5
+      },
+      {
+       "anim": "air-mp",
+       "count": 2,
+       "alias": [
+        "air-lp"
+       ]
+      },
+      {
+       "anim": "air-hp",
+       "count": 1
+      },
+      {
+       "anim": "air-lk",
+       "count": 1
+      },
+      {
+       "anim": "air-hk",
+       "count": 2,
+       "alias": [
+        "air-mk"
+       ]
+      },
+      {
+       "skip": true,
+       "count": 1
+      },
+      {
+       "anim": "land",
+       "count": 1
+      }
+     ]
+    },
+    {
+     "row": 7,
+     "segs": [
+      {
+       "anim": "jump-fwd",
+       "count": 8,
+       "alias": [
+        "jump-back"
+       ]
+      },
+      {
+       "skip": true,
+       "count": 4
+      }
+     ]
+    },
+    {
+     "row": 8,
+     "skip": true
+    },
+    {
+     "row": 9,
+     "segs": [
+      {
+       "skip": true,
+       "count": 1
+      },
+      {
+       "anim": "crouch",
+       "count": 2
+      },
+      {
+       "anim": "block-crouch",
+       "count": 3
+      }
+     ]
+    },
+    {
+     "row": 10,
+     "segs": [
+      {
+       "anim": "crouch-lp",
+       "count": 2
+      },
+      {
+       "skip": true,
+       "count": 1
+      },
+      {
+       "anim": "crouch-mp",
+       "count": 2
+      },
+      {
+       "skip": true,
+       "count": 1
+      },
+      {
+       "anim": "crouch-hp",
+       "count": 2
+      },
+      {
+       "anim": "crouch-lk",
+       "count": 2
+      }
+     ]
+    },
+    {
+     "row": 11,
+     "segs": [
+      {
+       "skip": true,
+       "count": 1
+      },
+      {
+       "anim": "crouch-hk",
+       "count": 2
+      },
+      {
+       "skip": true,
+       "count": 1
+      },
+      {
+       "anim": "crouch-mk",
+       "count": 1
+      },
+      {
+       "skip": true,
+       "count": 3
+      }
+     ]
+    },
+    {
+     "row": 12,
+     "segs": [
+      {
+       "anim": "hadouken",
+       "count": 4
+      },
+      {
+       "anim": "projectile",
+       "count": 3,
+       "loop": true,
+       "fps": 12
+      },
+      {
+       "skip": true,
+       "count": 2
+      }
+     ]
+    },
+    {
+     "row": 13,
+     "anim": "tatsumaki"
+    },
+    {
+     "row": 14,
+     "anim": "shoryuken"
+    },
+    {
+     "row": 15,
+     "segs": [
+      {
+       "skip": true,
+       "count": 1
+      },
+      {
+       "anim": "throw",
+       "count": 5
+      },
+      {
+       "skip": true,
+       "count": 5
+      }
+     ]
+    },
+    {
+     "row": 16,
+     "segs": [
+      {
+       "skip": true,
+       "count": 1
+      },
+      {
+       "anim": "hit-high",
+       "count": 2
+      },
+      {
+       "anim": "hit-low",
+       "count": 3
+      },
+      {
+       "anim": "hit-air",
+       "count": 1
+      },
+      {
+       "anim": "knockdown",
+       "count": 2
+      },
+      {
+       "anim": "down",
+       "count": 2
+      },
+      {
+       "anim": "getup",
+       "count": 1
+      }
+     ]
+    },
+    {
+     "row": 17,
+     "segs": [
+      {
+       "skip": true,
+       "count": 3
+      },
+      {
+       "anim": "thrown",
+       "count": 3
+      },
+      {
+       "skip": true,
+       "count": 3
+      }
+     ]
+    },
+    {
+     "row": 18,
+     "segs": [
+      {
+       "anim": "hit-crouch",
+       "count": 4
+      },
+      {
+       "anim": "block-stand",
+       "count": 2
+      },
+      {
+       "skip": true,
+       "count": 3
+      }
+     ]
+    },
+    {
+     "row": 19,
+     "segs": [
+      {
+       "anim": "dizzy",
+       "count": 8,
+       "loop": true
+      },
+      {
+       "anim": "win",
+       "count": 1
+      }
+     ]
+    },
+    {
+     "row": 20,
+     "skip": true
+    }
+   ],
+   "specials": [
+    "hadouken",
+    "shoryuken",
+    "tatsumaki",
+    "projectile"
+   ],
+   "portrait": {
+    "source": "ext/reference-artwork/sf2/ui/portraits-select-a.png",
+    "key": "auto",
+    "tolerance": 40,
+    "dilate": 0,
+    "minArea": 2000,
+    "at": [
+     70,
+     60
+    ]
+   }
+  },
+  "blanka": {
+   "source": "ext/reference-artwork/sf2-spritedatabase/char-blanka.png",
+   "key": "auto",
+   "tolerance": 14,
+   "dilate": 2,
+   "rows": [
+    {
+     "row": 0,
+     "segs": [
+      {
+       "anim": "idle",
+       "count": 3,
+       "loop": true,
+       "pingpong": true
+      },
+      {
+       "anim": "walk-fwd",
+       "count": 8,
+       "loop": true
+      }
+     ]
+    },
+    {
+     "row": 1,
+     "segs": [
+      {
+       "anim": "walk-back",
+       "count": 8,
+       "loop": true
+      },
+      {
+       "anim": "dash-fwd",
+       "count": 3
+      },
+      {
+       "anim": "dash-back",
+       "count": 3
+      },
+      {
+       "anim": "crouch",
+       "count": 3
+      }
+     ]
+    },
+    {
+     "row": 2,
+     "segs": [
+      {
+       "anim": "jump-neutral",
+       "count": 3,
+       "pingpong": true
+      },
+      {
+       "anim": "jump-fwd",
+       "count": 4,
+       "alias": [
+        "jump-back"
+       ]
+      },
+      {
+       "anim": "block-stand",
+       "count": 2,
+       "alias": [
+        "time-over"
+       ]
+      },
+      {
+       "anim": "block-crouch",
+       "count": 2
+      },
+      {
+       "anim": "turn",
+       "count": 3
+      },
+      {
+       "anim": "crouch-turn",
+       "count": 3
+      }
+     ]
+    },
+    {
+     "row": 3,
+     "segs": [
+      {
+       "anim": "stand-lp",
+       "count": 3,
+       "pingpong": true
+      },
+      {
+       "anim": "stand-mp",
+       "count": 2
+      },
+      {
+       "anim": "stand-hp",
+       "count": 4,
+       "pingpong": true
+      }
+     ]
+    },
+    {
+     "row": 4,
+     "segs": [
+      {
+       "anim": "close-lp",
+       "count": 3,
+       "pingpong": true,
+       "alias": [
+        "close-mp"
+       ]
+      },
+      {
+       "anim": "fwd-mp",
+       "count": 3,
+       "pingpong": true
+      },
+      {
+       "anim": "close-hp",
+       "count": 9
+      }
+     ]
+    },
+    {
+     "row": 5,
+     "segs": [
+      {
+       "anim": "stand-lk",
+       "count": 3,
+       "pingpong": true
+      },
+      {
+       "anim": "stand-mk",
+       "count": 3,
+       "pingpong": true
+      },
+      {
+       "anim": "stand-hk",
+       "count": 7
+      }
+     ]
+    },
+    {
+     "row": 6,
+     "segs": [
+      {
+       "anim": "close-lk",
+       "count": 3,
+       "pingpong": true,
+       "alias": [
+        "close-mk"
+       ]
+      },
+      {
+       "skip": true,
+       "count": 1
+      },
+      {
+       "anim": "crouch-lp",
+       "count": 3,
+       "pingpong": true
+      },
+      {
+       "skip": true,
+       "count": 1
+      },
+      {
+       "anim": "crouch-mp",
+       "count": 4,
+       "pingpong": true
+      }
+     ]
+    },
+    {
+     "row": 7,
+     "segs": [
+      {
+       "anim": "crouch-hp",
+       "count": 3,
+       "pingpong": true
+      },
+      {
+       "anim": "crouch-lk",
+       "count": 3,
+       "alias": [
+        "crouch-mk"
+       ]
+      },
+      {
+       "anim": "crouch-hk",
+       "count": 3,
+       "pingpong": true,
+       "alias": [
+        "close-hk"
+       ]
+      }
+     ]
+    },
+    {
+     "row": 8,
+     "segs": [
+      {
+       "anim": "air-lp",
+       "count": 3,
+       "pingpong": true,
+       "alias": [
+        "air-mp"
+       ]
+      },
+      {
+       "anim": "air-hp",
+       "count": 3
+      },
+      {
+       "anim": "air-fwd-hp",
+       "count": 3
+      },
+      {
+       "anim": "air-lk",
+       "count": 4,
+       "alias": [
+        "air-mk"
+       ]
+      },
+      {
+       "anim": "air-hk",
+       "count": 3,
+       "pingpong": true
+      }
+     ]
+    },
+    {
+     "row": 9,
+     "segs": [
+      {
+       "anim": "electric-thunder",
+       "count": 4,
+       "loop": true,
+       "dropFrames": [
+        1,
+        3
+       ]
+      },
+      {
+       "anim": "rolling-attack",
+       "count": 8,
+       "loop": true,
+       "alias": [
+        "vertical-roll"
+       ]
+      }
+     ]
+    },
+    {
+     "row": 10,
+     "anim": "backstep-roll"
+    },
+    {
+     "row": 11,
+     "skip": true
+    },
+    {
+     "row": 12,
+     "segs": [
+      {
+       "skip": true,
+       "count": 1
+      },
+      {
+       "anim": "throw",
+       "count": 3
+      },
+      {
+       "skip": true,
+       "count": 1
+      },
+      {
+       "anim": "thrown",
+       "count": 4
+      },
+      {
+       "anim": "dizzy",
+       "count": 4,
+       "loop": true
+      },
+      {
+       "anim": "shocked",
+       "count": 2,
+       "loop": true
+      }
+     ]
+    },
+    {
+     "row": 13,
+     "segs": [
+      {
+       "anim": "hit-high",
+       "count": 3
+      },
+      {
+       "anim": "hit-low",
+       "count": 4
+      },
+      {
+       "anim": "hit-crouch",
+       "count": 4
+      },
+      {
+       "anim": "hit-air",
+       "count": 2
+      },
+      {
+       "anim": "knockdown",
+       "count": 3
+      }
+     ]
+    },
+    {
+     "row": 14,
+     "skip": true
+    },
+    {
+     "row": 15,
+     "segs": [
+      {
+       "anim": "down",
+       "count": 2
+      },
+      {
+       "anim": "getup",
+       "count": 5
+      },
+      {
+       "skip": true,
+       "count": 2
+      },
+      {
+       "anim": "win",
+       "count": 4
+      }
+     ]
+    },
+    {
+     "row": 16,
+     "skip": true
+    }
+   ],
+   "specials": [
+    "rolling-attack",
+    "electric-thunder",
+    "vertical-roll",
+    "backstep-roll"
+   ],
+   "extraKeys": [
+    "#006000"
+   ],
+   "skipBelow": 2180,
+   "portrait": {
+    "source": "ext/reference-artwork/sf2/ui/portraits-select-a.png",
+    "key": "auto",
+    "tolerance": 40,
+    "dilate": 0,
+    "minArea": 2000,
+    "at": [
+     70,
+     490
+    ]
+   }
+  }
+ },
+ "stages": {
+  "airbase": {
+   "source": "ext/reference-artwork/sf2/stages/guile-airbase-ww.png",
+   "reference": "ext/reference-artwork/sf2-spritedatabase/stage-guile-stage.png",
+   "key": "auto",
+   "tolerance": 36,
+   "notes": [
+    "World Warrior layered sheet. Bands: sky strip y7-60, plane y68-179 (keyed) over tarmac y180-243, horizon/hangars y247-425 (x8-729), props to the right and below.",
+    "y is the layer bottom edge relative to the floor line; the tarmac top sits 40px above the feet, as in the CE composite."
+   ],
+   "layers": [
+    {
+     "name": "sky",
+     "rect": {
+      "x": 8,
+      "y": 7,
+      "w": 1024,
+      "h": 54
+     },
+     "parallax": 0.1,
+     "y": -146,
+     "repeat": true
+    },
+    {
+     "name": "far",
+     "rect": {
+      "x": 8,
+      "y": 247,
+      "w": 722,
+      "h": 179
+     },
+     "parallax": 0.5,
+     "y": -40
+    },
+    {
+     "name": "mid",
+     "rect": {
+      "x": 8,
+      "y": 68,
+      "w": 1024,
+      "h": 112
+     },
+     "parallax": 1.0,
+     "y": -40,
+     "keyBackground": true
+    },
+    {
+     "name": "floor",
+     "rect": {
+      "x": 8,
+      "y": 180,
+      "w": 1024,
+      "h": 64
+     },
+     "parallax": 1.0,
+     "y": 24,
+     "repeat": true
+    }
+   ],
+   "props": [
+    {
+     "name": "fence-left",
+     "rect": {
+      "x": 10,
+      "y": 562,
+      "w": 96,
+      "h": 80
+     },
+     "x": -372,
+     "y": 0
+    },
+    {
+     "name": "fence-right",
+     "rect": {
+      "x": 10,
+      "y": 562,
+      "w": 96,
+      "h": 80
+     },
+     "x": 276,
+     "y": 0
+    }
+   ],
+   "preview": {
+    "w": 1100,
+    "h": 720,
+    "floorY": 520
+   },
+   "keyAt": [
+    9,
+    69
+   ]
+  }
+ },
+ "fx": {
+  "sparks": {
+   "source": "ext/reference-artwork/sf2/fx/hit-sparks.png",
+   "key": "auto",
+   "tolerance": 12,
+   "dilate": 1,
+   "minArea": 30,
+   "minHeight": 8,
+   "rows": [
+    {
+     "row": 1,
+     "anim": "block",
+     "from": 0,
+     "to": 4,
+     "dropFrames": [
+      2
+     ],
+     "fps": 20
+    },
+    {
+     "row": 1,
+     "anim": "hit-light",
+     "from": 4,
+     "to": 8,
+     "dropFrames": [
+      2
+     ],
+     "fps": 20
+    },
+    {
+     "row": 2,
+     "anim": "hit-heavy",
+     "from": 4,
+     "to": 8,
+     "dropFrames": [
+      2
+     ],
+     "fps": 20
+    },
+    {
+     "row": 3,
+     "anim": "hit-special",
+     "from": 0,
+     "to": 5,
+     "fps": 24
+    },
+    {
+     "row": 4,
+     "anim": "dust",
+     "from": 0,
+     "to": 5,
+     "fps": 15
+    }
+   ]
+  }
+ }
+}

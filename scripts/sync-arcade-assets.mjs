@@ -30,7 +30,7 @@ function copyTree(src, dest, skip = () => false) {
   }
 }
 
-const GAMES = ['coast', 'stuntin', 'conduit']
+const GAMES = ['coast', 'stuntin', 'conduit', 'fighter']
 const ARCADE = at('apps/arcade/public')
 /** Handled specially below, never copied. */
 const SKIP = new Set(['favicon.svg', 'fonts'])

@@ -1,0 +1,17 @@
+return { name = "explore", tests = {
+  {name="idle",      dist=120, seq={}, frames=60},
+  {name="walkfwd",   dist=200, seq={{50,"fwd"}}, frames=60},
+  {name="walkback",  dist=120, seq={{50,"back"}}, frames=60},
+  {name="crouch",    dist=120, seq={{40,"down"}}, frames=60},
+  {name="jumpn",     dist=120, seq={{60,"up"}}, frames=90},
+  {name="jumpf",     dist=200, seq={{4,"up,fwd"},{60,"fwd"}}, frames=90},
+  {name="p2crouch",  dist=120, p2="crouch", seq={}, frames=40},
+  {name="p2back",    dist=120, p2="block", seq={}, frames=40},
+  {name="hp_hit1",   dist=60, p2="downafter", seq={{2,"hp"}}, frames=90},
+  {name="hp_hit2",   dist=60, p2="downafter", seq={{2,"hp"}}, frames=90},
+  {name="hp_hit3",   dist=60, p2="downafter", seq={{2,"hp"}}, frames=90},
+  {name="hp_hit4",   dist=60, p2="downafter", seq={{2,"hp"}}, frames=90},
+  {name="hp_hit5",   dist=60, p2="downafter", seq={{2,"hp"}}, frames=90},
+  {name="hp_block",  dist=60, p2="block", seq={{2,"hp"}}, frames=90, snap=true},
+  {name="hp_whiff",  dist=160, seq={{2,"hp"}}, frames=60},
+}}

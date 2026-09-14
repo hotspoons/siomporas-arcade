@@ -36,7 +36,7 @@ export const game: GameModule = {
         gone.run()
         g.dispose()
       },
-      bridge: { game: g, match: g.match },
+      bridge: { game: g },
     }
   },
 }

@@ -1,0 +1,74 @@
+{
+ "id": "airbase",
+ "source": "ext/reference-artwork/sf2/stages/guile-airbase-ww.png",
+ "reference": "ext/reference-artwork/sf2-spritedatabase/stage-guile-stage.png",
+ "pixelScale": 1,
+ "floorY": 0,
+ "screen": {
+  "w": 384,
+  "h": 224
+ },
+ "key": "#0d47a1",
+ "layers": [
+  {
+   "name": "sky",
+   "file": "sky.png",
+   "w": 1024,
+   "h": 54,
+   "parallax": 0.1,
+   "y": -146,
+   "repeat": true
+  },
+  {
+   "name": "far",
+   "file": "far.png",
+   "w": 722,
+   "h": 179,
+   "parallax": 0.5,
+   "y": -40,
+   "repeat": false
+  },
+  {
+   "name": "mid",
+   "file": "mid.png",
+   "w": 1024,
+   "h": 112,
+   "parallax": 1,
+   "y": -40,
+   "repeat": false
+  },
+  {
+   "name": "floor",
+   "file": "floor.png",
+   "w": 1024,
+   "h": 64,
+   "parallax": 1,
+   "y": 24,
+   "repeat": true
+  }
+ ],
+ "props": [
+  {
+   "name": "fence-left",
+   "file": "props/fence-left.png",
+   "w": 96,
+   "h": 80,
+   "x": -372,
+   "y": 0,
+   "parallax": 1
+  },
+  {
+   "name": "fence-right",
+   "file": "props/fence-right.png",
+   "w": 96,
+   "h": 80,
+   "x": 276,
+   "y": 0,
+   "parallax": 1
+  }
+ ],
+ "notes": [
+  "World Warrior layered sheet. Bands: sky strip y7-60, plane y68-179 (keyed) over tarmac y180-243, horizon/hangars y247-425 (x8-729), props to the right and below.",
+  "y is the layer bottom edge relative to the floor line; the tarmac top sits 40px above the feet, as in the CE composite."
+ ]
+}

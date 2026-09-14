@@ -49,7 +49,9 @@ const colours = await page.evaluate(() => {
 check(colours > 8, `canvas has ${colours} distinct colours in it`)
 await page.screenshot({ path: `${outDir}/fighter-idle.png` })
 
-// Walking has to move the fighter.
+// Walking has to move the fighter. Against a dummy from here: at pixel scale half a second of walking
+// is most of the way across the screen, and a live CPU would meet us there.
+await page.evaluate(() => window.fighter.setOpponent('dummy'))
 const startX = await page.evaluate(() => window.fighter.match.fighters[0].x)
 await page.keyboard.down('KeyD')
 await page.waitForTimeout(500)
@@ -57,7 +59,8 @@ await page.keyboard.up('KeyD')
 const walkedX = await page.evaluate(() => window.fighter.match.fighters[0].x)
 check(walkedX > startX + 5, `walking moved the fighter ${(walkedX - startX).toFixed(0)}px`)
 
-// A button has to start a move. Sampled, because a jab is over in eleven frames.
+// A button has to start a move. Sampled, because a jab is over in eleven frames. Against a dummy,
+// because at pixel scale the walk above has put us in the CPU's face and it would hit first.
 const swung = await page.evaluate(async () => {
   const g = window.fighter
   const seen = new Set()
@@ -103,8 +106,8 @@ await page.evaluate(async () => {
 await page.waitForFunction(() => window.fighter.match.phase === 'fight', null, { timeout: 8000 })
 await page.evaluate(async () => {
   const g = window.fighter
-  g.match.fighters[0].x = -46
-  g.match.fighters[1].x = 46
+  g.match.fighters[0].x = -24
+  g.match.fighters[1].x = 24
   await new Promise((r) => setTimeout(r, 60))
   window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyH' }))
   await new Promise((r) => setTimeout(r, 40))

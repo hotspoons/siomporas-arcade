@@ -1,0 +1,259 @@
+{
+ "id": "sparks",
+ "source": "ext/reference-artwork/sf2/fx/hit-sparks.png",
+ "pixelScale": 1,
+ "atlas": "sparks.png",
+ "atlasSize": {
+  "w": 368,
+  "h": 36
+ },
+ "anchor": "ax,ay = spark centre",
+ "frames": {
+  "block-0": {
+   "x": 295,
+   "y": 2,
+   "w": 14,
+   "h": 15,
+   "ax": 7,
+   "ay": 8,
+   "sheet": {
+    "x": 13,
+    "y": 41
+   }
+  },
+  "block-1": {
+   "x": 249,
+   "y": 2,
+   "w": 21,
+   "h": 19,
+   "ax": 11,
+   "ay": 10,
+   "sheet": {
+    "x": 34,
+    "y": 39
+   }
+  },
+  "block-2": {
+   "x": 103,
+   "y": 2,
+   "w": 27,
+   "h": 25,
+   "ax": 14,
+   "ay": 13,
+   "sheet": {
+    "x": 90,
+    "y": 35
+   }
+  },
+  "hit-light-0": {
+   "x": 311,
+   "y": 2,
+   "w": 14,
+   "h": 15,
+   "ax": 7,
+   "ay": 8,
+   "sheet": {
+    "x": 159,
+    "y": 41
+   }
+  },
+  "hit-light-1": {
+   "x": 272,
+   "y": 2,
+   "w": 21,
+   "h": 19,
+   "ax": 11,
+   "ay": 10,
+   "sheet": {
+    "x": 182,
+    "y": 39
+   }
+  },
+  "hit-light-2": {
+   "x": 132,
+   "y": 2,
+   "w": 27,
+   "h": 25,
+   "ax": 14,
+   "ay": 13,
+   "sheet": {
+    "x": 239,
+    "y": 35
+   }
+  },
+  "hit-heavy-0": {
+   "x": 190,
+   "y": 2,
+   "w": 15,
+   "h": 21,
+   "ax": 8,
+   "ay": 11,
+   "sheet": {
+    "x": 160,
+    "y": 68
+   }
+  },
+  "hit-heavy-1": {
+   "x": 161,
+   "y": 2,
+   "w": 27,
+   "h": 23,
+   "ax": 14,
+   "ay": 12,
+   "sheet": {
+    "x": 185,
+    "y": 70
+   }
+  },
+  "hit-heavy-2": {
+   "x": 36,
+   "y": 2,
+   "w": 32,
+   "h": 31,
+   "ax": 16,
+   "ay": 16,
+   "sheet": {
+    "x": 255,
+    "y": 66
+   }
+  },
+  "hit-special-0": {
+   "x": 327,
+   "y": 2,
+   "w": 11,
+   "h": 11,
+   "ax": 6,
+   "ay": 6,
+   "sheet": {
+    "x": 15,
+    "y": 116
+   }
+  },
+  "hit-special-1": {
+   "x": 207,
+   "y": 2,
+   "w": 15,
+   "h": 21,
+   "ax": 8,
+   "ay": 11,
+   "sheet": {
+    "x": 44,
+    "y": 112
+   }
+  },
+  "hit-special-2": {
+   "x": 224,
+   "y": 2,
+   "w": 23,
+   "h": 20,
+   "ax": 12,
+   "ay": 10,
+   "sheet": {
+    "x": 73,
+    "y": 112
+   }
+  },
+  "hit-special-3": {
+   "x": 70,
+   "y": 2,
+   "w": 31,
+   "h": 30,
+   "ax": 16,
+   "ay": 15,
+   "sheet": {
+    "x": 104,
+    "y": 109
+   }
+  },
+  "hit-special-4": {
+   "x": 2,
+   "y": 2,
+   "w": 32,
+   "h": 32,
+   "ax": 16,
+   "ay": 16,
+   "sheet": {
+    "x": 144,
+    "y": 106
+   }
+  },
+  "dust-0": {
+   "x": 340,
+   "y": 2,
+   "w": 13,
+   "h": 10,
+   "ax": 7,
+   "ay": 5,
+   "sheet": {
+    "x": 193,
+    "y": 139
+   }
+  },
+  "dust-1": {
+   "x": 355,
+   "y": 2,
+   "w": 11,
+   "h": 8,
+   "ax": 6,
+   "ay": 4,
+   "sheet": {
+    "x": 218,
+    "y": 140
+   }
+  }
+ },
+ "anims": {
+  "block": {
+   "frames": [
+    "block-0",
+    "block-1",
+    "block-2"
+   ],
+   "fps": 20,
+   "loop": false,
+   "pingpong": false
+  },
+  "hit-light": {
+   "frames": [
+    "hit-light-0",
+    "hit-light-1",
+    "hit-light-2"
+   ],
+   "fps": 20,
+   "loop": false,
+   "pingpong": false
+  },
+  "hit-heavy": {
+   "frames": [
+    "hit-heavy-0",
+    "hit-heavy-1",
+    "hit-heavy-2"
+   ],
+   "fps": 20,
+   "loop": false,
+   "pingpong": false
+  },
+  "hit-special": {
+   "frames": [
+    "hit-special-0",
+    "hit-special-1",
+    "hit-special-2",
+    "hit-special-3",
+    "hit-special-4"
+   ],
+   "fps": 24,
+   "loop": false,
+   "pingpong": false
+  },
+  "dust": {
+   "frames": [
+    "dust-0",
+    "dust-1"
+   ],
+   "fps": 15,
+   "loop": false,
+   "pingpong": false
+  }
+ },
+ "notes": []
+}

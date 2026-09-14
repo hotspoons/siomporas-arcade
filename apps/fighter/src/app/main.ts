@@ -1,5 +1,7 @@
-// Standalone entry. The arcade shell will mount this game through a GameModule later; for now it
-// runs on its own so the mechanics can be played before there is a cabinet to walk up to.
+// Standalone entry: the fighter on its own page, which is where tuning happens. The arcade mounts
+// the same Game through module.ts.
+//
+// `?p1=zangief&p2=blanka&stage=airbase` picks the pairing from the address.
 
 import '../style.css'
 import { Game } from './Game'
@@ -11,7 +13,8 @@ const canvas = document.createElement('canvas')
 canvas.className = 'stage'
 root.appendChild(canvas)
 
-const game = new Game(canvas)
+const q = new URLSearchParams(location.search)
+const game = new Game(canvas, { p1: q.get('p1') ?? undefined, p2: q.get('p2') ?? undefined, stage: q.get('stage') ?? undefined })
 game.start()
 
 // Handy from the console while tuning: `fighter.match.fighters[0].health = 50`.

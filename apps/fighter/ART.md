@@ -112,6 +112,44 @@ first:
   early ones. Adding an important rule at the bottom of the list, as happened with proportions
   twice, changes nothing at all and looks like the model refusing.
 
+### Two short prompts beat one long one
+
+The bible is better made in two passes than in one, and the reason is that the two passes want
+different things and fight each other in a single prompt.
+
+1. **A concise brief, text only.** Who she is, what she wears, one line of style. Well under the
+   character budget.
+2. **A restyle pass**, attaching the result of pass 1 with a prompt of a few hundred characters that
+   changes ONE thing and says everything else stays.
+
+Pass 2 at ~500 characters holds the layout far better than the same instructions folded into a
+3,700-character single prompt: every box in place, labels clean, the palette actually filled. The
+long version returned head boxes full of torsos and an empty palette. Short and single-purpose is
+worth more than complete.
+
+### PROPORTIONS DO NOT WORK, AND THIS IS THE OPEN PROBLEM
+
+The ripped arcade sprites are caricatures — roughly five heads tall, with enormous heads, hands and
+limbs. Everything generated here comes out at a naturalistic seven and a half to eight. At the same
+pixel height that reads as a smaller, further-away, frailer person, because we judge scale from head
+size and mass rather than from height: Kestrel measures 90px against Chun-Li's 87 and looks about
+four fifths her size standing next to her.
+
+Every lever tried has failed:
+
+| tried | result |
+|---|---|
+| A paragraph in the style block | Swamped the character: wrong hair, wrong costume, shoes she does not own. Proportions unchanged |
+| One sentence in the style block | No change at all |
+| Same, with the prompt cutoff raised so it demonstrably arrives | No change at all |
+| An image-to-image restyle pass, "change only the build" | Layout preserved perfectly, proportions untouched |
+| A short text-only generation with nothing to anchor it, plus a matching negative prompt | Still eight heads |
+
+So it is a prior in the model rather than a failure to read the instruction. What is left to try, in
+the order I would try it: a LoRA that carries the proportions; scaling the head mechanically after
+the cut, which is deterministic and ugly; or accepting naturalistic proportions as the house look on
+the grounds that the arcade sprites are placeholders and the mismatch disappears with them.
+
 ### Attach the bible as an image, never as a description
 
 The style is the bible's job and it cannot be carried in words. Describing it — "a photographed

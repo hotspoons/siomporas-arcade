@@ -26,12 +26,35 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const OUT = path.join(ROOT, 'apps/fighter/PROMPTS.md')
 
 /** In all five prompts, verbatim. The one block that decides whether the roster looks like a roster. */
+/**
+ * PROPORTIONS ARE PART OF THE STYLE, and leaving them out was the single worst error in this file.
+ *
+ * "A photographed actor, retouched" describes the printing technique exactly and the drawing
+ * convention not at all — so the generator supplied the one it knows, which is life drawing: a
+ * figure seven and a half to eight heads tall with a small head and thin limbs. Stood next to the
+ * ripped sprites at the same pixel height, that reads as a different, smaller, further-away person.
+ * Kestrel measured 90px against Chun-Li's 87 and still looked four fifths her size, because we read
+ * scale from head size and mass, not from height.
+ *
+ * The boards these imitate drew caricatures: about five and a half heads, a head you can read at
+ * 90px, hands and feet a size too big, and far more bulk than a person has. That is a convention
+ * every character obeys, on top of whatever build ROSTER.md gives them — Kestrel is still the lean
+ * tall one, drawn the way the fat short one is drawn.
+ *
+ * KEEP IT TO A SENTENCE. Written out as a full paragraph of its own it swamped everything around
+ * it: the character came back with the wrong hair, the wrong costume, shoes she does not wear — and
+ * proportions no better than before. Prompt length is a budget, and spending it here takes it from
+ * the description of who she is.
+ */
 const STYLE =
   'Painted in the manner of early-1990s arcade character art: a photographed actor in costume, ' +
   'retouched into hard-edged illustration — saturated colour, heavy contrast, one strong key light ' +
   'from the upper front left, deep shadow under the brow and the jaw, visible airbrush modelling on ' +
   'the muscle, and a crisp dark outline holding the whole figure together. Solid and physical, not ' +
-  'glossy and not cel-shaded. The costume reads as real cloth and real leather with real wear on it.'
+  'glossy and not cel-shaded. The costume reads as real cloth and real leather with real wear on it.' +
+  ' Drawn as a 1991 arcade sprite rather than from life: about five and a half heads tall, with a ' +
+  'big readable head, oversized hands and feet, and far more bulk through the shoulders and limbs ' +
+  'than the real body would have. Caricature, not life drawing.'
 
 /**
  * The closing prohibitions. The background rule is the one that decides whether the art is usable,
@@ -524,6 +547,14 @@ const ANIMS = [
 ]
 
 /**
+ * Rule 1 used to end "the same size on the page in every box", and that was wrong in a way worth
+ * recording: it is not what the boards did. Measured off the ROM art, a fierce is about twice the
+ * width of the same character standing still — Ryu's stand-hp is 108px against a 59px idle median,
+ * Zangief's stand-hk 146 against 92. The 1991 artists held the FEET in one place and let the
+ * drawing grow out of it, which is what an anchor is for. Asking instead for a constant area of ink
+ * squashed Kestrel's fierce to 34-66px against her own 51px idle — narrower than she stands, which
+ * no heavy attack on the board ever is.
+ *
  * The floor line is drawn in every box and the generator does not respect it on its own — left to
  * itself it draws the figure as large as the box allows, which puts the feet at or past the bottom
  * edge. Clipped feet are worse than they sound: the frame's lowest row becomes the box edge rather
@@ -544,7 +575,7 @@ These ${frames} drawings are VARIATIONS OF ONE DRAWING, not ${frames} different 
 
 Nine rules. Rule 1 matters more than all the others together:
 
-1. THE CAMERA NEVER MOVES. Every box is the same shot from the same distance: a full-length view with the whole fighter in it, head to feet, the same size on the page in all ${frames} boxes. Never zoom in, never crop to the waist or the chest or the legs, never draw a close-up of any part of her, and never put more than one drawing in a box. A box containing a pair of legs, or a head and shoulders, or two figures, is a ruined box.
+1. THE CAMERA AND THE FLOOR NEVER MOVE. Every box is the same shot from the same distance, with the feet in the same place on the same floor line. Never zoom in, never crop to the waist or the chest or the legs, never draw a close-up of any part of her, and never put more than one drawing in a box. A box containing a pair of legs, or a head and shoulders, or two figures, is a ruined box. Her HEIGHT standing is the same in every box — but a move may reach as far out from her as it needs to, and a committed attack should reach much further than she stands wide. Do not shrink a pose to fit; extend it.
 2. The character FACES RIGHT in all ${frames} boxes.
 3. The character is EXACTLY THE SAME HEIGHT in all ${frames} boxes, measured sole to crown. Never scale the character up or down between boxes.
 4. EXACTLY ONE character in each box — one figure, alone, per box. Never two in a box, never a box left empty, and never merge two boxes into a wider one. The boxes are the size and position they already are.

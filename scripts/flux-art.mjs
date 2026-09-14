@@ -10,6 +10,18 @@
 //
 //   kubectl port-forward -n default svc/flux-2-klein-9b-flux-2-klein-9b-flux2klei-d6cf254b 8402:80
 //
+// THE PROMPT IS TRUNCATED AT ABOUT 2000 CHARACTERS AND NOTHING SAYS SO. Measured, not guessed:
+// insert a loud instruction ("THE CHARACTER WEARS A LARGE BRIGHT YELLOW HAT IN EVERY BOX") at
+// char 1200 and the image changes; insert the same sentence at 2200 and the image is BYTE
+// IDENTICAL to the one without it. The boundary is between 1700 and 2200 — consistent with a
+// 512-token text encoder at roughly four characters a token. There is no error, no warning and no
+// field in the response: the tail is simply never read.
+//
+// Everything that matters must therefore go in the FIRST ~1800 CHARACTERS, and the order of a
+// prompt is now a resource-allocation decision rather than a matter of taste. A rule written at the
+// bottom of a long prompt has not been weakly applied, it has not been applied at all — which for a
+// while looked exactly like a model that ignores instructions.
+//
 // TWO IMAGES, AND WHY IT ONCE LOOKED LIKE ONE. Attach the bible AND the layout template, both as
 // `image`. If the server answers "Only a single image is supported by this model", that is not the
 // model: it is an admission gate in vllm-omni's API server reading a capability registry that has

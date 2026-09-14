@@ -82,6 +82,29 @@ The real ceiling above twenty isn't resolution, it's the generator losing track 
 instructions. That's why the sheet prompts put **six numbered rules before the pose list** instead of
 after it: when it gets absorbed in drawing twenty poses, the invariants are what it silently drops.
 
+### The prompt is cut off at about 2000 characters
+
+Measured against the served model, not guessed. Put a loud instruction — *"THE CHARACTER WEARS A
+LARGE BRIGHT YELLOW HAT IN EVERY BOX"* — at character 1200 of a prompt and the picture changes. Put
+the same sentence at 2200 and the picture is **byte-identical** to the one without it. The cutoff is
+somewhere between 1700 and 2200, which is what a 512-token text encoder looks like from outside.
+
+Nothing reports this. No error, no warning, no field in the response. A rule past the cutoff has not
+been weakly applied — it was never read, and that is indistinguishable from a model that ignores
+instructions until you test for it.
+
+**So the first ~1800 characters are the whole prompt**, and the order of one is a budget rather than
+a matter of taste. Two consequences worth stating plainly, because both were mis-diagnosed here
+first:
+
+- The style paragraph sits at the bottom of every prompt in this pipeline and has therefore never
+  been read by anything. What carries the style is the attached bible, which is why attaching it
+  works and describing it does not — the description was not losing to the image, it was not
+  arriving.
+- A long list of numbered rules spends the budget on its own tail. The rules that held were the
+  early ones. Adding an important rule at the bottom of the list, as happened with proportions
+  twice, changes nothing at all and looks like the model refusing.
+
 ### Attach the bible as an image, never as a description
 
 The style is the bible's job and it cannot be carried in words. Describing it — "a photographed

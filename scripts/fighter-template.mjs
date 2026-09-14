@@ -216,8 +216,15 @@ const CYCLE = [['f0', ''], ['f1', ''], ['f2', ''], ['f3', ''], ['f4', ''], ['f5'
  * spends frames settling their weight between poses and a lighter one does not need them. Six
  * frames on a light character comes back with two drawings doing no work.
  *
- * Two across and two down leaves a much wider box (1127) for the same figure height, which the
- * widest poses — a sweep, a lariat — have room in that they did not before.
+ * IT DOES NOT WORK YET AND NOTHING USES IT. Two across and two down stretches each box to 1128
+ * wide, and a box that wide is an invitation: the fighter came back sprawled across it at twice the
+ * width of her own idle, which is a scale break no anchor can repair. Redrawn at the six-box size
+ * and centred instead, with empty canvas either side, the generator filled one box and left
+ * 18px slivers in the other three.
+ *
+ * So four frames come off the six-box sheet like everything else for now, and the two spare boxes
+ * are spent rather than fought over. Kept here because a four-frame animation is a real thing — the
+ * board spends four on Chun-Li's idle — and this wants solving properly rather than deleting.
  */
 const CYCLE4 = [['f0', ''], ['f1', ''], ['f2', ''], ['f3', '']]
 

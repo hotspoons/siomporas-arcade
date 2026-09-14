@@ -121,16 +121,17 @@ Fill each of the 6 boxes with one frame of a SINGLE IDLE ANIMATION of that chara
 
 These 6 drawings are VARIATIONS OF ONE DRAWING, not 6 different pictures. Consecutive frames differ by inches. Do not restage the pose between boxes and do not give each box a different action.
 
-Eight rules. They matter more than any individual frame:
+Nine rules. Rule 1 matters more than all the others together:
 
-1. The character FACES RIGHT in all 6 boxes.
-2. The character is EXACTLY THE SAME HEIGHT in all 6 boxes, measured sole to crown. Never scale the character up or down between boxes.
-3. EXACTLY ONE character in each box — one figure, alone, per box. Never two in a box, never a box left empty, and never merge two boxes into a wider one. The boxes are the size and position they already are.
-4. The character stands ON the thin floor line with the soles of the feet touching it, and there is CLEAR EMPTY GREEN between the floor line and the bottom edge of the box. Nothing crosses the bottom edge. The head stops short of the top edge.
-5. The feet rest at the same place along the floor line and the body stands on the same vertical in every box. The character must not drift across the box between frames.
-6. The WHOLE body is in every box, head to feet. Nothing crosses into the gutters between boxes.
-7. The background inside every box is a CHROMA-KEY GREEN SCREEN and must stay one single completely flat, even, unlit, uniform bright green — exactly the green it already is, edge to edge, with no variation. It is a green screen, not a wall and not a room: it is not lit, nothing stands on it and nothing falls on it. No floor, no ground plane, no ground shadow, no cast shadow, no contact shadow, no pool of shade under the feet, no backdrop, no scenery, no gradient, no vignette, no glow, no darkening at the edges. Do not use green anywhere in the costume, skin or hair; green is the background and will be removed. No text, no labels, no captions, no watermark, no logo, no border and no frame.
-8. Fill all 6 boxes.
+1. THE CAMERA NEVER MOVES. Every box is the same shot from the same distance: a full-length view with the whole fighter in it, head to feet, the same size on the page in all 6 boxes. Never zoom in, never crop to the waist or the chest or the legs, never draw a close-up of any part of her, and never put more than one drawing in a box. A box containing a pair of legs, or a head and shoulders, or two figures, is a ruined box.
+2. The character FACES RIGHT in all 6 boxes.
+3. The character is EXACTLY THE SAME HEIGHT in all 6 boxes, measured sole to crown. Never scale the character up or down between boxes.
+4. EXACTLY ONE character in each box — one figure, alone, per box. Never two in a box, never a box left empty, and never merge two boxes into a wider one. The boxes are the size and position they already are.
+5. The character stands ON the thin floor line with the soles of the feet touching it, and there is CLEAR EMPTY GREEN between the floor line and the bottom edge of the box. Nothing crosses the bottom edge. The head stops short of the top edge.
+6. The feet rest at the same place along the floor line and the body stands on the same vertical in every box. The character must not drift across the box between frames.
+7. The WHOLE body is in every box, head to feet. Nothing crosses into the gutters between boxes.
+8. The background inside every box is a CHROMA-KEY GREEN SCREEN and must stay one single completely flat, even, unlit, uniform bright green — exactly the green it already is, edge to edge, with no variation. It is a green screen, not a wall and not a room: it is not lit, nothing stands on it and nothing falls on it. No floor, no ground plane, no ground shadow, no cast shadow, no contact shadow, no pool of shade under the feet, no backdrop, no scenery, no gradient, no vignette, no glow, no darkening at the edges. Do not use green anywhere in the costume, skin or hair; green is the background and will be removed. No text, no labels, no captions, no watermark, no logo, no border and no frame.
+9. Fill all 6 boxes.
 
 Painted in the manner of early-1990s arcade character art: a photographed actor in costume, retouched into hard-edged illustration — saturated colour, heavy contrast, one strong key light from the upper front left, deep shadow under the brow and the jaw, visible airbrush modelling on the muscle, and a crisp dark outline holding the whole figure together. Solid and physical, not glossy and not cel-shaded. The costume reads as real cloth and real leather with real wear on it.
 
@@ -156,16 +157,17 @@ Fill each of the 6 boxes with one frame of a SINGLE WALK-FWD ANIMATION of that c
 
 These 6 drawings are VARIATIONS OF ONE DRAWING, not 6 different pictures. Consecutive frames differ by inches. Do not restage the pose between boxes and do not give each box a different action.
 
-Eight rules. They matter more than any individual frame:
+Nine rules. Rule 1 matters more than all the others together:
 
-1. The character FACES RIGHT in all 6 boxes.
-2. The character is EXACTLY THE SAME HEIGHT in all 6 boxes, measured sole to crown. Never scale the character up or down between boxes.
-3. EXACTLY ONE character in each box — one figure, alone, per box. Never two in a box, never a box left empty, and never merge two boxes into a wider one. The boxes are the size and position they already are.
-4. The character stands ON the thin floor line with the soles of the feet touching it, and there is CLEAR EMPTY GREEN between the floor line and the bottom edge of the box. Nothing crosses the bottom edge. The head stops short of the top edge.
-5. The feet rest at the same place along the floor line and the body stands on the same vertical in every box. The character must not drift across the box between frames.
-6. The WHOLE body is in every box, head to feet. Nothing crosses into the gutters between boxes.
-7. The background inside every box is a CHROMA-KEY GREEN SCREEN and must stay one single completely flat, even, unlit, uniform bright green — exactly the green it already is, edge to edge, with no variation. It is a green screen, not a wall and not a room: it is not lit, nothing stands on it and nothing falls on it. No floor, no ground plane, no ground shadow, no cast shadow, no contact shadow, no pool of shade under the feet, no backdrop, no scenery, no gradient, no vignette, no glow, no darkening at the edges. Do not use green anywhere in the costume, skin or hair; green is the background and will be removed. No text, no labels, no captions, no watermark, no logo, no border and no frame.
-8. Fill all 6 boxes.
+1. THE CAMERA NEVER MOVES. Every box is the same shot from the same distance: a full-length view with the whole fighter in it, head to feet, the same size on the page in all 6 boxes. Never zoom in, never crop to the waist or the chest or the legs, never draw a close-up of any part of her, and never put more than one drawing in a box. A box containing a pair of legs, or a head and shoulders, or two figures, is a ruined box.
+2. The character FACES RIGHT in all 6 boxes.
+3. The character is EXACTLY THE SAME HEIGHT in all 6 boxes, measured sole to crown. Never scale the character up or down between boxes.
+4. EXACTLY ONE character in each box — one figure, alone, per box. Never two in a box, never a box left empty, and never merge two boxes into a wider one. The boxes are the size and position they already are.
+5. The character stands ON the thin floor line with the soles of the feet touching it, and there is CLEAR EMPTY GREEN between the floor line and the bottom edge of the box. Nothing crosses the bottom edge. The head stops short of the top edge.
+6. The feet rest at the same place along the floor line and the body stands on the same vertical in every box. The character must not drift across the box between frames.
+7. The WHOLE body is in every box, head to feet. Nothing crosses into the gutters between boxes.
+8. The background inside every box is a CHROMA-KEY GREEN SCREEN and must stay one single completely flat, even, unlit, uniform bright green — exactly the green it already is, edge to edge, with no variation. It is a green screen, not a wall and not a room: it is not lit, nothing stands on it and nothing falls on it. No floor, no ground plane, no ground shadow, no cast shadow, no contact shadow, no pool of shade under the feet, no backdrop, no scenery, no gradient, no vignette, no glow, no darkening at the edges. Do not use green anywhere in the costume, skin or hair; green is the background and will be removed. No text, no labels, no captions, no watermark, no logo, no border and no frame.
+9. Fill all 6 boxes.
 
 Painted in the manner of early-1990s arcade character art: a photographed actor in costume, retouched into hard-edged illustration — saturated colour, heavy contrast, one strong key light from the upper front left, deep shadow under the brow and the jaw, visible airbrush modelling on the muscle, and a crisp dark outline holding the whole figure together. Solid and physical, not glossy and not cel-shaded. The costume reads as real cloth and real leather with real wear on it.
 
@@ -191,16 +193,17 @@ Fill each of the 6 boxes with one frame of a SINGLE WALK-BACK ANIMATION of that 
 
 These 6 drawings are VARIATIONS OF ONE DRAWING, not 6 different pictures. Consecutive frames differ by inches. Do not restage the pose between boxes and do not give each box a different action.
 
-Eight rules. They matter more than any individual frame:
+Nine rules. Rule 1 matters more than all the others together:
 
-1. The character FACES RIGHT in all 6 boxes.
-2. The character is EXACTLY THE SAME HEIGHT in all 6 boxes, measured sole to crown. Never scale the character up or down between boxes.
-3. EXACTLY ONE character in each box — one figure, alone, per box. Never two in a box, never a box left empty, and never merge two boxes into a wider one. The boxes are the size and position they already are.
-4. The character stands ON the thin floor line with the soles of the feet touching it, and there is CLEAR EMPTY GREEN between the floor line and the bottom edge of the box. Nothing crosses the bottom edge. The head stops short of the top edge.
-5. The feet rest at the same place along the floor line and the body stands on the same vertical in every box. The character must not drift across the box between frames.
-6. The WHOLE body is in every box, head to feet. Nothing crosses into the gutters between boxes.
-7. The background inside every box is a CHROMA-KEY GREEN SCREEN and must stay one single completely flat, even, unlit, uniform bright green — exactly the green it already is, edge to edge, with no variation. It is a green screen, not a wall and not a room: it is not lit, nothing stands on it and nothing falls on it. No floor, no ground plane, no ground shadow, no cast shadow, no contact shadow, no pool of shade under the feet, no backdrop, no scenery, no gradient, no vignette, no glow, no darkening at the edges. Do not use green anywhere in the costume, skin or hair; green is the background and will be removed. No text, no labels, no captions, no watermark, no logo, no border and no frame.
-8. Fill all 6 boxes.
+1. THE CAMERA NEVER MOVES. Every box is the same shot from the same distance: a full-length view with the whole fighter in it, head to feet, the same size on the page in all 6 boxes. Never zoom in, never crop to the waist or the chest or the legs, never draw a close-up of any part of her, and never put more than one drawing in a box. A box containing a pair of legs, or a head and shoulders, or two figures, is a ruined box.
+2. The character FACES RIGHT in all 6 boxes.
+3. The character is EXACTLY THE SAME HEIGHT in all 6 boxes, measured sole to crown. Never scale the character up or down between boxes.
+4. EXACTLY ONE character in each box — one figure, alone, per box. Never two in a box, never a box left empty, and never merge two boxes into a wider one. The boxes are the size and position they already are.
+5. The character stands ON the thin floor line with the soles of the feet touching it, and there is CLEAR EMPTY GREEN between the floor line and the bottom edge of the box. Nothing crosses the bottom edge. The head stops short of the top edge.
+6. The feet rest at the same place along the floor line and the body stands on the same vertical in every box. The character must not drift across the box between frames.
+7. The WHOLE body is in every box, head to feet. Nothing crosses into the gutters between boxes.
+8. The background inside every box is a CHROMA-KEY GREEN SCREEN and must stay one single completely flat, even, unlit, uniform bright green — exactly the green it already is, edge to edge, with no variation. It is a green screen, not a wall and not a room: it is not lit, nothing stands on it and nothing falls on it. No floor, no ground plane, no ground shadow, no cast shadow, no contact shadow, no pool of shade under the feet, no backdrop, no scenery, no gradient, no vignette, no glow, no darkening at the edges. Do not use green anywhere in the costume, skin or hair; green is the background and will be removed. No text, no labels, no captions, no watermark, no logo, no border and no frame.
+9. Fill all 6 boxes.
 
 Painted in the manner of early-1990s arcade character art: a photographed actor in costume, retouched into hard-edged illustration — saturated colour, heavy contrast, one strong key light from the upper front left, deep shadow under the brow and the jaw, visible airbrush modelling on the muscle, and a crisp dark outline holding the whole figure together. Solid and physical, not glossy and not cel-shaded. The costume reads as real cloth and real leather with real wear on it.
 
@@ -226,16 +229,17 @@ Fill each of the 6 boxes with one frame of a SINGLE STAND-HP ANIMATION of that c
 
 These 6 drawings are VARIATIONS OF ONE DRAWING, not 6 different pictures. Consecutive frames differ by inches. Do not restage the pose between boxes and do not give each box a different action.
 
-Eight rules. They matter more than any individual frame:
+Nine rules. Rule 1 matters more than all the others together:
 
-1. The character FACES RIGHT in all 6 boxes.
-2. The character is EXACTLY THE SAME HEIGHT in all 6 boxes, measured sole to crown. Never scale the character up or down between boxes.
-3. EXACTLY ONE character in each box — one figure, alone, per box. Never two in a box, never a box left empty, and never merge two boxes into a wider one. The boxes are the size and position they already are.
-4. The character stands ON the thin floor line with the soles of the feet touching it, and there is CLEAR EMPTY GREEN between the floor line and the bottom edge of the box. Nothing crosses the bottom edge. The head stops short of the top edge.
-5. The feet rest at the same place along the floor line and the body stands on the same vertical in every box. The character must not drift across the box between frames.
-6. The WHOLE body is in every box, head to feet. Nothing crosses into the gutters between boxes.
-7. The background inside every box is a CHROMA-KEY GREEN SCREEN and must stay one single completely flat, even, unlit, uniform bright green — exactly the green it already is, edge to edge, with no variation. It is a green screen, not a wall and not a room: it is not lit, nothing stands on it and nothing falls on it. No floor, no ground plane, no ground shadow, no cast shadow, no contact shadow, no pool of shade under the feet, no backdrop, no scenery, no gradient, no vignette, no glow, no darkening at the edges. Do not use green anywhere in the costume, skin or hair; green is the background and will be removed. No text, no labels, no captions, no watermark, no logo, no border and no frame.
-8. Fill all 6 boxes.
+1. THE CAMERA NEVER MOVES. Every box is the same shot from the same distance: a full-length view with the whole fighter in it, head to feet, the same size on the page in all 6 boxes. Never zoom in, never crop to the waist or the chest or the legs, never draw a close-up of any part of her, and never put more than one drawing in a box. A box containing a pair of legs, or a head and shoulders, or two figures, is a ruined box.
+2. The character FACES RIGHT in all 6 boxes.
+3. The character is EXACTLY THE SAME HEIGHT in all 6 boxes, measured sole to crown. Never scale the character up or down between boxes.
+4. EXACTLY ONE character in each box — one figure, alone, per box. Never two in a box, never a box left empty, and never merge two boxes into a wider one. The boxes are the size and position they already are.
+5. The character stands ON the thin floor line with the soles of the feet touching it, and there is CLEAR EMPTY GREEN between the floor line and the bottom edge of the box. Nothing crosses the bottom edge. The head stops short of the top edge.
+6. The feet rest at the same place along the floor line and the body stands on the same vertical in every box. The character must not drift across the box between frames.
+7. The WHOLE body is in every box, head to feet. Nothing crosses into the gutters between boxes.
+8. The background inside every box is a CHROMA-KEY GREEN SCREEN and must stay one single completely flat, even, unlit, uniform bright green — exactly the green it already is, edge to edge, with no variation. It is a green screen, not a wall and not a room: it is not lit, nothing stands on it and nothing falls on it. No floor, no ground plane, no ground shadow, no cast shadow, no contact shadow, no pool of shade under the feet, no backdrop, no scenery, no gradient, no vignette, no glow, no darkening at the edges. Do not use green anywhere in the costume, skin or hair; green is the background and will be removed. No text, no labels, no captions, no watermark, no logo, no border and no frame.
+9. Fill all 6 boxes.
 
 Painted in the manner of early-1990s arcade character art: a photographed actor in costume, retouched into hard-edged illustration — saturated colour, heavy contrast, one strong key light from the upper front left, deep shadow under the brow and the jaw, visible airbrush modelling on the muscle, and a crisp dark outline holding the whole figure together. Solid and physical, not glossy and not cel-shaded. The costume reads as real cloth and real leather with real wear on it.
 
@@ -261,16 +265,17 @@ Fill each of the 6 boxes with one frame of a SINGLE STAND-HK ANIMATION of that c
 
 These 6 drawings are VARIATIONS OF ONE DRAWING, not 6 different pictures. Consecutive frames differ by inches. Do not restage the pose between boxes and do not give each box a different action.
 
-Eight rules. They matter more than any individual frame:
+Nine rules. Rule 1 matters more than all the others together:
 
-1. The character FACES RIGHT in all 6 boxes.
-2. The character is EXACTLY THE SAME HEIGHT in all 6 boxes, measured sole to crown. Never scale the character up or down between boxes.
-3. EXACTLY ONE character in each box — one figure, alone, per box. Never two in a box, never a box left empty, and never merge two boxes into a wider one. The boxes are the size and position they already are.
-4. The character stands ON the thin floor line with the soles of the feet touching it, and there is CLEAR EMPTY GREEN between the floor line and the bottom edge of the box. Nothing crosses the bottom edge. The head stops short of the top edge.
-5. The feet rest at the same place along the floor line and the body stands on the same vertical in every box. The character must not drift across the box between frames.
-6. The WHOLE body is in every box, head to feet. Nothing crosses into the gutters between boxes.
-7. The background inside every box is a CHROMA-KEY GREEN SCREEN and must stay one single completely flat, even, unlit, uniform bright green — exactly the green it already is, edge to edge, with no variation. It is a green screen, not a wall and not a room: it is not lit, nothing stands on it and nothing falls on it. No floor, no ground plane, no ground shadow, no cast shadow, no contact shadow, no pool of shade under the feet, no backdrop, no scenery, no gradient, no vignette, no glow, no darkening at the edges. Do not use green anywhere in the costume, skin or hair; green is the background and will be removed. No text, no labels, no captions, no watermark, no logo, no border and no frame.
-8. Fill all 6 boxes.
+1. THE CAMERA NEVER MOVES. Every box is the same shot from the same distance: a full-length view with the whole fighter in it, head to feet, the same size on the page in all 6 boxes. Never zoom in, never crop to the waist or the chest or the legs, never draw a close-up of any part of her, and never put more than one drawing in a box. A box containing a pair of legs, or a head and shoulders, or two figures, is a ruined box.
+2. The character FACES RIGHT in all 6 boxes.
+3. The character is EXACTLY THE SAME HEIGHT in all 6 boxes, measured sole to crown. Never scale the character up or down between boxes.
+4. EXACTLY ONE character in each box — one figure, alone, per box. Never two in a box, never a box left empty, and never merge two boxes into a wider one. The boxes are the size and position they already are.
+5. The character stands ON the thin floor line with the soles of the feet touching it, and there is CLEAR EMPTY GREEN between the floor line and the bottom edge of the box. Nothing crosses the bottom edge. The head stops short of the top edge.
+6. The feet rest at the same place along the floor line and the body stands on the same vertical in every box. The character must not drift across the box between frames.
+7. The WHOLE body is in every box, head to feet. Nothing crosses into the gutters between boxes.
+8. The background inside every box is a CHROMA-KEY GREEN SCREEN and must stay one single completely flat, even, unlit, uniform bright green — exactly the green it already is, edge to edge, with no variation. It is a green screen, not a wall and not a room: it is not lit, nothing stands on it and nothing falls on it. No floor, no ground plane, no ground shadow, no cast shadow, no contact shadow, no pool of shade under the feet, no backdrop, no scenery, no gradient, no vignette, no glow, no darkening at the edges. Do not use green anywhere in the costume, skin or hair; green is the background and will be removed. No text, no labels, no captions, no watermark, no logo, no border and no frame.
+9. Fill all 6 boxes.
 
 Painted in the manner of early-1990s arcade character art: a photographed actor in costume, retouched into hard-edged illustration — saturated colour, heavy contrast, one strong key light from the upper front left, deep shadow under the brow and the jaw, visible airbrush modelling on the muscle, and a crisp dark outline holding the whole figure together. Solid and physical, not glossy and not cel-shaded. The costume reads as real cloth and real leather with real wear on it.
 
@@ -296,16 +301,17 @@ Fill each of the 6 boxes with one frame of a SINGLE CROUCH-HK ANIMATION of that 
 
 These 6 drawings are VARIATIONS OF ONE DRAWING, not 6 different pictures. Consecutive frames differ by inches. Do not restage the pose between boxes and do not give each box a different action.
 
-Eight rules. They matter more than any individual frame:
+Nine rules. Rule 1 matters more than all the others together:
 
-1. The character FACES RIGHT in all 6 boxes.
-2. The character is EXACTLY THE SAME HEIGHT in all 6 boxes, measured sole to crown. Never scale the character up or down between boxes.
-3. EXACTLY ONE character in each box — one figure, alone, per box. Never two in a box, never a box left empty, and never merge two boxes into a wider one. The boxes are the size and position they already are.
-4. The character stands ON the thin floor line with the soles of the feet touching it, and there is CLEAR EMPTY GREEN between the floor line and the bottom edge of the box. Nothing crosses the bottom edge. The head stops short of the top edge.
-5. The feet rest at the same place along the floor line and the body stands on the same vertical in every box. The character must not drift across the box between frames.
-6. The WHOLE body is in every box, head to feet. Nothing crosses into the gutters between boxes.
-7. The background inside every box is a CHROMA-KEY GREEN SCREEN and must stay one single completely flat, even, unlit, uniform bright green — exactly the green it already is, edge to edge, with no variation. It is a green screen, not a wall and not a room: it is not lit, nothing stands on it and nothing falls on it. No floor, no ground plane, no ground shadow, no cast shadow, no contact shadow, no pool of shade under the feet, no backdrop, no scenery, no gradient, no vignette, no glow, no darkening at the edges. Do not use green anywhere in the costume, skin or hair; green is the background and will be removed. No text, no labels, no captions, no watermark, no logo, no border and no frame.
-8. Fill all 6 boxes.
+1. THE CAMERA NEVER MOVES. Every box is the same shot from the same distance: a full-length view with the whole fighter in it, head to feet, the same size on the page in all 6 boxes. Never zoom in, never crop to the waist or the chest or the legs, never draw a close-up of any part of her, and never put more than one drawing in a box. A box containing a pair of legs, or a head and shoulders, or two figures, is a ruined box.
+2. The character FACES RIGHT in all 6 boxes.
+3. The character is EXACTLY THE SAME HEIGHT in all 6 boxes, measured sole to crown. Never scale the character up or down between boxes.
+4. EXACTLY ONE character in each box — one figure, alone, per box. Never two in a box, never a box left empty, and never merge two boxes into a wider one. The boxes are the size and position they already are.
+5. The character stands ON the thin floor line with the soles of the feet touching it, and there is CLEAR EMPTY GREEN between the floor line and the bottom edge of the box. Nothing crosses the bottom edge. The head stops short of the top edge.
+6. The feet rest at the same place along the floor line and the body stands on the same vertical in every box. The character must not drift across the box between frames.
+7. The WHOLE body is in every box, head to feet. Nothing crosses into the gutters between boxes.
+8. The background inside every box is a CHROMA-KEY GREEN SCREEN and must stay one single completely flat, even, unlit, uniform bright green — exactly the green it already is, edge to edge, with no variation. It is a green screen, not a wall and not a room: it is not lit, nothing stands on it and nothing falls on it. No floor, no ground plane, no ground shadow, no cast shadow, no contact shadow, no pool of shade under the feet, no backdrop, no scenery, no gradient, no vignette, no glow, no darkening at the edges. Do not use green anywhere in the costume, skin or hair; green is the background and will be removed. No text, no labels, no captions, no watermark, no logo, no border and no frame.
+9. Fill all 6 boxes.
 
 Painted in the manner of early-1990s arcade character art: a photographed actor in costume, retouched into hard-edged illustration — saturated colour, heavy contrast, one strong key light from the upper front left, deep shadow under the brow and the jaw, visible airbrush modelling on the muscle, and a crisp dark outline holding the whole figure together. Solid and physical, not glossy and not cel-shaded. The costume reads as real cloth and real leather with real wear on it.
 
@@ -314,33 +320,34 @@ or impact effects anywhere — the game draws all of that, and anything painted 
 be removed. No text, labels, captions, watermarks, logos, borders or frames. NO NUMBERS anywhere in the image.
 ```
 
-## 8. KESTREL — HIT-HIGH — 4 frames
+## 8. KESTREL — HIT-HIGH — 6 frames
 
-**Attach:** the finished bible from prompt 11 **first**, then `art-templates/cycle-4.png`
+**Attach:** the finished bible from prompt 11 **first**, then `art-templates/cycle.png`
 
-**Cut with:** `node scripts/fighter-sheet.mjs ext/kestrel-hit-high.png kestrel cycle-4 --untrimmed hit-high`
+**Cut with:** `node scripts/fighter-sheet.mjs ext/kestrel-hit-high.png kestrel cycle --untrimmed hit-high`
 
 ```text
-Attached is a blank layout template: a dark green field with 4 bright chroma-key green boxes, each with a faint horizontal floor line near its bottom. The boxes carry no labels and no numbers, and none should be drawn.
+Attached is a blank layout template: a dark green field with 6 bright chroma-key green boxes, each with a faint horizontal floor line near its bottom. The boxes carry no labels and no numbers, and none should be drawn.
 
 THE CHARACTER: A tall, lean Black British woman in her late twenties, shaved head, long limbs, a loose dark teal sleeveless vest and cropped rust-orange trousers, barefoot. Her right forearm is wrapped wrist to elbow in thick rust-orange rope and cloth so it reads as a club, twice the thickness of her bare left arm, which wears brass rings. Confident, relaxed, economical.
 
 Draw that character, and only that character, from the description above. If a second reference image of them is supplied, match its face, build, costume and colours exactly; if none is, the description is the whole brief and every box must agree with it and with every other box.
 
-Fill each of the 4 boxes with one frame of a SINGLE HIT-HIGH ANIMATION of that character — BEING HIT in the head: the head snapping back, the body recoiling, arms loose, feet still on the floor, then beginning to recover. Struck, not attacking. Frame 1 through frame 4 in reading order, and frame 4 must lead back into frame 1 so the loop is seamless.
+Fill each of the 6 boxes with one frame of a SINGLE HIT-HIGH ANIMATION of that character — BEING HIT in the head: the head snapping back, the body recoiling, arms loose, feet still on the floor, then beginning to recover. Struck, not attacking. Frame 1 through frame 6 in reading order, and frame 6 must lead back into frame 1 so the loop is seamless.
 
-These 4 drawings are VARIATIONS OF ONE DRAWING, not 4 different pictures. Consecutive frames differ by inches. Do not restage the pose between boxes and do not give each box a different action.
+These 6 drawings are VARIATIONS OF ONE DRAWING, not 6 different pictures. Consecutive frames differ by inches. Do not restage the pose between boxes and do not give each box a different action.
 
-Eight rules. They matter more than any individual frame:
+Nine rules. Rule 1 matters more than all the others together:
 
-1. The character FACES RIGHT in all 4 boxes.
-2. The character is EXACTLY THE SAME HEIGHT in all 4 boxes, measured sole to crown. Never scale the character up or down between boxes.
-3. EXACTLY ONE character in each box — one figure, alone, per box. Never two in a box, never a box left empty, and never merge two boxes into a wider one. The boxes are the size and position they already are.
-4. The character stands ON the thin floor line with the soles of the feet touching it, and there is CLEAR EMPTY GREEN between the floor line and the bottom edge of the box. Nothing crosses the bottom edge. The head stops short of the top edge.
-5. The feet rest at the same place along the floor line and the body stands on the same vertical in every box. The character must not drift across the box between frames.
-6. The WHOLE body is in every box, head to feet. Nothing crosses into the gutters between boxes.
-7. The background inside every box is a CHROMA-KEY GREEN SCREEN and must stay one single completely flat, even, unlit, uniform bright green — exactly the green it already is, edge to edge, with no variation. It is a green screen, not a wall and not a room: it is not lit, nothing stands on it and nothing falls on it. No floor, no ground plane, no ground shadow, no cast shadow, no contact shadow, no pool of shade under the feet, no backdrop, no scenery, no gradient, no vignette, no glow, no darkening at the edges. Do not use green anywhere in the costume, skin or hair; green is the background and will be removed. No text, no labels, no captions, no watermark, no logo, no border and no frame.
-8. Fill all 4 boxes.
+1. THE CAMERA NEVER MOVES. Every box is the same shot from the same distance: a full-length view with the whole fighter in it, head to feet, the same size on the page in all 6 boxes. Never zoom in, never crop to the waist or the chest or the legs, never draw a close-up of any part of her, and never put more than one drawing in a box. A box containing a pair of legs, or a head and shoulders, or two figures, is a ruined box.
+2. The character FACES RIGHT in all 6 boxes.
+3. The character is EXACTLY THE SAME HEIGHT in all 6 boxes, measured sole to crown. Never scale the character up or down between boxes.
+4. EXACTLY ONE character in each box — one figure, alone, per box. Never two in a box, never a box left empty, and never merge two boxes into a wider one. The boxes are the size and position they already are.
+5. The character stands ON the thin floor line with the soles of the feet touching it, and there is CLEAR EMPTY GREEN between the floor line and the bottom edge of the box. Nothing crosses the bottom edge. The head stops short of the top edge.
+6. The feet rest at the same place along the floor line and the body stands on the same vertical in every box. The character must not drift across the box between frames.
+7. The WHOLE body is in every box, head to feet. Nothing crosses into the gutters between boxes.
+8. The background inside every box is a CHROMA-KEY GREEN SCREEN and must stay one single completely flat, even, unlit, uniform bright green — exactly the green it already is, edge to edge, with no variation. It is a green screen, not a wall and not a room: it is not lit, nothing stands on it and nothing falls on it. No floor, no ground plane, no ground shadow, no cast shadow, no contact shadow, no pool of shade under the feet, no backdrop, no scenery, no gradient, no vignette, no glow, no darkening at the edges. Do not use green anywhere in the costume, skin or hair; green is the background and will be removed. No text, no labels, no captions, no watermark, no logo, no border and no frame.
+9. Fill all 6 boxes.
 
 Painted in the manner of early-1990s arcade character art: a photographed actor in costume, retouched into hard-edged illustration — saturated colour, heavy contrast, one strong key light from the upper front left, deep shadow under the brow and the jaw, visible airbrush modelling on the muscle, and a crisp dark outline holding the whole figure together. Solid and physical, not glossy and not cel-shaded. The costume reads as real cloth and real leather with real wear on it.
 
@@ -366,16 +373,17 @@ Fill each of the 6 boxes with one frame of a SINGLE KNOCKDOWN ANIMATION of that 
 
 These 6 drawings are VARIATIONS OF ONE DRAWING, not 6 different pictures. Consecutive frames differ by inches. Do not restage the pose between boxes and do not give each box a different action.
 
-Eight rules. They matter more than any individual frame:
+Nine rules. Rule 1 matters more than all the others together:
 
-1. The character FACES RIGHT in all 6 boxes.
-2. The character is EXACTLY THE SAME HEIGHT in all 6 boxes, measured sole to crown. Never scale the character up or down between boxes.
-3. EXACTLY ONE character in each box — one figure, alone, per box. Never two in a box, never a box left empty, and never merge two boxes into a wider one. The boxes are the size and position they already are.
-4. The character stands ON the thin floor line with the soles of the feet touching it, and there is CLEAR EMPTY GREEN between the floor line and the bottom edge of the box. Nothing crosses the bottom edge. The head stops short of the top edge.
-5. The feet rest at the same place along the floor line and the body stands on the same vertical in every box. The character must not drift across the box between frames.
-6. The WHOLE body is in every box, head to feet. Nothing crosses into the gutters between boxes.
-7. The background inside every box is a CHROMA-KEY GREEN SCREEN and must stay one single completely flat, even, unlit, uniform bright green — exactly the green it already is, edge to edge, with no variation. It is a green screen, not a wall and not a room: it is not lit, nothing stands on it and nothing falls on it. No floor, no ground plane, no ground shadow, no cast shadow, no contact shadow, no pool of shade under the feet, no backdrop, no scenery, no gradient, no vignette, no glow, no darkening at the edges. Do not use green anywhere in the costume, skin or hair; green is the background and will be removed. No text, no labels, no captions, no watermark, no logo, no border and no frame.
-8. Fill all 6 boxes.
+1. THE CAMERA NEVER MOVES. Every box is the same shot from the same distance: a full-length view with the whole fighter in it, head to feet, the same size on the page in all 6 boxes. Never zoom in, never crop to the waist or the chest or the legs, never draw a close-up of any part of her, and never put more than one drawing in a box. A box containing a pair of legs, or a head and shoulders, or two figures, is a ruined box.
+2. The character FACES RIGHT in all 6 boxes.
+3. The character is EXACTLY THE SAME HEIGHT in all 6 boxes, measured sole to crown. Never scale the character up or down between boxes.
+4. EXACTLY ONE character in each box — one figure, alone, per box. Never two in a box, never a box left empty, and never merge two boxes into a wider one. The boxes are the size and position they already are.
+5. The character stands ON the thin floor line with the soles of the feet touching it, and there is CLEAR EMPTY GREEN between the floor line and the bottom edge of the box. Nothing crosses the bottom edge. The head stops short of the top edge.
+6. The feet rest at the same place along the floor line and the body stands on the same vertical in every box. The character must not drift across the box between frames.
+7. The WHOLE body is in every box, head to feet. Nothing crosses into the gutters between boxes.
+8. The background inside every box is a CHROMA-KEY GREEN SCREEN and must stay one single completely flat, even, unlit, uniform bright green — exactly the green it already is, edge to edge, with no variation. It is a green screen, not a wall and not a room: it is not lit, nothing stands on it and nothing falls on it. No floor, no ground plane, no ground shadow, no cast shadow, no contact shadow, no pool of shade under the feet, no backdrop, no scenery, no gradient, no vignette, no glow, no darkening at the edges. Do not use green anywhere in the costume, skin or hair; green is the background and will be removed. No text, no labels, no captions, no watermark, no logo, no border and no frame.
+9. Fill all 6 boxes.
 
 Painted in the manner of early-1990s arcade character art: a photographed actor in costume, retouched into hard-edged illustration — saturated colour, heavy contrast, one strong key light from the upper front left, deep shadow under the brow and the jaw, visible airbrush modelling on the muscle, and a crisp dark outline holding the whole figure together. Solid and physical, not glossy and not cel-shaded. The costume reads as real cloth and real leather with real wear on it.
 
@@ -401,16 +409,17 @@ Fill each of the 6 boxes with one frame of a SINGLE WIN ANIMATION of that charac
 
 These 6 drawings are VARIATIONS OF ONE DRAWING, not 6 different pictures. Consecutive frames differ by inches. Do not restage the pose between boxes and do not give each box a different action.
 
-Eight rules. They matter more than any individual frame:
+Nine rules. Rule 1 matters more than all the others together:
 
-1. The character FACES RIGHT in all 6 boxes.
-2. The character is EXACTLY THE SAME HEIGHT in all 6 boxes, measured sole to crown. Never scale the character up or down between boxes.
-3. EXACTLY ONE character in each box — one figure, alone, per box. Never two in a box, never a box left empty, and never merge two boxes into a wider one. The boxes are the size and position they already are.
-4. The character stands ON the thin floor line with the soles of the feet touching it, and there is CLEAR EMPTY GREEN between the floor line and the bottom edge of the box. Nothing crosses the bottom edge. The head stops short of the top edge.
-5. The feet rest at the same place along the floor line and the body stands on the same vertical in every box. The character must not drift across the box between frames.
-6. The WHOLE body is in every box, head to feet. Nothing crosses into the gutters between boxes.
-7. The background inside every box is a CHROMA-KEY GREEN SCREEN and must stay one single completely flat, even, unlit, uniform bright green — exactly the green it already is, edge to edge, with no variation. It is a green screen, not a wall and not a room: it is not lit, nothing stands on it and nothing falls on it. No floor, no ground plane, no ground shadow, no cast shadow, no contact shadow, no pool of shade under the feet, no backdrop, no scenery, no gradient, no vignette, no glow, no darkening at the edges. Do not use green anywhere in the costume, skin or hair; green is the background and will be removed. No text, no labels, no captions, no watermark, no logo, no border and no frame.
-8. Fill all 6 boxes.
+1. THE CAMERA NEVER MOVES. Every box is the same shot from the same distance: a full-length view with the whole fighter in it, head to feet, the same size on the page in all 6 boxes. Never zoom in, never crop to the waist or the chest or the legs, never draw a close-up of any part of her, and never put more than one drawing in a box. A box containing a pair of legs, or a head and shoulders, or two figures, is a ruined box.
+2. The character FACES RIGHT in all 6 boxes.
+3. The character is EXACTLY THE SAME HEIGHT in all 6 boxes, measured sole to crown. Never scale the character up or down between boxes.
+4. EXACTLY ONE character in each box — one figure, alone, per box. Never two in a box, never a box left empty, and never merge two boxes into a wider one. The boxes are the size and position they already are.
+5. The character stands ON the thin floor line with the soles of the feet touching it, and there is CLEAR EMPTY GREEN between the floor line and the bottom edge of the box. Nothing crosses the bottom edge. The head stops short of the top edge.
+6. The feet rest at the same place along the floor line and the body stands on the same vertical in every box. The character must not drift across the box between frames.
+7. The WHOLE body is in every box, head to feet. Nothing crosses into the gutters between boxes.
+8. The background inside every box is a CHROMA-KEY GREEN SCREEN and must stay one single completely flat, even, unlit, uniform bright green — exactly the green it already is, edge to edge, with no variation. It is a green screen, not a wall and not a room: it is not lit, nothing stands on it and nothing falls on it. No floor, no ground plane, no ground shadow, no cast shadow, no contact shadow, no pool of shade under the feet, no backdrop, no scenery, no gradient, no vignette, no glow, no darkening at the edges. Do not use green anywhere in the costume, skin or hair; green is the background and will be removed. No text, no labels, no captions, no watermark, no logo, no border and no frame.
+9. Fill all 6 boxes.
 
 Painted in the manner of early-1990s arcade character art: a photographed actor in costume, retouched into hard-edged illustration — saturated colour, heavy contrast, one strong key light from the upper front left, deep shadow under the brow and the jaw, visible airbrush modelling on the muscle, and a crisp dark outline holding the whole figure together. Solid and physical, not glossy and not cel-shaded. The costume reads as real cloth and real leather with real wear on it.
 

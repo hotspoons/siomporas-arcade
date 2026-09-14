@@ -518,7 +518,7 @@ const ANIMS = [
   { id: 'stand-hp', frames: 6, light: 6, what: 'a HEAVY PUNCH, thrown and recovered: guard, the shoulder and hips winding through it, the arm locked fully out at the peak, then back to guard. The peak reaches further than anything else this character does with the hands.' },
   { id: 'stand-hk', frames: 6, light: 6, what: 'a HEAVY ROUNDHOUSE KICK, thrown and recovered: guard, the knee lifting, the leg swung high and fully extended at the peak with the hips open, then back to guard.' },
   { id: 'crouch-hk', frames: 6, light: 6, what: 'a SWEEP: dropping from the stance down onto one hand with the other leg swept flat along the floor, fully extended at the peak, then gathering back up. The widest and lowest thing this character does — the whole body stays low.' },
-  { id: 'hit-high', frames: 4, light: 4, what: 'BEING HIT in the head: the head snapping back, the body recoiling, arms loose, feet still on the floor, then beginning to recover. Struck, not attacking.' },
+  { id: 'hit-high', frames: 6, light: 6, what: 'BEING HIT in the head: the head snapping back, the body recoiling, arms loose, feet still on the floor, then beginning to recover. Struck, not attacking.' },
   { id: 'knockdown', frames: 8, light: 8, what: 'BEING KNOCKED DOWN: lifted off the feet, turning through the air, landing flat on the back on the ground, limbs slack. The last frames are lying down, drawn along the floor line seen from the side.' },
   { id: 'win', frames: 6, light: 6, what: 'a VICTORY animation: coming out of the stance into their own gesture of triumph, in character, and holding it.' },
 ]
@@ -542,16 +542,17 @@ Fill each of the ${frames} boxes with one frame of a SINGLE ${anim.id.toUpperCas
 
 These ${frames} drawings are VARIATIONS OF ONE DRAWING, not ${frames} different pictures. Consecutive frames differ by inches. Do not restage the pose between boxes and do not give each box a different action.
 
-Eight rules. They matter more than any individual frame:
+Nine rules. Rule 1 matters more than all the others together:
 
-1. The character FACES RIGHT in all ${frames} boxes.
-2. The character is EXACTLY THE SAME HEIGHT in all ${frames} boxes, measured sole to crown. Never scale the character up or down between boxes.
-3. EXACTLY ONE character in each box — one figure, alone, per box. Never two in a box, never a box left empty, and never merge two boxes into a wider one. The boxes are the size and position they already are.
-4. The character stands ON the thin floor line with the soles of the feet touching it, and there is CLEAR EMPTY GREEN between the floor line and the bottom edge of the box. Nothing crosses the bottom edge. The head stops short of the top edge.
-5. The feet rest at the same place along the floor line and the body stands on the same vertical in every box. The character must not drift across the box between frames.
-6. The WHOLE body is in every box, head to feet. Nothing crosses into the gutters between boxes.
-7. ${CLEAN}
-8. Fill all ${frames} boxes.
+1. THE CAMERA NEVER MOVES. Every box is the same shot from the same distance: a full-length view with the whole fighter in it, head to feet, the same size on the page in all ${frames} boxes. Never zoom in, never crop to the waist or the chest or the legs, never draw a close-up of any part of her, and never put more than one drawing in a box. A box containing a pair of legs, or a head and shoulders, or two figures, is a ruined box.
+2. The character FACES RIGHT in all ${frames} boxes.
+3. The character is EXACTLY THE SAME HEIGHT in all ${frames} boxes, measured sole to crown. Never scale the character up or down between boxes.
+4. EXACTLY ONE character in each box — one figure, alone, per box. Never two in a box, never a box left empty, and never merge two boxes into a wider one. The boxes are the size and position they already are.
+5. The character stands ON the thin floor line with the soles of the feet touching it, and there is CLEAR EMPTY GREEN between the floor line and the bottom edge of the box. Nothing crosses the bottom edge. The head stops short of the top edge.
+6. The feet rest at the same place along the floor line and the body stands on the same vertical in every box. The character must not drift across the box between frames.
+7. The WHOLE body is in every box, head to feet. Nothing crosses into the gutters between boxes.
+8. ${CLEAN}
+9. Fill all ${frames} boxes.
 
 ${STYLE}
 

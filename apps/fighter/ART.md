@@ -82,6 +82,18 @@ The real ceiling above twenty isn't resolution, it's the generator losing track 
 instructions. That's why the sheet prompts put **six numbered rules before the pose list** instead of
 after it: when it gets absorbed in drawing twenty poses, the invariants are what it silently drops.
 
+### Attach the bible as an image, never as a description
+
+The style is the bible's job and it cannot be carried in words. Describing it — "a photographed
+actor in costume, retouched into hard-edged illustration" — gets you a photograph of an actor, which
+is half the sentence and the wrong half. Attaching the bible alongside the template gets the painted
+look, and brings scale consistency with it.
+
+That needs the generator to accept two images, which took a fix; `scripts/flux-art.mjs` has the
+detail. The consequence for this file is simpler: **whatever the bible gets wrong is inherited by
+every frame drawn from it.** A bible with cast shadows produces sheets with cast shadows no matter
+what the sheet prompt says. Fix the bible and regenerate; do not fight it downstream.
+
 ### Except that twenty doesn't work, and six does
 
 The argument above is sound about geometry and wrong about what a generator will hold. Run against

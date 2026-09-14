@@ -10,6 +10,23 @@
 //
 //   kubectl port-forward -n default svc/flux-2-klein-9b-flux-2-klein-9b-flux2klei-d6cf254b 8402:80
 //
+// TWO IMAGES, AND WHY IT ONCE LOOKED LIKE ONE. Attach the bible AND the layout template, both as
+// `image`. If the server answers "Only a single image is supported by this model", that is not the
+// model: it is an admission gate in vllm-omni's API server reading a capability registry that has
+// no entry for the pipeline. Neither FLUX.2 pipeline is registered upstream — klein was added on
+// 11 September, dev still is not — and unregistered pipelines fall through to a single-image
+// default. The dev pipeline concatenates a list of references and hands each one to its text
+// encoder separately; the capability is there, nothing advertises it. The cluster deployment
+// registers `Flux2Pipeline` at container start to fix this.
+//
+// DO NOT USE `reference_image` ON DEV. The server accepts it, puts it in its own `multi_modal_data`
+// key, and only the klein pipeline ever reads that key — so on dev it is silently discarded and you
+// get a stranger drawn to an otherwise perfectly obeyed prompt. `--reference` is klein-only.
+//
+// The bible has to be an attached image rather than a description, because the PAINTED STYLE lives
+// in it and does not survive being written down: asked in words for retouched arcade illustration,
+// dev returns photographs of an actor on a green screen.
+//
 // THE SIZE IS NOT NEGOTIABLE UPWARDS. The templates are 2390x1792 but the card OOMs above about
 // 3.2 megapixels, so we ask for 2048x1536 — the same 4:3, 85.7% of the linear size. The cutter
 // works in fractions of the sheet rather than absolute pixels, so this costs nothing but detail.

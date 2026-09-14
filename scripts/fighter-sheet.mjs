@@ -64,7 +64,7 @@ const has = (name) => argv.includes(`--${name}`)
 const layout = JSON.parse(readFileSync(path.join(TEMPLATES, 'sheets.json'), 'utf8'))
 const SHEETS = Object.keys(layout.sheets)
 
-const taken = new Set([flag('fuzz'), flag('only')].filter(Boolean))
+const taken = new Set([flag('fuzz'), flag('only'), flag('untrimmed')].filter(Boolean))
 const positional = argv.filter((a) => !a.startsWith('--') && !taken.has(a))
 const [src, character, sheetName] = positional
 
@@ -76,6 +76,9 @@ if (!src || !character || !SHEETS.includes(sheetName)) {
                      costume is being eaten.
   --keep-bg          do not key at all — cut the boxes and leave the grey in
   --only a,b,c       just these frames
+  --untrimmed NAME   hand the frames to scripts/pack-frames.mjs instead of installing them:
+                     writes ext/art/<character>/NAME/00.png.. keyed, UNCROPPED and all one size,
+                     plus ext/art/<character>/pack.json. For the cycle sheets.
 
 Hand a generator apps/fighter/art-templates/<sheet>.png with the character's reference art, ask it
 to fill in every box, and run this on what comes back. See apps/fighter/ART.md.`)
@@ -110,7 +113,27 @@ if (Math.abs(have - want) > 0.02) {
 }
 
 const sheet = size(work)
-const outDir = dry ? path.join(ROOT, 'shots', `fighter-${character}-${sheetName}`) : path.join(ROOT, 'apps/fighter/public/chars', character)
+
+/**
+ * UNTRIMMED. The frames go to the packer rather than into the game, and the packer computes the
+ * anchor.
+ *
+ * Both ends of this pipeline had grown their own anchor arithmetic — this cutter deriving it from
+ * the template's drawn floor line, `pack-frames.mjs` deriving it from a `floorY` it is told. Two
+ * sources of truth for the one number that keeps a character from jittering is a bug waiting for a
+ * quiet afternoon, so the cutter now stops short: it keys each box and hands over the whole box,
+ * uncropped, every frame identically sized. The shared baseline is then structural rather than
+ * something this script promises, and the anchor is worked out once, next to the renderer that
+ * consumes it.
+ */
+const untrimmed = flag('untrimmed')
+
+const artDir = path.join(ROOT, 'ext/art', character)
+const outDir = untrimmed
+  ? path.join(artDir, untrimmed)
+  : dry
+    ? path.join(ROOT, 'shots', `fighter-${character}-${sheetName}`)
+    : path.join(ROOT, 'apps/fighter/public/chars', character)
 mkdirSync(outDir, { recursive: true })
 
 const manifest = path.join(ROOT, 'apps/fighter/public/chars', character, 'frames.json')
@@ -120,6 +143,7 @@ console.log(`${path.relative(ROOT, src)} -> ${character}/${sheetName}${dry ? '  
 
 const frames = {}
 const cut = []
+let order = 0
 for (const [name, slot] of Object.entries(slots)) {
   if (only && !only.has(name)) continue
 
@@ -136,16 +160,25 @@ for (const [name, slot] of Object.entries(slots)) {
 
   const args = [work, '-crop', `${box.w}x${box.h}+${box.x}+${box.y}`, '+repage']
   if (!keepBg) {
-    // Inward from each corner, a few pixels in so a soft edge on the box border does not stop it.
-    const inset = 3
+    // Inward from each corner, at several depths. One inset is not enough: the generator often
+    // paints its own thin border just inside the box edge, and a seed that lands on that border
+    // floods the border and stops, leaving the whole background behind — which looks in the log
+    // exactly like a costume that filled the box. Seeding at 3, 12, 24 and 40 px gets past any
+    // border narrower than the gap between depths.
+    //
+    // Corners only, and never edge midpoints: a corner is the one part of a pose box the character
+    // is almost never in, and a seed that lands on the character eats the character.
     args.push('-alpha', 'set', '-fill', 'none', '-fuzz', `${fuzz}%`)
-    for (const [cx, cy] of [
-      [inset, inset],
-      [box.w - 1 - inset, inset],
-      [inset, box.h - 1 - inset],
-      [box.w - 1 - inset, box.h - 1 - inset],
-    ])
-      args.push('-draw', `alpha ${cx},${cy} floodfill`)
+    for (const inset of [3, 12, 24, 40]) {
+      if (inset * 2 >= Math.min(box.w, box.h)) break
+      for (const [cx, cy] of [
+        [inset, inset],
+        [box.w - 1 - inset, inset],
+        [inset, box.h - 1 - inset],
+        [box.w - 1 - inset, box.h - 1 - inset],
+      ])
+        args.push('-draw', `alpha ${cx},${cy} floodfill`)
+    }
     // The fill leaves a grey halo on the antialiased edge; two passes of despeckle-free cleanup is
     // overkill, but pulling the matte in by half a pixel kills the fringe cheaply.
     args.push('-channel', 'A', '-blur', '0x0.5', '-level', '40%,60%', '+channel')
@@ -154,6 +187,19 @@ for (const [name, slot] of Object.entries(slots)) {
   const cell = path.join(ROOT, 'shots', `.fighter-cell-${name}.png`)
   mkdirSync(path.dirname(cell), { recursive: true })
   magick([...args, cell])
+
+  if (untrimmed) {
+    // Named by position, not by slot id: the packer orders an animation's frames by filename and
+    // `f0..f5` would sort correctly only until a sheet had ten boxes.
+    const n = String(order++).padStart(2, '0')
+    const out = path.join(outDir, `${n}.png`)
+    magick([cell, out])
+    const ink = Number(magick([cell, '-format', '%[fx:mean.a*100]', 'info:'])) || 0
+    rmSync(cell, { force: true })
+    console.log(`  ${n}.png  ${box.w}x${box.h}  ${ink.toFixed(0)}% ink${ink < 6 ? '  <- almost nothing survived' : ''}`)
+    cut.push(out)
+    continue
+  }
 
   // Bounding box of what survived, so the anchor can be rebased into the trimmed frame.
   const bboxRaw = magick([cell, '-format', '%@', 'info:']).trim()
@@ -164,6 +210,12 @@ for (const [name, slot] of Object.entries(slots)) {
     continue
   }
   const bbox = { w: +m[1], h: +m[2], x: +m[3], y: +m[4] }
+
+  // How much of the box is actually still OPAQUE, not how big the surviving bounding box is. A
+  // figure drawn nearly box-height has a bounding box covering 90% of the box while being mostly
+  // transparent between its own limbs, and judging by bounding box called that a failed key on
+  // every frame of a six-box sheet. Mean alpha is the thing the warning was always trying to ask.
+  const fill = Number(magick([cell, '-format', '%[fx:mean.a*100]', 'info:'])) || 0
 
   const out = path.join(outDir, `${name}.webp`)
   magick([cell, '-trim', '+repage', '-define', 'webp:lossless=false', '-quality', '92', out])
@@ -179,9 +231,27 @@ for (const [name, slot] of Object.entries(slots)) {
   }
   cut.push(out)
 
-  const fill = ((bbox.w * bbox.h) / (box.w * box.h)) * 100
-  const warn = fill > 92 ? '  <- filled the box; the key may have failed' : fill < 12 ? '  <- almost nothing survived' : ''
+  const warn = fill > 92 ? '  <- filled the box; the key may have failed' : fill < 6 ? '  <- almost nothing survived' : ''
   console.log(`  ${name.padEnd(18)} ${final.w}x${final.h}  anchor ${frames[name].anchor.join(',')}  ${fill.toFixed(0)}% of box${warn}`)
+}
+
+// The packer needs the floor row and the stance centre in the box it is handed, and they come from
+// the same template geometry the boxes did — `boxHeight * (1 - GROUND)` and `boxWidth / 2` — rather
+// than being measured off the art or agreed by hand. Written per character, merged across runs, so
+// each animation can override the floor if a sheet ever needs it.
+if (untrimmed) {
+  const s0 = Object.values(slots)[0]
+  const boxW = Math.round(s0.w * sheet.w)
+  const boxH = Math.round(s0.h * sheet.h)
+  const packFile = path.join(artDir, 'pack.json')
+  const pack = existsSync(packFile) ? JSON.parse(readFileSync(packFile, 'utf8')) : {}
+  pack.floorY = s0.ground == null ? boxH : Math.round(boxH * (1 - s0.ground))
+  pack.anchorX = Math.round(boxW / 2)
+  writeFileSync(packFile, `${JSON.stringify(pack, null, 2)}\n`)
+  console.log(`  ${cut.length} frames in ${path.relative(ROOT, outDir)}  (${boxW}x${boxH} each)`)
+  console.log(`  ${path.relative(ROOT, packFile)}  floorY ${pack.floorY}  anchorX ${pack.anchorX}`)
+  console.log(`  pack them with: node scripts/pack-frames.mjs ext/art/${character} ${character} --height 90 --contact`)
+  process.exit(0)
 }
 
 // Reconcile scale against the IDLE already installed, then drop this sheet's copy of it.

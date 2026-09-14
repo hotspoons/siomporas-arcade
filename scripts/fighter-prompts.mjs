@@ -33,21 +33,40 @@ const STYLE =
   'the muscle, and a crisp dark outline holding the whole figure together. Solid and physical, not ' +
   'glossy and not cel-shaded. The costume reads as real cloth and real leather with real wear on it.'
 
-/** The closing prohibitions. The background rule is the one that decides whether the art is usable. */
+/**
+ * The closing prohibitions. The background rule is the one that decides whether the art is usable,
+ * and it is worded the way it is for a measured reason.
+ *
+ * The templates used to be grey and the art was unusable: a generator does not read a flat grey
+ * field as a key colour, it reads it as a LIT STUDIO WALL, and then lights it — gradient across the
+ * background, cast shadow under the feet, in every box, ignoring every instruction against it. The
+ * shadow is grey, the wall is grey and the key is grey, so no tolerance setting separates them.
+ *
+ * Saying "green screen" instead fixes it outright, because the model knows a green screen is a
+ * surface that is not a surface: unlit, with nothing standing on it. Flat to the edges, no shadow.
+ */
 const CLEAN =
-  'The background inside every box stays completely flat, even, unshaded grey — exactly the grey it ' +
-  'already is. No floor, no ground shadow, no cast shadow, no backdrop, no scenery, no gradient, no ' +
-  'vignette, no glow behind the figure. Do not use grey anywhere in the costume, skin or hair; grey ' +
+  'The background inside every box is a CHROMA-KEY GREEN SCREEN and must stay one single completely ' +
+  'flat, even, unlit, uniform bright green — exactly the green it already is, edge to edge, with no ' +
+  'variation. It is a green screen, not a wall and not a room: it is not lit, nothing stands on it ' +
+  'and nothing falls on it. No floor, no ground plane, no ground shadow, no cast shadow, no contact ' +
+  'shadow, no pool of shade under the feet, no backdrop, no scenery, no gradient, no vignette, no ' +
+  'glow, no darkening at the edges. Do not use green anywhere in the costume, skin or hair; green ' +
   'is the background and will be removed. No text, no labels, no captions, no watermark, no logo, ' +
   'no border and no frame.'
 
+/**
+ * Two images, and on the model we serve they go in two DIFFERENT slots — it rejects a second
+ * `image` outright ("Only a single image is supported by this model"), so the layout template is
+ * the image and the bible is `reference_image`. `scripts/flux-art.mjs --attach T --reference B`.
+ */
 const MATCH = (n) =>
   `Attached are two images.\n\n` +
   `IMAGE 1 is the finished reference sheet for a character. Match that character exactly — the same ` +
   `face, build, proportions, costume, colours and gear, in every single box. Study it before you ` +
   `start.\n\n` +
-  `IMAGE 2 is a blank layout template: a dark grey field with ${n} lighter grey boxes, each numbered ` +
-  `and labelled, each with a faint horizontal floor line near its bottom.`
+  `IMAGE 2 is a blank layout template: a dark green field with ${n} bright chroma-key green boxes, ` +
+  `each numbered and labelled, each with a faint horizontal floor line near its bottom.`
 
 /**
  * Six rules, numbered, before the pose list rather than after it. Twenty poses is near the limit of
@@ -63,9 +82,9 @@ const RULES = (airborne) => `Six rules. All of them apply to every box, and they
    shows up in the game as the character growing and shrinking on screen.
 3. Feet ON the thin floor line in every box, except ${airborne}, which float clearly above it.
 4. The WHOLE body is in every box, head to feet. Nothing crosses into the grey gutters between boxes.
-5. The background inside every box stays completely flat, even, unshaded grey — exactly the grey it
-   already is. No floor, no shadow, no scenery, no gradient, no glow. Never use grey in the costume,
-   skin or hair: grey is the background and gets removed.
+5. The background inside every box is a CHROMA-KEY GREEN SCREEN: one flat, even, unlit green, edge
+   to edge. No floor, no ground shadow, no cast shadow under the feet, no scenery, no gradient, no
+   glow. Never use green in the costume, skin or hair: green is the background and gets removed.
 6. Fill EVERY box. Never leave one empty, and keep them in their numbered order.`
 
 const CLOSE = `Draw only the body and the costume. No energy, fire, lightning, shockwaves, motion blur, speed lines
@@ -459,17 +478,113 @@ All of it is flat printed decal artwork, not a photograph of an arcade machine: 
 Authentic early-1990s arcade cabinet screen printing — saturated, high contrast, hard-edged airbrush illustration with heavy black outlines and chrome-and-gradient lettering, flat colour the way ink sits on a printed vinyl decal. No captions or labels beyond the logo and the text asked for.`
 }
 
+
+// --- the cycle sheets: one animation, four to six frames -----------------------------------------
+
+/**
+ * WHY THESE EXIST AND WHY THEY ARE THE ROUTE THAT WORKS.
+ *
+ * `moves-a` asks for twenty different poses and buys a whole playable character in one generation.
+ * It is the cheapest possible roster and, on the 9B model we serve, it does not work. Run against
+ * it, the generator rewrote the 5x4 grid into twelve boxes of its own, painted the template's labels
+ * into the artwork as garbled lettering (`JFOLE`, `WEHT PICHD`), invented a prop into the
+ * character's hand in nearly every frame, and cast a shadow under every pose. Four of twenty boxes
+ * were the pose that was asked for.
+ *
+ * Six boxes of ONE animation holds perfectly: intact grid, facing right, no invented props, feet on
+ * the line. The frames differ by inches, so the model has one drawing to get right and a handful of
+ * small variations of it — the easiest thing on the sheet list rather than the hardest.
+ *
+ * It also buys what twenty poses cannot: MOTION. `moves-a` gives one drawing per move, held for
+ * however many frames the move is active. The arcade board spends six drawings on Ryu's idle and
+ * four on Chun-Li's, and that is where the life is.
+ *
+ * The cost is honest: a character is eight or nine generations instead of one.
+ *
+ * FRAME COUNTS are measured off the arcade board (`shots/reference/*-animations.md`), not guessed,
+ * and they track build — a heavier fighter spends frames settling their weight between poses and a
+ * lighter one does not need them. Six for Ryu's idle, four for Chun-Li's.
+ */
+const ANIMS = [
+  { id: 'idle', frames: 6, light: 4, what: 'a FIGHTING STANCE, breathing. Knees bent, weight low and shifting gently from foot to foot, both fists raised to chest height with the elbows tucked in, side-on and ready. Braced to fight, NOT standing at rest and NOT walking.' },
+  { id: 'walk-fwd', frames: 6, light: 6, what: 'WALKING FORWARD, advancing on the opponent, guard still up. A full stride cycle: the legs pass through the whole step and return to where they began.' },
+  { id: 'walk-back', frames: 6, light: 6, what: 'WALKING BACKWARD, retreating, still facing right and still guarding. A full stride cycle that returns to where it began.' },
+  { id: 'stand-hp', frames: 6, light: 6, what: 'a HEAVY PUNCH, thrown and recovered: guard, the shoulder and hips winding through it, the arm locked fully out at the peak, then back to guard. The peak reaches further than anything else this character does with the hands.' },
+  { id: 'stand-hk', frames: 6, light: 6, what: 'a HEAVY ROUNDHOUSE KICK, thrown and recovered: guard, the knee lifting, the leg swung high and fully extended at the peak with the hips open, then back to guard.' },
+  { id: 'crouch-hk', frames: 6, light: 6, what: 'a SWEEP: dropping from the stance down onto one hand with the other leg swept flat along the floor, fully extended at the peak, then gathering back up. The widest and lowest thing this character does — the whole body stays low.' },
+  { id: 'hit-high', frames: 4, light: 4, what: 'BEING HIT in the head: the head snapping back, the body recoiling, arms loose, feet still on the floor, then beginning to recover. Struck, not attacking.' },
+  { id: 'knockdown', frames: 8, light: 8, what: 'BEING KNOCKED DOWN: lifted off the feet, turning through the air, landing flat on the back on the ground, limbs slack. The last frames are lying down, drawn along the floor line seen from the side.' },
+  { id: 'win', frames: 6, light: 6, what: 'a VICTORY animation: coming out of the stance into their own gesture of triumph, in character, and holding it.' },
+]
+
+/**
+ * The floor line is drawn in every box and the generator does not respect it on its own — left to
+ * itself it draws the figure as large as the box allows, which puts the feet at or past the bottom
+ * edge. Clipped feet are worse than they sound: the frame's lowest row becomes the box edge rather
+ * than the sole, every clipped frame reports the same baseline, and the character sinks into the
+ * floor for as long as those frames are on screen. Hence rule 3, which asks for the gap explicitly
+ * rather than trusting the line to be obeyed.
+ */
+function cycleSheet(c, anim, frames) {
+  return `Attached are two images.
+
+IMAGE 1 is the finished reference sheet for a character. Match that character exactly — the same face, build, proportions, costume, colours and gear, in every single box. Study it before you start.
+
+IMAGE 2 is a blank layout template: a dark green field with ${frames} bright chroma-key green boxes, each with a faint horizontal floor line near its bottom. The boxes carry no labels and no numbers, and none should be drawn.
+
+Fill each of the ${frames} boxes with one frame of a SINGLE ${anim.id.toUpperCase()} ANIMATION of that character — ${anim.what} Frame 1 through frame ${frames} in reading order${anim.id === 'knockdown' || anim.id === 'win' ? '.' : ', and frame ' + frames + ' must lead back into frame 1 so the loop is seamless.'}
+
+These ${frames} drawings are VARIATIONS OF ONE DRAWING, not ${frames} different pictures. Consecutive frames differ by inches. Do not restage the pose between boxes and do not give each box a different action.
+
+Eight rules. They matter more than any individual frame:
+
+1. The character FACES RIGHT in all ${frames} boxes.
+2. The character is EXACTLY THE SAME HEIGHT in all ${frames} boxes, measured sole to crown. Never scale the character up or down between boxes.
+3. EXACTLY ONE character in each box — one figure, alone, per box. Never two in a box, never a box left empty, and never merge two boxes into a wider one. The boxes are the size and position they already are.
+4. The character stands ON the thin floor line with the soles of the feet touching it, and there is CLEAR EMPTY GREEN between the floor line and the bottom edge of the box. Nothing crosses the bottom edge. The head stops short of the top edge.
+5. The feet rest at the same place along the floor line and the body stands on the same vertical in every box. The character must not drift across the box between frames.
+6. The WHOLE body is in every box, head to feet. Nothing crosses into the gutters between boxes.
+7. ${CLEAN}
+8. Fill all ${frames} boxes.
+
+${STYLE}
+
+${CLOSE} NO NUMBERS anywhere in the image.`
+}
+
 // --- the running order ------------------------------------------------------------------------
 
 const cut = (cmd) => '`node scripts/fighter-sheet.mjs ' + cmd + '`'
 const tpl = (name) => '`art-templates/' + name + '`'
 
+/** Whose cycle sheets get written out in full. The rest print on demand — see `--cycles`. */
+const LEAD = 'kestrel'
+
 function buildPhases() {
   const bibleNo = {}
+  const lead = CAST.find((c) => c.id === LEAD)
   const phases = [
     {
-      name: 'Phase 1 — a playable roster',
-      note: 'Twenty-four generations and all twelve are in the game. Two prompts per character: the bible, then one sheet of twenty poses which is a complete fighter on its own. Do Kestrel and Bollard first (prompts 1–4) and stop to look — whatever you have to fix in those prompts you would otherwise fix twelve times.',
+      name: 'Phase 1 — one character who moves',
+      note: `A bible, then one sheet per animation. This is the route that works: six boxes of one animation holds, twenty boxes of twenty poses does not — see ANIMS in scripts/fighter-prompts.mjs for what happened when it was tried. Nine sheets is a character who walks, punches, is hit, falls over and wins.\n\nWritten out here for ${lead.name}, who is the one to learn the pipeline on. For anybody else on the roster: \`node scripts/fighter-prompts.mjs --cycles bollard\`.\n\nCut each one straight to the packer, then pack the lot in one command:\n\n\`\`\`bash\nnode scripts/pack-frames.mjs ext/art/${lead.id} ${lead.id} --height 90 --contact\n\`\`\``,
+      items: [
+        { who: lead.name, label: 'CHARACTER BIBLE', attach: tpl('reference.png') + ' only', cut: cut(`ext/${lead.id}-bible.png ${lead.id} reference`), text: bible(lead), bible: lead.id },
+        ...ANIMS.map((a) => {
+          const frames = a.frames === 4 ? 4 : 6
+          return {
+            who: lead.name,
+            label: `${a.id.toUpperCase()} — ${frames} frames`,
+            attachBible: lead.id,
+            attach: tpl(frames === 4 ? 'cycle-4.png' : 'cycle.png'),
+            cut: cut(`ext/${lead.id}-${a.id}.png ${lead.id} ${frames === 4 ? 'cycle-4' : 'cycle'} --untrimmed ${a.id}`),
+            text: cycleSheet(lead, a, frames),
+          }
+        }),
+      ],
+    },
+    {
+      name: 'Phase 2 — the one-sheet route, which the 9B model cannot hold',
+      note: 'Two prompts per character — the bible, then one sheet of twenty poses that is a complete fighter on its own. Twenty-four generations for the whole roster, which is why it is written this way, and it DOES NOT WORK on the distilled 9B: the grid comes back rewritten, the labels come back painted into the artwork, and props appear in the character\'s hands. Kept because a larger, non-distilled model may well hold it, and because one generation per character is worth re-testing the day one is deployed. Until then use Phase 1.',
       items: CAST.flatMap((c) => [
         { who: c.name, label: 'CHARACTER BIBLE', attach: tpl('reference.png') + ' only', cut: cut(`ext/${c.id}-bible.png ${c.id} reference`), text: bible(c), bible: c.id },
         { who: c.name, label: 'SHEET A — twenty poses, a complete fighter', attachBible: c.id, attach: tpl('moves-a.png'), cut: cut(`ext/${c.id}-a.png ${c.id} moves-a --dry-run`), text: sheet(SHEET_A, AIRBORNE_A) },
@@ -538,6 +653,29 @@ function renderPhases(list) {
 const argv = process.argv.slice(2)
 const only = argv.includes('--only') ? argv[argv.indexOf('--only') + 1] : null
 
+// Every cycle sheet for one character, to stdout. The doc writes out the lead character's set in
+// full; printing 12 x 9 of them would bury everything else in the file.
+if (argv.includes('--cycles')) {
+  const id = argv[argv.indexOf('--cycles') + 1]
+  const c = CAST.find((x) => x.id === id)
+  if (!c) {
+    console.error(`no character "${id}" — pick one of ${CAST.map((x) => x.id).join(', ')}`)
+    process.exit(1)
+  }
+  for (const a of ANIMS) {
+    const frames = a.frames === 4 ? 4 : 6
+    const sh = frames === 4 ? 'cycle-4' : 'cycle'
+    console.log(`\n## ${c.name} — ${a.id.toUpperCase()} — ${frames} frames\n`)
+    console.log(`**Attach:** art-templates/${sh}.png, with the finished bible as the reference image`)
+    console.log(`**Generate:** node scripts/flux-art.mjs --prompt-file <this> --attach ext/${sh}.png --reference ext/${c.id}-bible.png --out ext/${c.id}-${a.id}.png`)
+    console.log(`**Cut with:** node scripts/fighter-sheet.mjs ext/${c.id}-${a.id}.png ${c.id} ${sh} --untrimmed ${a.id}\n`)
+    console.log('```text')
+    console.log(cycleSheet(c, a, frames))
+    console.log('```')
+  }
+  process.exit(0)
+}
+
 if (argv.includes('--list')) {
   for (const ph of phases) {
     console.log(`\n${ph.name}`)
@@ -572,8 +710,21 @@ explains why they are shaped the way they are; this file is for working through.
 node scripts/fighter-template.mjs     # blank templates land in ext/
 \`\`\`
 
-The templates are **2390 x 1792** — exactly what the generator returns, and exactly 4:3 — so nothing
-is resampled going in or cropped coming out. Any other 4:3 output still works; the cutter says so.
+The templates are drawn at **2390 x 1792** and the model we serve returns **2048 x 1536**. Both are
+exactly 4:3, the cutter works in fractions of the sheet rather than in pixels, and so the difference
+costs nothing but detail. Ask for more than about 3.2 megapixels and the card runs out of memory.
+
+The boxes are **chroma-key green**, not grey, and that is not a cosmetic choice — see the note in
+\`scripts/fighter-template.mjs\`. Generate with:
+
+\`\`\`bash
+kubectl port-forward -n default svc/flux-2-klein-9b-flux-2-klein-9b-flux2klei-d6cf254b 8402:80
+node scripts/flux-art.mjs --prompt-number 2 --out ext/kestrel-idle.png \\
+  --attach ext/cycle.png --reference ext/kestrel-bible.png
+\`\`\`
+
+The layout template is the attachment and the bible is the **reference image** — this model takes
+only one \`image\` and rejects a second.
 
 ## The order that matters
 
@@ -581,23 +732,31 @@ is resampled going in or cropped coming out. Any other 4:3 output still works; t
 |---|---|---|
 ${phases.map((ph) => `| ${ph.name.replace(/^Phase \d+ — /, '')} | ${ph.items.length} | ${ph.items[0].n}–${ph.items[ph.items.length - 1].n} |`).join('\n')}
 
-**You do not need all ${total}.** Phase 1 alone — twenty-four generations — puts all twelve
-characters in the playable game. Everything after it is width, not depth.
+**You do not need all ${total}.** Phase 1 alone — ten generations — is one character who walks,
+punches, is hit, falls over and wins. Do that character end to end before starting a second: what
+you have to fix in her prompts you would otherwise fix eleven more times.
 
-## Three things that will bite you
+## Four things that will bite you
 
-1. **Check the palette strip on every bible before going on.** If there is a mid-grey swatch in it,
-   say *"replace the grey swatch — the costume cannot contain grey"* and generate again. Grey is the
-   key colour; a grey costume gets holes cut in it twenty poses later.
-2. **Scale is the one error you cannot fix by eye.** Rule 2 in every sheet prompt exists for it.
-   *Across* sheets it is handled for you — sheet B repeats IDLE as a size reference and the cutter
-   rescales the whole sheet to match — but *within* a sheet, poses drawn at different sizes mean the
-   sheet has to be redone.
-3. **Never name a real game, studio or character**, in these prompts or in follow-ups. They name the
+1. **NEGATIVE PROMPTS DO NOTHING on this model, so never rely on one.** FLUX.2 klein is distilled —
+   \`"is_distilled": true\` in its own \`model_index.json\` — which means it is CFG-free. Tested
+   directly: the same seed with \`true_cfg_scale 4\` and a completely different negative prompt
+   returned a **pixel-identical image** (RMSE 0). Everything a frame must not contain has to be
+   carried POSITIVELY, in the prompt, as a description of what is there instead. Saying "no weapon"
+   is wasted breath; saying "her hands are empty" is not.
+2. **Check the palette strip on every bible before going on.** A green swatch in it means a costume
+   that gets holes cut in it later, the way a grey one used to. Say *"replace the green swatch — the
+   costume cannot contain green"* and generate again. If a character genuinely wants green, redraw
+   the templates with \`node scripts/fighter-template.mjs --key=magenta\` instead.
+3. **Scale is the one error you cannot fix by eye.** Rule 2 in every sheet prompt exists for it. The
+   cycle sheets make it much easier than the twenty-box sheets did — six near-identical drawings
+   drift far less than twenty different ones — but a sheet whose frames disagree about height has to
+   be redone, not repaired.
+4. **Never name a real game, studio or character**, in these prompts or in follow-ups. They name the
    era and the printing technique instead. See the note at the top of ROSTER.md.
 
-Three or four bad boxes out of twenty is normal, and is what \`--only\` is for: regenerate the whole
-sheet, then cut just the boxes that came back better.
+A bad frame or two out of six is normal. Regenerate the sheet on a new \`--seed\` rather than trying
+to talk the model out of the mistake; on a CFG-free model, rephrasing is most of what you have.
 `
 
 mkdirSync(path.dirname(OUT), { recursive: true })

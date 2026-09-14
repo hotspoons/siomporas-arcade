@@ -39,17 +39,29 @@ node scripts/fighter-template.mjs
 | `props.png` | 20 | Cut-out scenery objects to dress a stage |
 | `turnaround.png` | 8 | One pose from eight cameras. 3D pipeline only |
 | `portrait.png` | 1 | Select-screen mug shot, square |
+| `cycle.png` | 6 | **Six frames of ONE animation.** The route that actually works |
+| `cycle-4.png` | 4 | The same at four, for lighter characters |
 
 They land in `apps/fighter/art-templates/` and are copied into `ext/`, which is the scratch
 directory art goes in and out through.
 
-**The canvas is 2390×1792** — exactly what the generator returns, and exactly 4:3. Matching it means
-no resampling of our grid lines going in and a 1:1 pixel mapping coming out. Anything else 4:3 still
-works; the cutter centre-crops whatever isn't and says so.
+**The canvas is 2390×1792** and the model we serve returns **2048×1536**. Both are exactly 4:3, the
+cutter works in fractions of the sheet rather than pixels, and the difference costs nothing but
+detail. Above about 3.2 megapixels the card runs out of memory. Anything that isn't 4:3 gets
+centre-cropped and the cutter says so.
 
-**The grey is not decoration.** `#8f8f8f` inside a box is the key colour — it becomes alpha. The
+**The green is not decoration.** `#00b140` inside a box is the key colour — it becomes alpha. The
 gutters are darker and get thrown away with the labels. The faint line across each pose box is the
 floor.
+
+**It used to be grey, and grey does not work.** Not for want of tolerance: a generator does not read
+a flat grey field as a key colour, it reads it as a *lit studio wall*, and then lights it — a
+gradient across the background and a cast shadow under the feet, in every box, ignoring every
+instruction against it. The shadow is grey, the wall is grey, and the key is grey, so no `--fuzz`
+setting separates them; raising it to 35 ate the costume while the shadows survived. Chroma green
+fixes it on the first attempt, because the model knows a green screen is a surface that is not a
+surface. If a character's costume genuinely needs green, redraw the templates with
+`node scripts/fighter-template.mjs --key=magenta` — never fork a recoloured copy.
 
 ### Why twenty boxes and not forty
 
@@ -70,6 +82,27 @@ The real ceiling above twenty isn't resolution, it's the generator losing track 
 instructions. That's why the sheet prompts put **six numbered rules before the pose list** instead of
 after it: when it gets absorbed in drawing twenty poses, the invariants are what it silently drops.
 
+### Except that twenty doesn't work, and six does
+
+The argument above is sound about geometry and wrong about what a generator will hold. Run against
+`moves-a`, the 9B model **rewrote the 5×4 grid into twelve boxes of its own**, painted the template's
+labels into the artwork as garbled lettering (`JFOLE`, `WEHT PICHD`, `FALK PUNGH`), invented a gold
+disc into the character's hand in nearly every frame, and cast a shadow under every pose. Four of
+twenty boxes were the pose that was asked for.
+
+Six boxes of **one animation** holds perfectly: grid intact, facing right, no invented props, feet on
+the line. The frames differ by inches, so the model has one drawing to get right and five small
+variations of it — the easiest thing on the list rather than the hardest. Hence `cycle.png`, and
+hence Phase 1 of PROMPTS.md.
+
+The boxes on the cycle sheets carry **no label and no number**, because the model copies lettering
+into the art wherever it finds it — on the six-box sheet it duplicated the numerals into the boxes
+two and three times over. There is nothing a label tells it that the prompt cannot.
+
+What six boxes buys that twenty never could is **motion**. `moves-a` gives one drawing per move, held
+for however many frames the move is active; the arcade board spends six drawings on Ryu's idle and
+four on Chun-Li's. The cost is honest — a character is eight or nine generations rather than one.
+
 ## The loop
 
 ```bash
@@ -80,13 +113,37 @@ node scripts/fighter-sheet.mjs ext/kestrel-a.png kestrel moves-a             # i
 `--dry-run` cuts to `shots/` and builds a contact sheet over a checkerboard, which is the only way to
 see whether the alpha is right — alpha over white looks exactly like white.
 
-Flags: `--fuzz N` tunes key tolerance (default 14 — raise if grey survives, lower if the costume is
-being eaten), `--keep-bg` skips keying so you can matte a frame by hand, `--only a,b,c` redoes
-individual frames.
+Flags: `--fuzz N` tunes key tolerance (default 14 — raise if the key colour survives, lower if the
+costume is being eaten), `--keep-bg` skips keying so you can matte a frame by hand, `--only a,b,c`
+redoes individual frames, `--untrimmed NAME` hands the frames to the packer instead of installing
+them.
 
-Each line ends with what percentage of the box survived. **Over 92% means the key failed** — usually
-the generator shaded the background or put the figure on a floor. Under 12% means it ate the
-character.
+### `--untrimmed`, and who owns the anchor
+
+For the cycle sheets the cutter stops short of trimming:
+
+```bash
+node scripts/fighter-sheet.mjs ext/kestrel-idle.png kestrel cycle --untrimmed idle
+node scripts/pack-frames.mjs ext/art/kestrel kestrel --height 90 --contact
+```
+
+It writes `ext/art/kestrel/idle/00.png…` — the keyed box, uncropped, every frame identically sized —
+plus `pack.json` carrying `floorY` and `anchorX` derived from the template geometry. `pack-frames.mjs`
+then computes the anchors and writes `atlas.png` + `frames.json` where the game actually looks,
+`public/assets/crown/chars/<id>/`.
+
+The point of stopping short is that **the anchor should have one owner**. Both scripts had grown
+their own arithmetic for it, and two sources of truth for the number that keeps a character from
+jittering is a bug waiting for a quiet afternoon. Handing over whole boxes makes the shared baseline
+structural rather than something the cutter promises.
+
+Each line ends with the **mean alpha** of the cut box — how much of it is actually still opaque.
+Over 92% means the key failed; under 6% means it ate the character. A normal full-height figure reads
+around 20%, because a standing body is mostly gaps between its own limbs.
+
+(This used to measure the *bounding box* instead, which is a different question and the wrong one: a
+figure drawn nearly box-height legitimately fills 90% of its bounding box, so every frame of a
+six-box sheet was reported as a failed key.)
 
 ### The anchor
 
@@ -138,9 +195,10 @@ the thing that ships. That is how the cabinets went: templated projections of co
 |---|---|
 | Poses at different sizes | *"Rule 2: exactly the same height in every box."* Regenerate — this cannot be fixed in the cutter |
 | Figures crossing the gutters | *"Keep each pose entirely inside its own box."* |
-| A shadow or floor under the feet | *"The background inside each box must be completely flat unshaded grey."* Shadows survive the key and smear under the sprite |
-| Key ate the costume | Costume too near the key grey. `--fuzz 8`; if that leaves a halo, regenerate the bible with grey out of the palette |
-| Grey left round the figure | `--fuzz 20`. If that fails the background was shaded and the sheet needs redoing |
+| A shadow or floor under the feet | You are on a grey template. Regenerate the templates — they are green now, and this is the failure green exists to fix |
+| Feet clipped at the bottom edge of the box | The figure was drawn too large. The frame's lowest row becomes the box edge instead of the sole, so the anchor is wrong and the character sinks into the floor. Ask for three-quarters box height with clear space below the feet |
+| Key ate the costume | Costume too near the key colour. `--fuzz 8`; if that leaves a halo, regenerate the bible with that colour out of the palette, or switch the key with `--key=magenta` |
+| Key colour left round the figure | `--fuzz 20`. If that fails the background was shaded and the sheet needs redoing |
 | Glow baked into a special | Describe the body, never the effect. Regenerate and re-cut with `--only` |
 | KO standing up | It's the only lying-down pose and generators resist it. *"Lying flat on their back on the ground, seen from the side."* |
 | Face drifts between sheets | Attach the bible **first** and say *"match the face in image 1 exactly"* |

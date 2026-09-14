@@ -40,9 +40,12 @@
 //   props.png       twenty cut-out objects to scatter through a stage.
 //   turnaround.png  one pose from eight cameras at two heights. For the 3D pipeline only.
 //   portrait.png    the select-screen mug shot, square.
+//   cycle.png       SIX frames of ONE animation. Six boxes is what a generator can actually hold.
+//   cycle-4.png     the same at four, for lighter characters whose idle does not need six.
 //
-// The field grey is the key colour: every pose is cut out of it by flood fill, which is why the
-// prompts tell the generator to keep the background flat and to keep grey out of the costume.
+// The field colour is the key: every pose is cut out of it by flood fill, which is why the prompts
+// tell the generator to keep the background flat and to keep that colour out of the costume. It is
+// CHROMA GREEN and it is a `--key` parameter — see KEYS below for why it stopped being grey.
 //
 // Each pose box has a faint floor line. Grounded poses stand on it and airborne poses float above
 // it, so every frame shares one ground plane. fighter-sheet.mjs records where that line ended up in
@@ -56,9 +59,41 @@ import { fileURLToPath } from 'node:url'
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const OUT = path.join(ROOT, 'apps/fighter/art-templates')
 
-const FIELD = '#6f6f6f' // the gutters
-const SLOT = '#8f8f8f' // inside a box, and the colour that gets keyed out
-const FLOOR = '#828282' // the floor line: readable to a model, inside the key's tolerance
+/**
+ * THE KEY COLOUR, AND WHY IT IS NOT GREY ANY MORE.
+ *
+ * The templates were grey, and grey does not key. Not for want of tolerance — because a generator
+ * does not read a flat grey field as a key colour, it reads it as a lit studio wall, and then does
+ * what you do with a wall: lays a gradient across it and stands the character on it with a cast
+ * shadow. Every instruction against it was ignored, in every box, on every sheet. Raising `--fuzz`
+ * to 35 started eating the costume before it touched the shadows, because the shadow is grey and so
+ * is the wall and so, nearly, is the key.
+ *
+ * Chroma green fixes it outright, and the reason is that the model knows what a green screen is:
+ * a surface that is not a surface, not lit, with nothing standing on it. Flat background, edge to
+ * edge, no shadow, first attempt.
+ *
+ * So the key is a PARAMETER and not a constant. Green is right for this roster — the costumes are
+ * teal, rust, tartan, bone — but the twelve will eventually include someone in green, and the
+ * answer that day is `--key magenta`, never a recoloured template checked in under another name.
+ */
+const KEYS = {
+  green: { field: '#00521f', slot: '#00b140', floor: '#06a03c' },
+  magenta: { field: '#5c0038', slot: '#e0189a', floor: '#cc1a8d' },
+  blue: { field: '#002a5c', slot: '#0066cc', floor: '#0a5fbb' },
+  // The original. Keeps working, still keys badly; here so an old sheet can be re-cut.
+  grey: { field: '#6f6f6f', slot: '#8f8f8f', floor: '#828282' },
+}
+
+const keyName = (process.argv.find((a) => a.startsWith('--key='))?.slice(6) ?? 'green').toLowerCase()
+if (!KEYS[keyName]) {
+  console.error(`fighter-template: unknown --key ${keyName}; pick one of ${Object.keys(KEYS).join(', ')}`)
+  process.exit(1)
+}
+
+const FIELD = KEYS[keyName].field // the gutters
+const SLOT = KEYS[keyName].slot // inside a box, and the colour that gets keyed out
+const FLOOR = KEYS[keyName].floor // the floor line: readable to a model, inside the key's tolerance
 const INK = '#1a1a1a' // labels, which live in the gutters and are cut away with them
 
 /** What the generator actually returns, and exactly 4:3. */
@@ -150,6 +185,42 @@ const VIEWS = [
   ['high-315', 'HIGH 315'],
 ]
 
+/**
+ * ONE animation, six frames of it, and nothing else on the sheet.
+ *
+ * moves-a asks for twenty different poses and gets a playable character out of one generation,
+ * which is the cheapest possible roster. What it does not get is *motion*: one drawing per move,
+ * held for however many frames the move is active. The machine this imitates spends six drawings on
+ * an idle and seven on a walk, and that is where the life is.
+ *
+ * It is also the sheet the generator can actually hold. Twenty boxes is past where a model keeps
+ * track of its own instructions — it rewrites the grid, garbles the labels into the artwork and
+ * invents props. Six boxes of one repeated pose is the easiest thing on the sheet list: the frames
+ * differ by inches, so the model has one drawing to get right and five small variations of it.
+ *
+ * Three across and two down at this canvas gives a 740x789 box — big enough for the widest pose
+ * there is (a sweep, ~1.35x the fighter's height) without the crowding that made the twenty-box
+ * grid fall over.
+ *
+ * The boxes carry NO label at all, not even a number. On the twenty-box sheets the labels come back
+ * painted inside the artwork as garbled lettering; on a six-box sheet numerals came back copied into
+ * the boxes two and three times over. There is nothing here a label would tell the model that the
+ * prompt cannot — the frames are in reading order and the cutter finds them by arithmetic — so the
+ * cheapest fix is to give it no lettering to copy.
+ */
+const CYCLE = [['f0', ''], ['f1', ''], ['f2', ''], ['f3', ''], ['f4', ''], ['f5', '']]
+
+/**
+ * The same sheet at four frames, because six is not the universal answer. Ripped from the arcade
+ * board: Ryu's idle is six and Chun-Li's is four, and the difference is build — a heavier fighter
+ * spends frames settling their weight between poses and a lighter one does not need them. Six
+ * frames on a light character comes back with two drawings doing no work.
+ *
+ * Two across and two down leaves a much wider box (1127) for the same figure height, which the
+ * widest poses — a sweep, a lariat — have room in that they did not before.
+ */
+const CYCLE4 = [['f0', ''], ['f1', ''], ['f2', ''], ['f3', '']]
+
 /** Cut-out objects to dress a stage with. Same grid as the pose sheets; no floor line. */
 const PROPS = [
   ['drum', 'OIL DRUM'],
@@ -193,11 +264,13 @@ function stageSlots() {
   }
 }
 
-function gridSlots(entries, cols, rows, { floor = true } = {}) {
+function gridSlots(entries, cols, rows, { floor = true, bare = false } = {}) {
   const at = grid(cols, rows)
   const out = {}
   entries.forEach(([id, label], n) => {
-    out[id] = { ...at(n % cols, Math.floor(n / cols)), label: `${n + 1}. ${label}`, floor }
+    // `bare` labels a box with nothing but its own number. Anything wordier on a sheet the model
+    // finds easy comes back painted into the artwork as garbled lettering.
+    out[id] = { ...at(n % cols, Math.floor(n / cols)), label: bare ? label : `${n + 1}. ${label}`, floor }
   })
   return out
 }
@@ -252,9 +325,11 @@ const sheets = {
   stage: stageSlots(),
   props: gridSlots(PROPS, 5, 4, { floor: false }),
   turnaround: gridSlots(VIEWS, 4, 2),
+  cycle: gridSlots(CYCLE, 3, 2, { bare: true }),
+  'cycle-4': gridSlots(CYCLE4, 2, 2, { bare: true }),
 }
 
-const layout = { canvas: CANVAS, sheets: {} }
+const layout = { canvas: CANVAS, key: { name: keyName, ...KEYS[keyName] }, sheets: {} }
 for (const [name, slots] of Object.entries(sheets)) {
   const file = path.join(OUT, `${name}.png`)
   layout.sheets[name] = draw(file, slots)

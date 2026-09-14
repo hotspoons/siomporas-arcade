@@ -245,11 +245,17 @@ if (untrimmed) {
   const boxH = Math.round(s0.h * sheet.h)
   const packFile = path.join(artDir, 'pack.json')
   const pack = existsSync(packFile) ? JSON.parse(readFileSync(packFile, 'utf8')) : {}
-  pack.floorY = s0.ground == null ? boxH : Math.round(boxH * (1 - s0.ground))
+  const templateFloor = s0.ground == null ? boxH : Math.round(boxH * (1 - s0.ground))
+  // Only ever fill in a floor we have not been given one for. `floorY` is the packer's to override
+  // — as a mode ("frame", "content") or as a per-animation map — and it gets overridden precisely
+  // when the drawing did not stand where the template's line is, which is the case where rewriting
+  // it from the template would undo the fix and put the character back in the air.
+  if (typeof pack.floorY === 'number' || pack.floorY == null) pack.floorY = templateFloor
+  else console.log(`  keeping floorY ${JSON.stringify(pack.floorY)} (template line would be ${templateFloor})`)
   pack.anchorX = Math.round(boxW / 2)
   writeFileSync(packFile, `${JSON.stringify(pack, null, 2)}\n`)
   console.log(`  ${cut.length} frames in ${path.relative(ROOT, outDir)}  (${boxW}x${boxH} each)`)
-  console.log(`  ${path.relative(ROOT, packFile)}  floorY ${pack.floorY}  anchorX ${pack.anchorX}`)
+  console.log(`  ${path.relative(ROOT, packFile)}  floorY ${JSON.stringify(pack.floorY)}  anchorX ${pack.anchorX}`)
   console.log(`  pack them with: node scripts/pack-frames.mjs ext/art/${character} ${character} --height 90 --contact`)
   process.exit(0)
 }

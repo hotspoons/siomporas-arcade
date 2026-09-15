@@ -1,0 +1,162 @@
+# Build and publish the reconstruction service image for both architectures.
+#
+# The service (tools/recon-service) compiles four CUDA extensions from source — CuMesh, o-voxel,
+# FlexGEMM and nvdiffrast. That is the whole reason it runs on the GH200s at all, where TRELLIS 1
+# cannot: nothing here depends on a prebuilt x86 wheel. It also means the build is a real compile,
+# not a pip install, and that dictates the shape of this workflow.
+#
+# WHY NATIVE RUNNERS AND NOT QEMU. The usual `docker/build-push-action` with `platforms:` emulates
+# the foreign architecture. Emulating nvcc across thousands of translation units is roughly an
+# order of magnitude slower than native and reliably exceeds the job limit. So each architecture is
+# built on its own runner, pushed by digest, and the two are stitched into one manifest afterwards.
+# `ubuntu-24.04-arm` is a first-class GitHub runner; no self-hosting needed.
+#
+# WHY THE GPU ARCH LIST DIFFERS PER PLATFORM. TORCH_CUDA_ARCH_LIST is the set of GPU
+# architectures nvcc emits code for, and each one costs build time and image size. arm64 here means
+# Grace-Hopper, which is sm_90 and nothing else. amd64 is a datacentre/desktop mix, so it carries
+# Ampere through Hopper. Override with the inputs if you are targeting something else — Blackwell
+# is 12.0, which is what the people in TRELLIS.2#19 were building for.
+#
+# This does NOT run on every push: the image takes tens of minutes and almost no commit touches it.
+# It runs when tools/recon-service changes, on a tag, or when started by hand.
+name: Recon image
+
+on:
+  push:
+    branches: [main]
+    # `paths` applies to every ref this trigger matches, so a tag filter here would only fire when
+    # the tagged commit itself touched these files — usually never. Cut a release build by
+    # dispatching this workflow against the tag instead; the tag rule below still names the image.
+    paths:
+      - 'tools/recon-service/**'
+      - '.github/workflows/recon-image.yml'
+  workflow_dispatch:
+    inputs:
+      arch_list_amd64:
+        description: 'TORCH_CUDA_ARCH_LIST for amd64'
+        default: '8.0;8.6;8.9;9.0'
+      arch_list_arm64:
+        description: 'TORCH_CUDA_ARCH_LIST for arm64'
+        default: '9.0'
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE: ghcr.io/hotspoons/recon
+
+concurrency:
+  group: recon-image-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-24.04
+            slug: amd64
+            default_arch_list: '8.0;8.6;8.9;9.0'
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+            slug: arm64
+            default_arch_list: '9.0'
+    steps:
+      - uses: actions/checkout@v4
+
+      # A CUDA devel base plus four compiled extensions does not fit next to everything GitHub
+      # preinstalls. Reclaim the space before starting rather than failing 40 minutes in.
+      - name: Reclaim disk
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" || true
+          sudo docker image prune -af || true
+          df -h /
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: tools/recon-service
+          platforms: ${{ matrix.platform }}
+          build-args: |
+            TORCH_CUDA_ARCH_LIST=${{ (matrix.slug == 'arm64' && (inputs.arch_list_arm64 || matrix.default_arch_list)) || (inputs.arch_list_amd64 || matrix.default_arch_list) }}
+          # Push by digest only; the tags are attached to the merged manifest in the next job.
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=recon-${{ matrix.slug }}
+          cache-to: type=gha,scope=recon-${{ matrix.slug }},mode=max
+          provenance: false
+
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          touch "/tmp/digests/${GITHUB_SHA}-${{ matrix.slug }}"
+          echo "${{ steps.build.outputs.digest }}" > "/tmp/digests/${GITHUB_SHA}-${{ matrix.slug }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ matrix.slug }}
+          path: /tmp/digests/*
+          retention-days: 1
+
+  merge:
+    name: Manifest
+    runs-on: ubuntu-24.04
+    needs: [build]
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digest-*
+          merge-multiple: true
+
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=ref,event=branch
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=match,pattern=recon-v(.*),group=1
+            type=sha,format=short
+
+      # One manifest list pointing at both per-architecture images, so `docker pull` and the Helm
+      # chart resolve the right one without anybody naming an architecture.
+      - name: Create manifest
+        run: |
+          cd /tmp/digests
+          REFS=""
+          for f in *; do REFS="$REFS ${{ env.IMAGE }}@$(cat "$f")"; done
+          echo "combining:$REFS"
+          docker buildx imagetools create \
+            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< '${{ steps.meta.outputs.json }}') \
+            $REFS
+
+      - name: Show what shipped
+        run: |
+          docker buildx imagetools inspect ${{ env.IMAGE }}:latest || true

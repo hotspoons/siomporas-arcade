@@ -1,0 +1,100 @@
+image:
+  repository: ghcr.io/hotspoons/recon
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+
+# One GPU, one replica. The service serialises reconstructions internally, so a second replica
+# only helps if you also have a second GPU — scale the node pool, not this number, unless you do.
+replicaCount: 1
+
+resources:
+  limits:
+    nvidia.com/gpu: 1
+    cpu: "16"
+    memory: 64Gi
+  requests:
+    nvidia.com/gpu: 1
+    cpu: "8"
+    memory: 32Gi
+
+nodeSelector:
+  nvidia.com/gpu.product: NVIDIA-GH200-480GB
+tolerations: []
+affinity: {}
+
+env:
+  ATTN_BACKEND: sdpa
+  # sparse attention does NOT accept "sdpa" and silently keeps its flash_attn default; xformers
+  # is the only backend it accepts that has a working aarch64 wheel.
+  SPARSE_ATTN_BACKEND: xformers
+  MODEL_REPO: microsoft/TRELLIS.2-4B
+  MODEL_DIR: /weights/model
+  MAX_VIEWS: "8"
+  # ENCODER_REPO / REMBG_REPO are intentionally unset. The service decides at startup:
+  #   hfToken set    -> the upstream gated repos (facebook/dinov3..., briaai/RMBG-2.0)
+  #   hfToken unset  -> ungated mirrors, plus a loud licence warning in the pod log
+  # Set either only to pin a specific repo; doing so overrides that decision.
+
+# Optional Hugging Face token. WITHOUT IT the service falls back to community mirrors of two gated
+# models — byte-identical weights, but it bypasses the access gate rather than the licence, and
+# complying with Meta's and BRIA's terms remains yours to do. The pod log says so on every start.
+#
+# To go through the front door:
+#   1. request access:  https://huggingface.co/facebook/dinov3-vitl16-pretrain-lvd1689m
+#                       https://huggingface.co/briaai/RMBG-2.0
+#   2. mint a read token at https://huggingface.co/settings/tokens
+#   3. kubectl create secret generic hf-token --from-literal=token=hf_xxx
+#   4. helm upgrade --install recon ./chart --set hfToken.secretName=hf-token
+hfToken:
+  secretName: ""
+  secretKey: token
+
+# Weights are ~16GB and the model is large; keep them on a PVC so a pod restart is seconds
+# rather than a re-download.
+weights:
+  enabled: true
+  size: 80Gi
+  storageClass: ceph-filesystem
+  accessMode: ReadWriteMany
+
+assets:
+  enabled: true
+  size: 50Gi
+  storageClass: ceph-filesystem
+  accessMode: ReadWriteMany
+
+service:
+  type: ClusterIP
+  port: 80
+
+# Gateway API. The cluster already fronts everything with the shared gateway, and the other
+# services here are reached this way rather than through an Ingress.
+httpRoute:
+  enabled: true
+  parentRefs:
+    - name: central-gateway
+      namespace: patapsco-bradley-hartlove-gh200-platform
+  hostnames:
+    - recon.bradley-hartlove-gh200.basedweights.com
+  timeout: 600s
+
+# Classic Ingress, off by default. Enable only on a cluster without Gateway API; running both
+# for one service means two things claiming the same hostname.
+ingress:
+  enabled: false
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "64m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+  hosts:
+    - host: recon.bradley-hartlove-gh200.basedweights.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+# Weight loading takes minutes; the startup probe is what stops the kubelet killing the pod
+# before the model is on the card.
+probes:
+  startupFailureThreshold: 60   # 60 x 15s = 15 minutes
+  startupPeriodSeconds: 15

@@ -1,0 +1,446 @@
+<!doctype html>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>LATHE — every model in the build, turned over</title>
+<link rel="icon" href="/favicon.svg" />
+<style>
+  :root {
+    --bg: #07080c;
+    --pane: #0c0f16;
+    --sunk: #04050a;
+    --edge: #1b2233;
+    --ink: #dfe4ef;
+    --dim: #76819c;
+    --faint: #4c5670;
+    --hot: #ffa62f;         /* the one accent: hot metal on the lathe */
+    --cool: #38b0a6;
+    --bad: #ff5470;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: var(--mono); font-size: 13px; line-height: 1.55;
+  }
+  header { padding: 2rem 1.5rem 0; max-width: 92rem; margin: 0 auto; }
+  h1 { margin: 0; font-size: clamp(19px, 3.4vw, 30px); letter-spacing: .14em; font-weight: 600; }
+  h1 small { display: block; font-size: .4em; letter-spacing: .32em; color: var(--hot); margin-bottom: .45rem; }
+  p.lede { margin: .55rem 0 0; max-width: 56rem; color: var(--dim); }
+  main { max-width: 92rem; margin: 0 auto; padding: 1.2rem 1.5rem 3rem; }
+
+  .load { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: 1rem; }
+  input[type="text"] {
+    flex: 1 1 22rem; min-width: 0; font-family: inherit; font-size: 12px; color: var(--ink);
+    background: var(--sunk); border: 1px solid var(--edge); border-radius: 4px; padding: .7em .9em;
+  }
+  input[type="text"]:focus { outline: 2px solid var(--hot); outline-offset: 1px; }
+  input[type="text"]::placeholder { color: var(--faint); }
+  button {
+    font-family: inherit; font-size: 11.5px; letter-spacing: .14em; text-transform: uppercase;
+    cursor: pointer; padding: .7em 1.1em; border-radius: 4px; border: 1px solid var(--edge);
+    background: transparent; color: var(--ink); transition: border-color 140ms, color 140ms, background 140ms;
+  }
+  button:hover { border-color: var(--hot); color: var(--hot); }
+  button[aria-pressed="true"] { border-color: var(--hot); color: var(--hot); background: color-mix(in srgb, var(--hot) 14%, transparent); }
+  button:focus-visible { outline: 2px solid var(--hot); outline-offset: 2px; }
+
+  .panes { display: grid; grid-template-columns: 17rem minmax(0, 1fr) 15rem; gap: 1rem; align-items: start; }
+  @media (max-width: 1100px) { .panes { grid-template-columns: 15rem minmax(0, 1fr); } }
+  @media (max-width: 760px) { .panes { grid-template-columns: minmax(0, 1fr); } }
+
+  .pane { background: var(--pane); border: 1px solid var(--edge); border-radius: 6px; }
+  .pane h2 {
+    margin: 0; padding: .75rem .9rem .6rem; font-size: 10.5px; letter-spacing: .2em;
+    text-transform: uppercase; color: var(--faint); font-weight: 600;
+    border-bottom: 1px solid var(--edge);
+  }
+
+  .list { max-height: 30rem; overflow-y: auto; padding: .4rem; }
+  .grp { padding: .7rem .5rem .3rem; font-size: 10px; letter-spacing: .18em; text-transform: uppercase; color: var(--hot); }
+  .item {
+    display: flex; justify-content: space-between; gap: .6rem; width: 100%; text-align: left;
+    padding: .42em .55em; border: 0; border-radius: 3px; background: transparent; color: var(--ink);
+    font-family: inherit; font-size: 12px; letter-spacing: 0; text-transform: none; cursor: pointer;
+  }
+  .item:hover { background: #141a28; color: var(--ink); }
+  .item[aria-current="true"] { background: color-mix(in srgb, var(--hot) 16%, transparent); color: var(--hot); }
+  .item .kb { color: var(--faint); font-size: 11px; flex: none; font-variant-numeric: tabular-nums; }
+  .item:hover .kb { color: var(--dim); }
+
+  .stage { position: relative; border: 1px solid var(--edge); border-radius: 6px; overflow: hidden; background: var(--sunk); }
+  #cv { display: block; width: 100%; aspect-ratio: 16 / 11; }
+  @media (max-width: 560px) { #cv { aspect-ratio: 4 / 5; } }
+  .overlay {
+    position: absolute; inset: auto 0 0 0; display: flex; flex-wrap: wrap; gap: .4rem;
+    padding: .6rem; background: linear-gradient(to top, rgba(4,5,10,.82), transparent);
+  }
+  .overlay button { background: rgba(7,8,12,.72); font-size: 10.5px; padding: .5em .8em; }
+  .badge {
+    position: absolute; top: .7rem; left: .8rem; font-size: 11px; color: var(--dim);
+    letter-spacing: .08em; pointer-events: none; max-width: calc(100% - 1.6rem);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .badge b { color: var(--ink); font-weight: 600; }
+  #drop {
+    position: absolute; inset: 0; display: none; place-items: center; text-align: center;
+    background: rgba(7,8,12,.9); border: 2px dashed var(--hot); color: var(--hot);
+    letter-spacing: .2em; text-transform: uppercase; font-size: 12px;
+  }
+  #drop.on { display: grid; }
+
+  dl { margin: 0; padding: .7rem .9rem .9rem; display: grid; grid-template-columns: 1fr auto; gap: .45rem .7rem; align-items: baseline; }
+  dt { color: var(--dim); font-size: 11.5px; }
+  dd { margin: 0; text-align: right; font-size: 11.5px; font-variant-numeric: tabular-nums; }
+  dd.hot { color: var(--hot); }
+  .msg { padding: .7rem .9rem; color: var(--bad); font-size: 11.5px; line-height: 1.6; }
+  .msg:empty { display: none; }
+  footer { max-width: 92rem; margin: 0 auto; padding: 0 1.5rem 3rem; color: var(--faint); font-size: 11.5px; line-height: 1.7; }
+  footer code { color: var(--cool); }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
+</style>
+
+<header>
+  <h1><small>Apex Conduit · experiment</small>LATHE</h1>
+  <p class="lede">
+    A turntable for every <code>.glb</code> the arcade ships — track props, scenery, cars, and the
+    fighter meshes reconstructed from 2D art. Load one from the list, type a path or URL, or drop a
+    file on the window.
+  </p>
+</header>
+
+<main>
+  <form class="load" id="loadform">
+    <input type="text" id="src" name="src" spellcheck="false"
+           placeholder="/assets/props/pitsOffice.glb  ·  or an https:// URL" />
+    <button type="submit">Load</button>
+    <button type="button" id="pick">Open file…</button>
+    <input type="file" id="file" accept=".glb,.gltf" hidden />
+  </form>
+
+  <div class="panes">
+    <section class="pane">
+      <h2>In this build</h2>
+      <div class="list" id="list"></div>
+    </section>
+
+    <div class="stage" id="stage">
+      <canvas id="cv"></canvas>
+      <p class="badge" id="badge">Loading…</p>
+      <div id="drop">Drop a .glb to view</div>
+      <div class="overlay">
+        <button id="spin" aria-pressed="true">Spin</button>
+        <button id="wire" aria-pressed="false">Wireframe</button>
+        <button id="flat" aria-pressed="false">Unlit</button>
+        <button id="grid" aria-pressed="true">Grid</button>
+        <button id="reset">Reset</button>
+      </div>
+    </div>
+
+    <section class="pane">
+      <h2>What loaded</h2>
+      <dl id="stats"></dl>
+      <p class="msg" id="msg"></p>
+    </section>
+  </div>
+</main>
+
+<footer>
+  Deep-link any model with <code>?src=</code> — e.g. <code>/models.html?src=/assets/crown/chars/kestrel/mesh-arms-clear.glb</code>.
+  The list is generated by <code>scripts/model-catalogue.mjs</code>; re-run it after adding models.
+  three.js is vendored under <code>/vendor/three</code>, so this page has no runtime dependency on a CDN.
+</footer>
+
+<script type="importmap">
+{ "imports": { "three": "/vendor/three/build/three.module.min.js" } }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from '/vendor/three/loaders/GLTFLoader.js';
+import { OrbitControls } from '/vendor/three/controls/OrbitControls.js';
+
+// <<< CATALOGUE — generated by scripts/model-catalogue.mjs, do not edit by hand
+const CATALOGUE = [
+  {"path":"/assets/crown/chars/kestrel/mesh-arms-clear.glb","name":"mesh-arms-clear","group":"Fighter · reconstructed","kb":4828},
+  {"path":"/assets/crown/chars/kestrel/mesh-arms-in.glb","name":"mesh-arms-in","group":"Fighter · reconstructed","kb":4674},
+  {"path":"/assets/props/bannerTowerRed.glb","name":"bannerTowerRed","group":"Track props","kb":33},
+  {"path":"/assets/props/barrierRed.glb","name":"barrierRed","group":"Track props","kb":3},
+  {"path":"/assets/props/barrierWall.glb","name":"barrierWall","group":"Track props","kb":6},
+  {"path":"/assets/props/billboard.glb","name":"billboard","group":"Track props","kb":14},
+  {"path":"/assets/props/billboardLow.glb","name":"billboardLow","group":"Track props","kb":14},
+  {"path":"/assets/props/flagCheckers.glb","name":"flagCheckers","group":"Track props","kb":15},
+  {"path":"/assets/props/grandStand.glb","name":"grandStand","group":"Track props","kb":12},
+  {"path":"/assets/props/lightPostLarge.glb","name":"lightPostLarge","group":"Track props","kb":23},
+  {"path":"/assets/props/lightPostModern.glb","name":"lightPostModern","group":"Track props","kb":16},
+  {"path":"/assets/props/overhead.glb","name":"overhead","group":"Track props","kb":9},
+  {"path":"/assets/props/overheadLights.glb","name":"overheadLights","group":"Track props","kb":25},
+  {"path":"/assets/props/pitsOffice.glb","name":"pitsOffice","group":"Track props","kb":8},
+  {"path":"/assets/props/pylon.glb","name":"pylon","group":"Track props","kb":8},
+  {"path":"/assets/props/tent.glb","name":"tent","group":"Track props","kb":7},
+  {"path":"/assets/props/treeLarge.glb","name":"treeLarge","group":"Track props","kb":7},
+  {"path":"/assets/props/treeSmall.glb","name":"treeSmall","group":"Track props","kb":7},
+  {"path":"/assets/cars/ambulance.glb","name":"ambulance","group":"Cars","kb":228},
+  {"path":"/assets/cars/delivery.glb","name":"delivery","group":"Cars","kb":235},
+  {"path":"/assets/cars/hatchback-sports.glb","name":"hatchback-sports","group":"Cars","kb":193},
+  {"path":"/assets/cars/police.glb","name":"police","group":"Cars","kb":191},
+  {"path":"/assets/cars/race.glb","name":"race","group":"Cars","kb":163},
+  {"path":"/assets/cars/race-future.glb","name":"race-future","group":"Cars","kb":169},
+  {"path":"/assets/cars/sedan.glb","name":"sedan","group":"Cars","kb":168},
+  {"path":"/assets/cars/sedan-sports.glb","name":"sedan-sports","group":"Cars","kb":174},
+  {"path":"/assets/cars/suv.glb","name":"suv","group":"Cars","kb":203},
+  {"path":"/assets/cars/suv-luxury.glb","name":"suv-luxury","group":"Cars","kb":172},
+  {"path":"/assets/cars/taxi.glb","name":"taxi","group":"Cars","kb":171},
+  {"path":"/assets/cars/truck.glb","name":"truck","group":"Cars","kb":172},
+  {"path":"/assets/cars/van.glb","name":"van","group":"Cars","kb":172},
+  {"path":"/assets/nature/cactus_short.glb","name":"cactus_short","group":"Nature","kb":9},
+  {"path":"/assets/nature/cactus_tall.glb","name":"cactus_tall","group":"Nature","kb":9},
+  {"path":"/assets/nature/flower_redA.glb","name":"flower_redA","group":"Nature","kb":7},
+  {"path":"/assets/nature/flower_yellowA.glb","name":"flower_yellowA","group":"Nature","kb":7},
+  {"path":"/assets/nature/grass_large.glb","name":"grass_large","group":"Nature","kb":18},
+  {"path":"/assets/nature/plant_bush.glb","name":"plant_bush","group":"Nature","kb":4},
+  {"path":"/assets/nature/plant_bushLarge.glb","name":"plant_bushLarge","group":"Nature","kb":6},
+  {"path":"/assets/nature/rock_largeA.glb","name":"rock_largeA","group":"Nature","kb":7},
+  {"path":"/assets/nature/rock_largeB.glb","name":"rock_largeB","group":"Nature","kb":8},
+  {"path":"/assets/nature/rock_tallA.glb","name":"rock_tallA","group":"Nature","kb":12},
+  {"path":"/assets/nature/rock_tallB.glb","name":"rock_tallB","group":"Nature","kb":14},
+  {"path":"/assets/nature/stone_tallA.glb","name":"stone_tallA","group":"Nature","kb":11},
+  {"path":"/assets/nature/stump_old.glb","name":"stump_old","group":"Nature","kb":9},
+  {"path":"/assets/nature/tree_default.glb","name":"tree_default","group":"Nature","kb":9},
+  {"path":"/assets/nature/tree_default_dark.glb","name":"tree_default_dark","group":"Nature","kb":9},
+  {"path":"/assets/nature/tree_default_fall.glb","name":"tree_default_fall","group":"Nature","kb":17},
+  {"path":"/assets/nature/tree_detailed.glb","name":"tree_detailed","group":"Nature","kb":31},
+  {"path":"/assets/nature/tree_fat.glb","name":"tree_fat","group":"Nature","kb":5},
+  {"path":"/assets/nature/tree_oak.glb","name":"tree_oak","group":"Nature","kb":14},
+  {"path":"/assets/nature/tree_oak_dark.glb","name":"tree_oak_dark","group":"Nature","kb":14},
+  {"path":"/assets/nature/tree_oak_fall.glb","name":"tree_oak_fall","group":"Nature","kb":14},
+  {"path":"/assets/nature/tree_palm.glb","name":"tree_palm","group":"Nature","kb":13},
+  {"path":"/assets/nature/tree_palmBend.glb","name":"tree_palmBend","group":"Nature","kb":14},
+  {"path":"/assets/nature/tree_palmDetailedTall.glb","name":"tree_palmDetailedTall","group":"Nature","kb":28},
+  {"path":"/assets/nature/tree_palmShort.glb","name":"tree_palmShort","group":"Nature","kb":15},
+  {"path":"/assets/nature/tree_palmTall.glb","name":"tree_palmTall","group":"Nature","kb":15},
+  {"path":"/assets/nature/tree_pineDefaultA.glb","name":"tree_pineDefaultA","group":"Nature","kb":17},
+  {"path":"/assets/nature/tree_pineRoundA.glb","name":"tree_pineRoundA","group":"Nature","kb":14},
+  {"path":"/assets/nature/tree_pineTallA.glb","name":"tree_pineTallA","group":"Nature","kb":7},
+  {"path":"/assets/nature/tree_tall.glb","name":"tree_tall","group":"Nature","kb":7},
+  {"path":"/assets/nature/tree_tall_dark.glb","name":"tree_tall_dark","group":"Nature","kb":7},
+  {"path":"/assets/nature/tree_tall_fall.glb","name":"tree_tall_fall","group":"Nature","kb":12},
+  {"path":"/assets/nature/tree_thin.glb","name":"tree_thin","group":"Nature","kb":17},
+  {"path":"/assets/nature/tree_thin_dark.glb","name":"tree_thin_dark","group":"Nature","kb":32},
+  {"path":"/assets/nature/tree_thin_fall.glb","name":"tree_thin_fall","group":"Nature","kb":17},
+];
+// >>> CATALOGUE
+
+const $ = (id) => document.getElementById(id);
+const cv = $('cv'), badge = $('badge'), msg = $('msg'), statsEl = $('stats');
+
+const renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.NeutralToneMapping;
+renderer.toneMappingExposure = 1.5;   // baked base-colour maps read dark against a near-black set
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x04050a);
+const camera = new THREE.PerspectiveCamera(35, 16 / 11, 0.01, 500);
+const controls = new OrbitControls(camera, cv);
+controls.enableDamping = true;
+controls.addEventListener('start', () => setSpin(false));
+
+// Lighting reads a form without flattering it: a key, a cool fill opposite, and a warm rim that
+// separates the silhouette from the ground. No environment map — these are untextured props as
+// often as not, and an HDRI would hide exactly the shading faults worth seeing.
+scene.add(new THREE.HemisphereLight(0xb8c6e0, 0x141820, 1.35));
+const key = new THREE.DirectionalLight(0xffffff, 1.9); key.position.set(-3, 5, 4); scene.add(key);
+const fill = new THREE.DirectionalLight(0x8fd8d0, 0.42); fill.position.set(4, 1, -1.5); scene.add(fill);
+const rim = new THREE.DirectionalLight(0xffa62f, 0.75); rim.position.set(1, 2.5, -5); scene.add(rim);
+
+const grid = new THREE.GridHelper(4, 16, 0x2a3348, 0x161c2b);
+grid.material.transparent = true; grid.material.opacity = 0.75;
+scene.add(grid);
+
+const loader = new GLTFLoader();
+let current = null, spinning = true, homeDist = 3;
+
+function setSpin(on) { spinning = on; $('spin').setAttribute('aria-pressed', String(on)); }
+
+function disposeCurrent() {
+  if (!current) return;
+  scene.remove(current);
+  current.traverse((o) => {
+    if (!o.isMesh) return;
+    o.geometry?.dispose();
+    for (const m of [].concat(o.material || [])) {
+      for (const k of ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'emissiveMap', 'aoMap']) m[k]?.dispose?.();
+      m.dispose?.();
+    }
+  });
+  current = null;
+}
+
+function frame(obj) {
+  // Sit the model on the grid and pull the camera back to fit it, whatever scale it was authored at.
+  const box = new THREE.Box3().setFromObject(obj);
+  const size = box.getSize(new THREE.Vector3());
+  const centre = box.getCenter(new THREE.Vector3());
+  obj.position.sub(centre);
+  obj.position.y += size.y / 2;
+  const span = Math.max(size.x, size.y, size.z) || 1;
+  grid.scale.setScalar(span / 2);
+  homeDist = span * 2.1;
+  controls.target.set(0, size.y / 2, 0);
+  camera.near = span / 200; camera.far = span * 60; camera.updateProjectionMatrix();
+  home();
+  return { size, span };
+}
+function home() {
+  camera.position.set(homeDist * 0.55, controls.target.y + homeDist * 0.42, homeDist * 0.78);
+  controls.update();
+}
+
+function describe(obj, extra) {
+  let tris = 0, verts = 0, meshes = 0;
+  const mats = new Set(), texes = new Set();
+  obj.traverse((o) => {
+    if (!o.isMesh) return;
+    meshes++;
+    const g = o.geometry;
+    verts += g.attributes.position?.count ?? 0;
+    tris += g.index ? g.index.count / 3 : (g.attributes.position?.count ?? 0) / 3;
+    for (const m of [].concat(o.material || [])) {
+      mats.add(m.uuid);
+      for (const k of ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'emissiveMap']) if (m[k]) texes.add(m[k].uuid);
+    }
+  });
+  const d = extra.size;
+  const n = (x) => Math.round(x).toLocaleString();
+  statsEl.innerHTML =
+    `<dt>Triangles</dt><dd class="hot">${n(tris)}</dd>` +
+    `<dt>Vertices</dt><dd>${n(verts)}</dd>` +
+    `<dt>Meshes</dt><dd>${meshes}</dd>` +
+    `<dt>Materials</dt><dd>${mats.size}</dd>` +
+    `<dt>Textures</dt><dd class="${texes.size ? 'hot' : ''}">${texes.size || 'none'}</dd>` +
+    `<dt>Size w×h×d</dt><dd>${d.x.toFixed(2)} × ${d.y.toFixed(2)} × ${d.z.toFixed(2)}</dd>` +
+    (extra.kb ? `<dt>File</dt><dd>${extra.kb.toLocaleString()} KB</dd>` : '') +
+    `<dt>Load</dt><dd>${extra.ms} ms</dd>`;
+}
+
+function applyModes(root) {
+  root.traverse((o) => {
+    if (!o.isMesh) return;
+    for (const m of [].concat(o.material || [])) {
+      m.wireframe = $('wire').getAttribute('aria-pressed') === 'true';
+      m.flatShading = $('flat').getAttribute('aria-pressed') === 'true';
+      m.needsUpdate = true;
+    }
+  });
+}
+
+async function load(url, label, kb) {
+  msg.textContent = '';
+  badge.innerHTML = `<b>${label}</b> — loading…`;
+  const t0 = performance.now();
+  try {
+    const gltf = await loader.loadAsync(url);
+    disposeCurrent();
+    current = gltf.scene;
+    scene.add(current);
+    const extra = frame(current);
+    applyModes(current);
+    extra.ms = Math.round(performance.now() - t0);
+    extra.kb = kb;
+    describe(current, extra);
+    badge.innerHTML = `<b>${label}</b>`;
+    for (const b of document.querySelectorAll('.item')) {
+      b.setAttribute('aria-current', String(b.dataset.path === url));
+    }
+    const u = new URL(location.href);
+    u.searchParams.set('src', url);
+    history.replaceState(null, '', u);
+  } catch (err) {
+    badge.innerHTML = `<b>${label}</b> — failed`;
+    // Say which file and what went wrong; a silent empty viewport is the worst possible answer.
+    msg.textContent = `Could not load ${url} — ${err?.message || err}. If this came from the list, the catalogue may be stale: re-run scripts/model-catalogue.mjs.`;
+    statsEl.innerHTML = '';
+  }
+}
+
+// --- catalogue -----------------------------------------------------------------------------
+const listEl = $('list');
+let lastGroup = null;
+for (const row of CATALOGUE) {
+  if (row.group !== lastGroup) {
+    lastGroup = row.group;
+    const h = document.createElement('div');
+    h.className = 'grp'; h.textContent = row.group;
+    listEl.appendChild(h);
+  }
+  const b = document.createElement('button');
+  b.className = 'item'; b.type = 'button'; b.dataset.path = row.path;
+  b.innerHTML = `<span>${row.name}</span><span class="kb">${row.kb} KB</span>`;
+  b.addEventListener('click', () => load(row.path, row.name, row.kb));
+  listEl.appendChild(b);
+}
+
+// --- inputs --------------------------------------------------------------------------------
+$('loadform').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const v = $('src').value.trim();
+  if (v) load(v, v.split('/').pop(), null);
+});
+$('pick').addEventListener('click', () => $('file').click());
+$('file').addEventListener('change', (e) => {
+  const f = e.target.files?.[0];
+  if (f) load(URL.createObjectURL(f), f.name, Math.round(f.size / 1024));
+});
+const stage = $('stage'), drop = $('drop');
+['dragenter', 'dragover'].forEach((t) => addEventListener(t, (e) => { e.preventDefault(); drop.classList.add('on'); }));
+['dragleave', 'drop'].forEach((t) => addEventListener(t, (e) => {
+  e.preventDefault();
+  if (t === 'dragleave' && e.relatedTarget) return;
+  drop.classList.remove('on');
+}));
+addEventListener('drop', (e) => {
+  const f = e.dataTransfer?.files?.[0];
+  if (f) load(URL.createObjectURL(f), f.name, Math.round(f.size / 1024));
+});
+
+$('spin').addEventListener('click', () => setSpin(!spinning));
+for (const id of ['wire', 'flat']) {
+  $(id).addEventListener('click', () => {
+    const b = $(id);
+    b.setAttribute('aria-pressed', String(b.getAttribute('aria-pressed') !== 'true'));
+    if (current) applyModes(current);
+  });
+}
+$('grid').addEventListener('click', () => {
+  const b = $('grid');
+  const on = b.getAttribute('aria-pressed') !== 'true';
+  b.setAttribute('aria-pressed', String(on));
+  grid.visible = on;
+});
+$('reset').addEventListener('click', home);
+
+function size() {
+  const w = cv.clientWidth, h = cv.clientHeight;
+  if (!w || !h) return;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h; camera.updateProjectionMatrix();
+}
+addEventListener('resize', size);
+size();
+
+if (matchMedia('(prefers-reduced-motion: reduce)').matches) setSpin(false);
+
+// Open with something on screen: the deep-linked model, else the first catalogue entry.
+const wanted = new URL(location.href).searchParams.get('src');
+const first = CATALOGUE[0];
+if (wanted) { $('src').value = wanted; load(wanted, wanted.split('/').pop(), null); }
+else if (first) load(first.path, first.name, first.kb);
+else badge.textContent = 'No models bundled — run scripts/model-catalogue.mjs';
+
+(function loop() {
+  requestAnimationFrame(loop);
+  if (spinning && current) current.rotation.y += 0.004;
+  controls.update();
+  renderer.render(scene, camera);
+})();
+</script>

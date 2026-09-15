@@ -1,0 +1,6 @@
+apiVersion: v2
+name: recon
+description: Image-to-3D reconstruction service (TRELLIS.2) for the fighter asset pipeline
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

@@ -1,0 +1,80 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "recon.fullname" . }}
+  labels: {{- include "recon.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  strategy:
+    # One GPU: the old pod must release the card before the new one can schedule.
+    type: Recreate
+  selector:
+    matchLabels: {{- include "recon.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "recon.selectorLabels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: recon
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8000
+          env:
+            {{- range $k, $v := .Values.env }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+            - name: HF_HOME
+              value: /weights
+            - name: ASSET_DIR
+              value: /assets
+            {{- if .Values.hfToken.secretName }}
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.hfToken.secretName }}
+                  key: {{ .Values.hfToken.secretKey }}
+            {{- end }}
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+          startupProbe:
+            httpGet: {path: /readyz, port: http}
+            periodSeconds: {{ .Values.probes.startupPeriodSeconds }}
+            failureThreshold: {{ .Values.probes.startupFailureThreshold }}
+          readinessProbe:
+            httpGet: {path: /readyz, port: http}
+            periodSeconds: 10
+          livenessProbe:
+            # Liveness hits /healthz, not /readyz: a long reconstruction must not be read as death.
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 30
+            failureThreshold: 5
+          volumeMounts:
+            - {name: weights, mountPath: /weights}
+            - {name: assets, mountPath: /assets}
+            - {name: dshm, mountPath: /dev/shm}
+      volumes:
+        - name: weights
+          {{- if .Values.weights.enabled }}
+          persistentVolumeClaim: {claimName: {{ include "recon.fullname" . }}-weights}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        - name: assets
+          {{- if .Values.assets.enabled }}
+          persistentVolumeClaim: {claimName: {{ include "recon.fullname" . }}-assets}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        - name: dshm
+          emptyDir: {medium: Memory, sizeLimit: 16Gi}
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+      {{- end }}

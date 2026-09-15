@@ -1,0 +1,27 @@
+{{- if .Values.weights.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "recon.fullname" . }}-weights
+  labels: {{- include "recon.labels" . | nindent 4 }}
+spec:
+  accessModes: [{{ .Values.weights.accessMode }}]
+  storageClassName: {{ .Values.weights.storageClass }}
+  resources:
+    requests:
+      storage: {{ .Values.weights.size }}
+{{- end }}
+{{- if .Values.assets.enabled }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "recon.fullname" . }}-assets
+  labels: {{- include "recon.labels" . | nindent 4 }}
+spec:
+  accessModes: [{{ .Values.assets.accessMode }}]
+  storageClassName: {{ .Values.assets.storageClass }}
+  resources:
+    requests:
+      storage: {{ .Values.assets.size }}
+{{- end }}

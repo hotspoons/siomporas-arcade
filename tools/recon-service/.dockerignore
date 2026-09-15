@@ -1,0 +1,4 @@
+chart/
+README.md
+*.md
+__pycache__/

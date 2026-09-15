@@ -66,6 +66,16 @@ scrambler, and a V.22 bis handshake whose every duration is the Blue Book's. It
 measures its own claims out of the signal it just synthesised — nothing on it is
 a recording.
 
+Alongside it, [arcade.siomporas.com/models](https://arcade.siomporas.com/models)
+is a turntable for every `.glb` the build ships — track props, scenery, cars, and
+the fighter meshes reconstructed from 2D art by
+[`tools/recon-service`](tools/recon-service/). It reports what actually came out
+of a file rather than only drawing it: triangle and vertex counts, materials,
+whether textures survived, and the model's real dimensions. Load one from the
+bundled list, deep-link with `?src=`, or drop a file on the window.
+`scripts/model-catalogue.mjs` regenerates the list; `--check` fails CI when it
+has drifted from what is on disk.
+
 **Worth trying next:** the shell gives every game a *fresh* WebGL context rather
 than sharing one, which costs a few hundred milliseconds on each switch and is
 the reason for the fade. Sharing a single renderer would make it instant, but

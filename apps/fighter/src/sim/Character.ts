@@ -69,6 +69,7 @@ export interface SystemConfig {
   /** The round clock ticks once every this many frames — 40 on the machine, so 99 is 66 real seconds. */
   readonly timerFramesPerTick: number
   readonly throw: { readonly hold: number; readonly knockdown: boolean; readonly meter: number }
+  readonly defence: { readonly mode: DefenceMode; readonly rootedWhileGuarding: boolean }
   readonly meter: { readonly hit: number; readonly block: number; readonly whiffSpecial: number; readonly max: number }
 }
 
@@ -158,7 +159,42 @@ export interface Character {
   readonly specials: readonly Move[]
 }
 
+/**
+ * The three answers the arcade boards give to "how do I not get hit", measured in
+ * `research/BUILDER.md`. They are not variations on one idea — each one reorganises the game around
+ * it, which is why this is a switch rather than a flag.
+ */
+export type DefenceMode =
+  /** Champion Edition and Third Strike: hold away from the opponent, and blocking *is* retreating. */
+  | 'hold-away'
+  /** Tekken 3: standing still guards highs and mids by itself. You press nothing at all. */
+  | 'auto-standing'
+  /** Virtua Fighter 2: a button — which costs you no health and roots you to the floor. */
+  | 'guard-button'
+
 export const SYSTEM: SystemConfig = systemJson as unknown as SystemConfig
+
+/**
+ * The rules currently in force, as opposed to the ones the config was written with. Mutable on
+ * purpose: the point of measuring three boards is to be able to *feel* the difference, and that
+ * means switching schools without a reload.
+ */
+export const RULES: { defence: DefenceMode; rootedWhileGuarding: boolean } = {
+  defence: SYSTEM.defence.mode,
+  rootedWhileGuarding: SYSTEM.defence.rootedWhileGuarding,
+}
+
+/** What each school implies, beyond the blocking rule itself. */
+export const DEFENCE_SCHOOLS: Readonly<Record<DefenceMode, { name: string; rooted: boolean }>> = {
+  'hold-away': { name: 'STREET FIGHTER — hold back to block', rooted: false },
+  'auto-standing': { name: 'TEKKEN — standing still guards', rooted: false },
+  'guard-button': { name: 'VIRTUA FIGHTER — G guards, and roots you', rooted: true },
+}
+
+export function setDefence(mode: DefenceMode): void {
+  RULES.defence = mode
+  RULES.rootedWhileGuarding = DEFENCE_SCHOOLS[mode].rooted
+}
 
 const STRENGTH_OF: Record<string, Strength> = { lp: 'light', mp: 'medium', hp: 'heavy', lk: 'light', mk: 'medium', hk: 'heavy' }
 

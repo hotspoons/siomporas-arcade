@@ -43,6 +43,11 @@ export const Button = {
   LK: 1 << 3,
   MK: 1 << 4,
   HK: 1 << 5,
+  /**
+   * Guard. Street Fighter has no such button — you block by holding away — but Virtua Fighter's
+   * whole defence is one, and a builder that offers that school needs somewhere to put it.
+   */
+  G: 1 << 6,
 } as const
 
 export type ButtonMask = number

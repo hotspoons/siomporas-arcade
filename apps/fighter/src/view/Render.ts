@@ -10,7 +10,7 @@
 // limb is attacking — pulled from the move's own hitbox, so a move that looks wrong is wrong. A stage
 // with no art is a gradient and a floor line. F1 puts the real boxes over either.
 
-import { SYSTEM } from '../sim/Character'
+import { DEFENCE_SCHOOLS, RULES, SYSTEM } from '../sim/Character'
 import type { Fighter } from '../sim/Fighter'
 import { ROUNDS_TO_WIN, type Match } from '../sim/Match'
 import { blockAdvantage, totalFrames, type Box } from '../sim/Moves'
@@ -486,6 +486,7 @@ function controls(ctx: CanvasRenderingContext2D): void {
     'F G H punch   C V B kick   N = 3P   M = 3K',
     'fwd+heavy up close = throw',
     'ENTER = character select   5 6 7 8 pick P1   - = 9 0 walk the roster',
+    `F3 defence: ${DEFENCE_SCHOOLS[RULES.defence].name}`,
     'F1 boxes   F2 dummy   1 2 3 opponent   4 two players   R reset',
   ]
   font(ctx, 7, 600)

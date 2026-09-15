@@ -70,5 +70,10 @@
   },
   "airAttackLandingFrames": 7,
   "defenderFreezeExtra": 2,
-  "timerFramesPerTick": 40
+  "timerFramesPerTick": 40,
+  "defence": {
+    "$comment": "Which school of defence is in force. See research/BUILDER.md: the three arcade boards measured give three different answers, and this is the switch between them. 'hold-away' is Champion Edition and Third Strike; 'auto-standing' is Tekken 3, where doing nothing guards highs and mids; 'guard-button' is Virtua Fighter 2, where guard is a button that also roots you to the floor.",
+    "mode": "hold-away",
+    "rootedWhileGuarding": false
+  }
 }

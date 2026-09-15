@@ -17,7 +17,7 @@ import {
   CHARGE_BACK, CHARGE_DOWN, DP, HCB, HCF, InputHistory, QCB, QCF, RDP, Button,
   matchCharge, matchMotion, matchRotation, type ButtonMask, type Facing, type Motion,
 } from './Motion'
-import { SYSTEM, findCharacter, type Character } from './Character'
+import { RULES, SYSTEM, findCharacter, type Character } from './Character'
 import { activeOn, overlap, totalFrames, worldBox, type Box, type Move, type Stance } from './Moves'
 
 export type State =
@@ -124,12 +124,29 @@ export class Fighter {
    * Holding back with nothing else going on. Note that this is *not* "is safe": it says the guard
    * is up, and Match still decides whether the guard is in the right place for the attack.
    */
+  /**
+   * Whether this fighter is guarding — and the one place the three schools of defence differ.
+   * Whether the guard *works* against a given blow is decided elsewhere, by height, which every
+   * school agrees on: a low must be guarded low and a high must be guarded standing.
+   */
   get blocking(): boolean {
     if (!this.grounded) return false
     if (this.state === 'blockstun') return true
     if (!this.free) return false
-    const d = this.dir
-    return d === 1 || d === 4 || d === 7
+    switch (RULES.defence) {
+      // Tekken: neutral is a guard. You hold nothing, and the height rules do the rest — which is
+      // why lows are the whole offence on that board.
+      case 'auto-standing':
+        return true
+      // Virtua Fighter: a button. Costs no health, covers half of you, and see `walk` for the price.
+      case 'guard-button':
+        return (this.history.buttons(0) & Button.G) !== 0
+      // Street Fighter: hold away, so blocking and retreating are the same action.
+      default: {
+        const d = this.dir
+        return d === 1 || d === 4 || d === 7
+      }
+    }
   }
 
   /**
@@ -384,6 +401,14 @@ export class Fighter {
     }
     if (down) {
       if (this.state !== 'crouch') this.enter('crouch')
+      this.vx = 0
+      this.physics(true)
+      return
+    }
+    // Virtua Fighter charges movement for its free guard: hold it and you do not walk at all,
+    // measured at exactly 0.000 units in 120 frames on the board itself.
+    if (RULES.rootedWhileGuarding && (this.history.buttons(0) & Button.G) !== 0) {
+      if (this.state !== 'idle') this.enter('idle')
       this.vx = 0
       this.physics(true)
       return

@@ -54,6 +54,8 @@ Blanka — and one stage, Guile's airbase.
 | `F1` | **hitboxes and frame data** |
 | `F2` | training dummy |
 | `1` `2` `3` `4` | opponent: guard / easy / hard / second player |
+| `F3` | **which school of defence is in force** — see below |
+| `Space` · `Numpad0` | guard, in the school that has a guard button |
 | `Enter` | character select |
 | `5` `6` `7` `8` | pick P1 from the first four of the roster |
 | `-` `=` · `9` `0` | walk P1 · P2 along the whole roster |
@@ -65,6 +67,20 @@ press `4` first and the second cursor becomes the arrow keys and the numpad.
 
 A gamepad works: face buttons and the two right shoulders are the six buttons, the left shoulders
 are the three-punch and three-kick macros, d-pad or left stick moves.
+
+**Press F3.** The three arcade boards in `research/BUILDER.md` give three different answers to the
+most basic question a fighting game asks, and this cycles between them mid-fight:
+
+| | how you defend |
+|---|---|
+| `hold-away` | **Street Fighter** — hold back, so blocking and retreating are the same action. Chip on blocked specials. |
+| `auto-standing` | **Tekken** — standing still guards highs and mids by itself. You press nothing. |
+| `guard-button` | **Virtua Fighter** — `Space` guards, costs no health, and **roots you to the floor**. |
+
+`?defence=guard-button` in the URL picks one on arrival. The height rules do not change between them
+— a low must always be guarded low — so switching school changes what *counts* as guarding, not what
+guarding stops. The machine translates its own intent, so it guards with the button when that is what
+guarding means.
 
 **Press F1.** With no sprite loaded the placeholder art is a drawing of the frame data — the
 attacking limb is drawn *from the move's own hitbox*, so it reaches out through startup, locks at

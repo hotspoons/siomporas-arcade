@@ -13,6 +13,7 @@ import { Button, type ButtonMask } from '../sim/Motion'
 import { Match } from '../sim/Match'
 import { CHARACTERS } from '../sim/Character'
 import { Cpu, type Difficulty } from '../sim/Cpu'
+import { DEFENCE_SCHOOLS, RULES, setDefence, type DefenceMode } from '../sim/Character'
 import { render, type RenderOptions, type Scene } from '../view/Render'
 import { renderSelect } from '../view/SelectScreen'
 import { Select } from './Select'
@@ -35,6 +36,8 @@ const P1: Pad = {
     ['KeyF', Button.LP], ['KeyG', Button.MP], ['KeyH', Button.HP],
     ['KeyC', Button.LK], ['KeyV', Button.MK], ['KeyB', Button.HK],
     ['KeyN', PPP], ['KeyM', KKK],
+    // Guard, for the school that has one. Idle on the other two.
+    ['Space', Button.G],
   ],
 }
 
@@ -44,6 +47,7 @@ const P2: Pad = {
     ['Numpad4', Button.LP], ['Numpad5', Button.MP], ['Numpad6', Button.HP],
     ['Numpad1', Button.LK], ['Numpad2', Button.MK], ['Numpad3', Button.HK],
     ['Numpad7', PPP], ['Numpad8', KKK],
+    ['Numpad0', Button.G],
   ],
 }
 
@@ -62,6 +66,8 @@ export interface GameSettings {
   stage?: string
   /** Open on the select screen. Defaults to true when the settings do not name a fighter. */
   select?: boolean
+  /** Which school of defence to fight under. See `research/BUILDER.md`. */
+  defence?: string
 }
 
 export class Game {
@@ -94,6 +100,7 @@ export class Game {
     if (!ctx) throw new Error('fighter: no 2D context')
     this.ctx = ctx
     this.stage = settings.stage ?? 'airbase'
+    if (settings.defence && settings.defence in DEFENCE_SCHOOLS) setDefence(settings.defence as DefenceMode)
     this.match = new Match(settings.p1 ?? 'ryu', settings.p2 ?? 'zangief')
     void this.loadArt()
     // A link that names its fighters is a link to that fight; anything else starts where an arcade
@@ -245,6 +252,14 @@ export class Game {
       case 'NumpadEnter':
         if (!this.select) this.openSelect()
         return true
+      // F3 walks through the three schools of defence the arcade boards actually use. It is the
+      // whole point of the research being numbers rather than prose: you can feel the difference.
+      case 'F3': {
+        const modes = Object.keys(DEFENCE_SCHOOLS) as DefenceMode[]
+        setDefence(modes[(modes.indexOf(RULES.defence) + 1) % modes.length])
+        this.options.hint = true
+        return true
+      }
       case 'KeyR':
         this.reset()
         return true

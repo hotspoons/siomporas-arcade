@@ -13,6 +13,7 @@
 // spins a 360 next to you and Blanka's charges back and rolls, without this file knowing either of
 // them by name.
 
+import { RULES } from './Character'
 import { Button, type ButtonMask } from './Motion'
 import type { Fighter } from './Fighter'
 import type { Move } from './Moves'
@@ -98,8 +99,25 @@ export class Cpu {
     this.rng = new Rng(seed)
   }
 
-  /** The input frame to push into this fighter's history this tick. */
+  /**
+   * The input frame to push into this fighter's history this tick.
+   *
+   * The thinking is written in Street Fighter's dialect — "hold away" means "block" — because that
+   * is the school the character data was measured in. Under another school the same intention needs
+   * a different input, and translating it here rather than in the thinking keeps the CPU honest:
+   * it still only ever presses things a player could press.
+   */
   decide(me: Fighter, them: Fighter): Frame {
+    const f = this.think(me, them)
+    if (RULES.defence === 'guard-button' && f.x < 0) {
+      // It wanted to block. On this board that is a button, and holding it roots you — which is
+      // exactly the trade the board makes, so the CPU should pay it too.
+      return { ...f, buttons: f.buttons | Button.G }
+    }
+    return f
+  }
+
+  private think(me: Fighter, them: Fighter): Frame {
     if (this.difficulty === 'dummy') return hold(0)
     if (this.difficulty === 'guard') return hold(-1)
 

@@ -51,7 +51,7 @@ def _load_pipeline():
     import error here is a broken image, not a bad request — we want it visible in /healthz."""
     global _pipeline
     if _pipeline is None:
-        from app import compat
+        from reconsvc import compat
 
         compat.apply()  # must run before the pipeline import pulls in vendored model code
 
@@ -61,7 +61,7 @@ def _load_pipeline():
         # re-run: snapshot_download is a no-op once cached, so this only costs anything on a cold
         # volume. See fetch_weights for why the encoder is substituted and why we load by path.
         if not (MODEL_DIR / "pipeline.json").exists():
-            from app.fetch_weights import main as fetch_weights
+            from reconsvc.fetch_weights import main as fetch_weights
 
             fetch_weights()
 

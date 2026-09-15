@@ -25,6 +25,13 @@ import sys
 NEEDS_NO_GPU = ("torch", "cumesh", "nvdiffrast", "xformers", "utils3d", "trimesh")
 NEEDS_GPU = ("o_voxel", "flex_gemm")
 
+# The service's own module. This check did NOT exist when the first image shipped, and the pod
+# CrashLoopBackOff'd on startup: uvicorn was asked for `app.main`, and TRELLIS.2 ships its own
+# /opt/TRELLIS2/app.py — a Gradio demo — which has to be on PYTHONPATH for `trellis2` to import. A
+# plain module beats a namespace package, so `app` resolved to theirs. The package is `reconsvc`
+# now, and importing it here means a name collision fails the BUILD instead of the deployment.
+SERVICE_MODULE = "reconsvc.main"
+
 
 def main() -> int:
     failed = []
@@ -38,6 +45,18 @@ def main() -> int:
         if importlib.util.find_spec(name) is None:
             failed.append(f"{name}: not installed")
 
+    # Import the service itself, and check it is OURS. The pipeline is loaded lazily inside a
+    # request, so this costs nothing and needs no GPU.
+    try:
+        mod = importlib.import_module(SERVICE_MODULE)
+        where = getattr(mod, "__file__", "?")
+        if "/reconsvc/" not in where:
+            failed.append(f"{SERVICE_MODULE}: resolved to {where}, which is not ours")
+        elif not hasattr(mod, "app"):
+            failed.append(f"{SERVICE_MODULE}: no `app` for uvicorn to serve")
+    except Exception as exc:
+        failed.append(f"{SERVICE_MODULE}: {type(exc).__name__}: {exc}")
+
     if failed:
         print("SELFCHECK FAILED", file=sys.stderr)
         for line in failed:
@@ -46,7 +65,8 @@ def main() -> int:
 
     import torch
     print(f"torch {torch.__version__} — {len(NEEDS_NO_GPU)} imported, "
-          f"{len(NEEDS_GPU)} present (GPU-only, not imported here)")
+          f"{len(NEEDS_GPU)} present (GPU-only, not imported here), "
+          f"{SERVICE_MODULE} serves `app`")
     print("SELFCHECK OK")
     return 0
 

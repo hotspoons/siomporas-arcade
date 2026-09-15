@@ -116,9 +116,6 @@ RUN git clone --depth 1 -b v0.4.0 https://github.com/NVlabs/nvdiffrast.git /tmp/
 # build container does not have. They are checked with find_spec, which locates the installed module
 # without executing it — enough to prove the compile produced something importable-shaped, without
 # pretending a builder has a card in it.
-COPY app/selfcheck.py /opt/app/selfcheck.py
-RUN python3 /opt/app/selfcheck.py
-
 # flash-attn is deliberately NOT installed -- a long, fragile source build on aarch64. Two separate
 # attention backends have to be steered away from it:
 #   ATTN_BACKEND=sdpa          dense attention, torch's own scaled_dot_product_attention
@@ -127,9 +124,20 @@ RUN python3 /opt/app/selfcheck.py
 #                              silently ignored and the flash_attn default stands. xformers has a
 #                              working aarch64 wheel; that is why it is in the pip list above.
 
-COPY app /opt/app
-ENV PYTHONPATH=/opt/TRELLIS2
+COPY reconsvc /opt/reconsvc
+
+# PYTHONPATH carries BOTH: /opt so `reconsvc` is importable, /opt/TRELLIS2 so `trellis2` is. Order
+# matters — TRELLIS.2 ships its own app.py, so anything of ours sharing a name loses. `reconsvc`
+# cannot collide, which is why it is not called `app`.
+ENV PYTHONPATH=/opt:/opt/TRELLIS2
+
+# The gate, and it runs LAST, after everything it checks is actually in the image. Placed before the
+# COPY it was checking nothing that came after it. It verifies the compiled extensions are present
+# AND that `reconsvc.main` imports and resolves to our file rather than TRELLIS.2's app.py — the
+# collision that CrashLoopBackOff'd the first deployment.
+RUN python3 -m reconsvc.selfcheck
+
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=600s \
   CMD python3 -c "import urllib.request;urllib.request.urlopen('http://localhost:8000/healthz',timeout=4)"
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--app-dir", "/opt"]
+CMD ["uvicorn", "reconsvc.main:app", "--host", "0.0.0.0", "--port", "8000", "--app-dir", "/opt"]

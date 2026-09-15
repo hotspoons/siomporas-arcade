@@ -116,6 +116,35 @@ the rest are mechanisms and widget holders parked off the body.
 }
 ```
 
-**Reading this file back is not implemented yet.** The correction has to move the matching *metarig*
-bone before `rigify_generate` — `DEF-upper_armL` is metarig `upper_arm.L` — which means fitting the
-metarig, applying offsets, then generating. That is the next piece of work here.
+## The loop, and the seam still open in the middle of it
+
+The Blender half is done. `rig_character.py` has both ends:
+
+```bash
+# 1. fit the metarig, hand its 27 body joints out for correction, and stop
+rig_character.py -- --in mesh.glb --out mesh-for-editing.glb \
+                    --export-joints joints.json --blrig <path>
+
+# 2. ...drag the joints onto the real anatomy...
+
+# 3. place the metarig from the corrected file, then generate and weight
+rig_character.py -- --in mesh.glb --out rigged.glb --joints joints.json --blrig <path>
+```
+
+Step 3 injects between `fit_metarig` and `rigify_generate`, which is the only place a correction
+takes: Rigify's generation and bone-heat weighting both run after it.
+
+**What does not join up yet is step 2.** Two formats exist and they are not the same file:
+
+| | written by | what it describes |
+|---|---|---|
+| `apex-metarig-joints/1` | `rig_character.py --export-joints` | 27 **metarig** bones, head and tail |
+| `apex-joint-offsets/1` | the model viewer's Export | offsets on the ~160 generated `DEF-` bones |
+
+The viewer currently edits a *rigged* `.glb`, so it sees the generated deform skeleton — an output.
+The thing that actually controls the rig is the metarig going in, and only ~27 of its bones are body
+joints a human would place (the rest are face and fingers).
+
+So the remaining work is on the viewer side, not here: load a `apex-metarig-joints/1` file alongside
+the mesh, edit those 27 joints, write the same format back. The picking, box-select and drag all
+stay as they are — it is the source of the joints that changes.

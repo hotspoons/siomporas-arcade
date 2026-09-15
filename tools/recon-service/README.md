@@ -25,6 +25,29 @@ internal lock rather than racing each other into an out-of-memory.
 Our green-screen key is better than any background remover the model would otherwise run, and
 passing flattened RGB throws that away and makes it guess again.
 
+## Verified, end to end
+
+Not "the build is green" — an actual asset, from the art pipeline's own keyed cut-out:
+
+```
+POST /reconstruct      202  {"job":"c5d6438867f1","views":1,"poll":"/jobs/..."}
+GET  /jobs/<id>        done, 130.2s
+                       2,020,075 vertices / 4,227,596 faces
+                       textured true, decimated_to 400000, texture_size 2048
+GET  /jobs/<id>/asset  25.6 MB
+```
+
+and what came back, read out of the glb rather than taken on trust: 1 material, 2 images,
+attributes `POSITION` / `TEXCOORD_0` / `NORMAL`, with `baseColorTexture` and
+`metallicRoughnessTexture`. It renders as a bronze three-box saloon with paint, glass, chrome and
+lamps — see it in the model viewer at `/models`.
+
+**About 2 minutes per asset** at these settings on a GH200, and jobs serialise behind one GPU, so a
+57-asset roster is an unattended couple of hours rather than something to babysit.
+
+`DECIMATION_TARGET` (400000) and `TEXTURE_SIZE` (2048) are environment variables. For something only
+ever seen as a scaled sprite imposter, both are probably generous.
+
 ## Why TRELLIS.2 and not TRELLIS
 
 TRELLIS 1 cannot run on the GH200s. It needs `spconv`, which ships only as x86 wheels with no

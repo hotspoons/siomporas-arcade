@@ -260,26 +260,50 @@ which is what "safe" means.
 
 | | contact on frame | attacker free | defender free | advantage |
 |---|---|---|---|---|
-| `P` **on hit** | 11 | 23 | 27 | **+4** |
-| `K` **blocked** | 13 | 40 | 38 | **−2** |
-| `P` blocked | 10 | 23 | 13 | −10 — *not trusted, see below* |
+| `P` blocked | 10 | 23 | 29 | **+6** |
+| `K` blocked | 13 | 40 | 35 | **−5** |
+| `P` on hit | 11 | 23 | 27 | +4 |
 
-`P` on hit at **+4** and `K` blocked at **−2** are both sensible numbers of the kind a fighting game
-is built out of: land a jab and you act first by four frames; have your kick blocked and you are
-slightly worse off than the man who blocked it.
+Land a jab and you act first; have your kick blocked and the man who blocked it moves first. These
+are the numbers a fighting game is actually built out of.
 
-**The blocked jab is not trustworthy** and is left in only so nobody measures it again and thinks
-they have found something. −10 would mean blocking Akira's fastest attack lets you punish him
-freely, which no fighting game does with its jab. The likely fault is in the method rather than the
-board: the defender is *holding guard* throughout, so his phase counter is not sitting at a clean
-idle value, and "returned to the value it had before contact" can fire on a flicker rather than on
-the real end of blockstun. Three frames of blockstun, which is what that reading implies, is not
-credible. A proper measurement wants the defender's guard states enumerated first.
+Two corrections were needed to get them, and both are worth recording because both follow from the
+game's own design rather than from a bug.
 
-Contact detection needed the same correction, and it is worth recording because it follows from the
-game's own design: **a blocked hit does no damage here**, so health never moves and every blocked
-test reported no contact at all. The signal that works for both cases is the defender's phase
-leaving whatever it was.
+**Contact cannot be detected by health**, because a blocked hit does no damage on this board, so
+every blocked test reported no contact at all until the signal became the defender's state changing.
+
+**The defender's flags word flickers while he guards.** `0x13184` reads 512 standing, and while
+guard is held it alternates between 8194 and 8192 — so a test for "back to the value it had before
+contact" fires on the flicker, not on the end of blockstun. That produced a first reading of −10 for
+a blocked jab, which no fighting game does, and three frames of blockstun, which is not credible.
+The **phase counter** at `0x13380` is the clean signal: it leaves zero when the blow lands and
+returns when the defender has his guard back, twenty frames later for a jab.
+
+### Guard has a height, and a standing one does not cover your legs
+
+Found by accident — a crouching kick did ten damage straight through a held guard — and then tested
+properly:
+
+| | vs **standing** guard | vs **crouching** guard |
+|---|---|---|
+| `P` standing punch | blocked, 0 damage, **+6** | nothing lands |
+| `K` standing kick | blocked, 0 damage, **−5** | nothing lands |
+| `d+K` crouching kick | **hits, 12 damage**, −9 | nothing lands |
+
+So the guard button is not a shield, it is a *stance*: holding it while standing covers you against
+standing attacks and leaves your legs open, and crouching reverses which half of you is safe. That
+is the high/low game, and it is the thing that stops the rooted, chip-free guard being an answer to
+everything — you cannot simply hold a button, because whichever button you hold, half the moves in
+the game go round it.
+
+One honest gap in that table: the crouching-guard column says "nothing lands" rather than "blocked",
+because a standing attack against a crouching fighter produced **no contact at all** — no damage and
+no state change — and the probe cannot tell a clean block from a whiff over the head. Both readings
+support the same conclusion and neither is worth overstating.
+
+`d+K` landing for 12 and still leaving its thrower at **−9** is worth keeping too: a low kick that
+beats a standing guard, does real damage, and still hands the initiative back. Nothing here is free.
 
 ## What was not found
 

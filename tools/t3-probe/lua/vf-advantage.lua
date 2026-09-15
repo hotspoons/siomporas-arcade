@@ -24,11 +24,21 @@ local function gapNow()
   return x
 end
 
+-- Blocked only. On block the defender's phase counter is a clean signal — it leaves zero when the
+-- blow arrives and returns when he has his guard back. On *hit* it is not: the counter drops back
+-- to zero two frames after contact while the flags word at 0x13184 sits in a hit state for eighty
+-- frames and more, so hit advantage needs that word's vocabulary read first and is not attempted
+-- here rather than guessed at.
+-- Guard has a *height* on this board, which the previous run found by accident: d+K did ten damage
+-- straight through a standing guard. So the defender's stance is now part of the test — G on its own
+-- is a standing guard, and down+G a crouching one — and the question is which attacks each stops.
 local TESTS = {
-  { name = "P  on hit", hold = { "p" }, guard = false },
-  { name = "P  blocked", hold = { "p" }, guard = true },
-  { name = "K  on hit", hold = { "k" }, guard = false },
-  { name = "K  blocked", hold = { "k" }, guard = true },
+  { name = "P   vs standing guard", hold = { "p" }, guard = { "g" } },
+  { name = "P   vs crouch guard", hold = { "p" }, guard = { "down", "g" } },
+  { name = "d+K vs standing guard", hold = { "down", "k" }, guard = { "g" } },
+  { name = "d+K vs crouch guard", hold = { "down", "k" }, guard = { "down", "g" } },
+  { name = "K   vs standing guard", hold = { "k" }, guard = { "g" } },
+  { name = "K   vs crouch guard", hold = { "k" }, guard = { "down", "g" } },
 }
 
 local f = 900
@@ -45,14 +55,14 @@ local aFree, dFree, dBase, hp0, contact
 -- A move has to *begin* before "back to idle" means anything. The first version looked for the
 -- attacker's phase to read zero from frame four onwards and of course it did — the move had not
 -- started yet — so every measurement was four. Same trap on the defender's side.
-local aStarted, dStarted, spoiled
+local aStarted, dStarted, spoiled, dSettled
 
 local function nextTest(n)
   idx = idx + 1
   if idx > #TESTS then M.log("DONE"); state = "done"; return end
   state = "approach"
   M.hold(1, { "right" })
-  M.hold(2, TESTS[idx].guard and { "g" } or {})
+  M.hold(2, TESTS[idx].guard or {})
 end
 
 M.at(f + 620, function() nextTest(M.frame) end)
@@ -72,7 +82,7 @@ M.run(function(n)
     dBase, hp0 = ph(P2), hp2()
     M.log("  (%s: gap at the moment of attack %.2f)", TESTS[idx].name, gapNow())
     aFree, dFree, contact = nil, nil, nil
-    aStarted, dStarted, spoiled = false, false, false
+    aStarted, dStarted, spoiled, dSettled = false, false, false, 0
     t0 = n
     state = "go"
     M.hold(1, t.hold)
@@ -89,7 +99,10 @@ M.run(function(n)
     -- has left whatever it was before contact — not zero, if he is holding guard — and returned.
     if ph(P1) ~= 0 then aStarted = true end
     if aStarted and not aFree and ph(P1) == 0 then aFree = d end
-    if contact and ph(P2) ~= dBase then dStarted = true end
+    -- The defender's *phase* counter, not the flags word beside it. Holding guard makes the flags
+    -- flicker between two values, and "back to what it was" then fires on the flicker: that is what
+    -- produced a jab reading -10 on block, which no fighting game does.
+    if contact and ph(P2) ~= 0 then dStarted = true end
     if spoiled then
       M.log("%-12s round reset underneath the test — retrying", t.name)
       M.hold(1, {}); M.hold(2, {})
@@ -97,7 +110,12 @@ M.run(function(n)
       nextTest(n)
       return
     end
-    if dStarted and not dFree and ph(P2) == dBase then dFree = d end
+    if dStarted and not dFree and ph(P2) == 0 then
+      dSettled = (dSettled or 0) + 1
+      if dSettled >= 3 then dFree = d - 2 end
+    elseif not dFree then
+      dSettled = 0
+    end
     if d >= 170 then
       local adv = (aFree and dFree) and (dFree - aFree) or nil
       M.log("%-12s contact %s   attacker free %s   defender free %s   advantage %s   damage %d%s",

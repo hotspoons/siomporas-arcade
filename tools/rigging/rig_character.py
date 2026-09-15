@@ -41,6 +41,7 @@ import argparse
 import json
 import math
 import os
+import re
 import sys
 
 import bpy
@@ -54,14 +55,39 @@ def parse_args():
     argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
     p = argparse.ArgumentParser(prog="rig_character")
     p.add_argument("--in", dest="src", required=True)
-    p.add_argument("--out", dest="dst", required=True)
+    p.add_argument("--out", dest="dst", default="")
     p.add_argument("--blrig", default=os.environ.get("BLRIG_DIR", ""))
     p.add_argument("--height", type=float, default=1.7, help="metres, head to floor")
     p.add_argument("--voxel", type=float, default=0.012, help="remesh cell size in metres")
     p.add_argument("--cage-faces", type=int, default=60000)
     p.add_argument("--renders", default="", help="directory for pose renders; skipped if unset")
     p.add_argument("--keep-cage", action="store_true")
+    p.add_argument("--metarig", default="human", choices=("human", "basic_human"))
+    p.add_argument("--export-joints", default="",
+                   help="fit the metarig, write its body joints to this file, and stop. "
+                        "Pair with --out to get the mesh the joints belong to.")
+    p.add_argument("--joints", default="",
+                   help="a corrected joints file to place the metarig from before generating")
     return p.parse_args(argv)
+
+
+# Which metarig bones a human would place by hand. The full Rigify human metarig is 159 bones and
+# most of them are face and fingers — nobody is dragging an ear into position, and Rigify derives
+# the deform chain from these anyway.
+BODY_JOINT = re.compile(
+    r"^(spine(\.\d+)?"
+    r"|pelvis\.[LR]|thigh\.[LR]|shin\.[LR]|foot\.[LR]|toe\.[LR]|heel\.02\.[LR]"
+    r"|shoulder\.[LR]|upper_arm\.[LR]|forearm\.[LR]|hand\.[LR])$")
+
+# Blender is Z-up; glTF is Y-up, and `export_scene.gltf` converts on the way out. Joints are written
+# in the SAME space as the exported mesh so the browser can overlay them without transforming
+# anything — the conversion lives here, at the one boundary that knows about both.
+def to_gltf(v):
+    return [round(v[0], 5), round(v[2], 5), round(-v[1], 5)]
+
+
+def from_gltf(v):
+    return (v[0], -v[2], v[1])
 
 
 def import_and_normalise(src, height):
@@ -89,6 +115,14 @@ def import_and_normalise(src, height):
         raise SystemExit("degenerate mesh: zero extent")
     obj.scale = tuple(height / tallest for _ in range(3))
     bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+
+    # Stand it on the floor. TRELLIS centres its output on the origin, which makes every exported
+    # coordinate relative to nothing in particular; with the feet on z=0 a joint's height IS its
+    # height, and the joints file can say so truthfully.
+    bpy.context.view_layer.update()
+    lowest = min((obj.matrix_world @ v.co).z for v in obj.data.vertices)
+    obj.location.z -= lowest
+    bpy.ops.object.transform_apply(location=True, rotation=False, scale=False)
     return obj
 
 
@@ -182,6 +216,110 @@ def transfer_weights(cage, obj, armature):
     return len(obj.vertex_groups)
 
 
+def fit_metarig_for(mesh_obj, kind, blrig):
+    """Add a metarig and run blrig's proportional fit against *mesh_obj*. Returns (meta, plan)."""
+    perception, rigify, character = blrig
+    import numpy as np
+    verts, _tris = perception._mesh.mesh_arrays(mesh_obj)
+    lo, hi = verts.min(axis=0), verts.max(axis=0)
+    sym = perception.symmetry_plane(mesh_obj)
+    centre_x = float((lo[0] + hi[0]) * 0.5)
+    normal = sym.get("normal")
+    if normal is not None and abs(normal[0]) > 0.9:
+        point = np.asarray(sym["point"])
+        normal = np.asarray(normal)
+        centre_x = float(point @ normal / normal[0])
+    meta = rigify.add_metarig(kind, name="META-Rig")
+    fit = rigify.fit_metarig(meta, lo.tolist(), hi.tolist(), center_x=centre_x)
+    return meta, fit
+
+
+def write_joints(meta, mesh_obj, path, mesh_path, kind):
+    """The body joints of the fitted metarig, in the exported mesh's own space."""
+    joints = {}
+    for bone in meta.data.bones:
+        if not BODY_JOINT.match(bone.name):
+            continue
+        joints[bone.name] = {
+            "head": to_gltf(bone.head_local),
+            "tail": to_gltf(bone.tail_local),
+            "parent": bone.parent.name if bone.parent else None,
+            "connected": bool(bone.use_connect),
+        }
+    height = float(mesh_obj.dimensions.z)
+    doc = {
+        "format": "apex-metarig-joints/1",
+        "source": {"mesh": os.path.basename(mesh_path) if mesh_path else None,
+                   "metarig": kind, "written": "by tools/rigging/rig_character.py"},
+        "axis": "y-up, matching the exported glb; +y is up and the figure stands on y=0",
+        "units": "metres",
+        "height": round(height, 4),
+        "note": ("Positions from Rigify's PROPORTIONAL fit — a human template scaled to the mesh "
+                 "height, which never looks at the mesh. Drag these onto the real anatomy and feed "
+                 "the file back with --joints."),
+        "joints": joints,
+    }
+    with open(path, "w") as fh:
+        json.dump(doc, fh, indent=2)
+    return doc
+
+
+def apply_joints(meta, path, blrig):
+    """Place the metarig's bones from a corrected joints file, before Rigify generates anything.
+
+    This is the whole point of the exercise. `fit_metarig` scales a standard skeleton to the
+    character's height and never looks at the mesh, so on anything not shaped like the template the
+    joints land wrong — on Kestrel the hands came out at ankle height. Everything downstream
+    (Rigify's generation, bone-heat weighting) runs *after* this, so correcting here is the only
+    place a fix actually takes.
+    """
+    _perception, _rigify, _character = blrig
+    with open(path) as fh:
+        doc = json.load(fh)
+    if doc.get("format") != "apex-metarig-joints/1":
+        raise SystemExit("unexpected joints format: {!r}".format(doc.get("format")))
+    wanted = doc.get("joints", {})
+
+    import bpy as _bpy
+    applied, missing, off = 0, [], []
+    prev_mode = _bpy.context.object.mode if _bpy.context.object else "OBJECT"
+    _bpy.context.view_layer.objects.active = meta
+    _bpy.ops.object.mode_set(mode="EDIT")
+    try:
+        ebones = meta.data.edit_bones
+        # Parents first: a connected child's head follows its parent's tail, so setting the parent
+        # afterwards would silently undo the child.
+        def depth(name):
+            n, d = ebones.get(name), 0
+            while n is not None and n.parent is not None:
+                n, d = n.parent, d + 1
+            return d
+        for name in sorted(wanted, key=depth):
+            eb = ebones.get(name)
+            if eb is None:
+                missing.append(name)
+                continue
+            rec = wanted[name]
+            eb.head = from_gltf(rec["head"])
+            eb.tail = from_gltf(rec["tail"])
+            applied += 1
+        # Read back: a connected bone can refuse a head that disagrees with its parent's tail, and
+        # silently keeping the old position is exactly the failure that would waste an afternoon.
+        for name in wanted:
+            eb = ebones.get(name)
+            if eb is None:
+                continue
+            want = from_gltf(wanted[name]["head"])
+            d = max(abs(eb.head[i] - want[i]) for i in range(3))
+            if d > 0.001:
+                off.append({"bone": name, "mm": round(d * 1000, 1)})
+    finally:
+        _bpy.ops.object.mode_set(mode="OBJECT")
+        if prev_mode != "OBJECT":
+            pass
+    return {"applied": applied, "missing": missing, "did_not_take": off}
+
+
 def render_poses(obj, rig, out_dir):
     scene = bpy.context.scene
     scene.render.engine = "BLENDER_WORKBENCH"
@@ -238,11 +376,13 @@ def main():
         sys.path.insert(0, args.blrig)
     try:
         from blrig import perception
-        from blrig.skills import rig_biped_rigify
+        from blrig.skills import _rigify, rig_biped_rigify
+        from blrig.standard import validate_weights
     except ImportError as exc:
         raise SystemExit(
             "blrig not importable ({}). Pass --blrig <path to blmcp_ext/rigging> "
             "or set BLRIG_DIR.".format(exc))
+    blrig = (perception, _rigify, None)
 
     obj = import_and_normalise(args.src, args.height)
     say("imported", {"verts": len(obj.data.vertices), "faces": len(obj.data.polygons),
@@ -264,26 +404,53 @@ def main():
         say("warning", {"detail": "cage is not watertight; bone heat will leak. "
                                   "Try a larger --voxel."})
 
-    ctx = {"objects": [cage.name]}
-    result = rig_biped_rigify.run(ctx)
-    say("rig", {"ok": result.get("ok"), "fail": result.get("fail"),
-                "character": result.get("character")})
-    if not result.get("ok"):
-        raise SystemExit("rigging failed: {}".format(result.get("fail")))
+    meta, fit = fit_metarig_for(cage, args.metarig, blrig)
+    say("metarig", {"kind": args.metarig, "fit_scale": fit["scale"],
+                    "bones": len(meta.data.bones)})
 
+    # --- stage one: hand the joints out for correction and stop ---------------------------------
+    if args.export_joints:
+        if args.dst:
+            bpy.ops.object.select_all(action="DESELECT")
+            obj.select_set(True)
+            bpy.context.view_layer.objects.active = obj
+            bpy.ops.export_scene.gltf(filepath=args.dst, export_format="GLB", use_selection=True)
+            say("exported", {"path": args.dst, "bytes": os.path.getsize(args.dst)})
+        doc = write_joints(meta, obj, args.export_joints, args.dst, args.metarig)
+        say("joints_written", {"path": args.export_joints, "joints": len(doc["joints"]),
+                               "height": doc["height"], "names": sorted(doc["joints"])[:8]})
+        return
+
+    # --- stage two: place the metarig from a corrected file, then generate -----------------------
+    if args.joints:
+        report = apply_joints(meta, args.joints, blrig)
+        say("joints_applied", report)
+        if report["did_not_take"]:
+            say("warning", {"detail": "some bones did not move to the requested head; a connected "
+                                      "bone's head follows its parent's tail",
+                            "bones": report["did_not_take"][:6]})
+
+    rig = _rigify.generate(meta, "Rig.Biped")
+    _rigify.bind_auto_weights(cage, rig)
+    weights = validate_weights(cage, rig)
+    unweighted = next((e for e in weights["errors"] if e["rule"] == "E_UNWEIGHTED"), None)
+    if unweighted is not None:
+        raise SystemExit("bone heat failed: {}".format(unweighted["detail"]))
+    say("rig", {"armature": rig.name, "bones": len(rig.data.bones),
+                "deform": sum(1 for b in rig.data.bones if b.use_deform)})
+
+    ctx = {"objects": [cage.name], "armature": rig.name}
     verify = rig_biped_rigify.verify(ctx)
     say("verify", {"ok": verify.get("ok")})
     for check in verify.get("checks", []):
         if not check.get("ok") or "volume" in check["name"]:
             say("check", {"name": check["name"], "ok": check["ok"], "detail": check.get("detail")})
 
-    rig = bpy.data.objects[result["armature"]]
     groups = transfer_weights(cage, obj, rig)
     say("weights", {"vertex_groups_on_mesh": groups})
 
     if not args.keep_cage:
         bpy.data.objects.remove(cage, do_unlink=True)
-
     if args.renders:
         os.makedirs(args.renders, exist_ok=True)
         render_poses(obj, rig, args.renders)

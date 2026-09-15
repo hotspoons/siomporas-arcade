@@ -193,7 +193,21 @@ The ratio between landing and being blocked — 17:9, near enough 2:1 — is alm
 Turbo's 6:3. Eight years apart, the *relative* value of a hit over a blocked hit did not move, even
 though everything about the units did.
 
-## Not done
+## Not done, and one thing that was tried and failed
 
-EX moves specifically — how much of a stock one costs, and whether the gauge can be spent in parts.
-Also the red parry, and true startup figures if anyone finds the phase word this scan could not.
+**EX moves.** How much of the gauge one costs is the last piece of this economy and it is not
+measured. The probe can produce buttons and directions but not, so far, a **motion**: a quarter
+circle forward — down, down-forward, forward, then two punches with forward still held — was fed at
+two speeds, eleven frames end to end and twenty-eight, and neither produced a special. What came out
+both times was an ordinary crouching normal: the gauge went *up* by two rather than being spent, and
+the busy word sat at a crouching value throughout.
+
+So the harness needs a working motion-input primitive before this question can be asked, and that is
+worth building properly rather than guessing at — every special, super and EX on every 2D board is
+behind one. Two things to suspect first: whether the character selected by the entry mashing is one
+whose specials are quarter-circles at all (Alex, whom the probe keeps landing on, is a charge and
+grapple character), and whether the direction needs to be released for a frame between steps rather
+than transitioning straight from `down` to `down+forward`.
+
+Also not done: the red parry, and true startup figures if anyone finds the phase word this scan
+could not.

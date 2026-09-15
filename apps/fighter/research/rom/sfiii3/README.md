@@ -193,21 +193,41 @@ The ratio between landing and being blocked — 17:9, near enough 2:1 — is alm
 Turbo's 6:3. Eight years apart, the *relative* value of a hit over a blocked hit did not move, even
 though everything about the units did.
 
-## Not done, and one thing that was tried and failed
+## What an EX move costs
 
-**EX moves.** How much of the gauge one costs is the last piece of this economy and it is not
-measured. The probe can produce buttons and directions but not, so far, a **motion**: a quarter
-circle forward — down, down-forward, forward, then two punches with forward still held — was fed at
-two speeds, eleven frames end to end and twenty-eight, and neither produced a special. What came out
-both times was an ordinary crouching normal: the gauge went *up* by two rather than being spent, and
-the busy word sat at a crouching value throughout.
+| | |
+|---|---|
+| gauge before | 60 |
+| gauge after an **EX** fireball | **20** |
+| **cost** | **40 of 128** |
+| the same motion with one button | gains 1, costs nothing |
 
-So the harness needs a working motion-input primitive before this question can be asked, and that is
-worth building properly rather than guessing at — every special, super and EX on every 2D board is
-behind one. Two things to suspect first: whether the character selected by the entry mashing is one
-whose specials are quarter-circles at all (Alex, whom the probe keeps landing on, is a charge and
-grapple character), and whether the direction needs to be released for a frame between steps rather
-than transitioning straight from `down` to `down+forward`.
+So a full gauge is a choice: **one super stock, or about three EX moves**. That is the shape of this
+economy — a currency you can spend continuously in small amounts or bank for one large payoff —
+against Champion Edition, where the meter is only ever saved and only ever spent whole.
 
-Also not done: the red parry, and true startup figures if anyone finds the phase word this scan
-could not.
+Chip, incidentally, came free with the measurement, because player one was holding away and blocking
+throughout: **a blocked fireball chips 1, a blocked EX fireball chips 2.** So this game keeps
+Champion Edition's rule that specials chip through a guard, where both 3D boards abandoned it.
+
+### Two traps, and neither was the input
+
+Finding this took four runs and three of them were spent on wrong conclusions worth recording.
+
+**A game that cannot afford an EX gives you the ordinary special instead**, silently. With 18 units
+of gauge the "EX" and the plain version were identical in every respect — same damage, same gain —
+and that looks exactly like an input that did not register. Build the gauge before concluding
+anything. Blocked fierces are worth 9 each and harm nobody; fireballs are worth about 1.
+
+**And a character who does not have the move you are asking for looks exactly like a broken
+harness.** A quarter circle was fed to Alex at two speeds, with the direction held and released, and
+never produced a special — so the motion primitive was written off as not working. It works: the
+same call makes **Ryu throw a fireball across the screen on the first attempt**. Alex is a charge and
+grapple character. Test a new board with a fireball character before believing the input is at
+fault.
+
+`M.motion` and `M.qcf` in `lua/common.lua` are the primitive, and the comment above them says this.
+
+## Not done
+
+The red parry, and true startup figures if anyone finds the phase word this scan could not.

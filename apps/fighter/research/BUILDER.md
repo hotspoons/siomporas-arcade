@@ -111,12 +111,14 @@ animation, a rigged character's root does not need a height channel.
 | | how it works |
 |---|---|
 | Street Fighter II *(Super Turbo)* | a meter that fills in **bars**; gain is **flat per action** — `meter: { hit: 6, block: 3, whiffSpecial: 2, max: 4 }` |
-| **3rd Strike** | a gauge that fills to **128**, then **awards a stock and resets**; gain **scales with the attack** — a jab is 2, a fierce 17 |
+| **3rd Strike** | a gauge that fills to **128**, then **awards a stock and resets**; gain **scales with the attack** — a jab is 2, a fierce 17. An **EX move costs 40**, so a full gauge is one stock *or* about three EX moves |
 | Tekken 3, Virtua Fighter 2 | none |
 
-Two switches here. **Flat versus scaled gain** decides whether meter is built by touching the
+Three switches here. **Flat versus scaled gain** decides whether meter is built by touching the
 opponent often or by committing to big attacks. **Bars versus gauge-and-stock** decides whether a
-part-full meter is worth anything.
+part-full meter is worth anything. And **whether the meter can be spent in parts at all**: 3rd
+Strike lets you buy an EX for 40 of 128 at any time, so the gauge is a working currency rather than
+a countdown to one payoff, which is most of what makes its pacing different.
 
 One agreement across the decade: landing an attack is worth about **twice** what having it blocked
 is worth, in both Street Fighters — 6:3 in Super Turbo, 17:9 in 3rd Strike. The units changed
@@ -186,9 +188,7 @@ cheap.
 
 What is still missing, in the order I would do it:
 
-1. **EX moves and super meter**, which is what most separates 3rd Strike's economy from Champion
-   Edition's and which no column here describes at all.
-2. **True startup figures**, for every board except Champion Edition. Only that one has real
+1. **True startup figures**, for every board except Champion Edition. Only that one has real
    startup/active/recovery, read from the game's own counters; Virtua Fighter 2 has a phase word and
    so has real numbers too, but Tekken 3 and CPS3 both give upper bounds because no phase word was
    found on either.

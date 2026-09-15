@@ -1,70 +1,53 @@
--- What an EX move costs out of the super gauge.
+-- What an EX move costs out of the super gauge — asked of Ryu, who has a quarter-circle special.
 --
--- The gauge fills to 128 and converts to a stock. EX moves are the other thing it buys, and the
--- question is how much of it they take — which decides whether the gauge is a slow march toward one
--- big payoff or a currency you spend continuously. That is a genuine switch for a builder, and it is
--- the last piece of 3rd Strike's economy.
+-- The first attempt at this asked Alex, whose Flash Chop never came out however the motion was fed,
+-- and the harness was blamed. It was not the harness: the same primitive makes Ryu throw a fireball
+-- across the screen on the first attempt. **A character who does not have the move you are asking
+-- for looks exactly like a broken input.**
 --
--- This needs a **motion input**, which nothing in this harness has done: a quarter-circle forward
--- is down, then down-forward, then forward, each held a couple of frames, and then the buttons. Two
--- punches together make the EX version of the move.
+-- Ryu is player two here, on the right, so his forward is `left`. One punch gives the special; two
+-- give the EX version, and the difference between the gauge before and after is the answer.
 package.path = (os.getenv("PROBE_DIR") or ".") .. "/?.lua;" .. package.path
 local M = require("common")
 
 local W = manager.machine.memory.shares[":mainram"]
-local METER, STOCK, HP_D = 0x286a4, 0x286a8, 0x2866c
-local function gauge() return (W:read_u32(METER) >> 16) & 0xFFFF end
-local function stocks() return W:read_u32(STOCK) & 0xFFFF end
-local function hpd() return W:read_u32(HP_D) & 0xFFFF end
+-- Found by watching what rose while only player two attacked, **not** by assuming the health
+-- stride: the two health bars are 0x18 apart but the gauges are 0x34, and guessing cost a run.
+local P2_METER = 0x286d8
+local HP_P1 = 0x28654
+local function gauge() return (W:read_u32(P2_METER) >> 16) & 0xFFFF end
+local function hp1() return W:read_u32(HP_P1) & 0xFFFF end
 
-local WHICH = os.getenv("SF3_MOVE") or "ex"   -- "ex" = two punches, "special" = one
+local WHICH = os.getenv("SF3_MOVE") or "ex"
 
 for n = 600, 4000, 120 do M.tapCoin(n, 20) end
 for n = 1000, 4000, 260 do M.tapStart(n, 1, 10); M.tapStart(n + 60, 2, 10) end
 for n = 1400, 2000, 110 do M.tap(n, 1, { "jab" }, 8); M.tap(n + 30, 2, { "jab" }, 8) end
 
--- Build some gauge first, from out of range so the fighters stay put.
-local FILL_FROM, FILL_TO = 2400, 3300
-local state, t0, g0, hp0 = "fill", nil, nil, nil
-local busyPeak = 0
-
-M.run(function(n)
-  if state == "fill" then
-    if n < FILL_FROM then return end
-    if n % 26 == 0 then M.hold(1, { "fierce" }) end
-    if n % 26 == 10 then M.hold(1, {}) end
-    if n >= FILL_TO then
-      M.hold(1, {})
-      state = "settle"
-      t0 = n + 40
-    end
-  elseif state == "settle" and n == t0 then
-    g0, hp0 = gauge(), hpd()
-    M.log("gauge before: %d   stocks %d", g0, stocks())
-    t0 = n
-    state = "motion"
-  elseif state == "motion" then
-    local d = n - t0
-    local b = W:read_u32(0x68e78) & 0xFFFF
-    if b > busyPeak then busyPeak = b end
-    -- Quarter-circle forward: down, down-forward, forward. Player one faces right.
-    if d == 0 then M.hold(1, { "down" }) end
-    if d == 14 then M.hold(1, { "down", "right" }) end
-    if d == 22 then M.hold(1, { "right" }) end
-    
-    
-    -- The direction stays held with the buttons. Releasing it to press them, which is what the
-    -- first version did, turns a quarter-circle into a bare button press: the probe produced an
-    -- ordinary jab and the gauge went *up* by two rather than being spent.
-    if d == 28 then
-      M.hold(1, WHICH == "ex" and { "right", "jab", "strong" } or { "right", "jab" })
-    end
-    if d == 40 then M.hold(1, {}) end
-    if d == 120 then
-      M.log("%-8s gauge %d -> %d  (spent %d)   stocks %d   damage dealt %d   busy peaked %d",
-        WHICH, g0, gauge(), g0 - gauge(), stocks(), math.max(0, hp0 - hpd()), busyPeak)
-      M.log("DONE")
-      state = "done"
-    end
-  end
+-- **Build a real gauge first.** Eighteen units out of a hundred and twenty-eight is not enough to
+-- buy an EX, and a game that cannot afford one simply gives you the ordinary special — which looks
+-- exactly like a failed input and cost two runs to see through.
+--
+-- Fireballs are a poor way to fill it, at about one unit each. Blocked fierces are worth nine, so
+-- player two walks in and player one holds away and blocks fifteen of them: no damage to anybody,
+-- no knockdown, and a gauge near full in three hundred frames.
+M.at(2450, function() M.hold(2, { "left" }) end)              -- player two walks in
+M.at(2530, function() M.hold(2, {}) end)
+M.at(2540, function() M.hold(1, { "left" }) end)              -- player one holds away: blocking
+for i = 0, 14 do
+  M.at(2560 + i * 26, function() M.hold(2, { "left", "fierce" }) end)
+  M.at(2570 + i * 26, function() M.hold(2, { "left" }) end)
+end
+M.at(2960, function() M.hold(2, {}) end)
+local g0, hp0
+M.at(3000, function()
+  g0, hp0 = gauge(), hp1()
+  M.log("gauge before: %d", g0)
 end)
+M.qcf(3030, 2, "left", WHICH == "ex" and { "jab", "strong" } or { "fierce" })
+M.at(3230, function()
+  M.log("%-8s gauge %d -> %d  (spent %d)   damage to player one %d",
+    WHICH, g0, gauge(), g0 - gauge(), math.max(0, hp0 - hp1()))
+  M.log("DONE")
+end)
+M.run()

@@ -173,6 +173,42 @@ function M.vfEnter(from, until_, ready)
   end
 end
 
+--- Feed a motion input — a quarter circle, a dragon punch, a half circle — and then the buttons.
+---
+--- `dirs` is a list of direction sets, each held `step` frames in turn; the last one stays held
+--- while `buttons` are pressed, because releasing the direction to press the button turns the whole
+--- thing into a bare button press. Facing matters and is the caller's job: player one on the left
+--- has forward = `right`, player two on the right has forward = `left`.
+---
+--- Proved by making Ryu throw a fireball across the screen, which is the most standard input in the
+--- genre and unmistakable when it lands. Worth knowing that the same call produced nothing at all on
+--- Alex — a character can simply not have the move you are asking for, and that looks identical to a
+--- broken primitive. Test a new board with a fireball character before believing anything.
+function M.motion(frame, player, dirs, buttons, step)
+  step = step or 4
+  local at = frame
+  for i, d in ipairs(dirs) do
+    local held = d
+    M.at(at, function() M.hold(player, held) end)
+    at = at + step
+    if i == #dirs then
+      -- Buttons land while the final direction is still held.
+      local both = {}
+      for _, k in ipairs(d) do both[#both + 1] = k end
+      for _, k in ipairs(buttons) do both[#both + 1] = k end
+      M.at(at - step + math.max(1, step - 1), function() M.hold(player, both) end)
+    end
+  end
+  M.at(at + 10, function() M.hold(player, {}) end)
+  return at + 10
+end
+
+--- A quarter circle forward for a player facing `facing` ("right" or "left").
+function M.qcf(frame, player, facing, buttons, step)
+  local f = facing or "right"
+  return M.motion(frame, player, { { "down" }, { "down", f }, { f } }, buttons, step)
+end
+
 function M.snap(tag)
   manager.machine.video:snapshot()
   if tag then print(string.format("SNAP f%d %s", M.frame, tag)) end

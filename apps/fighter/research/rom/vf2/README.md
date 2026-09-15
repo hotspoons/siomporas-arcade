@@ -47,6 +47,11 @@ the emulator.
 | `0x12b2c` (low half) | **health, 16-bit, full at 196** — also mirrored at `0x15b40` high half |
 | `0x11380` | **what the fighter is doing**: 0 idle, 1 startup, **2 active**, 3 recovery |
 
+**The two fighters are the same structure 0x2000 apart.** Player two's phase counter is at
+`0x13380`, his health at `0x12b2c`, his x at `0x12f7c` — add `0x2000` to any of player one's. The
+very first pairing run on this board reported `+0x2000` as its most common gap and I did not believe
+it; it was right.
+
 **And these are IEEE floats.** Model 2's i960 has an FPU and its TGP coprocessor is float-native, so
 positions are singles: `1065353216` read as an integer is `1.0f`. The PlayStation boards next door
 have no FPU and use fixed-point integers throughout. Searching Model 2 as integers finds nothing and
@@ -247,11 +252,40 @@ half a second and living with it.
 That is a jumping kick that is a genuine gamble — a second and a half of your life, most of it spent
 unable to guard, on a stage you can be knocked off.
 
+### Advantage: who gets his body back first
+
+With both phase counters, this is direct — attack, then see which fighter leaves his stun or
+recovery first. Positive means the attacker is free first and may act again before his opponent can,
+which is what "safe" means.
+
+| | contact on frame | attacker free | defender free | advantage |
+|---|---|---|---|---|
+| `P` **on hit** | 11 | 23 | 27 | **+4** |
+| `K` **blocked** | 13 | 40 | 38 | **−2** |
+| `P` blocked | 10 | 23 | 13 | −10 — *not trusted, see below* |
+
+`P` on hit at **+4** and `K` blocked at **−2** are both sensible numbers of the kind a fighting game
+is built out of: land a jab and you act first by four frames; have your kick blocked and you are
+slightly worse off than the man who blocked it.
+
+**The blocked jab is not trustworthy** and is left in only so nobody measures it again and thinks
+they have found something. −10 would mean blocking Akira's fastest attack lets you punish him
+freely, which no fighting game does with its jab. The likely fault is in the method rather than the
+board: the defender is *holding guard* throughout, so his phase counter is not sitting at a clean
+idle value, and "returned to the value it had before contact" can fire on a flicker rather than on
+the real end of blockstun. Three frames of blockstun, which is what that reading implies, is not
+credible. A proper measurement wants the defender's guard states enumerated first.
+
+Contact detection needed the same correction, and it is worth recording because it follows from the
+game's own design: **a blocked hit does no damage here**, so health never moves and every blocked
+test reported no contact at all. The signal that works for both cases is the defender's phase
+leaving whatever it was.
+
 ## What was not found
 
-Advantage on block — which needs the *defender's* phase counter as well as the attacker's, and only
-player one's has been found. Also throws properly (they need a body), the stagger and recovery
-systems, and how the camera is driven.
+Throws properly — they need a body, and `P+G` thrown at nobody is just a punch. Also the stagger
+and recovery systems, the defender's guard states (which the advantage measurement above wants),
+and how the camera is driven.
 
 ## For the builder: the switches these two boards disagree on
 

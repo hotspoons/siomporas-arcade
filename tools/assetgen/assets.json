@@ -386,7 +386,7 @@
       ],
       "materials": ["dry fibrous grey-brown trunk", "fronds in a dusty desaturated green, sun-bleached at the tips"],
       "avoid": ["a symmetrical lollipop crown", "a smooth cylindrical trunk", "any pot, base disc, soil mound or ground plane"],
-      "views": ["profile"]
+      "views": ["profile", "front", "back"]
     },
 
     {
@@ -405,7 +405,7 @@
       ],
       "materials": ["dry fibrous grey-brown trunk", "fronds in a dusty desaturated green, sun-bleached at the tips"],
       "avoid": ["a symmetrical lollipop crown", "a smooth cylindrical trunk", "any visible pot, base disc or ground plane"],
-      "views": ["profile"]
+      "views": ["profile", "front", "back"]
     },
 
     {
@@ -424,7 +424,7 @@
       ],
       "materials": ["grey fibrous trunk with old frond scars", "green fronds browned and split at the tips"],
       "avoid": ["a straight vertical trunk", "an even radial crown", "any pot, base disc or ground plane"],
-      "views": ["profile"]
+      "views": ["profile", "front", "back"]
     },
 
     {
@@ -443,7 +443,7 @@
       ],
       "materials": ["plated red-brown bark", "dark blue-green needle masses, dense at the outside and open at the core"],
       "avoid": ["a smooth cone like a toy tree", "a perfectly symmetrical outline", "any pot, base disc or ground plane"],
-      "views": ["profile"]
+      "views": ["profile", "front", "back"]
     },
 
     {
@@ -462,7 +462,7 @@
       ],
       "materials": ["deeply fissured grey bark", "needle masses in a dark cold green"],
       "avoid": ["a wide low crown", "branches reaching the ground", "any pot, base disc or ground plane"],
-      "views": ["profile"]
+      "views": ["profile", "front", "back"]
     },
 
     {
@@ -481,7 +481,7 @@
       ],
       "materials": ["flaky orange-grey bark in irregular plates", "needle clusters in a dusty olive green"],
       "avoid": ["a conical Christmas-tree shape", "a single straight leader", "any pot, base disc or ground plane"],
-      "views": ["profile"]
+      "views": ["profile", "front", "back"]
     },
 
     {
@@ -500,7 +500,7 @@
       ],
       "materials": ["deeply furrowed grey bark", "small leaves in a dusty mid-green, greyer underneath"],
       "avoid": ["a tall narrow crown", "a straight single trunk to the top", "any pot, base disc or ground plane"],
-      "views": ["profile"]
+      "views": ["profile", "front", "back"]
     },
 
     {
@@ -519,7 +519,7 @@
       ],
       "materials": ["smooth grey bark with shallow vertical fissures", "mid-green foliage, lighter at the sunlit top"],
       "avoid": ["a perfect sphere on a stick", "autumn colour", "any pot, base disc or ground plane"],
-      "views": ["profile"]
+      "views": ["profile", "front", "back"]
     },
 
     {
@@ -538,7 +538,7 @@
       ],
       "materials": ["small dense leaves in a dry olive green", "thin woody stems the colour of old rope"],
       "avoid": ["a clipped hedge or topiary ball", "flowers", "any pot, base disc or ground plane"],
-      "views": ["profile"]
+      "views": ["profile", "front", "back"]
     },
 
     {
@@ -557,7 +557,7 @@
       ],
       "materials": ["small tough leaves in a grey-green", "bleached dead twigs within the mass"],
       "avoid": ["a neat rounded shrub", "flowering colour", "any pot, base disc or ground plane"],
-      "views": ["profile"]
+      "views": ["profile", "front", "back"]
     },
 
     {
@@ -576,7 +576,7 @@
       ],
       "materials": ["grey granite with a coarse speckled grain", "pale grey-green lichen, dry"],
       "avoid": ["a faceted low-poly crystal", "a perfectly rounded pebble", "any base disc, soil or ground plane"],
-      "views": ["profile"]
+      "views": ["profile", "front", "back"]
     },
 
     {
@@ -595,7 +595,7 @@
       ],
       "materials": ["banded sandstone in warm greys and ochres", "dark weeping stains below the ledges"],
       "avoid": ["a smooth monolith", "a low-poly crystal", "any base disc, rubble or ground plane"],
-      "views": ["profile"]
+      "views": ["profile", "front", "back"]
     },
 
     {
@@ -614,7 +614,7 @@
       ],
       "materials": ["pale limestone, chalky and dry", "dark weathering streaks running down the flutes"],
       "avoid": ["a carved monument, cairn or menhir with any worked surface", "any base disc or ground plane"],
-      "views": ["profile"]
+      "views": ["profile", "front", "back"]
     },
 
     {
@@ -633,7 +633,7 @@
       ],
       "materials": ["waxy blue-green skin", "straw-coloured spines, dense near the top"],
       "avoid": ["a smooth ribless cylinder", "flowers or fruit", "any pot, gravel base or ground plane"],
-      "views": ["profile"]
+      "views": ["profile", "front", "back"]
     },
 
     {
@@ -652,7 +652,7 @@
       ],
       "materials": ["dusty green waxy skin", "grey spine clusters, thinning towards the base"],
       "avoid": ["symmetric paired arms like a cartoon", "flowers or fruit", "any pot, gravel base or ground plane"],
-      "views": ["profile"]
+      "views": ["profile", "front", "back"]
     },
 
     {
@@ -671,7 +671,7 @@
       ],
       "materials": ["strong red-orange petals", "stems and leaves in a dry pale green"],
       "avoid": ["a florist's bouquet or a neat bedding block", "a pot, soil mound or ground plane"],
-      "views": ["profile"]
+      "views": ["profile", "front", "back"]
     },
 
     {
@@ -690,7 +690,7 @@
       ],
       "materials": ["silvered weathered wood on the cut face", "dark shrunken bark clinging in patches"],
       "avoid": ["a clean sawn cylinder", "moss carpet, mushrooms or a fairy-tale look", "any soil mound or ground plane"],
-      "views": ["profile"]
+      "views": ["profile", "front", "back"]
     },
 
 {
@@ -711,7 +711,7 @@
       ],
       "materials": ["painted sheet steel face gone chalky", "galvanised angle iron, rusting at the bolts", "plain enamel reflector lamps"],
       "avoid": ["any advertisement, image, logo or lettering on the face — it is blank and stays blank", "a modern vinyl wrap, LED panel or trivision slats"],
-      "views": ["front three-quarter", "profile"]
+      "views": ["front three-quarter", "profile", "front"]
     },
 
     {
@@ -731,7 +731,7 @@
       ],
       "materials": ["painted plank board, paint thin at the joints", "creosoted timber posts, dark at the base"],
       "avoid": ["any advertisement, image, logo or lettering", "a modern printed skin or aluminium frame"],
-      "views": ["front three-quarter", "profile"]
+      "views": ["front three-quarter", "profile", "front"]
     },
 
     {
@@ -751,7 +751,7 @@
       ],
       "materials": ["galvanised steel gone dull grey with white bloom", "an aluminium lamp head, oxidised"],
       "avoid": ["a modern flat LED head or a straight cantilever arm", "a decorative lantern or Victorian post", "any base plinth or ground plane"],
-      "views": ["profile", "front"]
+      "views": ["profile", "front", "back"]
     },
 
     {
@@ -771,7 +771,7 @@
       ],
       "materials": ["galvanised steel, chalky white bloom", "oxidised aluminium heads"],
       "avoid": ["a modern LED head or straight arms", "any base plinth or ground plane"],
-      "views": ["front", "profile"]
+      "views": ["front", "profile", "back"]
     },
 
     {
@@ -791,7 +791,7 @@
       ],
       "materials": ["grey precast concrete with faint formwork lines", "rust weep from the lifting eyes"],
       "avoid": ["diagonal hazard stripes, reflective panels or any lettering", "a plastic water-filled barrier", "any ground plane"],
-      "views": ["front three-quarter", "profile"]
+      "views": ["front three-quarter", "profile", "front"]
     },
 
     {
@@ -811,7 +811,7 @@
       ],
       "materials": ["galvanised scaffold tube with clamp fittings", "sun-faded canvas, taut at the eyelets and slack between them"],
       "avoid": ["any sponsor name, flag, chequer or logo on the fabric", "a modern printed mesh banner", "any ground plane or ballast"],
-      "views": ["front three-quarter", "profile"]
+      "views": ["front three-quarter", "profile", "front"]
     },
 
     {
@@ -832,7 +832,7 @@
       ],
       "materials": ["bare timber planks, silvered and split", "galvanised tube frame with rust at the joints", "corrugated sheet canopy"],
       "avoid": ["sponsor boards, flags, advertising hoardings or spectators", "moulded plastic seats or a modern enclosed stand", "any ground plane"],
-      "views": ["front three-quarter", "profile"]
+      "views": ["front three-quarter", "profile", "front"]
     },
 
     {
@@ -852,7 +852,7 @@
       ],
       "materials": ["heavy off-white canvas with weathering streaks", "hemp rope, wooden poles"],
       "avoid": ["any lettering, flag, bunting or pennant", "a modern nylon frame tent or a plastic gazebo", "any ground plane"],
-      "views": ["front three-quarter", "profile"]
+      "views": ["front three-quarter", "profile", "front"]
     },
 
     {
@@ -873,7 +873,7 @@
       ],
       "materials": ["painted rendered blockwork in white and a single accent colour", "steel window frames", "a concrete canopy edge"],
       "avoid": ["any circuit name, timing board, flag or sponsor panel — every surface is blank", "modern glazing or cladding"],
-      "views": ["front three-quarter", "profile"]
+      "views": ["front three-quarter", "profile", "front"]
     },
 
     {
@@ -893,7 +893,7 @@
       ],
       "materials": ["galvanised steel gone chalky", "plain reflective sheeting on the blank panels"],
       "avoid": ["any destination text, route number, shield or arrow — the panels are blank", "a modern variable-message display", "any road surface or ground plane"],
-      "views": ["front", "profile"]
+      "views": ["front", "profile", "back"]
     },
 
 {
@@ -915,7 +915,7 @@
       ],
       "materials": ["polished stainless steel bands", "porcelain enamel panels in cream and a single strong colour", "aluminium window frames"],
       "avoid": ["any diner's name, slogan or menu board — every panel is blank", "a modern glass box or a mock-retro pastiche", "any car park, kerb or ground plane"],
-      "views": ["front three-quarter", "profile"]
+      "views": ["front three-quarter", "profile", "front"]
     },
 
     {
@@ -937,7 +937,7 @@
       ],
       "materials": ["painted stucco in a pale colour", "turquoise or coral trim on the doors", "aggregate concrete walkway"],
       "avoid": ["any readable brand or motel name", "modern glazing, uPVC or a flat parapet", "any car park, pool or ground plane"],
-      "views": ["front three-quarter", "profile"]
+      "views": ["front three-quarter", "profile", "front"]
     },
 
     {
@@ -959,7 +959,7 @@
       ],
       "materials": ["white porcelain-enamel panels", "a single accent colour on the fascia", "oil-stained concrete forecourt"],
       "avoid": ["brand marks on the fascia, pumps or price panel — all blank", "modern pump displays, canopy downlights, a convenience store"],
-      "views": ["front three-quarter", "profile"]
+      "views": ["front three-quarter", "profile", "front"]
     },
 
     {
@@ -981,7 +981,7 @@
       ],
       "materials": ["painted brick gone patchy", "faded striped awning canvas", "black-painted steel fire escape"],
       "avoid": ["any shop name, signage or advertisement — the sign band is blank", "modern shopfront glazing or cladding", "any pavement, kerb or ground plane"],
-      "views": ["front three-quarter", "front"]
+      "views": ["front three-quarter", "front", "profile"]
     },
 
     {
@@ -1003,7 +1003,7 @@
       ],
       "materials": ["pale limestone cladding, streaked by rain below the sills", "anodised aluminium window frames", "dark polished granite base"],
       "avoid": ["any building name, number or plaque", "mirror glass or modern curtain walling", "any pavement or ground plane"],
-      "views": ["front three-quarter", "front"]
+      "views": ["front three-quarter", "front", "profile"]
     },
 
     {
@@ -1025,7 +1025,7 @@
       ],
       "materials": ["painted stucco, chalky and patched", "dark green glazed tile", "steel-framed windows"],
       "avoid": ["any name, number or advertisement — every panel is blank", "a modern rendered finish or aluminium shopfront", "any pavement or ground plane"],
-      "views": ["front three-quarter", "front"]
+      "views": ["front three-quarter", "front", "profile"]
     },
 
     {
@@ -1047,7 +1047,7 @@
       ],
       "materials": ["dark red brick with lime-washed patches", "painted pressed metal cornice", "stone sills stained below"],
       "avoid": ["any legible lettering in the ghost sign or elsewhere", "modern windows or cladding", "any pavement or ground plane"],
-      "views": ["front three-quarter", "front"]
+      "views": ["front three-quarter", "front", "profile"]
     },
 
     {
@@ -1069,7 +1069,7 @@
       ],
       "materials": ["dark painted brick above", "glowing neon glass tube standing off the face on spacers", "black vitrolite panels around the entrance"],
       "avoid": ["any word, letter or logo in the neon — the tubing traces shapes and outlines only", "a modern LED strip or backlit acrylic sign", "any pavement or ground plane"],
-      "views": ["front three-quarter", "front"]
+      "views": ["front three-quarter", "front", "profile"]
     },
 
     {
@@ -1091,7 +1091,7 @@
       ],
       "materials": ["painted render, bleached by salt", "coloured neon tube", "small round filament bulbs in plain sockets"],
       "avoid": ["any name, word or price on the marquee or booth", "a modern LED display or projected sign", "any pavement or ground plane"],
-      "views": ["front three-quarter", "front"]
+      "views": ["front three-quarter", "front", "profile"]
     },
 
     {
@@ -1113,7 +1113,7 @@
       ],
       "materials": ["board-marked concrete, weathered unevenly", "grey spandrel panels", "aluminium window frames"],
       "avoid": ["any building name, number or signage", "mirror glass, a curtain wall or modern cladding", "any street furniture or ground plane"],
-      "views": ["front three-quarter"]
+      "views": ["front three-quarter", "profile", "front"]
     },
 
     {
@@ -1135,7 +1135,7 @@
       ],
       "materials": ["dark brick, soot-darkened at the top", "rusting steel window frames, some panes boarded", "corrugated roof sheeting"],
       "avoid": ["any legible lettering in the painted-out panel", "modern roller shutters or cladding", "any yard, kerb or ground plane"],
-      "views": ["front three-quarter"]
+      "views": ["front three-quarter", "profile", "front"]
     },
 
     {
@@ -1157,7 +1157,7 @@
       ],
       "materials": ["anodised aluminium mullions", "grey-green solar glass", "a polished stone podium"],
       "avoid": ["any company name, logo, crown or antenna cluster", "a modern twisted or tapering form", "any surrounding buildings or ground plane"],
-      "views": ["front three-quarter"]
+      "views": ["front three-quarter", "profile", "front"]
     },
 
     {
@@ -1179,7 +1179,7 @@
       ],
       "materials": ["pebble-dash render, streaked below every balcony", "painted concrete balcony fronts", "grey aluminium windows"],
       "avoid": ["any name, number or signage on the block", "modern cladding panels", "any surrounding buildings or ground plane"],
-      "views": ["front three-quarter"]
+      "views": ["front three-quarter", "profile", "front"]
     },
 
     {
@@ -1201,7 +1201,7 @@
       ],
       "materials": ["enamelled steel face", "glass neon in two colours", "unpainted galvanised pole"],
       "avoid": ["any brand, chain or slogan — every lettering panel is BLANK; wording is applied later", "LED panels, modern typography, backlit acrylic", "any ground plane or base plinth"],
-      "views": ["front", "profile"]
+      "views": ["front", "profile", "back"]
     },
 
     {
@@ -1223,7 +1223,7 @@
       ],
       "materials": ["flat reflective sheeting in a single colour, faintly sparkling", "galvanised posts, dull grey"],
       "avoid": ["any lettering, arrow, numeral or shield — the face is blank and stays blank", "a modern gantry mount or variable message panel", "any ground plane or post footing"],
-      "views": ["front", "profile"]
+      "views": ["front", "profile", "back"]
     },
 
     {
@@ -1245,7 +1245,7 @@
       ],
       "materials": ["painted rendered masonry, cracked at the caps", "enamelled steel panel", "small clear filament bulbs"],
       "avoid": ["any town name, welcome message or lettering — the panel is blank", "modern signage or floodlighting", "any road surface or ground plane"],
-      "views": ["front three-quarter", "front"]
+      "views": ["front three-quarter", "front", "profile"]
     }
   ]
 }

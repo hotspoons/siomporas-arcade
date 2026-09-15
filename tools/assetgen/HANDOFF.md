@@ -25,18 +25,33 @@ spec ──► proportion.mjs ──► flux.2-dev ──► keyed cut-out ─�
 `signDrive` and `signBay`, which share one blank board with `signCoast` and differ only in the
 wording the game paints on. `node generate.mjs --audit` prints that comparison; keep it at zero.
 
-## The recon leg: where it actually stands
+## The recon leg: it runs, and it takes exactly one view
 
-With `KUBECONFIG=~/.kube/config.bradley` the Grace-Hopper cluster is reachable and has everything
-the chart asks for — five GH200s, `ceph-filesystem` for the weights PVC, the `central-gateway` the
-HTTPRoute attaches to. What was missing was the image. The GitHub Actions build failed twice on
-2026-09-15 at `Build and push by digest`; the service has since moved to publishing from GitLab CI
-into `harbor.tools.basedweights.com/sandbox/recon:latest`, which is what the chart now installs.
-That half belongs to the photogrammetry agent — ask rather than redeploying it underneath them.
+`svc/recon` is deployed in `default` on the bradley cluster (`KUBECONFIG=~/.kube/config.bradley`,
+`kubectl port-forward -n default svc/recon 8500:80`). I recorded earlier in this file that it was
+not deployed anywhere; that was wrong — it was up and I missed it in a cluster-wide listing. It
+belongs to the photogrammetry agent: ask rather than redeploying it underneath them.
 
-Once it is up, nothing here needs regenerating: `generate.mjs --recon` posts the cut-outs already on
-disk and writes the mesh beside them. The generation and the reconstruction are separable on
-purpose, and 44 subjects are already keyed and waiting.
+`generate.mjs --recon` posts the cut-outs already on disk and writes the mesh beside them, so
+nothing has to be regenerated to get geometry out of art that already exists.
+
+**One view, and this is a property of the model, not of the service.** TRELLIS.2's pipeline exposes
+`run(image: Image.Image)` and nothing else — the whole public surface is `cpu, cuda, decode_latent,
+decode_shape_slat, decode_tex_slat, device, from_pretrained, get_cond, model_names_to_load,
+preprocess_image, run, sample_shape_slat, sample_shape_slat_cascade, sample_sparse_structure,
+sample_tex_slat, to`. TRELLIS 1's `run_multi_image` is gone. Sending several views today returns
+`AttributeError: 'list' object has no attribute 'mode'`, from `preprocess_image` asking a list for
+its mode.
+
+It is close, though: inside `run()` the call is `self.get_cond([image], 512)`, and `get_cond` is
+typed `Union[torch.Tensor, list[Image.Image]]` and documented as "the image prompts", plural. The
+conditioning stack takes a view set; only `run()` wraps one image on the way in. Reported to the
+photogrammetry agent, whose service and CI it is. Every subject here is keyed at three views and
+waiting for the day it lands.
+
+**The output is 25 MB a subject** — around 400k faces after the service's own decimation, with two
+2048px PBR maps. That is right for a reconstruction and roughly fifty times what a sprite bake in a
+256-pixel cell can resolve. `decimate.py` takes it down.
 
 So the `.glb` half of `generate.mjs` is written against the service's actual API
 (`tools/recon-service/app/main.py`: POST `/reconstruct` with `images`, poll `/jobs/<id>`, GET

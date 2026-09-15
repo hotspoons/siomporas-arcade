@@ -416,26 +416,35 @@ export async function generate(spec, defaults, opts) {
   let first
   for (const [i, v] of plan.entries()) {
     const raw = path.join(dir, `view-${i}-${v.name.replace(/\W+/g, '-')}.png`)
-    const src = []
-    if (v.how === 'generate') {
-      src.push(proportion)
+    // RESUME. Asking for a third view of something that already has one should not re-buy the
+    // first: a view is 25 seconds of diffusion, and the one on disk is also the one every later
+    // view was rotated FROM, so regenerating it would quietly desynchronise the set. --redo
+    // ignores what is there.
+    let r = { seconds: 0, reused: true }
+    if (existsSync(raw) && !opts.redo) {
+      console.log(`  view ${i + 1} ${v.name}: on disk already, kept`)
     } else {
-      // The flank trick: mirror in, mirror out, and the asymmetric detail lands on the right side.
-      const from = opts.flank === 'left' ? path.join(dir, '_flopped.png') : first
-      if (opts.flank === 'left') flop(first, from)
-      src.push(from)
+      const src = []
+      if (v.how === 'generate') {
+        src.push(proportion)
+      } else {
+        // The flank trick: mirror in, mirror out, and the asymmetric detail lands on the right side.
+        const from = opts.flank === 'left' ? path.join(dir, '_flopped.png') : first
+        if (opts.flank === 'left') flop(first, from)
+        src.push(from)
+      }
+      r = await flux({ prompt: String(prompts[i]), negative, trueCfg: opts.trueCfg, attach: src, size: opts.size, steps: opts.steps, seed: opts.seed + i, field: opts.field })
+      writeFileSync(raw, r.png)
+      if (v.how === 'edit' && opts.flank === 'left') flop(raw, raw)
     }
-    const r = await flux({ prompt: String(prompts[i]), negative, trueCfg: opts.trueCfg, attach: src, size: opts.size, steps: opts.steps, seed: opts.seed + i, field: opts.field })
-    writeFileSync(raw, r.png)
-    if (v.how === 'edit' && opts.flank === 'left') flop(raw, raw)
     if (i === 0) first = raw
 
     const cut = raw.replace(/\.png$/, '-keyed.png')
     const k = keyChroma(raw, cut, chromaFor(spec), opts.threshold)
     keyed.push(cut)
-    meta.views.push({ view: v.name, how: v.how, file: path.basename(raw), keyed: path.basename(cut), seconds: r.seconds, ...k })
+    meta.views[i] = { view: v.name, how: v.how, file: path.basename(raw), keyed: path.basename(cut), seconds: r.seconds, reused: !!r.reused, ...k }
     const warn = k.ink < 4 ? '  ** almost nothing left — key ate the subject? **' : k.ink > 85 ? '  ** nearly opaque — did the backdrop key at all? **' : ''
-    console.log(`  view ${i + 1} ${v.name}: ${r.seconds.toFixed(1)}s, ${k.ink.toFixed(1)}% ink, bbox ${k.bbox}${warn}`)
+    if (!r.reused) console.log(`  view ${i + 1} ${v.name}: ${r.seconds.toFixed(1)}s, ${k.ink.toFixed(1)}% ink, bbox ${k.bbox}${warn}`)
     const prop = proportionCheck(spec, v.name, k.bbox, v.how === 'generate' || squareOn)
     if (prop) {
       meta.views[meta.views.length - 1].proportion = prop
@@ -485,6 +494,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     --threshold N    how far green must beat red and blue to be backdrop (default 0.12)
     --true-cfg N     real CFG, which is what makes the negative prompt do anything; ~2x slower
     --skip-recon     stop after the keyed cut-outs
+    --redo           regenerate views that are already on disk (default: keep them)
     --long           allow a prompt over ${BUDGET} characters
     --audit          which of the game's kinds have a spec, and which specs have no slot
     --rekey          re-cut every keyed view already on disk, without generating anything
@@ -589,6 +599,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     trueCfg: flag('true-cfg') ? Number(flag('true-cfg')) : undefined,
     skipRecon: has('skip-recon'),
     long: has('long'),
+    redo: has('redo'),
     out: flag('out', 'ext/assetgen'),
     field: flag('field', 'image[]'),
   }

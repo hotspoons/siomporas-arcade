@@ -11,8 +11,28 @@
 FROM nvidia/cuda:13.0.1-cudnn-devel-ubuntu24.04
 
 # Which GPU architectures nvcc emits code for. Each one costs build time and image size, so keep
-# the list to what you will actually run on: 9.0 is Hopper (GH200, H100), 8.0/8.6/8.9 are Ampere
-# and Ada, 12.0 is Blackwell. The multi-arch workflow passes a different list per platform.
+# the list to what you will actually run on. The multi-arch workflow passes a different list per
+# platform; 9.0 is Hopper, which is what the GH200s are.
+#
+# ON COVERING PASCAL THROUGH BLACKWELL. Measured against these exact base images with
+# `nvcc --list-gpu-arch`, not taken from a changelog:
+#
+#   CUDA 13.0.1  compute_75 80 86 87 88 89 90 100 103 110 120 121      Turing and up
+#   CUDA 12.8.1  compute_50 52 53 60 61 62 70 72 75 80 86 87 89 90 100 101 120
+#
+# CUDA 13 DROPPED Maxwell, Pascal and Volta outright — sm_60/61 will not compile here at any
+# setting, so Pascal is unreachable while this FROM line says 13.x. CUDA 12.8 covers the whole
+# range asked for, Pascal (6.0/6.1) through Blackwell (12.0), in one base.
+#
+# Moving is therefore a base-image change, not an arch-list change, and it is not free: the stack
+# proven on the GH200s is CUDA 13.0 with torch 2.13+cu130, and 12.8 means a different torch build
+# and a full re-verification of all four extensions. Do it deliberately, on a branch, with a real
+# reconstruction run at the end — not as a one-line edit here.
+#
+# Also weigh what it buys. Every architecture is a separate device-code pass over the same sources:
+# the full 12.8 list is sixteen of them against the one this builds today, and the build is already
+# tens of minutes. `TORCH_CUDA_ARCH_LIST` accepts a `+PTX` suffix on the newest entry, which lets
+# anything newer than the list JIT at first use rather than needing its own pass.
 ARG TORCH_CUDA_ARCH_LIST=9.0
 
 ENV DEBIAN_FRONTEND=noninteractive \

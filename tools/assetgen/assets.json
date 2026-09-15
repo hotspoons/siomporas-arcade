@@ -1,0 +1,222 @@
+{
+  "$comment": [
+    "Design language, not cars. Every entry describes an era, a set of constraints that produced a",
+    "shape, and real proportions in metres — the things that actually steer a generator — plus an",
+    "`avoid` list naming what must not appear. Nothing here names a marque, a model or a team: a",
+    "prompt that names one gets a copy of that one, which is the outcome this file exists to prevent.",
+    "See README.md for why each field is shaped the way it is."
+  ],
+  "defaults": {
+    "background": "flat chroma-green #2ecc40, evenly lit, no gradient, no shadow on the backdrop",
+    "camera": "level with the subject's mid-height, no perspective distortion, subject fully in frame with a small margin",
+    "render": "clean studio product render, neutral daylight, matte finish, no motion blur, no lens flare, no text",
+    "avoid": [
+      "manufacturer badges, marque emblems, grille crests or wordmarks of any kind",
+      "real sponsor marks, oil-company colours, cigarette-brand liveries",
+      "model names or type numbers anywhere on the body",
+      "licence plates bearing real jurisdictions",
+      "watermarks, signatures, captions, UI, borders"
+    ]
+  },
+
+  "assets": [
+    {
+      "id": "hero-prototype",
+      "class": "vehicle",
+      "kind": "hero",
+      "replaces": "buildPrototype() in apps/coast/src/render/procgen.ts",
+      "dims": { "lengthM": 4.18, "widthM": 1.98, "heightM": 1.02, "wheelbaseM": 2.40, "trackM": 1.52 },
+      "era": "1968–1971 international closed-cockpit sports-prototype racing, 5-litre class",
+      "silhouette": [
+        "Mid-engined two-seat closed coupe. The cabin sits forward of centre and the mass is behind it:",
+        "roughly a third of the length ahead of the windscreen, two-thirds behind.",
+        "Height barely above a metre, so the roof is at the level of a standing adult's hip."
+      ],
+      "cues": [
+        "low, wide, rounded nose with a full-width air intake slot beneath a soft leading edge",
+        "separate raised fender crowns over each front wheel, higher than the bonnet between them, so the driver can place the car",
+        "a bonnet valley running between those crowns, with two NACA-style flush ducts",
+        "steeply raked one-piece wraparound windscreen meeting a very short roof",
+        "flying buttresses running back from the roof to the rear fenders, leaving a recessed rear window",
+        "large half-moon cutouts over the rear wheels for tyre clearance and heat",
+        "a full-width horizontal spoiler lip at the tail, no upright fin, no high wing",
+        "exposed exhaust primaries emerging under the tail panel",
+        "wide slotted magnesium wheels, deeply dished, five-spoke, with knock-off centre nuts",
+        "a shallow chin spoiler under the nose"
+      ],
+      "materials": [
+        "hand-laid painted fibreglass with slight surface undulation, not machine-flat",
+        "clear-taped headlamp covers faired into the nose",
+        "bare riveted aluminium around the exhaust exits",
+        "plain dark rubber tyres with a faint period block tread"
+      ],
+      "avoid": [
+        "a pointed wedge nose or chisel front — that is a decade too late",
+        "a tall upright tail fin or swan-neck wing",
+        "modern low-profile tyres, alloy multi-spoke wheels, LED lamps",
+        "roll hoop protruding above the roofline",
+        "any racing number or roundel; liveries are applied separately"
+      ],
+      "views": ["front three-quarter", "side", "rear three-quarter"]
+    },
+
+    {
+      "id": "traffic-sedan",
+      "class": "vehicle",
+      "kind": "traffic_sedan",
+      "dims": { "lengthM": 4.90, "widthM": 1.86, "heightM": 1.40, "wheelbaseM": 2.85 },
+      "era": "early-1970s mass-market full-size saloon, North American market",
+      "silhouette": ["Three-box saloon, long bonnet, upright cabin, flat boot. Body sits high on its wheels with visible gap over the tyre."],
+      "cues": [
+        "flat horizontal bonnet meeting a full-width grille of fine vertical bars",
+        "stacked or paired round headlamps at the outer corners",
+        "thin chrome bumper standing clear of the body on visible overriders",
+        "square-shouldered body sides with a single crisp crease along the length",
+        "thin-pillared six-light glasshouse, near-vertical rear screen",
+        "modest tailfin residue: a raised edge along the rear wing, not a fin",
+        "steel wheels with small chrome hubcaps and whitewall tyres"
+      ],
+      "materials": ["single-stage enamel in a muted period colour", "bright chrome brightwork", "painted steel wheels"],
+      "avoid": ["any modern shape: no wedge, no fastback, no blacked-out pillars", "aerodynamic mirrors", "alloy wheels"],
+      "views": ["front three-quarter", "side"]
+    },
+
+    {
+      "id": "traffic-pickup",
+      "class": "vehicle",
+      "kind": "traffic_pickup",
+      "dims": { "lengthM": 5.10, "widthM": 1.95, "heightM": 1.75, "wheelbaseM": 3.05 },
+      "era": "late-1960s half-ton work pickup",
+      "silhouette": ["Two-box: upright cab forward, open cargo bed behind, straight beltline running the whole length."],
+      "cues": [
+        "flat slab sides with a step behind the cab",
+        "wide simple grille, single round headlamps either side",
+        "painted steel front bumper, no overriders",
+        "small wrap-around rear window in the cab",
+        "external fuel filler on the rear wing",
+        "plain steel wheels, chunky sidewalls"
+      ],
+      "materials": ["work-grade paint with honest wear, chalked on the horizontal surfaces", "a dusty matte finish, never showroom"],
+      "avoid": ["crew cab, four doors, lifted suspension, modern grille"],
+      "views": ["front three-quarter", "side"]
+    },
+
+    {
+      "id": "traffic-van",
+      "class": "vehicle",
+      "kind": "traffic_van",
+      "dims": { "lengthM": 4.60, "widthM": 1.85, "heightM": 2.00, "wheelbaseM": 2.75 },
+      "era": "late-1960s forward-control panel van",
+      "silhouette": ["One box. The windscreen is almost directly above the front axle; the nose barely exists."],
+      "cues": ["near-vertical flat windscreen", "sliding side door with a recessed track", "unglazed rear panels", "small round headlamps low on the flat front", "roof gutters running the full length"],
+      "materials": ["flat single colour with a hand-painted blank signwriting panel on the flank, lettering left off"],
+      "avoid": ["modern high-roof profile, body-coloured bumpers, tinted glass"],
+      "views": ["front three-quarter", "side"]
+    },
+
+    {
+      "id": "traffic-coupe",
+      "class": "vehicle",
+      "kind": "traffic_coupe",
+      "dims": { "lengthM": 4.75, "widthM": 1.90, "heightM": 1.30, "wheelbaseM": 2.75 },
+      "era": "1970 mass-market performance coupe",
+      "silhouette": ["Long bonnet, short deck, fastback roof falling in one line from the windscreen to the tail."],
+      "cues": ["bonnet bulge or scoop", "recessed grille with hidden or deeply set lamps", "muscular haunch over the rear wheel", "short ducktail lip on the boot", "wide steel wheels with trim rings"],
+      "materials": ["saturated period colour", "matte black bonnet stripe or blackout panel"],
+      "avoid": ["spoilers beyond a small lip, side skirts, modern tyres"],
+      "views": ["front three-quarter", "side"]
+    },
+
+    {
+      "id": "palm-tall",
+      "class": "nature",
+      "kind": "palm_tall",
+      "dims": { "heightM": 9.0, "trunkDiameterM": 0.35, "crownSpreadM": 4.5 },
+      "era": "coastal boulevard planting",
+      "silhouette": ["A bare slender trunk with a slight lean, and a crown only at the very top."],
+      "cues": [
+        "trunk visibly ringed with old frond scars, thicker at the base",
+        "nine to twelve fronds, the upper ones arcing up, the lower ones drooping past horizontal",
+        "a short skirt of dead brown fronds under the green crown",
+        "no branches anywhere on the trunk"
+      ],
+      "materials": ["dry fibrous grey-brown trunk", "fronds in a dusty desaturated green, sun-bleached at the tips"],
+      "avoid": ["a symmetrical lollipop crown", "a smooth cylindrical trunk", "any visible pot, base disc or ground plane"],
+      "views": ["side"]
+    },
+
+    {
+      "id": "motel-strip",
+      "class": "architecture",
+      "kind": "motel",
+      "dims": { "widthM": 24.0, "depthM": 9.0, "heightM": 6.5 },
+      "era": "1960s roadside motor court",
+      "silhouette": ["Two storeys, long and low, rooms in a row, an external walkway running the full length of the upper floor."],
+      "cues": [
+        "cantilevered upper walkway with a thin steel balustrade of repeated vertical rods",
+        "a door and a single window per room, evenly repeated",
+        "a butterfly or shallow-pitched roof with a deep overhang",
+        "a projecting office block at one end, fully glazed",
+        "exposed breeze-block screen wall at the stair end",
+        "ice machine and a soft-drink cooler recessed by the stair"
+      ],
+      "materials": ["painted stucco in a pale colour", "turquoise or coral trim on the doors", "aggregate concrete walkway"],
+      "avoid": ["any readable brand name", "modern glazing, uPVC, or a flat parapet"],
+      "views": ["front three-quarter"]
+    },
+
+    {
+      "id": "sign-pylon",
+      "class": "signage",
+      "kind": "sign_pylon",
+      "dims": { "heightM": 11.0, "widthM": 3.2, "depthM": 0.6 },
+      "era": "1960s roadside neon pylon",
+      "silhouette": ["A tall thin sign on a single steel pole, far taller than the building it serves."],
+      "cues": [
+        "a boomerang or starburst crown above a rectangular message panel",
+        "an arrow of chase lamps along the lower edge",
+        "exposed neon tubing standing off the face on visible spacers",
+        "a small changeable-letter panel beneath the main field",
+        "a plain riveted steel pole with a visible splice"
+      ],
+      "materials": ["enamelled steel face", "glass neon in two colours", "unpainted galvanised pole"],
+      "avoid": [
+        "any actual brand, chain or slogan — leave every lettering panel BLANK; wording is applied later",
+        "LED panels, modern typography, backlit acrylic"
+      ],
+      "views": ["front", "front three-quarter"]
+    },
+
+    {
+      "id": "gas-station",
+      "class": "architecture",
+      "kind": "gas_station",
+      "dims": { "widthM": 14.0, "depthM": 11.0, "heightM": 5.0 },
+      "era": "1960s highway service station",
+      "silhouette": ["A small glazed box with a large flat canopy reaching out over the forecourt on slender columns."],
+      "cues": [
+        "flat canopy with a deep fascia band, thin round columns",
+        "two pump islands under it, each with a pair of tall narrow pumps",
+        "a fully glazed sales office on one side",
+        "one open service bay with a folding door",
+        "a hose-and-bell across the forecourt approach"
+      ],
+      "materials": ["white porcelain-enamel panels", "a single accent colour on the fascia", "oil-stained concrete forecourt"],
+      "avoid": ["brand marks on the fascia or pumps — leave them blank", "modern pump displays, canopy downlights, convenience store"],
+      "views": ["front three-quarter"]
+    },
+
+    {
+      "id": "overhead-gantry",
+      "class": "props",
+      "kind": "gantry",
+      "dims": { "spanM": 16.0, "heightM": 7.0, "depthM": 1.2 },
+      "era": "period highway sign gantry",
+      "silhouette": ["A lattice truss spanning the road on two legs, with blank sign panels hung beneath it."],
+      "cues": ["galvanised tube lattice with visible bolted gussets", "two blank rectangular panels hung on the truss", "a maintenance walkway along the back", "a pair of downlights per panel"],
+      "materials": ["galvanised steel gone chalky", "plain reflective sheeting on the blank panels"],
+      "avoid": ["any legible destination text or route shield", "modern variable-message display"],
+      "views": ["front three-quarter"]
+    }
+  ]
+}

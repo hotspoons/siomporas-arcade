@@ -71,13 +71,18 @@ jobs:
 
       # A CUDA devel base plus four compiled extensions does not fit next to everything GitHub
       # preinstalls. Reclaim the space before starting rather than failing 40 minutes in.
+      # A 4.3GB compressed CUDA devel base unpacks to ~11GB, and four compiled extensions on top
+      # push the image past 20GB. A stock runner does not have room for that next to everything
+      # GitHub preinstalls, so reclaim first — failing here is cheap, failing 40 minutes in is not.
       - name: Reclaim disk
         run: |
-          df -h /
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
-                      /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" || true
-          sudo docker image prune -af || true
-          df -h /
+          echo "before:"; df -h / | tail -1
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup \
+                      /usr/local/share/boost /usr/local/share/powershell /opt/hostedtoolcache \
+                      /usr/local/lib/node_modules "$AGENT_TOOLSDIRECTORY" || true
+          sudo apt-get clean || true
+          sudo docker system prune -af --volumes || true
+          echo "after:"; df -h / | tail -1
 
       - uses: docker/setup-buildx-action@v3
 
@@ -97,9 +102,16 @@ jobs:
             TORCH_CUDA_ARCH_LIST=${{ (matrix.slug == 'arm64' && (inputs.arch_list_arm64 || matrix.default_arch_list)) || (inputs.arch_list_amd64 || matrix.default_arch_list) }}
           # Push by digest only; the tags are attached to the merged manifest in the next job.
           outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
-          cache-from: type=gha,scope=recon-${{ matrix.slug }}
-          cache-to: type=gha,scope=recon-${{ matrix.slug }},mode=max
+          # Registry cache, not type=gha. This image is north of 20GB unpacked and GitHub's Actions
+          # cache is capped at 10GB per repository — `mode=max` there evicts itself at best and
+          # fails the step at worst. GHCR has no such cap and the cache lives beside the image.
+          cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache-${{ matrix.slug }}
+          cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache-${{ matrix.slug }},mode=max,image-manifest=true,oci-mediatypes=true
           provenance: false
+
+      - name: Disk after build
+        if: always()
+        run: df -h / | tail -1
 
       - name: Export digest
         run: |

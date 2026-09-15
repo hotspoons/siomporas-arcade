@@ -45,6 +45,7 @@ the emulator.
 | `0x10f78` | **the gap between the fighters** — it rises by exactly as much as a retreat |
 | `0x1099c` | **height**: zero on the floor, a real arc in the air |
 | `0x12b2c` (low half) | **health, 16-bit, full at 196** — also mirrored at `0x15b40` high half |
+| `0x11380` | **what the fighter is doing**: 0 idle, 1 startup, **2 active**, 3 recovery |
 
 **And these are IEEE floats.** Model 2's i960 has an FPU and its TGP coprocessor is float-native, so
 positions are singles: `1065353216` read as an integer is `1.0f`. The PlayStation boards next door
@@ -199,11 +200,58 @@ guard all day and take no damage; what you cannot do is move, and behind you is 
 Compare Champion Edition, where health is 144, Ryu's fierce is 19, and a *blocked special* still
 takes a slice off you. Two games, two answers, and the difference is a single switch in a builder.
 
+## Frame data
+
+`0x11380` counts the phase of whatever player one is doing — **0 idle, 1 startup, 2 active, 3
+recovery** — and returns to 0 the frame he has his body back. That is the whole of frame data in one
+word, and it is the same vocabulary `src/sim/Moves.ts` already runs on.
+
+Measured on moves thrown into **open space**, with nobody in range. Whiffing is deliberate: against
+a body, every hit knocks the opponent back, so each move is thrown from a different distance than
+the last and half of them miss — an earlier version of this measured against an opponent and
+returned four dashes and two wrong numbers. Startup, active and recovery do not depend on contact.
+Damage does, and is measured separately.
+
+Akira:
+
+| move | startup | active | recovery | total |
+|---|---|---|---|---|
+| `P` standing punch | **8** | 2 | 10 | 20 |
+| `d+P` crouching punch | 9 | 2 | 8 | **19** |
+| `b+P` back punch | 8 | 2 | 10 | 20 |
+| `K` standing kick | 11 | 4 | 22 | 37 |
+| `d+K` crouching kick | 13 | 2 | 22 | 37 |
+| `f+P` forward punch | 11 | 2 | 25 | 38 |
+| `f+K` forward kick | 11 | 4 | 24 | 39 |
+| `P,P` punch twice | 16 | 4 | 20 | 40 |
+| `u+K` jumping kick | 4 | **33** | **60** | 97 |
+
+Two entries are not to be trusted and are left out of the table: `P+K` reported all zeros, so either
+Akira has no such move or it does not drive this counter, and `P+G` returned numbers identical to a
+plain `P` — almost certainly because a throw thrown at nobody is just a punch. Throws need a body
+and a separate measurement.
+
+### This is a much slower game than Street Fighter II
+
+The fastest thing Akira has is **8 frames** of startup. Ryu's jab in Champion Edition is **3**, and
+his fierce — a heavy, committing blow — is 6. Virtua Fighter's *quickest* attack is slower than
+Street Fighter's *slowest* normal.
+
+Everything else follows from that. A move here occupies 20 to 40 frames; the equivalent range in
+Champion Edition is 12 to 35 and the fast end is much faster. Combined with a guard that roots you
+and an edge seven units behind, the game is asking for a different kind of decision: in Street
+Fighter you are reacting inside a third of a second, and here you are committing to something for
+half a second and living with it.
+
+`u+K` is the extreme case and worth keeping: **33 active frames and 60 of recovery**, 97 in total.
+That is a jumping kick that is a genuine gamble — a second and a half of your life, most of it spent
+unable to guard, on a stage you can be knocked off.
+
 ## What was not found
 
-Frame data — startup, active and recovery — which is now within reach: health is the instrument it
-needs, and `tools/t3-probe/lua/vf-damage.lua` already lands a punch on a chosen frame and reads the
-result. Also throws, the stagger and recovery systems, and how the camera is driven.
+Advantage on block — which needs the *defender's* phase counter as well as the attacker's, and only
+player one's has been found. Also throws properly (they need a body), the stagger and recovery
+systems, and how the camera is driven.
 
 ## For the builder: the switches these two boards disagree on
 
@@ -219,6 +267,8 @@ result. Also throws, the stagger and recovery systems, and how the camera is dri
 | maths | fixed point | fixed point | **IEEE floats** |
 | full health | 144 | not yet found | **196** |
 | chip damage on block | yes, on specials | not yet measured | **none at all** |
+| fastest attack | 3 frames (jab) | not yet measured | **8 frames** |
+| a normal's total | 12–35 frames | not yet measured | **19–40 frames** |
 | jump height | simulated, one fixed arc | **animation** — world y is always 0 | **simulated, two arcs**: hop 32f/1.44, jump 72f/2.81, one gravity |
 
 Those seven rows are, roughly, the menu. A builder that let you choose "guard button + rooted

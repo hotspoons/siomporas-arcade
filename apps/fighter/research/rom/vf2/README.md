@@ -100,16 +100,47 @@ A ring-out ends the round as surely as a knockout, which means the arena is a *m
 size is a tunable number. Nothing in Street Fighter II corresponds to it, and Tekken 3's floors are
 mostly unbounded.
 
+## Height: this board *does* simulate it, and Tekken does not
+
+An earlier pass looked at the eight words around x, found no arc, and recorded a hint that both 3D
+boards might keep height in the animation. **That hint was wrong, and the caveat on it was the only
+reason it did not become a claim.** Searching the whole megabyte — cheap here, twenty milliseconds a
+pass — turns up a float at **`0x1099c`** which is the real thing.
+
+    standing   0.000
+    airborne   1.166  1.259  …  2.809  …  1.020
+    landed     0.000
+
+    airborne frames       72
+    apex                  2.809 units, at frame 35 — a symmetric arc
+    gravity               -0.0027 units per frame per frame
+    forward jump          same arc exactly, plus 3.548 units of travel
+
+**The gravity is a single distinct value.** Taking the second difference across all 72 frames gives
+exactly one number, −0.0027, not a spread — so the board is integrating a constant acceleration
+rather than playing a curve somebody drew. That is real physics, of the kind `src/sim/Fighter.ts`
+already runs for Champion Edition, and it means a Virtua Fighter character has the same three
+constants an SF2 character has: a launch speed, a gravity, and an airborne count.
+
+Two things to be careful about before quoting this:
+
+- The value is **0.000 while grounded and 1.166 on its first airborne frame** — it does not rise
+  from zero. So it is not simply the height of the feet; more likely a body origin that is only
+  written while airborne, with zero acting as "on the floor". The *dynamics* are readable either
+  way, but the offset is not yet understood.
+- The fighter stayed on the ground for 14 frames after the input, which happens to be exactly how
+  long the jump button was held. That may be genuine pre-jump startup or an artefact of the hold;
+  it needs a run with a shorter tap before anybody calls it a frame count.
+
+**So the two 3D boards disagree about height**, which is worth more than either answer alone:
+Tekken 3's world position has no height at all — the root's y is zero through a jump *and* through
+being thrown over somebody's shoulder — and the model rises because the animation says so. Virtua
+Fighter 2 integrates an arc. For a builder, that is another switch, and for the photogrammetry work
+it decides whether a rigged character's root needs a height channel or the animation owns it.
+
 ## What was not found
 
-**Height.** A neutral jump plainly happens — the picture shows Akira well off the ground — and no
-float in the eight words around x traces an arc. This is the same result Tekken 3 gave, where the
-whole structure and then the whole of RAM were searched and the root's y stayed zero through a jump
-*and* a throw. Here only eight words were checked, so it is a hint rather than a finding: worth
-recording that both 3D boards look like they keep height in the animation, and worth a proper search
-before anybody believes it twice.
-
-Also untouched: frame data, throws, the stagger and recovery systems, and how the camera is driven.
+Frame data, throws, the stagger and recovery systems, and how the camera is driven.
 
 ## For the builder: the switches these two boards disagree on
 
@@ -123,6 +154,7 @@ Also untouched: frame data, throws, the stagger and recovery systems, and how th
 | losing the round | health, or the clock | health, or the clock | health, the clock, **or the floor** |
 | arena | walls that stop you | mostly unbounded | **7 units to the edge** |
 | maths | fixed point | fixed point | **IEEE floats** |
+| jump height | simulated: launch, gravity, airborne | **animation** — world y is always 0 | **simulated**: apex 2.809, g = −0.0027/f² |
 
 Those seven rows are, roughly, the menu. A builder that let you choose "guard button + rooted
 blocking + ring-out + backward-biased movement" would produce something that feels like Virtua

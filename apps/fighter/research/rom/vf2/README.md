@@ -316,15 +316,15 @@ and how the camera is driven.
 | | Street Fighter II | Tekken 3 | Virtua Fighter 2 |
 |---|---|---|---|
 | buttons | 6, strengths | 4, limbs | **3, and one is Guard** |
-| how you block | hold away | hold away | **press and hold a button** |
+| how you block | hold away | **nothing — standing still guards highs and mids by itself** | **press and hold a button** |
 | can you move while blocking | yes, backwards | yes, backwards | **no — rooted** |
 | faster direction | forward | forward | **backward** |
 | third axis | none | **sidestep, 612 units in a burst** | none |
 | losing the round | health, or the clock | health, or the clock | health, the clock, **or the floor** |
 | arena | walls that stop you | mostly unbounded | **7 units to the edge** |
 | maths | fixed point | fixed point | **IEEE floats** |
-| full health | 144 | **resisted five attempts** — see the Tekken note | **196** |
-| chip damage on block | yes, on specials | unknown — needs health | **none at all** |
+| full health | 144 | **140** | **196** |
+| chip damage on block | yes, on specials | **none** — a blocked punch did 0 | **none at all** |
 | fastest attack | 3 frames (jab) | unknown — needs a phase word | **8 frames** |
 | a normal's total | 12–35 frames | unknown | **19–40 frames** |
 | jump height | simulated, one fixed arc | **animation** — world y is always 0 | **simulated, two arcs**: hop 32f/1.44, jump 72f/2.81, one gravity |

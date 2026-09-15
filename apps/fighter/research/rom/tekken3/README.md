@@ -78,6 +78,7 @@ player two's at `0x31fc40`, and every field below has a twin at `+0x1ae4`.
 | `0x31e1a4` | **state**: 6482 idle, 2114 airborne, 12585 crouching, 135250 walking, 4196418 sidestepping | changes with every phase, returns to 6482 |
 | `0x31e1a8`, `0x31e1ac`, `0x31e1e0`, `0x31e1f0` | state flags that move with `0x31e1a4` | square waves, not values |
 | `0x21f650` | **global frame counter**, +1 per frame | — |
+| `0x31e492` | **health, full at 140** — player two's at `0x31ff76`, one stride away | falls by 7 for a low kick; the twin stays put |
 | `0x25fdec`–`0x25fe5c` | **the health bar's geometry**, quads 0x10 apart | all shrank by 17 units together when punches landed |
 | `0x21fe00`, `0x21f614` | copies of x, one frame behind | same values, same movements |
 
@@ -147,8 +148,9 @@ needs a move list: `d/f+2` was tried, and Xiaoyu simply crouched.
 
 - ~~Height is not in the fighter structure.~~ **Settled, and it has its own section above:** the
   root's y is zero through a jump and through a throw. Only a juggle could still overturn it.
-- **Health: not found, after five attempts, and the reason is not the search.** This is worth
-  reading before trying a sixth.
+- ~~Health: not found after five attempts.~~ **Found: `0x31e492`, full at 140**, with player two's
+  one stride away at `0x31ff76`. The section below is kept because the *reason* it took seven
+  attempts is a mechanic, and a more important one than the address.
 
   The four search techniques were all sound — they are the same ones that found health on Virtua
   Fighter 2 within an hour, including the two that matter: **scan 16-bit halves** (health can sit
@@ -170,21 +172,53 @@ needs a move list: `d/f+2` was tried, and Xiaoyu simply crouched.
     and a probe that walks forward until `|p2.x − p1.x|` drops below a few hundred will walk into
     the opponent and push for nine hundred frames without ever getting there.
 
-  So the next attempt needs, in order: a **verified** way to know a hit landed — measuring the bar in
-  the snapshot is crude but it is ground truth, and the fighters' own state words are the in-Lua
-  version — and only then a search. The **write-watchpoint** is still the better tool for the search
-  itself: `-debug -debugger none` exposes `wpset`/`bpset` through the Lua device debugger. Note that
+  ### And the reason nothing ever landed: **standing still is a guard**
+
+  One run replicated, frame for frame, the only sequence that had ever visibly produced a spark on
+  the opponent's face — and the bars still did not move. The spark was the clue and I read it as a
+  hit. It was a **block**.
+
+  **On this board a character who is standing still guards automatically** against highs and mids.
+  He holds nothing and presses nothing; neutral *is* a guard. Every punch thrown at the idle second
+  player in seven runs was blocked, and six searches went looking for damage that was never done.
+
+  A low attack is what gets through:
+
+  | thrown at an opponent doing nothing at all | damage |
+  |---|---|
+  | `rp` right punch | **0** — blocked by simply standing there |
+  | `lp` left punch | **0** |
+  | `rk` right kick | **0** |
+  | **`d+rk` low kick** | **7** |
+
+  (Xiaoyu's `d+lk`, `d+rp` and `df+rp` also did nothing, which may mean they are not lows in her
+  moveset rather than that they were blocked. Only `d+rk` is confirmed to get through.)
+
+  That makes three genuinely different answers to the most basic question a fighting game asks:
+
+  | | how you defend |
+  |---|---|
+  | Street Fighter II | hold away — and standing still gets you hit |
+  | Virtua Fighter 2 | **hold the Guard button** — which roots you to the floor, and standing still gets you hit |
+  | Tekken 3 | **do nothing at all** — neutral blocks highs and mids by itself |
+
+  Tekken's answer is the most forgiving of the three and it changes what the game is about: defence
+  is free and automatic, so the pressure has to come from mixing highs with lows rather than from
+  making blocking expensive. Virtua Fighter charges you movement for the same protection and covers
+  only half of you. Street Fighter makes you commit the stick.
+
+  The **write-watchpoint** was never needed in the end, but remains the better tool if a value ever
+  genuinely hides: `-debug -debugger none` exposes `wpset`/`bpset` through the Lua device debugger.
   `wpset` with `nil` for the condition and action **segfaults MAME**; pass strings.
 - ~~Player two's structure base.~~ **Settled: `0x31fc40`, a stride of `+0x1ae4`.** Found by making
   only him walk and keeping the one word in 128KB that moved at a constant 14.4 a frame *and* had a
   zero in the next word — the root's signature, since the fighter stands on the floor. The twenty
   other words that walked with him were skeleton bones, whose next word is their height above it.
-- **Frame data** — startup, active, recovery — is blocked on the same thing. The animation pointer
-  and the per-animation frame counter at `0x31e194` are two of the three instruments the Champion
-  Edition harness used; the missing one is a damage signal. Virtua Fighter 2 shows what this looks
-  like once you have it: a single phase word there gives startup, active and recovery directly, and
-  a whole move list falls out in one run. Tekken 3 may well have the same word — nothing has looked
-  for it, because the search was stuck on health.
+- **Frame data** — startup, active, recovery — is now unblocked and not yet done. All three
+  instruments exist: the animation pointer, the per-animation frame counter at `0x31e194`, and now
+  health. Virtua Fighter 2 shows what it looks like once you have them — a single phase word there
+  gives startup, active and recovery directly and a whole move list falls out of one run — and
+  Tekken 3 probably has the same word. Nothing has looked for it yet.
 - **Ring-outs, walls and floor breaks**, and **how the camera is driven**, are untouched. Two
   addresses near `0x3ff7d0` trace a small arc during a jump and are the obvious camera candidates.
 

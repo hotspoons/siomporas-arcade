@@ -357,17 +357,49 @@ blow arrive and be blocked, rather than merely seeing nothing happen. The weakes
 "nothing lands" entries for standing attacks against a crouching guard, which were second and sixth
 in their run and rest on an absence.
 
+## Throws cannot be escaped by mashing, so crouching is the only answer
+
+Re-run as **one throw per boot** — about three and a half minutes for one number — because the
+multi-test design cannot answer this: after a throw the victim is on the floor, and every trial but
+the first measures a different situation.
+
+| defender does | result |
+|---|---|
+| guards, no escape attempt *(control)* | **thrown, 40** |
+| mashes `P+G`, the throw command | **thrown, 40** |
+| guards, no escape attempt *(control)* | **thrown, 40** |
+| mashes `P+G` again | **thrown, 40** |
+| mashes `P` alone | **thrown, 40** |
+
+Four trials, two of them controls, and the throw landed every time. The earlier run in which mashing
+appeared to escape — and in which mashing the *guard* button alone also appeared to escape — was
+entirely the ordering artefact.
+
+Mashing presses the escape for three frames of every six from the throw input until eighty frames
+later, and the throw connects on frame 41, so any escape window longer than about three frames would
+have been caught. A frame-perfect one is not ruled out; a usable one is.
+
+**So the throw is a hard twenty percent with no way out of it**, and the only answer measured on this
+board is not to be standing there: a crouching opponent cannot be thrown at all. That sharpens the
+triangle rather than complicating it — crouch is not merely *an* answer to the throw, it is the
+answer, and the price of crouching is a mid worth thirty.
+
+## Getting into a match without counting frames
+
+Worth stealing for any probe on this board. Boot time **varies between runs** — one run was still
+printing "sound initialize" at the frame a fixed schedule expected a live match — and coins fed
+during boot are ignored, after which the probe is quietly measuring the **attract-mode demo**: two
+machines fighting, health falling on its own, every number meaningless. Two runs were spent on that.
+
+`M.vfEnter` in `lua/common.lua` mashes coins, both start buttons and the character confirmation until
+a round is genuinely live, then calls back. Two details in it are load-bearing: the selection
+mashing has to **stop** before the match, or it carries on as two fighters punching each other every
+ninety frames; and the readiness test has to accept *nearly* full health rather than exactly full,
+or a stray selection press that landed a jab makes it wait forever.
+
 ## What was not found
 
-**Throw escapes remain untested**, and the attempt is worth describing because it failed
-instructively. Mashing the throw command during a throw appeared to escape it; so, in the same run,
-did mashing the punch button alone, and the guard button alone. Repeating those two showed both
-thrown, twice each. Then a plain control escaped, and the whole experiment collapsed into the
-ordering artefact above. The design cannot answer the question: after a throw the victim is on the
-floor, so every trial but the first is measuring a different situation. One trial per run would work
-and costs about three minutes each.
-
-Also untouched: the stagger and recovery systems, and how the camera is driven.
+The stagger and recovery systems, and how the camera is driven.
 
 ## For the builder: the switches these two boards disagree on
 

@@ -128,6 +128,46 @@ function M.run(each)
   end)
 end
 
+--- Get a Virtua Fighter board into a two-player match, without assuming how long it takes to boot.
+---
+--- Fixed schedules are what several wasted runs were made of. Boot time varies — one run was still
+--- printing "sound initialize" at the frame a schedule expected a live match — and coins fed during
+--- boot are simply ignored, after which the probe measures the **attract-mode demo**: two CPUs
+--- fighting, health falling on its own, and every number meaningless.
+---
+--- So this keeps feeding coins, pressing both start buttons and confirming the character selection,
+--- over and over, for as long as it takes. `ready(fn)` is called once, on the frame a real round is
+--- detected — both fighters at full health with a real distance between them.
+function M.vfEnter(from, until_, ready)
+  local fired = false
+  for n = from, until_, 100 do
+    M.tapCoin(n, 20)
+  end
+  for n = from + 400, until_, 220 do
+    M.tapStart(n, 1, 10)
+    M.tapStart(n + 40, 2, 10)
+  end
+  -- The selection mashing has to **stop**. Left running it carries on into the match, where it is
+  -- two fighters punching each other every ninety frames — so health never reads full, the "is a
+  -- round live" test never fires, and the run does nothing at all for two hundred seconds.
+  local selectUntil = math.min(until_, from + 3000)
+  for n = from + 600, selectUntil, 90 do
+    M.tap(n, 1, { "p" }, 6)
+    M.tap(n + 25, 2, { "p" }, 6)
+  end
+  return function(n, hp, gap)
+    if fired then return true end
+    -- Nearly full, not exactly full: a stray selection press may have landed a jab before the probe
+    -- looked, and waiting for a pristine 196 then waits forever.
+    if hp > 150 and gap > 0.5 and n > selectUntil then
+      fired = true
+      M.log("round is live at frame %d (gap %.2f)", n, gap)
+      if ready then ready(n) end
+    end
+    return fired
+  end
+end
+
 function M.snap(tag)
   manager.machine.video:snapshot()
   if tag then print(string.format("SNAP f%d %s", M.frame, tag)) end

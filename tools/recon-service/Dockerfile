@@ -35,10 +35,21 @@ FROM nvidia/cuda:13.0.1-cudnn-devel-ubuntu24.04
 # anything newer than the list JIT at first use rather than needing its own pass.
 ARG TORCH_CUDA_ARCH_LIST=9.0
 
+# How many nvcc processes run at once. This is a MEMORY limit, not a CPU one: each one takes well
+# over a gigabyte compiling these extensions, so the ceiling is RAM/2GB rather than core count.
+#
+# 4 because a GitHub-hosted runner has 4 vCPU and 15.61 GiB. At 16 the host killed the runner
+# mid-CuMesh — reported as "The runner has received a shutdown signal", which reads like a
+# cancellation rather than an out-of-memory and cost a while to place. It built fine everywhere else
+# because everywhere else was a 72-core GH200 or a large GitLab runner.
+#
+# Raise it where there is memory: --build-arg MAX_JOBS=24 on a big machine roughly halves the build.
+ARG MAX_JOBS=4
+
 ENV DEBIAN_FRONTEND=noninteractive \
     CUDA_HOME=/usr/local/cuda \
     TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST} \
-    MAX_JOBS=16 \
+    MAX_JOBS=${MAX_JOBS} \
     ATTN_BACKEND=sdpa \
     SPARSE_ATTN_BACKEND=xformers \
     HF_HOME=/weights \

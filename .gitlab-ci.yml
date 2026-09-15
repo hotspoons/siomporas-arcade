@@ -62,8 +62,11 @@ include:
       # same sources, so this is the single biggest lever on build time. arm64 here is Grace-Hopper
       # and nothing else; amd64 spans Ampere to Hopper. CUDA 13 dropped Maxwell, Pascal and Volta,
       # so sm_60 is not reachable from this base at any setting — see the Dockerfile.
+      # These runners have the memory for it; a GitHub-hosted one does not, which is why the
+      # Dockerfile defaults MAX_JOBS to 4 and this raises it.
       extra-params: >-
         --opt build-arg:TORCH_CUDA_ARCH_LIST=9.0
+        --opt build-arg:MAX_JOBS=16
 
 set-version:
   extends: .set-simple-version

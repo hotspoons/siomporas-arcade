@@ -56,6 +56,11 @@ for p = 1, 2 do
     lk = findField(pre .. "Button 3"), rk = findField(pre .. "Button 4"),
     -- Virtua Fighter: punch, kick, and a guard you hold
     p = findField(pre .. "Punch"), k = findField(pre .. "Kick"), g = findField(pre .. "Guard"),
+    -- Street Fighter III on CPS3: six buttons named by strength, which is our own config's
+    -- vocabulary — the 2D lineage names attacks by how hard they are, the 3D boards by which limb.
+    jab = findField(pre .. "Jab Punch"), strong = findField(pre .. "Strong Punch"),
+    fierce = findField(pre .. "Fierce Punch"), short = findField(pre .. "Short Kick"),
+    forward = findField(pre .. "Forward Kick"), roundhouse = findField(pre .. "Roundhouse Kick"),
     start = findField(p .. " Player Start", p .. " Players Start"),
   }
 end

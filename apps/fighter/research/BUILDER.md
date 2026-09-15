@@ -7,10 +7,10 @@ Everything below was measured by driving the original boards headlessly in MAME 
 memory, not taken from a wiki. `tools/sf2-probe` does the 2D one, `tools/t3-probe` the two 3D ones,
 and the per-board notes in `research/rom/` carry the addresses, the methods and the mistakes.
 
-| | Street Fighter II: Champion Edition | Tekken 3 | Virtua Fighter 2 |
-|---|---|---|---|
-| board | CPS1 | Namco System 12 | Sega Model 2 |
-| our config today | `src/data/system.json` + `chars/*.json` | — | — |
+| | Street Fighter II: CE | Tekken 3 | Virtua Fighter 2 | Street Fighter III: 3rd Strike |
+|---|---|---|---|---|
+| board | CPS1 | Namco System 12 | Sega Model 2 | CPS3 |
+| our config today | `system.json` + `chars/*.json` | — | — | — |
 
 ## 1. Defence — the switch that changes the most
 
@@ -21,6 +21,16 @@ This is the one to expose first, because everything else bends around it.
 | **Street Fighter II** | hold away from the opponent | **yes** — blocking *is* retreating | a blocked special still chips you (`chipFraction: 0.25`) |
 | **Tekken 3** | **nothing at all** — standing still guards highs and mids | yes, you are simply standing | nothing |
 | **Virtua Fighter 2** | **hold the Guard button** | **no — rooted, exactly 0.000 units in 120 frames** | nothing in health |
+| **3rd Strike** | hold away to block — **or tap *toward* to parry** | yes for a block; a parry is an instant | a parry costs a precise input, and **pays a free counter-attack** |
+
+3rd Strike is the one that adds a genuinely different *kind* of answer. The other three are all
+states you hold; the parry is a **moment you have to be right about**, and the measured difference
+is not the damage — a block stops that too — but what happens next:
+
+| after a fierce is… | can the defender hit back? |
+|---|---|
+| **blocked** | **no**, three times out of three |
+| **parried** | **yes** — a jab lands for 4, three times out of three |
 
 Three genuinely different answers to the most basic question a fighting game asks, and each one
 implies a different game:
@@ -41,10 +51,16 @@ Normalised, because the health totals differ and the percentages are what a play
 | Street Fighter II | **144** | 4 — 2.8% | 19 — 13.2% | 32 — **22.2%** |
 | Tekken 3 | **140** | — | — | — |
 | Virtua Fighter 2 | **196** | 12 — 6.1% | 30 — 15.3% | 40 — **20.4%** |
+| 3rd Strike | **160** | 4 — 2.5% | 21 — 13.1% | — |
 
-The striking agreement: **a throw is worth about a fifth of a health bar in both games that we can
-measure one in**, 22.2% and 20.4%, five years and two hardware generations apart. That looks like a
-constant of the genre rather than a coincidence, and it is a good default for a builder.
+Two agreements, and both look like constants of the genre rather than coincidences.
+
+**A throw is worth about a fifth of a health bar** in both games where one could be measured — 22.2%
+and 20.4%, five years and two hardware generations apart.
+
+**The Street Fighter line holds its damage curve for a decade.** Champion Edition: a jab is 2.8% of
+a life and a fierce 13.2%. Third Strike, eight years and two hardware generations later: 2.5% and
+13.1%. The health totals changed, the hardware changed completely, and the *fractions* did not.
 
 Tekken's row is thin because only one attack was ever landed on it — see §7.
 
@@ -55,6 +71,7 @@ Tekken's row is thin because only one attack was ever landed on it — see §7.
 | Street Fighter II | **3** (jab) | 12–35 |
 | Virtua Fighter 2 | **8** | 19–40 |
 | Tekken 3 | 14 (its one measurable attack) | 40–67 *(animation length, an upper bound)* |
+| 3rd Strike | not yet measured | ~60 for a roundhouse *(busy word, an upper bound)* |
 
 **Virtua Fighter's quickest attack is slower than Street Fighter's slowest normal.** That single
 comparison is most of why the two feel unalike: in one you are reacting inside a third of a second,
@@ -137,14 +154,20 @@ others it wants a few switches rather than a rewrite:
 startup/active/recovery, and already has a `blocking` concept — so "hold-away" and "guard-button"
 are a branch in one place, and `by-hold` jumps are a second entry in a table the sim already reads.
 
-## 9. The gap worth filling next
+## 9. Where to measure next
 
-**Street Fighter III: 3rd Strike.** It is `status="good"` in MAME 0.276 — fully emulated — and it is
-the 2D game most people would name as the finest of them, on the strength of one mechanic this table
-cannot express at all: the **parry**, a defence with no blockstun and no chip that costs you a
-precise input instead of a held direction. A fourth column would give the builder a defence option
-that is neither "hold away" nor "press a button" but "be right at the exact moment", which is the
-most celebrated idea in the genre.
+3rd Strike is in, and it turned out to be the **easiest** board of the four rather than the hardest:
+the `sfiii3n` "NO CD" set is 70MB with no disk image, MAME rates it `good`, work RAM is a 512KB
+share, savestates are supported, and it runs at about **2400% of real time** — a run that costs
+three minutes on Virtua Fighter 2 costs eight seconds here. Anything else wanted from this game is
+cheap.
 
-It needs its CD image rather than just the ROM zip, which is a larger download than anything here so
-far.
+What is still missing, in the order I would do it:
+
+1. **Frame data for 3rd Strike** — startup, active, recovery per move. Cheap on this board, and it
+   would put real numbers against the one column that has none.
+2. **EX moves and super meter**, which is what most separates this game's economy from Champion
+   Edition's and which no column here describes at all.
+3. **Tekken 3's phase word**, if it has one. Its frame-data column is animation lengths because none
+   was found, and that is the weakest row in the table.
+4. **Virtua Fighter's stagger system**, the last unmeasured piece of its triangle.

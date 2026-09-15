@@ -535,15 +535,87 @@ Authentic early-1990s arcade cabinet screen printing — saturated, high contras
  * lighter one does not need them. Six for Ryu's idle, four for Chun-Li's.
  */
 const ANIMS = [
-  { id: 'idle', frames: 6, light: 4, what: 'a FIGHTING STANCE, breathing. Knees bent, weight low and shifting gently from foot to foot, both fists raised to chest height with the elbows tucked in, side-on and ready. Braced to fight, NOT standing at rest and NOT walking.' },
-  { id: 'walk-fwd', frames: 6, light: 6, what: 'WALKING FORWARD, advancing on the opponent, guard still up. A full stride cycle: the legs pass through the whole step and return to where they began.' },
-  { id: 'walk-back', frames: 6, light: 6, what: 'WALKING BACKWARD, retreating, still facing right and still guarding. A full stride cycle that returns to where it began.' },
-  { id: 'stand-hp', frames: 6, light: 6, what: 'a HEAVY PUNCH, thrown and recovered: guard, the shoulder and hips winding through it, the arm locked fully out at the peak, then back to guard. The peak reaches further than anything else this character does with the hands.' },
-  { id: 'stand-hk', frames: 6, light: 6, what: 'a HEAVY ROUNDHOUSE KICK, thrown and recovered: guard, the knee lifting, the leg swung high and fully extended at the peak with the hips open, then back to guard.' },
-  { id: 'crouch-hk', frames: 6, light: 6, what: 'a SWEEP: dropping from the stance down onto one hand with the other leg swept flat along the floor, fully extended at the peak, then gathering back up. The widest and lowest thing this character does — the whole body stays low.' },
-  { id: 'hit-high', frames: 6, light: 6, what: 'BEING HIT in the head: the head snapping back, the body recoiling, arms loose, feet still on the floor, then beginning to recover. Struck, not attacking.' },
-  { id: 'knockdown', frames: 8, light: 8, what: 'BEING KNOCKED DOWN: lifted off the feet, turning through the air, landing flat on the back on the ground, limbs slack. The last frames are lying down, drawn along the floor line seen from the side.' },
-  { id: 'win', frames: 6, light: 6, what: 'a VICTORY animation: coming out of the stance into their own gesture of triumph, in character, and holding it.' },
+  { id: 'idle', frames: 6, light: 4, what: 'a FIGHTING STANCE, breathing. Knees bent, weight low and shifting gently from foot to foot, both fists raised to chest height with the elbows tucked in, side-on and ready. Braced to fight, NOT standing at rest and NOT walking.',
+    phases: [
+      'settled at the bottom of the breath, weight on the back foot, guard steady',
+      'rising, chest lifting, the guard drifting up an inch',
+      'at the top of the breath, standing tallest, guard at its highest',
+      'beginning to settle, weight easing across onto the front foot',
+      'sinking again, the guard lowering slightly',
+      'almost back where frame 1 began, about to loop',
+    ] },
+  { id: 'walk-fwd', frames: 6, light: 6, what: 'WALKING FORWARD, advancing on the opponent, guard still up. A full stride cycle: the legs pass through the whole step and return to where they began.',
+    phases: [
+      'the front foot has just landed, weight coming onto it',
+      'mid-step, the back leg swinging through past the front',
+      'at full stride, front leg reaching forward, back leg extended behind',
+      'the other foot lands, weight transferring onto it',
+      'mid-step again, the other leg swinging through',
+      'closing the cycle, back to where frame 1 began',
+    ] },
+  { id: 'walk-back', frames: 6, light: 6, what: 'WALKING BACKWARD, retreating, still facing right and still guarding. A full stride cycle that returns to where it began.',
+    phases: [
+      'the back foot has just landed, weight settling onto it, still facing right',
+      'mid-step retreating, the front leg drawing back past the other',
+      'at full stride backwards, legs furthest apart',
+      'the other foot lands behind, weight transferring',
+      'mid-step again, retreating',
+      'closing the cycle, back to where frame 1 began',
+    ] },
+  { id: 'stand-hp', frames: 6, light: 6, what: 'a HEAVY PUNCH, thrown and recovered: guard, the shoulder and hips winding through it, the arm locked fully out at the peak, then back to guard. The peak reaches further than anything else this character does with the hands.',
+    phases: [
+      'guard up, still, the instant before the punch',
+      'winding up: the punching shoulder drawn back, hips loading, weight onto the back foot',
+      'the fist driving forward, arm about half extended, hips beginning to rotate through',
+      'THE PEAK: the arm locked out at FULL extension, reaching far out in front of her, shoulder and hips rotated completely through, back heel lifted. This is the furthest she reaches in the whole game — much further than she stands wide',
+      'the arm drawing back, weight returning',
+      'back to guard, settled',
+    ] },
+  { id: 'stand-hk', frames: 6, light: 6, what: 'a HEAVY ROUNDHOUSE KICK, thrown and recovered: guard, the knee lifting, the leg swung high and fully extended at the peak with the hips open, then back to guard.',
+    phases: [
+      'guard up, still, the instant before the kick',
+      'the knee lifting, weight shifting onto the standing leg',
+      'the leg swinging out and up, about half extended',
+      'THE PEAK: the leg fully extended and swung high, hips open, reaching far out to the side. Much further than she stands wide',
+      'the leg folding back down',
+      'back to guard, both feet down',
+    ] },
+  { id: 'crouch-hk', frames: 6, light: 6, what: 'a SWEEP: dropping from the stance down onto one hand with the other leg swept flat along the floor, fully extended at the peak, then gathering back up. The widest and lowest thing this character does — the whole body stays low.',
+    phases: [
+      'dropping out of the stance, knees bending deep, body lowering',
+      'down low, one hand reaching for the floor',
+      'the hand plants, the sweeping leg beginning to extend along the ground',
+      'THE PEAK: down on one hand with the other leg swept FLAT along the floor at full extension, the whole body low and long. The widest and lowest thing she does',
+      'the leg gathering back in, still low',
+      'rising back toward the stance',
+    ] },
+  { id: 'hit-high', frames: 6, light: 6, what: 'BEING HIT in the head: the head snapping back, the body recoiling, arms loose, feet still on the floor, then beginning to recover. Struck, not attacking.',
+    phases: [
+      'the instant of impact: the head snapping back, chin up, the guard blown open',
+      'maximum recoil, the upper body thrown backwards, arms loose and trailing, feet still planted',
+      'still reeling, beginning to check the backward momentum',
+      'steadying, the head coming forward again, arms starting to gather',
+      'recovering, bringing the guard back up',
+      'back in the fighting stance',
+    ] },
+  { id: 'knockdown', frames: 8, light: 8, what: 'BEING KNOCKED DOWN: lifted off the feet, turning through the air, landing flat on the back on the ground, limbs slack. The last frames are lying down, drawn along the floor line seen from the side.',
+    phases: [
+      'lifted off her feet by the blow, both feet leaving the ground',
+      'airborne, body turning, limbs trailing loose',
+      'at the top of the fall, horizontal, completely off the ground',
+      'coming down, the back and shoulders about to hit the floor',
+      'landed flat on her back on the ground, limbs slack, drawn lying along the floor seen from the side',
+      'still down, motionless on her back, seen from the side',
+    ] },
+  { id: 'win', frames: 6, light: 6, what: 'a VICTORY animation: coming out of the stance into their own gesture of triumph, in character, and holding it.',
+    phases: [
+      'coming out of the fighting stance, guard dropping',
+      'straightening up, shoulders settling',
+      'raising the rope-bound forearm in front of her',
+      'holding it up, turning her head to look at it',
+      'still holding, unimpressed, the other hand on her hip',
+      'holding the pose, settled',
+    ] },
 ]
 
 /**
@@ -588,6 +660,50 @@ Nine rules. Rule 1 matters more than all the others together:
 ${STYLE}
 
 ${CLOSE} NO NUMBERS anywhere in the image.`
+}
+
+/**
+ * ONE FRAME, ONE GENERATION. The grid sheets are retired for character animation and this replaces
+ * them — see ART.md. A sheet asks the model to manage a layout as well as draw, and every defect
+ * that reached the game came from the layout half: grids rewritten, boxes merged, close-ups packed
+ * as poses, feet clipped at a box edge, scale drifting between cells. A single figure on flat green
+ * has none of those failure modes, keys trivially, and is the only form in which a proportion
+ * reference works at all.
+ *
+ * It costs about twice the wall clock and buys a character drawn the way we meant.
+ *
+ * Deliberately short. Everything past roughly eighteen hundred characters is either truncated or
+ * competing with the rules that matter, so this says who she is, which frame this is, and the four
+ * invariants — facing, framing, ground, background. Nothing else.
+ *
+ * It carries the WHOLE animation's description as well as the single frame's, and the first draft
+ * did not. Without it "frame 1 of 6: settled at the bottom of the breath, guard steady" is missing
+ * the part that says an idle is a fighting stance at all, and six frames came back of someone
+ * standing about with her arms by her sides. A phase only means something against the movement it
+ * is a phase of.
+ *
+ * The side view is stated first and at length for the same reason. "She FACES RIGHT" as a clause
+ * further down produced six front-facing figures: the reference image is side-on and did not carry
+ * the orientation either, so it has to be said early, as the kind of picture this is rather than as
+ * a property of the pose.
+ */
+function framePrompt(c, anim, i, n) {
+  const attack = ['stand-hp', 'stand-hk', 'crouch-hk'].includes(anim.id)
+  return `IMAGE 1 shows the character. Draw the SAME person — same face, same build and proportions, same costume, same colours.
+
+A SIDE VIEW, like a 2D fighting game: her body is turned side-on to the camera and she faces the RIGHT edge of the picture. We see her left flank. She is never facing the viewer and never three-quarters on.
+
+Her ${anim.id.toUpperCase()} animation is ${anim.what}
+
+Draw ONE frame of it — frame ${i + 1} of ${n}: ${anim.phases[i]}.
+
+${c.seed}
+
+Full figure, head to feet, the whole body inside the picture, feet on the ground near the bottom. She is the same height in every frame of this animation.${attack ? ' A committed attack reaches far out from her — much further than she stands wide. Extend the pose fully; do not shrink it to fit.' : ''}
+
+Flat chroma-green background, edge to edge, unlit. No shadow on the ground, no floor, no scenery, no text.
+
+${STYLE}`
 }
 
 // --- the running order ------------------------------------------------------------------------
@@ -690,6 +806,26 @@ function renderPhases(list) {
 
 const argv = process.argv.slice(2)
 const only = argv.includes('--only') ? argv[argv.indexOf('--only') + 1] : null
+
+// Every frame of one character as its own prompt, for scripts/fighter-frames.mjs to consume.
+if (argv.includes('--frames')) {
+  const id = argv[argv.indexOf('--frames') + 1]
+  const c = CAST.find((x) => x.id === id)
+  if (!c) {
+    console.error(`no character "${id}" — pick one of ${CAST.map((x) => x.id).join(', ')}`)
+    process.exit(1)
+  }
+  const out = []
+  for (const a of ANIMS) {
+    for (let i = 0; i < a.frames; i++) {
+      out.push({ character: c.id, anim: a.id, index: i, frames: a.frames, prompt: framePrompt(c, a, i, a.frames) })
+    }
+  }
+  // writeSync, not console.log: process.exit() discards whatever is still buffered on a pipe, and
+  // this payload is large enough that the tail was being cut off mid-string.
+  writeFileSync(1, `${JSON.stringify(out, null, 1)}\n`)
+  process.exit(0)
+}
 
 // Every cycle sheet for one character, to stdout. The doc writes out the lead character's set in
 // full; printing 12 x 9 of them would bury everything else in the file.

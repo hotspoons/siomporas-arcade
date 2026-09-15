@@ -127,7 +127,30 @@ Pass 2 at ~500 characters holds the layout far better than the same instructions
 long version returned head boxes full of torsos and an empty palette. Short and single-purpose is
 worth more than complete.
 
-### PROPORTIONS DO NOT WORK, AND THIS IS THE OPEN PROBLEM
+### The proportion reference, and the mannequin library we should build
+
+What moves proportions is an attached image, not words — see the table below for the five wordings
+that did nothing. Attach a figure drawn at the build you want and the head-to-body ratio and mass
+transfer; the face and costume do not.
+
+The first one was the ripped Ryu idle, which works and is the wrong long-term answer twice over: it
+is someone else's character sitting in our prompt log, and it drags his bulk along with his
+proportions, so a lean fighter comes back thickset.
+
+**The right reference is a faceless, colourless mannequin** — a neutral body at arcade proportions
+with no face, no costume, no palette, nothing to bleed. It can only transfer the thing we want.
+
+So the goal, not yet built: **a small library of mannequins spanning the builds this roster needs**,
+derived from the range of body types the arcade boards actually drew — the enormous grappler, the
+squat brawler, the lean zoner, the small fast one. Twelve characters, maybe five mannequins between
+them. Each new character then references the mannequin for their build rather than a character for
+theirs, and nothing of anyone else's comes with it.
+
+Until that exists, a character's own first good figure serves as their reference for every frame
+after it — `ext/kestrel-reference.png` is Kestrel's, and every frame of hers is generated against
+it.
+
+### PROPORTIONS: WHAT DOES NOT WORK
 
 The ripped arcade sprites are caricatures — roughly five heads tall, with enormous heads, hands and
 limbs. Everything generated here comes out at a naturalistic seven and a half to eight. At the same
@@ -144,11 +167,13 @@ Every lever tried has failed:
 | Same, with the prompt cutoff raised so it demonstrably arrives | No change at all |
 | An image-to-image restyle pass, "change only the build" | Layout preserved perfectly, proportions untouched |
 | A short text-only generation with nothing to anchor it, plus a matching negative prompt | Still eight heads |
+| **An attached figure drawn at the target build** | **Works.** Eight heads to about six |
 
-So it is a prior in the model rather than a failure to read the instruction. What is left to try, in
-the order I would try it: a LoRA that carries the proportions; scaling the head mechanically after
-the cut, which is deterministic and ugly; or accepting naturalistic proportions as the house look on
-the grounds that the arcade sprites are placeholders and the mismatch disappears with them.
+It is a prior in the model rather than a failure to read the instruction, and only an image gets
+underneath it. Even then there is a floor: asked for five heads the model thickens the *limbs*
+rather than enlarging the head, so a spread from "seven and slim" to "five and stocky" lands
+entirely between six and seven. Six is about as far as this approach goes. Past that would want a
+LoRA carrying the proportions, or scaling the head mechanically after the cut.
 
 ### Attach the bible as an image, never as a description
 

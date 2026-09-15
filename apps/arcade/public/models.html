@@ -104,6 +104,13 @@
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .badge b { color: var(--ink); font-weight: 600; }
+  /* Rubber band for box-select. A plain div over the canvas: cheaper and crisper than drawing it
+     into the scene, and it cannot be occluded by the model. */
+  #band {
+    position: absolute; pointer-events: none; z-index: 3;
+    border: 1px solid var(--hot); background: color-mix(in srgb, var(--hot) 14%, transparent);
+  }
+  #band[hidden] { display: none; }
   #drop {
     position: absolute; inset: 0; display: none; place-items: center; text-align: center;
     background: rgba(7,8,12,.9); border: 2px dashed var(--hot); color: var(--hot);
@@ -168,6 +175,7 @@
       <canvas id="cv"></canvas>
       <p class="badge" id="badge">Loading…</p>
       <div id="drop">Drop a .glb to view</div>
+      <div id="band" hidden></div>
       <div class="overlay">
         <button id="spin" aria-pressed="true">Spin</button>
         <button id="wire" aria-pressed="false">Wireframe</button>
@@ -195,8 +203,13 @@
       <div class="rigrow">
         <button id="bones" aria-pressed="false">Bones</button>
         <button id="joints" aria-pressed="false">Joints</button>
-        <button id="gmove" aria-pressed="false" title="Drag the selected joint to move it">Move</button>
+        <button id="gmove" aria-pressed="false" title="Drag the selected joints to move them">Move</button>
         <button id="grot" aria-pressed="false" title="Drag to rotate the selected joint">Rotate</button>
+      </div>
+      <div class="rigrow">
+        <button id="boxsel" aria-pressed="false" title="Drag a rectangle over the viewport to select joints">Box select</button>
+        <button id="selall">All</button>
+        <button id="selnone">None</button>
       </div>
       <div class="rigrow">
         <button id="restall">Reset pose</button>
@@ -340,6 +353,12 @@ controls.addEventListener('start', () => setSpin(false));
 
 // Dragging a joint and orbiting the camera are the same gesture, so the gizmo has to win while it
 // is being used or every drag also spins the scene.
+// Declared here, not with the rest of the rig state: `scene.add` below runs at module init and a
+// `const` further down the file is still in its temporal dead zone at that point.
+const proxy = new THREE.Object3D();   // what the gizmo drives when several joints are selected
+const proxyLast = new THREE.Vector3();
+scene.add(proxy);
+
 const gizmo = new TransformControls(camera, cv);
 gizmo.size = 0.55;
 gizmo.addEventListener('dragging-changed', (e) => {
@@ -377,6 +396,7 @@ let skeleton = null;         // { root, bones: [Bone], helper }
 let rest = new Map();        // bone.uuid -> { pos: Vector3, quat: Quaternion }
 let offsets = new Map();     // bone.name -> {x,y,z}
 let sweeping = null;         // { bone, axis, t } while the Sweep button is on
+let selected = new Set();    // bone names; the dropdown shows the primary (last picked)
 let sourcePath = null;       // where the loaded model came from — recorded in the export
 
 function setSpin(on) { spinning = on; $('spin').setAttribute('aria-pressed', String(on)); }
@@ -413,8 +433,10 @@ function collectSkeleton(root) {
   // the bone lines between them read as a tangle.
   const jgeo = new THREE.BufferGeometry();
   jgeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(deform.length * 3), 3));
+  jgeo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(deform.length * 3), 3));
   const joints = new THREE.Points(jgeo, new THREE.PointsMaterial({
-    color: 0x9fe8ff, size: 7, sizeAttenuation: false, depthTest: false, transparent: true, opacity: 0.9 }));
+    size: 8, sizeAttenuation: false, depthTest: false, transparent: true, opacity: 0.95,
+    vertexColors: true }));
   joints.renderOrder = 10;
   joints.frustumCulled = false;
   joints.visible = false;
@@ -551,59 +573,204 @@ async function load(url, label, kb) {
   }
 }
 
+// --- picking and selection ---------------------------------------------------------------------
+// Screen-space picking rather than a Raycaster against the Points cloud: `Points.threshold` is in
+// world units, so it behaves differently at every zoom level and on every model scale. Projecting
+// 160 joints and measuring in pixels is both cheaper and predictable — 12 px is 12 px.
+function jointAtScreen(px, py, radius = 12) {
+  if (!skeleton) return null;
+  const rect = cv.getBoundingClientRect();
+  const v = new THREE.Vector3();
+  let best = null, bestD = radius * radius;
+  for (const b of skeleton.deform) {
+    b.getWorldPosition(v).project(camera);
+    if (v.z > 1) continue;                       // behind the camera
+    const sx = (v.x * 0.5 + 0.5) * rect.width;
+    const sy = (-v.y * 0.5 + 0.5) * rect.height;
+    const d = (sx - px) ** 2 + (sy - py) ** 2;
+    if (d < bestD) { bestD = d; best = b; }
+  }
+  return best;
+}
+
+function jointsInRect(x0, y0, x1, y1) {
+  if (!skeleton) return [];
+  const rect = cv.getBoundingClientRect();
+  const [lx, hx] = x0 < x1 ? [x0, x1] : [x1, x0];
+  const [ly, hy] = y0 < y1 ? [y0, y1] : [y1, y0];
+  const v = new THREE.Vector3();
+  const hit = [];
+  for (const b of skeleton.deform) {
+    b.getWorldPosition(v).project(camera);
+    if (v.z > 1) continue;
+    const sx = (v.x * 0.5 + 0.5) * rect.width;
+    const sy = (-v.y * 0.5 + 0.5) * rect.height;
+    if (sx >= lx && sx <= hx && sy >= ly && sy <= hy) hit.push(b);
+  }
+  return hit;
+}
+
+function setSelection(names, primary) {
+  selected = new Set(names);
+  if (primary) boneSel.value = primary;
+  else if (selected.size && !selected.has(boneSel.value)) boneSel.value = [...selected][0];
+  paintJoints();
+  syncSliders();
+  note();
+  reattachGizmo();
+}
+
+function paintJoints() {
+  if (!skeleton) return;
+  const col = skeleton.joints.geometry.attributes.color;
+  skeleton.deform.forEach((b, i) => {
+    const moved = offsets.has(b.name);
+    const on = selected.has(b.name);
+    // selected = hot orange, edited = dim orange, otherwise pale blue
+    const c = on ? [1.0, 0.65, 0.18] : moved ? [0.85, 0.45, 0.15] : [0.62, 0.91, 1.0];
+    col.setXYZ(i, c[0], c[1], c[2]);
+  });
+  col.needsUpdate = true;
+}
+
+// Click to select; shift-click to add or remove. Pointerdown would fight OrbitControls, so this
+// runs on click and only when the pointer did not travel — a drag is an orbit, not a pick.
+let downAt = null;
+cv.addEventListener('pointerdown', (e) => { downAt = { x: e.clientX, y: e.clientY }; });
+cv.addEventListener('click', (e) => {
+  if (!skeleton || !skeleton.joints.visible) return;
+  if (downAt && Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) > 4) return;
+  const rect = cv.getBoundingClientRect();
+  const hit = jointAtScreen(e.clientX - rect.left, e.clientY - rect.top);
+  if (!hit) { if (!e.shiftKey) setSelection([]); return; }
+  if (e.shiftKey) {
+    const next = new Set(selected);
+    next.has(hit.name) ? next.delete(hit.name) : next.add(hit.name);
+    setSelection([...next], hit.name);
+  } else {
+    setSelection([hit.name], hit.name);
+  }
+});
+
+// Box select. Left-drag already orbits, so this takes over the gesture only while armed.
+const band = $('band');
+let boxFrom = null;
+function boxArmed() { return $('boxsel').getAttribute('aria-pressed') === 'true'; }
+$('boxsel').addEventListener('click', () => {
+  const on = !boxArmed();
+  $('boxsel').setAttribute('aria-pressed', String(on));
+  controls.enabled = !on;
+});
+cv.addEventListener('pointerdown', (e) => {
+  if (!boxArmed() || !skeleton) return;
+  const r = cv.getBoundingClientRect();
+  boxFrom = { x: e.clientX - r.left, y: e.clientY - r.top, shift: e.shiftKey };
+  cv.setPointerCapture(e.pointerId);
+});
+cv.addEventListener('pointermove', (e) => {
+  if (!boxFrom) return;
+  const r = cv.getBoundingClientRect();
+  const x = e.clientX - r.left, y = e.clientY - r.top;
+  Object.assign(band.style, {
+    left: Math.min(x, boxFrom.x) + 'px', top: Math.min(y, boxFrom.y) + 'px',
+    width: Math.abs(x - boxFrom.x) + 'px', height: Math.abs(y - boxFrom.y) + 'px',
+  });
+  band.hidden = false;
+});
+addEventListener('pointerup', (e) => {
+  if (!boxFrom) return;
+  const r = cv.getBoundingClientRect();
+  const hits = jointsInRect(boxFrom.x, boxFrom.y, e.clientX - r.left, e.clientY - r.top).map((b) => b.name);
+  const next = boxFrom.shift ? new Set([...selected, ...hits]) : new Set(hits);
+  band.hidden = true;
+  boxFrom = null;
+  setSelection([...next], hits[hits.length - 1]);
+});
+
+$('selall').addEventListener('click', () => {
+  if (skeleton) setSelection(skeleton.deform.map((b) => b.name));
+});
+$('selnone').addEventListener('click', () => setSelection([]));
+
 // --- gizmo -----------------------------------------------------------------------------------
 // The sliders stay — they are how you dial an exact number — but nudging a joint into place is a
 // spatial judgement, and a spatial judgement wants a handle you drag while looking at the mesh.
+function gizmoMode() {
+  return $('gmove').getAttribute('aria-pressed') === 'true' ? 'move'
+       : $('grot').getAttribute('aria-pressed') === 'true' ? 'rotate' : null;
+}
+
+function selectedBones() {
+  if (!skeleton) return [];
+  return skeleton.deform.filter((b) => selected.has(b.name));
+}
+
 function setGizmo(mode) {
   for (const id of ['gmove', 'grot']) $(id).setAttribute('aria-pressed', 'false');
-  if (!mode || !skeleton) { gizmo.detach(); return; }
-  const b = activeBone();
-  if (!b) { gizmo.detach(); return; }
-  gizmo.setMode(mode === 'move' ? 'translate' : 'rotate');
-  // Local space: a bone offset is meaningful in its parent's frame, which is also what gets
-  // exported. World-space handles would move the joint somewhere the export cannot describe.
-  gizmo.setSpace('local');
-  gizmo.attach(b);
-  $(mode === 'move' ? 'gmove' : 'grot').setAttribute('aria-pressed', 'true');
+  if (mode) $(mode === 'move' ? 'gmove' : 'grot').setAttribute('aria-pressed', 'true');
+  reattachGizmo();
+}
+
+function reattachGizmo() {
+  const mode = gizmoMode();
+  const bones = selectedBones();
+  if (!mode || !bones.length) { gizmo.detach(); return; }
+
+  if (mode === 'rotate') {
+    // Rotating several joints at once has no single sensible meaning, so rotation stays on the
+    // primary bone only, in its own frame.
+    const b = activeBone() || bones[0];
+    gizmo.setMode('rotate');
+    gizmo.setSpace('local');
+    gizmo.attach(b);
+    return;
+  }
+
+  // Translation drives a proxy parked at the centroid of the selection, and the per-frame delta is
+  // pushed onto every selected bone. Attaching the gizmo to one bone and hoping the rest follow
+  // does not work: they have different parents and therefore different local frames.
+  const c = new THREE.Vector3();
+  const v = new THREE.Vector3();
+  for (const b of bones) c.add(b.getWorldPosition(v));
+  c.divideScalar(bones.length);
+  proxy.position.copy(c);
+  proxy.rotation.set(0, 0, 0);
+  proxyLast.copy(c);
+  gizmo.setMode('translate');
+  gizmo.setSpace('world');   // a shared frame is the only one several bones can agree on
+  gizmo.attach(proxy);
 }
 
 function liveGizmo() {
-  // Mid-drag: keep the number panel honest without committing anything.
-  const b = activeBone();
-  if (!b) return;
+  const bones = selectedBones();
+  if (!bones.length) return;
+
   if (gizmo.getMode() === 'translate') {
-    const r = rest.get(b.uuid);
-    const off = { x: b.position.x - r.pos.x, y: b.position.y - r.pos.y, z: b.position.z - r.pos.z };
-    P.forEach((id, i) => {
-      const v = [off.x, off.y, off.z][i];
-      $(id).value = Math.max(-0.15, Math.min(0.15, v));
-      const el = $(id + 'v'); el.textContent = v.toFixed(3);
-      el.classList.toggle('edited', Math.abs(v) > 1e-6);
-    });
-  } else {
-    const e = new THREE.Euler().setFromQuaternion(b.quaternion, 'XYZ');
-    [e.x, e.y, e.z].forEach((rad, i) => {
-      const d = Math.round(THREE.MathUtils.radToDeg(rad));
-      $(R[i]).value = Math.max(-180, Math.min(180, d));
-      $(R[i] + 'v').textContent = d + '\u00b0';
-    });
+    const delta = proxy.position.clone().sub(proxyLast);
+    proxyLast.copy(proxy.position);
+    if (delta.lengthSq() === 0) return;
+    const w = new THREE.Vector3();
+    for (const b of bones) {
+      b.getWorldPosition(w).add(delta);
+      if (b.parent) b.parent.worldToLocal(w);   // back into the frame the export describes
+      b.position.copy(w);
+      const r = rest.get(b.uuid);
+      const off = { x: b.position.x - r.pos.x, y: b.position.y - r.pos.y, z: b.position.z - r.pos.z };
+      if (Math.abs(off.x) < 1e-6 && Math.abs(off.y) < 1e-6 && Math.abs(off.z) < 1e-6) offsets.delete(b.name);
+      else offsets.set(b.name, off);
+    }
   }
+  syncSliders();
 }
 
 function commitGizmo() {
-  const b = activeBone();
-  if (!b || gizmo.getMode() !== 'translate') return;
-  const r = rest.get(b.uuid);
-  const off = { x: b.position.x - r.pos.x, y: b.position.y - r.pos.y, z: b.position.z - r.pos.z };
-  if (Math.abs(off.x) < 1e-6 && Math.abs(off.y) < 1e-6 && Math.abs(off.z) < 1e-6) offsets.delete(b.name);
-  else offsets.set(b.name, off);
+  paintJoints();
   note();
+  reattachGizmo();   // re-centre the proxy on where the selection ended up
 }
 
-$('gmove').addEventListener('click', () =>
-  setGizmo($('gmove').getAttribute('aria-pressed') === 'true' ? null : 'move'));
-$('grot').addEventListener('click', () =>
-  setGizmo($('grot').getAttribute('aria-pressed') === 'true' ? null : 'rotate'));
+$('gmove').addEventListener('click', () => setGizmo(gizmoMode() === 'move' ? null : 'move'));
+$('grot').addEventListener('click', () => setGizmo(gizmoMode() === 'rotate' ? null : 'rotate'));
 
 // --- lighting ---------------------------------------------------------------------------------
 // Reconstructions come out with baked, fairly dark base colour, and a fixed rig makes some models
@@ -658,7 +825,9 @@ function setupRig() {
   skeleton.helper.visible = false;
   skeleton.dot.visible = false;
   skeleton.joints.visible = false;
+  selected = new Set();
   setGizmo(null);
+  paintJoints();
   syncSliders();
   note();
 }
@@ -710,7 +879,8 @@ function applyOffset() {
 function note() {
   const n = offsets.size;
   $('rignote').innerHTML = skeleton
-    ? `<b>${skeleton.bones.length}</b> bones, <b>${n}</b> joint${n === 1 ? '' : 's'} moved. ` +
+    ? `<b>${skeleton.deform.length}</b> joints, <b>${selected.size}</b> selected, ` +
+      `<b>${n}</b> moved. ` +
       `Rotation is scratch and is never exported; only joint offsets are. ` +
       `Source: <b>${sourcePath || 'unknown'}</b>`
     : '';
@@ -721,10 +891,7 @@ P.forEach((id) => $(id).addEventListener('input', applyOffset));
 boneSel.addEventListener('change', () => {
   sweeping = null;
   $('sweep').setAttribute('aria-pressed', 'false');
-  syncSliders();
-  const mode = $('gmove').getAttribute('aria-pressed') === 'true' ? 'move'
-             : $('grot').getAttribute('aria-pressed') === 'true' ? 'rotate' : null;
-  if (mode) setGizmo(mode);
+  setSelection([boneSel.value], boneSel.value);
 });
 
 $('sweep').addEventListener('click', () => {
@@ -760,7 +927,7 @@ $('clearoff').addEventListener('click', () => {
   if (!skeleton) return;
   for (const b of skeleton.bones) b.position.copy(rest.get(b.uuid).pos);
   offsets = new Map();
-  syncSliders(); note();
+  syncSliders(); paintJoints(); note(); reattachGizmo();
 });
 
 $('exportjoints').addEventListener('click', () => {
@@ -770,10 +937,18 @@ $('exportjoints').addEventListener('click', () => {
     const off = offsets.get(b.name);
     if (!off) continue;
     const r = rest.get(b.uuid);
+    // World position is what the Blender side actually needs — it positions metarig bone heads in
+    // armature space, and an offset expressed in this bone's parent frame is not usable there
+    // without rebuilding the whole chain. Both are written; take whichever fits.
+    const world = b.getWorldPosition(new THREE.Vector3());
+    const wasLocal = new THREE.Vector3(r.pos.x, r.pos.y, r.pos.z);
+    const wasWorld = b.parent ? b.parent.localToWorld(wasLocal.clone()) : wasLocal.clone();
     joints[b.name] = {
       offset: [round(off.x), round(off.y), round(off.z)],
       rest: [round(r.pos.x), round(r.pos.y), round(r.pos.z)],
       corrected: [round(r.pos.x + off.x), round(r.pos.y + off.y), round(r.pos.z + off.z)],
+      world: [round(world.x), round(world.y), round(world.z)],
+      worldRest: [round(wasWorld.x), round(wasWorld.y), round(wasWorld.z)],
       parent: b.parent && b.parent.isBone ? b.parent.name : null,
     };
   }
@@ -786,7 +961,11 @@ $('exportjoints').addEventListener('click', () => {
       page: location.href,
       loaded: new Date().toISOString(),
     },
-    units: 'metres, in each bone\u2019s parent space',
+    units: {
+      offset: 'metres, in the bone\u2019s parent space',
+      world: 'metres, world space, character standing on y=0 at the height given below',
+    },
+    height: skeleton ? +(new THREE.Box3().setFromObject(skeleton.skinned).getSize(new THREE.Vector3()).y).toFixed(4) : null,
     skeleton: { bones: skeleton.bones.length, root: skeleton.bones[0] ? skeleton.bones[0].name : null },
     note: 'Joint offsets only, on DEF- deform bones. Apply to the matching metarig bone before '
         + 'rigify_generate — DEF-upper_armL corresponds to metarig upper_arm.L. '

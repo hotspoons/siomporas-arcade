@@ -106,6 +106,22 @@ floor running out.
 Tekken's answer has a direct consequence for the 3D character work: if height belongs to the
 animation, a rigged character's root does not need a height channel.
 
+## 5b. Meter
+
+| | how it works |
+|---|---|
+| Street Fighter II *(Super Turbo)* | a meter that fills in **bars**; gain is **flat per action** — `meter: { hit: 6, block: 3, whiffSpecial: 2, max: 4 }` |
+| **3rd Strike** | a gauge that fills to **128**, then **awards a stock and resets**; gain **scales with the attack** — a jab is 2, a fierce 17 |
+| Tekken 3, Virtua Fighter 2 | none |
+
+Two switches here. **Flat versus scaled gain** decides whether meter is built by touching the
+opponent often or by committing to big attacks. **Bars versus gauge-and-stock** decides whether a
+part-full meter is worth anything.
+
+One agreement across the decade: landing an attack is worth about **twice** what having it blocked
+is worth, in both Street Fighters — 6:3 in Super Turbo, 17:9 in 3rd Strike. The units changed
+completely and the ratio did not.
+
 ## 6. The third axis, and the arena
 
 | | |

@@ -156,8 +156,44 @@ health a few frames after a hit will read a number that is still falling.
 It also means a KO is not instantaneous on this board, which is a mechanic in itself: a blow that
 takes you to zero takes twenty frames to do it.
 
+## The super meter
+
+| address in `:mainram` | what |
+|---|---|
+| `0x286a4` (high half) | **the gauge**, 0 at the start of a round |
+| `0x286a8` (low half) | **stocks held** |
+
+The gauge fills to **exactly 128**, and at 128 it does not stop — it **awards a stock and resets to
+zero** to start filling the next one. That is a different shape of economy from Champion Edition's,
+where the meter fills bars that sit there.
+
+What fills it, measured one action at a time from a fresh reading:
+
+| | gauge |
+|---|---|
+| a fierce that whiffs | **+3** |
+| a fierce that is blocked | **+9** |
+| a fierce that lands | **+17** |
+| a jab that lands | **+2** |
+
+Two things follow, and both are switches a builder would want.
+
+**Meter gain scales with the attack.** A jab is worth 2 and a fierce 17 — more than eight times as
+much — where Super Turbo's meter, as `system.json` records it, pays a flat rate per hit whatever you
+hit with. So in this game your meter is built by committing to big attacks, not by touching the
+opponent often.
+
+**And it pays you for being defended against.** A blocked fierce still gives 9, more than half of
+what landing it gives, and even a whiff gives 3. Attacking is never wasted here, which is a very
+different pressure from a game where a blocked attack gives you nothing.
+
+For scale: a full stock is about **eight landed fierces**, or forty-three whiffed ones.
+
+The ratio between landing and being blocked — 17:9, near enough 2:1 — is almost exactly Super
+Turbo's 6:3. Eight years apart, the *relative* value of a hit over a blocked hit did not move, even
+though everything about the units did.
+
 ## Not done
 
-EX moves and super meter, the mechanic that most distinguishes this game's economy from Champion
-Edition's and which nothing in this research describes. Also the red parry, and true startup figures
-if anyone finds the phase word this scan could not.
+EX moves specifically — how much of a stock one costs, and whether the gauge can be spent in parts.
+Also the red parry, and true startup figures if anyone finds the phase word this scan could not.

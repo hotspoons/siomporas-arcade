@@ -113,7 +113,7 @@ pass — turns up a float at **`0x1099c`** which is the real thing.
 
     airborne frames       72
     apex                  2.809 units, at frame 35 — a symmetric arc
-    gravity               -0.0027 units per frame per frame
+    gravity               -0.00272 units per frame per frame
     forward jump          same arc exactly, plus 3.548 units of travel
 
 **The gravity is a single distinct value.** Taking the second difference across all 72 frames gives
@@ -128,15 +128,42 @@ Two things to be careful about before quoting this:
   from zero. So it is not simply the height of the feet; more likely a body origin that is only
   written while airborne, with zero acting as "on the floor". The *dynamics* are readable either
   way, but the offset is not yet understood.
-- The fighter stayed on the ground for 14 frames after the input, which happens to be exactly how
-  long the jump button was held. That may be genuine pre-jump startup or an artefact of the hold;
-  it needs a run with a shorter tap before anybody calls it a frame count.
+- ~~The fighter stayed on the ground for 14 frames after the input, exactly as long as the button
+  was held.~~ Checked with holds of 4, 8, 14 and 30 frames, and it is not an artefact — but it is
+  not one number either. See below: there are **two jumps**.
 
 **So the two 3D boards disagree about height**, which is worth more than either answer alone:
 Tekken 3's world position has no height at all — the root's y is zero through a jump *and* through
 being thrown over somebody's shoulder — and the model rises because the animation says so. Virtua
 Fighter 2 integrates an arc. For a builder, that is another switch, and for the photogrammetry work
 it decides whether a rigged character's root needs a height channel or the animation owns it.
+
+## There are two jumps, and one gravity
+
+Holding "up" briefly and holding it a while produce different arcs, and the board decides which
+somewhere around the twelfth frame of the hold:
+
+| how long "up" is held | leaves the ground on frame | airborne | apex |
+|---|---|---|---|
+| 3 frames | 10 | **32** | **1.439** |
+| 6 frames | 10 | 32 | 1.439 |
+| 16 frames | 14 | **72** | **2.809** |
+| 30 frames | 14 | 72 | 2.809 |
+
+A hop that is up and down in half a second, and a committed jump more than twice as high that leaves
+you in the air for 72 frames — a very long time to be unable to guard, on a stage you can be knocked
+off. Which one you get is decided by the stick, not by a separate button.
+
+**And the gravity is the same in both.** Across all five jumps measured, the second difference is
+−0.00272 with a spread of **exactly 0.00000**. One acceleration constant for the whole game, two
+launch speeds. That is precisely the shape `src/data/system.json` already uses — a system-wide
+`gravity` with per-character launch — so this part of Virtua Fighter would drop into the existing
+simulation without inventing anything.
+
+Street Fighter II has one fixed jump arc and no way to vary it. Tekken 3's neutral jump is a single
+48-frame affair. A variable-commitment jump is therefore a genuine third option for the builder, and
+on a stage with edges it is the interesting one: the big jump is how you cross distance and also how
+you get yourself killed.
 
 ## What was not found
 
@@ -154,7 +181,7 @@ Frame data, throws, the stagger and recovery systems, and how the camera is driv
 | losing the round | health, or the clock | health, or the clock | health, the clock, **or the floor** |
 | arena | walls that stop you | mostly unbounded | **7 units to the edge** |
 | maths | fixed point | fixed point | **IEEE floats** |
-| jump height | simulated: launch, gravity, airborne | **animation** — world y is always 0 | **simulated**: apex 2.809, g = −0.0027/f² |
+| jump height | simulated, one fixed arc | **animation** — world y is always 0 | **simulated, two arcs**: hop 32f/1.44, jump 72f/2.81, one gravity |
 
 Those seven rows are, roughly, the menu. A builder that let you choose "guard button + rooted
 blocking + ring-out + backward-biased movement" would produce something that feels like Virtua

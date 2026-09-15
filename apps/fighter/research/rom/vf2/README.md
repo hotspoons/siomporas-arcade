@@ -305,11 +305,39 @@ support the same conclusion and neither is worth overstating.
 `d+K` landing for 12 and still leaving its thrower at **−9** is worth keeping too: a low kick that
 beats a standing guard, does real damage, and still hands the initiative back. Nothing here is free.
 
+## The whole design, in one triangle
+
+Every separate finding above turns out to be one side of a single shape. Measured, not remembered:
+
+| if you are doing this | this goes through it | damage |
+|---|---|---|
+| **standing guard** | a **throw** (`P+G`) | **40** — a fifth of your health |
+| **standing guard** | a **low** (`d+K`) | 12 |
+| **crouching guard** | a **mid** (`f+K`) | **30** |
+| **crouching guard** | a mid punch (`df+P`) | 10 |
+| crouching | *a throw cannot touch you* | 0 |
+| either guard | a high (`P`, `K`) | 0 |
+
+Read it as a loop. Guard costs nothing in health and takes nothing on block, so standing there ought
+to be free — except a throw goes straight through it for a fifth of your life, and a low goes under
+it. Crouch instead and the throw cannot touch you at all — except now a mid beats you for thirty.
+There is no stance that is simply correct, and the thing that makes each one wrong is worth more
+damage than the thing it protects against.
+
+And the prices line up with the rewards. The **throw is the biggest single number on this board** —
+40 against a standing punch's 12 — and it is the answer to the safest, laziest thing a player can
+do. The mid that punishes ducking is 30. The low that punishes standing is 12, the smallest of the
+three, because standing is already the stance that loses to the throw.
+
+That is the whole game, and it is the part a builder would actually want: not "Virtua Fighter has
+throws" but **a guard that is free, rooted, and half-height; a throw worth 20% that beats it; and a
+crouch that dodges the throw and loses to a mid worth 15%.** Four numbers and three rules.
+
 ## What was not found
 
-Throws properly — they need a body, and `P+G` thrown at nobody is just a punch. Also the stagger
-and recovery systems, the defender's guard states (which the advantage measurement above wants),
-and how the camera is driven.
+The stagger and recovery systems, and how the camera is driven. Throw *escapes* — Virtua Fighter's
+answer to the throw being this strong — were not tested, and on a board where a throw is worth a
+fifth of a health bar they are presumably the next load-bearing mechanic.
 
 ## For the builder: the switches these two boards disagree on
 

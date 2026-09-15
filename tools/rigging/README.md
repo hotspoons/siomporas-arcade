@@ -76,13 +76,46 @@ from a symmetric body. Symmetrising the mesh itself gives her two tails.
 
 ## What this does not do yet
 
-- **Joint placement is proportional, not anatomical.** blrig fits the metarig by scaling a human
-  template to the mesh height; it does not snap knees and elbows to where they actually are. For a
-  character with ordinary proportions that is fine. For a stylised one it will not be, and the fix
-  — perception-driven joint snapping from cross-section minima — is named as open work in blrig's
-  own `PROGRESS.md`. `blrig/perception/sections.py` already computes the cross-sections it needs.
+- **Applying a joint-correction file.** The viewer exports one; this script does not yet read it.
+  See below.
 - **No animation.** A rig that deforms is not a fighter. The sprite poses in
   `tools/photogrammetry` are the intended source: `lift_poses.py` solves joint rotations from the
   2D frames, and those rotations want mapping onto these bone names.
 - **Not wired into a game.** Output is a `.glb` on disk. Promoting one is deliberate: copy it into
   the owning game's `public/`, and let the existing sprite bake pick it up.
+
+## Correcting joint positions by hand
+
+blrig fits the metarig by **scaling a human template to the mesh height**. It does not snap knees
+and elbows to where they actually are, and re-running does not improve it — for a stylised
+character the joints land wrong and stay wrong. (Perception-driven joint snapping from
+cross-section minima is named as open work in blrig's own `PROGRESS.md`, and
+`blrig/perception/sections.py` already computes the cross-sections it would need.)
+
+Until that exists, the correction is a human looking at it. Load a rigged `.glb` into the model
+viewer — `apps/arcade/public/models.html`, live at `arcade.siomporas.com/models` — and a
+**Skeleton** panel appears for any model carrying a skin:
+
+- **Sweep** swings the selected joint through ±70°, which is how a badly placed joint gives itself
+  away: the limb visibly bends from the wrong place.
+- **pX / pY / pZ** move the joint. Rotation is scratch and is never exported; only positions are.
+- **Export joints JSON** writes the corrections *and where the model was loaded from*, so a
+  correction file is traceable to the model it was made against. **Import** applies one back.
+
+Only `DEF-` deform bones are listed — the ~160 that actually skin the mesh. Rigify emits ~700, and
+the rest are mechanisms and widget holders parked off the body.
+
+```json
+{
+  "format": "apex-joint-offsets/1",
+  "source": { "path": "/assets/…/rigged-arms-clear.glb", "url": "https://…", "loaded": "…" },
+  "units": "metres, in each bone's parent space",
+  "joints": {
+    "DEF-thighL": { "offset": [0, -0.03, 0.01], "rest": [...], "corrected": [...], "parent": "DEF-spine" }
+  }
+}
+```
+
+**Reading this file back is not implemented yet.** The correction has to move the matching *metarig*
+bone before `rigify_generate` — `DEF-upper_armL` is metarig `upper_arm.L` — which means fitting the
+metarig, applying offsets, then generating. That is the next piece of work here.

@@ -60,8 +60,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && ln -sfn /usr/include/eigen3/unsupported /usr/include/unsupported \
     && rm -rf /var/lib/apt/lists/*
 
+# PINNED, and it matters more than it looks. torch is the ABI anchor for all four CUDA extensions
+# below, and CuMesh hard-codes `-std=c++17` in its setup.py. torch 2.14's headers require C++20, so
+# an unpinned install silently drifts onto a torch that cannot compile them:
+#
+#   error: #error C++20 or later compatible compiler is required to use PyTorch.
+#
+# 2.13.0+cu130 is the version this whole stack was verified against on a GH200. Bumping it means
+# re-checking all four extensions, and probably patching CuMesh's standard along the way.
 RUN pip install --break-system-packages --no-cache-dir \
-      torch torchvision --index-url https://download.pytorch.org/whl/cu130
+      torch==2.13.0 torchvision==0.28.0 --index-url https://download.pytorch.org/whl/cu130
 
 RUN pip install --break-system-packages --no-cache-dir \
       imageio imageio-ffmpeg tqdm easydict opencv-python-headless ninja trimesh \

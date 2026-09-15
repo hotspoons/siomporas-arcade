@@ -100,6 +100,21 @@ RUN git clone --recursive https://github.com/JeffreyXiang/FlexGEMM.git /tmp/Flex
  && pip install --break-system-packages --no-build-isolation /tmp/FlexGEMM \
  && rm -rf /tmp/FlexGEMM
 
+# nvdiffrast is an OPTIONAL flag in upstream's setup.sh and is not optional here: `o_voxel` imports
+# it at module level, so without it the image builds perfectly and then dies on the first request
+# with ModuleNotFoundError. The GL/EGL dev headers installed above are what let it build. v0.4.0 is
+# the tag TRELLIS.2's own setup.sh pins.
+RUN git clone --depth 1 -b v0.4.0 https://github.com/NVlabs/nvdiffrast.git /tmp/nvdiffrast \
+ && pip install --break-system-packages --no-build-isolation /tmp/nvdiffrast \
+ && rm -rf /tmp/nvdiffrast
+
+# Fail the BUILD, not the first request. Each of these cost an hour to find separately: cumesh needs
+# the CUDA-13 patch, o_voxel needs nvdiffrast, flex_gemm is the sparse-conv backend, and importing
+# the pipeline is what proves they agree with each other and with this exact torch.
+RUN python3 -c "import torch, cumesh, o_voxel, flex_gemm, nvdiffrast, xformers, utils3d; print('torch', torch.__version__); print('EXTENSIONS OK')" \
+ && PYTHONPATH=/opt/TRELLIS2 ATTN_BACKEND=sdpa SPARSE_ATTN_BACKEND=xformers \
+    python3 -c "from trellis2.pipelines import Trellis2ImageTo3DPipeline; print('PIPELINE OK')"
+
 # flash-attn is deliberately NOT installed -- a long, fragile source build on aarch64. Two separate
 # attention backends have to be steered away from it:
 #   ATTN_BACKEND=sdpa          dense attention, torch's own scaled_dot_product_attention

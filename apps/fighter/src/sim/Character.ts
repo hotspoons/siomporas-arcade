@@ -195,10 +195,72 @@ export const SYSTEM: SystemConfig = systemJson as unknown as SystemConfig
  * purpose: the point of measuring three boards is to be able to *feel* the difference, and that
  * means switching schools without a reload.
  */
-export const RULES: { defence: DefenceMode; rootedWhileGuarding: boolean; jump: JumpMode } = {
+export const RULES: {
+  defence: DefenceMode
+  rootedWhileGuarding: boolean
+  jump: JumpMode
+  /** What a blocked special still takes off you. Zero on both 3D boards; a quarter on both 2D ones. */
+  chipFraction: number
+  /** Which whole game's rules are in force, if any single one is. */
+  school: SchoolName
+} = {
   defence: SYSTEM.defence.mode,
   rootedWhileGuarding: SYSTEM.defence.rootedWhileGuarding,
   jump: SYSTEM.jump.mode,
+  chipFraction: SYSTEM.chipFraction,
+  school: 'street-fighter',
+}
+
+/**
+ * Whole games, as sets of the switches above.
+ *
+ * This is the builder in miniature and the reason any of the measuring was worth doing: each of
+ * these is one arcade board's answers taken together, so you can play the same characters on the
+ * same stage under another game's rules and feel what changes. The numbers come from
+ * `research/BUILDER.md` and every one of them was read off the hardware.
+ *
+ * What is *not* here matters too. Third Strike's parry is its defining mechanic and is absent,
+ * because it is a defence this sim has no concept of — a moment rather than a state. Tekken's jump
+ * is absent because height there belongs to the animation and our art does not carry it. Virtua
+ * Fighter's ring-out is absent because we have no stage geometry to fall off. A preset that quietly
+ * dropped those would be lying about how close it gets.
+ */
+export type SchoolName = 'street-fighter' | 'third-strike' | 'tekken' | 'virtua-fighter'
+
+export const SCHOOLS: Readonly<Record<SchoolName, {
+  name: string
+  defence: DefenceMode
+  jump: JumpMode
+  chipFraction: number
+  missing?: string
+}>> = {
+  'street-fighter': {
+    name: 'STREET FIGHTER II',
+    defence: 'hold-away', jump: 'fixed', chipFraction: 0.25,
+  },
+  'third-strike': {
+    name: 'THIRD STRIKE',
+    defence: 'hold-away', jump: 'fixed', chipFraction: 0.25,
+    missing: 'no parry — a defence this sim has no concept of',
+  },
+  tekken: {
+    name: 'TEKKEN 3',
+    defence: 'auto-standing', jump: 'fixed', chipFraction: 0,
+    missing: 'jump height belongs to the animation there; our art cannot carry it',
+  },
+  'virtua-fighter': {
+    name: 'VIRTUA FIGHTER 2',
+    defence: 'guard-button', jump: 'by-hold', chipFraction: 0,
+    missing: 'no ring-out — we have no edge to fall off',
+  },
+}
+
+export function setSchool(which: SchoolName): void {
+  const s = SCHOOLS[which]
+  setDefence(s.defence)
+  setJump(s.jump)
+  RULES.chipFraction = s.chipFraction
+  RULES.school = which
 }
 
 /** What each school implies, beyond the blocking rule itself. */

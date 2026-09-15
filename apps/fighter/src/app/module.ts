@@ -33,6 +33,7 @@ export const game: GameModule = {
       stage: q.get('stage') ?? undefined,
       defence: q.get('defence') ?? undefined,
       jump: q.get('jump') ?? undefined,
+      rules: q.get('rules') ?? undefined,
     })
     const gone = new Disposer()
     // There is no menu yet, so Escape is the way out. The shell owns the URL either way.

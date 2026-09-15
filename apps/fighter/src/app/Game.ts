@@ -13,7 +13,7 @@ import { Button, type ButtonMask } from '../sim/Motion'
 import { Match } from '../sim/Match'
 import { CHARACTERS } from '../sim/Character'
 import { Cpu, type Difficulty } from '../sim/Cpu'
-import { DEFENCE_SCHOOLS, JUMP_SCHOOLS, RULES, setDefence, setJump, type DefenceMode, type JumpMode } from '../sim/Character'
+import { DEFENCE_SCHOOLS, JUMP_SCHOOLS, RULES, SCHOOLS, setDefence, setJump, setSchool, type DefenceMode, type JumpMode, type SchoolName } from '../sim/Character'
 import { render, type RenderOptions, type Scene } from '../view/Render'
 import { renderSelect } from '../view/SelectScreen'
 import { Select } from './Select'
@@ -70,6 +70,8 @@ export interface GameSettings {
   defence?: string
   /** Whether a jump is one arc or two. */
   jump?: string
+  /** A whole game's rules at once — `street-fighter`, `third-strike`, `tekken`, `virtua-fighter`. */
+  rules?: string
 }
 
 export class Game {
@@ -104,6 +106,8 @@ export class Game {
     this.stage = settings.stage ?? 'airbase'
     if (settings.defence && settings.defence in DEFENCE_SCHOOLS) setDefence(settings.defence as DefenceMode)
     if (settings.jump && settings.jump in JUMP_SCHOOLS) setJump(settings.jump as JumpMode)
+    // A whole school last, so the individual switches above can still override it deliberately.
+    if (settings.rules && settings.rules in SCHOOLS) setSchool(settings.rules as SchoolName)
     this.match = new Match(settings.p1 ?? 'ryu', settings.p2 ?? 'zangief')
     void this.loadArt()
     // A link that names its fighters is a link to that fight; anything else starts where an arcade
@@ -267,6 +271,15 @@ export class Game {
       case 'F4': {
         const modes = Object.keys(JUMP_SCHOOLS) as JumpMode[]
         setJump(modes[(modes.indexOf(RULES.jump) + 1) % modes.length])
+        this.options.hint = true
+        return true
+      }
+      // F5 puts the whole fight under another arcade board's rules at once: defence, jumping and
+      // chip together. It is the point of the research — the same two characters on the same stage,
+      // playing like a different game.
+      case 'F5': {
+        const names = Object.keys(SCHOOLS) as SchoolName[]
+        setSchool(names[(names.indexOf(RULES.school) + 1) % names.length])
         this.options.hint = true
         return true
       }

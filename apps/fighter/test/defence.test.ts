@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { Match } from '../src/sim/Match'
 import { Button } from '../src/sim/Motion'
-import { RULES, SYSTEM, setDefence, setJump } from '../src/sim/Character'
+import { RULES, SCHOOLS, SYSTEM, setDefence, setJump, setSchool } from '../src/sim/Character'
 import { Cpu } from '../src/sim/Cpu'
 
 // Every test leaves the rules as it found them: this is global state on purpose — the whole point
@@ -150,5 +150,40 @@ describe('the two schools of jumping', () => {
     const fixed = apex(40)
     setJump('by-hold')
     expect(apex(40)).toBeCloseTo(fixed, 5)
+  })
+})
+
+describe('whole games, as sets of switches', () => {
+  afterEach(() => setSchool('street-fighter'))
+
+  it('Tekken: standing still guards, and a blocked special takes nothing', () => {
+    setSchool('tekken')
+    expect(RULES.defence).toBe('auto-standing')
+    expect(RULES.chipFraction).toBe(0)
+    expect(exchange({ x: 0, y: 0 })).toBe(0)
+  })
+
+  it('Virtua Fighter: the button, the rooting, two jumps and no chip', () => {
+    setSchool('virtua-fighter')
+    expect(RULES.defence).toBe('guard-button')
+    expect(RULES.rootedWhileGuarding).toBe(true)
+    expect(RULES.jump).toBe('by-hold')
+    expect(RULES.chipFraction).toBe(0)
+  })
+
+  it('Street Fighter is what the config was written with', () => {
+    setSchool('street-fighter')
+    expect(RULES.defence).toBe(SYSTEM.defence.mode)
+    expect(RULES.jump).toBe(SYSTEM.jump.mode)
+    expect(RULES.chipFraction).toBe(SYSTEM.chipFraction)
+  })
+
+  it('every school says out loud what it cannot reproduce', () => {
+    // The three that are missing something are missing it for a reason this sim cannot fix, and
+    // a preset that hid that would be claiming more than it delivers.
+    expect(SCHOOLS['third-strike'].missing).toMatch(/parry/)
+    expect(SCHOOLS.tekken.missing).toMatch(/animation/)
+    expect(SCHOOLS['virtua-fighter'].missing).toMatch(/ring-out/)
+    expect(SCHOOLS['street-fighter'].missing).toBeUndefined()
   })
 })

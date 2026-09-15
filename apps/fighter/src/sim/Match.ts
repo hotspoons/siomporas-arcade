@@ -5,7 +5,7 @@
 // simulation runnable with no canvas, no browser and no art, which is how the tests run it.
 
 import { Fighter } from './Fighter'
-import { SYSTEM } from './Character'
+import { SYSTEM, RULES } from './Character'
 import { overlap, type Box, type Height, type Move } from './Moves'
 
 /** The clock counts down once per `timerFramesPerTick`, not per second — 99 is 66 real seconds, as it was. */
@@ -42,6 +42,13 @@ export interface Event {
   move?: string
   damage?: number
   combo?: number
+}
+
+/** A move's chip under the rules currently in force, rather than the ones it was written under. */
+function chipNow(baked: number): number {
+  if (baked <= 0 || SYSTEM.chipFraction <= 0) return 0
+  if (RULES.chipFraction === SYSTEM.chipFraction) return baked
+  return Math.round(baked * (RULES.chipFraction / SYSTEM.chipFraction))
 }
 
 export class Match {
@@ -214,7 +221,7 @@ export class Match {
       this.land(p.owner, {
         contact: { x: p.x, y: p.y + (p.box.y0 + p.box.y1) / 2 },
         damage: p.damage,
-        chip: Math.max(1, Math.round(p.damage * SYSTEM.chipFraction)),
+        chip: RULES.chipFraction > 0 ? Math.max(1, Math.round(p.damage * RULES.chipFraction)) : 0,
         hitstun: p.hitstun,
         blockstun: p.blockstun,
         hitstop: SYSTEM.hitstop.medium,
@@ -266,7 +273,10 @@ export class Match {
           y: (Math.max(hb.y0, hurt.y0) + Math.min(hb.y1, hurt.y1)) / 2,
         },
         damage: m.damage,
-        chip: m.chip,
+        // Each move's chip was baked in when the character was built, from the chip fraction the
+        // config was *written* with. Scaling by the ratio lets a school turn chip off — both 3D
+        // boards have none — without rebuilding every move.
+        chip: chipNow(m.chip),
         hitstun: m.hitstun,
         blockstun: m.blockstun,
         hitstop: m.hitstop,

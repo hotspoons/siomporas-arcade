@@ -10,7 +10,7 @@
 // limb is attacking — pulled from the move's own hitbox, so a move that looks wrong is wrong. A stage
 // with no art is a gradient and a floor line. F1 puts the real boxes over either.
 
-import { DEFENCE_SCHOOLS, JUMP_SCHOOLS, RULES, SYSTEM } from '../sim/Character'
+import { RULES, SCHOOLS, SYSTEM } from '../sim/Character'
 import type { Fighter } from '../sim/Fighter'
 import { ROUNDS_TO_WIN, type Match } from '../sim/Match'
 import { blockAdvantage, totalFrames, type Box } from '../sim/Moves'
@@ -486,13 +486,23 @@ function controls(ctx: CanvasRenderingContext2D): void {
     'F G H punch   C V B kick   N = 3P   M = 3K',
     'fwd+heavy up close = throw',
     'ENTER = character select   5 6 7 8 pick P1   - = 9 0 walk the roster',
-    `F3 defence: ${DEFENCE_SCHOOLS[RULES.defence].name}`,
-    `F4 jump: ${JUMP_SCHOOLS[RULES.jump]}`,
+    // One line for the rules rather than three: the school, then the two switches that tune it.
+    // Eight lines of banner covered the fighters entirely.
+    `F5 rules: ${SCHOOLS[RULES.school].name}   ·   F3 defence   F4 jump`,
     'F1 boxes   F2 dummy   1 2 3 opponent   4 two players   R reset',
   ]
   font(ctx, 7, 600)
   ctx.fillStyle = DIM
-  lines.forEach((l, i) => ctx.fillText(l, VIEW_W / 2, 112 + i * 10))
+  lines.forEach((l, i) => ctx.fillText(l, VIEW_W / 2, 106 + i * 10))
+
+  // What this school cannot reproduce, said out loud. Every preset that is missing something is
+  // missing it for a reason the sim cannot fix, and a banner that hid that would oversell it.
+  const gap = SCHOOLS[RULES.school].missing
+  if (gap) {
+    font(ctx, 6, 600)
+    ctx.fillStyle = 'rgba(255,209,102,0.6)'
+    ctx.fillText(`except: ${gap}`, VIEW_W / 2, 106 + lines.length * 10 + 2)
+  }
 }
 
 /** The tuning readout: what each fighter is doing, this frame, in the genre's own vocabulary. */

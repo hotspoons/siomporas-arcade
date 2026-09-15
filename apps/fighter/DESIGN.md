@@ -54,7 +54,8 @@ Blanka — and one stage, Guile's airbase.
 | `F1` | **hitboxes and frame data** |
 | `F2` | training dummy |
 | `1` `2` `3` `4` | opponent: guard / easy / hard / second player |
-| `F3` `F4` | **which school of defence, and of jumping** — see below |
+| `F5` | **play under another arcade board's rules entirely** — see below |
+| `F3` `F4` | the defence and the jump on their own |
 | `Space` · `Numpad0` | guard, in the school that has a guard button |
 | `Enter` | character select |
 | `5` `6` `7` `8` | pick P1 from the first four of the roster |
@@ -68,8 +69,23 @@ press `4` first and the second cursor becomes the arrow keys and the numpad.
 A gamepad works: face buttons and the two right shoulders are the six buttons, the left shoulders
 are the three-punch and three-kick macros, d-pad or left stick moves.
 
-**Press F3.** The three arcade boards in `research/BUILDER.md` give three different answers to the
-most basic question a fighting game asks, and this cycles between them mid-fight:
+**Press F5.** Four arcade boards were measured for `research/BUILDER.md`, and this puts the fight
+under one of their rulebooks entirely — defence, jumping and chip damage together. The same two
+characters on the same stage, playing like a different game.
+
+| | |
+|---|---|
+| `street-fighter` | Champion Edition, which is what every number in `system.json` was measured from |
+| `third-strike` | the same defence and chip — **no parry**, which this sim has no concept of |
+| `tekken` | standing still guards, and **nothing chips** |
+| `virtua-fighter` | a guard button that roots you, two jumps, and no chip |
+
+`?rules=virtua-fighter` picks one on arrival. **Each preset says on screen what it cannot
+reproduce** — the parry, Tekken's animation-owned jump height, Virtua Fighter's ring-out — because
+a preset that hid those would be claiming more than it delivers.
+
+**Press F3.** The three arcade boards give three different answers to the most basic question a
+fighting game asks, and this cycles between them mid-fight:
 
 | | how you defend |
 |---|---|

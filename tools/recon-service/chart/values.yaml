@@ -1,11 +1,18 @@
 image:
-  # Built and published by .gitlab-ci.yml to Harbor's `sandbox` project — a personal project has no
-  # business in a production repository. The project is public, so no pull secret is needed.
-  repository: harbor.tools.basedweights.com/sandbox/recon
-  # `latest` is a MOVING tag, so the pull policy has to be Always. With IfNotPresent a node that has
-  # ever pulled `latest` keeps serving whatever it cached — a `rollout restart` then cheerfully
-  # restarts the OLD image and the fix you just published never lands. Pin `tag` to a commit sha
-  # (e.g. "a6c6d543") for a reproducible deploy and IfNotPresent becomes correct again.
+  # ghcr, not the Harbor this was first proven on. Harbor is a work registry and this is a personal
+  # project — it has no business being a permanent dependency of this application's CI. It was the
+  # right place to get the build working (native arm64 runners, a mirrored CUDA base) and the wrong
+  # place to leave it.
+  #
+  # The GH200s can still pull THROUGH Harbor's existing ghcr.io pull-through cache without Harbor
+  # being part of the pipeline — that cache already fronts every ghcr image on the cluster. Set
+  # `repository` to harbor.tools.basedweights.com/ghcr.io/hotspoons/recon for that; the bytes are
+  # the same and CI never touches Harbor.
+  repository: ghcr.io/hotspoons/recon
+  # `latest` MOVES. With IfNotPresent a node that has ever pulled it keeps serving its cache, so a
+  # rollout restarts the old image and the fix you just published never lands — which cost two
+  # identical diagnoses before the digest gave it away. Pin `tag` to a commit sha for a reproducible
+  # deploy and IfNotPresent becomes correct again.
   tag: "latest"
   pullPolicy: Always
 

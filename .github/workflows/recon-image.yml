@@ -1,24 +1,23 @@
 # Build and publish the reconstruction service image for both architectures.
 #
 # The service (tools/recon-service) compiles four CUDA extensions from source — CuMesh, o-voxel,
-# FlexGEMM and nvdiffrast. That is the whole reason it runs on the GH200s at all, where TRELLIS 1
-# cannot: nothing here depends on a prebuilt x86 wheel. It also means the build is a real compile,
-# not a pip install, and that dictates the shape of this workflow.
+# FlexGEMM and nvdiffrast. That is why it runs on Grace-Hopper at all, where TRELLIS 1 cannot:
+# nothing here depends on a prebuilt x86 wheel. It also means the build is a real compile.
 #
-# WHY NATIVE RUNNERS AND NOT QEMU. The usual `docker/build-push-action` with `platforms:` emulates
-# the foreign architecture. Emulating nvcc across thousands of translation units is roughly an
-# order of magnitude slower than native and reliably exceeds the job limit. So each architecture is
-# built on its own runner, pushed by digest, and the two are stitched into one manifest afterwards.
-# `ubuntu-24.04-arm` is a first-class GitHub runner; no self-hosting needed.
+# WHY NATIVE RUNNERS AND NOT QEMU. `platforms: linux/arm64` on an amd64 runner emulates nvcc, which
+# is roughly an order of magnitude slower than native and does not finish inside a job. Each
+# architecture builds on its own runner and the manifest is stitched afterwards. `ubuntu-24.04-arm`
+# is a first-class GitHub runner and free for public repositories.
 #
-# WHY THE GPU ARCH LIST DIFFERS PER PLATFORM. TORCH_CUDA_ARCH_LIST is the set of GPU
-# architectures nvcc emits code for, and each one costs build time and image size. arm64 here means
-# Grace-Hopper, which is sm_90 and nothing else. amd64 is a datacentre/desktop mix, so it carries
-# Ampere through Hopper. Override with the inputs if you are targeting something else — Blackwell
-# is 12.0, which is what the people in TRELLIS.2#19 were building for.
+# WHAT ACTUALLY BROKE THE FIRST TIME, since guessing about it wasted an evening: not disk, not the
+# cache, not emulation. The Dockerfile had never been built by anyone. `torch` was unpinned, drifted
+# onto 2.14 — whose headers require C++20 while CuMesh hard-codes -std=c++17 — and the compile died.
+# The image is 7.6GB amd64 / 10.9GB arm64, comfortably inside a runner. The Dockerfile now pins
+# torch and ends with a self-check that imports everything it compiled, so this class of failure
+# fails the BUILD rather than the deployment.
 #
-# This does NOT run on every push: the image takes tens of minutes and almost no commit touches it.
-# It runs when tools/recon-service changes, on a tag, or when started by hand.
+# This does NOT run on every push: the build takes tens of minutes and almost no commit touches it.
+# It runs when tools/recon-service changes, or by hand.
 name: Recon image
 
 on:

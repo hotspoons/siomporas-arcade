@@ -25,15 +25,18 @@ spec ──► proportion.mjs ──► flux.2-dev ──► keyed cut-out ─�
 `signDrive` and `signBay`, which share one blank board with `signCoast` and differ only in the
 wording the game paints on. `node generate.mjs --audit` prints that comparison; keep it at zero.
 
-## The recon leg is blocked on an image that does not exist
+## The recon leg: where it actually stands
 
-Not on access: with `KUBECONFIG=~/.kube/config.bradley` the Grace-Hopper cluster is reachable and
-has five GH200s, `ceph-filesystem` for the weights PVC and the `central-gateway` the chart expects.
-There is simply nothing to deploy. No recon service, pod or PVC exists in any namespace on any
-context, and `ghcr.io/hotspoons/recon:0.1.0` is not pullable because **the last two runs of the
-`Recon image` workflow both failed**, at `Build and push by digest`, on both architectures
-(2026-09-15 01:27 and 01:38). Fix that build and `helm upgrade --install recon ./chart -n default`
-should be the whole deployment.
+With `KUBECONFIG=~/.kube/config.bradley` the Grace-Hopper cluster is reachable and has everything
+the chart asks for — five GH200s, `ceph-filesystem` for the weights PVC, the `central-gateway` the
+HTTPRoute attaches to. What was missing was the image. The GitHub Actions build failed twice on
+2026-09-15 at `Build and push by digest`; the service has since moved to publishing from GitLab CI
+into `harbor.tools.basedweights.com/sandbox/recon:latest`, which is what the chart now installs.
+That half belongs to the photogrammetry agent — ask rather than redeploying it underneath them.
+
+Once it is up, nothing here needs regenerating: `generate.mjs --recon` posts the cut-outs already on
+disk and writes the mesh beside them. The generation and the reconstruction are separable on
+purpose, and 44 subjects are already keyed and waiting.
 
 So the `.glb` half of `generate.mjs` is written against the service's actual API
 (`tools/recon-service/app/main.py`: POST `/reconstruct` with `images`, poll `/jobs/<id>`, GET

@@ -469,7 +469,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
 
   const id = flag('id')
   const klass = flag('class')
-  if ((!id && !klass && !has('audit') && !has('rekey')) || has('help')) {
+  if ((!id && !klass && !has('audit') && !has('rekey') && !has('recon')) || has('help')) {
     console.log(`
   node tools/assetgen/generate.mjs --id hero-prototype [options]
   node tools/assetgen/generate.mjs --class vehicle --dry-run
@@ -488,6 +488,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     --long           allow a prompt over ${BUDGET} characters
     --audit          which of the game's kinds have a spec, and which specs have no slot
     --rekey          re-cut every keyed view already on disk, without generating anything
+    --recon          reconstruct from the cut-outs already on disk — no generation at all.
+                     Takes --id or --class to narrow it, --views N to cap views per subject
     --out DIR        default ext/assetgen
     --field NAME     attachment field: image[] for flux.2-dev, image for klein
 
@@ -498,6 +500,43 @@ if (import.meta.url === `file://${process.argv[1]}`) {
 
   const file = path.join(HERE, 'assets.json')
   const { defaults, assets } = JSON.parse(readFileSync(file, 'utf8'))
+
+  if (has('recon')) {
+    // Reconstruct from the cut-outs already on disk. The generation and the reconstruction are
+    // separable — one costs 25 seconds of diffusion per view and the other about seven seconds of
+    // TRELLIS — and for most of a day the second half was not deployable at all. Anything already
+    // keyed should never have to be generated twice to get a mesh out of it.
+    const dir = flag('out', 'ext/assetgen')
+    const only = flag('id')
+    const klassOnly = flag('class')
+    const want = assets.filter((a) => (only ? a.id === only : klassOnly ? a.class === klassOnly : true))
+    let made = 0
+    let failed = 0
+    for (const spec of want) {
+      const d = path.join(ROOT, dir, spec.id)
+      if (!existsSync(d)) continue
+      const keyed = readdirSync(d)
+        .filter((f) => /^view-\d+-.*-keyed\.png$/.test(f))
+        .sort()
+        .slice(0, Number(flag('views', 8)))
+        .map((f) => path.join(d, f))
+      if (!keyed.length) continue
+      const glb = path.join(d, `${spec.id}.glb`)
+      try {
+        const st = await recon(keyed, glb, { seed: Number(flag('seed', 1)) })
+        const meta = existsSync(path.join(d, 'meta.json')) ? JSON.parse(readFileSync(path.join(d, 'meta.json'), 'utf8')) : { id: spec.id }
+        meta.mesh = { file: path.basename(glb), views: keyed.length, vertices: st.vertices, faces: st.faces, seconds: st.seconds }
+        writeFileSync(path.join(d, 'meta.json'), `${JSON.stringify(meta, null, 2)}\n`)
+        console.log(`${spec.id}: ${st.faces} faces, ${st.vertices} vertices, ${st.seconds}s, ${keyed.length} view${keyed.length > 1 ? 's' : ''}`)
+        made++
+      } catch (e) {
+        failed++
+        console.error(`${spec.id}: ${e.message}`)
+      }
+    }
+    console.log(`${made} meshes, ${failed} failed  (RECON_HOST=${RECON_HOST})`)
+    process.exit(failed ? 1 : 0)
+  }
 
   if (has('rekey')) {
     // The key has been changed more than once since the first views were generated, and a keyer

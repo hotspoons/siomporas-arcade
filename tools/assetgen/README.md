@@ -21,6 +21,7 @@ node proportion.mjs --id hero-prototype --annotate   # the measured outline, dim
 node generate.mjs --class vehicle --dry-run          # every prompt that would be sent, nothing spent
 node generate.mjs --id hero-prototype                # one asset, end to end
 node generate.mjs --audit                            # which of the game's kinds still have no spec
+node generate.mjs --recon --class nature             # mesh what is already keyed, no generation
 ```
 
 Outputs land in `ext/assetgen/<id>/` — gitignored — as the proportion reference, the generated view,

@@ -24,13 +24,19 @@ end
 -- answer to being thrown — and something has to be the answer to crouching, or ducking would simply
 -- be correct. In this genre that something is a **mid**: an attack a crouching guard does not stop.
 -- None of P, K or d+K is one, so this looks for it.
+-- **Order matters and it took a failed control to notice.** A throw leaves its victim on the floor,
+-- and a test that runs after one inherits a fighter who is getting up somewhere else — so the throw
+-- whiffs and reads as zero damage, which looks exactly like a successful defence. The proof was a
+-- run in which "guarding, no escape" escaped: the same control that had been thrown for 40 as the
+-- first test of a run took no damage at all as the fourth.
+--
+-- So the claim that a throw cannot touch a crouching opponent, made from the *third* test of a run,
+-- has to be re-made from the first. That is what this is: crouching guard first, and the two that
+-- already worked afterwards as a sanity check.
 local TESTS = {
-  { name = "f+K   vs a crouching guard", hold = { "right", "k" }, guard = { "down", "g" } },
-  { name = "df+K  vs a crouching guard", hold = { "down", "right", "k" }, guard = { "down", "g" } },
-  { name = "f+P   vs a crouching guard", hold = { "right", "p" }, guard = { "down", "g" } },
-  { name = "df+P  vs a crouching guard", hold = { "down", "right", "p" }, guard = { "down", "g" } },
-  { name = "b+K   vs a crouching guard", hold = { "left", "k" }, guard = { "down", "g" } },
-  { name = "u+K   vs a crouching guard", hold = { "up", "k" }, guard = { "down", "g" } },
+  { name = "P+G vs a CROUCHING guard (first)", hold = { "p", "g" }, guard = { "down", "g" } },
+  { name = "P+G vs a held guard", hold = { "p", "g" }, guard = { "g" } },
+  { name = "P+G vs an idle opponent", hold = { "p", "g" }, guard = {} },
 }
 
 local f = 900

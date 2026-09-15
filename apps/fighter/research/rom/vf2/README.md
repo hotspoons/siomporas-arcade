@@ -333,11 +333,41 @@ That is the whole game, and it is the part a builder would actually want: not "V
 throws" but **a guard that is free, rooted, and half-height; a throw worth 20% that beats it; and a
 crouch that dodges the throw and loses to a mid worth 15%.** Four numbers and three rules.
 
+## A warning about every "nothing landed" in this file
+
+Late on, a control failed, and it changes how much weight each row above can carry.
+
+A run measures several things in sequence, re-walking into range between each. **A throw leaves its
+victim on the floor**, so a test that follows one inherits a fighter who is getting up somewhere
+else — the throw whiffs, the probe reads zero damage, and zero damage looks exactly like a
+successful defence. The proof: a trial labelled *"guarding, no escape"*, with no escape input at
+all, was thrown for 40 as the **first** test of a run and took **no damage at all** as the fourth.
+
+So there is an asymmetry in the evidence here, and it is worth stating plainly:
+
+- **A hit that landed is trustworthy wherever it appears in a run.** Damage does not materialise out
+  of a disturbed state. Every "went through" in this file is safe.
+- **A zero is only trustworthy as the first test of a run**, or when the probe separately saw the
+  defender's state change — which is what distinguishes a genuine block from a whiff.
+
+Re-checked on that basis: *a throw cannot touch a crouching opponent* was originally the third test
+of its run and has been re-measured as the **first** test of another. It holds. The blocked jab and
+blocked kick are safe too, because the probe detected the defender's phase changing — it saw the
+blow arrive and be blocked, rather than merely seeing nothing happen. The weakest rows are the
+"nothing lands" entries for standing attacks against a crouching guard, which were second and sixth
+in their run and rest on an absence.
+
 ## What was not found
 
-The stagger and recovery systems, and how the camera is driven. Throw *escapes* — Virtua Fighter's
-answer to the throw being this strong — were not tested, and on a board where a throw is worth a
-fifth of a health bar they are presumably the next load-bearing mechanic.
+**Throw escapes remain untested**, and the attempt is worth describing because it failed
+instructively. Mashing the throw command during a throw appeared to escape it; so, in the same run,
+did mashing the punch button alone, and the guard button alone. Repeating those two showed both
+thrown, twice each. Then a plain control escaped, and the whole experiment collapsed into the
+ordering artefact above. The design cannot answer the question: after a throw the victim is on the
+floor, so every trial but the first is measuring a different situation. One trial per run would work
+and costs about three minutes each.
+
+Also untouched: the stagger and recovery systems, and how the camera is driven.
 
 ## For the builder: the switches these two boards disagree on
 

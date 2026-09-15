@@ -13,6 +13,10 @@ M.cpu = manager.machine.devices[":maincpu"]
 M.mem = M.cpu.spaces["program"]
 M.ports = manager.machine.ioport.ports
 
+--- Model 2 hands its work RAM to MAME as a share, which the PSX boards do not. Where it exists it
+--- is a megabyte rather than four, and it is the only place the fight can be.
+M.WORKRAM = manager.machine.memory.shares[":workram"]
+
 -- Main RAM: **4MB**, not the 2MB a PlayStation has — Namco doubled it for System 12, and the whole
 -- of the live game state sits in the half above 0x200000. The lower half is code and static data
 -- and changes about thirteen bytes a second, which is how much time you can lose believing the
@@ -31,18 +35,33 @@ local function findField(...)
   end
 end
 
--- Tekken's four buttons are limbs, not strengths: left punch, right punch, left kick, right kick.
+-- The two schools of 3D fighting differ before you measure anything, and it shows up here.
+--
+-- **Tekken** gives you four buttons and they are *limbs* — left punch, right punch, left kick,
+-- right kick — and no guard button at all: you block by holding away, as every 2D game does.
+-- **Virtua Fighter** gives you three, and one of them is **Guard**. Blocking is a button you press,
+-- not a direction you hold, which frees the stick for movement while defending and is most of why
+-- the two games feel nothing alike.
+--
+-- Both sets are looked up here and whichever the board has is what you get; the other is nil and
+-- `M.hold` ignores it.
 M.FIELD = { {}, {} }
 for p = 1, 2 do
   local pre = "P" .. p .. " "
   M.FIELD[p] = {
     up = findField(pre .. "Up"), down = findField(pre .. "Down"),
     left = findField(pre .. "Left"), right = findField(pre .. "Right"),
+    -- Tekken: four limbs
     lp = findField(pre .. "Button 1"), rp = findField(pre .. "Button 2"),
     lk = findField(pre .. "Button 3"), rk = findField(pre .. "Button 4"),
+    -- Virtua Fighter: punch, kick, and a guard you hold
+    p = findField(pre .. "Punch"), k = findField(pre .. "Kick"), g = findField(pre .. "Guard"),
     start = findField(p .. " Player Start", p .. " Players Start"),
   }
 end
+
+--- True on a board whose defence is a button rather than a direction.
+M.HAS_GUARD = M.FIELD[1].g ~= nil
 M.COIN = findField("Coin 1", "Coin A", "Coin")
 
 function M.set(port, name, v)

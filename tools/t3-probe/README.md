@@ -1,10 +1,13 @@
-# t3-probe — driving Namco System 12 headlessly
+# t3-probe — driving the 3D boards headlessly
 
-The 3D counterpart to `tools/sf2-probe`. It boots Tekken 3 in MAME with no video and no sound,
+The 3D counterpart to `tools/sf2-probe`. It boots a 3D fighter in MAME with no video and no sound,
 drives it from attract mode into a two-player fight, and reads the board's memory while it plays.
+Two boards so far: **Namco System 12** (Tekken 3, and its Soul Calibur and Tekken Tag siblings) and
+**Sega Model 2** (Virtua Fighter 2).
 
-Findings live in `apps/fighter/research/rom/tekken3/README.md`. **Read that first** — it has the
-memory map, the numbers, and the four expensive mistakes not to repeat.
+Findings live in `apps/fighter/research/rom/tekken3/README.md` and
+`apps/fighter/research/rom/vf2/README.md`. **Read those first** — they have the memory maps, the
+numbers, and the mistakes not to repeat.
 
     tools/t3-probe/run.sh measure.lua                  # walk, sidestep, jump; writes measure.csv
     node tools/t3-probe/motion.mjs                     # turn that into units per frame
@@ -17,6 +20,14 @@ memory map, the numbers, and the four expensive mistakes not to repeat.
 
     tools/t3-probe/run.sh findhealth.lua               # land punches
     node tools/t3-probe/hp.mjs                         # which word is health
+
+Virtua Fighter 2, whose probes need no companion script because Model 2's work RAM is a share and
+the whole search runs inside the emulator:
+
+    tools/t3-probe/run.sh vf-calibrate.lua vf2         # pictures of the way in
+    tools/t3-probe/run.sh vf-pos.lua vf2               # find a fighter's x
+    tools/t3-probe/run.sh vf-ring.lua vf2              # walk off the edge, record where it was
+    tools/t3-probe/run.sh vf-measure.lua vf2           # walks, guard, crouch, jump
 
 Environment: `PROBE_SECONDS` (emulated seconds to run — must cover the whole schedule),
 `PROBE_TIMEOUT` (wall-clock kill), `PROBE_OUT` (where dumps and CSVs land).
@@ -38,7 +49,18 @@ live two-player fight is about 30 seconds.
 
 **Both start buttons.** `M.tapStart(f, 1)` then `M.tapStart(f + 60, 2)`. Pressing only player two's
 starts a game against the machine that looks like versus and is not, and a moving opponent makes
-every differential measurement meaningless.
+every differential measurement meaningless. On VF2 also feed **eight coins**: that board is set to
+two coins per credit, so three buys one play and the second player never joins.
+
+## The two boards are not alike, and the differences bite
+
+|  | System 12 (Tekken 3) | Model 2 (Virtua Fighter 2) |
+|---|---|---|
+| live state | 4MB of PSX RAM above `0x200000`, via the CPU's address space | **1MB `:workram` share**, `M.WORKRAM` |
+| reading it | `M.mem:read_range`, dump to disk, analyse in Node | `W:read_u32` — a **full scan costs 20ms**, so search in Lua |
+| numbers | fixed-point integers | **IEEE floats** — read them as integers and you find nothing |
+| buttons | four limbs, `lp rp lk rk` | three, `p k g` — and `M.HAS_GUARD` is true |
+| headless speed | ~440% | ~250% |
 
 ## The method, since it is most of the work
 

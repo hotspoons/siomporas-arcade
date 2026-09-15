@@ -2,8 +2,12 @@ image:
   # Built and published by .gitlab-ci.yml to Harbor's `sandbox` project — a personal project has no
   # business in a production repository. The project is public, so no pull secret is needed.
   repository: harbor.tools.basedweights.com/sandbox/recon
+  # `latest` is a MOVING tag, so the pull policy has to be Always. With IfNotPresent a node that has
+  # ever pulled `latest` keeps serving whatever it cached — a `rollout restart` then cheerfully
+  # restarts the OLD image and the fix you just published never lands. Pin `tag` to a commit sha
+  # (e.g. "a6c6d543") for a reproducible deploy and IfNotPresent becomes correct again.
   tag: "latest"
-  pullPolicy: IfNotPresent
+  pullPolicy: Always
 
 # One GPU, one replica. The service serialises reconstructions internally, so a second replica
 # only helps if you also have a second GPU — scale the node pool, not this number, unless you do.

@@ -67,9 +67,29 @@
   .item .kb { color: var(--faint); font-size: 11px; flex: none; font-variant-numeric: tabular-nums; }
   .item:hover .kb { color: var(--dim); }
 
-  .stage { position: relative; border: 1px solid var(--edge); border-radius: 6px; overflow: hidden; background: var(--sunk); }
-  #cv { display: block; width: 100%; aspect-ratio: 16 / 11; }
-  @media (max-width: 560px) { #cv { aspect-ratio: 4 / 5; } }
+  .stage {
+    position: relative; border: 1px solid var(--edge); border-radius: 6px; overflow: hidden;
+    background: var(--sunk);
+    /* Vertical only, deliberately. The stage is a grid item in a `minmax(0, 1fr)` column, so a
+       horizontal drag fights the track and the handle appears stuck. Width comes from the Wide
+       button, which collapses the rails instead. */
+    resize: vertical;
+    height: clamp(300px, 56vh, 820px);
+    min-height: 240px;
+    max-height: 90vh;
+  }
+  #cv { display: block; width: 100%; height: 100%; }
+  /* The native handle is invisible on a dark ground; draw a corner grip over it. */
+  .stage::after {
+    content: ""; position: absolute; right: 2px; bottom: 2px; width: 14px; height: 14px;
+    pointer-events: none; opacity: .55;
+    background:
+      linear-gradient(135deg, transparent 46%, var(--dim) 46%, var(--dim) 54%, transparent 54%),
+      linear-gradient(135deg, transparent 72%, var(--dim) 72%, var(--dim) 80%, transparent 80%);
+  }
+  .panes.wide { grid-template-columns: minmax(0, 1fr); }
+  .panes.wide .pane { display: none; }
+  .panes.wide .stage { height: clamp(360px, 74vh, 1100px); }
   .overlay {
     position: absolute; inset: auto 0 0 0; display: flex; flex-wrap: wrap; gap: .4rem;
     padding: .6rem; background: linear-gradient(to top, rgba(4,5,10,.82), transparent);
@@ -151,6 +171,8 @@
         <button id="flat" aria-pressed="false">Unlit</button>
         <button id="grid" aria-pressed="true">Grid</button>
         <button id="reset">Reset</button>
+        <button id="wide" aria-pressed="false" title="Hide the side panels and give the viewport the full width">Wide</button>
+        <button id="fit">Fit</button>
       </div>
     </div>
 
@@ -727,13 +749,48 @@ $('grid').addEventListener('click', () => {
 });
 $('reset').addEventListener('click', home);
 
+const stageEl = document.querySelector('.stage');
+const panesEl = document.querySelector('.panes');
+
 function size() {
   const w = cv.clientWidth, h = cv.clientHeight;
   if (!w || !h) return;
   renderer.setSize(w, h, false);
-  camera.aspect = w / h; camera.updateProjectionMatrix();
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
 }
+
+// The window never resizes when someone drags the stage's own handle, so a `resize` listener alone
+// leaves the render buffer at its old size and the image stretches. Watch the element.
+new ResizeObserver(() => { size(); saveStageHeight(); }).observe(stageEl);
 addEventListener('resize', size);
+
+// Per-viewer convenience only: the height someone dragged to, remembered on this browser. Every
+// storage access is guarded — a private window or blocked site data throws on access, not on use.
+const HKEY = 'lathe.stageHeight';
+let saveTimer = null;
+function saveStageHeight() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    try { localStorage.setItem(HKEY, String(Math.round(stageEl.getBoundingClientRect().height))); }
+    catch { /* storage unavailable; the size simply is not remembered */ }
+  }, 400);
+}
+try {
+  const saved = parseInt(localStorage.getItem(HKEY) || '', 10);
+  if (Number.isFinite(saved) && saved >= 240) stageEl.style.height = saved + 'px';
+} catch { /* ignore */ }
+
+$('wide').addEventListener('click', () => {
+  const on = $('wide').getAttribute('aria-pressed') !== 'true';
+  $('wide').setAttribute('aria-pressed', String(on));
+  panesEl.classList.toggle('wide', on);
+  // A class change resizes the element, which the observer picks up; nothing to do here.
+});
+
+// Re-frame the camera on whatever is loaded, at the current viewport shape.
+$('fit').addEventListener('click', () => { if (current) { frame(current); } });
+
 size();
 
 if (matchMedia('(prefers-reduced-motion: reduce)').matches) setSpin(false);

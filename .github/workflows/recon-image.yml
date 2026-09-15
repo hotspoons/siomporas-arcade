@@ -26,9 +26,12 @@ on:
     # `paths` applies to every ref this trigger matches, so a tag filter here would only fire when
     # the tagged commit itself touched these files — usually never. Cut a release build by
     # dispatching this workflow against the tag instead; the tag rule below still names the image.
+    # NOT this workflow file. It used to be listed here, so editing a COMMENT in it started a
+    # forty-minute image build — and with cancel-in-progress, the next commit killed that build.
+    # Ten runs, eight cancelled, and the one marked "failure" was a runner shutdown mid-apt. The
+    # build had never actually failed on its merits. Use workflow_dispatch to test changes here.
     paths:
       - 'tools/recon-service/**'
-      - '.github/workflows/recon-image.yml'
   workflow_dispatch:
     inputs:
       arch_list_amd64:
@@ -44,7 +47,10 @@ env:
 
 concurrency:
   group: recon-image-${{ github.ref }}
-  cancel-in-progress: true
+  # Queue, do not kill. Cancelling is right for a two-minute site deploy where only the newest commit
+  # matters; it is wrong for a forty-minute compile, where an unrelated push half an hour in throws
+  # away all of it and reports a failure that never happened.
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -104,6 +110,9 @@ jobs:
           # Registry cache, not type=gha. This image is north of 20GB unpacked and GitHub's Actions
           # cache is capped at 10GB per repository — `mode=max` there evicts itself at best and
           # fails the step at worst. GHCR has no such cap and the cache lives beside the image.
+          # On the very first build this logs `failed to configure registry cache importer: ... not
+          # found`, because the cache does not exist yet. It is not fatal — buildkit carries on and
+          # writes one — but it reads like an error in the log, so: expected, once.
           cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache-${{ matrix.slug }}
           cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache-${{ matrix.slug }},mode=max,image-manifest=true,oci-mediatypes=true
           provenance: false

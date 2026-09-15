@@ -214,11 +214,42 @@ needs a move list: `d/f+2` was tried, and Xiaoyu simply crouched.
   only him walk and keeping the one word in 128KB that moved at a constant 14.4 a frame *and* had a
   zero in the next word — the root's signature, since the fighter stands on the floor. The twenty
   other words that walked with him were skeleton bones, whose next word is their height above it.
-- **Frame data** — startup, active, recovery — is now unblocked and not yet done. All three
-  instruments exist: the animation pointer, the per-animation frame counter at `0x31e194`, and now
-  health. Virtua Fighter 2 shows what it looks like once you have them — a single phase word there
-  gives startup, active and recovery directly and a whole move list falls out of one run — and
-  Tekken 3 probably has the same word. Nothing has looked for it yet.
+- **Frame data: partly. There is no phase word on this board, and that is the finding.**
+  A scan of the live half of RAM for Virtua Fighter 2's trick — one value at rest, another for
+  exactly as long as a move lasts, back afterwards, and small enough to be an enumeration — returned
+  five words and every one was binary. There is nothing here that says *startup, active, recovery*.
+  What there is: the **animation pointer** at `0x31e190`, which changes for whatever the fighter is
+  doing and returns to its standing value when the move is over.
+
+  So the durations below are **animation lengths, not frame data**. The distinction matters: the
+  animation includes the whole return to stance, which runs past the point a player can act again,
+  so every number here is an upper bound on the move rather than the recovery a player feels. Read
+  them against each other, not against Champion Edition's tables.
+
+  | move (whiffed in open space) | animation, frames |
+  |---|---|
+  | `lp` left punch | 40 |
+  | `rp` right punch | 42 |
+  | `f+rp` forward right punch | 42 |
+  | `rk` right kick | 47 |
+  | `d+rk` low kick | 52 |
+  | `lk` left kick | 61 |
+  | `d+lp` crouching left punch | 67 |
+
+  And one move measured properly against a body, since it is the one that gets through a standing
+  guard:
+
+  | `d+rk` low kick | |
+  |---|---|
+  | contact on frame | **14** |
+  | damage | **7** of 140 |
+  | animation ends | 52 |
+
+  Two traps met on the way, both worth avoiding next time. The **busy flag** at `0x31e1f4` looks like
+  a move indicator and is not: it was found with a kick, and every punch leaves it at zero, so an
+  entire run reported that no move had ever started. And a probe that measures eight moves from one
+  approach lands **none** of them — the fighters drift apart, and the low kick has to reach. Walk
+  back in before every single measurement.
 - **Ring-outs, walls and floor breaks**, and **how the camera is driven**, are untouched. Two
   addresses near `0x3ff7d0` trace a small arc during a jump and are the obvious camera candidates.
 

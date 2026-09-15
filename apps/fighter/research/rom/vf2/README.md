@@ -325,8 +325,8 @@ and how the camera is driven.
 | maths | fixed point | fixed point | **IEEE floats** |
 | full health | 144 | **140** | **196** |
 | chip damage on block | yes, on specials | **none** — a blocked punch did 0 | **none at all** |
-| fastest attack | 3 frames (jab) | unknown — needs a phase word | **8 frames** |
-| a normal's total | 12–35 frames | unknown | **19–40 frames** |
+| fastest attack | 3 frames (jab) | 14 to contact (low kick) | **8 frames** |
+| a normal's total | 12–35 frames | 40–67 (animation, not recovery) | **19–40 frames** |
 | jump height | simulated, one fixed arc | **animation** — world y is always 0 | **simulated, two arcs**: hop 32f/1.44, jump 72f/2.81, one gravity |
 
 Those seven rows are, roughly, the menu. A builder that let you choose "guard button + rooted

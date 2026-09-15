@@ -13,7 +13,7 @@ import { Button, type ButtonMask } from '../sim/Motion'
 import { Match } from '../sim/Match'
 import { CHARACTERS } from '../sim/Character'
 import { Cpu, type Difficulty } from '../sim/Cpu'
-import { DEFENCE_SCHOOLS, RULES, setDefence, type DefenceMode } from '../sim/Character'
+import { DEFENCE_SCHOOLS, JUMP_SCHOOLS, RULES, setDefence, setJump, type DefenceMode, type JumpMode } from '../sim/Character'
 import { render, type RenderOptions, type Scene } from '../view/Render'
 import { renderSelect } from '../view/SelectScreen'
 import { Select } from './Select'
@@ -68,6 +68,8 @@ export interface GameSettings {
   select?: boolean
   /** Which school of defence to fight under. See `research/BUILDER.md`. */
   defence?: string
+  /** Whether a jump is one arc or two. */
+  jump?: string
 }
 
 export class Game {
@@ -101,6 +103,7 @@ export class Game {
     this.ctx = ctx
     this.stage = settings.stage ?? 'airbase'
     if (settings.defence && settings.defence in DEFENCE_SCHOOLS) setDefence(settings.defence as DefenceMode)
+    if (settings.jump && settings.jump in JUMP_SCHOOLS) setJump(settings.jump as JumpMode)
     this.match = new Match(settings.p1 ?? 'ryu', settings.p2 ?? 'zangief')
     void this.loadArt()
     // A link that names its fighters is a link to that fight; anything else starts where an arcade
@@ -257,6 +260,13 @@ export class Game {
       case 'F3': {
         const modes = Object.keys(DEFENCE_SCHOOLS) as DefenceMode[]
         setDefence(modes[(modes.indexOf(RULES.defence) + 1) % modes.length])
+        this.options.hint = true
+        return true
+      }
+      // F4 does the same for the jump: one fixed arc, or a hop and a commitment chosen by the stick.
+      case 'F4': {
+        const modes = Object.keys(JUMP_SCHOOLS) as JumpMode[]
+        setJump(modes[(modes.indexOf(RULES.jump) + 1) % modes.length])
         this.options.hint = true
         return true
       }

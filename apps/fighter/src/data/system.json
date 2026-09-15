@@ -75,5 +75,10 @@
     "$comment": "Which school of defence is in force. See research/BUILDER.md: the three arcade boards measured give three different answers, and this is the switch between them. 'hold-away' is Champion Edition and Third Strike; 'auto-standing' is Tekken 3, where doing nothing guards highs and mids; 'guard-button' is Virtua Fighter 2, where guard is a button that also roots you to the floor.",
     "mode": "hold-away",
     "rootedWhileGuarding": false
+  },
+  "jump": {
+    "$comment": "How many jumps a character has. 'fixed' is Champion Edition: one arc, whatever you do. 'by-hold' is Virtua Fighter 2, which gives a hop for a tap and a committed jump for a hold \u2014 measured at 32 and 72 frames airborne, a ratio of 0.44, which is what hopFactor scales the launch velocity by. Tekken's answer, where height belongs to the animation entirely, is deliberately not offered: see research/BUILDER.md.",
+    "mode": "fixed",
+    "hopFactor": 0.44
   }
 }

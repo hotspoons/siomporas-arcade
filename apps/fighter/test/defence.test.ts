@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { Match } from '../src/sim/Match'
 import { Button } from '../src/sim/Motion'
-import { RULES, SYSTEM, setDefence } from '../src/sim/Character'
+import { RULES, SYSTEM, setDefence, setJump } from '../src/sim/Character'
 import { Cpu } from '../src/sim/Cpu'
 
 // Every test leaves the rules as it found them: this is global state on purpose — the whole point
@@ -109,5 +109,46 @@ describe('the machine plays by the same rules', () => {
     const f = cpu.decide(b, a)
     expect(f.buttons & Button.G).toBeFalsy()
     expect(f.x).toBeLessThan(0)
+  })
+})
+
+describe('the two schools of jumping', () => {
+  afterEach(() => setJump(SYSTEM.jump.mode))
+
+  /** How high the fighter gets, holding up for `holdFrames` of the prejump. */
+  function apex(holdFrames: number): number {
+    const m = started()
+    const [a, b] = m.fighters
+    let high = 0
+    for (let f = 0; f < 120; f++) {
+      a.history.push(0, f < holdFrames ? 1 : 0, 0)
+      b.history.push(0, 0, 0)
+      m.tick()
+      if (a.y > high) high = a.y
+    }
+    return high
+  }
+
+  it('Street Fighter gives one arc however briefly you press up', () => {
+    setJump('fixed')
+    expect(apex(1)).toBeCloseTo(apex(40), 5)
+  })
+
+  it('Virtua Fighter gives a hop for a tap and a full jump for a hold', () => {
+    setJump('by-hold')
+    const hop = apex(1)
+    const full = apex(40)
+    expect(hop).toBeGreaterThan(0)
+    expect(hop).toBeLessThan(full)
+    // Under one gravity the height goes as the square of the launch, so a 0.44 launch is about a
+    // fifth of the height — which is what makes a hop a different move rather than a smaller jump.
+    expect(hop / full).toBeCloseTo(SYSTEM.jump.hopFactor ** 2, 1)
+  })
+
+  it('and the full jump is exactly the fixed one', () => {
+    setJump('fixed')
+    const fixed = apex(40)
+    setJump('by-hold')
+    expect(apex(40)).toBeCloseTo(fixed, 5)
   })
 })

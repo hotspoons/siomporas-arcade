@@ -54,7 +54,7 @@ Blanka — and one stage, Guile's airbase.
 | `F1` | **hitboxes and frame data** |
 | `F2` | training dummy |
 | `1` `2` `3` `4` | opponent: guard / easy / hard / second player |
-| `F3` | **which school of defence is in force** — see below |
+| `F3` `F4` | **which school of defence, and of jumping** — see below |
 | `Space` · `Numpad0` | guard, in the school that has a guard button |
 | `Enter` | character select |
 | `5` `6` `7` `8` | pick P1 from the first four of the roster |
@@ -81,6 +81,21 @@ most basic question a fighting game asks, and this cycles between them mid-fight
 — a low must always be guarded low — so switching school changes what *counts* as guarding, not what
 guarding stops. The machine translates its own intent, so it guards with the button when that is what
 guarding means.
+
+**F4** does the same for the jump:
+
+| | |
+|---|---|
+| `fixed` | **Street Fighter** — one arc, whatever you do with the stick |
+| `by-hold` | **Virtua Fighter** — let go of up during the prejump and you hop; keep holding and you commit |
+
+Measured at 32 and 72 frames airborne on the board, a ratio of 0.44, which is what the launch
+velocity is scaled by — so a hop is about a fifth of the height, not half. That is the point of it:
+a hop is a different move, not a smaller jump.
+
+Tekken's answer is **not** offered. There, the world position has no height at all and the model
+rises because the animation says so — which only works if the art carries the height, and ours does
+not. A fighter whose y never changed would slide along the floor through a jumping sprite.
 
 **Press F1.** With no sprite loaded the placeholder art is a drawing of the frame data — the
 attacking limb is drawn *from the move's own hitbox*, so it reaches out through startup, locks at

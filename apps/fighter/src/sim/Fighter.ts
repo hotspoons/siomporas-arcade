@@ -14,7 +14,7 @@
 // ever matters.
 
 import {
-  CHARGE_BACK, CHARGE_DOWN, DP, HCB, HCF, InputHistory, QCB, QCF, RDP, Button,
+  CHARGE_BACK, CHARGE_DOWN, DP, HCB, HCF, InputHistory, QCB, QCF, RDP, UP, Button,
   matchCharge, matchMotion, matchRotation, type ButtonMask, type Facing, type Motion,
 } from './Motion'
 import { RULES, SYSTEM, findCharacter, type Character } from './Character'
@@ -293,7 +293,13 @@ export class Fighter {
         // pressed during the prejump frames cancels the jump. It is why the piledriver is inputtable.
         if (this.tryAttack(true)) return
         if (this.stateFrame >= this.character.prejump) {
-          this.vy = this.character.jumpVy
+          // Virtua Fighter gives you two jumps and the stick chooses: let go of up during the
+          // prejump and you get a hop, keep holding and you commit. On the board the two are 32 and
+          // 72 frames airborne — a ratio of 0.44, which is what `hopFactor` scales the launch by,
+          // since under one gravity the time in the air is proportional to how hard you left.
+          const stillUp = UP.includes(this.history.dir(0, this.facing))
+          const hop = RULES.jump === 'by-hold' && !stillUp
+          this.vy = this.character.jumpVy * (hop ? SYSTEM.jump.hopFactor : 1)
           this.vx = this.jumpDir * this.character.jumpVx
           this.enter('air')
         }

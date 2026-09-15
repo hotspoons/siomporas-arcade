@@ -70,6 +70,7 @@ export interface SystemConfig {
   readonly timerFramesPerTick: number
   readonly throw: { readonly hold: number; readonly knockdown: boolean; readonly meter: number }
   readonly defence: { readonly mode: DefenceMode; readonly rootedWhileGuarding: boolean }
+  readonly jump: { readonly mode: JumpMode; readonly hopFactor: number }
   readonly meter: { readonly hit: number; readonly block: number; readonly whiffSpecial: number; readonly max: number }
 }
 
@@ -172,6 +173,21 @@ export type DefenceMode =
   /** Virtua Fighter 2: a button — which costs you no health and roots you to the floor. */
   | 'guard-button'
 
+/**
+ * How many jumps a character gets.
+ *
+ * Tekken's answer — the world position has no height at all, and the model rises because the
+ * animation says so — is **not** offered, and that is a deliberate gap rather than an oversight. It
+ * only works if the art carries the height, and ours does not: a fighter whose y never changes would
+ * simply slide along the floor through a jumping sprite. It is in `research/BUILDER.md` as a thing a
+ * 3D character pipeline would want, not as a switch this sim can honour.
+ */
+export type JumpMode =
+  /** Champion Edition: one arc, whatever you do with the stick. */
+  | 'fixed'
+  /** Virtua Fighter 2: a tap gives a hop, a hold gives a committed jump, both under one gravity. */
+  | 'by-hold'
+
 export const SYSTEM: SystemConfig = systemJson as unknown as SystemConfig
 
 /**
@@ -179,9 +195,10 @@ export const SYSTEM: SystemConfig = systemJson as unknown as SystemConfig
  * purpose: the point of measuring three boards is to be able to *feel* the difference, and that
  * means switching schools without a reload.
  */
-export const RULES: { defence: DefenceMode; rootedWhileGuarding: boolean } = {
+export const RULES: { defence: DefenceMode; rootedWhileGuarding: boolean; jump: JumpMode } = {
   defence: SYSTEM.defence.mode,
   rootedWhileGuarding: SYSTEM.defence.rootedWhileGuarding,
+  jump: SYSTEM.jump.mode,
 }
 
 /** What each school implies, beyond the blocking rule itself. */
@@ -189,6 +206,15 @@ export const DEFENCE_SCHOOLS: Readonly<Record<DefenceMode, { name: string; roote
   'hold-away': { name: 'STREET FIGHTER — hold back to block', rooted: false },
   'auto-standing': { name: 'TEKKEN — standing still guards', rooted: false },
   'guard-button': { name: 'VIRTUA FIGHTER — G guards, and roots you', rooted: true },
+}
+
+export const JUMP_SCHOOLS: Readonly<Record<JumpMode, string>> = {
+  fixed: 'STREET FIGHTER — one arc',
+  'by-hold': 'VIRTUA FIGHTER — tap to hop, hold to jump',
+}
+
+export function setJump(mode: JumpMode): void {
+  RULES.jump = mode
 }
 
 export function setDefence(mode: DefenceMode): void {

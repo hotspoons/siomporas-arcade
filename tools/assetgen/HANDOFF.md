@@ -12,7 +12,8 @@ first — it is the approach. This is what exists and what is known.*
 | **flux.2-dev** | cluster, port-forward `:18090` | text→image and image→image. ~25 s a view. **Exercised** |
 | **proportion.mjs** | here | spec → measured orthographic outline, attached to the generation. **Exercised** |
 | **generate.mjs** | here | spec → prompt → flux → keyed cut-out → TRELLIS.2 → `.glb`. **Exercised to the cut-out** |
-| **TRELLIS.2** | `tools/recon-service` | one keyed view → textured `.glb`, ~7 s warm. **Not reachable from this box** |
+| **card.mjs** | here | keyed cut-out → a `.glb` the game loads. **40 kinds shipped** |
+| **TRELLIS.2** | `tools/recon-service` | one keyed view → textured `.glb`, ~7 s warm. **Not deployed anywhere** |
 | **blrig rigging** | `tools/rigging` | mesh → Rigify rig. Characters only; nothing here needs it |
 
 ```
@@ -24,14 +25,22 @@ spec ──► proportion.mjs ──► flux.2-dev ──► keyed cut-out ─�
 `signDrive` and `signBay`, which share one blank board with `signCoast` and differ only in the
 wording the game paints on. `node generate.mjs --audit` prints that comparison; keep it at zero.
 
-## The recon leg is the one thing unverified
+## The recon leg is blocked on an image that does not exist
 
-`recon.bradley-hartlove-gh200.basedweights.com` does not resolve from this container, and the recon
-service is not deployed on `rich-cluster` — it lives on the Grace-Hopper cluster the photogrammetry
-agent works from. So the `.glb` half of `generate.mjs` is written against the service's actual API
+Not on access: with `KUBECONFIG=~/.kube/config.bradley` the Grace-Hopper cluster is reachable and
+has five GH200s, `ceph-filesystem` for the weights PVC and the `central-gateway` the chart expects.
+There is simply nothing to deploy. No recon service, pod or PVC exists in any namespace on any
+context, and `ghcr.io/hotspoons/recon:0.1.0` is not pullable because **the last two runs of the
+`Recon image` workflow both failed**, at `Build and push by digest`, on both architectures
+(2026-09-15 01:27 and 01:38). Fix that build and `helm upgrade --install recon ./chart -n default`
+should be the whole deployment.
+
+So the `.glb` half of `generate.mjs` is written against the service's actual API
 (`tools/recon-service/app/main.py`: POST `/reconstruct` with `images`, poll `/jobs/<id>`, GET
-`/jobs/<id>/asset`) and has never been run. Anyone with a route to it should run one asset through
-with `RECON_HOST` set before trusting the batch.
+`/jobs/<id>/asset`) and has never been run.
+
+**What shipped instead** is `card.mjs`, and for the forty roadside kinds it is not a workaround —
+see README.md. The cars are what still want meshes.
 
 ## What was measured, and cost a generation each to learn
 
@@ -90,7 +99,8 @@ real dimensions. Re-run `node scripts/model-catalogue.mjs` after adding models.
 
 ## What is left
 
-1. **Run the recon leg.** One asset, `RECON_HOST` set, on a host that can see the service.
+1. **Fix the recon image build, then run the recon leg.** The cars cannot be cards: traffic is
+   baked at twelve yaws across four pitches, the hero at sixteen.
 2. **The hero car, properly.** `buildPrototype()` is the thing this was started for. Generating it
    is one command; deciding it is good enough to replace a hand-built model that the handling
    already looks right against is a judgement call, and the `LIVERIES` swap rides along with it.

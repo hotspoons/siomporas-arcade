@@ -81,6 +81,24 @@ model read the attachment's layout as the layout of the answer, exactly as the f
 reports for grids. `--plan` still draws both for reading by eye; `generate.mjs` never attaches that
 form. The width goes in the prompt, as metres.
 
+## Cards, for everything the game bakes at one angle
+
+`card.mjs` wraps a keyed cut-out in a `.glb`: one quad, standing on the ground at the spec's metres,
+with an unlit alpha-masked texture. Forty of the game's kinds now load one.
+
+This is not a stand-in for the mesh, for those kinds. Every nature, prop and architecture entry in
+`models.ts` is declared `yaws: [0]`: the game photographs it from exactly ONE angle, through a 6.5x
+lens at nine degrees above the horizon, and shows that sprite for the whole approach. A card
+foreshortens by cos(9°) — a hundredth of its height — and the mesh a reconstruction would give us
+is thrown into the same 128-pixel cell at the same angle. What the card cannot do is turn: cars are
+baked at twelve yaws across four pitches and the hero at sixteen, and a card seen from the side is
+an edge. Those need the real mesh.
+
+The material is `KHR_materials_unlit`, which three's loader turns into a MeshBasicMaterial. A
+cut-out is a photograph and carries its own light; letting the bake's lamps fall on it again gives a
+palm lit from two directions. It also keeps `SpriteAtlas`'s material pass — which flattens shading
+on every MeshStandardMaterial it finds — from touching these at all.
+
 ## Two chroma colours, because a third of the manifest is vegetation
 
 Everything keys onto flat green except `class: "nature"`, which keys onto magenta. A green screen

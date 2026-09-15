@@ -52,7 +52,7 @@
 // until something downstream is inexplicable.
 
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { Buffer } from 'node:buffer'
 import path from 'node:path'
 import process from 'node:process'
@@ -349,7 +349,11 @@ export function proportionCheck(spec, view, bbox, trustworthy) {
   const d = dimsOf(spec)
   const want = d.along / d.height
   const got = Number(m[1]) / Number(m[2])
-  return { want, got, off: (got - want) / want }
+  // A wheelbase is a specification; a crown spread is an average of trees. Holding a pine to the
+  // same 15% as a saloon fires the warning on correct art, and a warning that fires on correct art
+  // is one nobody reads — the fighter pipeline learned that with its reach check.
+  const tolerance = spec.class === 'nature' ? 0.35 : 0.15
+  return { want, got, off: (got - want) / want, tolerance }
 }
 
 /** `-flop`, for the flank trick. Two of these cancel. */
@@ -436,7 +440,7 @@ export async function generate(spec, defaults, opts) {
     if (prop) {
       meta.views[meta.views.length - 1].proportion = prop
       const pc = `${prop.off > 0 ? '+' : ''}${(prop.off * 100).toFixed(0)}%`
-      const loud = Math.abs(prop.off) > 0.15 ? '  ** the reference did not land — regenerate, or check the dims **' : ''
+      const loud = Math.abs(prop.off) > prop.tolerance ? '  ** the reference did not land — regenerate, or check the dims **' : ''
       console.log(`    profile aspect ${prop.got.toFixed(2)} against ${prop.want.toFixed(2)} from the spec (${pc})${loud}`)
     }
   }
@@ -465,7 +469,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
 
   const id = flag('id')
   const klass = flag('class')
-  if ((!id && !klass && !has('audit')) || has('help')) {
+  if ((!id && !klass && !has('audit') && !has('rekey')) || has('help')) {
     console.log(`
   node tools/assetgen/generate.mjs --id hero-prototype [options]
   node tools/assetgen/generate.mjs --class vehicle --dry-run
@@ -483,6 +487,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     --skip-recon     stop after the keyed cut-outs
     --long           allow a prompt over ${BUDGET} characters
     --audit          which of the game's kinds have a spec, and which specs have no slot
+    --rekey          re-cut every keyed view already on disk, without generating anything
     --out DIR        default ext/assetgen
     --field NAME     attachment field: image[] for flux.2-dev, image for klein
 
@@ -493,6 +498,25 @@ if (import.meta.url === `file://${process.argv[1]}`) {
 
   const file = path.join(HERE, 'assets.json')
   const { defaults, assets } = JSON.parse(readFileSync(file, 'utf8'))
+
+  if (has('rekey')) {
+    // The key has been changed more than once since the first views were generated, and a keyer
+    // change must never cost a generation: the raw view on disk is the expensive part and it is
+    // still there. Re-cuts every view of every spec that has one, in seconds.
+    const dir = flag('out', 'ext/assetgen')
+    let n = 0
+    for (const spec of assets) {
+      const d = path.join(ROOT, dir, spec.id)
+      if (!existsSync(d)) continue
+      for (const f of readdirSync(d).filter((f) => /^view-\d+-.*(?<!-keyed)\.png$/.test(f))) {
+        const k = keyChroma(path.join(d, f), path.join(d, f.replace(/\.png$/, '-keyed.png')), chromaFor(spec), Number(flag('threshold', 0.12)))
+        console.log(`${spec.id}/${f}: ${k.ink.toFixed(1)}% ink, bbox ${k.bbox}`)
+        n++
+      }
+    }
+    console.log(`${n} views re-keyed`)
+    process.exit(0)
+  }
 
   if (has('audit')) {
     // What the game asks for against what this file describes. The manifest builds most of its

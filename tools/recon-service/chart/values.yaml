@@ -1,6 +1,8 @@
 image:
-  repository: ghcr.io/hotspoons/recon
-  tag: "0.1.0"
+  # Built and published by .gitlab-ci.yml to Harbor's `sandbox` project — a personal project has no
+  # business in a production repository. The project is public, so no pull secret is needed.
+  repository: harbor.tools.basedweights.com/sandbox/recon
+  tag: "latest"
   pullPolicy: IfNotPresent
 
 # One GPU, one replica. The service serialises reconstructions internally, so a second replica

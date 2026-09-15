@@ -26,6 +26,10 @@ from PIL import Image
 ASSET_DIR = Path(os.environ.get("ASSET_DIR", "/assets"))
 MODEL_DIR = Path(os.environ.get("MODEL_DIR", "/weights/model"))
 MAX_VIEWS = int(os.environ.get("MAX_VIEWS", "8"))
+# Applied during to_glb, while the UVs still exist. 400k faces at 2048px is an asset you can look
+# at; drop both for something a browser should load.
+DECIMATION_TARGET = int(os.environ.get("DECIMATION_TARGET", "400000"))
+TEXTURE_SIZE = int(os.environ.get("TEXTURE_SIZE", "2048"))
 
 app = FastAPI(title="recon", summary="Image set to rigged-ready 3D asset")
 
@@ -93,6 +97,17 @@ def readyz() -> JSONResponse:
 
 
 def _export(mesh: Any, path: Path) -> dict:
+    """Write the mesh as a TEXTURED, UV-mapped glb.
+
+    The obvious export — trimesh.Trimesh(mesh.vertices, mesh.faces) — silently produces a bare
+    point-and-triangle soup: no UVs, no materials, no textures. TRELLIS.2 does not carry colour as
+    vertex colours. It carries a VOXEL ATTRIBUTE VOLUME (`attrs` + `coords` + `layout`, holding base
+    colour, metallic, roughness and alpha), and `o_voxel.postprocess.to_glb` is what remeshes the
+    surface, unwraps UVs and bakes that volume into PBR maps.
+
+    It also decimates WITH the UVs intact, which hand-decimating afterwards cannot do — so the
+    decimation target belongs here rather than in a later pass.
+    """
     import numpy as np
     import torch
     import trimesh
@@ -100,9 +115,36 @@ def _export(mesh: Any, path: Path) -> dict:
     def arr(x):
         return x.detach().cpu().numpy() if torch.is_tensor(x) else np.asarray(x)
 
-    v, f = arr(mesh.vertices), arr(mesh.faces)
-    trimesh.Trimesh(vertices=v, faces=f, process=False).export(path)
-    return {"vertices": int(len(v)), "faces": int(len(f))}
+    stats = {"vertices": int(len(arr(mesh.vertices))), "faces": int(len(arr(mesh.faces)))}
+
+    if hasattr(mesh, "attrs") and hasattr(mesh, "coords"):
+        import o_voxel
+
+        mesh.simplify(16777216)  # nvdiffrast's limit, as upstream's example does
+        glb = o_voxel.postprocess.to_glb(
+            vertices=mesh.vertices,
+            faces=mesh.faces,
+            attr_volume=mesh.attrs,
+            coords=mesh.coords,
+            attr_layout=mesh.layout,
+            voxel_size=mesh.voxel_size,
+            aabb=[[-0.5, -0.5, -0.5], [0.5, 0.5, 0.5]],
+            decimation_target=DECIMATION_TARGET,
+            texture_size=TEXTURE_SIZE,
+            remesh=True,
+            remesh_band=1,
+            remesh_project=0,
+        )
+        glb.export(path)
+        stats["textured"] = True
+        stats["decimated_to"] = DECIMATION_TARGET
+        stats["texture_size"] = TEXTURE_SIZE
+        return stats
+
+    # No attribute volume: geometry only, and say so rather than quietly shipping a grey mesh.
+    trimesh.Trimesh(vertices=arr(mesh.vertices), faces=arr(mesh.faces), process=False).export(path)
+    stats["textured"] = False
+    return stats
 
 
 def _run_job(job: Job, images: list[Image.Image], seed: int) -> None:

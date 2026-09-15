@@ -147,19 +147,44 @@ needs a move list: `d/f+2` was tried, and Xiaoyu simply crouched.
 
 - ~~Height is not in the fighter structure.~~ **Settled, and it has its own section above:** the
   root's y is zero through a jump and through a throw. Only a juggle could still overturn it.
-- **Health.** The bar's *geometry* was found and it plainly tracks damage, but the logical value has
-  not been. Differential search fails here: this RAM is mostly per-frame scratch, so "a word that
-  fell twice" returns forty candidates and every one oscillates when watched live. The right tool is
-  a **write-watchpoint on the bar geometry**, walking backwards to whatever writes it —
-  `-debug -debugger none` does expose `wpset`/`bpset` through the Lua device debugger, which the 2D
-  harness never needed.
+- **Health: not found, after five attempts, and the reason is not the search.** This is worth
+  reading before trying a sixth.
+
+  The four search techniques were all sound — they are the same ones that found health on Virtua
+  Fighter 2 within an hour, including the two that matter: **scan 16-bit halves** (health can sit
+  beside a per-frame counter, so no 32-bit word containing it ever looks still) and **accept a value
+  that falls once and holds** (demanding two falls throws the answer away when the second bout
+  misses). Neither found anything here, and a fifth pass using the fighter struct's own stride to
+  pair a falling number with its motionless twin found only colour data.
+
+  Then the health bars were measured **in pixels**, in the screenshots, which is what should have
+  happened first: **210 pixels wide, unchanged, in every snapshot of every health run.** No damage
+  was ever dealt. Every one of those searches was looking for a number that had not moved.
+
+  Two specific traps behind that:
+
+  - **The bar geometry at `0x25fdec`–`0x25fe5c` is not a damage signal.** It was used as the oracle
+    for "a hit has landed" and it moves — it went 460 → 499 → 474 in a run where both bars stayed
+    visibly full. It tracks something else, probably the camera or an animation.
+  - **Point-blank is a gap of about 1600 units, not a small number.** The fighters' bodies are wide,
+    and a probe that walks forward until `|p2.x − p1.x|` drops below a few hundred will walk into
+    the opponent and push for nine hundred frames without ever getting there.
+
+  So the next attempt needs, in order: a **verified** way to know a hit landed — measuring the bar in
+  the snapshot is crude but it is ground truth, and the fighters' own state words are the in-Lua
+  version — and only then a search. The **write-watchpoint** is still the better tool for the search
+  itself: `-debug -debugger none` exposes `wpset`/`bpset` through the Lua device debugger. Note that
+  `wpset` with `nil` for the condition and action **segfaults MAME**; pass strings.
 - ~~Player two's structure base.~~ **Settled: `0x31fc40`, a stride of `+0x1ae4`.** Found by making
   only him walk and keeping the one word in 128KB that moved at a constant 14.4 a frame *and* had a
   zero in the next word — the root's signature, since the fighter stands on the floor. The twenty
   other words that walked with him were skeleton bones, whose next word is their height above it.
-- **Frame data** — startup, active, recovery — is now within reach and was not attempted: the
-  animation pointer and the per-animation frame counter are exactly the two instruments the Champion
-  Edition harness used, and the missing third is a damage signal, which is the watchpoint job above.
+- **Frame data** — startup, active, recovery — is blocked on the same thing. The animation pointer
+  and the per-animation frame counter at `0x31e194` are two of the three instruments the Champion
+  Edition harness used; the missing one is a damage signal. Virtua Fighter 2 shows what this looks
+  like once you have it: a single phase word there gives startup, active and recovery directly, and
+  a whole move list falls out in one run. Tekken 3 may well have the same word — nothing has looked
+  for it, because the search was stuck on health.
 - **Ring-outs, walls and floor breaks**, and **how the camera is driven**, are untouched. Two
   addresses near `0x3ff7d0` trace a small arc during a jump and are the obvious camera candidates.
 

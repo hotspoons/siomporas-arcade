@@ -323,10 +323,10 @@ and how the camera is driven.
 | losing the round | health, or the clock | health, or the clock | health, the clock, **or the floor** |
 | arena | walls that stop you | mostly unbounded | **7 units to the edge** |
 | maths | fixed point | fixed point | **IEEE floats** |
-| full health | 144 | not yet found | **196** |
-| chip damage on block | yes, on specials | not yet measured | **none at all** |
-| fastest attack | 3 frames (jab) | not yet measured | **8 frames** |
-| a normal's total | 12–35 frames | not yet measured | **19–40 frames** |
+| full health | 144 | **resisted five attempts** — see the Tekken note | **196** |
+| chip damage on block | yes, on specials | unknown — needs health | **none at all** |
+| fastest attack | 3 frames (jab) | unknown — needs a phase word | **8 frames** |
+| a normal's total | 12–35 frames | unknown | **19–40 frames** |
 | jump height | simulated, one fixed arc | **animation** — world y is always 0 | **simulated, two arcs**: hop 32f/1.44, jump 72f/2.81, one gravity |
 
 Those seven rows are, roughly, the menu. A builder that let you choose "guard button + rooted

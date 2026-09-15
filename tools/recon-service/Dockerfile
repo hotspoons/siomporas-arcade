@@ -108,12 +108,16 @@ RUN git clone --depth 1 -b v0.4.0 https://github.com/NVlabs/nvdiffrast.git /tmp/
  && pip install --break-system-packages --no-build-isolation /tmp/nvdiffrast \
  && rm -rf /tmp/nvdiffrast
 
-# Fail the BUILD, not the first request. Each of these cost an hour to find separately: cumesh needs
-# the CUDA-13 patch, o_voxel needs nvdiffrast, flex_gemm is the sparse-conv backend, and importing
-# the pipeline is what proves they agree with each other and with this exact torch.
-RUN python3 -c "import torch, cumesh, o_voxel, flex_gemm, nvdiffrast, xformers, utils3d; print('torch', torch.__version__); print('EXTENSIONS OK')" \
- && PYTHONPATH=/opt/TRELLIS2 ATTN_BACKEND=sdpa SPARSE_ATTN_BACKEND=xformers \
-    python3 -c "from trellis2.pipelines import Trellis2ImageTo3DPipeline; print('PIPELINE OK')"
+# Fail the BUILD, not the first request. nvdiffrast was missing from this file for hours and the
+# image would have gone Ready and then 404'd on the first job with ModuleNotFoundError.
+#
+# The split matters: `flex_gemm` calls torch.cuda.get_device_name() AT IMPORT TIME to pick a Triton
+# autotune config, and `o_voxel` imports flex_gemm. So importing those two needs a GPU, which a
+# build container does not have. They are checked with find_spec, which locates the installed module
+# without executing it — enough to prove the compile produced something importable-shaped, without
+# pretending a builder has a card in it.
+COPY app/selfcheck.py /opt/app/selfcheck.py
+RUN python3 /opt/app/selfcheck.py
 
 # flash-attn is deliberately NOT installed -- a long, fragile source build on aarch64. Two separate
 # attention backends have to be steered away from it:

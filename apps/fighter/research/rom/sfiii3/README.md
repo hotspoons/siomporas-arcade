@@ -106,8 +106,58 @@ punish test above is what the difference means in practice.
 Boot, then mash: coins from frame 600, both start buttons from 1000, and a **jab** to confirm a
 character from 1400. A live two-player match by about frame 2100.
 
+## Frame data
+
+| move | input to the blow landing | total | damage |
+|---|---|---|---|
+| jab | **6** | — | 4 |
+| crouching jab | 6 | 21 | 4 |
+| short | 7 | 29 | 5 |
+| crouching short | 7 | 21 | 4 |
+| strong | 6 | 35 | 14 |
+| forward | 7 | 36 | 15 |
+| crouching roundhouse | 13 | 54 | 19 |
+| crouching fierce | 15 | 58 | 18 |
+| fierce | 16 | 54 | 21 |
+| roundhouse | **18** | **66** | 22 |
+
+**Read the first column as an upper bound on startup, not as startup.** It is frames from the button
+press to the health beginning to fall, so it carries input latency and any travel with it. The
+Champion Edition tables in `system.json` are true startup, read from that game's own frame counters,
+and the two are not like-for-like. A phase word was looked for here — the trick that gave Virtua
+Fighter 2 real startup/active/recovery in one run — and CPS3 does not appear to have one: a scan for
+a word taking a distinct small value in each of the three phases returned two candidates, and
+tracing both frame by frame showed neither is a clean enumeration.
+
+Even as an upper bound the shape is clear, and it is the interesting part:
+
+**3rd Strike is a markedly slower game than Champion Edition.** Ryu's jab there is 3 frames of
+startup and his fierce 6. Alex's jab here takes 6 frames to land and his fierce **16**. Whatever the
+input latency is, it is the same for every row, so the *spread* is real: the light attacks sit at
+6–7 and the heavy ones at 13–18, where Champion Edition's whole normal set fits between 3 and 6.
+The game that is remembered for reactions is built out of attacks you have twice as long to see.
+
+## Health drains; it does not drop
+
+Watching the fierce land frame by frame:
+
+    f+15   160
+    f+16   159   <- the blow lands
+    f+17   158
+    …
+    f+36   139   <- and stops, 21 down
+
+**One point per frame, for twenty-one frames.** So the word at `0x2866c` is the health *bar* as it
+animates rather than a logical hit point total, and two things follow. Damage totals are still
+exactly right, because the drain settles on the true value. But the "contact frame" is the frame the
+drain *starts*, which is an upper bound on the real moment of contact, and any probe that samples
+health a few frames after a hit will read a number that is still falling.
+
+It also means a KO is not instantaneous on this board, which is a mechanic in itself: a blow that
+takes you to zero takes twenty frames to do it.
+
 ## Not done
 
-Frame data proper — startup, active and recovery per move — which wants the same treatment Virtua
-Fighter 2 got and is cheap here at twenty-four times real time. Also EX moves and super meter, the
-mechanic that most distinguishes this game's economy from Champion Edition's, and the red parry.
+EX moves and super meter, the mechanic that most distinguishes this game's economy from Champion
+Edition's and which nothing in this research describes. Also the red parry, and true startup figures
+if anyone finds the phase word this scan could not.

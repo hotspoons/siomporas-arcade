@@ -71,7 +71,13 @@ Tekken's row is thin because only one attack was ever landed on it — see §7.
 | Street Fighter II | **3** (jab) | 12–35 |
 | Virtua Fighter 2 | **8** | 19–40 |
 | Tekken 3 | 14 (its one measurable attack) | 40–67 *(animation length, an upper bound)* |
-| 3rd Strike | not yet measured | ~60 for a roundhouse *(busy word, an upper bound)* |
+| 3rd Strike | **6** (jab, input-to-contact) | 21–66 |
+
+3rd Strike deserves its own line here, because the comparison with its own ancestor is the sharpest
+in the table: **Champion Edition's whole normal set starts up between 3 and 6 frames; 3rd Strike's
+lights land in 6–7 and its heavies in 13–18.** The game remembered for reactions is built out of
+attacks you have roughly twice as long to see coming — which is exactly what makes a parry, a
+mechanic that demands you be right at one moment, a reasonable thing to ask of a player.
 
 **Virtua Fighter's quickest attack is slower than Street Fighter's slowest normal.** That single
 comparison is most of why the two feel unalike: in one you are reacting inside a third of a second,
@@ -164,10 +170,12 @@ cheap.
 
 What is still missing, in the order I would do it:
 
-1. **Frame data for 3rd Strike** — startup, active, recovery per move. Cheap on this board, and it
-   would put real numbers against the one column that has none.
-2. **EX moves and super meter**, which is what most separates this game's economy from Champion
+1. **EX moves and super meter**, which is what most separates 3rd Strike's economy from Champion
    Edition's and which no column here describes at all.
+2. **True startup figures**, for every board except Champion Edition. Only that one has real
+   startup/active/recovery, read from the game's own counters; Virtua Fighter 2 has a phase word and
+   so has real numbers too, but Tekken 3 and CPS3 both give upper bounds because no phase word was
+   found on either.
 3. **Tekken 3's phase word**, if it has one. Its frame-data column is animation lengths because none
    was found, and that is the weakest row in the table.
 4. **Virtua Fighter's stagger system**, the last unmeasured piece of its triangle.

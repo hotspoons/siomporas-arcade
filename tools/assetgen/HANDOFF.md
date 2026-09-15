@@ -1,120 +1,112 @@
 # Handoff: regenerating Turbo Radrun's assets
 
-*For the agent taking on the asset overhaul. The generation and reconstruction halves both work and
-are committed; what is missing is the middle, and the judgement about what the game should look
-like. Read `README.md` here first — it is the approach. This is the state of the world.*
+*State of the world for whoever picks this up next. The pipeline is now end to end in code and
+verified as far as this machine can reach; what remains is mesh reconstruction, which needs a host
+that can see the recon service, and the judgement calls listed at the bottom. Read `README.md`
+first — it is the approach. This is what exists and what is known.*
 
-## What already runs
+## What runs
 
-Three pieces, all verified end to end tonight, none of them theoretical:
-
-| piece | where | what it does |
+| piece | where | state |
 |---|---|---|
-| **flux.2-dev** | cluster, `default` ns | text → image, and image → image. ~25 s a view |
-| **TRELLIS.2** | `tools/recon-service` | one keyed view → textured, UV-mapped `.glb`. **~7 s** warm |
-| **blrig rigging** | `tools/rigging` | mesh → Rigify rig, weights, textures kept |
+| **flux.2-dev** | cluster, port-forward `:18090` | text→image and image→image. ~25 s a view. **Exercised** |
+| **proportion.mjs** | here | spec → measured orthographic outline, attached to the generation. **Exercised** |
+| **generate.mjs** | here | spec → prompt → flux → keyed cut-out → TRELLIS.2 → `.glb`. **Exercised to the cut-out** |
+| **TRELLIS.2** | `tools/recon-service` | one keyed view → textured `.glb`, ~7 s warm. **Not reachable from this box** |
+| **blrig rigging** | `tools/rigging` | mesh → Rigify rig. Characters only; nothing here needs it |
 
 ```
-spec ──► flux.2-dev ──► keyed reference ──► TRELLIS.2 ──► .glb ──► rig ──► game
-         text→image      our own chroma      image→3D      textured   (characters only)
+spec ──► proportion.mjs ──► flux.2-dev ──► keyed cut-out ──► TRELLIS.2 ──► .glb ──► game
+         measured outline    text→image    dominance key     image→3D      textured
 ```
 
-Kestrel went the whole way: 2D art → 58k-triangle textured mesh → 706-bone rig with working
-deformation. See `tools/photogrammetry/RESULTS.md` and `tools/rigging/README.md`.
+`assets.json` now describes **57 assets** covering every ModelDef kind the game renders except
+`signDrive` and `signBay`, which share one blank board with `signCoast` and differ only in the
+wording the game paints on. `node generate.mjs --audit` prints that comparison; keep it at zero.
+
+## The recon leg is the one thing unverified
+
+`recon.bradley-hartlove-gh200.basedweights.com` does not resolve from this container, and the recon
+service is not deployed on `rich-cluster` — it lives on the Grace-Hopper cluster the photogrammetry
+agent works from. So the `.glb` half of `generate.mjs` is written against the service's actual API
+(`tools/recon-service/app/main.py`: POST `/reconstruct` with `images`, poll `/jobs/<id>`, GET
+`/jobs/<id>/asset`) and has never been run. Anyone with a route to it should run one asset through
+with `RECON_HOST` set before trusting the batch.
+
+## What was measured, and cost a generation each to learn
+
+These are the findings this session added. The general flux behaviour — three camera modes, the
+flank trick, naming what must be kept in an edit — is in `apps/fighter/ART.md` and still holds.
+
+- **An attachment's LAYOUT transfers, not just its content.** The proportion reference was
+  originally two panels, elevation over plan. The generation came back as a two-panel technical
+  drawing: two cars, dimension leader lines, garbled numbers in the margins. The prompt said "draw
+  the object, never the outline" and it changed nothing. One panel fixed it completely.
+- **A rotation is relative to its source view.** Asking a three-quarter view for "a full side
+  profile, rotated exactly 90 degrees" returns the same car turned about that far — roughly fifteen
+  degrees off a true profile. The cardinals the model understands are cardinals *of the source
+  frame*. Harmless for reconstruction, which only wants consistent views; fatal for measuring
+  anything off the result, so `proportionCheck` refuses to measure those.
+- **Name the colour or the backdrop will.** The first hero came back green, because the chroma was
+  the only colour mentioned in the prompt. Every vehicle spec now carries `paint`.
+- **Vegetation cannot go on a green screen.** The prompt has to say the subject is never the key
+  colour, and the model obeys: the first palm had brown fronds. `class: "nature"` keys on magenta
+  instead and comes back green.
+- **The model draws a contact shadow whatever you say.** Three wordings — flat shadowless lighting,
+  "floats against the colour", "no ground under it" — each shrank it and none removed it. It is
+  removed in the key instead, by a relative-dominance test: the shadow is a darkened backdrop, so it
+  is still green-dominant *relative to its own brightness* where a black tyre is not.
+- **Muted magenta is a weak key.** The model returns rose, not `#ff00ff`. `min(r,b) - g` scores 0.13
+  on it, close enough to the threshold that noise freckles the cut-out; `(r+b)/2 - g` scores 0.27
+  and still reads negative on every vegetation colour.
 
 ## Where things live
 
 ```
-tools/assetgen/assets.json          the design-language specs — 10 written, ~40 to go
-tools/assetgen/README.md            why the specs are shaped the way they are. Read this.
-tools/recon-service/                image→3D as a service: Dockerfile, API, Helm chart
-tools/rigging/rig_character.py      headless Blender rigging
-apps/coast/src/render/models.ts     ModelDef — the contract a generated asset must satisfy
-apps/coast/src/render/procgen.ts    the hand-built hero car and buildings being replaced
-apps/coast/public/assets/           the Kenney CC0 kits being replaced
+tools/assetgen/assets.json        57 design-language specs. The `$comment` block documents the fields
+tools/assetgen/liveries.json      four original liveries, to replace the two trademarked ones
+tools/assetgen/proportion.mjs     spec → measured outline PNG
+tools/assetgen/generate.mjs       spec → prompts → flux → keyed cut-out → mesh
+tools/recon-service/              image→3D as a service: Dockerfile, API, Helm chart
+apps/coast/src/render/models.ts   ModelDef — the contract a generated asset must satisfy
+apps/coast/src/render/procgen.ts  the hand-built hero car, architecture and LIVERIES being replaced
+apps/coast/public/assets/         the Kenney CC0 kits being replaced
 ```
 
-## The integration point, which is kinder than it looks
+## Promotion, which is kinder than it looks
 
-You do **not** need to touch the renderer. `ModelDef` in `models.ts` takes either a GLB `file` or a
-`build()` function, and the game bakes sprite atlases from it at runtime, at fixed yaws. Drop a
-`.glb` into `apps/coast/public/assets/`, add a `ModelDef`, and it is in the game.
+You do **not** need to touch the renderer. `ModelDef` takes either a GLB `file` or a `build()`
+function, and the game bakes sprite atlases from it at runtime at fixed yaws. Drop a `.glb` into
+`apps/coast/public/assets/`, add a `ModelDef`, and it is in the game. `apps/arcade/public/assets/`
+is a **mirror**, gitignored and rebuilt by `scripts/sync-arcade-assets.mjs`; a model belongs to a
+game, so put it in that game's `public/` and let the mirror carry it.
 
-Note `apps/arcade/public/assets/` is a **mirror**, gitignored and rebuilt from each game's `public/`
-by `scripts/sync-arcade-assets.mjs` on every dev and build. A model belongs to a game. Put it in
-that game's `public/` and let the mirror carry it.
+`spin` matters and is easy to get wrong: yaw 0 means *seen from behind*, which is right for a car
+driving away and exactly wrong for anything beside the road.
 
-`spin` on a `ModelDef` matters and is easy to get wrong: yaw 0 means *seen from behind*, which is
-right for a car driving away and exactly wrong for anything beside the road.
+Verify with `arcade.siomporas.com/models` (source: `apps/arcade/public/models.html`), which loads a
+`.glb` by path, URL or drag-and-drop and reports triangles, materials, whether textures survived and
+real dimensions. Re-run `node scripts/model-catalogue.mjs` after adding models.
 
-## The hero car is not an asset
+## What is left
 
-It is `buildPrototype()` in `procgen.ts` — hand-coded boxes and wedges, flat shaded. That is why it
-reads as one specific car (an Adams Brothers Probe 16 rather than the late-60s endurance prototype
-it was aiming at). Replacing it means generating a `.glb` and switching that `ModelDef` from
-`build:` to `file:`. The `LIVERIES` table stays; it is applied separately.
-
-**While you are in there:** `LIVERIES` ships `gulf` and `martini`. Those are not generic colour
-schemes, they are two companies' trademarks, and a livery is far more identifying than a roofline.
-`assets.json` has no opinion on this yet and should.
-
-## How to write a spec
-
-The specs describe a design language, never a car. The temptation is to feed in photographs of a
-330 P4 and ask for "something like this"; do not. It produces a copy with the badges filed off —
-the exact thing this is trying to avoid — and it is also the worse technical route, because one
-reference drags the generator toward reproducing that car and nothing else gets any attention.
-
-What works, and what every entry is built around:
-
-- **Name the era and the constraints that produced the shape.** "Regulation-limited windscreen
-  height", "front-hinged clamshell over an exposed spaceframe". Facts about a period of
-  engineering, not anyone's design.
-- **Give real proportions in metres.** The single highest-leverage field. Generators have strong,
-  wrong priors about proportion, and "low" barely moves them; a wheelbase-to-height ratio does.
-- **Blend three influences.** Pulled toward one source it is a copy of that source.
-- **Fill in `avoid`.** Marque badges, real sponsor marks, model numbers, legible brand names on
-  signage. This is a real negative prompt and it is where identifiability actually lives.
-
-## What to build
-
-1. **`proportion.mjs`** — render a plain orthographic side/plan silhouette at the spec's exact
-   metre dimensions, flat, no styling. Attach it to the generation as a second image. This is not
-   optional polish: the fix for Kestrel's proportions was an attached reference image, not a better
-   sentence. A text prompt alone could not pull her off naturalistic eight-heads.
-2. **`generate.mjs`** — spec → flux → key the chroma → TRELLIS.2 → `.glb` into
-   `ext/assetgen/<id>/` (gitignored). `--dry-run` should print the assembled prompts.
-3. **The rest of `assets.json`** — ~13 more traffic cars, the roadside architecture, signage,
-   nature. Ten are written as worked examples.
-
-## Things that will bite you
-
-- **flux has three camera modes — front, profile, back — and no continuous rotation.** "Rotate 90
-  degrees" works; "45 degrees" silently returns a front view. Do not spend generations chasing
-  intermediate angles through the prompt.
-- **It always returns the same flank.** To get the other one: `-flop` the reference, generate,
-  `-flop` the result back. The two flips cancel and asymmetric detail lands correctly.
-- **Name what you want kept.** An edit prompt that only describes the change treats everything
-  unmentioned as negotiable — asking for a pose change dropped a character's wrist jewellery
-  entirely.
-- **Send keyed cut-outs to TRELLIS.** It keeps an alpha channel when one is present and skips its
-  own background remover. Our chroma key is better than anything it would infer.
-- **Rigging is characters only.** Vehicles and props do not need it — they are baked to sprites.
-  `blrig` does have `rig_wheel` and `rig_turret` if a car ever needs turning wheels.
-- **A reconstruction will not weight until it is watertight.** Only relevant if you rig something:
-  see `tools/rigging/README.md`, where 315 open edges out of 103,000 were enough to inflate a mesh
-  thirty-fold when one arm moved.
-
-## Verifying your own work
-
-`arcade.siomporas.com/models` (source: `apps/arcade/public/models.html`) loads any `.glb` by path,
-URL, or drag-and-drop, and reports what actually came out of the file — triangles, materials,
-whether textures survived, real dimensions. "It rendered" and "it is correct" are different claims.
-Re-run `node scripts/model-catalogue.mjs` after adding models or the bundled list goes stale.
+1. **Run the recon leg.** One asset, `RECON_HOST` set, on a host that can see the service.
+2. **The hero car, properly.** `buildPrototype()` is the thing this was started for. Generating it
+   is one command; deciding it is good enough to replace a hand-built model that the handling
+   already looks right against is a judgement call, and the `LIVERIES` swap rides along with it.
+3. **Five specs have no game slot** — `traffic-convertible`, `traffic-bus`, `traffic-tanker`,
+   `traffic-camper`, `sign-pylon`. Each needs a `ModelDef` and a place in a scene's roadside or
+   landmark list in `apps/coast/src/world/scenes.ts`. They were written because the road is short of
+   variety, not because anything asked for them.
+4. **The signs keep their text step.** `buildSign()` paints wording onto a canvas texture; three
+   sign kinds differ only in that string. Generate the board blank — as `sign-highway` specifies —
+   and keep the canvas step, or lose the ability to restyle a sign per stage.
 
 ## Who else is on this
 
 Notes pass as files in `/tmp/messages/inbox`, moved to `read/` on receipt. **image generator** owns
-the art pipeline and `scripts/flux-art.mjs`; ask rather than editing the art path. **retro game
-spelunker** owns the ROM measurement tools. Three agents share one checkout: stage commits by path,
-never `git add -A`, and name another agent's file in a message rather than editing it.
+the art pipeline and `scripts/flux-art.mjs`; ask rather than editing the art path — nothing here
+imports it, deliberately, because dev and klein take attachments under different field names.
+**retro game spelunker** owns the ROM measurement tools. **photogrammetry** owns the recon service
+and the rigging. Several agents share one checkout: stage commits by path, never `git add -A`, and
+name another agent's file in a message rather than editing it.

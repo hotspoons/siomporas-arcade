@@ -6,8 +6,8 @@ wedge-and-fin silhouette lands somewhere near an Adams Brothers Probe 16 rather 
 endurance prototype it is aiming at. The rest of the world is Kenney's CC0 kits, which are good and
 free and look like Kenney's CC0 kits.
 
-This is the path to replacing both with assets of our own: a written design language in, a rigged
-and textured `.glb` out.
+This is the path to replacing both with assets of our own: a written design language in, a textured
+`.glb` out.
 
 ```
   spec (assets.json)  ──►  flux.2-dev   ──►  keyed reference view  ──►  TRELLIS.2  ──►  .glb
@@ -16,8 +16,23 @@ and textured `.glb` out.
   what to avoid              reference
 ```
 
-Both ends already work. `tools/recon-service` is the TRELLIS.2 half; the flux half is the same
-server that generated Kestrel. This is the middle.
+```bash
+node proportion.mjs --id hero-prototype --annotate   # the measured outline, dimensioned for reading
+node generate.mjs --class vehicle --dry-run          # every prompt that would be sent, nothing spent
+node generate.mjs --id hero-prototype                # one asset, end to end
+node generate.mjs --audit                            # which of the game's kinds still have no spec
+```
+
+Outputs land in `ext/assetgen/<id>/` — gitignored — as the proportion reference, the generated view,
+the keyed cut-out, the mesh and a `meta.json` recording what was asked for and what came back.
+Promoting one into the game is a deliberate second step: copy the `.glb` into the owning game's
+`public/`, add a `ModelDef` to `apps/coast/src/render/models.ts`, re-run
+`node scripts/model-catalogue.mjs`, and let the existing sprite bake do the rest. Nothing here
+writes into a game.
+
+**The two servers are port-forwards, not public URLs.** `FLUX_HOST` (default `:18090`) wants
+flux.2-dev — not the klein the fighter pipeline uses, and the two take their attachments under
+different field names. `RECON_HOST` is `tools/recon-service`.
 
 ## Why the specs describe a language and not a car
 
@@ -37,33 +52,67 @@ What works instead, and what every entry in `assets.json` is built around:
   wheelbase-to-height ratio does.
 - **Blend at least three influences, weighted.** A shape pulled toward one source is a copy of that
   source. Pulled between three, it is its own thing.
-- **List what must not appear.** `avoid` is a real negative prompt, and it is where marque badges,
-  actual team liveries, model numbers and sponsor marks get excluded by name. A car is identifiable
-  far more by its livery and badge than by its roofline.
+- **List what must not appear.** `avoid` is where marque badges, team liveries, model numbers and
+  sponsor marks get excluded by name. A car is identifiable far more by its livery and badge than
+  by its roofline. (It is assembled into `negative_prompt`, which on a guidance-distilled model
+  does nothing unless `--true-cfg 2` turns real CFG on, at twice the time. The load-bearing part of
+  it is repeated in the positive prompt, which always applies.)
+- **Say what colour it is.** `paint`. The first hero generation came back GREEN: the backdrop was
+  the only colour named anywhere in the prompt, so the model took the body colour from it, and the
+  chroma key then ate the car.
 
-One thing to flag on that last point: `LIVERIES` in `procgen.ts` currently ships `gulf` and
-`martini`, which are not generic colour schemes — they are the trademarks of two companies, and are
-the most recognisable thing about the cars that wore them. The shapes here are being made original;
-the liveries want the same treatment, and `liveries.json` proposes four that carry the same
-period read without borrowing anyone's marks.
+`liveries.json` is the same argument applied to paint schemes. `LIVERIES` in `procgen.ts` currently
+ships `gulf` and `martini`, which are not generic colour combinations — they are two companies'
+trademarks, and the most recognisable thing about the cars that wore them. Four originals are
+proposed there, with the two generic existing ones kept.
 
 ## The proportion reference
 
 Generated figures and vehicles drift toward the model's own idea of proportion. The fix that worked
 on Kestrel — whose first pass came out at naturalistic eight-heads next to five-head arcade
-sprites — was not a better sentence; it was attaching a reference image with the proportions drawn
-on it. `proportion.mjs` renders one per spec: a plain orthographic side and plan silhouette at the
-exact metre dimensions, on a flat ground, with nothing stylistic in it at all. It goes into the
-generation as a second image.
+sprites — was not a better sentence; it was attaching a reference image. `proportion.mjs` renders
+one per spec: a plain orthographic side elevation at the exact metre dimensions, flat, with no text,
+no grid and no styling in it at all.
 
-## Running it
+**One panel, and that was measured.** The first draft drew the plan below the elevation, because a
+plan carries width information an elevation cannot. Attaching it produced a generation with *two
+cars in it*, one per panel, with dimension leader lines and garbled numbers in the margins: the
+model read the attachment's layout as the layout of the answer, exactly as the fighter pipeline
+reports for grids. `--plan` still draws both for reading by eye; `generate.mjs` never attaches that
+form. The width goes in the prompt, as metres.
 
-```bash
-node generate.mjs --id hero-prototype          # one asset, end to end
-node generate.mjs --class vehicle --dry-run    # what would be generated, and the prompts
-```
+## Two chroma colours, because a third of the manifest is vegetation
 
-Outputs land in `ext/assetgen/<id>/` — gitignored — as the reference view, the keyed cut-out, and
-the mesh. Promoting one into the game is a deliberate second step: copy the `.glb` into the owning
-game's `public/`, add a `ModelDef` to `apps/coast/src/render/models.ts`, and let the existing
-sprite bake do the rest. Nothing here writes into a game directly.
+Everything keys onto flat green except `class: "nature"`, which keys onto magenta. A green screen
+behind a leaf is the one case where the backdrop and the subject are the same colour, and the prompt
+has to say the object is never the key colour — so the first palm came back with brown fronds, and
+obediently so. On magenta it comes back green. Per-spec `chroma` overrides the class default: put a
+red car on green, never on magenta.
+
+The key itself reads **green (or magenta) dominance**, not distance from a sampled colour, because
+the model draws a contact shadow whatever the prompt says and that shadow arrives nearly black —
+further from the backdrop than a white car is. See `keyChroma` in `generate.mjs` for the two tests
+and why each is there.
+
+## What the prompt budget is for
+
+`generate.mjs` assembles to 1900 characters and gives way at the end of the cue list when it runs
+over, saying so. That is not the model's ceiling — the cluster patched dev's text encoder to 2048
+tokens — it is the point past which the fighter pipeline measured the model trading one rule for
+another. Six or seven cues is the working size. A spec that will not fit is usually a spec with two
+cues that are one cue.
+
+## Verifying your own work
+
+Two checks are built in, and both answer questions that "it rendered" does not:
+
+- `--audit` compares the specs against the ModelDef kinds the game actually renders, in both
+  directions: kinds with no spec, and specs with no slot to be promoted into.
+- After a **profile** view, the keyed bounding box is measured against the spec's own metres and the
+  difference reported. A rotation is relative to its source, so a profile rotated out of a
+  three-quarter view is not square-on and is not measured — measuring the wrong thing confidently
+  is worse than not measuring.
+
+For the mesh, `arcade.siomporas.com/models` loads any `.glb` by path, URL or drag-and-drop and
+reports what actually came out of the file: triangles, materials, whether textures survived, real
+dimensions.

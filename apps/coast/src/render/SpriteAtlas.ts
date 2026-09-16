@@ -4,11 +4,13 @@
 
 import { AmbientLight, Box3, BoxGeometry, Color, Vector4, DirectionalLight, Group, HemisphereLight, Mesh, MeshStandardMaterial, Object3D, PerspectiveCamera, Scene, SRGBColorSpace, Vector3, WebGLRenderTarget, type Texture, type WebGLRenderer, NearestFilter, LinearFilter, RGBAFormat } from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
+import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js'
 import { isTouchDevice } from '@apex/engine/app/platform'
 
 import { atlasSizeFor, cellSize, MODELS, orient, type ModelDef } from './models'
 import { ensureFonts } from './procgen'
 import { applyAtlasFilters, atlasKey, loadCachedAtlas, saveCachedAtlas } from './AtlasCache'
+import { loadPrebakedAtlas } from './PrebakedAtlas'
 
 export interface SpriteFrame {
   /** UV rect in the atlas (0..1). */
@@ -123,6 +125,8 @@ export class SpriteAtlas {
 
   /** Whether the last bake() came from the IndexedDB cache. */
   fromCache = false
+  /** Whether the last bake() came from a prebaked atlas shipped with the build. */
+  fromPrebake = false
 
   /**
    * Drop the atlas. The render target is not in the scene graph, so the scene walk on unmount
@@ -138,11 +142,42 @@ export class SpriteAtlas {
     this.kinds.clear()
   }
 
-  async bake(renderer: WebGLRenderer, retro: boolean, onProgress?: (done: number, total: number) => void): Promise<void> {
-    const plan = atlasPlan(renderer)
+  /**
+   * `force` bakes a named plan and skips every shortcut — that is `bake.html` producing the shipped
+   * atlas, which must never be able to return the thing it is supposed to be making.
+   */
+  async bake(
+    renderer: WebGLRenderer,
+    retro: boolean,
+    onProgress?: (done: number, total: number) => void,
+    force?: { size: number; cellScale: number },
+  ): Promise<void> {
+    const plan = force ?? atlasPlan(renderer)
     this.size = plan.size
     this.cellScale = plan.cellScale
     const key = atlasKey(plan.size, plan.cellScale)
+    this.fromCache = false
+    this.fromPrebake = false
+
+    if (force) {
+      await this.render(renderer, retro, onProgress)
+      return
+    }
+
+    // Shipped atlas first. On a repeat visit the IndexedDB copy would serve just as well, but on a
+    // first visit it is this or downloading every mesh in the manifest to make it.
+    const prebaked = await loadPrebakedAtlas(key)
+    if (prebaked) {
+      applyAtlasFilters(prebaked.texture, retro)
+      this.texture = prebaked.texture
+      this.kinds.clear()
+      for (const [k, v] of prebaked.kinds) this.kinds.set(k, v)
+      this.ready = true
+      this.fromPrebake = true
+      onProgress?.(MODELS.length, MODELS.length)
+      return
+    }
+
     const cached = await loadCachedAtlas(key)
     if (cached) {
       applyAtlasFilters(cached.texture, retro)
@@ -166,6 +201,12 @@ export class SpriteAtlas {
     // setPath('/'), because the model paths are relative and in the arcade the game is served
     // at /radrun — where a bare 'assets/…' would resolve against whatever menu the URL is on.
     const loader = new GLTFLoader().setPath('/')
+    // The generated meshes are Draco-compressed — 83 MB of reconstructions does not fit in a
+    // Cloudflare Worker bundle and 16 MB does. The decoder sits under assets/ because that is the
+    // only directory the arcade mirror carries, so the path resolves both here and at /radrun.
+    // Kenney's kits are not compressed and the loader is happy either way.
+    const draco = new DRACOLoader().setDecoderPath('/assets/draco/')
+    loader.setDRACOLoader(draco)
     const scene = new Scene()
     scene.add(new AmbientLight(0xffffff, 0.35))
     scene.add(new HemisphereLight(0xffffff, 0x8080a0, 0.7))

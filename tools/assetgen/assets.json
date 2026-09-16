@@ -31,57 +31,200 @@
       "the class default — put a red car on green, never on magenta."
     ],
     "camera": "camera level with the subject's mid-height, no perspective distortion, the whole object in frame with a small margin",
-    "render": "clean studio product photograph, flat even lighting, no cast shadow, matte finish, no motion blur, no lens flare",
+    "style": "a clean simple 3D model, flat bright arcade look: bold simple shapes, BRIGHT SATURATED colour, smooth clean surfaces, no photographic texture or grain, nothing under it",
+    "render": "flat even lighting, no cast shadow, no ground, no base, no plinth, no soil, no rock under it — the object simply ends where it ends; no dirt, dust, rust, stains or weathering, nothing photographic",
     "avoid": [
       "manufacturer badges, marque emblems, grille crests or wordmarks of any kind",
       "real sponsor marks, oil-company colours, cigarette-brand liveries",
       "model names or type numbers anywhere on the body",
       "licence plates bearing real jurisdictions",
       "watermarks, signatures, captions, UI, borders"
-    ]
+    ],
+    "styleByClass": {
+      "architecture": "Windows are flat dark panels, never reflective glass; walls are plain blocks of one colour; no reflections, no interior visible",
+      "signage": "Flat painted panels in plain blocks of colour, no reflections",
+      "props": "Plain painted metal in flat colour, no reflections"
+    },
+    "bible": {
+      "file": "ext/assetgen/_bible/bible.png",
+      "says": "IMAGE {n} is the PALETTE AND FINISH CHART. Match its colours, its surface finish and its soft flat shading exactly. It contains no objects: draw NOTHING from it, take only the look",
+      "prompt": "A materials and palette chart for a late-1980s arcade racing game — NO objects, NO vehicles, NO scenery, NO buildings, nothing recognisable. Only plain geometric primitives on a plain neutral field: a sphere, a cube, a cylinder, a cone and a flat panel, repeated in a grid, each rendered in one bright saturated colour — red, orange, yellow, grass green, turquoise, royal blue, cream white.\n\nThe RENDERING is the point: smooth clean surfaces, flat even light, soft simple shading that shows the form, hard clean edges, no texture, no grain, no reflections, no shadows on the field, no gloss highlights blown out. Beneath them a row of flat colour swatches in the same palette.\n\nNo text, no lettering, no numbers, no labels.",
+      "mode": "reference",
+      "compose": true,
+      "composedSays": "In the REFERENCE: its right half is this object's measured side outline — match that silhouette, {dims}. Its left half is the palette and finish. Draw neither of them, draw the object"
+    },
+    "engines": {
+      "dev": {
+        "host": "http://127.0.0.1:18090",
+        "model": "flux.2-dev",
+        "field": "image[]",
+        "bible": false,
+        "readsAttachments": true
+      },
+      "klein": {
+        "host": "http://127.0.0.1:8402",
+        "model": "FLUX.2 [klein] 9B",
+        "field": "image",
+        "bible": "reference",
+        "readsAttachments": false
+      }
+    },
+    "$engines": [
+      "Two servers with opposite strengths, both measured rather than assumed.",
+      "",
+      "DEV reads what you attach — so literally that a two-panel outline came back as a two-panel",
+      "drawing. That is the failure mode everywhere except where a shape must be obeyed, and for a",
+      "vehicle it must: asked for a mid-engined prototype against a plain box, every server returns a",
+      "long-nosed front-engined sports racer. Give dev a DRAWN PROFILE and it traces it. Dev discards",
+      "`reference_image` silently, so there is no style guide on this side; the words carry it.",
+      "",
+      "KLEIN ignores attachments entirely — two completely different outlines under `image` produced",
+      "BYTE-IDENTICAL output — and reads `reference_image`, which refers rather than copies. So klein",
+      "is where the style guide works, and where proportion is only as good as the sentence describing",
+      "it. Right for scenery, whose shapes are generic and whose look is everything.",
+      "",
+      "Hence `engineByClass`. A spec can override with its own `engine`."
+    ],
+    "engineByClass": {
+      "vehicle": "dev",
+      "nature": "klein",
+      "props": "klein",
+      "architecture": "klein",
+      "signage": "klein"
+    }
   },
-
   "assets": [
-{
+    {
       "id": "hero-prototype",
       "class": "vehicle",
       "kind": "hero",
-      "subject": "closed-cockpit racing sports-prototype coupe",
+      "subject": "mid-engined endurance racing prototype coupe",
       "replaces": "buildPrototype() in apps/coast/src/render/procgen.ts",
-      "paint": "plain off-white, unmarked \u2014 the livery is applied separately",
-      "dims": { "lengthM": 4.18, "widthM": 1.98, "heightM": 1.02, "wheelbaseM": 2.40, "trackM": 1.52, "wheelDiameterM": 0.66 },
+      "paint": "a bright saturated racing red with one broad white stripe over nose and roof",
+      "dims": {
+        "lengthM": 4.18,
+        "widthM": 1.98,
+        "heightM": 1.02,
+        "wheelbaseM": 2.4,
+        "trackM": 1.52,
+        "wheelDiameterM": 0.66,
+        "cabin": {
+          "startM": 1.75,
+          "endM": 3.15,
+          "heightM": 0.34
+        },
+        "rearWheelDiameterM": 0.74
+      },
       "era": "1968–1971 international 5-litre prototype racing",
       "silhouette": [
-        "Mid-engined two-seat closed coupe: a third of the length ahead of the windscreen, two-thirds behind, barely a metre high"
+        "The engine is BEHIND the driver: the cockpit sits in the FRONT THIRD with the windscreen foot almost over the front wheels, and the whole rear two-thirds is one long engine deck. The nose is barely a wheel long; the tail is twice that"
       ],
       "cues": [
-        "a low wide rounded nose with a full-width intake slot under a soft edge, and raised fender crowns over each front wheel standing higher than the bonnet valley between them, which carries two flush NACA ducts",
-        "a steeply raked wraparound windscreen meeting a very short roof",
-        "flying buttresses running back from the roof to the rear fenders around a recessed rear window, with half-moon cutouts over the rear wheels",
-        "a full-width horizontal spoiler lip at the tail, and exposed exhaust primaries under it",
-        "wide deeply-dished five-spoke magnesium wheels, knock-off nuts"
+        "a cockpit bubble pushed far forward, the base of its windscreen almost over the front wheels",
+        "a long low engine deck running back from the cabin to the tail, vented with louvres over the engine",
+        "a short low nose with a wide full-width mouth, faired headlamp covers, and fender crowns peaked above the bonnet valley between them",
+        "flying buttresses running back from the roof to the rear fenders around a recessed rear window",
+        "a chopped vertical tail with a full-width spoiler lip and exhaust primaries under it",
+        "wide deep-dished five-spoke magnesium wheels, the rear tyres visibly fatter than the front"
       ],
       "materials": [
-        "hand-laid painted fibreglass, slightly undulating, never machine-flat",
-        "taped headlamp covers faired into the nose, bare riveted aluminium at the exhaust exits, dark tyres with a period block tread"
+        "smooth glossy painted plastic, one flat colour",
+        "clear headlamp covers, chrome exhaust pipes, plain black tyres"
       ],
       "avoid": [
+        "a long bonnet ahead of the cabin — the engine is BEHIND the driver, never in front of it",
+        "a cabin set back towards the rear axle, or any front-engined sports-racer profile",
         "a pointed wedge nose or chisel front — that is a decade too late",
-        "a tall upright tail fin or swan-neck wing",
+        "a tall upright tail fin, swan-neck wing or roll hoop above the roofline",
         "modern low-profile tyres, alloy multi-spoke wheels, LED lamps",
-        "a roll hoop protruding above the roofline",
         "any racing number or roundel; liveries are applied separately"
       ],
-      "views": ["front three-quarter", "profile", "back"]
+      "views": [
+        "rear three-quarter",
+        "profile",
+        "front"
+      ],
+      "profile": [
+        [
+          0.0,
+          0.22
+        ],
+        [
+          0.0,
+          0.74
+        ],
+        [
+          0.3,
+          0.8
+        ],
+        [
+          1.4,
+          0.82
+        ],
+        [
+          1.78,
+          0.84
+        ],
+        [
+          2.0,
+          1.02
+        ],
+        [
+          2.62,
+          1.02
+        ],
+        [
+          3.08,
+          0.8
+        ],
+        [
+          3.3,
+          0.78
+        ],
+        [
+          3.66,
+          0.7
+        ],
+        [
+          3.98,
+          0.52
+        ],
+        [
+          4.18,
+          0.36
+        ],
+        [
+          4.18,
+          0.2
+        ],
+        [
+          3.3,
+          0.14
+        ],
+        [
+          1.6,
+          0.14
+        ],
+        [
+          0.45,
+          0.16
+        ]
+      ]
     },
-
     {
       "id": "formula-single-seater",
       "class": "vehicle",
       "kind": "formula",
       "subject": "open-wheel single-seater racing car",
-      "paint": "a deep flat blue with no markings",
-      "dims": { "lengthM": 4.05, "widthM": 1.90, "heightM": 0.95, "wheelbaseM": 2.45, "trackM": 1.55, "wheelDiameterM": 0.70 },
+      "paint": "vivid royal blue with a white nose band",
+      "dims": {
+        "lengthM": 4.05,
+        "widthM": 1.9,
+        "heightM": 0.95,
+        "wheelbaseM": 2.45,
+        "trackM": 1.55,
+        "wheelDiameterM": 0.7
+      },
       "era": "1970–1972 3-litre grand prix racing, the first season of full-width wings",
       "silhouette": [
         "A cigar body with nothing around the wheels at all: four tyres standing clear in the open air, the driver's head and shoulders above the line of the bodywork",
@@ -92,23 +235,40 @@
         "a short chisel nose carrying a flat two-element front wing on stalks",
         "a full-width rear wing on twin uprights, level with or just above the rear tyre tops",
         "an airbox scoop standing above and behind the driver's head",
-        "an exposed engine and gearbox behind the cockpit, suspension wishbones in plain view",
-        "a small wraparound windscreen no higher than the driver's chin"
+        "an exposed engine and gearbox behind the cockpit, suspension wishbones in plain view"
       ],
-      "materials": ["riveted painted aluminium sheet", "magnesium wheels, four-spoke, plain", "wide slick tyres with no tread pattern at all"],
-      "avoid": ["enclosed bodywork over the wheels", "modern bargeboards, barge-high noses, halo, carbon weave", "any sponsor decal, racing number or roundel"],
-      "views": ["front three-quarter", "profile", "back"]
+      "materials": [
+        "smooth glossy painted shell",
+        "plain black slick tyres, bright chrome suspension"
+      ],
+      "avoid": [
+        "enclosed bodywork over the wheels",
+        "modern bargeboards, barge-high noses, halo, carbon weave",
+        "any sponsor decal, racing number or roundel"
+      ],
+      "views": [
+        "front three-quarter",
+        "profile",
+        "back"
+      ]
     },
-
     {
       "id": "traffic-sedan",
       "class": "vehicle",
       "kind": "sedan",
       "subject": "full-size family saloon",
-      "paint": "a muted metallic bronze-gold",
-      "dims": { "lengthM": 4.90, "widthM": 1.86, "heightM": 1.40, "wheelbaseM": 2.85, "wheelDiameterM": 0.70 },
+      "paint": "bright tangerine orange",
+      "dims": {
+        "lengthM": 4.9,
+        "widthM": 1.86,
+        "heightM": 1.4,
+        "wheelbaseM": 2.85,
+        "wheelDiameterM": 0.7
+      },
       "era": "early-1970s mass-market full-size saloon, North American market",
-      "silhouette": ["Three-box saloon: long bonnet, upright cabin, flat boot, the body sitting high on its wheels with a visible gap over the tyre"],
+      "silhouette": [
+        "Three-box saloon: long bonnet, upright cabin, flat boot, the body sitting high on its wheels with a visible gap over the tyre"
+      ],
       "cues": [
         "a flat horizontal bonnet meeting a full-width grille of fine vertical bars",
         "stacked or paired round headlamps at the outer corners",
@@ -118,20 +278,37 @@
         "a raised edge along the rear wing — tailfin residue, not a fin",
         "steel wheels with small chrome hubcaps and whitewall tyres"
       ],
-      "materials": ["single-stage enamel in a muted period colour", "bright chrome brightwork", "painted steel wheels"],
-      "avoid": ["any modern shape: no wedge, no fastback, no blacked-out pillars", "aerodynamic mirrors, alloy wheels, tinted glass"],
-      "views": ["front three-quarter", "profile", "back"]
+      "materials": [
+        "smooth glossy paint",
+        "bright chrome trim, plain black tyres"
+      ],
+      "avoid": [
+        "any modern shape: no wedge, no fastback, no blacked-out pillars",
+        "aerodynamic mirrors, alloy wheels, tinted glass"
+      ],
+      "views": [
+        "front three-quarter",
+        "profile",
+        "back"
+      ]
     },
-
     {
       "id": "traffic-coupe",
       "class": "vehicle",
       "kind": "sedanSports",
       "subject": "two-door performance coupe",
-      "paint": "a saturated orange-red",
-      "dims": { "lengthM": 4.75, "widthM": 1.90, "heightM": 1.30, "wheelbaseM": 2.75, "wheelDiameterM": 0.68 },
+      "paint": "vivid cherry red",
+      "dims": {
+        "lengthM": 4.75,
+        "widthM": 1.9,
+        "heightM": 1.3,
+        "wheelbaseM": 2.75,
+        "wheelDiameterM": 0.68
+      },
       "era": "1970 mass-market performance coupe",
-      "silhouette": ["Long bonnet, short deck, a fastback roof falling in one unbroken line from the windscreen to the tail"],
+      "silhouette": [
+        "Long bonnet, short deck, a fastback roof falling in one unbroken line from the windscreen to the tail"
+      ],
       "cues": [
         "a bonnet bulge or forward-facing scoop",
         "a recessed grille with deeply set or hidden lamps",
@@ -140,21 +317,38 @@
         "wide steel wheels with trim rings and raised-letter-free blackwall tyres",
         "twin exhaust tips under the rear valance"
       ],
-      "materials": ["saturated period colour", "a matte black bonnet blackout panel"],
-      "avoid": ["spoilers beyond a small lip, side skirts, modern tyres", "any stripe that reads as a team livery"],
-      "views": ["front three-quarter", "profile", "back"]
+      "materials": [
+        "smooth glossy paint with a flat black bonnet panel",
+        "plain black tyres"
+      ],
+      "avoid": [
+        "spoilers beyond a small lip, side skirts, modern tyres",
+        "any stripe that reads as a team livery"
+      ],
+      "views": [
+        "front three-quarter",
+        "profile",
+        "back"
+      ]
     },
-
     {
       "id": "traffic-wagon",
       "class": "vehicle",
       "kind": "suv",
       "subject": "full-size estate wagon",
       "replaces": "the 'suv' slot, which has no period equivalent — a wagon is what that decade drove",
-      "paint": "pale sand, below the wood-grain flank panel",
-      "dims": { "lengthM": 5.35, "widthM": 1.98, "heightM": 1.50, "wheelbaseM": 3.00, "wheelDiameterM": 0.70 },
+      "paint": "bright turquoise, with a bold woodgrain panel along the flank",
+      "dims": {
+        "lengthM": 5.35,
+        "widthM": 1.98,
+        "heightM": 1.5,
+        "wheelbaseM": 3.0,
+        "wheelDiameterM": 0.7
+      },
       "era": "early-1970s full-size estate wagon, the family long-distance car",
-      "silhouette": ["Two-box: the saloon's bonnet and cabin, then a long flat roof carried all the way to a vertical tailgate. Longer than anything else in traffic"],
+      "silhouette": [
+        "Two-box: the saloon's bonnet and cabin, then a long flat roof carried all the way to a vertical tailgate. Longer than anything else in traffic"
+      ],
       "cues": [
         "a roof rack of thin slats running most of the roof length",
         "a large square rear side window behind the rear door",
@@ -163,21 +357,38 @@
         "the same fine-barred full-width grille and paired round lamps as the saloon",
         "steel wheels, small hubcaps, whitewall tyres"
       ],
-      "materials": ["enamel in a pale period colour", "printed wood-grain film, slightly faded", "chrome roof-rack rails"],
-      "avoid": ["any modern SUV shape: no raised ride height, no cladding, no roof bars in a moulded shell", "alloy wheels, tinted glass"],
-      "views": ["front three-quarter", "profile", "back"]
+      "materials": [
+        "smooth glossy paint",
+        "bright chrome roof rails, plain black tyres"
+      ],
+      "avoid": [
+        "any modern SUV shape: no raised ride height, no cladding, no roof bars in a moulded shell",
+        "alloy wheels, tinted glass"
+      ],
+      "views": [
+        "front three-quarter",
+        "profile",
+        "back"
+      ]
     },
-
     {
       "id": "traffic-convertible",
       "class": "vehicle",
       "kind": null,
       "newKind": true,
       "subject": "open two-seat roadster",
-      "paint": "deep burgundy",
-      "dims": { "lengthM": 4.20, "widthM": 1.70, "heightM": 1.25, "wheelbaseM": 2.40, "wheelDiameterM": 0.66 },
+      "paint": "vivid magenta-red",
+      "dims": {
+        "lengthM": 4.2,
+        "widthM": 1.7,
+        "heightM": 1.25,
+        "wheelbaseM": 2.4,
+        "wheelDiameterM": 0.66
+      },
       "era": "late-1960s open two-seat sports roadster",
-      "silhouette": ["Small, low and open: a long bonnet, a cockpit set well back, a short tail, and no roof at all — the windscreen frame stands alone above the beltline"],
+      "silhouette": [
+        "Small, low and open: a long bonnet, a cockpit set well back, a short tail, and no roof at all — the windscreen frame stands alone above the beltline"
+      ],
       "cues": [
         "a low oval or rounded intake below a long bonnet with a raised centre crease",
         "exposed round headlamps standing proud, or faired under clear covers",
@@ -186,20 +397,36 @@
         "a folded hood stack lying flush in a well behind the seats",
         "wire wheels with knock-off spinners, thin whitewall tyres"
       ],
-      "materials": ["deep gloss enamel", "chrome bumperettes rather than a full bumper", "a tan or black leather interior visible over the sills"],
-      "avoid": ["a fixed roof or hard top", "roll bar, modern mirrors, alloy wheels"],
-      "views": ["front three-quarter", "profile"]
+      "materials": [
+        "smooth glossy paint",
+        "bright chrome bumperettes, a tan seat inside"
+      ],
+      "avoid": [
+        "a fixed roof or hard top",
+        "roll bar, modern mirrors, alloy wheels"
+      ],
+      "views": [
+        "front three-quarter",
+        "profile"
+      ]
     },
-
     {
       "id": "traffic-pickup",
       "class": "vehicle",
       "kind": "truck",
       "subject": "half-ton work pickup",
-      "paint": "a faded pale blue, chalked on the horizontal panels",
-      "dims": { "lengthM": 5.10, "widthM": 1.95, "heightM": 1.75, "wheelbaseM": 3.05, "wheelDiameterM": 0.76 },
+      "paint": "bright sky blue",
+      "dims": {
+        "lengthM": 5.1,
+        "widthM": 1.95,
+        "heightM": 1.75,
+        "wheelbaseM": 3.05,
+        "wheelDiameterM": 0.76
+      },
       "era": "late-1960s half-ton work pickup",
-      "silhouette": ["Two-box: an upright cab forward, an open cargo bed behind, a straight beltline running the whole length"],
+      "silhouette": [
+        "Two-box: an upright cab forward, an open cargo bed behind, a straight beltline running the whole length"
+      ],
       "cues": [
         "flat slab sides with a step down behind the cab",
         "a wide simple grille with a single round headlamp either side",
@@ -208,20 +435,37 @@
         "an external fuel filler on the rear wing",
         "plain steel wheels with chunky sidewalls"
       ],
-      "materials": ["work-grade paint with honest wear, chalked on the horizontal surfaces", "a dusty matte finish, never showroom"],
-      "avoid": ["a crew cab, four doors, lifted suspension, a modern grille", "bed liner, chrome side steps"],
-      "views": ["front three-quarter", "profile", "back"]
+      "materials": [
+        "flat painted panels",
+        "plain steel wheels, black tyres"
+      ],
+      "avoid": [
+        "a crew cab, four doors, lifted suspension, a modern grille",
+        "bed liner, chrome side steps"
+      ],
+      "views": [
+        "front three-quarter",
+        "profile",
+        "back"
+      ]
     },
-
     {
       "id": "traffic-van",
       "class": "vehicle",
       "kind": "van",
       "subject": "forward-control panel van",
-      "paint": "flat cream, one colour all over",
-      "dims": { "lengthM": 4.60, "widthM": 1.85, "heightM": 2.00, "wheelbaseM": 2.75, "wheelDiameterM": 0.66 },
+      "paint": "bright cream white",
+      "dims": {
+        "lengthM": 4.6,
+        "widthM": 1.85,
+        "heightM": 2.0,
+        "wheelbaseM": 2.75,
+        "wheelDiameterM": 0.66
+      },
       "era": "late-1960s forward-control panel van",
-      "silhouette": ["One box. The windscreen is almost directly above the front axle and the nose barely exists"],
+      "silhouette": [
+        "One box. The windscreen is almost directly above the front axle and the nose barely exists"
+      ],
       "cues": [
         "a near-vertical flat windscreen in two panes",
         "a sliding side door with a recessed track",
@@ -230,20 +474,37 @@
         "roof gutters running the full length",
         "a blank hand-painted signwriting panel on the flank, lettering left off"
       ],
-      "materials": ["flat single colour, slightly chalked", "painted steel wheels with plain centre caps"],
-      "avoid": ["a modern high-roof profile, body-coloured bumpers, tinted glass", "any legible lettering in the signwriting panel"],
-      "views": ["front three-quarter", "profile", "back"]
+      "materials": [
+        "flat painted panels, one colour all over",
+        "plain steel wheels"
+      ],
+      "avoid": [
+        "a modern high-roof profile, body-coloured bumpers, tinted glass",
+        "any legible lettering in the signwriting panel"
+      ],
+      "views": [
+        "front three-quarter",
+        "profile",
+        "back"
+      ]
     },
-
     {
       "id": "traffic-delivery",
       "class": "vehicle",
       "kind": "delivery",
       "subject": "walk-in delivery box van",
-      "paint": "a pale grey-blue",
-      "dims": { "lengthM": 6.20, "widthM": 2.10, "heightM": 2.80, "wheelbaseM": 3.40, "wheelDiameterM": 0.80 },
+      "paint": "bright grass green",
+      "dims": {
+        "lengthM": 6.2,
+        "widthM": 2.1,
+        "heightM": 2.8,
+        "wheelbaseM": 3.4,
+        "wheelDiameterM": 0.8
+      },
       "era": "1960s walk-in delivery van, the kind that worked a suburban round",
-      "silhouette": ["A tall square box on a truck chassis with a short rounded nose in front of it — nearly as tall as it is long in the cab section, and flat-sided all the way back"],
+      "silhouette": [
+        "A tall square box on a truck chassis with a short rounded nose in front of it — nearly as tall as it is long in the cab section, and flat-sided all the way back"
+      ],
       "cues": [
         "a rounded snub bonnet and a deep two-pane windscreen, the driver sitting high",
         "a doorless driver's opening on the near side",
@@ -252,20 +513,36 @@
         "a roof that curves into the sides on a tight radius",
         "small round headlamps mounted on the front wings"
       ],
-      "materials": ["flat painted steel with visible panel seams and rivets", "a scuffed aluminium kick strip low on the flank"],
-      "avoid": ["any company name, logo or livery — the flanks stay blank", "a modern box truck's flat face or roll shutter"],
-      "views": ["front three-quarter", "profile"]
+      "materials": [
+        "flat painted panels",
+        "one bright aluminium strip along the flank"
+      ],
+      "avoid": [
+        "any company name, logo or livery — the flanks stay blank",
+        "a modern box truck's flat face or roll shutter"
+      ],
+      "views": [
+        "front three-quarter",
+        "profile"
+      ]
     },
-
     {
       "id": "traffic-taxi",
       "class": "vehicle",
       "kind": "taxi",
       "subject": "city taxicab",
-      "paint": "deep yellow-ochre under a cream roof",
-      "dims": { "lengthM": 5.00, "widthM": 1.90, "heightM": 1.45, "wheelbaseM": 2.90, "wheelDiameterM": 0.70 },
+      "paint": "vivid taxi yellow under a white roof",
+      "dims": {
+        "lengthM": 5.0,
+        "widthM": 1.9,
+        "heightM": 1.45,
+        "wheelbaseM": 2.9,
+        "wheelDiameterM": 0.7
+      },
       "era": "early-1970s city taxicab, a full-size saloon in service trim",
-      "silhouette": ["The full-size saloon, upright and square, riding a little high and a little tired"],
+      "silhouette": [
+        "The full-size saloon, upright and square, riding a little high and a little tired"
+      ],
       "cues": [
         "a plain unlettered roof sign box on a low chrome base",
         "a two-tone paint break along the beltline: a strong body colour under a paler roof",
@@ -274,20 +551,36 @@
         "a heavy chrome bumper with rubber-faced overriders",
         "a slightly settled rear suspension and sagging door seals"
       ],
-      "materials": ["worn enamel with polish swirl and stone chips at the leading edges", "dull chrome, pitted at the bumper corners"],
-      "avoid": ["any taxi company's name, number or checker pattern — the panels are blank", "a modern hybrid cab shape, roof light bar, wrapped advertising"],
-      "views": ["front three-quarter", "profile"]
+      "materials": [
+        "glossy flat colour",
+        "bright chrome bumpers, plain black tyres"
+      ],
+      "avoid": [
+        "any taxi company's name, number or checker pattern — the panels are blank",
+        "a modern hybrid cab shape, roof light bar, wrapped advertising"
+      ],
+      "views": [
+        "front three-quarter",
+        "profile"
+      ]
     },
-
     {
       "id": "traffic-police",
       "class": "vehicle",
       "kind": "police",
       "subject": "highway patrol cruiser",
-      "paint": "black, with white doors and roof",
-      "dims": { "lengthM": 5.20, "widthM": 1.95, "heightM": 1.42, "wheelbaseM": 2.95, "wheelDiameterM": 0.72 },
+      "paint": "black with bright white doors and roof",
+      "dims": {
+        "lengthM": 5.2,
+        "widthM": 1.95,
+        "heightM": 1.42,
+        "wheelbaseM": 2.95,
+        "wheelDiameterM": 0.72
+      },
       "era": "early-1970s highway patrol pursuit saloon",
-      "silhouette": ["The full-size saloon again, but squatter on stiffer springs and visibly heavier at the front"],
+      "silhouette": [
+        "The full-size saloon again, but squatter on stiffer springs and visibly heavier at the front"
+      ],
       "cues": [
         "a single domed rotating beacon on the roof, low and round, on a small plinth",
         "a black-and-white paint division: white doors and roof against a dark body, or the reverse",
@@ -296,44 +589,75 @@
         "plain black steel wheels with no hubcaps and blackwall tyres",
         "a whip aerial rising from the rear wing"
       ],
-      "materials": ["flat fleet enamel, no metallic", "matte black rubber bumper faces"],
-      "avoid": ["any force's name, star, crest, motto or unit number — every panel is blank", "a modern light bar, push bar, decal wrap or LED"],
-      "views": ["front three-quarter", "profile"]
+      "materials": [
+        "flat paint in two blocks of colour",
+        "chrome bumpers, a clear domed beacon"
+      ],
+      "avoid": [
+        "any force's name, star, crest, motto or unit number — every panel is blank",
+        "a modern light bar, push bar, decal wrap or LED"
+      ],
+      "views": [
+        "front three-quarter",
+        "profile"
+      ]
     },
-
     {
       "id": "traffic-bus",
       "class": "vehicle",
       "kind": null,
       "newKind": true,
       "subject": "intercity coach",
-      "paint": "unpainted polished stainless, with one dark red band at the window line",
-      "dims": { "lengthM": 10.60, "widthM": 2.50, "heightM": 3.30, "wheelbaseM": 6.20, "wheelDiameterM": 1.05 },
+      "paint": "bright silver with one bold red band at the window line",
+      "dims": {
+        "lengthM": 10.6,
+        "widthM": 2.5,
+        "heightM": 3.3,
+        "wheelbaseM": 6.2,
+        "wheelDiameterM": 1.05
+      },
       "era": "late-1960s intercity highway coach",
-      "silhouette": ["A long high box with a raised rear section: passengers ride above the luggage bays, so the floor line is chest height on a standing adult"],
+      "silhouette": [
+        "A long high box with a raised rear section: passengers ride above the luggage bays, so the floor line is chest height on a standing adult"
+      ],
       "cues": [
         "a deep curved two-pane windscreen raked back over a short blunt nose",
         "a continuous run of side windows with rounded corners, each with a sliding upper light",
-        "fluted stainless side panels below the window line",
         "luggage bay doors along the flank between the axles",
         "a stepped roofline that rises behind the driver",
         "twin rear axles at the back, single at the front"
       ],
-      "materials": ["polished fluted stainless steel", "a single painted colour band along the window line", "chrome wheel trims on the front axle only"],
-      "avoid": ["any operator's name, logo or destination board text — blank panels", "a modern flat-fronted coach, wraparound glazing, air-conditioning pod"],
-      "views": ["front three-quarter", "profile"]
+      "materials": [
+        "smooth bright silver flanks",
+        "one bold painted colour band"
+      ],
+      "avoid": [
+        "any operator's name, logo or destination board text — blank panels",
+        "a modern flat-fronted coach, wraparound glazing, air-conditioning pod"
+      ],
+      "views": [
+        "front three-quarter",
+        "profile"
+      ]
     },
-
     {
       "id": "traffic-tanker",
       "class": "vehicle",
       "kind": null,
       "newKind": true,
       "subject": "articulated fuel tanker",
-      "paint": "a bare aluminium barrel behind a deep red cab",
-      "dims": { "lengthM": 13.50, "widthM": 2.45, "heightM": 3.60, "wheelbaseM": 4.20, "wheelDiameterM": 1.05 },
+      "paint": "a bright silver barrel behind a vivid red cab",
+      "dims": {
+        "lengthM": 13.5,
+        "widthM": 2.45,
+        "heightM": 3.6,
+        "wheelbaseM": 4.2,
+        "wheelDiameterM": 1.05
+      },
       "era": "late-1960s articulated road tanker",
-      "silhouette": ["A short bonneted tractor unit with a long polished cylinder behind it, the cylinder's belly hanging low between the axles"],
+      "silhouette": [
+        "A short bonneted tractor unit with a long polished cylinder behind it, the cylinder's belly hanging low between the axles"
+      ],
       "cues": [
         "a bonneted cab with a tall upright radiator shell and a sleeper box behind",
         "a plain polished cylindrical barrel with two or three raised ring stiffeners",
@@ -342,21 +666,37 @@
         "twin rear axles under the trailer, mudflaps behind them",
         "exhaust stacks standing vertically behind the cab"
       ],
-      "materials": ["polished unpainted aluminium barrel", "painted cab in a strong single colour", "black rubber mudflaps, unlettered"],
-      "avoid": ["any oil company's colours, name or hazard placard — the barrel stays plain", "a modern aerodynamic cab or fairings"],
-      "views": ["profile", "front"]
+      "materials": [
+        "a smooth bright silver barrel",
+        "a glossy painted cab, black tyres"
+      ],
+      "avoid": [
+        "any oil company's colours, name or hazard placard — the barrel stays plain",
+        "a modern aerodynamic cab or fairings"
+      ],
+      "views": [
+        "profile",
+        "front"
+      ]
     },
-
     {
       "id": "traffic-camper",
       "class": "vehicle",
       "kind": null,
       "newKind": true,
       "subject": "pickup with a slide-in camper",
-      "paint": "a cream camper body on a rust-red truck",
-      "dims": { "lengthM": 5.40, "widthM": 2.05, "heightM": 3.00, "wheelbaseM": 3.05, "wheelDiameterM": 0.76 },
+      "paint": "a cream camper body on a bright orange truck",
+      "dims": {
+        "lengthM": 5.4,
+        "widthM": 2.05,
+        "heightM": 3.0,
+        "wheelbaseM": 3.05,
+        "wheelDiameterM": 0.76
+      },
       "era": "late-1960s pickup carrying a slide-in camper body",
-      "silhouette": ["The work pickup, with a tall box sitting in its bed that overhangs the cab roof — the overhanging nose is the whole silhouette"],
+      "silhouette": [
+        "The work pickup, with a tall box sitting in its bed that overhangs the cab roof — the overhanging nose is the whole silhouette"
+      ],
       "cues": [
         "a camper nose overhanging the cab roof, with a small window in it",
         "a folding aluminium ladder on the rear face",
@@ -365,383 +705,691 @@
         "a roof vent hatch and a thin flue pipe",
         "the pickup's own cab, grille and steel wheels below"
       ],
-      "materials": ["ribbed aluminium camper skin with a pale enamel finish", "a contrasting stripe along the camper's waist", "the truck's paint noticeably more worn than the camper's"],
-      "avoid": ["a modern motorhome shape, graphics, wrap or fibreglass moulding", "any brand name on the camper flank"],
-      "views": ["front three-quarter", "profile"]
+      "materials": [
+        "flat painted panels, smooth and clean",
+        "plain steel wheels"
+      ],
+      "avoid": [
+        "a modern motorhome shape, graphics, wrap or fibreglass moulding",
+        "any brand name on the camper flank"
+      ],
+      "views": [
+        "front three-quarter",
+        "profile"
+      ]
     },
-
-{
+    {
       "id": "palm",
       "class": "nature",
       "kind": "palm",
       "subject": "fan palm beside a coast road",
-      "dims": { "heightM": 10.0, "trunkDiameterM": 0.42, "crownSpreadM": 5.0 },
+      "dims": {
+        "heightM": 10.0,
+        "trunkDiameterM": 0.42,
+        "crownSpreadM": 5.0
+      },
       "era": "coastal boulevard planting, mature",
-      "silhouette": ["A bare trunk standing dead upright with a crown only at the very top, and nothing at all on the trunk between"],
+      "silhouette": [
+        "A bare trunk standing dead upright with a crown only at the very top, and nothing at all on the trunk between"
+      ],
       "cues": [
         "a trunk cross-hatched with old frond bases, thickening towards the ground",
         "twelve to sixteen fronds radiating in every direction, the upper ones arched, the lower ones past horizontal",
         "a thick skirt of dead brown fronds hanging under the green crown",
         "seed stalks emerging where the fronds meet the trunk"
       ],
-      "materials": ["dry fibrous grey-brown trunk", "fronds in a dusty desaturated green, sun-bleached at the tips"],
-      "avoid": ["a symmetrical lollipop crown", "a smooth cylindrical trunk", "any pot, base disc, soil mound or ground plane"],
-      "views": ["profile", "front", "back"]
+      "materials": [
+        "a flat grey-brown trunk",
+        "bright green fronds in a few bold blades"
+      ],
+      "avoid": [
+        "a symmetrical lollipop crown",
+        "a smooth cylindrical trunk",
+        "any pot, base disc, soil mound or ground plane"
+      ],
+      "views": [
+        "profile",
+        "front",
+        "back"
+      ]
     },
-
     {
       "id": "palm-tall",
       "class": "nature",
       "kind": "palmTall",
       "subject": "tall slender palm",
-      "dims": { "heightM": 13.0, "trunkDiameterM": 0.35, "crownSpreadM": 4.5 },
+      "dims": {
+        "heightM": 13.0,
+        "trunkDiameterM": 0.35,
+        "crownSpreadM": 4.5
+      },
       "era": "coastal boulevard planting, old and drawn up",
-      "silhouette": ["A bare slender trunk with a slight lean, and a crown only at the very top. Absurdly tall for its thickness"],
+      "silhouette": [
+        "A bare slender trunk with a slight lean, and a crown only at the very top. Absurdly tall for its thickness"
+      ],
       "cues": [
         "a trunk visibly ringed with old frond scars, thicker at the base",
         "nine to twelve fronds, the upper ones arcing up, the lower ones drooping past horizontal",
         "a short skirt of dead brown fronds under the green crown",
         "no branches anywhere on the trunk"
       ],
-      "materials": ["dry fibrous grey-brown trunk", "fronds in a dusty desaturated green, sun-bleached at the tips"],
-      "avoid": ["a symmetrical lollipop crown", "a smooth cylindrical trunk", "any visible pot, base disc or ground plane"],
-      "views": ["profile", "front", "back"]
+      "materials": [
+        "a flat grey-brown trunk",
+        "bright green fronds in a few bold blades"
+      ],
+      "avoid": [
+        "a symmetrical lollipop crown",
+        "a smooth cylindrical trunk",
+        "any visible pot, base disc or ground plane"
+      ],
+      "views": [
+        "profile",
+        "front",
+        "back"
+      ]
     },
-
     {
       "id": "palm-bend",
       "class": "nature",
       "kind": "palmBend",
       "subject": "wind-leaned palm",
-      "dims": { "heightM": 9.5, "trunkDiameterM": 0.40, "crownSpreadM": 5.0 },
+      "dims": {
+        "heightM": 9.5,
+        "trunkDiameterM": 0.4,
+        "crownSpreadM": 5.0
+      },
       "era": "coastal planting on an exposed shore",
-      "silhouette": ["A trunk that leans hard away from the sea and curves back towards the vertical near the top, so the crown sits well to one side of the root"],
+      "silhouette": [
+        "A trunk that leans hard away from the sea and curves back towards the vertical near the top, so the crown sits well to one side of the root"
+      ],
       "cues": [
         "a smooth continuous curve in the trunk, not a kink",
         "the crown swept to the leeward side, fronds combed one way",
         "the windward fronds shorter and more ragged than the leeward ones",
         "roots visibly flared on the side the lean pulls against"
       ],
-      "materials": ["grey fibrous trunk with old frond scars", "green fronds browned and split at the tips"],
-      "avoid": ["a straight vertical trunk", "an even radial crown", "any pot, base disc or ground plane"],
-      "views": ["profile", "front", "back"]
+      "materials": [
+        "a flat grey-brown trunk",
+        "bright green fronds, swept one way"
+      ],
+      "avoid": [
+        "a straight vertical trunk",
+        "an even radial crown",
+        "any pot, base disc or ground plane"
+      ],
+      "views": [
+        "profile",
+        "front",
+        "back"
+      ]
     },
-
     {
       "id": "pine",
       "class": "nature",
       "kind": "pine",
       "subject": "coastal conifer",
-      "dims": { "heightM": 9.0, "trunkDiameterM": 0.45, "crownSpreadM": 4.0 },
+      "dims": {
+        "heightM": 9.0,
+        "trunkDiameterM": 0.45,
+        "crownSpreadM": 4.0
+      },
       "era": "coastal conifer stand",
-      "silhouette": ["A conical tree, widest a third of the way up and tapering to a single leader at the top, with a metre or two of clear trunk below the lowest branches"],
+      "silhouette": [
+        "A conical tree, widest a third of the way up and tapering to a single leader at the top, with a metre or two of clear trunk below the lowest branches"
+      ],
       "cues": [
         "whorls of branches in distinct tiers with gaps of trunk between them",
         "branches sweeping slightly downwards and lifting at the tips",
         "a single straight leader at the apex, not a rounded top",
         "dead stubs of old branches low on the trunk"
       ],
-      "materials": ["plated red-brown bark", "dark blue-green needle masses, dense at the outside and open at the core"],
-      "avoid": ["a smooth cone like a toy tree", "a perfectly symmetrical outline", "any pot, base disc or ground plane"],
-      "views": ["profile", "front", "back"]
+      "materials": [
+        "a flat red-brown trunk",
+        "deep green needle masses in simple blocks"
+      ],
+      "avoid": [
+        "a smooth cone like a toy tree",
+        "a perfectly symmetrical outline",
+        "any pot, base disc or ground plane"
+      ],
+      "views": [
+        "profile",
+        "front",
+        "back"
+      ]
     },
-
     {
       "id": "pine-tall",
       "class": "nature",
       "kind": "pineTall",
       "subject": "tall forest conifer",
-      "dims": { "heightM": 13.0, "trunkDiameterM": 0.55, "crownSpreadM": 4.2 },
+      "dims": {
+        "heightM": 13.0,
+        "trunkDiameterM": 0.55,
+        "crownSpreadM": 4.2
+      },
       "era": "closed-canopy conifer forest",
-      "silhouette": ["Very tall and narrow: a long clear trunk carrying a slim crown only in its upper half, the shape of a tree that grew up between others"],
+      "silhouette": [
+        "Very tall and narrow: a long clear trunk carrying a slim crown only in its upper half, the shape of a tree that grew up between others"
+      ],
       "cues": [
         "the lower half of the trunk bare, with only dead stubs where branches were",
         "a narrow crown no more than a third of the height",
         "the topmost whorls short and crowded, the leader thin",
         "a slight taper visible along the whole trunk"
       ],
-      "materials": ["deeply fissured grey bark", "needle masses in a dark cold green"],
-      "avoid": ["a wide low crown", "branches reaching the ground", "any pot, base disc or ground plane"],
-      "views": ["profile", "front", "back"]
+      "materials": [
+        "a flat grey-brown trunk",
+        "deep green needles in two or three blocks"
+      ],
+      "avoid": [
+        "a wide low crown",
+        "branches reaching the ground",
+        "any pot, base disc or ground plane"
+      ],
+      "views": [
+        "profile",
+        "front",
+        "back"
+      ]
     },
-
     {
       "id": "pine-round",
       "class": "nature",
       "kind": "pineRound",
       "subject": "wind-clipped shore pine",
-      "dims": { "heightM": 8.0, "trunkDiameterM": 0.50, "crownSpreadM": 6.0 },
+      "dims": {
+        "heightM": 8.0,
+        "trunkDiameterM": 0.5,
+        "crownSpreadM": 6.0
+      },
       "era": "exposed headland, salt-pruned",
-      "silhouette": ["Wider than it is tall: a short trunk dividing low into heavy limbs that carry a flat, dense, umbrella-shaped canopy"],
+      "silhouette": [
+        "Wider than it is tall: a short trunk dividing low into heavy limbs that carry a flat, dense, umbrella-shaped canopy"
+      ],
       "cues": [
         "a trunk that forks within two metres of the ground",
         "limbs visibly crooked, growing outwards more than upwards",
         "a canopy flattened on top as if cut level by the wind",
         "gaps of open sky between the limb clusters"
       ],
-      "materials": ["flaky orange-grey bark in irregular plates", "needle clusters in a dusty olive green"],
-      "avoid": ["a conical Christmas-tree shape", "a single straight leader", "any pot, base disc or ground plane"],
-      "views": ["profile", "front", "back"]
+      "materials": [
+        "a flat orange-brown trunk",
+        "olive-green foliage in one flat canopy"
+      ],
+      "avoid": [
+        "a conical Christmas-tree shape",
+        "a single straight leader",
+        "any pot, base disc or ground plane"
+      ],
+      "views": [
+        "profile",
+        "front",
+        "back"
+      ]
     },
-
     {
       "id": "oak",
       "class": "nature",
       "kind": "oak",
       "subject": "spreading valley oak",
-      "dims": { "heightM": 9.0, "trunkDiameterM": 0.80, "crownSpreadM": 10.0 },
+      "dims": {
+        "heightM": 9.0,
+        "trunkDiameterM": 0.8,
+        "crownSpreadM": 10.0
+      },
       "era": "dry inland valley, an old field tree",
-      "silhouette": ["Broader than it is tall: a short heavy trunk, low horizontal limbs, and a billowing crown that is wider than the tree is high"],
+      "silhouette": [
+        "Broader than it is tall: a short heavy trunk, low horizontal limbs, and a billowing crown that is wider than the tree is high"
+      ],
       "cues": [
         "a trunk that divides into three or four massive limbs below head height",
         "limbs that twist and reach sideways, some dipping towards the ground",
-        "a crown in distinct cloud-like masses with sky showing between them",
-        "one dead limb, bare and pale, among the leafed ones"
+        "a crown in distinct cloud-like masses with sky showing between them"
       ],
-      "materials": ["deeply furrowed grey bark", "small leaves in a dusty mid-green, greyer underneath"],
-      "avoid": ["a tall narrow crown", "a straight single trunk to the top", "any pot, base disc or ground plane"],
-      "views": ["profile", "front", "back"]
+      "materials": [
+        "a flat grey-brown trunk",
+        "bright green foliage in a few bold clumps"
+      ],
+      "avoid": [
+        "a tall narrow crown",
+        "a straight single trunk to the top",
+        "any pot, base disc or ground plane"
+      ],
+      "views": [
+        "profile",
+        "front",
+        "back"
+      ]
     },
-
     {
       "id": "tree-broadleaf",
       "class": "nature",
       "kind": "tree",
       "subject": "roadside broadleaf tree",
-      "dims": { "heightM": 8.0, "trunkDiameterM": 0.45, "crownSpreadM": 6.0 },
+      "dims": {
+        "heightM": 8.0,
+        "trunkDiameterM": 0.45,
+        "crownSpreadM": 6.0
+      },
       "era": "ordinary roadside planting, middle-aged",
-      "silhouette": ["An upright oval crown on a clear straight trunk, about as tall again as the crown is wide — the generic tree the eye reads without looking"],
+      "silhouette": [
+        "An upright oval crown on a clear straight trunk, about as tall again as the crown is wide — the generic tree the eye reads without looking"
+      ],
       "cues": [
         "two metres of clear trunk before the first branch",
         "a crown a little taller than it is wide, slightly lopsided",
         "branching visible at the crown's edge where the leaves thin out",
         "a faint lean away from the road"
       ],
-      "materials": ["smooth grey bark with shallow vertical fissures", "mid-green foliage, lighter at the sunlit top"],
-      "avoid": ["a perfect sphere on a stick", "autumn colour", "any pot, base disc or ground plane"],
-      "views": ["profile", "front", "back"]
+      "materials": [
+        "a flat grey trunk",
+        "bright green foliage in one simple mass"
+      ],
+      "avoid": [
+        "a perfect sphere on a stick",
+        "autumn colour",
+        "any pot, base disc or ground plane"
+      ],
+      "views": [
+        "profile",
+        "front",
+        "back"
+      ]
     },
-
     {
       "id": "bush",
       "class": "nature",
       "kind": "bush",
       "subject": "roadside shrub",
-      "dims": { "heightM": 1.6, "crownSpreadM": 1.8, "widthM": 1.8, "depthM": 1.8 },
+      "dims": {
+        "heightM": 1.6,
+        "crownSpreadM": 1.8,
+        "widthM": 1.8,
+        "depthM": 1.8
+      },
       "era": "unmaintained verge planting",
-      "silhouette": ["A rounded mound of foliage sitting directly on the ground with no visible trunk"],
+      "silhouette": [
+        "A rounded mound of foliage sitting directly on the ground with no visible trunk"
+      ],
       "cues": [
         "several stems emerging from the ground and lost immediately in the leaves",
         "an irregular top, higher on one side",
         "a few bare twigs breaking the outline",
         "the lowest leaves dusty and grey with road dirt"
       ],
-      "materials": ["small dense leaves in a dry olive green", "thin woody stems the colour of old rope"],
-      "avoid": ["a clipped hedge or topiary ball", "flowers", "any pot, base disc or ground plane"],
-      "views": ["profile", "front", "back"]
+      "materials": [
+        "bright green leaves in one solid rounded mass"
+      ],
+      "avoid": [
+        "a clipped hedge or topiary ball",
+        "flowers",
+        "any pot, base disc or ground plane"
+      ],
+      "views": [
+        "profile",
+        "front",
+        "back"
+      ]
     },
-
     {
       "id": "bush-large",
       "class": "nature",
       "kind": "bushLarge",
       "subject": "large gorse-like shrub",
-      "dims": { "heightM": 2.4, "crownSpreadM": 3.0, "widthM": 3.0, "depthM": 3.0 },
+      "dims": {
+        "heightM": 2.4,
+        "crownSpreadM": 3.0,
+        "widthM": 3.0,
+        "depthM": 3.0
+      },
       "era": "coastal scrub on a cliff verge",
-      "silhouette": ["A broad wind-flattened mass, wider than it is tall, leaning as one body away from the sea"],
+      "silhouette": [
+        "A broad wind-flattened mass, wider than it is tall, leaning as one body away from the sea"
+      ],
       "cues": [
         "a top sheared flat and sloping, as if a hand had pushed it over",
         "dense twiggy structure visible at the windward edge where leaves are stripped",
         "dead grey wood inside the living outer shell",
         "a ragged skirt where the lowest branches meet the ground"
       ],
-      "materials": ["small tough leaves in a grey-green", "bleached dead twigs within the mass"],
-      "avoid": ["a neat rounded shrub", "flowering colour", "any pot, base disc or ground plane"],
-      "views": ["profile", "front", "back"]
+      "materials": [
+        "grey-green leaves in one solid swept mass"
+      ],
+      "avoid": [
+        "a neat rounded shrub",
+        "flowering colour",
+        "any pot, base disc or ground plane"
+      ],
+      "views": [
+        "profile",
+        "front",
+        "back"
+      ]
     },
-
     {
       "id": "rock",
       "class": "nature",
       "kind": "rock",
       "subject": "weathered boulder",
-      "dims": { "heightM": 2.6, "widthM": 3.2, "depthM": 2.8 },
+      "dims": {
+        "heightM": 2.6,
+        "widthM": 3.2,
+        "depthM": 2.8
+      },
       "era": "roadside cut spoil, long settled",
-      "silhouette": ["A single squat boulder, wider than it is tall, resting on its broadest face"],
+      "silhouette": [
+        "A single squat boulder, wider than it is tall, resting on its broadest face"
+      ],
       "cues": [
         "three or four large flat facets meeting at rounded edges",
-        "a deep shadowed crack running down one face",
-        "the top face weathered smooth, the lower faces rougher",
-        "a lichen crust on the upward-facing surfaces only"
+        "a deep shadowed crack running down one face"
       ],
-      "materials": ["grey granite with a coarse speckled grain", "pale grey-green lichen, dry"],
-      "avoid": ["a faceted low-poly crystal", "a perfectly rounded pebble", "any base disc, soil or ground plane"],
-      "views": ["profile", "front", "back"]
+      "materials": [
+        "flat grey stone in a few large facets"
+      ],
+      "avoid": [
+        "a faceted low-poly crystal",
+        "a perfectly rounded pebble",
+        "any base disc, soil or ground plane"
+      ],
+      "views": [
+        "profile",
+        "front",
+        "back"
+      ]
     },
-
     {
       "id": "rock-tall",
       "class": "nature",
       "kind": "rockTall",
       "subject": "standing rock outcrop",
-      "dims": { "heightM": 4.2, "widthM": 2.4, "depthM": 2.2 },
+      "dims": {
+        "heightM": 4.2,
+        "widthM": 2.4,
+        "depthM": 2.2
+      },
       "era": "an outcrop left standing where the road was cut past it",
-      "silhouette": ["Taller than it is wide: a blocky column of rock with a stepped profile, leaning very slightly"],
+      "silhouette": [
+        "Taller than it is wide: a blocky column of rock with a stepped profile, leaning very slightly"
+      ],
       "cues": [
         "horizontal bedding lines running across the whole column",
         "a stepped top where one bed has broken away",
         "an undercut at the base where softer rock has eroded first",
         "fallen fragments implied by the broken edges, but none modelled"
       ],
-      "materials": ["banded sandstone in warm greys and ochres", "dark weeping stains below the ledges"],
-      "avoid": ["a smooth monolith", "a low-poly crystal", "any base disc, rubble or ground plane"],
-      "views": ["profile", "front", "back"]
+      "materials": [
+        "flat stone in warm grey and ochre bands"
+      ],
+      "avoid": [
+        "a smooth monolith",
+        "a low-poly crystal",
+        "any base disc, rubble or ground plane"
+      ],
+      "views": [
+        "profile",
+        "front",
+        "back"
+      ]
     },
-
     {
       "id": "stone-tall",
       "class": "nature",
       "kind": "stoneTall",
       "subject": "narrow standing stone",
-      "dims": { "heightM": 3.5, "widthM": 1.2, "depthM": 1.0 },
+      "dims": {
+        "heightM": 3.5,
+        "widthM": 1.2,
+        "depthM": 1.0
+      },
       "era": "a weathered pinnacle in arid country",
-      "silhouette": ["A narrow tapering spire, three times as tall as it is wide, with a blunt uneven top"],
+      "silhouette": [
+        "A narrow tapering spire, three times as tall as it is wide, with a blunt uneven top"
+      ],
       "cues": [
-        "a waist where the middle has weathered in further than the base",
         "vertical flutes running down the long faces",
         "one face noticeably smoother than the others",
         "a rough broken crown rather than a point"
       ],
-      "materials": ["pale limestone, chalky and dry", "dark weathering streaks running down the flutes"],
-      "avoid": ["a carved monument, cairn or menhir with any worked surface", "any base disc or ground plane"],
-      "views": ["profile", "front", "back"]
+      "materials": [
+        "flat pale cream stone, smooth"
+      ],
+      "avoid": [
+        "a carved monument, cairn or menhir with any worked surface",
+        "any base disc or ground plane"
+      ],
+      "views": [
+        "profile",
+        "front",
+        "back"
+      ]
     },
-
     {
       "id": "cactus",
       "class": "nature",
       "kind": "cactus",
       "subject": "short branching cactus",
-      "dims": { "heightM": 2.4, "widthM": 1.4, "depthM": 1.2 },
+      "dims": {
+        "heightM": 2.4,
+        "widthM": 1.4,
+        "depthM": 1.2
+      },
       "era": "desert roadside, mature",
-      "silhouette": ["A single thick column with two short arms rising from low down, all three tops at different heights"],
+      "silhouette": [
+        "A single thick column with two short arms rising from low down, all three tops at different heights"
+      ],
       "cues": [
         "deep vertical ribs running the whole height",
         "arms that leave the trunk horizontally and turn up through a tight elbow",
         "rounded tops, slightly domed, never pointed",
         "rows of spine clusters along every rib crest"
       ],
-      "materials": ["waxy blue-green skin", "straw-coloured spines, dense near the top"],
-      "avoid": ["a smooth ribless cylinder", "flowers or fruit", "any pot, gravel base or ground plane"],
-      "views": ["profile", "front", "back"]
+      "materials": [
+        "smooth bright green skin",
+        "pale straw spines"
+      ],
+      "avoid": [
+        "a smooth ribless cylinder",
+        "flowers or fruit",
+        "any pot, gravel base or ground plane"
+      ],
+      "views": [
+        "profile",
+        "front",
+        "back"
+      ]
     },
-
     {
       "id": "cactus-tall",
       "class": "nature",
       "kind": "cactusTall",
       "subject": "tall columnar cactus",
-      "dims": { "heightM": 4.0, "widthM": 2.2, "depthM": 1.4 },
+      "dims": {
+        "heightM": 4.0,
+        "widthM": 2.2,
+        "depthM": 1.4
+      },
       "era": "desert roadside, old",
-      "silhouette": ["A tall straight column with three or four arms, each turning upward to run parallel with the trunk — a candelabra"],
+      "silhouette": [
+        "A tall straight column with three or four arms, each turning upward to run parallel with the trunk — a candelabra"
+      ],
       "cues": [
         "arms standing well clear of the trunk before they turn up, so the plant is as wide as a car is long, at different heights and lengths and never paired symmetrically",
         "a trunk noticeably thicker below the lowest arm",
         "deep ribs, slightly pinched where the plant has dried",
         "one arm shorter and stubbier than the rest, as if damaged"
       ],
-      "materials": ["dusty green waxy skin", "grey spine clusters, thinning towards the base"],
-      "avoid": ["symmetric paired arms like a cartoon", "flowers or fruit", "any pot, gravel base or ground plane"],
-      "views": ["profile", "front", "back"]
+      "materials": [
+        "smooth bright green skin",
+        "pale spines"
+      ],
+      "avoid": [
+        "symmetric paired arms like a cartoon",
+        "flowers or fruit",
+        "any pot, gravel base or ground plane"
+      ],
+      "views": [
+        "profile",
+        "front",
+        "back"
+      ]
     },
-
     {
       "id": "flower",
       "class": "nature",
       "kind": "flower",
       "subject": "clump of tall verge wildflowers",
-      "dims": { "heightM": 0.8, "widthM": 0.7, "depthM": 0.7 },
+      "dims": {
+        "heightM": 0.8,
+        "widthM": 0.7,
+        "depthM": 0.7
+      },
       "era": "an unmown verge in high summer",
-      "silhouette": ["A loose clump of upright stems of uneven height, each carrying a single head at the top"],
+      "silhouette": [
+        "A loose clump of upright stems of uneven height, each carrying a single head at the top"
+      ],
       "cues": [
         "seven or eight stems leaning at slightly different angles",
         "heads at four or five different heights, none level with another",
         "narrow leaves low on the stems only",
         "two spent heads gone to seed among the open ones"
       ],
-      "materials": ["strong red-orange petals", "stems and leaves in a dry pale green"],
-      "avoid": ["a florist's bouquet or a neat bedding block", "a pot, soil mound or ground plane"],
-      "views": ["profile", "front", "back"]
+      "materials": [
+        "bright red-orange petals",
+        "bright green stems"
+      ],
+      "avoid": [
+        "a florist's bouquet or a neat bedding block",
+        "a pot, soil mound or ground plane"
+      ],
+      "views": [
+        "profile",
+        "front",
+        "back"
+      ]
     },
-
     {
       "id": "stump",
       "class": "nature",
       "kind": "stump",
       "subject": "old cut tree stump",
-      "dims": { "heightM": 1.0, "widthM": 1.1, "depthM": 1.0 },
+      "dims": {
+        "heightM": 1.0,
+        "widthM": 1.1,
+        "depthM": 1.0
+      },
       "era": "a tree taken down years ago and left",
-      "silhouette": ["A broad stub of trunk cut off at knee-to-waist height, flaring at the base into root buttresses"],
+      "silhouette": [
+        "A broad stub of trunk cut off at knee-to-waist height, flaring at the base into root buttresses"
+      ],
       "cues": [
-        "a ragged cut face, split and weathered grey, not a clean saw line",
         "one long splinter still standing proud of the cut",
         "root buttresses flaring out in three directions",
         "bark loose and partly fallen away from the sapwood"
       ],
-      "materials": ["silvered weathered wood on the cut face", "dark shrunken bark clinging in patches"],
-      "avoid": ["a clean sawn cylinder", "moss carpet, mushrooms or a fairy-tale look", "any soil mound or ground plane"],
-      "views": ["profile", "front", "back"]
+      "materials": [
+        "a pale flat cut face",
+        "flat brown bark"
+      ],
+      "avoid": [
+        "a clean sawn cylinder",
+        "moss carpet, mushrooms or a fairy-tale look",
+        "any soil mound or ground plane"
+      ],
+      "views": [
+        "profile",
+        "front",
+        "back"
+      ]
     },
-
-{
+    {
       "id": "billboard",
       "class": "props",
       "kind": "billboard",
       "subject": "roadside billboard on a steel trestle",
-      "dims": { "widthM": 12.2, "depthM": 1.8, "heightM": 7.5, "poleHeightM": 3.6 },
+      "dims": {
+        "widthM": 12.2,
+        "depthM": 1.8,
+        "heightM": 7.5,
+        "poleHeightM": 3.6
+      },
       "era": "1960s highway billboard, painted rather than printed",
-      "silhouette": ["A wide blank rectangular board held well above the ground on an open steel trestle, the board far wider than it is tall"],
+      "silhouette": [
+        "A wide blank rectangular board held well above the ground on an open steel trestle, the board far wider than it is tall"
+      ],
       "cues": [
+        "every panel and board face is COMPLETELY EMPTY: one flat colour, no picture, no pattern, no shapes, no lettering on it",
         "a plain moulded frame around the board with a narrow top rail",
         "an angled walkway and handrail along the bottom edge for the painters",
         "four or five raked floodlights on arms standing off the top rail",
         "a lattice of angle-iron bracing behind the board, visible from the side",
-        "two legs set in from the ends, with diagonal ties to the ground",
-        "the board face completely blank — no image, no lettering, no panel divisions"
+        "two legs set in from the ends, with diagonal ties to the ground"
       ],
-      "materials": ["painted sheet steel face gone chalky", "galvanised angle iron, rusting at the bolts", "plain enamel reflector lamps"],
-      "avoid": ["any advertisement, image, logo or lettering on the face — it is blank and stays blank", "a modern vinyl wrap, LED panel or trivision slats"],
-      "views": ["front three-quarter", "profile", "front"]
+      "materials": [
+        "a flat white painted board",
+        "a bright galvanised steel frame",
+        "plain white lamps"
+      ],
+      "avoid": [
+        "any advertisement, image, logo or lettering on the face — it is blank and stays blank",
+        "a modern vinyl wrap, LED panel or trivision slats"
+      ],
+      "views": [
+        "front three-quarter",
+        "profile",
+        "front"
+      ]
     },
-
     {
       "id": "billboard-low",
       "class": "props",
       "kind": "billboardLow",
       "subject": "low roadside hoarding",
-      "dims": { "widthM": 7.3, "depthM": 1.2, "heightM": 5.5, "poleHeightM": 2.2 },
+      "dims": {
+        "widthM": 7.3,
+        "depthM": 1.2,
+        "heightM": 5.5,
+        "poleHeightM": 2.2
+      },
       "era": "1960s secondary-road hoarding",
-      "silhouette": ["A smaller blank board on two short posts, its lower edge about head height"],
+      "silhouette": [
+        "A smaller blank board on two short posts, its lower edge about head height"
+      ],
       "cues": [
+        "every panel and board face is COMPLETELY EMPTY: one flat colour, no picture, no pattern, no shapes, no lettering on it",
         "two square timber posts, one at each third of the width",
         "a board made of visible horizontal planks with a light frame",
-        "a single lamp on a short arm above the top edge",
-        "one corner of the board weathered darker than the rest",
-        "the face blank — no image, no lettering"
+        "a single lamp on a short arm above the top edge"
       ],
-      "materials": ["painted plank board, paint thin at the joints", "creosoted timber posts, dark at the base"],
-      "avoid": ["any advertisement, image, logo or lettering", "a modern printed skin or aluminium frame"],
-      "views": ["front three-quarter", "profile", "front"]
+      "materials": [
+        "a flat painted board",
+        "plain timber posts"
+      ],
+      "avoid": [
+        "any advertisement, image, logo or lettering",
+        "a modern printed skin or aluminium frame"
+      ],
+      "views": [
+        "front three-quarter",
+        "profile",
+        "front"
+      ]
     },
-
     {
       "id": "lightpost",
       "class": "props",
       "kind": "lightpost",
       "subject": "highway light standard",
-      "dims": { "heightM": 8.0, "widthM": 2.4, "depthM": 0.4 },
+      "dims": {
+        "heightM": 8.0,
+        "widthM": 2.4,
+        "depthM": 0.4
+      },
       "era": "1960s highway lighting, mercury vapour",
-      "silhouette": ["A single tapered pole with one long arm curving out from the top, the lamp head hanging level at the far end"],
+      "silhouette": [
+        "A single tapered pole with one long arm curving out from the top, the lamp head hanging level at the far end"
+      ],
       "cues": [
         "a smooth continuous curve from the pole into the arm, no elbow",
         "a flat-bottomed teardrop lamp head with a shallow glass bowl",
@@ -749,19 +1397,35 @@
         "a small hand-hole cover low on the pole",
         "a faint taper up the whole length of the pole"
       ],
-      "materials": ["galvanised steel gone dull grey with white bloom", "an aluminium lamp head, oxidised"],
-      "avoid": ["a modern flat LED head or a straight cantilever arm", "a decorative lantern or Victorian post", "any base plinth or ground plane"],
-      "views": ["profile", "front", "back"]
+      "materials": [
+        "smooth pale grey steel",
+        "a clean white lamp head"
+      ],
+      "avoid": [
+        "a modern flat LED head or a straight cantilever arm",
+        "a decorative lantern or Victorian post",
+        "any base plinth or ground plane"
+      ],
+      "views": [
+        "profile",
+        "front",
+        "back"
+      ]
     },
-
     {
       "id": "lightpost-tall",
       "class": "props",
       "kind": "lightpostTall",
       "subject": "tall twin-headed light standard",
-      "dims": { "heightM": 10.0, "widthM": 5.0, "depthM": 0.5 },
+      "dims": {
+        "heightM": 10.0,
+        "widthM": 5.0,
+        "depthM": 0.5
+      },
       "era": "1960s expressway and causeway lighting",
-      "silhouette": ["One tall pole with two long arms curving out in opposite directions, so the lamps hang wide on both sides"],
+      "silhouette": [
+        "One tall pole with two long arms curving out in opposite directions, so the lamps hang wide on both sides"
+      ],
       "cues": [
         "the two arms rising from a single collar at the top of the pole",
         "both arms the same length, curving symmetrically",
@@ -769,59 +1433,104 @@
         "a heavier base section below a visible splice joint",
         "a small junction box bolted to the pole above the base"
       ],
-      "materials": ["galvanised steel, chalky white bloom", "oxidised aluminium heads"],
-      "avoid": ["a modern LED head or straight arms", "any base plinth or ground plane"],
-      "views": ["front", "profile", "back"]
+      "materials": [
+        "smooth pale grey steel",
+        "clean white lamp heads"
+      ],
+      "avoid": [
+        "a modern LED head or straight arms",
+        "any base plinth or ground plane"
+      ],
+      "views": [
+        "front",
+        "profile",
+        "back"
+      ]
     },
-
     {
       "id": "barrier-wall",
       "class": "props",
       "kind": "barrier",
       "subject": "precast concrete road barrier",
-      "dims": { "lengthM": 6.0, "widthM": 0.6, "heightM": 1.2 },
+      "dims": {
+        "lengthM": 6.0,
+        "widthM": 0.6,
+        "heightM": 1.2
+      },
       "era": "roadworks barrier, precast and lifted into place",
-      "silhouette": ["A short straight run of concrete with a wide splayed foot and a narrow top — the profile is the shape, seen from the end"],
+      "silhouette": [
+        "A short straight run of concrete with a wide splayed foot and a narrow top — the profile is the shape, seen from the end"
+      ],
       "cues": [
         "a sloping lower face flaring out to the ground and a near-vertical upper face",
         "lifting eyes or recessed lifting pockets on the top face",
         "a vertical joint line at each end where it butts the next unit",
-        "chamfered top edges, chipped in places",
-        "tyre scuffs and black rubber marks along the lower slope"
+        "chamfered top edges, chipped in places"
       ],
-      "materials": ["grey precast concrete with faint formwork lines", "rust weep from the lifting eyes"],
-      "avoid": ["diagonal hazard stripes, reflective panels or any lettering", "a plastic water-filled barrier", "any ground plane"],
-      "views": ["front three-quarter", "profile", "front"]
+      "materials": [
+        "flat pale grey concrete"
+      ],
+      "avoid": [
+        "diagonal hazard stripes, reflective panels or any lettering",
+        "a plastic water-filled barrier",
+        "any ground plane"
+      ],
+      "views": [
+        "front three-quarter",
+        "profile",
+        "front"
+      ]
     },
-
     {
       "id": "banner-tower",
       "class": "props",
       "kind": "banner",
       "subject": "scaffold banner tower",
-      "dims": { "widthM": 2.4, "depthM": 2.4, "heightM": 6.0 },
+      "dims": {
+        "widthM": 2.4,
+        "depthM": 2.4,
+        "heightM": 6.0
+      },
       "era": "temporary event structure beside a circuit",
-      "silhouette": ["A square scaffold tower with blank fabric panels laced to three of its faces, and a small open platform at the top"],
+      "silhouette": [
+        "A square scaffold tower with blank fabric panels laced to three of its faces, and a small open platform at the top"
+      ],
       "cues": [
+        "every panel and board face is COMPLETELY EMPTY: one flat colour, no picture, no pattern, no shapes, no lettering on it",
         "a tube-and-coupler scaffold frame with diagonal braces on every face",
         "fabric panels laced through eyelets, sagging slightly between fixings",
         "a boarded platform and a scaffold handrail at the top",
-        "a diagonal ladder inside the frame",
-        "the fabric in one flat colour, completely blank"
+        "a diagonal ladder inside the frame"
       ],
-      "materials": ["galvanised scaffold tube with clamp fittings", "sun-faded canvas, taut at the eyelets and slack between them"],
-      "avoid": ["any sponsor name, flag, chequer or logo on the fabric", "a modern printed mesh banner", "any ground plane or ballast"],
-      "views": ["front three-quarter", "profile", "front"]
+      "materials": [
+        "bright galvanised scaffold tube",
+        "taut plain-coloured fabric panels"
+      ],
+      "avoid": [
+        "any sponsor name, flag, chequer or logo on the fabric",
+        "a modern printed mesh banner",
+        "any ground plane or ballast"
+      ],
+      "views": [
+        "front three-quarter",
+        "profile",
+        "front"
+      ]
     },
-
     {
       "id": "grandstand",
       "class": "props",
       "kind": "grandstand",
       "subject": "open steel grandstand",
-      "dims": { "widthM": 24.0, "depthM": 10.0, "heightM": 7.0 },
+      "dims": {
+        "widthM": 24.0,
+        "depthM": 10.0,
+        "heightM": 7.0
+      },
       "era": "1960s temporary circuit grandstand",
-      "silhouette": ["A raked bank of seating on an open steel frame, the whole structure a wedge in side view, open at the back with the frame showing through"],
+      "silhouette": [
+        "A raked bank of seating on an open steel frame, the whole structure a wedge in side view, open at the back with the frame showing through"
+      ],
       "cues": [
         "plank bench rows stepping up at a constant rake, no individual seats",
         "a scaffold frame of verticals and diagonals carrying the rake",
@@ -830,19 +1539,36 @@
         "an open unclad back, so the underside of the seating is visible",
         "a shallow canopy over the topmost rows only"
       ],
-      "materials": ["bare timber planks, silvered and split", "galvanised tube frame with rust at the joints", "corrugated sheet canopy"],
-      "avoid": ["sponsor boards, flags, advertising hoardings or spectators", "moulded plastic seats or a modern enclosed stand", "any ground plane"],
-      "views": ["front three-quarter", "profile", "front"]
+      "materials": [
+        "pale timber planks",
+        "a bright galvanised tube frame",
+        "a clean corrugated canopy"
+      ],
+      "avoid": [
+        "sponsor boards, flags, advertising hoardings or spectators",
+        "moulded plastic seats or a modern enclosed stand",
+        "any ground plane"
+      ],
+      "views": [
+        "front three-quarter",
+        "profile",
+        "front"
+      ]
     },
-
     {
       "id": "tent",
       "class": "props",
       "kind": "tent",
       "subject": "guyed marquee tent",
-      "dims": { "widthM": 8.0, "depthM": 6.0, "heightM": 4.0 },
+      "dims": {
+        "widthM": 8.0,
+        "depthM": 6.0,
+        "heightM": 4.0
+      },
       "era": "a paddock marquee, canvas and rope",
-      "silhouette": ["A ridge tent: two poles, a straight ridge between them, and canvas falling to the ground in a long shallow slope on both sides"],
+      "silhouette": [
+        "A ridge tent: two poles, a straight ridge between them, and canvas falling to the ground in a long shallow slope on both sides"
+      ],
       "cues": [
         "the ridge sagging very slightly between the two poles",
         "guy ropes running out and down from the eaves to pegs at ground level",
@@ -850,83 +1576,149 @@
         "scalloped valance along the eaves, hanging unevenly",
         "wrinkles radiating from every rope fixing"
       ],
-      "materials": ["heavy off-white canvas with weathering streaks", "hemp rope, wooden poles"],
-      "avoid": ["any lettering, flag, bunting or pennant", "a modern nylon frame tent or a plastic gazebo", "any ground plane"],
-      "views": ["front three-quarter", "profile", "front"]
+      "materials": [
+        "clean off-white canvas",
+        "plain rope and poles"
+      ],
+      "avoid": [
+        "any lettering, flag, bunting or pennant",
+        "a modern nylon frame tent or a plastic gazebo",
+        "any ground plane"
+      ],
+      "views": [
+        "front three-quarter",
+        "profile",
+        "front"
+      ]
     },
-
     {
       "id": "pits-office",
       "class": "props",
       "kind": "pitsOffice",
       "subject": "circuit timing and control building",
-      "dims": { "widthM": 12.0, "depthM": 5.0, "heightM": 6.0 },
+      "dims": {
+        "widthM": 12.0,
+        "depthM": 5.0,
+        "heightM": 6.0
+      },
       "era": "1960s circuit timing box over a pit garage",
-      "silhouette": ["Two storeys, long and shallow: a run of open garage bays below, a glazed control room above, and a flat roof terrace over the lot"],
+      "silhouette": [
+        "Two storeys, long and shallow: a run of open garage bays below, a glazed control room above, and a flat roof terrace over the lot"
+      ],
       "cues": [
+        "every panel and board face is COMPLETELY EMPTY: one flat colour, no picture, no pattern, no shapes, no lettering on it",
         "three open bays below with painted steel lintels between them",
         "a continuous band of windows along the upper floor, tilted forward at the top",
         "an external steel stair at one end up to the balcony",
         "a railed flat roof terrace above the control room",
-        "a clock face housing on the roof, its dial left blank",
         "a canopy over the ground-floor bays, supported on thin posts"
       ],
-      "materials": ["painted rendered blockwork in white and a single accent colour", "steel window frames", "a concrete canopy edge"],
-      "avoid": ["any circuit name, timing board, flag or sponsor panel — every surface is blank", "modern glazing or cladding"],
-      "views": ["front three-quarter", "profile", "front"]
+      "materials": [
+        "flat white render with one bright accent colour",
+        "clean glazing"
+      ],
+      "avoid": [
+        "any circuit name, timing board, flag or sponsor panel — every surface is blank",
+        "modern glazing or cladding"
+      ],
+      "views": [
+        "front three-quarter",
+        "profile",
+        "front"
+      ]
     },
-
     {
       "id": "overhead-gantry",
       "class": "props",
       "kind": "gantry",
       "subject": "overhead highway sign gantry",
-      "dims": { "spanM": 16.0, "widthM": 1.2, "depthM": 1.2, "heightM": 8.5, "legHeightM": 6.2, "legWidthM": 0.7 },
+      "dims": {
+        "spanM": 16.0,
+        "widthM": 1.2,
+        "depthM": 1.2,
+        "heightM": 8.5,
+        "legHeightM": 6.2,
+        "legWidthM": 0.7
+      },
       "era": "period highway sign gantry",
-      "silhouette": ["A lattice truss spanning the road on two legs, with blank sign panels hung beneath it — the clearance under the truss is most of the height"],
+      "silhouette": [
+        "A lattice truss spanning the road on two legs, with blank sign panels hung beneath it — the clearance under the truss is most of the height"
+      ],
       "cues": [
+        "every panel and board face is COMPLETELY EMPTY: one flat colour, no picture, no pattern, no shapes, no lettering on it",
         "a galvanised tube lattice truss with bolted gusset plates",
-        "two blank rectangular panels hung on the truss face",
         "a maintenance walkway with a handrail along the back of the truss",
         "a pair of downlights on short arms above each panel",
         "legs of paired tubes with a bolted base plate each"
       ],
-      "materials": ["galvanised steel gone chalky", "plain reflective sheeting on the blank panels"],
-      "avoid": ["any destination text, route number, shield or arrow — the panels are blank", "a modern variable-message display", "any road surface or ground plane"],
-      "views": ["front", "profile", "back"]
+      "materials": [
+        "bright galvanised steel",
+        "flat pale sign panels"
+      ],
+      "avoid": [
+        "any destination text, route number, shield or arrow — the panels are blank",
+        "a modern variable-message display",
+        "any road surface or ground plane"
+      ],
+      "views": [
+        "front",
+        "profile",
+        "back"
+      ]
     },
-
-{
+    {
       "id": "diner",
       "class": "architecture",
       "kind": "diner",
       "subject": "roadside diner",
       "replaces": "buildDiner() in apps/coast/src/render/procgen.ts",
-      "dims": { "widthM": 14.0, "depthM": 7.0, "heightM": 6.4 },
+      "dims": {
+        "widthM": 14.0,
+        "depthM": 7.0,
+        "heightM": 6.4
+      },
       "era": "1950s prefabricated roadside diner, still working in the 1970s",
-      "silhouette": ["A long low box with rounded ends and a barrel-curved roof, sitting on a low plinth — a railway carriage parked at the kerb"],
+      "silhouette": [
+        "A long low box with rounded ends and a barrel-curved roof, sitting on a low plinth — a railway carriage parked at the kerb"
+      ],
       "cues": [
         "a continuous band of windows the whole length, divided by slim mullions",
-        "horizontal fluted stainless banding below the windows and again at the eaves",
         "rounded corners carried all the way up into the roof curve",
         "a recessed entrance at one end with a canted glass door",
         "a low stepped plinth with a single step running the length of the front",
         "a roof-mounted sign frame at one end with its panel left blank"
       ],
-      "materials": ["polished stainless steel bands", "porcelain enamel panels in cream and a single strong colour", "aluminium window frames"],
-      "avoid": ["any diner's name, slogan or menu board — every panel is blank", "a modern glass box or a mock-retro pastiche", "any car park, kerb or ground plane"],
-      "views": ["front three-quarter", "profile", "front"]
+      "materials": [
+        "bright polished stainless bands",
+        "flat cream and one strong accent colour",
+        "clean glazing"
+      ],
+      "avoid": [
+        "any diner's name, slogan or menu board — every panel is blank",
+        "a modern glass box or a mock-retro pastiche",
+        "any car park, kerb or ground plane"
+      ],
+      "views": [
+        "front three-quarter",
+        "profile",
+        "front"
+      ]
     },
-
     {
       "id": "motel-strip",
       "class": "architecture",
       "kind": "motel",
       "subject": "two-storey motor court",
       "replaces": "buildMotel() in apps/coast/src/render/procgen.ts",
-      "dims": { "widthM": 24.0, "depthM": 9.0, "heightM": 7.6 },
+      "dims": {
+        "widthM": 24.0,
+        "depthM": 9.0,
+        "heightM": 7.6
+      },
       "era": "1960s roadside motor court",
-      "silhouette": ["Two storeys, long and low, rooms in a row, an external walkway running the full length of the upper floor"],
+      "silhouette": [
+        "Two storeys, long and low, rooms in a row, an external walkway running the full length of the upper floor"
+      ],
       "cues": [
         "a cantilevered upper walkway with a thin balustrade of repeated vertical rods",
         "one door and one window per room, evenly repeated along both floors",
@@ -935,20 +1727,37 @@
         "an exposed breeze-block screen wall at the stair end",
         "an ice machine and a drinks cooler recessed by the stair"
       ],
-      "materials": ["painted stucco in a pale colour", "turquoise or coral trim on the doors", "aggregate concrete walkway"],
-      "avoid": ["any readable brand or motel name", "modern glazing, uPVC or a flat parapet", "any car park, pool or ground plane"],
-      "views": ["front three-quarter", "profile", "front"]
+      "materials": [
+        "flat pale stucco",
+        "bright turquoise and coral doors",
+        "clean concrete walkways"
+      ],
+      "avoid": [
+        "any readable brand or motel name",
+        "modern glazing, uPVC or a flat parapet",
+        "any car park, pool or ground plane"
+      ],
+      "views": [
+        "front three-quarter",
+        "profile",
+        "front"
+      ]
     },
-
     {
       "id": "gas-station",
       "class": "architecture",
       "kind": "gas",
       "subject": "highway service station",
       "replaces": "buildGasStation() in apps/coast/src/render/procgen.ts",
-      "dims": { "widthM": 14.0, "depthM": 11.0, "heightM": 5.0 },
+      "dims": {
+        "widthM": 14.0,
+        "depthM": 11.0,
+        "heightM": 5.0
+      },
       "era": "1960s highway service station",
-      "silhouette": ["A small glazed box with a large flat canopy reaching out over the forecourt on slender columns"],
+      "silhouette": [
+        "A small glazed box with a large flat canopy reaching out over the forecourt on slender columns"
+      ],
       "cues": [
         "a flat canopy with a deep plain fascia band on thin round columns",
         "two pump islands under it, each with a pair of tall narrow pumps",
@@ -957,20 +1766,36 @@
         "a hose-and-bell line across the forecourt approach",
         "a stack of tyres and an air line beside the bay door"
       ],
-      "materials": ["white porcelain-enamel panels", "a single accent colour on the fascia", "oil-stained concrete forecourt"],
-      "avoid": ["brand marks on the fascia, pumps or price panel — all blank", "modern pump displays, canopy downlights, a convenience store"],
-      "views": ["front three-quarter", "profile", "front"]
+      "materials": [
+        "flat white panels",
+        "one bright accent colour on the fascia",
+        "clean pale concrete"
+      ],
+      "avoid": [
+        "brand marks on the fascia, pumps or price panel — all blank",
+        "modern pump displays, canopy downlights, a convenience store"
+      ],
+      "views": [
+        "front three-quarter",
+        "profile",
+        "front"
+      ]
     },
-
     {
       "id": "facade-shopfront",
       "class": "architecture",
       "kind": "facade1",
       "subject": "three-storey main-street shopfront building",
       "replaces": "buildFacade(8, 3, …) in apps/coast/src/render/procgen.ts",
-      "dims": { "widthM": 8.0, "depthM": 3.0, "heightM": 14.4 },
+      "dims": {
+        "widthM": 8.0,
+        "depthM": 3.0,
+        "heightM": 14.4
+      },
       "era": "1920s main-street commercial block, worn into the 1970s",
-      "silhouette": ["A narrow flat-fronted building: a glazed shopfront at street level, two floors of windows above, a parapet hiding the roof"],
+      "silhouette": [
+        "A narrow flat-fronted building: a glazed shopfront at street level, two floors of windows above, a parapet hiding the roof"
+      ],
       "cues": [
         "a canvas awning cranked out over the shopfront, slightly sagging",
         "a recessed shop entrance between two display windows",
@@ -979,20 +1804,37 @@
         "a fire escape stair zigzagging across the upper floors",
         "a stub party wall at each side, showing this is one of a terrace"
       ],
-      "materials": ["painted brick gone patchy", "faded striped awning canvas", "black-painted steel fire escape"],
-      "avoid": ["any shop name, signage or advertisement — the sign band is blank", "modern shopfront glazing or cladding", "any pavement, kerb or ground plane"],
-      "views": ["front three-quarter", "front", "profile"]
+      "materials": [
+        "flat painted brick in a warm colour",
+        "a bright striped awning",
+        "black-painted steelwork"
+      ],
+      "avoid": [
+        "any shop name, signage or advertisement — the sign band is blank",
+        "modern shopfront glazing or cladding",
+        "any pavement, kerb or ground plane"
+      ],
+      "views": [
+        "front three-quarter",
+        "front",
+        "profile"
+      ]
     },
-
     {
       "id": "facade-office",
       "class": "architecture",
       "kind": "facade2",
       "subject": "four-storey downtown office block front",
       "replaces": "buildFacade(7, 4, …) in apps/coast/src/render/procgen.ts",
-      "dims": { "widthM": 7.0, "depthM": 3.0, "heightM": 17.8 },
+      "dims": {
+        "widthM": 7.0,
+        "depthM": 3.0,
+        "heightM": 17.8
+      },
       "era": "1950s downtown infill office, stone-faced",
-      "silhouette": ["A narrow, flat, strictly regular front: a stone base, four identical floors of windows, a thin coping at the top"],
+      "silhouette": [
+        "A narrow, flat, strictly regular front: a stone base, four identical floors of windows, a thin coping at the top"
+      ],
       "cues": [
         "paired windows in vertical strips separated by plain stone piers",
         "spandrel panels between the floors, recessed behind the piers",
@@ -1001,20 +1843,37 @@
         "window air-conditioning units in three or four openings, not all",
         "a thin coping course and nothing above it"
       ],
-      "materials": ["pale limestone cladding, streaked by rain below the sills", "anodised aluminium window frames", "dark polished granite base"],
-      "avoid": ["any building name, number or plaque", "mirror glass or modern curtain walling", "any pavement or ground plane"],
-      "views": ["front three-quarter", "front", "profile"]
+      "materials": [
+        "flat pale stone cladding",
+        "clean dark glazing",
+        "a dark polished base"
+      ],
+      "avoid": [
+        "any building name, number or plaque",
+        "mirror glass or modern curtain walling",
+        "any pavement or ground plane"
+      ],
+      "views": [
+        "front three-quarter",
+        "front",
+        "profile"
+      ]
     },
-
     {
       "id": "facade-lowrise",
       "class": "architecture",
       "kind": "facade3",
       "subject": "two-storey corner commercial building",
       "replaces": "buildFacade(8.5, 2, …) in apps/coast/src/render/procgen.ts",
-      "dims": { "widthM": 8.5, "depthM": 3.0, "heightM": 11.0 },
+      "dims": {
+        "widthM": 8.5,
+        "depthM": 3.0,
+        "heightM": 11.0
+      },
       "era": "1930s two-storey commercial building, stucco and tile",
-      "silhouette": ["Wide and short: a shopfront below, one floor of windows above, and a stepped parapet that rises in the middle"],
+      "silhouette": [
+        "Wide and short: a shopfront below, one floor of windows above, and a stepped parapet that rises in the middle"
+      ],
       "cues": [
         "a stepped parapet with a simple moulded coping",
         "a band of glazed tile along the top of the shopfront",
@@ -1023,42 +1882,75 @@
         "an empty projecting bracket where a hanging sign used to be",
         "a blank rendered sign panel in the parapet's raised centre"
       ],
-      "materials": ["painted stucco, chalky and patched", "dark green glazed tile", "steel-framed windows"],
-      "avoid": ["any name, number or advertisement — every panel is blank", "a modern rendered finish or aluminium shopfront", "any pavement or ground plane"],
-      "views": ["front three-quarter", "front", "profile"]
+      "materials": [
+        "flat painted stucco",
+        "bright green glazed tile",
+        "clean steel windows"
+      ],
+      "avoid": [
+        "any name, number or advertisement — every panel is blank",
+        "a modern rendered finish or aluminium shopfront",
+        "any pavement or ground plane"
+      ],
+      "views": [
+        "front three-quarter",
+        "front",
+        "profile"
+      ]
     },
-
     {
       "id": "facade-tall",
       "class": "architecture",
       "kind": "facade4",
       "subject": "five-storey brick city building front",
       "replaces": "buildFacade(7.5, 5, …) in apps/coast/src/render/procgen.ts",
-      "dims": { "widthM": 7.5, "depthM": 3.0, "heightM": 21.2 },
+      "dims": {
+        "widthM": 7.5,
+        "depthM": 3.0,
+        "heightM": 21.2
+      },
       "era": "1900s brick commercial loft building",
-      "silhouette": ["Tall and narrow: five floors of tall windows in a heavy brick wall, a cornice at the top, a cast-iron shopfront at the bottom"],
+      "silhouette": [
+        "Tall and narrow: five floors of tall windows in a heavy brick wall, a cornice at the top, a cast-iron shopfront at the bottom"
+      ],
       "cues": [
         "arched window heads on the upper floors, square-headed lower down",
         "a heavy pressed-metal cornice standing well proud of the wall",
         "a cast-iron shopfront with slim columns at street level",
-        "a painted-out ghost sign faded on the side wall, the lettering illegible",
         "a fire escape with a drop ladder over the pavement",
         "stone sill and lintel bands stepping across the brick"
       ],
-      "materials": ["dark red brick with lime-washed patches", "painted pressed metal cornice", "stone sills stained below"],
-      "avoid": ["any legible lettering in the ghost sign or elsewhere", "modern windows or cladding", "any pavement or ground plane"],
-      "views": ["front three-quarter", "front", "profile"]
+      "materials": [
+        "flat red brick",
+        "a painted cornice in one colour",
+        "pale stone bands"
+      ],
+      "avoid": [
+        "any legible lettering in the ghost sign or elsewhere",
+        "modern windows or cladding",
+        "any pavement or ground plane"
+      ],
+      "views": [
+        "front three-quarter",
+        "front",
+        "profile"
+      ]
     },
-
     {
       "id": "facade-neon-bar",
       "class": "architecture",
       "kind": "facadeLit1",
       "subject": "night-lit bar front with neon",
       "replaces": "buildFacade(8, 4, …, lit) in apps/coast/src/render/procgen.ts",
-      "dims": { "widthM": 8.0, "depthM": 3.0, "heightM": 17.8 },
+      "dims": {
+        "widthM": 8.0,
+        "depthM": 3.0,
+        "heightM": 17.8
+      },
       "era": "a downtown bar front on a street that only works after dark",
-      "silhouette": ["A dark narrow building front whose ground floor is a glowing recess, with a blank vertical neon blade projecting from the upper wall"],
+      "silhouette": [
+        "A dark narrow building front whose ground floor is a glowing recess, with a blank vertical neon blade projecting from the upper wall"
+      ],
       "cues": [
         "a vertical blade sign projecting at right angles to the wall, its face blank, outlined in neon tubing",
         "a neon border tracing the top of the shopfront in a second colour",
@@ -1067,20 +1959,37 @@
         "upper-floor windows dark, with blinds down",
         "exposed transformer boxes and conduit running to the neon"
       ],
-      "materials": ["dark painted brick above", "glowing neon glass tube standing off the face on spacers", "black vitrolite panels around the entrance"],
-      "avoid": ["any word, letter or logo in the neon — the tubing traces shapes and outlines only", "a modern LED strip or backlit acrylic sign", "any pavement or ground plane"],
-      "views": ["front three-quarter", "front", "profile"]
+      "materials": [
+        "flat dark painted brick",
+        "glowing neon tube in two bright colours",
+        "black panels around the entrance"
+      ],
+      "avoid": [
+        "any word, letter or logo in the neon — the tubing traces shapes and outlines only",
+        "a modern LED strip or backlit acrylic sign",
+        "any pavement or ground plane"
+      ],
+      "views": [
+        "front three-quarter",
+        "front",
+        "profile"
+      ]
     },
-
     {
       "id": "facade-neon-arcade",
       "class": "architecture",
       "kind": "facadeLit2",
       "subject": "night-lit amusement arcade front",
       "replaces": "buildFacade(7, 3, …, lit) in apps/coast/src/render/procgen.ts",
-      "dims": { "widthM": 7.0, "depthM": 3.0, "heightM": 14.4 },
+      "dims": {
+        "widthM": 7.0,
+        "depthM": 3.0,
+        "heightM": 14.4
+      },
       "era": "a seafront amusement arcade, open front and chase lamps",
-      "silhouette": ["A wide-open ground floor with no shopfront glass at all, under a deep marquee canopy edged in lamps, with two plain floors above"],
+      "silhouette": [
+        "A wide-open ground floor with no shopfront glass at all, under a deep marquee canopy edged in lamps, with two plain floors above"
+      ],
       "cues": [
         "a marquee canopy projecting over the pavement, its underside packed with small bulbs",
         "a run of chase lamps around the canopy edge, alternating colours",
@@ -1089,42 +1998,74 @@
         "neon tubing in a zigzag running up the pier between the upper windows",
         "a ticket booth standing in the middle of the open entrance"
       ],
-      "materials": ["painted render, bleached by salt", "coloured neon tube", "small round filament bulbs in plain sockets"],
-      "avoid": ["any name, word or price on the marquee or booth", "a modern LED display or projected sign", "any pavement or ground plane"],
-      "views": ["front three-quarter", "front", "profile"]
+      "materials": [
+        "flat painted render",
+        "bright neon tube",
+        "rows of small round bulbs"
+      ],
+      "avoid": [
+        "any name, word or price on the marquee or booth",
+        "a modern LED display or projected sign",
+        "any pavement or ground plane"
+      ],
+      "views": [
+        "front three-quarter",
+        "front",
+        "profile"
+      ]
     },
-
     {
       "id": "block-concrete",
       "class": "architecture",
       "kind": "block",
       "subject": "mid-rise concrete city block",
       "replaces": "buildBlock(15, 14, …) in apps/coast/src/render/procgen.ts",
-      "dims": { "widthM": 14.0, "depthM": 14.0, "heightM": 15.0 },
+      "dims": {
+        "widthM": 14.0,
+        "depthM": 14.0,
+        "heightM": 15.0
+      },
       "era": "1960s concrete-framed commercial block",
-      "silhouette": ["A plain rectangular block, as deep as it is wide, with a flat roof and an entirely regular grid of windows"],
+      "silhouette": [
+        "A plain rectangular block, as deep as it is wide, with a flat roof and an entirely regular grid of windows"
+      ],
       "cues": [
         "an exposed concrete frame with infill panels set back between the columns",
         "a continuous band of windows on each floor with slim mullions",
         "a plant room box set back on the roof, smaller than the footprint",
         "a service door and louvre grille at ground level on one flank",
-        "staining running down from every window head",
         "a shallow projecting canopy over the ground-floor entrance"
       ],
-      "materials": ["board-marked concrete, weathered unevenly", "grey spandrel panels", "aluminium window frames"],
-      "avoid": ["any building name, number or signage", "mirror glass, a curtain wall or modern cladding", "any street furniture or ground plane"],
-      "views": ["front three-quarter", "profile", "front"]
+      "materials": [
+        "flat pale concrete",
+        "grey panels and clean glazing"
+      ],
+      "avoid": [
+        "any building name, number or signage",
+        "mirror glass, a curtain wall or modern cladding",
+        "any street furniture or ground plane"
+      ],
+      "views": [
+        "front three-quarter",
+        "profile",
+        "front"
+      ]
     },
-
     {
       "id": "block-brick",
       "class": "architecture",
       "kind": "block2",
       "subject": "low brick warehouse block",
       "replaces": "buildBlock(11, 12, …) in apps/coast/src/render/procgen.ts",
-      "dims": { "widthM": 12.0, "depthM": 12.0, "heightM": 11.0 },
+      "dims": {
+        "widthM": 12.0,
+        "depthM": 12.0,
+        "heightM": 11.0
+      },
       "era": "1930s dockside brick warehouse",
-      "silhouette": ["A solid brick box, taller than one storey suggests, with few openings and a saw-tooth roof line at the top"],
+      "silhouette": [
+        "A solid brick box, taller than one storey suggests, with few openings and a saw-tooth roof line at the top"
+      ],
       "cues": [
         "tall steel-framed windows in deep brick reveals, in two rows",
         "a loading door at ground level with a hoist beam projecting above it",
@@ -1133,20 +2074,37 @@
         "a painted-out sign panel high on the wall, the lettering gone",
         "a ventilator cowl or two along the ridge"
       ],
-      "materials": ["dark brick, soot-darkened at the top", "rusting steel window frames, some panes boarded", "corrugated roof sheeting"],
-      "avoid": ["any legible lettering in the painted-out panel", "modern roller shutters or cladding", "any yard, kerb or ground plane"],
-      "views": ["front three-quarter", "profile", "front"]
+      "materials": [
+        "flat dark red brick",
+        "clean steel windows",
+        "a plain corrugated roof"
+      ],
+      "avoid": [
+        "any legible lettering in the painted-out panel",
+        "modern roller shutters or cladding",
+        "any yard, kerb or ground plane"
+      ],
+      "views": [
+        "front three-quarter",
+        "profile",
+        "front"
+      ]
     },
-
     {
       "id": "tower",
       "class": "architecture",
       "kind": "tower",
       "subject": "downtown office tower",
       "replaces": "buildTower(34, …) in apps/coast/src/render/procgen.ts",
-      "dims": { "widthM": 18.0, "depthM": 18.0, "heightM": 37.0 },
+      "dims": {
+        "widthM": 18.0,
+        "depthM": 18.0,
+        "heightM": 37.0
+      },
       "era": "1960s international-style office tower",
-      "silhouette": ["A tall plain slab standing straight off a lower base, twice as tall as it is wide, flat-topped"],
+      "silhouette": [
+        "A tall plain slab standing straight off a lower base, twice as tall as it is wide, flat-topped"
+      ],
       "cues": [
         "a strict vertical grid of identical windows over the whole height",
         "a recessed ground-floor colonnade, so the tower appears to float on its columns",
@@ -1155,20 +2113,37 @@
         "a plaza-level podium wider than the tower above it",
         "window washing rails visible at the roof edge"
       ],
-      "materials": ["anodised aluminium mullions", "grey-green solar glass", "a polished stone podium"],
-      "avoid": ["any company name, logo, crown or antenna cluster", "a modern twisted or tapering form", "any surrounding buildings or ground plane"],
-      "views": ["front three-quarter", "profile", "front"]
+      "materials": [
+        "bright aluminium mullions",
+        "flat blue-green glass",
+        "a pale stone podium"
+      ],
+      "avoid": [
+        "any company name, logo, crown or antenna cluster",
+        "a modern twisted or tapering form",
+        "any surrounding buildings or ground plane"
+      ],
+      "views": [
+        "front three-quarter",
+        "profile",
+        "front"
+      ]
     },
-
     {
       "id": "tower-low",
       "class": "architecture",
       "kind": "tower2",
       "subject": "residential slab tower",
       "replaces": "buildTower(22, …) in apps/coast/src/render/procgen.ts",
-      "dims": { "widthM": 15.0, "depthM": 12.0, "heightM": 25.0 },
+      "dims": {
+        "widthM": 15.0,
+        "depthM": 12.0,
+        "heightM": 25.0
+      },
       "era": "1960s residential slab block",
-      "silhouette": ["A shorter, broader slab, its face broken into a regular grid of recessed balconies rather than plain windows"],
+      "silhouette": [
+        "A shorter, broader slab, its face broken into a regular grid of recessed balconies rather than plain windows"
+      ],
       "cues": [
         "every flat with a recessed balcony, so the elevation reads as a grid of dark squares",
         "solid balcony fronts in a lighter colour than the wall behind",
@@ -1177,21 +2152,41 @@
         "water tanks in a box on the roof",
         "a television aerial forest along the roof edge"
       ],
-      "materials": ["pebble-dash render, streaked below every balcony", "painted concrete balcony fronts", "grey aluminium windows"],
-      "avoid": ["any name, number or signage on the block", "modern cladding panels", "any surrounding buildings or ground plane"],
-      "views": ["front three-quarter", "profile", "front"]
+      "materials": [
+        "flat pale render",
+        "painted balcony fronts in one bright colour",
+        "clean glazing"
+      ],
+      "avoid": [
+        "any name, number or signage on the block",
+        "modern cladding panels",
+        "any surrounding buildings or ground plane"
+      ],
+      "views": [
+        "front three-quarter",
+        "profile",
+        "front"
+      ]
     },
-
     {
       "id": "sign-pylon",
       "class": "signage",
       "kind": null,
       "newKind": true,
       "subject": "roadside neon pylon sign",
-      "dims": { "heightM": 11.0, "widthM": 3.2, "depthM": 0.6, "poleHeightM": 6.2, "poleDiameterM": 0.5 },
+      "dims": {
+        "heightM": 11.0,
+        "widthM": 3.2,
+        "depthM": 0.6,
+        "poleHeightM": 6.2,
+        "poleDiameterM": 0.5
+      },
       "era": "1960s roadside neon pylon",
-      "silhouette": ["A tall thin sign on a single steel pole, far taller than the building it serves, with most of its height being bare pole"],
+      "silhouette": [
+        "A tall thin sign on a single steel pole, far taller than the building it serves, with most of its height being bare pole"
+      ],
       "cues": [
+        "every panel and board face is COMPLETELY EMPTY: one flat colour, no picture, no pattern, no shapes, no lettering on it",
         "a boomerang or starburst crown above a rectangular message panel",
         "an arrow of chase lamps along the lower edge",
         "exposed neon tubing standing off the face on visible spacers",
@@ -1199,11 +2194,22 @@
         "a plain riveted steel pole with a visible splice",
         "a transformer box bolted to the back of the panel"
       ],
-      "materials": ["enamelled steel face", "glass neon in two colours", "unpainted galvanised pole"],
-      "avoid": ["any brand, chain or slogan — every lettering panel is BLANK; wording is applied later", "LED panels, modern typography, backlit acrylic", "any ground plane or base plinth"],
-      "views": ["front", "profile", "back"]
+      "materials": [
+        "a flat enamelled steel face",
+        "bright neon tube in two colours",
+        "a clean pale pole"
+      ],
+      "avoid": [
+        "any brand, chain or slogan — every lettering panel is BLANK; wording is applied later",
+        "LED panels, modern typography, backlit acrylic",
+        "any ground plane or base plinth"
+      ],
+      "views": [
+        "front",
+        "profile",
+        "back"
+      ]
     },
-
     {
       "id": "sign-highway",
       "class": "signage",
@@ -1211,41 +2217,79 @@
       "subject": "highway direction sign on two posts",
       "replaces": "buildSign() in apps/coast/src/render/procgen.ts — one blank board serves signCoast, signDrive and signBay",
       "note": "The game paints the wording onto this sign's face from a canvas texture. Generate the board BLANK and keep that step: a baked word cannot be restyled per stage, and three signs that differ only in their text should not be three meshes.",
-      "dims": { "heightM": 7.3, "widthM": 4.4, "depthM": 0.3, "poleHeightM": 4.4 },
+      "dims": {
+        "heightM": 7.3,
+        "widthM": 4.4,
+        "depthM": 0.3,
+        "poleHeightM": 4.4
+      },
       "era": "1960s highway direction sign",
-      "silhouette": ["A wide blank rectangular board carried on two posts, its lower edge above head height"],
+      "silhouette": [
+        "A wide blank rectangular board carried on two posts, its lower edge above head height"
+      ],
       "cues": [
+        "every panel and board face is COMPLETELY EMPTY: one flat colour, no picture, no pattern, no shapes, no lettering on it",
         "two square-section posts set in from the board's ends",
         "a plain rolled edge around the board and a narrow rail behind it",
-        "the face completely blank — no words, no arrows, no route shields",
         "bolt heads visible in a regular pattern where the board meets the rails",
         "a slight bow in the board face, catching the light unevenly"
       ],
-      "materials": ["flat reflective sheeting in a single colour, faintly sparkling", "galvanised posts, dull grey"],
-      "avoid": ["any lettering, arrow, numeral or shield — the face is blank and stays blank", "a modern gantry mount or variable message panel", "any ground plane or post footing"],
-      "views": ["front", "profile", "back"]
+      "materials": [
+        "a flat panel in one strong colour",
+        "clean pale posts"
+      ],
+      "avoid": [
+        "any lettering, arrow, numeral or shield — the face is blank and stays blank",
+        "a modern gantry mount or variable message panel",
+        "any ground plane or post footing"
+      ],
+      "views": [
+        "front",
+        "profile",
+        "back"
+      ]
     },
-
     {
       "id": "arch",
       "class": "signage",
       "kind": "arch",
       "subject": "welcome arch spanning the road",
       "replaces": "buildArch() in apps/coast/src/render/procgen.ts",
-      "dims": { "spanM": 14.0, "widthM": 1.0, "depthM": 1.0, "heightM": 10.2, "legHeightM": 6.5, "legWidthM": 1.2 },
+      "dims": {
+        "spanM": 14.0,
+        "widthM": 1.0,
+        "depthM": 1.0,
+        "heightM": 10.2,
+        "legHeightM": 6.5,
+        "legWidthM": 1.2
+      },
       "era": "a 1950s town welcome arch over the main road",
-      "silhouette": ["Two masonry piers either side of the road carrying a broad curved banner panel between them, high enough for a truck to pass under"],
+      "silhouette": [
+        "Two masonry piers either side of the road carrying a broad curved banner panel between them, high enough for a truck to pass under"
+      ],
       "cues": [
+        "every panel and board face is COMPLETELY EMPTY: one flat colour, no picture, no pattern, no shapes, no lettering on it",
         "square tapered piers with a moulded cap on each",
-        "a shallow curved panel spanning between them, blank on both faces",
         "a run of small bulbs around the panel's outer edge",
         "a decorative starburst finial above the centre of the span",
         "a maintenance ladder fixed to the back of one pier",
         "conduit running up the pier to the lamps"
       ],
-      "materials": ["painted rendered masonry, cracked at the caps", "enamelled steel panel", "small clear filament bulbs"],
-      "avoid": ["any town name, welcome message or lettering — the panel is blank", "modern signage or floodlighting", "any road surface or ground plane"],
-      "views": ["front three-quarter", "front", "profile"]
+      "materials": [
+        "flat painted masonry",
+        "a clean enamelled panel",
+        "rows of small round bulbs"
+      ],
+      "avoid": [
+        "any town name, welcome message or lettering — the panel is blank",
+        "modern signage or floodlighting",
+        "any road surface or ground plane"
+      ],
+      "views": [
+        "front three-quarter",
+        "front",
+        "profile"
+      ]
     }
   ]
 }

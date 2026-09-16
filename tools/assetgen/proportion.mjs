@@ -101,8 +101,29 @@ export function shapeFor(spec) {
     const track = d.trackM ?? d.across * 0.82
     const tyre = wheel * 0.32 // section width; only the plan sees it
 
-    side.push({ box: [0, 0, d.along, d.height] })
-    for (const x of [rear, front]) side.push({ ellipse: [x, wheel / 2, wheel, wheel], fill: DARK })
+    // A plain envelope box says how big, and nothing about WHERE THE MASS IS — which for a car is
+    // most of what the eye reads. Asked for a mid-engined prototype against a featureless box, the
+    // generator returned a front-engined sports racer: long bonnet, cabin set back, correct overall
+    // size. `cabin` draws the greenhouse where it belongs, so the outline itself says cab-forward.
+    // `profile` is the strongest thing this file can say, and the hero car is why it exists. Boxes
+    // give proportion and nothing else, and asked for a mid-engined prototype against a box the
+    // generator kept returning a long-nosed front-engined sports racer — right size, wrong car. A
+    // drawn profile is copied, which everywhere else is the failure mode and here is the point.
+    // Use it sparingly: for most assets the envelope is honest and a drawn roofline is an invention.
+    const cabin = d.cabin
+    const bodyH = cabin ? d.height - cabin.heightM : d.height
+    if (spec.profile) {
+      side.push({ poly: spec.profile })
+    } else {
+      side.push({ box: [0, 0, d.along, bodyH] })
+      if (cabin) side.push({ box: [cabin.startM, bodyH, cabin.endM - cabin.startM, cabin.heightM] })
+    }
+    // Fatter at the back, which is true of every one of these cars and is also the only thing in
+    // the drawing that says WHICH END IS THE FRONT. Without it a cab-forward outline is equally a
+    // cab-back one seen the other way round, and the generator is free to choose.
+    const rearWheel = d.rearWheelDiameterM ?? wheel * 1.12
+    side.push({ ellipse: [rear, rearWheel / 2, rearWheel, rearWheel], fill: DARK })
+    side.push({ ellipse: [front, wheel / 2, wheel, wheel], fill: DARK })
 
     plan.push({ box: [0, 0, d.along, d.across] })
     for (const x of [rear, front]) {
@@ -177,7 +198,10 @@ export function silhouetteSvg(spec, { annotate = false, plan = false } = {}) {
   const parts = []
   const emit = (p, originY, flip) => {
     const fill = p.fill ?? INK
-    if (p.box) {
+    if (p.poly) {
+      const pts = p.poly.map(([x, y]) => `${round(left + px(x))},${round(flip ? originY - px(y) : originY + px(y))}`).join(' ')
+      parts.push(`<polygon points="${pts}" fill="${p.fill ?? INK}"/>`)
+    } else if (p.box) {
       const [x, y, w, h] = p.box
       // Elevation grows upward from the ground line; the plan grows downward from its own top edge.
       const top = flip ? originY - px(y + h) : originY + px(y)

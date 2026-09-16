@@ -100,6 +100,36 @@ cut-out is a photograph and carries its own light; letting the bake's lamps fall
 palm lit from two directions. It also keeps `SpriteAtlas`'s material pass — which flattens shading
 on every MeshStandardMaterial it finds — from touching these at all.
 
+## Two servers, and they have opposite strengths
+
+Measured, not assumed, and the asymmetry is the whole reason `engineByClass` exists.
+
+**dev reads what you attach — so literally that it copies it.** A two-panel outline came back as a
+two-panel technical drawing; a style sheet came back as the style sheet. Everywhere else that is the
+failure mode, and for a vehicle it is exactly what is wanted: asked for a mid-engined prototype
+against a plain envelope box, every server returns a long-nosed front-engined sports racer, through
+six rewordings. Give dev a DRAWN PROFILE (`profile` on a spec) and it traces it. Dev discards
+`reference_image` silently, so there is no style guide on that side.
+
+**klein ignores attachments entirely.** Two completely different outlines under `image` produced
+BYTE-IDENTICAL output — which is how the wasted batch was found. It reads `reference_image`, which
+refers rather than copies, so klein is where the style guide works and where proportion is only as
+good as the sentence describing it. Right for scenery: generic shapes, and the look is everything.
+
+So vehicles go to dev with a drawn profile, scenery to klein with the style guide, and a spec can
+override with its own `engine`.
+
+## The style guide has no objects in it
+
+`--make-bible` generates it, from a prompt in `assets.json` so it is reproducible. The first one was
+what you would expect — a sheet of arcade cars, palms and pines in the right look — and attaching it
+returned THE SHEET, every time. So did a second version made of recognisable primitives. What works
+is a palette-and-finish chart: spheres, cubes and cones in the arcade palette, nothing anyone could
+copy, which conveys colour, surface and shading and contains no object to reproduce.
+
+On klein it rides in `reference_image`, composed with this asset's own outline — the only channel
+that side reads.
+
 ## Two chroma colours, because a third of the manifest is vegetation
 
 Everything keys onto flat green except `class: "nature"`, which keys onto magenta. A green screen

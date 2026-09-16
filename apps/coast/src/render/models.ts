@@ -2,7 +2,7 @@
 // in metres, and from which yaw angles (degrees; 0 = seen from behind).
 
 import { Group, type Object3D } from 'three'
-import { buildFacade, buildPrototype, buildSign, LIVERIES } from './procgen'
+import { buildFacade, buildSign, LIVERIES } from './procgen'
 
 export interface ModelDef {
   kind: string
@@ -108,8 +108,12 @@ export const MODELS: ModelDef[] = [
   G('tent', 'tent', 4, 192),
   G('pitsOffice', 'pits-office', 6, 256),
   G('gantry', 'overhead-gantry', 8.5, 256),
-  // Hero prototypes, one per livery; the chase view picks the selected one.
-  ...Object.entries(LIVERIES).map(([id, l]): ModelDef => ({ kind: `hero_${id}`, file: '', build: () => buildPrototype(l), heightM: 1.1, yaws: HERO_YAWS, cell: 288 })),
+  // Hero prototypes, one per livery; the chase view picks the selected one. The generated mesh is
+  // one car in one paint scheme, so for now every livery points at it — the tint cannot be applied
+  // to a baked texture the way `buildPrototype` applied it to flat material colours, and what that
+  // costs (four identical sprite sets in the atlas, and a livery menu that changes nothing) is the
+  // open question, not an oversight. `liveries.json` is where the answer goes.
+  ...Object.keys(LIVERIES).map((id): ModelDef => ({ kind: `hero_${id}`, file: 'assets/generated/hero-prototype.glb', heightM: 1.65, yaws: HERO_YAWS, cell: 288 })),
   { kind: 'formula', file: 'assets/cars/race.glb', heightM: 1.1, yaws: HERO_YAWS, cell: 288 },
   // Roadside architecture and signage.
   G('diner', 'diner', 6.4, 256),

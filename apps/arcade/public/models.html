@@ -135,6 +135,20 @@
   .edited { color: var(--hot) !important; }
   .rignote { padding: .5rem .9rem .8rem; color: var(--faint); font-size: 11px; line-height: 1.6; }
   .rignote b { color: var(--dim); font-weight: 500; }
+  .rignote .warn { color: var(--bad); }
+  /* The joint colours, spelled out — the legend is the only way to read a cloud of 160 dots. */
+  .swatch { display: inline-block; width: .6em; height: .6em; border-radius: 50%; vertical-align: baseline; }
+  .sw-active { background: #fffaee; }
+  .sw-sel { background: #ff9e1f; }
+  .sw-pivot { background: #ff406b; }
+  .sw-moved { background: #38b0a6; }
+  .sw-rest { background: #9ee8ff; }
+  /* Pose and rig are different jobs on the same skeleton, and the panel says which one is live. */
+  .seg { display: flex; gap: .4rem; padding: 0 .9rem .6rem; }
+  .seg button { flex: 1 1 0; padding-left: .4em; padding-right: .4em; }
+  .keyhint { padding: 0 .9rem .7rem; margin: 0; color: var(--faint); font-size: 10.5px; line-height: 1.8; }
+  .keyhint kbd { font-family: inherit; color: var(--dim); border: 1px solid var(--edge); border-radius: 3px; padding: 0 .3em; }
+  .hide { display: none !important; }
 
   dl { margin: 0; padding: .7rem .9rem .9rem; display: grid; grid-template-columns: 1fr auto; gap: .45rem .7rem; align-items: baseline; }
   dt { color: var(--dim); font-size: 11.5px; }
@@ -189,37 +203,50 @@
 
     <div class="rail">
     <section class="pane" id="rigpane" hidden>
-      <h2>Skeleton</h2>
+      <h2 id="rigtitle">Skeleton</h2>
+      <div class="seg">
+        <button id="mpose" aria-pressed="true" title="Rotate joints to see where a limb bends. Scratch, never exported.">Pose</button>
+        <button id="mrig" aria-pressed="false" title="Move the joints themselves. The mesh stays put — this is what gets exported.">Rig</button>
+      </div>
+      <div class="seg" id="seg2">
+        <button id="tskel" aria-pressed="true" title="The DEF- bones of the rigged .glb — the rig's output">Skeleton</button>
+        <button id="tmeta" aria-pressed="false" title="The metarig joints Rigify generates from — the rig's input">Metarig</button>
+      </div>
       <div class="rigrow">
-        <select id="bone" aria-label="bone"></select>
+        <select id="bone" aria-label="active joint"></select>
         <button id="sweep" aria-pressed="false" title="Swing this joint through its range">Sweep</button>
       </div>
-      <div class="sl"><b>rX</b><input type="range" id="rx" min="-180" max="180" step="1" value="0"><span class="v" id="rxv">0°</span></div>
-      <div class="sl"><b>rY</b><input type="range" id="ry" min="-180" max="180" step="1" value="0"><span class="v" id="ryv">0°</span></div>
-      <div class="sl"><b>rZ</b><input type="range" id="rz" min="-180" max="180" step="1" value="0"><span class="v" id="rzv">0°</span></div>
+      <div class="sl rot"><b>rX</b><input type="range" id="rx" min="-180" max="180" step="1" value="0"><span class="v" id="rxv">0°</span></div>
+      <div class="sl rot"><b>rY</b><input type="range" id="ry" min="-180" max="180" step="1" value="0"><span class="v" id="ryv">0°</span></div>
+      <div class="sl rot"><b>rZ</b><input type="range" id="rz" min="-180" max="180" step="1" value="0"><span class="v" id="rzv">0°</span></div>
       <div class="sl pos"><b>pX</b><input type="range" id="px" min="-0.15" max="0.15" step="0.001" value="0"><span class="v" id="pxv">0</span></div>
       <div class="sl pos"><b>pY</b><input type="range" id="py" min="-0.15" max="0.15" step="0.001" value="0"><span class="v" id="pyv">0</span></div>
       <div class="sl pos"><b>pZ</b><input type="range" id="pz" min="-0.15" max="0.15" step="0.001" value="0"><span class="v" id="pzv">0</span></div>
       <div class="rigrow">
         <button id="bones" aria-pressed="false">Bones</button>
         <button id="joints" aria-pressed="false">Joints</button>
-        <button id="gmove" aria-pressed="false" title="Drag the selected joints to move them">Move</button>
-        <button id="grot" aria-pressed="false" title="Drag to rotate the selected joint">Rotate</button>
+        <button id="gmove" aria-pressed="false" title="Drag to move every selected joint">Move</button>
+        <button id="grot" aria-pressed="false" title="Drag to swing the selection around the pivot">Rotate</button>
       </div>
       <div class="rigrow">
-        <button id="boxsel" aria-pressed="false" title="Drag a rectangle over the viewport to select joints">Box select</button>
+        <button id="boxsel" aria-pressed="false" title="Drag a rectangle without holding Ctrl. Alt+drag still orbits.">Box select</button>
         <button id="selall">All</button>
         <button id="selnone">None</button>
+        <button id="setpivot" aria-pressed="false" title="Pin the active joint as the point the Rotate gizmo turns around">Pivot</button>
       </div>
       <div class="rigrow">
         <button id="restall">Reset pose</button>
-        <button id="clearoff">Clear offsets</button>
+        <button id="clearoff">Reset joints</button>
       </div>
       <div class="rigrow">
-        <button id="exportjoints">Export joints JSON</button>
+        <button id="exportjoints">Export JSON</button>
         <button id="importjoints">Import…</button>
         <input type="file" id="jointsfile" accept=".json" hidden />
       </div>
+      <p class="keyhint">
+        <kbd>drag</kbd> orbit · <kbd>ctrl</kbd>+drag box · <kbd>+shift</kbd> add · <kbd>+alt</kbd> remove<br>
+        <kbd>click</kbd> pick · <kbd>shift</kbd>+click toggle · <kbd>alt</kbd>+click drop · <kbd>esc</kbd> none
+      </p>
       <p class="rignote" id="rignote"></p>
     </section>
 
@@ -260,6 +287,7 @@
 <script type="module">
 import * as THREE from 'three';
 import { GLTFLoader } from '/vendor/three/loaders/GLTFLoader.js';
+import { DRACOLoader } from '/vendor/three/loaders/DRACOLoader.js';
 import { OrbitControls } from '/vendor/three/controls/OrbitControls.js';
 import { TransformControls } from '/vendor/three/controls/TransformControls.js';
 
@@ -352,6 +380,7 @@ const CATALOGUE = [
   {"path":"/assets/generated/flower.glb","name":"flower","group":"generated","kb":75},
   {"path":"/assets/generated/gas-station.glb","name":"gas-station","group":"generated","kb":51},
   {"path":"/assets/generated/grandstand.glb","name":"grandstand","group":"generated","kb":81},
+  {"path":"/assets/generated/hero-prototype.glb","name":"hero-prototype","group":"generated","kb":1168},
   {"path":"/assets/generated/lightpost.glb","name":"lightpost","group":"generated","kb":18},
   {"path":"/assets/generated/lightpost-tall.glb","name":"lightpost-tall","group":"generated","kb":21},
   {"path":"/assets/generated/motel-strip.glb","name":"motel-strip","group":"generated","kb":59},
@@ -371,6 +400,8 @@ const CATALOGUE = [
   {"path":"/assets/generated/tent.glb","name":"tent","group":"generated","kb":44},
   {"path":"/assets/generated/tower.glb","name":"tower","group":"generated","kb":71},
   {"path":"/assets/generated/tower-low.glb","name":"tower-low","group":"generated","kb":116},
+  {"path":"/assets/generated/traffic-pickup.glb","name":"traffic-pickup","group":"generated","kb":1166},
+  {"path":"/assets/generated/traffic-sedan.glb","name":"traffic-sedan","group":"generated","kb":1106},
   {"path":"/assets/generated/tree-broadleaf.glb","name":"tree-broadleaf","group":"generated","kb":73},
 ];
 // >>> CATALOGUE
@@ -422,6 +453,12 @@ grid.material.transparent = true; grid.material.opacity = 0.75;
 scene.add(grid);
 
 const loader = new GLTFLoader();
+// The generated roadside meshes are Draco-compressed: 83 MB of reconstructions does not fit in a
+// Cloudflare Worker bundle and 16 MB does. The decoder is vendored under /assets/draco/ — the one
+// path that resolves both here and in a game served on its own, because the arcade mirror carries
+// `assets` and nothing else. Uncompressed files are unaffected; the loader only reaches for the
+// decoder when a file says KHR_draco_mesh_compression.
+loader.setDRACOLoader(new DRACOLoader().setDecoderPath('/assets/draco/'));
 let current = null, spinning = true, homeDist = 3;
 
 // --- rig editing -----------------------------------------------------------

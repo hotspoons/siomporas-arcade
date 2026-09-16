@@ -12,7 +12,8 @@ first — it is the approach. This is what exists and what is known.*
 | **flux.2-dev** | cluster, port-forward `:18090` | text→image and image→image. ~25 s a view. **Exercised** |
 | **proportion.mjs** | here | spec → measured orthographic outline, attached to the generation. **Exercised** |
 | **generate.mjs** | here | spec → prompt → flux → keyed cut-out → TRELLIS.2 → `.glb`. **Exercised to the cut-out** |
-| **card.mjs** | here | keyed cut-out → a `.glb` the game loads. **40 kinds shipped** |
+| **card.mjs** | here | keyed cut-out → a `.glb` the game loads, for single-yaw kinds |
+| **finish.mjs** | here | reconstruction → 1.2 MB: meshopt simplify, unlit, WebP + Draco |
 | **TRELLIS.2** | `tools/recon-service` | one keyed view → textured `.glb`, ~7 s warm. **Not deployed anywhere** |
 | **blrig rigging** | `tools/rigging` | mesh → Rigify rig. Characters only; nothing here needs it |
 
@@ -49,9 +50,14 @@ conditioning stack takes a view set; only `run()` wraps one image on the way in.
 photogrammetry agent, whose service and CI it is. Every subject here is keyed at three views and
 waiting for the day it lands.
 
-**The output is 25 MB a subject** — around 400k faces after the service's own decimation, with two
+**The output is 26 MB a subject** — around 400k faces after the service's own decimation, with two
 2048px PBR maps. That is right for a reconstruction and roughly fifty times what a sprite bake in a
-256-pixel cell can resolve. `decimate.py` takes it down.
+256-pixel cell can resolve. `finish.mjs` takes it to about 1.2 MB: simplify, unlit, compress.
+
+**Simplify with meshoptimizer, never with a collapse decimator.** The first version used Blender's
+decimate modifier at the same 20k target and the hero car came back CRACKED — black tears across the
+bodywork, the windscreen blown to white — while the raw mesh was clean. Nineteen-to-one pulls UV
+seams apart and the texture rips along them. Blender is no longer in this path at all.
 
 So the `.glb` half of `generate.mjs` is written against the service's actual API
 (`tools/recon-service/app/main.py`: POST `/reconstruct` with `images`, poll `/jobs/<id>`, GET

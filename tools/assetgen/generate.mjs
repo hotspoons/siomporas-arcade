@@ -11,7 +11,8 @@
 //
 // THE TWO SERVERS ARE PORT-FORWARDS, not public URLs:
 //
-//   kubectl port-forward -n default svc/<flux-2-dev-svc> 18090:80      # FLUX_HOST
+//   kubectl port-forward -n default svc/<flux-2-klein-svc> 8402:80      # FLUX_HOST (klein, default)
+//   kubectl port-forward -n default svc/<flux-2-dev-svc> 18090:80       # FLUX_HOST=... for dev
 //   kubectl port-forward -n default svc/recon 8500:80                  # RECON_HOST
 //
 // flux.2-dev, not klein. `scripts/flux-art.mjs` is the fighter pipeline's client and it is pointed
@@ -62,8 +63,17 @@ import { dimsOf, renderProportion } from './proportion.mjs'
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.resolve(HERE, '../..')
 
-const FLUX_HOST = process.env.FLUX_HOST ?? 'http://127.0.0.1:18090'
-const FLUX_MODEL = process.env.FLUX_MODEL ?? 'flux.2-dev'
+// KLEIN, NOT DEV, AND THE REASON IS THE STYLE GUIDE. Dev has no style channel: everything handed to
+// /v1/images/edits is an EDIT SOURCE, so attaching a style sheet returns the style sheet — measured
+// twice, once with an arcade art sheet and once with a palette chart, and both came back copied
+// pixel for pixel instead of informing the asset. `reference_image` is the channel that refers
+// rather than transforms, and it is klein-only: dev accepts the field, files it under a key only
+// klein's pipeline reads, and silently discards it. Klein also draws a better car — the malformed
+// one, with its nose at right angles to its body, was dev's.
+const FLUX_HOST = process.env.FLUX_HOST ?? 'http://127.0.0.1:8402'
+const FLUX_MODEL = process.env.FLUX_MODEL ?? 'FLUX.2 [klein] 9B'
+/** Dev takes repeated `image[]`; klein takes `image`. Getting this wrong looks like a server bug. */
+const ATTACH_FIELD = /klein/i.test(FLUX_MODEL) ? 'image' : 'image[]'
 const RECON_HOST = process.env.RECON_HOST ?? 'https://recon.bradley-hartlove-gh200.basedweights.com'
 
 const magick = (args) => execFileSync('magick', args, { encoding: 'utf8', maxBuffer: 1 << 28 }).trim()
@@ -176,13 +186,63 @@ export function proportionLine(spec) {
  * costs the cut-out, which costs the reconstruction. The cues are where the shape lives and they
  * are also the longest part, so they are what gives way — from the end, loudly, never silently.
  */
-export function generatePrompt(spec, view, { defaults, budget = BUDGET }) {
+/**
+ * What is attached to a generation, in order, and what the prompt calls each one.
+ *
+ * THE STYLE GUIDE IS FIRST AND IT EARNS ITS PLACE. Words could not hold a consistent look across
+ * fifty assets: the vehicles and the trees took the arcade style, the buildings stayed photographs
+ * through three rewordings, and nothing made two assets agree with each other. The fighter pipeline
+ * solved the same problem the same way — `apps/fighter/ART.md`: "the PAINTED STYLE lives in it and
+ * does not survive being written down". So a sheet is generated once, in the look we want, and
+ * every asset is drawn against it.
+ *
+ * `reference` on a spec adds its own images after it, for the assets that need more than a style —
+ * a shape nobody can describe, a scheme that has to match something already in the game.
+ */
+export function attachmentsFor(spec, defaults, dir, proportion) {
+  const out = []
+  // `mode: "reference"` sends the style guide down klein's reference_image channel instead, where
+  // it steers rather than gets copied — see `bibleReference` and the header.
+  const bible = defaults.bible?.mode !== 'reference' && defaults.bible?.file && path.resolve(ROOT, defaults.bible.file)
+  if (bible && existsSync(bible)) out.push({ file: bible, says: defaults.bible.says })
+  for (const ref of spec.reference ?? []) {
+    const file = path.resolve(ROOT, ref.file ?? ref)
+    if (!existsSync(file)) throw new Error(`${spec.id}: reference missing — ${ref.file ?? ref}`)
+    out.push({ file, says: ref.says ?? 'IMAGE {n} is a reference for this object. Follow its shapes and colours' })
+  }
+  out.push({ file: proportion, says: 'IMAGE {n} is its measured side outline — match it exactly: {dims}. Draw the object, not the outline' })
+  return out
+}
+
+export function generatePrompt(spec, view, { defaults, budget = BUDGET, attachments = [], readsAttachments = true }) {
   const subject = spec.subject ?? spec.kind.replace(/_/g, ' ')
   const chroma = chromaFor(spec)
   const head = [
-    `A single photograph: ONE ${subject}, alone, the only object in the picture, seen from ${view}. ${spec.era}.`,
-    `IMAGE 1 is its measured side outline — match it exactly: ${proportionLine(spec)}. Draw the object, not the outline.`,
+    // The style leads, because it is what KIND of picture this is, and the kind was wrong for a
+    // whole generation of assets: "a single photograph" returned photographs, faithfully, and a
+    // photograph of a diner is not an asset for a game whose sky is four flat bands of blue. The
+    // era still steers the FORM — a 1969 prototype is a 1969 prototype — but the rendering of it is
+    // a toy, not a document.
+    `ONE ${subject}, alone, the only object in the picture, seen from ${view}.`,
+    // THE SHAPE CLAIM COMES SECOND, and it cost a batch to learn why. The silhouette used to sit
+    // sixth, after the style, the class note, the era and the reference. Asked for a mid-engined
+    // prototype in that order, klein returned a long-nosed front-engined sports racer every time:
+    // by the time it reached where the cockpit goes it had already decided what kind of car it was
+    // drawing. What the thing IS, then what SHAPE it is, then how it is drawn.
     list(spec.silhouette),
+    `Draw it as ${defaults.style}.`,
+    // Buildings needed saying twice. The vehicles and the trees took the style straight away; the
+    // architecture kept coming back as photographs of buildings, because "office tower" drags a
+    // model toward the thing itself harder than "palm" does. This is the per-class second telling.
+    defaults.styleByClass?.[spec.class],
+    `Its shapes come from ${spec.era}.`,
+    defaults.bible?.mode === 'reference' && defaults.bible?.composedSays
+      ? defaults.bible.composedSays.replace('{dims}', proportionLine(spec))
+      : null,
+    // Only worth saying where it is read. Klein ignores attachments — measured — so on that side an
+    // "IMAGE 1 is its measured outline" sentence is a false statement that also costs 120 characters
+    // of a budget the cues need.
+    ...(readsAttachments ? attachments.map((a, i) => `${a.says.replace('{n}', String(i + 1)).replace('{dims}', proportionLine(spec))}.`) : []),
     spec.paint ? `It is painted ${spec.paint}.` : null,
   ]
   const tail = [
@@ -243,19 +303,21 @@ export function negativePrompt(spec, { defaults }) {
 
 // --- the servers -------------------------------------------------------------------------------
 
-async function flux({ prompt, negative, trueCfg, attach = [], size, steps, seed, field }) {
+async function flux({ prompt, negative, trueCfg, attach = [], reference, size, steps, seed, field, engine }) {
   const started = Date.now()
+  const host = engine?.host ?? FLUX_HOST
+  const model = engine?.model ?? FLUX_MODEL
   let res
   if (!attach.length) {
-    res = await fetch(`${FLUX_HOST}/v1/images/generations`, {
+    res = await fetch(`${host}/v1/images/generations`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: FLUX_MODEL, prompt, negative_prompt: negative, true_cfg_scale: trueCfg, size, num_inference_steps: steps, seed, response_format: 'b64_json' }),
+      body: JSON.stringify({ model, prompt, negative_prompt: negative, true_cfg_scale: trueCfg, size, num_inference_steps: steps, seed, response_format: 'b64_json' }),
       dispatcher,
     })
   } else {
     const form = new FormData()
-    form.append('model', FLUX_MODEL)
+    form.append('model', model)
     form.append('prompt', prompt)
     form.append('size', size)
     form.append('num_inference_steps', String(steps))
@@ -264,7 +326,13 @@ async function flux({ prompt, negative, trueCfg, attach = [], size, steps, seed,
     if (negative) form.append('negative_prompt', negative)
     if (trueCfg) form.append('true_cfg_scale', String(trueCfg))
     for (const p of attach) form.append(field, new Blob([readFileSync(p)], { type: 'image/png' }), path.basename(p))
-    res = await fetch(`${FLUX_HOST}/v1/images/edits`, { method: 'POST', body: form, dispatcher })
+    // `reference_image` is a STYLE channel, and it is klein-only: the dev server accepts the field,
+    // files it under its own multi_modal_data key, and only klein's pipeline ever reads that key —
+    // so on dev it is silently discarded and you get a stranger drawn to an otherwise obeyed
+    // prompt. That is why the style guide cannot ride along with the outline on dev: everything in
+    // `image[]` is an EDIT SOURCE there, and an edit source is reproduced, not referred to.
+    if (reference) form.append('reference_image', new Blob([readFileSync(reference)], { type: 'image/png' }), path.basename(reference))
+    res = await fetch(`${host}/v1/images/edits`, { method: 'POST', body: form, dispatcher })
   }
 
   const text = await res.text()
@@ -333,6 +401,29 @@ export function keyChroma(raw, out, chroma, threshold = 0.12) {
 }
 
 /**
+ * The single image klein is given to refer to — and on klein that is the ONLY image it reads.
+ *
+ * Measured, because it is the opposite of dev and it silently wasted a batch: handing klein two
+ * completely different outlines under `image` produced BYTE-IDENTICAL output, while changing
+ * `reference_image` changed the picture. The attachment is required by the API and ignored by the
+ * pipeline. Dev is the mirror image — it reads attachments so literally that it copies them, and
+ * discards `reference_image` — so neither server offers both channels.
+ *
+ * So the outline travels inside the reference: palette chart on the left, this asset's measured
+ * profile on the right, one image. `compose: false` sends the chart alone.
+ */
+export function referenceFor(spec, defaults, dir, proportion) {
+  const b = defaults.bible
+  if (b?.mode !== 'reference' || !b.file) return undefined
+  const chart = path.resolve(ROOT, b.file)
+  if (!existsSync(chart)) return undefined
+  if (b.compose === false) return chart
+  const out = path.join(dir, 'reference.png')
+  magick([chart, '-resize', '512x512!', '(', proportion, '-resize', '512x512!', ')', '+append', out])
+  return out
+}
+
+/**
  * Did the proportion reference actually land? On a PROFILE view the keyed bounding box is the
  * object's elevation, so its aspect is directly comparable with the metres in the spec — the one
  * cheap objective test of the thing this whole file exists to control. Any other view foreshortens
@@ -391,13 +482,26 @@ export async function generate(spec, defaults, opts) {
   renderProportion(spec, path.join(dir, 'proportion-annotated.png'), { annotate: true })
 
   const budget = opts.long ? Infinity : BUDGET
-  const prompts = plan.map((v) => (v.how === 'generate' ? generatePrompt(spec, v.name, { defaults, budget }) : editPrompt(spec, v.name, { defaults })))
+  // Which server draws this one, and therefore which of the two channels is available. See
+  // `$engines` in assets.json for what each side does and does not read.
+  const engineName = spec.engine ?? defaults.engineByClass?.[spec.class] ?? 'klein'
+  const engine = defaults.engines?.[engineName]
+  if (!engine) throw new Error(`${spec.id}: no engine ${JSON.stringify(engineName)} in defaults.engines`)
+  const useBible = engine.bible === 'reference'
+  const attachments = attachmentsFor(spec, { ...defaults, bible: useBible ? defaults.bible : undefined }, dir, proportion)
+  const styleRef = useBible ? referenceFor(spec, defaults, dir, proportion) : undefined
+  const promptDefaults = { ...defaults, bible: useBible ? defaults.bible : undefined }
+  const prompts = plan.map((v) =>
+    v.how === 'generate'
+      ? generatePrompt(spec, v.name, { defaults: promptDefaults, budget, attachments, readsAttachments: engine.readsAttachments !== false })
+      : editPrompt(spec, v.name, { defaults: promptDefaults }),
+  )
   const negative = negativePrompt(spec, { defaults })
 
   for (const [i, p] of prompts.entries()) {
     const over = p.length > BUDGET ? `  ** ${p.length - BUDGET} over budget **` : ''
     const cut = p.dropped ? `  ** ${p.dropped} cue${p.dropped > 1 ? 's' : ''} dropped to fit — shorten the spec **` : ''
-    console.log(`\n--- ${spec.id} view ${i + 1} (${plan[i].name}, ${plan[i].how})  ${p.length} chars${over}${cut}\n${p}`)
+    console.log(`\n--- ${spec.id} [${engineName}] view ${i + 1} (${plan[i].name}, ${plan[i].how})  ${p.length} chars${over}${cut}\n${p}`)
     if (i === 0) {
       console.log(`\n[negative] ${negative}`)
       if (!opts.trueCfg) console.log('[negative] NOT sampled: this is a guidance-distilled model, so a negative prompt only bites with --true-cfg 2 (and costs twice the time).')
@@ -426,14 +530,14 @@ export async function generate(spec, defaults, opts) {
     } else {
       const src = []
       if (v.how === 'generate') {
-        src.push(proportion)
+        src.push(...attachments.map((a) => a.file))
       } else {
         // The flank trick: mirror in, mirror out, and the asymmetric detail lands on the right side.
         const from = opts.flank === 'left' ? path.join(dir, '_flopped.png') : first
         if (opts.flank === 'left') flop(first, from)
         src.push(from)
       }
-      r = await flux({ prompt: String(prompts[i]), negative, trueCfg: opts.trueCfg, attach: src, size: opts.size, steps: opts.steps, seed: opts.seed + i, field: opts.field })
+      r = await flux({ prompt: String(prompts[i]), negative, trueCfg: opts.trueCfg, attach: src, reference: styleRef, size: opts.size, steps: opts.steps, seed: opts.seed + i, field: opts.field ?? engine.field, engine })
       writeFileSync(raw, r.png)
       if (v.how === 'edit' && opts.flank === 'left') flop(raw, raw)
     }
@@ -478,7 +582,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
 
   const id = flag('id')
   const klass = flag('class')
-  if ((!id && !klass && !has('audit') && !has('rekey') && !has('recon')) || has('help')) {
+  if ((!id && !klass && !has('audit') && !has('rekey') && !has('recon') && !has('make-bible')) || has('help')) {
     console.log(`
   node tools/assetgen/generate.mjs --id hero-prototype [options]
   node tools/assetgen/generate.mjs --class vehicle --dry-run
@@ -496,12 +600,13 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     --skip-recon     stop after the keyed cut-outs
     --redo           regenerate views that are already on disk (default: keep them)
     --long           allow a prompt over ${BUDGET} characters
+    --make-bible     generate the style guide every asset is drawn against (defaults.bible)
     --audit          which of the game's kinds have a spec, and which specs have no slot
     --rekey          re-cut every keyed view already on disk, without generating anything
     --recon          reconstruct from the cut-outs already on disk — no generation at all.
                      Takes --id or --class to narrow it, --views N to cap views per subject
     --out DIR        default ext/assetgen
-    --field NAME     attachment field: image[] for flux.2-dev, image for klein
+    --field NAME     attachment field: image for klein, image[] for flux.2-dev (default: ${ATTACH_FIELD})
 
   FLUX_HOST=${FLUX_HOST}  RECON_HOST=${RECON_HOST}
 `)
@@ -510,6 +615,27 @@ if (import.meta.url === `file://${process.argv[1]}`) {
 
   const file = path.join(HERE, 'assets.json')
   const { defaults, assets } = JSON.parse(readFileSync(file, 'utf8'))
+
+  if (has('make-bible')) {
+    // The style guide, generated once and then attached to everything. It is deliberately a
+    // GENERATION and not a photograph or a downloaded sheet: what we want is this model's own
+    // rendering of the look, because a style it can already draw is a style it can hold across
+    // fifty assets. Ours asks for the late-80s arcade racer palette on subjects it knows well —
+    // cars, palms, pines, a sign, a beach hut — and the specs then borrow the LOOK, never the
+    // objects in it.
+    const b = defaults.bible
+    if (!b?.prompt) {
+      console.error('no defaults.bible.prompt in assets.json')
+      process.exit(1)
+    }
+    const out = path.resolve(ROOT, flag('out-file', b.file))
+    mkdirSync(path.dirname(out), { recursive: true })
+    const seed = Number(flag('seed', 1))
+    const r = await flux({ prompt: b.prompt, size: flag('size', '1024x1024'), steps: Number(flag('steps', 28)), seed, field: flag('field', ATTACH_FIELD) })
+    writeFileSync(out, r.png)
+    console.log(`${path.relative(ROOT, out)}  ${r.seconds.toFixed(1)}s  seed ${seed}`)
+    process.exit(0)
+  }
 
   if (has('recon')) {
     // Reconstruct from the cut-outs already on disk. The generation and the reconstruction are
@@ -571,7 +697,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     // What the game asks for against what this file describes. The manifest builds most of its
     // kinds through the N/P/C helpers rather than writing `kind:` out, so both spellings are read.
     const ts = readFileSync(path.join(ROOT, 'apps/coast/src/render/models.ts'), 'utf8')
-    const kinds = new Set([...ts.matchAll(/kind: '([A-Za-z0-9_]+)'/g), ...ts.matchAll(/[NPC]\('([A-Za-z0-9_]+)'/g)].map((m) => m[1]))
+    const kinds = new Set([...ts.matchAll(/kind: '([A-Za-z0-9_]+)'/g), ...ts.matchAll(/\b[NPCG]\('([A-Za-z0-9_]+)'/g)].map((m) => m[1]))
     kinds.add('hero') // one ModelDef per livery, all built from buildPrototype
     const spec = new Map(assets.filter((a) => a.kind).map((a) => [a.kind, a.id]))
     const missing = [...kinds].filter((k) => !spec.has(k) && !k.startsWith('hero_'))
@@ -601,7 +727,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     long: has('long'),
     redo: has('redo'),
     out: flag('out', 'ext/assetgen'),
-    field: flag('field', 'image[]'),
+    field: flag('field'),
   }
 
   let failed = 0

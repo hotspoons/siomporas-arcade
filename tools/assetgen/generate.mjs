@@ -497,7 +497,10 @@ export async function generate(spec, defaults, opts) {
   const engineName = spec.engine ?? defaults.engineByClass?.[spec.class] ?? 'klein'
   const engine = defaults.engines?.[engineName]
   if (!engine) throw new Error(`${spec.id}: no engine ${JSON.stringify(engineName)} in defaults.engines`)
-  const useBible = engine.bible === 'reference'
+  // `styleRef: false` on a spec drops the style guide for that asset alone. The chart is blocks of
+  // flat colour, and an asset whose defining feature is a BLANK panel keeps borrowing them: the
+  // billboards and signs came back two-tone, orange against blue, however the cue was worded.
+  const useBible = engine.bible === 'reference' && spec.styleRef !== false
   const attachments = attachmentsFor(spec, { ...defaults, bible: useBible ? defaults.bible : undefined }, dir, proportion)
   const styleRef = useBible ? referenceFor(spec, defaults, dir, proportion) : undefined
   const promptDefaults = { ...defaults, bible: useBible ? defaults.bible : undefined }

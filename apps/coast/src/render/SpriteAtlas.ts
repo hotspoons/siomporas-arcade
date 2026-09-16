@@ -3,8 +3,7 @@
 // sprite scaling — the 2.5D look — while the art comes from real meshes.
 
 import { AmbientLight, Box3, BoxGeometry, Color, Vector4, DirectionalLight, Group, HemisphereLight, Mesh, MeshStandardMaterial, Object3D, PerspectiveCamera, Scene, SRGBColorSpace, Vector3, WebGLRenderTarget, type Texture, type WebGLRenderer, NearestFilter, LinearFilter, RGBAFormat } from 'three'
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
-import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js'
+import { glbLoader } from './loadGlb'
 import { isTouchDevice } from '@apex/engine/app/platform'
 
 import { atlasSizeFor, cellSize, MODELS, orient, type ModelDef } from './models'
@@ -235,13 +234,7 @@ export class SpriteAtlas {
     await ensureFonts()
     // setPath('/'), because the model paths are relative and in the arcade the game is served
     // at /radrun — where a bare 'assets/…' would resolve against whatever menu the URL is on.
-    const loader = new GLTFLoader().setPath('/')
-    // The generated meshes are Draco-compressed — 83 MB of reconstructions does not fit in a
-    // Cloudflare Worker bundle and 16 MB does. The decoder sits under assets/ because that is the
-    // only directory the arcade mirror carries, so the path resolves both here and at /radrun.
-    // Kenney's kits are not compressed and the loader is happy either way.
-    const draco = new DRACOLoader().setDecoderPath('/assets/draco/')
-    loader.setDRACOLoader(draco)
+    const loader = glbLoader()
     const scene = new Scene()
     scene.add(new AmbientLight(0xffffff, 0.35))
     scene.add(new HemisphereLight(0xffffff, 0x8080a0, 0.7))

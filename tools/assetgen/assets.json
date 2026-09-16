@@ -117,15 +117,14 @@
       },
       "era": "1968–1971 international 5-litre prototype racing",
       "silhouette": [
-        "The engine is BEHIND the driver: cockpit in the FRONT THIRD, windscreen foot almost over the front wheels, the rear two-thirds one long engine deck"
+        "A CLOSED COUPE with a roof over the cockpit. The engine is BEHIND the driver: cockpit in the front third, the rear two-thirds one long engine deck"
       ],
       "cues": [
-        "a cockpit bubble pushed far forward, the base of its windscreen almost over the front wheels",
-        "a long low engine deck running back from the cabin to the tail, vented with louvres over the engine",
-        "a short low nose with a wide full-width mouth, faired headlamp covers, and fender crowns peaked above the bonnet valley between them",
         "flying buttresses running back from the roof to the rear fenders around a recessed rear window",
-        "a chopped vertical tail with a full-width spoiler lip and exhaust primaries under it",
-        "wide deep-dished five-spoke magnesium wheels, the rear tyres visibly fatter than the front"
+        "a long engine deck behind the cabin, vented with louvres",
+        "a short low nose with a wide full-width mouth and faired headlamp covers",
+        "a chopped vertical tail with a full-width spoiler lip and exhaust pipes under it",
+        "wide deep-dished five-spoke magnesium wheels, fatter at the rear"
       ],
       "materials": [
         "smooth glossy painted plastic, one flat colour",
@@ -510,7 +509,7 @@
       "id": "traffic-delivery",
       "class": "vehicle",
       "kind": "delivery",
-      "subject": "walk-in delivery box van",
+      "subject": "box van: a van cab with one tall closed cargo box behind it, all one vehicle",
       "paint": "bright grass green",
       "dims": {
         "lengthM": 6.2,
@@ -521,27 +520,77 @@
       },
       "era": "1960s walk-in delivery van, the kind that worked a suburban round",
       "silhouette": [
-        "A tall square box on a truck chassis with a short rounded nose in front of it — nearly as tall as it is long in the cab section, and flat-sided all the way back"
+        "ONE vehicle in one piece: a short rounded cab with a tall square closed box directly behind it, the box as tall as the cab is long"
       ],
       "cues": [
+        "a tall closed box body, solid on every side, no openings in the flanks",
         "a rounded snub bonnet and a deep two-pane windscreen, the driver sitting high",
-        "a doorless driver's opening on the near side",
-        "a tall flat flank with a single horizontal rubbing strip",
-        "double hinged doors at the rear with long strap hinges",
+        "double hinged doors at the rear",
         "a roof that curves into the sides on a tight radius",
-        "small round headlamps mounted on the front wings"
+        "small round headlamps on the front wings"
       ],
       "materials": [
         "flat painted panels",
         "one bright aluminium strip along the flank"
       ],
       "avoid": [
-        "any company name, logo or livery — the flanks stay blank",
-        "a modern box truck's flat face or roll shutter"
+        "a cutaway, an open side, a missing wall or any view of the interior",
+        "a modern box truck's flat face or roll shutter",
+        "any company name, logo or livery — the flanks stay blank"
       ],
       "views": [
         "front three-quarter",
         "profile"
+      ],
+      "profile": [
+        [
+          0.0,
+          0.45
+        ],
+        [
+          0.0,
+          2.8
+        ],
+        [
+          4.4,
+          2.8
+        ],
+        [
+          4.4,
+          2.0
+        ],
+        [
+          4.8,
+          1.95
+        ],
+        [
+          5.15,
+          1.3
+        ],
+        [
+          5.95,
+          1.15
+        ],
+        [
+          6.2,
+          0.95
+        ],
+        [
+          6.2,
+          0.45
+        ],
+        [
+          5.2,
+          0.38
+        ],
+        [
+          1.1,
+          0.38
+        ],
+        [
+          0.2,
+          0.4
+        ]
       ]
     },
     {
@@ -1129,21 +1178,21 @@
       },
       "era": "an outcrop left standing where the road was cut past it",
       "silhouette": [
-        "Taller than it is wide: a blocky column of rock with a stepped profile, leaning very slightly"
+        "ONE single solid boulder standing taller than it is wide, in one piece"
       ],
       "cues": [
-        "horizontal bedding lines running across the whole column",
-        "a stepped top where one bed has broken away",
-        "an undercut at the base where softer rock has eroded first",
-        "fallen fragments implied by the broken edges, but none modelled"
+        "a few large flat facets meeting at hard edges, like a cut gem roughly hewn",
+        "a wider base narrowing towards a blunt broken top",
+        "one deep shadowed crack running down a face",
+        "an undercut at the base on one side"
       ],
       "materials": [
         "flat stone in warm grey and ochre bands"
       ],
       "avoid": [
-        "a smooth monolith",
-        "a low-poly crystal",
-        "any base disc, rubble or ground plane"
+        "a stack of separate slabs or blocks, a cairn, a pile of rubble",
+        "a smooth egg or a low-poly crystal",
+        "any base disc, soil or ground plane"
       ],
       "views": [
         "profile",
@@ -1357,7 +1406,8 @@
         "front three-quarter",
         "profile",
         "front"
-      ]
+      ],
+      "styleRef": false
     },
     {
       "id": "billboard-low",
@@ -1392,7 +1442,8 @@
         "front three-quarter",
         "profile",
         "front"
-      ]
+      ],
+      "styleRef": false
     },
     {
       "id": "lightpost",
@@ -2226,7 +2277,8 @@
         "front",
         "profile",
         "back"
-      ]
+      ],
+      "styleRef": false
     },
     {
       "id": "sign-highway",
@@ -2265,7 +2317,8 @@
         "front",
         "profile",
         "back"
-      ]
+      ],
+      "styleRef": false
     },
     {
       "id": "arch",

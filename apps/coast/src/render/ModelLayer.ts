@@ -22,7 +22,7 @@
 // rebuilt from the same rows, and a car over the next crest goes behind the hill like it should.
 
 import { AmbientLight, Box3, BufferAttribute, BufferGeometry, DirectionalLight, Group, HemisphereLight, Mesh, MeshBasicMaterial, MeshStandardMaterial, Object3D, PerspectiveCamera, Scene, Vector3, type WebGLRenderer } from 'three'
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
+import { glbLoader } from './loadGlb'
 
 import { MODELS, orient, type ModelDef } from './models'
 
@@ -104,7 +104,7 @@ export class ModelLayer {
     this.loading = true
     // setPath('/'), because the model paths are relative and in the arcade the game is served
     // at /radrun — where a bare 'assets/…' would resolve against whatever menu the URL is on.
-    const loader = new GLTFLoader().setPath('/')
+    const loader = glbLoader()
     for (const def of MODELS) {
       try {
         const model = def.file ? (await loader.loadAsync(def.file)).scene : def.build?.()

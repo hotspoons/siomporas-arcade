@@ -11,7 +11,7 @@
 import '../style.css'
 import { AmbientLight, DirectionalLight, GridHelper, Group, HemisphereLight, Mesh, MeshStandardMaterial, Object3D, PerspectiveCamera, Scene, SRGBColorSpace, WebGLRenderer } from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
+import { glbLoader } from '../render/loadGlb'
 import { buildArch, buildBlock, buildDiner, buildFacade, buildGasStation, buildMotel, buildPrototype, buildSign, buildTower, ensureFonts, LIVERIES, PROCGEN_VERSION } from '../render/procgen'
 import { MODELS } from '../render/models'
 
@@ -75,7 +75,7 @@ for (const def of MODELS) if (def.file) modelSelect.add(new Option(`glb · ${def
 for (const name of Object.keys(LIVERIES)) liverySelect.add(new Option(name, name))
 liverySelect.value = 'rosso'
 
-const loader = new GLTFLoader()
+const loader = glbLoader('')
 let current: Object3D | null = null
 
 async function show(): Promise<void> {

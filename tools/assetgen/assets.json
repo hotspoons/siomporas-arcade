@@ -117,7 +117,7 @@
       },
       "era": "1968–1971 international 5-litre prototype racing",
       "silhouette": [
-        "The engine is BEHIND the driver: the cockpit sits in the FRONT THIRD with the windscreen foot almost over the front wheels, and the whole rear two-thirds is one long engine deck. The nose is barely a wheel long; the tail is twice that"
+        "The engine is BEHIND the driver: cockpit in the FRONT THIRD, windscreen foot almost over the front wheels, the rear two-thirds one long engine deck"
       ],
       "cues": [
         "a cockpit bubble pushed far forward, the base of its windscreen almost over the front wheels",
@@ -209,6 +209,24 @@
           0.45,
           0.16
         ]
+      ],
+      "variants": [
+        {
+          "suffix": "gulf",
+          "paint": "pale powder blue with a broad orange stripe over nose and roof"
+        },
+        {
+          "suffix": "martini",
+          "paint": "off-white with a broad stripe of dark blue and red over nose and roof"
+        },
+        {
+          "suffix": "rosso",
+          "paint": "vivid racing red with a broad cream stripe over nose and roof"
+        },
+        {
+          "suffix": "midnight",
+          "paint": "near-black with a broad gold stripe over nose and roof"
+        }
       ]
     },
     {

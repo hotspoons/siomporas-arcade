@@ -1,64 +1,35 @@
 {
   "$comment": [
-    "Racing liveries for the hero car, to replace `LIVERIES` in apps/coast/src/render/procgen.ts.",
+    "The four liveries the hero car ships in, and one decision recorded rather than argued.",
     "",
-    "WHY THIS FILE EXISTS. That table ships `gulf` and `martini`. Those are not colour schemes, they",
-    "are the trademarks of two companies — a fuel brand and a drinks brand — and they are the single",
-    "most recognisable thing about the cars that wore them. A roofline can be made original by",
-    "describing an era instead of a car, which is what assets.json does; a livery cannot, because it",
-    "IS the identifying mark and nothing else about it is load-bearing. `rosso` and `midnight` are",
-    "fine as they stand: a red racing car and a dark blue one are national racing colours, not",
-    "anyone's property.",
+    "`gulf` and `martini` are two companies' trademarks, not generic colour schemes, and a livery is",
+    "far more identifying than a roofline — which is why everything else in assets.json goes to such",
+    "lengths to describe an era instead of a car. The point was put to Rich and he asked for them",
+    "anyway, alongside `rosso` and `midnight`. His call, his game; it is written down here so nobody",
+    "re-litigates it in six months, and so the four originals below stay available if it changes.",
     "",
-    "WHAT MAKES ONE OF THESE READ AS PERIOD without borrowing a mark:",
-    "- Two colours and at most one accent. Multi-colour gradient schemes are a 1980s habit.",
-    "- The stripe runs fore-and-aft over the nose and roof, or as a broad band around the middle.",
-    "  Diagonal flashes and swooshes are later.",
-    "- The number lives in a plain circle or a rectangle on the door, in a period grotesque.",
-    "- Colours are mixed paint, not metallics: a period car is flat, saturated and slightly off.",
-    "",
-    "AND WHAT TO AVOID, because the failure mode here is arriving back at the thing you meant to",
-    "leave: pale blue with an orange stripe is one company's mark, and white with a dark blue and red",
-    "double stripe is another's. Neither pairing appears below, and neither should be reintroduced",
-    "because it 'looks right' — looking right is exactly what makes it theirs.",
-    "",
-    "PROMOTING THIS is a paste into procgen.ts: the shape is already `Livery` — body, stripe, number.",
-    "The hero mesh is generated in plain off-white (see assets.json, hero-prototype `paint`) so the",
-    "tint reads true whichever of these is applied."
+    "EACH LIVERY IS NOW ITS OWN MESH. `buildPrototype` applied a Livery as flat material colours, so",
+    "one model served four schemes; a reconstruction carries its paint in a baked texture and cannot",
+    "be tinted. `variants` on the hero spec generates one car per livery — see assets.json."
   ],
-
   "liveries": [
     {
-      "id": "saltflat",
-      "name": "Salt flat",
-      "body": "0xeef0ee",
-      "stripe": "0x7b1f2b",
-      "number": "3",
-      "reads": "A works white with a single deep maroon centre stripe. The plainest of the set and the one that best carries a number."
+      "id": "gulf",
+      "name": "Gulf",
+      "body": "0x7fc6e8",
+      "stripe": "0xff7a1a",
+      "number": "17",
+      "paint": "pale powder blue with a broad orange stripe over nose and roof",
+      "shipping": true
     },
     {
-      "id": "kingfisher",
-      "name": "Kingfisher",
-      "body": "0x1c4b7a",
-      "stripe": "0xf0e3c2",
-      "number": "11",
-      "reads": "Deep marine blue with a cream stripe — the dark-blue-and-cream pairing an entrant used before sponsors bought the bodywork."
-    },
-    {
-      "id": "sandline",
-      "name": "Sandline",
-      "body": "0xd8cdb4",
-      "stripe": "0xb4573a",
-      "number": "4",
-      "reads": "Bone with oxide red. Reads as a privateer who painted over last season's colours, which is what most of the field was."
-    },
-    {
-      "id": "sunstrip",
-      "name": "Sunstrip",
-      "body": "0xe8b23a",
-      "stripe": "0x2e2a26",
-      "number": "6",
-      "reads": "Ochre with a near-black stripe. The loudest one, and the one that reads at sprite size against a blue sea."
+      "id": "martini",
+      "name": "Martini",
+      "body": "0xf2f2f2",
+      "stripe": "0x1a3a9a",
+      "number": "22",
+      "paint": "off-white with a broad stripe of dark blue and red over nose and roof",
+      "shipping": true
     },
     {
       "id": "rosso",
@@ -66,8 +37,8 @@
       "body": "0xd8262e",
       "stripe": "0xfff2d0",
       "number": "5",
-      "reads": "Kept from the existing table. A red racing car is a national colour, not a mark.",
-      "existing": true
+      "paint": "vivid racing red with a broad cream stripe over nose and roof",
+      "shipping": true
     },
     {
       "id": "midnight",
@@ -75,13 +46,45 @@
       "body": "0x1a1c28",
       "stripe": "0xffd45f",
       "number": "8",
-      "reads": "Kept from the existing table. Near-black with a gold stripe, which belongs to nobody.",
-      "existing": true
+      "paint": "near-black with a broad gold stripe over nose and roof",
+      "shipping": true
+    },
+    {
+      "id": "saltflat",
+      "name": "Salt flat",
+      "body": "0xeef0ee",
+      "stripe": "0x7b1f2b",
+      "number": "3",
+      "reads": "A works white with a single deep maroon centre stripe. The plainest of the set and the one that best carries a number.",
+      "shipping": false
+    },
+    {
+      "id": "kingfisher",
+      "name": "Kingfisher",
+      "body": "0x1c4b7a",
+      "stripe": "0xf0e3c2",
+      "number": "11",
+      "reads": "Deep marine blue with a cream stripe — the dark-blue-and-cream pairing an entrant used before sponsors bought the bodywork.",
+      "shipping": false
+    },
+    {
+      "id": "sandline",
+      "name": "Sandline",
+      "body": "0xd8cdb4",
+      "stripe": "0xb4573a",
+      "number": "4",
+      "reads": "Bone with oxide red. Reads as a privateer who painted over last season's colours, which is what most of the field was.",
+      "shipping": false
+    },
+    {
+      "id": "sunstrip",
+      "name": "Sunstrip",
+      "body": "0xe8b23a",
+      "stripe": "0x2e2a26",
+      "number": "6",
+      "reads": "Ochre with a near-black stripe. The loudest one, and the one that reads at sprite size against a blue sea.",
+      "shipping": false
     }
   ],
-
-  "retire": [
-    { "id": "gulf", "why": "Pale blue with an orange stripe is a fuel company's registered livery." },
-    { "id": "martini", "why": "White with the blue-and-red double stripe is a drinks company's registered livery." }
-  ]
+  "$alternatives": "The four below ship nothing today. They are kept because they carry the same period read without borrowing anyone's marks, and because the decision above is reversible."
 }

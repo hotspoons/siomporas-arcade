@@ -2,6 +2,8 @@
 // in metres, and from which yaw angles (degrees; 0 = seen from behind).
 
 import { Group, type Object3D } from 'three'
+import { ROAD_HALF_WIDTH } from '../sim/Tuning'
+
 import { buildFacade, buildSign, LIVERIES } from './procgen'
 
 export interface ModelDef {
@@ -18,6 +20,12 @@ export interface ModelDef {
   cell: number
   /** Extra uniform scale on the model before fitting (some kits are tiny). */
   fit?: number
+  /**
+   * How wide the real thing is, in metres, across the road. Optional, and only landmarks need it:
+   * `landmarkOffset` uses it to stand a building clear of the tarmac. Without it a 14-metre diner
+   * and a 3-metre sign get the same fixed offset, and the diner ends up in the road.
+   */
+  widthM?: number
   /**
    * Degrees to turn the model before anything looks at it. Yaw 0 means *seen from behind*, which is
    * what you want of a car driving away from you and exactly wrong for anything standing beside the
@@ -74,40 +82,50 @@ export const HERO_YAWS = [0, 12, 24, 38, 60, 90, 120, 150, 180, -12, -24, -38, -
  * above the horizon, so the card foreshortens by a hundredth of its height and the sprite is the
  * picture — see tools/assetgen/card.mjs. Nothing baked at more than one yaw may use this.
  */
-const G = (kind: string, file: string, heightM: number, cell = 128): ModelDef => ({ kind, file: `assets/generated/${file}.glb`, heightM, yaws: [0], cell, spin: 180 })
+const G = (kind: string, file: string, heightM: number, cell = 128, widthM?: number): ModelDef => ({ kind, file: `assets/generated/${file}.glb`, heightM, yaws: [0], cell, spin: 180, widthM })
+
+/**
+ * How far off the centreline a landmark of this kind should stand, in road-halves, so that its near
+ * edge clears the tarmac by about a metre whatever its size. Everything used to be placed at a flat
+ * 1.9 — fine for a sign, and half a diner in the road.
+ */
+export function landmarkOffset(kind: string): number {
+  const w = MODEL_BY_KIND[kind]?.widthM
+  return w ? 1.15 + w / 2 / ROAD_HALF_WIDTH : 1.9
+}
 /** Traffic: fine flank steps for cars near your lane, quarter views for crossers, head-on, and four pitches for hills. */
 export const TRAFFIC_YAWS = [0, 6, 13, 22, 35, 90, 180, -6, -13, -22, -35, -90]
 export const TRAFFIC_PITCHES = [-5, 4, 13, 22]
 const C = (kind: string, file: string): ModelDef => ({ kind, file: `assets/cars/${file}.glb`, heightM: 1.5, yaws: TRAFFIC_YAWS, pitches: TRAFFIC_PITCHES, cell: 128 })
 
 export const MODELS: ModelDef[] = [
-  G('palm', 'palm', 10, 192),
-  G('palmTall', 'palm-tall', 13, 192),
-  G('palmBend', 'palm-bend', 9.5, 192),
-  G('pine', 'pine', 9, 192),
-  G('pineTall', 'pine-tall', 13, 192),
-  G('pineRound', 'pine-round', 8, 192),
-  G('oak', 'oak', 9, 192),
-  G('tree', 'tree-broadleaf', 8, 192),
-  G('bush', 'bush', 1.6, 96),
-  G('bushLarge', 'bush-large', 2.4, 96),
-  G('rock', 'rock', 2.6, 96),
-  G('rockTall', 'rock-tall', 4.2, 128),
-  G('stoneTall', 'stone-tall', 3.5, 128),
-  G('cactus', 'cactus', 2.4, 96),
-  G('cactusTall', 'cactus-tall', 4.0, 128),
-  G('flower', 'flower', 0.8, 64),
-  G('stump', 'stump', 1.0, 64),
-  G('billboard', 'billboard', 7.5, 256),
-  G('billboardLow', 'billboard-low', 5.5, 256),
-  G('lightpost', 'lightpost', 8, 128),
-  G('lightpostTall', 'lightpost-tall', 10, 128),
-  G('barrier', 'barrier-wall', 1.2, 96),
-  G('banner', 'banner-tower', 6, 128),
-  G('grandstand', 'grandstand', 7, 256),
-  G('tent', 'tent', 4, 192),
-  G('pitsOffice', 'pits-office', 6, 256),
-  G('gantry', 'overhead-gantry', 8.5, 256),
+  G('palm', 'palm', 10, 192, 5.0),
+  G('palmTall', 'palm-tall', 13, 192, 4.5),
+  G('palmBend', 'palm-bend', 9.5, 192, 5.0),
+  G('pine', 'pine', 9, 192, 4.0),
+  G('pineTall', 'pine-tall', 13, 192, 4.2),
+  G('pineRound', 'pine-round', 8, 192, 6.0),
+  G('oak', 'oak', 9, 192, 10.0),
+  G('tree', 'tree-broadleaf', 8, 192, 6.0),
+  G('bush', 'bush', 1.6, 96, 1.8),
+  G('bushLarge', 'bush-large', 2.4, 96, 3.0),
+  G('rock', 'rock', 2.6, 96, 3.2),
+  G('rockTall', 'rock-tall', 4.2, 128, 2.4),
+  G('stoneTall', 'stone-tall', 3.5, 128, 1.2),
+  G('cactus', 'cactus', 2.4, 96, 1.4),
+  G('cactusTall', 'cactus-tall', 4.0, 128, 2.2),
+  G('flower', 'flower', 0.8, 64, 0.7),
+  G('stump', 'stump', 1.0, 64, 1.1),
+  G('billboard', 'billboard', 7.5, 256, 12.2),
+  G('billboardLow', 'billboard-low', 5.5, 256, 7.3),
+  G('lightpost', 'lightpost', 8, 128, 2.4),
+  G('lightpostTall', 'lightpost-tall', 10, 128, 5.0),
+  G('barrier', 'barrier-wall', 1.2, 96, 0.6),
+  G('banner', 'banner-tower', 6, 128, 2.4),
+  G('grandstand', 'grandstand', 7, 256, 24.0),
+  G('tent', 'tent', 4, 192, 8.0),
+  G('pitsOffice', 'pits-office', 6, 256, 12.0),
+  G('gantry', 'overhead-gantry', 8.5, 256, 1.2),
   // Hero prototypes, one per livery; the chase view picks the selected one. The generated mesh is
   // one car in one paint scheme, so for now every livery points at it — the tint cannot be applied
   // to a baked texture the way `buildPrototype` applied it to flat material colours, and what that
@@ -116,23 +134,23 @@ export const MODELS: ModelDef[] = [
   ...Object.keys(LIVERIES).map((id): ModelDef => ({ kind: `hero_${id}`, file: 'assets/generated/hero-prototype.glb', heightM: 1.65, yaws: HERO_YAWS, cell: 288 })),
   { kind: 'formula', file: 'assets/cars/race.glb', heightM: 1.1, yaws: HERO_YAWS, cell: 288 },
   // Roadside architecture and signage.
-  G('diner', 'diner', 6.4, 256),
-  G('block', 'block-concrete', 15, 192),
-  G('facade1', 'facade-shopfront', 14.4, 192),
-  G('facade2', 'facade-office', 17.8, 192),
-  G('facade3', 'facade-lowrise', 11, 160),
-  G('facade4', 'facade-tall', 21.2, 224),
+  G('diner', 'diner', 6.4, 256, 14.0),
+  G('block', 'block-concrete', 15, 192, 14.0),
+  G('facade1', 'facade-shopfront', 14.4, 192, 8.0),
+  G('facade2', 'facade-office', 17.8, 192, 7.0),
+  G('facade3', 'facade-lowrise', 11, 160, 8.5),
+  G('facade4', 'facade-tall', 21.2, 224, 7.5),
   { kind: 'facadeLit1', file: '', build: () => buildFacade(8, 4, 0x4a4a5a, 0xff5fd2, true), heightM: 17.8, yaws: [0], cell: 192, spin: 180 },
-  G('facadeLit2', 'facade-neon-arcade', 14.4, 192),
-  G('block2', 'block-brick', 11, 192),
-  G('motel', 'motel-strip', 7.6, 256),
-  G('gas', 'gas-station', 4.6, 256),
-  G('tower', 'tower', 37, 256),
-  G('tower2', 'tower-low', 25, 256),
+  G('facadeLit2', 'facade-neon-arcade', 14.4, 192, 7.0),
+  G('block2', 'block-brick', 11, 192, 12.0),
+  G('motel', 'motel-strip', 7.6, 256, 24.0),
+  G('gas', 'gas-station', 4.6, 256, 14.0),
+  G('tower', 'tower', 37, 256, 18.0),
+  G('tower2', 'tower-low', 25, 256, 15.0),
   { kind: 'signCoast', file: '', build: () => buildSign('COAST HWY 1', '#ffffff', '#1a5a2a'), heightM: 7.3, yaws: [0], cell: 192, spin: 180 },
   { kind: 'signDrive', file: '', build: () => buildSign('DRIVE SAFE', '#ffe28a', '#7a1a1a'), heightM: 7.3, yaws: [0], cell: 192, spin: 180 },
   { kind: 'signBay', file: '', build: () => buildSign('NEON BAY 12', '#ff5fd2', '#101030'), heightM: 7.3, yaws: [0], cell: 192, spin: 180 },
-  G('arch', 'arch', 10.2, 256),
+  G('arch', 'arch', 10.2, 256, 1.0),
   C('sedan', 'sedan'),
   C('sedanSports', 'sedan-sports'),
   C('suv', 'suv'),

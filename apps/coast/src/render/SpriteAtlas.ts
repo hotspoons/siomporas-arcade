@@ -83,6 +83,41 @@ export function atlasPlan(renderer: WebGLRenderer): { size: number; cellScale: n
   return { size: cap, cellScale: 0.125, cap }
 }
 
+
+/**
+ * Where the model stands: the horizontal centre of the geometry in the bottom tenth of its height,
+ * in the model's own pre-scale coordinates. Falls back to the bounding-box centre for anything with
+ * no readable geometry (a `build()` model of pure boxes still reports vertices, so this is rare).
+ */
+function footprint(model: Object3D): { x: number; z: number } {
+  const box = new Box3().setFromObject(model)
+  const band = box.min.y + (box.max.y - box.min.y) * FOOT_BAND
+  let minX = Infinity
+  let maxX = -Infinity
+  let minZ = Infinity
+  let maxZ = -Infinity
+  const v = new Vector3()
+  model.updateMatrixWorld(true)
+  model.traverse((o) => {
+    const mesh = o as Mesh
+    const pos = mesh.isMesh ? mesh.geometry?.getAttribute('position') : null
+    if (!pos) return
+    for (let i = 0; i < pos.count; i++) {
+      v.fromBufferAttribute(pos as never, i).applyMatrix4(mesh.matrixWorld)
+      if (v.y > band) continue
+      if (v.x < minX) minX = v.x
+      if (v.x > maxX) maxX = v.x
+      if (v.z < minZ) minZ = v.z
+      if (v.z > maxZ) maxZ = v.z
+    }
+  })
+  if (minX === Infinity) return { x: (box.min.x + box.max.x) / 2, z: (box.min.z + box.max.z) / 2 }
+  return { x: (minX + maxX) / 2, z: (minZ + maxZ) / 2 }
+}
+
+/** How much of a model, measured up from its lowest point, counts as the part standing on the ground. */
+const FOOT_BAND = 0.1
+
 export class SpriteAtlas {
   readonly kinds = new Map<string, SpriteKind>()
   texture: Texture | null = null
@@ -310,10 +345,23 @@ export class SpriteAtlas {
       box.getSize(size)
       const scale = (def.heightM / Math.max(1e-3, size.y)) * (def.fit ?? 1)
       model.scale.setScalar(scale)
-      model.position.set(-((box.min.x + box.max.x) / 2) * scale, -box.min.y * scale, -((box.min.z + box.max.z) / 2) * scale)
+      // CENTRE ON THE FOOTPRINT, NOT THE BOUNDING BOX. The sprite is drawn by its bottom CENTRE
+      // (`SpriteBatch.add`), so whatever the bake calls the centre is where the game believes the
+      // object stands. The bounding box is the wrong answer for anything whose mass is not over its
+      // feet: a palm leaning its crown one way, a billboard whose board overhangs its posts, a
+      // cut-out that kept a smear of the model's own drop shadow. All of those planted their feet
+      // to one side of where the world put them, which is how trees ended up standing in the road.
+      // The bottom tenth of the geometry is what touches the ground, so that is what gets centred.
+      const foot = footprint(model)
+      model.position.set(-foot.x * scale, -box.min.y * scale, -foot.z * scale)
       const fitted = new Box3().setFromObject(model)
       const fs = new Vector3()
       fitted.getSize(fs)
+      // Half-extents measured about the NEW origin rather than the box centre: an object centred on
+      // its feet can reach further one way than the other, and a frame sized from the box would
+      // clip the overhang off.
+      fs.x = 2 * Math.max(Math.abs(fitted.min.x), Math.abs(fitted.max.x))
+      fs.z = 2 * Math.max(Math.abs(fitted.min.z), Math.abs(fitted.max.z))
       const frames: SpriteFrame[] = []
       const pitches = def.pitches ?? [DEFAULT_PITCH]
       for (const pitchDeg of pitches) for (const yaw of def.yaws) {

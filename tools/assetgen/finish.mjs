@@ -30,6 +30,7 @@ import path from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 import { loadSpecs } from './proportion.mjs'
+import { expand } from './generate.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.resolve(HERE, '../..')
@@ -82,7 +83,10 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   }
 
   const { assets } = loadSpecs()
-  const chosen = assets.filter((a) => (id ? a.id === id : existsSync(path.join(ROOT, 'ext/assetgen', a.id, `${a.id}.glb`))))
+  const chosen = assets
+    .flatMap(expand)
+    .filter((a) => (id ? a.id === id || a.id.startsWith(`${id}-`) : true))
+    .filter((a) => existsSync(path.join(ROOT, 'ext/assetgen', a.id, `${a.id}.glb`)))
   if (!chosen.length) {
     console.error(id ? `no reconstruction for ${JSON.stringify(id)} — run generate.mjs --recon first` : 'nothing reconstructed yet')
     process.exit(1)

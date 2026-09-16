@@ -1,3 +1,4 @@
+import { landmarkOffset } from '../render/models'
 // The road as a list of segments — the classic pseudo-3D representation.
 // Curve is the change in lateral offset per segment (accumulated by the
 // renderer from the camera outward, which is what makes distant road sweep);
@@ -283,7 +284,7 @@ export class Stage {
         // Alternate sides, but never build a diner in the sea.
         let side = Math.floor(i / theme.landmarkEvery) % 2 === 0 ? -1 : 1
         if (seg.shore === side) side = -side
-        if (seg.shore !== side) seg.sprites.push({ kind: k, offset: side * 1.9, scale: 1, collide: true })
+        if (seg.shore !== side) seg.sprites.push({ kind: k, offset: side * landmarkOffset(k), scale: 1, collide: true })
       }
     }
     // Start gantry on the first segment of the stage.

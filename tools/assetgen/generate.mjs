@@ -162,6 +162,16 @@ export function viewPlan(spec, count) {
 /** Join spec lines into a sentence run without doubling the punctuation they already carry. */
 const list = (xs) => (xs ?? []).map((x) => x.trim().replace(/[.;,]+$/, '')).join('. ')
 
+/**
+ * A spec with `variants` is several assets that differ in one field — the hero car in four liveries.
+ * Expanded here rather than duplicated in the file, because the day the roofline changes is the day
+ * four copies of it disagree.
+ */
+export function expand(spec) {
+  if (!spec.variants?.length) return [spec]
+  return spec.variants.map((v) => ({ ...spec, ...v, id: `${spec.id}-${v.suffix}`, variants: undefined }))
+}
+
 /** The metres, as a sentence. The single highest-leverage part of the prompt — see README.md. */
 export function proportionLine(spec) {
   const d = dimsOf(spec)
@@ -645,7 +655,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     const dir = flag('out', 'ext/assetgen')
     const only = flag('id')
     const klassOnly = flag('class')
-    const want = assets.filter((a) => (only ? a.id === only : klassOnly ? a.class === klassOnly : true))
+    const want = assets.flatMap(expand).filter((a) => (only ? a.id === only || a.id.startsWith(`${only}-`) : klassOnly ? a.class === klassOnly : true))
     let made = 0
     let failed = 0
     for (const spec of want) {
@@ -680,7 +690,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     // still there. Re-cuts every view of every spec that has one, in seconds.
     const dir = flag('out', 'ext/assetgen')
     let n = 0
-    for (const spec of assets) {
+    for (const spec of assets.flatMap(expand)) {
       const d = path.join(ROOT, dir, spec.id)
       if (!existsSync(d)) continue
       for (const f of readdirSync(d).filter((f) => /^view-\d+-.*(?<!-keyed)\.png$/.test(f))) {
@@ -708,7 +718,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     console.log(`  no slot yet:      ${assets.filter((a) => a.newKind).map((a) => a.id).join(', ') || 'none'}`)
     process.exit(0)
   }
-  const chosen = assets.filter((a) => (id ? a.id === id : a.class === klass))
+  const chosen = assets.flatMap(expand).filter((a) => (id ? a.id === id || a.id.startsWith(`${id}-`) : a.class === klass))
   if (!chosen.length) {
     console.error(`nothing matched. ids: ${assets.map((a) => a.id).join(', ')}`)
     process.exit(1)

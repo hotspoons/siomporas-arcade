@@ -1,3 +1,4 @@
+import { landmarkOffset } from '../render/models'
 // Authored track → road segments. This is the only place that knows how the
 // plan-view centreline becomes the classic pseudo-3D representation.
 //
@@ -290,7 +291,7 @@ export function compileTrack(track: CoastTrack, seed: number, path?: TrackPath):
       // Alternate sides, but never build a diner in the sea.
       let side = Math.floor(i / theme.landmarkEvery) % 2 === 0 ? -1 : 1
       if (seg.shore === side) side = -side as -1 | 1
-      if (seg.shore !== side) seg.sprites.push({ kind: k, offset: side * 1.9, scale: 1, collide: true })
+      if (seg.shore !== side) seg.sprites.push({ kind: k, offset: side * landmarkOffset(k), scale: 1, collide: true })
     }
   }
   // Hand-placed props go on last, so they always survive the scatter.

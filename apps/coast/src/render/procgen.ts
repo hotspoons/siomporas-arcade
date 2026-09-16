@@ -35,7 +35,7 @@ const flat = (color: number, extra: FlatExtra = {}) => {
 }
 
 /** Bump when any procedural model changes shape; part of the atlas cache key. */
-export const PROCGEN_VERSION = 16
+export const PROCGEN_VERSION = 17
 
 interface Slice {
   z: number
@@ -477,9 +477,19 @@ function textPlane(text: string, widthM: number, fg: string, bg: string, px: num
     g.fillRect(0, 0, c.width, c.height)
   }
   g.fillStyle = fg
-  g.font = `bold ${px}px Impact, "Arial Black", ui-sans-serif, sans-serif`
   g.textAlign = 'center'
   g.textBaseline = 'middle'
+  // FIT THE TEXT TO THE CANVAS. `px` is the size this sign would like; the canvas is what it gets.
+  // "COAST HWY 1" at 160px overflows 512px and the canvas silently clips it, which is why the road
+  // was signposted AST HW — and the machine that bakes the atlas has no Impact, so it falls back to
+  // something wider still and clips more. Measure, then shrink until it fits with a margin.
+  const margin = 24
+  let size = px
+  do {
+    g.font = `bold ${size}px Impact, "Arial Black", ui-sans-serif, sans-serif`
+    if (g.measureText(text).width <= c.width - margin) break
+    size -= 4
+  } while (size > 24)
   g.fillText(text, c.width / 2, c.height / 2 + 4)
   const tex = new CanvasTexture(c)
   tex.colorSpace = SRGBColorSpace

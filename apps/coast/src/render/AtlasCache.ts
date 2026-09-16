@@ -11,12 +11,12 @@ import { PROCGEN_VERSION } from './procgen'
 const DB = 'apex-coast'
 const STORE = 'atlas'
 /** Bump when the bake itself changes (lighting, camera, cell layout). */
-const BAKE_VERSION = 10
+const BAKE_VERSION = 11
 
 interface CachedAtlas {
   key: string
   png: Blob
-  kinds: [string, { def: SpriteKind['def']; frames: SpriteKind['frames']; yaws: number[]; pitches?: number[] }][]
+  kinds: [string, { def: SpriteKind['def']; frames: SpriteKind['frames']; yaws: number[]; pitches?: number[]; extentM?: SpriteKind['extentM']; footM?: SpriteKind['footM'] }][]
 }
 
 /**
@@ -68,7 +68,7 @@ export async function loadCachedAtlas(key: string): Promise<{ texture: Texture; 
     texture.generateMipmaps = false
     texture.needsUpdate = true
     const kinds = new Map<string, SpriteKind>()
-    for (const [k, v] of rec.kinds) kinds.set(k, { def: v.def, frames: v.frames, yaws: v.yaws, pitches: v.pitches ?? [DEFAULT_PITCH] })
+    for (const [k, v] of rec.kinds) kinds.set(k, { def: v.def, frames: v.frames, yaws: v.yaws, pitches: v.pitches ?? [DEFAULT_PITCH], extentM: v.extentM ?? { x: 0, z: 0 }, footM: v.footM ?? { x: 0, z: 0 } })
     return { texture, kinds }
   } catch (err) {
     console.warn('atlas cache read failed', err)

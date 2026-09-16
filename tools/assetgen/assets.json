@@ -1,14 +1,14 @@
 {
   "$comment": [
     "Design language, not cars. Every entry describes an era, a set of constraints that produced a",
-    "shape, and real proportions in metres — the things that actually steer a generator — plus an",
+    "shape, and real proportions in metres \u2014 the things that actually steer a generator \u2014 plus an",
     "`avoid` list naming what must not appear. Nothing here names a marque, a model or a team: a",
     "prompt that names one gets a copy of that one, which is the outcome this file exists to prevent.",
     "See README.md for why each field is shaped the way it is.",
     "",
     "FIELDS. `subject` is the noun the prompt uses, so it must read as a thing and not as a slot name.",
     "`kind` is the ModelDef kind in apps/coast/src/render/models.ts that this replaces, or null with",
-    "`newKind: true` for an asset the game has no slot for yet — generating one of those is fine, but",
+    "`newKind: true` for an asset the game has no slot for yet \u2014 generating one of those is fine, but",
     "promoting it means adding a ModelDef and putting it in a scene's roadside or landmark list.",
     "`dims` is read by proportion.mjs as well as by the prompt: lengthM/spanM run left-to-right,",
     "widthM and depthM across, and the optional wheelDiameterM, poleHeightM and legHeightM are what",
@@ -28,11 +28,11 @@
       "one case where the backdrop and the subject are the same colour: the first palm generation came",
       "back with BROWN fronds, because the prompt has to say the object is never the key colour and the",
       "model obeyed. Magenta costs nothing and asks nothing of the plant. Per-spec `chroma` overrides",
-      "the class default — put a red car on green, never on magenta."
+      "the class default \u2014 put a red car on green, never on magenta."
     ],
     "camera": "camera level with the subject's mid-height, no perspective distortion, the whole object in frame with a small margin",
     "style": "a clean simple 3D model, flat bright arcade look: bold simple shapes, BRIGHT SATURATED colour, smooth clean surfaces, no photographic texture or grain, nothing under it",
-    "render": "flat even lighting, no cast shadow, no ground, no base, no plinth, no soil, no rock under it — the object simply ends where it ends; no dirt, dust, rust, stains or weathering, nothing photographic",
+    "render": "flat even lighting, no cast shadow, no ground, no base, no plinth, no soil, no rock under it \u2014 the object simply ends where it ends; no dirt, dust, rust, stains or weathering, nothing photographic",
     "avoid": [
       "manufacturer badges, marque emblems, grille crests or wordmarks of any kind",
       "real sponsor marks, oil-company colours, cigarette-brand liveries",
@@ -48,10 +48,10 @@
     "bible": {
       "file": "ext/assetgen/_bible/bible.png",
       "says": "IMAGE {n} is the PALETTE AND FINISH CHART. Match its colours, its surface finish and its soft flat shading exactly. It contains no objects: draw NOTHING from it, take only the look",
-      "prompt": "A materials and palette chart for a late-1980s arcade racing game — NO objects, NO vehicles, NO scenery, NO buildings, nothing recognisable. Only plain geometric primitives on a plain neutral field: a sphere, a cube, a cylinder, a cone and a flat panel, repeated in a grid, each rendered in one bright saturated colour — red, orange, yellow, grass green, turquoise, royal blue, cream white.\n\nThe RENDERING is the point: smooth clean surfaces, flat even light, soft simple shading that shows the form, hard clean edges, no texture, no grain, no reflections, no shadows on the field, no gloss highlights blown out. Beneath them a row of flat colour swatches in the same palette.\n\nNo text, no lettering, no numbers, no labels.",
+      "prompt": "A materials and palette chart for a late-1980s arcade racing game \u2014 NO objects, NO vehicles, NO scenery, NO buildings, nothing recognisable. Only plain geometric primitives on a plain neutral field: a sphere, a cube, a cylinder, a cone and a flat panel, repeated in a grid, each rendered in one bright saturated colour \u2014 red, orange, yellow, grass green, turquoise, royal blue, cream white.\n\nThe RENDERING is the point: smooth clean surfaces, flat even light, soft simple shading that shows the form, hard clean edges, no texture, no grain, no reflections, no shadows on the field, no gloss highlights blown out. Beneath them a row of flat colour swatches in the same palette.\n\nNo text, no lettering, no numbers, no labels.",
       "mode": "reference",
       "compose": true,
-      "composedSays": "In the REFERENCE: its right half is this object's measured side outline — match that silhouette, {dims}. Its left half is the palette and finish. Draw neither of them, draw the object"
+      "composedSays": "In the REFERENCE: its right half is this object's measured side outline \u2014 match that silhouette, {dims}. Its left half is the palette and finish. Draw neither of them, draw the object"
     },
     "engines": {
       "dev": {
@@ -72,14 +72,14 @@
     "$engines": [
       "Two servers with opposite strengths, both measured rather than assumed.",
       "",
-      "DEV reads what you attach — so literally that a two-panel outline came back as a two-panel",
+      "DEV reads what you attach \u2014 so literally that a two-panel outline came back as a two-panel",
       "drawing. That is the failure mode everywhere except where a shape must be obeyed, and for a",
       "vehicle it must: asked for a mid-engined prototype against a plain box, every server returns a",
       "long-nosed front-engined sports racer. Give dev a DRAWN PROFILE and it traces it. Dev discards",
       "`reference_image` silently, so there is no style guide on this side; the words carry it.",
       "",
-      "KLEIN ignores attachments entirely — two completely different outlines under `image` produced",
-      "BYTE-IDENTICAL output — and reads `reference_image`, which refers rather than copies. So klein",
+      "KLEIN ignores attachments entirely \u2014 two completely different outlines under `image` produced",
+      "BYTE-IDENTICAL output \u2014 and reads `reference_image`, which refers rather than copies. So klein",
       "is where the style guide works, and where proportion is only as good as the sentence describing",
       "it. Right for scenery, whose shapes are generic and whose look is everything.",
       "",
@@ -115,7 +115,7 @@
         },
         "rearWheelDiameterM": 0.74
       },
-      "era": "1968–1971 international 5-litre prototype racing",
+      "era": "1968\u20131971 international 5-litre prototype racing",
       "silhouette": [
         "A CLOSED COUPE with a roof over the cockpit. The engine is BEHIND the driver: cockpit in the front third, the rear two-thirds one long engine deck"
       ],
@@ -131,9 +131,9 @@
         "clear headlamp covers, chrome exhaust pipes, plain black tyres"
       ],
       "avoid": [
-        "a long bonnet ahead of the cabin — the engine is BEHIND the driver, never in front of it",
+        "a long bonnet ahead of the cabin \u2014 the engine is BEHIND the driver, never in front of it",
         "a cabin set back towards the rear axle, or any front-engined sports-racer profile",
-        "a pointed wedge nose or chisel front — that is a decade too late",
+        "a pointed wedge nose or chisel front \u2014 that is a decade too late",
         "a tall upright tail fin, swan-neck wing or roll hoop above the roofline",
         "modern low-profile tyres, alloy multi-spoke wheels, LED lamps",
         "any racing number or roundel; liveries are applied separately"
@@ -242,7 +242,7 @@
         "trackM": 1.55,
         "wheelDiameterM": 0.7
       },
-      "era": "1970–1972 3-litre grand prix racing, the first season of full-width wings",
+      "era": "1970\u20131972 3-litre grand prix racing, the first season of full-width wings",
       "silhouette": [
         "A cigar body with nothing around the wheels at all: four tyres standing clear in the open air, the driver's head and shoulders above the line of the bodywork",
         "Rear tyres visibly fatter and taller than the fronts"
@@ -292,7 +292,7 @@
         "a thin chrome bumper standing clear of the body on visible overriders",
         "square-shouldered body sides with a single crisp crease along the length",
         "a thin-pillared six-light glasshouse with a near-vertical rear screen",
-        "a raised edge along the rear wing — tailfin residue, not a fin",
+        "a raised edge along the rear wing \u2014 tailfin residue, not a fin",
         "steel wheels with small chrome hubcaps and whitewall tyres"
       ],
       "materials": [
@@ -353,7 +353,7 @@
       "class": "vehicle",
       "kind": "suv",
       "subject": "full-size estate wagon",
-      "replaces": "the 'suv' slot, which has no period equivalent — a wagon is what that decade drove",
+      "replaces": "the 'suv' slot, which has no period equivalent \u2014 a wagon is what that decade drove",
       "paint": "bright turquoise, with a bold woodgrain panel along the flank",
       "dims": {
         "lengthM": 5.35,
@@ -404,7 +404,7 @@
       },
       "era": "late-1960s open two-seat sports roadster",
       "silhouette": [
-        "Small, low and open: a long bonnet, a cockpit set well back, a short tail, and no roof at all — the windscreen frame stands alone above the beltline"
+        "Small, low and open: a long bonnet, a cockpit set well back, a short tail, and no roof at all \u2014 the windscreen frame stands alone above the beltline"
       ],
       "cues": [
         "a low oval or rounded intake below a long bonnet with a raised centre crease",
@@ -510,7 +510,7 @@
       "class": "vehicle",
       "kind": "delivery",
       "subject": "box van: a van cab with one tall closed cargo box behind it, all one vehicle",
-      "paint": "bright grass green",
+      "paint": "pale cream above a tan lower body, split at the waistline",
       "dims": {
         "lengthM": 6.2,
         "widthM": 2.1,
@@ -536,7 +536,7 @@
       "avoid": [
         "a cutaway, an open side, a missing wall or any view of the interior",
         "a modern box truck's flat face or roll shutter",
-        "any company name, logo or livery — the flanks stay blank"
+        "any company name, logo or livery \u2014 the flanks stay blank"
       ],
       "views": [
         "front three-quarter",
@@ -623,7 +623,7 @@
         "bright chrome bumpers, plain black tyres"
       ],
       "avoid": [
-        "any taxi company's name, number or checker pattern — the panels are blank",
+        "any taxi company's name, number or checker pattern \u2014 the panels are blank",
         "a modern hybrid cab shape, roof light bar, wrapped advertising"
       ],
       "views": [
@@ -661,7 +661,7 @@
         "chrome bumpers, a clear domed beacon"
       ],
       "avoid": [
-        "any force's name, star, crest, motto or unit number — every panel is blank",
+        "any force's name, star, crest, motto or unit number \u2014 every panel is blank",
         "a modern light bar, push bar, decal wrap or LED"
       ],
       "views": [
@@ -699,7 +699,7 @@
         "one bold painted colour band"
       ],
       "avoid": [
-        "any operator's name, logo or destination board text — blank panels",
+        "any operator's name, logo or destination board text \u2014 blank panels",
         "a modern flat-fronted coach, wraparound glazing, air-conditioning pod"
       ],
       "views": [
@@ -738,7 +738,7 @@
         "a glossy painted cab, black tyres"
       ],
       "avoid": [
-        "any oil company's colours, name or hazard placard — the barrel stays plain",
+        "any oil company's colours, name or hazard placard \u2014 the barrel stays plain",
         "a modern aerodynamic cab or fairings"
       ],
       "views": [
@@ -762,7 +762,7 @@
       },
       "era": "late-1960s pickup carrying a slide-in camper body",
       "silhouette": [
-        "The work pickup, with a tall box sitting in its bed that overhangs the cab roof — the overhanging nose is the whole silhouette"
+        "The work pickup, with a tall box sitting in its bed that overhangs the cab roof \u2014 the overhanging nose is the whole silhouette"
       ],
       "cues": [
         "a camper nose overhanging the cab roof, with a small window in it",
@@ -1045,7 +1045,7 @@
       },
       "era": "ordinary roadside planting, middle-aged",
       "silhouette": [
-        "An upright oval crown on a clear straight trunk, about as tall again as the crown is wide — the generic tree the eye reads without looking"
+        "An upright oval crown on a clear straight trunk, about as tall again as the crown is wide \u2014 the generic tree the eye reads without looking"
       ],
       "cues": [
         "two metres of clear trunk before the first branch",
@@ -1283,7 +1283,7 @@
       },
       "era": "desert roadside, old",
       "silhouette": [
-        "A tall straight column with three or four arms, each turning upward to run parallel with the trunk — a candelabra"
+        "A tall straight column with three or four arms, each turning upward to run parallel with the trunk \u2014 a candelabra"
       ],
       "cues": [
         "arms standing well clear of the trunk before they turn up, so the plant is as wide as a car is long, at different heights and lengths and never paired symmetrically",
@@ -1403,7 +1403,7 @@
         "plain white lamps"
       ],
       "avoid": [
-        "any advertisement, image, logo or lettering on the face — it is blank and stays blank",
+        "any advertisement, image, logo or lettering on the face \u2014 it is blank and stays blank",
         "a modern vinyl wrap, LED panel or trivision slats"
       ],
       "views": [
@@ -1532,7 +1532,7 @@
       },
       "era": "roadworks barrier, precast and lifted into place",
       "silhouette": [
-        "A short straight run of concrete with a wide splayed foot and a narrow top — the profile is the shape, seen from the end"
+        "A short straight run of concrete with a wide splayed foot and a narrow top \u2014 the profile is the shape, seen from the end"
       ],
       "cues": [
         "a sloping lower face flaring out to the ground and a near-vertical upper face",
@@ -1691,7 +1691,7 @@
         "clean glazing"
       ],
       "avoid": [
-        "any circuit name, timing board, flag or sponsor panel — every surface is blank",
+        "any circuit name, timing board, flag or sponsor panel \u2014 every surface is blank",
         "modern glazing or cladding"
       ],
       "views": [
@@ -1729,7 +1729,7 @@
         "flat pale sign panels"
       ],
       "avoid": [
-        "any destination text, route number, shield or arrow — the panels are blank",
+        "any destination text, route number, shield or arrow \u2014 the panels are blank",
         "a modern variable-message display",
         "any road surface or ground plane"
       ],
@@ -1752,7 +1752,7 @@
       },
       "era": "1950s prefabricated roadside diner, still working in the 1970s",
       "silhouette": [
-        "A long low box with rounded ends and a barrel-curved roof, sitting on a low plinth — a railway carriage parked at the kerb"
+        "A long low box with rounded ends and a barrel-curved roof, sitting on a low plinth \u2014 a railway carriage parked at the kerb"
       ],
       "cues": [
         "a continuous band of windows the whole length, divided by slim mullions",
@@ -1767,7 +1767,7 @@
         "clean glazing"
       ],
       "avoid": [
-        "any diner's name, slogan or menu board — every panel is blank",
+        "any diner's name, slogan or menu board \u2014 every panel is blank",
         "a modern glass box or a mock-retro pastiche",
         "any car park, kerb or ground plane"
       ],
@@ -1845,7 +1845,7 @@
         "clean pale concrete"
       ],
       "avoid": [
-        "brand marks on the fascia, pumps or price panel — all blank",
+        "brand marks on the fascia, pumps or price panel \u2014 all blank",
         "modern pump displays, canopy downlights, a convenience store"
       ],
       "views": [
@@ -1859,7 +1859,7 @@
       "class": "architecture",
       "kind": "facade1",
       "subject": "three-storey main-street shopfront building",
-      "replaces": "buildFacade(8, 3, …) in apps/coast/src/render/procgen.ts",
+      "replaces": "buildFacade(8, 3, \u2026) in apps/coast/src/render/procgen.ts",
       "dims": {
         "widthM": 8.0,
         "depthM": 3.0,
@@ -1883,7 +1883,7 @@
         "black-painted steelwork"
       ],
       "avoid": [
-        "any shop name, signage or advertisement — the sign band is blank",
+        "any shop name, signage or advertisement \u2014 the sign band is blank",
         "modern shopfront glazing or cladding",
         "any pavement, kerb or ground plane"
       ],
@@ -1898,7 +1898,7 @@
       "class": "architecture",
       "kind": "facade2",
       "subject": "four-storey downtown office block front",
-      "replaces": "buildFacade(7, 4, …) in apps/coast/src/render/procgen.ts",
+      "replaces": "buildFacade(7, 4, \u2026) in apps/coast/src/render/procgen.ts",
       "dims": {
         "widthM": 7.0,
         "depthM": 3.0,
@@ -1937,7 +1937,7 @@
       "class": "architecture",
       "kind": "facade3",
       "subject": "two-storey corner commercial building",
-      "replaces": "buildFacade(8.5, 2, …) in apps/coast/src/render/procgen.ts",
+      "replaces": "buildFacade(8.5, 2, \u2026) in apps/coast/src/render/procgen.ts",
       "dims": {
         "widthM": 8.5,
         "depthM": 3.0,
@@ -1957,11 +1957,11 @@
       ],
       "materials": [
         "flat painted stucco",
-        "bright green glazed tile",
+        "deep cobalt glazed tile",
         "clean steel windows"
       ],
       "avoid": [
-        "any name, number or advertisement — every panel is blank",
+        "any name, number or advertisement \u2014 every panel is blank",
         "a modern rendered finish or aluminium shopfront",
         "any pavement or ground plane"
       ],
@@ -1976,7 +1976,7 @@
       "class": "architecture",
       "kind": "facade4",
       "subject": "five-storey brick city building front",
-      "replaces": "buildFacade(7.5, 5, …) in apps/coast/src/render/procgen.ts",
+      "replaces": "buildFacade(7.5, 5, \u2026) in apps/coast/src/render/procgen.ts",
       "dims": {
         "widthM": 7.5,
         "depthM": 3.0,
@@ -2013,16 +2013,16 @@
       "id": "facade-neon-bar",
       "class": "architecture",
       "kind": "facadeLit1",
-      "subject": "night-lit bar front with neon",
-      "replaces": "buildFacade(8, 4, …, lit) in apps/coast/src/render/procgen.ts",
+      "subject": "bar front with a projecting neon blade sign",
+      "replaces": "buildFacade(8, 4, \u2026, lit) in apps/coast/src/render/procgen.ts",
       "dims": {
         "widthM": 8.0,
         "depthM": 3.0,
         "heightM": 17.8
       },
-      "era": "a downtown bar front on a street that only works after dark",
+      "era": "a downtown bar front, drawn in flat daylight with its neon switched on",
       "silhouette": [
-        "A dark narrow building front whose ground floor is a glowing recess, with a blank vertical neon blade projecting from the upper wall"
+        "A narrow building front whose ground floor is a recessed entrance, with a blank vertical neon blade projecting from the upper wall"
       ],
       "cues": [
         "a vertical blade sign projecting at right angles to the wall, its face blank, outlined in neon tubing",
@@ -2033,27 +2033,30 @@
         "exposed transformer boxes and conduit running to the neon"
       ],
       "materials": [
-        "flat dark painted brick",
+        "flat painted brick in a mid warm grey",
         "glowing neon tube in two bright colours",
-        "black panels around the entrance"
+        "dark panels around the entrance"
       ],
       "avoid": [
-        "any word, letter or logo in the neon — the tubing traces shapes and outlines only",
+        "any word, letter or logo in the neon \u2014 the tubing traces shapes and outlines only",
         "a modern LED strip or backlit acrylic sign",
-        "any pavement or ground plane"
+        "any pavement or ground plane",
+        "a night scene, a dark or black building, deep shadow \u2014 the wall is lit and readable",
+        "cracked, broken, missing or crumbling brickwork; the wall is whole"
       ],
       "views": [
         "front three-quarter",
         "front",
         "profile"
-      ]
+      ],
+      "backdrop": "a flat chroma-green #2ecc40 card standing behind the building, evenly lit in its own right and completely unaffected by the neon \u2014 no glow, no spill, no colour cast, no gradient, no shadow on it, no ground under the building"
     },
     {
       "id": "facade-neon-arcade",
       "class": "architecture",
       "kind": "facadeLit2",
       "subject": "night-lit amusement arcade front",
-      "replaces": "buildFacade(7, 3, …, lit) in apps/coast/src/render/procgen.ts",
+      "replaces": "buildFacade(7, 3, \u2026, lit) in apps/coast/src/render/procgen.ts",
       "dims": {
         "widthM": 7.0,
         "depthM": 3.0,
@@ -2092,7 +2095,7 @@
       "class": "architecture",
       "kind": "block",
       "subject": "mid-rise concrete city block",
-      "replaces": "buildBlock(15, 14, …) in apps/coast/src/render/procgen.ts",
+      "replaces": "buildBlock(15, 14, \u2026) in apps/coast/src/render/procgen.ts",
       "dims": {
         "widthM": 14.0,
         "depthM": 14.0,
@@ -2129,7 +2132,7 @@
       "class": "architecture",
       "kind": "block2",
       "subject": "low brick warehouse block",
-      "replaces": "buildBlock(11, 12, …) in apps/coast/src/render/procgen.ts",
+      "replaces": "buildBlock(11, 12, \u2026) in apps/coast/src/render/procgen.ts",
       "dims": {
         "widthM": 12.0,
         "depthM": 12.0,
@@ -2168,7 +2171,7 @@
       "class": "architecture",
       "kind": "tower",
       "subject": "downtown office tower",
-      "replaces": "buildTower(34, …) in apps/coast/src/render/procgen.ts",
+      "replaces": "buildTower(34, \u2026) in apps/coast/src/render/procgen.ts",
       "dims": {
         "widthM": 18.0,
         "depthM": 18.0,
@@ -2188,7 +2191,7 @@
       ],
       "materials": [
         "bright aluminium mullions",
-        "flat blue-green glass",
+        "flat steel-blue glass",
         "a pale stone podium"
       ],
       "avoid": [
@@ -2207,7 +2210,7 @@
       "class": "architecture",
       "kind": "tower2",
       "subject": "residential slab tower",
-      "replaces": "buildTower(22, …) in apps/coast/src/render/procgen.ts",
+      "replaces": "buildTower(22, \u2026) in apps/coast/src/render/procgen.ts",
       "dims": {
         "widthM": 15.0,
         "depthM": 12.0,
@@ -2273,7 +2276,7 @@
         "a clean pale pole"
       ],
       "avoid": [
-        "any brand, chain or slogan — every lettering panel is BLANK; wording is applied later",
+        "any brand, chain or slogan \u2014 every lettering panel is BLANK; wording is applied later",
         "LED panels, modern typography, backlit acrylic",
         "any ground plane or base plinth"
       ],
@@ -2289,7 +2292,7 @@
       "class": "signage",
       "kind": "signCoast",
       "subject": "highway direction sign on two posts",
-      "replaces": "buildSign() in apps/coast/src/render/procgen.ts — one blank board serves signCoast, signDrive and signBay",
+      "replaces": "buildSign() in apps/coast/src/render/procgen.ts \u2014 one blank board serves signCoast, signDrive and signBay",
       "note": "The game paints the wording onto this sign's face from a canvas texture. Generate the board BLANK and keep that step: a baked word cannot be restyled per stage, and three signs that differ only in their text should not be three meshes.",
       "dims": {
         "heightM": 7.3,
@@ -2313,7 +2316,7 @@
         "clean pale posts"
       ],
       "avoid": [
-        "any lettering, arrow, numeral or shield — the face is blank and stays blank",
+        "any lettering, arrow, numeral or shield \u2014 the face is blank and stays blank",
         "a modern gantry mount or variable message panel",
         "any ground plane or post footing"
       ],
@@ -2356,7 +2359,7 @@
         "rows of small round bulbs"
       ],
       "avoid": [
-        "any town name, welcome message or lettering — the panel is blank",
+        "any town name, welcome message or lettering \u2014 the panel is blank",
         "modern signage or floodlighting",
         "any road surface or ground plane"
       ],

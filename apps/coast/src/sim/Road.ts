@@ -1,4 +1,3 @@
-import { landmarkOffset } from '../render/models'
 // The road as a list of segments — the classic pseudo-3D representation.
 // Curve is the change in lateral offset per segment (accumulated by the
 // renderer from the camera outward, which is what makes distant road sweep);
@@ -7,6 +6,7 @@ import { landmarkOffset } from '../render/models'
 
 import { Rng } from '@apex/engine/math/Rng'
 import type { VibeStop } from '../world/types'
+import { placeLandmark, placeScenery } from './place'
 import { CROSSING_EVERY, FORK_SEGMENTS, ROLL_AMPLITUDE, RUNWAY_SEGMENTS, SEG_LENGTH, STAGE_SCALE } from './Tuning'
 
 export interface SpriteRef {
@@ -263,7 +263,7 @@ export class Stage {
       const seg = segs[i]
       if (seg.fork > 0.15 || seg.tunnel) continue // keep the split clear; nothing grows in a tunnel
       if (segs[Math.max(0, i - 3)].crossing || segs[Math.min(this.length - 1, i + 3)].crossing || seg.crossing) continue // keep intersections open
-      for (const side of [-1, 1]) {
+      for (const side of [-1, 1] as const) {
         if (seg.shore === side) continue // nothing grows in the sea
         if (rng.next() < theme.density) {
           const total = theme.roadside.reduce((a, r) => a + r.weight, 0)
@@ -276,15 +276,15 @@ export class Stage {
               break
             }
           }
-          seg.sprites.push({ kind: r.kind, offset: side * rng.range(r.minOffset, r.maxOffset), scale: (r.scale ?? 1) * rng.range(0.9, 1.15), collide: r.collide ?? true })
+          placeScenery(seg, r.kind, side, rng.range(r.minOffset, r.maxOffset), (r.scale ?? 1) * rng.range(0.9, 1.15), r.collide ?? true)
         }
       }
       if (theme.landmarks.length && i % theme.landmarkEvery === 0) {
         const k = theme.landmarks[Math.floor(i / theme.landmarkEvery) % theme.landmarks.length]
         // Alternate sides, but never build a diner in the sea.
-        let side = Math.floor(i / theme.landmarkEvery) % 2 === 0 ? -1 : 1
-        if (seg.shore === side) side = -side
-        if (seg.shore !== side) seg.sprites.push({ kind: k, offset: side * landmarkOffset(k), scale: 1, collide: true })
+        let side: -1 | 1 = Math.floor(i / theme.landmarkEvery) % 2 === 0 ? -1 : 1
+        if (seg.shore === side) side = -side as -1 | 1
+        if (seg.shore !== side) placeLandmark(seg, k, side)
       }
     }
     // Start gantry on the first segment of the stage.

@@ -44,6 +44,21 @@ export interface SpriteKind {
   frames: SpriteFrame[]
   yaws: number[]
   pitches: number[]
+  /**
+   * How far the scaled model reaches either side of the point it stands on, in metres — the full
+   * silhouette width and depth about the footprint origin, not about the bounding-box centre. This
+   * is the number that decides whether a thing placed beside the road has any part of itself over
+   * the tarmac, and it is MEASURED rather than declared: `widthM` in the manifest is a hand-typed
+   * estimate, and hand-typed estimates are what put trees in the road. `scripts/roadside-check.mjs`
+   * compares the two and fails on the difference.
+   */
+  extentM: { x: number; z: number }
+  /**
+   * The same, for the part of the model that touches the ground — the trunk rather than the crown,
+   * the posts rather than the board. A kind marked `overhang` is placed by this instead, because a
+   * lamp whose arm does not reach the road is not a street lamp.
+   */
+  footM: { x: number; z: number }
 }
 
 /**
@@ -88,7 +103,7 @@ export function atlasPlan(renderer: WebGLRenderer): { size: number; cellScale: n
  * in the model's own pre-scale coordinates. Falls back to the bounding-box centre for anything with
  * no readable geometry (a `build()` model of pure boxes still reports vertices, so this is rare).
  */
-function footprint(model: Object3D): { x: number; z: number } {
+function footprint(model: Object3D): { x: number; z: number; w: number; d: number } {
   const box = new Box3().setFromObject(model)
   const band = box.min.y + (box.max.y - box.min.y) * FOOT_BAND
   let minX = Infinity
@@ -110,8 +125,8 @@ function footprint(model: Object3D): { x: number; z: number } {
       if (v.z > maxZ) maxZ = v.z
     }
   })
-  if (minX === Infinity) return { x: (box.min.x + box.max.x) / 2, z: (box.min.z + box.max.z) / 2 }
-  return { x: (minX + maxX) / 2, z: (minZ + maxZ) / 2 }
+  if (minX === Infinity) return { x: (box.min.x + box.max.x) / 2, z: (box.min.z + box.max.z) / 2, w: box.max.x - box.min.x, d: box.max.z - box.min.z }
+  return { x: (minX + maxX) / 2, z: (minZ + maxZ) / 2, w: maxX - minX, d: maxZ - minZ }
 }
 
 /** How much of a model, measured up from its lowest point, counts as the part standing on the ground. */
@@ -345,8 +360,14 @@ export class SpriteAtlas {
       // cut-out that kept a smear of the model's own drop shadow. All of those planted their feet
       // to one side of where the world put them, which is how trees ended up standing in the road.
       // The bottom tenth of the geometry is what touches the ground, so that is what gets centred.
+      // `footprint` reads world positions, so what it returns is ALREADY in scaled units — the
+      // scale was set two lines up. Multiplying by it again displaced every model by its own foot
+      // offset times the scale factor, which for a ten-metre palm off a unit-tall .glb is a factor
+      // of ten: models flung metres off the point they were supposed to stand on, and frames sized
+      // to a bounding box that now had to reach all the way back. `roadside-check.mjs` found it by
+      // reporting a 9.5-metre palm as 63 metres wide.
       const foot = footprint(model)
-      model.position.set(-foot.x * scale, -box.min.y * scale, -foot.z * scale)
+      model.position.set(-foot.x, -box.min.y * scale, -foot.z)
       const fitted = new Box3().setFromObject(model)
       const fs = new Vector3()
       fitted.getSize(fs)
@@ -419,7 +440,7 @@ export class SpriteAtlas {
           nearMag: half / subject,
         })
       }
-      this.kinds.set(def.kind, { def, frames, yaws: def.yaws, pitches })
+      this.kinds.set(def.kind, { def, frames, yaws: def.yaws, pitches, extentM: { x: fs.x, z: fs.z }, footM: { x: foot.w, z: foot.d } })
       done++
       onProgress?.(done, MODELS.length)
     }

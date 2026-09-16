@@ -64,7 +64,7 @@ async function main() {
     size,
     cellScale,
     png: out.toDataURL('image/png'),
-    kinds: [...atlas.kinds].map(([kind, k]) => [kind, { frames: k.frames, yaws: k.yaws, pitches: k.pitches }]),
+    kinds: [...atlas.kinds].map(([kind, k]) => [kind, { frames: k.frames, yaws: k.yaws, pitches: k.pitches, extentM: k.extentM, footM: k.footM }]),
   }
   say(`baked ${atlas.kinds.size} kinds at ${size}px ×${cellScale}`)
 }

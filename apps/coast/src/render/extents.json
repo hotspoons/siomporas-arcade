@@ -1,0 +1,290 @@
+{
+  "note": "MEASURED, NOT TYPED. Regenerate with `node scripts/roadside-check.mjs --write` after changing a model or its heightM. silhouetteM/footM are metres about the point the sprite stands on; see scripts/roadside-check.mjs.",
+  "kinds": {
+    "arch": {
+      "silhouetteM": 16.21,
+      "depthM": 3.72,
+      "footM": 14.92
+    },
+    "banner": {
+      "silhouetteM": 3.23,
+      "depthM": 3.41,
+      "footM": 3.23
+    },
+    "barrier": {
+      "silhouetteM": 2.85,
+      "depthM": 0.97,
+      "footM": 2.85
+    },
+    "billboard": {
+      "silhouetteM": 9.36,
+      "depthM": 2.84,
+      "footM": 3.07
+    },
+    "billboardLow": {
+      "silhouetteM": 5.82,
+      "depthM": 0.79,
+      "footM": 4.59
+    },
+    "block": {
+      "silhouetteM": 10.92,
+      "depthM": 10.77,
+      "footM": 10.92
+    },
+    "block2": {
+      "silhouetteM": 14.74,
+      "depthM": 9.61,
+      "footM": 12.63
+    },
+    "bush": {
+      "silhouetteM": 1.92,
+      "depthM": 1.92,
+      "footM": 1.82
+    },
+    "bushLarge": {
+      "silhouetteM": 3.21,
+      "depthM": 2.76,
+      "footM": 1.71
+    },
+    "cactus": {
+      "silhouetteM": 1.74,
+      "depthM": 0.6,
+      "footM": 0.44
+    },
+    "cactusTall": {
+      "silhouetteM": 1.78,
+      "depthM": 0.59,
+      "footM": 0.49
+    },
+    "delivery": {
+      "silhouetteM": 1.96,
+      "depthM": 4.28,
+      "footM": 1.78
+    },
+    "diner": {
+      "silhouetteM": 19.64,
+      "depthM": 7.5,
+      "footM": 19.64
+    },
+    "facade1": {
+      "silhouetteM": 9.6,
+      "depthM": 13.78,
+      "footM": 9.31
+    },
+    "facade2": {
+      "silhouetteM": 10.57,
+      "depthM": 7.69,
+      "footM": 10.24
+    },
+    "facade3": {
+      "silhouetteM": 10.5,
+      "depthM": 10.62,
+      "footM": 7.94
+    },
+    "facade4": {
+      "silhouetteM": 10.78,
+      "depthM": 11.52,
+      "footM": 10.06
+    },
+    "facadeLit1": {
+      "silhouetteM": 14.61,
+      "depthM": 4.89,
+      "footM": 14.24
+    },
+    "facadeLit2": {
+      "silhouetteM": 20.27,
+      "depthM": 21.57,
+      "footM": 16.23
+    },
+    "flower": {
+      "silhouetteM": 0.46,
+      "depthM": 0.48,
+      "footM": 0.27
+    },
+    "formula": {
+      "silhouetteM": 3.21,
+      "depthM": 5.84,
+      "footM": 3.21
+    },
+    "gantry": {
+      "silhouetteM": 11.41,
+      "depthM": 4.29,
+      "footM": 11.41
+    },
+    "gas": {
+      "silhouetteM": 9.5,
+      "depthM": 10.64,
+      "footM": 9.24
+    },
+    "grandstand": {
+      "silhouetteM": 7.93,
+      "depthM": 13.36,
+      "footM": 6.76
+    },
+    "hero_gulf": {
+      "silhouetteM": 3.18,
+      "depthM": 6.27,
+      "footM": 3.16
+    },
+    "hero_martini": {
+      "silhouetteM": 3.74,
+      "depthM": 6.43,
+      "footM": 3.03
+    },
+    "hero_midnight": {
+      "silhouetteM": 2.95,
+      "depthM": 6.61,
+      "footM": 2.92
+    },
+    "hero_rosso": {
+      "silhouetteM": 3.07,
+      "depthM": 6.83,
+      "footM": 3.05
+    },
+    "lightpost": {
+      "silhouetteM": 7.12,
+      "depthM": 1.14,
+      "footM": 1.13
+    },
+    "lightpostTall": {
+      "silhouetteM": 1.6,
+      "depthM": 10.42,
+      "footM": 1.34
+    },
+    "motel": {
+      "silhouetteM": 20.42,
+      "depthM": 16.22,
+      "footM": 20.24
+    },
+    "oak": {
+      "silhouetteM": 9.04,
+      "depthM": 1.91,
+      "footM": 1.16
+    },
+    "palm": {
+      "silhouetteM": 9.53,
+      "depthM": 8.66,
+      "footM": 1.46
+    },
+    "palmBend": {
+      "silhouetteM": 15.28,
+      "depthM": 5.66,
+      "footM": 4.43
+    },
+    "palmTall": {
+      "silhouetteM": 8.17,
+      "depthM": 7.98,
+      "footM": 0.89
+    },
+    "pine": {
+      "silhouetteM": 5.73,
+      "depthM": 5.78,
+      "footM": 5.73
+    },
+    "pineRound": {
+      "silhouetteM": 9.57,
+      "depthM": 6.94,
+      "footM": 0.87
+    },
+    "pineTall": {
+      "silhouetteM": 4.02,
+      "depthM": 4,
+      "footM": 1.14
+    },
+    "pitsOffice": {
+      "silhouetteM": 8.2,
+      "depthM": 12.05,
+      "footM": 7.64
+    },
+    "police": {
+      "silhouetteM": 2.22,
+      "depthM": 5.86,
+      "footM": 2.03
+    },
+    "rock": {
+      "silhouetteM": 2.79,
+      "depthM": 2.81,
+      "footM": 2.79
+    },
+    "rockTall": {
+      "silhouetteM": 3.99,
+      "depthM": 3.76,
+      "footM": 3.99
+    },
+    "sedan": {
+      "silhouetteM": 2.66,
+      "depthM": 7.34,
+      "footM": 2.46
+    },
+    "sedanSports": {
+      "silhouetteM": 2.74,
+      "depthM": 6.52,
+      "footM": 2.66
+    },
+    "signBay": {
+      "silhouetteM": 6.4,
+      "depthM": 0.3,
+      "footM": 5.5
+    },
+    "signCoast": {
+      "silhouetteM": 6.4,
+      "depthM": 0.3,
+      "footM": 5.5
+    },
+    "signDrive": {
+      "silhouetteM": 6.4,
+      "depthM": 0.3,
+      "footM": 5.5
+    },
+    "stoneTall": {
+      "silhouetteM": 1.73,
+      "depthM": 1.51,
+      "footM": 1.73
+    },
+    "stump": {
+      "silhouetteM": 1.22,
+      "depthM": 1.08,
+      "footM": 1.22
+    },
+    "suv": {
+      "silhouetteM": 2.67,
+      "depthM": 6.82,
+      "footM": 2.48
+    },
+    "taxi": {
+      "silhouetteM": 2.19,
+      "depthM": 5.58,
+      "footM": 1.94
+    },
+    "tent": {
+      "silhouetteM": 6.91,
+      "depthM": 6.59,
+      "footM": 6.91
+    },
+    "tower": {
+      "silhouetteM": 24.5,
+      "depthM": 22.7,
+      "footM": 24.5
+    },
+    "tower2": {
+      "silhouetteM": 21.67,
+      "depthM": 10.34,
+      "footM": 20.76
+    },
+    "tree": {
+      "silhouetteM": 5.14,
+      "depthM": 1,
+      "footM": 0.62
+    },
+    "truck": {
+      "silhouetteM": 2.76,
+      "depthM": 6.7,
+      "footM": 2.49
+    },
+    "van": {
+      "silhouetteM": 2.28,
+      "depthM": 4.54,
+      "footM": 2.13
+    }
+  }
+}

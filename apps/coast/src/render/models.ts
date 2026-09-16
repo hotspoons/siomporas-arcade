@@ -3,8 +3,9 @@
 
 import { Group, type Object3D } from 'three'
 import { ROAD_HALF_WIDTH } from '../sim/Tuning'
+import EXTENTS from './extents.json'
 
-import { buildFacade, buildSign, LIVERIES } from './procgen'
+import { buildSign, LIVERIES } from './procgen'
 
 export interface ModelDef {
   kind: string
@@ -21,11 +22,11 @@ export interface ModelDef {
   /** Extra uniform scale on the model before fitting (some kits are tiny). */
   fit?: number
   /**
-   * How wide the real thing is, in metres, across the road. Optional, and only landmarks need it:
-   * `landmarkOffset` uses it to stand a building clear of the tarmac. Without it a 14-metre diner
-   * and a 3-metre sign get the same fixed offset, and the diner ends up in the road.
+   * This kind spans the road rather than standing beside it — an arch, a start gantry. It is placed
+   * over the centreline and `sideOffset` is not consulted, because the whole point of it is to be
+   * over the road.
    */
-  widthM?: number
+  straddle?: boolean
   /**
    * Degrees to turn the model before anything looks at it. Yaw 0 means *seen from behind*, which is
    * what you want of a car driving away from you and exactly wrong for anything standing beside the
@@ -82,57 +83,105 @@ export const HERO_YAWS = [0, 12, 24, 38, 60, 90, 120, 150, 180, -12, -24, -38, -
  * above the horizon, so the card foreshortens by a hundredth of its height and the sprite is the
  * picture — see tools/assetgen/card.mjs. Nothing baked at more than one yaw may use this.
  */
-const G = (kind: string, file: string, heightM: number, cell = 128, widthM?: number): ModelDef => ({ kind, file: `assets/generated/${file}.glb`, heightM, yaws: [0], cell, spin: 180, widthM })
+const G = (kind: string, file: string, heightM: number, cell = 128, extra: Partial<ModelDef> = {}): ModelDef => ({ kind, file: `assets/generated/${file}.glb`, heightM, yaws: [0], cell, spin: 180, ...extra })
+
+/** Metres of daylight between the edge of the tarmac and the nearest part of what STANDS beside it. */
+export const ROAD_CLEARANCE = 1.5
+/**
+ * Metres a silhouette may reach over the tarmac that its feet do not. A palm's crown, a street
+ * lamp's arm and a billboard's board all overhang the thing holding them up, and a coast road with
+ * nothing leaning over it is not the road this game is about. Only the feet have to stay off.
+ */
+export const OVERHANG_MAX = 1.0
 
 /**
- * How far off the centreline a landmark of this kind should stand, in road-halves, so that its near
- * edge clears the tarmac by about a metre whatever its size. Everything used to be placed at a flat
- * 1.9 — fine for a sign, and half a diner in the road.
+ * How far off the centreline something of this kind may stand, in road-halves, so that no part of
+ * it is over the tarmac — whatever its size, and whoever placed it.
+ *
+ * ONE FUNCTION FOR EVERY PLACEMENT, which is the whole point. Offsets used to be authored three
+ * separate ways: a flat 1.9 for landmarks, a hand-tuned range per scene for the scenery rows, and
+ * another hand-typed number per kind in the editor palette. All three were written against the
+ * Kenney sprites, whose pivots and widths are not these, and none of them knew how wide the thing
+ * being placed actually was — so a 5-metre palm crown and a 14-metre diner were both set down
+ * about ten metres from the centreline, and both hung over the road.
+ *
+ * `want` is what the caller asked for and stays the caller's decision — how far back this scene
+ * likes its trees, where the designer dragged this prop. The floor is not negotiable, and it comes
+ * from `extents.json`, which is MEASURED off the baked geometry rather than typed: see
+ * `scripts/roadside-check.mjs`. `scale` is the sprite's own multiplier, because a palm rolled 15%
+ * larger overhangs 15% further and has to stand that much further back.
  */
+export function sideOffset(kind: string, want = 0, scale = 1): number {
+  const e = EXTENTS.kinds[kind as keyof typeof EXTENTS.kinds] as { silhouetteM: number; footM: number } | undefined
+  // A kind nobody has measured yet — a `build()` model added this minute, a manifest edited without
+  // re-running the script — gets the old flat offset rather than a confident wrong answer.
+  if (!e) return Math.max(want, 1.9)
+  const byFoot = 1 + (ROAD_CLEARANCE + (e.footM * scale) / 2) / ROAD_HALF_WIDTH
+  const bySpan = 1 + ((e.silhouetteM * scale) / 2 - OVERHANG_MAX) / ROAD_HALF_WIDTH
+  return Math.max(want, byFoot, bySpan)
+}
+
+/** Where a landmark of this kind stands when nothing has asked for anything in particular. */
 export function landmarkOffset(kind: string): number {
-  const w = MODEL_BY_KIND[kind]?.widthM
-  return w ? 1.35 + w / 2 / ROAD_HALF_WIDTH : 1.9
+  return sideOffset(kind)
+}
+
+/**
+ * Half-width for the roadside hit test, in road-halves — what you would actually hit, which is what
+ * the thing STANDS on rather than what it spreads over your head. A palm is a trunk to drive into
+ * and a crown to drive under.
+ *
+ * Measured, from the same file `sideOffset` places by, and that pairing is the point: a hit box
+ * typed by hand beside an offset derived from geometry is a hit box that reaches into the road the
+ * moment the geometry changes. It did — a grandstand whose declared width was three times its real
+ * one ended up placed correctly and hittable from the middle of lane one.
+ */
+export function hitHalfWidth(kind: string, scale = 1): number {
+  const e = EXTENTS.kinds[kind as keyof typeof EXTENTS.kinds] as { footM: number } | undefined
+  return (e ? e.footM / 2 / ROAD_HALF_WIDTH : 0.12) * scale
 }
 /** Traffic: fine flank steps for cars near your lane, quarter views for crossers, head-on, and four pitches for hills. */
 export const TRAFFIC_YAWS = [0, 6, 13, 22, 35, 90, 180, -6, -13, -22, -35, -90]
 export const TRAFFIC_PITCHES = [-5, 4, 13, 22]
-const C = (kind: string, file: string): ModelDef => ({ kind, file: `assets/cars/${file}.glb`, heightM: 1.5, yaws: TRAFFIC_YAWS, pitches: TRAFFIC_PITCHES, cell: 128 })
 /**
- * Traffic, generated. Same yaws and pitches as the CC0 kit it replaces — a car is seen from every
- * angle on this road, which is why traffic could never be a card. The heights are exaggerated by
+ * Traffic, generated. Same yaws and pitches as the CC0 kit it replaced — a car is seen from every
+ * angle on this road, which is why traffic could never be a card. Nothing loads from
+ * `assets/cars/` any more: the last of the kit, the delivery van, held on because five generations
+ * of it came back as a flatbed. They had not: they came back as a correct green box van on a
+ * chroma-green card, and the keyer removed the van. The heights are exaggerated by
  * about half, as the hero's is: at true scale a 1.4 m saloon beside a 1.65 m prototype reads as a
  * toy on a real road.
  */
 const CG = (kind: string, file: string, heightM: number): ModelDef => ({ kind, file: `assets/generated/${file}.glb`, heightM, yaws: TRAFFIC_YAWS, pitches: TRAFFIC_PITCHES, cell: 128 })
 
 export const MODELS: ModelDef[] = [
-  G('palm', 'palm', 10, 192, 5.0),
-  G('palmTall', 'palm-tall', 13, 192, 4.5),
-  G('palmBend', 'palm-bend', 9.5, 192, 5.0),
-  G('pine', 'pine', 9, 192, 4.0),
-  G('pineTall', 'pine-tall', 13, 192, 4.2),
-  G('pineRound', 'pine-round', 8, 192, 6.0),
-  G('oak', 'oak', 9, 192, 10.0),
-  G('tree', 'tree-broadleaf', 8, 192, 6.0),
-  G('bush', 'bush', 1.6, 96, 1.8),
-  G('bushLarge', 'bush-large', 2.4, 96, 3.0),
-  G('rock', 'rock', 2.6, 96, 3.2),
-  G('rockTall', 'rock-tall', 4.2, 128, 2.4),
-  G('stoneTall', 'stone-tall', 3.5, 128, 1.2),
-  G('cactus', 'cactus', 2.4, 96, 1.4),
-  G('cactusTall', 'cactus-tall', 4.0, 128, 2.2),
-  G('flower', 'flower', 0.8, 64, 0.7),
-  G('stump', 'stump', 1.0, 64, 1.1),
-  G('billboard', 'billboard', 7.5, 256, 12.2),
-  G('billboardLow', 'billboard-low', 5.5, 256, 7.3),
-  G('lightpost', 'lightpost', 8, 128, 2.4),
-  G('lightpostTall', 'lightpost-tall', 10, 128, 5.0),
-  G('barrier', 'barrier-wall', 1.2, 96, 0.6),
-  G('banner', 'banner-tower', 6, 128, 2.4),
-  G('grandstand', 'grandstand', 7, 256, 24.0),
-  G('tent', 'tent', 4, 192, 8.0),
-  G('pitsOffice', 'pits-office', 6, 256, 12.0),
-  G('gantry', 'overhead-gantry', 8.5, 256, 24.0),
+  G('palm', 'palm', 10, 192),
+  G('palmTall', 'palm-tall', 13, 192),
+  G('palmBend', 'palm-bend', 9.5, 192),
+  G('pine', 'pine', 9, 192),
+  G('pineTall', 'pine-tall', 13, 192),
+  G('pineRound', 'pine-round', 8, 192),
+  G('oak', 'oak', 9, 192),
+  G('tree', 'tree-broadleaf', 8, 192),
+  G('bush', 'bush', 1.6, 96),
+  G('bushLarge', 'bush-large', 2.4, 96),
+  G('rock', 'rock', 2.6, 96),
+  G('rockTall', 'rock-tall', 4.2, 128),
+  G('stoneTall', 'stone-tall', 3.5, 128),
+  G('cactus', 'cactus', 2.4, 96),
+  G('cactusTall', 'cactus-tall', 4.0, 128),
+  G('flower', 'flower', 0.8, 64),
+  G('stump', 'stump', 1.0, 64),
+  G('billboard', 'billboard', 7.5, 256),
+  G('billboardLow', 'billboard-low', 5.5, 256),
+  G('lightpost', 'lightpost', 8, 128),
+  G('lightpostTall', 'lightpost-tall', 10, 128),
+  G('barrier', 'barrier-wall', 1.2, 96),
+  G('banner', 'banner-tower', 6, 128),
+  G('grandstand', 'grandstand', 7, 256),
+  G('tent', 'tent', 4, 192),
+  G('pitsOffice', 'pits-office', 6, 256),
+  G('gantry', 'overhead-gantry', 8.5, 256, { straddle: true }),
   // Hero prototypes, one per livery; the chase view picks the selected one. The generated mesh is
   // one car in one paint scheme, so for now every livery points at it — the tint cannot be applied
   // to a baked texture the way `buildPrototype` applied it to flat material colours, and what that
@@ -148,23 +197,23 @@ export const MODELS: ModelDef[] = [
   ...Object.keys(LIVERIES).map((id): ModelDef => ({ kind: `hero_${id}`, file: `assets/generated/hero-prototype-${id}.glb`, heightM: 1.65, yaws: HERO_YAWS, cell: 288, spin: 180 })),
   { kind: 'formula', file: 'assets/generated/formula-single-seater.glb', heightM: 1.45, yaws: HERO_YAWS, cell: 288 },
   // Roadside architecture and signage.
-  G('diner', 'diner', 6.4, 256, 14.0),
-  G('block', 'block-concrete', 15, 192, 14.0),
-  G('facade1', 'facade-shopfront', 14.4, 192, 8.0),
-  G('facade2', 'facade-office', 17.8, 192, 7.0),
-  G('facade3', 'facade-lowrise', 11, 160, 8.5),
-  G('facade4', 'facade-tall', 21.2, 224, 7.5),
-  { kind: 'facadeLit1', file: '', build: () => buildFacade(8, 4, 0x4a4a5a, 0xff5fd2, true), heightM: 17.8, yaws: [0], cell: 192, spin: 180 },
-  G('facadeLit2', 'facade-neon-arcade', 14.4, 192, 7.0),
-  G('block2', 'block-brick', 11, 192, 12.0),
-  G('motel', 'motel-strip', 7.6, 256, 24.0),
-  G('gas', 'gas-station', 4.6, 256, 14.0),
-  G('tower', 'tower', 37, 256, 18.0),
-  G('tower2', 'tower-low', 25, 256, 15.0),
+  G('diner', 'diner', 6.4, 256),
+  G('block', 'block-concrete', 15, 192),
+  G('facade1', 'facade-shopfront', 14.4, 192),
+  G('facade2', 'facade-office', 17.8, 192),
+  G('facade3', 'facade-lowrise', 11, 160),
+  G('facade4', 'facade-tall', 21.2, 224),
+  G('facadeLit1', 'facade-neon-bar', 17.8, 192),
+  G('facadeLit2', 'facade-neon-arcade', 14.4, 192),
+  G('block2', 'block-brick', 11, 192),
+  G('motel', 'motel-strip', 7.6, 256),
+  G('gas', 'gas-station', 4.6, 256),
+  G('tower', 'tower', 37, 256),
+  G('tower2', 'tower-low', 25, 256),
   { kind: 'signCoast', file: '', build: () => buildSign('COAST HWY 1', '#ffffff', '#1a5a2a'), heightM: 7.3, yaws: [0], cell: 192, spin: 180 },
   { kind: 'signDrive', file: '', build: () => buildSign('DRIVE SAFE', '#ffe28a', '#7a1a1a'), heightM: 7.3, yaws: [0], cell: 192, spin: 180 },
   { kind: 'signBay', file: '', build: () => buildSign('NEON BAY 12', '#ff5fd2', '#101030'), heightM: 7.3, yaws: [0], cell: 192, spin: 180 },
-  G('arch', 'arch', 10.2, 256, 1.0),
+  G('arch', 'arch', 10.2, 256, { straddle: true }),
   CG('sedan', 'traffic-sedan', 2.0),
   CG('sedanSports', 'traffic-coupe', 1.85),
   CG('suv', 'traffic-wagon', 2.1),
@@ -172,7 +221,7 @@ export const MODELS: ModelDef[] = [
   CG('truck', 'traffic-pickup', 2.35),
   CG('taxi', 'traffic-taxi', 2.05),
   CG('police', 'traffic-police', 2.0),
-  C('delivery', 'delivery'),
+  CG('delivery', 'traffic-delivery', 2.8),
 ]
 
 /** Width in road-halves is derived from the baked aspect; these are height metres for the sim's hit tests elsewhere. */

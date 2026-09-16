@@ -30,6 +30,9 @@ interface PrebakedKind {
   frames: SpriteFrame[]
   yaws: number[]
   pitches: number[]
+  /** Measured extents about the footprint origin; see `SpriteKind.extentM` and `footM`. */
+  extentM?: { x: number; z: number }
+  footM?: { x: number; z: number }
 }
 
 export interface PrebakedAtlas {
@@ -65,7 +68,7 @@ export async function loadPrebakedAtlas(key: string): Promise<{ texture: Texture
       // A kind in the file that the manifest no longer has means the two have drifted apart despite
       // the hash. Refuse the whole atlas rather than render a world with holes in it.
       if (!def) return null
-      kinds.set(kind, { def, frames: v.frames, yaws: v.yaws, pitches: v.pitches })
+      kinds.set(kind, { def, frames: v.frames, yaws: v.yaws, pitches: v.pitches, extentM: v.extentM ?? { x: 0, z: 0 }, footM: v.footM ?? { x: 0, z: 0 } })
     }
     return { texture, kinds }
   } catch (err) {

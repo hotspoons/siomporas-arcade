@@ -92,6 +92,21 @@ flank trick, naming what must be kept in an edit — is in `apps/fighter/ART.md`
 - **Muted magenta is a weak key.** The model returns rose, not `#ff00ff`. `min(r,b) - g` scores 0.13
   on it, close enough to the threshold that noise freckles the cut-out; `(r+b)/2 - g` scores 0.27
   and still reads negative on every vegetation colour.
+- **A spec must not paint itself the colour of its own backdrop, and three of them did.** The
+  delivery van asked for "bright grass green" on the chroma-green card and generated beautifully
+  five times running — a correct 1960s box van that the keyer then dissolved to 8% ink. The prompt
+  carried the sentence "Nothing on the object itself is green" directly under the line asking for
+  green paint, and the model believed the louder one. `--audit` now fails on it: `paintClash` reads
+  `paint`, `materials` and `cues` for the key's colour family. It caught two more the same day —
+  `facade-lowrise`'s green glazed tile, cut out of the fascia in bands, and `tower`'s blue-green
+  glass.
+- **A night subject dims the backdrop with it.** `facade-neon-bar` came back beautifully lit against
+  a warm grey studio wall, keying at 58% ink, because "flat even lighting" and a neon-lit night
+  scene are a contradiction and the model resolved it by dimming everything. Asking for the neon to
+  be the only light made it worse: a near-black building with torn brickwork. What worked was
+  dropping the night — the same building in flat daylight with its neon *on*. The sprite is baked
+  unlit, so nothing downstream knows the difference. `render` and `backdrop` on a spec override the
+  defaults for exactly this.
 
 ## Where things live
 
@@ -102,9 +117,23 @@ tools/assetgen/proportion.mjs     spec → measured outline PNG
 tools/assetgen/generate.mjs       spec → prompts → flux → keyed cut-out → mesh
 tools/recon-service/              image→3D as a service: Dockerfile, API, Helm chart
 apps/coast/src/render/models.ts   ModelDef — the contract a generated asset must satisfy
-apps/coast/src/render/procgen.ts  the hand-built hero car, architecture and LIVERIES being replaced
-apps/coast/public/assets/         the Kenney CC0 kits being replaced
+apps/coast/src/render/extents.json  MEASURED widths, written by scripts/roadside-check.mjs
+apps/coast/src/sim/place.ts       the one copy of where a thing beside the road stands
+apps/coast/src/render/procgen.ts  what is left of the hand-built models: signs and LIVERIES
+apps/coast/public/assets/         generated meshes, the baked atlas, the Draco decoder
 ```
+
+**The Kenney kits are gone.** `cars/`, `props/` and `nature/` are deleted; every vehicle, tree,
+building and sign in the game is a reconstruction now. The last holdout was the delivery van, kept
+because five generations of it "came back as a flatbed" — they had not, see the paint clash above.
+
+**Never type a model's width.** Four separate hand-typed width tables had accumulated — `widthM` in
+the manifest, per-scene offset ranges in `scenes.ts`, editor palette offsets, and `HIT_HALF_WIDTH` in
+`Sim.ts` — and every one of them was wrong, some by a factor of sixteen. They are one measurement
+now: `scripts/roadside-check.mjs --write` bakes, measures each model's silhouette and its ground
+footprint about the point the sprite stands on, and writes `extents.json`. Run it after changing a
+model or its `heightM`; without `--write` it is a check that fails when anything reaches over the
+road.
 
 ## Promotion, which is kinder than it looks
 

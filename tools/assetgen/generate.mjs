@@ -140,6 +140,29 @@ const CHROMA = {
 /** Vegetation on magenta, everything else on green, and `chroma` in a spec beats both. */
 export const chromaFor = (spec) => CHROMA[spec.chroma ?? (spec.class === 'nature' ? 'magenta' : 'green')]
 
+/** Colour words that will be keyed away, by backdrop. */
+const CLASHES = {
+  green: /\b(green|lime|olive|emerald|jade|mint|chartreuse|teal|viridian)\b/i,
+  magenta: /\b(magenta|pink|fuchsia|cerise|rose|violet|purple|mauve|plum)\b/i,
+}
+
+/**
+ * Is this spec painted the colour of its own backdrop? The delivery van asked for "bright grass
+ * green" on the chroma-green card and generated beautifully five times running: a correct 1960s box
+ * van that the keyer then dissolved, because the keyer's whole job is to remove everything green.
+ * The prompt even carried the sentence "Nothing on the object itself is green" directly under the
+ * line asking for green paint, and the model quite reasonably believed the louder one.
+ *
+ * Cheap to check and expensive to miss — a generation is 25 seconds a view and the failure looks
+ * like a bad keyer rather than a bad spec.
+ */
+export function paintClash(spec) {
+  const chroma = chromaFor(spec)
+  const said = [spec.paint, ...(spec.materials ?? []), ...(spec.cues ?? [])].filter(Boolean).join(' ')
+  const hit = said.match(CLASHES[chroma.key])
+  return hit ? { word: hit[0], key: chroma.key } : null
+}
+
 const CARDINALS = { front: 'front', profile: 'profile', side: 'profile', flank: 'profile', back: 'back', rear: 'back' }
 
 /** A spec's view names, normalised. The first may be anything; the rest must be cardinals. */
@@ -256,9 +279,14 @@ export function generatePrompt(spec, view, { defaults, budget = BUDGET, attachme
     spec.paint ? `It is painted ${spec.paint}.` : null,
   ]
   const tail = [
-    defaults.render,
+    // `render` and `backdrop` on a spec replace the defaults for that one asset. Both exist for the
+    // same reason: the defaults describe a daylit object on a flat card, and a subject that is lit
+    // BY something — a neon bar front at night — makes the model resolve the contradiction by
+    // dimming the whole picture, backdrop included. It came back beautifully lit against a warm grey
+    // studio wall, which keys to nothing: the cut-out kept 58% of the frame.
+    spec.render ?? defaults.render,
     defaults.camera,
-    `Background: ${defaults.backgrounds[chroma.key]}. Nothing on the object itself is ${chroma.word}.`,
+    `Background: ${spec.backdrop ?? defaults.backgrounds[chroma.key]}. Nothing on the object itself is ${chroma.word}.`,
     'One object, one view, filling the frame. NOT a technical drawing and NOT a sheet of panels: no second view, no dimension lines, no leader lines, no measurements, no text, no lettering, no numbers, no badges.',
   ]
   return fit(head.filter(Boolean), [list(spec.cues), list(spec.materials)], tail, budget, spec.cues ?? [])
@@ -301,8 +329,8 @@ export function editPrompt(spec, view, { defaults }) {
     `IMAGE 1 shows the object. Draw the SAME object — same shape, same proportions, same colours, same materials, same details — ${what}.`,
     `It is ${proportionLine(spec)}${spec.paint ? `, painted ${spec.paint}` : ''}.`,
     'Change nothing except the camera angle. Every panel, vent, lamp, wheel and marking stays exactly where it is.',
-    defaults.render,
-    `Background: ${defaults.backgrounds[chroma.key]}.`,
+    spec.render ?? defaults.render,
+    `Background: ${spec.backdrop ?? defaults.backgrounds[chroma.key]}.`,
     'No text, no lettering, no numbers, no badges anywhere in the picture.',
   ].join('\n\n')
 }
@@ -710,7 +738,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     // What the game asks for against what this file describes. The manifest builds most of its
     // kinds through the N/P/C helpers rather than writing `kind:` out, so both spellings are read.
     const ts = readFileSync(path.join(ROOT, 'apps/coast/src/render/models.ts'), 'utf8')
-    const kinds = new Set([...ts.matchAll(/kind: '([A-Za-z0-9_]+)'/g), ...ts.matchAll(/\b[NPCG]\('([A-Za-z0-9_]+)'/g)].map((m) => m[1]))
+    const kinds = new Set([...ts.matchAll(/kind: '([A-Za-z0-9_]+)'/g), ...ts.matchAll(/\b[A-Z]{1,2}\('([A-Za-z0-9_]+)'/g)].map((m) => m[1]))
     kinds.add('hero') // one ModelDef per livery, all built from buildPrototype
     const spec = new Map(assets.filter((a) => a.kind).map((a) => [a.kind, a.id]))
     const missing = [...kinds].filter((k) => !spec.has(k) && !k.startsWith('hero_'))
@@ -719,7 +747,10 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     console.log(`  no spec yet:      ${missing.join(', ') || 'none'}`)
     console.log(`  not in the game:  ${stray.join(', ') || 'none'}`)
     console.log(`  no slot yet:      ${assets.filter((a) => a.newKind).map((a) => a.id).join(', ') || 'none'}`)
-    process.exit(0)
+    // A spec painted its own backdrop colour generates perfectly and keys to nothing.
+    const clashes = assets.flatMap(expand).map((a) => [a, paintClash(a)]).filter(([, c]) => c)
+    console.log(`  paints its key:   ${clashes.map(([a, c]) => `${a.id} (${c.word} on ${c.key})`).join(', ') || 'none'}`)
+    process.exit(clashes.length ? 1 : 0)
   }
   const chosen = assets.flatMap(expand).filter((a) => (id ? a.id === id || a.id.startsWith(`${id}-`) : a.class === klass))
   if (!chosen.length) {

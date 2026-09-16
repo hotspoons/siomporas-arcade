@@ -1,4 +1,4 @@
-import { landmarkOffset } from '../render/models'
+import { placeAt, placeLandmark, placeScenery } from '../sim/place'
 // Authored track → road segments. This is the only place that knows how the
 // plan-view centreline becomes the classic pseudo-3D representation.
 //
@@ -97,7 +97,7 @@ export function trackThemes(track: CoastTrack): Theme[] {
 /** Place a prop on the segment its arc fraction falls in. */
 function placeProp(segs: Segment[], real: number, p: PropRef): void {
   const i = Math.min(real - 1, Math.max(0, Math.round(p.at * (real - 1))))
-  segs[i].sprites.push({ kind: p.kind, offset: p.offset, scale: p.scale ?? 1, collide: p.collide ?? true })
+  placeAt(segs[i], p.kind, p.offset, p.scale ?? 1, p.collide ?? true)
 }
 
 /**
@@ -284,14 +284,14 @@ export function compileTrack(track: CoastTrack, seed: number, path?: TrackPath):
         }
       }
       if (!r) continue
-      seg.sprites.push({ kind: r.kind, offset: side * rng.range(r.minOffset, r.maxOffset), scale: (r.scale ?? 1) * rng.range(0.9, 1.15), collide: r.collide ?? true })
+      placeScenery(seg, r.kind, side, rng.range(r.minOffset, r.maxOffset), (r.scale ?? 1) * rng.range(0.9, 1.15), r.collide ?? true)
     }
     if (theme.landmarks.length && i % theme.landmarkEvery === 0) {
       const k = theme.landmarks[Math.floor(i / theme.landmarkEvery) % theme.landmarks.length]
       // Alternate sides, but never build a diner in the sea.
-      let side = Math.floor(i / theme.landmarkEvery) % 2 === 0 ? -1 : 1
+      let side: -1 | 1 = Math.floor(i / theme.landmarkEvery) % 2 === 0 ? -1 : 1
       if (seg.shore === side) side = -side as -1 | 1
-      if (seg.shore !== side) seg.sprites.push({ kind: k, offset: side * landmarkOffset(k), scale: 1, collide: true })
+      if (seg.shore !== side) placeLandmark(seg, k, side)
     }
   }
   // Hand-placed props go on last, so they always survive the scatter.

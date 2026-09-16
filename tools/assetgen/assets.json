@@ -216,7 +216,7 @@
         },
         {
           "suffix": "martini",
-          "paint": "off-white with a broad stripe of dark blue and red over nose and roof"
+          "paint": "off-white with broad navy blue and red stripes over nose and roof, a dark cockpit and dark wheels"
         },
         {
           "suffix": "rosso",
@@ -224,7 +224,7 @@
         },
         {
           "suffix": "midnight",
-          "paint": "near-black with a broad gold stripe over nose and roof"
+          "paint": "deep midnight blue, nearly black, with a broad gold stripe over nose and roof and bright gold wheels"
         }
       ]
     },
@@ -802,7 +802,6 @@
       "cues": [
         "a trunk cross-hatched with old frond bases, thickening towards the ground",
         "twelve to sixteen fronds radiating in every direction, the upper ones arched, the lower ones past horizontal",
-        "a thick skirt of dead brown fronds hanging under the green crown",
         "seed stalks emerging where the fronds meet the trunk"
       ],
       "materials": [
@@ -812,7 +811,9 @@
       "avoid": [
         "a symmetrical lollipop crown",
         "a smooth cylindrical trunk",
-        "any pot, base disc, soil mound or ground plane"
+        "any pot, base disc, soil mound or ground plane",
+        "a skirt of dead hanging fronds under the crown",
+        "any soil, base disc or mound under the trunk"
       ],
       "views": [
         "profile",
@@ -837,7 +838,6 @@
       "cues": [
         "a trunk visibly ringed with old frond scars, thicker at the base",
         "nine to twelve fronds, the upper ones arcing up, the lower ones drooping past horizontal",
-        "a short skirt of dead brown fronds under the green crown",
         "no branches anywhere on the trunk"
       ],
       "materials": [
@@ -847,7 +847,9 @@
       "avoid": [
         "a symmetrical lollipop crown",
         "a smooth cylindrical trunk",
-        "any visible pot, base disc or ground plane"
+        "any visible pot, base disc or ground plane",
+        "a skirt of dead hanging fronds under the crown",
+        "any soil, base disc or mound under the trunk"
       ],
       "views": [
         "profile",
@@ -882,7 +884,9 @@
       "avoid": [
         "a straight vertical trunk",
         "an even radial crown",
-        "any pot, base disc or ground plane"
+        "any pot, base disc or ground plane",
+        "a skirt of dead hanging fronds under the crown",
+        "any soil, base disc or mound under the trunk"
       ],
       "views": [
         "profile",
@@ -1702,7 +1706,7 @@
       "kind": "gantry",
       "subject": "overhead highway sign gantry",
       "dims": {
-        "spanM": 16.0,
+        "spanM": 24.0,
         "widthM": 1.2,
         "depthM": 1.2,
         "heightM": 8.5,
@@ -1711,7 +1715,7 @@
       },
       "era": "period highway sign gantry",
       "silhouette": [
-        "A lattice truss spanning the road on two legs, with blank sign panels hung beneath it — the clearance under the truss is most of the height"
+        "A lattice truss spanning the whole road on two legs set well OUTSIDE the tarmac, with blank sign panels hung beneath it. The clearance under the truss is most of the height"
       ],
       "cues": [
         "every panel and board face is COMPLETELY EMPTY: one flat colour, no picture, no pattern, no shapes, no lettering on it",

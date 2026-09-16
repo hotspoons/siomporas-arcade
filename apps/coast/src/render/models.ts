@@ -91,7 +91,7 @@ const G = (kind: string, file: string, heightM: number, cell = 128, widthM?: num
  */
 export function landmarkOffset(kind: string): number {
   const w = MODEL_BY_KIND[kind]?.widthM
-  return w ? 1.15 + w / 2 / ROAD_HALF_WIDTH : 1.9
+  return w ? 1.35 + w / 2 / ROAD_HALF_WIDTH : 1.9
 }
 /** Traffic: fine flank steps for cars near your lane, quarter views for crossers, head-on, and four pitches for hills. */
 export const TRAFFIC_YAWS = [0, 6, 13, 22, 35, 90, 180, -6, -13, -22, -35, -90]
@@ -132,7 +132,7 @@ export const MODELS: ModelDef[] = [
   G('grandstand', 'grandstand', 7, 256, 24.0),
   G('tent', 'tent', 4, 192, 8.0),
   G('pitsOffice', 'pits-office', 6, 256, 12.0),
-  G('gantry', 'overhead-gantry', 8.5, 256, 1.2),
+  G('gantry', 'overhead-gantry', 8.5, 256, 24.0),
   // Hero prototypes, one per livery; the chase view picks the selected one. The generated mesh is
   // one car in one paint scheme, so for now every livery points at it — the tint cannot be applied
   // to a baked texture the way `buildPrototype` applied it to flat material colours, and what that
@@ -141,7 +141,11 @@ export const MODELS: ModelDef[] = [
   // One generated mesh per livery: a reconstruction carries its paint in a baked texture and cannot
   // be tinted the way `buildPrototype` tinted flat material colours. `variants` in assets.json is
   // what keeps the four from drifting into four different cars.
-  ...Object.keys(LIVERIES).map((id): ModelDef => ({ kind: `hero_${id}`, file: `assets/generated/hero-prototype-${id}.glb`, heightM: 1.65, yaws: HERO_YAWS, cell: 288 })),
+  // `spin: 180` because these were generated from a REAR three-quarter view and TRELLIS orients a
+  // reconstruction to the camera it was given: the mesh's nose points at yaw 0, which is the angle
+  // the chase camera occupies. Without it the player stares at the half of the car the model never
+  // saw and invented — which is exactly what it looked like.
+  ...Object.keys(LIVERIES).map((id): ModelDef => ({ kind: `hero_${id}`, file: `assets/generated/hero-prototype-${id}.glb`, heightM: 1.65, yaws: HERO_YAWS, cell: 288, spin: 180 })),
   { kind: 'formula', file: 'assets/generated/formula-single-seater.glb', heightM: 1.45, yaws: HERO_YAWS, cell: 288 },
   // Roadside architecture and signage.
   G('diner', 'diner', 6.4, 256, 14.0),

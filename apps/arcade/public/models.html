@@ -22,11 +22,12 @@
     margin: 0; background: var(--bg); color: var(--ink);
     font-family: var(--mono); font-size: 13px; line-height: 1.55;
   }
-  header { padding: 2rem 1.5rem 0; max-width: 92rem; margin: 0 auto; }
+  header { padding: 2rem 1.5rem 0; max-width: var(--maxw, 92rem); margin: 0 auto; }
   h1 { margin: 0; font-size: clamp(19px, 3.4vw, 30px); letter-spacing: .14em; font-weight: 600; }
   h1 small { display: block; font-size: .4em; letter-spacing: .32em; color: var(--hot); margin-bottom: .45rem; }
   p.lede { margin: .55rem 0 0; max-width: 56rem; color: var(--dim); }
-  main { max-width: 92rem; margin: 0 auto; padding: 1.2rem 1.5rem 3rem; }
+  main { max-width: var(--maxw, 92rem); margin: 0 auto; padding: 1.2rem 1.5rem 3rem; }
+  body.wide { --maxw: 100%; }
 
   .load { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: 1rem; }
   input[type="text"] {
@@ -44,8 +45,10 @@
   button[aria-pressed="true"] { border-color: var(--hot); color: var(--hot); background: color-mix(in srgb, var(--hot) 14%, transparent); }
   button:focus-visible { outline: 2px solid var(--hot); outline-offset: 2px; }
 
-  .panes { display: grid; grid-template-columns: 17rem minmax(0, 1fr) 15rem; gap: 1rem; align-items: start; }
-  @media (max-width: 1100px) { .panes { grid-template-columns: 15rem minmax(0, 1fr); } }
+  /* The model list is a <details>: closed it is a word, and the column shrinks to it, which is why
+     the first track is max-content rather than a fixed width. */
+  .panes { display: grid; grid-template-columns: max-content minmax(0, 1fr) 17rem; gap: 1rem; align-items: start; }
+  @media (max-width: 1100px) { .panes { grid-template-columns: max-content minmax(0, 1fr); } }
   @media (max-width: 760px) { .panes { grid-template-columns: minmax(0, 1fr); } }
 
   .pane { background: var(--pane); border: 1px solid var(--edge); border-radius: 6px; }
@@ -55,7 +58,17 @@
     border-bottom: 1px solid var(--edge);
   }
 
-  .list { max-height: 30rem; overflow-y: auto; padding: .4rem; }
+  .models summary {
+    list-style: none; cursor: pointer; user-select: none;
+    padding: .75rem .9rem .7rem; font-size: 10.5px; letter-spacing: .2em;
+    text-transform: uppercase; color: var(--faint); font-weight: 600; white-space: nowrap;
+  }
+  .models summary::-webkit-details-marker { display: none; }
+  .models summary::before { content: "\25b8"; color: var(--hot); margin-right: .5em; display: inline-block; }
+  .models[open] summary::before { content: "\25be"; }
+  .models summary:hover { color: var(--ink); }
+  .models[open] summary { border-bottom: 1px solid var(--edge); }
+  .list { max-height: 30rem; width: 15rem; overflow-y: auto; padding: .4rem; }
   .grp { padding: .7rem .5rem .3rem; font-size: 10px; letter-spacing: .18em; text-transform: uppercase; color: var(--hot); }
   .item {
     display: flex; justify-content: space-between; gap: .6rem; width: 100%; text-align: left;
@@ -90,9 +103,7 @@
   /* One grid child per column: the list, the stage, and a rail that stacks every right-hand
      panel. Without the rail each new panel became another grid item and wrapped onto a second row. */
   .rail { display: flex; flex-direction: column; gap: 1rem; min-width: 0; }
-  .panes.wide { grid-template-columns: minmax(0, 1fr); }
-  .panes.wide > :not(.stage) { display: none; }
-  .panes.wide .stage { height: clamp(360px, 74vh, 1100px); }
+  body.wide .stage { height: clamp(360px, 78vh, 1300px); }
   .overlay {
     position: absolute; inset: auto 0 0 0; display: flex; flex-wrap: wrap; gap: .4rem;
     padding: .6rem; background: linear-gradient(to top, rgba(4,5,10,.82), transparent);
@@ -118,9 +129,30 @@
   }
   #drop.on { display: grid; }
 
-  /* Rig panel: only ever visible for a model that actually has a skeleton. */
-  #rigpane[hidden] { display: none; }
-  .rigrow { display: flex; gap: .4rem; align-items: center; padding: 0 .9rem .6rem; flex-wrap: wrap; }
+  /* One rail, three tabs: the rig, how it is drawn, and what came off disk. */
+  .tabs { display: flex; gap: .15rem; padding: .45rem .45rem 0; border-bottom: 1px solid var(--edge); }
+  .tab {
+    flex: 1 1 0; border: 0; border-bottom: 2px solid transparent; border-radius: 3px 3px 0 0;
+    padding: .65em .3em; color: var(--dim); font-size: 10px; letter-spacing: .1em; background: transparent;
+  }
+  .tab:hover { color: var(--ink); background: #141a28; border-color: transparent; }
+  .tab[aria-selected="true"] { color: var(--hot); border-bottom-color: var(--hot); }
+  .tabpanel { padding-top: .7rem; }
+  .tabpanel[hidden], #rigpane[hidden] { display: none; }
+  .keys { padding: 0 .9rem .7rem; }
+  .keys summary {
+    list-style: none; cursor: pointer; user-select: none; color: var(--faint);
+    font-size: 10px; letter-spacing: .16em; text-transform: uppercase;
+  }
+  .keys summary::-webkit-details-marker { display: none; }
+  .keys summary::before { content: "\25b8"; color: var(--hot); margin-right: .45em; display: inline-block; }
+  .keys[open] summary::before { content: "\25be"; }
+  .keys summary:hover { color: var(--dim); }
+  .keys .keyhint { padding: .5rem 0 0; }
+  .rigrow { display: flex; gap: .35rem; align-items: center; padding: 0 .9rem .5rem; flex-wrap: wrap; }
+  /* The rig panel carries twenty-odd controls in a narrow rail. At the page's default button size
+     they wrap to roughly one per line and the panel runs off the screen. */
+  .rigrow button, .seg button { padding: .5em .62em; font-size: 10.5px; letter-spacing: .07em; }
   .rigrow select {
     flex: 1 1 8rem; min-width: 0; font-family: inherit; font-size: 11.5px; color: var(--ink);
     background: var(--sunk); border: 1px solid var(--edge); border-radius: 3px; padding: .45em .5em;
@@ -133,7 +165,7 @@
   .sl .v { text-align: right; font-variant-numeric: tabular-nums; color: var(--ink); }
   .sl.pos .v { color: var(--cool); }
   .edited { color: var(--hot) !important; }
-  .rignote { padding: .5rem .9rem .8rem; color: var(--faint); font-size: 11px; line-height: 1.6; }
+  .rignote { padding: .2rem .9rem .7rem; color: var(--faint); font-size: 11px; line-height: 1.6; }
   .rignote b { color: var(--dim); font-weight: 500; }
   .rignote .warn { color: var(--bad); }
   /* The joint colours, spelled out — the legend is the only way to read a cloud of 160 dots. */
@@ -180,9 +212,11 @@
   </form>
 
   <div class="panes">
-    <section class="pane">
-      <h2>In this build</h2>
-      <div class="list" id="list"></div>
+    <section class="pane models">
+      <details id="modelspane">
+        <summary>Models</summary>
+        <div class="list" id="list"></div>
+      </details>
     </section>
 
     <div class="stage" id="stage">
@@ -192,93 +226,109 @@
       <div id="band" hidden></div>
       <div class="overlay">
         <button id="spin" aria-pressed="true">Spin</button>
-        <button id="wire" aria-pressed="false">Wireframe</button>
-        <button id="flat" aria-pressed="false">Unlit</button>
-        <button id="grid" aria-pressed="true">Grid</button>
-        <button id="reset">Reset</button>
-        <button id="wide" aria-pressed="false" title="Hide the side panels and give the viewport the full width">Wide</button>
-        <button id="fit">Fit</button>
+        <button id="reset" title="Re-fit the camera to the model at the current viewport shape">Reset view</button>
+        <button id="wide" aria-pressed="false" title="Use the full window width">Wide</button>
       </div>
     </div>
 
     <div class="rail">
-    <section class="pane" id="rigpane" hidden>
-      <h2 id="rigtitle">Skeleton</h2>
-      <div class="seg">
-        <button id="mpose" aria-pressed="true" title="Rotate joints to see where a limb bends. Scratch, never exported.">Pose</button>
-        <button id="mrig" aria-pressed="false" title="Move the joints themselves. The mesh stays put — this is what gets exported.">Rig</button>
-      </div>
-      <div class="seg" id="seg2">
-        <button id="tskel" aria-pressed="true" title="The DEF- bones of the rigged .glb — the rig's output">Skeleton</button>
-        <button id="tmeta" aria-pressed="false" title="The metarig joints Rigify generates from — the rig's input">Metarig</button>
-      </div>
-      <div class="rigrow">
-        <select id="bone" aria-label="active joint"></select>
-        <button id="sweep" aria-pressed="false" title="Swing this joint through its range">Sweep</button>
-      </div>
-      <div class="sl rot"><b>rX</b><input type="range" id="rx" min="-180" max="180" step="1" value="0"><span class="v" id="rxv">0°</span></div>
-      <div class="sl rot"><b>rY</b><input type="range" id="ry" min="-180" max="180" step="1" value="0"><span class="v" id="ryv">0°</span></div>
-      <div class="sl rot"><b>rZ</b><input type="range" id="rz" min="-180" max="180" step="1" value="0"><span class="v" id="rzv">0°</span></div>
-      <div class="sl pos"><b>pX</b><input type="range" id="px" min="-0.15" max="0.15" step="0.001" value="0"><span class="v" id="pxv">0</span></div>
-      <div class="sl pos"><b>pY</b><input type="range" id="py" min="-0.15" max="0.15" step="0.001" value="0"><span class="v" id="pyv">0</span></div>
-      <div class="sl pos"><b>pZ</b><input type="range" id="pz" min="-0.15" max="0.15" step="0.001" value="0"><span class="v" id="pzv">0</span></div>
-      <div class="rigrow">
-        <button id="bones" aria-pressed="false">Bones</button>
-        <button id="joints" aria-pressed="false">Joints</button>
-        <button id="gmove" aria-pressed="false" title="Drag to move every selected joint">Move</button>
-        <button id="grot" aria-pressed="false" title="Drag to swing the selection around the pivot">Rotate</button>
-      </div>
-      <div class="rigrow">
-        <button id="boxsel" aria-pressed="false" title="Drag a rectangle without holding Ctrl. Alt+drag still orbits.">Box select</button>
-        <button id="selall">All</button>
-        <button id="selnone">None</button>
-        <button id="setpivot" aria-pressed="false" title="Pin the active joint as the point the Rotate gizmo turns around">Pivot</button>
-      </div>
-      <div class="rigrow">
-        <button id="restall">Reset pose</button>
-        <button id="clearoff">Reset joints</button>
-      </div>
-      <div class="rigrow">
-        <button id="exportjoints">Export JSON</button>
-        <button id="importjoints">Import…</button>
-        <input type="file" id="jointsfile" accept=".json" hidden />
-      </div>
-      <p class="keyhint">
-        <kbd>drag</kbd> orbit · <kbd>ctrl</kbd>+drag box · <kbd>+shift</kbd> add · <kbd>+alt</kbd> remove<br>
-        <kbd>click</kbd> pick · <kbd>shift</kbd>+click toggle · <kbd>alt</kbd>+click drop · <kbd>esc</kbd> none
-      </p>
-      <p class="rignote" id="rignote"></p>
-    </section>
+      <section class="pane">
+        <div class="tabs" role="tablist">
+          <button class="tab" id="tab-rig" role="tab" aria-selected="true" aria-controls="panel-rig">Rig</button>
+          <button class="tab" id="tab-render" role="tab" aria-selected="false" aria-controls="panel-render">Rendering</button>
+          <button class="tab" id="tab-info" role="tab" aria-selected="false" aria-controls="panel-info">Loaded</button>
+        </div>
 
-    <section class="pane">
-      <h2>Light</h2>
-      <div class="sl"><b>exp</b><input type="range" id="lexp" min="0.2" max="4" step="0.05" value="1.5"><span class="v" id="lexpv">1.50</span></div>
-      <div class="sl"><b>key</b><input type="range" id="lkey" min="0" max="6" step="0.05" value="1.9"><span class="v" id="lkeyv">1.90</span></div>
-      <div class="sl"><b>amb</b><input type="range" id="lamb" min="0" max="4" step="0.05" value="1.35"><span class="v" id="lambv">1.35</span></div>
-      <div class="sl"><b>rim</b><input type="range" id="lrim" min="0" max="4" step="0.05" value="0.75"><span class="v" id="lrimv">0.75</span></div>
-      <div class="rigrow">
-        <button id="lbright">Bright</button>
-        <button id="lstudio">Studio</button>
-        <button id="lmoody">Moody</button>
-      </div>
-    </section>
+        <div class="tabpanel" id="panel-rig" role="tabpanel">
+          <div id="rigpane" hidden>
+            <div class="seg" id="seg1">
+              <button id="mpose" aria-pressed="true" title="Rotate joints to see where a limb bends. Scratch, never exported.">Pose</button>
+              <button id="mrig" aria-pressed="false" title="Move the joints themselves. The mesh stays put — this is what gets exported.">Rig</button>
+            </div>
+            <div class="seg" id="seg2">
+              <button id="tskel" aria-pressed="true" title="The DEF- bones of the rigged .glb — the rig's output">Skeleton</button>
+              <button id="tmeta" aria-pressed="false" title="The metarig joints Rigify generates from — the rig's input">Metarig</button>
+            </div>
+            <div class="rigrow" id="rowbone">
+              <select id="bone" aria-label="active joint"></select>
+              <button id="sweep" aria-pressed="false" title="Swing this joint through ±70° to see where the limb bends">Sweep</button>
+            </div>
+            <div class="sl rot"><b>rX</b><input type="range" id="rx" min="-180" max="180" step="1" value="0"><span class="v" id="rxv">0°</span></div>
+            <div class="sl rot"><b>rY</b><input type="range" id="ry" min="-180" max="180" step="1" value="0"><span class="v" id="ryv">0°</span></div>
+            <div class="sl rot"><b>rZ</b><input type="range" id="rz" min="-180" max="180" step="1" value="0"><span class="v" id="rzv">0°</span></div>
+            <div class="sl pos"><b>pX</b><input type="range" id="px" min="-0.15" max="0.15" step="0.001" value="0"><span class="v" id="pxv">—</span></div>
+            <div class="sl pos"><b>pY</b><input type="range" id="py" min="-0.15" max="0.15" step="0.001" value="0"><span class="v" id="pyv">—</span></div>
+            <div class="sl pos"><b>pZ</b><input type="range" id="pz" min="-0.15" max="0.15" step="0.001" value="0"><span class="v" id="pzv">—</span></div>
+            <div class="rigrow" id="rowview">
+              <button id="bones" aria-pressed="false" title="Draw the bones between joints">Bones</button>
+              <button id="joints" aria-pressed="false" title="Draw the joints">Joints</button>
+              <button id="gmove" aria-pressed="false" title="Drag to move every selected joint">Move</button>
+              <button id="grot" aria-pressed="false" title="Drag to swing the selection around the pivot">Rotate</button>
+            </div>
+            <div class="rigrow" id="rowsel">
+              <button id="boxsel" aria-pressed="false" title="Drag a rectangle with no modifier held. Alt+drag still orbits.">Box</button>
+              <button id="selall">All</button>
+              <button id="selnone">None</button>
+              <button id="setpivot" aria-pressed="false" title="Pin the active joint as the point Rotate turns around">Pivot</button>
+            </div>
+            <div class="rigrow" id="rowmirror">
+              <button id="mirror" aria-pressed="false" title="Pair each joint with its opposite number across the rig's own centre plane, and mirror everything you do">Mirror</button>
+              <button id="undo" title="Undo (⌘Z)">Undo</button>
+              <button id="redo" title="Redo (⌘⇧Z)">Redo</button>
+            </div>
+            <div class="rigrow" id="rowreset">
+              <button id="restall" title="Put every joint back to its rest rotation">Reset pose</button>
+              <button id="clearoff" title="Put every joint back where the rig had it">Clear offsets</button>
+            </div>
+            <div class="rigrow" id="rowio">
+              <button id="exportjoints">Export</button>
+              <button id="importjoints">Import…</button>
+              <input type="file" id="jointsfile" accept=".json" hidden />
+            </div>
+            <p class="rignote" id="rignote"></p>
+            <details class="keys" id="keys">
+              <summary>Keys</summary>
+              <p class="keyhint" id="keyhint">
+                <kbd>drag</kbd> orbit · <kbd class="mod">ctrl</kbd>+drag box · <kbd>+shift</kbd> add · <kbd>+alt</kbd> remove<br>
+                <kbd>click</kbd> pick · <kbd>shift</kbd>+click toggle · <kbd>alt</kbd>+click drop · <kbd>esc</kbd> none<br>
+                <kbd>alt</kbd>+<kbd>shift</kbd>+click pins the pivot, keeping the selection<br>
+                <kbd class="mod">ctrl</kbd>+<kbd>z</kbd> undo · <kbd class="mod">ctrl</kbd>+<kbd>shift</kbd>+<kbd>z</kbd> redo<br>
+                <b>Box</b> drops the need for the modifier; <kbd>alt</kbd>+drag still orbits.
+              </p>
+            </details>
+          </div>
+        </div>
 
-    <section class="pane">
-      <h2>What loaded</h2>
-      <dl id="stats"></dl>
-      <p class="msg" id="msg"></p>
-    </section>
+        <div class="tabpanel" id="panel-render" role="tabpanel" hidden>
+          <div class="rigrow">
+            <button id="wire" aria-pressed="false">Wireframe</button>
+            <button id="flat" aria-pressed="false">Unlit</button>
+            <button id="grid" aria-pressed="true">Grid</button>
+          </div>
+          <div class="sl"><b>exp</b><input type="range" id="lexp" min="0.2" max="4" step="0.05" value="1.5"><span class="v" id="lexpv">1.50</span></div>
+          <div class="sl"><b>key</b><input type="range" id="lkey" min="0" max="6" step="0.05" value="1.9"><span class="v" id="lkeyv">1.90</span></div>
+          <div class="sl"><b>amb</b><input type="range" id="lamb" min="0" max="4" step="0.05" value="1.35"><span class="v" id="lambv">1.35</span></div>
+          <div class="sl"><b>rim</b><input type="range" id="lrim" min="0" max="4" step="0.05" value="0.75"><span class="v" id="lrimv">0.75</span></div>
+          <div class="rigrow">
+            <button id="lbright">Bright</button>
+            <button id="lstudio">Studio</button>
+            <button id="lmoody">Moody</button>
+          </div>
+        </div>
+
+        <div class="tabpanel" id="panel-info" role="tabpanel" hidden>
+          <dl id="stats"></dl>
+          <p class="msg" id="msg"></p>
+        </div>
+      </section>
     </div>
   </div>
 </main>
 
 <footer>
-  Deep-link any model with <code>?src=</code> — e.g. <code>/models.html?src=/assets/crown/chars/kestrel/mesh-arms-clear.glb</code>.
-  The list is generated by <code>scripts/model-catalogue.mjs</code>; re-run it after adding models.
-  three.js is vendored under <code>/vendor/three</code>, so this page has no runtime dependency on a CDN.
-  Load a model with a skeleton and a <b>Skeleton</b> panel appears: sweep a joint through its range to
-  see where a limb actually bends, nudge joints that sit in the wrong place, and export the corrections
-  as JSON for <code>tools/rigging</code> to apply on the next rig.
+  Deep-link a model with <code>?src=</code>. Edits, selection and camera are kept in this browser and
+  come back on reload — <code>?fresh=1</code> starts clean. Rig corrections export as JSON for
+  <code>tools/rigging/rig_character.py</code>; see its README for the loop.
 </footer>
 
 <script type="importmap">
@@ -296,113 +346,59 @@ const CATALOGUE = [
   {"path":"/assets/crown/chars/kestrel/mesh-arms-clear.glb","name":"mesh-arms-clear","group":"Fighter · reconstructed","kb":4828},
   {"path":"/assets/crown/chars/kestrel/mesh-arms-in.glb","name":"mesh-arms-in","group":"Fighter · reconstructed","kb":4674},
   {"path":"/assets/crown/chars/kestrel/rigged-arms-clear.glb","name":"rigged-arms-clear","group":"Fighter · reconstructed","kb":5789},
-  {"path":"/assets/props/bannerTowerRed.glb","name":"bannerTowerRed","group":"Track props","kb":33},
-  {"path":"/assets/props/barrierRed.glb","name":"barrierRed","group":"Track props","kb":3},
-  {"path":"/assets/props/barrierWall.glb","name":"barrierWall","group":"Track props","kb":6},
-  {"path":"/assets/props/billboard.glb","name":"billboard","group":"Track props","kb":14},
-  {"path":"/assets/props/billboardLow.glb","name":"billboardLow","group":"Track props","kb":14},
-  {"path":"/assets/props/flagCheckers.glb","name":"flagCheckers","group":"Track props","kb":15},
-  {"path":"/assets/props/grandStand.glb","name":"grandStand","group":"Track props","kb":12},
-  {"path":"/assets/props/lightPostLarge.glb","name":"lightPostLarge","group":"Track props","kb":23},
-  {"path":"/assets/props/lightPostModern.glb","name":"lightPostModern","group":"Track props","kb":16},
-  {"path":"/assets/props/overhead.glb","name":"overhead","group":"Track props","kb":9},
-  {"path":"/assets/props/overheadLights.glb","name":"overheadLights","group":"Track props","kb":25},
-  {"path":"/assets/props/pitsOffice.glb","name":"pitsOffice","group":"Track props","kb":8},
-  {"path":"/assets/props/pylon.glb","name":"pylon","group":"Track props","kb":8},
-  {"path":"/assets/props/tent.glb","name":"tent","group":"Track props","kb":7},
-  {"path":"/assets/props/treeLarge.glb","name":"treeLarge","group":"Track props","kb":7},
-  {"path":"/assets/props/treeSmall.glb","name":"treeSmall","group":"Track props","kb":7},
-  {"path":"/assets/cars/ambulance.glb","name":"ambulance","group":"Cars","kb":228},
   {"path":"/assets/cars/delivery.glb","name":"delivery","group":"Cars","kb":235},
-  {"path":"/assets/cars/hatchback-sports.glb","name":"hatchback-sports","group":"Cars","kb":193},
-  {"path":"/assets/cars/police.glb","name":"police","group":"Cars","kb":191},
-  {"path":"/assets/cars/race.glb","name":"race","group":"Cars","kb":163},
-  {"path":"/assets/cars/race-future.glb","name":"race-future","group":"Cars","kb":169},
-  {"path":"/assets/cars/sedan.glb","name":"sedan","group":"Cars","kb":168},
-  {"path":"/assets/cars/sedan-sports.glb","name":"sedan-sports","group":"Cars","kb":174},
-  {"path":"/assets/cars/suv.glb","name":"suv","group":"Cars","kb":203},
-  {"path":"/assets/cars/suv-luxury.glb","name":"suv-luxury","group":"Cars","kb":172},
-  {"path":"/assets/cars/taxi.glb","name":"taxi","group":"Cars","kb":171},
-  {"path":"/assets/cars/truck.glb","name":"truck","group":"Cars","kb":172},
-  {"path":"/assets/cars/van.glb","name":"van","group":"Cars","kb":172},
-  {"path":"/assets/nature/cactus_short.glb","name":"cactus_short","group":"Nature","kb":9},
-  {"path":"/assets/nature/cactus_tall.glb","name":"cactus_tall","group":"Nature","kb":9},
-  {"path":"/assets/nature/flower_redA.glb","name":"flower_redA","group":"Nature","kb":7},
-  {"path":"/assets/nature/flower_yellowA.glb","name":"flower_yellowA","group":"Nature","kb":7},
-  {"path":"/assets/nature/grass_large.glb","name":"grass_large","group":"Nature","kb":18},
-  {"path":"/assets/nature/plant_bush.glb","name":"plant_bush","group":"Nature","kb":4},
-  {"path":"/assets/nature/plant_bushLarge.glb","name":"plant_bushLarge","group":"Nature","kb":6},
-  {"path":"/assets/nature/rock_largeA.glb","name":"rock_largeA","group":"Nature","kb":7},
-  {"path":"/assets/nature/rock_largeB.glb","name":"rock_largeB","group":"Nature","kb":8},
-  {"path":"/assets/nature/rock_tallA.glb","name":"rock_tallA","group":"Nature","kb":12},
-  {"path":"/assets/nature/rock_tallB.glb","name":"rock_tallB","group":"Nature","kb":14},
-  {"path":"/assets/nature/stone_tallA.glb","name":"stone_tallA","group":"Nature","kb":11},
-  {"path":"/assets/nature/stump_old.glb","name":"stump_old","group":"Nature","kb":9},
-  {"path":"/assets/nature/tree_default.glb","name":"tree_default","group":"Nature","kb":9},
-  {"path":"/assets/nature/tree_default_dark.glb","name":"tree_default_dark","group":"Nature","kb":9},
-  {"path":"/assets/nature/tree_default_fall.glb","name":"tree_default_fall","group":"Nature","kb":17},
-  {"path":"/assets/nature/tree_detailed.glb","name":"tree_detailed","group":"Nature","kb":31},
-  {"path":"/assets/nature/tree_fat.glb","name":"tree_fat","group":"Nature","kb":5},
-  {"path":"/assets/nature/tree_oak.glb","name":"tree_oak","group":"Nature","kb":14},
-  {"path":"/assets/nature/tree_oak_dark.glb","name":"tree_oak_dark","group":"Nature","kb":14},
-  {"path":"/assets/nature/tree_oak_fall.glb","name":"tree_oak_fall","group":"Nature","kb":14},
-  {"path":"/assets/nature/tree_palm.glb","name":"tree_palm","group":"Nature","kb":13},
-  {"path":"/assets/nature/tree_palmBend.glb","name":"tree_palmBend","group":"Nature","kb":14},
-  {"path":"/assets/nature/tree_palmDetailedTall.glb","name":"tree_palmDetailedTall","group":"Nature","kb":28},
-  {"path":"/assets/nature/tree_palmShort.glb","name":"tree_palmShort","group":"Nature","kb":15},
-  {"path":"/assets/nature/tree_palmTall.glb","name":"tree_palmTall","group":"Nature","kb":15},
-  {"path":"/assets/nature/tree_pineDefaultA.glb","name":"tree_pineDefaultA","group":"Nature","kb":17},
-  {"path":"/assets/nature/tree_pineRoundA.glb","name":"tree_pineRoundA","group":"Nature","kb":14},
-  {"path":"/assets/nature/tree_pineTallA.glb","name":"tree_pineTallA","group":"Nature","kb":7},
-  {"path":"/assets/nature/tree_tall.glb","name":"tree_tall","group":"Nature","kb":7},
-  {"path":"/assets/nature/tree_tall_dark.glb","name":"tree_tall_dark","group":"Nature","kb":7},
-  {"path":"/assets/nature/tree_tall_fall.glb","name":"tree_tall_fall","group":"Nature","kb":12},
-  {"path":"/assets/nature/tree_thin.glb","name":"tree_thin","group":"Nature","kb":17},
-  {"path":"/assets/nature/tree_thin_dark.glb","name":"tree_thin_dark","group":"Nature","kb":32},
-  {"path":"/assets/nature/tree_thin_fall.glb","name":"tree_thin_fall","group":"Nature","kb":17},
-  {"path":"/assets/generated/arch.glb","name":"arch","group":"generated","kb":57},
-  {"path":"/assets/generated/banner-tower.glb","name":"banner-tower","group":"generated","kb":67},
-  {"path":"/assets/generated/barrier-wall.glb","name":"barrier-wall","group":"generated","kb":65},
-  {"path":"/assets/generated/billboard.glb","name":"billboard","group":"generated","kb":73},
-  {"path":"/assets/generated/billboard-low.glb","name":"billboard-low","group":"generated","kb":92},
-  {"path":"/assets/generated/block-brick.glb","name":"block-brick","group":"generated","kb":142},
-  {"path":"/assets/generated/block-concrete.glb","name":"block-concrete","group":"generated","kb":120},
-  {"path":"/assets/generated/bush.glb","name":"bush","group":"generated","kb":128},
-  {"path":"/assets/generated/bush-large.glb","name":"bush-large","group":"generated","kb":115},
-  {"path":"/assets/generated/cactus.glb","name":"cactus","group":"generated","kb":49},
-  {"path":"/assets/generated/cactus-tall.glb","name":"cactus-tall","group":"generated","kb":28},
-  {"path":"/assets/generated/diner.glb","name":"diner","group":"generated","kb":59},
-  {"path":"/assets/generated/facade-lowrise.glb","name":"facade-lowrise","group":"generated","kb":121},
-  {"path":"/assets/generated/facade-neon-arcade.glb","name":"facade-neon-arcade","group":"generated","kb":51},
-  {"path":"/assets/generated/facade-office.glb","name":"facade-office","group":"generated","kb":85},
-  {"path":"/assets/generated/facade-shopfront.glb","name":"facade-shopfront","group":"generated","kb":124},
-  {"path":"/assets/generated/facade-tall.glb","name":"facade-tall","group":"generated","kb":90},
-  {"path":"/assets/generated/flower.glb","name":"flower","group":"generated","kb":75},
-  {"path":"/assets/generated/gas-station.glb","name":"gas-station","group":"generated","kb":51},
-  {"path":"/assets/generated/grandstand.glb","name":"grandstand","group":"generated","kb":81},
-  {"path":"/assets/generated/hero-prototype.glb","name":"hero-prototype","group":"generated","kb":1168},
-  {"path":"/assets/generated/lightpost.glb","name":"lightpost","group":"generated","kb":18},
-  {"path":"/assets/generated/lightpost-tall.glb","name":"lightpost-tall","group":"generated","kb":21},
-  {"path":"/assets/generated/motel-strip.glb","name":"motel-strip","group":"generated","kb":59},
-  {"path":"/assets/generated/oak.glb","name":"oak","group":"generated","kb":120},
-  {"path":"/assets/generated/overhead-gantry.glb","name":"overhead-gantry","group":"generated","kb":48},
-  {"path":"/assets/generated/palm.glb","name":"palm","group":"generated","kb":57},
-  {"path":"/assets/generated/palm-bend.glb","name":"palm-bend","group":"generated","kb":54},
-  {"path":"/assets/generated/palm-tall.glb","name":"palm-tall","group":"generated","kb":33},
-  {"path":"/assets/generated/pine.glb","name":"pine","group":"generated","kb":57},
-  {"path":"/assets/generated/pine-round.glb","name":"pine-round","group":"generated","kb":88},
-  {"path":"/assets/generated/pine-tall.glb","name":"pine-tall","group":"generated","kb":24},
-  {"path":"/assets/generated/pits-office.glb","name":"pits-office","group":"generated","kb":61},
-  {"path":"/assets/generated/rock.glb","name":"rock","group":"generated","kb":154},
-  {"path":"/assets/generated/rock-tall.glb","name":"rock-tall","group":"generated","kb":96},
-  {"path":"/assets/generated/stone-tall.glb","name":"stone-tall","group":"generated","kb":53},
-  {"path":"/assets/generated/stump.glb","name":"stump","group":"generated","kb":74},
-  {"path":"/assets/generated/tent.glb","name":"tent","group":"generated","kb":44},
-  {"path":"/assets/generated/tower.glb","name":"tower","group":"generated","kb":71},
-  {"path":"/assets/generated/tower-low.glb","name":"tower-low","group":"generated","kb":116},
-  {"path":"/assets/generated/traffic-pickup.glb","name":"traffic-pickup","group":"generated","kb":1166},
-  {"path":"/assets/generated/traffic-sedan.glb","name":"traffic-sedan","group":"generated","kb":1106},
-  {"path":"/assets/generated/tree-broadleaf.glb","name":"tree-broadleaf","group":"generated","kb":73},
+  {"path":"/assets/generated/arch.glb","name":"arch","group":"generated","kb":285},
+  {"path":"/assets/generated/banner-tower.glb","name":"banner-tower","group":"generated","kb":401},
+  {"path":"/assets/generated/barrier-wall.glb","name":"barrier-wall","group":"generated","kb":181},
+  {"path":"/assets/generated/billboard.glb","name":"billboard","group":"generated","kb":719},
+  {"path":"/assets/generated/billboard-low.glb","name":"billboard-low","group":"generated","kb":403},
+  {"path":"/assets/generated/block-brick.glb","name":"block-brick","group":"generated","kb":428},
+  {"path":"/assets/generated/block-concrete.glb","name":"block-concrete","group":"generated","kb":674},
+  {"path":"/assets/generated/bush.glb","name":"bush","group":"generated","kb":1378},
+  {"path":"/assets/generated/bush-large.glb","name":"bush-large","group":"generated","kb":1108},
+  {"path":"/assets/generated/cactus.glb","name":"cactus","group":"generated","kb":412},
+  {"path":"/assets/generated/cactus-tall.glb","name":"cactus-tall","group":"generated","kb":208},
+  {"path":"/assets/generated/diner.glb","name":"diner","group":"generated","kb":380},
+  {"path":"/assets/generated/facade-lowrise.glb","name":"facade-lowrise","group":"generated","kb":463},
+  {"path":"/assets/generated/facade-neon-arcade.glb","name":"facade-neon-arcade","group":"generated","kb":642},
+  {"path":"/assets/generated/facade-office.glb","name":"facade-office","group":"generated","kb":474},
+  {"path":"/assets/generated/facade-shopfront.glb","name":"facade-shopfront","group":"generated","kb":299},
+  {"path":"/assets/generated/facade-tall.glb","name":"facade-tall","group":"generated","kb":597},
+  {"path":"/assets/generated/flower.glb","name":"flower","group":"generated","kb":650},
+  {"path":"/assets/generated/formula-single-seater.glb","name":"formula-single-seater","group":"generated","kb":481},
+  {"path":"/assets/generated/gas-station.glb","name":"gas-station","group":"generated","kb":287},
+  {"path":"/assets/generated/grandstand.glb","name":"grandstand","group":"generated","kb":445},
+  {"path":"/assets/generated/hero-prototype-gulf.glb","name":"hero-prototype-gulf","group":"generated","kb":924},
+  {"path":"/assets/generated/hero-prototype-martini.glb","name":"hero-prototype-martini","group":"generated","kb":1090},
+  {"path":"/assets/generated/hero-prototype-midnight.glb","name":"hero-prototype-midnight","group":"generated","kb":827},
+  {"path":"/assets/generated/hero-prototype-rosso.glb","name":"hero-prototype-rosso","group":"generated","kb":1044},
+  {"path":"/assets/generated/lightpost.glb","name":"lightpost","group":"generated","kb":251},
+  {"path":"/assets/generated/lightpost-tall.glb","name":"lightpost-tall","group":"generated","kb":153},
+  {"path":"/assets/generated/motel-strip.glb","name":"motel-strip","group":"generated","kb":316},
+  {"path":"/assets/generated/oak.glb","name":"oak","group":"generated","kb":217},
+  {"path":"/assets/generated/overhead-gantry.glb","name":"overhead-gantry","group":"generated","kb":386},
+  {"path":"/assets/generated/palm.glb","name":"palm","group":"generated","kb":1134},
+  {"path":"/assets/generated/palm-bend.glb","name":"palm-bend","group":"generated","kb":520},
+  {"path":"/assets/generated/palm-tall.glb","name":"palm-tall","group":"generated","kb":930},
+  {"path":"/assets/generated/pine.glb","name":"pine","group":"generated","kb":376},
+  {"path":"/assets/generated/pine-round.glb","name":"pine-round","group":"generated","kb":139},
+  {"path":"/assets/generated/pine-tall.glb","name":"pine-tall","group":"generated","kb":256},
+  {"path":"/assets/generated/pits-office.glb","name":"pits-office","group":"generated","kb":280},
+  {"path":"/assets/generated/rock.glb","name":"rock","group":"generated","kb":425},
+  {"path":"/assets/generated/rock-tall.glb","name":"rock-tall","group":"generated","kb":438},
+  {"path":"/assets/generated/stone-tall.glb","name":"stone-tall","group":"generated","kb":186},
+  {"path":"/assets/generated/stump.glb","name":"stump","group":"generated","kb":693},
+  {"path":"/assets/generated/tent.glb","name":"tent","group":"generated","kb":353},
+  {"path":"/assets/generated/tower.glb","name":"tower","group":"generated","kb":310},
+  {"path":"/assets/generated/tower-low.glb","name":"tower-low","group":"generated","kb":817},
+  {"path":"/assets/generated/traffic-coupe.glb","name":"traffic-coupe","group":"generated","kb":810},
+  {"path":"/assets/generated/traffic-pickup.glb","name":"traffic-pickup","group":"generated","kb":847},
+  {"path":"/assets/generated/traffic-police.glb","name":"traffic-police","group":"generated","kb":684},
+  {"path":"/assets/generated/traffic-sedan.glb","name":"traffic-sedan","group":"generated","kb":770},
+  {"path":"/assets/generated/traffic-taxi.glb","name":"traffic-taxi","group":"generated","kb":742},
+  {"path":"/assets/generated/traffic-van.glb","name":"traffic-van","group":"generated","kb":657},
+  {"path":"/assets/generated/traffic-wagon.glb","name":"traffic-wagon","group":"generated","kb":1009},
+  {"path":"/assets/generated/tree-broadleaf.glb","name":"tree-broadleaf","group":"generated","kb":200},
 ];
 // >>> CATALOGUE
 
@@ -428,13 +424,27 @@ controls.addEventListener('start', () => setSpin(false));
 // `const` further down the file is still in its temporal dead zone at that point.
 const proxy = new THREE.Object3D();   // what the gizmo drives when several joints are selected
 const proxyLast = new THREE.Vector3();
+const proxyQuat = new THREE.Quaternion();
 scene.add(proxy);
+
+// Two markers that belong to the viewport rather than to any one skeleton, because the metarig
+// overlay needs them too and it outlives no skin at all.
+const dot = new THREE.Mesh(new THREE.SphereGeometry(0.018, 12, 8),
+  new THREE.MeshBasicMaterial({ color: 0xfffaee, depthTest: false }));
+dot.renderOrder = 11; dot.visible = false; scene.add(dot);
+const pivotDot = new THREE.Mesh(new THREE.SphereGeometry(0.024, 14, 10),
+  new THREE.MeshBasicMaterial({ color: 0xff406b, depthTest: false, transparent: true, opacity: 0.85 }));
+pivotDot.renderOrder = 11; pivotDot.visible = false; scene.add(pivotDot);
 
 const gizmo = new TransformControls(camera, cv);
 gizmo.size = 0.55;
 gizmo.addEventListener('dragging-changed', (e) => {
-  controls.enabled = !e.value;
-  if (e.value) setSpin(false);
+  // Not `controls.enabled = !e.value`. That is one of two things with an opinion about the camera,
+  // and it used to hand orbiting back at the end of a gizmo drag even while a box-select was armed
+  // — which is where the intermittent spin during box select came from. One function decides.
+  gizmoDragging = e.value;
+  syncControls();
+  if (e.value) { pushUndo(); setSpin(false); }
   if (!e.value) commitGizmo();
 });
 gizmo.addEventListener('objectChange', () => liveGizmo());
@@ -469,11 +479,30 @@ let current = null, spinning = true, homeDist = 3;
 //
 // `pose` is scratch — a way to see whether a joint is in the right place, never exported.
 // `offset` is the product: a per-bone translation in the bone's own parent space, in metres.
-let skeleton = null;         // { root, bones: [Bone], helper }
+//
+// Two things can be edited and the panel says which:
+//   POSE — rotate joints and watch the skin follow. Scratch; never exported.
+//   RIG  — move the joints themselves. The skin is rebound every edit so the mesh does NOT move:
+//          the mesh is the thing that is right, and the skeleton is the thing that is wrong.
+// And two things can be edited IN rig mode:
+//   'bones'   — the DEF- bones of a rigged .glb. That skeleton is Rigify's *output*.
+//   'metarig' — the ~27 head/tail joints of an `apex-metarig-joints/1` file, which is the rig's
+//               *input*: rig_character.py --export-joints writes one, --joints reads it back, and
+//               correcting there is the only place a fix survives Rigify's generation.
+let skeleton = null;         // { skinned, bones: [Bone], helper, joints, pairs, deform }
 let rest = new Map();        // bone.uuid -> { pos: Vector3, quat: Quaternion }
+let bindRest = null;         // the skin's boneInverses as the file shipped them
+let bindHold = null;         // per bone: the skinning matrix that renders the model as it loaded
 let offsets = new Map();     // bone.name -> {x,y,z}
 let sweeping = null;         // { bone, axis, t } while the Sweep button is on
-let selected = new Set();    // bone names; the dropdown shows the primary (last picked)
+let selected = new Set();    // handle keys; `active` is the primary (last picked)
+let active = '';             // the one joint the sliders and Sweep act on, '' for none
+let pivot = '';              // the joint Rotate turns the selection around, '' for its centroid
+let mode = 'pose';           // 'pose' | 'rig'
+let target = 'bones';        // 'bones' | 'metarig'
+let metarig = null;          // the imported apex-metarig-joints/1 overlay, if any
+let gizmoDragging = false;   // both of these feed syncControls(), which is the only thing that
+let boxFrom = null;          // decides whether OrbitControls may move the camera
 let sourcePath = null;       // where the loaded model came from — recorded in the export
 
 function setSpin(on) { spinning = on; $('spin').setAttribute('aria-pressed', String(on)); }
@@ -485,6 +514,9 @@ function collectSkeleton(root) {
   const bones = skinned.skeleton.bones.slice();
   rest = new Map();
   for (const b of bones) rest.set(b.uuid, { pos: b.position.clone(), quat: b.quaternion.clone() });
+  // Rig mode rebinds the skin so moving a joint leaves the mesh alone; going back to pose mode has
+  // to put the original bind back, so keep a copy of it.
+  bindRest = skinned.skeleton.boneInverses.map((m) => m.clone());
 
   // Not THREE.SkeletonHelper: Rigify emits ~700 bones and most are mechanisms and widget holders
   // parked far from the body, so the stock helper draws a hairball you cannot read. Only deform
@@ -519,29 +551,24 @@ function collectSkeleton(root) {
   joints.visible = false;
   scene.add(joints);
 
-  // A marker for the joint currently being edited — without it you cannot tell which of 160 you
-  // are moving.
-  const dot = new THREE.Mesh(
-    new THREE.SphereGeometry(0.018, 12, 8),
-    new THREE.MeshBasicMaterial({ color: 0xffa62f, depthTest: false }));
-  dot.renderOrder = 11;
-  dot.visible = false;
-  scene.add(dot);
-
-  return { skinned, bones, helper, dot, joints, pairs, deform };
+  return { skinned, bones, helper, joints, pairs, deform };
 }
 
 function disposeSkeleton() {
   if (skeleton) {
     gizmo.detach();
-    for (const part of [skeleton.helper, skeleton.dot, skeleton.joints]) {
+    for (const part of [skeleton.helper, skeleton.joints]) {
       if (!part) continue;
       scene.remove(part);
       part.geometry?.dispose();
       part.material?.dispose();
     }
   }
-  skeleton = null; rest = new Map(); offsets = new Map(); sweeping = null;
+  disposeMetarig();
+  skeleton = null; rest = new Map(); bindRest = null; bindHold = null; offsets = new Map(); sweeping = null;
+  selected = new Set(); active = ''; pivot = '';
+  dot.visible = pivotDot.visible = false;
+  mode = 'pose'; target = 'bones';
   $('rigpane').hidden = true;
 }
 
@@ -560,12 +587,21 @@ function disposeCurrent() {
 }
 
 function frame(obj) {
-  // Sit the model on the grid and pull the camera back to fit it, whatever scale it was authored at.
+  // Sit the model on the grid, then fit the camera to it. Only done on load: it moves the model.
   const box = new THREE.Box3().setFromObject(obj);
   const size = box.getSize(new THREE.Vector3());
   const centre = box.getCenter(new THREE.Vector3());
   obj.position.sub(centre);
   obj.position.y += size.y / 2;
+  return refit(obj);
+}
+// The camera half on its own. Reset used to only fly the camera home while Fit re-measured the
+// model and then flew it home, so the two buttons did the same thing to anyone watching. This is
+// what both were reaching for, and it does not move the model — which matters once joints have been
+// dragged, because re-centring the model on its new bounding box would shift it under you.
+function refit(obj) {
+  const box = new THREE.Box3().setFromObject(obj);
+  const size = box.getSize(new THREE.Vector3());
   const span = Math.max(size.x, size.y, size.z) || 1;
   grid.scale.setScalar(span / 2);
   homeDist = span * 2.1;
@@ -631,16 +667,22 @@ async function load(url, label, kb) {
     skeleton = collectSkeleton(current);
     if (skeleton) setupRig();
     const extra = frame(current);
+    holdBind();   // after framing: the translation frame() applies is part of what rig mode holds
     applyModes(current);
     extra.ms = Math.round(performance.now() - t0);
     extra.kb = kb;
     describe(current, extra);
-    badge.innerHTML = `<b>${label}</b>`;
+    refreshPane(); note();
+    const restored = !FRESH && applySession(readSession());
+    badge.innerHTML = `<b>${label}</b>` + (restored ? ' · <span style="color:var(--cool)">session restored</span>' : '');
     for (const b of document.querySelectorAll('.item')) {
       b.setAttribute('aria-current', String(b.dataset.path === url));
     }
     const u = new URL(location.href);
     u.searchParams.set('src', url);
+    // `?fresh=1` is a one-shot. Leaving it in the address bar means every later reload throws the
+    // session away too, which is the opposite of what asking for one clean start meant.
+    u.searchParams.delete('fresh');
     history.replaceState(null, '', u);
   } catch (err) {
     badge.innerHTML = `<b>${label}</b> — failed`;
@@ -650,100 +692,237 @@ async function load(url, label, kb) {
   }
 }
 
-// --- picking and selection ---------------------------------------------------------------------
+// --- what is being edited ----------------------------------------------------------------------
+// Selection, picking, box select, the gizmo and pivot rotation all work against a "handle", and a
+// handle is either a DEF- bone of the loaded skin or a node of an imported metarig. Everything
+// below goes through these six functions so neither half needs to know about the other.
+function handleList() {
+  if (target === 'metarig') return metarig ? metarig.nodes : [];
+  return skeleton ? skeleton.deform : [];
+}
+function keyOf(h) { return target === 'metarig' ? h.key : h.name; }
+function handleByKey(k) {
+  if (!k) return null;
+  return handleList().find((h) => keyOf(h) === k) || null;
+}
+function labelOf(h) { return target === 'metarig' ? h.label : h.name; }
+function worldOf(h, v) {
+  if (target === 'metarig') return v.copy(h.pos).applyMatrix4(metarig.group.matrixWorld);
+  return h.getWorldPosition(v);
+}
+function setWorld(h, w) {
+  if (target === 'metarig') { h.pos.copy(w); metarig.group.worldToLocal(h.pos); return; }
+  const v = w.clone();
+  if (h.parent) { h.parent.updateWorldMatrix(true, false); h.parent.worldToLocal(v); }
+  h.position.copy(v);
+  noteOffset(h);
+}
+function movedOf(h) {
+  return target === 'metarig' ? h.pos.distanceToSquared(h.rest) > 1e-12 : offsets.has(h.name);
+}
+
+// An offset is the product of all this: where a joint ended up, measured from where the rig put it,
+// in the bone's own parent space. Recomputed from the bone rather than accumulated, so a drag and a
+// slider and an import all end in the same number.
+function noteOffset(b) {
+  const r = rest.get(b.uuid);
+  if (!r) return;
+  const off = { x: b.position.x - r.pos.x, y: b.position.y - r.pos.y, z: b.position.z - r.pos.z };
+  if (Math.abs(off.x) < 1e-6 && Math.abs(off.y) < 1e-6 && Math.abs(off.z) < 1e-6) offsets.delete(b.name);
+  else offsets.set(b.name, off);
+}
+
+// Everything under a selected bone, the selection included: those are the joints that would drift
+// when their parent moves, and editPositions puts each of them back.
+function withDescendants(list) {
+  const inList = new Set(list);
+  return skeleton.deform.filter((b) => {
+    for (let p = b; p; p = p.parent) if (inList.has(p)) return true;
+    return false;
+  });
+}
+
+// --- rig mode: move the skeleton, not the model ------------------------------------------------
+// A bone's position is its rest position and the skin is bound to where that was, so nudging a bone
+// drags the geometry with it. In pose mode that is the point — it is how you find out whether the
+// elbow bends in the right place. In rig mode it is exactly wrong: the mesh is the ground truth and
+// the skeleton is what needs fixing, so after every edit the bind is recomputed against the new
+// rest and the mesh does not budge.
+// The thing to preserve is the model as it was LOADED, not some abstract identity bind. A skin's
+// bone matrix is `bone.matrixWorld * boneInverse`, so forcing the inverses to plain
+// `inverse(matrixWorld)` slides the mesh the moment you enter rig mode — framing the model put a
+// translation in there. Hold each bone's loaded matrix instead and solve the inverse back out of it.
+//
+// Held RELATIVE TO THE MODEL, not in world space. The turntable is a rotation on `current`, and a
+// world-space hold freezes whatever angle the model happened to be at into the bind — the skin then
+// renders rotated away from the mesh, by however far it had spun. Divide the root out and the hold
+// is true at every angle.
+function holdBind() {
+  if (!skeleton || !current) return;
+  const sk = skeleton.skinned.skeleton;
+  scene.updateMatrixWorld(true);
+  const invW = new THREE.Matrix4().copy(current.matrixWorld).invert();
+  bindHold = sk.bones.map((b, i) =>
+    new THREE.Matrix4().multiplyMatrices(invW, b.matrixWorld).multiply(sk.boneInverses[i]));
+}
+function rebind() {
+  if (!skeleton || !bindHold || !current) return;
+  const sk = skeleton.skinned.skeleton;
+  scene.updateMatrixWorld(true);
+  const invW = new THREE.Matrix4().copy(current.matrixWorld).invert();
+  const l = new THREE.Matrix4();
+  for (let i = 0; i < sk.bones.length; i++) {
+    l.multiplyMatrices(invW, sk.bones[i].matrixWorld).invert();
+    sk.boneInverses[i].multiplyMatrices(l, bindHold[i]);
+  }
+  sk.update();
+}
+function unbind() {
+  if (!skeleton || !bindRest) return;
+  const sk = skeleton.skinned.skeleton;
+  for (let i = 0; i < sk.bones.length; i++) sk.boneInverses[i].copy(bindRest[i]);
+  sk.update();
+}
+
+// --- picking -----------------------------------------------------------------------------------
 // Screen-space picking rather than a Raycaster against the Points cloud: `Points.threshold` is in
 // world units, so it behaves differently at every zoom level and on every model scale. Projecting
 // 160 joints and measuring in pixels is both cheaper and predictable — 12 px is 12 px.
-function jointAtScreen(px, py, radius = 12) {
-  if (!skeleton) return null;
+const _pv = new THREE.Vector3();
+function screenOf(h, rect) {
+  worldOf(h, _pv).project(camera);
+  if (_pv.z > 1) return null;                      // behind the camera
+  return [(_pv.x * 0.5 + 0.5) * rect.width, (-_pv.y * 0.5 + 0.5) * rect.height];
+}
+
+function handleAtScreen(px, py, radius = 12) {
   const rect = cv.getBoundingClientRect();
-  const v = new THREE.Vector3();
   let best = null, bestD = radius * radius;
-  for (const b of skeleton.deform) {
-    b.getWorldPosition(v).project(camera);
-    if (v.z > 1) continue;                       // behind the camera
-    const sx = (v.x * 0.5 + 0.5) * rect.width;
-    const sy = (-v.y * 0.5 + 0.5) * rect.height;
-    const d = (sx - px) ** 2 + (sy - py) ** 2;
-    if (d < bestD) { bestD = d; best = b; }
+  for (const h of handleList()) {
+    const p = screenOf(h, rect);
+    if (!p) continue;
+    const d = (p[0] - px) ** 2 + (p[1] - py) ** 2;
+    if (d < bestD) { bestD = d; best = h; }
   }
   return best;
 }
 
-function jointsInRect(x0, y0, x1, y1) {
-  if (!skeleton) return [];
+function handlesInRect(x0, y0, x1, y1) {
   const rect = cv.getBoundingClientRect();
   const [lx, hx] = x0 < x1 ? [x0, x1] : [x1, x0];
   const [ly, hy] = y0 < y1 ? [y0, y1] : [y1, y0];
-  const v = new THREE.Vector3();
   const hit = [];
-  for (const b of skeleton.deform) {
-    b.getWorldPosition(v).project(camera);
-    if (v.z > 1) continue;
-    const sx = (v.x * 0.5 + 0.5) * rect.width;
-    const sy = (-v.y * 0.5 + 0.5) * rect.height;
-    if (sx >= lx && sx <= hx && sy >= ly && sy <= hy) hit.push(b);
+  for (const h of handleList()) {
+    const p = screenOf(h, rect);
+    if (p && p[0] >= lx && p[0] <= hx && p[1] >= ly && p[1] <= hy) hit.push(h);
   }
   return hit;
 }
 
-function setSelection(names, primary) {
-  selected = new Set(names);
-  if (primary) boneSel.value = primary;
-  else if (selected.size && !selected.has(boneSel.value)) boneSel.value = [...selected][0];
-  paintJoints();
-  syncSliders();
-  note();
-  reattachGizmo();
+// --- selection ---------------------------------------------------------------------------------
+// `active` is part of the selection, not a separate thing that survives it. Leaving it pointing at
+// the last joint you touched is what made joints look stuck on after None.
+function setSelection(keys, primary) {
+  // Mirror mode is sticky and applies to picking as well as to dragging: select a joint and its
+  // opposite number comes with it, so you can see both sides of what you are about to move.
+  selected = new Set(withMirror([...new Set(keys)]));
+  if (primary !== undefined) active = primary || '';
+  if (active && !selected.has(active)) active = '';
+  if (!active && selected.size) active = [...selected][0];
+  if (pivot && !selectedKeysHas(pivot) && !handleByKey(pivot)) pivot = '';
+  boneSel.value = active;
+  if (boneSel.value !== active) boneSel.value = '';   // a key from the other target
+  paintJoints(); syncSliders(); note(); reattachGizmo();
+}
+function selectedKeysHas(k) { return selected.has(k); }
+function selectedHandles() { return handleList().filter((h) => selected.has(keyOf(h))); }
+function activeHandle() { return handleByKey(active); }
+
+// Orange means selected and nothing else. A moved joint used to be painted dim orange, which reads
+// as "still selected" long after the selection is gone; moved joints are teal now.
+const C_ACTIVE = [1.00, 0.98, 0.93];
+const C_SEL    = [1.00, 0.62, 0.12];
+const C_PIVOT  = [1.00, 0.25, 0.42];
+const C_MOVED  = [0.22, 0.69, 0.65];
+const C_REST   = [0.62, 0.91, 1.00];
+function colourFor(k, moved) {
+  if (k && k === pivot) return C_PIVOT;
+  if (k && k === active) return C_ACTIVE;
+  if (selected.has(k)) return C_SEL;
+  return moved ? C_MOVED : C_REST;
 }
 
 function paintJoints() {
+  if (metarig) {
+    const mc = metarig.points.geometry.attributes.color;
+    metarig.nodes.forEach((n, i) => {
+      const c = target === 'metarig' ? colourFor(n.key, movedOf(n)) : C_REST;
+      mc.setXYZ(i, c[0], c[1], c[2]);
+    });
+    mc.needsUpdate = true;
+  }
   if (!skeleton) return;
   const col = skeleton.joints.geometry.attributes.color;
   skeleton.deform.forEach((b, i) => {
-    const moved = offsets.has(b.name);
-    const on = selected.has(b.name);
-    // selected = hot orange, edited = dim orange, otherwise pale blue
-    const c = on ? [1.0, 0.65, 0.18] : moved ? [0.85, 0.45, 0.15] : [0.62, 0.91, 1.0];
+    const c = target === 'bones' ? colourFor(b.name, offsets.has(b.name)) : C_REST;
     col.setXYZ(i, c[0], c[1], c[2]);
   });
   col.needsUpdate = true;
 }
 
-// Click to select; shift-click to add or remove. Pointerdown would fight OrbitControls, so this
-// runs on click and only when the pointer did not travel — a drag is an orbit, not a pick.
-let downAt = null;
-cv.addEventListener('pointerdown', (e) => { downAt = { x: e.clientX, y: e.clientY }; });
-cv.addEventListener('click', (e) => {
-  if (!skeleton || !skeleton.joints.visible) return;
-  if (downAt && Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) > 4) return;
-  const rect = cv.getBoundingClientRect();
-  const hit = jointAtScreen(e.clientX - rect.left, e.clientY - rect.top);
-  if (!hit) { if (!e.shiftKey) setSelection([]); return; }
-  if (e.shiftKey) {
-    const next = new Set(selected);
-    next.has(hit.name) ? next.delete(hit.name) : next.add(hit.name);
-    setSelection([...next], hit.name);
-  } else {
-    setSelection([hit.name], hit.name);
-  }
-});
-
-// Box select. Left-drag already orbits, so this takes over the gesture only while armed.
-const band = $('band');
-let boxFrom = null;
+// --- gestures ----------------------------------------------------------------------------------
+// Left-drag always orbits. Losing the camera to a mode was the worst thing about the old box
+// select, and it is why the gizmo kept handing orbiting back mid-drag. Ctrl+drag always draws a
+// band, armed or not; the Box select button only removes the need to hold Ctrl, and even then
+// Alt+drag still orbits.
+function jointsShown() {
+  if (target === 'metarig') return !!(metarig && metarig.group.visible);
+  return !!(skeleton && skeleton.joints.visible);
+}
 function boxArmed() { return $('boxsel').getAttribute('aria-pressed') === 'true'; }
-$('boxsel').addEventListener('click', () => {
-  const on = !boxArmed();
-  $('boxsel').setAttribute('aria-pressed', String(on));
-  controls.enabled = !on;
-});
+// macOS turns Ctrl+click into a secondary click, so the box-select modifier also opens the context
+// menu over the viewport. OrbitControls already suppresses that menu — but its handler bails on
+// `enabled === false`, which is exactly the state a box drag puts it in, so the menu comes through
+// on the one gesture that must not be interrupted. Suppress it here, unconditionally: there is
+// nothing in a 3D viewport a context menu is good for, and right-drag pans.
+cv.addEventListener('contextmenu', (e) => e.preventDefault());
+
+// Cmd is the modifier on a Mac. Ctrl still works where the browser lets it through, but it is not
+// the one to put in front of somebody.
+const MAC = /Mac|iPhone|iPad|iPod/i.test(
+  navigator.userAgentData?.platform || navigator.platform || navigator.userAgent || '');
+for (const el of document.querySelectorAll('kbd.mod')) el.textContent = MAC ? '\u2318' : 'ctrl';
+
+function onGizmo() { return !!(gizmo.object && gizmo.axis); }
+function wantsBox(e) {
+  if (e.button !== 0 || !jointsShown() || !handleList().length) return false;
+  // A handle under the pointer always wins. TransformControls sets `axis` on hover, and without
+  // this an armed box select swallows every gizmo drag — you arm it, grab the arrow, and lasso the
+  // model instead of moving anything.
+  if (onGizmo()) return false;
+  if (e.ctrlKey || e.metaKey) return true;
+  return boxArmed() && !e.altKey;
+}
+// The one place that decides whether OrbitControls may move the camera.
+function syncControls() { controls.enabled = !gizmoDragging && !boxFrom; }
+
+const band = $('band');
+let downAt = null, swallowClick = false;
+
+// Capture phase, deliberately: OrbitControls' own pointerdown is on this same canvas and was
+// registered first, and it bails on `enabled === false`. Disabling the camera here — before it
+// sees the event — is what stops a box drag from also orbiting.
 cv.addEventListener('pointerdown', (e) => {
-  if (!boxArmed() || !skeleton) return;
+  downAt = { x: e.clientX, y: e.clientY };
+  if (!wantsBox(e)) return;
   const r = cv.getBoundingClientRect();
-  boxFrom = { x: e.clientX - r.left, y: e.clientY - r.top, shift: e.shiftKey };
-  cv.setPointerCapture(e.pointerId);
-});
+  boxFrom = { x: e.clientX - r.left, y: e.clientY - r.top, add: e.shiftKey, sub: e.altKey, id: e.pointerId };
+  syncControls();
+  setSpin(false);   // a turntable you are trying to lasso joints on is not a turntable
+  try { cv.setPointerCapture(e.pointerId); } catch { /* the drag still works without capture */ }
+  e.preventDefault();
+}, { capture: true });
+
 cv.addEventListener('pointermove', (e) => {
   if (!boxFrom) return;
   const r = cv.getBoundingClientRect();
@@ -754,100 +933,407 @@ cv.addEventListener('pointermove', (e) => {
   });
   band.hidden = false;
 });
+
+// On the window, so releasing outside the canvas still ends the drag rather than leaving the
+// camera disabled and the band stuck on screen.
 addEventListener('pointerup', (e) => {
   if (!boxFrom) return;
-  const r = cv.getBoundingClientRect();
-  const hits = jointsInRect(boxFrom.x, boxFrom.y, e.clientX - r.left, e.clientY - r.top).map((b) => b.name);
-  const next = boxFrom.shift ? new Set([...selected, ...hits]) : new Set(hits);
-  band.hidden = true;
+  const from = boxFrom;
   boxFrom = null;
-  setSelection([...next], hits[hits.length - 1]);
+  band.hidden = true;
+  syncControls();
+  try { cv.releasePointerCapture(from.id); } catch { /* never captured */ }
+  const r = cv.getBoundingClientRect();
+  const x = e.clientX - r.left, y = e.clientY - r.top;
+  swallowClick = true;   // the click that follows a band is not a pick
+  if (Math.abs(x - from.x) < 3 && Math.abs(y - from.y) < 3) {
+    if (!from.add && !from.sub) setSelection([], '');   // a tap inside box mode clears
+    return;
+  }
+  const hits = handlesInRect(from.x, from.y, x, y).map(keyOf);
+  const both = withMirror(hits);   // removing one side has to remove the other, or it comes back
+  let next, primary;
+  if (from.add) { next = new Set([...selected, ...both]); primary = hits[hits.length - 1] || active; }
+  else if (from.sub) { next = new Set(selected); for (const k of both) next.delete(k); primary = next.has(active) ? active : ''; }
+  else { next = new Set(both); primary = hits[hits.length - 1] || ''; }
+  setSelection([...next], primary);
 });
 
-$('selall').addEventListener('click', () => {
-  if (skeleton) setSelection(skeleton.deform.map((b) => b.name));
+// Click to pick, shift-click to toggle, alt-click to drop — including dropping the active joint,
+// which previously had no way out short of loading the model again.
+cv.addEventListener('click', (e) => {
+  const dragged = downAt && Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) > 4;
+  downAt = null;
+  if (swallowClick) { swallowClick = false; return; }
+  if (dragged || onGizmo()) return;          // an orbit, or a poke at a gizmo handle
+  if (!jointsShown() || !handleList().length) return;
+  const r = cv.getBoundingClientRect();
+  const hit = handleAtScreen(e.clientX - r.left, e.clientY - r.top);
+  if (!hit) { if (!e.shiftKey && !e.altKey) setSelection([], ''); return; }
+  const k = keyOf(hit);
+  if (e.altKey && e.shiftKey) {
+    // Pin the point to swing around without disturbing what is selected. Going through the dropdown
+    // resets the selection to one joint, which is precisely the selection you were trying to keep.
+    setPivot(pivot === k ? '' : k);
+  } else if (e.altKey) {
+    const next = new Set(selected);
+    for (const x of withMirror([k])) next.delete(x);
+    setSelection([...next], active === k ? '' : active);
+  } else if (e.shiftKey) {
+    const next = new Set(selected);
+    const both = withMirror([k]);
+    if (next.has(k)) for (const x of both) next.delete(x);
+    else for (const x of both) next.add(x);
+    setSelection([...next], next.has(k) ? k : (active === k ? '' : active));
+  } else {
+    setSpin(false);
+    setSelection([k], k);   // no modifier: this joint and nothing else
+  }
 });
-$('selnone').addEventListener('click', () => setSelection([]));
 
-// --- gizmo -----------------------------------------------------------------------------------
-// The sliders stay — they are how you dial an exact number — but nudging a joint into place is a
+addEventListener('keydown', (e) => {
+  // A range input is still "the viewport" as far as these go — the only thing to keep clear of is
+  // somewhere text is being typed.
+  const t = e.target;
+  const typing = t && (t.tagName === 'TEXTAREA' || (t.tagName === 'INPUT' && t.type !== 'range'));
+  if (typing) return;
+  const cmd = e.metaKey || e.ctrlKey;
+  const k = e.key.toLowerCase();
+  if (cmd && k === 'z') { e.preventDefault(); if (e.shiftKey) redo(); else undo(); }
+  else if (cmd && k === 'y') { e.preventDefault(); redo(); }
+  else if (!cmd && e.key === 'Escape') setSelection([], '');
+});
+
+$('boxsel').addEventListener('click', () => {
+  const on = !boxArmed();
+  $('boxsel').setAttribute('aria-pressed', String(on));
+  // Arming box select with the joints hidden does nothing at all, which looks like a broken button.
+  if (on && !jointsShown()) showJoints(true);
+});
+$('selall').addEventListener('click', () => setSelection(handleList().map(keyOf), ''));
+$('selnone').addEventListener('click', () => setSelection([], ''));
+function setPivot(k) {
+  pivot = k || '';
+  $('setpivot').setAttribute('aria-pressed', String(!!pivot));
+  paintJoints(); note(); reattachGizmo();
+}
+$('setpivot').addEventListener('click', () => setPivot(pivot ? '' : active));
+
+$('mirror').addEventListener('click', () => {
+  mirror.on = !mirror.on;
+  $('mirror').setAttribute('aria-pressed', String(mirror.on));
+  if (mirror.on) {
+    detectMirror();
+    setSelection([...selected], active);   // pulls in the opposite numbers straight away
+  } else {
+    paintJoints(); note(); reattachGizmo();
+  }
+});
+
+// --- undo ---------------------------------------------------------------------------------------
+// Snapshots, not a command log. The edits here are all "some joints ended up somewhere else", the
+// state that describes them is a few thousand floats, and a Float32Array of the whole skeleton is
+// about 20 KB — cheaper to store than a reversible description of every gesture would be to get
+// right. Offsets are not stored: they are derived from the positions on the way back in.
+const UNDO_MAX = 80;
+let undoStack = [], redoStack = [];
+
+function snapshot() {
+  const s = {};
+  if (skeleton) {
+    const a = new Float32Array(skeleton.bones.length * 7);
+    skeleton.bones.forEach((x, i) => {
+      const o = i * 7;
+      a[o] = x.position.x; a[o + 1] = x.position.y; a[o + 2] = x.position.z;
+      a[o + 3] = x.quaternion.x; a[o + 4] = x.quaternion.y; a[o + 5] = x.quaternion.z; a[o + 6] = x.quaternion.w;
+    });
+    s.bones = a;
+  }
+  if (metarig) {
+    const a = new Float32Array(metarig.nodes.length * 3);
+    metarig.nodes.forEach((x, i) => { a[i * 3] = x.pos.x; a[i * 3 + 1] = x.pos.y; a[i * 3 + 2] = x.pos.z; });
+    s.nodes = a;
+  }
+  return s;
+}
+
+function restore(s) {
+  if (s.bones && skeleton && s.bones.length === skeleton.bones.length * 7) {
+    skeleton.bones.forEach((x, i) => {
+      const o = i * 7;
+      x.position.set(s.bones[o], s.bones[o + 1], s.bones[o + 2]);
+      x.quaternion.set(s.bones[o + 3], s.bones[o + 4], s.bones[o + 5], s.bones[o + 6]);
+    });
+    offsets = new Map();
+    for (const b of skeleton.bones) noteOffset(b);
+    if (mode === 'rig') rebind();
+  }
+  if (s.nodes && metarig && s.nodes.length === metarig.nodes.length * 3) {
+    metarig.nodes.forEach((x, i) => x.pos.set(s.nodes[i * 3], s.nodes[i * 3 + 1], s.nodes[i * 3 + 2]));
+  }
+  syncSliders(); paintJoints(); note(); reattachGizmo();
+}
+
+// Called BEFORE an edit, so the stack holds the state to come back to.
+function pushUndo() {
+  if (!skeleton && !metarig) return;
+  undoStack.push(snapshot());
+  if (undoStack.length > UNDO_MAX) undoStack.shift();
+  redoStack.length = 0;
+  note();
+}
+function undo() {
+  if (!undoStack.length) return;
+  redoStack.push(snapshot());
+  restore(undoStack.pop());
+}
+function redo() {
+  if (!redoStack.length) return;
+  undoStack.push(snapshot());
+  restore(redoStack.pop());
+}
+function clearHistory() { undoStack = []; redoStack = []; }
+$('undo').addEventListener('click', undo);
+$('redo').addEventListener('click', redo);
+
+// --- gizmo -------------------------------------------------------------------------------------
+// The sliders stay — they are how you dial an exact number — but moving a joint into place is a
 // spatial judgement, and a spatial judgement wants a handle you drag while looking at the mesh.
 function gizmoMode() {
   return $('gmove').getAttribute('aria-pressed') === 'true' ? 'move'
        : $('grot').getAttribute('aria-pressed') === 'true' ? 'rotate' : null;
 }
+function setGizmo(m) {
+  for (const id of ['gmove', 'grot']) $(id).setAttribute('aria-pressed', 'false');
+  if (m) $(m === 'move' ? 'gmove' : 'grot').setAttribute('aria-pressed', 'true');
+  reattachGizmo();
+}
+$('gmove').addEventListener('click', () => setGizmo(gizmoMode() === 'move' ? null : 'move'));
+$('grot').addEventListener('click', () => setGizmo(gizmoMode() === 'rotate' ? null : 'rotate'));
 
-function selectedBones() {
-  if (!skeleton) return [];
-  return skeleton.deform.filter((b) => selected.has(b.name));
+// Where the gizmo sits: the pivot joint if one is pinned, otherwise the centroid of the selection.
+function gizmoOrigin(sel, out) {
+  const p = pivot && handleByKey(pivot);
+  if (p) return worldOf(p, out);
+  const v = new THREE.Vector3();
+  out.set(0, 0, 0);
+  for (const h of sel) out.add(worldOf(h, v));
+  return out.divideScalar(sel.length || 1);
 }
 
-function setGizmo(mode) {
-  for (const id of ['gmove', 'grot']) $(id).setAttribute('aria-pressed', 'false');
-  if (mode) $(mode === 'move' ? 'gmove' : 'grot').setAttribute('aria-pressed', 'true');
-  reattachGizmo();
+// Park the proxy on the selection, oriented like the model. Called on attach and again every frame
+// the gizmo is idle, because the turntable moves the joints underneath it.
+function placeProxy(sel) {
+  gizmoOrigin(sel, proxy.position);
+  current.getWorldQuaternion(proxy.quaternion);
+  proxy.updateMatrixWorld(true);
+  proxyLast.copy(proxy.position);
+  proxyQuat.copy(proxy.quaternion);
 }
 
 function reattachGizmo() {
-  const mode = gizmoMode();
-  const bones = selectedBones();
-  if (!mode || !bones.length) { gizmo.detach(); return; }
+  const m = gizmoMode();
+  const sel = selectedHandles();
+  if (!m || !sel.length) { gizmo.detach(); return; }
 
-  if (mode === 'rotate') {
-    // Rotating several joints at once has no single sensible meaning, so rotation stays on the
-    // primary bone only, in its own frame.
-    const b = activeBone() || bones[0];
+  // One bone, no pivot pinned, posing: rotate it in its own frame — that is what bending a joint
+  // means. Anything else rotates the whole selection around a point, which is the thing a rig edit
+  // actually needs: grab the forearm and the hand, pin the elbow, swing.
+  if (m === 'rotate' && target === 'bones' && mode === 'pose' && sel.length === 1 && !pivot) {
     gizmo.setMode('rotate');
     gizmo.setSpace('local');
-    gizmo.attach(b);
+    gizmo.attach(sel[0]);
     return;
   }
 
-  // Translation drives a proxy parked at the centroid of the selection, and the per-frame delta is
-  // pushed onto every selected bone. Attaching the gizmo to one bone and hoping the rest follow
-  // does not work: they have different parents and therefore different local frames.
-  const c = new THREE.Vector3();
-  const v = new THREE.Vector3();
-  for (const b of bones) c.add(b.getWorldPosition(v));
-  c.divideScalar(bones.length);
-  proxy.position.copy(c);
-  proxy.rotation.set(0, 0, 0);
-  proxyLast.copy(c);
-  gizmo.setMode('translate');
-  gizmo.setSpace('world');   // a shared frame is the only one several bones can agree on
+  // Everything else drives a proxy and the per-frame delta is pushed onto the selection. Attaching
+  // the gizmo to one bone and hoping the rest follow does not work: they have different parents and
+  // therefore different local frames.
+  placeProxy(sel);
+  gizmo.setMode(m === 'move' ? 'translate' : 'rotate');
+  // The proxy carries the model's own orientation and the gizmo draws along it. Not world space:
+  // the turntable leaves the figure at some arbitrary angle — it is turning before you have
+  // touched anything — and a world-aligned X arrow then drags joints diagonally across the
+  // character. X should mean the character's left-right whatever the camera and the turntable are
+  // doing. A shared frame is still the only one several joints can agree on; this just picks a
+  // better one than the world.
+  gizmo.setSpace('local');
   gizmo.attach(proxy);
 }
 
-function liveGizmo() {
-  const bones = selectedBones();
-  if (!bones.length) return;
+// --- the mirror plane --------------------------------------------------------------------------
+// Found from the joints, not the mesh. A reconstruction is asymmetric on purpose — Kestrel's vest
+// tail is on one side, and symmetrising the mesh would give her two — but the skeleton under it is
+// not. Reflect every joint across a candidate plane, look for another joint within a few
+// millimetres of where it lands, and refine the plane from the midpoints of whatever pairs up.
+let mirror = { on: false, c: 0, tol: 0.003, pairs: new Map(), paired: 0, centred: 0, of: '' };
+function mirrorOn() { return mirror.on && mirror.pairs.size > 0; }
 
-  if (gizmo.getMode() === 'translate') {
-    const delta = proxy.position.clone().sub(proxyLast);
-    proxyLast.copy(proxy.position);
-    if (delta.lengthSq() === 0) return;
-    const w = new THREE.Vector3();
-    for (const b of bones) {
-      b.getWorldPosition(w).add(delta);
-      if (b.parent) b.parent.worldToLocal(w);   // back into the frame the export describes
-      b.position.copy(w);
-      const r = rest.get(b.uuid);
-      const off = { x: b.position.x - r.pos.x, y: b.position.y - r.pos.y, z: b.position.z - r.pos.z };
-      if (Math.abs(off.x) < 1e-6 && Math.abs(off.y) < 1e-6 && Math.abs(off.z) < 1e-6) offsets.delete(b.name);
-      else offsets.set(b.name, off);
+const _mv = new THREE.Vector3();
+function modelOf(h, out) { return current.worldToLocal(worldOf(h, out)); }
+
+function detectMirror() {
+  const list = handleList();
+  mirror.pairs = new Map(); mirror.paired = 0; mirror.centred = 0; mirror.of = target;
+  if (list.length < 4 || !current) return;
+  const pos = list.map((h) => modelOf(h, new THREE.Vector3()));
+  const ys = pos.map((p) => p.y);
+  const span = Math.max(...ys) - Math.min(...ys) || 1;
+  const tol = Math.max(0.003, span * 0.002);        // a couple of millimetres on a person-sized rig
+  const xs = pos.map((p) => p.x);
+  let c = (Math.min(...xs) + Math.max(...xs)) / 2;
+
+  // Nearest joint to where `i` lands when reflected across x = c.
+  const partnerOf = (i, cc) => {
+    let best = -1, bd = Infinity;
+    const tx = 2 * cc - pos[i].x;
+    for (let j = 0; j < pos.length; j++) {
+      if (j === i) continue;
+      const d = (pos[j].x - tx) ** 2 + (pos[j].y - pos[i].y) ** 2 + (pos[j].z - pos[i].z) ** 2;
+      if (d < bd) { bd = d; best = j; }
     }
+    return [best, bd];
+  };
+
+  // The bounding box centre is a poor guess on an asymmetric rig, so take the median midpoint of
+  // whatever pairs loosely and repeat. Median, not mean: one stray pair should not drag the plane.
+  for (let pass = 0; pass < 3; pass++) {
+    const mids = [];
+    for (let i = 0; i < pos.length; i++) {
+      const [j, d] = partnerOf(i, c);
+      if (j >= 0 && d < (tol * 8) ** 2) mids.push((pos[i].x + pos[j].x) / 2);
+    }
+    if (!mids.length) break;
+    mids.sort((a, b) => a - b);
+    const next = mids[mids.length >> 1];
+    if (Math.abs(next - c) < 1e-6) break;
+    c = next;
   }
+
+  // Final pass, tight and mutual: i pairs with j only if j also pairs back with i, or nothing does.
+  const near = pos.map((_, i) => { const [j, d] = partnerOf(i, c); return d <= tol * tol ? j : -1; });
+  for (let i = 0; i < pos.length; i++) {
+    const k = keyOf(list[i]);
+    if (Math.abs(pos[i].x - c) <= tol) { mirror.pairs.set(k, k); mirror.centred++; continue; }
+    const j = near[i];
+    if (j >= 0 && near[j] === i) { mirror.pairs.set(k, keyOf(list[j])); mirror.paired++; }
+  }
+  mirror.c = c; mirror.tol = tol;
+}
+
+function withMirror(keys) {
+  if (!mirrorOn()) return keys;
+  const out = new Set(keys);
+  for (const k of keys) { const p = mirror.pairs.get(k); if (p) out.add(p); }
+  return [...out];
+}
+// -1 / +1 either side of the plane, 0 for a joint sitting on it.
+function sideOf(h) {
+  const dx = modelOf(h, _mv).x - mirror.c;
+  return Math.abs(dx) <= mirror.tol ? 0 : Math.sign(dx);
+}
+
+// --- gestures ----------------------------------------------------------------------------------
+// A drag is either a translation or a turn about a point. Saying so as data rather than as a
+// closure is what makes mirroring it one line instead of three code paths.
+function applyGesture(g, w) {
+  if (g.kind === 'move') return w.add(g.delta);
+  if (g.kind === 'set') return w.copy(g.to);
+  return w.sub(g.origin).applyQuaternion(g.q).add(g.origin);
+}
+const _gq = new THREE.Quaternion();
+function mirrorPoint(w, out) {
+  out.copy(w);
+  current.worldToLocal(out);
+  out.x = 2 * mirror.c - out.x;
+  return current.localToWorld(out);
+}
+function mirrorDir(d, out) {
+  current.getWorldQuaternion(_gq);
+  out.copy(d).applyQuaternion(_gq.clone().invert());
+  out.x = -out.x;
+  return out.applyQuaternion(_gq);
+}
+function mirrorTurn(q, out) {
+  // Reflecting a rotation conjugates it. The axis is a pseudovector, so across the x = c plane it
+  // keeps its x and flips y and z; the angle is unchanged.
+  current.getWorldQuaternion(_gq);
+  const qi = _gq.clone().invert();
+  out.copy(qi).multiply(q).multiply(_gq);
+  out.set(out.x, -out.y, -out.z, out.w);
+  return out.premultiply(_gq).multiply(qi);
+}
+function mirrorGesture(g) {
+  if (g.kind === 'move') return { kind: 'move', delta: mirrorDir(g.delta, new THREE.Vector3()) };
+  if (g.kind === 'set') return { kind: 'set', to: mirrorPoint(g.to, new THREE.Vector3()) };
+  return { kind: 'turn', q: mirrorTurn(g.q, new THREE.Quaternion()),
+           origin: mirrorPoint(g.origin, new THREE.Vector3()) };
+}
+
+// --- moving joints -----------------------------------------------------------------------------
+// Move the joints that are selected and nothing else. A bone's position is relative to its parent,
+// so moving one carries its whole subtree — pick the three thumb joints and the rest of the hand
+// comes along, which is posing, not rigging. Everything under a moved joint that was not itself
+// picked is put back where it was. Selecting a whole hand and dragging still moves it in one piece:
+// that is what selecting the whole hand means.
+//
+// Shallowest first, and every position is read from a snapshot taken before any of it moved, so a
+// parent's write cannot corrupt the child's reading of where it used to be.
+function editPositions(sel, g) {
+  if (!sel.length) return;
+  const keys = withMirror(sel.map(keyOf));
+  const picked = keys.map(handleByKey).filter(Boolean);
+  const pickedSet = new Set(picked);
+  const list = target === 'metarig'
+    ? picked
+    : withDescendants(picked).sort((a, b) => depthOf(a) - depthOf(b));
+  const before = new Map(list.map((h) => [h, worldOf(h, new THREE.Vector3())]));
+  const gm = mirrorOn() ? mirrorGesture(g) : null;
+  const w = new THREE.Vector3(), t = new THREE.Vector3();
+  for (const h of list) {
+    w.copy(before.get(h));
+    if (pickedSet.has(h)) {
+      const side = gm ? sideOf(h) : 1;
+      if (side < 0) applyGesture(gm, w);
+      else if (side === 0) {
+        // On the plane. Take the symmetric half of the gesture so a spine joint slides along the
+        // plane instead of being dragged off it.
+        t.copy(w); applyGesture(gm, t); applyGesture(g, w);
+        w.add(t).multiplyScalar(0.5);
+      } else applyGesture(g, w);
+    }
+    setWorld(h, w);
+  }
+}
+
+function liveGizmo() {
+  const sel = selectedHandles();
+  if (!sel.length) return;
+  if (gizmo.object !== proxy) { syncSliders(); return; }   // single-bone local rotate: nothing to do
+
+  let g = null;
+  if (gizmo.getMode() === 'translate') {
+    const d = proxy.position.clone().sub(proxyLast);
+    proxyLast.copy(proxy.position);
+    if (d.lengthSq() === 0) return;
+    g = { kind: 'move', delta: d };
+  } else {
+    const dq = proxy.quaternion.clone().multiply(proxyQuat.clone().invert());
+    proxyQuat.copy(proxy.quaternion);
+    if (Math.abs(dq.w) > 0.9999999) return;
+    g = { kind: 'turn', q: dq, origin: proxy.position.clone() };
+  }
+  editPositions(sel, g);
+  if (mode === 'rig') rebind();
   syncSliders();
 }
+function depthOf(b) { let d = 0; for (let p = b.parent; p; p = p.parent) d++; return d; }
 
 function commitGizmo() {
   paintJoints();
   note();
   reattachGizmo();   // re-centre the proxy on where the selection ended up
 }
-
-$('gmove').addEventListener('click', () => setGizmo(gizmoMode() === 'move' ? null : 'move'));
-$('grot').addEventListener('click', () => setGizmo(gizmoMode() === 'rotate' ? null : 'rotate'));
 
 // --- lighting ---------------------------------------------------------------------------------
 // Reconstructions come out with baked, fairly dark base colour, and a fixed rig makes some models
@@ -871,52 +1357,160 @@ $('lbright').addEventListener('click', () => preset(2.2, 2.6, 2.2, 0.5));
 $('lstudio').addEventListener('click', () => preset(1.5, 1.9, 1.35, 0.75));
 $('lmoody').addEventListener('click', () => preset(1.1, 2.4, 0.5, 1.8));
 
-// --- rig controls ----------------------------------------------------------------------------
+// --- rig controls ------------------------------------------------------------------------------
 const boneSel = $('bone');
 const R = ['rx', 'ry', 'rz'], P = ['px', 'py', 'pz'];
 
-function activeBone() {
-  if (!skeleton) return null;
-  return skeleton.bones.find((b) => b.name === boneSel.value) || null;
+function activeBone() { return target === 'bones' ? activeHandle() : null; }
+function show(el, on) { el.classList.toggle('hide', !on); }
+function fileStem() {
+  return (sourcePath || 'model').split('/').pop().replace(/\.(glb|gltf)$/i, '');
+}
+
+function rebuildHandleSelect() {
+  boneSel.innerHTML = '';
+  // A `<select>` cannot be empty, and without a "none" row there is no value that means no joint —
+  // which is why the active joint used to survive every attempt to clear the selection.
+  const none = document.createElement('option');
+  none.value = ''; none.textContent = '— no joint —';
+  boneSel.appendChild(none);
+  for (const h of handleList()) {
+    const o = document.createElement('option');
+    o.value = keyOf(h);
+    o.textContent = labelOf(h);
+    boneSel.appendChild(o);
+  }
+  boneSel.value = active || '';
 }
 
 function setupRig() {
-  boneSel.innerHTML = '';
-  // Deform bones first: they are the ones whose position actually moves geometry. Rigify emits
-  // ~700 bones and most are controls and mechanisms that no export cares about.
-  const deform = skeleton.bones.filter((b) => /^DEF-/.test(b.name));
-  const list = deform.length ? deform : skeleton.bones;
-  for (const b of list) {
-    const opt = document.createElement('option');
-    opt.value = b.name;
-    opt.textContent = b.name;
-    boneSel.appendChild(opt);
-  }
-  const preferred = list.find((b) => /upper_?arm\.L$/i.test(b.name))
-                 || list.find((b) => /upper_?arm/i.test(b.name))
-                 || list[0];
-  boneSel.value = preferred.name;
-  $('rigpane').hidden = false;
+  target = 'bones';
+  mode = 'pose';
+  clearHistory();
+  offsets = new Map();
+  selected = new Set(); active = ''; pivot = '';
+  $('setpivot').setAttribute('aria-pressed', 'false');
   $('bones').setAttribute('aria-pressed', 'false');
-  $('joints').setAttribute('aria-pressed', 'false');
+  $('boxsel').setAttribute('aria-pressed', 'false');
   skeleton.helper.visible = false;
-  skeleton.dot.visible = false;
-  skeleton.joints.visible = false;
-  selected = new Set();
+  rebuildHandleSelect();
+  // Joints on by default. A viewport where clicking does nothing because the thing you are meant
+  // to click is hidden is how you conclude the tool is broken.
+  showJoints(true);
   setGizmo(null);
-  paintJoints();
-  syncSliders();
-  note();
+  refreshPane(); paintJoints(); syncSliders(); note();
+}
+
+function showJoints(on) {
+  // Only the target being edited is drawn. Both clouds at once is a field of dots where half are
+  // not clickable and nothing on screen says which half.
+  if (skeleton) {
+    skeleton.joints.visible = on && target === 'bones';
+    if (target !== 'bones') { skeleton.helper.visible = false; $('bones').setAttribute('aria-pressed', 'false'); }
+  }
+  if (metarig) metarig.group.visible = on && target === 'metarig';
+  $('joints').setAttribute('aria-pressed', String(on));
+}
+
+function refreshPane() {
+  const hasSkel = !!skeleton, hasMeta = !!metarig;
+  // Shown for any loaded model, not just a rigged one. An unrigged mesh plus a joints file is the
+  // whole point of `--export-joints`, and the way to bring that file in cannot live inside a panel
+  // that only appears once you already have a skeleton.
+  const editable = hasSkel || hasMeta;
+  $('rigpane').hidden = !current;
+  for (const id of ['seg1', 'rowbone', 'rowview', 'rowsel', 'rowmirror', 'rowreset', 'keys'])
+    show($(id), editable);
+  for (const el of document.querySelectorAll('.sl')) show(el, editable);
+  show($('exportjoints'), editable);
+  if (!editable) {
+    $('rignote').innerHTML = 'No skin in this model. Import an <b>apex-metarig-joints/1</b> file '
+      + '\u2014 what <b>rig_character.py --export-joints</b> writes \u2014 to place its joints on this '
+      + 'mesh, or drop the .json anywhere on the page.';
+    show($('seg2'), false);
+    return;
+  }
+  $('mpose').setAttribute('aria-pressed', String(mode === 'pose'));
+  $('mrig').setAttribute('aria-pressed', String(mode === 'rig'));
+  $('tskel').setAttribute('aria-pressed', String(target === 'bones'));
+  $('tmeta').setAttribute('aria-pressed', String(target === 'metarig'));
+  $('mpose').disabled = target === 'metarig';   // a metarig file has no pose to scratch on
+  $('tskel').disabled = !hasSkel;
+  $('tmeta').disabled = !hasMeta;
+  show($('seg2'), hasSkel && hasMeta);
+  const posing = hasSkel && target === 'bones' && mode === 'pose';
+  for (const el of document.querySelectorAll('.sl.rot')) show(el, posing);
+  for (const el of document.querySelectorAll('.sl.pos')) show(el, true);
+  show($('sweep'), posing);
+  show($('restall'), posing);
+  show($('bones'), hasSkel && target === 'bones');
+  $('clearoff').textContent = mode === 'rig' ? 'Reset joints' : 'Clear offsets';
+  $('exportjoints').textContent = target === 'metarig' ? 'Export metarig' : 'Export offsets';
+  // Rig mode is for gross repositioning — a proportional metarig fit put Kestrel's hands at ankle
+  // height — so the position sliders widen to something that can reach.
+  const span = mode === 'rig' ? 0.5 : 0.15;
+  for (const id of P) { $(id).min = -span; $(id).max = span; }
+}
+
+function setMode(m) {
+  if (target === 'metarig') m = 'rig';
+  mode = m;
+  sweeping = null; $('sweep').setAttribute('aria-pressed', 'false');
+  if (skeleton) {
+    if (mode === 'rig') {
+      // A scratch pose baked into a rig export would be a disaster, so entering rig mode drops it.
+      if (skeleton.bones.some((b) => !b.quaternion.equals(rest.get(b.uuid).quat))) pushUndo();
+      for (const b of skeleton.bones) b.quaternion.copy(rest.get(b.uuid).quat);
+      rebind();
+    } else {
+      unbind();
+    }
+  }
+  refreshPane(); syncSliders(); paintJoints(); note(); reattachGizmo();
+}
+
+function setTarget(t) {
+  if (t === target) return;
+  if (t === 'metarig' && !metarig) return;
+  if (t === 'bones' && !skeleton) return;
+  target = t;
+  selected = new Set(); active = '';
+  setPivot('');
+  rebuildHandleSelect();
+  showJoints(true);
+  if (mirror.on) detectMirror();     // a different set of joints means a different set of pairs
+  setMode(target === 'metarig' ? 'rig' : mode);
+}
+
+$('mpose').addEventListener('click', () => setMode('pose'));
+$('mrig').addEventListener('click', () => setMode('rig'));
+$('tskel').addEventListener('click', () => setTarget('bones'));
+$('tmeta').addEventListener('click', () => setTarget('metarig'));
+
+function offsetOf(h) {
+  if (target === 'metarig') return { x: h.pos.x - h.rest.x, y: h.pos.y - h.rest.y, z: h.pos.z - h.rest.z };
+  return offsets.get(h.name) || { x: 0, y: 0, z: 0 };
 }
 
 function syncSliders() {
-  const b = activeBone();
-  if (!b) return;
-  const e = new THREE.Euler().setFromQuaternion(b.quaternion, 'XYZ');
-  const deg = (r) => Math.round(THREE.MathUtils.radToDeg(r));
-  const vals = [deg(e.x), deg(e.y), deg(e.z)];
-  R.forEach((id, i) => { $(id).value = vals[i]; $(id + 'v').textContent = vals[i] + '\u00b0'; });
-  const off = offsets.get(b.name) || { x: 0, y: 0, z: 0 };
+  const h = activeHandle();
+  if (!h) {
+    R.forEach((id) => { $(id).value = 0; $(id + 'v').textContent = '0°'; });
+    P.forEach((id) => {
+      $(id).value = 0;
+      const el = $(id + 'v');
+      el.textContent = '—';
+      el.classList.remove('edited');
+    });
+    return;
+  }
+  if (target === 'bones') {
+    const e = new THREE.Euler().setFromQuaternion(h.quaternion, 'XYZ');
+    const deg = (r) => Math.round(THREE.MathUtils.radToDeg(r));
+    const vals = [deg(e.x), deg(e.y), deg(e.z)];
+    R.forEach((id, i) => { $(id).value = vals[i]; $(id + 'v').textContent = vals[i] + '°'; });
+  }
+  const off = offsetOf(h);
   [off.x, off.y, off.z].forEach((v, i) => {
     $(P[i]).value = v;
     const el = $(P[i] + 'v');
@@ -930,45 +1524,87 @@ function applyRotation() {
   if (!b) return;
   const rad = (id) => THREE.MathUtils.degToRad(parseFloat($(id).value));
   b.quaternion.setFromEuler(new THREE.Euler(rad('rx'), rad('ry'), rad('rz'), 'XYZ'));
-  R.forEach((id) => { $(id + 'v').textContent = Math.round(parseFloat($(id).value)) + '\u00b0'; });
+  R.forEach((id) => { $(id + 'v').textContent = Math.round(parseFloat($(id).value)) + '°'; });
 }
 
 function applyOffset() {
-  const b = activeBone();
-  if (!b) return;
-  const r = rest.get(b.uuid);
+  const h = activeHandle();
+  if (!h) return;
   const off = { x: parseFloat($('px').value), y: parseFloat($('py').value), z: parseFloat($('pz').value) };
-  if (Math.abs(off.x) < 1e-6 && Math.abs(off.y) < 1e-6 && Math.abs(off.z) < 1e-6) offsets.delete(b.name);
-  else offsets.set(b.name, off);
-  // Move the joint relative to where it was bound. The skin keeps its original bind matrices, so
-  // geometry near the joint shifts — which is the point: you are looking for the position where
-  // the elbow bends in the right place, not for the mesh to stay still.
-  b.position.set(r.pos.x + off.x, r.pos.y + off.y, r.pos.z + off.z);
+  // Through the same path a drag takes, so a slider mirrors and holds children exactly as a drag
+  // does. In pose mode the skin keeps its original bind and geometry near the joint shifts — which
+  // is the point, you are looking for the place the elbow should bend from. In rig mode the bind is
+  // recomputed and the mesh holds still.
+  const to = new THREE.Vector3();
+  if (target === 'metarig') {
+    to.copy(h.rest).add(new THREE.Vector3(off.x, off.y, off.z));
+    metarig.group.localToWorld(to);
+  } else {
+    const r = rest.get(h.uuid);
+    to.set(r.pos.x + off.x, r.pos.y + off.y, r.pos.z + off.z);
+    if (h.parent) { h.parent.updateWorldMatrix(true, false); h.parent.localToWorld(to); }
+  }
+  editPositions([h], { kind: 'set', to });
+  if (mode === 'rig') rebind();
   P.forEach((id, i) => {
     const v = [off.x, off.y, off.z][i];
     const el = $(id + 'v');
     el.textContent = v.toFixed(3);
     el.classList.toggle('edited', Math.abs(v) > 1e-6);
   });
-  note();
+  paintJoints(); note(); reattachGizmo();
+}
+
+function movedCount() {
+  if (target === 'metarig') return metarig ? metarig.nodes.filter((n) => n.pos.distanceToSquared(n.rest) > 1e-12).length : 0;
+  return offsets.size;
 }
 
 function note() {
-  const n = offsets.size;
-  $('rignote').innerHTML = skeleton
-    ? `<b>${skeleton.deform.length}</b> joints, <b>${selected.size}</b> selected, ` +
-      `<b>${n}</b> moved. ` +
-      `Rotation is scratch and is never exported; only joint offsets are. ` +
-      `Source: <b>${sourcePath || 'unknown'}</b>`
-    : '';
+  // Short enough to read at a glance. What each mode does, what Export writes and which key does
+  // what all live on the controls themselves now — as titles, and under Keys — rather than as three
+  // paragraphs of prose restating them every time anything moves.
+  if (!skeleton && !metarig) return;
+  const bits = [
+    `<b>${handleList().length}</b> ${target === 'metarig' ? 'metarig' : 'deform'} joints`,
+    `<b>${selected.size}</b> selected`,
+    `<b>${movedCount()}</b> moved`,
+  ];
+  if (pivot && handleByKey(pivot)) bits.push(`pivot <b>${labelOf(handleByKey(pivot))}</b>`);
+  if (mirror.on) {
+    bits.push(mirror.paired
+      ? `mirror <b>${mirror.paired}</b> pairs, <b>${mirror.centred}</b> centred`
+      : '<span class="warn">mirror found no pairs</span>');
+    $('mirror').title = mirror.paired
+      ? `Plane at x=${mirror.c.toFixed(4)} — ${mirror.paired} joints paired, ${mirror.centred} on the plane`
+      : 'No joint pairs found: nothing will mirror';
+  }
+  if (undoStack.length) bits.push(`<b>${undoStack.length}</b> to undo`);
+  $('exportjoints').title = target === 'metarig'
+    ? 'Writes apex-metarig-joints/1 — feed it back to rig_character.py --joints'
+    : 'Writes apex-joint-offsets/1: DEF- bone positions, a record of what is wrong with this rig';
+  $('rignote').innerHTML = bits.join(' \u00b7 ') +
+    '<br><span class="swatch sw-active"></span> active \u00b7 ' +
+    '<span class="swatch sw-sel"></span> selected \u00b7 ' +
+    '<span class="swatch sw-pivot"></span> pivot \u00b7 ' +
+    '<span class="swatch sw-moved"></span> moved \u00b7 ' +
+    '<span class="swatch sw-rest"></span> as rigged' +
+    (metarig && metarig.warn
+      ? `<br><span class="warn">Height mismatch \u2014 ${metarig.warn}.</span>` : '');
+  markDirty();
 }
 
 R.forEach((id) => $(id).addEventListener('input', applyRotation));
 P.forEach((id) => $(id).addEventListener('input', applyOffset));
+// A range fires `input` continuously; one drag of it should still be one step to undo.
+for (const id of [...R, ...P]) {
+  $(id).addEventListener('pointerdown', pushUndo);
+  $(id).addEventListener('keydown', (e) => { if (!e.repeat && /^Arrow|^Page|^Home|^End/.test(e.key)) pushUndo(); });
+}
 boneSel.addEventListener('change', () => {
   sweeping = null;
   $('sweep').setAttribute('aria-pressed', 'false');
-  setSelection([boneSel.value], boneSel.value);
+  setSelection(boneSel.value ? [boneSel.value] : [], boneSel.value);
 });
 
 $('sweep').addEventListener('click', () => {
@@ -982,33 +1618,165 @@ $('bones').addEventListener('click', () => {
   const on = $('bones').getAttribute('aria-pressed') !== 'true';
   $('bones').setAttribute('aria-pressed', String(on));
   skeleton.helper.visible = on;
-  skeleton.dot.visible = on;
 });
 
-$('joints').addEventListener('click', () => {
-  if (!skeleton) return;
-  const on = $('joints').getAttribute('aria-pressed') !== 'true';
-  $('joints').setAttribute('aria-pressed', String(on));
-  skeleton.joints.visible = on;
-  skeleton.dot.visible = on || skeleton.helper.visible;
-});
+$('joints').addEventListener('click', () => showJoints(!jointsShown()));
 
 $('restall').addEventListener('click', () => {
   if (!skeleton) return;
+  pushUndo();
   sweeping = null; $('sweep').setAttribute('aria-pressed', 'false');
   for (const b of skeleton.bones) b.quaternion.copy(rest.get(b.uuid).quat);
   syncSliders();
 });
 
 $('clearoff').addEventListener('click', () => {
-  if (!skeleton) return;
-  for (const b of skeleton.bones) b.position.copy(rest.get(b.uuid).pos);
-  offsets = new Map();
+  pushUndo();
+  if (target === 'metarig') {
+    if (!metarig) return;
+    for (const n of metarig.nodes) n.pos.copy(n.rest);
+  } else {
+    if (!skeleton) return;
+    for (const b of skeleton.bones) b.position.copy(rest.get(b.uuid).pos);
+    offsets = new Map();
+    if (mode === 'rig') rebind();
+  }
   syncSliders(); paintJoints(); note(); reattachGizmo();
 });
 
-$('exportjoints').addEventListener('click', () => {
-  if (!skeleton) return;
+// --- the metarig -------------------------------------------------------------------------------
+// `apex-metarig-joints/1` is the file that actually controls the rig. Rigify fits its metarig by
+// SCALING a human template to the mesh height and never looks at the mesh, so on a stylised
+// character the joints land wrong and re-running does not improve them. rig_character.py writes
+// the fitted metarig's ~27 body joints with --export-joints and reads a corrected file back with
+// --joints, injecting it between the fit and rigify_generate, which is the only place a correction
+// survives. The DEF- skeleton in a rigged .glb is downstream of all that: editing it corrects an
+// output. This edits the input.
+function buildMetarig(doc) {
+  const src = doc.joints || {};
+  const names = Object.keys(src);
+  const nodes = [];
+  const ends = new Map();     // "<bone>/head" | "<bone>/tail" -> node
+  const mk = (v) => {
+    const n = {
+      key: 'n' + nodes.length, label: '', refs: [],
+      pos: new THREE.Vector3(v[0], v[1], v[2]),
+      rest: new THREE.Vector3(v[0], v[1], v[2]),
+    };
+    nodes.push(n);
+    return n;
+  };
+  for (const name of names) {
+    const rec = src[name];
+    const h = mk(rec.head); h.refs.push([name, 'head']); ends.set(name + '/head', h);
+    const t = mk(rec.tail); t.refs.push([name, 'tail']); ends.set(name + '/tail', t);
+  }
+
+  // A connected child's head IS its parent's tail. Blender refuses a head that disagrees — that is
+  // what apply_joints reports as `did_not_take` — so they are merged into one node and dragging the
+  // elbow moves both bones, the way edit mode behaves.
+  const dead = new Set();
+  for (const name of names) {
+    const rec = src[name];
+    if (!rec.connected || !rec.parent || !src[rec.parent]) continue;
+    const head = ends.get(name + '/head'), tail = ends.get(rec.parent + '/tail');
+    if (!head || !tail || head === tail || dead.has(head) || dead.has(tail)) continue;
+    for (const ref of head.refs) { tail.refs.push(ref); ends.set(ref[0] + '/' + ref[1], tail); }
+    dead.add(head);
+  }
+  const live = nodes.filter((n) => !dead.has(n));
+  live.forEach((n, i) => {
+    n.key = 'n' + i;
+    const h = n.refs.find((r) => r[1] === 'head');
+    n.label = h ? h[0] : n.refs[0][0] + ' ·tip';
+  });
+
+  // Parented to the loaded model, so the overlay tracks the framing translation and the turntable
+  // without any of this having to know they happened. The joints file is written in the exported
+  // mesh's own space precisely so the browser can draw it without transforming anything.
+  const group = new THREE.Group();
+  (current || scene).add(group);
+
+  const pg = new THREE.BufferGeometry();
+  pg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(live.length * 3), 3));
+  pg.setAttribute('color', new THREE.BufferAttribute(new Float32Array(live.length * 3), 3));
+  const points = new THREE.Points(pg, new THREE.PointsMaterial({
+    size: 11, sizeAttenuation: false, depthTest: false, transparent: true, opacity: 0.98,
+    vertexColors: true }));
+  points.renderOrder = 12; points.frustumCulled = false;
+  group.add(points);
+
+  const segs = names.map((n) => [ends.get(n + '/head'), ends.get(n + '/tail')]);
+  const lg = new THREE.BufferGeometry();
+  lg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(segs.length * 6), 3));
+  const lines = new THREE.LineSegments(lg, new THREE.LineBasicMaterial({
+    color: 0xffa62f, depthTest: false, transparent: true, opacity: 0.8 }));
+  lines.renderOrder = 11; lines.frustumCulled = false;
+  group.add(lines);
+
+  return { doc, names, nodes: live, ends, segs, group, points, lines, warn: '' };
+}
+
+function disposeMetarig() {
+  if (!metarig) return;
+  metarig.group.parent?.remove(metarig.group);
+  for (const o of [metarig.points, metarig.lines]) { o.geometry.dispose(); o.material.dispose(); }
+  metarig = null;
+  if (target === 'metarig') target = 'bones';
+}
+
+function loadMetarig(doc) {
+  disposeMetarig();
+  metarig = buildMetarig(doc);
+  target = 'metarig';
+  selected = new Set(); active = ''; pivot = '';
+  $('setpivot').setAttribute('aria-pressed', 'false');
+  rebuildHandleSelect();
+  showJoints(true);
+  clearHistory();
+  if (mirror.on) detectMirror();
+  // The file is written in the exported mesh's own space, so if the .glb on screen is not the mesh
+  // it was written against the joints land somewhere plausible-looking and wrong. Height is the
+  // cheapest check that catches it.
+  const h = current ? new THREE.Box3().setFromObject(current).getSize(new THREE.Vector3()).y : 0;
+  const want = doc.height;
+  metarig.warn = (want && h && Math.abs(want - h) / want > 0.02)
+    ? `the file says ${(+want).toFixed(3)} m, this model measures ${h.toFixed(3)} m` : '';
+  setMode('rig');
+  return metarig.nodes.length;
+}
+
+const round = (v) => Math.round(v * 1e5) / 1e5;
+
+function exportMetarig() {
+  const joints = {};
+  for (const name of metarig.names) {
+    const rec = metarig.doc.joints[name];
+    const h = metarig.ends.get(name + '/head').pos, t = metarig.ends.get(name + '/tail').pos;
+    joints[name] = {
+      head: [round(h.x), round(h.y), round(h.z)],
+      tail: [round(t.x), round(t.y), round(t.z)],
+      parent: rec.parent ?? null,
+      connected: !!rec.connected,
+    };
+  }
+  // Everything the file arrived with is kept — format, axis, units, height, the note explaining
+  // where the numbers came from — because rig_character.py reads them and a correction file that
+  // loses its own provenance is not worth much either.
+  const doc = Object.assign({}, metarig.doc, {
+    joints,
+    corrected: {
+      by: 'apps/arcade/public/models.html (LATHE)',
+      at: new Date().toISOString(),
+      moved: movedCount(),
+      against: sourcePath,
+      page: location.href,
+    },
+  });
+  download(JSON.stringify(doc, null, 2), fileStem() + '.metarig.json');
+}
+
+function exportOffsets() {
   const joints = {};
   for (const b of skeleton.bones) {
     const off = offsets.get(b.name);
@@ -1037,23 +1805,28 @@ $('exportjoints').addEventListener('click', () => {
       url: sourcePath && /^https?:/.test(sourcePath) ? sourcePath : location.origin + (sourcePath || ''),
       page: location.href,
       loaded: new Date().toISOString(),
+      mode,
     },
     units: {
-      offset: 'metres, in the bone\u2019s parent space',
+      offset: 'metres, in the bone’s parent space',
       world: 'metres, world space, character standing on y=0 at the height given below',
     },
     height: skeleton ? +(new THREE.Box3().setFromObject(skeleton.skinned).getSize(new THREE.Vector3()).y).toFixed(4) : null,
     skeleton: { bones: skeleton.bones.length, root: skeleton.bones[0] ? skeleton.bones[0].name : null },
     note: 'Joint offsets only, on DEF- deform bones. Apply to the matching metarig bone before '
         + 'rigify_generate — DEF-upper_armL corresponds to metarig upper_arm.L. '
-        + 'See tools/rigging/rig_character.py.',
+        + 'See tools/rigging/rig_character.py. To edit the metarig itself instead — which is what '
+        + 'the rig is actually generated from — export a apex-metarig-joints/1 file with '
+        + 'rig_character.py --export-joints and import it here.',
     joints,
   };
-  download(JSON.stringify(doc, null, 2),
-    (sourcePath || 'model').split('/').pop().replace(/\.glb$/i, '') + '.joints.json');
-});
+  download(JSON.stringify(doc, null, 2), fileStem() + '.joints.json');
+}
 
-const round = (v) => Math.round(v * 1e5) / 1e5;
+$('exportjoints').addEventListener('click', () => {
+  if (target === 'metarig' && metarig) exportMetarig();
+  else if (skeleton) exportOffsets();
+});
 
 function download(text, name) {
   const blob = new Blob([text], { type: 'application/json' });
@@ -1064,32 +1837,201 @@ function download(text, name) {
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 }
 
-$('importjoints').addEventListener('click', () => $('jointsfile').click());
-$('jointsfile').addEventListener('change', async (e) => {
-  const f = e.target.files && e.target.files[0];
-  if (!f || !skeleton) return;
+function applyOffsetsDoc(doc) {
+  pushUndo();
+  let hit = 0;
+  const miss = [];
+  for (const [name, rec] of Object.entries(doc.joints || {})) {
+    const b = skeleton.bones.find((x) => x.name === name);
+    if (!b) { miss.push(name); continue; }
+    const off = { x: rec.offset[0], y: rec.offset[1], z: rec.offset[2] };
+    offsets.set(name, off);
+    const r = rest.get(b.uuid);
+    b.position.set(r.pos.x + off.x, r.pos.y + off.y, r.pos.z + off.z);
+    hit++;
+  }
+  if (mode === 'rig') rebind();
+  syncSliders(); paintJoints(); note();
+  return { hit, miss };
+}
+
+// One import button, two formats. Which one a file is decides what it does — being handed the
+// wrong one and silently applying nothing would be the worst of the three outcomes.
+async function importJointsFile(f) {
   try {
     const doc = JSON.parse(await f.text());
-    let hit = 0, miss = [];
-    for (const [name, rec] of Object.entries(doc.joints || {})) {
-      const b = skeleton.bones.find((x) => x.name === name);
-      if (!b) { miss.push(name); continue; }
-      const off = { x: rec.offset[0], y: rec.offset[1], z: rec.offset[2] };
-      offsets.set(name, off);
-      const r = rest.get(b.uuid);
-      b.position.set(r.pos.x + off.x, r.pos.y + off.y, r.pos.z + off.z);
-      hit++;
+    if (doc.format === 'apex-metarig-joints/1') {
+      const n = loadMetarig(doc);
+      msg.textContent = '';
+      badge.innerHTML = badge.innerHTML.replace(/ · metarig.*$/, '') + ` · metarig: ${n} joints`;
+      return;
     }
-    syncSliders(); note();
+    if (!skeleton) {
+      msg.textContent = `${f.name} is ${doc.format ? `a ${doc.format} file` : 'not a joints file'}, `
+        + 'and this model has no skeleton to apply it to. Load a rigged .glb first, or import an '
+        + 'apex-metarig-joints/1 file to place metarig joints on an unrigged mesh.';
+      return;
+    }
+    const { hit, miss } = applyOffsetsDoc(doc);
     msg.textContent = miss.length
-      ? `Applied ${hit} joint offsets. ${miss.length} bone name(s) not in this skeleton: ${miss.slice(0, 4).join(', ')}${miss.length > 4 ? '\u2026' : ''}`
+      ? `Applied ${hit} joint offsets. ${miss.length} bone name(s) not in this skeleton: ${miss.slice(0, 4).join(', ')}${miss.length > 4 ? '…' : ''}`
       : '';
-    if (!miss.length) msg.textContent = '';
   } catch (err) {
     msg.textContent = `Could not read ${f.name} — ${err.message}`;
   }
+}
+
+$('importjoints').addEventListener('click', () => $('jointsfile').click());
+$('jointsfile').addEventListener('change', (e) => {
+  const f = e.target.files && e.target.files[0];
+  if (f) importJointsFile(f);
   e.target.value = '';
 });
+
+// --- keeping the session -------------------------------------------------------------------------
+// A rig edit is half an hour of judgement calls and a browser reload should not be what throws it
+// away. Everything that is not the model file goes into localStorage: the edits, the selection, the
+// pivot, the mode, the camera, the lights, every toggle. The model itself is named rather than
+// stored — it is megabytes, and it is already on the server.
+//
+// Per-viewer convenience, so every access is guarded: a private window or blocked site data throws
+// on access rather than on use, and the worst outcome of a failure here is starting fresh. Add
+// `?fresh=1` to the URL to deliberately ignore and clear what was kept.
+const SKEY = 'lathe.session/1';
+const pressedOn = (id) => $(id).getAttribute('aria-pressed') === 'true';
+let sessionTimer = null, lastSave = 0, restoring = false;
+
+function markDirty() {
+  if (restoring) return;
+  clearTimeout(sessionTimer);
+  // Debounced, but with a ceiling. The camera emits `change` for every frame of its glide, and a
+  // pure debounce lets a signal like that postpone the write indefinitely — which it did: reload
+  // during the glide and the edit that started it was never written.
+  if (performance.now() - lastSave > 2000) saveSession();
+  else sessionTimer = setTimeout(saveSession, 600);
+}
+
+function saveSession() {
+  clearTimeout(sessionTimer);
+  lastSave = performance.now();
+  if (!current || !sourcePath) return;
+  try {
+    const s = {
+      src: sourcePath, mode, target, active, pivot, mirror: mirror.on, tool: gizmoMode(),
+      selected: [...selected],
+      view: {
+        spin: spinning, wire: pressedOn('wire'), flat: pressedOn('flat'), grid: pressedOn('grid'),
+        joints: pressedOn('joints'), boxsel: pressedOn('boxsel'), wide: pressedOn('wide'),
+        bones: !!(skeleton && skeleton.helper.visible), models: $('modelspane').open,
+      },
+      tab: Object.keys(TABS).find((t) => $(t).getAttribute('aria-selected') === 'true') || 'tab-rig',
+      light: Object.fromEntries(Object.entries(LIGHTS).map(([k, id]) => [k, parseFloat($(id).value)])),
+      cam: [camera.position.x, camera.position.y, camera.position.z,
+            controls.target.x, controls.target.y, controls.target.z],
+      offsets: [...offsets].map(([n, o]) => [n, round(o.x), round(o.y), round(o.z)]),
+      pose: [],
+      meta: null,
+    };
+    if (skeleton) {
+      // Only what differs from rest. A pose is usually a handful of bones out of seven hundred.
+      for (const b of skeleton.bones) {
+        const r = rest.get(b.uuid);
+        if (r && !b.quaternion.equals(r.quat)) {
+          s.pose.push([b.name, round(b.quaternion.x), round(b.quaternion.y), round(b.quaternion.z), round(b.quaternion.w)]);
+        }
+      }
+    }
+    if (metarig) {
+      s.meta = { doc: metarig.doc, nodes: metarig.nodes.map((n) => [round(n.pos.x), round(n.pos.y), round(n.pos.z)]) };
+    }
+    localStorage.setItem(SKEY, JSON.stringify(s));
+  } catch { /* unavailable or full; the session simply is not kept */ }
+}
+
+function readSession() {
+  try { return JSON.parse(localStorage.getItem(SKEY) || 'null'); } catch { return null; }
+}
+function forgetSession() { try { localStorage.removeItem(SKEY); } catch { /* nothing to forget */ } }
+
+function applySession(s) {
+  if (!s || s.src !== sourcePath) return false;
+  restoring = true;
+  try {
+    for (const [k, id] of Object.entries(LIGHTS)) if (s.light && s.light[k] != null) $(id).value = s.light[k];
+    applyLights();
+
+    const v = s.view || {};
+    for (const id of ['wire', 'flat']) if (v[id] !== undefined) $(id).setAttribute('aria-pressed', String(v[id]));
+    applyModes(current);
+    if (v.grid !== undefined) { $('grid').setAttribute('aria-pressed', String(v.grid)); grid.visible = v.grid; }
+    if (v.wide) { $('wide').setAttribute('aria-pressed', 'true'); document.body.classList.add('wide'); }
+    if (v.models !== undefined) $('modelspane').open = !!v.models;
+    showTab(s.tab || 'tab-rig');
+    if (v.boxsel) $('boxsel').setAttribute('aria-pressed', 'true');
+    setSpin(!!v.spin);
+
+    if (Array.isArray(s.cam) && s.cam.length === 6 && s.cam.every(Number.isFinite)) {
+      camera.position.set(s.cam[0], s.cam[1], s.cam[2]);
+      controls.target.set(s.cam[3], s.cam[4], s.cam[5]);
+      controls.update();
+    }
+
+    if (s.meta && s.meta.doc) {
+      loadMetarig(s.meta.doc);
+      metarig.nodes.forEach((n, i) => { const q = s.meta.nodes && s.meta.nodes[i]; if (q) n.pos.set(q[0], q[1], q[2]); });
+    }
+
+    if (skeleton) {
+      setMode(s.mode === 'rig' ? 'rig' : 'pose');
+      const byName = new Map(skeleton.bones.map((b) => [b.name, b]));
+      for (const [n, x, y, z] of s.offsets || []) {
+        const b = byName.get(n), r = b && rest.get(b.uuid);
+        if (!r) continue;
+        b.position.set(r.pos.x + x, r.pos.y + y, r.pos.z + z);
+        offsets.set(n, { x, y, z });
+      }
+      // Rotation is scratch and rig mode drops it, so it only comes back if that is where we were.
+      if (mode === 'pose') {
+        for (const [n, x, y, z, w] of s.pose || []) byName.get(n)?.quaternion.set(x, y, z, w);
+      }
+      if (mode === 'rig') rebind();
+    }
+
+    if (s.target === 'metarig' && metarig) setTarget('metarig');
+    if (v.joints === false) showJoints(false);
+    if (v.bones && skeleton) { $('bones').setAttribute('aria-pressed', 'true'); skeleton.helper.visible = true; }
+    if (s.mirror) { mirror.on = true; $('mirror').setAttribute('aria-pressed', 'true'); detectMirror(); }
+
+    pivot = '';
+    setSelection((s.selected || []).filter(handleByKey), s.active || '');
+    if (s.pivot && handleByKey(s.pivot)) setPivot(s.pivot);
+    setGizmo(s.tool || null);
+    clearHistory();
+    syncSliders(); paintJoints(); refreshPane(); note();
+    return true;
+  } catch (err) {
+    // A kept session that cannot be read back is worse than none: drop it rather than wedge the page.
+    msg.textContent = `Could not restore the last session — ${err.message}. Starting fresh.`;
+    forgetSession();
+    return false;
+  } finally {
+    restoring = false;
+  }
+}
+
+// The camera is not part of any note(), so it needs its own nudge. On `change` rather than `end`:
+// damping keeps easing the camera for a second after the drag stops, and saving at `end` stores a
+// position the camera was only passing through. `change` fires through the whole glide and the
+// debounce means only the last one, once it has settled, is written.
+controls.addEventListener('change', markDirty);
+// And whatever is pending goes out on the way off the page, so a reload never lands between the
+// last edit and the next write.
+addEventListener('pagehide', saveSession);
+addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveSession(); });
+for (const id of Object.values(LIGHTS)) $(id).addEventListener('change', markDirty);
+for (const id of ['spin', 'wire', 'flat', 'grid', 'wide', 'bones', 'joints', 'boxsel', 'mirror', 'gmove', 'grot', 'setpivot']) {
+  $(id).addEventListener('click', markDirty);
+}
 
 // --- catalogue -----------------------------------------------------------------------------
 const listEl = $('list');
@@ -1128,7 +2070,10 @@ const stage = $('stage'), drop = $('drop');
 }));
 addEventListener('drop', (e) => {
   const f = e.dataTransfer?.files?.[0];
-  if (f) load(URL.createObjectURL(f), f.name, Math.round(f.size / 1024));
+  if (!f) return;
+  // A .json dropped on the window is a correction file for what is already loaded, not a model.
+  if (/\.json$/i.test(f.name)) importJointsFile(f);
+  else load(URL.createObjectURL(f), f.name, Math.round(f.size / 1024));
 });
 
 $('spin').addEventListener('click', () => setSpin(!spinning));
@@ -1145,10 +2090,9 @@ $('grid').addEventListener('click', () => {
   b.setAttribute('aria-pressed', String(on));
   grid.visible = on;
 });
-$('reset').addEventListener('click', home);
+$('reset').addEventListener('click', () => { if (current) refit(current); else home(); });
 
 const stageEl = document.querySelector('.stage');
-const panesEl = document.querySelector('.panes');
 
 function size() {
   const w = cv.clientWidth, h = cv.clientHeight;
@@ -1182,19 +2126,35 @@ try {
 $('wide').addEventListener('click', () => {
   const on = $('wide').getAttribute('aria-pressed') !== 'true';
   $('wide').setAttribute('aria-pressed', String(on));
-  panesEl.classList.toggle('wide', on);
-  // A class change resizes the element, which the observer picks up; nothing to do here.
+  // Widen the page rather than hide the rails. On a big display they sit either side of a far
+  // larger viewport; throwing the controls away to get there was the wrong half of the trade.
+  document.body.classList.toggle('wide', on);
+  // The class resizes the canvas, which the ResizeObserver picks up; nothing to do here.
 });
 
-// Re-frame the camera on whatever is loaded, at the current viewport shape.
-$('fit').addEventListener('click', () => { if (current) { frame(current); } });
+// --- tabs ---------------------------------------------------------------------------------------
+const TABS = { 'tab-rig': 'panel-rig', 'tab-render': 'panel-render', 'tab-info': 'panel-info' };
+function showTab(id) {
+  if (!TABS[id]) id = 'tab-rig';
+  for (const [t, panel] of Object.entries(TABS)) {
+    $(t).setAttribute('aria-selected', String(t === id));
+    $(panel).hidden = t !== id;
+  }
+  markDirty();
+}
+for (const t of Object.keys(TABS)) $(t).addEventListener('click', () => showTab(t));
+$('modelspane').addEventListener('toggle', () => { size(); markDirty(); });
 
 size();
 
 if (matchMedia('(prefers-reduced-motion: reduce)').matches) setSpin(false);
 
-// Open with something on screen: the deep-linked model, else the first catalogue entry.
-const wanted = new URL(location.href).searchParams.get('src');
+// Open with something on screen: the deep-linked model, else whatever was open last, else the first
+// catalogue entry. `?fresh=1` throws the kept session away and starts clean.
+const FRESH = new URL(location.href).searchParams.has('fresh');
+if (FRESH) forgetSession();
+const kept = FRESH ? null : readSession();
+const wanted = new URL(location.href).searchParams.get('src') || (kept && kept.src) || null;
 const first = CATALOGUE[0];
 if (wanted) { $('src').value = wanted; load(wanted, wanted.split('/').pop(), null); }
 else if (first) load(first.path, first.name, first.kb);
@@ -1221,10 +2181,36 @@ else badge.textContent = 'No models bundled — run scripts/model-catalogue.mjs'
     jp.needsUpdate = true;
     skeleton.joints.geometry.computeBoundingSphere();
   }
-  if (skeleton && skeleton.dot.visible) {
-    const sel = skeleton.bones.find((x) => x.name === boneSel.value);
-    if (sel) skeleton.dot.position.copy(sel.getWorldPosition(new THREE.Vector3()));
+  // The metarig overlay lives in the model's own space, so only the buffers need refreshing —
+  // the framing translation and the turntable come free from the parent transform.
+  if (metarig && metarig.group.visible) {
+    const mp = metarig.points.geometry.attributes.position;
+    metarig.nodes.forEach((n, i) => mp.setXYZ(i, n.pos.x, n.pos.y, n.pos.z));
+    mp.needsUpdate = true;
+    metarig.points.geometry.computeBoundingSphere();
+    const ls = metarig.lines.geometry.attributes.position;
+    metarig.segs.forEach(([h, t], i) => {
+      ls.setXYZ(i * 2, h.pos.x, h.pos.y, h.pos.z);
+      ls.setXYZ(i * 2 + 1, t.pos.x, t.pos.y, t.pos.z);
+    });
+    ls.needsUpdate = true;
+    metarig.lines.geometry.computeBoundingSphere();
   }
+  // The joints move with the turntable, so a gizmo placed once drifts off them within a second.
+  // Re-place it every idle frame — never mid-drag, where its position IS the gesture.
+  if (gizmo.object === proxy && !gizmoDragging) {
+    const gsel = selectedHandles();
+    if (gsel.length) placeProxy(gsel);
+  }
+
+  // Markers for the two joints that are not just "selected": the one the sliders act on, and the
+  // one Rotate turns around. Both vanish with the selection, which is the whole of the fix.
+  const act = jointsShown() ? activeHandle() : null;
+  dot.visible = !!act;
+  if (act) worldOf(act, dot.position);
+  const piv = jointsShown() && pivot ? handleByKey(pivot) : null;
+  pivotDot.visible = !!piv;
+  if (piv) worldOf(piv, pivotDot.position);
   if (sweeping) {
     // Swing the selected joint through +-70 degrees so a bad joint position shows itself as the
     // limb bending from the wrong place.

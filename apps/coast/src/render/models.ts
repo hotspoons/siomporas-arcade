@@ -97,6 +97,13 @@ export function landmarkOffset(kind: string): number {
 export const TRAFFIC_YAWS = [0, 6, 13, 22, 35, 90, 180, -6, -13, -22, -35, -90]
 export const TRAFFIC_PITCHES = [-5, 4, 13, 22]
 const C = (kind: string, file: string): ModelDef => ({ kind, file: `assets/cars/${file}.glb`, heightM: 1.5, yaws: TRAFFIC_YAWS, pitches: TRAFFIC_PITCHES, cell: 128 })
+/**
+ * Traffic, generated. Same yaws and pitches as the CC0 kit it replaces — a car is seen from every
+ * angle on this road, which is why traffic could never be a card. The heights are exaggerated by
+ * about half, as the hero's is: at true scale a 1.4 m saloon beside a 1.65 m prototype reads as a
+ * toy on a real road.
+ */
+const CG = (kind: string, file: string, heightM: number): ModelDef => ({ kind, file: `assets/generated/${file}.glb`, heightM, yaws: TRAFFIC_YAWS, pitches: TRAFFIC_PITCHES, cell: 128 })
 
 export const MODELS: ModelDef[] = [
   G('palm', 'palm', 10, 192, 5.0),
@@ -131,8 +138,11 @@ export const MODELS: ModelDef[] = [
   // to a baked texture the way `buildPrototype` applied it to flat material colours, and what that
   // costs (four identical sprite sets in the atlas, and a livery menu that changes nothing) is the
   // open question, not an oversight. `liveries.json` is where the answer goes.
-  ...Object.keys(LIVERIES).map((id): ModelDef => ({ kind: `hero_${id}`, file: 'assets/generated/hero-prototype.glb', heightM: 1.65, yaws: HERO_YAWS, cell: 288 })),
-  { kind: 'formula', file: 'assets/cars/race.glb', heightM: 1.1, yaws: HERO_YAWS, cell: 288 },
+  // One generated mesh per livery: a reconstruction carries its paint in a baked texture and cannot
+  // be tinted the way `buildPrototype` tinted flat material colours. `variants` in assets.json is
+  // what keeps the four from drifting into four different cars.
+  ...Object.keys(LIVERIES).map((id): ModelDef => ({ kind: `hero_${id}`, file: `assets/generated/hero-prototype-${id}.glb`, heightM: 1.65, yaws: HERO_YAWS, cell: 288 })),
+  { kind: 'formula', file: 'assets/generated/formula-single-seater.glb', heightM: 1.45, yaws: HERO_YAWS, cell: 288 },
   // Roadside architecture and signage.
   G('diner', 'diner', 6.4, 256, 14.0),
   G('block', 'block-concrete', 15, 192, 14.0),
@@ -151,13 +161,13 @@ export const MODELS: ModelDef[] = [
   { kind: 'signDrive', file: '', build: () => buildSign('DRIVE SAFE', '#ffe28a', '#7a1a1a'), heightM: 7.3, yaws: [0], cell: 192, spin: 180 },
   { kind: 'signBay', file: '', build: () => buildSign('NEON BAY 12', '#ff5fd2', '#101030'), heightM: 7.3, yaws: [0], cell: 192, spin: 180 },
   G('arch', 'arch', 10.2, 256, 1.0),
-  C('sedan', 'sedan'),
-  C('sedanSports', 'sedan-sports'),
-  C('suv', 'suv'),
-  C('van', 'van'),
-  C('truck', 'truck'),
-  C('taxi', 'taxi'),
-  C('police', 'police'),
+  CG('sedan', 'traffic-sedan', 2.0),
+  CG('sedanSports', 'traffic-coupe', 1.85),
+  CG('suv', 'traffic-wagon', 2.1),
+  CG('van', 'traffic-van', 2.6),
+  CG('truck', 'traffic-pickup', 2.35),
+  CG('taxi', 'traffic-taxi', 2.05),
+  CG('police', 'traffic-police', 2.0),
   C('delivery', 'delivery'),
 ]
 

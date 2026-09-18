@@ -19,15 +19,29 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const at = (...parts) => path.join(ROOT, ...parts)
 
 /** Recursive copy, one file at a time. `fs.cpSync`'s native directory walk is blocked in the dev container. */
-function copyTree(src, dest, skip = () => false) {
+function copyTree(src, dest, skip = () => false, wrote = null) {
   mkdirSync(dest, { recursive: true })
   for (const entry of readdirSync(src, { withFileTypes: true })) {
     if (skip(entry.name)) continue
     const from = path.join(src, entry.name)
     const to = path.join(dest, entry.name)
-    if (entry.isDirectory()) copyTree(from, to, skip)
-    else copyFileSync(from, to)
+    if (entry.isDirectory()) copyTree(from, to, skip, wrote)
+    else {
+      copyFileSync(from, to)
+      wrote?.add(to)
+    }
   }
+}
+
+/** Every file under a directory, so what the mirror did not write can be found and removed. */
+function walk(dir, out = []) {
+  if (!existsSync(dir)) return out
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const p = path.join(dir, entry.name)
+    if (entry.isDirectory()) walk(p, out)
+    else out.push(p)
+  }
+  return out
 }
 
 const GAMES = ['coast', 'stuntin', 'conduit', 'fighter']
@@ -36,6 +50,11 @@ const ARCADE = at('apps/arcade/public')
 const SKIP = new Set(['favicon.svg', 'fonts'])
 
 let copied = 0
+// A MIRROR, NOT AN ACCUMULATION. Copying over the top leaves anything a game has since deleted
+// sitting in the arcade's copy for ever, and it ships. The sprite atlas is content-hashed, so every
+// re-bake used to leave its predecessor behind — eleven megabytes of sheet nothing can ever ask for,
+// and another eleven on the next bake. Track what the mirror writes and remove whatever it did not.
+const mirrored = new Set()
 
 for (const game of GAMES) {
   const from = at('apps', game, 'public')
@@ -43,9 +62,16 @@ for (const game of GAMES) {
   for (const entry of ['assets']) {
     const src = path.join(from, entry)
     if (!existsSync(src) || SKIP.has(entry)) continue
-    copyTree(src, path.join(ARCADE, entry))
+    copyTree(src, path.join(ARCADE, entry), () => false, mirrored)
     copied++
   }
+}
+
+let pruned = 0
+for (const file of walk(path.join(ARCADE, 'assets'))) {
+  if (mirrored.has(file)) continue
+  rmSync(file, { force: true })
+  pruned++
 }
 
 // Fonts: one directory holding every game's faces, and one stylesheet declaring all of them.
@@ -73,4 +99,4 @@ for (const game of GAMES) {
 writeFileSync(path.join(fontsOut, 'fonts.css'), css.join('\n') + '\n')
 writeFileSync(path.join(fontsOut, 'LICENSES.txt'), licenses.join(''))
 
-console.log(`arcade assets: ${copied} directories mirrored, fonts merged from ${GAMES.length} games`)
+console.log(`arcade assets: ${copied} directories mirrored${pruned ? `, ${pruned} stale files removed` : ''}, fonts merged from ${GAMES.length} games`)

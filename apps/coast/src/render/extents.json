@@ -2,9 +2,9 @@
   "note": "MEASURED, NOT TYPED. Regenerate with `node scripts/roadside-check.mjs --write` after changing a model or its heightM. silhouetteM/footM are metres about the point the sprite stands on; see scripts/roadside-check.mjs.",
   "kinds": {
     "arch": {
-      "silhouetteM": 16.21,
-      "depthM": 3.72,
-      "footM": 14.92
+      "silhouetteM": 22.86,
+      "depthM": 5.25,
+      "footM": 21.04
     },
     "banner": {
       "silhouetteM": 3.23,
@@ -107,9 +107,9 @@
       "footM": 3.21
     },
     "gantry": {
-      "silhouetteM": 11.41,
-      "depthM": 4.29,
-      "footM": 11.41
+      "silhouetteM": 21,
+      "depthM": 7.89,
+      "footM": 21
     },
     "gas": {
       "silhouetteM": 9.5,

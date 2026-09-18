@@ -4,23 +4,53 @@
 
 import { BufferGeometry, Color, DoubleSide, DynamicDrawUsage, Float32BufferAttribute, Mesh, ShaderMaterial } from 'three'
 import { DRAW_SEGMENTS, ROAD_HALF_WIDTH } from '../sim/Tuning'
-import { RUMBLE_WIDTH, SHOULDER_WIDTH } from './RenderTuning'
+import { BANK_BATTER, RUMBLE_WIDTH, SHOULDER_WIDTH } from './RenderTuning'
 
 const QUADS_PER_SEGMENT = 40
 const MAX_QUADS = (DRAW_SEGMENTS + 4) * QUADS_PER_SEGMENT
 
-/**
- * Height (metres) of a banked deck at lateral offset u (m, + right). The deck — shoulders, rumble
- * strips and tarmac — is one plane pivoting on its inner shoulder edge and rising |tilt| per metre
- * toward the outside; the land beyond either shoulder stays at grade (a raised banked deck with a
- * wall under its high side). Every deck quad lies in this one plane, so nothing pokes through.
- */
 /** Half the deck width (road + rumble + shoulder); read live so the tuning panel stays coherent. */
 export const deckHalf = (): number => ROAD_HALF_WIDTH + RUMBLE_WIDTH + SHOULDER_WIDTH
-export function bermLift(u: number, tilt: number, reach: number): number {
-  const e = Math.sign(tilt) * u + deckHalf() // distance from the inner shoulder edge toward the outside
-  if (e <= 0 || e > reach) return 0
-  return Math.abs(tilt) * e
+
+/**
+ * A vertex meant for the deck's outer edge is built as `deckHalf × scale` and read back as
+ * `(deckHalf × scale) ÷ scale`, which lands a few ulps either side of `deckHalf` depending on the
+ * row's scale. Without this tolerance the ones that land outside fall to grade while their neighbours
+ * stay lifted, which tears a wedge-shaped hole in the shoulder on the outside of a banked turn.
+ */
+const EDGE_EPS = 1e-6
+
+/**
+ * THE GROUND, at lateral offset u (metres, + right) on a row banked by `tilt` (rise per lateral metre,
+ * signed: negative tilts the left side up). Metres above the row's own datum.
+ *
+ *   |u| ≤ deckHalf          the deck — shoulders, rumble strips and tarmac — one plane pivoting on its
+ *                           inner shoulder edge and rising toward the outside
+ *   out to the bank's foot   the bank that carries the deck's high edge back down to grade, BANK_BATTER
+ *                           metres of run per metre of drop
+ *   beyond that, and the low side   flat ground
+ *
+ * ONE function, and everything reads it: the road draws this profile, the sprites stand on it, the
+ * depth proxy that hides things in 3D is built from it, and the camera rides it. They used to each
+ * carry their own idea of where the ground was, which is how trees came to stand at grade on a berm
+ * that had risen seven metres out from under them.
+ */
+export function groundHeight(u: number, tilt: number): number {
+  if (!tilt) return 0
+  const dh = deckHalf()
+  const reach = 2 * dh
+  const e = Math.sign(tilt) * u + dh // distance from the inner shoulder edge toward the outside
+  if (e <= 0) return 0
+  if (e <= reach + EDGE_EPS) return Math.abs(tilt) * Math.min(e, reach)
+  const drop = Math.abs(tilt) * reach
+  const run = drop * BANK_BATTER
+  if (run <= 0 || e >= reach + run) return 0
+  return drop * (1 - (e - reach) / run)
+}
+
+/** How far out from the centreline the ground is still moving, at this tilt: the deck and its bank. */
+export function bankReach(tilt: number): number {
+  return deckHalf() + Math.abs(tilt) * 2 * deckHalf() * BANK_BATTER
 }
 
 export class RoadMesh {
@@ -97,10 +127,10 @@ export class RoadMesh {
     this.ts2 = s2
   }
 
-  /** Berm profile: level at the inner edge, rising toward the outer edge, flat again past the plateau. */
+  /** Screen-y lift of the ground under a quad vertex, from the one ground profile. */
   private lift(x: number, xr: number, s: number, tilt: number): number {
     if (tilt === 0) return 0
-    return bermLift((x - xr) / s, tilt, this.plateau) * s
+    return groundHeight((x - xr) / s, tilt) * s
   }
 
   /** Trapezoid between two screen rows: (x1 ± w1) at y1 and (x2 ± w2) at y2. */

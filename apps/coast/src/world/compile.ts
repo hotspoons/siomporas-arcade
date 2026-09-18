@@ -14,7 +14,7 @@ import { placeAt, placeLandmark, placeScenery } from '../sim/place'
 
 import { Rng } from '@apex/engine/math/Rng'
 import { blankSegment, Stage, type Segment, type StageDesc, type Theme } from '../sim/Road'
-import { CROSSING_EVERY, FORK_SEGMENTS, RUNWAY_SEGMENTS, SEG_LENGTH } from '../sim/Tuning'
+import { CROSSING_EVERY, forkSegments, runInSegments, RUNWAY_SEGMENTS, SEG_LENGTH } from '../sim/Tuning'
 import { CURVE_UNIT } from '../render/RenderTuning'
 import { buildPath, MAX_GRADE, NODE_GRADE, scaleToGrade, STEEP_GRADE, TrackPath } from './path'
 import { sceneDef } from './scenes'
@@ -171,16 +171,16 @@ export function compileTrack(track: CoastTrack, seed: number, path?: TrackPath):
   const forks = track.next.length === 2
   segs[0].checkpoint = true
   if (forks) {
-    for (let i = 0; i < FORK_SEGMENTS && i < real; i++) {
-      const s = segs[real - FORK_SEGMENTS + i]
+    for (let i = 0; i < forkSegments() && i < real; i++) {
+      const s = segs[real - forkSegments() + i]
       if (!s) continue
-      s.fork = (i + 1) / FORK_SEGMENTS
+      s.fork = (i + 1) / forkSegments()
       s.curve = 0
       s.tunnel = false
       s.closed = 0
     }
   }
-  const forkFrom = forks ? (real - FORK_SEGMENTS) / real : 1.1
+  const forkFrom = forks ? (real - forkSegments()) / real : 1.1
 
   // --- macro elements -------------------------------------------------------
   const idx = (at: number) => Math.min(real - 1, Math.max(0, Math.round(at * (real - 1))))
@@ -238,7 +238,7 @@ export function compileTrack(track: CoastTrack, seed: number, path?: TrackPath):
   // have not placed any yourself — pick Downtown and you get a junction for free;
   // place one and the scene stops guessing.
   if (!track.crossings.length) {
-    for (let i = CROSSING_EVERY; i < real - FORK_SEGMENTS - 20; i += CROSSING_EVERY) {
+    for (let i = CROSSING_EVERY; i < real - forkSegments() - runInSegments() - 20; i += CROSSING_EVERY) {
       const seg = segs[i]
       if (!(themes[seg.scene] ?? themes[0]).crossings) continue
       if (Math.abs(seg.curve) > 1.2 || seg.tunnel) continue
@@ -248,7 +248,7 @@ export function compileTrack(track: CoastTrack, seed: number, path?: TrackPath):
   }
   if (!track.spans.some((s) => s.kind === 'workzone')) {
     let i = 120 + rng.int(160)
-    while (i + 90 < real - FORK_SEGMENTS - 30) {
+    while (i + 90 < real - forkSegments() - runInSegments() - 30) {
       if ((themes[segs[i].scene] ?? themes[0]).workZones) {
         const s = (rng.next() < 0.5 ? -1 : 1) as -1 | 1
         const len = 40 + rng.int(40)

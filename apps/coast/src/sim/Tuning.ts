@@ -15,9 +15,52 @@ export const DRAW_SEGMENTS = 260
 /** Extra straight segments appended after a stage so the horizon never runs out during a fork. */
 export const RUNWAY_SEGMENTS = 120
 /** Segments at the end of a forking stage where the road splits. */
-export const FORK_SEGMENTS = 70
-/** Lateral separation of the two fork roads at the end, in road widths. */
-export const FORK_SPREAD = 1.6
+/**
+ * How long the split runs and how long the approach to the line before it does, in seconds at a
+ * cruising pace. A fork you arrive at is not a fork: you need to see it open, pick a side, and change
+ * your mind twice before the line. The run-in is the same idea for every stage — the road goes quiet
+ * and straight for a moment so the checkpoint is something you are driving up to, not something that
+ * happens to you.
+ */
+export let FORK_SECONDS = 7
+export let STAGE_RUNIN_SECONDS = 2.5
+
+/** Those, as segments, at the same cruising pace `stageLinkMetres` uses. */
+export function forkSegments(): number {
+  return Math.round((FORK_SECONDS * MAX_SPEED_HI * 0.8) / SEG_LENGTH)
+}
+export function runInSegments(): number {
+  return Math.round((STAGE_RUNIN_SECONDS * MAX_SPEED_HI * 0.8) / SEG_LENGTH)
+}
+/**
+ * A fork is a road that WIDENS, not a lane that opens beside you. Over the split the carriageway
+ * grows by this many road-halves either side — 1 doubles it, so a road becomes four lanes with two
+ * feeding each branch — and you are free to be anywhere across it until the line. Nothing herds you to
+ * a side and nothing walls the middle off, so the choice stays open to the last metre and is genuinely
+ * even; whichever half you are on when the stage ends is the one you take.
+ */
+export const FORK_WIDEN = 1
+/** Lanes drawn through the widened fork zone: two per branch. */
+export const FORK_LANES = 4
+/**
+ * How hard the road you chose swings away from the one you did not, and over how many segments. Both
+ * branches turn — a fork where one way carries straight on and the other peels off is not a choice
+ * between two roads, it is a road with a turning off it.
+ */
+export let FORK_EXIT_CURVE = 2.6
+export const FORK_EXIT_SEGMENTS = 60
+/**
+ * How long one stage takes to become the next, in seconds at a cruising pace. A checkpoint is a seam
+ * in the world — new scene, new sky, often a different hour — and crossing it on one frame reads as
+ * the game cutting rather than the road going somewhere. For this long the road you are on belongs to
+ * neither stage: the light hands over, and so does what grows beside it.
+ */
+export let STAGE_LINK_SECONDS = 7
+
+/** That, as road. Measured at a cruising pace rather than flat out, so it lasts about as long either way. */
+export function stageLinkMetres(): number {
+  return STAGE_LINK_SECONDS * MAX_SPEED_HI * 0.8
+}
 /** Multiplier on authored section lengths (stages are authored long, then scaled to ~a minute). */
 export const STAGE_SCALE = 0.7
 /** Alternate road bands every N segments (shorter = faster strobe = more speed). */
@@ -152,6 +195,10 @@ export const SIM_TUNE: TuneSection = {
     tune('WRECK_TIME', () => WRECK_TIME, (v) => (WRECK_TIME = v)),
     tune('CROSSER_SPEED', () => CROSSER_SPEED, (v) => (CROSSER_SPEED = v)),
     tune('BANK_ASSIST', () => BANK_ASSIST, (v) => (BANK_ASSIST = v)),
+    tune('STAGE_LINK_SECONDS', () => STAGE_LINK_SECONDS, (v) => (STAGE_LINK_SECONDS = v), [0, 20], 0.5, 'seconds one stage takes to become the next'),
+    tune('FORK_SECONDS', () => FORK_SECONDS, (v) => (FORK_SECONDS = v), [1, 20], 0.5, 'seconds the split is open for'),
+    tune('STAGE_RUNIN_SECONDS', () => STAGE_RUNIN_SECONDS, (v) => (STAGE_RUNIN_SECONDS = v), [0, 10], 0.5, 'seconds of straight approach to the line'),
+    tune('FORK_EXIT_CURVE', () => FORK_EXIT_CURVE, (v) => (FORK_EXIT_CURVE = v), [0, 6], 0.1, 'how hard a fork throws the two ways apart'),
     tune('TIME_START', () => TIME_START, (v) => (TIME_START = v)),
     tune('TIME_CHECKPOINT', () => TIME_CHECKPOINT, (v) => (TIME_CHECKPOINT = v)),
     tune('BAND_SEGMENTS', () => BAND_SEGMENTS, (v) => (BAND_SEGMENTS = v)),

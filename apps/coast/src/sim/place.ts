@@ -10,17 +10,16 @@
 
 import { MODEL_BY_KIND, sideOffset } from '../render/models'
 import type { Segment } from './Road'
-import { FORK_SPREAD } from './Tuning'
+import { FORK_WIDEN } from './Tuning'
 
 /**
  * How far out the ground the player can be on reaches, in road-halves, on this segment. One
- * everywhere except through a fork, where the two carriageways pull apart to ±`FORK_SPREAD` and the
- * road is briefly two and a half times its own width. Placement that does not know this puts a lamp
- * post in the right-hand carriageway of every fork — invisible in a screenshot of the straights,
- * and a crash every time the player takes that side.
+ * everywhere except through a fork, where the road widens by `FORK_WIDEN` either side. Placement that
+ * does not know this puts a lamp post in the outer lane of every fork — invisible in a screenshot of
+ * the straights, and a crash every time the player takes that side.
  */
 function edge(seg: Segment): number {
-  return seg.fork >= 0 ? 1 + seg.fork * FORK_SPREAD : 1
+  return seg.fork >= 0 ? 1 + seg.fork * FORK_WIDEN : 1
 }
 
 /**

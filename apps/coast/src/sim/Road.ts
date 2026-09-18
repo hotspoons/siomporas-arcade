@@ -7,7 +7,7 @@
 import { Rng } from '@apex/engine/math/Rng'
 import type { VibeStop } from '../world/types'
 import { placeLandmark, placeScenery } from './place'
-import { CROSSING_EVERY, FORK_SEGMENTS, ROLL_AMPLITUDE, RUNWAY_SEGMENTS, SEG_LENGTH, STAGE_SCALE } from './Tuning'
+import { CROSSING_EVERY, forkSegments, ROLL_AMPLITUDE, runInSegments, RUNWAY_SEGMENTS, SEG_LENGTH, STAGE_SCALE } from './Tuning'
 
 export interface SpriteRef {
   kind: string
@@ -216,16 +216,27 @@ export class Stage {
       s0.y1 += ROLL_AMPLITUDE * Math.sin(a1)
     }
     if (segs.length) segs[0].checkpoint = true
+    // The approach: every stage goes straight and level for a moment before its line, so the gate is
+    // something you drive up to. Eased, not cut, or the road kinks where the curve is switched off.
+    const runIn = runInSegments()
+    const fork = this.forks ? forkSegments() : 0
+    const quiet = fork + runIn
+    for (let i = 0; i < quiet && i < segs.length; i++) {
+      const s = segs[segs.length - quiet + i]
+      s.curve *= Math.max(0, 1 - i / Math.max(1, runIn)) ** 2
+      s.bank *= Math.max(0, 1 - i / Math.max(1, runIn)) ** 2
+    }
     if (this.forks) {
-      for (let i = 0; i < FORK_SEGMENTS && i < segs.length; i++) {
-        const s = segs[segs.length - FORK_SEGMENTS + i]
-        s.fork = (i + 1) / FORK_SEGMENTS
+      for (let i = 0; i < fork && i < segs.length; i++) {
+        const s = segs[segs.length - fork + i]
+        s.fork = (i + 1) / fork
         s.curve = 0
+        s.bank = 0
       }
     }
     // Intersections: on straight-ish road, well clear of the split and the start.
     if (theme.crossings) {
-      for (let i = CROSSING_EVERY; i < this.length - FORK_SEGMENTS - 20; i += CROSSING_EVERY) {
+      for (let i = CROSSING_EVERY; i < this.length - forkSegments() - runInSegments() - 20; i += CROSSING_EVERY) {
         const s = segs[i]
         if (Math.abs(s.curve) > 1.2 || s.tunnel) continue
         // Two segments deep so the crossing road reads as a road, not a stripe.
@@ -237,7 +248,7 @@ export class Stage {
     if (theme.shore) {
       let i = 30 + rng.int(40)
       let side = rng.next() < 0.5 ? -1 : 1
-      while (i < this.length - FORK_SEGMENTS - 10) {
+      while (i < this.length - forkSegments() - runInSegments() - 10) {
         const run = 40 + rng.int(60)
         for (let k = 0; k < run && i + k < this.length; k++) segs[i + k].shore = side
         i += run + 30 + rng.int(70)
@@ -248,7 +259,7 @@ export class Stage {
     // barrier runs along the lane line for the closed stretch, and the cones taper back out.
     if (theme.workZones) {
       let i = 120 + rng.int(160)
-      while (i + 90 < this.length - FORK_SEGMENTS - 30) {
+      while (i + 90 < this.length - forkSegments() - runInSegments() - 30) {
         const side = rng.next() < 0.5 ? -1 : 1
         const len = 40 + rng.int(40)
         const taper = [0.98, 0.84, 0.7, 0.58]

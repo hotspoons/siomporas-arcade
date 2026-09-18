@@ -1,7 +1,7 @@
 // The run: player physics on the segment road, traffic, checkpoints with time
 // extension, forks at stage ends, tumbles and bumps. Deterministic.
 
-import { hitHalfWidth } from '../render/models'
+import { hitHeight, hitHalfWidth, sideOffset } from '../render/models'
 import { Rng } from '@apex/engine/math/Rng'
 import { clamp, expApproach } from '@apex/engine/math/scalar'
 import { EventQueue } from './Events'
@@ -125,8 +125,60 @@ export class Sim {
     this.timeLeft = this.stage.seconds ?? T.TIME_START
   }
 
+  /** Which way the last fork went, so the road we came out on swings away from the one we did not. */
+  private forkSide = 0
+
+  /**
+   * The interstitial. For the first `STAGE_LINK_SECONDS` of a new stage the roadside is still mostly
+   * the one you were just driving through, handing over to this stage's as you go — so a checkpoint is
+   * somewhere the world changes rather than a frame where it is swapped. The light crossfades over the
+   * same road (see RenderWorld); this is what grows beside it.
+   */
+  private blendLeadIn(from: Theme): void {
+    if (from === this.theme || !from.roadside.length) return
+    const lead = Math.round(T.stageLinkMetres() / T.SEG_LENGTH)
+    if (lead < 2) return
+    const total = from.roadside.reduce((a, r) => a + r.weight, 0)
+    const segs = this.stage.segments
+    for (let i = 0; i < lead && i < segs.length; i++) {
+      // 0 at the line, 1 at the end of the link: the chance this segment has already changed over.
+      const t = i / lead
+      for (const sp of segs[i].sprites) {
+        // Landmarks and the checkpoint gate are the stage announcing itself; they stay put.
+        if (!sp.collide || this.rng.next() < t) continue
+        let pick = this.rng.next() * total
+        let r = from.roadside[0]
+        for (const cand of from.roadside) {
+          pick -= cand.weight
+          if (pick < 0) {
+            r = cand
+            break
+          }
+        }
+        const side = Math.sign(sp.offset) || 1
+        sp.kind = r.kind
+        sp.scale = (r.scale ?? 1) * this.rng.range(0.9, 1.15)
+        // Re-derive the clearance: the thing standing here is a different shape now.
+        sp.offset = side * sideOffset(r.kind, Math.abs(sp.offset), sp.scale)
+      }
+    }
+  }
+
   private loadStage(id: string): void {
+    const cameFrom = this.route.length ? this.theme : null
+    // The length of the road we just left, to rebase anything still on it onto the new one.
+    const leftBehind = this.route.length ? this.stage.metres : 0
     this.stage = this.world.build(id, this.seed * 31 + this.route.length * 7 + (id.charCodeAt(0) || 1))
+    if (cameFrom) this.blendLeadIn(cameFrom)
+    if (this.forkSide) {
+      // Both branches turn. A fork where one way carries straight on and the other peels off reads as
+      // a road with a turning off it, and the straight one is always the one you meant to take.
+      const segs = this.stage.segments
+      for (let i = 0; i < T.FORK_EXIT_SEGMENTS && i < segs.length; i++) {
+        segs[i].curve += this.forkSide * T.FORK_EXIT_CURVE * (1 - i / T.FORK_EXIT_SEGMENTS) ** 2
+      }
+      this.forkSide = 0
+    }
     this.stageDesc = this.stage.desc
     this.theme = this.stage.theme
     this.route.push(id)
@@ -137,7 +189,19 @@ export class Sim {
     this.vy = 0
     this.segPrev = -1
     this.slopePrev = 0
-    for (const c of this.cars) this.spawnCar(c, this.rng.range(40, T.TRAFFIC_SPAWN_AHEAD * 3) * T.SEG_LENGTH)
+    // TRAFFIC CARRIES OVER. The road you are on at the line is the road you are on after it, and the
+    // cars around you were the loudest thing saying otherwise: every one of them vanished on the frame
+    // you crossed and reappeared half a kilometre up the new stage. Anything near you keeps its place
+    // relative to you — its z rebased onto the new stage — and only the ones already out of sight are
+    // recycled into the distance.
+    const carried = leftBehind
+    for (const c of this.cars) {
+      const rel = c.z - carried
+      if (carried && rel > -T.TRAFFIC_DESPAWN_BEHIND * T.SEG_LENGTH && rel < T.TRAFFIC_SPAWN_AHEAD * T.SEG_LENGTH) {
+        c.z = rel
+        c.passed = rel < 0
+      } else this.spawnCar(c, this.rng.range(40, T.TRAFFIC_SPAWN_AHEAD * 3) * T.SEG_LENGTH)
+    }
     for (const c of this.crossers) this.spawnCrosser(c)
   }
 
@@ -273,14 +337,13 @@ export class Sim {
     else if (input.throttle > 0) this.speed += accel * input.throttle * (1 - 0.6 * (this.speed / max) ** 2) * dt
     else this.speed -= T.COAST_DECEL * dt
     if (input.brake > 0 && !air) this.speed -= T.BRAKE_DECEL * input.brake * dt
-    // In the fork zone the road splits into two carriageways FORK_SPREAD apart (renderer draws
-    // them at ±fork × FORK_SPREAD); "on the road" means on one of them, and the widening
-    // median nudges you onto whichever side you lean to.
-    const forkC = seg.fork >= 0 ? seg.fork * T.FORK_SPREAD : 0
-    const centre = forkC ? Math.sign(this.x || 1) * forkC : 0
-    if (forkC && Math.abs(this.x) < forkC) this.x = expApproach(this.x, centre, 3 * seg.fork, dt)
+    // A fork widens the road; it does not split it into two lanes with a median between. There is one
+    // carriageway the whole way, twice as wide by the line, and you are free anywhere across it — no
+    // nudge onto the side you happen to be leaning to, and nothing off-road in the middle to stop you
+    // changing your mind. Whichever half you are on at the line is the branch you take.
+    const halfW = 1 + (seg.fork >= 0 ? seg.fork * T.FORK_WIDEN : 0)
     const wasOff = this.offroad
-    this.offroad = Math.abs(this.x - centre) > (forkC ? 1.3 : 1)
+    this.offroad = Math.abs(this.x) > halfW
     if (this.offroad && !air && this.speed > T.OFFROAD_MAX_SPEED) this.speed -= T.OFFROAD_DECEL * dt
     if (this.offroad !== wasOff) this.events.push(this.offroad ? 'offroad' : 'onroad')
     this.speed = clamp(this.speed, 0, max)
@@ -305,7 +368,7 @@ export class Sim {
       // Banked turns carry you round: the banking cancels part of the push.
       this.x -= seg.curve * sp * sp * T.CENTRIFUGAL * (1 - seg.bank * T.BANK_ASSIST) * dt
     }
-    this.x = clamp(this.x, -2.4 - forkC, 2.4 + forkC)
+    this.x = clamp(this.x, -1.4 - halfW, 1.4 + halfW)
     this.steerVisual = expApproach(this.steerVisual, input.steer, 10, dt)
     this.curveAccum += seg.curve * sp * dt * 60
 
@@ -324,6 +387,8 @@ export class Sim {
         for (const sp2 of this.stage.segments[i].sprites) {
           if (!sp2.collide) continue
           const hw = hitHalfWidth(sp2.kind, sp2.scale)
+          // Over it, not into it: a car forty metres up has cleared the palm it is passing.
+          if (this.airY > hitHeight(sp2.kind, sp2.scale)) continue
           if (Math.abs(this.x - sp2.offset) < hw + T.CAR_HALF_WIDTH_ROAD) {
             this.crash(false)
             return
@@ -343,9 +408,13 @@ export class Sim {
       }
       const id = next.length === 2 ? (this.x < 0 ? next[0] : next[1]) : next[0]
       if (next.length === 2) {
-        this.events.push('fork', this.x < 0 ? -1 : 1)
-        // Re-centre on the chosen carriageway (they sit ±FORK_SPREAD from the old centreline).
-        this.x = clamp(this.x + (this.x < 0 ? T.FORK_SPREAD : -T.FORK_SPREAD), -1, 1)
+        const side = this.x < 0 ? -1 : 1
+        this.events.push('fork', side)
+        // The half you were on becomes the whole road: its centre was halfway out, its edges the old
+        // centreline and the old edge, so the same lane you were in is the lane you come out in.
+        const half = (1 + T.FORK_WIDEN) / 2
+        this.x = clamp((this.x - side * half) / half, -1, 1)
+        this.forkSide = side
       }
       this.stageIndex++
       this.loadStage(id)
@@ -424,11 +493,12 @@ export class Sim {
       c.z += c.dir * c.speed * dt
       // Lane discipline with occasional changes (head-on traffic stays on its side).
       if (this.rng.next() < 0.002) c.lane = c.dir < 0 ? [-0.62, -0.25][this.rng.int(2)] : this.stage.themeAt(c.z).oncoming ? [0.25, 0.62][this.rng.int(2)] : [-0.62, -0.2, 0.2, 0.62][this.rng.int(4)]
-      // Through the fork zone traffic follows its carriageway out to the side; roadworks close a lane.
+      // Through the fork the road widens, so traffic spreads across it in the lane it was already in;
+      // roadworks close a lane.
       const cs = this.stage.segmentAt(c.z + 40)
       const fk = cs.fork
       if (cs.closed && Math.sign(c.lane) === cs.closed && Math.abs(c.lane) > 0.4) c.lane = cs.closed * 0.2
-      c.x = expApproach(c.x, fk >= 0 ? Math.sign(c.lane) * fk * T.FORK_SPREAD + c.lane : c.lane, 1.2, dt)
+      c.x = expApproach(c.x, fk >= 0 ? c.lane * (1 + fk * T.FORK_WIDEN) : c.lane, 1.2, dt)
       // Recycle: far behind, or beyond the stage end.
       if (c.z < this.z - T.TRAFFIC_DESPAWN_BEHIND * T.SEG_LENGTH || c.z > stageLen + 200) {
         this.spawnCar(c, this.z + this.rng.range(T.TRAFFIC_SPAWN_MIN, T.TRAFFIC_SPAWN_AHEAD) * T.SEG_LENGTH)
@@ -450,7 +520,7 @@ export class Sim {
         }
       }
       // Collision: same place along the road and overlapping laterally.
-      if (this.phase === 'driving' && Math.abs(c.z - this.z) < 4 && Math.abs(c.x - this.x) < T.CAR_HALF_WIDTH_ROAD * 2) {
+      if (this.phase === 'driving' && this.airY <= hitHeight(TRAFFIC_KINDS[c.kind]) && Math.abs(c.z - this.z) < 4 && Math.abs(c.x - this.x) < T.CAR_HALF_WIDTH_ROAD * 2) {
         if (c.dir < 0) {
           // Head-on: closing speed is the sum. Fast means a wreck; slow, a hard shove.
           if (this.speed + c.speed > T.WRECK_SPEED) this.crash(true)
@@ -489,7 +559,7 @@ export class Sim {
         }
         continue
       }
-      if (this.phase === 'driving' && Math.abs(c.crossZ - this.z) < 5 && Math.abs(c.x - this.x) < T.CAR_HALF_WIDTH_ROAD * 2.4) {
+      if (this.phase === 'driving' && this.airY <= hitHeight(TRAFFIC_KINDS[c.kind]) && Math.abs(c.crossZ - this.z) < 5 && Math.abs(c.x - this.x) < T.CAR_HALF_WIDTH_ROAD * 2.4) {
         if (this.speed > T.WRECK_SPEED * 0.8) this.crash(true)
         else {
           this.speed *= 0.3

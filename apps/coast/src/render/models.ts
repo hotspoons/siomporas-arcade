@@ -140,6 +140,14 @@ export function hitHalfWidth(kind: string, scale = 1): number {
   const e = EXTENTS.kinds[kind as keyof typeof EXTENTS.kinds] as { footM: number } | undefined
   return (e ? e.footM / 2 / ROAD_HALF_WIDTH : 0.12) * scale
 }
+
+/**
+ * How high this thing stands, in metres — what you have to be above to be over it rather than into it.
+ * The manifest's own height, so a bush is a bush and a tower is a tower and neither is a typed guess.
+ */
+export function hitHeight(kind: string, scale = 1): number {
+  return (MODEL_BY_KIND[kind]?.heightM ?? 2) * scale
+}
 /** Traffic: fine flank steps for cars near your lane, quarter views for crossers, head-on, and four pitches for hills. */
 export const TRAFFIC_YAWS = [0, 6, 13, 22, 35, 90, 180, -6, -13, -22, -35, -90]
 export const TRAFFIC_PITCHES = [-5, 4, 13, 22]
@@ -181,7 +189,10 @@ export const MODELS: ModelDef[] = [
   G('grandstand', 'grandstand', 7, 256),
   G('tent', 'tent', 4, 192),
   G('pitsOffice', 'pits-office', 6, 256),
-  G('gantry', 'overhead-gantry', 8.5, 256, { straddle: true }),
+  // Straddling kinds are sized by the road they have to clear, not by a nominal height: `fit` is
+  // 21 m ÷ the foot span extents.json measured before it (11.41 m), so the legs land on the shoulder
+  // instead of on the tarmac. Re-measure with `node scripts/roadside-check.mjs --write` if you touch it.
+  G('gantry', 'overhead-gantry', 8.5, 256, { straddle: true, fit: 1.84 }),
   // Hero prototypes, one per livery; the chase view picks the selected one. The generated mesh is
   // one car in one paint scheme, so for now every livery points at it — the tint cannot be applied
   // to a baked texture the way `buildPrototype` applied it to flat material colours, and what that
@@ -213,7 +224,7 @@ export const MODELS: ModelDef[] = [
   { kind: 'signCoast', file: '', build: () => buildSign('COAST HWY 1', '#ffffff', '#1a5a2a'), heightM: 7.3, yaws: [0], cell: 192, spin: 180 },
   { kind: 'signDrive', file: '', build: () => buildSign('DRIVE SAFE', '#ffe28a', '#7a1a1a'), heightM: 7.3, yaws: [0], cell: 192, spin: 180 },
   { kind: 'signBay', file: '', build: () => buildSign('NEON BAY 12', '#ff5fd2', '#101030'), heightM: 7.3, yaws: [0], cell: 192, spin: 180 },
-  G('arch', 'arch', 10.2, 256, { straddle: true }),
+  G('arch', 'arch', 10.2, 256, { straddle: true, fit: 1.41 }), // 21 m ÷ a measured 14.92 m foot span
   CG('sedan', 'traffic-sedan', 2.0),
   CG('sedanSports', 'traffic-coupe', 1.85),
   CG('suv', 'traffic-wagon', 2.1),

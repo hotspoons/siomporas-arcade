@@ -1,8 +1,11 @@
 // The real meshes, instead of the sprites baked from them. Two ways, both off by default:
 //
-//   MODELS_3D = 1  posed — every quad swapped for its mesh, in the same screen-space scene, at the
-//                  same size, in the pose the sprite was baked in. Sharper sprites and nothing else:
-//                  a car still steps between baked steering angles, a tree is still seen head-on.
+//   MODELS_3D = 1  live — the sprite, re-baked this frame instead of looked up. Every model is
+//                  photographed exactly the way the atlas photographs it — same standing-up, same
+//                  long lens, same distance, same lights, from `bakeView` — and the picture is
+//                  dropped into the rect the sprite would have filled. Not a lookalike: the same
+//                  arithmetic, so the two are the same image, and the angle need not snap to one of
+//                  sixteen baked ones because there is nothing to look up.
 //
 //   MODELS_3D = 2  solid — a real perspective pass over the top. Nothing is posed: every model sits
 //                  at its actual place in front of the camera and is seen from wherever the camera
@@ -21,72 +24,95 @@
 // space and writes no depth. So this pass lays the road surface down as a depth-only proxy first,
 // rebuilt from the same rows, and a car over the next crest goes behind the hill like it should.
 
-import { AmbientLight, Box3, BufferAttribute, BufferGeometry, DirectionalLight, Group, HemisphereLight, Mesh, MeshBasicMaterial, MeshStandardMaterial, Object3D, PerspectiveCamera, Scene, Vector3, type WebGLRenderer } from 'three'
+import { AmbientLight, BufferAttribute, BufferGeometry, Color, DirectionalLight, HemisphereLight, type Material, Mesh, MeshBasicMaterial, Object3D, PerspectiveCamera, Scene, Vector3, type WebGLRenderer } from 'three'
+import { disposeObject3D } from '@apex/engine/render/dispose'
 import { glbLoader } from './loadGlb'
+import { bankReach, deckHalf, groundHeight } from './RoadMesh'
 
-import { MODELS, orient, type ModelDef } from './models'
+import { MODELS } from './models'
+import { fitModel } from './bakeView'
 
 const DEG = Math.PI / 180
-/** Half the ortho camera's z range, shared out among the posed meshes in a frame. */
-const Z_RANGE = 30000
 /** How wide the depth proxy is either side of the road centre, in metres. */
 const GROUND_HALF = 90
+/** Lateral stations of the depth proxy: the ground, the foot of the bank, the deck's edges, its centre. */
+const GROUND_COLS = 7
+/** Sink the proxy this far (m) so a model standing on it doesn't fight it for the same depth. */
+const GROUND_BIAS = 0.08
+
 
 /**
- * The bake's normalisation, so a mesh here is the size the sprite of it would have been: scaled to
- * the manifest's height in metres, standing on y = 0, centred over its own footprint.
+ * Distance haze and night, done to a mesh exactly the way the sprite shader does it to a sprite:
+ * `mix(colour * dim, fog, amount)`, in the same linear space the road blends its own fog in. Without
+ * it a model is the one thing in the frame that does not go pale as it recedes, and the far half of
+ * the world reads as a cardboard cut-out pasted over the haze.
+ *
+ * The uniforms are per *instance*, not per kind, so the amount can differ down a row of trees. That
+ * means one material per instance: three only re-uploads a program's uniforms when the material it
+ * is drawing changes, so instances sharing a material would all wear whichever value was set last.
+ * The program is still shared — the cache key is `onBeforeCompile.toString()`, the same for all.
  */
-function normalise(raw: Object3D, def: ModelDef): Object3D {
-  const model = orient(raw, def)
-  model.traverse((o) => {
-    const m = o as Mesh
-    if (!m.isMesh) return
-    for (const mat of Array.isArray(m.material) ? m.material : [m.material]) {
-      const sm = mat as MeshStandardMaterial
-      if (sm.isMeshStandardMaterial) {
-        sm.flatShading = true
-        sm.metalness = Math.min(sm.metalness, 0.2)
-        sm.needsUpdate = true
-      }
-    }
-  })
-  const box = new Box3().setFromObject(model)
-  const size = box.getSize(new Vector3())
-  const scale = (def.heightM / Math.max(1e-3, size.y)) * (def.fit ?? 1)
-  model.scale.setScalar(scale)
-  model.position.set(-((box.min.x + box.max.x) / 2) * scale, -box.min.y * scale, -((box.min.z + box.max.z) / 2) * scale)
-  // A wrapper, so instances can be posed without disturbing the fit.
-  const holder = new Group()
-  holder.add(model)
-  return holder
+interface Tint {
+  uTintFog: { value: Color }
+  uTintAmt: { value: number }
+  uTintDim: { value: number }
+}
+const TINT_HEAD = 'uniform vec3 uTintFog;\nuniform float uTintAmt;\nuniform float uTintDim;\n'
+const TINT_MIX = '#include <opaque_fragment>\ngl_FragColor.rgb = mix( gl_FragColor.rgb * uTintDim, uTintFog, uTintAmt );'
+function tintShader(this: Material, shader: { uniforms: Record<string, unknown>; fragmentShader: string }): void {
+  const tint = (this.userData as { tint?: Tint }).tint
+  if (!tint) return
+  Object.assign(shader.uniforms, tint)
+  shader.fragmentShader = TINT_HEAD + shader.fragmentShader.replace('#include <opaque_fragment>', TINT_MIX)
+}
+
+/** A private copy of a material that fogs and dims on its own, sharing `fog` with the rest of the frame. */
+function tinted(mat: Material, fog: Color, out: Tint[]): Material {
+  const m = mat.clone()
+  const tint: Tint = { uTintFog: { value: fog }, uTintAmt: { value: 0 }, uTintDim: { value: 1 } }
+  m.userData = { ...m.userData, tint }
+  m.onBeforeCompile = tintShader
+  out.push(tint)
+  return m
 }
 
 export class ModelLayer {
-  /** Posed meshes: they live in the game's own screen-space scene, alongside the sprites. */
-  readonly group = new Group()
-  /** Solid meshes: a real camera, drawn as a second pass into the style's buffer. */
+  /** Both ways of posing a mesh, drawn as one pass through one lens into the style's buffer. */
   readonly scene = new Scene()
   readonly camera = new PerspectiveCamera(45, 1.78, 0.4, 6000)
   /** One prototype per kind; instances clone it and share its geometry and materials. */
   private readonly protos = new Map<string, Object3D>()
+  /** Each kind's fitted extents, which is all `bakeView` needs to frame it. */
+  private readonly sizes = new Map<string, Vector3>()
+  /** The fitted models and their extents, for whoever wants to photograph them live. */
+  readonly fitted = new Map<string, { model: Object3D; fs: Vector3 }>()
   private readonly pools = new Map<string, Object3D[]>()
   private readonly cursor = new Map<string, number>()
   private readonly ground: Mesh
   private groundVerts = new Float32Array(0)
-  private z = 0
-  private screenW = 800
-  private screenH = 448
+  /** The frame's fog colour, shared by reference with every instance's tint uniforms. */
+  private readonly fog = new Color(1, 1, 1)
+  /** Lateral stations of the proxy for the two rows of a strip (reused, not reallocated per row). */
+  private readonly colA = new Float64Array(GROUND_COLS)
+  private readonly colB = new Float64Array(GROUND_COLS)
+  /** 1/tan(halfFov) of whatever lens this frame is using, after the world's zoom. */
+  private camDepth = 1
+
+  /** The frame's aspect, so the solid camera matches the picture the 2D pass is drawing. */
+  set aspect(a: number) {
+    if (this.camera.aspect !== a) {
+      this.camera.aspect = a
+      this.camera.updateProjectionMatrix()
+    }
+  }
   ready = false
   private loading = false
 
   constructor() {
-    // The bake's lights in both scenes, so a mesh is shaded the way its sprite was.
-    for (const parent of [this.group, this.scene]) {
-      const sun = new DirectionalLight(0xffffff, 1.6)
-      sun.position.set(3, 6, 4)
-      parent.add(new AmbientLight(0xffffff, 0.35), new HemisphereLight(0xffffff, 0x8080a0, 0.7), sun)
-    }
-    this.group.visible = false
+    // The bake's lights, so a mesh is shaded the way its sprite was.
+    const sun = new DirectionalLight(0xffffff, 1.6)
+    sun.position.set(3, 6, 4)
+    this.scene.add(new AmbientLight(0xffffff, 0.35), new HemisphereLight(0xffffff, 0x8080a0, 0.7), sun)
     // Depth only: it exists so hills and the road's own crest can hide what is behind them.
     this.ground = new Mesh(new BufferGeometry(), new MeshBasicMaterial({ colorWrite: false }))
     this.ground.frustumCulled = false
@@ -108,7 +134,14 @@ export class ModelLayer {
     for (const def of MODELS) {
       try {
         const model = def.file ? (await loader.loadAsync(def.file)).scene : def.build?.()
-        if (model) this.protos.set(def.kind, normalise(model, def))
+        if (model) {
+          const fit = fitModel(model, def)
+          this.protos.set(def.kind, fit.model)
+          this.sizes.set(def.kind, fit.fs)
+          // The prototype itself is never in a scene — instances are clones of it — so the live atlas
+          // can borrow it to photograph without anything being reparented out from under the frame.
+          this.fitted.set(def.kind, { model: fit.model, fs: fit.fs })
+        }
       } catch (err) {
         console.warn(`3D models: ${def.kind} would not load; it keeps its sprite`, err)
       }
@@ -117,25 +150,40 @@ export class ModelLayer {
     this.ready = true
   }
 
-  /** The logical screen and the field of view this frame is drawn with. */
-  begin(w: number, h: number, fovDeg: number): void {
-    this.cursor.clear()
-    this.screenW = w
-    this.screenH = h
-    if (this.camera.fov !== fovDeg || this.camera.aspect !== w / h) {
-      this.camera.fov = fovDeg
-      this.camera.aspect = w / Math.max(1, h)
-      this.camera.updateProjectionMatrix()
-    }
-    // Ordering for the posed pass is by depth: each mesh gets a slab of the ortho camera's z range
-    // roughly as deep as its own geometry, handed out in the order the sprite pass draws — far first.
-    this.z = -Z_RANGE
+  /** The colour models fade into with distance; the same one the road and the sprites use. */
+  setFog(color: number): void {
+    this.fog.set(color)
   }
 
-  private instance(kind: string, solid: boolean): Object3D | null {
+  /**
+   * The view the 2D pass is drawing through: its field of view, the roll it is banking the whole
+   * picture by, and the zoom it uses to keep the corners covered while rolled. This pass has its own
+   * camera, so unless it wears all three the models sit level while the road tips underneath them.
+   */
+  begin(fovDeg: number, roll = 0, zoom = 1, ground = true): void {
+    this.cursor.clear()
+    // Scaling a projected image about its centre by `zoom` is the same as narrowing the lens by it.
+    // Solid mode shares the world's lens, because it is standing things in the world's own places.
+    // Posed mode picks its own and keeps it: the zoom is a magnification of the finished picture, so
+    // folding it into the lens would make the perspective breathe every time the view banked.
+    // The world's own lens, and posed placement measures against it WITHOUT the zoom: the zoom is a
+    // magnification of the finished picture to keep its corners covered while it is banked, so folding
+    // it in would make a posed mesh's perspective breathe every time the view rolled.
+    this.camDepth = Math.tan(fovDeg * 0.5 * DEG) ** -1
+    // Scaling a projected image about its centre by `zoom` is the same as narrowing the lens by it.
+    const fov = (2 * Math.atan(1 / (this.camDepth * Math.max(1e-3, zoom)))) / DEG
+    if (this.camera.fov !== fov) {
+      this.camera.fov = fov
+      this.camera.updateProjectionMatrix()
+    }
+    this.camera.rotation.set(0, 0, -roll)
+    this.ground.visible = ground
+  }
+
+  private instance(kind: string): Object3D | null {
     const proto = this.protos.get(kind)
     if (!proto) return null
-    const key = solid ? `s:${kind}` : `f:${kind}`
+    const key = kind
     let pool = this.pools.get(key)
     if (!pool) {
       pool = []
@@ -147,58 +195,45 @@ export class ModelLayer {
     if (!obj) {
       obj = proto.clone()
       obj.userData.kind = kind
-      // Over the road and the sprites, like a sprite would be. renderOrder does not reach a group's
-      // children, so leaving it at zero paints every mesh *under* the road it is standing on.
-      if (!solid) obj.traverse((o) => (o.renderOrder = 6))
+      // clone() shares the prototype's materials; this instance needs its own so it can carry its own
+      // distance haze. Geometry stays shared, and so does the compiled program.
+      const tints: Tint[] = []
+      obj.traverse((o) => {
+        const m = o as Mesh
+        if (!m.isMesh) return
+        m.material = Array.isArray(m.material) ? m.material.map((mat) => tinted(mat, this.fog, tints)) : tinted(m.material, this.fog, tints)
+      })
+      obj.userData.tints = tints
+      // The live pass puts a model's clip position in a uniform, which three cannot see, so it must
+      // not be allowed to decide the model is off screen.
+      obj.traverse((o) => (o.frustumCulled = false))
       pool.push(obj)
-      ;(solid ? this.scene : this.group).add(obj)
+      this.scene.add(obj)
     }
     obj.visible = true
     return obj
   }
 
-  /**
-   * Posed: put the mesh where its sprite would have been drawn — ground contact at screen (`x`, `y`),
-   * the frame `h` pixels tall, seen from `yawDeg` / `pitchDeg`, leaning by `roll`. Returns false when
-   * this kind has no mesh, so the caller can draw the sprite instead.
-   */
-  addPosed(kind: string, x: number, y: number, h: number, frame: { heightM: number; nearMag?: number }, yawDeg: number, pitchDeg: number, roll: number): boolean {
-    if (h <= 0) return false
-    // The near field is where this stops being a comparison. A sprite whose quad is four screens tall
-    // and half a screen off the side costs nothing and shows a sliver of trunk; the same thing as
-    // geometry is a mesh the size of a stadium leaning over the road, and it eats the whole z range
-    // the rest of the frame has to share. Those keep their sprites.
-    if (h > this.screenH * 2.5 || x < -this.screenW || x > this.screenW * 2) return false
-    const obj = this.instance(kind, false)
-    if (!obj) return false
-    // Sized as the sprite is: pixels to the metre at the frame's centre plane, times half the lens
-    // magnification — the sprite's near end is `nearMag` bigger than its far end, and a flat mesh can
-    // only pick one number out of that gradient. The middle of it is what matches by eye.
-    const mag = 1 + ((frame.nearMag ?? 1) - 1) * 0.5
-    obj.scale.setScalar((h / Math.max(1e-3, frame.heightM)) * mag)
-    // Yaw turns the mesh to face the way the bake camera stood (which is behind the car, hence the
-    // half turn); pitch tips it towards the viewer the way a camera above the road sees it; roll is
-    // the bank. Applied in that order, in world space, about the ground contact.
-    obj.rotation.order = 'ZXY'
-    obj.rotation.set(pitchDeg * DEG, (yawDeg + 180) * DEG, roll)
-    this.z += Math.min(h * 1.2 + 3, 240)
-    obj.position.set(x, y, this.z)
-    return true
+  /** How much haze this instance stands behind (0..1) and how much light reaches it (1 = full day). */
+  private setTint(obj: Object3D, fogT: number, bright: number): void {
+    for (const t of obj.userData.tints as Tint[]) {
+      t.uTintAmt.value = fogT
+      t.uTintDim.value = bright
+    }
   }
 
   /**
-   * Solid: put the mesh at the camera-relative point its sprite was standing on. `sx`/`sy` are where
-   * the sprite pass put its ground contact and `scale` is the pixels-to-the-metre it drew it at,
-   * which together invert to a place in front of the camera. `headingDeg` is the model's own heading,
-   * not a viewing angle — which way it is seen from falls out of where it is.
+   * Solid: stand the mesh at a place in front of the camera, in metres — `cx` to the side, `cy` above,
+   * `cz` ahead. Not a sprite's screen position inverted back into a place: the road rows carry the
+   * metres, and this is the pass that is allowed to use them as metres. `headingDeg` is the model's own
+   * heading, not a viewing angle — which way it is seen from falls out of where it is standing.
    */
-  addSolid(kind: string, sx: number, sy: number, scale: number, size: number, headingDeg: number, roll: number): boolean {
-    if (scale <= 1e-4) return false
-    const obj = this.instance(kind, true)
+  addSolid(kind: string, cx: number, cy: number, cz: number, size: number, headingDeg: number, roll: number, fogT = 0, bright = 1): boolean {
+    if (!(cz > 0.05)) return false
+    const obj = this.instance(kind)
     if (!obj) return false
-    const camDepth = 1 / Math.tan(this.camera.fov * 0.5 * DEG)
-    const cz = (camDepth * (this.screenH / 2)) / scale
-    obj.position.set((sx - this.screenW / 2) / scale, (sy - this.screenH / 2) / scale, -cz)
+    this.setTint(obj, fogT, bright)
+    obj.position.set(cx, cy, -cz)
     obj.scale.setScalar(size)
     obj.rotation.order = 'ZYX'
     // The half turn: these models face +z, and +z here is back towards the camera. Without it every
@@ -211,30 +246,51 @@ export class ModelLayer {
    * The depth-only road surface, from the same rows the road was drawn from: screen x, screen y and
    * pixels-to-the-metre per row, inverted back into camera space. Wide enough to stand in for the
    * ground either side, which is what actually hides a tree over a crest.
+   *
+   * It carries the banked deck and the bank under its high side, not just a flat ribbon down the
+   * centreline: on a bermed turn the surface you are hidden by stands metres above the centre, and a
+   * proxy laid flat there hides nothing — every tree behind the berm pokes up through the tarmac.
    */
-  setGround(rowX: ArrayLike<number>, rowY: ArrayLike<number>, rowScale: ArrayLike<number>, rows: number): void {
-    const quads = Math.max(0, rows - 1)
+  setGround(rowCx: ArrayLike<number>, rowCy: ArrayLike<number>, rowCz: ArrayLike<number>, rowTilt: ArrayLike<number>, rows: number): void {
+    const strips = Math.max(0, rows - 1)
+    const quads = strips * (GROUND_COLS - 1)
     const need = quads * 6 * 3
     if (this.groundVerts.length !== need) {
       this.groundVerts = new Float32Array(need)
       this.ground.geometry.setAttribute('position', new BufferAttribute(this.groundVerts, 3))
     }
     const p = this.groundVerts
-    const camDepth = 1 / Math.tan(this.camera.fov * 0.5 * DEG)
+    const dh = deckHalf()
     let v = 0
-    const put = (n: number, side: number): void => {
-      const s = Math.max(1e-4, rowScale[n])
-      p[v++] = (rowX[n] - this.screenW / 2) / s + side * GROUND_HALF
-      p[v++] = (rowY[n] - this.screenH / 2) / s
-      p[v++] = -((camDepth * (this.screenH / 2)) / s)
+    /** Where this row's profile changes slope: the ground, the foot of the bank, the deck, its centre. */
+    const stations = (out: Float64Array, tilt: number): void => {
+      const run = bankReach(tilt) - dh
+      out[0] = -GROUND_HALF
+      out[1] = -dh - (tilt < 0 ? run : 0)
+      out[2] = -dh
+      out[3] = 0
+      out[4] = dh
+      out[5] = dh + (tilt > 0 ? run : 0)
+      out[6] = GROUND_HALF
     }
-    for (let n = 0; n < quads; n++) {
-      put(n, -1)
-      put(n, 1)
-      put(n + 1, -1)
-      put(n + 1, -1)
-      put(n, 1)
-      put(n + 1, 1)
+    const put = (n: number, u: number): void => {
+      p[v++] = rowCx[n] + u
+      p[v++] = rowCy[n] + groundHeight(u, rowTilt[n]) - GROUND_BIAS
+      p[v++] = -rowCz[n]
+    }
+    const a = this.colA
+    const b = this.colB
+    for (let n = 0; n < strips; n++) {
+      stations(a, rowTilt[n])
+      stations(b, rowTilt[n + 1])
+      for (let c = 0; c < GROUND_COLS - 1; c++) {
+        put(n, a[c])
+        put(n, a[c + 1])
+        put(n + 1, b[c])
+        put(n + 1, b[c])
+        put(n, a[c + 1])
+        put(n + 1, b[c + 1])
+      }
     }
     ;(this.ground.geometry.getAttribute('position') as BufferAttribute).needsUpdate = true
     this.ground.geometry.setDrawRange(0, quads * 6)
@@ -245,6 +301,18 @@ export class ModelLayer {
       const used = this.cursor.get(key) ?? 0
       for (let i = used; i < pool.length; i++) pool[i].visible = false
     }
+  }
+
+  /**
+   * The solid scene hangs off this layer, not off the game's scene graph, so nothing else disposes it —
+   * and every instance owns its materials now, so there is real memory here to give back.
+   */
+  dispose(): void {
+    disposeObject3D(this.scene)
+    this.protos.clear()
+    this.pools.clear()
+    this.cursor.clear()
+    this.ready = false
   }
 
   /** The solid pass, into whatever the style is drawing into: its depth buffer, our geometry. */

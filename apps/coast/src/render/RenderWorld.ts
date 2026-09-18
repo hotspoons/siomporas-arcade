@@ -13,7 +13,7 @@ import type { Segment, Stage } from '../sim/Road'
 import type { Snapshot } from '../sim/Snapshot'
 import { TRAFFIC_KINDS } from '../sim/Sim'
 import { blendPalette, gradeColor, paletteFor, vibeAt, type VibeDef } from '../world/vibes'
-import { BAND_SEGMENTS, DRAW_SEGMENTS, FORK_SPREAD, ROAD_HALF_WIDTH, SEG_LENGTH } from '../sim/Tuning'
+import { BAND_SEGMENTS, DRAW_SEGMENTS, FORK_LANES, FORK_WIDEN, ROAD_HALF_WIDTH, SEG_LENGTH, stageLinkMetres } from '../sim/Tuning'
 import { HERO_YAWS } from './models'
 
 /** Darken (f < 1) or lighten a packed RGB colour. */
@@ -43,18 +43,24 @@ import { COCKPIT_H, COCKPIT_W, Cockpit } from './Cockpit'
 import { Flames } from './Flames'
 import { HudLayer } from './HudLayer'
 import { Projection } from './Projection'
-import { FOV_DEG, MODELS_3D, BANK_ROLL, BANK_SLOPE, BANK_TIER_COUNT, BANK_TIER_H, BANK_TIER_W, BEACH_WIDTH, CAM_BOUNCE, TUNNEL_DARK, TUNNEL_HALF_WIDTH, TUNNEL_HEIGHT, HUD_RETRO, HORIZON_ROLL_SHARE, STEER_ROLL, CURVE_UNIT, FOG_MODERN, FOG_RETRO, HEADLIGHT_REACH, LANE_WIDTH, LIGHTS_OFF_AMBIENT, LOGICAL_HEIGHT, MAX_SPRITES, NIGHT_AMBIENT, PALETTES, RAIL_HEIGHT, RUMBLE_WIDTH, SHOULDER_WIDTH, VIEWS, type Palette } from './RenderTuning'
+import { FOV_DEG, MODELS_3D, BANK_BATTER, BANK_ROLL, BANK_SLOPE, BANK_TIER_COUNT, BANK_TIER_H, BANK_TIER_W, BEACH_WIDTH, CAM_BOUNCE, TUNNEL_DARK, TUNNEL_HALF_WIDTH, TUNNEL_HEIGHT, HUD_RETRO, HORIZON_ROLL_SHARE, STEER_ROLL, CURVE_UNIT, FOG_MODERN, FOG_RETRO, HEADLIGHT_REACH, LANE_WIDTH, LIGHTS_OFF_AMBIENT, LOGICAL_HEIGHT, MAX_SPRITES, NIGHT_AMBIENT, PALETTES, RAIL_HEIGHT, RUMBLE_WIDTH, SHOULDER_WIDTH, VIEWS, type Palette } from './RenderTuning'
 import { LIVERIES } from './procgen'
 import { Rain } from './Rain'
 import type { Theme } from '../sim/Road'
-import { RoadMesh, bermLift, deckHalf } from './RoadMesh'
+import { RoadMesh, bankReach, deckHalf, groundHeight } from './RoadMesh'
 import { DEFAULT_PITCH, SpriteAtlas } from './SpriteAtlas'
 import { SpriteBatch } from './SpriteBatch'
 import { ModelLayer } from './ModelLayer'
+import { LiveAtlas } from './LiveAtlas'
 
 export type ViewMode = keyof typeof VIEWS
 
 const ROWS = DRAW_SEGMENTS + 2
+/**
+ * Screen-x buckets for the skyline (below). Four logical pixels each at the design width; what it
+ * feeds is one clip line per sprite, so finer than that buys nothing.
+ */
+const SKY_BINS = 200
 /** Segments either side of a scene change over which the ground colours crossfade. */
 const SCENE_FADE = 60
 
@@ -69,6 +75,8 @@ export class RenderWorld {
   readonly road = new RoadMesh()
   readonly sprites = new SpriteBatch(MAX_SPRITES)
   readonly models = new ModelLayer()
+  /** Sprites photographed this frame instead of looked up; MODELS_3D = 1. See LiveAtlas. */
+  readonly live = new LiveAtlas()
   readonly flames = new Flames()
   readonly background = new Background()
   readonly cockpit = new Cockpit()
@@ -101,8 +109,11 @@ export class RenderWorld {
   private readonly rowY = new Float32Array(ROWS)
   private readonly rowScale = new Float32Array(ROWS)
   private readonly rowValid = new Uint8Array(ROWS)
-  private readonly rowClip = new Float32Array(ROWS)
   private readonly rowFog = new Float32Array(ROWS)
+  /** The same rows in camera space, metres: lateral, vertical, and distance ahead. 3D reads these. */
+  private readonly rowCx = new Float32Array(ROWS)
+  private readonly rowCy = new Float32Array(ROWS)
+  private readonly rowCz = new Float32Array(ROWS)
   /** Banking slope per row (screen-y per lateral metre, ×scale), so sprites sit on the tilted road. */
   private readonly rowTilt = new Float32Array(ROWS)
   /** The arcade HUD drawn inside the low-res buffer (retro only; see HudLayer). */
@@ -110,6 +121,15 @@ export class RenderWorld {
   /** False on the title screen, where a score and a clock over the logo make no sense. */
   hudEnabled = true
   private readonly segVisible = new Uint8Array(ROWS)
+  /**
+   * THE SKYLINE, and the only thing that hides anything in the 2D pass. Per row, the highest the
+   * ground gets anywhere nearer than it, bucketed by screen x — the profile of the whole drawn road,
+   * crest and camber and bank together, not a horizon line plus a pile of cases for the bits that
+   * stand above it. A sprite is cut where the ground in front of it reaches, at its own screen x.
+   */
+  private readonly sky = new Float32Array(ROWS * SKY_BINS)
+  /** The running skyline pass 1 folds each row into as it walks near → far. */
+  private readonly skyRun = new Float32Array(SKY_BINS)
   private readonly carOrder: number[] = []
   private themeId = ''
   private hit = 0
@@ -120,6 +140,10 @@ export class RenderWorld {
   private nightAmt = 0
   private rainAmt = 0
   private silAmt = 0
+  /** The look we are handing over FROM at a checkpoint, and how many metres of the handover are left. */
+  private fadeFrom: { pal: Palette; night: number; rain: number; sil: number; fog: number } | null = null
+  private fadeLeft = 0
+  private fadeSpan = 1
   private fogScale = 1
   private bgKey = ''
   private clearRgb = -1
@@ -130,7 +154,7 @@ export class RenderWorld {
     this.renderer = new WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance', stencil: false, alpha: false })
     this.renderer.info.autoReset = false
     this.renderer.setClearColor(new Color(0x000000), 1)
-    this.inner.add(this.background.sky, this.background.clouds, this.background.far, this.background.near, this.road.mesh, this.flames.mesh, this.sprites.mesh, this.models.group)
+    this.inner.add(this.background.sky, this.background.clouds, this.background.far, this.background.near, this.road.mesh, this.flames.mesh, this.sprites.mesh)
     this.world.add(this.inner)
     this.scene.add(this.world, this.rain.mesh, this.cockpit.mesh, this.hudLayer.mesh)
     this.background.sky.renderOrder = 0
@@ -139,8 +163,6 @@ export class RenderWorld {
     this.background.near.renderOrder = 3
     this.road.mesh.renderOrder = 4
     this.sprites.mesh.renderOrder = 5
-    // Over the road like the sprites, and depth-sorted among themselves by their own z.
-    this.models.group.renderOrder = 5
     // Behind the car, over the road: the flames come out from under the tail.
     this.flames.mesh.renderOrder = 4
     this.rain.mesh.renderOrder = 6
@@ -156,7 +178,16 @@ export class RenderWorld {
     this.renderer.setClearColor(new Color(this.palette.skyBottom), 1)
   }
 
-  setStage(stage: Stage): void {
+  setStage(stage: Stage, handover = false): void {
+    // Hold on to the light we are leaving. The new stage's road starts at the line; its weather does not.
+    if (handover && this.stage && stageLinkMetres() > 0) {
+      this.fadeFrom = { pal: this.palette, night: this.nightAmt, rain: this.rainAmt, sil: this.silAmt, fog: this.fogScale }
+      this.fadeLeft = stageLinkMetres()
+      this.fadeSpan = this.fadeLeft
+    } else {
+      this.fadeFrom = null
+      this.fadeLeft = 0
+    }
     this.stage = stage
     this.scenePals = stage.scenes.map((s) => PALETTES[s.palette] ?? PALETTES.coast)
     this.themeId = stage.theme.id
@@ -192,16 +223,32 @@ export class RenderWorld {
       this.palette = base
       this.fogScale = 1
     }
-    // The parallax layers are canvas textures, so re-drawing them costs an upload:
-    // only do it when the scene (or the pipeline's filtering) under them changes.
-    const key = `${theme.backdrop}|${base.far.toString(16)}|${base.near.toString(16)}|${base.clouds.toString(16)}|${this.retro ? 'r' : 'm'}`
+    // Coming out of a checkpoint, the stage we left is still most of what you can see: blend out of it
+    // over STAGE_FADE_M so the seam is a change in the weather rather than a cut.
+    const from = this.fadeFrom
+    if (from) {
+      const t = 1 - Math.max(0, this.fadeLeft) / Math.max(1, this.fadeSpan)
+      const e = t * t * (3 - 2 * t)
+      this.palette = blendPalette(from.pal, this.palette, e)
+      this.nightAmt = from.night + (this.nightAmt - from.night) * e
+      this.rainAmt = from.rain + (this.rainAmt - from.rain) * e
+      this.silAmt = from.sil + (this.silAmt - from.sil) * e
+      this.fogScale = from.fog + (this.fogScale - from.fog) * e
+      if (this.fadeLeft <= 0) this.fadeFrom = null
+    }
+    // The parallax layers are canvas textures, so re-drawing them costs an upload: only do it when the
+    // scene (or the pipeline's filtering) under them changes — and through a handover, in steps, because
+    // a blend that moves every frame would redraw and re-upload every frame.
+    const step = from ? `|${Math.round((1 - this.fadeLeft / Math.max(1, this.fadeSpan)) * 12)}` : ''
+    const key = `${theme.backdrop}|${base.far.toString(16)}|${base.near.toString(16)}|${base.clouds.toString(16)}|${this.retro ? 'r' : 'm'}${step}`
     if (key !== this.bgKey) {
       this.bgKey = key
-      this.background.setPalette(base, theme.backdrop, this.retro, this.nightAmt, key)
+      this.background.setPalette(from ? blendPalette(from.pal, base, 1 - Math.max(0, this.fadeLeft) / Math.max(1, this.fadeSpan)) : base, theme.backdrop, this.retro, this.nightAmt, key)
     }
     this.background.setSky(this.palette, this.nightAmt, vibe ? gradeColor(0xffffff, vibe) : 0xffffff)
     this.road.setFog(this.palette.fog)
     this.sprites.setFog(this.palette.fog)
+    this.models.setFog(this.palette.fog)
     if (this.palette.skyBottom !== this.clearRgb) {
       this.clearRgb = this.palette.skyBottom
       this.renderer.setClearColor(this.clearColor.set(this.clearRgb), 1)
@@ -264,6 +311,8 @@ export class RenderWorld {
     this.style?.detach()
     this.style = null
     disposeObject3D(this.scene)
+    this.models.dispose()
+    this.live.dispose()
     this.renderer.dispose()
     // Release the context now rather than at the next collection: browsers cap how many live
     // WebGL contexts a page may hold, and the arcade makes a fresh one for every game entered.
@@ -325,6 +374,9 @@ export class RenderWorld {
     const W = P.width
     const H = P.height
     this.lightsOn = curr.lightsOn
+    // A handover is measured in road, not in seconds: stopping does not finish it and flooring it
+    // does not skip it. `z` restarts at each checkpoint, so only forward progress counts.
+    if (this.fadeLeft > 0) this.fadeLeft -= Math.max(0, z - this.lastZ)
     this.lastZ = z
     // Time of day and weather can move under you along a track, so the look is a
     // per-frame question now, not a per-stage one.
@@ -339,7 +391,7 @@ export class RenderWorld {
     // On a banked curve the camera rides the tilted surface at its own lateral position.
     const camSeg = stage.segmentAt(camZ)
     const camTilt = camSeg.bank > 0.02 && Math.abs(camSeg.curve) > 0.02 ? -Math.sign(camSeg.curve) * camSeg.bank * BANK_SLOPE : 0
-    this.camY = stage.heightAt(camZ) + view.camHeight + curr.airY * (view.drawPlayer ? 0.4 : 1) + bermLift(x * ROAD_HALF_WIDTH, camTilt, this.road.plateau)
+    this.camY = stage.heightAt(camZ) + view.camHeight + curr.airY * (view.drawPlayer ? 0.4 : 1) + groundHeight(x * ROAD_HALF_WIDTH, camTilt)
     // Road bounce only while actually driving: a finished or timed-out run sits still.
     this.bounce = curr.phase === 'driving' && speed > 5 ? Math.sin(this.time * 28) * CAM_BOUNCE * (speed / 84) : 0
     const camY = this.camY + this.bounce
@@ -388,6 +440,7 @@ export class RenderWorld {
     let xOff = 0
     let dx = -(segAt(base).curve * CURVE_UNIT * pct)
     let maxY = -Infinity
+    this.skyRun.fill(-1e9)
     for (let n = 0; n <= DRAW_SEGMENTS; n++) {
       const seg = segAt(base + n)
       let zRel = (base + n) * SEG_LENGTH - camZ
@@ -396,16 +449,40 @@ export class RenderWorld {
       // row instead left a one-frame gap whenever the camera crossed a segment edge.
       if (zRel < 0.6 + n * 0.01) zRel = 0.6 + n * 0.01
       {
+        // Camera space first, in metres — this is the row. Everything else is a view of it: the screen
+        // position the 2D pass paints, and the place the 3D pass stands a model.
+        const cx = xOff - camX + zRel * yawTan
+        const cy = seg.y0 - camY
         const scale = P.scaleAt(zRel)
+        this.rowCx[n] = cx
+        this.rowCy[n] = cy
+        this.rowCz[n] = zRel
         this.rowScale[n] = scale
         this.rowTilt[n] = seg.bank > 0.02 && Math.abs(seg.curve) > 0.02 ? -Math.sign(seg.curve) * seg.bank * BANK_SLOPE : 0
-        this.rowX[n] = P.screenX(xOff - camX + zRel * yawTan, scale)
-        this.rowY[n] = P.screenY(seg.y0 - camY, scale)
+        this.rowX[n] = P.screenX(cx, scale)
+        this.rowY[n] = P.screenY(cy, scale)
         if (n === 0) this.rowY[n] = Math.min(this.rowY[n], -4)
         this.rowValid[n] = behind ? 0 : 1
         this.rowFog[n] = 1 - Math.exp(-((zRel * fogK) ** 2))
       }
-      this.rowClip[n] = maxY
+      // The skyline so far is what stands between *this* row and the camera, so take it before this
+      // row is folded in.
+      this.sky.set(this.skyRun, n * SKY_BINS)
+      if (this.rowValid[n]) {
+        // Fold this row's ground into the running skyline: its own profile where the road is, flat
+        // ground either side of that. One sweep, whatever the row is doing.
+        const s1 = this.rowScale[n]
+        const t = this.rowTilt[n]
+        const y1 = this.rowY[n]
+        const reach = bankReach(t) * s1
+        const lo = (this.rowX[n] - reach) / W
+        const hi = (this.rowX[n] + reach) / W
+        for (let b = 0; b < SKY_BINS; b++) {
+          const f = (b + 0.5) / SKY_BINS
+          const top = t !== 0 && f > lo && f < hi ? y1 + groundHeight((f * W - this.rowX[n]) / s1, t) * s1 : y1
+          if (top > this.skyRun[b]) this.skyRun[b] = top
+        }
+      }
       // A segment is visible when its far edge rises above everything nearer.
       this.segVisible[n] = 0
       if (n > 0 && this.rowValid[n - 1] && this.rowValid[n] && this.rowY[n] > maxY) {
@@ -487,25 +564,6 @@ export class RenderWorld {
           this.road.quad4(x1 - hw * s1, y1, x1 - hw * s1, y1 + ch * s1, x1 + hw * s1, y1 + ch * s1, x1 + hw * s1, y1, 0x0c0c10, 0)
         }
       }
-      if (this.rowTilt[n] !== 0 && Math.sign(this.rowTilt[n]) === Math.sign(this.rowTilt[n + 1] || this.rowTilt[n])) {
-        // The high side of a banked deck stands on a wall down to the grass (only where both rows agree
-        // on which side is high — across an S-bend's crossover the wall would twist into a black sliver).
-        const side = Math.sign(this.rowTilt[n])
-        const bo = ROAD_HALF_WIDTH + RUMBLE_WIDTH + SHOULDER_WIDTH
-        const wx1 = x1 + side * bo * s1
-        const wx2 = x2 + side * bo * s2
-        const l1 = bermLift(side * bo, this.rowTilt[n], this.road.plateau) * s1
-        const l2 = bermLift(side * bo, this.rowTilt[n + 1], this.road.plateau) * s2
-        this.road.quad4(wx1, y1, wx1, y1 + l1, wx2, y2 + l2, wx2, y2, band ? 0x6a6a72 : 0x62626a, fog)
-        // Terraces above the deck on the outside, if any are configured.
-        for (let k = 0; k < BANK_TIER_COUNT; k++) {
-          const lo = bo + k * BANK_TIER_W
-          const hi = lo + BANK_TIER_W
-          const h = (k + 1) * BANK_TIER_H * seg.bank
-          const col = shade(k % 2 ? pal.grassB : pal.grassA, 1 - 0.12 * (k + 1))
-          this.road.quad(x1 + side * ((lo + hi) / 2) * s1, y1 + h * s1, ((hi - lo) / 2) * s1, x2 + side * ((lo + hi) / 2) * s2, y2 + h * s2, ((hi - lo) / 2) * s2, col, fog)
-        }
-      }
       if (seg.shore && pal.water !== undefined) {
         // The sea against the road: a sliver of beach past the shoulder, then water to the screen edge.
         const side = seg.shore
@@ -528,14 +586,38 @@ export class RenderWorld {
         this.road.quadFlat(W / 2, y1, W, W / 2, y1 + (y2 - y1) * 0.12, W, pal.lane, fog)
         this.road.quadFlat(W / 2, y2 - (y2 - y1) * 0.12, W, W / 2, y2, W, pal.lane, fog)
       }
-      const roads = seg.fork >= 0 ? 2 : 1
-      const spread = seg.fork >= 0 ? seg.fork * FORK_SPREAD * ROAD_HALF_WIDTH : 0
-      for (let r = 0; r < roads; r++) {
-        const side = roads === 2 ? (r === 0 ? -1 : 1) : 0
-        const cx1 = x1 + side * spread * s1
-        const cx2 = x2 + side * spread * s2
-        const w1 = ROAD_HALF_WIDTH * s1
-        const w2 = ROAD_HALF_WIDTH * s2
+      if (this.rowTilt[n] !== 0 && Math.sign(this.rowTilt[n]) === Math.sign(this.rowTilt[n + 1] || this.rowTilt[n])) {
+        // The deck's high side comes back down to the ground on a graded bank, not off a wall: a sheer
+        // face is a flat dark slab seen almost edge-on, which is the black wedge that used to sit in the
+        // grass on the outside of every turn. Drawn only where both rows agree on which side is high —
+        // across an S-bend's crossover the bank would twist through itself.
+        const side = Math.sign(this.rowTilt[n])
+        const bo = deckHalf()
+        const drop1 = Math.abs(this.rowTilt[n]) * this.road.plateau
+        const drop2 = Math.abs(this.rowTilt[n + 1]) * this.road.plateau
+        const wx1 = x1 + side * bo * s1
+        const wx2 = x2 + side * bo * s2
+        // Down the slope and out: the foot of the bank sits BANK_BATTER metres further out per metre of drop.
+        const fx1 = wx1 + side * drop1 * BANK_BATTER * s1
+        const fx2 = wx2 + side * drop2 * BANK_BATTER * s2
+        this.road.quad4(fx1, y1, wx1, y1 + drop1 * s1, wx2, y2 + drop2 * s2, fx2, y2, shade(grassCol, 0.74), fog)
+        // Terraces above the deck on the outside, if any are configured.
+        for (let k = 0; k < BANK_TIER_COUNT; k++) {
+          const lo = bo + k * BANK_TIER_W
+          const hi = lo + BANK_TIER_W
+          const h = (k + 1) * BANK_TIER_H * seg.bank
+          const col = shade(k % 2 ? pal.grassB : pal.grassA, 1 - 0.12 * (k + 1))
+          this.road.quad(x1 + side * ((lo + hi) / 2) * s1, y1 + h * s1, ((hi - lo) / 2) * s1, x2 + side * ((lo + hi) / 2) * s2, y2 + h * s2, ((hi - lo) / 2) * s2, col, fog)
+        }
+      }
+      // A fork is one road that widens, so it is drawn as one road that widens — two carriageways with a
+      // median between them is the thing it is replacing. Four lanes across it, two feeding each way.
+      const grow = seg.fork >= 0 ? 1 + seg.fork * FORK_WIDEN : 1
+      {
+        const cx1 = x1
+        const cx2 = x2
+        const w1 = ROAD_HALF_WIDTH * grow * s1
+        const w2 = ROAD_HALF_WIDTH * grow * s2
         this.road.quad(cx1, y1, w1 + (RUMBLE_WIDTH + SHOULDER_WIDTH) * s1, cx2, y2, w2 + (RUMBLE_WIDTH + SHOULDER_WIDTH) * s2, pal.shoulder, fog)
         this.road.quad(cx1, y1, w1 + RUMBLE_WIDTH * s1, cx2, y2, w2 + RUMBLE_WIDTH * s2, band ? pal.rumbleA : pal.rumbleB, fog)
         this.road.quad(cx1, y1, w1, cx2, y2, w2, band ? pal.roadA : pal.roadB, fog)
@@ -547,13 +629,17 @@ export class RenderWorld {
         }
         // Solid edge lines, dashed lane dividers (bright inside the beams).
         for (const e of [-1, 1]) this.road.quad(cx1 + e * (w1 - LANE_WIDTH * s1 * 1.5), y1, LANE_WIDTH * s1 * 0.8, cx2 + e * (w2 - LANE_WIDTH * s2 * 1.5), y2, LANE_WIDTH * s2 * 0.8, pal.lane, fog)
-        if (band) {
-          for (let l = 1; l < lanes; l++) {
-            const f = -1 + (2 * l) / lanes
-            this.road.quad(cx1 + f * w1, y1, LANE_WIDTH * s1, cx2 + f * w2, y2, LANE_WIDTH * s2, pal.lane, fog)
-          }
+        // Through the fork the lane count goes to FORK_LANES, and the middle one is solid: that is the
+        // line you are choosing a side of, and it wants to read as a decision rather than a lane change.
+        const marks = seg.fork >= 0 ? FORK_LANES : lanes
+        for (let l = 1; l < marks; l++) {
+          const mid = seg.fork >= 0 && l * 2 === marks
+          if (!band && !mid) continue
+          const f = -1 + (2 * l) / marks
+          const lw = mid ? LANE_WIDTH * 1.6 : LANE_WIDTH
+          this.road.quad(cx1 + f * w1, y1, lw * s1, cx2 + f * w2, y2, lw * s2, pal.lane, fog)
         }
-        if (seg.closed && side === 0) {
+        if (seg.closed) {
           // Roadworks: a concrete jersey barrier along the lane line with an orange stripe on top.
           const e = seg.closed
           const jx1 = cx1 + e * 0.5 * w1
@@ -582,13 +668,23 @@ export class RenderWorld {
     const want3D = MODELS_3D >= 1.5 ? 2 : MODELS_3D > 0.5 ? 1 : 0
     if (want3D && !this.models.ready) void this.models.load()
     const mode = this.models.ready ? want3D : 0
+    // Live sprites: the same pass, drawing from a sheet photographed this frame rather than shipped.
     const posed = mode === 1
     const solid = mode === 2
-    this.models.group.visible = posed
+    if (posed && !this.live.ready) {
+      this.live.init(this.renderer, this.retro)
+      this.live.setModels(this.models.fitted)
+    }
+    const liveOn = posed && this.live.ready && this.live.texture !== null
+    if (liveOn) this.live.begin()
+    if (this.atlas.texture) this.sprites.setAtlas(liveOn ? this.live.texture! : this.atlas.texture)
+    // One 3D pass through one lens, whichever way the meshes are being posed. Only solid mode stands
+    // them in real places, so only solid mode has a ground to bury them in.
     this.models.scene.visible = solid
     if (this.style) this.style.extra = solid ? this.renderSolid : null
-    this.models.begin(W, H, FOV_DEG)
-    if (solid) this.models.setGround(this.rowX, this.rowY, this.rowScale, ROWS)
+    this.models.aspect = W / H
+    this.models.begin(FOV_DEG, horizon, cover, solid)
+    if (solid) this.models.setGround(this.rowCx, this.rowCy, this.rowCz, this.rowTilt, ROWS)
     this.sprites.begin()
     const carOrder = this.carOrder
     carOrder.length = 0
@@ -598,7 +694,6 @@ export class RenderWorld {
     for (let n = DRAW_SEGMENTS - 1; n >= 0; n--) {
       if (!this.rowValid[n]) continue
       const seg = segAt(base + n)
-      const clip = Math.max(this.rowClip[n], -1e9)
       // Cars whose z falls in this segment.
       const zStart = (base + n) * SEG_LENGTH
       while (carPtr < carOrder.length && curr.trafficZ[carOrder[carPtr]] >= zStart) {
@@ -622,21 +717,46 @@ export class RenderWorld {
           // higher than the cockpit's eye line, so it adds more downward pitch.
           const dz = Math.max(6, cz - camZ)
           const viewYaw = yaw === 0 ? (Math.atan2((curr.trafficX[ci] - x) * ROAD_HALF_WIDTH, dz) * 180) / Math.PI : yaw
-          const viewPitch = (view.drawPlayer ? 9 : 2) + (Math.atan2(camY - stage.heightAt(cz), dz) * 180) / Math.PI
-          const frame = this.atlas.frame(kind, viewYaw, viewPitch)
+          // How far above this car the camera actually sits. The sprite pass adds a bias on top, which is
+          // there to bend the choice of baked frame toward the flattering one — a mesh needs no such help,
+          // and wearing the bias it drives along with its nose in the air.
+          const groundPitch = (Math.atan2(camY - stage.heightAt(cz), dz) * 180) / Math.PI
+          const viewPitch = (view.drawPlayer ? 9 : 2) + groundPitch
+          // Live: photographed at the angle it is actually seen from, not snapped to one of sixteen.
+          const frame = (liveOn ? this.live.frame(kind, viewYaw, viewPitch) : null) ?? this.atlas.frame(kind, viewYaw, viewPitch)
           const tsx = sx + lat * sc
           // Roll comes between the rows too, so a car does not snap upright halfway through a bank.
           const roll = Math.atan(this.rowTilt[n] + (this.rowTilt[n + 1] - this.rowTilt[n]) * t)
           if (!frame) continue
+          // A mesh takes the same haze and the same light the sprite of it would have: it is the one
+          // thing in the frame that could otherwise stay bright green a kilometre away.
+          const fogT = this.rowFog[n]
+          const bright = this.brightAt((base + n) * SEG_LENGTH - camZ)
           // Solid: the car's own heading, not the angle it happens to be seen from — that comes out
           // of where it is standing once there is a real camera.
-          if (solid && this.models.addSolid(kind, tsx, sy, sc, 1, yaw, roll)) continue
-          if (posed && this.models.addPosed(kind, tsx, sy, frame.heightM * sc, frame, viewYaw, viewPitch, roll)) continue
-          this.sprites.add(tsx, sy, frame.heightM * sc, frame, this.rowFog[n], this.brightAt((base + n) * SEG_LENGTH - camZ), Math.max(clip, this.deckWallTop(n, lat, tsx)), roll)
+          // In metres, between the same two rows the sprite is read between — the road's own numbers,
+          // not its screen position taken apart again.
+          if (
+            solid &&
+            this.models.addSolid(
+              kind,
+              this.rowCx[n] + (this.rowCx[n + 1] - this.rowCx[n]) * t + lat,
+              this.rowCy[n] + (this.rowCy[n + 1] - this.rowCy[n]) * t + groundHeight(lat, this.rowTilt[n]),
+              this.rowCz[n] + (this.rowCz[n + 1] - this.rowCz[n]) * t,
+              1,
+              yaw,
+              roll,
+              fogT,
+              bright,
+            )
+          )
+            continue
+          const clipHere = this.clipAt(n, tsx)
+          this.sprites.add(tsx, sy, frame.heightM * sc, frame, fogT, bright, clipHere, roll)
         }
       }
       if (seg.runway || base + n < 0) continue
-      this.drawSegmentSprites(seg, n, clip, this.brightAt((base + n) * SEG_LENGTH - camZ), posed, solid)
+      this.drawSegmentSprites(seg, n, this.brightAt((base + n) * SEG_LENGTH - camZ), liveOn, solid)
     }
     // Player car.
     if (view.drawPlayer) {
@@ -655,7 +775,7 @@ export class RenderWorld {
         spinDeg = ((turn * 360 + 180) % 360) - 180
         yaw = nearestYaw(spinDeg)
       }
-      const frame = this.atlas.frame(this.heroKind, yaw)
+      const frame = (liveOn ? this.live.frame(this.heroKind, spinDeg, DEFAULT_PITCH) : null) ?? this.atlas.frame(this.heroKind, yaw)
       let hop = curr.crashT > 0 ? Math.abs(Math.sin(curr.crashT * 20)) * 12 : 0
       let squash = 1
       if (curr.wreck) {
@@ -674,9 +794,20 @@ export class RenderWorld {
       const heroRoll = Math.atan(this.rowTilt[1])
       // Solid takes the steering angle continuously instead of the nearest of sixteen baked ones,
       // which is the whole point of it.
+      // The hero in metres too: `playerAhead` in front of the camera, which is riding directly over it —
+      // so it is at the camera's own lateral, give or take the lean the sprite pass puts on it.
+      const heroLat = curr.x * ROAD_HALF_WIDTH
       const drawn =
-        (solid && this.models.addSolid(this.heroKind, carX, py + hop, scale * squash, 1, spinDeg, heroRoll)) ||
-        (posed && frame !== null && this.models.addPosed(this.heroKind, carX, py + hop, carSize, frame, yaw, DEFAULT_PITCH, heroRoll))
+        (solid &&
+          this.models.addSolid(
+            this.heroKind,
+            (curr.steer * 2) / scale,
+            groundY + curr.airY - camY + groundHeight(heroLat, this.rowTilt[1]) + hop / scale,
+            view.playerAhead,
+            squash,
+            spinDeg,
+            heroRoll,
+          ))
       if (frame && !drawn) this.sprites.add(carX, py + hop, carSize, frame, 0, 1, -1e9, heroRoll)
       // Afterburner: boost lit and the throttle down, and not while the car is a wreck.
       this.flames.update(carX, py + hop, carSize, frame, Math.atan(this.rowTilt[1]), curr.hud.turboActive && curr.throttle > 0.1 && curr.crashT <= 0, dt)
@@ -719,65 +850,48 @@ export class RenderWorld {
     return 1 + (dark - 1) * nightAmt
   }
 
-  private drawSegmentSprites(seg: Segment, n: number, clip: number, bright: number, posed = false, solid = false): void {
+  private drawSegmentSprites(seg: Segment, n: number, bright: number, live = false, solid = false): void {
     const sc = this.rowScale[n]
     for (const sp of seg.sprites) {
-      const frame = this.atlas.frame(sp.kind)
+      const frame = (live ? this.live.frame(sp.kind, 0, DEFAULT_PITCH) : null) ?? this.atlas.frame(sp.kind)
       if (!frame) continue
       const sx = this.rowX[n] + sp.offset * ROAD_HALF_WIDTH * sc
       const lat = sp.offset * ROAD_HALF_WIDTH
       const sy = this.rowY[n] + this.tiltLift(n, lat)
-      const clipHere = Math.max(clip, this.deckWallTop(n, lat, sx))
+      const clipHere = this.clipAt(n, sx)
       // Lit signage and towers glow through the night; a silhouette vibe (the sunset) flattens
       // everything roadside to a cut-out instead, and blends in as the sun goes down.
       const lit = sp.kind.startsWith('sign') || sp.kind.startsWith('tower') || sp.kind === 'diner' || sp.kind === 'motel' || sp.kind === 'gas' || sp.kind === 'arch' ? Math.max(bright, 0.85) : bright
       const glow = this.silAmt > 0.01 ? lit + (0.04 - lit) * this.silAmt : lit
       const h = frame.heightM * sp.scale * sc
-      if (solid && this.models.addSolid(sp.kind, sx, sy, sc, sp.scale, 0, 0)) continue
-      if (posed && this.models.addPosed(sp.kind, sx, sy, h, frame, 0, DEFAULT_PITCH, 0)) continue
+      if (solid && this.models.addSolid(sp.kind, this.rowCx[n] + lat, this.rowCy[n] + groundHeight(lat, this.rowTilt[n]), this.rowCz[n], sp.scale, 0, 0, this.rowFog[n], glow)) continue
       this.sprites.add(sx, sy, h, frame, this.rowFog[n], glow, clipHere)
     }
   }
 
   /**
-   * Clip line for a sprite at row n and screen x: below the wall top of its own row's deck if it stands on
-   * the grass beyond the high side, and below the top of any nearer raised deck that lies in front of it
-   * on screen (a raised bank ahead of a far tree hides the tree's feet, as it would in the world).
+   * Where a sprite standing at row `n`, screen x `screenX`, gets cut: the skyline — how high the ground
+   * between it and the camera reaches at that screen x. Crest, camber and bank are the same question
+   * and this is the one answer to it.
    */
-  private deckWallTop(n: number, lateralM: number, screenX: number): number {
-    let clip = -1e9
-    const t = this.rowTilt[n]
-    if (t) {
-      const e = Math.sign(t) * lateralM + deckHalf()
-      if (e > 2 * deckHalf()) clip = this.rowY[n] + Math.abs(t) * 2 * deckHalf() * this.rowScale[n]
-    }
-    for (let m = Math.max(0, n - 40); m < n; m++) {
-      const tm = this.rowTilt[m]
-      if (!tm || !this.rowValid[m]) continue
-      const sm = this.rowScale[m]
-      const dh = deckHalf()
-      const lo = this.rowX[m] - dh * sm
-      const hi = this.rowX[m] + dh * sm
-      if (screenX < lo || screenX > hi) continue
-      // Height of that deck's surface at this screen x.
-      const u = (screenX - this.rowX[m]) / sm
-      const top = this.rowY[m] + bermLift(u, tm, 2 * dh) * sm
-      if (top > clip) clip = top
-    }
-    return clip
+  private clipAt(n: number, screenX: number): number {
+    const b = Math.floor((screenX / Math.max(1, this.proj.width)) * SKY_BINS)
+    return this.sky[n * SKY_BINS + (b < 0 ? 0 : b >= SKY_BINS ? SKY_BINS - 1 : b)]
   }
 
-  /** Screen-y lift of the banked road at a lateral offset (metres) on row n. */
+  /** Screen-y of the ground at a lateral offset (metres) on row n — the bank included, so a tree on it stands on it. */
   private tiltLift(n: number, lateralM: number): number {
     const t = this.rowTilt[n]
     if (!t) return 0
-    return bermLift(lateralM, t, this.road.plateau) * this.rowScale[n]
+    return groundHeight(lateralM, t) * this.rowScale[n]
   }
 
   /** The solid-model pass, handed to the style so it lands in the style's own buffer. */
   private readonly renderSolid = (r: WebGLRenderer): void => this.models.render(r)
 
   render(): void {
+    // Photograph whatever the sprite pass asked for before anything draws from the sheet.
+    this.live.flush(this.renderer)
     this.renderer.info.reset()
     this.style?.render(this.info)
     this.stats.drawCalls = this.renderer.info.render.calls

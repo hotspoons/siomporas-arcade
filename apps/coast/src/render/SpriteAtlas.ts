@@ -2,11 +2,12 @@
 // with an orthographic camera into its own atlas cell, so the runtime is pure
 // sprite scaling — the 2.5D look — while the art comes from real meshes.
 
-import { AmbientLight, Box3, BoxGeometry, Color, Vector4, DirectionalLight, Group, HemisphereLight, Mesh, MeshStandardMaterial, Object3D, PerspectiveCamera, Scene, SRGBColorSpace, Vector3, WebGLRenderTarget, type Texture, type WebGLRenderer, NearestFilter, LinearFilter, RGBAFormat } from 'three'
+import { AmbientLight, BoxGeometry, Color, Vector4, DirectionalLight, Group, HemisphereLight, Mesh, MeshStandardMaterial, Object3D, PerspectiveCamera, Scene, SRGBColorSpace, Vector3, WebGLRenderTarget, type Texture, type WebGLRenderer, NearestFilter, LinearFilter, RGBAFormat } from 'three'
 import { glbLoader } from './loadGlb'
 import { isTouchDevice } from '@apex/engine/app/platform'
 
-import { atlasSizeFor, cellSize, MODELS, orient, type ModelDef } from './models'
+import { atlasSizeFor, cellSize, MODELS, type ModelDef } from './models'
+import { bakeView, fitModel } from './bakeView'
 import { ensureFonts } from './procgen'
 import { applyAtlasFilters, atlasKey, loadCachedAtlas, saveCachedAtlas } from './AtlasCache'
 import { loadPrebakedAtlas } from './PrebakedAtlas'
@@ -66,7 +67,7 @@ export interface SpriteKind {
  * fisheye, huge is the isometric look this replaced; six and a half is about a long lens on a model
  * on a table, which is what these sprites are pretending to be.
  */
-const LENS = 6.5
+
 
 /** Camera pitch (degrees above horizontal) baked for models that declare none. */
 export const DEFAULT_PITCH = 9
@@ -98,39 +99,8 @@ export function atlasPlan(renderer: WebGLRenderer): { size: number; cellScale: n
 }
 
 
-/**
- * Where the model stands: the horizontal centre of the geometry in the bottom tenth of its height,
- * in the model's own pre-scale coordinates. Falls back to the bounding-box centre for anything with
- * no readable geometry (a `build()` model of pure boxes still reports vertices, so this is rare).
- */
-function footprint(model: Object3D): { x: number; z: number; w: number; d: number } {
-  const box = new Box3().setFromObject(model)
-  const band = box.min.y + (box.max.y - box.min.y) * FOOT_BAND
-  let minX = Infinity
-  let maxX = -Infinity
-  let minZ = Infinity
-  let maxZ = -Infinity
-  const v = new Vector3()
-  model.updateMatrixWorld(true)
-  model.traverse((o) => {
-    const mesh = o as Mesh
-    const pos = mesh.isMesh ? mesh.geometry?.getAttribute('position') : null
-    if (!pos) return
-    for (let i = 0; i < pos.count; i++) {
-      v.fromBufferAttribute(pos as never, i).applyMatrix4(mesh.matrixWorld)
-      if (v.y > band) continue
-      if (v.x < minX) minX = v.x
-      if (v.x > maxX) maxX = v.x
-      if (v.z < minZ) minZ = v.z
-      if (v.z > maxZ) maxZ = v.z
-    }
-  })
-  if (minX === Infinity) return { x: (box.min.x + box.max.x) / 2, z: (box.min.z + box.max.z) / 2, w: box.max.x - box.min.x, d: box.max.z - box.min.z }
-  return { x: (minX + maxX) / 2, z: (minZ + maxZ) / 2, w: maxX - minX, d: maxZ - minZ }
-}
 
 /** How much of a model, measured up from its lowest point, counts as the part standing on the ground. */
-const FOOT_BAND = 0.1
 
 export class SpriteAtlas {
   readonly kinds = new Map<string, SpriteKind>()
@@ -330,79 +300,21 @@ export class SpriteAtlas {
           model = placeholder(def)
         }
       }
-      // Flat-shaded, no textures beyond the kit's colour map: keep it crisp.
-      model.traverse((o) => {
-        const m = o as Mesh
-        if (m.isMesh) {
-          const mats = Array.isArray(m.material) ? m.material : [m.material]
-          for (const mat of mats) {
-            const sm = mat as MeshStandardMaterial
-            if (sm.isMeshStandardMaterial) {
-              sm.flatShading = true
-              sm.metalness = Math.min(sm.metalness, 0.2)
-              sm.needsUpdate = true
-            }
-          }
-        }
-      })
       holder.clear()
-      model = orient(model, def)
-      holder.add(model)
-      const box = new Box3().setFromObject(model)
-      const size = new Vector3()
-      box.getSize(size)
-      const scale = (def.heightM / Math.max(1e-3, size.y)) * (def.fit ?? 1)
-      model.scale.setScalar(scale)
-      // CENTRE ON THE FOOTPRINT, NOT THE BOUNDING BOX. The sprite is drawn by its bottom CENTRE
-      // (`SpriteBatch.add`), so whatever the bake calls the centre is where the game believes the
-      // object stands. The bounding box is the wrong answer for anything whose mass is not over its
-      // feet: a palm leaning its crown one way, a billboard whose board overhangs its posts, a
-      // cut-out that kept a smear of the model's own drop shadow. All of those planted their feet
-      // to one side of where the world put them, which is how trees ended up standing in the road.
-      // The bottom tenth of the geometry is what touches the ground, so that is what gets centred.
-      // `footprint` reads world positions, so what it returns is ALREADY in scaled units — the
-      // scale was set two lines up. Multiplying by it again displaced every model by its own foot
-      // offset times the scale factor, which for a ten-metre palm off a unit-tall .glb is a factor
-      // of ten: models flung metres off the point they were supposed to stand on, and frames sized
-      // to a bounding box that now had to reach all the way back. `roadside-check.mjs` found it by
-      // reporting a 9.5-metre palm as 63 metres wide.
-      const foot = footprint(model)
-      model.position.set(-foot.x, -box.min.y * scale, -foot.z)
-      const fitted = new Box3().setFromObject(model)
-      const fs = new Vector3()
-      fitted.getSize(fs)
-      // Half-extents measured about the NEW origin rather than the box centre: an object centred on
-      // its feet can reach further one way than the other, and a frame sized from the box would
-      // clip the overhang off.
-      fs.x = 2 * Math.max(Math.abs(fitted.min.x), Math.abs(fitted.max.x))
-      fs.z = 2 * Math.max(Math.abs(fitted.min.z), Math.abs(fitted.max.z))
+      // The same standing-up the live pass does, from the same place, so a live re-bake of this model
+      // is this model and not a near miss of it.
+      const fit = fitModel(model, def)
+      holder.add(fit.model)
+      const fs = fit.fs
       const frames: SpriteFrame[] = []
       const pitches = def.pitches ?? [DEFAULT_PITCH]
       for (const pitchDeg of pitches) for (const yaw of def.yaws) {
         const cell = place(cellSize(def, this.cellScale))
-        const yawR = (yaw * Math.PI) / 180
-        const pitch = (pitchDeg * Math.PI) / 180
-        // Fit the frame to what this view actually shows (a car from behind is half as wide as
-        // from the side) so the cell's pixels go on the car, not on empty margin.
-        const projW = Math.abs(Math.cos(yawR)) * fs.x + Math.abs(Math.sin(yawR)) * fs.z
-        const projD = Math.abs(Math.sin(yawR)) * fs.x + Math.abs(Math.cos(yawR)) * fs.z
-        const halfW = Math.max(projW / 2, fs.y / 2) * 1.02
-        const halfH = (fs.y / 2) * 1.02 + Math.sin(pitch) * (projD / 2)
-        const subject = Math.max(halfW, halfH)
-        // Perspective, not orthographic. An ortho bake gives the near and far ends of a car exactly
-        // the same width, which is why these sprites read as isometric drawings rather than as
-        // photographs of a model — and photographs of models is what the arcade sprites of the era
-        // were. So: a long lens a few subject-widths back, the same lens for everything from a
-        // wheel to a tower, and the frame still measured at the model's centre plane so nothing
-        // downstream has to know the difference.
-        const dist = subject * LENS
-        // The near half of the model projects larger than the centre plane does, so the frame has to
-        // open up by that much or the nose comes off against the edge of the cell.
-        const half = subject * (dist / Math.max(dist * 0.4, dist - projD / 2))
-        const cam = new PerspectiveCamera(2 * Math.atan(half / dist) * (180 / Math.PI), 1, dist * 0.15, dist + projD + fs.y + 10)
-        const horiz = dist * Math.cos(pitch)
-        cam.position.set(Math.sin(yawR) * horiz, fs.y / 2 + Math.sin(pitch) * dist, -Math.cos(yawR) * horiz)
-        cam.lookAt(0, fs.y / 2, 0)
+        const view = bakeView(fs, yaw, pitchDeg)
+        const half = view.half
+        const cam = new PerspectiveCamera(view.fov, 1, view.near, view.far)
+        cam.position.copy(view.eye)
+        cam.lookAt(view.at)
         cam.updateProjectionMatrix()
         // Where the pipes ended up in this frame, if the model declares any.
         let exhausts: SpriteFrame['exhausts']
@@ -435,12 +347,12 @@ export class SpriteAtlas {
           v1: (cell.y + cell.size) / atlasPx,
           widthM: half * 2,
           heightM: half * 2,
-          baseline: 0.5 - fs.y / 2 / (half * 2) - ((Math.sin(pitch) * projD) / 2 / (half * 2)) * 0.5,
+          baseline: view.baseline,
           exhausts,
-          nearMag: half / subject,
+          nearMag: view.nearMag,
         })
       }
-      this.kinds.set(def.kind, { def, frames, yaws: def.yaws, pitches, extentM: { x: fs.x, z: fs.z }, footM: { x: foot.w, z: foot.d } })
+      this.kinds.set(def.kind, { def, frames, yaws: def.yaws, pitches, extentM: { x: fs.x, z: fs.z }, footM: { x: fit.foot.w, z: fit.foot.d } })
       done++
       onProgress?.(done, MODELS.length)
     }

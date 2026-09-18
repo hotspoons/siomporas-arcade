@@ -342,7 +342,10 @@ export class Game implements LoopClient {
   private syncStage(): void {
     if (this.sim.stage.desc.id !== this.lastStageId) {
       this.lastStageId = this.sim.stage.desc.id
-      this.view.setStage(this.sim.stage)
+      // Only a checkpoint hands one look over to the next. Starting a run is a cut, not a handover:
+      // without this the first stage would spend half a kilometre fading out of wherever the last run
+      // happened to end.
+      this.view.setStage(this.sim.stage, this.sim.stageIndex > 0)
     }
   }
 

@@ -6,9 +6,9 @@
   "type": "module",
   "description": "The arcade: one shell, one address, every game on a path beneath it.",
   "scripts": {
-    "predev": "node ../../scripts/sync-arcade-assets.mjs",
+    "predev": "node ../../scripts/sync-arcade-assets.mjs && node ../../scripts/model-catalogue.mjs",
     "dev": "vite",
-    "prebuild": "node ../../scripts/sync-arcade-assets.mjs",
+    "prebuild": "node ../../scripts/sync-arcade-assets.mjs && node ../../scripts/model-catalogue.mjs",
     "build": "vite build",
     "preview": "vite preview --port 5183 --strictPort --host",
     "deploy": "npm run build && wrangler deploy"

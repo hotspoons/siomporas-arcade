@@ -18,8 +18,31 @@ Needs **Blender ≥ 5.1** — the declared minimum of the `blender-agent` addon 
 straight into `blender --background`. The agent harness is for when a human is asking questions;
 this path is a script.
 
-Blender publishes **no arm64 build for 5.x**, so this does not run in the aarch64 devcontainer or
-on the GH200s. It needs an amd64 box, and no GPU — rigging is CPU work.
+Rigging is CPU work; no GPU is wanted anywhere in it.
+
+## Getting Blender 5.1 in the container
+
+Debian ships 4.3 and blender.org publishes **no arm64 binary for 5.x**, so the devcontainer installs
+it itself — `.devcontainer/build-blender.sh`, ported from `blender-agent`'s copy and pinned by
+`.devcontainer/blender.env`:
+
+- **x86_64** takes the official binary from download.blender.org. Seconds.
+- **arm64** clones the pinned tag and builds from source against Blender's own precompiled libraries
+  (`projects.blender.org/blender/lib-linux_arm64`), so only the toolchain comes from apt. Tens of
+  minutes the first time, incremental after that.
+
+`post-create.sh` starts it in the background, because nothing else in the container waits on it. A
+shell tells you where it got to; `just blender-log` shows the tail, `just blender` runs it in the
+foreground, and `BLENDER_SKIP_INSTALL=1` opts out. It is idempotent and takes a lock, so running it
+twice is a no-op.
+
+Verified on aarch64: the source build produces 5.1.2, and `--export-joints` against
+`mesh-arms-clear.glb` reproduces the numbers in this README exactly — 16.5% asymmetry, 315 boundary
+edges, a watertight 22k-vert cage at 0.0%, and 27 body joints out. The arm64 build is not a
+different answer from the amd64 one.
+
+It symlinks `/usr/local/bin/blender`, which precedes `/usr/bin` on PATH — without that the distro's
+4.3 keeps winning and `blender --version` looks fine while this script cannot run.
 
 ## The result on Kestrel
 
@@ -76,8 +99,6 @@ from a symmetric body. Symmetrising the mesh itself gives her two tails.
 
 ## What this does not do yet
 
-- **Applying a joint-correction file.** The viewer exports one; this script does not yet read it.
-  See below.
 - **No animation.** A rig that deforms is not a fighter. The sprite poses in
   `tools/photogrammetry` are the intended source: `lift_poses.py` solves joint rotations from the
   2D frames, and those rotations want mapping onto these bone names.
@@ -92,18 +113,56 @@ character the joints land wrong and stay wrong. (Perception-driven joint snappin
 cross-section minima is named as open work in blrig's own `PROGRESS.md`, and
 `blrig/perception/sections.py` already computes the cross-sections it would need.)
 
-Until that exists, the correction is a human looking at it. Load a rigged `.glb` into the model
-viewer — `apps/arcade/public/models.html`, live at `arcade.siomporas.com/models` — and a
-**Skeleton** panel appears for any model carrying a skin:
+Until that exists, the correction is a human looking at it. Open the model viewer —
+`apps/arcade/public/models.html`, live at `arcade.siomporas.com/models` — load the mesh, and
+**Import** the joints file onto it, or drop the `.json` anywhere on the page. The **Rig** tab in the
+right-hand rail is the editor; **Rendering** and **Loaded** are the other two. Everything you do is
+kept in the browser and comes back on reload — `?fresh=1` starts clean.
 
-- **Sweep** swings the selected joint through ±70°, which is how a badly placed joint gives itself
-  away: the limb visibly bends from the wrong place.
-- **pX / pY / pZ** move the joint. Rotation is scratch and is never exported; only positions are.
-- **Export joints JSON** writes the corrections *and where the model was loaded from*, so a
-  correction file is traceable to the model it was made against. **Import** applies one back.
+**Pose or Rig.** These are different jobs and the panel is explicitly in one or the other.
 
-Only `DEF-` deform bones are listed — the ~160 that actually skin the mesh. Rigify emits ~700, and
-the rest are mechanisms and widget holders parked off the body.
+- **Pose** rotates joints and lets the skin follow — **Sweep** swings the active joint through
+  ±70°, which is how a badly placed joint gives itself away: the limb visibly bends from the
+  wrong place. Rotation here is scratch and is never exported.
+- **Rig** moves the joints themselves and holds the mesh *still*, by recomputing the skin's bind
+  against every edit. That is the right way round: in a bad rig the mesh is what is correct and the
+  skeleton is what is wrong. Toggling back to Pose shows what the correction did to the skin.
+
+**Placing many joints at once.** Ctrl+drag — **Cmd**+drag on a Mac, where Ctrl+click is a secondary
+click — draws a box over the viewport to select joints. The **Box** button drops the need for a
+modifier entirely; Alt+drag still orbits while it is armed, and plain drag always orbits. **Move**
+drags the whole selection. **Pivot** — the button, or Alt+Shift+click a joint — pins one joint, and
+**Rotate** then swings everything selected around it, which is how a whole limb chain gets re-aimed
+in one gesture. Ctrl+Z and Ctrl+Shift+Z undo and redo, one step per gesture.
+
+**Only the selected joints move.** A bone's position is relative to its parent, so moving one
+ordinarily carries its entire subtree — pick the three thumb joints, drag, and the rest of the hand
+comes with them, which is posing rather than rigging. Every joint below a moved one that was not
+itself selected is put back where it was. Selecting a whole hand and dragging still moves it in one
+piece; that is what selecting the whole hand means. The holding shows up in the export as small
+compensating offsets on those children, which is truthful — their position relative to their parent
+really did change — and leaves their world positions where they were.
+
+**Mirror** pairs each joint with its opposite number and applies everything to both sides. The plane
+is found from the joints rather than from the mesh, because a single-view reconstruction is
+asymmetric on purpose while the skeleton under it is not: each joint is reflected across a candidate
+plane, matched against any joint landing within a couple of millimetres, and the plane is refitted
+from the median of those midpoints until it settles. On Kestrel's generated rig that pairs 134 of the
+160 deform joints and finds 24 more sitting on the plane; on a 26-bone metarig, 28 nodes and 9.
+Selecting one side selects both, dragging one drags both symmetrically, and a joint *on* the plane
+gets the symmetric half of the gesture so it slides along the plane instead of being pulled off it.
+The panel reports where the plane landed and how many joints paired — if that count is low, do not
+trust it.
+
+**Which joints.** The panel edits one of two things, and says which:
+
+- **Metarig** — the ~27 head/tail joints of an `apex-metarig-joints/1` file. Heads and tails are
+  points, and a connected child's head *is* its parent's tail, so those are merged into a single
+  node: drag the elbow and both bones follow, the way Blender's edit mode behaves. Export writes the
+  same format straight back for `--joints`, keeping the file's own `format`/`axis`/`units`/`height`
+  and adding a `corrected` block recording what was edited against what.
+- **Skeleton** — the ~160 `DEF-` deform bones of a rigged `.glb`. Export writes
+  `apex-joint-offsets/1`. This is the rig's *output*, so prefer the metarig when you have one.
 
 ```json
 {
@@ -116,9 +175,9 @@ the rest are mechanisms and widget holders parked off the body.
 }
 ```
 
-## The loop, and the seam still open in the middle of it
+## The loop
 
-The Blender half is done. `rig_character.py` has both ends:
+`rig_character.py` has both ends and the viewer is the middle:
 
 ```bash
 # 1. fit the metarig, hand its 27 body joints out for correction, and stop
@@ -134,17 +193,16 @@ rig_character.py -- --in mesh.glb --out rigged.glb --joints joints.json --blrig 
 Step 3 injects between `fit_metarig` and `rigify_generate`, which is the only place a correction
 takes: Rigify's generation and bone-heat weighting both run after it.
 
-**What does not join up yet is step 2.** Two formats exist and they are not the same file:
+Step 2 is the viewer: load `mesh-for-editing.glb`, import `joints.json`, drag, export, and the file
+that comes out goes straight back into step 3. It is the same document — same format, same bone
+names, same axis — so nothing has to be translated between the halves.
+
+Two formats exist and they are not interchangeable:
 
 | | written by | what it describes |
 |---|---|---|
-| `apex-metarig-joints/1` | `rig_character.py --export-joints` | 27 **metarig** bones, head and tail |
-| `apex-joint-offsets/1` | the model viewer's Export | offsets on the ~160 generated `DEF-` bones |
+| `apex-metarig-joints/1` | `rig_character.py --export-joints`, and the viewer's **Export metarig** | 27 **metarig** bones, head and tail — the rig's *input* |
+| `apex-joint-offsets/1` | the viewer's **Export offsets** | offsets on the ~160 generated `DEF-` bones — the rig's *output* |
 
-The viewer currently edits a *rigged* `.glb`, so it sees the generated deform skeleton — an output.
-The thing that actually controls the rig is the metarig going in, and only ~27 of its bones are body
-joints a human would place (the rest are face and fingers).
-
-So the remaining work is on the viewer side, not here: load a `apex-metarig-joints/1` file alongside
-the mesh, edit those 27 joints, write the same format back. The picking, box-select and drag all
-stay as they are — it is the source of the joints that changes.
+Only the first closes the loop. The second is for looking at a rig you already have and recording
+what is wrong with it; `--joints` does not read it.

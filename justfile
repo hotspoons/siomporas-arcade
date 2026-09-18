@@ -114,5 +114,13 @@ browser:
 
 # --- housekeeping -----------------------------------------------------------
 
+# install or build the pinned Blender in the foreground (post-create does it in the background)
+blender:
+    bash .devcontainer/build-blender.sh
+
+# How far the background Blender build got.
+blender-log:
+    @tail -n 40 ~/.cache/blender-build.log 2>/dev/null || echo "no build log yet"
+
 clean:
     rm -rf apps/*/dist node_modules/.tmp node_modules/.vite apps/*/node_modules/.vite shots

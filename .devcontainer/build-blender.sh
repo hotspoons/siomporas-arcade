@@ -1,0 +1,223 @@
+#!/usr/bin/env bash
+# Install the pinned Blender version (see blender.env).
+#
+# Ported from Rich-Siomporas/blender-agent (branch feature/overhaul),
+# .devcontainer/build-blender.sh. Kept close to the original so changes
+# there are easy to bring across; the deltas are marked ARCADE below.
+#
+# What needs it: tools/rigging/rig_character.py, which turns a
+# reconstructed mesh into a Rigify-rigged .glb. That wants Blender >= 5.1,
+# and Debian ships 4.3 - see the ARCADE note by the /usr/local/bin symlink.
+#
+# Two paths:
+#
+#   1. x86_64: the official binary from download.blender.org (fast).
+#   2. Anything else (e.g. Linux ARM64, which blender.org does not
+#      ship): clone the pinned tag and build from source against
+#      Blender's official precompiled libraries
+#      (projects.blender.org/blender/lib-linux_arm64). Takes a while
+#      on first run; later runs are incremental.
+#
+# Idempotent: exits immediately when the installed `blender` already
+# reports the pinned version.
+#
+# Environment overrides:
+#   BLENDER_FORCE_SOURCE_BUILD=1  build from source even on x86_64.
+#   BLENDER_SOURCE_DIR=...        where to clone/build (default ~/.cache/blender-source).
+#   BLENDER_BUILD_JOBS=N          parallel build jobs (default: nproc).
+#   BLENDER_SKIP_INSTALL=1        do nothing (opt out entirely).
+set -euo pipefail
+
+if [ "${BLENDER_SKIP_INSTALL:-0}" = "1" ]; then
+    echo "BLENDER_SKIP_INSTALL is set; skipping Blender install."
+    exit 0
+fi
+
+# Single-instance guard: post-create forks this script, and a user may
+# also run it by hand - never let two builds race in the same tree.
+LOCK_FILE="$HOME/.cache/blender-build.lock"
+mkdir -p "$(dirname "$LOCK_FILE")"
+exec 9>"$LOCK_FILE"
+if ! flock -n 9; then
+    echo "Another build-blender.sh is already running; exiting."
+    exit 0
+fi
+
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck source=blender.env
+source "$SCRIPT_DIR/blender.env"
+
+PREFIX="$HOME/.local"
+BIN_DIR="$PREFIX/bin"
+# ARCADE: $HOME/.local/bin sits AFTER /usr/bin on this container's PATH, so
+# anything that ever lands at /usr/bin/blender silently wins over the build -
+# and the symptom is the bad kind, a version check that passes and a rigging
+# run that fails for a reason nobody connects to PATH. (Debian's 4.3 was
+# installed here by hand once and did exactly that.) /usr/local/bin comes
+# first, and it is where post-create.sh puts kubectl and cloudflared too.
+# Best-effort: without sudo the ~/.local symlink still stands.
+link_system() {
+    sudo ln -sf "$1" /usr/local/bin/blender 2>/dev/null ||
+        echo "NOTE: could not symlink /usr/local/bin/blender; \`blender\` may still resolve to $(command -v blender)"
+}
+SOURCE_DIR="${BLENDER_SOURCE_DIR:-$HOME/.cache/blender-source}"
+JOBS="${BLENDER_BUILD_JOBS:-$(nproc)}"
+# ARCADE: the job count is a memory limit as much as a CPU one. Blender's heavier translation units
+# (Cycles above all) peak at a couple of gigabytes each, so -j nproc on a box with more cores than
+# spare gigabytes is how the OOM killer turns up half an hour in and leaves a build that merely
+# "stopped". Budget ~2.5 GB a job and take the lower of the two. BLENDER_BUILD_JOBS overrides.
+if [ -z "${BLENDER_BUILD_JOBS:-}" ] && [ -r /proc/meminfo ]; then
+    _mem_jobs=$(( $(awk '/MemAvailable/ {print $2}' /proc/meminfo) / 2500000 ))
+    [ "$_mem_jobs" -lt 1 ] && _mem_jobs=1
+    if [ "$_mem_jobs" -lt "$JOBS" ]; then
+        echo "Limiting to -j${_mem_jobs} (was ${JOBS}): only $(( $(awk '/MemAvailable/ {print $2}' /proc/meminfo) / 1048576 )) GB available."
+        JOBS=$_mem_jobs
+    fi
+fi
+
+# PATH-independent: docker build stages don't have $HOME/.local/bin on
+# PATH (the devcontainer's profile does), so always prefer the explicit
+# install location and only fall back to whatever PATH provides.
+blender_bin() {
+    if [ -x "$BIN_DIR/blender" ]; then
+        echo "$BIN_DIR/blender"
+    else
+        command -v blender || true
+    fi
+}
+
+# ARCADE: the pinned build is worth nothing if `blender` on PATH is a different
+# one, and shadowing is silent. Check it here, where the answer is still cheap.
+verify_path() {
+    local found ver
+    found="$(command -v blender || true)"
+    ver="$([ -n "$found" ] && "$found" --version 2>/dev/null | head -n1 | awk '{print $2}' || true)"
+    if [ "$ver" = "${BLENDER_VERSION}" ]; then
+        echo "\`blender\` on PATH is ${ver} (${found})"
+    else
+        echo "WARNING: built ${BLENDER_VERSION}, but \`blender\` on PATH is ${ver:-nothing} (${found:-not found})." >&2
+        echo "         Something earlier in PATH is shadowing it; tools/rigging needs the pinned one." >&2
+    fi
+}
+
+installed_version() {
+    local bin
+    bin="$(blender_bin)"
+    [ -n "$bin" ] && "$bin" --version 2>/dev/null | head -n1 | awk '{print $2}' || true
+}
+
+if [ "$(installed_version)" = "${BLENDER_VERSION}" ]; then
+    echo "Blender ${BLENDER_VERSION} already installed: $(blender_bin)"
+    verify_path   # ARCADE: the re-run is the likeliest moment for something new to be shadowing it
+    exit 0
+fi
+
+mkdir -p "$BIN_DIR"
+
+# ---------------------------------------------------------------------------
+# ARCADE fast path: the build tree is a named volume and outlives the container, but the symlinks
+# into it are in $HOME, which does not. After a rebuild the binary is sitting right there and only
+# the links are gone — relink and go, rather than spending five minutes in `make` to be told so.
+
+PRIOR_BIN=$(ls -d "$SOURCE_DIR"/build_linux*/bin/blender 2>/dev/null | head -n1 || true)
+if [ -n "$PRIOR_BIN" ] && [ -x "$PRIOR_BIN" ] &&
+   [ "$("$PRIOR_BIN" --version 2>/dev/null | head -n1 | awk '{print $2}')" = "${BLENDER_VERSION}" ]; then
+    echo "Blender ${BLENDER_VERSION} already built in $SOURCE_DIR; relinking."
+    ln -sf "$PRIOR_BIN" "$BIN_DIR/blender"
+    link_system "$PRIOR_BIN"
+    verify_path
+    exit 0
+fi
+
+# ---------------------------------------------------------------------------
+# Fast path: official binary (x86_64 only - blender.org ships no other
+# Linux architecture).
+
+if [ "$(uname -m)" = "x86_64" ] && [ "${BLENDER_FORCE_SOURCE_BUILD:-0}" != "1" ]; then
+    echo "Installing official Blender ${BLENDER_VERSION} (linux-x64)..."
+    sudo apt-get update -qq
+    sudo apt-get install -y -qq --no-install-recommends \
+        libx11-6 libxi6 libxxf86vm1 libxfixes3 libxrender1 \
+        libgl1 libegl1 libsm6 libxkbcommon0 xz-utils
+    url="https://download.blender.org/release/${BLENDER_RELEASE_DIR}/blender-${BLENDER_VERSION}-linux-x64.tar.xz"
+    curl -sL "$url" | tar -xJ -C "$PREFIX"
+    ln -sf "$PREFIX/blender-${BLENDER_VERSION}-linux-x64/blender" "$BIN_DIR/blender"
+    link_system "$PREFIX/blender-${BLENDER_VERSION}-linux-x64/blender"   # ARCADE
+    "$BIN_DIR/blender" --version | head -n1
+    verify_path   # ARCADE
+    exit 0
+fi
+
+# ---------------------------------------------------------------------------
+# Source build, pinned to ${BLENDER_GIT_TAG}. Blender publishes
+# precompiled dependency libraries for this platform
+# (lib-linux_arm64 et al), fetched by `make update`, so only the
+# toolchain and windowing headers come from apt.
+
+echo "Building Blender ${BLENDER_GIT_TAG} from source for $(uname -m)..."
+
+sudo apt-get update -qq
+sudo apt-get install -y -qq --no-install-recommends \
+    build-essential cmake ninja-build git git-lfs python3 \
+    libx11-dev libxxf86vm-dev libxcursor-dev libxi-dev libxrandr-dev \
+    libxinerama-dev libegl-dev libwayland-dev wayland-protocols \
+    libxkbcommon-dev libdbus-1-dev linux-libc-dev libsm-dev libvulkan-dev
+
+# Fail fast with a clear message instead of minutes into CMake: Blender
+# 5.x requires GCC >= 14 (Debian trixie / Ubuntu 24.04+; bookworm's 12
+# will not do).
+GCC_MAJOR="$(gcc -dumpversion | cut -d. -f1)"
+if [ "${GCC_MAJOR}" -lt 14 ]; then
+    echo "ERROR: Blender ${BLENDER_GIT_TAG} needs GCC >= 14, found $(gcc -dumpversion)." \
+         "Use a Debian trixie / Ubuntu 24.04+ base image." >&2
+    exit 1
+fi
+
+mkdir -p "$SOURCE_DIR"
+SRC="$SOURCE_DIR/blender"
+
+if [ -d "$SRC/.git" ]; then
+    git -C "$SRC" fetch --depth 1 origin tag "${BLENDER_GIT_TAG}"
+    git -C "$SRC" checkout "${BLENDER_GIT_TAG}"
+else
+    git clone --branch "${BLENDER_GIT_TAG}" --depth 1 \
+        https://projects.blender.org/blender/blender.git "$SRC"
+fi
+
+cd "$SRC"
+# Fetch the matching precompiled libraries + asset submodules for the
+# checked-out tag. On platforms without a configured lib submodule
+# (linux_arm64 at the 5.1 tag) make_update exits non-zero after the
+# submodules are already updated - tolerate that; the libs are fetched
+# explicitly below.
+python3 ./build_files/utils/make_update.py --no-blender ||
+    echo "make_update reported issues (continuing; platform libs handled below)"
+
+# Blender 5.1's CMake supports precompiled libs for this platform
+# (`lib/linux_arm64` in platform_unix.cmake) and upstream publishes
+# them, but the 5.1 tag's .gitmodules has no entry for them yet - so
+# `make update` skips the fetch. Clone the matching release branch of
+# the lib repo directly when the platform's lib dir is missing.
+LIB_PLATFORM="linux_$(uname -m | sed -e 's/x86_64/x64/' -e 's/aarch64/arm64/')"
+LIB_BRANCH="blender-v${BLENDER_VERSION%.*}-release"
+if [ ! -d "lib/${LIB_PLATFORM}/.git" ] && ! grep -q "lib/${LIB_PLATFORM}" .gitmodules; then
+    echo "Fetching precompiled libraries lib-${LIB_PLATFORM} @ ${LIB_BRANCH} (not in .gitmodules at this tag)..."
+    git clone --branch "${LIB_BRANCH}" --depth 1 \
+        "https://projects.blender.org/blender/lib-${LIB_PLATFORM}.git" "lib/${LIB_PLATFORM}"
+fi
+
+# Build + install into the build tree's bin/ (Blender's default `make`
+# target already runs the install step into <build>/bin).
+make -j"$JOBS"
+
+BUILD_BIN=$(ls -d "$SOURCE_DIR"/build_linux*/bin/blender 2>/dev/null | head -n1 || true)
+if [ -z "$BUILD_BIN" ]; then
+    echo "ERROR: build completed but no blender binary found under $SOURCE_DIR/build_linux*/bin" >&2
+    exit 1
+fi
+
+ln -sf "$BUILD_BIN" "$BIN_DIR/blender"
+link_system "$BUILD_BIN"   # ARCADE
+"$BIN_DIR/blender" --version | head -n1
+echo "Blender ${BLENDER_VERSION} built and installed (symlink: $BIN_DIR/blender)"
+verify_path   # ARCADE

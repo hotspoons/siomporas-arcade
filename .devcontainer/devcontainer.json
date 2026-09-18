@@ -15,6 +15,12 @@
 	"forwardPorts": [5180, 5181, 5182],
 	"initializeCommand": "cmd.exe /c powershell -NoProfile -Command \"$ErrorActionPreference='SilentlyContinue'; New-Item -ItemType Directory -Force -Path $env:USERPROFILE\\.kube, $env:USERPROFILE\\.claude | Out-Null; if (!(Test-Path $env:USERPROFILE\\.claude.json)) { Set-Content -Path $env:USERPROFILE\\.claude.json -Value '{}' }\" || sh -c 'mkdir -p \"$HOME/.kube\" \"$HOME/.claude\" && touch \"$HOME/.claude.json\"'",
 	"mounts": [
+		// Blender 5.1 is a from-source build on arm64 (see .devcontainer/build-blender.sh) and takes
+		// the better part of an hour. Everything under /home/node lives in the container layer, so
+		// without this a rebuild throws the whole thing away and starts over, silently, in the
+		// background. A named volume outlives rebuilds; `make` is then incremental and the next
+		// container is minutes rather than an hour. Delete the volume to force a clean build.
+		"source=apex-blender-build,target=/home/node/.cache/blender-source,type=volume",
 		"source=${localEnv:HOME}${localEnv:USERPROFILE}/.kube,target=/home/node/.kube,type=bind,consistency=cached",
 		"source=${localEnv:HOME}${localEnv:USERPROFILE}/.claude.json,target=/home/node/.claude.json,type=bind",
 		"source=${localEnv:HOME}${localEnv:USERPROFILE}/.claude,target=/home/node/.claude,type=bind"

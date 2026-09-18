@@ -59,4 +59,47 @@ if ! command -v cloudflared >/dev/null 2>&1; then
         || echo "WARN: cloudflared install failed — 'just tunnel' will not work"
 fi
 
+# Blender, pinned by .devcontainer/blender.env. tools/rigging/rig_character.py needs >= 5.1 and
+# Debian ships 4.3, so this either fetches the official binary (x86_64) or builds from source
+# against Blender's own precompiled libraries (arm64, which blender.org does not ship).
+#
+# Backgrounded, because the source build is tens of minutes and nothing else here waits on it —
+# container create finishes, the games run, and Blender appears when it appears. The script takes
+# a lock, so a second run while one is in flight is a no-op. BLENDER_SKIP_INSTALL=1 opts out.
+_HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+mkdir -p "$HOME/.cache"
+# The build tree is a named volume (see devcontainer.json) so it outlives container rebuilds. Docker
+# creates the volume root-owned AND materialises its parent directories root-owned to hang the mount
+# on — so ~/.cache itself is not ours either, and the log redirect below is the first thing to hit
+# that. Both, or the build never starts and leaves no log to say why.
+for _d in "$HOME/.cache" "$HOME/.cache/blender-source"; do
+    [ -d "$_d" ] && [ ! -w "$_d" ] && { sudo chown "$(id -u):$(id -g)" "$_d" || echo "WARN: could not chown $_d"; }
+done
+unset _d
+nohup bash "$_HERE/build-blender.sh" > "$HOME/.cache/blender-build.log" 2>&1 &
+echo "Blender install/build started in the background (log: ~/.cache/blender-build.log)"
+
+# Say where that got to on each new shell: a build that died at 3am is otherwise invisible until
+# something tries to rig a character and fails for a reason nobody connects to this.
+if ! grep -q "blender-build-status" ~/.bashrc 2>/dev/null; then
+    cat >>~/.bashrc <<'EOF'
+
+# blender-build-status: the pinned Blender's state, reported once per shell.
+if [ -f /workspaces/apex-conduit/.devcontainer/blender.env ]; then
+    . /workspaces/apex-conduit/.devcontainer/blender.env
+    _bl=$(command -v blender >/dev/null 2>&1 && blender --version 2>/dev/null | head -n1 | awk '{print $2}' || true)
+    if [ "$_bl" != "$BLENDER_VERSION" ]; then
+        if pgrep -f "build-blender.sh" >/dev/null 2>&1; then
+            echo "[arcade] Blender ${BLENDER_VERSION} is still building (found: ${_bl:-none})."
+            echo "[arcade] Watch it:  tail -f ~/.cache/blender-build.log"
+        else
+            echo "[arcade] Blender ${BLENDER_VERSION} is not installed (found: ${_bl:-none}); tools/rigging needs it."
+            echo "[arcade] Check ~/.cache/blender-build.log, then: just blender"
+        fi
+    fi
+    unset _bl
+fi
+EOF
+fi
+
 echo "Done. \`just dev\` starts the dev server on :5180; \`just tunnel\` shares it."

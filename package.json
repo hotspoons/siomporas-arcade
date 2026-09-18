@@ -22,10 +22,15 @@
     "dev:coast": "npm run dev -w apps/coast"
   },
   "devDependencies": {
+    "@gltf-transform/core": "^4.5.0",
+    "@gltf-transform/extensions": "^4.5.0",
+    "@gltf-transform/functions": "^4.5.0",
     "@types/node": "^24.13.2",
     "@types/three": "^0.185.0",
     "@types/webxr": "^0.5.24",
     "@types/ws": "^8.18.1",
+    "draco3dgltf": "^1.5.7",
+    "meshoptimizer": "^1.2.0",
     "oxlint": "^1.71.0",
     "playwright": "^1.61.1",
     "typescript": "~6.0.2",

@@ -136,6 +136,7 @@ function applyLayers() {
   site.setImagery(on('imagery'))
   site.setWire(on('wire'))
   if (site.layers.canopy) site.layers.canopy.visible = on('canopy')
+  site.layers.buildings.visible = on('buildings')
   if (site.layers.trees) site.layers.trees.visible = on('trees')
   site.layers.road.visible = on('road')
   if (site.layers.horizon) site.layers.horizon.visible = on('horizon')
@@ -170,6 +171,7 @@ function fillInfo(m: Manifest) {
       ['frame', `EPSG:${m.frame.epsg}, origin ${m.frame.origin.map((v) => v.toFixed(0)).join(', ')}`],
       ['lidar', lidar],
       ['stand-ins', `${site?.treeCount ?? 0} trees from the canopy, road from ${m.spine.segments.length} OSM segments`],
+      ['buildings', site ? `${site.buildingStats.count} footprints (${site.buildingStats.fromLidar} measured, ${site.buildingStats.gabled} gabled)` : '—'],
       ['crossings', Object.entries(byRel).map(([k, v]) => `${v} ${k}`).join(', ') || 'none'],
       ['surface', m.surface ? Object.entries(m.surface.summary).map(([k, v]) => `${k} ${(v * m.surface!.step_m / 1000).toFixed(1)} km`).join(', ') : 'not measured'],
     ])}

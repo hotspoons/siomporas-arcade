@@ -86,7 +86,18 @@ export interface Manifest {
   photos: { file: string; heading_deg: number | null; taken: string | null }[]
   lidar: { dataset: string | null; points_in_corridor: number | null; classes: Record<string, number> | null }
   /** OSM land-use polygons in site coordinates; groundcover.ts picks the grass type from them */
-  landuse?: { class: string; ring: [number, number][] }[]
+  landuse?: { class: string; ring: [number, number][]; area_m2?: number }[]
+  /** OSM footprints with a measured height, in site metres (tools/corridor/corridor/buildings.py) */
+  buildings?: {
+    ring: [number, number][]
+    area_m2?: number
+    rect?: { w: number; d: number; yaw_deg: number }
+    height_m: number
+    height_src?: string
+    s?: number
+    lat?: number
+    tags?: Record<string, string>
+  }[]
 }
 
 export interface IndexEntry {

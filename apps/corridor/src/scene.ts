@@ -12,6 +12,7 @@ import { GRASS_TYPES, grassTypeFor } from './groundcover'
 import { buildStrip, sinkUnderStrip } from './strip'
 import { Adjustments, NEUTRAL as NEUTRAL_ADJ } from './adjust'
 import { buildPlacements, loadCatalog, loadPlacements } from './placements'
+import { buildBuildings } from './buildings'
 import { buildBridges, flattenSpine, loadStructureOverrides, suppressed } from './structures'
 import { loadSurfaceSets, overpassMesh, pavedOffset, pavedWidth, roadMesh, stations, taperedLanes, treesFromCanopy, type SurfaceSet } from './props'
 
@@ -22,7 +23,9 @@ export const toWorld = (x: number, y: number, z: number) => new THREE.Vector3(x,
 export interface Site {
   manifest: Manifest
   group: THREE.Group
-  layers: { imagery?: THREE.Mesh; canopy?: THREE.Mesh; trees?: THREE.Group; road: THREE.Group; horizon?: THREE.Mesh; structures: THREE.Group; spine: THREE.Group; markers: THREE.Group; placements: THREE.Group }
+  layers: { imagery?: THREE.Mesh; canopy?: THREE.Mesh; trees?: THREE.Group; road: THREE.Group; horizon?: THREE.Mesh; structures: THREE.Group; spine: THREE.Group; markers: THREE.Group; placements: THREE.Group; buildings: THREE.Group }
+  /** how many footprints were massed, and how many had a real measured height */
+  buildingStats: { count: number; gabled: number; fromLidar: number }
   adjustments: Adjustments
   treeCount: number
   /** the grass field, when this site has one (probes and the HUD read `grass.counts`) */
@@ -774,13 +777,18 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
   const catalog = await loadCatalog()
   const placementsGroup = await buildPlacements(await loadPlacements(manifest.slug), catalog, groundAtWorld)
   group.add(placementsGroup)
+  // the buildings the bake already knew about, as massing under whatever the catalogue places
+  status('raising buildings…')
+  const built = buildBuildings(manifest, groundAtWorld)
+  group.add(built.group)
   // authored bridges over the road (structures.json bridge_over)
   structures.add(await buildBridges(overrides, catalog, spineAt, groundAtWorld, (s) => pavedHalfAt(s) * 2))
 
   return {
     manifest,
     group,
-    layers: { imagery: terrain, canopy, trees, road, horizon, structures, spine, markers, placements: placementsGroup },
+    layers: { imagery: terrain, canopy, trees, road, horizon, structures, spine, markers, placements: placementsGroup, buildings: built.group },
+    buildingStats: built.stats,
     adjustments,
     treeCount,
     grass: grassRef,

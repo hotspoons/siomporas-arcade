@@ -73,6 +73,9 @@ export let GRASS_CACHE_SLACK = 1.4
 // --- trees --------------------------------------------------------------------------------------
 /** near-field radius (procedural models) — beyond it, impostors */
 export let TREE_NEAR_RADIUS = 240
+/** the band just outside that radius over which the impostor card dissolves away, so a tree does
+ *  not pop from card to model in one frame. 0 disables the fade (the old hard switch). */
+export let TREE_FADE_M = 30
 /** instanced models per variant in the near field (5 variants) */
 export let TREE_NEAR_CAPACITY = 140
 /** impostor cards lie flat above this view pitch (rad) */
@@ -284,6 +287,7 @@ export const TUNE_TABS: TuneTab[] = [
         title: 'LOD',
         keys: [
           tune('TREE_NEAR_RADIUS', () => TREE_NEAR_RADIUS, (v) => (TREE_NEAR_RADIUS = v), [30, 600], 5, 'procedural models inside, impostors beyond (m)'),
+          tune('TREE_FADE_M', () => TREE_FADE_M, (v) => (TREE_FADE_M = v), [0, 120], 1, 'band outside that radius where the card dissolves; 0 = hard switch'),
           tune('TREE_NEAR_CAPACITY', () => TREE_NEAR_CAPACITY, (v) => (TREE_NEAR_CAPACITY = v), [10, 500], 5, 'models per species variant'),
           tune('IMPOSTOR_FLAT_PITCH', () => IMPOSTOR_FLAT_PITCH, (v) => (IMPOSTOR_FLAT_PITCH = v), [0.2, 1.5], 0.02, 'cards lie flat above this view pitch (rad)'),
         ],

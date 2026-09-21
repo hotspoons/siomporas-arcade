@@ -618,7 +618,14 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
       for (const b of bulbStations) {
         const geo = new THREE.CircleGeometry(b.half, 36)
         geo.rotateX(-Math.PI / 2)
+        // UVs in METRES over the tile, like roadMesh: CircleGeometry's own 0..1 UVs stretch one
+        // tile across the whole 18 m bulb, which is the blotchy over-scaled asphalt Rich saw.
         const set = surfaceSets?.asphalt_aged
+        const mpt = set?.metresPerTile ?? 1
+        const uv = geo.getAttribute('uv') as THREE.BufferAttribute
+        const pos0 = geo.getAttribute('position') as THREE.BufferAttribute
+        for (let i = 0; i < uv.count; i++) uv.setXY(i, (b.x + pos0.getX(i)) / mpt, (b.z + pos0.getZ(i)) / mpt)
+        uv.needsUpdate = true
         const mesh = new THREE.Mesh(geo, set ? set.material : new THREE.MeshStandardMaterial({ color: 0x3b3b3d, roughness: 1 }))
         const c = curves[b.who]
         mesh.position.set(b.x, c.at(Math.min(c.len, Math.max(0, b.s))).pos.y + 0.02, b.z)
@@ -717,7 +724,7 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
     const bakedGrassType = grassTypeFor(manifest)
     grass.setType(bakedGrassType)
     let imp: Impostors | null = null
-    let refreshFar = (_skip: Set<number>) => {}
+    let refreshFar = (_skip: Set<number>, _eye?: THREE.Vector3, _fwd?: THREE.Vector3, _pitch?: number) => {}
     if (renderer) {
       // far field: the SAME models as impostors, one quad a tree, re-assigned as the eye moves
       status('baking impostors…')
@@ -733,15 +740,48 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
         imp!.set(i, r.x, r.y, r.z, r.h, v, ((i * 137) % 360) * (Math.PI / 180), m)
       })
       imp.commit(t.records.length)
+      // `shown` holds the indices whose card is currently HIDDEN (the name is the original's).
       let shown = new Set<number>()
-      refreshFar = (skip: Set<number>) => {
+      let faded = new Set<number>()
+      /**
+       * Which far trees draw a card, and how solidly.
+       *
+       * The card is kept ALIVE for the first `TREE_FADE_M` metres INSIDE the near radius, on top
+       * of the procedural model that has already taken over, and dissolves to nothing across that
+       * band. That direction is the whole point and it is easy to get backwards: fading the card
+       * out on the way IN, before the model appears, makes the tree vanish and then reappear —
+       * worse than the pop it was meant to hide. Here the model arrives underneath a solid card,
+       * which hides the arrival, and then the card melts off it.
+       *
+       * The dissolve is a dither in the impostor shader, not alpha blending: 35k camera-facing
+       * quads cannot be depth-sorted. The band is measured with the SAME `lodDistance` the near
+       * set uses to choose its members, or the fade ring and the swap boundary would be
+       * different shapes.
+       */
+      refreshFar = (skip: Set<number>, eye?: THREE.Vector3, fwd?: THREE.Vector3, pitch = 0) => {
         imp!.clearRanges()
-        for (const i of shown) if (!skip.has(i)) imp!.setVisible(i, true, sizes[i])
-        for (const i of skip) if (!shown.has(i)) imp!.setVisible(i, false, sizes[i])
-        shown = new Set(skip)
+        const band = Math.max(0, T.TREE_FADE_M)
+        const inner = T.TREE_NEAR_RADIUS
+        // near-set trees that should still show a dissolving card, and how solid it is
+        const keep = new Map<number, number>()
+        if (band > 0 && eye && fwd) {
+          for (const i of skip) {
+            const r = t.records[i]
+            const d = T.lodDistance(r.x - eye.x, r.z - eye.z, fwd.x, fwd.z, pitch)
+            if (d >= inner - band) keep.set(i, Math.min(1, Math.max(0, (d - (inner - band)) / band)))
+          }
+        }
+        const hide = new Set<number>()
+        for (const i of skip) if (!keep.has(i)) hide.add(i)
+        for (const i of shown) if (!hide.has(i)) imp!.setVisible(i, true, sizes[i])
+        for (const i of hide) if (!shown.has(i)) imp!.setVisible(i, false, sizes[i])
+        shown = hide
+        for (const [i, f] of keep) imp!.setFade(i, f)
+        for (const i of faded) if (!keep.has(i)) imp!.setFade(i, 1)
+        faded = new Set(keep.keys())
       }
       updateNear = (eye: THREE.Vector3, time: number, fwd?: THREE.Vector3, pitch = 0) => {
-        if (near.update(eye, false, fwd, pitch)) refreshFar(near.near)
+        if (near.update(eye, false, fwd, pitch)) refreshFar(near.near, eye, fwd, pitch)
         grass.update(eye, fwd, pitch)
         grass.tick(time)
         imp!.tick()

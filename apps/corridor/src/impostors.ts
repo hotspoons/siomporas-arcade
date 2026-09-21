@@ -24,6 +24,8 @@ export class Impostors {
   extents: number[] = []
   private aVariant: THREE.InstancedBufferAttribute
   private aYaw: THREE.InstancedBufferAttribute
+  /** 1 = solid, 0 = gone: a dither dissolve so a card does not pop when the model takes over */
+  private aFade: THREE.InstancedBufferAttribute
   private material: THREE.ShaderMaterial
 
   private renderer: THREE.WebGLRenderer
@@ -38,8 +40,10 @@ export class Impostors {
     geo.translate(0, 0.5, 0) // anchored at the foot
     this.aVariant = new THREE.InstancedBufferAttribute(new Float32Array(capacity), 1)
     this.aYaw = new THREE.InstancedBufferAttribute(new Float32Array(capacity), 1)
+    this.aFade = new THREE.InstancedBufferAttribute(new Float32Array(capacity).fill(1), 1)
     geo.setAttribute('aVariant', this.aVariant)
     geo.setAttribute('aYaw', this.aYaw)
+    geo.setAttribute('aFade', this.aFade)
     this.material = new THREE.ShaderMaterial({
       // merge() clones uniform values and cannot clone a render-target texture (it silently becomes
       // null and every quad is discarded); the atlas is attached after the merge instead
@@ -47,6 +51,8 @@ export class Impostors {
       vertexShader: /* glsl */ `
         attribute float aVariant;
         attribute float aYaw;
+        attribute float aFade;
+        varying float vFade;
         uniform float cols;
         uniform float yaws;
         uniform float rows;
@@ -56,6 +62,7 @@ export class Impostors {
         #include <fog_pars_vertex>
         #include <logdepthbuf_pars_vertex>
         void main() {
+          vFade = aFade;
           // instance origin and scale
           vec4 origin = modelMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0);
           float s = length(vec3(instanceMatrix[0].x, instanceMatrix[0].y, instanceMatrix[0].z));
@@ -87,12 +94,21 @@ export class Impostors {
       fragmentShader: /* glsl */ `
         uniform sampler2D atlas;
         varying vec2 vUv;
+        varying float vFade;
         #include <fog_pars_fragment>
         #include <logdepthbuf_pars_fragment>
         void main() {
           #include <logdepthbuf_fragment>
           vec4 c = texture2D(atlas, vUv);
-          if (c.a < 0.5) discard;
+          // DITHER, not alpha blending. This material is alpha-TESTED and opaque -- see
+          // transparent:false on the material and the discard below -- because 35k camera-facing
+          // quads cannot be depth-sorted against each other at any sensible cost. A card
+          // therefore dissolves by
+          // discarding a growing share of its pixels instead of going translucent: no blending,
+          // no sort, no change to the render pass. The R2 low-discrepancy sequence gives a
+          // stable, well-spread pattern per screen pixel in one dot product.
+          float dith = fract(dot(gl_FragCoord.xy, vec2(0.75487766, 0.56984029)));
+          if (c.a < 0.5 || vFade <= dith) discard;
           gl_FragColor = vec4(c.rgb, 1.0);
           #include <fog_fragment>
           #include <colorspace_fragment>
@@ -200,6 +216,19 @@ export class Impostors {
    * range is uploaded. Rewriting all 35k matrices every 15 m of travel was a one-second stall
    * on a phone; this is a few hundred tiny ranges.
    */
+  /**
+   * How solid instance `i` is, 0..1. One float written, not sixteen — this is cheaper than the
+   * matrix write `setVisible` does, which matters because the fade band is re-evaluated every
+   * time the near set moves.
+   */
+  setFade(i: number, f: number) {
+    const a = this.aFade.array as Float32Array
+    if (a[i] === f) return
+    a[i] = f
+    this.aFade.addUpdateRange(i, 1)
+    this.aFade.needsUpdate = true
+  }
+
   setVisible(i: number, on: boolean, size: number) {
     const a = this.mesh.instanceMatrix.array as Float32Array
     const s = on ? size : 0
@@ -212,5 +241,6 @@ export class Impostors {
 
   clearRanges() {
     this.mesh.instanceMatrix.clearUpdateRanges()
+    this.aFade.clearUpdateRanges()
   }
 }

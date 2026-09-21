@@ -209,6 +209,16 @@ from pavement, all on `groundAt`; South Mountain: 910 greenstone, nearest 4.16 m
   `ShaderMaterial` is fixed at compile time.
 - A missing optional JSON must 404 (the middleware does); Vite's SPA fallback would answer
   `index.html` with a 200 and `r.json()` dies on `<!doctype`.
+- **A pre-2010 lidar delivery can carry no CRS at all**, and the right one is recoverable without a
+  per-project table. `OR_NORTHCOAST_2008_2009` has no VLRs whatever, so `parse_crs()` is None and
+  the tile is unreadable. Its coordinates (X ≈ 431 k, Y ≈ 1 531 k) are no UTM zone; they are
+  **EPSG:2992, NAD83 / Oregon GIC Lambert, in FEET**, and the Z is in feet too (`check_units`
+  catches that part already). Enumerate the projected CRSs whose area of use contains the site
+  (pyproj, 80 candidates here), transform a sample under each, and keep the one that lands the
+  points inside the corridor: a wrong guess puts them in another state, so the test is
+  self-validating. 2.2 s; 4.9 M of the tile's 14.6 M points land in Ecola's corridor and the
+  ground agrees with the 3DEP DEM to **4 cm**. Datum realisations of one projection tie exactly —
+  take the lowest EPSG code. Proposed to main 2026-09-21.
 - **Bounding the vertices of a smoothed line does not bound the line.** `export._smooth_on_line`
   gaussian-smooths a centreline and then pulls every vertex back to within 1.5 m of the raw
   polyline, which fixed the spine leaving its own trace in the air photo (10.6 m on Chesterfield

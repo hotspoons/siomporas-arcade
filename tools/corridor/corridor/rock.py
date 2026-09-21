@@ -48,7 +48,14 @@ EDGE_ERODE = 6  # cells of the lidar corridor's rim to ignore (the fill there is
 
 
 def measure_network(site_dir: Path) -> dict | None:
-    """A tiled site, one 1 m raster tile at a time: the same rule, bounded memory, ids kept unique
+    """A tiled site, one 1 m raster tile at a time.
+
+    NOTE ON `s`: a polygon's `s` is its projection onto the PRIMARY spine, which on a network means
+    "how far along Chesterfield Road is the point nearest this outcrop" — for a polygon out on MD
+    450 that is a number, not a location. It is used for ordering and nothing else; the ring is the
+    truth. Faces (`cuts`) do carry a real road, because they are measured per chain.
+
+     the same rule, bounded memory, ids kept unique
     by the tile they came from. An outcrop straddling a tile edge becomes two polygons — at 15 m²
     minimum and 1 km tiles that is a rounding error, and the alternative is the 18 km array this
     whole path exists to avoid."""

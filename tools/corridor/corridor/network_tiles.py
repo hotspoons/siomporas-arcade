@@ -595,3 +595,64 @@ def overview(site_dir: Path, web: Path, ox: float, oy: float, mask_shapes: list,
         img.save(web / "naip_overview.jpg", quality=85, optimize=True)
         layers["naip"] = {"file": "naip_overview.jpg", "res": naip_res, "size": [w, h], "bbox": rel(bbox), "overview": True}
     return layers
+
+
+def ensure_overview(site_dir: Path) -> dict | None:
+    """Write the overview layers and patch them into an existing manifest, without a full export.
+
+    A tiled site whose manifest lists only `layers.tiles` does not load — `scene.ts` raises "site
+    has no DEM layer". A full re-export fixes it but re-renders 125 tiles for ten minutes, and the
+    manifest can be regenerated without these layers by anyone running an export from a checkout
+    that lacks `overview()` (which happened to crofton twice in one hour). This is the ten-second
+    repair: build the images if they are missing, merge the three layer entries into the manifest
+    on disk, leave everything else exactly as it was.
+
+        python -m corridor.overview <slug> [...]
+    """
+    web = site_dir / "web"
+    man = web / "manifest.json"
+    if not man.exists():
+        print(f"{site_dir.name}: no web/manifest.json")
+        return None
+    m = json.loads(man.read_text())
+    if not (m.get("layers") or {}).get("tiles"):
+        print(f"{site_dir.name}: not a tiled site, nothing to do")
+        return None
+    from PIL import ImageEnhance
+
+    from . import buildings as bld
+
+    site = json.loads((site_dir / "site.json").read_text())
+    ox, oy = site["frame"]["origin"]
+
+    def vivid(img, sat, con, green=1.0):
+        """The same push export.py gives the drape: NAIP is flown for measurement and reads grey."""
+        img = ImageEnhance.Color(img).enhance(sat)
+        img = ImageEnhance.Contrast(img).enhance(con)
+        if green != 1.0:
+            r, g, b = img.split()
+            img = Image.merge("RGB", (r, g.point(lambda v: min(255, int(v * green))), b))
+        return img
+
+    try:
+        derived = bld.derive(site_dir)
+    except Exception as exc:
+        print(f"  buildings failed ({exc}); masking the canopy with the roads only")
+        derived = {"buildings": []}
+    ov = overview(site_dir, web, ox, oy, mask_shapes(site_dir, derived), vivid)
+    if not ov:
+        print(f"{site_dir.name}: nothing to build")
+        return None
+    m.setdefault("layers", {}).update(ov)
+    man.write_text(json.dumps(m))
+    print(f"{site_dir.name}: layers now {sorted(m['layers'])} — " + ", ".join(f"{k} {v['size'][0]}x{v['size'][1]} @ {v['res']} m" for k, v in ov.items()))
+    return ov
+
+
+def main_overview() -> None:
+    import sys
+
+    from .__main__ import DATA
+
+    for slug in sys.argv[1:] or [d.name for d in sorted((DATA / "sites").glob("*")) if d.is_dir()]:
+        ensure_overview(DATA / "sites" / slug)

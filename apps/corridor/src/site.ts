@@ -67,6 +67,10 @@ export interface Manifest {
   }
   photos: { file: string; heading_deg: number | null; taken: string | null }[]
   lidar: { dataset: string | null; points_in_corridor: number | null; classes: Record<string, number> | null }
+  /** terrain-and-data agent: cut faces (cuts.py), exposed rock (rock.py), water (water.py); absent on older bakes */
+  cuts?: import('./rocks').CutsLayer | null
+  rock?: import('./rocks').RockLayer | null
+  water?: import('./water').WaterLayer | null
 }
 
 export interface IndexEntry {

@@ -244,6 +244,19 @@ def export_site(site_dir: Path) -> dict:
 
     # buildings/landuse/POIs: `derived`, computed above the canopy layer
 
+    # terrain features (terrain-and-data agent, 2026-09-21): cut faces, exposed rock, water. Each
+    # module measures from the rasters + OSM and writes its own <site>/{cuts,rock,water}.json;
+    # the manifest carries the dict. cuts before rock (rock reads cuts.json). No lidar → null.
+    import importlib
+
+    features: dict = {}
+    for name in ("cuts", "rock", "water"):
+        try:
+            features[name] = importlib.import_module(f".{name}", __package__).measure(site_dir)
+        except Exception as exc:
+            print(f"  {name} failed: {exc}")
+            features[name] = None
+
     out = {
         "slug": site["slug"],
         "ident": site.get("ident"),
@@ -262,6 +275,9 @@ def export_site(site_dir: Path) -> dict:
         "buildings": derived["buildings"],
         "landuse": derived["landuse"],
         "pois": derived["pois"],
+        "cuts": features.get("cuts"),
+        "rock": features.get("rock"),
+        "water": features.get("water"),
     }
     (web / "manifest.json").write_text(json.dumps(out))
     return {"layers": list(layers), "bytes": sum(f.stat().st_size for f in web.iterdir()), "buildings": derived["summary"]}

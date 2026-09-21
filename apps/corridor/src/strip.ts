@@ -170,6 +170,13 @@ export function buildStrip(
     const o = origins[bi], sd = sides[bi]
     const fwd = { x: sd.z, z: -sd.x } // side = dir × up = (-dz, 0, dx), so dir = (side.z, 0, -side.x)
     const alongM = (x - o.x) * fwd.x + (z - o.z) * fwd.z
+    // PAST THE END the strip does not exist. Without this the nearest station to a point a
+    // kilometre beyond the last one is still that last station, `lat` is measured in its frame,
+    // and every point inside |lat| < left reads as "on the strip" — an 80 m band running off the
+    // end of every road for ever. `sinkUnderStrip` then DROPPED the terrain triangles in those
+    // bands, which is the sky showing through past each cul-de-sac (Rich, 2026-09-21): ten roads,
+    // twenty wedges. Half a station of tolerance keeps the end cap itself intact.
+    if ((bi === 0 && alongM < -along * 0.5) || (bi === nS - 1 && alongM > along * 0.5)) return null
     const bj = alongM >= 0 ? Math.min(nS - 1, bi + 1) : Math.max(0, bi - 1)
     const fa = Math.min(1, Math.abs(alongM) / along)
     const lat = (x - o.x) * sd.x + (z - o.z) * sd.z

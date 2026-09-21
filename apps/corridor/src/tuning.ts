@@ -440,7 +440,7 @@ export const TUNE_TABS: TuneTab[] = [
           tune('GRASS_LIGHT', () => GRASS_LIGHT, (v) => (GRASS_LIGHT = v), [0.3, 2], 0.02),
           tune('GRASS_DRY_ADD', () => GRASS_DRY_ADD, (v) => (GRASS_DRY_ADD = v), [-1, 1], 0.02, 'straw on top of the season'),
           tune('GRASS_WIND_STILL_BELOW', () => GRASS_WIND_STILL_BELOW, (v) => (GRASS_WIND_STILL_BELOW = v), [0, 40], 0.5, 'no sway above this speed (m/s)'),
-          tune('GRASS_TYPE', () => GRASS_TYPE, (v) => (GRASS_TYPE = v), [-1, 3], 1, '-1 from the bake; 0 common 1 wheat 2 bermuda 3 coastal'),
+          tune('GRASS_TYPE', () => GRASS_TYPE, (v) => (GRASS_TYPE = v), [-1, 6], 1, '-1 from the bake (LANDFIRE ground class); 0 common 1 wheat 2 bermuda 3 coastal 4 annual 5 meadow 6 heath'),
           tune('SEASON', () => SEASON, (v) => (SEASON = v), [-1, 3], 1, '-1 use the selector; 0 winter 1 spring 2 summer 3 autumn'),
         ],
       },

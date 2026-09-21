@@ -33,6 +33,7 @@ from pathlib import Path
 import laspy
 import numpy as np
 import rasterio
+import rasterio.enums
 import requests
 import shapely
 from rasterio.features import rasterize
@@ -227,12 +228,35 @@ def _fetch_tnm_laz(frame: Frame, bbox, cache: Path, jobs: int, clip: Polygon | N
     items = r.json().get("items", [])
     if not items:
         raise RuntimeError("no lidar at all for this corridor (EPT or TNM)")
-    # newest project only: mixing vintages inside one corridor makes seams no game wants
+    # ONE project (mixing vintages inside a corridor makes seams no game wants) — but the one that
+    # COVERS the corridor, then the newest. "Newest only" picked MD_4County_D24 for Bonnie Branch
+    # because a single edge tile of it touched the bbox: 0.4 % of the corridor had lidar, the DTM
+    # was nearest-filled from that sliver, and the road ran 60 m below the real ground in a canyon
+    # of its own making (Rich, terrain-and-data agent, 2026-09-21).
     by_proj: dict[str, list[dict]] = {}
     for it in items:
         by_proj.setdefault(" ".join(it["title"].split(" ")[4:-1]), []).append(it)
-    proj = max(by_proj, key=lambda k: (max(i.get("publicationDate", "") for i in by_proj[k]), len(by_proj[k])))
+
+    def coverage(tiles: list[dict]) -> float:
+        area = max(1e-12, (e - w) * (n - s))
+        cov = 0.0
+        for it in tiles:
+            bb = it.get("boundingBox") or {}
+            try:
+                ix = max(0.0, min(e, float(bb["maxX"])) - max(w, float(bb["minX"])))
+                iy = max(0.0, min(n, float(bb["maxY"])) - max(s, float(bb["minY"])))
+            except (KeyError, TypeError, ValueError):
+                continue
+            cov += ix * iy
+        return min(1.0, cov / area)
+
+    scored = sorted(by_proj, key=lambda k: (round(coverage(by_proj[k]), 2), max(i.get("publicationDate", "") for i in by_proj[k]), len(by_proj[k])), reverse=True)
+    proj = scored[0]
     tiles = by_proj[proj]
+    for k in scored[:4]:
+        print(f"  lidar   TNM candidate {k}: {len(by_proj[k])} tiles, covers {coverage(by_proj[k]):.0%} of the bbox, {max(i.get('publicationDate', '') for i in by_proj[k])[:10]}", flush=True)
+    if coverage(tiles) < 0.6:
+        print(f"  lidar   WARNING best TNM project covers only {coverage(tiles):.0%} of the corridor; gaps fall back to the 3DEP DEM", flush=True)
     total = sum(i.get("sizeInBytes", 0) for i in tiles) / 2**20
     print(f"  lidar   TNM {proj}: {len(tiles)} LAZ tiles, {total:.0f} MiB", flush=True)
     paths = []
@@ -336,7 +360,23 @@ def rasters(pts: dict, bbox, frame: Frame, corridor: Polygon, out_dir: Path) -> 
 
     ground = cls == 2
     dtm = agg(ground, np.minimum, np.inf)
+    # Fill lidar gaps: nearest lidar within 10 m (a bridge deck shadow, a pond), the 3DEP DEM beyond
+    # that. Nearest-fill across a real coverage gap paints the whole corridor with the edge tile's
+    # heights (Bonnie Branch: 0.4 % coverage became a 60 m canyon).
     dtm_filled = _fill_nan(dtm.copy())
+    nan = np.isnan(dtm)
+    if nan.any():
+        dist = ndimage.distance_transform_edt(nan)
+        far = nan & (dist > 10)
+        dem_path = out_dir.parent / "dem_1m.tif"
+        if far.any() and dem_path.exists():
+            with rasterio.open(dem_path) as src:
+                from rasterio.windows import from_bounds
+                win = from_bounds(*bbox, transform=src.transform)
+                dem_here = src.read(1, window=win, boundless=True, out_shape=(h, w), resampling=rasterio.enums.Resampling.bilinear, fill_value=src.nodata if src.nodata is not None else -9999).astype(np.float32)
+            ok = dem_here > -9000
+            dtm_filled[far & ok] = dem_here[far & ok]
+            print(f"  lidar   coverage {100 * (1 - nan.mean()):.1f} %; {far.sum():,} cells (>10 m from lidar) filled from the 3DEP DEM", flush=True)
     dsm = agg(np.ones_like(cls, bool), np.maximum, -np.inf)
     # Canopy. Vendors differ: some classify vegetation (3/4/5), MD_Western_2021 leaves everything
     # that is not ground as 1 (unassigned). So canopy is "unassigned or vegetation, standing above

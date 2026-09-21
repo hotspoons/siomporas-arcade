@@ -146,16 +146,14 @@ def measure(site_dir: Path) -> dict | None:
         for w in waters:
             water_dist = np.minimum(water_dist, shapely.distance(pts, w))
 
-    with rasterio.open(dtm_p) as src:
-        dtm = src.read(1)
-        tr = src.transform
+    # heights: the lidar DTM first, the bare-earth DEM where it has no data (Bonnie Branch's TNM
+    # bake covered a sliver of the corridor: 0.4 % valid DTM cells, 2026-09-21)
+    from .water import _Heights
 
+    hz = _Heights(site_dir)
+    if True:
         def sample(xy: np.ndarray) -> np.ndarray:
-            r, c = rasterio.transform.rowcol(tr, xy[:, 0], xy[:, 1])
-            r = np.clip(np.asarray(r), 0, dtm.shape[0] - 1)
-            c = np.clip(np.asarray(c), 0, dtm.shape[1] - 1)
-            v = dtm[r, c]
-            return np.where(v < -9000, np.nan, v)
+            return hz.at(xy[:, 0], xy[:, 1])
 
         faces: list[dict] = []
         per_side: dict[str, np.ndarray] = {}

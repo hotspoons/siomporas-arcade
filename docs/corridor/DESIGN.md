@@ -136,6 +136,10 @@ Found: Sideling's left wall s 1576–3936, toe 9 m, median 15.7 m, max 32.4 m; B
 18.8 m; South Mountain's right side to 19.9 m; Bowie and Clarksburg nothing over 8.5 m.
 `artificial` when the toe's lateral std ≤ 3 m (graded, parallel); `natural` when it wanders, a
 mapped waterway runs within 30 m for half the interval, or both sides rise together beside water.
+Heights come from the lidar DTM with the bare-earth DEM filling nodata (Bonnie Branch's first
+bake had a 0.4 %-valid DTM). Bonnie Branch, the natural test: 20 faces, all `natural` — ravine
+walls with toes 2–36 m out wandering ±3–10 m, 4–24 m high, water beside them 50–100 % of the
+interval; the 496 m wall at s 3004–3500 reaches 20 m, Ellicott City Granodiorite → `granite`.
 Lithology: Macrostrat `lith` + `descrip` keyword votes (the named units leave `lith` empty) →
 `shale | sandstone | greenstone | phyllite | schist | granite | limestone | sand`. Manifest `cuts`:
 per face the interval, side, class, toe/top/height/slope, rock type, and toe+top `[x,y,z]` every

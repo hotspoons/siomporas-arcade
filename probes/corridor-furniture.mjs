@@ -41,6 +41,7 @@ console.log(JSON.stringify(await page.evaluate(() => {
     facing: { checked: 0, worstErrDeg: 0 },
     arm: { checked: 0, overAsphalt: 0, overAsphaltPct: 0, examplesMissing: [] },
     triangles: 0,
+    parking: null,
   }
   if (!g) return { ...out, note: 'no furniture group' }
 
@@ -98,6 +99,43 @@ console.log(JSON.stringify(await page.evaluate(() => {
     }
   }
   out.arm.overAsphaltPct = out.arm.checked ? +((100 * out.arm.overAsphalt) / out.arm.checked).toFixed(1) : 0
+
+  // --- parking: is any of the asphalt on a carriageway, and is the paint on the asphalt? --------
+  const pk = site.layers.parking
+  if (pk) {
+    const p3 = new mod.Vector3()
+    const res = { counts: site.parkingCounts, baked: (site.manifest.parking ?? []).length, meshes: [], surfaceOnRoad: 0, surfaceChecked: 0, paintOffAsphalt: 0, paintChecked: 0, triangles: 0 }
+    const surface = pk.children.find((m) => m.name === 'parking:surface')
+    const paint = pk.children.find((m) => m.name === 'parking:paint')
+    for (const m of pk.children) {
+      const tris = m.geometry.index.count / 3
+      res.meshes.push({ name: m.name, tris })
+      res.triangles += tris
+    }
+    // every Nth surface vertex: none of the paved area should be over a road we drew
+    if (surface) {
+      const a = surface.geometry.getAttribute('position')
+      const step = Math.max(1, Math.floor(a.count / 4000))
+      for (let i = 0; i < a.count; i += step) {
+        res.surfaceChecked++
+        if (site.edgeDistance(a.getX(i), a.getZ(i)) < 0) res.surfaceOnRoad++
+      }
+    }
+    // every stall stripe's far end should be inside a lot, i.e. above the paved mesh. Cheap proxy:
+    // it must be within the site and not on a carriageway, which is what the builder promised.
+    if (paint) {
+      const a = paint.geometry.getAttribute('position')
+      const step = Math.max(1, Math.floor(a.count / 4000))
+      for (let i = 0; i < a.count; i += step) {
+        res.paintChecked++
+        p3.set(a.getX(i), a.getY(i), a.getZ(i))
+        if (site.edgeDistance(p3.x, p3.z) < 0) res.paintOffAsphalt++
+      }
+    }
+    res.surfaceOnRoadPct = res.surfaceChecked ? +((100 * res.surfaceOnRoad) / res.surfaceChecked).toFixed(2) : 0
+    out.parking = res
+    out.triangles += res.triangles
+  }
   return out
 })))
 await browser.close()

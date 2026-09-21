@@ -257,6 +257,25 @@ export let FURNITURE_SETBACK_MAX = 16
 /** past this reach it is not a mast arm any more, and the signal is not placed (m) */
 export let FURNITURE_ARM_MAX = 14
 
+/** a stall bay, in metres: the American standard is 8'6" × 18' */
+export let PARKING_STALL_W = 2.6
+export let PARKING_STALL_D = 5.4
+/** the drive aisle between two facing rows, for lots with no aisle mapped (m) */
+export let PARKING_AISLE_W = 6.5
+/** the painted line's width (m), and how far the paint floats over the asphalt (m) */
+export let PARKING_PAINT_W = 0.12
+export let PARKING_PAINT_LIFT = 0.02
+/** how far the asphalt floats over the ground (m) */
+export let PARKING_LIFT = 0.04
+/** a lot with more than this share of its interior over a carriageway is not paved, 0…1 */
+export let PARKING_ROAD_OVERLAP = 0.35
+/** below this area a lot with no aisle mapped gets no stalls at all (m²) */
+export let PARKING_MIN_GRID_M2 = 400
+/** extra clearance past the aisle's own edge before a bay starts (m) */
+export let PARKING_AISLE_GAP = 0.3
+/** a lot with fewer than one stall per this many m² gets the squared grid as well (m²) */
+export let PARKING_FILL_M2 = 45
+
 export interface TuneTab {
   name: string
   sections: TuneSection[]
@@ -495,6 +514,21 @@ export const TUNE_TABS: TuneTab[] = [
           tune('FURNITURE_MAX_FROM_ROAD', () => FURNITURE_MAX_FROM_ROAD, (v) => (FURNITURE_MAX_FROM_ROAD = v), [2, 400], 2, 'm from a drawn road, or it is not placed'),
           tune('FURNITURE_SETBACK_MAX', () => FURNITURE_SETBACK_MAX, (v) => (FURNITURE_SETBACK_MAX = v), [0, 40], 1, 'm back along the approach, out of the junction box'),
           tune('FURNITURE_ARM_MAX', () => FURNITURE_ARM_MAX, (v) => (FURNITURE_ARM_MAX = v), [4, 30], 0.5, 'm of arm before the mast is dropped instead'),
+        ],
+      },
+      {
+        title: 'parking',
+        keys: [
+          tune('PARKING_STALL_W', () => PARKING_STALL_W, (v) => (PARKING_STALL_W = v), [2, 4], 0.05, 'bay width (m)'),
+          tune('PARKING_STALL_D', () => PARKING_STALL_D, (v) => (PARKING_STALL_D = v), [3.5, 8], 0.1, 'bay depth (m)'),
+          tune('PARKING_AISLE_W', () => PARKING_AISLE_W, (v) => (PARKING_AISLE_W = v), [3, 12], 0.25, 'drive aisle, where none is mapped (m)'),
+          tune('PARKING_PAINT_W', () => PARKING_PAINT_W, (v) => (PARKING_PAINT_W = v), [0.04, 0.5], 0.01, 'painted line width (m)'),
+          tune('PARKING_PAINT_LIFT', () => PARKING_PAINT_LIFT, (v) => (PARKING_PAINT_LIFT = v), [0.005, 0.2], 0.005, 'paint over asphalt (m)'),
+          tune('PARKING_LIFT', () => PARKING_LIFT, (v) => (PARKING_LIFT = v), [0, 0.4], 0.01, 'asphalt over ground (m)'),
+          tune('PARKING_ROAD_OVERLAP', () => PARKING_ROAD_OVERLAP, (v) => (PARKING_ROAD_OVERLAP = v), [0, 1], 0.05, 'share over a carriageway before a lot is skipped'),
+          tune('PARKING_MIN_GRID_M2', () => PARKING_MIN_GRID_M2, (v) => (PARKING_MIN_GRID_M2 = v), [50, 5000], 50, 'no fallback grid below this area (m²)'),
+          tune('PARKING_AISLE_GAP', () => PARKING_AISLE_GAP, (v) => (PARKING_AISLE_GAP = v), [0, 3], 0.05, 'clearance past the aisle edge (m)'),
+          tune('PARKING_FILL_M2', () => PARKING_FILL_M2, (v) => (PARKING_FILL_M2 = v), [10, 300], 5, 'm² per stall below which the grid fills in too'),
         ],
       },
     ],

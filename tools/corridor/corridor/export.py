@@ -446,6 +446,70 @@ def _signals(site_dir: Path, frame, ox: float, oy: float, bbox) -> dict:
     return {"masts": masts, "signs": signs}
 
 
+def _parking(site_dir: Path, frame, ox: float, oy: float, bbox) -> list[dict]:
+    """`amenity=parking` areas: the asphalt a shopping centre is mostly made of.
+
+    Crofton has 233 of them, from a 34 m² pull-in to a 64 000 m² park-and-ride, and we drew none —
+    so every strip mall on the site was a building standing in grass with a road going past it.
+
+    Only the ring and what OSM says about it comes out here. Whether a lot overlaps a carriageway,
+    and where its stalls go, are both decided in the viewer: the first because only the viewer
+    knows which roads are actually drawn, and the second because the aisles are already in the
+    manifest as `driveways` with `service=parking_aisle` and there is no reason to carry them twice.
+
+    Multi-storey and underground lots are tagged and passed through rather than dropped, because
+    the viewer wants to NOT pave a roof or a basement, and it cannot tell without being told.
+    """
+    gj_p = site_dir / "osm.geojson"
+    if not gj_p.exists():
+        return []
+    import rasterio
+    from shapely.geometry import Polygon, box
+    from shapely.ops import transform as shp_transform
+
+    site_box = box(*bbox)
+    dem_p = site_dir / "dem_1m.tif"
+    src = rasterio.open(dem_p) if dem_p.exists() else None
+    out: list[dict] = []
+    for f in json.loads(gj_p.read_text())["features"]:
+        p = f["properties"]
+        if p.get("amenity") != "parking" or f["geometry"]["type"] != "Polygon":
+            continue
+        try:
+            poly = shp_transform(lambda x, y, z=None: frame.from_wgs(x, y), Polygon(f["geometry"]["coordinates"][0], f["geometry"]["coordinates"][1:]))
+        except Exception:
+            continue
+        if not poly.is_valid:
+            poly = poly.buffer(0)
+        poly = poly.intersection(site_box)
+        if poly.is_empty:
+            continue
+        for part in (poly.geoms if poly.geom_type == "MultiPolygon" else [poly]):
+            if part.geom_type != "Polygon" or part.area < 60:
+                continue
+            ring = [[round(float(x - ox), 2), round(float(y - oy), 2)] for x, y in part.exterior.coords[:-1]]
+            if len(ring) < 3:
+                continue
+            cx, cy = part.centroid.x, part.centroid.y
+            z = 0.0
+            if src is not None:
+                v = next(src.sample([(float(cx), float(cy))]))[0]
+                z = 0.0 if v < -9000 else float(v)
+            out.append({
+                "kind": p.get("parking") or "surface",
+                "surface": p.get("surface"),
+                "access": p.get("access"),
+                "name": p.get("name"),
+                "area_m2": round(float(part.area), 1),
+                "z": round(z, 2),
+                "ring": ring,
+                "holes": [[[round(float(x - ox), 2), round(float(y - oy), 2)] for x, y in h.coords[:-1]] for h in part.interiors],
+            })
+    if src is not None:
+        src.close()
+    return out
+
+
 def _power(site_dir: Path, frame, ox: float, oy: float, bbox) -> dict:
     """Power lines and their supports: `power=line|minor_line` ways, `power=tower|pole` nodes.
 
@@ -773,6 +837,7 @@ def export_site(site_dir: Path) -> dict:
         "stubs": _stub_roads(site_dir, Frame.at(site["lon"], site["lat"]), ox, oy, bbox),
         "power": _power(site_dir, Frame.at(site["lon"], site["lat"]), ox, oy, bbox),
         "signals": _signals(site_dir, Frame.at(site["lon"], site["lat"]), ox, oy, bbox),
+        "parking": _parking(site_dir, Frame.at(site["lon"], site["lat"]), ox, oy, bbox),
         "landuse": derived["landuse"],
         "pois": derived["pois"],
         "cuts": features.get("cuts"),

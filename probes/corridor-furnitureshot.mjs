@@ -17,6 +17,7 @@ await page.route('**/@vite/client', (r) => r.abort())
 await page.goto(`http://127.0.0.1:${PORT}/#${SLUG}`, { waitUntil: 'domcontentloaded', timeout: 120000 })
 await page.waitForFunction((slug) => window.corridor?.site?.manifest?.slug === slug, SLUG, { timeout: 300000 })
 await page.keyboard.press('m')
+if (process.env.MODE) await page.evaluate((m) => { window.__mode = m }, process.env.MODE)
 
 console.log(await page.evaluate(({ eye }) => {
   const c = window.corridor, site = c.site, L = site.layers, mod = c.THREE
@@ -34,6 +35,33 @@ console.log(await page.evaluate(({ eye }) => {
       m4.decompose(p, q, s)
       at.push({ x: p.x, y: p.y, z: p.z, yaw: mesh.userData.src[i].yaw_deg })
     }
+  }
+  if (window.__mode === 'parking') {
+    // the biggest lot that actually got stalls: centre of the paint's bounding box, seen from a
+    // height that fits the whole thing in
+    const paintMesh = site.layers.parking?.children.find((m) => m.name === 'parking:paint')
+    const surfMesh = site.layers.parking?.children.find((m) => m.name === 'parking:surface')
+    if (!paintMesh) return 'no parking paint'
+    // find the densest cluster of paint: bucket every 64th vertex on a 60 m grid
+    const a = paintMesh.geometry.getAttribute('position')
+    const cell = new Map()
+    for (let i = 0; i < a.count; i += 16) {
+      const k = `${Math.round(a.getX(i) / 60)},${Math.round(a.getZ(i) / 60)}`
+      const e = cell.get(k) ?? { n: 0, x: 0, y: 0, z: 0 }
+      e.n++
+      e.x += a.getX(i)
+      e.y += a.getY(i)
+      e.z += a.getZ(i)
+      cell.set(k, e)
+    }
+    let bb = null
+    for (const e of cell.values()) if (!bb || e.n > bb.n) bb = e
+    const c0 = { x: bb.x / bb.n, y: bb.y / bb.n, z: bb.z / bb.n }
+    c.camera.position.set(c0.x + eye * 0.9, c0.y + eye * 0.8, c0.z + eye * 0.9)
+    c.orbit.target.set(c0.x, c0.y, c0.z)
+    c.orbit.update()
+    void surfMesh
+    return JSON.stringify({ mode: 'parking', at: [Math.round(c0.x), Math.round(c0.z)], paintVerts: bb.n, counts: site.parkingCounts })
   }
   if (!at.length) return 'no masts placed'
   // the busiest junction that is ALSO on road we draw properly: score by neighbours, but require
@@ -57,7 +85,11 @@ console.log(await page.evaluate(({ eye }) => {
 }, { eye: EYE }))
 
 for (const on of [false, true]) {
-  await page.evaluate((v) => { window.corridor.site.layers.furniture.visible = v }, on)
+  await page.evaluate((v) => {
+    const L = window.corridor.site.layers
+    const g = window.__mode === 'parking' ? L.parking : L.furniture
+    g.visible = v
+  }, on)
   await page.waitForTimeout(1500)
   await page.screenshot({ path: `${OUT}${on ? 'after' : 'before'}.png`, timeout: 300000 })
 }

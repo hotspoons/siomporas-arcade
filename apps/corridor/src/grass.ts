@@ -472,12 +472,22 @@ export class Grass {
     this.sig = this.signature() // so the FIRST knob change is judged against the built tiles, not ''
   }
 
-  /** the site's grass type; regenerates only if it actually changed (see invalidate) */
-  setType(t: GrassType) {
+  /**
+   * The site's ground cover: the blade style, and how much of it there is.
+   *
+   * `blades` is the second half of a ground-cover class (groundcover.ts `CoverLook`). Chaparral and
+   * conifer duff are not swards — they are woody scrub and needle mat with a few stems in the gaps —
+   * so the class that chooses the blade SHAPE also says how many blades belong there at all.
+   * Regenerates only if something actually changed (see invalidate).
+   */
+  setType(t: GrassType, blades = 1) {
+    if (t === this.type && blades === this.bladeScale) return
     this.type = t
-    this.look = GRASS_LOOK[t]
+    this.bladeScale = blades
+    this.look = blades === 1 ? GRASS_LOOK[t] : { ...GRASS_LOOK[t], density: GRASS_LOOK[t].density * blades }
     this.invalidate()
   }
+  private bladeScale = 1
   get grassType(): GrassType {
     return this.type
   }

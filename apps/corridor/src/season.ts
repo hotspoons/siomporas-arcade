@@ -108,6 +108,91 @@ export const LOOK: Record<Season, SeasonLook> = {
   },
 }
 
+// ---------------------------------------------------------------------------------------------
+// The same season, somewhere else.
+//
+// The four palettes above are the Maryland piedmont, and until 2026-09-21 they were every site:
+// `summer` painted a straw-topped olive verge whether the corridor was in Frederick County, on
+// Mount Desert Island or above the Pacific at Bixby Bridge. Two of those three are wrong, and the
+// California one is wrong in the most recognisable way there is — a Big Sur hillside in September
+// is straw from the road to the ridge, and the SAME hillside in February is the greenest thing in
+// the state. The inversion is the place's signature.
+//
+// So the palette stays as the reference and the site moves it, by the difference between its own
+// curing and the curing of the climate the palette was drawn against. Nothing here knows what a
+// state is; both numbers come out of Daymet through `Flora.curing`.
+
+/**
+ * The climate the four palettes were drawn against: Chesterfield Road, Maryland — Rich's own road,
+ * and the site his September reference photography was shot on. Daymet v4 1 km monthly means over
+ * 2014–2023, printed by `probes/corridor-flora.mjs`. It is written down here rather than fetched
+ * because it is a property of the PALETTE, not of any site being rendered: move the palette and
+ * this has to move with it.
+ */
+export const PALETTE_CLIMATE = {
+  ppt_mm: [78.0, 85.4, 87.0, 96.8, 126.2, 125.9, 155.7, 137.7, 98.1, 107.2, 79.6, 113.9],
+  tmax_c: [6.1, 8.4, 12.5, 18.8, 23.6, 28.3, 31.1, 29.9, 26.6, 20.6, 13.7, 9.5],
+}
+
+/** The month each season stands for. September is `summer` because that is when the NAIP was flown. */
+export const SEASON_MONTH: Record<Season, number> = { winter: 1, spring: 3, summer: 8, autumn: 10 }
+
+/**
+ * How cured the herbaceous cover is in a month, 0 (growing) … 1 (dead straw), from monthly rain
+ * and temperature alone.
+ *
+ * Two ways for grass to stop: it runs out of water, or it runs out of heat. A sward needs roughly
+ * 40 mm a month to keep growing and survives on about 10, so the rain over the preceding ninety
+ * days sets the drought term; below about 8 °C of daily maximum nothing grows at all, which sets
+ * the dormancy term. The worse of the two wins, because either one is enough.
+ */
+export function curingOf(ppt: number[], tmax: number[] | undefined, month: number): number {
+  if (!ppt || ppt.length !== 12) return 0
+  let rain = 0
+  for (let k = 0; k < 3; k++) rain += ppt[(month - k + 12) % 12]
+  const drought = Math.min(1, Math.max(0, (120 - rain) / 90))
+  const cold = tmax && tmax.length === 12 ? Math.min(1, Math.max(0, (14 - tmax[month]) / 6)) : 0
+  return Math.max(drought, cold)
+}
+
+/**
+ * This site's palette for a season: the reference palette, shifted by how much drier or greener
+ * this place is than the piedmont in the same month.
+ *
+ *   Chesterfield Rd  delta 0 in every season, by construction — the reference is unchanged
+ *   Bixby Bridge     +1.00 in September (2 mm of rain since June) and −0.93 in February
+ *   Acadia           0 in September, +0.07 in February (it is colder, not drier)
+ *
+ * The shift moves the grass dryness, pulls the grass colour toward straw, and lifts the litter and
+ * imagery tints with it, because a cured hillside bleaches everything on it, not only the blades.
+ */
+export function siteLook(season: Season, flora: { block: { climate?: { ppt_mm: number[]; tmax_c: number[] } } } | null): SeasonLook {
+  const base = LOOK[season]
+  const clim = flora?.block?.climate
+  if (!clim?.ppt_mm?.length) return base
+  const month = SEASON_MONTH[season]
+  const delta = curingOf(clim.ppt_mm, clim.tmax_c, month) - curingOf(PALETTE_CLIMATE.ppt_mm, PALETTE_CLIMATE.tmax_c, month)
+  if (Math.abs(delta) < 0.02) return base
+  const k = Math.max(-1, Math.min(1, delta))
+  // the colour a cured sward goes: standing wild oat over its own thatch, not soil
+  const STRAW_BASE = c(0xa8965f)
+  const STRAW_TIP = c(0xd8c68c)
+  const mixTo = (from: THREE.Color, to: THREE.Color, f: number) => from.clone().lerp(to, Math.max(0, f))
+  const green = Math.max(0, -k)
+  const cure = Math.max(0, k)
+  return {
+    ...base,
+    grass: {
+      base: mixTo(base.grass.base, STRAW_BASE, cure * 0.85).lerp(LOOK.spring.grass.base, green * 0.8),
+      tip: mixTo(base.grass.tip, STRAW_TIP, cure * 0.85).lerp(LOOK.spring.grass.tip, green * 0.8),
+      height: base.grass.height * (1 + cure * 0.25 - green * 0.1),
+      dry: Math.max(0, Math.min(1, base.grass.dry + k)),
+    },
+    litter: { tint: mixTo(base.litter.tint, STRAW_TIP, cure * 0.45), spread: base.litter.spread },
+    ground: mixTo(base.ground, c(0xfff0d2), cure * 0.5).lerp(c(0xeef7e0), green * 0.5),
+  }
+}
+
 /** A greyscale copy of a leaf texture (alpha kept), so a tint IS the leaf colour. */
 export function greyscaleTexture(src: THREE.Texture): THREE.Texture | null {
   const img = src.image as HTMLImageElement | undefined

@@ -7,8 +7,9 @@ import { DATA_BASE, decodeHeights, decodeScalar, loadImage, type Layer, type Man
 import { NearTrees } from './trees'
 import { Impostors } from './impostors'
 import { Grass } from './grass'
-import { LOOK, type Season } from './season'
-import { GRASS_TYPES, forestFloorTexture, grassTypeFor } from './groundcover'
+import { siteLook, type Season } from './season'
+import { GRASS_TYPES, GROUND_COVER, floorTexture, siteCover } from './groundcover'
+import { loadFlora, type Flora } from './flora'
 import { CROP_TYPES, buildCrops, tickCrops, type CropType, type Field as CropField } from './crops'
 import { ACCUM_PARS, Precipitation, accumUniforms, type Weather } from './weather'
 import { buildStrip, sinkUnderStrips } from './strip'
@@ -209,6 +210,12 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
   }
   status('decoding terrain…')
   const adjustments = await Adjustments.load(manifest.slug)
+  // what grows here, from the bake: LANDFIRE vegetation classes, an FIA species mix per class and
+  // Daymet's monthly rain. Null on a site baked before the flora layer, and everything downstream
+  // falls back to what it did then.
+  const flora: Flora | null = await loadFlora(manifest).catch(() => null)
+  const cover = siteCover(manifest, flora)
+  const look = (s: Season) => siteLook(s, flora)
   const overrides = await loadStructureOverrides(manifest.slug)
   // authored `flatten` intervals rewrite the spine's grade before anything is built from it
   if (overrides.length) manifest = { ...manifest, spine: { ...manifest.spine, coords: flattenSpine(manifest.spine.coords, overrides) }, structures: suppressed(manifest.structures, overrides) }
@@ -694,7 +701,9 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     // the CHM the grass generator already rejects cells by; the strip needs it to know where the
     // ground is forest floor rather than turf
     const stripCanopyAt = chm ? sampler(chm) : null
-    const litter = renderer && chm ? forestFloorTexture() : null
+    // the forest floor is the site's dominant TREE ground class: spruce duff at Acadia, bay and
+    // live-oak litter at Big Sur, the oak-hickory that used to be painted everywhere in Maryland
+    const litter = renderer && chm ? floorTexture(cover.floor) : null
     /**
      * On a bridge the verge stops at the parapet. Everywhere else the strip blends from road grade
      * back to the DEM over 7 m, but on a deck the DEM is the valley floor 5–12 m below and the
@@ -722,7 +731,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     const makeStrip = () => buildStrip(spineAt, curveLen, -latMin + VERGE, latMax + VERGE, (x, z) => edgeDistance(x, z), heightAt, imagery, manifest.bbox, grassTex('grass_mown'), grassTex('grass_rough'), lite ? 4 : 2, lite ? 2 : 1, adjustments.active ? (x, y) => adjustments.at(x, y, adjScratch).ground_offset_m : null, null, stripEdgeLimitAt, stripCanopyAt, litter)
     mark('grade: setup')
     let strip = makeStrip()
-    strip.setLitter(LOOK[currentSeason].litter.tint, LOOK[currentSeason].litter.spread)
+    strip.setLitter(look(currentSeason).litter.tint, look(currentSeason).litter.spread)
     road.add(strip.mesh)
     mark('grade: primary strip')
     mark('grade: sink primary')
@@ -946,13 +955,13 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     group.add(trees)
     // near field: real (procedural) tree models around the eye
     status('growing…')
-    const near = await new NearTrees(t.records, lite ? 140 : 240, lite ? 60 : 300).grow() // capacity here is the allocation ceiling; the live cap is the knob
+    const near = await new NearTrees(t.records, lite ? 140 : 240, lite ? 60 : 300, flora).grow() // capacity here is the allocation ceiling; the live cap is the knob
     trees.add(near.group)
     // grass on the verge: open ground (no canopy), off the pavement, mown near the shoulder
     const canopyAt = sampler(chm)
     canopyAtRef = canopyAt
     const grassAdj = { ...NEUTRAL_ADJ }
-    const grass = new Grass(groundNear, canopyAt, roadDistance, 0, LOOK[currentSeason], lite ? 90_000 : 400_000, lite ? 26 : 40, fog, adjustments.active ? (x, y) => { const a = adjustments.at(x, y, grassAdj); return a.cover === 'crop' ? [1, 0] : [a.grass_height, a.grass_density] } : undefined, undefined, heightAt)
+    const grass = new Grass(groundNear, canopyAt, roadDistance, 0, look(currentSeason), lite ? 90_000 : 400_000, lite ? 26 : 40, fog, adjustments.active ? (x, y) => { const a = adjustments.at(x, y, grassAdj); return a.cover === 'crop' ? [1, 0] : [a.grass_height, a.grass_density] } : undefined, undefined, heightAt)
     // NOT a child of `trees`. It was, and so the trees checkbox turned off all ground cover with
     // them — you could not hide the trees to look at the grass, which is most of what looking at
     // grass involves. Its own group, its own layer toggle.
@@ -1018,14 +1027,14 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     for (const bs of branchStrips) precip.follow(bs.weatherUniforms)
     precip.follow(grass.weatherUniforms)
     // what grows on this verge, read off the bake; GRASS_TYPE overrides it from the F6 panel
-    const bakedGrassType = grassTypeFor(manifest)
-    grass.setType(bakedGrassType)
+    const bakedGrassType = cover.grass
+    grass.setType(bakedGrassType, GROUND_COVER[cover.open].blades)
     let imp: Impostors | null = null
     let refreshFar = (_skip: Set<number>, _eye?: THREE.Vector3, _fwd?: THREE.Vector3, _pitch?: number) => {}
     if (renderer) {
       // far field: the SAME models as impostors, one quad a tree, re-assigned as the eye moves
       status('baking impostors…')
-      near.setSeason(LOOK[currentSeason])
+      near.setSeason(look(currentSeason))
       imp = new Impostors(renderer, near.sources(), t.records.length, fog)
       trees.add(imp.mesh)
       const m = new THREE.Matrix4()
@@ -1098,8 +1107,8 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     }
     retune = () => {
       near.invalidate()
-      const wantType = T.GRASS_TYPE < 0 ? bakedGrassType : GRASS_TYPES[Math.min(3, Math.max(0, Math.round(T.GRASS_TYPE)))]
-      if (wantType !== grass.grassType) grass.setType(wantType)
+      const wantType = T.GRASS_TYPE < 0 ? bakedGrassType : GRASS_TYPES[Math.min(GRASS_TYPES.length - 1, Math.max(0, Math.round(T.GRASS_TYPE)))]
+      grass.setType(wantType, T.GRASS_TYPE < 0 ? GROUND_COVER[cover.open].blades : 1)
       grass.invalidate()
       if (roadSignature() !== roadSig) {
         roadSig = roadSignature()
@@ -1112,16 +1121,18 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     }
     setSeason = (season: Season) => {
       currentSeason = season
-      const look = LOOK[season]
-      near.setSeason(look)
-      grass.setLook(look)
+      // the SITE's palette for this season, not the reference one: siteLook shifts it by how much
+      // drier or greener this place is than the piedmont the four palettes were drawn against
+      const lk = look(season)
+      near.setSeason(lk)
+      grass.setLook(lk)
       crops?.setSeason(season)
       for (const st of [strip, ...branchStrips]) {
-        st.setTint(look.grass.base.clone().multiplyScalar(2.0).lerp(new THREE.Color(0xffffff), 0.4), imagery ? look.ground : bare)
-        st.setLitter(look.litter.tint, look.litter.spread)
+        st.setTint(lk.grass.base.clone().multiplyScalar(2.0).lerp(new THREE.Color(0xffffff), 0.4), imagery ? lk.ground : bare)
+        st.setLitter(lk.litter.tint, lk.litter.spread)
       }
-      terrainMat.color.copy(imagery && terrainMat.map ? look.ground : bare)
-      if (horizon && (horizon.material as THREE.MeshStandardMaterial).map) (horizon.material as THREE.MeshStandardMaterial).color.copy(look.ground)
+      terrainMat.color.copy(imagery && terrainMat.map ? lk.ground : bare)
+      if (horizon && (horizon.material as THREE.MeshStandardMaterial).map) (horizon.material as THREE.MeshStandardMaterial).color.copy(lk.ground)
       if (imp) imp.rebake(near.sources())
     }
   }
@@ -1300,7 +1311,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     spineAt,
     setImagery: (on) => {
       terrainMat.map = on ? imagery : null
-      terrainMat.color.copy(on && imagery ? LOOK[currentSeason].ground : bare)
+      terrainMat.color.copy(on && imagery ? look(currentSeason).ground : bare)
       terrainMat.needsUpdate = true
     },
     setWire: (on) => {

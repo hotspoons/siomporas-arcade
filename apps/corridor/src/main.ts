@@ -8,6 +8,7 @@ import { MiniMap } from './minimap'
 import { TunePanel } from '@apex/engine/app/TunePanel'
 import * as T from './tuning'
 import { TUNE_TABS } from './tuning'
+
 import { fetchJSON, type IndexEntry, type Manifest, type Structure, type Crossing } from './site'
 import { LOOK, SEASONS, type Season } from './season'
 
@@ -91,7 +92,27 @@ async function loadSite(slug: string) {
   site = await buildSite(manifest, status, LITE, renderer, scene.fog as THREE.FogExp2, season)
   applySky(season)
   scene.add(site.group)
-  ;(window as unknown as { corridor: unknown }).corridor = { site, scene, camera, drive } // for probes and the console
+  // for probes and the console. `tune` is the same knob table the F6 panel drives, so a probe can
+  // sweep a knob exactly as Rich would and see the same rebuild — the module's `export let`s
+  // cannot be written from outside, and a dynamic import of tuning.ts under HMR is a dead copy.
+  ;(window as unknown as { corridor: unknown }).corridor = {
+    site,
+    scene,
+    camera,
+    drive,
+    tune: {
+      tabs: TUNE_TABS,
+      names: () => TUNE_TABS.flatMap((t) => t.sections.flatMap((sec) => sec.keys.map((k) => k.name))),
+      get: (name: string) => tuneKey(name)?.get(),
+      set: (name: string, v: number) => {
+        const k = tuneKey(name)
+        if (!k) return false
+        k.set(v)
+        site?.retune()
+        return true
+      },
+    },
+  }
   applyLayers()
   fillInfo(manifest)
   fly ??= new FlyControls(camera, orbit, canvas, (x, z) => site?.groundAt(x, z) ?? null)
@@ -423,6 +444,12 @@ $('#top').onclick = toTop
 // Tab toggles drive/fly. Driving: W/S throttle/brake, A/D steer, Space handbrake, R resets to the
 // road. Flying: see fly.ts (WASD move, Q/E rotate, R/F dolly, T/G lift, right-drag look). P and
 // H (home = top) are shared.
+/** one knob of the F6 panel by name, wherever its tab is; undefined if there is no such knob */
+function tuneKey(name: string) {
+  for (const t of TUNE_TABS) for (const sec of t.sections) for (const k of sec.keys) if (k.name === name) return k
+  return undefined
+}
+
 const held = new Set<string>()
 addEventListener('keydown', (e) => {
   const tgt = e.target as HTMLElement

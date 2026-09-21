@@ -53,7 +53,11 @@ export let GRASS_DRY_ADD = 0.3
 /** blades stop swaying above this eye speed (m/s): nobody sees wind from a moving car */
 export let GRASS_WIND_STILL_BELOW = 4
 /** how many 8 m tiles may be generated per frame while the ring fills */
-export let GRASS_TILES_PER_FRAME = 6
+export let GRASS_TILES_PER_FRAME = 48
+/** and no longer than this per frame generating them: the real budget, since tile cost varies 30× */
+export let GRASS_MS_PER_FRAME = 4
+/** evict cached tiles once the map holds this multiple of what the ring needs */
+export let GRASS_CACHE_SLACK = 1.4
 
 // --- trees --------------------------------------------------------------------------------------
 /** near-field radius (procedural models) — beyond it, impostors */
@@ -206,7 +210,9 @@ export const TUNE_TABS: TuneTab[] = [
           tune('GRASS_SPRITE_SCALE', () => GRASS_SPRITE_SCALE, (v) => (GRASS_SPRITE_SCALE = v), [0.3, 3], 0.05, 'height'),
           tune('GRASS_SPRITE_WIDTH', () => GRASS_SPRITE_WIDTH, (v) => (GRASS_SPRITE_WIDTH = v), [0.3, 3], 0.05, 'thickness'),
           tune('GRASS_SPRITE_LEAN', () => GRASS_SPRITE_LEAN, (v) => (GRASS_SPRITE_LEAN = v), [0, 1], 0.02),
-          tune('GRASS_TILES_PER_FRAME', () => GRASS_TILES_PER_FRAME, (v) => (GRASS_TILES_PER_FRAME = v), [1, 24], 1, 'tiles generated per frame while filling'),
+          tune('GRASS_TILES_PER_FRAME', () => GRASS_TILES_PER_FRAME, (v) => (GRASS_TILES_PER_FRAME = v), [1, 64], 1, 'ceiling on tiles generated per frame'),
+          tune('GRASS_MS_PER_FRAME', () => GRASS_MS_PER_FRAME, (v) => (GRASS_MS_PER_FRAME = v), [0.2, 12], 0.1, 'ms per frame spent generating them'),
+          tune('GRASS_CACHE_SLACK', () => GRASS_CACHE_SLACK, (v) => (GRASS_CACHE_SLACK = v), [1, 4], 0.1, 'cached tiles as a multiple of the ring'),
         ],
       },
       {

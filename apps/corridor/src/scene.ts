@@ -24,6 +24,8 @@ export interface Site {
   layers: { imagery?: THREE.Mesh; canopy?: THREE.Mesh; trees?: THREE.Group; road: THREE.Group; horizon?: THREE.Mesh; structures: THREE.Group; spine: THREE.Group; markers: THREE.Group; placements: THREE.Group }
   adjustments: Adjustments
   treeCount: number
+  /** the grass field, when this site has one (probes and the HUD read `grass.counts`) */
+  grass: Grass | null
   /** per-frame: move the near-field tree models and the grass ring to follow the eye; fwd/pitch shape the LOD footprint */
   updateNear: (eye: THREE.Vector3, time: number, fwd?: THREE.Vector3, pitch?: number) => void
   /** a knob changed: re-pick trees and re-seed grass on the next frame */
@@ -386,6 +388,7 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
   let edgeDistanceWorld: (x: number, z: number) => number = () => Infinity
   let treesNearWorld: (x: number, z: number, r: number) => [number, number, number][] = () => []
   let currentSeason: Season = initialSeason
+  let grassRef: Grass | null = null
   if (chm) {
     // distance to the nearest PAVEMENT EDGE of any carriageway (negative = on the pavement):
     // stations every 5 m from the spine and every sibling, hashed on a 20 m grid with each
@@ -519,6 +522,7 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
     const grassAdj = { ...NEUTRAL_ADJ }
     const grass = new Grass(groundNear, canopyAt, roadDistance, 0, LOOK[currentSeason], lite ? 90_000 : 400_000, lite ? 26 : 40, fog, adjustments.active ? (x, y) => { const a = adjustments.at(x, y, grassAdj); return [a.grass_height, a.grass_density] } : undefined)
     trees.add(grass.mesh)
+    grassRef = grass
     let imp: Impostors | null = null
     let refreshFar = (_skip: Set<number>) => {}
     if (renderer) {
@@ -698,6 +702,7 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
     layers: { imagery: terrain, canopy, trees, road, horizon, structures, spine, markers, placements: placementsGroup },
     adjustments,
     treeCount,
+    grass: grassRef,
     updateNear,
     retune,
     setSeason,

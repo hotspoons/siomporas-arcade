@@ -13,6 +13,7 @@
 // One merged geometry with vertex colours: a thousand footprints is one draw call.
 import * as THREE from 'three'
 import type { Manifest } from './site'
+import { Budget } from './budget'
 
 /** site x, y (north), z (up) → three.js world; the same mapping scene.ts uses, kept local to avoid an import cycle */
 const toWorld = (x: number, y: number, z: number) => new THREE.Vector3(x, z, -y)
@@ -75,7 +76,15 @@ function pushTri(b: Build, a: THREE.Vector3, c: THREE.Vector3, d: THREE.Vector3,
  * LOWEST ground under its ring, sunk 0.3 m, because a house on a slope is cut into the hill and a
  * house floating on its high corner is the thing everyone notices.
  */
-export function buildBuildings(manifest: Manifest, groundAt: (x: number, z: number) => number | null): { group: THREE.Group; stats: BuildingStats } {
+/**
+ * Every building on the site, as one merged mesh.
+ *
+ * ASYNC because it is 3.9 s of work on crofton-triangle (measured on a real machine through the
+ * dev bridge) and it used to run in one call stack, inside a single frame. The `Budget` hands the
+ * frame back every few milliseconds so the page paints and the progress message moves; the total
+ * work is unchanged.
+ */
+export async function buildBuildings(manifest: Manifest, groundAt: (x: number, z: number) => number | null, sliceMs = 8): Promise<{ group: THREE.Group; stats: BuildingStats }> {
   const group = new THREE.Group()
   group.name = 'buildings'
   const list = manifest.buildings ?? []
@@ -83,7 +92,9 @@ export function buildBuildings(manifest: Manifest, groundAt: (x: number, z: numb
   let gabled = 0
   let fromLidar = 0
 
+  const budget = new Budget(sliceMs)
   for (const bd of list) {
+    await budget.tick()
     const ring = (bd.ring ?? []) as [number, number][]
     if (ring.length < 3) continue
     const h = Math.max(2.4, bd.height_m ?? 6)

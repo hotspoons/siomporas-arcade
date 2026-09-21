@@ -12,6 +12,7 @@ import { GRASS_TYPES, forestFloorTexture, grassTypeFor } from './groundcover'
 import { CROP_TYPES, buildCrops, tickCrops, type CropType, type Field as CropField } from './crops'
 import { ACCUM_PARS, Precipitation, accumUniforms, type Weather } from './weather'
 import { buildStrip, sinkUnderStrips } from './strip'
+import { mapBudgeted } from './budget'
 import { Adjustments, NEUTRAL as NEUTRAL_ADJ } from './adjust'
 import { buildPlacements, loadCatalog, loadPlacements } from './placements'
 import { buildBuildings } from './buildings'
@@ -741,10 +742,10 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
      * ground beyond the verge is the coarse terrain, which is what it should be that far from a
      * residential street anyway.
      */
-    const makeBranchStrips = () => branchAts.map((b, i) => buildStrip(b.at, b.len, T.BRANCH_VERGE, T.BRANCH_VERGE, (x, z) => edgeDistance(x, z), heightAt, imagery, manifest.bbox, grassTex('grass_mown'), grassTex('grass_rough'), lite ? 4 : 3, lite ? 3 : 2, adjustments.active ? (x, y) => adjustments.at(x, y, adjScratch).ground_offset_m : null, (s) => {
+    const makeBranchStrips = () => mapBudgeted(branchAts, (b, i) => buildStrip(b.at, b.len, T.BRANCH_VERGE, T.BRANCH_VERGE, (x, z) => edgeDistance(x, z), heightAt, imagery, manifest.bbox, grassTex('grass_mown'), grassTex('grass_rough'), lite ? 4 : 3, lite ? 3 : 2, adjustments.active ? (x, y) => adjustments.at(x, y, adjScratch).ground_offset_m : null, (s) => {
       const q = b.at(s).pos
       return edgeDistance(q.x, q.z, branchWho0 + i).d < T.BRANCH_VERGE
-    }))
+    }), 8, (done, total) => rawStatus(`grading ${done}/${total} streets…`))
     // --- driveways -------------------------------------------------------------------------
     // Every house on Rich's court has one in OSM and we were dropping them, so the houses stood
     // in grass. Unmarked asphalt, 3.2 m, laid on the strip where the strip covers them and on the
@@ -864,7 +865,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
       }
     }
     makeBulbs()
-    let branchStrips = makeBranchStrips()
+    let branchStrips = await makeBranchStrips()
     mark('grade: branch strips built')
     for (const bs of branchStrips) road.add(bs.mesh)
     // ONE pass for every strip, primary and branches together
@@ -883,7 +884,9 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     const roadSignature = () => `${T.LANE_WIDTH}|${T.SHOULDER_OUT}|${T.SHOULDER_IN}|${T.ROAD_BLEND_M}|${T.ROAD_TAPER_M}|${T.ROAD_ONEWAY_CENTRE}|${T.CULDESAC_RADIUS}`
     let roadSig = roadSignature()
     let roadTimer: ReturnType<typeof setTimeout> | undefined
-    const rebuildRoad = () => {
+    // async because the branch strips are budgeted: a knob change on a 427-branch network used to
+    // freeze the tab for as long as the first build did
+    const rebuildRoad = async () => {
       for (const arr of stGrid.values()) for (const r of arr) { if (bulbStations.includes(r as St)) continue; r.half = halfOf(r.who, r.s); r.off = r.who === 0 ? pavedOffsetAt(r.s) : 0 }
       placeBulbs()
       makeBulbs()
@@ -898,7 +901,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
         road.remove(bs.mesh)
         bs.mesh.geometry.dispose()
       }
-      branchStrips = makeBranchStrips()
+      branchStrips = await makeBranchStrips()
       for (const bs of branchStrips) road.add(bs.mesh)
       sinkUnderStrips(terrainGeo, [strip, ...branchStrips])
     }
@@ -943,7 +946,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     group.add(trees)
     // near field: real (procedural) tree models around the eye
     status('growing…')
-    const near = new NearTrees(t.records, lite ? 140 : 240, lite ? 60 : 300) // capacity here is the allocation ceiling; the live cap is the knob
+    const near = await new NearTrees(t.records, lite ? 140 : 240, lite ? 60 : 300).grow() // capacity here is the allocation ceiling; the live cap is the knob
     trees.add(near.group)
     // grass on the verge: open ground (no canopy), off the pavement, mown near the shoulder
     const canopyAt = sampler(chm)
@@ -1102,7 +1105,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
         roadSig = roadSignature()
         clearTimeout(roadTimer)
         roadTimer = setTimeout(() => {
-          rebuildRoad()
+          void rebuildRoad()
           grass.invalidate()
         }, 250)
       }
@@ -1232,7 +1235,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
   group.add(placementsGroup)
   // the buildings the bake already knew about, as massing under whatever the catalogue places
   status('raising buildings…')
-  const built = buildBuildings(manifest, groundAtWorld)
+  const built = await buildBuildings(manifest, groundAtWorld)
   group.add(built.group)
   // poles and wires: most of what a rural roadside has, and it was all sitting unused in the bake
   const power = buildPower(manifest, groundAtWorld)

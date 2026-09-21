@@ -8,6 +8,7 @@
 // lands at that height. Species is a stand-in until something reads it off the imagery: oaks on
 // the ridges and roadside, ash in the bottoms, aspen for the thin tall ones.
 import * as THREE from 'three'
+import { Budget } from './budget'
 import { Tree } from '@dgreenheck/ez-tree'
 import { greyscaleTexture, type SeasonLook } from './season'
 import * as T from './tuning'
@@ -92,11 +93,31 @@ export class NearTrees {
     void radius // live radius is the knob TREE_NEAR_RADIUS
     this.capacity = capacity
     this.group.name = 'near-trees'
+    this.indexTrees(trees)
+  }
+
+  /**
+   * Generate the five procedural tree variants, yielding between them.
+   *
+   * `t.generate()` is about 800 ms a preset, so doing all five in the constructor was a single
+   * 4.1 s frame on crofton-triangle — the largest phase of the whole build, measured on a real
+   * machine through the dev bridge. Yielding does not make it faster, it makes it five ~800 ms
+   * slices the browser can paint between. Splitting a preset's own generate() is not ours to do;
+   * that is inside ez-tree.
+   */
+  async grow(sliceMs = 8): Promise<this> {
+    const b = new Budget(sliceMs)
     for (const p of PRESETS) {
-      const v = buildVariant(p, capacity)
+      const v = buildVariant(p, this.capacity)
       this.variants.push(v)
       this.group.add(v.branches, v.leavesFull, v.leavesSparse)
+      await b.tick()
     }
+    b.finish()
+    return this
+  }
+
+  private indexTrees(trees: TreeRecord[]) {
     trees.forEach((t, i) => {
       const k = `${Math.floor(t.x / this.cell)},${Math.floor(t.z / this.cell)}`
       const arr = this.grid.get(k)

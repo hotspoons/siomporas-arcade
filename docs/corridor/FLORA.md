@@ -64,20 +64,26 @@ green. That is where Rich's guess lands, and it lands hard — see [§5](#5-daym
 
 ```
 EVT class of every 30 m pixel in the corridor          ← always, this is the spine of it
-   └─ species mix for each class
-        1. FHP basal area summed over that class's pixels          (measured, named species)
-        2. else the class NAME parsed against FIA's vocabulary     ("Spruce-Fir" → Picea, Abies)
-        3. else the class's physiognomy alone                      (Conifer → a pine, at worst)
+   └─ species mix for each class = f · (FHP basal area over that class's pixels)
+                                 + (1−f) · (the class NAME parsed against FIA's vocabulary)
+        where f = the fraction of the class's pixels that carry any basal area at all
    └─ ground-cover class for each class, by rule over EVT_LF / EVT_SBCLS / EVT_PHYS
    └─ leaf cycle for each class, straight off EVT_SBCLS
 Daymet monthly normals at the site                     ← when it is green, never what it is
 ```
 
-Step 1 needs a threshold, and the threshold is measured per class: **eight pixels of non-zero basal
-area**. Below that the class falls to its name. Site-wide, the fraction of *tree* pixels carrying any
-basal area is reported as `canopy.coverage` and it varies enormously — 97 % at Sideling Hill, 85 %
-at Acadia, 32 % at Chesterfield Road, **8 % at Bixby Bridge** — which is exactly why the fallback
-had to exist rather than being a nicety.
+It is a **blend, not a threshold**, and that is the second version. The first picked the measured
+mix whenever a class had eight pixels of basal area and the class name otherwise, which is wrong in
+the middle: at Bixby Bridge the class "California Coastal Redwood Forest" cleared eight pixels and
+came out **12 % redwood**, because the twelve pixels that happened to carry data were bay laurel.
+The class name is data too — LANDFIRE named that community after its dominant tree — so the two
+sources are weighted by how much of the class was actually measured. With the blend, Bixby's mix is
+California live oak 58 %, redwood 33 %, California laurel 7 %.
+
+`f` varies enormously and is reported per site as `canopy.coverage`: 97 % at Sideling Hill, 85 % at
+Acadia, 32 % at Chesterfield Road, **8 % at Bixby Bridge**, 0 % at Frederick. At the top of that
+range the answer is the measured plot data; at the bottom it is LANDFIRE's class name; in between it
+is both, in proportion.
 
 ---
 
@@ -114,8 +120,8 @@ climate  1352 mm/yr, Jun–Aug 22 % of it
    5.0%  California Northern Coastal Grassland              Herb   Perennial graminoid grassland
    2.6%  California Ruderal Grassland and Meadow            Herb   Annual Graminoid/Forb
    2.6%  Mediterranean California Northern Coastal Dune     Sparse Sparsely vegetated
-canopy   8 % of tree pixels carry basal area (8/45 rasters)
-         California laurel 48 %, California live oak 28 %, Douglas-fir 6 %, redwood 6 %
+canopy   8 % of tree pixels carry basal area (8/45 rasters), so the mix is mostly the class names
+         California live oak 58 %, redwood 33 %, California laurel 7 %
 ground   mixed_scrub 29 %, broadleaf_evergreen_litter 17 %, water 15 %, conifer_duff 12 %
 climate  828 mm/yr, Jun–Aug 0.2 % of it
 ```
@@ -223,6 +229,14 @@ printed mix: "pine" expands to Pinus (54 species) *and* Araucaria, Podocarpus an
 corridor listed `pine 0 %` twice; and the single FIA species "myrtle of the river" makes "river" a
 tree group, which put a Calyptranthes in a Maryland oak wood. A group word now needs three species
 and resolves to the one genus with the most of them.
+
+**"Live oak" means a tree in Georgia.** Matching a class name against FIA's common names is a
+longest-phrase match, and "California Coastal Live Oak Woodland and Savanna" matches the two words
+*live oak* — which FIA files as *Quercus virginiana*, the southern live oak, 4000 km away. FIA also
+has *California live oak* (*Quercus agrifolia*), whose name is the matched phrase plus a word that
+is already in the class name. A longer common name now wins when every extra word in it appears in
+the class name too. The genus and the silhouette were right either way; the species printed in the
+manifest was not, and a manifest nobody can trust at the species level is not worth writing.
 
 **LANDFIRE's ImageServer does not publish its raster attribute table.** `.../ImageServer/rasterAttributeTable`
 returns `{}` and `/legend` gives labels with no values against them, so a corridor is a histogram of

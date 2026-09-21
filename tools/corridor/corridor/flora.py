@@ -386,6 +386,25 @@ def fhp_species(frame: Frame, corridor: Polygon, grid: dict, cache: Path) -> dic
     return {"arrays": arrays, "requested": len(want), "year": FHP_YEAR}
 
 
+def _refine(phrase: str, context: set[str], exact: dict) -> dict | None:
+    """Upgrade a matched phrase to the more specific FIA species the class name is pointing at.
+
+    "California Coastal Live Oak Woodland and Savanna" matches the two words "live oak", and FIA's
+    "live oak" is *Quercus virginiana* — a southern live oak, 4000 km from Big Sur. FIA also has
+    "California live oak" (*Quercus agrifolia*), whose name is the matched phrase plus a word that
+    is already in the class name. So a longer common name wins when every extra word in it appears
+    in the class name too. Genus and silhouette were right either way; the printed species was not.
+    """
+    best, best_extra = None, 0
+    for key, rec in exact.items():
+        if phrase not in key or key == phrase:
+            continue
+        extra = [w for w in key.split() if w not in phrase.split()]
+        if extra and all(w in context for w in extra) and len(extra) > best_extra:
+            best, best_extra = rec, len(extra)
+    return best
+
+
 def species_from_name(name: str, exact: dict, group: dict) -> list[dict]:
     """Read an EVT class name as species, using FIA's vocabulary as the dictionary.
 
@@ -395,13 +414,14 @@ def species_from_name(name: str, exact: dict, group: dict) -> list[dict]:
     the fallback where the basal-area rasters are empty, not the primary source.
     """
     toks = _norm(name.replace("-", " ")).split()
+    context = set(toks)
     out: list[dict] = []
     i = 0
     while i < len(toks):
         for span in (3, 2, 1):
             phrase = " ".join(toks[i : i + span])
             if phrase in exact:
-                out.append({**exact[phrase], "match": "species"})
+                out.append({**(_refine(phrase, context, exact) or exact[phrase]), "match": "species"})
                 i += span
                 break
             if span == 1 and phrase in group:
@@ -588,21 +608,41 @@ def for_site(site: dict, frame: Frame, corridor: Polygon, cache: Path, out_dir: 
                 if live.any():
                     height_num[key] += float((w[live] * hh[live]).sum())
                     height_den[key] += float(w[live].sum())
+        named = species_from_name(c["name"], exact, group)
+        # weight by position in the name: "Spruce-Fir" is spruce first, and a bare group word
+        # stands for a genus rather than a species, so it is worth less than a named species
+        from_name: dict[str, float] = defaultdict(float)
+        for rank, rec in enumerate(named):
+            from_name[note(rec)] += (1.0 if rec["match"] == "species" else 0.6) / (1 + rank)
+
+        px_class = int(sel.sum())
         px_with_ba = int((ba_any & sel).sum())
-        if px_with_ba >= 8 and measured:
-            c["species"] = _mix(measured)
-            c["species_from"] = "fhp"
-            c["species_px"] = px_with_ba
-        else:
-            named = species_from_name(c["name"], exact, group)
-            # weight by position in the name: "Spruce-Fir" is spruce first, and a bare group word
-            # stands for a genus rather than a species, so it is worth less than a named species
-            w: dict[str, float] = defaultdict(float)
-            for rank, rec in enumerate(named):
-                w[note(rec)] += (1.0 if rec["match"] == "species" else 0.6) / (1 + rank)
-            c["species"] = _mix(w)
-            c["species_from"] = "evt_name" if named else "none"
-            c["species_px"] = px_with_ba
+        # How much of this class the basal-area rasters actually cover. At Sideling Hill it is 0.97
+        # and the measured mix is the answer; at Bixby Bridge it is 0.05 and a class-level estimate
+        # rests on a dozen pixels, which is how "California Coastal Redwood Forest" came out with
+        # 12 % redwood in it. The class NAME is data too — LANDFIRE named that community after its
+        # dominant tree — so the two are BLENDED by how much of the class was measured, rather than
+        # one being chosen over the other by a threshold.
+        frac = (px_with_ba / px_class) if px_class else 0.0
+        if px_with_ba < 8:
+            frac = 0.0
+        merged: dict[str, float] = defaultdict(float)
+        if measured and frac > 0:
+            total_m = sum(measured.values())
+            for k, v in measured.items():
+                merged[k] += frac * v / total_m
+        if from_name and frac < 1:
+            total_n = sum(from_name.values())
+            for k, v in from_name.items():
+                merged[k] += (1 - frac) * v / total_n
+        if not merged and measured:  # named nothing and the rasters are all we have
+            total_m = sum(measured.values())
+            for k, v in measured.items():
+                merged[k] = v / total_m
+        c["species"] = _mix(merged)
+        c["species_from"] = "fhp" if frac >= 0.999 else ("evt_name" if frac <= 0 else "fhp+evt_name")
+        c["species_px"] = px_with_ba
+        c["species_px_total"] = px_class
         for s in c["species"]:
             site_weights[s["key"]] += s["weight"] * c["share"]
 

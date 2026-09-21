@@ -20,7 +20,9 @@ npm-debug.log*
 .claude/
 
 # ad-hoc dev probe scripts (throwaway; kept local, never committed)
-probes/
+probes/*
+!probes/*.mjs
+!probes/*.py
 _*.mjs
 shots/
 shots/

@@ -131,18 +131,25 @@ def _norm(s: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", s.lower()).strip()
 
 
-def ref_species(cache: Path) -> tuple[dict[str, dict], dict[str, list[dict]]]:
+def ref_species(cache: Path) -> tuple[dict[str, dict], dict[str, dict]]:
     """FIA's REF_SPECIES: the species vocabulary, with genus and the softwood/hardwood split.
 
-    Two indexes come out of it: exact common name ("red spruce" -> Picea rubens, softwood), and the
-    LAST word of every common name ("spruce" -> every Picea, "oak" -> every Quercus). The second is
-    what lets an EVT class NAME be read as species without anybody typing a regional palette:
-    "Acadian Low-Elevation Spruce-Fir Forest" tokenises to Picea + Abies because FIA says those are
-    the trees called spruce and fir.
+    Two indexes come out of it. Exact common name — "red spruce" -> Picea rubens, softwood. And the
+    LAST word of every common name as a GROUP: "spruce" -> Picea, "oak" -> Quercus, because FIA
+    files 10 spruces under Picea and 74 oaks under Quercus. That second index is what lets an EVT
+    class NAME be read as species without anybody typing a regional palette — "Acadian Low-Elevation
+    Spruce-Fir Forest" tokenises to Picea and Abies because FIA says those are the trees called
+    spruce and fir.
+
+    A group word resolves to ONE genus, the one with the most species under it, and only if at
+    least three species share the word. Both rules are there because the naive version was wrong in
+    two visible ways: "pine" expanded to Pinus *and* Araucaria and Casuarina (4 ornamentals against
+    54 real pines) so a corridor's mix listed `pine 0%` twice, and the single species "myrtle of the
+    river" made the word "river" a tree group, which put a Calyptranthes in a Maryland oak wood.
     """
     raw = _get(REF_SPECIES, None, cache / "fia", ".csv")
     exact: dict[str, dict] = {}
-    group: dict[str, list[dict]] = defaultdict(list)
+    words: dict[str, list[dict]] = defaultdict(list)
     for r in csv.DictReader(io.StringIO(raw.decode("utf-8-sig"))):
         # SPCD 298/299/998/999 are FIA's "unknown live tree / dead hardwood" placeholders, filed
         # under the genus "Tree". They match the word "hardwood" in an EVT class name and would
@@ -160,8 +167,22 @@ def ref_species(cache: Path) -> tuple[dict[str, dict], dict[str, list[dict]]]:
         n = _norm(rec["common"])
         exact.setdefault(n, rec)
         if n:
-            group[n.split()[-1]].append(rec)
-    return exact, dict(group)
+            words[n.split()[-1]].append(rec)
+    group: dict[str, dict] = {}
+    for word, recs in words.items():
+        if len(recs) < 3:
+            continue
+        by_genus: dict[str, list[dict]] = defaultdict(list)
+        for r in recs:
+            by_genus[r["genus"]].append(r)
+        genus, members = max(by_genus.items(), key=lambda kv: len(kv[1]))
+        if len(members) < 3:
+            continue
+        group[word] = {
+            "spcd": None, "common": word, "scientific": f"{genus} spp.", "genus": genus,
+            "softwood": sum(m["softwood"] for m in members) * 2 > len(members), "woodland": False,
+        }
+    return exact, group
 
 
 # --------------------------------------------------------------------------------------------
@@ -384,12 +405,7 @@ def species_from_name(name: str, exact: dict, group: dict) -> list[dict]:
                 i += span
                 break
             if span == 1 and phrase in group:
-                # every FIA species filed under this word, one entry per genus (the commonest first)
-                seen: dict[str, dict] = {}
-                for rec in group[phrase]:
-                    seen.setdefault(rec["genus"], rec)
-                for rec in seen.values():
-                    out.append({**rec, "common": phrase, "match": "group"})
+                out.append({**group[phrase], "match": "group"})
                 i += 1
                 break
         else:
@@ -482,8 +498,10 @@ def _mix(weights: dict[str, float], limit: int = 8) -> list[dict]:
     total = sum(weights.values())
     if total <= 0:
         return []
-    ranked = sorted(weights.items(), key=lambda kv: -kv[1])[:limit]
-    scale = sum(w for _, w in ranked)
+    # a species that rounds to nothing is noise in every consumer: it shows up in the printed mix
+    # as `pine 0%` and it can still win a draw. Cut at a thousandth of the stand.
+    ranked = [kv for kv in sorted(weights.items(), key=lambda kv: -kv[1])[:limit] if kv[1] / total >= 0.001]
+    scale = sum(w for _, w in ranked) or 1.0
     return [{"key": k, "weight": round(w / scale, 4)} for k, w in ranked]
 
 

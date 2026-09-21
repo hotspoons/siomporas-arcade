@@ -181,6 +181,36 @@ Frederick is the fallback working: an interchange in a town has almost no forest
 has are street trees. "Oak, mown grass" is the right answer and it came out of the chain rather than
 out of a default.
 
+### Before and after, counted
+
+`probes/corridor-flora.mjs` replays the old rule — canopy height and a hash over five fixed hardwood
+presets — over the SAME measured trees, so this is the change and not a description of it.
+
+| site | trees | before | after | evergreen |
+|---|---|---|---|---|
+| acadia-ocean-dr | 30 655 | Ash Small 32 %, Oak Medium 23 %, Aspen Medium 23 %, Ash Medium 22 % | **spruce 39 %**, hardwood 24 %, **birch 21 %**, hardwood-small 8 %, **fir 5 %**, aspen 3 % | 0 % → **44 %** |
+| bixby-bridge-ca1 | 5 774 | Ash Small 56 %, Oak Medium 15 %, Aspen Medium 14 %, Ash Medium 13 % | **live-oak 45 %**, **redwood 25 %**, oak 17 %, **douglas-fir 6 %**, willow 5 %, pine 2 % | 0 % → **79 %** |
+| chesterfield-rd | 25 329 | Oak Medium 37 %, Oak Large 22 %, Aspen Medium 16 %, Ash Medium 15 %, Ash Small 11 % | oak 38 %, oak-large 31 %, hardwood 28 %, hardwood-small 3 % | 0 % → 0 % |
+| sideling-i68 | 36 786 | Oak Medium 30 %, Aspen Medium 23 %, Ash Medium 23 %, Ash Small 16 % | oak 52 %, hardwood 36 %, oak-large 9 %, birch 1 %, fir 1 %, pine 1 % | 0 % → 2 % |
+
+Chesterfield Road is the control and it is supposed to barely move: it was a mid-Atlantic oak wood
+before and it is a mid-Atlantic oak wood now. What changed there is that it is white oak and sweetgum
+*because the data says so*, at 28.1 m and 27.4 m measured out of its own lidar, rather than by
+coincidence. Sideling Hill, the best-measured site in the set at 97 % basal-area coverage, comes out
+as an Appalachian chestnut-oak wood with sugar maple and hickory in it.
+
+And the seasons, read back off the grass shader's own uniforms:
+
+| site | winter | spring | summer (September) | autumn |
+|---|---|---|---|---|
+| chesterfield-rd | dry 1.00 `#877a58` | 0.12 `#5f9a3a` | 0.45 `#4c6b2e` | 0.85 `#77803f` |
+| bixby-bridge-ca1 | **0.07 `#6b9343`** | 0.12 `#5f9a3a` | **1.00 `#9e915a`** | 0.85 `#77803f` |
+| acadia-ocean-dr | 1.00 `#897c58` | 0.64 `#85984d` | 0.45 `#4c6b2e` | 1.00 `#9e9158` |
+
+Chesterfield's row is the four palettes unchanged, to the digit — the reference site cannot move,
+which is the regression guard. Bixby Bridge is straw in September and green in February. Acadia is
+brown in April, because in Maine it is.
+
 ---
 
 ## 4. Why these sources, and the traps in them
@@ -348,8 +378,10 @@ one is a tanoak" arithmetic over two measurements instead of a rule about redwoo
   is derived from ez-tree's presets by moving where branches start up the trunk, their length against
   the leader, and which way the growth force pulls their tips; the comment on each says which real
   tree the numbers are shaped after.
-- `trees.ts` — which silhouettes to build (the six heaviest by area-weighted basal area), and a
-  stable per-tree draw from the pixel's mix weighted by height affinity.
+- `trees.ts` — which silhouettes to build (the six heaviest by area-weighted basal area, asked at
+  the corridor's own 20th / 55th / 90th percentile canopy heights so both the understorey and the
+  emergent builds of a species exist), and a stable per-tree draw from the pixel's mix weighted by
+  height affinity.
 - `groundcover.ts` — eighteen ground classes with a blade style, a blade count and a floor texture
   each; `floorTexture(kind)` in place of one canvas of oak-hickory litter.
 - `season.ts` — `siteLook(season, flora)`: the reference palette shifted by the curing difference.

@@ -19,7 +19,12 @@
       <div id="modes" class="row seg">
         <button data-mode="areas">1 · areas</button>
         <button data-mode="place">2 · place</button>
+        <button data-mode="grow">3 · grow</button>
+        <button data-mode="structures">4 · structures</button>
+      </div>
+      <div class="row seg">
         <button id="save">save</button>
+        <button id="preview" class="primary">preview (V)</button>
         <span id="dirty" class="warn"></span>
       </div>
       <section id="layers" class="row">
@@ -28,15 +33,19 @@
         <label><input type="checkbox" data-layer="placements" checked /> placements</label>
         <label><input type="checkbox" data-layer="spine" checked /> spine</label>
         <label><input type="checkbox" data-layer="structures" checked /> structures</label>
+        <label><input type="checkbox" data-layer="authored" checked /> authored</label>
         <label><input type="checkbox" data-layer="trees" /> trees</label>
         <label><input type="checkbox" data-layer="horizon" /> horizon</label>
       </section>
       <section id="body"></section>
       <footer>
-        drag / wheel to orbit · T top · F fly to selection<br />
+        drag / wheel to orbit · T top · F fly to selection · V preview<br />
         <b>areas</b>: N draw, click to add a vertex, click the first vertex or Enter to close, Esc cancel, Del remove, drag a handle to nudge<br />
         <b>place</b>: pick an asset then click the ground, drag to move, Q/E or shift+wheel to rotate, [ ] to scale, Del remove<br />
-        Ctrl+S saves the active mode's file.
+        <b>grow</b>: G generates from the bake's footprints; editing a generated item locks it and
+        deleting one is remembered, so regenerating keeps your fixes<br />
+        <b>structures</b>: N then click the road twice (start, then end), drag an end sphere to move it, Q/E turn a bridge, Del remove<br />
+        Ctrl+S saves the active mode's file; preview saves them all and rebuilds.
       </footer>
     </aside>
     <div id="status">loading…</div>

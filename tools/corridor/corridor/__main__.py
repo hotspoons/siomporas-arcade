@@ -106,6 +106,7 @@ def fetch_site(site: dict, half_length: float, half_width: float, lidar_half_wid
             if f != 1.0:
                 pts["z"] = pts["z"] * f
             meta["z_factor"] = f
+        meta["classification"] = lidar.classification_quality(pts)
         r = lidar.rasters(pts, lbbox, frame, lidar_corridor, ldir)
         prof = lidar.profile(line, r["dtm"], r["chm"], r["transform"], r["pts"])
         (out / "profile.json").write_text(json.dumps(prof))

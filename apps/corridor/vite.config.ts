@@ -34,7 +34,7 @@ function serveBake(): Plugin {
         const file = resolve(roots[prefix], rel)
         // DEV ONLY: the editor writes authored JSON back beside the bake — adjustments.json,
         // placements.json — never anything the bake itself produced. Whitelisted by name.
-        if (req.method === 'PUT' && prefix === '/sites/' && /^[a-z0-9-]+\/(adjustments|placements)\.json$/.test(rel.replaceAll('\\', '/'))) {
+        if (req.method === 'PUT' && prefix === '/sites/' && /^[a-z0-9-]+\/(adjustments|placements|structures)\.json$/.test(rel.replaceAll('\\', '/'))) {
           const chunks: Buffer[] = []
           req.on('data', (c) => chunks.push(c))
           req.on('end', () => {

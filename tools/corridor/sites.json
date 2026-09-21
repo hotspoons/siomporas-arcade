@@ -1,242 +1,370 @@
 [
-  {
+ {
+  "lat": 39.699936,
+  "lon": -78.297794,
+  "photos": [
+   {
+    "file": "PXL_20260920_140633989.jpg",
     "lat": 39.699936,
     "lon": -78.297794,
-    "photos": [
-      {
-        "file": "PXL_20260920_140633989.jpg",
-        "lat": 39.699936,
-        "lon": -78.297794,
-        "alt_m": 410.55,
-        "heading_deg": 353.0,
-        "taken": "2026:09:20 10:06:33",
-        "size": [
-          4000,
-          3000
-        ]
-      }
-    ],
-    "slug": "sideling-i68",
-    "heading_deg": 353.0
-  },
-  {
+    "alt_m": 410.55,
+    "heading_deg": 353.0,
+    "taken": "2026:09:20 10:06:33",
+    "size": [
+     4000,
+     3000
+    ]
+   }
+  ],
+  "slug": "sideling-i68",
+  "heading_deg": 353.0
+ },
+ {
+  "lat": 39.4682,
+  "lon": -77.523269,
+  "photos": [
+   {
+    "file": "PXL_20260920_152504055.MP.jpg",
     "lat": 39.4682,
     "lon": -77.523269,
-    "photos": [
-      {
-        "file": "PXL_20260920_152504055.MP.jpg",
-        "lat": 39.4682,
-        "lon": -77.523269,
-        "alt_m": 191.73,
-        "heading_deg": 51.0,
-        "taken": "2026:09:20 11:25:04",
-        "size": [
-          4000,
-          3000
-        ]
-      },
-      {
-        "file": "PXL_20260920_152628694.jpg",
-        "lat": 39.4682,
-        "lon": -77.523269,
-        "alt_m": 191.73,
-        "heading_deg": 36.0,
-        "taken": "2026:09:20 11:26:28",
-        "size": [
-          4000,
-          3000
-        ]
-      },
-      {
-        "file": "PXL_20260920_152629809.jpg",
-        "lat": 39.4682,
-        "lon": -77.523269,
-        "alt_m": 191.73,
-        "heading_deg": 39.0,
-        "taken": "2026:09:20 11:26:29",
-        "size": [
-          4000,
-          3000
-        ]
-      }
-    ],
-    "slug": "south-mountain-i70",
-    "heading_deg": 51.0
-  },
-  {
+    "alt_m": 191.73,
+    "heading_deg": 51.0,
+    "taken": "2026:09:20 11:25:04",
+    "size": [
+     4000,
+     3000
+    ]
+   },
+   {
+    "file": "PXL_20260920_152628694.jpg",
+    "lat": 39.4682,
+    "lon": -77.523269,
+    "alt_m": 191.73,
+    "heading_deg": 36.0,
+    "taken": "2026:09:20 11:26:28",
+    "size": [
+     4000,
+     3000
+    ]
+   },
+   {
+    "file": "PXL_20260920_152629809.jpg",
+    "lat": 39.4682,
+    "lon": -77.523269,
+    "alt_m": 191.73,
+    "heading_deg": 39.0,
+    "taken": "2026:09:20 11:26:29",
+    "size": [
+     4000,
+     3000
+    ]
+   }
+  ],
+  "slug": "south-mountain-i70",
+  "heading_deg": 51.0
+ },
+ {
+  "lat": 39.422592,
+  "lon": -77.486522,
+  "photos": [
+   {
+    "file": "PXL_20260920_152800422.jpg",
     "lat": 39.422592,
     "lon": -77.486522,
-    "photos": [
-      {
-        "file": "PXL_20260920_152800422.jpg",
-        "lat": 39.422592,
-        "lon": -77.486522,
-        "alt_m": 174.45,
-        "heading_deg": 78.0,
-        "taken": "2026:09:20 11:28:00",
-        "size": [
-          4000,
-          3000
-        ]
-      },
-      {
-        "file": "PXL_20260920_152855957.jpg",
-        "lat": 39.422592,
-        "lon": -77.486522,
-        "alt_m": 174.45,
-        "heading_deg": 66.0,
-        "taken": "2026:09:20 11:28:55",
-        "size": [
-          4000,
-          3000
-        ]
-      },
-      {
-        "file": "PXL_20260920_152907670.jpg",
-        "lat": 39.422592,
-        "lon": -77.486522,
-        "alt_m": 174.45,
-        "heading_deg": 81.0,
-        "taken": "2026:09:20 11:29:07",
-        "size": [
-          4000,
-          3000
-        ]
-      }
-    ],
-    "slug": "braddock-i70",
-    "heading_deg": 78.0
-  },
-  {
+    "alt_m": 174.45,
+    "heading_deg": 78.0,
+    "taken": "2026:09:20 11:28:00",
+    "size": [
+     4000,
+     3000
+    ]
+   },
+   {
+    "file": "PXL_20260920_152855957.jpg",
+    "lat": 39.422592,
+    "lon": -77.486522,
+    "alt_m": 174.45,
+    "heading_deg": 66.0,
+    "taken": "2026:09:20 11:28:55",
+    "size": [
+     4000,
+     3000
+    ]
+   },
+   {
+    "file": "PXL_20260920_152907670.jpg",
+    "lat": 39.422592,
+    "lon": -77.486522,
+    "alt_m": 174.45,
+    "heading_deg": 81.0,
+    "taken": "2026:09:20 11:29:07",
+    "size": [
+     4000,
+     3000
+    ]
+   }
+  ],
+  "slug": "braddock-i70",
+  "heading_deg": 78.0
+ },
+ {
+  "lat": 39.394894,
+  "lon": -77.418378,
+  "photos": [
+   {
+    "file": "PXL_20260920_153326567.jpg",
     "lat": 39.394894,
     "lon": -77.418378,
-    "photos": [
-      {
-        "file": "PXL_20260920_153326567.jpg",
-        "lat": 39.394894,
-        "lon": -77.418378,
-        "alt_m": 79.23,
-        "heading_deg": 56.0,
-        "taken": "2026:09:20 11:33:26",
-        "size": [
-          4000,
-          3000
-        ]
-      }
-    ],
-    "slug": "frederick-i70",
-    "heading_deg": 56.0
-  },
-  {
+    "alt_m": 79.23,
+    "heading_deg": 56.0,
+    "taken": "2026:09:20 11:33:26",
+    "size": [
+     4000,
+     3000
+    ]
+   }
+  ],
+  "slug": "frederick-i70",
+  "heading_deg": 56.0
+ },
+ {
+  "lat": 39.364661,
+  "lon": -77.400114,
+  "photos": [
+   {
+    "file": "PXL_20260920_153345353.jpg",
     "lat": 39.364661,
     "lon": -77.400114,
-    "photos": [
-      {
-        "file": "PXL_20260920_153345353.jpg",
-        "lat": 39.364661,
-        "lon": -77.400114,
-        "alt_m": 66.97,
-        "heading_deg": 84.0,
-        "taken": "2026:09:20 11:33:45",
-        "size": [
-          4000,
-          3000
-        ]
-      }
-    ],
-    "slug": "frederick-i270",
-    "heading_deg": 84.0
-  },
-  {
+    "alt_m": 66.97,
+    "heading_deg": 84.0,
+    "taken": "2026:09:20 11:33:45",
+    "size": [
+     4000,
+     3000
+    ]
+   }
+  ],
+  "slug": "frederick-i270",
+  "heading_deg": 84.0
+ },
+ {
+  "lat": 39.181842,
+  "lon": -77.252419,
+  "photos": [
+   {
+    "file": "PXL_20260920_154700699.jpg",
     "lat": 39.181842,
     "lon": -77.252419,
-    "photos": [
-      {
-        "file": "PXL_20260920_154700699.jpg",
-        "lat": 39.181842,
-        "lon": -77.252419,
-        "alt_m": 129.15,
-        "heading_deg": 84.0,
-        "taken": "2026:09:20 11:47:00",
-        "size": [
-          4000,
-          3000
-        ]
-      }
-    ],
-    "slug": "clarksburg-i270",
-    "heading_deg": 84.0
-  },
-  {
+    "alt_m": 129.15,
+    "heading_deg": 84.0,
+    "taken": "2026:09:20 11:47:00",
+    "size": [
+     4000,
+     3000
+    ]
+   }
+  ],
+  "slug": "clarksburg-i270",
+  "heading_deg": 84.0
+ },
+ {
+  "lat": 39.136908,
+  "lon": -77.131681,
+  "photos": [
+   {
+    "file": "PXL_20260920_155606876.jpg",
     "lat": 39.136908,
     "lon": -77.131681,
-    "photos": [
-      {
-        "file": "PXL_20260920_155606876.jpg",
-        "lat": 39.136908,
-        "lon": -77.131681,
-        "alt_m": 98.3,
-        "heading_deg": 82.0,
-        "taken": "2026:09:20 11:56:06",
-        "size": [
-          4000,
-          3000
-        ]
-      }
-    ],
-    "slug": "shady-grove-icc",
-    "heading_deg": 82.0
-  },
-  {
+    "alt_m": 98.3,
+    "heading_deg": 82.0,
+    "taken": "2026:09:20 11:56:06",
+    "size": [
+     4000,
+     3000
+    ]
+   }
+  ],
+  "slug": "shady-grove-icc",
+  "heading_deg": 82.0
+ },
+ {
+  "lat": 39.070586,
+  "lon": -76.911544,
+  "photos": [
+   {
+    "file": "PXL_20260920_160745177.jpg",
     "lat": 39.070586,
     "lon": -76.911544,
-    "photos": [
-      {
-        "file": "PXL_20260920_160745177.jpg",
-        "lat": 39.070586,
-        "lon": -76.911544,
-        "alt_m": 53.15,
-        "heading_deg": 59.0,
-        "taken": "2026:09:20 12:07:45",
-        "size": [
-          4000,
-          3000
-        ]
-      }
-    ],
-    "slug": "burtonsville-icc",
-    "heading_deg": 59.0
-  },
-  {
+    "alt_m": 53.15,
+    "heading_deg": 59.0,
+    "taken": "2026:09:20 12:07:45",
+    "size": [
+     4000,
+     3000
+    ]
+   }
+  ],
+  "slug": "burtonsville-icc",
+  "heading_deg": 59.0
+ },
+ {
+  "lat": 39.013133,
+  "lon": -76.751944,
+  "photos": [
+   {
+    "file": "PXL_20260920_162822073.jpg",
     "lat": 39.013133,
     "lon": -76.751944,
-    "photos": [
-      {
-        "file": "PXL_20260920_162822073.jpg",
-        "lat": 39.013133,
-        "lon": -76.751944,
-        "alt_m": 8.56,
-        "heading_deg": 82.0,
-        "taken": "2026:09:20 12:28:22",
-        "size": [
-          4000,
-          3000
-        ]
-      },
-      {
-        "file": "PXL_20260920_162839918.MP.jpg",
-        "lat": 39.013133,
-        "lon": -76.751944,
-        "alt_m": 7.36,
-        "heading_deg": 88.0,
-        "taken": "2026:09:20 12:28:39",
-        "size": [
-          4000,
-          3000
-        ]
-      }
-    ],
-    "slug": "bowie-racetrack-rd",
-    "heading_deg": 82.0
-  }
+    "alt_m": 8.56,
+    "heading_deg": 82.0,
+    "taken": "2026:09:20 12:28:22",
+    "size": [
+     4000,
+     3000
+    ]
+   },
+   {
+    "file": "PXL_20260920_162839918.MP.jpg",
+    "lat": 39.013133,
+    "lon": -76.751944,
+    "alt_m": 7.36,
+    "heading_deg": 88.0,
+    "taken": "2026:09:20 12:28:39",
+    "size": [
+     4000,
+     3000
+    ]
+   }
+  ],
+  "slug": "bowie-racetrack-rd",
+  "heading_deg": 82.0
+ },
+ {
+  "slug": "bacon-ridge-rd",
+  "lat": 39.038926,
+  "lon": -76.6183,
+  "photos": [],
+  "heading_deg": null,
+  "note": "gaussworks brief: Gambrills/Crofton/Crownsville/Davidsonville backroads"
+ },
+ {
+  "slug": "bell-branch-rd",
+  "lat": 38.981975,
+  "lon": -76.653359,
+  "photos": [],
+  "heading_deg": null,
+  "note": "gaussworks brief: Gambrills/Crofton/Crownsville/Davidsonville backroads"
+ },
+ {
+  "slug": "chesterfield-rd",
+  "lat": 38.998792,
+  "lon": -76.605292,
+  "photos": [],
+  "heading_deg": null,
+  "note": "gaussworks brief: Gambrills/Crofton/Crownsville/Davidsonville backroads"
+ },
+ {
+  "slug": "crownsville-rd",
+  "lat": 39.008201,
+  "lon": -76.5929,
+  "photos": [],
+  "heading_deg": null,
+  "note": "gaussworks brief: Gambrills/Crofton/Crownsville/Davidsonville backroads"
+ },
+ {
+  "slug": "hawkins-rd",
+  "lat": 39.010483,
+  "lon": -76.605067,
+  "photos": [],
+  "heading_deg": null,
+  "note": "gaussworks brief: Gambrills/Crofton/Crownsville/Davidsonville backroads"
+ },
+ {
+  "slug": "patuxent-river-rd",
+  "lat": 38.939008,
+  "lon": -76.678069,
+  "photos": [],
+  "heading_deg": null,
+  "note": "gaussworks brief: Gambrills/Crofton/Crownsville/Davidsonville backroads"
+ },
+ {
+  "slug": "rossback-rd",
+  "lat": 38.962826,
+  "lon": -76.658618,
+  "photos": [],
+  "heading_deg": null,
+  "note": "gaussworks brief: Gambrills/Crofton/Crownsville/Davidsonville backroads"
+ },
+ {
+  "slug": "rutland-rd",
+  "lat": 38.968022,
+  "lon": -76.634936,
+  "photos": [],
+  "heading_deg": null,
+  "note": "gaussworks brief: Gambrills/Crofton/Crownsville/Davidsonville backroads"
+ },
+ {
+  "slug": "st-stephens-church-rd",
+  "lat": 39.021067,
+  "lon": -76.642909,
+  "photos": [],
+  "heading_deg": null,
+  "note": "gaussworks brief: Gambrills/Crofton/Crownsville/Davidsonville backroads"
+ },
+ {
+  "slug": "underwood-rd",
+  "lat": 39.009282,
+  "lon": -76.664297,
+  "photos": [],
+  "heading_deg": null,
+  "note": "gaussworks brief: Gambrills/Crofton/Crownsville/Davidsonville backroads"
+ },
+ {
+  "slug": "waterbury-rd",
+  "lat": 39.0476,
+  "lon": -76.624495,
+  "photos": [],
+  "heading_deg": null,
+  "note": "gaussworks brief: Gambrills/Crofton/Crownsville/Davidsonville backroads"
+ },
+ {
+  "slug": "bonnie-branch-rd",
+  "lat": 39.2322538,
+  "lon": -76.785061,
+  "photos": [],
+  "heading_deg": null,
+  "note": "Ellicott City/Ilchester: falls and rapids down the fall line to the Patapsco"
+ },
+ {
+  "slug": "ragged-point-ca1",
+  "lat": 35.7595645,
+  "lon": -121.3268269,
+  "photos": [],
+  "heading_deg": null,
+  "note": "Highway 1, San Luis Obispo County coast"
+ },
+ {
+  "slug": "bixby-bridge-ca1",
+  "lat": 36.3715,
+  "lon": -121.9018,
+  "photos": [],
+  "heading_deg": null,
+  "note": "Highway 1, Big Sur"
+ },
+ {
+  "slug": "ecola-or",
+  "lat": 45.9197,
+  "lon": -123.975,
+  "photos": [],
+  "heading_deg": null,
+  "note": "Ecola State Park Road, Cannon Beach (Goonies country)"
+ },
+ {
+  "slug": "acadia-ocean-dr",
+  "lat": 44.3206,
+  "lon": -68.1885,
+  "photos": [],
+  "heading_deg": null,
+  "note": "Park Loop Road / Ocean Drive, Mount Desert Island"
+ }
 ]

@@ -4,6 +4,7 @@
 // field shows up close — so the switch at the LOD boundary is a change of technique, not of
 // species. This is what the coast game does for its roadside sprites, brought to the corridor.
 import * as THREE from 'three'
+import * as T from './tuning'
 
 export interface ImpostorSource {
   branches: THREE.Mesh
@@ -42,13 +43,14 @@ export class Impostors {
     this.material = new THREE.ShaderMaterial({
       // merge() clones uniform values and cannot clone a render-target texture (it silently becomes
       // null and every quad is discarded); the atlas is attached after the merge instead
-      uniforms: { ...THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { cols: { value: COLS }, yaws: { value: YAWS }, rows: { value: rows } }]), atlas: { value: this.target.texture } },
+      uniforms: { ...THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { cols: { value: COLS }, yaws: { value: YAWS }, rows: { value: rows }, flatPitch: { value: T.IMPOSTOR_FLAT_PITCH } }]), atlas: { value: this.target.texture } },
       vertexShader: /* glsl */ `
         attribute float aVariant;
         attribute float aYaw;
         uniform float cols;
         uniform float yaws;
         uniform float rows;
+        uniform float flatPitch;
         varying vec2 vUv;
         #include <common>
         #include <fog_pars_vertex>
@@ -63,7 +65,7 @@ export class Impostors {
           vec3 right = normalize(vec3(cos(ang), 0.0, -sin(ang)));
           vec3 world;
           float k;
-          if (pitch > 0.62) {
+          if (pitch > flatPitch) {
             // steep view: a vertical card would fan out over everything behind it (the road,
             // seen from a hill, vanished under canopy). Lay the card FLAT at crown height and
             // show the top-down cell instead.
@@ -178,6 +180,11 @@ export class Impostors {
     this.mesh.setMatrixAt(i, m)
     this.aVariant.setX(i, variant)
     this.aYaw.setX(i, yaw)
+  }
+
+  /** Push the current knob values into the shader. */
+  tick() {
+    this.material.uniforms.flatPitch.value = T.IMPOSTOR_FLAT_PITCH
   }
 
   commit(count: number) {

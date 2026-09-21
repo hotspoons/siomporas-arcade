@@ -4,6 +4,10 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { buildSite, describe, type Site } from './scene'
 import { Car, type CarInput } from './car'
 import { FlyControls } from './fly'
+import { MiniMap } from './minimap'
+import { TunePanel } from '@apex/engine/app/TunePanel'
+import * as T from './tuning'
+import { TUNE_TABS } from './tuning'
 import { fetchJSON, type IndexEntry, type Manifest, type Structure, type Crossing } from './site'
 import { LOOK, SEASONS, type Season } from './season'
 
@@ -27,9 +31,11 @@ sun.position.set(-3000, 4000, 2500)
 scene.add(sun)
 
 let site: Site | null = null
+let minimap: MiniMap | null = null
+const panel = $('#panel')
 let dragging = false, lastX = 0, lastY = 0, downAt = 0
 // drive mode: a real car (stuntin dynamics) on the corridor strip, chase camera behind it
-const drive = { on: false, yaw: 0, pitch: 0, car: null as Car | null, input: { throttle: 0, brake: 0, steer: 0, handbrake: false } as CarInput, steerKey: 0 }
+const drive = { on: false, cockpit: false, yaw: 0, pitch: 0, car: null as Car | null, input: { throttle: 0, brake: 0, steer: 0, handbrake: false } as CarInput, steerKey: 0 }
 let fly: FlyControls | null = null
 
 function resize() {
@@ -54,7 +60,7 @@ async function loadIndex() {
     o.textContent = `${s.slug} — ${ident}, ${(s.length_m / 1000).toFixed(1)} km, ${s.structures} structures`
     sel.append(o)
   }
-  const want = location.hash.slice(1) || idx.sites[0]?.slug
+  const want = readStanceParam()?.site || location.hash.slice(1) || idx.sites[0]?.slug
   if (want) {
     sel.value = want
     await loadSite(want)
@@ -78,6 +84,8 @@ async function loadSite(slug: string) {
     site = null
   }
   if (drive.car) { scene.remove(drive.car.mesh); drive.car = null }
+  minimap?.dispose()
+  minimap = null
   status(`loading ${slug}…`)
   const manifest = await fetchJSON<Manifest>(`/sites/${slug}/web/manifest.json`)
   site = await buildSite(manifest, status, LITE, renderer, scene.fog as THREE.FogExp2, season)
@@ -87,7 +95,10 @@ async function loadSite(slug: string) {
   applyLayers()
   fillInfo(manifest)
   fly ??= new FlyControls(camera, orbit, canvas, (x, z) => site?.groundAt(x, z) ?? null)
-  toPhoto()
+  minimap = new MiniMap(document.body, manifest)
+  const st = readStanceParam()
+  if (st && st.site === slug) applyStance(st)
+  else toPhoto()
   status('')
 }
 
@@ -119,10 +130,13 @@ function fillInfo(m: Manifest) {
     .map((st, i) => `<tr class="struct" data-i="${i}"><td>${st.kind}</td><td>${describe(st)}</td></tr>`)
     .join('')
   const byRel = m.crossings.reduce<Record<string, number>>((a, c) => ((a[c.relation] = (a[c.relation] ?? 0) + 1), a), {})
-  const geo = m.geology.units
-    .slice(0, 6)
-    .map((u) => `<p><b>${u.strat_name}</b>${u.lith ? ` · ${u.lith}` : ''}${u.b_age ? ` · ${u.b_age}–${u.t_age} Ma` : ''}${u.descrip ? `<br>${u.descrip.slice(0, 220)}${u.descrip.length > 220 ? '…' : ''}` : ''}</p>`)
+  // geology: one line of formation names in the panel; the full Macrostrat text opens in a dialog
+  const geoShort = m.geology.units.slice(0, 4).map((u) => u.strat_name).filter(Boolean).join(' · ') || 'no named formations'
+  const geoFull = m.geology.units
+    .map((u) => `<p><b>${u.strat_name}</b>${u.lith ? ` · ${u.lith}` : ''}${u.b_age ? ` · ${u.b_age}–${u.t_age} Ma` : ''}${u.descrip ? `<br>${u.descrip}` : ''}</p>`)
     .join('')
+  const geo = `<p>${geoShort}${m.geology.units.length > 4 ? ` +${m.geology.units.length - 4}` : ''} <button class="geo-more" type="button">full text</button></p>
+    <dialog class="geo-dialog"><h2>geology along this corridor</h2>${geoFull || '<p>no named formations</p>'}<form method="dialog"><button>close</button></form></dialog>`
   info.innerHTML = `
     ${rows([
       ['road', ident],
@@ -135,6 +149,7 @@ function fillInfo(m: Manifest) {
     ])}
     <h2>structures (${m.structures.length})</h2><table>${structs || '<tr><td>none</td></tr>'}</table>
     <h2>geology</h2>${geo || '<p>no named formations</p>'}`
+  info.querySelector<HTMLButtonElement>('.geo-more')?.addEventListener('click', () => info.querySelector<HTMLDialogElement>('.geo-dialog')?.showModal())
   for (const tr of info.querySelectorAll<HTMLTableRowElement>('tr.struct')) {
     tr.onclick = () => goToStructure(m.structures[Number(tr.dataset.i)])
   }
@@ -201,7 +216,6 @@ function goToStructure(st: Structure) {
 // phone: bottom-sheet panel and on-screen drive buttons. LITE is also how the scene builder
 // knows to hand a phone GPU a quarter of the vertices and a 4k texture instead of a 22 MP one.
 export const LITE = matchMedia('(pointer: coarse)').matches || innerWidth < 900 || new URLSearchParams(location.search).has('lite')
-const panel = $('#panel')
 $('#toggle').onclick = () => panel.classList.toggle('collapsed')
 if (LITE) panel.classList.add('collapsed')
 for (const b of document.querySelectorAll<HTMLButtonElement>('#drivepad button')) {
@@ -281,6 +295,128 @@ seasonSel.onchange = () => {
   setTimeout(() => status(''), 1200)
 }
 
+// A STANCE is everything needed to reproduce what is on screen: site, season, mode, camera (or
+// car), layer toggles, lite. C copies the current one as a URL; a URL with ?stance= restores it
+// on load, and probes/corridor-stance.mjs renders it headlessly. Rich pastes the URL, I see his
+// exact frame — no more guessing at a screenshot.
+interface Stance {
+  v: 1
+  site: string
+  season: Season
+  mode: 'fly' | 'drive'
+  cam?: { p: number[]; t: number[] }
+  car?: { p: number[]; yaw: number; speed: number; look: number[] }
+  layers: Record<string, boolean>
+  lite: boolean
+}
+function captureStance(): Stance | null {
+  if (!site) return null
+  const layers: Record<string, boolean> = {}
+  for (const el of document.querySelectorAll<HTMLInputElement>('input[data-layer]')) layers[el.dataset.layer!] = el.checked
+  const st: Stance = { v: 1, site: site.manifest.slug, season, mode: drive.on ? 'drive' : 'fly', layers, lite: LITE }
+  const r3 = (v: THREE.Vector3) => [+v.x.toFixed(2), +v.y.toFixed(2), +v.z.toFixed(2)]
+  if (drive.on && drive.car) st.car = { p: r3(drive.car.pos), yaw: +drive.car.yaw.toFixed(4), speed: +drive.car.speed.toFixed(2), look: [+drive.yaw.toFixed(3), +drive.pitch.toFixed(3)] }
+  else st.cam = { p: r3(camera.position), t: r3(orbit.target) }
+  return st
+}
+function stanceUrl(st: Stance): string {
+  const u = new URL(location.href)
+  u.searchParams.set('stance', btoa(JSON.stringify(st)))
+  u.searchParams.set('season', st.season)
+  u.hash = st.site
+  return u.toString()
+}
+function applyStance(st: Stance) {
+  for (const el of document.querySelectorAll<HTMLInputElement>('input[data-layer]')) if (el.dataset.layer! in st.layers) el.checked = st.layers[el.dataset.layer!]
+  applyLayers()
+  if (st.mode === 'drive' && st.car) {
+    setDrive(true)
+    if (drive.car) {
+      drive.car.pos.set(st.car.p[0], st.car.p[1], st.car.p[2])
+      drive.car.yaw = st.car.yaw
+      drive.car.speed = st.car.speed
+      drive.yaw = st.car.look[0]
+      drive.pitch = st.car.look[1]
+      // settle the camera immediately so the first frame is the stance, not a lerp toward it
+      const back = drive.car.forward.set(Math.cos(st.car.yaw), 0, Math.sin(st.car.yaw)).clone().applyAxisAngle(up, drive.yaw).multiplyScalar(-7.5)
+      camera.position.copy(drive.car.pos).add(back).add(new THREE.Vector3(0, 2.6, 0))
+    }
+  } else if (st.cam) {
+    setDrive(false)
+    camera.position.set(st.cam.p[0], st.cam.p[1], st.cam.p[2])
+    orbit.target.set(st.cam.t[0], st.cam.t[1], st.cam.t[2])
+    orbit.update()
+  }
+}
+function readStanceParam(): Stance | null {
+  const raw = new URLSearchParams(location.search).get('stance')
+  if (!raw) return null
+  try {
+    return JSON.parse(atob(raw)) as Stance
+  } catch {
+    return null
+  }
+}
+async function copyStance() {
+  const st = captureStance()
+  if (!st) return
+  const url = stanceUrl(st)
+  history.replaceState(null, '', url)
+  try {
+    await navigator.clipboard.writeText(url)
+    status('stance copied to clipboard (also in the address bar)')
+  } catch {
+    status('stance is in the address bar — copy the URL')
+  }
+  setTimeout(() => { if ($('#status').textContent?.startsWith('stance')) status('') }, 4000)
+}
+$('#stance').onclick = copyStance
+
+// the side panel hides completely (M or the ≡ tab), for looking at the picture
+const panelTab = $('#paneltab')
+function setPanelHidden(hidden: boolean) {
+  panel.classList.toggle('hidden', hidden)
+  panelTab.textContent = hidden ? '≡' : '×'
+}
+panelTab.onclick = () => setPanelHidden(!panel.classList.contains('hidden'))
+
+// Tuning: one engine TunePanel per tab (grass, trees, LOD shape, road, car, camera), a tab strip
+// above them. F6 toggles. Values persist per browser under apex-corridor-<tab>; Copy JSON in a
+// panel hands the numbers back to tuning.ts. A change re-picks trees / re-seeds grass at once.
+const tuneHost = document.createElement('div')
+tuneHost.id = 'tunehost'
+tuneHost.className = 'hidden'
+const tabStrip = document.createElement('div')
+tabStrip.className = 'tunetabs'
+tuneHost.append(tabStrip)
+document.body.append(tuneHost)
+const tunePanels = TUNE_TABS.map((tab) => {
+  const panelEl = document.createElement('div')
+  tuneHost.append(panelEl)
+  const p = new TunePanel(panelEl, `corridor-${tab.name}`, tab.sections)
+  p.context = () => (captureStance() ?? {}) as Record<string, unknown>
+  p.onChange = () => site?.retune()
+  const b = document.createElement('button')
+  b.textContent = tab.name
+  b.onclick = () => showTuneTab(tab.name)
+  tabStrip.append(b)
+  return { name: tab.name, panel: p, button: b }
+})
+let tuneTab = tunePanels[0].name
+function showTuneTab(name: string) {
+  tuneTab = name
+  for (const t of tunePanels) {
+    t.panel.toggle(t.name === name)
+    t.button.classList.toggle('active', t.name === name)
+  }
+}
+function toggleTune() {
+  const on = tuneHost.classList.toggle('hidden')
+  if (!on) showTuneTab(tuneTab)
+  else for (const t of tunePanels) t.panel.toggle(false)
+}
+$('#tune').onclick = toggleTune
+
 $('#drive').onclick = () => setDrive(!drive.on)
 $('#photo').onclick = toPhoto
 $('#top').onclick = toTop
@@ -289,15 +425,27 @@ $('#top').onclick = toTop
 // H (home = top) are shared.
 const held = new Set<string>()
 addEventListener('keydown', (e) => {
-  if ((e.target as HTMLElement).tagName === 'SELECT' || (e.target as HTMLElement).tagName === 'INPUT') return
+  const tgt = e.target as HTMLElement
+  const inField = tgt.tagName === 'SELECT' || tgt.tagName === 'INPUT' || tgt.tagName === 'TEXTAREA'
+  // focus management: while driving, a slider or select that still has focus must not eat the
+  // arrow keys (Rich: "arrow keys move around inside the frame while you are driving")
+  if (inField && drive.on && (e.code.startsWith('Arrow') || ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'Tab'].includes(e.code))) {
+    tgt.blur()
+    e.preventDefault()
+  } else if (inField && !(tgt.tagName === 'INPUT' && (tgt as HTMLInputElement).type === 'range' && e.code === 'Tab')) return
   if (e.code === 'Tab') { e.preventDefault(); setDrive(!drive.on); return }
+  if (e.code === 'F6') { e.preventDefault(); toggleTune(); return }
   held.add(e.code)
   switch (e.code) {
     case 'KeyP': toPhoto(); break
     case 'KeyH': toTop(); break
+    case 'KeyC': if (drive.on) { drive.cockpit = !drive.cockpit; break } void copyStance(); break
+    case 'KeyX': void copyStance(); break
+    case 'KeyM': setPanelHidden(!panel.classList.contains('hidden')); break
+    case 'KeyN': minimap?.setExpanded(!minimap.expanded); break
     case 'KeyR': if (drive.on && site && drive.car) { const p = site.spineAt(site.manifest.spine.photo_s); const side = p.dir.clone().cross(up).multiplyScalar(1.83); drive.car.place(p.pos.x + side.x, p.pos.z + side.z, Math.atan2(p.dir.z, p.dir.x)) } break
   }
-  if (drive.on && ['KeyW', 'KeyS', 'KeyA', 'KeyD', 'Space'].includes(e.code)) e.preventDefault()
+  if (drive.on && (['KeyW', 'KeyS', 'KeyA', 'KeyD', 'Space'].includes(e.code) || e.code.startsWith('Arrow'))) e.preventDefault()
 })
 addEventListener('keyup', (e) => held.delete(e.code))
 addEventListener('blur', () => held.clear())
@@ -338,6 +486,7 @@ function pick(e: PointerEvent) {
 // frame loop
 const clock = new THREE.Clock()
 const up = new THREE.Vector3(0, 1, 0)
+const viewDir = new THREE.Vector3()
 function frame() {
   const dt = Math.min(0.1, clock.getDelta())
   if (site && drive.on && drive.car) {
@@ -350,12 +499,20 @@ function frame() {
     drive.input.throttle = padT
     drive.input.brake = padB
     // chase camera: behind and above, looking over the bonnet; drag adds a look-around yaw
-    const back = car.forward.clone().applyAxisAngle(up, drive.yaw).multiplyScalar(-7.5)
-    const want = car.pos.clone().add(back).add(new THREE.Vector3(0, 2.6 + Math.tan(drive.pitch) * 4, 0))
+    if (drive.cockpit) {
+      // cockpit: eye at the driver's head, looking down the nose (stuntin's C view); drive.yaw/pitch look around
+      const eye = car.pos.clone().add(new THREE.Vector3(0, T.COCKPIT_EYE_UP, 0)).add(car.forward.clone().multiplyScalar(T.COCKPIT_EYE_FWD))
+      camera.position.copy(eye)
+      const ahead = car.forward.clone().applyAxisAngle(up, drive.yaw)
+      camera.lookAt(eye.clone().add(ahead.multiplyScalar(30)).add(new THREE.Vector3(0, -Math.tan(drive.pitch) * 30 + T.COCKPIT_LOOK_UP, 0)))
+      return
+    }
+    const back = car.forward.clone().applyAxisAngle(up, drive.yaw).multiplyScalar(-T.CHASE_BACK)
+    const want = car.pos.clone().add(back).add(new THREE.Vector3(0, T.CHASE_UP + Math.tan(drive.pitch) * 4, 0))
     const gy = site.groundAt(want.x, want.z)
     if (gy !== null && want.y < gy + 1.2) want.y = gy + 1.2
-    camera.position.lerp(want, 1 - Math.exp(-8 * dt))
-    camera.lookAt(car.pos.clone().add(car.forward.clone().multiplyScalar(6)).add(new THREE.Vector3(0, 1.0, 0)))
+    camera.position.lerp(want, 1 - Math.exp(-T.CHASE_LAG * dt))
+    camera.lookAt(car.pos.clone().add(car.forward.clone().multiplyScalar(T.CHASE_LOOK_AHEAD)).add(new THREE.Vector3(0, 1.0, 0)))
     if (car.event === 'bump') status('bump')
     $('#pos').textContent = `${(Math.abs(car.speed) * 2.237).toFixed(0)} mph  ${car.onGrass ? 'grass' : 'pavement'}${Math.abs(car.slide) > 1 ? '  sliding' : ''}`
   } else {
@@ -364,7 +521,14 @@ function frame() {
     orbit.update()
     $('#pos').textContent = ''
   }
-  site?.updateNear(camera.position, clock.elapsedTime)
+  if (site) {
+    const fwd = camera.getWorldDirection(viewDir)
+    const pitch = Math.max(0, -Math.asin(THREE.MathUtils.clamp(fwd.y, -1, 1))) // 0 level, +down
+    site.updateNear(camera.position, clock.elapsedTime, fwd, pitch)
+    // the inset map follows the car when driving, the camera when flying; site frame is x east, y north = -z
+    if (drive.on && drive.car) minimap?.draw({ x: drive.car.pos.x, y: -drive.car.pos.z, yaw: Math.atan2(-drive.car.forward.z, drive.car.forward.x) })
+    else minimap?.draw({ x: camera.position.x, y: -camera.position.z, yaw: Math.atan2(-fwd.z, fwd.x) })
+  }
   renderer.render(scene, camera)
   requestAnimationFrame(frame)
 }

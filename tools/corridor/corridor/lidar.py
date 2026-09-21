@@ -51,6 +51,11 @@ DATASETS = [
     "MD_VA_NCB_KGeorge_1_2020",
     "USGS_LPC_MD_VA_Sandy_NCR_2014_LAS_2015",
 ]
+# a deck's underside is a plane: lowest point per 2 m lateral cell agrees across the road.
+# Real decks measured ≤ 0.28 m std / ≤ 0.74 m range; tree canopy over a narrow road ≥ 1.2 / ≥ 3.
+DECK_UNDERSIDE_STD = 0.5
+DECK_UNDERSIDE_RANGE = 1.5
+
 CLASS_NAMES = {0: "never", 1: "unassigned", 2: "ground", 3: "veg_low", 4: "veg_med", 5: "veg_high", 6: "building", 7: "noise", 9: "water", 10: "rail", 11: "road", 13: "wire_guard", 14: "wire_conductor", 15: "tower", 16: "wire_connector", 17: "bridge_deck", 18: "noise_high", 20: "ignored_ground", 21: "snow", 22: "temporal_exclusion"}
 session = requests.Session()
 session.headers["User-Agent"] = "apex-conduit corridor (github.com/hotspoons)"
@@ -289,6 +294,26 @@ def check_units(pts: dict, dem_path: Path) -> float:
     return factor
 
 
+def classification_quality(pts: dict) -> dict:
+    """Is this vendor's class 17 (bridge deck) believable? USGS's 2014 Sandy NCR delivery has 23% of
+    the corridor as class 17 and another 23% as class 18 (high noise), at ground height — those bins
+    were used for something else. Anything over 3% deck is not a road corridor's bridges. When the
+    share is implausible, 17 and 18 are demoted to unassigned before any structure logic runs, and
+    the manifest says so; the geometric overhead test still finds real overpasses."""
+    cls = pts["cls"]
+    n = max(1, len(cls))
+    share17 = float((cls == 17).sum()) / n
+    share18 = float((cls == 18).sum()) / n
+    trust = share17 <= 0.03
+    q = {"class17_share": round(share17, 4), "class18_share": round(share18, 4), "class17_trusted": trust}
+    if not trust:
+        demote = (cls == 17) | (cls == 18)
+        pts["cls"] = np.where(demote, 1, cls).astype(np.uint8)
+        q["note"] = "class 17/18 demoted to unassigned: implausible share, vendor used them as junk bins"
+        print(f"  lidar   class 17 = {share17:.1%} of points — not bridge decks; demoted with class 18", flush=True)
+    return q
+
+
 def rasters(pts: dict, bbox, frame: Frame, corridor: Polygon, out_dir: Path) -> dict:
     w, h, tr = _grid(bbox)
     row, col, ok = _cells(pts, bbox, w, h)
@@ -408,7 +433,8 @@ def profile(spine: LineString, dtm: np.ndarray, chm: np.ndarray, tr, pts: dict, 
         interp = np.interp(np.arange(i, j + 1), [a, b], [ground_z[a], ground_z[b]])
         on_deck = np.nanmean(np.abs(deck_min[i : j + 1] - interp))
         on_ground = np.nanmean(np.abs(ground_z[i : j + 1] - interp))
-        if on_deck < on_ground:  # the deck continues our grade: we are ON it
+        above = float(np.nanmedian(deck_min[i : j + 1] - ground_z[i : j + 1]))
+        if on_deck < on_ground and above >= 1.5:  # the deck continues our grade AND stands above the ground: we are ON it
             filled = deck_min[i : j + 1].copy()
             nan = np.isnan(filled)
             if nan.any():
@@ -430,6 +456,14 @@ def profile(spine: LineString, dtm: np.ndarray, chm: np.ndarray, tr, pts: dict, 
     # centreline, binned 2 m along by 2 m across: a station is spanned when 6 of the 8 lateral
     # cells inside ±8 m hold a point. Class-agnostic, because the South Mountain arch deck is
     # "unassigned" in this dataset.
+    #
+    # Coverage alone is not enough on a two-lane road under trees: Race Track Road's canopy closes
+    # over all ±8 m and produced 46 "overpasses" along 4.7 km. What separates a deck from a tree
+    # tunnel is that a deck is a PLANE — its underside, read as the lowest point in each 2 m
+    # lateral cell, agrees across the width. Measured (2026-09-21) on Clarksburg and Frederick:
+    # real overpasses and gantries have a lateral std of the cell minima ≤ 0.28 m and a range
+    # ≤ 0.74 m; Bowie's canopy runs have std 1.2–5.3 m and range 3–15 m, and the one Bowie run
+    # that passes (s≈2350, std 0.28) sits exactly on an OSM bridleway tagged as crossing over.
     g_all = shapely.points(pts["x"][notnoise], pts["y"][notnoise])
     near_all = shapely.distance(g_all, spine) <= 10.0
     if near_all.any():
@@ -441,9 +475,14 @@ def profile(spine: LineString, dtm: np.ndarray, chm: np.ndarray, tr, pts: dict, 
         lat_bin = ((lat_off[over] + 8.0) / 2.0).astype(int).clip(0, 7)
         occ = np.zeros((n, 8), bool)
         occ[bins_all[over], lat_bin] = True
-        spanned = (occ.sum(axis=1) >= 6) & ~on_bridge
-        hmin = np.full(n, np.nan)
-        np.fmin.at(hmin, bins_all[over], h_all[over])
+        cell_min = np.full((n, 8), np.nan)
+        np.fmin.at(cell_min, (bins_all[over], lat_bin), h_all[over])
+        with np.errstate(all="ignore"):
+            under_std = np.nanstd(cell_min, axis=1)
+            under_range = np.nanmax(cell_min, axis=1) - np.nanmin(cell_min, axis=1)
+        planar = (under_std <= DECK_UNDERSIDE_STD) & (under_range <= DECK_UNDERSIDE_RANGE)
+        spanned = (occ.sum(axis=1) >= 6) & planar & ~on_bridge
+        hmin = np.nanmin(cell_min, axis=1)
         for i, j in _runs(spanned):
             length = (j - i + 1) * step
             if length < 2.0:
@@ -454,6 +493,7 @@ def profile(spine: LineString, dtm: np.ndarray, chm: np.ndarray, tr, pts: dict, 
                 "s_start": round(float(s[i]), 1), "s_end": round(float(s[j]), 1), "length_m": round(float(length), 1),
                 "deck_z_min": round(float(np.nanmin(hmin[i : j + 1] + surface_z[i : j + 1])), 2), "deck_z_max": None,
                 "clearance_m": round(float(np.nanmin(hmin[i : j + 1])), 2), "height_above_ground_m": None,
+                "underside_std_m": round(float(np.nanmedian(under_std[i : j + 1])), 2),
             })
     structures.sort(key=lambda st: st["s_start"])
 

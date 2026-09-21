@@ -114,6 +114,18 @@ def export_site(site_dir: Path) -> dict:
                 if len(part) > 1:
                     shapes.append((LineString(part).buffer(half, cap_style="flat"), 1))
         tr2 = from_origin(g["bbox"][0], g["bbox"][3], 2.0, 2.0)
+        # A roof is the same problem as a truck: this lidar has no vegetation classes, canopy is
+        # "unassigned above ground", so every building footprint is also a 6 m tree — and autogen
+        # now stands a model on each one (editor agent, 2026-09-21). Zero the canopy under every
+        # OSM footprint (+1 m), in the bake, so viewer, editor and preview all get it.
+        bpath = site_dir / "web" / "buildings.json"
+        if bpath.exists():
+            from shapely.geometry import Polygon
+            ox, oy = site["frame"]["origin"]
+            for b in json.loads(bpath.read_text()).get("buildings", []):
+                ring = b.get("ring") or []
+                if len(ring) >= 3:
+                    shapes.append((Polygon([(x + ox, y + oy) for x, y in ring]).buffer(1.0), 1))
         road_mask = rasterize(shapes, out_shape=c.shape, transform=tr2, fill=0, dtype=np.uint8).astype(bool)
         c[road_mask] = 0.0
         Image.fromarray(np.clip(np.round(c * 4), 0, 255).astype(np.uint8), "L").save(web / "chm_2m.png", optimize=True)

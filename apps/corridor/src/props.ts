@@ -10,9 +10,15 @@
 import * as THREE from 'three'
 import type { TreeRecord } from './trees'
 
-export const LANE_M = 3.66 // US interstate lane
-export const SHOULDER_OUT_M = 3.0
-export const SHOULDER_IN_M = 1.2
+import * as T from './tuning'
+
+// road cross-section: knobs in tuning.ts (F6 → road); a change needs a site reload to rebuild
+/** @deprecated read T.LANE_WIDTH live — a knob changes it */
+export const LANE_M = T.LANE_WIDTH
+/** @deprecated read T.SHOULDER_OUT live — a knob changes it */
+export const SHOULDER_OUT_M = T.SHOULDER_OUT
+/** @deprecated read T.SHOULDER_IN live — a knob changes it */
+export const SHOULDER_IN_M = T.SHOULDER_IN
 
 export interface Station {
   pos: THREE.Vector3 // road surface centreline
@@ -33,8 +39,8 @@ export function stations(spineAt: (s: number) => { pos: THREE.Vector3; dir: THRE
 }
 
 /** Width of the paved surface at station s: lanes × 3.66 + both shoulders. */
-export function pavedWidth(lanes: number): number {
-  return lanes * LANE_M + SHOULDER_OUT_M + SHOULDER_IN_M
+export function pavedWidth(lanes: number, twoWay = false): number {
+  return lanes * T.LANE_WIDTH + T.SHOULDER_OUT + (twoWay ? T.SHOULDER_OUT : T.SHOULDER_IN)
 }
 
 /**
@@ -48,7 +54,13 @@ export interface SurfaceSet {
   metresPerTile: number
 }
 
-export function roadMesh(st: Station[], lanesAt: (s: number) => number, classAt: (s: number) => string = () => 'asphalt_aged', sets: Record<string, SurfaceSet> = {}, lift = 0.15): THREE.Group {
+/**
+ * Paint scheme from OSM: a one-way carriageway (a divided highway's lanes, `oneway=yes` or a
+ * motorway) has a yellow line on its left edge and white on the right, with white dashes between
+ * lanes. A two-way road (`oneway=no`, or a non-motorway with no tag) has a DOUBLE YELLOW down the
+ * centre and white edge lines both sides; its lanes are split evenly about the centreline.
+ */
+export function roadMesh(st: Station[], lanesAt: (s: number) => number, classAt: (s: number) => string = () => 'asphalt_aged', sets: Record<string, SurfaceSet> = {}, lift = 0.02, twoWayAt: (s: number) => boolean = () => false): THREE.Group {
   const g = new THREE.Group()
   // one asphalt geometry per surface class, so each gets its own textured material
   const byClass: Record<string, { pos: number[]; uv: number[]; idx: number[] }> = {}
@@ -70,7 +82,14 @@ export function roadMesh(st: Station[], lanesAt: (s: number) => number, classAt:
   for (let i = 0; i < st.length - 1; i++) {
     const a = st[i], b = st[i + 1]
     const la = lanesAt(a.s), lb = lanesAt(b.s)
-    const wa = pavedWidth(la), wb = pavedWidth(lb)
+    // ROOT CAUSE of "lanes ~35% too narrow on the 2-lane road" (Rich, 2026-09-21): this called
+    // pavedWidth(lanes) without the two-way flag, so a two-way road got one inside shoulder
+    // (1.2 m) instead of two outside ones (3.0 m) — 11.5 m of asphalt instead of 13.3 — and the
+    // edge lines, drawn SHOULDER_OUT in from that edge, sat 2.76 m from the centre: a 2.76 m lane
+    // where 3.66 was meant (0.75×). The paved-edge lookup in scene.ts already used the flag, so
+    // the strip and the asphalt disagreed by 0.9 m a side as well.
+    const twoWay = twoWayAt((a.s + b.s) / 2)
+    const wa = pavedWidth(la, twoWay), wb = pavedWidth(lb, twoWay)
     const sa = a.dir.clone().cross(UP), sb = b.dir.clone().cross(UP) // right of travel
     const ya = a.pos.y + lift, yb = b.pos.y + lift
     const P = (base: THREE.Vector3, side: THREE.Vector3, off: number, y: number) => new THREE.Vector3(base.x + side.x * off, y, base.z + side.z * off)
@@ -83,19 +102,31 @@ export function roadMesh(st: Station[], lanesAt: (s: number) => number, classAt:
     // repeats at its real scale and lane dashes stay where paint would be
     quad(bk.pos, bk.idx, P(a.pos, sa, -wa / 2, ya), P(a.pos, sa, wa / 2, ya), P(b.pos, sb, -wb / 2, yb), P(b.pos, sb, wb / 2, yb), undefined, undefined,
       [0, a.s / mpt, wa / mpt, a.s / mpt, 0, b.s / mpt, wb / mpt, b.s / mpt], bk.uv)
-    // edge lines: yellow left (median side), white right, sitting on the shoulder boundary
     const ml = 0.12, y2a = ya + 0.02, y2b = yb + 0.02
-    const leftA = -wa / 2 + SHOULDER_IN_M, leftB = -wb / 2 + SHOULDER_IN_M
-    const rightA = wa / 2 - SHOULDER_OUT_M, rightB = wb / 2 - SHOULDER_OUT_M
-    quad(marks, midx, P(a.pos, sa, leftA - ml, y2a), P(a.pos, sa, leftA + ml, y2a), P(b.pos, sb, leftB - ml, y2b), P(b.pos, sb, leftB + ml, y2b), yellow, mcol)
-    quad(marks, midx, P(a.pos, sa, rightA - ml, y2a), P(a.pos, sa, rightA + ml, y2a), P(b.pos, sb, rightB - ml, y2b), P(b.pos, sb, rightB + ml, y2b), white, mcol)
-    // lane dashes: 3 m paint / 9 m gap is the US standard; one dash per 12 m station cycle
     const cycle = Math.floor(a.s / 12) * 12
-    if (a.s - cycle < 3.01 && la === lb) {
-      const len = Math.min(3, b.s - a.s)
-      const bb = a.pos.clone().add(a.dir.clone().multiplyScalar(len))
-      for (let l = 1; l < la; l++) {
-        const off = leftA + l * LANE_M
+    const dash = a.s - cycle < 3.01 && la === lb
+    const dashLen = Math.min(3, b.s - a.s)
+    const bb = a.pos.clone().add(a.dir.clone().multiplyScalar(dashLen))
+    if (twoWay) {
+      // two-way: white edge lines on both shoulders, double yellow at the centre, white dashes
+      // between the lanes of each direction (3+ lanes a side)
+      const edgeA = wa / 2 - T.SHOULDER_OUT, edgeB = wb / 2 - T.SHOULDER_OUT
+      for (const sgn of [-1, 1]) quad(marks, midx, P(a.pos, sa, sgn * edgeA - ml, y2a), P(a.pos, sa, sgn * edgeA + ml, y2a), P(b.pos, sb, sgn * edgeB - ml, y2b), P(b.pos, sb, sgn * edgeB + ml, y2b), white, mcol)
+      for (const off of [-0.16, 0.16]) quad(marks, midx, P(a.pos, sa, off - 0.1, y2a), P(a.pos, sa, off + 0.1, y2a), P(b.pos, sb, off - 0.1, y2b), P(b.pos, sb, off + 0.1, y2b), yellow, mcol)
+      const perSide = Math.max(1, Math.floor(la / 2))
+      if (dash) for (const sgn of [-1, 1]) for (let l = 1; l < perSide; l++) {
+        const off = sgn * l * T.LANE_WIDTH
+        quad(marks, midx, P(a.pos, sa, off - 0.08, y2a), P(a.pos, sa, off + 0.08, y2a), P(bb, sa, off - 0.08, y2a), P(bb, sa, off + 0.08, y2a), white, mcol)
+      }
+    } else {
+      // one-way carriageway: yellow left (median side), white right, on the shoulder boundaries
+      const leftA = -wa / 2 + T.SHOULDER_IN, leftB = -wb / 2 + T.SHOULDER_IN
+      const rightA = wa / 2 - T.SHOULDER_OUT, rightB = wb / 2 - T.SHOULDER_OUT
+      quad(marks, midx, P(a.pos, sa, leftA - ml, y2a), P(a.pos, sa, leftA + ml, y2a), P(b.pos, sb, leftB - ml, y2b), P(b.pos, sb, leftB + ml, y2b), yellow, mcol)
+      quad(marks, midx, P(a.pos, sa, rightA - ml, y2a), P(a.pos, sa, rightA + ml, y2a), P(b.pos, sb, rightB - ml, y2b), P(b.pos, sb, rightB + ml, y2b), white, mcol)
+      // lane dashes: 3 m paint / 9 m gap is the US standard; one dash per 12 m station cycle
+      if (dash) for (let l = 1; l < la; l++) {
+        const off = leftA + l * T.LANE_WIDTH
         quad(marks, midx, P(a.pos, sa, off - 0.08, y2a), P(a.pos, sa, off + 0.08, y2a), P(bb, sa, off - 0.08, y2a), P(bb, sa, off + 0.08, y2a), white, mcol)
       }
     }

@@ -15,22 +15,44 @@ export interface CatalogEntry {
   glb?: string
   footprint_m: [number, number]
   height_m: number
+  /**
+   * How a normalised reconstruction is scaled. `height` (default): uniformly to `height_m`.
+   * `span`: uniformly so its longest horizontal axis is a span — `footprint_m[0]` when placed
+   * free-form, the structure's `span_m` when it is a `bridge_over`. Bridges are laid across the
+   * road and it is their length that has to be right, not their height.
+   */
+  fit?: 'height' | 'span'
 }
 
 export interface Catalog {
   assets: CatalogEntry[]
 }
 
-/** Category tints, so a plan view of a whole town reads without labels. */
+/**
+ * Category tints, so a plan view of a whole town reads without labels. The vocabulary is the one
+ * `autogen.ts` classifies into, so a generated corridor is colour-coded by what the rules decided:
+ * residential greens, commercial oranges, industrial violets, civic greys.
+ */
 const TINT: Record<string, number> = {
+  shed: 0x7d8a72,
+  house: 0x6fa36a,
+  house_large: 0x548f56,
+  townhouse: 0x4e8f7a,
+  apartments: 0x3f7f8f,
   restaurant: 0xd9683f,
-  hotel: 0x4f7fc4,
+  retail_unit: 0xc4713f,
+  strip_mall: 0xb8632f,
+  big_box: 0x7a5fb0,
   gas_station: 0xd8b13a,
+  hotel: 0x4f7fc4,
+  office: 0x5f6fb0,
+  warehouse: 0x6a5f8a,
+  school: 0xb0b0bd,
   church: 0xcfcfd6,
-  retail: 0x7a5fb0,
-  sign: 0xd94f6e,
-  farm: 0x8c5a33,
+  barn: 0x8c5a33,
   utility: 0x6f8f7a,
+  sign: 0xd94f6e,
+  bridge: 0xd98c3f,
 }
 export const tintOf = (cat: string) => TINT[cat] ?? 0x8a8a8a
 
@@ -119,7 +141,8 @@ const models = new Map<string, Promise<THREE.Object3D | null>>()
 /**
  * Load a .glb once and hand out clones. A reconstruction comes back in whatever scale the
  * reconstructor felt like, so the model is recentred on its footprint and rescaled to the
- * catalog's `height_m` — the catalog's numbers are the truth, the mesh is a skin over them.
+ * catalog's `height_m` (or, with `fit: "span"`, so its long axis is `footprint_m[0]`) — the
+ * catalog's numbers are the truth, the mesh is a skin over them.
  */
 function loadModel(entry: CatalogEntry): Promise<THREE.Object3D | null> {
   if (!entry.glb) return Promise.resolve(null)
@@ -131,7 +154,8 @@ function loadModel(entry: CatalogEntry): Promise<THREE.Object3D | null> {
         const root = g.scene
         const bb = new THREE.Box3().setFromObject(root)
         const size = bb.getSize(new THREE.Vector3())
-        const k = size.y > 1e-3 ? entry.height_m / size.y : 1
+        const long = Math.max(size.x, size.z)
+        const k = entry.fit === 'span' ? (long > 1e-3 ? entry.footprint_m[0] / long : 1) : size.y > 1e-3 ? entry.height_m / size.y : 1
         root.scale.setScalar(k)
         const c = bb.getCenter(new THREE.Vector3()).multiplyScalar(k)
         root.position.set(-c.x, -bb.min.y * k, -c.z)

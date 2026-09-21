@@ -2,6 +2,7 @@
 // Z = south — i.e. (x, y, z)_site -> (x, z, -y)_three, right-handed with Y up so nothing in
 // three's camera/controls code has to be told about Z-up.
 import * as THREE from 'three'
+import * as T from './tuning'
 import { DATA_BASE, decodeHeights, decodeScalar, loadImage, type Layer, type Manifest, type Structure } from './site'
 import { NearTrees } from './trees'
 import { Impostors } from './impostors'
@@ -10,6 +11,7 @@ import { LOOK, type Season } from './season'
 import { buildStrip, sinkUnderStrip } from './strip'
 import { Adjustments, NEUTRAL as NEUTRAL_ADJ } from './adjust'
 import { buildPlacements, loadCatalog, loadPlacements } from './placements'
+import { buildBridges, flattenSpine, loadStructureOverrides, suppressed } from './structures'
 import { loadSurfaceSets, overpassMesh, pavedWidth, roadMesh, stations, treesFromCanopy, type SurfaceSet } from './props'
 
 let surfaceSets: Record<string, SurfaceSet> | null = null
@@ -22,8 +24,10 @@ export interface Site {
   layers: { imagery?: THREE.Mesh; canopy?: THREE.Mesh; trees?: THREE.Group; road: THREE.Group; horizon?: THREE.Mesh; structures: THREE.Group; spine: THREE.Group; markers: THREE.Group; placements: THREE.Group }
   adjustments: Adjustments
   treeCount: number
-  /** per-frame: move the near-field tree models and the grass ring to follow the eye */
-  updateNear: (eye: THREE.Vector3, time: number) => void
+  /** per-frame: move the near-field tree models and the grass ring to follow the eye; fwd/pitch shape the LOD footprint */
+  updateNear: (eye: THREE.Vector3, time: number, fwd?: THREE.Vector3, pitch?: number) => void
+  /** a knob changed: re-pick trees and re-seed grass on the next frame */
+  retune: () => void
   /** recolour everything living */
   setSeason: (season: Season) => void
   /** world-frame ground height under x,z: the fine strip near the road, the DEM beyond */
@@ -145,7 +149,8 @@ const hypso = (z: number): [number, number, number] => {
 }
 
 
-export async function buildSite(manifest: Manifest, status: (s: string) => void, lite = false, renderer?: THREE.WebGLRenderer, fog: THREE.FogExp2 | null = null, initialSeason: Season = 'summer'): Promise<Site> {
+export async function buildSite(manifestIn: Manifest, status: (s: string) => void, lite = false, renderer?: THREE.WebGLRenderer, fog: THREE.FogExp2 | null = null, initialSeason: Season = 'summer'): Promise<Site> {
+  let manifest = manifestIn
   const base = `/sites/${manifest.slug}/web/`
   const group = new THREE.Group()
   const L = manifest.layers
@@ -153,6 +158,9 @@ export async function buildSite(manifest: Manifest, status: (s: string) => void,
 
   status('decoding terrain…')
   const adjustments = await Adjustments.load(manifest.slug)
+  const overrides = await loadStructureOverrides(manifest.slug)
+  // authored `flatten` intervals rewrite the spine's grade before anything is built from it
+  if (overrides.length) manifest = { ...manifest, spine: { ...manifest.spine, coords: flattenSpine(manifest.spine.coords, overrides) }, structures: suppressed(manifest.structures, overrides) }
   const demImg = await loadImage(base + L.dem.file)
   const dem: Field = { layer: L.dem, data: decodeHeights(demImg, L.dem) }
   const heightAt = sampler(dem)
@@ -238,6 +246,12 @@ export async function buildSite(manifest: Manifest, status: (s: string) => void,
     const hz: Field = { layer: L.horizon, data: decodeHeights(hImg, L.horizon) }
     const hs = strideFor(L.horizon, lite ? 120_000 : 300_000)
     const geo = gridGeometry(hz, hs, () => -2.0, L.horizon_naip ? undefined : (i) => hypso(hz.data[i]))
+    // The horizon is the FAR field only. Two meshes of the same ground at 60 m and 1-8 m sampling
+    // cannot coexist: the coarse one is above the fine one wherever the fine one dips within a
+    // cell, and shows through as flat green (Rich's "green stuff", four rounds of it). So every
+    // horizon triangle inside the near DEM's footprint is removed, and the one-cell rim that is
+    // still inside is pinned 3 m under the near terrain so the two meet without a hole.
+    cutHorizon(geo, L.dem.bbox, hz.layer.res * hs, heightAt)
     let mat: THREE.Material
     if (L.horizon_naip) {
       const tex = new THREE.TextureLoader().load(`${DATA_BASE}${base}${L.horizon_naip.file}`)
@@ -278,11 +292,20 @@ export async function buildSite(manifest: Manifest, status: (s: string) => void,
   // --- the road surface, as wide as OSM says ---------------------------------------------------
   status('paving…')
   const segs = manifest.spine.segments
+  const segAt = (s: number) => segs.find((g) => g.s_start - 0.5 <= s && s <= g.s_end + 0.5)
   const lanesAt = (s: number) => {
-    const seg = segs.find((g) => g.s_start - 0.5 <= s && s <= g.s_end + 0.5)
-    const n = Number(seg?.tags.lanes)
+    const n = Number(segAt(s)?.tags.lanes)
     return Number.isFinite(n) && n > 0 ? n : 2
   }
+  // OSM: oneway=yes, or a motorway (implicitly one way), is a carriageway; everything else with
+  // oneway=no or untagged is a two-way road with traffic both directions on one pavement
+  const twoWayAt = (s: number) => {
+    const tg = segAt(s)?.tags ?? {}
+    if (tg.oneway === 'yes' || tg.oneway === '-1') return false
+    if (tg.oneway === 'no') return true
+    return !['motorway', 'motorway_link', 'trunk_link', 'primary_link'].includes(tg.highway ?? '')
+  }
+  const pavedHalfAt = (s: number) => pavedWidth(lanesAt(s), twoWayAt(s)) / 2
   const road = new THREE.Group()
   road.name = 'road'
   surfaceSets ??= await loadSurfaceSets()
@@ -299,7 +322,17 @@ export async function buildSite(manifest: Manifest, status: (s: string) => void,
     return surf.class[i] ?? 'asphalt_aged'
   }
   const mainSt = stations(spineAt, manifest.spine.length_m, 6)
-  road.add(roadMesh(mainSt, lanesAt, classAt, surfaceSets))
+  // the asphalt and paint are rebuilt when a road knob moves (F6 → road), so keep the builders
+  const roadBuilders: (() => THREE.Object3D)[] = [() => roadMesh(mainSt, lanesAt, classAt, surfaceSets!, 0.02, twoWayAt)]
+  let roadParts: THREE.Object3D[] = []
+  const buildRoads = () => {
+    for (const o of roadParts) {
+      road.remove(o)
+      disposeDeep(o)
+    }
+    roadParts = roadBuilders.map((b) => b())
+    for (const o of roadParts) road.add(o)
+  }
   // spine stations every 5 m, for "what is the road doing next to this point" lookups
   const spineSt: { x: number; z: number; y: number; s: number }[] = []
   for (let s = 0; s <= curveLen; s += 5) {
@@ -339,13 +372,15 @@ export async function buildSite(manifest: Manifest, status: (s: string) => void,
       return { pos: c2.getPointAt(u), dir: c2.getTangentAt(u) }
     }
     sibAts.push({ at: sibAt, len: len2, spineS: (s: number) => { const p = sibAt(s).pos; return nearestSpine(p.x, p.z).s } })
-    road.add(roadMesh(stations(sibAt, len2, 6), () => 2, () => 'asphalt_aged', surfaceSets))
+    roadBuilders.push(() => roadMesh(stations(sibAt, len2, 6), () => 2, () => 'asphalt_aged', surfaceSets!))
   }
+  buildRoads()
 
   // --- trees, one per canopy cell, as tall as the lidar says ---------------------------------
   let trees: THREE.Group | undefined
   let treeCount = 0
-  let updateNear: (eye: THREE.Vector3, time: number) => void = () => {}
+  let updateNear: (eye: THREE.Vector3, time: number, fwd?: THREE.Vector3, pitch?: number) => void = () => {}
+  let retune: () => void = () => {}
   let setSeason: (season: Season) => void = () => {}
   let groundAtWorld: (x: number, z: number) => number | null = (x, z) => heightAt(x, -z)
   let edgeDistanceWorld: (x: number, z: number) => number = () => Infinity
@@ -356,34 +391,49 @@ export async function buildSite(manifest: Manifest, status: (s: string) => void,
     // stations every 5 m from the spine and every sibling, hashed on a 20 m grid with each
     // station carrying its own half width. Grass, verges and tree exclusion all ask this.
     const stCell = 20
-    const stGrid = new Map<string, { x: number; z: number; y: number; half: number; who: number }[]>()
-    const addStations = (at: (s: number) => { pos: THREE.Vector3 }, len: number, halfAt: (s: number) => number, who: number) => {
-      for (let s = 0; s <= len; s += 5) {
-        const p = at(s).pos
-        const k = `${Math.floor(p.x / stCell)},${Math.floor(p.z / stCell)}`
+    const stGrid = new Map<string, { x: number; z: number; dx: number; dz: number; s: number; half: number; who: number }[]>()
+    // one height function per carriageway: the SAME spline the road mesh is drawn from
+    const curves: { at: (s: number) => { pos: THREE.Vector3; dir: THREE.Vector3 }; len: number }[] = [{ at: spineAt, len: curveLen }, ...sibAts.map((s) => ({ at: s.at, len: s.len }))]
+    const addStations = (who: number, halfAt: (s: number) => number) => {
+      const c = curves[who]
+      for (let s = 0; s <= c.len; s += 5) {
+        const st = c.at(s)
+        const d = st.dir.clone().setY(0).normalize()
+        const k = `${Math.floor(st.pos.x / stCell)},${Math.floor(st.pos.z / stCell)}`
         const arr = stGrid.get(k)
-        const rec = { x: p.x, z: p.z, y: p.y, half: halfAt(s), who }
+        const rec = { x: st.pos.x, z: st.pos.z, dx: d.x, dz: d.z, s, half: halfAt(s), who }
         if (arr) arr.push(rec)
         else stGrid.set(k, [rec])
       }
     }
-    addStations(spineAt, curveLen, (s) => pavedWidth(lanesAt(s)) / 2, 0)
-    for (const [i, sib] of sibAts.entries()) addStations(sib.at, sib.len, () => pavedWidth(2) / 2, i + 1)
+    addStations(0, pavedHalfAt)
+    for (let i = 0; i < sibAts.length; i++) addStations(i + 1, () => pavedWidth(2) / 2)
     /** signed distance to the nearest pavement edge, and which carriageway that was */
     const edgeDistance = (x: number, z: number, exclude = -1): { d: number; who: number; y: number } => {
       const cx = Math.floor(x / stCell), cz = Math.floor(z / stCell)
-      let best = Infinity, who = -1, y = 0
+      let best = Infinity, who = -1, bp: (typeof stGrid extends Map<string, (infer R)[]> ? R : never) | null = null
       for (let a = -3; a <= 3; a++) {
         for (let b = -3; b <= 3; b++) {
           const arr = stGrid.get(`${cx + a},${cz + b}`)
           if (!arr) continue
           for (const p of arr) {
             if (p.who === exclude) continue
-            const d = Math.hypot(p.x - x, p.z - z) - p.half
-            if (d < best) { best = d; who = p.who; y = p.y }
+            // lateral distance to the station's tangent, so a point between two stations measures
+            // to the road and not to the nearer station's dot
+            const ux = x - p.x, uz = z - p.z
+            const along = ux * p.dx + uz * p.dz
+            const lat = Math.abs(ux * p.dz - uz * p.dx)
+            const d = (Math.abs(along) <= 2.6 ? lat : Math.hypot(ux, uz)) - p.half
+            if (d < best) { best = d; who = p.who; bp = p }
           }
         }
       }
+      if (!bp) return { d: best, who, y: 0 }
+      // the road height HERE, from the carriageway spline at the projected along-track metre —
+      // the very same function the asphalt mesh is built from, so ground and road agree to the mm
+      const along = (x - bp.x) * bp.dx + (z - bp.z) * bp.dz
+      const c = curves[bp.who]
+      const y = c.at(Math.min(c.len, Math.max(0, bp.s + along))).pos.y // the spline IS the road surface
       return { d: best, who, y }
     }
     const roadDistance = (x: number, z: number) => edgeDistance(x, z).d
@@ -405,9 +455,23 @@ export async function buildSite(manifest: Manifest, status: (s: string) => void,
     }
     const VERGE = 40
     const grassTex = (cls: string) => ((surfaceSets?.[cls]?.material as THREE.MeshStandardMaterial | undefined)?.map ?? null)
-    const strip = buildStrip(spineAt, curveLen, -latMin + VERGE, latMax + VERGE, (x, z) => edgeDistance(x, z), heightAt, imagery, manifest.bbox, grassTex('grass_mown'), grassTex('grass_rough'), lite ? 4 : 2, lite ? 2 : 1, adjustments.active ? (x, y) => adjustments.at(x, y, adjScratch).ground_offset_m : null)
+    const makeStrip = () => buildStrip(spineAt, curveLen, -latMin + VERGE, latMax + VERGE, (x, z) => edgeDistance(x, z), heightAt, imagery, manifest.bbox, grassTex('grass_mown'), grassTex('grass_rough'), lite ? 4 : 2, lite ? 2 : 1, adjustments.active ? (x, y) => adjustments.at(x, y, adjScratch).ground_offset_m : null)
+    let strip = makeStrip()
     road.add(strip.mesh)
     sinkUnderStrip(terrainGeo, strip.heightAt)
+    // a road knob moved: every station's half width, the asphalt, then the strip that hugs it
+    const roadSignature = () => `${T.LANE_WIDTH}|${T.SHOULDER_OUT}|${T.SHOULDER_IN}`
+    let roadSig = roadSignature()
+    let roadTimer: ReturnType<typeof setTimeout> | undefined
+    const rebuildRoad = () => {
+      for (const arr of stGrid.values()) for (const r of arr) r.half = r.who === 0 ? pavedHalfAt(r.s) : pavedWidth(2) / 2
+      buildRoads()
+      road.remove(strip.mesh)
+      strip.mesh.geometry.dispose()
+      strip = makeStrip()
+      road.add(strip.mesh)
+      sinkUnderStrip(terrainGeo, strip.heightAt)
+    }
     group.add(road)
     // everything that stands on the ground near the road stands on the strip
     const groundNear = (x: number, y: number) => strip.heightAt(x, -y) ?? heightAt(x, y)
@@ -448,7 +512,7 @@ export async function buildSite(manifest: Manifest, status: (s: string) => void,
     group.add(trees)
     // near field: real (procedural) tree models around the eye
     status('growing…')
-    const near = new NearTrees(t.records, lite ? 140 : 240, lite ? 40 : 140)
+    const near = new NearTrees(t.records, lite ? 140 : 240, lite ? 60 : 300) // capacity here is the allocation ceiling; the live cap is the knob
     trees.add(near.group)
     // grass on the verge: open ground (no canopy), off the pavement, mown near the shoulder
     const canopyAt = sampler(chm)
@@ -479,18 +543,31 @@ export async function buildSite(manifest: Manifest, status: (s: string) => void,
         for (const i of skip) if (!shown.has(i)) imp!.setVisible(i, false, sizes[i])
         shown = new Set(skip)
       }
-      updateNear = (eye: THREE.Vector3, time: number) => {
-        if (near.update(eye)) refreshFar(near.near)
-        grass.update(eye)
+      updateNear = (eye: THREE.Vector3, time: number, fwd?: THREE.Vector3, pitch = 0) => {
+        if (near.update(eye, false, fwd, pitch)) refreshFar(near.near)
+        grass.update(eye, fwd, pitch)
         grass.tick(time)
+        imp!.tick()
       }
     } else {
       // no renderer (tests): lollipops for everything
       trees.add(t.crowns, t.trunks)
-      updateNear = (eye: THREE.Vector3, time: number) => {
-        if (near.update(eye)) t.refresh(near.near)
-        grass.update(eye)
+      updateNear = (eye: THREE.Vector3, time: number, fwd?: THREE.Vector3, pitch = 0) => {
+        if (near.update(eye, false, fwd, pitch)) t.refresh(near.near)
+        grass.update(eye, fwd, pitch)
         grass.tick(time)
+      }
+    }
+    retune = () => {
+      near.invalidate()
+      grass.invalidate()
+      if (roadSignature() !== roadSig) {
+        roadSig = roadSignature()
+        clearTimeout(roadTimer)
+        roadTimer = setTimeout(() => {
+          rebuildRoad()
+          grass.invalidate()
+        }, 250)
       }
     }
     setSeason = (season: Season) => {
@@ -530,7 +607,7 @@ export async function buildSite(manifest: Manifest, status: (s: string) => void,
     if (st.kind === 'bridge') {
       // a bridge we are on: concrete parapets along both pavement edges and an edge beam below the
       // deck, following the curve station by station — the deck itself is the road surface
-      const w = pavedWidth(lanesAt((st.s_start + st.s_end) / 2)) / 2 + 0.6
+      const w = pavedHalfAt((st.s_start + st.s_end) / 2) + 0.6
       for (let s = st.s_start; s < st.s_end; s += 4) {
         const a = spineAt(s), b = spineAt(Math.min(st.s_end, s + 4))
         const dir = b.pos.clone().sub(a.pos)
@@ -581,7 +658,7 @@ export async function buildSite(manifest: Manifest, status: (s: string) => void,
       mesh.position.set(mid.pos.x, deck + 0.3, mid.pos.z)
     } else {
       const deck = st.deck_z_min ?? mid.pos.y + (st.clearance_m ?? 6)
-      const width = pavedWidth(lanesAt((st.s_start + st.s_end) / 2))
+      const width = pavedHalfAt((st.s_start + st.s_end) / 2) * 2
       const op = overpassMesh({ pos: mid.pos, dir: mid.dir.clone().setY(0).normalize(), s: 0 }, deck, st.length_m, width, heightAt)
       op.traverse((o) => { o.userData = { structure: st } })
       structures.add(op)
@@ -609,8 +686,11 @@ export async function buildSite(manifest: Manifest, status: (s: string) => void,
 
   // placed assets from the editor
   status('placing…')
-  const placementsGroup = await buildPlacements(await loadPlacements(manifest.slug), await loadCatalog(), groundAtWorld)
+  const catalog = await loadCatalog()
+  const placementsGroup = await buildPlacements(await loadPlacements(manifest.slug), catalog, groundAtWorld)
   group.add(placementsGroup)
+  // authored bridges over the road (structures.json bridge_over)
+  structures.add(await buildBridges(overrides, catalog, spineAt, groundAtWorld, (s) => pavedHalfAt(s) * 2))
 
   return {
     manifest,
@@ -619,6 +699,7 @@ export async function buildSite(manifest: Manifest, status: (s: string) => void,
     adjustments,
     treeCount,
     updateNear,
+    retune,
     setSeason,
     groundAt: groundAtWorld,
     edgeDistance: edgeDistanceWorld,
@@ -649,4 +730,35 @@ function hash2(x: number, y: number): number {
   let h = (Math.floor(x * 4) * 73856093) ^ (Math.floor(y * 4) * 19349663)
   h = Math.imul(h ^ (h >>> 13), 0x5bd1e995)
   return ((h ^ (h >>> 15)) >>> 0) / 4294967296
+}
+
+function cutHorizon(geo: THREE.BufferGeometry, demBbox: [number, number, number, number], cell: number, heightAt: (x: number, y: number) => number) {
+  const pos = geo.getAttribute('position') as THREE.BufferAttribute
+  const [x0, y0, x1, y1] = demBbox
+  const removed = new Uint8Array(pos.count)
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), y = -pos.getZ(i) // site frame
+    if (x < x0 || x > x1 || y < y0 || y > y1) continue
+    const deep = x > x0 + cell * 1.5 && x < x1 - cell * 1.5 && y > y0 + cell * 1.5 && y < y1 - cell * 1.5
+    if (deep) removed[i] = 1
+    else pos.setY(i, heightAt(x, y) - 3.0)
+  }
+  const idx = geo.getIndex()!
+  const keep: number[] = []
+  for (let t = 0; t < idx.count; t += 3) {
+    const a = idx.getX(t), b = idx.getX(t + 1), c = idx.getX(t + 2)
+    if (removed[a] || removed[b] || removed[c]) continue
+    keep.push(a, b, c)
+  }
+  geo.setIndex(keep)
+  pos.needsUpdate = true
+  geo.computeVertexNormals()
+}
+
+/** Free the GPU side of a subtree (geometry only: materials are shared surface sets). */
+function disposeDeep(o: THREE.Object3D) {
+  o.traverse((c) => {
+    const m = c as THREE.Mesh
+    if (m.geometry) m.geometry.dispose()
+  })
 }

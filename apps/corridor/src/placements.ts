@@ -26,6 +26,10 @@ export interface CatalogEntry {
   glb?: string | null
   footprint_m: [number, number]
   height_m: number
+  /** how a normalised TRELLIS model is scaled: to `height_m` (default) or so its longest horizontal axis = span */
+  fit?: 'height' | 'span'
+  /** a generated .glb faces whichever way the reconstruction left it; one number per asset, set by eye, applied on top of every placement's yaw */
+  yaw_offset_deg?: number
 }
 
 // tools/assetgen/finish.mjs always Draco-compresses; without a decoder GLTFLoader rejects silently
@@ -87,7 +91,7 @@ export async function buildPlacements(items: Placement[], catalog: Map<string, C
     const y = it.z ?? groundAt(it.x, wz) ?? 0
     const holder = new THREE.Group()
     holder.position.set(it.x, y, wz)
-    holder.rotation.y = -(it.yaw_deg * Math.PI) / 180
+    holder.rotation.y = -((it.yaw_deg + (entry?.yaw_offset_deg ?? 0)) * Math.PI) / 180
     holder.scale.setScalar(it.scale || 1)
     holder.userData = { placement: it, entry }
     const [fw, fl] = entry?.footprint_m ?? [10, 10]
@@ -100,15 +104,7 @@ export async function buildPlacements(items: Placement[], catalog: Map<string, C
         glbCache.set(url, p)
       }
       try {
-        // TRELLIS reconstructions come normalised to a ~1 m cube with no real scale; fit the model
-        // to the catalog's height (uniform) and set its base on the ground
-        const model = (await p).clone(true)
-        const box = new THREE.Box3().setFromObject(model)
-        const size = box.getSize(new THREE.Vector3())
-        const k = size.y > 1e-6 ? h / size.y : 1
-        model.scale.setScalar(k)
-        model.position.set(-((box.min.x + box.max.x) / 2) * k, -box.min.y * k, -((box.min.z + box.max.z) / 2) * k)
-        holder.add(model)
+        holder.add(fitModel((await p).clone(true), entry, h))
       } catch (e) {
         console.warn(`placement ${it.id}: ${url} failed to load, drawing a box`, e)
         holder.add(new THREE.Mesh(new THREE.BoxGeometry(fw, h, fl), boxMat).translateY(h / 2))
@@ -126,4 +122,48 @@ export async function buildPlacements(items: Placement[], catalog: Map<string, C
     g.add(holder)
   }
   return g
+}
+
+/**
+ * TRELLIS reconstructions come normalised to a ~1 m cube with no real scale. Fit the model
+ * uniformly: to `targetH` metres tall (fit "height"), or so its longest horizontal axis is
+ * `span` metres (fit "span", for bridges laid across a road). Base on the ground, centred in plan,
+ * long axis along local X.
+ */
+export function fitModel(model: THREE.Object3D, entry: CatalogEntry | undefined, targetH: number, span?: number): THREE.Object3D {
+  const box = new THREE.Box3().setFromObject(model)
+  const size = box.getSize(new THREE.Vector3())
+  let k = size.y > 1e-6 ? targetH / size.y : 1
+  const wrap = new THREE.Group()
+  if ((entry?.fit === 'span' || span) && span) {
+    // long axis to X first, then scale it to the span
+    if (size.z > size.x) {
+      model.rotation.y = Math.PI / 2
+      box.setFromObject(model)
+      box.getSize(size)
+    }
+    k = size.x > 1e-6 ? span / size.x : 1
+  }
+  model.scale.setScalar(k)
+  box.setFromObject(model)
+  model.position.set(model.position.x - (box.min.x + box.max.x) / 2, model.position.y - box.min.y, model.position.z - (box.min.z + box.max.z) / 2)
+  wrap.add(model)
+  return wrap
+}
+
+/** Load a catalog asset's model (cached), or null when it has no glb. */
+export async function loadAssetModel(entry: CatalogEntry | undefined): Promise<THREE.Object3D | null> {
+  if (!entry?.glb) return null
+  const url = `/${entry.glb.replace(/^\//, '')}`
+  let p = glbCache.get(url)
+  if (!p) {
+    p = loader.loadAsync(url).then((gltf) => gltf.scene)
+    glbCache.set(url, p)
+  }
+  try {
+    return (await p).clone(true)
+  } catch (e) {
+    console.warn(`asset ${entry.id}: ${url} failed to load`, e)
+    return null
+  }
 }

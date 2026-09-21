@@ -1,7 +1,17 @@
 # AUTOGEN — growing neighbourhoods, business parks and towns along a corridor
 
-Design only; no code yet. What follows is the rule set a future `python -m corridor autogen <slug>`
-would implement, writing `placements.json` (and adjustment-area seeds) into a baked site.
+**Implemented**, in the browser, as mode 3 of the corridor editor:
+`apps/corridor/src/editor/autogen.ts` (the rules) and `grow.ts` (the loop around them). Press **G**
+in `/editor.html`; the result is `g-` items in `placements.json`.
+
+It runs in the browser rather than as a `python -m corridor autogen` subcommand, and that was a
+change of plan worth recording. The loop this has to serve is *generate → look at it → fix the six
+it got wrong → generate again*, and a loop with a shell round trip in it is a loop nobody runs
+twice. Everything the rules need is already in `web/manifest.json`; the three quantities that
+genuinely need the GIS stack are precomputed there by `corridor/buildings.py` (§10).
+
+Sections 2–7 below are the rule set, and describe the shipped code. §8 is the override model —
+how a regeneration keeps the corrections you made to the last one. §9 says what is not done.
 
 ## 1. What the corridor already knows
 
@@ -74,16 +84,24 @@ fit = |ln(A_catalog / A_footprint)| + |ln(E_catalog / E_footprint)| + 0.5·|ln(h
 score = fit + (0 if entry.category == c else 1.5)
 ```
 
-Take the best. Then `scale = sqrt(A_footprint / A_catalog)`, **clamped to [0.8, 1.3]**. Outside
-that clamp the asset is the wrong object, not a small one: fall back to **procedural massing** —
-extrude the real ring to `H` with a roof and a category-tinted facade material. A 180 m distribution
-centre is always procedural; nothing in a catalog of ten boxes is that shape.
+Take the best. Then `scale = sqrt(A_footprint / A_catalog)`, and an entry that would need to go
+outside **`scale_min..scale_max`** (0.7–1.4 by default, both knobs in the panel) is not considered
+at all — it is the wrong object, not a small one. If nothing fits, the footprint is skipped and
+counted under *no catalog asset fits*, which is a message about the catalog rather than the site.
+The catalog therefore has to span the range: 19 entries from a 6 × 4 m shed to a 120 × 78 m big
+box, `footprint_m` always **[long, short]**.
 
 ## 5. Siting (R4)
 
-- **Yaw**: perpendicular to the nearest spine/sibling tangent, facing the road. Where the real ring
-  exists, use the minimum rotated rectangle's long axis instead — it beats the road normal on a
-  corner lot. (`PlaceMode.yawOfRoad` in the editor already does the road-normal half.)
+- **Yaw**: the minimum rotated rectangle's long axis, wherever a real footprint exists — it beats
+  the road normal on a corner lot and on a cul-de-sac, and the bake measured it. Invented frontage
+  has no rectangle, so it uses the road normal (`yawFacingRoad`).
+  **Watch the frame.** `rect.yaw_deg` is `degrees(atan2(dy, dx)) % 180`, a math angle measured
+  counterclockwise from EAST, describing an axis. A placement's `yaw_deg` is a compass bearing,
+  rendered as `rotation.y = -yaw·π/180`. The conversion that puts a box's long side on the
+  rectangle is `yaw = -rect.yaw_deg` (`yawForLongAxis` in `editor/corridor.ts`). Get the sign
+  wrong and you get a town mirrored about the east axis, which looks entirely plausible until you
+  put it next to the air photo.
 - **Setback**, from the *pavement edge* (not the centreline), when the footprint is invented rather
   than real: `commercial` 30 m (parking in front), `retail_unit` in a mall row 45 m, `residential`
   14 m, `industrial` 45 m, `farm` 70 m, `civic` 25 m.
@@ -127,21 +145,54 @@ Density falls off with distance from the nearest real junction in `crossings.jso
 400 m of a junction, half beyond 800 m, nothing beyond 1500 m. Roadside commerce grows at the exits
 and this is the cheapest way to make an invented town look like it grew rather than got extruded.
 
-## 8. Output contract
+## 8. Override — what survives a regeneration
 
-Autogen writes items with ids prefixed **`g-`** into `placements.json` and areas prefixed **`g-`**
-into `adjustments.json`. On a re-run it replaces every `g-` id and **touches nothing else** — a
-hand-placed `p-07` or a hand-drawn `a-03` survives regeneration untouched, the same rule
-`python -m corridor areas` already follows. A `--seed` makes runs reproducible; it is recorded in
-the file so a placement can be traced back to the run that made it.
+The generator is only useful if you can disagree with it, so an id is never a fresh guid. A
+generated item's id is **derived from its source building index** (`g-137`), or for invented
+frontage from its side and along-track metre (`g-inv-l-2480`). The same input lands on the same id
+every run, which is what makes the following work:
 
-## 9. Staging
+| you did | stored as | what the next generate does |
+|---|---|---|
+| moved / turned / scaled / retagged a `g-` item | `"locked": true` on the item | leaves it exactly as it is |
+| deleted a `g-` item | its id in `autogen.deleted` | does not put it back |
+| placed something by hand | a `p-` id | never touched — hand items are not autogen's business |
+| changed a knob | `autogen.params` | everything unlocked is re-made under the new rules |
 
-1. real OSM footprints in-corridor → categories → catalog assets or procedural massing
-2. Overture heights and names layered over that (better `H`, and a name turns a `retail_unit` into
-   a pole sign worth reading)
-3. procedural lots, fences, poles
-4. invented settlements (R5)
+So "generate, fix six, try a different density" costs one keypress and keeps the six. The panel
+shows the tally — generated / locked / by hand / deleted — with buttons to restore the deleted and
+to unlock everything, and `clear generated` for a genuine clean slate.
+
+`placements.json` therefore carries one optional block the viewer ignores:
+
+```jsonc
+"autogen": { "params": { …the knobs… }, "deleted": ["g-88"], "ran": "2026-09-21T01:12:00Z" }
+```
+
+Only the invented frontage is random, and it is seeded — footprints from the bake give the same
+answer every run, so pressing generate twice with the same knobs is a no-op.
+
+## 9. What is not done
+
+- **Procedural lots, striping, driveways, fences, power poles** (§6). The rules are written; none
+  of it is generated. It is the next largest visible win after the buildings themselves.
+- **Ground as adjustment areas.** §6 says a parking lot or a farmyard is a change to what the
+  ground *is*, and belongs in `adjustments.json`. Autogen emits placements only; it does not yet
+  write `g-` areas. Concretely this means a generated building can stand in a stretch the lidar
+  says is forest, with trees through it — the canopy is not cleared under a new footprint, because
+  the browser has no canopy sampler. Either the bake zeroes the CHM under `buildings[]` the way it
+  already does under the road, or `Site` exposes a canopy lookup and autogen emits the clearings.
+  The first is less code and helps every consumer.
+- **Overture** heights and names. `buildings.py` has the slot (`height_src`); nothing fetches them,
+  so 156 of frederick-i70's 347 footprints fall through to the 6 m default.
+- **Non-uniform fit.** A `Placement` carries one uniform `scale`, so a catalog asset is matched to
+  a footprint's AREA and rejected if it would have to stretch past `scale_min..scale_max`. A real
+  46 × 30 m footprint therefore gets an asset of roughly the right size rather than exactly the
+  right outline. The honest fix is procedural massing from `ring` — extrude the real polygon —
+  which is a renderer feature, not an autogen one.
+- **Model facing.** The box proxies have their long side on local +X, so §5's yaw is exact for
+  them. A reconstructed `.glb` faces whichever way TRELLIS left it; a per-entry `yaw_offset_deg`
+  in the catalog is the place to fix that, one number per asset, by eye.
 
 ## 10. What the bake has to add first
 

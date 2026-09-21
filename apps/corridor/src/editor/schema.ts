@@ -1,10 +1,10 @@
-// The two authored files, and how they get to and from disk.
+// The three authored files, and how they get to and from disk.
 //
-// Both live BESIDE the bake (tools/corridor/data/sites/<slug>/{adjustments,placements}.json), not
-// inside web/ — the bake owns web/ and would overwrite them. In dev the Vite middleware serves
-// them at /sites/<slug>/*.json and accepts a PUT back to the same path; that is the only writable
-// path in the app. `python -m corridor areas` writes adjustments.json too, seeding the areas this
-// editor then tunes, so the two must agree on the shape exactly.
+// All live BESIDE the bake (tools/corridor/data/sites/<slug>/{adjustments,placements,structures}
+// .json), not inside web/ — the bake owns web/ and would overwrite them. In dev the Vite
+// middleware serves them at /sites/<slug>/*.json and accepts a PUT back to the same path; that is
+// the only writable path in the app. `python -m corridor areas` writes adjustments.json too,
+// seeding the areas this editor then tunes, so the two must agree on the shape exactly.
 
 /** Every knob an area can turn. NOTHING may be added here without telling the main agent: the
  *  viewer (scene.ts) consumes this key set to decide what a polygon does to trees, grass, the
@@ -46,12 +46,71 @@ export interface Placement {
   scale: number
   snap: 'ground' | 'free'
   tags: string[]
+  /**
+   * Set on a generated (`g-`) item the moment a human touches it. Regeneration then leaves it
+   * alone. This is the whole override story: you are never editing a file that is about to be
+   * rewritten out from under you, and you never have to remember which ones you fixed.
+   * Absent on hand-placed items, which are never regenerated anyway.
+   */
+  locked?: boolean
+}
+
+/** What autogen remembers between runs. The viewer ignores it; only `items` is rendered. */
+export interface AutogenState {
+  params: Record<string, number | boolean>
+  /** generated ids the human deleted — regeneration must not bring them back */
+  deleted: string[]
+  ran?: string
 }
 
 export interface Placements {
   version: 1
   items: Placement[]
+  autogen?: AutogenState
 }
+
+/** A generated item, as opposed to one a human placed by hand. */
+export const isGenerated = (p: Placement) => p.id.startsWith('g-')
+
+/**
+ * What a human says the road does where the lidar could not tell. Intervals are ALONG-TRACK
+ * metres on the site's spine (`manifest.spine`, `site.spineAt(s)`), never x/y: a re-bake that
+ * moves the centreline sideways keeps the bridge over the road.
+ *
+ *   flatten      the grade between the two ends is a straight line (the viewer applies it to the
+ *                spline before anything is built, so the strip, car and paint follow)
+ *   suppress     detected structures (profile.json) inside the interval are ignored
+ *   bridge_over  `asset` centred at mid-interval, long axis ACROSS the road (+ yaw_offset_deg),
+ *                scaled so its long axis = span_m, underside at road + clearance_m, abutments on
+ *                the ground
+ *
+ * The four bridge keys are present only on `bridge_over`. The viewer (src/structures.ts, the
+ * main agent's) consumes this key set — nothing may be added without telling them.
+ */
+export type StructureKind = 'bridge_over' | 'flatten' | 'suppress'
+
+export interface StructureItem {
+  id: string
+  name: string
+  kind: StructureKind
+  s_start: number
+  s_end: number
+  clearance_m?: number
+  asset?: string
+  span_m?: number
+  yaw_offset_deg?: number
+}
+
+export interface Structures {
+  version: 1
+  items: StructureItem[]
+}
+
+export const STRUCTURE_KINDS: { kind: StructureKind; label: string; note: string }[] = [
+  { kind: 'bridge_over', label: 'bridge over', note: 'a catalog bridge spans the road at the middle of the interval; the interval length is the bridge depth along the road' },
+  { kind: 'flatten', label: 'flatten', note: 'the road grade between the two ends becomes a straight line — for lidar noise under a bridge or a junk-classified flight' },
+  { kind: 'suppress', label: 'suppress', note: 'structures the profile detected inside the interval are ignored — for a canopy or a gantry that read as a bridge' },
+]
 
 export const NEUTRAL: Adjust = {
   canopy_scale: 1,
@@ -122,8 +181,10 @@ export const loadAdjustments = (slug: string) => load<Adjustments>(`/sites/${slu
 export const saveAdjustments = (slug: string, doc: Adjustments) => save(`/sites/${slug}/adjustments.json`, doc)
 export const loadPlacements = (slug: string) => load<Placements>(`/sites/${slug}/placements.json`, { version: 1, items: [] })
 export const savePlacements = (slug: string, doc: Placements) => save(`/sites/${slug}/placements.json`, doc)
+export const loadStructures = (slug: string) => load<Structures>(`/sites/${slug}/structures.json`, { version: 1, items: [] })
+export const saveStructures = (slug: string, doc: Structures) => save(`/sites/${slug}/structures.json`, doc)
 
-/** Lowest free `a-NN` / `p-NN`, so hand-drawn ids never collide with the generated ones. */
+/** Lowest free `a-NN` / `p-NN` / `st-NN`, so hand-drawn ids never collide with the generated ones. */
 export function nextId(prefix: string, taken: Iterable<string>): string {
   const used = new Set(taken)
   for (let i = 1; i < 1000; i++) {

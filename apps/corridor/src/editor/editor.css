@@ -38,3 +38,38 @@ button.danger:hover { border-color: #e2564f; color: #e2564f; }
 .chip { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; padding: 4px 6px; text-align: left; }
 .chip.on { border-color: #2ee6c0; background: #14302c; }
 .chip .nm { font-size: 12px; }
+
+/* mode 3 · grow -------------------------------------------------------------------------------- */
+button.primary { border-color: #2ee6c0; color: #2ee6c0; }
+button.primary:hover { background: #14302c; }
+.tally { display: flex; gap: 10px; flex-wrap: wrap; color: var(--dim); font-size: 11px; }
+.tally .hot { color: var(--accent); }
+.item .nm.dim { color: #7c838c; }
+
+/* preview dialog ------------------------------------------------------------------------------
+   A full-screen backdrop with a window cut into it. The window's middle is `.pv-view`, an empty
+   div whose bounding box the renderer scissors to — nothing is drawn into the DOM there, the
+   WebGL canvas behind simply shows through only inside that rect. */
+.preview {
+  position: fixed; inset: 0; z-index: 20; background: rgba(6, 8, 11, 0.82);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0;
+  padding: 3vh 3vw; box-sizing: border-box;
+}
+/* above the canvas, which is lifted to 21 and clipped to the hole while previewing */
+.pv-bar, .pv-hud, .pv-help { position: relative; z-index: 22; }
+.pv-bar {
+  display: flex; align-items: center; gap: 8px; width: min(1500px, 94vw);
+  background: var(--panel); border: 1px solid #2a2f38; border-bottom: 0; padding: 7px 10px; box-sizing: border-box;
+}
+.pv-title { color: #2ee6c0; letter-spacing: 0.1em; text-transform: uppercase; font-size: 11px; margin-right: auto; }
+.pv-bar select { background: #1a1d24; color: var(--fg); border: 1px solid #333; padding: 3px 5px; }
+.pv-view {
+  width: min(1500px, 94vw); flex: 1 1 auto; min-height: 0; max-height: 82vh;
+  border: 1px solid #2a2f38; cursor: grab; touch-action: none;
+}
+.pv-view:active { cursor: grabbing; }
+.pv-hud {
+  width: min(1500px, 94vw); box-sizing: border-box; padding: 5px 10px;
+  background: var(--panel); border: 1px solid #2a2f38; border-top: 0; color: var(--fg); font-size: 12px;
+}
+.pv-help { width: min(1500px, 94vw); color: #6d737b; font-size: 11px; padding: 6px 2px; box-sizing: border-box; }

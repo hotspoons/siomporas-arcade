@@ -10,6 +10,7 @@
 //              wheel dollies (OrbitControls, exponential)
 //   the target's height eases toward the ground under it, so a flight over a ridge follows it
 import * as THREE from 'three'
+import * as T from './tuning'
 import type { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 
 const UP = new THREE.Vector3(0, 1, 0)
@@ -114,6 +115,6 @@ export class FlyControls {
     } else ctl.target.set(nx, ctl.target.y, nz)
     // never below the ground under the camera
     const cy = this.groundAt(cam.position.x, cam.position.z)
-    if (cy !== null && cam.position.y < cy + 1.6) cam.position.y = cy + 1.6
+    if (cy !== null && cam.position.y < cy + T.CAM_MIN_HEIGHT) cam.position.y = cy + T.CAM_MIN_HEIGHT
   }
 }

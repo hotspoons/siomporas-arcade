@@ -10,6 +10,7 @@
 import * as THREE from 'three'
 import { Tree } from '@dgreenheck/ez-tree'
 import { greyscaleTexture, type SeasonLook } from './season'
+import * as T from './tuning'
 
 export interface TreeRecord {
   x: number // world X (east)
@@ -80,15 +81,15 @@ export class NearTrees {
   private trees: TreeRecord[]
   private grid = new Map<string, number[]>()
   private cell = 50
-  private radius: number
   private last = new THREE.Vector3(Infinity, Infinity, Infinity)
+  private lastHeading = 0
   private capacity: number
   /** which tree index is currently drawn as a near model, so the far set can skip it */
   near = new Set<number>()
 
   constructor(trees: TreeRecord[], radius = 220, capacity = 240) {
     this.trees = trees
-    this.radius = radius
+    void radius // live radius is the knob TREE_NEAR_RADIUS
     this.capacity = capacity
     this.group.name = 'near-trees'
     for (const p of PRESETS) {
@@ -146,26 +147,36 @@ export class NearTrees {
   }
 
   /** Re-assign near models around `eye`. Cheap: only cells within the radius are visited. Returns true when the set changed. */
-  update(eye: THREE.Vector3, force = false): boolean {
-    if (!force && eye.distanceTo(this.last) < 15) return false
+  /** Force a re-pick on the next update (a knob changed). */
+  invalidate() {
+    this.last.set(Infinity, Infinity, Infinity)
+  }
+
+  update(eye: THREE.Vector3, force = false, fwd = new THREE.Vector3(1, 0, 0), pitch = 0): boolean {
+    const heading = Math.atan2(fwd.x, fwd.z)
+    const turned = Math.abs(heading - this.lastHeading) > 0.44
+    if (!force && !turned && eye.distanceTo(this.last) < 15) return false
     this.last.copy(eye)
-    const r2 = this.radius * this.radius
+    this.lastHeading = heading
+    // radius and capacity are knobs (F6 → trees); the footprint is stretched behind the view
+    const radius = T.TREE_NEAR_RADIUS
+    const cap = Math.min(this.capacity, Math.round(T.TREE_NEAR_CAPACITY))
     const cands: { i: number; d2: number }[] = []
     const c0 = Math.floor(eye.x / this.cell), c1 = Math.floor(eye.z / this.cell)
-    const n = Math.ceil(this.radius / this.cell)
+    const n = Math.ceil((radius * (1 + T.LOD_BEHIND_PENALTY)) / this.cell)
     for (let a = -n; a <= n; a++) {
       for (let b = -n; b <= n; b++) {
         const arr = this.grid.get(`${c0 + a},${c1 + b}`)
         if (!arr) continue
         for (const i of arr) {
           const t = this.trees[i]
-          const d2 = (t.x - eye.x) ** 2 + (t.z - eye.z) ** 2
-          if (d2 <= r2) cands.push({ i, d2 })
+          const d = T.lodDistance(t.x - eye.x, t.z - eye.z, fwd.x, fwd.z, pitch)
+          if (d <= radius) cands.push({ i, d2: d * d })
         }
       }
     }
     cands.sort((p, q) => p.d2 - q.d2)
-    const total = Math.min(cands.length, this.capacity * this.variants.length)
+    const total = Math.min(cands.length, cap * this.variants.length)
     const counts = this.variants.map(() => 0)
     const m = new THREE.Matrix4()
     const q = new THREE.Quaternion()
@@ -176,8 +187,8 @@ export class NearTrees {
       const { i } = cands[k]
       const t = this.trees[i]
       let vi = this.variantFor(t, i)
-      if (counts[vi] >= this.capacity) vi = counts.indexOf(Math.min(...counts))
-      if (counts[vi] >= this.capacity) break
+      if (counts[vi] >= cap) vi = counts.indexOf(Math.min(...counts))
+      if (counts[vi] >= cap) break
       const v = this.variants[vi]
       const scale = t.h / v.nativeHeight
       q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), ((i * 137) % 360) * (Math.PI / 180))

@@ -9,7 +9,8 @@
 // so a re-bake with a better DEM moves the diner with the hillside instead of burying it.
 import * as THREE from 'three'
 import { instanceOf, loadCatalog, tintOf, type Catalog, type CatalogEntry } from './catalog'
-import { loadPlacements, nextId, savePlacements, type Placement, type Placements } from './schema'
+import { isGenerated, loadPlacements, nextId, savePlacements, type Placement, type Placements } from './schema'
+import { yawFacingRoad } from './corridor'
 import { el } from './ui'
 import type { Site } from '../scene'
 
@@ -62,6 +63,24 @@ export class PlaceMode {
     this.markSelected()
   }
 
+  /**
+   * Rebuild every object from the document. Autogen rewrites `doc.items` wholesale, and the
+   * scene has to follow it — the alternative is a diff, and a diff that is wrong leaves a ghost
+   * building in the world with nothing behind it.
+   */
+  async respawn() {
+    for (const o of this.objects.values()) this.group.remove(o)
+    this.objects.clear()
+    await Promise.all(this.doc.items.map((p) => this.spawn(p)))
+    if (this.selected && !this.objects.has(this.selected)) this.selected = null
+    this.markSelected()
+  }
+
+  /** The catalog, for the modes that generate against it. */
+  get assets(): CatalogEntry[] {
+    return this.catalog.assets
+  }
+
   private entry(id: string): CatalogEntry | undefined {
     return this.catalog.assets.find((a) => a.id === id)
   }
@@ -73,7 +92,11 @@ export class PlaceMode {
 
   private place(o: THREE.Object3D, p: Placement) {
     o.position.set(p.x, this.zOf(p), -p.y)
-    o.rotation.y = (p.yaw_deg * Math.PI) / 180
+    // MINUS. `yaw_deg` is a compass bearing (0 = north = world −Z, 90 = east = +X) and three
+    // rotates a local −Z front to (−sinθ, 0, −cosθ), so θ = −yaw. The viewer's placements.ts uses
+    // the same sign; with `+` here the editor drew every asymmetric model mirrored against the
+    // game, and the selection arrow — built from the compass bearing — disagreed with it.
+    o.rotation.y = -(p.yaw_deg * Math.PI) / 180
     o.scale.setScalar(p.scale)
   }
 
@@ -144,26 +167,15 @@ export class PlaceMode {
    * the human turning each one by hand.
    */
   private yawOfRoad(x: number, y: number): number {
-    if (!this.site) return 0
-    const len = this.site.manifest.spine.length_m
-    let best = Infinity
-    let bs = 0
-    for (let s = 0; s <= len; s += 20) {
-      const p = this.site.spineAt(s).pos
-      const d = (p.x - x) ** 2 + (p.z + y) ** 2
-      if (d < best) {
-        best = d
-        bs = s
-      }
-    }
-    const at = this.site.spineAt(bs)
-    // face the road: perpendicular to the travel direction, on the side the point is on
-    const side = Math.sign((x - at.pos.x) * -at.dir.z - (-y - at.pos.z) * at.dir.x) || 1
-    const dir = new THREE.Vector3(-at.dir.z, 0, at.dir.x).multiplyScalar(-side)
-    return (Math.round((Math.atan2(dir.x, -dir.z) * 180) / Math.PI) + 360) % 360
+    return this.site ? yawFacingRoad(this.site, x, y) : 0
   }
 
   remove(id: string) {
+    // A deleted generated item is remembered, or the next generate puts it straight back.
+    if (id.startsWith('g-')) {
+      this.doc.autogen ??= { params: {}, deleted: [] }
+      if (!this.doc.autogen.deleted.includes(id)) this.doc.autogen.deleted.push(id)
+    }
     const o = this.objects.get(id)
     if (o) this.group.remove(o)
     this.objects.delete(id)
@@ -177,6 +189,8 @@ export class PlaceMode {
     const p = this.doc.items.find((x) => x.id === this.selected)
     if (!p) return
     fn(p)
+    // A generated item the human has moved is now the human's. Regeneration will skip it.
+    if (isGenerated(p)) p.locked = true
     const o = this.objects.get(p.id)
     if (o) this.place(o, p)
     this.dirty = true
@@ -317,6 +331,7 @@ export class PlaceMode {
     ti.value = p.tags.join(', ')
     ti.oninput = () => {
       p.tags = ti.value.split(',').map((t) => t.trim()).filter(Boolean)
+      if (isGenerated(p)) p.locked = true
       this.dirty = true
       this.onChange(false)
     }

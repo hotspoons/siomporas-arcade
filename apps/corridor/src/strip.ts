@@ -57,7 +57,7 @@ export function buildStrip(
       // the editor's ground_offset_m raises or lowers the verge, never the pavement, fading in
       // over the same 0.6–7 m band the DEM blend uses
       const off = offsetAt ? offsetAt(x, -z) * t : 0
-      const y = (e.d < 0.6 ? e.y - 0.08 : (e.y - 0.08) * (1 - t) + dem * t) + off
+      const y = (e.d < 0.6 ? e.y - 0.02 : (e.y - 0.02) * (1 - t) + dem * t) + off
       pos[k * 3] = x
       pos[k * 3 + 1] = y
       pos[k * 3 + 2] = z
@@ -143,11 +143,20 @@ export function buildStrip(
       if (d < best) { best = d; bi = i }
     }
     if (bi < 0) return null
+    // bilinear: along-track between this station and the next toward the point, across between
+    // the two lateral columns — a nearest-vertex lookup stepped the car 25 cm every 2 m
     const o = origins[bi], sd = sides[bi]
+    const fwd = { x: sd.z, z: -sd.x } // side = dir × up = (-dz, 0, dx), so dir = (side.z, 0, -side.x)
+    const alongM = (x - o.x) * fwd.x + (z - o.z) * fwd.z
+    const bj = alongM >= 0 ? Math.min(nS - 1, bi + 1) : Math.max(0, bi - 1)
+    const fa = Math.min(1, Math.abs(alongM) / along)
     const lat = (x - o.x) * sd.x + (z - o.z) * sd.z
-    const j = Math.round((lat + left) / across)
-    if (j < 0 || j >= nL) return null
-    return heights[bi * nL + j]
+    const jf = (lat + left) / across
+    const j0 = Math.floor(jf), j1 = Math.min(nL - 1, j0 + 1)
+    if (j0 < 0 || j0 >= nL) return null
+    const fj = jf - j0
+    const h = (i: number) => heights[i * nL + j0] * (1 - fj) + heights[i * nL + j1] * fj
+    return h(bi) * (1 - fa) + h(bj) * fa
   }
   return {
     mesh,

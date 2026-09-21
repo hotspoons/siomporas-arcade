@@ -31,7 +31,7 @@ Controls. **Fly** (trailworks scheme, `src/fly.ts`): WASD/arrows move along the 
 scales with distance to the orbit target, Shift sprints), Q/E turn the view about the camera, R/F
 dolly, T/G raise/lower, left-drag orbits, right-drag looks, wheel dollies; the target rides the
 ground. **Drive** (Tab; stuntin dynamics ported in `src/car.ts`): W/S throttle/brake, A/D steer,
-Space handbrake, R resets to the photo; drag looks around the chase camera. The car collides with
+Space handbrake, R resets to the photo; drag looks around the chase camera. **C copies a stance**: a URL that reproduces exactly this view (site, season, mode, camera or car, layers) — paste it in a bug report and `node probes/corridor-stance.mjs '<url>' out.png` renders it headlessly. **M** hides the panel. The car collides with
 tree trunks (radius from canopy height) and gets grass drag and grip off the pavement. P = photo,
 H = top.
 `?season=winter|spring|summer|autumn` or the picker in the header. Phones get a move pad (hold to glide) and drive buttons.
@@ -43,3 +43,4 @@ H = top.
 - After rendering to a render target with sub-viewports, restore viewport and scissor or the main view draws into a corner.
 - Under `InstancedMesh`, ez-tree's leaf material (custom wind shader) draws nothing; a plain material with the same texture does.
 - Per-frame rebuilds of tens of thousands of instance matrices stall a phone for a second; keep instance slots static and toggle with `addUpdateRange`.
+- **One surface, one height function.** Every bug of the form "green stuff on the road", "ribbons on the embankment", "the car shakes" has been two meshes modelling the same ground at different samplings (horizon vs near DEM; strip vs terrain; strip's stepped pavement vs the spline road). The rule: the carriageway spline is the road height, the strip is the only ground within 40 m of it, the horizon exists only outside the near DEM footprint. Reproduce with a stance and isolate by hiding layers before changing anything.

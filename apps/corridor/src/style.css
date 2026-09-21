@@ -69,3 +69,43 @@ footer { margin-top: auto; color: #666; font-size: 11px; line-height: 1.4; }
   #drivepad { display: flex; }
   #movepad { display: grid; }
 }
+
+/* the panel tab: a small handle that survives the panel being hidden */
+#paneltab { position: fixed; left: 340px; top: 8px; z-index: 3; width: 28px; height: 28px; padding: 0; font-size: 16px; line-height: 26px; }
+#panel.hidden { display: none; }
+#panel.hidden ~ #paneltab { left: 8px; }
+@media (max-width: 760px), (pointer: coarse) and (max-width: 1024px) {
+  #paneltab { left: auto; right: 8px; top: auto; bottom: 8px; }
+  #panel.hidden ~ #paneltab { left: auto; right: 8px; }
+}
+
+/* tuning host: the engine panels, one per tab, under a tab strip */
+#tunehost { position: fixed; right: 12px; top: 44px; z-index: 4; display: flex; flex-direction: column; gap: 6px; max-height: calc(100vh - 60px); width: min(380px, calc(100vw - 24px)); overflow-y: auto; overflow-x: hidden; box-sizing: border-box; }
+#tunehost > * { max-width: 100%; box-sizing: border-box; overflow-x: hidden; }
+#tunehost input[type=range] { max-width: 100%; }
+.geo-dialog { max-width: min(720px, 92vw); max-height: 80vh; overflow: auto; background: #14161a; color: #ddd; border: 1px solid #333; border-radius: 8px; padding: 16px 20px; font: 13px/1.45 system-ui, sans-serif; }
+.geo-dialog::backdrop { background: rgba(0,0,0,0.55); }
+.geo-more { margin-left: 6px; font-size: 11px; }
+#tunehost.hidden { display: none; }
+.tunetabs { display: flex; gap: 4px; }
+.tunetabs button { padding: 4px 10px; }
+.tunetabs button.active { border-color: var(--accent); color: var(--accent); }
+#tunehost .tune { position: static !important; }
+
+/* inset map: bottom-right on desktop, top-right and smaller on phones */
+#minimap { position: fixed; right: 12px; bottom: 12px; z-index: 2; }
+#minimap canvas { border-radius: 50%; box-shadow: 0 2px 12px rgba(0,0,0,0.5); background: #1b2a1f; display: block; touch-action: none; }
+#minimap button { position: absolute; left: 4px; bottom: 4px; width: 26px; height: 26px; padding: 0; border-radius: 50%; }
+@media (max-width: 760px), (pointer: coarse) and (max-width: 1024px) {
+  #minimap { right: 8px; bottom: auto; top: 44px; transform: scale(0.65); transform-origin: top right; }
+}
+
+#minimap button.expand { left: auto; right: 4px; bottom: 4px; }
+#minimap.expanded { right: 0; bottom: 0; left: 0; top: 0; display: flex; align-items: center; justify-content: center; background: rgba(13,15,18,0.7); z-index: 5; }
+#minimap.expanded canvas { border-radius: 12px; }
+#minimap.expanded button { bottom: 24px; }
+#minimap.expanded button.expand { right: 24px; }
+#minimap.expanded button:not(.expand) { left: 24px; }
+@media (max-width: 760px), (pointer: coarse) and (max-width: 1024px) {
+  #minimap.expanded { transform: none; top: 0; right: 0; }
+}

@@ -8,6 +8,7 @@ import { MiniMap } from './minimap'
 import { TunePanel } from '@apex/engine/app/TunePanel'
 import * as T from './tuning'
 import { TUNE_TABS } from './tuning'
+import { applySiteTuning, saveSiteTuning } from './sitetuning'
 
 import { fetchJSON, type IndexEntry, type Manifest, type Structure, type Crossing } from './site'
 import { LOOK, SEASONS, type Season } from './season'
@@ -125,7 +126,17 @@ async function loadSite(slug: string) {
   const st = readStanceParam()
   if (st && st.site === slug) applyStance(st)
   else toPhoto()
-  status('')
+  // per-site knob overrides, applied AFTER the panels have restored the browser's values so the
+  // committed file wins, and undoing whatever the previous site's file had set
+  const tuned = await applySiteTuning(slug, siteTuneAccess)
+  if (tuned.applied || tuned.unknown.length) {
+    onTuneChange()
+    // TunePanel.refresh is private, but toggle() refreshes a visible panel — reopening the active
+    // tab is the public way to make it show the values the site file just set
+    if (!tuneHost.classList.contains('hidden')) showTuneTab(tuneTab)
+    status(`${slug}: ${tuned.applied} site knobs applied${tuned.unknown.length ? `, ${tuned.unknown.length} unknown (${tuned.unknown.slice(0, 3).join(', ')})` : ''}`)
+    setTimeout(() => status(''), 4000)
+  } else status('')
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -430,6 +441,11 @@ panelTab.onclick = () => setPanelHidden(!panel.classList.contains('hidden'))
 // Tuning: one engine TunePanel per tab (grass, trees, LOD shape, road, car, camera), a tab strip
 // above them. F6 toggles. Values persist per browser under apex-corridor-<tab>; Copy JSON in a
 // panel hands the numbers back to tuning.ts. A change re-picks trees / re-seeds grass at once.
+// The code defaults, read BEFORE the panels restore localStorage over them. This is the baseline
+// a per-site tuning.json is a diff against; capture it any later and it is somebody's scratch pad.
+const TUNE_BASELINE: Record<string, number> = {}
+for (const t of TUNE_TABS) for (const sec of t.sections) for (const k of sec.keys) TUNE_BASELINE[k.name] = k.get()
+
 const tuneHost = document.createElement('div')
 tuneHost.id = 'tunehost'
 tuneHost.className = 'hidden'
@@ -449,6 +465,12 @@ const tunePanels = TUNE_TABS.map((tab) => {
   tabStrip.append(b)
   return { name: tab.name, panel: p, button: b }
 })
+const saveSiteBtn = document.createElement('button')
+saveSiteBtn.textContent = 'save to site'
+saveSiteBtn.title = 'write every knob that differs from the code default into this site\u2019s tuning.json, so the corridor keeps its own look'
+saveSiteBtn.onclick = () => void doSaveSiteTuning()
+tabStrip.append(saveSiteBtn)
+
 let tuneTab = tunePanels[0].name
 function showTuneTab(name: string) {
   tuneTab = name
@@ -457,6 +479,30 @@ function showTuneTab(name: string) {
     t.button.classList.toggle('active', t.name === name)
   }
 }
+/** How sitetuning.ts reaches the knobs, without it needing to know about TUNE_TABS. */
+const siteTuneAccess = {
+  get: (name: string) => tuneKey(name)?.get(),
+  set: (name: string, v: number) => {
+    const k = tuneKey(name)
+    if (!k) return false
+    k.set(v)
+    return true
+  },
+  names: () => Object.keys(TUNE_BASELINE),
+}
+
+/** Write the knobs that differ from the code defaults into this site's tuning.json. */
+async function doSaveSiteTuning() {
+  if (!site) return
+  try {
+    const r = await saveSiteTuning(site.manifest.slug, siteTuneAccess, TUNE_BASELINE)
+    status(`saved ${r.count} knobs to ${site.manifest.slug}/tuning.json (${r.bytes} bytes)`)
+  } catch (e) {
+    status(`site tuning: ${(e as Error).message}`)
+  }
+  setTimeout(() => status(''), 6000)
+}
+
 function toggleTune() {
   const on = tuneHost.classList.toggle('hidden')
   if (!on) showTuneTab(tuneTab)

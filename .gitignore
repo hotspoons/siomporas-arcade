@@ -52,3 +52,6 @@ apps/corridor/public/assets/*.glb
 # python bytecode: churns on every bake and has been landing in commits
 __pycache__/
 *.pyc
+
+# road-and-car: synthetic tiled-site fixture (probes/make-tiles.py), regenerable, not a bake
+apps/corridor/public/testdata/

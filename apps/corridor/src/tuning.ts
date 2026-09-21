@@ -73,6 +73,14 @@ export let LOD_TOPDOWN_PITCH = 0.9
 export let LANE_WIDTH = 3.66
 export let SHOULDER_OUT = 3.0
 export let SHOULDER_IN = 1.2
+/** m: width of the transition strip where the surface class changes. 0 = the old hard joint. */
+export let ROAD_BLEND_M = 0.15
+/** m: length a lane-count change is ramped over, so an auxiliary lane tapers instead of appearing
+ *  sideways in one quad. 0 = the old step. */
+export let ROAD_TAPER_M = 60
+/** 0 = a one-way carriageway's TRAVEL LANES are centred on the spine (OSM draws the way down the
+ *  lanes, so this is the truthful one); 1 = the asphalt is centred instead, as it was before. */
+export let ROAD_ONEWAY_CENTRE = 0
 
 // --- car (stuntin's Tuning.ts defaults and the Kestrel S9 spec; see apps/stuntin/src/sim) -------
 // engine (CarSpec 'kestrel' + longitudinal)
@@ -122,6 +130,12 @@ export let CAR_CLIMB_SLOPE = 1.5
 export let CAR_LAUNCH_MIN_SPEED = 20
 /** the ground must fall this far away from under the wheels (m) before the car is airborne (corridor: hysteresis over stuntin's one-tick test, which a faceted lidar strip would trip every station) */
 export let CAR_LAUNCH_GAP = 0.9
+/** m/s: the most vertical speed a crest can impart. A suspension cannot throw a car harder than
+ *  this however steep the height data pretends to be; 8 m/s is a 3.3 m jump. */
+export let CAR_LAUNCH_MAX_RISE = 8
+/** Arcade: how much more willingly a crest throws the car than physics says. 1 = measured reality;
+ *  above 1 the car holds its line over a brow longer than gravity allows. Rich dials it. */
+export let CAR_CREST_GAIN = 1
 /** vertical impact speed that wrecks the car (m/s) */
 export let CAR_CRASH_IMPACT_SPEED = 30
 /** how fast the nose follows the arc in the air, and the roll settles (1/s) */
@@ -140,10 +154,17 @@ export let CAR_ROCKET_MIN_SPEED = 0.94
 // --- camera -------------------------------------------------------------------------------------
 /** the fly camera may not go below the ground under it by less than this (m) */
 export let CAM_MIN_HEIGHT = 0.4
+/** m: eye height for the "sit on the road" key (G). Below ~0.25 m the 0.5 m near plane starts
+ *  clipping the surface out of the bottom of the frame. */
+export let CAM_SIT_HEIGHT = 1.5
 /** cockpit (C while driving): eye height above the car's origin, forward of it, and a little look-up */
 export let COCKPIT_EYE_UP = 1.15
 export let COCKPIT_EYE_FWD = 0.35
+/** m: the driver's seat is left of centre in the US, so the eye is too (negative = left) */
+export let COCKPIT_EYE_SIDE = -0.38
 export let COCKPIT_LOOK_UP = 0.6
+/** how much of the car's roll the cockpit view takes on: 0 = head stays level, 1 = bolted to the body */
+export let COCKPIT_ROLL = 0.6
 export let CHASE_BACK = 7.5
 export let CHASE_UP = 2.6
 export let CHASE_LOOK_AHEAD = 6
@@ -255,6 +276,9 @@ export const TUNE_TABS: TuneTab[] = [
           tune('LANE_WIDTH', () => LANE_WIDTH, (v) => (LANE_WIDTH = v), [2.5, 4.5], 0.01),
           tune('SHOULDER_OUT', () => SHOULDER_OUT, (v) => (SHOULDER_OUT = v), [0, 5], 0.1),
           tune('SHOULDER_IN', () => SHOULDER_IN, (v) => (SHOULDER_IN = v), [0, 5], 0.1),
+          tune('ROAD_BLEND_M', () => ROAD_BLEND_M, (v) => (ROAD_BLEND_M = v), [0, 2], 0.05, 'transition strip where the surface class changes (m); 0 = hard joint'),
+          tune('ROAD_TAPER_M', () => ROAD_TAPER_M, (v) => (ROAD_TAPER_M = v), [0, 200], 5, 'length a lane-count change is ramped over (m); 0 = a step'),
+          tune('ROAD_ONEWAY_CENTRE', () => ROAD_ONEWAY_CENTRE, (v) => (ROAD_ONEWAY_CENTRE = v), [0, 1], 1, '0 = lanes centred on the spine (OSM truth), 1 = asphalt centred (old)'),
         ],
       },
     ],
@@ -318,6 +342,8 @@ export const TUNE_TABS: TuneTab[] = [
         keys: [
           tune('CAR_LAUNCH_MIN_SPEED', () => CAR_LAUNCH_MIN_SPEED, (v) => (CAR_LAUNCH_MIN_SPEED = v), [0, 40], 1, 'slower than this and a crest is just followed (m/s)'),
           tune('CAR_LAUNCH_GAP', () => CAR_LAUNCH_GAP, (v) => (CAR_LAUNCH_GAP = v), [0.02, 2], 0.02, 'ground must fall this far away before you are airborne (m)'),
+          tune('CAR_LAUNCH_MAX_RISE', () => CAR_LAUNCH_MAX_RISE, (v) => (CAR_LAUNCH_MAX_RISE = v), [0, 30], 0.5, 'most vertical speed a crest can impart (m/s); 8 ≈ a 3.3 m jump'),
+          tune('CAR_CREST_GAIN', () => CAR_CREST_GAIN, (v) => (CAR_CREST_GAIN = v), [0.5, 6], 0.1, '1 = real physics; higher makes a crest throw the car sooner'),
           tune('CAR_CRASH_IMPACT_SPEED', () => CAR_CRASH_IMPACT_SPEED, (v) => (CAR_CRASH_IMPACT_SPEED = v), [5, 80], 1, 'vertical m/s that wrecks the car'),
           tune('CAR_AIR_NOSE_RATE', () => CAR_AIR_NOSE_RATE, (v) => (CAR_AIR_NOSE_RATE = v), [0.2, 10], 0.1, 'nose follows the arc, 1/s'),
           tune('CAR_AIR_ROLL_SETTLE', () => CAR_AIR_ROLL_SETTLE, (v) => (CAR_AIR_ROLL_SETTLE = v), [0.2, 10], 0.1, 'roll levels out, 1/s'),
@@ -342,9 +368,12 @@ export const TUNE_TABS: TuneTab[] = [
           tune('CHASE_UP', () => CHASE_UP, (v) => (CHASE_UP = v), [0.5, 15], 0.1),
           tune('CHASE_LOOK_AHEAD', () => CHASE_LOOK_AHEAD, (v) => (CHASE_LOOK_AHEAD = v), [0, 40], 0.5),
           tune('CHASE_LAG', () => CHASE_LAG, (v) => (CHASE_LAG = v), [1, 30], 0.5, 'higher = stiffer'),
+          tune('CAM_SIT_HEIGHT', () => CAM_SIT_HEIGHT, (v) => (CAM_SIT_HEIGHT = v), [0.25, 5], 0.05, 'eye height for G, sit on the road (m)'),
           tune('CAM_MIN_HEIGHT', () => CAM_MIN_HEIGHT, (v) => (CAM_MIN_HEIGHT = v), [0.05, 5], 0.05, 'fly camera floor above ground (m)'),
           tune('COCKPIT_EYE_UP', () => COCKPIT_EYE_UP, (v) => (COCKPIT_EYE_UP = v), [0.3, 3], 0.05),
           tune('COCKPIT_EYE_FWD', () => COCKPIT_EYE_FWD, (v) => (COCKPIT_EYE_FWD = v), [-2, 3], 0.05),
+          tune('COCKPIT_EYE_SIDE', () => COCKPIT_EYE_SIDE, (v) => (COCKPIT_EYE_SIDE = v), [-0.9, 0.9], 0.02, 'driver seat offset, - = left'),
+          tune('COCKPIT_ROLL', () => COCKPIT_ROLL, (v) => (COCKPIT_ROLL = v), [0, 1], 0.05, 'share of the body roll the head takes on'),
           tune('COCKPIT_LOOK_UP', () => COCKPIT_LOOK_UP, (v) => (COCKPIT_LOOK_UP = v), [-3, 3], 0.1),
         ],
       },

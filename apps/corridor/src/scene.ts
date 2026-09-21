@@ -12,7 +12,7 @@ import { buildStrip, sinkUnderStrip } from './strip'
 import { Adjustments, NEUTRAL as NEUTRAL_ADJ } from './adjust'
 import { buildPlacements, loadCatalog, loadPlacements } from './placements'
 import { buildBridges, flattenSpine, loadStructureOverrides, suppressed } from './structures'
-import { loadSurfaceSets, overpassMesh, pavedWidth, roadMesh, stations, treesFromCanopy, type SurfaceSet } from './props'
+import { loadSurfaceSets, overpassMesh, pavedOffset, pavedWidth, roadMesh, stations, taperedLanes, treesFromCanopy, type SurfaceSet } from './props'
 
 let surfaceSets: Record<string, SurfaceSet> | null = null
 
@@ -293,9 +293,22 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
   status('paving…')
   const segs = manifest.spine.segments
   const segAt = (s: number) => segs.find((g) => g.s_start - 0.5 <= s && s <= g.s_end + 0.5)
-  const lanesAt = (s: number) => {
+  const stepLanes = (s: number) => {
     const n = Number(segAt(s)?.tags.lanes)
     return Number.isFinite(n) && n > 0 ? n : 2
+  }
+  // OSM's lane count is a step function; a lane that appears in one 6 m quad is a road growing
+  // sideways. taperedLanes ramps it over ROAD_TAPER_M so the width, the edge line and the shoulder
+  // converge together. It goes HERE rather than inside roadMesh so that the asphalt and
+  // edgeDistance keep using the same width — that agreement is what the two-way fix restored.
+  let taperFor = -1
+  let laneFn: (s: number) => number = stepLanes
+  const lanesAt = (s: number) => {
+    if (taperFor !== T.ROAD_TAPER_M) {
+      taperFor = T.ROAD_TAPER_M
+      laneFn = taperedLanes(stepLanes, manifest.spine.length_m, T.ROAD_TAPER_M)
+    }
+    return laneFn(s)
   }
   // OSM: oneway=yes, or a motorway (implicitly one way), is a carriageway; everything else with
   // oneway=no or untagged is a two-way road with traffic both directions on one pavement
@@ -306,6 +319,12 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
     return !['motorway', 'motorway_link', 'trunk_link', 'primary_link'].includes(tg.highway ?? '')
   }
   const pavedHalfAt = (s: number) => pavedWidth(lanesAt(s), twoWayAt(s)) / 2
+  // How far right of the spine the asphalt's centre sits: 0 on a two-way road, half the shoulder
+  // difference on a carriageway, because OSM draws a motorway down its travel lanes and not down
+  // the middle of its asphalt. edgeDistance has to use this or the pavement the car and the grass
+  // believe in drifts 0.9 m from the one the asphalt mesh draws — the same class of disagreement
+  // the two-way width fix removed.
+  const pavedOffsetAt = (s: number) => pavedOffset(twoWayAt(s))
   const road = new THREE.Group()
   road.name = 'road'
   surfaceSets ??= await loadSurfaceSets()
@@ -413,24 +432,24 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
     // stations every 5 m from the spine and every sibling, hashed on a 20 m grid with each
     // station carrying its own half width. Grass, verges and tree exclusion all ask this.
     const stCell = 20
-    const stGrid = new Map<string, { x: number; z: number; dx: number; dz: number; s: number; half: number; who: number }[]>()
+    const stGrid = new Map<string, { x: number; z: number; dx: number; dz: number; s: number; half: number; off: number; who: number }[]>()
     // one height function per carriageway: the SAME spline the road mesh is drawn from
     const curves: { at: (s: number) => { pos: THREE.Vector3; dir: THREE.Vector3 }; len: number }[] = [{ at: spineAt, len: curveLen }, ...sibAts.map((s) => ({ at: s.at, len: s.len })), ...branchAts.map((b) => ({ at: b.at, len: b.len }))]
     const branchWho0 = 1 + sibAts.length // `who` of the first branch in the station grid
     const halfOf = (who: number, s: number) => (who === 0 ? pavedHalfAt(s) : who < branchWho0 ? pavedWidth(2) / 2 : branchAts[who - branchWho0].half)
-    const addStations = (who: number, halfAt: (s: number) => number) => {
+    const addStations = (who: number, halfAt: (s: number) => number, offAt: (s: number) => number = () => 0) => {
       const c = curves[who]
       for (let s = 0; s <= c.len; s += 5) {
         const st = c.at(s)
         const d = st.dir.clone().setY(0).normalize()
         const k = `${Math.floor(st.pos.x / stCell)},${Math.floor(st.pos.z / stCell)}`
         const arr = stGrid.get(k)
-        const rec = { x: st.pos.x, z: st.pos.z, dx: d.x, dz: d.z, s, half: halfAt(s), who }
+        const rec = { x: st.pos.x, z: st.pos.z, dx: d.x, dz: d.z, s, half: halfAt(s), off: offAt(s), who }
         if (arr) arr.push(rec)
         else stGrid.set(k, [rec])
       }
     }
-    addStations(0, pavedHalfAt)
+    addStations(0, pavedHalfAt, pavedOffsetAt)
     for (let i = 0; i < sibAts.length; i++) addStations(i + 1, () => pavedWidth(2) / 2)
     for (let i = 0; i < branchAts.length; i++) addStations(branchWho0 + i, () => branchAts[i].half)
     /** signed distance to the nearest pavement edge, and which carriageway that was */
@@ -447,7 +466,9 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
             // to the road and not to the nearer station's dot
             const ux = x - p.x, uz = z - p.z
             const along = ux * p.dx + uz * p.dz
-            const lat = Math.abs(ux * p.dz - uz * p.dx)
+            // signed lateral, + to the right of travel (right = dir x UP = (-dz, 0, dx)), measured
+            // from the asphalt's centre rather than the spine; with off = 0 this is the old |lat|
+            const lat = Math.abs(uz * p.dx - ux * p.dz - p.off)
             const d = (Math.abs(along) <= 2.6 ? lat : Math.hypot(ux, uz)) - p.half
             if (d < best) { best = d; who = p.who; bp = p }
           }
@@ -505,11 +526,11 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
       return null
     }
     // a road knob moved: every station's half width, the asphalt, then the strip that hugs it
-    const roadSignature = () => `${T.LANE_WIDTH}|${T.SHOULDER_OUT}|${T.SHOULDER_IN}`
+    const roadSignature = () => `${T.LANE_WIDTH}|${T.SHOULDER_OUT}|${T.SHOULDER_IN}|${T.ROAD_BLEND_M}|${T.ROAD_TAPER_M}|${T.ROAD_ONEWAY_CENTRE}`
     let roadSig = roadSignature()
     let roadTimer: ReturnType<typeof setTimeout> | undefined
     const rebuildRoad = () => {
-      for (const arr of stGrid.values()) for (const r of arr) r.half = halfOf(r.who, r.s)
+      for (const arr of stGrid.values()) for (const r of arr) { r.half = halfOf(r.who, r.s); r.off = r.who === 0 ? pavedOffsetAt(r.s) : 0 }
       buildRoads()
       road.remove(strip.mesh)
       strip.mesh.geometry.dispose()

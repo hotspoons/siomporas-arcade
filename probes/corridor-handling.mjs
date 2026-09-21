@@ -1,6 +1,6 @@
 // Handling probe for the corridor car: measure, don't eyeball.
 //
-//   node probes/corridor-handling.mjs [site]        (dev server on :5185; default site clarksburg-i270)
+//   node probes/corridor-handling.mjs [site]        (CORRIDOR_PORT, default :5202; default site clarksburg-i270)
 //
 // Test A — turning radius: hold the car at a speed, full right lock, and report the radius two ways:
 //   R_yaw  = v / yaw-rate           (what the nose does)
@@ -16,10 +16,13 @@
 import { chromium } from 'playwright'
 
 const site = process.argv[2] ?? 'clarksburg-i270'
+const PORT = process.env.CORRIDOR_PORT ?? '5202'
 const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] })
 const page = await browser.newPage({ viewport: { width: 900, height: 600 } })
 page.on('pageerror', (e) => console.log('pageerror', e.message))
-await page.goto(`http://127.0.0.1:5185/?lite#${site}`, { waitUntil: 'load' })
+// several agents edit this tree at once; a Vite full reload mid-probe empties window.corridor.
+await page.route('**/@vite/client', (r) => r.abort())
+await page.goto(`http://127.0.0.1:${PORT}/?lite#${site}`, { waitUntil: 'load' })
 await page.waitForFunction(() => document.querySelector('#status')?.textContent === '' && window.corridor, null, { timeout: 180000 })
 await page.keyboard.press('Tab')
 
@@ -40,7 +43,7 @@ const r = await page.evaluate(() => {
     for (let i = 0; i < ticks; i++) {
       if (holdSpeed !== undefined) car.speed = holdSpeed
       car.tick(DT, input)
-      out.push({ x: car.pos.x, z: car.pos.z, y: car.pos.y, yaw: car.yaw, v: car.speed, slide: car.slide, ev: car.event, grass: car.onGrass })
+      out.push({ x: car.pos.x, z: car.pos.z, y: car.pos.y, yaw: car.yaw, v: car.speed, slide: car.slide, ev: car.event, grass: car.onGrass, air: car.mode === 'air' })
     }
     return out
   }
@@ -83,16 +86,37 @@ const r = await page.evaluate(() => {
     const input = { throttle: 0, brake: 0, steer: -1, handbrake: false }
     run(24, input, v)
     const w = run(48, input, v)
-    out.radius[`${v}mps`] = { ...stats(w), grassShare: +(w.filter((q) => q.grass).length / w.length).toFixed(2) }
+    out.radius[`${v}mps`] = { ...stats(w), grassShare: +(w.filter((q) => q.grass).length / w.length).toFixed(2), airShare: +(w.filter((q) => q.air).length / w.length).toFixed(2) }
   }
-  // the same at 15 m/s but held for 1.5 s, which carries the car off the pavement: the verge's number
-  start()
-  {
+  // The same on the verge: steer right and hold long enough to leave the pavement, then measure.
+  // Rich has to be able to turn after running off the map, so this is the number that matters.
+  for (const v of [15, 30, 45]) {
+    start()
     const input = { throttle: 0, brake: 0, steer: 1, handbrake: false }
-    run(180, input, 15)
-    const w = run(60, input, 15)
-    out.radius['15mps_verge'] = { ...stats(w), grassShare: +(w.filter((q) => q.grass).length / w.length).toFixed(2) }
+    run(Math.round(2.0 * 120 * 15 / v), input, v) // ~30 m of travel to clear the shoulder
+    const w = run(60, input, v)
+    out.radius[`${v}mps_verge`] = { ...stats(w), grassShare: +(w.filter((q) => q.grass).length / w.length).toFixed(2), airShare: +(w.filter((q) => q.air).length / w.length).toFixed(2) }
   }
+
+  // --- C: straight-line traction, pavement vs grass. Full throttle from 5 m/s for 2 s, and full
+  // brake from 30 m/s for 1 s. CAR_GRASS_TRACTION and CAR_GRASS_DRAG only show up here.
+  const straightLine = (onGrass) => {
+    start()
+    if (onGrass) {
+      // drive off the side first: full lock for 2 s at 15 m/s puts the car well onto the verge
+      run(240, { throttle: 0, brake: 0, steer: 1, handbrake: false }, 15)
+      run(60, { throttle: 0, brake: 0, steer: 0, handbrake: false }, 15)
+    }
+    const a0 = car.speed = 5
+    const acc = run(240, { throttle: 1, brake: 0, steer: 0, handbrake: false })
+    const accel = { from: a0, to: +car.speed.toFixed(2), mean_mps2: +((car.speed - a0) / 2).toFixed(2), grass: acc.at(-1).grass, airShare: +(acc.filter((q) => q.air).length / acc.length).toFixed(2) }
+    car.speed = 30
+    const b0 = 30
+    const dec = run(120, { throttle: 0, brake: 1, steer: 0, handbrake: false })
+    const brake = { from: b0, to: +car.speed.toFixed(2), mean_mps2: +((b0 - car.speed) / 1).toFixed(2), grass: dec.at(-1).grass, airShare: +(dec.filter((q) => q.air).length / dec.length).toFixed(2) }
+    return { accel, brake }
+  }
+  out.straight = { pavement: straightLine(false), verge: straightLine(true) }
 
   // --- B: handbrake slide, then counter-steer ---
   start()

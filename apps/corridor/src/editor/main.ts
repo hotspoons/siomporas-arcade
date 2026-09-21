@@ -10,6 +10,8 @@
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { buildSite, type Site } from '../scene'
+import { RoadWidth } from './roadwidth'
+import { TUNE_TABS } from '../tuning'
 import { fetchJSON, type IndexEntry, type Manifest } from '../site'
 import { AreaMode } from './areas'
 import { PlaceMode } from './place'
@@ -58,6 +60,9 @@ let season: Season = 'summer'
 // down without knowing which modes exist. A new mode marks its group and needs no other change.
 scene.add(markOverlay(areas.group), markOverlay(place.group))
 scene.add(markOverlay(structs.group))
+// road cross-section preview: its own floating panel and its own overlay group, so it survives the
+// panel rebuilds in refresh() and touches nothing else here (road-and-car agent)
+const roadWidth = new RoadWidth(scene)
 const preview = new Preview(scene, canvas, document.body, () => {
   // back to the editor's own camera and overlays
   orbit.enabled = true
@@ -124,6 +129,7 @@ async function loadSite(slug: string, quality: 'edit' | 'preview' = 'edit') {
   const ground = (x: number, y: number) => site!.groundAt(x, -y) ?? site!.heightAt(x, y)
   await Promise.all([areas.load(slug, ground), place.load(slug, site, ground)])
   await structs.load(slug, site, place.catalog) // after place: it shares the catalog place loaded
+  roadWidth.setSite(site)
   grow.adopt()
   ;(window as unknown as { corridor: unknown }).corridor = { site, scene, camera, areas, place, grow, preview, orbitTarget: orbit.target } // probes
   ;(window as unknown as { corridor: { structs: unknown } }).corridor.structs = structs
@@ -307,6 +313,10 @@ function setMode(m: Mode) {
   refresh()
 }
 for (const b of document.querySelectorAll<HTMLButtonElement>('#modes button')) b.onclick = () => setMode(b.dataset.mode as Mode)
+// the road panel is not a mode — it overlays whatever mode you are in, so it gets its own button
+roadWidth.mount(document.querySelector('#modes')!)
+// the same handle the viewer exposes as window.corridor, so probes can drive the editor too
+;(window as unknown as { __ed: unknown }).__ed = { scene, camera, orbit, tune: TUNE_TABS, get site() { return site } }
 
 const unsaved = () => areas.dirty || place.dirty || structs.dirty
 

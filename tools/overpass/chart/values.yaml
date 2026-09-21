@@ -30,7 +30,10 @@ shmSize: 2Gi
 
 storage:
   size: 60Gi
-  className: ceph-filesystem
+  # a BLOCK device, not cephfs. Overpass opens its database files with direct I/O; on the cephfs
+  # class the clone died with "File error caught: 22 Invalid argument /db/db/nodes.bin"
+  # (EINVAL = O_DIRECT unsupported) after downloading and converting the whole extract.
+  className: ceph-block
 
 resources:
   requests: { cpu: "2", memory: 6Gi }

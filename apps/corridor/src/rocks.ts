@@ -146,9 +146,13 @@ export async function buildRocks(
     for (let i = 0; i < st.length - 1; i++) {
       const a = st[i], b = st[i + 1]
       const along = Math.hypot(b.toe[0] - a.toe[0], b.toe[1] - a.toe[1])
-      // how much rock: per metre of face, more when taller and steeper, scaled by the knob
+      // how much rock: per metre of face, more when taller and steeper, scaled by the knob — and
+      // thinned right down where the geology says sand or gravel. The Crofton region's 202 faces
+      // are all Potomac Group sand: a bank, not a boulder field, so it gets riprap-ish lumps at
+      // ROCK_SAND_DENSITY rather than the shale wall's crowd.
       const hgt = Math.max(0, a.top[2] - a.toe[2])
-      const n = Math.round(along * T.ROCK_PER_M * Math.min(3, 0.5 + hgt / 6) * (f.slope > 0.9 ? 1.3 : 1))
+      const soft = f.rock_type === 'sand' || f.rock_type === 'unknown' ? T.ROCK_SAND_DENSITY : 1
+      const n = Math.round(along * T.ROCK_PER_M * soft * Math.min(3, 0.5 + hgt / 6) * (f.slope > 0.9 ? 1.3 : 1))
       for (let k = 0; k < n; k++) {
         const u = h2(f.s_start + i * 17.3, k * 1.7 + 0.3)     // along the segment
         const w = Math.pow(h2(k * 3.7 + 0.1, f.s_start + i), 0.7) // across: toe→top, biased to the lower face
@@ -169,7 +173,8 @@ export async function buildRocks(
     if (p.ring.length < 3) continue
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity
     for (const [x, y] of p.ring) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y) }
-    const n = Math.round(p.area_m2 * T.ROCK_OUTCROP_PER_M2)
+    const soft = p.rock_type === 'sand' || p.rock_type === 'unknown' ? T.ROCK_SAND_DENSITY : 1
+    const n = Math.round(p.area_m2 * T.ROCK_OUTCROP_PER_M2 * soft)
     let tries = 0
     for (let k = 0; k < n && tries < n * 6; tries++) {
       const x = x0 + (x1 - x0) * h2(p.area_m2 + tries, x0), ySite = y0 + (y1 - y0) * h2(y0, tries * 2.3 + p.area_m2)

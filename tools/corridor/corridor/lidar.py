@@ -390,7 +390,7 @@ def _runs(mask: np.ndarray) -> list[tuple[int, int]]:
     return out
 
 
-def profile(spine: LineString, dtm: np.ndarray, chm: np.ndarray, tr, pts: dict, step: float = 2.0) -> dict:
+def profile(spine: LineString, dtm: np.ndarray, chm: np.ndarray, tr, pts: dict, step: float = 2.0, major_road: bool = True, crossings_over_s: list[float] | None = None) -> dict:
     """Along-track profile: road height, ground beside the road (cut/fill), canopy beside the
     road, and structures — bridges we are on, overpasses over us.
 
@@ -544,10 +544,20 @@ def profile(spine: LineString, dtm: np.ndarray, chm: np.ndarray, tr, pts: dict, 
         planar = (under_std <= DECK_UNDERSIDE_STD) & (under_range <= DECK_UNDERSIDE_RANGE)
         spanned = (occ.sum(axis=1) >= 6) & planar & ~on_bridge
         hmin = np.nanmin(cell_min, axis=1)
+        # On a country road under old growth a limb can pass the planarity test at one or two
+        # stations, always right at the 4.5 m floor (Bacon Ridge: 7 "gantries", Chesterfield: 6, all
+        # 2–6 m long, all 4.5–4.9 m). Sign gantries exist on motorways/trunks/primaries; on anything
+        # smaller an overhead thing is only believed where OSM says a way crosses over within 25 m
+        # (the Bowie bridleway at s≈2350 stays; the canopy goes).
+        over_s = np.array(crossings_over_s or [], float)
         for i, j in _runs(spanned):
             length = (j - i + 1) * step
             if length < 2.0:
                 continue
+            if not major_road:
+                mid = (s[i] + s[j]) / 2
+                if not (len(over_s) and np.min(np.abs(over_s - mid)) <= 25.0):
+                    continue
             labelled = bool(np.any(~np.isnan(deck_min[i : j + 1])))
             structures.append({
                 "kind": "overpass" if length >= 5 else "gantry", "source": "geometry+class17" if labelled else "geometry",

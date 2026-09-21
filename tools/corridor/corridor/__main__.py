@@ -118,7 +118,10 @@ def fetch_site(site: dict, half_length: float, half_width: float, lidar_half_wid
             meta["z_factor"] = f
         meta["classification"] = lidar.classification_quality(pts)
         r = lidar.rasters(pts, lbbox, frame, lidar_corridor, ldir)
-        prof = lidar.profile(line, r["dtm"], r["chm"], r["transform"], r["pts"])
+        hw = {seg.get("tags", {}).get("highway", "") for seg in sp.get("segments", [])}
+        major = bool(hw & {"motorway", "motorway_link", "trunk", "trunk_link", "primary", "primary_link"})
+        over_s = [c["s"] for c in cross if c.get("relation") == "over"]
+        prof = lidar.profile(line, r["dtm"], r["chm"], r["transform"], r["pts"], major_road=major, crossings_over_s=over_s)
         (out / "profile.json").write_text(json.dumps(prof))
         cls = r["classes"]
         print(f"  lidar   {r['points_in_corridor']:,} pts in corridor; ground {cls.get('ground', 0):,} veg {cls.get('veg_high', 0) + cls.get('veg_med', 0) + cls.get('veg_low', 0):,} building {cls.get('building', 0):,} bridge_deck {cls.get('bridge_deck', 0):,}")

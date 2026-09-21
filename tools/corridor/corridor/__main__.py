@@ -46,6 +46,16 @@ def cmd_sites(_: argparse.Namespace) -> None:
     sites.main(PHOTOS, SITES)
 
 
+
+def _keep_provenance(previous: dict | None, fresh: dict) -> dict:
+    """A cached re-fetch returns {"file", "cached": true}; keep the first run's source tiles and
+    dates under it instead of losing them (terrain-and-data agent, 2026-09-21)."""
+    if fresh.get("cached") and previous and not previous.get("cached"):
+        return {**previous, "cached": True}
+    if fresh.get("cached") and previous:
+        return {**previous, **fresh}
+    return fresh
+
 def fetch_site(site: dict, half_length: float, half_width: float, lidar_half_width: float, skip: set[str]) -> None:
     from shapely.geometry import mapping
 
@@ -84,13 +94,13 @@ def fetch_site(site: dict, half_length: float, half_width: float, lidar_half_wid
     (out / "site.json").write_text(json.dumps(site_json))
 
     if "dem" not in skip:
-        manifest["dem"] = dem.fetch_dem(frame, bbox, out / "dem_1m.tif", CACHE)
+        manifest["dem"] = _keep_provenance(manifest.get("dem"), dem.fetch_dem(frame, bbox, out / "dem_1m.tif", CACHE))
     if "naip" not in skip:
-        manifest["naip"] = naip.fetch_naip(frame, bbox, out / "naip.tif", CACHE)
+        manifest["naip"] = _keep_provenance(manifest.get("naip"), naip.fetch_naip(frame, bbox, out / "naip.tif", CACHE))
     if "horizon" not in skip:
         from . import horizon
 
-        manifest["horizon"] = horizon.fetch_horizon(frame, out / "horizon_30m.tif", CACHE, radius_m=a_radius(manifest))
+        manifest["horizon"] = _keep_provenance(manifest.get("horizon"), horizon.fetch_horizon(frame, out / "horizon_30m.tif", CACHE, radius_m=a_radius(manifest)))
     if "geology" not in skip:
         g = geology.along_spine(line, frame, site, CACHE, out)
         (out / "geology.json").write_text(json.dumps(g, indent=1))
@@ -141,6 +151,8 @@ def fetch_site(site: dict, half_length: float, half_width: float, lidar_half_wid
         print(f"  web     {', '.join(ex['layers'])} ({ex['bytes'] / 2**20:.1f} MiB)")
     except Exception as exc:
         print(f"  web export failed: {exc}")
+    # written again: the surface summary is measured after the first write above
+    (out / "manifest.json").write_text(json.dumps(manifest, indent=1, default=str))
     print(f"  done    {manifest['seconds']} s -> {out}")
 
 

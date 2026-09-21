@@ -525,3 +525,67 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+OVERVIEW_DEM_M = 8.0
+OVERVIEW_NAIP_M = 4.0
+
+
+def overview(site_dir: Path, web: Path, ox: float, oy: float, mask_shapes: list, vivid) -> dict:
+    """A whole-region dem/chm/naip at coarse resolution, so a tiled site LOADS.
+
+    The tiles are the right answer and the viewer will stream them, but until it does, a site whose
+    only height layer is `layers.tiles` fails outright — `scene.ts` raises "site has no DEM layer"
+    and you get nothing at all (Rich, 2026-09-21, on crofton-crownsville). One overview at 8 m is
+    5.4 M pixels for an 18 km region, which decodes in a browser without complaint, and it is only
+    the FAR terrain: within 40 m of any road the corridor strip is built from the carriageway
+    spline, so the road you drive on is unaffected by the coarseness. Whoever wires tile streaming
+    should prefer `layers.tiles` when it is present and treat these as the fallback.
+    """
+    from PIL import Image
+    from rasterio.enums import Resampling
+
+    from .export import _encode_height, _fill
+
+    layers: dict = {}
+    site = json.loads((site_dir / "site.json").read_text())
+    bbox = tuple(site["bbox_utm"])
+
+    def rel(b):
+        return [b[0] - ox, b[1] - oy, b[2] - ox, b[3] - oy]
+
+    def read(path: Path, res: float, count: int = 1):
+        with rasterio.open(path) as src:
+            w = int(round((bbox[2] - bbox[0]) / res))
+            h = int(round((bbox[3] - bbox[1]) / res))
+            win = rasterio.windows.from_bounds(*bbox, transform=src.transform)
+            a = src.read(out_shape=(count, h, w), window=win, resampling=Resampling.average, boundless=True, fill_value=src.nodata if src.nodata is not None and count == 1 else 0)
+        return (a[0] if count == 1 else a), (w, h)
+
+    dem_p = site_dir / "dem_1m.tif"
+    if dem_p.exists():
+        z, (w, h) = read(dem_p, OVERVIEW_DEM_M)
+        z = _fill(z.astype(np.float32), -9999)
+        rgb, zmin, scale = _encode_height(z)
+        Image.fromarray(rgb, "RGB").save(web / "dem_8m.png", optimize=True)
+        layers["dem"] = {"file": "dem_8m.png", "res": OVERVIEW_DEM_M, "size": [w, h], "bbox": rel(bbox), "zmin": zmin, "zscale": scale, "overview": True}
+
+    chm_p = _raster(site_dir / "lidar", "chm")
+    if chm_p.exists() and "dem" in layers:
+        c, (w, h) = read(chm_p, OVERVIEW_DEM_M)
+        c = np.nan_to_num(c.astype(np.float32), nan=0.0)
+        if mask_shapes:
+            tr = from_origin(bbox[0], bbox[3], OVERVIEW_DEM_M, OVERVIEW_DEM_M)
+            c[rasterize([(g, 1) for g in mask_shapes], out_shape=c.shape, transform=tr, fill=0, dtype=np.uint8).astype(bool)] = 0.0
+        Image.fromarray(np.clip(np.round(c * 4), 0, 255).astype(np.uint8), "L").save(web / "chm_8m.png", optimize=True)
+        layers["chm"] = {"file": "chm_8m.png", "res": OVERVIEW_DEM_M, "size": [w, h], "bbox": rel(bbox), "scale": 0.25, "overview": True}
+
+    naip_p = site_dir / "naip_1m.tif"
+    if naip_p.exists():
+        rgb, (w, h) = read(naip_p, OVERVIEW_NAIP_M, count=3)
+        img = vivid(Image.fromarray(np.moveaxis(rgb, 0, -1), "RGB"), 1.3, 1.1)
+        r_, g_, b_ = img.split()
+        img = Image.merge("RGB", (r_.point(lambda v: min(255, int(v * 1.06))), g_, b_.point(lambda v: int(v * 0.9))))
+        img.save(web / "naip_4m.jpg", quality=85, optimize=True)
+        layers["naip"] = {"file": "naip_4m.jpg", "res": OVERVIEW_NAIP_M, "size": [w, h], "bbox": rel(bbox), "overview": True}
+    return layers

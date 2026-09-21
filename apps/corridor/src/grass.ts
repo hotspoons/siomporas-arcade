@@ -147,6 +147,8 @@ export class Grass {
   private roadDistance: (x: number, z: number) => number
   private pavedHalf: number
   private adjustAt: ((x: number, y: number) => [number, number]) | undefined
+  /** the bare DEM, for the shelf test in generate(); undefined means the test is skipped */
+  private demAt: ((x: number, y: number) => number) | undefined
   private tiles = new Map<string, Tile>()
   private pending: { key: string; tx: number; tz: number; withBlades: boolean }[] = []
   private prevEye = new THREE.Vector3(NaN, NaN, NaN)
@@ -184,7 +186,9 @@ export class Grass {
     fog: THREE.FogExp2 | null = null,
     adjustAt: ((x: number, y: number) => [number, number]) | undefined = undefined,
     sun = new THREE.Vector3(-3000, 4000, 2500).normalize(),
+    demAt: ((x: number, y: number) => number) | undefined = undefined,
   ) {
+    this.demAt = demAt
     this.adjustAt = adjustAt
     this.groundAt = groundAt
     this.canopyAt = canopyAt
@@ -495,7 +499,7 @@ export class Grass {
       T.GRASS_SPRITE_PER_M2, T.GRASS_MOW_LINE, T.GRASS_MAX_FROM_ROAD, T.GRASS_PATCHINESS,
       T.GRASS_PATCH_SIZE, T.GRASS_SCATTER, T.GRASS_SLOPE_MAX, T.GRASS_MOWN_HEIGHT,
       T.GRASS_ROUGH_HEIGHT, T.GRASS_LEAN, T.GRASS_HEIGHT_SCALE, T.GRASS_WIDTH_SCALE,
-      T.GRASS_SPRITE_SCALE, this.heightScale, this.type,
+      T.GRASS_SPRITE_SCALE, T.GRASS_MAX_SHELF, this.heightScale, this.type,
     ].join(',')
   }
   private sig = ''
@@ -660,6 +664,13 @@ export class Grass {
         const gy = this.groundAt(wx, -wz)
         const slope = Math.max(Math.abs(this.groundAt(wx + 1, -wz) - gy), Math.abs(this.groundAt(wx, -wz - 1) - gy))
         if (slope > T.GRASS_SLOPE_MAX) continue
+        // NOTHING GROWS ON A SHELF. Past the strip's blend band the strip IS the DEM — both come
+        // from the same raster — so any real gap there means this ground is not sitting on the
+        // world: a bridge verge at deck height over a valley, a retaining wall, a deck that has
+        // been widened. Grass standing on it is grass in the air. Inside the band the strip is
+        // between road grade and the DEM by construction, and a fill embankment lives there
+        // legitimately, so the test only applies once the blend has finished.
+        if (this.demAt && T.GRASS_MAX_SHELF > 0 && roadD > this.pavedHalf + 8 && gy - this.demAt(wx, -wz) > T.GRASS_MAX_SHELF) continue
         // bare patches: low-frequency hash noise thins the field where soil shows
         const patch = hash(Math.floor(cx / patchCells) * 971 + Math.floor(cz / patchCells) * 337)
         if (patch < T.GRASS_PATCHINESS) continue

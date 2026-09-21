@@ -28,6 +28,17 @@ export function buildStrip(
   offsetAt: ((x: number, y: number) => number) | null = null,
   /** network branches: stations where another road's strip already covers the ground are left out (no triangles, heightAt → null) */
   skipAt: ((s: number) => boolean) | null = null,
+  /**
+   * How far past the PAVEMENT EDGE the strip may reach at this station, in metres (Infinity for
+   * no limit). On a bridge the verge has to stop at the parapet: out there the strip is still at
+   * DECK height while the DEM is the valley floor 5–12 m below, and the blend to the DEM cannot
+   * reach that far, so the verge hangs over the valley as a shelf with grass and trees standing
+   * on it. Measured from the pavement edge rather than from the spine because a divided highway
+   * carries its carriageways on two separate decks: a spine-relative half-width would keep the
+   * median, which is open air, and cut the sibling's deck away. Vertices past the limit emit no
+   * triangles and heightAt returns null for them.
+   */
+  edgeLimitAt: ((s: number) => number) | null = null,
 ): {
   mesh: THREE.Mesh
   heightAt: (x: number, z: number) => number | null
@@ -50,6 +61,8 @@ export function buildStrip(
   let k = 0
   // a lookup grid for heightAt(): station index by along-track, lateral by offset
   const heights = new Float32Array(nS * nL)
+  /** vertices outside this station's width limit: no triangles touch them, heightAt ignores them */
+  const dead = new Uint8Array(nS * nL)
   const origins: THREE.Vector3[] = []
   const sides: THREE.Vector3[] = []
   for (let i = 0; i < nS; i++) {
@@ -59,6 +72,7 @@ export function buildStrip(
     origins.push(st.pos)
     sides.push(side)
     if (skipAt && skipAt(sHere)) skipped[i] = 1
+    const edgeLimit = edgeLimitAt ? edgeLimitAt(sHere) : Infinity
     for (let j = 0; j < nL; j++) {
       const o = offs[j]
       const x = st.pos.x + side.x * o, z = st.pos.z + side.z * o
@@ -74,7 +88,8 @@ export function buildStrip(
       pos[k * 3] = x
       pos[k * 3 + 1] = y
       pos[k * 3 + 2] = z
-      heights[k] = skipped[i] ? NaN : y
+      if (e.d > edgeLimit) dead[k] = 1
+      heights[k] = skipped[i] || dead[k] ? NaN : y
       // imagery uv from world position inside the site bbox (site y = -world z)
       uv[k * 2] = (x - bx0) / (bx1 - bx0)
       uv[k * 2 + 1] = (-z - by0) / (by1 - by0)
@@ -88,6 +103,7 @@ export function buildStrip(
     if (skipped[i] || skipped[i + 1]) continue
     for (let j = 0; j < nL - 1; j++) {
       const a = i * nL + j, b = a + 1, c = a + nL, d = c + 1
+      if (dead[a] || dead[b] || dead[c] || dead[d]) continue
       // WINDING. b is one step along `side` (= dir × up) and c is one step along `dir`, so
       // (a, c, b) has normal dir × side = −up: the sheet's front faces pointed DOWN. The material
       // is FrontSide, so the strip was back-face culled from above and drew nothing at all — the
@@ -274,6 +290,7 @@ export function sinkUnderStrip(
   sinkTo: (x: number, z: number) => number | null,
   coverAt: (x: number, z: number) => number,
   margin = 9,
+  maxLift = 3.5,
 ) {
   const pos = geo.getAttribute('position') as THREE.BufferAttribute
   const cover = new Float32Array(pos.count)
@@ -282,7 +299,15 @@ export function sinkUnderStrip(
     cover[i] = coverAt(x, z)
     if (cover[i] <= 0) continue
     const y = sinkTo(x, z)
-    if (y !== null) pos.setY(i, Math.min(pos.getY(i), y))
+    if (y === null) { cover[i] = -1; continue }
+    // A DECK IS NOT A COVER. Being laterally inside the strip is not the same as having the strip
+    // over your head: on a bridge the strip is the deck, five to twelve metres up, and the valley
+    // floor below is in full view. Dropping those triangles punched a hole straight through the
+    // world — invisible until the deck's 40 m verge stopped hanging over it and hiding it. Where
+    // the strip stands more than `maxLift` above this ground, leave the ground alone entirely.
+    // A fill embankment never reaches that: its blend is back on the DEM within seven metres.
+    if (y - pos.getY(i) > maxLift) { cover[i] = -1; continue }
+    pos.setY(i, Math.min(pos.getY(i), y))
   }
   const idx = geo.getIndex()
   if (idx) {

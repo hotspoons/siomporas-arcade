@@ -36,6 +36,8 @@ export let GRASS_PATCH_SIZE = 6
 /** how far blades scatter around their clump centre (m), and the steepest turf slope (m/m) */
 export let GRASS_SCATTER = 0.7
 export let GRASS_SLOPE_MAX = 0.7
+/** past the strip's blend band, no grass where the ground stands this far above the bare DEM (m): that is a shelf, not ground. 0 = off */
+export let GRASS_MAX_SHELF = 1.0
 /** sprite clumps: from the mid ring out to this radius (m), cards per m², size multiplier */
 export let GRASS_SPRITE_RADIUS = 300
 export let GRASS_SPRITE_PER_M2 = 0.8
@@ -262,6 +264,7 @@ export const TUNE_TABS: TuneTab[] = [
           tune('GRASS_PATCH_SIZE', () => GRASS_PATCH_SIZE, (v) => (GRASS_PATCH_SIZE = v), [1, 30], 1, 'bare patch size (m)'),
           tune('GRASS_SCATTER', () => GRASS_SCATTER, (v) => (GRASS_SCATTER = v), [0.1, 2], 0.05, 'blade scatter around the clump (m)'),
           tune('GRASS_SLOPE_MAX', () => GRASS_SLOPE_MAX, (v) => (GRASS_SLOPE_MAX = v), [0.1, 3], 0.05, 'no turf steeper than this (m/m)'),
+          tune('GRASS_MAX_SHELF', () => GRASS_MAX_SHELF, (v) => (GRASS_MAX_SHELF = v), [0, 8], 0.1, 'no turf this far above the bare DEM (m); 0 = off'),
         ],
       },
       {

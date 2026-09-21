@@ -600,7 +600,31 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
     }
     const VERGE = 40
     const grassTex = (cls: string) => ((surfaceSets?.[cls]?.material as THREE.MeshStandardMaterial | undefined)?.map ?? null)
-    const makeStrip = () => buildStrip(spineAt, curveLen, -latMin + VERGE, latMax + VERGE, (x, z) => edgeDistance(x, z), heightAt, imagery, manifest.bbox, grassTex('grass_mown'), grassTex('grass_rough'), lite ? 4 : 2, lite ? 2 : 1, adjustments.active ? (x, y) => adjustments.at(x, y, adjScratch).ground_offset_m : null)
+    /**
+     * On a bridge the verge stops at the parapet. Everywhere else the strip blends from road grade
+     * back to the DEM over 7 m, but on a deck the DEM is the valley floor 5–12 m below and the
+     * blend cannot reach it, so the 40 m verge stayed at deck height: a shelf hanging over the
+     * valley, with grass and trees standing on it (Rich's Braddock screenshot). The deck itself is
+     * the road mesh and the car reads its height from this strip, so the strip must stay — only
+     * its width goes. Tapered over BRIDGE_TAPER either side so the verge runs out onto the
+     * abutment instead of ending in a wall.
+     */
+    const BRIDGE_TAPER = 10
+    const decks = manifest.structures.filter((st) => st.kind === 'bridge')
+    const stripEdgeLimitAt = (s: number): number => {
+      let lim = VERGE
+      for (const b of decks) {
+        const on = Math.min(
+          THREE.MathUtils.smoothstep(s, b.s_start - BRIDGE_TAPER, b.s_start),
+          1 - THREE.MathUtils.smoothstep(s, b.s_end, b.s_end + BRIDGE_TAPER),
+        )
+        if (on <= 0) continue
+        const parapet = 1.0 // the parapets in the structures pass stand 0.6 m outside the pavement
+        lim = Math.min(lim, parapet + (VERGE - parapet) * (1 - on))
+      }
+      return lim
+    }
+    const makeStrip = () => buildStrip(spineAt, curveLen, -latMin + VERGE, latMax + VERGE, (x, z) => edgeDistance(x, z), heightAt, imagery, manifest.bbox, grassTex('grass_mown'), grassTex('grass_rough'), lite ? 4 : 2, lite ? 2 : 1, adjustments.active ? (x, y) => adjustments.at(x, y, adjScratch).ground_offset_m : null, null, stripEdgeLimitAt)
     let strip = makeStrip()
     road.add(strip.mesh)
     sinkUnderStrip(terrainGeo, strip.sinkAt, strip.coverAt)
@@ -794,7 +818,7 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
     // grass on the verge: open ground (no canopy), off the pavement, mown near the shoulder
     const canopyAt = sampler(chm)
     const grassAdj = { ...NEUTRAL_ADJ }
-    const grass = new Grass(groundNear, canopyAt, roadDistance, 0, LOOK[currentSeason], lite ? 90_000 : 400_000, lite ? 26 : 40, fog, adjustments.active ? (x, y) => { const a = adjustments.at(x, y, grassAdj); return [a.grass_height, a.grass_density] } : undefined)
+    const grass = new Grass(groundNear, canopyAt, roadDistance, 0, LOOK[currentSeason], lite ? 90_000 : 400_000, lite ? 26 : 40, fog, adjustments.active ? (x, y) => { const a = adjustments.at(x, y, grassAdj); return [a.grass_height, a.grass_density] } : undefined, undefined, heightAt)
     trees.add(grass.mesh)
     grassRef = grass
     // what grows on this verge, read off the bake; GRASS_TYPE overrides it from the F6 panel

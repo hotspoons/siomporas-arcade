@@ -90,8 +90,11 @@ def log_blocks(log: Path | None) -> dict[str, dict]:
         b["lines"].append(line)
         if line.startswith("  done"):
             b["done"] = True
-        if "Traceback" in line or re.search(r"\b(Error|error:|failed)\b", line):
-            b["error"] = line.strip()
+        # the LAST exception line, not the first "Traceback" — a bake that retried three mirrors
+        # and then died on a LAS header should say so, and "Traceback (most recent call last):" in
+        # a table tells nobody anything.
+        if re.match(r"^[A-Za-z_.]*(Error|Exception)\b", line) or re.search(r"\b(failed|SystemExit)\b", line):
+            b["error"] = line.strip()[:200]
     return out
 
 
@@ -209,7 +212,9 @@ def render(rows: list[dict], log: Path | None) -> str:
             if r["missing"]:
                 L.append(f"Missing: {', '.join(r['missing'])}\n")
             continue
-        L.append(f"- **road**: {r.get('ident')} · {r.get('length_m')} m · snap {r.get('snap_m')} m · trimmed {r.get('trimmed')} · fetched {r.get('fetched')} ({r.get('seconds')} s)")
+        snap = r.get("snap_m") or 0
+        warn = "  ⚠ **check the road**: the fix snapped this far, which usually means it landed on a different road" if snap > 250 else ""
+        L.append(f"- **road**: {r.get('ident')} · {r.get('length_m')} m · snap {r.get('snap_m')} m{warn} · trimmed {r.get('trimmed')} · fetched {r.get('fetched')} ({r.get('seconds')} s)")
         L.append(f"- **lidar**: `{r['lidar_dataset']}` ({lidar_year(r['lidar_dataset'])}) · {r['lidar_points']:,} pts in corridor · z factor {r.get('lidar_zf')} · classes: {fmt_classes(r['lidar_classes'])} · class 17: {r['lidar_quality'].get('class17_share')} ({'trusted' if r['lidar_quality'].get('class17_trusted') else 'demoted'}){' — ' + r['lidar_quality']['note'] if r['lidar_quality'].get('note') else ''}")
         dem = "reused from cache (sources not re-recorded)" if r["dem_cached"] else ("; ".join(f"{t} — {dt}" for t, dt in r["dem_sources"]) or "—")
         L.append(f"- **DEM**: {dem}")

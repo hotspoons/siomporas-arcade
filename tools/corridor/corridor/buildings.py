@@ -148,7 +148,13 @@ def derive(site_dir: Path) -> dict:
             continue
         if g.is_empty:
             continue
-        landuse.append({"class": p["landuse"], "ring": [[round(x, 1), round(y, 1)] for x, y in g.simplify(1.0).exterior.coords[:-1]], "area_m2": round(float(g.area), 1)})
+        # what is GROWN there, when OSM says (Rich, 2026-09-21: "there is a farm at the end of my
+        # neighborhood where they grow usually corn and soy"). OSM tags it as `crop=maize;soybean`
+        # or `produce=*` on the farmland way; row detection from NAIP is not worth it, so where OSM
+        # is silent this stays null and the editor authors it.
+        crop = p.get("crop") or p.get("produce") or p.get("trees")
+        crops = [c.strip() for c in str(crop).split(";") if c.strip()] if crop else None
+        landuse.append({"class": p["landuse"], "ring": [[round(x, 1), round(y, 1)] for x, y in g.simplify(1.0).exterior.coords[:-1]], "area_m2": round(float(g.area), 1), "crop": crops, "name": p.get("name")})
 
     pois = []
     for f in feats:

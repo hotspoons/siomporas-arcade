@@ -268,14 +268,20 @@ def export_site(site_dir: Path) -> dict:
 
     features: dict = {}
     for name in ("cuts", "rock", "water"):
-        if tiled:  # these read the whole DTM; the tiled path gets them once they sample lazily
-            features[name] = None
-            continue
+        mod = importlib.import_module(f".{name}", __package__)
+        # a network samples per road / per raster tile through a windowed reader; a corridor reads
+        # its one DTM into an array. Same rules either way — see water._Heights for why.
+        fn = getattr(mod, "measure_network", None) if tiled else None
         try:
-            features[name] = importlib.import_module(f".{name}", __package__).measure(site_dir)
+            features[name] = (fn or mod.measure)(site_dir)
         except Exception as exc:
+            import traceback
+
+            traceback.print_exc()
             print(f"  {name} failed: {exc}")
             features[name] = None
+        if features[name] and features[name].get("summary"):
+            print(f"  {name:7s} {features[name]['summary']}", flush=True)
 
     out = {
         "slug": site["slug"],

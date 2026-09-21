@@ -270,11 +270,37 @@ Every branch gets its own `lidar.profile` (grade lifted onto its decks, structur
 viewer path. Tiled sites export `web/tiles/0/<x>_<y>.dem.png|chm.png|naip.jpg` (same encodings,
 2 m / 2 m / 1 m, chm zeroed over every carriageway and building) and
 `layers.tiles = {size_m: 1000, origin, res, dir, list: [{x, y, dem: {zmin, zscale}, chm, naip}]}`
-instead of the single-image dem/chm/naip layers; the horizon stays one image. `cuts`/`rock`/
-`water` are skipped on tiled sites until they sample lazily.
+instead of the single-image dem/chm/naip layers; the horizon stays one image. `cuts`, `rock` and `water` run on
+tiled sites too: `water._Heights` keeps any raster over 40 M cells open and reads only the window
+each call needs, `cuts` builds its transects in 256-station chunks so those windows stay compact
+and runs per chain against that chain's own profile, and `rock` runs per 1 m raster tile. Face and
+polygon ids carry the road or tile they came from.
 
-Run: `python -m corridor fetch arrowhead-farms-network` (7 min) /
-`fetch crofton-crownsville --half-width 150 --lidar-half-width 150`.
+Run: `python -m corridor fetch arrowhead-farms-network` (39 min, 2.2 GB of LAZ) /
+`fetch crofton-crownsville --half-width 150 --lidar-half-width 150` (8.7 h, 199 LAZ tiles, 500 M
+points, 1.3 GB on disk). `python -m corridor.network_tiles <slug>` **re-profiles** a tiled site
+from the rasters and `lidar/corridor.laz` already on disk — minutes, for when a rule downstream of
+the rasters changes.
+
+**Dead ends** (`network.dead_ends`). A chain end is an end only when no other chain of ours shares
+its node, no `highway` way outside the `roads` list uses it (one Overpass query resolves every end
+node at once), and it is more than 60 m from our own query box — otherwise it is a junction with an
+unlisted road, or our own clip. Rich's rule is that an end is a **cul-de-sac unless told
+otherwise**, so that is what the bake emits; OSM's `highway=turning_circle` / `turning_loop` marks
+`source: "osm"`, everything else `"assumed"`, and the editor overrides `kind` to `dead_end`.
+Radius is to the pavement edge: 9 m residential/tertiary (the 18 m US bulb), 8 m living_street, 6 m
+service. Written as `dead_ends: [{s, kind, radius_m, source, node, x, y}]` on the primary and every
+branch.
+
+**Crops.** `manifest.landuse` rings carry `crop: [...] | null` and `name` from OSM's `crop` /
+`produce` / `trees`. Across every bake there are 49 `farmland` rings and 2 crop tags, so the
+editor's authoring path is the one that matters; NAIP row detection is not worth it.
+
+**A NaN is a broken site.** `lidar.profile` on the single-image path samples a gap-*filled* DTM;
+the tiled path samples a VRT, whose nodata is NaN, so a station in a lidar hole or at the
+corridor's edge produced `NaN` in `road_z`, and `json.dump` wrote a literal `NaN` that
+`JSON.parse` refuses — one token breaks the entire manifest. `network_tiles._fill_along`
+interpolates along every profile array and `export_branches` guards every number.
 
 ### 1.13 Proposals, publish, cluster
 

@@ -49,30 +49,74 @@ def _num(v) -> float | None:
 
 
 class _Heights:
-    """DTM first, DEM where the DTM has no data, NaN beyond both."""
+    """Ground height at arbitrary points: the lidar DTM first, the bare-earth DEM where it has no
+    data, NaN beyond both.
+
+    Two modes, because a corridor and a region are different problems. A single-road site's DTM is
+    a few hundred MB at most, so it is read once into an array and indexed. A NETWORK site's
+    `lidar/dtm.vrt` covers 18 km square — 324 M cells, 1.3 GB — and must never be resident: over
+    `LAZY_CELLS` the dataset is kept open and each `at()` call reads only the window its own points
+    need. That makes the CALLER's access pattern the thing that matters: ask for a compact clump of
+    points (one along-track chunk), not for one lateral offset down a whole 16 km road.
+    """
+
+    LAZY_CELLS = 40_000_000
 
     def __init__(self, site_dir: Path):
-        self.srcs = []
-        for name in ("lidar/dtm.tif", "dem_1m.tif"):
+        self.srcs: list[tuple] = []
+        for name in ("lidar/dtm.vrt", "lidar/dtm.tif", "dem_1m.tif"):
             p = site_dir / name
-            if p.exists():
-                with rasterio.open(p) as src:
-                    self.srcs.append((src.read(1).astype(np.float32), src.transform))
+            if not p.exists():
+                continue
+            src = rasterio.open(p)
+            if src.width * src.height > self.LAZY_CELLS:
+                self.srcs.append(("lazy", src, src.transform))
+            else:
+                arr = src.read(1).astype(np.float32)
+                src.close()
+                self.srcs.append(("array", arr, None))
+                self.srcs[-1] = ("array", arr, rasterio.open(p).transform)
 
-    def at(self, xs: np.ndarray, ys: np.ndarray) -> np.ndarray:
+    def _read(self, kind, obj, tr, xs: np.ndarray, ys: np.ndarray) -> np.ndarray:
+        if kind == "array":
+            r, c = rasterio.transform.rowcol(tr, xs, ys)
+            r, c = np.asarray(r), np.asarray(c)
+            ok = (r >= 0) & (r < obj.shape[0]) & (c >= 0) & (c < obj.shape[1])
+            v = np.full(ok.shape, np.nan, np.float32)
+            v[ok] = obj[r[ok], c[ok]]
+            return v
+        # lazy: one window covering exactly the points asked for
+        src = obj
+        r, c = rasterio.transform.rowcol(tr, xs, ys)
+        r, c = np.asarray(r), np.asarray(c)
+        ok = (r >= 0) & (r < src.height) & (c >= 0) & (c < src.width)
+        v = np.full(ok.shape, np.nan, np.float32)
+        if not ok.any():
+            return v
+        r0, r1 = int(r[ok].min()), int(r[ok].max())
+        c0, c1 = int(c[ok].min()), int(c[ok].max())
+        win = rasterio.windows.Window(c0, r0, c1 - c0 + 1, r1 - r0 + 1)
+        a = src.read(1, window=win).astype(np.float32)
+        v[ok] = a[r[ok] - r0, c[ok] - c0]
+        return v
+
+    def at(self, xs, ys) -> np.ndarray:
+        xs = np.atleast_1d(np.asarray(xs, dtype=float))
+        ys = np.atleast_1d(np.asarray(ys, dtype=float))
         out = np.full(len(xs), np.nan, np.float32)
-        for arr, tr in self.srcs:
+        for kind, obj, tr in self.srcs:
             need = np.isnan(out)
             if not need.any():
                 break
-            r, c = rasterio.transform.rowcol(tr, xs[need], ys[need])
-            r, c = np.asarray(r), np.asarray(c)
-            ok = (r >= 0) & (r < arr.shape[0]) & (c >= 0) & (c < arr.shape[1])
-            v = np.full(ok.shape, np.nan, np.float32)
-            v[ok] = arr[r[ok], c[ok]]
-            v[v < -9000] = np.nan
+            v = self._read(kind, obj, tr, xs[need], ys[need])
+            v = np.where((v < -9000) | ~np.isfinite(v), np.nan, v)
             out[need] = v
         return out
+
+    def close(self):
+        for kind, obj, _ in self.srcs:
+            if kind == "lazy":
+                obj.close()
 
 
 def measure(site_dir: Path) -> dict | None:

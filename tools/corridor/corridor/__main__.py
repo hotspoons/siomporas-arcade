@@ -46,6 +46,16 @@ def cmd_sites(_: argparse.Namespace) -> None:
     sites.main(PHOTOS, SITES)
 
 
+
+def _keep_provenance(previous: dict | None, fresh: dict) -> dict:
+    """A cached re-fetch returns {"file", "cached": true}; keep the first run's source tiles and
+    dates under it instead of losing them (terrain-and-data agent, 2026-09-21)."""
+    if fresh.get("cached") and previous and not previous.get("cached"):
+        return {**previous, "cached": True}
+    if fresh.get("cached") and previous:
+        return {**previous, **fresh}
+    return fresh
+
 def fetch_site(site: dict, half_length: float, half_width: float, lidar_half_width: float, skip: set[str]) -> None:
     from shapely.geometry import mapping
 
@@ -84,13 +94,13 @@ def fetch_site(site: dict, half_length: float, half_width: float, lidar_half_wid
     (out / "site.json").write_text(json.dumps(site_json))
 
     if "dem" not in skip:
-        manifest["dem"] = dem.fetch_dem(frame, bbox, out / "dem_1m.tif", CACHE)
+        manifest["dem"] = _keep_provenance(manifest.get("dem"), dem.fetch_dem(frame, bbox, out / "dem_1m.tif", CACHE))
     if "naip" not in skip:
-        manifest["naip"] = naip.fetch_naip(frame, bbox, out / "naip.tif", CACHE)
+        manifest["naip"] = _keep_provenance(manifest.get("naip"), naip.fetch_naip(frame, bbox, out / "naip.tif", CACHE))
     if "horizon" not in skip:
         from . import horizon
 
-        manifest["horizon"] = horizon.fetch_horizon(frame, out / "horizon_30m.tif", CACHE, radius_m=a_radius(manifest))
+        manifest["horizon"] = _keep_provenance(manifest.get("horizon"), horizon.fetch_horizon(frame, out / "horizon_30m.tif", CACHE, radius_m=a_radius(manifest)))
     if "geology" not in skip:
         g = geology.along_spine(line, frame, site, CACHE, out)
         (out / "geology.json").write_text(json.dumps(g, indent=1))
@@ -108,7 +118,10 @@ def fetch_site(site: dict, half_length: float, half_width: float, lidar_half_wid
             meta["z_factor"] = f
         meta["classification"] = lidar.classification_quality(pts)
         r = lidar.rasters(pts, lbbox, frame, lidar_corridor, ldir)
-        prof = lidar.profile(line, r["dtm"], r["chm"], r["transform"], r["pts"])
+        hw = {seg.get("tags", {}).get("highway", "") for seg in sp.get("segments", [])}
+        major = bool(hw & {"motorway", "motorway_link", "trunk", "trunk_link", "primary", "primary_link"})
+        over_s = [c["s"] for c in cross if c.get("relation") == "over"]
+        prof = lidar.profile(line, r["dtm"], r["chm"], r["transform"], r["pts"], major_road=major, crossings_over_s=over_s)
         (out / "profile.json").write_text(json.dumps(prof))
         cls = r["classes"]
         print(f"  lidar   {r['points_in_corridor']:,} pts in corridor; ground {cls.get('ground', 0):,} veg {cls.get('veg_high', 0) + cls.get('veg_med', 0) + cls.get('veg_low', 0):,} building {cls.get('building', 0):,} bridge_deck {cls.get('bridge_deck', 0):,}")
@@ -141,6 +154,8 @@ def fetch_site(site: dict, half_length: float, half_width: float, lidar_half_wid
         print(f"  web     {', '.join(ex['layers'])} ({ex['bytes'] / 2**20:.1f} MiB)")
     except Exception as exc:
         print(f"  web export failed: {exc}")
+    # written again: the surface summary is measured after the first write above
+    (out / "manifest.json").write_text(json.dumps(manifest, indent=1, default=str))
     print(f"  done    {manifest['seconds']} s -> {out}")
 
 

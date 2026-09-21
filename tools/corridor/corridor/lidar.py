@@ -55,6 +55,9 @@ DATASETS = [
 # Real decks measured ≤ 0.28 m std / ≤ 0.74 m range; tree canopy over a narrow road ≥ 1.2 / ≥ 3.
 DECK_UNDERSIDE_STD = 0.5
 DECK_UNDERSIDE_RANGE = 1.5
+# an unlabelled deck: the DTM drops this far below the local grade, for at most this long
+DIP_MIN = 1.5
+DIP_MAX_LEN = 120.0
 
 CLASS_NAMES = {0: "never", 1: "unassigned", 2: "ground", 3: "veg_low", 4: "veg_med", 5: "veg_high", 6: "building", 7: "noise", 9: "water", 10: "rail", 11: "road", 13: "wire_guard", 14: "wire_conductor", 15: "tower", 16: "wire_connector", 17: "bridge_deck", 18: "noise_high", 20: "ignored_ground", 21: "snow", 22: "temporal_exclusion"}
 session = requests.Session()
@@ -387,7 +390,7 @@ def _runs(mask: np.ndarray) -> list[tuple[int, int]]:
     return out
 
 
-def profile(spine: LineString, dtm: np.ndarray, chm: np.ndarray, tr, pts: dict, step: float = 2.0) -> dict:
+def profile(spine: LineString, dtm: np.ndarray, chm: np.ndarray, tr, pts: dict, step: float = 2.0, major_road: bool = True, crossings_over_s: list[float] | None = None) -> dict:
     """Along-track profile: road height, ground beside the road (cut/fill), canopy beside the
     road, and structures — bridges we are on, overpasses over us.
 
@@ -446,6 +449,64 @@ def profile(spine: LineString, dtm: np.ndarray, chm: np.ndarray, tr, pts: dict, 
                 "deck_z_min": round(float(np.nanmin(deck_min[i : j + 1])), 2), "deck_z_max": round(float(np.nanmax(deck_max[i : j + 1])), 2),
                 "clearance_m": None, "height_above_ground_m": round(float(np.nanmedian(deck_min[i : j + 1] - ground_z[i : j + 1])), 2),
             })
+    # --- 1b. unlabelled decks: the road bridges a dip the DTM fell into ---------------------------
+    # Where the vendor's class 17 is junk (Bowie, 2014) or absent, a culvert or a short bridge shows
+    # up as the DTM dropping metres below the road's grade for a few dozen metres — the ground
+    # under the deck — while the points near the centreline stay AT the grade: Bowie s≈2500–2515,
+    # measured 2026-09-21: DTM 5 m down, 945 of 1000 points within ±0.5 m of the interpolated
+    # grade (the deck), 12 ground points in the hole. Left alone, the road dives 5 m into a stream
+    # bed (the car flew 101 m) and the deck itself is then flagged as a "gantry" 4.5 m over the
+    # surface. So: a short run where ground_z sits ≥ DIP_MIN below the local grade AND the near
+    # points cluster at the grade is a deck we are on; the surface is lifted onto those points.
+    g_near = shapely.points(pts["x"][notnoise], pts["y"][notnoise])
+    near_mask = shapely.distance(g_near, spine) <= 8.0
+    near_bins = np.clip((shapely.line_locate_point(spine, g_near[near_mask]) / step).astype(int), 0, n - 1)
+    near_z = pts["z"][notnoise][near_mask]
+    order = np.argsort(near_bins, kind="stable")
+    near_bins, near_z = near_bins[order], near_z[order]
+    starts = np.searchsorted(near_bins, np.arange(n + 1))
+    win = int(60 / step)
+    local = np.array([np.median(ground_z[max(0, i - win) : i + win + 1]) for i in range(n)])
+    dipped = (local - ground_z) >= DIP_MIN
+    for st in structures:  # labelled bridges are already resolved
+        dipped[int(st["s_start"] / step) : int(st["s_end"] / step) + 1] = False
+    for i, j in _runs(dipped):
+        length = (j - i + 1) * step
+        if length < 4 or length > DIP_MAX_LEN:
+            continue
+        a, b = max(0, i - 3), min(n - 1, j + 3)
+        grade = np.interp(np.arange(i, j + 1), [a, b], [ground_z[a], ground_z[b]])
+        deck_med = np.full(j - i + 1, np.nan)
+        deck_n = all_n = 0
+        for k in range(i, j + 1):
+            zs = near_z[starts[k] : starts[k + 1]]
+            if len(zs) == 0:
+                continue
+            on = zs[np.abs(zs - grade[k - i]) <= 0.6]
+            all_n += len(zs)
+            deck_n += len(on)
+            if len(on) >= 5:
+                deck_med[k - i] = np.median(on)
+        if all_n == 0 or deck_n / all_n < 0.6 or deck_n < 10 * (j - i + 1):
+            continue
+        nan = np.isnan(deck_med)
+        if nan.all():
+            continue
+        if nan.any():
+            deck_med[nan] = np.interp(np.flatnonzero(nan), np.flatnonzero(~nan), deck_med[~nan])
+        # the deck has to actually stand above the hole, and a run touching either end of the spine
+        # is the median window running out of road, not a bridge (Sideling s=0..8 and the last 8 m
+        # came out as 0.07 m and -0.11 m "decks")
+        if i == 0 or j == n - 1 or float(np.median(deck_med - ground_z[i : j + 1])) < DIP_MIN * 0.7:
+            continue
+        surface_z[i : j + 1] = deck_med
+        structures.append({
+            "kind": "bridge", "source": "geometry",
+            "s_start": round(float(s[i]), 1), "s_end": round(float(s[j]), 1), "length_m": round(float(length), 1),
+            "deck_z_min": round(float(np.min(deck_med)), 2), "deck_z_max": round(float(np.max(deck_med)), 2),
+            "clearance_m": None, "height_above_ground_m": round(float(np.median(deck_med - ground_z[i : j + 1])), 2),
+        })
+    structures.sort(key=lambda st: st["s_start"])
     on_bridge = np.zeros(n, bool)
     for st in structures:
         on_bridge[int(st["s_start"] / step) : int(st["s_end"] / step) + 1] = True
@@ -483,10 +544,20 @@ def profile(spine: LineString, dtm: np.ndarray, chm: np.ndarray, tr, pts: dict, 
         planar = (under_std <= DECK_UNDERSIDE_STD) & (under_range <= DECK_UNDERSIDE_RANGE)
         spanned = (occ.sum(axis=1) >= 6) & planar & ~on_bridge
         hmin = np.nanmin(cell_min, axis=1)
+        # On a country road under old growth a limb can pass the planarity test at one or two
+        # stations, always right at the 4.5 m floor (Bacon Ridge: 7 "gantries", Chesterfield: 6, all
+        # 2–6 m long, all 4.5–4.9 m). Sign gantries exist on motorways/trunks/primaries; on anything
+        # smaller an overhead thing is only believed where OSM says a way crosses over within 25 m
+        # (the Bowie bridleway at s≈2350 stays; the canopy goes).
+        over_s = np.array(crossings_over_s or [], float)
         for i, j in _runs(spanned):
             length = (j - i + 1) * step
             if length < 2.0:
                 continue
+            if not major_road:
+                mid = (s[i] + s[j]) / 2
+                if not (len(over_s) and np.min(np.abs(over_s - mid)) <= 25.0):
+                    continue
             labelled = bool(np.any(~np.isnan(deck_min[i : j + 1])))
             structures.append({
                 "kind": "overpass" if length >= 5 else "gantry", "source": "geometry+class17" if labelled else "geometry",

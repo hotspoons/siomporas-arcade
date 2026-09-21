@@ -2,6 +2,7 @@ import { createReadStream, existsSync, renameSync, statSync, writeFileSync } fro
 import { resolve, extname, normalize } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { defineConfig, type Plugin } from 'vite'
+import { devBridge } from '@apex/engine/dev/bridge-plugin'
 
 // The viewer reads the SAME layout the Worker will serve from R2: /sites/index.json and
 // /sites/<slug>/web/*. In dev those come straight off tools/corridor/data, so nothing is copied
@@ -75,7 +76,9 @@ function serveBake(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [serveBake()],
+  // devBridge is inert unless APEX_BRIDGE is set, and can never reach a build — see
+  // packages/engine/src/dev/bridge-plugin.ts. `just bridge-dev corridor` turns it on.
+  plugins: [serveBake(), devBridge()],
   server: {
     // Keep in sync with the justfile (corridor viewer = 5185).
     port: 5185,

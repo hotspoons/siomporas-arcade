@@ -1,4 +1,5 @@
 // corridor viewer: look at what tools/corridor baked, from above and from the driver's seat.
+import { registerBridgeContext, startDevBridge } from 'virtual:dev-bridge'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { buildSite, describe, type Site } from './scene'
@@ -667,4 +668,61 @@ function frame() {
 loadIndex().then(frame).catch((e) => {
   console.error('corridor: load failed', e)
   status(`failed: ${e.message}`)
+})
+
+// --- dev operator shell ---------------------------------------------------------------------
+// Inert unless the dev server was started with APEX_BRIDGE set, and it cannot reach a build at
+// all — the virtual module resolves to empty no-ops otherwise, so not a byte of it, and no handle
+// onto the scene, exists at runtime. `just bridge-dev corridor`, then `just bridge '<js>' corridor`.
+//
+// This exists because the agent box has no GPU. Every frame-time number in this app's commits so
+// far is swiftshader's, which falls off a cliff at a few hundred thousand triangles and says
+// nothing about a real card. `apex.perf()` reads `renderer.info` — the DRAW CALLS and TRIANGLES
+// the GPU was actually given — plus measured frame times, from the machine that has one.
+startDevBridge()
+registerBridgeContext({
+  get site() {
+    return site
+  },
+  scene,
+  camera,
+  orbit,
+  renderer,
+  drive,
+  THREE,
+  tune: TUNE_TABS,
+  /**
+   * What the renderer really did, and what the frames really cost.
+   *
+   * 30 frames is half a second on a real card and fits inside the bridge's 5 s eval timeout; ask
+   * for more with `apex.perf(120)` and pass `--timeout 30000` to the client.
+   */
+  perf: (frames = 30) =>
+    new Promise<unknown>((resolve) => {
+      const t: number[] = []
+      let last = performance.now()
+      let i = 0
+      const tick = () => {
+        const n = performance.now()
+        t.push(n - last)
+        last = n
+        if (++i < frames) return requestAnimationFrame(tick)
+        const s = [...t].sort((a, b) => a - b)
+        const at = (p: number) => Math.round((s[Math.min(s.length - 1, Math.floor(s.length * p))] ?? 0) * 100) / 100
+        const r = renderer.info.render
+        resolve({
+          site: site?.manifest.slug ?? null,
+          frames: t.length,
+          fps: Math.round(1000 / (t.reduce((a, b) => a + b, 0) / t.length)),
+          ms: { median: at(0.5), p90: at(0.9), p99: at(0.99), max: Math.round(Math.max(...t) * 100) / 100 },
+          drawCalls: r.calls,
+          triangles: r.triangles,
+          programs: renderer.info.programs?.length ?? null,
+          geometries: renderer.info.memory.geometries,
+          textures: renderer.info.memory.textures,
+          drive: drive.on,
+        })
+      }
+      requestAnimationFrame(tick)
+    }),
 })

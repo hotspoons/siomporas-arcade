@@ -62,17 +62,24 @@ const FALLBACK = ['oak', 'hardwood', 'aspen', 'oak-large', 'hardwood-small']
  * red spruce and 14 % paper birch gets a spruce and a birch; one that is 36 % coastal-plain
  * hardwood gets oaks.
  */
-export function paletteFor(flora: Flora | null, limit = 6): Archetype[] {
+export function paletteFor(flora: Flora | null, heights: number[] = [], limit = 6): Archetype[] {
   const byId = new Map(ARCHETYPES.map((a) => [a.id, a]))
   if (!flora) return FALLBACK.map((id) => byId.get(id)!).filter(Boolean)
   const weight = new Map<string, number>()
   const add = (a: Archetype, w: number) => weight.set(a.id, (weight.get(a.id) ?? 0) + w)
+  // The palette is asked at SEVERAL heights, because a species has more than one build and which
+  // one a tree gets depends on how tall that tree is. Asking once at the species' mean height put
+  // only `oak-large` in Chesterfield Road's palette, so every oak under 22 m — the understorey and
+  // the young edge — was drawn as a 28 m open-grown oak. The heights are this corridor's own
+  // canopy quartiles, so the question asked is "what silhouettes do the trees that are actually
+  // here need", not "what does the average tree of this species look like".
+  const hs = heights.length ? heights : [12, 18, 26]
   for (const c of flora.classes) {
     if (c.lifeform !== 'Tree' || !c.species) continue
     for (const s of c.species) {
       const sp = flora.block.canopy.ref[s.key]
       if (!sp) continue
-      add(archetypeFor(sp, Flora.isBroadleafEvergreen(c), sp.canopy_h_m ?? 18), s.weight * c.share)
+      for (const h of hs) add(archetypeFor(sp, Flora.isBroadleafEvergreen(c), h), (s.weight * c.share) / hs.length)
     }
   }
   if (!weight.size) return FALLBACK.map((id) => byId.get(id)!).filter(Boolean)
@@ -152,6 +159,8 @@ export class NearTrees {
   private chosen: Int16Array
   /** the site's typical canopy height, which tunes the archetypes that scale with it */
   private median = 18
+  /** 20th / 55th / 90th percentile canopy height, the sizes the palette has to cover */
+  private quantiles: number[] = []
   /** which tree index is currently drawn as a near model, so the far set can skip it */
   near = new Set<number>()
 
@@ -161,9 +170,12 @@ export class NearTrees {
     void radius // live radius is the knob TREE_NEAR_RADIUS
     this.capacity = capacity
     this.group.name = 'near-trees'
-    // the typical canopy height of the site, so the archetypes are tuned for the wood they are in
+    // this corridor's own canopy quartiles: the archetypes are tuned for the wood they are in, and
+    // the palette is chosen for the range of tree sizes that are actually standing in it
     const hs = trees.map((t) => t.h).sort((a, b) => a - b)
-    this.median = hs.length ? hs[Math.floor(hs.length * 0.6)] : 18
+    const q = (f: number) => (hs.length ? hs[Math.min(hs.length - 1, Math.floor(hs.length * f))] : 18)
+    this.median = q(0.6)
+    this.quantiles = hs.length ? [q(0.2), q(0.55), q(0.9)] : []
     this.chosen = new Int16Array(trees.length).fill(-1)
     this.indexTrees(trees)
   }
@@ -181,7 +193,7 @@ export class NearTrees {
    */
   async grow(sliceMs = 8): Promise<this> {
     const b = new Budget(sliceMs)
-    for (const a of paletteFor(this.flora)) {
+    for (const a of paletteFor(this.flora, this.quantiles)) {
       const v = buildVariant(a, this.capacity, this.median)
       this.variants.push(v)
       this.group.add(v.branches, v.leavesFull, v.leavesSparse)

@@ -13,12 +13,15 @@ await page.goto(`http://127.0.0.1:${PORT}/?lite#${site}`, { waitUntil: 'load' })
 await page.waitForFunction(() => document.querySelector('#status')?.textContent === '' && window.corridor, null, { timeout: 240000 })
 await page.keyboard.press('Tab')
 await page.waitForTimeout(800)
-// Roll with the wheel over so the steer and the spin are both non-zero in the shot. It has to be a
-// held KEY: frame() calls readDriveKeys() every frame, which overwrites drive.input.steer, so an
-// injected value is gone before the next render.
-await page.evaluate(() => { window.corridor.drive.car.speed = 14 })
-await page.keyboard.down('a')
-await page.waitForTimeout(2500)
+// Tick the sim directly rather than waiting on frames: headless swiftshader renders at well under
+// one frame a second here, so 2.5 s of wall clock can be ZERO sim ticks and every wheel angle reads
+// its initial value. 1 s of sim at full left lock, driven from the probe, is deterministic.
+await page.evaluate(() => {
+  const car = window.corridor.drive.car
+  car.speed = 14
+  for (let i = 0; i < 120; i++) car.tick(1 / 120, { throttle: 0.3, brake: 0, steer: -1, handbrake: false })
+})
+
 console.log(JSON.stringify(await page.evaluate(() => {
   const car = window.corridor.drive.car
   const parts = []
@@ -34,7 +37,6 @@ console.log(JSON.stringify(await page.evaluate(() => {
     speed: +car.speed.toFixed(1),
   }
 }), null, 1))
-await page.keyboard.up('a')
 if (out) {
   await page.evaluate(() => { for (const id of ['#info', '#panel', '#sidebar']) { const el = document.querySelector(id); if (el) el.style.display = 'none' } })
   await page.waitForTimeout(2500)

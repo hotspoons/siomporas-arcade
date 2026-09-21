@@ -36,9 +36,10 @@ apps/arcade/public/assets/
 apps/arcade/public/fonts/
 
 # corridor: the geo tool's venv and its downloaded lidar/imagery/OSM cache (rebuildable, GBs)
-tools/corridor/.venv/
 # both forms, for the reason spelled out under public/surfaces below: the trailing-slash rule
-# matches directories only, and every agent worktree replaces this with a symlink to main's copy.
+# matches directories only, and every agent worktree replaces these with a symlink to main's copy.
+tools/corridor/.venv/
+tools/corridor/.venv
 tools/corridor/data/
 tools/corridor/data
 

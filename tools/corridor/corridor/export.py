@@ -19,6 +19,7 @@ the Worker will hand the browser, so the viewer is already reading the productio
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 
 import numpy as np
@@ -254,6 +255,195 @@ def _stub_roads(site_dir: Path, frame, ox: float, oy: float, bbox) -> list[dict]
     if src is not None:
         src.close()
     return out
+
+
+DRIVABLE = (
+    "motorway", "trunk", "primary", "secondary", "tertiary", "unclassified", "residential",
+    "motorway_link", "trunk_link", "primary_link", "secondary_link", "tertiary_link", "living_street",
+)
+
+
+def _bearing(dx: float, dy: float) -> float:
+    """Compass bearing of a vector in UTM metres (x east, y north): 0 = north, 90 = east."""
+    return math.degrees(math.atan2(dx, dy)) % 360.0
+
+
+def _road_index(features) -> dict:
+    """Every drivable way's vertices, keyed by exact WGS84 coordinate.
+
+    A `highway=traffic_signals` node is not a free-floating point: OSM puts it ON the way it
+    governs, as one of its vertices, and at a junction the SAME node is a vertex of every arm. So
+    the way to find out what a signal governs, and which way the traffic runs, is to look the
+    node's own coordinate up among the vertices — no geometry search and no tolerance needed,
+    because these are the same floats from the same extract.
+    """
+    idx: dict[tuple, list] = {}
+    for f in features:
+        p = f["properties"]
+        if p.get("highway") not in DRIVABLE or f["geometry"]["type"] != "LineString":
+            continue
+        cs = f["geometry"]["coordinates"]
+        for i, c in enumerate(cs):
+            idx.setdefault((c[0], c[1]), []).append((f, i))
+    return idx
+
+
+def _lanes_of(p: dict) -> int:
+    for k in ("lanes", "lanes:forward"):
+        try:
+            n = int(str(p.get(k, "")).split(";")[0])
+            if 1 <= n <= 12:
+                return n
+        except (TypeError, ValueError):
+            pass
+    hw = p.get("highway", "")
+    return 4 if hw in ("motorway", "trunk", "primary") else 2
+
+
+def _signals(site_dir: Path, frame, ox: float, oy: float, bbox) -> dict:
+    """Traffic signals, stop and give-way signs.
+
+    Crofton has 218 `highway=traffic_signals` nodes and we draw none of them, which is most of why
+    a signalised suburban junction reads as a crossroads in a field.
+
+    A signal node carries no bearing of its own, so the bearing comes from the geometry: look the
+    node up in the road index to get the arm it sits on, group the nodes of one junction together
+    (they are within a few tens of metres of each other), and the direction of travel on that arm
+    is from the node toward the group's centre. The heads then face BACK along that, at the
+    traffic. `traffic_signals:direction` is used where OSM has it (112 of the 218 here), because a
+    forward/backward tag beats an inference.
+
+    Isolated signals — a mid-block pedestrian crossing, of which there are many — have no junction
+    to point at, so they take the arm's own tangent and the OSM direction tag.
+    """
+    gj_p = site_dir / "osm.geojson"
+    if not gj_p.exists():
+        return {"masts": [], "signs": []}
+    import rasterio
+    from shapely.geometry import Point, box
+
+    site_box = box(*bbox)
+    dem_p = site_dir / "dem_1m.tif"
+    src = rasterio.open(dem_p) if dem_p.exists() else None
+
+    def ground(x: float, y: float) -> float:
+        if src is None:
+            return 0.0
+        v = next(src.sample([(float(x), float(y))]))[0]
+        return 0.0 if v < -9000 else float(v)
+
+    features = json.loads(gj_p.read_text())["features"]
+    idx = _road_index(features)
+
+    # the signal nodes, in UTM, with the arm they sit on
+    nodes = []
+    for f in features:
+        p = f["properties"]
+        if p.get("highway") != "traffic_signals" or f["geometry"]["type"] != "Point":
+            continue
+        lon, lat = f["geometry"]["coordinates"][:2]
+        x, y = frame.from_wgs(lon, lat)
+        if not site_box.contains(Point(x, y)):
+            continue
+        ways = idx.get((lon, lat), [])
+        if not ways:
+            continue  # a signal on a way we do not draw (a cycleway, a private service road)
+        nodes.append({"x": x, "y": y, "lon": lon, "lat": lat, "ways": ways, "dir": p.get("traffic_signals:direction")})
+
+    # junctions: signal nodes within JUNCTION_R of each other are arms of one crossing
+    JUNCTION_R = 45.0
+    unassigned = list(range(len(nodes)))
+    groups: list[list[int]] = []
+    while unassigned:
+        seed = unassigned.pop()
+        grp = [seed]
+        changed = True
+        while changed:
+            changed = False
+            for i in list(unassigned):
+                if any(math.hypot(nodes[i]["x"] - nodes[j]["x"], nodes[i]["y"] - nodes[j]["y"]) <= JUNCTION_R for j in grp):
+                    grp.append(i)
+                    unassigned.remove(i)
+                    changed = True
+        groups.append(grp)
+
+    masts = []
+    for grp in groups:
+        cx = sum(nodes[i]["x"] for i in grp) / len(grp)
+        cy = sum(nodes[i]["y"] for i in grp) / len(grp)
+        for i in grp:
+            n = nodes[i]
+            way, vi = n["ways"][0]
+            cs = way["geometry"]["coordinates"]
+            # the arm's own tangent at this vertex, in UTM
+            a = cs[max(0, vi - 1)]
+            b = cs[min(len(cs) - 1, vi + 1)]
+            ax, ay = frame.from_wgs(a[0], a[1])
+            bx, by = frame.from_wgs(b[0], b[1])
+            tx, ty = bx - ax, by - ay
+            tl = math.hypot(tx, ty) or 1.0
+            tx, ty = tx / tl, ty / tl
+            # which way does traffic run? toward the junction centre when there is one, otherwise
+            # the tag, otherwise the tangent as it lies
+            dx, dy = cx - n["x"], cy - n["y"]
+            d = math.hypot(dx, dy)
+            if len(grp) > 1 and d > 3.0:
+                # project the centre direction onto the arm, so the signal stays on its own road
+                sgn = 1.0 if (dx * tx + dy * ty) >= 0 else -1.0
+                trav = (tx * sgn, ty * sgn)
+            else:
+                sgn = -1.0 if n["dir"] == "backward" else 1.0
+                trav = (tx * sgn, ty * sgn)
+            heads = _bearing(-trav[0], -trav[1])  # the heads look back at the traffic
+            lanes = _lanes_of(way["properties"])
+            masts.append({
+                "x": round(float(n["x"] - ox), 2),
+                "y": round(float(n["y"] - oy), 2),
+                "z": round(ground(n["x"], n["y"]), 2),
+                "yaw_deg": round(heads, 1),            # compass bearing the heads face
+                "travel_deg": round(_bearing(*trav), 1),
+                "arm_m": round(lanes * 3.66 / 2 + 1.4, 2),
+                "lanes": lanes,
+                "junction": len(grp),
+                "tagged": bool(n["dir"]),
+            })
+
+    # stop and give-way: a sign on a post, facing the traffic it stops
+    signs = []
+    for f in features:
+        p = f["properties"]
+        kind = p.get("highway")
+        if kind not in ("stop", "give_way") or f["geometry"]["type"] != "Point":
+            continue
+        lon, lat = f["geometry"]["coordinates"][:2]
+        x, y = frame.from_wgs(lon, lat)
+        if not site_box.contains(Point(x, y)):
+            continue
+        ways = idx.get((lon, lat), [])
+        if not ways:
+            continue
+        way, vi = ways[0]
+        cs = way["geometry"]["coordinates"]
+        a = cs[max(0, vi - 1)]
+        b = cs[min(len(cs) - 1, vi + 1)]
+        ax, ay = frame.from_wgs(a[0], a[1])
+        bx, by = frame.from_wgs(b[0], b[1])
+        tx, ty = bx - ax, by - ay
+        tl = math.hypot(tx, ty) or 1.0
+        sgn = -1.0 if p.get("direction") == "backward" else 1.0
+        trav = (tx / tl * sgn, ty / tl * sgn)
+        signs.append({
+            "kind": kind,
+            "x": round(float(x - ox), 2),
+            "y": round(float(y - oy), 2),
+            "z": round(ground(x, y), 2),
+            "yaw_deg": round(_bearing(-trav[0], -trav[1]), 1),
+            "travel_deg": round(_bearing(*trav), 1),
+        })
+
+    if src is not None:
+        src.close()
+    return {"masts": masts, "signs": signs}
 
 
 def _power(site_dir: Path, frame, ox: float, oy: float, bbox) -> dict:
@@ -582,6 +772,7 @@ def export_site(site_dir: Path) -> dict:
         "driveways": _service_ways(site_dir, Frame.at(site["lon"], site["lat"]), ox, oy, bbox),
         "stubs": _stub_roads(site_dir, Frame.at(site["lon"], site["lat"]), ox, oy, bbox),
         "power": _power(site_dir, Frame.at(site["lon"], site["lat"]), ox, oy, bbox),
+        "signals": _signals(site_dir, Frame.at(site["lon"], site["lat"]), ox, oy, bbox),
         "landuse": derived["landuse"],
         "pois": derived["pois"],
         "cuts": features.get("cuts"),

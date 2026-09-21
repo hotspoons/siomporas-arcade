@@ -76,6 +76,11 @@ export interface Manifest {
   driveways?: { service: string; width_m: number; surface?: string | null; coords: [number, number, number][] }[]
   /** roads we do not model, stubbed ~60 m from where they meet ours so a junction goes somewhere */
   stubs?: { highway: string; name?: string | null; lanes?: number; oneway?: string | null; coords: [number, number, number][] }[]
+  /** street furniture: signal masts and stop/give-way signs (OSM highway=traffic_signals|stop|give_way) */
+  signals?: {
+    masts: { x: number; y: number; z: number; yaw_deg: number; travel_deg: number; arm_m: number; lanes: number; junction: number; tagged: boolean }[]
+    signs: { kind: string; x: number; y: number; z: number; yaw_deg: number; travel_deg: number }[]
+  } | null
   /** power lines and their supports (OSM power=line|minor_line, tower|pole) */
   power?: { lines: { kind: string; voltage?: string | null; coords: [number, number, number][] }[]; supports: { kind: string; x: number; y: number; z: number; height_m: number }[] } | null
   /** network sites: every road that is not the primary spine */

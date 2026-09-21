@@ -229,6 +229,34 @@ export let CHASE_UP = 2.6
 export let CHASE_LOOK_AHEAD = 6
 export let CHASE_LAG = 8
 
+// --- street furniture ---------------------------------------------------------------------------
+/** the mast pole's height (m); the arm hangs its heads a little under the top */
+export let FURNITURE_SIGNAL_HEIGHT = 6.4
+/** the mast arm's reach over the carriageway, × what the road's lane count asks for */
+export let FURNITURE_SIGNAL_ARM_SCALE = 1
+/**
+ * 1 lights one lens. Left at 0 by default and deliberately: nothing in the bake or the viewer
+ * knows what phase a junction is in, and a signal cycling to a timer that has no relationship to
+ * the junction is worse than an unlit one, because it invites you to obey it.
+ */
+export let FURNITURE_SIGNAL_LIT = 0
+/** a stop or give-way sign's post height (m) */
+export let FURNITURE_SIGN_HEIGHT = 2.2
+/** how far clear of the asphalt a post has to stand before it is left alone (m) */
+export let FURNITURE_KERB_CLEAR = 0.6
+/** and how far it may be walked sideways looking for that clearance (m) */
+export let FURNITURE_KERB_MAX = 26
+/**
+ * Furniture further than this from a drawn carriageway edge is not placed (m). The bake reads the
+ * whole OSM extract; the viewer draws a fraction of the roads in it, and a signal for a road that
+ * is not there stands in a field with its arm over grass.
+ */
+export let FURNITURE_MAX_FROM_ROAD = 20
+/** how far back along its own approach a post may be walked to get out of the junction box (m) */
+export let FURNITURE_SETBACK_MAX = 16
+/** past this reach it is not a mast arm any more, and the signal is not placed (m) */
+export let FURNITURE_ARM_MAX = 14
+
 export interface TuneTab {
   name: string
   sections: TuneSection[]
@@ -448,6 +476,25 @@ export const TUNE_TABS: TuneTab[] = [
           tune('POWER_HEIGHT_SCALE', () => POWER_HEIGHT_SCALE, (v) => (POWER_HEIGHT_SCALE = v), [0.3, 2], 0.05, 'pole and tower height'),
           tune('POWER_SAG', () => POWER_SAG, (v) => (POWER_SAG = v), [0, 0.12], 0.005, 'conductor sag as a fraction of the span'),
           tune('POWER_SAG_MAX', () => POWER_SAG_MAX, (v) => (POWER_SAG_MAX = v), [0, 20], 0.5, 'm'),
+        ],
+      },
+    ],
+  },
+  {
+    name: 'furniture',
+    sections: [
+      {
+        title: 'signals and signs',
+        keys: [
+          tune('FURNITURE_SIGNAL_HEIGHT', () => FURNITURE_SIGNAL_HEIGHT, (v) => (FURNITURE_SIGNAL_HEIGHT = v), [3, 12], 0.1, 'mast pole height (m)'),
+          tune('FURNITURE_SIGNAL_ARM_SCALE', () => FURNITURE_SIGNAL_ARM_SCALE, (v) => (FURNITURE_SIGNAL_ARM_SCALE = v), [0.4, 2.5], 0.05, 'arm reach ×'),
+          tune('FURNITURE_SIGNAL_LIT', () => FURNITURE_SIGNAL_LIT, (v) => (FURNITURE_SIGNAL_LIT = v), [0, 1], 1, '1 lights a lens; there is no controller'),
+          tune('FURNITURE_SIGN_HEIGHT', () => FURNITURE_SIGN_HEIGHT, (v) => (FURNITURE_SIGN_HEIGHT = v), [1, 4], 0.05, 'sign post height (m)'),
+          tune('FURNITURE_KERB_CLEAR', () => FURNITURE_KERB_CLEAR, (v) => (FURNITURE_KERB_CLEAR = v), [0, 4], 0.1, 'm clear of the asphalt a post needs'),
+          tune('FURNITURE_KERB_MAX', () => FURNITURE_KERB_MAX, (v) => (FURNITURE_KERB_MAX = v), [2, 40], 1, 'm it may be walked sideways to find it'),
+          tune('FURNITURE_MAX_FROM_ROAD', () => FURNITURE_MAX_FROM_ROAD, (v) => (FURNITURE_MAX_FROM_ROAD = v), [2, 400], 2, 'm from a drawn road, or it is not placed'),
+          tune('FURNITURE_SETBACK_MAX', () => FURNITURE_SETBACK_MAX, (v) => (FURNITURE_SETBACK_MAX = v), [0, 40], 1, 'm back along the approach, out of the junction box'),
+          tune('FURNITURE_ARM_MAX', () => FURNITURE_ARM_MAX, (v) => (FURNITURE_ARM_MAX = v), [4, 30], 0.5, 'm of arm before the mast is dropped instead'),
         ],
       },
     ],

@@ -37,7 +37,10 @@ apps/arcade/public/fonts/
 
 # corridor: the geo tool's venv and its downloaded lidar/imagery/OSM cache (rebuildable, GBs)
 tools/corridor/.venv/
+# both forms, for the reason spelled out under public/surfaces below: the trailing-slash rule
+# matches directories only, and every agent worktree replaces this with a symlink to main's copy.
 tools/corridor/data/
+tools/corridor/data
 
 # corridor viewer: generated textures (tools/surfaces/gen.py) and generated props (editor
 # probes/editor-assets.mjs) are regenerable and ~100 MB; they will live in a bucket, not in git.

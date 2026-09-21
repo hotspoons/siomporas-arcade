@@ -337,6 +337,12 @@ export let SIDEWALK_CROSSING_W = 1
  * merged mesh per kind has a site-sized bounding sphere and is submitted in full from anywhere.
  */
 export let FURNITURE_CHUNK_M = 900
+/**
+ * The verge a BRANCH road's strip carries, each side (m). The primary gets 40 m; a residential
+ * street in a subdivision whose neighbours are a hundred metres away does not, and giving it the
+ * same both paved the grid twice over and cost 21.7 s of a 427-branch build.
+ */
+export let BRANCH_VERGE = 14
 
 export interface TuneTab {
   name: string
@@ -635,6 +641,7 @@ export const TUNE_TABS: TuneTab[] = [
           tune('SIDEWALK_PAINT_LIFT', () => SIDEWALK_PAINT_LIFT, (v) => (SIDEWALK_PAINT_LIFT = v), [0.005, 0.2], 0.005, 'paint over ground (m)'),
           tune('SIDEWALK_CROSSING_W', () => SIDEWALK_CROSSING_W, (v) => (SIDEWALK_CROSSING_W = v), [0.4, 3], 0.05, 'painted band width ×'),
           tune('FURNITURE_CHUNK_M', () => FURNITURE_CHUNK_M, (v) => (FURNITURE_CHUNK_M = v), [50, 2000], 25, 'm per cull chunk for linear furniture'),
+          tune('BRANCH_VERGE', () => BRANCH_VERGE, (v) => (BRANCH_VERGE = v), [4, 40], 1, 'm of verge on a branch road strip'),
         ],
       },
     ],

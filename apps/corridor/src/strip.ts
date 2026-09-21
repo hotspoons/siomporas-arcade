@@ -51,6 +51,8 @@ export function buildStrip(
   sinkAt: (x: number, z: number) => number | null
   /** metres inside the strip, ≤ 0 outside: how sinkUnderStrip knows which triangles to drop */
   coverAt: (x: number, z: number) => number
+  /** the strip's own extent in world metres, [minX, minZ, maxX, maxZ] — sinkUnderStrip's fast path */
+  bounds: [number, number, number, number]
   setLitter: (tint: THREE.Color, spread: number) => void
   weatherUniforms: Record<string, THREE.IUniform>
   setTint: (c: THREE.Color, ground: THREE.Color) => void
@@ -232,7 +234,13 @@ export function buildStrip(
   mat.customProgramCacheKey = () => 'corridor-strip'
   const mesh = new THREE.Mesh(geo, mat)
   mesh.name = 'strip'
-  mesh.frustumCulled = false
+  // CULL IT. This was off, which is right for one 5 km corridor strip whose bounding sphere covers
+  // the site anyway, and wrong the moment a network gave every branch its own: 428 of them were
+  // submitted in full from anywhere on crofton-triangle. The primary's sphere is still site-sized
+  // and still always passes, so this costs nothing there and removes the branches when they are
+  // behind you.
+  mesh.frustumCulled = true
+  geo.computeBoundingSphere()
 
   // height lookup: nearest station by projecting onto the spine polyline (origins every `along`).
   // `lat` comes back too, because the sink taper below needs to know how near the rim we are.
@@ -301,11 +309,14 @@ export function buildStrip(
     const r = probe(x, z)
     return r === null ? -1 : Math.min(r.lat + left, right - r.lat)
   }
+  geo.computeBoundingBox()
+  const bb = geo.boundingBox!
   return {
     mesh,
     heightAt,
     sinkAt,
     coverAt,
+    bounds: [bb.min.x, bb.min.z, bb.max.x, bb.max.z] as [number, number, number, number],
     setTint: (c: THREE.Color, ground: THREE.Color) => {
       uniforms.grassTint.value.copy(c)
       mat.color.copy(ground)
@@ -336,41 +347,105 @@ export function buildStrip(
  * `strip.sinkAt`'s few centimetres so the strip wins the seam. Out there the strip's height IS
  * the DEM the terrain is built from, so the two meet.
  */
+export interface StripCover {
+  sinkAt: (x: number, z: number) => number | null
+  coverAt: (x: number, z: number) => number
+  bounds: [number, number, number, number]
+}
+
+/**
+ * Get the coarse terrain out of the way of EVERY strip, in one pass.
+ *
+ * It used to be one call per strip. That is fine for a corridor with one carriageway and quadratic
+ * for a network: crofton-triangle has 427 branch strips, and each call allocated a fresh cover
+ * array over 580 000 terrain vertices AND rebuilt the whole 1.7-million-entry index. 427 of those
+ * was **84 of the 125 second build**, with the browser frozen for all of it. A bounding-box
+ * fast-path in front of the expensive probe took it to 60 s; the rest was the per-call allocation
+ * and index rebuild, which only one pass can remove.
+ *
+ * So: one cover array, one index rebuild, and the strips bucketed into a coarse grid so a vertex
+ * only asks the two or three strips whose extent actually reaches it rather than all 427.
+ *
+ * The sink itself is unchanged. A vertex covered by several strips takes the LOWEST of their
+ * targets, and keeps the deepest cover for the triangle test — a triangle buried under any strip
+ * is dropped, which is what dropping it per strip used to achieve one strip at a time.
+ */
+export function sinkUnderStrips(geo: THREE.BufferGeometry, strips: StripCover[], margin = 9, maxLift = 3.5) {
+  const pos = geo.getAttribute('position') as THREE.BufferAttribute
+  if (!strips.length || !pos) return
+  const cover = new Float32Array(pos.count).fill(-1)
+  const pad = margin + 1
+
+  // bucket the strips by a grid over their extents, so a vertex asks only the strips near it
+  const CELL = 250
+  const grid = new Map<number, number[]>()
+  const key = (cx: number, cz: number) => cx * 100003 + cz
+  for (let i = 0; i < strips.length; i++) {
+    const [x0, z0, x1, z1] = strips[i].bounds
+    if (!Number.isFinite(x0)) continue
+    for (let cx = Math.floor((x0 - pad) / CELL); cx <= Math.floor((x1 + pad) / CELL); cx++) {
+      for (let cz = Math.floor((z0 - pad) / CELL); cz <= Math.floor((z1 + pad) / CELL); cz++) {
+        const k = key(cx, cz)
+        const arr = grid.get(k)
+        if (arr) arr.push(i)
+        else grid.set(k, [i])
+      }
+    }
+  }
+
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), z = pos.getZ(i)
+    const near = grid.get(key(Math.floor(x / CELL), Math.floor(z / CELL)))
+    if (!near) continue
+    const y0 = pos.getY(i)
+    let bestCover = -1
+    let lowest = Infinity
+    for (let k = 0; k < near.length; k++) {
+      const st = strips[near[k]]
+      const [x0, z0, x1, z1] = st.bounds
+      if (x < x0 - pad || x > x1 + pad || z < z0 - pad || z > z1 + pad) continue
+      const c = st.coverAt(x, z)
+      if (c <= 0) continue
+      const y = st.sinkAt(x, z)
+      if (y === null) continue
+      // A DECK IS NOT A COVER. Being laterally inside the strip is not the same as having it over
+      // your head: on a bridge the strip is the deck, five to twelve metres up, and the valley
+      // floor below is in full view. Dropping those triangles punched a hole through the world.
+      // A fill embankment never reaches maxLift — its blend is back on the DEM within seven metres.
+      if (y - y0 > maxLift) continue
+      if (c > bestCover) bestCover = c
+      if (y < lowest) lowest = y
+    }
+    cover[i] = bestCover
+    if (lowest < Infinity) pos.setY(i, Math.min(y0, lowest))
+  }
+
+  const idx = geo.getIndex()
+  if (idx) {
+    const src = idx.array
+    const kept = new Uint32Array(src.length)
+    let n = 0
+    for (let t = 0; t < src.length; t += 3) {
+      const a = src[t], b = src[t + 1], c = src[t + 2]
+      if (cover[a] > margin && cover[b] > margin && cover[c] > margin) continue
+      kept[n++] = a
+      kept[n++] = b
+      kept[n++] = c
+    }
+    geo.setIndex(new THREE.BufferAttribute(kept.subarray(0, n), 1))
+  }
+  pos.needsUpdate = true
+  geo.computeVertexNormals()
+}
+
+/** One strip's worth of the above, for callers that have only one. */
 export function sinkUnderStrip(
   geo: THREE.BufferGeometry,
   sinkTo: (x: number, z: number) => number | null,
   coverAt: (x: number, z: number) => number,
   margin = 9,
   maxLift = 3.5,
+  bounds: [number, number, number, number] = [-Infinity, -Infinity, Infinity, Infinity],
 ) {
-  const pos = geo.getAttribute('position') as THREE.BufferAttribute
-  const cover = new Float32Array(pos.count)
-  for (let i = 0; i < pos.count; i++) {
-    const x = pos.getX(i), z = pos.getZ(i)
-    cover[i] = coverAt(x, z)
-    if (cover[i] <= 0) continue
-    const y = sinkTo(x, z)
-    if (y === null) { cover[i] = -1; continue }
-    // A DECK IS NOT A COVER. Being laterally inside the strip is not the same as having the strip
-    // over your head: on a bridge the strip is the deck, five to twelve metres up, and the valley
-    // floor below is in full view. Dropping those triangles punched a hole straight through the
-    // world — invisible until the deck's 40 m verge stopped hanging over it and hiding it. Where
-    // the strip stands more than `maxLift` above this ground, leave the ground alone entirely.
-    // A fill embankment never reaches that: its blend is back on the DEM within seven metres.
-    if (y - pos.getY(i) > maxLift) { cover[i] = -1; continue }
-    pos.setY(i, Math.min(pos.getY(i), y))
-  }
-  const idx = geo.getIndex()
-  if (idx) {
-    const src = idx.array
-    const kept: number[] = []
-    for (let t = 0; t < src.length; t += 3) {
-      const a = src[t], b = src[t + 1], c = src[t + 2]
-      if (cover[a] > margin && cover[b] > margin && cover[c] > margin) continue
-      kept.push(a, b, c)
-    }
-    geo.setIndex(kept)
-  }
-  pos.needsUpdate = true
-  geo.computeVertexNormals()
+  sinkUnderStrips(geo, [{ sinkAt: sinkTo, coverAt, bounds }], margin, maxLift)
 }

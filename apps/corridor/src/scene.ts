@@ -11,7 +11,7 @@ import { LOOK, type Season } from './season'
 import { GRASS_TYPES, forestFloorTexture, grassTypeFor } from './groundcover'
 import { CROP_TYPES, buildCrops, tickCrops, type CropType, type Field as CropField } from './crops'
 import { ACCUM_PARS, Precipitation, accumUniforms, type Weather } from './weather'
-import { buildStrip, sinkUnderStrip } from './strip'
+import { buildStrip, sinkUnderStrips } from './strip'
 import { Adjustments, NEUTRAL as NEUTRAL_ADJ } from './adjust'
 import { buildPlacements, loadCatalog, loadPlacements } from './placements'
 import { buildBuildings } from './buildings'
@@ -37,6 +37,8 @@ export interface Site {
   treeCount: number
   /** the grass field, when this site has one (probes and the HUD read `grass.counts`) */
   grass: Grass | null
+  /** how long each build phase took (ms), in order — `status()` marks the boundaries */
+  buildProfile: { phase: string; ms: number }[]
   /** what street furniture was placed, and how much of it had to be walked off the carriageway */
   furnitureCounts: { masts: number; signs: number; movedOffPavement: number; stillOnPavement: number; onTheLeft: number; noRoadNearby: number; armNoRoad: number }
   /** what parking was paved, and why the rest was not */
@@ -180,13 +182,30 @@ const hypso = (z: number): [number, number, number] => {
 }
 
 
-export async function buildSite(manifestIn: Manifest, status: (s: string) => void, lite = false, renderer?: THREE.WebGLRenderer, fog: THREE.FogExp2 | null = null, initialSeason: Season = 'summer'): Promise<Site> {
+export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => void, lite = false, renderer?: THREE.WebGLRenderer, fog: THREE.FogExp2 | null = null, initialSeason: Season = 'summer'): Promise<Site> {
   let manifest = manifestIn
   const base = `/sites/${manifest.slug}/web/`
   const group = new THREE.Group()
   const L = manifest.layers
   if (!L.dem) throw new Error('site has no DEM layer')
 
+  // BUILD PROFILE. A network site of 427 branches takes over two minutes to build and the browser
+  // is frozen for all of it, so the first question is always which phase. `status()` already marks
+  // every phase boundary; timing it there costs nothing and means the answer is one probe away
+  // rather than a bisect. Read it back as `site.buildProfile`.
+  const buildProfile: { phase: string; ms: number }[] = []
+  let phaseT = performance.now()
+  let phaseName = 'start'
+  const mark = (next: string) => {
+    const now = performance.now()
+    buildProfile.push({ phase: phaseName, ms: Math.round(now - phaseT) })
+    phaseT = now
+    phaseName = next
+  }
+  const status = (m: string) => {
+    mark(m)
+    return rawStatus(m)
+  }
   status('decoding terrain…')
   const adjustments = await Adjustments.load(manifest.slug)
   const overrides = await loadStructureOverrides(manifest.slug)
@@ -700,15 +719,31 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
       return lim
     }
     const makeStrip = () => buildStrip(spineAt, curveLen, -latMin + VERGE, latMax + VERGE, (x, z) => edgeDistance(x, z), heightAt, imagery, manifest.bbox, grassTex('grass_mown'), grassTex('grass_rough'), lite ? 4 : 2, lite ? 2 : 1, adjustments.active ? (x, y) => adjustments.at(x, y, adjScratch).ground_offset_m : null, null, stripEdgeLimitAt, stripCanopyAt, litter)
+    mark('grade: setup')
     let strip = makeStrip()
     strip.setLitter(LOOK[currentSeason].litter.tint, LOOK[currentSeason].litter.spread)
     road.add(strip.mesh)
-    sinkUnderStrip(terrainGeo, strip.sinkAt, strip.coverAt)
+    mark('grade: primary strip')
+    mark('grade: sink primary')
     // one strip per branch; where another road's strip already covers the ground (within VERGE of
     // its pavement edge) the branch strip leaves a hole rather than a second coplanar surface
-    const makeBranchStrips = () => branchAts.map((b, i) => buildStrip(b.at, b.len, VERGE, VERGE, (x, z) => edgeDistance(x, z), heightAt, imagery, manifest.bbox, grassTex('grass_mown'), grassTex('grass_rough'), lite ? 4 : 2, lite ? 2 : 1, adjustments.active ? (x, y) => adjustments.at(x, y, adjScratch).ground_offset_m : null, (s) => {
+    /**
+     * A BRANCH GETS A NARROWER, COARSER STRIP THAN THE PRIMARY.
+     *
+     * The primary is the road you drive, so it gets 40 m of verge sampled every 2 m along and 1 m
+     * across. Giving a residential branch the same is wrong twice over. Wrong visually: streets in
+     * a subdivision are a hundred metres apart, so 40 m of verge each side means every strip
+     * overlaps its neighbours and the whole grid is paved twice. And wrong in cost: 427 branches at
+     * that resolution was **21.7 s of the build**, because every vertex asks `edgeDistance`, which
+     * projects onto the station grid.
+     *
+     * BRANCH_VERGE (14 m) and a 2 m lateral step cut the vertices per branch about six-fold. The
+     * ground beyond the verge is the coarse terrain, which is what it should be that far from a
+     * residential street anyway.
+     */
+    const makeBranchStrips = () => branchAts.map((b, i) => buildStrip(b.at, b.len, T.BRANCH_VERGE, T.BRANCH_VERGE, (x, z) => edgeDistance(x, z), heightAt, imagery, manifest.bbox, grassTex('grass_mown'), grassTex('grass_rough'), lite ? 4 : 3, lite ? 3 : 2, adjustments.active ? (x, y) => adjustments.at(x, y, adjScratch).ground_offset_m : null, (s) => {
       const q = b.at(s).pos
-      return edgeDistance(q.x, q.z, branchWho0 + i).d < VERGE
+      return edgeDistance(q.x, q.z, branchWho0 + i).d < T.BRANCH_VERGE
     }))
     // --- driveways -------------------------------------------------------------------------
     // Every house on Rich's court has one in OSM and we were dropping them, so the houses stood
@@ -830,10 +865,11 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
     }
     makeBulbs()
     let branchStrips = makeBranchStrips()
-    for (const bs of branchStrips) {
-      road.add(bs.mesh)
-      sinkUnderStrip(terrainGeo, bs.sinkAt, bs.coverAt)
-    }
+    mark('grade: branch strips built')
+    for (const bs of branchStrips) road.add(bs.mesh)
+    // ONE pass for every strip, primary and branches together
+    sinkUnderStrips(terrainGeo, [strip, ...branchStrips])
+    mark('grade: sink all strips')
     const stripHeight = (x: number, z: number): number | null => {
       const h = strip.heightAt(x, z)
       if (h !== null) return h
@@ -857,16 +893,14 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
       strip.mesh.geometry.dispose()
       strip = makeStrip()
       road.add(strip.mesh)
-      sinkUnderStrip(terrainGeo, strip.sinkAt, strip.coverAt)
+
       for (const bs of branchStrips) {
         road.remove(bs.mesh)
         bs.mesh.geometry.dispose()
       }
       branchStrips = makeBranchStrips()
-      for (const bs of branchStrips) {
-        road.add(bs.mesh)
-        sinkUnderStrip(terrainGeo, bs.sinkAt, bs.coverAt)
-      }
+      for (const bs of branchStrips) road.add(bs.mesh)
+      sinkUnderStrips(terrainGeo, [strip, ...branchStrips])
     }
     group.add(road)
     // everything that stands on the ground near the road stands on the strip
@@ -1239,6 +1273,7 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
     adjustments,
     treeCount,
     grass: grassRef,
+    buildProfile: (mark('done'), buildProfile),
     furnitureCounts: furniture.counts,
     parkingCounts: parking.counts,
     barrierCounts: barriers.counts,

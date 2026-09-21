@@ -149,6 +149,93 @@ def roads(site: dict, frame: Frame, cache: Path) -> dict:
     return {"chains": chains, "primary": primary, "found": found, "missing": missing, "ways": len(ways)}
 
 
+DEAD_END_RADIUS = {"residential": 9.0, "unclassified": 9.0, "tertiary": 9.0, "living_street": 8.0, "service": 6.0}
+DEAD_END_DEFAULT = 9.0
+BOUNDARY_M = 60.0  # an end this close to the query box was CLIPPED by us, not built as a dead end
+
+
+def dead_ends(chains: list[dict], frame: Frame, cache: Path, radius_m: float, site_lat: float, site_lon: float) -> None:
+    """Mark each chain end as a cul-de-sac, a true dead end, or neither (Rich, 2026-09-21).
+
+    "If a street dead ends, assume a cul de sac, make it so this can be overridden into a true dead
+    end." So the bake's job is to say which ends are ends at all, and to use OSM's own answer where
+    OSM has one. Three things can be true of a chain end:
+
+      * it MEETS another road — one of ours (a junction we already have) or one we did not ask for.
+        The second needs asking: one Overpass query for every end node returns the ways that use it,
+        so an end shared with any other `highway` way is a junction, not a dead end. Chesterfield
+        Road ending on a road outside the `roads` list must not grow a bulb.
+      * it was CLIPPED by our own query box (within BOUNDARY_M of it). The road continues in the
+        real world; the world just stops here.
+      * it is genuinely an end. OSM marks the bulb with `highway=turning_circle` (a paved bulb) or
+        `turning_loop` (an island); when the node carries one, source is "osm" and the kind is a
+        cul-de-sac. Otherwise we ASSUME a cul-de-sac, which is Rich's rule, and the editor can
+        override it to `dead_end`.
+
+    Radius is to the pavement EDGE: 9 m for a residential bulb (the 18 m diameter US standard),
+    6 m for a service road. Written onto each chain as `dead_ends`; nothing else moves.
+    """
+    ends: dict[int, list[tuple[dict, float]]] = {}
+    for c in chains:
+        ways = c["ways"]
+        for node, s_at in ((ways[0]["nodes"][0], 0.0), (ways[-1]["nodes"][-1], float(c["line"].length))):
+            ends.setdefault(node, []).append((c, s_at))
+    tags: dict[int, dict] = {}
+    way_count: dict[int, int] = {}
+    if ends:
+        ids = ";".join(str(n) for n in sorted(ends))
+        q = f"[out:json][timeout:120];node(id:{ids})->.e;(.e;way(bn.e)[highway];);out tags;"
+        try:
+            for el in osm.overpass(q, cache)["elements"]:
+                if el["type"] == "node":
+                    tags[el["id"]] = el.get("tags", {})
+                elif el["type"] == "way":
+                    for nid in el.get("nodes", []) or []:
+                        if nid in ends:
+                            way_count[nid] = way_count.get(nid, 0) + 1
+        except Exception as exc:  # a dead end we cannot confirm is better than a failed bake
+            print(f"  ends    overpass failed ({exc}); assuming every unshared end is a cul-de-sac")
+    # `out tags` on a way omits its node list, so ask again for the ways' nodes when we got none
+    if ends and not way_count:
+        q2 = f"[out:json][timeout:120];node(id:{ids})->.e;way(bn.e)[highway];out ids;"
+        try:
+            for el in osm.overpass(q2, cache)["elements"]:
+                for nid in el.get("nodes", []) or []:
+                    if nid in ends:
+                        way_count[nid] = way_count.get(nid, 0) + 1
+        except Exception:
+            pass
+    ox, oy = frame.origin
+    for c in chains:
+        c["dead_ends"] = []
+    n_osm = n_assumed = 0
+    for node, owners in ends.items():
+        shared_here = len({c["id"] for c, _ in owners}) > 1  # two of OUR chains meet
+        t = tags.get(node, {})
+        hw = t.get("highway")
+        osm_bulb = hw in ("turning_circle", "turning_loop")
+        # ways using this node, ours included; more than the chains that own it means an unlisted road
+        ours = len(owners)
+        meets_other = way_count.get(node, ours) > ours
+        for c, s_at in owners:
+            if shared_here or meets_other:
+                continue
+            p = c["line"].interpolate(s_at)
+            if min(abs(p.x - (ox - radius_m)), abs(p.x - (ox + radius_m)), abs(p.y - (oy - radius_m)), abs(p.y - (oy + radius_m))) < BOUNDARY_M:
+                continue  # clipped by our own query box
+            rad = DEAD_END_RADIUS.get(c["highway"] or "", DEAD_END_DEFAULT)
+            c["dead_ends"].append({
+                "s": round(s_at, 1), "kind": "cul_de_sac", "radius_m": round(float(t.get("radius_m") or rad), 1),
+                "source": "osm" if osm_bulb else "assumed", "node": node,
+                "x": round(float(p.x - ox), 1), "y": round(float(p.y - oy), 1),
+            })
+            if osm_bulb:
+                n_osm += 1
+            else:
+                n_assumed += 1
+    print(f"  ends    {n_osm + n_assumed} dead ends ({n_osm} marked by OSM, {n_assumed} assumed cul-de-sacs)", flush=True)
+
+
 def write_vectors(site: dict, frame: Frame, R: dict, out: Path, half_width: float, cache: Path) -> dict:
     """spine_utm.json / spine.geojson / site.json / osm.geojson / crossings.json for a network."""
     ox, oy = frame.origin
@@ -169,11 +256,11 @@ def write_vectors(site: dict, frame: Frame, R: dict, out: Path, half_width: floa
         siblings.append({
             "osm_ids": [wy["id"] for wy in c["ways"]], "tags": c["ways"][0].get("tags", {}), "geometry": mapping(c["line"]),
             "id": c["id"], "name": c["name"], "ref": c["ref"], "ident": c["ident"], "highway": c["highway"], "lanes": c["lanes"], "oneway": c["oneway"],
-            "length_m": c["length_m"], "junctions": c["junctions"],
+            "length_m": c["length_m"], "junctions": c["junctions"], "dead_ends": c.get("dead_ends", []),
         })
     (out / "spine_utm.json").write_text(json.dumps({
         "epsg": frame.epsg, "coords": np.array(line.coords).round(2).tolist(), "photo_s": round(photo_s, 1), "segments": segs, "siblings": siblings,
-        "network": True, "primary": {"id": prim["id"], "ident": prim["ident"], "length_m": prim["length_m"], "junctions": prim["junctions"]}, "roads": R["found"],
+        "network": True, "primary": {"id": prim["id"], "ident": prim["ident"], "length_m": prim["length_m"], "junctions": prim["junctions"], "dead_ends": prim.get("dead_ends", [])}, "roads": R["found"],
     }))
     xs, ys = np.array(line.coords)[:, 0], np.array(line.coords)[:, 1]
     lon, lat = frame.to_wgs(xs, ys)
@@ -218,6 +305,7 @@ def fetch_site(site: dict, half_width: float, lidar_half_width: float, skip: set
     manifest |= {"slug": slug, "kind": "network", "frame": {"epsg": frame.epsg, "origin": frame.origin}, "fetched": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "params": {"half_width_m": half_width, "lidar_half_width_m": lidar_half_width, "radius_m": site.get("radius_m"), "horizon_radius_m": 30000.0}}
     R = roads(site, frame, cache / "overpass")
     print(f"  roads   {summary(R)}", flush=True)
+    dead_ends(R["chains"], frame, cache / "overpass", float(site.get("radius_m", 9000)), site["lat"], site["lon"])
     V = write_vectors(site, frame, R, out, half_width, cache / "overpass")
     corridor = V["corridor"]
     bbox = V["bbox"]
@@ -260,7 +348,7 @@ def fetch_site(site: dict, half_width: float, lidar_half_width: float, skip: set
     branches: list[dict] = []
 
     def branch_rec(c: dict, bp: dict | None) -> dict:
-        return {"id": c["id"], "ident": c["ident"], "name": c["name"], "ref": c["ref"], "highway": c["highway"], "lanes": c["lanes"], "oneway": c["oneway"], "length_m": c["length_m"], "s_on_primary": round(float(prim["line"].project(c["line"].interpolate(0.5, normalized=True))), 1), "junctions": c["junctions"], "profile": {"step_m": bp["step_m"], "s": bp["s"], "road_z": bp["road_z"]} if bp else None, "structures": bp["structures"] if bp else []}
+        return {"id": c["id"], "ident": c["ident"], "name": c["name"], "ref": c["ref"], "highway": c["highway"], "lanes": c["lanes"], "oneway": c["oneway"], "length_m": c["length_m"], "s_on_primary": round(float(prim["line"].project(c["line"].interpolate(0.5, normalized=True))), 1), "junctions": c["junctions"], "dead_ends": c.get("dead_ends", []), "profile": {"step_m": bp["step_m"], "s": bp["s"], "road_z": bp["road_z"]} if bp else None, "structures": bp["structures"] if bp else []}
 
     if "lidar" not in skip and tiled:
         from . import network_tiles
@@ -406,7 +494,7 @@ def export_branches(site_dir: Path, ox: float, oy: float) -> list[dict] | None:
         out.append({
             "id": b["id"], "name": b.get("name"), "ref": b.get("ref"), "ident": b.get("ident"), "highway": b.get("highway"), "lanes": b.get("lanes"), "oneway": b.get("oneway"), "length_m": b.get("length_m"),
             "coords": np.column_stack([pts[:, 0] - ox, pts[:, 1] - oy, zs]).round(2).tolist(),
-            "junctions": js, "s_on_primary": b.get("s_on_primary"),
+            "junctions": js, "dead_ends": sib.get("dead_ends") or b.get("dead_ends") or [], "s_on_primary": b.get("s_on_primary"),
             "profile": {"s": prof["s"][::5], "road_z": [finite(v) for v in prof["road_z"][::5]]} if prof and prof.get("s") else None,
             "structures": b.get("structures") or [], "surface": None,
         })

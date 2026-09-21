@@ -494,6 +494,11 @@ def profile(spine: LineString, dtm: np.ndarray, chm: np.ndarray, tr, pts: dict, 
             continue
         if nan.any():
             deck_med[nan] = np.interp(np.flatnonzero(nan), np.flatnonzero(~nan), deck_med[~nan])
+        # the deck has to actually stand above the hole, and a run touching either end of the spine
+        # is the median window running out of road, not a bridge (Sideling s=0..8 and the last 8 m
+        # came out as 0.07 m and -0.11 m "decks")
+        if i == 0 or j == n - 1 or float(np.median(deck_med - ground_z[i : j + 1])) < DIP_MIN * 0.7:
+            continue
         surface_z[i : j + 1] = deck_med
         structures.append({
             "kind": "bridge", "source": "geometry",

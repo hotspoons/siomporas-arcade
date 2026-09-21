@@ -6,6 +6,7 @@
 // imagery everywhere, mown turf inside the mow line, rough grass beyond, blended by the same
 // edge distance the blades use. The coarse terrain is sunk beneath it.
 import * as THREE from 'three'
+import { ACCUM_PARS, accumUniforms } from './weather'
 
 export interface Edge {
   d: number // signed distance to the nearest pavement edge (negative on the pavement)
@@ -28,6 +29,21 @@ export function buildStrip(
   offsetAt: ((x: number, y: number) => number) | null = null,
   /** network branches: stations where another road's strip already covers the ground are left out (no triangles, heightAt → null) */
   skipAt: ((s: number) => boolean) | null = null,
+  /**
+   * How far past the PAVEMENT EDGE the strip may reach at this station, in metres (Infinity for
+   * no limit). On a bridge the verge has to stop at the parapet: out there the strip is still at
+   * DECK height while the DEM is the valley floor 5–12 m below, and the blend to the DEM cannot
+   * reach that far, so the verge hangs over the valley as a shelf with grass and trees standing
+   * on it. Measured from the pavement edge rather than from the spine because a divided highway
+   * carries its carriageways on two separate decks: a spine-relative half-width would keep the
+   * median, which is open air, and cut the sibling's deck away. Vertices past the limit emit no
+   * triangles and heightAt returns null for them.
+   */
+  edgeLimitAt: ((s: number) => number) | null = null,
+  /** canopy height (m) at site x,y — the CHM. Where it closes over, the verge is forest floor. */
+  canopyAt: ((x: number, y: number) => number) | null = null,
+  /** the forest-floor texture that replaces turf under canopy (groundcover.forestFloorTexture) */
+  forestFloor: THREE.Texture | null = null,
 ): {
   mesh: THREE.Mesh
   heightAt: (x: number, z: number) => number | null
@@ -35,6 +51,8 @@ export function buildStrip(
   sinkAt: (x: number, z: number) => number | null
   /** metres inside the strip, ≤ 0 outside: how sinkUnderStrip knows which triangles to drop */
   coverAt: (x: number, z: number) => number
+  setLitter: (tint: THREE.Color, spread: number) => void
+  weatherUniforms: Record<string, THREE.IUniform>
   setTint: (c: THREE.Color, ground: THREE.Color) => void
 } {
   const nS = Math.floor(length / along) + 1
@@ -45,11 +63,14 @@ export function buildStrip(
   const pos = new Float32Array(nS * nL * 3)
   const uv = new Float32Array(nS * nL * 2)
   const edge = new Float32Array(nS * nL)
+  const canopy = new Float32Array(nS * nL)
   const up = new THREE.Vector3(0, 1, 0)
   const [bx0, by0, bx1, by1] = bbox
   let k = 0
   // a lookup grid for heightAt(): station index by along-track, lateral by offset
   const heights = new Float32Array(nS * nL)
+  /** vertices outside this station's width limit: no triangles touch them, heightAt ignores them */
+  const dead = new Uint8Array(nS * nL)
   const origins: THREE.Vector3[] = []
   const sides: THREE.Vector3[] = []
   for (let i = 0; i < nS; i++) {
@@ -59,6 +80,7 @@ export function buildStrip(
     origins.push(st.pos)
     sides.push(side)
     if (skipAt && skipAt(sHere)) skipped[i] = 1
+    const edgeLimit = edgeLimitAt ? edgeLimitAt(sHere) : Infinity
     for (let j = 0; j < nL; j++) {
       const o = offs[j]
       const x = st.pos.x + side.x * o, z = st.pos.z + side.z * o
@@ -74,11 +96,13 @@ export function buildStrip(
       pos[k * 3] = x
       pos[k * 3 + 1] = y
       pos[k * 3 + 2] = z
-      heights[k] = skipped[i] ? NaN : y
+      if (e.d > edgeLimit) dead[k] = 1
+      heights[k] = skipped[i] || dead[k] ? NaN : y
       // imagery uv from world position inside the site bbox (site y = -world z)
       uv[k * 2] = (x - bx0) / (bx1 - bx0)
       uv[k * 2 + 1] = (-z - by0) / (by1 - by0)
       edge[k] = e.d
+      canopy[k] = canopyAt ? canopyAt(x, -z) : 0
       k++
     }
   }
@@ -88,6 +112,7 @@ export function buildStrip(
     if (skipped[i] || skipped[i + 1]) continue
     for (let j = 0; j < nL - 1; j++) {
       const a = i * nL + j, b = a + 1, c = a + nL, d = c + 1
+      if (dead[a] || dead[b] || dead[c] || dead[d]) continue
       // WINDING. b is one step along `side` (= dir × up) and c is one step along `dir`, so
       // (a, c, b) has normal dir × side = −up: the sheet's front faces pointed DOWN. The material
       // is FrontSide, so the strip was back-face culled from above and drew nothing at all — the
@@ -103,24 +128,59 @@ export function buildStrip(
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3))
   geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2))
   geo.setAttribute('aEdge', new THREE.BufferAttribute(edge, 1))
+  geo.setAttribute('aCanopy', new THREE.BufferAttribute(canopy, 1))
   geo.setIndex(new THREE.BufferAttribute(idx, 1))
   geo.computeVertexNormals()
 
-  for (const t of [grassMown, grassRough]) if (t) { t.wrapS = t.wrapT = THREE.RepeatWrapping }
+  for (const t of [grassMown, grassRough, forestFloor]) if (t) { t.wrapS = t.wrapT = THREE.RepeatWrapping }
   const mat = new THREE.MeshStandardMaterial({ map: imagery, color: 0xffffff, roughness: 1, metalness: 0 })
   const uniforms = {
     grassMown: { value: grassMown },
     grassRough: { value: grassRough },
     hasGrass: { value: grassMown && grassRough ? 1 : 0 },
+    forestFloor: { value: forestFloor },
+    hasForest: { value: forestFloor ? 1 : 0 },
+    litterTint: { value: new THREE.Color(0x7a6e56) },
+    litterSpread: { value: 0.2 },
+    ...accumUniforms(),
     grassTint: { value: new THREE.Color(0xffffff) },
   }
   mat.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms)
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute float aEdge;\nvarying float vEdge;\nvarying vec3 vWorldXZ;')
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvEdge = aEdge;\nvWorldXZ = (modelMatrix * vec4(position, 1.0)).xyz;')
+      .replace('#include <common>', '#include <common>\nattribute float aEdge;\nattribute float aCanopy;\nvarying float vEdge;\nvarying float vCanopy;\nvarying vec3 vWorldXZ;\nvarying vec3 vWorldN;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvEdge = aEdge;\nvCanopy = aCanopy;\nvWorldXZ = (modelMatrix * vec4(position, 1.0)).xyz;\nvWorldN = normalize(mat3(modelMatrix) * objectNormal);')
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <map_pars_fragment>', '#include <map_pars_fragment>\nuniform sampler2D grassMown;\nuniform sampler2D grassRough;\nuniform int hasGrass;\nuniform vec3 grassTint;\nvarying float vEdge;\nvarying vec3 vWorldXZ;')
+      .replace('#include <map_pars_fragment>', `#include <map_pars_fragment>
+        uniform sampler2D grassMown;
+        uniform sampler2D grassRough;
+        uniform int hasGrass;
+        uniform sampler2D forestFloor;
+        uniform int hasForest;
+        uniform vec3 litterTint;
+        uniform float litterSpread;
+        uniform vec3 grassTint;
+        varying float vEdge;
+        varying float vCanopy;
+        varying vec3 vWorldXZ;
+        varying vec3 vWorldN;
+        ${ACCUM_PARS}
+        // TRIPLANAR. The ground textures used to be projected straight down — uv = worldXZ / 2 —
+        // which is exact on the flat and degenerate on a cut face: a 40° bank gets a metre of uv
+        // for every 1.3 m of slope, and a near-vertical one smears a single row of texels all the
+        // way down. That is the vertical streaking on the Chesterfield embankment. Sampling on all
+        // three world planes and blending by the normal costs three fetches and holds scale
+        // whatever the ground is doing. The exponent decides how narrow the blend band is; 4 keeps
+        // flat ground effectively single-sampled and only pays on the slopes.
+        vec3 triplanar(sampler2D t, vec3 p, vec3 n, float scale, vec2 off) {
+          vec3 w = pow(abs(n), vec3(4.0));
+          w /= max(1e-4, w.x + w.y + w.z);
+          vec3 c = vec3(0.0);
+          if (w.y > 0.001) c += texture2D(t, p.xz * scale + off).rgb * w.y;
+          if (w.x > 0.001) c += texture2D(t, p.zy * scale + off).rgb * w.x;
+          if (w.z > 0.001) c += texture2D(t, p.xy * scale + off).rgb * w.z;
+          return c;
+        }`)
       .replace(
         '#include <map_fragment>',
         `
@@ -128,19 +188,42 @@ export function buildStrip(
           vec4 img = texture2D(map, vMapUv);
           vec4 ground = img;
           if (hasGrass == 1) {
-            vec2 guv = vWorldXZ.xz / 2.0;
-            vec4 mown = texture2D(grassMown, guv);
-            vec4 rough = texture2D(grassRough, guv * 0.97 + vec2(0.13, 0.41));
+            vec3 n = normalize(vWorldN);
+            vec3 mown = triplanar(grassMown, vWorldXZ, n, 0.5, vec2(0.0));
+            vec3 rough = triplanar(grassRough, vWorldXZ, n, 0.485, vec2(0.13, 0.41));
             // the mow line ~8 m out, rough grass to ~22 m, then the air photo takes over; the
             // imagery's own brightness is kept as a large-scale modulation so fields and woods
             // still read through the grass tiles
             float wMown = 1.0 - smoothstep(6.5, 9.5, vEdge);
             float wRough = smoothstep(6.5, 9.5, vEdge) * (1.0 - smoothstep(18.0, 26.0, vEdge));
             float lum = clamp(dot(img.rgb, vec3(0.3, 0.5, 0.2)) * 2.2, 0.55, 1.35);
-            vec3 grass = (mown.rgb * wMown + rough.rgb * wRough) * grassTint * lum;
+            vec3 grass = (mown * wMown + rough * wRough) * grassTint * lum;
             float wGrass = clamp(wMown + wRough, 0.0, 1.0);
             ground = vec4(mix(img.rgb, grass, wGrass), 1.0);
+            // FOREST FLOOR. Under a closed canopy the verge is leaf litter, not turf: the same
+            // CHM > 3 m that stops the grass generator putting a single blade here (68 % of the
+            // Chesterfield verge) should stop the ground reading as mown grass too. Blended over
+            // 2–4 m of canopy height so a hedge line is a gradient and not a cut-out, and kept
+            // off the pavement by the same edge distance everything else uses.
+            if (hasForest == 1) {
+              // canopy closing over AND clear of the mown strip: a highway crew mows under an
+              // overhanging crown, so the first few metres off the shoulder stay turf even in
+              // closed woodland. 41 % of Bowie's verge is under canopy by the CHM and most of that
+              // is overhang, not forest floor.
+              //
+              // litterSpread moves the canopy threshold with the SEASON. A wood in leaf drops
+              // almost nothing on the verge beside it (spread 0.2: litter only where the CHM is
+              // really closed); the same wood in November has covered it (spread 1.0: litter
+              // wherever there is any canopy at all nearby). That, and not the bare branches
+              // alone, is what makes a winter wood read as winter.
+              float lo = mix(3.0, 0.2, litterSpread), hi = mix(5.0, 1.2, litterSpread);
+              float wForest = smoothstep(lo, hi, vCanopy) * smoothstep(4.0, 10.0, vEdge);
+              vec3 litter = triplanar(forestFloor, vWorldXZ, n, 0.5, vec2(0.37, 0.11)) * litterTint * 1.6 * lum;
+              ground = vec4(mix(ground.rgb, litter, wForest), 1.0);
+            }
           }
+          // snow, ice and rain last, over whatever the ground turned out to be
+          ground = vec4(applyWeather(ground.rgb, normalize(vWorldN), vWorldXZ), 1.0);
           diffuseColor *= ground;
         #endif
         `,
@@ -227,6 +310,13 @@ export function buildStrip(
       uniforms.grassTint.value.copy(c)
       mat.color.copy(ground)
     },
+    /** the season's leaf litter: its colour, and how far past the crowns it has fallen */
+    setLitter: (tint: THREE.Color, spread: number) => {
+      uniforms.litterTint.value.copy(tint)
+      uniforms.litterSpread.value = spread
+    },
+    /** hand these to Precipitation.follow so the settled layer and the wet look drive them */
+    weatherUniforms: uniforms as unknown as Record<string, THREE.IUniform>,
   }
 }
 
@@ -251,6 +341,7 @@ export function sinkUnderStrip(
   sinkTo: (x: number, z: number) => number | null,
   coverAt: (x: number, z: number) => number,
   margin = 9,
+  maxLift = 3.5,
 ) {
   const pos = geo.getAttribute('position') as THREE.BufferAttribute
   const cover = new Float32Array(pos.count)
@@ -259,7 +350,15 @@ export function sinkUnderStrip(
     cover[i] = coverAt(x, z)
     if (cover[i] <= 0) continue
     const y = sinkTo(x, z)
-    if (y !== null) pos.setY(i, Math.min(pos.getY(i), y))
+    if (y === null) { cover[i] = -1; continue }
+    // A DECK IS NOT A COVER. Being laterally inside the strip is not the same as having the strip
+    // over your head: on a bridge the strip is the deck, five to twelve metres up, and the valley
+    // floor below is in full view. Dropping those triangles punched a hole straight through the
+    // world — invisible until the deck's 40 m verge stopped hanging over it and hiding it. Where
+    // the strip stands more than `maxLift` above this ground, leave the ground alone entirely.
+    // A fill embankment never reaches that: its blend is back on the DEM within seven metres.
+    if (y - pos.getY(i) > maxLift) { cover[i] = -1; continue }
+    pos.setY(i, Math.min(pos.getY(i), y))
   }
   const idx = geo.getIndex()
   if (idx) {

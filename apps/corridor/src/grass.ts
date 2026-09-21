@@ -31,6 +31,7 @@
 import * as THREE from 'three'
 import type { SeasonLook } from './season'
 import { GRASS_LOOK, type GrassType } from './groundcover'
+import { ACCUM_PARS, accumUniforms } from './weather'
 import * as T from './tuning'
 
 const SEGMENTS = 6
@@ -147,6 +148,8 @@ export class Grass {
   private roadDistance: (x: number, z: number) => number
   private pavedHalf: number
   private adjustAt: ((x: number, y: number) => [number, number]) | undefined
+  /** the bare DEM, for the shelf test in generate(); undefined means the test is skipped */
+  private demAt: ((x: number, y: number) => number) | undefined
   private tiles = new Map<string, Tile>()
   private pending: { key: string; tx: number; tz: number; withBlades: boolean }[] = []
   private prevEye = new THREE.Vector3(NaN, NaN, NaN)
@@ -163,6 +166,12 @@ export class Grass {
   /** the visible tile set for this eye/heading, nearest first; rebuilt only when the view moved */
   private vis: { key: string; tx: number; tz: number; d: number }[] = []
   private visStale = true
+  /**
+   * The settled layer's uniforms, shared by the blade and card materials so Precipitation.follow
+   * drives both with one object. Snow has to lie on the grass as well as the ground: a white verge
+   * with green grass standing out of it is worse than no snow at all.
+   */
+  readonly weatherUniforms = accumUniforms()
   /** what grows here: shape multipliers over the season palette and the knobs (groundcover.ts) */
   private type: GrassType = 'common'
   private look = GRASS_LOOK.common
@@ -184,7 +193,9 @@ export class Grass {
     fog: THREE.FogExp2 | null = null,
     adjustAt: ((x: number, y: number) => [number, number]) | undefined = undefined,
     sun = new THREE.Vector3(-3000, 4000, 2500).normalize(),
+    demAt: ((x: number, y: number) => number) | undefined = undefined,
   ) {
+    this.demAt = demAt
     this.adjustAt = adjustAt
     this.groundAt = groundAt
     this.canopyAt = canopyAt
@@ -217,6 +228,7 @@ export class Grass {
         uHue: { value: 0 },
         uSat: { value: 1 },
         uLight: { value: 1 },
+        ...this.weatherUniforms,
       },
       vertexShader: /* glsl */ `
         attribute vec3 aRoot;
@@ -289,6 +301,7 @@ export class Grass {
         varying vec3 vWorld;
         #include <fog_pars_fragment>
         #include <logdepthbuf_pars_fragment>
+        ${ACCUM_PARS}
   // colour grading over the season palette: hue rotation about the grey axis (YIQ), saturation, lightness
   vec3 grade(vec3 c, float hueDeg, float sat, float light) {
     float a = radians(hueDeg);
@@ -316,7 +329,11 @@ export class Grass {
           // a little specular sheen along the blade
           vec3 hvec = normalize(uSun + v);
           lit += vec3(0.08) * pow(max(0.0, dot(n, hvec)), 24.0) * vT;
-          gl_FragColor = vec4(grade(lit, uHue, uSat, uLight), 1.0);
+          vec3 outCol = grade(lit, uHue, uSat, uLight);
+          // a blade catches the settled layer at its TIP, not at its root, so the normal it is
+          // weighed by is faked upright near the top — the real one points sideways all the way up
+          outCol = applyWeather(outCol, vec3(0.0, mix(0.1, 1.0, vT), 0.0), vWorld);
+          gl_FragColor = vec4(outCol, 1.0);
           #include <fog_fragment>
           #include <colorspace_fragment>
         }
@@ -354,6 +371,7 @@ export class Grass {
         uHue: { value: 0 },
         uSat: { value: 1 },
         uLight: { value: 1 },
+        ...this.weatherUniforms,
       },
       vertexShader: /* glsl */ `
         attribute vec4 aCard;  // x y z size
@@ -367,6 +385,7 @@ export class Grass {
         varying vec2 vUv;
         varying float vRand;
         varying float vMown;
+        varying vec3 vCardWorld;
         #include <common>
         #include <fog_pars_vertex>
         #include <logdepthbuf_pars_vertex>
@@ -389,6 +408,7 @@ export class Grass {
           float lean = (aCard2.x - 0.5) * 2.0 * uLean;
           vec3 world = root + right * (position.x * size * uWidth + lean * position.y * size) + vec3(0.0, position.y * size, 0.0)
                      + vec3(0.8, 0.0, 0.5) * gust * position.y * size;
+          vCardWorld = world;
           vec4 mvPosition = viewMatrix * vec4(world, 1.0);
           gl_Position = projectionMatrix * mvPosition;
           #include <logdepthbuf_vertex>
@@ -406,8 +426,10 @@ export class Grass {
         varying vec2 vUv;
         varying float vRand;
         varying float vMown;
+        varying vec3 vCardWorld;
         #include <fog_pars_fragment>
         #include <logdepthbuf_pars_fragment>
+        ${ACCUM_PARS}
   // colour grading over the season palette: hue rotation about the grey axis (YIQ), saturation, lightness
   vec3 grade(vec3 c, float hueDeg, float sat, float light) {
     float a = radians(hueDeg);
@@ -429,7 +451,9 @@ export class Grass {
           float shade = mix(0.55, 1.15, s.r);
           // a mown card is a low even turf; keep it a touch darker like the strip's mown texture
           c *= shade * mix(1.0, 0.85, vMown);
-          gl_FragColor = vec4(grade(c, uHue, uSat, uLight), 1.0);
+          vec3 outCol = grade(c, uHue, uSat, uLight);
+          outCol = applyWeather(outCol, vec3(0.0, mix(0.1, 1.0, vUv.y), 0.0), vCardWorld);
+          gl_FragColor = vec4(outCol, 1.0);
           #include <fog_fragment>
           #include <colorspace_fragment>
         }
@@ -495,7 +519,7 @@ export class Grass {
       T.GRASS_SPRITE_PER_M2, T.GRASS_MOW_LINE, T.GRASS_MAX_FROM_ROAD, T.GRASS_PATCHINESS,
       T.GRASS_PATCH_SIZE, T.GRASS_SCATTER, T.GRASS_SLOPE_MAX, T.GRASS_MOWN_HEIGHT,
       T.GRASS_ROUGH_HEIGHT, T.GRASS_LEAN, T.GRASS_HEIGHT_SCALE, T.GRASS_WIDTH_SCALE,
-      T.GRASS_SPRITE_SCALE, this.heightScale, this.type,
+      T.GRASS_SPRITE_SCALE, T.GRASS_MAX_SHELF, this.heightScale, this.type,
     ].join(',')
   }
   private sig = ''
@@ -660,6 +684,13 @@ export class Grass {
         const gy = this.groundAt(wx, -wz)
         const slope = Math.max(Math.abs(this.groundAt(wx + 1, -wz) - gy), Math.abs(this.groundAt(wx, -wz - 1) - gy))
         if (slope > T.GRASS_SLOPE_MAX) continue
+        // NOTHING GROWS ON A SHELF. Past the strip's blend band the strip IS the DEM — both come
+        // from the same raster — so any real gap there means this ground is not sitting on the
+        // world: a bridge verge at deck height over a valley, a retaining wall, a deck that has
+        // been widened. Grass standing on it is grass in the air. Inside the band the strip is
+        // between road grade and the DEM by construction, and a fill embankment lives there
+        // legitimately, so the test only applies once the blend has finished.
+        if (this.demAt && T.GRASS_MAX_SHELF > 0 && roadD > this.pavedHalf + 8 && gy - this.demAt(wx, -wz) > T.GRASS_MAX_SHELF) continue
         // bare patches: low-frequency hash noise thins the field where soil shows
         const patch = hash(Math.floor(cx / patchCells) * 971 + Math.floor(cz / patchCells) * 337)
         if (patch < T.GRASS_PATCHINESS) continue

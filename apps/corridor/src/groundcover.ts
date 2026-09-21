@@ -16,6 +16,7 @@
 // Selection is from the bake, not from a person: the site's latitude and longitude put it in a
 // warm- or cool-season region, and the OSM land use around the corridor decides between a
 // roadside mix and a crop verge.
+import * as THREE from 'three'
 import type { Manifest } from './site'
 
 export type GrassType = 'common' | 'wheat' | 'bermuda' | 'coastal'
@@ -101,4 +102,91 @@ export function grassTypeFor(manifest: Manifest): GrassType {
   // farmland (or its farmyards) taking a real share of the corridor: a crop verge, gone to seed
   if (area('farmland') + area('farmyard') > 0.3 * Math.max(1, total)) return 'wheat'
   return 'common'
+}
+
+/**
+ * Leaf litter, painted once to a tiling canvas.
+ *
+ * A PLACEHOLDER, and deliberately a cheap one. Main's brief (inbox 002) is that the real ground
+ * sets come out of flux.2 through `tools/surfaces/gen.py`, one per class per region — piedmont
+ * oak-hickory litter, Appalachian shale scree, coastal chaparral, rainforest moss and needles,
+ * granite duff, crop stubble — with colour, normal and height and three variants each, using
+ * ez-tree's `dirt_color.jpg` as the conditioning image. This is what stands in until they exist,
+ * so the shader path and the CHM blend below can be built and checked now: under a closed canopy
+ * a verge has to read as forest floor, and Chesterfield is 68 % closed canopy over its verge
+ * (probes/corridor-canopycover.mjs). Straw-coloured turf under old-growth oak is worse than a
+ * rough litter. Swap the texture, keep everything else.
+ *
+ * Tiles because every leaf is drawn nine times, once per wrap of the torus.
+ */
+export function forestFloorTexture(size = 1024): THREE.Texture {
+  const cv = document.createElement('canvas')
+  cv.width = cv.height = size
+  const ctx = cv.getContext('2d')!
+  let seed = 20260921
+  const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff)
+  // loam, mottled
+  ctx.fillStyle = '#3d3024'
+  ctx.fillRect(0, 0, size, size)
+  for (let i = 0; i < 2600; i++) {
+    const r = 6 + rnd() * 46
+    ctx.fillStyle = `rgba(${40 + rnd() * 34 | 0},${32 + rnd() * 26 | 0},${22 + rnd() * 18 | 0},0.5)`
+    ctx.beginPath()
+    ctx.arc(rnd() * size, rnd() * size, r, 0, 6.2832)
+    ctx.fill()
+  }
+  // leaves: oak and hickory, browns through russet to olive, lying flat and overlapping
+  const LEAF = [[122, 82, 42], [146, 102, 50], [101, 72, 38], [138, 116, 58], [92, 84, 44], [160, 118, 62], [78, 60, 34]]
+  for (let i = 0; i < 9000; i++) {
+    const x = rnd() * size, y = rnd() * size
+    const a = rnd() * Math.PI
+    // ~3–9 cm across at the shader's 2 m tile: litter is small and there is a great deal of it
+    const w = 4 + rnd() * 9, h = w * (0.42 + rnd() * 0.3)
+    const c = LEAF[(rnd() * LEAF.length) | 0]
+    const k = 0.72 + rnd() * 0.5
+    ctx.fillStyle = `rgba(${Math.min(255, c[0] * k) | 0},${Math.min(255, c[1] * k) | 0},${Math.min(255, c[2] * k) | 0},${0.55 + rnd() * 0.45})`
+    for (const dx of [-size, 0, size]) {
+      for (const dy of [-size, 0, size]) {
+        ctx.save()
+        ctx.translate(x + dx, y + dy)
+        ctx.rotate(a)
+        ctx.beginPath()
+        ctx.ellipse(0, 0, w, h, 0, 0, 6.2832)
+        ctx.fill()
+        ctx.restore()
+      }
+    }
+  }
+  // a few twigs
+  ctx.lineCap = 'round'
+  for (let i = 0; i < 260; i++) {
+    const x = rnd() * size, y = rnd() * size, a = rnd() * Math.PI, len = 12 + rnd() * 52
+    ctx.strokeStyle = `rgba(${52 + rnd() * 26 | 0},${40 + rnd() * 20 | 0},${28 + rnd() * 14 | 0},0.8)`
+    ctx.lineWidth = 1 + rnd() * 2.2
+    for (const dx of [-size, 0, size]) {
+      for (const dy of [-size, 0, size]) {
+        ctx.beginPath()
+        ctx.moveTo(x + dx, y + dy)
+        ctx.lineTo(x + dx + Math.cos(a) * len, y + dy + Math.sin(a) * len)
+        ctx.stroke()
+      }
+    }
+  }
+  // fine grain: without it the litter turns to flat blobs the moment the eye is a metre away
+  const d = ctx.getImageData(0, 0, size, size)
+  const px = d.data
+  for (let i = 0; i < px.length; i += 4) {
+    const n = (rnd() - 0.5) * 34
+    px[i] = Math.max(0, Math.min(255, px[i] + n))
+    px[i + 1] = Math.max(0, Math.min(255, px[i + 1] + n))
+    px[i + 2] = Math.max(0, Math.min(255, px[i + 2] + n * 0.7))
+  }
+  ctx.putImageData(d, 0, 0)
+  const tex = new THREE.CanvasTexture(cv)
+  tex.colorSpace = THREE.SRGBColorSpace
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping
+  tex.minFilter = THREE.LinearMipmapLinearFilter
+  tex.generateMipmaps = true
+  tex.anisotropy = 8
+  return tex
 }

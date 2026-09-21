@@ -74,6 +74,10 @@ export interface Manifest {
   siblings: [number, number][][]
   /** unnamed asphalt: OSM `highway=service` — driveways, parking aisles, alleys. Unmarked. */
   driveways?: { service: string; width_m: number; surface?: string | null; coords: [number, number, number][] }[]
+  /** roads we do not model, stubbed ~60 m from where they meet ours so a junction goes somewhere */
+  stubs?: { highway: string; name?: string | null; lanes?: number; oneway?: string | null; coords: [number, number, number][] }[]
+  /** power lines and their supports (OSM power=line|minor_line, tower|pole) */
+  power?: { lines: { kind: string; voltage?: string | null; coords: [number, number, number][] }[]; supports: { kind: string; x: number; y: number; z: number; height_m: number }[] } | null
   /** network sites: every road that is not the primary spine */
   branches?: Branch[]
   structures: Structure[]

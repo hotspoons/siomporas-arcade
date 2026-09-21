@@ -13,6 +13,7 @@ import { buildStrip, sinkUnderStrip } from './strip'
 import { Adjustments, NEUTRAL as NEUTRAL_ADJ } from './adjust'
 import { buildPlacements, loadCatalog, loadPlacements } from './placements'
 import { buildBuildings } from './buildings'
+import { buildPower } from './power'
 import { buildBridges, flattenSpine, loadStructureOverrides, suppressed } from './structures'
 import { loadSurfaceSets, overpassMesh, pavedOffset, pavedWidth, roadMesh, stations, taperedLanes, treesFromCanopy, type SurfaceSet } from './props'
 import { buildRocks } from './rocks'
@@ -25,7 +26,7 @@ export const toWorld = (x: number, y: number, z: number) => new THREE.Vector3(x,
 export interface Site {
   manifest: Manifest
   group: THREE.Group
-  layers: { imagery?: THREE.Mesh; canopy?: THREE.Mesh; trees?: THREE.Group; road: THREE.Group; horizon?: THREE.Mesh; structures: THREE.Group; spine: THREE.Group; markers: THREE.Group; placements: THREE.Group; buildings: THREE.Group; rocks: THREE.Group; water: THREE.Group }
+  layers: { imagery?: THREE.Mesh; canopy?: THREE.Mesh; trees?: THREE.Group; road: THREE.Group; horizon?: THREE.Mesh; structures: THREE.Group; spine: THREE.Group; markers: THREE.Group; placements: THREE.Group; buildings: THREE.Group; power: THREE.Group; rocks: THREE.Group; water: THREE.Group }
   /** how many footprints were massed, and how many had a real measured height */
   buildingStats: { count: number; gabled: number; fromLidar: number }
   adjustments: Adjustments
@@ -633,10 +634,16 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
       const mat = set ? set.material : new THREE.MeshStandardMaterial({ color: 0x3b3b3d, roughness: 1 })
       const mpt = set?.metresPerTile ?? 1
       const pos: number[] = [], uv: number[] = [], idx: number[] = []
-      for (const dw of manifest.driveways ?? []) {
+      const ribbons: { coords: [number, number, number][]; width: number }[] = [
+        ...(manifest.driveways ?? []).map((d) => ({ coords: d.coords, width: d.width_m ?? 3.6 })),
+        // a road we do not model, stubbed in from the junction: full width, still unmarked —
+        // paint on a 60 m stub that ends in nothing would draw the eye to the seam
+        ...(manifest.stubs ?? []).map((s) => ({ coords: s.coords, width: Math.max(5, (s.lanes ?? 2) * 3.1 + 0.8) })),
+      ]
+      for (const dw of ribbons) {
         const pts = (dw.coords ?? []).map(([x, y, z]) => toWorld(x, y, z))
         if (pts.length < 2) continue
-        const half = Math.max(1.2, (dw.width_m ?? 3.6) / 2)
+        const half = Math.max(1.2, (dw.width ?? 3.6) / 2)
         const base = pos.length / 3
         for (let i = 0; i < pts.length; i++) {
           const a = pts[Math.max(0, i - 1)], b = pts[Math.min(pts.length - 1, i + 1)]
@@ -1002,6 +1009,9 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
   status('raising buildings…')
   const built = buildBuildings(manifest, groundAtWorld)
   group.add(built.group)
+  // poles and wires: most of what a rural roadside has, and it was all sitting unused in the bake
+  const power = buildPower(manifest, groundAtWorld)
+  group.add(power.group)
   // authored bridges over the road (structures.json bridge_over)
   structures.add(await buildBridges(overrides, catalog, spineAt, groundAtWorld, (s) => pavedHalfAt(s) * 2))
 
@@ -1023,7 +1033,7 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
   return {
     manifest,
     group,
-    layers: { imagery: terrain, canopy, trees, road, horizon, structures, spine, markers, placements: placementsGroup, buildings: built.group, rocks: rocks.group, water: water.group },
+    layers: { imagery: terrain, canopy, trees, road, horizon, structures, spine, markers, placements: placementsGroup, buildings: built.group, power: power.group, rocks: rocks.group, water: water.group },
     buildingStats: built.stats,
     adjustments,
     treeCount,

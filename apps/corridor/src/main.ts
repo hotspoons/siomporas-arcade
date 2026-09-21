@@ -148,6 +148,7 @@ function applyLayers() {
   site.setWire(on('wire'))
   if (site.layers.canopy) site.layers.canopy.visible = on('canopy')
   site.layers.buildings.visible = on('buildings')
+  if (site.layers.power) site.layers.power.visible = on('power')
   if (site.layers.trees) site.layers.trees.visible = on('trees')
   site.layers.road.visible = on('road')
   if (site.layers.horizon) site.layers.horizon.visible = on('horizon')

@@ -156,6 +156,163 @@ def _service_ways(site_dir: Path, frame, ox: float, oy: float, bbox) -> list[dic
         src.close()
     return out
 
+
+def _our_lines(site_dir: Path):
+    """Every carriageway we already draw, in ABSOLUTE UTM — the same frame the OSM ways arrive in.
+
+    (They were built in the site frame once and every distance came out at 4.3 million metres,
+    which is the origin, so no road was ever "near" another.)
+    """
+    from shapely.geometry import LineString, MultiLineString
+
+    out = []
+    sp_p = site_dir / "spine_utm.json"
+    if sp_p.exists():
+        sp = json.loads(sp_p.read_text())
+        out.append(LineString(sp["coords"]))
+        for sib in sp.get("siblings", []):
+            g = sib["geometry"]
+            parts = [g["coordinates"]] if g["type"] == "LineString" else g["coordinates"]
+            for part in parts:
+                if len(part) > 1:
+                    out.append(LineString(part))
+    return MultiLineString(out) if out else None
+
+
+def _stub_roads(site_dir: Path, frame, ox: float, oy: float, bbox) -> list[dict]:
+    """The roads we do NOT model, stubbed a little way in from where they meet the ones we do.
+
+    "When we bake a road, detect when we intersect another road even if it isn't part of the
+    network, and draw at least a portion of it so it doesn't appear overgrown with grass — fine if
+    it dead ends 100 or 200 feet later" (Rich, 2026-09-21). A junction with nothing on the far
+    side reads as a mowed gap in the trees; 60 m of asphalt reads as a road going somewhere.
+    """
+    gj_p = site_dir / "osm.geojson"
+    ours = _our_lines(site_dir)
+    if not gj_p.exists() or ours is None:
+        return []
+    import rasterio
+    from shapely.geometry import LineString, box
+    from shapely.ops import transform as shp_transform
+
+    DRIVABLE = {"motorway", "trunk", "primary", "secondary", "tertiary", "unclassified", "residential", "living_street", "track"}
+    LANES = {"motorway": 4, "trunk": 4, "primary": 2, "secondary": 2, "tertiary": 2, "unclassified": 2, "residential": 2, "living_street": 1, "track": 1}
+    STUB_M = 60.0
+    site_box = box(*bbox)
+    dem_p = site_dir / "dem_1m.tif"
+    src = rasterio.open(dem_p) if dem_p.exists() else None
+    out: list[dict] = []
+    for f in json.loads(gj_p.read_text())["features"]:
+        p = f["properties"]
+        hw = p.get("highway")
+        if hw not in DRIVABLE or f["geometry"]["type"] != "LineString":
+            continue
+        try:
+            ln = shp_transform(lambda x, y, z=None: frame.from_wgs(x, y), LineString(f["geometry"]["coordinates"]))
+        except Exception:
+            continue
+        ln = ln.intersection(site_box)
+        for part in (ln.geoms if ln.geom_type == "MultiLineString" else [ln]):
+            if part.is_empty or part.geom_type != "LineString" or part.length < 6:
+                continue
+            # where does this way meet ours? sample it and find the closest approach
+            n = max(2, int(part.length // 5))
+            ss = np.linspace(0.0, part.length, n)
+            ds = np.array([ours.distance(part.interpolate(float(v))) for v in ss])
+            i = int(np.argmin(ds))
+            if ds[i] > 12.0:
+                continue  # not a junction with us: some other road passing through the box
+            # …and not a road we already draw. A way that RUNS ALONG one of ours (most of its
+            # length within 6 m) is the same road, named or not; stub only what branches off.
+            if float(np.mean(ds < 6.0)) > 0.5:
+                continue
+            meet = float(ss[i])
+            # our own carriageway occupies the first few metres; start clear of it
+            lo, hi = max(0.0, meet - STUB_M), min(part.length, meet + STUB_M)
+            keep = LineString([part.interpolate(float(v)).coords[0] for v in np.arange(lo, hi, 4.0).tolist() + [hi]])
+            if keep.length < 12:
+                continue
+            pts = np.array(keep.coords)
+            if src is not None:
+                zs = np.array([v[0] for v in src.sample([(float(x), float(y)) for x, y in pts])], dtype=float)
+                zs[zs < -9000] = np.nan
+                if np.isfinite(zs).any():
+                    ok = np.isfinite(zs)
+                    zs[~ok] = np.interp(np.flatnonzero(~ok), np.flatnonzero(ok), zs[ok])
+                    if len(zs) > 4:
+                        zs = np.convolve(np.pad(np.nan_to_num(zs), 2, mode="edge"), np.ones(5) / 5, mode="valid")
+                else:
+                    zs = np.zeros(len(pts))
+            else:
+                zs = np.zeros(len(pts))
+            out.append({
+                "highway": hw, "name": p.get("name") or p.get("ref"),
+                "lanes": int(p["lanes"]) if str(p.get("lanes", "")).isdigit() else LANES.get(hw, 2),
+                "oneway": p.get("oneway"),
+                "coords": np.column_stack([pts[:, 0] - ox, pts[:, 1] - oy, np.nan_to_num(zs)]).round(2).tolist(),
+            })
+    if src is not None:
+        src.close()
+    return out
+
+
+def _power(site_dir: Path, frame, ox: float, oy: float, bbox) -> dict:
+    """Power lines and their supports: `power=line|minor_line` ways, `power=tower|pole` nodes.
+
+    Wires and poles are most of what a rural roadside actually looks like, and they are in the
+    data already — Rich's region has 247 towers and 304 poles. Support heights are OSM's when
+    tagged, otherwise by kind.
+    """
+    gj_p = site_dir / "osm.geojson"
+    if not gj_p.exists():
+        return {"lines": [], "supports": []}
+    import rasterio
+    from shapely.geometry import LineString, Point, box
+    from shapely.ops import transform as shp_transform
+
+    HEIGHT = {"tower": 26.0, "pole": 9.5, "portal": 18.0}
+    site_box = box(*bbox)
+    dem_p = site_dir / "dem_1m.tif"
+    src = rasterio.open(dem_p) if dem_p.exists() else None
+
+    def ground(x: float, y: float) -> float:
+        if src is None:
+            return 0.0
+        v = next(src.sample([(float(x), float(y))]))[0]
+        return 0.0 if v < -9000 else float(v)
+
+    lines, supports = [], []
+    for f in json.loads(gj_p.read_text())["features"]:
+        p = f["properties"]
+        pw = p.get("power")
+        g = f["geometry"]
+        if pw in ("line", "minor_line") and g["type"] == "LineString":
+            try:
+                ln = shp_transform(lambda x, y, z=None: frame.from_wgs(x, y), LineString(g["coordinates"])).intersection(site_box)
+            except Exception:
+                continue
+            for part in (ln.geoms if ln.geom_type == "MultiLineString" else [ln]):
+                if part.is_empty or part.geom_type != "LineString" or part.length < 20:
+                    continue
+                pts = np.array(part.coords)
+                lines.append({
+                    "kind": pw, "voltage": p.get("voltage"), "circuits": p.get("circuits"),
+                    "coords": [[round(float(x - ox), 2), round(float(y - oy), 2), round(ground(x, y), 2)] for x, y in pts],
+                })
+        elif pw in ("tower", "pole", "portal") and g["type"] == "Point":
+            x, y = frame.from_wgs(*g["coordinates"][:2])
+            if not site_box.contains(Point(x, y)):
+                continue
+            h = None
+            try:
+                h = float(str(p.get("height", "")).rstrip("m ").strip())
+            except ValueError:
+                h = None
+            supports.append({"kind": pw, "x": round(float(x - ox), 2), "y": round(float(y - oy), 2), "z": round(ground(x, y), 2), "height_m": h or HEIGHT.get(pw, 10.0)})
+    if src is not None:
+        src.close()
+    return {"lines": lines, "supports": supports}
+
 def export_site(site_dir: Path) -> dict:
     site = json.loads((site_dir / "site.json").read_text())
     manifest = json.loads((site_dir / "manifest.json").read_text()) if (site_dir / "manifest.json").exists() else {}
@@ -416,6 +573,8 @@ def export_site(site_dir: Path) -> dict:
         "lidar": {k: manifest.get("lidar", {}).get(k) for k in ("dataset", "points_in_corridor", "classes")},
         "buildings": derived["buildings"],
         "driveways": _service_ways(site_dir, Frame.at(site["lon"], site["lat"]), ox, oy, bbox),
+        "stubs": _stub_roads(site_dir, Frame.at(site["lon"], site["lat"]), ox, oy, bbox),
+        "power": _power(site_dir, Frame.at(site["lon"], site["lat"]), ox, oy, bbox),
         "landuse": derived["landuse"],
         "pois": derived["pois"],
         "cuts": features.get("cuts"),

@@ -199,6 +199,13 @@ export let WATER_OPACITY = 0.82
 export let WATER_LEVEL_M = 0
 export let WATER_LEVEL_SPAN = 30000
 
+// --- power lines ---------------------------------------------------------------------------
+/** support heights as a multiple of OSM's (or the default for the kind) */
+export let POWER_HEIGHT_SCALE = 1.0
+/** conductor sag as a fraction of the span, and a cap in metres — the sag is what reads as a wire */
+export let POWER_SAG = 0.035
+export let POWER_SAG_MAX = 6
+
 // --- camera -------------------------------------------------------------------------------------
 /** the fly camera may not go below the ground under it by less than this (m) */
 export let CAM_MIN_HEIGHT = 0.4
@@ -434,6 +441,9 @@ export const TUNE_TABS: TuneTab[] = [
           tune('WATER_OPACITY', () => WATER_OPACITY, (v) => (WATER_OPACITY = v), [0.2, 1], 0.02),
           tune('WATER_LEVEL_M', () => WATER_LEVEL_M, (v) => (WATER_LEVEL_M = v), [-20, 300], 0.5, 'still water / sea level (m); raise it to flood'),
           tune('WATER_LEVEL_SPAN', () => WATER_LEVEL_SPAN, (v) => (WATER_LEVEL_SPAN = v), [200, 60000], 100, 'how far the water plane reaches (m)'),
+          tune('POWER_HEIGHT_SCALE', () => POWER_HEIGHT_SCALE, (v) => (POWER_HEIGHT_SCALE = v), [0.3, 2], 0.05, 'pole and tower height'),
+          tune('POWER_SAG', () => POWER_SAG, (v) => (POWER_SAG = v), [0, 0.12], 0.005, 'conductor sag as a fraction of the span'),
+          tune('POWER_SAG_MAX', () => POWER_SAG_MAX, (v) => (POWER_SAG_MAX = v), [0, 20], 0.5, 'm'),
         ],
       },
     ],

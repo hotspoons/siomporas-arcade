@@ -8,6 +8,7 @@ import { NearTrees } from './trees'
 import { Impostors } from './impostors'
 import { Grass } from './grass'
 import { LOOK, type Season } from './season'
+import { GRASS_TYPES, grassTypeFor } from './groundcover'
 import { buildStrip, sinkUnderStrip } from './strip'
 import { Adjustments, NEUTRAL as NEUTRAL_ADJ } from './adjust'
 import { buildPlacements, loadCatalog, loadPlacements } from './placements'
@@ -24,6 +25,8 @@ export interface Site {
   layers: { imagery?: THREE.Mesh; canopy?: THREE.Mesh; trees?: THREE.Group; road: THREE.Group; horizon?: THREE.Mesh; structures: THREE.Group; spine: THREE.Group; markers: THREE.Group; placements: THREE.Group }
   adjustments: Adjustments
   treeCount: number
+  /** the grass field, when this site has one (probes and the HUD read `grass.counts`) */
+  grass: Grass | null
   /** per-frame: move the near-field tree models and the grass ring to follow the eye; fwd/pitch shape the LOD footprint */
   updateNear: (eye: THREE.Vector3, time: number, fwd?: THREE.Vector3, pitch?: number) => void
   /** a knob changed: re-pick trees and re-seed grass on the next frame */
@@ -427,6 +430,7 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
   let edgeDistanceWorld: (x: number, z: number) => number = () => Infinity
   let treesNearWorld: (x: number, z: number, r: number) => [number, number, number][] = () => []
   let currentSeason: Season = initialSeason
+  let grassRef: Grass | null = null
   if (chm) {
     // distance to the nearest PAVEMENT EDGE of any carriageway (negative = on the pavement):
     // stations every 5 m from the spine and every sibling, hashed on a 20 m grid with each
@@ -504,7 +508,7 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
     const makeStrip = () => buildStrip(spineAt, curveLen, -latMin + VERGE, latMax + VERGE, (x, z) => edgeDistance(x, z), heightAt, imagery, manifest.bbox, grassTex('grass_mown'), grassTex('grass_rough'), lite ? 4 : 2, lite ? 2 : 1, adjustments.active ? (x, y) => adjustments.at(x, y, adjScratch).ground_offset_m : null)
     let strip = makeStrip()
     road.add(strip.mesh)
-    sinkUnderStrip(terrainGeo, strip.heightAt)
+    sinkUnderStrip(terrainGeo, strip.sinkAt, strip.coverAt)
     // one strip per branch; where another road's strip already covers the ground (within VERGE of
     // its pavement edge) the branch strip leaves a hole rather than a second coplanar surface
     const makeBranchStrips = () => branchAts.map((b, i) => buildStrip(b.at, b.len, VERGE, VERGE, (x, z) => edgeDistance(x, z), heightAt, imagery, manifest.bbox, grassTex('grass_mown'), grassTex('grass_rough'), lite ? 4 : 2, lite ? 2 : 1, adjustments.active ? (x, y) => adjustments.at(x, y, adjScratch).ground_offset_m : null, (s) => {
@@ -514,7 +518,7 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
     let branchStrips = makeBranchStrips()
     for (const bs of branchStrips) {
       road.add(bs.mesh)
-      sinkUnderStrip(terrainGeo, bs.heightAt)
+      sinkUnderStrip(terrainGeo, bs.sinkAt, bs.coverAt)
     }
     const stripHeight = (x: number, z: number): number | null => {
       const h = strip.heightAt(x, z)
@@ -536,7 +540,7 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
       strip.mesh.geometry.dispose()
       strip = makeStrip()
       road.add(strip.mesh)
-      sinkUnderStrip(terrainGeo, strip.heightAt)
+      sinkUnderStrip(terrainGeo, strip.sinkAt, strip.coverAt)
       for (const bs of branchStrips) {
         road.remove(bs.mesh)
         bs.mesh.geometry.dispose()
@@ -544,7 +548,7 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
       branchStrips = makeBranchStrips()
       for (const bs of branchStrips) {
         road.add(bs.mesh)
-        sinkUnderStrip(terrainGeo, bs.heightAt)
+        sinkUnderStrip(terrainGeo, bs.sinkAt, bs.coverAt)
       }
     }
     group.add(road)
@@ -594,6 +598,10 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
     const grassAdj = { ...NEUTRAL_ADJ }
     const grass = new Grass(groundNear, canopyAt, roadDistance, 0, LOOK[currentSeason], lite ? 90_000 : 400_000, lite ? 26 : 40, fog, adjustments.active ? (x, y) => { const a = adjustments.at(x, y, grassAdj); return [a.grass_height, a.grass_density] } : undefined)
     trees.add(grass.mesh)
+    grassRef = grass
+    // what grows on this verge, read off the bake; GRASS_TYPE overrides it from the F6 panel
+    const bakedGrassType = grassTypeFor(manifest)
+    grass.setType(bakedGrassType)
     let imp: Impostors | null = null
     let refreshFar = (_skip: Set<number>) => {}
     if (renderer) {
@@ -635,6 +643,8 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
     }
     retune = () => {
       near.invalidate()
+      const wantType = T.GRASS_TYPE < 0 ? bakedGrassType : GRASS_TYPES[Math.min(3, Math.max(0, Math.round(T.GRASS_TYPE)))]
+      if (wantType !== grass.grassType) grass.setType(wantType)
       grass.invalidate()
       if (roadSignature() !== roadSig) {
         roadSig = roadSignature()
@@ -773,6 +783,7 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
     layers: { imagery: terrain, canopy, trees, road, horizon, structures, spine, markers, placements: placementsGroup },
     adjustments,
     treeCount,
+    grass: grassRef,
     updateNear,
     retune,
     setSeason,

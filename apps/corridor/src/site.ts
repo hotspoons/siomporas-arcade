@@ -85,6 +85,8 @@ export interface Manifest {
   }
   photos: { file: string; heading_deg: number | null; taken: string | null }[]
   lidar: { dataset: string | null; points_in_corridor: number | null; classes: Record<string, number> | null }
+  /** OSM land-use polygons in site coordinates; groundcover.ts picks the grass type from them */
+  landuse?: { class: string; ring: [number, number][] }[]
 }
 
 export interface IndexEntry {

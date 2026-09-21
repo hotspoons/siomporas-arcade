@@ -49,11 +49,26 @@ export let GRASS_SPRITE_FAR_DENSITY = 0.25
 export let GRASS_HUE = 0
 export let GRASS_SAT = 0.9
 export let GRASS_LIGHT = 1.0
-export let GRASS_DRY_ADD = 0.3
+export let GRASS_DRY_ADD = 0
 /** blades stop swaying above this eye speed (m/s): nobody sees wind from a moving car */
 export let GRASS_WIND_STILL_BELOW = 4
+/**
+ * Which grass grows here: -1 reads it off the bake (latitude, longitude and OSM land use, see
+ * groundcover.ts), 0…3 forces common / wheat / bermuda / coastal.
+ */
+export let GRASS_TYPE = -1
+/**
+ * The season, as a number, because the engine's TunePanel takes numbers: -1 leaves the season
+ * selector alone, 0…3 is winter / spring / summer / autumn. Driving with F6 open, this is how
+ * Rich watches a verge go from September to bare in one drag.
+ */
+export let SEASON = -1
 /** how many 8 m tiles may be generated per frame while the ring fills */
-export let GRASS_TILES_PER_FRAME = 6
+export let GRASS_TILES_PER_FRAME = 48
+/** and no longer than this per frame generating them: the real budget, since tile cost varies 30× */
+export let GRASS_MS_PER_FRAME = 4
+/** evict cached tiles once the map holds this multiple of what the ring needs */
+export let GRASS_CACHE_SLACK = 1.4
 
 // --- trees --------------------------------------------------------------------------------------
 /** near-field radius (procedural models) — beyond it, impostors */
@@ -227,7 +242,9 @@ export const TUNE_TABS: TuneTab[] = [
           tune('GRASS_SPRITE_SCALE', () => GRASS_SPRITE_SCALE, (v) => (GRASS_SPRITE_SCALE = v), [0.3, 3], 0.05, 'height'),
           tune('GRASS_SPRITE_WIDTH', () => GRASS_SPRITE_WIDTH, (v) => (GRASS_SPRITE_WIDTH = v), [0.3, 3], 0.05, 'thickness'),
           tune('GRASS_SPRITE_LEAN', () => GRASS_SPRITE_LEAN, (v) => (GRASS_SPRITE_LEAN = v), [0, 1], 0.02),
-          tune('GRASS_TILES_PER_FRAME', () => GRASS_TILES_PER_FRAME, (v) => (GRASS_TILES_PER_FRAME = v), [1, 24], 1, 'tiles generated per frame while filling'),
+          tune('GRASS_TILES_PER_FRAME', () => GRASS_TILES_PER_FRAME, (v) => (GRASS_TILES_PER_FRAME = v), [1, 64], 1, 'ceiling on tiles generated per frame'),
+          tune('GRASS_MS_PER_FRAME', () => GRASS_MS_PER_FRAME, (v) => (GRASS_MS_PER_FRAME = v), [0.2, 12], 0.1, 'ms per frame spent generating them'),
+          tune('GRASS_CACHE_SLACK', () => GRASS_CACHE_SLACK, (v) => (GRASS_CACHE_SLACK = v), [1, 4], 0.1, 'cached tiles as a multiple of the ring'),
         ],
       },
       {
@@ -238,6 +255,8 @@ export const TUNE_TABS: TuneTab[] = [
           tune('GRASS_LIGHT', () => GRASS_LIGHT, (v) => (GRASS_LIGHT = v), [0.3, 2], 0.02),
           tune('GRASS_DRY_ADD', () => GRASS_DRY_ADD, (v) => (GRASS_DRY_ADD = v), [-1, 1], 0.02, 'straw on top of the season'),
           tune('GRASS_WIND_STILL_BELOW', () => GRASS_WIND_STILL_BELOW, (v) => (GRASS_WIND_STILL_BELOW = v), [0, 40], 0.5, 'no sway above this speed (m/s)'),
+          tune('GRASS_TYPE', () => GRASS_TYPE, (v) => (GRASS_TYPE = v), [-1, 3], 1, '-1 from the bake; 0 common 1 wheat 2 bermuda 3 coastal'),
+          tune('SEASON', () => SEASON, (v) => (SEASON = v), [-1, 3], 1, '-1 use the selector; 0 winter 1 spring 2 summer 3 autumn'),
         ],
       },
     ],

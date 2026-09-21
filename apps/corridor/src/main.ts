@@ -3,11 +3,12 @@ import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { buildSite, describe, type Site } from './scene'
 import { Car, type CarInput } from './car'
-import { FlyControls, sitOnRoad } from './fly'
+import { FlyControls } from './fly'
 import { MiniMap } from './minimap'
 import { TunePanel } from '@apex/engine/app/TunePanel'
 import * as T from './tuning'
 import { TUNE_TABS } from './tuning'
+
 import { fetchJSON, type IndexEntry, type Manifest, type Structure, type Crossing } from './site'
 import { LOOK, SEASONS, type Season } from './season'
 
@@ -91,9 +92,32 @@ async function loadSite(slug: string) {
   site = await buildSite(manifest, status, LITE, renderer, scene.fog as THREE.FogExp2, season)
   applySky(season)
   scene.add(site.group)
-  // `tune` is TUNE_TABS itself, so a probe can read and set any knob through the same getters and
-  // setters the F6 panel uses — importing tuning.ts from a probe gets an HMR-dead copy instead.
-  ;(window as unknown as { corridor: unknown }).corridor = { site, scene, camera, drive, tune: TUNE_TABS } // for probes and the console
+  // for probes and the console. `tune` is the same knob table the F6 panel drives, so a probe can
+  // sweep a knob exactly as Rich would and see the same rebuild — the module's `export let`s
+  // cannot be written from outside, and a dynamic import of tuning.ts under HMR is a dead copy.
+  ;(window as unknown as { corridor: unknown }).corridor = {
+    site,
+    scene,
+    camera,
+    // the orbit controls re-derive the camera from their own target every frame, so a probe that
+    // only writes camera.position gets dragged back; set orbit.target too, as applyStance does
+    orbit,
+    drive,
+    THREE, // probes need Raycaster/Vector3 in the page, and there is no other handle on it
+
+    tune: {
+      tabs: TUNE_TABS,
+      names: () => TUNE_TABS.flatMap((t) => t.sections.flatMap((sec) => sec.keys.map((k) => k.name))),
+      get: (name: string) => tuneKey(name)?.get(),
+      set: (name: string, v: number) => {
+        const k = tuneKey(name)
+        if (!k) return false
+        k.set(v)
+        onTuneChange()
+        return true
+      },
+    },
+  }
   applyLayers()
   fillInfo(manifest)
   fly ??= new FlyControls(camera, orbit, canvas, (x, z) => site?.groundAt(x, z) ?? null)
@@ -289,12 +313,29 @@ function applySky(s: Season) {
 }
 const seasonSel = $<HTMLSelectElement>('#season')
 seasonSel.value = season
-seasonSel.onchange = () => {
-  season = seasonSel.value as Season
-  applySky(season)
-  site?.setSeason(season)
-  status(`${season}`)
+function setSeason(s: Season) {
+  season = s
+  seasonSel.value = s
+  applySky(s)
+  site?.setSeason(s)
+  status(`${s}`)
   setTimeout(() => status(''), 1200)
+}
+seasonSel.onchange = () => setSeason(seasonSel.value as Season)
+/** the F6 season knob (tuning.ts SEASON, -1 = leave the selector alone) */
+function applySeasonKnob() {
+  if (T.SEASON < 0) return
+  const want = SEASONS[Math.min(3, Math.max(0, Math.round(T.SEASON)))]
+  if (want !== season) setSeason(want)
+}
+/**
+ * A knob moved. The F6 panel and `window.corridor.tune.set` both come through here, so a probe
+ * sweeping a knob gets exactly what Rich gets from the slider — the first version of the probe
+ * hook called `retune()` alone and the season knob silently did nothing under it.
+ */
+function onTuneChange() {
+  applySeasonKnob()
+  site?.retune()
 }
 
 // A STANCE is everything needed to reproduce what is on screen: site, season, mode, camera (or
@@ -397,7 +438,7 @@ const tunePanels = TUNE_TABS.map((tab) => {
   tuneHost.append(panelEl)
   const p = new TunePanel(panelEl, `corridor-${tab.name}`, tab.sections)
   p.context = () => (captureStance() ?? {}) as Record<string, unknown>
-  p.onChange = () => site?.retune()
+  p.onChange = onTuneChange
   const b = document.createElement('button')
   b.textContent = tab.name
   b.onclick = () => showTuneTab(tab.name)
@@ -425,6 +466,12 @@ $('#top').onclick = toTop
 // Tab toggles drive/fly. Driving: W/S throttle/brake, A/D steer, Space handbrake, R resets to the
 // road. Flying: see fly.ts (WASD move, Q/E rotate, R/F dolly, T/G lift, right-drag look). P and
 // H (home = top) are shared.
+/** one knob of the F6 panel by name, wherever its tab is; undefined if there is no such knob */
+function tuneKey(name: string) {
+  for (const t of TUNE_TABS) for (const sec of t.sections) for (const k of sec.keys) if (k.name === name) return k
+  return undefined
+}
+
 const held = new Set<string>()
 addEventListener('keydown', (e) => {
   const tgt = e.target as HTMLElement
@@ -443,7 +490,6 @@ addEventListener('keydown', (e) => {
     case 'KeyH': toTop(); break
     case 'KeyC': if (drive.on) { drive.cockpit = !drive.cockpit; break } void copyStance(); break
     case 'KeyX': void copyStance(); break
-    case 'KeyG': if (!drive.on && site) sitOnRoad(camera, orbit, site.spineAt, site.manifest.spine.length_m); break
     case 'KeyM': setPanelHidden(!panel.classList.contains('hidden')); break
     case 'KeyN': minimap?.setExpanded(!minimap.expanded); break
     case 'KeyR': if (drive.on && site && drive.car) { const p = site.spineAt(site.manifest.spine.photo_s); const side = p.dir.clone().cross(up).multiplyScalar(1.83); drive.car.place(p.pos.x + side.x, p.pos.z + side.z, Math.atan2(p.dir.z, p.dir.x)) } break
@@ -502,31 +548,22 @@ function frame() {
     drive.input.throttle = padT
     drive.input.brake = padB
     // chase camera: behind and above, looking over the bonnet; drag adds a look-around yaw
-    car.setCockpit(drive.cockpit)
     if (drive.cockpit) {
-      // Cockpit: eye at the driver's head, looking down the nose (stuntin's C view); drive.yaw/pitch
-      // look around. NOTE there is no early return here. This branch used to `return` out of
-      // frame(), which skipped site.updateNear, the minimap, renderer.render AND the
-      // requestAnimationFrame that re-arms the loop — so pressing C froze the viewer dead and
-      // nothing brought it back (probes/corridor-cockpit.mjs: the car moved 0.48 m in 2 s in chase
-      // and 0.00 m in cockpit). The eye rides the body, so it pitches and rolls with the car.
-      const lean = new THREE.Vector3(0, T.COCKPIT_EYE_UP, 0).applyAxisAngle(car.right, -Math.atan(car.pitch))
-      const eye = car.pos.clone().add(lean).add(car.forward.clone().multiplyScalar(T.COCKPIT_EYE_FWD)).addScaledVector(car.right, T.COCKPIT_EYE_SIDE)
+      // cockpit: eye at the driver's head, looking down the nose (stuntin's C view); drive.yaw/pitch look around
+      const eye = car.pos.clone().add(new THREE.Vector3(0, T.COCKPIT_EYE_UP, 0)).add(car.forward.clone().multiplyScalar(T.COCKPIT_EYE_FWD))
       camera.position.copy(eye)
       const ahead = car.forward.clone().applyAxisAngle(up, drive.yaw)
-      camera.up.set(0, 1, 0).applyAxisAngle(car.forward, Math.atan(car.roll) * T.COCKPIT_ROLL)
       camera.lookAt(eye.clone().add(ahead.multiplyScalar(30)).add(new THREE.Vector3(0, -Math.tan(drive.pitch) * 30 + T.COCKPIT_LOOK_UP, 0)))
-    } else {
-      camera.up.set(0, 1, 0)
-      const back = car.forward.clone().applyAxisAngle(up, drive.yaw).multiplyScalar(-T.CHASE_BACK)
-      const want = car.pos.clone().add(back).add(new THREE.Vector3(0, T.CHASE_UP + Math.tan(drive.pitch) * 4, 0))
-      const gy = site.groundAt(want.x, want.z)
-      if (gy !== null && want.y < gy + 1.2) want.y = gy + 1.2
-      camera.position.lerp(want, 1 - Math.exp(-T.CHASE_LAG * dt))
-      camera.lookAt(car.pos.clone().add(car.forward.clone().multiplyScalar(T.CHASE_LOOK_AHEAD)).add(new THREE.Vector3(0, 1.0, 0)))
+      return
     }
+    const back = car.forward.clone().applyAxisAngle(up, drive.yaw).multiplyScalar(-T.CHASE_BACK)
+    const want = car.pos.clone().add(back).add(new THREE.Vector3(0, T.CHASE_UP + Math.tan(drive.pitch) * 4, 0))
+    const gy = site.groundAt(want.x, want.z)
+    if (gy !== null && want.y < gy + 1.2) want.y = gy + 1.2
+    camera.position.lerp(want, 1 - Math.exp(-T.CHASE_LAG * dt))
+    camera.lookAt(car.pos.clone().add(car.forward.clone().multiplyScalar(T.CHASE_LOOK_AHEAD)).add(new THREE.Vector3(0, 1.0, 0)))
     if (car.event === 'bump') status('bump')
-    $('#pos').textContent = `${(Math.abs(car.speed) * 2.237).toFixed(0)} mph  ${car.onGrass ? 'grass' : 'pavement'}${Math.abs(car.slide) > 1 ? '  sliding' : ''}${drive.cockpit ? '  cockpit' : ''}`
+    $('#pos').textContent = `${(Math.abs(car.speed) * 2.237).toFixed(0)} mph  ${car.onGrass ? 'grass' : 'pavement'}${Math.abs(car.slide) > 1 ? '  sliding' : ''}`
   } else {
     fly?.update(dt)
     applyMove(dt)

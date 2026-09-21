@@ -1,32 +1,292 @@
 {
  "assets": [
-  { "id": "shed-01", "name": "Shed", "category": "shed", "footprint_m": [6, 4], "height_m": 3 },
-  { "id": "house-01", "name": "House", "category": "house", "footprint_m": [12, 9], "height_m": 7 },
-  { "id": "house-02", "name": "Large house", "category": "house_large", "footprint_m": [18, 12], "height_m": 8 },
-  { "id": "townhouse-01", "name": "Townhouse row", "category": "townhouse", "footprint_m": [42, 9], "height_m": 9 },
-  { "id": "apartments-02", "name": "Apartment walk-up", "category": "apartments", "footprint_m": [16, 12], "height_m": 17 },
-  { "id": "apartments-01", "name": "Apartment block", "category": "apartments", "footprint_m": [40, 18], "height_m": 16 },
-  { "id": "barn-01", "name": "Barn", "category": "barn", "footprint_m": [30, 14], "height_m": 11, "glb": "assets/barn-01.glb" },
-  { "id": "diner-01", "name": "Roadside diner", "category": "restaurant", "footprint_m": [22, 14], "height_m": 6, "glb": "assets/diner-01.glb" },
-  { "id": "restaurant-02", "name": "Family restaurant", "category": "restaurant", "footprint_m": [34, 24], "height_m": 7 },
-  { "id": "retail-01", "name": "Retail unit", "category": "retail_unit", "footprint_m": [30, 20], "height_m": 6 },
-  { "id": "gas-01", "name": "Gas station", "category": "gas_station", "footprint_m": [30, 22], "height_m": 7 },
-  { "id": "motel-01", "name": "Highway motel", "category": "hotel", "footprint_m": [62, 14], "height_m": 9 },
-  { "id": "hotel-02", "name": "Highway hotel", "category": "hotel", "footprint_m": [72, 34], "height_m": 14 },
-  { "id": "stripmall-01", "name": "Strip mall", "category": "strip_mall", "footprint_m": [92, 26], "height_m": 7 },
-  { "id": "bigbox-02", "name": "Supermarket", "category": "big_box", "footprint_m": [75, 55], "height_m": 9 },
-  { "id": "bigbox-01", "name": "Big-box store", "category": "big_box", "footprint_m": [120, 78], "height_m": 11 },
-  { "id": "warehouse-02", "name": "Storage units", "category": "warehouse", "footprint_m": [60, 12], "height_m": 4 },
-  { "id": "warehouse-01", "name": "Warehouse", "category": "warehouse", "footprint_m": [110, 55], "height_m": 12 },
-  { "id": "office-01", "name": "Office block", "category": "office", "footprint_m": [45, 28], "height_m": 15 },
-  { "id": "school-01", "name": "School", "category": "school", "footprint_m": [80, 35], "height_m": 9 },
-  { "id": "school-02", "name": "Large school", "category": "school", "footprint_m": [120, 60], "height_m": 11 },
-  { "id": "church-01", "name": "Country church", "category": "church", "footprint_m": [24, 14], "height_m": 13 },
-  { "id": "church-02", "name": "Town church", "category": "church", "footprint_m": [46, 22], "height_m": 12 },
-  { "id": "watertower-01", "name": "Water tower", "category": "utility", "footprint_m": [16, 16], "height_m": 38, "glb": "assets/watertower-01.glb" },
-  { "id": "archway-01", "name": "Gateway sign", "category": "sign", "footprint_m": [30, 3], "height_m": 9 },
-  { "id": "billboard-01", "name": "Billboard", "category": "sign", "footprint_m": [14, 2], "height_m": 14 },
-  { "id": "horsebridge-01", "name": "Covered horse bridge", "category": "bridge", "footprint_m": [22, 4.5], "height_m": 5, "fit": "span", "glb": "assets/horsebridge-01.glb" },
-  { "id": "overpass-01", "name": "Concrete overpass span", "category": "bridge", "footprint_m": [30, 12], "height_m": 2.6, "fit": "span", "glb": "assets/overpass-01.glb" }
+  {
+   "id": "shed-01",
+   "name": "Shed",
+   "category": "shed",
+   "footprint_m": [
+    6,
+    4
+   ],
+   "height_m": 3
+  },
+  {
+   "id": "house-01",
+   "name": "House",
+   "category": "house",
+   "footprint_m": [
+    12,
+    9
+   ],
+   "height_m": 7
+  },
+  {
+   "id": "house-02",
+   "name": "Large house",
+   "category": "house_large",
+   "footprint_m": [
+    18,
+    12
+   ],
+   "height_m": 8
+  },
+  {
+   "id": "townhouse-01",
+   "name": "Townhouse row",
+   "category": "townhouse",
+   "footprint_m": [
+    42,
+    9
+   ],
+   "height_m": 9
+  },
+  {
+   "id": "apartments-02",
+   "name": "Apartment walk-up",
+   "category": "apartments",
+   "footprint_m": [
+    16,
+    12
+   ],
+   "height_m": 17
+  },
+  {
+   "id": "apartments-01",
+   "name": "Apartment block",
+   "category": "apartments",
+   "footprint_m": [
+    40,
+    18
+   ],
+   "height_m": 16
+  },
+  {
+   "id": "barn-01",
+   "name": "Barn",
+   "category": "barn",
+   "footprint_m": [
+    30,
+    14
+   ],
+   "height_m": 11,
+   "glb": "assets/barn-01.glb"
+  },
+  {
+   "id": "diner-01",
+   "name": "Roadside diner",
+   "category": "restaurant",
+   "footprint_m": [
+    22,
+    14
+   ],
+   "height_m": 6,
+   "glb": "assets/diner-01.glb"
+  },
+  {
+   "id": "restaurant-02",
+   "name": "Family restaurant",
+   "category": "restaurant",
+   "footprint_m": [
+    34,
+    24
+   ],
+   "height_m": 7
+  },
+  {
+   "id": "retail-01",
+   "name": "Retail unit",
+   "category": "retail_unit",
+   "footprint_m": [
+    30,
+    20
+   ],
+   "height_m": 6
+  },
+  {
+   "id": "gas-01",
+   "name": "Gas station",
+   "category": "gas_station",
+   "footprint_m": [
+    30,
+    22
+   ],
+   "height_m": 7
+  },
+  {
+   "id": "motel-01",
+   "name": "Highway motel",
+   "category": "hotel",
+   "footprint_m": [
+    62,
+    14
+   ],
+   "height_m": 9
+  },
+  {
+   "id": "hotel-02",
+   "name": "Highway hotel",
+   "category": "hotel",
+   "footprint_m": [
+    72,
+    34
+   ],
+   "height_m": 14
+  },
+  {
+   "id": "stripmall-01",
+   "name": "Strip mall",
+   "category": "strip_mall",
+   "footprint_m": [
+    92,
+    26
+   ],
+   "height_m": 7
+  },
+  {
+   "id": "bigbox-02",
+   "name": "Supermarket",
+   "category": "big_box",
+   "footprint_m": [
+    75,
+    55
+   ],
+   "height_m": 9
+  },
+  {
+   "id": "bigbox-01",
+   "name": "Big-box store",
+   "category": "big_box",
+   "footprint_m": [
+    120,
+    78
+   ],
+   "height_m": 11
+  },
+  {
+   "id": "warehouse-02",
+   "name": "Storage units",
+   "category": "warehouse",
+   "footprint_m": [
+    60,
+    12
+   ],
+   "height_m": 4
+  },
+  {
+   "id": "warehouse-01",
+   "name": "Warehouse",
+   "category": "warehouse",
+   "footprint_m": [
+    110,
+    55
+   ],
+   "height_m": 12
+  },
+  {
+   "id": "office-01",
+   "name": "Office block",
+   "category": "office",
+   "footprint_m": [
+    45,
+    28
+   ],
+   "height_m": 15
+  },
+  {
+   "id": "school-01",
+   "name": "School",
+   "category": "school",
+   "footprint_m": [
+    80,
+    35
+   ],
+   "height_m": 9
+  },
+  {
+   "id": "school-02",
+   "name": "Large school",
+   "category": "school",
+   "footprint_m": [
+    120,
+    60
+   ],
+   "height_m": 11
+  },
+  {
+   "id": "church-01",
+   "name": "Country church",
+   "category": "church",
+   "footprint_m": [
+    24,
+    14
+   ],
+   "height_m": 13
+  },
+  {
+   "id": "church-02",
+   "name": "Town church",
+   "category": "church",
+   "footprint_m": [
+    46,
+    22
+   ],
+   "height_m": 12
+  },
+  {
+   "id": "watertower-01",
+   "name": "Water tower",
+   "category": "utility",
+   "footprint_m": [
+    16,
+    16
+   ],
+   "height_m": 38,
+   "glb": "assets/watertower-01.glb"
+  },
+  {
+   "id": "archway-01",
+   "name": "Gateway sign",
+   "category": "sign",
+   "footprint_m": [
+    30,
+    3
+   ],
+   "height_m": 9
+  },
+  {
+   "id": "billboard-01",
+   "name": "Billboard",
+   "category": "sign",
+   "footprint_m": [
+    14,
+    2
+   ],
+   "height_m": 14
+  },
+  {
+   "id": "horsebridge-01",
+   "name": "Covered horse bridge",
+   "category": "bridge",
+   "footprint_m": [
+    22,
+    4.5
+   ],
+   "height_m": 5,
+   "fit": "span",
+   "glb": "assets/horsebridge-01.glb"
+  },
+  {
+   "id": "overpass-01",
+   "name": "Concrete overpass span",
+   "category": "bridge",
+   "footprint_m": [
+    30,
+    12
+   ],
+   "height_m": 2.6,
+   "fit": "span",
+   "glb": "assets/overpass-01.glb",
+   "yaw_offset_deg": 90
+  }
  ]
 }

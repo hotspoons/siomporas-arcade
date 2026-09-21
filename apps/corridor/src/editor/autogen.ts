@@ -63,9 +63,13 @@ export interface Params {
   /** invent frontage where the corridor is bare (AUTOGEN.md R5) */
   invent: boolean
   invent_spacing_m: number
-  /** full mix within this of a junction, nothing past `invent_falloff_m` */
+  /** every slot is taken within this of an INTERCHANGE; nothing at all past `invent_falloff_m` */
   invent_near_m: number
   invent_falloff_m: number
+  /** how often a rural slot is taken at all. Commercial frontage packs out; a farm road does
+   *  not, and without this the first version put 56 buildings down a forested mountain
+   *  interstate because every slot within 400 m of a farm track scored a certainty. */
+  invent_rural_chance: number
   seed: number
 }
 
@@ -79,6 +83,7 @@ export const DEFAULTS: Params = {
   invent_spacing_m: 70,
   invent_near_m: 400,
   invent_falloff_m: 1500,
+  invent_rural_chance: 0.15,
   seed: 1,
 }
 
@@ -371,14 +376,27 @@ export function generate(manifest: Manifest, site: Site, catalog: CatalogEntry[]
 
 // --- R5 invented frontage ----------------------------------------------------------------------
 
-/** The mixes a bare stretch of frontage gets, by how close it is to a real junction. */
+/** The mixes a bare stretch of frontage gets, by what kind of junction is near it. */
 const STRIP_MIX = ['gas_station', 'restaurant', 'restaurant', 'retail_unit', 'retail_unit', 'retail_unit', 'retail_unit', 'strip_mall', 'hotel']
 const RURAL_MIX = ['house', 'house', 'house', 'house_large', 'barn', 'barn', 'church', 'shed']
 
 /**
- * Walk both verges and fill the gaps. Density falls off with distance from the nearest real
- * junction in `crossings.json`, because roadside commerce grows at the exits — and doing it that
- * way is the cheapest thing that makes an invented town look grown rather than extruded.
+ * Which crossings are somewhere people can actually stop.
+ *
+ * MEASURED, and it is the difference between an invented town and an invented mess. R5 counted
+ * every entry in `crossings`, and on the two sites that need invention most that is wrong:
+ * sideling-i68's nine "junctions" are four farm tracks, four service roads and one tertiary, and
+ * south-mountain-i70's six include TWO STREAMS AND A POWER LINE. Seeding a gas station at a
+ * culvert is a good way to make an invented town look invented. So an interchange earns commerce,
+ * a minor road earns a farmhouse, and a waterway or a power line earns nothing.
+ */
+const INTERCHANGE = /^(motorway_link|trunk|trunk_link|primary|primary_link|secondary|secondary_link)$/
+const MINOR = /^(tertiary|tertiary_link|unclassified|residential|service|track|living_street)$/
+
+/**
+ * Walk both verges and fill the gaps. Commercial only within reach of an interchange; a farmhouse
+ * within reach of any road junction; nothing at all beyond the falloff — which on a forested
+ * mountain interstate means nothing at all, and that is the right answer for Sideling Hill.
  */
 function inventFrontage(
   manifest: Manifest,
@@ -390,25 +408,38 @@ function inventFrontage(
   free: (x: number, y: number, r: number) => boolean,
   byCategory: Record<string, number>,
 ) {
-  const junctions = manifest.crossings.filter((c) => c.relation !== 'grade').map((c) => c.s)
-  const nearestJunction = (s: number) => junctions.reduce((m, j) => Math.min(m, Math.abs(j - s)), Infinity)
+  const interchanges: number[] = []
+  const minors: number[] = []
+  for (const c of manifest.crossings) {
+    if (c.relation === 'grade') continue
+    const k = c.kind ?? ''
+    if (INTERCHANGE.test(k)) interchanges.push(c.s)
+    else if (MINOR.test(k)) minors.push(c.s)
+  }
+  const nearest = (list: number[], s: number) => list.reduce((m, j) => Math.min(m, Math.abs(j - s)), Infinity)
   const len = manifest.spine.length_m
   const left = new THREE.Vector3()
   let n = 0
   for (const sideSign of [1, -1]) {
     let s = p.invent_spacing_m
     while (s < len - p.invent_spacing_m) {
-      const d = nearestJunction(s)
-      // full mix at a junction, half by 800 m, nothing past the falloff
-      const chance = d <= p.invent_near_m ? 1 : d >= p.invent_falloff_m ? 0 : 1 - (d - p.invent_near_m) / (p.invent_falloff_m - p.invent_near_m)
+      const dI = nearest(interchanges, s)
+      const dM = Math.min(dI, nearest(minors, s))
+      const commercial = dI <= p.invent_near_m
+      // rural frontage is sparser than a commercial strip, and thins with distance from anything
+      // A commercial slot near an interchange is taken every time — that is what a strip IS.
+      // A rural slot is taken `invent_rural_chance` of the time, thinning to nothing at the
+      // falloff. Without the separate rate, a site whose junctions are 500 m apart has every
+      // slot inside `invent_near_m` and builds a continuous ribbon of farmhouses.
+      const fade = dM >= p.invent_falloff_m ? 0 : dM <= p.invent_near_m ? 1 : 1 - (dM - p.invent_near_m) / (p.invent_falloff_m - p.invent_near_m)
+      const chance = commercial ? 1 : p.invent_rural_chance * fade
       const rnd = hash(p.seed, n * 7919 + (sideSign > 0 ? 0 : 1))
-      s += p.invent_spacing_m * (0.6 + hash(p.seed + 5, n) * 0.8)
+      s += p.invent_spacing_m * (commercial ? 1 : 2.2) * (0.6 + hash(p.seed + 5, n) * 0.8)
       n++
-      if (rnd > chance) continue
-      const commercial = d <= p.invent_near_m
+      if (chance <= 0 || rnd > chance) continue
       const mix = commercial ? STRIP_MIX : RURAL_MIX
       const category = mix[Math.floor(hash(p.seed + 11, n) * mix.length)]
-      const entry = catalog.filter((e) => e.category === category)[0]
+      const entry = catalog.filter((e) => e.category === category && e.fit !== 'span')[0]
       if (!entry) continue
       // setback from the PAVEMENT EDGE, deeper for commerce because the parking goes in front
       const setback = (commercial ? 30 : 18) + hash(p.seed + 17, n) * 25
@@ -419,6 +450,7 @@ function inventFrontage(
       const x = at.pos.x + left.x * lat
       const wz = at.pos.z + left.z * lat
       const y = -wz
+      if (Math.abs(lat) > p.max_lat_m) continue
       if (site.edgeDistance(x, wz) < p.keepout_m) continue
       const r = Math.max(...entry.footprint_m) / 2
       if (!free(x, y, r * 0.8)) continue

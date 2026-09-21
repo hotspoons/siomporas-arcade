@@ -96,7 +96,7 @@ export class PlaceMode {
     // rotates a local −Z front to (−sinθ, 0, −cosθ), so θ = −yaw. The viewer's placements.ts uses
     // the same sign; with `+` here the editor drew every asymmetric model mirrored against the
     // game, and the selection arrow — built from the compass bearing — disagreed with it.
-    o.rotation.y = -(p.yaw_deg * Math.PI) / 180
+    o.rotation.y = -((p.yaw_deg + (this.entry(p.asset)?.yaw_offset_deg ?? 0)) * Math.PI) / 180
     o.scale.setScalar(p.scale)
   }
 

@@ -87,6 +87,17 @@ def export_site(site_dir: Path) -> dict:
         Image.fromarray(rgb, "RGB").save(web / "dem_2m.png", optimize=True)
         layers["dem"] = {"file": "dem_2m.png", "res": 2.0, "size": g["size"], "bbox": rel_bbox(g["bbox"]), "zmin": zmin, "zscale": scale}
 
+    # buildings / landuse / POIs in corridor coordinates (AUTOGEN.md §10) — derived here, before the
+    # canopy layer, because the canopy mask below needs the footprints. (The first version read them
+    # from web/buildings.json, a file nothing ever wrote: the mask was a silent no-op on all nine
+    # sites — found by the editor agent with probes/chm-buildings-check.py, 2026-09-21.)
+    try:
+        from . import buildings as bld
+        derived = bld.derive(site_dir)
+    except Exception as exc:
+        print(f"  buildings failed: {exc}")
+        derived = {"buildings": [], "landuse": [], "pois": [], "summary": {}}
+
     # --- canopy on the same lattice ------------------------------------------------------------
     chm_path = site_dir / "lidar" / "chm.tif"
     if chm_path.exists() and "dem" in layers:
@@ -118,14 +129,12 @@ def export_site(site_dir: Path) -> dict:
         # "unassigned above ground", so every building footprint is also a 6 m tree — and autogen
         # now stands a model on each one (editor agent, 2026-09-21). Zero the canopy under every
         # OSM footprint (+1 m), in the bake, so viewer, editor and preview all get it.
-        bpath = site_dir / "web" / "buildings.json"
-        if bpath.exists():
-            from shapely.geometry import Polygon
-            ox, oy = site["frame"]["origin"]
-            for b in json.loads(bpath.read_text()).get("buildings", []):
-                ring = b.get("ring") or []
-                if len(ring) >= 3:
-                    shapes.append((Polygon([(x + ox, y + oy) for x, y in ring]).buffer(1.0), 1))
+        from shapely.geometry import Polygon
+        ox, oy = site["frame"]["origin"]
+        for b in derived.get("buildings", []):
+            ring = b.get("ring") or []
+            if len(ring) >= 3:
+                shapes.append((Polygon([(x + ox, y + oy) for x, y in ring]).buffer(1.0), 1))
         road_mask = rasterize(shapes, out_shape=c.shape, transform=tr2, fill=0, dtype=np.uint8).astype(bool)
         c[road_mask] = 0.0
         Image.fromarray(np.clip(np.round(c * 4), 0, 255).astype(np.uint8), "L").save(web / "chm_2m.png", optimize=True)
@@ -233,14 +242,7 @@ def export_site(site_dir: Path) -> dict:
     crossings = json.loads((site_dir / "crossings.json").read_text()) if (site_dir / "crossings.json").exists() else []
     geology = json.loads((site_dir / "geology.json").read_text()) if (site_dir / "geology.json").exists() else {}
 
-    # buildings / landuse / POIs in corridor coordinates, for autogen (AUTOGEN.md §10)
-    try:
-        from . import buildings as bld
-
-        derived = bld.derive(site_dir)
-    except Exception as exc:  # the manifest is still useful without them
-        print(f"  buildings failed: {exc}")
-        derived = {"buildings": [], "landuse": [], "pois": [], "summary": {}}
+    # buildings/landuse/POIs: `derived`, computed above the canopy layer
 
     out = {
         "slug": site["slug"],

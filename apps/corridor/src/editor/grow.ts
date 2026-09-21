@@ -24,7 +24,8 @@ const KNOBS: [keyof Params, string, number, number, number, string][] = [
   ['scale_min', 'fit min ×', 0.3, 1, 0.05, 'how far DOWN a catalog asset may be scaled to match a footprint before it is the wrong object'],
   ['scale_max', 'fit max ×', 1, 3, 0.05, 'how far UP a catalog asset may be scaled before it is the wrong object'],
   ['invent_spacing_m', 'invent every m', 30, 200, 5, 'mean frontage gap when inventing; jittered per site'],
-  ['invent_near_m', 'full mix within m', 100, 1200, 50, 'within this of a junction the invented mix is commercial and dense'],
+  ['invent_near_m', 'full mix within m', 100, 1200, 50, 'within this of an INTERCHANGE (motorway link, trunk, primary, secondary) every slot is taken and the mix is commercial'],
+  ['invent_rural_chance', 'rural density', 0, 1, 0.05, 'how often a slot near a minor road junction is taken. A farm track is not a strip; 56 farmhouses down a forested interstate is what happens at 1'],
   ['invent_falloff_m', 'nothing past m', 400, 3000, 100, 'beyond this from any junction, nothing is invented'],
 ]
 

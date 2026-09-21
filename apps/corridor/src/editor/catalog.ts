@@ -22,6 +22,13 @@ export interface CatalogEntry {
    * road and it is their length that has to be right, not their height.
    */
   fit?: 'height' | 'span'
+  /**
+   * Added to a placement's `yaw_deg` before rendering, to square a model that was reconstructed
+   * off-axis. The box proxies put their long side on local +X and `footprint_m` is [long, short],
+   * so an asset whose model is longer in Z needs 90 here. Measured from the .glb's bounding box,
+   * never guessed. The viewer's `placements.ts` applies it the same way, so the two agree.
+   */
+  yaw_offset_deg?: number
 }
 
 export interface Catalog {

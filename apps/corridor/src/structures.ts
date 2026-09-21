@@ -96,7 +96,9 @@ export async function buildBridges(
     // local X is the road's left normal — which is exactly where the span (BoxGeometry's X, the
     // fitted model's long axis) must point. The +π/2 that used to be here turned every bridge
     // 90° and laid the abutments across the carriageway as a wall (Rich, 2026-09-21).
-    const across = Math.atan2(dir.x, dir.z) + ((o.yaw_offset_deg ?? 0) * Math.PI) / 180
+    // the item's authored offset plus the asset's own (a generated .glb faces whichever way the
+    // reconstruction left it: overpass-01's long axis is Z, so its catalog entry carries 90)
+    const across = Math.atan2(dir.x, dir.z) + (((o.yaw_offset_deg ?? 0) + (entry?.yaw_offset_deg ?? 0)) * Math.PI) / 180
     holder.rotation.y = across
     const axisX = Math.cos(across)
     const axisZ = -Math.sin(across)

@@ -310,7 +310,7 @@ Missing: site.json, spine_utm.json, osm.geojson, crossings.json, dem_1m.tif, nai
 *MD 450 (Defense Hwy) between Patuxent River Rd and Staples Corner (MD 424); point is a midpoint estimate (Overpass 429'd), nearest_road should snap to MD 450*  
 fix 38.9375, -76.667 · 0 photo(s) · status **baked**
 
-- **road**: {'name': 'Double Gate Road'} · 2722.1 m · snap 369.0 m · trimmed [False, False] · fetched 2026-09-21T04:39:54Z (543.3 s)
+- **road**: {'name': 'Double Gate Road'} · 2722.1 m · snap 369.0 m  ⚠ **check the road**: the fix snapped this far, which usually means it landed on a different road · trimmed [False, False] · fetched 2026-09-21T04:39:54Z (543.3 s)
 - **lidar**: `USGS_LPC_MD_VA_Sandy_NCR_2014_LAS_2015` (2014) · 1,029,682 pts in corridor · z factor 1.0 · classes: unassigned 56%, ground 44% · class 17: 0.1288 (demoted) — class 17/18 demoted to unassigned: implausible share, vendor used them as junk bins
 - **DEM**: USGS one meter x35y432 MD VA Sandy NCR 2014 — 2020-03-30; USGS 1 Meter 18 x35y432 MD_Central_Processing_D24 — 2026-04-04
 - **NAIP**: fetched at 0.3 m, [9600, 3567] px · tile under the fix `m_3807603_ne_18_030_20230712` flown 2023-07-12 at 0.3 m

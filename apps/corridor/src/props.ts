@@ -8,6 +8,7 @@
 // Everything is in the viewer's world frame (X east, Y up, Z south) and sized in metres, so
 // swapping a stand-in for a generated glb later is a one-line change per prop kind.
 import * as THREE from 'three'
+import { HEX_GLSL } from './hextile'
 import type { TreeRecord } from './trees'
 
 import * as T from './tuning'
@@ -38,9 +39,67 @@ export function stations(spineAt: (s: number) => { pos: THREE.Vector3; dir: THRE
   return out
 }
 
+/**
+ * Lane counts come out of OSM as a step function: `lanes=3` for 550 m, then `lanes=4` for 200 m with
+ * `turn:lanes=|||merge_to_left`, then `lanes=3` again. Drawn literally that is a lane that appears
+ * and disappears in one 6 m quad — a road that grows a lane sideways. Real ones taper: an auxiliary
+ * lane between two interchanges opens and closes over a few tens of metres, and the edge line
+ * converges across it.
+ *
+ * This wraps a step `lanesAt` into a ramped one, so a lane count is fractional inside a taper and the
+ * paved width, the edge line and the shoulder all converge together. Tapers shrink where two changes
+ * are closer than `taper` apart, so a short auxiliary lane still opens and closes cleanly.
+ *
+ * Sampled onto a dense array once and read by interpolation, because `edgeDistance` calls this for
+ * every grass blade and every car tick.
+ */
+export function taperedLanes(lanesAt: (s: number) => number, length: number, taper = T.ROAD_TAPER_M, step = 2): (s: number) => number {
+  const n = Math.max(2, Math.ceil(length / step) + 1)
+  const raw = new Float32Array(n)
+  for (let i = 0; i < n; i++) raw[i] = lanesAt(i * step)
+  const out = Float32Array.from(raw)
+  if (taper > 0) {
+    const changes: { s: number; from: number; to: number }[] = []
+    for (let i = 1; i < n; i++) if (raw[i] !== raw[i - 1]) changes.push({ s: (i - 0.5) * step, from: raw[i - 1], to: raw[i] })
+    changes.forEach((c, i) => {
+      const prevGap = i > 0 ? (c.s - changes[i - 1].s) / 2 : Infinity
+      const nextGap = i < changes.length - 1 ? (changes[i + 1].s - c.s) / 2 : Infinity
+      const h = Math.min(taper / 2, prevGap, nextGap)
+      if (!(h > 0)) return
+      const i0 = Math.max(0, Math.floor((c.s - h) / step)), i1 = Math.min(n - 1, Math.ceil((c.s + h) / step))
+      for (let k = i0; k <= i1; k++) {
+        const t = Math.min(1, Math.max(0, (k * step - (c.s - h)) / (2 * h)))
+        out[k] = c.from + (c.to - c.from) * t
+      }
+    })
+  }
+  return (s) => {
+    const x = Math.min(n - 1, Math.max(0, s / step))
+    const i = Math.floor(x), f = x - i
+    return out[i] * (1 - f) + out[Math.min(n - 1, i + 1)] * f
+  }
+}
+
 /** Width of the paved surface at station s: lanes × 3.66 + both shoulders. */
 export function pavedWidth(lanes: number, twoWay = false): number {
   return lanes * T.LANE_WIDTH + T.SHOULDER_OUT + (twoWay ? T.SHOULDER_OUT : T.SHOULDER_IN)
+}
+
+/**
+ * How far right of the spine the asphalt's centre sits.
+ *
+ * A one-way carriageway is not symmetric: it carries a wide outside shoulder and a narrow median
+ * one, so the middle of the asphalt is (SHOULDER_OUT − SHOULDER_IN)/2 = 0.9 m right of the middle of
+ * the travel lanes. OSM's motorway way is drawn down the TRAVEL LANES, not down the asphalt, so
+ * centring the asphalt on the spine puts every lane 0.9 m too far left. Offsetting it puts the lanes
+ * where OSM says they are and the shoulders where they belong.
+ *
+ * `ROAD_ONEWAY_CENTRE` = 0 anchors the lanes on the spine (the truthful one, default); 1 restores
+ * the old symmetric asphalt. Two-way roads have equal shoulders, so their offset is always 0.
+ */
+export function pavedOffset(twoWay = false): number {
+  if (twoWay || T.ROAD_ONEWAY_CENTRE >= 0.5) return 0
+  return (T.SHOULDER_OUT - T.SHOULDER_IN) / 2
 }
 
 /**
@@ -52,6 +111,116 @@ export interface SurfaceSet {
   name: string
   material: THREE.Material
   metresPerTile: number
+  /** the hex-tiling inputs, kept so two sets can be mixed in one shader (see blendMaterial) */
+  hex?: {
+    albedo: THREE.DataArrayTexture
+    normal: THREE.DataArrayTexture
+    layers: number
+    macro: THREE.Texture | null
+    macroMetres: number
+  }
+}
+
+/**
+ * A material that hex-tiles TWO surface sets and mixes them along a `blend` vertex attribute.
+ *
+ * Where the surface class changes the pavement used to change in one edge — a paving joint with a
+ * ruler's edge, which is what a resurfacing joint never looks like. The transition strip is its own
+ * geometry sitting in the gap left by trimming the two neighbouring quads back, so the two
+ * materials never overlap and there is nothing to z-fight; the mix happens in the shader.
+ *
+ * `hextile.ts` is world-look's file, so rather than reshape `hexSample` to take its samplers as
+ * parameters, this declares a second set of uniforms and a `hexSampleB` that reuses HEX_GLSL's own
+ * `hexTriangleGrid` and `hexHash`. If that file ever grows a parameterised sampler, delete this.
+ *
+ * UVs on the blend geometry are in METRES (u across the road, v along it) and divided by each set's
+ * metresPerTile here, because the two sets tile at different scales.
+ */
+export function blendMaterial(a: SurfaceSet, b: SurfaceSet): THREE.Material | null {
+  if (!a.hex || !b.hex) return null
+  const base = a.material as THREE.MeshStandardMaterial
+  const mat = new THREE.MeshStandardMaterial({ map: base.map, normalMap: base.normalMap, normalScale: new THREE.Vector2(0.6, 0.6), roughnessMap: base.roughnessMap, roughness: 1, metalness: 0, side: THREE.DoubleSide })
+  const A = a.hex, B = b.hex
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.hexAlbedo = { value: A.albedo }
+    shader.uniforms.hexNormal = { value: A.normal }
+    shader.uniforms.hexLayers = { value: A.layers }
+    shader.uniforms.hexCell = { value: 1.6 }
+    shader.uniforms.hexAlbedoB = { value: B.albedo }
+    shader.uniforms.hexNormalB = { value: B.normal }
+    shader.uniforms.hexLayersB = { value: B.layers }
+    shader.uniforms.macroA = { value: A.macro }
+    shader.uniforms.macroB = { value: B.macro }
+    shader.uniforms.useMacroA = { value: A.macro ? 1 : 0 }
+    shader.uniforms.useMacroB = { value: B.macro ? 1 : 0 }
+    shader.uniforms.mptA = { value: a.metresPerTile }
+    shader.uniforms.mptB = { value: b.metresPerTile }
+    shader.uniforms.macroMetresA = { value: A.macroMetres }
+    shader.uniforms.macroMetresB = { value: B.macroMetres }
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute float blend;\nvarying float vBlend;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvBlend = blend;')
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <map_pars_fragment>',
+        `#include <map_pars_fragment>
+${HEX_GLSL}
+uniform sampler2DArray hexAlbedoB;
+uniform sampler2DArray hexNormalB;
+uniform float hexLayersB;
+uniform sampler2D macroA;
+uniform sampler2D macroB;
+uniform int useMacroA;
+uniform int useMacroB;
+uniform float mptA;
+uniform float mptB;
+uniform float macroMetresA;
+uniform float macroMetresB;
+varying float vBlend;
+vec3 hexN = vec3(0.0, 0.0, 1.0);
+
+vec4 hexSampleB(vec2 uv, out vec3 n) {
+  float w1, w2, w3; ivec2 v1, v2, v3;
+  hexTriangleGrid(uv / hexCell, w1, w2, w3, v1, v2, v3);
+  vec3 h1 = hexHash(v1), h2 = hexHash(v2), h3 = hexHash(v3);
+  vec2 dx = dFdx(uv), dy = dFdy(uv);
+  vec3 uv1 = vec3(uv + h1.xy, floor(h1.z * hexLayersB));
+  vec3 uv2 = vec3(uv + h2.xy, floor(h2.z * hexLayersB));
+  vec3 uv3 = vec3(uv + h3.xy, floor(h3.z * hexLayersB));
+  vec3 w = pow(vec3(w1, w2, w3), vec3(4.0));
+  w /= (w.x + w.y + w.z);
+  vec4 c = textureGrad(hexAlbedoB, uv1, dx, dy) * w.x + textureGrad(hexAlbedoB, uv2, dx, dy) * w.y + textureGrad(hexAlbedoB, uv3, dx, dy) * w.z;
+  vec3 nn = textureGrad(hexNormalB, uv1, dx, dy).xyz * w.x + textureGrad(hexNormalB, uv2, dx, dy).xyz * w.y + textureGrad(hexNormalB, uv3, dx, dy).xyz * w.z;
+  n = nn * 2.0 - 1.0;
+  return vec4(c.rgb, 1.0);
+}`,
+      )
+      .replace(
+        '#include <map_fragment>',
+        `
+        #ifdef USE_MAP
+          vec3 nA, nB;
+          vec4 cA = hexSample(vMapUv / mptA, nA);
+          vec4 cB = hexSampleB(vMapUv / mptB, nB);
+          if (useMacroA == 1) cA.rgb *= mix(vec3(1.0), texture2D(macroA, vMapUv / macroMetresA).rgb * 2.0, 0.85);
+          if (useMacroB == 1) cB.rgb *= mix(vec3(1.0), texture2D(macroB, vMapUv / macroMetresB).rgb * 2.0, 0.85);
+          float t = smoothstep(0.0, 1.0, clamp(vBlend, 0.0, 1.0));
+          hexN = normalize(mix(nA, nB, t));
+          diffuseColor *= mix(cA, cB, t);
+        #endif
+        `,
+      )
+      .replace('#include <normal_fragment_maps>', THREE.ShaderChunk.normal_fragment_maps.replace('vec3 mapN = texture2D( normalMap, vNormalMapUv ).xyz * 2.0 - 1.0;', 'vec3 mapN = hexN;'))
+  }
+  mat.customProgramCacheKey = () => `road-blend-${a.name}>${b.name}`
+  return mat
+}
+
+const blendCache = new Map<string, THREE.Material | null>()
+function blendFor(sets: Record<string, SurfaceSet>, from: string, to: string): THREE.Material | null {
+  const k = `${from}>${to}`
+  if (!blendCache.has(k)) blendCache.set(k, sets[from] && sets[to] ? blendMaterial(sets[from], sets[to]) : null)
+  return blendCache.get(k) ?? null
 }
 
 /**
@@ -79,8 +248,27 @@ export function roadMesh(st: Station[], lanesAt: (s: number) => number, classAt:
     if (uv && uvs) uvs.push(...uv)
   }
 
+  // Class per quad, so a quad knows whether either of its ends is a class boundary. The blend band
+  // is a strip of its own geometry in the gap left by trimming both neighbours back by half a band;
+  // no quad overlaps another, so there is nothing to z-fight.
+  const quadClass: string[] = []
+  for (let i = 0; i < st.length - 1; i++) quadClass.push(classAt((st[i].s + st[i + 1].s) / 2))
+  const blends: Record<string, { pos: number[]; uv: number[]; idx: number[]; bl: number[] }> = {}
+  const lerpSt = (a: Station, b: Station, t: number): Station => ({
+    pos: a.pos.clone().lerp(b.pos, t),
+    dir: a.dir.clone().lerp(b.dir, t).normalize(),
+    s: a.s + (b.s - a.s) * t,
+  })
+
   for (let i = 0; i < st.length - 1; i++) {
-    const a = st[i], b = st[i + 1]
+    const a0 = st[i], b0 = st[i + 1]
+    // half a band, but never more than 40% of the quad, so a short station interval stays sane
+    const half = Math.min(T.ROAD_BLEND_M / 2, (b0.s - a0.s) * 0.4)
+    const cutStart = i > 0 && quadClass[i - 1] !== quadClass[i] ? half : 0
+    const cutEnd = i < quadClass.length - 1 && quadClass[i + 1] !== quadClass[i] ? half : 0
+    const span = b0.s - a0.s || 1
+    const a = cutStart > 0 ? lerpSt(a0, b0, cutStart / span) : a0
+    const b = cutEnd > 0 ? lerpSt(a0, b0, 1 - cutEnd / span) : b0
     const la = lanesAt(a.s), lb = lanesAt(b.s)
     // ROOT CAUSE of "lanes ~35% too narrow on the 2-lane road" (Rich, 2026-09-21): this called
     // pavedWidth(lanes) without the two-way flag, so a two-way road got one inside shoulder
@@ -90,6 +278,9 @@ export function roadMesh(st: Station[], lanesAt: (s: number) => number, classAt:
     // the strip and the asphalt disagreed by 0.9 m a side as well.
     const twoWay = twoWayAt((a.s + b.s) / 2)
     const wa = pavedWidth(la, twoWay), wb = pavedWidth(lb, twoWay)
+    // the asphalt's centre, right of the spine: 0 for a two-way road, half the shoulder difference
+    // for a carriageway (see pavedOffset)
+    const off = pavedOffset(twoWay)
     const sa = a.dir.clone().cross(UP), sb = b.dir.clone().cross(UP) // right of travel
     const ya = a.pos.y + lift, yb = b.pos.y + lift
     const P = (base: THREE.Vector3, side: THREE.Vector3, off: number, y: number) => new THREE.Vector3(base.x + side.x * off, y, base.z + side.z * off)
@@ -100,17 +291,19 @@ export function roadMesh(st: Station[], lanesAt: (s: number) => number, classAt:
     const mpt = sets[cls]?.metresPerTile ?? 1
     // UVs in metres over the tile size: u across the pavement, v along the road, so the texture
     // repeats at its real scale and lane dashes stay where paint would be
-    quad(bk.pos, bk.idx, P(a.pos, sa, -wa / 2, ya), P(a.pos, sa, wa / 2, ya), P(b.pos, sb, -wb / 2, yb), P(b.pos, sb, wb / 2, yb), undefined, undefined,
+    quad(bk.pos, bk.idx, P(a.pos, sa, off - wa / 2, ya), P(a.pos, sa, off + wa / 2, ya), P(b.pos, sb, off - wb / 2, yb), P(b.pos, sb, off + wb / 2, yb), undefined, undefined,
       [0, a.s / mpt, wa / mpt, a.s / mpt, 0, b.s / mpt, wb / mpt, b.s / mpt], bk.uv)
+    // Paint runs over the untrimmed station interval: it sits 0.04 m above the asphalt, so it
+    // crosses the blend band without a gap and without fighting it.
     const ml = 0.12, y2a = ya + 0.02, y2b = yb + 0.02
-    const cycle = Math.floor(a.s / 12) * 12
-    const dash = a.s - cycle < 3.01 && la === lb
-    const dashLen = Math.min(3, b.s - a.s)
-    const bb = a.pos.clone().add(a.dir.clone().multiplyScalar(dashLen))
+    const cycle = Math.floor(a0.s / 12) * 12
+    const dash = a0.s - cycle < 3.01 && Math.round(la) === Math.round(lb)
+    const dashLen = Math.min(3, b0.s - a0.s)
+    const bb = a0.pos.clone().add(a0.dir.clone().multiplyScalar(dashLen))
     if (twoWay) {
       // two-way: white edge lines on both shoulders, double yellow at the centre, white dashes
       // between the lanes of each direction (3+ lanes a side)
-      const edgeA = wa / 2 - T.SHOULDER_OUT, edgeB = wb / 2 - T.SHOULDER_OUT
+      const edgeA = wa / 2 - T.SHOULDER_OUT + off, edgeB = wb / 2 - T.SHOULDER_OUT + off
       for (const sgn of [-1, 1]) quad(marks, midx, P(a.pos, sa, sgn * edgeA - ml, y2a), P(a.pos, sa, sgn * edgeA + ml, y2a), P(b.pos, sb, sgn * edgeB - ml, y2b), P(b.pos, sb, sgn * edgeB + ml, y2b), white, mcol)
       for (const off of [-0.16, 0.16]) quad(marks, midx, P(a.pos, sa, off - 0.1, y2a), P(a.pos, sa, off + 0.1, y2a), P(b.pos, sb, off - 0.1, y2b), P(b.pos, sb, off + 0.1, y2b), yellow, mcol)
       const perSide = Math.max(1, Math.floor(la / 2))
@@ -120,8 +313,8 @@ export function roadMesh(st: Station[], lanesAt: (s: number) => number, classAt:
       }
     } else {
       // one-way carriageway: yellow left (median side), white right, on the shoulder boundaries
-      const leftA = -wa / 2 + T.SHOULDER_IN, leftB = -wb / 2 + T.SHOULDER_IN
-      const rightA = wa / 2 - T.SHOULDER_OUT, rightB = wb / 2 - T.SHOULDER_OUT
+      const leftA = -wa / 2 + T.SHOULDER_IN + off, leftB = -wb / 2 + T.SHOULDER_IN + off
+      const rightA = wa / 2 - T.SHOULDER_OUT + off, rightB = wb / 2 - T.SHOULDER_OUT + off
       quad(marks, midx, P(a.pos, sa, leftA - ml, y2a), P(a.pos, sa, leftA + ml, y2a), P(b.pos, sb, leftB - ml, y2b), P(b.pos, sb, leftB + ml, y2b), yellow, mcol)
       quad(marks, midx, P(a.pos, sa, rightA - ml, y2a), P(a.pos, sa, rightA + ml, y2a), P(b.pos, sb, rightB - ml, y2b), P(b.pos, sb, rightB + ml, y2b), white, mcol)
       // lane dashes: 3 m paint / 9 m gap is the US standard; one dash per 12 m station cycle
@@ -130,6 +323,43 @@ export function roadMesh(st: Station[], lanesAt: (s: number) => number, classAt:
         quad(marks, midx, P(a.pos, sa, off - 0.08, y2a), P(a.pos, sa, off + 0.08, y2a), P(bb, sa, off - 0.08, y2a), P(bb, sa, off + 0.08, y2a), white, mcol)
       }
     }
+
+    // the transition strip into the gap this quad's trimmed end left
+    if (cutEnd > 0 && T.ROAD_BLEND_M > 0) {
+      const from = quadClass[i], to = quadClass[i + 1]
+      const key = `${from}>${to}`
+      const bk2 = (blends[key] ??= { pos: [], uv: [], idx: [], bl: [] })
+      const n0 = lerpSt(a0, b0, 1 - cutEnd / span) // = b
+      const nextSpan = st[i + 2] ? st[i + 2].s - b0.s || 1 : span
+      const n1 = st[i + 2] ? lerpSt(b0, st[i + 2], Math.min(T.ROAD_BLEND_M / 2, nextSpan * 0.4) / nextSpan) : b0
+      const w0 = pavedWidth(lanesAt(n0.s), twoWayAt(n0.s)), w1 = pavedWidth(lanesAt(n1.s), twoWayAt(n1.s))
+      const s0 = n0.dir.clone().cross(UP), s1 = n1.dir.clone().cross(UP)
+      const y0 = n0.pos.y + lift, y1 = n1.pos.y + lift
+      const k = bk2.pos.length / 3
+      for (const [p, sd, w, yy] of [[n0, s0, w0, y0], [n1, s1, w1, y1]] as [Station, THREE.Vector3, number, number][]) {
+        const bo = pavedOffset(twoWayAt(p.s))
+        for (const o of [bo - w / 2, bo + w / 2]) bk2.pos.push(p.pos.x + sd.x * o, yy, p.pos.z + sd.z * o)
+      }
+      // uv in METRES here (blendMaterial divides by each set's metresPerTile)
+      bk2.uv.push(0, n0.s, w0, n0.s, 0, n1.s, w1, n1.s)
+      bk2.bl.push(0, 0, 1, 1)
+      bk2.idx.push(k, k + 1, k + 2, k + 1, k + 3, k + 2)
+    }
+  }
+
+  for (const [key, bk2] of Object.entries(blends)) {
+    const [from, to] = key.split('>')
+    const mat = blendFor(sets, from, to)
+    if (!mat || bk2.idx.length === 0) continue
+    const bg = new THREE.BufferGeometry()
+    bg.setAttribute('position', new THREE.Float32BufferAttribute(bk2.pos, 3))
+    bg.setAttribute('uv', new THREE.Float32BufferAttribute(bk2.uv, 2))
+    bg.setAttribute('blend', new THREE.Float32BufferAttribute(bk2.bl, 1))
+    bg.setIndex(bk2.idx)
+    bg.computeVertexNormals()
+    const mesh = new THREE.Mesh(bg, mat)
+    mesh.name = `road:blend:${key}`
+    g.add(mesh)
   }
   for (const [cls, bk] of Object.entries(byClass)) {
     const ag = new THREE.BufferGeometry()
@@ -288,17 +518,19 @@ export async function loadSurfaceSets(base = '/surfaces/'): Promise<Record<strin
     if (srgb) t.colorSpace = THREE.SRGBColorSpace
     return t
   }
-  const { HEX_GLSL, arrayTexture } = await import('./hextile')
+  const { arrayTexture } = await import('./hextile')
   const normalChunk = THREE.ShaderChunk.normal_fragment_maps.replace('vec3 mapN = texture2D( normalMap, vNormalMapUv ).xyz * 2.0 - 1.0;', 'vec3 mapN = hexN;')
   for (const s of cat.sets) {
     // variant 0 stays on the material so three enables USE_MAP / USE_NORMALMAP and the uv varyings
     const mat = new THREE.MeshStandardMaterial({ map: tex(s.albedo, true), normalMap: tex(s.normal, false), normalScale: new THREE.Vector2(0.6, 0.6), roughnessMap: tex(s.roughness, false), roughness: 1, metalness: 0, side: THREE.DoubleSide })
     const variants = s.variants && s.variants.length > 1 ? s.variants : null
+    let hex: SurfaceSet['hex'] | null = null
     if (variants) {
       const [albedo, normal] = await Promise.all([arrayTexture(variants.map((v) => `/${v.albedo}`), true), arrayTexture(variants.map((v) => `/${v.normal}`), false)])
       const macro = s.macro ? tex(s.macro, true) : null
       if (macro) macro.wrapS = macro.wrapT = THREE.MirroredRepeatWrapping
       const ratio = (s.macro_metres ?? 8) / s.metres_per_tile
+      hex = { albedo, normal, layers: variants.length, macro, macroMetres: s.macro_metres ?? 8 }
       mat.onBeforeCompile = (shader) => {
         shader.uniforms.hexAlbedo = { value: albedo }
         shader.uniforms.hexNormal = { value: normal }
@@ -327,7 +559,7 @@ export async function loadSurfaceSets(base = '/surfaces/'): Promise<Record<strin
       }
       mat.customProgramCacheKey = () => `road-hex-${s.name}`
     }
-    out[s.name] = { name: s.name, metresPerTile: s.metres_per_tile, material: mat }
+    out[s.name] = { name: s.name, metresPerTile: s.metres_per_tile, material: mat, hex: hex ?? undefined }
   }
   return out
 }

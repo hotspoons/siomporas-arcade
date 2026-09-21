@@ -69,7 +69,8 @@ export class Car {
   rocket = false
   event: CarEvent = 'none'
   readonly forward = new THREE.Vector3(1, 0, 0)
-  private readonly right = new THREE.Vector3(0, 0, 1)
+  /** unit vector out of the driver's right window; the cockpit camera leans along it */
+  readonly right = new THREE.Vector3(0, 0, 1)
   /** world-space sideways velocity: the rear letting go, or gravity across a slope */
   private slideX = 0
   private slideZ = 0
@@ -83,6 +84,10 @@ export class Car {
   private steerVisual = 0
   mesh: THREE.Group
   private wheels: THREE.Mesh[] = []
+  /** dash, pillars and wheel: drawn only from inside (setCockpit) */
+  private interior: THREE.Group | null = null
+  private shell: THREE.Object3D[] = []
+  private steeringWheel: THREE.Object3D | null = null
   private surface: Surface
 
   constructor(surface: Surface) {
@@ -347,6 +352,38 @@ export class Car {
     const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.5, 1.5), new THREE.MeshStandardMaterial({ color: 0x1c1f24, roughness: 0.2, metalness: 0.5 }))
     cabin.position.set(-0.2, 0.95, 0)
     g.add(cabin)
+    // The view from the driver's seat: a dash below the eye line, two A-pillars and a header rail
+    // to frame it, and a wheel that turns with the steering. Hidden until setCockpit(true), and the
+    // body shell is hidden then instead, so the eye is not sitting inside a solid box.
+    const interior = new THREE.Group()
+    interior.visible = false
+    const dashMat = new THREE.MeshStandardMaterial({ color: 0x14161a, roughness: 0.85, metalness: 0.05 })
+    const dash = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.26, 1.7), dashMat)
+    dash.position.set(0.62, 0.95, 0)
+    interior.add(dash)
+    const cowl = new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.06, 1.75), dashMat)
+    cowl.position.set(0.95, 1.02, 0)
+    cowl.rotation.z = -0.13 // the bonnet falling away ahead
+    interior.add(cowl)
+    const header = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.1, 1.6), dashMat)
+    header.position.set(0.55, 1.62, 0)
+    interior.add(header)
+    for (const zz of [-0.78, 0.78]) {
+      const pillar = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.8, 0.12), dashMat)
+      pillar.position.set(0.58, 1.25, zz)
+      pillar.rotation.z = 0.22
+      interior.add(pillar)
+    }
+    const wheelRim = new THREE.Mesh(new THREE.TorusGeometry(0.17, 0.022, 8, 24), new THREE.MeshStandardMaterial({ color: 0x0c0d10, roughness: 0.6 }))
+    wheelRim.position.set(0.42, 1.0, -0.38)
+    wheelRim.rotation.y = Math.PI / 2
+    wheelRim.rotation.x = 0.35 // raked toward the driver
+    interior.add(wheelRim)
+    this.steeringWheel = wheelRim
+    this.interior = interior
+    g.add(interior)
+    this.shell = [body, cabin]
+
     const wheelGeo = new THREE.CylinderGeometry(0.34, 0.34, 0.26, 16)
     wheelGeo.rotateX(Math.PI / 2)
     const wheelMat = new THREE.MeshStandardMaterial({ color: 0x151515, roughness: 0.9 })
@@ -360,12 +397,20 @@ export class Car {
     return g
   }
 
+  /** Inside or outside: swap the body shell for the dash, pillars and wheel. */
+  setCockpit(on: boolean) {
+    if (!this.interior || this.interior.visible === on) return
+    this.interior.visible = on
+    for (const o of this.shell) o.visible = !on
+  }
+
   private updateMesh() {
     this.mesh.position.copy(this.pos).y -= T.CAR_RIDE
     // yaw about Y (three: +yaw turns from +X toward -Z, our forward is (cos, 0, sin) so negate)
     this.mesh.rotation.set(0, -this.yaw, 0)
     this.mesh.rotateZ(-Math.atan(this.pitch))
     this.mesh.rotateX(Math.atan(this.roll))
+    if (this.steeringWheel) this.steeringWheel.rotation.z = this.steerVisual * 2.6
     for (const [i, w] of this.wheels.entries()) {
       w.rotation.set(0, i < 2 ? -this.steerVisual : 0, 0)
       w.rotateZ(-this.wheelSpin)

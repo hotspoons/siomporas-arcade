@@ -501,22 +501,31 @@ function frame() {
     drive.input.throttle = padT
     drive.input.brake = padB
     // chase camera: behind and above, looking over the bonnet; drag adds a look-around yaw
+    car.setCockpit(drive.cockpit)
     if (drive.cockpit) {
-      // cockpit: eye at the driver's head, looking down the nose (stuntin's C view); drive.yaw/pitch look around
-      const eye = car.pos.clone().add(new THREE.Vector3(0, T.COCKPIT_EYE_UP, 0)).add(car.forward.clone().multiplyScalar(T.COCKPIT_EYE_FWD))
+      // Cockpit: eye at the driver's head, looking down the nose (stuntin's C view); drive.yaw/pitch
+      // look around. NOTE there is no early return here. This branch used to `return` out of
+      // frame(), which skipped site.updateNear, the minimap, renderer.render AND the
+      // requestAnimationFrame that re-arms the loop — so pressing C froze the viewer dead and
+      // nothing brought it back (probes/corridor-cockpit.mjs: the car moved 0.48 m in 2 s in chase
+      // and 0.00 m in cockpit). The eye rides the body, so it pitches and rolls with the car.
+      const lean = new THREE.Vector3(0, T.COCKPIT_EYE_UP, 0).applyAxisAngle(car.right, -Math.atan(car.pitch))
+      const eye = car.pos.clone().add(lean).add(car.forward.clone().multiplyScalar(T.COCKPIT_EYE_FWD))
       camera.position.copy(eye)
       const ahead = car.forward.clone().applyAxisAngle(up, drive.yaw)
+      camera.up.set(0, 1, 0).applyAxisAngle(car.forward, Math.atan(car.roll) * T.COCKPIT_ROLL)
       camera.lookAt(eye.clone().add(ahead.multiplyScalar(30)).add(new THREE.Vector3(0, -Math.tan(drive.pitch) * 30 + T.COCKPIT_LOOK_UP, 0)))
-      return
+    } else {
+      camera.up.set(0, 1, 0)
+      const back = car.forward.clone().applyAxisAngle(up, drive.yaw).multiplyScalar(-T.CHASE_BACK)
+      const want = car.pos.clone().add(back).add(new THREE.Vector3(0, T.CHASE_UP + Math.tan(drive.pitch) * 4, 0))
+      const gy = site.groundAt(want.x, want.z)
+      if (gy !== null && want.y < gy + 1.2) want.y = gy + 1.2
+      camera.position.lerp(want, 1 - Math.exp(-T.CHASE_LAG * dt))
+      camera.lookAt(car.pos.clone().add(car.forward.clone().multiplyScalar(T.CHASE_LOOK_AHEAD)).add(new THREE.Vector3(0, 1.0, 0)))
     }
-    const back = car.forward.clone().applyAxisAngle(up, drive.yaw).multiplyScalar(-T.CHASE_BACK)
-    const want = car.pos.clone().add(back).add(new THREE.Vector3(0, T.CHASE_UP + Math.tan(drive.pitch) * 4, 0))
-    const gy = site.groundAt(want.x, want.z)
-    if (gy !== null && want.y < gy + 1.2) want.y = gy + 1.2
-    camera.position.lerp(want, 1 - Math.exp(-T.CHASE_LAG * dt))
-    camera.lookAt(car.pos.clone().add(car.forward.clone().multiplyScalar(T.CHASE_LOOK_AHEAD)).add(new THREE.Vector3(0, 1.0, 0)))
     if (car.event === 'bump') status('bump')
-    $('#pos').textContent = `${(Math.abs(car.speed) * 2.237).toFixed(0)} mph  ${car.onGrass ? 'grass' : 'pavement'}${Math.abs(car.slide) > 1 ? '  sliding' : ''}`
+    $('#pos').textContent = `${(Math.abs(car.speed) * 2.237).toFixed(0)} mph  ${car.onGrass ? 'grass' : 'pavement'}${Math.abs(car.slide) > 1 ? '  sliding' : ''}${drive.cockpit ? '  cockpit' : ''}`
   } else {
     fly?.update(dt)
     applyMove(dt)

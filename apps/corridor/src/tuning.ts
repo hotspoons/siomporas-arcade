@@ -73,6 +73,14 @@ export let LOD_TOPDOWN_PITCH = 0.9
 export let LANE_WIDTH = 3.66
 export let SHOULDER_OUT = 3.0
 export let SHOULDER_IN = 1.2
+/** m: width of the transition strip where the surface class changes. 0 = the old hard joint. */
+export let ROAD_BLEND_M = 0.15
+/** m: length a lane-count change is ramped over, so an auxiliary lane tapers instead of appearing
+ *  sideways in one quad. 0 = the old step. */
+export let ROAD_TAPER_M = 60
+/** 0 = a one-way carriageway's TRAVEL LANES are centred on the spine (OSM draws the way down the
+ *  lanes, so this is the truthful one); 1 = the asphalt is centred instead, as it was before. */
+export let ROAD_ONEWAY_CENTRE = 0
 
 // --- car (stuntin's Tuning.ts defaults and the Kestrel S9 spec; see apps/stuntin/src/sim) -------
 // engine (CarSpec 'kestrel' + longitudinal)
@@ -147,6 +155,8 @@ export let CAM_MIN_HEIGHT = 0.4
 export let COCKPIT_EYE_UP = 1.15
 export let COCKPIT_EYE_FWD = 0.35
 export let COCKPIT_LOOK_UP = 0.6
+/** how much of the car's roll the cockpit view takes on: 0 = head stays level, 1 = bolted to the body */
+export let COCKPIT_ROLL = 0.6
 export let CHASE_BACK = 7.5
 export let CHASE_UP = 2.6
 export let CHASE_LOOK_AHEAD = 6
@@ -258,6 +268,9 @@ export const TUNE_TABS: TuneTab[] = [
           tune('LANE_WIDTH', () => LANE_WIDTH, (v) => (LANE_WIDTH = v), [2.5, 4.5], 0.01),
           tune('SHOULDER_OUT', () => SHOULDER_OUT, (v) => (SHOULDER_OUT = v), [0, 5], 0.1),
           tune('SHOULDER_IN', () => SHOULDER_IN, (v) => (SHOULDER_IN = v), [0, 5], 0.1),
+          tune('ROAD_BLEND_M', () => ROAD_BLEND_M, (v) => (ROAD_BLEND_M = v), [0, 2], 0.05, 'transition strip where the surface class changes (m); 0 = hard joint'),
+          tune('ROAD_TAPER_M', () => ROAD_TAPER_M, (v) => (ROAD_TAPER_M = v), [0, 200], 5, 'length a lane-count change is ramped over (m); 0 = a step'),
+          tune('ROAD_ONEWAY_CENTRE', () => ROAD_ONEWAY_CENTRE, (v) => (ROAD_ONEWAY_CENTRE = v), [0, 1], 1, '0 = lanes centred on the spine (OSM truth), 1 = asphalt centred (old)'),
         ],
       },
     ],
@@ -349,6 +362,7 @@ export const TUNE_TABS: TuneTab[] = [
           tune('CAM_MIN_HEIGHT', () => CAM_MIN_HEIGHT, (v) => (CAM_MIN_HEIGHT = v), [0.05, 5], 0.05, 'fly camera floor above ground (m)'),
           tune('COCKPIT_EYE_UP', () => COCKPIT_EYE_UP, (v) => (COCKPIT_EYE_UP = v), [0.3, 3], 0.05),
           tune('COCKPIT_EYE_FWD', () => COCKPIT_EYE_FWD, (v) => (COCKPIT_EYE_FWD = v), [-2, 3], 0.05),
+          tune('COCKPIT_ROLL', () => COCKPIT_ROLL, (v) => (COCKPIT_ROLL = v), [0, 1], 0.05, 'share of the body roll the head takes on'),
           tune('COCKPIT_LOOK_UP', () => COCKPIT_LOOK_UP, (v) => (COCKPIT_LOOK_UP = v), [-3, 3], 0.1),
         ],
       },

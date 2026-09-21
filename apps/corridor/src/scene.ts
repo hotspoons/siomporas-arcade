@@ -493,9 +493,30 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
       }
       return false
     }
-    const deadEnds: { x: number; z: number; dx: number; dz: number; who: number; s: number }[] = []
+    const deadEnds: { x: number; z: number; dx: number; dz: number; who: number; s: number; radius?: number }[] = []
+    // the bake's answer wins where it has one: `dead_ends` per road resolves the ends against OSM
+    // (a shared node, a turning circle, a way outside our list) and the editor can turn any of
+    // them into a true dead end. Geometry only decides for roads the bake has not spoken about.
+    const authored = new Map<number, import('./site').DeadEnd[]>()
+    if (manifest.spine.dead_ends?.length) authored.set(0, manifest.spine.dead_ends)
+    for (let i = 0; i < branchAts.length; i++) {
+      const de = (manifest.branches ?? [])[i]?.dead_ends
+      if (de?.length) authored.set(branchWho0 + i, de)
+    }
     for (let who = 0; who < curves.length; who++) {
       const c = curves[who]
+      const said = authored.get(who)
+      if (said) {
+        for (const de of said) {
+          if (de.kind !== 'cul_de_sac') continue
+          const s = Math.min(c.len, Math.max(0, de.s))
+          const st = c.at(s)
+          const sign = s > c.len / 2 ? 1 : -1
+          const d = st.dir.clone().setY(0).normalize().multiplyScalar(sign)
+          deadEnds.push({ x: st.pos.x, z: st.pos.z, dx: d.x, dz: d.z, who, s, radius: de.radius_m })
+        }
+        continue
+      }
       for (const [s, sign] of [[0, -1], [c.len, 1]] as [number, number][]) {
         const st = c.at(Math.min(c.len, Math.max(0, s)))
         const d = st.dir.clone().setY(0).normalize().multiplyScalar(sign)
@@ -516,8 +537,9 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
       if (T.CULDESAC_RADIUS <= 0) return
       for (const e of deadEnds) {
         // the bulb sits just beyond the last metre of pavement, as a turning circle does
-        const bx = e.x + e.dx * T.CULDESAC_RADIUS * 0.6, bz = e.z + e.dz * T.CULDESAC_RADIUS * 0.6
-        const rec: St = { x: bx, z: bz, dx: e.dx, dz: e.dz, s: e.s, half: T.CULDESAC_RADIUS, who: e.who, off: 0 }
+        const r = e.radius && e.radius > 0 ? e.radius : T.CULDESAC_RADIUS
+        const bx = e.x + e.dx * r * 0.6, bz = e.z + e.dz * r * 0.6
+        const rec: St = { x: bx, z: bz, dx: e.dx, dz: e.dz, s: e.s, half: r, who: e.who, off: 0 }
         bulbStations.push(rec)
         const k = `${Math.floor(bx / stCell)},${Math.floor(bz / stCell)}`
         const arr = stGrid.get(k)

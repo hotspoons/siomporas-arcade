@@ -32,6 +32,16 @@ export interface Crossing {
 }
 
 /** a road of a network site other than the primary: rendered as a first-class carriageway with its own strip */
+/** a road end with nothing beyond it: a turning bulb unless a human says it is a true dead end */
+export interface DeadEnd {
+  s: number
+  kind: 'cul_de_sac' | 'dead_end'
+  radius_m?: number
+  source?: string
+  x?: number
+  y?: number
+}
+
 export interface Branch {
   name: string | null
   ref?: string | null
@@ -45,6 +55,7 @@ export interface Branch {
   s_on_primary?: number | null
   profile?: { s: number[]; road_z: number[] } | null
   structures?: Structure[] | null
+  dead_ends?: DeadEnd[] | null
 }
 
 export interface Manifest {
@@ -54,6 +65,7 @@ export interface Manifest {
   bbox: [number, number, number, number]
   layers: Partial<Record<'dem' | 'chm' | 'naip' | 'horizon' | 'horizon_naip', Layer>>
   spine: {
+    dead_ends?: DeadEnd[] | null
     coords: [number, number, number][]
     photo_s: number
     length_m: number

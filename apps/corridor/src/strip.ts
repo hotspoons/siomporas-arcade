@@ -39,6 +39,10 @@ export function buildStrip(
    * triangles and heightAt returns null for them.
    */
   edgeLimitAt: ((s: number) => number) | null = null,
+  /** canopy height (m) at site x,y — the CHM. Where it closes over, the verge is forest floor. */
+  canopyAt: ((x: number, y: number) => number) | null = null,
+  /** the forest-floor texture that replaces turf under canopy (groundcover.forestFloorTexture) */
+  forestFloor: THREE.Texture | null = null,
 ): {
   mesh: THREE.Mesh
   heightAt: (x: number, z: number) => number | null
@@ -56,6 +60,7 @@ export function buildStrip(
   const pos = new Float32Array(nS * nL * 3)
   const uv = new Float32Array(nS * nL * 2)
   const edge = new Float32Array(nS * nL)
+  const canopy = new Float32Array(nS * nL)
   const up = new THREE.Vector3(0, 1, 0)
   const [bx0, by0, bx1, by1] = bbox
   let k = 0
@@ -94,6 +99,7 @@ export function buildStrip(
       uv[k * 2] = (x - bx0) / (bx1 - bx0)
       uv[k * 2 + 1] = (-z - by0) / (by1 - by0)
       edge[k] = e.d
+      canopy[k] = canopyAt ? canopyAt(x, -z) : 0
       k++
     }
   }
@@ -119,29 +125,35 @@ export function buildStrip(
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3))
   geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2))
   geo.setAttribute('aEdge', new THREE.BufferAttribute(edge, 1))
+  geo.setAttribute('aCanopy', new THREE.BufferAttribute(canopy, 1))
   geo.setIndex(new THREE.BufferAttribute(idx, 1))
   geo.computeVertexNormals()
 
-  for (const t of [grassMown, grassRough]) if (t) { t.wrapS = t.wrapT = THREE.RepeatWrapping }
+  for (const t of [grassMown, grassRough, forestFloor]) if (t) { t.wrapS = t.wrapT = THREE.RepeatWrapping }
   const mat = new THREE.MeshStandardMaterial({ map: imagery, color: 0xffffff, roughness: 1, metalness: 0 })
   const uniforms = {
     grassMown: { value: grassMown },
     grassRough: { value: grassRough },
     hasGrass: { value: grassMown && grassRough ? 1 : 0 },
+    forestFloor: { value: forestFloor },
+    hasForest: { value: forestFloor ? 1 : 0 },
     grassTint: { value: new THREE.Color(0xffffff) },
   }
   mat.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms)
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute float aEdge;\nvarying float vEdge;\nvarying vec3 vWorldXZ;\nvarying vec3 vWorldN;')
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvEdge = aEdge;\nvWorldXZ = (modelMatrix * vec4(position, 1.0)).xyz;\nvWorldN = normalize(mat3(modelMatrix) * objectNormal);')
+      .replace('#include <common>', '#include <common>\nattribute float aEdge;\nattribute float aCanopy;\nvarying float vEdge;\nvarying float vCanopy;\nvarying vec3 vWorldXZ;\nvarying vec3 vWorldN;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvEdge = aEdge;\nvCanopy = aCanopy;\nvWorldXZ = (modelMatrix * vec4(position, 1.0)).xyz;\nvWorldN = normalize(mat3(modelMatrix) * objectNormal);')
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <map_pars_fragment>', `#include <map_pars_fragment>
         uniform sampler2D grassMown;
         uniform sampler2D grassRough;
         uniform int hasGrass;
+        uniform sampler2D forestFloor;
+        uniform int hasForest;
         uniform vec3 grassTint;
         varying float vEdge;
+        varying float vCanopy;
         varying vec3 vWorldXZ;
         varying vec3 vWorldN;
         // TRIPLANAR. The ground textures used to be projected straight down — uv = worldXZ / 2 —
@@ -179,6 +191,20 @@ export function buildStrip(
             vec3 grass = (mown * wMown + rough * wRough) * grassTint * lum;
             float wGrass = clamp(wMown + wRough, 0.0, 1.0);
             ground = vec4(mix(img.rgb, grass, wGrass), 1.0);
+            // FOREST FLOOR. Under a closed canopy the verge is leaf litter, not turf: the same
+            // CHM > 3 m that stops the grass generator putting a single blade here (68 % of the
+            // Chesterfield verge) should stop the ground reading as mown grass too. Blended over
+            // 2–4 m of canopy height so a hedge line is a gradient and not a cut-out, and kept
+            // off the pavement by the same edge distance everything else uses.
+            if (hasForest == 1) {
+              // canopy closing over (2–4 m of CHM) AND clear of the mown strip: a highway crew
+              // mows under an overhanging crown, so the first few metres off the shoulder stay
+              // turf even in closed woodland. 41 % of Bowie's verge is under canopy by the CHM and
+              // most of that is overhang, not forest floor.
+              float wForest = smoothstep(2.0, 4.0, vCanopy) * smoothstep(4.0, 10.0, vEdge);
+              vec3 litter = triplanar(forestFloor, vWorldXZ, n, 0.5, vec2(0.37, 0.11)) * lum;
+              ground = vec4(mix(ground.rgb, litter, wForest), 1.0);
+            }
           }
           diffuseColor *= ground;
         #endif

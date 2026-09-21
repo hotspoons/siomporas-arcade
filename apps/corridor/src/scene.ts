@@ -8,7 +8,7 @@ import { NearTrees } from './trees'
 import { Impostors } from './impostors'
 import { Grass } from './grass'
 import { LOOK, type Season } from './season'
-import { GRASS_TYPES, grassTypeFor } from './groundcover'
+import { GRASS_TYPES, forestFloorTexture, grassTypeFor } from './groundcover'
 import { buildStrip, sinkUnderStrip } from './strip'
 import { Adjustments, NEUTRAL as NEUTRAL_ADJ } from './adjust'
 import { buildPlacements, loadCatalog, loadPlacements } from './placements'
@@ -36,6 +36,8 @@ export interface Site {
   /** terrain-and-data: rock instances placed per rock type, and what water was drawn (for probes) */
   rockCounts: Record<string, number>
   waterStats: { lines: number; areas: number; falls: number; length_m: number }
+  /** canopy height (m) above the ground at site x,y — the CHM the trees and the grass rule read */
+  canopyAt: (x: number, y: number) => number
   /** per-frame: move the near-field tree models and the grass ring to follow the eye; fwd/pitch shape the LOD footprint */
   updateNear: (eye: THREE.Vector3, time: number, fwd?: THREE.Vector3, pitch?: number) => void
   /** a knob changed: re-pick trees and re-seed grass on the next frame */
@@ -446,6 +448,7 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
   let treesNearWorld: (x: number, z: number, r: number) => [number, number, number][] = () => []
   let currentSeason: Season = initialSeason
   let grassRef: Grass | null = null
+  let canopyAtRef: (x: number, y: number) => number = () => 0
   if (chm) {
     // distance to the nearest PAVEMENT EDGE of any carriageway (negative = on the pavement):
     // stations every 5 m from the spine and every sibling, hashed on a 20 m grid with each
@@ -600,6 +603,10 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
     }
     const VERGE = 40
     const grassTex = (cls: string) => ((surfaceSets?.[cls]?.material as THREE.MeshStandardMaterial | undefined)?.map ?? null)
+    // the CHM the grass generator already rejects cells by; the strip needs it to know where the
+    // ground is forest floor rather than turf
+    const stripCanopyAt = chm ? sampler(chm) : null
+    const litter = renderer && chm ? forestFloorTexture() : null
     /**
      * On a bridge the verge stops at the parapet. Everywhere else the strip blends from road grade
      * back to the DEM over 7 m, but on a deck the DEM is the valley floor 5–12 m below and the
@@ -624,7 +631,7 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
       }
       return lim
     }
-    const makeStrip = () => buildStrip(spineAt, curveLen, -latMin + VERGE, latMax + VERGE, (x, z) => edgeDistance(x, z), heightAt, imagery, manifest.bbox, grassTex('grass_mown'), grassTex('grass_rough'), lite ? 4 : 2, lite ? 2 : 1, adjustments.active ? (x, y) => adjustments.at(x, y, adjScratch).ground_offset_m : null, null, stripEdgeLimitAt)
+    const makeStrip = () => buildStrip(spineAt, curveLen, -latMin + VERGE, latMax + VERGE, (x, z) => edgeDistance(x, z), heightAt, imagery, manifest.bbox, grassTex('grass_mown'), grassTex('grass_rough'), lite ? 4 : 2, lite ? 2 : 1, adjustments.active ? (x, y) => adjustments.at(x, y, adjScratch).ground_offset_m : null, null, stripEdgeLimitAt, stripCanopyAt, litter)
     let strip = makeStrip()
     road.add(strip.mesh)
     sinkUnderStrip(terrainGeo, strip.sinkAt, strip.coverAt)
@@ -817,6 +824,7 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
     trees.add(near.group)
     // grass on the verge: open ground (no canopy), off the pavement, mown near the shoulder
     const canopyAt = sampler(chm)
+    canopyAtRef = canopyAt
     const grassAdj = { ...NEUTRAL_ADJ }
     const grass = new Grass(groundNear, canopyAt, roadDistance, 0, LOOK[currentSeason], lite ? 90_000 : 400_000, lite ? 26 : 40, fog, adjustments.active ? (x, y) => { const a = adjustments.at(x, y, grassAdj); return [a.grass_height, a.grass_density] } : undefined, undefined, heightAt)
     trees.add(grass.mesh)
@@ -1064,6 +1072,7 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
     grass: grassRef,
     rockCounts: rocks.counts,
     waterStats: { lines: water.lines, areas: water.areas, falls: water.falls, length_m: water.length_m },
+    canopyAt: canopyAtRef,
     updateNear,
     retune,
     setSeason,

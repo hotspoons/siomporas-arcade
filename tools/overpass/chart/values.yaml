@@ -1,0 +1,59 @@
+# Overpass API on gh200-1. The public mirrors 504 under load and went down entirely for an hour on
+# 2026-09-21, failing every new site bake at step one; this is the fix Rich asked for.
+#
+# The region is a Geofabrik extract. Maryland inits in ~20 minutes and covers every Gambrills /
+# Crownsville / Davidsonville / Bowie / Frederick / Sideling corridor we bake. To cover the
+# California, Oregon and Maine sites too, set planetUrl/diffUrl to north-america/us-latest and
+# raise storage to 400Gi — that init is several hours, so do it deliberately, not by accident.
+image:
+  repository: wiktorn/overpass-api
+  tag: "latest"       # multi-arch; arm64 present, which the GH200 nodes need
+  pullPolicy: IfNotPresent
+
+fullnameOverride: overpass
+
+# Geofabrik publishes .osm.pbf only (the .osm.bz2 the image expects 404s), so the container
+# downloads the pbf into planet.osm.bz2 and osmium converts it in place before the clone.
+# and the DATED file, not -latest: -latest is a 302 and the image's downloader does not follow
+# redirects (it wrote the 254-byte redirect body and called it a planet). Updates come from
+# diffUrl anyway, so pinning the init snapshot costs nothing.
+planetUrl: https://download.geofabrik.de/north-america/us/maryland-260920.osm.pbf
+preprocess: 'mv /db/planet.osm.bz2 /db/planet.osm.pbf && osmium cat -o /db/planet.osm.bz2 /db/planet.osm.pbf && rm /db/planet.osm.pbf'
+diffUrl: https://download.geofabrik.de/north-america/us/maryland-updates/
+# `no` drops changeset/user/timestamp: a third off the database and we never query on them
+meta: "no"
+# minutely diffs are pointless for a bake of roads that have been there for decades
+updateSleep: 86400
+rulesLoad: 10
+# the dispatcher's shared memory; Overpass wants this in /dev/shm
+shmSize: 2Gi
+
+storage:
+  size: 60Gi
+  className: ceph-filesystem
+
+resources:
+  requests: { cpu: "2", memory: 6Gi }
+  limits: { cpu: "8", memory: 16Gi }
+
+service:
+  port: 80
+
+ingress:
+  enabled: true
+  className: nginx
+  host: overpass.richard-siomporas.basedweights.com
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-issuer
+    # a corridor query over a 12 km network bbox is big and slow; nginx's defaults are not
+    nginx.ingress.kubernetes.io/proxy-body-size: "16m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
+  tls:
+    secretName: overpass-tls
+
+# The road not taken, again (see tools/recon-service/README.md): the platform's
+# pai-managed-ext-gateway at 172.16.10.157 is the intended external front door. This chart uses
+# ingress-nginx because that is what recon proved on this cluster.
+nodeSelector: {}
+tolerations: []

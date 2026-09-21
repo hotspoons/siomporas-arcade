@@ -5,6 +5,8 @@
 //           line plus WATER_DEPTH (a stream is not a film on its bed). Culvert segments are not
 //           drawn — the water goes under the road fill and comes out the other side.
 //   areas   ponds/basins/wetlands as a flat polygon at the median ground inside them.
+//   meshes  one per MATERIAL, not per waterway — a region can hold hundreds of streams (Crofton:
+//           416 lines, 129 rapids, 199 ponds) and they share three materials between them.
 //   falls   over a fall or rapid a second, brighter ribbon carries scrolling foam.
 //   look    MeshStandardMaterial (so the log-depth and fog chunks come for free) with the normal
 //           perturbed per frame by two scrolling value-noise layers over world position — the
@@ -14,6 +16,7 @@
 // KNOWN GAP: within 0.6 m of any pavement the corridor strip sits at road height, so water under a
 // bridge we are on is hidden by the strip deck until the strip learns to open over decks (main's).
 import * as THREE from 'three'
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import * as T from './tuning'
 
 export interface WaterFall { i0: number; i1: number; drop_m: number; length_m: number; grade: number; kind: 'falls' | 'rapids' }
@@ -157,6 +160,14 @@ export function buildWater(water: WaterLayer | null | undefined, groundAt: (x: n
   const foam = foamMaterial(uniforms)
   let nLines = 0, nFalls = 0, length = 0
 
+  // ONE MESH PER MATERIAL, not per waterway. The Crofton region has 416 streams, 129 rapids and
+  // 199 ponds: drawn separately that is ~744 draw calls for about 4,000 triangles, which is the
+  // wrong trade in every direction. They share a material and nothing picks an individual stream,
+  // so each bucket is merged. The per-line records stay on the result for anyone who needs them.
+  const streamGeo: THREE.BufferGeometry[] = []
+  const foamGeo: THREE.BufferGeometry[] = []
+  const areaGeo: THREE.BufferGeometry[] = []
+
   for (const ln of water.lines ?? []) {
     if (ln.culvert || ln.pts.length < 2) continue
     const pts = ln.pts.map(([x, y, z]) => {
@@ -167,22 +178,13 @@ export function buildWater(water: WaterLayer | null | undefined, groundAt: (x: n
       return new THREE.Vector3(x, g === null ? surf : Math.max(surf, g - 0.3), wz)
     })
     const w = Math.max(0.6, ln.width_m) * T.WATER_WIDTH_SCALE
-    const mesh = new THREE.Mesh(ribbon(pts, () => w), stream)
-    mesh.name = `water:${ln.kind}:${ln.name ?? ln.id}`
-    mesh.userData = { water: ln }
-    mesh.frustumCulled = false
-    group.add(mesh)
+    streamGeo.push(ribbon(pts, () => w))
     nLines++
     length += ln.length_m
     for (const f of ln.falls ?? []) {
       const seg = pts.slice(f.i0, f.i1 + 1).map((p) => p.clone().setY(p.y + 0.06))
       if (seg.length < 2) continue
-      const fm = new THREE.Mesh(ribbon(seg, () => w * (f.kind === 'falls' ? 1.15 : 0.9), 'aFoam'), foam)
-      fm.name = `water:${f.kind}`
-      fm.userData = { fall: f, line: ln.id }
-      fm.frustumCulled = false
-      fm.renderOrder = 2
-      group.add(fm)
+      foamGeo.push(ribbon(seg, () => w * (f.kind === 'falls' ? 1.15 : 0.9), 'aFoam'))
       nFalls++
     }
   }
@@ -192,11 +194,31 @@ export function buildWater(water: WaterLayer | null | undefined, groundAt: (x: n
     const geo = new THREE.ShapeGeometry(sh)
     // shape (x, y_site) → world (x, level, −y_site): rotate −90° about X puts local +Y on world −Z
     geo.rotateX(-Math.PI / 2)
-    const mesh = new THREE.Mesh(geo, still)
-    mesh.position.y = ar.z + T.WATER_DEPTH * 0.5
-    mesh.name = `water:${ar.kind}:${ar.name ?? ar.id}`
-    mesh.userData = { water: ar }
+    geo.translate(0, ar.z + T.WATER_DEPTH * 0.5, 0)
+    geo.deleteAttribute('normal')
+    geo.computeVertexNormals()
+    areaGeo.push(geo)
+  }
+
+  const add = (geos: THREE.BufferGeometry[], mat: THREE.Material, name: string) => {
+    if (!geos.length) return
+    // mergeGeometries needs identical attribute sets; ribbon() and ShapeGeometry both end up with
+    // position + uv + normal, and the foam bucket additionally carries aFoam throughout.
+    const merged = geos.length === 1 ? geos[0] : mergeGeometries(geos, false)
+    if (!merged) {
+      for (const g of geos) group.add(new THREE.Mesh(g, mat))  // mismatched attributes: draw them singly
+      return
+    }
+    if (merged !== geos[0]) for (const g of geos) g.dispose()
+    const mesh = new THREE.Mesh(merged, mat)
+    mesh.name = name
+    mesh.frustumCulled = false
+    if (name === 'water:foam') mesh.renderOrder = 2
     group.add(mesh)
   }
+  add(streamGeo, stream, 'water:streams')
+  add(areaGeo, still, 'water:areas')
+  add(foamGeo, foam, 'water:foam')
+
   return { group, tick: (t) => { uniforms.uTime.value = t * T.WATER_SPEED }, lines: nLines, areas: water.areas?.length ?? 0, falls: nFalls, length_m: Math.round(length) }
 }

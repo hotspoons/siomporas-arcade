@@ -359,8 +359,45 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
     return surf.class[i] ?? 'asphalt_aged'
   }
   const mainSt = stations(spineAt, manifest.spine.length_m, 6)
+  // --- where the roads meet -----------------------------------------------------------------
+  // Three sources, all already in the bake: a network's `branches[].junctions`, the mouth of
+  // every `stub` (the end nearest one of our carriageways), and on a single-road site the
+  // `crossings` whose relation is a merge or a grade crossing. Paint is suppressed inside these
+  // circles, which is how an intersection stops being two sets of lines crossing each other.
+  const junctions: { x: number; z: number; r: number }[] = []
+  {
+    const pushJ = (x: number, z: number, r: number) => junctions.push({ x, z, r })
+    for (const br of manifest.branches ?? []) {
+      for (const j of br.junctions ?? []) {
+        const w = toWorld(j.x, j.y, 0)
+        pushJ(w.x, w.z, Math.max(T.JUNCTION_CLEAR, ((br.lanes ?? 2) * T.LANE_WIDTH) / 2 + T.JUNCTION_CLEAR * 0.4))
+      }
+    }
+    for (const sb of manifest.stubs ?? []) {
+      const c = sb.coords ?? []
+      if (c.length < 2) continue
+      // the mouth is whichever end sits on one of our roads; the far end is a dead stop
+      for (const e of [c[0], c[c.length - 1]]) {
+        const w = toWorld(e[0], e[1], 0)
+        pushJ(w.x, w.z, Math.max(T.JUNCTION_CLEAR, ((sb.lanes ?? 2) * T.LANE_WIDTH) / 2 + T.JUNCTION_CLEAR * 0.4))
+      }
+    }
+    if (!(manifest.branches?.length ?? 0)) {
+      for (const c of manifest.crossings ?? []) {
+        if (c.relation !== 'merge' && c.relation !== 'grade') continue
+        const p = spineAt(Math.min(manifest.spine.length_m, Math.max(0, c.s)))
+        pushJ(p.pos.x, p.pos.z, T.JUNCTION_CLEAR)
+      }
+    }
+  }
+  /** inside any junction circle? asked per marking quad, at that line's own lateral offset */
+  const paintOff = (x: number, z: number) => {
+    for (const j of junctions) if ((j.x - x) ** 2 + (j.z - z) ** 2 < j.r * j.r) return true
+    return false
+  }
+
   // the asphalt and paint are rebuilt when a road knob moves (F6 → road), so keep the builders
-  const roadBuilders: (() => THREE.Object3D)[] = [() => roadMesh(mainSt, lanesAt, classAt, surfaceSets!, 0.02, twoWayAt)]
+  const roadBuilders: (() => THREE.Object3D)[] = [() => roadMesh(mainSt, lanesAt, classAt, surfaceSets!, 0.02, twoWayAt, paintOff)]
   let roadParts: THREE.Object3D[] = []
   const buildRoads = () => {
     for (const o of roadParts) {
@@ -409,7 +446,7 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
       return { pos: c2.getPointAt(u), dir: c2.getTangentAt(u) }
     }
     sibAts.push({ at: sibAt, len: len2, spineS: (s: number) => { const p = sibAt(s).pos; return nearestSpine(p.x, p.z).s } })
-    roadBuilders.push(() => roadMesh(stations(sibAt, len2, 6), () => 2, () => 'asphalt_aged', surfaceSets!))
+    roadBuilders.push(() => roadMesh(stations(sibAt, len2, 6), () => 2, () => 'asphalt_aged', surfaceSets!, 0.02, () => false, paintOff))
   }
   // --- network branches: every other road of a network site is a first-class carriageway --------
   // Its grade is its own lidar profile (the bake densified it like the spine), its lanes and
@@ -430,7 +467,7 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
     const lanesB = Number(br.lanes) > 0 ? Number(br.lanes) : 2
     const twoWayB = br.oneway === 'yes' || br.oneway === '-1' ? false : br.oneway === 'no' ? true : !['motorway', 'motorway_link', 'trunk_link', 'primary_link'].includes(br.highway ?? '')
     const halfB = pavedWidth(lanesB, twoWayB) / 2
-    roadBuilders.push(() => roadMesh(stations(atB, lenB, 6), () => lanesB, () => 'asphalt_aged', surfaceSets!, 0.02, () => twoWayB))
+    roadBuilders.push(() => roadMesh(stations(atB, lenB, 6), () => lanesB, () => 'asphalt_aged', surfaceSets!, 0.02, () => twoWayB, paintOff))
     branchAts.push({ at: atB, len: lenB, half: halfB, name: br.name ?? br.ref ?? 'branch' })
   }
   buildRoads()

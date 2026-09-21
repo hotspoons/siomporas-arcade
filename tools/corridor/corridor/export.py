@@ -744,6 +744,48 @@ def _power(site_dir: Path, frame, ox: float, oy: float, bbox) -> dict:
         src.close()
     return {"lines": lines, "supports": supports}
 
+def _flora_block(flora: dict) -> dict:
+    """The part of flora.json the browser needs: everything but the grid, which is a PNG."""
+    return {k: flora[k] for k in ("evt", "canopy", "ground", "climate", "fetched") if k in flora}
+
+
+def _flora(site_dir: Path, web: Path, ox: float, oy: float) -> tuple[dict | None, dict | None]:
+    """flora.json -> `web/flora_30m.png` (the class index) and the manifest layer entry."""
+    path = site_dir / "flora.json"
+    if not path.exists():
+        return None, None
+    flora = json.loads(path.read_text())
+    npy = site_dir / flora.get("grid", "flora_evt.npy")
+    if not npy.exists():
+        return flora, None
+    Image.fromarray(np.load(npy), "L").save(web / "flora_30m.png", optimize=True)
+    b = flora["bbox_utm"]
+    return flora, {"file": "flora_30m.png", "res": flora["res_m"], "size": flora["size"], "bbox": [b[0] - ox, b[1] - oy, b[2] - ox, b[3] - oy], "nodata": 255}
+
+
+def refresh_flora(site_dir: Path) -> bool:
+    """Rewrite ONLY the flora layer and the manifest's flora block.
+
+    A full `export` re-encodes the DEM, the canopy and a 30 cm image mosaic, which is minutes a
+    site; re-reading a species mix should not cost that. Same reason `corridor export` exists at all.
+    """
+    web = site_dir / "web"
+    man = web / "manifest.json"
+    if not man.exists():
+        return False
+    site = json.loads((site_dir / "site.json").read_text())
+    ox, oy = site["frame"]["origin"]
+    flora, layer = _flora(site_dir, web, ox, oy)
+    if flora is None:
+        return False
+    out = json.loads(man.read_text())
+    out["flora"] = _flora_block(flora)
+    if layer:
+        out.setdefault("layers", {})["flora"] = layer
+    man.write_text(json.dumps(out))
+    return True
+
+
 def export_site(site_dir: Path) -> dict:
     site = json.loads((site_dir / "site.json").read_text())
     manifest = json.loads((site_dir / "manifest.json").read_text()) if (site_dir / "manifest.json").exists() else {}
@@ -825,16 +867,9 @@ def export_site(site_dir: Path) -> dict:
     # The EVT class index as an 8-bit PNG on its own 30 m lattice (255 = outside the corridor), and
     # the class table beside it. Its own lattice, not the 2 m one: the source IS 30 m, and
     # resampling a class raster up to the DEM grid would be five megabytes of the same integer.
-    flora_path = site_dir / "flora.json"
-    flora = None
-    if flora_path.exists():
-        flora = json.loads(flora_path.read_text())
-        npy = site_dir / flora.get("grid", "flora_evt.npy")
-        if npy.exists():
-            idx = np.load(npy)
-            Image.fromarray(idx, "L").save(web / "flora_30m.png", optimize=True)
-            fb = flora["bbox_utm"]
-            layers["flora"] = {"file": "flora_30m.png", "res": flora["res_m"], "size": flora["size"], "bbox": rel_bbox(fb), "nodata": 255}
+    flora, flora_layer = _flora(site_dir, web, ox, oy)
+    if flora_layer:
+        layers["flora"] = flora_layer
 
     # --- imagery -------------------------------------------------------------------------------
     # NAIP is flown for measurement, not for looks: leaf-on, high sun, and the service's overview
@@ -1034,13 +1069,7 @@ def export_site(site_dir: Path) -> dict:
         "sidewalks": _sidewalks(site_dir, Frame.at(site["lon"], site["lat"]), ox, oy, bbox),
         "landuse": derived["landuse"],
         "pois": derived["pois"],
-        "flora": None if flora is None else {
-            "evt": flora["evt"],
-            "canopy": flora["canopy"],
-            "ground": flora["ground"],
-            "climate": flora["climate"],
-            "fetched": flora["fetched"],
-        },
+        "flora": None if flora is None else _flora_block(flora),
         "cuts": features.get("cuts"),
         "rock": features.get("rock"),
         "water": features.get("water"),

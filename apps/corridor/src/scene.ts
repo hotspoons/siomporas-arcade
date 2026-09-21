@@ -4,7 +4,7 @@
 import * as THREE from 'three'
 import * as T from './tuning'
 import { DATA_BASE, decodeHeights, decodeScalar, loadImage, type Layer, type Manifest, type Structure } from './site'
-import { NearTrees } from './trees'
+import { NearTrees, type TreeRecord } from './trees'
 import { Impostors } from './impostors'
 import { Grass } from './grass'
 import { siteLook, type Season } from './season'
@@ -54,6 +54,14 @@ export interface Site {
   waterStats: { lines: number; areas: number; falls: number; length_m: number }
   /** canopy height (m) above the ground at site x,y — the CHM the trees and the grass rule read */
   canopyAt: (x: number, y: number) => number
+  /** what grows here: LANDFIRE classes, the FIA species mix and Daymet climate. Null on an old bake. */
+  flora: Flora | null
+  /** the verge and forest-floor classes this site resolved to, and whether the bake or OSM chose them */
+  cover: import('./groundcover').SiteCover
+  /** the tree silhouettes this site built, with the real tree each is shaped after */
+  treePalette: () => { id: string; after: string; leaf: string; evergreen: boolean }[]
+  /** every measured tree's silhouette, counted — the whole species assignment as a histogram */
+  treeSpecies: (legacy?: boolean) => Record<string, number>
   /** crop rows built per field, by crop type (probes read this) */
   cropRows: Record<string, number>
   /** what is falling and what has settled */
@@ -541,6 +549,10 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
   let treesNearWorld: (x: number, z: number, r: number) => [number, number, number][] = () => []
   let currentSeason: Season = initialSeason
   let grassRef: Grass | null = null
+  // the near-tree set and the measured tree list, for probes/corridor-flora.mjs: which silhouettes
+  // this site built and which one every one of its tens of thousands of trees drew
+  let nearRef: NearTrees | null = null
+  let treeRecords: TreeRecord[] = []
   let crops: ReturnType<typeof buildCrops> | null = null
   let precip: Precipitation | null = null
   let canopyAtRef: (x: number, y: number) => number = () => 0
@@ -956,6 +968,8 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     // near field: real (procedural) tree models around the eye
     status('growing…')
     const near = await new NearTrees(t.records, lite ? 140 : 240, lite ? 60 : 300, flora).grow() // capacity here is the allocation ceiling; the live cap is the knob
+    nearRef = near
+    treeRecords = t.records
     trees.add(near.group)
     // grass on the verge: open ground (no canopy), off the pavement, mown near the shoulder
     const canopyAt = sampler(chm)
@@ -1295,6 +1309,33 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     rockCounts: rocks.counts,
     waterStats: { lines: water.lines, areas: water.areas, falls: water.falls, length_m: water.length_m },
     canopyAt: canopyAtRef,
+    // what grows here, for probes and the console
+    flora,
+    cover,
+    treePalette: () => nearRef?.palette ?? [],
+    /**
+     * The silhouette every measured tree drew, as a histogram — the whole species assignment,
+     * counted. `legacy` replays the rule this replaced (canopy height and a hash over five fixed
+     * hardwood presets, trees.ts before 2026-09-21) over the same trees, so a probe can print the
+     * before and the after side by side rather than describing the change.
+     */
+    treeSpecies: (legacy = false) => {
+      const pal = nearRef?.palette ?? []
+      const n: Record<string, number> = {}
+      const LEGACY = ['Oak Medium', 'Ash Medium', 'Aspen Medium', 'Oak Large', 'Ash Small']
+      if (legacy) for (const k of LEGACY) n[k] = 0
+      else for (const p of pal) n[p.id] = 0
+      for (let i = 0; i < treeRecords.length; i++) {
+        const t = treeRecords[i]
+        let id: string
+        if (legacy) {
+          const hash = (i * 2654435761) >>> 0
+          id = LEGACY[t.h > 22 ? (hash % 2 === 0 ? 3 : 0) : t.h < 8 ? 4 : hash % 3]
+        } else id = pal[nearRef?.variantFor(t, i) ?? 0]?.id ?? '?'
+        n[id] = (n[id] ?? 0) + 1
+      }
+      return n
+    },
     cropRows: crops?.counts ?? {},
     setWeather: (w: Weather) => precip?.set(w),
     get weather() {

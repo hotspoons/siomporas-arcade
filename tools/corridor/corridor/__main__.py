@@ -236,6 +236,10 @@ def cmd_flora(a: argparse.Namespace) -> None:
         print(f"{d.name:24s} {time.time() - t0:5.0f}s  {len(f['evt']['classes'])} classes; {top}")
         print(f"{'':24s}        canopy ({f['canopy']['coverage'] * 100:.0f}% BA cover, {f['canopy']['rasters_with_data']}/{f['canopy']['rasters_here']} rasters): {sp}")
         print(f"{'':24s}        ground: " + ", ".join(f"{g['key']} {100 * g['weight']:.0f}%" for g in f["ground"]["classes"][:5]))
+        # keep web/ in step without paying for a full re-export of the imagery and the height PNGs
+        from . import export as export_mod
+
+        export_mod.refresh_flora(d)
 
 
 def cmd_areas(a: argparse.Namespace) -> None:

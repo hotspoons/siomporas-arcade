@@ -473,10 +473,16 @@ def canopy_heights(site_dir: Path, grid: dict) -> np.ndarray | None:
     """Our own lidar canopy height model, averaged onto the 30 m flora lattice.
 
     This is the cross-check that stops the species pick from being a guess about size. A species'
-    basal area is a weight per pixel; the mean CHM height under that weight says how tall the trees
-    of that species actually are IN THIS CORRIDOR — measured here, by the lidar, not read out of a
+    basal area is a weight per pixel; the CHM height under that weight says how tall the trees of
+    that species actually are IN THIS CORRIDOR — measured here, by the lidar, not read out of a
     field guide. Where the lidar or the basal area is missing the height is simply null and the
     pick falls back to the mix weights alone.
+
+    Aggregated at the **third quartile**, not the mean. A 30 m LANDFIRE pixel is 900 m² of ground
+    and most of it is not a tree top: the mean of the 1 m CHM over that square mixes crowns with
+    gaps, verge and pavement, and it came out at 11.5 m for red maple at Acadia where the trees
+    the viewer plants from the same CHM stand at 20 m and more. The viewer compares an INDIVIDUAL
+    tree's height against this number, so it has to be a canopy height and not a cell average.
     """
     chm = site_dir / "lidar" / "chm.tif"
     if not chm.exists():
@@ -489,7 +495,7 @@ def canopy_heights(site_dir: Path, grid: dict) -> np.ndarray | None:
             source=rasterio.band(src, 1), destination=out,
             src_transform=src.transform, src_crs=src.crs,
             dst_transform=grid["transform"], dst_crs=src.crs,
-            resampling=Resampling.average, src_nodata=src.nodata, dst_nodata=0.0,
+            resampling=Resampling.q3, src_nodata=src.nodata, dst_nodata=0.0,
         )
     return np.nan_to_num(out, nan=0.0)
 

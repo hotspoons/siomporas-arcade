@@ -492,6 +492,23 @@ export class Grass {
     return this.type
   }
 
+  /**
+   * What the blades are ACTUALLY drawing with, read back off the uniforms.
+   *
+   * probes/corridor-flora.mjs prints this per season. A screenshot cannot settle "is the hillside
+   * browner in September than it used to be"; `#97a054 -> #cfbd8a` can.
+   */
+  get applied(): { type: GrassType; blades: number; dry: number; base: string; tip: string } {
+    const u = this.bladeMat.uniforms
+    return {
+      type: this.type,
+      blades: this.bladeScale,
+      dry: u.uDry.value as number,
+      base: '#' + (u.uBase.value as THREE.Color).getHexString(),
+      tip: '#' + (u.uTip.value as THREE.Color).getHexString(),
+    }
+  }
+
   setLook(look: SeasonLook) {
     for (const m of [this.bladeMat, this.cardMat]) {
       ;(m.uniforms.uBase.value as THREE.Color).copy(look.grass.base)

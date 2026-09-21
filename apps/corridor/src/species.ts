@@ -342,17 +342,20 @@ const BY_GENUS: Record<string, Archetype> = {
  *   - the measured canopy HEIGHT, from this corridor's own lidar, which only chooses between the
  *     large and small variants of the same silhouette.
  */
-export function archetypeFor(sp: FloraSpecies, leafCycle: string, h: number): Archetype {
+export function archetypeFor(sp: FloraSpecies, evergreenBroadleaf: boolean, h: number): Archetype {
   const a = BY_GENUS[sp.genus]
   if (a) {
-    // a broadleaf genus standing in a stand LANDFIRE calls evergreen is an evergreen broadleaf —
-    // a live oak, a madrone, a tanoak — and must not go bare in November
-    if (!sp.softwood && leafCycle === 'evergreen' && !a.evergreen) return LIVE_OAK
+    // a broadleaf genus in a stand LANDFIRE calls evergreen AND files under a Hardwood physiognomy
+    // is an evergreen broadleaf — a coast live oak, a madrone — and must not go bare in November.
+    // Both halves matter: "Acadian Low-Elevation Spruce-Fir Forest" is an evergreen stand too, and
+    // the paper birch in it is emphatically deciduous. That version of this test turned 10 % of
+    // Mount Desert Island into live oaks (probes/corridor-flora.mjs, first run).
+    if (!sp.softwood && evergreenBroadleaf && !a.evergreen) return LIVE_OAK
     if (a === OAK && h > 22) return OAK_BIG
     return a
   }
   if (sp.softwood) return h > 45 ? REDWOOD : PINE // an unknown conifer is a pine unless it is huge
-  if (leafCycle === 'evergreen') return LIVE_OAK
+  if (evergreenBroadleaf) return LIVE_OAK
   return h < 8 ? HARDWOOD_SMALL : HARDWOOD
 }
 

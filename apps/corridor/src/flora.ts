@@ -148,6 +148,23 @@ export class Flora {
     return this.at(x, y)?.leaf_cycle ?? 'mixed'
   }
 
+  /**
+   * Is the BROADLEAF component of the stand at a point evergreen?
+   *
+   * An evergreen stand is not the same thing as an evergreen broadleaf. "California Coastal Live
+   * Oak Woodland" is Hardwood + Evergreen and its oaks hold their leaves; "Acadian Low-Elevation
+   * Spruce-Fir Forest" is Conifer + Evergreen and its paper birch does not. Both halves of the test
+   * are needed, and LANDFIRE files both halves.
+   */
+  broadleafEvergreenAt(x: number, y: number): boolean {
+    const c = this.at(x, y)
+    return !!c && c.leaf_cycle === 'evergreen' && c.physiognomy === 'Hardwood'
+  }
+
+  static isBroadleafEvergreen(c: FloraClass): boolean {
+    return c.leaf_cycle === 'evergreen' && c.physiognomy === 'Hardwood'
+  }
+
   groundAt(x: number, y: number): GroundClass | null {
     return this.at(x, y)?.ground ?? null
   }

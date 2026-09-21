@@ -22,7 +22,7 @@
 import * as THREE from 'three'
 import { Budget } from './budget'
 import { Tree } from '@dgreenheck/ez-tree'
-import type { Flora, FloraSpecies, SpeciesWeight } from './flora'
+import { Flora, type FloraSpecies, type SpeciesWeight } from './flora'
 import { ARCHETYPES, archetypeFor, optionsFor, type Archetype, type LeafKind } from './species'
 import { greyscaleTexture, type SeasonLook } from './season'
 import * as T from './tuning'
@@ -72,7 +72,7 @@ export function paletteFor(flora: Flora | null, limit = 6): Archetype[] {
     for (const s of c.species) {
       const sp = flora.block.canopy.ref[s.key]
       if (!sp) continue
-      add(archetypeFor(sp, c.leaf_cycle, sp.canopy_h_m ?? 18), s.weight * c.share)
+      add(archetypeFor(sp, Flora.isBroadleafEvergreen(c), sp.canopy_h_m ?? 18), s.weight * c.share)
     }
   }
   if (!weight.size) return FALLBACK.map((id) => byId.get(id)!).filter(Boolean)
@@ -260,7 +260,7 @@ export class NearTrees {
     }
     const mix: SpeciesWeight[] = this.flora ? this.flora.mixAt(t.x, -t.z) : []
     if (mix.length) {
-      const cycle = this.flora!.leafCycleAt(t.x, -t.z)
+      const evergreenBroadleaf = this.flora!.broadleafEvergreenAt(t.x, -t.z)
       const scores: number[] = []
       const wants: Archetype[] = []
       let total = 0
@@ -268,7 +268,7 @@ export class NearTrees {
         const sp: FloraSpecies = s.species
         const w = s.weight * heightAffinity(t.h, sp.canopy_h_m)
         if (w <= 0) continue
-        wants.push(archetypeFor(sp, cycle, t.h))
+        wants.push(archetypeFor(sp, evergreenBroadleaf, t.h))
         scores.push(w)
         total += w
       }

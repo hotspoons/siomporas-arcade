@@ -365,6 +365,9 @@ def export_branches(site_dir: Path, ox: float, oy: float) -> list[dict] | None:
     from shapely.geometry import LineString
 
     by_id = {b["id"]: b for b in json.loads(br_p.read_text())["branches"]}
+    def finite(v, default=0.0):
+        return default if v is None or not np.isfinite(v) else float(v)
+
     out = []
     for sib in spine.get("siblings", []):
         b = by_id.get(sib.get("id"))
@@ -384,16 +387,27 @@ def export_branches(site_dir: Path, ox: float, oy: float) -> list[dict] | None:
         s_d = np.arange(0.0, ln2.length, 10.0).tolist() + [ln2.length]
         pts = np.array([ln2.interpolate(v).coords[0] for v in s_d])
         prof = b.get("profile")
-        zs = np.interp(np.array(s_d), np.array(prof["s"]), np.array(prof["road_z"])) if prof and prof.get("s") else np.zeros(len(s_d))
+        if prof and prof.get("s"):
+            pz = np.asarray(prof["road_z"], dtype=float)
+            good = np.isfinite(pz)
+            zs = np.interp(np.array(s_d), np.asarray(prof["s"], dtype=float)[good], pz[good]) if good.any() else np.zeros(len(s_d))
+        else:
+            zs = np.zeros(len(s_d))
+        zs = np.nan_to_num(zs, nan=0.0, posinf=0.0, neginf=0.0)
         js = []
         for j in b.get("junctions", []):
-            z = float(np.interp(j["s"], np.array(prof["s"]), np.array(prof["road_z"]))) if prof and prof.get("s") else None
-            js.append({**j, "z": None if z is None else round(z, 2)})
+            z = None
+            if prof and prof.get("s"):
+                pz = np.asarray(prof["road_z"], dtype=float)
+                good = np.isfinite(pz)
+                if good.any():
+                    z = float(np.interp(j["s"], np.asarray(prof["s"], dtype=float)[good], pz[good]))
+            js.append({**j, "z": None if z is None or not np.isfinite(z) else round(z, 2)})
         out.append({
             "id": b["id"], "name": b.get("name"), "ref": b.get("ref"), "ident": b.get("ident"), "highway": b.get("highway"), "lanes": b.get("lanes"), "oneway": b.get("oneway"), "length_m": b.get("length_m"),
             "coords": np.column_stack([pts[:, 0] - ox, pts[:, 1] - oy, zs]).round(2).tolist(),
             "junctions": js, "s_on_primary": b.get("s_on_primary"),
-            "profile": {"s": prof["s"][::5], "road_z": prof["road_z"][::5]} if prof and prof.get("s") else None,
+            "profile": {"s": prof["s"][::5], "road_z": [finite(v) for v in prof["road_z"][::5]]} if prof and prof.get("s") else None,
             "structures": b.get("structures") or [], "surface": None,
         })
     return out

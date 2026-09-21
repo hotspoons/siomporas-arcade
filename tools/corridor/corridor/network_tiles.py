@@ -380,6 +380,38 @@ def mask_shapes(site_dir: Path, derived: dict) -> list:
     return shapes
 
 
+def _fill_along(values: list[float]) -> list[float]:
+    """Interpolate non-finite entries along an along-track array (a road's grade is continuous).
+
+    THE BUG THIS FIXES (2026-09-21): the single-image path hands lidar.profile a gap-filled DTM
+    (`_fill_nan`), but the tiled path hands it a VRT, and LazyRaster answers nodata with NaN — so a
+    station whose 1 m cell is outside the lidar (a road crossing the corridor's own edge, a hole in
+    the flight) came back NaN, that NaN went into road_z, into the manifest's branch coords, and
+    `json.dump` wrote a literal `NaN` that `JSON.parse` refuses: the whole Crofton site failed to
+    load in the browser. Interpolating is also the physically right answer, and matches what the
+    single-image path already does to the raster."""
+    a = np.asarray(values, dtype=float)
+    bad = ~np.isfinite(a)
+    if not bad.any():
+        return values
+    if bad.all():
+        return [0.0] * len(values)
+    idx = np.flatnonzero(~bad)
+    a[bad] = np.interp(np.flatnonzero(bad), idx, a[idx])
+    return [round(float(v), 2) for v in a]
+
+
+def _fill_profile(prof: dict) -> dict:
+    """Every along-track array in a profile, gap-filled. Structures carry no raster samples."""
+    for key in ("road_z", "ground_z"):
+        if key in prof:
+            prof[key] = _fill_along(prof[key])
+    for group in ("ground_rel", "canopy"):
+        if group in prof:
+            prof[group] = {k: _fill_along(v) for k, v in prof[group].items()}
+    return prof
+
+
 def profile_tiled(line: LineString, ldir: Path, pts: dict | None, road_index: int | None = None) -> dict:
     """lidar.profile over the VRTs with a LazyRaster, and only this road's near points."""
     dtm = LazyRaster(ldir / "dtm.vrt")
@@ -392,7 +424,7 @@ def profile_tiled(line: LineString, ldir: Path, pts: dict | None, road_index: in
             sub = {k: v[m] for k, v in pts.items() if k != "road"}
         else:
             sub = {k: v for k, v in pts.items() if k != "road"}
-        return lidar.profile(line, dtm, chm, dtm.transform, sub)
+        return _fill_profile(lidar.profile(line, dtm, chm, dtm.transform, sub))
     finally:
         dtm.close()
         chm.close()
@@ -400,3 +432,66 @@ def profile_tiled(line: LineString, ldir: Path, pts: dict | None, road_index: in
 
 def elapsed(t0: float) -> str:
     return f"{time.time() - t0:.0f} s"
+
+
+def reprofile(site_dir: Path) -> dict:
+    """Re-run the primary's and every branch's profile from the rasters already on disk.
+
+    The expensive half of a tiled bake is the download and the point pass (Crofton: 199 LAZ tiles,
+    500 M points, 8.7 h); the profiles are minutes. So a rule change downstream of the rasters —
+    the NaN fill above, a new structure test — re-runs this instead of the bake. Inputs: the VRTs,
+    `lidar/corridor.laz` (the near-road points), and `spine_utm.json` (the chains). The road index
+    each point belongs to is recomputed exactly as the bake did it, by rasterizing the chain band.
+    """
+    import laspy
+    from shapely.geometry import LineString as LS
+
+    ldir = site_dir / "lidar"
+    spine = json.loads((site_dir / "spine_utm.json").read_text())
+    if not spine.get("network"):
+        raise SystemExit(f"{site_dir.name} is not a network site")
+    chains: list[dict] = [{"id": (spine.get("primary") or {}).get("id", "r00"), "line": LS(spine["coords"]), "primary": True}]
+    for sib in spine.get("siblings", []):
+        g = sib["geometry"]
+        parts = [g["coordinates"]] if g["type"] == "LineString" else g["coordinates"]
+        coords = [c for part in parts for c in part]
+        if len(coords) >= 2:
+            chains.append({"id": sib.get("id"), "line": LS(coords), "primary": False, "sib": sib})
+    las = laspy.read(ldir / "corridor.laz")
+    pts = {"x": np.asarray(las.x), "y": np.asarray(las.y), "z": np.asarray(las.z), "cls": np.asarray(las.classification).astype(np.uint8), "rn": np.asarray(las.return_number).astype(np.uint8), "nr": np.asarray(las.number_of_returns).astype(np.uint8), "i": np.asarray(las.intensity).astype(np.uint16)}
+    xmin, ymin = float(pts["x"].min()) - 50, float(pts["y"].min()) - 50
+    xmax, ymax = float(pts["x"].max()) + 50, float(pts["y"].max()) + 50
+    bw, bh = int(np.ceil((xmax - xmin) / 2.0)), int(np.ceil((ymax - ymin) / 2.0))
+    btr = from_origin(xmin, ymax, 2.0, 2.0)
+    band = rasterize([(c["line"].buffer(BAND_M), i + 1) for i, c in enumerate(chains)], out_shape=(bh, bw), transform=btr, fill=0, dtype=np.int32)
+    br = np.clip(((ymax - pts["y"]) / 2.0).astype(np.int64), 0, bh - 1)
+    bc = np.clip(((pts["x"] - xmin) / 2.0).astype(np.int64), 0, bw - 1)
+    pts["road"] = band[br, bc].astype(np.int16)
+    print(f"  reprofile {len(pts['x']):,} near-road points, {len(chains)} chains", flush=True)
+    branches_old = {b["id"]: b for b in json.loads((site_dir / "branches.json").read_text())["branches"]} if (site_dir / "branches.json").exists() else {}
+    branches = []
+    for i, c in enumerate(chains):
+        prof = profile_tiled(c["line"], ldir, pts, i + 1)
+        if c["primary"]:
+            (site_dir / "profile.json").write_text(json.dumps(prof))
+            print(f"  reprofile primary {c['id']}: {len(prof['structures'])} structures", flush=True)
+            continue
+        old = branches_old.get(c["id"], {})
+        branches.append({**old, "profile": {"step_m": prof["step_m"], "s": prof["s"], "road_z": prof["road_z"]}, "structures": prof["structures"]})
+    (site_dir / "branches.json").write_text(json.dumps({"branches": branches}))
+    print(f"  reprofile {len(branches)} branches, {sum(len(b['structures']) for b in branches)} structures", flush=True)
+    return {"chains": len(chains), "branches": len(branches)}
+
+
+def main() -> None:
+    import sys
+
+    from .__main__ import DATA
+
+    for slug in sys.argv[1:]:
+        print(f"=== {slug}")
+        reprofile(DATA / "sites" / slug)
+
+
+if __name__ == "__main__":
+    main()

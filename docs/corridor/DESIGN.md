@@ -209,6 +209,15 @@ from pavement, all on `groundAt`; South Mountain: 910 greenstone, nearest 4.16 m
   `ShaderMaterial` is fixed at compile time.
 - A missing optional JSON must 404 (the middleware does); Vite's SPA fallback would answer
   `index.html` with a 200 and `r.json()` dies on `<!doctype`.
+- **A key that indexes data must be intrinsic, never positional.** Network chain ids were `r00`,
+  `r01`, … by enumeration, and `branches.json` keys every road's profile by them. Lowering the
+  minimum chain length from 120 m to 50 m added two chains *in the middle* of Crofton's list and
+  shifted every id after them: 21 of 39 branches would have been published carrying a different
+  road's grade and structures, and 3 roads would have been dropped for want of a match. Ids are now
+  `r<smallest OSM way id in the chain>`, which survives any change to the chain *set* and changes
+  only when that chain's own ways change — and then it simply fails to match and is recomputed,
+  which is a failure you can see. Caught by diffing `branches.json` against `spine_utm.json` before
+  calling the data good; it would have rendered perfectly and been wrong everywhere.
 - **Python writes `NaN` into JSON and `JSON.parse` refuses the whole file.** Anything sampled from
   a raster that can be nodata (a VRT through `LazyRaster`, an out-of-coverage DEM) must be filled
   or guarded before it is written. One NaN token cost the Crofton network site its entire

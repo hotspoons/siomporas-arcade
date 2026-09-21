@@ -120,8 +120,15 @@ def roads(site: dict, frame: Frame, cache: Path) -> dict:
     prim_id = site.get("primary")
     prim_cands = [c for c in chains if c["ident"] == prim_id] or chains
     primary = max(prim_cands, key=lambda c: c["length_m"])
-    for i, c in enumerate(chains):
-        c["id"] = f"r{i:02d}"
+    # STABLE IDS, not positional. Chain ids key the branch profiles in branches.json, and numbering
+    # them by enumeration meant that lowering MIN_CHAIN_M from 120 m to 50 m — two extra chains,
+    # inserted in the middle — renumbered everything after them: 21 of Crofton's 39 branches ended
+    # up carrying a DIFFERENT road's grade, silently. An id derived from the chain's own smallest
+    # OSM way id survives any change to the chain SET, and changes only when that chain's own ways
+    # change — in which case the stale profile fails to match and is recomputed, which is the safe
+    # failure rather than the silent one.
+    for c in chains:
+        c["id"] = f"r{min(w['id'] for w in c['ways'])}"
     # junctions: nodes shared between chains; position from any way's geometry that carries the node
     node_xy: dict[int, tuple[float, float]] = {}
     for c in chains:
@@ -454,9 +461,9 @@ def export_branches(site_dir: Path, ox: float, oy: float) -> list[dict] | None:
 
     out = []
     for sib in spine.get("siblings", []):
-        b = by_id.get(sib.get("id"))
+        b = by_id.get(sib.get("id")) or {}
         if not b:
-            continue
+            print(f"  branches no profile for {sib.get('ident')} ({sib.get('id')}) — emitted with profile: null; run `python -m corridor.network_tiles <slug>` to compute it")
         g = sib["geometry"]
         parts = [g["coordinates"]] if g["type"] == "LineString" else g["coordinates"]
         coords = [c for part in parts for c in part]

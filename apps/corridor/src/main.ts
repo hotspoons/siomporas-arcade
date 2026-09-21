@@ -149,7 +149,7 @@ function applyLayers() {
   const on = (name: string) => $<HTMLInputElement>(`input[data-layer="${name}"]`).checked
   site.setImagery(on('imagery'))
   site.setWire(on('wire'))
-  if (site.layers.canopy) site.layers.canopy.visible = on('canopy')
+  site.setCanopy(on('canopy'))
   site.layers.buildings.visible = on('buildings')
   if (site.layers.power) site.layers.power.visible = on('power')
   if (site.layers.trees) site.layers.trees.visible = on('trees')

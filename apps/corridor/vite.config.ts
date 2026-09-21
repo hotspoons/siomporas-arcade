@@ -1,5 +1,6 @@
 import { createReadStream, existsSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import { resolve, extname, normalize } from 'node:path'
+import { createGzip } from 'node:zlib'
 import { fileURLToPath } from 'node:url'
 import { defineConfig, type Plugin } from 'vite'
 import { devBridge } from '@apex/engine/dev/bridge-plugin'
@@ -69,6 +70,16 @@ function serveBake(): Plugin {
         }
         res.setHeader('Content-Type', types[extname(file)] ?? 'application/octet-stream')
         res.setHeader('Cache-Control', 'no-cache')
+        // JSON goes over the wire compressed. crofton-triangle's manifest is 6.5 MB of it, and
+        // uncompressed it was 1 348 ms of the load against 13 ms to parse — transfer, not compute.
+        // The PNG/JPEG rasters are already compressed; gzipping them again only burns CPU.
+        const gz = /\bgzip\b/.test(String(req.headers['accept-encoding'] ?? '')) && /\.(json|geojson)$/.test(file)
+        if (gz) {
+          res.setHeader('Content-Encoding', 'gzip')
+          res.setHeader('Vary', 'Accept-Encoding')
+          createReadStream(file).pipe(createGzip()).pipe(res)
+          return
+        }
         createReadStream(file).pipe(res)
       })
     },

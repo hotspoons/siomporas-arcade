@@ -354,6 +354,64 @@ export interface StripCover {
 }
 
 /**
+ * A coarse grid over anything that carries `bounds`, so a point asks the two or three whose extent
+ * actually reaches it rather than all of them.
+ *
+ * `sinkUnderStrips` already had this grid inline — it is what took the sink from 84 s to 0.7 s on
+ * crofton-triangle's 427 branches. `stripHeight` in scene.ts did NOT have it, and that turned out
+ * to be the single largest cost in the whole load: every ground query that was not on the primary
+ * road walked all 427 branch strips before falling through to the DEM. Measured on Rich's machine
+ * through the dev bridge, 2026-09-21: 0.4 µs for a point on the primary strip (first try, no scan)
+ * against 45.3 µs for a point off every strip. Buildings alone make 68 347 of those queries — 3.2 s
+ * of the build, against 9 ms for all the geometry they actually assemble.
+ *
+ * Everything that stands on the ground goes through that lookup: buildings, grass (once a blade),
+ * crops, placements, power, furniture, parking, barriers, sidewalks, rocks, water and bridges. So
+ * it lives here now, shared, instead of being re-derived at each call site.
+ */
+export class BoundsIndex<T extends { bounds: [number, number, number, number] }> {
+  private grid = new Map<number, T[]>()
+  private cell: number
+  private pad: number
+
+  constructor(items: readonly T[], cell = 250, pad = 1) {
+    this.cell = cell
+    this.pad = pad
+    for (const it of items) {
+      const [x0, z0, x1, z1] = it.bounds
+      if (!Number.isFinite(x0)) continue
+      for (let cx = Math.floor((x0 - pad) / cell); cx <= Math.floor((x1 + pad) / cell); cx++) {
+        for (let cz = Math.floor((z0 - pad) / cell); cz <= Math.floor((z1 + pad) / cell); cz++) {
+          const k = cx * 100003 + cz
+          const arr = this.grid.get(k)
+          if (arr) arr.push(it)
+          else this.grid.set(k, [it])
+        }
+      }
+    }
+  }
+
+  /**
+   * The first non-null `hit` among the items whose bounds contain (x, z). Allocation-free: this
+   * runs hundreds of thousands of times a load, so it takes a callback rather than returning a
+   * filtered array.
+   */
+  firstAt<R>(x: number, z: number, hit: (item: T) => R | null): R | null {
+    const near = this.grid.get(Math.floor(x / this.cell) * 100003 + Math.floor(z / this.cell))
+    if (!near) return null
+    const pad = this.pad
+    for (let i = 0; i < near.length; i++) {
+      const it = near[i]
+      const [x0, z0, x1, z1] = it.bounds
+      if (x < x0 - pad || x > x1 + pad || z < z0 - pad || z > z1 + pad) continue
+      const r = hit(it)
+      if (r !== null) return r
+    }
+    return null
+  }
+}
+
+/**
  * Get the coarse terrain out of the way of EVERY strip, in one pass.
  *
  * It used to be one call per strip. That is fine for a corridor with one carriageway and quadratic

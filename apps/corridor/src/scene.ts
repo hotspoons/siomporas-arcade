@@ -12,7 +12,7 @@ import { GRASS_TYPES, GROUND_COVER, floorTexture, siteCover } from './groundcove
 import { loadFlora, type Flora } from './flora'
 import { CROP_TYPES, buildCrops, tickCrops, type CropType, type Field as CropField } from './crops'
 import { ACCUM_PARS, Precipitation, accumUniforms, type Weather } from './weather'
-import { buildStrip, sinkUnderStrips } from './strip'
+import { BoundsIndex, buildStrip, sinkUnderStrips } from './strip'
 import { mapBudgeted } from './budget'
 import { Adjustments, NEUTRAL as NEUTRAL_ADJ } from './adjust'
 import { buildPlacements, loadCatalog, loadPlacements } from './placements'
@@ -32,7 +32,7 @@ export const toWorld = (x: number, y: number, z: number) => new THREE.Vector3(x,
 export interface Site {
   manifest: Manifest
   group: THREE.Group
-  layers: { imagery?: THREE.Mesh; canopy?: THREE.Mesh; trees?: THREE.Group; grass?: THREE.Group; crops?: THREE.Group; road: THREE.Group; horizon?: THREE.Mesh; structures: THREE.Group; spine: THREE.Group; markers: THREE.Group; placements: THREE.Group; buildings: THREE.Group; power: THREE.Group; furniture: THREE.Group; parking: THREE.Group; barriers: THREE.Group; sidewalks: THREE.Group; rocks: THREE.Group; water: THREE.Group }
+  layers: { imagery?: THREE.Mesh; trees?: THREE.Group; grass?: THREE.Group; crops?: THREE.Group; road: THREE.Group; horizon?: THREE.Mesh; structures: THREE.Group; spine: THREE.Group; markers: THREE.Group; placements: THREE.Group; buildings: THREE.Group; power: THREE.Group; furniture: THREE.Group; parking: THREE.Group; barriers: THREE.Group; sidewalks: THREE.Group; rocks: THREE.Group; water: THREE.Group }
   /** how many footprints were massed, and how many had a real measured height */
   buildingStats: { count: number; gabled: number; fromLidar: number }
   adjustments: Adjustments
@@ -88,6 +88,8 @@ export interface Site {
   setImagery: (on: boolean) => void
   /** draw the terrain as a wireframe */
   setWire: (on: boolean) => void
+  /** the canopy blanket: 72 MB and 1.05 M vertices, so it is not built until this is first called true */
+  setCanopy: (on: boolean) => THREE.Mesh | undefined
 }
 
 interface Field {
@@ -276,6 +278,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
 
   // --- canopy: the forest blanket (off by default; the trees below are the stand-ins) --------
   let canopy: THREE.Mesh | undefined
+  let makeCanopy: (() => THREE.Mesh) | null = null
   let chm: Field | undefined
   if (L.chm) {
     status('decoding canopy…')
@@ -301,19 +304,25 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
       }
       if (touched) console.info(`adjustments: canopy changed in ${touched} cells`)
     }
-    const alpha = new THREE.Texture(chmImg)
-    alpha.needsUpdate = true
-    alpha.flipY = true
+    // The blanket is a DIAGNOSTIC layer, off unless someone ticks the box — and building it was
+    // 72 MB of geometry and 1 057 160 vertices that almost every session throws away unseen. So it
+    // is a closure now, run on the first tick. The CHM itself stays: `canopyAt`, the tree planter
+    // and the grass all read it whether the blanket is drawn or not.
     const cd = chm.data
-    const geo = gridGeometry(dem, stride, (i) => (cd[i] > 1.5 ? cd[i] : 0), (i) => {
-      const t = Math.min(1, cd[i] / 30)
-      return [0.24 - 0.1 * t, 0.5 - 0.22 * t, 0.2 - 0.09 * t]
-    })
-    const mat = new THREE.MeshStandardMaterial({ vertexColors: true, alphaMap: alpha, alphaTest: 0.03, roughness: 1, side: THREE.DoubleSide })
-    canopy = new THREE.Mesh(geo, mat)
-    canopy.name = 'canopy'
-    canopy.visible = false
-    group.add(canopy)
+    makeCanopy = () => {
+      const alpha = new THREE.Texture(chmImg)
+      alpha.needsUpdate = true
+      alpha.flipY = true
+      const geo = gridGeometry(dem, stride, (i) => (cd[i] > 1.5 ? cd[i] : 0), (i) => {
+        const t = Math.min(1, cd[i] / 30)
+        return [0.24 - 0.1 * t, 0.5 - 0.22 * t, 0.2 - 0.09 * t]
+      })
+      const mat = new THREE.MeshStandardMaterial({ vertexColors: true, alphaMap: alpha, alphaTest: 0.03, roughness: 1, side: THREE.DoubleSide })
+      const m = new THREE.Mesh(geo, mat)
+      m.name = 'canopy'
+      group.add(m)
+      return m
+    }
   }
 
   // --- far terrain -----------------------------------------------------------------------------
@@ -892,14 +901,14 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     // ONE pass for every strip, primary and branches together
     sinkUnderStrips(terrainGeo, [strip, ...branchStrips])
     mark('grade: sink all strips')
+    // The branches go in a bounds grid: this lookup is the single hottest thing in the build, and
+    // walking all 427 of them was 45 µs a call against 0.4 µs for a point on the primary strip.
+    // See BoundsIndex in strip.ts for the measurement.
+    let branchIndex = new BoundsIndex(branchStrips)
     const stripHeight = (x: number, z: number): number | null => {
       const h = strip.heightAt(x, z)
       if (h !== null) return h
-      for (const bs of branchStrips) {
-        const v = bs.heightAt(x, z)
-        if (v !== null) return v
-      }
-      return null
+      return branchIndex.firstAt(x, z, (bs) => bs.heightAt(x, z))
     }
     // a road knob moved: every station's half width, the asphalt, then the strip that hugs it
     const roadSignature = () => `${T.LANE_WIDTH}|${T.SHOULDER_OUT}|${T.SHOULDER_IN}|${T.ROAD_BLEND_M}|${T.ROAD_TAPER_M}|${T.ROAD_ONEWAY_CENTRE}|${T.CULDESAC_RADIUS}`
@@ -923,6 +932,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
         bs.mesh.geometry.dispose()
       }
       branchStrips = await makeBranchStrips()
+      branchIndex = new BoundsIndex(branchStrips)
       for (const bs of branchStrips) road.add(bs.mesh)
       sinkUnderStrips(terrainGeo, [strip, ...branchStrips])
     }
@@ -1296,7 +1306,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
   return {
     manifest,
     group,
-    layers: { imagery: terrain, canopy, trees, grass: grassRef?.mesh, crops: crops?.group, road, horizon, structures, spine, markers, placements: placementsGroup, buildings: built.group, power: power.group, furniture: furniture.group, parking: parking.group, barriers: barriers.group, sidewalks: sidewalks.group, rocks: rocks.group, water: water.group },
+    layers: { imagery: terrain, trees, grass: grassRef?.mesh, crops: crops?.group, road, horizon, structures, spine, markers, placements: placementsGroup, buildings: built.group, power: power.group, furniture: furniture.group, parking: parking.group, barriers: barriers.group, sidewalks: sidewalks.group, rocks: rocks.group, water: water.group },
     buildingStats: built.stats,
     adjustments,
     treeCount,
@@ -1357,6 +1367,12 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     },
     setWire: (on) => {
       terrainMat.wireframe = on
+    },
+    /** the canopy blanket is built on the first tick, not on load — see `makeCanopy` */
+    setCanopy: (on) => {
+      if (on && !canopy && makeCanopy) canopy = makeCanopy()
+      if (canopy) canopy.visible = on
+      return canopy
     },
   }
 }

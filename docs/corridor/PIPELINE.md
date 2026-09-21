@@ -427,9 +427,9 @@ consumer:
 
 | bake | manifest key | viewer | detects |
 |---|---|---|---|
-| `cuts.py` | `cuts` | `rocks.ts` | cut faces from `profile.ground_rel` + the DTM: ground rising > 0.6 m/m within 15 m of pavement for ≥ 20 m; `artificial` (straight, constant slope, parallel to the road) vs `natural` (ravine walls both sides, following a stream) |
-| `rock.py` | `rock` | `rocks.ts` | exposed rock: bare ground (no canopy) with high 1 m roughness, slope > 30°, lithology from `geology.json`, NAIP grey/brown → polygons with a rock type; the kit is 4–6 boulder/ledge GLBs per lithology |
-| `water.py` | `water` | `water.ts` | OSM `waterway=*` / `natural=water` snapped to the DTM low line → water mesh with an animated normal shader; falls where a stream drops > 2 m over 20 m → whitewater strip |
+| `cuts.py` | `cuts` | `rocks.ts` | cut faces from 1 m DTM transects every 4 m: a 5 m window steeper than 0.6 m/m rising ≥ 3 m with its toe inside 40 m, for ≥ 20 m; `artificial` (toe parallel to the road, std ≤ 3 m) vs `natural` (toe wanders, a stream beside it, both sides rising) |
+| `rock.py` | `rock` | `rocks.ts` | exposed rock: slope > 40° with ≥ 3 m of relief over 7 m, bare or inside a cut face (1 m roughness and leaf-on NAIP colour were measured and do not separate rock from soil; intensity is recorded per polygon), lithology from `geology.json` → polygons with a rock type; the kit is 4 boulder/ledge/talus GLBs per lithology (`probes/terrain-rockkit.mjs`) |
+| `water.py` | `water` | `water.ts` | OSM `waterway=*` / `natural=water` snapped to the DTM low line (±6 m; the OSM line is within 3 m of it 9 times in 10) → ribbon at channel + `WATER_DEPTH` with a scrolling-noise normal; culverts skipped; runs of 20 m windows dropping > 2 m → foam ribbon (`falls` if grade > 0.25, else `rapids`) |
 
 See `DESIGN.md` for the rules and `SITES.md` for what each baked site actually contains.
 

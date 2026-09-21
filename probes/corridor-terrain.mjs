@@ -96,9 +96,9 @@ const report = await page.evaluate((what) => {
 }, what)
 console.log(JSON.stringify(report))
 
-// frame time with the layer on, 3 s idle
+// frame time with the layer on, 12 s idle (swiftshader draws a corridor frame in seconds; the count is relative, not a fps claim)
 await page.evaluate(() => { window.__ft = []; let last = performance.now(); const loop = () => { const n = performance.now(); window.__ft.push(n - last); last = n; requestAnimationFrame(loop) }; requestAnimationFrame(loop) })
-await page.waitForTimeout(3000)
+await page.waitForTimeout(12000)
 console.log(await page.evaluate(() => {
   const ft = window.__ft.slice(5); const sorted = [...ft].sort((a, b) => a - b)
   const pct = (p) => Math.round((sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))] ?? -1) * 10) / 10

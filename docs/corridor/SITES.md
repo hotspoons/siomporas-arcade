@@ -1,14 +1,15 @@
 # Corridor sites — what each bake actually holds
 
-*Generated 2026-09-21 04:13 UTC by `python -m corridor.sitesdoc` from `tools/corridor/data/sites/*/manifest.json`, `spine_utm.json`, `surface.json` and the bake log `/tmp/claude-1000/-workspaces-apex-conduit/397fba92-5e84-41c5-9605-5d43678842ec/scratchpad/newbakes.log`. Do not edit by hand; re-run it. Lidar year is read off the project name (`_D21` = 2021 delivery). The fetch itself does not record the NAIP acquisition date, so it is looked up here from the image service's catalog under the site point (the tile that covers the photo; a long corridor can straddle two flight dates). A DEM listed as "cached" was reused from an earlier run and its source tiles were not re-recorded (a `__main__.py` gap reported to main).*
+*Generated 2026-09-21 04:34 UTC by `python -m corridor.sitesdoc` from `tools/corridor/data/sites/*/manifest.json`, `spine_utm.json`, `surface.json` and the bake log `/tmp/claude-1000/-workspaces-apex-conduit/397fba92-5e84-41c5-9605-5d43678842ec/scratchpad/newbakes.log`. Do not edit by hand; re-run it. Lidar year is read off the project name (`_D21` = 2021 delivery). The fetch itself does not record the NAIP acquisition date, so it is looked up here from the image service's catalog under the site point (the tile that covers the photo; a long corridor can straddle two flight dates). A DEM listed as "cached" was reused from an earlier run and its source tiles were not re-recorded (a `__main__.py` gap reported to main).*
 
-**10 baked, 15 not yet** (acadia-ocean-dr (not baked), bell-branch-rd (not baked), bixby-bridge-ca1 (not baked), bonnie-branch-rd (not baked), chesterfield-rd (in progress), crownsville-rd (not baked), ecola-or (not baked), hawkins-rd (not baked), patuxent-river-rd (not baked), ragged-point-ca1 (not baked), rossback-rd (not baked), rutland-rd (not baked), st-stephens-church-rd (not baked), underwood-rd (not baked), waterbury-rd (not baked)).
+**11 baked, 15 not yet** (acadia-ocean-dr (not baked), bell-branch-rd (not baked), bixby-bridge-ca1 (not baked), bonnie-branch-rd (not baked), chesterfield-rd (in progress), crownsville-rd (not baked), ecola-or (not baked), hawkins-rd (not baked), patuxent-river-rd (not baked), ragged-point-ca1 (not baked), rossback-rd (not baked), rutland-rd (not baked), st-stephens-church-rd (not baked), underwood-rd (not baked), waterbury-rd (not baked)).
 
 ## Summary
 
 | site | road | km | lidar project (year) | class 17 | veg classes | NAIP | DEM | structures | formations | missing |
 |---|---|---|---|---|---|---|---|---|---|---|
 | `acadia-ocean-dr` | *not baked* | | | | | | | |  |
+| `arrowhead-farms` | Arrowhead Farms Court | 0.1 | USGS_LPC_MD_VA_Sandy_NCR_2014_LAS_2015 (2014) | demoted | no (unassigned) | 2023-07-12 | USGS one meter x35y432 MD VA Sandy NCR 2014 (2020-03-30), USGS 1 Meter 18 x35y432 MD_Central_Processing_D24 (2026-04-04) | none | Matawan Formation | — |
 | `bacon-ridge-rd` | Bacon Ridge Road | 2.1 | TNM:MD_Central_Processing_D24 (2024) | trusted | yes | 2023-05-25 | USGS 1 Meter 18 x35y433 MD_Central_Processing_D24 (2026-04-04), USGS 1 Meter 18 x36y433 MD_Central_Processing_D24 (2026-04-04) | 6 gantry, 1 overpass | Matawan Formation, Monmouth Formation | — |
 | `bell-branch-rd` | *not baked* | | | | | | | |  |
 | `bixby-bridge-ca1` | *not baked* | | | | | | | |  |
@@ -63,6 +64,22 @@
 fix 44.3206, -68.1885 · 0 photo(s) · status **not baked**
 
 Missing: site.json, spine_utm.json, osm.geojson, crossings.json, dem_1m.tif, naip.tif, horizon_30m.tif, geology.json, lidar/dtm.tif, lidar/chm.tif, profile.json, surface.json, web/manifest.json, web/dem_2m.png, web/chm_2m.png, web/naip_1m.jpg, web/horizon_60m.png
+
+### `arrowhead-farms`
+
+*Rich's neighbourhood (Davidsonville): Arrowhead Farms Ct/Rd/Dr, Halls Grove Rd, Gosheff Ln, Patuxent Overlook/Preserve, Patuxent River Rd, Deer Pass Ln — a network site later*  
+fix 38.983787, -76.695393 · 0 photo(s) · status **baked**
+
+- **road**: {'name': 'Arrowhead Farms Court'} · 75.3 m · snap 0.0 m · trimmed [False, False] · fetched 2026-09-21T04:31:28Z (108.0 s)
+- **lidar**: `USGS_LPC_MD_VA_Sandy_NCR_2014_LAS_2015` (2014) · 239,885 pts in corridor · z factor 1.0 · classes: unassigned 77%, ground 23% · class 17: 0.3005 (demoted) — class 17/18 demoted to unassigned: implausible share, vendor used them as junk bins
+- **DEM**: USGS one meter x35y432 MD VA Sandy NCR 2014 — 2020-03-30; USGS 1 Meter 18 x35y432 MD_Central_Processing_D24 — 2026-04-04
+- **NAIP**: fetched at 0.3 m, [2033, 700] px · tile under the fix `m_3807603_nw_18_030_20230712` flown 2023-07-12 at 0.3 m
+- **OSM**: 20 features, 3 crossings; spine tags: `highway`=residential
+- **structures** (0): none
+- **surface** (per 20 m): {'asphalt_aged': 4}
+- **geology**: Matawan Formation
+- **web**: layers ['dem', 'chm', 'naip', 'horizon', 'horizon_naip'] · 6 buildings · 0 POIs · 0 landuse rings · authored: none
+- **missing**: nothing
 
 ### `bacon-ridge-rd`
 
@@ -120,7 +137,7 @@ fix 39.013133, -76.751944 · 2 photo(s) · status **baked**
 
 fix 39.422592, -77.486522 · 3 photo(s) · status **baked**
 
-- **road**: {'ref': 'I 70'} · 6438.0 m · snap 0.8 m · trimmed [True, True] · fetched 2026-09-21T02:17:24Z (59.3 s)
+- **road**: {'ref': 'I 70'} · 6438.0 m · snap 0.8 m · trimmed [True, True] · fetched 2026-09-21T04:23:21Z (68.2 s)
 - **lidar**: `MD_Western_2_D21` (2021) · 13,031,479 pts in corridor · z factor 1.0 · classes: ground 64%, unassigned 36%, noise 0%, bridge_deck 0% · class 17: 0.0002 (trusted)
 - **DEM**: reused from cache (sources not re-recorded)
 - **NAIP**: reused from cache · tile under the fix `m_3907737_sw_18_030_20230521` flown 2023-05-21 at 0.3 m
@@ -135,7 +152,7 @@ fix 39.422592, -77.486522 · 3 photo(s) · status **baked**
 
 fix 39.070586, -76.911544 · 1 photo(s) · status **baked**
 
-- **road**: {'ref': 'I 95'} · 6438.0 m · snap 280.9 m · trimmed [True, True] · fetched 2026-09-21T02:04:24Z (79.9 s)
+- **road**: {'ref': 'I 95'} · 6438.0 m · snap 280.9 m · trimmed [True, True] · fetched 2026-09-21T04:12:24Z (85.3 s)
 - **lidar**: `USGS_LPC_MD_VA_Sandy_NCR_2014_LAS_2015` (2014) · 13,152,356 pts in corridor · z factor 1.0 · classes: unassigned 62%, ground 38% · class 17: 0.2123 (demoted) — class 17/18 demoted to unassigned: implausible share, vendor used them as junk bins
 - **DEM**: reused from cache (sources not re-recorded)
 - **NAIP**: fetched at 0.3 m, [13967, 17633] px · tile under the fix `m_3907657_ne_18_030_20230901` flown 2023-09-01 at 0.3 m
@@ -151,7 +168,7 @@ fix 39.070586, -76.911544 · 1 photo(s) · status **baked**
 *gaussworks brief: Gambrills/Crofton/Crownsville/Davidsonville backroads*  
 fix 38.998792, -76.605292 · 0 photo(s) · status **in progress**
 
-Missing: dem_1m.tif, naip.tif, horizon_30m.tif, geology.json, lidar/dtm.tif, lidar/chm.tif, profile.json, surface.json, web/manifest.json, web/dem_2m.png, web/chm_2m.png, web/naip_1m.jpg, web/horizon_60m.png
+Missing: lidar/dtm.tif, lidar/chm.tif, profile.json, web/chm_2m.png
 
 ### `clarksburg-i270`
 
@@ -186,7 +203,7 @@ Missing: site.json, spine_utm.json, osm.geojson, crossings.json, dem_1m.tif, nai
 
 fix 39.364661, -77.400114 · 1 photo(s) · status **baked**
 
-- **road**: {'ref': 'I 270'} · 6438.0 m · snap 7.9 m · trimmed [True, True] · fetched 2026-09-21T02:16:04Z (51.4 s)
+- **road**: {'ref': 'I 270'} · 6438.0 m · snap 7.9 m · trimmed [True, True] · fetched 2026-09-21T04:22:09Z (49.2 s)
 - **lidar**: `MD_Western_2_D21` (2021) · 10,791,038 pts in corridor · z factor 1.0 · classes: ground 76%, unassigned 24%, bridge_deck 0%, water 0% · class 17: 0.0009 (trusted)
 - **DEM**: reused from cache (sources not re-recorded)
 - **NAIP**: reused from cache · tile under the fix `m_3907745_ne_18_030_20230521` flown 2023-05-21 at 0.3 m
@@ -201,7 +218,7 @@ fix 39.364661, -77.400114 · 1 photo(s) · status **baked**
 
 fix 39.394894, -77.418378 · 1 photo(s) · status **baked**
 
-- **road**: {'name': 'Frederick Freeway'} · 3680.2 m · snap 198.7 m · trimmed [False, True] · fetched 2026-09-21T02:15:36Z (16.1 s)
+- **road**: {'name': 'Frederick Freeway'} · 3680.2 m · snap 198.7 m · trimmed [False, True] · fetched 2026-09-21T04:21:41Z (17.4 s)
 - **lidar**: `MD_Western_2_D21` (2021) · 4,970,341 pts in corridor · z factor 1.0 · classes: ground 71%, unassigned 28%, bridge_deck 1% · class 17: 0.0027 (trusted)
 - **DEM**: reused from cache (sources not re-recorded)
 - **NAIP**: reused from cache · tile under the fix `m_3907737_se_18_030_20230521` flown 2023-05-21 at 0.3 m
@@ -266,7 +283,7 @@ fix 39.136908, -77.131681 · 1 photo(s) · status **baked**
 
 fix 39.699936, -78.297794 · 1 photo(s) · status **baked**
 
-- **road**: {'ref': 'US 40 Scenic'} · 4386.3 m · snap 9.3 m · trimmed [False, True] · fetched 2026-09-21T02:20:18Z (22.0 s)
+- **road**: {'ref': 'US 40 Scenic'} · 4386.3 m · snap 9.3 m · trimmed [False, True] · fetched 2026-09-21T04:29:59Z (33.5 s)
 - **lidar**: `MD_Western_1_D21` (2021) · 10,190,481 pts in corridor · z factor 1.0 · classes: ground 59%, unassigned 41%, noise 1% · class 17: 0.0 (trusted)
 - **DEM**: reused from cache (sources not re-recorded)
 - **NAIP**: reused from cache · tile under the fix `m_3907822_ne_18_030_20230521` flown 2023-05-21 at 0.3 m
@@ -281,7 +298,7 @@ fix 39.699936, -78.297794 · 1 photo(s) · status **baked**
 
 fix 39.4682, -77.523269 · 3 photo(s) · status **baked**
 
-- **road**: {'ref': 'I 70'} · 6438.0 m · snap 7.1 m · trimmed [True, True] · fetched 2026-09-21T02:18:57Z (55.6 s)
+- **road**: {'ref': 'I 70'} · 6438.0 m · snap 7.1 m · trimmed [True, True] · fetched 2026-09-21T04:25:08Z (79.8 s)
 - **lidar**: `MD_Western_2_D21` (2021) · 12,412,733 pts in corridor · z factor 1.0 · classes: ground 72%, unassigned 27%, noise 0%, bridge_deck 0% · class 17: 0.0002 (trusted)
 - **DEM**: reused from cache (sources not re-recorded)
 - **NAIP**: reused from cache · tile under the fix `m_3907736_ne_18_030_20230521` flown 2023-05-21 at 0.3 m

@@ -531,14 +531,23 @@ def revector(site: dict, data: Path, cache: Path) -> dict:
     # branches keep their profiles; the per-chain keys are refreshed from the new chains
     br_p = out / "branches.json"
     if br_p.exists():
-        # branches.json written before chains carried ids has neither `id` nor a name to match on;
-        # its order IS the chain order, so fall back to position rather than refusing to run.
+        # branches.json written before chains carried ids has neither `id` nor a name to match on.
+        # Its order is the NON-PRIMARY chain order — `fetch_site` appends `for c in chains: if c is
+        # prim: continue` — so position must be matched against that list, not against every chain;
+        # matching against all of them shifts every entry after the primary onto the wrong road,
+        # which is the same mis-attribution intrinsic ids were introduced to stop. And it is only
+        # ever safe when the counts agree: if they do not, the chain SET changed too, and the only
+        # honest answer is to recompute rather than guess.
         by_id = {c["id"]: c for c in R["chains"]}
         branches = json.loads(br_p.read_text())["branches"]
         if branches and "id" not in branches[0]:
-            print(f"  note    branches.json predates chain ids; matching {len(branches)} branches by position", flush=True)
-            for i, b in enumerate(branches):
-                b["id"] = R["chains"][i]["id"] if i < len(R["chains"]) else f"r{i:02d}"
+            others = [c for c in R["chains"] if c is not R["primary"]]
+            if len(others) == len(branches):
+                print(f"  note    branches.json predates chain ids; matching {len(branches)} branches by position", flush=True)
+                for i, b in enumerate(branches):
+                    b["id"] = others[i]["id"]
+            else:
+                print(f"  WARNING branches.json predates chain ids and holds {len(branches)} records for {len(others)} roads — cannot match them safely. Run `python -m corridor.network_tiles {slug}` to recompute the profiles.", flush=True)
         for b in branches:
             c = by_id.get(b["id"])
             if c:

@@ -209,6 +209,51 @@ from pavement, all on `groundAt`; South Mountain: 910 greenstone, nearest 4.16 m
   `ShaderMaterial` is fixed at compile time.
 - A missing optional JSON must 404 (the middleware does); Vite's SPA fallback would answer
   `index.html` with a 200 and `r.json()` dies on `<!doctype`.
+- **A pre-2010 lidar delivery can carry no CRS at all**, and the right one is recoverable without a
+  per-project table. `OR_NORTHCOAST_2008_2009` has no VLRs whatever, so `parse_crs()` is None and
+  the tile is unreadable. Its coordinates (X ≈ 431 k, Y ≈ 1 531 k) are no UTM zone; they are
+  **EPSG:2992, NAD83 / Oregon GIC Lambert, in FEET**, and the Z is in feet too (`check_units`
+  catches that part already). Enumerate the projected CRSs whose area of use contains the site
+  (pyproj, 80 candidates here), transform a sample under each, and keep the one that lands the
+  points inside the corridor: a wrong guess puts them in another state, so the test is
+  self-validating. 2.2 s; 4.9 M of the tile's 14.6 M points land in Ecola's corridor and the
+  ground agrees with the 3DEP DEM to **4 cm**. Datum realisations of one projection tie exactly —
+  take the lowest EPSG code. Proposed to main 2026-09-21. **But reach for it last**: Ecola also has
+  `CA_West_Coast_LiDAR_2016_B16` at 85 % coverage, eight years newer, in metres, with a compound
+  CRS carrying the vertical datum — the project scoring passes it over because the broken one
+  covers 100 %. Falling back to the next project when every tile of the chosen one fails to read
+  is simpler and gives better data; guessing a CRS is for a site where the header-less project is
+  the only one.
+- **You can read a delivery's CRS without downloading it.** `Range: bytes=0-200000` returns HTTP
+  206 from the USGS host and the LAS header and VLRs live in the first few hundred bytes, so a
+  717 MiB tile can be scored for readability in a second.
+- **Bounding the vertices of a smoothed line does not bound the line.** `export._smooth_on_line`
+  gaussian-smooths a centreline and then pulls every vertex back to within 1.5 m of the raw
+  polyline, which fixed the spine leaving its own trace in the air photo (10.6 m on Chesterfield
+  → 1.72 m). But it clamps toward the NEAREST point on the line, and nearest-point projection is
+  not monotonic: on a switchback two adjacent vertices project onto opposite limbs and the clamp
+  drags them apart. Measured on Crofton's branches: every vertex within 1.58 m as designed, one
+  pair **15.5 m apart** where the median gap is 2 m, and the 10 m sample in the middle of that
+  straight chords across the bend at **6.95 m** — 9 of 39 branches over 2 m. The station of each
+  point is already known (the line was resampled at those stations), so pulling toward the line
+  *at its own station* is monotonic by construction: worst deviation 1.60 m, none over 2 m.
+  A coast road of hairpins is the worst possible input for a nearest-point clamp: **ecola-or's
+  centreline leaves its road by 10.2 m**, against ≤ 2 m everywhere else. `corridor.verify` warns
+  over 3 m. Patch proposed to main 2026-09-21; whoever applies it must re-export, since it moves
+  published geometry — and it shrinks the drift above too, because a line that stops cutting
+  corners stops being short.
+- **`s` is measured on the raw line; the viewer draws a shorter smoothed one.**
+  `manifest.spine.length_m` is the RAW OSM line's length, `manifest.spine.coords` is the smoothed
+  and densified line, and smoothing shortens: −0.03 % on Braddock, −0.37 % on Crofton, **−0.80 %
+  (29.4 m) on Bonnie Branch**. Everything keyed by along-track metre — structures, `profile.s`,
+  `surface.s`, `cuts.faces[].s_start`, the editor's authored intervals — is measured on the raw
+  line and resolved as arclength along the published curve, so the error accumulates with `s`.
+  Measured on real structures it is 0–4.1 m, the worst being Bowie's horse bridge at s = 2350.
+  **The drift scales with how twisty the road is** — the interstates are 0.01–0.03 % and invisible,
+  the backroads and the coast road 0.4–1.8 % — which is why it appeared only once Ecola, Bonnie
+  Branch and Rich's neighbourhood were baked. `corridor.verify` warns over 0.2 %; 11 of 20 sites
+  warn today. Fix either by scaling `s` by `curveLen / length_m` in `spineAt`, or by publishing the
+  smoothed length as well. Reported to main 2026-09-21.
 - **A key that indexes data must be intrinsic, never positional.** Network chain ids were `r00`,
   `r01`, … by enumeration, and `branches.json` keys every road's profile by them. Lowering the
   minimum chain length from 120 m to 50 m added two chains *in the middle* of Crofton's list and
@@ -218,6 +263,13 @@ from pavement, all on `groundAt`; South Mountain: 910 greenstone, nearest 4.16 m
   only when that chain's own ways change — and then it simply fails to match and is recomputed,
   which is a failure you can see. Caught by diffing `branches.json` against `spine_utm.json` before
   calling the data good; it would have rendered perfectly and been wrong everywhere.
+- **One writer per site directory.** `tools/corridor/data` is a symlink shared by every worktree,
+  so `export all` from main and a targeted export from an agent are the same files — written
+  non-atomically, image by image. Announce an export in mail before running it.
+- **A pattern that matches your own command line kills your own shell.** `pkill -f 'foo'`,
+  `pgrep -f 'foo'` and `awk '/foo/'` all see the very command running them; three shells died to
+  this in one session. Kill by PID, filter by process name (`ps -eo comm,args`), or put the script
+  in a file so its command line is a path.
 - **Python writes `NaN` into JSON and `JSON.parse` refuses the whole file.** Anything sampled from
   a raster that can be nodata (a VRT through `LazyRaster`, an out-of-coverage DEM) must be filled
   or guarded before it is written. One NaN token cost the Crofton network site its entire

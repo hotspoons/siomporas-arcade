@@ -410,10 +410,17 @@ def export_site(site_dir: Path) -> dict:
         try:
             from . import network_tiles
 
-            tl = network_tiles.export_tiles(site_dir, web, ox, oy, network_tiles.mask_shapes(site_dir, derived), vivid)
+            shapes = network_tiles.mask_shapes(site_dir, derived)
+            tl = network_tiles.export_tiles(site_dir, web, ox, oy, shapes, vivid)
             if tl:
                 layers["tiles"] = tl
                 print(f"  tiles   {len(tl['list'])} km tiles -> web/tiles/0", flush=True)
+            # ...and a coarse whole-region overview, because a site whose only height layer is
+            # `tiles` does not load at all until the viewer streams them
+            ov = network_tiles.overview(site_dir, web, ox, oy, shapes, vivid)
+            layers.update(ov)
+            if ov:
+                print(f"  overview {', '.join(f'{k} {v['size'][0]}x{v['size'][1]}' for k, v in ov.items())}", flush=True)
         except Exception as exc:
             import traceback
 

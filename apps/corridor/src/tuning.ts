@@ -179,10 +179,14 @@ export let ROCK_OUTCROP_PER_M2 = 0.04
 /** boulder size multiplier (m at scale 1), and how far off any pavement edge a rock must stay (m) */
 export let ROCK_SIZE = 1.1
 export let ROCK_PAVEMENT_CLEAR = 1.5
-/** density multiplier where the geology says the face is sand or gravel rather than rock: a
- *  coastal-plain bank (the whole Crofton region, the Potomac Group) is not a boulder field, but it
- *  does carry riprap and washed-out lumps. 0 turns them off entirely. */
-export let ROCK_SAND_DENSITY = 0.2
+/** density multiplier where the geology says the face is sand or gravel rather than rock.
+ *  DEFAULT 0, decided by looking: on Chesterfield Road's sand cut the boulders read as debris
+ *  scattered on a lawn, and with the layer off the same bank reads correctly as the grassy
+ *  coastal-plain cut it is. The day-one design note said the same thing before I guessed
+ *  otherwise — "coastal-plain sands and gravels: no rock cuts; sand faces, riprap only". Raise it
+ *  if a sand face should carry riprap; the rock kit has no sand set, so these are the procedural
+ *  shapes and they read as boulders whatever colour they are. */
+export let ROCK_SAND_DENSITY = 0
 /** water surface above the channel bottom (m), ribbon width multiplier, ripple speed, opacity */
 export let WATER_DEPTH = 0.25
 export let WATER_WIDTH_SCALE = 1.0

@@ -219,8 +219,11 @@ from pavement, all on `groundAt`; South Mountain: 910 greenstone, nearest 4.16 m
   straight chords across the bend at **6.95 m** — 9 of 39 branches over 2 m. The station of each
   point is already known (the line was resampled at those stations), so pulling toward the line
   *at its own station* is monotonic by construction: worst deviation 1.60 m, none over 2 m.
-  Patch proposed to main 2026-09-21; whoever applies it must re-export, since it moves published
-  geometry.
+  A coast road of hairpins is the worst possible input for a nearest-point clamp: **ecola-or's
+  centreline leaves its road by 10.2 m**, against ≤ 2 m everywhere else. `corridor.verify` warns
+  over 3 m. Patch proposed to main 2026-09-21; whoever applies it must re-export, since it moves
+  published geometry — and it shrinks the drift above too, because a line that stops cutting
+  corners stops being short.
 - **`s` is measured on the raw line; the viewer draws a shorter smoothed one.**
   `manifest.spine.length_m` is the RAW OSM line's length, `manifest.spine.coords` is the smoothed
   and densified line, and smoothing shortens: −0.03 % on Braddock, −0.37 % on Crofton, **−0.80 %
@@ -228,8 +231,11 @@ from pavement, all on `groundAt`; South Mountain: 910 greenstone, nearest 4.16 m
   `surface.s`, `cuts.faces[].s_start`, the editor's authored intervals — is measured on the raw
   line and resolved as arclength along the published curve, so the error accumulates with `s`.
   Measured on real structures it is 0–4.1 m, the worst being Bowie's horse bridge at s = 2350.
-  Fix either by scaling `s` by `curveLen / length_m` in `spineAt`, or by publishing the smoothed
-  length as well. Reported to main 2026-09-21.
+  **The drift scales with how twisty the road is** — the interstates are 0.01–0.03 % and invisible,
+  the backroads and the coast road 0.4–1.8 % — which is why it appeared only once Ecola, Bonnie
+  Branch and Rich's neighbourhood were baked. `corridor.verify` warns over 0.2 %; 11 of 20 sites
+  warn today. Fix either by scaling `s` by `curveLen / length_m` in `spineAt`, or by publishing the
+  smoothed length as well. Reported to main 2026-09-21.
 - **A key that indexes data must be intrinsic, never positional.** Network chain ids were `r00`,
   `r01`, … by enumeration, and `branches.json` keys every road's profile by them. Lowering the
   minimum chain length from 120 m to 50 m added two chains *in the middle* of Crofton's list and

@@ -127,20 +127,49 @@ the other ≥ 3 m) → one whole-side handle (a leaf-off flight line); else runs
 canopy departs from the same side's ±300 m rolling median by max(3 m, 60 %) for ≥ 150 m, strongest
 6 per side; one band ±40 m per structure; one per surface-class run ≥ 30 m. All knobs neutral.
 
-**Cut faces** (`cuts.py`, this agent — rule as designed, thresholds to be measured on Sideling,
-Braddock and Bonnie Branch): from `profile.ground_rel` (ground beside the surface at 8/15/25/40/
-60 m) and the DTM, a cut face is ground rising **> 0.6 m/m within 15 m of the pavement for
-≥ 20 m** along-track. `artificial` when the face is straight, constant-slope and parallel to the
-road (blasted or graded); `natural` when both sides rise (a ravine) and the low line follows an
-OSM stream. Manifest key `cuts`: intervals with side, height, slope, class, lithology.
+**Cut faces** (`cuts.py`, measured 2026-09-21 on all ten baked sites; runs in 2 s): at every 4 m
+station a lateral DTM transect 1 m apart from 2 to 70 m each side, height relative to the driving
+surface. A face is a **5 m window steeper than 0.6 m/m (~31°) whose steep part rises ≥ 3 m, toe
+inside 40 m, for ≥ 20 m along the road** (two stations of gap bridged). The profile's five offsets
+were not enough — Braddock's Catoctin cut starts 11–13 m out and tops at 30 m, between them.
+Found: Sideling's left wall s 1576–3936, toe 9 m, median 15.7 m, max 32.4 m; Braddock 22 faces to
+18.8 m; South Mountain's right side to 19.9 m; Bowie and Clarksburg nothing over 8.5 m.
+`artificial` when the toe's lateral std ≤ 3 m (graded, parallel); `natural` when it wanders, a
+mapped waterway runs within 30 m for half the interval, or both sides rise together beside water.
+Heights come from the lidar DTM with the bare-earth DEM filling nodata (Bonnie Branch's first
+bake had a 0.4 %-valid DTM). Bonnie Branch, the natural test: 20 faces, all `natural` — ravine
+walls with toes 2–36 m out wandering ±3–10 m, 4–24 m high, water beside them 50–100 % of the
+interval; the 496 m wall at s 3004–3500 reaches 20 m, Ellicott City Granodiorite → `granite`.
+Lithology: Macrostrat `lith` + `descrip` keyword votes (the named units leave `lith` empty) →
+`shale | sandstone | greenstone | phyllite | schist | granite | limestone | sand`. Manifest `cuts`:
+per face the interval, side, class, toe/top/height/slope, rock type, and toe+top `[x,y,z]` every
+10 m.
 
-**Exposed rock** (`rock.py`): bare ground (canopy < 0.5 m) with high 1 m roughness (DTM residual
-from a 5 m plane), slope > 30°, lithology from `geology.json` (shale / siltstone / schist /
-granite / sandstone / metabasalt), NAIP grey-brown → polygons with a rock type. Manifest key
-`rock`.
+**Exposed rock** (`rock.py`, measured against those faces): **slope > 40° and 7 m relief ≥ 3 m**,
+on bare ground (CHM < 0.5 m) *or* inside a detected cut face, closed/opened 3×3, polygons ≥ 15 m².
+Why slope: inside the tall faces 16–64 % of cells stand steeper than 45°, on other steep bare
+ground 2–6 %. What did **not** work: 1 m roughness (0.19 vs 0.17 m — the min-of-ground DTM is too
+smooth), NAIP colour (leaf-on under forest shadow, 65 vs 68 luminance). Ground-return intensity is
+per lithology (Catoctin metabasalt 0.4× the verge, Sideling shale 1.06×) so it is recorded per
+polygon, not thresholded. Manifest `rock`: polygons with area, slope, relief, intensity ratio,
+NAIP colour, `in_cut`, rock type.
 
-**Water** (`water.py`): OSM `waterway=*` lines and `natural=water` polygons snapped to the DTM
-low line; a fall or rapid where the stream drops > 2 m over 20 m. Manifest key `water`.
+**Water** (`water.py`): OSM `waterway` lines every 5 m, each vertex **snapped to the DTM low point
+across ±6 m** (measured: the OSM line is within 3 m of it 86–100 % of the time) unless the channel
+is wider than 12 m (the Monocacy: centreline kept, z read); DEM stands in outside the lidar
+corridor. Heights running-minimum in the flow direction. `tunnel=culvert` segments flagged, not
+drawn. **Falls/rapids: maximal runs of 20 m windows each dropping > 2 m**; grade > 0.25 is a fall,
+else rapids; none under a culvert (the DTM there is the road fill). Widths: OSM `width`, else
+river 12, canal 6, stream 2.5, ditch 1.2, drain 1 m. Polygons (`natural=water`, `water=*`,
+wetland) flat at their median ground. Manifest `water`: lines with `pts [x,y,z]`, `falls`, areas.
+
+**Rock dressing** (`rocks.ts`): boulders per metre of face `ROCK_PER_M` × (0.5 + height/6), biased
+to the lower face, size `ROCK_SIZE` × (0.4–2.0) larger at the toe; outcrop polygons at
+`ROCK_OUTCROP_PER_M2`; none within `ROCK_PAVEMENT_CLEAR` (1.5 m) of a pavement edge; positions
+hashed from face id and station. Kit: `catalog.json` `category: "rock"` + `rock_type`; procedural
+displaced icosahedra in the lithology's colour until a GLB exists. Probe:
+`probes/corridor-terrain.mjs <slug> rock|water` — Sideling: 5 481 shale instances, nearest 1.52 m
+from pavement, all on `groundAt`; South Mountain: 910 greenstone, nearest 4.16 m.
 
 ## 6 · Sign conventions (the ones that bit people)
 

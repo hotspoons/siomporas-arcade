@@ -79,8 +79,12 @@ def export_site(site_dir: Path) -> dict:
     def rel_bbox(b):
         return [b[0] - ox, b[1] - oy, b[2] - ox, b[3] - oy]
 
+    # network sites over 6 km go out as 1 km tiles (network_tiles.export_tiles, below); the
+    # single-image dem/chm/naip blocks are skipped for them — an 18 km DEM PNG is 85 M pixels
+    tiled = bool(manifest.get("tiled"))
+
     # --- near terrain --------------------------------------------------------------------------
-    if (site_dir / "dem_1m.tif").exists():
+    if (site_dir / "dem_1m.tif").exists() and not tiled:
         z, g = _read_at(site_dir / "dem_1m.tif", 2.0, bbox)
         z = _fill(z, -9999)
         rgb, zmin, scale = _encode_height(z)
@@ -100,7 +104,7 @@ def export_site(site_dir: Path) -> dict:
 
     # --- canopy on the same lattice ------------------------------------------------------------
     chm_path = site_dir / "lidar" / "chm.tif"
-    if chm_path.exists() and "dem" in layers:
+    if chm_path.exists() and "dem" in layers and not tiled:
         c, g = _read_at(chm_path, 2.0, bbox)  # boundless: 0 outside the lidar corridor
         c = np.nan_to_num(c, nan=0.0)
         # The canopy model is "unclassified points above ground", and on a working interstate that
@@ -156,7 +160,20 @@ def export_site(site_dir: Path) -> dict:
             img = Image.merge("RGB", (r, g, b))
         return img
 
-    if (site_dir / "naip.tif").exists():
+    if tiled:
+        try:
+            from . import network_tiles
+
+            tl = network_tiles.export_tiles(site_dir, web, ox, oy, network_tiles.mask_shapes(site_dir, derived), vivid)
+            if tl:
+                layers["tiles"] = tl
+                print(f"  tiles   {len(tl['list'])} km tiles -> web/tiles/0", flush=True)
+        except Exception as exc:
+            import traceback
+
+            traceback.print_exc()
+            print(f"  tiles failed: {exc}")
+    if (site_dir / "naip.tif").exists() and not tiled:
         with rasterio.open(site_dir / "naip.tif") as src:
             w = int(round((bbox[2] - bbox[0]) / 1.0))
             h = int(round((bbox[3] - bbox[1]) / 1.0))
@@ -244,6 +261,22 @@ def export_site(site_dir: Path) -> dict:
 
     # buildings/landuse/POIs: `derived`, computed above the canopy layer
 
+    # terrain features (terrain-and-data agent, 2026-09-21): cut faces, exposed rock, water. Each
+    # module measures from the rasters + OSM and writes its own <site>/{cuts,rock,water}.json;
+    # the manifest carries the dict. cuts before rock (rock reads cuts.json). No lidar → null.
+    import importlib
+
+    features: dict = {}
+    for name in ("cuts", "rock", "water"):
+        if tiled:  # these read the whole DTM; the tiled path gets them once they sample lazily
+            features[name] = None
+            continue
+        try:
+            features[name] = importlib.import_module(f".{name}", __package__).measure(site_dir)
+        except Exception as exc:
+            print(f"  {name} failed: {exc}")
+            features[name] = None
+
     out = {
         "slug": site["slug"],
         "ident": site.get("ident"),
@@ -262,7 +295,23 @@ def export_site(site_dir: Path) -> dict:
         "buildings": derived["buildings"],
         "landuse": derived["landuse"],
         "pois": derived["pois"],
+        "cuts": features.get("cuts"),
+        "rock": features.get("rock"),
+        "water": features.get("water"),
     }
+    # network sites (cadre §6): every other road as a first-class branch — coords with lidar grade,
+    # junctions, profile, structures. `siblings` above stays as it was for the old viewer path.
+    try:
+        from . import network
+
+        br = network.export_branches(site_dir, ox, oy)
+        if br is not None:
+            out["network"] = True
+            out["roads"] = spine.get("roads", [])
+            out["junctions"] = (spine.get("primary") or {}).get("junctions", [])
+            out["branches"] = br
+    except Exception as exc:
+        print(f"  branches failed: {exc}")
     (web / "manifest.json").write_text(json.dumps(out))
     return {"layers": list(layers), "bytes": sum(f.stat().st_size for f in web.iterdir()), "buildings": derived["summary"]}
 

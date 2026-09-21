@@ -15,6 +15,8 @@ import { buildPlacements, loadCatalog, loadPlacements } from './placements'
 import { buildBuildings } from './buildings'
 import { buildBridges, flattenSpine, loadStructureOverrides, suppressed } from './structures'
 import { loadSurfaceSets, overpassMesh, pavedOffset, pavedWidth, roadMesh, stations, taperedLanes, treesFromCanopy, type SurfaceSet } from './props'
+import { buildRocks } from './rocks'
+import { buildWater } from './water'
 
 let surfaceSets: Record<string, SurfaceSet> | null = null
 
@@ -23,13 +25,16 @@ export const toWorld = (x: number, y: number, z: number) => new THREE.Vector3(x,
 export interface Site {
   manifest: Manifest
   group: THREE.Group
-  layers: { imagery?: THREE.Mesh; canopy?: THREE.Mesh; trees?: THREE.Group; road: THREE.Group; horizon?: THREE.Mesh; structures: THREE.Group; spine: THREE.Group; markers: THREE.Group; placements: THREE.Group; buildings: THREE.Group }
+  layers: { imagery?: THREE.Mesh; canopy?: THREE.Mesh; trees?: THREE.Group; road: THREE.Group; horizon?: THREE.Mesh; structures: THREE.Group; spine: THREE.Group; markers: THREE.Group; placements: THREE.Group; buildings: THREE.Group; rocks: THREE.Group; water: THREE.Group }
   /** how many footprints were massed, and how many had a real measured height */
   buildingStats: { count: number; gabled: number; fromLidar: number }
   adjustments: Adjustments
   treeCount: number
   /** the grass field, when this site has one (probes and the HUD read `grass.counts`) */
   grass: Grass | null
+  /** terrain-and-data: rock instances placed per rock type, and what water was drawn (for probes) */
+  rockCounts: Record<string, number>
+  waterStats: { lines: number; areas: number; falls: number; length_m: number }
   /** per-frame: move the near-field tree models and the grass ring to follow the eye; fwd/pitch shape the LOD footprint */
   updateNear: (eye: THREE.Vector3, time: number, fwd?: THREE.Vector3, pitch?: number) => void
   /** a knob changed: re-pick trees and re-seed grass on the next frame */
@@ -868,14 +873,31 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
   // authored bridges over the road (structures.json bridge_over)
   structures.add(await buildBridges(overrides, catalog, spineAt, groundAtWorld, (s) => pavedHalfAt(s) * 2))
 
+  // terrain features (terrain-and-data agent): rock on the measured cut faces and outcrops, water in
+  // the measured channels. Both stand on groundAt; the water's ripples tick with the near update.
+  status('dressing…')
+  const rocks = await buildRocks(manifest.cuts, manifest.rock, catalog, groundAtWorld, edgeDistanceWorld)
+  group.add(rocks.group)
+  const water = buildWater(manifest.water, groundAtWorld)
+  group.add(water.group)
+  {
+    const inner = updateNear
+    updateNear = (eye, time, fwd, pitch) => {
+      inner(eye, time, fwd, pitch)
+      water.tick(time)
+    }
+  }
+
   return {
     manifest,
     group,
-    layers: { imagery: terrain, canopy, trees, road, horizon, structures, spine, markers, placements: placementsGroup, buildings: built.group },
+    layers: { imagery: terrain, canopy, trees, road, horizon, structures, spine, markers, placements: placementsGroup, buildings: built.group, rocks: rocks.group, water: water.group },
     buildingStats: built.stats,
     adjustments,
     treeCount,
     grass: grassRef,
+    rockCounts: rocks.counts,
+    waterStats: { lines: water.lines, areas: water.areas, falls: water.falls, length_m: water.length_m },
     updateNear,
     retune,
     setSeason,

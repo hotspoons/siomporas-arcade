@@ -30,6 +30,8 @@ export interface CatalogEntry {
   fit?: 'height' | 'span'
   /** a generated .glb faces whichever way the reconstruction left it; one number per asset, set by eye, applied on top of every placement's yaw */
   yaw_offset_deg?: number
+  /** `category: "rock"` entries: which lithology this boulder set is for (cuts.py rock types) */
+  rock_type?: string
 }
 
 // tools/assetgen/finish.mjs always Draco-compresses; without a decoder GLTFLoader rejects silently

@@ -169,6 +169,19 @@ export let CAR_ROCKET_CHANCE = 0.2
 export let CAR_ROCKET_SPEED = 75
 export let CAR_ROCKET_MIN_SPEED = 0.94
 
+// --- terrain features (terrain-and-data agent): rock on cut faces, water --------------------------
+/** boulders per metre of cut face (scaled by face height and steepness), and per m² of outcrop */
+export let ROCK_PER_M = 0.6
+export let ROCK_OUTCROP_PER_M2 = 0.04
+/** boulder size multiplier (m at scale 1), and how far off any pavement edge a rock must stay (m) */
+export let ROCK_SIZE = 1.1
+export let ROCK_PAVEMENT_CLEAR = 1.5
+/** water surface above the channel bottom (m), ribbon width multiplier, ripple speed, opacity */
+export let WATER_DEPTH = 0.25
+export let WATER_WIDTH_SCALE = 1.0
+export let WATER_SPEED = 1.0
+export let WATER_OPACITY = 0.82
+
 // --- camera -------------------------------------------------------------------------------------
 /** the fly camera may not go below the ground under it by less than this (m) */
 export let CAM_MIN_HEIGHT = 0.4
@@ -377,6 +390,29 @@ export const TUNE_TABS: TuneTab[] = [
           tune('CAR_ROCKET_CHANCE', () => CAR_ROCKET_CHANCE, (v) => (CAR_ROCKET_CHANCE = v), [0, 1], 0.05, 'share of qualifying launches that fire'),
           tune('CAR_ROCKET_SPEED', () => CAR_ROCKET_SPEED, (v) => (CAR_ROCKET_SPEED = v), [20, 400], 10, 'straight up, m/s'),
           tune('CAR_ROCKET_MIN_SPEED', () => CAR_ROCKET_MIN_SPEED, (v) => (CAR_ROCKET_MIN_SPEED = v), [0.5, 1], 0.02, 'share of top speed needed'),
+        ],
+      },
+    ],
+  },
+  {
+    name: 'terrain',
+    sections: [
+      {
+        title: 'rock (cut faces and outcrops; reload to rebuild)',
+        keys: [
+          tune('ROCK_PER_M', () => ROCK_PER_M, (v) => (ROCK_PER_M = v), [0, 4], 0.05, 'boulders per metre of face'),
+          tune('ROCK_OUTCROP_PER_M2', () => ROCK_OUTCROP_PER_M2, (v) => (ROCK_OUTCROP_PER_M2 = v), [0, 0.5], 0.01, 'per m² of exposed rock'),
+          tune('ROCK_SIZE', () => ROCK_SIZE, (v) => (ROCK_SIZE = v), [0.2, 4], 0.05, 'm'),
+          tune('ROCK_PAVEMENT_CLEAR', () => ROCK_PAVEMENT_CLEAR, (v) => (ROCK_PAVEMENT_CLEAR = v), [0, 10], 0.1, 'no rock nearer the pavement than this (m)'),
+        ],
+      },
+      {
+        title: 'water',
+        keys: [
+          tune('WATER_DEPTH', () => WATER_DEPTH, (v) => (WATER_DEPTH = v), [0, 2], 0.05, 'surface above the channel bottom (m)'),
+          tune('WATER_WIDTH_SCALE', () => WATER_WIDTH_SCALE, (v) => (WATER_WIDTH_SCALE = v), [0.3, 3], 0.05),
+          tune('WATER_SPEED', () => WATER_SPEED, (v) => (WATER_SPEED = v), [0, 4], 0.05, 'ripple speed'),
+          tune('WATER_OPACITY', () => WATER_OPACITY, (v) => (WATER_OPACITY = v), [0.2, 1], 0.02),
         ],
       },
     ],

@@ -61,6 +61,11 @@ def fetch_site(site: dict, half_length: float, half_width: float, lidar_half_wid
 
     from . import dem, geo, geology, lidar, naip, osm
 
+    if site.get("kind") == "network":  # cadre §6: one region of roads as one world (terrain-and-data agent)
+        from . import network
+
+        network.fetch_site(site, half_width, lidar_half_width, skip, DATA, CACHE)
+        return
     slug = site["slug"]
     out = DATA / "sites" / slug
     out.mkdir(parents=True, exist_ok=True)

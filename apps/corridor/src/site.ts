@@ -98,6 +98,10 @@ export interface Manifest {
     lat?: number
     tags?: Record<string, string>
   }[]
+  /** terrain-and-data agent: cut faces (cuts.py), exposed rock (rock.py), water (water.py); absent on older bakes */
+  cuts?: import('./rocks').CutsLayer | null
+  rock?: import('./rocks').RockLayer | null
+  water?: import('./water').WaterLayer | null
 }
 
 export interface IndexEntry {

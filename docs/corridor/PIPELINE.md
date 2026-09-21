@@ -233,7 +233,50 @@ every 10 m, `photo_s`, `length_m`, `segments` with tags), `siblings`, `structure
 8/15/40, `canopy` at 15/40), `geology`, `photos`, `lidar` summary, `buildings`, `landuse`, `pois`.
 `write_index` rebuilds `sites/index.json`. The TypeScript mirror is `apps/corridor/src/site.ts`.
 
-### 1.12 Proposals, publish, cluster
+### 1.12 Network sites (`network.py`, `network_tiles.py`) — one region of roads as one world
+
+A `sites.json` entry with `kind: "network"` names a region's roads (`roads`: OSM `name`s or
+`ref`s such as `MD 450`), a `primary` road, a centre and a `radius_m`. `network.roads` fetches
+every `highway` way in the radius carrying one of those identities (one Overpass query, cached),
+drops footways/service/tracks, chains each identity with `osm._chains`, discards stubs under
+120 m, and picks the **primary** as the longest chain of the primary road. **Junctions** are OSM
+node ids shared between chains, positioned in the site frame with their along-track `s` on each
+chain. `write_vectors` emits the usual files: `spine_utm.json` (the primary as `coords`, every
+other chain as a `sibling` with the additive keys `id name ref ident highway lanes oneway
+length_m junctions`, plus `network: true`, `primary.junctions`, `roads`), `site.json` whose
+`corridor` is the **union of every chain buffered 150 m**, `osm.geojson` inside that union's hull,
+`crossings.json` for the primary.
+
+Rasters follow the corridor's bbox. Under 6 km a side (Arrowhead Farms: 2.6 × 4.3 km) the
+single-image path runs unchanged; over it (Crofton–Crownsville: 18.8 × 18.2 km, 30.7 km² of
+corridor) the **tiled path** does:
+
+- DEM via `dem.fetch_dem` over the whole bbox (deflate; the bbox is mostly fields, they compress);
+- NAIP at **1 m** (`naip_tiled`): only the 4 km service tiles that touch the corridor, written
+  window by window into one JPEG GeoTIFF — 0.3 m over 18 km would be 5 GB;
+- lidar tile-wise (`lidar_tiled`): TNM LAZ delivery tiles of the newest project, each read,
+  reprojected, clipped to the corridor and scattered into **1 km output tiles** (min ground, max
+  surface, max vegetation/unassigned, deck max/count, building count) — the whole cloud (~150 M
+  points) never exists in memory; class 17/18 demoted per tile when over 3 %; only points within
+  15 m of a road are kept (`lidar/corridor.laz`) for the structure tests; per-tile GeoTIFFs under
+  `lidar/tiles/<x>_<y>.*.tif` and `gdalbuildvrt` VRTs over them;
+- profiles per chain with `LazyRaster` (the VRT answering `arr[r, c]` in row bands) so
+  `lidar.profile` runs unchanged on a 16 km branch.
+
+Every branch gets its own `lidar.profile` (grade lifted onto its decks, structures) into
+`branches.json`; `export.py` turns those into the manifest's **`branches`** (main's schema):
+`coords [x, y, z]` every 10 m smoothed like the spine, `junctions` with `z`, `s_on_primary`,
+`profile {s, road_z}`, `structures`, `surface: null`. `siblings` stays as before for the old
+viewer path. Tiled sites export `web/tiles/0/<x>_<y>.dem.png|chm.png|naip.jpg` (same encodings,
+2 m / 2 m / 1 m, chm zeroed over every carriageway and building) and
+`layers.tiles = {size_m: 1000, origin, res, dir, list: [{x, y, dem: {zmin, zscale}, chm, naip}]}`
+instead of the single-image dem/chm/naip layers; the horizon stays one image. `cuts`/`rock`/
+`water` are skipped on tiled sites until they sample lazily.
+
+Run: `python -m corridor fetch arrowhead-farms-network` (7 min) /
+`fetch crofton-crownsville --half-width 150 --lidar-half-width 150`.
+
+### 1.13 Proposals, publish, cluster
 
 `areas.py` (`python -m corridor areas`) proposes neutral adjustment-area polygons from what the
 bake measured: a canopy side that reads < 40 % of the other (a leaf-off flight line), canopy runs
@@ -427,9 +470,9 @@ consumer:
 
 | bake | manifest key | viewer | detects |
 |---|---|---|---|
-| `cuts.py` | `cuts` | `rocks.ts` | cut faces from `profile.ground_rel` + the DTM: ground rising > 0.6 m/m within 15 m of pavement for ≥ 20 m; `artificial` (straight, constant slope, parallel to the road) vs `natural` (ravine walls both sides, following a stream) |
-| `rock.py` | `rock` | `rocks.ts` | exposed rock: bare ground (no canopy) with high 1 m roughness, slope > 30°, lithology from `geology.json`, NAIP grey/brown → polygons with a rock type; the kit is 4–6 boulder/ledge GLBs per lithology |
-| `water.py` | `water` | `water.ts` | OSM `waterway=*` / `natural=water` snapped to the DTM low line → water mesh with an animated normal shader; falls where a stream drops > 2 m over 20 m → whitewater strip |
+| `cuts.py` | `cuts` | `rocks.ts` | cut faces from 1 m DTM transects every 4 m: a 5 m window steeper than 0.6 m/m rising ≥ 3 m with its toe inside 40 m, for ≥ 20 m; `artificial` (toe parallel to the road, std ≤ 3 m) vs `natural` (toe wanders, a stream beside it, both sides rising) |
+| `rock.py` | `rock` | `rocks.ts` | exposed rock: slope > 40° with ≥ 3 m of relief over 7 m, bare or inside a cut face (1 m roughness and leaf-on NAIP colour were measured and do not separate rock from soil; intensity is recorded per polygon), lithology from `geology.json` → polygons with a rock type; the kit is 4 boulder/ledge/talus GLBs per lithology (`probes/terrain-rockkit.mjs`) |
+| `water.py` | `water` | `water.ts` | OSM `waterway=*` / `natural=water` snapped to the DTM low line (±6 m; the OSM line is within 3 m of it 9 times in 10) → ribbon at channel + `WATER_DEPTH` with a scrolling-noise normal; culverts skipped; runs of 20 m windows dropping > 2 m → foam ribbon (`falls` if grade > 0.25, else `rapids`) |
 
 See `DESIGN.md` for the rules and `SITES.md` for what each baked site actually contains.
 

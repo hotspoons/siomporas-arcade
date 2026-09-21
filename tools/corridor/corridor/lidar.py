@@ -52,6 +52,10 @@ DATASETS = [
     "MD_VA_NCB_KGeorge_1_2020",
     "USGS_LPC_MD_VA_Sandy_NCR_2014_LAS_2015",
 ]
+# EPT sets that are older AND mis-classified (Sandy NCR 2014 uses class 17/18 as junk bins and has
+# no vegetation classes): skipped in favour of the TNM delivery tiles, where MD_Central_Processing_D24
+# (2020, vegetation classified) covers the same ground — a rule, not a per-site flag (main, 2026-09-21).
+PREFER_TNM_OVER = {"USGS_LPC_MD_VA_Sandy_NCR_2014_LAS_2015"}
 # a deck's underside is a plane: lowest point per 2 m lateral cell agrees across the road.
 # Real decks measured ≤ 0.28 m std / ≤ 0.74 m range; tree canopy over a narrow road ≥ 1.2 / ≥ 3.
 DECK_UNDERSIDE_STD = 0.5
@@ -154,6 +158,9 @@ def fetch_points(frame: Frame, bbox: tuple[float, float, float, float], cache: P
     ds = ""
     keys: list[str] = []
     for ds, ept in candidate_datasets(bbox_merc, cache):
+        if ds in PREFER_TNM_OVER:
+            print(f"  lidar   {ds}: junk-bin classification, preferring the TNM delivery tiles", flush=True)
+            continue
         keys = nodes_for(ds, ept, bbox_merc, cache)
         print(f"  lidar   {ds}: {len(keys)} octree nodes", flush=True)
         if not keys:

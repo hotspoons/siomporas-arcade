@@ -9,6 +9,7 @@ import { Impostors } from './impostors'
 import { Grass } from './grass'
 import { LOOK, type Season } from './season'
 import { GRASS_TYPES, forestFloorTexture, grassTypeFor } from './groundcover'
+import { CROP_TYPES, buildCrops, tickCrops, type CropType, type Field as CropField } from './crops'
 import { buildStrip, sinkUnderStrip } from './strip'
 import { Adjustments, NEUTRAL as NEUTRAL_ADJ } from './adjust'
 import { buildPlacements, loadCatalog, loadPlacements } from './placements'
@@ -26,7 +27,7 @@ export const toWorld = (x: number, y: number, z: number) => new THREE.Vector3(x,
 export interface Site {
   manifest: Manifest
   group: THREE.Group
-  layers: { imagery?: THREE.Mesh; canopy?: THREE.Mesh; trees?: THREE.Group; road: THREE.Group; horizon?: THREE.Mesh; structures: THREE.Group; spine: THREE.Group; markers: THREE.Group; placements: THREE.Group; buildings: THREE.Group; power: THREE.Group; rocks: THREE.Group; water: THREE.Group }
+  layers: { imagery?: THREE.Mesh; canopy?: THREE.Mesh; trees?: THREE.Group; grass?: THREE.Group; crops?: THREE.Group; road: THREE.Group; horizon?: THREE.Mesh; structures: THREE.Group; spine: THREE.Group; markers: THREE.Group; placements: THREE.Group; buildings: THREE.Group; power: THREE.Group; rocks: THREE.Group; water: THREE.Group }
   /** how many footprints were massed, and how many had a real measured height */
   buildingStats: { count: number; gabled: number; fromLidar: number }
   adjustments: Adjustments
@@ -38,6 +39,8 @@ export interface Site {
   waterStats: { lines: number; areas: number; falls: number; length_m: number }
   /** canopy height (m) above the ground at site x,y — the CHM the trees and the grass rule read */
   canopyAt: (x: number, y: number) => number
+  /** crop rows built per field, by crop type (probes read this) */
+  cropRows: Record<string, number>
   /** per-frame: move the near-field tree models and the grass ring to follow the eye; fwd/pitch shape the LOD footprint */
   updateNear: (eye: THREE.Vector3, time: number, fwd?: THREE.Vector3, pitch?: number) => void
   /** a knob changed: re-pick trees and re-seed grass on the next frame */
@@ -448,6 +451,7 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
   let treesNearWorld: (x: number, z: number, r: number) => [number, number, number][] = () => []
   let currentSeason: Season = initialSeason
   let grassRef: Grass | null = null
+  let crops: ReturnType<typeof buildCrops> | null = null
   let canopyAtRef: (x: number, y: number) => number = () => 0
   if (chm) {
     // distance to the nearest PAVEMENT EDGE of any carriageway (negative = on the pavement):
@@ -826,9 +830,63 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
     const canopyAt = sampler(chm)
     canopyAtRef = canopyAt
     const grassAdj = { ...NEUTRAL_ADJ }
-    const grass = new Grass(groundNear, canopyAt, roadDistance, 0, LOOK[currentSeason], lite ? 90_000 : 400_000, lite ? 26 : 40, fog, adjustments.active ? (x, y) => { const a = adjustments.at(x, y, grassAdj); return [a.grass_height, a.grass_density] } : undefined, undefined, heightAt)
-    trees.add(grass.mesh)
+    const grass = new Grass(groundNear, canopyAt, roadDistance, 0, LOOK[currentSeason], lite ? 90_000 : 400_000, lite ? 26 : 40, fog, adjustments.active ? (x, y) => { const a = adjustments.at(x, y, grassAdj); return a.cover === 'crop' ? [1, 0] : [a.grass_height, a.grass_density] } : undefined, undefined, heightAt)
+    // NOT a child of `trees`. It was, and so the trees checkbox turned off all ground cover with
+    // them — you could not hide the trees to look at the grass, which is most of what looking at
+    // grass involves. Its own group, its own layer toggle.
+    group.add(grass.mesh)
     grassRef = grass
+
+    // --- crop fields ---------------------------------------------------------------------------
+    // Two sources, as main's 009 sets out: OSM farmland rings from the bake, and the editor's
+    // authored `cover: 'crop'` areas, which win where they overlap because a person looked.
+    const fields: CropField[] = []
+    const asCrop = (v: string | null): CropType | null => (v && (CROP_TYPES as string[]).includes(v) ? (v as CropType) : null)
+    // a field's rows are never random and almost never due north; the road is the one direction we
+    // know, so the default heading is the bearing of the spine nearest the field (editor-knobs, 900)
+    const headingNear = (cx: number, cy: number): number => {
+      let best = Infinity, bestS = 0
+      for (let s = 0; s <= curveLen; s += 25) {
+        const p = spineAt(s)
+        const d = (p.pos.x - cx) ** 2 + (-p.pos.z - cy) ** 2
+        if (d < best) { best = d; bestS = s }
+      }
+      const dir = spineAt(bestS).dir
+      return (Math.atan2(dir.x, -dir.z) * 180) / Math.PI
+    }
+    const centroidOf = (ring: [number, number][]): [number, number] => {
+      let x = 0, y = 0
+      for (const [px, py] of ring) { x += px; y += py }
+      return [x / ring.length, y / ring.length]
+    }
+    if (T.CROP_AUTO_FARMLAND > 0) {
+      for (const lu of manifest.landuse ?? []) {
+        if (lu.class !== 'farmland') continue
+        const ring = lu.ring as [number, number][]
+        if (ring.length < 3) continue
+        const [cx, cy] = centroidOf(ring)
+        // nothing in the bake says which crop; corn is the mid-Atlantic default and the editor
+        // overrides it per polygon. Alternating by ring keeps a run of fields from being uniform.
+        const crop: CropType = hash2(cx, cy) < 0.5 ? 'corn' : 'soy'
+        fields.push({ polygon: ring, crop, headingDeg: headingNear(cx, cy), spacing: 0 })
+      }
+    }
+    for (const ar of adjustments.list) {
+      const a = ar.adjust ?? {}
+      if (a.cover !== 'crop') continue
+      const ring = ar.polygon as [number, number][]
+      const [cx, cy] = centroidOf(ring)
+      fields.push({
+        polygon: ring,
+        crop: asCrop(a.crop ?? null) ?? 'corn',
+        headingDeg: a.row_heading_deg ?? headingNear(cx, cy),
+        spacing: a.row_spacing_m ?? 0,
+      })
+    }
+    if (fields.length) {
+      crops = buildCrops(fields, currentSeason, groundAtWorld, edgeDistanceWorld)
+      group.add(crops.group)
+    }
     // what grows on this verge, read off the bake; GRASS_TYPE overrides it from the F6 panel
     const bakedGrassType = grassTypeFor(manifest)
     grass.setType(bakedGrassType)
@@ -893,6 +951,7 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
         if (near.update(eye, false, fwd, pitch)) refreshFar(near.near, eye, fwd, pitch)
         grass.update(eye, fwd, pitch)
         grass.tick(time)
+        if (crops) tickCrops(crops.group, time)
         imp!.tick()
       }
     } else {
@@ -902,6 +961,7 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
         if (near.update(eye, false, fwd, pitch)) t.refresh(near.near)
         grass.update(eye, fwd, pitch)
         grass.tick(time)
+        if (crops) tickCrops(crops.group, time)
       }
     }
     retune = () => {
@@ -923,6 +983,7 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
       const look = LOOK[season]
       near.setSeason(look)
       grass.setLook(look)
+      crops?.setSeason(season)
       for (const st of [strip, ...branchStrips]) st.setTint(look.grass.base.clone().multiplyScalar(2.0).lerp(new THREE.Color(0xffffff), 0.4), imagery ? look.ground : bare)
       terrainMat.color.copy(imagery && terrainMat.map ? look.ground : bare)
       if (horizon && (horizon.material as THREE.MeshStandardMaterial).map) (horizon.material as THREE.MeshStandardMaterial).color.copy(look.ground)
@@ -1065,7 +1126,7 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
   return {
     manifest,
     group,
-    layers: { imagery: terrain, canopy, trees, road, horizon, structures, spine, markers, placements: placementsGroup, buildings: built.group, power: power.group, rocks: rocks.group, water: water.group },
+    layers: { imagery: terrain, canopy, trees, grass: grassRef?.mesh, crops: crops?.group, road, horizon, structures, spine, markers, placements: placementsGroup, buildings: built.group, power: power.group, rocks: rocks.group, water: water.group },
     buildingStats: built.stats,
     adjustments,
     treeCount,
@@ -1073,6 +1134,7 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
     rockCounts: rocks.counts,
     waterStats: { lines: water.lines, areas: water.areas, falls: water.falls, length_m: water.length_m },
     canopyAt: canopyAtRef,
+    cropRows: crops?.counts ?? {},
     updateNear,
     retune,
     setSeason,

@@ -39,12 +39,6 @@ console.log(await page.evaluate(({ thin, hide, wire }) => {
   const named = new Map()
   site.group.traverse((o) => { if (o.name) named.set(o.name, o) })
   const hideOne = (n) => {
-    // the grass mesh is a CHILD of the `trees` group, so hiding trees hides ground cover too;
-    // hide its siblings instead when asked for trees
-    if (n === 'trees' && site.layers.trees) {
-      for (const ch of site.layers.trees.children) if (ch !== site.grass?.mesh) ch.visible = false
-      return true
-    }
     if (n === 'grass' && site.grass) { site.grass.mesh.visible = false; return true }
     if (n === 'imagery') {
       site.setImagery(false)

@@ -16,6 +16,19 @@ export interface Adjust {
   ground_offset_m: number
   surface_class: string | null
   species: string | null
+  // --- authored by the editor (editor-knobs, 900), consumed here ------------------------------
+  /** how much paint this stretch carries (road-and-car) */
+  markings: string | null
+  /** the centre line's kind over this stretch (road-and-car) */
+  centre_line: string | null
+  /** what covers this ground when the bake's guess is wrong (world-look) */
+  cover: string | null
+  /** which crop, when `cover` is 'crop' */
+  crop: string | null
+  /** compass bearing the crop rows run along; only read when cover === 'crop', so 0 is neutral */
+  row_heading_deg: number
+  /** metres between crop rows; 0 = the crop's own default */
+  row_spacing_m: number
 }
 
 export interface Area {
@@ -26,7 +39,7 @@ export interface Area {
   adjust: Partial<Adjust>
 }
 
-export const NEUTRAL: Adjust = { canopy_scale: 1, canopy_offset_m: 0, tree_density: 1, grass_height: 1, grass_density: 1, ground_offset_m: 0, surface_class: null, species: null }
+export const NEUTRAL: Adjust = { canopy_scale: 1, canopy_offset_m: 0, tree_density: 1, grass_height: 1, grass_density: 1, ground_offset_m: 0, surface_class: null, species: null, markings: null, centre_line: null, cover: null, crop: null, row_heading_deg: 0, row_spacing_m: 0 }
 
 interface Prepared {
   area: Area
@@ -66,6 +79,11 @@ export class Adjustments {
       })
   }
 
+  /** the authored areas themselves: crops and covers are read per POLYGON, not per point */
+  get list(): readonly Area[] {
+    return this.areas.map((p) => p.area)
+  }
+
   /** True when any area with a non-neutral adjustment exists — callers can skip work otherwise. */
   get active(): boolean {
     return this.areas.some((p) => Object.entries(p.area.adjust ?? {}).some(([k, v]) => v !== null && v !== (NEUTRAL as unknown as Record<string, unknown>)[k]))
@@ -74,7 +92,11 @@ export class Adjustments {
   /** Composite adjustment at a site-frame point (x east, y north). */
   at(x: number, y: number, out: Adjust = { ...NEUTRAL }): Adjust {
     Object.assign(out, NEUTRAL)
-    let bestSurface = Infinity, bestSpecies = Infinity
+    // every categorical key is smallest-polygon-wins, and so are the crop row FIELD ATTRIBUTES:
+    // a heading and a row spacing describe a field, they are not corrections, so overlapping
+    // areas must not multiply or sum them (editor-knobs, 900)
+    let bestSurface = Infinity, bestSpecies = Infinity, bestMark = Infinity, bestLine = Infinity
+    let bestCover = Infinity, bestCrop = Infinity, bestHeading = Infinity, bestSpacing = Infinity
     for (const p of this.areas) {
       const b = p.bbox
       if (x < b[0] || x > b[2] || y < b[1] || y > b[3]) continue
@@ -88,6 +110,12 @@ export class Adjustments {
       out.ground_offset_m += a.ground_offset_m ?? 0
       if (a.surface_class && p.size < bestSurface) { bestSurface = p.size; out.surface_class = a.surface_class }
       if (a.species && p.size < bestSpecies) { bestSpecies = p.size; out.species = a.species }
+      if (a.markings && p.size < bestMark) { bestMark = p.size; out.markings = a.markings }
+      if (a.centre_line && p.size < bestLine) { bestLine = p.size; out.centre_line = a.centre_line }
+      if (a.cover && p.size < bestCover) { bestCover = p.size; out.cover = a.cover }
+      if (a.crop && p.size < bestCrop) { bestCrop = p.size; out.crop = a.crop }
+      if (a.row_heading_deg != null && p.size < bestHeading) { bestHeading = p.size; out.row_heading_deg = a.row_heading_deg }
+      if (a.row_spacing_m != null && p.size < bestSpacing) { bestSpacing = p.size; out.row_spacing_m = a.row_spacing_m }
     }
     return out
   }

@@ -150,6 +150,7 @@ function applyLayers() {
   site.layers.buildings.visible = on('buildings')
   if (site.layers.power) site.layers.power.visible = on('power')
   if (site.layers.trees) site.layers.trees.visible = on('trees')
+  if (site.layers.grass) site.layers.grass.visible = on('grass')
   site.layers.road.visible = on('road')
   if (site.layers.horizon) site.layers.horizon.visible = on('horizon')
   site.layers.structures.visible = on('structures')
@@ -633,4 +634,9 @@ function frame() {
   requestAnimationFrame(frame)
 }
 
-loadIndex().then(frame).catch((e) => status(`failed: ${e.message}`))
+// the stack matters: `status()` shows only the message, and a load failure here is usually a
+// shader or a missing layer several files down
+loadIndex().then(frame).catch((e) => {
+  console.error('corridor: load failed', e)
+  status(`failed: ${e.message}`)
+})

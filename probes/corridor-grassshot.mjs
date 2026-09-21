@@ -18,9 +18,9 @@ await page.waitForFunction((slug) => window.corridor?.site?.manifest?.slug === s
 await page.keyboard.press('m') // the info panel covers half the frame
 await page.evaluate(() => {
   const c = window.corridor, L = c.site.layers
-  // the near tree models are the other swiftshader hog — but the grass mesh is a CHILD of the
-  // `trees` group, so hiding that group hides the grass with it. Hide its siblings instead.
-  if (L.trees) for (const ch of L.trees.children) ch.visible = ch === c.site.grass.mesh
+  // the near tree models are the other swiftshader hog; grass is its own layer now, so this
+  // leaves it alone
+  if (L.trees) L.trees.visible = false
   c.site.grass.mesh.visible = true
   c.tune.set('GRASS_RADIUS', 22)
   c.tune.set('GRASS_SPRITE_RADIUS', 120)

@@ -38,6 +38,19 @@ export let GRASS_SCATTER = 0.7
 export let GRASS_SLOPE_MAX = 0.7
 /** past the strip's blend band, no grass where the ground stands this far above the bare DEM (m): that is a shelf, not ground. 0 = off */
 export let GRASS_MAX_SHELF = 1.0
+
+// --- crops --------------------------------------------------------------------------------------
+/** 1 = grow crops on every OSM farmland ring as well as on authored areas */
+export let CROP_AUTO_FARMLAND = 1
+/** row spacing × this: the whole field coarsens or tightens together */
+export let CROP_ROW_SCALE = 1
+/** metres of row per ribbon segment: shorter follows the ground better and costs more */
+export let CROP_SEGMENT_M = 4
+/** metres of row per repeat of the plant texture */
+export let CROP_TEXTURE_M = 2
+/** no crop closer than this to a pavement edge (m) */
+export let CROP_MIN_FROM_ROAD = 2
+export let CROP_WIND = 1
 /** sprite clumps: from the mid ring out to this radius (m), cards per m², size multiplier */
 export let GRASS_SPRITE_RADIUS = 300
 export let GRASS_SPRITE_PER_M2 = 0.8
@@ -265,6 +278,17 @@ export const TUNE_TABS: TuneTab[] = [
           tune('GRASS_SCATTER', () => GRASS_SCATTER, (v) => (GRASS_SCATTER = v), [0.1, 2], 0.05, 'blade scatter around the clump (m)'),
           tune('GRASS_SLOPE_MAX', () => GRASS_SLOPE_MAX, (v) => (GRASS_SLOPE_MAX = v), [0.1, 3], 0.05, 'no turf steeper than this (m/m)'),
           tune('GRASS_MAX_SHELF', () => GRASS_MAX_SHELF, (v) => (GRASS_MAX_SHELF = v), [0, 8], 0.1, 'no turf this far above the bare DEM (m); 0 = off'),
+        ],
+      },
+      {
+        title: 'crops',
+        keys: [
+          tune('CROP_AUTO_FARMLAND', () => CROP_AUTO_FARMLAND, (v) => (CROP_AUTO_FARMLAND = v), [0, 1], 1, 'grow crops on OSM farmland too, not only authored areas'),
+          tune('CROP_ROW_SCALE', () => CROP_ROW_SCALE, (v) => (CROP_ROW_SCALE = v), [0.3, 4], 0.05, 'row spacing ×'),
+          tune('CROP_SEGMENT_M', () => CROP_SEGMENT_M, (v) => (CROP_SEGMENT_M = v), [1, 20], 0.5, 'm of row per segment'),
+          tune('CROP_TEXTURE_M', () => CROP_TEXTURE_M, (v) => (CROP_TEXTURE_M = v), [0.5, 8], 0.1, 'm of row per texture repeat'),
+          tune('CROP_MIN_FROM_ROAD', () => CROP_MIN_FROM_ROAD, (v) => (CROP_MIN_FROM_ROAD = v), [0, 20], 0.5, 'm clear of the pavement'),
+          tune('CROP_WIND', () => CROP_WIND, (v) => (CROP_WIND = v), [0, 3], 0.05),
         ],
       },
       {

@@ -110,16 +110,21 @@ def _lith_at(geology: dict, s: float) -> tuple[str | None, str | None, str | Non
     return (pick.get("strat_name") or pick.get("name"), pick.get("lith"), pick.get("descrip")) if pick else (None, None, None)
 
 
-def measure(site_dir: Path) -> dict | None:
+def measure(site_dir: Path, line: LineString | None = None, prof: dict | None = None, prefix: str = "") -> dict | None:
+    """Faces beside one road. `line`/`prof` default to the site's spine; a network passes each
+    chain in turn (see `measure_network`) and `prefix` keeps the face ids unique per road."""
     dtm_p = site_dir / "lidar" / "dtm.tif"
-    if not (dtm_p.exists() and (site_dir / "profile.json").exists()):
+    vrt_p = site_dir / "lidar" / "dtm.vrt"
+    if not ((dtm_p.exists() or vrt_p.exists()) and (site_dir / "profile.json").exists()):
         return None
     site = json.loads((site_dir / "site.json").read_text())
     ox, oy = site["frame"]["origin"]
     sp = json.loads((site_dir / "spine_utm.json").read_text())
-    prof = json.loads((site_dir / "profile.json").read_text())
+    if prof is None:
+        prof = json.loads((site_dir / "profile.json").read_text())
     geology = json.loads((site_dir / "geology.json").read_text()) if (site_dir / "geology.json").exists() else {}
-    line = LineString(sp["coords"])
+    if line is None:
+        line = LineString(sp["coords"])
     s = np.arange(0.0, line.length, STEP_M)
     p = np.array([line.interpolate(v).coords[0] for v in s])
     a = np.array([line.interpolate(min(v + 1.0, line.length)).coords[0] for v in s])
@@ -163,8 +168,14 @@ def measure(site_dir: Path) -> dict | None:
         def detect(slope_min: float, rise_min: float, forced_class: str | None) -> None:
             for side, sg in (("left", 1.0), ("right", -1.0)):
                 Z = np.zeros((len(s), len(OFFSETS)))
-                for j, o in enumerate(OFFSETS):
-                    Z[:, j] = sample(p + normal * (sg * o)) - road_z
+                # CHUNKED ON PURPOSE: a network's sampler reads a window per call (water._Heights),
+                # so asking for one lateral offset down a 16 km road would read the whole raster 69
+                # times. One chunk of stations x every offset is a compact box.
+                CHUNK = 256
+                for i0 in range(0, len(s), CHUNK):
+                    sl = slice(i0, min(len(s), i0 + CHUNK))
+                    q = np.concatenate([p[sl] + normal[sl] * (sg * o) for o in OFFSETS])
+                    Z[sl] = sample(q).reshape(len(OFFSETS), -1).T - road_z[sl, None]
                 with np.errstate(invalid="ignore"):
                     dz = (Z[:, WINDOW:] - Z[:, :-WINDOW]) / WINDOW  # slope of each 5 m window, at OFFSETS[:-WINDOW]
                 steep = np.nan_to_num(dz, nan=0.0) > slope_min
@@ -207,7 +218,7 @@ def measure(site_dir: Path) -> dict | None:
                     mid = float((s[i0] + s[i1]) / 2)
                     strat, lith, descrip = _lith_at(geology, mid)
                     faces.append({
-                        "id": f"cut-{side[0]}-{int(round(float(s[i0]))):04d}",
+                        "id": f"cut-{prefix}{side[0]}-{int(round(float(s[i0]))):04d}",
                         "side": side,
                         "s_start": round(float(s[i0]), 1), "s_end": round(float(s[i1]), 1), "length_m": round(float(s[i1] - s[i0]), 1),
                         "toe_m": round(toe_med, 1), "toe_std_m": round(toe_std, 1), "top_m": round(float(np.nanmedian(top[sl])), 1),
@@ -228,9 +239,52 @@ def measure(site_dir: Path) -> dict | None:
             f["two_sided_share"] = round(two_sided, 2)
             natural = f["toe_std_m"] > PARALLEL_STD or f["water_share"] >= 0.5 or (two_sided >= 0.5 and f["water_share"] > 0)
             f["class"] = f.pop("forced_class") or ("natural" if natural else "artificial")
+    hz.close()
     faces.sort(key=lambda f: f["s_start"])
     summary = {"faces": len(faces), "artificial": sum(f["class"] == "artificial" for f in faces), "natural": sum(f["class"] == "natural" for f in faces), "total_length_m": round(sum(f["length_m"] for f in faces), 1), "tallest_m": max((f["height_max_m"] for f in faces), default=0.0), "rock_types": sorted({f["rock_type"] for f in faces})}
     out = {"step_m": STEP_M, "thresholds": {"slope_min": SLOPE_MIN, "rise_min_m": RISE_MIN, "natural_slope_min": NATURAL_SLOPE_MIN, "natural_rise_min_m": NATURAL_RISE_MIN, "toe_max_m": TOE_MAX, "run_min_m": RUN_MIN, "window_m": WINDOW, "parallel_std_m": PARALLEL_STD, "water_near_m": WATER_NEAR}, "faces": faces, "summary": summary}
+    (site_dir / "cuts.json").write_text(json.dumps(out))
+    return out
+
+
+def measure_network(site_dir: Path) -> dict | None:
+    """Every road of a network site, faces prefixed by chain id. The branches' own profiles give
+    each road its own driving surface, so a face is measured against the road beside it."""
+    sp_p, br_p = site_dir / "spine_utm.json", site_dir / "branches.json"
+    if not sp_p.exists():
+        return None
+    sp = json.loads(sp_p.read_text())
+    if not sp.get("network"):
+        return measure(site_dir)
+    branches = {b["id"]: b for b in json.loads(br_p.read_text())["branches"]} if br_p.exists() else {}
+    faces: list[dict] = []
+    thresholds: dict = {}
+    prim = measure(site_dir)
+    if prim:
+        thresholds = prim["thresholds"]
+        faces += prim["faces"]
+    for sib in sp.get("siblings", []):
+        b = branches.get(sib.get("id"))
+        if not b or not b.get("profile"):
+            continue
+        g = sib["geometry"]
+        parts = [g["coordinates"]] if g["type"] == "LineString" else g["coordinates"]
+        coords = [c for part in parts for c in part]
+        if len(coords) < 2:
+            continue
+        try:
+            r = measure(site_dir, LineString(coords), b["profile"], f"{sib['id']}-")
+        except Exception as exc:
+            print(f"  cuts    {sib.get('ident')} failed: {exc}")
+            continue
+        if r:
+            for f in r["faces"]:
+                f["road"] = sib.get("ident")
+            faces += r["faces"]
+            thresholds = thresholds or r["thresholds"]
+    faces.sort(key=lambda f: (f.get("road") or "", f["s_start"]))
+    summary = {"faces": len(faces), "artificial": sum(f["class"] == "artificial" for f in faces), "natural": sum(f["class"] == "natural" for f in faces), "total_length_m": round(sum(f["length_m"] for f in faces), 1), "tallest_m": max((f["height_max_m"] for f in faces), default=0.0), "rock_types": sorted({f["rock_type"] for f in faces}), "roads": len({f.get("road") for f in faces})}
+    out = {"step_m": STEP_M, "thresholds": thresholds, "faces": faces, "summary": summary}
     (site_dir / "cuts.json").write_text(json.dumps(out))
     return out
 
@@ -242,7 +296,7 @@ def main() -> None:
 
     slugs = sys.argv[1:] or [d.name for d in sorted((DATA / "sites").glob("*")) if d.is_dir()]
     for slug in slugs:
-        r = measure(DATA / "sites" / slug)
+        r = measure_network(DATA / "sites" / slug)
         if r is None:
             print(f"{slug:24s} no lidar/profile")
             continue

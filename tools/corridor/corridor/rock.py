@@ -47,8 +47,36 @@ AREA_MIN = 15.0
 EDGE_ERODE = 6  # cells of the lidar corridor's rim to ignore (the fill there is not ground)
 
 
-def measure(site_dir: Path) -> dict | None:
-    dtm_p, chm_p = site_dir / "lidar" / "dtm.tif", site_dir / "lidar" / "chm.tif"
+def measure_network(site_dir: Path) -> dict | None:
+    """A tiled site, one 1 m raster tile at a time: the same rule, bounded memory, ids kept unique
+    by the tile they came from. An outcrop straddling a tile edge becomes two polygons — at 15 m²
+    minimum and 1 km tiles that is a rounding error, and the alternative is the 18 km array this
+    whole path exists to avoid."""
+    tdir = site_dir / "lidar" / "tiles"
+    if not tdir.exists():
+        return measure(site_dir)
+    polygons: list[dict] = []
+    tiles = sorted({p.name.split(".")[0] for p in tdir.glob("*.dtm.tif")})
+    for t in tiles:
+        try:
+            r = measure(site_dir, tdir / f"{t}.dtm.tif", tdir / f"{t}.chm.tif", f"{t}-")
+        except Exception as exc:
+            print(f"  rock    tile {t} failed: {exc}")
+            continue
+        if r:
+            polygons += r["polygons"]
+    polygons.sort(key=lambda q: q["s"])
+    by_type: dict[str, float] = {}
+    for q in polygons:
+        by_type[q["rock_type"]] = round(by_type.get(q["rock_type"], 0.0) + q["area_m2"], 1)
+    out = {"thresholds": _thresholds(), "polygons": polygons, "summary": {"count": len(polygons), "area_m2": round(sum(q["area_m2"] for q in polygons), 1), "in_cut": sum(q["in_cut"] for q in polygons), "by_type": by_type, "tiles": len(tiles)}}
+    (site_dir / "rock.json").write_text(json.dumps(out))
+    return out
+
+
+def measure(site_dir: Path, dtm_override: Path | None = None, chm_override: Path | None = None, prefix: str = "") -> dict | None:
+    dtm_p = dtm_override or site_dir / "lidar" / "dtm.tif"
+    chm_p = chm_override or site_dir / "lidar" / "chm.tif"
     if not (dtm_p.exists() and chm_p.exists()):
         return None
     site = json.loads((site_dir / "site.json").read_text())
@@ -59,9 +87,27 @@ def measure(site_dir: Path) -> dict | None:
         tr = s1.transform
         bounds = s1.bounds
     valid = dtm > -9000
+    # WHEN TO FALL BACK TO THE DEM. Not "most of this raster is nodata" — a corridor's DTM is a
+    # 200 m strip inside a bbox, so it is ALWAYS mostly nodata (Sideling: 38% valid) and that
+    # trigger silently tripled its rock by detecting DEM slopes out where the CHM is 0 and every
+    # cell reads as bare. The real question is whether the lidar covered THE ROAD, which is what
+    # Bonnie Branch's one-tile bake failed: sample the spine and fall back only if it did not.
     valid_before = float(valid.mean())
-    if valid_before < 0.5 and (site_dir / "dem_1m.tif").exists():
-        # the lidar covered a sliver (Bonnie Branch): the bare-earth DEM stands in on the DTM grid
+    road_cover = 1.0
+    sp_p = site_dir / "spine_utm.json"
+    if sp_p.exists() and dtm_override is None:
+        from shapely.geometry import LineString as _LS
+
+        ln = _LS(json.loads(sp_p.read_text())["coords"])
+        qs = np.arange(0.0, ln.length, 20.0)
+        if len(qs):
+            q = np.array([ln.interpolate(v).coords[0] for v in qs])
+            rr, cc = rasterio.transform.rowcol(tr, q[:, 0], q[:, 1])
+            rr = np.clip(np.asarray(rr), 0, dtm.shape[0] - 1)
+            cc = np.clip(np.asarray(cc), 0, dtm.shape[1] - 1)
+            road_cover = float(valid[rr, cc].mean())
+    if road_cover < 0.7 and (site_dir / "dem_1m.tif").exists():
+        # the lidar missed the road itself: the bare-earth DEM stands in on the DTM grid
         from rasterio.windows import from_bounds
 
         with rasterio.open(site_dir / "dem_1m.tif") as sd:
@@ -70,7 +116,7 @@ def measure(site_dir: Path) -> dict | None:
         use = (dem > -9000) & ~valid
         dtm[use] = dem[use]
         valid = dtm > -9000
-        print(f"  rock    DTM {100 * valid_before:.1f}% valid; DEM filled {int(use.sum()):,} cells", flush=True)
+        print(f"  rock    lidar covers {100 * road_cover:.0f}% of the road ({100 * valid_before:.0f}% of the raster); DEM filled {int(use.sum()):,} cells", flush=True)
     if valid.sum() < 100:
         return None
     idx = ndimage.distance_transform_edt(~valid, return_distances=False, return_indices=True)
@@ -104,7 +150,8 @@ def measure(site_dir: Path) -> dict | None:
     labels, n = ndimage.label(mask)
     if n == 0:
         out = {"thresholds": _thresholds(), "polygons": [], "summary": {"count": 0, "area_m2": 0.0, "in_cut": 0, "by_type": {}}}
-        (site_dir / "rock.json").write_text(json.dumps(out))
+        if dtm_override is None:
+            (site_dir / "rock.json").write_text(json.dumps(out))
         return out
 
     # per-region statistics
@@ -182,7 +229,7 @@ def measure(site_dir: Path) -> dict | None:
         s_at = float(spine.project(cen))
         strat, lith, descrip = _lith_at(geology, s_at)
         polygons.append({
-            "id": f"rock-{int(round(s_at)):04d}-{k}",
+            "id": f"rock-{prefix}{int(round(s_at)):04d}-{k}",
             "ring": [[round(x - ox, 1), round(y - oy, 1)] for x, y in pg.exterior.coords[:-1]],
             "area_m2": round(float(pg.area), 1),
             "s": round(s_at, 1),
@@ -200,7 +247,8 @@ def measure(site_dir: Path) -> dict | None:
     for q in polygons:
         by_type[q["rock_type"]] = round(by_type.get(q["rock_type"], 0.0) + q["area_m2"], 1)
     out = {"thresholds": _thresholds(), "polygons": polygons, "summary": {"count": len(polygons), "area_m2": round(sum(q["area_m2"] for q in polygons), 1), "in_cut": sum(q["in_cut"] for q in polygons), "by_type": by_type}}
-    (site_dir / "rock.json").write_text(json.dumps(out))
+    if dtm_override is None:
+        (site_dir / "rock.json").write_text(json.dumps(out))
     return out
 
 
@@ -215,7 +263,7 @@ def main() -> None:
 
     slugs = sys.argv[1:] or [d.name for d in sorted((DATA / "sites").glob("*")) if d.is_dir()]
     for slug in slugs:
-        r = measure(DATA / "sites" / slug)
+        r = measure_network(DATA / "sites" / slug)
         if r is None:
             print(f"{slug:24s} no lidar")
             continue

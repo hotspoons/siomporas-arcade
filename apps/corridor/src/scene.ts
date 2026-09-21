@@ -634,16 +634,33 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
       const mat = set ? set.material : new THREE.MeshStandardMaterial({ color: 0x3b3b3d, roughness: 1 })
       const mpt = set?.metresPerTile ?? 1
       const pos: number[] = [], uv: number[] = [], idx: number[] = []
-      const ribbons: { coords: [number, number, number][]; width: number }[] = [
-        ...(manifest.driveways ?? []).map((d) => ({ coords: d.coords, width: d.width_m ?? 3.6 })),
+      const ribbons: { coords: [number, number, number][]; width: number; flare?: boolean }[] = [
+        // a driveway meets the road at a dropped kerb, not a flared mouth
+        ...(manifest.driveways ?? []).map((d) => ({ coords: d.coords, width: d.width_m ?? 3.6, flare: false })),
         // a road we do not model, stubbed in from the junction: full width, still unmarked —
         // paint on a 60 m stub that ends in nothing would draw the eye to the seam
-        ...(manifest.stubs ?? []).map((s) => ({ coords: s.coords, width: Math.max(5, (s.lanes ?? 2) * 3.1 + 0.8) })),
+        ...(manifest.stubs ?? []).map((s) => ({ coords: s.coords, width: Math.max(5.5, (s.lanes ?? 2) * 3.1 + 0.8), flare: true })),
       ]
       for (const dw of ribbons) {
         const pts = (dw.coords ?? []).map(([x, y, z]) => toWorld(x, y, z))
         if (pts.length < 2) continue
         const half = Math.max(1.2, (dw.width ?? 3.6) / 2)
+        // the mouth: a side road flares where it meets ours, and drawing it at a constant width
+        // right to the edge is most of why Rich's junction read as an abandoned track. Widen over
+        // the last `MOUTH` metres of whichever end is closest to a carriageway of ours.
+        const MOUTH = 11
+        const endNearRoad = [0, pts.length - 1].map((i) => edgeDistance(pts[i].x, pts[i].z, -1).d)
+        const flareAt = dw.flare === false ? -1 : endNearRoad[0] <= endNearRoad[1] ? 0 : pts.length - 1
+        const run: number[] = [0]
+        for (let i = 1; i < pts.length; i++) run.push(run[i - 1] + Math.hypot(pts[i].x - pts[i - 1].x, pts[i].z - pts[i - 1].z))
+        const total = run[run.length - 1]
+        const halfAtI = (i: number) => {
+          if (flareAt < 0) return half
+          const d = flareAt === 0 ? run[i] : total - run[i]
+          if (d >= MOUTH) return half
+          const f = 1 - d / MOUTH
+          return half + f * f * half * 1.5 // a quadratic flare reads as the corner radius
+        }
         const base = pos.length / 3
         for (let i = 0; i < pts.length; i++) {
           const a = pts[Math.max(0, i - 1)], b = pts[Math.min(pts.length - 1, i + 1)]
@@ -652,18 +669,21 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
           const sx = -dz / n, sz = dx / n // right of travel
           const g = groundAtWorld(pts[i].x, pts[i].z)
           const y = (g ?? pts[i].y) + 0.03
+          const hw = halfAtI(i)
           for (const s of [-1, 1]) {
-            pos.push(pts[i].x + sx * half * s, y, pts[i].z + sz * half * s)
-            uv.push((pts[i].x + sx * half * s) / mpt, (pts[i].z + sz * half * s) / mpt)
+            pos.push(pts[i].x + sx * hw * s, y, pts[i].z + sz * hw * s)
+            uv.push((pts[i].x + sx * hw * s) / mpt, (pts[i].z + sz * hw * s) / mpt)
           }
-          if (i % 2 === 0) {
-            const rec: St = { x: pts[i].x, z: pts[i].z, dx: dx / n, dz: dz / n, s: 0, half, who: -2, off: 0, y }
-            driveStations.push(rec)
-            const k = `${Math.floor(rec.x / stCell)},${Math.floor(rec.z / stCell)}`
-            const arr = stGrid.get(k)
-            if (arr) arr.push(rec)
-            else stGrid.set(k, [rec])
-          }
+          // A STATION AT EVERY POINT. edgeDistance treats a lone station as a disc beyond ±2.6 m
+          // along-track, so stations 8 m apart left 1.4 m gaps between the discs and grass grew
+          // up through the asphalt in every one of them (Rich, 2026-09-21). At 4 m spacing every
+          // point on the ribbon is inside some station's along-track band.
+          const rec: St = { x: pts[i].x, z: pts[i].z, dx: dx / n, dz: dz / n, s: 0, half: hw + 0.4, who: -2, off: 0, y }
+          driveStations.push(rec)
+          const k = `${Math.floor(rec.x / stCell)},${Math.floor(rec.z / stCell)}`
+          const arr = stGrid.get(k)
+          if (arr) arr.push(rec)
+          else stGrid.set(k, [rec])
         }
         for (let i = 0; i < pts.length - 1; i++) {
           const a = base + i * 2

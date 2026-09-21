@@ -99,6 +99,9 @@ async function loadSite(slug: string) {
     site,
     scene,
     camera,
+    // the orbit controls re-derive the camera from their own target every frame, so a probe that
+    // only writes camera.position gets dragged back; set orbit.target too, as applyStance does
+    orbit,
     drive,
     THREE, // probes need Raycaster/Vector3 in the page, and there is no other handle on it
 
@@ -110,7 +113,7 @@ async function loadSite(slug: string) {
         const k = tuneKey(name)
         if (!k) return false
         k.set(v)
-        site?.retune()
+        onTuneChange()
         return true
       },
     },
@@ -310,12 +313,29 @@ function applySky(s: Season) {
 }
 const seasonSel = $<HTMLSelectElement>('#season')
 seasonSel.value = season
-seasonSel.onchange = () => {
-  season = seasonSel.value as Season
-  applySky(season)
-  site?.setSeason(season)
-  status(`${season}`)
+function setSeason(s: Season) {
+  season = s
+  seasonSel.value = s
+  applySky(s)
+  site?.setSeason(s)
+  status(`${s}`)
   setTimeout(() => status(''), 1200)
+}
+seasonSel.onchange = () => setSeason(seasonSel.value as Season)
+/** the F6 season knob (tuning.ts SEASON, -1 = leave the selector alone) */
+function applySeasonKnob() {
+  if (T.SEASON < 0) return
+  const want = SEASONS[Math.min(3, Math.max(0, Math.round(T.SEASON)))]
+  if (want !== season) setSeason(want)
+}
+/**
+ * A knob moved. The F6 panel and `window.corridor.tune.set` both come through here, so a probe
+ * sweeping a knob gets exactly what Rich gets from the slider — the first version of the probe
+ * hook called `retune()` alone and the season knob silently did nothing under it.
+ */
+function onTuneChange() {
+  applySeasonKnob()
+  site?.retune()
 }
 
 // A STANCE is everything needed to reproduce what is on screen: site, season, mode, camera (or
@@ -418,7 +438,7 @@ const tunePanels = TUNE_TABS.map((tab) => {
   tuneHost.append(panelEl)
   const p = new TunePanel(panelEl, `corridor-${tab.name}`, tab.sections)
   p.context = () => (captureStance() ?? {}) as Record<string, unknown>
-  p.onChange = () => site?.retune()
+  p.onChange = onTuneChange
   const b = document.createElement('button')
   b.textContent = tab.name
   b.onclick = () => showTuneTab(tab.name)

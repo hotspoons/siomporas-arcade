@@ -30,6 +30,7 @@
 // ring cost anything, and no more than GRASS_TILES_PER_FRAME of them per frame.
 import * as THREE from 'three'
 import type { SeasonLook } from './season'
+import { GRASS_LOOK, type GrassType } from './groundcover'
 import * as T from './tuning'
 
 const SEGMENTS = 6
@@ -162,6 +163,9 @@ export class Grass {
   /** the visible tile set for this eye/heading, nearest first; rebuilt only when the view moved */
   private vis: { key: string; tx: number; tz: number; d: number }[] = []
   private visStale = true
+  /** what grows here: shape multipliers over the season palette and the knobs (groundcover.ts) */
+  private type: GrassType = 'common'
+  private look = GRASS_LOOK.common
   // per-frame cost of the last update(), milliseconds. This box has no GPU (swiftshader renders
   // ~1 frame per 10 s at Rich's density), so the only honest frame-time number we can take here
   // is the CPU half — tile generation and buffer assembly. probes/corridor-grasscpu.mjs reads it.
@@ -444,6 +448,16 @@ export class Grass {
     this.sig = this.signature() // so the FIRST knob change is judged against the built tiles, not ''
   }
 
+  /** the site's grass type; regenerates only if it actually changed (see invalidate) */
+  setType(t: GrassType) {
+    this.type = t
+    this.look = GRASS_LOOK[t]
+    this.invalidate()
+  }
+  get grassType(): GrassType {
+    return this.type
+  }
+
   setLook(look: SeasonLook) {
     for (const m of [this.bladeMat, this.cardMat]) {
       ;(m.uniforms.uBase.value as THREE.Color).copy(look.grass.base)
@@ -461,9 +475,9 @@ export class Grass {
       m.uniforms.uTime.value = t
       // no sway from a moving car: the eye speed (measured in update) fades the wind out
       m.uniforms.uWind.value = T.GRASS_WIND * this.motion
-      m.uniforms.uDry.value = Math.min(1, Math.max(0, this.dryBase + T.GRASS_DRY_ADD))
-      m.uniforms.uHue.value = T.GRASS_HUE
-      m.uniforms.uSat.value = T.GRASS_SAT
+      m.uniforms.uDry.value = Math.min(1, Math.max(0, this.dryBase + T.GRASS_DRY_ADD + this.look.dry))
+      m.uniforms.uHue.value = T.GRASS_HUE + this.look.hue
+      m.uniforms.uSat.value = T.GRASS_SAT * this.look.sat
       m.uniforms.uLight.value = T.GRASS_LIGHT
     }
     this.cardMat.uniforms.uWidth.value = T.GRASS_SPRITE_WIDTH
@@ -481,7 +495,7 @@ export class Grass {
       T.GRASS_SPRITE_PER_M2, T.GRASS_MOW_LINE, T.GRASS_MAX_FROM_ROAD, T.GRASS_PATCHINESS,
       T.GRASS_PATCH_SIZE, T.GRASS_SCATTER, T.GRASS_SLOPE_MAX, T.GRASS_MOWN_HEIGHT,
       T.GRASS_ROUGH_HEIGHT, T.GRASS_LEAN, T.GRASS_HEIGHT_SCALE, T.GRASS_WIDTH_SCALE,
-      T.GRASS_SPRITE_SCALE, this.heightScale,
+      T.GRASS_SPRITE_SCALE, this.heightScale, this.type,
     ].join(',')
   }
   private sig = ''
@@ -654,18 +668,20 @@ export class Grass {
         if (mown) mownCells++
         // the editor's local corrections: [height multiplier, density multiplier]
         const [ah, ad] = this.adjustAt ? this.adjustAt(wx, -wz) : [1, 1]
-        const perCell = withBlades ? Math.round((mown ? T.GRASS_MOWN_PER_M2 : T.GRASS_ROUGH_PER_M2) * (0.7 + 0.6 * patch) * ad) : 0
+        const perCell = withBlades ? Math.round((mown ? T.GRASS_MOWN_PER_M2 : T.GRASS_ROUGH_PER_M2) * this.look.density * (0.7 + 0.6 * patch) * ad) : 0
         // one clump centre per cell; blades scatter around it
         const ccx = wx + (hash(cx * 7919 + cz * 104729) - 0.5) * cell
         const ccz = wz + (hash(cx * 15485863 + cz * 32452843) - 0.5) * cell
         for (let b = 0; b < perCell && n < maxBlades; b++) {
           const h1 = hash(cx * 31 + cz * 17 + b * 101), h2 = hash(cx * 13 + cz * 29 + b * 53)
-          const x = ccx + (h1 - 0.5) * T.GRASS_SCATTER, z = ccz + (h2 - 0.5) * T.GRASS_SCATTER
+          const scatter = T.GRASS_SCATTER * this.look.scatter
+          const x = ccx + (h1 - 0.5) * scatter, z = ccz + (h2 - 0.5) * scatter
           const y = this.groundAt(x, -z) - 0.02
           const rnd = hash(cx * 29 + cz * 31 + b * 3)
-          const height = (mown ? T.GRASS_MOWN_HEIGHT : this.heightScale * T.GRASS_ROUGH_HEIGHT) * ah * T.GRASS_HEIGHT_SCALE * (0.6 + 0.8 * hash(cx * 3 + cz * 5 + b * 7))
-          const width = (mown ? 0.035 : 0.05 + 0.03 * rnd) * T.GRASS_WIDTH_SCALE
-          const lean = 0.15 + T.GRASS_LEAN * hash(cx * 11 + cz * 19 + b * 23)
+          const shape = mown ? this.look.mown : this.look.height
+          const height = (mown ? T.GRASS_MOWN_HEIGHT : this.heightScale * T.GRASS_ROUGH_HEIGHT) * shape * ah * T.GRASS_HEIGHT_SCALE * (0.6 + 0.8 * hash(cx * 3 + cz * 5 + b * 7))
+          const width = (mown ? 0.035 : 0.05 + 0.03 * rnd) * T.GRASS_WIDTH_SCALE * this.look.width
+          const lean = Math.max(0, 0.15 + this.look.lean + T.GRASS_LEAN * hash(cx * 11 + cz * 19 + b * 23))
           const o = n * BLADE_F
           blades[o] = x
           blades[o + 1] = y
@@ -678,12 +694,12 @@ export class Grass {
           n++
         }
         // clump cards: sparse, sized to the cover they stand in
-        const cardsHere = T.GRASS_SPRITE_PER_M2 * (0.7 + 0.6 * patch) * ad
+        const cardsHere = T.GRASS_SPRITE_PER_M2 * this.look.density * (0.7 + 0.6 * patch) * ad
         const want = Math.floor(cardsHere) + (hash(cx * 61 + cz * 67) < cardsHere % 1 ? 1 : 0)
         for (let b = 0; b < want && nc < maxCards; b++) {
           const x = wx + (hash(cx * 71 + cz * 73 + b * 79) - 0.5) * cell, z = wz + (hash(cx * 83 + cz * 89 + b * 97) - 0.5) * cell
           const y = this.groundAt(x, -z) - 0.03
-          const base = mown ? T.GRASS_MOWN_HEIGHT * 1.6 : this.heightScale * T.GRASS_ROUGH_HEIGHT * 0.8
+          const base = (mown ? T.GRASS_MOWN_HEIGHT * 1.6 * this.look.mown : this.heightScale * T.GRASS_ROUGH_HEIGHT * 0.8 * this.look.height)
           const size = base * ah * T.GRASS_HEIGHT_SCALE * T.GRASS_SPRITE_SCALE * (0.75 + 0.5 * hash(cx * 101 + cz * 103 + b * 107))
           const o = nc * CARD_F
           cards[o] = x
@@ -765,8 +781,8 @@ export class Grass {
   }
 
   /** counts for probes and the HUD */
-  get counts(): { blades: number; cards: number; tiles: number; pending: number; motion: number } {
-    return { blades: this.bladeGeo.instanceCount, cards: this.cardGeo.instanceCount, tiles: this.tiles.size, pending: this.pending.length, motion: +this.motion.toFixed(2) }
+  get counts(): { blades: number; cards: number; tiles: number; pending: number; motion: number; type: GrassType } {
+    return { blades: this.bladeGeo.instanceCount, cards: this.cardGeo.instanceCount, tiles: this.tiles.size, pending: this.pending.length, motion: +this.motion.toFixed(2), type: this.type }
   }
 
   /**

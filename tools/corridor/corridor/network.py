@@ -183,8 +183,11 @@ def dead_ends(chains: list[dict], frame: Frame, cache: Path, radius_m: float, si
     tags: dict[int, dict] = {}
     way_count: dict[int, int] = {}
     if ends:
-        ids = ";".join(str(n) for n in sorted(ends))
-        q = f"[out:json][timeout:120];node(id:{ids})->.e;(.e;way(bn.e)[highway];);out tags;"
+        # Overpass `id:` takes COMMAS (semicolons are a syntax error and every mirror 400s on it),
+        # and a way printed with `out tags` carries no node list — so the ways go out as `skel`,
+        # which is ids + nodes and is what "how many roads use this node" actually needs.
+        ids = ",".join(str(n) for n in sorted(ends))
+        q = f"[out:json][timeout:180];node(id:{ids})->.e;.e out tags;way(bn.e)[highway];out skel;"
         try:
             for el in osm.overpass(q, cache)["elements"]:
                 if el["type"] == "node":
@@ -195,16 +198,6 @@ def dead_ends(chains: list[dict], frame: Frame, cache: Path, radius_m: float, si
                             way_count[nid] = way_count.get(nid, 0) + 1
         except Exception as exc:  # a dead end we cannot confirm is better than a failed bake
             print(f"  ends    overpass failed ({exc}); assuming every unshared end is a cul-de-sac")
-    # `out tags` on a way omits its node list, so ask again for the ways' nodes when we got none
-    if ends and not way_count:
-        q2 = f"[out:json][timeout:120];node(id:{ids})->.e;way(bn.e)[highway];out ids;"
-        try:
-            for el in osm.overpass(q2, cache)["elements"]:
-                for nid in el.get("nodes", []) or []:
-                    if nid in ends:
-                        way_count[nid] = way_count.get(nid, 0) + 1
-        except Exception:
-            pass
     ox, oy = frame.origin
     for c in chains:
         c["dead_ends"] = []
@@ -499,3 +492,58 @@ def export_branches(site_dir: Path, ox: float, oy: float) -> list[dict] | None:
             "structures": b.get("structures") or [], "surface": None,
         })
     return out
+
+
+def revector(site: dict, data: Path, cache: Path) -> dict:
+    """Re-run only the OSM stage of a network site and patch the vectors in place.
+
+    A rule that lives before the rasters — dead ends, a junction change, a road added to the list —
+    must not cost a re-bake: Crofton's was 8.7 hours, and every Overpass answer it used is cached,
+    so this is seconds. Rewrites `spine_utm.json` (and the manifest's spine block) and leaves every
+    raster, profile and branch profile exactly where it is; `branches.json` keeps its profiles and
+    gains the new per-chain keys. Follow it with `python -m corridor export <slug>`.
+    """
+    slug = site["slug"]
+    out = data / "sites" / slug
+    frame = Frame.at(site["lon"], site["lat"])
+    old_spine = json.loads((out / "spine_utm.json").read_text()) if (out / "spine_utm.json").exists() else {}
+    R = roads(site, frame, cache / "overpass")
+    print(f"  roads   {summary(R)}", flush=True)
+    dead_ends(R["chains"], frame, cache / "overpass", float(site.get("radius_m", 9000)), site["lat"], site["lon"])
+    if old_spine.get("coords") and len(R["primary"]["line"].coords) != len(old_spine["coords"]):
+        print(f"  WARNING the primary changed shape ({len(old_spine['coords'])} -> {len(R['primary']['line'].coords)} points): profiles are keyed to the OLD line, re-bake instead", flush=True)
+    half_width = float((json.loads((out / "manifest.json").read_text()).get("params") or {}).get("half_width_m", 150.0))
+    write_vectors(site, frame, R, out, half_width, cache / "overpass")
+    # branches keep their profiles; the per-chain keys are refreshed from the new chains
+    br_p = out / "branches.json"
+    if br_p.exists():
+        by_id = {c["id"]: c for c in R["chains"]}
+        branches = json.loads(br_p.read_text())["branches"]
+        for b in branches:
+            c = by_id.get(b["id"])
+            if c:
+                b["junctions"] = c["junctions"]
+                b["dead_ends"] = c.get("dead_ends", [])
+        br_p.write_text(json.dumps({"branches": branches}))
+    m_p = out / "manifest.json"
+    if m_p.exists():
+        m = json.loads(m_p.read_text())
+        m["spine"] = {**m.get("spine", {}), "roads": R["found"], "roads_missing": R["missing"], "chains": len(R["chains"]), "dead_ends": sum(len(c.get("dead_ends", [])) for c in R["chains"])}
+        m["revectored"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        m_p.write_text(json.dumps(m, indent=1, default=str))
+    return {"chains": len(R["chains"]), "dead_ends": sum(len(c.get("dead_ends", [])) for c in R["chains"])}
+
+
+def main() -> None:
+    import sys
+
+    from .__main__ import DATA, SITES, CACHE
+
+    sites = {s["slug"]: s for s in json.loads(SITES.read_text())}
+    for slug in sys.argv[1:]:
+        print(f"=== {slug} revector")
+        print(" ", revector(sites[slug], DATA, CACHE))
+
+
+if __name__ == "__main__":
+    main()

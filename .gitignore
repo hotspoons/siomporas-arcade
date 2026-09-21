@@ -42,5 +42,13 @@ tools/corridor/data/
 # corridor viewer: generated textures (tools/surfaces/gen.py) and generated props (editor
 # probes/editor-assets.mjs) are regenerable and ~100 MB; they will live in a bucket, not in git.
 # catalog.json and the vendored Draco decoder stay.
+# The trailing slash matches DIRECTORIES ONLY. Each worktree links this path at its own copy,
+# and a symlink is not a directory, so without the slash-less line below the LINK gets
+# committed — and checking that out in the main checkout makes it point at its own path
+# (ELOOP, and the real directory is replaced by the link). Keep both lines.
 apps/corridor/public/surfaces/
+apps/corridor/public/surfaces
 apps/corridor/public/assets/*.glb
+
+# road-and-car: synthetic tiled-site fixture (probes/make-tiles.py), regenerable, not a bake
+apps/corridor/public/testdata/

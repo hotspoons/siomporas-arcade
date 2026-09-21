@@ -154,6 +154,16 @@ per lithology (Catoctin metabasalt 0.4× the verge, Sideling shale 1.06×) so it
 polygon, not thresholded. Manifest `rock`: polygons with area, slope, relief, intensity ratio,
 NAIP colour, `in_cut`, rock type.
 
+**Dead ends** (`network.py`, Rich's rule): an unshared chain end more than 60 m from the query box,
+with no unlisted `highway` way on its node, is a **cul-de-sac by default** — `dead_end` is an
+authored override, never a measurement. Radius 9 m residential, 8 m living_street, 6 m service.
+
+**When to distrust the DTM and fall back to the DEM**: not "most of this raster is nodata" — a
+corridor's DTM is a 200 m strip inside a bbox and is *always* mostly nodata (Sideling 38 % valid).
+Sample the spine: under 70 % of road stations covered, the lidar missed the road (Bonnie Branch's
+one-tile bake) and the bare-earth DEM stands in. Getting this wrong tripled Sideling's rock by
+detecting DEM slopes out where the CHM is 0 and every cell reads as bare.
+
 **Water** (`water.py`): OSM `waterway` lines every 5 m, each vertex **snapped to the DTM low point
 across ±6 m** (measured: the OSM line is within 3 m of it 86–100 % of the time) unless the channel
 is wider than 12 m (the Monocacy: centreline kept, z read); DEM stands in outside the lidar

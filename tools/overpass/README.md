@@ -42,6 +42,16 @@ Bowie / Frederick / Sideling sets. To cover the California, Oregon and Maine sit
 init runs for hours, so do it deliberately. Re-initialising means deleting the PVC — the container
 only clones when `/db` is empty.
 
+## Traps this hit, so nobody hits them twice
+
+- **Block, not cephfs.** Overpass opens its database with direct I/O. On `ceph-filesystem` the
+  clone downloaded and converted 204 MB and then died with `File error caught: 22 Invalid argument
+  /db/db/nodes.bin` — EINVAL, O_DIRECT unsupported. `ceph-block` (RBD) works.
+- **A dated URL, not `-latest`.** `-latest` is a 302 and the image's downloader does not follow
+  redirects: it writes the 254-byte redirect body and reports a corrupt planet.
+- **pbf, converted.** Geofabrik has no `.osm.bz2` for state extracts; `preprocess` runs
+  `osmium cat` to make the file the image expects.
+
 ## Notes
 
 - `meta: "no"` drops changeset/user/timestamp: a third off the database, and no query we write

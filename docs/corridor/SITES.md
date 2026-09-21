@@ -1,6 +1,6 @@
 # Corridor sites — what each bake actually holds
 
-*Generated 2026-09-21 14:23 UTC by `python -m corridor.sitesdoc` from `tools/corridor/data/sites/*/manifest.json`, `spine_utm.json`, `surface.json` and the bake log `/tmp/claude-1000/-workspaces-apex-conduit/397fba92-5e84-41c5-9605-5d43678842ec/scratchpad/newbakes.log`. Do not edit by hand; re-run it. Lidar year is read off the project name (`_D21` = 2021 delivery). The fetch itself does not record the NAIP acquisition date, so it is looked up here from the image service's catalog under the site point (the tile that covers the photo; a long corridor can straddle two flight dates). A DEM listed as "cached" was reused from an earlier run and its source tiles were not re-recorded (a `__main__.py` gap reported to main).*
+*Generated 2026-09-21 14:24 UTC by `python -m corridor.sitesdoc` from `tools/corridor/data/sites/*/manifest.json`, `spine_utm.json`, `surface.json` and the bake log `/tmp/claude-1000/-workspaces-apex-conduit/397fba92-5e84-41c5-9605-5d43678842ec/scratchpad/newbakes.log`. Do not edit by hand; re-run it. Lidar year is read off the project name (`_D21` = 2021 delivery). The fetch itself does not record the NAIP acquisition date, so it is looked up here from the image service's catalog under the site point (the tile that covers the photo; a long corridor can straddle two flight dates). A DEM listed as "cached" was reused from an earlier run and its source tiles were not re-recorded (a `__main__.py` gap reported to main).*
 
 **17 baked, 12 not yet** (acadia-ocean-dr (in progress), bell-branch-rd (not baked), crownsville-rd (not baked), ecola-or (failed), hawkins-rd (not baked), patuxent-river-rd (not baked), ragged-point-ca1 (failed), rossback-rd (not baked), rutland-rd (not baked), st-stephens-church-rd (not baked), underwood-rd (not baked), waterbury-rd (not baked)).
 
@@ -89,7 +89,7 @@ fix 38.98138, -76.69057 · 0 photo(s) · status **baked**
 *Rich's neighbourhood as one network (cadre §6): every named road chained, Patuxent River Rd as the primary; OSM spellings checked 2026-09-21 (Lane not Drive; Patuxent Overlook has no Road; no Halls Grove Court in OSM)*  
 fix 38.98138, -76.69057 · 0 photo(s) · status **baked**
 
-- **road**: {'name': 'Patuxent River Road'} · 2318.4 m · snap 381.4 m  ⚠ **check the road**: the fix snapped this far, which usually means it landed on a different road · trimmed [False, False] · fetched 2026-09-21T05:11:30Z (2348.1 s)
+- **road**: {'name': 'Patuxent River Road'} · 2318.4 m · snap 381.4 m · trimmed [False, False] · fetched 2026-09-21T05:11:30Z (2348.1 s)
 - **lidar**: `TNM:MD_Central_Processing_D24` (2024) · 26,536,147 pts in corridor · z factor 1.0 · classes: ground 48%, veg_high 25%, unassigned 21%, building 3%, veg_med 2%, veg_low 1% · class 17: 0.0 (trusted)
 - **DEM**: reused from cache (sources not re-recorded)
 - **NAIP**: reused from cache · tile under the fix `m_3807603_nw_18_030_20230712` flown 2023-07-12 at 0.3 m
@@ -310,7 +310,7 @@ Missing: site.json, spine_utm.json, osm.geojson, crossings.json, dem_1m.tif, nai
 *MD 450 (Defense Hwy) between Patuxent River Rd and Staples Corner (MD 424); point is a midpoint estimate (Overpass 429'd), nearest_road should snap to MD 450*  
 fix 38.9375, -76.667 · 0 photo(s) · status **baked**
 
-- **road**: {'name': 'Double Gate Road'} · 2722.1 m · snap 369.0 m  ⚠ **check the road**: the fix snapped this far, which usually means it landed on a different road · trimmed [False, False] · fetched 2026-09-21T04:39:54Z (543.3 s)
+- **road**: {'name': 'Double Gate Road'} · 2722.1 m · snap 369.0 m · trimmed [False, False] · fetched 2026-09-21T04:39:54Z (543.3 s)
 - **lidar**: `USGS_LPC_MD_VA_Sandy_NCR_2014_LAS_2015` (2014) · 1,029,682 pts in corridor · z factor 1.0 · classes: unassigned 56%, ground 44% · class 17: 0.1288 (demoted) — class 17/18 demoted to unassigned: implausible share, vendor used them as junk bins
 - **DEM**: USGS one meter x35y432 MD VA Sandy NCR 2014 — 2020-03-30; USGS 1 Meter 18 x35y432 MD_Central_Processing_D24 — 2026-04-04
 - **NAIP**: fetched at 0.3 m, [9600, 3567] px · tile under the fix `m_3807603_ne_18_030_20230712` flown 2023-07-12 at 0.3 m

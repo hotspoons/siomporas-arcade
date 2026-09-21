@@ -371,6 +371,258 @@
    ],
    "height_m": 0.6,
    "glb": "assets/greenstone-ledge-01.glb"
+  },
+  {
+   "id": "sandstone-boulder-01",
+   "name": "sandstone boulder 01",
+   "category": "rock",
+   "rock_type": "sandstone",
+   "footprint_m": [
+    1.8,
+    1.4
+   ],
+   "height_m": 1.2,
+   "glb": "assets/sandstone-boulder-01.glb"
+  },
+  {
+   "id": "sandstone-boulder-02",
+   "name": "sandstone boulder 02",
+   "category": "rock",
+   "rock_type": "sandstone",
+   "footprint_m": [
+    1.8,
+    1.4
+   ],
+   "height_m": 1.2,
+   "glb": "assets/sandstone-boulder-02.glb"
+  },
+  {
+   "id": "sandstone-ledge-01",
+   "name": "sandstone ledge 01",
+   "category": "rock",
+   "rock_type": "sandstone",
+   "footprint_m": [
+    1.8,
+    1.4
+   ],
+   "height_m": 0.6,
+   "glb": "assets/sandstone-ledge-01.glb"
+  },
+  {
+   "id": "sandstone-talus-01",
+   "name": "sandstone talus 01",
+   "category": "rock",
+   "rock_type": "sandstone",
+   "footprint_m": [
+    1.8,
+    1.4
+   ],
+   "height_m": 0.7,
+   "glb": "assets/sandstone-talus-01.glb"
+  },
+  {
+   "id": "schist-boulder-01",
+   "name": "schist boulder 01",
+   "category": "rock",
+   "rock_type": "schist",
+   "footprint_m": [
+    1.7,
+    1.2
+   ],
+   "height_m": 1,
+   "glb": "assets/schist-boulder-01.glb"
+  },
+  {
+   "id": "schist-boulder-02",
+   "name": "schist boulder 02",
+   "category": "rock",
+   "rock_type": "schist",
+   "footprint_m": [
+    1.7,
+    1.2
+   ],
+   "height_m": 1,
+   "glb": "assets/schist-boulder-02.glb"
+  },
+  {
+   "id": "schist-ledge-01",
+   "name": "schist ledge 01",
+   "category": "rock",
+   "rock_type": "schist",
+   "footprint_m": [
+    1.7,
+    1.2
+   ],
+   "height_m": 0.6,
+   "glb": "assets/schist-ledge-01.glb"
+  },
+  {
+   "id": "schist-talus-01",
+   "name": "schist talus 01",
+   "category": "rock",
+   "rock_type": "schist",
+   "footprint_m": [
+    1.7,
+    1.2
+   ],
+   "height_m": 0.7,
+   "glb": "assets/schist-talus-01.glb"
+  },
+  {
+   "id": "phyllite-boulder-01",
+   "name": "phyllite boulder 01",
+   "category": "rock",
+   "rock_type": "phyllite",
+   "footprint_m": [
+    1.5,
+    1.1
+   ],
+   "height_m": 0.9,
+   "glb": "assets/phyllite-boulder-01.glb"
+  },
+  {
+   "id": "phyllite-boulder-02",
+   "name": "phyllite boulder 02",
+   "category": "rock",
+   "rock_type": "phyllite",
+   "footprint_m": [
+    1.5,
+    1.1
+   ],
+   "height_m": 0.9,
+   "glb": "assets/phyllite-boulder-02.glb"
+  },
+  {
+   "id": "phyllite-ledge-01",
+   "name": "phyllite ledge 01",
+   "category": "rock",
+   "rock_type": "phyllite",
+   "footprint_m": [
+    1.5,
+    1.1
+   ],
+   "height_m": 0.6,
+   "glb": "assets/phyllite-ledge-01.glb"
+  },
+  {
+   "id": "phyllite-talus-01",
+   "name": "phyllite talus 01",
+   "category": "rock",
+   "rock_type": "phyllite",
+   "footprint_m": [
+    1.5,
+    1.1
+   ],
+   "height_m": 0.7,
+   "glb": "assets/phyllite-talus-01.glb"
+  },
+  {
+   "id": "granite-boulder-01",
+   "name": "granite boulder 01",
+   "category": "rock",
+   "rock_type": "granite",
+   "footprint_m": [
+    1.8,
+    1.5
+   ],
+   "height_m": 1.3,
+   "glb": "assets/granite-boulder-01.glb"
+  },
+  {
+   "id": "granite-boulder-02",
+   "name": "granite boulder 02",
+   "category": "rock",
+   "rock_type": "granite",
+   "footprint_m": [
+    1.8,
+    1.5
+   ],
+   "height_m": 1.3,
+   "glb": "assets/granite-boulder-02.glb"
+  },
+  {
+   "id": "granite-ledge-01",
+   "name": "granite ledge 01",
+   "category": "rock",
+   "rock_type": "granite",
+   "footprint_m": [
+    1.8,
+    1.5
+   ],
+   "height_m": 0.6,
+   "glb": "assets/granite-ledge-01.glb"
+  },
+  {
+   "id": "granite-talus-01",
+   "name": "granite talus 01",
+   "category": "rock",
+   "rock_type": "granite",
+   "footprint_m": [
+    1.8,
+    1.5
+   ],
+   "height_m": 0.7,
+   "glb": "assets/granite-talus-01.glb"
+  },
+  {
+   "id": "limestone-boulder-01",
+   "name": "limestone boulder 01",
+   "category": "rock",
+   "rock_type": "limestone",
+   "footprint_m": [
+    1.6,
+    1.3
+   ],
+   "height_m": 1,
+   "glb": "assets/limestone-boulder-01.glb"
+  },
+  {
+   "id": "limestone-boulder-02",
+   "name": "limestone boulder 02",
+   "category": "rock",
+   "rock_type": "limestone",
+   "footprint_m": [
+    1.6,
+    1.3
+   ],
+   "height_m": 1,
+   "glb": "assets/limestone-boulder-02.glb"
+  },
+  {
+   "id": "limestone-ledge-01",
+   "name": "limestone ledge 01",
+   "category": "rock",
+   "rock_type": "limestone",
+   "footprint_m": [
+    1.6,
+    1.3
+   ],
+   "height_m": 0.6,
+   "glb": "assets/limestone-ledge-01.glb"
+  },
+  {
+   "id": "limestone-talus-01",
+   "name": "limestone talus 01",
+   "category": "rock",
+   "rock_type": "limestone",
+   "footprint_m": [
+    1.6,
+    1.3
+   ],
+   "height_m": 0.7,
+   "glb": "assets/limestone-talus-01.glb"
+  },
+  {
+   "id": "greenstone-talus-01",
+   "name": "greenstone talus 01",
+   "category": "rock",
+   "rock_type": "greenstone",
+   "footprint_m": [
+    1.6,
+    1.3
+   ],
+   "height_m": 0.7,
+   "glb": "assets/greenstone-talus-01.glb"
   }
  ]
 }

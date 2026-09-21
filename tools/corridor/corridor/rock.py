@@ -59,7 +59,8 @@ def measure(site_dir: Path) -> dict | None:
         tr = s1.transform
         bounds = s1.bounds
     valid = dtm > -9000
-    if valid.mean() < 0.5 and (site_dir / "dem_1m.tif").exists():
+    valid_before = float(valid.mean())
+    if valid_before < 0.5 and (site_dir / "dem_1m.tif").exists():
         # the lidar covered a sliver (Bonnie Branch): the bare-earth DEM stands in on the DTM grid
         from rasterio.windows import from_bounds
 
@@ -69,7 +70,7 @@ def measure(site_dir: Path) -> dict | None:
         use = (dem > -9000) & ~valid
         dtm[use] = dem[use]
         valid = dtm > -9000
-        print(f"  rock    DTM {100 * (~use).mean():.0f}% sparse; DEM filled {int(use.sum()):,} cells", flush=True)
+        print(f"  rock    DTM {100 * valid_before:.1f}% valid; DEM filled {int(use.sum()):,} cells", flush=True)
     if valid.sum() < 100:
         return None
     idx = ndimage.distance_transform_edt(~valid, return_distances=False, return_indices=True)

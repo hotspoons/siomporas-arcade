@@ -37,7 +37,21 @@ just corridor-export                      # rewrite web/ layers + surface.json w
 | `web/` | browser-decodable layers + `manifest.json` for `apps/corridor` and the R2 publish: RGB-encoded height PNGs, 1 m imagery JPEG, canopy PNG, spine/structures/profile/surface in metres from the origin | derived |
 | `geology.json` + `geology.geojson` | Macrostrat map units under the spine, with lithology and description | Macrostrat |
 | `preview.png` | imagery + spine (yellow), siblings (orange), crossings (red over / blue under), structures (cyan overpass / magenta bridge), photo (white ring), canopy (green) | derived |
+| `cuts.json` | cut faces beside the road from 1 m DTM transects: interval, side, `artificial`/`natural`, toe/top/height/slope, rock type, toe+top `[x,y,z]` every 10 m (`corridor/cuts.py`; rules and measurements in `docs/corridor/DESIGN.md` §5) | derived |
+| `rock.json` | exposed rock polygons: slope > 40° with ≥ 3 m relief, bare or inside a cut, with lithology, intensity and NAIP colour (`corridor/rock.py`) | derived |
+| `water.json` | OSM waterways snapped to the DTM low line with heights, culverts flagged, falls/rapids; ponds flat at their median ground (`corridor/water.py`) | OSM + derived |
+| `branches.json` | network sites only: every non-primary road chain with its own lidar profile and structures (`corridor/network.py`) | derived |
+| `lidar/tiles/`, `lidar/*.vrt` | network sites over 6 km: 1 km raster tiles and VRTs over them (`corridor/network_tiles.py`) | derived |
 | `manifest.json` | what was fetched, from where, when, how long | — |
+
+## Network sites
+
+A `sites.json` entry with `kind: "network"`, a `roads` list (OSM names or refs), a `primary` road,
+a centre and `radius_m` bakes one interconnected region as one site: every road chained, the
+primary as the spine, every other road as a branch with junctions, rasters clipped to the union
+of the roads buffered 150 m, and — over 6 km a side — 1 km web tiles instead of single images.
+`docs/corridor/PIPELINE.md` §1.12 has the detail; `python -m corridor.sitesdoc` regenerates
+`docs/corridor/SITES.md` from every bake.
 
 ## Why these sources, and the traps in them
 

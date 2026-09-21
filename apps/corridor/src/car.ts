@@ -45,9 +45,10 @@ export interface Surface {
 
 export type CarEvent = 'none' | 'bump' | 'launch' | 'land' | 'crash' | 'rocket'
 
-// body geometry (the mesh is built from these; the sim uses the half width for wheel spread and trunks)
+// body geometry (the mesh is built from these; the sim uses the half width for wheel spread and
+// trunk collisions). The length lives in the silhouette profile in buildMesh, which is 4.4 m nose
+// to tail — change it there.
 const CAR_HALF_WIDTH = 0.95
-const CAR_HALF_LENGTH = 2.2
 
 export class Car {
   pos = new THREE.Vector3()
@@ -355,12 +356,51 @@ export class Car {
   /** A stand-in car: low wedge body, four wheels. Kestrel-ish proportions, 4.4 × 1.9 m. */
   private buildMesh(): THREE.Group {
     const g = new THREE.Group()
-    const body = new THREE.Mesh(new THREE.BoxGeometry(CAR_HALF_LENGTH * 2, 0.55, CAR_HALF_WIDTH * 2), new THREE.MeshStandardMaterial({ color: 0xc8322a, roughness: 0.35, metalness: 0.3 }))
-    body.position.y = 0.45
+    // The silhouette, as a side profile extruded across the car. A box reads as a box from every
+    // angle; a profile with a bonnet line, a raked screen and a fastback costs the same draw call
+    // and is a CAR from the chase camera, which is where it is looked at. Nose at +x.
+    const side = new THREE.Shape()
+    const prof: [number, number][] = [
+      [2.16, 0.42], [2.2, 0.62], [1.98, 0.76], [1.5, 0.84], // nose, bonnet
+      [0.92, 1.1], [0.3, 1.3], [-0.5, 1.31], [-1.12, 1.16], // screen, roof
+      [-1.72, 0.84], [-2.08, 0.76], [-2.2, 0.6], [-2.2, 0.4], // fastback, tail
+      [-1.75, 0.3], [-1.05, 0.26], [0.95, 0.26], [1.7, 0.3], // sills between the arches
+    ]
+    side.moveTo(prof[0][0], prof[0][1])
+    for (const [x, y] of prof.slice(1)) side.lineTo(x, y)
+    side.closePath()
+    const bodyGeo = new THREE.ExtrudeGeometry(side, { depth: CAR_HALF_WIDTH * 2 - 0.16, bevelEnabled: true, bevelSize: 0.06, bevelThickness: 0.05, bevelSegments: 2, curveSegments: 1 })
+    bodyGeo.translate(0, 0, -(CAR_HALF_WIDTH - 0.08)) // extrusion runs along +z; centre it
+    bodyGeo.computeVertexNormals()
+    const body = new THREE.Mesh(bodyGeo, new THREE.MeshStandardMaterial({ color: 0xc8322a, roughness: 0.35, metalness: 0.3 }))
     g.add(body)
-    const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.5, 1.5), new THREE.MeshStandardMaterial({ color: 0x1c1f24, roughness: 0.2, metalness: 0.5 }))
-    cabin.position.set(-0.2, 0.95, 0)
+    // glasshouse: the same profile, slightly proud, in dark glass — screen, roof band and backlight
+    const glassMat = new THREE.MeshStandardMaterial({ color: 0x141922, roughness: 0.12, metalness: 0.6 })
+    const cabin = new THREE.Group()
+    for (const zz of [-1, 1]) {
+      const win = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.34, 0.06), glassMat)
+      win.position.set(-0.15, 1.12, zz * (CAR_HALF_WIDTH - 0.06))
+      cabin.add(win)
+    }
+    const screen = new THREE.Mesh(new THREE.BoxGeometry(0.66, 0.05, 1.62), glassMat)
+    screen.position.set(0.62, 1.22, 0)
+    screen.rotation.z = 0.62
+    cabin.add(screen)
+    const roof = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.05, 1.66), glassMat)
+    roof.position.set(-0.1, 1.33, 0)
+    cabin.add(roof)
     g.add(cabin)
+    // lamps, so which end is the front is never a question
+    const lampMat = new THREE.MeshStandardMaterial({ color: 0xfff3d0, emissive: 0xfff0c0, emissiveIntensity: 0.55, roughness: 0.3 })
+    const tailMat = new THREE.MeshStandardMaterial({ color: 0x8e1414, emissive: 0x8e1414, emissiveIntensity: 0.4, roughness: 0.4 })
+    for (const zz of [-1, 1]) {
+      const head = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.13, 0.42), lampMat)
+      head.position.set(2.14, 0.66, zz * 0.52)
+      g.add(head)
+      const tail = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.12, 0.38), tailMat)
+      tail.position.set(-2.2, 0.66, zz * 0.56)
+      g.add(tail)
+    }
     // The view from the driver's seat. Mesh-local y is height above the wheel contact, so with
     // CAR_RIDE 0.35 and COCKPIT_EYE_UP 1.15 the eye sits at local (0.35, 1.50, COCKPIT_EYE_SIDE),
     // and everything here is placed relative to THAT. Hidden until setCockpit(true), when the body

@@ -10,7 +10,7 @@ const site = process.argv[2] ?? 'bowie-racetrack-rd'
 const out = process.argv[3] ?? null
 const PORT = process.env.CORRIDOR_PORT ?? '5202'
 const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] })
-const page = await browser.newPage({ viewport: { width: 860, height: 560 } })
+const page = await browser.newPage({ viewport: { width: 640, height: 420 } })
 page.on('pageerror', (e) => console.log('pageerror', e.message))
 await page.route('**/@vite/client', (r) => r.abort())
 await page.goto(`http://127.0.0.1:${PORT}/?lite#${site}`, { waitUntil: 'load' })

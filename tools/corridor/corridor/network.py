@@ -180,9 +180,8 @@ def dead_ends(chains: list[dict], frame: Frame, cache: Path, radius_m: float, si
         ways = c["ways"]
         for node, s_at in ((ways[0]["nodes"][0], 0.0), (ways[-1]["nodes"][-1], float(c["line"].length))):
             ends.setdefault(node, []).append((c, s_at))
-    our_way_ids = {w["id"] for c in chains for w in c["ways"]}
     node_tags: dict[int, dict] = {}
-    other_roads: dict[int, int] = {}
+    node_routable: dict[int, set[int]] = {}
     if ends:
         # `id:` takes COMMAS (semicolons are a syntax error and every mirror 400s), and the ways go
         # out as `body` — ids AND nodes AND tags — because the node list says which end a way
@@ -194,11 +193,11 @@ def dead_ends(chains: list[dict], frame: Frame, cache: Path, radius_m: float, si
                 if el["type"] == "node":
                     node_tags[el["id"]] = el.get("tags", {})
                     continue
-                if el["id"] in our_way_ids or el.get("tags", {}).get("highway") not in ROUTABLE:
+                if el.get("tags", {}).get("highway") not in ROUTABLE:
                     continue
                 for nid in el.get("nodes", []) or []:
                     if nid in ends:
-                        other_roads[nid] = other_roads.get(nid, 0) + 1
+                        node_routable.setdefault(nid, set()).add(el["id"])
         except Exception as exc:  # a dead end we cannot confirm is better than a failed bake
             print(f"  ends    overpass failed ({exc}); assuming every unshared end is a cul-de-sac")
     ox, oy = frame.origin
@@ -208,10 +207,15 @@ def dead_ends(chains: list[dict], frame: Frame, cache: Path, radius_m: float, si
     for node, owners in ends.items():
         t = node_tags.get(node, {})
         osm_bulb = t.get("highway") in ("turning_circle", "turning_loop")
-        shared_here = len({c["ident"] for c, _ in owners}) > 1  # two DIFFERENT roads of ours meet
         for c, s_at in owners:
-            if not osm_bulb and (shared_here or other_roads.get(node, 0) > 0):
-                continue  # it meets another road; OSM's own bulb tag outranks this
+            # Any ROUTABLE way at this node other than THIS CHAIN's own ways makes it a junction —
+            # including one of our own roads, which is the usual case: a cul-de-sac's inner end
+            # sits MID-WAY along the street it comes off, so that street never appears as an "end"
+            # here. Excluding every road in the network (the first fix) put a bulb on the joined end
+            # of almost every street in the neighbourhood.
+            own = {w["id"] for w in c["ways"]}
+            if not osm_bulb and (node_routable.get(node, set()) - own):
+                continue
             p = c["line"].interpolate(s_at)
             if min(abs(p.x - (ox - radius_m)), abs(p.x - (ox + radius_m)), abs(p.y - (oy - radius_m)), abs(p.y - (oy + radius_m))) < BOUNDARY_M:
                 continue  # clipped by our own query box: the road continues, our world does not

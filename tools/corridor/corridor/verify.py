@@ -11,6 +11,10 @@ Written after three bugs in one evening that a viewer would have rendered perfec
   * a re-profile that matched the old file by those ids and wrote records with no `id` at all,
     which then took the manifest's entire `branches` block down.
 
+and two more found by the checks themselves once they existed: a published centreline that leaves
+the real road on a switchback, and a published centreline SHORTER than the line every along-track
+`s` is measured on, which displaces every structure and authored interval near the far end.
+
 None of those is visible by looking at the thing. They are all visible in thirty lines of checking,
 so the checking lives here and runs before anyone believes a bake.
 
@@ -112,10 +116,34 @@ def verify(site_dir: Path) -> dict:
             if zs and max(zs) - min(zs) > 200:
                 warnings.append(f"branch {b.get('ident')} spans {max(zs) - min(zs):.0f} m of height: check its profile")
 
-    # 5. the road itself
+    # 5. the published centreline against the road it was measured from
     spine = m.get("spine") or {}
     if not spine.get("coords"):
         errors.append("no spine coords")
+    sp_p = site_dir / "spine_utm.json"
+    if spine.get("coords") and sp_p.exists():
+        try:
+            import shapely
+            from shapely.geometry import LineString
+
+            site = json.loads((site_dir / "site.json").read_text())
+            ox, oy = site["frame"]["origin"]
+            rawline = LineString(json.loads(sp_p.read_text())["coords"])
+            pub = [[c[0] + ox, c[1] + oy] for c in spine["coords"]]
+            publine = LineString(pub)
+            # (a) how far the DRAWN road sits from the real one. Smoothing is bounded per vertex,
+            # but a long segment between two clamped vertices can still chord across a bend.
+            dev = shapely.distance(shapely.points([q[0] for q in pub], [q[1] for q in pub]), rawline)
+            if float(dev.max()) > 3.0:
+                warnings.append(f"the published centreline leaves the real road by up to {float(dev.max()):.1f} m (smoothing); it reads as the road beside its own trace in the air photo")
+            # (b) every `s` in this manifest is measured on the RAW line and resolved as arclength
+            # along the PUBLISHED one, so a length mismatch displaces every structure and interval.
+            drift = publine.length - rawline.length
+            if rawline.length > 0 and abs(drift) / rawline.length > 0.002:
+                worst = abs(drift)
+                warnings.append(f"published centreline is {drift:+.1f} m ({100 * drift / rawline.length:+.2f} %) against the line every `s` is measured on: features near the far end are displaced by up to {worst:.0f} m")
+        except Exception as exc:
+            warnings.append(f"could not compare the centreline against spine_utm.json ({exc})")
     if (m.get("lidar") or {}).get("dataset") is None:
         warnings.append("no lidar: no trees, no structures, no cut faces")
     for key in ("cuts", "rock", "water"):

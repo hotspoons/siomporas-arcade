@@ -100,6 +100,8 @@ async function loadSite(slug: string) {
     scene,
     camera,
     drive,
+    THREE, // probes need Raycaster/Vector3 in the page, and there is no other handle on it
+
     tune: {
       tabs: TUNE_TABS,
       names: () => TUNE_TABS.flatMap((t) => t.sections.flatMap((sec) => sec.keys.map((k) => k.name))),

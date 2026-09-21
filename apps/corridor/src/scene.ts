@@ -461,7 +461,7 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
     const makeStrip = () => buildStrip(spineAt, curveLen, -latMin + VERGE, latMax + VERGE, (x, z) => edgeDistance(x, z), heightAt, imagery, manifest.bbox, grassTex('grass_mown'), grassTex('grass_rough'), lite ? 4 : 2, lite ? 2 : 1, adjustments.active ? (x, y) => adjustments.at(x, y, adjScratch).ground_offset_m : null)
     let strip = makeStrip()
     road.add(strip.mesh)
-    sinkUnderStrip(terrainGeo, strip.heightAt)
+    sinkUnderStrip(terrainGeo, strip.sinkAt, strip.coverAt)
     // a road knob moved: every station's half width, the asphalt, then the strip that hugs it
     const roadSignature = () => `${T.LANE_WIDTH}|${T.SHOULDER_OUT}|${T.SHOULDER_IN}`
     let roadSig = roadSignature()
@@ -473,7 +473,7 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
       strip.mesh.geometry.dispose()
       strip = makeStrip()
       road.add(strip.mesh)
-      sinkUnderStrip(terrainGeo, strip.heightAt)
+      sinkUnderStrip(terrainGeo, strip.sinkAt, strip.coverAt)
     }
     group.add(road)
     // everything that stands on the ground near the road stands on the strip

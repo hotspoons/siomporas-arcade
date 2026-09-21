@@ -90,7 +90,7 @@ def _way_line(el: dict, frame: Frame) -> LineString:
     return LineString(np.column_stack([x, y]))
 
 
-def nearest_road(lat: float, lon: float, frame: Frame, cache: Path, radius_m: int = 300) -> dict:
+def nearest_road(lat: float, lon: float, frame: Frame, cache: Path, radius_m: int = 300, want: str | None = None) -> dict:
     # Widen in steps: a fix taken from a moving car can sit a few hundred metres off the road it
     # shows (Burtonsville's was 120+ m off the ICC). The step-up is logged so a far snap is visible.
     els = []
@@ -114,9 +114,14 @@ def nearest_road(lat: float, lon: float, frame: Frame, cache: Path, radius_m: in
     # the interstate (Frederick's I-70/I-270 frame snapped to Guilford Drive before this).
     CLASS_PENALTY = {"motorway": 0, "trunk": 40, "primary": 120, "secondary": 220, "tertiary": 320}
 
+    # `want` (sites.json `road`) is the human saying which road this site IS. A point estimated
+    # from two junction coordinates can easily land nearer a lane than the highway it names:
+    # md450-staples snapped 369 m onto "Double Gate Road". Naming the road settles it.
     def score(e):
         t = e.get("tags", {})
         hw = str(t.get("highway", ""))
+        if want and want.lower() not in f'{t.get("ref", "")} {t.get("name", "")}'.lower():
+            return 1e9 + _way_line(e, frame).distance(p)
         d = _way_line(e, frame).distance(p)
         d += CLASS_PENALTY.get(hw, 420)
         d += 150 if hw.endswith("_link") else 0
@@ -124,6 +129,8 @@ def nearest_road(lat: float, lon: float, frame: Frame, cache: Path, radius_m: in
         return d
 
     best = min(els, key=score)
+    if want and score(best) >= 1e9:
+        raise RuntimeError(f'no way matching road="{want}" within 800 m of {lat},{lon}')
     tags = best.get("tags", {})
     if not (tags.get("ref") or tags.get("name")):
         raise RuntimeError(f"nearest drivable way {best['id']} has neither ref nor name; cannot chain a spine")
@@ -186,7 +193,7 @@ def _chains(ways: list[dict]) -> list[list[dict]]:
 
 
 def spine(site: dict, frame: Frame, cache: Path, half_length_m: float, search_m: float) -> dict:
-    near = nearest_road(site["lat"], site["lon"], frame, cache)
+    near = nearest_road(site["lat"], site["lon"], frame, cache, want=site.get("road"))
     key, val = near["ident"]
     esc = val.replace('"', '\\"')
     ox, oy = frame.origin

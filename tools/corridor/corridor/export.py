@@ -223,7 +223,26 @@ def export_site(site_dir: Path) -> dict:
     if prof:
         zs = np.interp(np.array(s_dense), np.array(prof["s"]), np.array(prof["road_z"]))
     else:
-        zs = np.zeros(len(s_dense))
+        # No lidar here (the 2008 Oregon delivery has no CRS, the California coast has no EPT):
+        # the road's grade is then the bare-earth DEM under the centreline, lightly smoothed. Zero
+        # buried Ragged Point's road 33 m under its own terrain — "only terrain, no roads"
+        # (Rich, 2026-09-21).
+        dem_p = site_dir / "dem_1m.tif"
+        if dem_p.exists():
+            import rasterio as _rio
+            with _rio.open(dem_p) as _src:
+                zs = np.array([v[0] for v in _src.sample([(float(x), float(y)) for x, y in pts])], dtype=float)
+            zs[zs < -9000] = np.nan
+            if np.isnan(zs).any() and np.isfinite(zs).any():
+                ok = np.isfinite(zs)
+                zs[~ok] = np.interp(np.flatnonzero(~ok), np.flatnonzero(ok), zs[ok])
+            zs = np.nan_to_num(zs, nan=0.0)
+            if len(zs) > 9:  # a car follows the road, not the 1 m noise of a bare-earth raster
+                k = np.ones(9) / 9
+                zs = np.convolve(np.pad(zs, 4, mode="edge"), k, mode="valid")
+            print(f"  export  no lidar profile; spine grade from the DEM ({zs.min():.1f}–{zs.max():.1f} m)", flush=True)
+        else:
+            zs = np.zeros(len(s_dense))
     spine_rel = np.column_stack([pts[:, 0] - ox, pts[:, 1] - oy, zs]).round(2).tolist()
 
     siblings = []

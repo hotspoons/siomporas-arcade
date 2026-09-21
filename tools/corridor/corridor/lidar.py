@@ -198,10 +198,29 @@ def _read_laz_tile(path: Path, frame: Frame, bbox, clip: Polygon | None = None) 
 
     las = laspy.read(path)
     crs = las.header.parse_crs()
+    rx, ry = np.asarray(las.x), np.asarray(las.y)
     if crs is None:
-        raise RuntimeError(f"{path.name}: no CRS in the LAS header")
+        # Deliveries from before the convention of writing a CRS into the header exist and are
+        # otherwise fine: OR_NorthCoast_2008-2009 is why Ecola would not bake. Decide it by
+        # geometry instead of guessing — try the site's own CRS and the UTM zone either side, and
+        # keep the one whose transformed extent lands on the corridor we asked USGS for.
+        cx, cy = float(np.median(rx)), float(np.median(ry))
+        xmin, ymin, xmax, ymax = bbox
+        pad = 20_000.0
+        for cand in (frame.crs, f"EPSG:{frame.epsg - 1}", f"EPSG:{frame.epsg + 1}"):
+            try:
+                tx, ty = Transformer.from_crs(cand, frame.crs, always_xy=True).transform(cx, cy)
+            except Exception:
+                continue
+            if xmin - pad <= tx <= xmax + pad and ymin - pad <= ty <= ymax + pad:
+                crs = cand
+                print(f"  lidar   {path.name}: no CRS in the header; its extent fits {cand}", flush=True)
+                break
+        if crs is None:
+            print(f"  lidar   {path.name}: no CRS in the header and no candidate fits its extent; skipped", flush=True)
+            return None
     tr = Transformer.from_crs(crs, frame.crs, always_xy=True)
-    x, y = tr.transform(np.asarray(las.x), np.asarray(las.y))
+    x, y = tr.transform(rx, ry)
     x, y = np.asarray(x), np.asarray(y)
     xmin, ymin, xmax, ymax = bbox
     m = (x >= xmin) & (x < xmax) & (y >= ymin) & (y < ymax)

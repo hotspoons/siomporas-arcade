@@ -131,6 +131,25 @@ function ribbon(points: THREE.Vector3[], width: (i: number) => number, uvAttr?: 
   return g
 }
 
+/**
+ * The still-water plane: the sea, and the flood.
+ *
+ * Every site is quoted in metres NAVD88, so a plane at 0 is sea level everywhere and is simply
+ * buried under the terrain at an inland site — no per-site switch, no coastal flag. Raising
+ * `WATER_LEVEL_M` fills the valleys from the bottom, which is trailworks' flooding mechanic in
+ * one number (Rich, 2026-09-21). Two triangles, so the cost of having it always on is nothing.
+ */
+function seaPlane(uniforms: { uTime: { value: number } }): THREE.Mesh {
+  const geo = new THREE.PlaneGeometry(1, 1, 1, 1)
+  geo.rotateX(-Math.PI / 2)
+  const mat = waterMaterial(uniforms, 0x2f5d6b, Math.min(0.96, T.WATER_OPACITY + 0.08), 0.12)
+  const mesh = new THREE.Mesh(geo, mat)
+  mesh.name = 'water:level'
+  mesh.renderOrder = 1
+  mesh.frustumCulled = false
+  return mesh
+}
+
 export interface WaterResult {
   group: THREE.Group
   /** advance the ripples */
@@ -150,7 +169,16 @@ export function buildWater(water: WaterLayer | null | undefined, groundAt: (x: n
   const group = new THREE.Group()
   group.name = 'water'
   const uniforms = { uTime: { value: 0 } }
-  const empty = { group, tick: () => {}, lines: 0, areas: 0, falls: 0, length_m: 0 }
+  // the still-water plane exists on every site, water layer or not: at 0 it is the sea, raised it
+  // is the flood, and inland at 0 it is invisible under the ground
+  const sea = seaPlane(uniforms)
+  group.add(sea)
+  const placeSea = () => {
+    sea.position.set(0, T.WATER_LEVEL_M, 0)
+    sea.scale.set(T.WATER_LEVEL_SPAN * 2, 1, T.WATER_LEVEL_SPAN * 2)
+  }
+  placeSea()
+  const empty: WaterResult = { group, tick: (t: number) => { uniforms.uTime.value = t * T.WATER_SPEED; placeSea() }, lines: 0, areas: 0, falls: 0, length_m: 0 }
   if (!water || (!water.lines?.length && !water.areas?.length)) return empty
   const stream = waterMaterial(uniforms, 0x3d6b73, T.WATER_OPACITY, 0.28)
   const still = waterMaterial(uniforms, 0x46707a, Math.min(1, T.WATER_OPACITY + 0.05), 0.2)
@@ -198,5 +226,5 @@ export function buildWater(water: WaterLayer | null | undefined, groundAt: (x: n
     mesh.userData = { water: ar }
     group.add(mesh)
   }
-  return { group, tick: (t) => { uniforms.uTime.value = t * T.WATER_SPEED }, lines: nLines, areas: water.areas?.length ?? 0, falls: nFalls, length_m: Math.round(length) }
+  return { group, tick: (t) => { uniforms.uTime.value = t * T.WATER_SPEED; placeSea() }, lines: nLines, areas: water.areas?.length ?? 0, falls: nFalls, length_m: Math.round(length) }
 }

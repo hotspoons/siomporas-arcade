@@ -286,11 +286,17 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
     const dir = curve.getTangentAt(u)
     return { pos, dir }
   }
+  // A network site carries the same roads twice: `siblings` (the old dense-coords key, kept so an
+  // older viewer still draws something) and `branches` (with tags, grade and junctions). Drawing
+  // both put two carriageways, two paint sets and two strips on every side street — z-fighting
+  // paint, doubled stations, and every dead end reading as a junction with its own twin
+  // (Rich's neighbourhood, 2026-09-21). Branches supersede siblings.
+  const siblings = (manifest.branches?.length ?? 0) > 0 ? [] : manifest.siblings
   const spine = new THREE.Group()
   spine.name = 'spine'
   // analysis overlay: a thin centreline, floating a hand above the pavement so it never floods it
   spine.add(ribbon(sp.map((v) => v.clone().add(new THREE.Vector3(0, 0.5, 0))), 0.35, 0xffdc00))
-  for (const sib of manifest.siblings) {
+  for (const sib of siblings) {
     const pts = sib.map(([x, y]) => toWorld(x, y, heightAt(x, y) + 0.9))
     spine.add(ribbon(pts, 0.3, 0xff8c00, 0.9))
   }
@@ -381,7 +387,7 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
   // takes the spine's road height (plus 0.4 m like the spine); further out it is its own road on
   // the DEM (a ramp peeling away, a frontage road).
   const sibAts: { at: (s: number) => { pos: THREE.Vector3; dir: THREE.Vector3 }; len: number; spineS: (s: number) => number }[] = []
-  for (const sib of manifest.siblings) {
+  for (const sib of siblings) {
     if (sib.length < 2) continue
     const raw2 = sib.map(([x, y]) => {
       const wz = -y
@@ -459,6 +465,62 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
     addStations(0, pavedHalfAt, pavedOffsetAt)
     for (let i = 0; i < sibAts.length; i++) addStations(i + 1, () => pavedWidth(2) / 2)
     for (let i = 0; i < branchAts.length; i++) addStations(branchWho0 + i, () => branchAts[i].half)
+
+    // --- cul-de-sacs ------------------------------------------------------------------------
+    // "if a street dead ends, assume a cul de sac" (Rich, 2026-09-21). An end is a dead end when
+    // it is not a junction with another carriageway AND not simply where we clipped the corridor.
+    // One station at the bulb centre IS the bulb: outside the ±2.6 m along-track band
+    // `edgeDistance` measures radially and subtracts `half`, so a lone station is a disc — grass,
+    // trees and the car all see pavement there for free. The bake will carry `dead_ends` per road
+    // (kind + radius, overridable in the editor); until it does, the geometry decides.
+    const [dbx0, dby0, dbx1, dby1] = manifest.bbox
+    const nearBboxEdge = (x: number, wz: number) => {
+      const y = -wz
+      return Math.min(x - dbx0, dbx1 - x, y - dby0, dby1 - y) < 60
+    }
+    const junctionNear = (x: number, z: number, self: number) => {
+      const cx = Math.floor(x / stCell), cz = Math.floor(z / stCell)
+      for (let a = -2; a <= 2; a++) for (let b = -2; b <= 2; b++) {
+        for (const p of stGrid.get(`${cx + a},${cz + b}`) ?? []) {
+          if (p.who === self) continue
+          if ((p.x - x) ** 2 + (p.z - z) ** 2 < 225) return true // 15 m: a bulb is ~9 m, and a 75 m court runs close to the next street
+        }
+      }
+      return false
+    }
+    const deadEnds: { x: number; z: number; dx: number; dz: number; who: number; s: number }[] = []
+    for (let who = 0; who < curves.length; who++) {
+      const c = curves[who]
+      for (const [s, sign] of [[0, -1], [c.len, 1]] as [number, number][]) {
+        const st = c.at(Math.min(c.len, Math.max(0, s)))
+        const d = st.dir.clone().setY(0).normalize().multiplyScalar(sign)
+        const atEdge = nearBboxEdge(st.pos.x, st.pos.z), atJunction = junctionNear(st.pos.x, st.pos.z, who)
+        console.info(`end who=${who} s=${s.toFixed(0)} edge=${atEdge} junction=${atJunction} at ${st.pos.x.toFixed(0)},${st.pos.z.toFixed(0)}`)
+        if (atEdge || atJunction) continue
+        deadEnds.push({ x: st.pos.x, z: st.pos.z, dx: d.x, dz: d.z, who, s })
+      }
+    }
+    type St = { x: number; z: number; dx: number; dz: number; s: number; half: number; who: number; off: number }
+    const bulbStations: St[] = []
+    const placeBulbs = () => {
+      for (const b of bulbStations) {
+        const arr = stGrid.get(`${Math.floor(b.x / stCell)},${Math.floor(b.z / stCell)}`)
+        if (arr && arr.indexOf(b) >= 0) arr.splice(arr.indexOf(b), 1)
+      }
+      bulbStations.length = 0
+      if (T.CULDESAC_RADIUS <= 0) return
+      for (const e of deadEnds) {
+        // the bulb sits just beyond the last metre of pavement, as a turning circle does
+        const bx = e.x + e.dx * T.CULDESAC_RADIUS * 0.6, bz = e.z + e.dz * T.CULDESAC_RADIUS * 0.6
+        const rec: St = { x: bx, z: bz, dx: e.dx, dz: e.dz, s: e.s, half: T.CULDESAC_RADIUS, who: e.who, off: 0 }
+        bulbStations.push(rec)
+        const k = `${Math.floor(bx / stCell)},${Math.floor(bz / stCell)}`
+        const arr = stGrid.get(k)
+        if (arr) arr.push(rec)
+        else stGrid.set(k, [rec])
+      }
+    }
+    placeBulbs()
     /** signed distance to the nearest pavement edge, and which carriageway that was */
     const edgeDistance = (x: number, z: number, exclude = -1): { d: number; who: number; y: number } => {
       const cx = Math.floor(x / stCell), cz = Math.floor(z / stCell)
@@ -518,6 +580,26 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
       const q = b.at(s).pos
       return edgeDistance(q.x, q.z, branchWho0 + i).d < VERGE
     }))
+    const bulbGroup = new THREE.Group()
+    bulbGroup.name = 'culdesacs'
+    road.add(bulbGroup)
+    const makeBulbs = () => {
+      for (const o of [...bulbGroup.children]) {
+        bulbGroup.remove(o)
+        ;(o as THREE.Mesh).geometry.dispose()
+      }
+      for (const b of bulbStations) {
+        const geo = new THREE.CircleGeometry(b.half, 36)
+        geo.rotateX(-Math.PI / 2)
+        const set = surfaceSets?.asphalt_aged
+        const mesh = new THREE.Mesh(geo, set ? set.material : new THREE.MeshStandardMaterial({ color: 0x3b3b3d, roughness: 1 }))
+        const c = curves[b.who]
+        mesh.position.set(b.x, c.at(Math.min(c.len, Math.max(0, b.s))).pos.y + 0.02, b.z)
+        mesh.name = 'road:culdesac'
+        bulbGroup.add(mesh)
+      }
+    }
+    makeBulbs()
     let branchStrips = makeBranchStrips()
     for (const bs of branchStrips) {
       road.add(bs.mesh)
@@ -533,11 +615,13 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
       return null
     }
     // a road knob moved: every station's half width, the asphalt, then the strip that hugs it
-    const roadSignature = () => `${T.LANE_WIDTH}|${T.SHOULDER_OUT}|${T.SHOULDER_IN}|${T.ROAD_BLEND_M}|${T.ROAD_TAPER_M}|${T.ROAD_ONEWAY_CENTRE}`
+    const roadSignature = () => `${T.LANE_WIDTH}|${T.SHOULDER_OUT}|${T.SHOULDER_IN}|${T.ROAD_BLEND_M}|${T.ROAD_TAPER_M}|${T.ROAD_ONEWAY_CENTRE}|${T.CULDESAC_RADIUS}`
     let roadSig = roadSignature()
     let roadTimer: ReturnType<typeof setTimeout> | undefined
     const rebuildRoad = () => {
-      for (const arr of stGrid.values()) for (const r of arr) { r.half = halfOf(r.who, r.s); r.off = r.who === 0 ? pavedOffsetAt(r.s) : 0 }
+      for (const arr of stGrid.values()) for (const r of arr) { if (bulbStations.includes(r as St)) continue; r.half = halfOf(r.who, r.s); r.off = r.who === 0 ? pavedOffsetAt(r.s) : 0 }
+      placeBulbs()
+      makeBulbs()
       buildRoads()
       road.remove(strip.mesh)
       strip.mesh.geometry.dispose()

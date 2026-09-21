@@ -86,6 +86,9 @@ export let LOD_TOPDOWN_PITCH = 0.9
 
 // --- road ---------------------------------------------------------------------------------------
 export let LANE_WIDTH = 3.66
+/** a street that dead-ends gets a turning bulb unless the bake or the editor says otherwise;
+ *  radius to the pavement edge (9 m ≈ the 18 m bulb US subdivisions are built to). 0 = off. */
+export let CULDESAC_RADIUS = 9
 export let SHOULDER_OUT = 3.0
 export let SHOULDER_IN = 1.2
 /** m: width of the transition strip where the surface class changes. 0 = the old hard joint. */
@@ -293,6 +296,7 @@ export const TUNE_TABS: TuneTab[] = [
         title: 'cross-section (road and strip rebuild live)',
         keys: [
           tune('LANE_WIDTH', () => LANE_WIDTH, (v) => (LANE_WIDTH = v), [2.5, 4.5], 0.01),
+          tune('CULDESAC_RADIUS', () => CULDESAC_RADIUS, (v) => (CULDESAC_RADIUS = v), [0, 20], 0.5, 'turning bulb at a dead end (m); 0 = none'),
           tune('SHOULDER_OUT', () => SHOULDER_OUT, (v) => (SHOULDER_OUT = v), [0, 5], 0.1),
           tune('SHOULDER_IN', () => SHOULDER_IN, (v) => (SHOULDER_IN = v), [0, 5], 0.1),
           tune('ROAD_BLEND_M', () => ROAD_BLEND_M, (v) => (ROAD_BLEND_M = v), [0, 2], 0.05, 'transition strip where the surface class changes (m); 0 = hard joint'),

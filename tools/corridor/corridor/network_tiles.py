@@ -412,10 +412,16 @@ def _fill_profile(prof: dict) -> dict:
     return prof
 
 
+def _raster(ldir: Path, kind: str) -> Path:
+    """The VRT of a tiled bake, or the single GeoTIFF of a small one. LazyRaster reads either."""
+    vrt = ldir / f"{kind}.vrt"
+    return vrt if vrt.exists() else ldir / f"{kind}.tif"
+
+
 def profile_tiled(line: LineString, ldir: Path, pts: dict | None, road_index: int | None = None) -> dict:
-    """lidar.profile over the VRTs with a LazyRaster, and only this road's near points."""
-    dtm = LazyRaster(ldir / "dtm.vrt")
-    chm = LazyRaster(ldir / "chm.vrt")
+    """lidar.profile over the rasters with a LazyRaster, and only this road's near points."""
+    dtm = LazyRaster(_raster(ldir, "dtm"))
+    chm = LazyRaster(_raster(ldir, "chm"))
     try:
         if pts is None:
             sub = {"x": np.zeros(0), "y": np.zeros(0), "z": np.zeros(0), "cls": np.zeros(0, np.uint8), "rn": np.zeros(0, np.uint8), "nr": np.zeros(0, np.uint8), "i": np.zeros(0, np.uint16)}

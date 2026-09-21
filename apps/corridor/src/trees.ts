@@ -183,11 +183,14 @@ export class NearTrees {
   /**
    * Generate the procedural tree variants, yielding between them.
    *
-   * `t.generate()` is about 800 ms a variant, so doing all of them in the constructor was a single
-   * 4.1 s frame on crofton-triangle — the largest phase of the whole build, measured on a real
-   * machine through the dev bridge. Yielding does not make it faster, it makes it a run of ~800 ms
-   * slices the browser can paint between. Splitting a variant's own generate() is not ours to do;
-   * that is inside ez-tree.
+   * An earlier version of this comment claimed `t.generate()` costs ~800 ms a variant and that the
+   * variants were the largest phase of the build. Both were wrong: they were inferred from the
+   * `growing…` phase total, and that phase builds the grass too. Timed on their own through the
+   * dev bridge (crofton-triangle, Rich's machine, 2026-09-21) five variants — ten `generate()`
+   * calls, full and sparse — cost **83 ms** and yield 3.2 MB. The grass is the other four seconds.
+   *
+   * So the yielding here is not buying much, and it is not where to look for load time. It stays
+   * because it is free and a large palette is allowed to grow; it is not a saving.
    *
    * WHICH variants is `paletteFor`: the site's own species mix, not a fixed five.
    */

@@ -42,7 +42,7 @@ from . import osm
 from .geo import Frame, snap_bbox
 
 REF_RE = re.compile(r"^(MD|US|I|VA|PA|CA|OR|ME)[ -]?\d+[A-Z]?( Alt| Bus| Scenic| Toll)?$")
-MIN_CHAIN_M = 120.0  # a stub shorter than this (a turning head, a mis-tagged driveway) is dropped
+MIN_CHAIN_M = 50.0  # a stub shorter than this (a turning head, a mis-tagged driveway) is dropped; a 75 m cul-de-sac is a road Rich lives on (main, 2026-09-21)
 
 
 def _ident(tags: dict, refs: set[str], names: set[str]) -> str | None:

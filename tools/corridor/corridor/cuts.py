@@ -46,6 +46,8 @@ SLOPE_MIN = 0.6     # m/m: ~31°, steeper than any graded embankment (1:2 = 0.5)
 RISE_MIN = 3.0      # m the steep part must climb
 TOE_MAX = 40.0      # m from the centreline the face must start within
 RUN_MIN = 20.0      # m along the road
+NATURAL_SLOPE_MIN = 0.4  # m/m (~22°): a ravine wall is gentler than a blasted cut but still a wall...
+NATURAL_RISE_MIN = 6.0   # ...when it climbs this much (Bonnie Branch's walls: 4-24 m at 0.3-0.6 m/m)
 GAP_STATIONS = 2    # stations of no-face a run may bridge
 PARALLEL_STD = 3.0  # m: a graded toe wanders less than this
 WATER_NEAR = 30.0   # m: a stream this close beside the road for half the interval makes it a ravine
@@ -157,59 +159,67 @@ def measure(site_dir: Path) -> dict | None:
 
         faces: list[dict] = []
         per_side: dict[str, np.ndarray] = {}
-        for side, sg in (("left", 1.0), ("right", -1.0)):
-            Z = np.zeros((len(s), len(OFFSETS)))
-            for j, o in enumerate(OFFSETS):
-                Z[:, j] = sample(p + normal * (sg * o)) - road_z
-            with np.errstate(invalid="ignore"):
-                dz = (Z[:, WINDOW:] - Z[:, :-WINDOW]) / WINDOW  # slope of each 5 m window, at OFFSETS[:-WINDOW]
-            steep = np.nan_to_num(dz, nan=0.0) > SLOPE_MIN
-            n_toe = int(np.searchsorted(OFFSETS, TOE_MAX))  # windows whose start is inside TOE_MAX
-            win = steep[:, :n_toe]
-            has = win.any(axis=1)
-            first = np.argmax(win, axis=1)
-            last = win.shape[1] - 1 - np.argmax(win[:, ::-1], axis=1)
-            toe = np.where(has, OFFSETS[first], np.nan)
-            top = np.where(has, OFFSETS[last] + WINDOW, np.nan)
-            rise = np.full(len(s), np.nan)
-            smax = np.full(len(s), np.nan)
-            for i in np.flatnonzero(has):
-                j0, j1 = int(first[i]), int(last[i]) + WINDOW
-                rise[i] = Z[i, j1] - Z[i, j0]
-                smax[i] = np.nanmax(dz[i, first[i] : last[i] + 1])
-            good = has & (np.nan_to_num(rise) >= RISE_MIN)
-            per_side[side] = good
-            for i0, i1 in _runs(good, GAP_STATIONS):
-                if s[i1] - s[i0] < RUN_MIN:
-                    continue
-                sl = slice(i0, i1 + 1)
-                toe_med = float(np.nanmedian(toe[sl]))
-                toe_std = float(np.nanstd(toe[sl]))
-                stations = []
-                for i in range(i0, i1 + 1, max(1, int(round(10.0 / STEP_M)))):
-                    if not good[i]:
+
+        def detect(slope_min: float, rise_min: float, forced_class: str | None) -> None:
+            for side, sg in (("left", 1.0), ("right", -1.0)):
+                Z = np.zeros((len(s), len(OFFSETS)))
+                for j, o in enumerate(OFFSETS):
+                    Z[:, j] = sample(p + normal * (sg * o)) - road_z
+                with np.errstate(invalid="ignore"):
+                    dz = (Z[:, WINDOW:] - Z[:, :-WINDOW]) / WINDOW  # slope of each 5 m window, at OFFSETS[:-WINDOW]
+                steep = np.nan_to_num(dz, nan=0.0) > slope_min
+                n_toe = int(np.searchsorted(OFFSETS, TOE_MAX))  # windows whose start is inside TOE_MAX
+                win = steep[:, :n_toe]
+                has = win.any(axis=1)
+                first = np.argmax(win, axis=1)
+                last = win.shape[1] - 1 - np.argmax(win[:, ::-1], axis=1)
+                toe = np.where(has, OFFSETS[first], np.nan)
+                top = np.where(has, OFFSETS[last] + WINDOW, np.nan)
+                rise = np.full(len(s), np.nan)
+                smax = np.full(len(s), np.nan)
+                for i in np.flatnonzero(has):
+                    j0, j1 = int(first[i]), int(last[i]) + WINDOW
+                    rise[i] = Z[i, j1] - Z[i, j0]
+                    smax[i] = np.nanmax(dz[i, first[i] : last[i] + 1])
+                good = has & (np.nan_to_num(rise) >= rise_min)
+                if forced_class is None:
+                    per_side[side] = good
+                for i0, i1 in _runs(good, GAP_STATIONS):
+                    if s[i1] - s[i0] < RUN_MIN:
                         continue
-                    t_xy = p[i] + normal[i] * (sg * toe[i])
-                    u_xy = p[i] + normal[i] * (sg * top[i])
-                    stations.append({
-                        "s": round(float(s[i]), 1),
-                        "toe": [round(float(t_xy[0] - ox), 1), round(float(t_xy[1] - oy), 1), round(float(road_z[i] + Z[i, int(toe[i] - OFFSETS[0])]), 2)],
-                        "top": [round(float(u_xy[0] - ox), 1), round(float(u_xy[1] - oy), 1), round(float(road_z[i] + Z[i, int(top[i] - OFFSETS[0])]), 2)],
+                    if forced_class is not None and any(f["side"] == side and f["s_start"] <= s[i1] and f["s_end"] >= s[i0] for f in faces):
+                        continue  # the steep pass already has this stretch
+                    sl = slice(i0, i1 + 1)
+                    toe_med = float(np.nanmedian(toe[sl]))
+                    toe_std = float(np.nanstd(toe[sl]))
+                    stations = []
+                    for i in range(i0, i1 + 1, max(1, int(round(10.0 / STEP_M)))):
+                        if not good[i]:
+                            continue
+                        t_xy = p[i] + normal[i] * (sg * toe[i])
+                        u_xy = p[i] + normal[i] * (sg * top[i])
+                        stations.append({
+                            "s": round(float(s[i]), 1),
+                            "toe": [round(float(t_xy[0] - ox), 1), round(float(t_xy[1] - oy), 1), round(float(road_z[i] + Z[i, int(toe[i] - OFFSETS[0])]), 2)],
+                            "top": [round(float(u_xy[0] - ox), 1), round(float(u_xy[1] - oy), 1), round(float(road_z[i] + Z[i, int(top[i] - OFFSETS[0])]), 2)],
+                        })
+                    near_water = float(np.mean(water_dist[sl] <= WATER_NEAR)) if waters else 0.0
+                    mid = float((s[i0] + s[i1]) / 2)
+                    strat, lith, descrip = _lith_at(geology, mid)
+                    faces.append({
+                        "id": f"cut-{side[0]}-{int(round(float(s[i0]))):04d}",
+                        "side": side,
+                        "s_start": round(float(s[i0]), 1), "s_end": round(float(s[i1]), 1), "length_m": round(float(s[i1] - s[i0]), 1),
+                        "toe_m": round(toe_med, 1), "toe_std_m": round(toe_std, 1), "top_m": round(float(np.nanmedian(top[sl])), 1),
+                        "height_m": round(float(np.nanmedian(rise[sl])), 1), "height_max_m": round(float(np.nanmax(rise[sl])), 1),
+                        "slope": round(float(np.nanmedian(smax[sl])), 2), "slope_max": round(float(np.nanmax(smax[sl])), 2),
+                        "water_share": round(near_water, 2),
+                        "formation": strat, "lith": lith or (descrip or "")[:80] or None, "rock_type": rock_type(lith, descrip),
+                        "stations": stations, "pass": "steep" if forced_class is None else "gentle", "forced_class": forced_class,
                     })
-                near_water = float(np.mean(water_dist[sl] <= WATER_NEAR)) if waters else 0.0
-                mid = float((s[i0] + s[i1]) / 2)
-                strat, lith, descrip = _lith_at(geology, mid)
-                faces.append({
-                    "id": f"cut-{side[0]}-{int(round(float(s[i0]))):04d}",
-                    "side": side,
-                    "s_start": round(float(s[i0]), 1), "s_end": round(float(s[i1]), 1), "length_m": round(float(s[i1] - s[i0]), 1),
-                    "toe_m": round(toe_med, 1), "toe_std_m": round(toe_std, 1), "top_m": round(float(np.nanmedian(top[sl])), 1),
-                    "height_m": round(float(np.nanmedian(rise[sl])), 1), "height_max_m": round(float(np.nanmax(rise[sl])), 1),
-                    "slope": round(float(np.nanmedian(smax[sl])), 2), "slope_max": round(float(np.nanmax(smax[sl])), 2),
-                    "water_share": round(near_water, 2),
-                    "formation": strat, "lith": lith or (descrip or "")[:80] or None, "rock_type": rock_type(lith, descrip),
-                    "stations": stations,
-                })
+
+        detect(SLOPE_MIN, RISE_MIN, None)
+        detect(NATURAL_SLOPE_MIN, NATURAL_RISE_MIN, "natural")
         # both sides rising over the same stations is a canyon, however straight
         both = per_side["left"] & per_side["right"]
         for f in faces:
@@ -217,10 +227,10 @@ def measure(site_dir: Path) -> dict | None:
             two_sided = float(np.mean(both[i0 : i1 + 1]))
             f["two_sided_share"] = round(two_sided, 2)
             natural = f["toe_std_m"] > PARALLEL_STD or f["water_share"] >= 0.5 or (two_sided >= 0.5 and f["water_share"] > 0)
-            f["class"] = "natural" if natural else "artificial"
+            f["class"] = f.pop("forced_class") or ("natural" if natural else "artificial")
     faces.sort(key=lambda f: f["s_start"])
     summary = {"faces": len(faces), "artificial": sum(f["class"] == "artificial" for f in faces), "natural": sum(f["class"] == "natural" for f in faces), "total_length_m": round(sum(f["length_m"] for f in faces), 1), "tallest_m": max((f["height_max_m"] for f in faces), default=0.0), "rock_types": sorted({f["rock_type"] for f in faces})}
-    out = {"step_m": STEP_M, "thresholds": {"slope_min": SLOPE_MIN, "rise_min_m": RISE_MIN, "toe_max_m": TOE_MAX, "run_min_m": RUN_MIN, "window_m": WINDOW, "parallel_std_m": PARALLEL_STD, "water_near_m": WATER_NEAR}, "faces": faces, "summary": summary}
+    out = {"step_m": STEP_M, "thresholds": {"slope_min": SLOPE_MIN, "rise_min_m": RISE_MIN, "natural_slope_min": NATURAL_SLOPE_MIN, "natural_rise_min_m": NATURAL_RISE_MIN, "toe_max_m": TOE_MAX, "run_min_m": RUN_MIN, "window_m": WINDOW, "parallel_std_m": PARALLEL_STD, "water_near_m": WATER_NEAR}, "faces": faces, "summary": summary}
     (site_dir / "cuts.json").write_text(json.dumps(out))
     return out
 

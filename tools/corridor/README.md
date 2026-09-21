@@ -13,6 +13,7 @@ the real-road driving game: measure first, generate second.
 just corridor-sites                       # ext/ref-driving/*.jpg -> sites.json
 just corridor-fetch south-mountain-i70    # one site (or `all`); add `--skip lidar` for a quick pass
 just corridor-report
+tools/corridor/.venv/bin/python -m corridor.verify        # every site: safe to publish?
 just corridor-view                        # the viewer, :5185 (apps/corridor)
 just corridor-export                      # rewrite web/ layers + surface.json without refetching
 ```

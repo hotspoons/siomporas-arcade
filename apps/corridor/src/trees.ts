@@ -5,11 +5,25 @@
 //         a few hundred, re-assigned to the trees nearest the camera every half second
 //
 // Every tree has a MEASURED height from the lidar canopy; the near model is scaled so its crown top
-// lands at that height. Species is a stand-in until something reads it off the imagery: oaks on
-// the ridges and roadside, ash in the bottoms, aspen for the thin tall ones.
+// lands at that height.
+//
+// SPECIES, since 2026-09-21, is measured too. It used to be a documented stand-in — `pickVariant`
+// sorted a fixed five presets (oak, ash, aspen) by canopy height alone, so Acadia's spruce-fir and
+// Big Sur's redwoods both came out as a Maryland oak wood, and there was no conifer variant at all.
+// Now the bake (`tools/corridor/corridor/flora.py`) hands over, per 30 m pixel, the LANDFIRE
+// vegetation class and a ranked species mix with weights, and species.ts turns a genus into a
+// silhouette. The height is still an input — it chooses between the large and small build of a
+// silhouette, and it weights the draw toward the species whose measured canopy height it matches —
+// but it is no longer the only one.
+//
+// Two properties of the old code are kept exactly:
+//   * a tree keeps its identity across frames, because the draw is a stable hash of its index;
+//   * an adjustment area's `species` override still wins over the data.
 import * as THREE from 'three'
 import { Budget } from './budget'
 import { Tree } from '@dgreenheck/ez-tree'
+import type { Flora, FloraSpecies, SpeciesWeight } from './flora'
+import { ARCHETYPES, archetypeFor, optionsFor, type Archetype, type LeafKind } from './species'
 import { greyscaleTexture, type SeasonLook } from './season'
 import * as T from './tuning'
 
@@ -18,12 +32,13 @@ export interface TreeRecord {
   z: number // world Z (south, = -north)
   y: number // ground
   h: number // canopy height, m
-  species?: 'oak' | 'ash' | 'aspen' | 'pine' // an adjustment area's override; undefined = by height
+  species?: 'oak' | 'ash' | 'aspen' | 'pine' // an adjustment area's override; undefined = from the bake
 }
 
 interface Variant {
   name: string
-  species: 'oak' | 'ash' | 'aspen' | 'pine'
+  archetype: Archetype
+  leaf: LeafKind
   branches: THREE.InstancedMesh
   leaves: THREE.InstancedMesh
   leavesFull: THREE.InstancedMesh // the sparse (density<1) leaf set is a second geometry with fewer leaves
@@ -34,11 +49,44 @@ interface Variant {
   grey: boolean
 }
 
-const PRESETS = ['Oak Medium', 'Ash Medium', 'Aspen Medium', 'Oak Large', 'Ash Small']
+/** The five that stood here before there was any species data: a mid-Atlantic hardwood wood. */
+const FALLBACK = ['oak', 'hardwood', 'aspen', 'oak-large', 'hardwood-small']
 
-function buildVariant(preset: string, capacity: number): Variant {
+/**
+ * Which silhouettes to build for this site.
+ *
+ * Building an ez-tree variant costs a full procedural generate (twice — the full and the thinned
+ * leaf set), so the list has to be short. It is chosen by AREA-WEIGHTED BASAL AREA: every EVT class
+ * in the corridor contributes its species mix scaled by its share of the ground, the species are
+ * mapped to silhouettes, and the heaviest `limit` silhouettes are built. A corridor that is 20 %
+ * red spruce and 14 % paper birch gets a spruce and a birch; one that is 36 % coastal-plain
+ * hardwood gets oaks.
+ */
+export function paletteFor(flora: Flora | null, limit = 6): Archetype[] {
+  const byId = new Map(ARCHETYPES.map((a) => [a.id, a]))
+  if (!flora) return FALLBACK.map((id) => byId.get(id)!).filter(Boolean)
+  const weight = new Map<string, number>()
+  const add = (a: Archetype, w: number) => weight.set(a.id, (weight.get(a.id) ?? 0) + w)
+  for (const c of flora.classes) {
+    if (c.lifeform !== 'Tree' || !c.species) continue
+    for (const s of c.species) {
+      const sp = flora.block.canopy.ref[s.key]
+      if (!sp) continue
+      add(archetypeFor(sp, c.leaf_cycle, sp.canopy_h_m ?? 18), s.weight * c.share)
+    }
+  }
+  if (!weight.size) return FALLBACK.map((id) => byId.get(id)!).filter(Boolean)
+  const ranked = [...weight.entries()].sort((a, b) => b[1] - a[1]).map(([id]) => byId.get(id)!).filter(Boolean)
+  const out = ranked.slice(0, limit)
+  // a wood with nothing small in it reads as a plantation; keep one understorey build if the
+  // dominant silhouettes are all full-height and there is room
+  if (out.length < limit && !out.some((a) => a.id.endsWith('-small'))) out.push(byId.get('hardwood-small')!)
+  return out
+}
+
+function buildVariant(a: Archetype, capacity: number, h: number): Variant {
   const t = new Tree()
-  t.loadPreset(preset)
+  t.loadFromJson(optionsFor(a, h))
   // the presets carry ~20k leaf vertices a tree; with hundreds of instances that is the whole
   // frame budget. Half the leaves, a third bigger, reads the same from the road.
   const fullCount = Math.max(4, Math.round(t.options.leaves.count * 0.5))
@@ -59,7 +107,7 @@ function buildVariant(preset: string, capacity: number): Variant {
   const sparseGeo = t.leavesMesh.geometry.clone()
   {
     const t2 = new Tree()
-    t2.loadPreset(preset)
+    t2.loadFromJson(optionsFor(a, h))
     t2.options.leaves.count = Math.max(2, Math.round(fullCount * 0.35))
     t2.options.leaves.size *= 1.3
     t2.generate()
@@ -67,13 +115,27 @@ function buildVariant(preset: string, capacity: number): Variant {
   }
   const leavesSparse = new THREE.InstancedMesh(sparseGeo, leafMat, capacity)
   leavesSparse.visible = false
-  const species = (t.options.leaves.type as Variant['species']) ?? 'oak'
   for (const m of [branches, leavesFull, leavesSparse]) {
     m.count = 0
     m.frustumCulled = false
-    m.name = `near-tree:${preset}`
+    m.name = `near-tree:${a.id}`
   }
-  return { name: preset, species, branches, leaves: leavesFull, leavesFull, leavesSparse, nativeHeight: Math.max(1, top), leafMat, srcMap: src.map, grey: false }
+  return { name: a.id, archetype: a, leaf: a.leaf, branches, leaves: leavesFull, leavesFull, leavesSparse, nativeHeight: Math.max(1, top), leafMat, srcMap: src.map, grey: false }
+}
+
+/**
+ * How well a measured canopy height matches a species' measured height in this corridor.
+ *
+ * Both numbers are lidar: `h` is the height of THIS tree from the CHM, `hm` is the mean CHM height
+ * over the pixels where the bake found that species' basal area. So "a 40 m stem in a redwood mix
+ * is a redwood and an 8 m one is a tanoak" is arithmetic over two measurements, not a rule. A
+ * species with no measured height (the EVT-name fallback, where no basal-area raster had data)
+ * scores 1 and is chosen on its mix weight alone.
+ */
+function heightAffinity(h: number, hm: number | null | undefined): number {
+  if (!hm || hm <= 0) return 1
+  const d = (h - hm) / Math.max(4, hm * 0.7)
+  return Math.exp(-d * d)
 }
 
 export class NearTrees {
@@ -85,30 +147,42 @@ export class NearTrees {
   private last = new THREE.Vector3(Infinity, Infinity, Infinity)
   private lastHeading = 0
   private capacity: number
+  private flora: Flora | null
+  /** memoised variant per tree index: the draw is stable, so it is worth computing once */
+  private chosen: Int16Array
+  /** the site's typical canopy height, which tunes the archetypes that scale with it */
+  private median = 18
   /** which tree index is currently drawn as a near model, so the far set can skip it */
   near = new Set<number>()
 
-  constructor(trees: TreeRecord[], radius = 220, capacity = 240) {
+  constructor(trees: TreeRecord[], radius = 220, capacity = 240, flora: Flora | null = null) {
     this.trees = trees
+    this.flora = flora
     void radius // live radius is the knob TREE_NEAR_RADIUS
     this.capacity = capacity
     this.group.name = 'near-trees'
+    // the typical canopy height of the site, so the archetypes are tuned for the wood they are in
+    const hs = trees.map((t) => t.h).sort((a, b) => a - b)
+    this.median = hs.length ? hs[Math.floor(hs.length * 0.6)] : 18
+    this.chosen = new Int16Array(trees.length).fill(-1)
     this.indexTrees(trees)
   }
 
   /**
-   * Generate the five procedural tree variants, yielding between them.
+   * Generate the procedural tree variants, yielding between them.
    *
-   * `t.generate()` is about 800 ms a preset, so doing all five in the constructor was a single
+   * `t.generate()` is about 800 ms a variant, so doing all of them in the constructor was a single
    * 4.1 s frame on crofton-triangle — the largest phase of the whole build, measured on a real
-   * machine through the dev bridge. Yielding does not make it faster, it makes it five ~800 ms
-   * slices the browser can paint between. Splitting a preset's own generate() is not ours to do;
+   * machine through the dev bridge. Yielding does not make it faster, it makes it a run of ~800 ms
+   * slices the browser can paint between. Splitting a variant's own generate() is not ours to do;
    * that is inside ez-tree.
+   *
+   * WHICH variants is `paletteFor`: the site's own species mix, not a fixed five.
    */
   async grow(sliceMs = 8): Promise<this> {
     const b = new Budget(sliceMs)
-    for (const p of PRESETS) {
-      const v = buildVariant(p, this.capacity)
+    for (const a of paletteFor(this.flora)) {
+      const v = buildVariant(a, this.capacity, this.median)
       this.variants.push(v)
       this.group.add(v.branches, v.leavesFull, v.leavesSparse)
       await b.tick()
@@ -124,6 +198,11 @@ export class NearTrees {
       if (arr) arr.push(i)
       else this.grid.set(k, [i])
     })
+  }
+
+  /** What was built, for the F6 panel and the probes. */
+  get palette(): { id: string; after: string; leaf: LeafKind; evergreen: boolean }[] {
+    return this.variants.map((v) => ({ id: v.archetype.id, after: v.archetype.after, leaf: v.leaf, evergreen: v.archetype.evergreen }))
   }
 
   /** Geometry + materials of each variant, for the impostor baker (the leaf set the season shows). */
@@ -143,7 +222,7 @@ export class NearTrees {
           v.grey = true
         } else ok = false
       }
-      const leaf = look.leaves[v.species] ?? look.leaves.oak
+      const leaf = look.leaves[v.leaf] ?? look.leaves.oak
       v.leafMat.color.copy(leaf.tint)
       const bare = leaf.density <= 0.05
       const sparse = !bare && leaf.density < 0.85
@@ -155,19 +234,70 @@ export class NearTrees {
     return ok
   }
 
-  /** Pick a species by height and a stable hash of position, so a tree keeps its shape. */
+  /**
+   * Pick a silhouette for one tree: a stable draw from the species mix of the 30 m pixel it stands
+   * on, weighted by how well its measured height matches each species' measured height.
+   *
+   * Stability is the whole game here. The hash is of the tree INDEX, exactly as before, so a tree
+   * keeps its identity across frames, across re-picks and across a change of near radius; only the
+   * data underneath it can change what it is.
+   */
   variantFor(t: TreeRecord, i: number): number {
+    const memo = this.chosen[i]
+    if (memo >= 0) return memo
     const hash = (i * 2654435761) >>> 0
-    if (t.species) {
-      const idx = this.variants.map((v, k) => (v.species === t.species ? k : -1)).filter((k) => k >= 0)
-      if (idx.length) return idx[hash % idx.length]
-    }
-    if (t.h > 22) return hash % 2 === 0 ? 3 : 0 // tall: big oaks
-    if (t.h < 8) return 4 // short: small ash
-    return hash % 3 // mid: oak / ash / aspen
+    const pick = this.compute(t, hash)
+    this.chosen[i] = pick
+    return pick
   }
 
-  /** Re-assign near models around `eye`. Cheap: only cells within the radius are visited. Returns true when the set changed. */
+  private compute(t: TreeRecord, hash: number): number {
+    // an adjustment area's override is a leaf kind, and it still wins
+    if (t.species) {
+      const want: LeafKind = t.species
+      const idx = this.variants.map((v, k) => (v.leaf === want ? k : -1)).filter((k) => k >= 0)
+      if (idx.length) return idx[hash % idx.length]
+    }
+    const mix: SpeciesWeight[] = this.flora ? this.flora.mixAt(t.x, -t.z) : []
+    if (mix.length) {
+      const cycle = this.flora!.leafCycleAt(t.x, -t.z)
+      const scores: number[] = []
+      const wants: Archetype[] = []
+      let total = 0
+      for (const s of mix) {
+        const sp: FloraSpecies = s.species
+        const w = s.weight * heightAffinity(t.h, sp.canopy_h_m)
+        if (w <= 0) continue
+        wants.push(archetypeFor(sp, cycle, t.h))
+        scores.push(w)
+        total += w
+      }
+      if (total > 0) {
+        // a stable uniform in [0,1) from the same hash, then a cumulative draw
+        let u = ((hash >>> 8) / 0x01000000) * total
+        for (let k = 0; k < scores.length; k++) {
+          u -= scores[k]
+          if (u <= 0) return this.nearest(wants[k], hash)
+        }
+        return this.nearest(wants[wants.length - 1], hash)
+      }
+    }
+    // no flora: the old behaviour, so a bake from before this layer still looks like it did
+    if (t.h > 22) return hash % 2 === 0 ? Math.min(3, this.variants.length - 1) : 0
+    if (t.h < 8) return Math.min(4, this.variants.length - 1)
+    return hash % Math.min(3, this.variants.length)
+  }
+
+  /** The built variant closest to a wanted silhouette: itself, else one with the same leaf kind. */
+  private nearest(a: Archetype, hash: number): number {
+    const exact = this.variants.findIndex((v) => v.archetype.id === a.id)
+    if (exact >= 0) return exact
+    const same = this.variants.map((v, k) => (v.leaf === a.leaf ? k : -1)).filter((k) => k >= 0)
+    if (same.length) return same[hash % same.length]
+    const ever = this.variants.map((v, k) => (v.archetype.evergreen === a.evergreen ? k : -1)).filter((k) => k >= 0)
+    return ever.length ? ever[hash % ever.length] : 0
+  }
+
   /** Force a re-pick on the next update (a knob changed). */
   invalidate() {
     this.last.set(Infinity, Infinity, Infinity)

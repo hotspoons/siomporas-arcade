@@ -63,7 +63,7 @@ export interface Manifest {
   ident: Record<string, string> | null
   frame: { epsg: number; origin: [number, number] }
   bbox: [number, number, number, number]
-  layers: Partial<Record<'dem' | 'chm' | 'naip' | 'horizon' | 'horizon_naip', Layer>>
+  layers: Partial<Record<'dem' | 'chm' | 'naip' | 'horizon' | 'horizon_naip' | 'flora', Layer>>
   spine: {
     dead_ends?: DeadEnd[] | null
     coords: [number, number, number][]
@@ -127,6 +127,10 @@ export interface Manifest {
     lat?: number
     tags?: Record<string, string>
   }[]
+  /** what grows here: LANDFIRE EVT classes with their corridor share, an FIA species mix,
+   *  a ground-cover class per vegetation type and Daymet monthly climate (tools/corridor/corridor/flora.py).
+   *  Absent on bakes older than 2026-09-21; flora.ts falls back to the OSM land-use rule. */
+  flora?: import('./flora').FloraBlock | null
   /** terrain-and-data agent: cut faces (cuts.py), exposed rock (rock.py), water (water.py); absent on older bakes */
   cuts?: import('./rocks').CutsLayer | null
   rock?: import('./rocks').RockLayer | null
@@ -174,6 +178,19 @@ export function decodeHeights(img: HTMLImageElement, layer: Layer): Float32Array
   const zmin = layer.zmin ?? 0
   const zs = layer.zscale ?? 0.01
   for (let i = 0; i < out.length; i++) out[i] = zmin + ((px[i * 4] << 8) | px[i * 4 + 1]) * zs
+  return out
+}
+
+/** Decode an 8-bit PNG of CLASS INDICES (the flora grid). No scaling: these are not measurements. */
+export function decodeIndex(img: HTMLImageElement): Uint8Array {
+  const c = document.createElement('canvas')
+  c.width = img.naturalWidth
+  c.height = img.naturalHeight
+  const ctx = c.getContext('2d', { willReadFrequently: true })!
+  ctx.drawImage(img, 0, 0)
+  const px = ctx.getImageData(0, 0, c.width, c.height).data
+  const out = new Uint8Array(c.width * c.height)
+  for (let i = 0; i < out.length; i++) out[i] = px[i * 4]
   return out
 }
 

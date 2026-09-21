@@ -25,8 +25,22 @@ export interface LeafLook {
   density: number // 0 = bare
 }
 
+/**
+ * The leaf palette is keyed by LEAF KIND, not by species — five entries that every silhouette in
+ * species.ts dresses in:
+ *
+ *   oak    a deciduous broadleaf that goes russet
+ *   ash    a deciduous broadleaf that goes gold
+ *   aspen  a deciduous broadleaf that goes yellow and bare early — birch and larch wear this too
+ *   pine   an evergreen conifer: GREEN IN EVERY SEASON, density 1 all year. The autumn ramp turns
+ *          the hardwoods and leaves the conifers alone, which is most of what an October spruce-fir
+ *          hillside looks like
+ *   live   an evergreen BROADLEAF — coast live oak, tanoak, California bay, madrone. Also green all
+ *          year, but darker and a little glossier than a conifer, and it is a third of the standing
+ *          basal area at Bixby Bridge, so California cannot do without it
+ */
 export interface SeasonLook {
-  leaves: Record<'oak' | 'ash' | 'aspen' | 'pine', LeafLook>
+  leaves: Record<'oak' | 'ash' | 'aspen' | 'pine' | 'live', LeafLook>
   grass: { base: THREE.Color; tip: THREE.Color; height: number; dry: number }
   /**
    * Leaf litter on the ground. `spread` is how far past the crowns it reaches, 0…1 — a hardwood
@@ -51,7 +65,7 @@ const c = (hex: number) => new THREE.Color(hex)
 
 export const LOOK: Record<Season, SeasonLook> = {
   winter: {
-    leaves: { oak: { tint: c(0x6b5a48), density: 0.08 }, ash: { tint: c(0x7a6a58), density: 0 }, aspen: { tint: c(0x8a7a66), density: 0 }, pine: { tint: c(0x3f5a3a), density: 1 } },
+    leaves: { oak: { tint: c(0x6b5a48), density: 0.08 }, ash: { tint: c(0x7a6a58), density: 0 }, aspen: { tint: c(0x8a7a66), density: 0 }, pine: { tint: c(0x3f5a3a), density: 1 }, live: { tint: c(0x3d5236), density: 1 } },
     grass: { base: c(0x877a58), tip: c(0xc3b189), height: 0.18, dry: 1 },
     litter: { tint: c(0xa89a86), spread: 1.0 }, // matted and grey by February, but the winter ground tint already darkens it
     ground: c(0xc9c0b2),
@@ -61,7 +75,7 @@ export const LOOK: Record<Season, SeasonLook> = {
     ambient: { sky: c(0xdfe8f2), ground: c(0x8f8878), intensity: 1.05 },
   },
   spring: {
-    leaves: { oak: { tint: c(0xc6e07e), density: 0.55 }, ash: { tint: c(0xd2ea92), density: 0.5 }, aspen: { tint: c(0xdcf0a0), density: 0.5 }, pine: { tint: c(0x6a9a5a), density: 1 } },
+    leaves: { oak: { tint: c(0xc6e07e), density: 0.55 }, ash: { tint: c(0xd2ea92), density: 0.5 }, aspen: { tint: c(0xdcf0a0), density: 0.5 }, pine: { tint: c(0x6a9a5a), density: 1 }, live: { tint: c(0x5c8046), density: 1 } },
     // April, and the only season allowed to look like it
     grass: { base: c(0x5f9a3a), tip: c(0xa6d66a), height: 0.22, dry: 0.12 },
     litter: { tint: c(0x6e6350), spread: 0.15 },
@@ -72,7 +86,7 @@ export const LOOK: Record<Season, SeasonLook> = {
     ambient: { sky: c(0xe6eef6), ground: c(0x7f7658), intensity: 0.82 },
   },
   summer: {
-    leaves: { oak: { tint: c(0x7fb54a), density: 1 }, ash: { tint: c(0x8cc45a), density: 1 }, aspen: { tint: c(0x9ed065), density: 1 }, pine: { tint: c(0x5a8a50), density: 1 } },
+    leaves: { oak: { tint: c(0x7fb54a), density: 1 }, ash: { tint: c(0x8cc45a), density: 1 }, aspen: { tint: c(0x9ed065), density: 1 }, pine: { tint: c(0x5a8a50), density: 1 }, live: { tint: c(0x4e7440), density: 1 } },
     // September: olive at the root, straw at the tip, seed heads standing a little taller
     grass: { base: c(0x4c6b2e), tip: c(0x97a054), height: 0.46, dry: 0.45 },
     litter: { tint: c(0x7a6e56), spread: 0.2 },
@@ -83,7 +97,7 @@ export const LOOK: Record<Season, SeasonLook> = {
     ambient: { sky: c(0xe9eef2), ground: c(0x7a6a50), intensity: 0.75 },
   },
   autumn: {
-    leaves: { oak: { tint: c(0xd6823a), density: 0.75 }, ash: { tint: c(0xe0b24a), density: 0.6 }, aspen: { tint: c(0xf7d23a), density: 0.65 }, pine: { tint: c(0x5a8a50), density: 1 } },
+    leaves: { oak: { tint: c(0xd6823a), density: 0.75 }, ash: { tint: c(0xe0b24a), density: 0.6 }, aspen: { tint: c(0xf7d23a), density: 0.65 }, pine: { tint: c(0x5a8a50), density: 1 }, live: { tint: c(0x4b6f3e), density: 1 } },
     grass: { base: c(0x77803f), tip: c(0xc0b268), height: 0.36, dry: 0.85 },
     litter: { tint: c(0xb07a44), spread: 0.85 },
     ground: c(0xf5e6cf),

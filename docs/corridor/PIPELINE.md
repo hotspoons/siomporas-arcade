@@ -389,6 +389,37 @@ catalog entry, set `yaw_offset_deg` by eye in the editor.
 
 ---
 
+## Fusing gaussian splats later (visuals) while keeping the geometry (dynamics)
+
+The split already exists in the code: the car never touches a rendered mesh. It drives on the
+carriageway spline's height function, `edgeDistance` for pavement vs verge, and the tree grid for
+collision — all tier B closures built from the bake. Splats replace what the eye sees, not what
+the tyres feel. What that looks like, tier by tier:
+
+- **Bake (A).** gaussworks' 360 drive-through captures → trained splats per capture → registered
+  into the corridor frame (EPSG UTM + NAVD88): the GPS track gives scale and a first pose, then an
+  ICP of the splat means against the lidar DTM and the road spline pins it (the road surface is the
+  most reliable common geometry). Dynamic objects (cars, people) masked out before training. Output
+  per site: a 7-DOF transform in the manifest and the splats **chunked by along-track station**
+  (every ~50 m of `s`), each chunk a `.ksplat`/`.spz` in `web/splats/` and later R2, with a
+  capture date and time-of-day recorded.
+- **Boot (B).** Load the transform and the chunk index; build the same terrain, strip, spline,
+  station grid and structures as today. Nothing the car needs changes.
+- **Dynamic (C).** Stream splat chunks ahead of the car by `s` (the grass tile scheduler is the
+  same idea), unload behind. Render splats with depth writes into the same depth buffer as the
+  meshes so the car, props, weather and grass sort against them; a distance band fades from
+  splats (near, where captured, ±50 m of the road) to geometry (far terrain, horizon, far trees).
+
+What it costs: a splat is a photograph — one season, one time of day, one traffic state. Seasons
+and weather then become colour grading over the splats plus the geometry layers we keep drawing
+(snow accumulation, wet road, particles), or one capture per season. The sun in the scene has to
+match the capture. Anything the game changes (authored bridges, autogen buildings, cut-face rock)
+is a mesh in front of the splats, so a splat captured with a real bridge and a game without one
+cannot coexist — the authored world has to win, meaning splat editing (delete a region) is part
+of the bake. The renderer: `@mkkellogg/gaussian-splats-3d` or Spark composite into a three.js
+scene with depth today; the strip's height function can also be *improved* by splat depth where
+the lidar is old (Bowie's is 2014).
+
 ## Part 4 · This agent's additions (terrain-and-data, 2026-09-21)
 
 New bake modules, each additive in `export.py` (a manifest key each) and each with a viewer

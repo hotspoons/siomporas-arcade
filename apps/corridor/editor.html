@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <title>corridor editor</title>
+    <link rel="stylesheet" href="/src/style.css" />
+    <link rel="stylesheet" href="/src/editor/editor.css" />
+  </head>
+  <body class="editor">
+    <canvas id="gl"></canvas>
+    <aside id="panel">
+      <header>
+        <h1>editor</h1>
+        <select id="site"></select>
+        <a class="link" href="/" title="the read-only viewer">view ↗</a>
+      </header>
+      <div id="modes" class="row seg">
+        <button data-mode="areas">1 · areas</button>
+        <button data-mode="place">2 · place</button>
+        <button id="save">save</button>
+        <span id="dirty" class="warn"></span>
+      </div>
+      <section id="layers" class="row">
+        <label><input type="checkbox" data-layer="imagery" checked /> imagery</label>
+        <label><input type="checkbox" data-layer="areas" checked /> areas</label>
+        <label><input type="checkbox" data-layer="placements" checked /> placements</label>
+        <label><input type="checkbox" data-layer="spine" checked /> spine</label>
+        <label><input type="checkbox" data-layer="structures" checked /> structures</label>
+        <label><input type="checkbox" data-layer="trees" /> trees</label>
+        <label><input type="checkbox" data-layer="horizon" /> horizon</label>
+      </section>
+      <section id="body"></section>
+      <footer>
+        drag / wheel to orbit · T top · F fly to selection<br />
+        <b>areas</b>: N draw, click to add a vertex, click the first vertex or Enter to close, Esc cancel, Del remove, drag a handle to nudge<br />
+        <b>place</b>: pick an asset then click the ground, drag to move, Q/E or shift+wheel to rotate, [ ] to scale, Del remove<br />
+        Ctrl+S saves the active mode's file.
+      </footer>
+    </aside>
+    <div id="status">loading…</div>
+    <script type="module" src="/src/editor/main.ts"></script>
+  </body>
+</html>

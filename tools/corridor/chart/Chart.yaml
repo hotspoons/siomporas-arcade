@@ -1,0 +1,6 @@
+apiVersion: v2
+name: corridor
+description: Bake real-road corridors (OSM, DEM, NAIP, lidar, geology) onto a volume and publish them to an S3/R2 bucket
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

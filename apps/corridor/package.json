@@ -1,0 +1,16 @@
+{
+  "name": "@apex/corridor",
+  "private": true,
+  "version": "0.0.0",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview --port 5185 --strictPort --host"
+  },
+  "dependencies": {
+    "@dgreenheck/ez-tree": "^1.1.0",
+    "three": "^0.185.1"
+  }
+}

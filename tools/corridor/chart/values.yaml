@@ -1,0 +1,65 @@
+# corridor: one Job per `helm upgrade` that bakes every site onto a PVC and, optionally, syncs the
+# result to an S3-compatible bucket. The Job is named after the release revision, so
+#
+#   helm upgrade --install corridor tools/corridor/chart -n default
+#
+# always starts a fresh bake; a bake that is already on the volume is cheap because every source
+# is cached there (a second run of a baked site is ~1 minute of recompute, no downloads).
+#
+# WHY A JOB AND NOT A DEPLOYMENT. Nothing here serves. The Worker serves, from the bucket. This
+# is a batch step with a beginning and an end, and the cluster is where it runs because it has
+# the storage (a laptop's 2 TB filled up doing this for trailworks) and the bandwidth to USGS.
+
+image:
+  repository: ghcr.io/hotspoons/corridor
+  tag: "latest"
+  pullPolicy: Always
+
+# The volume everything lands on. Sources cache under /data/cache (DEM tiles at 350 MB each, EPT
+# nodes, NAIP JPEGs, Overpass responses) and sites under /data/sites. Budget: ~3 GB a site plus a
+# shared cache that grows with the area covered. RWX so a publish Job can read while a bake writes.
+data:
+  existingClaim: ""
+  size: 500Gi
+  storageClass: ceph-filesystem
+  accessMode: ReadWriteMany
+
+bake:
+  enabled: true
+  # a slug from sites.json, or `all`
+  sites: all
+  # comma list of steps to skip: dem,naip,lidar,geology,horizon
+  skip: ""
+  # extra CLI args, e.g. ["--lidar-half-width", "150"]
+  args: []
+  # a site is ~100 M points held in numpy while rasters are built; 16 Gi is the observed floor for
+  # the South Mountain corridor, 48 Gi leaves room for a wider one. CPU is mostly LAZ decode.
+  resources:
+    requests: {cpu: "4", memory: 16Gi}
+    limits: {cpu: "16", memory: 48Gi}
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 604800  # keep a week of logs
+  # Override the sites.json baked into the image (a JSON array, see corridor/sites.py). Empty
+  # means the image's copy.
+  sitesJson: ""
+
+# After a successful bake, `python -m corridor publish` into this bucket. Credentials come from a
+# Secret with AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY (an R2 API token works as-is).
+#   kubectl create secret generic corridor-r2 --from-literal=AWS_ACCESS_KEY_ID=... --from-literal=AWS_SECRET_ACCESS_KEY=...
+publish:
+  enabled: false
+  bucket: ""
+  # R2: https://<account-id>.r2.cloudflarestorage.com ; leave empty for AWS
+  endpoint: ""
+  region: auto
+  prefix: corridor
+  secretName: corridor-r2
+  # publish only, without baking first (e.g. after a manual fix on the volume)
+  only: false
+
+# Where the sites are — this only affects which lidar dataset is picked and how far USGS is.
+horizonRadiusM: 30000
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

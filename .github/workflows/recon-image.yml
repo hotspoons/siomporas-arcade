@@ -32,6 +32,9 @@ on:
     # build had never actually failed on its merits. Use workflow_dispatch to test changes here.
     paths:
       - 'tools/recon-service/**'
+      # docs and the Helm chart do not change the image; without these a README edit is a build
+      - '!tools/recon-service/README.md'
+      - '!tools/recon-service/chart/**'
   workflow_dispatch:
     inputs:
       arch_list_amd64:

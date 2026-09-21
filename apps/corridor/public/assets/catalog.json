@@ -1,0 +1,107 @@
+{
+ "assets": [
+  {
+   "id": "diner-01",
+   "name": "Roadside diner",
+   "category": "restaurant",
+   "footprint_m": [
+    22,
+    14
+   ],
+   "height_m": 6,
+   "glb": "assets/diner-01.glb"
+  },
+  {
+   "id": "motel-01",
+   "name": "Highway motel",
+   "category": "hotel",
+   "footprint_m": [
+    62,
+    14
+   ],
+   "height_m": 9
+  },
+  {
+   "id": "gas-01",
+   "name": "Gas station",
+   "category": "gas_station",
+   "footprint_m": [
+    30,
+    22
+   ],
+   "height_m": 7
+  },
+  {
+   "id": "church-01",
+   "name": "Country church",
+   "category": "church",
+   "footprint_m": [
+    24,
+    14
+   ],
+   "height_m": 13
+  },
+  {
+   "id": "stripmall-01",
+   "name": "Strip mall",
+   "category": "retail",
+   "footprint_m": [
+    92,
+    26
+   ],
+   "height_m": 7
+  },
+  {
+   "id": "bigbox-01",
+   "name": "Big-box store",
+   "category": "retail",
+   "footprint_m": [
+    120,
+    78
+   ],
+   "height_m": 11
+  },
+  {
+   "id": "archway-01",
+   "name": "Gateway sign",
+   "category": "sign",
+   "footprint_m": [
+    30,
+    3
+   ],
+   "height_m": 9
+  },
+  {
+   "id": "barn-01",
+   "name": "Barn",
+   "category": "farm",
+   "footprint_m": [
+    30,
+    14
+   ],
+   "height_m": 11,
+   "glb": "assets/barn-01.glb"
+  },
+  {
+   "id": "watertower-01",
+   "name": "Water tower",
+   "category": "utility",
+   "footprint_m": [
+    16,
+    16
+   ],
+   "height_m": 38,
+   "glb": "assets/watertower-01.glb"
+  },
+  {
+   "id": "billboard-01",
+   "name": "Billboard",
+   "category": "sign",
+   "footprint_m": [
+    14,
+    2
+   ],
+   "height_m": 14
+  }
+ ]
+}

@@ -1,0 +1,469 @@
+"""The point cloud itself, from USGS's Entwine (EPT) staging, and what a road can learn from it.
+
+WHY THE POINTS AND NOT JUST THE DEM. The 1 m DEM is bare earth: the vendor has already deleted
+every bridge deck, tree and building from it. Those are precisely the things this game has to
+place. The classified point cloud still has them, each with an ASPRS class:
+
+    2 ground   3/4/5 low/medium/high vegetation   6 building   7/18 noise   9 water
+    17 BRIDGE DECK   (and 10 rail, 11 road surface, 13-16 wires/towers where the vendor bothered)
+
+Class 17 is the answer to "does something cross over this road": a bridge deck is explicitly
+labelled, in 3D, at 8 points per square metre. OSM tells us a way crosses; the deck tells us how
+high and how wide. Vegetation classes minus ground is a canopy height model — tree cover, per
+metre, for placing trees where trees are. Ground beside the road versus the road's own height is
+the cut/fill profile: a blasted rock cut is ground standing 10-30 m above the pavement a few
+metres to the side; an embankment is the reverse.
+
+WHY EPT. USGS stages every 3DEP project as Entwine Point Tiles on a public bucket: an octree of
+LAZ files with a JSON hierarchy. A 6 km corridor a few hundred metres wide is a handful of octree
+nodes — tens of MB — where the same stretch as LAZ delivery tiles is 850 MB. EPT is in Web
+Mercator; points are re-projected to the site frame on the way in. There is no PDAL in this
+container (Debian trixie/arm64 has none) so the octree walk is done by hand here and the LAZ nodes
+are read with laspy+lazrs.
+
+UNITS. EPT declares no vertical CRS. Z is compared against the DEM (metres, NAVD88) on load and
+converted if it is in feet — one older Maryland project is.
+"""
+from __future__ import annotations
+
+import json
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+
+import laspy
+import numpy as np
+import rasterio
+import requests
+import shapely
+from rasterio.features import rasterize
+from rasterio.transform import from_origin
+from scipy import ndimage
+from shapely.geometry import LineString, Polygon
+
+from .geo import Frame
+
+BASE = "https://usgs-lidar-public.s3.us-west-2.amazonaws.com/{ds}/"
+# Newest and best first. A dataset is used when its bounds contain the corridor.
+DATASETS = [
+    "MD_Western_2_D21",
+    "MD_Western_1_D21",
+    "MD_PotomacP2_TB_2021",
+    "MD_VA_NCB_KGeorge_1_2020",
+    "USGS_LPC_MD_VA_Sandy_NCR_2014_LAS_2015",
+]
+CLASS_NAMES = {0: "never", 1: "unassigned", 2: "ground", 3: "veg_low", 4: "veg_med", 5: "veg_high", 6: "building", 7: "noise", 9: "water", 10: "rail", 11: "road", 13: "wire_guard", 14: "wire_conductor", 15: "tower", 16: "wire_connector", 17: "bridge_deck", 18: "noise_high", 20: "ignored_ground", 21: "snow", 22: "temporal_exclusion"}
+session = requests.Session()
+session.headers["User-Agent"] = "apex-conduit corridor (github.com/hotspoons)"
+
+
+def _get_json(url: str, cache: Path) -> dict:
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    if cache.exists():
+        return json.loads(cache.read_text())
+    r = session.get(url, timeout=120)
+    r.raise_for_status()
+    cache.write_bytes(r.content)
+    return r.json()
+
+
+def candidate_datasets(bbox_merc, cache: Path) -> list[tuple[str, dict]]:
+    """Datasets whose declared bounds contain the corridor, best first. The bounds are the
+    octree's CUBE, padded square around the real footprint, so containment is necessary but not
+    sufficient — Clarksburg sits inside MD_Western_2's cube and outside its points. The caller
+    walks the list until one actually yields points."""
+    x0, y0, x1, y1 = bbox_merc
+    out = []
+    for ds in DATASETS:
+        ept = _get_json(BASE.format(ds=ds) + "ept.json", cache / "ept" / ds / "ept.json")
+        b = ept["bounds"]
+        if b[0] <= x0 and b[1] <= y0 and b[3] >= x1 and b[4] >= y1:
+            out.append((ds, ept))
+    if not out:
+        raise RuntimeError("no EPT dataset covers this corridor")
+    return out
+
+
+def nodes_for(ds: str, ept: dict, bbox_merc, cache: Path) -> list[str]:
+    """Octree keys (D-X-Y-Z) with points whose XY footprint intersects the bbox, all depths."""
+    b = ept["bounds"]
+    size = b[3] - b[0]
+    x0, y0, x1, y1 = bbox_merc
+    hier: dict[str, int] = dict(_get_json(BASE.format(ds=ds) + "ept-hierarchy/0-0-0-0.json", cache / "ept" / ds / "h" / "0-0-0-0.json"))
+    out: list[str] = []
+    stack = ["0-0-0-0"]
+    while stack:
+        key = stack.pop()
+        d, x, y, z = (int(v) for v in key.split("-"))
+        ns = size / (2**d)
+        nx0, ny0 = b[0] + x * ns, b[1] + y * ns
+        if nx0 > x1 or nx0 + ns < x0 or ny0 > y1 or ny0 + ns < y0:
+            continue
+        count = hier.get(key)
+        if count is None:
+            continue
+        if count == -1:  # subtree lives in its own hierarchy file
+            hier.update(_get_json(BASE.format(ds=ds) + f"ept-hierarchy/{key}.json", cache / "ept" / ds / "h" / f"{key}.json"))
+            count = hier.get(key, 0)
+        if count > 0:
+            out.append(key)
+        for dx in (0, 1):
+            for dy in (0, 1):
+                for dz in (0, 1):
+                    child = f"{d + 1}-{2 * x + dx}-{2 * y + dy}-{2 * z + dz}"
+                    if child in hier:
+                        stack.append(child)
+    return out
+
+
+def _read_node(ds: str, key: str, bbox_merc, cache: Path) -> dict | None:
+    path = cache / "ept" / ds / "data" / f"{key}.laz"
+    if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        r = session.get(BASE.format(ds=ds) + f"ept-data/{key}.laz", timeout=300)
+        r.raise_for_status()
+        tmp = path.with_suffix(".part")
+        tmp.write_bytes(r.content)
+        tmp.replace(path)
+    las = laspy.read(path)
+    x, y = np.asarray(las.x), np.asarray(las.y)
+    x0, y0, x1, y1 = bbox_merc
+    m = (x >= x0) & (x <= x1) & (y >= y0) & (y <= y1)
+    if not m.any():
+        return None
+    return {
+        "x": x[m], "y": y[m], "z": np.asarray(las.z)[m],
+        "cls": np.asarray(las.classification)[m].astype(np.uint8),
+        "rn": np.asarray(las.return_number)[m].astype(np.uint8),
+        "nr": np.asarray(las.number_of_returns)[m].astype(np.uint8),
+        "i": np.asarray(las.intensity)[m].astype(np.uint16),
+    }
+
+
+def fetch_points(frame: Frame, bbox: tuple[float, float, float, float], cache: Path, jobs: int = 8, clip: Polygon | None = None) -> tuple[dict, dict]:
+    bbox_merc = frame.bbox_merc(*bbox)
+    parts: list[dict] = []
+    ds = ""
+    keys: list[str] = []
+    for ds, ept in candidate_datasets(bbox_merc, cache):
+        keys = nodes_for(ds, ept, bbox_merc, cache)
+        print(f"  lidar   {ds}: {len(keys)} octree nodes", flush=True)
+        if not keys:
+            continue
+        with ThreadPoolExecutor(jobs) as ex:
+            parts = [p for p in ex.map(lambda k: _read_node(ds, k, bbox_merc, cache), keys) if p]
+        if parts:
+            break
+        print(f"  lidar   {ds}: inside its cube but no points here; trying the next dataset", flush=True)
+    if not parts:
+        # Not staged as EPT (yet): MD_Central_Processing_D24 was published 2026-03 and covers
+        # Montgomery / Prince George's, where the Entwine bucket has nothing newer than 2014. Fall
+        # back to the delivery LAZ tiles through the TNM API — heavier, but the same points.
+        return _fetch_tnm_laz(frame, bbox, cache, jobs, clip)
+    pts = {k: np.concatenate([p[k] for p in parts]) for k in parts[0]}
+    ux, uy = frame.from_merc(pts["x"], pts["y"])
+    pts["x"], pts["y"] = np.asarray(ux), np.asarray(uy)
+    xmin, ymin, xmax, ymax = bbox
+    m = (pts["x"] >= xmin) & (pts["x"] < xmax) & (pts["y"] >= ymin) & (pts["y"] < ymax)
+    pts = {k: v[m] for k, v in pts.items()}
+    print(f"  lidar   {len(pts['x']):,} points in bbox", flush=True)
+    return pts, {"dataset": ds, "nodes": len(keys), "points": int(len(pts["x"]))}
+
+
+TNM = "https://tnmaccess.nationalmap.gov/api/v1/products"
+
+
+def _read_laz_tile(path: Path, frame: Frame, bbox, clip: Polygon | None = None) -> dict | None:
+    """One delivery tile: read, re-project from ITS declared CRS to the site frame, clip."""
+    from pyproj import Transformer
+
+    las = laspy.read(path)
+    crs = las.header.parse_crs()
+    if crs is None:
+        raise RuntimeError(f"{path.name}: no CRS in the LAS header")
+    tr = Transformer.from_crs(crs, frame.crs, always_xy=True)
+    x, y = tr.transform(np.asarray(las.x), np.asarray(las.y))
+    x, y = np.asarray(x), np.asarray(y)
+    xmin, ymin, xmax, ymax = bbox
+    m = (x >= xmin) & (x < xmax) & (y >= ymin) & (y < ymax)
+    if clip is not None and m.any():
+        # the corridor is a strip on a diagonal; its bbox is mostly air. Clip per tile so the
+        # concatenated cloud is the strip, not the box (memory: 300 M points vs 40 M on Clarksburg)
+        idx = np.flatnonzero(m)
+        inside = shapely.contains_xy(clip, x[idx], y[idx])
+        m[idx[~inside]] = False
+    if not m.any():
+        return None
+    z = np.asarray(las.z)[m]
+    # a compound CRS in US survey feet puts Z in feet too; check_units() confirms against the DEM
+    try:
+        unit = crs.axis_info[0].unit_name if crs.axis_info else "metre"
+    except Exception:
+        unit = "metre"
+    if "foot" in unit or "feet" in unit:
+        z = z * 0.3048006096
+    return {
+        "x": x[m], "y": y[m], "z": z,
+        "cls": np.asarray(las.classification)[m].astype(np.uint8),
+        "rn": np.asarray(las.return_number)[m].astype(np.uint8),
+        "nr": np.asarray(las.number_of_returns)[m].astype(np.uint8),
+        "i": np.asarray(las.intensity)[m].astype(np.uint16),
+    }
+
+
+def _fetch_tnm_laz(frame: Frame, bbox, cache: Path, jobs: int, clip: Polygon | None = None) -> tuple[dict, dict]:
+    from .dem import download
+
+    w, s, e, n = frame.bbox_wgs(*bbox)
+    r = session.get(TNM, params={"datasets": "Lidar Point Cloud (LPC)", "bbox": f"{w},{s},{e},{n}", "outputFormat": "JSON", "max": 400}, timeout=120)
+    r.raise_for_status()
+    items = r.json().get("items", [])
+    if not items:
+        raise RuntimeError("no lidar at all for this corridor (EPT or TNM)")
+    # newest project only: mixing vintages inside one corridor makes seams no game wants
+    by_proj: dict[str, list[dict]] = {}
+    for it in items:
+        by_proj.setdefault(" ".join(it["title"].split(" ")[4:-1]), []).append(it)
+    proj = max(by_proj, key=lambda k: (max(i.get("publicationDate", "") for i in by_proj[k]), len(by_proj[k])))
+    tiles = by_proj[proj]
+    total = sum(i.get("sizeInBytes", 0) for i in tiles) / 2**20
+    print(f"  lidar   TNM {proj}: {len(tiles)} LAZ tiles, {total:.0f} MiB", flush=True)
+    paths = []
+    with ThreadPoolExecutor(min(jobs, 4)) as ex:
+        paths = list(ex.map(lambda it: download(it["downloadURL"], cache / "laz" / proj / it["downloadURL"].rsplit("/", 1)[1], it.get("sizeInBytes")), tiles))
+    parts = []
+    for i, pth in enumerate(paths, 1):
+        part = _read_laz_tile(pth, frame, bbox, clip)
+        if part:
+            parts.append(part)
+        print(f"  lidar   tile {i}/{len(paths)} {pth.name}: {len(part['x']) if part else 0:,} pts in bbox", flush=True)
+    if not parts:
+        raise RuntimeError("TNM tiles intersect the bbox but hold no points in it")
+    pts = {k: np.concatenate([p[k] for p in parts]) for k in parts[0]}
+    print(f"  lidar   {len(pts['x']):,} points in bbox", flush=True)
+    return pts, {"dataset": f"TNM:{proj}", "tiles": len(paths), "points": int(len(pts["x"]))}
+
+
+def _grid(bbox, res=1.0):
+    xmin, ymin, xmax, ymax = bbox
+    w, h = int(round((xmax - xmin) / res)), int(round((ymax - ymin) / res))
+    return w, h, from_origin(xmin, ymax, res, res)
+
+
+def _cells(pts, bbox, w, h, res=1.0):
+    xmin, _, _, ymax = bbox
+    col = ((pts["x"] - xmin) / res).astype(np.int64)
+    row = ((ymax - pts["y"]) / res).astype(np.int64)
+    ok = (col >= 0) & (col < w) & (row >= 0) & (row < h)
+    return row, col, ok
+
+
+def _fill_nan(a: np.ndarray) -> np.ndarray:
+    nan = np.isnan(a)
+    if not nan.any() or nan.all():
+        return a
+    idx = ndimage.distance_transform_edt(nan, return_distances=False, return_indices=True)
+    return a[tuple(idx)]
+
+
+def _write(path: Path, arr: np.ndarray, transform, crs: str, nodata=None):
+    with rasterio.open(path, "w", driver="GTiff", width=arr.shape[1], height=arr.shape[0], count=1, dtype=arr.dtype, crs=crs, transform=transform, compress="deflate", tiled=True, nodata=nodata) as d:
+        d.write(arr, 1)
+
+
+def check_units(pts: dict, dem_path: Path) -> float:
+    """Return the factor that puts Z in metres, measured against the bare-earth DEM."""
+    with rasterio.open(dem_path) as d:
+        g = pts["cls"] == 2
+        idx = np.random.default_rng(0).choice(np.flatnonzero(g), size=min(20000, int(g.sum())), replace=False)
+        rows, cols = rasterio.transform.rowcol(d.transform, pts["x"][idx], pts["y"][idx])
+        rows, cols = np.asarray(rows), np.asarray(cols)
+        ok = (rows >= 0) & (rows < d.height) & (cols >= 0) & (cols < d.width)
+        dem = d.read(1)[rows[ok], cols[ok]]
+        valid = dem > -9000
+        z = pts["z"][idx][ok][valid]
+        dem = dem[valid]
+    ratio = float(np.median(z) / np.median(dem)) if len(dem) else 1.0
+    factor = 0.3048 if abs(ratio - 1 / 0.3048) < 0.15 else 1.0
+    resid = float(np.median(z * factor - dem))
+    print(f"  lidar   ground z / DEM ratio {ratio:.3f} -> factor {factor}, median residual {resid:+.2f} m", flush=True)
+    return factor
+
+
+def rasters(pts: dict, bbox, frame: Frame, corridor: Polygon, out_dir: Path) -> dict:
+    w, h, tr = _grid(bbox)
+    row, col, ok = _cells(pts, bbox, w, h)
+    inside = rasterize([(corridor, 1)], out_shape=(h, w), transform=tr, fill=0, dtype=np.uint8).astype(bool)
+    keep = ok.copy()
+    keep[ok] &= inside[row[ok], col[ok]]
+    pts = {k: v[keep] for k, v in pts.items()}
+    row, col = row[keep], col[keep]
+    z, cls = pts["z"], pts["cls"]
+    flat = row * w + col
+
+    def agg(mask, fn, init):
+        a = np.full(w * h, init, dtype=np.float32)
+        fn.at(a, flat[mask], z[mask].astype(np.float32))
+        a[a == init] = np.nan
+        return a.reshape(h, w)
+
+    ground = cls == 2
+    dtm = agg(ground, np.minimum, np.inf)
+    dtm_filled = _fill_nan(dtm.copy())
+    dsm = agg(np.ones_like(cls, bool), np.maximum, -np.inf)
+    # Canopy. Vendors differ: some classify vegetation (3/4/5), MD_Western_2021 leaves everything
+    # that is not ground as 1 (unassigned). So canopy is "unassigned or vegetation, standing above
+    # the ground", with deck cells zeroed. Buildings that the vendor did not classify (6) will show
+    # up as canopy here; osm.geojson has their footprints for the game to mask them.
+    veg = ((cls >= 3) & (cls <= 5)) | (cls == 1)
+    veg_max = agg(veg, np.maximum, -np.inf)
+    chm = np.clip(np.nan_to_num(veg_max - dtm_filled, nan=0.0), 0, 80).astype(np.float32)
+    deck = cls == 17
+    deck_z = agg(deck, np.maximum, -np.inf)
+    deck_n = np.bincount(flat[deck], minlength=w * h).reshape(h, w).astype(np.uint16)
+    chm[deck_n > 0] = 0
+    bld_n = np.bincount(flat[cls == 6], minlength=w * h).reshape(h, w).astype(np.uint16)
+
+    crs = frame.crs
+    _write(out_dir / "dtm.tif", np.nan_to_num(dtm, nan=-9999).astype(np.float32), tr, crs, -9999)
+    _write(out_dir / "dsm.tif", np.nan_to_num(dsm, nan=-9999).astype(np.float32), tr, crs, -9999)
+    _write(out_dir / "chm.tif", chm, tr, crs)
+    _write(out_dir / "deck_z.tif", np.nan_to_num(deck_z, nan=-9999).astype(np.float32), tr, crs, -9999)
+    _write(out_dir / "deck_n.tif", deck_n, tr, crs)
+    _write(out_dir / "building_n.tif", bld_n, tr, crs)
+
+    counts = np.bincount(cls, minlength=32)
+    classes = {CLASS_NAMES.get(i, str(i)): int(c) for i, c in enumerate(counts) if c}
+
+    las = laspy.create(point_format=6, file_version="1.4")
+    las.header.offsets = [float(np.floor(pts["x"].min())), float(np.floor(pts["y"].min())), 0.0]
+    las.header.scales = [0.01, 0.01, 0.01]
+    las.x, las.y, las.z = pts["x"], pts["y"], z
+    las.classification = cls
+    las.return_number, las.number_of_returns, las.intensity = pts["rn"], pts["nr"], pts["i"]
+    import pyproj
+
+    las.header.add_crs(pyproj.CRS.from_user_input(crs))
+    las.write(out_dir / "corridor.laz")
+
+    return {"points_in_corridor": int(len(z)), "classes": classes, "grid": [w, h], "rasters": ["dtm.tif", "dsm.tif", "chm.tif", "deck_z.tif", "deck_n.tif", "building_n.tif"], "pts": pts, "dtm": dtm_filled, "chm": chm, "transform": tr}
+
+
+def _runs(mask: np.ndarray) -> list[tuple[int, int]]:
+    out, i, n = [], 0, len(mask)
+    while i < n:
+        if mask[i]:
+            j = i
+            while j + 1 < n and mask[j + 1]:
+                j += 1
+            out.append((i, j))
+            i = j + 1
+        else:
+            i += 1
+    return out
+
+
+def profile(spine: LineString, dtm: np.ndarray, chm: np.ndarray, tr, pts: dict, step: float = 2.0) -> dict:
+    """Along-track profile: road height, ground beside the road (cut/fill), canopy beside the
+    road, and structures — bridges we are on, overpasses over us.
+
+    ORDER MATTERS. The DTM under a bridge we are driving on is the valley floor, so "points 4.5 m
+    above the road" would flag our own deck as an overpass. Class-17 decks along the centreline
+    are therefore resolved FIRST into bridge runs, the driving surface is lifted onto those decks,
+    and only then is the geometry test for things above the surface run. Where a vendor did not
+    label decks (older projects) the on-bridge case will still misfire; that is a known gap."""
+    n = int(spine.length // step) + 1
+    s = np.arange(n) * step
+    p = np.array([spine.interpolate(v).coords[0] for v in s])
+    ahead = np.array([spine.interpolate(min(v + 1.0, spine.length)).coords[0] for v in s])
+    d = ahead - p
+    d /= np.maximum(np.linalg.norm(d, axis=1, keepdims=True), 1e-9)
+    normal = np.column_stack([-d[:, 1], d[:, 0]])  # left of travel
+
+    def sample(arr, xy):
+        r, c = rasterio.transform.rowcol(tr, xy[:, 0], xy[:, 1])
+        r, c = np.clip(np.asarray(r), 0, arr.shape[0] - 1), np.clip(np.asarray(c), 0, arr.shape[1] - 1)
+        return arr[r, c]
+
+    ground_z = sample(dtm, p)
+    surface_z = ground_z.copy()
+    structures: list[dict] = []
+    notnoise = (pts["cls"] != 7) & (pts["cls"] != 18)
+
+    # --- 1. labelled decks (class 17) within 14 m of the centreline -----------------------------
+    deck = (pts["cls"] == 17) & notnoise
+    deck_min = np.full(n, np.nan)
+    deck_max = np.full(n, np.nan)
+    if deck.any():
+        g = shapely.points(pts["x"][deck], pts["y"][deck])
+        near = shapely.distance(g, spine) <= 14.0
+        if near.any():
+            bins = np.clip((shapely.line_locate_point(spine, g[near]) / step).astype(int), 0, n - 1)
+            zd = pts["z"][deck][near]
+            np.fmin.at(deck_min, bins, zd)
+            np.fmax.at(deck_max, bins, zd)
+    for i, j in _runs(~np.isnan(deck_min)):
+        if (j - i + 1) * step < 4:
+            continue
+        a, b = max(0, i - 8), min(n - 1, j + 8)
+        interp = np.interp(np.arange(i, j + 1), [a, b], [ground_z[a], ground_z[b]])
+        on_deck = np.nanmean(np.abs(deck_min[i : j + 1] - interp))
+        on_ground = np.nanmean(np.abs(ground_z[i : j + 1] - interp))
+        if on_deck < on_ground:  # the deck continues our grade: we are ON it
+            filled = deck_min[i : j + 1].copy()
+            nan = np.isnan(filled)
+            if nan.any():
+                filled[nan] = np.interp(np.flatnonzero(nan), np.flatnonzero(~nan), filled[~nan])
+            surface_z[i : j + 1] = filled
+            structures.append({
+                "kind": "bridge", "source": "class17",
+                "s_start": round(float(s[i]), 1), "s_end": round(float(s[j]), 1), "length_m": round(float((j - i + 1) * step), 1),
+                "deck_z_min": round(float(np.nanmin(deck_min[i : j + 1])), 2), "deck_z_max": round(float(np.nanmax(deck_max[i : j + 1])), 2),
+                "clearance_m": None, "height_above_ground_m": round(float(np.nanmedian(deck_min[i : j + 1] - ground_z[i : j + 1])), 2),
+            })
+    on_bridge = np.zeros(n, bool)
+    for st in structures:
+        on_bridge[int(st["s_start"] / step) : int(st["s_end"] / step) + 1] = True
+
+    # --- 2. anything spanning the road 4.5-40 m above the DRIVING SURFACE ------------------------
+    # A bridge over us covers the whole width in one along-track run; a tree overhangs from one
+    # side; a sign gantry is a full-width run a metre or two long. Points within 10 m of the
+    # centreline, binned 2 m along by 2 m across: a station is spanned when 6 of the 8 lateral
+    # cells inside ±8 m hold a point. Class-agnostic, because the South Mountain arch deck is
+    # "unassigned" in this dataset.
+    g_all = shapely.points(pts["x"][notnoise], pts["y"][notnoise])
+    near_all = shapely.distance(g_all, spine) <= 10.0
+    if near_all.any():
+        bins_all = np.clip((shapely.line_locate_point(spine, g_all[near_all]) / step).astype(int), 0, n - 1)
+        h_all = pts["z"][notnoise][near_all] - surface_z[bins_all]
+        pxy = np.column_stack([pts["x"][notnoise][near_all], pts["y"][notnoise][near_all]])
+        lat_off = np.einsum("ij,ij->i", pxy - p[bins_all], normal[bins_all])
+        over = (h_all >= 4.5) & (h_all <= 40.0) & (np.abs(lat_off) <= 8.0)
+        lat_bin = ((lat_off[over] + 8.0) / 2.0).astype(int).clip(0, 7)
+        occ = np.zeros((n, 8), bool)
+        occ[bins_all[over], lat_bin] = True
+        spanned = (occ.sum(axis=1) >= 6) & ~on_bridge
+        hmin = np.full(n, np.nan)
+        np.fmin.at(hmin, bins_all[over], h_all[over])
+        for i, j in _runs(spanned):
+            length = (j - i + 1) * step
+            if length < 2.0:
+                continue
+            labelled = bool(np.any(~np.isnan(deck_min[i : j + 1])))
+            structures.append({
+                "kind": "overpass" if length >= 5 else "gantry", "source": "geometry+class17" if labelled else "geometry",
+                "s_start": round(float(s[i]), 1), "s_end": round(float(s[j]), 1), "length_m": round(float(length), 1),
+                "deck_z_min": round(float(np.nanmin(hmin[i : j + 1] + surface_z[i : j + 1])), 2), "deck_z_max": None,
+                "clearance_m": round(float(np.nanmin(hmin[i : j + 1])), 2), "height_above_ground_m": None,
+            })
+    structures.sort(key=lambda st: st["s_start"])
+
+    # --- 3. ground and canopy beside the road, relative to the driving surface ------------------
+    offsets = [8, 15, 25, 40, 60]
+    ground, canopy = {}, {}
+    for off in offsets:
+        for side, sign in (("left", 1), ("right", -1)):
+            q = p + normal * (sign * off)
+            ground[f"{side}_{off}"] = (sample(dtm, q) - surface_z).round(2).tolist()
+            canopy[f"{side}_{off}"] = sample(chm, q).round(1).tolist()
+
+    return {"step_m": step, "s": s.round(1).tolist(), "road_z": surface_z.round(2).tolist(), "ground_z": ground_z.round(2).tolist(), "ground_rel": ground, "canopy": canopy, "structures": structures}

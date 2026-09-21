@@ -8,7 +8,7 @@ rather than babysat.
 ```bash
 # start a job
 curl -sF images=@kestrel-front.png -F images=@kestrel-side.png \
-     https://recon.bradley-hartlove-gh200.basedweights.com/reconstruct
+     https://recon.richard-siomporas.basedweights.com/reconstruct
 # {"job":"3f9a1c2d4e5b","views":2,"poll":"/jobs/3f9a1c2d4e5b"}
 
 curl -s https://recon.../jobs/3f9a1c2d4e5b
@@ -41,6 +41,11 @@ and what came back, read out of the glb rather than taken on trust: 1 material, 
 attributes `POSITION` / `TEXCOORD_0` / `NORMAL`, with `baseColorTexture` and
 `metallicRoughnessTexture`. It renders as a bronze three-box saloon with paint, glass, chrome and
 lamps — see it in the model viewer at `/models`.
+
+Re-verified on **gh200-1** on 2026-09-20, through the public URL rather than a port-forward, with
+TRELLIS.2's own 652px RGBA sample: 100.9s, 388k triangles after decimation, 25.8 MB, `POSITION` /
+`TEXCOORD_0` / `NORMAL`, one material with `baseColorTexture` and `metallicRoughnessTexture`. Cold
+install to Ready was under nine minutes including the 10 GB image pull and 16 GB of weights.
 
 **About 2 minutes per asset** at these settings on a GH200, and jobs serialise behind one GPU, so a
 57-asset roster is an unattended couple of hours rather than something to babysit.
@@ -89,8 +94,27 @@ point at the snapshot; everything then resolves as local files.
 helm upgrade --install recon ./chart -n default
 ```
 
-`values.yaml` defaults to the Gateway API `HTTPRoute` this cluster already uses. A classic Ingress
-is included but off — enabling both means two objects claiming one hostname.
+**Where it runs now: `gh200-1`** (the default `~/.kube/config` context), eight GH200 nodes, at
+`https://recon.richard-siomporas.basedweights.com`. It moved there from the four-node bradley
+cluster on 2026-09-20; the old deployment there is untouched but no longer the one to use.
+
+**The image is pinned** to `ghcr.io/hotspoons/recon:sha-da4b51b`, the multi-arch build the GitHub
+workflow made from the last commit that touched this directory. The Harbor `sandbox/recon` build
+from the same day is equivalent but Harbor is a work registry — see `values.yaml`. A new CI build
+lands as a new `sha-` tag; bump `image.tag` to move to it, never `latest`.
+
+**Exposed through ingress-nginx, not the platform gateway**, and `values.yaml` says why at length.
+The short version: on this cluster `central-gateway` is a ClusterIP with one plain-HTTP listener, so
+an `HTTPRoute` there would get a hostname that resolves to a 10.x address — the previous cluster's
+recon URL did exactly that, and everybody port-forwarded around it. ingress-nginx has a MetalLB
+address on the routable 172.16.10.0/24, external-dns publishes Ingress hostnames to pfSense, and
+cert-manager's production issuer solves DNS-01 through Cloudflare, so a private address still gets
+a real certificate. Turning `httpRoute.enabled` back on while the Ingress is on makes two objects
+claim one hostname. From inside the cluster use the Service, `http://recon.default.svc`.
+
+**No Hugging Face token is configured**, as before, so the two gated dependencies (DINOv3, RMBG-2.0)
+load from the ungated mirrors and the pod log carries the licence banner on every start. See
+`hfToken` in `values.yaml` for the front-door route.
 
 Weights (~16GB) go on a PVC so a restart is seconds rather than a re-download. The startup probe
 allows 15 minutes: the liveness probe deliberately hits `/healthz` rather than `/readyz`, so a long

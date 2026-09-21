@@ -42,6 +42,17 @@ EOF
     fi
 fi
 
+# ll: the stock Debian .bashrc ships it commented out, and ~/.bashrc lives in the container layer,
+# so every rebuild loses it again. The guard anchors at line start — `#alias ll=` is already in
+# there and would otherwise make this look done.
+if ! grep -q "^alias ll=" ~/.bashrc 2>/dev/null; then
+    cat >>~/.bashrc <<'EOF'
+
+# ls
+alias ll='ls -alF'
+EOF
+fi
+
 # MAME, which the fighter's tooling drives headlessly: tools/sf2-probe boots the arcade boards,
 # reads their memory and dumps their graphics ROMs, and scripts/rom-sprites.mjs draws the fighters
 # out of what it finds. Nothing else needs it, and nothing breaks without it — but a container
@@ -50,6 +61,20 @@ if ! command -v mame >/dev/null 2>&1 && [ ! -x /usr/games/mame ]; then
     (sudo apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends mame) \
         || echo "WARN: mame install failed — tools/sf2-probe will not run"
 fi
+
+# tools/corridor: the geo pipeline behind the real-road driving game. Python in a venv (this is a
+# Node image; nothing else here wants Python packages) plus GDAL's CLI for warping DEMs. PDAL is
+# not in Debian trixie on arm64, so the point-cloud reader is laspy+lazrs and the Entwine octree
+# walk is done in corridor/lidar.py by hand. Idempotent: pip is a no-op once satisfied.
+if ! command -v gdalwarp >/dev/null 2>&1 || ! python3 -c 'import venv' 2>/dev/null; then
+    (sudo apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends gdal-bin python3-venv python3-pip) \
+        || echo "WARN: gdal/venv install failed — tools/corridor will not run"
+fi
+if [ ! -x tools/corridor/.venv/bin/python ]; then
+    python3 -m venv tools/corridor/.venv || echo "WARN: could not create tools/corridor/.venv"
+fi
+[ -x tools/corridor/.venv/bin/pip ] && (tools/corridor/.venv/bin/pip install -q -r tools/corridor/requirements.txt \
+    || echo "WARN: corridor requirements failed — re-run: tools/corridor/.venv/bin/pip install -r tools/corridor/requirements.txt")
 
 # cloudflared for `just tunnel` (anonymous quick tunnels; no account needed).
 if ! command -v cloudflared >/dev/null 2>&1; then

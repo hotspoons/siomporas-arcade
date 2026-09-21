@@ -165,3 +165,14 @@ Two checks are built in, and both answer questions that "it rendered" does not:
 For the mesh, `arcade.siomporas.com/models` loads any `.glb` by path, URL or drag-and-drop and
 reports what actually came out of the file: triangles, materials, whether textures survived, real
 dimensions.
+
+
+## A second confirmation, from the corridor props (2026-09-21)
+
+The editor agent generating roadside buildings hit the same wall from the other side: a **tall**
+subject (a water tower) came back with its legs cropped off the bottom edge, and TRELLIS invented
+them. Rewording the prompt to name a margin size and the bottom of the object made the keyed
+subject *narrower* and cropped it by exactly as much. flux.2-dev's framing prior for a tall
+subject does not move for words; wide subjects (a barn, a diner) frame themselves. Same shape as
+the proportion finding above — the fix is an attached reference, not a better sentence. Recorded
+in `apps/corridor/src/editor/README.md` and `probes/editor-assets.mjs`.

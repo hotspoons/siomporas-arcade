@@ -4,6 +4,7 @@
 #   apps/stuntin  stunt-track driving game                :5181
 #   apps/coast    pseudo-3D sprite racer                  :5182
 #   apps/fighter  2D/2.5D/3D fighting game                 :5184
+#   apps/corridor viewer for tools/corridor bakes          :5185
 #   packages/engine  shared runtime (loop, styles, input, menus, router, math, dev bridge)
 #
 # The three games still run on their own — that is where tuning, the bridge and the smoke
@@ -18,7 +19,7 @@ default:
 
 # --- dev loop ---------------------------------------------------------------
 
-# Vite dev server for an app (arcade :5183, conduit :5180, stuntin :5181, coast :5182, fighter :5184)
+# Vite dev server for an app (arcade :5183, conduit :5180, stuntin :5181, coast :5182, fighter :5184, corridor :5185)
 dev app="arcade":
     npm run dev -w apps/{{ app }}
 
@@ -74,7 +75,7 @@ bridge-clients app="conduit":
     APEX_BRIDGE="${APEX_BRIDGE:-apex-dev}" APEX_ORIGIN="http://localhost:$(just _port {{ app }})" node scripts/bridge.mjs --clients
 
 _port app:
-    @case "{{ app }}" in stuntin) echo 5181;; coast) echo 5182;; arcade) echo 5183;; fighter) echo 5184;; *) echo 5180;; esac
+    @case "{{ app }}" in stuntin) echo 5181;; coast) echo 5182;; arcade) echo 5183;; fighter) echo 5184;; corridor) echo 5185;; *) echo 5180;; esac
 
 # --- remote testing ---------------------------------------------------------
 
@@ -124,3 +125,32 @@ blender-log:
 
 clean:
     rm -rf apps/*/dist node_modules/.tmp node_modules/.vite apps/*/node_modules/.vite shots
+
+# --- corridor: real-road strips for the driving game -------------------------
+# tools/corridor pulls a couple of miles of road either side of each reference photo: OSM spine
+# and features, 1 m DEM, 30 cm NAIP, the classified lidar point cloud (bridge decks, canopy,
+# cut/fill) and the geology under it. Python, in its own venv (see .devcontainer/post-create.sh).
+
+# photos in ext/ref-driving -> tools/corridor/sites.json
+corridor-sites:
+    tools/corridor/.venv/bin/python -m corridor sites
+
+# build tools/corridor/data/sites/<slug>/ (slug or `all`); e.g. `just corridor-fetch south-mountain-i70 --skip lidar`
+corridor-fetch slug="all" *args:
+    cd tools/corridor && .venv/bin/python -u -m corridor fetch {{ slug }} {{ args }}
+
+# the viewer for baked sites, on :5185 (reads tools/corridor/data/sites straight off disk)
+corridor-view:
+    npm run dev -w apps/corridor
+
+# rewrite the web/ layers + sites/index.json without re-fetching
+corridor-export slug="all":
+    tools/corridor/.venv/bin/python -m corridor export {{ slug }}
+
+# a tunnel that survives dev-server restarts: devproxy on :5190 fronts the viewer, cloudflared fronts the proxy
+corridor-tunnel:
+    (node scripts/devproxy.mjs --listen 5190 --target 5185 &) && sleep 1 && PORT=5190 APP=corridor bash scripts/tunnel.sh
+
+# one line per fetched site
+corridor-report:
+    tools/corridor/.venv/bin/python -m corridor report

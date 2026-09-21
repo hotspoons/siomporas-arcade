@@ -1,0 +1,40 @@
+/* The editor reuses the viewer's shell (src/style.css) and adds the authoring furniture:
+   a wider panel, a mode switch, the area/placement lists and the slider rows. */
+body.editor #panel { width: 400px; }
+body.editor #panel h1 { color: #2ee6c0; }
+#panel .link { color: var(--dim); text-decoration: none; font-size: 11px; }
+#panel .link:hover { color: var(--accent); }
+
+.seg button.on { border-color: #2ee6c0; color: #2ee6c0; }
+#save:disabled { opacity: 0.45; cursor: default; border-color: #333; }
+.warn { color: var(--accent); font-size: 11px; }
+button.danger:hover { border-color: #e2564f; color: #e2564f; }
+
+#body { display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+#body h2 { font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spacing: 0.1em; margin: 6px 0 2px; }
+#body p.dim { color: #6d737b; margin: 4px 0; line-height: 1.4; }
+
+.list { display: flex; flex-direction: column; max-height: 34vh; overflow: auto; border: 1px solid #1f232b; }
+.item { display: flex; gap: 6px; align-items: baseline; padding: 3px 6px; cursor: pointer; border-bottom: 1px solid #16191f; }
+.item:hover { background: #171b22; }
+.item.sel { background: #14302c; }
+.item.edited .nm { color: var(--accent); }
+.item .nm { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.item .tag { color: #6d737b; font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; min-width: 52px; }
+
+.detail { display: flex; flex-direction: column; gap: 4px; border-top: 1px solid #1f232b; padding-top: 6px; }
+.detail input[type='text'], .detail input[type='number'], .detail select {
+  background: #1a1d24; color: var(--fg); border: 1px solid #333; padding: 3px 5px; min-width: 0; flex: 1;
+}
+.field { display: flex; align-items: center; gap: 6px; color: var(--dim); }
+.field > span:first-child { flex: 0 0 132px; }
+.field.slider > span:first-child { flex: 0 0 108px; white-space: nowrap; }
+.field.slider .val { flex: 0 0 42px; text-align: right; color: #6d737b; }
+.field.slider input[type='range'] { flex: 1; accent-color: #3c4654; }
+.field.slider.off-neutral > span:first-child { color: var(--accent); }
+.field.slider.off-neutral input[type='range'] { accent-color: var(--accent); }
+
+.palette { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+.chip { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; padding: 4px 6px; text-align: left; }
+.chip.on { border-color: #2ee6c0; background: #14302c; }
+.chip .nm { font-size: 12px; }

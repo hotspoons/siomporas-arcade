@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark" />
+    <title>corridor</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <canvas id="gl"></canvas>
+    <aside id="panel">
+      <header>
+        <h1>corridor</h1>
+        <select id="site"></select>
+        <select id="season" title="season">
+          <option value="winter">winter</option><option value="spring">spring</option><option value="summer" selected>summer</option><option value="autumn">autumn</option>
+        </select>
+        <button class="toggle" id="toggle" aria-label="collapse panel">▾</button>
+      </header>
+      <section id="layers" class="row">
+        <label><input type="checkbox" data-layer="imagery" checked /> imagery</label>
+        <label><input type="checkbox" data-layer="trees" checked /> trees</label>
+        <label><input type="checkbox" data-layer="road" checked /> road</label>
+        <label><input type="checkbox" data-layer="canopy" /> canopy blanket</label>
+        <label><input type="checkbox" data-layer="horizon" checked /> horizon</label>
+        <label><input type="checkbox" data-layer="structures" checked /> structures</label>
+        <label><input type="checkbox" data-layer="spine" /> spine</label>
+        <label><input type="checkbox" data-layer="markers" /> markers</label>
+        <label><input type="checkbox" data-layer="wire" /> wireframe</label>
+      </section>
+      <section class="row">
+        <button id="drive">drive (Tab)</button>
+        <button id="photo">to photo (P)</button>
+        <button id="top">top (H)</button>
+        <span id="pos" class="mono"></span>
+      </section>
+      <section id="info"></section>
+      <section id="photos"></section>
+      <footer>fly: WASD move · Q/E turn · R/F zoom · T/G up/down · left-drag orbit · right-drag look · wheel zoom · Shift fast<br>drive (Tab): W/S throttle/brake · A/D steer · Space handbrake · R reset · drag to look · click a structure for its numbers</footer>
+    </aside>
+    <div id="drivepad">
+      <button data-act="drive">drive</button>
+      <button data-act="faster">+</button>
+      <button data-act="slower">−</button>
+      <button data-act="photo">📷</button>
+    </div>
+    <!-- phone: move about the world in orbit mode. Hold to glide in the camera's horizontal frame;
+         ▲/▼ forward/back, ◀/▶ sideways, ⤒/⤓ up/down. In drive mode ▲/▼ are speed, ◀/▶ lanes. -->
+    <div id="movepad">
+      <button data-move="up">⤒</button><button data-move="fwd">▲</button><button data-move="down">⤓</button>
+      <button data-move="left">◀</button><button data-move="back">▼</button><button data-move="right">▶</button>
+    </div>
+    <div id="status">loading…</div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

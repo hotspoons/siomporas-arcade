@@ -1,0 +1,9 @@
+numpy
+scipy
+rasterio
+pyproj
+shapely>=2
+requests
+Pillow
+laspy[lazrs]
+boto3

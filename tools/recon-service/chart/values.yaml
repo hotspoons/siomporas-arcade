@@ -13,8 +13,18 @@ image:
   # rollout restarts the old image and the fix you just published never lands — which cost two
   # identical diagnoses before the digest gave it away. Pin `tag` to a commit sha for a reproducible
   # deploy and IfNotPresent becomes correct again.
-  tag: "latest"
-  pullPolicy: Always
+  #
+  # sha-da4b51b is the build the CI of record made from da4b51b (2026-09-15), multi-arch, arm64
+  # side built with TORCH_CUDA_ARCH_LIST=9.0 — Hopper, which is every node on gh200-1. Its index
+  # digest is sha256:11e1dddf959edcff99bfbd404fc23157e9637ec78e87b8771ee6d7f069dcb741; `latest` and
+  # `main` point at the same index today. A new CI build lands as a new sha- tag; bump this to move.
+  tag: "sha-da4b51b"
+  pullPolicy: IfNotPresent
+
+# The Service and Deployment are called `recon`, full stop — not `recon-recon`. Scripts and docs
+# elsewhere in this repo address it as `svc/recon` (tools/assetgen/HANDOFF.md), and the previous
+# cluster ran it under that name.
+fullnameOverride: recon
 
 # One GPU, one replica. The service serialises reconstructions internally, so a second replica
 # only helps if you also have a second GPU — scale the node pool, not this number, unless you do.
@@ -80,31 +90,59 @@ service:
   type: ClusterIP
   port: 80
 
-# Gateway API. The cluster already fronts everything with the shared gateway, and the other
-# services here are reached this way rather than through an Ingress.
+# How the service is reached from outside the cluster. Exactly ONE of the two below should be on:
+# external-dns (--policy=sync) publishes the hostname of whichever object carries it, and two
+# objects claiming one name fight over the record.
+#
+# ON gh200-1 THE INGRESS IS THE ONE THAT IS ON, and this is a measured choice, not a style one.
+# The platform's `central-gateway` is a ClusterIP (10.100.23.26) with a single plain-HTTP listener:
+# an HTTPRoute there gets a DNS record nobody off-cluster can route to, which is exactly what the
+# previous cluster's recon hostname was (it resolved to a 10.x address and everyone port-forwarded).
+# ingress-nginx here has a MetalLB address on the same 172.16.10.0/24 the platform's public
+# hostnames resolve to, external-dns lists `--source=ingress`, and cert-manager's
+# `letsencrypt-issuer` solves DNS-01 through Cloudflare — so a private address gets a real
+# certificate. Result: an https URL that works from a laptop on the network, no port-forward.
+#
+# THE ROAD NOT TAKEN, for next time: the platform also has `pai-managed-ext-gateway` in the same
+# namespace, at 172.16.10.157 — the address every public platform hostname resolves to. Its Gateway
+# object shows only an `http-mock` listener, but the platform's own HTTPRoutes attach to it and the
+# operator handles TLS, so it is the intended external front door and a route there would keep
+# recon inside the platform's ingress story. It was passed over here on the strength of that
+# listener list alone, which was too quick. Moving means: parentRef `pai-managed-ext-gateway`,
+# turn the Ingress off, and first work out how a non-platform hostname gets its certificate.
+#
+# Anything running IN the cluster should skip both and use the Service: http://recon.default.svc.
 httpRoute:
-  enabled: true
+  enabled: false
   parentRefs:
     - name: central-gateway
-      namespace: patapsco-bradley-hartlove-gh200-platform
+      namespace: patapsco-richard-siomporas-platform
   hostnames:
-    - recon.bradley-hartlove-gh200.basedweights.com
+    - recon.richard-siomporas.basedweights.com
   timeout: 600s
 
-# Classic Ingress, off by default. Enable only on a cluster without Gateway API; running both
-# for one service means two things claiming the same hostname.
 ingress:
-  enabled: false
+  enabled: true
   className: nginx
   annotations:
+    # cert-manager's ingress-shim mints `tls[].secretName` from this issuer. It is the PRODUCTION
+    # Let's Encrypt issuer; the platform's own routes use letsencrypt-staging and browsers warn on
+    # them. Production has a rate limit of 5 duplicate certificates a week, which a chart that is
+    # installed and uninstalled repeatedly can hit — the secret survives `helm uninstall` only if
+    # you do not delete it, so leave `recon-tls` alone between reinstalls.
+    cert-manager.io/cluster-issuer: letsencrypt-issuer
+    # A subject's views are a handful of PNGs; 64m is generous. The read timeout covers the poll
+    # endpoints only — jobs are async, so nothing holds a connection for a whole reconstruction.
     nginx.ingress.kubernetes.io/proxy-body-size: "64m"
     nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
   hosts:
-    - host: recon.bradley-hartlove-gh200.basedweights.com
+    - host: recon.richard-siomporas.basedweights.com
       paths:
         - path: /
           pathType: Prefix
-  tls: []
+  tls:
+    - hosts: [recon.richard-siomporas.basedweights.com]
+      secretName: recon-tls
 
 # Weight loading takes minutes; the startup probe is what stops the kubelet killing the pod
 # before the model is on the card.

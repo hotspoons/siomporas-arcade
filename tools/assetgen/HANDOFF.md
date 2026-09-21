@@ -28,8 +28,10 @@ wording the game paints on. `node generate.mjs --audit` prints that comparison; 
 
 ## The recon leg: it runs, and it takes exactly one view
 
-`svc/recon` is deployed in `default` on the bradley cluster (`KUBECONFIG=~/.kube/config.bradley`,
-`kubectl port-forward -n default svc/recon 8500:80`). I recorded earlier in this file that it was
+`svc/recon` is deployed in `default` on **gh200-1**, the default kubeconfig context, as of
+2026-09-20, and reachable without a port-forward at `https://recon.richard-siomporas.basedweights.com`
+(the bradley copy, `KUBECONFIG=~/.kube/config.bradley` + `kubectl port-forward -n default svc/recon
+8500:80`, still exists but is the old cluster). I recorded earlier in this file that it was
 not deployed anywhere; that was wrong — it was up and I missed it in a cluster-wide listing. It
 belongs to the photogrammetry agent: ask rather than redeploying it underneath them.
 

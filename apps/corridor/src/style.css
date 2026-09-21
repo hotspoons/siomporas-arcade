@@ -77,6 +77,12 @@ footer { margin-top: auto; color: #666; font-size: 11px; line-height: 1.4; }
 @media (max-width: 760px), (pointer: coarse) and (max-width: 1024px) {
   #paneltab { left: auto; right: 8px; top: auto; bottom: 8px; }
   #panel.hidden ~ #paneltab { left: auto; right: 8px; }
+  /* THE TUNER WAS UNOPENABLE ON A PHONE. `#tune` lives inside `#panel`, and the phone rule above
+     collapses that to a 46px sheet — measured at 412x915 the button sat at y=1065, off the
+     bottom of a 915px viewport, and a click there landed on `aside#panel.collapsed`. Lift it out
+     to the free bottom-LEFT corner, the same trick `#paneltab` already uses on the right; the
+     tune host itself covers the top, so the two never meet. */
+  #tune { position: fixed; left: 8px; bottom: 8px; z-index: 5; }
 }
 
 /* tuning host: the engine panels, one per tab, under a tab strip */
@@ -87,10 +93,39 @@ footer { margin-top: auto; color: #666; font-size: 11px; line-height: 1.4; }
 .geo-dialog::backdrop { background: rgba(0,0,0,0.55); }
 .geo-more { margin-left: 6px; font-size: 11px; }
 #tunehost.hidden { display: none; }
-.tunetabs { display: flex; gap: 4px; }
+/* Seven tabs and growing: without wrap the strip runs past the host (measured at 1280 — `camera`
+   ended at x=1292 in a 1268-wide host) and `overflow-x: hidden` above clips it away. */
+.tunetabs { display: flex; flex-wrap: wrap; gap: 4px; }
 .tunetabs button { padding: 4px 10px; }
 .tunetabs button.active { border-color: var(--accent); color: var(--accent); }
 #tunehost .tune { position: static !important; }
+/* THE 441px. The engine's `.tune` is `width: min(440px, 92vw)`, and the existing
+   `#tunehost > * { max-width: 100% }` never reached it — main.ts appends a plain wrapper div per
+   tab and TunePanel builds `.tune` INSIDE that, so the child selector matches the wrapper, not
+   the panel. The panel therefore stood 440px wide in a 380px host, which is both the horizontal
+   scroll and the reason every row's reset button (`.tune-def`, the last grid column) sat past the
+   host's right edge under the canvas, unclickable. */
+#tunehost .tune { width: 100%; max-width: 100%; box-sizing: border-box; }
+/* The strip is a flex ITEM of a column flex container, so it shrinks: once it wrapped to two rows
+   it reported 34px for 54px of content and the second row landed on top of the panel. */
+.tunetabs { flex: 0 0 auto; }
+/* The engine's `.tune-row` is `grid-template-columns: 1fr 120px 64px 24px`, and a grid track's
+   `min-width` is `auto` — so the name column refuses to shrink below the widest knob name and the
+   panel's content comes out 441px wide inside a 380px box (measured). `minmax(0, 1fr)` lets it
+   shrink, which is also what makes the engine's own `text-overflow: ellipsis` on `.tune-name`
+   fire at all; today that rule can never do anything. Scoped to #tunehost rather than fixed in
+   the engine because coast and stuntin share that CSS and I cannot test them from here. */
+#tunehost .tune-row { grid-template-columns: minmax(0, 1fr) 120px 64px 24px; }
+
+/* Phone: the open tuner must not cover its own close button. `#tune` lives inside `#panel`, which
+   has a `backdrop-filter` and therefore its own stacking context, so the button's `z-index: 5` is
+   scoped to the panel and cannot climb over `#tunehost`. Measured at 412x915: the click landed on
+   `div#tunehost`. Leaving the bottom ~70px free is simpler than fighting the stacking order.
+   This block sits AFTER the base `#tunehost` rule on purpose — same specificity, so order decides,
+   and the first attempt at this lived earlier in the file and was silently overridden. */
+@media (max-width: 760px), (pointer: coarse) and (max-width: 1024px) {
+  #tunehost { max-height: calc(100vh - 120px); }
+}
 
 /* inset map: bottom-right on desktop, top-right and smaller on phones */
 #minimap { position: fixed; right: 12px; bottom: 12px; z-index: 2; }

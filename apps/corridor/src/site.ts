@@ -31,6 +31,33 @@ export interface Crossing {
   inferred?: boolean
 }
 
+/** a road of a network site other than the primary: rendered as a first-class carriageway with its own strip */
+/** a road end with nothing beyond it: a turning bulb unless a human says it is a true dead end */
+export interface DeadEnd {
+  s: number
+  kind: 'cul_de_sac' | 'dead_end'
+  radius_m?: number
+  source?: string
+  x?: number
+  y?: number
+}
+
+export interface Branch {
+  name: string | null
+  ref?: string | null
+  highway?: string | null
+  lanes?: number | null
+  oneway?: string | null
+  length_m: number
+  /** site x, y and lidar road grade z, densified ~10 m like the spine */
+  coords: [number, number, number][]
+  junctions?: { x: number; y: number; z: number; node?: number; with?: string[] }[]
+  s_on_primary?: number | null
+  profile?: { s: number[]; road_z: number[] } | null
+  structures?: Structure[] | null
+  dead_ends?: DeadEnd[] | null
+}
+
 export interface Manifest {
   slug: string
   ident: Record<string, string> | null
@@ -38,12 +65,15 @@ export interface Manifest {
   bbox: [number, number, number, number]
   layers: Partial<Record<'dem' | 'chm' | 'naip' | 'horizon' | 'horizon_naip', Layer>>
   spine: {
+    dead_ends?: DeadEnd[] | null
     coords: [number, number, number][]
     photo_s: number
     length_m: number
     segments: { s_start: number; s_end: number; tags: Record<string, string> }[]
   }
   siblings: [number, number][][]
+  /** network sites: every road that is not the primary spine */
+  branches?: Branch[]
   structures: Structure[]
   crossings: Crossing[]
   surface: {
@@ -67,6 +97,19 @@ export interface Manifest {
   }
   photos: { file: string; heading_deg: number | null; taken: string | null }[]
   lidar: { dataset: string | null; points_in_corridor: number | null; classes: Record<string, number> | null }
+  /** OSM land-use polygons in site coordinates; groundcover.ts picks the grass type from them */
+  landuse?: { class: string; ring: [number, number][]; area_m2?: number }[]
+  /** OSM footprints with a measured height, in site metres (tools/corridor/corridor/buildings.py) */
+  buildings?: {
+    ring: [number, number][]
+    area_m2?: number
+    rect?: { w: number; d: number; yaw_deg: number }
+    height_m: number
+    height_src?: string
+    s?: number
+    lat?: number
+    tags?: Record<string, string>
+  }[]
   /** terrain-and-data agent: cut faces (cuts.py), exposed rock (rock.py), water (water.py); absent on older bakes */
   cuts?: import('./rocks').CutsLayer | null
   rock?: import('./rocks').RockLayer | null

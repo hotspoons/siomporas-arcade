@@ -369,11 +369,11 @@
  },
  {
   "slug": "arrowhead-farms",
-  "lat": 38.983787,
-  "lon": -76.695393,
+  "lat": 38.98138,
+  "lon": -76.69057,
   "photos": [],
   "heading_deg": null,
-  "note": "Rich's neighbourhood (Davidsonville): Arrowhead Farms Ct/Rd/Dr, Halls Grove Rd, Gosheff Ln, Patuxent Overlook/Preserve, Patuxent River Rd, Deer Pass Ln \u2014 a network site later"
+  "note": "Rich's neighbourhood (Davidsonville): Arrowhead Farms Ct/Rd/Dr, Halls Grove Rd, Gosheff Ln, Patuxent Overlook/Preserve, Patuxent River Rd, Deer Pass Ln \u2014 a network site later \u2014 point moved onto Halls Grove Rd so the spine is a road, not the 75 m court"
  },
  {
   "slug": "arrowhead-farms-network",
@@ -429,5 +429,13 @@
   "photos": [],
   "heading_deg": null,
   "note": "the interconnected Crofton/Crownsville world (cadre \u00a76): 18 roads, Chesterfield Rd primary (the Hawkins Rd jump); MD 450 = Defense Hwy, MD 424 = Davidsonville Rd, MD 178 = Generals Hwy by ref; tiled export"
+ },
+ {
+  "slug": "md450-staples",
+  "lat": 38.9375,
+  "lon": -76.667,
+  "photos": [],
+  "heading_deg": null,
+  "note": "MD 450 (Defense Hwy) between Patuxent River Rd and Staples Corner (MD 424); point is a midpoint estimate (Overpass 429'd), nearest_road should snap to MD 450"
  }
 ]

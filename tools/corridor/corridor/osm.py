@@ -23,6 +23,7 @@ bridge-deck returns; the two are joined in report.py.
 from __future__ import annotations
 
 import hashlib
+import os
 import json
 import time
 from pathlib import Path
@@ -36,7 +37,12 @@ from .geo import Frame
 
 # Public Overpass instances, tried in turn: the main one 504s under load on queries that take
 # milliseconds elsewhere, and every one of these is a shared free server owed the same courtesy.
-OVERPASS = [
+# Ours first, when there is one: CORRIDOR_OVERPASS_URL (comma-separated) jumps the queue, and the
+# public mirrors stay as the fallback for regions our extract does not cover. Every public mirror
+# refused connections for an hour on 2026-09-21 and took every new bake down with it; the chart
+# for our own is in tools/overpass/chart.
+_OURS = [u.strip() for u in os.environ.get("CORRIDOR_OVERPASS_URL", "").split(",") if u.strip()]
+OVERPASS = _OURS + [
     "https://overpass-api.de/api/interpreter",
     "https://overpass.private.coffee/api/interpreter",
     "https://overpass.kumi.systems/api/interpreter",

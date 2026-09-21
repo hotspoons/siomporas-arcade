@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.fullnameOverride }}
+  labels: { app: {{ .Values.fullnameOverride }} }
+spec:
+  replicas: 1
+  # the database is one directory on one volume; never two writers
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app: {{ .Values.fullnameOverride }} }
+  template:
+    metadata:
+      labels: { app: {{ .Values.fullnameOverride }} }
+    spec:
+      containers:
+        - name: overpass
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - { name: OVERPASS_MODE, value: "init" }        # a no-op once /db holds a database
+            - { name: OVERPASS_PLANET_URL, value: "{{ .Values.planetUrl }}" }
+            - { name: OVERPASS_DIFF_URL, value: "{{ .Values.diffUrl }}" }
+            - { name: OVERPASS_PLANET_PREPROCESS, value: {{ .Values.preprocess | quote }} }
+            - { name: OVERPASS_META, value: "{{ .Values.meta }}" }
+            - { name: OVERPASS_RULES_LOAD, value: "{{ .Values.rulesLoad }}" }
+            - { name: OVERPASS_UPDATE_SLEEP, value: "{{ .Values.updateSleep }}" }
+            - { name: OVERPASS_MAX_TIMEOUT, value: "600" }
+          ports: [{ containerPort: 80, name: http }]
+          volumeMounts:
+            - { name: db, mountPath: /db }
+            - { name: shm, mountPath: /dev/shm }
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+          # the init clone runs for tens of minutes with no listener; a liveness probe would
+          # restart it forever, so only readiness gates traffic
+          readinessProbe:
+            httpGet: { path: "/api/status", port: http }
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            failureThreshold: 120
+      volumes:
+        - name: db
+          persistentVolumeClaim: { claimName: {{ .Values.fullnameOverride }}-db }
+        - name: shm
+          emptyDir: { medium: Memory, sizeLimit: {{ .Values.shmSize }} }
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}

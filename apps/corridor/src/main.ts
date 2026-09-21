@@ -8,6 +8,7 @@ import { MiniMap } from './minimap'
 import { TunePanel } from '@apex/engine/app/TunePanel'
 import * as T from './tuning'
 import { TUNE_TABS } from './tuning'
+
 import { fetchJSON, type IndexEntry, type Manifest, type Structure, type Crossing } from './site'
 import { LOOK, SEASONS, type Season } from './season'
 
@@ -91,7 +92,32 @@ async function loadSite(slug: string) {
   site = await buildSite(manifest, status, LITE, renderer, scene.fog as THREE.FogExp2, season)
   applySky(season)
   scene.add(site.group)
-  ;(window as unknown as { corridor: unknown }).corridor = { site, scene, camera, drive } // for probes and the console
+  // for probes and the console. `tune` is the same knob table the F6 panel drives, so a probe can
+  // sweep a knob exactly as Rich would and see the same rebuild — the module's `export let`s
+  // cannot be written from outside, and a dynamic import of tuning.ts under HMR is a dead copy.
+  ;(window as unknown as { corridor: unknown }).corridor = {
+    site,
+    scene,
+    camera,
+    // the orbit controls re-derive the camera from their own target every frame, so a probe that
+    // only writes camera.position gets dragged back; set orbit.target too, as applyStance does
+    orbit,
+    drive,
+    THREE, // probes need Raycaster/Vector3 in the page, and there is no other handle on it
+
+    tune: {
+      tabs: TUNE_TABS,
+      names: () => TUNE_TABS.flatMap((t) => t.sections.flatMap((sec) => sec.keys.map((k) => k.name))),
+      get: (name: string) => tuneKey(name)?.get(),
+      set: (name: string, v: number) => {
+        const k = tuneKey(name)
+        if (!k) return false
+        k.set(v)
+        onTuneChange()
+        return true
+      },
+    },
+  }
   applyLayers()
   fillInfo(manifest)
   fly ??= new FlyControls(camera, orbit, canvas, (x, z) => site?.groundAt(x, z) ?? null)
@@ -110,6 +136,7 @@ function applyLayers() {
   site.setImagery(on('imagery'))
   site.setWire(on('wire'))
   if (site.layers.canopy) site.layers.canopy.visible = on('canopy')
+  site.layers.buildings.visible = on('buildings')
   if (site.layers.trees) site.layers.trees.visible = on('trees')
   site.layers.road.visible = on('road')
   if (site.layers.horizon) site.layers.horizon.visible = on('horizon')
@@ -146,6 +173,7 @@ function fillInfo(m: Manifest) {
       ['frame', `EPSG:${m.frame.epsg}, origin ${m.frame.origin.map((v) => v.toFixed(0)).join(', ')}`],
       ['lidar', lidar],
       ['stand-ins', `${site?.treeCount ?? 0} trees from the canopy, road from ${m.spine.segments.length} OSM segments`],
+      ['buildings', site ? `${site.buildingStats.count} footprints (${site.buildingStats.fromLidar} measured, ${site.buildingStats.gabled} gabled)` : '—'],
       ['crossings', Object.entries(byRel).map(([k, v]) => `${v} ${k}`).join(', ') || 'none'],
       ['surface', m.surface ? Object.entries(m.surface.summary).map(([k, v]) => `${k} ${(v * m.surface!.step_m / 1000).toFixed(1)} km`).join(', ') : 'not measured'],
     ])}
@@ -289,12 +317,29 @@ function applySky(s: Season) {
 }
 const seasonSel = $<HTMLSelectElement>('#season')
 seasonSel.value = season
-seasonSel.onchange = () => {
-  season = seasonSel.value as Season
-  applySky(season)
-  site?.setSeason(season)
-  status(`${season}`)
+function setSeason(s: Season) {
+  season = s
+  seasonSel.value = s
+  applySky(s)
+  site?.setSeason(s)
+  status(`${s}`)
   setTimeout(() => status(''), 1200)
+}
+seasonSel.onchange = () => setSeason(seasonSel.value as Season)
+/** the F6 season knob (tuning.ts SEASON, -1 = leave the selector alone) */
+function applySeasonKnob() {
+  if (T.SEASON < 0) return
+  const want = SEASONS[Math.min(3, Math.max(0, Math.round(T.SEASON)))]
+  if (want !== season) setSeason(want)
+}
+/**
+ * A knob moved. The F6 panel and `window.corridor.tune.set` both come through here, so a probe
+ * sweeping a knob gets exactly what Rich gets from the slider — the first version of the probe
+ * hook called `retune()` alone and the season knob silently did nothing under it.
+ */
+function onTuneChange() {
+  applySeasonKnob()
+  site?.retune()
 }
 
 // A STANCE is everything needed to reproduce what is on screen: site, season, mode, camera (or
@@ -397,7 +442,7 @@ const tunePanels = TUNE_TABS.map((tab) => {
   tuneHost.append(panelEl)
   const p = new TunePanel(panelEl, `corridor-${tab.name}`, tab.sections)
   p.context = () => (captureStance() ?? {}) as Record<string, unknown>
-  p.onChange = () => site?.retune()
+  p.onChange = onTuneChange
   const b = document.createElement('button')
   b.textContent = tab.name
   b.onclick = () => showTuneTab(tab.name)
@@ -425,6 +470,12 @@ $('#top').onclick = toTop
 // Tab toggles drive/fly. Driving: W/S throttle/brake, A/D steer, Space handbrake, R resets to the
 // road. Flying: see fly.ts (WASD move, Q/E rotate, R/F dolly, T/G lift, right-drag look). P and
 // H (home = top) are shared.
+/** one knob of the F6 panel by name, wherever its tab is; undefined if there is no such knob */
+function tuneKey(name: string) {
+  for (const t of TUNE_TABS) for (const sec of t.sections) for (const k of sec.keys) if (k.name === name) return k
+  return undefined
+}
+
 const held = new Set<string>()
 addEventListener('keydown', (e) => {
   const tgt = e.target as HTMLElement

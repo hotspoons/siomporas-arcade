@@ -45,9 +45,10 @@ export interface Surface {
 
 export type CarEvent = 'none' | 'bump' | 'launch' | 'land' | 'crash' | 'rocket'
 
-// body geometry (the mesh is built from these; the sim uses the half width for wheel spread and trunks)
+// body geometry (the mesh is built from these; the sim uses the half width for wheel spread and
+// trunk collisions). The length lives in the silhouette profile in buildMesh, which is 4.4 m nose
+// to tail — change it there.
 const CAR_HALF_WIDTH = 0.95
-const CAR_HALF_LENGTH = 2.2
 
 export class Car {
   pos = new THREE.Vector3()
@@ -69,7 +70,8 @@ export class Car {
   rocket = false
   event: CarEvent = 'none'
   readonly forward = new THREE.Vector3(1, 0, 0)
-  private readonly right = new THREE.Vector3(0, 0, 1)
+  /** unit vector out of the driver's right window; the cockpit camera leans along it */
+  readonly right = new THREE.Vector3(0, 0, 1)
   /** world-space sideways velocity: the rear letting go, or gravity across a slope */
   private slideX = 0
   private slideZ = 0
@@ -83,6 +85,10 @@ export class Car {
   private steerVisual = 0
   mesh: THREE.Group
   private wheels: THREE.Mesh[] = []
+  /** dash, pillars and wheel: drawn only from inside (setCockpit) */
+  private interior: THREE.Group | null = null
+  private shell: THREE.Object3D[] = []
+  private steeringWheel: THREE.Object3D | null = null
   private surface: Surface
 
   constructor(surface: Surface) {
@@ -243,10 +249,31 @@ export class Car {
     // the ground is CAR_LAUNCH_GAP below it the car is in the air. Stuntin tests one tick's change in the
     // ground's vertical speed; on a lidar strip interpolated between stations that fires at every seam,
     // so here the same condition is integrated instead — a slope break has to keep falling away.
+    // `hover` is integrated ballistically and clamped into [ref - 0.01, ref + GAP + 0.01]. Because
+    // `ref` is last tick's ground and `pos.y` is rewritten to the ground every tick, the floor only
+    // bites while the car is ON the ground; once the ground starts falling away hover sits above it
+    // and the gap accumulates across the crest as intended. Measured at Chesterfield's Hawkins Road
+    // brow, the clamp costs about 1 mph of launch threshold against a free integration (83 vs 84 at
+    // GAP 0.2, 77 vs 78 at 0.1) — it makes launching very slightly harder, and nothing else.
     this.hover = clamp(this.hover + this.vy * dt, ref - 0.01, ref + T.CAR_LAUNCH_GAP + 0.01)
-    this.vy -= T.CAR_GRAVITY * dt
+    // CAR_CREST_GAIN > 1 lets the car hold its line over a crest longer than gravity really allows,
+    // which is the arcade knob for "this brow should throw the car". It scales only the separation
+    // test; the flight itself (tickAir) always uses real gravity.
+    this.vy -= (T.CAR_GRAVITY / Math.max(0.05, T.CAR_CREST_GAIN)) * dt
     if (this.hover <= gh + 1e-4 || Math.abs(v) <= T.CAR_LAUNCH_MIN_SPEED) {
-      this.vy = dt > 0 ? (gh - ref) / dt : 0
+      // The contact point's vertical speed while the ground carries the car, and — via launch() —
+      // the vertical speed the car leaves a crest with. Reading it as one tick's change in sampled
+      // height, (gh - ref)/dt, makes it the height field's derivative DIVIDED BY dt: at 30 m/s a
+      // tick is 0.25 m, so a 0.42 m step in the DTM becomes vy = 50 m/s and a 128 m ballistic arc.
+      // That is what threw the car 101 m up at Bowie s≈2524, where the baked road profile drops 5 m
+      // into an undetected underpass (probes/corridor-groundstep.mjs).
+      // A car following the ground at speed v rises at v × (slope along the nose), and `pitch` has
+      // just measured that slope over a 3 m base — the car's own length, which is the shortest
+      // wavelength a car can actually follow. Take vy from that geometry, so a step in the data is a
+      // bump and only a sustained ramp is a jump; CAR_LAUNCH_MAX_RISE then caps what any ramp can
+      // impart, because a suspension cannot throw a car harder than that however steep the data is.
+      const rise = v * this.pitch
+      this.vy = clamp(rise, -T.CAR_LAUNCH_MAX_RISE, T.CAR_LAUNCH_MAX_RISE)
       this.hover = gh
     } else if (this.hover - gh > T.CAR_LAUNCH_GAP) {
       this.launch(v)
@@ -329,12 +356,89 @@ export class Car {
   /** A stand-in car: low wedge body, four wheels. Kestrel-ish proportions, 4.4 × 1.9 m. */
   private buildMesh(): THREE.Group {
     const g = new THREE.Group()
-    const body = new THREE.Mesh(new THREE.BoxGeometry(CAR_HALF_LENGTH * 2, 0.55, CAR_HALF_WIDTH * 2), new THREE.MeshStandardMaterial({ color: 0xc8322a, roughness: 0.35, metalness: 0.3 }))
-    body.position.y = 0.45
+    // The silhouette, as a side profile extruded across the car. A box reads as a box from every
+    // angle; a profile with a bonnet line, a raked screen and a fastback costs the same draw call
+    // and is a CAR from the chase camera, which is where it is looked at. Nose at +x.
+    const side = new THREE.Shape()
+    const prof: [number, number][] = [
+      [2.16, 0.42], [2.2, 0.62], [1.98, 0.76], [1.5, 0.84], // nose, bonnet
+      [0.92, 1.1], [0.3, 1.3], [-0.5, 1.31], [-1.12, 1.16], // screen, roof
+      [-1.72, 0.84], [-2.08, 0.76], [-2.2, 0.6], [-2.2, 0.4], // fastback, tail
+      [-1.75, 0.3], [-1.05, 0.26], [0.95, 0.26], [1.7, 0.3], // sills between the arches
+    ]
+    side.moveTo(prof[0][0], prof[0][1])
+    for (const [x, y] of prof.slice(1)) side.lineTo(x, y)
+    side.closePath()
+    const bodyGeo = new THREE.ExtrudeGeometry(side, { depth: CAR_HALF_WIDTH * 2 - 0.16, bevelEnabled: true, bevelSize: 0.06, bevelThickness: 0.05, bevelSegments: 2, curveSegments: 1 })
+    bodyGeo.translate(0, 0, -(CAR_HALF_WIDTH - 0.08)) // extrusion runs along +z; centre it
+    bodyGeo.computeVertexNormals()
+    const body = new THREE.Mesh(bodyGeo, new THREE.MeshStandardMaterial({ color: 0xc8322a, roughness: 0.35, metalness: 0.3 }))
     g.add(body)
-    const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.5, 1.5), new THREE.MeshStandardMaterial({ color: 0x1c1f24, roughness: 0.2, metalness: 0.5 }))
-    cabin.position.set(-0.2, 0.95, 0)
+    // glasshouse: the same profile, slightly proud, in dark glass — screen, roof band and backlight
+    const glassMat = new THREE.MeshStandardMaterial({ color: 0x141922, roughness: 0.12, metalness: 0.6 })
+    const cabin = new THREE.Group()
+    for (const zz of [-1, 1]) {
+      const win = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.34, 0.06), glassMat)
+      win.position.set(-0.15, 1.12, zz * (CAR_HALF_WIDTH - 0.06))
+      cabin.add(win)
+    }
+    const screen = new THREE.Mesh(new THREE.BoxGeometry(0.66, 0.05, 1.62), glassMat)
+    screen.position.set(0.62, 1.22, 0)
+    screen.rotation.z = 0.62
+    cabin.add(screen)
+    const roof = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.05, 1.66), glassMat)
+    roof.position.set(-0.1, 1.33, 0)
+    cabin.add(roof)
     g.add(cabin)
+    // lamps, so which end is the front is never a question
+    const lampMat = new THREE.MeshStandardMaterial({ color: 0xfff3d0, emissive: 0xfff0c0, emissiveIntensity: 0.55, roughness: 0.3 })
+    const tailMat = new THREE.MeshStandardMaterial({ color: 0x8e1414, emissive: 0x8e1414, emissiveIntensity: 0.4, roughness: 0.4 })
+    for (const zz of [-1, 1]) {
+      const head = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.13, 0.42), lampMat)
+      head.position.set(2.14, 0.66, zz * 0.52)
+      g.add(head)
+      const tail = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.12, 0.38), tailMat)
+      tail.position.set(-2.2, 0.66, zz * 0.56)
+      g.add(tail)
+    }
+    // The view from the driver's seat. Mesh-local y is height above the wheel contact, so with
+    // CAR_RIDE 0.35 and COCKPIT_EYE_UP 1.15 the eye sits at local (0.35, 1.50, COCKPIT_EYE_SIDE),
+    // and everything here is placed relative to THAT. Hidden until setCockpit(true), when the body
+    // shell is hidden instead so the eye is not sitting inside a solid box.
+    // Everything here has to sit BEYOND the camera's 0.5 m near plane, or it is clipped away and
+    // you see the road through your own dashboard. The eye is at local (0.35, 1.50), so the near
+    // face of the dash starts at x = 0.93 — 0.58 m ahead — and its top at y = 1.33 is 0.17 m below
+    // the eye, which at that distance is above the bottom edge of a 60-degree frame (0.33 m below).
+    // It reaches down to the floor so nothing shows underneath it.
+    const interior = new THREE.Group()
+    interior.visible = false
+    const dashMat = new THREE.MeshStandardMaterial({ color: 0x14161a, roughness: 0.85, metalness: 0.05 })
+    const dash = new THREE.Mesh(new THREE.BoxGeometry(0.78, 1.2, 2.0), dashMat)
+    dash.position.set(1.32, 0.73, 0) // x 0.93..1.71, y 0.13..1.33
+    interior.add(dash)
+    const cowl = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.06, 2.0), dashMat)
+    cowl.position.set(1.95, 1.3, 0)
+    cowl.rotation.z = -0.09 // the bonnet falling away ahead
+    interior.add(cowl)
+    const header = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.1, 1.75), dashMat)
+    header.position.set(1.0, 1.78, 0)
+    interior.add(header)
+    for (const zz of [-0.85, 0.85]) {
+      const pillar = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.6, 0.14), dashMat)
+      pillar.position.set(1.02, 1.5, zz)
+      pillar.rotation.z = 0.26
+      interior.add(pillar)
+    }
+    const wheelRim = new THREE.Mesh(new THREE.TorusGeometry(0.19, 0.026, 8, 24), new THREE.MeshStandardMaterial({ color: 0x0c0d10, roughness: 0.6 }))
+    wheelRim.position.set(1.0, 1.24, T.COCKPIT_EYE_SIDE)
+    wheelRim.rotation.y = Math.PI / 2
+    wheelRim.rotation.x = 0.42 // raked toward the driver
+    interior.add(wheelRim)
+    this.steeringWheel = wheelRim
+    this.interior = interior
+    g.add(interior)
+    this.shell = [body, cabin]
+
     const wheelGeo = new THREE.CylinderGeometry(0.34, 0.34, 0.26, 16)
     wheelGeo.rotateX(Math.PI / 2)
     const wheelMat = new THREE.MeshStandardMaterial({ color: 0x151515, roughness: 0.9 })
@@ -348,12 +452,20 @@ export class Car {
     return g
   }
 
+  /** Inside or outside: swap the body shell for the dash, pillars and wheel. */
+  setCockpit(on: boolean) {
+    if (!this.interior || this.interior.visible === on) return
+    this.interior.visible = on
+    for (const o of this.shell) o.visible = !on
+  }
+
   private updateMesh() {
     this.mesh.position.copy(this.pos).y -= T.CAR_RIDE
     // yaw about Y (three: +yaw turns from +X toward -Z, our forward is (cos, 0, sin) so negate)
     this.mesh.rotation.set(0, -this.yaw, 0)
     this.mesh.rotateZ(-Math.atan(this.pitch))
     this.mesh.rotateX(Math.atan(this.roll))
+    if (this.steeringWheel) this.steeringWheel.rotation.z = this.steerVisual * 2.6
     for (const [i, w] of this.wheels.entries()) {
       w.rotation.set(0, i < 2 ? -this.steerVisual : 0, 0)
       w.rotateZ(-this.wheelSpin)

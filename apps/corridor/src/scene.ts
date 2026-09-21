@@ -8,11 +8,13 @@ import { NearTrees } from './trees'
 import { Impostors } from './impostors'
 import { Grass } from './grass'
 import { LOOK, type Season } from './season'
+import { GRASS_TYPES, grassTypeFor } from './groundcover'
 import { buildStrip, sinkUnderStrip } from './strip'
 import { Adjustments, NEUTRAL as NEUTRAL_ADJ } from './adjust'
 import { buildPlacements, loadCatalog, loadPlacements } from './placements'
+import { buildBuildings } from './buildings'
 import { buildBridges, flattenSpine, loadStructureOverrides, suppressed } from './structures'
-import { loadSurfaceSets, overpassMesh, pavedWidth, roadMesh, stations, treesFromCanopy, type SurfaceSet } from './props'
+import { loadSurfaceSets, overpassMesh, pavedOffset, pavedWidth, roadMesh, stations, taperedLanes, treesFromCanopy, type SurfaceSet } from './props'
 import { buildRocks } from './rocks'
 import { buildWater } from './water'
 
@@ -23,9 +25,13 @@ export const toWorld = (x: number, y: number, z: number) => new THREE.Vector3(x,
 export interface Site {
   manifest: Manifest
   group: THREE.Group
-  layers: { imagery?: THREE.Mesh; canopy?: THREE.Mesh; trees?: THREE.Group; road: THREE.Group; horizon?: THREE.Mesh; structures: THREE.Group; spine: THREE.Group; markers: THREE.Group; placements: THREE.Group; rocks?: THREE.Group; water?: THREE.Group }
+  layers: { imagery?: THREE.Mesh; canopy?: THREE.Mesh; trees?: THREE.Group; road: THREE.Group; horizon?: THREE.Mesh; structures: THREE.Group; spine: THREE.Group; markers: THREE.Group; placements: THREE.Group; buildings: THREE.Group; rocks: THREE.Group; water: THREE.Group }
+  /** how many footprints were massed, and how many had a real measured height */
+  buildingStats: { count: number; gabled: number; fromLidar: number }
   adjustments: Adjustments
   treeCount: number
+  /** the grass field, when this site has one (probes and the HUD read `grass.counts`) */
+  grass: Grass | null
   /** terrain-and-data: rock instances placed per rock type, and what water was drawn (for probes) */
   rockCounts: Record<string, number>
   waterStats: { lines: number; areas: number; falls: number; length_m: number }
@@ -285,11 +291,17 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
     const dir = curve.getTangentAt(u)
     return { pos, dir }
   }
+  // A network site carries the same roads twice: `siblings` (the old dense-coords key, kept so an
+  // older viewer still draws something) and `branches` (with tags, grade and junctions). Drawing
+  // both put two carriageways, two paint sets and two strips on every side street — z-fighting
+  // paint, doubled stations, and every dead end reading as a junction with its own twin
+  // (Rich's neighbourhood, 2026-09-21). Branches supersede siblings.
+  const siblings = (manifest.branches?.length ?? 0) > 0 ? [] : manifest.siblings
   const spine = new THREE.Group()
   spine.name = 'spine'
   // analysis overlay: a thin centreline, floating a hand above the pavement so it never floods it
   spine.add(ribbon(sp.map((v) => v.clone().add(new THREE.Vector3(0, 0.5, 0))), 0.35, 0xffdc00))
-  for (const sib of manifest.siblings) {
+  for (const sib of siblings) {
     const pts = sib.map(([x, y]) => toWorld(x, y, heightAt(x, y) + 0.9))
     spine.add(ribbon(pts, 0.3, 0xff8c00, 0.9))
   }
@@ -298,9 +310,22 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
   status('paving…')
   const segs = manifest.spine.segments
   const segAt = (s: number) => segs.find((g) => g.s_start - 0.5 <= s && s <= g.s_end + 0.5)
-  const lanesAt = (s: number) => {
+  const stepLanes = (s: number) => {
     const n = Number(segAt(s)?.tags.lanes)
     return Number.isFinite(n) && n > 0 ? n : 2
+  }
+  // OSM's lane count is a step function; a lane that appears in one 6 m quad is a road growing
+  // sideways. taperedLanes ramps it over ROAD_TAPER_M so the width, the edge line and the shoulder
+  // converge together. It goes HERE rather than inside roadMesh so that the asphalt and
+  // edgeDistance keep using the same width — that agreement is what the two-way fix restored.
+  let taperFor = -1
+  let laneFn: (s: number) => number = stepLanes
+  const lanesAt = (s: number) => {
+    if (taperFor !== T.ROAD_TAPER_M) {
+      taperFor = T.ROAD_TAPER_M
+      laneFn = taperedLanes(stepLanes, manifest.spine.length_m, T.ROAD_TAPER_M)
+    }
+    return laneFn(s)
   }
   // OSM: oneway=yes, or a motorway (implicitly one way), is a carriageway; everything else with
   // oneway=no or untagged is a two-way road with traffic both directions on one pavement
@@ -311,6 +336,12 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
     return !['motorway', 'motorway_link', 'trunk_link', 'primary_link'].includes(tg.highway ?? '')
   }
   const pavedHalfAt = (s: number) => pavedWidth(lanesAt(s), twoWayAt(s)) / 2
+  // How far right of the spine the asphalt's centre sits: 0 on a two-way road, half the shoulder
+  // difference on a carriageway, because OSM draws a motorway down its travel lanes and not down
+  // the middle of its asphalt. edgeDistance has to use this or the pavement the car and the grass
+  // believe in drifts 0.9 m from the one the asphalt mesh draws — the same class of disagreement
+  // the two-way width fix removed.
+  const pavedOffsetAt = (s: number) => pavedOffset(twoWayAt(s))
   const road = new THREE.Group()
   road.name = 'road'
   surfaceSets ??= await loadSurfaceSets()
@@ -361,7 +392,7 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
   // takes the spine's road height (plus 0.4 m like the spine); further out it is its own road on
   // the DEM (a ramp peeling away, a frontage road).
   const sibAts: { at: (s: number) => { pos: THREE.Vector3; dir: THREE.Vector3 }; len: number; spineS: (s: number) => number }[] = []
-  for (const sib of manifest.siblings) {
+  for (const sib of siblings) {
     if (sib.length < 2) continue
     const raw2 = sib.map(([x, y]) => {
       const wz = -y
@@ -379,6 +410,28 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
     sibAts.push({ at: sibAt, len: len2, spineS: (s: number) => { const p = sibAt(s).pos; return nearestSpine(p.x, p.z).s } })
     roadBuilders.push(() => roadMesh(stations(sibAt, len2, 6), () => 2, () => 'asphalt_aged', surfaceSets!))
   }
+  // --- network branches: every other road of a network site is a first-class carriageway --------
+  // Its grade is its own lidar profile (the bake densified it like the spine), its lanes and
+  // direction its own OSM tags; it gets stations in the edge grid (so grass, trees and the car
+  // know it is pavement), an asphalt+paint mesh, and below, its own strip. Kept apart from the
+  // divided-highway siblings: those share the spine's grade and widen the spine's strip.
+  const branchAts: { at: (s: number) => { pos: THREE.Vector3; dir: THREE.Vector3 }; len: number; half: number; name: string }[] = []
+  for (const br of manifest.branches ?? []) {
+    if (!br.coords || br.coords.length < 2) continue
+    const rawB = br.coords.map(([x, y, z]) => toWorld(x, y, (Number.isFinite(z) ? z : heightAt(x, y)) + 0.4))
+    const cB = new THREE.CatmullRomCurve3(rawB, false, 'centripetal')
+    cB.arcLengthDivisions = Math.max(100, rawB.length * 8)
+    const lenB = cB.getLength()
+    const atB = (s: number) => {
+      const u = Math.min(1, Math.max(0, s / lenB))
+      return { pos: cB.getPointAt(u), dir: cB.getTangentAt(u) }
+    }
+    const lanesB = Number(br.lanes) > 0 ? Number(br.lanes) : 2
+    const twoWayB = br.oneway === 'yes' || br.oneway === '-1' ? false : br.oneway === 'no' ? true : !['motorway', 'motorway_link', 'trunk_link', 'primary_link'].includes(br.highway ?? '')
+    const halfB = pavedWidth(lanesB, twoWayB) / 2
+    roadBuilders.push(() => roadMesh(stations(atB, lenB, 6), () => lanesB, () => 'asphalt_aged', surfaceSets!, 0.02, () => twoWayB))
+    branchAts.push({ at: atB, len: lenB, half: halfB, name: br.name ?? br.ref ?? 'branch' })
+  }
   buildRoads()
 
   // --- trees, one per canopy cell, as tall as the lidar says ---------------------------------
@@ -391,28 +444,110 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
   let edgeDistanceWorld: (x: number, z: number) => number = () => Infinity
   let treesNearWorld: (x: number, z: number, r: number) => [number, number, number][] = () => []
   let currentSeason: Season = initialSeason
+  let grassRef: Grass | null = null
   if (chm) {
     // distance to the nearest PAVEMENT EDGE of any carriageway (negative = on the pavement):
     // stations every 5 m from the spine and every sibling, hashed on a 20 m grid with each
     // station carrying its own half width. Grass, verges and tree exclusion all ask this.
     const stCell = 20
-    const stGrid = new Map<string, { x: number; z: number; dx: number; dz: number; s: number; half: number; who: number }[]>()
+    const stGrid = new Map<string, { x: number; z: number; dx: number; dz: number; s: number; half: number; off: number; who: number }[]>()
     // one height function per carriageway: the SAME spline the road mesh is drawn from
-    const curves: { at: (s: number) => { pos: THREE.Vector3; dir: THREE.Vector3 }; len: number }[] = [{ at: spineAt, len: curveLen }, ...sibAts.map((s) => ({ at: s.at, len: s.len }))]
-    const addStations = (who: number, halfAt: (s: number) => number) => {
+    const curves: { at: (s: number) => { pos: THREE.Vector3; dir: THREE.Vector3 }; len: number }[] = [{ at: spineAt, len: curveLen }, ...sibAts.map((s) => ({ at: s.at, len: s.len })), ...branchAts.map((b) => ({ at: b.at, len: b.len }))]
+    const branchWho0 = 1 + sibAts.length // `who` of the first branch in the station grid
+    const halfOf = (who: number, s: number) => (who === 0 ? pavedHalfAt(s) : who < branchWho0 ? pavedWidth(2) / 2 : branchAts[who - branchWho0].half)
+    const addStations = (who: number, halfAt: (s: number) => number, offAt: (s: number) => number = () => 0) => {
       const c = curves[who]
       for (let s = 0; s <= c.len; s += 5) {
         const st = c.at(s)
         const d = st.dir.clone().setY(0).normalize()
         const k = `${Math.floor(st.pos.x / stCell)},${Math.floor(st.pos.z / stCell)}`
         const arr = stGrid.get(k)
-        const rec = { x: st.pos.x, z: st.pos.z, dx: d.x, dz: d.z, s, half: halfAt(s), who }
+        const rec = { x: st.pos.x, z: st.pos.z, dx: d.x, dz: d.z, s, half: halfAt(s), off: offAt(s), who }
         if (arr) arr.push(rec)
         else stGrid.set(k, [rec])
       }
     }
-    addStations(0, pavedHalfAt)
+    addStations(0, pavedHalfAt, pavedOffsetAt)
     for (let i = 0; i < sibAts.length; i++) addStations(i + 1, () => pavedWidth(2) / 2)
+    for (let i = 0; i < branchAts.length; i++) addStations(branchWho0 + i, () => branchAts[i].half)
+
+    // --- cul-de-sacs ------------------------------------------------------------------------
+    // "if a street dead ends, assume a cul de sac" (Rich, 2026-09-21). An end is a dead end when
+    // it is not a junction with another carriageway AND not simply where we clipped the corridor.
+    // One station at the bulb centre IS the bulb: outside the ±2.6 m along-track band
+    // `edgeDistance` measures radially and subtracts `half`, so a lone station is a disc — grass,
+    // trees and the car all see pavement there for free. The bake will carry `dead_ends` per road
+    // (kind + radius, overridable in the editor); until it does, the geometry decides.
+    const [dbx0, dby0, dbx1, dby1] = manifest.bbox
+    const nearBboxEdge = (x: number, wz: number) => {
+      const y = -wz
+      return Math.min(x - dbx0, dbx1 - x, y - dby0, dby1 - y) < 60
+    }
+    const junctionNear = (x: number, z: number, self: number) => {
+      const cx = Math.floor(x / stCell), cz = Math.floor(z / stCell)
+      for (let a = -2; a <= 2; a++) for (let b = -2; b <= 2; b++) {
+        for (const p of stGrid.get(`${cx + a},${cz + b}`) ?? []) {
+          if (p.who === self) continue
+          if ((p.x - x) ** 2 + (p.z - z) ** 2 < 225) return true // 15 m: a bulb is ~9 m, and a 75 m court runs close to the next street
+        }
+      }
+      return false
+    }
+    const deadEnds: { x: number; z: number; dx: number; dz: number; who: number; s: number; radius?: number }[] = []
+    // the bake's answer wins where it has one: `dead_ends` per road resolves the ends against OSM
+    // (a shared node, a turning circle, a way outside our list) and the editor can turn any of
+    // them into a true dead end. Geometry only decides for roads the bake has not spoken about.
+    const authored = new Map<number, import('./site').DeadEnd[]>()
+    if (manifest.spine.dead_ends?.length) authored.set(0, manifest.spine.dead_ends)
+    for (let i = 0; i < branchAts.length; i++) {
+      const de = (manifest.branches ?? [])[i]?.dead_ends
+      if (de?.length) authored.set(branchWho0 + i, de)
+    }
+    for (let who = 0; who < curves.length; who++) {
+      const c = curves[who]
+      const said = authored.get(who)
+      if (said) {
+        for (const de of said) {
+          if (de.kind !== 'cul_de_sac') continue
+          const s = Math.min(c.len, Math.max(0, de.s))
+          const st = c.at(s)
+          const sign = s > c.len / 2 ? 1 : -1
+          const d = st.dir.clone().setY(0).normalize().multiplyScalar(sign)
+          deadEnds.push({ x: st.pos.x, z: st.pos.z, dx: d.x, dz: d.z, who, s, radius: de.radius_m })
+        }
+        continue
+      }
+      for (const [s, sign] of [[0, -1], [c.len, 1]] as [number, number][]) {
+        const st = c.at(Math.min(c.len, Math.max(0, s)))
+        const d = st.dir.clone().setY(0).normalize().multiplyScalar(sign)
+        const atEdge = nearBboxEdge(st.pos.x, st.pos.z), atJunction = junctionNear(st.pos.x, st.pos.z, who)
+        console.info(`end who=${who} s=${s.toFixed(0)} edge=${atEdge} junction=${atJunction} at ${st.pos.x.toFixed(0)},${st.pos.z.toFixed(0)}`)
+        if (atEdge || atJunction) continue
+        deadEnds.push({ x: st.pos.x, z: st.pos.z, dx: d.x, dz: d.z, who, s })
+      }
+    }
+    type St = { x: number; z: number; dx: number; dz: number; s: number; half: number; who: number; off: number }
+    const bulbStations: St[] = []
+    const placeBulbs = () => {
+      for (const b of bulbStations) {
+        const arr = stGrid.get(`${Math.floor(b.x / stCell)},${Math.floor(b.z / stCell)}`)
+        if (arr && arr.indexOf(b) >= 0) arr.splice(arr.indexOf(b), 1)
+      }
+      bulbStations.length = 0
+      if (T.CULDESAC_RADIUS <= 0) return
+      for (const e of deadEnds) {
+        // the bulb sits just beyond the last metre of pavement, as a turning circle does
+        const r = e.radius && e.radius > 0 ? e.radius : T.CULDESAC_RADIUS
+        const bx = e.x + e.dx * r * 0.6, bz = e.z + e.dz * r * 0.6
+        const rec: St = { x: bx, z: bz, dx: e.dx, dz: e.dz, s: e.s, half: r, who: e.who, off: 0 }
+        bulbStations.push(rec)
+        const k = `${Math.floor(bx / stCell)},${Math.floor(bz / stCell)}`
+        const arr = stGrid.get(k)
+        if (arr) arr.push(rec)
+        else stGrid.set(k, [rec])
+      }
+    }
+    placeBulbs()
     /** signed distance to the nearest pavement edge, and which carriageway that was */
     const edgeDistance = (x: number, z: number, exclude = -1): { d: number; who: number; y: number } => {
       const cx = Math.floor(x / stCell), cz = Math.floor(z / stCell)
@@ -427,7 +562,9 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
             // to the road and not to the nearer station's dot
             const ux = x - p.x, uz = z - p.z
             const along = ux * p.dx + uz * p.dz
-            const lat = Math.abs(ux * p.dz - uz * p.dx)
+            // signed lateral, + to the right of travel (right = dir x UP = (-dz, 0, dx)), measured
+            // from the asphalt's centre rather than the spine; with off = 0 this is the old |lat|
+            const lat = Math.abs(uz * p.dx - ux * p.dz - p.off)
             const d = (Math.abs(along) <= 2.6 ? lat : Math.hypot(ux, uz)) - p.half
             if (d < best) { best = d; who = p.who; bp = p }
           }
@@ -463,24 +600,82 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
     const makeStrip = () => buildStrip(spineAt, curveLen, -latMin + VERGE, latMax + VERGE, (x, z) => edgeDistance(x, z), heightAt, imagery, manifest.bbox, grassTex('grass_mown'), grassTex('grass_rough'), lite ? 4 : 2, lite ? 2 : 1, adjustments.active ? (x, y) => adjustments.at(x, y, adjScratch).ground_offset_m : null)
     let strip = makeStrip()
     road.add(strip.mesh)
-    sinkUnderStrip(terrainGeo, strip.heightAt)
+    sinkUnderStrip(terrainGeo, strip.sinkAt, strip.coverAt)
+    // one strip per branch; where another road's strip already covers the ground (within VERGE of
+    // its pavement edge) the branch strip leaves a hole rather than a second coplanar surface
+    const makeBranchStrips = () => branchAts.map((b, i) => buildStrip(b.at, b.len, VERGE, VERGE, (x, z) => edgeDistance(x, z), heightAt, imagery, manifest.bbox, grassTex('grass_mown'), grassTex('grass_rough'), lite ? 4 : 2, lite ? 2 : 1, adjustments.active ? (x, y) => adjustments.at(x, y, adjScratch).ground_offset_m : null, (s) => {
+      const q = b.at(s).pos
+      return edgeDistance(q.x, q.z, branchWho0 + i).d < VERGE
+    }))
+    const bulbGroup = new THREE.Group()
+    bulbGroup.name = 'culdesacs'
+    road.add(bulbGroup)
+    const makeBulbs = () => {
+      for (const o of [...bulbGroup.children]) {
+        bulbGroup.remove(o)
+        ;(o as THREE.Mesh).geometry.dispose()
+      }
+      for (const b of bulbStations) {
+        const geo = new THREE.CircleGeometry(b.half, 36)
+        geo.rotateX(-Math.PI / 2)
+        // UVs in METRES over the tile, like roadMesh: CircleGeometry's own 0..1 UVs stretch one
+        // tile across the whole 18 m bulb, which is the blotchy over-scaled asphalt Rich saw.
+        const set = surfaceSets?.asphalt_aged
+        const mpt = set?.metresPerTile ?? 1
+        const uv = geo.getAttribute('uv') as THREE.BufferAttribute
+        const pos0 = geo.getAttribute('position') as THREE.BufferAttribute
+        for (let i = 0; i < uv.count; i++) uv.setXY(i, (b.x + pos0.getX(i)) / mpt, (b.z + pos0.getZ(i)) / mpt)
+        uv.needsUpdate = true
+        const mesh = new THREE.Mesh(geo, set ? set.material : new THREE.MeshStandardMaterial({ color: 0x3b3b3d, roughness: 1 }))
+        const c = curves[b.who]
+        mesh.position.set(b.x, c.at(Math.min(c.len, Math.max(0, b.s))).pos.y + 0.02, b.z)
+        mesh.name = 'road:culdesac'
+        bulbGroup.add(mesh)
+      }
+    }
+    makeBulbs()
+    let branchStrips = makeBranchStrips()
+    for (const bs of branchStrips) {
+      road.add(bs.mesh)
+      sinkUnderStrip(terrainGeo, bs.sinkAt, bs.coverAt)
+    }
+    const stripHeight = (x: number, z: number): number | null => {
+      const h = strip.heightAt(x, z)
+      if (h !== null) return h
+      for (const bs of branchStrips) {
+        const v = bs.heightAt(x, z)
+        if (v !== null) return v
+      }
+      return null
+    }
     // a road knob moved: every station's half width, the asphalt, then the strip that hugs it
-    const roadSignature = () => `${T.LANE_WIDTH}|${T.SHOULDER_OUT}|${T.SHOULDER_IN}`
+    const roadSignature = () => `${T.LANE_WIDTH}|${T.SHOULDER_OUT}|${T.SHOULDER_IN}|${T.ROAD_BLEND_M}|${T.ROAD_TAPER_M}|${T.ROAD_ONEWAY_CENTRE}|${T.CULDESAC_RADIUS}`
     let roadSig = roadSignature()
     let roadTimer: ReturnType<typeof setTimeout> | undefined
     const rebuildRoad = () => {
-      for (const arr of stGrid.values()) for (const r of arr) r.half = r.who === 0 ? pavedHalfAt(r.s) : pavedWidth(2) / 2
+      for (const arr of stGrid.values()) for (const r of arr) { if (bulbStations.includes(r as St)) continue; r.half = halfOf(r.who, r.s); r.off = r.who === 0 ? pavedOffsetAt(r.s) : 0 }
+      placeBulbs()
+      makeBulbs()
       buildRoads()
       road.remove(strip.mesh)
       strip.mesh.geometry.dispose()
       strip = makeStrip()
       road.add(strip.mesh)
-      sinkUnderStrip(terrainGeo, strip.heightAt)
+      sinkUnderStrip(terrainGeo, strip.sinkAt, strip.coverAt)
+      for (const bs of branchStrips) {
+        road.remove(bs.mesh)
+        bs.mesh.geometry.dispose()
+      }
+      branchStrips = makeBranchStrips()
+      for (const bs of branchStrips) {
+        road.add(bs.mesh)
+        sinkUnderStrip(terrainGeo, bs.sinkAt, bs.coverAt)
+      }
     }
     group.add(road)
     // everything that stands on the ground near the road stands on the strip
-    const groundNear = (x: number, y: number) => strip.heightAt(x, -y) ?? heightAt(x, y)
-    groundAtWorld = (x, z) => strip.heightAt(x, z) ?? heightAt(x, -z)
+    const groundNear = (x: number, y: number) => stripHeight(x, -y) ?? heightAt(x, y)
+    groundAtWorld = (x, z) => stripHeight(x, z) ?? heightAt(x, -z)
     edgeDistanceWorld = (x, z) => edgeDistance(x, z).d
     status('planting…')
     const treeAdj = { ...NEUTRAL_ADJ }
@@ -524,8 +719,12 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
     const grassAdj = { ...NEUTRAL_ADJ }
     const grass = new Grass(groundNear, canopyAt, roadDistance, 0, LOOK[currentSeason], lite ? 90_000 : 400_000, lite ? 26 : 40, fog, adjustments.active ? (x, y) => { const a = adjustments.at(x, y, grassAdj); return [a.grass_height, a.grass_density] } : undefined)
     trees.add(grass.mesh)
+    grassRef = grass
+    // what grows on this verge, read off the bake; GRASS_TYPE overrides it from the F6 panel
+    const bakedGrassType = grassTypeFor(manifest)
+    grass.setType(bakedGrassType)
     let imp: Impostors | null = null
-    let refreshFar = (_skip: Set<number>) => {}
+    let refreshFar = (_skip: Set<number>, _eye?: THREE.Vector3, _fwd?: THREE.Vector3, _pitch?: number) => {}
     if (renderer) {
       // far field: the SAME models as impostors, one quad a tree, re-assigned as the eye moves
       status('baking impostors…')
@@ -541,15 +740,48 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
         imp!.set(i, r.x, r.y, r.z, r.h, v, ((i * 137) % 360) * (Math.PI / 180), m)
       })
       imp.commit(t.records.length)
+      // `shown` holds the indices whose card is currently HIDDEN (the name is the original's).
       let shown = new Set<number>()
-      refreshFar = (skip: Set<number>) => {
+      let faded = new Set<number>()
+      /**
+       * Which far trees draw a card, and how solidly.
+       *
+       * The card is kept ALIVE for the first `TREE_FADE_M` metres INSIDE the near radius, on top
+       * of the procedural model that has already taken over, and dissolves to nothing across that
+       * band. That direction is the whole point and it is easy to get backwards: fading the card
+       * out on the way IN, before the model appears, makes the tree vanish and then reappear —
+       * worse than the pop it was meant to hide. Here the model arrives underneath a solid card,
+       * which hides the arrival, and then the card melts off it.
+       *
+       * The dissolve is a dither in the impostor shader, not alpha blending: 35k camera-facing
+       * quads cannot be depth-sorted. The band is measured with the SAME `lodDistance` the near
+       * set uses to choose its members, or the fade ring and the swap boundary would be
+       * different shapes.
+       */
+      refreshFar = (skip: Set<number>, eye?: THREE.Vector3, fwd?: THREE.Vector3, pitch = 0) => {
         imp!.clearRanges()
-        for (const i of shown) if (!skip.has(i)) imp!.setVisible(i, true, sizes[i])
-        for (const i of skip) if (!shown.has(i)) imp!.setVisible(i, false, sizes[i])
-        shown = new Set(skip)
+        const band = Math.max(0, T.TREE_FADE_M)
+        const inner = T.TREE_NEAR_RADIUS
+        // near-set trees that should still show a dissolving card, and how solid it is
+        const keep = new Map<number, number>()
+        if (band > 0 && eye && fwd) {
+          for (const i of skip) {
+            const r = t.records[i]
+            const d = T.lodDistance(r.x - eye.x, r.z - eye.z, fwd.x, fwd.z, pitch)
+            if (d >= inner - band) keep.set(i, Math.min(1, Math.max(0, (d - (inner - band)) / band)))
+          }
+        }
+        const hide = new Set<number>()
+        for (const i of skip) if (!keep.has(i)) hide.add(i)
+        for (const i of shown) if (!hide.has(i)) imp!.setVisible(i, true, sizes[i])
+        for (const i of hide) if (!shown.has(i)) imp!.setVisible(i, false, sizes[i])
+        shown = hide
+        for (const [i, f] of keep) imp!.setFade(i, f)
+        for (const i of faded) if (!keep.has(i)) imp!.setFade(i, 1)
+        faded = new Set(keep.keys())
       }
       updateNear = (eye: THREE.Vector3, time: number, fwd?: THREE.Vector3, pitch = 0) => {
-        if (near.update(eye, false, fwd, pitch)) refreshFar(near.near)
+        if (near.update(eye, false, fwd, pitch)) refreshFar(near.near, eye, fwd, pitch)
         grass.update(eye, fwd, pitch)
         grass.tick(time)
         imp!.tick()
@@ -565,6 +797,8 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
     }
     retune = () => {
       near.invalidate()
+      const wantType = T.GRASS_TYPE < 0 ? bakedGrassType : GRASS_TYPES[Math.min(3, Math.max(0, Math.round(T.GRASS_TYPE)))]
+      if (wantType !== grass.grassType) grass.setType(wantType)
       grass.invalidate()
       if (roadSignature() !== roadSig) {
         roadSig = roadSignature()
@@ -580,7 +814,7 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
       const look = LOOK[season]
       near.setSeason(look)
       grass.setLook(look)
-      strip.setTint(look.grass.base.clone().multiplyScalar(2.0).lerp(new THREE.Color(0xffffff), 0.4), imagery ? look.ground : bare)
+      for (const st of [strip, ...branchStrips]) st.setTint(look.grass.base.clone().multiplyScalar(2.0).lerp(new THREE.Color(0xffffff), 0.4), imagery ? look.ground : bare)
       terrainMat.color.copy(imagery && terrainMat.map ? look.ground : bare)
       if (horizon && (horizon.material as THREE.MeshStandardMaterial).map) (horizon.material as THREE.MeshStandardMaterial).color.copy(look.ground)
       if (imp) imp.rebake(near.sources())
@@ -694,6 +928,10 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
   const catalog = await loadCatalog()
   const placementsGroup = await buildPlacements(await loadPlacements(manifest.slug), catalog, groundAtWorld)
   group.add(placementsGroup)
+  // the buildings the bake already knew about, as massing under whatever the catalogue places
+  status('raising buildings…')
+  const built = buildBuildings(manifest, groundAtWorld)
+  group.add(built.group)
   // authored bridges over the road (structures.json bridge_over)
   structures.add(await buildBridges(overrides, catalog, spineAt, groundAtWorld, (s) => pavedHalfAt(s) * 2))
 
@@ -715,9 +953,11 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
   return {
     manifest,
     group,
-    layers: { imagery: terrain, canopy, trees, road, horizon, structures, spine, markers, placements: placementsGroup, rocks: rocks.group, water: water.group },
+    layers: { imagery: terrain, canopy, trees, road, horizon, structures, spine, markers, placements: placementsGroup, buildings: built.group, rocks: rocks.group, water: water.group },
+    buildingStats: built.stats,
     adjustments,
     treeCount,
+    grass: grassRef,
     rockCounts: rocks.counts,
     waterStats: { lines: water.lines, areas: water.areas, falls: water.falls, length_m: water.length_m },
     updateNear,

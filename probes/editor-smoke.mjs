@@ -50,6 +50,31 @@ await p.waitForTimeout(2500)
 const st = await p.textContent('#status')
 check('save writes a file', /saved/.test(st ?? ''), st ?? '')
 
+// The preview is opt-in: it saves, rebuilds the site WITH the renderer and bakes the impostor
+// atlas, which is minutes under swiftshader. It is also the most fragile thing I own — it reloads
+// the whole site through another agent's buildSite — so it is worth running before a handoff.
+if (process.argv.includes('--preview')) {
+  await p.evaluate(() => document.querySelector('#preview').click())
+  await p.waitForFunction(() => window.corridor?.preview?.open === true, null, { timeout: 600000 })
+  await p.waitForTimeout(3000)
+  check('preview opens', await p.evaluate(() => window.corridor.preview.open))
+  check('preview hides the editor overlays', await p.evaluate(() =>
+    window.corridor.scene.children.filter((c) => c.userData.editorOverlay).every((c) => !c.visible)))
+  check('preview shows the trees', await p.evaluate(() => window.corridor.site.layers.trees?.visible === true))
+  check('preview renders placements', await p.evaluate(() => window.corridor.site.layers.placements.visible === true))
+  // Read the NUMBER, not the word. The first version of this asserted /mph/ against the HUD and
+  // passed on "0 mph   pavement" — i.e. it reported a car that had not moved as a car that moves.
+  // Written twenty minutes after I warned main about exactly this pattern.
+  const before = await p.evaluate(() => window.corridor.preview.car?.speed ?? 0)
+  await p.keyboard.down('KeyW'); await p.waitForTimeout(6000); await p.keyboard.up('KeyW')
+  const after = await p.evaluate(() => ({ speed: window.corridor.preview.car?.speed ?? 0, hud: document.querySelector('.pv-hud')?.textContent ?? '' }))
+  check('the car moves', after.speed > 1, `${before.toFixed?.(2) ?? before} -> ${after.speed.toFixed(2)} m/s  hud "${after.hud.trim()}"`)
+  await p.keyboard.press('Escape')
+  await p.waitForTimeout(800)
+  check('preview closes and restores the overlays', await p.evaluate(() =>
+    window.corridor.preview.open === false && window.corridor.scene.children.some((c) => c.userData.editorOverlay && c.visible)))
+}
+
 check('no page errors', errs.length === 0, errs.slice(0, 3).join(' | '))
 console.log(bad ? `\n${bad} FAILED` : '\nall good')
 await b.close()

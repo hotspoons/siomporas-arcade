@@ -455,14 +455,14 @@ def export_branches(site_dir: Path, ox: float, oy: float) -> list[dict] | None:
     from scipy.ndimage import gaussian_filter1d
     from shapely.geometry import LineString
 
-    by_id = {b["id"]: b for b in json.loads(br_p.read_text())["branches"]}
+    by_id = {b["id"]: b for b in json.loads(br_p.read_text())["branches"] if b.get("id")}
     def finite(v, default=0.0):
         return default if v is None or not np.isfinite(v) else float(v)
 
     out = []
     for sib in spine.get("siblings", []):
         b = by_id.get(sib.get("id")) or {}
-        if not b:
+        if not b:  # a road with no profile is still a road: emit it and say so, never drop it
             print(f"  branches no profile for {sib.get('ident')} ({sib.get('id')}) — emitted with profile: null; run `python -m corridor.network_tiles <slug>` to compute it")
         g = sib["geometry"]
         parts = [g["coordinates"]] if g["type"] == "LineString" else g["coordinates"]

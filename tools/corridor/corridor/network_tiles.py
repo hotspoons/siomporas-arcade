@@ -482,8 +482,23 @@ def reprofile(site_dir: Path) -> dict:
             (site_dir / "profile.json").write_text(json.dumps(prof))
             print(f"  reprofile primary {c['id']}: {len(prof['structures'])} structures", flush=True)
             continue
+        # The record is rebuilt from the SIBLING in spine_utm.json, which is authoritative after a
+        # revector — matching the previous branches.json by id silently produced records with no
+        # id or ident at all the first time the ids changed shape, and the export then died on
+        # KeyError 'id'. Anything the old record had and the sibling does not (nothing today) is
+        # carried over, never the other way round.
+        sib = c["sib"]
         old = branches_old.get(c["id"], {})
-        branches.append({**old, "profile": {"step_m": prof["step_m"], "s": prof["s"], "road_z": prof["road_z"]}, "structures": prof["structures"]})
+        branches.append({
+            **old,
+            "id": sib["id"], "ident": sib.get("ident"), "name": sib.get("name"), "ref": sib.get("ref"),
+            "highway": sib.get("highway"), "lanes": sib.get("lanes"), "oneway": sib.get("oneway"),
+            "length_m": sib.get("length_m"), "junctions": sib.get("junctions") or [],
+            "dead_ends": sib.get("dead_ends") or [],
+            "s_on_primary": old.get("s_on_primary") if old.get("s_on_primary") is not None else round(float(chains[0]["line"].project(c["line"].interpolate(0.5, normalized=True))), 1),
+            "profile": {"step_m": prof["step_m"], "s": prof["s"], "road_z": prof["road_z"]},
+            "structures": prof["structures"],
+        })
     (site_dir / "branches.json").write_text(json.dumps({"branches": branches}))
     print(f"  reprofile {len(branches)} branches, {sum(len(b['structures']) for b in branches)} structures", flush=True)
     return {"chains": len(chains), "branches": len(branches)}

@@ -58,8 +58,18 @@ const OVERLAP_CELL_M = 80
 export interface Params {
   /** skip footprints this far or further from the centreline; the bake only reaches 300 m */
   max_lat_m: number
-  /** never put anything within this of a pavement edge */
+  /** how close INVENTED frontage may come to a pavement edge */
   keepout_m: number
+  /**
+   * The same for a MEASURED footprint, and it has to be much smaller.
+   *
+   * road-and-car made OSM service ways into real driveways, and 15 of frederick-i70's houses
+   * promptly vanished: a house is 8 m from its own driveway, and a 10 m keep-out meant for an
+   * interstate rejected it. The distinction is evidence, not distance — a footprint from the bake
+   * is where a building demonstrably IS, so the keep-out only has to stop it sitting in the
+   * carriageway. Invented frontage is a guess and keeps its polite setback.
+   */
+  keepout_real_m: number
   /** below this the footprint is map noise, not a building */
   min_area_m2: number
   /** how far a catalog asset may be stretched to fit a footprint before it is the wrong object */
@@ -85,6 +95,7 @@ export interface Params {
 export const DEFAULTS: Params = {
   max_lat_m: 260,
   keepout_m: 10,
+  keepout_real_m: 2,
   min_area_m2: 25,
   scale_min: 0.7,
   scale_max: 1.4,
@@ -408,7 +419,7 @@ export function generate(manifest: Manifest, site: Site, catalog: CatalogEntry[]
     if (b.area_m2 < p.min_area_m2) { drop('too small'); continue }
     if (Math.abs(b.lat) > p.max_lat_m) { drop('outside the corridor'); continue }
     // Never on the road. `edgeDistance` is signed and in the WORLD frame (x, z).
-    if (site.edgeDistance(cx, -cy) < p.keepout_m) { drop('on or beside the pavement'); continue }
+    if (site.edgeDistance(cx, -cy) < p.keepout_real_m) { drop('in the carriageway'); continue }
     const zone = zoneOf(b, ctx)
     const category = categoryOf(b, zone, ctx.poiFor.get(i) ?? null)
     const fit = fitAsset(b, category, catalog, p)

@@ -6,6 +6,7 @@
 // imagery everywhere, mown turf inside the mow line, rough grass beyond, blended by the same
 // edge distance the blades use. The coarse terrain is sunk beneath it.
 import * as THREE from 'three'
+import { ACCUM_PARS, accumUniforms } from './weather'
 
 export interface Edge {
   d: number // signed distance to the nearest pavement edge (negative on the pavement)
@@ -51,6 +52,7 @@ export function buildStrip(
   /** metres inside the strip, ≤ 0 outside: how sinkUnderStrip knows which triangles to drop */
   coverAt: (x: number, z: number) => number
   setLitter: (tint: THREE.Color, spread: number) => void
+  weatherUniforms: Record<string, THREE.IUniform>
   setTint: (c: THREE.Color, ground: THREE.Color) => void
 } {
   const nS = Math.floor(length / along) + 1
@@ -140,6 +142,7 @@ export function buildStrip(
     hasForest: { value: forestFloor ? 1 : 0 },
     litterTint: { value: new THREE.Color(0x7a6e56) },
     litterSpread: { value: 0.2 },
+    ...accumUniforms(),
     grassTint: { value: new THREE.Color(0xffffff) },
   }
   mat.onBeforeCompile = (shader) => {
@@ -161,6 +164,7 @@ export function buildStrip(
         varying float vCanopy;
         varying vec3 vWorldXZ;
         varying vec3 vWorldN;
+        ${ACCUM_PARS}
         // TRIPLANAR. The ground textures used to be projected straight down — uv = worldXZ / 2 —
         // which is exact on the flat and degenerate on a cut face: a 40° bank gets a metre of uv
         // for every 1.3 m of slope, and a near-vertical one smears a single row of texels all the
@@ -218,6 +222,8 @@ export function buildStrip(
               ground = vec4(mix(ground.rgb, litter, wForest), 1.0);
             }
           }
+          // snow, ice and rain last, over whatever the ground turned out to be
+          ground = vec4(applyWeather(ground.rgb, normalize(vWorldN), vWorldXZ), 1.0);
           diffuseColor *= ground;
         #endif
         `,
@@ -309,6 +315,8 @@ export function buildStrip(
       uniforms.litterTint.value.copy(tint)
       uniforms.litterSpread.value = spread
     },
+    /** hand these to Precipitation.follow so the settled layer and the wet look drive them */
+    weatherUniforms: uniforms as unknown as Record<string, THREE.IUniform>,
   }
 }
 

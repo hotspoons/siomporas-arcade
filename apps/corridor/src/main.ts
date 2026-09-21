@@ -12,6 +12,7 @@ import { applySiteTuning, saveSiteTuning } from './sitetuning'
 
 import { fetchJSON, type IndexEntry, type Manifest, type Structure, type Crossing } from './site'
 import { LOOK, SEASONS, type Season } from './season'
+import { WEATHER, WEATHERS, type Weather } from './weather'
 
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector<T>(sel)!
 const status = (s: string) => ($('#status').textContent = s)
@@ -27,7 +28,8 @@ const orbit = new OrbitControls(camera, canvas)
 orbit.enableDamping = true
 orbit.maxPolarAngle = Math.PI / 2 - 0.02
 
-scene.add(new THREE.HemisphereLight(0xe9eef2, 0x7a6a50, 0.75))
+const ambient = new THREE.HemisphereLight(0xe9eef2, 0x7a6a50, 0.75)
+scene.add(ambient)
 const sun = new THREE.DirectionalLight(0xfff0d8, 2.0)
 sun.position.set(-3000, 4000, 2500)
 scene.add(sun)
@@ -322,11 +324,32 @@ function applyMove(dt: number) {
 // season: sky, fog, ground tint here; leaves and grass in the scene
 let season: Season = (new URLSearchParams(location.search).get('season') as Season) || 'summer'
 if (!SEASONS.includes(season)) season = 'summer'
+/**
+ * Sky, fog and LIGHT for the season, then the weather pulled over the top of it. Both in one place
+ * because weather is a modifier on a season and not a state of its own: snow under a winter sun is
+ * a different scene from snow under a summer one.
+ */
 function applySky(s: Season) {
   const look = LOOK[s]
-  ;(scene.background as THREE.Color).copy(look.sky)
-  ;(scene.fog as THREE.FogExp2).color.copy(look.sky)
-  ;(scene.fog as THREE.FogExp2).density = look.fog
+  const w = WEATHER[weatherNow()]
+  const sky = look.sky.clone().lerp(w.skyTint, w.skyMix)
+  ;(scene.background as THREE.Color).copy(sky)
+  ;(scene.fog as THREE.FogExp2).color.copy(sky)
+  ;(scene.fog as THREE.FogExp2).density = look.fog * w.fogScale
+  sun.color.copy(look.sun.colour)
+  // overcast: the sun goes down and the sky comes up, which is what a grey day actually is
+  sun.intensity = look.sun.intensity * (1 - 0.72 * w.skyMix)
+  ambient.color.copy(look.ambient.sky)
+  ambient.groundColor.copy(look.ambient.ground)
+  ambient.intensity = look.ambient.intensity * (1 + 0.5 * w.skyMix)
+  // the knob is the single source of truth for road-and-car: car.ts reads T.WEATHER_GRIP_SCALE
+  tuneKey('WEATHER_GRIP_SCALE')?.set(w.grip)
+  site?.setWeather(weatherNow())
+}
+
+/** the weather the WEATHER knob selects */
+function weatherNow(): Weather {
+  return WEATHERS[Math.min(4, Math.max(0, Math.round(T.WEATHER)))]
 }
 const seasonSel = $<HTMLSelectElement>('#season')
 seasonSel.value = season
@@ -352,6 +375,7 @@ function applySeasonKnob() {
  */
 function onTuneChange() {
   applySeasonKnob()
+  applySky(season) // the WEATHER knob lives here: sky, fog, sun, grip and what is falling
   site?.retune()
 }
 

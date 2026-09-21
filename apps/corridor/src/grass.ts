@@ -31,6 +31,7 @@
 import * as THREE from 'three'
 import type { SeasonLook } from './season'
 import { GRASS_LOOK, type GrassType } from './groundcover'
+import { ACCUM_PARS, accumUniforms } from './weather'
 import * as T from './tuning'
 
 const SEGMENTS = 6
@@ -165,6 +166,12 @@ export class Grass {
   /** the visible tile set for this eye/heading, nearest first; rebuilt only when the view moved */
   private vis: { key: string; tx: number; tz: number; d: number }[] = []
   private visStale = true
+  /**
+   * The settled layer's uniforms, shared by the blade and card materials so Precipitation.follow
+   * drives both with one object. Snow has to lie on the grass as well as the ground: a white verge
+   * with green grass standing out of it is worse than no snow at all.
+   */
+  readonly weatherUniforms = accumUniforms()
   /** what grows here: shape multipliers over the season palette and the knobs (groundcover.ts) */
   private type: GrassType = 'common'
   private look = GRASS_LOOK.common
@@ -221,6 +228,7 @@ export class Grass {
         uHue: { value: 0 },
         uSat: { value: 1 },
         uLight: { value: 1 },
+        ...this.weatherUniforms,
       },
       vertexShader: /* glsl */ `
         attribute vec3 aRoot;
@@ -293,6 +301,7 @@ export class Grass {
         varying vec3 vWorld;
         #include <fog_pars_fragment>
         #include <logdepthbuf_pars_fragment>
+        ${ACCUM_PARS}
   // colour grading over the season palette: hue rotation about the grey axis (YIQ), saturation, lightness
   vec3 grade(vec3 c, float hueDeg, float sat, float light) {
     float a = radians(hueDeg);
@@ -320,7 +329,11 @@ export class Grass {
           // a little specular sheen along the blade
           vec3 hvec = normalize(uSun + v);
           lit += vec3(0.08) * pow(max(0.0, dot(n, hvec)), 24.0) * vT;
-          gl_FragColor = vec4(grade(lit, uHue, uSat, uLight), 1.0);
+          vec3 outCol = grade(lit, uHue, uSat, uLight);
+          // a blade catches the settled layer at its TIP, not at its root, so the normal it is
+          // weighed by is faked upright near the top — the real one points sideways all the way up
+          outCol = applyWeather(outCol, vec3(0.0, mix(0.1, 1.0, vT), 0.0), vWorld);
+          gl_FragColor = vec4(outCol, 1.0);
           #include <fog_fragment>
           #include <colorspace_fragment>
         }
@@ -358,6 +371,7 @@ export class Grass {
         uHue: { value: 0 },
         uSat: { value: 1 },
         uLight: { value: 1 },
+        ...this.weatherUniforms,
       },
       vertexShader: /* glsl */ `
         attribute vec4 aCard;  // x y z size
@@ -371,6 +385,7 @@ export class Grass {
         varying vec2 vUv;
         varying float vRand;
         varying float vMown;
+        varying vec3 vCardWorld;
         #include <common>
         #include <fog_pars_vertex>
         #include <logdepthbuf_pars_vertex>
@@ -393,6 +408,7 @@ export class Grass {
           float lean = (aCard2.x - 0.5) * 2.0 * uLean;
           vec3 world = root + right * (position.x * size * uWidth + lean * position.y * size) + vec3(0.0, position.y * size, 0.0)
                      + vec3(0.8, 0.0, 0.5) * gust * position.y * size;
+          vCardWorld = world;
           vec4 mvPosition = viewMatrix * vec4(world, 1.0);
           gl_Position = projectionMatrix * mvPosition;
           #include <logdepthbuf_vertex>
@@ -410,8 +426,10 @@ export class Grass {
         varying vec2 vUv;
         varying float vRand;
         varying float vMown;
+        varying vec3 vCardWorld;
         #include <fog_pars_fragment>
         #include <logdepthbuf_pars_fragment>
+        ${ACCUM_PARS}
   // colour grading over the season palette: hue rotation about the grey axis (YIQ), saturation, lightness
   vec3 grade(vec3 c, float hueDeg, float sat, float light) {
     float a = radians(hueDeg);
@@ -433,7 +451,9 @@ export class Grass {
           float shade = mix(0.55, 1.15, s.r);
           // a mown card is a low even turf; keep it a touch darker like the strip's mown texture
           c *= shade * mix(1.0, 0.85, vMown);
-          gl_FragColor = vec4(grade(c, uHue, uSat, uLight), 1.0);
+          vec3 outCol = grade(c, uHue, uSat, uLight);
+          outCol = applyWeather(outCol, vec3(0.0, mix(0.1, 1.0, vUv.y), 0.0), vCardWorld);
+          gl_FragColor = vec4(outCol, 1.0);
           #include <fog_fragment>
           #include <colorspace_fragment>
         }

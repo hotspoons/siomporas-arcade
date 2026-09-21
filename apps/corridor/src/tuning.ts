@@ -51,6 +51,27 @@ export let CROP_TEXTURE_M = 2
 /** no crop closer than this to a pavement edge (m) */
 export let CROP_MIN_FROM_ROAD = 2
 export let CROP_WIND = 1
+
+// --- weather ------------------------------------------------------------------------------------
+/** -1 = clear; 0 clear, 1 rain, 2 sleet, 3 snow, 4 ice (weather.ts) */
+export let WEATHER = 0
+/** the box of falling particles that follows the camera, × the weather's own size */
+export let WEATHER_BOX = 1
+/** particle density × this */
+export let WEATHER_RATE = 1
+export let WEATHER_OPACITY = 1
+/** sideways drift × this; the same gust direction the grass leans with */
+export let WEATHER_WIND = 1
+/** how much settles, × the weather's own figure */
+export let WEATHER_ACCUM = 1
+/** how fast the settled layer builds and melts, per second */
+export let WEATHER_SETTLE_RATE = 0.012
+export let WEATHER_MELT_RATE = 0.06
+/**
+ * What a tyre keeps on this surface, 0…1. Weather sets it; `car.ts` (road-and-car's) multiplies
+ * its grip by it. 1 until they wire it up, and harmless until then.
+ */
+export let WEATHER_GRIP_SCALE = 1
 /** sprite clumps: from the mid ring out to this radius (m), cards per m², size multiplier */
 export let GRASS_SPRITE_RADIUS = 300
 export let GRASS_SPRITE_PER_M2 = 0.8
@@ -289,6 +310,20 @@ export const TUNE_TABS: TuneTab[] = [
           tune('CROP_TEXTURE_M', () => CROP_TEXTURE_M, (v) => (CROP_TEXTURE_M = v), [0.5, 8], 0.1, 'm of row per texture repeat'),
           tune('CROP_MIN_FROM_ROAD', () => CROP_MIN_FROM_ROAD, (v) => (CROP_MIN_FROM_ROAD = v), [0, 20], 0.5, 'm clear of the pavement'),
           tune('CROP_WIND', () => CROP_WIND, (v) => (CROP_WIND = v), [0, 3], 0.05),
+        ],
+      },
+      {
+        title: 'weather',
+        keys: [
+          tune('WEATHER', () => WEATHER, (v) => (WEATHER = v), [0, 4], 1, '0 clear 1 rain 2 sleet 3 snow 4 ice'),
+          tune('WEATHER_RATE', () => WEATHER_RATE, (v) => (WEATHER_RATE = v), [0, 4], 0.05, 'how much is falling'),
+          tune('WEATHER_OPACITY', () => WEATHER_OPACITY, (v) => (WEATHER_OPACITY = v), [0, 2], 0.05),
+          tune('WEATHER_WIND', () => WEATHER_WIND, (v) => (WEATHER_WIND = v), [0, 4], 0.05, 'sideways drift ×'),
+          tune('WEATHER_BOX', () => WEATHER_BOX, (v) => (WEATHER_BOX = v), [0.3, 3], 0.05, 'the camera-following box ×'),
+          tune('WEATHER_ACCUM', () => WEATHER_ACCUM, (v) => (WEATHER_ACCUM = v), [0, 1], 0.02, 'how much settles'),
+          tune('WEATHER_SETTLE_RATE', () => WEATHER_SETTLE_RATE, (v) => (WEATHER_SETTLE_RATE = v), [0.005, 1], 0.005, 'settled per second'),
+          tune('WEATHER_MELT_RATE', () => WEATHER_MELT_RATE, (v) => (WEATHER_MELT_RATE = v), [0.01, 2], 0.01, 'melted per second'),
+          tune('WEATHER_GRIP_SCALE', () => WEATHER_GRIP_SCALE, (v) => (WEATHER_GRIP_SCALE = v), [0.05, 1], 0.01, 'grip left — car.ts reads this'),
         ],
       },
       {

@@ -17,6 +17,9 @@ const PORT = process.env.PORT ?? '5201'
 const THIN = process.env.THIN !== '0'
 const WIRE = process.env.WIRE === '1'
 const HIDE = (process.env.HIDE ?? '').split(',').map((s) => s.trim()).filter(Boolean)
+const WEATHER = process.env.WEATHER ? Number(process.env.WEATHER) : null // 0 clear…4 ice
+const RATE = process.env.WEATHER_RATE ?? 0.35 // swiftshader cannot draw the real count
+const SETTLE = Number(process.env.SETTLE ?? 300) // simulated seconds of it falling before the shot
 const [, , url, out] = process.argv
 const local = url.replace(/^https?:\/\/[^/]+/, `http://127.0.0.1:${PORT}`)
 
@@ -66,6 +69,20 @@ console.log(await page.evaluate(({ thin, hide, wire }) => {
     grass: site.grass?.counts ?? null,
   })
 }, { thin: THIN, hide: HIDE, wire: WIRE }))
+
+if (WEATHER != null) {
+  console.log(await page.evaluate(({ w, settle, RATE }) => {
+    const c = window.corridor, site = c.site
+    c.tune.set('WEATHER', w)
+    // swiftshader cannot draw twenty thousand transparent quads; thin them and say by how much
+    c.tune.set('WEATHER_RATE', Number(RATE))
+    // let it fall for a while so the settled layer is where it would be, without waiting for it
+    let t = 0
+    const fwd = c.camera.getWorldDirection(new c.THREE.Vector3())
+    for (let i = 0; i < settle * 60; i++) { t += 1 / 60; site.updateNear(c.camera.position, t, fwd, 0) }
+    return JSON.stringify({ weather: site.weather.current, particles: site.weather.particles, settled: +site.weather.settled.toFixed(2), rate_knob: c.tune.get('WEATHER_RATE') })
+  }, { w: WEATHER, settle: SETTLE, RATE }))
+}
 
 await page.keyboard.press('m') // the info panel covers half the frame
 await page.waitForTimeout(2500)

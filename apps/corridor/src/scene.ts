@@ -10,6 +10,7 @@ import { Grass } from './grass'
 import { LOOK, type Season } from './season'
 import { GRASS_TYPES, forestFloorTexture, grassTypeFor } from './groundcover'
 import { CROP_TYPES, buildCrops, tickCrops, type CropType, type Field as CropField } from './crops'
+import { ACCUM_PARS, Precipitation, accumUniforms, type Weather } from './weather'
 import { buildStrip, sinkUnderStrip } from './strip'
 import { Adjustments, NEUTRAL as NEUTRAL_ADJ } from './adjust'
 import { buildPlacements, loadCatalog, loadPlacements } from './placements'
@@ -41,6 +42,9 @@ export interface Site {
   canopyAt: (x: number, y: number) => number
   /** crop rows built per field, by crop type (probes read this) */
   cropRows: Record<string, number>
+  /** what is falling and what has settled */
+  setWeather: (w: Weather) => void
+  weather: { current: Weather; settled: number; particles: number }
   /** per-frame: move the near-field tree models and the grass ring to follow the eye; fwd/pitch shape the LOD footprint */
   updateNear: (eye: THREE.Vector3, time: number, fwd?: THREE.Vector3, pitch?: number) => void
   /** a knob changed: re-pick trees and re-seed grass on the next frame */
@@ -209,6 +213,18 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
   }
   const bare = new THREE.Color(0x6f6a5a)
   const terrainMat = new THREE.MeshStandardMaterial({ map: imagery, color: imagery ? 0xffffff : bare, roughness: 1, metalness: 0 })
+  // the coarse terrain takes the settled layer as well, or snow stops at the strip's rim
+  const terrainWeather = accumUniforms()
+  terrainMat.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, terrainWeather)
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vWWorld;\nvarying vec3 vWNormal;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvWWorld = (modelMatrix * vec4(position, 1.0)).xyz;\nvWNormal = normalize(mat3(modelMatrix) * objectNormal);')
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <map_pars_fragment>', `#include <map_pars_fragment>\nvarying vec3 vWWorld;\nvarying vec3 vWNormal;\n${ACCUM_PARS}`)
+      .replace('#include <map_fragment>', '#include <map_fragment>\ndiffuseColor.rgb = applyWeather(diffuseColor.rgb, normalize(vWNormal), vWWorld);')
+  }
+  terrainMat.customProgramCacheKey = () => 'corridor-terrain'
   const terrain = new THREE.Mesh(terrainGeo, terrainMat)
   terrain.name = 'terrain'
   group.add(terrain)
@@ -452,6 +468,7 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
   let currentSeason: Season = initialSeason
   let grassRef: Grass | null = null
   let crops: ReturnType<typeof buildCrops> | null = null
+  let precip: Precipitation | null = null
   let canopyAtRef: (x: number, y: number) => number = () => 0
   if (chm) {
     // distance to the nearest PAVEMENT EDGE of any carriageway (negative = on the pavement):
@@ -888,6 +905,14 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
       crops = buildCrops(fields, currentSeason, groundAtWorld, edgeDistanceWorld)
       group.add(crops.group)
     }
+
+    // --- weather -------------------------------------------------------------------------------
+    precip = new Precipitation(lite ? 18_000 : 60_000, fog)
+    group.add(precip.mesh)
+    precip.follow(terrainWeather)
+    precip.follow(strip.weatherUniforms)
+    for (const bs of branchStrips) precip.follow(bs.weatherUniforms)
+    precip.follow(grass.weatherUniforms)
     // what grows on this verge, read off the bake; GRASS_TYPE overrides it from the F6 panel
     const bakedGrassType = grassTypeFor(manifest)
     grass.setType(bakedGrassType)
@@ -953,6 +978,7 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
         grass.update(eye, fwd, pitch)
         grass.tick(time)
         if (crops) tickCrops(crops.group, time)
+        precip?.tick(eye, time)
         imp!.tick()
       }
     } else {
@@ -963,6 +989,7 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
         grass.update(eye, fwd, pitch)
         grass.tick(time)
         if (crops) tickCrops(crops.group, time)
+        precip?.tick(eye, time)
       }
     }
     retune = () => {
@@ -1139,6 +1166,10 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
     waterStats: { lines: water.lines, areas: water.areas, falls: water.falls, length_m: water.length_m },
     canopyAt: canopyAtRef,
     cropRows: crops?.counts ?? {},
+    setWeather: (w: Weather) => precip?.set(w),
+    get weather() {
+      return { current: precip?.current ?? ('clear' as Weather), settled: precip?.settled ?? 0, particles: precip?.count ?? 0 }
+    },
     updateNear,
     retune,
     setSeason,

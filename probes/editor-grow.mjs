@@ -64,7 +64,10 @@ for (const a of actions) {
     const r = await page.evaluate(() => {
       const d = window.corridor.place.doc
       const f = (id) => d.items.find((p) => p.id === id)
-      return { n: d.items.length, locked: d.items.filter((p) => p.locked).map((p) => `${p.id}@${p.yaw_deg}`), deleted: d.autogen?.deleted ?? [], g88: !!f('g-88') }
+      const KINDS = ['house','retail_unit','house_large','townhouse','big_box','warehouse','restaurant','shed','apartments','office','school','church','hotel','gas_station','barn','strip_mall','utility']
+      const by = {}
+      for (const p of d.items) for (const t of p.tags ?? []) if (KINDS.includes(t)) by[t] = (by[t] ?? 0) + 1
+      return { n: d.items.length, by, locked: d.items.filter((p) => p.locked).map((p) => `${p.id}@${p.yaw_deg}`), deleted: d.autogen?.deleted ?? [], g88: !!f('g-88') }
     })
     console.log('  report:', JSON.stringify(r))
   } else if (verb === 'del') {

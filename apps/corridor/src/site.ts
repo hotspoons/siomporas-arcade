@@ -85,6 +85,8 @@ export interface Manifest {
   parking?: { kind: string; surface?: string | null; access?: string | null; name?: string | null; area_m2: number; z: number; ring: [number, number][]; holes: [number, number][][] }[] | null
   /** `barrier=guard_rail|fence|wall|hedge` ways, with a vertex every 2 m and a grade (furniture.ts) */
   barriers?: { kind: string; height_m: number; material?: string | null; coords: [number, number, number][] }[] | null
+  /** sidewalks and crossings: explicit `highway=footway` ways plus offsets from `sidewalk=*` roads */
+  sidewalks?: { kind: string; width_m: number; marked: boolean; source: string; coords: [number, number, number][] }[] | null
   /** power lines and their supports (OSM power=line|minor_line, tower|pole) */
   power?: { lines: { kind: string; voltage?: string | null; coords: [number, number, number][] }[]; supports: { kind: string; x: number; y: number; z: number; height_m: number }[] } | null
   /** network sites: every road that is not the primary spine */

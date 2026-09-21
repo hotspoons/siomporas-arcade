@@ -579,6 +579,114 @@ def _barriers(site_dir: Path, frame, ox: float, oy: float, bbox) -> list[dict]:
     return out
 
 
+def _sidewalks(site_dir: Path, frame, ox: float, oy: float, bbox) -> list[dict]:
+    """Sidewalks and crossings: `highway=footway` ways, and the roads that say they have one.
+
+    Crofton maps 626 `footway=sidewalk` ways and 446 `footway=crossing` ways explicitly, which is
+    the good case and most of the built-up part of the site. Another 78 roads carry
+    `sidewalk=both|left|right` with no separate way, and those get a line offset off the
+    carriageway — the same walk exists, OSM just recorded it as an attribute instead of a geometry.
+
+    Whether a crossing is PAINTED is a real tag and not a guess: `crossing:markings` is yes or
+    ladder on 209 of Crofton's 644 crossing nodes and explicitly `no` on 213. An unmarked crossing
+    gets a dropped kerb and no paint, which is what an unmarked crossing is.
+    """
+    gj_p = site_dir / "osm.geojson"
+    if not gj_p.exists():
+        return []
+    import rasterio
+    from shapely.geometry import LineString, box
+    from shapely.ops import transform as shp_transform
+
+    site_box = box(*bbox)
+    dem_p = site_dir / "dem_1m.tif"
+    src = rasterio.open(dem_p) if dem_p.exists() else None
+
+    def grade(pts):
+        if src is None:
+            return np.zeros(len(pts))
+        zs = np.array([v[0] for v in src.sample([(float(x), float(y)) for x, y in pts])], dtype=float)
+        zs[zs < -9000] = np.nan
+        if not np.isfinite(zs).any():
+            return np.zeros(len(pts))
+        ok = np.isfinite(zs)
+        zs[~ok] = np.interp(np.flatnonzero(~ok), np.flatnonzero(ok), zs[ok])
+        if len(zs) > 4:
+            zs = np.convolve(np.pad(np.nan_to_num(zs), 2, mode="edge"), np.ones(5) / 5, mode="valid")
+        return np.nan_to_num(zs)
+
+    def emit(out, part, kind, width, marked, source):
+        step = 3.0
+        ss = np.arange(0.0, part.length, step).tolist() + [part.length]
+        pts = np.array([part.interpolate(v).coords[0] for v in ss])
+        zs = grade(pts)
+        out.append({
+            "kind": kind,
+            "width_m": round(float(width), 2),
+            "marked": bool(marked),
+            "source": source,
+            "coords": np.column_stack([pts[:, 0] - ox, pts[:, 1] - oy, zs]).round(2).tolist(),
+        })
+
+    def width_of(p, default):
+        for k in ("width", "est_width"):
+            try:
+                return max(0.8, min(6.0, float(str(p.get(k, "")).rstrip("m ").strip())))
+            except (TypeError, ValueError):
+                pass
+        return default
+
+    out: list[dict] = []
+    features = json.loads(gj_p.read_text())["features"]
+    for f in features:
+        p = f["properties"]
+        if p.get("highway") != "footway" or f["geometry"]["type"] != "LineString":
+            continue
+        fw = p.get("footway")
+        if fw not in ("sidewalk", "crossing"):
+            continue
+        try:
+            ln = shp_transform(lambda x, y, z=None: frame.from_wgs(x, y), LineString(f["geometry"]["coordinates"]))
+        except Exception:
+            continue
+        ln = ln.intersection(site_box)
+        marked = str(p.get("crossing:markings", "")) in ("yes", "ladder", "zebra") or p.get("crossing") in ("marked", "zebra", "traffic_signals")
+        for part in (ln.geoms if ln.geom_type == "MultiLineString" else [ln]):
+            if part.is_empty or part.geom_type != "LineString" or part.length < 2:
+                continue
+            emit(out, part, fw, width_of(p, 1.8 if fw == "sidewalk" else 3.0), marked, "way")
+
+    # roads that only SAY they have one
+    for f in features:
+        p = f["properties"]
+        side = p.get("sidewalk")
+        if side not in ("both", "left", "right") or p.get("highway") not in DRIVABLE or f["geometry"]["type"] != "LineString":
+            continue
+        try:
+            ln = shp_transform(lambda x, y, z=None: frame.from_wgs(x, y), LineString(f["geometry"]["coordinates"])).intersection(site_box)
+        except Exception:
+            continue
+        half = _lanes_of(p) * 3.66 / 2 + 2.2
+        for part in (ln.geoms if ln.geom_type == "MultiLineString" else [ln]):
+            if part.is_empty or part.geom_type != "LineString" or part.length < 10:
+                continue
+            for s_side in (("left", "right") if side == "both" else (side,)):
+                try:
+                    off = part.parallel_offset(half, s_side, join_style=2)
+                except Exception:
+                    continue
+                if off.is_empty:
+                    continue
+                for o in (off.geoms if off.geom_type == "MultiLineString" else [off]):
+                    if o.geom_type != "LineString" or o.length < 10:
+                        continue
+                    emit(out, o, "sidewalk", 1.8, False, "offset")
+
+    if src is not None:
+        src.close()
+    return out
+
+
 def _power(site_dir: Path, frame, ox: float, oy: float, bbox) -> dict:
     """Power lines and their supports: `power=line|minor_line` ways, `power=tower|pole` nodes.
 
@@ -908,6 +1016,7 @@ def export_site(site_dir: Path) -> dict:
         "signals": _signals(site_dir, Frame.at(site["lon"], site["lat"]), ox, oy, bbox),
         "parking": _parking(site_dir, Frame.at(site["lon"], site["lat"]), ox, oy, bbox),
         "barriers": _barriers(site_dir, Frame.at(site["lon"], site["lat"]), ox, oy, bbox),
+        "sidewalks": _sidewalks(site_dir, Frame.at(site["lon"], site["lat"]), ox, oy, bbox),
         "landuse": derived["landuse"],
         "pois": derived["pois"],
         "cuts": features.get("cuts"),

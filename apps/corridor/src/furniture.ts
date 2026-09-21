@@ -35,6 +35,88 @@ export interface FurnitureResult {
   counts: { masts: number; signs: number; movedOffPavement: number; stillOnPavement: number; onTheLeft: number; noRoadNearby: number; armNoRoad: number }
 }
 
+/**
+ * A mesh builder that cuts what it is given into spatial chunks.
+ *
+ * Every one of these features is LINEAR and site-wide: Crofton has 34.9 km of fence and 80 km of
+ * sidewalk spread over fifteen kilometres. Merged into one mesh each — which is the obvious way to
+ * keep the draw calls down, and what `power.ts` does — the bounding sphere is the size of the site,
+ * so frustum culling can never fire and every triangle is submitted every frame no matter where
+ * the camera looks. Measured: 448 000 triangles of furniture took the frame from 33 ms to 1123 ms
+ * on this (GPU-less) box.
+ *
+ * So: bucket by a coarse grid, one mesh per occupied cell, each with real bounds and culling ON.
+ * More draw calls, almost all of them rejected before they cost anything.
+ */
+class Chunked {
+  private cells = new Map<string, { pos: number[]; nor: number[]; col: number[]; idx: number[] }>()
+  private size: number
+  constructor(size: number) {
+    this.size = size
+  }
+  private cell(x: number, z: number) {
+    const k = `${Math.floor(x / this.size)},${Math.floor(z / this.size)}`
+    let c = this.cells.get(k)
+    if (!c) {
+      c = { pos: [], nor: [], col: [], idx: [] }
+      this.cells.set(k, c)
+    }
+    return c
+  }
+  /** a quad strip between two swept rings; both are (x, y, z, nx, nz, r, g, b) per profile point */
+  strip(a: number[][], b: number[][]) {
+    if (!a.length || a.length !== b.length) return
+    const c = this.cell(a[0][0], a[0][2])
+    const base = c.pos.length / 3
+    for (const ring of [a, b]) {
+      for (const v of ring) {
+        c.pos.push(v[0], v[1], v[2])
+        c.nor.push(v[3], 0, v[4])
+        c.col.push(v[5], v[6], v[7])
+      }
+    }
+    const n = a.length
+    for (let k = 0; k + 1 < n; k++) {
+      const a0 = base + k
+      const a1 = base + k + 1
+      const b0 = base + n + k
+      const b1 = base + n + k + 1
+      c.idx.push(a0, b0, b1, a0, b1, a1)
+    }
+  }
+  /** a flat quad, four corners in order, one colour */
+  quad(v: number[][], col: [number, number, number]) {
+    const c = this.cell(v[0][0], v[0][2])
+    const base = c.pos.length / 3
+    for (const q of v) {
+      c.pos.push(q[0], q[1], q[2])
+      c.nor.push(0, 1, 0)
+      c.col.push(col[0], col[1], col[2])
+    }
+    c.idx.push(base, base + 1, base + 2, base, base + 2, base + 3)
+  }
+  get isEmpty() {
+    return this.cells.size === 0
+  }
+  /** one culled mesh per occupied cell */
+  addTo(group: THREE.Group, name: string, material: THREE.Material) {
+    let i = 0
+    for (const c of this.cells.values()) {
+      if (!c.idx.length) continue
+      const geo = new THREE.BufferGeometry()
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(c.pos, 3))
+      geo.setAttribute('normal', new THREE.Float32BufferAttribute(c.nor, 3))
+      geo.setAttribute('color', new THREE.Float32BufferAttribute(c.col, 3))
+      geo.setIndex(c.idx)
+      geo.computeVertexNormals()
+      geo.computeBoundingSphere()
+      const mesh = new THREE.Mesh(geo, material)
+      mesh.name = `${name}:${i++}`
+      group.add(mesh)
+    }
+  }
+}
+
 /** Merge a list of geometries, keeping position, normal and colour. */
 function merge(list: THREE.BufferGeometry[]): THREE.BufferGeometry {
   const pos: number[] = []
@@ -476,12 +558,12 @@ export function buildBarriers(
   const runs = manifest.barriers ?? []
   if (!runs.length) return { group, counts }
 
-  const byKind = new Map<string, { pos: number[]; nor: number[]; col: number[]; idx: number[]; posts: { x: number; y: number; z: number; yaw: number; h: number }[] }>()
+  const byKind = new Map<string, { chunks: Chunked; posts: { x: number; y: number; z: number; yaw: number; h: number }[] }>()
 
   for (const run of runs) {
     const spec = PROFILE[run.kind] ?? PROFILE.fence
     const c = new THREE.Color(spec.colour)
-    if (!byKind.has(run.kind)) byKind.set(run.kind, { pos: [], nor: [], col: [], idx: [], posts: [] })
+    if (!byKind.has(run.kind)) byKind.set(run.kind, { chunks: new Chunked(T.FURNITURE_CHUNK_M), posts: [] })
     const b = byKind.get(run.kind)!
     const st = (counts[run.kind] ??= { runs: 0, metres: 0, posts: 0 })
     st.runs++
@@ -500,7 +582,7 @@ export function buildBarriers(
     const bodily = run.kind === 'wall' || run.kind === 'hedge' || run.kind === 'retaining_wall'
     const prof = spec.profile.map((q) => ({ out: bodily ? q.out * hScale : q.out, y: bodily ? q.y * hScale : q.y * T.BARRIER_HEIGHT_SCALE }))
 
-    let ring: number[] = []
+    let ring: number[][] = []
     for (let i = 0; i < pts.length; i++) {
       const a = pts[Math.max(0, i - 1)]
       const d = pts[Math.min(pts.length - 1, i + 1)]
@@ -509,21 +591,9 @@ export function buildBarriers(
       const l = Math.hypot(dx, dz) || 1
       const px = -dz / l
       const pz = dx / l
-      const here: number[] = []
-      for (const q of prof) {
-        here.push(b.pos.length / 3)
-        b.pos.push(pts[i].x + px * q.out, pts[i].y + q.y, pts[i].z + pz * q.out)
-        b.nor.push(px, 0, pz)
-        b.col.push(c.r, c.g, c.b)
-      }
+      const here = prof.map((q) => [pts[i].x + px * q.out, pts[i].y + q.y, pts[i].z + pz * q.out, px, pz, c.r, c.g, c.b])
       if (i > 0) {
-        for (let k = 0; k + 1 < prof.length; k++) {
-          const a0 = ring[k]
-          const a1 = ring[k + 1]
-          const b0 = here[k]
-          const b1 = here[k + 1]
-          b.idx.push(a0, b0, b1, a0, b1, a1)
-        }
+        b.chunks.strip(ring, here)
         st.metres += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].z - pts[i - 1].z)
       }
       ring = here
@@ -556,36 +626,181 @@ export function buildBarriers(
 
   for (const [kind, b] of byKind) {
     const spec = PROFILE[kind] ?? PROFILE.fence
-    if (b.pos.length) {
-      const geo = new THREE.BufferGeometry()
-      geo.setAttribute('position', new THREE.Float32BufferAttribute(b.pos, 3))
-      geo.setAttribute('normal', new THREE.Float32BufferAttribute(b.nor, 3))
-      geo.setAttribute('color', new THREE.Float32BufferAttribute(b.col, 3))
-      geo.setIndex(b.idx)
-      const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: kind === 'hedge' ? 0.95 : 0.6, metalness: kind === 'guard_rail' ? 0.4 : 0, side: THREE.DoubleSide }))
-      mesh.name = `barrier:${kind}`
-      mesh.frustumCulled = false
-      group.add(mesh)
+    if (!b.chunks.isEmpty) {
+      b.chunks.addTo(group, `barrier:${kind}`, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: kind === 'hedge' ? 0.95 : 0.6, metalness: kind === 'guard_rail' ? 0.4 : 0, side: THREE.DoubleSide }))
     }
     if (b.posts.length) {
-      const g = new THREE.BoxGeometry(spec.postW, 1, spec.postW * 0.6)
-      g.translate(0, 0.5, 0)
-      tint(g, spec.postColour)
-      const mesh = new THREE.InstancedMesh(g, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.65, metalness: 0.3 }), b.posts.length)
-      mesh.name = `barrier:${kind}:posts`
-      const m4 = new THREE.Matrix4()
-      const q = new THREE.Quaternion()
-      const up = new THREE.Vector3(0, 1, 0)
-      b.posts.forEach((p, i) => {
-        q.setFromAxisAngle(up, p.yaw)
-        m4.compose(new THREE.Vector3(p.x, p.y, p.z), q, new THREE.Vector3(1, p.h, 1))
-        mesh.setMatrixAt(i, m4)
-      })
-      mesh.instanceMatrix.needsUpdate = true
-      mesh.frustumCulled = false
-      group.add(mesh)
+      // the posts are chunked as well: 13 870 fence posts in one InstancedMesh is one draw call
+      // that can never be culled, and a fence post is 12 triangles, so that is 166 000 of them
+      // submitted from anywhere on the site
+      const byCell = new Map<string, typeof b.posts>()
+      for (const p of b.posts) {
+        const k = `${Math.floor(p.x / T.FURNITURE_CHUNK_M)},${Math.floor(p.z / T.FURNITURE_CHUNK_M)}`
+        const arr = byCell.get(k) ?? []
+        arr.push(p)
+        byCell.set(k, arr)
+      }
+      const postMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.65, metalness: 0.3 })
+      let ci = 0
+      for (const arr of byCell.values()) {
+        const g = new THREE.BoxGeometry(spec.postW, 1, spec.postW * 0.6)
+        g.translate(0, 0.5, 0)
+        tint(g, spec.postColour)
+        const mesh = new THREE.InstancedMesh(g, postMat, arr.length)
+        mesh.name = `barrier:${kind}:posts:${ci++}`
+        const m4 = new THREE.Matrix4()
+        const q = new THREE.Quaternion()
+        const up = new THREE.Vector3(0, 1, 0)
+        arr.forEach((p, i) => {
+          q.setFromAxisAngle(up, p.yaw)
+          m4.compose(new THREE.Vector3(p.x, p.y, p.z), q, new THREE.Vector3(1, p.h, 1))
+          mesh.setMatrixAt(i, m4)
+        })
+        mesh.instanceMatrix.needsUpdate = true
+        mesh.computeBoundingSphere()
+        group.add(mesh)
+      }
     }
   }
   for (const k of Object.keys(counts)) counts[k].metres = Math.round(counts[k].metres)
+  return { group, counts }
+}
+
+// --- sidewalks, kerbs and crossings -----------------------------------------------------------
+//
+// Crofton maps 626 `footway=sidewalk` ways and 446 `footway=crossing` ways explicitly, and another
+// 78 roads say `sidewalk=both|left|right` with no separate geometry — the same walk, recorded as
+// an attribute instead of a line, and offset off the carriageway in the bake.
+//
+// What makes a sidewalk read as one rather than as a grey stripe is the KERB: a vertical lip on
+// the road side, about 150 mm, catching a different light from the walking surface. So the ribbon
+// is a three-point swept profile — kerb foot, kerb top, back edge — and the only interesting part
+// is which side the kerb goes on, because a sidewalk way carries no such tag. It is found by
+// measurement: sample `edgeDistance` a couple of metres either side and put the kerb toward the
+// asphalt. Where neither side is near a road the lip goes flat, which is right, because that is a
+// path through a park and not a sidewalk.
+//
+// A DROPPED KERB is not decoration either. The lip fades to nothing over the last couple of metres
+// before a crossing, which is what the ramp at a corner is, and it is why the kerb height is a
+// per-vertex value rather than a constant in the profile.
+
+export interface SidewalkResult {
+  group: THREE.Group
+  counts: { walks: number; crossings: number; marked: number; bars: number; metres: number; kerbFlat: number }
+}
+
+export function buildSidewalks(
+  manifest: Manifest,
+  groundAt: (x: number, z: number) => number | null,
+  edgeDistance: (x: number, z: number) => number,
+): SidewalkResult {
+  const group = new THREE.Group()
+  group.name = 'sidewalks'
+  const counts = { walks: 0, crossings: 0, marked: 0, bars: 0, metres: 0, kerbFlat: 0 }
+  const runs = manifest.sidewalks ?? []
+  if (!runs.length) return { group, counts }
+
+  const concrete = new Chunked(T.FURNITURE_CHUNK_M)
+  const bars = new Chunked(T.FURNITURE_CHUNK_M)
+  const cWalk = new THREE.Color(0xb4b2ab)
+  const cKerb = new THREE.Color(0xa09e97)
+
+  // every crossing end, so a kerb can be dropped where a walk meets one
+  const ends: { x: number; z: number }[] = []
+  for (const r of runs) {
+    if (r.kind !== 'crossing') continue
+    for (const e of [r.coords[0], r.coords[r.coords.length - 1]]) ends.push({ x: e[0], z: -e[1] })
+  }
+  const nearCrossing = (x: number, z: number) => {
+    let best = Infinity
+    for (const e of ends) {
+      const d = (e.x - x) ** 2 + (e.z - z) ** 2
+      if (d < best) best = d
+    }
+    return Math.sqrt(best)
+  }
+
+  for (const r of runs) {
+    const pts = r.coords.map((p) => {
+      const x = p[0]
+      const z = -p[1]
+      return { x, z, y: groundAt(x, z) ?? p[2] }
+    })
+    if (pts.length < 2) continue
+
+    if (r.kind === 'crossing') {
+      counts.crossings++
+      if (!r.marked) continue
+      counts.marked++
+      // a ladder crossing: bars across the walk, along its length
+      const w = Math.max(1.5, r.width_m) * T.SIDEWALK_CROSSING_W
+      for (let i = 1; i < pts.length; i++) {
+        const dx = pts[i].x - pts[i - 1].x
+        const dz = pts[i].z - pts[i - 1].z
+        const seg = Math.hypot(dx, dz)
+        if (seg < 0.1) continue
+        const ux = dx / seg
+        const uz = dz / seg
+        const px = -uz
+        const pz = ux
+        for (let t = T.SIDEWALK_BAR_PITCH / 2; t < seg; t += T.SIDEWALK_BAR_PITCH) {
+          const u = t / seg
+          const cxp = pts[i - 1].x + dx * u
+          const czp = pts[i - 1].z + dz * u
+          const cy = (pts[i - 1].y + (pts[i].y - pts[i - 1].y) * u) + T.SIDEWALK_PAINT_LIFT
+          // a bar runs ACROSS the crossing line, which is along the traffic's direction
+          const hb = T.SIDEWALK_BAR_W / 2
+          bars.quad([
+            [cxp + px * (w / 2) + ux * hb, cy, czp + pz * (w / 2) + uz * hb],
+            [cxp - px * (w / 2) + ux * hb, cy, czp - pz * (w / 2) + uz * hb],
+            [cxp - px * (w / 2) - ux * hb, cy, czp - pz * (w / 2) - uz * hb],
+            [cxp + px * (w / 2) - ux * hb, cy, czp + pz * (w / 2) - uz * hb],
+          ], [0.85, 0.85, 0.82])
+          counts.bars++
+        }
+      }
+      continue
+    }
+
+    counts.walks++
+    const w = Math.max(0.9, r.width_m) * T.SIDEWALK_WIDTH_SCALE
+    let ring: number[][] = []
+    for (let i = 0; i < pts.length; i++) {
+      const a = pts[Math.max(0, i - 1)]
+      const d = pts[Math.min(pts.length - 1, i + 1)]
+      const dx = d.x - a.x
+      const dz = d.z - a.z
+      const l = Math.hypot(dx, dz) || 1
+      const px = -dz / l
+      const pz = dx / l
+      // which side is the road? measure, rather than guess: a sidewalk way carries no such tag
+      const probe = T.SIDEWALK_KERB_PROBE
+      const eL = edgeDistance(pts[i].x + px * probe, pts[i].z + pz * probe)
+      const eR = edgeDistance(pts[i].x - px * probe, pts[i].z - pz * probe)
+      const side = eL < eR ? 1 : -1
+      const nearest = Math.min(eL, eR)
+      // no road either side: a path through a park, and it has no kerb
+      let kerb = nearest > T.SIDEWALK_KERB_MAX_FROM_ROAD ? 0 : T.SIDEWALK_KERB_H
+      if (kerb === 0) counts.kerbFlat++
+      // and the lip ramps away at a crossing — that is what a dropped kerb is
+      const dc = nearCrossing(pts[i].x, pts[i].z)
+      if (dc < T.SIDEWALK_DROP_M) kerb *= dc / T.SIDEWALK_DROP_M
+      const profile = [
+        { out: (side * w) / 2, y: 0, c: cKerb },
+        { out: (side * w) / 2, y: kerb + T.SIDEWALK_LIFT, c: cKerb },
+        { out: (-side * w) / 2, y: kerb + T.SIDEWALK_LIFT, c: cWalk },
+      ]
+      const here = profile.map((q) => [pts[i].x + px * q.out, pts[i].y + q.y, pts[i].z + pz * q.out, 0, 1, q.c.r, q.c.g, q.c.b])
+      if (i > 0) {
+        concrete.strip(ring, here)
+        counts.metres += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].z - pts[i - 1].z)
+      }
+      ring = here
+    }
+  }
+
+  concrete.addTo(group, 'sidewalk:concrete', new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.92, metalness: 0, side: THREE.DoubleSide }))
+  bars.addTo(group, 'sidewalk:crossingbars', new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8, metalness: 0 }))
+  counts.metres = Math.round(counts.metres)
   return { group, counts }
 }

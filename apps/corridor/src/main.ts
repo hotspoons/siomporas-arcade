@@ -156,6 +156,7 @@ function applyLayers() {
   if (site.layers.furniture) site.layers.furniture.visible = on('furniture')
   if (site.layers.parking) site.layers.parking.visible = on('parking')
   if (site.layers.barriers) site.layers.barriers.visible = on('barriers')
+  if (site.layers.sidewalks) site.layers.sidewalks.visible = on('sidewalks')
   if (site.layers.rocks) site.layers.rocks.visible = on('rocks')
   if (site.layers.water) site.layers.water.visible = on('water')
   site.layers.spine.visible = on('spine') && !drive.on

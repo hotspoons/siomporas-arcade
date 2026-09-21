@@ -277,6 +277,28 @@ export let PARKING_AISLE_GAP = 0.3
 export let PARKING_FILL_M2 = 45
 /** every barrier's height × this */
 export let BARRIER_HEIGHT_SCALE = 1
+/** the kerb lip's height (m) — a US kerb is about 150 mm */
+export let SIDEWALK_KERB_H = 0.15
+/** sidewalk width × this, and how far the concrete floats over the ground (m) */
+export let SIDEWALK_WIDTH_SCALE = 1
+export let SIDEWALK_LIFT = 0.02
+/** how far either side to look for the asphalt, to decide which side the kerb goes on (m) */
+export let SIDEWALK_KERB_PROBE = 2.5
+/** no kerb where the nearest carriageway is further than this — that is a path, not a sidewalk (m) */
+export let SIDEWALK_KERB_MAX_FROM_ROAD = 8
+/** the lip ramps to nothing over this distance before a crossing: a dropped kerb (m) */
+export let SIDEWALK_DROP_M = 3
+/** a painted crossing bar's width and spacing along the crossing (m), and its float (m) */
+export let SIDEWALK_BAR_W = 0.5
+export let SIDEWALK_BAR_PITCH = 1.2
+export let SIDEWALK_PAINT_LIFT = 0.025
+/** the painted band's width across the crossing × this */
+export let SIDEWALK_CROSSING_W = 1
+/**
+ * Linear furniture is cut into chunks this many metres across so frustum culling can fire. One
+ * merged mesh per kind has a site-sized bounding sphere and is submitted in full from anywhere.
+ */
+export let FURNITURE_CHUNK_M = 900
 
 export interface TuneTab {
   name: string
@@ -532,6 +554,22 @@ export const TUNE_TABS: TuneTab[] = [
           tune('PARKING_AISLE_GAP', () => PARKING_AISLE_GAP, (v) => (PARKING_AISLE_GAP = v), [0, 3], 0.05, 'clearance past the aisle edge (m)'),
           tune('PARKING_FILL_M2', () => PARKING_FILL_M2, (v) => (PARKING_FILL_M2 = v), [10, 300], 5, 'm² per stall below which the grid fills in too'),
           tune('BARRIER_HEIGHT_SCALE', () => BARRIER_HEIGHT_SCALE, (v) => (BARRIER_HEIGHT_SCALE = v), [0.3, 3], 0.05, 'guard rail, fence, wall and hedge height ×'),
+        ],
+      },
+      {
+        title: 'sidewalks',
+        keys: [
+          tune('SIDEWALK_KERB_H', () => SIDEWALK_KERB_H, (v) => (SIDEWALK_KERB_H = v), [0, 0.5], 0.01, 'kerb lip (m)'),
+          tune('SIDEWALK_WIDTH_SCALE', () => SIDEWALK_WIDTH_SCALE, (v) => (SIDEWALK_WIDTH_SCALE = v), [0.4, 3], 0.05, 'width ×'),
+          tune('SIDEWALK_LIFT', () => SIDEWALK_LIFT, (v) => (SIDEWALK_LIFT = v), [0, 0.3], 0.005, 'concrete over ground (m)'),
+          tune('SIDEWALK_KERB_PROBE', () => SIDEWALK_KERB_PROBE, (v) => (SIDEWALK_KERB_PROBE = v), [0.5, 8], 0.25, 'm either side, to find which side the road is'),
+          tune('SIDEWALK_KERB_MAX_FROM_ROAD', () => SIDEWALK_KERB_MAX_FROM_ROAD, (v) => (SIDEWALK_KERB_MAX_FROM_ROAD = v), [1, 40], 1, 'past this it is a path and has no kerb (m)'),
+          tune('SIDEWALK_DROP_M', () => SIDEWALK_DROP_M, (v) => (SIDEWALK_DROP_M = v), [0, 12], 0.5, 'dropped-kerb ramp before a crossing (m)'),
+          tune('SIDEWALK_BAR_W', () => SIDEWALK_BAR_W, (v) => (SIDEWALK_BAR_W = v), [0.1, 1.5], 0.05, 'crossing bar width (m)'),
+          tune('SIDEWALK_BAR_PITCH', () => SIDEWALK_BAR_PITCH, (v) => (SIDEWALK_BAR_PITCH = v), [0.4, 4], 0.1, 'crossing bar spacing (m)'),
+          tune('SIDEWALK_PAINT_LIFT', () => SIDEWALK_PAINT_LIFT, (v) => (SIDEWALK_PAINT_LIFT = v), [0.005, 0.2], 0.005, 'paint over ground (m)'),
+          tune('SIDEWALK_CROSSING_W', () => SIDEWALK_CROSSING_W, (v) => (SIDEWALK_CROSSING_W = v), [0.4, 3], 0.05, 'painted band width ×'),
+          tune('FURNITURE_CHUNK_M', () => FURNITURE_CHUNK_M, (v) => (FURNITURE_CHUNK_M = v), [50, 2000], 25, 'm per cull chunk for linear furniture'),
         ],
       },
     ],

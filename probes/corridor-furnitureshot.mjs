@@ -37,6 +37,25 @@ console.log(await page.evaluate(({ eye }) => {
       at.push({ x: p.x, y: p.y, z: p.z, yaw: mesh.userData.src[i].yaw_deg })
     }
   }
+  if (window.__mode === 'sidewalks') {
+    // a marked crossing that is actually beside road we draw, seen from the pavement
+    const xs = (site.manifest.sidewalks ?? []).filter((r) => r.kind === 'crossing' && r.marked)
+    let best = null
+    for (const r of xs) {
+      const m = r.coords[Math.floor(r.coords.length / 2)]
+      if (Math.abs(site.edgeDistance(m[0], -m[1])) < 6) { best = r; break }
+    }
+    if (!best) best = xs[0]
+    if (!best) return 'no marked crossing'
+    const m = best.coords[Math.floor(best.coords.length / 2)]
+    const mx = m[0]
+    const mz = -m[1]
+    const gy = site.groundAt(mx, mz) ?? 0
+    c.camera.position.set(mx + eye * 0.5, gy + eye * 0.35, mz + eye * 0.5)
+    c.orbit.target.set(mx, gy, mz)
+    c.orbit.update()
+    return JSON.stringify({ mode: 'sidewalks', at: [Math.round(mx), Math.round(mz)], counts: site.sidewalkCounts })
+  }
   if (window.__mode === 'barriers') {
     // the longest run of the kind asked for, seen from beside it at eye height
     const want = window.__kind ?? 'guard_rail'
@@ -111,7 +130,7 @@ console.log(await page.evaluate(({ eye }) => {
 for (const on of [false, true]) {
   await page.evaluate((v) => {
     const L = window.corridor.site.layers
-    const g = window.__mode === 'parking' ? L.parking : window.__mode === 'barriers' ? L.barriers : L.furniture
+    const g = window.__mode === 'parking' ? L.parking : window.__mode === 'barriers' ? L.barriers : window.__mode === 'sidewalks' ? L.sidewalks : L.furniture
     g.visible = v
   }, on)
   await page.waitForTimeout(1500)

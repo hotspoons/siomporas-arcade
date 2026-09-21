@@ -43,6 +43,7 @@ console.log(JSON.stringify(await page.evaluate(() => {
     triangles: 0,
     parking: null,
     barriers: null,
+    sidewalks: null,
   }
   if (!g) return { ...out, note: 'no furniture group' }
 
@@ -106,8 +107,8 @@ console.log(JSON.stringify(await page.evaluate(() => {
   if (pk) {
     const p3 = new mod.Vector3()
     const res = { counts: site.parkingCounts, baked: (site.manifest.parking ?? []).length, meshes: [], surfaceOnRoad: 0, surfaceChecked: 0, paintOffAsphalt: 0, paintChecked: 0, triangles: 0 }
-    const surface = pk.children.find((m) => m.name === 'parking:surface')
-    const paint = pk.children.find((m) => m.name === 'parking:paint')
+    const surface = pk.children.find((m) => m.name.startsWith('parking:surface'))
+    const paint = pk.children.find((m) => m.name.startsWith('parking:paint'))
     for (const m of pk.children) {
       const tris = m.geometry.index.count / 3
       res.meshes.push({ name: m.name, tris })
@@ -161,6 +162,40 @@ console.log(JSON.stringify(await page.evaluate(() => {
       }
     }
     out.barriers = res
+    out.triangles += res.triangles
+  }
+  // --- sidewalks: is the kerb on the ROAD side, and does it drop at a crossing? -----------------
+  const sw = site.layers.sidewalks
+  if (sw) {
+    const res = { counts: site.sidewalkCounts, baked: (site.manifest.sidewalks ?? []).length, meshes: [], triangles: 0, kerbOnRoadSide: 0, kerbChecked: 0, kerbWrongSide: [] }
+    for (const m of sw.children) {
+      const tris = m.geometry.index.count / 3
+      res.meshes.push({ name: m.name, tris })
+      res.triangles += tris
+    }
+    // the swept profile is three vertices a station: kerb foot, kerb top, back edge. The kerb foot
+    // must be the end NEARER the asphalt, or the lip is on the garden side and the walk has a step
+    // down into the hedge.
+    // the concrete is CHUNKED for culling, so it is `sidewalk:concrete:0`, `:1`, … rather than one
+    // mesh — a `find` on the exact name silently checked nothing and reported 0 %
+    for (const concrete of sw.children.filter((m) => m.name.startsWith('sidewalk:concrete'))) {
+      const a = concrete.geometry.getAttribute('position')
+      const step = Math.max(3, Math.floor(a.count / 2400) * 3)
+      for (let i = 0; i + 2 < a.count; i += step) {
+        const kx = a.getX(i)
+        const kz = a.getZ(i)
+        const bx = a.getX(i + 2)
+        const bz = a.getZ(i + 2)
+        const ek = site.edgeDistance(kx, kz)
+        const eb = site.edgeDistance(bx, bz)
+        if (Math.min(ek, eb) > 8) continue // a path, no kerb claimed
+        res.kerbChecked++
+        if (ek <= eb) res.kerbOnRoadSide++
+        else if (res.kerbWrongSide.length < 5) res.kerbWrongSide.push({ x: +kx.toFixed(1), z: +kz.toFixed(1), kerbEdge: +ek.toFixed(2), backEdge: +eb.toFixed(2) })
+      }
+    }
+    res.kerbOnRoadSidePct = res.kerbChecked ? +((100 * res.kerbOnRoadSide) / res.kerbChecked).toFixed(1) : 0
+    out.sidewalks = res
     out.triangles += res.triangles
   }
   return out

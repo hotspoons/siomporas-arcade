@@ -374,5 +374,60 @@
   "photos": [],
   "heading_deg": null,
   "note": "Rich's neighbourhood (Davidsonville): Arrowhead Farms Ct/Rd/Dr, Halls Grove Rd, Gosheff Ln, Patuxent Overlook/Preserve, Patuxent River Rd, Deer Pass Ln \u2014 a network site later"
+ },
+ {
+  "slug": "arrowhead-farms-network",
+  "kind": "network",
+  "region": "arrowhead-farms",
+  "primary": "Patuxent River Road",
+  "lat": 38.98138,
+  "lon": -76.69057,
+  "radius_m": 2500,
+  "roads": [
+   "Patuxent River Road",
+   "Halls Grove Road",
+   "Arrowhead Farms Road",
+   "Arrowhead Farms Lane",
+   "Arrowhead Farms Court",
+   "Gosheff Lane",
+   "Patuxent Overlook",
+   "Patuxent Preserve Lane",
+   "Deer Pass Lane"
+  ],
+  "photos": [],
+  "heading_deg": null,
+  "note": "Rich's neighbourhood as one network (cadre \u00a76): every named road chained, Patuxent River Rd as the primary; OSM spellings checked 2026-09-21 (Lane not Drive; Patuxent Overlook has no Road; no Halls Grove Court in OSM)"
+ },
+ {
+  "slug": "crofton-crownsville",
+  "kind": "network",
+  "region": "crofton-crownsville",
+  "primary": "Chesterfield Road",
+  "lat": 39.0,
+  "lon": -76.62,
+  "radius_m": 9000,
+  "roads": [
+   "Chesterfield Road",
+   "Saint Stephens Church Road",
+   "Hawkins Road",
+   "Rutland Road",
+   "Rossback Road",
+   "Bell Branch Road",
+   "Crownsville Road",
+   "Honeysuckle Lane",
+   "Underwood Road",
+   "Johns Hopkins Road",
+   "Severn Chapel Road",
+   "Waterbury Road",
+   "Bacon Ridge Road",
+   "Governors Bridge Road",
+   "Patuxent River Road",
+   "MD 450",
+   "MD 178",
+   "MD 424"
+  ],
+  "photos": [],
+  "heading_deg": null,
+  "note": "the interconnected Crofton/Crownsville world (cadre \u00a76): 18 roads, Chesterfield Rd primary (the Hawkins Rd jump); MD 450 = Defense Hwy, MD 424 = Davidsonville Rd, MD 178 = Generals Hwy by ref; tiled export"
  }
 ]

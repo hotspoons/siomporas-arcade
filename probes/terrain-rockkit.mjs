@@ -55,6 +55,15 @@ const LITHS = {
     look: 'slaty phyllite, silver-grey to blue-grey with a satin sheen, thin plates splitting parallel, sharp edges, light rust streaks',
     footprint: [1.5, 1.1], height: 0.9,
   },
+  // Baltimore Gabbro / Ellicott City Granodiorite (Bonnie Branch's ravine walls): coarse, rounded
+  granite: {
+    look: 'coarse-grained granodiorite and gabbro, speckled light grey with black and white crystals, rounded weathered boulder faces, greenish-grey lichen patches, a few straight joint cracks',
+    footprint: [1.8, 1.5], height: 1.3,
+  },
+  limestone: {
+    look: 'grey limestone, pale blue-grey to buff, blocky with pitted dissolved surfaces and sharp fluted edges, thin darker beds',
+    footprint: [1.6, 1.3], height: 1.0,
+  },
 }
 const SHAPES = [
   ['boulder-01', 'A single large weathered boulder of {look}, about 1.6 metres wide and 1 metre tall, rounded-blocky, resting on nothing.'],

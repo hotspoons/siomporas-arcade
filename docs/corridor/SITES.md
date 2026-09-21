@@ -1,14 +1,14 @@
 # Corridor sites — what each bake actually holds
 
-*Generated 2026-09-21 14:24 UTC by `python -m corridor.sitesdoc` from `tools/corridor/data/sites/*/manifest.json`, `spine_utm.json`, `surface.json` and the bake log `/tmp/claude-1000/-workspaces-apex-conduit/397fba92-5e84-41c5-9605-5d43678842ec/scratchpad/newbakes.log`. Do not edit by hand; re-run it. Lidar year is read off the project name (`_D21` = 2021 delivery). The fetch itself does not record the NAIP acquisition date, so it is looked up here from the image service's catalog under the site point (the tile that covers the photo; a long corridor can straddle two flight dates). A DEM listed as "cached" was reused from an earlier run and its source tiles were not re-recorded (a `__main__.py` gap reported to main).*
+*Generated 2026-09-21 14:59 UTC by `python -m corridor.sitesdoc` from `tools/corridor/data/sites/*/manifest.json`, `spine_utm.json`, `surface.json` and the bake log `/tmp/claude-1000/-workspaces-apex-conduit/397fba92-5e84-41c5-9605-5d43678842ec/scratchpad/newbakes.log`. Do not edit by hand; re-run it. Lidar year is read off the project name (`_D21` = 2021 delivery). The fetch itself does not record the NAIP acquisition date, so it is looked up here from the image service's catalog under the site point (the tile that covers the photo; a long corridor can straddle two flight dates). A DEM listed as "cached" was reused from an earlier run and its source tiles were not re-recorded (a `__main__.py` gap reported to main).*
 
-**17 baked, 12 not yet** (acadia-ocean-dr (in progress), bell-branch-rd (not baked), crownsville-rd (not baked), ecola-or (failed), hawkins-rd (not baked), patuxent-river-rd (not baked), ragged-point-ca1 (failed), rossback-rd (not baked), rutland-rd (not baked), st-stephens-church-rd (not baked), underwood-rd (not baked), waterbury-rd (not baked)).
+**18 baked, 11 not yet** (bell-branch-rd (not baked), crownsville-rd (not baked), ecola-or (failed), hawkins-rd (not baked), patuxent-river-rd (not baked), ragged-point-ca1 (failed), rossback-rd (not baked), rutland-rd (not baked), st-stephens-church-rd (not baked), underwood-rd (not baked), waterbury-rd (not baked)).
 
 ## Summary
 
 | site | road | km | lidar project (year) | class 17 | veg classes | NAIP | DEM | structures | formations | missing |
 |---|---|---|---|---|---|---|---|---|---|---|
-| `acadia-ocean-dr` | *in progress* | | | | | | | |  |
+| `acadia-ocean-dr` | Park Loop Road | 4.4 | TNM:ME_MidCoast_2021_B21 (2021) | trusted | no (unassigned) | 2021-09-20 | cached | none |  | — |
 | `arrowhead-farms` | Halls Grove Road | 0.6 | USGS_LPC_MD_VA_Sandy_NCR_2014_LAS_2015 (2014) | demoted | no (unassigned) | 2023-07-12 | cached | none | Monmouth Formation | — |
 | `arrowhead-farms-network` | Patuxent River Road | 2.3 | TNM:MD_Central_Processing_D24 (2024) | trusted | yes | 2023-07-12 | cached | none | Aquia Formation, Matawan Formation, Monmouth Formation | — |
 | `bacon-ridge-rd` | Bacon Ridge Road | 2.1 | TNM:MD_Central_Processing_D24 (2024) | trusted | yes | 2023-05-25 | USGS 1 Meter 18 x35y433 MD_Central_Processing_D24 (2026-04-04), USGS 1 Meter 18 x36y433 MD_Central_Processing_D24 (2026-04-04) | none | Matawan Formation, Monmouth Formation | — |
@@ -26,7 +26,7 @@
 | `frederick-i270` | I 270 | 6.4 | MD_Western_2_D21 (2021) | trusted | no (unassigned) | 2023-05-21 | cached | 3 bridge | Adamstown Member, Antietam Formation, Araby Formation… | — |
 | `frederick-i70` | Frederick Freeway | 3.7 | MD_Western_2_D21 (2021) | trusted | no (unassigned) | 2023-05-21 | cached | 1 bridge, 3 gantry, 5 overpass | Adamstown Member, Frederick Limestone, Lime Kiln Member… | — |
 | `hawkins-rd` | *not baked* | | | | | | | |  |
-| `md450-staples` | Double Gate Road | 2.7 | USGS_LPC_MD_VA_Sandy_NCR_2014_LAS_2015 (2014) | demoted | no (unassigned) | 2023-07-12 | USGS one meter x35y432 MD VA Sandy NCR 2014 (2020-03-30), USGS 1 Meter 18 x35y432 MD_Central_Processing_D24 (2026-04-04) | none | Aquia Formation, Calvert Formation | — |
+| `md450-staples` | MD 450 | 4.5 | TNM:MD_Central_Processing_D24 (2024) | trusted | yes | 2023-07-12 | USGS one meter x35y432 MD VA Sandy NCR 2014 (2020-03-30), USGS 1 Meter 18 x35y432 MD_Central_Processing_D24 (2026-04-04) | none | Aquia Formation, Calvert Formation, Monmouth Formation | — |
 | `patuxent-river-rd` | *not baked* | | | | | | | |  |
 | `ragged-point-ca1` | *failed* | | | | | | | | RuntimeError: no EPT dataset covers this corridor |
 | `rossback-rd` | *not baked* | | | | | | | |  |
@@ -57,16 +57,25 @@
 | `ragged-point-ca1` | failed | RuntimeError: no EPT dataset covers this corridor |
 | `bixby-bridge-ca1` | baked | baked 2026-09-21T14:02:26Z in 629.1 s; TNM:CA_AZ_FEMA_R9_Lidar_2017_D18, 2 structures |
 | `ecola-or` | failed | RuntimeError: USGS_LPC_OR_NORTHCOAST_2008_2009_OR_NorthCoast_2008-2009_003712.laz: no CRS in the LAS header |
-| `acadia-ocean-dr` | in progress | Park Loop Road / Ocean Drive, Mount Desert Island |
+| `acadia-ocean-dr` | baked | baked 2026-09-21T14:22:45Z in 399.2 s; TNM:ME_MidCoast_2021_B21, 0 structures |
 
 ## Per site
 
 ### `acadia-ocean-dr`
 
 *Park Loop Road / Ocean Drive, Mount Desert Island*  
-fix 44.3206, -68.1885 · 0 photo(s) · status **in progress**
+fix 44.3206, -68.1885 · 0 photo(s) · status **baked**
 
-Missing: lidar/dtm.tif, lidar/chm.tif, profile.json, web/chm_2m.png
+- **road**: {'name': 'Park Loop Road'} · 4446.5 m · snap 43.9 m · trimmed [True, False] · fetched 2026-09-21T14:22:45Z (399.2 s)
+- **lidar**: `TNM:ME_MidCoast_2021_B21` (2021) · 14,634,316 pts in corridor · z factor 1.0 · classes: unassigned 73%, ground 24%, water 3% · class 17: 0.0 (trusted)
+- **DEM**: reused from cache (sources not re-recorded)
+- **NAIP**: reused from cache · tile under the fix `m_4406847_ne_19_060_20210920` flown 2021-09-20 at 0.6 m
+- **OSM**: 130 features, 23 crossings; spine tags: `highway`=tertiary; `lanes`=2/3; `maxspeed`=15 mph/25 mph/35 mph; `oneway`=yes; `surface`=asphalt
+- **structures** (0): none
+- **surface** (per 20 m): {'asphalt_aged': 104, 'chipseal': 117, 'concrete': 2}
+- **geology**: no named formation (Macrostrat coarse units only)
+- **web**: layers ['dem', 'chm', 'naip', 'horizon', 'horizon_naip'] · 8 buildings · 12 POIs · 0 landuse rings · authored: none
+- **missing**: nothing
 
 ### `arrowhead-farms`
 
@@ -307,18 +316,18 @@ Missing: site.json, spine_utm.json, osm.geojson, crossings.json, dem_1m.tif, nai
 
 ### `md450-staples`
 
-*MD 450 (Defense Hwy) between Patuxent River Rd and Staples Corner (MD 424); point is a midpoint estimate (Overpass 429'd), nearest_road should snap to MD 450*  
-fix 38.9375, -76.667 · 0 photo(s) · status **baked**
+*MD 450 (Defense Hwy) between Patuxent River Rd and Staples Corner (MD 424); `road` pins the snap, the point is only a hint*  
+fix 38.992095, -76.68646 · 0 photo(s) · status **baked**
 
-- **road**: {'name': 'Double Gate Road'} · 2722.1 m · snap 369.0 m  ⚠ **check the road**: the fix snapped this far, which usually means it landed on a different road · trimmed [False, False] · fetched 2026-09-21T04:39:54Z (543.3 s)
-- **lidar**: `USGS_LPC_MD_VA_Sandy_NCR_2014_LAS_2015` (2014) · 1,029,682 pts in corridor · z factor 1.0 · classes: unassigned 56%, ground 44% · class 17: 0.1288 (demoted) — class 17/18 demoted to unassigned: implausible share, vendor used them as junk bins
+- **road**: {'ref': 'MD 450'} · 4479.2 m · snap 0.0 m · trimmed [True, False] · fetched 2026-09-21T14:35:29Z (676.1 s)
+- **lidar**: `TNM:MD_Central_Processing_D24` (2024) · 30,458,801 pts in corridor · z factor 1.0 · classes: ground 46%, veg_high 26%, unassigned 20%, building 5%, veg_med 3%, veg_low 1% · class 17: 0.0 (trusted)
 - **DEM**: USGS one meter x35y432 MD VA Sandy NCR 2014 — 2020-03-30; USGS 1 Meter 18 x35y432 MD_Central_Processing_D24 — 2026-04-04
-- **NAIP**: fetched at 0.3 m, [9600, 3567] px · tile under the fix `m_3807603_ne_18_030_20230712` flown 2023-07-12 at 0.3 m
-- **OSM**: 268 features, 42 crossings; spine tags: `highway`=tertiary
+- **NAIP**: fetched at 0.3 m, [14700, 3367] px · tile under the fix `m_3807603_ne_18_030_20230712` flown 2023-07-12 at 0.3 m
+- **OSM**: 1233 features, 89 crossings; spine tags: `highway`=secondary; `lanes`=2/3/4/5; `lanes:backward`=2; `lanes:forward`=1; `surface`=asphalt
 - **structures** (0): none
-- **surface** (per 20 m): {'asphalt_aged': 93, 'asphalt_new': 33, 'concrete': 11}
-- **geology**: Aquia Formation, Calvert Formation
-- **web**: layers ['dem', 'chm', 'naip', 'horizon', 'horizon_naip'] · 149 buildings · 0 POIs · 2 landuse rings · authored: none
+- **surface** (per 20 m): {'asphalt_aged': 142, 'asphalt_new': 8, 'chipseal': 21, 'concrete': 53}
+- **geology**: Aquia Formation, Calvert Formation, Monmouth Formation
+- **web**: layers ['dem', 'chm', 'naip', 'horizon', 'horizon_naip'] · 750 buildings · 20 POIs · 15 landuse rings · authored: none
 - **missing**: nothing
 
 ### `patuxent-river-rd`

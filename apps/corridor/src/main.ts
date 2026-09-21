@@ -114,6 +114,8 @@ function applyLayers() {
   site.layers.road.visible = on('road')
   if (site.layers.horizon) site.layers.horizon.visible = on('horizon')
   site.layers.structures.visible = on('structures')
+  if (site.layers.rocks) site.layers.rocks.visible = on('rocks')
+  if (site.layers.water) site.layers.water.visible = on('water')
   site.layers.spine.visible = on('spine') && !drive.on
   site.layers.markers.visible = on('markers') && !drive.on
 }

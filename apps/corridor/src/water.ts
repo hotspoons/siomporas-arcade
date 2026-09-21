@@ -63,8 +63,8 @@ function waterMaterial(uniforms: { uTime: { value: number } }, colour: number, o
           float h0 = WAVE(p);
           float hx = WAVE(p + vec2(e, 0.0));
           float hz = WAVE(p + vec2(0.0, e));
-          vec3 pert = normalize(vec3(-(hx - h0) / e * 0.35, 1.0, -(hz - h0) / e * 0.35));
-          normal = normalize(normal + (pert - vec3(0.0, 1.0, 0.0)) * 0.9);
+          vec3 pert = normalize(vec3(-(hx - h0) / e * 0.18, 1.0, -(hz - h0) / e * 0.18));
+          normal = normalize(normal + (pert - vec3(0.0, 1.0, 0.0)) * 0.45);
         }
         `,
       )
@@ -152,8 +152,8 @@ export function buildWater(water: WaterLayer | null | undefined, groundAt: (x: n
   const uniforms = { uTime: { value: 0 } }
   const empty = { group, tick: () => {}, lines: 0, areas: 0, falls: 0, length_m: 0 }
   if (!water || (!water.lines?.length && !water.areas?.length)) return empty
-  const stream = waterMaterial(uniforms, 0x3d6b73, T.WATER_OPACITY, 0.12)
-  const still = waterMaterial(uniforms, 0x46707a, Math.min(1, T.WATER_OPACITY + 0.05), 0.08)
+  const stream = waterMaterial(uniforms, 0x3d6b73, T.WATER_OPACITY, 0.28)
+  const still = waterMaterial(uniforms, 0x46707a, Math.min(1, T.WATER_OPACITY + 0.05), 0.2)
   const foam = foamMaterial(uniforms)
   let nLines = 0, nFalls = 0, length = 0
 

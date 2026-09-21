@@ -48,3 +48,7 @@ tools/corridor/data/
 apps/corridor/public/surfaces/
 apps/corridor/public/surfaces
 apps/corridor/public/assets/*.glb
+
+# python bytecode: churns on every bake and has been landing in commits
+__pycache__/
+*.pyc

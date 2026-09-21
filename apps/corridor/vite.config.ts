@@ -33,8 +33,13 @@ function serveBake(): Plugin {
         if (rel.startsWith('..')) return next()
         const file = resolve(roots[prefix], rel)
         // DEV ONLY: the editor writes authored JSON back beside the bake — adjustments.json,
-        // placements.json — never anything the bake itself produced. Whitelisted by name.
-        if (req.method === 'PUT' && prefix === '/sites/' && /^[a-z0-9-]+\/(adjustments|placements|structures)\.json$/.test(rel.replaceAll('\\', '/'))) {
+        // placements.json, structures.json, dead_ends.json — never anything the bake itself
+        // produced. Whitelisted by name.
+        //
+        // `dead_ends` is Rich's third editor ask, keyed on the OSM NODE ID rather than on `s` or a
+        // chain id: the node id is in every dead_ends entry the bake emits and it survives a
+        // re-bake, a re-chaining and a change of chain set, which stations and chain ids do not.
+        if (req.method === 'PUT' && prefix === '/sites/' && /^[a-z0-9-]+\/(adjustments|placements|structures|dead_ends)\.json$/.test(rel.replaceAll('\\', '/'))) {
           const chunks: Buffer[] = []
           req.on('data', (c) => chunks.push(c))
           req.on('end', () => {

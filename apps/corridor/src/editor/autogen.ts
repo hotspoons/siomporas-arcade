@@ -50,6 +50,11 @@ export interface Poi {
 
 export type Zone = 'commercial' | 'residential' | 'industrial' | 'farm' | 'civic' | 'open' | 'rural'
 
+/** R1b's neighbourhood radius: how far out "what do the buildings round here look like" reaches. */
+const NEIGHBOUR_M = 150
+/** Bucket size for the overlap test — about a big-box store, so a query touches few cells. */
+const OVERLAP_CELL_M = 80
+
 export interface Params {
   /** skip footprints this far or further from the centreline; the bake only reaches 300 m */
   max_lat_m: number
@@ -70,6 +75,10 @@ export interface Params {
    *  not, and without this the first version put 56 buildings down a forested mountain
    *  interstate because every slot within 400 m of a farm track scored a certainty. */
   invent_rural_chance: number
+  /** ceiling on generated items. crofton-crownsville has 28,413 footprints and 12,287 inside the
+   *  corridor; the editor draws one THREE object per placement, so an uncapped run there is tens
+   *  of thousands of draw calls. The cap is reported as a skip reason, never silent. */
+  max_items: number
   seed: number
 }
 
@@ -84,6 +93,7 @@ export const DEFAULTS: Params = {
   invent_near_m: 400,
   invent_falloff_m: 1500,
   invent_rural_chance: 0.15,
+  max_items: 2500,
   seed: 1,
 }
 
@@ -128,6 +138,46 @@ const PLAUSIBLE_MAX: Record<string, number> = {
   barn: 3000, warehouse: 40000, big_box: 40000, utility: 800,
 }
 
+/**
+ * A uniform bucket grid over the site frame: "which of these are near that point".
+ *
+ * Both places this replaces were O(n²) and both were invisible at 347 footprints. Then
+ * crofton-crownsville arrived with **28,413** — a network site, not a strip — and the neighbour
+ * scan in `zoneOf` alone became 349 M distance checks for a frozen tab. String keys rather than a
+ * hashed integer: a hash collision silently merges two cells and the answer is quietly wrong,
+ * which is a far worse trade than a Map lookup at this scale.
+ */
+class Buckets {
+  private readonly cell: number
+  private readonly m = new Map<string, number[]>()
+
+  constructor(cell: number) {
+    this.cell = cell
+  }
+
+  add(x: number, y: number, i: number) {
+    const k = `${Math.floor(x / this.cell)},${Math.floor(y / this.cell)}`
+    const a = this.m.get(k)
+    if (a) a.push(i)
+    else this.m.set(k, [i])
+  }
+
+  /** Indices in every cell the disc touches. A superset — the caller still checks the radius. */
+  near(x: number, y: number, r: number, out: number[]): number[] {
+    out.length = 0
+    const n = Math.ceil(r / this.cell)
+    const cx = Math.floor(x / this.cell)
+    const cy = Math.floor(y / this.cell)
+    for (let a = -n; a <= n; a++) {
+      for (let b = -n; b <= n; b++) {
+        const arr = this.m.get(`${cx + a},${cy + b}`)
+        if (arr) for (const i of arr) out.push(i)
+      }
+    }
+    return out
+  }
+}
+
 const centroid = (ring: [number, number][]): [number, number] => {
   let x = 0, y = 0
   for (const [px, py] of ring) { x += px; y += py }
@@ -159,13 +209,14 @@ export function zoneOf(b: Building, ctx: Ctx): Zone {
     if (z && inside(lu.ring, cx, cy)) return z
   }
   // R1b: no zoning here, so derive one from what the neighbours look like
-  const near: Building[] = []
-  for (const o of ctx.buildings) {
-    const [ox, oy] = o.centre
-    if ((ox - cx) ** 2 + (oy - cy) ** 2 < 150 * 150) near.push(o.b)
+  const areas: number[] = []
+  for (const j of ctx.grid.near(cx, cy, NEIGHBOUR_M, ctx.scratch)) {
+    const o = ctx.buildings[j]
+    if ((o.centre[0] - cx) ** 2 + (o.centre[1] - cy) ** 2 < NEIGHBOUR_M * NEIGHBOUR_M) areas.push(o.b.area_m2)
   }
-  if (!near.length) return 'open'
-  const areas = near.map((n) => n.area_m2).sort((p, q) => p - q)
+  if (!areas.length) return 'open'
+  areas.sort((p, q) => p - q)
+  const near = areas
   const med = areas[areas.length >> 1]
   if (med > 1500) return 'commercial'
   if (near.length >= 6 && med >= 80 && med <= 400) return 'residential'
@@ -294,6 +345,10 @@ export interface Ctx {
   landuse: Landuse[]
   poiFor: Map<number, string>
   site: Site
+  /** centroids, for the neighbour scan */
+  grid: Buckets
+  /** one reusable result array — this is the hot path on a 28k-footprint site */
+  scratch: number[]
 }
 
 export function contextOf(manifest: Manifest, site: Site): Ctx {
@@ -303,7 +358,9 @@ export function contextOf(manifest: Manifest, site: Site): Ctx {
   for (const p of (manifest as unknown as { pois?: Poi[] }).pois ?? []) {
     if (p.building != null && !poiFor.has(p.building)) poiFor.set(p.building, p.kind)
   }
-  return { buildings, landuse, poiFor, site }
+  const grid = new Buckets(NEIGHBOUR_M)
+  buildings.forEach((b, i) => grid.add(b.centre[0], b.centre[1], i))
+  return { buildings, landuse, poiFor, site, grid, scratch: [] }
 }
 
 export interface Result {
@@ -322,11 +379,26 @@ export function generate(manifest: Manifest, site: Site, catalog: CatalogEntry[]
   const byCategory: Record<string, number> = {}
   const drop = (why: string) => { skipped[why] = (skipped[why] ?? 0) + 1 }
   const items: Placement[] = []
-  // R7: biggest first, and nothing may overlap something already standing
+  // R7: biggest first, and nothing may overlap something already standing. Gridded for the same
+  // reason `zoneOf` is — a linear scan of everything placed so far is another O(n²), and on
+  // crofton-crownsville "everything placed so far" reaches five figures.
   const taken: { x: number; y: number; r: number }[] = []
+  const takenGrid = new Buckets(OVERLAP_CELL_M)
+  const hits: number[] = []
   const free = (x: number, y: number, r: number) => {
-    for (const t of taken) if ((t.x - x) ** 2 + (t.y - y) ** 2 < (t.r + r) ** 2) return false
+    // the grid only guarantees cells within `r`; something big placed further out can still
+    // reach us, so the query radius carries the largest radius seen so far
+    for (const i of takenGrid.near(x, y, r + maxTakenR, hits)) {
+      const t = taken[i]
+      if ((t.x - x) ** 2 + (t.y - y) ** 2 < (t.r + r) ** 2) return false
+    }
     return true
+  }
+  let maxTakenR = 0
+  const claim = (x: number, y: number, r: number) => {
+    takenGrid.add(x, y, taken.length)
+    taken.push({ x, y, r })
+    if (r > maxTakenR) maxTakenR = r
   }
 
   const order = ctx.buildings.map((_, i) => i).sort((a, c) => ctx.buildings[c].b.area_m2 - ctx.buildings[a].b.area_m2)
@@ -343,7 +415,8 @@ export function generate(manifest: Manifest, site: Site, catalog: CatalogEntry[]
     if (!fit) { drop('no catalog asset fits'); continue }
     const r = (Math.max(...fit.entry.footprint_m) * fit.scale) / 2
     if (!free(cx, cy, r * 0.6)) { drop('overlaps something bigger'); continue }
-    taken.push({ x: cx, y: cy, r: r * 0.6 })
+    if (items.length >= p.max_items) { drop(`over the ${p.max_items}-item cap`); continue }
+    claim(cx, cy, r * 0.6)
     items.push({
       id: `g-${i}`,
       asset: fit.entry.id,
@@ -369,7 +442,7 @@ export function generate(manifest: Manifest, site: Site, catalog: CatalogEntry[]
     byCategory[category] = (byCategory[category] ?? 0) + 1
   }
 
-  if (p.invent) inventFrontage(manifest, site, catalog, p, items, taken, free, byCategory)
+  if (p.invent) inventFrontage(manifest, site, catalog, p, items, claim, free, byCategory)
   items.sort((a, c) => a.id.localeCompare(c.id, 'en', { numeric: true }))
   return { items, skipped, byCategory }
 }
@@ -404,7 +477,7 @@ function inventFrontage(
   catalog: CatalogEntry[],
   p: Params,
   items: Placement[],
-  taken: { x: number; y: number; r: number }[],
+  claim: (x: number, y: number, r: number) => void,
   free: (x: number, y: number, r: number) => boolean,
   byCategory: Record<string, number>,
 ) {
@@ -454,7 +527,8 @@ function inventFrontage(
       if (site.edgeDistance(x, wz) < p.keepout_m) continue
       const r = Math.max(...entry.footprint_m) / 2
       if (!free(x, y, r * 0.8)) continue
-      taken.push({ x, y, r: r * 0.8 })
+      if (items.length >= p.max_items) continue
+      claim(x, y, r * 0.8)
       // face the road: the inward normal, as a compass bearing
       const face = left.clone().multiplyScalar(-sideSign)
       items.push({

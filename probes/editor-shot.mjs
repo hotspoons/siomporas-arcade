@@ -17,7 +17,8 @@ const [, , slug = 'frederick-i70', out = '/tmp/editor.png', ...actions] = proces
 const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] })
 const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } })
 await page.route('**/@vite/client', (r) => r.abort())
-\1page.on('console', (m) => logs.push(`${m.type()}: ${m.text()}`))
+const logs = []
+page.on('console', (m) => logs.push(`${m.type()}: ${m.text()}`))
 page.on('pageerror', (e) => logs.push(`pageerror: ${e.message}`))
 page.on('dialog', (d) => d.accept())
 

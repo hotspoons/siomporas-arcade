@@ -117,10 +117,33 @@ export function buildStrip(
   mat.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms)
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nattribute float aEdge;\nvarying float vEdge;\nvarying vec3 vWorldXZ;')
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvEdge = aEdge;\nvWorldXZ = (modelMatrix * vec4(position, 1.0)).xyz;')
+      .replace('#include <common>', '#include <common>\nattribute float aEdge;\nvarying float vEdge;\nvarying vec3 vWorldXZ;\nvarying vec3 vWorldN;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvEdge = aEdge;\nvWorldXZ = (modelMatrix * vec4(position, 1.0)).xyz;\nvWorldN = normalize(mat3(modelMatrix) * objectNormal);')
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <map_pars_fragment>', '#include <map_pars_fragment>\nuniform sampler2D grassMown;\nuniform sampler2D grassRough;\nuniform int hasGrass;\nuniform vec3 grassTint;\nvarying float vEdge;\nvarying vec3 vWorldXZ;')
+      .replace('#include <map_pars_fragment>', `#include <map_pars_fragment>
+        uniform sampler2D grassMown;
+        uniform sampler2D grassRough;
+        uniform int hasGrass;
+        uniform vec3 grassTint;
+        varying float vEdge;
+        varying vec3 vWorldXZ;
+        varying vec3 vWorldN;
+        // TRIPLANAR. The ground textures used to be projected straight down — uv = worldXZ / 2 —
+        // which is exact on the flat and degenerate on a cut face: a 40° bank gets a metre of uv
+        // for every 1.3 m of slope, and a near-vertical one smears a single row of texels all the
+        // way down. That is the vertical streaking on the Chesterfield embankment. Sampling on all
+        // three world planes and blending by the normal costs three fetches and holds scale
+        // whatever the ground is doing. The exponent decides how narrow the blend band is; 4 keeps
+        // flat ground effectively single-sampled and only pays on the slopes.
+        vec3 triplanar(sampler2D t, vec3 p, vec3 n, float scale, vec2 off) {
+          vec3 w = pow(abs(n), vec3(4.0));
+          w /= max(1e-4, w.x + w.y + w.z);
+          vec3 c = vec3(0.0);
+          if (w.y > 0.001) c += texture2D(t, p.xz * scale + off).rgb * w.y;
+          if (w.x > 0.001) c += texture2D(t, p.zy * scale + off).rgb * w.x;
+          if (w.z > 0.001) c += texture2D(t, p.xy * scale + off).rgb * w.z;
+          return c;
+        }`)
       .replace(
         '#include <map_fragment>',
         `
@@ -128,16 +151,16 @@ export function buildStrip(
           vec4 img = texture2D(map, vMapUv);
           vec4 ground = img;
           if (hasGrass == 1) {
-            vec2 guv = vWorldXZ.xz / 2.0;
-            vec4 mown = texture2D(grassMown, guv);
-            vec4 rough = texture2D(grassRough, guv * 0.97 + vec2(0.13, 0.41));
+            vec3 n = normalize(vWorldN);
+            vec3 mown = triplanar(grassMown, vWorldXZ, n, 0.5, vec2(0.0));
+            vec3 rough = triplanar(grassRough, vWorldXZ, n, 0.485, vec2(0.13, 0.41));
             // the mow line ~8 m out, rough grass to ~22 m, then the air photo takes over; the
             // imagery's own brightness is kept as a large-scale modulation so fields and woods
             // still read through the grass tiles
             float wMown = 1.0 - smoothstep(6.5, 9.5, vEdge);
             float wRough = smoothstep(6.5, 9.5, vEdge) * (1.0 - smoothstep(18.0, 26.0, vEdge));
             float lum = clamp(dot(img.rgb, vec3(0.3, 0.5, 0.2)) * 2.2, 0.55, 1.35);
-            vec3 grass = (mown.rgb * wMown + rough.rgb * wRough) * grassTint * lum;
+            vec3 grass = (mown * wMown + rough * wRough) * grassTint * lum;
             float wGrass = clamp(wMown + wRough, 0.0, 1.0);
             ground = vec4(mix(img.rgb, grass, wGrass), 1.0);
           }

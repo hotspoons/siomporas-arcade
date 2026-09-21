@@ -158,44 +158,47 @@ def dead_ends(chains: list[dict], frame: Frame, cache: Path, radius_m: float, si
     """Mark each chain end as a cul-de-sac, a true dead end, or neither (Rich, 2026-09-21).
 
     "If a street dead ends, assume a cul de sac, make it so this can be overridden into a true dead
-    end." So the bake's job is to say which ends are ends at all, and to use OSM's own answer where
-    OSM has one. Three things can be true of a chain end:
+    end." So the bake says which ends are ends, and uses OSM's own answer where OSM has one.
 
-      * it MEETS another road — one of ours (a junction we already have) or one we did not ask for.
-        The second needs asking: one Overpass query for every end node returns the ways that use it,
-        so an end shared with any other `highway` way is a junction, not a dead end. Chesterfield
-        Road ending on a road outside the `roads` list must not grow a bulb.
-      * it was CLIPPED by our own query box (within BOUNDARY_M of it). The road continues in the
-        real world; the world just stops here.
-      * it is genuinely an end. OSM marks the bulb with `highway=turning_circle` (a paved bulb) or
-        `turning_loop` (an island); when the node carries one, source is "osm" and the kind is a
-        cul-de-sac. Otherwise we ASSUME a cul-de-sac, which is Rich's rule, and the editor can
-        override it to `dead_end`.
+    MEASURED on arrowhead-farms-network, because the first version found 1 end in a neighbourhood
+    that is almost entirely cul-de-sacs, and both reasons were mine:
+
+      * 8 of its 21 end nodes carry `highway=turning_circle` — OSM marks the bulb explicitly, and
+        that tag should decide the question on its own.
+      * every bulb also has DRIVEWAYS on it (`highway=service`), 2 to 4 of them. Counting any
+        highway way as "this end meets another road" suppressed every one. Only a way a car could
+        route through counts: service roads, tracks, footways and paths do not make a junction.
+        And the comparison has to be against OUR WAYS at that node, not our chain-END records —
+        a node where two of our own ways meet is still one road.
 
     Radius is to the pavement EDGE: 9 m for a residential bulb (the 18 m diameter US standard),
     6 m for a service road. Written onto each chain as `dead_ends`; nothing else moves.
     """
+    ROUTABLE = {"motorway", "trunk", "primary", "secondary", "tertiary", "unclassified", "residential", "living_street", "motorway_link", "trunk_link", "primary_link", "secondary_link", "tertiary_link"}
     ends: dict[int, list[tuple[dict, float]]] = {}
     for c in chains:
         ways = c["ways"]
         for node, s_at in ((ways[0]["nodes"][0], 0.0), (ways[-1]["nodes"][-1], float(c["line"].length))):
             ends.setdefault(node, []).append((c, s_at))
-    tags: dict[int, dict] = {}
-    way_count: dict[int, int] = {}
+    our_way_ids = {w["id"] for c in chains for w in c["ways"]}
+    node_tags: dict[int, dict] = {}
+    other_roads: dict[int, int] = {}
     if ends:
-        # Overpass `id:` takes COMMAS (semicolons are a syntax error and every mirror 400s on it),
-        # and a way printed with `out tags` carries no node list — so the ways go out as `skel`,
-        # which is ids + nodes and is what "how many roads use this node" actually needs.
+        # `id:` takes COMMAS (semicolons are a syntax error and every mirror 400s), and the ways go
+        # out as `body` — ids AND nodes AND tags — because the node list says which end a way
+        # touches and the tags say whether it is a road or somebody's driveway.
         ids = ",".join(str(n) for n in sorted(ends))
-        q = f"[out:json][timeout:180];node(id:{ids})->.e;.e out tags;way(bn.e)[highway];out skel;"
+        q = f"[out:json][timeout:180];node(id:{ids})->.e;.e out tags;way(bn.e)[highway];out body;"
         try:
             for el in osm.overpass(q, cache)["elements"]:
                 if el["type"] == "node":
-                    tags[el["id"]] = el.get("tags", {})
-                elif el["type"] == "way":
-                    for nid in el.get("nodes", []) or []:
-                        if nid in ends:
-                            way_count[nid] = way_count.get(nid, 0) + 1
+                    node_tags[el["id"]] = el.get("tags", {})
+                    continue
+                if el["id"] in our_way_ids or el.get("tags", {}).get("highway") not in ROUTABLE:
+                    continue
+                for nid in el.get("nodes", []) or []:
+                    if nid in ends:
+                        other_roads[nid] = other_roads.get(nid, 0) + 1
         except Exception as exc:  # a dead end we cannot confirm is better than a failed bake
             print(f"  ends    overpass failed ({exc}); assuming every unshared end is a cul-de-sac")
     ox, oy = frame.origin
@@ -203,22 +206,18 @@ def dead_ends(chains: list[dict], frame: Frame, cache: Path, radius_m: float, si
         c["dead_ends"] = []
     n_osm = n_assumed = 0
     for node, owners in ends.items():
-        shared_here = len({c["id"] for c, _ in owners}) > 1  # two of OUR chains meet
-        t = tags.get(node, {})
-        hw = t.get("highway")
-        osm_bulb = hw in ("turning_circle", "turning_loop")
-        # ways using this node, ours included; more than the chains that own it means an unlisted road
-        ours = len(owners)
-        meets_other = way_count.get(node, ours) > ours
+        t = node_tags.get(node, {})
+        osm_bulb = t.get("highway") in ("turning_circle", "turning_loop")
+        shared_here = len({c["ident"] for c, _ in owners}) > 1  # two DIFFERENT roads of ours meet
         for c, s_at in owners:
-            if shared_here or meets_other:
-                continue
+            if not osm_bulb and (shared_here or other_roads.get(node, 0) > 0):
+                continue  # it meets another road; OSM's own bulb tag outranks this
             p = c["line"].interpolate(s_at)
             if min(abs(p.x - (ox - radius_m)), abs(p.x - (ox + radius_m)), abs(p.y - (oy - radius_m)), abs(p.y - (oy + radius_m))) < BOUNDARY_M:
-                continue  # clipped by our own query box
+                continue  # clipped by our own query box: the road continues, our world does not
             rad = DEAD_END_RADIUS.get(c["highway"] or "", DEAD_END_DEFAULT)
             c["dead_ends"].append({
-                "s": round(s_at, 1), "kind": "cul_de_sac", "radius_m": round(float(t.get("radius_m") or rad), 1),
+                "s": round(s_at, 1), "kind": "cul_de_sac", "radius_m": round(rad, 1),
                 "source": "osm" if osm_bulb else "assumed", "node": node,
                 "x": round(float(p.x - ox), 1), "y": round(float(p.y - oy), 1),
             })

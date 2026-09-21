@@ -218,7 +218,15 @@ from pavement, all on `groundAt`; South Mountain: 910 greenstone, nearest 4.16 m
   points inside the corridor: a wrong guess puts them in another state, so the test is
   self-validating. 2.2 s; 4.9 M of the tile's 14.6 M points land in Ecola's corridor and the
   ground agrees with the 3DEP DEM to **4 cm**. Datum realisations of one projection tie exactly —
-  take the lowest EPSG code. Proposed to main 2026-09-21.
+  take the lowest EPSG code. Proposed to main 2026-09-21. **But reach for it last**: Ecola also has
+  `CA_West_Coast_LiDAR_2016_B16` at 85 % coverage, eight years newer, in metres, with a compound
+  CRS carrying the vertical datum — the project scoring passes it over because the broken one
+  covers 100 %. Falling back to the next project when every tile of the chosen one fails to read
+  is simpler and gives better data; guessing a CRS is for a site where the header-less project is
+  the only one.
+- **You can read a delivery's CRS without downloading it.** `Range: bytes=0-200000` returns HTTP
+  206 from the USGS host and the LAS header and VLRs live in the first few hundred bytes, so a
+  717 MiB tile can be scored for readability in a second.
 - **Bounding the vertices of a smoothed line does not bound the line.** `export._smooth_on_line`
   gaussian-smooths a centreline and then pulls every vertex back to within 1.5 m of the raw
   polyline, which fixed the spine leaving its own trace in the air photo (10.6 m on Chesterfield

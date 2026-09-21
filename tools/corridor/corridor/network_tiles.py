@@ -528,7 +528,11 @@ if __name__ == "__main__":
 
 
 OVERVIEW_DEM_M = 8.0
-OVERVIEW_NAIP_M = 4.0
+# The imagery goes on as ONE texture, and 4096 px is the limit a lot of GPUs still report — over it
+# the upload fails and the terrain draws untextured. So the overview resolution is chosen to keep
+# the long side under that for the extent at hand, rather than fixed: an 18.8 km region at 4 m is
+# 4702 px and would be over.
+OVERVIEW_MAX_PX = 4000
 
 
 def overview(site_dir: Path, web: Path, ox: float, oy: float, mask_shapes: list, vivid) -> dict:
@@ -582,10 +586,12 @@ def overview(site_dir: Path, web: Path, ox: float, oy: float, mask_shapes: list,
 
     naip_p = site_dir / "naip_1m.tif"
     if naip_p.exists():
-        rgb, (w, h) = read(naip_p, OVERVIEW_NAIP_M, count=3)
+        span = max(bbox[2] - bbox[0], bbox[3] - bbox[1])
+        naip_res = max(1.0, round(span / OVERVIEW_MAX_PX, 1))
+        rgb, (w, h) = read(naip_p, naip_res, count=3)
         img = vivid(Image.fromarray(np.moveaxis(rgb, 0, -1), "RGB"), 1.3, 1.1)
         r_, g_, b_ = img.split()
         img = Image.merge("RGB", (r_.point(lambda v: min(255, int(v * 1.06))), g_, b_.point(lambda v: int(v * 0.9))))
-        img.save(web / "naip_4m.jpg", quality=85, optimize=True)
-        layers["naip"] = {"file": "naip_4m.jpg", "res": OVERVIEW_NAIP_M, "size": [w, h], "bbox": rel(bbox), "overview": True}
+        img.save(web / "naip_overview.jpg", quality=85, optimize=True)
+        layers["naip"] = {"file": "naip_overview.jpg", "res": naip_res, "size": [w, h], "bbox": rel(bbox), "overview": True}
     return layers

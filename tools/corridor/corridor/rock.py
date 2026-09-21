@@ -50,10 +50,9 @@ EDGE_ERODE = 6  # cells of the lidar corridor's rim to ignore (the fill there is
 def measure_network(site_dir: Path) -> dict | None:
     """A tiled site, one 1 m raster tile at a time.
 
-    NOTE ON `s`: a polygon's `s` is its projection onto the PRIMARY spine, which on a network means
-    "how far along Chesterfield Road is the point nearest this outcrop" — for a polygon out on MD
-    450 that is a number, not a location. It is used for ordering and nothing else; the ring is the
-    truth. Faces (`cuts`) do carry a real road, because they are measured per chain.
+    Each polygon is then attributed to the road NEAREST it (`road`, `road_dist_m`) and its `s` is
+    measured along that road — projecting an outcrop 8 km out on MD 450 onto the primary spine
+    would be a number rather than a location.
 
      the same rule, bounded memory, ids kept unique
     by the tile they came from. An outcrop straddling a tile edge becomes two polygons — at 15 m²
@@ -72,11 +71,39 @@ def measure_network(site_dir: Path) -> dict | None:
             continue
         if r:
             polygons += r["polygons"]
-    polygons.sort(key=lambda q: q["s"])
+    # Each polygon belongs to the road nearest it, and its `s` is measured along THAT road — a
+    # projection onto the primary spine is a number, not a location, once a region is 18 km across.
+    sp_p = site_dir / "spine_utm.json"
+    if sp_p.exists() and polygons:
+        import shapely
+        from shapely.geometry import LineString as _LS, Point as _Pt
+
+        sp = json.loads(sp_p.read_text())
+        site = json.loads((site_dir / "site.json").read_text())
+        ox, oy = site["frame"]["origin"]
+        chains = [((sp.get("primary") or {}).get("ident"), _LS(sp["coords"]))]
+        for sib in sp.get("siblings", []):
+            g = sib["geometry"]
+            parts = [g["coordinates"]] if g["type"] == "LineString" else g["coordinates"]
+            cc = [c for part in parts for c in part]
+            if len(cc) >= 2:
+                chains.append((sib.get("ident"), _LS(cc)))
+        lines = [ln for _, ln in chains]
+        for q in polygons:
+            ring = q["ring"]
+            cx = sum(x for x, _ in ring) / len(ring) + ox
+            cy = sum(y for _, y in ring) / len(ring) + oy
+            pt = _Pt(cx, cy)
+            d = [shapely.distance(pt, ln) for ln in lines]
+            k = min(range(len(d)), key=lambda i: d[i])
+            q["road"] = chains[k][0]
+            q["road_dist_m"] = round(float(d[k]), 1)
+            q["s"] = round(float(lines[k].project(pt)), 1)
+    polygons.sort(key=lambda q: (str(q.get("road") or ""), q["s"]))
     by_type: dict[str, float] = {}
     for q in polygons:
         by_type[q["rock_type"]] = round(by_type.get(q["rock_type"], 0.0) + q["area_m2"], 1)
-    out = {"thresholds": _thresholds(), "polygons": polygons, "summary": {"count": len(polygons), "area_m2": round(sum(q["area_m2"] for q in polygons), 1), "in_cut": sum(q["in_cut"] for q in polygons), "by_type": by_type, "tiles": len(tiles)}}
+    out = {"thresholds": _thresholds(), "polygons": polygons, "summary": {"count": len(polygons), "area_m2": round(sum(q["area_m2"] for q in polygons), 1), "in_cut": sum(q["in_cut"] for q in polygons), "by_type": by_type, "tiles": len(tiles), "roads": len({q.get("road") for q in polygons})}}
     (site_dir / "rock.json").write_text(json.dumps(out))
     return out
 

@@ -221,6 +221,15 @@ from pavement, all on `groundAt`; South Mountain: 910 greenstone, nearest 4.16 m
   *at its own station* is monotonic by construction: worst deviation 1.60 m, none over 2 m.
   Patch proposed to main 2026-09-21; whoever applies it must re-export, since it moves published
   geometry.
+- **`s` is measured on the raw line; the viewer draws a shorter smoothed one.**
+  `manifest.spine.length_m` is the RAW OSM line's length, `manifest.spine.coords` is the smoothed
+  and densified line, and smoothing shortens: −0.03 % on Braddock, −0.37 % on Crofton, **−0.80 %
+  (29.4 m) on Bonnie Branch**. Everything keyed by along-track metre — structures, `profile.s`,
+  `surface.s`, `cuts.faces[].s_start`, the editor's authored intervals — is measured on the raw
+  line and resolved as arclength along the published curve, so the error accumulates with `s`.
+  Measured on real structures it is 0–4.1 m, the worst being Bowie's horse bridge at s = 2350.
+  Fix either by scaling `s` by `curveLen / length_m` in `spineAt`, or by publishing the smoothed
+  length as well. Reported to main 2026-09-21.
 - **A key that indexes data must be intrinsic, never positional.** Network chain ids were `r00`,
   `r01`, … by enumeration, and `branches.json` keys every road's profile by them. Lowering the
   minimum chain length from 120 m to 50 m added two chains *in the middle* of Crofton's list and

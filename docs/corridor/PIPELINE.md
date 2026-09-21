@@ -273,8 +273,17 @@ viewer path. Tiled sites export `web/tiles/0/<x>_<y>.dem.png|chm.png|naip.jpg` (
 instead of the single-image dem/chm/naip layers; the horizon stays one image. `cuts`/`rock`/
 `water` are skipped on tiled sites until they sample lazily.
 
-Run: `python -m corridor fetch arrowhead-farms-network` (7 min) /
-`fetch crofton-crownsville --half-width 150 --lidar-half-width 150`.
+Run: `python -m corridor fetch arrowhead-farms-network` (39 min, 2.2 GB of LAZ) /
+`fetch crofton-crownsville --half-width 150 --lidar-half-width 150` (8.7 h, 199 LAZ tiles, 500 M
+points, 1.3 GB on disk). `python -m corridor.network_tiles <slug>` **re-profiles** a tiled site
+from the rasters and `lidar/corridor.laz` already on disk — minutes, for when a rule downstream of
+the rasters changes.
+
+**A NaN is a broken site.** `lidar.profile` on the single-image path samples a gap-*filled* DTM;
+the tiled path samples a VRT, whose nodata is NaN, so a station in a lidar hole or at the
+corridor's edge produced `NaN` in `road_z`, and `json.dump` wrote a literal `NaN` that
+`JSON.parse` refuses — one token breaks the entire manifest. `network_tiles._fill_along`
+interpolates along every profile array and `export_branches` guards every number.
 
 ### 1.13 Proposals, publish, cluster
 

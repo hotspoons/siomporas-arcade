@@ -192,6 +192,10 @@ from pavement, all on `groundAt`; South Mountain: 910 greenstone, nearest 4.16 m
   `ShaderMaterial` is fixed at compile time.
 - A missing optional JSON must 404 (the middleware does); Vite's SPA fallback would answer
   `index.html` with a 200 and `r.json()` dies on `<!doctype`.
+- **Python writes `NaN` into JSON and `JSON.parse` refuses the whole file.** Anything sampled from
+  a raster that can be nodata (a VRT through `LazyRaster`, an out-of-coverage DEM) must be filled
+  or guarded before it is written. One NaN token cost the Crofton network site its entire
+  manifest (2026-09-21).
 
 ## 7 · How to add a road (one page)
 

@@ -75,9 +75,30 @@ def _chain_line(chain: list[dict], frame: Frame) -> LineString:
     return LineString(np.column_stack([x, y]))
 
 
+#: every highway kind a car can drive on, for `all_streets` sites
+DRIVABLE = (
+    "motorway", "trunk", "primary", "secondary", "tertiary", "unclassified", "residential",
+    "living_street", "motorway_link", "trunk_link", "primary_link", "secondary_link", "tertiary_link",
+)
+
+UNNAMED = "«unnamed»"
+
+
 def roads(site: dict, frame: Frame, cache: Path) -> dict:
-    """Every chain of every road in the list, with junctions, the primary picked out."""
-    wanted = list(site["roads"])
+    """Every chain of every road we want, with junctions, the primary picked out.
+
+    Two ways to say which roads. A `roads` LIST names them, which is what the first network site
+    did — Crofton/Crownsville is 18 named roads over a 9 km radius, chosen by hand. That is also a
+    ceiling nobody could see: the viewer drew 18 of the 10 593 drivable ways in that extract, so
+    most of the street furniture built off the OSM data had no road to belong to and was correctly
+    dropped (112 of 205 signal masts, and 20 491 sidewalk stations with no kerb).
+
+    `all_streets: true` takes every drivable way in the radius instead. Identity is then the way's
+    own name, or its ref, or `UNNAMED` — and since chains are split by CONNECTIVITY, two unrelated
+    "Oak Court"s stay two chains and a run of unnamed links still joins into one.
+    """
+    wanted = list(site.get("roads") or [])
+    all_streets = bool(site.get("all_streets"))
     refs = {r for r in wanted if REF_RE.match(r)}
     names = {r for r in wanted if r not in refs}
     ox, oy = frame.origin
@@ -85,19 +106,27 @@ def roads(site: dict, frame: Frame, cache: Path) -> dict:
     w, s, e, n = frame.bbox_wgs(ox - R, oy - R, ox + R, oy + R)
     esc = lambda v: v.replace("(", "\\(").replace(")", "\\)").replace(".", "\\.")  # noqa: E731
     parts = []
-    if names:
-        parts.append(f'way({s},{w},{n},{e})[highway][name~"^({"|".join(esc(x) for x in sorted(names))})$"];')
-        parts.append(f'way({s},{w},{n},{e})[highway][alt_name~"^({"|".join(esc(x) for x in sorted(names))})$"];')
-    if refs:
-        parts.append(f'way({s},{w},{n},{e})[highway][ref~"(^|;)({"|".join(esc(x) for x in sorted(refs))})(;|$)"];')
-    q = f"[out:json][timeout:180];({''.join(parts)});out geom;"
+    if all_streets:
+        parts.append(f'way({s},{w},{n},{e})[highway~"^({"|".join(DRIVABLE)})$"];')
+    else:
+        if names:
+            parts.append(f'way({s},{w},{n},{e})[highway][name~"^({"|".join(esc(x) for x in sorted(names))})$"];')
+            parts.append(f'way({s},{w},{n},{e})[highway][alt_name~"^({"|".join(esc(x) for x in sorted(names))})$"];')
+        if refs:
+            parts.append(f'way({s},{w},{n},{e})[highway][ref~"(^|;)({"|".join(esc(x) for x in sorted(refs))})(;|$)"];')
+    if not parts:
+        raise RuntimeError(f"site {site.get('slug')} names no roads and is not all_streets")
+    q = f"[out:json][timeout:300];({''.join(parts)});out geom;"
     ways = [x for x in osm.overpass(q, cache)["elements"] if x.get("geometry") and x.get("nodes")]
     by: dict[str, list[dict]] = {}
     for wy in ways:
         t = wy.get("tags", {})
         if t.get("highway") in ("footway", "path", "cycleway", "pedestrian", "steps", "bridleway", "service", "track", "proposed", "construction"):
             continue
-        ident = _ident(t, refs, names)
+        if all_streets:
+            ident = t.get("name") or (str(t.get("ref")).split(";")[0].strip() if t.get("ref") else None) or UNNAMED
+        else:
+            ident = _ident(t, refs, names)
         if ident:
             by.setdefault(ident, []).append(wy)
     chains: list[dict] = []
@@ -302,7 +331,8 @@ def fetch_site(site: dict, half_width: float, lidar_half_width: float, skip: set
     out = data / "sites" / slug
     out.mkdir(parents=True, exist_ok=True)
     t0 = time.time()
-    print(f"=== {slug}  network ({site['lat']:.5f}, {site['lon']:.5f}) roads {len(site['roads'])}")
+    asked = "every drivable street" if site.get("all_streets") else f"roads {len(site.get('roads') or [])}"
+    print(f"=== {slug}  network ({site['lat']:.5f}, {site['lon']:.5f}) {asked}")
     frame = Frame.at(site["lon"], site["lat"])
     manifest: dict = json.loads((out / "manifest.json").read_text()) if (out / "manifest.json").exists() else {}
     manifest |= {"slug": slug, "kind": "network", "frame": {"epsg": frame.epsg, "origin": frame.origin}, "fetched": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "params": {"half_width_m": half_width, "lidar_half_width_m": lidar_half_width, "radius_m": site.get("radius_m"), "horizon_radius_m": 30000.0}}

@@ -400,6 +400,19 @@
   "note": "Rich's neighbourhood as one network (cadre \u00a76): every named road chained, Patuxent River Rd as the primary; OSM spellings checked 2026-09-21 (Lane not Drive; Patuxent Overlook has no Road; no Halls Grove Court in OSM)"
  },
  {
+  "slug": "crofton-triangle",
+  "kind": "network",
+  "region": "crofton-crownsville",
+  "primary": "Crofton Parkway",
+  "all_streets": true,
+  "lat": 39.004,
+  "lon": -76.683,
+  "radius_m": 2600,
+  "photos": [],
+  "heading_deg": null,
+  "note": "the Crofton triangle (MD 3 west, MD 424 east, MD 450 south) with EVERY drivable street in it rather than a named list: 588 ways / 385 names / 142 km of centreline, against crofton-crownsville's 18 roads over a 9 km radius. Built so the street furniture has roads to belong to \u2014 signals, parking, guard rail, sidewalks and kerbs are all filtered against what is DRAWN, so on an 18-road site most of them are correctly dropped (112 of 205 masts; 20 491 sidewalk stations with no kerb). Crofton Parkway is the primary."
+ },
+ {
   "slug": "crofton-crownsville",
   "kind": "network",
   "region": "crofton-crownsville",

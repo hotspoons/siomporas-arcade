@@ -10,6 +10,9 @@ const PORT = process.env.PORT ?? '5205'
 const SLUG = process.env.SLUG ?? 'crofton-crownsville'
 const OUT = process.argv[2] ?? '/tmp/furn-'
 const EYE = Number(process.env.EYE ?? 34)
+// a tiled network site streams its terrain in after the camera moves; shooting at 1.5 s gets flat
+// untextured ground and a tile wedge, which looks like a bug in whatever you were photographing
+const SETTLE_MS = Number(process.env.SETTLE_MS ?? 1500)
 const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] })
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } })
 page.on('pageerror', (e) => console.log('pageerror', e.message))
@@ -133,7 +136,7 @@ for (const on of [false, true]) {
     const g = window.__mode === 'parking' ? L.parking : window.__mode === 'barriers' ? L.barriers : window.__mode === 'sidewalks' ? L.sidewalks : L.furniture
     g.visible = v
   }, on)
-  await page.waitForTimeout(1500)
+  await page.waitForTimeout(SETTLE_MS)
   await page.screenshot({ path: `${OUT}${on ? 'after' : 'before'}.png`, timeout: 300000 })
 }
 await browser.close()

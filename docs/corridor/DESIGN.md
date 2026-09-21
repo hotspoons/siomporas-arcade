@@ -218,6 +218,13 @@ from pavement, all on `groundAt`; South Mountain: 910 greenstone, nearest 4.16 m
   only when that chain's own ways change — and then it simply fails to match and is recomputed,
   which is a failure you can see. Caught by diffing `branches.json` against `spine_utm.json` before
   calling the data good; it would have rendered perfectly and been wrong everywhere.
+- **One writer per site directory.** `tools/corridor/data` is a symlink shared by every worktree,
+  so `export all` from main and a targeted export from an agent are the same files — written
+  non-atomically, image by image. Announce an export in mail before running it.
+- **A pattern that matches your own command line kills your own shell.** `pkill -f 'foo'`,
+  `pgrep -f 'foo'` and `awk '/foo/'` all see the very command running them; three shells died to
+  this in one session. Kill by PID, filter by process name (`ps -eo comm,args`), or put the script
+  in a file so its command line is a path.
 - **Python writes `NaN` into JSON and `JSON.parse` refuses the whole file.** Anything sampled from
   a raster that can be nodata (a VRT through `LazyRaster`, an out-of-coverage DEM) must be filled
   or guarded before it is written. One NaN token cost the Crofton network site its entire

@@ -92,7 +92,11 @@ def candidate_datasets(bbox_merc, cache: Path) -> list[tuple[str, dict]]:
         if b[0] <= x0 and b[1] <= y0 and b[3] >= x1 and b[4] >= y1:
             out.append((ds, ept))
     if not out:
-        raise RuntimeError("no EPT dataset covers this corridor")
+        # NOT an error: the caller falls back to the TNM delivery tiles, which is the only path
+        # that works outside the mid-Atlantic (DATASETS is a hand-kept list). Raising here killed
+        # every California / Oregon / Maine bake before the fallback could run.
+        print("  lidar   no EPT dataset covers this corridor; going straight to the TNM tiles", flush=True)
+        return []
     return out
 
 

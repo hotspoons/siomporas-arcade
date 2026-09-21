@@ -18,6 +18,19 @@ export interface Adjust {
   ground_offset_m: number
   surface_class: string | null
   species: string | null
+  /** how much paint: none / centre line only / centre + edge + lane lines. null = as inferred */
+  markings: string | null
+  /** which centre line. OSM has no `overtaking` tag on any baked site, so a passing zone cannot
+   *  come from the data — it is authored here or inferred from sight distance by road-and-car. */
+  centre_line: string | null
+  /** what grows on the ground inside this polygon, where it is not simply verge */
+  cover: string | null
+  /** with `cover: 'crop'`, which crop */
+  crop: string | null
+  /** row direction as a compass bearing, and the gap between rows. Only read when cover=crop, so
+   *  0 is a safe neutral rather than a sentinel. */
+  row_heading_deg: number
+  row_spacing_m: number
 }
 
 export interface Area {
@@ -121,6 +134,12 @@ export const NEUTRAL: Adjust = {
   ground_offset_m: 0,
   surface_class: null,
   species: null,
+  markings: null,
+  centre_line: null,
+  cover: null,
+  crop: null,
+  row_heading_deg: 0,
+  row_spacing_m: 0.76,
 }
 
 /** The texture sets tools/surfaces/gen.py bakes; `null` means "whatever the classifier said". */
@@ -128,6 +147,25 @@ export const SURFACE_CLASSES = ['asphalt_new', 'asphalt_aged', 'asphalt_patched'
 
 /** What trees.ts can actually grow; `null` means "pick by height as usual". */
 export const SPECIES = ['oak', 'ash', 'aspen', 'pine']
+
+/**
+ * The dropdown vocabularies, and who consumes each one. A `null` selection always means "as the
+ * bake inferred it", which is why every one of these is optional rather than defaulted.
+ */
+export const PICKERS: { key: keyof Adjust; label: string; options: string[]; note: string }[] = [
+  { key: 'surface_class', label: 'surface', options: SURFACE_CLASSES, note: 'overrides the measured pavement class — freshly paved is asphalt_new' },
+  { key: 'markings', label: 'markings', options: ['none', 'class', 'full'], note: 'how much paint: none, the centre line only, or centre + edge + lane lines. Site default is the ROAD_MARKINGS knob' },
+  { key: 'centre_line', label: 'centre line', options: ['dashed', 'solid', 'solid_left', 'solid_right'], note: 'where overtaking is allowed. No baked site has an OSM `overtaking` tag, so this cannot come from the data' },
+  { key: 'species', label: 'species', options: SPECIES, note: 'which tree the near field grows here' },
+  { key: 'cover', label: 'ground cover', options: ['crop', 'pasture', 'orchard', 'scrub', 'bare'], note: 'what grows inside the polygon where it is not roadside verge' },
+  { key: 'crop', label: 'crop', options: ['corn', 'soy', 'wheat', 'hay', 'fallow'], note: 'only read when ground cover is crop' },
+]
+
+/** Shown only when `cover === 'crop'`: the rows themselves. */
+export const CROP_FIELDS: { key: keyof Adjust; label: string; step: number; note: string }[] = [
+  { key: 'row_heading_deg', label: 'row heading°', step: 1, note: 'compass bearing the rows run along; defaults to the road at this polygon when you pick a crop' },
+  { key: 'row_spacing_m', label: 'row spacing m', step: 0.02, note: 'gap between rows; 0.76 m is a US corn row' },
+]
 
 export interface SliderDef {
   key: keyof Adjust
@@ -177,7 +215,18 @@ async function save(path: string, body: unknown): Promise<number> {
   return j.bytes ?? 0
 }
 
-export const loadAdjustments = (slug: string) => load<Adjustments>(`/sites/${slug}/adjustments.json`, { version: 1, areas: [] })
+/**
+ * Areas written before a key existed do not have it, and `undefined` is not `NEUTRAL[key]`: the
+ * crop-row default is "set it from the road when it is still 0", and an absent key is never 0, so
+ * it silently never fired and the two row fields never reached the file. Fill every area's
+ * `adjust` from NEUTRAL on the way in and the rest of the editor can assume a complete object.
+ * The viewer reads `adjust` as a Partial and does not care either way.
+ */
+export async function loadAdjustments(slug: string): Promise<Adjustments> {
+  const doc = await load<Adjustments>(`/sites/${slug}/adjustments.json`, { version: 1, areas: [] })
+  for (const a of doc.areas) a.adjust = { ...NEUTRAL, ...a.adjust }
+  return doc
+}
 export const saveAdjustments = (slug: string, doc: Adjustments) => save(`/sites/${slug}/adjustments.json`, doc)
 export const loadPlacements = (slug: string) => load<Placements>(`/sites/${slug}/placements.json`, { version: 1, items: [] })
 export const savePlacements = (slug: string, doc: Placements) => save(`/sites/${slug}/placements.json`, doc)

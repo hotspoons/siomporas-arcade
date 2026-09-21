@@ -9,7 +9,9 @@
 // and re-draped whenever the terrain under it changes, so a re-bake cannot leave an area floating.
 import * as THREE from 'three'
 import { fillMesh, handleMesh, outlineMesh, type HeightAt } from './drape'
-import { areaOf, inside, loadAdjustments, nextId, saveAdjustments, NEUTRAL, SLIDERS, SPECIES, SURFACE_CLASSES, type Adjust, type Adjustments, type Area } from './schema'
+import { areaOf, inside, loadAdjustments, nextId, saveAdjustments, CROP_FIELDS, NEUTRAL, PICKERS, SLIDERS, type Adjust, type Adjustments, type Area } from './schema'
+import type { Site } from '../scene'
+import { bearingOf, nearestStation, normDeg } from './corridor'
 import { el, slider } from './ui'
 
 const COLOR = { idle: 0x5c93c4, edited: 0xffdc00, selected: 0x2ee6c0, draw: 0xff8a2b }
@@ -25,6 +27,8 @@ export class AreaMode {
 
   private slug = ''
   private h: HeightAt = () => 0
+  /** only for corridor-frame defaults (the crop-row heading); areas themselves are site-frame */
+  private site: Site | null = null
   private meshes = new Map<string, { fill: THREE.Mesh; outline: THREE.LineLoop }>()
   private handles = new THREE.Group()
   private draw: [number, number][] | null = null
@@ -39,9 +43,10 @@ export class AreaMode {
     this.onChange = onChange
   }
 
-  async load(slug: string, h: HeightAt) {
+  async load(slug: string, h: HeightAt, site: Site | null = null) {
     this.slug = slug
     this.h = h
+    this.site = site
     this.doc = await loadAdjustments(slug)
     this.dirty = false
     this.selected = null
@@ -296,8 +301,32 @@ export class AreaMode {
         this.onChange(false)
       }))
     }
-    det.append(this.picker('surface', SURFACE_CLASSES, a.adjust.surface_class, (v) => (a.adjust.surface_class = v)))
-    det.append(this.picker('species', SPECIES, a.adjust.species, (v) => (a.adjust.species = v)))
+    for (const pk of PICKERS) {
+      // the crop dropdown is noise until something is growing there
+      if (pk.key === 'crop' && a.adjust.cover !== 'crop') continue
+      det.append(this.picker(pk.label, pk.options, a.adjust[pk.key] as string | null, pk.note, (v) => {
+        ;(a.adjust[pk.key] as string | null) = v
+        // Picking a crop lines the rows up with the road by default. A field's rows are never
+        // random and almost never due north; the road is the one direction we know, and it is a
+        // better starting guess than zero for the same reason a building's own rectangle beats
+        // the road normal — except here there is no rectangle to measure.
+        if (pk.key === 'cover' && v === 'crop' && a.adjust.row_heading_deg === 0) {
+          a.adjust.row_heading_deg = this.roadHeadingAt(a)
+        }
+        if (pk.key === 'cover' && v !== 'crop') a.adjust.crop = null
+        this.onChange()
+      }))
+    }
+    if (a.adjust.cover === 'crop') {
+      for (const f of CROP_FIELDS) {
+        det.append(this.number(f.label, a.adjust[f.key] as number, f.step, f.note, (v) => {
+          ;(a.adjust[f.key] as number) = v
+          this.dirty = true
+          this.refreshColors()
+          this.onChange(false)
+        }))
+      }
+    }
 
     const acts = el('div', 'row')
     const goBtn = el('button')
@@ -319,8 +348,34 @@ export class AreaMode {
     root.append(det)
   }
 
-  private picker(label: string, options: string[], value: string | null, set: (v: string | null) => void) {
+  /** The compass bearing of the road nearest this area's centroid — the crop-row default. */
+  private roadHeadingAt(a: Area): number {
+    if (!this.site) return 0
+    let x = 0, y = 0
+    for (const [px, py] of a.polygon) { x += px; y += py }
+    const st = nearestStation(this.site, x / a.polygon.length, y / a.polygon.length)
+    return Math.round(normDeg(bearingOf(st.dir)))
+  }
+
+  private number(label: string, value: number, step: number, note: string, set: (v: number) => void) {
     const wrap = el('label', 'field')
+    wrap.title = note
+    wrap.append(el('span', '', label))
+    const i = document.createElement('input')
+    i.type = 'number'
+    i.step = String(step)
+    i.value = String(value)
+    i.onchange = () => {
+      const v = Number(i.value)
+      if (Number.isFinite(v)) set(v)
+    }
+    wrap.append(i)
+    return wrap
+  }
+
+  private picker(label: string, options: string[], value: string | null, note: string, set: (v: string | null) => void) {
+    const wrap = el('label', 'field')
+    wrap.title = note
     wrap.append(el('span', '', label))
     const sel = document.createElement('select')
     for (const o of ['(as measured)', ...options]) {

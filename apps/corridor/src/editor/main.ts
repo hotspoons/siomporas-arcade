@@ -127,7 +127,7 @@ async function loadSite(slug: string, quality: 'edit' | 'preview' = 'edit') {
   // the surface the game actually drives on. Beside the pavement the two differ by metres, so
   // draping an area or standing a diner on the raw DEM would author against a surface nobody sees.
   const ground = (x: number, y: number) => site!.groundAt(x, -y) ?? site!.heightAt(x, y)
-  await Promise.all([areas.load(slug, ground), place.load(slug, site, ground)])
+  await Promise.all([areas.load(slug, ground, site), place.load(slug, site, ground)])
   await structs.load(slug, site, place.catalog) // after place: it shares the catalog place loaded
   roadWidth.setSite(site)
   grow.adopt()

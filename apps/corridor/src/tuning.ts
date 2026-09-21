@@ -188,6 +188,16 @@ export let WATER_DEPTH = 0.25
 export let WATER_WIDTH_SCALE = 1.0
 export let WATER_SPEED = 1.0
 export let WATER_OPACITY = 0.82
+/**
+ * The still-water line, metres NAVD88 — the sea at 0, and the flood control.
+ *
+ * One plane over the whole site at this height. Inland it sits under the terrain and nothing is
+ * drawn; on a coast it IS the ocean; raised, it floods the valleys from the bottom up, which is
+ * the mechanic Rich wants ported from trailworks. `WATER_LEVEL_SPAN` is how far it reaches
+ * (m from the site centre) — 30 km by default so the ocean meets the horizon.
+ */
+export let WATER_LEVEL_M = 0
+export let WATER_LEVEL_SPAN = 30000
 
 // --- camera -------------------------------------------------------------------------------------
 /** the fly camera may not go below the ground under it by less than this (m) */
@@ -422,6 +432,8 @@ export const TUNE_TABS: TuneTab[] = [
           tune('WATER_WIDTH_SCALE', () => WATER_WIDTH_SCALE, (v) => (WATER_WIDTH_SCALE = v), [0.3, 3], 0.05),
           tune('WATER_SPEED', () => WATER_SPEED, (v) => (WATER_SPEED = v), [0, 4], 0.05, 'ripple speed'),
           tune('WATER_OPACITY', () => WATER_OPACITY, (v) => (WATER_OPACITY = v), [0.2, 1], 0.02),
+          tune('WATER_LEVEL_M', () => WATER_LEVEL_M, (v) => (WATER_LEVEL_M = v), [-20, 300], 0.5, 'still water / sea level (m); raise it to flood'),
+          tune('WATER_LEVEL_SPAN', () => WATER_LEVEL_SPAN, (v) => (WATER_LEVEL_SPAN = v), [200, 60000], 100, 'how far the water plane reaches (m)'),
         ],
       },
     ],

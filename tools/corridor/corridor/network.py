@@ -455,13 +455,15 @@ def export_branches(site_dir: Path, ox: float, oy: float) -> list[dict] | None:
     from scipy.ndimage import gaussian_filter1d
     from shapely.geometry import LineString
 
-    by_id = {b["id"]: b for b in json.loads(br_p.read_text())["branches"] if b.get("id")}
+    _br = json.loads(br_p.read_text())["branches"]
+    by_id = {b["id"]: b for b in _br if b.get("id")}
+    by_pos = _br  # a branches.json written before chains carried ids: its order is the sibling order
     def finite(v, default=0.0):
         return default if v is None or not np.isfinite(v) else float(v)
 
     out = []
-    for sib in spine.get("siblings", []):
-        b = by_id.get(sib.get("id")) or {}
+    for si, sib in enumerate(spine.get("siblings", [])):
+        b = by_id.get(sib.get("id")) or (by_pos[si] if not by_id and si < len(by_pos) else None) or {}
         if not b:  # a road with no profile is still a road: emit it and say so, never drop it
             print(f"  branches no profile for {sib.get('ident')} ({sib.get('id')}) — emitted with profile: null; run `python -m corridor.network_tiles <slug>` to compute it")
         g = sib["geometry"]
@@ -472,7 +474,9 @@ def export_branches(site_dir: Path, ox: float, oy: float) -> list[dict] | None:
         ln = LineString(coords)
         fine = np.arange(0.0, ln.length, 2.0).tolist() + [ln.length]
         raw = np.array([ln.interpolate(v).coords[0] for v in fine])
-        sm = np.column_stack([gaussian_filter1d(raw[:, 0], 15.0, mode="nearest"), gaussian_filter1d(raw[:, 1], 15.0, mode="nearest")]) if len(raw) > 3 else raw
+        from .export import _smooth_on_line
+
+        sm = _smooth_on_line(raw)
         sm[0], sm[-1] = raw[0], raw[-1]
         ln2 = LineString(sm)
         s_d = np.arange(0.0, ln2.length, 10.0).tolist() + [ln2.length]
@@ -527,8 +531,14 @@ def revector(site: dict, data: Path, cache: Path) -> dict:
     # branches keep their profiles; the per-chain keys are refreshed from the new chains
     br_p = out / "branches.json"
     if br_p.exists():
+        # branches.json written before chains carried ids has neither `id` nor a name to match on;
+        # its order IS the chain order, so fall back to position rather than refusing to run.
         by_id = {c["id"]: c for c in R["chains"]}
         branches = json.loads(br_p.read_text())["branches"]
+        if branches and "id" not in branches[0]:
+            print(f"  note    branches.json predates chain ids; matching {len(branches)} branches by position", flush=True)
+            for i, b in enumerate(branches):
+                b["id"] = R["chains"][i]["id"] if i < len(R["chains"]) else f"r{i:02d}"
         for b in branches:
             c = by_id.get(b["id"])
             if c:

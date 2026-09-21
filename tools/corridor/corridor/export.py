@@ -67,6 +67,35 @@ def _read_at(path: Path, res: float, bbox=None) -> tuple[np.ndarray, dict]:
     return a.astype(np.float32), {"bbox": [float(v) for v in bbox], "res": res, "size": [w, h], "nodata": nodata}
 
 
+
+def _smooth_on_line(raw, sigma: float = 15.0, max_dev: float = 1.5):
+    """Smooth the digitising jitter out of a centreline WITHOUT leaving the road.
+
+    A plain gaussian over the vertices cuts corners: at sigma 15 samples (30 m) the spine left the
+    real centreline by up to 10.6 m on a bend, which is the road sitting visibly beside its own
+    trace in the air photo (Rich, 2026-09-21). Angular paint and a snapping camera were why the
+    smoothing went in, and those come from vertex-to-vertex direction changes, not from position —
+    so smooth, then pull every point back to within `max_dev` of the raw polyline. Jitter of a
+    metre disappears; a real curve is kept.
+    """
+    import numpy as np
+    from scipy.ndimage import gaussian_filter1d
+    from shapely.geometry import LineString, Point
+
+    if len(raw) < 4:
+        return raw
+    sm = np.column_stack([gaussian_filter1d(raw[:, 0], sigma, mode="nearest"), gaussian_filter1d(raw[:, 1], sigma, mode="nearest")])
+    sm[0], sm[-1] = raw[0], raw[-1]
+    line = LineString(raw)
+    for i in range(1, len(sm) - 1):
+        p = Point(sm[i])
+        d = p.distance(line)
+        if d > max_dev:
+            q = line.interpolate(line.project(p))
+            f = (d - max_dev) / d
+            sm[i] = (sm[i][0] + (q.x - sm[i][0]) * f, sm[i][1] + (q.y - sm[i][1]) * f)
+    return sm
+
 def export_site(site_dir: Path) -> dict:
     site = json.loads((site_dir / "site.json").read_text())
     manifest = json.loads((site_dir / "manifest.json").read_text()) if (site_dir / "manifest.json").exists() else {}
@@ -215,15 +244,33 @@ def export_site(site_dir: Path) -> dict:
     step = 10.0
     fine = np.arange(0.0, line.length, 2.0).tolist() + [line.length]
     raw = np.array([line.interpolate(v).coords[0] for v in fine])
-    sm = np.column_stack([gaussian_filter1d(raw[:, 0], 15.0, mode="nearest"), gaussian_filter1d(raw[:, 1], 15.0, mode="nearest")])
-    sm[0], sm[-1] = raw[0], raw[-1]
+    sm = _smooth_on_line(raw)
     smooth_line = LineString(sm)
     s_dense = np.arange(0.0, smooth_line.length, step).tolist() + [smooth_line.length]
     pts = np.array([smooth_line.interpolate(v).coords[0] for v in s_dense])
     if prof:
         zs = np.interp(np.array(s_dense), np.array(prof["s"]), np.array(prof["road_z"]))
     else:
-        zs = np.zeros(len(s_dense))
+        # No lidar here (the 2008 Oregon delivery has no CRS, the California coast has no EPT):
+        # the road's grade is then the bare-earth DEM under the centreline, lightly smoothed. Zero
+        # buried Ragged Point's road 33 m under its own terrain — "only terrain, no roads"
+        # (Rich, 2026-09-21).
+        dem_p = site_dir / "dem_1m.tif"
+        if dem_p.exists():
+            import rasterio as _rio
+            with _rio.open(dem_p) as _src:
+                zs = np.array([v[0] for v in _src.sample([(float(x), float(y)) for x, y in pts])], dtype=float)
+            zs[zs < -9000] = np.nan
+            if np.isnan(zs).any() and np.isfinite(zs).any():
+                ok = np.isfinite(zs)
+                zs[~ok] = np.interp(np.flatnonzero(~ok), np.flatnonzero(ok), zs[ok])
+            zs = np.nan_to_num(zs, nan=0.0)
+            if len(zs) > 9:  # a car follows the road, not the 1 m noise of a bare-earth raster
+                k = np.ones(9) / 9
+                zs = np.convolve(np.pad(zs, 4, mode="edge"), k, mode="valid")
+            print(f"  export  no lidar profile; spine grade from the DEM ({zs.min():.1f}–{zs.max():.1f} m)", flush=True)
+        else:
+            zs = np.zeros(len(s_dense))
     spine_rel = np.column_stack([pts[:, 0] - ox, pts[:, 1] - oy, zs]).round(2).tolist()
 
     siblings = []
@@ -238,7 +285,7 @@ def export_site(site_dir: Path) -> dict:
                 continue
             fine2 = np.arange(0.0, ln.length, 2.0).tolist() + [ln.length]
             raw2 = np.array([ln.interpolate(v).coords[0] for v in fine2])
-            sm2 = np.column_stack([gaussian_filter1d(raw2[:, 0], 15.0, mode="nearest"), gaussian_filter1d(raw2[:, 1], 15.0, mode="nearest")])
+            sm2 = _smooth_on_line(raw2)
             sm2[0], sm2[-1] = raw2[0], raw2[-1]
             ln2 = LineString(sm2)
             dense2 = np.array([ln2.interpolate(v).coords[0] for v in np.arange(0.0, ln2.length, step).tolist() + [ln2.length]])

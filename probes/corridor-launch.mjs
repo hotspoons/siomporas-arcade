@@ -24,6 +24,7 @@ const offset = Number(process.argv[3] ?? 0) // metres right of the centreline: 0
 const PORT = process.env.CORRIDOR_PORT ?? '5202'
 // CORRIDOR_SPEEDS=45,55  CORRIDOR_KNOBS=CAR_LAUNCH_MAX_RISE:1000
 const speeds = (process.env.CORRIDOR_SPEEDS ?? '13,22,30,40').split(',').map(Number)
+const crestOverride = process.env.CORRIDOR_CREST ? Number(process.env.CORRIDOR_CREST) : null
 const knobs = Object.fromEntries((process.env.CORRIDOR_KNOBS ?? '').split(',').filter(Boolean).map((kv) => { const [k, v] = kv.split(':'); return [k, Number(v)] }))
 const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] })
 const page = await browser.newPage({ viewport: { width: 900, height: 600 } })
@@ -33,7 +34,7 @@ await page.goto(`http://127.0.0.1:${PORT}/?lite#${site}`, { waitUntil: 'load' })
 await page.waitForFunction(() => document.querySelector('#status')?.textContent === '' && window.corridor, null, { timeout: 240000 })
 await page.keyboard.press('Tab')
 
-const r = await page.evaluate(({ offset, speeds, knobs }) => {
+const r = await page.evaluate(({ offset, speeds, knobs, crestOverride }) => {
   const { drive, site } = window.corridor
   const car = drive.car
   // knobs through the same setters the F6 panel uses (window.corridor.tune === TUNE_TABS)
@@ -148,7 +149,7 @@ const r = await page.evaluate(({ offset, speeds, knobs }) => {
   // The number the story needs: the slowest speed at which a given crest actually throws the car.
   // Drive the 200 m around one crest at a held speed and see whether a 'launch' fires; bisect.
   const launchesAt = (sc, v) => {
-    const s0 = Math.max(10, sc - 120)
+    const s0 = Math.max(10, Math.min(sc - 40, sc - 120))
     const p0 = at(s0)
     car.place(p0.x, p0.z, Math.atan2(p0.dir.z, p0.dir.x))
     car.speed = v
@@ -162,7 +163,7 @@ const r = await page.evaluate(({ offset, speeds, knobs }) => {
         if (d < best) { best = d; bs = s + ds }
       }
       s = bs
-      if (s > L - 10) break
+      if (s > Math.min(L - 5, sc + 60)) break
       const Ld = Math.max(12, v * 0.7)
       const tgt = at(s + Ld)
       const alpha = wrap(Math.atan2(tgt.z - car.pos.z, tgt.x - car.pos.x) - car.yaw)
@@ -185,7 +186,10 @@ const r = await page.evaluate(({ offset, speeds, knobs }) => {
     }
     return { crest_s: sc, min_launch_speed_mps: +hi.toFixed(1), min_launch_mph: +(hi * 2.2369).toFixed(0) }
   }
-  const sharpest = merged.filter((c) => c.s > 60 && c.s < L - 60).slice(0, 3)
+  // a crest 26 m from the end of the site is still a crest (Chesterfield's is at s=3556 of 3582)
+  const sharpest = crestOverride != null
+    ? [{ s: crestOverride, v_launch: merged.find((c) => Math.abs(c.s - crestOverride) < 20)?.v_launch ?? null }]
+    : merged.filter((c) => c.s > 50 && c.s < L - 20).slice(0, 3)
 
   return {
     site: site.manifest.slug,
@@ -197,6 +201,6 @@ const r = await page.evaluate(({ offset, speeds, knobs }) => {
     crests: merged.slice(0, 10),
     runs: speeds.map(drive1),
   }
-}, { offset, speeds, knobs })
+}, { offset, speeds, knobs, crestOverride })
 console.log(JSON.stringify(r, null, 1))
 await browser.close()

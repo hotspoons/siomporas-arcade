@@ -118,3 +118,41 @@ export class FlyControls {
     if (cy !== null && cam.position.y < cy + T.CAM_MIN_HEIGHT) cam.position.y = cy + T.CAM_MIN_HEIGHT
   }
 }
+
+/**
+ * Put the eye on the road: nearest point of the carriageway spline to where the camera is now, at
+ * CAM_SIT_HEIGHT above the surface, looking along the road. The view from a driver's eye without
+ * having to drive — which is the one that tells you whether the paint, the shoulder and the verge
+ * are the right size.
+ *
+ * The camera's near plane is 0.5 m and the vertical fov 60 degrees, so the ground first enters the
+ * frustum 0.5 / sin(30 deg) = 1.0 m ahead of the eye horizontally; at any eye height above 0.25 m
+ * the road surface is drawn right up to the bottom of the frame and nothing is clipped. Both
+ * CAM_MIN_HEIGHT (0.4) and CAM_SIT_HEIGHT are comfortably above that.
+ */
+export function sitOnRoad(
+  camera: THREE.PerspectiveCamera,
+  orbit: { target: THREE.Vector3; update: () => void },
+  spineAt: (s: number) => { pos: THREE.Vector3; dir: THREE.Vector3 },
+  length: number,
+): void {
+  let best = Infinity, bs = 0
+  for (let s = 0; s <= length; s += 2) {
+    const p = spineAt(s)
+    const d = (p.pos.x - camera.position.x) ** 2 + (p.pos.z - camera.position.z) ** 2
+    if (d < best) { best = d; bs = s }
+  }
+  for (let s = Math.max(0, bs - 2); s <= Math.min(length, bs + 2); s += 0.25) {
+    const p = spineAt(s)
+    const d = (p.pos.x - camera.position.x) ** 2 + (p.pos.z - camera.position.z) ** 2
+    if (d < best) { best = d; bs = s }
+  }
+  const p = spineAt(bs)
+  const dir = p.dir.clone().setY(0).normalize()
+  camera.up.set(0, 1, 0)
+  camera.position.set(p.pos.x, p.pos.y + T.CAM_SIT_HEIGHT, p.pos.z)
+  const ahead = spineAt(Math.min(length, bs + 40))
+  orbit.target.set(ahead.pos.x, ahead.pos.y + T.CAM_SIT_HEIGHT * 0.6, ahead.pos.z)
+  if (orbit.target.distanceTo(camera.position) < 1) orbit.target.copy(camera.position).addScaledVector(dir, 40)
+  orbit.update()
+}

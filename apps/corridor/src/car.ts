@@ -248,8 +248,17 @@ export class Car {
     // the ground is CAR_LAUNCH_GAP below it the car is in the air. Stuntin tests one tick's change in the
     // ground's vertical speed; on a lidar strip interpolated between stations that fires at every seam,
     // so here the same condition is integrated instead — a slope break has to keep falling away.
+    // `hover` is integrated ballistically and clamped into [ref - 0.01, ref + GAP + 0.01]. Because
+    // `ref` is last tick's ground and `pos.y` is rewritten to the ground every tick, the floor only
+    // bites while the car is ON the ground; once the ground starts falling away hover sits above it
+    // and the gap accumulates across the crest as intended. Measured at Chesterfield's Hawkins Road
+    // brow, the clamp costs about 1 mph of launch threshold against a free integration (83 vs 84 at
+    // GAP 0.2, 77 vs 78 at 0.1) — it makes launching very slightly harder, and nothing else.
     this.hover = clamp(this.hover + this.vy * dt, ref - 0.01, ref + T.CAR_LAUNCH_GAP + 0.01)
-    this.vy -= T.CAR_GRAVITY * dt
+    // CAR_CREST_GAIN > 1 lets the car hold its line over a crest longer than gravity really allows,
+    // which is the arcade knob for "this brow should throw the car". It scales only the separation
+    // test; the flight itself (tickAir) always uses real gravity.
+    this.vy -= (T.CAR_GRAVITY / Math.max(0.05, T.CAR_CREST_GAIN)) * dt
     if (this.hover <= gh + 1e-4 || Math.abs(v) <= T.CAR_LAUNCH_MIN_SPEED) {
       // The contact point's vertical speed while the ground carries the car, and — via launch() —
       // the vertical speed the car leaves a crest with. Reading it as one tick's change in sampled
@@ -352,32 +361,38 @@ export class Car {
     const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.5, 1.5), new THREE.MeshStandardMaterial({ color: 0x1c1f24, roughness: 0.2, metalness: 0.5 }))
     cabin.position.set(-0.2, 0.95, 0)
     g.add(cabin)
-    // The view from the driver's seat: a dash below the eye line, two A-pillars and a header rail
-    // to frame it, and a wheel that turns with the steering. Hidden until setCockpit(true), and the
-    // body shell is hidden then instead, so the eye is not sitting inside a solid box.
+    // The view from the driver's seat. Mesh-local y is height above the wheel contact, so with
+    // CAR_RIDE 0.35 and COCKPIT_EYE_UP 1.15 the eye sits at local (0.35, 1.50, COCKPIT_EYE_SIDE),
+    // and everything here is placed relative to THAT. Hidden until setCockpit(true), when the body
+    // shell is hidden instead so the eye is not sitting inside a solid box.
+    // Everything here has to sit BEYOND the camera's 0.5 m near plane, or it is clipped away and
+    // you see the road through your own dashboard. The eye is at local (0.35, 1.50), so the near
+    // face of the dash starts at x = 0.93 — 0.58 m ahead — and its top at y = 1.33 is 0.17 m below
+    // the eye, which at that distance is above the bottom edge of a 60-degree frame (0.33 m below).
+    // It reaches down to the floor so nothing shows underneath it.
     const interior = new THREE.Group()
     interior.visible = false
     const dashMat = new THREE.MeshStandardMaterial({ color: 0x14161a, roughness: 0.85, metalness: 0.05 })
-    const dash = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.26, 1.7), dashMat)
-    dash.position.set(0.62, 0.95, 0)
+    const dash = new THREE.Mesh(new THREE.BoxGeometry(0.78, 1.2, 2.0), dashMat)
+    dash.position.set(1.32, 0.73, 0) // x 0.93..1.71, y 0.13..1.33
     interior.add(dash)
-    const cowl = new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.06, 1.75), dashMat)
-    cowl.position.set(0.95, 1.02, 0)
-    cowl.rotation.z = -0.13 // the bonnet falling away ahead
+    const cowl = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.06, 2.0), dashMat)
+    cowl.position.set(1.95, 1.3, 0)
+    cowl.rotation.z = -0.09 // the bonnet falling away ahead
     interior.add(cowl)
-    const header = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.1, 1.6), dashMat)
-    header.position.set(0.55, 1.62, 0)
+    const header = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.1, 1.75), dashMat)
+    header.position.set(1.0, 1.78, 0)
     interior.add(header)
-    for (const zz of [-0.78, 0.78]) {
-      const pillar = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.8, 0.12), dashMat)
-      pillar.position.set(0.58, 1.25, zz)
-      pillar.rotation.z = 0.22
+    for (const zz of [-0.85, 0.85]) {
+      const pillar = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.6, 0.14), dashMat)
+      pillar.position.set(1.02, 1.5, zz)
+      pillar.rotation.z = 0.26
       interior.add(pillar)
     }
-    const wheelRim = new THREE.Mesh(new THREE.TorusGeometry(0.17, 0.022, 8, 24), new THREE.MeshStandardMaterial({ color: 0x0c0d10, roughness: 0.6 }))
-    wheelRim.position.set(0.42, 1.0, -0.38)
+    const wheelRim = new THREE.Mesh(new THREE.TorusGeometry(0.19, 0.026, 8, 24), new THREE.MeshStandardMaterial({ color: 0x0c0d10, roughness: 0.6 }))
+    wheelRim.position.set(1.0, 1.24, T.COCKPIT_EYE_SIDE)
     wheelRim.rotation.y = Math.PI / 2
-    wheelRim.rotation.x = 0.35 // raked toward the driver
+    wheelRim.rotation.x = 0.42 // raked toward the driver
     interior.add(wheelRim)
     this.steeringWheel = wheelRim
     this.interior = interior

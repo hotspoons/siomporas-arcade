@@ -73,3 +73,23 @@ button.primary:hover { background: #14302c; }
   background: var(--panel); border: 1px solid #2a2f38; border-top: 0; color: var(--fg); font-size: 12px;
 }
 .pv-help { width: min(1500px, 94vw); color: #6d737b; font-size: 11px; padding: 6px 2px; box-sizing: border-box; }
+
+/* road cross-section preview (road-and-car): a floating panel, not part of #body, so the editor's
+   refresh() rebuilding the mode panel never tears it down mid-drag */
+.roadwidth {
+  position: fixed;
+  right: 12px;
+  bottom: 12px;
+  width: min(340px, calc(100vw - 24px));
+  padding: 10px 12px 12px;
+  border-radius: 10px;
+  background: rgba(16, 18, 22, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+  z-index: 40;
+}
+.roadwidth.hidden { display: none; }
+.roadwidth-title { font-weight: 600; margin-bottom: 6px; }
+.roadwidth-note { opacity: 0.75; font-size: 11px; line-height: 1.45; margin: 8px 0 10px; }
+.roadwidth-apply { width: 100%; }
+.roadwidth-apply:disabled { opacity: 0.45; }

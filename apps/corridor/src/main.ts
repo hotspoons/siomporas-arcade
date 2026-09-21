@@ -3,7 +3,7 @@ import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { buildSite, describe, type Site } from './scene'
 import { Car, type CarInput } from './car'
-import { FlyControls } from './fly'
+import { FlyControls, sitOnRoad } from './fly'
 import { MiniMap } from './minimap'
 import { TunePanel } from '@apex/engine/app/TunePanel'
 import * as T from './tuning'
@@ -443,6 +443,7 @@ addEventListener('keydown', (e) => {
     case 'KeyH': toTop(); break
     case 'KeyC': if (drive.on) { drive.cockpit = !drive.cockpit; break } void copyStance(); break
     case 'KeyX': void copyStance(); break
+    case 'KeyG': if (!drive.on && site) sitOnRoad(camera, orbit, site.spineAt, site.manifest.spine.length_m); break
     case 'KeyM': setPanelHidden(!panel.classList.contains('hidden')); break
     case 'KeyN': minimap?.setExpanded(!minimap.expanded); break
     case 'KeyR': if (drive.on && site && drive.car) { const p = site.spineAt(site.manifest.spine.photo_s); const side = p.dir.clone().cross(up).multiplyScalar(1.83); drive.car.place(p.pos.x + side.x, p.pos.z + side.z, Math.atan2(p.dir.z, p.dir.x)) } break
@@ -510,7 +511,7 @@ function frame() {
       // nothing brought it back (probes/corridor-cockpit.mjs: the car moved 0.48 m in 2 s in chase
       // and 0.00 m in cockpit). The eye rides the body, so it pitches and rolls with the car.
       const lean = new THREE.Vector3(0, T.COCKPIT_EYE_UP, 0).applyAxisAngle(car.right, -Math.atan(car.pitch))
-      const eye = car.pos.clone().add(lean).add(car.forward.clone().multiplyScalar(T.COCKPIT_EYE_FWD))
+      const eye = car.pos.clone().add(lean).add(car.forward.clone().multiplyScalar(T.COCKPIT_EYE_FWD)).addScaledVector(car.right, T.COCKPIT_EYE_SIDE)
       camera.position.copy(eye)
       const ahead = car.forward.clone().applyAxisAngle(up, drive.yaw)
       camera.up.set(0, 1, 0).applyAxisAngle(car.forward, Math.atan(car.roll) * T.COCKPIT_ROLL)

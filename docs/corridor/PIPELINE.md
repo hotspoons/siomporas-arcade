@@ -505,6 +505,7 @@ See `DESIGN.md` for the rules and `SITES.md` for what each baked site actually c
 ## Appendix · Running it
 
 ```bash
+tools/corridor/.venv/bin/python -m corridor.verify [slug]     # is this safe to publish? (see below)
 just corridor-sites                    # photos → sites.json (or hand-edit sites.json for a lat/lon)
 just corridor-fetch <slug>             # one site; `all`; `--skip lidar` for a quick pass
 just corridor-export [slug]            # rewrite web/ + index.json without refetching (--resurface re-measures)
@@ -514,6 +515,14 @@ just corridor-view                     # :5185; /editor.html on the same server
 just corridor-tunnel                   # devproxy :5190 + cloudflared, for the phone
 tools/corridor/.venv/bin/python tools/surfaces/gen.py [class] # regenerate a texture set
 ```
+
+**Verify before you believe a bake.** `python -m corridor.verify [slug ...]` checks what a consumer
+relies on and exits with the number of bad sites: the manifest parses and holds no non-finite
+number anywhere (one literal `NaN` makes `JSON.parse` refuse the whole file); `manifest.json`
+exists beside `web/`, so a bake that died before lidar cannot pass as a finished site; every layer
+named is on disk, every listed tile has its `dem.png` and its `zmin`/`zscale`; a network's branch
+ids are present, unique and agree with `spine_utm.json`. It exists because every data bug found on
+2026-09-21 rendered perfectly and was wrong.
 
 Licences: USGS 3DEP and NAIP public domain; OSM ODbL (attribute; share-alike on derived *data*);
 Macrostrat CC-BY; ez-tree MIT; TRELLIS.2 per its licence banner in the recon service.

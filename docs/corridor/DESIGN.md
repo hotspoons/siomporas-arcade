@@ -154,9 +154,16 @@ per lithology (Catoctin metabasalt 0.4× the verge, Sideling shale 1.06×) so it
 polygon, not thresholded. Manifest `rock`: polygons with area, slope, relief, intensity ratio,
 NAIP colour, `in_cut`, rock type.
 
-**Dead ends** (`network.py`, Rich's rule): an unshared chain end more than 60 m from the query box,
-with no unlisted `highway` way on its node, is a **cul-de-sac by default** — `dead_end` is an
-authored override, never a measurement. Radius 9 m residential, 8 m living_street, 6 m service.
+**Dead ends** (`network.py`, Rich's rule): a chain end is an end when no **routable** way other
+than that chain's own ways uses its node, and it is more than 60 m from the query box; then it is
+a **cul-de-sac by default** — `dead_end` is an authored override, never a measurement. Radius 9 m
+residential/tertiary, 8 m living_street, 6 m service; `highway=turning_circle`/`turning_loop` on
+the node makes it `source: "osm"` and outranks the junction test. Two things had to be measured on
+all 21 of Arrowhead Farms' end nodes before this was right: **driveways do not make a junction**
+(every bulb there has 2–4 `highway=service` ways on it, which suppressed all of them), and the
+exclusion is **that chain's own ways, not the whole network** (a cul-de-sac's inner end sits
+mid-way along the street it comes off, so that street is never in the end-node set — excluding all
+our roads put a bulb on the joined end of nearly every street). 9 ends on Arrowhead, 12 on Crofton.
 
 **When to distrust the DTM and fall back to the DEM**: not "most of this raster is nodata" — a
 corridor's DTM is a 200 m strip inside a bbox and is *always* mostly nodata (Sideling 38 % valid).
@@ -202,6 +209,15 @@ from pavement, all on `groundAt`; South Mountain: 910 greenstone, nearest 4.16 m
   `ShaderMaterial` is fixed at compile time.
 - A missing optional JSON must 404 (the middleware does); Vite's SPA fallback would answer
   `index.html` with a 200 and `r.json()` dies on `<!doctype`.
+- **A key that indexes data must be intrinsic, never positional.** Network chain ids were `r00`,
+  `r01`, … by enumeration, and `branches.json` keys every road's profile by them. Lowering the
+  minimum chain length from 120 m to 50 m added two chains *in the middle* of Crofton's list and
+  shifted every id after them: 21 of 39 branches would have been published carrying a different
+  road's grade and structures, and 3 roads would have been dropped for want of a match. Ids are now
+  `r<smallest OSM way id in the chain>`, which survives any change to the chain *set* and changes
+  only when that chain's own ways change — and then it simply fails to match and is recomputed,
+  which is a failure you can see. Caught by diffing `branches.json` against `spine_utm.json` before
+  calling the data good; it would have rendered perfectly and been wrong everywhere.
 - **Python writes `NaN` into JSON and `JSON.parse` refuses the whole file.** Anything sampled from
   a raster that can be nodata (a VRT through `LazyRaster`, an out-of-coverage DEM) must be filled
   or guarded before it is written. One NaN token cost the Crofton network site its entire

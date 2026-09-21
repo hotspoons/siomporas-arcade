@@ -260,8 +260,11 @@ def measure_network(site_dir: Path) -> dict | None:
     faces: list[dict] = []
     thresholds: dict = {}
     prim = measure(site_dir)
+    prim_ident = (sp.get("primary") or {}).get("ident")
     if prim:
         thresholds = prim["thresholds"]
+        for f in prim["faces"]:
+            f["road"] = prim_ident  # every face names its road, primary included
         faces += prim["faces"]
     for sib in sp.get("siblings", []):
         b = branches.get(sib.get("id"))

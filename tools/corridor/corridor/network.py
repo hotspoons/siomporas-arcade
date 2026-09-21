@@ -120,8 +120,15 @@ def roads(site: dict, frame: Frame, cache: Path) -> dict:
     prim_id = site.get("primary")
     prim_cands = [c for c in chains if c["ident"] == prim_id] or chains
     primary = max(prim_cands, key=lambda c: c["length_m"])
-    for i, c in enumerate(chains):
-        c["id"] = f"r{i:02d}"
+    # STABLE IDS, not positional. Chain ids key the branch profiles in branches.json, and numbering
+    # them by enumeration meant that lowering MIN_CHAIN_M from 120 m to 50 m — two extra chains,
+    # inserted in the middle — renumbered everything after them: 21 of Crofton's 39 branches ended
+    # up carrying a DIFFERENT road's grade, silently. An id derived from the chain's own smallest
+    # OSM way id survives any change to the chain SET, and changes only when that chain's own ways
+    # change — in which case the stale profile fails to match and is recomputed, which is the safe
+    # failure rather than the silent one.
+    for c in chains:
+        c["id"] = f"r{min(w['id'] for w in c['ways'])}"
     # junctions: nodes shared between chains; position from any way's geometry that carries the node
     node_xy: dict[int, tuple[float, float]] = {}
     for c in chains:
@@ -158,44 +165,46 @@ def dead_ends(chains: list[dict], frame: Frame, cache: Path, radius_m: float, si
     """Mark each chain end as a cul-de-sac, a true dead end, or neither (Rich, 2026-09-21).
 
     "If a street dead ends, assume a cul de sac, make it so this can be overridden into a true dead
-    end." So the bake's job is to say which ends are ends at all, and to use OSM's own answer where
-    OSM has one. Three things can be true of a chain end:
+    end." So the bake says which ends are ends, and uses OSM's own answer where OSM has one.
 
-      * it MEETS another road — one of ours (a junction we already have) or one we did not ask for.
-        The second needs asking: one Overpass query for every end node returns the ways that use it,
-        so an end shared with any other `highway` way is a junction, not a dead end. Chesterfield
-        Road ending on a road outside the `roads` list must not grow a bulb.
-      * it was CLIPPED by our own query box (within BOUNDARY_M of it). The road continues in the
-        real world; the world just stops here.
-      * it is genuinely an end. OSM marks the bulb with `highway=turning_circle` (a paved bulb) or
-        `turning_loop` (an island); when the node carries one, source is "osm" and the kind is a
-        cul-de-sac. Otherwise we ASSUME a cul-de-sac, which is Rich's rule, and the editor can
-        override it to `dead_end`.
+    MEASURED on arrowhead-farms-network, because the first version found 1 end in a neighbourhood
+    that is almost entirely cul-de-sacs, and both reasons were mine:
+
+      * 8 of its 21 end nodes carry `highway=turning_circle` — OSM marks the bulb explicitly, and
+        that tag should decide the question on its own.
+      * every bulb also has DRIVEWAYS on it (`highway=service`), 2 to 4 of them. Counting any
+        highway way as "this end meets another road" suppressed every one. Only a way a car could
+        route through counts: service roads, tracks, footways and paths do not make a junction.
+        And the comparison has to be against OUR WAYS at that node, not our chain-END records —
+        a node where two of our own ways meet is still one road.
 
     Radius is to the pavement EDGE: 9 m for a residential bulb (the 18 m diameter US standard),
     6 m for a service road. Written onto each chain as `dead_ends`; nothing else moves.
     """
+    ROUTABLE = {"motorway", "trunk", "primary", "secondary", "tertiary", "unclassified", "residential", "living_street", "motorway_link", "trunk_link", "primary_link", "secondary_link", "tertiary_link"}
     ends: dict[int, list[tuple[dict, float]]] = {}
     for c in chains:
         ways = c["ways"]
         for node, s_at in ((ways[0]["nodes"][0], 0.0), (ways[-1]["nodes"][-1], float(c["line"].length))):
             ends.setdefault(node, []).append((c, s_at))
-    tags: dict[int, dict] = {}
-    way_count: dict[int, int] = {}
+    node_tags: dict[int, dict] = {}
+    node_routable: dict[int, set[int]] = {}
     if ends:
-        # Overpass `id:` takes COMMAS (semicolons are a syntax error and every mirror 400s on it),
-        # and a way printed with `out tags` carries no node list — so the ways go out as `skel`,
-        # which is ids + nodes and is what "how many roads use this node" actually needs.
+        # `id:` takes COMMAS (semicolons are a syntax error and every mirror 400s), and the ways go
+        # out as `body` — ids AND nodes AND tags — because the node list says which end a way
+        # touches and the tags say whether it is a road or somebody's driveway.
         ids = ",".join(str(n) for n in sorted(ends))
-        q = f"[out:json][timeout:180];node(id:{ids})->.e;.e out tags;way(bn.e)[highway];out skel;"
+        q = f"[out:json][timeout:180];node(id:{ids})->.e;.e out tags;way(bn.e)[highway];out body;"
         try:
             for el in osm.overpass(q, cache)["elements"]:
                 if el["type"] == "node":
-                    tags[el["id"]] = el.get("tags", {})
-                elif el["type"] == "way":
-                    for nid in el.get("nodes", []) or []:
-                        if nid in ends:
-                            way_count[nid] = way_count.get(nid, 0) + 1
+                    node_tags[el["id"]] = el.get("tags", {})
+                    continue
+                if el.get("tags", {}).get("highway") not in ROUTABLE:
+                    continue
+                for nid in el.get("nodes", []) or []:
+                    if nid in ends:
+                        node_routable.setdefault(nid, set()).add(el["id"])
         except Exception as exc:  # a dead end we cannot confirm is better than a failed bake
             print(f"  ends    overpass failed ({exc}); assuming every unshared end is a cul-de-sac")
     ox, oy = frame.origin
@@ -203,22 +212,23 @@ def dead_ends(chains: list[dict], frame: Frame, cache: Path, radius_m: float, si
         c["dead_ends"] = []
     n_osm = n_assumed = 0
     for node, owners in ends.items():
-        shared_here = len({c["id"] for c, _ in owners}) > 1  # two of OUR chains meet
-        t = tags.get(node, {})
-        hw = t.get("highway")
-        osm_bulb = hw in ("turning_circle", "turning_loop")
-        # ways using this node, ours included; more than the chains that own it means an unlisted road
-        ours = len(owners)
-        meets_other = way_count.get(node, ours) > ours
+        t = node_tags.get(node, {})
+        osm_bulb = t.get("highway") in ("turning_circle", "turning_loop")
         for c, s_at in owners:
-            if shared_here or meets_other:
+            # Any ROUTABLE way at this node other than THIS CHAIN's own ways makes it a junction —
+            # including one of our own roads, which is the usual case: a cul-de-sac's inner end
+            # sits MID-WAY along the street it comes off, so that street never appears as an "end"
+            # here. Excluding every road in the network (the first fix) put a bulb on the joined end
+            # of almost every street in the neighbourhood.
+            own = {w["id"] for w in c["ways"]}
+            if not osm_bulb and (node_routable.get(node, set()) - own):
                 continue
             p = c["line"].interpolate(s_at)
             if min(abs(p.x - (ox - radius_m)), abs(p.x - (ox + radius_m)), abs(p.y - (oy - radius_m)), abs(p.y - (oy + radius_m))) < BOUNDARY_M:
-                continue  # clipped by our own query box
+                continue  # clipped by our own query box: the road continues, our world does not
             rad = DEAD_END_RADIUS.get(c["highway"] or "", DEAD_END_DEFAULT)
             c["dead_ends"].append({
-                "s": round(s_at, 1), "kind": "cul_de_sac", "radius_m": round(float(t.get("radius_m") or rad), 1),
+                "s": round(s_at, 1), "kind": "cul_de_sac", "radius_m": round(rad, 1),
                 "source": "osm" if osm_bulb else "assumed", "node": node,
                 "x": round(float(p.x - ox), 1), "y": round(float(p.y - oy), 1),
             })
@@ -446,16 +456,16 @@ def export_branches(site_dir: Path, ox: float, oy: float) -> list[dict] | None:
     from shapely.geometry import LineString
 
     _br = json.loads(br_p.read_text())["branches"]
-    by_id = {b["id"]: b for b in _br if "id" in b}
-    by_pos = _br  # pre-id files: the order is the sibling order
+    by_id = {b["id"]: b for b in _br if b.get("id")}
+    by_pos = _br  # a branches.json written before chains carried ids: its order is the sibling order
     def finite(v, default=0.0):
         return default if v is None or not np.isfinite(v) else float(v)
 
     out = []
     for si, sib in enumerate(spine.get("siblings", [])):
-        b = by_id.get(sib.get("id")) or (by_pos[si] if not by_id and si < len(by_pos) else None)
-        if not b:
-            continue
+        b = by_id.get(sib.get("id")) or (by_pos[si] if not by_id and si < len(by_pos) else None) or {}
+        if not b:  # a road with no profile is still a road: emit it and say so, never drop it
+            print(f"  branches no profile for {sib.get('ident')} ({sib.get('id')}) — emitted with profile: null; run `python -m corridor.network_tiles <slug>` to compute it")
         g = sib["geometry"]
         parts = [g["coordinates"]] if g["type"] == "LineString" else g["coordinates"]
         coords = [c for part in parts for c in part]

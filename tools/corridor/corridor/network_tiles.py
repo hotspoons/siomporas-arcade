@@ -412,10 +412,16 @@ def _fill_profile(prof: dict) -> dict:
     return prof
 
 
+def _raster(ldir: Path, kind: str) -> Path:
+    """The VRT of a tiled bake, or the single GeoTIFF of a small one. LazyRaster reads either."""
+    vrt = ldir / f"{kind}.vrt"
+    return vrt if vrt.exists() else ldir / f"{kind}.tif"
+
+
 def profile_tiled(line: LineString, ldir: Path, pts: dict | None, road_index: int | None = None) -> dict:
-    """lidar.profile over the VRTs with a LazyRaster, and only this road's near points."""
-    dtm = LazyRaster(ldir / "dtm.vrt")
-    chm = LazyRaster(ldir / "chm.vrt")
+    """lidar.profile over the rasters with a LazyRaster, and only this road's near points."""
+    dtm = LazyRaster(_raster(ldir, "dtm"))
+    chm = LazyRaster(_raster(ldir, "chm"))
     try:
         if pts is None:
             sub = {"x": np.zeros(0), "y": np.zeros(0), "z": np.zeros(0), "cls": np.zeros(0, np.uint8), "rn": np.zeros(0, np.uint8), "nr": np.zeros(0, np.uint8), "i": np.zeros(0, np.uint16)}
@@ -468,7 +474,16 @@ def reprofile(site_dir: Path) -> dict:
     bc = np.clip(((pts["x"] - xmin) / 2.0).astype(np.int64), 0, bw - 1)
     pts["road"] = band[br, bc].astype(np.int16)
     print(f"  reprofile {len(pts['x']):,} near-road points, {len(chains)} chains", flush=True)
-    branches_old = {b["id"]: b for b in json.loads((site_dir / "branches.json").read_text())["branches"]} if (site_dir / "branches.json").exists() else {}
+    # defensive on the READ as well as the write: a branches.json from a run that crashed part-way
+    # can hold records with no id, and re-profiling is exactly how you recover from that
+    branches_old: dict[str, dict] = {}
+    if (site_dir / "branches.json").exists():
+        try:
+            for b in json.loads((site_dir / "branches.json").read_text()).get("branches", []):
+                if b.get("id"):
+                    branches_old[b["id"]] = b
+        except Exception as exc:
+            print(f"  reprofile ignoring unreadable branches.json ({exc})", flush=True)
     branches = []
     for i, c in enumerate(chains):
         prof = profile_tiled(c["line"], ldir, pts, i + 1)
@@ -476,8 +491,23 @@ def reprofile(site_dir: Path) -> dict:
             (site_dir / "profile.json").write_text(json.dumps(prof))
             print(f"  reprofile primary {c['id']}: {len(prof['structures'])} structures", flush=True)
             continue
+        # The record is rebuilt from the SIBLING in spine_utm.json, which is authoritative after a
+        # revector — matching the previous branches.json by id silently produced records with no
+        # id or ident at all the first time the ids changed shape, and the export then died on
+        # KeyError 'id'. Anything the old record had and the sibling does not (nothing today) is
+        # carried over, never the other way round.
+        sib = c["sib"]
         old = branches_old.get(c["id"], {})
-        branches.append({**old, "profile": {"step_m": prof["step_m"], "s": prof["s"], "road_z": prof["road_z"]}, "structures": prof["structures"]})
+        branches.append({
+            **old,
+            "id": sib["id"], "ident": sib.get("ident"), "name": sib.get("name"), "ref": sib.get("ref"),
+            "highway": sib.get("highway"), "lanes": sib.get("lanes"), "oneway": sib.get("oneway"),
+            "length_m": sib.get("length_m"), "junctions": sib.get("junctions") or [],
+            "dead_ends": sib.get("dead_ends") or [],
+            "s_on_primary": old.get("s_on_primary") if old.get("s_on_primary") is not None else round(float(chains[0]["line"].project(c["line"].interpolate(0.5, normalized=True))), 1),
+            "profile": {"step_m": prof["step_m"], "s": prof["s"], "road_z": prof["road_z"]},
+            "structures": prof["structures"],
+        })
     (site_dir / "branches.json").write_text(json.dumps({"branches": branches}))
     print(f"  reprofile {len(branches)} branches, {sum(len(b['structures']) for b in branches)} structures", flush=True)
     return {"chains": len(chains), "branches": len(branches)}

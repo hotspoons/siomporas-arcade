@@ -18,6 +18,7 @@ await page.goto(`http://127.0.0.1:${PORT}/#${SLUG}`, { waitUntil: 'domcontentloa
 await page.waitForFunction((slug) => window.corridor?.site?.manifest?.slug === slug, SLUG, { timeout: 300000 })
 await page.keyboard.press('m')
 if (process.env.MODE) await page.evaluate((m) => { window.__mode = m }, process.env.MODE)
+if (process.env.KIND) await page.evaluate((k) => { window.__kind = k }, process.env.KIND)
 
 console.log(await page.evaluate(({ eye }) => {
   const c = window.corridor, site = c.site, L = site.layers, mod = c.THREE
@@ -35,6 +36,29 @@ console.log(await page.evaluate(({ eye }) => {
       m4.decompose(p, q, s)
       at.push({ x: p.x, y: p.y, z: p.z, yaw: mesh.userData.src[i].yaw_deg })
     }
+  }
+  if (window.__mode === 'barriers') {
+    // the longest run of the kind asked for, seen from beside it at eye height
+    const want = window.__kind ?? 'guard_rail'
+    const runs = (site.manifest.barriers ?? []).filter((r) => r.kind === want)
+    if (!runs.length) return `no ${want} on this site`
+    let best = runs[0]
+    for (const r of runs) if (r.coords.length > best.coords.length) best = r
+    const mid = best.coords[Math.floor(best.coords.length / 2)]
+    const nxt = best.coords[Math.min(best.coords.length - 1, Math.floor(best.coords.length / 2) + 4)]
+    const mx = mid[0]
+    const mz = -mid[1]
+    const dx = nxt[0] - mid[0]
+    const dz = -(nxt[1] - mid[1])
+    const l = Math.hypot(dx, dz) || 1
+    // stand off to one side, looking along the run so its length is what fills the frame
+    const px = (-dz / l) * 9
+    const pz = (dx / l) * 9
+    const gy = site.groundAt(mx + px, mz + pz) ?? 0
+    c.camera.position.set(mx + px - (dx / l) * 18, gy + 2.2, mz + pz - (dz / l) * 18)
+    c.orbit.target.set(mx + (dx / l) * 25, gy + 0.9, mz + (dz / l) * 25)
+    c.orbit.update()
+    return JSON.stringify({ mode: 'barriers', kind: want, runVerts: best.coords.length, at: [Math.round(mx), Math.round(mz)], counts: site.barrierCounts })
   }
   if (window.__mode === 'parking') {
     // the biggest lot that actually got stalls: centre of the paint's bounding box, seen from a
@@ -87,7 +111,7 @@ console.log(await page.evaluate(({ eye }) => {
 for (const on of [false, true]) {
   await page.evaluate((v) => {
     const L = window.corridor.site.layers
-    const g = window.__mode === 'parking' ? L.parking : L.furniture
+    const g = window.__mode === 'parking' ? L.parking : window.__mode === 'barriers' ? L.barriers : L.furniture
     g.visible = v
   }, on)
   await page.waitForTimeout(1500)

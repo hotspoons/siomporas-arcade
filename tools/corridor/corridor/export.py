@@ -510,6 +510,75 @@ def _parking(site_dir: Path, frame, ox: float, oy: float, bbox) -> list[dict]:
     return out
 
 
+def _barriers(site_dir: Path, frame, ox: float, oy: float, bbox) -> list[dict]:
+    """`barrier=guard_rail|fence|wall|hedge` ways, and `barrier=gate` nodes on them.
+
+    Guard rail is the one that matters for a rural road and it is NOT on the suburban acceptance
+    site: Crofton has 178 fences, 24 walls, 3 hedges and zero guard rail, while frederick-i70 has
+    39 and frederick-i270 has 22. It is an interstate feature in this region, so it is built here
+    and proven there.
+
+    Heights are OSM's where tagged and by kind otherwise. The grade is the bare-earth DEM sampled
+    along the way, lightly smoothed — a rail follows the ground, and a fence posted off a single
+    end height staircases across a bank.
+    """
+    gj_p = site_dir / "osm.geojson"
+    if not gj_p.exists():
+        return []
+    import rasterio
+    from shapely.geometry import LineString, box
+    from shapely.ops import transform as shp_transform
+
+    KIND = {"guard_rail": 0.72, "fence": 1.5, "wall": 1.8, "hedge": 1.4, "city_wall": 3.0, "retaining_wall": 1.6}
+    site_box = box(*bbox)
+    dem_p = site_dir / "dem_1m.tif"
+    src = rasterio.open(dem_p) if dem_p.exists() else None
+    out: list[dict] = []
+    for f in json.loads(gj_p.read_text())["features"]:
+        p = f["properties"]
+        kind = p.get("barrier")
+        if kind not in KIND or f["geometry"]["type"] != "LineString":
+            continue
+        try:
+            ln = shp_transform(lambda x, y, z=None: frame.from_wgs(x, y), LineString(f["geometry"]["coordinates"]))
+        except Exception:
+            continue
+        ln = ln.intersection(site_box)
+        for part in (ln.geoms if ln.geom_type == "MultiLineString" else [ln]):
+            if part.is_empty or part.geom_type != "LineString" or part.length < 4:
+                continue
+            # a post every couple of metres wants a vertex every couple of metres
+            step = 2.0
+            ss = np.arange(0.0, part.length, step).tolist() + [part.length]
+            pts = np.array([part.interpolate(v).coords[0] for v in ss])
+            if src is not None:
+                zs = np.array([v[0] for v in src.sample([(float(x), float(y)) for x, y in pts])], dtype=float)
+                zs[zs < -9000] = np.nan
+                if np.isfinite(zs).any():
+                    ok = np.isfinite(zs)
+                    zs[~ok] = np.interp(np.flatnonzero(~ok), np.flatnonzero(ok), zs[ok])
+                    if len(zs) > 4:
+                        zs = np.convolve(np.pad(np.nan_to_num(zs), 2, mode="edge"), np.ones(5) / 5, mode="valid")
+                else:
+                    zs = np.zeros(len(pts))
+            else:
+                zs = np.zeros(len(pts))
+            h = None
+            try:
+                h = float(str(p.get("height", "")).rstrip("m ").strip())
+            except ValueError:
+                h = None
+            out.append({
+                "kind": kind,
+                "height_m": round(h or KIND[kind], 2),
+                "material": p.get("material") or p.get("fence_type"),
+                "coords": np.column_stack([pts[:, 0] - ox, pts[:, 1] - oy, np.nan_to_num(zs)]).round(2).tolist(),
+            })
+    if src is not None:
+        src.close()
+    return out
+
+
 def _power(site_dir: Path, frame, ox: float, oy: float, bbox) -> dict:
     """Power lines and their supports: `power=line|minor_line` ways, `power=tower|pole` nodes.
 
@@ -838,6 +907,7 @@ def export_site(site_dir: Path) -> dict:
         "power": _power(site_dir, Frame.at(site["lon"], site["lat"]), ox, oy, bbox),
         "signals": _signals(site_dir, Frame.at(site["lon"], site["lat"]), ox, oy, bbox),
         "parking": _parking(site_dir, Frame.at(site["lon"], site["lat"]), ox, oy, bbox),
+        "barriers": _barriers(site_dir, Frame.at(site["lon"], site["lat"]), ox, oy, bbox),
         "landuse": derived["landuse"],
         "pois": derived["pois"],
         "cuts": features.get("cuts"),

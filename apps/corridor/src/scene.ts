@@ -14,7 +14,7 @@ import { Adjustments, NEUTRAL as NEUTRAL_ADJ } from './adjust'
 import { buildPlacements, loadCatalog, loadPlacements } from './placements'
 import { buildBuildings } from './buildings'
 import { buildPower } from './power'
-import { buildFurniture } from './furniture'
+import { buildBarriers, buildFurniture } from './furniture'
 import { buildParking } from './parking'
 import { buildBridges, flattenSpine, loadStructureOverrides, suppressed } from './structures'
 import { loadSurfaceSets, overpassMesh, pavedOffset, pavedWidth, roadMesh, stations, taperedLanes, treesFromCanopy, type SurfaceSet } from './props'
@@ -28,7 +28,7 @@ export const toWorld = (x: number, y: number, z: number) => new THREE.Vector3(x,
 export interface Site {
   manifest: Manifest
   group: THREE.Group
-  layers: { imagery?: THREE.Mesh; canopy?: THREE.Mesh; trees?: THREE.Group; road: THREE.Group; horizon?: THREE.Mesh; structures: THREE.Group; spine: THREE.Group; markers: THREE.Group; placements: THREE.Group; buildings: THREE.Group; power: THREE.Group; furniture: THREE.Group; parking: THREE.Group; rocks: THREE.Group; water: THREE.Group }
+  layers: { imagery?: THREE.Mesh; canopy?: THREE.Mesh; trees?: THREE.Group; road: THREE.Group; horizon?: THREE.Mesh; structures: THREE.Group; spine: THREE.Group; markers: THREE.Group; placements: THREE.Group; buildings: THREE.Group; power: THREE.Group; furniture: THREE.Group; parking: THREE.Group; barriers: THREE.Group; rocks: THREE.Group; water: THREE.Group }
   /** how many footprints were massed, and how many had a real measured height */
   buildingStats: { count: number; gabled: number; fromLidar: number }
   adjustments: Adjustments
@@ -39,6 +39,8 @@ export interface Site {
   furnitureCounts: { masts: number; signs: number; movedOffPavement: number; stillOnPavement: number; onTheLeft: number; noRoadNearby: number; armNoRoad: number }
   /** what parking was paved, and why the rest was not */
   parkingCounts: { lots: number; stalls: number; skippedOnRoad: number; skippedKind: number; fromAisles: number; fromFallback: number }
+  /** guard rail, fence, wall and hedge: runs, metres and posts by kind */
+  barrierCounts: Record<string, { runs: number; metres: number; posts: number }>
   /** terrain-and-data: rock instances placed per rock type, and what water was drawn (for probes) */
   rockCounts: Record<string, number>
   waterStats: { lines: number; areas: number; falls: number; length_m: number }
@@ -1044,6 +1046,8 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
   group.add(furniture.group)
   const parking = buildParking(manifest, groundAtWorld, edgeDistanceWorld)
   group.add(parking.group)
+  const barriers = buildBarriers(manifest, groundAtWorld)
+  group.add(barriers.group)
   // authored bridges over the road (structures.json bridge_over)
   structures.add(await buildBridges(overrides, catalog, spineAt, groundAtWorld, (s) => pavedHalfAt(s) * 2))
 
@@ -1065,13 +1069,14 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
   return {
     manifest,
     group,
-    layers: { imagery: terrain, canopy, trees, road, horizon, structures, spine, markers, placements: placementsGroup, buildings: built.group, power: power.group, furniture: furniture.group, parking: parking.group, rocks: rocks.group, water: water.group },
+    layers: { imagery: terrain, canopy, trees, road, horizon, structures, spine, markers, placements: placementsGroup, buildings: built.group, power: power.group, furniture: furniture.group, parking: parking.group, barriers: barriers.group, rocks: rocks.group, water: water.group },
     buildingStats: built.stats,
     adjustments,
     treeCount,
     grass: grassRef,
     furnitureCounts: furniture.counts,
     parkingCounts: parking.counts,
+    barrierCounts: barriers.counts,
     rockCounts: rocks.counts,
     waterStats: { lines: water.lines, areas: water.areas, falls: water.falls, length_m: water.length_m },
     updateNear,

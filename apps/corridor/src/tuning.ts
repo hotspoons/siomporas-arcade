@@ -275,6 +275,8 @@ export let PARKING_MIN_GRID_M2 = 400
 export let PARKING_AISLE_GAP = 0.3
 /** a lot with fewer than one stall per this many m² gets the squared grid as well (m²) */
 export let PARKING_FILL_M2 = 45
+/** every barrier's height × this */
+export let BARRIER_HEIGHT_SCALE = 1
 
 export interface TuneTab {
   name: string
@@ -529,6 +531,7 @@ export const TUNE_TABS: TuneTab[] = [
           tune('PARKING_MIN_GRID_M2', () => PARKING_MIN_GRID_M2, (v) => (PARKING_MIN_GRID_M2 = v), [50, 5000], 50, 'no fallback grid below this area (m²)'),
           tune('PARKING_AISLE_GAP', () => PARKING_AISLE_GAP, (v) => (PARKING_AISLE_GAP = v), [0, 3], 0.05, 'clearance past the aisle edge (m)'),
           tune('PARKING_FILL_M2', () => PARKING_FILL_M2, (v) => (PARKING_FILL_M2 = v), [10, 300], 5, 'm² per stall below which the grid fills in too'),
+          tune('BARRIER_HEIGHT_SCALE', () => BARRIER_HEIGHT_SCALE, (v) => (BARRIER_HEIGHT_SCALE = v), [0.3, 3], 0.05, 'guard rail, fence, wall and hedge height ×'),
         ],
       },
     ],

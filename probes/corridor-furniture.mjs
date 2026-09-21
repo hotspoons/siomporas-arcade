@@ -42,6 +42,7 @@ console.log(JSON.stringify(await page.evaluate(() => {
     arm: { checked: 0, overAsphalt: 0, overAsphaltPct: 0, examplesMissing: [] },
     triangles: 0,
     parking: null,
+    barriers: null,
   }
   if (!g) return { ...out, note: 'no furniture group' }
 
@@ -134,6 +135,32 @@ console.log(JSON.stringify(await page.evaluate(() => {
     }
     res.surfaceOnRoadPct = res.surfaceChecked ? +((100 * res.surfaceOnRoad) / res.surfaceChecked).toFixed(2) : 0
     out.parking = res
+    out.triangles += res.triangles
+  }
+  // --- barriers ---------------------------------------------------------------------------------
+  const bg = site.layers.barriers
+  if (bg) {
+    const res = { counts: site.barrierCounts, baked: (site.manifest.barriers ?? []).length, meshes: [], triangles: 0, belowGround: 0, checked: 0 }
+    for (const m of bg.children) {
+      const tris = m.geometry.index ? m.geometry.index.count / 3 : m.geometry.getAttribute('position').count / 3
+      const n = m.isInstancedMesh ? m.count : 1
+      res.meshes.push({ name: m.name, instances: n, tris: tris * n })
+      res.triangles += tris * n
+    }
+    // a barrier follows the ground: no vertex of a swept ribbon should be buried under it, which
+    // is what happens if the bake's grade and the viewer's ground disagree
+    for (const m of bg.children) {
+      if (m.isInstancedMesh) continue
+      const a = m.geometry.getAttribute('position')
+      const step = Math.max(1, Math.floor(a.count / 3000))
+      for (let i = 0; i < a.count; i += step) {
+        const gy = site.groundAt(a.getX(i), a.getZ(i))
+        if (gy === null) continue
+        res.checked++
+        if (a.getY(i) < gy - 0.25) res.belowGround++
+      }
+    }
+    out.barriers = res
     out.triangles += res.triangles
   }
   return out

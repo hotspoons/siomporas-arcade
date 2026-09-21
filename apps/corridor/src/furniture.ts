@@ -369,3 +369,223 @@ export function buildFurniture(
 
   return { group, counts }
 }
+
+// --- barriers: guard rail, fence, wall, hedge ------------------------------------------------
+//
+// Guard rail is the one that matters for a rural road, and the acceptance site does not have any:
+// Crofton is suburban arterials with 178 fences, 24 walls, 3 hedges and ZERO guard rail, while
+// frederick-i70 has 39 runs of it and frederick-i270 has 22. It is an interstate feature in this
+// region. So it is built to the real profile and proven on frederick-i70.
+//
+// A W-beam is not a plank. What your eye reads at speed is the two corrugations catching the light
+// along their length, so the beam is swept as a five-point profile — out, in, out, in, out — which
+// is four quad strips per segment and the only thing that makes it look like highway rail rather
+// than a fence board.
+
+/** A cross-section, swept along a way: lateral offset from the line, and height above the ground. */
+type Profile = { out: number; y: number }[]
+
+const PROFILE: Record<string, { profile: Profile; colour: number; postEvery: number; postW: number; postColour: number }> = {
+  // 0.72 m to the top of the beam, the US standard; posts every 2 m (6'3" in practice)
+  guard_rail: {
+    profile: [
+      { out: 0, y: 0.42 },
+      { out: 0.06, y: 0.52 },
+      { out: 0, y: 0.6 },
+      { out: 0.06, y: 0.68 },
+      { out: 0, y: 0.76 },
+    ],
+    colour: 0x9aa0a4,
+    postEvery: 2,
+    postW: 0.14,
+    postColour: 0x7c8286,
+  },
+  fence: {
+    profile: [
+      { out: 0, y: 0.35 },
+      { out: 0, y: 0.38 },
+      { out: 0, y: 1.0 },
+      { out: 0, y: 1.03 },
+    ],
+    colour: 0x8d8b82,
+    postEvery: 2.5,
+    postW: 0.08,
+    postColour: 0x6f6d66,
+  },
+  wall: {
+    profile: [
+      { out: -0.12, y: 0 },
+      { out: -0.12, y: 1 },
+      { out: 0.12, y: 1 },
+      { out: 0.12, y: 0 },
+    ],
+    colour: 0x9e9a90,
+    postEvery: 0,
+    postW: 0,
+    postColour: 0x9e9a90,
+  },
+  // a retaining wall has no posts; without its own entry it fell through to the fence profile and
+  // grew 94 of them on Crofton
+  retaining_wall: {
+    profile: [
+      { out: -0.18, y: 0 },
+      { out: -0.14, y: 1 },
+      { out: 0.14, y: 1 },
+      { out: 0.18, y: 0 },
+    ],
+    colour: 0x8f8b83,
+    postEvery: 0,
+    postW: 0,
+    postColour: 0x8f8b83,
+  },
+  hedge: {
+    profile: [
+      { out: -0.45, y: 0.05 },
+      { out: -0.38, y: 0.75 },
+      { out: 0, y: 1 },
+      { out: 0.38, y: 0.75 },
+      { out: 0.45, y: 0.05 },
+    ],
+    colour: 0x46612f,
+    postEvery: 0,
+    postW: 0,
+    postColour: 0x46612f,
+  },
+}
+
+export interface BarrierResult {
+  group: THREE.Group
+  counts: Record<string, { runs: number; metres: number; posts: number }>
+}
+
+/**
+ * Build every barrier on the site.
+ *
+ * The profile is swept along each way with the height scaled to whatever OSM said (or the kind's
+ * default), so a 3 m city wall and a 1.5 m garden fence come out of the same code. `wall` and
+ * `hedge` scale their whole profile, including the lateral spread — a tall hedge is a fat hedge —
+ * while a guard rail does not, because a W-beam is the same beam whatever the post height.
+ */
+export function buildBarriers(
+  manifest: Manifest,
+  groundAt: (x: number, z: number) => number | null,
+): BarrierResult {
+  const group = new THREE.Group()
+  group.name = 'barriers'
+  const counts: Record<string, { runs: number; metres: number; posts: number }> = {}
+  const runs = manifest.barriers ?? []
+  if (!runs.length) return { group, counts }
+
+  const byKind = new Map<string, { pos: number[]; nor: number[]; col: number[]; idx: number[]; posts: { x: number; y: number; z: number; yaw: number; h: number }[] }>()
+
+  for (const run of runs) {
+    const spec = PROFILE[run.kind] ?? PROFILE.fence
+    const c = new THREE.Color(spec.colour)
+    if (!byKind.has(run.kind)) byKind.set(run.kind, { pos: [], nor: [], col: [], idx: [], posts: [] })
+    const b = byKind.get(run.kind)!
+    const st = (counts[run.kind] ??= { runs: 0, metres: 0, posts: 0 })
+    st.runs++
+
+    // the way, in world coordinates, on the ground
+    const pts = run.coords.map((p) => {
+      const x = p[0]
+      const z = -p[1]
+      return { x, z, y: groundAt(x, z) ?? p[2] }
+    })
+    if (pts.length < 2) continue
+
+    // height: OSM's where it had one, scaled by the knob. A guard rail keeps its beam profile and
+    // only its posts grow; a wall or a hedge scales bodily.
+    const hScale = (run.height_m || 1) * T.BARRIER_HEIGHT_SCALE
+    const bodily = run.kind === 'wall' || run.kind === 'hedge' || run.kind === 'retaining_wall'
+    const prof = spec.profile.map((q) => ({ out: bodily ? q.out * hScale : q.out, y: bodily ? q.y * hScale : q.y * T.BARRIER_HEIGHT_SCALE }))
+
+    let ring: number[] = []
+    for (let i = 0; i < pts.length; i++) {
+      const a = pts[Math.max(0, i - 1)]
+      const d = pts[Math.min(pts.length - 1, i + 1)]
+      const dx = d.x - a.x
+      const dz = d.z - a.z
+      const l = Math.hypot(dx, dz) || 1
+      const px = -dz / l
+      const pz = dx / l
+      const here: number[] = []
+      for (const q of prof) {
+        here.push(b.pos.length / 3)
+        b.pos.push(pts[i].x + px * q.out, pts[i].y + q.y, pts[i].z + pz * q.out)
+        b.nor.push(px, 0, pz)
+        b.col.push(c.r, c.g, c.b)
+      }
+      if (i > 0) {
+        for (let k = 0; k + 1 < prof.length; k++) {
+          const a0 = ring[k]
+          const a1 = ring[k + 1]
+          const b0 = here[k]
+          const b1 = here[k + 1]
+          b.idx.push(a0, b0, b1, a0, b1, a1)
+        }
+        st.metres += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].z - pts[i - 1].z)
+      }
+      ring = here
+    }
+
+    // posts, spaced along the run rather than per vertex — the bake puts a vertex every 2 m but a
+    // fence wants one every 2.5 and a rail every 2, and a short segment must not get a post pile
+    if (spec.postEvery > 0) {
+      let carried = 0
+      for (let i = 1; i < pts.length; i++) {
+        const dx = pts[i].x - pts[i - 1].x
+        const dz = pts[i].z - pts[i - 1].z
+        const seg = Math.hypot(dx, dz)
+        const yaw = Math.atan2(dx, dz)
+        for (let t = spec.postEvery - carried; t < seg; t += spec.postEvery) {
+          const u = t / seg
+          b.posts.push({
+            x: pts[i - 1].x + dx * u,
+            z: pts[i - 1].z + dz * u,
+            y: pts[i - 1].y + (pts[i].y - pts[i - 1].y) * u,
+            yaw,
+            h: prof[prof.length - 1].y,
+          })
+          st.posts++
+        }
+        carried = (carried + seg) % spec.postEvery
+      }
+    }
+  }
+
+  for (const [kind, b] of byKind) {
+    const spec = PROFILE[kind] ?? PROFILE.fence
+    if (b.pos.length) {
+      const geo = new THREE.BufferGeometry()
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(b.pos, 3))
+      geo.setAttribute('normal', new THREE.Float32BufferAttribute(b.nor, 3))
+      geo.setAttribute('color', new THREE.Float32BufferAttribute(b.col, 3))
+      geo.setIndex(b.idx)
+      const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: kind === 'hedge' ? 0.95 : 0.6, metalness: kind === 'guard_rail' ? 0.4 : 0, side: THREE.DoubleSide }))
+      mesh.name = `barrier:${kind}`
+      mesh.frustumCulled = false
+      group.add(mesh)
+    }
+    if (b.posts.length) {
+      const g = new THREE.BoxGeometry(spec.postW, 1, spec.postW * 0.6)
+      g.translate(0, 0.5, 0)
+      tint(g, spec.postColour)
+      const mesh = new THREE.InstancedMesh(g, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.65, metalness: 0.3 }), b.posts.length)
+      mesh.name = `barrier:${kind}:posts`
+      const m4 = new THREE.Matrix4()
+      const q = new THREE.Quaternion()
+      const up = new THREE.Vector3(0, 1, 0)
+      b.posts.forEach((p, i) => {
+        q.setFromAxisAngle(up, p.yaw)
+        m4.compose(new THREE.Vector3(p.x, p.y, p.z), q, new THREE.Vector3(1, p.h, 1))
+        mesh.setMatrixAt(i, m4)
+      })
+      mesh.instanceMatrix.needsUpdate = true
+      mesh.frustumCulled = false
+      group.add(mesh)
+    }
+  }
+  for (const k of Object.keys(counts)) counts[k].metres = Math.round(counts[k].metres)
+  return { group, counts }
+}

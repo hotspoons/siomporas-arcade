@@ -144,6 +144,10 @@ export let ROCK_OUTCROP_PER_M2 = 0.04
 /** boulder size multiplier (m at scale 1), and how far off any pavement edge a rock must stay (m) */
 export let ROCK_SIZE = 1.1
 export let ROCK_PAVEMENT_CLEAR = 1.5
+/** density multiplier where the geology says the face is sand or gravel rather than rock: a
+ *  coastal-plain bank (the whole Crofton region, the Potomac Group) is not a boulder field, but it
+ *  does carry riprap and washed-out lumps. 0 turns them off entirely. */
+export let ROCK_SAND_DENSITY = 0.2
 /** water surface above the channel bottom (m), ribbon width multiplier, ripple speed, opacity */
 export let WATER_DEPTH = 0.25
 export let WATER_WIDTH_SCALE = 1.0
@@ -355,6 +359,7 @@ export const TUNE_TABS: TuneTab[] = [
           tune('ROCK_OUTCROP_PER_M2', () => ROCK_OUTCROP_PER_M2, (v) => (ROCK_OUTCROP_PER_M2 = v), [0, 0.5], 0.01, 'per m² of exposed rock'),
           tune('ROCK_SIZE', () => ROCK_SIZE, (v) => (ROCK_SIZE = v), [0.2, 4], 0.05, 'm'),
           tune('ROCK_PAVEMENT_CLEAR', () => ROCK_PAVEMENT_CLEAR, (v) => (ROCK_PAVEMENT_CLEAR = v), [0, 10], 0.1, 'no rock nearer the pavement than this (m)'),
+          tune('ROCK_SAND_DENSITY', () => ROCK_SAND_DENSITY, (v) => (ROCK_SAND_DENSITY = v), [0, 1], 0.05, 'density on sand/gravel faces (coastal plain)'),
         ],
       },
       {

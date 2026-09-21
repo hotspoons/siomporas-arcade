@@ -206,7 +206,16 @@ def export_site(site_dir: Path) -> dict:
         with rasterio.open(site_dir / "naip.tif") as src:
             w = int(round((bbox[2] - bbox[0]) / 1.0))
             h = int(round((bbox[3] - bbox[1]) / 1.0))
-            rgb = src.read(out_shape=(3, h, w), resampling=Resampling.average)
+            # WINDOW it. `naip.tif` is fetched over the LIDAR corridor (bbox + 150 m each side);
+            # reading the whole file and labelling it with the site bbox squeezed 2570 m of
+            # photograph into a 2280 m frame — a 12% stretch, zero error at the centre and ±145 m
+            # at the edges. That is the imagery sliding off the roads that Rich kept reporting and
+            # that three "is the data aligned" measurements missed, because a stretch is not a
+            # shift and they all sampled near the middle (2026-09-21).
+            from rasterio.windows import from_bounds as _from_bounds
+
+            win = _from_bounds(*bbox, transform=src.transform)
+            rgb = src.read(window=win, out_shape=(3, h, w), resampling=Resampling.average, boundless=True, fill_value=0)
         # warm it a touch as well: NAIP's blue channel runs high and the drape read as teal
         img = vivid(Image.fromarray(np.moveaxis(rgb, 0, -1), "RGB"), 1.3, 1.1)
         r_, g_, b_ = img.split()

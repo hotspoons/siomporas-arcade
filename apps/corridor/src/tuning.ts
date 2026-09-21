@@ -122,6 +122,9 @@ export let CAR_CLIMB_SLOPE = 1.5
 export let CAR_LAUNCH_MIN_SPEED = 20
 /** the ground must fall this far away from under the wheels (m) before the car is airborne (corridor: hysteresis over stuntin's one-tick test, which a faceted lidar strip would trip every station) */
 export let CAR_LAUNCH_GAP = 0.9
+/** m/s: the most vertical speed a crest can impart. A suspension cannot throw a car harder than
+ *  this however steep the height data pretends to be; 8 m/s is a 3.3 m jump. */
+export let CAR_LAUNCH_MAX_RISE = 8
 /** vertical impact speed that wrecks the car (m/s) */
 export let CAR_CRASH_IMPACT_SPEED = 30
 /** how fast the nose follows the arc in the air, and the roll settles (1/s) */
@@ -318,6 +321,7 @@ export const TUNE_TABS: TuneTab[] = [
         keys: [
           tune('CAR_LAUNCH_MIN_SPEED', () => CAR_LAUNCH_MIN_SPEED, (v) => (CAR_LAUNCH_MIN_SPEED = v), [0, 40], 1, 'slower than this and a crest is just followed (m/s)'),
           tune('CAR_LAUNCH_GAP', () => CAR_LAUNCH_GAP, (v) => (CAR_LAUNCH_GAP = v), [0.02, 2], 0.02, 'ground must fall this far away before you are airborne (m)'),
+          tune('CAR_LAUNCH_MAX_RISE', () => CAR_LAUNCH_MAX_RISE, (v) => (CAR_LAUNCH_MAX_RISE = v), [0, 30], 0.5, 'most vertical speed a crest can impart (m/s); 8 ≈ a 3.3 m jump'),
           tune('CAR_CRASH_IMPACT_SPEED', () => CAR_CRASH_IMPACT_SPEED, (v) => (CAR_CRASH_IMPACT_SPEED = v), [5, 80], 1, 'vertical m/s that wrecks the car'),
           tune('CAR_AIR_NOSE_RATE', () => CAR_AIR_NOSE_RATE, (v) => (CAR_AIR_NOSE_RATE = v), [0.2, 10], 0.1, 'nose follows the arc, 1/s'),
           tune('CAR_AIR_ROLL_SETTLE', () => CAR_AIR_ROLL_SETTLE, (v) => (CAR_AIR_ROLL_SETTLE = v), [0.2, 10], 0.1, 'roll levels out, 1/s'),

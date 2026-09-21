@@ -146,7 +146,9 @@ export function roadMesh(st: Station[], lanesAt: (s: number) => number, classAt:
   mg.setAttribute('position', new THREE.Float32BufferAttribute(marks, 3))
   mg.setAttribute('color', new THREE.Float32BufferAttribute(mcol, 3))
   mg.setIndex(midx)
-  g.add(new THREE.Mesh(mg, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide })))
+  const marksMesh = new THREE.Mesh(mg, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide }))
+  marksMesh.name = 'road:markings' // probes read the paint off this geometry (probes/corridor-geometry.mjs)
+  g.add(marksMesh)
   return g
 }
 

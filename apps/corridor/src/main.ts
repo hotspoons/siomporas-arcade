@@ -91,7 +91,9 @@ async function loadSite(slug: string) {
   site = await buildSite(manifest, status, LITE, renderer, scene.fog as THREE.FogExp2, season)
   applySky(season)
   scene.add(site.group)
-  ;(window as unknown as { corridor: unknown }).corridor = { site, scene, camera, drive } // for probes and the console
+  // `tune` is TUNE_TABS itself, so a probe can read and set any knob through the same getters and
+  // setters the F6 panel uses — importing tuning.ts from a probe gets an HMR-dead copy instead.
+  ;(window as unknown as { corridor: unknown }).corridor = { site, scene, camera, drive, tune: TUNE_TABS } // for probes and the console
   applyLayers()
   fillInfo(manifest)
   fly ??= new FlyControls(camera, orbit, canvas, (x, z) => site?.groundAt(x, z) ?? null)

@@ -246,7 +246,19 @@ export class Car {
     this.hover = clamp(this.hover + this.vy * dt, ref - 0.01, ref + T.CAR_LAUNCH_GAP + 0.01)
     this.vy -= T.CAR_GRAVITY * dt
     if (this.hover <= gh + 1e-4 || Math.abs(v) <= T.CAR_LAUNCH_MIN_SPEED) {
-      this.vy = dt > 0 ? (gh - ref) / dt : 0
+      // The contact point's vertical speed while the ground carries the car, and — via launch() —
+      // the vertical speed the car leaves a crest with. Reading it as one tick's change in sampled
+      // height, (gh - ref)/dt, makes it the height field's derivative DIVIDED BY dt: at 30 m/s a
+      // tick is 0.25 m, so a 0.42 m step in the DTM becomes vy = 50 m/s and a 128 m ballistic arc.
+      // That is what threw the car 101 m up at Bowie s≈2524, where the baked road profile drops 5 m
+      // into an undetected underpass (probes/corridor-groundstep.mjs).
+      // A car following the ground at speed v rises at v × (slope along the nose), and `pitch` has
+      // just measured that slope over a 3 m base — the car's own length, which is the shortest
+      // wavelength a car can actually follow. Take vy from that geometry, so a step in the data is a
+      // bump and only a sustained ramp is a jump; CAR_LAUNCH_MAX_RISE then caps what any ramp can
+      // impart, because a suspension cannot throw a car harder than that however steep the data is.
+      const rise = v * this.pitch
+      this.vy = clamp(rise, -T.CAR_LAUNCH_MAX_RISE, T.CAR_LAUNCH_MAX_RISE)
       this.hover = gh
     } else if (this.hover - gh > T.CAR_LAUNCH_GAP) {
       this.launch(v)

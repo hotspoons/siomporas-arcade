@@ -288,10 +288,35 @@ def fetch_site(site: dict, half_width: float, lidar_half_width: float, skip: set
             branches.append(branch_rec(c, bp))
         print(f"  branch  {len(branches)} branches profiled, {sum(len(b['structures']) for b in branches)} structures on them", flush=True)
     elif "lidar" not in skip:
+        # the single-image path: the whole corridor's points in memory, as for a single road
+        ldir = out / "lidar"
+        ldir.mkdir(exist_ok=True)
+        lbbox = snap_bbox(lidar_corridor.bounds)
+        pts, meta = lidar.fetch_points(frame, lbbox, cache, clip=lidar_corridor)
+        if (out / "dem_1m.tif").exists():
+            f = lidar.check_units(pts, out / "dem_1m.tif")
+            if f != 1.0:
+                pts["z"] = pts["z"] * f
+            meta["z_factor"] = f
+        meta["classification"] = lidar.classification_quality(pts)
+        r = lidar.rasters(pts, lbbox, frame, lidar_corridor, ldir)
+        prof = lidar.profile(prim["line"], r["dtm"], r["chm"], r["transform"], r["pts"])
+        (out / "profile.json").write_text(json.dumps(prof))
+        cls = r["classes"]
+        print(f"  lidar   {r['points_in_corridor']:,} pts in corridor; ground {cls.get('ground', 0):,} veg {cls.get('veg_high', 0) + cls.get('veg_med', 0) + cls.get('veg_low', 0):,} building {cls.get('building', 0):,} bridge_deck {cls.get('bridge_deck', 0):,}")
+        for st in prof["structures"]:
+            print(f"  struct  {st['kind']:8s} s={st['s_start']:.0f}..{st['s_end']:.0f} m ({st['length_m']} m)  clearance={st['clearance_m']}  above_ground={st['height_above_ground_m']}")
+        manifest["lidar"] = {**meta, "points_in_corridor": r["points_in_corridor"], "classes": cls, "rasters": r["rasters"], "structures": prof["structures"]}
         for c in R["chains"]:
             if c is prim:
                 continue
-            branches.append({"id": c["id"], "ident": c["ident"], "name": c["name"], "ref": c["ref"], "highway": c["highway"], "lanes": c["lanes"], "oneway": c["oneway"], "length_m": c["length_m"], "s_on_primary": round(float(prim["line"].project(c["line"].interpolate(0.5, normalized=True))), 1), "junctions": c["junctions"], "profile": None, "structures": []})
+            branches.append(branch_rec(c, lidar.profile(c["line"], r["dtm"], r["chm"], r["transform"], r["pts"])))
+        print(f"  branch  {len(branches)} branches profiled, {sum(len(b['structures']) for b in branches)} structures on them", flush=True)
+    else:
+        for c in R["chains"]:
+            if c is prim:
+                continue
+            branches.append(branch_rec(c, None))
     (out / "branches.json").write_text(json.dumps({"branches": branches}))
     manifest["branches"] = {"count": len(branches), "structures": sum(len(b["structures"]) for b in branches)}
     try:

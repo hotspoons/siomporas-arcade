@@ -6,12 +6,14 @@
 //   node probes/tree-lod-fade.mjs [fadeM ...]
 import { chromium } from 'playwright'
 
-const fades = process.argv.slice(2).map(Number)
+const args = process.argv.slice(2)
+const slug = args.find((a) => /^[a-z]/.test(a)) ?? 'frederick-i70'
+const fades = args.filter((a) => /^[\d.]+$/.test(a)).map(Number)
 const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] })
 const page = await browser.newPage({ viewport: { width: 900, height: 600 } })
 await page.route('**/@vite/client', (r) => r.abort())
 page.on('pageerror', (e) => console.log('pageerror:', e.message))
-await page.goto('http://localhost:5207/#frederick-i70', { waitUntil: 'load' })
+await page.goto(`http://localhost:5207/#${slug}`, { waitUntil: 'load' })
 await page.waitForFunction(() => !!window.corridor?.site?.updateNear, null, { timeout: 300000 })
 await page.waitForTimeout(1500)
 
@@ -31,11 +33,13 @@ for (const fade of fades.length ? fades : [0, 30]) {
       return out
     }
     const len = site.manifest.spine.length_m
+    const from = Math.round(len * 0.35)
+    const to = Math.min(len - 20, from + 300)
     const steps = []
     let prev = null
     let inside = 0, outside = 0
     // walk 300 m along the road in 10 m steps: every tree at the boundary crosses it
-    for (let s = 1200; s <= 1500; s += 10) {
+    for (let s = from; s <= to; s += 10) {
       const at = site.spineAt(s)
       const fwd = at.dir.clone()
       site.updateNear(at.pos.clone().add(new THREE.Vector3(0, 1.4, 0)), 0, fwd, 0)
@@ -71,10 +75,10 @@ for (const fade of fades.length ? fades : [0, 30]) {
     }
     const sum = (k) => steps.reduce((a, x) => a + x[k], 0)
     const max = (k) => steps.reduce((a, x) => Math.max(a, x[k]), 0)
-    return { len, n: count, steps: steps.length, hardTotal: sum('hard'), hardMax: max('hard'), softTotal: sum('soft'), partialMax: max('partial'), inside, outside }
+    return { len, from, to, n: count, steps: steps.length, hardTotal: sum('hard'), hardMax: max('hard'), softTotal: sum('soft'), partialMax: max('partial'), inside, outside }
   }, { fade })
   if (r.err) { console.log(r.err); break }
-  console.log(`TREE_FADE_M=${String(fade).padStart(3)}  over ${r.steps} steps of 10 m, ${r.n} far trees:`)
+  console.log(`${slug}  TREE_FADE_M=${String(fade).padStart(3)}  s ${r.from}->${r.to}, ${r.steps} steps of 10 m, ${r.n} far trees:`)
   console.log(`   hard switches (card <-> model in ONE step): ${r.hardTotal} total, worst step ${r.hardMax}`)
   console.log(`   partial steps (dissolving):                 ${r.softTotal} total, most mid-fade at once ${r.partialMax}`)
   if (r.inside + r.outside > 0) {

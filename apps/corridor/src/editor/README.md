@@ -181,6 +181,57 @@ Two corrections to the first version, both measured rather than reasoned:
   `LOOK.summer.fog = 1.8e-5`, fog over the whole impostor range is under a thousandth. Set it for
   consistency with the viewer, not because you will see it.
 
+## What an area can say (the `adjust` keys)
+
+An area is a polygon plus a bag of overrides. `null` on any of them means "as the bake inferred
+it", which is why they are all optional — an area is a correction, not a description.
+
+| key | values | consumed by |
+|---|---|---|
+| `canopy_scale`, `canopy_offset_m` | numbers | baked into the CHM at load; changes tree heights AND the tree list |
+| `tree_density` | 0–1, thins only | there are no canopy cells to grow extra trees from |
+| `grass_height`, `grass_density` | numbers | the grass ring, live |
+| `ground_offset_m` | ±10 m | deforms the corridor strip off the pavement |
+| `surface_class` | the `tools/surfaces` set names | the road texture at spine stations inside the polygon |
+| `species` | oak, ash, aspen, pine | which tree the near field grows |
+| `markings` | none, class, full | how much paint. Site default is the `ROAD_MARKINGS` knob |
+| `centre_line` | dashed, solid, solid_left, solid_right | where overtaking is allowed |
+| `cover` | crop, pasture, orchard, scrub, bare | what grows where it is not roadside verge |
+| `crop` | corn, soy, wheat, hay, fallow | only read when `cover` is crop |
+| `row_heading_deg`, `row_spacing_m` | numbers | the rows themselves |
+
+**Composition where areas overlap** (`src/adjust.ts`, the viewer's): scales multiply, offsets add,
+and every CATEGORICAL key — including the four new strings, and the two crop numbers, which are
+field attributes rather than corrections — goes to the SMALLEST polygon. That matches what the
+editor selects on a click, so the area you can see yourself picking is the one that wins.
+
+**Why these are area keys and not a new interval file.** road-and-car asked for `centre_line` as
+an interval with `s_start`/`s_end`. An area polygon already IS a stretch of road, and
+`python -m corridor areas` already emits a band polygon along the spine for every surface-class
+run — so the shapes exist, are drawn, and are draggable. A new file would have been a new mode, a
+new save path and a new composition rule for one enum.
+
+**Picking `cover: crop` defaults `row_heading_deg` to the road's bearing** at that polygon's
+centroid. A field's rows are never random and almost never due north, and the road is the one
+direction we know.
+
+## Per-site knobs — `tuning.json`
+
+`tools/corridor/data/sites/<slug>/tuning.json`, `{ version: 1, values: { KNOB: number } }`.
+Sideling Hill is closed forest on a mountain grade, Bowie is a suburban arterial, Ecola is a
+coast; one `GRASS_RADIUS` cannot be right for all of them.
+
+- **The file beats the browser.** `TunePanel` persists every knob to localStorage when it is
+  constructed — that is the scratch pad while driving. The site file is applied after the site
+  loads, so it lands on top. Copy JSON in a panel is how a scratch value is promoted into a file.
+- **A file is undone when you leave the site.** Without that, frederick's `GRASS_RADIUS=44`
+  survives into south-mountain for the rest of the session and looks like a bug in
+  south-mountain, which is where someone would go hunting.
+- **Only differences from the CODE defaults are stored**, and the baseline is captured before the
+  panels restore localStorage. Capture it later and you are diffing against a scratch pad; store
+  all 112 knobs and every future default change is a merge conflict.
+- An unknown knob is reported in the status line, not swallowed.
+
 ## Adding a mode
 
 Mark your scene group with `markOverlay()` from `preview.ts`. The preview hides every direct

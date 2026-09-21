@@ -637,6 +637,7 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
     }
     const makeStrip = () => buildStrip(spineAt, curveLen, -latMin + VERGE, latMax + VERGE, (x, z) => edgeDistance(x, z), heightAt, imagery, manifest.bbox, grassTex('grass_mown'), grassTex('grass_rough'), lite ? 4 : 2, lite ? 2 : 1, adjustments.active ? (x, y) => adjustments.at(x, y, adjScratch).ground_offset_m : null, null, stripEdgeLimitAt, stripCanopyAt, litter)
     let strip = makeStrip()
+    strip.setLitter(LOOK[currentSeason].litter.tint, LOOK[currentSeason].litter.spread)
     road.add(strip.mesh)
     sinkUnderStrip(terrainGeo, strip.sinkAt, strip.coverAt)
     // one strip per branch; where another road's strip already covers the ground (within VERGE of
@@ -984,7 +985,10 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
       near.setSeason(look)
       grass.setLook(look)
       crops?.setSeason(season)
-      for (const st of [strip, ...branchStrips]) st.setTint(look.grass.base.clone().multiplyScalar(2.0).lerp(new THREE.Color(0xffffff), 0.4), imagery ? look.ground : bare)
+      for (const st of [strip, ...branchStrips]) {
+        st.setTint(look.grass.base.clone().multiplyScalar(2.0).lerp(new THREE.Color(0xffffff), 0.4), imagery ? look.ground : bare)
+        st.setLitter(look.litter.tint, look.litter.spread)
+      }
       terrainMat.color.copy(imagery && terrainMat.map ? look.ground : bare)
       if (horizon && (horizon.material as THREE.MeshStandardMaterial).map) (horizon.material as THREE.MeshStandardMaterial).color.copy(look.ground)
       if (imp) imp.rebake(near.sources())

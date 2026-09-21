@@ -50,6 +50,7 @@ export function buildStrip(
   sinkAt: (x: number, z: number) => number | null
   /** metres inside the strip, ≤ 0 outside: how sinkUnderStrip knows which triangles to drop */
   coverAt: (x: number, z: number) => number
+  setLitter: (tint: THREE.Color, spread: number) => void
   setTint: (c: THREE.Color, ground: THREE.Color) => void
 } {
   const nS = Math.floor(length / along) + 1
@@ -137,6 +138,8 @@ export function buildStrip(
     hasGrass: { value: grassMown && grassRough ? 1 : 0 },
     forestFloor: { value: forestFloor },
     hasForest: { value: forestFloor ? 1 : 0 },
+    litterTint: { value: new THREE.Color(0x7a6e56) },
+    litterSpread: { value: 0.2 },
     grassTint: { value: new THREE.Color(0xffffff) },
   }
   mat.onBeforeCompile = (shader) => {
@@ -151,6 +154,8 @@ export function buildStrip(
         uniform int hasGrass;
         uniform sampler2D forestFloor;
         uniform int hasForest;
+        uniform vec3 litterTint;
+        uniform float litterSpread;
         uniform vec3 grassTint;
         varying float vEdge;
         varying float vCanopy;
@@ -197,12 +202,19 @@ export function buildStrip(
             // 2–4 m of canopy height so a hedge line is a gradient and not a cut-out, and kept
             // off the pavement by the same edge distance everything else uses.
             if (hasForest == 1) {
-              // canopy closing over (2–4 m of CHM) AND clear of the mown strip: a highway crew
-              // mows under an overhanging crown, so the first few metres off the shoulder stay
-              // turf even in closed woodland. 41 % of Bowie's verge is under canopy by the CHM and
-              // most of that is overhang, not forest floor.
-              float wForest = smoothstep(2.0, 4.0, vCanopy) * smoothstep(4.0, 10.0, vEdge);
-              vec3 litter = triplanar(forestFloor, vWorldXZ, n, 0.5, vec2(0.37, 0.11)) * lum;
+              // canopy closing over AND clear of the mown strip: a highway crew mows under an
+              // overhanging crown, so the first few metres off the shoulder stay turf even in
+              // closed woodland. 41 % of Bowie's verge is under canopy by the CHM and most of that
+              // is overhang, not forest floor.
+              //
+              // litterSpread moves the canopy threshold with the SEASON. A wood in leaf drops
+              // almost nothing on the verge beside it (spread 0.2: litter only where the CHM is
+              // really closed); the same wood in November has covered it (spread 1.0: litter
+              // wherever there is any canopy at all nearby). That, and not the bare branches
+              // alone, is what makes a winter wood read as winter.
+              float lo = mix(3.0, 0.2, litterSpread), hi = mix(5.0, 1.2, litterSpread);
+              float wForest = smoothstep(lo, hi, vCanopy) * smoothstep(4.0, 10.0, vEdge);
+              vec3 litter = triplanar(forestFloor, vWorldXZ, n, 0.5, vec2(0.37, 0.11)) * litterTint * 1.6 * lum;
               ground = vec4(mix(ground.rgb, litter, wForest), 1.0);
             }
           }
@@ -291,6 +303,11 @@ export function buildStrip(
     setTint: (c: THREE.Color, ground: THREE.Color) => {
       uniforms.grassTint.value.copy(c)
       mat.color.copy(ground)
+    },
+    /** the season's leaf litter: its colour, and how far past the crowns it has fallen */
+    setLitter: (tint: THREE.Color, spread: number) => {
+      uniforms.litterTint.value.copy(tint)
+      uniforms.litterSpread.value = spread
     },
   }
 }

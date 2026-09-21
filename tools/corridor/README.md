@@ -16,6 +16,7 @@ just corridor-report
 tools/corridor/.venv/bin/python -m corridor.verify        # every site: safe to publish?
 just corridor-view                        # the viewer, :5185 (apps/corridor)
 just corridor-export                      # rewrite web/ layers + surface.json without refetching
+tools/corridor/.venv/bin/python -m corridor flora all     # backfill flora.json onto older bakes
 ```
 
 ## What a site directory holds
@@ -37,6 +38,7 @@ just corridor-export                      # rewrite web/ layers + surface.json w
 | `web/manifest.json` `buildings` / `landuse` / `pois` | per-footprint minimum rotated rectangle, height (OSM → lidar DSM−DTM → 6 m) with its source, along-track `s` and signed lateral `lat`, tags enriched from POIs inside; for the editor agent's autogen (AUTOGEN.md §10) | derived (`corridor/buildings.py`) |
 | `web/` | browser-decodable layers + `manifest.json` for `apps/corridor` and the R2 publish: RGB-encoded height PNGs, 1 m imagery JPEG, canopy PNG, spine/structures/profile/surface in metres from the origin | derived |
 | `geology.json` + `geology.geojson` | Macrostrat map units under the spine, with lithology and description | Macrostrat |
+| `flora.json` + `flora_evt.npy` | what grows here: LANDFIRE vegetation classes with their share of the corridor, a ranked tree-species mix per class with genus and a lidar-measured canopy height, a ground-cover class per vegetation type, and Daymet monthly climate (`corridor/flora.py`; sources, fallbacks and traps in `docs/corridor/FLORA.md`) | LANDFIRE + USFS FIA/FHP + Daymet |
 | `preview.png` | imagery + spine (yellow), siblings (orange), crossings (red over / blue under), structures (cyan overpass / magenta bridge), photo (white ring), canopy (green) | derived |
 | `cuts.json` | cut faces beside the road from 1 m DTM transects: interval, side, `artificial`/`natural`, toe/top/height/slope, rock type, toe+top `[x,y,z]` every 10 m (`corridor/cuts.py`; rules and measurements in `docs/corridor/DESIGN.md` §5) | derived |
 | `rock.json` | exposed rock polygons: slope > 40° with ≥ 3 m relief, bare or inside a cut, with lithology, intensity and NAIP colour (`corridor/rock.py`) | derived |
@@ -68,6 +70,13 @@ JSON hierarchy — on a public bucket. A 6 km corridor is a few dozen nodes; the
 delivery tiles is 850 MB. The bucket has no vertical CRS; Z is checked against the DEM on load and
 converted if it is in feet. There is no PDAL on Debian trixie/arm64, so `lidar.py` walks the
 octree itself and reads nodes with `laspy` + `lazrs`.
+
+**LANDFIRE's class at the centre of a corridor is always `Developed-Roads`.** The site point is on
+the pavement by construction, and LANDFIRE has a 30 m class for pavement. Vegetation is read as AREA
+SHARES over the whole corridor polygon, the way land use already was. The other traps in the flora
+sources — a multidimensional `getSamples` that silently truncates at 100 rasters and drops red
+spruce at Acadia, 2002 genus rollups that double-count against the 2011 species, basal-area rasters
+that are dense in the East and 3 % populated at Big Sur — are written up in `docs/corridor/FLORA.md`.
 
 **Overpass is a shared free server.** Every query is cached by hash under `data/cache/overpass/`,
 so a re-run is offline; a 504 is retried with backoff. Do not point `all` at it in a loop.

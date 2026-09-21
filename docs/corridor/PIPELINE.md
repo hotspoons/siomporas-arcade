@@ -133,6 +133,29 @@ is the set with a `strat_name` (the detailed state-map sources). The polygons at
 go to `geology.geojson`. Credit Macrostrat (CC-BY) wherever shown. This is the input for the rock
 palette (Part 3).
 
+### 1.7b Flora (`flora.py`) — what grows beside it
+
+**LANDFIRE Existing Vegetation Type** (LF2024, 30 m, CONUS/AK/HI) over the corridor polygon, as
+AREA SHARES — the class at the centre point is `Developed-Roads` at every site we have. Each class
+keeps LANDFIRE's own `EVT_LF` / `EVT_PHYS` / `EVT_CLASS` / `EVT_SBCLS`, from which the bake derives
+a leaf cycle (evergreen / deciduous / mixed) and one of eighteen ground-cover classes by rule.
+
+**USFS FHP tree-species basal area** (340 species at 30 m, modelled from FIA) refines each class
+into a ranked species mix, joined to **FIA REF_SPECIES** for genus and the softwood/hardwood split.
+A spatial query against the raster catalogue names the 45–130 species that have a raster over this
+site, so it is that many `exportImage` calls and not 340. Where a class has fewer than eight pixels
+of basal area the species come from the class NAME instead, tokenised against FIA's vocabulary.
+Per species the bake also averages our own lidar CHM over the pixels that species holds, so the mix
+carries a MEASURED canopy height.
+
+**Daymet v4** (1 km) monthly rain and temperature, for phenology only — not what grows, but when it
+is green. Bixby Bridge takes 2 mm of rain in June–August (0.2 % of its year), Chesterfield Road
+419 mm (32 %).
+
+Out: `flora.json` + `flora_evt.npy` (the class index per 30 m pixel), a `flora` block in
+`web/manifest.json` and `web/flora_30m.png`. The sources, the fallback chain, the readouts at every
+test site and the traps are in `docs/corridor/FLORA.md`.
+
 ### 1.8 The point cloud (`lidar.py`)
 
 **Fetch.** USGS stages 3DEP projects as Entwine Point Tiles (EPT) in Web Mercator on a public S3
@@ -214,6 +237,7 @@ Browser-decodable layers on one 2 m lattice, coordinates **relative to the site 
 | `chm_2m.png` | canopy, 8-bit, 0.25 m per step, **zeroed over every carriageway** (paved width + 2 m, from the max lane count) **and under every OSM building footprint + 1 m** — a truck is a 4 m "tree", a roof a 6 m one |
 | `naip_1m.jpg` | imagery at 1 m, saturation 1.3× / contrast 1.1× / warmed, because NAIP is flown for measurement and reads grey-green under fog |
 | `horizon_60m.png`, `horizon_naip_60m.jpg` | far terrain, same height encoding, 1000² over 60 km |
+| `flora_30m.png` | the LANDFIRE EVT class INDEX per pixel into `flora.evt.classes`, 255 outside the corridor — on its own 30 m lattice, because the source is 30 m and resampling a class raster to 2 m is megabytes of the same integer |
 | `manifest.json` | see below |
 
 Before the vectors, `buildings.derive` (`buildings.py`) computes per OSM footprint the minimum
@@ -230,7 +254,9 @@ the kinks. Siblings get the same treatment (2-D only).
 `web/manifest.json` keys: `slug`, `ident`, `frame`, `bbox`, `layers`, `spine` (`coords` [x,y,z]
 every 10 m, `photo_s`, `length_m`, `segments` with tags), `siblings`, `structures`, `crossings`,
 `surface` (stations + segments + summary), `profile` (every 10 m: `road_z`, `ground_rel` at
-8/15/40, `canopy` at 15/40), `geology`, `photos`, `lidar` summary, `buildings`, `landuse`, `pois`.
+8/15/40, `canopy` at 15/40), `geology`, `flora` (EVT classes with their corridor share and species mix, the site species mix with
+genus and measured canopy height per species, ground-cover shares, Daymet monthly climate),
+`photos`, `lidar` summary, `buildings`, `landuse`, `pois`.
 `write_index` rebuilds `sites/index.json`. The TypeScript mirror is `apps/corridor/src/site.ts`.
 
 ### 1.12 Network sites (`network.py`, `network_tiles.py`) — one region of roads as one world

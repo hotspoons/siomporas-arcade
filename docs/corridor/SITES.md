@@ -1,22 +1,22 @@
 # Corridor sites — what each bake actually holds
 
-*Generated 2026-09-21 04:06 UTC by `python -m corridor.sitesdoc` from `tools/corridor/data/sites/*/manifest.json`, `spine_utm.json`, `surface.json` and the bake log `/tmp/claude-1000/-workspaces-apex-conduit/397fba92-5e84-41c5-9605-5d43678842ec/scratchpad/newbakes.log`. Do not edit by hand; re-run it. Lidar year is read off the project name (`_D21` = 2021 delivery). The fetch itself does not record the NAIP acquisition date, so it is looked up here from the image service's catalog under the site point (the tile that covers the photo; a long corridor can straddle two flight dates). A DEM listed as "cached" was reused from an earlier run and its source tiles were not re-recorded (a `__main__.py` gap reported to main).*
+*Generated 2026-09-21 04:13 UTC by `python -m corridor.sitesdoc` from `tools/corridor/data/sites/*/manifest.json`, `spine_utm.json`, `surface.json` and the bake log `/tmp/claude-1000/-workspaces-apex-conduit/397fba92-5e84-41c5-9605-5d43678842ec/scratchpad/newbakes.log`. Do not edit by hand; re-run it. Lidar year is read off the project name (`_D21` = 2021 delivery). The fetch itself does not record the NAIP acquisition date, so it is looked up here from the image service's catalog under the site point (the tile that covers the photo; a long corridor can straddle two flight dates). A DEM listed as "cached" was reused from an earlier run and its source tiles were not re-recorded (a `__main__.py` gap reported to main).*
 
-**9 baked, 16 not yet** (acadia-ocean-dr (not baked), bacon-ridge-rd (in progress), bell-branch-rd (not baked), bixby-bridge-ca1 (not baked), bonnie-branch-rd (not baked), chesterfield-rd (not baked), crownsville-rd (not baked), ecola-or (not baked), hawkins-rd (not baked), patuxent-river-rd (not baked), ragged-point-ca1 (not baked), rossback-rd (not baked), rutland-rd (not baked), st-stephens-church-rd (not baked), underwood-rd (not baked), waterbury-rd (not baked)).
+**10 baked, 15 not yet** (acadia-ocean-dr (not baked), bell-branch-rd (not baked), bixby-bridge-ca1 (not baked), bonnie-branch-rd (not baked), chesterfield-rd (in progress), crownsville-rd (not baked), ecola-or (not baked), hawkins-rd (not baked), patuxent-river-rd (not baked), ragged-point-ca1 (not baked), rossback-rd (not baked), rutland-rd (not baked), st-stephens-church-rd (not baked), underwood-rd (not baked), waterbury-rd (not baked)).
 
 ## Summary
 
 | site | road | km | lidar project (year) | class 17 | veg classes | NAIP | DEM | structures | formations | missing |
 |---|---|---|---|---|---|---|---|---|---|---|
 | `acadia-ocean-dr` | *not baked* | | | | | | | |  |
-| `bacon-ridge-rd` | *in progress* | | | | | | | |  |
+| `bacon-ridge-rd` | Bacon Ridge Road | 2.1 | TNM:MD_Central_Processing_D24 (2024) | trusted | yes | 2023-05-25 | USGS 1 Meter 18 x35y433 MD_Central_Processing_D24 (2026-04-04), USGS 1 Meter 18 x36y433 MD_Central_Processing_D24 (2026-04-04) | 6 gantry, 1 overpass | Matawan Formation, Monmouth Formation | — |
 | `bell-branch-rd` | *not baked* | | | | | | | |  |
 | `bixby-bridge-ca1` | *not baked* | | | | | | | |  |
 | `bonnie-branch-rd` | *not baked* | | | | | | | |  |
-| `bowie-racetrack-rd` | Race Track Road | 4.7 | USGS_LPC_MD_VA_Sandy_NCR_2014_LAS_2015 (2014) | demoted | no (unassigned) | 2023-07-12 | USGS one meter x34y432 MD VA Sandy NCR 2014 (2020-03-30), USGS one meter x35y432 MD VA Sandy NCR 2014 (2020-03-30) | 2 gantry, 1 overpass | Monmouth Formation, Potomac Group | — |
+| `bowie-racetrack-rd` | Race Track Road | 4.7 | USGS_LPC_MD_VA_Sandy_NCR_2014_LAS_2015 (2014) | demoted | no (unassigned) | 2023-07-12 | USGS one meter x34y432 MD VA Sandy NCR 2014 (2020-03-30), USGS one meter x35y432 MD VA Sandy NCR 2014 (2020-03-30) | 1 bridge, 1 gantry, 1 overpass | Monmouth Formation, Potomac Group | — |
 | `braddock-i70` | I 70 | 6.4 | MD_Western_2_D21 (2021) | trusted | no (unassigned) | 2023-05-21 | cached | 2 bridge, 2 overpass | Antietam Formation, Buzzard Knob Member, Catoctin Formation… | — |
 | `burtonsville-icc` | I 95 | 6.4 | USGS_LPC_MD_VA_Sandy_NCR_2014_LAS_2015 (2014) | demoted | no (unassigned) | 2023-09-01 | cached | 4 gantry, 6 overpass | Potomac Group, Wissahickon Formation | — |
-| `chesterfield-rd` | *not baked* | | | | | | | |  |
+| `chesterfield-rd` | *in progress* | | | | | | | |  |
 | `clarksburg-i270` | I 270 | 6.4 | TNM:MD_Central_Processing_D24 (2024) | trusted | no (unassigned) | 2023-07-12 | cached | 2 bridge, 4 gantry, 3 overpass | Ijamsville Formation; Marburg Schist, Marburg Formation, Wissahickon Formation | — |
 | `crownsville-rd` | *not baked* | | | | | | | |  |
 | `ecola-or` | *not baked* | | | | | | | |  |
@@ -39,8 +39,8 @@
 | site | status | where it stands |
 |---|---|---|
 | `patuxent-river-rd` | not baked | gaussworks brief: Gambrills/Crofton/Crownsville/Davidsonville backroads |
-| `bacon-ridge-rd` | in progress | gaussworks brief: Gambrills/Crofton/Crownsville/Davidsonville backroads |
-| `chesterfield-rd` | not baked | gaussworks brief: Gambrills/Crofton/Crownsville/Davidsonville backroads |
+| `bacon-ridge-rd` | baked | baked 2026-09-21T03:49:00Z in 1353.6 s; TNM:MD_Central_Processing_D24, 7 structures |
+| `chesterfield-rd` | in progress | gaussworks brief: Gambrills/Crofton/Crownsville/Davidsonville backroads |
 | `crownsville-rd` | not baked | gaussworks brief: Gambrills/Crofton/Crownsville/Davidsonville backroads |
 | `underwood-rd` | not baked | gaussworks brief: Gambrills/Crofton/Crownsville/Davidsonville backroads |
 | `waterbury-rd` | not baked | gaussworks brief: Gambrills/Crofton/Crownsville/Davidsonville backroads |
@@ -67,9 +67,18 @@ Missing: site.json, spine_utm.json, osm.geojson, crossings.json, dem_1m.tif, nai
 ### `bacon-ridge-rd`
 
 *gaussworks brief: Gambrills/Crofton/Crownsville/Davidsonville backroads*  
-fix 39.038926, -76.6183 · 0 photo(s) · status **in progress**
+fix 39.038926, -76.6183 · 0 photo(s) · status **baked**
 
-Missing: lidar/dtm.tif, lidar/chm.tif, profile.json, surface.json, web/manifest.json, web/dem_2m.png, web/chm_2m.png, web/naip_1m.jpg, web/horizon_60m.png
+- **road**: {'name': 'Bacon Ridge Road'} · 2107.8 m · snap 0.0 m · trimmed [False, False] · fetched 2026-09-21T03:49:00Z (1353.6 s)
+- **lidar**: `TNM:MD_Central_Processing_D24` (2024) · 13,588,441 pts in corridor · z factor 1.0 · classes: ground 54%, veg_high 25%, unassigned 15%, veg_med 4%, building 1%, veg_low 1% · class 17: 0.0006 (trusted)
+- **DEM**: USGS 1 Meter 18 x35y433 MD_Central_Processing_D24 — 2026-04-04; USGS 1 Meter 18 x36y433 MD_Central_Processing_D24 — 2026-04-04
+- **NAIP**: fetched at 0.3 m, [4033, 7600] px · tile under the fix `m_3907660_sw_18_030_20230525` flown 2023-05-25 at 0.3 m
+- **OSM**: 257 features, 31 crossings; spine tags: `highway`=residential; `maxspeed`=25 mph
+- **structures** (7): gantry s=566–566 (2.0 m, clearance 4.93 m, geometry); gantry s=782–782 (2.0 m, clearance 4.5 m, geometry); overpass s=814–818 (6.0 m, clearance 4.5 m, geometry); gantry s=968–968 (2.0 m, clearance 4.5 m, geometry); gantry s=1060–1060 (2.0 m, clearance 4.51 m, geometry); gantry s=1110–1110 (2.0 m, clearance 4.58 m, geometry); gantry s=1116–1118 (4.0 m, clearance 4.51 m, geometry)
+- **surface** (per 20 m): {'asphalt_aged': 106}
+- **geology**: Matawan Formation, Monmouth Formation
+- **web**: layers ['dem', 'chm', 'naip', 'horizon', 'horizon_naip'] · 129 buildings · 3 POIs · 4 landuse rings · authored: none
+- **missing**: nothing
 
 ### `bell-branch-rd`
 
@@ -96,12 +105,12 @@ Missing: site.json, spine_utm.json, osm.geojson, crossings.json, dem_1m.tif, nai
 
 fix 39.013133, -76.751944 · 2 photo(s) · status **baked**
 
-- **road**: {'name': 'Race Track Road'} · 4698.6 m · snap 81.5 m · trimmed [True, False] · fetched 2026-09-21T01:57:31Z (38.6 s)
+- **road**: {'name': 'Race Track Road'} · 4698.6 m · snap 81.5 m · trimmed [True, False] · fetched 2026-09-21T04:10:43Z (57.0 s)
 - **lidar**: `USGS_LPC_MD_VA_Sandy_NCR_2014_LAS_2015` (2014) · 10,842,599 pts in corridor · z factor 1.0 · classes: unassigned 70%, ground 30% · class 17: 0.2399 (demoted) — class 17/18 demoted to unassigned: implausible share, vendor used them as junk bins
 - **DEM**: USGS one meter x34y432 MD VA Sandy NCR 2014 — 2020-03-30; USGS one meter x35y432 MD VA Sandy NCR 2014 — 2020-03-30; USGS 1 Meter 18 x34y433 VA_UpperMiddleNeck_2018_D18 — 2021-12-21; USGS 1 Meter 18 x34y432 MD_Central_Processing_D24 — 2026-04-04; USGS 1 Meter 18 x34y433 MD_Central_Processing_D24 — 2026-04-04; USGS 1 Meter 18 x35y432 MD_Central_Processing_D24 — 2026-04-04
 - **NAIP**: fetched at 0.3 m, [10300, 10067] px · tile under the fix `m_3907658_se_18_030_20230712` flown 2023-07-12 at 0.3 m
 - **OSM**: 1331 features, 47 crossings; spine tags: `highway`=secondary/tertiary; `lanes`=2/4; `surface`=asphalt/concrete; `oneway`=no; `lanes:backward`=1; `lanes:forward`=3
-- **structures** (3): gantry s=1054–1054 (2.0 m, clearance 4.83 m, geometry); overpass s=2350–2356 (8.0 m, clearance 8.85 m, geometry); gantry s=2506–2508 (4.0 m, clearance 4.5 m, geometry)
+- **structures** (3): gantry s=1054–1054 (2.0 m, clearance 4.83 m, geometry); overpass s=2350–2356 (8.0 m, clearance 8.85 m, geometry); bridge s=2500–2514 (16.0 m, 3.08 m above ground, geometry)
 - **surface** (per 20 m): {'asphalt_aged': 85, 'chipseal': 29, 'concrete': 72, 'asphalt_new': 37, 'asphalt_patched': 12}
 - **geology**: Monmouth Formation, Potomac Group
 - **web**: layers ['dem', 'chm', 'naip', 'horizon', 'horizon_naip'] · 833 buildings · 9 POIs · 8 landuse rings · authored: adjustments, structures
@@ -140,9 +149,9 @@ fix 39.070586, -76.911544 · 1 photo(s) · status **baked**
 ### `chesterfield-rd`
 
 *gaussworks brief: Gambrills/Crofton/Crownsville/Davidsonville backroads*  
-fix 38.998792, -76.605292 · 0 photo(s) · status **not baked**
+fix 38.998792, -76.605292 · 0 photo(s) · status **in progress**
 
-Missing: site.json, spine_utm.json, osm.geojson, crossings.json, dem_1m.tif, naip.tif, horizon_30m.tif, geology.json, lidar/dtm.tif, lidar/chm.tif, profile.json, surface.json, web/manifest.json, web/dem_2m.png, web/chm_2m.png, web/naip_1m.jpg, web/horizon_60m.png
+Missing: dem_1m.tif, naip.tif, horizon_30m.tif, geology.json, lidar/dtm.tif, lidar/chm.tif, profile.json, surface.json, web/manifest.json, web/dem_2m.png, web/chm_2m.png, web/naip_1m.jpg, web/horizon_60m.png
 
 ### `clarksburg-i270`
 

@@ -31,6 +31,17 @@ photo (EXIF fix)  or  lat/lon ──► sites.json
 
 ---
 
+## The three tiers at a glance
+
+Rich's question — what is baked in the pipeline, what is built when the viewer boots, and what
+is dynamic — in one table. Parts 1 and 2 below are the detail.
+
+| tier | when | where it lives | what |
+|---|---|---|---|
+| **A · pipeline bake** | `python -m corridor fetch <slug>`, minutes per site, re-run only when data or a rule changes | `tools/corridor/data/sites/<slug>/` on disk (later an R2 bucket); the viewer reads only `web/` | OSM spine, lane tags, siblings, crossings, buildings/landuse/POIs · 3DEP 1 m DEM → `dem_2m.png` · NAIP 0.3 m → `naip_1m.jpg` · lidar → DTM/DSM/CHM/deck rasters, along-track profile, detected structures (deck planarity, class-17 demotion) · pavement class per 20 m · Macrostrat geology · 60 km horizon DEM + NAIP · canopy zeroed under carriageways and building footprints · `manifest.json`. Also offline, not per site: flux.2 surface textures (`tools/surfaces/gen.py`), TRELLIS.2 prop GLBs (`public/assets/`). |
+| **B · viewer boot** | `buildSite()` in `scene.ts`, once per site load, a few seconds, all in memory | GPU buffers and closures on the `Site` object | authored `adjustments.json` / `structures.json` applied (flatten rewrites the grade before the spline exists) · terrain mesh from the DEM, horizon mesh with the near footprint cut out · the carriageway Catmull-Rom spline — the one height function · station grid for `edgeDistance` · asphalt + paint meshes · corridor strip · tree records from the CHM (position, height, species) · impostor atlas baked with the renderer for the season · hex-tiled surface material sets · catalog GLBs placed · minimap layers · car placed at the photo. A knob in the `road` tab or a season change re-runs the affected part of this tier (`retune`, `setSeason`). |
+| **C · dynamic** | every frame | `updateNear()`, `Car.tick()`, controls | grass tiles generated a few per frame as the eye moves and cached (blades near, sprite cards far) · which tree records get full ez-tree models inside `TREE_NEAR_RADIUS` and which stay impostors · impostor and grass wind/colour uniforms · the LOD footprint (stretched behind the view, circular when pitched down) · car physics, chase/cockpit camera, fly controls · minimap redraw. |
+
 ## Part 1 · The bake (`tools/corridor`)
 
 Entry point: `corridor/__main__.py`. Commands: `sites`, `fetch`, `report`, `export`, `areas`,
@@ -377,6 +388,37 @@ PNG to recon, download the `.glb`, run `finish.mjs`, drop it in `public/assets/`
 catalog entry, set `yaw_offset_deg` by eye in the editor.
 
 ---
+
+## Fusing gaussian splats later (visuals) while keeping the geometry (dynamics)
+
+The split already exists in the code: the car never touches a rendered mesh. It drives on the
+carriageway spline's height function, `edgeDistance` for pavement vs verge, and the tree grid for
+collision — all tier B closures built from the bake. Splats replace what the eye sees, not what
+the tyres feel. What that looks like, tier by tier:
+
+- **Bake (A).** gaussworks' 360 drive-through captures → trained splats per capture → registered
+  into the corridor frame (EPSG UTM + NAVD88): the GPS track gives scale and a first pose, then an
+  ICP of the splat means against the lidar DTM and the road spline pins it (the road surface is the
+  most reliable common geometry). Dynamic objects (cars, people) masked out before training. Output
+  per site: a 7-DOF transform in the manifest and the splats **chunked by along-track station**
+  (every ~50 m of `s`), each chunk a `.ksplat`/`.spz` in `web/splats/` and later R2, with a
+  capture date and time-of-day recorded.
+- **Boot (B).** Load the transform and the chunk index; build the same terrain, strip, spline,
+  station grid and structures as today. Nothing the car needs changes.
+- **Dynamic (C).** Stream splat chunks ahead of the car by `s` (the grass tile scheduler is the
+  same idea), unload behind. Render splats with depth writes into the same depth buffer as the
+  meshes so the car, props, weather and grass sort against them; a distance band fades from
+  splats (near, where captured, ±50 m of the road) to geometry (far terrain, horizon, far trees).
+
+What it costs: a splat is a photograph — one season, one time of day, one traffic state. Seasons
+and weather then become colour grading over the splats plus the geometry layers we keep drawing
+(snow accumulation, wet road, particles), or one capture per season. The sun in the scene has to
+match the capture. Anything the game changes (authored bridges, autogen buildings, cut-face rock)
+is a mesh in front of the splats, so a splat captured with a real bridge and a game without one
+cannot coexist — the authored world has to win, meaning splat editing (delete a region) is part
+of the bake. The renderer: `@mkkellogg/gaussian-splats-3d` or Spark composite into a three.js
+scene with depth today; the strip's height function can also be *improved* by splat depth where
+the lidar is old (Bowie's is 2014).
 
 ## Part 4 · This agent's additions (terrain-and-data, 2026-09-21)
 

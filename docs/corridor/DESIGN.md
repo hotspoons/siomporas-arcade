@@ -209,6 +209,18 @@ from pavement, all on `groundAt`; South Mountain: 910 greenstone, nearest 4.16 m
   `ShaderMaterial` is fixed at compile time.
 - A missing optional JSON must 404 (the middleware does); Vite's SPA fallback would answer
   `index.html` with a 200 and `r.json()` dies on `<!doctype`.
+- **Bounding the vertices of a smoothed line does not bound the line.** `export._smooth_on_line`
+  gaussian-smooths a centreline and then pulls every vertex back to within 1.5 m of the raw
+  polyline, which fixed the spine leaving its own trace in the air photo (10.6 m on Chesterfield
+  → 1.72 m). But it clamps toward the NEAREST point on the line, and nearest-point projection is
+  not monotonic: on a switchback two adjacent vertices project onto opposite limbs and the clamp
+  drags them apart. Measured on Crofton's branches: every vertex within 1.58 m as designed, one
+  pair **15.5 m apart** where the median gap is 2 m, and the 10 m sample in the middle of that
+  straight chords across the bend at **6.95 m** — 9 of 39 branches over 2 m. The station of each
+  point is already known (the line was resampled at those stations), so pulling toward the line
+  *at its own station* is monotonic by construction: worst deviation 1.60 m, none over 2 m.
+  Patch proposed to main 2026-09-21; whoever applies it must re-export, since it moves published
+  geometry.
 - **A key that indexes data must be intrinsic, never positional.** Network chain ids were `r00`,
   `r01`, … by enumeration, and `branches.json` keys every road's profile by them. Lowering the
   minimum chain length from 120 m to 50 m added two chains *in the middle* of Crofton's list and

@@ -31,6 +31,22 @@ export interface Crossing {
   inferred?: boolean
 }
 
+/** a road of a network site other than the primary: rendered as a first-class carriageway with its own strip */
+export interface Branch {
+  name: string | null
+  ref?: string | null
+  highway?: string | null
+  lanes?: number | null
+  oneway?: string | null
+  length_m: number
+  /** site x, y and lidar road grade z, densified ~10 m like the spine */
+  coords: [number, number, number][]
+  junctions?: { x: number; y: number; z: number; node?: number; with?: string[] }[]
+  s_on_primary?: number | null
+  profile?: { s: number[]; road_z: number[] } | null
+  structures?: Structure[] | null
+}
+
 export interface Manifest {
   slug: string
   ident: Record<string, string> | null
@@ -44,6 +60,8 @@ export interface Manifest {
     segments: { s_start: number; s_end: number; tags: Record<string, string> }[]
   }
   siblings: [number, number][][]
+  /** network sites: every road that is not the primary spine */
+  branches?: Branch[]
   structures: Structure[]
   crossings: Crossing[]
   surface: {

@@ -374,6 +374,28 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
     sibAts.push({ at: sibAt, len: len2, spineS: (s: number) => { const p = sibAt(s).pos; return nearestSpine(p.x, p.z).s } })
     roadBuilders.push(() => roadMesh(stations(sibAt, len2, 6), () => 2, () => 'asphalt_aged', surfaceSets!))
   }
+  // --- network branches: every other road of a network site is a first-class carriageway --------
+  // Its grade is its own lidar profile (the bake densified it like the spine), its lanes and
+  // direction its own OSM tags; it gets stations in the edge grid (so grass, trees and the car
+  // know it is pavement), an asphalt+paint mesh, and below, its own strip. Kept apart from the
+  // divided-highway siblings: those share the spine's grade and widen the spine's strip.
+  const branchAts: { at: (s: number) => { pos: THREE.Vector3; dir: THREE.Vector3 }; len: number; half: number; name: string }[] = []
+  for (const br of manifest.branches ?? []) {
+    if (!br.coords || br.coords.length < 2) continue
+    const rawB = br.coords.map(([x, y, z]) => toWorld(x, y, (Number.isFinite(z) ? z : heightAt(x, y)) + 0.4))
+    const cB = new THREE.CatmullRomCurve3(rawB, false, 'centripetal')
+    cB.arcLengthDivisions = Math.max(100, rawB.length * 8)
+    const lenB = cB.getLength()
+    const atB = (s: number) => {
+      const u = Math.min(1, Math.max(0, s / lenB))
+      return { pos: cB.getPointAt(u), dir: cB.getTangentAt(u) }
+    }
+    const lanesB = Number(br.lanes) > 0 ? Number(br.lanes) : 2
+    const twoWayB = br.oneway === 'yes' || br.oneway === '-1' ? false : br.oneway === 'no' ? true : !['motorway', 'motorway_link', 'trunk_link', 'primary_link'].includes(br.highway ?? '')
+    const halfB = pavedWidth(lanesB, twoWayB) / 2
+    roadBuilders.push(() => roadMesh(stations(atB, lenB, 6), () => lanesB, () => 'asphalt_aged', surfaceSets!, 0.02, () => twoWayB))
+    branchAts.push({ at: atB, len: lenB, half: halfB, name: br.name ?? br.ref ?? 'branch' })
+  }
   buildRoads()
 
   // --- trees, one per canopy cell, as tall as the lidar says ---------------------------------
@@ -393,7 +415,9 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
     const stCell = 20
     const stGrid = new Map<string, { x: number; z: number; dx: number; dz: number; s: number; half: number; who: number }[]>()
     // one height function per carriageway: the SAME spline the road mesh is drawn from
-    const curves: { at: (s: number) => { pos: THREE.Vector3; dir: THREE.Vector3 }; len: number }[] = [{ at: spineAt, len: curveLen }, ...sibAts.map((s) => ({ at: s.at, len: s.len }))]
+    const curves: { at: (s: number) => { pos: THREE.Vector3; dir: THREE.Vector3 }; len: number }[] = [{ at: spineAt, len: curveLen }, ...sibAts.map((s) => ({ at: s.at, len: s.len })), ...branchAts.map((b) => ({ at: b.at, len: b.len }))]
+    const branchWho0 = 1 + sibAts.length // `who` of the first branch in the station grid
+    const halfOf = (who: number, s: number) => (who === 0 ? pavedHalfAt(s) : who < branchWho0 ? pavedWidth(2) / 2 : branchAts[who - branchWho0].half)
     const addStations = (who: number, halfAt: (s: number) => number) => {
       const c = curves[who]
       for (let s = 0; s <= c.len; s += 5) {
@@ -408,6 +432,7 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
     }
     addStations(0, pavedHalfAt)
     for (let i = 0; i < sibAts.length; i++) addStations(i + 1, () => pavedWidth(2) / 2)
+    for (let i = 0; i < branchAts.length; i++) addStations(branchWho0 + i, () => branchAts[i].half)
     /** signed distance to the nearest pavement edge, and which carriageway that was */
     const edgeDistance = (x: number, z: number, exclude = -1): { d: number; who: number; y: number } => {
       const cx = Math.floor(x / stCell), cz = Math.floor(z / stCell)
@@ -459,23 +484,52 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
     let strip = makeStrip()
     road.add(strip.mesh)
     sinkUnderStrip(terrainGeo, strip.heightAt)
+    // one strip per branch; where another road's strip already covers the ground (within VERGE of
+    // its pavement edge) the branch strip leaves a hole rather than a second coplanar surface
+    const makeBranchStrips = () => branchAts.map((b, i) => buildStrip(b.at, b.len, VERGE, VERGE, (x, z) => edgeDistance(x, z), heightAt, imagery, manifest.bbox, grassTex('grass_mown'), grassTex('grass_rough'), lite ? 4 : 2, lite ? 2 : 1, adjustments.active ? (x, y) => adjustments.at(x, y, adjScratch).ground_offset_m : null, (s) => {
+      const q = b.at(s).pos
+      return edgeDistance(q.x, q.z, branchWho0 + i).d < VERGE
+    }))
+    let branchStrips = makeBranchStrips()
+    for (const bs of branchStrips) {
+      road.add(bs.mesh)
+      sinkUnderStrip(terrainGeo, bs.heightAt)
+    }
+    const stripHeight = (x: number, z: number): number | null => {
+      const h = strip.heightAt(x, z)
+      if (h !== null) return h
+      for (const bs of branchStrips) {
+        const v = bs.heightAt(x, z)
+        if (v !== null) return v
+      }
+      return null
+    }
     // a road knob moved: every station's half width, the asphalt, then the strip that hugs it
     const roadSignature = () => `${T.LANE_WIDTH}|${T.SHOULDER_OUT}|${T.SHOULDER_IN}`
     let roadSig = roadSignature()
     let roadTimer: ReturnType<typeof setTimeout> | undefined
     const rebuildRoad = () => {
-      for (const arr of stGrid.values()) for (const r of arr) r.half = r.who === 0 ? pavedHalfAt(r.s) : pavedWidth(2) / 2
+      for (const arr of stGrid.values()) for (const r of arr) r.half = halfOf(r.who, r.s)
       buildRoads()
       road.remove(strip.mesh)
       strip.mesh.geometry.dispose()
       strip = makeStrip()
       road.add(strip.mesh)
       sinkUnderStrip(terrainGeo, strip.heightAt)
+      for (const bs of branchStrips) {
+        road.remove(bs.mesh)
+        bs.mesh.geometry.dispose()
+      }
+      branchStrips = makeBranchStrips()
+      for (const bs of branchStrips) {
+        road.add(bs.mesh)
+        sinkUnderStrip(terrainGeo, bs.heightAt)
+      }
     }
     group.add(road)
     // everything that stands on the ground near the road stands on the strip
-    const groundNear = (x: number, y: number) => strip.heightAt(x, -y) ?? heightAt(x, y)
-    groundAtWorld = (x, z) => strip.heightAt(x, z) ?? heightAt(x, -z)
+    const groundNear = (x: number, y: number) => stripHeight(x, -y) ?? heightAt(x, y)
+    groundAtWorld = (x, z) => stripHeight(x, z) ?? heightAt(x, -z)
     edgeDistanceWorld = (x, z) => edgeDistance(x, z).d
     status('planting…')
     const treeAdj = { ...NEUTRAL_ADJ }
@@ -575,7 +629,7 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
       const look = LOOK[season]
       near.setSeason(look)
       grass.setLook(look)
-      strip.setTint(look.grass.base.clone().multiplyScalar(2.0).lerp(new THREE.Color(0xffffff), 0.4), imagery ? look.ground : bare)
+      for (const st of [strip, ...branchStrips]) st.setTint(look.grass.base.clone().multiplyScalar(2.0).lerp(new THREE.Color(0xffffff), 0.4), imagery ? look.ground : bare)
       terrainMat.color.copy(imagery && terrainMat.map ? look.ground : bare)
       if (horizon && (horizon.material as THREE.MeshStandardMaterial).map) (horizon.material as THREE.MeshStandardMaterial).color.copy(look.ground)
       if (imp) imp.rebake(near.sources())

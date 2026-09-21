@@ -26,8 +26,11 @@ export function buildStrip(
   along = 2,
   across = 1,
   offsetAt: ((x: number, y: number) => number) | null = null,
+  /** network branches: stations where another road's strip already covers the ground are left out (no triangles, heightAt → null) */
+  skipAt: ((s: number) => boolean) | null = null,
 ): { mesh: THREE.Mesh; heightAt: (x: number, z: number) => number | null; setTint: (c: THREE.Color, ground: THREE.Color) => void } {
   const nS = Math.floor(length / along) + 1
+  const skipped = new Uint8Array(nS)
   const offs: number[] = []
   for (let o = -left; o <= right + 1e-6; o += across) offs.push(o)
   const nL = offs.length
@@ -42,10 +45,12 @@ export function buildStrip(
   const origins: THREE.Vector3[] = []
   const sides: THREE.Vector3[] = []
   for (let i = 0; i < nS; i++) {
-    const st = spineAt(Math.min(length, i * along))
+    const sHere = Math.min(length, i * along)
+    const st = spineAt(sHere)
     const side = st.dir.clone().setY(0).normalize().cross(up) // right of travel
     origins.push(st.pos)
     sides.push(side)
+    if (skipAt && skipAt(sHere)) skipped[i] = 1
     for (let j = 0; j < nL; j++) {
       const o = offs[j]
       const x = st.pos.x + side.x * o, z = st.pos.z + side.z * o
@@ -61,7 +66,7 @@ export function buildStrip(
       pos[k * 3] = x
       pos[k * 3 + 1] = y
       pos[k * 3 + 2] = z
-      heights[k] = y
+      heights[k] = skipped[i] ? NaN : y
       // imagery uv from world position inside the site bbox (site y = -world z)
       uv[k * 2] = (x - bx0) / (bx1 - bx0)
       uv[k * 2 + 1] = (-z - by0) / (by1 - by0)
@@ -69,15 +74,17 @@ export function buildStrip(
       k++
     }
   }
-  const idx = new Uint32Array((nS - 1) * (nL - 1) * 6)
+  const idxAll = new Uint32Array((nS - 1) * (nL - 1) * 6)
   let n = 0
   for (let i = 0; i < nS - 1; i++) {
+    if (skipped[i] || skipped[i + 1]) continue
     for (let j = 0; j < nL - 1; j++) {
       const a = i * nL + j, b = a + 1, c = a + nL, d = c + 1
-      idx[n++] = a; idx[n++] = c; idx[n++] = b
-      idx[n++] = b; idx[n++] = c; idx[n++] = d
+      idxAll[n++] = a; idxAll[n++] = c; idxAll[n++] = b
+      idxAll[n++] = b; idxAll[n++] = c; idxAll[n++] = d
     }
   }
+  const idx = n === idxAll.length ? idxAll : idxAll.slice(0, n)
   const geo = new THREE.BufferGeometry()
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3))
   geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2))
@@ -156,7 +163,8 @@ export function buildStrip(
     if (j0 < 0 || j0 >= nL) return null
     const fj = jf - j0
     const h = (i: number) => heights[i * nL + j0] * (1 - fj) + heights[i * nL + j1] * fj
-    return h(bi) * (1 - fa) + h(bj) * fa
+    const v = h(bi) * (1 - fa) + h(bj) * fa
+    return Number.isNaN(v) ? null : v
   }
   return {
     mesh,

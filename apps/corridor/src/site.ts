@@ -72,6 +72,8 @@ export interface Manifest {
     segments: { s_start: number; s_end: number; tags: Record<string, string> }[]
   }
   siblings: [number, number][][]
+  /** unnamed asphalt: OSM `highway=service` — driveways, parking aisles, alleys. Unmarked. */
+  driveways?: { service: string; width_m: number; surface?: string | null; coords: [number, number, number][] }[]
   /** network sites: every road that is not the primary spine */
   branches?: Branch[]
   structures: Structure[]

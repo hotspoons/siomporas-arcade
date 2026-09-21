@@ -27,6 +27,8 @@ from PIL import Image
 from rasterio.enums import Resampling
 from shapely.geometry import LineString
 
+from .geo import Frame
+
 Z_SCALE = 0.01  # metres per count; 655 m of range in a uint16
 
 
@@ -95,6 +97,64 @@ def _smooth_on_line(raw, sigma: float = 15.0, max_dev: float = 1.5):
             f = (d - max_dev) / d
             sm[i] = (sm[i][0] + (q.x - sm[i][0]) * f, sm[i][1] + (q.y - sm[i][1]) * f)
     return sm
+
+
+def _service_ways(site_dir: Path, frame, ox: float, oy: float, bbox) -> list[dict]:
+    """Driveways and other unnamed asphalt: `highway=service` inside the site.
+
+    Rich's court has a driveway to every house in OSM and we were throwing them away — the roads
+    list only keeps named ways, so the world had houses standing in grass. These are drawn
+    unmarked and narrow. Their grade is the bare-earth DEM (a driveway is never a bridge), lightly
+    smoothed, and the viewer drops them onto the strip where one covers them.
+    """
+    gj_p = site_dir / "osm.geojson"
+    if not gj_p.exists():
+        return []
+    import rasterio
+    from shapely.geometry import LineString, box
+    from shapely.ops import transform as shp_transform
+
+    WIDTH = {"driveway": 3.2, "parking_aisle": 5.0, "alley": 3.6}
+    site_box = box(bbox[0], bbox[1], bbox[2], bbox[3])
+    dem_p = site_dir / "dem_1m.tif"
+    src = rasterio.open(dem_p) if dem_p.exists() else None
+    out: list[dict] = []
+    for f in json.loads(gj_p.read_text())["features"]:
+        p = f["properties"]
+        if p.get("highway") != "service" or f["geometry"]["type"] != "LineString":
+            continue
+        try:
+            ln = shp_transform(lambda x, y, z=None: frame.from_wgs(x, y), LineString(f["geometry"]["coordinates"]))
+        except Exception:
+            continue
+        ln = ln.intersection(site_box)
+        for part in (ln.geoms if ln.geom_type == "MultiLineString" else [ln]):
+            if part.is_empty or part.geom_type != "LineString" or part.length < 8:
+                continue
+            step = 4.0
+            ss = np.arange(0.0, part.length, step).tolist() + [part.length]
+            pts = np.array([part.interpolate(v).coords[0] for v in ss])
+            if src is not None:
+                zs = np.array([v[0] for v in src.sample([(float(x), float(y)) for x, y in pts])], dtype=float)
+                zs[zs < -9000] = np.nan
+                if np.isfinite(zs).any():
+                    ok = np.isfinite(zs)
+                    zs[~ok] = np.interp(np.flatnonzero(~ok), np.flatnonzero(ok), zs[ok])
+                    if len(zs) > 4:
+                        zs = np.convolve(np.pad(np.nan_to_num(zs), 2, mode="edge"), np.ones(5) / 5, mode="valid")
+                else:
+                    zs = np.zeros(len(pts))
+            else:
+                zs = np.zeros(len(pts))
+            out.append({
+                "service": p.get("service") or "service",
+                "width_m": WIDTH.get(p.get("service", ""), 3.6),
+                "surface": p.get("surface"),
+                "coords": np.column_stack([pts[:, 0] - ox, pts[:, 1] - oy, np.nan_to_num(zs)]).round(2).tolist(),
+            })
+    if src is not None:
+        src.close()
+    return out
 
 def export_site(site_dir: Path) -> dict:
     site = json.loads((site_dir / "site.json").read_text())
@@ -355,6 +415,7 @@ def export_site(site_dir: Path) -> dict:
         "photos": [{"file": p["file"], "heading_deg": p.get("heading_deg"), "taken": p.get("taken")} for p in site.get("photos", [])],
         "lidar": {k: manifest.get("lidar", {}).get(k) for k in ("dataset", "points_in_corridor", "classes")},
         "buildings": derived["buildings"],
+        "driveways": _service_ways(site_dir, Frame.at(site["lon"], site["lat"]), ox, oy, bbox),
         "landuse": derived["landuse"],
         "pois": derived["pois"],
         "cuts": features.get("cuts"),

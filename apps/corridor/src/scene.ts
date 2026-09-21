@@ -450,7 +450,7 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
     // stations every 5 m from the spine and every sibling, hashed on a 20 m grid with each
     // station carrying its own half width. Grass, verges and tree exclusion all ask this.
     const stCell = 20
-    const stGrid = new Map<string, { x: number; z: number; dx: number; dz: number; s: number; half: number; off: number; who: number }[]>()
+    const stGrid = new Map<string, { x: number; z: number; dx: number; dz: number; s: number; half: number; who: number; off: number; y?: number }[]>()
     // one height function per carriageway: the SAME spline the road mesh is drawn from
     const curves: { at: (s: number) => { pos: THREE.Vector3; dir: THREE.Vector3 }; len: number }[] = [{ at: spineAt, len: curveLen }, ...sibAts.map((s) => ({ at: s.at, len: s.len })), ...branchAts.map((b) => ({ at: b.at, len: b.len }))]
     const branchWho0 = 1 + sibAts.length // `who` of the first branch in the station grid
@@ -526,7 +526,7 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
         deadEnds.push({ x: st.pos.x, z: st.pos.z, dx: d.x, dz: d.z, who, s })
       }
     }
-    type St = { x: number; z: number; dx: number; dz: number; s: number; half: number; who: number; off: number }
+    type St = { x: number; z: number; dx: number; dz: number; s: number; half: number; who: number; off: number; y?: number }
     const bulbStations: St[] = []
     const placeBulbs = () => {
       for (const b of bulbStations) {
@@ -571,6 +571,8 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
         }
       }
       if (!bp) return { d: best, who, y: 0 }
+      // a driveway (who < 0) is not a carriageway and has no spline: it carries its own height
+      if (bp.who < 0) return { d: best, who: bp.who, y: bp.y ?? 0 }
       // the road height HERE, from the carriageway spline at the projected along-track metre —
       // the very same function the asphalt mesh is built from, so ground and road agree to the mm
       const along = (x - bp.x) * bp.dx + (z - bp.z) * bp.dz
@@ -607,6 +609,72 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
       const q = b.at(s).pos
       return edgeDistance(q.x, q.z, branchWho0 + i).d < VERGE
     }))
+    // --- driveways -------------------------------------------------------------------------
+    // Every house on Rich's court has one in OSM and we were dropping them, so the houses stood
+    // in grass. Unmarked asphalt, 3.2 m, laid on the strip where the strip covers them and on the
+    // DEM grade beyond it. They get stations too, so grass and trees keep off them and the car
+    // knows it is on pavement when it pulls in.
+    const driveGroup = new THREE.Group()
+    driveGroup.name = 'driveways'
+    road.add(driveGroup)
+    const driveStations: St[] = []
+    const makeDriveways = () => {
+      for (const o of [...driveGroup.children]) {
+        driveGroup.remove(o)
+        ;(o as THREE.Mesh).geometry.dispose()
+      }
+      for (const st of driveStations) {
+        const arr = stGrid.get(`${Math.floor(st.x / stCell)},${Math.floor(st.z / stCell)}`)
+        const i = arr?.indexOf(st) ?? -1
+        if (arr && i >= 0) arr.splice(i, 1)
+      }
+      driveStations.length = 0
+      const set = surfaceSets?.asphalt_aged
+      const mat = set ? set.material : new THREE.MeshStandardMaterial({ color: 0x3b3b3d, roughness: 1 })
+      const mpt = set?.metresPerTile ?? 1
+      const pos: number[] = [], uv: number[] = [], idx: number[] = []
+      for (const dw of manifest.driveways ?? []) {
+        const pts = (dw.coords ?? []).map(([x, y, z]) => toWorld(x, y, z))
+        if (pts.length < 2) continue
+        const half = Math.max(1.2, (dw.width_m ?? 3.6) / 2)
+        const base = pos.length / 3
+        for (let i = 0; i < pts.length; i++) {
+          const a = pts[Math.max(0, i - 1)], b = pts[Math.min(pts.length - 1, i + 1)]
+          const dx = b.x - a.x, dz = b.z - a.z
+          const n = Math.hypot(dx, dz) || 1
+          const sx = -dz / n, sz = dx / n // right of travel
+          const g = groundAtWorld(pts[i].x, pts[i].z)
+          const y = (g ?? pts[i].y) + 0.03
+          for (const s of [-1, 1]) {
+            pos.push(pts[i].x + sx * half * s, y, pts[i].z + sz * half * s)
+            uv.push((pts[i].x + sx * half * s) / mpt, (pts[i].z + sz * half * s) / mpt)
+          }
+          if (i % 2 === 0) {
+            const rec: St = { x: pts[i].x, z: pts[i].z, dx: dx / n, dz: dz / n, s: 0, half, who: -2, off: 0, y }
+            driveStations.push(rec)
+            const k = `${Math.floor(rec.x / stCell)},${Math.floor(rec.z / stCell)}`
+            const arr = stGrid.get(k)
+            if (arr) arr.push(rec)
+            else stGrid.set(k, [rec])
+          }
+        }
+        for (let i = 0; i < pts.length - 1; i++) {
+          const a = base + i * 2
+          idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2)
+        }
+      }
+      if (idx.length) {
+        const geo = new THREE.BufferGeometry()
+        geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
+        geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2))
+        geo.setIndex(idx)
+        geo.computeVertexNormals()
+        const mesh = new THREE.Mesh(geo, mat)
+        mesh.name = 'road:driveways'
+        driveGroup.add(mesh)
+      }
+    }
+
     const bulbGroup = new THREE.Group()
     bulbGroup.name = 'culdesacs'
     road.add(bulbGroup)
@@ -656,6 +724,7 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
       for (const arr of stGrid.values()) for (const r of arr) { if (bulbStations.includes(r as St)) continue; r.half = halfOf(r.who, r.s); r.off = r.who === 0 ? pavedOffsetAt(r.s) : 0 }
       placeBulbs()
       makeBulbs()
+      makeDriveways()
       buildRoads()
       road.remove(strip.mesh)
       strip.mesh.geometry.dispose()
@@ -674,6 +743,7 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
     }
     group.add(road)
     // everything that stands on the ground near the road stands on the strip
+    makeDriveways()
     const groundNear = (x: number, y: number) => stripHeight(x, -y) ?? heightAt(x, y)
     groundAtWorld = (x, z) => stripHeight(x, z) ?? heightAt(x, -z)
     edgeDistanceWorld = (x, z) => edgeDistance(x, z).d

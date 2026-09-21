@@ -19,6 +19,7 @@ the Worker will hand the browser, so the viewer is already reading the productio
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 
 import numpy as np
@@ -251,6 +252,436 @@ def _stub_roads(site_dir: Path, frame, ox: float, oy: float, bbox) -> list[dict]
                 "oneway": p.get("oneway"),
                 "coords": np.column_stack([pts[:, 0] - ox, pts[:, 1] - oy, np.nan_to_num(zs)]).round(2).tolist(),
             })
+    if src is not None:
+        src.close()
+    return out
+
+
+DRIVABLE = (
+    "motorway", "trunk", "primary", "secondary", "tertiary", "unclassified", "residential",
+    "motorway_link", "trunk_link", "primary_link", "secondary_link", "tertiary_link", "living_street",
+)
+
+
+def _bearing(dx: float, dy: float) -> float:
+    """Compass bearing of a vector in UTM metres (x east, y north): 0 = north, 90 = east."""
+    return math.degrees(math.atan2(dx, dy)) % 360.0
+
+
+def _road_index(features) -> dict:
+    """Every drivable way's vertices, keyed by exact WGS84 coordinate.
+
+    A `highway=traffic_signals` node is not a free-floating point: OSM puts it ON the way it
+    governs, as one of its vertices, and at a junction the SAME node is a vertex of every arm. So
+    the way to find out what a signal governs, and which way the traffic runs, is to look the
+    node's own coordinate up among the vertices — no geometry search and no tolerance needed,
+    because these are the same floats from the same extract.
+    """
+    idx: dict[tuple, list] = {}
+    for f in features:
+        p = f["properties"]
+        if p.get("highway") not in DRIVABLE or f["geometry"]["type"] != "LineString":
+            continue
+        cs = f["geometry"]["coordinates"]
+        for i, c in enumerate(cs):
+            idx.setdefault((c[0], c[1]), []).append((f, i))
+    return idx
+
+
+def _lanes_of(p: dict) -> int:
+    for k in ("lanes", "lanes:forward"):
+        try:
+            n = int(str(p.get(k, "")).split(";")[0])
+            if 1 <= n <= 12:
+                return n
+        except (TypeError, ValueError):
+            pass
+    hw = p.get("highway", "")
+    return 4 if hw in ("motorway", "trunk", "primary") else 2
+
+
+def _signals(site_dir: Path, frame, ox: float, oy: float, bbox) -> dict:
+    """Traffic signals, stop and give-way signs.
+
+    Crofton has 218 `highway=traffic_signals` nodes and we draw none of them, which is most of why
+    a signalised suburban junction reads as a crossroads in a field.
+
+    A signal node carries no bearing of its own, so the bearing comes from the geometry: look the
+    node up in the road index to get the arm it sits on, group the nodes of one junction together
+    (they are within a few tens of metres of each other), and the direction of travel on that arm
+    is from the node toward the group's centre. The heads then face BACK along that, at the
+    traffic. `traffic_signals:direction` is used where OSM has it (112 of the 218 here), because a
+    forward/backward tag beats an inference.
+
+    Isolated signals — a mid-block pedestrian crossing, of which there are many — have no junction
+    to point at, so they take the arm's own tangent and the OSM direction tag.
+    """
+    gj_p = site_dir / "osm.geojson"
+    if not gj_p.exists():
+        return {"masts": [], "signs": []}
+    import rasterio
+    from shapely.geometry import Point, box
+
+    site_box = box(*bbox)
+    dem_p = site_dir / "dem_1m.tif"
+    src = rasterio.open(dem_p) if dem_p.exists() else None
+
+    def ground(x: float, y: float) -> float:
+        if src is None:
+            return 0.0
+        v = next(src.sample([(float(x), float(y))]))[0]
+        return 0.0 if v < -9000 else float(v)
+
+    features = json.loads(gj_p.read_text())["features"]
+    idx = _road_index(features)
+
+    # the signal nodes, in UTM, with the arm they sit on
+    nodes = []
+    for f in features:
+        p = f["properties"]
+        if p.get("highway") != "traffic_signals" or f["geometry"]["type"] != "Point":
+            continue
+        lon, lat = f["geometry"]["coordinates"][:2]
+        x, y = frame.from_wgs(lon, lat)
+        if not site_box.contains(Point(x, y)):
+            continue
+        ways = idx.get((lon, lat), [])
+        if not ways:
+            continue  # a signal on a way we do not draw (a cycleway, a private service road)
+        nodes.append({"x": x, "y": y, "lon": lon, "lat": lat, "ways": ways, "dir": p.get("traffic_signals:direction")})
+
+    # junctions: signal nodes within JUNCTION_R of each other are arms of one crossing
+    JUNCTION_R = 45.0
+    unassigned = list(range(len(nodes)))
+    groups: list[list[int]] = []
+    while unassigned:
+        seed = unassigned.pop()
+        grp = [seed]
+        changed = True
+        while changed:
+            changed = False
+            for i in list(unassigned):
+                if any(math.hypot(nodes[i]["x"] - nodes[j]["x"], nodes[i]["y"] - nodes[j]["y"]) <= JUNCTION_R for j in grp):
+                    grp.append(i)
+                    unassigned.remove(i)
+                    changed = True
+        groups.append(grp)
+
+    masts = []
+    for grp in groups:
+        cx = sum(nodes[i]["x"] for i in grp) / len(grp)
+        cy = sum(nodes[i]["y"] for i in grp) / len(grp)
+        for i in grp:
+            n = nodes[i]
+            way, vi = n["ways"][0]
+            cs = way["geometry"]["coordinates"]
+            # the arm's own tangent at this vertex, in UTM
+            a = cs[max(0, vi - 1)]
+            b = cs[min(len(cs) - 1, vi + 1)]
+            ax, ay = frame.from_wgs(a[0], a[1])
+            bx, by = frame.from_wgs(b[0], b[1])
+            tx, ty = bx - ax, by - ay
+            tl = math.hypot(tx, ty) or 1.0
+            tx, ty = tx / tl, ty / tl
+            # which way does traffic run? toward the junction centre when there is one, otherwise
+            # the tag, otherwise the tangent as it lies
+            dx, dy = cx - n["x"], cy - n["y"]
+            d = math.hypot(dx, dy)
+            if len(grp) > 1 and d > 3.0:
+                # project the centre direction onto the arm, so the signal stays on its own road
+                sgn = 1.0 if (dx * tx + dy * ty) >= 0 else -1.0
+                trav = (tx * sgn, ty * sgn)
+            else:
+                sgn = -1.0 if n["dir"] == "backward" else 1.0
+                trav = (tx * sgn, ty * sgn)
+            heads = _bearing(-trav[0], -trav[1])  # the heads look back at the traffic
+            lanes = _lanes_of(way["properties"])
+            masts.append({
+                "x": round(float(n["x"] - ox), 2),
+                "y": round(float(n["y"] - oy), 2),
+                "z": round(ground(n["x"], n["y"]), 2),
+                "yaw_deg": round(heads, 1),            # compass bearing the heads face
+                "travel_deg": round(_bearing(*trav), 1),
+                "arm_m": round(lanes * 3.66 / 2 + 1.4, 2),
+                "lanes": lanes,
+                "junction": len(grp),
+                "tagged": bool(n["dir"]),
+            })
+
+    # stop and give-way: a sign on a post, facing the traffic it stops
+    signs = []
+    for f in features:
+        p = f["properties"]
+        kind = p.get("highway")
+        if kind not in ("stop", "give_way") or f["geometry"]["type"] != "Point":
+            continue
+        lon, lat = f["geometry"]["coordinates"][:2]
+        x, y = frame.from_wgs(lon, lat)
+        if not site_box.contains(Point(x, y)):
+            continue
+        ways = idx.get((lon, lat), [])
+        if not ways:
+            continue
+        way, vi = ways[0]
+        cs = way["geometry"]["coordinates"]
+        a = cs[max(0, vi - 1)]
+        b = cs[min(len(cs) - 1, vi + 1)]
+        ax, ay = frame.from_wgs(a[0], a[1])
+        bx, by = frame.from_wgs(b[0], b[1])
+        tx, ty = bx - ax, by - ay
+        tl = math.hypot(tx, ty) or 1.0
+        sgn = -1.0 if p.get("direction") == "backward" else 1.0
+        trav = (tx / tl * sgn, ty / tl * sgn)
+        signs.append({
+            "kind": kind,
+            "x": round(float(x - ox), 2),
+            "y": round(float(y - oy), 2),
+            "z": round(ground(x, y), 2),
+            "yaw_deg": round(_bearing(-trav[0], -trav[1]), 1),
+            "travel_deg": round(_bearing(*trav), 1),
+        })
+
+    if src is not None:
+        src.close()
+    return {"masts": masts, "signs": signs}
+
+
+def _parking(site_dir: Path, frame, ox: float, oy: float, bbox) -> list[dict]:
+    """`amenity=parking` areas: the asphalt a shopping centre is mostly made of.
+
+    Crofton has 233 of them, from a 34 m² pull-in to a 64 000 m² park-and-ride, and we drew none —
+    so every strip mall on the site was a building standing in grass with a road going past it.
+
+    Only the ring and what OSM says about it comes out here. Whether a lot overlaps a carriageway,
+    and where its stalls go, are both decided in the viewer: the first because only the viewer
+    knows which roads are actually drawn, and the second because the aisles are already in the
+    manifest as `driveways` with `service=parking_aisle` and there is no reason to carry them twice.
+
+    Multi-storey and underground lots are tagged and passed through rather than dropped, because
+    the viewer wants to NOT pave a roof or a basement, and it cannot tell without being told.
+    """
+    gj_p = site_dir / "osm.geojson"
+    if not gj_p.exists():
+        return []
+    import rasterio
+    from shapely.geometry import Polygon, box
+    from shapely.ops import transform as shp_transform
+
+    site_box = box(*bbox)
+    dem_p = site_dir / "dem_1m.tif"
+    src = rasterio.open(dem_p) if dem_p.exists() else None
+    out: list[dict] = []
+    for f in json.loads(gj_p.read_text())["features"]:
+        p = f["properties"]
+        if p.get("amenity") != "parking" or f["geometry"]["type"] != "Polygon":
+            continue
+        try:
+            poly = shp_transform(lambda x, y, z=None: frame.from_wgs(x, y), Polygon(f["geometry"]["coordinates"][0], f["geometry"]["coordinates"][1:]))
+        except Exception:
+            continue
+        if not poly.is_valid:
+            poly = poly.buffer(0)
+        poly = poly.intersection(site_box)
+        if poly.is_empty:
+            continue
+        for part in (poly.geoms if poly.geom_type == "MultiPolygon" else [poly]):
+            if part.geom_type != "Polygon" or part.area < 60:
+                continue
+            ring = [[round(float(x - ox), 2), round(float(y - oy), 2)] for x, y in part.exterior.coords[:-1]]
+            if len(ring) < 3:
+                continue
+            cx, cy = part.centroid.x, part.centroid.y
+            z = 0.0
+            if src is not None:
+                v = next(src.sample([(float(cx), float(cy))]))[0]
+                z = 0.0 if v < -9000 else float(v)
+            out.append({
+                "kind": p.get("parking") or "surface",
+                "surface": p.get("surface"),
+                "access": p.get("access"),
+                "name": p.get("name"),
+                "area_m2": round(float(part.area), 1),
+                "z": round(z, 2),
+                "ring": ring,
+                "holes": [[[round(float(x - ox), 2), round(float(y - oy), 2)] for x, y in h.coords[:-1]] for h in part.interiors],
+            })
+    if src is not None:
+        src.close()
+    return out
+
+
+def _barriers(site_dir: Path, frame, ox: float, oy: float, bbox) -> list[dict]:
+    """`barrier=guard_rail|fence|wall|hedge` ways, and `barrier=gate` nodes on them.
+
+    Guard rail is the one that matters for a rural road and it is NOT on the suburban acceptance
+    site: Crofton has 178 fences, 24 walls, 3 hedges and zero guard rail, while frederick-i70 has
+    39 and frederick-i270 has 22. It is an interstate feature in this region, so it is built here
+    and proven there.
+
+    Heights are OSM's where tagged and by kind otherwise. The grade is the bare-earth DEM sampled
+    along the way, lightly smoothed — a rail follows the ground, and a fence posted off a single
+    end height staircases across a bank.
+    """
+    gj_p = site_dir / "osm.geojson"
+    if not gj_p.exists():
+        return []
+    import rasterio
+    from shapely.geometry import LineString, box
+    from shapely.ops import transform as shp_transform
+
+    KIND = {"guard_rail": 0.72, "fence": 1.5, "wall": 1.8, "hedge": 1.4, "city_wall": 3.0, "retaining_wall": 1.6}
+    site_box = box(*bbox)
+    dem_p = site_dir / "dem_1m.tif"
+    src = rasterio.open(dem_p) if dem_p.exists() else None
+    out: list[dict] = []
+    for f in json.loads(gj_p.read_text())["features"]:
+        p = f["properties"]
+        kind = p.get("barrier")
+        if kind not in KIND or f["geometry"]["type"] != "LineString":
+            continue
+        try:
+            ln = shp_transform(lambda x, y, z=None: frame.from_wgs(x, y), LineString(f["geometry"]["coordinates"]))
+        except Exception:
+            continue
+        ln = ln.intersection(site_box)
+        for part in (ln.geoms if ln.geom_type == "MultiLineString" else [ln]):
+            if part.is_empty or part.geom_type != "LineString" or part.length < 4:
+                continue
+            # a post every couple of metres wants a vertex every couple of metres
+            step = 2.0
+            ss = np.arange(0.0, part.length, step).tolist() + [part.length]
+            pts = np.array([part.interpolate(v).coords[0] for v in ss])
+            if src is not None:
+                zs = np.array([v[0] for v in src.sample([(float(x), float(y)) for x, y in pts])], dtype=float)
+                zs[zs < -9000] = np.nan
+                if np.isfinite(zs).any():
+                    ok = np.isfinite(zs)
+                    zs[~ok] = np.interp(np.flatnonzero(~ok), np.flatnonzero(ok), zs[ok])
+                    if len(zs) > 4:
+                        zs = np.convolve(np.pad(np.nan_to_num(zs), 2, mode="edge"), np.ones(5) / 5, mode="valid")
+                else:
+                    zs = np.zeros(len(pts))
+            else:
+                zs = np.zeros(len(pts))
+            h = None
+            try:
+                h = float(str(p.get("height", "")).rstrip("m ").strip())
+            except ValueError:
+                h = None
+            out.append({
+                "kind": kind,
+                "height_m": round(h or KIND[kind], 2),
+                "material": p.get("material") or p.get("fence_type"),
+                "coords": np.column_stack([pts[:, 0] - ox, pts[:, 1] - oy, np.nan_to_num(zs)]).round(2).tolist(),
+            })
+    if src is not None:
+        src.close()
+    return out
+
+
+def _sidewalks(site_dir: Path, frame, ox: float, oy: float, bbox) -> list[dict]:
+    """Sidewalks and crossings: `highway=footway` ways, and the roads that say they have one.
+
+    Crofton maps 626 `footway=sidewalk` ways and 446 `footway=crossing` ways explicitly, which is
+    the good case and most of the built-up part of the site. Another 78 roads carry
+    `sidewalk=both|left|right` with no separate way, and those get a line offset off the
+    carriageway — the same walk exists, OSM just recorded it as an attribute instead of a geometry.
+
+    Whether a crossing is PAINTED is a real tag and not a guess: `crossing:markings` is yes or
+    ladder on 209 of Crofton's 644 crossing nodes and explicitly `no` on 213. An unmarked crossing
+    gets a dropped kerb and no paint, which is what an unmarked crossing is.
+    """
+    gj_p = site_dir / "osm.geojson"
+    if not gj_p.exists():
+        return []
+    import rasterio
+    from shapely.geometry import LineString, box
+    from shapely.ops import transform as shp_transform
+
+    site_box = box(*bbox)
+    dem_p = site_dir / "dem_1m.tif"
+    src = rasterio.open(dem_p) if dem_p.exists() else None
+
+    def grade(pts):
+        if src is None:
+            return np.zeros(len(pts))
+        zs = np.array([v[0] for v in src.sample([(float(x), float(y)) for x, y in pts])], dtype=float)
+        zs[zs < -9000] = np.nan
+        if not np.isfinite(zs).any():
+            return np.zeros(len(pts))
+        ok = np.isfinite(zs)
+        zs[~ok] = np.interp(np.flatnonzero(~ok), np.flatnonzero(ok), zs[ok])
+        if len(zs) > 4:
+            zs = np.convolve(np.pad(np.nan_to_num(zs), 2, mode="edge"), np.ones(5) / 5, mode="valid")
+        return np.nan_to_num(zs)
+
+    def emit(out, part, kind, width, marked, source):
+        step = 3.0
+        ss = np.arange(0.0, part.length, step).tolist() + [part.length]
+        pts = np.array([part.interpolate(v).coords[0] for v in ss])
+        zs = grade(pts)
+        out.append({
+            "kind": kind,
+            "width_m": round(float(width), 2),
+            "marked": bool(marked),
+            "source": source,
+            "coords": np.column_stack([pts[:, 0] - ox, pts[:, 1] - oy, zs]).round(2).tolist(),
+        })
+
+    def width_of(p, default):
+        for k in ("width", "est_width"):
+            try:
+                return max(0.8, min(6.0, float(str(p.get(k, "")).rstrip("m ").strip())))
+            except (TypeError, ValueError):
+                pass
+        return default
+
+    out: list[dict] = []
+    features = json.loads(gj_p.read_text())["features"]
+    for f in features:
+        p = f["properties"]
+        if p.get("highway") != "footway" or f["geometry"]["type"] != "LineString":
+            continue
+        fw = p.get("footway")
+        if fw not in ("sidewalk", "crossing"):
+            continue
+        try:
+            ln = shp_transform(lambda x, y, z=None: frame.from_wgs(x, y), LineString(f["geometry"]["coordinates"]))
+        except Exception:
+            continue
+        ln = ln.intersection(site_box)
+        marked = str(p.get("crossing:markings", "")) in ("yes", "ladder", "zebra") or p.get("crossing") in ("marked", "zebra", "traffic_signals")
+        for part in (ln.geoms if ln.geom_type == "MultiLineString" else [ln]):
+            if part.is_empty or part.geom_type != "LineString" or part.length < 2:
+                continue
+            emit(out, part, fw, width_of(p, 1.8 if fw == "sidewalk" else 3.0), marked, "way")
+
+    # roads that only SAY they have one
+    for f in features:
+        p = f["properties"]
+        side = p.get("sidewalk")
+        if side not in ("both", "left", "right") or p.get("highway") not in DRIVABLE or f["geometry"]["type"] != "LineString":
+            continue
+        try:
+            ln = shp_transform(lambda x, y, z=None: frame.from_wgs(x, y), LineString(f["geometry"]["coordinates"])).intersection(site_box)
+        except Exception:
+            continue
+        half = _lanes_of(p) * 3.66 / 2 + 2.2
+        for part in (ln.geoms if ln.geom_type == "MultiLineString" else [ln]):
+            if part.is_empty or part.geom_type != "LineString" or part.length < 10:
+                continue
+            for s_side in (("left", "right") if side == "both" else (side,)):
+                try:
+                    off = part.parallel_offset(half, s_side, join_style=2)
+                except Exception:
+                    continue
+                if off.is_empty:
+                    continue
+                for o in (off.geoms if off.geom_type == "MultiLineString" else [off]):
+                    if o.geom_type != "LineString" or o.length < 10:
+                        continue
+                    emit(out, o, "sidewalk", 1.8, False, "offset")
+
     if src is not None:
         src.close()
     return out
@@ -582,6 +1013,10 @@ def export_site(site_dir: Path) -> dict:
         "driveways": _service_ways(site_dir, Frame.at(site["lon"], site["lat"]), ox, oy, bbox),
         "stubs": _stub_roads(site_dir, Frame.at(site["lon"], site["lat"]), ox, oy, bbox),
         "power": _power(site_dir, Frame.at(site["lon"], site["lat"]), ox, oy, bbox),
+        "signals": _signals(site_dir, Frame.at(site["lon"], site["lat"]), ox, oy, bbox),
+        "parking": _parking(site_dir, Frame.at(site["lon"], site["lat"]), ox, oy, bbox),
+        "barriers": _barriers(site_dir, Frame.at(site["lon"], site["lat"]), ox, oy, bbox),
+        "sidewalks": _sidewalks(site_dir, Frame.at(site["lon"], site["lat"]), ox, oy, bbox),
         "landuse": derived["landuse"],
         "pois": derived["pois"],
         "cuts": features.get("cuts"),

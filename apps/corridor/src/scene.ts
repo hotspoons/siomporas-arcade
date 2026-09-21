@@ -16,6 +16,8 @@ import { Adjustments, NEUTRAL as NEUTRAL_ADJ } from './adjust'
 import { buildPlacements, loadCatalog, loadPlacements } from './placements'
 import { buildBuildings } from './buildings'
 import { buildPower } from './power'
+import { buildBarriers, buildFurniture, buildSidewalks } from './furniture'
+import { buildParking } from './parking'
 import { buildBridges, flattenSpine, loadStructureOverrides, suppressed } from './structures'
 import { loadSurfaceSets, overpassMesh, pavedOffset, pavedWidth, roadMesh, stations, taperedLanes, treesFromCanopy, type SurfaceSet } from './props'
 import { buildRocks } from './rocks'
@@ -28,13 +30,21 @@ export const toWorld = (x: number, y: number, z: number) => new THREE.Vector3(x,
 export interface Site {
   manifest: Manifest
   group: THREE.Group
-  layers: { imagery?: THREE.Mesh; canopy?: THREE.Mesh; trees?: THREE.Group; grass?: THREE.Group; crops?: THREE.Group; road: THREE.Group; horizon?: THREE.Mesh; structures: THREE.Group; spine: THREE.Group; markers: THREE.Group; placements: THREE.Group; buildings: THREE.Group; power: THREE.Group; rocks: THREE.Group; water: THREE.Group }
+  layers: { imagery?: THREE.Mesh; canopy?: THREE.Mesh; trees?: THREE.Group; grass?: THREE.Group; crops?: THREE.Group; road: THREE.Group; horizon?: THREE.Mesh; structures: THREE.Group; spine: THREE.Group; markers: THREE.Group; placements: THREE.Group; buildings: THREE.Group; power: THREE.Group; furniture: THREE.Group; parking: THREE.Group; barriers: THREE.Group; sidewalks: THREE.Group; rocks: THREE.Group; water: THREE.Group }
   /** how many footprints were massed, and how many had a real measured height */
   buildingStats: { count: number; gabled: number; fromLidar: number }
   adjustments: Adjustments
   treeCount: number
   /** the grass field, when this site has one (probes and the HUD read `grass.counts`) */
   grass: Grass | null
+  /** what street furniture was placed, and how much of it had to be walked off the carriageway */
+  furnitureCounts: { masts: number; signs: number; movedOffPavement: number; stillOnPavement: number; onTheLeft: number; noRoadNearby: number; armNoRoad: number }
+  /** what parking was paved, and why the rest was not */
+  parkingCounts: { lots: number; stalls: number; skippedOnRoad: number; skippedKind: number; fromAisles: number; fromFallback: number }
+  /** guard rail, fence, wall and hedge: runs, metres and posts by kind */
+  barrierCounts: Record<string, { runs: number; metres: number; posts: number }>
+  /** sidewalks, kerbs and painted crossings */
+  sidewalkCounts: { walks: number; crossings: number; marked: number; bars: number; metres: number; kerbFlat: number }
   /** terrain-and-data: rock instances placed per rock type, and what water was drawn (for probes) */
   rockCounts: Record<string, number>
   waterStats: { lines: number; areas: number; falls: number; length_m: number }
@@ -1193,6 +1203,16 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
   // poles and wires: most of what a rural roadside has, and it was all sitting unused in the bake
   const power = buildPower(manifest, groundAtWorld)
   group.add(power.group)
+  // street furniture needs edgeDistance as well as the ground: a signal node sits on the road
+  // centreline, and only the viewer knows where the asphalt actually ends
+  const furniture = buildFurniture(manifest, groundAtWorld, edgeDistanceWorld)
+  group.add(furniture.group)
+  const parking = buildParking(manifest, groundAtWorld, edgeDistanceWorld)
+  group.add(parking.group)
+  const barriers = buildBarriers(manifest, groundAtWorld)
+  group.add(barriers.group)
+  const sidewalks = buildSidewalks(manifest, groundAtWorld, edgeDistanceWorld)
+  group.add(sidewalks.group)
   // authored bridges over the road (structures.json bridge_over)
   structures.add(await buildBridges(overrides, catalog, spineAt, groundAtWorld, (s) => pavedHalfAt(s) * 2))
 
@@ -1214,11 +1234,15 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
   return {
     manifest,
     group,
-    layers: { imagery: terrain, canopy, trees, grass: grassRef?.mesh, crops: crops?.group, road, horizon, structures, spine, markers, placements: placementsGroup, buildings: built.group, power: power.group, rocks: rocks.group, water: water.group },
+    layers: { imagery: terrain, canopy, trees, grass: grassRef?.mesh, crops: crops?.group, road, horizon, structures, spine, markers, placements: placementsGroup, buildings: built.group, power: power.group, furniture: furniture.group, parking: parking.group, barriers: barriers.group, sidewalks: sidewalks.group, rocks: rocks.group, water: water.group },
     buildingStats: built.stats,
     adjustments,
     treeCount,
     grass: grassRef,
+    furnitureCounts: furniture.counts,
+    parkingCounts: parking.counts,
+    barrierCounts: barriers.counts,
+    sidewalkCounts: sidewalks.counts,
     rockCounts: rocks.counts,
     waterStats: { lines: water.lines, areas: water.areas, falls: water.falls, length_m: water.length_m },
     canopyAt: canopyAtRef,

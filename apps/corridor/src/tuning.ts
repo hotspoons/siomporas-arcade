@@ -267,6 +267,77 @@ export let CHASE_UP = 2.6
 export let CHASE_LOOK_AHEAD = 6
 export let CHASE_LAG = 8
 
+// --- street furniture ---------------------------------------------------------------------------
+/** the mast pole's height (m); the arm hangs its heads a little under the top */
+export let FURNITURE_SIGNAL_HEIGHT = 6.4
+/** the mast arm's reach over the carriageway, × what the road's lane count asks for */
+export let FURNITURE_SIGNAL_ARM_SCALE = 1
+/**
+ * 1 lights one lens. Left at 0 by default and deliberately: nothing in the bake or the viewer
+ * knows what phase a junction is in, and a signal cycling to a timer that has no relationship to
+ * the junction is worse than an unlit one, because it invites you to obey it.
+ */
+export let FURNITURE_SIGNAL_LIT = 0
+/** a stop or give-way sign's post height (m) */
+export let FURNITURE_SIGN_HEIGHT = 2.2
+/** how far clear of the asphalt a post has to stand before it is left alone (m) */
+export let FURNITURE_KERB_CLEAR = 0.6
+/** and how far it may be walked sideways looking for that clearance (m) */
+export let FURNITURE_KERB_MAX = 26
+/**
+ * Furniture further than this from a drawn carriageway edge is not placed (m). The bake reads the
+ * whole OSM extract; the viewer draws a fraction of the roads in it, and a signal for a road that
+ * is not there stands in a field with its arm over grass.
+ */
+export let FURNITURE_MAX_FROM_ROAD = 20
+/** how far back along its own approach a post may be walked to get out of the junction box (m) */
+export let FURNITURE_SETBACK_MAX = 16
+/** past this reach it is not a mast arm any more, and the signal is not placed (m) */
+export let FURNITURE_ARM_MAX = 14
+
+/** a stall bay, in metres: the American standard is 8'6" × 18' */
+export let PARKING_STALL_W = 2.6
+export let PARKING_STALL_D = 5.4
+/** the drive aisle between two facing rows, for lots with no aisle mapped (m) */
+export let PARKING_AISLE_W = 6.5
+/** the painted line's width (m), and how far the paint floats over the asphalt (m) */
+export let PARKING_PAINT_W = 0.12
+export let PARKING_PAINT_LIFT = 0.02
+/** how far the asphalt floats over the ground (m) */
+export let PARKING_LIFT = 0.04
+/** a lot with more than this share of its interior over a carriageway is not paved, 0…1 */
+export let PARKING_ROAD_OVERLAP = 0.35
+/** below this area a lot with no aisle mapped gets no stalls at all (m²) */
+export let PARKING_MIN_GRID_M2 = 400
+/** extra clearance past the aisle's own edge before a bay starts (m) */
+export let PARKING_AISLE_GAP = 0.3
+/** a lot with fewer than one stall per this many m² gets the squared grid as well (m²) */
+export let PARKING_FILL_M2 = 45
+/** every barrier's height × this */
+export let BARRIER_HEIGHT_SCALE = 1
+/** the kerb lip's height (m) — a US kerb is about 150 mm */
+export let SIDEWALK_KERB_H = 0.15
+/** sidewalk width × this, and how far the concrete floats over the ground (m) */
+export let SIDEWALK_WIDTH_SCALE = 1
+export let SIDEWALK_LIFT = 0.02
+/** how far either side to look for the asphalt, to decide which side the kerb goes on (m) */
+export let SIDEWALK_KERB_PROBE = 2.5
+/** no kerb where the nearest carriageway is further than this — that is a path, not a sidewalk (m) */
+export let SIDEWALK_KERB_MAX_FROM_ROAD = 8
+/** the lip ramps to nothing over this distance before a crossing: a dropped kerb (m) */
+export let SIDEWALK_DROP_M = 3
+/** a painted crossing bar's width and spacing along the crossing (m), and its float (m) */
+export let SIDEWALK_BAR_W = 0.5
+export let SIDEWALK_BAR_PITCH = 1.2
+export let SIDEWALK_PAINT_LIFT = 0.025
+/** the painted band's width across the crossing × this */
+export let SIDEWALK_CROSSING_W = 1
+/**
+ * Linear furniture is cut into chunks this many metres across so frustum culling can fire. One
+ * merged mesh per kind has a site-sized bounding sphere and is submitted in full from anywhere.
+ */
+export let FURNITURE_CHUNK_M = 900
+
 export interface TuneTab {
   name: string
   sections: TuneSection[]
@@ -513,6 +584,57 @@ export const TUNE_TABS: TuneTab[] = [
           tune('POWER_HEIGHT_SCALE', () => POWER_HEIGHT_SCALE, (v) => (POWER_HEIGHT_SCALE = v), [0.3, 2], 0.05, 'pole and tower height'),
           tune('POWER_SAG', () => POWER_SAG, (v) => (POWER_SAG = v), [0, 0.12], 0.005, 'conductor sag as a fraction of the span'),
           tune('POWER_SAG_MAX', () => POWER_SAG_MAX, (v) => (POWER_SAG_MAX = v), [0, 20], 0.5, 'm'),
+        ],
+      },
+    ],
+  },
+  {
+    name: 'furniture',
+    sections: [
+      {
+        title: 'signals and signs',
+        keys: [
+          tune('FURNITURE_SIGNAL_HEIGHT', () => FURNITURE_SIGNAL_HEIGHT, (v) => (FURNITURE_SIGNAL_HEIGHT = v), [3, 12], 0.1, 'mast pole height (m)'),
+          tune('FURNITURE_SIGNAL_ARM_SCALE', () => FURNITURE_SIGNAL_ARM_SCALE, (v) => (FURNITURE_SIGNAL_ARM_SCALE = v), [0.4, 2.5], 0.05, 'arm reach ×'),
+          tune('FURNITURE_SIGNAL_LIT', () => FURNITURE_SIGNAL_LIT, (v) => (FURNITURE_SIGNAL_LIT = v), [0, 1], 1, '1 lights a lens; there is no controller'),
+          tune('FURNITURE_SIGN_HEIGHT', () => FURNITURE_SIGN_HEIGHT, (v) => (FURNITURE_SIGN_HEIGHT = v), [1, 4], 0.05, 'sign post height (m)'),
+          tune('FURNITURE_KERB_CLEAR', () => FURNITURE_KERB_CLEAR, (v) => (FURNITURE_KERB_CLEAR = v), [0, 4], 0.1, 'm clear of the asphalt a post needs'),
+          tune('FURNITURE_KERB_MAX', () => FURNITURE_KERB_MAX, (v) => (FURNITURE_KERB_MAX = v), [2, 40], 1, 'm it may be walked sideways to find it'),
+          tune('FURNITURE_MAX_FROM_ROAD', () => FURNITURE_MAX_FROM_ROAD, (v) => (FURNITURE_MAX_FROM_ROAD = v), [2, 400], 2, 'm from a drawn road, or it is not placed'),
+          tune('FURNITURE_SETBACK_MAX', () => FURNITURE_SETBACK_MAX, (v) => (FURNITURE_SETBACK_MAX = v), [0, 40], 1, 'm back along the approach, out of the junction box'),
+          tune('FURNITURE_ARM_MAX', () => FURNITURE_ARM_MAX, (v) => (FURNITURE_ARM_MAX = v), [4, 30], 0.5, 'm of arm before the mast is dropped instead'),
+        ],
+      },
+      {
+        title: 'parking',
+        keys: [
+          tune('PARKING_STALL_W', () => PARKING_STALL_W, (v) => (PARKING_STALL_W = v), [2, 4], 0.05, 'bay width (m)'),
+          tune('PARKING_STALL_D', () => PARKING_STALL_D, (v) => (PARKING_STALL_D = v), [3.5, 8], 0.1, 'bay depth (m)'),
+          tune('PARKING_AISLE_W', () => PARKING_AISLE_W, (v) => (PARKING_AISLE_W = v), [3, 12], 0.25, 'drive aisle, where none is mapped (m)'),
+          tune('PARKING_PAINT_W', () => PARKING_PAINT_W, (v) => (PARKING_PAINT_W = v), [0.04, 0.5], 0.01, 'painted line width (m)'),
+          tune('PARKING_PAINT_LIFT', () => PARKING_PAINT_LIFT, (v) => (PARKING_PAINT_LIFT = v), [0.005, 0.2], 0.005, 'paint over asphalt (m)'),
+          tune('PARKING_LIFT', () => PARKING_LIFT, (v) => (PARKING_LIFT = v), [0, 0.4], 0.01, 'asphalt over ground (m)'),
+          tune('PARKING_ROAD_OVERLAP', () => PARKING_ROAD_OVERLAP, (v) => (PARKING_ROAD_OVERLAP = v), [0, 1], 0.05, 'share over a carriageway before a lot is skipped'),
+          tune('PARKING_MIN_GRID_M2', () => PARKING_MIN_GRID_M2, (v) => (PARKING_MIN_GRID_M2 = v), [50, 5000], 50, 'no fallback grid below this area (m²)'),
+          tune('PARKING_AISLE_GAP', () => PARKING_AISLE_GAP, (v) => (PARKING_AISLE_GAP = v), [0, 3], 0.05, 'clearance past the aisle edge (m)'),
+          tune('PARKING_FILL_M2', () => PARKING_FILL_M2, (v) => (PARKING_FILL_M2 = v), [10, 300], 5, 'm² per stall below which the grid fills in too'),
+          tune('BARRIER_HEIGHT_SCALE', () => BARRIER_HEIGHT_SCALE, (v) => (BARRIER_HEIGHT_SCALE = v), [0.3, 3], 0.05, 'guard rail, fence, wall and hedge height ×'),
+        ],
+      },
+      {
+        title: 'sidewalks',
+        keys: [
+          tune('SIDEWALK_KERB_H', () => SIDEWALK_KERB_H, (v) => (SIDEWALK_KERB_H = v), [0, 0.5], 0.01, 'kerb lip (m)'),
+          tune('SIDEWALK_WIDTH_SCALE', () => SIDEWALK_WIDTH_SCALE, (v) => (SIDEWALK_WIDTH_SCALE = v), [0.4, 3], 0.05, 'width ×'),
+          tune('SIDEWALK_LIFT', () => SIDEWALK_LIFT, (v) => (SIDEWALK_LIFT = v), [0, 0.3], 0.005, 'concrete over ground (m)'),
+          tune('SIDEWALK_KERB_PROBE', () => SIDEWALK_KERB_PROBE, (v) => (SIDEWALK_KERB_PROBE = v), [0.5, 8], 0.25, 'm either side, to find which side the road is'),
+          tune('SIDEWALK_KERB_MAX_FROM_ROAD', () => SIDEWALK_KERB_MAX_FROM_ROAD, (v) => (SIDEWALK_KERB_MAX_FROM_ROAD = v), [1, 40], 1, 'past this it is a path and has no kerb (m)'),
+          tune('SIDEWALK_DROP_M', () => SIDEWALK_DROP_M, (v) => (SIDEWALK_DROP_M = v), [0, 12], 0.5, 'dropped-kerb ramp before a crossing (m)'),
+          tune('SIDEWALK_BAR_W', () => SIDEWALK_BAR_W, (v) => (SIDEWALK_BAR_W = v), [0.1, 1.5], 0.05, 'crossing bar width (m)'),
+          tune('SIDEWALK_BAR_PITCH', () => SIDEWALK_BAR_PITCH, (v) => (SIDEWALK_BAR_PITCH = v), [0.4, 4], 0.1, 'crossing bar spacing (m)'),
+          tune('SIDEWALK_PAINT_LIFT', () => SIDEWALK_PAINT_LIFT, (v) => (SIDEWALK_PAINT_LIFT = v), [0.005, 0.2], 0.005, 'paint over ground (m)'),
+          tune('SIDEWALK_CROSSING_W', () => SIDEWALK_CROSSING_W, (v) => (SIDEWALK_CROSSING_W = v), [0.4, 3], 0.05, 'painted band width ×'),
+          tune('FURNITURE_CHUNK_M', () => FURNITURE_CHUNK_M, (v) => (FURNITURE_CHUNK_M = v), [50, 2000], 25, 'm per cull chunk for linear furniture'),
         ],
       },
     ],

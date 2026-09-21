@@ -111,6 +111,17 @@ def fetch_site(site: dict, half_length: float, half_width: float, lidar_half_wid
         (out / "geology.json").write_text(json.dumps(g, indent=1))
         print(f"  geology {len(g['units'])} units; named: {', '.join(g['named_formations'][:6])}")
         manifest["geology"] = {"units": len(g["units"]), "named_formations": g["named_formations"]}
+    if "flora" not in skip:
+        from . import flora as flora_mod
+
+        f = flora_mod.along_spine(line, frame, site, corridor, CACHE, out)
+        top = ", ".join(f"{c['name']} {100 * c['share']:.0f}%" for c in f["evt"]["classes"][:3])
+        sp = ", ".join(f"{f['canopy']['ref'][s['key']]['common']} {100 * s['weight']:.0f}%" for s in f["canopy"]["species"][:4])
+        print(f"  flora   {len(f['evt']['classes'])} EVT classes: {top}")
+        print(f"          canopy ({f['canopy']['coverage'] * 100:.0f}% basal-area cover): {sp}")
+        print(f"          ground: " + ", ".join(f"{g['key']} {100 * g['weight']:.0f}%" for g in f["ground"]["classes"][:5]) + f"; summer rain {f['climate']['summer_dry'] * 100:.1f}% of annual")
+        manifest["flora"] = {"classes": len(f["evt"]["classes"]), "species": len(f["canopy"]["species"]), "coverage": f["canopy"]["coverage"], "source": f["evt"]["source"], "fetched": f["fetched"]}
+
     if "lidar" not in skip:
         ldir = out / "lidar"
         ldir.mkdir(exist_ok=True)
@@ -203,6 +214,30 @@ def cmd_export(a: argparse.Namespace) -> None:
     print(export.write_index(DATA / "sites"))
 
 
+def cmd_flora(a: argparse.Namespace) -> None:
+    """Backfill flora.json onto sites that were baked before this layer existed."""
+    from shapely.geometry import shape
+
+    from . import flora as flora_mod
+    from . import geo
+
+    for d in sorted((DATA / "sites").glob("*")):
+        if not (d / "site.json").exists() or (a.slug != "all" and d.name != a.slug):
+            continue
+        if (d / "flora.json").exists() and not a.overwrite:
+            print(f"{d.name:24s} flora.json exists (--overwrite to redo)")
+            continue
+        site = json.loads((d / "site.json").read_text())
+        frame = geo.Frame.at(site["lon"], site["lat"])
+        t0 = time.time()
+        f = flora_mod.along_spine(None, frame, site, shape(site["corridor"]), CACHE, d)
+        top = ", ".join(f"{c['name']} {100 * c['share']:.0f}%" for c in f["evt"]["classes"][:3])
+        sp = ", ".join(f"{f['canopy']['ref'][s['key']]['common']} {100 * s['weight']:.0f}%" for s in f["canopy"]["species"][:4])
+        print(f"{d.name:24s} {time.time() - t0:5.0f}s  {len(f['evt']['classes'])} classes; {top}")
+        print(f"{'':24s}        canopy ({f['canopy']['coverage'] * 100:.0f}% BA cover, {f['canopy']['rasters_with_data']}/{f['canopy']['rasters_here']} rasters): {sp}")
+        print(f"{'':24s}        ground: " + ", ".join(f"{g['key']} {100 * g['weight']:.0f}%" for g in f["ground"]["classes"][:5]))
+
+
 def cmd_areas(a: argparse.Namespace) -> None:
     from . import areas
 
@@ -231,6 +266,10 @@ def main() -> None:
     ex.add_argument("slug", nargs="?", default="all")
     ex.add_argument("--resurface", action="store_true", help="re-measure surface.json even if present")
     ex.set_defaults(fn=cmd_export)
+    fl = sub.add_parser("flora", help="fetch LANDFIRE EVT + FIA species + Daymet for baked sites")
+    fl.add_argument("slug", nargs="?", default="all")
+    fl.add_argument("--overwrite", action="store_true")
+    fl.set_defaults(fn=cmd_flora)
     ar = sub.add_parser("areas", help="propose adjustment-area polygons into <site>/adjustments.json")
     ar.add_argument("slug", nargs="?", default="all")
     ar.add_argument("--overwrite", action="store_true", help="replace the file instead of appending missing ids")

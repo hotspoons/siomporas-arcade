@@ -146,6 +146,44 @@ def verify(site_dir: Path) -> dict:
             warnings.append(f"could not compare the centreline against spine_utm.json ({exc})")
     if (m.get("lidar") or {}).get("dataset") is None:
         warnings.append("no lidar: no trees, no structures, no cut faces")
+    # flora: the viewer picks a tree species and a ground cover from this, and gets neither the
+    # regional palette nor the fallback right if the shares do not add up or the grid is not the
+    # size the manifest claims. A missing block is a warning (old bakes); a broken one is an error.
+    fl = m.get("flora")
+    if fl is None:
+        warnings.append("no flora: every tree falls back to the mid-Atlantic hardwood mix and the ground to plain grass")
+    else:
+        classes = (fl.get("evt") or {}).get("classes") or []
+        if not classes:
+            errors.append("flora has no EVT classes")
+        share = sum(c.get("share", 0) for c in classes)
+        if not 0.98 <= share <= 1.02:
+            errors.append(f"flora EVT class shares sum to {share:.3f}, not 1")
+        lay = (m.get("layers") or {}).get("flora")
+        if lay is None:
+            warnings.append("flora has no class grid: species and ground cover are uniform over the whole site")
+        else:
+            png = site_dir / "web" / lay["file"]
+            if not png.exists():
+                errors.append(f"flora layer {lay['file']} is in the manifest but not on disk")
+            else:
+                try:
+                    from PIL import Image
+
+                    with Image.open(png) as im:
+                        if list(im.size) != list(lay["size"]):
+                            errors.append(f"flora grid is {im.size} but the manifest says {tuple(lay['size'])}")
+                except Exception as exc:
+                    errors.append(f"flora grid unreadable: {exc}")
+        ref = (fl.get("canopy") or {}).get("ref") or {}
+        for c in classes:
+            for sp in c.get("species", []):
+                if sp["key"] not in ref:
+                    errors.append(f"flora class {c['value']} names species {sp['key']!r} that is not in canopy.ref")
+                    break
+        if not (fl.get("climate") or {}).get("ppt_mm"):
+            warnings.append("flora has no climate: the ground cover cannot cure on the right months")
+
     for key in ("cuts", "rock", "water"):
         v = m.get(key)
         if v is not None and not isinstance(v, dict):

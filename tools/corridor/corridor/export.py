@@ -821,6 +821,21 @@ def export_site(site_dir: Path) -> dict:
         Image.fromarray(np.clip(np.round(c * 4), 0, 255).astype(np.uint8), "L").save(web / "chm_2m.png", optimize=True)
         layers["chm"] = {"file": "chm_2m.png", "res": 2.0, "size": g["size"], "bbox": rel_bbox(g["bbox"]), "scale": 0.25}
 
+    # --- what grows here -------------------------------------------------------------------------
+    # The EVT class index as an 8-bit PNG on its own 30 m lattice (255 = outside the corridor), and
+    # the class table beside it. Its own lattice, not the 2 m one: the source IS 30 m, and
+    # resampling a class raster up to the DEM grid would be five megabytes of the same integer.
+    flora_path = site_dir / "flora.json"
+    flora = None
+    if flora_path.exists():
+        flora = json.loads(flora_path.read_text())
+        npy = site_dir / flora.get("grid", "flora_evt.npy")
+        if npy.exists():
+            idx = np.load(npy)
+            Image.fromarray(idx, "L").save(web / "flora_30m.png", optimize=True)
+            fb = flora["bbox_utm"]
+            layers["flora"] = {"file": "flora_30m.png", "res": flora["res_m"], "size": flora["size"], "bbox": rel_bbox(fb), "nodata": 255}
+
     # --- imagery -------------------------------------------------------------------------------
     # NAIP is flown for measurement, not for looks: leaf-on, high sun, and the service's overview
     # mosaic at 60 m is a desaturated grey-green (35% grey on average). Under fog and a hemisphere
@@ -1019,6 +1034,13 @@ def export_site(site_dir: Path) -> dict:
         "sidewalks": _sidewalks(site_dir, Frame.at(site["lon"], site["lat"]), ox, oy, bbox),
         "landuse": derived["landuse"],
         "pois": derived["pois"],
+        "flora": None if flora is None else {
+            "evt": flora["evt"],
+            "canopy": flora["canopy"],
+            "ground": flora["ground"],
+            "climate": flora["climate"],
+            "fetched": flora["fetched"],
+        },
         "cuts": features.get("cuts"),
         "rock": features.get("rock"),
         "water": features.get("water"),

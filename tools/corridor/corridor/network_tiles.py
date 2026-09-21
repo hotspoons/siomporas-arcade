@@ -474,7 +474,16 @@ def reprofile(site_dir: Path) -> dict:
     bc = np.clip(((pts["x"] - xmin) / 2.0).astype(np.int64), 0, bw - 1)
     pts["road"] = band[br, bc].astype(np.int16)
     print(f"  reprofile {len(pts['x']):,} near-road points, {len(chains)} chains", flush=True)
-    branches_old = {b["id"]: b for b in json.loads((site_dir / "branches.json").read_text())["branches"]} if (site_dir / "branches.json").exists() else {}
+    # defensive on the READ as well as the write: a branches.json from a run that crashed part-way
+    # can hold records with no id, and re-profiling is exactly how you recover from that
+    branches_old: dict[str, dict] = {}
+    if (site_dir / "branches.json").exists():
+        try:
+            for b in json.loads((site_dir / "branches.json").read_text()).get("branches", []):
+                if b.get("id"):
+                    branches_old[b["id"]] = b
+        except Exception as exc:
+            print(f"  reprofile ignoring unreadable branches.json ({exc})", flush=True)
     branches = []
     for i, c in enumerate(chains):
         prof = profile_tiled(c["line"], ldir, pts, i + 1)

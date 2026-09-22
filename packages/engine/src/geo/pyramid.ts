@@ -147,3 +147,18 @@ export function diff(
   }
   return { load, drop }
 }
+
+/**
+ * The 2x2 geodetic control lattice for a quadtree tile.
+ *
+ * The UTM tiles need a 9x9 lattice because a UTM square is a curved quadrilateral in lon/lat and
+ * 2x2 leaves 1179 mm of bilinear error. A quadtree tile IS a lon/lat rectangle, so interpolating
+ * lon linearly in u and lat linearly in v is not an approximation of the right answer — it is the
+ * right answer, to float64. Four corners, no lattice in the manifest, nothing to keep in step.
+ *
+ * Rows run south to north and columns west to east, matching `Frame.control_lattice`.
+ */
+export function latticeFor(z: number, x: number, y: number): { n: number; lon: number[]; lat: number[] } {
+  const b = tileBoundsOf(z, x, y)
+  return { n: 2, lon: [b.w, b.e, b.w, b.e], lat: [b.s, b.s, b.n, b.n] }
+}

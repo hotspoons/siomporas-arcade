@@ -28,6 +28,7 @@
 import * as THREE from 'three'
 import type { Anchor } from '@apex/engine/geo/wgs84'
 import { RasterFrame } from '@apex/engine/geo/raster'
+import { latticeFor } from '@apex/engine/geo/pyramid'
 import { DATA_BASE, decodeHeights, decodeScalar, type Layer, type TileIndex } from './site'
 import { loadBakedTexture } from './textures'
 
@@ -489,4 +490,90 @@ export class PyramidSet {
 
   /** Which level answered here — for probes, so "the pyramid is working" is measurable. */
   levelAt = (x: number, y: number): number | null => this.at(x, y)?.t.z ?? null
+}
+
+/** What the bake's `pyramid.list` says about one tile. Bounds are NOT here — they are in the id. */
+export interface PyrEntry {
+  z: number
+  x: number
+  y: number
+  empty?: boolean
+  dem?: { zmin: number; zscale: number }
+  chm?: boolean
+  naip?: boolean
+  naip_fill?: number
+}
+
+export interface PyrIndex {
+  scheme: string
+  zmin: number
+  zmax: number
+  px: number
+  dir: string
+  format: string
+  list: PyrEntry[]
+}
+
+/**
+ * Fetch and decode one pyramid tile.
+ *
+ * Returns null for a tile the bake marked `empty` and for one that will not load. Both are gaps,
+ * not failures: an empty tile is emitted only so quad closure can see the quad is complete, and a
+ * tile that 404s is covered by its parent, which strict child-replaces-parent guarantees is still
+ * resident.
+ */
+export async function loadPyrTile(
+  base: string,
+  index: PyrIndex,
+  e: PyrEntry,
+  anchor: Anchor,
+  signal?: AbortSignal,
+): Promise<PyrTile | null> {
+  if (e.empty || !e.dem) return null
+  const res = await fetch(`${DATA_BASE}${base}${index.dir}/${e.z}/${e.x}_${e.y}.pack`, { cache: 'force-cache', signal })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  const buf = await res.arrayBuffer()
+  const files = readPack(buf)
+  const demBytes = files.get('dem.png')
+  if (!demBytes) throw new Error('pack has no dem.png')
+
+  const geo = latticeFor(e.z, e.x, e.y)
+  const demImg = await imageFrom(demBytes, 'image/png')
+  const size: [number, number] = [demImg.naturalWidth, demImg.naturalHeight]
+  const demLayer: Layer = {
+    file: `${e.z}/${e.x}_${e.y}.dem.png`,
+    res: 0,
+    size,
+    bbox: [0, 0, 0, 0],
+    zmin: e.dem.zmin,
+    zscale: e.dem.zscale,
+    geo,
+  }
+  const rf = new RasterFrame({ size, geo }, anchor)
+  const dem: TileField = { layer: demLayer, data: decodeHeights(demImg, demLayer), rf }
+
+  let chm: TileField | null = null
+  const chmBytes = files.get('chm.png')
+  if (chmBytes) {
+    const chmImg = await imageFrom(chmBytes, 'image/png')
+    const chmSize: [number, number] = [chmImg.naturalWidth, chmImg.naturalHeight]
+    const chmLayer: Layer = { file: `${e.z}/${e.x}_${e.y}.chm.png`, res: 0, size: chmSize, bbox: [0, 0, 0, 0], scale: 0.25, geo }
+    chm = { layer: chmLayer, data: decodeScalar(chmImg, 0.25), rf: new RasterFrame({ size: chmSize, geo }, anchor) }
+  }
+
+  const bounds = enuBounds(rf)
+  return {
+    z: e.z,
+    x: e.x,
+    y: e.y,
+    dem,
+    chm,
+    bounds,
+    cx: (bounds[0] + bounds[2]) / 2,
+    cy: (bounds[1] + bounds[3]) / 2,
+    hasNaip: !!e.naip,
+    // The decoded rasters, not the wire bytes: this is what eviction has to bound, and a PNG that
+    // gzips to 40 kB is 512*512*4 in memory either way.
+    bytes: buf.byteLength + dem.data.byteLength + (chm ? chm.data.byteLength : 0),
+  }
 }

@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { childrenOf, diff, parentOf, tileBoundsOf, tileKey, tileMetres, wanted, type TileId } from '../src/geo/pyramid'
+import { childrenOf, diff, latticeFor, parentOf, tileBoundsOf, tileKey, tileMetres, wanted, type TileId } from '../src/geo/pyramid'
+import { RasterFrame } from '../src/geo/raster'
+import { Anchor } from '../src/geo/wgs84'
 
 /** A synthetic world: every tile exists down to `zmax`, placed on a flat ENU plane. */
 const world = (zmax: number, lat = 39) => {
@@ -128,5 +130,54 @@ describe('load / evict', () => {
     const want = [{ z: 14, x: 1, y: 1 }, { z: 14, x: 1, y: 2 }, { z: 14, x: 1, y: 3 }]
     const cheap = held([['14/1/1', 0.7e6, 10], ['14/1/2', 0.7e6, 500], ['14/1/3', 0.7e6, 900]])
     expect(diff(want, cheap, 128e6).drop).toEqual([])
+  })
+})
+
+describe('latticeFor', () => {
+  // A UTM tile needs a 9x9 lattice because a UTM square is a curved quadrilateral in lon/lat.
+  // A quadtree tile IS a lon/lat rectangle, so 2x2 should not be an approximation at all. If that
+  // is true the manifest carries no lattice and there is nothing to keep in step; if it is false
+  // the pyramid quietly misplaces every vertex, so it is worth asserting rather than asserting.
+  const z = 14, x = 9382, y = 6215
+  const b = tileBoundsOf(z, x, y)
+  const anchor = new Anchor((b.w + b.e) / 2, (b.s + b.n) / 2, 0)
+
+  it('reproduces the tile rectangle exactly, not approximately', () => {
+    const rf = new RasterFrame({ size: [512, 512], geo: latticeFor(z, x, y) }, anchor)
+    let worst = 0
+    // deliberately off-centre and non-symmetric: a lat flip or a u/v swap cancels at (0.5, 0.5)
+    for (const [u, v] of [[0, 0], [1, 0], [0, 1], [1, 1], [0.3, 0.8], [0.77, 0.12], [0.5, 0.5]]) {
+      const g = rf.geodeticAt(u, v)
+      const lon = b.w + u * (b.e - b.w)
+      const lat = b.n - v * (b.n - b.s)   // v runs NORTH to SOUTH, image order
+      worst = Math.max(worst, Math.abs(g.lon - lon), Math.abs(g.lat - lat))
+    }
+    expect(worst).toBeLessThan(1e-12)
+  })
+
+  it('is oriented: v=0 is the NORTH edge and u=0 the WEST', () => {
+    const rf = new RasterFrame({ size: [512, 512], geo: latticeFor(z, x, y) }, anchor)
+    expect(rf.geodeticAt(0.5, 0).lat).toBeGreaterThan(rf.geodeticAt(0.5, 1).lat)
+    expect(rf.geodeticAt(0, 0.5).lon).toBeLessThan(rf.geodeticAt(1, 0.5).lon)
+  })
+
+  it('a flipped lattice FAILS the exactness check', () => {
+    // the negative: prove the first test can go red, so passing means something
+    const g = latticeFor(z, x, y)
+    const flipped = { n: 2, lon: g.lon, lat: [g.lat[2], g.lat[3], g.lat[0], g.lat[1]] }
+    const rf = new RasterFrame({ size: [512, 512], geo: flipped }, anchor)
+    const got = rf.geodeticAt(0.3, 0.8).lat
+    const want = b.n - 0.8 * (b.n - b.s)
+    expect(Math.abs(got - want)).toBeGreaterThan(1e-6)
+  })
+
+  it('a child tile lattice nests exactly inside its parent', () => {
+    for (const c of childrenOf({ z, x, y })) {
+      const cb = tileBoundsOf(c.z, c.x, c.y)
+      expect(cb.w).toBeGreaterThanOrEqual(b.w - 1e-12)
+      expect(cb.e).toBeLessThanOrEqual(b.e + 1e-12)
+      expect(cb.s).toBeGreaterThanOrEqual(b.s - 1e-12)
+      expect(cb.n).toBeLessThanOrEqual(b.n + 1e-12)
+    }
   })
 })

@@ -93,3 +93,9 @@ button.primary:hover { background: #14302c; }
 .roadwidth-note { opacity: 0.75; font-size: 11px; line-height: 1.45; margin: 8px 0 10px; }
 .roadwidth-apply { width: 100%; }
 .roadwidth-apply:disabled { opacity: 0.45; }
+
+/* `.framewarn` — the frame-mismatch banner from editor/ui.ts::frameBanner — is styled by
+   ui-and-assets in their token system, not here. It was four raw hex colours in this file until
+   2026-09-22; they own the palette and a red that is not THEIR red is worse than no red. The
+   markup is <div.framewarn><strong/><span/><span.dim/> and it should read as an ERROR: every
+   coordinate in the file is displaced and nothing else about the editor looks wrong. */

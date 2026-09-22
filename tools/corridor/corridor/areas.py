@@ -309,7 +309,17 @@ def write_site(site_dir: Path, overwrite: bool = False, dry_run: bool = False) -
             existing = []
     have = {a.get("id") for a in existing}
     added = [a for a in proposed if a["id"] not in have]
-    doc = {"version": 1, "areas": existing + added}
+    # STAMP THE FRAME. Polygons are metres in the site frame, and on 2026-09-22 that frame changed
+    # from UTM-relative to true ENU — every authored band silently moved off the road it was drawn
+    # around, by a median of 40 m and up to 439 m, with nothing erroring and everything still
+    # drawing. A file of coordinates has to say which frame it is in, exactly as the manifest now
+    # does; the editor compares the two on load and refuses to pretend.
+    fr = manifest.get("frame") or {}
+    doc = {
+        "version": 1,
+        "frame": {k: fr[k] for k in ("kind", "epsg", "anchor") if k in fr},
+        "areas": existing + added,
+    }
     if not dry_run:
         tmp = out.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(doc, indent=1))

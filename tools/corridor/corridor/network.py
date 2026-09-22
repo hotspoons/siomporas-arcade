@@ -515,38 +515,70 @@ def export_branches(site_dir: Path, frame) -> list[dict] | None:
     # Fit that slope and compare it with the convergence: the two states are three orders of
     # magnitude apart (crofton-triangle read 0.02 mm/m once converted, against 18 for a rotation),
     # so there is no ambiguous middle to get wrong. The marker is then just a fast path.
-    def _looks_rotated() -> bool:
-        import math
+    by_id = {b["id"]: b for b in _br if b.get("id")}
+    by_pos = _br  # a branches.json written before chains carried ids: its order is the sibling order
 
-        num = den = 0.0
+    def _junctions_are_stale() -> bool:
+        """
+        Are `junctions[].x/y` in the OLD frame — UTM-relative metres — rather than ENU?
+
+        THIRD version of this test, and the first two both failed silently on real input:
+
+          1. keyed on the ABSENCE of a "frame": "enu" marker. A correct-but-unmarked file (written
+             by a revector after the ENU commit but before the marker existed) would have been
+             converted twice. street-spice caught it.
+          2. measured the junctions against `b["coords"]`. branches.json has NO `coords` — the
+             geometry lives on the SIBLING in spine_utm.json — so it sampled nothing, returned
+             False, and skipped the repair on genuinely stale input. `corridor.verify` caught it on
+             crofton-crownsville at 14.9 mm/m, which is the only reason I know.
+
+        So this one pairs exactly as the emission loop below does: the branch record supplies the
+        junctions, the sibling supplies the polyline. Then it tries BOTH readings and lets the data
+        choose, with no threshold and no marker to trust:
+
+            A  the junctions are already ENU     use them as they are
+            B  the junctions are UTM-relative    to_enu(j + origin)
+
+        Whichever lands nearer the converted polyline is the truth, and the two are orders of
+        magnitude apart rather than marginal.
+        """
+        ox_, oy_ = frame.origin
+        sa = sb = 0.0
         n = 0
-        for b in _br:
-            cs = b.get("coords") or []
-            if len(cs) < 2:
+        for si, sib in enumerate(spine.get("siblings", [])):
+            b = by_id.get(sib.get("id")) or (by_pos[si] if not by_id and si < len(by_pos) else None) or {}
+            js = b.get("junctions") or []
+            g = sib.get("geometry")
+            if not js or not g:
                 continue
-            for j in b.get("junctions") or []:
+            gc = g.get("coordinates") if isinstance(g, dict) else g
+            if not gc or len(gc) < 2:
+                continue
+            pts = np.asarray([[c[0], c[1]] for c in gc], dtype=float)
+            ce, cn = frame.to_enu(pts[:, 0], pts[:, 1])  # sibling geometry is ABSOLUTE utm
+            ce, cn = np.asarray(ce), np.asarray(cn)
+            for j in js:
                 jx, jy = j.get("x"), j.get("y")
                 if jx is None or jy is None:
                     continue
-                d = min(math.hypot(c[0] - jx, c[1] - jy) for c in cs)
-                r = math.hypot(jx, jy)
-                num += r * d
-                den += r * r
+                sa += float(np.hypot(ce - jx, cn - jy).min())
+                be, bn = frame.to_enu(jx + ox_, jy + oy_)
+                sb += float(np.hypot(ce - float(be), cn - float(bn)).min())
                 n += 1
-        if n < 8 or den <= 0:
+            if n >= 200:
+                break
+        if n < 8:
             return False  # too little to judge; leave it alone rather than guess
-        rot = math.sin(math.radians(abs(frame.enu_fit()[0])))
-        return (num / den) > rot * 0.5
+        return sb < sa
 
-    if _bj.get("frame") != "enu" and _looks_rotated():
-        ox, oy = frame.origin
+    if _junctions_are_stale():
+        ox_, oy_ = frame.origin
         for _b in _br:
             for _j in _b.get("junctions", []) or []:
-                _e, _n = frame.to_enu(_j["x"] + ox, _j["y"] + oy)
+                _e, _n = frame.to_enu(_j["x"] + ox_, _j["y"] + oy_)
                 _j["x"], _j["y"] = round(float(_e), 1), round(float(_n), 1)
         print(f"  note    branches.json junctions measured as still in the old frame; {sum(len(b.get('junctions') or []) for b in _br)} converted on read", flush=True)
-    by_id = {b["id"]: b for b in _br if b.get("id")}
-    by_pos = _br  # a branches.json written before chains carried ids: its order is the sibling order
+
     def finite(v, default=0.0):
         return default if v is None or not np.isfinite(v) else float(v)
 

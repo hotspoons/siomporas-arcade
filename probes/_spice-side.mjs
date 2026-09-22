@@ -9,7 +9,7 @@ await p.waitForFunction(s => window.corridor?.site?.manifest?.slug === s, SLUG, 
 console.log(JSON.stringify(await p.evaluate(() => {
   const site = window.corridor.site, THREE = window.corridor.THREE
   const m = site.manifest
-  const out = { side: { checked: 0, right: 0, left: 0 }, bars: { meshes: 0, tris: 0, nearJunction: 0 }, blades: { meshes: 0, tris: 0 }, sample: null }
+  const out = { back: [], side: { checked: 0, right: 0, left: 0 }, bars: { meshes: 0, tris: 0, nearJunction: 0 }, blades: { meshes: 0, tris: 0 }, sample: null }
 
   // which side of travel did each stop sign END UP on, after the kerb walk?
   const m4 = new THREE.Matrix4(), pp = new THREE.Vector3(), qq = new THREE.Quaternion(), ss = new THREE.Vector3()
@@ -34,6 +34,14 @@ console.log(JSON.stringify(await p.evaluate(() => {
       const dot = dx * rx + dz * rz
       out.side.checked++
       if (dot >= 0) out.side.right++; else out.side.left++
+      // how far BACK up the approach did it end up, measured from the junction centre? A stop sign
+      // 20 m back is not a stop sign, it is a warning sign.
+      const XX = byX.get(rec.x_id)
+      if (XX) {
+        const bx = pp.x - XX.x, bz = pp.z - (-XX.y)
+        const backM = -(bx * tx + bz * tz)   // positive = back up the approach
+        out.back.push(+backM.toFixed(1))
+      }
       if (!out.sample) out.sample = { x_id: rec.x_id, travel: rec.travel_deg, moved: +Math.hypot(dx, dz).toFixed(2), dotRight: +dot.toFixed(2) }
     }
   }
@@ -56,6 +64,13 @@ console.log(JSON.stringify(await p.evaluate(() => {
       lanesByArm: X.approaches.map(a => a.lanes),
     }
   }
+  const bb = out.back.slice().sort((a, c) => a - c)
+  out.backStats = bb.length ? {
+    n: bb.length, min: bb[0], p25: bb[Math.floor(bb.length * 0.25)], median: bb[Math.floor(bb.length / 2)],
+    p75: bb[Math.floor(bb.length * 0.75)], p95: bb[Math.floor(bb.length * 0.95)], max: bb[bb.length - 1],
+    over15: bb.filter((v) => v > 15).length, over20: bb.filter((v) => v > 20).length,
+  } : null
+  delete out.back
   return out
 })))
 await b.close()

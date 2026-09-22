@@ -78,7 +78,8 @@ await shoot('approach', () => {
   if (!X) return null
   const a = X.approaches.find((q) => q.stop) ?? X.approaches[0]
   const th = (a.bearing_deg * Math.PI) / 180
-  const px = X.x - Math.sin(th) * 22, py = X.y - Math.cos(th) * 22
+  const BACK = Number(window.__back ?? 13)
+  const px = X.x - Math.sin(th) * BACK, py = X.y - Math.cos(th) * BACK
   const gy = site.groundAt(px, -py) ?? 0
   c.camera.position.set(px, gy + 1.6, -py)
   c.orbit.target.set(X.x, gy + 1.8, -X.y)

@@ -15,13 +15,15 @@ and are served by the deployed site:
 
 ## Software dependencies
 
-Only two third-party packages reach the browser. Everything else is build
+A short list of third-party code reaches the browser. Everything else is build
 tooling that never leaves this machine.
 
 | Shipped to the browser | Licence | |
 |---|---|---|
 | [three.js](https://threejs.org) | MIT | the renderer, and most of the engine's maths |
 | [postprocessing](https://github.com/pmndrs/postprocessing) | Zlib | bloom, SMAA and the effect composer behind the modern style |
+| [ez-tree](https://github.com/dgreenheck/ez-tree) | MIT | corridor's procedural near trees |
+| [Heroicons](https://heroicons.com) | MIT | corridor's interface icons. The package itself is dev-only; `scripts/heroicons.mjs` inlines the path data of the ~35 icons used into `apps/corridor/src/ui/icons.ts`, so what ships is that generated file, not the 1,300-icon package |
 
 | Build-time only | Licence | Reached via |
 |---|---|---|
@@ -38,8 +40,8 @@ redistribute it, and minified CSS is output, not a derivative work.
 dev-only dependency of the local Workers emulator — it is never linked into
 anything, never redistributed, and never present in a deployed bundle.
 
-The deployed Worker contains our own code, three.js and postprocessing. That is
-all.
+The deployed Worker contains our own code, three.js, postprocessing, ez-tree and
+the inlined Heroicons path data. That is all.
 
 ## Models and textures
 
@@ -85,6 +87,8 @@ for a font, or for anything else.
 | [Audiowide](https://fonts.google.com/specimen/Audiowide) | OFL 1.1 | Brian J. Bonislawsky, Astigmatic | Apex Conduit |
 | [Orbitron](https://fonts.google.com/specimen/Orbitron) | OFL 1.1 | Matt McInerney, The League of Moveable Type | Apex Conduit |
 | [Rajdhani](https://fonts.google.com/specimen/Rajdhani) | OFL 1.1 | Indian Type Foundry | Apex Conduit |
+| [IBM Plex Sans](https://fonts.google.com/specimen/IBM+Plex+Sans) | OFL 1.1 | IBM / Mike Abbink, Bold Monday | corridor |
+| [IBM Plex Mono](https://fonts.google.com/specimen/IBM+Plex+Mono) | OFL 1.1 | IBM / Mike Abbink, Bold Monday | corridor |
 
 The OFL's one real condition is that the licence text travel with the font, and
 it does — `LICENSES.txt` sits in the same directory as the `woff2` files and is

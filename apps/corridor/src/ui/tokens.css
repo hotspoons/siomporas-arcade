@@ -1,0 +1,144 @@
+/*
+ * corridor design tokens — the whole visual vocabulary, in one file.
+ *
+ * Two rules hold this together. First, NOTHING below this file names a raw colour: every rule in
+ * ui.css and in the two app stylesheets reaches for a token, so the theme can move without a
+ * search-and-replace through a thousand declarations. Second, the scale is a scale — spacing steps
+ * and type sizes come from a short ramp rather than from whatever number looked right that
+ * afternoon, which is most of the difference between "designed" and "accumulated".
+ *
+ * Dark is the default because the canvas behind this UI is a photograph of the world and a bright
+ * chrome around it destroys your eye's adaptation to the scene. Light is honoured when asked for.
+ *
+ * Fonts are self-hosted from public/fonts, matching every other app in this repo: the viewer runs
+ * from a Worker, off a memory stick, and inside a cluster pod, and a Google Fonts round-trip fails
+ * in two of those three. The @font-face rules are NOT here — `scripts/fetch-fonts.mjs` downloads
+ * the woff2 subsets and writes public/fonts/fonts.css beside them, which both HTML files link
+ * before this one. Declaring them twice is how a weight silently stops matching its file.
+ */
+
+:root {
+  /* ---- type ------------------------------------------------------------------------------- */
+  --font-body: 'IBM Plex Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-md: 13px;
+  --text-lg: 15px;
+  --text-xl: 19px;
+  --leading: 1.5;
+  /* Every measured number in this app is read in a column against another measured number, so the
+     mono faces are tabular by default and digits do not jitter as a value ticks. */
+  --num: var(--font-mono);
+
+  /* ---- space ------------------------------------------------------------------------------ */
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s5: 24px;
+  --s6: 32px;
+  --s7: 48px;
+
+  --r1: 4px;
+  --r2: 7px;
+  --r3: 11px;
+  --r-full: 999px;
+
+  /* ---- colour: dark (default) ------------------------------------------------------------- */
+  /* A near-neutral slate, very slightly blue, so that the greens and browns of the world in the
+     canvas read as colours and the UI around them reads as furniture. */
+  --bg-0: #0d1014;            /* the page behind everything */
+  --bg-1: #151a20;            /* panels, drawer, dialog */
+  --bg-2: #1c232b;            /* raised rows, inputs */
+  --bg-3: #252e38;            /* hover */
+  --scrim: rgb(6 8 10 / 62%); /* behind a modal */
+
+  --line-1: #2b343e;          /* hairline between rows */
+  --line-2: #3a4652;          /* border of an interactive thing */
+
+  --ink-1: #e6ecf2;           /* primary text */
+  --ink-2: #a3b1bf;           /* labels, secondary */
+  --ink-3: #6b7a89;           /* hints, disabled, units */
+
+  /* One accent. A UI with three accents has none. */
+  --accent: #4aa8e8;
+  --accent-ink: #0a1219;      /* text ON the accent */
+  --accent-dim: rgb(74 168 232 / 15%);
+  --accent-line: rgb(74 168 232 / 45%);
+
+  --ok: #56b982;
+  --warn: #d9a441;
+  --danger: #e2685f;
+  --danger-dim: rgb(226 104 95 / 14%);
+
+  --shadow-1: 0 1px 2px rgb(0 0 0 / 30%);
+  --shadow-2: 0 6px 20px rgb(0 0 0 / 38%);
+  --shadow-3: 0 18px 50px rgb(0 0 0 / 52%);
+
+  /* HUD sits directly on the scene and needs its own, heavier, scrim. */
+  --hud-bg: rgb(13 16 20 / 72%);
+  --hud-line: rgb(255 255 255 / 10%);
+
+  --dur-1: 110ms;
+  --dur-2: 200ms;
+  --ease: cubic-bezier(0.2, 0.6, 0.3, 1);
+
+  /* The top bar's height, so the editor's inspector can sit BELOW it rather than over it — the
+     first cut had both at the same z-index and the inspector, appended later, swallowed the
+     bar's Save/Preview/Settings buttons. Playwright found it: "aside.inspector intercepts
+     pointer events". 50px, not 46: the bar's height is content-driven (a 30px button plus the
+     padding) and measured 49 in the browser, so a smaller token left the inspector tucked under
+     it. Anything that offsets itself from the bar reads this, so they cannot drift apart. */
+  --bar-h: 50px;
+
+  /* Stacking, named once so nothing has to guess a number. */
+  --z-hud: 10;
+  --z-panel: 20;
+  --z-bar: 30;
+  --z-drawer: 40;
+  --z-modal: 50;
+  --z-toast: 60;
+
+  color-scheme: dark;
+}
+
+:root[data-theme='light'] {
+  --bg-0: #f4f6f8;
+  --bg-1: #ffffff;
+  --bg-2: #eef1f5;
+  --bg-3: #e2e8ef;
+  --scrim: rgb(20 26 32 / 34%);
+
+  --line-1: #dde3ea;
+  --line-2: #c3ccd6;
+
+  --ink-1: #141a20;
+  --ink-2: #4a5765;
+  --ink-3: #78848f;
+
+  --accent: #1c6fb0;
+  --accent-ink: #ffffff;
+  --accent-dim: rgb(28 111 176 / 10%);
+  --accent-line: rgb(28 111 176 / 40%);
+
+  --ok: #2c8a56;
+  --warn: #a8761c;
+  --danger: #bc4339;
+  --danger-dim: rgb(188 67 57 / 10%);
+
+  --shadow-1: 0 1px 2px rgb(16 24 32 / 10%);
+  --shadow-2: 0 6px 20px rgb(16 24 32 / 12%);
+  --shadow-3: 0 18px 50px rgb(16 24 32 / 18%);
+
+  --hud-bg: rgb(255 255 255 / 82%);
+  --hud-line: rgb(16 24 32 / 12%);
+
+  color-scheme: light;
+}
+
+/* Someone who has asked their OS to reduce motion gets the same UI without the travel. */
+@media (prefers-reduced-motion: reduce) {
+  :root { --dur-1: 0ms; --dur-2: 0ms; }
+}

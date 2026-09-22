@@ -12,11 +12,18 @@ const FAMILIES = {
   Audiowide: { q: 'Audiowide', lic: 'ofl/audiowide' },
   Orbitron: { q: 'Orbitron:wght@400..900', lic: 'ofl/orbitron', variable: true },
   Rajdhani: { q: 'Rajdhani:wght@500;600;700', lic: 'ofl/rajdhani' },
+  // corridor's interface: a text face and a matched mono, because every panel in that app reads a
+  // measured number against another measured number and they have to line up.
+  // Plex Sans is a variable font on Google Fonts: every weight is the SAME file, so asking for
+  // 400;500;600 gets one url three times and the dedupe leaves a single 400-only face.
+  'IBM Plex Sans': { q: 'IBM+Plex+Sans:wght@400..600', lic: 'ofl/ibmplexsans', variable: true },
+  'IBM Plex Mono': { q: 'IBM+Plex+Mono:wght@400;500', lic: 'ofl/ibmplexmono' },
 }
 const APPS = {
   stuntin: ['Yellowtail', 'VT323', 'Press Start 2P'],
   coast: ['Pacifico', 'Racing Sans One', 'Righteous', 'Press Start 2P'],
   conduit: ['Audiowide', 'Orbitron', 'Rajdhani', 'Press Start 2P'],
+  corridor: ['IBM Plex Sans', 'IBM Plex Mono'],
 }
 const slug = (s) => s.toLowerCase().replace(/\s+/g, '-')
 const cache = new Map()

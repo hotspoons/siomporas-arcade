@@ -1,4 +1,4 @@
-Fonts bundled with drivin
+Fonts bundled with stuntin
 =========================
 
 ----- Yellowtail (Apache License 2.0) -----

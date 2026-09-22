@@ -79,7 +79,12 @@ def verify(site_dir: Path) -> dict:
     for name, L in layers.items():
         if name == "tiles":
             tdir = site_dir / "web" / (L.get("dir") or "tiles/0")
-            missing = [f"{t['x']}_{t['y']}" for t in L.get("list", []) if not (tdir / f"{t['x']}_{t['y']}.dem.png").exists()]
+            # a tile's heights are either a packed blob (`<x>_<y>.pack`, the current bake) or the
+            # original `<x>_<y>.dem.png`. Checking only for the PNG made every tiled site fail
+            # after main packed the tiles, which is a false alarm that teaches people to ignore this
+            # command — the one thing a verifier must never do.
+            missing = [f"{t['x']}_{t['y']}" for t in L.get("list", [])
+                       if not (tdir / f"{t['x']}_{t['y']}.pack").exists() and not (tdir / f"{t['x']}_{t['y']}.dem.png").exists()]
             if missing:
                 errors.append(f"{len(missing)} tile(s) listed with no dem.png on disk, e.g. {missing[0]}")
             noz = [t for t in L.get("list", []) if not (t.get("dem") or {}).get("zscale")]
@@ -115,6 +120,52 @@ def verify(site_dir: Path) -> dict:
             zs = [c[2] for c in (b.get("coords") or [])]
             if zs and max(zs) - min(zs) > 200:
                 warnings.append(f"branch {b.get('ident')} spans {max(zs) - min(zs):.0f} m of height: check its profile")
+
+    # 4b. a junction has to lie ON the road that claims it
+    #
+    # `export_branches` copies each junction record out of branches.json unchanged, so a
+    # branches.json written before the ENU migration keeps handing UTM-relative junctions to a
+    # freshly exported manifest FOREVER — a re-export does not repair it, only re-running the OSM
+    # stage does. The signature is an offset that grows linearly with distance from the origin (it
+    # is the grid convergence), and on crofton-triangle it reached 69 m while every road, tile and
+    # building around it was correct. The viewer feeds these straight into the junction paint-
+    # suppression circles, so lane markings get erased in an empty field and drawn through the real
+    # crossroads.
+    if m.get("branches"):
+        offs = []
+        for b in m["branches"]:
+            cs = b.get("coords") or []
+            if len(cs) < 2:
+                continue
+            for j in b.get("junctions") or []:
+                if j.get("x") is None or j.get("y") is None:
+                    continue
+                d = min(math.hypot(c[0] - j["x"], c[1] - j["y"]) for c in cs)
+                if d > 5.0:
+                    offs.append((b.get("ident"), j.get("node"), round(d, 1)))
+        if offs:
+            worst = max(offs, key=lambda t: t[2])
+            total = sum(len(b.get("junctions") or []) for b in m["branches"]) or 1
+            frac = len(offs) / total
+            # TWO different faults land here and they need different answers, so tell them apart by
+            # how MANY junctions are wrong rather than by how far:
+            #   a frame mismatch is systematic — it moves every junction, by an amount that grows
+            #     with distance from the origin, and it is fixed by re-running the OSM stage;
+            #   the smoothing residual is local — it moves a handful of junctions on short or
+            #     sharply-bent chains, because the published centreline is a smoothed resample of
+            #     the line the junction was projected onto.
+            # Calling the second one a frame error sends you to re-bake a site that is fine.
+            if frac > 0.3:
+                errors.append(
+                    f"{len(offs)} of {total} junctions ({frac:.0%}) are not on the road that claims them, worst {worst[2]} m on {worst[0]}: "
+                    f"that is systematic, so the junction records are in a different frame from `coords`. A re-export will NOT fix it — "
+                    f"re-run the OSM stage (`python -m corridor.network {slug}`) so branches.json is rewritten, then export."
+                )
+            else:
+                warnings.append(
+                    f"{len(offs)} of {total} junctions sit up to {worst[2]} m off their own road ({worst[0]}): the published centreline is "
+                    f"a smoothed resample, and on a short or sharply-bent chain it leaves the line the junction was projected onto"
+                )
 
     # 5. the published centreline against the road it was measured from
     spine = m.get("spine") or {}

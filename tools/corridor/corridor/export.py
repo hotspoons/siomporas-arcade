@@ -1196,6 +1196,31 @@ def export_site(site_dir: Path, web: Path | None = None) -> dict:
         "rock": features.get("rock"),
         "water": features.get("water"),
     }
+    # intersections: who has priority, who stops, and what the blades say. Derived from the drawn
+    # network rather than transcribed from OSM, because a US suburb maps almost none of it — 854
+    # drivable ways inside crofton-triangle carry 3 stop nodes between them. Replaces the masts of
+    # every junction it models and leaves mid-block signals alone; see intersections.merge_into.
+    try:
+        from . import intersections as _intersections
+
+        _xc = _intersections.merge_into(out, site_dir, frame)
+        if _xc:
+            print(f"  cross   {_xc['intersections']} intersections: {_xc['signalised']} signalised ({_xc['masts']} masts), "
+                  f"{_xc['two_way_stop']} two-way + {_xc['all_way_stop']} all-way stop ({_xc['stop_signs']} signs), {_xc['blades']} blades", flush=True)
+    except Exception as exc:
+        print(f"  cross   failed: {exc}", flush=True)
+    # sidewalks where OSM has none: 93 % of crofton-triangle's drivable ways carry no sidewalk tag
+    # and the whole corridor holds 47 mapped sidewalk ways. Zones are derived from the residential
+    # network, not typed; an authored sidewalk_zones.json overrides. See walkways.py.
+    try:
+        from . import walkways as _walkways
+
+        _wc = _walkways.merge_into(out, site_dir, frame)
+        if _wc and _wc.get("sides"):
+            print(f"  walks   {_wc['zones']} zones / {_wc['zone_area_km2']} km²: {_wc['sides']} sides on {_wc['roads_in_zone']} roads, "
+                  f"{_wc['metres'] / 1000:.1f} km ({_wc['sides_already_mapped']} skipped, OSM has them)", flush=True)
+    except Exception as exc:
+        print(f"  walks   failed: {exc}", flush=True)
     # network sites (cadre §6): every other road as a first-class branch — coords with lidar grade,
     # junctions, profile, structures. `siblings` above stays as it was for the old viewer path.
     try:

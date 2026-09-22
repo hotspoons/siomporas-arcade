@@ -120,9 +120,44 @@ export interface Manifest {
   stubs?: { highway: string; name?: string | null; lanes?: number; oneway?: string | null; coords: [number, number, number][] }[]
   /** street furniture: signal masts and stop/give-way signs (OSM highway=traffic_signals|stop|give_way) */
   signals?: {
-    masts: { x: number; y: number; z: number; yaw_deg: number; travel_deg: number; arm_m: number; lanes: number; junction: number; tagged: boolean }[]
-    signs: { kind: string; x: number; y: number; z: number; yaw_deg: number; travel_deg: number }[]
+    masts: { x: number; y: number; z: number; yaw_deg: number; travel_deg: number; arm_m: number; lanes: number; junction: number; tagged: boolean; x_id?: string; phase?: number; arm?: number }[]
+    signs: { kind: string; x: number; y: number; z: number; yaw_deg: number; travel_deg: number; x_id?: string; arm?: number; source?: string }[]
+    /** the painted stop line for each stopping approach, across the lane at the stop position */
+    bars?: { x: number; y: number; z: number; travel_deg: number; width_m: number; x_id?: string; arm?: number }[]
   } | null
+  /**
+   * Where the roads meet, and who has priority there (corridor/intersections.py).
+   *
+   * DERIVED from the drawn network rather than transcribed from OSM, because an American suburb
+   * maps almost none of it: 854 drivable ways inside crofton-triangle carry three `highway=stop`
+   * nodes between them. `control` is what the junction is, `approaches` is one arm per direction
+   * you can arrive on, and `phases` groups the arms that run together on a signal.
+   */
+  intersections?: {
+    list: {
+      id: string
+      nodes: number[]
+      x: number
+      y: number
+      control: 'signals' | 'two_way_stop' | 'all_way_stop'
+      arms: number
+      superior: string
+      approaches: {
+        road: string; name: string | null; highway: string; rank: number; lanes: number
+        bearing_deg: number; s: number; through: boolean; superior: boolean; stop: boolean
+        stop_x: number; stop_y: number; width_m: number; phase?: number; stop_source?: string
+      }[]
+      phases: { arms: number[]; green_s: number; amber_s: number; all_red_s: number; superior: boolean }[]
+      cycle_s: number
+      /** street name signs, already truncated to the blade's character budget */
+      blades: { text: string; full: string; truncated: boolean; yaw_deg: number; rank: number }[]
+      /** candidate corners, best first; only the viewer knows which one is clear of the asphalt */
+      corners: { x: number; y: number; why: string }[]
+    }[]
+    counts: Record<string, number>
+  } | null
+  /** polygons inside which every street was given a sidewalk (walkways.py), for the minimap/editor */
+  sidewalk_zones?: [number, number][][] | null
   /** `amenity=parking` areas, in site metres; the viewer decides which are real (parking.ts) */
   parking?: { kind: string; surface?: string | null; access?: string | null; name?: string | null; area_m2: number; z: number; ring: [number, number][]; holes: [number, number][][] }[] | null
   /** `barrier=guard_rail|fence|wall|hedge` ways, with a vertex every 2 m and a grade (furniture.ts) */

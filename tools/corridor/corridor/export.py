@@ -786,13 +786,19 @@ def refresh_flora(site_dir: Path) -> bool:
     return True
 
 
-def export_site(site_dir: Path) -> dict:
+def export_site(site_dir: Path, web: Path | None = None) -> dict:
+    """
+    Write the viewer's `web/` tree for one site.
+
+    `web` defaults to `site_dir/"web"` — the live tree. Pass a staging directory to build without
+    touching what is being served, then `swap.swap_dir` to put it live in one step; see swap.py.
+    """
     site = json.loads((site_dir / "site.json").read_text())
     manifest = json.loads((site_dir / "manifest.json").read_text()) if (site_dir / "manifest.json").exists() else {}
     ox, oy = site["frame"]["origin"]
     bbox = tuple(site["bbox_utm"])
-    web = site_dir / "web"
-    web.mkdir(exist_ok=True)
+    web = Path(web) if web is not None else site_dir / "web"
+    web.mkdir(parents=True, exist_ok=True)
     layers: dict = {}
 
     def rel_bbox(b):
@@ -1089,7 +1095,11 @@ def export_site(site_dir: Path) -> dict:
             out["branches"] = br
     except Exception as exc:
         print(f"  branches failed: {exc}")
-    (web / "manifest.json").write_text(json.dumps(out))
+    # compact separators: the manifest is the single biggest thing the viewer fetches (5.8 MB for
+    # crofton-triangle, 18.3 MB for crofton-crownsville) and the default ", " / ": " is 0.7 MB and
+    # 2.3 MB of pure whitespace. Most of that is recovered by gzip, but not the R2 storage or the
+    # string the parser has to walk.
+    (web / "manifest.json").write_text(json.dumps(out, separators=(",", ":")))
     return {"layers": list(layers), "bytes": sum(f.stat().st_size for f in web.iterdir()), "buildings": derived["summary"]}
 
 

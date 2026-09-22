@@ -16,6 +16,7 @@
 // couple of centimetres above the surface rather than being blended into it, which is the cheap
 // way and also the one that survives the lot being on a slope.
 import * as THREE from 'three'
+import { BoundsIndex } from './strip'
 import type { Manifest } from './site'
 import * as T from './tuning'
 
@@ -119,6 +120,35 @@ function stripe(into: { pos: number[]; idx: number[] }, ax: number, az: number, 
  * OSM lot that includes its own access road, or one whose road we have drawn straight through, and
  * paving it puts a second surface on top of the one the car drives on.
  */
+/**
+ * Is this world point on a parking surface?
+ *
+ * Built from the manifest alone, so `scene.ts` can have it BEFORE the grass is planted — the
+ * parking meshes are made much later and the grass needs the answer first. Without it the verge
+ * planter only knows `roadDistance`, so it happily grows turf across a supermarket car park:
+ * visible as green tufts scattered over the asphalt in any open lot.
+ *
+ * Rings are bucketed by bounds, because a network site has hundreds of lots and this is called
+ * once per candidate blade.
+ */
+export function parkingCover(manifest: Manifest): (x: number, z: number) => boolean {
+  const lots = (manifest.parking ?? []).filter((l) => (l.ring?.length ?? 0) >= 3)
+  if (!lots.length) return () => false
+  const rings = lots.map((l) => {
+    const ring = l.ring.map(([x, y]) => [x, -y] as Pt)
+    let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity
+    for (const [x, z] of ring) {
+      if (x < x0) x0 = x
+      if (x > x1) x1 = x
+      if (z < z0) z0 = z
+      if (z > z1) z1 = z
+    }
+    return { ring, bounds: [x0, z0, x1, z1] as [number, number, number, number] }
+  })
+  const index = new BoundsIndex(rings, 250, 1)
+  return (x, z) => index.firstAt(x, z, (r) => (inside(r.ring, x, z) ? true : null)) === true
+}
+
 export function buildParking(
   manifest: Manifest,
   groundAt: (x: number, z: number) => number | null,

@@ -24,7 +24,7 @@ import { buildBuildings } from './buildings'
 import { buildPower } from './power'
 import { buildBarriers, buildFurniture, buildSidewalks } from './furniture'
 import { buildBlades, buildSignals, buildStopBars } from './intersections'
-import { buildParking } from './parking'
+import { buildParking, parkingCover } from './parking'
 import { buildBridges, flattenSpine, loadStructureOverrides, suppressed } from './structures'
 import { loadSurfaceSets, overpassMesh, pavedOffset, pavedWidth, roadMesh, stations, taperedLanes, treesFromCanopy, type SurfaceSet } from './props'
 import { buildRocks } from './rocks'
@@ -828,6 +828,12 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
       return { d: best, who, y }
     }
     const roadDistance = (x: number, z: number) => edgeDistance(x, z).d
+    // A CAR PARK IS NOT A VERGE. The grass planter only knows how far it is from the pavement
+    // EDGE, and a lot sits beyond that edge, so turf was growing straight across the asphalt —
+    // visible as green tufts over any open lot. Parking meshes are built much later than the
+    // grass, so the cover comes from the manifest directly.
+    const onParking = parkingCover(manifest)
+    const grassRoadDistance = (x: number, z: number) => (onParking(x, z) ? -1 : roadDistance(x, z))
 
     // --- the corridor strip: fine terrain across every carriageway and 40 m of verge each side ---
     status('grading…')
@@ -1116,7 +1122,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     const canopyAt = sampler(chm)
     canopyAtRef = canopyAt
     const grassAdj = { ...NEUTRAL_ADJ }
-    const grass = new Grass(groundNear, canopyAt, roadDistance, 0, look(currentSeason), lite ? 90_000 : 400_000, lite ? 26 : 40, fog, adjustments.active ? (x, y) => { const a = adjustments.at(x, y, grassAdj); return a.cover === 'crop' ? [1, 0] : [a.grass_height, a.grass_density] } : undefined, undefined, heightAt)
+    const grass = new Grass(groundNear, canopyAt, grassRoadDistance, 0, look(currentSeason), lite ? 90_000 : 400_000, lite ? 26 : 40, fog, adjustments.active ? (x, y) => { const a = adjustments.at(x, y, grassAdj); return a.cover === 'crop' ? [1, 0] : [a.grass_height, a.grass_density] } : undefined, undefined, heightAt)
     // NOT a child of `trees`. It was, and so the trees checkbox turned off all ground cover with
     // them — you could not hide the trees to look at the grass, which is most of what looking at
     // grass involves. Its own group, its own layer toggle.

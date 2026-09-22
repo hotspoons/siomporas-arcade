@@ -13,6 +13,8 @@ const slug = process.argv[2] ?? 'crofton-crownsville'
 const out = process.argv[3] ?? null
 const PORT = process.env.CORRIDOR_PORT ?? '5202'
 const DATA = process.env.CORRIDOR_DATA ?? ''
+// CORRIDOR_STREAM=maxResident:12,loadWithin:1500 — sweep the ring and the ceiling
+const streamOpts = Object.fromEntries((process.env.CORRIDOR_STREAM ?? '').split(',').filter(Boolean).map((kv) => { const [k, v] = kv.split(':'); return [k, Number(v)] }))
 const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] })
 const page = await browser.newPage({ viewport: { width: 700, height: 460 } })
 page.on('pageerror', (e) => console.log('pageerror', e.message))
@@ -89,6 +91,7 @@ const counts = () => page.evaluate(() => {
   const r = window.__apex?.renderer
   return { ...t, gpu_textures: r?.info?.memory?.textures ?? null, gpu_geometries: r?.info?.memory?.geometries ?? null }
 })
+await page.evaluate((o) => { const st = window.corridor.site.tileStream; if (st) Object.assign(st, o) }, streamOpts)
 const L = await page.evaluate(() => window.corridor.site.manifest.spine.length_m)
 let peak = { resident: 0 }
 const samples = []
@@ -102,6 +105,7 @@ for (let s = 0; s <= L; s += 250) {
 const MB_PER_TILE = 1000 * 1000 * 4 * 1.333 / 1e6 // RGBA + a full mip chain
 const end = await counts()
 console.log(JSON.stringify({
+  stream_opts: streamOpts,
   drive_stations: samples.length,
   peak_resident_tiles: peak.resident,
   peak_resident_MB_est: +(peak.resident * MB_PER_TILE).toFixed(0),

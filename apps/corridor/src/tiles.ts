@@ -234,6 +234,17 @@ export class ImageryStream {
   loadWithin = 2000
   keepWithin = 3500
   inFlight = 2
+  /**
+   * Hard ceiling on resident tiles, evicted farthest-first.
+   *
+   * A distance ring alone does not bound memory, it bounds it BY SITE SIZE: driving the 3.58 km of
+   * crofton-crownsville's primary with keepWithin 3500 m took the resident set from 11 tiles to 19
+   * and evicted twice in twenty-one loads, because a tile picked up at the start is still inside
+   * the keep radius at the finish. A longer route just keeps climbing until the whole network is
+   * resident — 125 uncompressed 1 m NAIP tiles is ~667 MB, which does not fit. The cap makes the
+   * ceiling a property of this class instead of a property of the road.
+   */
+  maxResident = 24
   loads = 0
   unloads = 0
   fails = 0
@@ -251,20 +262,34 @@ export class ImageryStream {
   /** Call per frame with the eye in SITE coordinates (x, y = -z). */
   update(eyeX: number, eyeY: number) {
     let best: { key: string; d: number } | null = null
+    const resident: { key: string; d: number }[] = []
     for (const [key, t] of this.targets) {
       const d = Math.hypot(t.tile.cx - eyeX, t.tile.cy - eyeY)
-      if (d > this.keepWithin && this.loaded.has(key)) {
-        const tex = this.loaded.get(key)!
-        t.mat.map = t.fallback
-        t.mat.needsUpdate = true
-        tex.dispose()
-        this.loaded.delete(key)
-        this.unloads++
+      const have = this.loaded.has(key)
+      if (have && d > this.keepWithin) {
+        this.evict(key)
         continue
       }
-      if (d <= this.loadWithin && !this.loaded.has(key) && !this.pending.has(key) && (!best || d < best.d)) best = { key, d }
+      if (have) resident.push({ key, d })
+      else if (d <= this.loadWithin && !this.pending.has(key) && (!best || d < best.d)) best = { key, d }
     }
-    if (best && this.pending.size < this.inFlight) this.fetch(best.key)
+    // over the ceiling: drop the farthest, which are the ones the eye is leaving behind
+    if (resident.length > this.maxResident) {
+      resident.sort((a, b) => b.d - a.d)
+      for (let i = 0; i < resident.length - this.maxResident; i++) this.evict(resident[i].key)
+    }
+    if (best && this.pending.size < this.inFlight && this.loaded.size < this.maxResident) this.fetch(best.key)
+  }
+
+  private evict(key: string) {
+    const tex = this.loaded.get(key)
+    const t = this.targets.get(key)
+    if (!tex || !t) return
+    t.mat.map = t.fallback
+    t.mat.needsUpdate = true
+    tex.dispose()
+    this.loaded.delete(key)
+    this.unloads++
   }
 
   private fetch(key: string) {

@@ -86,6 +86,8 @@ export interface Site {
   terrain: THREE.Mesh
   /** imagery streaming counts on a tiled network, null on a corridor site */
   tiles: (() => { resident: number; pending: number; tiles: number; loads: number; unloads: number; fails: number }) | null
+  /** the stream itself, so its ring and ceiling can be swept from a probe or the console */
+  tileStream: ImageryStream | null
   /** ground height (m) at site x,y from the DEM layer */
   heightAt: (x: number, y: number) => number
   /** point + travel direction on the spine at along-track s (metres) */
@@ -1483,6 +1485,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     terrain,
     /** tiled sites only: imagery streaming counts, for probes and the console */
     tiles: stream ? () => stream.counts : null,
+    tileStream: stream,
     heightAt,
     spineAt,
     setImagery: (on) => {

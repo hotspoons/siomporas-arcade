@@ -53,11 +53,22 @@ the difference, which is also why a bug fixed in one is fixed in both.
 A whitelist and not a path check: the bake owns `web/` and every raster beside it, and a PUT over
 `manifest.json` would destroy a bake that cost an hour of USGS bandwidth.
 
-### 2. The bake takes a SQUARE. The editor says so, in numbers
+### 2. `radius_m` is a HALF-WIDTH, not a radius. The editor says so, in numbers
 
 `network.roads` queries the geodetic bounding box of a **UTM square of side 2·radius_m** and there
-is no circular clip on roads anywhere after it. A `radius_m` reads like a circular cut and is not
-one. So the editor draws the square solid, labelled, and the circle only as a dashed hint at where
+is no circular clip on roads anywhere after it:
+
+```python
+R = float(site.get("radius_m", 9000))
+w, s, e, n = frame.bbox_wgs(ox - R, oy - R, ox + R, oy + R)
+```
+
+The name is wrong at the source — network.py's docstring says "every drivable way in the radius"
+and its error says "within {R} m" — and a square of side 2R is **4/π = 1.27×** the area both of
+those imply. Confirmed with the orchestrator, who owns `network.py` and is fixing the documentation
+rather than the behaviour: clipping to the circle to make the name honest would silently shrink
+every site already baked, and crofton-crownsville's eighteen hand-chosen roads were picked against
+the square's reach. If we ever want a real shape it should be the drawn polygon, not a circle. So the editor draws the square solid, labelled, and the circle only as a dashed hint at where
 the radius came from — and the panel reports both counts:
 
 ```

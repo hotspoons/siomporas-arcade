@@ -27,6 +27,7 @@ const out = await page.evaluate(() => {
   const site = window.corridor.site, THREE = window.corridor.THREE
   const m = site.manifest
   const model = m.intersections?.list ?? []
+  const ed = site.edgeDistance ?? null
   const r = {
     site: m.slug,
     bake: m.intersections?.counts ?? null,
@@ -34,7 +35,7 @@ const out = await page.evaluate(() => {
     arms: { signalised: 0, armsExpected: 0, armsWithMast: 0, junctionsFullyCovered: 0, worst: null },
     cycle: { junctions: 0, everTwoGreen: 0, phasesNeverGreen: 0, phasesNeverRed: 0, sampled: 0 },
     bars: { checked: 0, offRoad: 0, worst: 0 },
-    blades: { checked: 0, onPavement: 0, truncatedExamples: [] },
+    blades: { checked: 0, onPavement: 0, noneClear: 0, worstIntoRoad: 0, truncatedExamples: [] },
     zones: (m.sidewalk_zones ?? []).length,
     zoneSidewalks: (m.sidewalks ?? []).filter((s) => s.source === 'zone').length,
   }
@@ -111,7 +112,6 @@ const out = await page.evaluate(() => {
   }
 
   // --- stop bars on the asphalt ----------------------------------------------------------------
-  const ed = site.edgeDistance ?? null
   for (const b of (m.signals?.bars ?? []).slice(0, 400)) {
     r.bars.checked++
     if (!ed) continue
@@ -120,9 +120,28 @@ const out = await page.evaluate(() => {
   }
 
   // --- blades ---------------------------------------------------------------------------------
+  //
+  // The first version of this counted nothing and reported `checked: 0`, which is a check that
+  // cannot fail. What it has to prove is that the post the viewer CHOSE is clear of the asphalt —
+  // the bake offers four candidates and the viewer takes the first clear one, so the failure mode
+  // is a blade standing in a traffic lane when none of the four was clear and the fallback was
+  // taken anyway.
   for (const X of model) {
     for (const bl of X.blades ?? []) {
       if (bl.truncated && r.blades.truncatedExamples.length < 12) r.blades.truncatedExamples.push(`${bl.full} -> ${bl.text}`)
+    }
+    const corners = X.corners ?? []
+    if ((X.blades ?? []).length < 2 || !corners.length || !ed) continue
+    let chosen = null
+    for (const c of corners) {
+      if (ed(c.x, -c.y) >= 0.5) { chosen = c; break }
+    }
+    if (!chosen) { r.blades.noneClear++; continue }
+    r.blades.checked++
+    const d = ed(chosen.x, -chosen.y)
+    if (d < 0) {
+      r.blades.onPavement++
+      r.blades.worstIntoRoad = Math.min(r.blades.worstIntoRoad, d)
     }
   }
   return r

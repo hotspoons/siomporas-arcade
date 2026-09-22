@@ -628,20 +628,31 @@ def _blades(approaches: list[dict], best: dict, cx: float, cy: float, max_chars:
     tx, ty = math.sin(b), math.cos(b)          # superior travel direction
     rx, ry = ty, -tx                           # right of travel
     R = max(6.0, best["lanes"] * LANE_W / 2 + 4.0)
+    # All FOUR quadrants, in preference order. The two diagonals Rich's rule picks come first; the
+    # other two are there because a corner can be unusable — a slip lane, a wide radius, a building
+    # on the property line — and a junction with no blade at all is worse than one whose blade is on
+    # the near corner. Measured: with two candidates, 62 of 408 junctions (15 %) found neither clear
+    # and were skipped entirely.
     cand = [
         {"x": round(cx + (tx + rx) * R, 2), "y": round(cy + (ty + ry) * R, 2), "why": "far right of the superior road"},
         {"x": round(cx - (tx + rx) * R, 2), "y": round(cy - (ty + ry) * R, 2), "why": "far right of the opposite direction"},
+        {"x": round(cx + (tx - rx) * R, 2), "y": round(cy + (ty - ry) * R, 2), "why": "far left, where neither right corner is clear"},
+        {"x": round(cx - (tx - rx) * R, 2), "y": round(cy - (ty - ry) * R, 2), "why": "near left, last resort"},
     ]
+    pref, rest = cand[:2], cand[2:]
     # 1. a T junction: prefer the corner on the side the stem actually comes from
     stems = [a for a in approaches if a["rank"] < best["rank"]] or [a for a in approaches if a["road"] != best["road"]]
     if stems:
         sb = math.radians(stems[0]["bearing_deg"])
         # the stem's traffic arrives travelling (sin, cos), so the stem lies OPPOSITE that
         sx, sy = -math.sin(sb), -math.cos(sb)
-        cand.sort(key=lambda c: -((c["x"] - cx) * sx + (c["y"] - cy) * sy))
+        pref.sort(key=lambda c: -((c["x"] - cx) * sx + (c["y"] - cy) * sy))
+        rest.sort(key=lambda c: -((c["x"] - cx) * sx + (c["y"] - cy) * sy))
     else:
         # 2. north-easterly wins
-        cand.sort(key=lambda c: -((c["x"] - cx) + (c["y"] - cy)))
+        pref.sort(key=lambda c: -((c["x"] - cx) + (c["y"] - cy)))
+        rest.sort(key=lambda c: -((c["x"] - cx) + (c["y"] - cy)))
+    cand = pref + rest
 
     blades = []
     for nm, a in sorted(names.items(), key=lambda kv: (-kv[1]["rank"], kv[0])):

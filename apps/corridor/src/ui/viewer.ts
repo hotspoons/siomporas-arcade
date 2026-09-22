@@ -30,6 +30,9 @@ export const LAYER_GROUPS: { title: string; layers: { id: string; label: string;
     layers: [
       { id: 'imagery', label: 'Aerial imagery', on: true },
       { id: 'horizon', label: 'Far hills', on: true },
+      // OFF on purpose, and not merely because the old HTML had it off: the canopy blanket is
+      // built lazily on first toggle — 72 MB and ~1.05 M vertices that almost every session threw
+      // away unseen. Defaulting it on here would quietly undo that.
       { id: 'canopy', label: 'Canopy blanket', on: false },
     ],
   },
@@ -88,11 +91,20 @@ function frameReadouts(m: Manifest): HTMLElement[] {
       : f.kind === 'utm'
         ? 'UTM-relative, on a plane'
         : 'UTM-relative (baked before frame.kind existed)'
-  const rows = [readout('Frame', kind, false), readout('Bake EPSG', String(f.epsg))]
-  if (f.anchor) rows.push(readout('Anchor', `${f.anchor.lat.toFixed(6)}, ${f.anchor.lon.toFixed(6)}`))
-  if (typeof f.utm_convergence_deg === 'number') {
-    rows.push(readout('Convergence', `${f.utm_convergence_deg.toFixed(4)}° grid→true`))
+  // A one-line summary first, because it makes the ROTATION visible — which is the part a human
+  // has to see. The numbers follow for anyone who needs them.
+  const rows: HTMLElement[] = []
+  if (f.kind === 'enu' && f.anchor) {
+    const ns = f.anchor.lat >= 0 ? 'N' : 'S'
+    const ew = f.anchor.lon >= 0 ? 'E' : 'W'
+    const conv = typeof f.utm_convergence_deg === 'number' ? `, grid north ${f.utm_convergence_deg >= 0 ? '+' : ''}${f.utm_convergence_deg.toFixed(2)}°` : ''
+    rows.push(readout('Frame', `ENU about ${Math.abs(f.anchor.lat).toFixed(5)}${ns} ${Math.abs(f.anchor.lon).toFixed(5)}${ew} (was EPSG:${f.epsg}${conv})`, false))
+  } else {
+    rows.push(readout('Frame', kind, false), readout('Bake EPSG', String(f.epsg)))
   }
+  if (f.anchor) rows.push(readout('Anchor', `${f.anchor.lat.toFixed(6)}, ${f.anchor.lon.toFixed(6)}`))
+  if (typeof f.utm_convergence_deg === 'number') rows.push(readout('Convergence', `${f.utm_convergence_deg.toFixed(4)}° grid→true`))
+  if (typeof f.utm_scale === 'number') rows.push(readout('UTM scale', `${((f.utm_scale - 1) * 1e6).toFixed(0)} ppm`))
   return rows
 }
 

@@ -107,16 +107,35 @@ site-local metre grid (`web/tiles/0/`, indexed by `manifest.layers.tiles`) — 5
 crofton-triangle, 375 for crofton-crownsville, and **the viewer does not stream any of them yet**.
 Moving those onto the global quadtree is the step that turns sites into a world.
 
-## Order of work
+## Order of work — where it got to
 
 1. ✅ `packages/engine/src/geo/wgs84.ts` — the geodesy core, checked against PROJ.
-2. The bake declares a geodetic anchor in the manifest (`frame.anchor`), alongside the existing
-   UTM fields so nothing breaks. Backfill existing sites; no re-bake.
-3. The viewer builds an `Anchor` from the manifest and routes terrain/tile vertex generation
-   through `toLocal`. Curvature appears; nothing else changes.
-4. Tiles move to the global quadtree and start streaming.
-5. Floating origin: rebase when the camera drifts, translating *and* rotating.
+2. ✅ The bake declares a geodetic anchor (`frame.anchor`) and says which metres it holds
+   (`frame.kind`). All 21 sites backfilled, then re-exported to true ENU and promoted.
+3. ✅ The viewer renders on the ellipsoid — `gridGeometry` places each vertex from the lattice and
+   `sampler` inverts it (`RasterFrame`). Curvature verified on Rich's GPU: 3.97 m at 7,112 m
+   against the ellipsoid's 3.96 m.
+4. ✅ Tiles stream, as trailworks-format packs with `.ktx2` twins — but on the **site-local** tile
+   grid, not the global quadtree. crofton-crownsville holds 19 tiles at 12.1 MB of texture where
+   all 125 would be 667 MB. Moving to the global quadtree is what would let sites share data with
+   trailworks and with each other; it has not been done.
+5. **Open.** Floating origin: `Anchor.delta` and `deltaRotation` are written and tested, and
+   nothing calls them. Needed when corridor becomes continuous rather than a set of islands —
+   remember a rebase is a translation AND a rotation, ~0.009°/km, and ignoring the rotation loses
+   ~141 m over 60 km.
 
-Steps 3 and 4 are the same edit if done together, which is why the frame had to be settled before
-the tile system — the tile loader is precisely the code that turns stored data into world
-coordinates, and writing it twice would be the waste.
+Steps 3 and 4 were the same edit, which is why the frame had to be settled before the tile system:
+the tile loader is precisely the code that turns stored data into world coordinates, and writing it
+twice would have been the waste.
+
+## What the conversion missed, so the next one does not
+
+The bake was converted and the data **beside** it was not. `adjustments.json`, `placements.json`
+and `structures.json` are authored, live outside `web/`, and no re-export touches them — they sat
+in the old frame at a median of 40 m and up to 439 m displacement until a separate pass repaired
+and stamped them. Likewise `branches.json`: `export_branches` copied `junctions[].x/y` verbatim
+while `coords` went through the conversion, so a re-export could not repair it.
+
+**A migration's blind spot is the data it does not own.** Both classes are now stamped with the
+frame they were written in, and `corridor.verify` fails a manifest whose junction offsets grow
+with distance from the origin — the signature of a rotation rather than ordinary slop.

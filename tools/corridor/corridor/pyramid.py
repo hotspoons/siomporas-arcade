@@ -238,3 +238,100 @@ def fill_blank(rgb):
             ch = rgb[c]
             ch[blank] = int(ch[~blank].mean())
     return rgb, (nb / blank.size if blank.size else 0.0)
+
+
+def bake(site_dir, web, frame, zmax: int | None = None, zmin: int | None = None, vivid=None) -> dict:
+    """
+    Emit the pyramid under `web/pyr/<z>/<x>_<y>.{pack,jpg}` and return the manifest block.
+
+    A tile's bounds are IMPLICIT in (z, x, y) — that is the point of quadtree addressing, and it
+    is why this needs no control lattice where the UTM tiles did. The viewer derives the geodetic
+    corners from the id and asks `Anchor.toLocal` for the ENU position of each vertex, so the grid
+    curves correctly with no per-tile metadata at all.
+    """
+    import io
+    import json
+
+    import numpy as np
+    from PIL import Image
+
+    from .export import _encode_height, _fill
+    from .pack import write_pack
+
+    site = json.loads((site_dir / "site.json").read_text())
+    lat = float(site["lat"])
+    ox, oy = frame.origin
+    bb = site.get("bbox_utm")
+    bbox_wgs = frame.bbox_wgs(*bb) if bb else None
+    if bbox_wgs is None:
+        return {}
+    zmax = zmax if zmax is not None else leaf_level(lat)
+    zmin = zmin if zmin is not None else root_level(bbox_wgs)
+    tiles = plan(bbox_wgs, zmax=zmax, zmin=zmin)
+
+    dem_p = site_dir / "dem_1m.tif"
+    chm_p = site_dir / "lidar" / "chm.vrt"
+    naip_p = site_dir / "naip_1m.tif"
+    if not naip_p.exists():
+        naip_p = site_dir / "naip.tif"
+
+    out = web / "pyr"
+    entries = []
+    rev = int((site_dir / "manifest.json").stat().st_mtime) if (site_dir / "manifest.json").exists() else 0
+    skipped = 0
+    for t in tiles:
+        w, s, e, n = tile_bounds(t.z, t.x, t.y)
+        parts: dict[str, bytes] = {}
+        entry: dict = {"z": t.z, "x": t.x, "y": t.y}
+
+        z = _sample(dem_p, w, s, e, n, TILE_PX, -9999.0)
+        if z is None or not np.isfinite(z).any() or not (z > -9000).any():
+            # No source under this tile. It is still EMITTED — quad closure means an absent sibling
+            # freezes its parent forever — but as a marker with no rasters.
+            entry["empty"] = True
+            entries.append(entry)
+            skipped += 1
+            continue
+        z = _fill(z, -9999.0)
+        rgb_h, zmn, scale = _encode_height(z)
+        buf = io.BytesIO()
+        Image.fromarray(rgb_h, "RGB").save(buf, "PNG", optimize=True)
+        parts["dem.png"] = buf.getvalue()
+        entry["dem"] = {"zmin": zmn, "zscale": scale}
+
+        c = _sample(chm_p, w, s, e, n, TILE_PX, 0.0)
+        if c is not None and np.isfinite(c).any():
+            buf = io.BytesIO()
+            Image.fromarray(np.clip(np.round(np.nan_to_num(c) * 4), 0, 255).astype(np.uint8), "L").save(buf, "PNG", optimize=True)
+            parts["chm.png"] = buf.getvalue()
+            entry["chm"] = True
+
+        d = out / str(t.z)
+        d.mkdir(parents=True, exist_ok=True)
+        entry["pack"] = write_pack(d / f"{t.x}_{t.y}.pack", parts, rev=rev)
+
+        rgb = _sample_rgb(naip_p, w, s, e, n, TILE_PX)
+        if rgb is not None and rgb.any():
+            rgb, frac = fill_blank(rgb)
+            img = Image.fromarray(np.moveaxis(rgb, 0, -1), "RGB")
+            if vivid is not None:
+                img = vivid(img, 1.3, 1.1)
+                r_, g_, b_ = img.split()
+                img = Image.merge("RGB", (r_.point(lambda v: min(255, int(v * 1.06))), g_, b_.point(lambda v: int(v * 0.9))))
+            img.save(d / f"{t.x}_{t.y}.jpg", quality=85, optimize=True)
+            entry["naip"] = True
+            if frac:
+                entry["naip_fill"] = round(frac, 3)
+        entries.append(entry)
+
+    return {
+        "scheme": "geo-quadtree",   # 2^(z+1) lon cols, 2^z lat rows — same ids as trailworks
+        "zmin": zmin,
+        "zmax": zmax,
+        "px": TILE_PX,
+        "dir": "pyr",
+        "format": "pack-1",
+        "texture": "jpg",
+        "empty": skipped,
+        "list": entries,
+    }

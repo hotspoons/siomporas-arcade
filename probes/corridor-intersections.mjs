@@ -27,6 +27,7 @@ const out = await page.evaluate(() => {
   const site = window.corridor.site, THREE = window.corridor.THREE
   const m = site.manifest
   const model = m.intersections?.list ?? []
+  const ed = site.edgeDistance ?? null
   const r = {
     site: m.slug,
     bake: m.intersections?.counts ?? null,
@@ -34,7 +35,7 @@ const out = await page.evaluate(() => {
     arms: { signalised: 0, armsExpected: 0, armsWithMast: 0, junctionsFullyCovered: 0, worst: null },
     cycle: { junctions: 0, everTwoGreen: 0, phasesNeverGreen: 0, phasesNeverRed: 0, sampled: 0 },
     bars: { checked: 0, offRoad: 0, worst: 0 },
-    blades: { checked: 0, onPavement: 0, truncatedExamples: [] },
+    blades: { checked: 0, onPavement: 0, noneClear: 0, nominalClear: 0, neededWalk: 0, worstIntoRoad: 0, truncatedExamples: [] },
     zones: (m.sidewalk_zones ?? []).length,
     zoneSidewalks: (m.sidewalks ?? []).filter((s) => s.source === 'zone').length,
   }
@@ -111,7 +112,6 @@ const out = await page.evaluate(() => {
   }
 
   // --- stop bars on the asphalt ----------------------------------------------------------------
-  const ed = site.edgeDistance ?? null
   for (const b of (m.signals?.bars ?? []).slice(0, 400)) {
     r.bars.checked++
     if (!ed) continue
@@ -120,9 +120,43 @@ const out = await page.evaluate(() => {
   }
 
   // --- blades ---------------------------------------------------------------------------------
+  //
+  // The first version of this counted nothing and reported `checked: 0`, which is a check that
+  // cannot fail. What it has to prove is that the post the viewer CHOSE is clear of the asphalt —
+  // the bake offers four candidates and the viewer takes the first clear one, so the failure mode
+  // is a blade standing in a traffic lane when none of the four was clear and the fallback was
+  // taken anyway.
   for (const X of model) {
     for (const bl of X.blades ?? []) {
       if (bl.truncated && r.blades.truncatedExamples.length < 12) r.blades.truncatedExamples.push(`${bl.full} -> ${bl.text}`)
+    }
+    const corners = X.corners ?? []
+    if ((X.blades ?? []).length < 2 || !corners.length || !ed) continue
+    // mirror the viewer's search EXACTLY, including the outward walk — a probe that models the
+    // old behaviour silently stops cross-checking the moment the viewer changes, and then agrees
+    // with nothing. `nominalClear` keeps the stricter number as a diagnostic: it is how many
+    // junctions the bake's nominal radius got right on its own.
+    const WALK = 14, CLEAR = 0.5
+    let chosen = null
+    let walked = false
+    for (const c of corners) {
+      const dx = c.x - X.x, dy = -c.y - -X.y
+      const r0 = Math.hypot(dx, dy) || 1
+      const ux = dx / r0, uy = dy / r0
+      for (let rr = r0; rr <= r0 + WALK; rr += 1) {
+        const px = X.x + ux * rr, pz = -X.y + uy * rr
+        if (ed(px, pz) >= CLEAR) { chosen = { px, pz }; walked = rr > r0 + 0.001; break }
+      }
+      if (chosen) break
+    }
+    if (corners.some((c) => ed(c.x, -c.y) >= CLEAR)) r.blades.nominalClear++
+    if (!chosen) { r.blades.noneClear++; continue }
+    r.blades.checked++
+    if (walked) r.blades.neededWalk++
+    const d = ed(chosen.px, chosen.pz)
+    if (d < CLEAR) {
+      r.blades.onPavement++
+      r.blades.worstIntoRoad = Math.min(r.blades.worstIntoRoad, d)
     }
   }
   return r

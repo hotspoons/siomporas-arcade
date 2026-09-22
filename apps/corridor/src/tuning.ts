@@ -364,6 +364,8 @@ export let STOPBAR_MAX_FROM_ROAD = 12
 export let BLADE_POST_H = 2.9
 export let BLADE_H = 0.26
 export let BLADE_CLEAR = 0.5
+/** how far outward from the nominal corner a blade post may be walked to find clear ground (m) */
+export let BLADE_WALK_M = 14
 /**
  * The verge a BRANCH road's strip carries, each side (m). The primary gets 40 m; a residential
  * street in a subdivision whose neighbours are a hundred metres away does not, and giving it the
@@ -687,6 +689,7 @@ export const TUNE_TABS: TuneTab[] = [
           tune('BLADE_POST_H', () => BLADE_POST_H, (v) => (BLADE_POST_H = v), [1.5, 6], 0.1, 'street sign post height (m)'),
           tune('BLADE_H', () => BLADE_H, (v) => (BLADE_H = v), [0.1, 0.6], 0.01, 'blade height (m)'),
           tune('BLADE_CLEAR', () => BLADE_CLEAR, (v) => (BLADE_CLEAR = v), [0, 4], 0.1, 'm clear of asphalt a corner post needs'),
+          tune('BLADE_WALK_M', () => BLADE_WALK_M, (v) => (BLADE_WALK_M = v), [0, 40], 1, 'm outward it may walk to find it'),
         ],
       },
     ],

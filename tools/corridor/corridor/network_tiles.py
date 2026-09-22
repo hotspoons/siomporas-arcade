@@ -250,10 +250,18 @@ def naip_tiled(frame: Frame, bbox, corridor, out: Path, cache: Path, res: float 
 
     from PIL import Image
 
+    from . import naip as naip_mod
     from .naip import SERVICE, TILE_PX, _get_with_retry, session  # noqa: F401
 
     if out.exists():
         return {"file": out.name, "cached": True, "res_m": res}
+    # OUTSIDE THE UNITED STATES THERE IS NO NAIP, and the service does not say so — it answers
+    # HTTP 200 with a black JPEG, tile after tile. The first Stelvio bake came out with a
+    # 6830x3450 image containing exactly one colour and a completely green log. `naip.covered`
+    # probes for CONTENT rather than for a status code; see its docstring for the two measurements
+    # that prove it can tell the difference.
+    if not naip_mod.covered(frame, bbox):
+        return naip_mod.fetch_sentinel2(frame, bbox, out, res=res)
     xmin, ymin, xmax, ymax = bbox
     width = int(round((xmax - xmin) / res))
     height = int(round((ymax - ymin) / res))

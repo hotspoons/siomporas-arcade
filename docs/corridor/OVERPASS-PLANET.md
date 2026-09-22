@@ -111,11 +111,53 @@ the cheap thing here: **provision 4 Ti and stop thinking about it.**
 Import time is the real cost — Maryland took about ten minutes, and the reorganize step is
 superlinear. Budget a day or more for Europe and run it once.
 
+## The storage class was a misattribution, and cephfs works
+
+`tools/overpass/chart/values.yaml` carries a comment saying the database must be on a BLOCK device
+because "on the cephfs class the clone died with File error caught: 22 Invalid argument
+/db/db/nodes.bin". **That is the same errno, the same function and the same phase as the failure
+now attributed to compression** — which means it was never evidence about cephfs. It failed on
+cephfs *with gz*, and gz was the cause.
+
+Settled by test rather than argument, because a wrong guess costs a day-long import:
+
+```
+release      overpass-cephfs-test        a second release, not the running one
+storage      80Gi ceph-filesystem
+extract      maryland-260920.osm.pbf     the one known to import in ~10 minutes
+compression  no
+result       reached the serving phase; 0 occurrences of "File error caught"
+             Crofton bbox -> 508 ways    the same number the ceph-block instance gives
+```
+
+**cephfs is fine for this workload with `compression: no`.** The chart comment is wrong and should
+be corrected when someone owns that file. The 4 Ti ceph-filesystem choice below stands.
+
+## The bz2 bottleneck, and lbzip2
+
+`init_osm3s.sh` ends in `bunzip2 <$PLANET_FILE | update_database`, so the importer genuinely wants
+bz2-compressed OSM XML — a pbf cannot be handed to it. Europe is 35.0 GB of pbf and expands to
+several hundred GB of XML, and the image ships only single-threaded `bzip2`.
+
+The image is Debian bookworm and `apt-get install lbzip2` works, so the preprocess becomes a
+streamed, parallel conversion with no giant intermediate on disk:
+
+```
+apt-get update -qq && apt-get install -y -qq lbzip2 &&
+mv /db/planet.osm.bz2 /db/planet.osm.pbf &&
+osmium cat -o - -f osm /db/planet.osm.pbf | lbzip2 -c -n 8 > /db/planet.osm.bz2 &&
+rm -f /db/planet.osm.pbf
+```
+
+Also worth correcting: the entrypoint uses `curl -L`, so it **does** follow redirects and
+`europe-latest.osm.pbf` (a 302 to a Geofabrik mirror) downloads fine. The chart's note about
+`-latest` not being followed is stale.
+
 ## Shape
 
 ```
-PVC          4 Ti     ceph-filesystem     sizing is uncertain by an order of magnitude and the
-                                          pool has 54.8 TiB free; do not economise here
+PVC          4 Ti     ceph-filesystem     PROVEN for this workload, see above; sizing is uncertain
+                                          by an order of magnitude and the pool has 54.8 TiB free
 mode         init     OVERPASS_PLANET_URL=.../europe-latest.osm.pbf
 compression  no       NOT negotiable — gz and lz4 both fail on this storage
 areas        off      rulesLoad: 0

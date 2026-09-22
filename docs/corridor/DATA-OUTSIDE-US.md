@@ -1,15 +1,46 @@
 # Baking outside the United States
 
-**Status:** research, 2026-09-22. Nothing built.
+**Status:** the global DEM and imagery rungs are BUILT and an Italian pass bakes. 2026-09-22.
+Sources below verified twice — once by the research pass, once again by me before building on them.
 Every number here was fetched live on the date above, not cited. Where I did not verify something
 I say so.
 
 ## The short version
 
 Roads and geology already work worldwide. Canopy already works worldwide and is *easier* than what
-we do now. Imagery is fine in France and 10x worse everywhere else. **Elevation is the problem**,
-and it is a bigger problem than "lower resolution" — the free global product is a *surface* model,
-so it has the trees in it.
+we do now. Imagery is fine in France and 10x worse everywhere else.
+
+**The elevation verdict has changed, and it changed by measurement.** The research pass expected
+30 m sampling to destroy the Stelvio's switchbacks — "the geometry that makes the road worth
+driving does not exist in the data". It does. Measured on the baked site: the switchback legs sit
+a median **34.2 m** apart in plan, which is *wider than a 30 m cell*, so consecutive legs land in
+different cells and GLO-30 gives them a median **17.5 m** of height separation against the
+**18.5 m** the road's own average grade implies — **94%**. Only 1% of 3 858 stacked pairs come out
+within a metre of each other.
+
+The remaining elevation problem is the one that was always the real one: **GLO-30 is a surface
+model**. Above the treeline, where an alpine pass mostly is, that costs nothing. In woodland the
+road rides on the canopy, and that is still unsolved.
+
+## What is built
+
+`dem.py` has a rung below the USGS ladder: when TNM returns nothing at 1 m, 1/9 or 1/3 arc-second,
+it reads **Copernicus GLO-30** straight off the COGs over `/vsicurl` — no download step, the same
+`gdalwarp` that puts a USGS tile on the site lattice. `native_res_m: 30` and `surface_model: true`
+go in the manifest so nothing downstream has to guess.
+
+`naip.py` has `covered()` and `fetch_sentinel2()`, and `network_tiles.naip_tiled` routes through
+them. See **the black JPEG**, below — that one nearly shipped.
+
+A pass bakes:
+
+```
+stelvio-ref   SS38, 17 952 m of spine, 1 277 -> 2 757 m
+              dem   Copernicus GLO-30, 1 tile, 30 m surface model
+              naip  Sentinel-2 S2C_32TPS_20260904_1_L2A, 0.0% cloud, 10 m on a 1 m lattice
+              geology 13 Macrostrat units
+              81 distinct hairpins in the spine geometry
+```
 
 ## Layer by layer
 
@@ -59,20 +90,68 @@ where it should come from anyway.
 `sentinel-2-l2a` AND `cop-dem-glo-30` from one STAC API. A single code path could replace three
 bespoke fetchers, US and EU both.
 
-## Elevation: the actual blocker
+## The black JPEG: how NAIP says "not here"
+
+`USGSNAIPPlus/exportImage` does not fail outside the United States. It answers **HTTP 200 with a
+valid, entirely black JPEG**. One 32x32 export from each of two places:
+
+```
+Stelvio pass (Italy)   200  image/jpeg  659 B     1 distinct colour,   0% non-zero
+Crofton (Maryland)     200  image/jpeg  905 B   390 distinct colours, 100% non-zero
+```
+
+This is the same shape as the Overpass silent empty — a well-formed success carrying nothing — and
+it is why the first Stelvio bake produced a **6830 x 3450 image containing exactly one colour** and
+a completely green log. `naip.covered()` therefore asserts CONTENT, not a status code, and the two
+measurements above are what prove the assertion can tell them apart.
+
+## Road identity breaks at a language border
+
+Two separate problems, both found on the Stelvio, both costing a whole spine:
+
+1. **One state road, four names.** South Tyrol is bilingual, so `SS38` is tagged
+   `Stilfserjoch Staatsstraße - Strada Statale 38 dello Stelvio` (31 ways, the east ramp),
+   `Strada Statale 38 dello Stelvio` (25, the west), `Stilfserbrücke - Via Ponte Stelvio` (9) and
+   `Gomagoi` (6). `network.roads` groups by `name`, so the pass became four roads and the spine
+   went 11.5 km down the *wrong side* — climbing 852 m instead of 1 481.
+2. **`REF_RE` is US-only**: `^(MD|US|I|VA|PA|CA|OR|ME)[ -]?\d+...`. So `roads: ["SS38"]` is treated
+   as a name, matches nothing, and the obvious fix is unavailable.
+
+Worked around by listing all four names. **The real fix is to generalise `REF_RE` and to prefer
+`ref` over `name` when chaining** — `network.py` is not this lane's file, so it is written up here
+and raised rather than changed.
+
+## Elevation: measured, and less of a blocker than it looked
 
 Copernicus GLO-30 is accurate where it is defined — **+3 m at the Stelvio Pass, −2 m at Umbrail**,
 against published pass heights. That is not the problem. Two other things are:
 
-1. **30 m, not 1 m.** At 46.5°N a cell is about 21 m east-west by 30 m north-south. A Stelvio
-   hairpin is roughly 20 m across. The pass's 48 switchbacks would be *below the sample spacing* —
-   the geometry that makes the road worth driving does not exist in the data.
+1. ~~**30 m, not 1 m.**~~ **Tested on the baked site, and it does not happen.** The claim was that
+   the switchbacks fall below the sample spacing. The measurement says otherwise:
+
+   | | |
+   |---|---|
+   | stacked leg pairs (within 40 m in plan, >200 m apart along the road) | **3 858** |
+   | their plan separation | median **34.2 m** — wider than a 30 m cell |
+   | height gap GLO-30 gives them | median **17.5 m**, max 31.9 m |
+   | gap implied by the road's own 8.3% average grade | **18.5 m** |
+   | so the DEM delivers | **94%** of the real separation |
+   | pairs collapsed to within 1 m | 28 of 3 858 (**1%**) |
+
+   The road centreline comes from OSM, not from the DEM, so the hairpins exist regardless; the
+   question was only whether the DEM could give two stacked legs different heights, and at this
+   pass it can.
+
+   **A caution on counting hairpins.** Per-vertex heading change reported **zero** hairpins on a
+   road that has 81, because OSM maps the curve densely and each vertex turns at most 33°.
+   Cumulative turn over a 120 m window finds all 81. If you measure hairpins, measure the
+   cumulative turn.
 
 2. **It is a DSM, not a DTM.** GLO-30 is a surface model: forest canopy and buildings are in the
    elevation. Our whole pipeline assumes bare earth, with canopy carried separately in the CHM.
    Through woodland the road would ride on treetops.
 
-Point 2 is the one that bites. Point 1 we already work around — the road surface comes from OSM
+Point 2 is the one that bites, and it is now the ONLY one. Point 1 we already work around — the road surface comes from OSM
 geometry draped on the DEM, and `CAR_CREST_GAIN` exists because one-tick height derivatives off a
 DEM already fling the car. A coarse DEM is a worse *landscape*, not necessarily a worse *road*.
 

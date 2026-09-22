@@ -7,6 +7,18 @@
 // of wall clock — the controller is driven by wall-clock time on purpose, so this is the honest way
 // to see it move rather than a debug override.
 import { chromium } from 'playwright'
+
+// page.screenshot() blows its 30 s timeout on a scene this heavy under swiftshader — the cost is
+// in compositing pixels, not in anything on the page. Reading the drawing buffer inside the rAF
+// that drew it is cheaper and gives the identical image. (orchestrator, 2026-09-22)
+const shoot = async (page, path) => {
+  const url = await page.evaluate(() => new Promise((res) => {
+    const { renderer, scene, camera } = window.__apex
+    requestAnimationFrame(() => { renderer.render(scene, camera); res(renderer.domElement.toDataURL('image/png')) })
+  }))
+  const { writeFileSync } = await import('node:fs')
+  writeFileSync(path, Buffer.from(url.split(',')[1], 'base64'))
+}
 const PORT = process.env.PORT ?? '5210'
 const SLUG = process.env.SLUG ?? 'crofton-triangle'
 const OUT = process.argv[2] ?? '/tmp/x-'
@@ -51,7 +63,7 @@ await page.evaluate(() => window.corridor.tune.set('SIGNAL_RATE', 10))
 await page.waitForTimeout(SETTLE_MS)
 for (let i = 0; i < 4; i++) {
   await page.waitForTimeout(3800)
-  await page.screenshot({ path: `${OUT}signal-${i}.png` })
+  await shoot(page, `${OUT}signal-${i}.png`)
   const lit = await page.evaluate(() => {
     const L = window.corridor.site.layers.signals.children[0]
     if (!L?.instanceColor) return null
@@ -71,7 +83,7 @@ for (let i = 0; i < 4; i++) {
 const stop = await park('stop', 18, 6)
 console.log('stop junction', JSON.stringify(stop))
 await page.waitForTimeout(SETTLE_MS)
-await page.screenshot({ path: `${OUT}stop.png` })
+await shoot(page, `${OUT}stop.png`)
 
 // and the same one from a driver's eye
 await page.evaluate(() => {
@@ -90,6 +102,6 @@ await page.evaluate(() => {
   c.orbit.update()
 })
 await page.waitForTimeout(SETTLE_MS)
-await page.screenshot({ path: `${OUT}approach.png` })
+await shoot(page, `${OUT}approach.png`)
 console.log('wrote', `${OUT}signal-0..3.png ${OUT}stop.png ${OUT}approach.png`)
 await browser.close()

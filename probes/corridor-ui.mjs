@@ -29,7 +29,9 @@ page.on('response', (r) => {
 await page.route('**/@vite/client', (r) => r.abort())
 
 await page.goto(`http://localhost:${port}/#${slug}`, { waitUntil: 'domcontentloaded', timeout: 180000 })
-await page.waitForFunction(() => !!window.corridor?.site, null, { timeout: 300000 })
+// __apex is the dev-bridge context and the one that carries `renderer`; window.corridor exists
+// too and probing it 'works' while silently lacking renderer and perf. Prefer the bridge.
+await page.waitForFunction(() => !!(window.__apex ?? window.corridor)?.site, null, { timeout: 300000 })
 await page.waitForTimeout(2500)
 
 const shot = async (name, prep) => {

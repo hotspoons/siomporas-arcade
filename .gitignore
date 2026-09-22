@@ -59,3 +59,4 @@ __pycache__/
 
 # road-and-car: synthetic tiled-site fixture (probes/make-tiles.py), regenerable, not a bake
 apps/corridor/public/testdata/
+tools/corridor/.bin

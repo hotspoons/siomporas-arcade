@@ -26,6 +26,7 @@ in row bands, so a 16 km branch's transects cost a few hundred MB of reads, not 
 """
 from __future__ import annotations
 
+import io
 import json
 import subprocess
 import time
@@ -282,12 +283,22 @@ def naip_tiled(frame: Frame, bbox, corridor, out: Path, cache: Path, res: float 
     return {"file": out.name, "res_m": res, "size": [width, height], "tiles_fetched": fetched}
 
 
-def export_tiles(site_dir: Path, web: Path, ox: float, oy: float, mask_shapes: list, vivid) -> dict:
-    """web/tiles/0/<x>_<y>.dem.png|chm.png|naip.jpg for every corridor tile; returns layers.tiles."""
+def export_tiles(site_dir: Path, web: Path, frame, mask_shapes: list, vivid) -> dict:
+    """
+    One pack + one texture per tile: web/tiles/0/<x>_<y>.pack and <x>_<y>.naip.jpg.
+
+    The pack holds the DATA rasters (dem, chm) in the trailworks container — see pack.py for the
+    format and why the texture stays a separate object. Each entry also carries `geo`, the
+    geodetic control lattice that puts the tile on the ellipsoid: a tile is a regular grid on the
+    UTM plane, and in ENU that grid is rotated by the meridian convergence and curved. 3x3 over a
+    1 km tile is well under a centimetre (bilinear error scales with the square of the span, and
+    9x9 over a whole 8.5 km site measured 18 mm).
+    """
     from PIL import Image
     from rasterio.enums import Resampling
 
     from .export import _encode_height, _fill
+    from .pack import write_pack
 
     lidar_meta = json.loads((site_dir / "manifest.json").read_text()).get("lidar", {}) if (site_dir / "manifest.json").exists() else {}
     tinfo = lidar_meta.get("tiles") or {}
@@ -302,6 +313,7 @@ def export_tiles(site_dir: Path, web: Path, ox: float, oy: float, mask_shapes: l
     chm_p = site_dir / "lidar" / "chm.vrt"
     naip_p = site_dir / "naip_1m.tif"
     entries = []
+    rev = int((site_dir / "manifest.json").stat().st_mtime) if (site_dir / "manifest.json").exists() else 0
     dem_ds = rasterio.open(dem_p) if dem_p.exists() else None
     chm_ds = rasterio.open(chm_p) if chm_p.exists() else None
     naip_ds = rasterio.open(naip_p) if naip_p.exists() else None
@@ -309,6 +321,7 @@ def export_tiles(site_dir: Path, web: Path, ox: float, oy: float, mask_shapes: l
         bx0, by0 = x0 + tx * TILE_M, y0 + ty * TILE_M
         bx1, by1 = bx0 + TILE_M, by0 + TILE_M
         entry: dict = {"x": tx, "y": ty}
+        parts: dict[str, bytes] = {}
         if dem_ds is not None:
             win = rasterio.windows.from_bounds(bx0, by0, bx1, by1, transform=dem_ds.transform)
             z = dem_ds.read(1, window=win, out_shape=(n // 2, n // 2), resampling=Resampling.average, boundless=True, fill_value=-9999).astype(np.float32)
@@ -316,7 +329,9 @@ def export_tiles(site_dir: Path, web: Path, ox: float, oy: float, mask_shapes: l
             if not np.isfinite(z).any():
                 continue
             rgb, zmin, scale = _encode_height(z)
-            Image.fromarray(rgb, "RGB").save(tdir / f"{tx}_{ty}.dem.png", optimize=True)
+            buf = io.BytesIO()
+            Image.fromarray(rgb, "RGB").save(buf, "PNG", optimize=True)
+            parts["dem.png"] = buf.getvalue()
             entry["dem"] = {"zmin": zmin, "zscale": scale}
         if chm_ds is not None:
             win = rasterio.windows.from_bounds(bx0, by0, bx1, by1, transform=chm_ds.transform)
@@ -328,7 +343,9 @@ def export_tiles(site_dir: Path, web: Path, ox: float, oy: float, mask_shapes: l
                 if sub:
                     m = rasterize(sub, out_shape=c.shape, transform=tr2, fill=0, dtype=np.uint8).astype(bool)
                     c[m] = 0.0
-            Image.fromarray(np.clip(np.round(c * 4), 0, 255).astype(np.uint8), "L").save(tdir / f"{tx}_{ty}.chm.png", optimize=True)
+            buf = io.BytesIO()
+            Image.fromarray(np.clip(np.round(c * 4), 0, 255).astype(np.uint8), "L").save(buf, "PNG", optimize=True)
+            parts["chm.png"] = buf.getvalue()
             entry["chm"] = True
         if naip_ds is not None:
             win = rasterio.windows.from_bounds(bx0, by0, bx1, by1, transform=naip_ds.transform)
@@ -338,11 +355,25 @@ def export_tiles(site_dir: Path, web: Path, ox: float, oy: float, mask_shapes: l
             img = Image.merge("RGB", (r_.point(lambda v: min(255, int(v * 1.06))), g_, b_.point(lambda v: int(v * 0.9))))
             img.save(tdir / f"{tx}_{ty}.naip.jpg", quality=85, optimize=True)
             entry["naip"] = True
+        if not parts:
+            continue
+        entry["pack"] = write_pack(tdir / f"{tx}_{ty}.pack", parts, rev=rev)
+        # where this tile's corners actually are on the ellipsoid
+        entry["geo"] = frame.control_lattice((bx0, by0, bx1, by1), 3)
         entries.append(entry)
     for ds in (dem_ds, chm_ds, naip_ds):
         if ds is not None:
             ds.close()
-    return {"size_m": TILE_M, "origin": [x0 - ox, y0 - oy], "res": {"dem": 2.0, "naip": 1.0, "chm": 2.0}, "dir": "tiles/0", "list": entries}
+    return {
+        "size_m": TILE_M,
+        # kept for culling; `geo` on each entry is what PLACES a tile
+        "origin": [round(float(v), 2) for v in frame.to_enu(x0, y0)],
+        "res": {"dem": 2.0, "naip": 1.0, "chm": 2.0},
+        "dir": "tiles/0",
+        "format": "pack-1",
+        "texture": "naip.jpg",
+        "list": entries,
+    }
 
 
 def mask_shapes(site_dir: Path, derived: dict) -> list:
@@ -535,7 +566,7 @@ OVERVIEW_DEM_M = 8.0
 OVERVIEW_MAX_PX = 4000
 
 
-def overview(site_dir: Path, web: Path, ox: float, oy: float, mask_shapes: list, vivid) -> dict:
+def overview(site_dir: Path, web: Path, frame, mask_shapes: list, vivid) -> dict:
     """A whole-region dem/chm/naip at coarse resolution, so a tiled site LOADS.
 
     The tiles are the right answer and the viewer will stream them, but until it does, a site whose
@@ -550,13 +581,16 @@ def overview(site_dir: Path, web: Path, ox: float, oy: float, mask_shapes: list,
     from rasterio.enums import Resampling
 
     from .export import _encode_height, _fill
+    from .pack import write_pack
 
     layers: dict = {}
     site = json.loads((site_dir / "site.json").read_text())
     bbox = tuple(site["bbox_utm"])
 
     def rel(b):
-        return [b[0] - ox, b[1] - oy, b[2] - ox, b[3] - oy]
+        from .export import _enu_bbox
+
+        return _enu_bbox(frame, b)
 
     def read(path: Path, res: float, count: int = 1):
         with rasterio.open(path) as src:
@@ -572,7 +606,7 @@ def overview(site_dir: Path, web: Path, ox: float, oy: float, mask_shapes: list,
         z = _fill(z.astype(np.float32), -9999)
         rgb, zmin, scale = _encode_height(z)
         Image.fromarray(rgb, "RGB").save(web / "dem_8m.png", optimize=True)
-        layers["dem"] = {"file": "dem_8m.png", "res": OVERVIEW_DEM_M, "size": [w, h], "bbox": rel(bbox), "zmin": zmin, "zscale": scale, "overview": True}
+        layers["dem"] = {"file": "dem_8m.png", "res": OVERVIEW_DEM_M, "size": [w, h], "bbox": rel(bbox), "geo": frame.control_lattice(bbox), "zmin": zmin, "zscale": scale, "overview": True}
 
     chm_p = _raster(site_dir / "lidar", "chm")
     if chm_p.exists() and "dem" in layers:
@@ -582,7 +616,7 @@ def overview(site_dir: Path, web: Path, ox: float, oy: float, mask_shapes: list,
             tr = from_origin(bbox[0], bbox[3], OVERVIEW_DEM_M, OVERVIEW_DEM_M)
             c[rasterize([(g, 1) for g in mask_shapes], out_shape=c.shape, transform=tr, fill=0, dtype=np.uint8).astype(bool)] = 0.0
         Image.fromarray(np.clip(np.round(c * 4), 0, 255).astype(np.uint8), "L").save(web / "chm_8m.png", optimize=True)
-        layers["chm"] = {"file": "chm_8m.png", "res": OVERVIEW_DEM_M, "size": [w, h], "bbox": rel(bbox), "scale": 0.25, "overview": True}
+        layers["chm"] = {"file": "chm_8m.png", "res": OVERVIEW_DEM_M, "size": [w, h], "bbox": rel(bbox), "geo": frame.control_lattice(bbox), "scale": 0.25, "overview": True}
 
     naip_p = site_dir / "naip_1m.tif"
     if naip_p.exists():
@@ -593,7 +627,7 @@ def overview(site_dir: Path, web: Path, ox: float, oy: float, mask_shapes: list,
         r_, g_, b_ = img.split()
         img = Image.merge("RGB", (r_.point(lambda v: min(255, int(v * 1.06))), g_, b_.point(lambda v: int(v * 0.9))))
         img.save(web / "naip_overview.jpg", quality=85, optimize=True)
-        layers["naip"] = {"file": "naip_overview.jpg", "res": naip_res, "size": [w, h], "bbox": rel(bbox), "overview": True}
+        layers["naip"] = {"file": "naip_overview.jpg", "res": naip_res, "size": [w, h], "bbox": rel(bbox), "geo": frame.control_lattice(bbox), "overview": True}
     return layers
 
 

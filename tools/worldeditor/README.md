@@ -234,6 +234,15 @@ page has no scene and no renderer, so it gets its own name and holds only what i
 caught it reporting a 500, which tells a person the service is broken when their editor sent
 rubbish.
 
+**A guard on the OBJECT is not a guard.** Cancelling a run signalled the child and recorded
+`failed — cancelled`; the child's own `close` handler then fired and wrote `failed — exited null`
+over it, so the API answered "cancelled" and the file on the volume said something else. Guarding
+`#finish` on `run.state` did not fix it, and looked as though it had: `cancel` re-reads the record
+off the volume, so it holds a **different object** from the one the child's handler closed over,
+and both still say "running". The guard is keyed on the run **id**. The probe now re-reads the run
+after cancelling rather than trusting the cancel response, because the response was right the whole
+time the stored truth was wrong.
+
 ## The probe, and why half of it is negatives
 
 On 2026-09-21 six checks across four lanes returned true answers about the wrong thing, most of
@@ -248,7 +257,13 @@ A skipped check prints `SKIP` and is counted separately, because a skip that pri
 same failure in a different costume.
 
 ```
-6 passed, 0 failed              # --prove: every check goes red on a broken input
-13 passed, 0 failed             # offline + the live service
-13 passed, 0 failed             # + the page, driven headlessly
+ 7 passed, 0 failed    # --prove: every check goes red on a broken input
+ 9 passed, 0 failed    # offline: geometry, the guards, the cache key, the Job spec
+21 passed, 0 failed    # + the live service and the page, driven headlessly
+21 passed, 0 failed    # + the same, against the BUILT bundle with no Vite at all (the pod path)
 ```
+
+The negatives keep earning it. The first one for the smallest-enclosing-circle check used a
+SQUARE, where the naive answer is exactly right, so it passed and proved nothing. The first one
+for the cancel check modelled two objects where the bug needs three, so it passed and proved
+nothing. Both are written down above the code that fixes them.

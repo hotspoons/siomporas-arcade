@@ -629,6 +629,27 @@ async function proveChecks() {
     await rm(store.root, { recursive: true, force: true })
   })()
 
+  await proves('the cancel check, against a guard keyed on the OBJECT rather than the id', async () => {
+    // The bug, in miniature, and the fix that LOOKED right. `cancel` re-reads the run off the
+    // volume, so it holds a different object from the one the child's close handler closed over.
+    // A guard on `run.state` is passed by both of them; only a guard on the ID turns the second
+    // one away. This is the negative for the real check in --api, which needs a live service.
+    const stored = { id: 'r1', state: 'running', detail: null } // the file on the volume
+    const objectGuard = (run, detail) => {
+      if (run.state === 'done' || run.state === 'failed') return // looks correct, is not
+      run.state = 'failed'
+      Object.assign(stored, { state: 'failed', detail }) // #save writes the file
+    }
+    // THREE objects, which is the whole point. `#startLocal` closed over one when it spawned;
+    // `cancel` read another off the volume a minute later; the file is a third. Both in-memory
+    // copies still say "running", so both pass a guard on their own state and both write.
+    const heldByChild = { id: 'r1', state: 'running', detail: null }
+    const heldByCancel = { id: 'r1', state: 'running', detail: null }
+    objectGuard(heldByCancel, 'cancelled')
+    objectGuard(heldByChild, 'exited null')
+    assert(stored.detail === 'cancelled', `the stored reason became "${stored.detail}" — something finished it twice`)
+  })()
+
   await proves('the “no HTML 200” check', () => {
     // Vite's SPA fallback, which is what this check exists to catch
     const t = '<!doctype html><html>…'

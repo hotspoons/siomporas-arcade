@@ -42,3 +42,17 @@ export function slider(label: string, value: number, min: number, max: number, s
   wrap.append(name, out, range)
   return wrap
 }
+
+/**
+ * The loudest thing the panel can say. A frame mismatch means every coordinate in the file is
+ * displaced — on 2026-09-22 by a median of 40 m and up to 439 m — while every polygon still draws
+ * a plausible shape over plausible ground. Nothing else in this editor is wrong in a way you
+ * cannot see, so nothing else gets a banner.
+ */
+export function frameBanner(file: string, why: string): HTMLElement {
+  const b = el('div', 'framewarn')
+  b.append(el('strong', '', `${file} was authored in a different frame`))
+  b.append(el('span', '', why))
+  b.append(el('span', 'dim', 'Regenerate the seeded areas (`python -m corridor areas <slug> --overwrite`) and re-run grow; anything drawn by hand has to be redrawn.'))
+  return b
+}

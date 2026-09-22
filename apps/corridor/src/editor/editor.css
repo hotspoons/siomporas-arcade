@@ -93,3 +93,9 @@ button.primary:hover { background: #14302c; }
 .roadwidth-note { opacity: 0.75; font-size: 11px; line-height: 1.45; margin: 8px 0 10px; }
 .roadwidth-apply { width: 100%; }
 .roadwidth-apply:disabled { opacity: 0.45; }
+
+/* a frame mismatch is the one error worth shouting about: everything still draws, and all of it
+   is in the wrong place */
+.framewarn { display: flex; flex-direction: column; gap: 4px; border: 1px solid #e2564f; background: #2a1512; padding: 8px 10px; }
+.framewarn strong { color: #ff8b82; }
+.framewarn .dim { color: #b99; font-size: 11px; }

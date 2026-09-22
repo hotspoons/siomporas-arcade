@@ -30,14 +30,25 @@ def check(slug: str) -> None:
     pts = np.array(m["spine"]["coords"])[:, :2]
     seg = np.linalg.norm(np.diff(pts, axis=0), axis=1)
     s_at = np.concatenate([[0.0], np.cumsum(seg)])
+    # Distance from the band's centroid to the NEAREST point on the spine, not to the spine at the
+    # `s` in its id. A band runs s_start-pad .. s_end+pad, so on a curve or over a long structure
+    # its centroid is tens of metres along from s_start — which the first version of this read as
+    # staleness and reported on correctly-reseeded files. The question is "is this band still on
+    # the road", and that is a distance to the line, not to a station.
     off = []
     for a in json.loads(adj.read_text()).get("areas", []):
         if not a["id"].startswith("struct-"):
             continue
-        s = float(a["id"].split("-")[1])
         c = np.array(a["polygon"]).mean(axis=0)
-        p = np.array([np.interp(s, s_at, pts[:, 0]), np.interp(s, s_at, pts[:, 1])])
-        off.append(float(np.linalg.norm(c - p)))
+        d = np.linalg.norm(pts - c, axis=1)
+        j = int(d.argmin())
+        lo, hi = max(0, j - 2), min(len(pts), j + 3)
+        seg_d = []
+        for k in range(lo, hi - 1):
+            u = pts[k + 1] - pts[k]
+            t = np.clip(np.dot(c - pts[k], u) / max(1e-9, np.dot(u, u)), 0.0, 1.0)
+            seg_d.append(np.linalg.norm(pts[k] + t * u - c))
+        off.append(float(min(seg_d) if seg_d else d[j]))
     if not off:
         return
     off = np.array(off)

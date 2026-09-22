@@ -60,6 +60,12 @@ export interface FrameStamp {
   anchor?: { lon: number; lat: number; h?: number }
 }
 
+/** The stamp to write into a file saved against this manifest. */
+export function frameOf(manifest: Manifest): FrameStamp {
+  const f = (manifest as unknown as { frame?: FrameStamp }).frame ?? {}
+  return { kind: f.kind ?? 'utm', epsg: f.epsg, anchor: f.anchor }
+}
+
 /** Non-null when a file was authored in a different frame from the one the bake now serves. */
 export function frameMismatch(stamp: FrameStamp | undefined, manifest: Manifest): string | null {
   const now = (manifest as unknown as { frame?: FrameStamp }).frame ?? {}

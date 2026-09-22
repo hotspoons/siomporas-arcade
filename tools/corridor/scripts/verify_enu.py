@@ -70,6 +70,10 @@ def verify(slug: str) -> tuple[bool, str]:
     if not (old_p.exists() and new_p.exists()):
         return True, f"{slug:26} - nothing staged, skipped"
     old, new = json.loads(old_p.read_text()), json.loads(new_p.read_text())
+    if old.get("frame", {}).get("kind") == "enu":
+        # the live tree has already been promoted, so this would compare ENU against ENU and
+        # report the conversion itself as an error. Nothing to check.
+        return True, f"{slug:26} -    live tree is already enu, nothing to compare"
     f = Frame(old["frame"]["epsg"], tuple(old["frame"]["origin"]))
     ox, oy = f.origin
     a = f.anchor_frame()

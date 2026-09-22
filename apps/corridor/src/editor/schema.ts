@@ -6,6 +6,8 @@
 // the only writable path in the app. `python -m corridor areas` writes adjustments.json too,
 // seeding the areas this editor then tunes, so the two must agree on the shape exactly.
 
+import type { Manifest } from '../site'
+
 /** Every knob an area can turn. NOTHING may be added here without telling the main agent: the
  *  viewer (scene.ts) consumes this key set to decide what a polygon does to trees, grass, the
  *  ground and the pavement. Neutral means "leave what the data inferred alone". */
@@ -43,8 +45,39 @@ export interface Area {
   adjust: Adjust
 }
 
+/**
+ * Which frame a file's coordinates are in.
+ *
+ * On 2026-09-22 the corridor moved from UTM-relative metres to true ENU. Every authored polygon
+ * stayed where it was written and the world rotated by the grid convergence underneath it — a
+ * median of 40 m off the road each band was drawn around, up to 439 m, with nothing erroring,
+ * nothing logging, and every polygon still drawing a perfectly plausible shape. A file of
+ * coordinates must say which frame it is in.
+ */
+export interface FrameStamp {
+  kind?: string
+  epsg?: number
+  anchor?: { lon: number; lat: number; h?: number }
+}
+
+/** Non-null when a file was authored in a different frame from the one the bake now serves. */
+export function frameMismatch(stamp: FrameStamp | undefined, manifest: Manifest): string | null {
+  const now = (manifest as unknown as { frame?: FrameStamp }).frame ?? {}
+  if (!stamp || (!stamp.kind && !stamp.anchor)) {
+    // written before stamping existed: it cannot be shown to match, so say so rather than assume
+    return `authored before frames were stamped; the bake is "${now.kind ?? 'utm'}". If these were drawn before 2026-09-22 they are in the old UTM-relative metres and will sit off the road.`
+  }
+  if (stamp.kind && now.kind && stamp.kind !== now.kind) return `authored in "${stamp.kind}" but the bake is now "${now.kind}"`
+  const a = stamp.anchor, b = now.anchor
+  if (a && b && (Math.abs(a.lon - b.lon) > 1e-6 || Math.abs(a.lat - b.lat) > 1e-6)) {
+    return `authored about a different anchor (${a.lat.toFixed(5)}, ${a.lon.toFixed(5)} vs ${b.lat.toFixed(5)}, ${b.lon.toFixed(5)})`
+  }
+  return null
+}
+
 export interface Adjustments {
   version: 1
+  frame?: FrameStamp
   areas: Area[]
 }
 
@@ -78,6 +111,7 @@ export interface AutogenState {
 
 export interface Placements {
   version: 1
+  frame?: FrameStamp
   items: Placement[]
   autogen?: AutogenState
 }

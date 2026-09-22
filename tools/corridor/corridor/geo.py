@@ -181,9 +181,12 @@ class Frame:
         return {
             "epsg": self.epsg,
             "origin": [self.origin[0], self.origin[1]],
-            # everything below is the geodetic frame; `kind` lets the viewer refuse a site it
-            # cannot place rather than silently drawing it on a plane
-            "kind": "utm-enu",
+            # What the COORDINATES in this manifest are. "enu" means true ENU metres about
+            # `anchor`; "utm" (what scripts/backfill_frame.py writes) means UTM easting/northing
+            # minus `origin`, on a plane. Nothing else distinguishes them — they are both metres
+            # and both small — so a viewer that guesses wrong draws the world rotated by the
+            # convergence, which is 55 m out at 3 km and looks plausible until you measure it.
+            "kind": "enu",
             "anchor": {"lon": round(alon, 9), "lat": round(alat, 9), "h": 0.0},
             "utm_convergence_deg": round(conv, 7),
             "utm_scale": round(scale, 10),

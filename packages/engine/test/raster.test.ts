@@ -16,14 +16,16 @@ describe('RasterFrame on a real baked lattice', () => {
         worstU = Math.max(worstU, Math.abs(g[0] - Math.min(u, 1)), Math.abs(g[1] - Math.min(v, 1)))
       }
     }
-    // a whole grid cell is 1/1070; this is two orders of magnitude inside one
-    expect(worstU).toBeLessThan(1e-5)
+    // a whole grid cell is 1/1070; this is well inside one
+    expect(worstU).toBeLessThan(1e-4)
   })
 
-  it('the inverse is worth having — the affine seed alone is metres out', () => {
-    // If a plain affine were good enough we would not need the Newton step. Measure the seed's
-    // own error by taking a single iteration away: the gap here is why `sampler` could not just
-    // keep using bbox arithmetic.
+  it('the inverse closes to millimetres, against an affine seed that is metres out', () => {
+    // The inverse iterates against the lattice's BILINEAR PATCH, not the exact forward map. That
+    // is a deliberate trade: the exact version cost about nine geodetic transforms a call and hung
+    // the build at "grading 1/427 streets", because every height and canopy lookup goes through
+    // here. The patch costs four lerps and an analytic Jacobian, and the price is a few
+    // millimetres against a DEM cell of 2-8 m.
     let worstM = 0
     for (let u = 0; u <= 1.0001; u += 0.25) {
       for (let v = 0; v <= 1.0001; v += 0.25) {
@@ -34,7 +36,7 @@ describe('RasterFrame on a real baked lattice', () => {
         worstM = Math.max(worstM, Math.hypot(q[0] - p[0], q[1] - p[1]))
       }
     }
-    expect(worstM).toBeLessThan(0.001) // the refined inverse closes to a millimetre
+    expect(worstM).toBeLessThan(0.01) // measured 4.0 mm over an 8.56 km raster
   })
 
   it('puts the raster where the bake says, and curves it', () => {
@@ -65,6 +67,6 @@ describe('RasterFrame on a real baked lattice', () => {
         worst = Math.max(worst, Math.hypot(q[0] - p[0], q[1] - p[1]))
       }
     }
-    expect(worst).toBeLessThan(0.001)
+    expect(worst).toBeLessThan(0.01)
   })
 })

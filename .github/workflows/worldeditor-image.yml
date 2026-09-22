@@ -1,0 +1,82 @@
+# Build and publish the worldeditor image, both architectures, from one runner.
+#
+# THE CONTEXT IS THE REPOSITORY ROOT. The Dockerfile builds `apps/corridor` — which needs
+# packages/engine, the workspace lockfile and every workspace manifest — and then copies the
+# service beside the built pages, so a context of tools/worldeditor can see none of it.
+#
+# A change to apps/corridor changes this image, because the image CONTAINS the app. That is the
+# trade for the browser knowing one origin, and it is written down here so nobody is surprised
+# when an editor change rebuilds a backend.
+name: Worldeditor image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tools/worldeditor/**'
+      - '!tools/worldeditor/README.md'
+      - '!tools/worldeditor/chart/**'
+      - 'apps/corridor/**'
+      - 'packages/engine/**'
+      - 'package-lock.json'
+      - '.github/workflows/worldeditor-image.yml'
+  workflow_dispatch:
+
+env:
+  IMAGE: ghcr.io/hotspoons/worldeditor
+
+concurrency:
+  group: worldeditor-image-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,format=short
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: tools/worldeditor/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache
+          cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache,mode=max
+
+      # An image that starts but serves no app is the failure this image can actually have, and it
+      # would only show the first time somebody opened it. So: start it, and ask it for the page.
+      - name: smoke the published image
+        run: |
+          docker run -d --name worldeditor -p 8780:8780 ${{ env.IMAGE }}:latest
+          for i in $(seq 1 30); do curl -sf localhost:8780/api/health && break || sleep 1; done
+          # Parse the JSON, do not grep it — the response is pretty-printed, so `"ok":true` with
+          # no space could never match and would fail the run AFTER the push (assetsvc's lesson).
+          curl -sf localhost:8780/api/health | tee /dev/stderr \
+            | node -e 'const b=JSON.parse(require("fs").readFileSync(0,"utf8")); if (b.ok !== true) { console.error("health.ok was", b.ok); process.exit(1) }'
+          # the three pages are really in there, and `/` really is the world editor
+          for p in / /index.html /editor.html; do
+            curl -sf "localhost:8780$p" | grep -qi '<html' || { echo "no page at $p"; exit 1; }
+          done
+          curl -sf localhost:8780/ | grep -q 'worldedit/main' || { echo "/ is not the world editor"; exit 1; }
+          # and the volume was seeded, so a fresh pod is not an empty list
+          curl -sf localhost:8780/api/worlds \
+            | node -e 'const b=JSON.parse(require("fs").readFileSync(0,"utf8")); if (!(b.worlds?.length > 5)) { console.error("only", b.worlds?.length, "worlds seeded"); process.exit(1) } console.log(b.worlds.length, "worlds seeded")'
+          docker rm -f worldeditor

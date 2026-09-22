@@ -1,0 +1,6 @@
+apiVersion: v2
+name: worldeditor
+description: The pod where a human turns OSM into a corridor world — explore, define, bake, publish
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

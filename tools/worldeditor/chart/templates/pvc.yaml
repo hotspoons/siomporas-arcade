@@ -1,0 +1,20 @@
+{{- if and .Values.enabled (not .Values.data.existingClaim) }}
+# Only when no existing claim was named. In real use this points at the BAKE's claim — see
+# values.yaml — because a separate volume means the bake Job and this pod are looking at two
+# different worlds and nothing a person bakes ever appears.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "worldeditor.fullname" . }}-data
+  labels: {{- include "worldeditor.labels" . | nindent 4 }}
+  annotations:
+    # Worlds, authored files and bake logs live here. Deleting them should be a decision, not a
+    # side effect of `helm uninstall`.
+    helm.sh/resource-policy: keep
+spec:
+  accessModes: [{{ .Values.data.accessMode }}]
+  storageClassName: {{ .Values.data.storageClass }}
+  resources:
+    requests:
+      storage: {{ .Values.data.size }}
+{{- end }}

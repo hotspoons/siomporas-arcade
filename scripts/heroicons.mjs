@@ -30,6 +30,9 @@ const NAMES = [
   // editor
   'pencil-square', 'rectangle-group', 'sparkles', 'document-arrow-down', 'lock-closed',
   'arrow-uturn-left',
+  // world editor: find a place, draw its extent, run a bake, watch it, publish it
+  'magnifying-glass', 'cloud-arrow-up', 'stop', 'bolt', 'clock', 'server-stack',
+  'arrow-down-tray', 'queue-list', 'exclamation-triangle', 'folder-open',
 ]
 
 /** The bit between <svg …> and </svg> — one or more <path>, already stroke-styled by the wrapper. */

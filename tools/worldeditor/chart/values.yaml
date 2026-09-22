@@ -1,0 +1,114 @@
+# worldeditor: the pod where a person turns OSM into a corridor world.
+#
+# OFF BY DEFAULT, and that is the point twice over. Nothing in corridor requires this — the viewer
+# and the editor work exactly as before without it — and a pod that can create Jobs on a shared
+# cluster is something you turn on deliberately, not something that arrives with a merge.
+#
+#   helm upgrade --install worldeditor tools/worldeditor/chart -n default \
+#     --set enabled=true --set data.existingClaim=corridor-data
+#
+# `helm template` with these defaults renders ZERO objects.
+enabled: false
+
+image:
+  repository: ghcr.io/hotspoons/worldeditor
+  tag: "latest"
+  pullPolicy: Always
+
+replicaCount: 1
+
+# THE BAKE'S VOLUME. Set `existingClaim` to the claim `tools/corridor/chart` made (default
+# `corridor-data`): the bake Job writes `sites/<slug>/web/`, this serves it, and the editor writes
+# `sites/<slug>/placements.json` beside it. Nothing is copied. RWX because a bake Job and this pod
+# hold it at the same time, which is the normal state, not the exception.
+#
+# Left empty, the chart makes its own claim — useful for trying this out, and wrong for real use,
+# because then the bake Job and this pod are looking at two different worlds.
+data:
+  existingClaim: ""
+  size: 500Gi
+  storageClass: ceph-filesystem
+  accessMode: ReadWriteMany
+
+# Ours first. The public mirrors are appended by the service itself, exactly as osm.py does, so a
+# site outside our extract still bakes.
+overpassUrl: https://overpass.richard-siomporas.basedweights.com/api/interpreter
+
+# The asset backend, in-cluster. The BROWSER never sees this: the service reverse-proxies it at
+# /assetsvc so the page knows one origin. Empty means the asset panels report "no service", which
+# is a normal state — generation is off by default (tools/assetsvc/chart).
+assetsvcUrl: http://assetsvc.default.svc
+
+bake:
+  # What a bake Job runs. The same image tools/corridor/chart uses, because it IS that Job.
+  image: ghcr.io/hotspoons/corridor:latest
+  # A site is ~100 M points held in numpy while rasters are built; 16 Gi is the observed floor.
+  resources:
+    requests: {cpu: "4", memory: 16Gi}
+    limits: {cpu: "16", memory: 48Gi}
+  # keep a week of finished Jobs, so a log is still readable the next morning
+  ttlSecondsAfterFinished: 604800
+  horizonRadiusM: 30000
+
+# Publishing runs `python -m corridor publish` in a Job with this Secret attached.
+#   kubectl create secret generic corridor-r2 --from-literal=AWS_ACCESS_KEY_ID=... --from-literal=AWS_SECRET_ACCESS_KEY=...
+publish:
+  bucket: ""
+  endpoint: ""      # R2: https://<account-id>.r2.cloudflarestorage.com ; empty for AWS
+  region: auto
+  prefix: corridor
+  secretName: corridor-r2
+
+# THE SMALLEST ROLE THAT WORKS, and the reason it exists is that a person should be able to start a
+# bake without a kubeconfig. Namespaced, no secrets, no cluster scope, and the only thing it can
+# create is a Job. `pods/log` is `get` — that is the log the editor streams.
+rbac:
+  create: true
+serviceAccount:
+  create: true
+  name: ""
+
+corsOrigin: "*"    # the app is served from this same origin in the cluster; this is for curl
+
+service:
+  port: 80
+
+probes:
+  startupPeriodSeconds: 2
+  startupFailureThreshold: 30
+
+resources:
+  requests: {cpu: "200m", memory: 256Mi}
+  limits: {cpu: "2", memory: 2Gi}
+
+# Turn on EITHER ingress or httpRoute, never both: external-dns publishes whichever object carries
+# the hostname and two objects claiming one name fight over the record. The nginx Ingress is the
+# proven path on gh200-1 (see tools/overpass and tools/recon-service); central-gateway is a
+# ClusterIP, so an HTTPRoute there gets a DNS record nobody off-cluster can route to.
+ingress:
+  enabled: false
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-issuer
+    # A world's manifest is megabytes of JSON and a bake log is long-lived; nginx's defaults are not
+    nginx.ingress.kubernetes.io/proxy-body-size: "64m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
+  hosts:
+    - host: worldeditor.richard-siomporas.basedweights.com
+      paths: [{path: /, pathType: Prefix}]
+  tls:
+    - secretName: worldeditor-tls
+      hosts: [worldeditor.richard-siomporas.basedweights.com]
+
+httpRoute:
+  enabled: false
+  parentRef:
+    name: pai-managed-ext-gateway
+    namespace: pai-managed
+  hostnames: []
+
+podAnnotations: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}

@@ -1,0 +1,112 @@
+{{- if .Values.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "worldeditor.fullname" . }}
+  labels: {{- include "worldeditor.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels: {{- include "worldeditor.selectorLabels" . | nindent 6 }}
+  # Recreate, not RollingUpdate. Two processes would both adopt the same live run at start-up and
+  # both follow its pod's log into the same file on the volume, interleaved.
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels: {{- include "worldeditor.selectorLabels" . | nindent 8 }}
+      {{- with .Values.podAnnotations }}
+      annotations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ .Values.serviceAccount.name | default (include "worldeditor.fullname" .) }}
+      # The token is what makes the Kubernetes runner possible; without it the service falls back
+      # to a local subprocess and says so in /api/config rather than failing.
+      automountServiceAccountToken: true
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+      containers:
+        - name: worldeditor
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8780
+              protocol: TCP
+          env:
+            - name: WORLDEDITOR_DATA
+              value: /data
+            - name: WORLDEDITOR_PORT
+              value: "8780"
+            - name: WORLDEDITOR_CORS
+              value: {{ .Values.corsOrigin | quote }}
+            - name: WORLDEDITOR_OVERPASS_URL
+              value: {{ .Values.overpassUrl | quote }}
+            - name: WORLDEDITOR_ASSETSVC
+              value: {{ .Values.assetsvcUrl | quote }}
+            - name: WORLDEDITOR_NAMESPACE
+              value: {{ .Release.Namespace | quote }}
+            - name: WORLDEDITOR_BAKE_IMAGE
+              value: {{ .Values.bake.image | quote }}
+            - name: WORLDEDITOR_CLAIM
+              value: {{ include "worldeditor.claimName" . | quote }}
+            - name: WORLDEDITOR_BAKE_RESOURCES
+              value: {{ toJson .Values.bake.resources | quote }}
+            - name: WORLDEDITOR_HORIZON_M
+              value: {{ .Values.bake.horizonRadiusM | quote }}
+            {{- if .Values.publish.bucket }}
+            - name: WORLDEDITOR_S3_BUCKET
+              value: {{ .Values.publish.bucket | quote }}
+            - name: WORLDEDITOR_S3_ENDPOINT
+              value: {{ .Values.publish.endpoint | quote }}
+            - name: WORLDEDITOR_S3_REGION
+              value: {{ .Values.publish.region | quote }}
+            - name: WORLDEDITOR_S3_PREFIX
+              value: {{ .Values.publish.prefix | quote }}
+            # The credentials go to the bake JOB, not to this process — this one never signs a
+            # request to the bucket, it only starts the Job that does.
+            - name: WORLDEDITOR_S3_SECRET
+              value: {{ .Values.publish.secretName | quote }}
+            {{- end }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          # Node with no weights to load: this is up in well under a second.
+          startupProbe:
+            httpGet: {path: /api/health, port: http}
+            periodSeconds: {{ .Values.probes.startupPeriodSeconds }}
+            failureThreshold: {{ .Values.probes.startupFailureThreshold }}
+          # HEALTH, NOT READY. /api/ready reports whether Overpass and the Kubernetes API answer,
+          # which is what a person wants to know; it is the wrong answer for the kubelet, because
+          # with Overpass down this pod still serves every baked world, still saves authored files
+          # and still watches a running bake. Taking it out of the Service would break all of that
+          # for a fault it can work around and describe.
+          readinessProbe:
+            httpGet: {path: /api/health, port: http}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /api/health, port: http}
+            periodSeconds: 20
+            timeoutSeconds: 5
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop: [ALL]
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "worldeditor.claimName" . }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

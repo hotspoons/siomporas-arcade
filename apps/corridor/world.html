@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark light" />
+    <title>corridor world editor</title>
+    <link rel="preload" href="/fonts/ibm-plex-sans.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/ibm-plex-mono-400.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="stylesheet" href="/fonts/fonts.css" />
+    <link rel="stylesheet" href="/src/ui/tokens.css" />
+    <link rel="stylesheet" href="/src/ui/ui.css" />
+    <link rel="stylesheet" href="/src/ui/app.css" />
+    <link rel="stylesheet" href="/src/worldedit/world.css" />
+    <script>
+      // `src/assetsvc.ts` resolves to same-origin `/assetsvc` only on port 80/443 — which is how
+      // it looks in the pod — and to localhost:8770 otherwise, which is right for a laptop running
+      // the service directly and wrong for THIS page, which always wants the proxy its own backend
+      // provides. The `?assetsvc=` parameter takes precedence over both, so it is set here, before
+      // the module graph loads and reads it. `replaceState` changes `location.search` synchronously.
+      if (!new URLSearchParams(location.search).has('assetsvc')) {
+        const u = new URL(location.href)
+        u.searchParams.set('assetsvc', '/assetsvc')
+        history.replaceState(null, '', u)
+      }
+    </script>
+  </head>
+  <body class="worldedit">
+    <!-- The bar, the drawer and the dialogs are built in src/worldedit/main.ts. This file owns the
+         map canvas, the docked inspector it renders into, and the coordinate readout. -->
+    <canvas id="map"></canvas>
+    <aside class="inspector">
+      <header class="inspector-head"><h2>World</h2></header>
+      <div id="panel" class="inspector-body"></div>
+    </aside>
+    <div id="readout" class="map-readout"></div>
+    <script type="module" src="/src/worldedit/main.ts"></script>
+  </body>
+</html>

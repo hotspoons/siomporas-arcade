@@ -62,10 +62,13 @@ def download(url: str, dest: Path, size: int | None = None) -> Path:
     raise RuntimeError(f"download failed for {url}: {last}")
 
 
-def discover_1m(w: float, s: float, e: float, n: float) -> list[dict]:
+ONE_METRE = "Digital Elevation Model (DEM) 1 meter"
+
+
+def discover_1m(w: float, s: float, e: float, n: float, dataset: str = ONE_METRE) -> list[dict]:
     r = session.get(
         TNM,
-        params={"datasets": "Digital Elevation Model (DEM) 1 meter", "bbox": f"{w},{s},{e},{n}", "prodFormats": "GeoTIFF", "outputFormat": "JSON", "max": 100},
+        params={"datasets": dataset, "bbox": f"{w},{s},{e},{n}", "prodFormats": "GeoTIFF", "outputFormat": "JSON", "max": 100},
         timeout=90,
     )
     r.raise_for_status()
@@ -74,13 +77,30 @@ def discover_1m(w: float, s: float, e: float, n: float) -> list[dict]:
     return items
 
 
+# 3DEP's 1 m layer is the best bare earth there is and it does not cover everything: the Oregon
+# coast at Ecola returns zero items and the site could not bake at all. 1/3 arc-second (~10 m) is
+# seamless over CONUS, so fall down the ladder and record what we actually got.
+LADDER = [
+    (ONE_METRE, 1.0),
+    ("National Elevation Dataset (NED) 1/9 arc-second", 3.0),
+    ("National Elevation Dataset (NED) 1/3 arc-second", 10.0),
+]
+
+
 def fetch_dem(frame: Frame, bbox: tuple[float, float, float, float], out: Path, cache: Path) -> dict:
     if out.exists():
         return {"file": out.name, "cached": True}
     w, s, e, n = frame.bbox_wgs(*bbox)
-    items = discover_1m(w, s, e, n)
+    items, native = [], 1.0
+    for dataset, res in LADDER:
+        items = discover_1m(w, s, e, n, dataset)
+        if items:
+            native = res
+            if res > 1.0:
+                print(f"  dem     no 1 m coverage here; {dataset} (~{res:g} m) upsampled to the 1 m lattice", flush=True)
+            break
     if not items:
-        raise RuntimeError("no 1 m DEM coverage from TNM for this bbox")
+        raise RuntimeError("no DEM coverage from TNM at 1 m, 1/9 or 1/3 arc-second for this bbox")
     tiles = []
     for it in items:
         name = it["downloadURL"].rsplit("/", 1)[1]
@@ -94,4 +114,4 @@ def fetch_dem(frame: Frame, bbox: tuple[float, float, float, float], out: Path, 
         *[str(t) for t in tiles], str(out),
     ]
     subprocess.run(cmd, check=True)
-    return {"file": out.name, "sources": [{"title": it["title"], "date": it.get("publicationDate")} for it in items]}
+    return {"file": out.name, "native_res_m": native, "sources": [{"title": it["title"], "date": it.get("publicationDate")} for it in items]}

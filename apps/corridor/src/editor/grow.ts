@@ -19,8 +19,10 @@ import { el, slider } from './ui'
 
 const KNOBS: [keyof Params, string, number, number, number, string][] = [
   ['max_lat_m', 'corridor ±m', 40, 300, 10, 'ignore footprints further than this from the centreline; the bake only reaches 300 m'],
-  ['keepout_m', 'keep-out m', 0, 40, 1, 'nothing is placed within this of a pavement edge'],
+  ['keepout_real_m', 'keep-out m (real)', 0, 20, 0.5, 'how close a MEASURED footprint may come to a pavement edge. Small on purpose: a house is metres from its own driveway, and the bake says the building is there'],
+  ['keepout_m', 'keep-out m (invented)', 0, 40, 1, 'how close INVENTED frontage may come. Larger, because it is a guess rather than a measurement'],
   ['min_area_m2', 'min m²', 10, 300, 5, 'below this a footprint is map noise, not a building — the first decile is 13 m²'],
+  ['max_items', 'max items', 100, 15000, 100, 'ceiling on generated items. The editor draws one object per placement, and crofton-crownsville has 12,287 footprints inside its corridor'],
   ['scale_min', 'fit min ×', 0.3, 1, 0.05, 'how far DOWN a catalog asset may be scaled to match a footprint before it is the wrong object'],
   ['scale_max', 'fit max ×', 1, 3, 0.05, 'how far UP a catalog asset may be scaled before it is the wrong object'],
   ['invent_spacing_m', 'invent every m', 30, 200, 5, 'mean frontage gap when inventing; jittered per site'],

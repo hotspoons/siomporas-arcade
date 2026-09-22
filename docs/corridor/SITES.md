@@ -1,30 +1,34 @@
 # Corridor sites — what each bake actually holds
 
-*Generated 2026-09-21 04:06 UTC by `python -m corridor.sitesdoc` from `tools/corridor/data/sites/*/manifest.json`, `spine_utm.json`, `surface.json` and the bake log `/tmp/claude-1000/-workspaces-apex-conduit/397fba92-5e84-41c5-9605-5d43678842ec/scratchpad/newbakes.log`. Do not edit by hand; re-run it. Lidar year is read off the project name (`_D21` = 2021 delivery). The fetch itself does not record the NAIP acquisition date, so it is looked up here from the image service's catalog under the site point (the tile that covers the photo; a long corridor can straddle two flight dates). A DEM listed as "cached" was reused from an earlier run and its source tiles were not re-recorded (a `__main__.py` gap reported to main).*
+*Generated 2026-09-21 15:34 UTC by `python -m corridor.sitesdoc` from `tools/corridor/data/sites/*/manifest.json`, `spine_utm.json`, `surface.json` and the bake log `/tmp/claude-1000/-workspaces-apex-conduit/397fba92-5e84-41c5-9605-5d43678842ec/scratchpad/newbakes.log`. Do not edit by hand; re-run it. Lidar year is read off the project name (`_D21` = 2021 delivery). The fetch itself does not record the NAIP acquisition date, so it is looked up here from the image service's catalog under the site point (the tile that covers the photo; a long corridor can straddle two flight dates). A DEM listed as "cached" was reused from an earlier run and its source tiles were not re-recorded (a `__main__.py` gap reported to main).*
 
-**9 baked, 16 not yet** (acadia-ocean-dr (not baked), bacon-ridge-rd (in progress), bell-branch-rd (not baked), bixby-bridge-ca1 (not baked), bonnie-branch-rd (not baked), chesterfield-rd (not baked), crownsville-rd (not baked), ecola-or (not baked), hawkins-rd (not baked), patuxent-river-rd (not baked), ragged-point-ca1 (not baked), rossback-rd (not baked), rutland-rd (not baked), st-stephens-church-rd (not baked), underwood-rd (not baked), waterbury-rd (not baked)).
+**18 baked, 11 not yet** (bell-branch-rd (not baked), crownsville-rd (not baked), ecola-or (failed), hawkins-rd (not baked), patuxent-river-rd (not baked), ragged-point-ca1 (failed), rossback-rd (not baked), rutland-rd (not baked), st-stephens-church-rd (not baked), underwood-rd (not baked), waterbury-rd (not baked)).
 
 ## Summary
 
 | site | road | km | lidar project (year) | class 17 | veg classes | NAIP | DEM | structures | formations | missing |
 |---|---|---|---|---|---|---|---|---|---|---|
-| `acadia-ocean-dr` | *not baked* | | | | | | | |  |
-| `bacon-ridge-rd` | *in progress* | | | | | | | |  |
+| `acadia-ocean-dr` | Park Loop Road | 4.4 | TNM:ME_MidCoast_2021_B21 (2021) | trusted | no (unassigned) | 2021-09-20 | cached | none |  | — |
+| `arrowhead-farms` | Halls Grove Road | 0.6 | USGS_LPC_MD_VA_Sandy_NCR_2014_LAS_2015 (2014) | demoted | no (unassigned) | 2023-07-12 | cached | none | Monmouth Formation | — |
+| `arrowhead-farms-network` | Patuxent River Road | 2.3 | TNM:MD_Central_Processing_D24 (2024) | trusted | yes | 2023-07-12 | cached | none | Aquia Formation, Matawan Formation, Monmouth Formation | — |
+| `bacon-ridge-rd` | Bacon Ridge Road | 2.1 | TNM:MD_Central_Processing_D24 (2024) | trusted | yes | 2023-05-25 | USGS 1 Meter 18 x35y433 MD_Central_Processing_D24 (2026-04-04), USGS 1 Meter 18 x36y433 MD_Central_Processing_D24 (2026-04-04) | none | Matawan Formation, Monmouth Formation | — |
 | `bell-branch-rd` | *not baked* | | | | | | | |  |
-| `bixby-bridge-ca1` | *not baked* | | | | | | | |  |
-| `bonnie-branch-rd` | *not baked* | | | | | | | |  |
-| `bowie-racetrack-rd` | Race Track Road | 4.7 | USGS_LPC_MD_VA_Sandy_NCR_2014_LAS_2015 (2014) | demoted | no (unassigned) | 2023-07-12 | USGS one meter x34y432 MD VA Sandy NCR 2014 (2020-03-30), USGS one meter x35y432 MD VA Sandy NCR 2014 (2020-03-30) | 2 gantry, 1 overpass | Monmouth Formation, Potomac Group | — |
+| `bixby-bridge-ca1` | CA 1 | 6.4 | TNM:CA_AZ_FEMA_R9_Lidar_2017_D18 (2018) | trusted | no (unassigned) | 2022-05-18 | USGS 1 Meter 10 x59y403 CA_AZ_FEMA_R9_Lidar_2017_D18 (2021-06-19) | 2 bridge | Adobe Flat Shale Member; Asuncion Group; Atascadero Formation; Bald Hills Formation; Chico Formation; Forbes Formation; Funks Formation; Gualala Group; Guinda Formation; Jack Creek Formation; Jalama Formation; Kione Sand; Ladd Formation; Moreno Formation; Panoche Formation; Pigeon Point Formation; Rosario Formation; Salt Creek Conglomerate; Sites Formation; Venado Formation; Williams Formation; Yolo Formation; Great Valley Sequence; Boxer Formation; Cortina Formation; Rumsey Formation; Budden Canyon Formation; Tuna Canyon Formation; Rosario Group; Lusardi Formation; Point Loma Formation; Cabrillo Formation, Agua Sandstone Member; Alferitz Formation; Altamira Shale Member; Antelope Shale Member; Big Blue Serpentinous Member; Branch Canyon Formation; Briones Formation; Button Bed Sandstone Member; Capistrano Formation; Carneros Sandstone Member; Castaic Formation; Cierbo Sandstone; Claremont Shale; Devilwater Silt-Gould Shale Member; Escudo Sandstone; Fish Creek Gypsum Member; Freeman Silt; Gallaway Beds; Hambre Sandstone; Hannah Formation; Hercules Shale Member; Jewett Sand; La Vida Member; Malaga Mudstone Member; McDonald Shale; McLure Shale Member; Media Shale Member; Modelo Formation; Monterey Formation; Neroly Formation; Olcese Sand; Oso Member; Oursan Sandstone; Painted Rock Sandstone Member; Pismo Formation; Pleito Formation; Point Arena Beds; Point Sal Formation; Puente Formation; Pullen Formation; Quail Lake Formation; Reef Ridge Shale; Rincon Shale; Rodeo Shale; Round Mountain Silt; Salinas Shale; Salt Creek Shale Member; Saltos Shale Member; Sandholdt Shale; San Onofre Breccia; San Pablo Group; Santa Margarita Formation; Santos Shale Member; Sisquoc Formation; Sobrante Sandstone; Soda Lake Sandstone Member; Soda Lake Shale Member; Soquel Member Split Mountain Formation; Sycamore Canyon Member; Temblor Formation; Tequepis Sandstone; Tice Shale; Topanga Formation; Twisselman Sandstone Member; Valmonte Diatomite Member; Vaqueros Formation; Vedder Sand; Whiterock Bluff Shale Member; Wimer Formation; Yorba Member, Ash Mountain Complex; Placerita Formation; Sur Series… | — |
+| `bonnie-branch-rd` | Bonnie Branch Road | 3.7 | TNM:MD_4County_D24 (2024) | trusted | no (unassigned) | 2023-07-12 | USGS 1 Meter 18 x34y435 VA_UpperMiddleNeck_2018_D18 (2021-12-21), USGS 1 Meter 18 x34y435 MD_4County_D24 (2026-05-11) | none | Baltimore Gabbro Complex, Ellicott City Granodiorite, Potomac Group | — |
+| `bowie-racetrack-rd` | Race Track Road | 4.7 | USGS_LPC_MD_VA_Sandy_NCR_2014_LAS_2015 (2014) | demoted | no (unassigned) | 2023-07-12 | USGS one meter x34y432 MD VA Sandy NCR 2014 (2020-03-30), USGS one meter x35y432 MD VA Sandy NCR 2014 (2020-03-30) | 1 bridge, 1 overpass | Monmouth Formation, Potomac Group | — |
 | `braddock-i70` | I 70 | 6.4 | MD_Western_2_D21 (2021) | trusted | no (unassigned) | 2023-05-21 | cached | 2 bridge, 2 overpass | Antietam Formation, Buzzard Knob Member, Catoctin Formation… | — |
 | `burtonsville-icc` | I 95 | 6.4 | USGS_LPC_MD_VA_Sandy_NCR_2014_LAS_2015 (2014) | demoted | no (unassigned) | 2023-09-01 | cached | 4 gantry, 6 overpass | Potomac Group, Wissahickon Formation | — |
-| `chesterfield-rd` | *not baked* | | | | | | | |  |
+| `chesterfield-rd` | Chesterfield Road | 3.6 | TNM:MD_Central_Processing_D24 (2024) | trusted | yes | 2023-07-12 | USGS one meter x35y432 MD VA Sandy NCR 2014 (2020-03-30), USGS 1 Meter 18 x35y432 MD_Central_Processing_D24 (2026-04-04) | none | Aquia Formation, Matawan Formation, Monmouth Formation | — |
 | `clarksburg-i270` | I 270 | 6.4 | TNM:MD_Central_Processing_D24 (2024) | trusted | no (unassigned) | 2023-07-12 | cached | 2 bridge, 4 gantry, 3 overpass | Ijamsville Formation; Marburg Schist, Marburg Formation, Wissahickon Formation | — |
+| `crofton-crownsville` | Chesterfield Road | 3.6 | TNM:MD_Central_Processing_D24 (2024) | trusted | yes | 2023-07-12 | USGS one meter x34y431 MD VA Sandy NCR 2014 (2020-03-30), USGS one meter x34y432 MD VA Sandy NCR 2014 (2020-03-30) | 6 gantry | Aquia Formation, Calvert Formation, Magothy Formation… | naip.tif, lidar/dtm.tif, lidar/chm.tif, web/dem_2m.png, web/chm_2m.png, web/naip_1m.jpg |
 | `crownsville-rd` | *not baked* | | | | | | | |  |
-| `ecola-or` | *not baked* | | | | | | | |  |
+| `ecola-or` | *failed* | | | | | | | | RuntimeError: USGS_LPC_OR_NORTHCOAST_2008_2009_OR_NorthCoast_2008-2009_003712.laz: no CRS in the LAS header |
 | `frederick-i270` | I 270 | 6.4 | MD_Western_2_D21 (2021) | trusted | no (unassigned) | 2023-05-21 | cached | 3 bridge | Adamstown Member, Antietam Formation, Araby Formation… | — |
 | `frederick-i70` | Frederick Freeway | 3.7 | MD_Western_2_D21 (2021) | trusted | no (unassigned) | 2023-05-21 | cached | 1 bridge, 3 gantry, 5 overpass | Adamstown Member, Frederick Limestone, Lime Kiln Member… | — |
 | `hawkins-rd` | *not baked* | | | | | | | |  |
+| `md450-staples` | MD 450 | 4.5 | TNM:MD_Central_Processing_D24 (2024) | trusted | yes | 2023-07-12 | USGS one meter x35y432 MD VA Sandy NCR 2014 (2020-03-30), USGS 1 Meter 18 x35y432 MD_Central_Processing_D24 (2026-04-04) | none | Aquia Formation, Calvert Formation, Monmouth Formation | — |
 | `patuxent-river-rd` | *not baked* | | | | | | | |  |
-| `ragged-point-ca1` | *not baked* | | | | | | | |  |
+| `ragged-point-ca1` | *failed* | | | | | | | | RuntimeError: no EPT dataset covers this corridor |
 | `rossback-rd` | *not baked* | | | | | | | |  |
 | `rutland-rd` | *not baked* | | | | | | | |  |
 | `shady-grove-icc` | MD 200 Toll | 6.4 | TNM:MD_Central_Processing_D24 (2024) | trusted | no (unassigned) | 2023-07-12 | cached | 3 bridge, 8 gantry, 3 overpass | Bear Island Granodiorite, Sykesville Formation, Wissahickon Formation | — |
@@ -39,8 +43,8 @@
 | site | status | where it stands |
 |---|---|---|
 | `patuxent-river-rd` | not baked | gaussworks brief: Gambrills/Crofton/Crownsville/Davidsonville backroads |
-| `bacon-ridge-rd` | in progress | gaussworks brief: Gambrills/Crofton/Crownsville/Davidsonville backroads |
-| `chesterfield-rd` | not baked | gaussworks brief: Gambrills/Crofton/Crownsville/Davidsonville backroads |
+| `bacon-ridge-rd` | baked | baked 2026-09-21T04:41:21Z in 106.2 s; TNM:MD_Central_Processing_D24, 0 structures |
+| `chesterfield-rd` | baked | baked 2026-09-21T04:43:34Z in 162.4 s; TNM:MD_Central_Processing_D24, 0 structures |
 | `crownsville-rd` | not baked | gaussworks brief: Gambrills/Crofton/Crownsville/Davidsonville backroads |
 | `underwood-rd` | not baked | gaussworks brief: Gambrills/Crofton/Crownsville/Davidsonville backroads |
 | `waterbury-rd` | not baked | gaussworks brief: Gambrills/Crofton/Crownsville/Davidsonville backroads |
@@ -49,27 +53,77 @@
 | `hawkins-rd` | not baked | gaussworks brief: Gambrills/Crofton/Crownsville/Davidsonville backroads |
 | `bell-branch-rd` | not baked | gaussworks brief: Gambrills/Crofton/Crownsville/Davidsonville backroads |
 | `st-stephens-church-rd` | not baked | gaussworks brief: Gambrills/Crofton/Crownsville/Davidsonville backroads |
-| `bonnie-branch-rd` | not baked | Ellicott City/Ilchester: falls and rapids down the fall line to the Patapsco |
-| `ragged-point-ca1` | not baked | Highway 1, San Luis Obispo County coast |
-| `bixby-bridge-ca1` | not baked | Highway 1, Big Sur |
-| `ecola-or` | not baked | Ecola State Park Road, Cannon Beach (Goonies country) |
-| `acadia-ocean-dr` | not baked | Park Loop Road / Ocean Drive, Mount Desert Island |
+| `bonnie-branch-rd` | baked | baked 2026-09-21T04:39:58Z in 779.4 s; TNM:MD_4County_D24, 0 structures |
+| `ragged-point-ca1` | failed | RuntimeError: no EPT dataset covers this corridor |
+| `bixby-bridge-ca1` | baked | baked 2026-09-21T14:02:26Z in 629.1 s; TNM:CA_AZ_FEMA_R9_Lidar_2017_D18, 2 structures |
+| `ecola-or` | failed | RuntimeError: USGS_LPC_OR_NORTHCOAST_2008_2009_OR_NorthCoast_2008-2009_003712.laz: no CRS in the LAS header |
+| `acadia-ocean-dr` | baked | baked 2026-09-21T14:22:45Z in 399.2 s; TNM:ME_MidCoast_2021_B21, 0 structures |
 
 ## Per site
 
 ### `acadia-ocean-dr`
 
 *Park Loop Road / Ocean Drive, Mount Desert Island*  
-fix 44.3206, -68.1885 · 0 photo(s) · status **not baked**
+fix 44.3206, -68.1885 · 0 photo(s) · status **baked**
 
-Missing: site.json, spine_utm.json, osm.geojson, crossings.json, dem_1m.tif, naip.tif, horizon_30m.tif, geology.json, lidar/dtm.tif, lidar/chm.tif, profile.json, surface.json, web/manifest.json, web/dem_2m.png, web/chm_2m.png, web/naip_1m.jpg, web/horizon_60m.png
+- **road**: {'name': 'Park Loop Road'} · 4446.5 m · snap 43.9 m · trimmed [True, False] · fetched 2026-09-21T14:22:45Z (399.2 s)
+- **lidar**: `TNM:ME_MidCoast_2021_B21` (2021) · 14,634,316 pts in corridor · z factor 1.0 · classes: unassigned 73%, ground 24%, water 3% · class 17: 0.0 (trusted)
+- **DEM**: reused from cache (sources not re-recorded)
+- **NAIP**: reused from cache · tile under the fix `m_4406847_ne_19_060_20210920` flown 2021-09-20 at 0.6 m
+- **OSM**: 130 features, 23 crossings; spine tags: `highway`=tertiary; `lanes`=2/3; `maxspeed`=15 mph/25 mph/35 mph; `oneway`=yes; `surface`=asphalt
+- **structures** (0): none
+- **surface** (per 20 m): {'asphalt_aged': 104, 'chipseal': 117, 'concrete': 2}
+- **geology**: no named formation (Macrostrat coarse units only)
+- **web**: layers ['dem', 'chm', 'naip', 'horizon', 'horizon_naip'] · 8 buildings · 12 POIs · 0 landuse rings · authored: none
+- **missing**: nothing
+
+### `arrowhead-farms`
+
+*Rich's neighbourhood (Davidsonville): Arrowhead Farms Ct/Rd/Dr, Halls Grove Rd, Gosheff Ln, Patuxent Overlook/Preserve, Patuxent River Rd, Deer Pass Ln — a network site later — point moved onto Halls Grove Rd so the spine is a road, not the 75 m court*  
+fix 38.98138, -76.69057 · 0 photo(s) · status **baked**
+
+- **road**: {'name': 'Halls Grove Road'} · 629.5 m · snap 45.8 m · trimmed [False, False] · fetched 2026-09-21T04:49:23Z (4.4 s)
+- **lidar**: `USGS_LPC_MD_VA_Sandy_NCR_2014_LAS_2015` (2014) · 1,473,400 pts in corridor · z factor 1.0 · classes: unassigned 68%, ground 32% · class 17: 0.2107 (demoted) — class 17/18 demoted to unassigned: implausible share, vendor used them as junk bins
+- **DEM**: reused from cache (sources not re-recorded)
+- **NAIP**: reused from cache · tile under the fix `m_3807603_nw_18_030_20230712` flown 2023-07-12 at 0.3 m
+- **OSM**: 97 features, 5 crossings; spine tags: `highway`=residential
+- **structures** (0): none
+- **surface** (per 20 m): {'asphalt_aged': 32}
+- **geology**: Monmouth Formation
+- **web**: layers ['dem', 'chm', 'naip', 'horizon', 'horizon_naip'] · 59 buildings · 0 POIs · 0 landuse rings · authored: none
+- **missing**: nothing
+
+### `arrowhead-farms-network`
+
+*Rich's neighbourhood as one network (cadre §6): every named road chained, Patuxent River Rd as the primary; OSM spellings checked 2026-09-21 (Lane not Drive; Patuxent Overlook has no Road; no Halls Grove Court in OSM)*  
+fix 38.98138, -76.69057 · 0 photo(s) · status **baked**
+
+- **road**: {'name': 'Patuxent River Road'} · 2318.4 m · snap 381.4 m · trimmed [False, False] · fetched 2026-09-21T05:11:30Z (2348.1 s)
+- **lidar**: `TNM:MD_Central_Processing_D24` (2024) · 26,536,147 pts in corridor · z factor 1.0 · classes: ground 48%, veg_high 25%, unassigned 21%, building 3%, veg_med 2%, veg_low 1% · class 17: 0.0 (trusted)
+- **DEM**: reused from cache (sources not re-recorded)
+- **NAIP**: reused from cache · tile under the fix `m_3807603_nw_18_030_20230712` flown 2023-07-12 at 0.3 m
+- **OSM**: 638 features, 20 crossings; spine tags: `highway`=residential
+- **structures** (0): none
+- **surface** (per 20 m): {'concrete': 8, 'asphalt_aged': 108}
+- **geology**: Aquia Formation, Matawan Formation, Monmouth Formation
+- **web**: layers ['dem', 'chm', 'naip', 'horizon', 'horizon_naip'] · 237 buildings · 8 POIs · 7 landuse rings · authored: none
+- **missing**: nothing
 
 ### `bacon-ridge-rd`
 
 *gaussworks brief: Gambrills/Crofton/Crownsville/Davidsonville backroads*  
-fix 39.038926, -76.6183 · 0 photo(s) · status **in progress**
+fix 39.038926, -76.6183 · 0 photo(s) · status **baked**
 
-Missing: lidar/dtm.tif, lidar/chm.tif, profile.json, surface.json, web/manifest.json, web/dem_2m.png, web/chm_2m.png, web/naip_1m.jpg, web/horizon_60m.png
+- **road**: {'name': 'Bacon Ridge Road'} · 2107.8 m · snap 0.0 m · trimmed [False, False] · fetched 2026-09-21T04:41:21Z (106.2 s)
+- **lidar**: `TNM:MD_Central_Processing_D24` (2024) · 13,588,441 pts in corridor · z factor 1.0 · classes: ground 54%, veg_high 25%, unassigned 15%, veg_med 4%, building 1%, veg_low 1% · class 17: 0.0006 (trusted)
+- **DEM**: USGS 1 Meter 18 x35y433 MD_Central_Processing_D24 — 2026-04-04; USGS 1 Meter 18 x36y433 MD_Central_Processing_D24 — 2026-04-04
+- **NAIP**: fetched at 0.3 m, [4033, 7600] px · tile under the fix `m_3907660_sw_18_030_20230525` flown 2023-05-25 at 0.3 m
+- **OSM**: 257 features, 31 crossings; spine tags: `highway`=residential; `maxspeed`=25 mph
+- **structures** (0): none
+- **surface** (per 20 m): {'asphalt_aged': 106}
+- **geology**: Matawan Formation, Monmouth Formation
+- **web**: layers ['dem', 'chm', 'naip', 'horizon', 'horizon_naip'] · 129 buildings · 3 POIs · 4 landuse rings · authored: none
+- **missing**: nothing
 
 ### `bell-branch-rd`
 
@@ -81,27 +135,45 @@ Missing: site.json, spine_utm.json, osm.geojson, crossings.json, dem_1m.tif, nai
 ### `bixby-bridge-ca1`
 
 *Highway 1, Big Sur*  
-fix 36.3715, -121.9018 · 0 photo(s) · status **not baked**
+fix 36.3715, -121.9018 · 0 photo(s) · status **baked**
 
-Missing: site.json, spine_utm.json, osm.geojson, crossings.json, dem_1m.tif, naip.tif, horizon_30m.tif, geology.json, lidar/dtm.tif, lidar/chm.tif, profile.json, surface.json, web/manifest.json, web/dem_2m.png, web/chm_2m.png, web/naip_1m.jpg, web/horizon_60m.png
+- **road**: {'ref': 'CA 1'} · 6438.0 m · snap 8.8 m · trimmed [True, True] · fetched 2026-09-21T14:02:26Z (629.1 s)
+- **lidar**: `TNM:CA_AZ_FEMA_R9_Lidar_2017_D18` (2018) · 11,713,883 pts in corridor · z factor 1.0 · classes: unassigned 54%, ground 42%, water 4% · class 17: 0.0005 (trusted)
+- **DEM**: USGS 1 Meter 10 x59y403 CA_AZ_FEMA_R9_Lidar_2017_D18 — 2021-06-19
+- **NAIP**: fetched at 0.3 m, [4667, 20000] px · tile under the fix `m_3612141_ne_10_060_20220518` flown 2022-05-18 at 0.6 m
+- **OSM**: 137 features, 35 crossings; spine tags: `highway`=primary; `lanes`=2; `oneway`=no; `surface`=asphalt/concrete
+- **structures** (2): bridge s=3118–3342 (226.0 m, 37.96 m above ground, class17); bridge s=4216–4364 (150.0 m, 18.49 m above ground, class17)
+- **surface** (per 20 m): {'concrete': 55, 'asphalt_aged': 267}
+- **geology**: Adobe Flat Shale Member; Asuncion Group; Atascadero Formation; Bald Hills Formation; Chico Formation; Forbes Formation; Funks Formation; Gualala Group; Guinda Formation; Jack Creek Formation; Jalama Formation; Kione Sand; Ladd Formation; Moreno Formation; Panoche Formation; Pigeon Point Formation; Rosario Formation; Salt Creek Conglomerate; Sites Formation; Venado Formation; Williams Formation; Yolo Formation; Great Valley Sequence; Boxer Formation; Cortina Formation; Rumsey Formation; Budden Canyon Formation; Tuna Canyon Formation; Rosario Group; Lusardi Formation; Point Loma Formation; Cabrillo Formation, Agua Sandstone Member; Alferitz Formation; Altamira Shale Member; Antelope Shale Member; Big Blue Serpentinous Member; Branch Canyon Formation; Briones Formation; Button Bed Sandstone Member; Capistrano Formation; Carneros Sandstone Member; Castaic Formation; Cierbo Sandstone; Claremont Shale; Devilwater Silt-Gould Shale Member; Escudo Sandstone; Fish Creek Gypsum Member; Freeman Silt; Gallaway Beds; Hambre Sandstone; Hannah Formation; Hercules Shale Member; Jewett Sand; La Vida Member; Malaga Mudstone Member; McDonald Shale; McLure Shale Member; Media Shale Member; Modelo Formation; Monterey Formation; Neroly Formation; Olcese Sand; Oso Member; Oursan Sandstone; Painted Rock Sandstone Member; Pismo Formation; Pleito Formation; Point Arena Beds; Point Sal Formation; Puente Formation; Pullen Formation; Quail Lake Formation; Reef Ridge Shale; Rincon Shale; Rodeo Shale; Round Mountain Silt; Salinas Shale; Salt Creek Shale Member; Saltos Shale Member; Sandholdt Shale; San Onofre Breccia; San Pablo Group; Santa Margarita Formation; Santos Shale Member; Sisquoc Formation; Sobrante Sandstone; Soda Lake Sandstone Member; Soda Lake Shale Member; Soquel Member Split Mountain Formation; Sycamore Canyon Member; Temblor Formation; Tequepis Sandstone; Tice Shale; Topanga Formation; Twisselman Sandstone Member; Valmonte Diatomite Member; Vaqueros Formation; Vedder Sand; Whiterock Bluff Shale Member; Wimer Formation; Yorba Member, Ash Mountain Complex; Placerita Formation; Sur Series, Bodega Diorite; Santa Lucia Quartz Diorite
+- **web**: layers ['dem', 'chm', 'naip', 'horizon', 'horizon_naip'] · 10 buildings · 16 POIs · 3 landuse rings · authored: none
+- **missing**: nothing
 
 ### `bonnie-branch-rd`
 
 *Ellicott City/Ilchester: falls and rapids down the fall line to the Patapsco*  
-fix 39.2322538, -76.785061 · 0 photo(s) · status **not baked**
+fix 39.2322538, -76.785061 · 0 photo(s) · status **baked**
 
-Missing: site.json, spine_utm.json, osm.geojson, crossings.json, dem_1m.tif, naip.tif, horizon_30m.tif, geology.json, lidar/dtm.tif, lidar/chm.tif, profile.json, surface.json, web/manifest.json, web/dem_2m.png, web/chm_2m.png, web/naip_1m.jpg, web/horizon_60m.png
+- **road**: {'name': 'Bonnie Branch Road'} · 3689.7 m · snap 0.0 m · trimmed [False, False] · fetched 2026-09-21T04:39:58Z (779.4 s)
+- **lidar**: `TNM:MD_4County_D24` (2024) · 458,290 pts in corridor · z factor 1.0 · classes: unassigned 74%, ground 25%, noise 0% · class 17: 0.0 (trusted)
+- **DEM**: USGS 1 Meter 18 x34y435 VA_UpperMiddleNeck_2018_D18 — 2021-12-21; USGS 1 Meter 18 x34y435 MD_4County_D24 — 2026-05-11
+- **NAIP**: fetched at 0.3 m, [8467, 9900] px · tile under the fix `m_3907650_ne_18_030_20230712` flown 2023-07-12 at 0.3 m
+- **OSM**: 760 features, 57 crossings; spine tags: `highway`=tertiary; `lanes`=2; `maxspeed`=25 mph/30 mph; `surface`=asphalt
+- **structures** (0): none
+- **surface** (per 20 m): {'asphalt_new': 144, 'concrete': 26, 'asphalt_aged': 12, 'chipseal': 3}
+- **geology**: Baltimore Gabbro Complex, Ellicott City Granodiorite, Potomac Group
+- **web**: layers ['dem', 'chm', 'naip', 'horizon', 'horizon_naip'] · 363 buildings · 9 POIs · 12 landuse rings · authored: none
+- **missing**: nothing
 
 ### `bowie-racetrack-rd`
 
 fix 39.013133, -76.751944 · 2 photo(s) · status **baked**
 
-- **road**: {'name': 'Race Track Road'} · 4698.6 m · snap 81.5 m · trimmed [True, False] · fetched 2026-09-21T01:57:31Z (38.6 s)
+- **road**: {'name': 'Race Track Road'} · 4698.6 m · snap 81.5 m · trimmed [True, False] · fetched 2026-09-21T04:48:06Z (58.0 s)
 - **lidar**: `USGS_LPC_MD_VA_Sandy_NCR_2014_LAS_2015` (2014) · 10,842,599 pts in corridor · z factor 1.0 · classes: unassigned 70%, ground 30% · class 17: 0.2399 (demoted) — class 17/18 demoted to unassigned: implausible share, vendor used them as junk bins
 - **DEM**: USGS one meter x34y432 MD VA Sandy NCR 2014 — 2020-03-30; USGS one meter x35y432 MD VA Sandy NCR 2014 — 2020-03-30; USGS 1 Meter 18 x34y433 VA_UpperMiddleNeck_2018_D18 — 2021-12-21; USGS 1 Meter 18 x34y432 MD_Central_Processing_D24 — 2026-04-04; USGS 1 Meter 18 x34y433 MD_Central_Processing_D24 — 2026-04-04; USGS 1 Meter 18 x35y432 MD_Central_Processing_D24 — 2026-04-04
 - **NAIP**: fetched at 0.3 m, [10300, 10067] px · tile under the fix `m_3907658_se_18_030_20230712` flown 2023-07-12 at 0.3 m
 - **OSM**: 1331 features, 47 crossings; spine tags: `highway`=secondary/tertiary; `lanes`=2/4; `surface`=asphalt/concrete; `oneway`=no; `lanes:backward`=1; `lanes:forward`=3
-- **structures** (3): gantry s=1054–1054 (2.0 m, clearance 4.83 m, geometry); overpass s=2350–2356 (8.0 m, clearance 8.85 m, geometry); gantry s=2506–2508 (4.0 m, clearance 4.5 m, geometry)
+- **structures** (2): overpass s=2350–2356 (8.0 m, clearance 8.85 m, geometry); bridge s=2500–2514 (16.0 m, 3.08 m above ground, geometry)
 - **surface** (per 20 m): {'asphalt_aged': 85, 'chipseal': 29, 'concrete': 72, 'asphalt_new': 37, 'asphalt_patched': 12}
 - **geology**: Monmouth Formation, Potomac Group
 - **web**: layers ['dem', 'chm', 'naip', 'horizon', 'horizon_naip'] · 833 buildings · 9 POIs · 8 landuse rings · authored: adjustments, structures
@@ -111,7 +183,7 @@ fix 39.013133, -76.751944 · 2 photo(s) · status **baked**
 
 fix 39.422592, -77.486522 · 3 photo(s) · status **baked**
 
-- **road**: {'ref': 'I 70'} · 6438.0 m · snap 0.8 m · trimmed [True, True] · fetched 2026-09-21T02:17:24Z (59.3 s)
+- **road**: {'ref': 'I 70'} · 6438.0 m · snap 0.8 m · trimmed [True, True] · fetched 2026-09-21T04:23:21Z (68.2 s)
 - **lidar**: `MD_Western_2_D21` (2021) · 13,031,479 pts in corridor · z factor 1.0 · classes: ground 64%, unassigned 36%, noise 0%, bridge_deck 0% · class 17: 0.0002 (trusted)
 - **DEM**: reused from cache (sources not re-recorded)
 - **NAIP**: reused from cache · tile under the fix `m_3907737_sw_18_030_20230521` flown 2023-05-21 at 0.3 m
@@ -126,7 +198,7 @@ fix 39.422592, -77.486522 · 3 photo(s) · status **baked**
 
 fix 39.070586, -76.911544 · 1 photo(s) · status **baked**
 
-- **road**: {'ref': 'I 95'} · 6438.0 m · snap 280.9 m · trimmed [True, True] · fetched 2026-09-21T02:04:24Z (79.9 s)
+- **road**: {'ref': 'I 95'} · 6438.0 m · snap 280.9 m  ⚠ **check the road**: the fix snapped this far, which usually means it landed on a different road · trimmed [True, True] · fetched 2026-09-21T04:12:24Z (85.3 s)
 - **lidar**: `USGS_LPC_MD_VA_Sandy_NCR_2014_LAS_2015` (2014) · 13,152,356 pts in corridor · z factor 1.0 · classes: unassigned 62%, ground 38% · class 17: 0.2123 (demoted) — class 17/18 demoted to unassigned: implausible share, vendor used them as junk bins
 - **DEM**: reused from cache (sources not re-recorded)
 - **NAIP**: fetched at 0.3 m, [13967, 17633] px · tile under the fix `m_3907657_ne_18_030_20230901` flown 2023-09-01 at 0.3 m
@@ -140,9 +212,18 @@ fix 39.070586, -76.911544 · 1 photo(s) · status **baked**
 ### `chesterfield-rd`
 
 *gaussworks brief: Gambrills/Crofton/Crownsville/Davidsonville backroads*  
-fix 38.998792, -76.605292 · 0 photo(s) · status **not baked**
+fix 38.998792, -76.605292 · 0 photo(s) · status **baked**
 
-Missing: site.json, spine_utm.json, osm.geojson, crossings.json, dem_1m.tif, naip.tif, horizon_30m.tif, geology.json, lidar/dtm.tif, lidar/chm.tif, profile.json, surface.json, web/manifest.json, web/dem_2m.png, web/chm_2m.png, web/naip_1m.jpg, web/horizon_60m.png
+- **road**: {'name': 'Chesterfield Road'} · 3582.1 m · snap 0.0 m · trimmed [False, False] · fetched 2026-09-21T04:43:34Z (162.4 s)
+- **lidar**: `TNM:MD_Central_Processing_D24` (2024) · 24,101,497 pts in corridor · z factor 1.0 · classes: ground 48%, veg_high 30%, unassigned 17%, veg_med 3%, building 1%, veg_low 1% · class 17: 0.0003 (trusted)
+- **DEM**: USGS one meter x35y432 MD VA Sandy NCR 2014 — 2020-03-30; USGS 1 Meter 18 x35y432 MD_Central_Processing_D24 — 2026-04-04; USGS 1 Meter 18 x36y432 MD_Central_Processing_D24 — 2026-04-04
+- **NAIP**: fetched at 0.3 m, [11100, 4633] px · tile under the fix `m_3807604_nw_18_030_20230712` flown 2023-07-12 at 0.3 m
+- **OSM**: 448 features, 22 crossings; spine tags: `highway`=residential; `surface`=concrete
+- **structures** (0): none
+- **surface** (per 20 m): {'asphalt_aged': 172, 'chipseal': 5, 'concrete': 3}
+- **geology**: Aquia Formation, Matawan Formation, Monmouth Formation
+- **web**: layers ['dem', 'chm', 'naip', 'horizon', 'horizon_naip'] · 260 buildings · 5 POIs · 2 landuse rings · authored: none
+- **missing**: nothing
 
 ### `clarksburg-i270`
 
@@ -159,6 +240,22 @@ fix 39.181842, -77.252419 · 1 photo(s) · status **baked**
 - **web**: layers ['dem', 'chm', 'naip', 'horizon', 'horizon_naip'] · 367 buildings · 8 POIs · 9 landuse rings · authored: adjustments
 - **missing**: nothing
 
+### `crofton-crownsville`
+
+*the interconnected Crofton/Crownsville world (cadre §6): 18 roads, Chesterfield Rd primary (the Hawkins Rd jump); MD 450 = Defense Hwy, MD 424 = Davidsonville Rd, MD 178 = Generals Hwy by ref; tiled export*  
+fix 39.0, -76.62 · 0 photo(s) · status **baked**
+
+- **road**: {'name': 'Chesterfield Road'} · 3582.1 m · snap 128.5 m · trimmed [False, False] · fetched 2026-09-21T04:56:39Z (31426.5 s)
+- **lidar**: `TNM:MD_Central_Processing_D24` (2024) · 500,848,582 pts in corridor · z factor 1.0 · classes: ground 50%, veg_high 23%, unassigned 20%, veg_med 3%, building 3%, veg_low 1% · class 17: None (trusted)
+- **DEM**: USGS one meter x34y431 MD VA Sandy NCR 2014 — 2020-03-30; USGS one meter x34y432 MD VA Sandy NCR 2014 — 2020-03-30; USGS one meter x34y433 MD VA Sandy NCR 2014 — 2020-03-30; USGS one meter x35y431 MD VA Sandy NCR 2014 — 2020-03-30; USGS one meter x35y432 MD VA Sandy NCR 2014 — 2020-03-30; USGS 1 Meter 18 x34y433 VA_UpperMiddleNeck_2018_D18 — 2021-12-21; USGS 1 Meter 18 x34y431 MD_Central_Processing_D24 — 2026-04-04; USGS 1 Meter 18 x34y432 MD_Central_Processing_D24 — 2026-04-04; USGS 1 Meter 18 x34y433 MD_Central_Processing_D24 — 2026-04-04; USGS 1 Meter 18 x35y431 MD_Central_Processing_D24 — 2026-04-04; USGS 1 Meter 18 x35y432 MD_Central_Processing_D24 — 2026-04-04; USGS 1 Meter 18 x35y433 MD_Central_Processing_D24 — 2026-04-04; USGS 1 Meter 18 x36y431 MD_Central_Processing_D24 — 2026-04-04; USGS 1 Meter 18 x36y432 MD_Central_Processing_D24 — 2026-04-04; USGS 1 Meter 18 x36y433 MD_Central_Processing_D24 — 2026-04-04
+- **NAIP**: fetched at 1.0 m, [18810, 18210] px · tile under the fix `m_3807604_nw_18_030_20230712` flown 2023-07-12 at 0.3 m
+- **OSM**: 52999 features, 22 crossings; spine tags: `highway`=residential; `surface`=concrete
+- **structures** (6): gantry s=398–398 (2.0 m, clearance 4.66 m, geometry); gantry s=556–556 (2.0 m, clearance 4.92 m, geometry); gantry s=1288–1288 (2.0 m, clearance 15.96 m, geometry); gantry s=1934–1934 (2.0 m, clearance 4.71 m, geometry); gantry s=3280–3282 (4.0 m, clearance 4.5 m, geometry); gantry s=3468–3468 (2.0 m, clearance 4.63 m, geometry)
+- **surface** (per 20 m): {'asphalt_aged': 179, 'concrete': 1}
+- **geology**: Aquia Formation, Calvert Formation, Magothy Formation, Matawan Formation, Monmouth Formation
+- **web**: layers ['tiles', 'horizon', 'horizon_naip'] · 28413 buildings · 1082 POIs · 475 landuse rings · authored: none
+- **missing**: naip.tif, lidar/dtm.tif, lidar/chm.tif, web/dem_2m.png, web/chm_2m.png, web/naip_1m.jpg
+
 ### `crownsville-rd`
 
 *gaussworks brief: Gambrills/Crofton/Crownsville/Davidsonville backroads*  
@@ -169,15 +266,22 @@ Missing: site.json, spine_utm.json, osm.geojson, crossings.json, dem_1m.tif, nai
 ### `ecola-or`
 
 *Ecola State Park Road, Cannon Beach (Goonies country)*  
-fix 45.9197, -123.975 · 0 photo(s) · status **not baked**
+fix 45.9197, -123.975 · 0 photo(s) · status **failed**
 
-Missing: site.json, spine_utm.json, osm.geojson, crossings.json, dem_1m.tif, naip.tif, horizon_30m.tif, geology.json, lidar/dtm.tif, lidar/chm.tif, profile.json, surface.json, web/manifest.json, web/dem_2m.png, web/chm_2m.png, web/naip_1m.jpg, web/horizon_60m.png
+Last bake log lines:
+
+```
+Traceback (most recent call last):
+    raise RuntimeError(f"{path.name}: no CRS in the LAS header")
+RuntimeError: USGS_LPC_OR_NORTHCOAST_2008_2009_OR_NorthCoast_2008-2009_003712.laz: no CRS in the LAS header
+```
+Missing: lidar/dtm.tif, lidar/chm.tif, profile.json, web/chm_2m.png
 
 ### `frederick-i270`
 
 fix 39.364661, -77.400114 · 1 photo(s) · status **baked**
 
-- **road**: {'ref': 'I 270'} · 6438.0 m · snap 7.9 m · trimmed [True, True] · fetched 2026-09-21T02:16:04Z (51.4 s)
+- **road**: {'ref': 'I 270'} · 6438.0 m · snap 7.9 m · trimmed [True, True] · fetched 2026-09-21T04:22:09Z (49.2 s)
 - **lidar**: `MD_Western_2_D21` (2021) · 10,791,038 pts in corridor · z factor 1.0 · classes: ground 76%, unassigned 24%, bridge_deck 0%, water 0% · class 17: 0.0009 (trusted)
 - **DEM**: reused from cache (sources not re-recorded)
 - **NAIP**: reused from cache · tile under the fix `m_3907745_ne_18_030_20230521` flown 2023-05-21 at 0.3 m
@@ -192,7 +296,7 @@ fix 39.364661, -77.400114 · 1 photo(s) · status **baked**
 
 fix 39.394894, -77.418378 · 1 photo(s) · status **baked**
 
-- **road**: {'name': 'Frederick Freeway'} · 3680.2 m · snap 198.7 m · trimmed [False, True] · fetched 2026-09-21T02:15:36Z (16.1 s)
+- **road**: {'name': 'Frederick Freeway'} · 3680.2 m · snap 198.7 m · trimmed [False, True] · fetched 2026-09-21T04:21:41Z (17.4 s)
 - **lidar**: `MD_Western_2_D21` (2021) · 4,970,341 pts in corridor · z factor 1.0 · classes: ground 71%, unassigned 28%, bridge_deck 1% · class 17: 0.0027 (trusted)
 - **DEM**: reused from cache (sources not re-recorded)
 - **NAIP**: reused from cache · tile under the fix `m_3907737_se_18_030_20230521` flown 2023-05-21 at 0.3 m
@@ -210,6 +314,22 @@ fix 39.010483, -76.605067 · 0 photo(s) · status **not baked**
 
 Missing: site.json, spine_utm.json, osm.geojson, crossings.json, dem_1m.tif, naip.tif, horizon_30m.tif, geology.json, lidar/dtm.tif, lidar/chm.tif, profile.json, surface.json, web/manifest.json, web/dem_2m.png, web/chm_2m.png, web/naip_1m.jpg, web/horizon_60m.png
 
+### `md450-staples`
+
+*MD 450 (Defense Hwy) between Patuxent River Rd and Staples Corner (MD 424); `road` pins the snap, the point is only a hint*  
+fix 38.992095, -76.68646 · 0 photo(s) · status **baked**
+
+- **road**: {'ref': 'MD 450'} · 4479.2 m · snap 0.0 m · trimmed [True, False] · fetched 2026-09-21T14:35:29Z (676.1 s)
+- **lidar**: `TNM:MD_Central_Processing_D24` (2024) · 30,458,801 pts in corridor · z factor 1.0 · classes: ground 46%, veg_high 26%, unassigned 20%, building 5%, veg_med 3%, veg_low 1% · class 17: 0.0 (trusted)
+- **DEM**: USGS one meter x35y432 MD VA Sandy NCR 2014 — 2020-03-30; USGS 1 Meter 18 x35y432 MD_Central_Processing_D24 — 2026-04-04
+- **NAIP**: fetched at 0.3 m, [14700, 3367] px · tile under the fix `m_3807603_ne_18_030_20230712` flown 2023-07-12 at 0.3 m
+- **OSM**: 1233 features, 89 crossings; spine tags: `highway`=secondary; `lanes`=2/3/4/5; `lanes:backward`=2; `lanes:forward`=1; `surface`=asphalt
+- **structures** (0): none
+- **surface** (per 20 m): {'asphalt_aged': 142, 'asphalt_new': 8, 'chipseal': 21, 'concrete': 53}
+- **geology**: Aquia Formation, Calvert Formation, Monmouth Formation
+- **web**: layers ['dem', 'chm', 'naip', 'horizon', 'horizon_naip'] · 750 buildings · 20 POIs · 15 landuse rings · authored: none
+- **missing**: nothing
+
 ### `patuxent-river-rd`
 
 *gaussworks brief: Gambrills/Crofton/Crownsville/Davidsonville backroads*  
@@ -220,9 +340,16 @@ Missing: site.json, spine_utm.json, osm.geojson, crossings.json, dem_1m.tif, nai
 ### `ragged-point-ca1`
 
 *Highway 1, San Luis Obispo County coast*  
-fix 35.7595645, -121.3268269 · 0 photo(s) · status **not baked**
+fix 35.7595645, -121.3268269 · 0 photo(s) · status **failed**
 
-Missing: site.json, spine_utm.json, osm.geojson, crossings.json, dem_1m.tif, naip.tif, horizon_30m.tif, geology.json, lidar/dtm.tif, lidar/chm.tif, profile.json, surface.json, web/manifest.json, web/dem_2m.png, web/chm_2m.png, web/naip_1m.jpg, web/horizon_60m.png
+Last bake log lines:
+
+```
+  spine   {'ref': 'CA 1'}  6438.0 m, photo at s=3219.0 (snap 485.5 m), 3 ways, 0 sibling chains
+Traceback (most recent call last):
+RuntimeError: no EPT dataset covers this corridor
+```
+Missing: lidar/dtm.tif, lidar/chm.tif, profile.json, web/chm_2m.png
 
 ### `rossback-rd`
 
@@ -257,7 +384,7 @@ fix 39.136908, -77.131681 · 1 photo(s) · status **baked**
 
 fix 39.699936, -78.297794 · 1 photo(s) · status **baked**
 
-- **road**: {'ref': 'US 40 Scenic'} · 4386.3 m · snap 9.3 m · trimmed [False, True] · fetched 2026-09-21T02:20:18Z (22.0 s)
+- **road**: {'ref': 'US 40 Scenic'} · 4386.3 m · snap 9.3 m · trimmed [False, True] · fetched 2026-09-21T04:29:59Z (33.5 s)
 - **lidar**: `MD_Western_1_D21` (2021) · 10,190,481 pts in corridor · z factor 1.0 · classes: ground 59%, unassigned 41%, noise 1% · class 17: 0.0 (trusted)
 - **DEM**: reused from cache (sources not re-recorded)
 - **NAIP**: reused from cache · tile under the fix `m_3907822_ne_18_030_20230521` flown 2023-05-21 at 0.3 m
@@ -272,7 +399,7 @@ fix 39.699936, -78.297794 · 1 photo(s) · status **baked**
 
 fix 39.4682, -77.523269 · 3 photo(s) · status **baked**
 
-- **road**: {'ref': 'I 70'} · 6438.0 m · snap 7.1 m · trimmed [True, True] · fetched 2026-09-21T02:18:57Z (55.6 s)
+- **road**: {'ref': 'I 70'} · 6438.0 m · snap 7.1 m · trimmed [True, True] · fetched 2026-09-21T04:25:08Z (79.8 s)
 - **lidar**: `MD_Western_2_D21` (2021) · 12,412,733 pts in corridor · z factor 1.0 · classes: ground 72%, unassigned 27%, noise 0%, bridge_deck 0% · class 17: 0.0002 (trusted)
 - **DEM**: reused from cache (sources not re-recorded)
 - **NAIP**: reused from cache · tile under the fix `m_3907736_ne_18_030_20230521` flown 2023-05-21 at 0.3 m

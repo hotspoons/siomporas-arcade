@@ -1,10 +1,20 @@
 // Seasons, as a palette everything living reads from.
 //
 // Maryland piedmont, four snapshots: dead of winter (bare hardwoods, straw verges, pale sky),
-// early spring (thin lime canopy, bright short grass), mid summer (full dark-green canopy, the
-// NAIP look), late autumn (oak russet, ash purple-gold, aspen yellow, thinning). Trees take a
-// leaf tint and a density; grass a colour ramp and a height; the imagery-draped ground a tint,
-// because NAIP is flown leaf-on and has to be pushed toward the season by hand.
+// early spring (thin lime canopy, bright short grass), late summer (full canopy going leathery,
+// verges gone to seed — SEPTEMBER, which is when Rich's reference photography and the NAIP were
+// both shot, and what the default season has to look like), late autumn (oak russet, ash
+// purple-gold, aspen yellow, thinning). Trees take a leaf tint and a density; grass a colour ramp
+// and a height; the imagery-draped ground a tint, because NAIP is flown leaf-on and has to be
+// pushed toward the season by hand.
+//
+// The grass here was reading as April in every season. Two reasons, both fixed:
+//   - `summer` was high summer — a saturated, blue-leaning green with dry = 0.1. A Maryland verge
+//     in September is olive under straw seed heads, not lush.
+//   - the straw was being added OUTSIDE the palette. GRASS_DRY_ADD was sitting at 0.3, so every
+//     season was really its own dryness plus a third, and nobody could see the real value or set
+//     one season without moving the other three. That 0.3 is folded into the palettes and the
+//     knob is back to 0, free for Rich to push a single site drier.
 import * as THREE from 'three'
 
 export type Season = 'winter' | 'spring' | 'summer' | 'autumn'
@@ -15,45 +25,172 @@ export interface LeafLook {
   density: number // 0 = bare
 }
 
+/**
+ * The leaf palette is keyed by LEAF KIND, not by species — five entries that every silhouette in
+ * species.ts dresses in:
+ *
+ *   oak    a deciduous broadleaf that goes russet
+ *   ash    a deciduous broadleaf that goes gold
+ *   aspen  a deciduous broadleaf that goes yellow and bare early — birch and larch wear this too
+ *   pine   an evergreen conifer: GREEN IN EVERY SEASON, density 1 all year. The autumn ramp turns
+ *          the hardwoods and leaves the conifers alone, which is most of what an October spruce-fir
+ *          hillside looks like
+ *   live   an evergreen BROADLEAF — coast live oak, tanoak, California bay, madrone. Also green all
+ *          year, but darker and a little glossier than a conifer, and it is a third of the standing
+ *          basal area at Bixby Bridge, so California cannot do without it
+ */
 export interface SeasonLook {
-  leaves: Record<'oak' | 'ash' | 'aspen' | 'pine', LeafLook>
+  leaves: Record<'oak' | 'ash' | 'aspen' | 'pine' | 'live', LeafLook>
   grass: { base: THREE.Color; tip: THREE.Color; height: number; dry: number }
+  /**
+   * Leaf litter on the ground. `spread` is how far past the crowns it reaches, 0…1 — a hardwood
+   * wood in leaf drops almost nothing on the verge, and the same wood in November has covered it,
+   * which is a large part of why a bare wood reads as winter rather than as summer with no leaves.
+   */
+  litter: { tint: THREE.Color; spread: number }
   ground: THREE.Color // multiplies the imagery drape
   sky: THREE.Color
   fog: number
+  /**
+   * The light. The sun did not change by season, and the ground tint alone had to carry it, so a
+   * winter scene came out as a summer scene multiplied by 0.79 — dark rather than cold, with the
+   * darkening compounding on everything the tint touched. A low bright winter sun and a colder,
+   * stronger sky give the same answer honestly.
+   */
+  sun: { colour: THREE.Color; intensity: number }
+  ambient: { sky: THREE.Color; ground: THREE.Color; intensity: number }
 }
 
 const c = (hex: number) => new THREE.Color(hex)
 
 export const LOOK: Record<Season, SeasonLook> = {
   winter: {
-    leaves: { oak: { tint: c(0x6b5a48), density: 0.08 }, ash: { tint: c(0x7a6a58), density: 0 }, aspen: { tint: c(0x8a7a66), density: 0 }, pine: { tint: c(0x3f5a3a), density: 1 } },
-    grass: { base: c(0x8a7d55), tip: c(0xc9b98a), height: 0.18, dry: 1 },
+    leaves: { oak: { tint: c(0x6b5a48), density: 0.08 }, ash: { tint: c(0x7a6a58), density: 0 }, aspen: { tint: c(0x8a7a66), density: 0 }, pine: { tint: c(0x3f5a3a), density: 1 }, live: { tint: c(0x3d5236), density: 1 } },
+    grass: { base: c(0x877a58), tip: c(0xc3b189), height: 0.18, dry: 1 },
+    litter: { tint: c(0xa89a86), spread: 1.0 }, // matted and grey by February, but the winter ground tint already darkens it
     ground: c(0xc9c0b2),
     sky: c(0xd6dde6),
     fog: 0.000035,
+    sun: { colour: c(0xfff4e2), intensity: 2.2 },
+    ambient: { sky: c(0xdfe8f2), ground: c(0x8f8878), intensity: 1.05 },
   },
   spring: {
-    leaves: { oak: { tint: c(0xc6e07e), density: 0.55 }, ash: { tint: c(0xd2ea92), density: 0.5 }, aspen: { tint: c(0xdcf0a0), density: 0.5 }, pine: { tint: c(0x6a9a5a), density: 1 } },
-    grass: { base: c(0x5f9a3a), tip: c(0xa6d66a), height: 0.22, dry: 0 },
+    leaves: { oak: { tint: c(0xc6e07e), density: 0.55 }, ash: { tint: c(0xd2ea92), density: 0.5 }, aspen: { tint: c(0xdcf0a0), density: 0.5 }, pine: { tint: c(0x6a9a5a), density: 1 }, live: { tint: c(0x5c8046), density: 1 } },
+    // April, and the only season allowed to look like it
+    grass: { base: c(0x5f9a3a), tip: c(0xa6d66a), height: 0.22, dry: 0.12 },
+    litter: { tint: c(0x6e6350), spread: 0.15 },
     ground: c(0xf2f7e6),
     sky: c(0xcfdcec),
     fog: 0.000022,
+    sun: { colour: c(0xfff2dc), intensity: 2.1 },
+    ambient: { sky: c(0xe6eef6), ground: c(0x7f7658), intensity: 0.82 },
   },
   summer: {
-    leaves: { oak: { tint: c(0x7fb54a), density: 1 }, ash: { tint: c(0x8cc45a), density: 1 }, aspen: { tint: c(0x9ed065), density: 1 }, pine: { tint: c(0x5a8a50), density: 1 } },
-    grass: { base: c(0x3f6f26), tip: c(0x8ab84f), height: 0.42, dry: 0.1 },
-    ground: c(0xffffff),
+    leaves: { oak: { tint: c(0x7fb54a), density: 1 }, ash: { tint: c(0x8cc45a), density: 1 }, aspen: { tint: c(0x9ed065), density: 1 }, pine: { tint: c(0x5a8a50), density: 1 }, live: { tint: c(0x4e7440), density: 1 } },
+    // September: olive at the root, straw at the tip, seed heads standing a little taller
+    grass: { base: c(0x4c6b2e), tip: c(0x97a054), height: 0.46, dry: 0.45 },
+    litter: { tint: c(0x7a6e56), spread: 0.2 },
+    ground: c(0xfaf6ec),
     sky: c(0xbfd2ea),
     fog: 0.000018,
+    sun: { colour: c(0xfff0d8), intensity: 2.0 },
+    ambient: { sky: c(0xe9eef2), ground: c(0x7a6a50), intensity: 0.75 },
   },
   autumn: {
-    leaves: { oak: { tint: c(0xd6823a), density: 0.75 }, ash: { tint: c(0xe0b24a), density: 0.6 }, aspen: { tint: c(0xf7d23a), density: 0.65 }, pine: { tint: c(0x5a8a50), density: 1 } },
-    grass: { base: c(0x7f8a45), tip: c(0xc2b96a), height: 0.36, dry: 0.6 },
+    leaves: { oak: { tint: c(0xd6823a), density: 0.75 }, ash: { tint: c(0xe0b24a), density: 0.6 }, aspen: { tint: c(0xf7d23a), density: 0.65 }, pine: { tint: c(0x5a8a50), density: 1 }, live: { tint: c(0x4b6f3e), density: 1 } },
+    grass: { base: c(0x77803f), tip: c(0xc0b268), height: 0.36, dry: 0.85 },
+    litter: { tint: c(0xb07a44), spread: 0.85 },
     ground: c(0xf5e6cf),
     sky: c(0xd2d9df),
     fog: 0.000028,
+    sun: { colour: c(0xffeacc), intensity: 1.95 },
+    ambient: { sky: c(0xe4e8ec), ground: c(0x7d6c4e), intensity: 0.85 },
   },
+}
+
+// ---------------------------------------------------------------------------------------------
+// The same season, somewhere else.
+//
+// The four palettes above are the Maryland piedmont, and until 2026-09-21 they were every site:
+// `summer` painted a straw-topped olive verge whether the corridor was in Frederick County, on
+// Mount Desert Island or above the Pacific at Bixby Bridge. Two of those three are wrong, and the
+// California one is wrong in the most recognisable way there is — a Big Sur hillside in September
+// is straw from the road to the ridge, and the SAME hillside in February is the greenest thing in
+// the state. The inversion is the place's signature.
+//
+// So the palette stays as the reference and the site moves it, by the difference between its own
+// curing and the curing of the climate the palette was drawn against. Nothing here knows what a
+// state is; both numbers come out of Daymet through `Flora.curing`.
+
+/**
+ * The climate the four palettes were drawn against: Chesterfield Road, Maryland — Rich's own road,
+ * and the site his September reference photography was shot on. Daymet v4 1 km monthly means over
+ * 2014–2023, printed by `probes/corridor-flora.mjs`. It is written down here rather than fetched
+ * because it is a property of the PALETTE, not of any site being rendered: move the palette and
+ * this has to move with it.
+ */
+export const PALETTE_CLIMATE = {
+  ppt_mm: [78.0, 85.4, 87.0, 96.8, 126.2, 125.9, 155.7, 137.7, 98.1, 107.2, 79.6, 113.9],
+  tmax_c: [6.1, 8.4, 12.5, 18.8, 23.6, 28.3, 31.1, 29.9, 26.6, 20.6, 13.7, 9.5],
+}
+
+/** The month each season stands for. September is `summer` because that is when the NAIP was flown. */
+export const SEASON_MONTH: Record<Season, number> = { winter: 1, spring: 3, summer: 8, autumn: 10 }
+
+/**
+ * How cured the herbaceous cover is in a month, 0 (growing) … 1 (dead straw), from monthly rain
+ * and temperature alone.
+ *
+ * Two ways for grass to stop: it runs out of water, or it runs out of heat. A sward needs roughly
+ * 40 mm a month to keep growing and survives on about 10, so the rain over the preceding ninety
+ * days sets the drought term; below about 8 °C of daily maximum nothing grows at all, which sets
+ * the dormancy term. The worse of the two wins, because either one is enough.
+ */
+export function curingOf(ppt: number[], tmax: number[] | undefined, month: number): number {
+  if (!ppt || ppt.length !== 12) return 0
+  let rain = 0
+  for (let k = 0; k < 3; k++) rain += ppt[(month - k + 12) % 12]
+  const drought = Math.min(1, Math.max(0, (120 - rain) / 90))
+  const cold = tmax && tmax.length === 12 ? Math.min(1, Math.max(0, (14 - tmax[month]) / 6)) : 0
+  return Math.max(drought, cold)
+}
+
+/**
+ * This site's palette for a season: the reference palette, shifted by how much drier or greener
+ * this place is than the piedmont in the same month.
+ *
+ *   Chesterfield Rd  delta 0 in every season, by construction — the reference is unchanged
+ *   Bixby Bridge     +1.00 in September (2 mm of rain since June) and −0.93 in February
+ *   Acadia           0 in September, +0.07 in February (it is colder, not drier)
+ *
+ * The shift moves the grass dryness, pulls the grass colour toward straw, and lifts the litter and
+ * imagery tints with it, because a cured hillside bleaches everything on it, not only the blades.
+ */
+export function siteLook(season: Season, flora: { block: { climate?: { ppt_mm: number[]; tmax_c: number[] } } } | null): SeasonLook {
+  const base = LOOK[season]
+  const clim = flora?.block?.climate
+  if (!clim?.ppt_mm?.length) return base
+  const month = SEASON_MONTH[season]
+  const delta = curingOf(clim.ppt_mm, clim.tmax_c, month) - curingOf(PALETTE_CLIMATE.ppt_mm, PALETTE_CLIMATE.tmax_c, month)
+  if (Math.abs(delta) < 0.02) return base
+  const k = Math.max(-1, Math.min(1, delta))
+  // the colour a cured sward goes: standing wild oat over its own thatch, not soil
+  const STRAW_BASE = c(0xa8965f)
+  const STRAW_TIP = c(0xd8c68c)
+  const mixTo = (from: THREE.Color, to: THREE.Color, f: number) => from.clone().lerp(to, Math.max(0, f))
+  const green = Math.max(0, -k)
+  const cure = Math.max(0, k)
+  return {
+    ...base,
+    grass: {
+      base: mixTo(base.grass.base, STRAW_BASE, cure * 0.85).lerp(LOOK.spring.grass.base, green * 0.8),
+      tip: mixTo(base.grass.tip, STRAW_TIP, cure * 0.85).lerp(LOOK.spring.grass.tip, green * 0.8),
+      height: base.grass.height * (1 + cure * 0.25 - green * 0.1),
+      dry: Math.max(0, Math.min(1, base.grass.dry + k)),
+    },
+    litter: { tint: mixTo(base.litter.tint, STRAW_TIP, cure * 0.45), spread: base.litter.spread },
+    ground: mixTo(base.ground, c(0xfff0d2), cure * 0.5).lerp(c(0xeef7e0), green * 0.5),
+  }
 }
 
 /** A greyscale copy of a leaf texture (alpha kept), so a tint IS the leaf colour. */

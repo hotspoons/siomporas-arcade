@@ -36,6 +36,42 @@ export let GRASS_PATCH_SIZE = 6
 /** how far blades scatter around their clump centre (m), and the steepest turf slope (m/m) */
 export let GRASS_SCATTER = 0.7
 export let GRASS_SLOPE_MAX = 0.7
+/** past the strip's blend band, no grass where the ground stands this far above the bare DEM (m): that is a shelf, not ground. 0 = off */
+export let GRASS_MAX_SHELF = 1.0
+
+// --- crops --------------------------------------------------------------------------------------
+/** 1 = grow crops on every OSM farmland ring as well as on authored areas */
+export let CROP_AUTO_FARMLAND = 1
+/** row spacing × this: the whole field coarsens or tightens together */
+export let CROP_ROW_SCALE = 1
+/** metres of row per ribbon segment: shorter follows the ground better and costs more */
+export let CROP_SEGMENT_M = 4
+/** metres of row per repeat of the plant texture */
+export let CROP_TEXTURE_M = 2
+/** no crop closer than this to a pavement edge (m) */
+export let CROP_MIN_FROM_ROAD = 2
+export let CROP_WIND = 1
+
+// --- weather ------------------------------------------------------------------------------------
+/** -1 = clear; 0 clear, 1 rain, 2 sleet, 3 snow, 4 ice (weather.ts) */
+export let WEATHER = 0
+/** the box of falling particles that follows the camera, × the weather's own size */
+export let WEATHER_BOX = 1
+/** particle density × this */
+export let WEATHER_RATE = 1
+export let WEATHER_OPACITY = 1
+/** sideways drift × this; the same gust direction the grass leans with */
+export let WEATHER_WIND = 1
+/** how much settles, × the weather's own figure */
+export let WEATHER_ACCUM = 1
+/** how fast the settled layer builds and melts, per second */
+export let WEATHER_SETTLE_RATE = 0.012
+export let WEATHER_MELT_RATE = 0.06
+/**
+ * What a tyre keeps on this surface, 0…1. Weather sets it; `car.ts` (road-and-car's) multiplies
+ * its grip by it. 1 until they wire it up, and harmless until then.
+ */
+export let WEATHER_GRIP_SCALE = 1
 /** sprite clumps: from the mid ring out to this radius (m), cards per m², size multiplier */
 export let GRASS_SPRITE_RADIUS = 300
 export let GRASS_SPRITE_PER_M2 = 0.8
@@ -49,15 +85,33 @@ export let GRASS_SPRITE_FAR_DENSITY = 0.25
 export let GRASS_HUE = 0
 export let GRASS_SAT = 0.9
 export let GRASS_LIGHT = 1.0
-export let GRASS_DRY_ADD = 0.3
+export let GRASS_DRY_ADD = 0
 /** blades stop swaying above this eye speed (m/s): nobody sees wind from a moving car */
 export let GRASS_WIND_STILL_BELOW = 4
+/**
+ * Which grass grows here: -1 reads it off the bake (latitude, longitude and OSM land use, see
+ * groundcover.ts), 0…3 forces common / wheat / bermuda / coastal.
+ */
+export let GRASS_TYPE = -1
+/**
+ * The season, as a number, because the engine's TunePanel takes numbers: -1 leaves the season
+ * selector alone, 0…3 is winter / spring / summer / autumn. Driving with F6 open, this is how
+ * Rich watches a verge go from September to bare in one drag.
+ */
+export let SEASON = -1
 /** how many 8 m tiles may be generated per frame while the ring fills */
-export let GRASS_TILES_PER_FRAME = 6
+export let GRASS_TILES_PER_FRAME = 48
+/** and no longer than this per frame generating them: the real budget, since tile cost varies 30× */
+export let GRASS_MS_PER_FRAME = 4
+/** evict cached tiles once the map holds this multiple of what the ring needs */
+export let GRASS_CACHE_SLACK = 1.4
 
 // --- trees --------------------------------------------------------------------------------------
 /** near-field radius (procedural models) — beyond it, impostors */
 export let TREE_NEAR_RADIUS = 240
+/** the band just outside that radius over which the impostor card dissolves away, so a tree does
+ *  not pop from card to model in one frame. 0 disables the fade (the old hard switch). */
+export let TREE_FADE_M = 30
 /** instanced models per variant in the near field (5 variants) */
 export let TREE_NEAR_CAPACITY = 140
 /** impostor cards lie flat above this view pitch (rad) */
@@ -71,6 +125,11 @@ export let LOD_TOPDOWN_PITCH = 0.9
 
 // --- road ---------------------------------------------------------------------------------------
 export let LANE_WIDTH = 3.66
+/** a street that dead-ends gets a turning bulb unless the bake or the editor says otherwise;
+ *  radius to the pavement edge (9 m ≈ the 18 m bulb US subdivisions are built to). 0 = off. */
+export let CULDESAC_RADIUS = 9
+/** paint stops this far from the centre of a junction; nothing is painted through one */
+export let JUNCTION_CLEAR = 9
 export let SHOULDER_OUT = 3.0
 export let SHOULDER_IN = 1.2
 /** m: width of the transition strip where the surface class changes. 0 = the old hard joint. */
@@ -151,6 +210,44 @@ export let CAR_ROCKET_CHANCE = 0.2
 export let CAR_ROCKET_SPEED = 75
 export let CAR_ROCKET_MIN_SPEED = 0.94
 
+// --- terrain features (terrain-and-data agent): rock on cut faces, water --------------------------
+/** boulders per metre of cut face (scaled by face height and steepness), and per m² of outcrop */
+export let ROCK_PER_M = 0.6
+export let ROCK_OUTCROP_PER_M2 = 0.04
+/** boulder size multiplier (m at scale 1), and how far off any pavement edge a rock must stay (m) */
+export let ROCK_SIZE = 1.1
+export let ROCK_PAVEMENT_CLEAR = 1.5
+/** density multiplier where the geology says the face is sand or gravel rather than rock.
+ *  DEFAULT 0, decided by looking: on Chesterfield Road's sand cut the boulders read as debris
+ *  scattered on a lawn, and with the layer off the same bank reads correctly as the grassy
+ *  coastal-plain cut it is. The day-one design note said the same thing before I guessed
+ *  otherwise — "coastal-plain sands and gravels: no rock cuts; sand faces, riprap only". Raise it
+ *  if a sand face should carry riprap; the rock kit has no sand set, so these are the procedural
+ *  shapes and they read as boulders whatever colour they are. */
+export let ROCK_SAND_DENSITY = 0
+/** water surface above the channel bottom (m), ribbon width multiplier, ripple speed, opacity */
+export let WATER_DEPTH = 0.25
+export let WATER_WIDTH_SCALE = 1.0
+export let WATER_SPEED = 1.0
+export let WATER_OPACITY = 0.82
+/**
+ * The still-water line, metres NAVD88 — the sea at 0, and the flood control.
+ *
+ * One plane over the whole site at this height. Inland it sits under the terrain and nothing is
+ * drawn; on a coast it IS the ocean; raised, it floods the valleys from the bottom up, which is
+ * the mechanic Rich wants ported from trailworks. `WATER_LEVEL_SPAN` is how far it reaches
+ * (m from the site centre) — 30 km by default so the ocean meets the horizon.
+ */
+export let WATER_LEVEL_M = 0
+export let WATER_LEVEL_SPAN = 30000
+
+// --- power lines ---------------------------------------------------------------------------
+/** support heights as a multiple of OSM's (or the default for the kind) */
+export let POWER_HEIGHT_SCALE = 1.0
+/** conductor sag as a fraction of the span, and a cap in metres — the sag is what reads as a wire */
+export let POWER_SAG = 0.035
+export let POWER_SAG_MAX = 6
+
 // --- camera -------------------------------------------------------------------------------------
 /** the fly camera may not go below the ground under it by less than this (m) */
 export let CAM_MIN_HEIGHT = 0.4
@@ -169,6 +266,83 @@ export let CHASE_BACK = 7.5
 export let CHASE_UP = 2.6
 export let CHASE_LOOK_AHEAD = 6
 export let CHASE_LAG = 8
+
+// --- street furniture ---------------------------------------------------------------------------
+/** the mast pole's height (m); the arm hangs its heads a little under the top */
+export let FURNITURE_SIGNAL_HEIGHT = 6.4
+/** the mast arm's reach over the carriageway, × what the road's lane count asks for */
+export let FURNITURE_SIGNAL_ARM_SCALE = 1
+/**
+ * 1 lights one lens. Left at 0 by default and deliberately: nothing in the bake or the viewer
+ * knows what phase a junction is in, and a signal cycling to a timer that has no relationship to
+ * the junction is worse than an unlit one, because it invites you to obey it.
+ */
+export let FURNITURE_SIGNAL_LIT = 0
+/** a stop or give-way sign's post height (m) */
+export let FURNITURE_SIGN_HEIGHT = 2.2
+/** how far clear of the asphalt a post has to stand before it is left alone (m) */
+export let FURNITURE_KERB_CLEAR = 0.6
+/** and how far it may be walked sideways looking for that clearance (m) */
+export let FURNITURE_KERB_MAX = 26
+/**
+ * Furniture further than this from a drawn carriageway edge is not placed (m). The bake reads the
+ * whole OSM extract; the viewer draws a fraction of the roads in it, and a signal for a road that
+ * is not there stands in a field with its arm over grass.
+ */
+export let FURNITURE_MAX_FROM_ROAD = 20
+/** how far back along its own approach a post may be walked to get out of the junction box (m) */
+export let FURNITURE_SETBACK_MAX = 16
+/** past this reach it is not a mast arm any more, and the signal is not placed (m) */
+export let FURNITURE_ARM_MAX = 14
+
+/** a stall bay, in metres: the American standard is 8'6" × 18' */
+export let PARKING_STALL_W = 2.6
+export let PARKING_STALL_D = 5.4
+/** the drive aisle between two facing rows, for lots with no aisle mapped (m) */
+export let PARKING_AISLE_W = 6.5
+/** the painted line's width (m), and how far the paint floats over the asphalt (m) */
+export let PARKING_PAINT_W = 0.12
+export let PARKING_PAINT_LIFT = 0.02
+/** how far the asphalt floats over the ground (m) */
+export let PARKING_LIFT = 0.04
+/** a lot with more than this share of its interior over a carriageway is not paved, 0…1 */
+export let PARKING_ROAD_OVERLAP = 0.35
+/** below this area a lot with no aisle mapped gets no stalls at all (m²) */
+export let PARKING_MIN_GRID_M2 = 400
+/** extra clearance past the aisle's own edge before a bay starts (m) */
+export let PARKING_AISLE_GAP = 0.3
+/** a lot with fewer than one stall per this many m² gets the squared grid as well (m²) */
+export let PARKING_FILL_M2 = 45
+/** every barrier's height × this */
+export let BARRIER_HEIGHT_SCALE = 1
+/** the kerb lip's height (m) — a US kerb is about 150 mm */
+export let SIDEWALK_KERB_H = 0.15
+/** sidewalk width × this, and how far the concrete floats over the ground (m) */
+export let SIDEWALK_WIDTH_SCALE = 1
+export let SIDEWALK_LIFT = 0.02
+/** how far either side to look for the asphalt, to decide which side the kerb goes on (m) */
+export let SIDEWALK_KERB_PROBE = 2.5
+/** no kerb where the nearest carriageway is further than this — that is a path, not a sidewalk (m) */
+export let SIDEWALK_KERB_MAX_FROM_ROAD = 8
+/** the lip ramps to nothing over this distance before a crossing: a dropped kerb (m) */
+export let SIDEWALK_DROP_M = 3
+/** a painted crossing bar's width and spacing along the crossing (m), and its float (m) */
+export let SIDEWALK_BAR_W = 0.5
+export let SIDEWALK_BAR_PITCH = 1.2
+export let SIDEWALK_PAINT_LIFT = 0.025
+/** the painted band's width across the crossing × this */
+export let SIDEWALK_CROSSING_W = 1
+/**
+ * Linear furniture is cut into chunks this many metres across so frustum culling can fire. One
+ * merged mesh per kind has a site-sized bounding sphere and is submitted in full from anywhere.
+ */
+export let FURNITURE_CHUNK_M = 900
+/**
+ * The verge a BRANCH road's strip carries, each side (m). The primary gets 40 m; a residential
+ * street in a subdivision whose neighbours are a hundred metres away does not, and giving it the
+ * same both paved the grid twice over and cost 21.7 s of a 427-branch build.
+ */
+export let BRANCH_VERGE = 14
 
 export interface TuneTab {
   name: string
@@ -207,6 +381,32 @@ export const TUNE_TABS: TuneTab[] = [
           tune('GRASS_PATCH_SIZE', () => GRASS_PATCH_SIZE, (v) => (GRASS_PATCH_SIZE = v), [1, 30], 1, 'bare patch size (m)'),
           tune('GRASS_SCATTER', () => GRASS_SCATTER, (v) => (GRASS_SCATTER = v), [0.1, 2], 0.05, 'blade scatter around the clump (m)'),
           tune('GRASS_SLOPE_MAX', () => GRASS_SLOPE_MAX, (v) => (GRASS_SLOPE_MAX = v), [0.1, 3], 0.05, 'no turf steeper than this (m/m)'),
+          tune('GRASS_MAX_SHELF', () => GRASS_MAX_SHELF, (v) => (GRASS_MAX_SHELF = v), [0, 8], 0.1, 'no turf this far above the bare DEM (m); 0 = off'),
+        ],
+      },
+      {
+        title: 'crops',
+        keys: [
+          tune('CROP_AUTO_FARMLAND', () => CROP_AUTO_FARMLAND, (v) => (CROP_AUTO_FARMLAND = v), [0, 1], 1, 'grow crops on OSM farmland too, not only authored areas'),
+          tune('CROP_ROW_SCALE', () => CROP_ROW_SCALE, (v) => (CROP_ROW_SCALE = v), [0.3, 4], 0.05, 'row spacing ×'),
+          tune('CROP_SEGMENT_M', () => CROP_SEGMENT_M, (v) => (CROP_SEGMENT_M = v), [1, 20], 0.5, 'm of row per segment'),
+          tune('CROP_TEXTURE_M', () => CROP_TEXTURE_M, (v) => (CROP_TEXTURE_M = v), [0.5, 8], 0.1, 'm of row per texture repeat'),
+          tune('CROP_MIN_FROM_ROAD', () => CROP_MIN_FROM_ROAD, (v) => (CROP_MIN_FROM_ROAD = v), [0, 20], 0.5, 'm clear of the pavement'),
+          tune('CROP_WIND', () => CROP_WIND, (v) => (CROP_WIND = v), [0, 3], 0.05),
+        ],
+      },
+      {
+        title: 'weather',
+        keys: [
+          tune('WEATHER', () => WEATHER, (v) => (WEATHER = v), [0, 4], 1, '0 clear 1 rain 2 sleet 3 snow 4 ice'),
+          tune('WEATHER_RATE', () => WEATHER_RATE, (v) => (WEATHER_RATE = v), [0, 4], 0.05, 'how much is falling'),
+          tune('WEATHER_OPACITY', () => WEATHER_OPACITY, (v) => (WEATHER_OPACITY = v), [0, 2], 0.05),
+          tune('WEATHER_WIND', () => WEATHER_WIND, (v) => (WEATHER_WIND = v), [0, 4], 0.05, 'sideways drift ×'),
+          tune('WEATHER_BOX', () => WEATHER_BOX, (v) => (WEATHER_BOX = v), [0.3, 3], 0.05, 'the camera-following box ×'),
+          tune('WEATHER_ACCUM', () => WEATHER_ACCUM, (v) => (WEATHER_ACCUM = v), [0, 1], 0.02, 'how much settles'),
+          tune('WEATHER_SETTLE_RATE', () => WEATHER_SETTLE_RATE, (v) => (WEATHER_SETTLE_RATE = v), [0.005, 1], 0.005, 'settled per second'),
+          tune('WEATHER_MELT_RATE', () => WEATHER_MELT_RATE, (v) => (WEATHER_MELT_RATE = v), [0.01, 2], 0.01, 'melted per second'),
+          tune('WEATHER_GRIP_SCALE', () => WEATHER_GRIP_SCALE, (v) => (WEATHER_GRIP_SCALE = v), [0.05, 1], 0.01, 'grip left — car.ts reads this'),
         ],
       },
       {
@@ -227,7 +427,9 @@ export const TUNE_TABS: TuneTab[] = [
           tune('GRASS_SPRITE_SCALE', () => GRASS_SPRITE_SCALE, (v) => (GRASS_SPRITE_SCALE = v), [0.3, 3], 0.05, 'height'),
           tune('GRASS_SPRITE_WIDTH', () => GRASS_SPRITE_WIDTH, (v) => (GRASS_SPRITE_WIDTH = v), [0.3, 3], 0.05, 'thickness'),
           tune('GRASS_SPRITE_LEAN', () => GRASS_SPRITE_LEAN, (v) => (GRASS_SPRITE_LEAN = v), [0, 1], 0.02),
-          tune('GRASS_TILES_PER_FRAME', () => GRASS_TILES_PER_FRAME, (v) => (GRASS_TILES_PER_FRAME = v), [1, 24], 1, 'tiles generated per frame while filling'),
+          tune('GRASS_TILES_PER_FRAME', () => GRASS_TILES_PER_FRAME, (v) => (GRASS_TILES_PER_FRAME = v), [1, 64], 1, 'ceiling on tiles generated per frame'),
+          tune('GRASS_MS_PER_FRAME', () => GRASS_MS_PER_FRAME, (v) => (GRASS_MS_PER_FRAME = v), [0.2, 12], 0.1, 'ms per frame spent generating them'),
+          tune('GRASS_CACHE_SLACK', () => GRASS_CACHE_SLACK, (v) => (GRASS_CACHE_SLACK = v), [1, 4], 0.1, 'cached tiles as a multiple of the ring'),
         ],
       },
       {
@@ -238,6 +440,8 @@ export const TUNE_TABS: TuneTab[] = [
           tune('GRASS_LIGHT', () => GRASS_LIGHT, (v) => (GRASS_LIGHT = v), [0.3, 2], 0.02),
           tune('GRASS_DRY_ADD', () => GRASS_DRY_ADD, (v) => (GRASS_DRY_ADD = v), [-1, 1], 0.02, 'straw on top of the season'),
           tune('GRASS_WIND_STILL_BELOW', () => GRASS_WIND_STILL_BELOW, (v) => (GRASS_WIND_STILL_BELOW = v), [0, 40], 0.5, 'no sway above this speed (m/s)'),
+          tune('GRASS_TYPE', () => GRASS_TYPE, (v) => (GRASS_TYPE = v), [-1, 6], 1, '-1 from the bake (LANDFIRE ground class); 0 common 1 wheat 2 bermuda 3 coastal 4 annual 5 meadow 6 heath'),
+          tune('SEASON', () => SEASON, (v) => (SEASON = v), [-1, 3], 1, '-1 use the selector; 0 winter 1 spring 2 summer 3 autumn'),
         ],
       },
     ],
@@ -249,6 +453,7 @@ export const TUNE_TABS: TuneTab[] = [
         title: 'LOD',
         keys: [
           tune('TREE_NEAR_RADIUS', () => TREE_NEAR_RADIUS, (v) => (TREE_NEAR_RADIUS = v), [30, 600], 5, 'procedural models inside, impostors beyond (m)'),
+          tune('TREE_FADE_M', () => TREE_FADE_M, (v) => (TREE_FADE_M = v), [0, 120], 1, 'band outside that radius where the card dissolves; 0 = hard switch'),
           tune('TREE_NEAR_CAPACITY', () => TREE_NEAR_CAPACITY, (v) => (TREE_NEAR_CAPACITY = v), [10, 500], 5, 'models per species variant'),
           tune('IMPOSTOR_FLAT_PITCH', () => IMPOSTOR_FLAT_PITCH, (v) => (IMPOSTOR_FLAT_PITCH = v), [0.2, 1.5], 0.02, 'cards lie flat above this view pitch (rad)'),
         ],
@@ -274,6 +479,8 @@ export const TUNE_TABS: TuneTab[] = [
         title: 'cross-section (road and strip rebuild live)',
         keys: [
           tune('LANE_WIDTH', () => LANE_WIDTH, (v) => (LANE_WIDTH = v), [2.5, 4.5], 0.01),
+          tune('CULDESAC_RADIUS', () => CULDESAC_RADIUS, (v) => (CULDESAC_RADIUS = v), [0, 20], 0.5, 'turning bulb at a dead end (m); 0 = none'),
+          tune('JUNCTION_CLEAR', () => JUNCTION_CLEAR, (v) => (JUNCTION_CLEAR = v), [0, 30], 0.5, 'bare asphalt radius at a junction (m)'),
           tune('SHOULDER_OUT', () => SHOULDER_OUT, (v) => (SHOULDER_OUT = v), [0, 5], 0.1),
           tune('SHOULDER_IN', () => SHOULDER_IN, (v) => (SHOULDER_IN = v), [0, 5], 0.1),
           tune('ROAD_BLEND_M', () => ROAD_BLEND_M, (v) => (ROAD_BLEND_M = v), [0, 2], 0.05, 'transition strip where the surface class changes (m); 0 = hard joint'),
@@ -354,6 +561,87 @@ export const TUNE_TABS: TuneTab[] = [
           tune('CAR_ROCKET_CHANCE', () => CAR_ROCKET_CHANCE, (v) => (CAR_ROCKET_CHANCE = v), [0, 1], 0.05, 'share of qualifying launches that fire'),
           tune('CAR_ROCKET_SPEED', () => CAR_ROCKET_SPEED, (v) => (CAR_ROCKET_SPEED = v), [20, 400], 10, 'straight up, m/s'),
           tune('CAR_ROCKET_MIN_SPEED', () => CAR_ROCKET_MIN_SPEED, (v) => (CAR_ROCKET_MIN_SPEED = v), [0.5, 1], 0.02, 'share of top speed needed'),
+        ],
+      },
+    ],
+  },
+  {
+    name: 'terrain',
+    sections: [
+      {
+        title: 'rock (cut faces and outcrops; reload to rebuild)',
+        keys: [
+          tune('ROCK_PER_M', () => ROCK_PER_M, (v) => (ROCK_PER_M = v), [0, 4], 0.05, 'boulders per metre of face'),
+          tune('ROCK_OUTCROP_PER_M2', () => ROCK_OUTCROP_PER_M2, (v) => (ROCK_OUTCROP_PER_M2 = v), [0, 0.5], 0.01, 'per m² of exposed rock'),
+          tune('ROCK_SIZE', () => ROCK_SIZE, (v) => (ROCK_SIZE = v), [0.2, 4], 0.05, 'm'),
+          tune('ROCK_PAVEMENT_CLEAR', () => ROCK_PAVEMENT_CLEAR, (v) => (ROCK_PAVEMENT_CLEAR = v), [0, 10], 0.1, 'no rock nearer the pavement than this (m)'),
+          tune('ROCK_SAND_DENSITY', () => ROCK_SAND_DENSITY, (v) => (ROCK_SAND_DENSITY = v), [0, 1], 0.05, 'density on sand/gravel faces (coastal plain)'),
+        ],
+      },
+      {
+        title: 'water',
+        keys: [
+          tune('WATER_DEPTH', () => WATER_DEPTH, (v) => (WATER_DEPTH = v), [0, 2], 0.05, 'surface above the channel bottom (m)'),
+          tune('WATER_WIDTH_SCALE', () => WATER_WIDTH_SCALE, (v) => (WATER_WIDTH_SCALE = v), [0.3, 3], 0.05),
+          tune('WATER_SPEED', () => WATER_SPEED, (v) => (WATER_SPEED = v), [0, 4], 0.05, 'ripple speed'),
+          tune('WATER_OPACITY', () => WATER_OPACITY, (v) => (WATER_OPACITY = v), [0.2, 1], 0.02),
+          tune('WATER_LEVEL_M', () => WATER_LEVEL_M, (v) => (WATER_LEVEL_M = v), [-20, 300], 0.5, 'still water / sea level (m); raise it to flood'),
+          tune('WATER_LEVEL_SPAN', () => WATER_LEVEL_SPAN, (v) => (WATER_LEVEL_SPAN = v), [200, 60000], 100, 'how far the water plane reaches (m)'),
+          tune('POWER_HEIGHT_SCALE', () => POWER_HEIGHT_SCALE, (v) => (POWER_HEIGHT_SCALE = v), [0.3, 2], 0.05, 'pole and tower height'),
+          tune('POWER_SAG', () => POWER_SAG, (v) => (POWER_SAG = v), [0, 0.12], 0.005, 'conductor sag as a fraction of the span'),
+          tune('POWER_SAG_MAX', () => POWER_SAG_MAX, (v) => (POWER_SAG_MAX = v), [0, 20], 0.5, 'm'),
+        ],
+      },
+    ],
+  },
+  {
+    name: 'furniture',
+    sections: [
+      {
+        title: 'signals and signs',
+        keys: [
+          tune('FURNITURE_SIGNAL_HEIGHT', () => FURNITURE_SIGNAL_HEIGHT, (v) => (FURNITURE_SIGNAL_HEIGHT = v), [3, 12], 0.1, 'mast pole height (m)'),
+          tune('FURNITURE_SIGNAL_ARM_SCALE', () => FURNITURE_SIGNAL_ARM_SCALE, (v) => (FURNITURE_SIGNAL_ARM_SCALE = v), [0.4, 2.5], 0.05, 'arm reach ×'),
+          tune('FURNITURE_SIGNAL_LIT', () => FURNITURE_SIGNAL_LIT, (v) => (FURNITURE_SIGNAL_LIT = v), [0, 1], 1, '1 lights a lens; there is no controller'),
+          tune('FURNITURE_SIGN_HEIGHT', () => FURNITURE_SIGN_HEIGHT, (v) => (FURNITURE_SIGN_HEIGHT = v), [1, 4], 0.05, 'sign post height (m)'),
+          tune('FURNITURE_KERB_CLEAR', () => FURNITURE_KERB_CLEAR, (v) => (FURNITURE_KERB_CLEAR = v), [0, 4], 0.1, 'm clear of the asphalt a post needs'),
+          tune('FURNITURE_KERB_MAX', () => FURNITURE_KERB_MAX, (v) => (FURNITURE_KERB_MAX = v), [2, 40], 1, 'm it may be walked sideways to find it'),
+          tune('FURNITURE_MAX_FROM_ROAD', () => FURNITURE_MAX_FROM_ROAD, (v) => (FURNITURE_MAX_FROM_ROAD = v), [2, 400], 2, 'm from a drawn road, or it is not placed'),
+          tune('FURNITURE_SETBACK_MAX', () => FURNITURE_SETBACK_MAX, (v) => (FURNITURE_SETBACK_MAX = v), [0, 40], 1, 'm back along the approach, out of the junction box'),
+          tune('FURNITURE_ARM_MAX', () => FURNITURE_ARM_MAX, (v) => (FURNITURE_ARM_MAX = v), [4, 30], 0.5, 'm of arm before the mast is dropped instead'),
+        ],
+      },
+      {
+        title: 'parking',
+        keys: [
+          tune('PARKING_STALL_W', () => PARKING_STALL_W, (v) => (PARKING_STALL_W = v), [2, 4], 0.05, 'bay width (m)'),
+          tune('PARKING_STALL_D', () => PARKING_STALL_D, (v) => (PARKING_STALL_D = v), [3.5, 8], 0.1, 'bay depth (m)'),
+          tune('PARKING_AISLE_W', () => PARKING_AISLE_W, (v) => (PARKING_AISLE_W = v), [3, 12], 0.25, 'drive aisle, where none is mapped (m)'),
+          tune('PARKING_PAINT_W', () => PARKING_PAINT_W, (v) => (PARKING_PAINT_W = v), [0.04, 0.5], 0.01, 'painted line width (m)'),
+          tune('PARKING_PAINT_LIFT', () => PARKING_PAINT_LIFT, (v) => (PARKING_PAINT_LIFT = v), [0.005, 0.2], 0.005, 'paint over asphalt (m)'),
+          tune('PARKING_LIFT', () => PARKING_LIFT, (v) => (PARKING_LIFT = v), [0, 0.4], 0.01, 'asphalt over ground (m)'),
+          tune('PARKING_ROAD_OVERLAP', () => PARKING_ROAD_OVERLAP, (v) => (PARKING_ROAD_OVERLAP = v), [0, 1], 0.05, 'share over a carriageway before a lot is skipped'),
+          tune('PARKING_MIN_GRID_M2', () => PARKING_MIN_GRID_M2, (v) => (PARKING_MIN_GRID_M2 = v), [50, 5000], 50, 'no fallback grid below this area (m²)'),
+          tune('PARKING_AISLE_GAP', () => PARKING_AISLE_GAP, (v) => (PARKING_AISLE_GAP = v), [0, 3], 0.05, 'clearance past the aisle edge (m)'),
+          tune('PARKING_FILL_M2', () => PARKING_FILL_M2, (v) => (PARKING_FILL_M2 = v), [10, 300], 5, 'm² per stall below which the grid fills in too'),
+          tune('BARRIER_HEIGHT_SCALE', () => BARRIER_HEIGHT_SCALE, (v) => (BARRIER_HEIGHT_SCALE = v), [0.3, 3], 0.05, 'guard rail, fence, wall and hedge height ×'),
+        ],
+      },
+      {
+        title: 'sidewalks',
+        keys: [
+          tune('SIDEWALK_KERB_H', () => SIDEWALK_KERB_H, (v) => (SIDEWALK_KERB_H = v), [0, 0.5], 0.01, 'kerb lip (m)'),
+          tune('SIDEWALK_WIDTH_SCALE', () => SIDEWALK_WIDTH_SCALE, (v) => (SIDEWALK_WIDTH_SCALE = v), [0.4, 3], 0.05, 'width ×'),
+          tune('SIDEWALK_LIFT', () => SIDEWALK_LIFT, (v) => (SIDEWALK_LIFT = v), [0, 0.3], 0.005, 'concrete over ground (m)'),
+          tune('SIDEWALK_KERB_PROBE', () => SIDEWALK_KERB_PROBE, (v) => (SIDEWALK_KERB_PROBE = v), [0.5, 8], 0.25, 'm either side, to find which side the road is'),
+          tune('SIDEWALK_KERB_MAX_FROM_ROAD', () => SIDEWALK_KERB_MAX_FROM_ROAD, (v) => (SIDEWALK_KERB_MAX_FROM_ROAD = v), [1, 40], 1, 'past this it is a path and has no kerb (m)'),
+          tune('SIDEWALK_DROP_M', () => SIDEWALK_DROP_M, (v) => (SIDEWALK_DROP_M = v), [0, 12], 0.5, 'dropped-kerb ramp before a crossing (m)'),
+          tune('SIDEWALK_BAR_W', () => SIDEWALK_BAR_W, (v) => (SIDEWALK_BAR_W = v), [0.1, 1.5], 0.05, 'crossing bar width (m)'),
+          tune('SIDEWALK_BAR_PITCH', () => SIDEWALK_BAR_PITCH, (v) => (SIDEWALK_BAR_PITCH = v), [0.4, 4], 0.1, 'crossing bar spacing (m)'),
+          tune('SIDEWALK_PAINT_LIFT', () => SIDEWALK_PAINT_LIFT, (v) => (SIDEWALK_PAINT_LIFT = v), [0.005, 0.2], 0.005, 'paint over ground (m)'),
+          tune('SIDEWALK_CROSSING_W', () => SIDEWALK_CROSSING_W, (v) => (SIDEWALK_CROSSING_W = v), [0.4, 3], 0.05, 'painted band width ×'),
+          tune('FURNITURE_CHUNK_M', () => FURNITURE_CHUNK_M, (v) => (FURNITURE_CHUNK_M = v), [50, 2000], 25, 'm per cull chunk for linear furniture'),
+          tune('BRANCH_VERGE', () => BRANCH_VERGE, (v) => (BRANCH_VERGE = v), [4, 40], 1, 'm of verge on a branch road strip'),
         ],
       },
     ],

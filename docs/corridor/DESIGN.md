@@ -127,20 +127,66 @@ the other ≥ 3 m) → one whole-side handle (a leaf-off flight line); else runs
 canopy departs from the same side's ±300 m rolling median by max(3 m, 60 %) for ≥ 150 m, strongest
 6 per side; one band ±40 m per structure; one per surface-class run ≥ 30 m. All knobs neutral.
 
-**Cut faces** (`cuts.py`, this agent — rule as designed, thresholds to be measured on Sideling,
-Braddock and Bonnie Branch): from `profile.ground_rel` (ground beside the surface at 8/15/25/40/
-60 m) and the DTM, a cut face is ground rising **> 0.6 m/m within 15 m of the pavement for
-≥ 20 m** along-track. `artificial` when the face is straight, constant-slope and parallel to the
-road (blasted or graded); `natural` when both sides rise (a ravine) and the low line follows an
-OSM stream. Manifest key `cuts`: intervals with side, height, slope, class, lithology.
+**Cut faces** (`cuts.py`, measured 2026-09-21 on all ten baked sites; runs in 2 s): at every 4 m
+station a lateral DTM transect 1 m apart from 2 to 70 m each side, height relative to the driving
+surface. A face is a **5 m window steeper than 0.6 m/m (~31°) whose steep part rises ≥ 3 m, toe
+inside 40 m, for ≥ 20 m along the road** (two stations of gap bridged). The profile's five offsets
+were not enough — Braddock's Catoctin cut starts 11–13 m out and tops at 30 m, between them.
+Found: Sideling's left wall s 1576–3936, toe 9 m, median 15.7 m, max 32.4 m; Braddock 22 faces to
+18.8 m; South Mountain's right side to 19.9 m; Bowie and Clarksburg nothing over 8.5 m.
+`artificial` when the toe's lateral std ≤ 3 m (graded, parallel); `natural` when it wanders, a
+mapped waterway runs within 30 m for half the interval, or both sides rise together beside water.
+Heights come from the lidar DTM with the bare-earth DEM filling nodata (Bonnie Branch's first
+bake had a 0.4 %-valid DTM). Bonnie Branch, the natural test: 20 faces, all `natural` — ravine
+walls with toes 2–36 m out wandering ±3–10 m, 4–24 m high, water beside them 50–100 % of the
+interval; the 496 m wall at s 3004–3500 reaches 20 m, Ellicott City Granodiorite → `granite`.
+Lithology: Macrostrat `lith` + `descrip` keyword votes (the named units leave `lith` empty) →
+`shale | sandstone | greenstone | phyllite | schist | granite | limestone | sand`. Manifest `cuts`:
+per face the interval, side, class, toe/top/height/slope, rock type, and toe+top `[x,y,z]` every
+10 m.
 
-**Exposed rock** (`rock.py`): bare ground (canopy < 0.5 m) with high 1 m roughness (DTM residual
-from a 5 m plane), slope > 30°, lithology from `geology.json` (shale / siltstone / schist /
-granite / sandstone / metabasalt), NAIP grey-brown → polygons with a rock type. Manifest key
-`rock`.
+**Exposed rock** (`rock.py`, measured against those faces): **slope > 40° and 7 m relief ≥ 3 m**,
+on bare ground (CHM < 0.5 m) *or* inside a detected cut face, closed/opened 3×3, polygons ≥ 15 m².
+Why slope: inside the tall faces 16–64 % of cells stand steeper than 45°, on other steep bare
+ground 2–6 %. What did **not** work: 1 m roughness (0.19 vs 0.17 m — the min-of-ground DTM is too
+smooth), NAIP colour (leaf-on under forest shadow, 65 vs 68 luminance). Ground-return intensity is
+per lithology (Catoctin metabasalt 0.4× the verge, Sideling shale 1.06×) so it is recorded per
+polygon, not thresholded. Manifest `rock`: polygons with area, slope, relief, intensity ratio,
+NAIP colour, `in_cut`, rock type.
 
-**Water** (`water.py`): OSM `waterway=*` lines and `natural=water` polygons snapped to the DTM
-low line; a fall or rapid where the stream drops > 2 m over 20 m. Manifest key `water`.
+**Dead ends** (`network.py`, Rich's rule): a chain end is an end when no **routable** way other
+than that chain's own ways uses its node, and it is more than 60 m from the query box; then it is
+a **cul-de-sac by default** — `dead_end` is an authored override, never a measurement. Radius 9 m
+residential/tertiary, 8 m living_street, 6 m service; `highway=turning_circle`/`turning_loop` on
+the node makes it `source: "osm"` and outranks the junction test. Two things had to be measured on
+all 21 of Arrowhead Farms' end nodes before this was right: **driveways do not make a junction**
+(every bulb there has 2–4 `highway=service` ways on it, which suppressed all of them), and the
+exclusion is **that chain's own ways, not the whole network** (a cul-de-sac's inner end sits
+mid-way along the street it comes off, so that street is never in the end-node set — excluding all
+our roads put a bulb on the joined end of nearly every street). 9 ends on Arrowhead, 12 on Crofton.
+
+**When to distrust the DTM and fall back to the DEM**: not "most of this raster is nodata" — a
+corridor's DTM is a 200 m strip inside a bbox and is *always* mostly nodata (Sideling 38 % valid).
+Sample the spine: under 70 % of road stations covered, the lidar missed the road (Bonnie Branch's
+one-tile bake) and the bare-earth DEM stands in. Getting this wrong tripled Sideling's rock by
+detecting DEM slopes out where the CHM is 0 and every cell reads as bare.
+
+**Water** (`water.py`): OSM `waterway` lines every 5 m, each vertex **snapped to the DTM low point
+across ±6 m** (measured: the OSM line is within 3 m of it 86–100 % of the time) unless the channel
+is wider than 12 m (the Monocacy: centreline kept, z read); DEM stands in outside the lidar
+corridor. Heights running-minimum in the flow direction. `tunnel=culvert` segments flagged, not
+drawn. **Falls/rapids: maximal runs of 20 m windows each dropping > 2 m**; grade > 0.25 is a fall,
+else rapids; none under a culvert (the DTM there is the road fill). Widths: OSM `width`, else
+river 12, canal 6, stream 2.5, ditch 1.2, drain 1 m. Polygons (`natural=water`, `water=*`,
+wetland) flat at their median ground. Manifest `water`: lines with `pts [x,y,z]`, `falls`, areas.
+
+**Rock dressing** (`rocks.ts`): boulders per metre of face `ROCK_PER_M` × (0.5 + height/6), biased
+to the lower face, size `ROCK_SIZE` × (0.4–2.0) larger at the toe; outcrop polygons at
+`ROCK_OUTCROP_PER_M2`; none within `ROCK_PAVEMENT_CLEAR` (1.5 m) of a pavement edge; positions
+hashed from face id and station. Kit: `catalog.json` `category: "rock"` + `rock_type`; procedural
+displaced icosahedra in the lithology's colour until a GLB exists. Probe:
+`probes/corridor-terrain.mjs <slug> rock|water` — Sideling: 5 481 shale instances, nearest 1.52 m
+from pavement, all on `groundAt`; South Mountain: 910 greenstone, nearest 4.16 m.
 
 ## 6 · Sign conventions (the ones that bit people)
 
@@ -163,6 +209,71 @@ low line; a fall or rapid where the stream drops > 2 m over 20 m. Manifest key `
   `ShaderMaterial` is fixed at compile time.
 - A missing optional JSON must 404 (the middleware does); Vite's SPA fallback would answer
   `index.html` with a 200 and `r.json()` dies on `<!doctype`.
+- **A pre-2010 lidar delivery can carry no CRS at all**, and the right one is recoverable without a
+  per-project table. `OR_NORTHCOAST_2008_2009` has no VLRs whatever, so `parse_crs()` is None and
+  the tile is unreadable. Its coordinates (X ≈ 431 k, Y ≈ 1 531 k) are no UTM zone; they are
+  **EPSG:2992, NAD83 / Oregon GIC Lambert, in FEET**, and the Z is in feet too (`check_units`
+  catches that part already). Enumerate the projected CRSs whose area of use contains the site
+  (pyproj, 80 candidates here), transform a sample under each, and keep the one that lands the
+  points inside the corridor: a wrong guess puts them in another state, so the test is
+  self-validating. 2.2 s; 4.9 M of the tile's 14.6 M points land in Ecola's corridor and the
+  ground agrees with the 3DEP DEM to **4 cm**. Datum realisations of one projection tie exactly —
+  take the lowest EPSG code. Proposed to main 2026-09-21. **But reach for it last**: Ecola also has
+  `CA_West_Coast_LiDAR_2016_B16` at 85 % coverage, eight years newer, in metres, with a compound
+  CRS carrying the vertical datum — the project scoring passes it over because the broken one
+  covers 100 %. Falling back to the next project when every tile of the chosen one fails to read
+  is simpler and gives better data; guessing a CRS is for a site where the header-less project is
+  the only one.
+- **You can read a delivery's CRS without downloading it.** `Range: bytes=0-200000` returns HTTP
+  206 from the USGS host and the LAS header and VLRs live in the first few hundred bytes, so a
+  717 MiB tile can be scored for readability in a second.
+- **Bounding the vertices of a smoothed line does not bound the line.** `export._smooth_on_line`
+  gaussian-smooths a centreline and then pulls every vertex back to within 1.5 m of the raw
+  polyline, which fixed the spine leaving its own trace in the air photo (10.6 m on Chesterfield
+  → 1.72 m). But it clamps toward the NEAREST point on the line, and nearest-point projection is
+  not monotonic: on a switchback two adjacent vertices project onto opposite limbs and the clamp
+  drags them apart. Measured on Crofton's branches: every vertex within 1.58 m as designed, one
+  pair **15.5 m apart** where the median gap is 2 m, and the 10 m sample in the middle of that
+  straight chords across the bend at **6.95 m** — 9 of 39 branches over 2 m. The station of each
+  point is already known (the line was resampled at those stations), so pulling toward the line
+  *at its own station* is monotonic by construction: worst deviation 1.60 m, none over 2 m.
+  A coast road of hairpins is the worst possible input for a nearest-point clamp: **ecola-or's
+  centreline leaves its road by 10.2 m**, against ≤ 2 m everywhere else. `corridor.verify` warns
+  over 3 m. Patch proposed to main 2026-09-21; whoever applies it must re-export, since it moves
+  published geometry — and it shrinks the drift above too, because a line that stops cutting
+  corners stops being short.
+- **`s` is measured on the raw line; the viewer draws a shorter smoothed one.**
+  `manifest.spine.length_m` is the RAW OSM line's length, `manifest.spine.coords` is the smoothed
+  and densified line, and smoothing shortens: −0.03 % on Braddock, −0.37 % on Crofton, **−0.80 %
+  (29.4 m) on Bonnie Branch**. Everything keyed by along-track metre — structures, `profile.s`,
+  `surface.s`, `cuts.faces[].s_start`, the editor's authored intervals — is measured on the raw
+  line and resolved as arclength along the published curve, so the error accumulates with `s`.
+  Measured on real structures it is 0–4.1 m, the worst being Bowie's horse bridge at s = 2350.
+  **The drift scales with how twisty the road is** — the interstates are 0.01–0.03 % and invisible,
+  the backroads and the coast road 0.4–1.8 % — which is why it appeared only once Ecola, Bonnie
+  Branch and Rich's neighbourhood were baked. `corridor.verify` warns over 0.2 %; 11 of 20 sites
+  warn today. Fix either by scaling `s` by `curveLen / length_m` in `spineAt`, or by publishing the
+  smoothed length as well. Reported to main 2026-09-21.
+- **A key that indexes data must be intrinsic, never positional.** Network chain ids were `r00`,
+  `r01`, … by enumeration, and `branches.json` keys every road's profile by them. Lowering the
+  minimum chain length from 120 m to 50 m added two chains *in the middle* of Crofton's list and
+  shifted every id after them: 21 of 39 branches would have been published carrying a different
+  road's grade and structures, and 3 roads would have been dropped for want of a match. Ids are now
+  `r<smallest OSM way id in the chain>`, which survives any change to the chain *set* and changes
+  only when that chain's own ways change — and then it simply fails to match and is recomputed,
+  which is a failure you can see. Caught by diffing `branches.json` against `spine_utm.json` before
+  calling the data good; it would have rendered perfectly and been wrong everywhere.
+- **One writer per site directory.** `tools/corridor/data` is a symlink shared by every worktree,
+  so `export all` from main and a targeted export from an agent are the same files — written
+  non-atomically, image by image. Announce an export in mail before running it.
+- **A pattern that matches your own command line kills your own shell.** `pkill -f 'foo'`,
+  `pgrep -f 'foo'` and `awk '/foo/'` all see the very command running them; three shells died to
+  this in one session. Kill by PID, filter by process name (`ps -eo comm,args`), or put the script
+  in a file so its command line is a path.
+- **Python writes `NaN` into JSON and `JSON.parse` refuses the whole file.** Anything sampled from
+  a raster that can be nodata (a VRT through `LazyRaster`, an out-of-coverage DEM) must be filled
+  or guarded before it is written. One NaN token cost the Crofton network site its entire
+  manifest (2026-09-21).
 
 ## 7 · How to add a road (one page)
 

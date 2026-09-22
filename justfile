@@ -70,6 +70,11 @@ bridge-dev app="conduit":
 bridge code app="conduit":
     APEX_BRIDGE="${APEX_BRIDGE:-apex-dev}" APEX_ORIGIN="http://localhost:$(just _port {{ app }})" node scripts/bridge.mjs {{ quote(code) }}
 
+# corridor's bridge needs :5185 free — stop the plain `just corridor-view` server first, then
+# `just bridge-dev corridor`, open http://localhost:5185 in a REAL browser, and drive it with
+# `just bridge 'apex.perf()' corridor`. The agent box has no GPU, so every frame-time number
+# measured there is swiftshader's; this is how a real one gets read.
+
 # list the pages currently attached to the shell
 bridge-clients app="conduit":
     APEX_BRIDGE="${APEX_BRIDGE:-apex-dev}" APEX_ORIGIN="http://localhost:$(just _port {{ app }})" node scripts/bridge.mjs --clients

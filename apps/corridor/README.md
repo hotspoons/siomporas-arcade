@@ -22,6 +22,8 @@ of the terrain vertices, 4k imagery, fewer near trees); touch devices get it aut
 | `src/hextile.ts` | stochastic hex tiling over a texture-array library, for the pavement |
 | `src/season.ts` | the four-season palette: leaf tints and densities, grass ramp, ground tint, sky and fog |
 | `src/strip.ts` | the fine corridor terrain: 1 m across, 2 m along, road height under every carriageway, DEM beyond; one ground material blending mown turf, rough grass and the air photo |
+| `src/rocks.ts` | rock on the measured cut faces (`manifest.cuts`) and outcrops (`manifest.rock`): the rock kit (`catalog.json` `category: "rock"` by `rock_type`) instanced between toe and top, procedural boulders until a GLB lands, never within `ROCK_PAVEMENT_CLEAR` of the pavement |
+| `src/water.ts` | streams and ponds where the lidar says the channel is (`manifest.water`): ribbons at the snapped low line + `WATER_DEPTH` with a scrolling-noise normal, foam over falls and rapids, culverts skipped |
 | `src/fly.ts` | trailworks-style fly camera |
 | `src/car.ts` | the car: stuntin's ground regime + lateral grip model, tree collision |
 | `src/main.ts` | UI, orbit/drive cameras, phone layout, picking |
@@ -34,7 +36,10 @@ ground. **Drive** (Tab; stuntin dynamics ported in `src/car.ts`): W/S throttle/b
 Space handbrake, R resets to the photo; drag looks around the chase camera. **C copies a stance**: a URL that reproduces exactly this view (site, season, mode, camera or car, layers) — paste it in a bug report and `node probes/corridor-stance.mjs '<url>' out.png` renders it headlessly. **M** hides the panel. The car collides with
 tree trunks (radius from canopy height) and gets grass drag and grip off the pavement. P = photo,
 H = top.
-`?season=winter|spring|summer|autumn` or the picker in the header. Phones get a move pad (hold to glide) and drive buttons.
+`?season=winter|spring|summer|autumn` or the picker in the header. **rock** and **water** layer
+toggles; F6 → terrain tab for their knobs. `probes/corridor-terrain.mjs <slug> rock|water` flies to
+the tallest measured face or the longest stream, counts what was placed, checks clearance and
+grounding, and shoots it with and without the layer. Phones get a move pad (hold to glide) and drive buttons.
 
 ## Rendering notes worth keeping
 

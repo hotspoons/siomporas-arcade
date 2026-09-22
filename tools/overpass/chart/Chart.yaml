@@ -1,0 +1,6 @@
+apiVersion: v2
+name: overpass
+description: Our own Overpass API — the corridor bake's OSM source, so a public mirror going down cannot stop a bake
+type: application
+version: 0.1.0
+appVersion: "0.7.62"

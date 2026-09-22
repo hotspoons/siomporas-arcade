@@ -30,6 +30,8 @@
 // ring cost anything, and no more than GRASS_TILES_PER_FRAME of them per frame.
 import * as THREE from 'three'
 import type { SeasonLook } from './season'
+import { GRASS_LOOK, type GrassType } from './groundcover'
+import { ACCUM_PARS, accumUniforms } from './weather'
 import * as T from './tuning'
 
 const SEGMENTS = 6
@@ -146,6 +148,8 @@ export class Grass {
   private roadDistance: (x: number, z: number) => number
   private pavedHalf: number
   private adjustAt: ((x: number, y: number) => [number, number]) | undefined
+  /** the bare DEM, for the shelf test in generate(); undefined means the test is skipped */
+  private demAt: ((x: number, y: number) => number) | undefined
   private tiles = new Map<string, Tile>()
   private pending: { key: string; tx: number; tz: number; withBlades: boolean }[] = []
   private prevEye = new THREE.Vector3(NaN, NaN, NaN)
@@ -159,6 +163,24 @@ export class Grass {
   private eye = new THREE.Vector3()
   private fwd = new THREE.Vector3(1, 0, 0)
   private pitch = 0
+  /** the visible tile set for this eye/heading, nearest first; rebuilt only when the view moved */
+  private vis: { key: string; tx: number; tz: number; d: number }[] = []
+  private visStale = true
+  /**
+   * The settled layer's uniforms, shared by the blade and card materials so Precipitation.follow
+   * drives both with one object. Snow has to lie on the grass as well as the ground: a white verge
+   * with green grass standing out of it is worse than no snow at all.
+   */
+  readonly weatherUniforms = accumUniforms()
+  /** what grows here: shape multipliers over the season palette and the knobs (groundcover.ts) */
+  private type: GrassType = 'common'
+  private look = GRASS_LOOK.common
+  // per-frame cost of the last update(), milliseconds. This box has no GPU (swiftshader renders
+  // ~1 frame per 10 s at Rich's density), so the only honest frame-time number we can take here
+  // is the CPU half — tile generation and buffer assembly. probes/corridor-grasscpu.mjs reads it.
+  private genMs = 0
+  private asmMs = 0
+  private madeThisFrame = 0
 
   constructor(
     groundAt: (x: number, y: number) => number,
@@ -171,7 +193,9 @@ export class Grass {
     fog: THREE.FogExp2 | null = null,
     adjustAt: ((x: number, y: number) => [number, number]) | undefined = undefined,
     sun = new THREE.Vector3(-3000, 4000, 2500).normalize(),
+    demAt: ((x: number, y: number) => number) | undefined = undefined,
   ) {
+    this.demAt = demAt
     this.adjustAt = adjustAt
     this.groundAt = groundAt
     this.canopyAt = canopyAt
@@ -204,6 +228,7 @@ export class Grass {
         uHue: { value: 0 },
         uSat: { value: 1 },
         uLight: { value: 1 },
+        ...this.weatherUniforms,
       },
       vertexShader: /* glsl */ `
         attribute vec3 aRoot;
@@ -276,6 +301,7 @@ export class Grass {
         varying vec3 vWorld;
         #include <fog_pars_fragment>
         #include <logdepthbuf_pars_fragment>
+        ${ACCUM_PARS}
   // colour grading over the season palette: hue rotation about the grey axis (YIQ), saturation, lightness
   vec3 grade(vec3 c, float hueDeg, float sat, float light) {
     float a = radians(hueDeg);
@@ -303,7 +329,11 @@ export class Grass {
           // a little specular sheen along the blade
           vec3 hvec = normalize(uSun + v);
           lit += vec3(0.08) * pow(max(0.0, dot(n, hvec)), 24.0) * vT;
-          gl_FragColor = vec4(grade(lit, uHue, uSat, uLight), 1.0);
+          vec3 outCol = grade(lit, uHue, uSat, uLight);
+          // a blade catches the settled layer at its TIP, not at its root, so the normal it is
+          // weighed by is faked upright near the top — the real one points sideways all the way up
+          outCol = applyWeather(outCol, vec3(0.0, mix(0.1, 1.0, vT), 0.0), vWorld);
+          gl_FragColor = vec4(outCol, 1.0);
           #include <fog_fragment>
           #include <colorspace_fragment>
         }
@@ -341,6 +371,7 @@ export class Grass {
         uHue: { value: 0 },
         uSat: { value: 1 },
         uLight: { value: 1 },
+        ...this.weatherUniforms,
       },
       vertexShader: /* glsl */ `
         attribute vec4 aCard;  // x y z size
@@ -354,6 +385,7 @@ export class Grass {
         varying vec2 vUv;
         varying float vRand;
         varying float vMown;
+        varying vec3 vCardWorld;
         #include <common>
         #include <fog_pars_vertex>
         #include <logdepthbuf_pars_vertex>
@@ -376,6 +408,7 @@ export class Grass {
           float lean = (aCard2.x - 0.5) * 2.0 * uLean;
           vec3 world = root + right * (position.x * size * uWidth + lean * position.y * size) + vec3(0.0, position.y * size, 0.0)
                      + vec3(0.8, 0.0, 0.5) * gust * position.y * size;
+          vCardWorld = world;
           vec4 mvPosition = viewMatrix * vec4(world, 1.0);
           gl_Position = projectionMatrix * mvPosition;
           #include <logdepthbuf_vertex>
@@ -393,8 +426,10 @@ export class Grass {
         varying vec2 vUv;
         varying float vRand;
         varying float vMown;
+        varying vec3 vCardWorld;
         #include <fog_pars_fragment>
         #include <logdepthbuf_pars_fragment>
+        ${ACCUM_PARS}
   // colour grading over the season palette: hue rotation about the grey axis (YIQ), saturation, lightness
   vec3 grade(vec3 c, float hueDeg, float sat, float light) {
     float a = radians(hueDeg);
@@ -416,7 +451,9 @@ export class Grass {
           float shade = mix(0.55, 1.15, s.r);
           // a mown card is a low even turf; keep it a touch darker like the strip's mown texture
           c *= shade * mix(1.0, 0.85, vMown);
-          gl_FragColor = vec4(grade(c, uHue, uSat, uLight), 1.0);
+          vec3 outCol = grade(c, uHue, uSat, uLight);
+          outCol = applyWeather(outCol, vec3(0.0, mix(0.1, 1.0, vUv.y), 0.0), vCardWorld);
+          gl_FragColor = vec4(outCol, 1.0);
           #include <fog_fragment>
           #include <colorspace_fragment>
         }
@@ -432,6 +469,44 @@ export class Grass {
     this.mesh = new THREE.Group()
     this.mesh.name = 'grass'
     this.mesh.add(this.blades, this.cards)
+    this.sig = this.signature() // so the FIRST knob change is judged against the built tiles, not ''
+  }
+
+  /**
+   * The site's ground cover: the blade style, and how much of it there is.
+   *
+   * `blades` is the second half of a ground-cover class (groundcover.ts `CoverLook`). Chaparral and
+   * conifer duff are not swards — they are woody scrub and needle mat with a few stems in the gaps —
+   * so the class that chooses the blade SHAPE also says how many blades belong there at all.
+   * Regenerates only if something actually changed (see invalidate).
+   */
+  setType(t: GrassType, blades = 1) {
+    if (t === this.type && blades === this.bladeScale) return
+    this.type = t
+    this.bladeScale = blades
+    this.look = blades === 1 ? GRASS_LOOK[t] : { ...GRASS_LOOK[t], density: GRASS_LOOK[t].density * blades }
+    this.invalidate()
+  }
+  private bladeScale = 1
+  get grassType(): GrassType {
+    return this.type
+  }
+
+  /**
+   * What the blades are ACTUALLY drawing with, read back off the uniforms.
+   *
+   * probes/corridor-flora.mjs prints this per season. A screenshot cannot settle "is the hillside
+   * browner in September than it used to be"; `#97a054 -> #cfbd8a` can.
+   */
+  get applied(): { type: GrassType; blades: number; dry: number; base: string; tip: string } {
+    const u = this.bladeMat.uniforms
+    return {
+      type: this.type,
+      blades: this.bladeScale,
+      dry: u.uDry.value as number,
+      base: '#' + (u.uBase.value as THREE.Color).getHexString(),
+      tip: '#' + (u.uTip.value as THREE.Color).getHexString(),
+    }
   }
 
   setLook(look: SeasonLook) {
@@ -451,21 +526,46 @@ export class Grass {
       m.uniforms.uTime.value = t
       // no sway from a moving car: the eye speed (measured in update) fades the wind out
       m.uniforms.uWind.value = T.GRASS_WIND * this.motion
-      m.uniforms.uDry.value = Math.min(1, Math.max(0, this.dryBase + T.GRASS_DRY_ADD))
-      m.uniforms.uHue.value = T.GRASS_HUE
-      m.uniforms.uSat.value = T.GRASS_SAT
+      m.uniforms.uDry.value = Math.min(1, Math.max(0, this.dryBase + T.GRASS_DRY_ADD + this.look.dry))
+      m.uniforms.uHue.value = T.GRASS_HUE + this.look.hue
+      m.uniforms.uSat.value = T.GRASS_SAT * this.look.sat
       m.uniforms.uLight.value = T.GRASS_LIGHT
     }
     this.cardMat.uniforms.uWidth.value = T.GRASS_SPRITE_WIDTH
     this.cardMat.uniforms.uLean.value = T.GRASS_SPRITE_LEAN
   }
 
-  /** Drop the tile cache (a knob or the season changed); tiles regenerate over the next frames. */
+  /**
+   * Everything about a tile's CONTENTS: change one of these and the cached tiles are wrong.
+   * Deliberately not here: colour, wind, dryness, sprite width/lean (uniforms, free), and the LOD
+   * densities and shape (they only choose how much of each cached tile to copy, in assemble).
+   */
+  private signature(): string {
+    return [
+      T.GRASS_MOWN_PER_M2, T.GRASS_ROUGH_PER_M2, T.GRASS_RADIUS, T.GRASS_SPRITE_RADIUS,
+      T.GRASS_SPRITE_PER_M2, T.GRASS_MOW_LINE, T.GRASS_MAX_FROM_ROAD, T.GRASS_PATCHINESS,
+      T.GRASS_PATCH_SIZE, T.GRASS_SCATTER, T.GRASS_SLOPE_MAX, T.GRASS_MOWN_HEIGHT,
+      T.GRASS_ROUGH_HEIGHT, T.GRASS_LEAN, T.GRASS_HEIGHT_SCALE, T.GRASS_WIDTH_SCALE,
+      T.GRASS_SPRITE_SCALE, T.GRASS_MAX_SHELF, this.heightScale, this.type,
+    ].join(',')
+  }
+  private sig = ''
+
+  /**
+   * A knob or the season changed. `retune()` cannot know WHICH knob, so it calls this for all of
+   * them — and a full cache clear is ~3 s of grass visibly growing back in. That is what made
+   * tuning miserable: dragging the hue slider threw away every tile, though hue is a uniform.
+   * So compare the signature first and only pay when the tiles would actually come out different.
+   */
   invalidate() {
+    const sig = this.signature()
+    this.visStale = true // the LOD shape may have moved even when the tiles did not
+    this.dirty = true
+    if (sig === this.sig) return
+    this.sig = sig
     this.tiles.clear()
     this.pending = []
     this.lastTile = 'none'
-    this.dirty = true
   }
 
   /** how many tiles are still waiting to be generated (probes read this) */
@@ -496,40 +596,61 @@ export class Grass {
     const heading = Math.atan2(fwd.x, fwd.z)
     const tileKey = `${Math.floor(eye.x / TILE)},${Math.floor(eye.z / TILE)}`
     const turned = Math.abs(heading - this.lastHeading) > 0.25 || Math.abs(pitch - this.lastPitch) > 0.2
-    if (tileKey !== this.lastTile || turned) {
+    const moved = tileKey !== this.lastTile || turned
+    if (moved || this.visStale) {
       this.lastTile = tileKey
       this.lastHeading = heading
       this.lastPitch = pitch
+      this.revisit()
+    }
+    if (moved) {
       this.dirty = true
       // the eye moved to a new tile (or teleported: fly → drive): re-plan from here, nearest first,
       // instead of finishing a queue that was planned for where we were
       this.queueMissing()
     } else if (this.dirty && this.pending.length === 0) this.queueMissing()
-    // generate a few of the nearest missing tiles; a card-only tile is cheap, a blade tile is not
-    let made = 0, budget = T.GRASS_TILES_PER_FRAME
-    while (this.pending.length && budget > 0) {
+    // Generate the nearest missing tiles until this frame's MILLISECOND budget is spent. A fixed
+    // tile count cannot work: a card-only tile is ~50 records and a blade tile ~7000, and the same
+    // count is 0.3 ms of work in open country and 9 ms along a hedgerow. Spending time instead of
+    // tiles means the queue drains as fast as the frame can afford and never faster.
+    let made = 0, tiles = T.GRASS_TILES_PER_FRAME
+    const t0 = performance.now()
+    const deadline = t0 + T.GRASS_MS_PER_FRAME
+    while (this.pending.length && tiles > 0) {
       const p = this.pending.shift()!
       const have = this.tiles.get(p.key)
       if (!have || (p.withBlades && !have.hasBlades)) {
         this.tiles.set(p.key, this.generate(p.tx, p.tz, p.withBlades))
         made++
-        budget -= p.withBlades ? 1 : 0.15
+        tiles -= p.withBlades ? 1 : 0.15
+        if (performance.now() >= deadline) break
       }
     }
+    const t1 = performance.now()
     if (made) this.dirty = true
     // assemble: every 4th frame while a burst is still filling, at once when it is complete
     if (this.dirty && (this.pending.length === 0 || this.frame % 4 === 0)) {
       this.assemble()
       this.dirty = this.pending.length > 0
     }
-    if (this.tiles.size > 1600) this.evict()
+    this.genMs = t1 - t0
+    this.asmMs = performance.now() - t1
+    this.madeThisFrame = made
+    // only worth walking the map when the cache holds appreciably more than the ring needs
+    if (this.tiles.size > this.vis.length * T.GRASS_CACHE_SLACK + 64) this.evict()
   }
 
   // --- tiles --------------------------------------------------------------------------------------
 
-  private visibleTiles(): { key: string; tx: number; tz: number; d: number }[] {
+  /**
+   * The visible tile set, nearest first. At GRASS_SPRITE_RADIUS = 300 this walks a 76 × 76 box and
+   * sorts ~4500 entries, so it is computed ONCE per update() into `vis` and shared by the queue,
+   * the assembly and the eviction — they used to each rebuild it, three times a frame.
+   */
+  private revisit() {
     const r = Math.max(T.GRASS_RADIUS, T.GRASS_SPRITE_RADIUS)
-    const out: { key: string; tx: number; tz: number; d: number }[] = []
+    const out = this.vis
+    out.length = 0
     const tx0 = Math.floor((this.eye.x - r) / TILE), tx1 = Math.floor((this.eye.x + r) / TILE)
     const tz0 = Math.floor((this.eye.z - r) / TILE), tz1 = Math.floor((this.eye.z + r) / TILE)
     for (let tx = tx0; tx <= tx1; tx++) {
@@ -542,21 +663,27 @@ export class Grass {
       }
     }
     out.sort((a, b) => a.d - b.d)
-    return out
+    this.visStale = false
   }
 
   private queueMissing() {
     const rBlade = T.GRASS_RADIUS + TILE * 0.71
     this.pending = []
-    for (const t of this.visibleTiles()) {
+    for (const t of this.vis) {
       const withBlades = t.d <= rBlade
       const have = this.tiles.get(t.key)
       if (!have || (withBlades && !have.hasBlades)) this.pending.push({ ...t, withBlades })
     }
   }
 
+  /**
+   * Drop tiles the ring no longer covers. The threshold is a multiple of what the ring NEEDS, not
+   * a constant: the old `> 1600` was below the ~2500 tiles GRASS_SPRITE_RADIUS = 300 m asks for,
+   * so this ran every single frame, rebuilt the visible set, and deleted nothing.
+   */
   private evict() {
-    const keep = new Set(this.visibleTiles().map((t) => t.key))
+    const keep = new Set<string>()
+    for (const t of this.vis) keep.add(t.key)
     for (const k of this.tiles.keys()) if (!keep.has(k)) this.tiles.delete(k)
   }
 
@@ -584,6 +711,13 @@ export class Grass {
         const gy = this.groundAt(wx, -wz)
         const slope = Math.max(Math.abs(this.groundAt(wx + 1, -wz) - gy), Math.abs(this.groundAt(wx, -wz - 1) - gy))
         if (slope > T.GRASS_SLOPE_MAX) continue
+        // NOTHING GROWS ON A SHELF. Past the strip's blend band the strip IS the DEM — both come
+        // from the same raster — so any real gap there means this ground is not sitting on the
+        // world: a bridge verge at deck height over a valley, a retaining wall, a deck that has
+        // been widened. Grass standing on it is grass in the air. Inside the band the strip is
+        // between road grade and the DEM by construction, and a fill embankment lives there
+        // legitimately, so the test only applies once the blend has finished.
+        if (this.demAt && T.GRASS_MAX_SHELF > 0 && roadD > this.pavedHalf + 8 && gy - this.demAt(wx, -wz) > T.GRASS_MAX_SHELF) continue
         // bare patches: low-frequency hash noise thins the field where soil shows
         const patch = hash(Math.floor(cx / patchCells) * 971 + Math.floor(cz / patchCells) * 337)
         if (patch < T.GRASS_PATCHINESS) continue
@@ -592,18 +726,20 @@ export class Grass {
         if (mown) mownCells++
         // the editor's local corrections: [height multiplier, density multiplier]
         const [ah, ad] = this.adjustAt ? this.adjustAt(wx, -wz) : [1, 1]
-        const perCell = withBlades ? Math.round((mown ? T.GRASS_MOWN_PER_M2 : T.GRASS_ROUGH_PER_M2) * (0.7 + 0.6 * patch) * ad) : 0
+        const perCell = withBlades ? Math.round((mown ? T.GRASS_MOWN_PER_M2 : T.GRASS_ROUGH_PER_M2) * this.look.density * (0.7 + 0.6 * patch) * ad) : 0
         // one clump centre per cell; blades scatter around it
         const ccx = wx + (hash(cx * 7919 + cz * 104729) - 0.5) * cell
         const ccz = wz + (hash(cx * 15485863 + cz * 32452843) - 0.5) * cell
         for (let b = 0; b < perCell && n < maxBlades; b++) {
           const h1 = hash(cx * 31 + cz * 17 + b * 101), h2 = hash(cx * 13 + cz * 29 + b * 53)
-          const x = ccx + (h1 - 0.5) * T.GRASS_SCATTER, z = ccz + (h2 - 0.5) * T.GRASS_SCATTER
+          const scatter = T.GRASS_SCATTER * this.look.scatter
+          const x = ccx + (h1 - 0.5) * scatter, z = ccz + (h2 - 0.5) * scatter
           const y = this.groundAt(x, -z) - 0.02
           const rnd = hash(cx * 29 + cz * 31 + b * 3)
-          const height = (mown ? T.GRASS_MOWN_HEIGHT : this.heightScale * T.GRASS_ROUGH_HEIGHT) * ah * T.GRASS_HEIGHT_SCALE * (0.6 + 0.8 * hash(cx * 3 + cz * 5 + b * 7))
-          const width = (mown ? 0.035 : 0.05 + 0.03 * rnd) * T.GRASS_WIDTH_SCALE
-          const lean = 0.15 + T.GRASS_LEAN * hash(cx * 11 + cz * 19 + b * 23)
+          const shape = mown ? this.look.mown : this.look.height
+          const height = (mown ? T.GRASS_MOWN_HEIGHT : this.heightScale * T.GRASS_ROUGH_HEIGHT) * shape * ah * T.GRASS_HEIGHT_SCALE * (0.6 + 0.8 * hash(cx * 3 + cz * 5 + b * 7))
+          const width = (mown ? 0.035 : 0.05 + 0.03 * rnd) * T.GRASS_WIDTH_SCALE * this.look.width
+          const lean = Math.max(0, 0.15 + this.look.lean + T.GRASS_LEAN * hash(cx * 11 + cz * 19 + b * 23))
           const o = n * BLADE_F
           blades[o] = x
           blades[o + 1] = y
@@ -616,12 +752,12 @@ export class Grass {
           n++
         }
         // clump cards: sparse, sized to the cover they stand in
-        const cardsHere = T.GRASS_SPRITE_PER_M2 * (0.7 + 0.6 * patch) * ad
+        const cardsHere = T.GRASS_SPRITE_PER_M2 * this.look.density * (0.7 + 0.6 * patch) * ad
         const want = Math.floor(cardsHere) + (hash(cx * 61 + cz * 67) < cardsHere % 1 ? 1 : 0)
         for (let b = 0; b < want && nc < maxCards; b++) {
           const x = wx + (hash(cx * 71 + cz * 73 + b * 79) - 0.5) * cell, z = wz + (hash(cx * 83 + cz * 89 + b * 97) - 0.5) * cell
           const y = this.groundAt(x, -z) - 0.03
-          const base = mown ? T.GRASS_MOWN_HEIGHT * 1.6 : this.heightScale * T.GRASS_ROUGH_HEIGHT * 0.8
+          const base = (mown ? T.GRASS_MOWN_HEIGHT * 1.6 * this.look.mown : this.heightScale * T.GRASS_ROUGH_HEIGHT * 0.8 * this.look.height)
           const size = base * ah * T.GRASS_HEIGHT_SCALE * T.GRASS_SPRITE_SCALE * (0.75 + 0.5 * hash(cx * 101 + cz * 103 + b * 107))
           const o = nc * CARD_F
           cards[o] = x
@@ -648,7 +784,7 @@ export class Grass {
     const rBlade = T.GRASS_RADIUS
     const rCard = T.GRASS_SPRITE_RADIUS
     const cardFrom = T.GRASS_LOD_MID - 8
-    for (const t of this.visibleTiles()) {
+    for (const t of this.vis) {
       const tile = this.tiles.get(t.key)
       if (!tile) continue
       if (t.d <= rBlade + TILE * 0.71 && tile.n) {
@@ -703,8 +839,40 @@ export class Grass {
   }
 
   /** counts for probes and the HUD */
-  get counts(): { blades: number; cards: number; tiles: number; pending: number; motion: number } {
-    return { blades: this.bladeGeo.instanceCount, cards: this.cardGeo.instanceCount, tiles: this.tiles.size, pending: this.pending.length, motion: +this.motion.toFixed(2) }
+  get counts(): { blades: number; cards: number; tiles: number; pending: number; motion: number; type: GrassType } {
+    return { blades: this.bladeGeo.instanceCount, cards: this.cardGeo.instanceCount, tiles: this.tiles.size, pending: this.pending.length, motion: +this.motion.toFixed(2), type: this.type }
+  }
+
+  /**
+   * What the last update() cost on the CPU, what it handed the GPU, and — the number that decides
+   * whether the ring shows bare ground — how far away the NEAREST tile still waiting to be
+   * generated is. The queue is nearest-first, so `nearestMissing` is the radius inside which the
+   * world is complete. While it stays above GRASS_RADIUS nothing the eye can resolve is missing,
+   * however deep the queue is: the tiles behind it are card-only tiles at the rim, where the size
+   * fade has already taken the cards to nothing.
+   */
+  get perf(): { genMs: number; asmMs: number; made: number; triangles: number; nearestEmpty: number; nearestUpgrade: number; pendingEmpty: number } {
+    // Two very different things sit in the queue and only one of them can show bare ground:
+    //   EMPTY    no tile cached at all — nothing is drawn there
+    //   UPGRADE  a card-only tile that has come inside the blade ring and wants blades too; the
+    //            ground is already covered, it is about to get better
+    // The ring crosses the blade radius continuously, so there is ALWAYS an upgrade pending at
+    // about rBlade. Only `nearestEmpty` says whether the eye can see a hole.
+    let empty = Infinity, upgrade = Infinity, nEmpty = 0
+    for (const p of this.pending) {
+      const d = T.lodDistance(p.tx * TILE + TILE / 2 - this.eye.x, p.tz * TILE + TILE / 2 - this.eye.z, this.fwd.x, this.fwd.z, this.pitch)
+      if (this.tiles.has(p.key)) { if (d < upgrade) upgrade = d } else { nEmpty++; if (d < empty) empty = d }
+    }
+    return {
+      nearestEmpty: +empty.toFixed(1),
+      nearestUpgrade: +upgrade.toFixed(1),
+      pendingEmpty: nEmpty,
+      genMs: this.genMs,
+      asmMs: this.asmMs,
+      made: this.madeThisFrame,
+      // a blade is (SEGMENTS - 1) quads plus a tip triangle; a card is a quad. Both are DoubleSide.
+      triangles: this.bladeGeo.instanceCount * (SEGMENTS * 2 - 1) + this.cardGeo.instanceCount * 2,
+    }
   }
 }
 

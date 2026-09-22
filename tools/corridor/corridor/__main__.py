@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -61,6 +62,11 @@ def fetch_site(site: dict, half_length: float, half_width: float, lidar_half_wid
 
     from . import dem, geo, geology, lidar, naip, osm
 
+    if site.get("kind") == "network":  # cadre §6: one region of roads as one world (terrain-and-data agent)
+        from . import network
+
+        network.fetch_site(site, half_width, lidar_half_width, skip, DATA, CACHE)
+        return
     slug = site["slug"]
     out = DATA / "sites" / slug
     out.mkdir(parents=True, exist_ok=True)
@@ -106,6 +112,17 @@ def fetch_site(site: dict, half_length: float, half_width: float, lidar_half_wid
         (out / "geology.json").write_text(json.dumps(g, indent=1))
         print(f"  geology {len(g['units'])} units; named: {', '.join(g['named_formations'][:6])}")
         manifest["geology"] = {"units": len(g["units"]), "named_formations": g["named_formations"]}
+    if "flora" not in skip:
+        from . import flora as flora_mod
+
+        f = flora_mod.along_spine(line, frame, site, corridor, CACHE, out)
+        top = ", ".join(f"{c['name']} {100 * c['share']:.0f}%" for c in f["evt"]["classes"][:3])
+        sp = ", ".join(f"{f['canopy']['ref'][s['key']]['common']} {100 * s['weight']:.0f}%" for s in f["canopy"]["species"][:4])
+        print(f"  flora   {len(f['evt']['classes'])} EVT classes: {top}")
+        print(f"          canopy ({f['canopy']['coverage'] * 100:.0f}% basal-area cover): {sp}")
+        print(f"          ground: " + ", ".join(f"{g['key']} {100 * g['weight']:.0f}%" for g in f["ground"]["classes"][:5]) + f"; summer rain {f['climate']['summer_dry'] * 100:.1f}% of annual")
+        manifest["flora"] = {"classes": len(f["evt"]["classes"]), "species": len(f["canopy"]["species"]), "coverage": f["canopy"]["coverage"], "source": f["evt"]["source"], "fetched": f["fetched"]}
+
     if "lidar" not in skip:
         ldir = out / "lidar"
         ldir.mkdir(exist_ok=True)
@@ -184,18 +201,127 @@ def cmd_report(a: argparse.Namespace) -> None:
         print(f"{j['slug']:24s} {sp.get('ident')} {sp.get('length_m')} m  osm {j.get('osm', {}).get('features')}  lidar {li.get('points_in_corridor', 0):,} pts  structures {len(li.get('structures', []))}  geology {j.get('geology', {}).get('named_formations')}")
 
 
+def _sites(slug: str):
+    for d in sorted((DATA / "sites").glob("*")):
+        if (d / "site.json").exists() and (slug == "all" or d.name == slug):
+            yield d
+
+
 def cmd_export(a: argparse.Namespace) -> None:
-    from . import export, surface
+    """
+    Re-write web/ for one site or all of them.
+
+    By default this writes straight into the live tree, which is fine on a laptop and wrong for a
+    pipeline something is serving from: a viewer that reloads mid-export gets a manifest that does
+    not match the rasters beside it. `--staged` builds into `web.staging` instead and leaves the
+    served tree untouched until `corridor promote` swaps it in. `--promote` does both.
+    """
+    from . import export, surface, swap
+
+    staged = a.staged or a.promote
+    touched = []
+    for d in _sites(a.slug):
+        if not (d / "surface.json").exists() or a.resurface:
+            sf = surface.measure(d)
+            if sf:
+                print(f"{d.name:24s} surface {sf['summary']}")
+        live = Path(a.out) if a.out else d / "web"
+        target = swap.staging_dir(live) if staged else live
+        if staged and target.exists():
+            shutil.rmtree(target)
+        ex = export.export_site(d, target)
+        where = f"  -> {target.name}" if target != live else ""
+        print(f"{d.name:24s} {', '.join(ex['layers'])}  {ex['bytes'] / 2**20:.1f} MiB{where}")
+        touched.append((d, live, target))
+
+    if staged and a.promote:
+        for d, live, target in touched:
+            _promote(d.name, live, target, a.allow_missing)
+    if not staged or a.promote:
+        print(export.write_index(DATA / "sites"))
+    elif staged:
+        print(f"{len(touched)} staged, nothing live yet — `corridor promote {a.slug}` to swap")
+
+
+def _promote(name: str, live: Path, staged: Path, allow_missing: bool) -> bool:
+    from . import swap
+
+    gone = swap.missing_from(staged, live)
+    if gone and not allow_missing:
+        print(f"{name:24s} REFUSED: {len(gone)} file(s) in the live tree are absent from the staged one")
+        for g in gone[:8]:
+            print(f"    {g}")
+        if len(gone) > 8:
+            print(f"    ... and {len(gone) - 8} more")
+        print("    re-run the export, or pass --allow-missing if the layer is meant to be gone")
+        return False
+    how = swap.swap_dir(live, staged)
+    note = "atomic" if how == "exchange" else "brief gap" if how == "rename" else "first publish"
+    extra = f", {len(gone)} dropped" if gone else ""
+    print(f"{name:24s} LIVE ({note}{extra}) — previous tree kept at {staged.name}")
+    return True
+
+
+def cmd_promote(a: argparse.Namespace) -> None:
+    """Swap a staged export into place. The old tree is kept, so `rollback` is the same swap."""
+    from . import export
+
+    n = 0
+    for d in _sites(a.slug):
+        live = d / "web"
+        staged = live.with_name(live.name + ".staging")
+        if not staged.is_dir():
+            continue
+        n += _promote(d.name, live, staged, a.allow_missing)
+    if n:
+        print(export.write_index(DATA / "sites"))
+    print(f"{n} site(s) promoted")
+
+
+def cmd_rollback(a: argparse.Namespace) -> None:
+    """Undo a promote — the swap run a second time puts the previous tree back."""
+    from . import export, swap
+
+    n = 0
+    for d in _sites(a.slug):
+        live = d / "web"
+        staged = live.with_name(live.name + ".staging")
+        if not staged.is_dir():
+            continue
+        how = swap.swap_dir(live, staged)
+        print(f"{d.name:24s} ROLLED BACK ({'atomic' if how == 'exchange' else 'brief gap'})")
+        n += 1
+    if n:
+        print(export.write_index(DATA / "sites"))
+    print(f"{n} site(s) rolled back")
+
+
+def cmd_flora(a: argparse.Namespace) -> None:
+    """Backfill flora.json onto sites that were baked before this layer existed."""
+    from shapely.geometry import shape
+
+    from . import flora as flora_mod
+    from . import geo
 
     for d in sorted((DATA / "sites").glob("*")):
-        if (d / "site.json").exists() and (a.slug == "all" or d.name == a.slug):
-            if not (d / "surface.json").exists() or a.resurface:
-                sf = surface.measure(d)
-                if sf:
-                    print(f"{d.name:24s} surface {sf['summary']}")
-            ex = export.export_site(d)
-            print(f"{d.name:24s} {', '.join(ex['layers'])}  {ex['bytes'] / 2**20:.1f} MiB")
-    print(export.write_index(DATA / "sites"))
+        if not (d / "site.json").exists() or (a.slug != "all" and d.name != a.slug):
+            continue
+        if (d / "flora.json").exists() and not a.overwrite:
+            print(f"{d.name:24s} flora.json exists (--overwrite to redo)")
+            continue
+        site = json.loads((d / "site.json").read_text())
+        frame = geo.Frame.at(site["lon"], site["lat"])
+        t0 = time.time()
+        f = flora_mod.along_spine(None, frame, site, shape(site["corridor"]), CACHE, d)
+        top = ", ".join(f"{c['name']} {100 * c['share']:.0f}%" for c in f["evt"]["classes"][:3])
+        sp = ", ".join(f"{f['canopy']['ref'][s['key']]['common']} {100 * s['weight']:.0f}%" for s in f["canopy"]["species"][:4])
+        print(f"{d.name:24s} {time.time() - t0:5.0f}s  {len(f['evt']['classes'])} classes; {top}")
+        print(f"{'':24s}        canopy ({f['canopy']['coverage'] * 100:.0f}% BA cover, {f['canopy']['rasters_with_data']}/{f['canopy']['rasters_here']} rasters): {sp}")
+        print(f"{'':24s}        ground: " + ", ".join(f"{g['key']} {100 * g['weight']:.0f}%" for g in f["ground"]["classes"][:5]))
+        # keep web/ in step without paying for a full re-export of the imagery and the height PNGs
+        from . import export as export_mod
+
+        export_mod.refresh_flora(d)
 
 
 def cmd_areas(a: argparse.Namespace) -> None:
@@ -225,7 +351,22 @@ def main() -> None:
     ex = sub.add_parser("export", help="(re)write web/ layers + sites/index.json for the viewer")
     ex.add_argument("slug", nargs="?", default="all")
     ex.add_argument("--resurface", action="store_true", help="re-measure surface.json even if present")
+    ex.add_argument("--staged", action="store_true", help="build into web.staging and leave the served tree alone")
+    ex.add_argument("--promote", action="store_true", help="build staged, then swap it live (implies --staged)")
+    ex.add_argument("--out", help="write this ONE site's layers to an explicit directory instead of web/")
+    ex.add_argument("--allow-missing", action="store_true", help="promote even if the staged tree drops files the live one has")
     ex.set_defaults(fn=cmd_export)
+    pr = sub.add_parser("promote", help="swap a staged export live (atomic where the filesystem allows)")
+    pr.add_argument("slug", nargs="?", default="all")
+    pr.add_argument("--allow-missing", action="store_true")
+    pr.set_defaults(fn=cmd_promote)
+    rb = sub.add_parser("rollback", help="put the previous tree back — the promote swap, run again")
+    rb.add_argument("slug", nargs="?", default="all")
+    rb.set_defaults(fn=cmd_rollback)
+    fl = sub.add_parser("flora", help="fetch LANDFIRE EVT + FIA species + Daymet for baked sites")
+    fl.add_argument("slug", nargs="?", default="all")
+    fl.add_argument("--overwrite", action="store_true")
+    fl.set_defaults(fn=cmd_flora)
     ar = sub.add_parser("areas", help="propose adjustment-area polygons into <site>/adjustments.json")
     ar.add_argument("slug", nargs="?", default="all")
     ar.add_argument("--overwrite", action="store_true", help="replace the file instead of appending missing ids")

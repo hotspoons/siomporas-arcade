@@ -1,11 +1,39 @@
 // The site manifest as tools/corridor/corridor/export.py writes it. Metres, relative to the site
 // origin (the photo fix projected to UTM), z in metres NAVD88. Keep this in step with export.py.
 
+/**
+ * A geodetic control lattice over a raster: `n*n` lon/lat samples, row-major, rows running SOUTH
+ * to NORTH and columns WEST to EAST — the same order as `bbox`.
+ *
+ * A raster is a regular grid on whatever plane the bake projected it onto (UTM, today). In the
+ * ENU frame the viewer renders in, that grid is rotated by the meridian convergence, scaled, and
+ * curved over the ellipsoid, so its bbox cannot simply be relabelled. The viewer interpolates
+ * lon/lat from this lattice and asks the `Anchor` where each vertex goes; curvature is not a
+ * correction applied afterwards, it falls out of the transform.
+ *
+ * Measured over crofton-triangle's 8.56 x 7.90 km DEM, worst error against the exact projection:
+ * 1179 mm at 2x2, 295 at 3x3, 73 at 5x5, **18 at 9x9**, 4.6 at 17x17. The bake writes 9x9 for a
+ * whole raster and 3x3 for a 1 km tile.
+ *
+ * It also means the browser never learns which CRS the bake used, so a future source in some other
+ * projection just emits its own lattice. See docs/corridor/FRAME.md.
+ */
+export interface GeoLattice {
+  n: number
+  lon: number[]
+  lat: number[]
+}
+
 export interface Layer {
   file: string
   res: number
   size: [number, number]
-  bbox: [number, number, number, number] // xmin, ymin, xmax, ymax relative to origin
+  /** ENU metres about the site anchor, and only a CONTAINING box — `geo` is what places the grid */
+  bbox: [number, number, number, number]
+  /** absent on a manifest baked before the geodetic frame; such a site draws on a flat plane */
+  geo?: GeoLattice
+  /** GPU-compressed twin of `file`, when the bake wrote one — see textures.ts */
+  ktx2?: string
   zmin?: number
   zscale?: number
   scale?: number
@@ -46,6 +74,16 @@ export interface Crossing {
 }
 
 /** a road of a network site other than the primary: rendered as a first-class carriageway with its own strip */
+/** a road end with nothing beyond it: a turning bulb unless a human says it is a true dead end */
+export interface DeadEnd {
+  s: number
+  kind: 'cul_de_sac' | 'dead_end'
+  radius_m?: number
+  source?: string
+  x?: number
+  y?: number
+}
+
 export interface Branch {
   name: string | null
   ref?: string | null
@@ -59,21 +97,60 @@ export interface Branch {
   s_on_primary?: number | null
   profile?: { s: number[]; road_z: number[] } | null
   structures?: Structure[] | null
+  dead_ends?: DeadEnd[] | null
 }
 
 export interface Manifest {
   slug: string
   ident: Record<string, string> | null
-  frame: { epsg: number; origin: [number, number] }
+  /**
+   * Where this site is, and what its stored metres mean. `epsg`/`origin` are the UTM the bake
+   * writes; `anchor` is the same origin in WGS84 and is the geodetic authority — see
+   * docs/corridor/FRAME.md. `kind` is absent on a manifest baked before the geodetic frame
+   * existed, which is how the viewer knows it cannot place that site on the ellipsoid.
+   */
+  frame: {
+    epsg: number
+    origin: [number, number]
+    /**
+     * What the COORDINATES in this manifest are. "enu" is true ENU metres about `anchor`; "utm"
+     * is UTM easting/northing minus `origin`, on a plane. Both are small metric numbers and
+     * nothing else tells them apart, so guessing wrong draws the world rotated by the grid
+     * convergence — 55 m out at 3 km, and plausible-looking until measured.
+     */
+    kind?: 'utm' | 'enu'
+    anchor?: { lon: number; lat: number; h: number }
+    /** UTM north relative to TRUE north at the anchor, degrees — a rotation, not an error */
+    utm_convergence_deg?: number
+    utm_scale?: number
+  }
   bbox: [number, number, number, number]
-  layers: Partial<Record<'dem' | 'chm' | 'naip' | 'horizon' | 'horizon_naip', Layer>> & { tiles?: TileIndex }
+  layers: Partial<Record<'dem' | 'chm' | 'naip' | 'horizon' | 'horizon_naip' | 'flora', Layer>> & { tiles?: TileIndex }
   spine: {
+    dead_ends?: DeadEnd[] | null
     coords: [number, number, number][]
     photo_s: number
     length_m: number
     segments: { s_start: number; s_end: number; tags: Record<string, string> }[]
   }
   siblings: [number, number][][]
+  /** unnamed asphalt: OSM `highway=service` — driveways, parking aisles, alleys. Unmarked. */
+  driveways?: { service: string; width_m: number; surface?: string | null; coords: [number, number, number][] }[]
+  /** roads we do not model, stubbed ~60 m from where they meet ours so a junction goes somewhere */
+  stubs?: { highway: string; name?: string | null; lanes?: number; oneway?: string | null; coords: [number, number, number][] }[]
+  /** street furniture: signal masts and stop/give-way signs (OSM highway=traffic_signals|stop|give_way) */
+  signals?: {
+    masts: { x: number; y: number; z: number; yaw_deg: number; travel_deg: number; arm_m: number; lanes: number; junction: number; tagged: boolean }[]
+    signs: { kind: string; x: number; y: number; z: number; yaw_deg: number; travel_deg: number }[]
+  } | null
+  /** `amenity=parking` areas, in site metres; the viewer decides which are real (parking.ts) */
+  parking?: { kind: string; surface?: string | null; access?: string | null; name?: string | null; area_m2: number; z: number; ring: [number, number][]; holes: [number, number][][] }[] | null
+  /** `barrier=guard_rail|fence|wall|hedge` ways, with a vertex every 2 m and a grade (furniture.ts) */
+  barriers?: { kind: string; height_m: number; material?: string | null; coords: [number, number, number][] }[] | null
+  /** sidewalks and crossings: explicit `highway=footway` ways plus offsets from `sidewalk=*` roads */
+  sidewalks?: { kind: string; width_m: number; marked: boolean; source: string; coords: [number, number, number][] }[] | null
+  /** power lines and their supports (OSM power=line|minor_line, tower|pole) */
+  power?: { lines: { kind: string; voltage?: string | null; coords: [number, number, number][] }[]; supports: { kind: string; x: number; y: number; z: number; height_m: number }[] } | null
   /** network sites: every road that is not the primary spine */
   branches?: Branch[]
   structures: Structure[]
@@ -99,6 +176,27 @@ export interface Manifest {
   }
   photos: { file: string; heading_deg: number | null; taken: string | null }[]
   lidar: { dataset: string | null; points_in_corridor: number | null; classes: Record<string, number> | null }
+  /** OSM land-use polygons in site coordinates; groundcover.ts picks the grass type from them */
+  landuse?: { class: string; ring: [number, number][]; area_m2?: number }[]
+  /** OSM footprints with a measured height, in site metres (tools/corridor/corridor/buildings.py) */
+  buildings?: {
+    ring: [number, number][]
+    area_m2?: number
+    rect?: { w: number; d: number; yaw_deg: number }
+    height_m: number
+    height_src?: string
+    s?: number
+    lat?: number
+    tags?: Record<string, string>
+  }[]
+  /** what grows here: LANDFIRE EVT classes with their corridor share, an FIA species mix,
+   *  a ground-cover class per vegetation type and Daymet monthly climate (tools/corridor/corridor/flora.py).
+   *  Absent on bakes older than 2026-09-21; flora.ts falls back to the OSM land-use rule. */
+  flora?: import('./flora').FloraBlock | null
+  /** terrain-and-data agent: cut faces (cuts.py), exposed rock (rock.py), water (water.py); absent on older bakes */
+  cuts?: import('./rocks').CutsLayer | null
+  rock?: import('./rocks').RockLayer | null
+  water?: import('./water').WaterLayer | null
 }
 
 export interface IndexEntry {
@@ -142,6 +240,19 @@ export function decodeHeights(img: HTMLImageElement, layer: Layer): Float32Array
   const zmin = layer.zmin ?? 0
   const zs = layer.zscale ?? 0.01
   for (let i = 0; i < out.length; i++) out[i] = zmin + ((px[i * 4] << 8) | px[i * 4 + 1]) * zs
+  return out
+}
+
+/** Decode an 8-bit PNG of CLASS INDICES (the flora grid). No scaling: these are not measurements. */
+export function decodeIndex(img: HTMLImageElement): Uint8Array {
+  const c = document.createElement('canvas')
+  c.width = img.naturalWidth
+  c.height = img.naturalHeight
+  const ctx = c.getContext('2d', { willReadFrequently: true })!
+  ctx.drawImage(img, 0, 0)
+  const px = ctx.getImageData(0, 0, c.width, c.height).data
+  const out = new Uint8Array(c.width * c.height)
+  for (let i = 0; i < out.length; i++) out[i] = px[i * 4]
   return out
 }
 

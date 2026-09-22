@@ -1,7 +1,9 @@
 import { createReadStream, existsSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import { resolve, extname, normalize } from 'node:path'
+import { createGzip } from 'node:zlib'
 import { fileURLToPath } from 'node:url'
 import { defineConfig, type Plugin } from 'vite'
+import { devBridge } from '@apex/engine/dev/bridge-plugin'
 
 // The viewer reads the SAME layout the Worker will serve from R2: /sites/index.json and
 // /sites/<slug>/web/*. In dev those come straight off tools/corridor/data, so nothing is copied
@@ -33,8 +35,13 @@ function serveBake(): Plugin {
         if (rel.startsWith('..')) return next()
         const file = resolve(roots[prefix], rel)
         // DEV ONLY: the editor writes authored JSON back beside the bake — adjustments.json,
-        // placements.json — never anything the bake itself produced. Whitelisted by name.
-        if (req.method === 'PUT' && prefix === '/sites/' && /^[a-z0-9-]+\/(adjustments|placements|structures)\.json$/.test(rel.replaceAll('\\', '/'))) {
+        // placements.json, structures.json, dead_ends.json — never anything the bake itself
+        // produced. Whitelisted by name.
+        //
+        // `dead_ends` is Rich's third editor ask, keyed on the OSM NODE ID rather than on `s` or a
+        // chain id: the node id is in every dead_ends entry the bake emits and it survives a
+        // re-bake, a re-chaining and a change of chain set, which stations and chain ids do not.
+        if (req.method === 'PUT' && prefix === '/sites/' && /^[a-z0-9-]+\/(adjustments|placements|structures|dead_ends)\.json$/.test(rel.replaceAll('\\', '/'))) {
           const chunks: Buffer[] = []
           req.on('data', (c) => chunks.push(c))
           req.on('end', () => {
@@ -63,6 +70,16 @@ function serveBake(): Plugin {
         }
         res.setHeader('Content-Type', types[extname(file)] ?? 'application/octet-stream')
         res.setHeader('Cache-Control', 'no-cache')
+        // JSON goes over the wire compressed. crofton-triangle's manifest is 6.5 MB of it, and
+        // uncompressed it was 1 348 ms of the load against 13 ms to parse — transfer, not compute.
+        // The PNG/JPEG rasters are already compressed; gzipping them again only burns CPU.
+        const gz = /\bgzip\b/.test(String(req.headers['accept-encoding'] ?? '')) && /\.(json|geojson)$/.test(file)
+        if (gz) {
+          res.setHeader('Content-Encoding', 'gzip')
+          res.setHeader('Vary', 'Accept-Encoding')
+          createReadStream(file).pipe(createGzip()).pipe(res)
+          return
+        }
         createReadStream(file).pipe(res)
       })
     },
@@ -70,7 +87,9 @@ function serveBake(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [serveBake()],
+  // devBridge is inert unless APEX_BRIDGE is set, and can never reach a build — see
+  // packages/engine/src/dev/bridge-plugin.ts. `just bridge-dev corridor` turns it on.
+  plugins: [serveBake(), devBridge()],
   server: {
     // Keep in sync with the justfile (corridor viewer = 5185).
     port: 5185,

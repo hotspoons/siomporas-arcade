@@ -52,6 +52,10 @@ DATASETS = [
     "MD_VA_NCB_KGeorge_1_2020",
     "USGS_LPC_MD_VA_Sandy_NCR_2014_LAS_2015",
 ]
+# EPT sets that are older AND mis-classified (Sandy NCR 2014 uses class 17/18 as junk bins and has
+# no vegetation classes): skipped in favour of the TNM delivery tiles, where MD_Central_Processing_D24
+# (2020, vegetation classified) covers the same ground — a rule, not a per-site flag (main, 2026-09-21).
+PREFER_TNM_OVER = {"USGS_LPC_MD_VA_Sandy_NCR_2014_LAS_2015"}
 # a deck's underside is a plane: lowest point per 2 m lateral cell agrees across the road.
 # Real decks measured ≤ 0.28 m std / ≤ 0.74 m range; tree canopy over a narrow road ≥ 1.2 / ≥ 3.
 DECK_UNDERSIDE_STD = 0.5
@@ -88,7 +92,11 @@ def candidate_datasets(bbox_merc, cache: Path) -> list[tuple[str, dict]]:
         if b[0] <= x0 and b[1] <= y0 and b[3] >= x1 and b[4] >= y1:
             out.append((ds, ept))
     if not out:
-        raise RuntimeError("no EPT dataset covers this corridor")
+        # NOT an error: the caller falls back to the TNM delivery tiles, which is the only path
+        # that works outside the mid-Atlantic (DATASETS is a hand-kept list). Raising here killed
+        # every California / Oregon / Maine bake before the fallback could run.
+        print("  lidar   no EPT dataset covers this corridor; going straight to the TNM tiles", flush=True)
+        return []
     return out
 
 
@@ -154,6 +162,9 @@ def fetch_points(frame: Frame, bbox: tuple[float, float, float, float], cache: P
     ds = ""
     keys: list[str] = []
     for ds, ept in candidate_datasets(bbox_merc, cache):
+        if ds in PREFER_TNM_OVER:
+            print(f"  lidar   {ds}: junk-bin classification, preferring the TNM delivery tiles", flush=True)
+            continue
         keys = nodes_for(ds, ept, bbox_merc, cache)
         print(f"  lidar   {ds}: {len(keys)} octree nodes", flush=True)
         if not keys:
@@ -187,10 +198,29 @@ def _read_laz_tile(path: Path, frame: Frame, bbox, clip: Polygon | None = None) 
 
     las = laspy.read(path)
     crs = las.header.parse_crs()
+    rx, ry = np.asarray(las.x), np.asarray(las.y)
     if crs is None:
-        raise RuntimeError(f"{path.name}: no CRS in the LAS header")
+        # Deliveries from before the convention of writing a CRS into the header exist and are
+        # otherwise fine: OR_NorthCoast_2008-2009 is why Ecola would not bake. Decide it by
+        # geometry instead of guessing — try the site's own CRS and the UTM zone either side, and
+        # keep the one whose transformed extent lands on the corridor we asked USGS for.
+        cx, cy = float(np.median(rx)), float(np.median(ry))
+        xmin, ymin, xmax, ymax = bbox
+        pad = 20_000.0
+        for cand in (frame.crs, f"EPSG:{frame.epsg - 1}", f"EPSG:{frame.epsg + 1}"):
+            try:
+                tx, ty = Transformer.from_crs(cand, frame.crs, always_xy=True).transform(cx, cy)
+            except Exception:
+                continue
+            if xmin - pad <= tx <= xmax + pad and ymin - pad <= ty <= ymax + pad:
+                crs = cand
+                print(f"  lidar   {path.name}: no CRS in the header; its extent fits {cand}", flush=True)
+                break
+        if crs is None:
+            print(f"  lidar   {path.name}: no CRS in the header and no candidate fits its extent; skipped", flush=True)
+            return None
     tr = Transformer.from_crs(crs, frame.crs, always_xy=True)
-    x, y = tr.transform(np.asarray(las.x), np.asarray(las.y))
+    x, y = tr.transform(rx, ry)
     x, y = np.asarray(x), np.asarray(y)
     xmin, ymin, xmax, ymax = bbox
     m = (x >= xmin) & (x < xmax) & (y >= ymin) & (y < ymax)

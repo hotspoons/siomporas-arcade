@@ -36,19 +36,27 @@ apps/arcade/public/assets/
 apps/arcade/public/fonts/
 
 # corridor: the geo tool's venv and its downloaded lidar/imagery/OSM cache (rebuildable, GBs)
+# both forms, for the reason spelled out under public/surfaces below: the trailing-slash rule
+# matches directories only, and every agent worktree replaces these with a symlink to main's copy.
 tools/corridor/.venv/
+tools/corridor/.venv
 tools/corridor/data/
+tools/corridor/data
 
 # corridor viewer: generated textures (tools/surfaces/gen.py) and generated props (editor
 # probes/editor-assets.mjs) are regenerable and ~100 MB; they will live in a bucket, not in git.
 # catalog.json and the vendored Draco decoder stay.
-# The trailing slash matches DIRECTORIES ONLY. Each worktree links this path at its own copy,
-# and a symlink is not a directory, so without the slash-less line below the LINK gets
-# committed — and checking that out in the main checkout makes it point at its own path
-# (ELOOP, and the real directory is replaced by the link). Keep both lines.
+# both forms: the trailing-slash rule matches DIRECTORIES only, and a worktree's symlink to main's
+# textures slipped past it, got committed, and on checkout in main replaced the real directory with a
+# link to itself (Vite ELOOP, tunnel dark, 2026-09-21). Keep both lines.
 apps/corridor/public/surfaces/
 apps/corridor/public/surfaces
 apps/corridor/public/assets/*.glb
 
+# python bytecode: churns on every bake and has been landing in commits
+__pycache__/
+*.pyc
+
 # road-and-car: synthetic tiled-site fixture (probes/make-tiles.py), regenerable, not a bake
 apps/corridor/public/testdata/
+tools/corridor/.bin

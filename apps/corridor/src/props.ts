@@ -229,7 +229,16 @@ function blendFor(sets: Record<string, SurfaceSet>, from: string, to: string): T
  * lanes. A two-way road (`oneway=no`, or a non-motorway with no tag) has a DOUBLE YELLOW down the
  * centre and white edge lines both sides; its lanes are split evenly about the centreline.
  */
-export function roadMesh(st: Station[], lanesAt: (s: number) => number, classAt: (s: number) => string = () => 'asphalt_aged', sets: Record<string, SurfaceSet> = {}, lift = 0.02, twoWayAt: (s: number) => boolean = () => false): THREE.Group {
+/**
+ * Build a carriageway: asphalt, then its markings.
+ *
+ * `paintOff(x, z)` is how a junction stays bare. Nothing is painted through an intersection in
+ * the real world — no double yellow crossing another double yellow, no edge line ruled across the
+ * mouth of a side road — and we were painting every line straight through every one of them
+ * (Rich, twice). The predicate is asked for each marking quad at its own lateral offset, so a
+ * junction on the right erases the right-hand edge line and leaves the left one alone.
+ */
+export function roadMesh(st: Station[], lanesAt: (s: number) => number, classAt: (s: number) => string = () => 'asphalt_aged', sets: Record<string, SurfaceSet> = {}, lift = 0.02, twoWayAt: (s: number) => boolean = () => false, paintOff: ((x: number, z: number) => boolean) | null = null): THREE.Group {
   const g = new THREE.Group()
   // one asphalt geometry per surface class, so each gets its own textured material
   const byClass: Record<string, { pos: number[]; uv: number[]; idx: number[] }> = {}
@@ -296,6 +305,9 @@ export function roadMesh(st: Station[], lanesAt: (s: number) => number, classAt:
     // Paint runs over the untrimmed station interval: it sits 0.04 m above the asphalt, so it
     // crosses the blend band without a gap and without fighting it.
     const ml = 0.12, y2a = ya + 0.02, y2b = yb + 0.02
+    // is this line, at this lateral offset, inside a junction? test both ends of the quad
+    const off2 = (oa: number, ob: number) =>
+      !!paintOff && (paintOff(a.pos.x + sa.x * oa, a.pos.z + sa.z * oa) || paintOff(b.pos.x + sb.x * ob, b.pos.z + sb.z * ob))
     const cycle = Math.floor(a0.s / 12) * 12
     const dash = a0.s - cycle < 3.01 && Math.round(la) === Math.round(lb)
     const dashLen = Math.min(3, b0.s - a0.s)
@@ -304,22 +316,24 @@ export function roadMesh(st: Station[], lanesAt: (s: number) => number, classAt:
       // two-way: white edge lines on both shoulders, double yellow at the centre, white dashes
       // between the lanes of each direction (3+ lanes a side)
       const edgeA = wa / 2 - T.SHOULDER_OUT + off, edgeB = wb / 2 - T.SHOULDER_OUT + off
-      for (const sgn of [-1, 1]) quad(marks, midx, P(a.pos, sa, sgn * edgeA - ml, y2a), P(a.pos, sa, sgn * edgeA + ml, y2a), P(b.pos, sb, sgn * edgeB - ml, y2b), P(b.pos, sb, sgn * edgeB + ml, y2b), white, mcol)
-      for (const off of [-0.16, 0.16]) quad(marks, midx, P(a.pos, sa, off - 0.1, y2a), P(a.pos, sa, off + 0.1, y2a), P(b.pos, sb, off - 0.1, y2b), P(b.pos, sb, off + 0.1, y2b), yellow, mcol)
+      for (const sgn of [-1, 1]) { if (off2(sgn * edgeA, sgn * edgeB)) continue; quad(marks, midx, P(a.pos, sa, sgn * edgeA - ml, y2a), P(a.pos, sa, sgn * edgeA + ml, y2a), P(b.pos, sb, sgn * edgeB - ml, y2b), P(b.pos, sb, sgn * edgeB + ml, y2b), white, mcol) }
+      for (const off of [-0.16, 0.16]) { if (off2(off, off)) continue; quad(marks, midx, P(a.pos, sa, off - 0.1, y2a), P(a.pos, sa, off + 0.1, y2a), P(b.pos, sb, off - 0.1, y2b), P(b.pos, sb, off + 0.1, y2b), yellow, mcol) }
       const perSide = Math.max(1, Math.floor(la / 2))
       if (dash) for (const sgn of [-1, 1]) for (let l = 1; l < perSide; l++) {
         const off = sgn * l * T.LANE_WIDTH
+        if (off2(off, off)) continue
         quad(marks, midx, P(a.pos, sa, off - 0.08, y2a), P(a.pos, sa, off + 0.08, y2a), P(bb, sa, off - 0.08, y2a), P(bb, sa, off + 0.08, y2a), white, mcol)
       }
     } else {
       // one-way carriageway: yellow left (median side), white right, on the shoulder boundaries
       const leftA = -wa / 2 + T.SHOULDER_IN + off, leftB = -wb / 2 + T.SHOULDER_IN + off
       const rightA = wa / 2 - T.SHOULDER_OUT + off, rightB = wb / 2 - T.SHOULDER_OUT + off
-      quad(marks, midx, P(a.pos, sa, leftA - ml, y2a), P(a.pos, sa, leftA + ml, y2a), P(b.pos, sb, leftB - ml, y2b), P(b.pos, sb, leftB + ml, y2b), yellow, mcol)
-      quad(marks, midx, P(a.pos, sa, rightA - ml, y2a), P(a.pos, sa, rightA + ml, y2a), P(b.pos, sb, rightB - ml, y2b), P(b.pos, sb, rightB + ml, y2b), white, mcol)
+      if (!off2(leftA, leftB)) quad(marks, midx, P(a.pos, sa, leftA - ml, y2a), P(a.pos, sa, leftA + ml, y2a), P(b.pos, sb, leftB - ml, y2b), P(b.pos, sb, leftB + ml, y2b), yellow, mcol)
+      if (!off2(rightA, rightB)) quad(marks, midx, P(a.pos, sa, rightA - ml, y2a), P(a.pos, sa, rightA + ml, y2a), P(b.pos, sb, rightB - ml, y2b), P(b.pos, sb, rightB + ml, y2b), white, mcol)
       // lane dashes: 3 m paint / 9 m gap is the US standard; one dash per 12 m station cycle
       if (dash) for (let l = 1; l < la; l++) {
         const off = leftA + l * T.LANE_WIDTH
+        if (off2(off, off)) continue
         quad(marks, midx, P(a.pos, sa, off - 0.08, y2a), P(a.pos, sa, off + 0.08, y2a), P(bb, sa, off - 0.08, y2a), P(bb, sa, off + 0.08, y2a), white, mcol)
       }
     }

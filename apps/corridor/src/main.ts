@@ -1,15 +1,19 @@
 // corridor viewer: look at what tools/corridor baked, from above and from the driver's seat.
+import { registerBridgeContext, startDevBridge } from 'virtual:dev-bridge'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { buildSite, describe, type Site } from './scene'
 import { Car, type CarInput } from './car'
-import { FlyControls, sitOnRoad } from './fly'
+import { FlyControls } from './fly'
 import { MiniMap } from './minimap'
 import { TunePanel } from '@apex/engine/app/TunePanel'
 import * as T from './tuning'
 import { TUNE_TABS } from './tuning'
+import { applySiteTuning, saveSiteTuning } from './sitetuning'
+
 import { fetchJSON, type IndexEntry, type Manifest, type Structure, type Crossing } from './site'
 import { LOOK, SEASONS, type Season } from './season'
+import { WEATHER, WEATHERS, type Weather } from './weather'
 
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector<T>(sel)!
 const status = (s: string) => ($('#status').textContent = s)
@@ -25,7 +29,8 @@ const orbit = new OrbitControls(camera, canvas)
 orbit.enableDamping = true
 orbit.maxPolarAngle = Math.PI / 2 - 0.02
 
-scene.add(new THREE.HemisphereLight(0xe9eef2, 0x7a6a50, 0.75))
+const ambient = new THREE.HemisphereLight(0xe9eef2, 0x7a6a50, 0.75)
+scene.add(ambient)
 const sun = new THREE.DirectionalLight(0xfff0d8, 2.0)
 sun.position.set(-3000, 4000, 2500)
 scene.add(sun)
@@ -91,9 +96,32 @@ async function loadSite(slug: string) {
   site = await buildSite(manifest, status, LITE, renderer, scene.fog as THREE.FogExp2, season)
   applySky(season)
   scene.add(site.group)
-  // `tune` is TUNE_TABS itself, so a probe can read and set any knob through the same getters and
-  // setters the F6 panel uses — importing tuning.ts from a probe gets an HMR-dead copy instead.
-  ;(window as unknown as { corridor: unknown }).corridor = { site, scene, camera, drive, tune: TUNE_TABS } // for probes and the console
+  // for probes and the console. `tune` is the same knob table the F6 panel drives, so a probe can
+  // sweep a knob exactly as Rich would and see the same rebuild — the module's `export let`s
+  // cannot be written from outside, and a dynamic import of tuning.ts under HMR is a dead copy.
+  ;(window as unknown as { corridor: unknown }).corridor = {
+    site,
+    scene,
+    camera,
+    // the orbit controls re-derive the camera from their own target every frame, so a probe that
+    // only writes camera.position gets dragged back; set orbit.target too, as applyStance does
+    orbit,
+    drive,
+    THREE, // probes need Raycaster/Vector3 in the page, and there is no other handle on it
+
+    tune: {
+      tabs: TUNE_TABS,
+      names: () => TUNE_TABS.flatMap((t) => t.sections.flatMap((sec) => sec.keys.map((k) => k.name))),
+      get: (name: string) => tuneKey(name)?.get(),
+      set: (name: string, v: number) => {
+        const k = tuneKey(name)
+        if (!k) return false
+        k.set(v)
+        onTuneChange()
+        return true
+      },
+    },
+  }
   applyLayers()
   fillInfo(manifest)
   fly ??= new FlyControls(camera, orbit, canvas, (x, z) => site?.groundAt(x, z) ?? null)
@@ -101,7 +129,17 @@ async function loadSite(slug: string) {
   const st = readStanceParam()
   if (st && st.site === slug) applyStance(st)
   else toPhoto()
-  status('')
+  // per-site knob overrides, applied AFTER the panels have restored the browser's values so the
+  // committed file wins, and undoing whatever the previous site's file had set
+  const tuned = await applySiteTuning(slug, siteTuneAccess)
+  if (tuned.applied || tuned.unknown.length) {
+    onTuneChange()
+    // TunePanel.refresh is private, but toggle() refreshes a visible panel — reopening the active
+    // tab is the public way to make it show the values the site file just set
+    if (!tuneHost.classList.contains('hidden')) showTuneTab(tuneTab)
+    status(`${slug}: ${tuned.applied} site knobs applied${tuned.unknown.length ? `, ${tuned.unknown.length} unknown (${tuned.unknown.slice(0, 3).join(', ')})` : ''}`)
+    setTimeout(() => status(''), 4000)
+  } else status('')
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -111,11 +149,20 @@ function applyLayers() {
   const on = (name: string) => $<HTMLInputElement>(`input[data-layer="${name}"]`).checked
   site.setImagery(on('imagery'))
   site.setWire(on('wire'))
-  if (site.layers.canopy) site.layers.canopy.visible = on('canopy')
+  site.setCanopy(on('canopy'))
+  site.layers.buildings.visible = on('buildings')
+  if (site.layers.power) site.layers.power.visible = on('power')
   if (site.layers.trees) site.layers.trees.visible = on('trees')
+  if (site.layers.grass) site.layers.grass.visible = on('grass')
   site.layers.road.visible = on('road')
   if (site.layers.horizon) site.layers.horizon.visible = on('horizon')
   site.layers.structures.visible = on('structures')
+  if (site.layers.furniture) site.layers.furniture.visible = on('furniture')
+  if (site.layers.parking) site.layers.parking.visible = on('parking')
+  if (site.layers.barriers) site.layers.barriers.visible = on('barriers')
+  if (site.layers.sidewalks) site.layers.sidewalks.visible = on('sidewalks')
+  if (site.layers.rocks) site.layers.rocks.visible = on('rocks')
+  if (site.layers.water) site.layers.water.visible = on('water')
   site.layers.spine.visible = on('spine') && !drive.on
   site.layers.markers.visible = on('markers') && !drive.on
 }
@@ -146,6 +193,7 @@ function fillInfo(m: Manifest) {
       ['frame', `EPSG:${m.frame.epsg}, origin ${m.frame.origin.map((v) => v.toFixed(0)).join(', ')}`],
       ['lidar', lidar],
       ['stand-ins', `${site?.treeCount ?? 0} trees from the canopy, road from ${m.spine.segments.length} OSM segments`],
+      ['buildings', site ? `${site.buildingStats.count} footprints (${site.buildingStats.fromLidar} measured, ${site.buildingStats.gabled} gabled)` : '—'],
       ['crossings', Object.entries(byRel).map(([k, v]) => `${v} ${k}`).join(', ') || 'none'],
       ['surface', m.surface ? Object.entries(m.surface.summary).map(([k, v]) => `${k} ${(v * m.surface!.step_m / 1000).toFixed(1)} km`).join(', ') : 'not measured'],
     ])}
@@ -281,20 +329,59 @@ function applyMove(dt: number) {
 // season: sky, fog, ground tint here; leaves and grass in the scene
 let season: Season = (new URLSearchParams(location.search).get('season') as Season) || 'summer'
 if (!SEASONS.includes(season)) season = 'summer'
+/**
+ * Sky, fog and LIGHT for the season, then the weather pulled over the top of it. Both in one place
+ * because weather is a modifier on a season and not a state of its own: snow under a winter sun is
+ * a different scene from snow under a summer one.
+ */
 function applySky(s: Season) {
   const look = LOOK[s]
-  ;(scene.background as THREE.Color).copy(look.sky)
-  ;(scene.fog as THREE.FogExp2).color.copy(look.sky)
-  ;(scene.fog as THREE.FogExp2).density = look.fog
+  const w = WEATHER[weatherNow()]
+  const sky = look.sky.clone().lerp(w.skyTint, w.skyMix)
+  ;(scene.background as THREE.Color).copy(sky)
+  ;(scene.fog as THREE.FogExp2).color.copy(sky)
+  ;(scene.fog as THREE.FogExp2).density = look.fog * w.fogScale
+  sun.color.copy(look.sun.colour)
+  // overcast: the sun goes down and the sky comes up, which is what a grey day actually is
+  sun.intensity = look.sun.intensity * (1 - 0.72 * w.skyMix)
+  ambient.color.copy(look.ambient.sky)
+  ambient.groundColor.copy(look.ambient.ground)
+  ambient.intensity = look.ambient.intensity * (1 + 0.5 * w.skyMix)
+  // the knob is the single source of truth for road-and-car: car.ts reads T.WEATHER_GRIP_SCALE
+  tuneKey('WEATHER_GRIP_SCALE')?.set(w.grip)
+  site?.setWeather(weatherNow())
+}
+
+/** the weather the WEATHER knob selects */
+function weatherNow(): Weather {
+  return WEATHERS[Math.min(4, Math.max(0, Math.round(T.WEATHER)))]
 }
 const seasonSel = $<HTMLSelectElement>('#season')
 seasonSel.value = season
-seasonSel.onchange = () => {
-  season = seasonSel.value as Season
-  applySky(season)
-  site?.setSeason(season)
-  status(`${season}`)
+function setSeason(s: Season) {
+  season = s
+  seasonSel.value = s
+  applySky(s)
+  site?.setSeason(s)
+  status(`${s}`)
   setTimeout(() => status(''), 1200)
+}
+seasonSel.onchange = () => setSeason(seasonSel.value as Season)
+/** the F6 season knob (tuning.ts SEASON, -1 = leave the selector alone) */
+function applySeasonKnob() {
+  if (T.SEASON < 0) return
+  const want = SEASONS[Math.min(3, Math.max(0, Math.round(T.SEASON)))]
+  if (want !== season) setSeason(want)
+}
+/**
+ * A knob moved. The F6 panel and `window.corridor.tune.set` both come through here, so a probe
+ * sweeping a knob gets exactly what Rich gets from the slider — the first version of the probe
+ * hook called `retune()` alone and the season knob silently did nothing under it.
+ */
+function onTuneChange() {
+  applySeasonKnob()
+  applySky(season) // the WEATHER knob lives here: sky, fog, sun, grip and what is falling
+  site?.retune()
 }
 
 // A STANCE is everything needed to reproduce what is on screen: site, season, mode, camera (or
@@ -385,6 +472,11 @@ panelTab.onclick = () => setPanelHidden(!panel.classList.contains('hidden'))
 // Tuning: one engine TunePanel per tab (grass, trees, LOD shape, road, car, camera), a tab strip
 // above them. F6 toggles. Values persist per browser under apex-corridor-<tab>; Copy JSON in a
 // panel hands the numbers back to tuning.ts. A change re-picks trees / re-seeds grass at once.
+// The code defaults, read BEFORE the panels restore localStorage over them. This is the baseline
+// a per-site tuning.json is a diff against; capture it any later and it is somebody's scratch pad.
+const TUNE_BASELINE: Record<string, number> = {}
+for (const t of TUNE_TABS) for (const sec of t.sections) for (const k of sec.keys) TUNE_BASELINE[k.name] = k.get()
+
 const tuneHost = document.createElement('div')
 tuneHost.id = 'tunehost'
 tuneHost.className = 'hidden'
@@ -397,13 +489,19 @@ const tunePanels = TUNE_TABS.map((tab) => {
   tuneHost.append(panelEl)
   const p = new TunePanel(panelEl, `corridor-${tab.name}`, tab.sections)
   p.context = () => (captureStance() ?? {}) as Record<string, unknown>
-  p.onChange = () => site?.retune()
+  p.onChange = onTuneChange
   const b = document.createElement('button')
   b.textContent = tab.name
   b.onclick = () => showTuneTab(tab.name)
   tabStrip.append(b)
   return { name: tab.name, panel: p, button: b }
 })
+const saveSiteBtn = document.createElement('button')
+saveSiteBtn.textContent = 'save to site'
+saveSiteBtn.title = 'write every knob that differs from the code default into this site\u2019s tuning.json, so the corridor keeps its own look'
+saveSiteBtn.onclick = () => void doSaveSiteTuning()
+tabStrip.append(saveSiteBtn)
+
 let tuneTab = tunePanels[0].name
 function showTuneTab(name: string) {
   tuneTab = name
@@ -412,6 +510,30 @@ function showTuneTab(name: string) {
     t.button.classList.toggle('active', t.name === name)
   }
 }
+/** How sitetuning.ts reaches the knobs, without it needing to know about TUNE_TABS. */
+const siteTuneAccess = {
+  get: (name: string) => tuneKey(name)?.get(),
+  set: (name: string, v: number) => {
+    const k = tuneKey(name)
+    if (!k) return false
+    k.set(v)
+    return true
+  },
+  names: () => Object.keys(TUNE_BASELINE),
+}
+
+/** Write the knobs that differ from the code defaults into this site's tuning.json. */
+async function doSaveSiteTuning() {
+  if (!site) return
+  try {
+    const r = await saveSiteTuning(site.manifest.slug, siteTuneAccess, TUNE_BASELINE)
+    status(`saved ${r.count} knobs to ${site.manifest.slug}/tuning.json (${r.bytes} bytes)`)
+  } catch (e) {
+    status(`site tuning: ${(e as Error).message}`)
+  }
+  setTimeout(() => status(''), 6000)
+}
+
 function toggleTune() {
   const on = tuneHost.classList.toggle('hidden')
   if (!on) showTuneTab(tuneTab)
@@ -425,6 +547,12 @@ $('#top').onclick = toTop
 // Tab toggles drive/fly. Driving: W/S throttle/brake, A/D steer, Space handbrake, R resets to the
 // road. Flying: see fly.ts (WASD move, Q/E rotate, R/F dolly, T/G lift, right-drag look). P and
 // H (home = top) are shared.
+/** one knob of the F6 panel by name, wherever its tab is; undefined if there is no such knob */
+function tuneKey(name: string) {
+  for (const t of TUNE_TABS) for (const sec of t.sections) for (const k of sec.keys) if (k.name === name) return k
+  return undefined
+}
+
 const held = new Set<string>()
 addEventListener('keydown', (e) => {
   const tgt = e.target as HTMLElement
@@ -443,7 +571,6 @@ addEventListener('keydown', (e) => {
     case 'KeyH': toTop(); break
     case 'KeyC': if (drive.on) { drive.cockpit = !drive.cockpit; break } void copyStance(); break
     case 'KeyX': void copyStance(); break
-    case 'KeyG': if (!drive.on && site) sitOnRoad(camera, orbit, site.spineAt, site.manifest.spine.length_m); break
     case 'KeyM': setPanelHidden(!panel.classList.contains('hidden')); break
     case 'KeyN': minimap?.setExpanded(!minimap.expanded); break
     case 'KeyR': if (drive.on && site && drive.car) { const p = site.spineAt(site.manifest.spine.photo_s); const side = p.dir.clone().cross(up).multiplyScalar(1.83); drive.car.place(p.pos.x + side.x, p.pos.z + side.z, Math.atan2(p.dir.z, p.dir.x)) } break
@@ -502,31 +629,22 @@ function frame() {
     drive.input.throttle = padT
     drive.input.brake = padB
     // chase camera: behind and above, looking over the bonnet; drag adds a look-around yaw
-    car.setCockpit(drive.cockpit)
     if (drive.cockpit) {
-      // Cockpit: eye at the driver's head, looking down the nose (stuntin's C view); drive.yaw/pitch
-      // look around. NOTE there is no early return here. This branch used to `return` out of
-      // frame(), which skipped site.updateNear, the minimap, renderer.render AND the
-      // requestAnimationFrame that re-arms the loop — so pressing C froze the viewer dead and
-      // nothing brought it back (probes/corridor-cockpit.mjs: the car moved 0.48 m in 2 s in chase
-      // and 0.00 m in cockpit). The eye rides the body, so it pitches and rolls with the car.
-      const lean = new THREE.Vector3(0, T.COCKPIT_EYE_UP, 0).applyAxisAngle(car.right, -Math.atan(car.pitch))
-      const eye = car.pos.clone().add(lean).add(car.forward.clone().multiplyScalar(T.COCKPIT_EYE_FWD)).addScaledVector(car.right, T.COCKPIT_EYE_SIDE)
+      // cockpit: eye at the driver's head, looking down the nose (stuntin's C view); drive.yaw/pitch look around
+      const eye = car.pos.clone().add(new THREE.Vector3(0, T.COCKPIT_EYE_UP, 0)).add(car.forward.clone().multiplyScalar(T.COCKPIT_EYE_FWD))
       camera.position.copy(eye)
       const ahead = car.forward.clone().applyAxisAngle(up, drive.yaw)
-      camera.up.set(0, 1, 0).applyAxisAngle(car.forward, Math.atan(car.roll) * T.COCKPIT_ROLL)
       camera.lookAt(eye.clone().add(ahead.multiplyScalar(30)).add(new THREE.Vector3(0, -Math.tan(drive.pitch) * 30 + T.COCKPIT_LOOK_UP, 0)))
-    } else {
-      camera.up.set(0, 1, 0)
-      const back = car.forward.clone().applyAxisAngle(up, drive.yaw).multiplyScalar(-T.CHASE_BACK)
-      const want = car.pos.clone().add(back).add(new THREE.Vector3(0, T.CHASE_UP + Math.tan(drive.pitch) * 4, 0))
-      const gy = site.groundAt(want.x, want.z)
-      if (gy !== null && want.y < gy + 1.2) want.y = gy + 1.2
-      camera.position.lerp(want, 1 - Math.exp(-T.CHASE_LAG * dt))
-      camera.lookAt(car.pos.clone().add(car.forward.clone().multiplyScalar(T.CHASE_LOOK_AHEAD)).add(new THREE.Vector3(0, 1.0, 0)))
+      return
     }
+    const back = car.forward.clone().applyAxisAngle(up, drive.yaw).multiplyScalar(-T.CHASE_BACK)
+    const want = car.pos.clone().add(back).add(new THREE.Vector3(0, T.CHASE_UP + Math.tan(drive.pitch) * 4, 0))
+    const gy = site.groundAt(want.x, want.z)
+    if (gy !== null && want.y < gy + 1.2) want.y = gy + 1.2
+    camera.position.lerp(want, 1 - Math.exp(-T.CHASE_LAG * dt))
+    camera.lookAt(car.pos.clone().add(car.forward.clone().multiplyScalar(T.CHASE_LOOK_AHEAD)).add(new THREE.Vector3(0, 1.0, 0)))
     if (car.event === 'bump') status('bump')
-    $('#pos').textContent = `${(Math.abs(car.speed) * 2.237).toFixed(0)} mph  ${car.onGrass ? 'grass' : 'pavement'}${Math.abs(car.slide) > 1 ? '  sliding' : ''}${drive.cockpit ? '  cockpit' : ''}`
+    $('#pos').textContent = `${(Math.abs(car.speed) * 2.237).toFixed(0)} mph  ${car.onGrass ? 'grass' : 'pavement'}${Math.abs(car.slide) > 1 ? '  sliding' : ''}`
   } else {
     fly?.update(dt)
     applyMove(dt)
@@ -545,4 +663,66 @@ function frame() {
   requestAnimationFrame(frame)
 }
 
-loadIndex().then(frame).catch((e) => status(`failed: ${e.message}`))
+// the stack matters: `status()` shows only the message, and a load failure here is usually a
+// shader or a missing layer several files down
+loadIndex().then(frame).catch((e) => {
+  console.error('corridor: load failed', e)
+  status(`failed: ${e.message}`)
+})
+
+// --- dev operator shell ---------------------------------------------------------------------
+// Inert unless the dev server was started with APEX_BRIDGE set, and it cannot reach a build at
+// all — the virtual module resolves to empty no-ops otherwise, so not a byte of it, and no handle
+// onto the scene, exists at runtime. `just bridge-dev corridor`, then `just bridge '<js>' corridor`.
+//
+// This exists because the agent box has no GPU. Every frame-time number in this app's commits so
+// far is swiftshader's, which falls off a cliff at a few hundred thousand triangles and says
+// nothing about a real card. `apex.perf()` reads `renderer.info` — the DRAW CALLS and TRIANGLES
+// the GPU was actually given — plus measured frame times, from the machine that has one.
+startDevBridge()
+registerBridgeContext({
+  get site() {
+    return site
+  },
+  scene,
+  camera,
+  orbit,
+  renderer,
+  drive,
+  THREE,
+  tune: TUNE_TABS,
+  /**
+   * What the renderer really did, and what the frames really cost.
+   *
+   * 30 frames is half a second on a real card and fits inside the bridge's 5 s eval timeout; ask
+   * for more with `apex.perf(120)` and pass `--timeout 30000` to the client.
+   */
+  perf: (frames = 30) =>
+    new Promise<unknown>((resolve) => {
+      const t: number[] = []
+      let last = performance.now()
+      let i = 0
+      const tick = () => {
+        const n = performance.now()
+        t.push(n - last)
+        last = n
+        if (++i < frames) return requestAnimationFrame(tick)
+        const s = [...t].sort((a, b) => a - b)
+        const at = (p: number) => Math.round((s[Math.min(s.length - 1, Math.floor(s.length * p))] ?? 0) * 100) / 100
+        const r = renderer.info.render
+        resolve({
+          site: site?.manifest.slug ?? null,
+          frames: t.length,
+          fps: Math.round(1000 / (t.reduce((a, b) => a + b, 0) / t.length)),
+          ms: { median: at(0.5), p90: at(0.9), p99: at(0.99), max: Math.round(Math.max(...t) * 100) / 100 },
+          drawCalls: r.calls,
+          triangles: r.triangles,
+          programs: renderer.info.programs?.length ?? null,
+          geometries: renderer.info.memory.geometries,
+          textures: renderer.info.memory.textures,
+          drive: drive.on,
+        })
+      }
+      requestAnimationFrame(tick)
+    }),
+})

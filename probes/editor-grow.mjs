@@ -7,7 +7,8 @@ const [, , slug = 'frederick-i70', out = '/tmp/grow.png', ...actions] = process.
 const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] })
 const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } })
 await page.route('**/@vite/client', (r) => r.abort())
-\1page.on('console', (m) => logs.push(`${m.type()}: ${m.text()}`))
+const logs = []
+page.on('console', (m) => logs.push(`${m.type()}: ${m.text()}`))
 page.on('pageerror', (e) => logs.push(`pageerror: ${e.message}`))
 page.on('dialog', (d) => d.accept())
 
@@ -18,8 +19,21 @@ await page.waitForTimeout(1500)
 for (const a of actions) {
   const [verb, arg] = a.split(':')
   if (verb === 'gen') {
-    await page.evaluate(() => window.corridor.grow.run(window.corridor.site, window.corridor.place.assets))
-    await page.waitForTimeout(2500)
+    // time the RULES alone, separately from spawning the scene objects: on a big site those are
+    // two very different costs and only one of them is autogen's fault
+    const t = await page.evaluate(async () => {
+      const { site, place, grow } = window.corridor
+      const ag = await import('/src/editor/autogen.ts')
+      const t0 = performance.now()
+      const r = ag.generate(site.manifest, site, place.assets, grow.params)
+      const rules = performance.now() - t0
+      const t1 = performance.now()
+      await grow.run(site, place.assets)
+      return { rules: Math.round(rules), total: Math.round(performance.now() - t1), placed: r.items.length, skipped: r.skipped }
+    })
+    console.log(`  rules ${t.rules} ms -> ${t.placed} items; spawn+rules again ${t.total} ms`)
+    console.log('  skipped:', JSON.stringify(t.skipped))
+    await page.waitForTimeout(1500)
   } else if (verb === 'invent') {
     await page.evaluate(() => { window.corridor.grow.params.invent = true })
   } else if (verb === 'params') {
@@ -50,7 +64,10 @@ for (const a of actions) {
     const r = await page.evaluate(() => {
       const d = window.corridor.place.doc
       const f = (id) => d.items.find((p) => p.id === id)
-      return { n: d.items.length, locked: d.items.filter((p) => p.locked).map((p) => `${p.id}@${p.yaw_deg}`), deleted: d.autogen?.deleted ?? [], g88: !!f('g-88') }
+      const KINDS = ['house','retail_unit','house_large','townhouse','big_box','warehouse','restaurant','shed','apartments','office','school','church','hotel','gas_station','barn','strip_mall','utility']
+      const by = {}
+      for (const p of d.items) for (const t of p.tags ?? []) if (KINDS.includes(t)) by[t] = (by[t] ?? 0) + 1
+      return { n: d.items.length, by, locked: d.items.filter((p) => p.locked).map((p) => `${p.id}@${p.yaw_deg}`), deleted: d.autogen?.deleted ?? [], g88: !!f('g-88') }
     })
     console.log('  report:', JSON.stringify(r))
   } else if (verb === 'del') {

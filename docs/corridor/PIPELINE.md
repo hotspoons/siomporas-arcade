@@ -133,6 +133,29 @@ is the set with a `strat_name` (the detailed state-map sources). The polygons at
 go to `geology.geojson`. Credit Macrostrat (CC-BY) wherever shown. This is the input for the rock
 palette (Part 3).
 
+### 1.7b Flora (`flora.py`) — what grows beside it
+
+**LANDFIRE Existing Vegetation Type** (LF2024, 30 m, CONUS/AK/HI) over the corridor polygon, as
+AREA SHARES — the class at the centre point is `Developed-Roads` at every site we have. Each class
+keeps LANDFIRE's own `EVT_LF` / `EVT_PHYS` / `EVT_CLASS` / `EVT_SBCLS`, from which the bake derives
+a leaf cycle (evergreen / deciduous / mixed) and one of eighteen ground-cover classes by rule.
+
+**USFS FHP tree-species basal area** (340 species at 30 m, modelled from FIA) refines each class
+into a ranked species mix, joined to **FIA REF_SPECIES** for genus and the softwood/hardwood split.
+A spatial query against the raster catalogue names the 45–130 species that have a raster over this
+site, so it is that many `exportImage` calls and not 340. Where a class has fewer than eight pixels
+of basal area the species come from the class NAME instead, tokenised against FIA's vocabulary.
+Per species the bake also averages our own lidar CHM over the pixels that species holds, so the mix
+carries a MEASURED canopy height.
+
+**Daymet v4** (1 km) monthly rain and temperature, for phenology only — not what grows, but when it
+is green. Bixby Bridge takes 2 mm of rain in June–August (0.2 % of its year), Chesterfield Road
+419 mm (32 %).
+
+Out: `flora.json` + `flora_evt.npy` (the class index per 30 m pixel), a `flora` block in
+`web/manifest.json` and `web/flora_30m.png`. The sources, the fallback chain, the readouts at every
+test site and the traps are in `docs/corridor/FLORA.md`.
+
 ### 1.8 The point cloud (`lidar.py`)
 
 **Fetch.** USGS stages 3DEP projects as Entwine Point Tiles (EPT) in Web Mercator on a public S3
@@ -214,6 +237,7 @@ Browser-decodable layers on one 2 m lattice, coordinates **relative to the site 
 | `chm_2m.png` | canopy, 8-bit, 0.25 m per step, **zeroed over every carriageway** (paved width + 2 m, from the max lane count) **and under every OSM building footprint + 1 m** — a truck is a 4 m "tree", a roof a 6 m one |
 | `naip_1m.jpg` | imagery at 1 m, saturation 1.3× / contrast 1.1× / warmed, because NAIP is flown for measurement and reads grey-green under fog |
 | `horizon_60m.png`, `horizon_naip_60m.jpg` | far terrain, same height encoding, 1000² over 60 km |
+| `flora_30m.png` | the LANDFIRE EVT class INDEX per pixel into `flora.evt.classes`, 255 outside the corridor — on its own 30 m lattice, because the source is 30 m and resampling a class raster to 2 m is megabytes of the same integer |
 | `manifest.json` | see below |
 
 Before the vectors, `buildings.derive` (`buildings.py`) computes per OSM footprint the minimum
@@ -230,10 +254,81 @@ the kinks. Siblings get the same treatment (2-D only).
 `web/manifest.json` keys: `slug`, `ident`, `frame`, `bbox`, `layers`, `spine` (`coords` [x,y,z]
 every 10 m, `photo_s`, `length_m`, `segments` with tags), `siblings`, `structures`, `crossings`,
 `surface` (stations + segments + summary), `profile` (every 10 m: `road_z`, `ground_rel` at
-8/15/40, `canopy` at 15/40), `geology`, `photos`, `lidar` summary, `buildings`, `landuse`, `pois`.
+8/15/40, `canopy` at 15/40), `geology`, `flora` (EVT classes with their corridor share and species mix, the site species mix with
+genus and measured canopy height per species, ground-cover shares, Daymet monthly climate),
+`photos`, `lidar` summary, `buildings`, `landuse`, `pois`.
 `write_index` rebuilds `sites/index.json`. The TypeScript mirror is `apps/corridor/src/site.ts`.
 
-### 1.12 Proposals, publish, cluster
+### 1.12 Network sites (`network.py`, `network_tiles.py`) — one region of roads as one world
+
+A `sites.json` entry with `kind: "network"` names a region's roads (`roads`: OSM `name`s or
+`ref`s such as `MD 450`), a `primary` road, a centre and a `radius_m`. `network.roads` fetches
+every `highway` way in the radius carrying one of those identities (one Overpass query, cached),
+drops footways/service/tracks, chains each identity with `osm._chains`, discards stubs under
+120 m, and picks the **primary** as the longest chain of the primary road. **Junctions** are OSM
+node ids shared between chains, positioned in the site frame with their along-track `s` on each
+chain. `write_vectors` emits the usual files: `spine_utm.json` (the primary as `coords`, every
+other chain as a `sibling` with the additive keys `id name ref ident highway lanes oneway
+length_m junctions`, plus `network: true`, `primary.junctions`, `roads`), `site.json` whose
+`corridor` is the **union of every chain buffered 150 m**, `osm.geojson` inside that union's hull,
+`crossings.json` for the primary.
+
+Rasters follow the corridor's bbox. Under 6 km a side (Arrowhead Farms: 2.6 × 4.3 km) the
+single-image path runs unchanged; over it (Crofton–Crownsville: 18.8 × 18.2 km, 30.7 km² of
+corridor) the **tiled path** does:
+
+- DEM via `dem.fetch_dem` over the whole bbox (deflate; the bbox is mostly fields, they compress);
+- NAIP at **1 m** (`naip_tiled`): only the 4 km service tiles that touch the corridor, written
+  window by window into one JPEG GeoTIFF — 0.3 m over 18 km would be 5 GB;
+- lidar tile-wise (`lidar_tiled`): TNM LAZ delivery tiles of the newest project, each read,
+  reprojected, clipped to the corridor and scattered into **1 km output tiles** (min ground, max
+  surface, max vegetation/unassigned, deck max/count, building count) — the whole cloud (~150 M
+  points) never exists in memory; class 17/18 demoted per tile when over 3 %; only points within
+  15 m of a road are kept (`lidar/corridor.laz`) for the structure tests; per-tile GeoTIFFs under
+  `lidar/tiles/<x>_<y>.*.tif` and `gdalbuildvrt` VRTs over them;
+- profiles per chain with `LazyRaster` (the VRT answering `arr[r, c]` in row bands) so
+  `lidar.profile` runs unchanged on a 16 km branch.
+
+Every branch gets its own `lidar.profile` (grade lifted onto its decks, structures) into
+`branches.json`; `export.py` turns those into the manifest's **`branches`** (main's schema):
+`coords [x, y, z]` every 10 m smoothed like the spine, `junctions` with `z`, `s_on_primary`,
+`profile {s, road_z}`, `structures`, `surface: null`. `siblings` stays as before for the old
+viewer path. Tiled sites export `web/tiles/0/<x>_<y>.dem.png|chm.png|naip.jpg` (same encodings,
+2 m / 2 m / 1 m, chm zeroed over every carriageway and building) and
+`layers.tiles = {size_m: 1000, origin, res, dir, list: [{x, y, dem: {zmin, zscale}, chm, naip}]}`
+instead of the single-image dem/chm/naip layers; the horizon stays one image. `cuts`, `rock` and `water` run on
+tiled sites too: `water._Heights` keeps any raster over 40 M cells open and reads only the window
+each call needs, `cuts` builds its transects in 256-station chunks so those windows stay compact
+and runs per chain against that chain's own profile, and `rock` runs per 1 m raster tile. Face and
+polygon ids carry the road or tile they came from.
+
+Run: `python -m corridor fetch arrowhead-farms-network` (39 min, 2.2 GB of LAZ) /
+`fetch crofton-crownsville --half-width 150 --lidar-half-width 150` (8.7 h, 199 LAZ tiles, 500 M
+points, 1.3 GB on disk). `python -m corridor.network_tiles <slug>` **re-profiles** a tiled site
+from the rasters and `lidar/corridor.laz` already on disk — minutes, for when a rule downstream of
+the rasters changes.
+
+**Dead ends** (`network.dead_ends`). A chain end is an end only when no other chain of ours shares
+its node, no `highway` way outside the `roads` list uses it (one Overpass query resolves every end
+node at once), and it is more than 60 m from our own query box — otherwise it is a junction with an
+unlisted road, or our own clip. Rich's rule is that an end is a **cul-de-sac unless told
+otherwise**, so that is what the bake emits; OSM's `highway=turning_circle` / `turning_loop` marks
+`source: "osm"`, everything else `"assumed"`, and the editor overrides `kind` to `dead_end`.
+Radius is to the pavement edge: 9 m residential/tertiary (the 18 m US bulb), 8 m living_street, 6 m
+service. Written as `dead_ends: [{s, kind, radius_m, source, node, x, y}]` on the primary and every
+branch.
+
+**Crops.** `manifest.landuse` rings carry `crop: [...] | null` and `name` from OSM's `crop` /
+`produce` / `trees`. Across every bake there are 49 `farmland` rings and 2 crop tags, so the
+editor's authoring path is the one that matters; NAIP row detection is not worth it.
+
+**A NaN is a broken site.** `lidar.profile` on the single-image path samples a gap-*filled* DTM;
+the tiled path samples a VRT, whose nodata is NaN, so a station in a lidar hole or at the
+corridor's edge produced `NaN` in `road_z`, and `json.dump` wrote a literal `NaN` that
+`JSON.parse` refuses — one token breaks the entire manifest. `network_tiles._fill_along`
+interpolates along every profile array and `export_branches` guards every number.
+
+### 1.13 Proposals, publish, cluster
 
 `areas.py` (`python -m corridor areas`) proposes neutral adjustment-area polygons from what the
 bake measured: a canopy side that reads < 40 % of the other (a leaf-off flight line), canopy runs
@@ -427,15 +522,16 @@ consumer:
 
 | bake | manifest key | viewer | detects |
 |---|---|---|---|
-| `cuts.py` | `cuts` | `rocks.ts` | cut faces from `profile.ground_rel` + the DTM: ground rising > 0.6 m/m within 15 m of pavement for ≥ 20 m; `artificial` (straight, constant slope, parallel to the road) vs `natural` (ravine walls both sides, following a stream) |
-| `rock.py` | `rock` | `rocks.ts` | exposed rock: bare ground (no canopy) with high 1 m roughness, slope > 30°, lithology from `geology.json`, NAIP grey/brown → polygons with a rock type; the kit is 4–6 boulder/ledge GLBs per lithology |
-| `water.py` | `water` | `water.ts` | OSM `waterway=*` / `natural=water` snapped to the DTM low line → water mesh with an animated normal shader; falls where a stream drops > 2 m over 20 m → whitewater strip |
+| `cuts.py` | `cuts` | `rocks.ts` | cut faces from 1 m DTM transects every 4 m: a 5 m window steeper than 0.6 m/m rising ≥ 3 m with its toe inside 40 m, for ≥ 20 m; `artificial` (toe parallel to the road, std ≤ 3 m) vs `natural` (toe wanders, a stream beside it, both sides rising) |
+| `rock.py` | `rock` | `rocks.ts` | exposed rock: slope > 40° with ≥ 3 m of relief over 7 m, bare or inside a cut face (1 m roughness and leaf-on NAIP colour were measured and do not separate rock from soil; intensity is recorded per polygon), lithology from `geology.json` → polygons with a rock type; the kit is 4 boulder/ledge/talus GLBs per lithology (`probes/terrain-rockkit.mjs`) |
+| `water.py` | `water` | `water.ts` | OSM `waterway=*` / `natural=water` snapped to the DTM low line (±6 m; the OSM line is within 3 m of it 9 times in 10) → ribbon at channel + `WATER_DEPTH` with a scrolling-noise normal; culverts skipped; runs of 20 m windows dropping > 2 m → foam ribbon (`falls` if grade > 0.25, else `rapids`) |
 
 See `DESIGN.md` for the rules and `SITES.md` for what each baked site actually contains.
 
 ## Appendix · Running it
 
 ```bash
+tools/corridor/.venv/bin/python -m corridor.verify [slug]     # is this safe to publish? (see below)
 just corridor-sites                    # photos → sites.json (or hand-edit sites.json for a lat/lon)
 just corridor-fetch <slug>             # one site; `all`; `--skip lidar` for a quick pass
 just corridor-export [slug]            # rewrite web/ + index.json without refetching (--resurface re-measures)
@@ -445,6 +541,14 @@ just corridor-view                     # :5185; /editor.html on the same server
 just corridor-tunnel                   # devproxy :5190 + cloudflared, for the phone
 tools/corridor/.venv/bin/python tools/surfaces/gen.py [class] # regenerate a texture set
 ```
+
+**Verify before you believe a bake.** `python -m corridor.verify [slug ...]` checks what a consumer
+relies on and exits with the number of bad sites: the manifest parses and holds no non-finite
+number anywhere (one literal `NaN` makes `JSON.parse` refuse the whole file); `manifest.json`
+exists beside `web/`, so a bake that died before lidar cannot pass as a finished site; every layer
+named is on disk, every listed tile has its `dem.png` and its `zmin`/`zscale`; a network's branch
+ids are present, unique and agree with `spine_utm.json`. It exists because every data bug found on
+2026-09-21 rendered perfectly and was wrong.
 
 Licences: USGS 3DEP and NAIP public domain; OSM ODbL (attribute; share-alike on derived *data*);
 Macrostrat CC-BY; ez-tree MIT; TRELLIS.2 per its licence banner in the recon service.

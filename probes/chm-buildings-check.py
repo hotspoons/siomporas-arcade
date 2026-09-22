@@ -34,7 +34,11 @@ def check(slug: str) -> None:
     if not blds:
         print(f"{slug:22s} no buildings in the manifest")
         return
-    L = m["layers"]["chm"]
+    L = (m.get("layers") or {}).get("chm")
+    if not L:
+        # a site whose lidar produced no canopy raster (new coastal bakes); nothing to mask
+        print(f"{slug:24s} {len(blds):4d} footprints | no chm layer — skipped")
+        return
     chm = np.asarray(Image.open(web / L["file"])).astype(np.float32) * L.get("scale", 0.25)
     x0, _, _, y1 = L["bbox"]
     tr = from_origin(x0, y1, L["res"], L["res"])

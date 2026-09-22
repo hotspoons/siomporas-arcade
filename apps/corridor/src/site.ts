@@ -1,11 +1,37 @@
 // The site manifest as tools/corridor/corridor/export.py writes it. Metres, relative to the site
 // origin (the photo fix projected to UTM), z in metres NAVD88. Keep this in step with export.py.
 
+/**
+ * A geodetic control lattice over a raster: `n*n` lon/lat samples, row-major, rows running SOUTH
+ * to NORTH and columns WEST to EAST — the same order as `bbox`.
+ *
+ * A raster is a regular grid on whatever plane the bake projected it onto (UTM, today). In the
+ * ENU frame the viewer renders in, that grid is rotated by the meridian convergence, scaled, and
+ * curved over the ellipsoid, so its bbox cannot simply be relabelled. The viewer interpolates
+ * lon/lat from this lattice and asks the `Anchor` where each vertex goes; curvature is not a
+ * correction applied afterwards, it falls out of the transform.
+ *
+ * Measured over crofton-triangle's 8.56 x 7.90 km DEM, worst error against the exact projection:
+ * 1179 mm at 2x2, 295 at 3x3, 73 at 5x5, **18 at 9x9**, 4.6 at 17x17. The bake writes 9x9 for a
+ * whole raster and 3x3 for a 1 km tile.
+ *
+ * It also means the browser never learns which CRS the bake used, so a future source in some other
+ * projection just emits its own lattice. See docs/corridor/FRAME.md.
+ */
+export interface GeoLattice {
+  n: number
+  lon: number[]
+  lat: number[]
+}
+
 export interface Layer {
   file: string
   res: number
   size: [number, number]
-  bbox: [number, number, number, number] // xmin, ymin, xmax, ymax relative to origin
+  /** ENU metres about the site anchor, and only a CONTAINING box — `geo` is what places the grid */
+  bbox: [number, number, number, number]
+  /** absent on a manifest baked before the geodetic frame; such a site draws on a flat plane */
+  geo?: GeoLattice
   zmin?: number
   zscale?: number
   scale?: number

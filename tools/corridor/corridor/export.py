@@ -30,6 +30,57 @@ from shapely.geometry import LineString
 
 from .geo import Frame
 
+
+# --- the ENU choke point ---------------------------------------------------------------------
+#
+# Everything the bake writes as "site metres" goes through one of these. The stored world is a
+# true ENU tangent plane about the site's geodetic anchor, not the UTM plane it is measured on --
+# UTM north is not true north (1.06 deg at Crofton, and it differs per site), UTM has a scale
+# factor, and a plane has no curvature at all. See docs/corridor/FRAME.md.
+#
+# Rasters do NOT come through here: a raster is a regular grid on the UTM plane and in ENU that
+# grid is rotated, scaled and curved. They carry a geodetic control lattice instead
+# (Frame.control_lattice) and the viewer places each vertex from it.
+
+
+def _enu(frame: Frame, x, y, nd: int = 2):
+    """One point: UTM easting/northing -> rounded (east, north) in ENU metres."""
+    e, n = frame.to_enu(x, y)
+    return round(float(e), nd), round(float(n), nd)
+
+
+def _enu_cols(frame: Frame, pts: np.ndarray, zs=None, nd: int = 2) -> list:
+    """An Nx2 array of UTM points -> [[e, n], ...] or [[e, n, z], ...], rounded."""
+    e, n = frame.to_enu(pts[:, 0], pts[:, 1])
+    cols = [np.asarray(e), np.asarray(n)] + ([np.nan_to_num(np.asarray(zs, dtype=float))] if zs is not None else [])
+    return np.column_stack(cols).round(nd).tolist()
+
+
+def _enu_ring(frame: Frame, coords, nd: int = 2) -> list:
+    """A ring/line of (x, y) UTM pairs -> [[e, n], ...]."""
+    a = np.asarray([[c[0], c[1]] for c in coords], dtype=float)
+    if not len(a):
+        return []
+    e, n = frame.to_enu(a[:, 0], a[:, 1])
+    return np.column_stack([np.asarray(e), np.asarray(n)]).round(nd).tolist()
+
+
+def _enu_bbox(frame: Frame, b) -> list:
+    """
+    A UTM bbox -> the ENU bbox that CONTAINS it.
+
+    The UTM rectangle is not a rectangle in ENU (it is rotated by the convergence), so this takes
+    the hull of the whole boundary rather than two corners, and is used for culling only. Where a
+    raster lives, `geo` (the control lattice) is what places it.
+    """
+    xs = np.linspace(b[0], b[2], 9)
+    ys = np.linspace(b[1], b[3], 9)
+    px = np.concatenate([xs, xs, np.full(9, b[0]), np.full(9, b[2])])
+    py = np.concatenate([np.full(9, b[1]), np.full(9, b[3]), ys, ys])
+    e, n = frame.to_enu(px, py)
+    e, n = np.asarray(e), np.asarray(n)
+    return [round(float(e.min()), 2), round(float(n.min()), 2), round(float(e.max()), 2), round(float(n.max()), 2)]
+
 Z_SCALE = 0.01  # metres per count; 655 m of range in a uint16
 
 
@@ -151,7 +202,7 @@ def _service_ways(site_dir: Path, frame, ox: float, oy: float, bbox) -> list[dic
                 "service": p.get("service") or "service",
                 "width_m": WIDTH.get(p.get("service", ""), 3.6),
                 "surface": p.get("surface"),
-                "coords": np.column_stack([pts[:, 0] - ox, pts[:, 1] - oy, np.nan_to_num(zs)]).round(2).tolist(),
+                "coords": _enu_cols(frame, pts, zs),
             })
     if src is not None:
         src.close()
@@ -250,7 +301,7 @@ def _stub_roads(site_dir: Path, frame, ox: float, oy: float, bbox) -> list[dict]
                 "highway": hw, "name": p.get("name") or p.get("ref"),
                 "lanes": int(p["lanes"]) if str(p.get("lanes", "")).isdigit() else LANES.get(hw, 2),
                 "oneway": p.get("oneway"),
-                "coords": np.column_stack([pts[:, 0] - ox, pts[:, 1] - oy, np.nan_to_num(zs)]).round(2).tolist(),
+                "coords": _enu_cols(frame, pts, zs),
             })
     if src is not None:
         src.close()
@@ -263,9 +314,19 @@ DRIVABLE = (
 )
 
 
-def _bearing(dx: float, dy: float) -> float:
-    """Compass bearing of a vector in UTM metres (x east, y north): 0 = north, 90 = east."""
-    return math.degrees(math.atan2(dx, dy)) % 360.0
+def _bearing(dx: float, dy: float, conv: float = 0.0) -> float:
+    """
+    TRUE compass bearing of a vector measured in UTM metres: 0 = north, 90 = east.
+
+    `conv` is the grid convergence — UTM north is not true north, by 1.06 deg at Crofton and a
+    different amount at every site (-1.73 to +1.60 across the baked set). Everything else the bake
+    emits is now in a true ENU frame, so a bearing left in grid degrees would point every sign,
+    signal head and building a degree or so off the road it belongs to. Measured: UTM (3000, 0)
+    lands at ENU (2999.92, 55.48), i.e. grid bearing 90 is true bearing 88.94.
+
+    NOT applied to photo `heading_deg`: that comes from EXIF GPS and is already true north.
+    """
+    return (math.degrees(math.atan2(dx, dy)) - conv) % 360.0
 
 
 def _road_index(features) -> dict:
@@ -316,6 +377,8 @@ def _signals(site_dir: Path, frame, ox: float, oy: float, bbox) -> dict:
     Isolated signals — a mid-block pedestrian crossing, of which there are many — have no junction
     to point at, so they take the arm's own tangent and the OSM direction tag.
     """
+    # UTM north is not true north; every bearing below is corrected by it (see _bearing)
+    conv = float(frame.manifest_frame()["utm_convergence_deg"])
     gj_p = site_dir / "osm.geojson"
     if not gj_p.exists():
         return {"masts": [], "signs": []}
@@ -397,11 +460,11 @@ def _signals(site_dir: Path, frame, ox: float, oy: float, bbox) -> dict:
             heads = _bearing(-trav[0], -trav[1])  # the heads look back at the traffic
             lanes = _lanes_of(way["properties"])
             masts.append({
-                "x": round(float(n["x"] - ox), 2),
-                "y": round(float(n["y"] - oy), 2),
+                "x": _enu(frame, n["x"], n["y"])[0],
+                "y": _enu(frame, n["x"], n["y"])[1],
                 "z": round(ground(n["x"], n["y"]), 2),
                 "yaw_deg": round(heads, 1),            # compass bearing the heads face
-                "travel_deg": round(_bearing(*trav), 1),
+                "travel_deg": round(_bearing(*trav, conv), 1),
                 "arm_m": round(lanes * 3.66 / 2 + 1.4, 2),
                 "lanes": lanes,
                 "junction": len(grp),
@@ -434,11 +497,11 @@ def _signals(site_dir: Path, frame, ox: float, oy: float, bbox) -> dict:
         trav = (tx / tl * sgn, ty / tl * sgn)
         signs.append({
             "kind": kind,
-            "x": round(float(x - ox), 2),
-            "y": round(float(y - oy), 2),
+            "x": _enu(frame, x, y)[0],
+            "y": _enu(frame, x, y)[1],
             "z": round(ground(x, y), 2),
-            "yaw_deg": round(_bearing(-trav[0], -trav[1]), 1),
-            "travel_deg": round(_bearing(*trav), 1),
+            "yaw_deg": round(_bearing(-trav[0], -trav[1], conv), 1),
+            "travel_deg": round(_bearing(*trav, conv), 1),
         })
 
     if src is not None:
@@ -487,7 +550,7 @@ def _parking(site_dir: Path, frame, ox: float, oy: float, bbox) -> list[dict]:
         for part in (poly.geoms if poly.geom_type == "MultiPolygon" else [poly]):
             if part.geom_type != "Polygon" or part.area < 60:
                 continue
-            ring = [[round(float(x - ox), 2), round(float(y - oy), 2)] for x, y in part.exterior.coords[:-1]]
+            ring = _enu_ring(frame, part.exterior.coords[:-1])
             if len(ring) < 3:
                 continue
             cx, cy = part.centroid.x, part.centroid.y
@@ -503,7 +566,7 @@ def _parking(site_dir: Path, frame, ox: float, oy: float, bbox) -> list[dict]:
                 "area_m2": round(float(part.area), 1),
                 "z": round(z, 2),
                 "ring": ring,
-                "holes": [[[round(float(x - ox), 2), round(float(y - oy), 2)] for x, y in h.coords[:-1]] for h in part.interiors],
+                "holes": [_enu_ring(frame, h.coords[:-1]) for h in part.interiors],
             })
     if src is not None:
         src.close()
@@ -572,7 +635,7 @@ def _barriers(site_dir: Path, frame, ox: float, oy: float, bbox) -> list[dict]:
                 "kind": kind,
                 "height_m": round(h or KIND[kind], 2),
                 "material": p.get("material") or p.get("fence_type"),
-                "coords": np.column_stack([pts[:, 0] - ox, pts[:, 1] - oy, np.nan_to_num(zs)]).round(2).tolist(),
+                "coords": _enu_cols(frame, pts, zs),
             })
     if src is not None:
         src.close()
@@ -625,7 +688,7 @@ def _sidewalks(site_dir: Path, frame, ox: float, oy: float, bbox) -> list[dict]:
             "width_m": round(float(width), 2),
             "marked": bool(marked),
             "source": source,
-            "coords": np.column_stack([pts[:, 0] - ox, pts[:, 1] - oy, zs]).round(2).tolist(),
+            "coords": _enu_cols(frame, pts, zs),
         })
 
     def width_of(p, default):
@@ -728,7 +791,7 @@ def _power(site_dir: Path, frame, ox: float, oy: float, bbox) -> dict:
                 pts = np.array(part.coords)
                 lines.append({
                     "kind": pw, "voltage": p.get("voltage"), "circuits": p.get("circuits"),
-                    "coords": [[round(float(x - ox), 2), round(float(y - oy), 2), round(ground(x, y), 2)] for x, y in pts],
+                    "coords": [[*_enu(frame, x, y), round(ground(x, y), 2)] for x, y in pts],
                 })
         elif pw in ("tower", "pole", "portal") and g["type"] == "Point":
             x, y = frame.from_wgs(*g["coordinates"][:2])
@@ -739,7 +802,7 @@ def _power(site_dir: Path, frame, ox: float, oy: float, bbox) -> dict:
                 h = float(str(p.get("height", "")).rstrip("m ").strip())
             except ValueError:
                 h = None
-            supports.append({"kind": pw, "x": round(float(x - ox), 2), "y": round(float(y - oy), 2), "z": round(ground(x, y), 2), "height_m": h or HEIGHT.get(pw, 10.0)})
+            supports.append({"kind": pw, "x": _enu(frame, x, y)[0], "y": _enu(frame, x, y)[1], "z": round(ground(x, y), 2), "height_m": h or HEIGHT.get(pw, 10.0)})
     if src is not None:
         src.close()
     return {"lines": lines, "supports": supports}
@@ -749,7 +812,7 @@ def _flora_block(flora: dict) -> dict:
     return {k: flora[k] for k in ("evt", "canopy", "ground", "climate", "fetched") if k in flora}
 
 
-def _flora(site_dir: Path, web: Path, ox: float, oy: float) -> tuple[dict | None, dict | None]:
+def _flora(site_dir: Path, web: Path, frame: Frame) -> tuple[dict | None, dict | None]:
     """flora.json -> `web/flora_30m.png` (the class index) and the manifest layer entry."""
     path = site_dir / "flora.json"
     if not path.exists():
@@ -760,7 +823,7 @@ def _flora(site_dir: Path, web: Path, ox: float, oy: float) -> tuple[dict | None
         return flora, None
     Image.fromarray(np.load(npy), "L").save(web / "flora_30m.png", optimize=True)
     b = flora["bbox_utm"]
-    return flora, {"file": "flora_30m.png", "res": flora["res_m"], "size": flora["size"], "bbox": [b[0] - ox, b[1] - oy, b[2] - ox, b[3] - oy], "nodata": 255}
+    return flora, {"file": "flora_30m.png", "res": flora["res_m"], "size": flora["size"], "bbox": _enu_bbox(frame, b), "geo": frame.control_lattice(b), "nodata": 255}
 
 
 def refresh_flora(site_dir: Path) -> bool:
@@ -775,7 +838,7 @@ def refresh_flora(site_dir: Path) -> bool:
         return False
     site = json.loads((site_dir / "site.json").read_text())
     ox, oy = site["frame"]["origin"]
-    flora, layer = _flora(site_dir, web, ox, oy)
+    flora, layer = _flora(site_dir, web, Frame(site["frame"]["epsg"], tuple(site["frame"]["origin"])))
     if flora is None:
         return False
     out = json.loads(man.read_text())
@@ -784,6 +847,38 @@ def refresh_flora(site_dir: Path) -> bool:
         out.setdefault("layers", {})["flora"] = layer
     man.write_text(json.dumps(out))
     return True
+
+
+
+def _enu_derived(frame: Frame, derived: dict) -> dict:
+    """
+    Convert `buildings.derive`'s output to ENU, at the LAST moment.
+
+    buildings.py works in UTM-relative site metres throughout and has to keep doing so: it samples
+    the DSM/DTM by translating a ring back onto the raster (`_lidar_height`), and export.py
+    rasterises the same rings against a UTM transform to mask the canopy. Converting inside that
+    module would have broken both silently — the heights would have been read from the wrong
+    footprints. So the frame change happens here, on the way into the manifest, and nothing
+    upstream of it moves.
+
+    `rect.yaw_deg` is a BEARING, so it rotates by the convergence like every other bearing; the
+    rings rotate by the transform itself.
+    """
+    conv = float(frame.manifest_frame()["utm_convergence_deg"])
+    ox, oy = frame.origin
+
+    def ring(r):
+        return _enu_ring(frame, [(x + ox, y + oy) for x, y in r]) if r else r
+
+    out = dict(derived)
+    out["buildings"] = [
+        {**b, "ring": ring(b.get("ring")),
+         **({"rect": {**b["rect"], "yaw_deg": round((b["rect"]["yaw_deg"] - conv) % 360.0, 1)}} if b.get("rect") else {})}
+        for b in derived.get("buildings", [])
+    ]
+    out["landuse"] = [{**l, "ring": ring(l.get("ring"))} for l in derived.get("landuse", [])]
+    out["pois"] = [{**q, **dict(zip(("x", "y"), _enu(frame, q["x"] + ox, q["y"] + oy)))} for q in derived.get("pois", [])]
+    return out
 
 
 def export_site(site_dir: Path, web: Path | None = None) -> dict:
@@ -800,9 +895,16 @@ def export_site(site_dir: Path, web: Path | None = None) -> dict:
     web = Path(web) if web is not None else site_dir / "web"
     web.mkdir(parents=True, exist_ok=True)
     layers: dict = {}
+    # ONE frame, built from the authoritative stored origin rather than re-derived from lon/lat
+    # seven times. Every helper below takes it, so every layer lands in the same ENU tangent plane.
+    frame = Frame(site["frame"]["epsg"], (ox, oy))
 
     def rel_bbox(b):
-        return [b[0] - ox, b[1] - oy, b[2] - ox, b[3] - oy]
+        return _enu_bbox(frame, b)
+
+    def geo_of(b):
+        """The geodetic control lattice that places a raster — see Frame.control_lattice."""
+        return frame.control_lattice(b)
 
     # network sites over 6 km go out as 1 km tiles (network_tiles.export_tiles, below); the
     # single-image dem/chm/naip blocks are skipped for them — an 18 km DEM PNG is 85 M pixels
@@ -814,7 +916,7 @@ def export_site(site_dir: Path, web: Path | None = None) -> dict:
         z = _fill(z, -9999)
         rgb, zmin, scale = _encode_height(z)
         Image.fromarray(rgb, "RGB").save(web / "dem_2m.png", optimize=True)
-        layers["dem"] = {"file": "dem_2m.png", "res": 2.0, "size": g["size"], "bbox": rel_bbox(g["bbox"]), "zmin": zmin, "zscale": scale}
+        layers["dem"] = {"file": "dem_2m.png", "res": 2.0, "size": g["size"], "bbox": rel_bbox(g["bbox"]), "geo": geo_of(g["bbox"]), "zmin": zmin, "zscale": scale}
 
     # buildings / landuse / POIs in corridor coordinates (AUTOGEN.md §10) — derived here, before the
     # canopy layer, because the canopy mask below needs the footprints. (The first version read them
@@ -867,13 +969,13 @@ def export_site(site_dir: Path, web: Path | None = None) -> dict:
         road_mask = rasterize(shapes, out_shape=c.shape, transform=tr2, fill=0, dtype=np.uint8).astype(bool)
         c[road_mask] = 0.0
         Image.fromarray(np.clip(np.round(c * 4), 0, 255).astype(np.uint8), "L").save(web / "chm_2m.png", optimize=True)
-        layers["chm"] = {"file": "chm_2m.png", "res": 2.0, "size": g["size"], "bbox": rel_bbox(g["bbox"]), "scale": 0.25}
+        layers["chm"] = {"file": "chm_2m.png", "res": 2.0, "size": g["size"], "bbox": rel_bbox(g["bbox"]), "geo": geo_of(g["bbox"]), "scale": 0.25}
 
     # --- what grows here -------------------------------------------------------------------------
     # The EVT class index as an 8-bit PNG on its own 30 m lattice (255 = outside the corridor), and
     # the class table beside it. Its own lattice, not the 2 m one: the source IS 30 m, and
     # resampling a class raster up to the DEM grid would be five megabytes of the same integer.
-    flora, flora_layer = _flora(site_dir, web, ox, oy)
+    flora, flora_layer = _flora(site_dir, web, frame)
     if flora_layer:
         layers["flora"] = flora_layer
 
@@ -898,13 +1000,13 @@ def export_site(site_dir: Path, web: Path | None = None) -> dict:
             from . import network_tiles
 
             shapes = network_tiles.mask_shapes(site_dir, derived)
-            tl = network_tiles.export_tiles(site_dir, web, ox, oy, shapes, vivid)
+            tl = network_tiles.export_tiles(site_dir, web, frame, shapes, vivid)
             if tl:
                 layers["tiles"] = tl
                 print(f"  tiles   {len(tl['list'])} km tiles -> web/tiles/0", flush=True)
             # ...and a coarse whole-region overview, because a site whose only height layer is
             # `tiles` does not load at all until the viewer streams them
-            ov = network_tiles.overview(site_dir, web, ox, oy, shapes, vivid)
+            ov = network_tiles.overview(site_dir, web, frame, shapes, vivid)
             layers.update(ov)
             if ov:
                 print(f"  overview {', '.join(f'{k} {v['size'][0]}x{v['size'][1]}' for k, v in ov.items())}", flush=True)
@@ -932,7 +1034,7 @@ def export_site(site_dir: Path, web: Path | None = None) -> dict:
         r_, g_, b_ = img.split()
         img = Image.merge("RGB", (r_.point(lambda v: min(255, int(v * 1.06))), g_, b_.point(lambda v: int(v * 0.9))))
         img.save(web / "naip_1m.jpg", quality=85, optimize=True)
-        layers["naip"] = {"file": "naip_1m.jpg", "res": 1.0, "size": [w, h], "bbox": rel_bbox(bbox)}
+        layers["naip"] = {"file": "naip_1m.jpg", "res": 1.0, "size": [w, h], "bbox": rel_bbox(bbox), "geo": geo_of(bbox)}
 
     # --- far terrain ---------------------------------------------------------------------------
     if (site_dir / "horizon_30m.tif").exists():
@@ -940,10 +1042,10 @@ def export_site(site_dir: Path, web: Path | None = None) -> dict:
         z = _fill(z, -9999)
         rgb, zmin, scale = _encode_height(z)
         Image.fromarray(rgb, "RGB").save(web / "horizon_60m.png", optimize=True)
-        layers["horizon"] = {"file": "horizon_60m.png", "res": 60.0, "size": g["size"], "bbox": rel_bbox(g["bbox"]), "zmin": zmin, "zscale": scale}
+        layers["horizon"] = {"file": "horizon_60m.png", "res": 60.0, "size": g["size"], "bbox": rel_bbox(g["bbox"]), "geo": geo_of(g["bbox"]), "zmin": zmin, "zscale": scale}
         if (site_dir / "horizon_naip_60m.jpg").exists():
             vivid(Image.open(site_dir / "horizon_naip_60m.jpg").convert("RGB"), 1.9, 1.25, 1.06).save(web / "horizon_naip_60m.jpg", quality=88)
-            layers["horizon_naip"] = {"file": "horizon_naip_60m.jpg", "res": 60.0, "size": g["size"], "bbox": rel_bbox(g["bbox"])}
+            layers["horizon_naip"] = {"file": "horizon_naip_60m.jpg", "res": 60.0, "size": g["size"], "bbox": rel_bbox(g["bbox"]), "geo": geo_of(g["bbox"])}
 
     # --- vectors, relative to the origin -------------------------------------------------------
     spine = json.loads((site_dir / "spine_utm.json").read_text())
@@ -991,7 +1093,7 @@ def export_site(site_dir: Path, web: Path | None = None) -> dict:
             print(f"  export  no lidar profile; spine grade from the DEM ({zs.min():.1f}–{zs.max():.1f} m)", flush=True)
         else:
             zs = np.zeros(len(s_dense))
-    spine_rel = np.column_stack([pts[:, 0] - ox, pts[:, 1] - oy, zs]).round(2).tolist()
+    spine_rel = _enu_cols(frame, pts, zs)
 
     siblings = []
     for sib in spine.get("siblings", []):
@@ -1009,7 +1111,7 @@ def export_site(site_dir: Path, web: Path | None = None) -> dict:
             sm2[0], sm2[-1] = raw2[0], raw2[-1]
             ln2 = LineString(sm2)
             dense2 = np.array([ln2.interpolate(v).coords[0] for v in np.arange(0.0, ln2.length, step).tolist() + [ln2.length]])
-            siblings.append(np.column_stack([dense2[:, 0] - ox, dense2[:, 1] - oy]).round(2).tolist())
+            siblings.append(_enu_cols(frame, dense2))
 
     profile_10 = None
     if prof:
@@ -1025,6 +1127,10 @@ def export_site(site_dir: Path, web: Path | None = None) -> dict:
     surface = json.loads((site_dir / "surface.json").read_text()) if (site_dir / "surface.json").exists() else None
     crossings = json.loads((site_dir / "crossings.json").read_text()) if (site_dir / "crossings.json").exists() else []
     geology = json.loads((site_dir / "geology.json").read_text()) if (site_dir / "geology.json").exists() else {}
+
+    # `derived` stays in UTM site metres (the canopy mask above rasterises its rings against a UTM
+    # transform); the manifest gets the ENU copy.
+    enu_derived = _enu_derived(frame, derived)
 
     # buildings/landuse/POIs: `derived`, computed above the canopy layer
 
@@ -1055,7 +1161,7 @@ def export_site(site_dir: Path, web: Path | None = None) -> dict:
         "ident": site.get("ident"),
         # the geodetic frame, so the viewer can place this site on the ellipsoid without a
         # projection library — see docs/corridor/FRAME.md
-        "frame": Frame(site["frame"]["epsg"], tuple(site["frame"]["origin"])).manifest_frame(),
+        "frame": frame.manifest_frame(),
         "bbox": rel_bbox(bbox),
         "layers": layers,
         "spine": {"coords": spine_rel, "photo_s": spine["photo_s"], "length_m": round(float(line.length), 1), "segments": spine.get("segments", [])},
@@ -1067,16 +1173,16 @@ def export_site(site_dir: Path, web: Path | None = None) -> dict:
         "geology": {"named_formations": geology.get("named_formations", []), "units": [{k: u.get(k) for k in ("name", "strat_name", "lith", "descrip", "b_age", "t_age")} for u in geology.get("units", []) if u.get("strat_name")]},
         "photos": [{"file": p["file"], "heading_deg": p.get("heading_deg"), "taken": p.get("taken")} for p in site.get("photos", [])],
         "lidar": {k: manifest.get("lidar", {}).get(k) for k in ("dataset", "points_in_corridor", "classes")},
-        "buildings": derived["buildings"],
-        "driveways": _service_ways(site_dir, Frame.at(site["lon"], site["lat"]), ox, oy, bbox),
-        "stubs": _stub_roads(site_dir, Frame.at(site["lon"], site["lat"]), ox, oy, bbox),
-        "power": _power(site_dir, Frame.at(site["lon"], site["lat"]), ox, oy, bbox),
-        "signals": _signals(site_dir, Frame.at(site["lon"], site["lat"]), ox, oy, bbox),
-        "parking": _parking(site_dir, Frame.at(site["lon"], site["lat"]), ox, oy, bbox),
-        "barriers": _barriers(site_dir, Frame.at(site["lon"], site["lat"]), ox, oy, bbox),
-        "sidewalks": _sidewalks(site_dir, Frame.at(site["lon"], site["lat"]), ox, oy, bbox),
-        "landuse": derived["landuse"],
-        "pois": derived["pois"],
+        "buildings": enu_derived["buildings"],
+        "driveways": _service_ways(site_dir, frame, ox, oy, bbox),
+        "stubs": _stub_roads(site_dir, frame, ox, oy, bbox),
+        "power": _power(site_dir, frame, ox, oy, bbox),
+        "signals": _signals(site_dir, frame, ox, oy, bbox),
+        "parking": _parking(site_dir, frame, ox, oy, bbox),
+        "barriers": _barriers(site_dir, frame, ox, oy, bbox),
+        "sidewalks": _sidewalks(site_dir, frame, ox, oy, bbox),
+        "landuse": enu_derived["landuse"],
+        "pois": enu_derived["pois"],
         "flora": None if flora is None else _flora_block(flora),
         "cuts": features.get("cuts"),
         "rock": features.get("rock"),
@@ -1087,7 +1193,7 @@ def export_site(site_dir: Path, web: Path | None = None) -> dict:
     try:
         from . import network
 
-        br = network.export_branches(site_dir, ox, oy)
+        br = network.export_branches(site_dir, frame)
         if br is not None:
             out["network"] = True
             out["roads"] = spine.get("roads", [])

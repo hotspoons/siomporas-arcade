@@ -129,6 +129,51 @@ class Frame:
         scale = math.hypot(sxx, sxy) / snn
         return theta, scale
 
+    def anchor_frame(self) -> "Anchor":
+        """This site's ENU tangent frame, anchored at the photo point."""
+        if "_anchor_obj" not in self.__dict__:
+            lon, lat = self.anchor
+            self.__dict__["_anchor_obj"] = Anchor(lon, lat, 0.0)
+        return self.__dict__["_anchor_obj"]
+
+    def to_enu(self, x, y):
+        """
+        UTM easting/northing -> true ENU metres about the site anchor.
+
+        THE choke point. Everything the bake writes as "site metres" goes through here, so the
+        stored world is a tangent plane on the ellipsoid rather than a UTM plane. Accepts scalars
+        or numpy arrays; returns (east, north).
+        """
+        lon, lat = self.to_wgs(x, y)
+        e, n, _ = self.anchor_frame().to_local(lon, lat, 0.0)
+        return e, n
+
+    def control_lattice(self, bbox: tuple[float, float, float, float], n: int = 9) -> dict:
+        """
+        A geodetic control lattice over a raster's UTM bbox, for the viewer to interpolate.
+
+        A raster is a regular grid on the UTM PLANE; in true ENU that grid is rotated, scaled and
+        curved, so its bbox cannot simply be relabelled and resampling it would be lossy and slow.
+        Instead the viewer bilinearly interpolates lon/lat from this lattice and puts each vertex
+        where the ellipsoid says. Measured over crofton-triangle's 8.56 x 7.90 km DEM, worst error
+        against the exact projection: 1179 mm at 2x2, 295 at 3x3, 73 at 5x5, **18 at 9x9**, 4.6 at
+        17x17 -- clean quadratic convergence, as bilinear should be. 9x9 is 81 points, about 1.3 kB
+        of JSON, against 100 mm lane markings.
+
+        It also means the browser needs no projection library and never learns what CRS the bake
+        used, so a future source in some other projection just emits its own lattice.
+        """
+        xs = np.linspace(bbox[0], bbox[2], n)
+        ys = np.linspace(bbox[1], bbox[3], n)
+        gx, gy = np.meshgrid(xs, ys)
+        lon, lat = self.to_wgs(gx.ravel(), gy.ravel())
+        # rows run SOUTH to NORTH, columns WEST to EAST, matching the bbox order
+        return {
+            "n": n,
+            "lon": [round(float(v), 9) for v in np.asarray(lon)],
+            "lat": [round(float(v), 9) for v in np.asarray(lat)],
+        }
+
     def manifest_frame(self) -> dict:
         """The `frame` block a site writes: the UTM it is stored in, and the geodetic it means."""
         alon, alat = self.anchor
@@ -160,6 +205,61 @@ class Frame:
         py = np.concatenate([np.full(9, ymin), np.full(9, ymax), ys, ys])
         mx, my = self.to_merc(px, py)
         return float(mx.min()), float(my.min()), float(mx.max()), float(my.max())
+
+
+class Anchor:
+    """
+    A local ENU tangent frame about a geodetic anchor — the Python mirror of
+    packages/engine/src/geo/wgs84.ts `Anchor`.
+
+    The two are checked against each other (probes/corridor-frame.mjs) because the bake converts
+    the vector geometry and the viewer converts the rasters, and if they disagree the roads will
+    not sit on the ground. Same constants, same axis conventions:
+
+        ECEF   X through (0E, 0N), Y through (90E, 0N), Z through the north pole
+        ENU    east, north, up at the anchor
+    """
+
+    A = 6378137.0
+    F = 1 / 298.257223563
+    B = A * (1 - F)
+    E2 = F * (2 - F)
+
+    def __init__(self, lon: float, lat: float, h: float = 0.0):
+        import math
+
+        self.lon, self.lat, self.h = float(lon), float(lat), float(h)
+        self.ecef = self._to_ecef(lon, lat, h)
+        lo, la = math.radians(lon), math.radians(lat)
+        slo, clo, sla, cla = math.sin(lo), math.cos(lo), math.sin(la), math.cos(la)
+        self.east = (-slo, clo, 0.0)
+        self.north = (-sla * clo, -sla * slo, cla)
+        self.up = (cla * clo, cla * slo, sla)
+
+    @classmethod
+    def _to_ecef(cls, lon, lat, h):
+        import math
+
+        lo, la = math.radians(lon), math.radians(lat)
+        sla = math.sin(la)
+        n = cls.A / math.sqrt(1 - cls.E2 * sla * sla)
+        return ((n + h) * math.cos(la) * math.cos(lo), (n + h) * math.cos(la) * math.sin(lo), (n * (1 - cls.E2) + h) * sla)
+
+    def to_local(self, lon, lat, h=0.0):
+        """geodetic -> local ENU metres. Vectorised: lon/lat/h may be numpy arrays."""
+        lo = np.radians(np.asarray(lon, dtype=float))
+        la = np.radians(np.asarray(lat, dtype=float))
+        sla, cla = np.sin(la), np.cos(la)
+        n = self.A / np.sqrt(1 - self.E2 * sla * sla)
+        hh = np.asarray(h, dtype=float)
+        px = (n + hh) * cla * np.cos(lo)
+        py = (n + hh) * cla * np.sin(lo)
+        pz = (n * (1 - self.E2) + hh) * sla
+        dx, dy, dz = px - self.ecef[0], py - self.ecef[1], pz - self.ecef[2]
+        e = self.east[0] * dx + self.east[1] * dy + self.east[2] * dz
+        nn = self.north[0] * dx + self.north[1] * dy + self.north[2] * dz
+        u = self.up[0] * dx + self.up[1] * dy + self.up[2] * dz
+        return e, nn, u
 
 
 def snap_bbox(b: tuple[float, float, float, float], step: float = 10.0) -> tuple[float, float, float, float]:

@@ -350,6 +350,29 @@ def export_tiles(site_dir: Path, web: Path, frame, mask_shapes: list, vivid) -> 
         if naip_ds is not None:
             win = rasterio.windows.from_bounds(bx0, by0, bx1, by1, transform=naip_ds.transform)
             rgb = naip_ds.read(out_shape=(3, n, n), window=win, resampling=Resampling.average, boundless=True, fill_value=0)
+            # A TILE AT THE EDGE OF COVERAGE IS NOT BLACK GROUND. `boundless=True` lets the window
+            # run past the source raster and fills whatever it finds outside with 0, and the tile
+            # grid is the corridor hull snapped to 1 km — so edge tiles legitimately reach past
+            # where NAIP was fetched and came out as black slabs with a dead straight edge exactly
+            # where coverage stops.
+            #
+            # Measured on crofton-triangle before this: 59 tiles with a mean luma of 66.9 and a
+            # standard deviation of 14.4, ranging 13.8 to 91.4 — `5_0` at 13.8 sitting directly
+            # below `5_1` at 91.4, a 6.6x step across a tile boundary. But 5_0 was 85 % nodata and
+            # the imagery it DID have averaged 91.9 against its neighbour's 91.8. The photograph
+            # was never the problem.
+            #
+            # Filling with the tile's own valid mean is not correct at the metre level and is not
+            # meant to be — it is a plausible tone where there is no measurement, and the eye reads
+            # it as more of the same ground instead of a hole. Exact zero across all three channels
+            # is the fill's own signature; real NAIP essentially never is.
+            blank = (rgb == 0).all(axis=0)
+            nblank = int(blank.sum())
+            if nblank and nblank < blank.size:
+                for c in range(3):
+                    ch = rgb[c]
+                    ch[blank] = int(ch[~blank].mean())
+                entry["naip_fill"] = round(nblank / blank.size, 3)
             img = vivid(Image.fromarray(np.moveaxis(rgb, 0, -1), "RGB"), 1.3, 1.1)
             r_, g_, b_ = img.split()
             img = Image.merge("RGB", (r_.point(lambda v: min(255, int(v * 1.06))), g_, b_.point(lambda v: int(v * 0.9))))

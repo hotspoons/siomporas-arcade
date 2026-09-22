@@ -153,6 +153,39 @@ Also worth correcting: the entrypoint uses `curl -L`, so it **does** follow redi
 `europe-latest.osm.pbf` (a 302 to a Geofabrik mirror) downloads fine. The chart's note about
 `-latest` not being followed is stale.
 
+### The hidden third pass: `osmium fileinfo -e`
+
+The entrypoint computes the database version inline, before it imports:
+
+```
+/app/bin/init_osm3s.sh /db/planet.osm.bz2 ... "--version=$(osmium fileinfo -e -g data.timestamp.last /db/planet.osm.bz2) ..."
+```
+
+`-e` is *extended*, so this **decompresses and parses the entire file to read one timestamp**, and
+it is single-threaded. On Maryland that is seconds and invisible. On Europe it is a full pass over
+**58.6 GB of bz2** before the import has started — measured: the conversion finished, the pbf was
+removed, `/db/db` was still empty, and the only process burning CPU was `osmium fileinfo`.
+
+So a continent import is **three full passes over the data**, not one:
+
+| pass | what | parallel? |
+|---|---|---|
+| 1 | `osmium cat` pbf → XML → `lbzip2` | yes, with lbzip2 |
+| 2 | `osmium fileinfo -e` to read the timestamp | **no** |
+| 3 | `bunzip2 \| update_database`, then Reorganizing | no |
+
+Pass 2 buys one string. If Europe's import time ever needs cutting, passing a known `--version`
+and skipping it is the cheapest hour available — it would need a change to the image's entrypoint
+or an `OVERPASS_PLANET_PREPROCESS` that writes the timestamp somewhere the entrypoint reads, and
+neither is obviously clean. Recorded so the next person does not mistake it for a stall.
+
+### Sizing, measured rather than extrapolated
+
+`europe-latest.osm.pbf` is **35.0 GB**, and converted to `.osm.bz2` it is **58.6 GB** — 1.67x, not
+the ~1x this document guessed. Both live on the volume at once until the conversion finishes, so
+the peak before the database is even built is **~94 GB**. The 4 Ti provisioning remains obviously
+right; the point is that the pbf size is not a useful predictor of anything downstream.
+
 ## Shape
 
 ```

@@ -3,8 +3,13 @@
 // These are now thin adapters over the shared control set in `src/ui/controls.ts`, kept at this
 // path and with these signatures so areas.ts / place.ts / grow.ts / structures.ts did not have to
 // change to pick up the new look. One definition of what a slider is, for both apps.
-export { el } from '../ui/shell'
+// `el` is both imported and re-exported: a bare `export { el } from '...'` forwards it to this
+// module's consumers WITHOUT binding it in this module's own scope, so frameBanner below could
+// not see it. tsc caught that the moment the two branches merged.
+import { el } from '../ui/shell'
 import { slider as uiSlider } from '../ui/controls'
+
+export { el }
 
 /**
  * A labelled range with its value, and a dot that tells you at a glance whether this knob is

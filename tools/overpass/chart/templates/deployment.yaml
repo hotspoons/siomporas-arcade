@@ -33,6 +33,10 @@ spec:
             # The image defaults this to 16, meaning a 16 GB flush buffer — sized for the
             # planet, against our 16Gi limit. Maryland is a 204 MB extract.
             - { name: OVERPASS_FLUSH_SIZE, value: "{{ .Values.flushSize }}" }
+            # gz (the image default) writes variable-length compressed blocks and reads them
+            # back through the same O_DIRECT path that throws EINVAL here. O_DIRECT itself is
+            # not at fault — see values.yaml — so the block layout is the remaining variable.
+            - { name: OVERPASS_COMPRESSION, value: "{{ .Values.compression }}" }
           ports: [{ containerPort: 80, name: http }]
           volumeMounts:
             - { name: db, mountPath: /db }

@@ -35,6 +35,9 @@ shmSize: 2Gi
 # tested on this volume at 512 and 4096 byte alignment and works.
 flushSize: 4
 
+# Block compression for the imported database: gz (image default), lz4 or no.
+compression: "no"
+
 storage:
   size: 60Gi
   # a BLOCK device, not cephfs. Overpass opens its database files with direct I/O; on the cephfs

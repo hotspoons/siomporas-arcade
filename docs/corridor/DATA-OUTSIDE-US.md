@@ -198,6 +198,24 @@ DEM already fling the car. A coarse DEM is a worse *landscape*, not necessarily 
   technique rather than a hack. **Untested.**
 - There is no single 1 m bare-earth DTM for Europe. Each country publishes its own.
 
+## What it looks like, which was the whole point of baking it badly first
+
+The Stelvio renders. Alpine relief, the right silhouette, OSM buildings and power lines placed, and
+the minimap showing the switchback stack unmistakably. Judged with the thing on screen rather than
+in the abstract, **the priority in this document was the wrong way round**:
+
+* **Elevation is not the visible problem.** 30 m GLO-30 gives a landscape that reads as the Stelvio
+  — ridgelines, the valley, the shape of the massif. Coarse terrain is a smoother *landscape*, and
+  the road is draped on OSM geometry that has all 81 hairpins regardless.
+* **Imagery is.** Sentinel-2 at 10 m, upsampled onto the 1 m lattice, is mush within about a
+  hundred metres of the camera — which is exactly where a driving game looks. Against NAIP's 30 cm
+  this is the one layer where the difference is obvious at driving distance rather than on a chart.
+
+So if someone picks this up wanting the biggest visible improvement per hour spent, it is **not**
+a better DEM. It is imagery: France's IGN at 45 cm (already verified reachable, no API key) for
+French passes, and for everywhere else the honest answer is that road surface appearance should
+come from OSM tags and our own materials, which is where it arguably belonged anyway.
+
 ## What I would do
 
 Make an Italian pass bake *at all* before making it bake well: GLO-30 plus Sentinel-2 plus the

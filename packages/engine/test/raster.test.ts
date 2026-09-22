@@ -70,3 +70,29 @@ describe('RasterFrame on a real baked lattice', () => {
     expect(worst).toBeLessThan(0.01)
   })
 })
+
+describe('containment — the thing toGrid cannot answer', () => {
+  it('says yes inside and no outside, where toGrid says yes to everything', () => {
+    const [x0, z0, x1, z1] = R.dem.bbox as unknown as number[]
+    const midX = (x0 + x1) / 2
+    const midZ = (z0 + z1) / 2
+    expect(dem.contains(midX, midZ)).toBe(true)
+    // well outside on every side
+    for (const [x, z] of [[x0 - 5000, midZ], [x1 + 5000, midZ], [midX, z0 - 5000], [midX, z1 + 5000]]) {
+      expect(dem.contains(x, z), `${x},${z}`).toBe(false)
+      // ...and this is why it was a trap: toGrid happily returns an in-range answer for all of them
+      const g = dem.toGrid(x, z)
+      expect(g[0]).toBeGreaterThanOrEqual(0)
+      expect(g[0]).toBeLessThanOrEqual(1)
+    }
+  })
+
+  it('slack lets neighbouring tiles overlap instead of leaving a seam', () => {
+    const t = new RasterFrame({ size: [500, 500], geo: R.tile.geo as never }, anchor)
+    const c = t.toEnu(0.5, 0.5, 0) as number[]
+    const edge = t.toEnu(1, 0.5, 0) as number[]
+    const justOut = [edge[0] + (edge[0] - c[0]) * 0.002, edge[1] + (edge[1] - c[1]) * 0.002]
+    expect(t.contains(justOut[0], justOut[1])).toBe(false)
+    expect(t.contains(justOut[0], justOut[1], 5)).toBe(true)
+  })
+})

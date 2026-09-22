@@ -79,9 +79,16 @@ def verify(site_dir: Path) -> dict:
     for name, L in layers.items():
         if name == "tiles":
             tdir = site_dir / "web" / (L.get("dir") or "tiles/0")
-            missing = [f"{t['x']}_{t['y']}" for t in L.get("list", []) if not (tdir / f"{t['x']}_{t['y']}.dem.png").exists()]
+            # the dem/chm rasters moved INSIDE the per-tile pack (format "pack-1"); only a bake
+            # older than that still writes loose <x>_<y>.dem.png beside it
+            packed = L.get("format") == "pack-1"
+            def _has(t):
+                stem = tdir / f"{t['x']}_{t['y']}"
+                return stem.with_suffix(".pack").exists() if packed else stem.with_suffix(".dem.png").exists()
+
+            missing = [f"{t['x']}_{t['y']}" for t in L.get("list", []) if not _has(t)]
             if missing:
-                errors.append(f"{len(missing)} tile(s) listed with no dem.png on disk, e.g. {missing[0]}")
+                errors.append(f"{len(missing)} tile(s) listed with no {'pack' if packed else 'dem.png'} on disk, e.g. {missing[0]}")
             noz = [t for t in L.get("list", []) if not (t.get("dem") or {}).get("zscale")]
             if noz:
                 errors.append(f"{len(noz)} tile(s) with no dem.zmin/zscale: heights cannot be decoded")
@@ -188,6 +195,51 @@ def verify(site_dir: Path) -> dict:
         v = m.get(key)
         if v is not None and not isinstance(v, dict):
             errors.append(f"{key} is not an object")
+
+    # --- everything in ONE frame ---------------------------------------------------------------
+    #
+    # The frame conversion rewrote every coordinate, and a layer left behind in the old frame
+    # RENDERS PERFECTLY while being wrong — it is simply rotated by the grid convergence, about
+    # 1.06 deg in Maryland, which puts a feature 18 mm out per metre from the origin. That is the
+    # third bug of this shape in this tree (asked for by the street-spice lane), so it gets a check
+    # rather than another pair of eyes.
+    #
+    # The test needs no ground truth: a junction belongs to its own road, so its distance to that
+    # road's own polyline is near zero in a consistent frame and grows LINEARLY with distance from
+    # the origin in a rotated one. Fitting that slope separates a frame error from ordinary slop.
+    if m.get("frame", {}).get("kind") == "enu":
+        import math
+
+        num = den = 0.0
+        worst = 0.0
+        n_j = 0
+        for b in m.get("branches") or []:
+            cs = b.get("coords") or []
+            if len(cs) < 2:
+                continue
+            for j in b.get("junctions") or []:
+                jx, jy = j.get("x"), j.get("y")
+                if jx is None or jy is None:
+                    continue
+                d = min(math.hypot(c[0] - jx, c[1] - jy) for c in cs)
+                r = math.hypot(jx, jy)
+                num += r * d
+                den += r * r
+                worst = max(worst, d)
+                n_j += 1
+        if n_j >= 8 and den > 0:
+            slope = num / den  # metres of offset per metre from the origin
+            rot = math.sin(math.radians(abs(m["frame"].get("utm_convergence_deg") or 0.0)))
+            # half the convergence signature is far outside anything ordinary slop produces
+            if rot > 0 and slope > rot * 0.5:
+                errors.append(
+                    f"branches[].junctions look like they are still in the OLD frame: offset grows "
+                    f"{slope * 1000:.1f} mm per metre from the origin (a {abs(m['frame']['utm_convergence_deg']):.2f} deg "
+                    f"rotation would give {rot * 1000:.0f}), worst {worst:.0f} m over {n_j} junctions. "
+                    f"branches.json predates the ENU frame; export repairs it on read, so re-export."
+                )
+            elif worst > 60:
+                warnings.append(f"a junction sits {worst:.0f} m from its own road's polyline over {n_j} junctions")
 
     return {"slug": slug, "errors": errors, "warnings": warnings, "ok": not errors}
 

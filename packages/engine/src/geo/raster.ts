@@ -177,7 +177,16 @@ export class RasterFrame {
   }
 
   /**
-   * ENU metres -> fractional grid (u, v), clamped to the raster.
+   * ENU metres -> NORMALISED grid position (u, v in 0..1), **clamped to the raster**.
+   *
+   * Two things about this signature have cost other lanes a round each, so they are stated plainly:
+   *
+   * - the result is NORMALISED, not cell units, despite the name. `indexAt` is what multiplies by
+   *   `cols`/`rows`.
+   * - it CLAMPS. A point outside the raster comes back pinned to the nearest edge, so this cannot
+   *   be used to ask "is this point inside?" — every point looks inside. Use `contains`. On a
+   *   tiled site the wrong answer is that every height comes from whichever tile the index
+   *   happened to list first, and it looks entirely plausible.
    *
    * Affine seed, then Newton on the bilinear patch with its analytic Jacobian. No trigonometry, no
    * finite differences, and it converges in two passes because the patch is very nearly affine
@@ -201,6 +210,22 @@ export class RasterFrame {
     out[0] = u
     out[1] = v
     return out
+  }
+
+  /**
+   * Is this ENU point actually inside the raster?
+   *
+   * `toGrid` clamps, so it cannot answer this — asking it is the trap. The honest test is whether
+   * the clamped answer still maps BACK to where you asked: if the point was outside, the clamp
+   * moved it, and the round trip lands somewhere else. `slackM` is how far outside still counts as
+   * in, which matters on a tiled site where neighbouring tiles should overlap rather than leave a
+   * seam of nothing.
+   */
+  contains(x: number, z: number, slackM = 0): boolean {
+    const g = this.toGrid(x, z)
+    const p = SCRATCH6
+    this.patch(g[0], g[1], p)
+    return Math.hypot(p[0] - x, p[1] - z) <= slackM + 1e-6
   }
 
   /** ENU metres -> nearest cell index into the raster's data array. */

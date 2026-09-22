@@ -9,9 +9,9 @@
 // so a re-bake with a better DEM moves the diner with the hillside instead of burying it.
 import * as THREE from 'three'
 import { instanceOf, loadCatalog, tintOf, type Catalog, type CatalogEntry } from './catalog'
-import { isGenerated, loadPlacements, nextId, savePlacements, type Placement, type Placements } from './schema'
+import { frameMismatch, frameOf, isGenerated, loadPlacements, nextId, savePlacements, type Placement, type Placements } from './schema'
 import { yawFacingRoad } from './corridor'
-import { el } from './ui'
+import { el, frameBanner } from './ui'
 import type { Site } from '../scene'
 
 const SELECT = 0x2ee6c0
@@ -34,6 +34,8 @@ export class PlaceMode {
   )
   private nose = new THREE.ArrowHelper(new THREE.Vector3(0, 0, -1), new THREE.Vector3(), 10, SELECT, 4, 2.4)
   private armed: string | null = null
+  /** set when the file's coordinates were authored in a different frame from the bake's */
+  frameWarning: string | null = null
   private grabbed: string | null = null
   /** `false` = only a value changed; the panel must not be rebuilt under the pointer. */
   private onChange: (structural?: boolean) => void
@@ -55,6 +57,7 @@ export class PlaceMode {
     this.ground = ground
     if (!this.catalog.assets.length) this.catalog = await loadCatalog()
     this.doc = await loadPlacements(slug)
+    this.frameWarning = frameMismatch(this.doc.frame, site.manifest)
     this.dirty = false
     this.selected = null
     for (const o of this.objects.values()) this.group.remove(o)
@@ -267,6 +270,8 @@ export class PlaceMode {
   }
 
   async save(): Promise<string> {
+    // stamp the frame we authored in, so the next frame change is loud rather than silent
+    if (this.site) this.doc.frame = frameOf(this.site.manifest)
     const bytes = await savePlacements(this.slug, this.doc)
     this.dirty = false
     this.onChange()
@@ -276,6 +281,7 @@ export class PlaceMode {
   // --- panel ---------------------------------------------------------------------------------------
   panel(root: HTMLElement, fly: (pts: [number, number][]) => void) {
     root.replaceChildren()
+    if (this.frameWarning) root.append(frameBanner('placements.json', this.frameWarning))
     root.append(el('h2', '', this.armed ? 'click the ground to place' : 'pick an asset, then click the ground'))
     const pal = el('div', 'palette')
     for (const a of this.catalog.assets) {

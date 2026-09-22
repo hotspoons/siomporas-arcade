@@ -99,6 +99,19 @@ for (const a of actions) {
     await page.keyboard.press(arg === 'place' ? '2' : arg === 'grow' ? '3' : '1')
   } else if (verb === 'wait') {
     await page.waitForTimeout(Number(arg))
+  } else if (verb === 'save') {
+    await page.keyboard.down('Control')
+    await page.keyboard.press('s')
+    await page.keyboard.up('Control')
+    await page.waitForFunction(() => /saved|failed/.test(document.querySelector('#status')?.textContent ?? ''), null, { timeout: 60000 })
+    console.log('  save:', await page.textContent('#status'))
+  } else {
+    // A verb this probe does not implement used to be skipped in silence: I asked it to `save`,
+    // it did nothing, reported success, and the file I then went to read was not there. An
+    // instruction that is not carried out has to say so.
+    console.error(`unknown action "${a}" — known: gen, invent, params, clear, lock, del, report, inv, preview, put, obl, drive, shot, mode, wait, save`)
+    process.exitCode = 2
+    break
   }
   await page.waitForTimeout(400)
 }

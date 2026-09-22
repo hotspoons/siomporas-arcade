@@ -438,7 +438,7 @@ def fetch_site(site: dict, half_width: float, lidar_half_width: float, skip: set
             if c is prim:
                 continue
             branches.append(branch_rec(c, None))
-    (out / "branches.json").write_text(json.dumps({"branches": branches}))
+    (out / "branches.json").write_text(json.dumps({"frame": "enu", "branches": branches}))
     manifest["branches"] = {"count": len(branches), "structures": sum(len(b["structures"]) for b in branches)}
     try:
         from . import preview
@@ -493,7 +493,58 @@ def export_branches(site_dir: Path, frame) -> list[dict] | None:
     from scipy.ndimage import gaussian_filter1d
     from shapely.geometry import LineString
 
-    _br = json.loads(br_p.read_text())["branches"]
+    _bj = json.loads(br_p.read_text())
+    _br = _bj["branches"]
+    # `junctions[].x/y` are copied VERBATIM into the manifest below, unlike `coords` which goes
+    # through _enu_cols. A branches.json written before the ENU conversion holds UTM-relative
+    # metres there, and a re-export cannot repair it because the intermediate is what is stale —
+    # only a revector would, and that re-queries Overpass for no reason. So repair it on read.
+    #
+    # Reported by the street-spice lane and confirmed by measuring junction-to-polyline distance
+    # against distance from origin: a pure frame rotation gives 18 mm/m at 1.06 deg, and
+    # crofton-crownsville measured 14.9 mm/m (mean 76 m, max 147 m), arrowhead-farms-network
+    # 17.3 mm/m. It is not cosmetic — scene.ts feeds these to the junction paint-suppression
+    # circles, so lane paint was being cut in empty ground and drawn through real intersections.
+    # DO NOT infer staleness from the marker alone. A branches.json can be correct-but-unmarked —
+    # written by a revector after the ENU commit but before the marker existed — and converting
+    # that a second time rotates it the wrong way, turning a right answer into a doubly-wrong one.
+    # The street-spice lane created exactly that file and caught it before it bit.
+    #
+    # So MEASURE instead. A junction belongs to its own road, so its distance to that road's own
+    # polyline grows linearly with distance from the origin if and only if the frame is rotated.
+    # Fit that slope and compare it with the convergence: the two states are three orders of
+    # magnitude apart (crofton-triangle read 0.02 mm/m once converted, against 18 for a rotation),
+    # so there is no ambiguous middle to get wrong. The marker is then just a fast path.
+    def _looks_rotated() -> bool:
+        import math
+
+        num = den = 0.0
+        n = 0
+        for b in _br:
+            cs = b.get("coords") or []
+            if len(cs) < 2:
+                continue
+            for j in b.get("junctions") or []:
+                jx, jy = j.get("x"), j.get("y")
+                if jx is None or jy is None:
+                    continue
+                d = min(math.hypot(c[0] - jx, c[1] - jy) for c in cs)
+                r = math.hypot(jx, jy)
+                num += r * d
+                den += r * r
+                n += 1
+        if n < 8 or den <= 0:
+            return False  # too little to judge; leave it alone rather than guess
+        rot = math.sin(math.radians(abs(frame.enu_fit()[0])))
+        return (num / den) > rot * 0.5
+
+    if _bj.get("frame") != "enu" and _looks_rotated():
+        ox, oy = frame.origin
+        for _b in _br:
+            for _j in _b.get("junctions", []) or []:
+                _e, _n = frame.to_enu(_j["x"] + ox, _j["y"] + oy)
+                _j["x"], _j["y"] = round(float(_e), 1), round(float(_n), 1)
+        print(f"  note    branches.json junctions measured as still in the old frame; {sum(len(b.get('junctions') or []) for b in _br)} converted on read", flush=True)
     by_id = {b["id"]: b for b in _br if b.get("id")}
     by_pos = _br  # a branches.json written before chains carried ids: its order is the sibling order
     def finite(v, default=0.0):
@@ -591,7 +642,7 @@ def revector(site: dict, data: Path, cache: Path) -> dict:
             if c:
                 b["junctions"] = c["junctions"]
                 b["dead_ends"] = c.get("dead_ends", [])
-        br_p.write_text(json.dumps({"branches": branches}))
+        br_p.write_text(json.dumps({"frame": "enu", "branches": branches}))
     m_p = out / "manifest.json"
     if m_p.exists():
         m = json.loads(m_p.read_text())

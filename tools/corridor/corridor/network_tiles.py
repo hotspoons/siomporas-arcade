@@ -366,7 +366,11 @@ def export_tiles(site_dir: Path, web: Path, frame, mask_shapes: list, vivid) -> 
             ds.close()
     return {
         "size_m": TILE_M,
-        # kept for culling; `geo` on each entry is what PLACES a tile
+        # The ENU position of the UTM tile grid's origin. DO NOT walk the grid from it: the tiles
+        # step along the UTM axes, which are rotated from ENU by the meridian convergence, so
+        # `origin + x * size_m` is not where tile x is. Measured on crofton-crownsville, that
+        # arithmetic is out by up to 384.9 m across 125 tiles. `geo` on each entry is the only
+        # thing that places a tile; this is for a coarse cull and for debugging, nothing else.
         "origin": [round(float(v), 2) for v in frame.to_enu(x0, y0)],
         "res": {"dem": 2.0, "naip": 1.0, "chm": 2.0},
         "dir": "tiles/0",

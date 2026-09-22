@@ -113,6 +113,9 @@ def _ang_diff(a: float, b: float) -> float:
 # leave the suffix like rd, dr, st, ct, etc.) and short names can spell out the suffix if room
 # permits."
 #
+# 17, not 12: 12 gave "Hawk Holl Dr" for Hawk Hollow Drive, and Rich measured 17 as the most he
+# has seen fit on a real blade. The rule below is unchanged — only the budget moved.
+#
 # So the suffix is never what gets cut — it is the part that tells you what kind of street this is,
 # and "Thistle Brooke" without the "Ct" could be anything. The body gives way instead.
 SUFFIX = {
@@ -126,7 +129,7 @@ DIRECTION = {"north": "N", "south": "S", "east": "E", "west": "W",
              "northeast": "NE", "northwest": "NW", "southeast": "SE", "southwest": "SW"}
 
 
-def blade_text(name: str, max_chars: int = 12) -> str:
+def blade_text(name: str, max_chars: int = 17) -> str:
     """The name as it goes on the blade.
 
     Order of attack, each step only taken because the previous one did not fit:
@@ -336,7 +339,7 @@ def _signal_and_stop_nodes(site_dir: Path, frame) -> tuple[list, list]:
     return sig, stop
 
 
-def build(site_dir: Path, frame, max_chars: int = 12) -> dict:
+def build(site_dir: Path, frame, max_chars: int = 17) -> dict:
     """Every intersection on this site, with control, phases, stop bars and name blades."""
     roads = _roads(site_dir, frame)
     if not roads:
@@ -714,7 +717,7 @@ def furniture(built: dict, roads_by_id: dict) -> dict:
     return {"masts": masts, "signs": signs, "bars": bars}
 
 
-def build_all(site_dir: Path, frame, max_chars: int = 12) -> dict | None:
+def build_all(site_dir: Path, frame, max_chars: int = 17) -> dict | None:
     """Everything this module contributes to one manifest, or None for a non-network site."""
     roads = _roads(site_dir, frame)
     if not roads:
@@ -728,7 +731,7 @@ def build_all(site_dir: Path, frame, max_chars: int = 12) -> dict | None:
     }
 
 
-def merge_into(out: dict, site_dir: Path, frame, max_chars: int = 12) -> dict | None:
+def merge_into(out: dict, site_dir: Path, frame, max_chars: int = 17) -> dict | None:
     """Fold this module's output into a manifest that `export._signals` has already filled in.
 
     The two sources overlap on purpose and the derived one wins AT A JUNCTION WE MODEL:

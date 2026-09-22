@@ -32,6 +32,8 @@ export interface Layer {
   bbox: [number, number, number, number]
   /** absent on a manifest baked before the geodetic frame; such a site draws on a flat plane */
   geo?: GeoLattice
+  /** GPU-compressed twin of `file`, when the bake wrote one — see textures.ts */
+  ktx2?: string
   zmin?: number
   zscale?: number
   scale?: number

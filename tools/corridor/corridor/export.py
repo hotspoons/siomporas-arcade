@@ -1004,6 +1004,14 @@ def export_site(site_dir: Path, web: Path | None = None) -> dict:
             if tl:
                 layers["tiles"] = tl
                 print(f"  tiles   {len(tl['list'])} km tiles -> web/tiles/0", flush=True)
+                from . import ktx2
+
+                k = ktx2.encode_dir(web / "tiles", "*.jpg")
+                if k.get("ok"):
+                    layers["tiles"]["texture_ktx2"] = "naip.ktx2"
+                    print(f"  ktx2    {k['ok']} textures, {k['jpg_bytes'] / 2**20:.1f} -> {k['ktx2_bytes'] / 2**20:.1f} MiB on the wire, ~8x less on the GPU", flush=True)
+                elif k.get("status") != "ok":
+                    print(f"  ktx2    skipped ({k['status']}) — scripts/fetch_ktx.sh; the .jpg fallback still works", flush=True)
             # ...and a coarse whole-region overview, because a site whose only height layer is
             # `tiles` does not load at all until the viewer streams them
             ov = network_tiles.overview(site_dir, web, frame, shapes, vivid)
@@ -1206,6 +1214,24 @@ def export_site(site_dir: Path, web: Path | None = None) -> dict:
     # 2.3 MB of pure whitespace. Most of that is recovered by gzip, but not the R2 storage or the
     # string the parser has to walk.
     (web / "manifest.json").write_text(json.dumps(out, separators=(",", ":")))
+    # GPU-compressed twins for every baked jpg. The overview NAIP alone is 4076x3762 and decodes
+    # to ~82 MB of RGBA+mips; as ETC1S it is ~10 MB, and that is a saving the viewer gets TODAY,
+    # before any streaming. Additive — the jpg stays and a client that cannot transcode uses it.
+    try:
+        from . import ktx2
+
+        kk = ktx2.encode_dir(web, "*.jpg")
+        if kk.get("ok"):
+            for name, lay in layers.items():
+                f = lay.get("file", "") if isinstance(lay, dict) else ""
+                if f.endswith(".jpg") and (web / f).with_suffix(".ktx2").exists():
+                    lay["ktx2"] = f[:-4] + ".ktx2"
+            print(f"  ktx2    {kk['ok']} textures, {kk['jpg_bytes'] / 2**20:.1f} -> {kk['ktx2_bytes'] / 2**20:.1f} MiB on the wire", flush=True)
+        elif kk.get("status") != "ok":
+            print(f"  ktx2    skipped ({kk['status']}) — tools/corridor/scripts/fetch_ktx.sh", flush=True)
+    except Exception as exc:
+        print(f"  ktx2    failed: {exc}", flush=True)
+
     return {"layers": list(layers), "bytes": sum(f.stat().st_size for f in web.iterdir()), "buildings": derived["summary"]}
 
 

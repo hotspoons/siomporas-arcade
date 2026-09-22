@@ -5,6 +5,7 @@ import * as THREE from 'three'
 import * as T from './tuning'
 import { Anchor } from '@apex/engine/geo/wgs84'
 import { RasterFrame } from '@apex/engine/geo/raster'
+import { loadBakedTexture } from './textures'
 import { DATA_BASE, decodeHeights, decodeScalar, loadImage, type Layer, type Manifest, type Structure } from './site'
 import { NearTrees, type TreeRecord } from './trees'
 import { Impostors } from './impostors'
@@ -295,7 +296,8 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
       c.getContext('2d')!.drawImage(img, 0, 0, c.width, c.height)
       tex = new THREE.CanvasTexture(c)
     } else {
-      tex = new THREE.TextureLoader().load(`${DATA_BASE}${base}${L.naip.file}`)
+      // the compressed twin when the bake made one: ~8x less GPU memory for the same image
+      tex = loadBakedTexture(`${DATA_BASE}${base}`, L.naip, renderer)
     }
     tex.colorSpace = THREE.SRGBColorSpace
     tex.anisotropy = lite ? 2 : 8
@@ -386,7 +388,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     cutHorizon(geo, L.dem.bbox, hz.layer.res * hs, heightAt)
     let mat: THREE.Material
     if (L.horizon_naip) {
-      const tex = new THREE.TextureLoader().load(`${DATA_BASE}${base}${L.horizon_naip.file}`)
+      const tex = loadBakedTexture(`${DATA_BASE}${base}`, L.horizon_naip, renderer)
       tex.colorSpace = THREE.SRGBColorSpace
       mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 1 })
     } else {

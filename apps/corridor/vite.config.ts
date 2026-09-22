@@ -38,10 +38,14 @@ function serveBake(): Plugin {
         // placements.json, structures.json, dead_ends.json — never anything the bake itself
         // produced. Whitelisted by name.
         //
+        // `tuning` is the per-site knob override file (src/sitetuning.ts). The editor-knobs lane
+        // built the whole save path and could not ship it because this one word was missing and
+        // this file was not theirs to edit — their error message names the fix exactly.
+        //
         // `dead_ends` is Rich's third editor ask, keyed on the OSM NODE ID rather than on `s` or a
         // chain id: the node id is in every dead_ends entry the bake emits and it survives a
         // re-bake, a re-chaining and a change of chain set, which stations and chain ids do not.
-        if (req.method === 'PUT' && prefix === '/sites/' && /^[a-z0-9-]+\/(adjustments|placements|structures|dead_ends)\.json$/.test(rel.replaceAll('\\', '/'))) {
+        if (req.method === 'PUT' && prefix === '/sites/' && /^[a-z0-9-]+\/(adjustments|placements|structures|dead_ends|tuning)\.json$/.test(rel.replaceAll('\\', '/'))) {
           const chunks: Buffer[] = []
           req.on('data', (c) => chunks.push(c))
           req.on('end', () => {

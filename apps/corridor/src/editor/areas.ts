@@ -9,10 +9,10 @@
 // and re-draped whenever the terrain under it changes, so a re-bake cannot leave an area floating.
 import * as THREE from 'three'
 import { fillMesh, handleMesh, outlineMesh, type HeightAt } from './drape'
-import { areaOf, inside, loadAdjustments, nextId, saveAdjustments, CROP_FIELDS, NEUTRAL, PICKERS, SLIDERS, type Adjust, type Adjustments, type Area } from './schema'
+import { areaOf, frameMismatch, frameOf, inside, loadAdjustments, nextId, saveAdjustments, CROP_FIELDS, NEUTRAL, PICKERS, SLIDERS, type Adjust, type Adjustments, type Area } from './schema'
 import type { Site } from '../scene'
 import { bearingOf, nearestStation, normDeg } from './corridor'
-import { el, slider } from './ui'
+import { el, frameBanner, slider } from './ui'
 
 const COLOR = { idle: 0x5c93c4, edited: 0xffdc00, selected: 0x2ee6c0, draw: 0xff8a2b }
 const MIN_VERTS = 3
@@ -34,6 +34,8 @@ export class AreaMode {
   private draw: [number, number][] | null = null
   private drawGroup = new THREE.Group()
   private grabbed = -1
+  /** set when the file's coordinates were authored in a different frame from the bake's */
+  frameWarning: string | null = null
   /** `false` = only a value changed; the panel must not be rebuilt under the pointer. */
   private onChange: (structural?: boolean) => void
 
@@ -48,6 +50,7 @@ export class AreaMode {
     this.h = h
     this.site = site
     this.doc = await loadAdjustments(slug)
+    this.frameWarning = site ? frameMismatch(this.doc.frame, site.manifest) : null
     this.dirty = false
     this.selected = null
     this.draw = null
@@ -250,6 +253,8 @@ export class AreaMode {
   }
 
   async save(): Promise<string> {
+    // stamp the frame we authored in, so the next frame change is loud rather than silent
+    if (this.site) this.doc.frame = frameOf(this.site.manifest)
     const bytes = await saveAdjustments(this.slug, this.doc)
     this.dirty = false
     this.onChange()
@@ -259,6 +264,7 @@ export class AreaMode {
   // --- panel ------------------------------------------------------------------------------------
   panel(root: HTMLElement, go: (a: Area) => void) {
     root.replaceChildren()
+    if (this.frameWarning) root.append(frameBanner('adjustments.json', this.frameWarning))
     const tools = el('div', 'row')
     const drawBtn = el('button')
     drawBtn.textContent = this.draw ? `drawing… ${this.draw.length} pts (Enter close, Esc cancel)` : 'draw area (N)'

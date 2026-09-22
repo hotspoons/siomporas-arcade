@@ -80,9 +80,6 @@ function imageFrom(bytes: Uint8Array, mime: string): Promise<HTMLImageElement> {
   })
 }
 
-/** scratch for the containment round trip; `at` runs in every height lookup */
-const SCRATCH = [0, 0, 0]
-
 /** The four ENU corners of a raster, as an axis-aligned box. */
 function enuBounds(rf: RasterFrame): [number, number, number, number] {
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity
@@ -131,22 +128,18 @@ export class TileSet {
   /**
    * The tile containing this ENU point, and its NORMALISED grid coordinates, or null.
    *
-   * `RasterFrame.toGrid` returns u,v in 0..1 and CLAMPS them, so it cannot be asked whether a point
-   * is inside — every point comes back looking inside, pinned to the nearest edge. Containment is
-   * therefore a round trip: map to the grid, map back to ENU, and if the answer moved, the clamp
-   * moved it and the point was outside. A point on a shared edge is claimed by whichever tile is
-   * tested first, which is harmless because neighbours agree there.
+   * Containment goes through `RasterFrame.contains`, not through `toGrid`: `toGrid` CLAMPS its
+   * answer into 0..1, so every point looks inside every raster, pinned to the nearest edge. The
+   * slack is half a cell so two neighbouring tiles overlap on their shared edge rather than leave
+   * a hairline neither of them claims.
    */
   private at(x: number, y: number): { t: Tile; u: number; v: number } | null {
     const arr = this.grid.get(`${Math.floor(x / this.cell)},${Math.floor(y / this.cell)}`)
     if (!arr) return null
-    const e = SCRATCH
     for (const t of arr) {
       if (x < t.bounds[0] || x > t.bounds[2] || y < t.bounds[1] || y > t.bounds[3]) continue
+      if (!t.dem.rf.contains(x, y, t.dem.layer.res / 2)) continue
       const g = t.dem.rf.toGrid(x, y)
-      t.dem.rf.toEnu(g[0], g[1], 0, e)
-      const tol = t.dem.layer.res
-      if (Math.abs(e[0] - x) > tol || Math.abs(e[1] - y) > tol) continue
       return { t, u: g[0], v: g[1] }
     }
     return null

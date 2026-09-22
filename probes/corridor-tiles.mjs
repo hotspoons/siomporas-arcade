@@ -72,24 +72,43 @@ console.log(JSON.stringify(await page.evaluate(() => {
   return o
 }), null, 1))
 
-// stream: park the eye on the spine, let it settle, then jump 6 km away and watch the release
+// Streaming under a drive. The number that decides whether this works is not the fetch count, it
+// is PEAK RESIDENT TEXTURE MEMORY: an uncompressed 1000x1000 NAIP tile is ~5.3 MB of RGBA plus
+// mips, so all 125 resident would be ~666 MB and would not fit. The ring is what keeps that
+// bounded, so measure the worst it ever holds while driving the whole primary, not the total.
 const at = async (s) => page.evaluate((s) => {
   const c = window.corridor
   const p = c.site.spineAt(Math.max(0, Math.min(c.site.manifest.spine.length_m, s)))
-  c.camera.position.set(p.pos.x, p.pos.y + 120, p.pos.z)
+  c.camera.position.set(p.pos.x, p.pos.y + 60, p.pos.z)
+  c.orbit?.target.set(p.pos.x, p.pos.y, p.pos.z)
   c.site.updateNear(c.camera.position, performance.now() / 1000)
 }, s)
-const counts = () => page.evaluate(() => window.corridor.site.tiles?.() ?? null)
-await at(200)
-for (let i = 0; i < 40; i++) { await page.waitForTimeout(250); await at(200) }
-const near = await counts()
-await page.evaluate(() => {
+const counts = () => page.evaluate(() => {
   const c = window.corridor
-  c.camera.position.set(c.camera.position.x + 9000, c.camera.position.y, c.camera.position.z)
+  const t = c.site.tiles?.() ?? null
+  const r = window.__apex?.renderer
+  return { ...t, gpu_textures: r?.info?.memory?.textures ?? null, gpu_geometries: r?.info?.memory?.geometries ?? null }
 })
-for (let i = 0; i < 20; i++) { await page.waitForTimeout(250); await page.evaluate(() => window.corridor.site.updateNear(window.corridor.camera.position, performance.now() / 1000)) }
-const far = await counts()
-console.log(JSON.stringify({ stream_near_spine: near, stream_after_9km_jump: far }, null, 1))
+const L = await page.evaluate(() => window.corridor.site.manifest.spine.length_m)
+let peak = { resident: 0 }
+const samples = []
+for (let s = 0; s <= L; s += 250) {
+  // several ticks per station: one update starts at most `inFlight` fetches
+  for (let i = 0; i < 8; i++) { await at(s); await page.waitForTimeout(200) }
+  const c = await counts()
+  samples.push({ s, resident: c.resident, pending: c.pending })
+  if (c.resident > peak.resident) peak = { ...c, s }
+}
+const MB_PER_TILE = 1000 * 1000 * 4 * 1.333 / 1e6 // RGBA + a full mip chain
+const end = await counts()
+console.log(JSON.stringify({
+  drive_stations: samples.length,
+  peak_resident_tiles: peak.resident,
+  peak_resident_MB_est: +(peak.resident * MB_PER_TILE).toFixed(0),
+  all_125_resident_would_be_MB: +(125 * MB_PER_TILE).toFixed(0),
+  final: end,
+  resident_by_station: samples.slice(0, 16),
+}, null, 1))
 
 if (out) {
   await at(600)

@@ -1,0 +1,142 @@
+# assetsvc — the backend that orchestrates asset generation.
+#
+#   helm upgrade --install assetsvc tools/assetsvc/chart -n default --set enabled=true
+#
+# IT IS OFF BY DEFAULT, deliberately. Nothing in corridor requires it: the viewer and the editor
+# work completely without one, and the editor's asset panel says "no service" rather than failing.
+# Generation costs GPU time on a shared cluster, so it is something you turn on when you want it.
+enabled: false
+
+image:
+  # Built from tools/assetsvc/Dockerfile. No CUDA, no weights — the GPUs are in `recon` and the
+  # flux deployment and this only calls them, so it is a small node image that builds for both
+  # architectures in a minute.
+  repository: ghcr.io/hotspoons/assetsvc
+  # `latest` MOVES, and with IfNotPresent a node that has ever pulled it keeps serving its cache —
+  # so a rollout restarts the OLD image and the fix you just published never lands. That cost the
+  # recon chart two identical diagnoses. Pin to a sha- tag for a reproducible deploy.
+  tag: "latest"
+  pullPolicy: Always
+
+# The Service and Deployment are called `assetsvc`, full stop — not `assetsvc-assetsvc`. Anything
+# in the cluster addresses it as http://assetsvc.default.svc, and the README and the editor's
+# default URL both say so. (The recon chart learned this one first.)
+fullnameOverride: assetsvc
+
+replicaCount: 1
+
+# ---------------------------------------------------------------------------------------------
+# THE MODELS. This is the whole point of the service: the browser never reaches these, and these
+# are ClusterIP addresses with no route from outside the cluster.
+#
+# `models` is written verbatim into a ConfigMap and mounted as models.json. Adding a model, or
+# swapping which one is the default, is an edit here — there is no code change anywhere for it.
+models:
+  defaults:
+    image: flux2-dev
+    mesh: trellis2
+  models:
+    flux2-dev:
+      kind: image
+      model: flux.2-dev
+      # high-brine's flux.2-dev on gh200-1. `kubectl get svc -n default | grep flux2` if it moves.
+      url: http://high-brine-high-brine-flux2-dev-lws-api.default.svc
+      # dev takes edit attachments under `image`; klein wants `image[]`. Configuration, not a branch.
+      field: image
+      timeoutMs: 300000
+    trellis2:
+      kind: mesh
+      # tools/recon-service. Anything IN the cluster should use the Service and skip the ingress.
+      url: http://recon.default.svc
+      pollMs: 3000
+      timeoutMs: 1800000
+
+# ---------------------------------------------------------------------------------------------
+# The catalog volume. Tens of megabytes per asset — a raw reconstruction is ~25 MB before it is
+# finished — and the whole reason it is a PVC is that regenerating one costs a GPU-minute. RWX so
+# a future second replica, or a one-off Job that bulk-finishes, can read while this writes.
+data:
+  existingClaim: ""
+  size: 100Gi
+  storageClass: ceph-filesystem
+  accessMode: ReadWriteMany
+
+# ---------------------------------------------------------------------------------------------
+# S3-compatible save and load. Off unless a bucket is named.
+#   kubectl create secret generic assetsvc-s3 \
+#     --from-literal=AWS_ACCESS_KEY_ID=... --from-literal=AWS_SECRET_ACCESS_KEY=...
+s3:
+  bucket: ""
+  # R2: https://<account-id>.r2.cloudflarestorage.com ; leave empty for AWS
+  endpoint: ""
+  region: auto
+  prefix: assets
+  secretName: assetsvc-s3
+
+# Which origin may call this from a browser. `*` is the development default and is wrong for a
+# cluster: set it to wherever the editor is actually served from.
+corsOrigin: "*"
+
+resources:
+  requests: {cpu: "500m", memory: 1Gi}
+  # Finishing holds a ~25 MB glb and its textures in memory across three gltf-transform passes,
+  # and the container's heap ceiling is 2 GB (see the Dockerfile) — 4 Gi leaves room around it.
+  limits: {cpu: "4", memory: 4Gi}
+
+service:
+  type: ClusterIP
+  port: 80
+
+# ---------------------------------------------------------------------------------------------
+# How it is reached from outside. Exactly ONE of these should be on: external-dns (--policy=sync)
+# publishes the hostname of whichever object carries it, and two objects claiming one name fight
+# over the record.
+#
+# THE RECON CHART CHOSE THE INGRESS AND SAID SO IN ITS OWN COMMENTS — and it also recorded the
+# road not taken: `pai-managed-ext-gateway` in patapsco-richard-siomporas-platform, at
+# 172.16.10.157, which is the address every public platform hostname resolves to and which the
+# platform's own HTTPRoutes attach to. It was passed over there on the strength of its listener
+# list alone, which that chart calls "too quick".
+#
+# Both gateways are Programmed on gh200-1 today (`kubectl get gateway -A`). The HTTPRoute below is
+# written against the ext gateway rather than central-gateway for that reason — central-gateway is
+# a ClusterIP (10.100.23.26) and a route there gets a DNS record nobody off-cluster can route to,
+# which is exactly the trap recon documented. It is still OFF by default: turning it on means
+# first working out how a non-platform hostname gets its certificate there.
+httpRoute:
+  enabled: false
+  parentRefs:
+    - name: pai-managed-ext-gateway
+      namespace: patapsco-richard-siomporas-platform
+  hostnames: []
+  # A reconstruction is minutes, but nothing holds a connection for one — jobs are polled. This
+  # only has to cover an upload and a glb download.
+  timeout: 300s
+
+ingress:
+  enabled: false
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-issuer
+    # A generated glb is ~25 MB raw; uploads of source views are a few MB. 64m is generous.
+    nginx.ingress.kubernetes.io/proxy-body-size: "64m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+  hosts: []
+  tls: []
+
+# ---------------------------------------------------------------------------------------------
+# Probes. READINESS IS /health AND NOT /ready, and that is deliberate.
+#
+# The service also exposes /ready, which 503s unless BOTH model servers answer — useful to a human
+# and to the editor's Service tab. It is the wrong thing for the kubelet: if the mesh model is down
+# for maintenance, assetsvc can still serve the catalog, the thumbnails, S3 sync and 2D generation,
+# and taking the pod out of the Service would break the editor entirely for a fault it could have
+# worked around. Liveness that the process is up is what readiness should gate on here.
+probes:
+  startupFailureThreshold: 20
+  startupPeriodSeconds: 3
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+podAnnotations: {}

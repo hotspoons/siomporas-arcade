@@ -1,0 +1,19 @@
+{{- if and .Values.enabled (not .Values.data.existingClaim) }}
+# The catalog. A raw reconstruction is ~25 MB and regenerating one costs a GPU-minute, which is
+# the whole reason this is a volume and not an emptyDir.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "assetsvc.fullname" . }}-data
+  labels: {{- include "assetsvc.labels" . | nindent 4 }}
+  annotations:
+    # Keep the catalog when the release is uninstalled. Deleting generated assets should be a
+    # decision somebody makes, not a side effect of `helm uninstall`.
+    helm.sh/resource-policy: keep
+spec:
+  accessModes: [{{ .Values.data.accessMode }}]
+  storageClassName: {{ .Values.data.storageClass }}
+  resources:
+    requests:
+      storage: {{ .Values.data.size }}
+{{- end }}

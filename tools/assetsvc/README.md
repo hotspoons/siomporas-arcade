@@ -154,8 +154,42 @@ flattened RGB throws that away and makes the model guess again.
 process is up, and TRELLIS takes minutes to get 16 GB of weights onto the card. Probing liveness
 would tell the editor the pipeline is available while a reconstruction would still fail.
 
-## Not the default
+## In the cluster
 
-Nothing here runs unless it is asked for. The Helm chart ships with the deployment disabled, and
-corridor's viewer and editor work exactly as before without it — the asset catalog is an extra
-panel that reports "no service configured" when there is none.
+```bash
+helm upgrade --install assetsvc tools/assetsvc/chart -n default --set enabled=true
+kubectl port-forward -n default svc/assetsvc 8770:80     # until a route is turned on
+```
+
+`enabled: false` is the default and is the point: nothing in corridor requires this. The viewer and
+the editor work exactly as before without it, and the editor's asset panel reports "no service"
+rather than failing. Generation costs GPU time on a shared cluster, so it is something you turn on.
+
+What the chart makes:
+
+| | |
+|---|---|
+| Deployment | `Recreate`, one replica. A rolling update would put two processes on one catalog, each thinking it owns the job queue |
+| Service | `assetsvc:80` → the pod's 8770. In-cluster callers use `http://assetsvc.default.svc` |
+| PVC | the catalog, `helm.sh/resource-policy: keep` — deleting generated assets should be a decision, not a side effect of `helm uninstall` |
+| ConfigMap | `models.json`, with a checksum annotation on the pod so editing the roster actually restarts it |
+| HTTPRoute / Ingress | both **off**, and exactly one should ever be on: external-dns publishes whichever object carries the hostname, and two claiming one name fight over the record |
+
+**Readiness probes `/health`, not `/ready`.** `/ready` 503s unless both model servers answer, which
+is the right answer for a human and the wrong one for the kubelet: if the mesh model is down, this
+can still serve the catalog, the thumbnails, S3 sync and 2D generation, and taking the pod out of
+the Service would break the editor for a fault it could have worked around and reported.
+
+**The image is built by CI** (`.github/workflows/assetsvc-image.yml`) with the repository root as
+its context, because the Dockerfile also copies `finish.mjs` and the two modules it imports at load
+time out of `tools/assetgen`. It is a plain node image — no CUDA, no weights.
+
+### Which front door
+
+Both gateways on gh200-1 are Programmed. `central-gateway` is a ClusterIP (10.100.23.26), so an
+HTTPRoute there gets a DNS record nobody off-cluster can route to — the trap `tools/recon-service`
+documented after falling into it. The route here is written against `pai-managed-ext-gateway`
+(172.16.10.157), the address every public platform hostname resolves to, which recon's own comments
+call the road it should have taken. It is still off: turning it on means first working out how a
+non-platform hostname gets its certificate there. The nginx Ingress is the proven path and is the
+one recon uses today.

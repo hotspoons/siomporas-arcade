@@ -137,14 +137,20 @@
   display: grid; gap: var(--s1);
   padding: var(--s3);
   color: var(--ink-1);
-  background: var(--danger-dim);
-  border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
-  border-left-width: 3px;
+  /* Louder than an error row, which is what editor-knobs asked for: a filled field rather than a
+     tinted one, a solid bar down the side, and a ring that lifts it off the panel. Nothing else
+     in either corridor UI is allowed this much weight, which is what makes it work. */
+  background: color-mix(in srgb, var(--danger) 16%, var(--bg-1));
+  border: 1px solid color-mix(in srgb, var(--danger) 55%, transparent);
+  border-left: 4px solid var(--danger);
   border-radius: var(--r2);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 12%, transparent);
   font-size: var(--text-sm);
 }
 .framewarn strong { color: var(--danger); font-weight: 600; }
-.framewarn .dim { color: var(--ink-3); font-size: var(--text-xs); }
+.framewarn > span { color: var(--ink-1); }
+.framewarn .dim { color: var(--ink-2); font-size: var(--text-xs); }
+.framewarn code { font-family: var(--num); font-size: var(--text-xs); color: var(--ink-1); }
 
 /* ---- the floating road cross-section --------------------------------------------------------
    Not part of the inspector, so the editor's refresh() rebuilding the mode panel never tears it

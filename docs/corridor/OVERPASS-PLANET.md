@@ -174,6 +174,22 @@ So a continent import is **three full passes over the data**, not one:
 | 2 | `osmium fileinfo -e` to read the timestamp | **no** |
 | 3 | `bunzip2 \| update_database`, then Reorganizing | no |
 
+**Measured cost of pass 2 on Europe: about 3.5 hours.** Two thirds of the way in, the file offset
+was 35.0 GB of 58.6 GB (59.7%) after 128 minutes of CPU — so a shade over 3 hours of pure
+decompress-and-parse to produce a timestamp, before the import has read a byte.
+
+**How to tell a long pass from a hung one**, which is worth more than the number: the process holds
+the file open, so its read position is the exact progress.
+
+```
+kubectl exec -n default <pod> -- sh -c '
+  for d in /proc/[0-9]*; do case "$(tr "\0" " " < $d/cmdline)" in *fileinfo*)
+    for f in $d/fd/*; do case "$(readlink $f)" in *planet.osm.bz2)
+      grep "^pos:" $d/fdinfo/${f##*/};; esac; done;; esac; done'
+```
+
+That turns "is it stuck?" into a percentage, for any of the three passes, without touching the job.
+
 Pass 2 buys one string. If Europe's import time ever needs cutting, passing a known `--version`
 and skipping it is the cheapest hour available — it would need a change to the image's entrypoint
 or an `OVERPASS_PLANET_PREPROCESS` that writes the timestamp somewhere the entrypoint reads, and

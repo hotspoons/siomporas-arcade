@@ -505,14 +505,46 @@ def export_branches(site_dir: Path, frame) -> list[dict] | None:
     # crofton-crownsville measured 14.9 mm/m (mean 76 m, max 147 m), arrowhead-farms-network
     # 17.3 mm/m. It is not cosmetic — scene.ts feeds these to the junction paint-suppression
     # circles, so lane paint was being cut in empty ground and drawn through real intersections.
-    _stale = _bj.get("frame") != "enu"
-    if _stale:
+    # DO NOT infer staleness from the marker alone. A branches.json can be correct-but-unmarked —
+    # written by a revector after the ENU commit but before the marker existed — and converting
+    # that a second time rotates it the wrong way, turning a right answer into a doubly-wrong one.
+    # The street-spice lane created exactly that file and caught it before it bit.
+    #
+    # So MEASURE instead. A junction belongs to its own road, so its distance to that road's own
+    # polyline grows linearly with distance from the origin if and only if the frame is rotated.
+    # Fit that slope and compare it with the convergence: the two states are three orders of
+    # magnitude apart (crofton-triangle read 0.02 mm/m once converted, against 18 for a rotation),
+    # so there is no ambiguous middle to get wrong. The marker is then just a fast path.
+    def _looks_rotated() -> bool:
+        import math
+
+        num = den = 0.0
+        n = 0
+        for b in _br:
+            cs = b.get("coords") or []
+            if len(cs) < 2:
+                continue
+            for j in b.get("junctions") or []:
+                jx, jy = j.get("x"), j.get("y")
+                if jx is None or jy is None:
+                    continue
+                d = min(math.hypot(c[0] - jx, c[1] - jy) for c in cs)
+                r = math.hypot(jx, jy)
+                num += r * d
+                den += r * r
+                n += 1
+        if n < 8 or den <= 0:
+            return False  # too little to judge; leave it alone rather than guess
+        rot = math.sin(math.radians(abs(frame.enu_fit()[0])))
+        return (num / den) > rot * 0.5
+
+    if _bj.get("frame") != "enu" and _looks_rotated():
         ox, oy = frame.origin
         for _b in _br:
             for _j in _b.get("junctions", []) or []:
                 _e, _n = frame.to_enu(_j["x"] + ox, _j["y"] + oy)
                 _j["x"], _j["y"] = round(float(_e), 1), round(float(_n), 1)
-        print(f"  note    branches.json predates the ENU frame; {sum(len(b.get('junctions') or []) for b in _br)} junctions converted on read", flush=True)
+        print(f"  note    branches.json junctions measured as still in the old frame; {sum(len(b.get('junctions') or []) for b in _br)} converted on read", flush=True)
     by_id = {b["id"]: b for b in _br if b.get("id")}
     by_pos = _br  # a branches.json written before chains carried ids: its order is the sibling order
     def finite(v, default=0.0):

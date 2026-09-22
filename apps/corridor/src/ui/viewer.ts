@@ -70,6 +70,27 @@ export const LAYER_GROUPS: { title: string; layers: { id: string; label: string;
   },
 ]
 
+/**
+ * How this site's stored metres should be read.
+ *
+ * Showing `EPSG:32618` alone was actively misleading after the geodetic move: a manifest with
+ * `kind: "enu"` holds ENU metres about `frame.anchor`, and the EPSG is only where the bake started
+ * from. `frame.kind` is the ONLY field that distinguishes the two, and reading it wrong rotates
+ * the world by the grid convergence — about 55 m at 3 km, and it looks plausible. So the panel
+ * says which, names the anchor, and gives the convergence that separates the two norths.
+ * See docs/corridor/FRAME.md.
+ */
+function frameReadouts(m: Manifest): HTMLElement[] {
+  const f = m.frame
+  const kind = f.kind === 'enu' ? 'ENU about the anchor' : f.kind === 'utm-enu' ? 'UTM-relative (flat)' : 'UTM-relative (pre-geodetic bake)'
+  const rows = [readout('Frame', kind, false), readout('Bake EPSG', String(f.epsg))]
+  if (f.anchor) rows.push(readout('Anchor', `${f.anchor.lat.toFixed(6)}, ${f.anchor.lon.toFixed(6)}`))
+  if (typeof f.utm_convergence_deg === 'number') {
+    rows.push(readout('Convergence', `${f.utm_convergence_deg.toFixed(4)}° grid→true`))
+  }
+  return rows
+}
+
 /** Keyboard reference, shown in Settings → Controls instead of as six lines of footer text. */
 const KEYS: { group: string; rows: [string, string][] }[] = [
   {
@@ -275,7 +296,7 @@ export class ViewerUI {
       readout('Road', ident, false),
       readout('Spine', `${(m.spine.length_m / 1000).toFixed(2)} km`),
       readout('Photo at', `${m.spine.photo_s.toFixed(0)} m`),
-      readout('Frame', `EPSG:${m.frame.epsg}`),
+      ...frameReadouts(m),
       readout('Lidar', lidar, false),
       readout('Crossings', Object.entries(byRel).map(([k, v]) => `${v} ${k}`).join(', ') || 'none', false),
       readout('Surface', m.surface ? Object.entries(m.surface.summary).map(([k, v]) => `${k} ${(v * m.surface!.step_m / 1000).toFixed(1)} km`).join(', ') : 'not measured', false),

@@ -35,6 +35,7 @@ const out = await page.evaluate(() => {
     arms: { signalised: 0, armsExpected: 0, armsWithMast: 0, junctionsFullyCovered: 0, worst: null },
     cycle: { junctions: 0, everTwoGreen: 0, phasesNeverGreen: 0, phasesNeverRed: 0, sampled: 0 },
     bars: { checked: 0, offRoad: 0, worst: 0 },
+    facing: { checked: 0, wrongWay: 0, worstErrDeg: 0, examples: [] },
     blades: { checked: 0, onPavement: 0, noneClear: 0, nominalClear: 0, neededWalk: 0, worstIntoRoad: 0, truncatedExamples: [] },
     zones: (m.sidewalk_zones ?? []).length,
     zoneSidewalks: (m.sidewalks ?? []).filter((s) => s.source === 'zone').length,
@@ -108,6 +109,42 @@ const out = await page.evaluate(() => {
       r.cycle.junctions++
       if (!seenGreen.get(c.id)) r.cycle.phasesNeverGreen++
       if (!seenRed.get(c.id)) r.cycle.phasesNeverRed++
+    }
+  }
+
+  // --- do the stop signs FACE the traffic they stop? --------------------------------------------
+  //
+  // A sign facing the wrong way is indistinguishable from a correct one in any still, and it is a
+  // 180 deg error, so it is either perfect or completely wrong. The repo renders a bearing as
+  // `rotation.y = -(yaw*PI/180)`, under which a model's -Z points along it; the sign's face is on
+  // -Z and its `yaw_deg` is `travel + 180`, so the face should end up pointing back UP the
+  // approach, opposite the direction of travel. Matched by INSTANCE INDEX through the source
+  // record each mesh carries — nearest-position matching pairs the two signs of one junction with
+  // each other, which is how street-furniture first measured a phantom 180 deg error on the masts.
+  {
+    const fwd = new THREE.Vector3()
+    const m4 = new THREE.Matrix4(), pp = new THREE.Vector3(), qq = new THREE.Quaternion(), ss = new THREE.Vector3()
+    for (const mesh of site.layers.furniture.children) {
+      if (!mesh.name.startsWith('furniture:sign')) continue
+      const src = mesh.userData?.src
+      if (!Array.isArray(src)) continue
+      for (let i = 0; i < mesh.count; i++) {
+        const rec = src[i]
+        if (!rec || rec.travel_deg == null) continue
+        mesh.getMatrixAt(i, m4)
+        m4.decompose(pp, qq, ss)
+        fwd.set(0, 0, -1).applyQuaternion(qq)
+        // world (x east, z south) -> compass bearing
+        const face = ((Math.atan2(fwd.x, -fwd.z) * 180) / Math.PI + 360) % 360
+        const want = (rec.travel_deg + 180) % 360
+        const err = Math.abs(((face - want + 540) % 360) - 180)
+        r.facing.checked++
+        r.facing.worstErrDeg = Math.max(r.facing.worstErrDeg, err)
+        if (err > 45) {
+          r.facing.wrongWay++
+          if (r.facing.examples.length < 5) r.facing.examples.push({ x_id: rec.x_id, face: Math.round(face), want: Math.round(want) })
+        }
+      }
     }
   }
 

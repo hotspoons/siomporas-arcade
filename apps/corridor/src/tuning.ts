@@ -292,6 +292,13 @@ export let FURNITURE_KERB_MAX = 26
 export let FURNITURE_MAX_FROM_ROAD = 20
 /** how far back along its own approach a post may be walked to get out of the junction box (m) */
 export let FURNITURE_SETBACK_MAX = 16
+/**
+ * How far to the RIGHT a sign post will look before it will accept the left (m).
+ *
+ * A stop sign belongs on the right of travel. 0 restores the old behaviour, where the nearest
+ * clear spot on either side won and 31 % of Crofton's stop signs stood on the left.
+ */
+export let FURNITURE_SIGN_RIGHT_M = 12
 /** past this reach it is not a mast arm any more, and the signal is not placed (m) */
 export let FURNITURE_ARM_MAX = 14
 
@@ -637,6 +644,7 @@ export const TUNE_TABS: TuneTab[] = [
           tune('FURNITURE_KERB_MAX', () => FURNITURE_KERB_MAX, (v) => (FURNITURE_KERB_MAX = v), [2, 40], 1, 'm it may be walked sideways to find it'),
           tune('FURNITURE_MAX_FROM_ROAD', () => FURNITURE_MAX_FROM_ROAD, (v) => (FURNITURE_MAX_FROM_ROAD = v), [2, 400], 2, 'm from a drawn road, or it is not placed'),
           tune('FURNITURE_SETBACK_MAX', () => FURNITURE_SETBACK_MAX, (v) => (FURNITURE_SETBACK_MAX = v), [0, 40], 1, 'm back along the approach, out of the junction box'),
+          tune('FURNITURE_SIGN_RIGHT_M', () => FURNITURE_SIGN_RIGHT_M, (v) => (FURNITURE_SIGN_RIGHT_M = v), [0, 30], 1, 'm right a sign looks before accepting the left'),
           tune('FURNITURE_ARM_MAX', () => FURNITURE_ARM_MAX, (v) => (FURNITURE_ARM_MAX = v), [4, 30], 0.5, 'm of arm before the mast is dropped instead'),
         ],
       },

@@ -32,7 +32,7 @@ const toWorld = (x: number, y: number) => new THREE.Vector3(x, 0, -y)
 
 export interface FurnitureResult {
   group: THREE.Group
-  counts: { masts: number; signs: number; movedOffPavement: number; stillOnPavement: number; onTheLeft: number; noRoadNearby: number; armNoRoad: number }
+  counts: { masts: number; signs: number; movedOffPavement: number; stillOnPavement: number; onTheLeft: number; signsOnTheLeft: number; noRoadNearby: number; armNoRoad: number }
   /**
    * Where each mast ACTUALLY ended up, after the kerb walk and the arm measurement.
    *
@@ -298,7 +298,7 @@ export function buildFurniture(
 ): FurnitureResult {
   const group = new THREE.Group()
   group.name = 'furniture'
-  const counts = { masts: 0, signs: 0, movedOffPavement: 0, stillOnPavement: 0, onTheLeft: 0, noRoadNearby: 0, armNoRoad: 0 }
+  const counts = { masts: 0, signs: 0, movedOffPavement: 0, stillOnPavement: 0, onTheLeft: 0, signsOnTheLeft: 0, noRoadNearby: 0, armNoRoad: 0 }
   const placed: FurnitureResult['placed'] = []
   const data = manifest.signals
   if (!data) return { group, counts, placed }
@@ -316,10 +316,33 @@ export function buildFurniture(
    * clear spot, prefer the right where both work, and if neither clears within the limit take
    * whichever got furthest out rather than the last step of a failed walk.
    */
-  const toKerb = (p: THREE.Vector3, side: THREE.Vector3, back: THREE.Vector3): { p: THREE.Vector3; moved: boolean; clear: boolean; sign: number } => {
+  const toKerb = (p: THREE.Vector3, side: THREE.Vector3, back: THREE.Vector3, rightFirstM = 0): { p: THREE.Vector3; moved: boolean; clear: boolean; sign: number } => {
     const want = T.FURNITURE_KERB_CLEAR
     if (edgeDistance(p.x, p.z) >= want) return { p, moved: false, clear: true, sign: 1 }
     const step = 0.5
+    // RIGHT FIRST, when the caller says the right matters more than the distance.
+    //
+    // The search below is ordered (step back, then sideways distance, then side), so a nearer LEFT
+    // always beats a farther RIGHT. For a mast that is the right trade — it is hung over the road
+    // either way and the geometry mirrors. For a STOP SIGN it is not: an American stop sign is on
+    // the right, and a sign on the left of a two-way street reads as wrong to anyone who drives.
+    //
+    // Measured on crofton-triangle before this: 179 of 572 stop signs (31 %) stood on the left. The
+    // cause is that a stop sign is placed at the STOP LINE, 6 m into the junction's paved throat,
+    // where walking right crosses the cross street's asphalt — 140 of the 179 had no clear ground
+    // to the right at that setback at all, out to the full 26 m. Stepping back 2-12 m first clears
+    // it for 176 of them, and the right-hand search below does exactly that before it gives up.
+    if (rightFirstM > 0) {
+      const q0 = new THREE.Vector3()
+      const f0 = new THREE.Vector3()
+      for (let b = 0; b <= T.FURNITURE_SETBACK_MAX; b += 2) {
+        f0.set(p.x + back.x * b, 0, p.z + back.z * b)
+        for (let d = step; d <= rightFirstM; d += step) {
+          q0.set(f0.x + side.x * d, 0, f0.z + side.z * d)
+          if (edgeDistance(q0.x, q0.z) >= want) return { p: q0.clone(), moved: true, clear: true, sign: 1 }
+        }
+      }
+    }
     let bestE = -Infinity
     let bestSign = 1
     const best = p.clone()
@@ -446,7 +469,7 @@ export function buildFurniture(
   }
 
   // --- stop and give-way signs -----------------------------------------------------------------
-  const bySign = new Map<'stop' | 'give_way', { pos: THREE.Vector3; yaw: number }[]>()
+  const bySign = new Map<'stop' | 'give_way', { pos: THREE.Vector3; yaw: number; src: unknown }[]>()
   for (const s of data.signs ?? []) {
     const kind = s.kind === 'stop' ? 'stop' : 'give_way'
     const b = (s.yaw_deg * Math.PI) / 180
@@ -458,12 +481,13 @@ export function buildFurniture(
       counts.noRoadNearby++
       continue
     }
-    const { p, moved, clear } = toKerb(p0, right, headDir)
+    const { p, moved, clear, sign } = toKerb(p0, right, headDir, T.FURNITURE_SIGN_RIGHT_M)
     if (moved) counts.movedOffPavement++
     if (!clear) counts.stillOnPavement++
+    if (sign < 0) counts.signsOnTheLeft++
     p.y = groundAt(p.x, p.z) ?? s.z
     if (!bySign.has(kind)) bySign.set(kind, [])
-    bySign.get(kind)!.push({ pos: p, yaw: s.yaw_deg })
+    bySign.get(kind)!.push({ pos: p, yaw: s.yaw_deg, src: s })
     counts.signs++
   }
   for (const [kind, at] of bySign) {
@@ -479,6 +503,9 @@ export function buildFurniture(
     })
     mesh.instanceMatrix.needsUpdate = true
     mesh.frustumCulled = false
+    // the source record per instance, in instance order — so a probe can ask whether a sign faces
+    // the traffic it stops, which is the one thing about a sign that a screenshot cannot show
+    mesh.userData.src = at.map((a) => a.src)
     group.add(mesh)
   }
 

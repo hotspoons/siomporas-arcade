@@ -67,6 +67,7 @@ export function loadBakedTexture(base: string, choice: TexChoice, renderer?: THR
       out.magFilter = t.magFilter
       out.anisotropy = t.anisotropy
       ;(out as unknown as { isCompressedTexture: boolean }).isCompressedTexture = true
+      out.generateMipmaps = false // the ktx2 brought its own
       out.needsUpdate = true
       onLoad?.(out)
     },

@@ -301,9 +301,15 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     }
     tex.colorSpace = THREE.SRGBColorSpace
     tex.anisotropy = lite ? 2 : 8
-    tex.generateMipmaps = true
+    // A .ktx2 CARRIES its mipmaps (12 of them for the overview) — asking three to generate more
+    // for a compressed texture is a no-op at best and drops the chain at worst. Only the
+    // uncompressed paths need it.
+    tex.generateMipmaps = !(tex as unknown as { isCompressedTexture?: boolean }).isCompressedTexture
     tex.minFilter = THREE.LinearMipmapLinearFilter
     imagery = tex
+
+    // NOTE: minimap.ts fetches layers.naip.file separately and that is not waste — it draws the
+    // imagery into a 2D canvas, which cannot read a GPU-compressed texture.
   }
   const bare = new THREE.Color(0x6f6a5a)
   const terrainMat = new THREE.MeshStandardMaterial({ map: imagery, color: imagery ? 0xffffff : bare, roughness: 1, metalness: 0 })

@@ -446,7 +446,7 @@ export function buildFurniture(
   }
 
   // --- stop and give-way signs -----------------------------------------------------------------
-  const bySign = new Map<'stop' | 'give_way', { pos: THREE.Vector3; yaw: number }[]>()
+  const bySign = new Map<'stop' | 'give_way', { pos: THREE.Vector3; yaw: number; src: unknown }[]>()
   for (const s of data.signs ?? []) {
     const kind = s.kind === 'stop' ? 'stop' : 'give_way'
     const b = (s.yaw_deg * Math.PI) / 180
@@ -463,7 +463,7 @@ export function buildFurniture(
     if (!clear) counts.stillOnPavement++
     p.y = groundAt(p.x, p.z) ?? s.z
     if (!bySign.has(kind)) bySign.set(kind, [])
-    bySign.get(kind)!.push({ pos: p, yaw: s.yaw_deg })
+    bySign.get(kind)!.push({ pos: p, yaw: s.yaw_deg, src: s })
     counts.signs++
   }
   for (const [kind, at] of bySign) {
@@ -479,6 +479,9 @@ export function buildFurniture(
     })
     mesh.instanceMatrix.needsUpdate = true
     mesh.frustumCulled = false
+    // the source record per instance, in instance order — so a probe can ask whether a sign faces
+    // the traffic it stops, which is the one thing about a sign that a screenshot cannot show
+    mesh.userData.src = at.map((a) => a.src)
     group.add(mesh)
   }
 

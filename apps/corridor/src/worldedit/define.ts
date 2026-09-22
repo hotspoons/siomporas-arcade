@@ -168,14 +168,14 @@ export class DefinePanel {
       wb.append(
         readout('centre', `${c.lat.toFixed(5)}, ${c.lon.toFixed(5)}`),
         slider({
-          label: 'radius',
+          label: 'half-width',
           value: c.radius_m,
           min: 150,
           max: 12000,
           step: 50,
           neutral: c.radius_m,
           unit: 'm',
-          note: 'the smallest circle containing what you drew; drag to widen or tighten it',
+          note: 'sized from the smallest circle containing what you drew, but the bake uses it as a HALF-WIDTH: drag to widen or tighten the square',
           onInput: (v) => {
             this.draft.radius_m = v
             this.o.map.extent = { centre: { lat: c.lat, lon: c.lon }, radius_m: v }
@@ -188,6 +188,7 @@ export class DefinePanel {
           },
         }),
         readout('the bake takes', `${(c.radius_m * 2).toLocaleString()} m square`),
+        hint('`radius_m` is the bake’s own name for this and it is a half-width, not a radius: `network.roads` builds a square of side 2× it and never clips to a circle. A square is 4/π = 1.27× the area the name implies.'),
       )
       for (const w of this.preview.warnings) wb.append(warn(w))
     }
@@ -197,7 +198,7 @@ export class DefinePanel {
     if (this.preview) {
       const s = this.preview.selection
       const size = group('What is in it', {
-        note: 'The bake queries a SQUARE of side 2·radius and never clips roads to a circle or to your polygon. Both numbers are here so the difference is visible.',
+        note: 'The bake queries a SQUARE of side 2× the half-width and never clips roads to a circle or to your polygon. Both numbers are here so the difference is visible.',
       })
       const sb = bodyOf(size)
       sb.append(readout('in the square (baked)', `${s.square.ways} ways · ${km(s.square.metres)}`))

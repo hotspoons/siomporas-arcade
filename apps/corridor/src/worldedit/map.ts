@@ -434,8 +434,9 @@ export class MapView {
   /**
    * The extent, drawn as the CIRCLE and the SQUARE.
    *
-   * `radius_m` reads like a circular cut and is not one: `network.roads` queries the geodetic
-   * bounding box of a UTM square of side 2·radius_m and never clips to a circle afterwards. The
+   * `radius_m` is a HALF-WIDTH and its name is wrong at the source: `network.roads` queries the
+   * geodetic bounding box of a UTM square of side 2·radius_m and never clips to a circle
+   * afterwards, so the square is 4/π = 1.27× the area the name implies. The
    * square is drawn solid and labelled "what the bake takes"; the circle is a dashed hint at where
    * the radius came from. Drawing only the circle is how someone ends up believing they excluded a
    * motorway that the bake then chains right through their town.
@@ -466,7 +467,7 @@ export class MapView {
     g.fillStyle = '#4aa8e8'
     g.font = '11px ui-monospace, monospace'
     g.textAlign = 'left'
-    g.fillText(`the bake takes this square · ${(radius_m * 2).toLocaleString()} m a side`, cx - rpx + 6, cy - rpx - 6)
+    g.fillText(`the bake takes this square · ${(radius_m * 2).toLocaleString()} m a side (radius_m is a half-width)`, cx - rpx + 6, cy - rpx - 6)
     g.restore()
   }
 

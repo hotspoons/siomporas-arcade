@@ -12,6 +12,13 @@
 // THAT CONTAINS IT (geo.circleFor), and the editor draws the resulting square back on the map.
 // The polygon is kept for provenance and for re-editing, never as a clip, and the UI says so
 // rather than letting someone believe they cut a shape.
+//
+// AND `radius_m` IS A HALF-WIDTH. The name is wrong at the source — network.py's docstring says
+// "every drivable way in the radius" and its error says "within {R} m", and a square of side 2R is
+// 4/π = 1.27× the area both of those imply. Confirmed with the orchestrator on 2026-09-22, who
+// owns network.py and is fixing the documentation rather than the behaviour: clipping to the
+// circle to make the name honest would silently shrink every site already baked, and
+// crofton-crownsville's eighteen hand-chosen roads were picked against the square's reach.
 
 import { circleFor, haversineM, lengthM, pointInRing, slugify } from './geo.mjs'
 

@@ -5,7 +5,11 @@
 # cluster is something you turn on deliberately, not something that arrives with a merge.
 #
 #   helm upgrade --install worldeditor tools/worldeditor/chart -n default \
-#     --set enabled=true --set data.existingClaim=corridor-data
+#     --set enabled=true --set ingress.enabled=true
+#
+# That one command is the whole deployment: it makes the volume, the pod, the role that lets a
+# person start a bake without a kubeconfig, and the route in. Nothing has to be installed first
+# and no bake runs on install — you draw the areas and bake them from the page.
 #
 # `helm template` with these defaults renders ZERO objects.
 enabled: false
@@ -17,13 +21,19 @@ image:
 
 replicaCount: 1
 
-# THE BAKE'S VOLUME. Set `existingClaim` to the claim `tools/corridor/chart` made (default
-# `corridor-data`): the bake Job writes `sites/<slug>/web/`, this serves it, and the editor writes
-# `sites/<slug>/placements.json` beside it. Nothing is copied. RWX because a bake Job and this pod
-# hold it at the same time, which is the normal state, not the exception.
+# THE BAKE'S VOLUME. A bake Job writes `sites/<slug>/web/`, this pod serves it, and the editor
+# writes `sites/<slug>/placements.json` beside it. Nothing is copied. RWX because a bake Job and
+# this pod hold it at the same time, which is the normal state, not the exception.
 #
-# Left empty, the chart makes its own claim — useful for trying this out, and wrong for real use,
-# because then the bake Job and this pod are looking at two different worlds.
+# LEAVE `existingClaim` EMPTY unless you are sharing a volume with a separately-installed
+# `tools/corridor/chart`. The bake Jobs this service launches mount WORLDEDITOR_CLAIM, which the
+# deployment sets to whatever claim this chart is using — so a claim of its own is not a half
+# setup, it is the self-contained one, and the pod and its bakes are on the same volume either
+# way. Set `existingClaim` only to ADOPT an existing bake volume; the two-worlds problem it avoids
+# is the corridor chart's Job writing somewhere this pod cannot see, which only arises if you run
+# that chart's Job at all.
+#
+# The claim carries `helm.sh/resource-policy: keep`, so worlds outlive `helm uninstall`.
 data:
   existingClaim: ""
   size: 500Gi

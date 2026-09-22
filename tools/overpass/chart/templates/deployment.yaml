@@ -18,7 +18,11 @@ spec:
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           env:
-            - { name: OVERPASS_MODE, value: "init" }        # a no-op once /db holds a database
+            # The image re-runs the import unless /db/init_done exists. It does NOT check
+            # whether /db is empty, whatever the upstream README says — a failed import
+            # leaves /db/db behind and no marker, so the next start imports ON TOP of the
+            # wreckage. Wipe /db/db before retrying a failed import.
+            - { name: OVERPASS_MODE, value: "init" }
             - { name: OVERPASS_PLANET_URL, value: "{{ .Values.planetUrl }}" }
             - { name: OVERPASS_DIFF_URL, value: "{{ .Values.diffUrl }}" }
             - { name: OVERPASS_PLANET_PREPROCESS, value: {{ .Values.preprocess | quote }} }
@@ -26,6 +30,9 @@ spec:
             - { name: OVERPASS_RULES_LOAD, value: "{{ .Values.rulesLoad }}" }
             - { name: OVERPASS_UPDATE_SLEEP, value: "{{ .Values.updateSleep }}" }
             - { name: OVERPASS_MAX_TIMEOUT, value: "600" }
+            # The image defaults this to 16, meaning a 16 GB flush buffer — sized for the
+            # planet, against our 16Gi limit. Maryland is a 204 MB extract.
+            - { name: OVERPASS_FLUSH_SIZE, value: "{{ .Values.flushSize }}" }
           ports: [{ containerPort: 80, name: http }]
           volumeMounts:
             - { name: db, mountPath: /db }

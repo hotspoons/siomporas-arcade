@@ -335,7 +335,7 @@ const checkJobSpec = check('the Job this service builds is accepted by the real 
   k8s.getJob = () => new Promise(() => {})
   k8s.podsFor = () => Promise.resolve([])
   const runs = new Runs(store, k8s, {
-    image: 'ghcr.io/hotspoons/corridor:latest', claim: 'corridor-data', secretName: 'corridor-r2',
+    image: 'ghcr.io/hotspoons/corridor:latest', claim: 'probe-claim-not-the-default', secretName: 'corridor-r2',
     bucket: 'apex-corridor', endpoint: '', region: 'auto', prefix: 'corridor',
     overpassUrl: 'https://overpass.example/api/interpreter', horizonM: 30000,
     resources: { requests: { cpu: '4', memory: '16Gi' }, limits: { cpu: '16', memory: '48Gi' } },
@@ -346,7 +346,11 @@ const checkJobSpec = check('the Job this service builds is accepted by the real 
   // the things that make it the CHART's Job rather than a different one
   const c = spec.spec.template.spec.containers[0]
   assert(c.command.join(' ') === 'python -m corridor fetch crofton-triangle', `command is ${c.command.join(' ')}`)
-  assert(spec.spec.template.spec.volumes[0].persistentVolumeClaim.claimName === 'corridor-data', 'the Job is not on the shared volume')
+  // Deliberately NOT the default name: feeding in 'corridor-data' and asserting 'corridor-data'
+  // passes just as well against a claimName hardcoded in runs.mjs, which is the one bug this
+  // check exists to catch. The Job must mount whatever claim the POD is serving from, or a
+  // bake writes into a volume nobody reads.
+  assert(spec.spec.template.spec.volumes[0].persistentVolumeClaim.claimName === 'probe-claim-not-the-default', 'the Job is not on the claim the pod serves from')
   assert(c.env.find((e) => e.name === 'CORRIDOR_SITES')?.value === '/data/sites.json', 'the Job would read the image’s sites.json, not the world just drawn')
   assert(c.env.find((e) => e.name === 'PYTHONUNBUFFERED')?.value === '1', 'without this the log arrives in 4 KiB lumps, minutes late')
   assert(spec.spec.backoffLimit === 0, 'a retry would print the log twice and look like a hang')

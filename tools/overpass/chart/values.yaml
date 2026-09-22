@@ -28,6 +28,13 @@ rulesLoad: 10
 # the dispatcher's shared memory; Overpass wants this in /dev/shm
 shmSize: 2Gi
 
+# GB of flush buffer during import. The image defaults to 16, which is a planet-sized
+# setting and sits right on our 16Gi memory limit; the import died in "Reorganizing the
+# database" with an EINVAL out of File_Blocks::read_block on a CLEAN volume, which is what
+# a failed buffer allocation looks like through an O_DIRECT read. O_DIRECT itself was
+# tested on this volume at 512 and 4096 byte alignment and works.
+flushSize: 4
+
 storage:
   size: 60Gi
   # a BLOCK device, not cephfs. Overpass opens its database files with direct I/O; on the cephfs

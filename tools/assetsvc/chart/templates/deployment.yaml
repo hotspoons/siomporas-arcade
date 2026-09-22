@@ -1,0 +1,109 @@
+{{- if .Values.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "assetsvc.fullname" . }}
+  labels: {{- include "assetsvc.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels: {{- include "assetsvc.selectorLabels" . | nindent 6 }}
+  # The catalog is a ReadWriteMany volume, but a rolling update would still put two processes on
+  # it that each think they own the job queue. Recreate: one at a time, briefly down.
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels: {{- include "assetsvc.selectorLabels" . | nindent 8 }}
+      annotations:
+        # Without this a roster edit lands in the ConfigMap and the running process never re-reads
+        # it — models.json is parsed once at start-up.
+        checksum/models: {{ toPrettyJson .Values.models | sha256sum }}
+        {{- with .Values.podAnnotations }}{{- toYaml . | nindent 8 }}{{- end }}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+      containers:
+        - name: assetsvc
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["--models", "/config/models.json"]
+          ports:
+            - name: http
+              containerPort: 8770
+              protocol: TCP
+          env:
+            - name: ASSETSVC_DATA
+              value: /data
+            - name: ASSETSVC_PORT
+              value: "8770"
+            - name: ASSETSVC_CORS
+              value: {{ .Values.corsOrigin | quote }}
+            {{- if .Values.s3.bucket }}
+            - name: ASSETSVC_S3_BUCKET
+              value: {{ .Values.s3.bucket | quote }}
+            - name: ASSETSVC_S3_ENDPOINT
+              value: {{ .Values.s3.endpoint | quote }}
+            - name: ASSETSVC_S3_REGION
+              value: {{ .Values.s3.region | quote }}
+            - name: ASSETSVC_S3_PREFIX
+              value: {{ .Values.s3.prefix | quote }}
+            # The bucket's token. An R2 API token works as-is; see values.yaml for the one-liner
+            # that creates the Secret.
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef: {name: {{ .Values.s3.secretName }}, key: AWS_ACCESS_KEY_ID}
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef: {name: {{ .Values.s3.secretName }}, key: AWS_SECRET_ACCESS_KEY}
+            {{- end }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: models
+              mountPath: /config
+              readOnly: true
+          # The process is up in under a second — there are no weights to load here, which is the
+          # whole difference between this and the GPU services it calls.
+          startupProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: {{ .Values.probes.startupPeriodSeconds }}
+            failureThreshold: {{ .Values.probes.startupFailureThreshold }}
+          # READINESS IS /health, NOT /ready — see values.yaml. /ready 503s when a MODEL server is
+          # down, and the catalog, the thumbnails, S3 sync and 2D generation all still work in that
+          # state; taking the pod out of the Service would break the editor for a fault it could
+          # have worked around and reported.
+          readinessProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /health, port: http}
+            periodSeconds: 20
+            # Finishing a mesh runs in a CHILD process precisely so it cannot block the event loop
+            # and fail this probe. If that ever changes, this is the thing that kills the pod.
+            timeoutSeconds: 5
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop: [ALL]
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ .Values.data.existingClaim | default (printf "%s-data" (include "assetsvc.fullname" .)) }}
+        - name: models
+          configMap:
+            name: {{ include "assetsvc.fullname" . }}-models
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

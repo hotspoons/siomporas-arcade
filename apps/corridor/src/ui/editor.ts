@@ -93,6 +93,8 @@ export interface EditorUIOpts {
   onLayers: () => void
   onSave: () => void
   onPreview: () => void
+  /** open the generated-asset catalog (ui/assets.ts) */
+  onAssets: () => void
 }
 
 export class EditorUI {
@@ -139,6 +141,7 @@ export class EditorUI {
       this.dirtyEl,
       this.saveBtn,
       button({ label: 'Preview', icon: 'eye', variant: 'primary', key: 'V', onClick: () => this.o.onPreview() }),
+      button({ icon: 'cube', title: 'generated assets', onClick: () => this.o.onAssets() }),
       button({ icon: 'cog-6-tooth', title: 'settings', onClick: () => this.settings.open() }),
     )
     document.body.append(this.bar)
@@ -163,6 +166,7 @@ export class EditorUI {
   private buildDrawer() {
     const nav = this.drawer.section('')
     this.drawer.item(nav, { id: 'settings', label: 'Settings', icon: 'cog-6-tooth', hint: 'layers and keys', onClick: () => this.settings.open() })
+    this.drawer.item(nav, { id: 'assets', label: 'Assets', icon: 'cube', hint: 'generate props in 2D, then in 3D', onClick: () => this.o.onAssets() })
     this.drawer.item(nav, { id: 'viewer', label: 'Viewer', icon: 'globe-alt', hint: 'the read-only view', onClick: () => (location.href = '/') })
 
     const act = this.drawer.section('This site')

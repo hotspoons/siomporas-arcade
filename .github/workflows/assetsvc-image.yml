@@ -1,0 +1,79 @@
+# Build and publish the assetsvc image, both architectures, from one runner.
+#
+# Like the corridor image and unlike recon, there is nothing to compile — this is a node image with
+# no CUDA and no model weights, because the GPUs are in `recon` and the flux deployment and this
+# only calls them. QEMU emulation costs a minute or two, so one buildx invocation emits both.
+#
+# THE CONTEXT IS THE REPOSITORY ROOT, not tools/assetsvc. The Dockerfile copies three files out of
+# tools/assetgen as well — finish.mjs and the two modules it imports at load time — so a context
+# of tools/assetsvc cannot see them.
+name: Assetsvc image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tools/assetsvc/**'
+      - '!tools/assetsvc/README.md'
+      - '!tools/assetsvc/chart/**'
+      # the finisher is baked in, so a change to it changes this image
+      - 'tools/assetgen/finish.mjs'
+      - 'tools/assetgen/proportion.mjs'
+      - 'tools/assetgen/generate.mjs'
+      - '.github/workflows/assetsvc-image.yml'
+  workflow_dispatch:
+
+env:
+  IMAGE: ghcr.io/hotspoons/assetsvc
+
+concurrency:
+  group: assetsvc-image-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,format=short
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: tools/assetsvc/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache
+          cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache,mode=max
+
+      # The image is useless if the service cannot start, and a bad COPY of the assetgen closure
+      # would only show up the first time somebody finished a mesh. Start it and ask it a question.
+      - name: smoke the published image
+        run: |
+          docker run -d --name assetsvc -p 8770:8770 ${{ env.IMAGE }}:latest
+          for i in $(seq 1 30); do
+            curl -sf localhost:8770/health && break || sleep 1
+          done
+          curl -sf localhost:8770/health | tee /dev/stderr | grep -q '"ok":true'
+          # the finisher's import closure, which is the part a COPY can silently break
+          docker exec assetsvc node -e "import('/app/tools/assetgen/finish.mjs').then(m => {
+            if (typeof m.finish !== 'function') { console.error('finish() missing'); process.exit(1) }
+            console.log('finish() imports cleanly')
+          })"
+          docker rm -f assetsvc

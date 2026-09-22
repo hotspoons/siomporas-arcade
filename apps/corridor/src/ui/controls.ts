@@ -188,7 +188,9 @@ export function textField(o: {
 }): HTMLElement {
   const wrap = el('label', 'field text')
   wrap.append(el('span', 'field-label', o.label))
-  const i = el('input', 'input')
+  // A numeric field wants to be narrow and aligned; a text one wants the room. The first cut gave
+  // both the 9ch that suits a number, and an asset's subject line truncated to "a rural".
+  const i = el('input', `input${(o.type ?? 'text') === 'text' ? ' wide' : ''}`)
   i.type = o.type ?? 'text'
   if (o.step) i.step = String(o.step)
   i.value = o.value

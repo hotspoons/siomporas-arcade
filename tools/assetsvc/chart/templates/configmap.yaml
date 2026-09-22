@@ -1,0 +1,16 @@
+{{- if .Values.enabled }}
+# The model roster, mounted at /config/models.json. This is the file adapters.mjs builds the
+# registry from — adding a model or changing a default is an edit to values.yaml and a `helm
+# upgrade`, with no code change anywhere.
+#
+# The checksum annotation on the Deployment means editing this actually restarts the pod; without
+# it a roster change sits in the ConfigMap and the running process never re-reads it.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "assetsvc.fullname" . }}-models
+  labels: {{- include "assetsvc.labels" . | nindent 4 }}
+data:
+  models.json: |
+{{ toPrettyJson .Values.models | indent 4 }}
+{{- end }}

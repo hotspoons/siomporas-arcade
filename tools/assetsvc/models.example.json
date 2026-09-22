@@ -1,0 +1,59 @@
+{
+  "$comment": [
+    "The model roster. Copy this, edit it, and point ASSETSVC_MODELS at your copy — or mount it",
+    "from a ConfigMap, which is what the Helm chart does.",
+    "",
+    "NOTHING IN assetsvc NAMES A VENDOR. Adapters are chosen by `kind` (see adapters.mjs) and the",
+    "rest is configuration: swapping flux.2 for another image server, or TRELLIS for another",
+    "reconstructor, is an entry here plus one environment variable, not a code change.",
+    "",
+    "`url` is overridable per model at runtime by ASSETSVC_URL_<ID>, upper-cased with non-alphanumerics",
+    "as underscores — so `flux2-dev` reads ASSETSVC_URL_FLUX2_DEV. That is how the same roster serves",
+    "a laptop on port-forwards and a pod on cluster DNS without two files.",
+    "",
+    "IN-CLUSTER URLS ARE THE POINT. A browser must never reach these directly; assetsvc is the only",
+    "thing that does, over the cluster's own network. The localhost entries below are what a",
+    "port-forward looks like during development:",
+    "",
+    "  kubectl port-forward -n default svc/high-brine-high-brine-flux2-dev-lws-api 18090:80",
+    "  kubectl port-forward -n default svc/recon 8500:80"
+  ],
+
+  "defaults": {
+    "image": "flux2-dev",
+    "mesh": "trellis2"
+  },
+
+  "models": {
+    "flux2-dev": {
+      "kind": "image",
+      "model": "flux.2-dev",
+      "url": "http://high-brine-high-brine-flux2-dev-lws-api.default.svc",
+      "field": "image",
+      "timeoutMs": 300000,
+      "$note": "flux.2-dev takes its edit attachments under `image`; klein wants `image[]`. That is what `field` is for. On dev, everything in the attachment list is an EDIT SOURCE and is reproduced — `reference_image` as a style channel is klein-only and is silently discarded here."
+    },
+
+    "flux2-klein": {
+      "kind": "image",
+      "model": "flux.2-klein",
+      "url": "",
+      "field": "image[]",
+      "$note": "Not deployed on gh200-1 today. Left here as the worked example of swapping an image model by configuration alone."
+    },
+
+    "trellis2": {
+      "kind": "mesh",
+      "url": "http://recon.default.svc",
+      "pollMs": 3000,
+      "timeoutMs": 1800000,
+      "$note": "tools/recon-service. One GPU, one job at a time — it serialises internally, and assetsvc's own queue is concurrency 1 on the mesh lane so we do not race it into an out-of-memory. Send KEYED cut-outs: it keeps an alpha channel when one is present and our chroma key beats the background remover it would otherwise run."
+    }
+  },
+
+  "$dev": {
+    "$comment": "What to set while working from a laptop, for copy-paste:",
+    "ASSETSVC_URL_FLUX2_DEV": "http://127.0.0.1:18090",
+    "ASSETSVC_URL_TRELLIS2": "http://127.0.0.1:8500"
+  }
+}

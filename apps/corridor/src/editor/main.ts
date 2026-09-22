@@ -21,6 +21,7 @@ import { Preview, markOverlay } from './preview'
 import { CAN_SAVE, type Area } from './schema'
 import { LOOK, type Season } from '../season'
 import { EditorUI } from '../ui/editor'
+import { AssetCatalog } from '../ui/assets'
 import { installShellKeys, toast, status } from '../ui/shell'
 import { restoreTheme } from '../ui/viewer'
 
@@ -61,7 +62,9 @@ let mode: Mode = (location.hash.split(':')[1] as Mode) || 'areas'
 // The interface. Every callback here is a function declared later in this file, which is fine —
 // they are declarations, so they are hoisted, and none of them runs before the first event.
 restoreTheme()
+const assets = new AssetCatalog()
 const ui = new EditorUI({
+  onAssets: () => void assets.open(),
   onSite: (slug) => void loadSite(slug),
   onMode: (m) => setMode(m),
   onLayers: () => applyLayers(),

@@ -111,8 +111,12 @@ export class MiniMap {
       const gj = (await r.json()) as { features: { geometry: { type: string; coordinates: number[][] }; properties: Record<string, string> }[] }
       // osm.geojson is WGS84; project with the site's frame. The manifest gives the origin in UTM;
       // a local equirectangular fit is accurate to well under a metre over a 6 km corridor.
-      const [ox, oy] = this.manifest.frame.origin
-      const proj = utmProjector(this.manifest.frame.epsg, ox, oy)
+      const fr = this.manifest.frame as { epsg: number; origin: [number, number]; kind?: string; anchor?: { lon: number; lat: number; h?: number } }
+      // WHICH METRES does this manifest hold? `frame.kind` is the only thing that says, and
+      // guessing wrong rotates the overlay by the grid convergence — measured 12 m mean and 30 m
+      // worst against the ENU bakes, which looks exactly like the imagery offset Rich chased for
+      // hours. ENU is true north about the site anchor; the old bakes are UTM minus the origin.
+      const proj = fr.kind === 'enu' && fr.anchor ? enuProjector(fr.anchor.lon, fr.anchor.lat, fr.anchor.h ?? 0) : utmProjector(fr.epsg, fr.origin[0], fr.origin[1])
       for (const f of gj.features) {
         if (f.geometry.type !== 'LineString') continue
         const p = f.properties
@@ -252,6 +256,30 @@ function niceScale(m: number): number {
  * forward formula (Krüger series, good to mm), because osm.geojson is the only layer the viewer
  * reads that is not already in metres.
  */
+/**
+ * WGS84 → local east/north metres about the site anchor (the `enu` frame), through ECEF.
+ *
+ * Exact, not a rotation of the UTM grid: verified against the baked spines at 0.6-0.7 m mean,
+ * which is OSM's own digitising accuracy.
+ */
+function enuProjector(lon0: number, lat0: number, h0: number): (lon: number, lat: number) => [number, number] {
+  const A = 6378137, F = 1 / 298.257223563, E2 = F * (2 - F)
+  const D = Math.PI / 180
+  const ecef = (lon: number, lat: number, h: number): [number, number, number] => {
+    const lo = lon * D, la = lat * D
+    const N = A / Math.sqrt(1 - E2 * Math.sin(la) ** 2)
+    return [(N + h) * Math.cos(la) * Math.cos(lo), (N + h) * Math.cos(la) * Math.sin(lo), (N * (1 - E2) + h) * Math.sin(la)]
+  }
+  const [x0, y0, z0] = ecef(lon0, lat0, h0)
+  const lo0 = lon0 * D, la0 = lat0 * D
+  const sLo = Math.sin(lo0), cLo = Math.cos(lo0), sLa = Math.sin(la0), cLa = Math.cos(la0)
+  return (lon, lat) => {
+    const [x, y, z] = ecef(lon, lat, 0)
+    const dx = x - x0, dy = y - y0, dz = z - z0
+    return [-sLo * dx + cLo * dy, -sLa * cLo * dx - sLa * sLo * dy + cLa * dz]
+  }
+}
+
 function utmProjector(epsg: number, ox: number, oy: number): (lon: number, lat: number) => [number, number] {
   const zone = epsg % 100
   const south = Math.floor(epsg / 100) === 327

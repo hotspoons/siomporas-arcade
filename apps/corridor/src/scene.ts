@@ -13,6 +13,7 @@ import { Adjustments, NEUTRAL as NEUTRAL_ADJ } from './adjust'
 import { buildPlacements, loadCatalog, loadPlacements } from './placements'
 import { buildBridges, flattenSpine, loadStructureOverrides, suppressed } from './structures'
 import { loadSurfaceSets, overpassMesh, pavedOffset, pavedWidth, roadMesh, stations, taperedLanes, treesFromCanopy, type SurfaceSet } from './props'
+import { ImageryStream, bilinear, buildMosaic, horizonUv, tileBbox } from './tiles'
 
 let surfaceSets: Record<string, SurfaceSet> | null = null
 
@@ -21,7 +22,7 @@ export const toWorld = (x: number, y: number, z: number) => new THREE.Vector3(x,
 export interface Site {
   manifest: Manifest
   group: THREE.Group
-  layers: { imagery?: THREE.Mesh; canopy?: THREE.Mesh; trees?: THREE.Group; road: THREE.Group; horizon?: THREE.Mesh; structures: THREE.Group; spine: THREE.Group; markers: THREE.Group; placements: THREE.Group }
+  layers: { imagery?: THREE.Object3D; canopy?: THREE.Mesh; trees?: THREE.Group; road: THREE.Group; horizon?: THREE.Mesh; structures: THREE.Group; spine: THREE.Group; markers: THREE.Group; placements: THREE.Group }
   adjustments: Adjustments
   treeCount: number
   /** per-frame: move the near-field tree models and the grass ring to follow the eye; fwd/pitch shape the LOD footprint */
@@ -36,7 +37,10 @@ export interface Site {
   edgeDistance: (x: number, z: number) => number
   /** trees within r of world x,z as [x, z, trunkRadius] */
   treesNear: (x: number, z: number, r: number) => [number, number, number][]
-  terrain: THREE.Mesh
+  /** a single mesh on a corridor site, one mesh per tile on a tiled one */
+  terrain: THREE.Object3D
+  /** imagery streaming counts on a tiled site, for probes and the console; null on a corridor site */
+  tiles: (() => { resident: number; pending: number; tiles: number; loads: number; unloads: number }) | null
   /** ground height (m) at site x,y from the DEM layer */
   heightAt: (x: number, y: number) => number
   /** point + travel direction on the spine at along-track s (metres) */
@@ -62,28 +66,41 @@ function sampler(f: Field) {
   }
 }
 
-/** A regular grid mesh over a height field, sampled every `stride` cells. */
-function gridGeometry(f: Field, stride: number, lift: (i: number, r: number, c: number) => number, color?: (i: number) => [number, number, number]) {
+/**
+ * A regular grid mesh over a height field, sampled every `stride` cells.
+ *
+ * `win` restricts it to a rectangle of cells — one tile's footprint in the mosaic — and makes the
+ * UVs tile-LOCAL (0..1 across the window) so each tile can carry its own imagery. The stride is the
+ * same for every tile on purpose: two neighbouring terrain meshes at different strides do not share
+ * their edge vertices and you get a lit crack between them at every LOD boundary.
+ */
+function gridGeometry(f: Field, stride: number, lift: (i: number, r: number, c: number) => number, color?: (i: number) => [number, number, number], win?: { c0: number; r0: number; w: number; h: number }) {
   const [xmin, , , ymax] = f.layer.bbox
   const [w, h] = f.layer.size
-  const cols = Math.floor((w - 1) / stride) + 1
-  const rows = Math.floor((h - 1) / stride) + 1
+  const wc0 = win ? win.c0 : 0
+  const wr0 = win ? win.r0 : 0
+  const ww = win ? win.w : w
+  const wh = win ? win.h : h
+  const cols = Math.floor((ww - 1) / stride) + 1
+  const rows = Math.floor((wh - 1) / stride) + 1
   const pos = new Float32Array(cols * rows * 3)
   const uv = new Float32Array(cols * rows * 2)
   const col = color ? new Float32Array(cols * rows * 3) : null
   let k = 0
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
-      const rr = Math.min(h - 1, r * stride)
-      const cc = Math.min(w - 1, c * stride)
+      // the window's last row/column is clamped to its own edge, so neighbouring tiles put a
+      // vertex on exactly the same cell and meet without a crack
+      const rr = Math.min(h - 1, wr0 + Math.min(wh - 1, r * stride))
+      const cc = Math.min(w - 1, wc0 + Math.min(ww - 1, c * stride))
       const i = rr * w + cc
       const x = xmin + (cc + 0.5) * f.layer.res
       const y = ymax - (rr + 0.5) * f.layer.res
       pos[k * 3] = x
       pos[k * 3 + 1] = f.data[i] + lift(i, rr, cc)
       pos[k * 3 + 2] = -y
-      uv[k * 2] = (cc + 0.5) / w
-      uv[k * 2 + 1] = 1 - (rr + 0.5) / h
+      uv[k * 2] = win ? (cc - wc0 + 0.5) / ww : (cc + 0.5) / w
+      uv[k * 2 + 1] = win ? 1 - (rr - wr0 + 0.5) / wh : 1 - (rr + 0.5) / h
       if (col && color) {
         const [cr, cg, cb] = color(i)
         col[k * 3] = cr
@@ -154,20 +171,39 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
   const base = `/sites/${manifest.slug}/web/`
   const group = new THREE.Group()
   const L = manifest.layers
-  if (!L.dem) throw new Error('site has no DEM layer')
+  if (!L.dem && !L.tiles) throw new Error('site has no DEM layer and no tile index')
 
   status('decoding terrain…')
   const adjustments = await Adjustments.load(manifest.slug)
   const overrides = await loadStructureOverrides(manifest.slug)
   // authored `flatten` intervals rewrite the spine's grade before anything is built from it
   if (overrides.length) manifest = { ...manifest, spine: { ...manifest.spine, coords: flattenSpine(manifest.spine.coords, overrides) }, structures: suppressed(manifest.structures, overrides) }
-  const demImg = await loadImage(base + L.dem.file)
-  const dem: Field = { layer: L.dem, data: decodeHeights(demImg, L.dem) }
+  // The horizon is normally decoded much later, with the far terrain. A tiled site needs it FIRST,
+  // to seed the mosaic between the corridors, so it is decoded on demand and remembered.
+  let hzField: Field | null = null
+  const horizonField = async (): Promise<Field | null> => {
+    if (!L.horizon) return null
+    if (!hzField) hzField = { layer: L.horizon, data: decodeHeights(await loadImage(base + L.horizon.file), L.horizon) }
+    return hzField
+  }
+
+  let dem: Field
+  if (L.tiles) {
+    // Heights cannot stream: the car, the strip, the trees and the grass ask for a height wherever
+    // they happen to be on the first frame, and a height that has not arrived is a hole, not a
+    // coarser LOD. So every dem tile is decoded up front into one Field over the hull.
+    const hz = await horizonField()
+    const res = L.tiles.res.dem * (lite ? 2 : 1)
+    status('decoding terrain tiles…')
+    dem = await buildMosaic(base, L.tiles, 'dem', res, hz ? bilinear(hz) : null, (d, n) => status(`terrain tiles ${d}/${n}…`))
+  } else {
+    const demImg = await loadImage(base + L.dem!.file)
+    dem = { layer: L.dem!, data: decodeHeights(demImg, L.dem!) }
+  }
   const heightAt = sampler(dem)
 
   // --- near terrain, textured with the imagery -----------------------------------------------
-  const stride = strideFor(L.dem, lite ? 300_000 : 1_100_000)
-  const terrainGeo = gridGeometry(dem, stride, () => 0)
+  const stride = strideFor(dem.layer, lite ? 300_000 : 1_100_000)
   let imagery: THREE.Texture | null = null
   if (L.naip) {
     status('loading imagery…')
@@ -191,18 +227,88 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
     imagery = tex
   }
   const bare = new THREE.Color(0x6f6a5a)
-  const terrainMat = new THREE.MeshStandardMaterial({ map: imagery, color: imagery ? 0xffffff : bare, roughness: 1, metalness: 0 })
-  const terrain = new THREE.Mesh(terrainGeo, terrainMat)
-  terrain.name = 'terrain'
+  // One mesh on a corridor site; one mesh per tile on a network. Both end up as `terrain` — a Mesh
+  // or a Group of them — and everything after this works through `terrainGeos` and `terrainMats`
+  // so it does not care which it got.
+  const tileKeys = new Set<string>((L.tiles?.list ?? []).map((e) => `${e.x}_${e.y}`))
+  const terrainGeos: THREE.BufferGeometry[] = []
+  const terrainMats: THREE.MeshStandardMaterial[] = []
+  let terrain: THREE.Object3D
+  let stream: ImageryStream | null = null
+  if (L.tiles) {
+    const tiles = L.tiles
+    const grp = new THREE.Group()
+    grp.name = 'terrain'
+    // The coarse imagery under every tile is the horizon's own NAIP, addressed by offset/repeat, so
+    // a tile that has not streamed yet is the same pixels the far terrain is already showing and
+    // the seam is invisible. It is cloned per tile because offset/repeat live on the texture.
+    const hzTex = L.horizon_naip ? new THREE.TextureLoader().load(`${DATA_BASE}${base}${L.horizon_naip.file}`) : null
+    if (hzTex) hzTex.colorSpace = THREE.SRGBColorSpace
+    stream = new ImageryStream(base, tiles)
+    const [mx0, , , my1] = dem.layer.bbox
+    const res = dem.layer.res
+    const [mw, mh] = dem.layer.size
+    for (const e of tiles.list) {
+      const [bx0, by0, bx1, by1] = tileBbox(tiles, e.x, e.y)
+      const c0 = Math.max(0, Math.round((bx0 - mx0) / res))
+      const r0 = Math.max(0, Math.round((my1 - by1) / res))
+      const cw = Math.min(mw - c0, Math.round((bx1 - bx0) / res))
+      const ch = Math.min(mh - r0, Math.round((by1 - by0) / res))
+      if (cw <= 1 || ch <= 1) continue
+      const geo = gridGeometry(dem, stride, () => 0, undefined, { c0, r0, w: cw, h: ch })
+      let map: THREE.Texture | null = null
+      if (hzTex && L.horizon_naip) {
+        map = hzTex.clone()
+        const { offset, repeat } = horizonUv(tiles, e.x, e.y, L.horizon_naip)
+        map.offset.copy(offset)
+        map.repeat.copy(repeat)
+        map.needsUpdate = true
+      }
+      const mat = new THREE.MeshStandardMaterial({ map, color: map ? 0xffffff : bare, roughness: 1, metalness: 0 })
+      const mesh = new THREE.Mesh(geo, mat)
+      mesh.name = `terrain:${e.x}_${e.y}`
+      grp.add(mesh)
+      terrainGeos.push(geo)
+      terrainMats.push(mat)
+      if (map) stream.add(e.x, e.y, mat, map)
+    }
+    terrain = grp
+  } else {
+    const geo = gridGeometry(dem, stride, () => 0)
+    const mat = new THREE.MeshStandardMaterial({ map: imagery, color: imagery ? 0xffffff : bare, roughness: 1, metalness: 0 })
+    const mesh = new THREE.Mesh(geo, mat)
+    mesh.name = 'terrain'
+    terrainGeos.push(geo)
+    terrainMats.push(mat)
+    terrain = mesh
+  }
+  const sinkAll = (h: (x: number, z: number) => number | null) => {
+    for (const g of terrainGeos) sinkUnderStrip(g, h)
+  }
+  /** Is this site-frame point inside a tile that actually exists? (the horizon is cut to this) */
+  const tileCovers = (x: number, y: number): boolean => {
+    if (!L.tiles) return false
+    const [ox, oy] = L.tiles.origin
+    const tx = Math.floor((x - ox) / L.tiles.size_m)
+    const ty = Math.floor((y - oy) / L.tiles.size_m)
+    return tileKeys.has(`${tx}_${ty}`)
+  }
   group.add(terrain)
 
   // --- canopy: the forest blanket (off by default; the trees below are the stand-ins) --------
   let canopy: THREE.Mesh | undefined
   let chm: Field | undefined
-  if (L.chm) {
+  if (L.chm || L.tiles) {
     status('decoding canopy…')
-    const chmImg = await loadImage(base + L.chm.file)
-    chm = { layer: L.chm, data: decodeScalar(chmImg, L.chm.scale ?? 0.25) }
+    let chmImg: HTMLImageElement | null = null
+    if (L.tiles) {
+      // The canopy mosaic MUST share the DEM mosaic's lattice: the blanket below indexes the canopy
+      // array with the DEM's own cell index, so a different res or bbox would silently shear it.
+      chm = await buildMosaic(base, L.tiles, 'chm', dem.layer.res, null, (d, n) => status(`canopy tiles ${d}/${n}…`))
+    } else {
+      chmImg = await loadImage(base + L.chm!.file)
+      chm = { layer: L.chm!, data: decodeScalar(chmImg, L.chm!.scale ?? 0.25) }
+    }
     if (adjustments.active) {
       // bake the human's canopy corrections into the height model once: scale and offset per cell
       const [w, h] = chm.layer.size
@@ -223,9 +329,20 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
       }
       if (touched) console.info(`adjustments: canopy changed in ${touched} cells`)
     }
-    const alpha = new THREE.Texture(chmImg)
+    // The blanket's alpha is the canopy itself, so cells with no trees are cut away. With tiles
+    // there is no single canopy image to hand it, so one is made from the mosaic.
+    let alpha: THREE.Texture
+    if (chmImg) {
+      alpha = new THREE.Texture(chmImg)
+      alpha.flipY = true
+    } else {
+      const [cw, ch] = chm.layer.size
+      const px = new Uint8Array(cw * ch)
+      for (let i = 0; i < px.length; i++) px[i] = Math.min(255, Math.round(chm.data[i] / 0.25))
+      alpha = new THREE.DataTexture(px, cw, ch, THREE.RedFormat)
+      alpha.flipY = false
+    }
     alpha.needsUpdate = true
-    alpha.flipY = true
     const cd = chm.data
     const geo = gridGeometry(dem, stride, (i) => (cd[i] > 1.5 ? cd[i] : 0), (i) => {
       const t = Math.min(1, cd[i] / 30)
@@ -242,8 +359,8 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
   let horizon: THREE.Mesh | undefined
   if (L.horizon) {
     status('decoding horizon…')
-    const hImg = await loadImage(base + L.horizon.file)
-    const hz: Field = { layer: L.horizon, data: decodeHeights(hImg, L.horizon) }
+    // a tiled site already decoded this to seed the mosaic; `horizonField` remembers it
+    const hz: Field = (await horizonField())!
     const hs = strideFor(L.horizon, lite ? 120_000 : 300_000)
     const geo = gridGeometry(hz, hs, () => -2.0, L.horizon_naip ? undefined : (i) => hypso(hz.data[i]))
     // The horizon is the FAR field only. Two meshes of the same ground at 60 m and 1-8 m sampling
@@ -251,7 +368,7 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
     // cell, and shows through as flat green (Rich's "green stuff", four rounds of it). So every
     // horizon triangle inside the near DEM's footprint is removed, and the one-cell rim that is
     // still inside is pinned 3 m under the near terrain so the two meet without a hole.
-    cutHorizon(geo, L.dem.bbox, hz.layer.res * hs, heightAt)
+    cutHorizon(geo, dem.layer.bbox, hz.layer.res * hs, heightAt, L.tiles ? tileCovers : undefined)
     let mat: THREE.Material
     if (L.horizon_naip) {
       const tex = new THREE.TextureLoader().load(`${DATA_BASE}${base}${L.horizon_naip.file}`)
@@ -504,7 +621,7 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
     const makeStrip = () => buildStrip(spineAt, curveLen, -latMin + VERGE, latMax + VERGE, (x, z) => edgeDistance(x, z), heightAt, imagery, manifest.bbox, grassTex('grass_mown'), grassTex('grass_rough'), lite ? 4 : 2, lite ? 2 : 1, adjustments.active ? (x, y) => adjustments.at(x, y, adjScratch).ground_offset_m : null)
     let strip = makeStrip()
     road.add(strip.mesh)
-    sinkUnderStrip(terrainGeo, strip.heightAt)
+    sinkAll(strip.heightAt)
     // one strip per branch; where another road's strip already covers the ground (within VERGE of
     // its pavement edge) the branch strip leaves a hole rather than a second coplanar surface
     const makeBranchStrips = () => branchAts.map((b, i) => buildStrip(b.at, b.len, VERGE, VERGE, (x, z) => edgeDistance(x, z), heightAt, imagery, manifest.bbox, grassTex('grass_mown'), grassTex('grass_rough'), lite ? 4 : 2, lite ? 2 : 1, adjustments.active ? (x, y) => adjustments.at(x, y, adjScratch).ground_offset_m : null, (s) => {
@@ -514,7 +631,7 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
     let branchStrips = makeBranchStrips()
     for (const bs of branchStrips) {
       road.add(bs.mesh)
-      sinkUnderStrip(terrainGeo, bs.heightAt)
+      sinkAll(bs.heightAt)
     }
     const stripHeight = (x: number, z: number): number | null => {
       const h = strip.heightAt(x, z)
@@ -536,7 +653,7 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
       strip.mesh.geometry.dispose()
       strip = makeStrip()
       road.add(strip.mesh)
-      sinkUnderStrip(terrainGeo, strip.heightAt)
+      sinkAll(strip.heightAt)
       for (const bs of branchStrips) {
         road.remove(bs.mesh)
         bs.mesh.geometry.dispose()
@@ -544,7 +661,7 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
       branchStrips = makeBranchStrips()
       for (const bs of branchStrips) {
         road.add(bs.mesh)
-        sinkUnderStrip(terrainGeo, bs.heightAt)
+        sinkAll(bs.heightAt)
       }
     }
     group.add(road)
@@ -623,6 +740,7 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
         grass.update(eye, fwd, pitch)
         grass.tick(time)
         imp!.tick()
+        stream?.update(eye.x, -eye.z) // site frame: y = -z
       }
     } else {
       // no renderer (tests): lollipops for everything
@@ -631,6 +749,7 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
         if (near.update(eye, false, fwd, pitch)) t.refresh(near.near)
         grass.update(eye, fwd, pitch)
         grass.tick(time)
+        stream?.update(eye.x, -eye.z)
       }
     }
     retune = () => {
@@ -651,7 +770,7 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
       near.setSeason(look)
       grass.setLook(look)
       for (const st of [strip, ...branchStrips]) st.setTint(look.grass.base.clone().multiplyScalar(2.0).lerp(new THREE.Color(0xffffff), 0.4), imagery ? look.ground : bare)
-      terrainMat.color.copy(imagery && terrainMat.map ? look.ground : bare)
+      for (const m of terrainMats) m.color.copy(imagery && m.map ? look.ground : bare)
       if (horizon && (horizon.material as THREE.MeshStandardMaterial).map) (horizon.material as THREE.MeshStandardMaterial).color.copy(look.ground)
       if (imp) imp.rebake(near.sources())
     }
@@ -780,15 +899,22 @@ export async function buildSite(manifestIn: Manifest, status: (s: string) => voi
     edgeDistance: edgeDistanceWorld,
     treesNear: treesNearWorld,
     terrain,
+    tiles: stream ? () => stream!.counts : null,
     heightAt,
     spineAt,
     setImagery: (on) => {
-      terrainMat.map = on ? imagery : null
-      terrainMat.color.copy(on && imagery ? LOOK[currentSeason].ground : bare)
-      terrainMat.needsUpdate = true
+      // On a tiled site the map is per tile (streamed or the horizon crop), so the toggle only
+      // hides or shows what each material already has rather than swapping in one shared texture.
+      for (const m of terrainMats) {
+        if (!L.tiles) m.map = on ? imagery : null
+        else m.visible = true
+        m.color.copy(on && m.map ? LOOK[currentSeason].ground : bare)
+        m.needsUpdate = true
+      }
+      if (L.tiles) terrain.visible = true
     },
     setWire: (on) => {
-      terrainMat.wireframe = on
+      for (const m of terrainMats) m.wireframe = on
     },
   }
 }
@@ -807,14 +933,22 @@ function hash2(x: number, y: number): number {
   return ((h ^ (h >>> 15)) >>> 0) / 4294967296
 }
 
-function cutHorizon(geo: THREE.BufferGeometry, demBbox: [number, number, number, number], cell: number, heightAt: (x: number, y: number) => number) {
+function cutHorizon(geo: THREE.BufferGeometry, demBbox: [number, number, number, number], cell: number, heightAt: (x: number, y: number) => number, covered?: (x: number, y: number) => boolean) {
   const pos = geo.getAttribute('position') as THREE.BufferAttribute
   const [x0, y0, x1, y1] = demBbox
+  // A corridor site's near terrain fills its whole bbox, so "inside" is that rectangle. A NETWORK's
+  // hull is mostly empty — there are terrain tiles only where roads are — so `covered` answers per
+  // point instead, and cutting the whole hull would punch holes in the horizon everywhere between
+  // the corridors.
+  const inside = covered ?? ((x: number, y: number) => x >= x0 && x <= x1 && y >= y0 && y <= y1)
   const removed = new Uint8Array(pos.count)
   for (let i = 0; i < pos.count; i++) {
     const x = pos.getX(i), y = -pos.getZ(i) // site frame
-    if (x < x0 || x > x1 || y < y0 || y > y1) continue
-    const deep = x > x0 + cell * 1.5 && x < x1 - cell * 1.5 && y > y0 + cell * 1.5 && y < y1 - cell * 1.5
+    if (!inside(x, y)) continue
+    // deep = this point and its neighbourhood are all covered, so no rim of the near terrain is
+    // near enough for the coarse mesh to show through
+    const d = cell * 1.5
+    const deep = inside(x - d, y) && inside(x + d, y) && inside(x, y - d) && inside(x, y + d)
     if (deep) removed[i] = 1
     else pos.setY(i, heightAt(x, y) - 3.0)
   }

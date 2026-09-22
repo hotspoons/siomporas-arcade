@@ -11,6 +11,20 @@ export interface Layer {
   scale?: number
 }
 
+/**
+ * `manifest.layers.tiles`: a network-sized bake cuts its DEM, canopy and imagery into `size_m`
+ * tiles instead of one image per layer, and lists only the tiles that have data. Tiles outside the
+ * corridor hull are simply absent. Files are `web/tiles/0/<x>_<y>.dem.png | .naip.jpg | .chm.png`,
+ * with the same encodings as the single-image layers.
+ */
+export interface TileIndex {
+  size_m: number
+  /** site-frame position of tile (0, 0)'s minimum corner */
+  origin: [number, number]
+  res: { dem: number; naip: number | null; chm: number | null }
+  list: { x: number; y: number; dem: { zmin: number; zscale: number }; chm?: boolean; naip?: boolean }[]
+}
+
 export interface Structure {
   kind: 'bridge' | 'overpass' | 'gantry'
   source?: string
@@ -52,7 +66,7 @@ export interface Manifest {
   ident: Record<string, string> | null
   frame: { epsg: number; origin: [number, number] }
   bbox: [number, number, number, number]
-  layers: Partial<Record<'dem' | 'chm' | 'naip' | 'horizon' | 'horizon_naip', Layer>>
+  layers: Partial<Record<'dem' | 'chm' | 'naip' | 'horizon' | 'horizon_naip', Layer>> & { tiles?: TileIndex }
   spine: {
     coords: [number, number, number][]
     photo_s: number

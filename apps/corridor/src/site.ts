@@ -57,6 +57,8 @@ export interface TileIndex {
   format?: string
   /** the per-tile imagery file inside the tile directory (default `naip.jpg`) */
   texture?: string
+  /** the GPU-compressed twin beside it, when the bake made one — 8x less resident than the jpg */
+  texture_ktx2?: string
   list: {
     x: number
     y: number

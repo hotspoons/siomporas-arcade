@@ -29,6 +29,7 @@ import * as THREE from 'three'
 import type { Anchor } from '@apex/engine/geo/wgs84'
 import { RasterFrame } from '@apex/engine/geo/raster'
 import { DATA_BASE, decodeHeights, decodeScalar, type Layer, type TileIndex } from './site'
+import { loadBakedTexture } from './textures'
 
 export type { TileIndex }
 
@@ -227,7 +228,8 @@ export class ImageryStream {
   private readonly base: string
   private readonly dir: string
   private readonly texture: string
-  private readonly loader = new THREE.TextureLoader()
+  private readonly textureKtx2: string | null
+  private readonly renderer: THREE.WebGLRenderer | undefined
   private readonly loaded = new Map<string, THREE.Texture>()
   private readonly pending = new Set<string>()
   private readonly targets = new Map<string, { tile: Tile; mat: THREE.MeshStandardMaterial; fallback: THREE.Texture | null }>()
@@ -235,24 +237,47 @@ export class ImageryStream {
   keepWithin = 3500
   inFlight = 2
   /**
-   * Hard ceiling on resident tiles, evicted farthest-first.
+   * Hard ceiling on resident texture BYTES, evicted farthest-first.
    *
-   * A distance ring alone does not bound memory, it bounds it BY SITE SIZE: driving the 3.58 km of
-   * crofton-crownsville's primary with keepWithin 3500 m took the resident set from 11 tiles to 19
-   * and evicted twice in twenty-one loads, because a tile picked up at the start is still inside
-   * the keep radius at the finish. A longer route just keeps climbing until the whole network is
-   * resident — 125 uncompressed 1 m NAIP tiles is ~667 MB, which does not fit. The cap makes the
-   * ceiling a property of this class instead of a property of the road.
+   * Two proxies had to be discarded to get here. A distance ring bounds memory by the size of the
+   * SITE, not by anything this class controls: driving crofton-crownsville's 3.58 km primary with
+   * keepWithin 3500 m took the resident set from 11 tiles to 19 and evicted twice in twenty-one
+   * loads, because a tile picked up at the start is still inside the keep radius at the finish. A
+   * count of tiles is no better, because a tile is not a unit of memory — the same 1000x1000 NAIP
+   * is 5.33 MB as a jpg and 0.67 MB as a ktx2, so a cap of 24 tiles means 128 MB today and 16 MB
+   * the moment the twin is wired, and nobody would remember why it was eight times too strict.
+   *
+   * Bytes is the resource, so bytes is the cap, and the tile count falls out of the format.
    */
-  maxResident = 24
+  budgetBytes = 128 * 1024 * 1024
+  /** resident texture bytes, kept in step with `loaded` */
+  bytes = 0
   loads = 0
   unloads = 0
   fails = 0
 
-  constructor(base: string, index: TileIndex) {
+  constructor(base: string, index: TileIndex, renderer?: THREE.WebGLRenderer) {
     this.base = base
     this.dir = index.dir ?? 'tiles/0'
     this.texture = index.texture ?? 'naip.jpg'
+    // `loadBakedTexture` silently takes the jpg path without a renderer — it needs one for
+    // detectSupport — so a missing renderer here is an 8x memory regression that looks like
+    // nothing at all.
+    this.textureKtx2 = index.texture_ktx2 ?? null
+    this.renderer = renderer
+  }
+
+  /**
+   * Resident bytes of one texture: width x height x bytes-per-pixel x 4/3 for the mip chain.
+   * ETC1S is 4 bits a pixel, RGBA is 32, so the same 1000x1000 tile is 0.67 MB compressed and
+   * 5.33 MB not — exactly the 8x that decides whether a budget is generous or absurd.
+   */
+  private static bytesOf(tex: THREE.Texture): number {
+    const img = tex.image as { width?: number; height?: number } | undefined
+    const w = img?.width ?? 1000
+    const h = img?.height ?? 1000
+    const bpp = (tex as unknown as { isCompressedTexture?: boolean }).isCompressedTexture ? 0.5 : 4
+    return Math.round(w * h * bpp * (4 / 3))
   }
 
   add(tile: Tile, mat: THREE.MeshStandardMaterial, fallback: THREE.Texture | null) {
@@ -274,11 +299,14 @@ export class ImageryStream {
       else if (d <= this.loadWithin && !this.pending.has(key) && (!best || d < best.d)) best = { key, d }
     }
     // over the ceiling: drop the farthest, which are the ones the eye is leaving behind
-    if (resident.length > this.maxResident) {
+    if (this.bytes > this.budgetBytes) {
       resident.sort((a, b) => b.d - a.d)
-      for (let i = 0; i < resident.length - this.maxResident; i++) this.evict(resident[i].key)
+      for (const r of resident) {
+        if (this.bytes <= this.budgetBytes) break
+        this.evict(r.key)
+      }
     }
-    if (best && this.pending.size < this.inFlight && this.loaded.size < this.maxResident) this.fetch(best.key)
+    if (best && this.pending.size < this.inFlight && this.bytes < this.budgetBytes) this.fetch(best.key)
   }
 
   private evict(key: string) {
@@ -287,6 +315,7 @@ export class ImageryStream {
     if (!tex || !t) return
     t.mat.map = t.fallback
     t.mat.needsUpdate = true
+    this.bytes -= ImageryStream.bytesOf(tex)
     tex.dispose()
     this.loaded.delete(key)
     this.unloads++
@@ -296,34 +325,45 @@ export class ImageryStream {
     const t = this.targets.get(key)
     if (!t) return
     this.pending.add(key)
-    this.loader.load(
-      `${DATA_BASE}${this.base}${this.dir}/${key}.${this.texture}`,
-      (tex) => {
-        this.pending.delete(key)
-        tex.colorSpace = THREE.SRGBColorSpace
-        tex.anisotropy = 8
+    const choice = { file: `${this.dir}/${key}.${this.texture}`, ktx2: this.textureKtx2 ? `${this.dir}/${key}.${this.textureKtx2}` : undefined }
+    const tex = loadBakedTexture(`${DATA_BASE}${this.base}`, choice, this.renderer, () => {
+      this.pending.delete(key)
+      tex.anisotropy = 8
+      // A ktx2 CARRIES its mip chain; asking three to generate more drops it. Only the jpg path
+      // needs them, and loadBakedTexture has already set generateMipmaps = false on the twin.
+      if (!(tex as unknown as { isCompressedTexture?: boolean }).isCompressedTexture) {
         tex.generateMipmaps = true
         tex.minFilter = THREE.LinearMipmapLinearFilter
-        this.loaded.set(key, tex)
-        this.loads++
-        t.mat.map = tex
-        t.mat.color.setRGB(1, 1, 1)
-        t.mat.needsUpdate = true
-      },
-      undefined,
-      () => {
-        this.pending.delete(key)
-        this.fails++
-      },
-    )
+      }
+      tex.needsUpdate = true
+      this.bytes += ImageryStream.bytesOf(tex)
+      this.loaded.set(key, tex)
+      this.loads++
+      t.mat.map = tex
+      t.mat.color.setRGB(1, 1, 1)
+      t.mat.needsUpdate = true
+    })
   }
 
   get counts() {
-    return { resident: this.loaded.size, pending: this.pending.size, tiles: this.targets.size, loads: this.loads, unloads: this.unloads, fails: this.fails }
+    const compressed = [...this.loaded.values()].filter((t) => (t as unknown as { isCompressedTexture?: boolean }).isCompressedTexture).length
+    return {
+      resident: this.loaded.size,
+      pending: this.pending.size,
+      tiles: this.targets.size,
+      loads: this.loads,
+      unloads: this.unloads,
+      fails: this.fails,
+      bytes: this.bytes,
+      MB: +(this.bytes / 1048576).toFixed(1),
+      budgetMB: +(this.budgetBytes / 1048576).toFixed(0),
+      compressed, // how many of the resident textures came back as ktx2 rather than jpg
+    }
   }
 
   dispose() {
     for (const t of this.loaded.values()) t.dispose()
     this.loaded.clear()
+    this.bytes = 0
   }
 }

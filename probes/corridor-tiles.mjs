@@ -13,7 +13,8 @@ const slug = process.argv[2] ?? 'crofton-crownsville'
 const out = process.argv[3] ?? null
 const PORT = process.env.CORRIDOR_PORT ?? '5202'
 const DATA = process.env.CORRIDOR_DATA ?? ''
-// CORRIDOR_STREAM=maxResident:12,loadWithin:1500 — sweep the ring and the ceiling
+// CORRIDOR_STREAM=budgetBytes:33554432,loadWithin:1500 — sweep the ring and the ceiling
+// CORRIDOR_NOKTX2=1 — force the jpg path, for the compressed/uncompressed comparison
 const streamOpts = Object.fromEntries((process.env.CORRIDOR_STREAM ?? '').split(',').filter(Boolean).map((kv) => { const [k, v] = kv.split(':'); return [k, Number(v)] }))
 const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] })
 const page = await browser.newPage({ viewport: { width: 700, height: 460 } })
@@ -91,7 +92,13 @@ const counts = () => page.evaluate(() => {
   const r = window.__apex?.renderer
   return { ...t, gpu_textures: r?.info?.memory?.textures ?? null, gpu_geometries: r?.info?.memory?.geometries ?? null }
 })
-await page.evaluate((o) => { const st = window.corridor.site.tileStream; if (st) Object.assign(st, o) }, streamOpts)
+await page.evaluate(({ o, noktx2 }) => {
+  const st = window.corridor.site.tileStream
+  if (!st) return
+  // the twin is chosen inside fetch(); blanking the name is the only honest way to force the jpg
+  if (noktx2) st.textureKtx2 = null
+  Object.assign(st, o)
+}, { o: streamOpts, noktx2: !!process.env.CORRIDOR_NOKTX2 })
 const L = await page.evaluate(() => window.corridor.site.manifest.spine.length_m)
 let peak = { resident: 0 }
 const samples = []
@@ -99,17 +106,18 @@ for (let s = 0; s <= L; s += 250) {
   // several ticks per station: one update starts at most `inFlight` fetches
   for (let i = 0; i < 8; i++) { await at(s); await page.waitForTimeout(200) }
   const c = await counts()
-  samples.push({ s, resident: c.resident, pending: c.pending })
+  samples.push({ s, resident: c.resident, MB: c.MB })
   if (c.resident > peak.resident) peak = { ...c, s }
 }
-const MB_PER_TILE = 1000 * 1000 * 4 * 1.333 / 1e6 // RGBA + a full mip chain
 const end = await counts()
 console.log(JSON.stringify({
   stream_opts: streamOpts,
+  forced_jpg: !!process.env.CORRIDOR_NOKTX2,
   drive_stations: samples.length,
   peak_resident_tiles: peak.resident,
-  peak_resident_MB_est: +(peak.resident * MB_PER_TILE).toFixed(0),
-  all_125_resident_would_be_MB: +(125 * MB_PER_TILE).toFixed(0),
+  peak_MB: peak.MB,
+  budget_MB: end.budgetMB,
+  compressed_of_resident: `${end.compressed}/${end.resident}`,
   final: end,
   resident_by_station: samples.slice(0, 16),
 }, null, 1))

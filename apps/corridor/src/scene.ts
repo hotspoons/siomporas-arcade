@@ -85,7 +85,7 @@ export interface Site {
   treesNear: (x: number, z: number, r: number) => [number, number, number][]
   terrain: THREE.Mesh
   /** imagery streaming counts on a tiled network, null on a corridor site */
-  tiles: (() => { resident: number; pending: number; tiles: number; loads: number; unloads: number; fails: number }) | null
+  tiles: (() => ImageryStream['counts']) | null
   /** the stream itself, so its ring and ceiling can be swept from a probe or the console */
   tileStream: ImageryStream | null
   /** ground height (m) at site x,y from the DEM layer */
@@ -370,7 +370,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     // stride for every tile: two neighbouring terrain meshes at different strides do not share
     // their edge vertices and you get a lit crack between them at every boundary.
     const tileStride = strideFor(tileSet.tiles[0].dem.layer, lite ? 4_000 : 14_000)
-    stream = new ImageryStream(base, L.tiles)
+    stream = new ImageryStream(base, L.tiles, renderer)
     const grp = new THREE.Group()
     grp.name = 'terrain:tiles'
     for (const t of tileSet.tiles) {

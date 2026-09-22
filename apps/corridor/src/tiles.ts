@@ -367,3 +367,126 @@ export class ImageryStream {
     this.bytes = 0
   }
 }
+
+// -------------------------------------------------------------------------------------------------
+// The pyramid
+//
+// `TileSet` above holds ONE flat level and `loadTiles` fetches every tile of it before the scene
+// draws. That is deferred loading, not streaming: 33.8 MB of packs at boot for crofton-crownsville,
+// and it scales with the world rather than the view.
+//
+// `PyramidSet` holds whatever levels happen to be resident and answers from the FINEST one that
+// covers a point, falling back to coarser. That is what dissolves the objection the flat loader was
+// built on — "heights cannot stream, the strip and the car ask on the first frame". With a pyramid
+// the root is small, always resident, and always answers; finer tiles refine it as they arrive and
+// nothing ever waits.
+
+export interface PyrTile extends Tile {
+  z: number
+  /** bytes this tile holds, so eviction can bound the real resource rather than a proxy for it */
+  bytes: number
+}
+
+export class PyramidSet {
+  readonly tiles = new Map<string, PyrTile>()
+  private grid = new Map<string, PyrTile[]>()
+  private cell = 2000
+  readonly zmin: number
+  readonly zmax: number
+
+  // NOT constructor parameter properties: tsconfig has `erasableSyntaxOnly`, which forbids them.
+  // It is in the cadre brief under "conventions that bit people" and I walked into it anyway.
+  private readonly baseHeight: (x: number, y: number) => number
+  private readonly baseCanopy?: (x: number, y: number) => number
+
+  constructor(
+    zmin: number,
+    zmax: number,
+    baseHeight: (x: number, y: number) => number,
+    baseCanopy?: (x: number, y: number) => number,
+  ) {
+    this.zmin = zmin
+    this.zmax = zmax
+    this.baseHeight = baseHeight
+    this.baseCanopy = baseCanopy
+  }
+
+  private keyOf = (x: number, y: number) => `${Math.floor(x / this.cell)},${Math.floor(y / this.cell)}`
+
+  add(t: PyrTile) {
+    const id = `${t.z}/${t.x}/${t.y}`
+    if (this.tiles.has(id)) return
+    this.tiles.set(id, t)
+    for (let cx = Math.floor(t.bounds[0] / this.cell); cx <= Math.floor(t.bounds[2] / this.cell); cx++) {
+      for (let cy = Math.floor(t.bounds[1] / this.cell); cy <= Math.floor(t.bounds[3] / this.cell); cy++) {
+        const k = `${cx},${cy}`
+        const arr = this.grid.get(k)
+        if (arr) arr.push(t)
+        else this.grid.set(k, [t])
+      }
+    }
+  }
+
+  remove(id: string) {
+    const t = this.tiles.get(id)
+    if (!t) return
+    this.tiles.delete(id)
+    for (const [k, arr] of this.grid) {
+      const i = arr.indexOf(t)
+      if (i >= 0) arr.splice(i, 1)
+      if (!arr.length) this.grid.delete(k)
+    }
+  }
+
+  get bytes(): number {
+    let n = 0
+    for (const [, t] of this.tiles) n += t.bytes
+    return n
+  }
+
+  /**
+   * The FINEST resident tile covering this ENU point.
+   *
+   * Indexed by ENU bounds rather than by converting the point to geodetic and deriving the tile id
+   * arithmetically. The arithmetic is exact and tempting, but it costs a geodetic round trip per
+   * call — about 300 ns in a browser — and this is the hottest function in the viewer. A bounds
+   * index plus a level preference is the same answer for the price of the flat path.
+   */
+  private at(x: number, y: number): { t: PyrTile; u: number; v: number } | null {
+    const arr = this.grid.get(this.keyOf(x, y))
+    if (!arr) return null
+    let best: { t: PyrTile; u: number; v: number } | null = null
+    for (const t of arr) {
+      if (x < t.bounds[0] || x > t.bounds[2] || y < t.bounds[1] || y > t.bounds[3]) continue
+      if (best && t.z <= best.t.z) continue
+      if (!t.dem.rf.contains(x, y, t.dem.layer.res / 2)) continue
+      const g = t.dem.rf.toGrid(x, y)
+      best = { t, u: g[0], v: g[1] }
+    }
+    return best
+  }
+
+  private static cellOf(f: TileField, u: number, v: number): number {
+    const [w, h] = f.layer.size
+    const c = Math.min(w - 1, Math.max(0, Math.floor(u * w)))
+    const r = Math.min(h - 1, Math.max(0, Math.floor(v * h)))
+    return r * w + c
+  }
+
+  heightAt = (x: number, y: number): number => {
+    const hit = this.at(x, y)
+    if (!hit) return this.baseHeight(x, y)
+    return hit.t.dem.data[PyramidSet.cellOf(hit.t.dem, hit.u, hit.v)]
+  }
+
+  canopyAt = (x: number, y: number): number => {
+    const hit = this.at(x, y)
+    if (!hit?.t.chm) return this.baseCanopy ? this.baseCanopy(x, y) : 0
+    return hit.t.chm.data[PyramidSet.cellOf(hit.t.chm, hit.u, hit.v)]
+  }
+
+  covers = (x: number, y: number): boolean => this.at(x, y) !== null
+
+  /** Which level answered here — for probes, so "the pyramid is working" is measurable. */
+  levelAt = (x: number, y: number): number | null => this.at(x, y)?.t.z ?? null
+}

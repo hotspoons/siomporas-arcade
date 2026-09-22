@@ -158,7 +158,10 @@ export class ReconMeshModel {
 
   async available() {
     if (!this.url) return { ok: false, detail: 'no url configured' }
-    for (const path of ['/healthz', '/health', '/']) {
+    // /readyz before /healthz: a GPU service answers healthz the moment the process is up, and
+    // TRELLIS takes minutes to get 16 GB of weights onto the card. Liveness would tell the editor
+    // the pipeline is available while a reconstruction would still fail.
+    for (const path of ['/readyz', '/healthz', '/health']) {
       try {
         const r = await fetchWithTimeout(`${this.url}${path}`, { headers: this.headers }, 8000)
         if (r.ok) return { ok: true, detail: `via ${path}` }

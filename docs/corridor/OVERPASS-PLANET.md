@@ -48,50 +48,76 @@ because the existing PVC was 60 Gi and I sized against that rather than against 
 
 The docs' "about 40 GB" figure for a clone is long out of date — it is off by 7x.
 
-## Route: clone, not import
+## Route: import continent extracts uncompressed. NOT the clone.
 
-**Clone.** `OVERPASS_MODE=clone` fetches a prebuilt database. It is hours, not days, and it skips
-the import code entirely — which matters, because the import is where every failure so far has
-been.
+**This reverses the first version of this document, which recommended the clone.** The gate it
+proposed was run and the clone failed it.
 
-**Import** would mean `planet.osm.pbf` (~80 GB) through `init_osm3s.sh`. The Maryland extract is
-204 MB and took ten minutes; the planet is 400x that and the reorganize step is superlinear. Days,
-holding a 48 Gi limit, with a failure mode we have already met three times.
+### What the gate found
 
-There is no third option. Nobody publishes prebuilt Overpass *databases* per region — Geofabrik,
-OpenPlanetData and SliceOSM publish raw `.pbf` extracts, which is the thing we would have to
-import. Regional clone = import = the slow, fragile path.
+The `.idx` header carries the block format in 8 bytes — version, block-size exponent,
+compression-factor exponent, then a uint16 compression method — so this cost a range request, not
+a download.
 
-## The risk this design turns on
+```
+clone nodes.bin       version 7600  block 16384  factor 8  method 2 = lz4
+clone ways.bin        version 7600  block 16384  factor 8  method 2 = lz4
+clone relations.bin   version 7600  block 65536  factor 8  method 2 = lz4
+ours  nodes.bin       version 7600  block 16384  factor 8  method 0 = none
+```
 
-**We do not know whether the clone's blocks are readable on our storage.**
+**The clone is lz4.** Our three failures had all been gz, so this looked at first like good news —
+a different code path. It is not:
 
-The Maryland import failed three times with `File error caught: 22 Invalid argument ...
-File_Blocks::read_block` and only succeeded once `OVERPASS_COMPRESSION=no` was set. O_DIRECT was
-ruled out by direct test — 512 MB file on the actual volume, direct reads and writes at offsets
-512, 3584, 4095x512 and past 2 GB, all fine, device reports 512-byte logical blocks. Memory was
-ruled out by lowering the flush buffer from 16 GB to 4, which made it fail *sooner*.
+| compression | result on our storage |
+|---|---|
+| gz (method 1) | fails, `Reorganizing the database`, errno 22, `nodes.0a.bin` |
+| **lz4 (method 2)** | **fails, same phase, same errno, `nodes.0g.bin`** |
+| none (method 0) | **succeeds** — 30 GB, `init_done`, 508 ways for a Crofton bbox |
 
-What is left is the gz block layout, and a clone ships blocks built by the SOURCE with the
-source's compression. If gz is genuinely what breaks here, a 277 GiB download may land and then
-fail on first read.
+Compressed blocks do not read on this storage, whichever codec, and the clone is compressed. That
+is enough to rule the route out without spending 277 GiB.
 
-**So the first step is a cheap test, not a big download.** Clone into a scratch PVC, stop as soon
-as `nodes.bin` and its `.idx` are down (94.5 GiB, the largest single file, ~1 hour), and run a
-query that forces a block read. If it throws errno 22, the clone route is dead and the honest
-answer is to stay on the mirrors. Do not download 277 GiB first and find out after.
+**A caveat I could not close.** An import writes compressed blocks and then reads them back; a
+clone only ever reads blocks written upstream. So this test does not strictly prove the clone
+would fail — only that our write-then-read cycle does. Closing it properly means decompressing an
+upstream block by hand: the index parses cleanly (stride 16, pos and size in 8192-byte sub-blocks,
+8301 entries) but the block body is not a bare LZ4 frame at any offset I tried, and going further
+is reverse-engineering `File_Blocks`' internal layout. Not worth it when a working route exists.
 
-Note also that area generation still fails on our working Maryland instance
-(`area_tags_local.bin`, `read_block::4`) while bbox queries answer fine. Areas are not used by any
-corridor query. Set `rulesLoad: 0` and stop paying for a loop that cannot succeed.
+### The working route
+
+Import with `OVERPASS_COMPRESSION=no`, which is the configuration we have actually seen finish.
+
+Not the planet — **continent extracts**, from the same Geofabrik source the current chart uses:
+
+```
+europe-latest.osm.pbf          35.0 GB
+north-america-latest.osm.pbf   19.4 GB
+```
+
+That covers Italy, the Alps and everything we bake today, and it skips Asia, Africa and South
+America entirely until someone wants them. Geofabrik also publishes per-country extracts, so Italy
+alone is an option if Europe is too slow to start with.
+
+**Sizing is genuinely uncertain and should be provisioned generously rather than estimated.**
+Maryland is 204 MB of pbf and 30 GB on disk, but most of that is preallocated sparse map files
+that do not scale with the extract — extrapolating that ratio gives 5 TB for Europe and is almost
+certainly wrong. Working back from the clone instead (≈80 GB planet pbf → 277 GiB lz4) and
+allowing a few times for decompression suggests under a terabyte for the planet uncompressed. The
+two estimates disagree by an order of magnitude, which is the honest state of knowledge. Disk is
+the cheap thing here: **provision 4 Ti and stop thinking about it.**
+
+Import time is the real cost — Maryland took about ten minutes, and the reorganize step is
+superlinear. Budget a day or more for Europe and run it once.
 
 ## Shape
 
 ```
-PVC          600 Gi   ceph-block RWO      277 GiB clone + diffs + headroom + room to rebuild
-                                          beside the old one during a re-clone
-mode         clone    OVERPASS_CLONE_SOURCE=https://dev.overpass-api.de/api_drolbr/
-compression  no       until the gz question above is answered; costs disk, and disk is free
+PVC          4 Ti     ceph-filesystem     sizing is uncertain by an order of magnitude and the
+                                          pool has 54.8 TiB free; do not economise here
+mode         init     OVERPASS_PLANET_URL=.../europe-latest.osm.pbf
+compression  no       NOT negotiable — gz and lz4 both fail on this storage
 areas        off      rulesLoad: 0
 diffs        on       OVERPASS_DIFF_URL → planet daily; minute diffs are not worth it for a
                       pipeline that bakes a corridor once
@@ -103,8 +129,9 @@ memory       16 Gi    the clone does not import, so the flush buffer does not ap
 
 ## Rollout
 
-1. Scratch PVC, clone `nodes.bin` only, query it, decide. **This is the gate.**
-2. If green: full clone onto the 600 Gi PVC, alongside the Maryland one, which keeps working.
+1. ~~Clone gate.~~ **Done 2026-09-22: the clone is lz4, lz4 fails here, route abandoned.**
+2. Import `europe-latest.osm.pbf` uncompressed onto the 4 Ti PVC, alongside the Maryland one,
+   which keeps working and keeps answering while it runs.
 3. Verify with the boxes that matter — Stelvio, Crofton, somewhere in the southern hemisphere —
    and assert **non-zero** ways for each. The silent empty means "no exception" is not a pass.
 4. Only then set `overpassUrl` back to ours on the worldeditor release, mirrors still appended.

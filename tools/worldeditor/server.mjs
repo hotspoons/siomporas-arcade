@@ -52,6 +52,28 @@ const DATA = path.resolve(arg('data', env.WORLDEDITOR_DATA ?? path.join(REPO, 't
 const APP = path.resolve(arg('app', env.WORLDEDITOR_APP ?? path.join(REPO, 'apps/corridor/dist')))
 const ASSETSVC = (env.WORLDEDITOR_ASSETSVC ?? '').replace(/\/$/, '')
 
+/**
+ * The biggest road query this will run, MEASURED rather than guessed.
+ *
+ * Every drivable way in a box around Crofton, warm cache excluded, on 2026-09-22:
+ *
+ *   0.10 x 0.14   2 066 ways    2.1 MB     9 s
+ *   0.15 x 0.21   4 721 ways    4.6 MB    79 s
+ *   0.25 x 0.35  17 173 ways   15.0 MB    11 s
+ *   0.34 x 0.44  31 053 ways   26.5 MB   > 300 s cold (it completed and cached; the CLIENT gave up)
+ *
+ * The first cap here was 0.35 x 0.45 "about 40 km a side", which permits that last row: 26 MB of
+ * JSON, minutes of somebody else's Overpass, to draw 31 000 residential streets into a window
+ * where each is a fraction of a pixel wide. A cap should be the largest query worth running, not
+ * the largest one that eventually returns. 0.25 x 0.35 is about 28 x 30 km and is the last row
+ * that comes back in a time a person will wait for.
+ *
+ * The client does not rely on this: it sizes its own request to fit (see loadRoads) and tells the
+ * person to zoom in rather than firing something it knows will be refused. This is the backstop.
+ */
+const MAX_SPAN_LAT = 0.25
+const MAX_SPAN_LON = 0.35
+
 const store = new Store(DATA)
 store.catalogSeed = path.join(REPO, 'apps/corridor/public/assets/catalog.json')
 await store.init()
@@ -60,10 +82,21 @@ await store.seedWorlds(env.WORLDEDITOR_SEED_SITES ?? path.join(REPO, 'tools/corr
 // Ours first, the public mirrors behind it — the same order and the same list osm.py uses, for
 // the same reason: our extract is one region, so a California site still needs a mirror, and every
 // mirror refused connections for an hour on 2026-09-21.
-const overpass = new Overpass(store, [
-  ...(env.WORLDEDITOR_OVERPASS_URL ?? 'https://overpass.richard-siomporas.basedweights.com/api/interpreter').split(',').map((s) => s.trim()),
-  ...PUBLIC_MIRRORS,
-])
+const overpass = new Overpass(
+  store,
+  [
+    ...(env.WORLDEDITOR_OVERPASS_URL ?? 'https://overpass.richard-siomporas.basedweights.com/api/interpreter').split(',').map((s) => s.trim()),
+    ...PUBLIC_MIRRORS,
+  ],
+  {
+    // Tunable because the right answer depends on the extract: ours on a warm database answers a
+    // county in seconds, a public mirror under load took 79 s for the same query, and a laptop
+    // testing the fallback wants neither.
+    timeoutMs: Number(env.WORLDEDITOR_OVERPASS_TIMEOUT ?? 120000),
+    deadlineMs: Number(env.WORLDEDITOR_OVERPASS_DEADLINE ?? 240000),
+    downForMs: Number(env.WORLDEDITOR_OVERPASS_DOWN_FOR ?? 60000),
+  },
+)
 const k8s = new K8s(env)
 const runs = new Runs(store, k8s, {
   force: env.WORLDEDITOR_RUNNER ?? null,
@@ -250,8 +283,18 @@ async function api(req, res, seg, q) {
     // Readiness reports; it does NOT gate. If Overpass is down this can still serve baked sites,
     // save authored files and watch a run, and taking the pod out of the Service for that would
     // break the editor for a fault it can work around and report. The kubelet probes /api/health.
-    const [op, kube] = await Promise.all([overpass.available(), k8s.permitted()])
-    return json(res, 200, { ok: true, overpass: op, kubernetes: kube, runner: runs.runner, assetsvc: ASSETSVC || null })
+    const [ours, kube] = await Promise.all([overpass.available(), k8s.permitted()])
+    // If ours is down, say whether anything else is — "overpass: DOWN" on a page that is working
+    // perfectly off a public mirror is a true statement that misleads.
+    const fallbacks = ours.ok ? [] : await overpass.probe()
+    const using = ours.ok ? ours.url : (fallbacks.find((p) => p.ok)?.url ?? null)
+    return json(res, 200, {
+      ok: true,
+      overpass: { ...ours, using, fellBack: !!(using && using !== overpass.ours), upstreams: fallbacks },
+      kubernetes: kube,
+      runner: runs.runner,
+      assetsvc: ASSETSVC || null,
+    })
   }
   if (seg[0] === 'config') {
     return json(res, 200, {
@@ -262,7 +305,14 @@ async function api(req, res, seg, q) {
       assetsvc: ASSETSVC ? '/assetsvc' : null,
       bucket: runs.cfg.bucket ? { bucket: runs.cfg.bucket, endpoint: runs.cfg.endpoint || 'aws', prefix: runs.cfg.prefix } : null,
       authored: (await import('./store.mjs')).AUTHORED,
-      limits: { min_radius_m: worlds.MIN_M, warn_radius_m: worlds.WARN_M, max_radius_m: worlds.MAX_M },
+      limits: {
+        min_radius_m: worlds.MIN_M,
+        warn_radius_m: worlds.WARN_M,
+        max_radius_m: worlds.MAX_M,
+        // The client sizes its road requests from these rather than hard-coding a zoom level.
+        max_span_lat: MAX_SPAN_LAT,
+        max_span_lon: MAX_SPAN_LON,
+      },
       adoptedRuns: adopted,
     })
   }
@@ -276,8 +326,20 @@ async function api(req, res, seg, q) {
     // want the state.
     const spanLat = bbox.north - bbox.south
     const spanLon = bbox.east - bbox.west
-    if (spanLat > 0.35 || spanLon > 0.45) return json(res, 400, { error: 'zoom in — the road query is capped at about 40 km a side', span: { spanLat, spanLon } })
+    if (spanLat > MAX_SPAN_LAT || spanLon > MAX_SPAN_LON) {
+      return json(res, 400, {
+        error: `zoom in — the road query is capped at ${MAX_SPAN_LAT}° x ${MAX_SPAN_LON}° (about 28 x 30 km), and this asked for ${spanLat.toFixed(3)} x ${spanLon.toFixed(3)}`,
+        span: { spanLat, spanLon },
+        cap: { lat: MAX_SPAN_LAT, lon: MAX_SPAN_LON },
+      })
+    }
     return json(res, 200, await overpass.drivable(bbox, { refresh: q.get('refresh') === '1' }))
+  }
+  if (seg[0] === 'osm' && seg[1] === 'status' && req.method === 'GET') {
+    // Every upstream, in the order they are tried, with what each one just answered. This is the
+    // troubleshooting endpoint: "is it using ours or a public mirror" should not need a log.
+    const probes = await overpass.probe()
+    return json(res, 200, { ours: overpass.ours, upstreams: probes, using: probes.find((p) => p.ok)?.host ?? null, cache: store.overpassCache })
   }
   if (seg[0] === 'osm' && seg[1] === 'search' && req.method === 'GET') {
     return json(res, 200, await overpass.search(q.get('q') ?? ''))

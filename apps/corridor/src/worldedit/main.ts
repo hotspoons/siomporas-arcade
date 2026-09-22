@@ -16,7 +16,7 @@ import { Drawer, button, el, installShellKeys, status, clearStatus, toast, typin
 import { segmented, select } from '../ui/controls'
 import { icon } from '../ui/icons'
 import { AssetCatalog } from '../ui/assets'
-import { api, type Config, type World } from './api'
+import { api, type Config, type Way, type World } from './api'
 import { MapView, type LonLat } from './map'
 import { DefinePanel, zoomFor } from './define'
 import { LogView, RunsPanel } from './runs'
@@ -36,8 +36,23 @@ let dirty = false
 
 /* ---- the map ------------------------------------------------------------------------------- */
 
+type Box = { south: number; west: number; north: number; east: number }
+
 let roadsReq: AbortController | null = null
-let lastBox: { south: number; west: number; north: number; east: number } | null = null
+/**
+ * THE BOX `map.ways` CURRENTLY HOLDS — or null when it holds nothing.
+ *
+ * One variable, set and cleared in the same breath as `map.ways`, because the bug this replaces
+ * came from having two: a `lastBox` that meant "what we asked for" and a `map.ways` that meant
+ * "what we have". Zooming out past the road threshold emptied the ways and left the box, so
+ * zooming back in found the viewport inside the box it still believed it had, returned early, and
+ * never fetched again. The map stayed empty for the rest of the session and nothing logged
+ * anything. Measured: one request across zoom in -> out -> in.
+ *
+ * Every write to `map.ways` in this file goes through `setCoverage`, so the two cannot disagree.
+ */
+let coverage: Box | null = null
+let roadsOff: string | null = null
 
 const map = new MapView({
   canvas,
@@ -56,34 +71,89 @@ const map = new MapView({
  * cheap on the server but the round trip and the re-render are not free, and a drag fires this on
  * every settle. The box asked for is padded 25% beyond the screen so a small pan is covered.
  */
-async function loadRoads(bbox: { south: number; west: number; north: number; east: number }, zoom: number) {
-  if (zoom < 12) {
-    map.ways = []
-    map.draw()
+/** The only place `map.ways` is assigned. Ways and the box they cover move together or not at all. */
+function setCoverage(ways: Way[], box: Box | null) {
+  map.ways = ways
+  coverage = box
+  map.draw()
+}
+
+const contains = (outer: Box, inner: Box) =>
+  inner.south >= outer.south && inner.north <= outer.north && inner.west >= outer.west && inner.east <= outer.east
+
+/**
+ * How much bigger than the screen to ask for, capped so the request is never one the server will
+ * refuse.
+ *
+ * The pad exists so a small pan does not re-query. 25% each side is 1.5x the viewport, and at the
+ * wide end that pushed the request past the server's cap and earned a 400 — on a 1500px window at
+ * zoom 12 the page asked for 0.335 x 0.597 degrees against a cap of 0.25 x 0.35. So the pad is
+ * whatever still fits, down to none, and if the bare viewport does not fit there is nothing
+ * sensible to fetch at all.
+ */
+function requestFor(bbox: Box, cap: { lat: number; lon: number }): Box | null {
+  const vLat = bbox.north - bbox.south
+  const vLon = bbox.east - bbox.west
+  if (vLat > cap.lat || vLon > cap.lon) return null
+  const k = Math.min(1.5, cap.lat / vLat, cap.lon / vLon)
+  const padLat = (vLat * (k - 1)) / 2
+  const padLon = (vLon * (k - 1)) / 2
+  return { south: bbox.south - padLat, north: bbox.north + padLat, west: bbox.west - padLon, east: bbox.east + padLon }
+}
+
+/**
+ * Fetch the roads for a viewport, unless what we already hold covers it.
+ *
+ * There is no magic minimum zoom any more. Whether roads can load is derived from the server's
+ * measured cap and the size of this window: a viewport wider than the cap has nothing worth
+ * fetching — 31 000 residential streets at a fraction of a pixel each — and says so instead of
+ * firing a request it knows will be refused. On a wide monitor that threshold sits at a different
+ * zoom than on a narrow one, which is precisely why it was never a constant.
+ */
+async function loadRoads(bbox: Box, _zoom: number) {
+  const cap = { lat: config?.limits.max_span_lat ?? 0.25, lon: config?.limits.max_span_lon ?? 0.35 }
+  const want = requestFor(bbox, cap)
+  if (!want) {
+    // Clear the ways AND the coverage together — the whole point of setCoverage.
+    if (coverage || map.ways.length) setCoverage([], null)
+    roadsOff = 'zoom in to load roads — this view is wider than one OSM query'
     clearStatus()
+    if (mode === 'explore') renderExplore()
     return
   }
-  if (lastBox && bbox.south >= lastBox.south && bbox.north <= lastBox.north && bbox.west >= lastBox.west && bbox.east <= lastBox.east) return
-  const padLat = (bbox.north - bbox.south) * 0.25
-  const padLon = (bbox.east - bbox.west) * 0.25
-  const want = { south: bbox.south - padLat, north: bbox.north + padLat, west: bbox.west - padLon, east: bbox.east + padLon }
+  if (coverage && contains(coverage, bbox)) {
+    roadsOff = null
+    return
+  }
   roadsReq?.abort()
-  roadsReq = new AbortController()
+  const mine = new AbortController()
+  roadsReq = mine
   status('reading OSM…')
   try {
-    const r = await api.roads(want, roadsReq.signal)
-    map.ways = r.ways
-    lastBox = want
-    map.draw()
-    toast(`${r.ways.length} drivable ways${r.cache === 'hit' ? ' (cached)' : ''}`, 'info', 1600)
+    const r = await api.roads(want, mine.signal)
+    setCoverage(r.ways, want)
+    roadsOff = null
+    lastRoads = { count: r.ways.length, cache: r.cache, upstream: r.upstream, fellBack: r.fellBack }
+    toast(`${r.ways.length} drivable ways${r.cache === 'hit' ? ' (cached)' : ` via ${r.upstream ?? 'overpass'}`}`, 'info', 1800)
   } catch (e) {
     if ((e as Error).name === 'AbortError') return
-    lastBox = null
+    // Not a coverage change: we still hold whatever we held. Only the attempt failed.
+    roadsOff = (e as Error).message
     toast((e as Error).message, 'danger', 6000)
   } finally {
-    clearStatus()
+    // Only the request that is still the current one may clear the status. An aborted request's
+    // `finally` used to wipe the message its own replacement had just put up, which is the
+    // "reading OSM" flicker — a superseded request tidying up after the live one.
+    if (roadsReq === mine) {
+      roadsReq = null
+      clearStatus()
+    }
+    if (mode === 'explore') renderExplore()
   }
 }
+
+/** What the last road fetch did, for the Explore panel to report. */
+let lastRoads: { count: number; cache: string; upstream: string | null; fellBack: boolean | null } | null = null
 
 /* ---- panels -------------------------------------------------------------------------------- */
 
@@ -326,37 +396,88 @@ function renderPanel() {
   }
 }
 
-/** Explore: what is on screen, and what the numbers mean. */
+/**
+ * Explore: what is on screen, where it came from, and — when there is nothing — why.
+ *
+ * The "why" is the part that matters. An empty map used to look identical whether the view was too
+ * wide to query, the request had failed, or Overpass was down, and there was nowhere to look but
+ * the network tab. Each of those now says which it is, in the panel, in words.
+ */
 function renderExplore() {
   inspector.replaceChildren()
   const wrap = el('div', 'explore')
-  wrap.append(
-    el('p', 'panel-hint', ''),
-    ...[
-      ['Roads on screen', `${map.ways.length}`],
-      ['Zoom', map.zoom.toFixed(1)],
-      ['Scale', `${map.metresPerPixel.toFixed(2)} m/px`],
-      ['Worlds defined', `${worlds.length}`],
-      ['Baked', `${worlds.filter((w) => w.baked).length}`],
-    ].map(([k, v]) => {
-      const row = el('div', 'readout')
-      row.append(el('span', 'field-label', k), el('span', 'field-value mono', v))
-      return row
-    }),
-  )
-  const p = wrap.firstChild as HTMLElement
-  p.append(
+  const intro = el('p', 'panel-hint')
+  intro.append(
     icon('information-circle', 14),
     el(
       'span',
       '',
-      'These are the drivable ways our own Overpass returns — the same query the bake chains, not a basemap. Zoom past 12 to load them. Existing worlds are outlined faintly.',
+      'These are the drivable ways Overpass returns — the same query the bake chains, not a basemap. Existing worlds are outlined faintly.',
     ),
   )
+  wrap.append(intro)
+
+  if (roadsOff) {
+    const p = el('p', 'panel-hint warn')
+    p.append(icon('exclamation-triangle', 14), el('span', '', roadsOff))
+    wrap.append(p)
+  }
+
+  const rows: [string, string][] = [
+    ['Roads on screen', `${map.ways.length}`],
+    ['Zoom', map.zoom.toFixed(1)],
+    ['Scale', `${map.metresPerPixel.toFixed(2)} m/px`],
+    ['View', `${((map.bbox().north - map.bbox().south) * 111.1).toFixed(1)} x ${((map.bbox().east - map.bbox().west) * 111.1 * Math.cos((map.centre.lat * Math.PI) / 180)).toFixed(1)} km`],
+  ]
+  if (lastRoads) {
+    // WHERE THE DATA CAME FROM. Rich's first question was "does it fall back to the public
+    // Overpass" and the honest place to answer it is beside the roads themselves.
+    rows.push(['Source', lastRoads.cache === 'hit' ? `cache${lastRoads.upstream ? ` (was ${lastRoads.upstream})` : ''}` : (lastRoads.upstream ?? 'overpass')])
+    if (lastRoads.fellBack) rows.push(['', 'fell back to a public mirror'])
+  }
+  rows.push(['Worlds defined', `${worlds.length}`], ['Baked', `${worlds.filter((w) => w.baked).length}`])
+  for (const [k, v] of rows) {
+    const row = el('div', 'readout')
+    row.append(el('span', 'field-label', k), el('span', `field-value mono${k === '' ? ' warn' : ''}`, v))
+    wrap.append(row)
+  }
+
   const acts = el('div', 'panel-actions')
-  acts.append(button({ label: 'New world here', icon: 'plus', variant: 'primary', onClick: () => newWorld() }))
+  acts.append(
+    button({ label: 'New world here', icon: 'plus', variant: 'primary', onClick: () => newWorld() }),
+    button({
+      label: 'Reload roads',
+      icon: 'arrow-path',
+      title: 'drop what is held and ask again for this view',
+      onClick: () => {
+        setCoverage([], null)
+        void loadRoads(map.bbox(), map.zoom)
+      },
+    }),
+    button({ label: 'Overpass status', icon: 'server-stack', onClick: () => void showOverpass() }),
+  )
   wrap.append(acts)
   inspector.append(wrap)
+}
+
+/**
+ * Every upstream, in the order they are tried, and what each just answered.
+ *
+ * This is the answer to "is it using ours, or did it fall back?" without opening a terminal.
+ */
+async function showOverpass() {
+  status('probing every Overpass upstream…')
+  try {
+    const s = await api.overpassStatus()
+    const lines = s.upstreams.map((u) => `${u.ok ? '  up  ' : ' DOWN '} ${u.host.padEnd(44)} ${u.ok ? `${u.ms} ms` : (u.detail ?? '').slice(0, 60)}`)
+    const using = s.using ? `using ${s.using}${s.using !== new URL(s.ours ?? 'http://x').host ? '  (FELL BACK — ours is not answering)' : '  (ours)'}` : 'nothing is answering'
+    console.log(`overpass\n${using}\n${lines.join('\n')}`)
+    toast(using, s.using ? (s.using === new URL(s.ours ?? 'http://x').host ? 'ok' : 'warn') : 'danger', 8000)
+  } catch (e) {
+    toast((e as Error).message, 'danger', 6000)
+  } finally {
+    clearStatus()
+  }
 }
 
 function newWorld() {
@@ -459,6 +580,9 @@ declare global {
       selected: () => string | null
       config: () => Config | null
       refreshWorlds: () => Promise<void>
+      /** The road layer's decision inputs. A probe that cannot see these can only see symptoms. */
+      roads: () => { coverage: Box | null; off: string | null; ways: number; last: typeof lastRoads; inFlight: boolean }
+      loadRoads: (bbox: Box, zoom: number) => Promise<void>
     }
   }
 }
@@ -472,6 +596,8 @@ window.__we = {
   selected: () => selected,
   config: () => config,
   refreshWorlds,
+  roads: () => ({ coverage, off: roadsOff, ways: map.ways.length, last: lastRoads, inFlight: !!roadsReq }),
+  loadRoads,
 }
 
 void boot()

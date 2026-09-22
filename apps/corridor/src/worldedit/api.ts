@@ -82,7 +82,7 @@ export interface Config {
   assetsvc: string | null
   bucket: { bucket: string; endpoint: string; prefix: string } | null
   authored: string[]
-  limits: { min_radius_m: number; warn_radius_m: number; max_radius_m: number }
+  limits: { min_radius_m: number; warn_radius_m: number; max_radius_m: number; max_span_lat: number; max_span_lon: number }
   adoptedRuns: string[]
 }
 
@@ -121,11 +121,16 @@ export const api = {
   ready: () => call<Ready>('/api/ready'),
 
   roads: (b: { south: number; west: number; north: number; east: number }, signal?: AbortSignal) =>
-    call<{ ways: Way[]; cache: 'hit' | 'miss'; key: string }>(
+    call<{ ways: Way[]; cache: 'hit' | 'miss'; upstream: string | null; fellBack: boolean | null; key: string }>(
       `/api/osm/roads?south=${b.south.toFixed(6)}&west=${b.west.toFixed(6)}&north=${b.north.toFixed(6)}&east=${b.east.toFixed(6)}`,
       { signal },
     ),
   search: (q: string) => call<{ places: Place[] }>(`/api/osm/search?q=${encodeURIComponent(q)}`),
+  /** Every upstream in the order they are tried, and what each just answered. */
+  overpassStatus: () =>
+    call<{ ours: string | null; using: string | null; cache: string; upstreams: { url: string; host: string; ok: boolean; status?: number; ms: number; detail?: string }[] }>(
+      '/api/osm/status',
+    ),
 
   worlds: () => call<{ worlds: World[] }>('/api/worlds'),
   world: (slug: string) => call<{ world: World }>(`/api/worlds/${slug}`),

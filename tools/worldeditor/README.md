@@ -110,6 +110,20 @@ read out of them.
 The Bake panel does read `manifest.frame.kind` off a baked site, and says so when it is still
 `utm` — because anything authored against such a bake is in a frame that has since moved.
 
+### 3b. Which Overpass answered, and what happens when it does not
+
+Ours first, then the four public mirrors — the same list and the same order as `osm.py`, because
+our extract is one region and a site outside it still needs a mirror. **It does fall back**, and
+the page says so rather than leaving you to guess: the Explore panel reports the upstream that
+served the roads on screen and flags a fallback, and `GET /api/osm/status` probes every upstream in
+order and reports what each one just answered. `/api/ready` reports the same thing rather than only
+probing the first, because "overpass: DOWN" on a page that is working perfectly off a mirror is a
+true statement that misleads.
+
+Two hazards, both guarded, both written up under *Traps*: a **hanging** upstream used to cost a
+full timeout on every single query, and a **regional** upstream answers an out-of-area box with an
+empty success that the rotation cannot see is wrong.
+
 ### 4. The cache is the bake's cache
 
 `osm.py` keys Overpass responses on `sha1(query)[:16]` under `<data>/cache/overpass/`, and so does
@@ -169,7 +183,8 @@ Environment only, so the chart and a laptop run the same code.
 | `WORLDEDITOR_PORT` `_HOST` | where to listen (`--port`, `--host`) |
 | `WORLDEDITOR_DATA` | the volume (`--data`). Default `tools/corridor/data` |
 | `WORLDEDITOR_APP` | the built app to serve (`--app`). Default `apps/corridor/dist` |
-| `WORLDEDITOR_OVERPASS_URL` | comma list, ours first; the public mirrors are appended |
+| `WORLDEDITOR_OVERPASS_URL` | comma list, ours first; the public mirrors are appended. A REGIONAL instance must declare what it holds: `https://host/api/interpreter#south/west/north/east` (slashes, because the list itself is comma-separated) |
+| `WORLDEDITOR_OVERPASS_TIMEOUT` `_DEADLINE` `_DOWN_FOR` | per attempt (120 s), for the whole call (240 s), and how long a failed upstream is skipped (60 s) |
 | `WORLDEDITOR_ASSETSVC` | the assetsvc base URL, e.g. `http://assetsvc.default.svc` |
 | `WORLDEDITOR_RUNNER` | force `local`; otherwise Kubernetes when a service-account token is mounted |
 | `WORLDEDITOR_BAKE_IMAGE` `_CLAIM` `_BAKE_RESOURCES` | what the Job runs, on which PVC, with what |
@@ -241,6 +256,40 @@ both exist on the viewer and the editor and both carry `site`/`scene`/`camera`, 
 someone probes the wrong one and gets true answers about the wrong object for an afternoon. This
 page has no scene and no renderer, so it gets its own name and holds only what it really has.
 
+**Two variables that can disagree are a bug waiting for a zoom level.** The road layer held
+`map.ways` and, separately, `lastBox` — "what we have" and "what we asked for". Zooming out past
+the query limit emptied the ways and left the box, so zooming back in found the viewport inside a
+box it believed it still held, returned early, and never fetched again: the map stayed empty for
+the rest of the session with nothing in the console and no failed request. Measured before the fix:
+**one request across zoom in → out → in.** There is now one variable, `coverage`, written only by
+`setCoverage` alongside the ways, so the two cannot disagree.
+
+**The widest useful view asked for something the service refused.** At zoom 12 on a 1500 px window
+the page asked for 0.335 × 0.597° against a cap of 0.25 × 0.35 and got a 400 — so the edge of the
+road band was a guaranteed error toast rather than a map. The pad is now whatever still fits, and
+when even the bare viewport does not fit there is nothing worth fetching and the panel says so.
+There is no magic minimum zoom any more: the threshold falls at a different zoom on a wide monitor
+than on a narrow one, which is exactly why it was never a constant.
+
+**An aborted request tidied up after the live one.** `status()` and `clearStatus()` were global, so
+a superseded request's `finally` wiped the message its own replacement had just put up — the
+"reading OSM" flicker. Only the request that is still current clears the status now.
+
+**A regional Overpass answers an out-of-area box with HTTP 200 and zero ways.** Not a 404, not an
+error: a success with nothing in it, byte-identical to a legitimately empty answer over the sea. A
+rotation that turns on an exception or a non-2xx does not fire, so a regional instance placed first
+silently reports that Italy has no roads. Found and measured by the overpass lane
+(`docs/corridor/OVERPASS-PLANET.md`); guarded here two ways — an upstream may declare what it holds
+(`#south/west/north/east`) and is skipped for anything else, and, needing no configuration at all,
+**an empty answer from an upstream that is not the last one is treated as inconclusive** and the
+next one is tried before it is believed.
+
+**A hanging upstream cost a full timeout on every query.** While our own Overpass was being rebuilt
+it accepted connections and never answered, so each query waited the per-attempt timeout before
+falling back — every pan of the map. A failure is now remembered for 45 s and that upstream is
+skipped with no wait, which costs nothing when everything is healthy and turns "every query takes
+two minutes" into "one query a minute does".
+
 **`JSON.parse` throwing un-tagged is a 500.** An unparseable body is the client's fault; the probe
 caught it reporting a 500, which tells a person the service is broken when their editor sent
 rubbish.
@@ -268,11 +317,14 @@ A skipped check prints `SKIP` and is counted separately, because a skip that pri
 same failure in a different costume.
 
 ```
- 7 passed, 0 failed    # --prove: every check goes red on a broken input
- 9 passed, 0 failed    # offline: geometry, the guards, the cache key, the Job spec
-21 passed, 0 failed    # + the live service and the page, driven headlessly
-21 passed, 0 failed    # + the same, against the BUILT bundle with no Vite at all (the pod path)
+ 9 passed, 0 failed    # --prove: every check goes red on a broken input
+13 passed, 0 failed    # offline: geometry, the guards, the cache key, the rotation, the Job spec
+27 passed, 0 failed    # + the live service and the page, driven headlessly
 ```
+
+The upstream-rotation checks run against fake Overpass servers this probe starts on loopback — a
+regional one that answers 200-with-nothing outside its box, and one that hangs. Hanging them off
+public mirrors would have made them a weather report.
 
 The negatives keep earning it. The first one for the smallest-enclosing-circle check used a
 SQUARE, where the naive answer is exactly right, so it passed and proved nothing. The first one

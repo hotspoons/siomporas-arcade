@@ -345,14 +345,34 @@ export function buildBlades(
     const blades = X.blades ?? []
     const corners = X.corners ?? []
     if (blades.length < 2 || !corners.length) continue
-    // the first candidate that is clear of the asphalt; the bake's order is the preference
+    // The first candidate that is clear of the asphalt, WALKING OUTWARD if it is not.
+    //
+    // The bake puts each corner at a nominal radius from the junction centre, and it cannot know
+    // whether that lands on asphalt: at a wide crossing with turn radii the pavement reaches past
+    // it in every direction, and all four corners come back buried. Measured: 18 of 408 junctions
+    // had no clear candidate at the nominal radius and lost their signs entirely.
+    //
+    // So the corner is a DIRECTION, not a position — the same move `toKerb` makes for a signal
+    // mast. Step out along it until there is ground to stand on, and only give up when even the
+    // far end of the walk is still road, which means this is not a corner at all.
+    const centre = toWorld(X.x, X.y)
     let spot: { x: number; y: number } | null = null
-    for (let i = 0; i < corners.length; i++) {
+    for (let i = 0; i < corners.length && !spot; i++) {
       const w = toWorld(corners[i].x, corners[i].y)
-      if (edgeDistance(w.x, w.z) >= T.BLADE_CLEAR) {
-        spot = corners[i]
-        if (i > 0) counts.fellBack++
-        break
+      const dx = w.x - centre.x
+      const dz = w.z - centre.z
+      const r0 = Math.hypot(dx, dz) || 1
+      const ux = dx / r0
+      const uz = dz / r0
+      for (let r = r0; r <= r0 + T.BLADE_WALK_M; r += 1) {
+        const px = centre.x + ux * r
+        const pz = centre.z + uz * r
+        if (edgeDistance(px, pz) >= T.BLADE_CLEAR) {
+          // back in site metres, which is what the rest of this loop works in
+          spot = { x: px, y: -pz }
+          if (i > 0 || r > r0 + 0.001) counts.fellBack++
+          break
+        }
       }
     }
     if (!spot) {

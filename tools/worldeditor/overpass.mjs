@@ -179,6 +179,42 @@ export class Overpass {
   }
 
   /**
+   * Throw away every cached response that has nothing in it.
+   *
+   * THE CURE FOR A POISONED CACHE, and it needs one because an empty answer is cached in a form
+   * that cannot be told apart from a real one: a query hash and a body with no elements. An
+   * upstream that was regional, or overloaded, or briefly wrong wrote "there is nothing here" to
+   * the volume, and a cache HIT never asks again — so the Alps stay blank through every retry,
+   * every reload and every restart, and nothing anywhere reports an error.
+   *
+   * Only empty entries are removed. A cached response with elements in it was right when it was
+   * written and OSM does not un-build roads, so there is nothing to gain from dropping those and a
+   * re-fetch of the whole region to lose.
+   */
+  async purgeEmpty() {
+    const { readdir, readFile, rm } = await import('node:fs/promises')
+    const removed = []
+    for (const name of await readdir(this.store.overpassCache).catch(() => [])) {
+      if (!name.endsWith('.json')) continue
+      const file = `${this.store.overpassCache}/${name}`
+      const text = await readFile(file, 'utf8').catch(() => null)
+      if (!text) continue
+      let doc = null
+      try {
+        doc = JSON.parse(text)
+      } catch {
+        continue
+      }
+      if (doc.elements?.length) continue
+      const side = await readFile(`${file}.upstream`, 'utf8').then(JSON.parse).catch(() => null)
+      await rm(file, { force: true })
+      await rm(`${file}.upstream`, { force: true })
+      removed.push({ key: name.replace(/\.json$/, ''), from: side?.host ?? null })
+    }
+    return removed
+  }
+
+  /**
    * Run a query, answering from the shared cache when it is there.
    *
    * Identical queries in flight are coalesced: dragging the map fires the same box repeatedly and
@@ -262,13 +298,32 @@ export class Overpass {
           if (attempt >= this.urls.length - 1) await new Promise((r) => setTimeout(r, 4000))
         }
       }
-      // Nothing better turned up, so the empty answer was the real one after all.
+      // An empty answer that nothing else got the chance to contradict.
+      //
+      // IT IS RETURNED BUT NOT CACHED, and that distinction is the whole point. "Nothing else
+      // turned up" covers two very different situations: every other upstream genuinely said the
+      // same thing, or every other upstream timed out and the deadline ran out. The second is not
+      // evidence of anything, and caching it writes "the Alps have no roads" to the volume for
+      // ever — a poisoned tile that no amount of retrying will clear, because a cache hit never
+      // asks again. So a provisional empty is handed back so the map can say "nothing here yet"
+      // and is deliberately NOT persisted; the next look asks again.
       if (empty) {
-        await this.store.writeAtomic(file, Buffer.from(empty.text))
-        await this.store
-          .writeAtomic(`${file}.upstream`, Buffer.from(JSON.stringify({ url: empty.url, host: new URL(empty.url).host, at: new Date().toISOString(), empty: true })))
-          .catch(() => {})
-        return { ...empty.json, _cache: 'miss', _upstream: new URL(empty.url).host, _fellBack: empty.url !== this.urls[0], _empty: true }
+        const corroborated = tried.every((t) => /nothing in it|does not hold this area/.test(t))
+        if (corroborated) {
+          await this.store.writeAtomic(file, Buffer.from(empty.text))
+          await this.store
+            .writeAtomic(`${file}.upstream`, Buffer.from(JSON.stringify({ url: empty.url, host: new URL(empty.url).host, at: new Date().toISOString(), empty: true })))
+            .catch(() => {})
+        }
+        return {
+          ...empty.json,
+          _cache: 'miss',
+          _upstream: new URL(empty.url).host,
+          _fellBack: empty.url !== this.urls[0],
+          _empty: true,
+          _provisional: !corroborated,
+          _tried: tried,
+        }
       }
       throw Object.assign(
         new Error(`every Overpass upstream failed or was skipped — ${tried.join(' | ')}`),

@@ -53,6 +53,72 @@ the difference, which is also why a bug fixed in one is fixed in both.
 A whitelist and not a path check: the bake owns `web/` and every raster beside it, and a PUT over
 `manifest.json` would destroy a bake that cost an hour of USGS bandwidth.
 
+### 1b. The map is a layer stack, because a world editor starts at the world
+
+The first version asked OSM exactly one question — "every drivable way in this box" — and had one
+lever for making it affordable: refuse to zoom out. That is a site definer. It assumes you already
+know where you are going, and it makes finding somewhere new impossible.
+
+A map asks a different question at every scale, and so does this (`layers.mjs`):
+
+| zoom | layer | source | tile level |
+|---|---|---|---|
+| 0 – 9 | country outlines | Natural Earth 110m, fetched once, cached | one file |
+| 0 – 6 | world cities, ranked | Natural Earth 50m, fetched once, cached | one file |
+| 6 – 12 | towns and villages | Overpass `node[place]` | z4 — 11.25° cells |
+| 7 – 11 | motorways and trunk roads | Overpass, `+primary` from zoom 9 | z6 — 2.8° cells |
+| 11 + | every drivable street | Overpass, the `all_streets` query | z9 — 0.35° cells |
+
+Measured on 2026-09-22, which is what makes the bands defensible rather than a guess:
+
+| query | elements | raw | time |
+|---|---|---|---|
+| every city + town in ALL of Italy (11.7 × 12°) | 2 016 nodes | 946 kB | 34 s |
+| motorway + trunk over NW Italy (1.5 × 2.5°) | 5 000 ways (capped) | 5.2 MB | 15 s |
+| every drivable way, 0.25 × 0.35° | 17 173 ways | 15.0 MB | 11 s |
+| every drivable way, 0.34 × 0.44° | 31 053 ways | 26.5 MB | > 300 s |
+
+The bottom row is why the old single cap was wrong, and the top row is why this works: **asking a
+cheaper question over a bigger box beats asking the expensive question over a smaller one.**
+
+**Natural Earth for the overview, Overpass for the detail.** A national border in Overpass is a
+relation whose geometry is the country's entire coastline at full resolution — megabytes per
+country, minutes per query, for a line forty pixels long. Natural Earth is public domain, already
+generalised by cartographers for exactly these zooms, and it is **fetched at runtime and cached on
+the volume** rather than committed: 89 kB of borders and 36 kB of world cities on the wire, once,
+then local for ever. If the fetch fails there are no borders and the panel says so.
+
+**Tiles, not viewports.** Every Overpass layer is fetched on the same geographic quadtree as
+`packages/engine/src/geo/wgs84.ts` and trailworks. The old cache was viewport-shaped, so every pan
+was a box nobody had asked for and therefore a miss. Tiles make panning free after the first look,
+bound the cache, and let two people share the work. `GET /api/osm/plan` is what the client asks:
+which layers apply at this zoom, and which tiles of each cover the view, nearest the middle first.
+
+**Trimmed and simplified before caching.** Overpass returns every tag and every vertex; at overview
+scales neither is wanted. A motorway across Lombardy does not need 10 m vertex spacing to read as a
+line. What lands on the volume is what the map will draw.
+
+**The cache key carries the question, not just the tile.** `places` asks for cities below zoom 5
+and cities + towns above it. If the key did not say which, panning at z4 and then zooming to z8
+would read back the city-only tile and the towns would never appear — a cache HIT that is silently
+the wrong answer. `variantOf()` returns the parameters and the key derived from them, and the probe
+asserts one question ↔ one key in both directions. It caught `major` fetching the same query twice
+under two keys because its tolerance and its road classes changed at different zooms.
+
+### 1c. Finding somewhere, and keeping it
+
+**Search is Nominatim, not Overpass.** Overpass answers questions about a box; a name search over
+the planet is a regex across every node in the database. Nominatim is OSM's own geocoder and
+returns a **bounding box**, which is what "fly me to Lombardy" needs — the old search dropped a pin
+at street zoom whether you asked for a country or a car park. Used politely by construction: one
+request a second behind a gate, an identifying User-Agent, every result cached on the volume for
+ever.
+
+**The index** (`/api/places`) is a list of places worth coming back to. It is deliberately not a
+world: finding somewhere is a different job from deciding what to bake, it happens first and in
+bulk, and it mostly ends in "not that one". A place costs a name and a pin — one click from a
+search result — and a world is promoted from one when it earns it.
+
 ### 2. `radius_m` is a HALF-WIDTH, not a radius. The editor says so, in numbers
 
 `network.roads` queries the geodetic bounding box of a **UTM square of side 2·radius_m** and there
@@ -290,6 +356,31 @@ falling back — every pan of the map. A failure is now remembered for 45 s and 
 skipped with no wait, which costs nothing when everything is healthy and turns "every query takes
 two minutes" into "one query a minute does".
 
+**`out tags` returns no coordinates.** On a place node Overpass's `out tags` gives the id and the
+tags and nothing else — Milan comes back as a name with nowhere to put it. The trim quite
+reasonably requires a position, so it dropped all 3 751 elements of a perfectly good response and
+cached an empty tile that looked exactly like "there are no cities in the Alps". `out body` is the
+one that carries `lat`. Two guards came out of it: a tile whose trim eats a non-empty response is
+refused and not cached, and the probe stubs an upstream that returns unusable elements to prove
+that guard fires.
+
+**An empty answer caches like any other, and a cache hit never asks again.** A regional upstream,
+an overloaded one, or a deadline expiring mid-rotation writes "there is nothing here" to the
+volume permanently. So an empty result that could not be corroborated is returned but **not
+persisted**, and `POST /api/osm/cache/purge-empty` is the cure for the ones already written —
+because "the map thinks Italy is empty" otherwise has no fix at all.
+
+**A tile is held after you zoom away from it, so drawing must be gated on the band too.** Keeping
+tiles is what makes zooming back instant; drawing them regardless meant 59 544 street segments
+painted over the Atlantic at a scale where each is a fraction of a pixel. And the detail layer has
+to be cleared as soon as the band is left, not after the rest of the load finishes — at zoom 10
+the plan contains layers whose tiles take a minute each, and the stale streets were drawn for all
+of it.
+
+**`boot()` flies to a starting world after awaiting the world list**, so anything that moved the
+map in the meantime got yanked back a second later — a search, a probe, or a person who started
+panning while the list loaded. It only flies now if nobody has touched the map.
+
 **`JSON.parse` throwing un-tagged is a 500.** An unparseable body is the client's fault; the probe
 caught it reporting a 500, which tells a person the service is broken when their editor sent
 rubbish.
@@ -317,9 +408,9 @@ A skipped check prints `SKIP` and is counted separately, because a skip that pri
 same failure in a different costume.
 
 ```
- 9 passed, 0 failed    # --prove: every check goes red on a broken input
-13 passed, 0 failed    # offline: geometry, the guards, the cache key, the rotation, the Job spec
-27 passed, 0 failed    # + the live service and the page, driven headlessly
+11 passed, 0 failed    # --prove: every check goes red on a broken input
+16 passed, 0 failed    # offline: geometry, the guards, the layer stack, the rotation, the Job spec
+30 passed, 0 failed    # + the live service and the page, driven headlessly
 ```
 
 The upstream-rotation checks run against fake Overpass servers this probe starts on loopback — a

@@ -11,6 +11,7 @@
 //   <data>/sites/<slug>/...        the bake's own output — CORRIDOR_DATA points a bake Job here
 //   <data>/sites/index.json        what the viewer lists
 //   <data>/cache/overpass/*.json   SHARED with the bake: same sha1(query)[:16] key (osm.py)
+//   <data>/places/<id>.json        a place somebody found and kept — the INDEX, upstream of a world
 //   <data>/worlds/<slug>.json      a world definition drawn in the editor (superset of a site)
 //   <data>/sites.json              worlds materialised as the array `corridor fetch` reads
 //   <data>/runs/<id>.json|.log     bakes and publishes, and their output
@@ -39,13 +40,14 @@ export class Store {
     this.root = path.resolve(root)
     this.sites = path.join(this.root, 'sites')
     this.worlds = path.join(this.root, 'worlds')
+    this.places = path.join(this.root, 'places')
     this.runs = path.join(this.root, 'runs')
     this.overpassCache = path.join(this.root, 'cache', 'overpass')
     this.assets = path.join(this.root, 'assets')
   }
 
   async init() {
-    for (const d of [this.sites, this.worlds, this.runs, this.overpassCache, this.assets]) await mkdir(d, { recursive: true })
+    for (const d of [this.sites, this.worlds, this.places, this.runs, this.overpassCache, this.assets]) await mkdir(d, { recursive: true })
   }
 
   /** Write through a temp file in the same directory, so a reader never sees a half-written JSON. */
@@ -189,6 +191,44 @@ export class Store {
       })
     }
     return out
+  }
+
+  /* ---- the place index --------------------------------------------------------------------- */
+
+  /**
+   * A place somebody found and wants to keep.
+   *
+   * THIS IS NOT A WORLD, and the distinction is the point. Finding somewhere worth driving is a
+   * different activity from deciding the extent of a bake, and it happens first, in bulk, and
+   * mostly ends in "not that one". A world costs a slug, a radius, a primary road and an argument
+   * about what the bake will take; a place costs a name and a pin. So the index is cheap to add to
+   * — a click on the map, or a search result — and a world is PROMOTED from one when it earns it.
+   *
+   * The shape is deliberately close to a geocoder result (`bbox` included) so that framing a place
+   * on the map means reading one field rather than guessing a zoom from its category.
+   */
+  async listPlaces() {
+    const out = []
+    for (const f of await readdir(this.places).catch(() => [])) {
+      if (!f.endsWith('.json')) continue
+      const p = await this.readJson(path.join(this.places, f))
+      if (p) out.push(p)
+    }
+    return out.sort((a, b) => (a.added < b.added ? 1 : -1))
+  }
+
+  getPlace(id) {
+    return this.readJson(path.join(this.places, `${id}.json`))
+  }
+
+  async putPlace(place) {
+    const doc = { ...place, added: place.added ?? new Date().toISOString() }
+    await this.writeAtomic(path.join(this.places, `${doc.id}.json`), Buffer.from(JSON.stringify(doc, null, 1)))
+    return doc
+  }
+
+  removePlace(id) {
+    return rm(path.join(this.places, `${id}.json`), { force: true })
   }
 
   /* ---- the overpass cache, shared with the bake -------------------------------------------- */

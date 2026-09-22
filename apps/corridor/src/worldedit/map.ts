@@ -1,12 +1,22 @@
-// The map. Pan, zoom, search, draw a boundary — and it draws the ROADS, not a basemap.
+// The map: a layer stack, from country outlines down to every street a car can drive.
 //
-// WHY THERE IS NO BASEMAP. The brief asks for a view where a person can "see what the bake would
-// see". The bake does not see aerial imagery or a cartographer's rendering of a town; it sees the
-// drivable ways Overpass returns for a box, chains them, and throws away everything else. So this
-// draws exactly those ways, from exactly that query (`network.roads`' all_streets branch, through
-// our own Overpass) — which is a truer preview than a tiled basemap AND removes a third-party
-// dependency from a pod that may have no route off the cluster, and a tile-usage policy from a
-// tool that would pan across a county.
+// WHAT THIS REPLACES. The first version drew exactly one thing — the drivable ways the bake would
+// chain — and made everything else impossible: zoom out to look for a pass in the Alps and the
+// screen went black by design. That is a site definer. A world editor has to let you start at the
+// world, so the map asks a different question at every scale, and the scales are:
+//
+//   borders   country outlines            once, cached; Natural Earth, not Overpass
+//   cities    world cities, ranked        once, cached; the overview's place layer
+//   places    towns and villages          Overpass, tiled, from zoom 6
+//   major     motorways and trunk roads   Overpass, tiled, from zoom 7
+//   roads     every drivable street       Overpass, tiled, from zoom 11 — what the bake will chain
+//
+// The server owns which layers apply at which zoom (`/api/osm/layers`, `/api/osm/plan`) because it
+// also owns the queries; a client that hard-coded zoom numbers would drift from them.
+//
+// THERE IS STILL NO RASTER BASEMAP, and that is deliberate rather than unfinished. What matters
+// here is what the bake will see, and vector outlines say that exactly, work with no route off the
+// cluster, and carry no tile-usage policy for a tool that pans across a continent.
 //
 // PROJECTION. Web Mercator, because that is what every map gesture people already know assumes,
 // and because pan and zoom are then a translation and a scale with no trigonometry per frame.
@@ -24,6 +34,33 @@ import type { Way } from './api'
 export interface LonLat {
   lon: number
   lat: number
+}
+
+export interface TileDoc {
+  layer: string
+  z: number
+  x: number
+  y: number
+  kind: 'points' | 'lines'
+  bounds: { south: number; west: number; north: number; east: number }
+  items: unknown[]
+}
+
+export interface PlacePoint {
+  id: number
+  name: string
+  kind: string
+  pop: number
+  lat: number
+  lon: number
+}
+
+export interface MajorLine {
+  id: number
+  name: string | null
+  ref: string | null
+  highway: string
+  line: [number, number][]
 }
 
 /** A circle and the square the bake will actually take around it. */
@@ -89,6 +126,34 @@ export class MapView {
   zoom = 14
   mode: Mode = 'pan'
   ways: Way[] = []
+  /** Country outlines, drawn under everything. Loaded once by main.ts. */
+  borders: { geometry: { type: string; coordinates: number[][][] | number[][][][] }; properties: { name: string | null } }[] = []
+  /** World cities, ranked — what stands in for `places` below its minimum zoom. */
+  worldCities: { name: string; country: string | null; pop: number; rank: number; lat: number; lon: number }[] = []
+  /** Fetched tiles, keyed `layer/z/x/y`. The map draws whatever it holds. */
+  tiles = new Map<string, TileDoc>()
+  /**
+   * Has the view been moved since the page loaded?
+   *
+   * `boot()` flies to a starting world, and it does so AFTER awaiting the world list — so anything
+   * that moved the map in the meantime (a probe, a search, a person who started panning while the
+   * list was loading) got yanked back a second later. The flag lets boot say "only if nobody has
+   * touched it", which is the behaviour anyone would expect and which a probe depends on.
+   */
+  moved = false
+
+  /** Indexed places, drawn as pins at every zoom — the index is the point of the index. */
+  pins: { id: string; name: string; lat: number; lon: number; world: boolean }[] = []
+  /**
+   * Each layer's zoom band, from the server — the same numbers that choose the queries.
+   *
+   * DRAWING IS GATED ON THIS, not only fetching. A tile stays in memory after you zoom away from
+   * it (so coming back is instant), and without a gate the detail layer is still drawn at world
+   * zoom: 59 544 street segments from a previous session, painted over the Atlantic, at a scale
+   * where every one of them is a fraction of a pixel. It cost about a second a frame and looked
+   * like a rendering bug.
+   */
+  bands = new Map<string, { minZoom: number; maxZoom: number }>()
   /** the ring being drawn, or the saved one being edited */
   ring: LonLat[] = []
   ringClosed = false
@@ -165,7 +230,13 @@ export class MapView {
     return metresPerPixel(this.centre.lat, this.zoom)
   }
 
-  flyTo(p: LonLat, zoom?: number) {
+  /** The canvas in CSS pixels — what `frame()` needs to work out a zoom from an extent. */
+  get canvasSize() {
+    return { w: this.w, h: this.h }
+  }
+
+  flyTo(p: LonLat, zoom?: number, { user = true } = {}) {
+    if (user) this.moved = true
     this.centre = { ...p }
     if (zoom != null) this.zoom = zoom
     this.draw()
@@ -199,7 +270,10 @@ export class MapView {
       if (this.dragging) {
         const dx = e.offsetX - this.dragging.x
         const dy = e.offsetY - this.dragging.y
-        if (Math.abs(dx) + Math.abs(dy) > 3) this.dragging.moved = true
+        if (Math.abs(dx) + Math.abs(dy) > 3) {
+          this.dragging.moved = true
+          this.moved = true
+        }
         if (this.dragging.vertex != null) {
           this.ring[this.dragging.vertex] = p
           this.o.onBoundary(this.ring, this.ringClosed)
@@ -254,8 +328,10 @@ export class MapView {
       (e) => {
         e.preventDefault()
         // zoom about the cursor: the point under the pointer stays under the pointer
+        this.moved = true
         const before = this.toLonLat(e.offsetX, e.offsetY)
-        this.zoom = Math.max(4, Math.min(19, this.zoom - Math.sign(e.deltaY) * 0.5))
+        // Down to 2, not 4: the whole point is that you can start at the world.
+        this.zoom = Math.max(2, Math.min(19, this.zoom - Math.sign(e.deltaY) * 0.5))
         const after = this.toLonLat(e.offsetX, e.offsetY)
         const [bx, by] = project(before)
         const [ax, ay] = project(after)
@@ -326,15 +402,22 @@ export class MapView {
     g.fillRect(0, 0, this.w, this.h)
 
     this.paintGraticule(g)
+    this.paintBorders(g)
+    this.paintMajor(g)
     this.paintOthers(g)
     this.paintWays(g)
     this.paintExtent(g)
     this.paintRing(g)
+    this.paintPlaces(g)
+    this.paintPins(g)
     this.paintScale(g)
   }
 
   /** A degree grid, so a featureless area is not a blank screen and a pan has something to hold. */
   private paintGraticule(g: CanvasRenderingContext2D) {
+    // Off at the overview: at world zoom the useful grid is the coastlines, and a 25 km lattice
+    // over them is just noise.
+    if (this.zoom < 7) return
     const mpp = this.metresPerPixel
     const stepM = [10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 25000].find((s) => s / mpp > 70) ?? 50000
     const stepDeg = stepM / 111320
@@ -356,7 +439,151 @@ export class MapView {
     g.stroke()
   }
 
+  /** Is this layer worth drawing at the current zoom? Unknown layers draw, so a new one shows up. */
+  inBand(layer: string): boolean {
+    const b = this.bands.get(layer)
+    return !b || (this.zoom >= b.minZoom && this.zoom < b.maxZoom)
+  }
+
+  /** Everything this map holds for a layer, across the tiles it has — empty when out of band. */
+  itemsOf<T>(layer: string): T[] {
+    if (!this.inBand(layer)) return []
+    const out: T[] = []
+    for (const t of this.tiles.values()) if (t.layer === layer) out.push(...(t.items as T[]))
+    return out
+  }
+
+  /**
+   * Country outlines: a filled landmass and a hairline border.
+   *
+   * Filled, not just stroked, because an unfilled outline at world zoom reads as a tangle of
+   * squiggles and the thing a person actually needs is "sea there, land here, that shape is Italy".
+   */
+  private paintBorders(g: CanvasRenderingContext2D) {
+    if (!this.borders.length || this.zoom > 9) return
+    const fade = this.zoom > 6 ? Math.max(0, 1 - (this.zoom - 6) / 3) : 1
+    g.save()
+    g.globalAlpha = fade
+    g.fillStyle = 'rgba(31,41,51,0.85)'
+    g.strokeStyle = 'rgba(122,140,158,0.55)'
+    g.lineWidth = 1
+    for (const f of this.borders) {
+      const polys = f.geometry.type === 'Polygon' ? [f.geometry.coordinates as number[][][]] : (f.geometry.coordinates as number[][][][])
+      for (const poly of polys) {
+        g.beginPath()
+        for (const ring of poly) {
+          for (let i = 0; i < ring.length; i++) {
+            const [x, y] = this.toScreen({ lon: ring[i][0], lat: ring[i][1] })
+            if (i === 0) g.moveTo(x, y)
+            else g.lineTo(x, y)
+          }
+          g.closePath()
+        }
+        g.fill()
+        g.stroke()
+      }
+    }
+    g.restore()
+  }
+
+  /** The motorway skeleton. Drawn under the detail roads so a town reads over its bypass. */
+  private paintMajor(g: CanvasRenderingContext2D) {
+    const lines = this.itemsOf<MajorLine>('major')
+    if (!lines.length) return
+    g.save()
+    g.lineCap = 'round'
+    g.lineJoin = 'round'
+    for (const w of lines) {
+      const s = styleOf(w.highway)
+      g.strokeStyle = s.c
+      g.lineWidth = s.w
+      g.globalAlpha = 0.9
+      g.beginPath()
+      for (let i = 0; i < w.line.length; i++) {
+        const [x, y] = this.toScreen({ lon: w.line[i][0], lat: w.line[i][1] })
+        if (i === 0) g.moveTo(x, y)
+        else g.lineTo(x, y)
+      }
+      g.stroke()
+    }
+    g.restore()
+    if (this.zoom >= 7) this.paintRefs(g, lines)
+  }
+
+  /** Motorway numbers — an A4 shield is how you recognise a road you have never driven. */
+  private paintRefs(g: CanvasRenderingContext2D, lines: MajorLine[]) {
+    const placed = new Set<string>()
+    g.save()
+    g.font = '600 10px ui-monospace, monospace'
+    g.textAlign = 'center'
+    g.textBaseline = 'middle'
+    for (const w of lines) {
+      const ref = w.ref?.split(';')[0]?.trim()
+      if (!ref || placed.has(ref) || w.line.length < 2) continue
+      const mid = w.line[Math.floor(w.line.length / 2)]
+      const [x, y] = this.toScreen({ lon: mid[0], lat: mid[1] })
+      if (x < 20 || x > this.w - 20 || y < 12 || y > this.h - 12) continue
+      const width = g.measureText(ref).width + 8
+      g.fillStyle = 'rgba(13,16,20,0.85)'
+      g.strokeStyle = 'rgba(217,136,79,0.8)'
+      g.lineWidth = 1
+      g.beginPath()
+      g.roundRect(x - width / 2, y - 7, width, 14, 3)
+      g.fill()
+      g.stroke()
+      g.fillStyle = '#d9a441'
+      g.fillText(ref, x, y)
+      placed.add(ref)
+    }
+    g.restore()
+  }
+
+  /**
+   * Cities and towns, as a dot and a label, biggest first with collision rejection.
+   *
+   * Below the `places` layer's minimum zoom this draws the world-cities basemap instead, so the
+   * view never goes from "labelled" to "blank" as you pull out — which is exactly the transition
+   * that made the old map feel broken.
+   */
+  private paintPlaces(g: CanvasRenderingContext2D) {
+    const live = this.itemsOf<PlacePoint>('places')
+    const source: { name: string; lat: number; lon: number; pop: number; kind?: string }[] = live.length
+      ? live
+      : this.worldCities
+    if (!source.length) return
+    const boxes: [number, number, number, number][] = []
+    const hits = (x: number, y: number, w: number, h: number) =>
+      boxes.some((b) => x < b[0] + b[2] && x + w > b[0] && y < b[1] + b[3] && y + h > b[1])
+    g.save()
+    g.font = '11px var(--font-mono), ui-monospace, monospace'
+    g.textBaseline = 'middle'
+    g.strokeStyle = 'rgba(13,16,20,0.85)'
+    g.lineWidth = 3
+    let drawn = 0
+    for (const p of source) {
+      if (drawn > 120) break
+      const [x, y] = this.toScreen({ lon: p.lon, lat: p.lat })
+      if (x < 0 || x > this.w || y < 0 || y > this.h) continue
+      const major = (p.kind ?? 'city') === 'city' || p.pop > 100000
+      const r = major ? 3 : 2
+      const label = p.name
+      const tw = g.measureText(label).width
+      if (hits(x + 6, y - 7, tw + 4, 14)) continue
+      boxes.push([x + 6, y - 7, tw + 4, 14])
+      g.beginPath()
+      g.arc(x, y, r, 0, Math.PI * 2)
+      g.fillStyle = major ? '#e6ecf2' : '#a3b1bf'
+      g.fill()
+      g.fillStyle = major ? '#e6ecf2' : '#a3b1bf'
+      g.strokeText(label, x + 6, y)
+      g.fillText(label, x + 6, y)
+      drawn++
+    }
+    g.restore()
+  }
+
   private paintWays(g: CanvasRenderingContext2D) {
+    if (!this.ways.length || !this.inBand('roads')) return
     g.lineCap = 'round'
     g.lineJoin = 'round'
     // Painted class by class so the motorways land on top of the residentials, which is the one
@@ -520,12 +747,50 @@ export class MapView {
     g.restore()
   }
 
+  /**
+   * Indexed places, at every zoom and over everything.
+   *
+   * Deliberately not subject to the label collision rules the place layer uses: these are the ones
+   * a person chose, so they win. A pin that has become a world is drawn differently, because "have
+   * I already done this one" is the question you ask of an index.
+   */
+  private paintPins(g: CanvasRenderingContext2D) {
+    if (!this.pins.length) return
+    g.save()
+    g.font = '600 11px var(--font-mono), ui-monospace, monospace'
+    g.textBaseline = 'middle'
+    for (const p of this.pins) {
+      const [x, y] = this.toScreen({ lon: p.lon, lat: p.lat })
+      if (x < -40 || x > this.w + 40 || y < -20 || y > this.h + 20) continue
+      const col = p.world ? '#56b982' : '#d9a441'
+      g.beginPath()
+      g.moveTo(x, y)
+      g.lineTo(x - 5, y - 11)
+      g.lineTo(x + 5, y - 11)
+      g.closePath()
+      g.fillStyle = col
+      g.fill()
+      g.beginPath()
+      g.arc(x, y - 14, 5, 0, Math.PI * 2)
+      g.fillStyle = col
+      g.fill()
+      g.strokeStyle = 'rgba(13,16,20,0.9)'
+      g.lineWidth = 3
+      g.strokeText(p.name, x + 9, y - 12)
+      g.fillStyle = col
+      g.fillText(p.name, x + 9, y - 12)
+    }
+    g.restore()
+  }
+
   /** A bar whose length is a round number of metres at the map's own latitude. */
   private paintScale(g: CanvasRenderingContext2D) {
     const mpp = this.metresPerPixel
     const target = 120
-    const nice = [10, 25, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000]
-    const m = nice.find((n) => n / mpp > target) ?? 100000
+    // Up to 5 000 km: at zoom 2 a metre is a millionth of the screen and a bar that stops at 50 km
+    // is fourteen pixels long, which is not a scale bar, it is a dash.
+    const nice = [10, 25, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000, 200000, 500000, 1000000, 2000000, 5000000]
+    const m = nice.find((n) => n / mpp > target) ?? 5000000
     const px = m / mpp
     const x = 14
     const y = this.h - 18

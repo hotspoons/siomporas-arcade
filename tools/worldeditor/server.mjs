@@ -25,12 +25,16 @@
 import http from 'node:http'
 import { createReadStream } from 'node:fs'
 import { stat } from 'node:fs/promises'
-import { createGzip } from 'node:zlib'
+import { createGzip, gzip } from 'node:zlib'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { Store } from './store.mjs'
 import { Overpass, PUBLIC_MIRRORS } from './overpass.mjs'
+import { Tiles } from './tiles.mjs'
+import { Basemap } from './basemap.mjs'
+import { Geocoder } from './geocode.mjs'
+import { LAYERS, layersAt, tilesFor } from './layers.mjs'
 import { K8s } from './k8s.mjs'
 import { Runs } from './runs.mjs'
 import { bboxOf, circleFor } from './geo.mjs'
@@ -79,15 +83,22 @@ store.catalogSeed = path.join(REPO, 'apps/corridor/public/assets/catalog.json')
 await store.init()
 await store.seedWorlds(env.WORLDEDITOR_SEED_SITES ?? path.join(REPO, 'tools/corridor/sites.json'))
 
-// Ours first, the public mirrors behind it — the same order and the same list osm.py uses, for
-// the same reason: our extract is one region, so a California site still needs a mirror, and every
-// mirror refused connections for an hour on 2026-09-21.
+// THE DEFAULT IS THE PUBLIC MIRRORS, AND OURS IS OPT-IN. It used to be the other way round, and
+// that was wrong for one measured reason: our instance holds ONE REGION, and a regional instance
+// answers a box it does not hold with HTTP 200 and zero ways. With it first and undeclared, a
+// query about the Alps came back empty after 240 s and the emptiness was cached. The guard for
+// that is a coverage box on the URL (`#south/west/north/east`) — so if you want ours in the list,
+// declare what it holds, and the rotation will use it where it helps and skip it where it lies.
+// When it holds the planet (docs/corridor/OVERPASS-PLANET.md) it needs no box and should be first.
+const configured = (env.WORLDEDITOR_OVERPASS_URL ?? '').split(',').map((s) => s.trim()).filter(Boolean)
+for (const u of configured) {
+  if (!u.includes('#') && !/overpass-api\.de|kumi\.systems|private\.coffee/.test(u)) {
+    console.warn(`overpass: ${u.split('#')[0]} has no coverage box. If it is regional, add #south/west/north/east or it will answer HTTP 200 with nothing outside its extent and that answer looks exactly like "no roads here".`)
+  }
+}
 const overpass = new Overpass(
   store,
-  [
-    ...(env.WORLDEDITOR_OVERPASS_URL ?? 'https://overpass.richard-siomporas.basedweights.com/api/interpreter').split(',').map((s) => s.trim()),
-    ...PUBLIC_MIRRORS,
-  ],
+  [...configured, ...PUBLIC_MIRRORS],
   {
     // Tunable because the right answer depends on the extract: ours on a warm database answers a
     // county in seconds, a public mirror under load took 79 s for the same query, and a laptop
@@ -97,6 +108,12 @@ const overpass = new Overpass(
     downForMs: Number(env.WORLDEDITOR_OVERPASS_DOWN_FOR ?? 60000),
   },
 )
+const tiles = new Tiles(store, overpass)
+const basemap = new Basemap(store, { enabled: env.WORLDEDITOR_BASEMAP !== 'off' })
+const geocoder = new Geocoder(store, {
+  url: env.WORLDEDITOR_NOMINATIM ?? 'https://nominatim.openstreetmap.org',
+  minIntervalMs: Number(env.WORLDEDITOR_NOMINATIM_INTERVAL ?? 1100),
+})
 const k8s = new K8s(env)
 const runs = new Runs(store, k8s, {
   force: env.WORLDEDITOR_RUNNER ?? null,
@@ -130,10 +147,44 @@ const CORS = {
 // helper that returned undefined here made every API call fall through to the static handler and
 // then to the 404, writing headers twice; the symptom was ERR_HTTP_HEADERS_SENT on a route that
 // had in fact answered correctly.
+/**
+ * Returns true, always — `api()` hands that back so the router knows the route was handled. A
+ * helper that returned undefined here made every API call fall through to the static handler and
+ * then to the 404, writing headers twice; the symptom was ERR_HTTP_HEADERS_SENT on a route that
+ * had in fact answered correctly.
+ *
+ * GZIPPED ABOVE 4 kB. The map's payloads are JSON and JSON compresses like nothing else: the
+ * borders layer is 880 kB raw and 108 kB gzipped, and a roads tile is the same shape. The
+ * threshold is there because below it the header costs more than the saving. Async, not
+ * `gzipSync`: compressing 880 kB on the event loop is ten milliseconds in which this service
+ * answers nothing at all, liveness probe included.
+ *
+ * Pretty-printed only when it is small. A 26 MB tile does not need two-space indentation, and the
+ * indentation was a third of the bytes before gzip got to it.
+ */
 const json = (res, status, body) => {
-  const buf = Buffer.from(JSON.stringify(body, null, 2))
-  res.writeHead(status, { 'Content-Type': 'application/json', 'Content-Length': buf.length, ...CORS })
-  res.end(buf)
+  const text = JSON.stringify(body, null, 2)
+  const buf = Buffer.byteLength(text) > 4096 ? Buffer.from(JSON.stringify(body)) : Buffer.from(text)
+  const wantsGzip = /\bgzip\b/.test(String(res.req?.headers?.['accept-encoding'] ?? ''))
+  if (!wantsGzip || buf.length <= 4096) {
+    res.writeHead(status, { 'Content-Type': 'application/json', 'Content-Length': buf.length, ...CORS })
+    res.end(buf)
+    return true
+  }
+  gzip(buf, (err, out) => {
+    if (err) {
+      res.writeHead(status, { 'Content-Type': 'application/json', 'Content-Length': buf.length, ...CORS })
+      return res.end(buf)
+    }
+    res.writeHead(status, {
+      'Content-Type': 'application/json',
+      'Content-Encoding': 'gzip',
+      'Content-Length': out.length,
+      Vary: 'Accept-Encoding',
+      ...CORS,
+    })
+    res.end(out)
+  })
   return true
 }
 
@@ -227,6 +278,18 @@ async function proxyAssetsvc(req, res, rest) {
 
 /* ---- routes ------------------------------------------------------------------------------------ */
 
+/** How many tiles of each layer one viewport may ask for. See the note in the plan route. */
+const CAPS = { places: 16, major: 6, roads: 9 }
+
+/** Squared distance from a tile's centre to a point, for "fetch the middle of the screen first". */
+function dist2(t, z, lon, lat) {
+  const cols = 2 ** (z + 1)
+  const rows = 2 ** z
+  const cx = -180 + ((t.x + 0.5) * 360) / cols
+  const cy = 90 - ((t.y + 0.5) * 180) / rows
+  return (cx - lon) ** 2 + (cy - lat) ** 2
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host ?? 'localhost'}`)
   const seg = url.pathname.split('/').filter(Boolean)
@@ -301,6 +364,9 @@ async function api(req, res, seg, q) {
       data: store.root,
       app: APP,
       overpass: overpass.describe(),
+      basemap: basemap.describe(),
+      geocoder: geocoder.describe(),
+      layers: LAYERS.map((l) => ({ id: l.id, label: l.label, minZoom: l.minZoom, maxZoom: l.maxZoom, tile: l.tile, kind: l.kind })),
       runs: runs.describe(),
       assetsvc: ASSETSVC ? '/assetsvc' : null,
       bucket: runs.cfg.bucket ? { bucket: runs.cfg.bucket, endpoint: runs.cfg.endpoint || 'aws', prefix: runs.cfg.prefix } : null,
@@ -335,14 +401,112 @@ async function api(req, res, seg, q) {
     }
     return json(res, 200, await overpass.drivable(bbox, { refresh: q.get('refresh') === '1' }))
   }
+  /* ---- the layer stack: what the map asks for, by zoom ---- */
+
+  if (seg[0] === 'osm' && seg[1] === 'layers' && req.method === 'GET') {
+    // What exists, and what the map should be drawing at this zoom. The client reads its own
+    // behaviour from here rather than hard-coding zoom numbers that would drift from the queries.
+    const zoom = Number(q.get('zoom') ?? 0)
+    return json(res, 200, {
+      layers: LAYERS.map((l) => ({ id: l.id, label: l.label, minZoom: l.minZoom, maxZoom: l.maxZoom, tile: l.tile, kind: l.kind })),
+      at: Number.isFinite(zoom) ? layersAt(zoom).map((l) => l.id) : [],
+      cache: await tiles.stats(),
+    })
+  }
+
+  /** Which tiles cover a viewport, so the client asks for whole cached cells rather than boxes. */
+  if (seg[0] === 'osm' && seg[1] === 'plan' && req.method === 'GET') {
+    const bbox = { south: Number(q.get('south')), west: Number(q.get('west')), north: Number(q.get('north')), east: Number(q.get('east')) }
+    const zoom = Number(q.get('zoom'))
+    for (const [k, v] of Object.entries({ ...bbox, zoom })) if (!Number.isFinite(v)) return json(res, 400, { error: `${k} is required` })
+    const plan = []
+    for (const layer of layersAt(zoom)) {
+      const want = tilesFor(layer.tile, bbox)
+      // A cap on tiles, not on span. The world at zoom 2 is 512 `places` cells and nobody needs
+      // 512 requests; the biggest ones are in the middle of the screen, so take those.
+      const cx = (bbox.west + bbox.east) / 2
+      const cy = (bbox.south + bbox.north) / 2
+      want.sort((a, b) => dist2(a, layer.tile, cx, cy) - dist2(b, layer.tile, cx, cy))
+      // Capped per layer by what a tile COSTS, not by a single number: a places tile is one cheap
+      // node query, a major tile is 5 MB and fifteen seconds. Sorted by distance from the middle of
+      // the screen first, so the cap keeps what you are looking at.
+      plan.push({ layer: layer.id, kind: layer.kind, tiles: want.slice(0, CAPS[layer.id] ?? 12), total: want.length })
+    }
+    return json(res, 200, { zoom, plan })
+  }
+
+  if (seg[0] === 'osm' && seg[1] === 'tile' && req.method === 'GET') {
+    const [, , layer, z, x, y] = seg
+    const zoom = Number(q.get('zoom') ?? z)
+    return json(res, 200, await tiles.tile(layer, Number(z), Number(x), Number(y), zoom, { refresh: q.get('refresh') === '1' }))
+  }
+
+  /** Country outlines, so the world view is a world. Fetched once, then local for ever. */
+  if (seg[0] === 'osm' && seg[1] === 'borders' && req.method === 'GET') {
+    return json(res, 200, q.get('refresh') === '1' ? await basemap.fetch('countries') : await basemap.countries())
+  }
+  /** World cities, ranked — the overview's place layer, where Overpass would be absurd. */
+  if (seg[0] === 'osm' && seg[1] === 'cities' && req.method === 'GET') {
+    return json(res, 200, q.get('refresh') === '1' ? await basemap.fetch('cities') : await basemap.cities())
+  }
+
+  /**
+   * Throw away every cached-empty answer, at both levels.
+   *
+   * "The map thinks Italy is empty" has exactly one cure, because an empty answer caches as a
+   * perfectly ordinary cache entry and a hit never asks again. This is that cure, and it is a
+   * POST because it deletes.
+   */
+  if (seg[0] === 'osm' && seg[1] === 'cache' && seg[2] === 'purge-empty' && req.method === 'POST') {
+    const responses = await overpass.purgeEmpty()
+    const tilesPurged = await tiles.purgeEmpty()
+    return json(res, 200, { responses, tiles: tilesPurged, note: 'only entries with nothing in them were removed; anything with data in it was right when it was written' })
+  }
+
   if (seg[0] === 'osm' && seg[1] === 'status' && req.method === 'GET') {
     // Every upstream, in the order they are tried, with what each one just answered. This is the
     // troubleshooting endpoint: "is it using ours or a public mirror" should not need a log.
     const probes = await overpass.probe()
     return json(res, 200, { ours: overpass.ours, upstreams: probes, using: probes.find((p) => p.ok)?.host ?? null, cache: store.overpassCache })
   }
+  /**
+   * Global search. Nominatim, not Overpass.
+   *
+   * The old one asked our own Overpass for `node[place][name~...]`, which finds a town in the
+   * loaded extract and nothing anywhere else — fine for a tool that assumed you already knew where
+   * you were going, useless for "find places in Italy". This returns a BBOX as well as a point, so
+   * the editor can frame a country or a pass rather than dropping a pin at street zoom.
+   */
   if (seg[0] === 'osm' && seg[1] === 'search' && req.method === 'GET') {
-    return json(res, 200, await overpass.search(q.get('q') ?? ''))
+    return json(res, 200, await geocoder.search(q.get('q') ?? '', { refresh: q.get('refresh') === '1' }))
+  }
+
+  /* ---- the place index: found somewhere, keep it ---- */
+
+  if (seg[0] === 'places' && seg.length === 1) {
+    if (req.method === 'GET') return json(res, 200, { places: await store.listPlaces() })
+    if (req.method === 'POST') {
+      const body = await readJson(req)
+      if (!Number.isFinite(body.lat) || !Number.isFinite(body.lon)) return json(res, 400, { error: 'lat and lon are required' })
+      const id = body.id ?? `p-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
+      return json(res, 201, { place: await store.putPlace({ ...body, id }) })
+    }
+  }
+  if (seg[0] === 'places' && seg.length === 2) {
+    const id = seg[1]
+    if (req.method === 'GET') {
+      const p = await store.getPlace(id)
+      return p ? json(res, 200, { place: p }) : json(res, 404, { error: `no place ${id}` })
+    }
+    if (req.method === 'PUT') {
+      const prev = await store.getPlace(id)
+      if (!prev) return json(res, 404, { error: `no place ${id}` })
+      return json(res, 200, { place: await store.putPlace({ ...prev, ...(await readJson(req)), id }) })
+    }
+    if (req.method === 'DELETE') {
+      await store.removePlace(id)
+      return json(res, 200, { deleted: id })
+    }
   }
 
   /* ---- worlds ---- */

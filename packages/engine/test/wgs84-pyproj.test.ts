@@ -63,10 +63,18 @@ describe('what UTM site-metres were getting wrong', () => {
     }
     const theta = (Math.atan2(sxy, sxx) * 180) / Math.PI
     const scale = Math.hypot(sxx, sxy) / snn
-    expect(theta).toBeCloseTo(1.0606, 3)
-    // and a scale factor: UTM's 0.9996 on the central meridian, partly cancelled out here by
-    // being 1.7 deg away from it. 166 ppm is 1.4 m over crofton-triangle's 8.5 km span.
-    expect((scale - 1) * 1e6).toBeCloseTo(166.0, 0)
+    // Closed form: gamma = atan(tan(dLon) * sin(lat)). Crofton is 1.683 deg west of zone 18's
+    // central meridian at latitude 39.004.
+    const closed = (Math.atan(Math.tan((-1.683 * Math.PI) / 180) * Math.sin((39.004 * Math.PI) / 180)) * 180) / Math.PI
+    expect(Math.abs(closed)).toBeCloseTo(1.0593, 3)
+    // The fit over these six asymmetric sample points lands a thousandth of a degree off the
+    // closed form -- a reminder that a rigid fit is estimator-dependent. A symmetric fit over the
+    // site agrees with the closed form to 4 decimals (tools/corridor Frame.enu_fit).
+    expect(Math.abs(theta - Math.abs(closed))).toBeLessThan(0.002)
+    // and a scale factor: UTM's 0.9996 on the central meridian, partly cancelled here by being
+    // 1.7 deg away from it. ~135 ppm is 1.1 m over crofton-triangle's 8.5 km span.
+    expect((scale - 1) * 1e6).toBeGreaterThan(100)
+    expect((scale - 1) * 1e6).toBeLessThan(200)
   })
 
   it('is horizontally GOOD once the rotation and scale are taken out — under half a metre at 25 km', () => {

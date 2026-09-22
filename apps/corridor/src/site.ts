@@ -61,7 +61,21 @@ export interface Branch {
 export interface Manifest {
   slug: string
   ident: Record<string, string> | null
-  frame: { epsg: number; origin: [number, number] }
+  /**
+   * Where this site is, and what its stored metres mean. `epsg`/`origin` are the UTM the bake
+   * writes; `anchor` is the same origin in WGS84 and is the geodetic authority — see
+   * docs/corridor/FRAME.md. `kind` is absent on a manifest baked before the geodetic frame
+   * existed, which is how the viewer knows it cannot place that site on the ellipsoid.
+   */
+  frame: {
+    epsg: number
+    origin: [number, number]
+    kind?: 'utm-enu' | 'enu'
+    anchor?: { lon: number; lat: number; h: number }
+    /** UTM north relative to TRUE north at the anchor, degrees — a rotation, not an error */
+    utm_convergence_deg?: number
+    utm_scale?: number
+  }
   bbox: [number, number, number, number]
   layers: Partial<Record<'dem' | 'chm' | 'naip' | 'horizon' | 'horizon_naip' | 'flora', Layer>>
   spine: {

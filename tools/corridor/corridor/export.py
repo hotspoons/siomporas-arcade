@@ -1047,7 +1047,9 @@ def export_site(site_dir: Path) -> dict:
     out = {
         "slug": site["slug"],
         "ident": site.get("ident"),
-        "frame": site["frame"],
+        # the geodetic frame, so the viewer can place this site on the ellipsoid without a
+        # projection library — see docs/corridor/FRAME.md
+        "frame": Frame(site["frame"]["epsg"], tuple(site["frame"]["origin"])).manifest_frame(),
         "bbox": rel_bbox(bbox),
         "layers": layers,
         "spine": {"coords": spine_rel, "photo_s": spine["photo_s"], "length_m": round(float(line.length), 1), "segments": spine.get("segments", [])},

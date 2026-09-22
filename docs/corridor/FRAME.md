@@ -44,9 +44,9 @@ very different things — and the popular assumption (that UTM is "inaccurate") 
 
 | effect | size at Crofton | verdict |
 |---|---|---|
-| **grid convergence** — UTM north vs true north | **1.0606°** | a rotation, not an error |
-| **scale factor** | **166 ppm** (1.4 m over 8.5 km) | small |
-| **residual horizontal**, after removing both | **< 0.34 m at 25 km** | UTM was fine horizontally |
+| **grid convergence** — UTM north vs true north | **1.0594°** | a rotation, not an error |
+| **scale factor** | **~135 ppm** (1.1 m over 8.5 km) | small |
+| **residual horizontal**, after removing both | **< 0.34 m at 25 km on axis; 2.42 m at the corners of a 50 km box** | UTM was fine horizontally *for one site* |
 | **curvature** — the drop a plane cannot represent | **0.70 m @ 3 km · 7.84 m @ 10 km · 49.0 m @ 25 km** | the real problem |
 
 So: **the win is the vertical and the ability to stitch, not horizontal accuracy.** The 1.06°
@@ -58,6 +58,22 @@ The curvature figure is worth stating exactly, because the familiar `d²/2R` is 
 approximation and overstates it: going east at latitude 39 the relevant radius is the prime
 vertical N = 6 386 615 m, not the mean 6 371 009 m. At 30 km the ellipsoid says **70.46 m** where
 `d²/2R` says 70.63 m. Both are far larger than anything horizontal.
+
+### The rigid fit is a migration shim, not the answer
+
+It is tempting to keep storing UTM metres and let the viewer apply that rotation and scale. Over
+one site that is sub-metre and fine. It does not survive scale, for two measured reasons:
+
+* the fit is **estimator-dependent** — a symmetric fit agrees with the closed-form convergence to
+  four decimals, but the six asymmetric sample points used in the first pass of this work gave
+  1.0606° and 166 ppm rather than 1.0594° and 135 ppm, about a metre apart at 25 km;
+* the **residual is not flat** — over a 50 × 50 km box the best rigid fit still leaves **2.42 m**
+  at the corners, because a conformal projection's distortion is not a rotation and a scale.
+
+The bake has PROJ. The browser should not need it. So the destination is that **export emits true
+ENU metres about the declared anchor**, exactly, and `frame.kind` becomes `"enu"`. The
+`utm_convergence_deg` / `utm_scale` pair exists so a viewer can place an already-exported site in
+the meantime, and should be treated as deprecated the moment every site has been re-exported.
 
 ## Existing bakes convert with no re-bake
 

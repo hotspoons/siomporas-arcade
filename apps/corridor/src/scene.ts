@@ -3,6 +3,8 @@
 // three's camera/controls code has to be told about Z-up.
 import * as THREE from 'three'
 import * as T from './tuning'
+import { Anchor } from '@apex/engine/geo/wgs84'
+import { RasterFrame } from '@apex/engine/geo/raster'
 import { DATA_BASE, decodeHeights, decodeScalar, loadImage, type Layer, type Manifest, type Structure } from './site'
 import { NearTrees, type TreeRecord } from './trees'
 import { Impostors } from './impostors'
@@ -95,9 +97,32 @@ export interface Site {
 interface Field {
   layer: Layer
   data: Float32Array
+  /**
+   * How this raster sits on the ellipsoid. Absent for a site baked before the geodetic frame, in
+   * which case the old flat-plane arithmetic below still applies and the site draws as it always
+   * did — wrong by the convergence and the curvature, but drawn.
+   */
+  rf?: RasterFrame
 }
 
+/** Attach the ellipsoid placement to a field, if the bake gave us a lattice for it. */
+function framed(layer: Layer, data: Float32Array, anchor: Anchor | null): Field {
+  return { layer, data, rf: anchor && layer.geo ? new RasterFrame({ size: layer.size, geo: layer.geo }, anchor) : undefined }
+}
+
+/**
+ * Sample a raster at a world position.
+ *
+ * `x, y` are SITE metres (east, north) — note the callers pass `-z` for y. With a lattice the
+ * lookup goes through `RasterFrame`, because the raster's grid is rotated relative to ENU and
+ * bbox arithmetic would read a cell tens of metres away at the far edge of a site. Without one it
+ * falls back to the flat arithmetic, which is what the grid actually was.
+ */
 function sampler(f: Field) {
+  if (f.rf) {
+    const rf = f.rf
+    return (x: number, y: number) => f.data[rf.indexAt(x, y)]
+  }
   const [xmin, , , ymax] = f.layer.bbox
   const [w, h] = f.layer.size
   return (x: number, y: number) => {
@@ -111,6 +136,8 @@ function sampler(f: Field) {
 function gridGeometry(f: Field, stride: number, lift: (i: number, r: number, c: number) => number, color?: (i: number) => [number, number, number]) {
   const [xmin, , , ymax] = f.layer.bbox
   const [w, h] = f.layer.size
+  const rf = f.rf
+  const enu = [0, 0, 0]
   const cols = Math.floor((w - 1) / stride) + 1
   const rows = Math.floor((h - 1) / stride) + 1
   const pos = new Float32Array(cols * rows * 3)
@@ -122,13 +149,23 @@ function gridGeometry(f: Field, stride: number, lift: (i: number, r: number, c: 
       const rr = Math.min(h - 1, r * stride)
       const cc = Math.min(w - 1, c * stride)
       const i = rr * w + cc
-      const x = xmin + (cc + 0.5) * f.layer.res
-      const y = ymax - (rr + 0.5) * f.layer.res
-      pos[k * 3] = x
-      pos[k * 3 + 1] = f.data[i] + lift(i, rr, cc)
-      pos[k * 3 + 2] = -y
-      uv[k * 2] = (cc + 0.5) / w
-      uv[k * 2 + 1] = 1 - (rr + 0.5) / h
+      const u = (cc + 0.5) / w
+      const v = (rr + 0.5) / h
+      const z = f.data[i] + lift(i, rr, cc)
+      if (rf) {
+        // geodetic from the lattice, then the ellipsoid: the curvature is not a correction added
+        // afterwards, it is what the transform returns
+        rf.toEnu(u, v, z, enu)
+        pos[k * 3] = enu[0]
+        pos[k * 3 + 1] = enu[2]
+        pos[k * 3 + 2] = -enu[1]
+      } else {
+        pos[k * 3] = xmin + (cc + 0.5) * f.layer.res
+        pos[k * 3 + 1] = z
+        pos[k * 3 + 2] = -(ymax - (rr + 0.5) * f.layer.res)
+      }
+      uv[k * 2] = u
+      uv[k * 2 + 1] = 1 - v
       if (col && color) {
         const [cr, cg, cb] = color(i)
         col[k * 3] = cr
@@ -218,6 +255,14 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     mark(m)
     return rawStatus(m)
   }
+
+  // The site's geodetic anchor: the origin of the ENU tangent frame everything is rendered in.
+  // Absent on a manifest baked before the geodetic frame, and then every raster falls back to
+  // flat-plane arithmetic and the site draws as it always did — see `framed`, docs/corridor/FRAME.md.
+  const fa = manifest.frame?.anchor
+  const anchor = fa ? new Anchor(fa.lon, fa.lat, fa.h ?? 0) : null
+  if (!anchor) console.warn(`${manifest.slug}: no frame.anchor — drawing on a flat plane`)
+
   status('decoding terrain…')
   const adjustments = await Adjustments.load(manifest.slug)
   // what grows here, from the bake: LANDFIRE vegetation classes, an FIA species mix per class and
@@ -230,7 +275,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
   // authored `flatten` intervals rewrite the spine's grade before anything is built from it
   if (overrides.length) manifest = { ...manifest, spine: { ...manifest.spine, coords: flattenSpine(manifest.spine.coords, overrides) }, structures: suppressed(manifest.structures, overrides) }
   const demImg = await loadImage(base + L.dem.file)
-  const dem: Field = { layer: L.dem, data: decodeHeights(demImg, L.dem) }
+  const dem: Field = framed(L.dem, decodeHeights(demImg, L.dem), anchor)
   const heightAt = sampler(dem)
 
   // --- near terrain, textured with the imagery -----------------------------------------------
@@ -283,7 +328,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
   if (L.chm) {
     status('decoding canopy…')
     const chmImg = await loadImage(base + L.chm.file)
-    chm = { layer: L.chm, data: decodeScalar(chmImg, L.chm.scale ?? 0.25) }
+    chm = framed(L.chm, decodeScalar(chmImg, L.chm.scale ?? 0.25), anchor)
     if (adjustments.active) {
       // bake the human's canopy corrections into the height model once: scale and offset per cell
       const [w, h] = chm.layer.size
@@ -330,7 +375,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
   if (L.horizon) {
     status('decoding horizon…')
     const hImg = await loadImage(base + L.horizon.file)
-    const hz: Field = { layer: L.horizon, data: decodeHeights(hImg, L.horizon) }
+    const hz: Field = framed(L.horizon, decodeHeights(hImg, L.horizon), anchor)
     const hs = strideFor(L.horizon, lite ? 120_000 : 300_000)
     const geo = gridGeometry(hz, hs, () => -2.0, L.horizon_naip ? undefined : (i) => hypso(hz.data[i]))
     // The horizon is the FAR field only. Two meshes of the same ground at 60 m and 1-8 m sampling

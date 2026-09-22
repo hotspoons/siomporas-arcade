@@ -131,7 +131,7 @@ function stripe(into: { pos: number[]; idx: number[] }, ax: number, az: number, 
  * Rings are bucketed by bounds, because a network site has hundreds of lots and this is called
  * once per candidate blade.
  */
-export function parkingCover(manifest: Manifest): (x: number, z: number) => boolean {
+export function parkingCover(manifest: Manifest, margin = 3): (x: number, z: number) => boolean {
   const lots = (manifest.parking ?? []).filter((l) => (l.ring?.length ?? 0) >= 3)
   if (!lots.length) return () => false
   const rings = lots.map((l) => {
@@ -145,8 +145,27 @@ export function parkingCover(manifest: Manifest): (x: number, z: number) => bool
     }
     return { ring, bounds: [x0, z0, x1, z1] as [number, number, number, number] }
   })
-  const index = new BoundsIndex(rings, 250, 1)
-  return (x, z) => index.firstAt(x, z, (r) => (inside(r.ring, x, z) ? true : null)) === true
+  const index = new BoundsIndex(rings, 250, margin + 1)
+
+  /** distance from (x, z) to the nearest ring edge — the ring is dilated by `margin` */
+  const nearEdge = (ring: Pt[], x: number, z: number): boolean => {
+    const m2 = margin * margin
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const [ax, az] = ring[j], [bx, bz] = ring[i]
+      const dx = bx - ax, dz = bz - az
+      const len2 = dx * dx + dz * dz
+      const t = len2 > 0 ? Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / len2)) : 0
+      const qx = ax + t * dx - x, qz = az + t * dz - z
+      if (qx * qx + qz * qz < m2) return true
+    }
+    return false
+  }
+
+  // DILATED BY `margin`, and that is not belt-and-braces. The grass tests a 1 m CELL CENTRE and
+  // then places the blade up to cell/2 + scatter/2 away from it — about 1.6 m with Rich's saved
+  // GRASS_SCATTER of 1.9 — so testing the bare polygon leaked blades over the edge of every lot.
+  // Measured: the undilated version still put 52 of 10 224 sampled blades on asphalt.
+  return (x, z) => index.firstAt(x, z, (r) => (inside(r.ring, x, z) || nearEdge(r.ring, x, z) ? true : null)) === true
 }
 
 export function buildParking(

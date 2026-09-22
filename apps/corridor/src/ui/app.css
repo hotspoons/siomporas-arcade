@@ -1,0 +1,189 @@
+/*
+ * App chrome: the bits that sit directly over the 3D canvas rather than inside a panel.
+ *
+ * Everything here is deliberately thin. The scene is the product; the interface is a frame around
+ * it, and the frame gets one bar at the top and a status line at the bottom. Anything that needs
+ * more room than that opens as a dialog, over the scene, and closes again.
+ */
+
+/* ---- top bar ------------------------------------------------------------------------------- */
+
+.topbar {
+  position: fixed; top: 0; left: 0; right: 0; z-index: var(--z-bar);
+  display: flex; align-items: center; gap: var(--s2);
+  min-height: var(--bar-h);
+  padding: var(--s2) var(--s3);
+  /* The bar floats over a photograph, which can be a bright sky. A gradient that fades too far
+     leaves the secondary text unreadable against it — measured on chesterfield-rd, where the site
+     meta vanished into the horizon. It fades, but not below the point where --ink-2 still reads. */
+  background: linear-gradient(to bottom, var(--hud-bg), color-mix(in srgb, var(--hud-bg) 82%, transparent));
+  border-bottom: 1px solid var(--hud-line);
+  backdrop-filter: blur(14px);
+  /* the bar must never eat a drag meant for the scene */
+  pointer-events: none;
+}
+.topbar > * { pointer-events: auto; }
+.topbar-spacer { flex: 1; pointer-events: none; }
+
+.site-button {
+  display: flex; align-items: center; gap: var(--s2);
+  padding: var(--s1) var(--s2);
+  font: inherit; color: var(--ink-1);
+  background: none; border: 1px solid transparent; border-radius: var(--r2);
+  cursor: pointer; max-width: 46vw;
+  transition: background var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease);
+}
+.site-button:hover { background: var(--bg-2); border-color: var(--line-1); }
+.site-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.site-meta { font-size: var(--text-xs); color: var(--ink-2); white-space: nowrap; }
+.site-button .icon { color: var(--ink-3); }
+
+.hud-pos {
+  font-size: var(--text-sm); color: var(--ink-2);
+  padding: 0 var(--s2); white-space: nowrap;
+}
+
+/* ---- editor: the docked inspector ---------------------------------------------------------- */
+
+.inspector {
+  position: fixed; top: var(--bar-h); right: 0; bottom: 0; z-index: var(--z-panel);
+  width: min(340px, 92vw);
+  display: flex; flex-direction: column;
+  background: var(--bg-1);
+  border-left: 1px solid var(--line-1);
+  box-shadow: var(--shadow-2);
+}
+.inspector-head { padding: var(--s3) var(--s4) var(--s2); border-bottom: 1px solid var(--line-1); }
+.inspector-head h2 { font-size: var(--text-sm); text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-3); }
+.inspector-body { flex: 1; overflow-y: auto; padding: var(--s3) var(--s4) var(--s6); display: grid; gap: var(--s3); align-content: start; }
+.inspector-body h2 { font-size: var(--text-md); }
+
+.mode-host { display: flex; align-items: center; gap: var(--s2); }
+
+.dirty { font-size: var(--text-xs); color: var(--ink-3); padding: 0 var(--s2); white-space: nowrap; }
+.dirty.on { color: var(--warn); }
+
+@media (max-width: 900px) {
+  .inspector { width: 100%; top: auto; height: 46vh; border-left: 0; border-top: 1px solid var(--line-1); }
+}
+
+/* Driving wants the road, not the furniture: the bar thins out and the secondary buttons go. */
+body.driving .topbar { background: none; border-bottom-color: transparent; backdrop-filter: none; }
+body.driving .site-meta { display: none; }
+
+/* M hides everything but the canvas. */
+body.chrome-off .topbar,
+body.chrome-off #minimap,
+body.chrome-off .toast,
+body.chrome-off .movepad,
+body.chrome-off .drivepad { display: none; }
+
+/* ---- settings tab contents ----------------------------------------------------------------- */
+
+.layer-list { gap: 0; }
+
+.struct-row {
+  display: flex; align-items: center; gap: var(--s2);
+  width: 100%; padding: var(--s2);
+  font: inherit; font-size: var(--text-sm); text-align: left;
+  color: var(--ink-2); background: none; border: 0; border-radius: var(--r2);
+  cursor: pointer;
+}
+.struct-row:hover { background: var(--bg-2); color: var(--ink-1); }
+.struct-row .icon { color: var(--ink-3); }
+.struct-kind { font-weight: 500; color: var(--ink-1); min-width: 8ch; }
+.struct-desc { font-family: var(--num); font-size: var(--text-xs); color: var(--ink-3); }
+
+.geo-unit { padding: var(--s2) 0; border-bottom: 1px solid var(--line-1); }
+.geo-unit:last-child { border-bottom: 0; }
+.geo-meta { display: block; font-size: var(--text-xs); color: var(--ink-3); }
+.geo-desc { margin: var(--s1) 0 0; font-size: var(--text-sm); color: var(--ink-2); max-width: 70ch; }
+
+.photo-strip { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: var(--s2); }
+.photo-strip img { width: 100%; aspect-ratio: 4/3; object-fit: cover; border-radius: var(--r2); border: 1px solid var(--line-1); display: block; }
+.photo-strip a:hover img { border-color: var(--accent); }
+
+.keys { gap: 0; }
+.key-row { display: flex; align-items: center; justify-content: space-between; gap: var(--s4); padding: var(--s1) 0; }
+.key-keys { display: flex; gap: var(--s1); flex: none; }
+.key-what { font-size: var(--text-sm); color: var(--ink-2); text-align: right; }
+
+/* The tuning dialog is a wall of sliders: give it a fixed tall body so the tab strip never moves. */
+.tune-body { height: min(72vh, 680px); }
+.tune-body .tab-body { column-width: 260px; column-gap: var(--s5); }
+.tune-body .group { break-inside: avoid; }
+
+/* ---- touch pads ---------------------------------------------------------------------------- */
+
+.drivepad, .movepad {
+  position: fixed; z-index: var(--z-hud);
+  display: none; gap: var(--s2);
+}
+.drivepad { right: var(--s4); bottom: var(--s4); flex-direction: column; }
+.movepad { left: var(--s4); bottom: var(--s4); display: none; grid-template-columns: repeat(3, 1fr); }
+
+.drivepad button, .movepad button {
+  width: 52px; height: 52px;
+  font: inherit; font-size: var(--text-lg);
+  color: var(--ink-1); background: var(--hud-bg);
+  border: 1px solid var(--hud-line); border-radius: var(--r3);
+  backdrop-filter: blur(10px);
+  cursor: pointer; touch-action: none;
+}
+.drivepad button:active, .movepad button:active { background: var(--accent); color: var(--accent-ink); }
+
+/* Only on a touch screen, and only when there is room for the scene as well. */
+@media (pointer: coarse) {
+  .drivepad { display: flex; }
+  .movepad { display: grid; }
+}
+
+/* ---- minimap --------------------------------------------------------------------------------
+   MiniMap sets `id="minimap"` and appends itself to <body>, so these are id rules. The first cut
+   of this file styled `.minimap` and therefore styled nothing — the map was on the page, unpinned
+   and invisible behind the scene. */
+
+#minimap { position: fixed; right: var(--s3); bottom: var(--s3); z-index: var(--z-hud); }
+#minimap canvas {
+  display: block; touch-action: none;
+  border-radius: 50%;
+  background: var(--bg-1);
+  border: 1px solid var(--hud-line);
+  box-shadow: var(--shadow-2);
+}
+#minimap button {
+  position: absolute; left: var(--s1); bottom: var(--s1);
+  width: 26px; height: 26px; padding: 0;
+  display: grid; place-items: center;
+  font: inherit; font-size: var(--text-xs);
+  color: var(--ink-1); background: var(--hud-bg);
+  border: 1px solid var(--hud-line); border-radius: 50%;
+  backdrop-filter: blur(8px);
+  cursor: pointer;
+}
+#minimap button:hover { background: var(--bg-3); color: var(--accent); }
+#minimap button.expand { left: auto; right: var(--s1); bottom: var(--s1); }
+
+#minimap.expanded {
+  inset: 0; right: 0; bottom: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--scrim);
+  z-index: var(--z-modal);
+}
+#minimap.expanded canvas { border-radius: var(--r3); }
+#minimap.expanded button { bottom: var(--s5); }
+#minimap.expanded button.expand { right: var(--s5); }
+#minimap.expanded button:not(.expand) { left: var(--s5); }
+
+/* On a phone the map moves out from under the thumb and shrinks; expanded, it fills the screen. */
+@media (max-width: 760px), (pointer: coarse) and (max-width: 1024px) {
+  #minimap { right: var(--s2); bottom: auto; top: calc(var(--bar-h) + var(--s2)); transform: scale(0.65); transform-origin: top right; }
+  #minimap.expanded { transform: none; top: 0; right: 0; }
+}
+
+@media (max-width: 640px) {
+  .topbar { padding: var(--s1) var(--s2); }
+  .hud-pos { display: none; }
+  .topbar .btn .btn-label { display: none; }
+  .topbar .btn { padding: 6px; }
+}

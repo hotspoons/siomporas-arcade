@@ -6,7 +6,6 @@ import { buildSite, describe, type Site } from './scene'
 import { Car, type CarInput } from './car'
 import { FlyControls } from './fly'
 import { MiniMap } from './minimap'
-import { TunePanel } from '@apex/engine/app/TunePanel'
 import * as T from './tuning'
 import { TUNE_TABS } from './tuning'
 import { applySiteTuning, saveSiteTuning } from './sitetuning'
@@ -14,9 +13,11 @@ import { applySiteTuning, saveSiteTuning } from './sitetuning'
 import { fetchJSON, type IndexEntry, type Manifest, type Structure, type Crossing } from './site'
 import { LOOK, SEASONS, type Season } from './season'
 import { WEATHER, WEATHERS, type Weather } from './weather'
+import { ViewerUI, restoreTheme } from './ui/viewer'
+import { TuneUI } from './ui/tune'
+import { installShellKeys, toast, status, clearStatus } from './ui/shell'
 
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector<T>(sel)!
-const status = (s: string) => ($('#status').textContent = s)
 
 const canvas = $<HTMLCanvasElement>('#gl')
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, logarithmicDepthBuffer: true })
@@ -37,7 +38,32 @@ scene.add(sun)
 
 let site: Site | null = null
 let minimap: MiniMap | null = null
-const panel = $('#panel')
+
+// The interface. Built before anything else touches a tunable, because TuneUI's constructor
+// restores this browser's saved knobs and everything downstream reads them as its starting value.
+restoreTheme()
+const tuneUI = new TuneUI({
+  context: () => (captureStance() ?? {}) as Record<string, unknown>,
+  onChange: () => onTuneChange(),
+  onSaveSite: () => void doSaveSiteTuning(),
+})
+const ui = new ViewerUI({
+  onSite: (slug) => {
+    location.hash = slug
+    void loadSite(slug)
+  },
+  onSeason: (s) => setSeason(s),
+  onWeather: (w) => setWeatherSelection(w),
+  onLayers: () => applyLayers(),
+  onDrive: () => setDrive(!drive.on),
+  onPhoto: () => toPhoto(),
+  onTop: () => toTop(),
+  onStance: () => void copyStance(),
+  onTune: () => tuneUI.toggle(),
+  onStructure: (i) => site && goToStructure(site.manifest.structures[i]),
+})
+ui.describe = (s) => describe(s as Structure)
+installShellKeys(() => ui.drawer)
 let dragging = false, lastX = 0, lastY = 0, downAt = 0
 // drive mode: a real car (stuntin dynamics) on the corridor strip, chase camera behind it
 const drive = { on: false, cockpit: false, yaw: 0, pitch: 0, car: null as Car | null, input: { throttle: 0, brake: 0, steer: 0, handbrake: false } as CarInput, steerKey: 0 }
@@ -56,25 +82,14 @@ resize()
 // loading
 async function loadIndex() {
   const idx = await fetchJSON<{ sites: IndexEntry[] }>('/sites/index.json')
-  const sel = $<HTMLSelectElement>('#site')
-  sel.innerHTML = ''
-  for (const s of idx.sites) {
-    const o = document.createElement('option')
-    o.value = s.slug
-    const ident = s.ident ? Object.values(s.ident)[0] : '?'
-    o.textContent = `${s.slug} — ${ident}, ${(s.length_m / 1000).toFixed(1)} km, ${s.structures} structures`
-    sel.append(o)
-  }
   const want = readStanceParam()?.site || location.hash.slice(1) || idx.sites[0]?.slug
-  if (want) {
-    sel.value = want
-    await loadSite(want)
-  }
-  sel.onchange = () => loadSite(sel.value)
+  ui.setSites(idx.sites, want ?? '')
+  if (want) await loadSite(want)
 }
 
 async function loadSite(slug: string) {
   location.hash = slug
+  ui.setSite(slug)
   if (site) {
     scene.remove(site.group)
     site.group.traverse((o) => {
@@ -134,19 +149,16 @@ async function loadSite(slug: string) {
   const tuned = await applySiteTuning(slug, siteTuneAccess)
   if (tuned.applied || tuned.unknown.length) {
     onTuneChange()
-    // TunePanel.refresh is private, but toggle() refreshes a visible panel — reopening the active
-    // tab is the public way to make it show the values the site file just set
-    if (!tuneHost.classList.contains('hidden')) showTuneTab(tuneTab)
-    status(`${slug}: ${tuned.applied} site knobs applied${tuned.unknown.length ? `, ${tuned.unknown.length} unknown (${tuned.unknown.slice(0, 3).join(', ')})` : ''}`)
-    setTimeout(() => status(''), 4000)
-  } else status('')
+    toast(`${slug}: ${tuned.applied} site knobs applied${tuned.unknown.length ? `, ${tuned.unknown.length} unknown (${tuned.unknown.slice(0, 3).join(', ')})` : ''}`, 'ok', 4000)
+  } else clearStatus()
 }
 
 // ---------------------------------------------------------------------------------------------
 // layers
 function applyLayers() {
   if (!site) return
-  const on = (name: string) => $<HTMLInputElement>(`input[data-layer="${name}"]`).checked
+  const state = ui.layers()
+  const on = (name: string) => state[name] ?? false
   site.setImagery(on('imagery'))
   site.setWire(on('wire'))
   site.setCanopy(on('canopy'))
@@ -166,53 +178,31 @@ function applyLayers() {
   site.layers.spine.visible = on('spine') && !drive.on
   site.layers.markers.visible = on('markers') && !drive.on
 }
-for (const el of document.querySelectorAll<HTMLInputElement>('input[data-layer]')) el.onchange = applyLayers
 
 // ---------------------------------------------------------------------------------------------
 // info panel
+/**
+ * Hand the settings dialog what the bake measured.
+ *
+ * Everything this used to build by hand — a table of innerHTML, a nested <dialog> for the geology
+ * and a strip of <img> — is now built by ui/viewer.ts from the manifest, so the markup lives with
+ * the rest of the interface and this function is the seam: the two counts below are the only
+ * things the scene knows and the manifest does not.
+ */
 function fillInfo(m: Manifest) {
-  const info = $('#info')
-  const ident = m.ident ? Object.values(m.ident)[0] : '(unnamed)'
-  const lidar = m.lidar.points_in_corridor ? `${m.lidar.dataset}, ${(m.lidar.points_in_corridor / 1e6).toFixed(1)} M points` : 'none'
-  const rows = (pairs: [string, string][]) => `<table>${pairs.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('')}</table>`
-  const structs = m.structures
-    .map((st, i) => `<tr class="struct" data-i="${i}"><td>${st.kind}</td><td>${describe(st)}</td></tr>`)
-    .join('')
-  const byRel = m.crossings.reduce<Record<string, number>>((a, c) => ((a[c.relation] = (a[c.relation] ?? 0) + 1), a), {})
-  // geology: one line of formation names in the panel; the full Macrostrat text opens in a dialog
-  const geoShort = m.geology.units.slice(0, 4).map((u) => u.strat_name).filter(Boolean).join(' · ') || 'no named formations'
-  const geoFull = m.geology.units
-    .map((u) => `<p><b>${u.strat_name}</b>${u.lith ? ` · ${u.lith}` : ''}${u.b_age ? ` · ${u.b_age}–${u.t_age} Ma` : ''}${u.descrip ? `<br>${u.descrip}` : ''}</p>`)
-    .join('')
-  const geo = `<p>${geoShort}${m.geology.units.length > 4 ? ` +${m.geology.units.length - 4}` : ''} <button class="geo-more" type="button">full text</button></p>
-    <dialog class="geo-dialog"><h2>geology along this corridor</h2>${geoFull || '<p>no named formations</p>'}<form method="dialog"><button>close</button></form></dialog>`
-  info.innerHTML = `
-    ${rows([
-      ['road', ident],
-      ['spine', `${(m.spine.length_m / 1000).toFixed(2)} km, photo at ${m.spine.photo_s.toFixed(0)} m`],
-      ['frame', `EPSG:${m.frame.epsg}, origin ${m.frame.origin.map((v) => v.toFixed(0)).join(', ')}`],
-      ['lidar', lidar],
-      ['stand-ins', `${site?.treeCount ?? 0} trees from the canopy, road from ${m.spine.segments.length} OSM segments`],
-      ['buildings', site ? `${site.buildingStats.count} footprints (${site.buildingStats.fromLidar} measured, ${site.buildingStats.gabled} gabled)` : '—'],
-      ['crossings', Object.entries(byRel).map(([k, v]) => `${v} ${k}`).join(', ') || 'none'],
-      ['surface', m.surface ? Object.entries(m.surface.summary).map(([k, v]) => `${k} ${(v * m.surface!.step_m / 1000).toFixed(1)} km`).join(', ') : 'not measured'],
-    ])}
-    <h2>structures (${m.structures.length})</h2><table>${structs || '<tr><td>none</td></tr>'}</table>
-    <h2>geology</h2>${geo || '<p>no named formations</p>'}`
-  info.querySelector<HTMLButtonElement>('.geo-more')?.addEventListener('click', () => info.querySelector<HTMLDialogElement>('.geo-dialog')?.showModal())
-  for (const tr of info.querySelectorAll<HTMLTableRowElement>('tr.struct')) {
-    tr.onclick = () => goToStructure(m.structures[Number(tr.dataset.i)])
-  }
-  const photos = $('#photos')
-  photos.innerHTML = m.photos.map((p) => `<a href="/photos/${p.file}" target="_blank"><img src="/photos/${p.file}" title="${p.file} heading ${p.heading_deg ?? '?'}°" loading="lazy" /></a>`).join('')
+  ui.setManifest(m, {
+    'Stand-ins': `${site?.treeCount ?? 0} trees from the canopy, road from ${m.spine.segments.length} OSM segments`,
+    Buildings: site
+      ? `${site.buildingStats.count} footprints (${site.buildingStats.fromLidar} measured, ${site.buildingStats.gabled} gabled)`
+      : '—',
+  })
 }
-
 // ---------------------------------------------------------------------------------------------
 // cameras
 function setDrive(on: boolean) {
   drive.on = on
   orbit.enabled = !on
-  $('#drive').textContent = on ? 'fly (Tab)' : 'drive (Tab)'
+  ui.setDriveMode(on)
   if (fly) fly.enabled = !on
   if (on && site) {
     if (!drive.car) {
@@ -229,8 +219,8 @@ function setDrive(on: boolean) {
   // the analysis overlays (centreline, photo ring) are for the map view; from the seat they read
   // as paint on the road, so they step aside while driving
   if (site) {
-    site.layers.spine.visible = !on && $<HTMLInputElement>('input[data-layer="spine"]').checked
-    site.layers.markers.visible = !on && $<HTMLInputElement>('input[data-layer="markers"]').checked
+    site.layers.spine.visible = !on && ui.layers().spine
+    site.layers.markers.visible = !on && ui.layers().markers
   }
 }
 
@@ -266,8 +256,6 @@ function goToStructure(st: Structure) {
 // phone: bottom-sheet panel and on-screen drive buttons. LITE is also how the scene builder
 // knows to hand a phone GPU a quarter of the vertices and a 4k texture instead of a 22 MP one.
 export const LITE = matchMedia('(pointer: coarse)').matches || innerWidth < 900 || new URLSearchParams(location.search).has('lite')
-$('#toggle').onclick = () => panel.classList.toggle('collapsed')
-if (LITE) panel.classList.add('collapsed')
 for (const b of document.querySelectorAll<HTMLButtonElement>('#drivepad button')) {
   // + and − are hold-to-throttle / hold-to-brake while driving
   if (b.dataset.act === 'faster' || b.dataset.act === 'slower') {
@@ -356,17 +344,25 @@ function applySky(s: Season) {
 function weatherNow(): Weather {
   return WEATHERS[Math.min(4, Math.max(0, Math.round(T.WEATHER)))]
 }
-const seasonSel = $<HTMLSelectElement>('#season')
-seasonSel.value = season
 function setSeason(s: Season) {
   season = s
-  seasonSel.value = s
   applySky(s)
   site?.setSeason(s)
-  status(`${s}`)
-  setTimeout(() => status(''), 1200)
+  toast(s, 'info', 1200)
 }
-seasonSel.onchange = () => setSeason(seasonSel.value as Season)
+
+/**
+ * The weather picker writes the WEATHER knob rather than a variable of its own, because the knob
+ * is what `weatherNow()` reads and what a stance and a site's tuning.json already carry. One
+ * source of truth, and the tuning dialog and this select stay in step for free.
+ */
+function setWeatherSelection(w: Weather) {
+  const i = WEATHERS.indexOf(w)
+  if (i < 0) return
+  tuneKey('WEATHER')?.set(i)
+  onTuneChange()
+  toast(w, 'info', 1200)
+}
 /** the F6 season knob (tuning.ts SEASON, -1 = leave the selector alone) */
 function applySeasonKnob() {
   if (T.SEASON < 0) return
@@ -401,7 +397,7 @@ interface Stance {
 function captureStance(): Stance | null {
   if (!site) return null
   const layers: Record<string, boolean> = {}
-  for (const el of document.querySelectorAll<HTMLInputElement>('input[data-layer]')) layers[el.dataset.layer!] = el.checked
+  Object.assign(layers, ui.layers())
   const st: Stance = { v: 1, site: site.manifest.slug, season, mode: drive.on ? 'drive' : 'fly', layers, lite: LITE }
   const r3 = (v: THREE.Vector3) => [+v.x.toFixed(2), +v.y.toFixed(2), +v.z.toFixed(2)]
   if (drive.on && drive.car) st.car = { p: r3(drive.car.pos), yaw: +drive.car.yaw.toFixed(4), speed: +drive.car.speed.toFixed(2), look: [+drive.yaw.toFixed(3), +drive.pitch.toFixed(3)] }
@@ -416,7 +412,7 @@ function stanceUrl(st: Stance): string {
   return u.toString()
 }
 function applyStance(st: Stance) {
-  for (const el of document.querySelectorAll<HTMLInputElement>('input[data-layer]')) if (el.dataset.layer! in st.layers) el.checked = st.layers[el.dataset.layer!]
+  ui.setLayers(st.layers)
   applyLayers()
   if (st.mode === 'drive' && st.car) {
     setDrive(true)
@@ -453,97 +449,41 @@ async function copyStance() {
   history.replaceState(null, '', url)
   try {
     await navigator.clipboard.writeText(url)
-    status('stance copied to clipboard (also in the address bar)')
+    toast('view copied to the clipboard, and to the address bar', 'ok')
   } catch {
-    status('stance is in the address bar — copy the URL')
-  }
-  setTimeout(() => { if ($('#status').textContent?.startsWith('stance')) status('') }, 4000)
-}
-$('#stance').onclick = copyStance
-
-// the side panel hides completely (M or the ≡ tab), for looking at the picture
-const panelTab = $('#paneltab')
-function setPanelHidden(hidden: boolean) {
-  panel.classList.toggle('hidden', hidden)
-  panelTab.textContent = hidden ? '≡' : '×'
-}
-panelTab.onclick = () => setPanelHidden(!panel.classList.contains('hidden'))
-
-// Tuning: one engine TunePanel per tab (grass, trees, LOD shape, road, car, camera), a tab strip
-// above them. F6 toggles. Values persist per browser under apex-corridor-<tab>; Copy JSON in a
-// panel hands the numbers back to tuning.ts. A change re-picks trees / re-seeds grass at once.
-// The code defaults, read BEFORE the panels restore localStorage over them. This is the baseline
-// a per-site tuning.json is a diff against; capture it any later and it is somebody's scratch pad.
-const TUNE_BASELINE: Record<string, number> = {}
-for (const t of TUNE_TABS) for (const sec of t.sections) for (const k of sec.keys) TUNE_BASELINE[k.name] = k.get()
-
-const tuneHost = document.createElement('div')
-tuneHost.id = 'tunehost'
-tuneHost.className = 'hidden'
-const tabStrip = document.createElement('div')
-tabStrip.className = 'tunetabs'
-tuneHost.append(tabStrip)
-document.body.append(tuneHost)
-const tunePanels = TUNE_TABS.map((tab) => {
-  const panelEl = document.createElement('div')
-  tuneHost.append(panelEl)
-  const p = new TunePanel(panelEl, `corridor-${tab.name}`, tab.sections)
-  p.context = () => (captureStance() ?? {}) as Record<string, unknown>
-  p.onChange = onTuneChange
-  const b = document.createElement('button')
-  b.textContent = tab.name
-  b.onclick = () => showTuneTab(tab.name)
-  tabStrip.append(b)
-  return { name: tab.name, panel: p, button: b }
-})
-const saveSiteBtn = document.createElement('button')
-saveSiteBtn.textContent = 'save to site'
-saveSiteBtn.title = 'write every knob that differs from the code default into this site\u2019s tuning.json, so the corridor keeps its own look'
-saveSiteBtn.onclick = () => void doSaveSiteTuning()
-tabStrip.append(saveSiteBtn)
-
-let tuneTab = tunePanels[0].name
-function showTuneTab(name: string) {
-  tuneTab = name
-  for (const t of tunePanels) {
-    t.panel.toggle(t.name === name)
-    t.button.classList.toggle('active', t.name === name)
+    toast('the view is in the address bar — copy the URL', 'warn')
   }
 }
+
+// M hides the whole interface, for looking at the picture rather than at the furniture.
+function setChromeHidden(hidden: boolean) {
+  document.body.classList.toggle('chrome-off', hidden)
+}
+
+// Tuning is its own dialog now (ui/tune.ts): the same knob table, the same localStorage keys as
+// the old F6 panel so this browser's saved values survive, Copy JSON with the stance as context,
+// Reset, and "save to site". F6 opens it.
+
 /** How sitetuning.ts reaches the knobs, without it needing to know about TUNE_TABS. */
-const siteTuneAccess = {
-  get: (name: string) => tuneKey(name)?.get(),
-  set: (name: string, v: number) => {
-    const k = tuneKey(name)
-    if (!k) return false
-    k.set(v)
-    return true
-  },
-  names: () => Object.keys(TUNE_BASELINE),
-}
+const siteTuneAccess = tuneUI.access
+
+/**
+ * The code defaults — the baseline a per-site tuning.json is a diff against. Read from each
+ * TuneKey's own `default`, which `tune()` captures when tuning.ts is first evaluated, so it is the
+ * committed number and not whatever this browser had restored over it.
+ */
+const TUNE_BASELINE = tuneUI.baseline
 
 /** Write the knobs that differ from the code defaults into this site's tuning.json. */
 async function doSaveSiteTuning() {
   if (!site) return
   try {
     const r = await saveSiteTuning(site.manifest.slug, siteTuneAccess, TUNE_BASELINE)
-    status(`saved ${r.count} knobs to ${site.manifest.slug}/tuning.json (${r.bytes} bytes)`)
+    toast(`saved ${r.count} knobs to ${site.manifest.slug}/tuning.json (${r.bytes} bytes)`, 'ok')
   } catch (e) {
-    status(`site tuning: ${(e as Error).message}`)
+    toast(`site tuning: ${(e as Error).message}`, 'danger')
   }
-  setTimeout(() => status(''), 6000)
 }
-
-function toggleTune() {
-  const on = tuneHost.classList.toggle('hidden')
-  if (!on) showTuneTab(tuneTab)
-  else for (const t of tunePanels) t.panel.toggle(false)
-}
-$('#tune').onclick = toggleTune
-
-$('#drive').onclick = () => setDrive(!drive.on)
-$('#photo').onclick = toPhoto
-$('#top').onclick = toTop
 // Tab toggles drive/fly. Driving: W/S throttle/brake, A/D steer, Space handbrake, R resets to the
 // road. Flying: see fly.ts (WASD move, Q/E rotate, R/F dolly, T/G lift, right-drag look). P and
 // H (home = top) are shared.
@@ -564,14 +504,14 @@ addEventListener('keydown', (e) => {
     e.preventDefault()
   } else if (inField && !(tgt.tagName === 'INPUT' && (tgt as HTMLInputElement).type === 'range' && e.code === 'Tab')) return
   if (e.code === 'Tab') { e.preventDefault(); setDrive(!drive.on); return }
-  if (e.code === 'F6') { e.preventDefault(); toggleTune(); return }
+  if (e.code === 'F6') { e.preventDefault(); tuneUI.toggle(); return }
   held.add(e.code)
   switch (e.code) {
     case 'KeyP': toPhoto(); break
     case 'KeyH': toTop(); break
     case 'KeyC': if (drive.on) { drive.cockpit = !drive.cockpit; break } void copyStance(); break
     case 'KeyX': void copyStance(); break
-    case 'KeyM': setPanelHidden(!panel.classList.contains('hidden')); break
+    case 'KeyM': setChromeHidden(!document.body.classList.contains('chrome-off')); break
     case 'KeyN': minimap?.setExpanded(!minimap.expanded); break
     case 'KeyR': if (drive.on && site && drive.car) { const p = site.spineAt(site.manifest.spine.photo_s); const side = p.dir.clone().cross(up).multiplyScalar(1.83); drive.car.place(p.pos.x + side.x, p.pos.z + side.z, Math.atan2(p.dir.z, p.dir.x)) } break
   }
@@ -644,12 +584,12 @@ function frame() {
     camera.position.lerp(want, 1 - Math.exp(-T.CHASE_LAG * dt))
     camera.lookAt(car.pos.clone().add(car.forward.clone().multiplyScalar(T.CHASE_LOOK_AHEAD)).add(new THREE.Vector3(0, 1.0, 0)))
     if (car.event === 'bump') status('bump')
-    $('#pos').textContent = `${(Math.abs(car.speed) * 2.237).toFixed(0)} mph  ${car.onGrass ? 'grass' : 'pavement'}${Math.abs(car.slide) > 1 ? '  sliding' : ''}`
+    ui.setPos(`${(Math.abs(car.speed) * 2.237).toFixed(0)} mph · ${car.onGrass ? 'grass' : 'pavement'}${Math.abs(car.slide) > 1 ? ' · sliding' : ''}`)
   } else {
     fly?.update(dt)
     applyMove(dt)
     orbit.update()
-    $('#pos').textContent = ''
+    ui.setPos('')
   }
   if (site) {
     const fwd = camera.getWorldDirection(viewDir)

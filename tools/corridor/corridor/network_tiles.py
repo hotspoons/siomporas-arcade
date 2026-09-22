@@ -539,7 +539,7 @@ def reprofile(site_dir: Path) -> dict:
             "profile": {"step_m": prof["step_m"], "s": prof["s"], "road_z": prof["road_z"]},
             "structures": prof["structures"],
         })
-    (site_dir / "branches.json").write_text(json.dumps({"branches": branches}))
+    (site_dir / "branches.json").write_text(json.dumps({"frame": "enu", "branches": branches}))
     print(f"  reprofile {len(branches)} branches, {sum(len(b['structures']) for b in branches)} structures", flush=True)
     return {"chains": len(chains), "branches": len(branches)}
 

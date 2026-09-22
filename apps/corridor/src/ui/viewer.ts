@@ -82,7 +82,12 @@ export const LAYER_GROUPS: { title: string; layers: { id: string; label: string;
  */
 function frameReadouts(m: Manifest): HTMLElement[] {
   const f = m.frame
-  const kind = f.kind === 'enu' ? 'ENU about the anchor' : f.kind === 'utm-enu' ? 'UTM-relative (flat)' : 'UTM-relative (pre-geodetic bake)'
+  const kind =
+    f.kind === 'enu'
+      ? 'ENU about the anchor'
+      : f.kind === 'utm'
+        ? 'UTM-relative, on a plane'
+        : 'UTM-relative (baked before frame.kind existed)'
   const rows = [readout('Frame', kind, false), readout('Bake EPSG', String(f.epsg))]
   if (f.anchor) rows.push(readout('Anchor', `${f.anchor.lat.toFixed(6)}, ${f.anchor.lon.toFixed(6)}`))
   if (typeof f.utm_convergence_deg === 'number') {

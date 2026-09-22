@@ -295,6 +295,7 @@ input.range::-moz-range-thumb { width: 13px; height: 13px; border: 0; border-rad
   border: 1px solid var(--line-2); border-radius: var(--r2);
 }
 .field.text .input:focus { border-color: var(--accent); }
+.input.wide { width: auto; flex: 1; min-width: 0; text-align: left; font-family: var(--font-body); }
 
 /* segmented */
 .segmented { display: inline-flex; padding: 2px; background: var(--bg-2); border: 1px solid var(--line-1); border-radius: var(--r2); }

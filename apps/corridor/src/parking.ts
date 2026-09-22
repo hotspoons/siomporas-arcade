@@ -18,6 +18,7 @@
 import * as THREE from 'three'
 import { BoundsIndex } from './strip'
 import type { Manifest } from './site'
+import type { SurfaceSet } from './props'
 import * as T from './tuning'
 
 export interface ParkingResult {
@@ -172,6 +173,8 @@ export function buildParking(
   manifest: Manifest,
   groundAt: (x: number, z: number) => number | null,
   edgeDistance: (x: number, z: number) => number,
+  /** the road's own surface library, so a lot is asphalt rather than a grey slab */
+  sets: Record<string, SurfaceSet> = {},
 ): ParkingResult {
   const group = new THREE.Group()
   group.name = 'parking'
@@ -355,7 +358,19 @@ export function buildParking(
     // one merged mesh: 231 lots is 231 draw calls otherwise, for what is conceptually one surface
     const pos: number[] = []
     const nor: number[] = []
+    const uv: number[] = []
     const idx: number[] = []
+    // A lot is asphalt, not a grey slab. It gets the ROAD's own surface set, so the two read as the
+    // same material where a car park meets the carriageway. Measured before this: parking rendered
+    // at luma 63 against the road's 100, flat and untextured.
+    //
+    // UV CONVENTION, and it is the trap here. The plain per-class material wants uv in TILE UNITS
+    // — `roadMesh` divides by metresPerTile in JS (`a.s / mpt`). Only `blendMaterial` takes metres
+    // and divides in the shader. Getting it the wrong way round tiles at the SQUARE of the right
+    // scale, which looks plausible in a screenshot and is wrong. A lot is flat and horizontal, so
+    // a planar projection of world x/z is the natural parameterisation.
+    const surfSet = sets.asphalt_aged ?? sets.asphalt_new ?? Object.values(sets)[0]
+    const mpt = surfSet?.metresPerTile ?? 1
     for (const g of surf) {
       const gp = g.getAttribute('position') as THREE.BufferAttribute
       const gn = g.getAttribute('normal') as THREE.BufferAttribute
@@ -364,6 +379,7 @@ export function buildParking(
       for (let i = 0; i < gp.count; i++) {
         pos.push(gp.getX(i), gp.getY(i), gp.getZ(i))
         nor.push(gn.getX(i), gn.getY(i), gn.getZ(i))
+        uv.push(gp.getX(i) / mpt, gp.getZ(i) / mpt)
       }
       if (gi) for (let i = 0; i < gi.count; i++) idx.push(base + gi.getX(i))
       g.dispose()
@@ -371,8 +387,9 @@ export function buildParking(
     const geo = new THREE.BufferGeometry()
     geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
     geo.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3))
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2))
     geo.setIndex(idx)
-    const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: 0x4a4a4c, roughness: 0.96, metalness: 0 }))
+    const mesh = new THREE.Mesh(geo, surfSet?.material ?? new THREE.MeshStandardMaterial({ color: 0x4a4a4c, roughness: 0.96, metalness: 0 }))
     mesh.name = 'parking:surface'
     mesh.frustumCulled = false
     group.add(mesh)

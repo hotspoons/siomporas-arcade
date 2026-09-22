@@ -1416,7 +1416,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
   // centreline, and only the viewer knows where the asphalt actually ends
   const furniture = buildFurniture(manifest, groundAtWorld, edgeDistanceWorld)
   group.add(furniture.group)
-  const parking = buildParking(manifest, groundAtWorld, edgeDistanceWorld)
+  const parking = buildParking(manifest, groundAtWorld, edgeDistanceWorld, surfaceSets ?? {})
   group.add(parking.group)
   const barriers = buildBarriers(manifest, groundAtWorld)
   group.add(barriers.group)

@@ -162,3 +162,33 @@ export function latticeFor(z: number, x: number, y: number): { n: number; lon: n
   const b = tileBoundsOf(z, x, y)
   return { n: 2, lon: [b.w, b.e, b.w, b.e], lat: [b.s, b.s, b.n, b.n] }
 }
+
+/** `"z/x/y"` back to a TileId. The key is the wire format between the selector and the streamer. */
+export function parseKey(key: string): TileId {
+  const [z, x, y] = key.split('/').map(Number)
+  return { z, x, y }
+}
+
+/**
+ * Filter a drop list so nothing is released while it is still the only thing covering its ground.
+ *
+ * `diff` evicts a parent the instant its children enter the wanted set — but at that instant the
+ * children have only been REQUESTED. Dropping the parent then opens a hole in the terrain for as
+ * long as the fetch takes, and at a pyramid's leading edge that is every tile you drive toward.
+ *
+ * The two reasons a tile is dropped need opposite treatment:
+ *   - it left the view        -> drop now, nothing is looking at it
+ *   - it is being REFINED     -> hold until all four children are resident, then drop
+ *
+ * A tile is being refined when any of its children is wanted. Requiring all four before releasing
+ * the parent is the same strictness `wanted` applies when it splits a quad, and for the same
+ * reason: three children and a parent-shaped gap is worse than a blurry parent.
+ */
+export function holdWhileRefining(drop: string[], want: TileId[], isHeld: (key: string) => boolean): string[] {
+  const wantKeys = new Set(want.map(tileKey))
+  return drop.filter((k) => {
+    const kids = childrenOf(parseKey(k))
+    const refining = kids.some((c) => wantKeys.has(tileKey(c)))
+    return !refining || kids.every((c) => isHeld(tileKey(c)))
+  })
+}

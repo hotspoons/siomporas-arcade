@@ -29,10 +29,10 @@ import * as THREE from 'three'
 import type { Anchor } from '@apex/engine/geo/wgs84'
 import { RasterFrame } from '@apex/engine/geo/raster'
 import { latticeFor } from '@apex/engine/geo/pyramid'
-import { DATA_BASE, decodeHeights, decodeScalar, type Layer, type TileIndex } from './site'
+import { DATA_BASE, decodeHeights, decodeScalar, type Layer, type PyrEntry, type PyrIndex, type TileIndex } from './site'
 import { loadBakedTexture } from './textures'
 
-export type { TileIndex }
+export type { TileIndex, PyrEntry, PyrIndex }
 
 /** A height/scalar raster plus how it sits on the ellipsoid — the same shape scene.ts uses. */
 export interface TileField {
@@ -492,27 +492,6 @@ export class PyramidSet {
   levelAt = (x: number, y: number): number | null => this.at(x, y)?.t.z ?? null
 }
 
-/** What the bake's `pyramid.list` says about one tile. Bounds are NOT here — they are in the id. */
-export interface PyrEntry {
-  z: number
-  x: number
-  y: number
-  empty?: boolean
-  dem?: { zmin: number; zscale: number }
-  chm?: boolean
-  naip?: boolean
-  naip_fill?: number
-}
-
-export interface PyrIndex {
-  scheme: string
-  zmin: number
-  zmax: number
-  px: number
-  dir: string
-  format: string
-  list: PyrEntry[]
-}
 
 /**
  * Fetch and decode one pyramid tile.

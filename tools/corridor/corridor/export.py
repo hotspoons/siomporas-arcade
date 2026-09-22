@@ -18,6 +18,7 @@ the Worker will hand the browser, so the viewer is already reading the productio
 """
 from __future__ import annotations
 
+import os
 import json
 import math
 from pathlib import Path
@@ -994,6 +995,22 @@ def export_site(site_dir: Path, web: Path | None = None) -> dict:
             g = g.point(lambda v: min(255, int(v * green)))
             img = Image.merge("RGB", (r, g, b))
         return img
+
+    # The LOD pyramid, beside the flat tiles rather than instead of them: a viewer that does not
+    # know about `pyramid` keeps working off `tiles`, and one that does ignores `tiles` entirely.
+    # Opt-in because it is a second copy of the same ground and roughly doubles a site's bytes.
+    if tiled and os.environ.get("CORRIDOR_PYRAMID") == "1":
+        try:
+            from . import pyramid as _pyr
+
+            pl = _pyr.bake(site_dir, web, frame, vivid=vivid)
+            if pl:
+                layers["pyramid"] = pl
+                n = len(pl["list"])
+                empt = sum(1 for e in pl["list"] if e.get("empty"))
+                print(f"  pyramid z{pl['zmin']}..z{pl['zmax']}, {n} tiles ({empt} empty) -> web/pyr", flush=True)
+        except Exception as exc:
+            print(f"  pyramid SKIPPED: {exc.__class__.__name__}: {exc}", flush=True)
 
     if tiled:
         try:

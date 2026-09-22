@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { childrenOf, diff, latticeFor, parentOf, tileBoundsOf, tileKey, tileMetres, wanted, type TileId } from '../src/geo/pyramid'
+import { childrenOf, diff, holdWhileRefining, latticeFor, parentOf, tileBoundsOf, tileKey, tileMetres, wanted, type TileId } from '../src/geo/pyramid'
 import { RasterFrame } from '../src/geo/raster'
 import { Anchor } from '../src/geo/wgs84'
 
@@ -179,5 +179,41 @@ describe('latticeFor', () => {
       expect(cb.s).toBeGreaterThanOrEqual(b.s - 1e-12)
       expect(cb.n).toBeLessThanOrEqual(b.n + 1e-12)
     }
+  })
+})
+
+describe('holdWhileRefining', () => {
+  const parent: TileId = { z: 12, x: 2345, y: 1553 }
+  const kids = childrenOf(parent)
+  const pk = tileKey(parent)
+
+  it('holds a parent whose children are wanted but not yet resident', () => {
+    // the leading edge: diff wants to evict the parent, the children are still in flight
+    const out = holdWhileRefining([pk], kids, () => false)
+    expect(out).toEqual([])
+  })
+
+  it('releases the parent once ALL four children are resident', () => {
+    const resident = new Set(kids.map(tileKey))
+    const out = holdWhileRefining([pk], kids, (k) => resident.has(k))
+    expect(out).toEqual([pk])
+  })
+
+  it('still holds when only three of four have landed', () => {
+    // three children and a parent-shaped gap is worse than a blurry parent
+    const resident = new Set(kids.slice(0, 3).map(tileKey))
+    expect(holdWhileRefining([pk], kids, (k) => resident.has(k))).toEqual([])
+  })
+
+  it('releases immediately when the tile simply left the view', () => {
+    // nothing wanted overlaps it — no refinement is happening, so there is nothing to wait for
+    const elsewhere: TileId[] = [{ z: 12, x: 900, y: 900 }]
+    expect(holdWhileRefining([pk], elsewhere, () => false)).toEqual([pk])
+  })
+
+  it('does not hold a tile whose SIBLING is wanted — only its own children count', () => {
+    // a sibling covers different ground; holding for it would pin the resident set open
+    const sibling: TileId = { z: 12, x: 2346, y: 1553 }
+    expect(holdWhileRefining([pk], childrenOf(sibling), () => false)).toEqual([pk])
   })
 })

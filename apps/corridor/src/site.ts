@@ -45,6 +45,28 @@ export interface Layer {
  * corridor hull are simply absent. Files are `web/tiles/0/<x>_<y>.dem.png | .naip.jpg | .chm.png`,
  * with the same encodings as the single-image layers.
  */
+/** What the bake's `pyramid.list` says about one tile. Bounds are NOT here — they are in the id. */
+export interface PyrEntry {
+  z: number
+  x: number
+  y: number
+  empty?: boolean
+  dem?: { zmin: number; zscale: number }
+  chm?: boolean
+  naip?: boolean
+  naip_fill?: number
+}
+
+export interface PyrIndex {
+  scheme: string
+  zmin: number
+  zmax: number
+  px: number
+  dir: string
+  format: string
+  list: PyrEntry[]
+}
+
 export interface TileIndex {
   size_m: number
   /** tile (0,0)'s minimum corner ON THE PROJECTION GRID — not ENU. Tile placement comes from each
@@ -144,7 +166,7 @@ export interface Manifest {
     utm_scale?: number
   }
   bbox: [number, number, number, number]
-  layers: Partial<Record<'dem' | 'chm' | 'naip' | 'horizon' | 'horizon_naip' | 'flora', Layer>> & { tiles?: TileIndex }
+  layers: Partial<Record<'dem' | 'chm' | 'naip' | 'horizon' | 'horizon_naip' | 'flora', Layer>> & { tiles?: TileIndex; pyramid?: PyrIndex }
   spine: {
     dead_ends?: DeadEnd[] | null
     coords: [number, number, number][]

@@ -5,7 +5,8 @@ import * as THREE from 'three'
 import * as T from './tuning'
 import { Anchor } from '@apex/engine/geo/wgs84'
 import { RasterFrame } from '@apex/engine/geo/raster'
-import { ImageryStream, TileSet, loadTiles } from './tiles'
+import { ImageryStream, PyramidSet, TileSet, loadTiles } from './tiles'
+import { PyramidStream } from './pyramidstream'
 import { loadBakedTexture } from './textures'
 import { DATA_BASE, decodeHeights, decodeScalar, loadImage, type Layer, type Manifest, type Structure } from './site'
 import { NearTrees, type TreeRecord } from './trees'
@@ -95,6 +96,10 @@ export interface Site {
   tiles: (() => ImageryStream['counts']) | null
   /** the stream itself, so its ring and ceiling can be swept from a probe or the console */
   tileStream: ImageryStream | null
+  /** LOD pyramid residency — held/pending/bytes and a count per level, null on a flat bake */
+  pyramid: (() => PyramidStream['counts']) | null
+  /** the pyramid stream itself, so a probe can force an update at a chosen eye */
+  pyramidStream: PyramidStream | null
   /** ground height (m) at site x,y from the DEM layer */
   heightAt: (x: number, y: number) => number
   /** point + travel direction on the spine at along-track s (metres) */
@@ -295,8 +300,17 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
   // are decoded up front, not streamed: every height lookup below — the strip, the trees, the
   // grass, the car — happens on the first frame, and a height that has not arrived is a hole, not
   // a coarser LOD. The overview stands in wherever no tile was baked, which is most of a hull.
+  // A PYRAMID bake supersedes the flat tile list: quadtree tiles at several levels, loaded and
+  // evicted against the camera instead of decoded up front. `pyrSet` answers heights from the
+  // finest resident tile and falls back to the overview wherever nothing is held — which is what
+  // dissolves the objection the flat loader was built on, that a height not yet arrived is a hole.
+  let pyrSet: PyramidSet | null = null
+  if (L.pyramid && anchor) {
+    pyrSet = new PyramidSet(L.pyramid.zmin, L.pyramid.zmax, overviewHeight)
+  }
+
   let tileSet: TileSet | null = null
-  if (L.tiles && anchor) {
+  if (L.tiles && anchor && !pyrSet) {
     status('decoding terrain tiles…')
     tileSet = new TileSet(L.tiles.size_m, overviewHeight, null)
     // Budgeted: four hundred packs decoded in one call stack is the same freeze the branch
@@ -309,7 +323,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
       tileSet = null
     }
   }
-  const heightAt = tileSet ? tileSet.heightAt : overviewHeight
+  const heightAt = pyrSet ? pyrSet.heightAt : tileSet ? tileSet.heightAt : overviewHeight
 
   // --- near terrain, textured with the imagery -----------------------------------------------
   const stride = strideFor(L.dem, lite ? 300_000 : 1_100_000)
@@ -398,6 +412,40 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     // z-fight wherever the coarse one pokes through the fine one. Cut it to the tiles' coverage,
     // the same way the horizon is cut to the near DEM's.
     cutHorizon(terrainGeo, L.dem.bbox, L.dem.res * stride, heightAt, tileSet.covers)
+  }
+
+  // --- fine terrain, streamed: the LOD pyramid ------------------------------------------------
+  let pyr: PyramidStream | null = null
+  if (pyrSet && L.pyramid && anchor) {
+    const grp = new THREE.Group()
+    grp.name = 'terrain:pyramid'
+    group.add(grp)
+    pyr = new PyramidStream({
+      base,
+      index: L.pyramid,
+      anchor,
+      set: pyrSet,
+      group: grp,
+      // gridGeometry already reads a tile's own RasterFrame and emits 0..1 UVs, so a quadtree tile
+      // places and textures with no changes — the same property that made the flat tiles work.
+      geometryFor: (t) => gridGeometry(t.dem, strideFor(t.dem.layer, lite ? 4_000 : 14_000), () => 0),
+      materialFor: () => {
+        const m = terrainMaterial(imagery)
+        // The overview stays under the pyramid rather than being cut to it: coverage changes every
+        // time a tile lands or leaves, and a geometry re-cut per frame is not affordable. Two
+        // surfaces of the same ground z-fight, so the pyramid is biased to win the depth test.
+        m.polygonOffset = true
+        m.polygonOffsetFactor = -1
+        m.polygonOffsetUnits = -1
+        return m
+      },
+      fovY: (60 * Math.PI) / 180,
+      viewportH: renderer?.domElement.height ?? 1080,
+      budgetBytes: lite ? 96 * 1024 * 1024 : 256 * 1024 * 1024,
+    })
+    // Prime the resident set before the first frame, so the strip and the car have heights to ask
+    // for. Without this the root tiles arrive a frame or two late and the car starts in a hole.
+    pyr.update(0, 0, true)
   }
 
   // --- canopy: the forest blanket (off by default; the trees below are the stand-ins) --------
@@ -1447,6 +1495,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
       inner(eye, time, fwd, pitch)
       water.tick(time)
       stream?.update(eye.x, -eye.z) // site frame: y = -z
+      pyr?.update(eye.x, -eye.z)
       signals.tick(time)
     }
   }
@@ -1512,6 +1561,8 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     /** tiled sites only: imagery streaming counts, for probes and the console */
     tiles: stream ? () => stream.counts : null,
     tileStream: stream,
+    pyramid: pyr ? () => pyr.counts : null,
+    pyramidStream: pyr,
     heightAt,
     spineAt,
     setImagery: (on) => {

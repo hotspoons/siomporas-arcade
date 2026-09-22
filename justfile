@@ -5,6 +5,7 @@
 #   apps/coast    pseudo-3D sprite racer                  :5182
 #   apps/fighter  2D/2.5D/3D fighting game                 :5184
 #   apps/corridor viewer for tools/corridor bakes          :5185
+#   apps/corridor world editor (just worldeditor-app)      :5212  (service on :8780)
 #   packages/engine  shared runtime (loop, styles, input, menus, router, math, dev bridge)
 #
 # The three games still run on their own — that is where tuning, the bridge and the smoke
@@ -159,3 +160,32 @@ corridor-tunnel:
 # one line per fetched site
 corridor-report:
     tools/corridor/.venv/bin/python -m corridor report
+
+# --- world editor: draw a world on a map, bake it, publish it ------------------
+# tools/worldeditor is the pod's backend and apps/corridor/world.html is its page. The two run as
+# two processes in development and one image in the cluster; see tools/worldeditor/README.md.
+#
+# The service on :8780 and the app on :5212 — run these in two terminals, in this order. The app
+# reaches the service through a Vite proxy, so every fetch in the page is relative, exactly as it
+# is in the pod.
+
+# the world editor's backend, on :8780 (OSM, worlds, bakes, the editor's save path)
+worldeditor-svc:
+    node tools/worldeditor/server.mjs --port 8780 --data tools/corridor/data
+
+# the world editor page, on :5212 -> http://localhost:5212/world.html
+worldeditor-app:
+    CORRIDOR_PORT=5212 WORLDEDITOR=http://localhost:8780 npm run dev -w apps/corridor
+
+# `just worldeditor-probe` checks every claim in the README; `prove` runs the negatives instead —
+# each check fed something that must break it, which is the only reason to believe the rest.
+
+# the world editor's probe; `just worldeditor-probe prove` runs the negatives
+worldeditor-probe mode="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ "{{ mode }}" = "prove" ]; then
+      node tools/worldeditor/probe.mjs --prove
+    else
+      node tools/worldeditor/probe.mjs --api http://localhost:8780 --ui http://localhost:5212/world.html
+    fi

@@ -95,16 +95,29 @@ export default defineConfig({
   // packages/engine/src/dev/bridge-plugin.ts. `just bridge-dev corridor` turns it on.
   plugins: [serveBake(), devBridge()],
   server: {
-    // Keep in sync with the justfile (corridor viewer = 5185).
-    port: 5185,
+    // Keep in sync with the justfile (corridor viewer = 5185). CORRIDOR_PORT lets a second dev
+    // server run this same app on another port — the world-editor lane runs it on 5212 against a
+    // worldeditor service — without either of them having to edit this file again.
+    port: Number(process.env.CORRIDOR_PORT ?? 5185),
     strictPort: true,
     host: true,
     allowedHosts: true,
+    // DEV ONLY, and only when WORLDEDITOR is set. `tools/worldeditor` serves these paths in the
+    // pod, from the same origin as the app; this makes development identical to that, so the
+    // world editor's fetches are relative in both places and there is no CORS anywhere.
+    ...(process.env.WORLDEDITOR ? { proxy: { '/api': process.env.WORLDEDITOR, '/assetsvc': process.env.WORLDEDITOR } } : {}),
   },
   build: {
     target: 'es2022',
     chunkSizeWarningLimit: 1500,
-    // two pages: the viewer and the editor (apps/corridor/editor.html, owned by the editor agent)
-    rollupOptions: { input: { main: fileURLToPath(new URL('index.html', import.meta.url)), editor: fileURLToPath(new URL('editor.html', import.meta.url)) } },
+    // three pages: the viewer, the editor (apps/corridor/editor.html, owned by the editor agent)
+    // and the world editor (world.html) — which is the one `tools/worldeditor` serves at `/`.
+    rollupOptions: {
+      input: {
+        main: fileURLToPath(new URL('index.html', import.meta.url)),
+        editor: fileURLToPath(new URL('editor.html', import.meta.url)),
+        world: fileURLToPath(new URL('world.html', import.meta.url)),
+      },
+    },
   },
 })

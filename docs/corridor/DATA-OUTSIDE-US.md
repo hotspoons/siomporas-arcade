@@ -69,8 +69,38 @@ above the treeline — and the way to know the difference is the Chamonix window
 pyramid reading 13.6 m mean with 82.5% of pixels above 2 m. A single point sample could not have
 told those apart.
 
-This could replace the EPT lidar fetch **in the US too**. We currently pull point clouds and build
-a CHM ourselves; this is the same product, precomputed, globally, at the same resolution.
+Built as `corridor/canopy.py`, with `python -m corridor.canopy <slug>` to add a canopy layer to a
+site baked without lidar. Verified with the control this file already warned about: the Stelvio
+reads 0.0 m over a 600 m window (correct — the pass is above the treeline) while Trafoi, in the
+same tile, reads 4.6 m mean and 29.0 m max with 45% of pixels above 2 m.
+
+### It is NOT a drop-in replacement for the US lidar CHM
+
+The research pass suggested this "could replace the EPT lidar fetch in the US too — the same
+product, precomputed". **Measured against our own lidar CHM at three baked sites, it is not the
+same product.** Same bounds, same 1 m lattice, no registration shift (testing ±3 px moves binary
+agreement from 60% to 61%):
+
+| site | ours >2 m | Meta >2 m | binary agreement | Meta says tree, ours does not |
+|---|---|---|---|---|
+| arrowhead-farms (suburban) | 27.6% | 58.2% | 60% | **35.3%** |
+| acadia-ocean-dr (Maine coast) | 25.1% | 54.5% | 65% | **32.4%** |
+| south-mountain-i70 (highway) | 3.5% | 29.9% | 72% | **27.1%** |
+
+26.5 million pixels, two states, three landscapes, one direction: **Meta reports about twice the
+tree cover our lidar CHM does**, and the disagreement is one-sided — ours-says-tree-Meta-does-not
+is only 4.7% at arrowhead-farms against 35.3% the other way. Where both agree there is a tree, the
+heights are closer (mean −1.71 m) but still only 38% within 3 m.
+
+**Which one is right is NOT established here.** Meta/WRI is a global model predicted from imagery
+and calibrated against GEDI and ALS, so smearing canopy across suburban gaps is a plausible
+failure; equally, `lidar.py`'s vegetation-minus-ground thresholds could be under-reporting, and
+south-mountain-i70 at 3.5% tree cover for a wooded Maryland highway corridor does look low. That
+needs ground truth to settle and did not get it.
+
+The actionable part does not depend on settling it: **swapping the US CHM for this would visibly
+double the trees in every baked US site**, so it is not a free simplification. Outside the US it is
+the only option and a good one.
 
 ## Imagery: France is better than NAIP, everywhere else is 10x worse
 

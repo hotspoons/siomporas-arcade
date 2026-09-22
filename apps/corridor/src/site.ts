@@ -39,6 +39,39 @@ export interface Layer {
   scale?: number
 }
 
+/**
+ * `manifest.layers.tiles`: a network-sized bake cuts its DEM, canopy and imagery into `size_m`
+ * tiles instead of one image per layer, and lists only the tiles that have data. Tiles outside the
+ * corridor hull are simply absent. Files are `web/tiles/0/<x>_<y>.dem.png | .naip.jpg | .chm.png`,
+ * with the same encodings as the single-image layers.
+ */
+export interface TileIndex {
+  size_m: number
+  /** tile (0,0)'s minimum corner ON THE PROJECTION GRID — not ENU. Tile placement comes from each
+   *  tile's own `geo` lattice; this is only useful for naming and for coarse bookkeeping. */
+  origin: [number, number]
+  res: { dem: number; naip: number | null; chm: number | null }
+  /** where the packs live, relative to web/ (default `tiles/0`) */
+  dir?: string
+  /** `pack-1`: uint32 LE header length, header JSON {rev, files:{name:[offset,len]}}, then blobs */
+  format?: string
+  /** the per-tile imagery file inside the tile directory (default `naip.jpg`) */
+  texture?: string
+  /** the GPU-compressed twin beside it, when the bake made one — 8x less resident than the jpg */
+  texture_ktx2?: string
+  list: {
+    x: number
+    y: number
+    dem: { zmin: number; zscale: number }
+    chm?: boolean
+    naip?: boolean
+    /** pack size in bytes, for a loading estimate */
+    pack?: number
+    /** the tile's own geodetic control lattice — the only correct way to place or sample it */
+    geo?: GeoLattice
+  }[]
+}
+
 export interface Structure {
   kind: 'bridge' | 'overpass' | 'gantry'
   source?: string
@@ -111,7 +144,7 @@ export interface Manifest {
     utm_scale?: number
   }
   bbox: [number, number, number, number]
-  layers: Partial<Record<'dem' | 'chm' | 'naip' | 'horizon' | 'horizon_naip' | 'flora', Layer>>
+  layers: Partial<Record<'dem' | 'chm' | 'naip' | 'horizon' | 'horizon_naip' | 'flora', Layer>> & { tiles?: TileIndex }
   spine: {
     dead_ends?: DeadEnd[] | null
     coords: [number, number, number][]

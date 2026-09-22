@@ -16,7 +16,11 @@ for mf in sorted(root.glob('*/web/manifest.json')):
         print(f'  skip {mf.parent.parent.name}: no usable frame'); continue
     if fr.get('kind'):
         print(f'  skip {mf.parent.parent.name}: already has kind={fr["kind"]}'); continue
-    m['frame'] = Frame(fr['epsg'], tuple(fr['origin'])).manifest_frame()
+    fm = Frame(fr['epsg'], tuple(fr['origin'])).manifest_frame()
+    # this tree's coordinates were written BEFORE the ENU conversion: they are UTM site metres.
+    # Only a re-export makes them "enu".
+    fm['kind'] = 'utm'
+    m['frame'] = fm
     tmp = mf.with_suffix('.json.tmp')
     tmp.write_text(json.dumps(m, separators=(',', ':')))
     tmp.replace(mf)

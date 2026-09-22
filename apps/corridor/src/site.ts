@@ -98,7 +98,13 @@ export interface Manifest {
   frame: {
     epsg: number
     origin: [number, number]
-    kind?: 'utm-enu' | 'enu'
+    /**
+     * What the COORDINATES in this manifest are. "enu" is true ENU metres about `anchor`; "utm"
+     * is UTM easting/northing minus `origin`, on a plane. Both are small metric numbers and
+     * nothing else tells them apart, so guessing wrong draws the world rotated by the grid
+     * convergence — 55 m out at 3 km, and plausible-looking until measured.
+     */
+    kind?: 'utm' | 'enu'
     anchor?: { lon: number; lat: number; h: number }
     /** UTM north relative to TRUE north at the anchor, degrees — a rotation, not an error */
     utm_convergence_deg?: number

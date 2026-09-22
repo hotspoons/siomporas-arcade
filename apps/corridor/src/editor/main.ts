@@ -20,9 +20,11 @@ import { GrowMode } from './grow'
 import { Preview, markOverlay } from './preview'
 import { CAN_SAVE, type Area } from './schema'
 import { LOOK, type Season } from '../season'
+import { EditorUI } from '../ui/editor'
+import { installShellKeys, toast, status } from '../ui/shell'
+import { restoreTheme } from '../ui/viewer'
 
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector<T>(sel)!
-const status = (s: string) => ($('#status').textContent = s)
 
 const canvas = $<HTMLCanvasElement>('#gl')
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, logarithmicDepthBuffer: true })
@@ -53,8 +55,20 @@ const grow = new GrowMode(place, (structural) => refresh(structural))
 // ignore. Its own file (structures.json) and its own pointer/key handling, so below it is always
 // a `mode === 'structures'` branch ahead of the areas/place pair, never mixed into them.
 const structs = new StructureMode((structural) => refresh(structural))
-type Mode = 'areas' | 'place' | 'grow' | 'structures'
+import type { Mode } from '../ui/editor'
 let mode: Mode = (location.hash.split(':')[1] as Mode) || 'areas'
+
+// The interface. Every callback here is a function declared later in this file, which is fine —
+// they are declarations, so they are hoisted, and none of them runs before the first event.
+restoreTheme()
+const ui = new EditorUI({
+  onSite: (slug) => void loadSite(slug),
+  onMode: (m) => setMode(m),
+  onLayers: () => applyLayers(),
+  onSave: () => void doSave(),
+  onPreview: () => void openPreview(),
+})
+installShellKeys(() => ui.drawer)
 let season: Season = 'summer'
 // Every group an editing mode puts in the scene is marked, so the preview can stand all of them
 // down without knowing which modes exist. A new mode marks its group and needs no other change.
@@ -82,18 +96,9 @@ resize()
 // loading
 async function loadIndex() {
   const idx = await fetchJSON<{ sites: IndexEntry[] }>('/sites/index.json')
-  const sel = $<HTMLSelectElement>('#site')
-  sel.replaceChildren()
-  for (const s of idx.sites) {
-    const o = document.createElement('option')
-    o.value = s.slug
-    o.textContent = `${s.slug} — ${(s.length_m / 1000).toFixed(1)} km`
-    sel.append(o)
-  }
   const want = location.hash.slice(1).split(':')[0] || idx.sites[0]?.slug
   if (!want) throw new Error('no sites baked')
-  sel.value = want
-  sel.onchange = () => loadSite(sel.value)
+  ui.setSites(idx.sites, want)
   await loadSite(want)
 }
 
@@ -106,10 +111,11 @@ let siteHasImpostors = false
 
 async function loadSite(slug: string, quality: 'edit' | 'preview' = 'edit') {
   if (unsaved() && !confirm('There are unsaved edits. Load another site anyway?')) {
-    $<HTMLSelectElement>('#site').value = site?.manifest.slug ?? slug
+    ui.setSite(site?.manifest.slug ?? slug)
     return
   }
   location.hash = `${slug}:${mode}`
+  ui.setSite(slug)
   if (site) {
     scene.remove(site.group)
     site.group.traverse((o) => {
@@ -143,7 +149,8 @@ async function loadSite(slug: string, quality: 'edit' | 'preview' = 'edit') {
 // view
 function applyLayers() {
   if (!site) return
-  const on = (n: string) => $<HTMLInputElement>(`input[data-layer="${n}"]`).checked
+  const state = ui.layers()
+  const on = (n: string) => state[n] ?? false
   site.setImagery(on('imagery'))
   if (site.layers.trees) site.layers.trees.visible = on('trees')
   site.layers.structures.visible = on('structures')
@@ -153,7 +160,6 @@ function applyLayers() {
   place.group.visible = on('placements')
   structs.group.visible = on('authored')
 }
-for (const c of document.querySelectorAll<HTMLInputElement>('input[data-layer]')) c.onchange = applyLayers
 
 /** Straight down, high enough that the whole baked corridor is in frame — both extents, not just
  *  the long one: some sites are wider than they are long. */
@@ -309,12 +315,11 @@ addEventListener('keydown', (e) => {
 function setMode(m: Mode) {
   mode = m
   if (site) location.hash = `${site.manifest.slug}:${m}`
-  for (const b of document.querySelectorAll<HTMLButtonElement>('#modes button')) b.classList.toggle('on', b.dataset.mode === m)
+  ui.setMode(m)
   refresh()
 }
-for (const b of document.querySelectorAll<HTMLButtonElement>('#modes button')) b.onclick = () => setMode(b.dataset.mode as Mode)
 // the road panel is not a mode — it overlays whatever mode you are in, so it gets its own button
-roadWidth.mount(document.querySelector('#modes')!)
+roadWidth.mount(ui.modeHost)
 // the same handle the viewer exposes as window.corridor, so probes can drive the editor too
 ;(window as unknown as { __ed: unknown }).__ed = { scene, camera, orbit, tune: TUNE_TABS, get site() { return site } }
 
@@ -369,16 +374,13 @@ async function openPreview() {
 function refresh(structural = true) {
   season = preview.season
   if (structural) {
-    if (mode === 'areas') areas.panel($('#body'), (a: Area) => flyTo(a.polygon))
-    else if (mode === 'grow') grow.panel($('#body'), site, place.assets, flyTo)
-    else if (mode === 'structures') structs.panel($('#body'), flyTo)
-    else place.panel($('#body'), flyTo)
+    if (mode === 'areas') areas.panel(ui.inspector, (a: Area) => flyTo(a.polygon))
+    else if (mode === 'grow') grow.panel(ui.inspector, site, place.assets, flyTo)
+    else if (mode === 'structures') structs.panel(ui.inspector, flyTo)
+    else place.panel(ui.inspector, flyTo)
   }
-  const save = $<HTMLButtonElement>('#save')
   const what = mode === 'areas' ? 'areas' : mode === 'structures' ? 'structures' : 'place'
-  save.disabled = !CAN_SAVE || !unsaved()
-  save.textContent = unsaved() ? `save ${what} •` : `save ${what}`
-  $('#dirty').textContent = unsaved() ? 'unsaved edits' : ''
+  ui.setDirty(CAN_SAVE && unsaved(), `Save ${what}`)
 }
 
 async function doSave() {
@@ -386,12 +388,10 @@ async function doSave() {
     status(mode === 'areas' ? await areas.save() : mode === 'structures' ? await structs.save() : await place.save())
     sitePredatesEdits = true
   } catch (err) {
-    status(`save failed: ${(err as Error).message}`)
+    toast(`save failed: ${(err as Error).message}`, 'danger')
   }
   refresh()
 }
-$('#save').onclick = () => void doSave()
-$('#preview').onclick = () => void openPreview()
 addEventListener('beforeunload', (e) => {
   if (unsaved()) e.preventDefault()
 })

@@ -1,95 +1,150 @@
-/* The editor reuses the viewer's shell (src/style.css) and adds the authoring furniture:
-   a wider panel, a mode switch, the area/placement lists and the slider rows. */
-body.editor #panel { width: 400px; }
-body.editor #panel h1 { color: #2ee6c0; }
-#panel .link { color: var(--dim); text-decoration: none; font-size: 11px; }
-#panel .link:hover { color: var(--accent); }
+/*
+ * The editor's authoring furniture, in the shared design language.
+ *
+ * The shell — bar, drawer, dialog, tabs, fields — is ui/*.css, exactly as in the viewer. What is
+ * left here is the handful of things only an authoring tool has: the list of things you can
+ * select, the detail block under it, the asset palette, the preview window and the floating road
+ * cross-section. Every one reaches for a token; none names a colour.
+ *
+ * These class names are the ones areas.ts / place.ts / grow.ts / structures.ts / preview.ts /
+ * roadwidth.ts already build, so those files did not have to change.
+ */
 
-.seg button.on { border-color: #2ee6c0; color: #2ee6c0; }
-#save:disabled { opacity: 0.45; cursor: default; border-color: #333; }
-.warn { color: var(--accent); font-size: 11px; }
-button.danger:hover { border-color: #e2564f; color: #e2564f; }
+/* ---- the selectable list ------------------------------------------------------------------- */
 
-#body { display: flex; flex-direction: column; gap: 8px; min-height: 0; }
-#body h2 { font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spacing: 0.1em; margin: 6px 0 2px; }
-#body p.dim { color: #6d737b; margin: 4px 0; line-height: 1.4; }
-
-.list { display: flex; flex-direction: column; max-height: 34vh; overflow: auto; border: 1px solid #1f232b; }
-.item { display: flex; gap: 6px; align-items: baseline; padding: 3px 6px; cursor: pointer; border-bottom: 1px solid #16191f; }
-.item:hover { background: #171b22; }
-.item.sel { background: #14302c; }
-.item.edited .nm { color: var(--accent); }
-.item .nm { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.item .tag { color: #6d737b; font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; min-width: 52px; }
-
-.detail { display: flex; flex-direction: column; gap: 4px; border-top: 1px solid #1f232b; padding-top: 6px; }
-.detail input[type='text'], .detail input[type='number'], .detail select {
-  background: #1a1d24; color: var(--fg); border: 1px solid #333; padding: 3px 5px; min-width: 0; flex: 1;
+.list {
+  display: flex; flex-direction: column;
+  max-height: 34vh; overflow: auto;
+  border: 1px solid var(--line-1);
+  border-radius: var(--r2);
 }
-.field { display: flex; align-items: center; gap: 6px; color: var(--dim); }
-.field > span:first-child { flex: 0 0 132px; }
-.field.slider > span:first-child { flex: 0 0 108px; white-space: nowrap; }
-.field.slider .val { flex: 0 0 42px; text-align: right; color: #6d737b; }
-.field.slider input[type='range'] { flex: 1; accent-color: #3c4654; }
-.field.slider.off-neutral > span:first-child { color: var(--accent); }
-.field.slider.off-neutral input[type='range'] { accent-color: var(--accent); }
+.item {
+  display: flex; gap: var(--s2); align-items: baseline;
+  padding: var(--s1) var(--s2);
+  cursor: pointer;
+  border-bottom: 1px solid var(--line-1);
+  font-size: var(--text-sm);
+}
+.item:last-child { border-bottom: 0; }
+.item:hover { background: var(--bg-2); }
+.item.sel { background: var(--accent-dim); box-shadow: inset 2px 0 0 var(--accent); }
+.item.edited .nm { color: var(--accent); }
+.item .nm { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-1); }
+.item .nm.dim { color: var(--ink-3); }
+.item .tag {
+  color: var(--ink-3); font-size: var(--text-xs);
+  text-transform: uppercase; letter-spacing: 0.06em;
+  min-width: 52px;
+}
 
-.palette { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
-.chip { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; padding: 4px 6px; text-align: left; }
-.chip.on { border-color: #2ee6c0; background: #14302c; }
-.chip .nm { font-size: 12px; }
+/* ---- the detail block under it -------------------------------------------------------------- */
 
-/* mode 3 · grow -------------------------------------------------------------------------------- */
-button.primary { border-color: #2ee6c0; color: #2ee6c0; }
-button.primary:hover { background: #14302c; }
-.tally { display: flex; gap: 10px; flex-wrap: wrap; color: var(--dim); font-size: 11px; }
+.detail {
+  display: flex; flex-direction: column; gap: var(--s2);
+  border-top: 1px solid var(--line-1);
+  padding-top: var(--s3);
+}
+.detail input[type='text'], .detail input[type='number'], .detail select {
+  flex: 1; min-width: 0;
+  padding: 5px var(--s2);
+  font: inherit; font-family: var(--num); font-size: var(--text-sm);
+  color: var(--ink-1); background: var(--bg-2);
+  border: 1px solid var(--line-2); border-radius: var(--r2);
+}
+.detail input:focus, .detail select:focus { border-color: var(--accent); outline: none; }
+
+.warn { color: var(--warn); font-size: var(--text-xs); }
+
+.tally { display: flex; gap: var(--s3); flex-wrap: wrap; color: var(--ink-3); font-size: var(--text-xs); }
 .tally .hot { color: var(--accent); }
-.item .nm.dim { color: #7c838c; }
 
-/* preview dialog ------------------------------------------------------------------------------
+/* ---- the asset palette ---------------------------------------------------------------------- */
+
+.palette { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s1); }
+.chip {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 1px;
+  padding: var(--s1) var(--s2);
+  font: inherit; font-size: var(--text-xs); text-align: left;
+  color: var(--ink-2); background: var(--bg-2);
+  border: 1px solid var(--line-2); border-radius: var(--r2);
+  cursor: pointer;
+}
+.chip:hover { background: var(--bg-3); color: var(--ink-1); }
+.chip.on { background: var(--accent-dim); border-color: var(--accent-line); color: var(--accent); }
+.chip .nm { font-size: var(--text-sm); }
+
+/* ---- the preview window ---------------------------------------------------------------------
    A full-screen backdrop with a window cut into it. The window's middle is `.pv-view`, an empty
    div whose bounding box the renderer scissors to — nothing is drawn into the DOM there, the
    WebGL canvas behind simply shows through only inside that rect. */
+
 .preview {
-  position: fixed; inset: 0; z-index: 20; background: rgba(6, 8, 11, 0.82);
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0;
-  padding: 3vh 3vw; box-sizing: border-box;
+  position: fixed; inset: 0; z-index: var(--z-modal);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: 3vh 3vw;
+  background: var(--scrim);
+  backdrop-filter: blur(6px);
 }
-/* above the canvas, which is lifted to 21 and clipped to the hole while previewing */
-.pv-bar, .pv-hud, .pv-help { position: relative; z-index: 22; }
+/* above the canvas, which is lifted over the backdrop and clipped to the hole while previewing */
+.pv-bar, .pv-hud, .pv-help { position: relative; z-index: calc(var(--z-modal) + 2); }
+
 .pv-bar {
-  display: flex; align-items: center; gap: 8px; width: min(1500px, 94vw);
-  background: var(--panel); border: 1px solid #2a2f38; border-bottom: 0; padding: 7px 10px; box-sizing: border-box;
+  display: flex; align-items: center; gap: var(--s2);
+  width: min(1500px, 94vw);
+  padding: var(--s2) var(--s3);
+  background: var(--bg-1);
+  border: 1px solid var(--line-1); border-bottom: 0;
+  border-radius: var(--r3) var(--r3) 0 0;
 }
-.pv-title { color: #2ee6c0; letter-spacing: 0.1em; text-transform: uppercase; font-size: 11px; margin-right: auto; }
-.pv-bar select { background: #1a1d24; color: var(--fg); border: 1px solid #333; padding: 3px 5px; }
+.pv-title {
+  margin-right: auto;
+  color: var(--ink-3); font-size: var(--text-xs);
+  text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600;
+}
+.pv-bar select {
+  padding: 4px var(--s2);
+  font: inherit; font-size: var(--text-sm);
+  color: var(--ink-1); background: var(--bg-2);
+  border: 1px solid var(--line-2); border-radius: var(--r2);
+}
 .pv-view {
   width: min(1500px, 94vw); flex: 1 1 auto; min-height: 0; max-height: 82vh;
-  border: 1px solid #2a2f38; cursor: grab; touch-action: none;
+  border: 1px solid var(--line-1);
+  cursor: grab; touch-action: none;
 }
 .pv-view:active { cursor: grabbing; }
 .pv-hud {
-  width: min(1500px, 94vw); box-sizing: border-box; padding: 5px 10px;
-  background: var(--panel); border: 1px solid #2a2f38; border-top: 0; color: var(--fg); font-size: 12px;
+  width: min(1500px, 94vw);
+  padding: var(--s2) var(--s3);
+  background: var(--bg-1); color: var(--ink-1);
+  border: 1px solid var(--line-1); border-top: 0;
+  border-radius: 0 0 var(--r3) var(--r3);
+  font-size: var(--text-sm);
 }
-.pv-help { width: min(1500px, 94vw); color: #6d737b; font-size: 11px; padding: 6px 2px; box-sizing: border-box; }
+.pv-help { width: min(1500px, 94vw); padding: var(--s2) 2px; color: var(--ink-3); font-size: var(--text-xs); }
 
-/* road cross-section preview (road-and-car): a floating panel, not part of #body, so the editor's
-   refresh() rebuilding the mode panel never tears it down mid-drag */
+/* ---- the floating road cross-section --------------------------------------------------------
+   Not part of the inspector, so the editor's refresh() rebuilding the mode panel never tears it
+   down mid-drag. It sits bottom-right, clear of the inspector on a wide screen. */
+
 .roadwidth {
   position: fixed;
-  right: 12px;
-  bottom: 12px;
-  width: min(340px, calc(100vw - 24px));
-  padding: 10px 12px 12px;
-  border-radius: 10px;
-  background: rgba(16, 18, 22, 0.94);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
-  z-index: 40;
+  right: calc(min(340px, 92vw) + var(--s3));
+  bottom: var(--s3);
+  z-index: var(--z-panel);
+  width: min(340px, calc(100vw - 2 * var(--s3)));
+  padding: var(--s3);
+  background: var(--bg-1);
+  border: 1px solid var(--line-1);
+  border-radius: var(--r3);
+  box-shadow: var(--shadow-2);
 }
 .roadwidth.hidden { display: none; }
-.roadwidth-title { font-weight: 600; margin-bottom: 6px; }
-.roadwidth-note { opacity: 0.75; font-size: 11px; line-height: 1.45; margin: 8px 0 10px; }
-.roadwidth-apply { width: 100%; }
-.roadwidth-apply:disabled { opacity: 0.45; }
+.roadwidth-title { font-weight: 600; font-size: var(--text-sm); margin-bottom: var(--s2); }
+.roadwidth-note { margin: var(--s2) 0 var(--s3); color: var(--ink-3); font-size: var(--text-xs); line-height: 1.45; }
+.roadwidth-apply { width: 100%; justify-content: center; }
+.roadwidth-apply:disabled { opacity: 0.45; pointer-events: none; }
+
+@media (max-width: 900px) {
+  .roadwidth { right: var(--s3); bottom: calc(46vh + var(--s3)); }
+}

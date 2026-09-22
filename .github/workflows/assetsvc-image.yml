@@ -70,7 +70,12 @@ jobs:
           for i in $(seq 1 30); do
             curl -sf localhost:8770/health && break || sleep 1
           done
-          curl -sf localhost:8770/health | tee /dev/stderr | grep -q '"ok":true'
+          # Parse it, do not grep it. The first version matched '"ok":true' against a response
+          # that is pretty-printed — `"ok": true`, with a space — so it could never have matched,
+          # and it failed the run AFTER the image had already been pushed. A shape assertion about
+          # JSON belongs in a JSON parser.
+          curl -sf localhost:8770/health | tee /dev/stderr \
+            | node -e 'const b=JSON.parse(require("fs").readFileSync(0,"utf8")); if (b.ok !== true) { console.error("health.ok was", b.ok); process.exit(1) }'
           # the finisher's import closure, which is the part a COPY can silently break
           docker exec assetsvc node -e "import('/app/tools/assetgen/finish.mjs').then(m => {
             if (typeof m.finish !== 'function') { console.error('finish() missing'); process.exit(1) }

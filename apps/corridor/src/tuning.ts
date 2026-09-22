@@ -338,6 +338,33 @@ export let SIDEWALK_CROSSING_W = 1
  */
 export let FURNITURE_CHUNK_M = 900
 /**
+ * Signal timing, in seconds of green (Rich, 2026-09-22: "set the superior road with a 2 minute
+ * interval and the inferior road with a 20 second interval. More than 4 way intersections should
+ * just round robin").
+ *
+ * These override the bake's numbers at load, so the whole site retimes from the panel without a
+ * re-export. SIGNAL_RATE multiplies wall-clock time: at 1 you wait the real two minutes, which is
+ * correct and tedious to test against, so turn it up to watch a cycle.
+ */
+export let SIGNAL_GREEN_MAJOR = 120
+export let SIGNAL_GREEN_MINOR = 20
+/** every phase's green at a junction with more than two phase groups — the round robin */
+export let SIGNAL_GREEN_RR = 25
+export let SIGNAL_AMBER = 4
+export let SIGNAL_ALL_RED = 2
+export let SIGNAL_RATE = 1
+/** the lit lens disc's radius (m); the dark lens it covers is 0.12 */
+export let SIGNAL_LENS_R = 0.125
+/** a stop bar's depth along the lane and its float over the asphalt (m) */
+export let STOPBAR_DEPTH = 0.5
+export let STOPBAR_LIFT = 0.025
+/** a bar further than this from a carriageway is not painted (m) */
+export let STOPBAR_MAX_FROM_ROAD = 12
+/** street name blades: post height, blade height, and the clear ground a corner post needs (m) */
+export let BLADE_POST_H = 2.9
+export let BLADE_H = 0.26
+export let BLADE_CLEAR = 0.5
+/**
  * The verge a BRANCH road's strip carries, each side (m). The primary gets 40 m; a residential
  * street in a subdivision whose neighbours are a hundred metres away does not, and giving it the
  * same both paved the grid twice over and cost 21.7 s of a 427-branch build.
@@ -642,6 +669,24 @@ export const TUNE_TABS: TuneTab[] = [
           tune('SIDEWALK_CROSSING_W', () => SIDEWALK_CROSSING_W, (v) => (SIDEWALK_CROSSING_W = v), [0.4, 3], 0.05, 'painted band width ×'),
           tune('FURNITURE_CHUNK_M', () => FURNITURE_CHUNK_M, (v) => (FURNITURE_CHUNK_M = v), [50, 2000], 25, 'm per cull chunk for linear furniture'),
           tune('BRANCH_VERGE', () => BRANCH_VERGE, (v) => (BRANCH_VERGE = v), [4, 40], 1, 'm of verge on a branch road strip'),
+        ],
+      },
+      {
+        title: 'intersections',
+        keys: [
+          tune('SIGNAL_GREEN_MAJOR', () => SIGNAL_GREEN_MAJOR, (v) => (SIGNAL_GREEN_MAJOR = v), [5, 300], 5, 'green on the superior road (s)'),
+          tune('SIGNAL_GREEN_MINOR', () => SIGNAL_GREEN_MINOR, (v) => (SIGNAL_GREEN_MINOR = v), [5, 120], 1, 'green on the inferior road (s)'),
+          tune('SIGNAL_GREEN_RR', () => SIGNAL_GREEN_RR, (v) => (SIGNAL_GREEN_RR = v), [5, 120], 1, 'green per phase when round-robining (s)'),
+          tune('SIGNAL_AMBER', () => SIGNAL_AMBER, (v) => (SIGNAL_AMBER = v), [1, 10], 0.5, 'amber (s)'),
+          tune('SIGNAL_ALL_RED', () => SIGNAL_ALL_RED, (v) => (SIGNAL_ALL_RED = v), [0, 6], 0.5, 'all-red between phases (s)'),
+          tune('SIGNAL_RATE', () => SIGNAL_RATE, (v) => (SIGNAL_RATE = v), [0, 30], 0.5, 'clock × — turn up to watch a cycle'),
+          tune('SIGNAL_LENS_R', () => SIGNAL_LENS_R, (v) => (SIGNAL_LENS_R = v), [0.05, 0.4], 0.005, 'lit lens radius (m)'),
+          tune('STOPBAR_DEPTH', () => STOPBAR_DEPTH, (v) => (STOPBAR_DEPTH = v), [0.1, 2], 0.05, 'stop bar depth along the lane (m)'),
+          tune('STOPBAR_LIFT', () => STOPBAR_LIFT, (v) => (STOPBAR_LIFT = v), [0.005, 0.2], 0.005, 'paint over asphalt (m)'),
+          tune('STOPBAR_MAX_FROM_ROAD', () => STOPBAR_MAX_FROM_ROAD, (v) => (STOPBAR_MAX_FROM_ROAD = v), [2, 60], 1, 'm from a drawn road, or no bar'),
+          tune('BLADE_POST_H', () => BLADE_POST_H, (v) => (BLADE_POST_H = v), [1.5, 6], 0.1, 'street sign post height (m)'),
+          tune('BLADE_H', () => BLADE_H, (v) => (BLADE_H = v), [0.1, 0.6], 0.01, 'blade height (m)'),
+          tune('BLADE_CLEAR', () => BLADE_CLEAR, (v) => (BLADE_CLEAR = v), [0, 4], 0.1, 'm clear of asphalt a corner post needs'),
         ],
       },
     ],

@@ -173,6 +173,12 @@ function applyLayers() {
   if (site.layers.parking) site.layers.parking.visible = on('parking')
   if (site.layers.barriers) site.layers.barriers.visible = on('barriers')
   if (site.layers.sidewalks) site.layers.sidewalks.visible = on('sidewalks')
+  // street-spice's derived intersection control. The Site carries these but nothing toggled them:
+  // their branch declared the checkboxes in index.html, and that markup no longer exists — layers
+  // are declared in ui/viewer.ts LAYER_GROUPS now, so the wiring has to be here.
+  if (site.layers.signals) site.layers.signals.visible = on('signals')
+  if (site.layers.stopbars) site.layers.stopbars.visible = on('stopbars')
+  if (site.layers.blades) site.layers.blades.visible = on('blades')
   if (site.layers.rocks) site.layers.rocks.visible = on('rocks')
   if (site.layers.water) site.layers.water.visible = on('water')
   site.layers.spine.visible = on('spine') && !drive.on

@@ -188,6 +188,73 @@ displaced icosahedra in the lithology's colour until a GLB exists. Probe:
 `probes/corridor-terrain.mjs <slug> rock|water` — Sideling: 5 481 shale instances, nearest 1.52 m
 from pavement, all on `groundAt`; South Mountain: 910 greenstone, nearest 4.16 m.
 
+### 5.x Intersection control — derived, not transcribed (`intersections.py`)
+
+Rich drove Crofton and found one signal, reading one way, and no stop signs. The cause is not an
+OSM gap in the way it looks — it is that a US suburb does not record what is assumed:
+
+| inside crofton-triangle's corridor | |
+|---|---|
+| drivable ways | 854 |
+| `highway=traffic_signals` nodes | 35 (one per junction, not one per arm) |
+| `highway=stop` nodes | 3 |
+| separately mapped `footway=sidewalk` ways | 47 |
+| drivable ways with NO `sidewalk=*` tag | 796 of 854 (93 %) |
+
+So the control is derived from the drawn network. Rules and their measured effect:
+
+| rule | threshold | why that number |
+|---|---|---|
+| one crossing per node cluster | 20 m | Crofton's blocks are 60 m+, so it cannot merge two real junctions; it does merge the node pair a slightly-offset crossroads is recorded as. 1038 junction records on 660 nodes collapse to 408 crossings |
+| a junction at all | ≥ 3 approaches | two arms is one road continuing through a node OSM happened to split |
+| a signal governs this crossing | 40 m | signals sit on each arm's stop line, 25–30 m out at a wide junction |
+| opposing arms share a phase | 180 ± 40° | tolerant enough for a skew crossing, tight enough not to pair two arms of one bend |
+| stop line setback | max(6 m, half the widest cross street + 1.5) | where the bar is painted, and the only setback that keeps it off the cross street's asphalt |
+
+**Who stops is class FIRST and continuity SECOND, and the second half is what makes it right.**
+Ranking on OSM class alone made 298 of 408 junctions all-way stops and put 1062 stop signs on a
+suburb that has almost none — every court meeting its street stopped the street too. When classes
+tie, which in a subdivision is most junctions, the road that runs THROUGH outranks the one that
+ends at it. That is a T, and the stem stops. Only two equal roads both running through is a real
+crossroads. After the fix: 369 two-way, 27 all-way, 12 signalised, 522 signs.
+
+**Exactly one phase is superior.** Testing "does this phase contain an arm of the top rank" made
+both phases superior at a crossing of two equal roads and produced a 252 s cycle — four minutes of
+green split two ways. It is now the phase holding the superior ROAD. Rich's timings: 120 s major,
+20 s minor, +4 amber +2 all-red, so 152 s; more than two phase groups round-robins at 25 s.
+
+**Every approach gets a mast.** This is the actual fix for "only read from one direction": OSM has
+one signal node per junction and the old path emitted one mast for it. 12 signalised junctions,
+41 masts, none short of its arm count.
+
+**The blade corner is ONE corner, not two.** "Far right from the superior road in the direction of
+travel" and "close right for the inferior road" select the same corner — at a crossroads the
+far-right of the eastbound superior IS the near-right of the northbound minor. The tie is between
+the two DIAGONALS (one per direction of the superior road), broken by the stem at a T and by
+north-easterly otherwise. Four candidates are emitted in preference order because only the viewer
+knows where the asphalt ends: with two, 62 of 408 junctions found neither clear and were skipped;
+with four, 18.
+
+**Truncation keeps the suffix and cuts the body**, because "Thistle Brooke" without the "Ct" could
+be anything. Direction words abbreviate BEFORE the suffix test — "Bancroft Lane East" has "East"
+last, so a suffix test run first finds nothing to abbreviate and eats the part that names the
+street. Consecutive leading directions collapse ("North West Crain Highway" -> "NW Crain Hwy").
+
+### 5.y Sidewalks from zones (`walkways.py`)
+
+Zones are polygons inside which every street is assumed to have a sidewalk, and they are DERIVED,
+not typed: buffer the residential network by 110 m (half a Crofton block), union, drop anything
+under 0.25 km². A subdivision is a dense mesh so the buffer closes over it; a rural road stays a
+ribbon and falls out. crofton-triangle: 7 zones, 13.19 km², which found the Crofton triangle and
+the north Crofton pocket without anyone typing a coordinate. An authored `sidewalk_zones.json`
+(lon/lat rings) overrides the derivation entirely.
+
+Emitted with `source: "zone"` into the existing `sidewalks` list, so the kerb, dropped-kerb and
+crossing logic in `furniture.buildSidewalks` is unchanged. OSM wins where it has an answer:
+`sidewalk=no` skips the road, `sidewalk=left|right` picks the side, and a side whose midpoint is
+within 7 m of a real mapped sidewalk is skipped (61 of 809 on Crofton). 748 sides on 396 roads,
+212 km, 64 600 triangles.
+
 ## 6 · Sign conventions (the ones that bit people)
 
 - three.js `rotation.y = θ` sends local **+Z** to `(sin θ, 0, cos θ)` and local **+X** to

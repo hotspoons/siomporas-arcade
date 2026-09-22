@@ -61,6 +61,13 @@ export const LAYER_GROUPS: { title: string; layers: { id: string; label: string;
       { id: 'buildings', label: 'Buildings', on: true },
       { id: 'power', label: 'Power lines', on: true },
       { id: 'furniture', label: 'Street furniture', on: true },
+      // from the street-spice lane: intersection control derived from the drawn network, because
+      // a US suburb records almost none of it in OSM (854 drivable ways in the Crofton triangle
+      // carry 35 signal nodes and 3 stop nodes). Toggles live here now, not as input[data-layer]
+      // in the HTML — that markup is gone.
+      { id: 'signals', label: 'Traffic signals', on: true },
+      { id: 'stopbars', label: 'Stop signs & bars', on: true },
+      { id: 'blades', label: 'Street name blades', on: true },
     ],
   },
   {

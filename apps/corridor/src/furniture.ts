@@ -33,7 +33,38 @@ const toWorld = (x: number, y: number) => new THREE.Vector3(x, 0, -y)
 export interface FurnitureResult {
   group: THREE.Group
   counts: { masts: number; signs: number; movedOffPavement: number; stillOnPavement: number; onTheLeft: number; noRoadNearby: number; armNoRoad: number }
+  /**
+   * Where each mast ACTUALLY ended up, after the kerb walk and the arm measurement.
+   *
+   * A signal controller has to hang a lit lens under the right head, and only this module knows
+   * where the head is: the bake gives the OSM node on the centreline, and the pole is then walked
+   * back out of the junction box and sideways to clear ground, so the final position is a metre
+   * or twenty from the one in the manifest. Published rather than re-derived, because re-deriving
+   * it means re-implementing `toKerb` and the two would drift apart on the first tuning change.
+   */
+  placed: { pos: THREE.Vector3; yaw: number; arm: number; side: number; lanes: number; src: unknown }[]
 }
+
+/**
+ * Where the lens centres of one mast sit, in the mast's own local frame.
+ *
+ * Exported so a controller can light them without re-deriving `mastGeometry`'s layout. The heads
+ * hang under the arm and are spread along it; each carries three lenses on its −Z face, and these
+ * are the same numbers `headGeometry` and `mastGeometry` build with.
+ */
+export function signalLensOffsets(lanes: number, arm: number, side: number): { x: number; y: number; z: number }[] {
+  const H = T.FURNITURE_SIGNAL_HEIGHT
+  const n = Math.max(1, Math.min(lanes, 6))
+  const out: { x: number; y: number; z: number }[] = []
+  for (let i = 0; i < n; i++) {
+    const t = n === 1 ? 0.62 : 0.3 + (0.66 * i) / (n - 1)
+    out.push({ x: side * arm * t, y: H - 0.9, z: -0.152 })
+  }
+  return out
+}
+
+/** lens height offsets within a head, red first — `headGeometry`'s LENS table. */
+export const SIGNAL_LENS_Y = [0.3, 0.0, -0.3]
 
 /**
  * A mesh builder that cuts what it is given into spatial chunks.
@@ -268,8 +299,9 @@ export function buildFurniture(
   const group = new THREE.Group()
   group.name = 'furniture'
   const counts = { masts: 0, signs: 0, movedOffPavement: 0, stillOnPavement: 0, onTheLeft: 0, noRoadNearby: 0, armNoRoad: 0 }
+  const placed: FurnitureResult['placed'] = []
   const data = manifest.signals
-  if (!data) return { group, counts }
+  if (!data) return { group, counts, placed }
 
   const metal = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.62, metalness: 0.25 })
 
@@ -409,6 +441,7 @@ export function buildFurniture(
     mesh.frustumCulled = false
     mesh.userData.src = b.at.map((a) => a.src)
     mesh.userData.arm = b.arm * b.side
+    for (const a of b.at) placed.push({ pos: a.pos, yaw: a.yaw, arm: b.arm, side: b.side, lanes, src: a.src })
     group.add(mesh)
   }
 
@@ -449,7 +482,7 @@ export function buildFurniture(
     group.add(mesh)
   }
 
-  return { group, counts }
+  return { group, counts, placed }
 }
 
 // --- barriers: guard rail, fence, wall, hedge ------------------------------------------------

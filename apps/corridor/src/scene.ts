@@ -23,6 +23,7 @@ import { buildPlacements, loadCatalog, loadPlacements } from './placements'
 import { buildBuildings } from './buildings'
 import { buildPower } from './power'
 import { buildBarriers, buildFurniture, buildSidewalks } from './furniture'
+import { buildBlades, buildSignals, buildStopBars } from './intersections'
 import { buildParking } from './parking'
 import { buildBridges, flattenSpine, loadStructureOverrides, suppressed } from './structures'
 import { loadSurfaceSets, overpassMesh, pavedOffset, pavedWidth, roadMesh, stations, taperedLanes, treesFromCanopy, type SurfaceSet } from './props'
@@ -36,7 +37,7 @@ export const toWorld = (x: number, y: number, z: number) => new THREE.Vector3(x,
 export interface Site {
   manifest: Manifest
   group: THREE.Group
-  layers: { imagery?: THREE.Mesh; trees?: THREE.Group; grass?: THREE.Group; crops?: THREE.Group; road: THREE.Group; horizon?: THREE.Mesh; structures: THREE.Group; spine: THREE.Group; markers: THREE.Group; placements: THREE.Group; buildings: THREE.Group; power: THREE.Group; furniture: THREE.Group; parking: THREE.Group; barriers: THREE.Group; sidewalks: THREE.Group; rocks: THREE.Group; water: THREE.Group }
+  layers: { imagery?: THREE.Mesh; trees?: THREE.Group; grass?: THREE.Group; crops?: THREE.Group; road: THREE.Group; horizon?: THREE.Mesh; structures: THREE.Group; spine: THREE.Group; markers: THREE.Group; placements: THREE.Group; buildings: THREE.Group; power: THREE.Group; furniture: THREE.Group; parking: THREE.Group; barriers: THREE.Group; sidewalks: THREE.Group; rocks: THREE.Group; water: THREE.Group; signals: THREE.Group; stopbars: THREE.Group; blades: THREE.Group }
   /** how many footprints were massed, and how many had a real measured height */
   buildingStats: { count: number; gabled: number; fromLidar: number }
   adjustments: Adjustments
@@ -53,6 +54,12 @@ export interface Site {
   barrierCounts: Record<string, { runs: number; metres: number; posts: number }>
   /** sidewalks, kerbs and painted crossings */
   sidewalkCounts: { walks: number; crossings: number; marked: number; bars: number; metres: number; kerbFlat: number }
+  /** signal junctions that cycle, and the lit lenses driving them */
+  signalCounts: { junctions: number; lit: number; masts: number; phases: number }
+  /** painted stop lines */
+  stopBarCounts: { bars: number; metres: number; clipped: number; noRoad: number }
+  /** street name blades and the corners they stand on */
+  bladeCounts: { junctions: number; blades: number; truncated: number; fellBack: number; noCorner: number; atlas: string }
   /** terrain-and-data: rock instances placed per rock type, and what water was drawn (for probes) */
   rockCounts: Record<string, number>
   waterStats: { lines: number; areas: number; falls: number; length_m: number }
@@ -1409,6 +1416,15 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
   group.add(barriers.group)
   const sidewalks = buildSidewalks(manifest, groundAtWorld, edgeDistanceWorld)
   group.add(sidewalks.group)
+  // the signals cycle, the stop lines are painted and the corners are named. The controller is fed
+  // the masts furniture.ts ACTUALLY placed, because the kerb walk moves each one off the bake's
+  // centreline position by a metre or twenty and the lenses have to hang under the real head.
+  const signals = buildSignals(manifest, furniture.placed)
+  group.add(signals.group)
+  const stopbars = buildStopBars(manifest, groundAtWorld, edgeDistanceWorld)
+  group.add(stopbars.group)
+  const blades = buildBlades(manifest, groundAtWorld, edgeDistanceWorld)
+  group.add(blades.group)
   // authored bridges over the road (structures.json bridge_over)
   structures.add(await buildBridges(overrides, catalog, spineAt, groundAtWorld, (s) => pavedHalfAt(s) * 2))
 
@@ -1425,13 +1441,14 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
       inner(eye, time, fwd, pitch)
       water.tick(time)
       stream?.update(eye.x, -eye.z) // site frame: y = -z
+      signals.tick(time)
     }
   }
 
   return {
     manifest,
     group,
-    layers: { imagery: terrain, trees, grass: grassRef?.mesh, crops: crops?.group, road, horizon, structures, spine, markers, placements: placementsGroup, buildings: built.group, power: power.group, furniture: furniture.group, parking: parking.group, barriers: barriers.group, sidewalks: sidewalks.group, rocks: rocks.group, water: water.group },
+    layers: { imagery: terrain, trees, grass: grassRef?.mesh, crops: crops?.group, road, horizon, structures, spine, markers, placements: placementsGroup, buildings: built.group, power: power.group, furniture: furniture.group, parking: parking.group, barriers: barriers.group, sidewalks: sidewalks.group, rocks: rocks.group, water: water.group, signals: signals.group, stopbars: stopbars.group, blades: blades.group },
     buildingStats: built.stats,
     adjustments,
     treeCount,
@@ -1441,6 +1458,9 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     parkingCounts: parking.counts,
     barrierCounts: barriers.counts,
     sidewalkCounts: sidewalks.counts,
+    signalCounts: signals.counts,
+    stopBarCounts: stopbars.counts,
+    bladeCounts: blades.counts,
     rockCounts: rocks.counts,
     waterStats: { lines: water.lines, areas: water.areas, falls: water.falls, length_m: water.length_m },
     canopyAt: canopyAtRef,

@@ -177,7 +177,7 @@ def roads(site: dict, frame: Frame, cache: Path) -> dict:
             others = owners.get(nid, set()) - {c["id"]}
             if others:
                 x, y = node_xy[nid]
-                js.append({"node": nid, "x": round(x - ox, 1), "y": round(y - oy, 1), "s": round(float(c["line"].project(Point(x, y))), 1), "with": sorted(by_id[o]["ident"] for o in others)})
+                js.append({"node": nid, "x": round(float(frame.to_enu(x, y)[0]), 1), "y": round(float(frame.to_enu(x, y)[1]), 1), "s": round(float(c["line"].project(Point(x, y))), 1), "with": sorted(by_id[o]["ident"] for o in others)})
         js.sort(key=lambda j: j["s"])
         c["junctions"] = js
     found = sorted({c["ident"] for c in chains})
@@ -259,7 +259,7 @@ def dead_ends(chains: list[dict], frame: Frame, cache: Path, radius_m: float, si
             c["dead_ends"].append({
                 "s": round(s_at, 1), "kind": "cul_de_sac", "radius_m": round(rad, 1),
                 "source": "osm" if osm_bulb else "assumed", "node": node,
-                "x": round(float(p.x - ox), 1), "y": round(float(p.y - oy), 1),
+                "x": round(float(frame.to_enu(p.x, p.y)[0]), 1), "y": round(float(frame.to_enu(p.x, p.y)[1]), 1),
             })
             if osm_bulb:
                 n_osm += 1
@@ -472,7 +472,15 @@ def fetch_site(site: dict, half_width: float, lidar_half_width: float, skip: set
     print(f"  done    {manifest['seconds']} s -> {out}")
 
 
-def export_branches(site_dir: Path, ox: float, oy: float) -> list[dict] | None:
+def _enu_cols(frame, pts, zs=None, nd: int = 2) -> list:
+    """Nx2 UTM -> [[e, n(, z)], ...] in the site's ENU frame. Mirrors export._enu_cols; kept local
+    so network.py does not have to import export.py."""
+    e, n = frame.to_enu(pts[:, 0], pts[:, 1])
+    cols = [np.asarray(e), np.asarray(n)] + ([np.nan_to_num(np.asarray(zs, dtype=float))] if zs is not None else [])
+    return np.column_stack(cols).round(nd).tolist()
+
+
+def export_branches(site_dir: Path, frame) -> list[dict] | None:
     """The manifest's `branches` (cadre §6 / main's 011): every non-primary chain with coords
     [x, y, z] every 10 m (Gaussian-smoothed like the spine, z from its own lidar profile), its
     junctions with z, and its profile/structures. None for a single-road site."""
@@ -530,7 +538,7 @@ def export_branches(site_dir: Path, ox: float, oy: float) -> list[dict] | None:
             js.append({**j, "z": None if z is None or not np.isfinite(z) else round(z, 2)})
         out.append({
             "id": b["id"], "name": b.get("name"), "ref": b.get("ref"), "ident": b.get("ident"), "highway": b.get("highway"), "lanes": b.get("lanes"), "oneway": b.get("oneway"), "length_m": b.get("length_m"),
-            "coords": np.column_stack([pts[:, 0] - ox, pts[:, 1] - oy, zs]).round(2).tolist(),
+            "coords": _enu_cols(frame, pts, zs),
             "junctions": js, "dead_ends": sib.get("dead_ends") or b.get("dead_ends") or [], "s_on_primary": b.get("s_on_primary"),
             "profile": {"s": prof["s"][::5], "road_z": [finite(v) for v in prof["road_z"][::5]]} if prof and prof.get("s") else None,
             "structures": b.get("structures") or [], "surface": None,

@@ -11,15 +11,40 @@
 // returns immediately while this frame still has room, and yields to the next frame when it does
 // not. The loop stays readable and the page stays alive.
 //
+// One thing the budget must NOT do is block on a frame that is not coming: see `nextSlice` and
+// the hidden-tab check in `tick`.
+//
 // This is also the floor that tiled streaming is built on. A tile system is exactly this — build a
 // bounded amount per frame, nearest first — plus a wanted set and eviction. There is no point
 // adding those on top of a builder that cannot be interrupted.
 
-/** How the yield happens: a frame if we can render one, otherwise a macrotask. */
-const nextSlice = (): Promise<void> =>
-  typeof requestAnimationFrame === 'function'
-    ? new Promise((r) => requestAnimationFrame(() => r()))
-    : new Promise((r) => setTimeout(r, 0))
+/**
+ * How the yield happens: a frame if one is actually coming, otherwise a macrotask.
+ *
+ * `requestAnimationFrame` DOES NOT FIRE in a background tab. Browsers pause it entirely, so a
+ * budgeted build that yields on it stops dead the moment the tab loses focus and never resumes —
+ * the page stays responsive, nothing is spinning, and the progress readout sits on whatever it
+ * last printed. crofton-triangle sat at "grading 1/427 streets" indefinitely on Rich's machine
+ * while building fine headless, and it took a visibility check to see why: the tab was simply not
+ * in front. The same happens with an occluded window or a sleeping monitor.
+ *
+ * So: a macrotask when the document is hidden, and even when it is visible, race the frame
+ * against a timer. A build must never depend on a frame that may not come.
+ */
+const nextSlice = (): Promise<void> => {
+  if (typeof requestAnimationFrame !== 'function') return new Promise((r) => setTimeout(r, 0))
+  return new Promise((r) => {
+    let done = false
+    const fin = () => {
+      if (done) return
+      done = true
+      r()
+    }
+    requestAnimationFrame(fin)
+    // only bites if rAF is not coming; a visible tab resolves on the frame, as intended
+    setTimeout(fin, 100)
+  })
+}
 
 export interface BudgetStats {
   /** how many times the work yielded back to the browser */
@@ -63,6 +88,15 @@ export class Budget {
     const now = performance.now()
     const slice = now - this.sliceStart
     if (slice < this.sliceMs) return
+    // A HIDDEN TAB HAS NO FRAMES TO PROTECT. requestAnimationFrame is paused outright there, and
+    // setTimeout is clamped to about 1 Hz, so yielding costs a second an item and a 427-branch
+    // build never finishes — measured crawling 1 -> 46 of 427 in a minute before this check, and
+    // stopped dead before that when the yield was rAF alone. The whole point of the budget is to
+    // let the browser paint between slices; where it is not painting, just get on with it.
+    if (typeof document !== 'undefined' && document.hidden) {
+      this.sliceStart = now
+      return
+    }
     if (slice > this.stats.worstSliceMs) this.stats.worstSliceMs = slice
     this.stats.yields++
     this.onProgress?.(this.done, this.total)

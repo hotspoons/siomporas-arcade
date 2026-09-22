@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -200,18 +201,99 @@ def cmd_report(a: argparse.Namespace) -> None:
         print(f"{j['slug']:24s} {sp.get('ident')} {sp.get('length_m')} m  osm {j.get('osm', {}).get('features')}  lidar {li.get('points_in_corridor', 0):,} pts  structures {len(li.get('structures', []))}  geology {j.get('geology', {}).get('named_formations')}")
 
 
-def cmd_export(a: argparse.Namespace) -> None:
-    from . import export, surface
-
+def _sites(slug: str):
     for d in sorted((DATA / "sites").glob("*")):
-        if (d / "site.json").exists() and (a.slug == "all" or d.name == a.slug):
-            if not (d / "surface.json").exists() or a.resurface:
-                sf = surface.measure(d)
-                if sf:
-                    print(f"{d.name:24s} surface {sf['summary']}")
-            ex = export.export_site(d)
-            print(f"{d.name:24s} {', '.join(ex['layers'])}  {ex['bytes'] / 2**20:.1f} MiB")
-    print(export.write_index(DATA / "sites"))
+        if (d / "site.json").exists() and (slug == "all" or d.name == slug):
+            yield d
+
+
+def cmd_export(a: argparse.Namespace) -> None:
+    """
+    Re-write web/ for one site or all of them.
+
+    By default this writes straight into the live tree, which is fine on a laptop and wrong for a
+    pipeline something is serving from: a viewer that reloads mid-export gets a manifest that does
+    not match the rasters beside it. `--staged` builds into `web.staging` instead and leaves the
+    served tree untouched until `corridor promote` swaps it in. `--promote` does both.
+    """
+    from . import export, surface, swap
+
+    staged = a.staged or a.promote
+    touched = []
+    for d in _sites(a.slug):
+        if not (d / "surface.json").exists() or a.resurface:
+            sf = surface.measure(d)
+            if sf:
+                print(f"{d.name:24s} surface {sf['summary']}")
+        live = Path(a.out) if a.out else d / "web"
+        target = swap.staging_dir(live) if staged else live
+        if staged and target.exists():
+            shutil.rmtree(target)
+        ex = export.export_site(d, target)
+        where = f"  -> {target.name}" if target != live else ""
+        print(f"{d.name:24s} {', '.join(ex['layers'])}  {ex['bytes'] / 2**20:.1f} MiB{where}")
+        touched.append((d, live, target))
+
+    if staged and a.promote:
+        for d, live, target in touched:
+            _promote(d.name, live, target, a.allow_missing)
+    if not staged or a.promote:
+        print(export.write_index(DATA / "sites"))
+    elif staged:
+        print(f"{len(touched)} staged, nothing live yet — `corridor promote {a.slug}` to swap")
+
+
+def _promote(name: str, live: Path, staged: Path, allow_missing: bool) -> bool:
+    from . import swap
+
+    gone = swap.missing_from(staged, live)
+    if gone and not allow_missing:
+        print(f"{name:24s} REFUSED: {len(gone)} file(s) in the live tree are absent from the staged one")
+        for g in gone[:8]:
+            print(f"    {g}")
+        if len(gone) > 8:
+            print(f"    ... and {len(gone) - 8} more")
+        print("    re-run the export, or pass --allow-missing if the layer is meant to be gone")
+        return False
+    how = swap.swap_dir(live, staged)
+    note = "atomic" if how == "exchange" else "brief gap" if how == "rename" else "first publish"
+    extra = f", {len(gone)} dropped" if gone else ""
+    print(f"{name:24s} LIVE ({note}{extra}) — previous tree kept at {staged.name}")
+    return True
+
+
+def cmd_promote(a: argparse.Namespace) -> None:
+    """Swap a staged export into place. The old tree is kept, so `rollback` is the same swap."""
+    from . import export
+
+    n = 0
+    for d in _sites(a.slug):
+        live = d / "web"
+        staged = live.with_name(live.name + ".staging")
+        if not staged.is_dir():
+            continue
+        n += _promote(d.name, live, staged, a.allow_missing)
+    if n:
+        print(export.write_index(DATA / "sites"))
+    print(f"{n} site(s) promoted")
+
+
+def cmd_rollback(a: argparse.Namespace) -> None:
+    """Undo a promote — the swap run a second time puts the previous tree back."""
+    from . import export, swap
+
+    n = 0
+    for d in _sites(a.slug):
+        live = d / "web"
+        staged = live.with_name(live.name + ".staging")
+        if not staged.is_dir():
+            continue
+        how = swap.swap_dir(live, staged)
+        print(f"{d.name:24s} ROLLED BACK ({'atomic' if how == 'exchange' else 'brief gap'})")
+        n += 1
+    if n:
+        print(export.write_index(DATA / "sites"))
+    print(f"{n} site(s) rolled back")
 
 
 def cmd_flora(a: argparse.Namespace) -> None:
@@ -269,7 +351,18 @@ def main() -> None:
     ex = sub.add_parser("export", help="(re)write web/ layers + sites/index.json for the viewer")
     ex.add_argument("slug", nargs="?", default="all")
     ex.add_argument("--resurface", action="store_true", help="re-measure surface.json even if present")
+    ex.add_argument("--staged", action="store_true", help="build into web.staging and leave the served tree alone")
+    ex.add_argument("--promote", action="store_true", help="build staged, then swap it live (implies --staged)")
+    ex.add_argument("--out", help="write this ONE site's layers to an explicit directory instead of web/")
+    ex.add_argument("--allow-missing", action="store_true", help="promote even if the staged tree drops files the live one has")
     ex.set_defaults(fn=cmd_export)
+    pr = sub.add_parser("promote", help="swap a staged export live (atomic where the filesystem allows)")
+    pr.add_argument("slug", nargs="?", default="all")
+    pr.add_argument("--allow-missing", action="store_true")
+    pr.set_defaults(fn=cmd_promote)
+    rb = sub.add_parser("rollback", help="put the previous tree back — the promote swap, run again")
+    rb.add_argument("slug", nargs="?", default="all")
+    rb.set_defaults(fn=cmd_rollback)
     fl = sub.add_parser("flora", help="fetch LANDFIRE EVT + FIA species + Daymet for baked sites")
     fl.add_argument("slug", nargs="?", default="all")
     fl.add_argument("--overwrite", action="store_true")

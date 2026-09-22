@@ -123,6 +123,29 @@
 }
 .pv-help { width: min(1500px, 94vw); padding: var(--s2) 2px; color: var(--ink-3); font-size: var(--text-xs); }
 
+/* ---- the frame-mismatch banner --------------------------------------------------------------
+   `frameBanner()` in editor/ui.ts, absorbed into the palette at the editor lane's request. Their
+   version hand-rolled four hex colours (#e2564f / #2a1512 / #ff8b82 / #b99) which put the one
+   loudest element in the editor in a red that was not this UI's red. Same intent, same markup
+   (strong, a reason, a dim instruction), expressed in --danger.
+
+   It is deliberately the only banner in the editor. A frame mismatch displaces every coordinate
+   in a file while every polygon still draws a plausible shape over plausible ground — nothing
+   else here is wrong in a way you cannot see, so nothing else earns this much attention. */
+
+.framewarn {
+  display: grid; gap: var(--s1);
+  padding: var(--s3);
+  color: var(--ink-1);
+  background: var(--danger-dim);
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
+  border-left-width: 3px;
+  border-radius: var(--r2);
+  font-size: var(--text-sm);
+}
+.framewarn strong { color: var(--danger); font-weight: 600; }
+.framewarn .dim { color: var(--ink-3); font-size: var(--text-xs); }
+
 /* ---- the floating road cross-section --------------------------------------------------------
    Not part of the inspector, so the editor's refresh() rebuilding the mode panel never tears it
    down mid-drag. It sits bottom-right, clear of the inspector on a wide screen. */

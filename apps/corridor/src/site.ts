@@ -47,10 +47,27 @@ export interface Layer {
  */
 export interface TileIndex {
   size_m: number
-  /** site-frame position of tile (0, 0)'s minimum corner */
+  /** tile (0,0)'s minimum corner ON THE PROJECTION GRID — not ENU. Tile placement comes from each
+   *  tile's own `geo` lattice; this is only useful for naming and for coarse bookkeeping. */
   origin: [number, number]
   res: { dem: number; naip: number | null; chm: number | null }
-  list: { x: number; y: number; dem: { zmin: number; zscale: number }; chm?: boolean; naip?: boolean }[]
+  /** where the packs live, relative to web/ (default `tiles/0`) */
+  dir?: string
+  /** `pack-1`: uint32 LE header length, header JSON {rev, files:{name:[offset,len]}}, then blobs */
+  format?: string
+  /** the per-tile imagery file inside the tile directory (default `naip.jpg`) */
+  texture?: string
+  list: {
+    x: number
+    y: number
+    dem: { zmin: number; zscale: number }
+    chm?: boolean
+    naip?: boolean
+    /** pack size in bytes, for a loading estimate */
+    pack?: number
+    /** the tile's own geodetic control lattice — the only correct way to place or sample it */
+    geo?: GeoLattice
+  }[]
 }
 
 export interface Structure {

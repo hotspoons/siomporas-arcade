@@ -5,6 +5,7 @@ import * as THREE from 'three'
 import * as T from './tuning'
 import { Anchor } from '@apex/engine/geo/wgs84'
 import { RasterFrame } from '@apex/engine/geo/raster'
+import { ImageryStream, TileSet, loadTiles } from './tiles'
 import { loadBakedTexture } from './textures'
 import { DATA_BASE, decodeHeights, decodeScalar, loadImage, type Layer, type Manifest, type Structure } from './site'
 import { NearTrees, type TreeRecord } from './trees'
@@ -16,7 +17,7 @@ import { loadFlora, type Flora } from './flora'
 import { CROP_TYPES, buildCrops, tickCrops, type CropType, type Field as CropField } from './crops'
 import { ACCUM_PARS, Precipitation, accumUniforms, type Weather } from './weather'
 import { BoundsIndex, buildStrip, sinkUnderStrips } from './strip'
-import { mapBudgeted } from './budget'
+import { Budget, mapBudgeted } from './budget'
 import { Adjustments, NEUTRAL as NEUTRAL_ADJ } from './adjust'
 import { buildPlacements, loadCatalog, loadPlacements } from './placements'
 import { buildBuildings } from './buildings'
@@ -83,6 +84,8 @@ export interface Site {
   /** trees within r of world x,z as [x, z, trunkRadius] */
   treesNear: (x: number, z: number, r: number) => [number, number, number][]
   terrain: THREE.Mesh
+  /** imagery streaming counts on a tiled network, null on a corridor site */
+  tiles: (() => { resident: number; pending: number; tiles: number; loads: number; unloads: number; fails: number }) | null
   /** ground height (m) at site x,y from the DEM layer */
   heightAt: (x: number, y: number) => number
   /** point + travel direction on the spine at along-track s (metres) */
@@ -277,7 +280,27 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
   if (overrides.length) manifest = { ...manifest, spine: { ...manifest.spine, coords: flattenSpine(manifest.spine.coords, overrides) }, structures: suppressed(manifest.structures, overrides) }
   const demImg = await loadImage(base + L.dem.file)
   const dem: Field = framed(L.dem, decodeHeights(demImg, L.dem), anchor)
-  const heightAt = sampler(dem)
+  const overviewHeight = sampler(dem)
+
+  // A network bake keeps this 8 m DEM as the OVERVIEW and puts the real 2 m heights in tiles. Those
+  // are decoded up front, not streamed: every height lookup below — the strip, the trees, the
+  // grass, the car — happens on the first frame, and a height that has not arrived is a hole, not
+  // a coarser LOD. The overview stands in wherever no tile was baked, which is most of a hull.
+  let tileSet: TileSet | null = null
+  if (L.tiles && anchor) {
+    status('decoding terrain tiles…')
+    tileSet = new TileSet(L.tiles.size_m, overviewHeight, null)
+    // Budgeted: four hundred packs decoded in one call stack is the same freeze the branch
+    // builder had, and the budget already knows not to wait on a frame that a hidden tab will
+    // never deliver.
+    const b = new Budget(8)
+    await loadTiles(base, L.tiles, anchor, tileSet, (d, n) => status(`terrain tiles ${d}/${n}…`), () => b.tick())
+    if (!tileSet.tiles.length) {
+      console.warn(`${manifest.slug}: tile index lists ${L.tiles.list.length} tiles, none loaded — falling back to the overview`)
+      tileSet = null
+    }
+  }
+  const heightAt = tileSet ? tileSet.heightAt : overviewHeight
 
   // --- near terrain, textured with the imagery -----------------------------------------------
   const stride = strideFor(L.dem, lite ? 300_000 : 1_100_000)
@@ -312,22 +335,61 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     // imagery into a 2D canvas, which cannot read a GPU-compressed texture.
   }
   const bare = new THREE.Color(0x6f6a5a)
-  const terrainMat = new THREE.MeshStandardMaterial({ map: imagery, color: imagery ? 0xffffff : bare, roughness: 1, metalness: 0 })
   // the coarse terrain takes the settled layer as well, or snow stops at the strip's rim
   const terrainWeather = accumUniforms()
-  terrainMat.onBeforeCompile = (shader) => {
-    Object.assign(shader.uniforms, terrainWeather)
-    shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nvarying vec3 vWWorld;\nvarying vec3 vWNormal;')
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvWWorld = (modelMatrix * vec4(position, 1.0)).xyz;\nvWNormal = normalize(mat3(modelMatrix) * objectNormal);')
-    shader.fragmentShader = shader.fragmentShader
-      .replace('#include <map_pars_fragment>', `#include <map_pars_fragment>\nvarying vec3 vWWorld;\nvarying vec3 vWNormal;\n${ACCUM_PARS}`)
-      .replace('#include <map_fragment>', '#include <map_fragment>\ndiffuseColor.rgb = applyWeather(diffuseColor.rgb, normalize(vWNormal), vWWorld);')
+  /** Every terrain surface — the overview and each tile — is the same material with its own map. */
+  const terrainMaterial = (map: THREE.Texture | null) => {
+    const m = new THREE.MeshStandardMaterial({ map, color: map ? 0xffffff : bare, roughness: 1, metalness: 0 })
+    m.onBeforeCompile = (shader) => {
+      Object.assign(shader.uniforms, terrainWeather)
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', '#include <common>\nvarying vec3 vWWorld;\nvarying vec3 vWNormal;')
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvWWorld = (modelMatrix * vec4(position, 1.0)).xyz;\nvWNormal = normalize(mat3(modelMatrix) * objectNormal);')
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <map_pars_fragment>', `#include <map_pars_fragment>\nvarying vec3 vWWorld;\nvarying vec3 vWNormal;\n${ACCUM_PARS}`)
+        .replace('#include <map_fragment>', '#include <map_fragment>\ndiffuseColor.rgb = applyWeather(diffuseColor.rgb, normalize(vWNormal), vWWorld);')
+    }
+    m.customProgramCacheKey = () => 'corridor-terrain'
+    return m
   }
-  terrainMat.customProgramCacheKey = () => 'corridor-terrain'
-  const terrain = new THREE.Mesh(terrainGeo, terrainMat)
-  terrain.name = 'terrain'
+  const terrainMat = terrainMaterial(imagery)
+  const terrainMats: THREE.MeshStandardMaterial[] = [terrainMat]
+  const terrainGeos: THREE.BufferGeometry[] = [terrainGeo]
+  const overview = new THREE.Mesh(terrainGeo, terrainMat)
+  overview.name = 'terrain'
+  const terrain = overview
   group.add(terrain)
+
+  // --- fine terrain, one mesh per tile ---------------------------------------------------------
+  let stream: ImageryStream | null = null
+  if (tileSet && L.tiles) {
+    // Each tile is its own raster with its own lattice, so `gridGeometry` places it correctly and
+    // hands it 0..1 UVs — exactly the UV a per-tile texture wants — with no changes at all. One
+    // stride for every tile: two neighbouring terrain meshes at different strides do not share
+    // their edge vertices and you get a lit crack between them at every boundary.
+    const tileStride = strideFor(tileSet.tiles[0].dem.layer, lite ? 4_000 : 14_000)
+    stream = new ImageryStream(base, L.tiles)
+    const grp = new THREE.Group()
+    grp.name = 'terrain:tiles'
+    for (const t of tileSet.tiles) {
+      const geo = gridGeometry(t.dem, tileStride, () => 0)
+      // Until its own imagery streams in, a tile wears the site's NAIP overview. That is the same
+      // picture the overview mesh under it is already showing, so a tile appearing is a sharpening
+      // rather than a flash of a different colour.
+      const mat = terrainMaterial(imagery)
+      const mesh = new THREE.Mesh(geo, mat)
+      mesh.name = `terrain:${t.x}_${t.y}`
+      grp.add(mesh)
+      terrainMats.push(mat)
+      terrainGeos.push(geo)
+      stream.add(t, mat, imagery)
+    }
+    group.add(grp)
+    // The overview is still under the tiles, and two surfaces of the same ground at 8 m and 2 m
+    // z-fight wherever the coarse one pokes through the fine one. Cut it to the tiles' coverage,
+    // the same way the horizon is cut to the near DEM's.
+    cutHorizon(terrainGeo, L.dem.bbox, L.dem.res * stride, heightAt, tileSet.covers)
+  }
 
   // --- canopy: the forest blanket (off by default; the trees below are the stand-ins) --------
   let canopy: THREE.Mesh | undefined
@@ -391,7 +453,10 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     // cell, and shows through as flat green (Rich's "green stuff", four rounds of it). So every
     // horizon triangle inside the near DEM's footprint is removed, and the one-cell rim that is
     // still inside is pinned 3 m under the near terrain so the two meet without a hole.
-    cutHorizon(geo, L.dem.bbox, hz.layer.res * hs, heightAt)
+    // On a tiled network the near ground is the tiles, not the whole DEM bbox — the overview
+    // between them is itself only a coarse stand-in, and cutting the hull whole would leave the
+    // horizon missing everywhere the bake did not reach.
+    cutHorizon(geo, L.dem.bbox, hz.layer.res * hs, heightAt, tileSet ? tileSet.covers : undefined)
     let mat: THREE.Material
     if (L.horizon_naip) {
       const tex = loadBakedTexture(`${DATA_BASE}${base}`, L.horizon_naip, renderer)
@@ -952,7 +1017,9 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     mark('grade: branch strips built')
     for (const bs of branchStrips) road.add(bs.mesh)
     // ONE pass for every strip, primary and branches together
-    sinkUnderStrips(terrainGeo, [strip, ...branchStrips])
+    // every terrain surface, not just the overview: a 2 m tile left unsunk pokes up through
+    // the road it is under
+    for (const g of terrainGeos) sinkUnderStrips(g, [strip, ...branchStrips])
     mark('grade: sink all strips')
     // The branches go in a bounds grid: this lookup is the single hottest thing in the build, and
     // walking all 427 of them was 45 µs a call against 0.4 µs for a point on the primary strip.
@@ -987,7 +1054,9 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
       branchStrips = await makeBranchStrips()
       branchIndex = new BoundsIndex(branchStrips)
       for (const bs of branchStrips) road.add(bs.mesh)
-      sinkUnderStrips(terrainGeo, [strip, ...branchStrips])
+      // every terrain surface, not just the overview: a 2 m tile left unsunk pokes up through
+    // the road it is under
+    for (const g of terrainGeos) sinkUnderStrips(g, [strip, ...branchStrips])
     }
     group.add(road)
     // everything that stands on the ground near the road stands on the strip
@@ -1208,7 +1277,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
         st.setTint(lk.grass.base.clone().multiplyScalar(2.0).lerp(new THREE.Color(0xffffff), 0.4), imagery ? lk.ground : bare)
         st.setLitter(lk.litter.tint, lk.litter.spread)
       }
-      terrainMat.color.copy(imagery && terrainMat.map ? lk.ground : bare)
+      for (const m of terrainMats) m.color.copy(m.map ? lk.ground : bare)
       if (horizon && (horizon.material as THREE.MeshStandardMaterial).map) (horizon.material as THREE.MeshStandardMaterial).color.copy(lk.ground)
       if (imp) imp.rebake(near.sources())
     }
@@ -1353,6 +1422,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     updateNear = (eye, time, fwd, pitch) => {
       inner(eye, time, fwd, pitch)
       water.tick(time)
+      stream?.update(eye.x, -eye.z) // site frame: y = -z
     }
   }
 
@@ -1411,15 +1481,23 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     edgeDistance: edgeDistanceWorld,
     treesNear: treesNearWorld,
     terrain,
+    /** tiled sites only: imagery streaming counts, for probes and the console */
+    tiles: stream ? () => stream.counts : null,
     heightAt,
     spineAt,
     setImagery: (on) => {
-      terrainMat.map = on ? imagery : null
-      terrainMat.color.copy(on && imagery ? look(currentSeason).ground : bare)
-      terrainMat.needsUpdate = true
+      // A tile's map is its own — streamed 1 m NAIP, or the overview standing in until it lands —
+      // so turning imagery off clears them all and turning it back on restores what each had.
+      for (const m of terrainMats) {
+        if (!on) m.map = null
+        else if (m === terrainMat) m.map = imagery
+        else if (!m.map) m.map = imagery // a tile whose stream has not arrived goes back to the overview
+        m.color.copy(on && m.map ? look(currentSeason).ground : bare)
+        m.needsUpdate = true
+      }
     },
     setWire: (on) => {
-      terrainMat.wireframe = on
+      for (const m of terrainMats) m.wireframe = on
     },
     /** the canopy blanket is built on the first tick, not on load — see `makeCanopy` */
     setCanopy: (on) => {
@@ -1444,14 +1522,22 @@ function hash2(x: number, y: number): number {
   return ((h ^ (h >>> 15)) >>> 0) / 4294967296
 }
 
-function cutHorizon(geo: THREE.BufferGeometry, demBbox: [number, number, number, number], cell: number, heightAt: (x: number, y: number) => number) {
+function cutHorizon(geo: THREE.BufferGeometry, demBbox: [number, number, number, number], cell: number, heightAt: (x: number, y: number) => number, covered?: (x: number, y: number) => boolean) {
   const pos = geo.getAttribute('position') as THREE.BufferAttribute
   const [x0, y0, x1, y1] = demBbox
+  // A corridor site's near terrain fills its whole bbox, so "inside" is that rectangle. A tiled
+  // NETWORK is different twice over: the hull is mostly empty, so cutting it whole would punch
+  // holes in the horizon between the corridors, and the same cut is used again to take the 8 m
+  // overview out from under the 2 m tiles. Both cases are "wherever this other surface covers".
+  const inside = covered ?? ((x: number, y: number) => x >= x0 && x <= x1 && y >= y0 && y <= y1)
   const removed = new Uint8Array(pos.count)
   for (let i = 0; i < pos.count; i++) {
     const x = pos.getX(i), y = -pos.getZ(i) // site frame
-    if (x < x0 || x > x1 || y < y0 || y > y1) continue
-    const deep = x > x0 + cell * 1.5 && x < x1 - cell * 1.5 && y > y0 + cell * 1.5 && y < y1 - cell * 1.5
+    if (!inside(x, y)) continue
+    // deep = this point and its neighbourhood are covered, so no rim of the finer surface is close
+    // enough for the coarse one to show through
+    const d = cell * 1.5
+    const deep = inside(x - d, y) && inside(x + d, y) && inside(x, y - d) && inside(x, y + d)
     if (deep) removed[i] = 1
     else pos.setY(i, heightAt(x, y) - 3.0)
   }

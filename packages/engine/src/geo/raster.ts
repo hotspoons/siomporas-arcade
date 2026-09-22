@@ -41,6 +41,17 @@ export class RasterFrame {
   private readonly lon: number[]
   private readonly lat: number[]
   private readonly anchor: Anchor
+  /**
+   * The lattice points' own ENU positions, precomputed: [e0, n0, e1, n1, ...].
+   *
+   * `toGrid` runs in the hot path — every height and canopy lookup in the viewer, several times a
+   * vertex while the road strips are built — and the first version iterated Newton against the
+   * EXACT forward map, about nine geodetic transforms a call. It hung the build at "grading 1/427
+   * streets". Over a raster the ENU surface is very nearly a bilinear patch on these points, so
+   * the inverse iterates against THAT instead: four lerps and an analytic Jacobian, no
+   * transcendentals at all, converging to the lattice's own accuracy.
+   */
+  private readonly enu: Float64Array
   /** affine ENU->grid seed for the inverse: [a, b, c, d, e, f] with u = a*x + b*y + c etc. */
   private readonly inv: number[]
 
@@ -51,6 +62,14 @@ export class RasterFrame {
     this.lon = spec.geo.lon
     this.lat = spec.geo.lat
     this.anchor = anchor
+    const n = this.n
+    this.enu = new Float64Array(n * n * 2)
+    const p: number[] = [0, 0, 0]
+    for (let k = 0; k < n * n; k++) {
+      anchor.toLocal(this.lon[k], this.lat[k], 0, p)
+      this.enu[k * 2] = p[0]
+      this.enu[k * 2 + 1] = p[1]
+    }
     this.inv = this.fitInverse()
   }
 
@@ -102,12 +121,10 @@ export class RasterFrame {
     const A = new Float64Array(9)
     const bu = new Float64Array(3)
     const bv = new Float64Array(3)
-    const p: number[] = [0, 0, 0]
     for (let i = 0; i < n; i++) {
       for (let j = 0; j < n; j++) {
         const k = i * n + j
-        this.anchor.toLocal(this.lon[k], this.lat[k], 0, p)
-        const row = [p[0], p[1], 1]
+        const row = [this.enu[k * 2], this.enu[k * 2 + 1], 1]
         const u = j / (n - 1)
         const v = 1 - i / (n - 1) // lattice row i is south->north; v is north->south
         for (let r = 0; r < 3; r++) {
@@ -127,39 +144,59 @@ export class RasterFrame {
    * map's own accuracy; the Jacobian is finite-differenced because the forward map is a bilinear
    * patch composed with the ellipsoid and writing its derivative by hand buys nothing.
    */
+  /**
+   * The ENU position of the lattice's bilinear patch at grid (u, v), plus its derivatives.
+   *
+   * This is the model `toGrid` inverts. It is not the exact forward map — that composes the
+   * lattice with the ellipsoid — but over a raster the two differ by the lattice's own
+   * interpolation error, and it costs four lerps rather than a geodetic transform.
+   */
+  private patch(u: number, v: number, out: number[]): void {
+    const n = this.n
+    const fu = u <= 0 ? 0 : u >= 1 ? n - 1 : u * (n - 1)
+    const fv = v <= 0 ? n - 1 : v >= 1 ? 0 : (1 - v) * (n - 1)
+    const j0 = Math.min(n - 2, Math.floor(fu))
+    const i0 = Math.min(n - 2, Math.floor(fv))
+    const tu = fu - j0
+    const tv = fv - i0
+    const a = (i0 * n + j0) * 2
+    const b = a + 2
+    const c = a + n * 2
+    const d = c + 2
+    const E = this.enu
+    // value
+    out[0] = (1 - tv) * ((1 - tu) * E[a] + tu * E[b]) + tv * ((1 - tu) * E[c] + tu * E[d])
+    out[1] = (1 - tv) * ((1 - tu) * E[a + 1] + tu * E[b + 1]) + tv * ((1 - tu) * E[c + 1] + tu * E[d + 1])
+    // d/du and d/dv, analytic — a bilinear patch has no need of a finite difference. The chain
+    // rule brings in (n-1) for u and -(n-1) for v, because v runs north->south.
+    const k = n - 1
+    out[2] = ((1 - tv) * (E[b] - E[a]) + tv * (E[d] - E[c])) * k
+    out[3] = ((1 - tv) * (E[b + 1] - E[a + 1]) + tv * (E[d + 1] - E[c + 1])) * k
+    out[4] = ((1 - tu) * (E[c] - E[a]) + tu * (E[d] - E[b])) * -k
+    out[5] = ((1 - tu) * (E[c + 1] - E[a + 1]) + tu * (E[d + 1] - E[b + 1])) * -k
+  }
+
+  /**
+   * ENU metres -> fractional grid (u, v), clamped to the raster.
+   *
+   * Affine seed, then Newton on the bilinear patch with its analytic Jacobian. No trigonometry, no
+   * finite differences, and it converges in two passes because the patch is very nearly affine
+   * within one lattice cell.
+   */
   toGrid(x: number, z: number, out: [number, number] = [0, 0]): [number, number] {
     const [a, b, c, d, e, f] = this.inv
     const clamp = (t: number) => (t < 0 ? 0 : t > 1 ? 1 : t)
-    // Clamp the SEED, not just the answer. `geodeticAt` clamps, so a seed even fractionally
-    // outside [0, 1] makes both finite-difference probes land on the same point, the Jacobian
-    // goes singular and the iteration exits on its first step leaving the affine's own error
-    // behind. That was a silent 30 mm sitting exactly on the east edge.
     let u = clamp(a * x + b * z + c)
     let v = clamp(d * x + e * z + f)
-    const p: number[] = [0, 0, 0]
-    // The forward map is a bilinear PATCH, so a finite difference that steps across a lattice cell
-    // boundary measures the wrong patch's slope. Worse, `geodeticAt` CLAMPS, so a forward step at
-    // the east or south edge lands on the same point and the Jacobian loses a column — that was a
-    // 30 mm residual sitting exactly on u = 1. Step away from whichever edge we are on.
-    const EPS = 1e-6
-    const q: number[] = [0, 0, 0]
-    for (let it = 0; it < 3; it++) {
-      this.toEnu(u, v, 0, p)
-      const rx = p[0] - x
-      const rz = p[1] - z
-      if (Math.abs(rx) < 1e-9 && Math.abs(rz) < 1e-9) break
-      const hu = u > 0.5 ? -EPS : EPS
-      const hv = v > 0.5 ? -EPS : EPS
-      this.toEnu(u + hu, v, 0, q)
-      const dxu = (q[0] - p[0]) / hu
-      const dzu = (q[1] - p[1]) / hu
-      this.toEnu(u, v + hv, 0, q)
-      const dxv = (q[0] - p[0]) / hv
-      const dzv = (q[1] - p[1]) / hv
-      const det = dxu * dzv - dxv * dzu
+    const P = SCRATCH6
+    for (let it = 0; it < 2; it++) {
+      this.patch(u, v, P)
+      const rx = P[0] - x
+      const rz = P[1] - z
+      const det = P[2] * P[5] - P[4] * P[3]
       if (!det) break
-      u = clamp(u - (rx * dzv - rz * dxv) / det)
-      v = clamp(v - (rz * dxu - rx * dzu) / det)
+      u = clamp(u - (rx * P[5] - rz * P[4]) / det)
+      v = clamp(v - (rz * P[2] - rx * P[3]) / det)
     }
     out[0] = u
     out[1] = v
@@ -174,6 +211,9 @@ export class RasterFrame {
     return r * this.cols + c
   }
 }
+
+/** one shared scratch for `patch` — `toGrid` runs hundreds of thousands of times a load */
+const SCRATCH6: number[] = [0, 0, 0, 0, 0, 0]
 
 /** Solve a symmetric 3x3 by Gaussian elimination with partial pivoting. */
 function solve3(A: Float64Array, b: Float64Array): number[] {

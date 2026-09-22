@@ -2,5 +2,11 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": { "tsBuildInfoFile": "../../node_modules/.tmp/engine.tsbuildinfo" },
   "include": ["src", "test"],
-  "exclude": ["src/dev/bridge-plugin.ts"]
+  "exclude": [
+    "src/dev/bridge-plugin.ts",
+    // An integration probe against a real bake on disk, so it reads node:fs. The engine is
+    // browser code and must not gain node types just to typecheck one test; vitest collects
+    // this file regardless of what tsc is told to compile.
+    "test/pyrprobe.test.ts"
+  ]
 }

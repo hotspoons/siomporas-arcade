@@ -64,6 +64,12 @@ export class PyramidStream {
   private readonly places = new Map<string, { x: number; z: number; radius: number }>()
   private readonly failed = new Set<string>()
   private lastEye = { x: Infinity, z: Infinity }
+  /**
+   * What a tile costs, for budgeting a fetch before it lands. Seeded from a measured crownsville
+   * tile (213 KiB pack + a 512x512 float32 DEM + the same for canopy) and then replaced by this
+   * bake's own running mean, because a site with no canopy costs half of that.
+   */
+  private typicalBytes = 2.21 * 1024 * 1024
   private disposed = false
   /** counters, so "the pyramid is working" is measurable rather than asserted */
   loads = 0
@@ -134,11 +140,20 @@ export class PyramidStream {
     // engine beside `diff`, with a negative proving it can fail.
     for (const k of holdWhileRefining(drop, want, (key) => this.held.has(key))) this.release(k)
 
+    // The budget bounds the HELD set at the moment diff() ran. Tiles in flight are not in it yet,
+    // so issuing every wanted load would sail past the ceiling and only come back under it on the
+    // next update — a jump-cut to a new part of the world would spike well over. Count what is
+    // already in the air against the same budget.
+    let inFlight = this.pending.size * this.typicalBytes
+    let resident = 0
+    for (const h of this.held.values()) resident += h.tile.bytes
     for (const t of load) {
       const k = tileKey(t)
       if (this.pending.size >= this.o.maxPending) break
+      if (resident + inFlight + this.typicalBytes > this.o.budgetBytes) break
       if (this.pending.has(k) || this.held.has(k) || this.failed.has(k)) continue
       this.fetch(k)
+      inFlight += this.typicalBytes
     }
   }
 
@@ -161,6 +176,8 @@ export class PyramidStream {
         this.o.set.add(tile)
         this.held.set(k, { tile, mesh, geo, mat })
         this.loads++
+        // running mean, so the budget learns this bake's real cost rather than trusting the seed
+        this.typicalBytes += (tile.bytes - this.typicalBytes) / Math.min(this.loads, 32)
       })
       .catch((err) => {
         this.pending.delete(k)

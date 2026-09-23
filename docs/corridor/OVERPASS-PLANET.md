@@ -1,8 +1,10 @@
 # The full world pull
 
-**Status:** design, not built. 2026-09-22.
-**Now:** the editor and the baker run on the four public query mirrors. Our own Overpass holds
-Maryland and is deliberately NOT their first upstream — see "The silent empty" below.
+**Status:** Europe is importing. 2026-09-23.
+**Now:** the editor and the baker still run on the four public query mirrors. `overpass` holds
+Maryland and is deliberately NOT their first upstream — see "The silent empty" below. `overpass-eu`
+holds Europe and is **not yet in any client's list**; it goes in only when
+`tools/overpass/verify.sh --pod overpass-eu` returns non-zero ways for Stelvio *and* Crofton.
 
 ## Why
 
@@ -108,8 +110,9 @@ allowing a few times for decompression suggests under a terabyte for the planet 
 two estimates disagree by an order of magnitude, which is the honest state of knowledge. Disk is
 the cheap thing here: **provision 4 Ti and stop thinking about it.**
 
-Import time is the real cost — Maryland took about ten minutes, and the reorganize step is
-superlinear. Budget a day or more for Europe and run it once.
+Import time is the real cost. Maryland took about ten minutes; **Europe takes about thirty hours**,
+and the shape of those hours is nothing like a scaled-up Maryland — see "What a continent import
+actually costs" below. Run it once.
 
 ## The storage class was a misattribution, and cephfs works
 
@@ -174,9 +177,15 @@ So a continent import is **three full passes over the data**, not one:
 | 2 | `osmium fileinfo -e` to read the timestamp | **no** |
 | 3 | `bunzip2 \| update_database`, then Reorganizing | no |
 
-**Measured cost of pass 2 on Europe: about 3.5 hours.** Two thirds of the way in, the file offset
-was 35.0 GB of 58.6 GB (59.7%) after 128 minutes of CPU — so a shade over 3 hours of pure
-decompress-and-parse to produce a timestamp, before the import has read a byte.
+**Measured cost of pass 2 on Europe: 2 h 13 min.** Not estimated — `/db/db/osm_base_version` is
+the file that pass 2 exists to write, so its mtime is the moment pass 2 ended, and the converted
+`planet.osm.bz2`'s mtime is the moment it began.
+
+An in-flight extrapolation from the read offset predicted **3.5 hours and was 60% high**. The
+offset was 59.7% after 128 minutes, which reads as a clean linear ETA and is not one: bz2 offset
+is a poor proxy for parse work, because the node-dense front of the file decompresses to far more
+elements per byte than the tail. **Use the offset to tell a long pass from a hung one — that is
+what it is good for — and do not turn it into a completion time.**
 
 **How to tell a long pass from a hung one**, which is worth more than the number: the process holds
 the file open, so its read position is the exact progress.
@@ -201,6 +210,37 @@ neither is obviously clean. Recorded so the next person does not mistake it for 
 the ~1x this document guessed. Both live on the volume at once until the conversion finishes, so
 the peak before the database is even built is **~94 GB**. The 4 Ti provisioning remains obviously
 right; the point is that the pbf size is not a useful predictor of anything downstream.
+
+### What a continent import actually costs, hour by hour
+
+The Europe import, `europe-latest.osm.pbf` onto 4 Ti ceph-filesystem with `compression: no`,
+started 2026-09-22 19:16 UTC. Every boundary below is a file mtime inside the pod, not a guess.
+
+| phase | from | to | wall |
+|---|---|---|---|
+| 1. download 35.0 GB pbf, `osmium cat \| lbzip2 -n 8` → 58.6 GB bz2 | 19:16 | 20:49 | **1 h 33 m** |
+| 2. `osmium fileinfo -e`, to produce one timestamp | 20:49 | 23:02 | **2 h 13 m** |
+| 3a. `update_database`, **nodes** | 23:02 | 02:01 | **3 h 0 m** |
+| 3b. `update_database`, **ways** | 02:01 | still running at 21:31 (93%) | **19 h 30 m +** |
+| 3c. relations, then the closing reorganize | — | — | not reached |
+
+**The ways are the import.** Nodes are roughly the first **70%** of the bz2 stream and cost three
+hours; ways are the remaining ~28% and have cost nineteen and a half. That is a **~13x slowdown
+per byte at the node→way boundary**, confirmed across four independent readings before it was
+believed. Anyone watching the percentage climb through the node phase will conclude the import
+lands in six hours, and they will be wrong by a day. Budget from the boundary, not from the start.
+
+**The closing reorganize is not a cliff.** `Reorganizing the database ... done.` is interleaved
+throughout — it appears between ordinary flushes every few hundred million elements and completes
+inside a two-minute sampling window. The feared superlinear final step is being paid incrementally
+as the import runs.
+
+**Disk, measured at 93% of pass 3:** `/db/db` is **219.6 GB** and none of it is sparse (apparent
+size equals allocated size, file by file), plus the 58.6 GB bz2 that can be deleted afterwards.
+**`df` on this cephfs mount is wrong** — it reported 55 G used against 278 GB of real contents, so
+size a continent volume from `du -sb`, never from `df`. 4 Ti remains obviously right, and the
+order-of-magnitude uncertainty this document opened with is now closed at roughly **a quarter of a
+terabyte for Europe**.
 
 ## Shape
 

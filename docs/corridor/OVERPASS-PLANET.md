@@ -199,6 +199,13 @@ kubectl exec -n default <pod> -- sh -c '
 
 That turns "is it stuck?" into a percentage, for any of the three passes, without touching the job.
 
+**One trap in writing that loop:** `/proc/*/cmdline` includes the shell running the loop, and the
+patterns being matched are literal text inside it, so a naive version matches itself and reports
+whatever phase it happens to mention first. It reported `diffs` on a pod that was still
+downloading. Match on `argv[0..1]` only — a real worker is `curl`, `bunzip2`, `osmium fileinfo` or
+`/app/bin/update_from_dir`, and the watcher's own shell is `sh -c`, which collides with none of
+them. This is the `/proc` twin of `pkill -f <pattern>` killing its own shell.
+
 Pass 2 buys one string. If Europe's import time ever needs cutting, passing a known `--version`
 and skipping it is the cheapest hour available — it would need a change to the image's entrypoint
 or an `OVERPASS_PLANET_PREPROCESS` that writes the timestamp somewhere the entrypoint reads, and
@@ -288,8 +295,17 @@ It does not check whether `/db/db` is populated, and `init_osm3s.sh` does `mkdir
 refusing. **Any failure anywhere in that chain silently converts a completed continent import into
 a restart loop that eats it.** The marker is the only state that matters, and it is written last.
 
-The recovery, before the re-download completes, is `touch /db/init_done` in the running pod and
-roll the deployment with `useAreas: false`; the database is complete and current without areas.
+**What was actually done, 2026-09-24:** re-imported from scratch with `useAreas: false`. The
+in-place recovery — `touch /db/init_done` and roll — was available and would have been serving in
+minutes, but it was not chosen, and by the time the decision came back the restart loop had been
+running for twelve hours and `update_database` was already nine hours into writing over the old
+database. **Which is the lesson: the window to recover a finished import is the length of one
+download, and it closes silently.** Nothing alerts on "this container is re-importing a database
+it already has"; the log line is the cheerful `No database directory. Initializing`.
+
+If this happens again and the database is wanted, `touch /db/init_done` **first** — it is one file
+and it costs nothing to create, it can be deleted again, and it is the only thing standing between
+a crash loop and a wiped continent.
 
 ## Shape
 

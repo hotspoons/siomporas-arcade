@@ -1,0 +1,42 @@
+# The Europe instance. Imported 2026-09-22..24 onto a fresh 4 Ti cephfs volume, alongside the
+# Maryland release, which kept serving the whole time.
+#
+# Recorded here because this was assembled on the command line the first time and the flags are
+# not guessable: see docs/corridor/OVERPASS-PLANET.md for what each one cost in hours.
+#
+#   helm upgrade --install overpass-eu tools/overpass/chart -n default -f tools/overpass/values-eu.yaml
+#
+# BEFORE re-running this against an existing volume, read the note on useAreas in
+# chart/values.yaml. A container that dies anywhere in the entrypoint's && chain never reaches
+# `touch /db/init_done`, and the next start reads the missing marker as "no database" and
+# re-imports on top of a finished one.
+fullnameOverride: overpass-eu
+
+planetUrl: https://download.geofabrik.de/europe-latest.osm.pbf
+diffUrl: https://download.geofabrik.de/europe-updates/
+
+# The importer wants bz2 XML and cannot be handed a pbf, and the image ships only single-threaded
+# bzip2. lbzip2 installs from bookworm and the conversion streams, so no giant intermediate.
+preprocess: >-
+  apt-get update -qq && apt-get install -y -qq lbzip2 &&
+  mv /db/planet.osm.bz2 /db/planet.osm.pbf &&
+  osmium cat -o - -f osm /db/planet.osm.pbf | lbzip2 -c -n 8 > /db/planet.osm.bz2 &&
+  rm -f /db/planet.osm.pbf
+
+compression: "no"    # gz and lz4 both fail to read back here. Not negotiable.
+useAreas: false      # see chart/values.yaml; this is what killed the first run at the finish line
+rulesLoad: 0
+flushSize: 4
+
+storage:
+  size: 4Ti                      # Europe settled at 254 GB; sized against the pool, not the guess
+  className: ceph-filesystem     # proven for this workload with compression=no
+
+resources:
+  requests: { cpu: "4", memory: 8Gi }
+  limits: { cpu: "16", memory: 32Gi }
+
+# Not exposed. Clients reach it in-cluster, and it goes into no client's list until
+# tools/overpass/verify.sh passes against it.
+ingress:
+  enabled: false

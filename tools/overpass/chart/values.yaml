@@ -14,9 +14,10 @@ fullnameOverride: overpass
 
 # Geofabrik publishes .osm.pbf only (the .osm.bz2 the image expects 404s), so the container
 # downloads the pbf into planet.osm.bz2 and osmium converts it in place before the clone.
-# and the DATED file, not -latest: -latest is a 302 and the image's downloader does not follow
-# redirects (it wrote the 254-byte redirect body and called it a planet). Updates come from
-# diffUrl anyway, so pinning the init snapshot costs nothing.
+# A dated file rather than -latest, though not for the reason this comment used to give: the
+# entrypoint downloads with `curl -L` and DOES follow the 302, and europe-latest.osm.pbf fetched
+# fine. Pinning the init snapshot is still worth it for reproducibility, and updates come from
+# diffUrl anyway, so it costs nothing.
 planetUrl: https://download.geofabrik.de/north-america/us/maryland-260920.osm.pbf
 preprocess: 'mv /db/planet.osm.bz2 /db/planet.osm.pbf && osmium cat -o /db/planet.osm.bz2 /db/planet.osm.pbf && rm /db/planet.osm.pbf'
 diffUrl: https://download.geofabrik.de/north-america/us/maryland-updates/
@@ -25,6 +26,24 @@ meta: "no"
 # minutely diffs are pointless for a bake of roads that have been there for decades
 updateSleep: 86400
 rulesLoad: 10
+
+# AREAS OFF, and rulesLoad does NOT do this. `OVERPASS_USE_AREAS=true` is baked into the image,
+# so leaving this unset means areas run however low rulesLoad is; rulesLoad only sets the loop's
+# interval. On 2026-09-24 that cost the Europe import 33 hours: the database imported clean and
+# caught up on diffs, then the entrypoint's one-shot "Generating areas..." died with
+#
+#   File_Error: Invalid argument 22 /db/db/area_tags_local.bin File_Blocks::read_block::4
+#
+# because the areas step is the ONE call that does not pass --compression-method, so it writes
+# lz4 whatever `compression` says. Measured, not inferred — the method is a uint16 in the .idx
+# header and it reads 0 (none) for nodes.bin and ways.bin, 2 (lz4) for every area_*.bin. lz4 is
+# the codec already proven to fail on this storage by the clone gate. The failure broke the
+# entrypoint's && chain before `touch /db/init_done`, so the container exited 1, restarted, found
+# no marker and began re-importing Europe from zero on top of a finished database.
+#
+# We query by bbox and have never used an area filter. Turning this on needs `compression` to
+# stop being `no`, which is not available here.
+useAreas: false
 # the dispatcher's shared memory; Overpass wants this in /dev/shm
 shmSize: 2Gi
 
@@ -40,9 +59,14 @@ compression: "no"
 
 storage:
   size: 60Gi
-  # a BLOCK device, not cephfs. Overpass opens its database files with direct I/O; on the cephfs
-  # class the clone died with "File error caught: 22 Invalid argument /db/db/nodes.bin"
-  # (EINVAL = O_DIRECT unsupported) after downloading and converting the whole extract.
+  # CORRECTED 2026-09-22: this comment used to say the database must be on a block device because
+  # the cephfs clone died with "File error caught: 22 /db/db/nodes.bin". That is the same errno,
+  # the same function and the same phase as the failure now attributed to compression — it failed
+  # on cephfs WITH gz, and gz was the cause. Settled by test: a Maryland import on 80Gi
+  # ceph-filesystem with compression=no reached the serving phase and answered a Crofton bbox with
+  # 508 ways, the same number ceph-block gives. Europe then imported 254 GB onto 4Ti cephfs with
+  # zero occurrences of the error across 33 hours.
+  # ceph-block is kept here only because this release is already on it; cephfs is fine.
   className: ceph-block
 
 resources:

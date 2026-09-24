@@ -28,6 +28,10 @@ spec:
             - { name: OVERPASS_PLANET_PREPROCESS, value: {{ .Values.preprocess | quote }} }
             - { name: OVERPASS_META, value: "{{ .Values.meta }}" }
             - { name: OVERPASS_RULES_LOAD, value: "{{ .Values.rulesLoad }}" }
+            # MUST be set explicitly. The image bakes OVERPASS_USE_AREAS=true, and rulesLoad only
+            # sets the loop interval — it does not turn areas off. See values.yaml: the areas step
+            # ignores --compression-method, writes lz4, and lz4 does not read back here.
+            - { name: OVERPASS_USE_AREAS, value: "{{ .Values.useAreas }}" }
             - { name: OVERPASS_UPDATE_SLEEP, value: "{{ .Values.updateSleep }}" }
             - { name: OVERPASS_MAX_TIMEOUT, value: "600" }
             # The image defaults this to 16, meaning a 16 GB flush buffer — sized for the

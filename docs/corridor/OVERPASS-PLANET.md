@@ -242,6 +242,55 @@ size a continent volume from `du -sb`, never from `df`. 4 Ti remains obviously r
 order-of-magnitude uncertainty this document opened with is now closed at roughly **a quarter of a
 terabyte for Europe**.
 
+## Areas killed it at the finish line, and `rulesLoad: 0` does not turn them off
+
+The Europe import finished. Nodes, ways and relations all landed, four days of Geofabrik diffs
+applied cleanly to `2026-09-23T20:22:04Z`, and the update loop reported `status code: 3` — caught
+up. Then the entrypoint ran one more step nobody asked for:
+
+```
+Generating areas...
+File_Error: Invalid argument 22 /db/db/area_tags_local.bin File_Blocks::read_block::4
+Failed to process planet file
+```
+
+**`OVERPASS_USE_AREAS=true` is baked into the image.** Our chart sets `rulesLoad: 0` and that reads
+like "areas off"; it is not. `OVERPASS_RULES_LOAD` is only the *interval* of the rules loop. The
+one-shot area generation in the entrypoint is gated on `OVERPASS_USE_AREAS`, which we never set,
+so the image default won.
+
+**Why it failed is the old finding in a new place.** The areas step is
+`osm3s_query --progress --rules --db-dir=/db/db`, and it is the one call in the entrypoint that
+does **not** pass `--compression-method`. So it writes the default codec regardless of
+`OVERPASS_COMPRESSION`. Measured from the `.idx` headers rather than inferred — the compression
+method is a `uint16` at byte 6:
+
+| file | method |
+|---|---|
+| `nodes.bin.idx`, `ways.bin.idx` | **0 — none**, our setting took effect |
+| `area_tags_local.bin.idx`, `area_blocks.bin.idx`, `areas.bin.idx` | **2 — lz4** |
+
+lz4 is the codec the clone gate already proved cannot be read back on this storage. The same
+errno, the same `File_Blocks::read_block`, 33 hours later, in the only step that ignores the
+setting.
+
+### The failure mode that makes it expensive
+
+The area step sits inside the entrypoint's `&&` chain, **before `touch /db/init_done`**. So:
+
+1. areas fail → the chain breaks → `Failed to process planet file` → container exits 1
+2. Kubernetes restarts it
+3. the entrypoint tests `[[ ! -f /db/init_done ]]`, finds no marker, prints
+   **`No database directory. Initializing`** — and begins re-downloading
+   `europe-latest.osm.pbf` on top of a finished 254 GB database
+
+It does not check whether `/db/db` is populated, and `init_osm3s.sh` does `mkdir -p` rather than
+refusing. **Any failure anywhere in that chain silently converts a completed continent import into
+a restart loop that eats it.** The marker is the only state that matters, and it is written last.
+
+The recovery, before the re-download completes, is `touch /db/init_done` in the running pod and
+roll the deployment with `useAreas: false`; the database is complete and current without areas.
+
 ## Shape
 
 ```
@@ -265,6 +314,9 @@ memory       16 Gi    the clone does not import, so the flush buffer does not ap
    which keeps working and keeps answering while it runs.
 3. Verify with the boxes that matter — Stelvio, Crofton, somewhere in the southern hemisphere —
    and assert **non-zero** ways for each. The silent empty means "no exception" is not a pass.
+   `tools/overpass/verify.sh --pod overpass-eu` is that probe, and its third outcome matters: it
+   reported `NOASK` while the pod had no listener, which is *inconclusive*, not a coverage
+   failure. Without that distinction this would have read as "our extract is missing Italy".
 4. Only then set `overpassUrl` back to ours on the worldeditor release, mirrors still appended.
 5. Retire the Maryland PVC.
 

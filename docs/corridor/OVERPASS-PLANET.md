@@ -211,6 +211,20 @@ and skipping it is the cheapest hour available — it would need a change to the
 or an `OVERPASS_PLANET_PREPROCESS` that writes the timestamp somewhere the entrypoint reads, and
 neither is obviously clean. Recorded so the next person does not mistake it for a stall.
 
+### The hidden FOURTH pass: `pyosmium-get-changes` finding the newest object
+
+After `update_database` prints `Update complete.` the entrypoint runs `update_overpass.sh`, whose
+first act on a fresh database is `pyosmium-get-changes -O /db/planet.osm.bz2`, and Geofabrik
+extracts carry no replication headers, so it logs `OSM file has no replication headers. Looking
+for newest OSM object.` and **reads the whole 58.6 GB bz2 again**, single-threaded, to find one
+timestamp — the same job pass 2 did, done a second time by a different tool. Measured on the
+first Europe run: `Update complete.` at 04:22, first diff download at 06:39 — **2 h 17 min**. The
+pod stays 0/1 throughout, and the process to look for is `pyosmium-get-changes`, not `bunzip2`.
+
+So a continent import is four passes over the data, and two of them exist to produce a timestamp
+each. Writing `/db/replicate_id` before the update step (the sequence number for the extract's
+date, which Geofabrik's `state.txt` files give you) skips this one entirely; not done yet.
+
 ### Sizing, measured rather than extrapolated
 
 `europe-latest.osm.pbf` is **35.0 GB**, and converted to `.osm.bz2` it is **58.6 GB** — 1.67x, not
@@ -229,7 +243,8 @@ started 2026-09-22 19:16 UTC. Every boundary below is a file mtime inside the po
 | 2. `osmium fileinfo -e`, to produce one timestamp | 20:49 | 23:02 | **2 h 13 m** |
 | 3a. `update_database`, **nodes** | 23:02 | 02:01 | **3 h 0 m** |
 | 3b. `update_database`, **ways** | 02:01 | still running at 21:31 (93%) | **19 h 30 m +** |
-| 3c. relations, then the closing reorganize | — | — | not reached |
+| 3c. relations, then the closing reorganize | — | — | not reached on the first run |
+| 4. `pyosmium-get-changes` scanning the bz2 for the newest object | `Update complete.` | first diff download | **2 h 17 m** (first run: 04:22 → 06:39) |
 
 **The ways are the import.** Nodes are roughly the first **70%** of the bz2 stream and cost three
 hours; ways are the remaining ~28% and have cost nineteen and a half. That is a **~13x slowdown

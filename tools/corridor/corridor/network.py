@@ -601,6 +601,12 @@ def export_branches(site_dir: Path, frame) -> list[dict] | None:
         sm = _smooth_on_line(raw)
         sm[0], sm[-1] = raw[0], raw[-1]
         ln2 = LineString(sm)
+        # A CLOSED way — a cul-de-sac ring, start and end on the same node — collapses under the
+        # smoothing: Nancarles Drive (59 m, r351763585) came out as two identical points on
+        # 2026-09-26 and its zero-length curve took the whole viewer down. If smoothing lost more
+        # than half the length, it was not smoothing, and the raw densified line is kept.
+        if ln2.length < max(1.0, 0.5 * ln.length):
+            ln2 = LineString(raw)
         s_d = np.arange(0.0, ln2.length, 10.0).tolist() + [ln2.length]
         pts = np.array([ln2.interpolate(v).coords[0] for v in s_d])
         prof = b.get("profile")

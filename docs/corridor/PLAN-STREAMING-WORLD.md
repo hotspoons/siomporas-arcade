@@ -33,6 +33,36 @@ is a material or a uniform and is unaffected by baking the geometry.
 
 Each step is shippable on its own and each makes the next one smaller.
 
+### 0. Done first (2026-09-26): per-tile, lazy — the same work, cut by distance
+
+Built before the baked format because it changes the load you feel today and needs no new
+container. Two moves in `scene.ts`:
+
+- **The ground is a formula, not a mesh.** `gradedHeight(x, z)` answers exactly what a strip
+  vertex computes (road grade under and just beside the pavement, blended to the DEM over
+  0.6–7 m, plus the editor's ground offset) straight from `edgeDistance`, which already knows the
+  nearest road, its edge distance, its spline height and its along-track `s`. The car, the grass,
+  the furniture and the buildings stand on this whether or not the strip mesh near them exists.
+  Measured: `groundAt` at 40 road-side points is bit-identical before and after the meshes
+  arrive, and every strip vertex agrees with it to 0.000 m.
+- **Units around the eye.** The primary strip in `STREAM_CHUNK_M` (250 m) chunks, one unit per
+  branch strip, one per 500 m cell of buildings — 644 units on Crofton. A pump on its own
+  macrotask loop (never on frames: a hidden tab has none) builds the nearest unfinished unit
+  inside `STREAM_BUILD_M` (1500 m), `STREAM_BUDGET_MS` (6 ms) at a time, sinking only the
+  terrain geometries a new strip's box touches. `site.graded()` reports it; the screenshot probes
+  wait on `pendingNear === 0`.
+
+Crofton, headless CPU: the build before the first frame went 14.0 s → ~8 s, and of what is
+left, the grading and raising phases are ~0 — the remaining large phases are paving (road
+meshes, 0.9 s), tile decode, and swiftshader paints between status marks. After ready, the 283
+units within 1500 m of the photo stance (239 strips, 4,237 buildings) arrive in ~30 s of
+headless wall time, nearest first; the slowest synchronous unit is a primary chunk at ~180 ms
+headless, which is the hitch to shrink next (smaller chunks, or an async lattice).
+
+Not lazy yet: the road meshes (`buildRoads`, 0.9 s), the furniture family (signs, masts,
+blades, stop bars, walks, parking, barriers — ~0.8 s together, most of it one fetch), trees
+(already per CHM tile). Those follow the same unit pattern; the buildings cell is the template.
+
 ### 1. Strips into the packs
 
 `network_tiles` already writes a pack per 1 km tile with `dem.png` + `chm.png`. Add

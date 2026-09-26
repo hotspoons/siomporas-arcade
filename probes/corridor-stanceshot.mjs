@@ -30,6 +30,9 @@ await page.route('**/@vite/client', (r) => r.abort())
 await page.goto(local, { waitUntil: 'domcontentloaded', timeout: 120000 })
 await page.waitForFunction(() => !!window.corridor?.site, null, { timeout: 300000 })
 await page.waitForTimeout(1500)
+// the strips and buildings are built lazily around the eye (scene.ts gradeNear): wait until
+// nothing within range is left, or the shot shows bare terrain where a strip will be
+await page.waitForFunction(() => { const g = window.corridor?.site?.graded?.(); return !g || (g.pendingNear === 0 && g.built > 0) }, null, { timeout: 300000 }).catch(() => console.log('grading did not settle'))
 
 console.log(await page.evaluate(({ thin, hide, wire }) => {
   const c = window.corridor, site = c.site

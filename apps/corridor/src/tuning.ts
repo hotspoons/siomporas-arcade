@@ -241,6 +241,11 @@ export let WATER_OPACITY = 0.82
  * the mechanic Rich wants ported from trailworks. `WATER_LEVEL_SPAN` is how far it reaches
  * (m from the site centre) — 30 km by default so the ocean meets the horizon.
  */
+// --- lazy grading (scene.ts gradeNear): how far around the eye the strips and buildings are built,
+// how much of a frame each build may take, and how long a chunk of the primary strip is
+export let STREAM_BUILD_M = 1500
+export let STREAM_BUDGET_MS = 6
+export let STREAM_CHUNK_M = 250
 export let WATER_LEVEL_M = 0
 export let WATER_LEVEL_SPAN = 30000
 

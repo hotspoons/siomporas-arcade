@@ -17,8 +17,8 @@ import { GRASS_TYPES, GROUND_COVER, floorTexture, siteCover } from './groundcove
 import { loadFlora, type Flora } from './flora'
 import { CROP_TYPES, buildCrops, tickCrops, type CropType, type Field as CropField } from './crops'
 import { ACCUM_PARS, Precipitation, accumUniforms, type Weather } from './weather'
-import { BoundsIndex, buildStrip, sinkUnderStrips } from './strip'
-import { Budget, mapBudgeted } from './budget'
+import { buildStrip, sinkUnderStrips } from './strip'
+import { Budget } from './budget'
 import { Adjustments, NEUTRAL as NEUTRAL_ADJ } from './adjust'
 import { buildPlacements, loadCatalog, loadPlacements } from './placements'
 import { buildBuildings } from './buildings'
@@ -110,6 +110,8 @@ export interface Site {
   pyramidStream: PyramidStream | null
   /** ground height (m) at site x,y from the DEM layer */
   heightAt: (x: number, y: number) => number
+  /** the lazy grading: how much of the site's strips and buildings exist yet, and what they cost */
+  graded: () => { built: number; total: number; pendingNear: number; strips: number; buildings: number; ms: number; worstMs: number; worst: string }
   /** point + travel direction on the spine at along-track s (metres) */
   spineAt: (s: number) => { pos: THREE.Vector3; dir: THREE.Vector3 }
   /** the terrain's texture, so the imagery toggle can swap it in and out */
@@ -880,6 +882,66 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
   let retune: () => void = () => {}
   let setSeason: (season: Season) => void = () => {}
   let groundAtWorld: (x: number, z: number) => number | null = (x, z) => heightAt(x, -z)
+  // --- LAZY GRADING: the strips, the terrain sink and the buildings are built around the eye ---
+  // A unit is a chunk of the primary strip, one branch strip, or one 500 m cell of buildings. Each
+  // frame `gradeNear` builds the nearest unfinished units inside STREAM_BUILD_M for at most
+  // STREAM_BUDGET_MS. Nothing waits on them: the ground is a formula (gradedHeight below), so the
+  // car, the grass and the furniture stand on the graded surface before its mesh exists.
+  interface GradeUnit { key: string; x: number; z: number; r: number; done: boolean; run: () => void | Promise<void> }
+  const gradeUnits: GradeUnit[] = []
+  // worstMs is the longest SYNCHRONOUS unit — the hitch a frame can feel; an async unit (a
+  // buildings cell) yields inside buildBuildings and its wall time is not a hitch
+  const gradeStats = { built: 0, strips: 0, buildings: 0, ms: 0, worstMs: 0, worst: '' }
+  const gradeEye = new THREE.Vector3(NaN, NaN, NaN)
+  let gradePumping = false
+  /** the nearest unfinished unit inside STREAM_BUILD_M of the eye, or null */
+  const nextUnit = (): GradeUnit | null => {
+    let best: GradeUnit | null = null, bd = Infinity
+    for (const u of gradeUnits) {
+      if (u.done) continue
+      const d = Math.hypot(u.x - gradeEye.x, u.z - gradeEye.z) - u.r
+      if (d < bd) { bd = d; best = u }
+    }
+    return best && bd <= T.STREAM_BUILD_M ? best : null
+  }
+  const pendingNear = () => { let n = 0; for (const u of gradeUnits) if (!u.done && Math.hypot(u.x - gradeEye.x, u.z - gradeEye.z) - u.r <= T.STREAM_BUILD_M) n++; return n }
+  // THE PUMP IS A MACROTASK LOOP, NOT A FRAME HOOK. Building on requestAnimationFrame would tie
+  // the build to the frame rate (a slow frame, a hidden tab: no build — see reference-raf-budget-
+  // deadlock), so the frame only tells the pump where the eye is; the pump then works in slices
+  // of STREAM_BUDGET_MS with a setTimeout(0) between them so rendering interleaves, and stops when
+  // nothing is left within range.
+  const pump = async () => {
+    if (gradePumping) return
+    gradePumping = true
+    try {
+      for (;;) {
+        const t0 = performance.now()
+        let any = false
+        while (performance.now() - t0 < T.STREAM_BUDGET_MS) {
+          const u = nextUnit()
+          if (!u) break
+          any = true
+          u.done = true
+          const u0 = performance.now()
+          const r = u.run()
+          const sync = !(r instanceof Promise)
+          if (!sync) await r
+          gradeStats.built++
+          const ms = performance.now() - u0
+          gradeStats.ms += ms
+          if (sync && ms > gradeStats.worstMs) { gradeStats.worstMs = ms; gradeStats.worst = u.key }
+        }
+        if (!any) return
+        await new Promise<void>((r) => setTimeout(r, 0))
+      }
+    } finally {
+      gradePumping = false
+    }
+  }
+  const gradeNear = (eye: THREE.Vector3) => {
+    gradeEye.copy(eye)
+    void pump()
+  }
   // the grass generator's road-distance answer, lifted out of the strip block for the Site's probes
   let grassRoadDistanceOut: (x: number, z: number) => number = () => Infinity
   let edgeDistanceWorld: (x: number, z: number) => number = () => Infinity
@@ -999,7 +1061,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     }
     placeBulbs()
     /** signed distance to the nearest pavement edge, and which carriageway that was */
-    const edgeDistance = (x: number, z: number, exclude = -1): { d: number; who: number; y: number } => {
+    const edgeDistance = (x: number, z: number, exclude = -1): { d: number; who: number; y: number; s: number } => {
       const cx = Math.floor(x / stCell), cz = Math.floor(z / stCell)
       let best = Infinity, who = -1, bp: (typeof stGrid extends Map<string, (infer R)[]> ? R : never) | null = null
       for (let a = -3; a <= 3; a++) {
@@ -1020,15 +1082,16 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
           }
         }
       }
-      if (!bp) return { d: best, who, y: 0 }
+      if (!bp) return { d: best, who, y: 0, s: 0 }
       // a driveway (who < 0) is not a carriageway and has no spline: it carries its own height
-      if (bp.who < 0) return { d: best, who: bp.who, y: bp.y ?? 0 }
+      if (bp.who < 0) return { d: best, who: bp.who, y: bp.y ?? 0, s: 0 }
       // the road height HERE, from the carriageway spline at the projected along-track metre —
       // the very same function the asphalt mesh is built from, so ground and road agree to the mm
       const along = (x - bp.x) * bp.dx + (z - bp.z) * bp.dz
       const c = curves[bp.who]
-      const y = c.at(Math.min(c.len, Math.max(0, bp.s + along))).pos.y // the spline IS the road surface
-      return { d: best, who, y }
+      const sOn = Math.min(c.len, Math.max(0, bp.s + along))
+      const y = c.at(sOn).pos.y // the spline IS the road surface
+      return { d: best, who, y, s: sOn }
     }
     const roadDistance = (x: number, z: number) => edgeDistance(x, z).d
     // A CAR PARK IS NOT A VERGE. The grass planter only knows how far it is from the pavement
@@ -1060,10 +1123,12 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     const grassTex = (cls: string) => ((surfaceSets?.[cls]?.material as THREE.MeshStandardMaterial | undefined)?.map ?? null)
     // the CHM the grass generator already rejects cells by; the strip needs it to know where the
     // ground is forest floor rather than turf
+    mark('grade: lateral extent')
     const stripCanopyAt = chm ? sampler(chm) : null
     // the forest floor is the site's dominant TREE ground class: spruce duff at Acadia, bay and
     // live-oak litter at Big Sur, the oak-hickory that used to be painted everywhere in Maryland
     const litter = renderer && chm ? floorTexture(cover.floor) : null
+    mark('grade: floor texture')
     /**
      * On a bridge the verge stops at the parapet. Everywhere else the strip blends from road grade
      * back to the DEM over 7 m, but on a deck the DEM is the valley floor 5–12 m below and the
@@ -1088,12 +1153,59 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
       }
       return lim
     }
-    const makeStrip = () => buildStrip(spineAt, curveLen, -latMin + VERGE, latMax + VERGE, (x, z) => edgeDistance(x, z), heightAt, imagery, manifest.bbox, grassTex('grass_mown'), grassTex('grass_rough'), lite ? 4 : 2, lite ? 2 : 1, adjustments.active ? (x, y) => adjustments.at(x, y, adjScratch).ground_offset_m : null, null, stripEdgeLimitAt, stripCanopyAt, litter)
     mark('grade: setup')
-    let strip = makeStrip()
-    strip.setLitter(look(currentSeason).litter.tint, look(currentSeason).litter.spread)
-    road.add(strip.mesh)
-    mark('grade: primary strip')
+    // --- THE GROUND IS A FORMULA, NOT A MESH -------------------------------------------------
+    // Exactly what a strip vertex computes (strip.ts): road grade under and just beside the
+    // pavement, blended to the DEM over 0.6–7 m, plus the editor's ground offset — answered here
+    // straight from edgeDistance. The car, the grass, the furniture and the buildings all stand on
+    // this, whether or not the strip MESH near them exists yet, which is what lets the meshes be
+    // built lazily around the eye instead of 427 of them at load. Past the verge, and past a
+    // parapet on the primary, it answers null and the caller falls back to the DEM.
+    const offsetFn = adjustments.active ? (x: number, y: number) => adjustments.at(x, y, adjScratch).ground_offset_m : null
+    const gradedHeight = (x: number, z: number): number | null => {
+      const e = edgeDistance(x, z)
+      if (!Number.isFinite(e.d)) return null
+      const primary = e.who < branchWho0
+      if (e.d > (primary ? VERGE : T.BRANCH_VERGE)) return null
+      if (primary && e.d > stripEdgeLimitAt(e.s)) return null
+      const t = THREE.MathUtils.smoothstep(e.d, 0.6, 7.0)
+      const off = offsetFn ? offsetFn(x, -z) * t : 0
+      return (e.d < 0.6 ? e.y - 0.02 : (e.y - 0.02) * (1 - t) + heightAt(x, -z) * t) + off
+    }
+    type LiveStrip = ReturnType<typeof buildStrip>
+    const liveStrips: LiveStrip[] = []
+    // the terrain surfaces a new strip must sink: every geometry whose box it touches, not all 60
+    const terrainBoxes = terrainGeos.map((g) => { g.computeBoundingBox(); const b = g.boundingBox!; return { g, x0: b.min.x, z0: b.min.z, x1: b.max.x, z1: b.max.z } })
+    const dressStrip = (st: LiveStrip) => {
+      const lk = look(currentSeason)
+      st.setTint(lk.grass.base.clone().multiplyScalar(2.0).lerp(new THREE.Color(0xffffff), 0.4), imagery ? lk.ground : bare)
+      st.setLitter(lk.litter.tint, lk.litter.spread)
+      st.setImageryDesat(STYLE[currentStyle].desaturate)
+      precip?.follow(st.weatherUniforms)
+    }
+    const adoptStrip = (st: LiveStrip) => {
+      road.add(st.mesh)
+      liveStrips.push(st)
+      gradeStats.strips++
+      const [x0, z0, x1, z1] = st.bounds
+      for (const b of terrainBoxes) {
+        if (x1 + 10 < b.x0 || x0 - 10 > b.x1 || z1 + 10 < b.z0 || z0 - 10 > b.z1) continue
+        sinkUnderStrips(b.g, [st])
+      }
+      dressStrip(st)
+    }
+    const edgeAt = (x: number, z: number) => edgeDistance(x, z)
+    // the primary in chunks along s: a chunk's stations start at its own s0, so two chunks meet
+    // on identical vertices and the seam is exact
+    const CHUNK = T.STREAM_CHUNK_M
+    const spineUnits: GradeUnit[] = []
+    for (let s0 = 0; s0 < curveLen; s0 += CHUNK) {
+      const s1 = Math.min(curveLen, s0 + CHUNK)
+      const mid = spineAt((s0 + s1) / 2).pos
+      spineUnits.push({ key: `spine:${Math.round(s0)}`, x: mid.x, z: mid.z, r: (s1 - s0) / 2 + VERGE + 60, done: false, run: () => {
+        adoptStrip(buildStrip((s) => spineAt(s0 + s), s1 - s0, -latMin + VERGE, latMax + VERGE, edgeAt, heightAt, imagery, manifest.bbox, grassTex('grass_mown'), grassTex('grass_rough'), lite ? 4 : 2, lite ? 2 : 1, offsetFn, null, (s) => stripEdgeLimitAt(s0 + s), stripCanopyAt, litter))
+      } })
+    }
     mark('grade: sink primary')
     // one strip per branch; where another road's strip already covers the ground (within VERGE of
     // its pavement edge) the branch strip leaves a hole rather than a second coplanar surface
@@ -1111,10 +1223,18 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
      * ground beyond the verge is the coarse terrain, which is what it should be that far from a
      * residential street anyway.
      */
-    const makeBranchStrips = () => mapBudgeted(branchAts, (b, i) => buildStrip(b.at, b.len, T.BRANCH_VERGE, T.BRANCH_VERGE, (x, z) => edgeDistance(x, z), heightAt, imagery, manifest.bbox, grassTex('grass_mown'), grassTex('grass_rough'), lite ? 4 : 3, lite ? 3 : 2, adjustments.active ? (x, y) => adjustments.at(x, y, adjScratch).ground_offset_m : null, (s) => {
-      const q = b.at(s).pos
-      return edgeDistance(q.x, q.z, branchWho0 + i).d < T.BRANCH_VERGE
-    }), 8, (done, total) => rawStatus(`grading ${done}/${total} streets…`))
+    const branchUnits: GradeUnit[] = branchAts.map((b, i) => {
+      // the branch's extent, from its curve: a centre and a radius the scheduler can measure
+      let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity
+      for (let s = 0; s <= b.len; s += 25) { const q = b.at(s).pos; if (q.x < x0) x0 = q.x; if (q.x > x1) x1 = q.x; if (q.z < z0) z0 = q.z; if (q.z > z1) z1 = q.z }
+      return { key: `branch:${i}`, x: (x0 + x1) / 2, z: (z0 + z1) / 2, r: Math.hypot(x1 - x0, z1 - z0) / 2 + T.BRANCH_VERGE + 20, done: false, run: () => {
+        adoptStrip(buildStrip(b.at, b.len, T.BRANCH_VERGE, T.BRANCH_VERGE, edgeAt, heightAt, imagery, manifest.bbox, grassTex('grass_mown'), grassTex('grass_rough'), lite ? 4 : 3, lite ? 3 : 2, offsetFn, (s) => {
+          const q = b.at(s).pos
+          return edgeDistance(q.x, q.z, branchWho0 + i).d < T.BRANCH_VERGE
+        }))
+      } }
+    })
+    gradeUnits.push(...spineUnits, ...branchUnits)
     // --- driveways -------------------------------------------------------------------------
     // Every house on Rich's court has one in OSM and we were dropping them, so the houses stood
     // in grass. Unmarked asphalt, 3.2 m, laid on the strip where the strip covers them and on the
@@ -1234,23 +1354,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
       }
     }
     makeBulbs()
-    let branchStrips = await makeBranchStrips()
-    mark('grade: branch strips built')
-    for (const bs of branchStrips) road.add(bs.mesh)
-    // ONE pass for every strip, primary and branches together
-    // every terrain surface, not just the overview: a 2 m tile left unsunk pokes up through
-    // the road it is under
-    for (const g of terrainGeos) sinkUnderStrips(g, [strip, ...branchStrips])
-    mark('grade: sink all strips')
-    // The branches go in a bounds grid: this lookup is the single hottest thing in the build, and
-    // walking all 427 of them was 45 µs a call against 0.4 µs for a point on the primary strip.
-    // See BoundsIndex in strip.ts for the measurement.
-    let branchIndex = new BoundsIndex(branchStrips)
-    const stripHeight = (x: number, z: number): number | null => {
-      const h = strip.heightAt(x, z)
-      if (h !== null) return h
-      return branchIndex.firstAt(x, z, (bs) => bs.heightAt(x, z))
-    }
+    mark('grade: lazy — nothing built at load')
     // a road knob moved: every station's half width, the asphalt, then the strip that hugs it
     const roadSignature = () => `${T.LANE_WIDTH}|${T.SHOULDER_OUT}|${T.SHOULDER_IN}|${T.ROAD_BLEND_M}|${T.ROAD_TAPER_M}|${T.ROAD_ONEWAY_CENTRE}|${T.CULDESAC_RADIUS}`
     let roadSig = roadSignature()
@@ -1263,27 +1367,20 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
       makeBulbs()
       makeDriveways()
       buildRoads()
-      road.remove(strip.mesh)
-      strip.mesh.geometry.dispose()
-      strip = makeStrip()
-      road.add(strip.mesh)
-
-      for (const bs of branchStrips) {
-        road.remove(bs.mesh)
-        bs.mesh.geometry.dispose()
+      for (const st of liveStrips) {
+        road.remove(st.mesh)
+        st.mesh.geometry.dispose()
       }
-      branchStrips = await makeBranchStrips()
-      branchIndex = new BoundsIndex(branchStrips)
-      for (const bs of branchStrips) road.add(bs.mesh)
-      // every terrain surface, not just the overview: a 2 m tile left unsunk pokes up through
-    // the road it is under
-    for (const g of terrainGeos) sinkUnderStrips(g, [strip, ...branchStrips])
+      liveStrips.length = 0
+      gradeStats.strips = 0
+      for (const u of spineUnits) u.done = false
+      for (const u of branchUnits) u.done = false
     }
     group.add(road)
     // everything that stands on the ground near the road stands on the strip
     makeDriveways()
-    const groundNear = (x: number, y: number) => stripHeight(x, -y) ?? heightAt(x, y)
-    groundAtWorld = (x, z) => stripHeight(x, z) ?? heightAt(x, -z)
+    const groundNear = (x: number, y: number) => gradedHeight(x, -y) ?? heightAt(x, y)
+    groundAtWorld = (x, z) => gradedHeight(x, z) ?? heightAt(x, -z)
     edgeDistanceWorld = (x, z) => edgeDistance(x, z).d
     roadHeightWorld = (x, z) => { const e = edgeDistance(x, z); return e.d <= T.STOPBAR_MAX_FROM_ROAD ? e.y : null }
     status('planting…')
@@ -1391,8 +1488,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     precip = new Precipitation(lite ? 18_000 : 60_000, fog)
     group.add(precip.mesh)
     precip.follow(terrainWeather)
-    precip.follow(strip.weatherUniforms)
-    for (const bs of branchStrips) precip.follow(bs.weatherUniforms)
+    for (const st of liveStrips) precip.follow(st.weatherUniforms) // later ones follow as they are built
     precip.follow(grass.weatherUniforms)
     // what grows on this verge, read off the bake; GRASS_TYPE overrides it from the F6 panel
     const bakedGrassType = cover.grass
@@ -1495,7 +1591,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
       near.setSeason(lk)
       grass.setLook(lk)
       crops?.setSeason(season)
-      for (const st of [strip, ...branchStrips]) {
+      for (const st of liveStrips) {
         st.setTint(lk.grass.base.clone().multiplyScalar(2.0).lerp(new THREE.Color(0xffffff), 0.4), imagery ? lk.ground : bare)
         st.setLitter(lk.litter.tint, lk.litter.spread)
         st.setImageryDesat(STYLE[currentStyle].desaturate)
@@ -1626,7 +1722,46 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
   group.add(placementsGroup)
   // the buildings the bake already knew about, as massing under whatever the catalogue places
   status('raising buildings…')
-  const built = await buildBuildings(manifest, groundAtWorld)
+  // per 500 m cell, built around the eye like the strips (a cell after the strips that cross it,
+  // by distance order: the strips' units carry a larger radius). `built` keeps the shape the rest
+  // of the file and the probes expect; its stats accumulate as cells arrive.
+  const buildingsGroup = new THREE.Group()
+  buildingsGroup.name = 'buildings'
+  const builtParts: { recolour: (walls: [number, number, number][], roofs: [number, number, number][]) => void }[] = []
+  let palette: { walls: [number, number, number][]; roofs: [number, number, number][] } | null = null
+  const built = {
+    group: buildingsGroup,
+    stats: { count: 0, gabled: 0, fromLidar: 0 },
+    recolour: (walls: [number, number, number][], roofs: [number, number, number][]) => {
+      palette = { walls, roofs }
+      for (const p of builtParts) p.recolour(walls, roofs)
+    },
+  }
+  {
+    const CELL = 500
+    const cells = new Map<string, NonNullable<Manifest['buildings']>>()
+    for (const bd of manifest.buildings ?? []) {
+      const p0 = bd.ring?.[0]
+      if (!p0) continue
+      const k = `${Math.floor(p0[0] / CELL)},${Math.floor(p0[1] / CELL)}`
+      const arr = cells.get(k)
+      if (arr) arr.push(bd)
+      else cells.set(k, [bd])
+    }
+    for (const [k, list] of cells) {
+      const [cx, cy] = k.split(',').map(Number)
+      gradeUnits.push({ key: `buildings:${k}`, x: cx * CELL + CELL / 2, z: -(cy * CELL + CELL / 2), r: CELL * 0.71 + 10, done: false, run: async () => {
+        const b = await buildBuildings({ ...manifest, buildings: list }, groundAtWorld, 4)
+        buildingsGroup.add(b.group)
+        builtParts.push(b)
+        if (palette) b.recolour(palette.walls, palette.roofs)
+        built.stats.count += b.stats.count
+        built.stats.gabled += b.stats.gabled
+        built.stats.fromLidar += b.stats.fromLidar
+        gradeStats.buildings += b.stats.count
+      } })
+    }
+  }
   group.add(built.group)
   // poles and wires: most of what a rural roadside has, and it was all sitting unused in the bake
   const power = buildPower(manifest, groundAtWorld)
@@ -1699,6 +1834,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
       stream?.update(eye.x, -eye.z) // site frame: y = -z
       pyr?.update(eye.x, -eye.z)
       signals.tick(time)
+      gradeNear(eye)
     }
   }
 
@@ -1769,6 +1905,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     pyramid: pyr ? () => pyr.counts : null,
     pyramidStream: pyr,
     heightAt,
+    graded: () => ({ built: gradeStats.built, total: gradeUnits.length, pendingNear: pendingNear(), strips: gradeStats.strips, buildings: gradeStats.buildings, ms: Math.round(gradeStats.ms), worstMs: Math.round(gradeStats.worstMs), worst: gradeStats.worst }),
     spineAt,
     setImagery: (on) => {
       // A tile's map is its own — streamed 1 m NAIP, or the overview standing in until it lands —

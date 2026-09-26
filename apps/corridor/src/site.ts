@@ -128,6 +128,8 @@ export interface DeadEnd {
 }
 
 export interface Branch {
+  /** the bake's road id, `r<osm way id>`; the junction model's approaches name roads by it */
+  id?: string
   name: string | null
   ref?: string | null
   highway?: string | null
@@ -346,4 +348,18 @@ export function decodeScalar(img: HTMLImageElement, scale: number): Float32Array
   const out = new Float32Array(c.width * c.height)
   for (let i = 0; i < out.length; i++) out[i] = px[i * 4] * scale
   return out
+}
+
+/**
+ * Bilinear, never nearest-cell. The car samples the ground at its four wheels and the DEM is a
+ * 2 m (or 8 m) lattice: a nearest-cell lookup made the car step from cell to cell across a field,
+ * "snapping to a grid" (Rich, 2026-09-26). Cell centres are at (c + 0.5, r + 0.5).
+ */
+export function bilinear(data: Float32Array, w: number, h: number, u: number, v: number): number {
+  const gx = Math.min(w - 1, Math.max(0, u * w - 0.5)), gy = Math.min(h - 1, Math.max(0, v * h - 0.5))
+  const c0 = Math.floor(gx), r0 = Math.floor(gy)
+  const c1 = Math.min(w - 1, c0 + 1), r1 = Math.min(h - 1, r0 + 1)
+  const fx = gx - c0, fy = gy - r0
+  const a = data[r0 * w + c0], b = data[r0 * w + c1], c = data[r1 * w + c0], d = data[r1 * w + c1]
+  return (a * (1 - fx) + b * fx) * (1 - fy) + (c * (1 - fx) + d * fx) * fy
 }

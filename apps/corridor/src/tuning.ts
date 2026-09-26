@@ -246,6 +246,8 @@ export let WATER_OPACITY = 0.82
 export let STREAM_BUILD_M = 1500
 export let STREAM_BUDGET_MS = 6
 export let STREAM_CHUNK_M = 250
+// an inferior road is re-graded to meet the superior one at a junction, fading out over this many metres
+export let JUNCTION_MEET_M = 40
 export let WATER_LEVEL_M = 0
 export let WATER_LEVEL_SPAN = 30000
 
@@ -288,6 +290,7 @@ export let FURNITURE_SIGNAL_ARM_SCALE = 1
 export let FURNITURE_SIGNAL_LIT = 0
 /** a stop or give-way sign's post height (m) */
 export let FURNITURE_SIGN_HEIGHT = 2.2
+export let FURNITURE_SIGN_SCALE = 1.8 // the STOP / YIELD face, over MUTCD's 30"; "about twice as big" (Rich, 2026-09-26)
 /** how far clear of the asphalt a post has to stand before it is left alone (m) */
 export let FURNITURE_KERB_CLEAR = 0.6
 /** and how far it may be walked sideways looking for that clearance (m) */

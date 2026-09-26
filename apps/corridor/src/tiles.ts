@@ -29,7 +29,7 @@ import * as THREE from 'three'
 import type { Anchor } from '@apex/engine/geo/wgs84'
 import { RasterFrame } from '@apex/engine/geo/raster'
 import { latticeFor } from '@apex/engine/geo/pyramid'
-import { DATA_BASE, decodeHeights, decodeScalar, type Layer, type PyrEntry, type PyrIndex, type TileIndex } from './site'
+import { DATA_BASE, decodeHeights, decodeScalar, type Layer, type PyrEntry, type PyrIndex, type TileIndex, bilinear } from './site'
 import { loadBakedTexture } from './textures'
 
 export type { TileIndex, PyrEntry, PyrIndex }
@@ -158,7 +158,7 @@ export class TileSet {
   heightAt = (x: number, y: number): number => {
     const hit = this.at(x, y)
     if (!hit) return this.baseHeight(x, y)
-    return hit.t.dem.data[TileSet.cellOf(hit.t.dem, hit.u, hit.v)]
+    return bilinear(hit.t.dem.data, hit.t.dem.layer.size[0], hit.t.dem.layer.size[1], hit.u, hit.v)
   }
 
   canopyAt = (x: number, y: number): number => {
@@ -479,7 +479,7 @@ export class PyramidSet {
   heightAt = (x: number, y: number): number => {
     const hit = this.at(x, y)
     if (!hit) return this.baseHeight(x, y)
-    return hit.t.dem.data[PyramidSet.cellOf(hit.t.dem, hit.u, hit.v)]
+    return bilinear(hit.t.dem.data, hit.t.dem.layer.size[0], hit.t.dem.layer.size[1], hit.u, hit.v)
   }
 
   canopyAt = (x: number, y: number): number => {

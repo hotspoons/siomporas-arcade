@@ -8,7 +8,7 @@ import { RasterFrame } from '@apex/engine/geo/raster'
 import { ImageryStream, PyramidSet, TileSet, loadTiles } from './tiles'
 import { PyramidStream } from './pyramidstream'
 import { loadBakedTexture } from './textures'
-import { DATA_BASE, decodeHeights, decodeScalar, loadImage, type Layer, type Manifest, type Structure } from './site'
+import { DATA_BASE, decodeHeights, decodeScalar, loadImage, type Layer, type Manifest, type Structure, bilinear } from './site'
 import { NearTrees, type TreeRecord } from './trees'
 import { Impostors } from './impostors'
 import { Grass } from './grass'
@@ -97,6 +97,10 @@ export interface Site {
   edgeDistance: (x: number, z: number) => number
   /** what the grass generator is told at world (x, z): -1 on pavement, a lot, a walk or air-photo paving; else metres from the nearest road. For probes. */
   grassRoadDistance: (x: number, z: number) => number
+  /** the full edge record at world (x, z): signed distance to the nearest pavement edge, which road (`who`, < 0 for a driveway or bulb), its surface height and along-track s. For probes. */
+  edgeInfo: (x: number, z: number, exclude?: number, roadsOnly?: boolean) => { d: number; who: number; y: number; s: number }
+  /** how many junctions had an inferior road re-graded to meet the superior one, and the largest step closed (m) */
+  junctionMeet: { junctions: number; warped: number; maxStep: number }
   /** trees within r of world x,z as [x, z, trunkRadius] */
   treesNear: (x: number, z: number, r: number) => [number, number, number][]
   terrain: THREE.Mesh
@@ -147,17 +151,13 @@ function framed(layer: Layer, data: Float32Array, anchor: Anchor | null): Field 
  * falls back to the flat arithmetic, which is what the grid actually was.
  */
 function sampler(f: Field) {
+  const [w, h] = f.layer.size
   if (f.rf) {
     const rf = f.rf
-    return (x: number, y: number) => f.data[rf.indexAt(x, y)]
+    return (x: number, y: number) => { const g = rf.toGrid(x, y); return bilinear(f.data, w, h, g[0], g[1]) }
   }
   const [xmin, , , ymax] = f.layer.bbox
-  const [w, h] = f.layer.size
-  return (x: number, y: number) => {
-    const c = Math.min(w - 1, Math.max(0, Math.floor((x - xmin) / f.layer.res)))
-    const r = Math.min(h - 1, Math.max(0, Math.floor((ymax - y) / f.layer.res)))
-    return f.data[r * w + c]
-  }
+  return (x: number, y: number) => bilinear(f.data, w, h, (x - xmin) / (w * f.layer.res), (ymax - y) / (h * f.layer.res))
 }
 
 /**
@@ -849,13 +849,15 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
   // know it is pavement), an asphalt+paint mesh, and below, its own strip. Kept apart from the
   // divided-highway siblings: those share the spine's grade and widen the spine's strip.
   // `road` builds the branch's asphalt and paint; it runs inside the branch's lazy unit, with its strip
+  // one per branchAts entry, same order: the raw graded points and a way to rebuild the curve after they move
+  const branchRaw: { br: NonNullable<Manifest['branches']>[number]; rawB: THREE.Vector3[]; dirty: boolean; recurve: () => void }[] = []
   const branchAts: { at: (s: number) => { pos: THREE.Vector3; dir: THREE.Vector3 }; len: number; half: number; name: string; road: () => THREE.Group; bounds: [number, number, number, number] }[] = []
   for (const br of manifest.branches ?? []) {
     if (!br.coords || br.coords.length < 2) continue
     const rawB = br.coords.map(([x, y, z]) => toWorld(x, y, (Number.isFinite(z) ? z : heightAt(x, y)) + 0.4))
-    const cB = new THREE.CatmullRomCurve3(rawB, false, 'centripetal')
+    let cB = new THREE.CatmullRomCurve3(rawB, false, 'centripetal')
     cB.arcLengthDivisions = Math.max(100, rawB.length * 8)
-    const lenB = cB.getLength()
+    let lenB = cB.getLength()
     // A branch whose points all coincide has no length, and s / 0 is NaN: getPointAt(NaN) reads
     // an undefined point and the WHOLE site fails to load ("corridor: load failed ... reading
     // 'x'"). A re-vector on 2026-09-26 produced one such branch on crofton-triangle and took the
@@ -874,9 +876,85 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     const halfB = pavedWidth(lanesB, twoWayB, kerbedB) / 2
     let bx0 = Infinity, bz0 = Infinity, bx1 = -Infinity, bz1 = -Infinity
     for (const q of rawB) { if (q.x < bx0) bx0 = q.x; if (q.x > bx1) bx1 = q.x; if (q.z < bz0) bz0 = q.z; if (q.z > bz1) bz1 = q.z }
+    branchRaw.push({ br, rawB, dirty: false, recurve: () => { cB = new THREE.CatmullRomCurve3(rawB, false, 'centripetal'); cB.arcLengthDivisions = Math.max(100, rawB.length * 8); lenB = cB.getLength(); branchAts[branchRaw.length - 1].len = lenB } })
     branchAts.push({ at: atB, len: lenB, half: halfB, name: br.name ?? br.ref ?? 'branch', bounds: [bx0, bz0, bx1, bz1], road: () => roadMesh(stations(atB, lenB, 6), () => lanesB, () => 'asphalt_aged', surfaceSets!, 0.02, () => twoWayB, paintOff, () => kerbedB) })
   }
   mark('paving: branch curves')
+  // --- ROADS MEET AT THE SAME HEIGHT ---------------------------------------------------------
+  // Every road carries its own lidar grade, and two profiles measured independently do not agree
+  // where the roads meet: Saint Stephens Church Road reached Chesterfield Road 1.3–1.9 m above it
+  // (crownsville, measured in probes/corridor-crosssection.mjs), a cliff across the junction with
+  // the DEM saying the ground was Chesterfield's height. The bake owns the profiles; the viewer
+  // owns the promise that a junction is one surface. So at every junction the INFERIOR road is
+  // re-graded to meet the superior one — the bake's own `superior` approach flag, else the spine
+  // if the node sits on it, else the better road class (the longer road on a tie) — with the
+  // correction fading out over JUNCTION_MEET_M along the inferior road. The superior road, and
+  // the spine always, keep their grade.
+  const junctionMeet = { junctions: 0, warped: 0, maxStep: 0 }
+  {
+    const RANK: Record<string, number> = { motorway: 0, trunk: 1, primary: 2, secondary: 3, tertiary: 4, unclassified: 5, residential: 6, living_street: 7, service: 8 }
+    const rank = (hw?: string | null) => RANK[(hw ?? '').replace(/_link$/, '')] ?? 9
+    const spineWays = new Set((manifest.spine.segments ?? []).map((g) => `r${(g as { osm_id?: number }).osm_id}`))
+    const byId = new Map<string, number>()
+    branchRaw.forEach((b, i) => { if (b.br.id) byId.set(b.br.id, i) })
+    const xByNode = new Map<number, NonNullable<Manifest['intersections']>['list'][number]>()
+    for (const x of manifest.intersections?.list ?? []) for (const n of x.nodes ?? []) xByNode.set(n, x)
+    /** a road's graded height at the raw vertex nearest (x, z) — at a node, that vertex IS the node */
+    const heightOf = (i: number, x: number, z: number) => {
+      let best = Infinity, y = NaN
+      for (const q of branchRaw[i].rawB) { const d = (q.x - x) ** 2 + (q.z - z) ** 2; if (d < best) { best = d; y = q.y } }
+      return best < 6 * 6 ? y : NaN
+    }
+    const MEET = T.JUNCTION_MEET_M
+    branchRaw.forEach((b, i) => {
+      for (const j of b.br.junctions ?? []) {
+        const w = toWorld(j.x, j.y, 0)
+        const x = j.node != null ? xByNode.get(j.node) : undefined
+        const mine = x?.approaches.find((a) => a.road === b.br.id)
+        if (mine?.superior) continue
+        let target = NaN
+        const sup = x?.approaches.find((a) => a.superior && a.road !== b.br.id)
+        if (sup && spineWays.has(sup.road)) target = nearestSpine(w.x, w.z).y
+        else if (sup && byId.has(sup.road)) target = heightOf(byId.get(sup.road)!, w.x, w.z)
+        else {
+          const ns = nearestSpine(w.x, w.z)
+          if (ns.dist < 4) target = ns.y
+          else {
+            const myRank = rank(b.br.highway), myLen = b.br.length_m ?? 0
+            for (const other of j.with ?? []) {
+              const k = byId.get(other)
+              if (k == null || k === i) continue
+              const o = branchRaw[k].br
+              const better = rank(o.highway) < myRank || (rank(o.highway) === myRank && (o.length_m ?? 0) > myLen)
+              if (better) { target = heightOf(k, w.x, w.z); break }
+            }
+          }
+        }
+        if (!Number.isFinite(target)) continue
+        let vi = -1, best = Infinity
+        b.rawB.forEach((q, k) => { const d = (q.x - w.x) ** 2 + (q.z - w.z) ** 2; if (d < best) { best = d; vi = k } })
+        if (vi < 0 || best > 6 * 6) continue
+        const step = target - b.rawB[vi].y
+        junctionMeet.junctions++
+        if (Math.abs(step) < 0.05) continue
+        junctionMeet.warped++
+        if (Math.abs(step) > junctionMeet.maxStep) junctionMeet.maxStep = Math.abs(step)
+        for (const dir of [-1, 1]) {
+          let dist = 0
+          for (let k = vi; k >= 0 && k < b.rawB.length; k += dir) {
+            if (k !== vi) dist += Math.hypot(b.rawB[k].x - b.rawB[k - dir].x, b.rawB[k].z - b.rawB[k - dir].z)
+            if (dist > MEET) break
+            if (dir === 1 && k === vi) continue // the node itself is done on the -1 pass
+            b.rawB[k].y += step * (1 - THREE.MathUtils.smoothstep(dist, 0, MEET))
+          }
+        }
+        b.dirty = true
+      }
+    })
+    for (const b of branchRaw) if (b.dirty) b.recurve()
+    junctionMeet.maxStep = +junctionMeet.maxStep.toFixed(2)
+  }
+  mark('paving: junctions meet')
   buildRoads()
   mark('paving: primary road mesh')
 
@@ -951,6 +1029,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
   }
   // the grass generator's road-distance answer, lifted out of the strip block for the Site's probes
   let grassRoadDistanceOut: (x: number, z: number) => number = () => Infinity
+  let edgeInfoOut: (x: number, z: number, exclude?: number, roadsOnly?: boolean) => { d: number; who: number; y: number; s: number } = () => ({ d: Infinity, who: -1, y: 0, s: 0 })
   let edgeDistanceWorld: (x: number, z: number) => number = () => Infinity
   /** the road surface under a point near a carriageway: the spline's height, which the asphalt is built from */
   let roadHeightWorld: (x: number, z: number) => number | null = () => null
@@ -1068,7 +1147,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     }
     placeBulbs()
     /** signed distance to the nearest pavement edge, and which carriageway that was */
-    const edgeDistance = (x: number, z: number, exclude = -1): { d: number; who: number; y: number; s: number } => {
+    const edgeDistance = (x: number, z: number, exclude = -1, roadsOnly = false): { d: number; who: number; y: number; s: number } => {
       const cx = Math.floor(x / stCell), cz = Math.floor(z / stCell)
       let best = Infinity, who = -1, bp: (typeof stGrid extends Map<string, (infer R)[]> ? R : never) | null = null
       for (let a = -3; a <= 3; a++) {
@@ -1076,7 +1155,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
           const arr = stGrid.get(`${cx + a},${cz + b}`)
           if (!arr) continue
           for (const p of arr) {
-            if (p.who === exclude) continue
+            if (p.who === exclude || (roadsOnly && p.who < 0)) continue
             // lateral distance to the station's tangent, so a point between two stations measures
             // to the road and not to the nearer station's dot
             const ux = x - p.x, uz = z - p.z
@@ -1110,6 +1189,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     // -1 means "do not plant here": a mapped lot, a walk, or anything the air photo says is paved
     const grassRoadDistance = (x: number, z: number) => (onParking(x, z) || onSidewalk(x, z) || (pavedAt !== null && pavedAt(x, -z) > 0.5) ? -1 : roadDistance(x, z))
     grassRoadDistanceOut = grassRoadDistance
+    edgeInfoOut = edgeDistance
 
     // --- the corridor strip: fine terrain across every carriageway and 40 m of verge each side ---
     status('grading…')
@@ -1245,9 +1325,14 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
       roadParts.push(rm)
     }
     branchAts.forEach((b, i) => {
+      // A station is left out only where another CARRIAGEWAY's strip covers it. The rule used to
+      // ask the nearest station of any other `who`, and a driveway (who -2) counted: every station
+      // beside a driveway was skipped, nothing covered the hole, the terrain under it was never
+      // sunk, and the coarse terrain stood 0.4-0.9 m above the road as a dark blob (Saint
+      // Stephens Church Road, crownsville, measured in probes/corridor-crosssection.mjs).
       const skip = (s: number) => {
         const q = b.at(s).pos
-        return edgeDistance(q.x, q.z, branchWho0 + i).d < T.BRANCH_VERGE
+        return edgeDistance(q.x, q.z, branchWho0 + i, true).d < T.BRANCH_VERGE
       }
       const nChunks = Math.max(1, Math.ceil(b.len / CHUNK))
       for (let k = 0; k < nChunks; k++) {
@@ -1935,6 +2020,8 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     groundAt: groundAtWorld,
     edgeDistance: edgeDistanceWorld,
     grassRoadDistance: (x, z) => grassRoadDistanceOut(x, z),
+    edgeInfo: (x, z, exclude, roadsOnly) => edgeInfoOut(x, z, exclude, roadsOnly),
+    junctionMeet,
     treesNear: treesNearWorld,
     terrain,
     /** tiled sites only: imagery streaming counts, for probes and the console */

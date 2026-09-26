@@ -286,7 +286,10 @@ function signPostGeometry(kind: 'stop' | 'give_way'): THREE.BufferGeometry {
  * a step so a flat edge is on top, which is how an octagon is hung.
  */
 function signOutline(kind: 'stop' | 'give_way'): THREE.BufferGeometry {
-  const g = kind === 'stop' ? new THREE.CircleGeometry(0.38, 8, Math.PI / 8) : new THREE.CircleGeometry(0.45, 3, -Math.PI / 2)
+  // MUTCD: a 30" STOP is 0.76 m across the flats (circumradius 0.41); FURNITURE_SIGN_SCALE is Rich's
+  // "about twice as big as they are in the renderings" (2026-09-26) on top of that
+  const S = T.FURNITURE_SIGN_SCALE
+  const g = kind === 'stop' ? new THREE.CircleGeometry(0.41 * S, 8, Math.PI / 8) : new THREE.CircleGeometry(0.45 * S, 3, -Math.PI / 2)
   g.rotateY(Math.PI) // face −Z, the way every head here faces
   return g
 }

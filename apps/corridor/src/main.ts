@@ -707,8 +707,12 @@ function readDriveKeys() {
 // drag to look around while driving; click a structure or crossing for its numbers
 canvas.addEventListener('pointerdown', (e) => { dragging = true; lastX = e.clientX; lastY = e.clientY; downAt = performance.now() })
 canvas.addEventListener('pointerup', (e) => {
+  const wasDrag = Math.abs(e.clientX - lastX) + Math.abs(e.clientY - lastY) > 6
   dragging = false
-  if (performance.now() - downAt < 250 && site) pick(e)
+  if (performance.now() - downAt >= 250 || wasDrag || !site) return
+  // in the air, a left click is "drive here"; a click on a structure still reads it out
+  if (!drive.on && e.button === 0 && !pick(e)) driveHere(e)
+  else pick(e)
 })
 canvas.addEventListener('pointermove', (e) => {
   if (!dragging || !drive.on) return
@@ -717,15 +721,64 @@ canvas.addEventListener('pointermove', (e) => {
   lastX = e.clientX; lastY = e.clientY
 })
 const ray = new THREE.Raycaster()
-function pick(e: PointerEvent) {
-  if (!site) return
+/**
+ * DRIVE HERE. A left click in fly mode puts the car where you pointed (Rich, 2026-09-26): ray the
+ * ground, drop the car there, and take the seat. If the point is beside a road the car is snapped
+ * into the near lane facing along it — clicking a street should put you ON the street, pointing
+ * the way it goes, not askew in a verge — and anywhere else it simply lands facing away from the
+ * camera, which is where you were looking.
+ */
+function driveHere(e: PointerEvent): boolean {
+  if (!site) return false
+  ray.setFromCamera(new THREE.Vector2((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1), camera)
+  const ground = [site.terrain, ...site.layers.road.children, ...(site.layers.imagery ? [site.layers.imagery] : [])]
+  let hit = ray.intersectObjects(ground, true)[0]?.point ?? null
+  if (!hit) {
+    // nothing under the cursor (the sky, or a gap between meshes): fall back to where the ray
+    // crosses the ground's own height, walked forward until it is under the terrain
+    const o = ray.ray.origin, d = ray.ray.direction
+    for (let s = 5; s < 4000; s += 5) {
+      const p = o.clone().addScaledVector(d, s)
+      const g = site.groundAt(p.x, p.z)
+      if (g !== null && p.y <= g) { hit = p.setY(g); break }
+    }
+  }
+  if (!hit) return false
+  const edge = site.edgeInfo(hit.x, hit.z)
+  let x = hit.x, z = hit.z
+  let yaw = Math.atan2(camera.getWorldDirection(viewDir).x, camera.getWorldDirection(viewDir).z)
+  if (Number.isFinite(edge.d) && edge.d < 30 && edge.who >= 0) {
+    // the gradient points away from the road, so stepping back along it lands on the pavement; the
+    // road's own direction is across that
+    const back = Math.min(edge.d + 1.8, 30)
+    x = hit.x - edge.gx * back
+    z = hit.z - edge.gz * back
+    // the road runs at right angles to the gradient: forward = (-gz, gx), and a yaw is
+    // atan2(forward.z, forward.x) because the car's forward is (cos yaw, 0, sin yaw)
+    const along = Math.atan2(edge.gx, -edge.gz)
+    // keep whichever way down the road is closer to where the camera was looking
+    const camYaw = Math.atan2(camera.getWorldDirection(viewDir).x, camera.getWorldDirection(viewDir).z)
+    const d1 = Math.abs(((along - camYaw + Math.PI * 3) % (Math.PI * 2)) - Math.PI)
+    yaw = d1 < Math.PI / 2 ? along : along + Math.PI
+  }
+  if (!drive.on) setDrive(true)
+  drive.car?.place(x, z, yaw)
+  drive.yaw = 0
+  drive.pitch = 0
+  status(edge.d < 30 ? 'drive here — on the road' : 'drive here')
+  return true
+}
+function pick(e: PointerEvent): boolean {
+  if (!site) return false
   ray.setFromCamera(new THREE.Vector2((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1), camera)
   const hit = ray.intersectObjects([...site.layers.structures.children, ...site.layers.markers.children], true)[0]
-  if (!hit) return
+  if (!hit) return false
   const st = hit.object.userData.structure as Structure | undefined
   const c = hit.object.userData.crossing as Crossing | undefined
   if (st) status(describe(st))
   else if (c) status(`${c.kind ?? 'way'} ${c.name ?? ''} crosses ${c.relation} us at ${c.s.toFixed(0)} m${c.inferred ? ' (inferred from OSM)' : ''}`)
+  else return false
+  return true
 }
 
 // ---------------------------------------------------------------------------------------------

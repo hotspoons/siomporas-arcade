@@ -380,3 +380,15 @@ The bake fetches DEM, NAIP, lidar and geology from US federal sources. **Those a
 Italian corridor gets its roads from OSM and then has no terrain. Whatever the elevation and
 imagery story is outside the US — Copernicus DEM at 30 m, national orthophoto services, no lidar —
 that is a separate design and it is the real blocker for an Italian pass, not Overpass.
+
+## The flip (2026-09-26)
+
+Applied once the worldeditor image carried the coverage parsing (`sha-9c38b09`, release
+revision 6):
+
+    overpassUrl = http://overpass-eu/api/interpreter#34/-25/72/45,http://overpass/api/interpreter#37.9/-79.5/39.8/-75.0
+
+(escape the comma as `\,` in `helm --set`). Asserted with content, not status: a Stelvio preview
+returns 26 drivable ways from `overpass-eu`, a Crofton preview 384 from `overpass`, and a Sydney
+preview is refused by both boxes with "does not hold this area" before falling through to the
+public mirrors. Maryland stays: Europe does not cover Crofton.

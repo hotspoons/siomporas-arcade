@@ -239,8 +239,11 @@ export function buildStrip(
               // third of the way toward the photo, so from above it reads as shaded ground under
               // trees and from the car it reads as litter, and neither is a black stripe.
               vec3 litter = triplanar(forestFloor, vWorldXZ, n, 0.5, vec2(0.37, 0.11)) * litterTint * 1.6;
-              litter = mix(litter, img.rgb, 0.35);
-              ground = vec4(mix(ground.rgb, litter, wForest), 1.0);
+              litter = mix(litter, img.rgb, 0.45);
+              // and never the whole way: a verge under trees is litter over turf, not a floor. The
+              // full replacement read as a brown stripe along the parkway from the air even after
+              // the luminance fix; at 0.65 the turf shows through and the stripe is a shading.
+              ground = vec4(mix(ground.rgb, litter, wForest * 0.65), 1.0);
             }
           }
           // snow, ice and rain last, over whatever the ground turned out to be

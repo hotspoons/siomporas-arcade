@@ -168,9 +168,10 @@ async function loadSite(slug: string) {
       names: () => TUNE_TABS.flatMap((t) => t.sections.flatMap((sec) => sec.keys.map((k) => k.name))),
       get: (name: string) => tuneKey(name)?.get(),
       set: (name: string, v: number) => {
-        const k = tuneKey(name)
-        if (!k) return false
-        k.set(v)
+        // through the PANEL's own setter, so the slider, its readout, the off-neutral mark and the
+        // section's changed dot all follow — a knob set from a probe or from a site's tuning.json
+        // has to look exactly like one that was dragged
+        if (!tuneUI.access.set(name, v)) return false
         onTuneChange()
         return true
       },

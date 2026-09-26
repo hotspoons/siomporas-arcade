@@ -30,6 +30,8 @@ export class TuneUI {
   private keys = new Map<string, TuneKey>()
   /** the live range inputs, so a programmatic set redraws the control */
   private redraw = new Map<string, () => void>()
+  /** each rendered section, so the changed dot can be kept in step with its knobs */
+  private groups: { el: HTMLElement; keys: TuneKey[] }[] = []
 
   private o: TuneUIOpts
 
@@ -45,11 +47,23 @@ export class TuneUI {
         for (const sec of tab.sections) {
           // One section is one group. Sections with a handful of keys start open; the long ones
           // (car has thirty) start collapsed, so a tab opens as a readable list of headings.
-          const g = group(sec.title, { collapsed: sec.keys.length > 12 })
+          // Each group carries its own reset, and marks itself when anything inside it has moved
+          // — on a panel this size, "where have I actually changed something" is the question.
+          const reset = button({
+            icon: 'arrow-uturn-left',
+            variant: 'ghost',
+            title: `put ${sec.title} back to the code defaults`,
+            onClick: () => this.resetSection(tab.name, sec),
+          })
+          const g = group(sec.title, { collapsed: sec.keys.length > 12, actions: [reset] })
           const body = bodyOf(g)
           for (const k of sec.keys) body.append(this.field(tab.name, k))
+          this.groups.push({ el: g, keys: sec.keys })
           host.append(g)
         }
+        // a tab builds the first time it is opened; knobs restored from this browser are already
+        // off their defaults, so the dots have to be right before anything is touched
+        this.markGroups()
       },
     }))
     this.tabs = new Tabs(tabs)
@@ -73,10 +87,12 @@ export class TuneUI {
       step: k.step,
       neutral: k.default,
       note: k.hint,
+      resettable: true,
       onInput: (v) => {
         k.set(v)
         this.persist(tabName)
         this.o.onChange(k.name, v)
+        this.markGroups()
       },
     })
     // Redrawing goes through the range's own input event, so the readout, the off-neutral dot and
@@ -87,6 +103,25 @@ export class TuneUI {
       range.dispatchEvent(new Event('input'))
     })
     return node
+  }
+
+  /** Put one section's knobs back to the code defaults. */
+  private resetSection(tabName: string, sec: { title: string; keys: TuneKey[] }) {
+    let n = 0
+    for (const k of sec.keys) {
+      if (k.get() === k.default) continue
+      k.set(k.default)
+      this.redraw.get(k.name)?.()
+      n++
+    }
+    this.persist(tabName)
+    this.markGroups()
+    toast(n ? `${sec.title}: ${n} back to default` : `${sec.title} was already at the defaults`, n ? 'ok' : 'info', 2000)
+  }
+
+  /** A dot on every section holding a knob that has been moved. */
+  private markGroups() {
+    for (const g of this.groups) g.el.classList.toggle('changed', g.keys.some((k) => k.get() !== k.default))
   }
 
   /** Apply everything saved for every tab. Called once, before anything caches a tunable. */
@@ -143,6 +178,7 @@ export class TuneUI {
     }
     this.persist(tab.name)
     toast(n ? `${tab.name}: ${n} knobs back to default` : `${tab.name} was already at the defaults`, n ? 'ok' : 'info')
+    this.markGroups()
   }
 
   /** How sitetuning.ts reaches the knobs without knowing about TUNE_TABS. */

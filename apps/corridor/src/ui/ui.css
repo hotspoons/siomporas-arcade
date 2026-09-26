@@ -212,12 +212,23 @@ kbd {
 .group-body { padding-bottom: var(--s3); display: grid; gap: var(--s3); }
 .group.collapsed .group-body { display: none; }
 .group-note { margin: 0 0 var(--s1); font-size: var(--text-xs); color: var(--ink-3); max-width: 62ch; }
+/* a group's own buttons, at the right of its heading (controls.ts group({actions})) */
+.group { position: relative; }
+.group-actions { position: absolute; right: 0; top: 0; display: flex; gap: var(--s1); align-items: center; height: 34px; }
+.group-actions .btn { opacity: 0; transition: opacity var(--dur-1) var(--ease); }
+.group:hover .group-actions .btn, .group-actions .btn:focus-visible { opacity: 1; }
+.group.changed > .group-head > span::after { content: '•'; margin-left: var(--s1); color: var(--accent); }
+.group.changed .group-actions .btn { opacity: 0.65; }
 
 /* ---- fields -------------------------------------------------------------------------------- */
 
 .field { display: block; cursor: pointer; }
 .field-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s3); }
 .field-label { font-size: var(--text-sm); color: var(--ink-2); }
+/* the per-knob reset, shown only once the knob has been moved off neutral */
+.field-reset { display: none; margin-left: auto; padding: 0 4px; color: var(--ink-3); background: none; border: 0; cursor: pointer; line-height: 0; }
+.field-reset:hover { color: var(--accent); }
+.field.off-neutral .field-reset { display: inline-flex; }
 .field-value { font-size: var(--text-sm); color: var(--ink-1); }
 
 /* slider */

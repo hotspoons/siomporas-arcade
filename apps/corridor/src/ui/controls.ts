@@ -8,12 +8,21 @@ import { icon, type IconName } from './icons'
 import { el } from './shell'
 
 /** A titled group of fields inside a panel. Collapsible when there are a lot of them. */
-export function group(title: string, opts: { collapsed?: boolean; note?: string } = {}): HTMLElement {
+export function group(title: string, opts: { collapsed?: boolean; note?: string; actions?: HTMLElement[] } = {}): HTMLElement {
   const g = el('section', 'group')
   const head = el('button', 'group-head')
   head.append(icon('chevron-down', 14), el('span', '', title))
   const bodyEl = el('div', 'group-body')
   if (opts.note) bodyEl.append(el('p', 'group-note', opts.note))
+  // A group's own buttons (reset this section, say) sit at the right of its heading — NOT inside
+  // the heading, which is itself a button: a button inside a button is invalid, and the click
+  // would toggle the group as well as doing whatever it was for.
+  if (opts.actions?.length) {
+    const bar = el('div', 'group-actions')
+    bar.append(...opts.actions)
+    bar.addEventListener('click', (e) => e.stopPropagation())
+    g.append(bar)
+  }
   head.onclick = () => {
     const open = g.classList.toggle('collapsed')
     head.setAttribute('aria-expanded', String(!open))
@@ -48,6 +57,8 @@ export function slider(o: {
   note?: string
   unit?: string
   onInput: (v: number) => void
+  /** show a reset button that puts this one knob back to `neutral` */
+  resettable?: boolean
 }): HTMLElement {
   const wrap = el('label', 'field slider')
   const neutral = o.neutral ?? o.value
@@ -76,10 +87,26 @@ export function slider(o: {
     show(v)
     o.onInput(v)
   }
-  name.ondblclick = () => {
+  const toNeutral = () => {
     range.value = String(neutral)
     show(neutral)
     o.onInput(neutral)
+  }
+  name.ondblclick = toNeutral
+  // Double-clicking the label has always done this, but a keyboard-free affordance nobody can see
+  // is not an affordance (Rich, 2026-09-26: "reset buttons on individual items"). The button shows
+  // only when the knob is off neutral, so a panel of two hundred sliders still reads as a list.
+  if (o.resettable) {
+    const reset = el('button', 'field-reset')
+    reset.type = 'button'
+    reset.title = `back to ${neutral}`
+    reset.append(icon('arrow-uturn-left', 12))
+    reset.addEventListener('click', (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      toNeutral()
+    })
+    head.append(reset)
   }
   wrap.append(head, range)
   return wrap

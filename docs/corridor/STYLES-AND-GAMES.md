@@ -134,3 +134,36 @@ scoring geometry are already there. Same engine, same catalog entry pattern.
    arrows, six goblins that wander, chase within 25 m, knock back on contact and drop to an arrow;
    first person within arm's reach. No rigged figure or animation yet — that is the next visible
    step, and a Mixamo-style rig on the same controller is the honest way to get it.
+
+## Grass, 2026-09-26 (later)
+
+- **Where it grows**: the road-distance gate, the OSM lots and walks, and now the tile photo:
+  `vegmask.ts` classifies each 0.6–1 m tile jpg (excess green, 3×3 majority) lazily around the
+  eye, and the generator plants nothing where the photo is not green. The car park OSM never
+  mapped went bare. NDVI from NAIP's NIR band in the bake is the honest successor.
+- **How it looks**: `zoning.ts` — KEPT (inside or within 40 m of a built-up landuse polygon, or
+  beside a residential/living/service road) is a trimmed lawn everywhere and does not sway;
+  RURAL (farmland, meadow, forest, or beside an unclassified/tertiary/secondary/primary road)
+  is a `GRASS_RURAL_MOW_LINE` shoulder and then rough grass `GRASS_RURAL_TALL` times taller.
+- **No pop**: a tile's blades and cards grow in over `GRASS_GROW_S` from the tile's birth time
+  (`aExtra`), on top of the rim fade; wind already stills below `GRASS_WIND_STILL_BELOW` m/s.
+
+## Trees, 2026-09-26
+
+Density was a property of the SITE, not of the ground: `treesFromCanopy` coarsened its sampling
+cell (6, 8, 10 … 40 m) until the whole site's tree count fitted one global budget, so
+arrowhead-farms (0.68 km²) planted one tree per 6.1 m of canopy and crofton-crownsville
+(355 km²) one per 34.2 m — the same Maryland woods, 31× thinner.
+
+Now the cell is fixed (`TREE_CELL_M`) and the budget is spent around the eye: candidates within
+`TREE_PLANT_RADIUS_M`, nearest first, replanted when the eye leaves that centre by
+`TREE_REPLANT_M`. The lattice is world-aligned and every jitter is a hash of the cell indices, so
+a replant puts every tree back exactly where it was — only the set near the eye changes. The
+record array is mutated in place, so `NearTrees.reindex()`, the collision grid and the impostor
+slots re-index rather than rebuild (the impostor capacity is the budget, not the first planting).
+Trees also plant from the tiles' 2 m CHM where a tile is resident, not the 8 m overview.
+
+Measured after (`probes/corridor-treedensity.mjs`, trees per CANOPY km², which is the comparable
+number): 27,519 crownsville / 27,053 crofton-triangle / 27,318 arrowhead; implied cell
+6.0 / 6.1 / 6.1 m. A replant costs ~200 ms under swiftshader and is the next thing to chunk
+through the grading pump if it is felt on a real GPU.

@@ -153,6 +153,32 @@ kbd {
 .dialog.size-md { max-width: 640px; }
 .dialog.size-lg { max-width: 940px; }
 
+/* ---- a dialog you work WITH: dragged, resized, or docked to a side ---------------------------
+   Docked, the scrim is gone entirely — the scene behind it is live and clicks reach it — so the
+   panel has to be a real column with its own edge rather than a card floating over a dim page. */
+.dialog-scrim.docked { background: none; pointer-events: none; display: block; padding: 0; }
+.dialog-scrim.docked .dialog { pointer-events: auto; }
+.dialog.dock-left, .dialog.dock-right {
+  position: fixed; top: var(--bar-h, 48px); bottom: 0;
+  width: min(460px, 46vw); max-width: none; max-height: none;
+  border-radius: 0; transform: none;
+}
+.dialog.dock-left { left: 0; border-left: 0; border-top: 0; border-bottom: 0; }
+.dialog.dock-right { right: 0; border-right: 0; border-top: 0; border-bottom: 0; }
+/* dragged or resized: the panel leaves the centring grid and takes its own box. The size-* caps
+   and the 86vh height cap have to go with it, or an inline width is silently clamped back and the
+   grip appears to do nothing. */
+.dialog.placed { position: fixed; margin: 0; transform: none; max-width: none; max-height: none; }
+.dialog-head.draggable { cursor: grab; user-select: none; }
+.dialog-head.draggable:active { cursor: grabbing; }
+.dialog-grip {
+  position: absolute; right: 0; bottom: 0; width: 18px; height: 18px; cursor: nwse-resize;
+  background: linear-gradient(135deg, transparent 50%, var(--ink-3) 50%, var(--ink-3) 58%, transparent 58%, transparent 74%, var(--ink-3) 74%, var(--ink-3) 82%, transparent 82%);
+  opacity: 0.5;
+}
+.dialog-grip:hover { opacity: 1; }
+.dialog.dock-left .dialog-grip, .dialog.dock-right .dialog-grip { display: none; }
+
 .dialog-head {
   display: flex; align-items: center; gap: var(--s2);
   padding: var(--s3) var(--s3) var(--s3) var(--s4);

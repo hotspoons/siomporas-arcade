@@ -47,7 +47,7 @@ export class Impostors {
     this.material = new THREE.ShaderMaterial({
       // merge() clones uniform values and cannot clone a render-target texture (it silently becomes
       // null and every quad is discarded); the atlas is attached after the merge instead
-      uniforms: { ...THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { cols: { value: COLS }, yaws: { value: YAWS }, rows: { value: rows }, flatPitch: { value: T.IMPOSTOR_FLAT_PITCH } }]), atlas: { value: this.target.texture } },
+      uniforms: { ...THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { cols: { value: COLS }, yaws: { value: YAWS }, rows: { value: rows }, flatPitch: { value: T.IMPOSTOR_FLAT_PITCH } }]), atlas: { value: this.target.texture }, uLight: { value: 1 }, uLightTint: { value: new THREE.Color(1, 1, 1) } },
       vertexShader: /* glsl */ `
         attribute float aVariant;
         attribute float aYaw;
@@ -93,6 +93,12 @@ export class Impostors {
       `,
       fragmentShader: /* glsl */ `
         uniform sampler2D atlas;
+        // The atlas was baked under a fixed studio light, so without this a far tree GLOWS at
+        // night while everything lit by the scene goes dark (Rich, 2026-09-26). uLight is the
+        // scene's own day/night level and uLightTint its colour, so a card dims and cools with
+        // everything else.
+        uniform float uLight;
+        uniform vec3 uLightTint;
         varying vec2 vUv;
         varying float vFade;
         #include <fog_pars_fragment>
@@ -109,7 +115,7 @@ export class Impostors {
           // stable, well-spread pattern per screen pixel in one dot product.
           float dith = fract(dot(gl_FragCoord.xy, vec2(0.75487766, 0.56984029)));
           if (c.a < 0.5 || vFade <= dith) discard;
-          gl_FragColor = vec4(c.rgb, 1.0);
+          gl_FragColor = vec4(c.rgb * uLight * uLightTint, 1.0);
           #include <fog_fragment>
           #include <colorspace_fragment>
         }
@@ -199,6 +205,12 @@ export class Impostors {
   }
 
   /** Push the current knob values into the shader. */
+  /** the scene's day/night light level and its colour; the atlas was baked under a fixed light */
+  setLight(level: number, tint: THREE.Color) {
+    this.material.uniforms.uLight.value = level
+    ;(this.material.uniforms.uLightTint.value as THREE.Color).copy(tint)
+  }
+
   tick() {
     this.material.uniforms.flatPitch.value = T.IMPOSTOR_FLAT_PITCH
   }

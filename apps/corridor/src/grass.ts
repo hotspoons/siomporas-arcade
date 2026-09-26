@@ -247,6 +247,8 @@ export class Grass {
         uHue: { value: 0 },
         uSat: { value: 1 },
         uLight: { value: 1 },
+        uNightMul: { value: 1 },
+        uLightTint: { value: new THREE.Color(1, 1, 1) },
         ...this.weatherUniforms,
       },
       vertexShader: /* glsl */ `
@@ -327,6 +329,10 @@ export class Grass {
         uniform float uHue;
         uniform float uSat;
         uniform float uLight;
+        // the scene's day/night level: grass is drawn by its own shader and knows nothing about the
+        // lights, so without this it glows in the dark (Rich, 2026-09-26)
+        uniform float uNightMul;
+        uniform vec3 uLightTint;
         varying float vT;
         varying float vRand;
         varying vec3 vNormal;
@@ -361,7 +367,7 @@ export class Grass {
           // a little specular sheen along the blade
           vec3 hvec = normalize(uSun + v);
           lit += vec3(0.08) * pow(max(0.0, dot(n, hvec)), 24.0) * vT;
-          vec3 outCol = grade(lit, uHue, uSat, uLight);
+          vec3 outCol = grade(lit, uHue, uSat, uLight) * uNightMul * uLightTint;
           // a blade catches the settled layer at its TIP, not at its root, so the normal it is
           // weighed by is faked upright near the top — the real one points sideways all the way up
           outCol = applyWeather(outCol, vec3(0.0, mix(0.1, 1.0, vT), 0.0), vWorld);
@@ -404,6 +410,8 @@ export class Grass {
         uHue: { value: 0 },
         uSat: { value: 1 },
         uLight: { value: 1 },
+        uNightMul: { value: 1 },
+        uLightTint: { value: new THREE.Color(1, 1, 1) },
         ...this.weatherUniforms,
       },
       vertexShader: /* glsl */ `
@@ -457,6 +465,10 @@ export class Grass {
         uniform float uHue;
         uniform float uSat;
         uniform float uLight;
+        // the scene's day/night level: grass is drawn by its own shader and knows nothing about the
+        // lights, so without this it glows in the dark (Rich, 2026-09-26)
+        uniform float uNightMul;
+        uniform vec3 uLightTint;
         varying vec2 vUv;
         varying float vRand;
         varying float vMown;
@@ -485,7 +497,7 @@ export class Grass {
           float shade = mix(0.55, 1.15, s.r);
           // a mown card is a low even turf; keep it a touch darker like the strip's mown texture
           c *= shade * mix(1.0, 0.85, vMown);
-          vec3 outCol = grade(c, uHue, uSat, uLight);
+          vec3 outCol = grade(c, uHue, uSat, uLight) * uNightMul * uLightTint;
           outCol = applyWeather(outCol, vec3(0.0, mix(0.1, 1.0, vUv.y), 0.0), vCardWorld);
           gl_FragColor = vec4(outCol, 1.0);
           #include <fog_fragment>
@@ -701,6 +713,14 @@ export class Grass {
     }
     out.sort((a, b) => a.d - b.d)
     this.visStale = false
+  }
+
+  /** the scene's day/night light level and its colour, for a shader that does its own lighting */
+  setLight(level: number, tint: THREE.Color) {
+    for (const m of [this.bladeMat, this.cardMat]) {
+      m.uniforms.uNightMul.value = level
+      ;(m.uniforms.uLightTint.value as THREE.Color).copy(tint)
+    }
   }
 
   /** forget the cached tiles inside a world box (x0, z0, x1, z1) so they regenerate: the vegetation mask for that ground just arrived */

@@ -21,6 +21,8 @@ export interface TuneUIOpts {
   onChange: (name: string, value: number) => void
   /** write the diff-from-default into the site's tuning.json */
   onSaveSite: () => void
+  /** empty that file and put the knobs it set back */
+  onClearSite: () => void
 }
 
 export class TuneUI {
@@ -70,13 +72,16 @@ export class TuneUI {
     }))
     this.tabs = new Tabs(tabs)
 
-    this.dialog = new Dialog({ title: 'Tuning', icon: 'adjustments-horizontal', size: 'lg' })
+    // movable: tuning is a loop of change-something / look-at-it, so this one docks to a side and
+    // drops the scrim rather than dimming the world you are trying to judge
+    this.dialog = new Dialog({ title: 'Tuning', icon: 'adjustments-horizontal', size: 'lg', movable: true })
     this.dialog.body.append(this.tabs.root)
     this.dialog.body.classList.add('tune-body')
     this.dialog.footer(
       button({ label: 'Copy JSON', icon: 'link', title: 'every knob that differs from the default, plus the stance — paste this back into tuning.ts', onClick: () => this.copy() }),
       button({ label: 'Reset tab', icon: 'arrow-path', title: 'put this tab’s knobs back to the code defaults', onClick: () => this.resetTab() }),
-      button({ label: 'Save to site', icon: 'document-arrow-down', variant: 'primary', title: 'write the changed knobs into this site’s tuning.json', onClick: () => this.o.onSaveSite() }),
+      button({ label: 'Clear site file', icon: 'trash', title: 'empty this site’s tuning.json and put its knobs back', onClick: () => this.o.onClearSite() }),
+      button({ label: 'Save to site', icon: 'document-arrow-down', variant: 'primary', title: 'write the changed knobs into tools/corridor/data/sites/<slug>/tuning.json', onClick: () => this.o.onSaveSite() }),
     )
   }
 

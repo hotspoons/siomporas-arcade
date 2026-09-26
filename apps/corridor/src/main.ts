@@ -11,7 +11,7 @@ import { SquishyHunt } from './games/squishy'
 import { Parkour } from './games/parkour'
 import * as T from './tuning'
 import { TUNE_TABS } from './tuning'
-import { applySiteTuning, saveSiteTuning } from './sitetuning'
+import { applySiteTuning, clearSiteTuning, saveSiteTuning } from './sitetuning'
 
 import { fetchJSON, type IndexEntry, type Manifest, type Structure, type Crossing } from './site'
 import { LOOK, SEASONS, type Season } from './season'
@@ -60,6 +60,7 @@ const tuneUI = new TuneUI({
   context: () => (captureStance() ?? {}) as Record<string, unknown>,
   onChange: () => onTuneChange(),
   onSaveSite: () => void doSaveSiteTuning(),
+  onClearSite: () => void doClearSiteTuning(),
 })
 const ui = new ViewerUI({
   onSite: (slug) => {
@@ -165,6 +166,9 @@ async function loadSite(slug: string) {
     // only writes camera.position gets dragged back; set orbit.target too, as applyStance does
     orbit,
     drive,
+    tuneDialog: tuneUI.dialog, // probes drive the panel's dock/float through this
+    /** what the canopy overhead is doing to the ambient light, and the numbers behind it */
+    light: () => ({ canopyShade: +canopyShade.toFixed(3), baseAmbient: +baseAmbient.toFixed(3), baseEnv: +baseEnv.toFixed(3), foliage: +foliageFraction().toFixed(2), ambient: +ambient.intensity.toFixed(3), env: +scene.environmentIntensity.toFixed(3) }),
     THREE, // probes need Raycaster/Vector3 in the page, and there is no other handle on it
     // the world's clock: probes and the console drive time of day through this
     time: {
@@ -472,6 +476,89 @@ function sunNow(): { el: number; az: number; dir: THREE.Vector3; moon: THREE.Vec
   }
 }
 
+/**
+ * THE SKY IS THE LIGHT. A hemisphere light is two colours and a constant, which is why a night
+ * road still read as pitch black however far the ambient was turned up: nothing in the scene knew
+ * what the sky above it actually looked like (Rich, 2026-09-26 — "we need ambient light, probably
+ * sampled from what is going on in the sky").
+ *
+ * So the dome is rendered into a small environment map and handed to the scene: every physical
+ * material then picks up the real sky — blue overhead at noon, orange along one side at sunset,
+ * deep blue with a moon at night. It is the same shader the dome draws, so the light and the sky
+ * can never disagree, and it costs one 128 px cube render each time the light changes materially.
+ */
+/**
+ * WHAT THE CANOPY TAKES OUT OF THE SKY.
+ *
+ * Ambient light IS sky light, so standing under a closed canopy there is simply less of it — and
+ * how much less depends on the season and on what the trees are (Rich, 2026-09-26: "heavy canopy
+ * in summer would be much darker than a field in winter … would need to take into account if the
+ * trees are evergreens or deciduous"). Every piece of that is already measured and in the viewer:
+ *
+ *   how much canopy   the bake's CHM, sampled around the eye (2 m from the tiles where resident)
+ *   leaf or no leaf   the season palette's own per-leaf-kind DENSITY — winter oak is 0.08, ash 0
+ *   which trees       the species palette this site built, each archetype flagged evergreen
+ *
+ * So the transmittance under a wood is 1 − cover · foliage · CANOPY_SHADE, where `foliage` is the
+ * site's own mix of evergreen (always 1) and deciduous (the season's density). A pine wood in
+ * February is as dark as it is in July; an oak wood is not. It is smoothed over a few tenths of a
+ * second because driving out of a wood should be a change in the light, not a step.
+ */
+let baseAmbient = 1
+let baseEnv = 1
+let canopyShade = 1
+function foliageFraction(): number {
+  const lk = LOOK[season].leaves
+  const pal = site?.treePalette() ?? []
+  if (!pal.length) return (lk.oak.density + lk.ash.density) / 2
+  let sum = 0
+  for (const a of pal) sum += a.evergreen ? 1 : (lk[a.leaf as keyof typeof lk]?.density ?? 1)
+  return sum / pal.length
+}
+/** 0 = pitch under the trees, 1 = open sky, sampled in a small kernel around the eye */
+function canopyTransmittance(eye: THREE.Vector3): number {
+  if (!site || !(T.CANOPY_SHADE > 0)) return 1
+  // WHAT YOU ARE SAMPLING IS THE SKY YOU CAN SEE, NOT THE TREE YOU ARE UNDER. So the kernel is
+  // the hemisphere's worth of ground around the eye — two rings out to 10 m — rather than a few
+  // metres: a 2 m CHM has real gaps between crowns, and standing in one of them under a wood does
+  // not put you in a field, because the crowns either side still close over you.
+  let cover = 0, n = 0
+  for (const r of [0, 5, 10]) {
+    const steps = r === 0 ? 1 : 6
+    for (let i = 0; i < steps; i++) {
+      const a = (i / steps) * Math.PI * 2
+      const h = site.canopyAt(eye.x + Math.cos(a) * r, -(eye.z + Math.sin(a) * r))
+      cover += h > 2 ? Math.min(1, (h - 2) / 6) : 0   // an 8 m crown is already a closed roof
+      n++
+    }
+  }
+  return 1 - (cover / n) * foliageFraction() * T.CANOPY_SHADE
+}
+function applyCanopyShade(immediate = false) {
+  const g = Math.max(0.05, T.AMBIENT_GAIN)
+  if (immediate) {
+    ambient.intensity = baseAmbient * canopyShade * g
+    scene.environmentIntensity = baseEnv * canopyShade * g
+    return
+  }
+  ambient.intensity = baseAmbient * canopyShade * g
+  scene.environmentIntensity = baseEnv * canopyShade * g
+}
+
+const pmrem = new THREE.PMREMGenerator(renderer)
+const skyScene = new THREE.Scene()
+let envRT: THREE.WebGLRenderTarget | null = null
+function skyEnvironment() {
+  // the dome lives in the main scene; borrow it for the capture and put it straight back
+  const parent = skyDome.mesh.parent
+  skyScene.add(skyDome.mesh)
+  const next = pmrem.fromScene(skyScene, 0, 0.1, 100)
+  if (parent) parent.add(skyDome.mesh)
+  envRT?.dispose()
+  envRT = next
+  scene.environment = next.texture
+}
+
 function applySky(s: Season) {
   const look = styled(LOOK[s], style)
   const def = STYLE[style]
@@ -527,6 +614,19 @@ function applySky(s: Season) {
   ambient.color.copy(look.ambient.sky).lerp(new THREE.Color(0x3d4f76), night)
   ambient.groundColor.copy(look.ambient.ground).lerp(new THREE.Color(0x141b2b), night)
   ambient.intensity = look.ambient.intensity * (1 + 0.5 * w.skyMix) * (day + night * (T.NIGHT_AMBIENT + 1.2 * moonlight))
+  // and the image-based half: the sky itself, as an environment map. Its intensity carries the
+  // night floor, so what lights the car at midnight is a dark blue sky with a moon in it rather
+  // than a grey constant.
+  // the shaders that light themselves — grass, tree impostors — take the same day/night level as
+  // everything else, or they glow in the dark
+  site?.setLight(
+    Math.max(0.03, day + night * (T.NIGHT_AMBIENT * 1.1 + 1.6 * moonlight)) * Math.max(0.05, T.AMBIENT_GAIN),
+    new THREE.Color(1, 1, 1).lerp(new THREE.Color(0x7f93c4), night * 0.85),
+  )
+  baseAmbient = ambient.intensity
+  baseEnv = T.SKY_LIGHT * (day + night * (T.NIGHT_AMBIENT * 1.2 + 1.5 * moonlight))
+  applyCanopyShade(true)
+  skyEnvironment()
   // headlights follow the night, not the clock: they come on as the sun goes and off as it returns
   drive.car?.setLights(night * (drive.on ? 1 : 0.6))
   // the knob is the single source of truth for road-and-car: car.ts reads T.WEATHER_GRIP_SCALE
@@ -726,9 +826,21 @@ async function doSaveSiteTuning() {
   if (!site) return
   try {
     const r = await saveSiteTuning(site.manifest.slug, siteTuneAccess, TUNE_BASELINE)
-    toast(`saved ${r.count} knobs to ${site.manifest.slug}/tuning.json (${r.bytes} bytes)`, 'ok')
+    toast(`saved ${r.count} knobs to tools/corridor/data/sites/${site.manifest.slug}/tuning.json (${r.bytes} bytes)`, 'ok', 6000)
   } catch (e) {
     toast(`site tuning: ${(e as Error).message}`, 'danger')
+  }
+}
+
+async function doClearSiteTuning() {
+  if (!site) return
+  const slug = site.manifest.slug
+  try {
+    const r = await clearSiteTuning(slug, siteTuneAccess)
+    onTuneChange()
+    toast(r.cleared ? `cleared ${r.cleared} knobs from ${slug}/tuning.json; ${r.restored} put back` : `${slug}/tuning.json was already empty`, r.cleared ? 'ok' : 'info', 6000)
+  } catch (e) {
+    toast(`clearing ${slug}/tuning.json: ${(e as Error).message}`, 'danger')
   }
 }
 // Tab toggles drive/fly. Driving: W/S throttle/brake, A/D steer, Space handbrake, R backs you out (Shift+R resets to the
@@ -918,6 +1030,13 @@ function frame() {
     applyMove(dt)
     orbit.update()
     ui.setPos('')
+  }
+  if (site) {
+    // the canopy overhead changes as you drive; the light under it follows, smoothed
+    const eye = drive.on && drive.car ? drive.car.pos : camera.position
+    const want = canopyTransmittance(eye)
+    canopyShade += (want - canopyShade) * Math.min(1, dt * 3)
+    applyCanopyShade()
   }
   if (site && clock.elapsedTime * 1000 - resumeAt > RESUME_MS) {
     resumeAt = clock.elapsedTime * 1000

@@ -96,6 +96,32 @@ export async function applySiteTuning(slug: string, tune: TuneAccess): Promise<{
 }
 
 /**
+ * Throw the site's file away: write it back with no values, and put every knob it had set back to
+ * what it was before the file was applied.
+ *
+ * "Where does it live and how do I clear it" (Rich, 2026-09-26) is a fair question about a file
+ * nothing in the UI could remove. It lives at `tools/corridor/data/sites/<slug>/tuning.json` in
+ * dev (the world-editor volume in the cluster), it holds only the knobs that differ from the code
+ * defaults, and `look` — the world's style, season and relief, written by the world editor — is
+ * kept, because that belongs to the world and not to the tuning.
+ */
+export async function clearSiteTuning(slug: string, tune: TuneAccess): Promise<{ cleared: number; restored: number }> {
+  const doc = await loadSiteTuning(slug)
+  const cleared = doc ? Object.keys(doc.values ?? {}).length : 0
+  let restored = 0
+  if (applied && applied.slug === slug) {
+    for (const [k, v] of Object.entries(applied.before)) if (tune.set(k, v)) restored++
+    applied = null
+  }
+  const body: SiteTuning = { version: 1, values: {} }
+  if (doc?.look) body.look = doc.look
+  const r = await fetch(`/sites/${slug}/tuning.json`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body, null, 1) })
+  const j = (await r.json().catch(() => ({}))) as { ok?: boolean; error?: string }
+  if (!r.ok || !j.ok) throw new Error(j.error ?? `HTTP ${r.status}`)
+  return { cleared, restored }
+}
+
+/**
  * Write the knobs that differ from `baseline` to the site's file. Only the differences: a file of
  * all 112 knobs is unreadable and turns every future default change into a merge conflict.
  */

@@ -95,6 +95,9 @@ export interface Site {
   setSeason: (season: Season) => void
   /** the palette: realistic is the bake as measured; anything else is a place that is not this one */
   setStyle: (style: Style) => void
+  /** the scene's day/night light level and colour, for the shaders that do their own lighting:
+   * the grass and the tree impostors, which would otherwise glow in the dark */
+  setLight: (level: number, tint: THREE.Color) => void
   /** world-frame ground height under x,z: the fine strip near the road, the DEM beyond */
   groundAt: (x: number, z: number) => number | null
   /** signed distance to the nearest pavement edge (negative on the pavement) */
@@ -1060,6 +1063,8 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
   // the near-tree set and the measured tree list, for probes/corridor-flora.mjs: which silhouettes
   // this site built and which one every one of its tens of thousands of trees drew
   let nearRef: NearTrees | null = null
+  /** the impostor field, for the Site's setLight — a baked card lights itself */
+  let impRef: Impostors | null = null
   let treeRecords: TreeRecord[] = []
   let treePlantingRef: () => { count: number; cellM: number; radius: number; centre: [number, number]; capped: boolean; replants: number; lastMs: number } = () => ({ count: 0, cellM: 0, radius: 0, centre: [0, 0], capped: false, replants: 0, lastMs: 0 })
   let crops: ReturnType<typeof buildCrops> | null = null
@@ -1721,6 +1726,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
       status('baking impostors…')
       near.setSeason(look(currentSeason))
       imp = new Impostors(renderer, near.sources(), treeBudget, fog)
+      impRef = imp
       trees.add(imp.mesh)
       const m = new THREE.Matrix4()
       // every tree gets its impostor slot ONCE (slot = tree index); the near set only toggles
@@ -2114,6 +2120,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     waterStats: { lines: water.lines, areas: water.areas, falls: water.falls, length_m: water.length_m },
     junctionPaint: { bars: stopbars.counts, crosswalks: crosswalks.counts, arrows: arrows.counts },
     setStyle,
+    setLight: (level: number, tint: THREE.Color) => { grassRef?.setLight(level, tint); impRef?.setLight(level, tint) },
     canopyAt: canopyAtRef,
     // what grows here, for probes and the console
     flora,

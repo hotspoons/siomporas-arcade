@@ -128,6 +128,8 @@ function registerOpen(d: Dialog | null) {
 
 export interface DialogOpts {
   title: string
+  /** can be dragged, resized and docked to a side (Dialog.dock) — for panels you work WITH, not modals */
+  movable?: boolean
   icon?: IconName
   /** 'md' is the common settings size; 'lg' is for the tuning wall of sliders */
   size?: 'sm' | 'md' | 'lg'
@@ -140,11 +142,17 @@ export class Dialog {
   body = el('div', 'dialog-body')
   private foot = el('footer', 'dialog-foot')
   private lastFocus: Element | null = null
+  /** float over a scrim, or a column at one side with the scene live beside it */
+  private docked: 'float' | 'left' | 'right' = 'float'
+  private size: { w: number; h: number } | null = null
+  private at: { x: number; y: number } | null = null
+  private prefKey: string
 
   private o: DialogOpts
 
   constructor(o: DialogOpts) {
     this.o = o
+    this.prefKey = `apex-dialog.${o.title.toLowerCase().replace(/\W+/g, '-')}.v1`
     this.panel.classList.add(`size-${o.size ?? 'md'}`)
     this.panel.setAttribute('role', 'dialog')
     this.panel.setAttribute('aria-modal', 'true')
@@ -153,15 +161,145 @@ export class Dialog {
     const head = el('header', 'dialog-head')
     if (o.icon) head.append(icon(o.icon, 18))
     head.append(el('h2', '', o.title))
+    if (o.movable) {
+      // DOCK, DON'T CLOSE. Tuning is a loop — move a slider, look at the world, move it again —
+      // and a modal over a dimmed scene breaks the looking half of it (Rich, 2026-09-26). Docked,
+      // the panel is a column at one side, the scrim goes away entirely and the scene is live
+      // beside it. Floating, it can be dragged by its title bar and resized from its corner.
+      head.append(
+        button({ icon: 'chevron-left', variant: 'ghost', title: 'dock to the left', onClick: () => this.dock('left') }),
+        button({ icon: 'squares-2x2', variant: 'ghost', title: 'float over the scene', onClick: () => this.dock('float') }),
+        button({ icon: 'chevron-right', variant: 'ghost', title: 'dock to the right', onClick: () => this.dock('right') }),
+      )
+      head.classList.add('draggable')
+      this.makeDraggable(head)
+    }
     head.append(button({ icon: 'x-mark', variant: 'ghost', title: 'close', key: 'Esc', onClick: () => this.close() }))
     this.panel.append(head, this.body, this.foot)
+    if (o.movable) {
+      const grip = el('div', 'dialog-grip')
+      grip.title = 'drag to resize'
+      this.panel.append(grip)
+      this.makeResizable(grip)
+    }
     this.foot.hidden = true
     this.root.append(this.panel)
 
     // A click on the backdrop closes; a click that started inside and ended outside does not,
     // which is what makes dragging a slider to the edge of the dialog survivable.
     this.root.addEventListener('pointerdown', (e) => {
-      if (e.target === this.root) this.close()
+      // a docked panel has no backdrop to click: the rest of the screen is the scene, and clicks
+      // belong to it
+      if (e.target === this.root && this.docked === 'float') this.close()
+    })
+    if (o.movable) {
+      try {
+        const pref = JSON.parse(localStorage.getItem(this.prefKey) ?? 'null') as { dock?: 'float' | 'left' | 'right'; size?: { w: number; h: number } | null; at?: { x: number; y: number } | null } | null
+        if (pref) {
+          this.size = pref.size ?? null
+          this.at = pref.at ?? null
+          if (this.at) { this.panel.style.left = `${this.at.x}px`; this.panel.style.top = `${this.at.y}px`; this.panel.classList.add('placed') }
+          this.dock(pref.dock ?? 'float')
+        }
+      } catch { /* a fresh or blocked browser just gets the default */ }
+    }
+  }
+
+  /**
+   * Where the panel lives. `float` is the old modal, centred over a scrim; `left` and `right` are
+   * a column down that side with NO scrim, so the scene stays visible and live while you work.
+   * Remembered per dialog, because it is a working preference and not a mode.
+   */
+  dock(where: 'float' | 'left' | 'right') {
+    this.docked = where
+    this.root.classList.toggle('docked', where !== 'float')
+    this.panel.classList.toggle('dock-left', where === 'left')
+    this.panel.classList.toggle('dock-right', where === 'right')
+    if (where !== 'float') {
+      // a docked panel drops whatever it was dragged or resized to; the side decides its box
+      this.panel.style.left = this.panel.style.top = this.panel.style.width = this.panel.style.height = ''
+    } else if (this.size) {
+      this.panel.style.width = `${this.size.w}px`
+      this.panel.style.height = `${this.size.h}px`
+    }
+    this.savePrefs()
+  }
+
+  private savePrefs() {
+    try { localStorage.setItem(this.prefKey, JSON.stringify({ dock: this.docked, size: this.size, at: this.at })) } catch { /* private window */ }
+  }
+
+  /**
+   * Freeze the panel's current size into an inline one. A floating dialog is `width: 100%` of a
+   * full-screen backdrop with a max-width doing the real work, so the moment it is positioned and
+   * the caps come off it would fill the window. Called before the first drag or resize.
+   */
+  private takeOwnBox() {
+    if (this.size) return
+    const r = this.panel.getBoundingClientRect()
+    this.size = { w: Math.round(r.width), h: Math.round(r.height) }
+    this.at = this.at ?? { x: Math.round(r.x), y: Math.round(r.y) }
+    this.panel.style.width = `${this.size.w}px`
+    this.panel.style.height = `${this.size.h}px`
+    this.panel.style.left = `${this.at.x}px`
+    this.panel.style.top = `${this.at.y}px`
+    this.panel.classList.add('placed')
+  }
+
+  /** Drag the panel by its title bar; only while floating. */
+  private makeDraggable(handle: HTMLElement) {
+    handle.addEventListener('pointerdown', (e) => {
+      if (this.docked !== 'float' || (e.target as HTMLElement).closest('button')) return
+      e.preventDefault()
+      handle.setPointerCapture(e.pointerId)
+      this.takeOwnBox()
+      const r = this.panel.getBoundingClientRect()
+      const dx = e.clientX - r.left, dy = e.clientY - r.top
+      const move = (m: PointerEvent) => {
+        this.at = {
+          x: Math.min(innerWidth - 120, Math.max(20 - r.width, m.clientX - dx)),
+          y: Math.min(innerHeight - 40, Math.max(0, m.clientY - dy)),
+        }
+        this.panel.style.left = `${this.at.x}px`
+        this.panel.style.top = `${this.at.y}px`
+        this.panel.classList.add('placed')
+      }
+      const up = () => {
+        handle.removeEventListener('pointermove', move)
+        handle.removeEventListener('pointerup', up)
+        this.savePrefs()
+      }
+      handle.addEventListener('pointermove', move)
+      handle.addEventListener('pointerup', up)
+    })
+  }
+
+  /** Resize from the bottom-right grip; only while floating (a docked panel's width is the dock). */
+  private makeResizable(grip: HTMLElement) {
+    grip.addEventListener('pointerdown', (e) => {
+      if (this.docked !== 'float') return
+      e.preventDefault()
+      e.stopPropagation()
+      grip.setPointerCapture(e.pointerId)
+      this.takeOwnBox()
+      const r = this.panel.getBoundingClientRect()
+      const x0 = e.clientX, y0 = e.clientY
+      const move = (m: PointerEvent) => {
+        this.size = {
+          w: Math.round(Math.min(innerWidth - 40, Math.max(320, r.width + (m.clientX - x0)))),
+          h: Math.round(Math.min(innerHeight - 40, Math.max(220, r.height + (m.clientY - y0)))),
+        }
+        this.panel.style.width = `${this.size.w}px`
+        this.panel.style.height = `${this.size.h}px`
+        this.panel.classList.add('placed')
+      }
+      const up = () => {
+        grip.removeEventListener('pointermove', move)
+        grip.removeEventListener('pointerup', up)
+        this.savePrefs()
+      }
+      grip.addEventListener('pointermove', move)
+      grip.addEventListener('pointerup', up)
     })
   }
 
@@ -180,8 +318,8 @@ export class Dialog {
     registerOpen(this)
     // next frame, so the transition has a start state to move from
     requestAnimationFrame(() => this.root.classList.add('in'))
-    const focusable = this.panel.querySelector<HTMLElement>('button, [href], input, select, textarea')
-    focusable?.focus()
+    // a docked panel must not steal focus: the keys belong to the car
+    if (this.docked === 'float') this.panel.querySelector<HTMLElement>('button, [href], input, select, textarea')?.focus()
     return this
   }
 

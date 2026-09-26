@@ -103,6 +103,36 @@ const stars = await p.evaluate(async () => {
 })
 ok('there are stars', stars.runs > 20, JSON.stringify(stars))
 ok('and they are points, not blobs', stars.median <= 3 && stars.p90 <= 6, `median bright run ${stars.median} px, p90 ${stars.p90} px (the longest, ${stars.longest} px, is the moon)`)
+// NOTHING GLOWS IN THE DARK. Grass and the tree impostors are drawn by their own shaders and know
+// nothing about the scene's lights, so at night they used to stay lit for noon (Rich, 2026-09-26).
+// Measured as the brightest green pixel in the verge at midday against the same one at midnight.
+const verge = async (time) => {
+  await p.evaluate((t) => window.corridor.time.setLocal('2026-06-21', t, 'America/New_York'), time)
+  await p.waitForTimeout(2500)
+  return p.evaluate(async () => {
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
+    const cv = document.querySelector('canvas')
+    const g = document.createElement('canvas'); g.width = cv.width; g.height = cv.height
+    const ctx = g.getContext('2d'); ctx.drawImage(cv, 0, 0)
+    const d = ctx.getImageData(0, Math.floor(cv.height * 0.55), cv.width, Math.floor(cv.height * 0.35)).data
+    // the median of the brightest fifty, not the single brightest: one pixel of verge caught in a
+    // headlight beam is a fact about the headlights, not about whether the grass glows
+    const greens = []
+    for (let i = 0; i < d.length; i += 4) { const green = d[i + 1] - (d[i] + d[i + 2]) / 2; if (green > 8) greens.push(d[i + 1]) }
+    greens.sort((a, b) => b - a)
+    const top = greens.slice(0, 50)
+    return top.length ? top[top.length >> 1] : 0
+  })
+}
+// the minimap is satellite imagery — green, and the same green at midnight — so the chrome goes
+// away before any pixel is counted (it is already off from the star test, but not in isolation)
+if (!(await p.evaluate(() => document.body.classList.contains('chrome-off')))) { await p.keyboard.press('KeyM'); await p.waitForTimeout(400) }
+await p.evaluate(() => { const c = window.corridor; const s = c.site.manifest.spine.coords, a = s[Math.floor(s.length / 2)]
+  const gy = c.site.groundAt(a[0], -a[1]) ?? 0
+  c.camera.position.set(a[0] + 12, gy + 2.2, -a[1] + 12); c.orbit.target.set(a[0], gy + 1, -a[1]); c.orbit.update() })
+const dayGreen = await verge('13:00')
+const nightGreen = await verge('23:30')
+ok('the verge does not glow in the dark', nightGreen < dayGreen * 0.7, `lit green ${dayGreen} by day, ${nightGreen} at night`)
 console.log(fails ? `FAIL ${fails}` : 'PASS')
 await b.close()
 process.exit(fails ? 1 : 0)

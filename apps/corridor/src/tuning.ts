@@ -301,7 +301,13 @@ export let MOON_LIGHT = 0.06
 /** how hard the low sun paints the sky: 1 is what the air really does, higher is a postcard */
 export let SUNSET_BOLD = 1
 /** the light left at night with no moon, against the season's daytime ambient */
-export let NIGHT_AMBIENT = 0.3
+export let NIGHT_AMBIENT = 0.38
+/** how hard the sky itself lights the world (scene.environment, built from the dome) */
+export let SKY_LIGHT = 1
+/** everything ambient, multiplied: the one knob for "I cannot see" */
+export let AMBIENT_GAIN = 1
+/** how much a closed canopy takes out of the sky light under it; 0 = the wood is as bright as the field */
+export let CANOPY_SHADE = 0.75
 /** headlights while driving: intensity, and how far down the road they reach (m) */
 export let HEADLIGHT = 1
 export let HEADLIGHT_RANGE = 70
@@ -558,6 +564,9 @@ export const TUNE_TABS: TuneTab[] = [
           tune('MOON_LIGHT', () => MOON_LIGHT, (v) => (MOON_LIGHT = v), [0, 0.3], 0.01, 'moonlight at full moon, against the sun'),
           tune('SUNSET_BOLD', () => SUNSET_BOLD, (v) => (SUNSET_BOLD = v), [0, 3], 0.05, 'how hard a low sun paints the sky; 1 is what the air really does'),
           tune('NIGHT_AMBIENT', () => NIGHT_AMBIENT, (v) => (NIGHT_AMBIENT = v), [0, 1], 0.02, 'the light left at night with no moon'),
+          tune('SKY_LIGHT', () => SKY_LIGHT, (v) => (SKY_LIGHT = v), [0, 3], 0.05, 'how hard the sky itself lights the world (the dome, as an environment map)'),
+          tune('AMBIENT_GAIN', () => AMBIENT_GAIN, (v) => (AMBIENT_GAIN = v), [0.1, 5], 0.05, 'everything ambient, multiplied — the one knob for "I cannot see"'),
+          tune('CANOPY_SHADE', () => CANOPY_SHADE, (v) => (CANOPY_SHADE = v), [0, 1], 0.05, 'how much a closed canopy takes out of the sky light under it, allowing for leaf-off and evergreens'),
           tune('HEADLIGHT', () => HEADLIGHT, (v) => (HEADLIGHT = v), [0, 4], 0.1, 'headlights while driving at night'),
           tune('HEADLIGHT_RANGE', () => HEADLIGHT_RANGE, (v) => (HEADLIGHT_RANGE = v), [10, 200], 5, 'how far down the road they reach (m)'),
         ],

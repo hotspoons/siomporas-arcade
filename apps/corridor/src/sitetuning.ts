@@ -20,7 +20,7 @@ export interface SiteTuning {
   version: 1
   values: Record<string, number>
   /** what the world's author chose it to open with; the URL's ?style / ?season win over it */
-  look?: { style?: string; season?: string }
+  look?: { style?: string; season?: string; relief?: number }
 }
 
 export interface TuneAccess {

@@ -3,6 +3,7 @@
 // entry's footprint and height, so the layout reads before any model exists. Snap-to-ground
 // items take the strip/DEM height at their position.
 import * as THREE from 'three'
+import { reliefZ } from './relief'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js'
 import { DATA_BASE } from './site'
@@ -90,7 +91,7 @@ export async function buildPlacements(items: Placement[], catalog: Map<string, C
   for (const it of items) {
     const entry = catalog.get(it.asset)
     const wz = -it.y
-    const y = it.z ?? groundAt(it.x, wz) ?? 0
+    const y = it.z != null ? reliefZ(it.z) : (groundAt(it.x, wz) ?? 0)
     const holder = new THREE.Group()
     holder.position.set(it.x, y, wz)
     holder.rotation.y = -((it.yaw_deg + (entry?.yaw_offset_deg ?? 0)) * Math.PI) / 180

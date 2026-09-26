@@ -309,6 +309,21 @@ export class DefinePanel {
           this.o.onDirty(true)
         },
       }),
+      slider({
+        label: 'terrain relief',
+        value: look.relief ?? 1,
+        min: 0.25,
+        max: 5,
+        step: 0.25,
+        neutral: 1,
+        unit: '×',
+        note: 'exaggerates the hills about the primary road; 1 is the world as measured',
+        onInput: (v) => {
+          if (v === 1) delete look.relief
+          else look.relief = v
+          this.o.onDirty(true)
+        },
+      }),
       toggle({
         label: 'set the water level',
         value: look.water_level_m != null,

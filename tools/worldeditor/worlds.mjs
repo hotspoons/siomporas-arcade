@@ -67,6 +67,7 @@ export function validate(world) {
     else {
       if (L.style != null && !STYLES.includes(L.style)) errors.push(`look.style must be one of ${STYLES.join(', ')}`)
       if (L.season != null && !SEASONS.includes(L.season)) errors.push(`look.season must be one of ${SEASONS.join(', ')}`)
+      if (L.relief != null && !(Number.isFinite(L.relief) && L.relief >= 0.25 && L.relief <= 10)) errors.push('look.relief must be a number between 0.25 and 10 (terrain exaggeration, 1 = as measured)')
       if (L.water_level_m != null && !(Number.isFinite(L.water_level_m) && L.water_level_m >= -100 && L.water_level_m <= 1000)) errors.push('look.water_level_m must be a number between -100 and 1000 (metres NAVD88 / above the ellipsoid)')
     }
   }
@@ -110,6 +111,7 @@ export function fromDraw({ slug, name, boundary, centre, radius_m, primary, road
     if (look.style) L.style = look.style
     if (look.season) L.season = look.season
     if (Number.isFinite(look.water_level_m)) L.water_level_m = Number(look.water_level_m)
+    if (Number.isFinite(look.relief) && Number(look.relief) !== 1) L.relief = Number(look.relief)
     if (Object.keys(L).length) world.look = L
   }
   if (ring.length >= 3) world.boundary = ring.map((p) => [round6(p.lon), round6(p.lat)])

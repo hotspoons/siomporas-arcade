@@ -149,6 +149,7 @@ export class Store {
     const look = {}
     if (L.style) look.style = L.style
     if (L.season) look.season = L.season
+    if (Number.isFinite(L.relief) && L.relief !== 1) look.relief = L.relief
     if (Object.keys(look).length) doc.look = look
     else delete doc.look
     if (Number.isFinite(L.water_level_m)) doc.values.WATER_LEVEL_M = L.water_level_m

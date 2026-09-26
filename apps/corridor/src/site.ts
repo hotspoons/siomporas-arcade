@@ -1,6 +1,8 @@
 // The site manifest as tools/corridor/corridor/export.py writes it. Metres, relative to the site
 // origin (the photo fix projected to UTM), z in metres NAVD88. Keep this in step with export.py.
 
+import { reliefHeights } from './relief'
+
 /**
  * A geodetic control lattice over a raster: `n*n` lon/lat samples, row-major, rows running SOUTH
  * to NORTH and columns WEST to EAST — the same order as `bbox`.
@@ -317,7 +319,7 @@ export function decodeHeights(img: HTMLImageElement, layer: Layer): Float32Array
   const zmin = layer.zmin ?? 0
   const zs = layer.zscale ?? 0.01
   for (let i = 0; i < out.length; i++) out[i] = zmin + ((px[i * 4] << 8) | px[i * 4 + 1]) * zs
-  return out
+  return reliefHeights(out)
 }
 
 /** Decode an 8-bit PNG of CLASS INDICES (the flora grid). No scaling: these are not measurements. */

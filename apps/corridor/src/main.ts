@@ -16,6 +16,8 @@ import { applySiteTuning, saveSiteTuning } from './sitetuning'
 import { fetchJSON, type IndexEntry, type Manifest, type Structure, type Crossing } from './site'
 import { LOOK, SEASONS, type Season } from './season'
 import { STYLE, styled, isStyle, type Style } from './style'
+import { setRelief, relief, clampRelief, spineDatum, reliefManifest } from './relief'
+import { loadSiteTuning } from './sitetuning'
 import { WEATHER, WEATHERS, type Weather } from './weather'
 import { ViewerUI, restoreTheme } from './ui/viewer'
 import { TuneUI } from './ui/tune'
@@ -62,6 +64,14 @@ const ui = new ViewerUI({
   },
   onSeason: (s) => setSeason(s),
   onStyle: (s) => setStyle(s),
+  onRelief: (k) => {
+    reliefWanted = clampRelief(k)
+    const u = new URL(location.href)
+    if (reliefWanted === 1) u.searchParams.delete('relief')
+    else u.searchParams.set('relief', String(reliefWanted))
+    history.replaceState(null, '', u.toString())
+    if (site) void loadSite(site.manifest.slug)
+  },
   onWeather: (w) => setWeatherSelection(w),
   onLayers: () => applyLayers(),
   onDrive: () => setDrive(!drive.on),
@@ -121,6 +131,19 @@ async function loadSite(slug: string) {
   minimap = null
   status(`loading ${slug}…`)
   const manifest = await fetchJSON<Manifest>(`/sites/${slug}/web/manifest.json`)
+  // terrain exaggeration is decided BEFORE anything decodes: the URL, else the stance, else the
+  // world's own look (tuning.json, written by the world editor). It is a load-time transform on
+  // every absolute height (relief.ts), so changing it reloads the site.
+  {
+    const q = new URLSearchParams(location.search)
+    const fromUrl = q.get('relief') != null ? Number(q.get('relief')) : NaN
+    const fromStance = readStanceParam()?.relief
+    const fromWorld = Number.isFinite(fromUrl) || fromStance != null ? undefined : (await loadSiteTuning(slug))?.look?.relief
+    reliefWanted = clampRelief(Number.isFinite(fromUrl) ? fromUrl : fromStance ?? fromWorld ?? reliefWanted)
+    setRelief(reliefWanted, spineDatum(manifest))
+    reliefManifest(manifest)
+    ui.setRelief(reliefWanted)
+  }
   site = await buildSite(manifest, status, LITE, renderer, scene.fog as THREE.FogExp2, season, style)
   applySky(season)
   scene.add(site.group)
@@ -387,6 +410,8 @@ if (!SEASONS.includes(season)) season = 'summer'
 // style: realistic is the bake as measured; ?style=fantasy is the first palette that is not Crofton
 const styleParam = new URLSearchParams(location.search).get('style')
 let style: Style = isStyle(styleParam) ? styleParam : 'realistic'
+/** terrain exaggeration for the next load; 1 is the world as measured (see relief.ts) */
+let reliefWanted = 1
 /**
  * Sky, fog and LIGHT for the season, then the weather pulled over the top of it. Both in one place
  * because weather is a modifier on a season and not a state of its own: snow under a winter sun is
@@ -476,6 +501,8 @@ interface Stance {
   site: string
   season: Season
   style?: Style
+  /** terrain exaggeration the frame was made with; absent means 1 */
+  relief?: number
   mode: 'fly' | 'drive'
   cam?: { p: number[]; t: number[] }
   car?: { p: number[]; yaw: number; speed: number; look: number[] }
@@ -487,6 +514,7 @@ function captureStance(): Stance | null {
   const layers: Record<string, boolean> = {}
   Object.assign(layers, ui.layers())
   const st: Stance = { v: 1, site: site.manifest.slug, season, style, mode: drive.on ? 'drive' : 'fly', layers, lite: LITE }
+  if (relief().k !== 1) st.relief = relief().k
   const r3 = (v: THREE.Vector3) => [+v.x.toFixed(2), +v.y.toFixed(2), +v.z.toFixed(2)]
   if (drive.on && drive.car) st.car = { p: r3(drive.car.pos), yaw: +drive.car.yaw.toFixed(4), speed: +drive.car.speed.toFixed(2), look: [+drive.yaw.toFixed(3), +drive.pitch.toFixed(3)] }
   else st.cam = { p: r3(camera.position), t: r3(orbit.target) }
@@ -498,6 +526,8 @@ function stanceUrl(st: Stance): string {
   u.searchParams.set('season', st.season)
   if (st.style && st.style !== 'realistic') u.searchParams.set('style', st.style)
   else u.searchParams.delete('style')
+  if (st.relief && st.relief !== 1) u.searchParams.set('relief', String(st.relief))
+  else u.searchParams.delete('relief')
   u.hash = st.site
   return u.toString()
 }

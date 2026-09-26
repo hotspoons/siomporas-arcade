@@ -19,6 +19,13 @@ import { empty, group, bodyOf, layerToggle, readout, select, toggle } from './co
 import type { IndexEntry, Manifest } from '../site'
 import { SEASONS, type Season } from '../season'
 import { STYLES, type Style } from '../style'
+
+/** the exaggerations offered; a URL may carry any value in 0.25–10 and the select grows to show it */
+const RELIEFS = [1, 1.5, 2, 3, 5]
+const clampReliefParam = () => {
+  const k = Number(new URLSearchParams(location.search).get('relief'))
+  return Number.isFinite(k) && k > 0 ? Math.min(10, Math.max(0.25, k)) : 1
+}
 import { WEATHERS, type Weather } from '../weather'
 
 /**
@@ -160,6 +167,7 @@ export interface ViewerUIOpts {
   onSite: (slug: string) => void
   onSeason: (s: Season) => void
   onStyle: (s: Style) => void
+  onRelief: (k: number) => void
   onWeather: (w: Weather) => void
   onLayers: (layers: Record<string, boolean>) => void
   onDrive: () => void
@@ -171,6 +179,15 @@ export interface ViewerUIOpts {
 }
 
 export class ViewerUI {
+  private reliefSel: HTMLElement | null = null
+  /** reflect the relief a site loaded with (the URL, the stance or the world's look decided it) */
+  setRelief(k: number): void {
+    const s = this.reliefSel?.querySelector('select')
+    if (!s) return
+    const v = String(k)
+    if (![...s.options].some((o) => o.value === v)) s.append(Object.assign(document.createElement('option'), { value: v, textContent: `${k}× hills` }))
+    s.value = v
+  }
   bar = el('header', 'topbar')
   drawer = new Drawer('corridor', 'a strip of real road, measured')
   settings: Dialog
@@ -286,6 +303,12 @@ export class ViewerUI {
         options: STYLES.map((s) => ({ value: s, label: s[0].toUpperCase() + s.slice(1) })),
         onChange: (v) => this.o.onStyle(v),
       }),
+      (this.reliefSel = select<string>({
+        label: 'Relief',
+        value: String(clampReliefParam()),
+        options: RELIEFS.map((k) => ({ value: String(k), label: k === 1 ? '1× as measured' : `${k}× hills` })),
+        onChange: (v) => this.o.onRelief(Number(v)),
+      })),
       select<Weather>({
         label: 'Weather',
         value: WEATHERS[0],

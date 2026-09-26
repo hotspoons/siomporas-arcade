@@ -62,11 +62,19 @@ Two already exist and one is missing:
 - **water level** — `WATER_LEVEL_M` is trailworks' flooding mechanic in one number; the sea plane
   is always drawn and rises to it. Waterworld is that knob plus the fantasy palette's turquoise.
 - **season / weather** — already stance and tuning state.
-- **terrain exaggeration** — missing. The honest version scales heights *about the road*: the
-  strip and the car stay drivable if the exaggeration is applied to the DEM relative to the spine
-  grade (`z' = zroad + k·(z − zroad)`), which keeps every carriageway where it was and lifts the
-  hills around it. It is a loader-side transform on the height fields with `k` on the world
-  record; the strip, trees and buildings all read `heightAt`, so they follow for free.
+- **terrain exaggeration** — built 2026-09-26 (`apps/corridor/src/relief.ts`). One affine map
+  `z' = z0 + k·(z − z0)` with `z0` the spine's median grade, applied ONCE at load to every
+  absolute height: the rasters through `decodeHeights` (tiles, overview, horizon) and the
+  manifest's own z (spine and branch profiles, junctions, decks, water, parking, sidewalks,
+  driveways, barriers, power, signs, masts, bars; `ground_rel` scales by k, a building's height
+  does not). Because it is the same map everywhere, everything that lay on the ground still does,
+  only steeper: the car gets real hills and the strip stays drivable. `?relief=3`, the stance
+  carries it, the world record's `look.relief` sets a world's default, and the viewer has a Relief
+  select (a change reloads the site — it is geometry, not a uniform). `probes/corridor-relief.mjs`
+  loads a site twice and asserts the mechanism: datum fixed, off-road ground moved by k·(z−z0),
+  road surface = exaggerated profile + the strip's measured lift, water moved with the ground.
+  The first version of that probe failed on a sample that sat on a road, because the strip's
+  0.4 m lift is a thing on the terrain and does not scale — the probe now measures the lift.
 
 ## Squishy Hunt
 
@@ -117,7 +125,7 @@ scoring geometry are already there. Same engine, same catalog entry pattern.
    {style, season, water_level_m}`; the editor's Define form has a Look group; the service writes
    it into the site's `tuning.json` (on save, and again when a bake finishes, since the bake never
    writes that file) and the viewer applies it unless the URL says `?style`/`?season`. Terrain
-   exaggeration on `heightAt` is still to do.
+   exaggeration: done the same day, `look.relief` (see Play knobs).
 3. ~~Squishy Hunt: hauls + hints + walk mode single-player, then the relay.~~ Done 2026-09-26; the world-editor pod needs redeploying for the relay to exist outside a dev box.
 4. Parkour: ~~the character, then tricks, then the bow, then enemies.~~ First pass 2026-09-26
    (`apps/corridor/src/games/parkour.ts`, `?game=parkour` or P): a capsule runner on the real

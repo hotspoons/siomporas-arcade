@@ -183,6 +183,24 @@ body.chrome-off .drivepad { display: none; }
 #minimap.expanded .mm-locate { left: var(--s5); }
 #minimap.expanded .mm-expand { right: var(--s5); }
 
+/* ---- Squishy Hunt --------------------------------------------------------------------------
+   The game's one panel: the score, the hint, an arrow that points at the next squishy relative
+   to where you are looking. Under the top bar on the left, where the eye goes for a message. */
+#squishy {
+  position: fixed; left: var(--s3); top: calc(var(--bar-h, 48px) + var(--s3)); z-index: var(--z-hud);
+  width: min(360px, calc(100vw - 2 * var(--s3)));
+  padding: var(--s2) var(--s3); border-radius: var(--r3);
+  color: var(--ink-1); background: var(--hud-bg); border: 1px solid var(--hud-line); box-shadow: var(--shadow-2);
+  font-size: var(--text-sm, 13px);
+}
+#squishy .squishy-title { display: flex; align-items: center; gap: var(--s1); font-weight: 600; letter-spacing: 0.02em; }
+#squishy .squishy-title svg { color: #ff9ec9; }
+#squishy .squishy-score { margin-top: 2px; font-family: 'IBM Plex Mono', monospace; font-size: var(--text-xs, 12px); opacity: 0.8; }
+#squishy .squishy-row { display: flex; align-items: center; gap: var(--s2); margin-top: var(--s2); }
+#squishy .squishy-arrow { flex: none; width: 28px; height: 28px; display: grid; place-items: center; color: #ff9ec9; transition: transform 200ms; }
+#squishy .squishy-hint { line-height: 1.35; }
+body.chrome-off #squishy { display: none; }
+
 /* On a phone the map moves out from under the thumb and shrinks; expanded, it fills the screen. */
 @media (max-width: 760px), (pointer: coarse) and (max-width: 1024px) {
   #minimap { right: var(--s2); bottom: auto; top: calc(var(--bar-h) + var(--s2)); }

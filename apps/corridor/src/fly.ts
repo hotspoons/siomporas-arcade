@@ -21,6 +21,13 @@ export class FlyControls {
   private lastX = 0
   private lastY = 0
   enabled = true
+  /**
+   * ON FOOT: the same keys and the same look, but the eye is pinned WALK_EYE above the ground
+   * and moves at walking pace (Shift jogs); the dolly and lift keys do nothing. For the games
+   * (Squishy Hunt walks up to a store), and for looking at a kerb the way a person does.
+   */
+  walk = false
+  static WALK_EYE = 1.7
   private camera: THREE.PerspectiveCamera
   private orbit: OrbitControls
   private groundAt: (x: number, z: number) => number | null
@@ -75,6 +82,21 @@ export class FlyControls {
     this.orbit.target.copy(this.camera.position).add(off)
   }
 
+  /** put the eye on the ground where the camera is, keeping the look direction */
+  setWalk(on: boolean) {
+    this.walk = on
+    if (!on) return
+    const cam = this.camera, ctl = this.orbit
+    const off = ctl.target.clone().sub(cam.position)
+    const gy = this.groundAt(cam.position.x, cam.position.z)
+    if (gy !== null) cam.position.y = gy + FlyControls.WALK_EYE
+    // look level-ish from a standing height: keep the heading, flatten most of the pitch
+    const len = Math.max(8, off.length())
+    off.y = Math.max(-0.35, Math.min(0.2, off.y / len)) * len
+    off.setLength(len)
+    ctl.target.copy(cam.position).add(off)
+  }
+
   update(dt: number) {
     if (!this.enabled) return
     const k = this.keys
@@ -83,9 +105,27 @@ export class FlyControls {
     const fwd = Number(k.has('KeyW') || k.has('ArrowUp')) - Number(k.has('KeyS') || k.has('ArrowDown'))
     const strafe = Number(k.has('KeyD') || k.has('ArrowRight')) - Number(k.has('KeyA') || k.has('ArrowLeft'))
     const yaw = Number(k.has('KeyQ')) - Number(k.has('KeyE'))
+    const cam = this.camera, ctl = this.orbit
+    if (this.walk) {
+      if (yaw) this.lookBy(yaw * (sprint ? 2.1 : 1.2) * d, 0)
+      const off = ctl.target.clone().sub(cam.position)
+      const heading = Math.atan2(off.x, off.z)
+      const step = (sprint ? 6.5 : 3.2) * d
+      const mx = (Math.sin(heading) * fwd + Math.cos(heading) * strafe) * step
+      const mz = (Math.cos(heading) * fwd - Math.sin(heading) * strafe) * step
+      cam.position.x += mx
+      cam.position.z += mz
+      const gy = this.groundAt(cam.position.x, cam.position.z)
+      if (gy !== null) {
+        // ease onto steps and kerbs rather than snapping, but never sink below the eye height
+        const want = gy + FlyControls.WALK_EYE
+        cam.position.y += (want - cam.position.y) * (1 - Math.exp(-12 * d))
+      }
+      ctl.target.copy(cam.position).add(off)
+      return
+    }
     const zoom = Number(k.has('KeyF')) - Number(k.has('KeyR'))
     const lift = Number(k.has('KeyT')) - Number(k.has('KeyG'))
-    const cam = this.camera, ctl = this.orbit
     if (yaw) this.lookBy(yaw * (sprint ? 2.1 : 1.2) * d, 0)
     if (zoom) {
       const f = Math.exp(zoom * (sprint ? 1.6 : 0.9) * d)

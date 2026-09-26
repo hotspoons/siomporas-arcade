@@ -148,6 +148,8 @@ const KEYS: { group: string; rows: [string, string][] }[] = [
       ['X', 'copy a link to this exact view'],
       ['F6', 'tuning'],
       ['M', 'hide the interface'],
+      ['B', 'on foot / back to flying'],
+      ['G', 'Squishy Hunt on this site'],
       ['Esc', 'close what is open'],
     ],
   },

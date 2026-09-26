@@ -7,6 +7,7 @@ import { Car, type CarInput } from './car'
 import { FlyControls } from './fly'
 import { MiniMap } from './minimap'
 import { Sky } from './sky'
+import { SquishyHunt } from './games/squishy'
 import * as T from './tuning'
 import { TUNE_TABS } from './tuning'
 import { applySiteTuning, saveSiteTuning } from './sitetuning'
@@ -75,6 +76,9 @@ let dragging = false, lastX = 0, lastY = 0, downAt = 0
 // drive mode: a real car (stuntin dynamics) on the corridor strip, chase camera behind it
 const drive = { on: false, cockpit: false, yaw: 0, pitch: 0, car: null as Car | null, input: { throttle: 0, brake: 0, steer: 0, handbrake: false } as CarInput, steerKey: 0 }
 let fly: FlyControls | null = null
+// the games ride on the viewer: ?game=squishy starts one when the site lands, G toggles it
+let game: SquishyHunt | null = null
+const wantGame = new URLSearchParams(location.search).get('game')
 
 function resize() {
   const w = innerWidth, h = innerHeight
@@ -147,6 +151,9 @@ async function loadSite(slug: string) {
   applyLayers()
   fillInfo(manifest)
   fly ??= new FlyControls(camera, orbit, canvas, (x, z) => site?.groundAt(x, z) ?? null)
+  game?.dispose()
+  game = null
+  if (wantGame === 'squishy') startSquishy()
   minimap = new MiniMap(document.body, manifest)
   const st = readStanceParam()
   if (st && st.site === slug) applyStance(st)
@@ -212,8 +219,23 @@ function fillInfo(m: Manifest) {
 }
 // ---------------------------------------------------------------------------------------------
 // cameras
+/** Squishy Hunt on this site, on foot; G again ends it. */
+function startSquishy() {
+  if (!site) return
+  game?.dispose()
+  game = new SquishyHunt(site, document.body)
+  setDrive(false)
+  setWalk(true)
+  toast(`Squishy Hunt: ${game.hauls.length} squishies hidden around town. Walk with W/A/S/D, look with the right mouse button.`, 'info', 6000)
+}
+function setWalk(on: boolean) {
+  if (!fly) return
+  fly.setWalk(on)
+  if (on) toast('on foot (B to fly again)', 'info', 1500)
+}
 function setDrive(on: boolean) {
   drive.on = on
+  if (on && fly?.walk) fly.setWalk(false)
   orbit.enabled = !on
   ui.setDriveMode(on)
   if (fly) fly.enabled = !on
@@ -554,6 +576,8 @@ addEventListener('keydown', (e) => {
     case 'KeyX': void copyStance(); break
     case 'KeyM': setChromeHidden(!document.body.classList.contains('chrome-off')); break
     case 'KeyN': minimap?.setExpanded(!minimap.expanded); break
+    case 'KeyB': if (!drive.on && fly) setWalk(!fly.walk); break
+    case 'KeyG': if (game) { game.dispose(); game = null; toast('hunt over', 'info', 1200) } else startSquishy(); break
     // R backs you out the way you came (stuntin's recover); Shift+R is the old teleport to the
     // photo station, kept for getting back to the start of the corridor
     case 'KeyR':
@@ -642,6 +666,8 @@ function frame() {
     const fwd = camera.getWorldDirection(viewDir)
     const pitch = Math.max(0, -Math.asin(THREE.MathUtils.clamp(fwd.y, -1, 1))) // 0 level, +down
     site.updateNear(camera.position, clock.elapsedTime, fwd, pitch)
+    // the player is the car when driving, the eye on foot or in the air; heading is compass from north
+    if (game) game.tick(dt, drive.on && drive.car ? drive.car.pos : camera.position, drive.on && drive.car ? Math.atan2(drive.car.forward.x, -drive.car.forward.z) : Math.atan2(fwd.x, -fwd.z))
     // the inset map follows the car when driving, the camera when flying; site frame is x east, y north = -z
     if (drive.on && drive.car) minimap?.draw({ x: drive.car.pos.x, y: -drive.car.pos.z, yaw: Math.atan2(-drive.car.forward.z, drive.car.forward.x) })
     else minimap?.draw({ x: camera.position.x, y: -camera.position.z, yaw: Math.atan2(-fwd.z, fwd.x) })

@@ -287,6 +287,24 @@ export let VEG_RADIUS_M = 700
 export let VEG_EXG_MIN = 0.04
 // an inferior road is re-graded to meet the superior one at a junction, fading out over this many metres
 export let JUNCTION_MEET_M = 40
+// --- time of day (sun.ts + main.ts applySky) ------------------------------------------------
+/** simulated seconds per real second: 1 is a real day, 600 puts a whole day in four minutes, 0 stops the sun */
+export let TIME_RATE = 1
+/** stretches the sun's elevation about the horizon; 1 is the sky over this site as it really is */
+export let SUN_ARC = 1
+/** how many stars on a clear night, 0 … 1 */
+export let SKY_STARS = 0.8
+/** the wispy high layer, 0 … 1; the cumulus layer is the weather's own cover */
+export let SKY_CIRRUS = 0.3
+/** moonlight at full moon, as a fraction of the sun's intensity */
+export let MOON_LIGHT = 0.06
+/** how hard the low sun paints the sky: 1 is what the air really does, higher is a postcard */
+export let SUNSET_BOLD = 1
+/** the light left at night with no moon, against the season's daytime ambient */
+export let NIGHT_AMBIENT = 0.3
+/** headlights while driving: intensity, and how far down the road they reach (m) */
+export let HEADLIGHT = 1
+export let HEADLIGHT_RANGE = 70
 export let WATER_LEVEL_M = 0
 export let WATER_LEVEL_SPAN = 30000
 
@@ -528,6 +546,20 @@ export const TUNE_TABS: TuneTab[] = [
           tune('GRASS_WIND_STILL_BELOW', () => GRASS_WIND_STILL_BELOW, (v) => (GRASS_WIND_STILL_BELOW = v), [0, 40], 0.5, 'no sway above this speed (m/s)'),
           tune('GRASS_TYPE', () => GRASS_TYPE, (v) => (GRASS_TYPE = v), [-1, 6], 1, '-1 from the bake (LANDFIRE ground class); 0 common 1 wheat 2 bermuda 3 coastal 4 annual 5 meadow 6 heath'),
           tune('SEASON', () => SEASON, (v) => (SEASON = v), [-1, 3], 1, '-1 use the selector; 0 winter 1 spring 2 summer 3 autumn'),
+        ],
+      },
+      {
+        title: 'time of day',
+        keys: [
+          tune('TIME_RATE', () => TIME_RATE, (v) => (TIME_RATE = v), [0, 3600], 1, 'simulated seconds per real second: 1 real time, 600 a day in four minutes, 0 stops the sun'),
+          tune('SUN_ARC', () => SUN_ARC, (v) => (SUN_ARC = v), [0.2, 3], 0.05, 'stretches the sun\'s arc about the horizon; 1 is this latitude as it really is'),
+          tune('SKY_STARS', () => SKY_STARS, (v) => (SKY_STARS = v), [0, 1], 0.05, 'how many stars on a clear night'),
+          tune('SKY_CIRRUS', () => SKY_CIRRUS, (v) => (SKY_CIRRUS = v), [0, 1], 0.05, 'the wispy high layer'),
+          tune('MOON_LIGHT', () => MOON_LIGHT, (v) => (MOON_LIGHT = v), [0, 0.3], 0.01, 'moonlight at full moon, against the sun'),
+          tune('SUNSET_BOLD', () => SUNSET_BOLD, (v) => (SUNSET_BOLD = v), [0, 3], 0.05, 'how hard a low sun paints the sky; 1 is what the air really does'),
+          tune('NIGHT_AMBIENT', () => NIGHT_AMBIENT, (v) => (NIGHT_AMBIENT = v), [0, 1], 0.02, 'the light left at night with no moon'),
+          tune('HEADLIGHT', () => HEADLIGHT, (v) => (HEADLIGHT = v), [0, 4], 0.1, 'headlights while driving at night'),
+          tune('HEADLIGHT_RANGE', () => HEADLIGHT_RANGE, (v) => (HEADLIGHT_RANGE = v), [10, 200], 5, 'how far down the road they reach (m)'),
         ],
       },
     ],

@@ -17,6 +17,7 @@ import { fetchJSON, type IndexEntry, type Manifest, type Structure, type Crossin
 import { LOOK, SEASONS, type Season } from './season'
 import { STYLE, styled, isStyle, type Style } from './style'
 import { setRelief, relief, clampRelief, spineDatum, reliefManifest } from './relief'
+import { WorldClock, sunPosition, sunVector } from './sun'
 import { loadSiteTuning } from './sitetuning'
 import { WEATHER, WEATHERS, type Weather } from './weather'
 import { ViewerUI, restoreTheme } from './ui/viewer'
@@ -34,7 +35,10 @@ scene.fog = new THREE.FogExp2(0xbfd2ea, 0.000018)
 const camera = new THREE.PerspectiveCamera(60, 1, 0.5, 120_000)
 const orbit = new OrbitControls(camera, canvas)
 orbit.enableDamping = true
-orbit.maxPolarAngle = Math.PI / 2 - 0.02
+// You can look UP. The half-circle limit stopped the camera dropping below the target's own
+// plane, which also meant the sky above the horizon was unreachable — no use at all now that
+// there is a sun arc, a sunset and a sky full of stars to look at (2026-09-26).
+orbit.maxPolarAngle = Math.PI - 0.05
 
 const ambient = new THREE.HemisphereLight(0xe9eef2, 0x7a6a50, 0.75)
 scene.add(ambient)
@@ -162,6 +166,18 @@ async function loadSite(slug: string) {
     orbit,
     drive,
     THREE, // probes need Raycaster/Vector3 in the page, and there is no other handle on it
+    // the world's clock: probes and the console drive time of day through this
+    time: {
+      get ms() { return worldClock.ms },
+      set ms(v: number) { worldClock.ms = v; applySky(season) },
+      home: () => { worldClock.home(); applySky(season) },
+      parts: (tz = Intl.DateTimeFormat().resolvedOptions().timeZone) => worldClock.parts(tz),
+      setLocal: (date?: string, time?: string, tz = Intl.DateTimeFormat().resolvedOptions().timeZone) => {
+        worldClock.setLocal(tz, date, time)
+        applySky(season)
+      },
+      sun: () => sunNow(),
+    },
 
     tune: {
       tabs: TUNE_TABS,
@@ -199,9 +215,9 @@ async function loadSite(slug: string) {
   const urlQ = new URLSearchParams(location.search)
   if (tuned.look?.style && !urlQ.get('style') && isStyle(tuned.look.style) && tuned.look.style !== style) setStyle(tuned.look.style)
   if (tuned.look?.season && !urlQ.get('season') && SEASONS.includes(tuned.look.season as Season) && tuned.look.season !== season) setSeason(tuned.look.season as Season)
-  if (tuned.applied || tuned.unknown.length) {
+  if (tuned.applied || tuned.unknown.length || tuned.kept.length) {
     onTuneChange()
-    toast(`${slug}: ${tuned.applied} site knobs applied${tuned.unknown.length ? `, ${tuned.unknown.length} unknown (${tuned.unknown.slice(0, 3).join(', ')})` : ''}`, 'ok', 4000)
+    toast(`${slug}: ${tuned.applied} site knobs applied${tuned.kept.length ? `, ${tuned.kept.length} left as you set them (${tuned.kept.slice(0, 3).join(', ')})` : ''}${tuned.unknown.length ? `, ${tuned.unknown.length} unknown (${tuned.unknown.slice(0, 3).join(', ')})` : ''}`, 'ok', 4000)
   } else clearStatus()
 }
 
@@ -426,30 +442,93 @@ let reliefWanted = 1
  * because weather is a modifier on a season and not a state of its own: snow under a winter sun is
  * a different scene from snow under a summer one.
  */
+/**
+ * THE WORLD'S CLOCK. It starts at the real now and keeps up with it (sun.ts WorldClock), so a
+ * session opens at today's light without anyone choosing anything; the date and time controls move
+ * an OFFSET from real time rather than an absolute instant, which is what lets a world left paused
+ * yesterday still open on today. TIME_RATE is how fast it runs.
+ */
+const worldClock = new WorldClock()
+/** where the sun is for this site, right now on the world's clock */
+function sunNow(): { el: number; az: number; dir: THREE.Vector3; moon: THREE.Vector3; phase: number } {
+  const a = site?.manifest.frame?.anchor
+  const lat = a?.lat ?? 39, lon = a?.lon ?? -76.7
+  const s = sunPosition(worldClock.ms, lat, lon)
+  const v = sunVector(s.elevation, s.azimuth, T.SUN_ARC)
+  // The moon, cheaply: it runs the same arc about 50 minutes later each day, and its phase is the
+  // synodic month since a known new moon (2026-01-18 19:52 UTC). This is not an ephemeris — it is
+  // a light in the sky that is in roughly the right place at roughly the right brightness, which
+  // is all a night drive needs. A real one is Meeus chapter 47 if it ever matters.
+  const SYNODIC = 29.530588853 * 86400000
+  const phase = (((worldClock.ms - Date.parse('2026-01-18T19:52:00Z')) % SYNODIC) + SYNODIC) % SYNODIC / SYNODIC
+  const m = sunPosition(worldClock.ms - phase * SYNODIC + SYNODIC / 2, lat, lon)
+  const mv = sunVector(m.elevation, m.azimuth, T.SUN_ARC)
+  return {
+    el: s.elevation,
+    az: s.azimuth,
+    dir: new THREE.Vector3(v.x, v.y, v.z),
+    moon: new THREE.Vector3(mv.x, mv.y, mv.z),
+    phase: 1 - Math.abs(phase * 2 - 1), // 0 new, 1 full
+  }
+}
+
 function applySky(s: Season) {
   const look = styled(LOOK[s], style)
   const def = STYLE[style]
   const w = WEATHER[weatherNow()]
-  const sky = look.sky.clone().lerp(w.skyTint, w.skyMix)
+  const sunAt = sunNow()
+  // day 1 → night 0, across civil twilight: the light changes fastest right at the horizon, which
+  // is why the band is −6° to +4° and not something symmetric and tidy
+  const day = THREE.MathUtils.smoothstep(sunAt.el, -6, 4)
+  const night = 1 - day
+  // the golden hour is a fact about elevation, not a time: low sun, long air, red light
+  // SUNSET_BOLD is a postcard knob: 1 is what the air really does, higher widens the band the low
+  // sun paints in and deepens it
+  const golden = Math.max(0, 1 - Math.abs(sunAt.el - 4) / (10 * Math.max(0.3, T.SUNSET_BOLD))) * day * Math.min(1.6, T.SUNSET_BOLD)
+  // the season's daylight palette, then dusk pulled over it and night under that
+  // These mixes happen in the renderer's LINEAR working space (three converts on setHex), so a
+  // mix of 0.92 toward a dark blue still reads as a mid slate once it is written back out to
+  // sRGB. The numbers are chosen against what the screen shows, not against the arithmetic.
+  const NIGHT_SKY = new THREE.Color(0x05080f)
+  const DUSK = new THREE.Color(0xe8a765)
+  const sky = look.sky.clone().lerp(w.skyTint, w.skyMix).lerp(DUSK, Math.min(0.9, golden * 0.45 * T.SUNSET_BOLD)).lerp(NIGHT_SKY, night * 0.985)
   ;(scene.background as THREE.Color).copy(sky)
   ;(scene.fog as THREE.FogExp2).color.copy(sky)
   ;(scene.fog as THREE.FogExp2).density = look.fog * w.fogScale
   // the dome reads the same two inputs: the season's blue overhead, the fog colour at the horizon,
   // the weather's cover — a clear day is a third cumulus, an overcast one (skyMix ~0.9) is shut
+  // the sun is a direction now, not a fixed corner of the sky; the light is 3 km out along it so
+  // shadows and specular agree with the disc the dome draws
+  sun.position.copy(sunAt.dir).multiplyScalar(5000)
   skyDome.set({
-    zenith: (def.sky ? def.sky.zenith.clone() : look.sky.clone().lerp(new THREE.Color(0x4f86d2), 0.55)).lerp(w.skyTint, w.skyMix),
+    zenith: (def.sky ? def.sky.zenith.clone() : look.sky.clone().lerp(new THREE.Color(0x4f86d2), 0.55)).lerp(w.skyTint, w.skyMix).lerp(NIGHT_SKY, night * 0.99),
     horizon: sky,
     cover: Math.min(1, 0.3 + (def.sky?.cloudBias ?? 0) + 0.7 * w.skyMix),
     haze: Math.min(1, 0.35 + w.skyMix * 0.6),
-    sunDir: sun.position,
-    sunColour: look.sun.colour,
+    sunDir: sunAt.dir,
+    sunColour: look.sun.colour.clone().lerp(new THREE.Color(0xff6b2a), Math.min(0.95, golden * 0.8 * T.SUNSET_BOLD)),
+    night,
+    stars: T.SKY_STARS,
+    cirrus: T.SKY_CIRRUS * (1 - w.skyMix * 0.6),
+    moonDir: sunAt.moon,
+    moonPhase: sunAt.phase,
   })
-  sun.color.copy(look.sun.colour)
+  // the sun's own colour reddens as it drops, and it hands over to the moon below the horizon
+  const moonUp = THREE.MathUtils.smoothstep(sunAt.moon.y, -0.05, 0.25)
+  sun.color.copy(look.sun.colour).lerp(new THREE.Color(0xff8a3d), Math.min(0.95, golden * 0.85 * T.SUNSET_BOLD)).lerp(new THREE.Color(0x9fb4de), night)
   // overcast: the sun goes down and the sky comes up, which is what a grey day actually is
-  sun.intensity = look.sun.intensity * (1 - 0.72 * w.skyMix)
-  ambient.color.copy(look.ambient.sky)
-  ambient.groundColor.copy(look.ambient.ground)
-  ambient.intensity = look.ambient.intensity * (1 + 0.5 * w.skyMix)
+  const moonlight = T.MOON_LIGHT * sunAt.phase * moonUp
+  sun.intensity = look.sun.intensity * (1 - 0.72 * w.skyMix) * (day + night * moonlight)
+  // at night the light comes from the whole sky, not from a lamp: the ambient carries it, cold and
+  // dim, and the ground bounce all but disappears
+  // A NIGHT YOU CAN SEE. There is no such thing as a black night outdoors — there is airglow, the
+  // moon, and in a neighbourhood a sky full of other people's lights. At 0.10 the road went
+  // genuinely pitch black (Rich, 2026-09-26); NIGHT_AMBIENT is the floor, and the moon adds to it.
+  ambient.color.copy(look.ambient.sky).lerp(new THREE.Color(0x3d4f76), night)
+  ambient.groundColor.copy(look.ambient.ground).lerp(new THREE.Color(0x141b2b), night)
+  ambient.intensity = look.ambient.intensity * (1 + 0.5 * w.skyMix) * (day + night * (T.NIGHT_AMBIENT + 1.2 * moonlight))
+  // headlights follow the night, not the clock: they come on as the sun goes and off as it returns
+  drive.car?.setLights(night * (drive.on ? 1 : 0.6))
   // the knob is the single source of truth for road-and-car: car.ts reads T.WEATHER_GRIP_SCALE
   tuneKey('WEATHER_GRIP_SCALE')?.set(w.grip)
   site?.setWeather(weatherNow())
@@ -787,8 +866,20 @@ function pick(e: PointerEvent): boolean {
 const clock = new THREE.Clock()
 const up = new THREE.Vector3(0, 1, 0)
 const viewDir = new THREE.Vector3()
+/** the simulated instant the sky was last built for; 20 s of world time is well under a degree of sun */
+let lastSkyMs = -1e15
 function frame() {
-  const dt = Math.min(0.1, clock.getDelta())
+  const real = clock.getDelta()
+  const dt = Math.min(0.1, real)
+  // the world's clock, and the light that follows from it. applySky is cheap (no geometry), so it
+  // runs whenever the sun has moved enough to see — a degree of elevation is about four minutes of
+  // a real day, and far less than that at a high TIME_RATE.
+  worldClock.rate = T.TIME_RATE
+  worldClock.tick(real) // real time, not the capped physics step: the sun does not care about hitches
+  if (Math.abs(worldClock.ms - lastSkyMs) > 20000) {
+    lastSkyMs = worldClock.ms
+    applySky(season)
+  }
   if (site && drive.on && drive.car) {
     const car = drive.car
     // keyboard is read fresh each frame; the phone pads have already set throttle/brake/steer

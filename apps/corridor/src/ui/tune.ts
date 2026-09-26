@@ -32,6 +32,8 @@ export class TuneUI {
   private redraw = new Map<string, () => void>()
   /** each rendered section, so the changed dot can be kept in step with its knobs */
   private groups: { el: HTMLElement; keys: TuneKey[] }[] = []
+  /** every knob this browser has moved or explicitly reset — a site file does not override these */
+  private touched = new Set<string>()
 
   private o: TuneUIOpts
 
@@ -90,6 +92,7 @@ export class TuneUI {
       resettable: true,
       onInput: (v) => {
         k.set(v)
+        this.touched.add(k.name)
         this.persist(tabName)
         this.o.onChange(k.name, v)
         this.markGroups()
@@ -111,6 +114,7 @@ export class TuneUI {
     for (const k of sec.keys) {
       if (k.get() === k.default) continue
       k.set(k.default)
+      this.touched.add(k.name)
       this.redraw.get(k.name)?.()
       n++
     }
@@ -130,7 +134,11 @@ export class TuneUI {
       try {
         const raw = localStorage.getItem(storeKey(tab.name))
         if (!raw) continue
-        const saved = JSON.parse(raw) as Record<string, number>
+        const doc = JSON.parse(raw) as Record<string, number> | { v: 2; values: Record<string, number>; touched?: string[] }
+        // v2 keeps the touched names beside the values; a v1 file is a bare map, and every key in
+        // it was something somebody moved, so they are all touched
+        const saved = (doc as { v?: number }).v === 2 ? (doc as { values: Record<string, number> }).values : (doc as Record<string, number>)
+        for (const n of (doc as { touched?: string[] }).touched ?? Object.keys(saved)) this.touched.add(n)
         for (const s of tab.sections) for (const k of s.keys) if (typeof saved[k.name] === 'number') k.set(saved[k.name])
       } catch {
         /* a corrupt or blocked localStorage is not worth failing a page load over */
@@ -138,13 +146,22 @@ export class TuneUI {
     }
   }
 
+  /**
+   * WHAT YOU TOUCHED IS AN OPINION, EVEN WHEN IT IS THE DEFAULT.
+   *
+   * Only knobs that differ from the default were stored, which is right for the values — but it
+   * meant a RESET erased the browser's opinion entirely, and the site's own tuning.json (applied
+   * after the panel restores, by design) put its value straight back on the next load. Rich reset
+   * the weather, reloaded, and it was raining again. So the touched names are stored beside the
+   * values, and `applySiteTuning` leaves those knobs alone.
+   */
   private persist(tabName: string) {
     const tab = TUNE_TABS.find((t) => t.name === tabName)
     if (!tab) return
     const out: Record<string, number> = {}
     for (const s of tab.sections) for (const k of s.keys) if (k.get() !== k.default) out[k.name] = k.get()
     try {
-      localStorage.setItem(storeKey(tabName), JSON.stringify(out))
+      localStorage.setItem(storeKey(tabName), JSON.stringify({ v: 2, values: out, touched: [...this.touched] }))
     } catch {
       /* private window, or storage full — the knob still moved, it just will not survive a reload */
     }
@@ -171,6 +188,7 @@ export class TuneUI {
       for (const k of s.keys) {
         if (k.get() === k.default) continue
         k.set(k.default)
+        this.touched.add(k.name)
         this.redraw.get(k.name)?.()
         this.o.onChange(k.name, k.default)
         n++
@@ -193,6 +211,8 @@ export class TuneUI {
         return true
       },
       names: () => [...this.keys.keys()],
+      /** what this browser has an opinion about; a site's tuning.json leaves these alone */
+      touched: () => this.touched,
     }
   }
 

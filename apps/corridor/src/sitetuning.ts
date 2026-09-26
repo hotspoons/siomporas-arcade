@@ -11,6 +11,12 @@
 // AFTER the panel restores, and wins. Copy JSON in the panel is how a scratch value is promoted
 // into a file.
 //
+// WITH ONE EXCEPTION, which took a bug to find: a knob this browser has explicitly TOUCHED —
+// moved, or reset back to its default — is left alone. Without it there was no way to undo a
+// value a site file carried: the panel only stores knobs that differ from the default, so a reset
+// erased the browser's opinion and the file put its value straight back on the next load. Rich
+// reset the weather, reloaded, and it was raining again.
+//
 // And the file is UNDONE when you leave the site. Without that, a value from site A leaks into
 // site B for the rest of the session and looks like a bug in B — so the pre-file value of every
 // knob the file touched is captured on apply and restored on the next load.
@@ -27,6 +33,8 @@ export interface TuneAccess {
   get: (name: string) => number | undefined
   set: (name: string, v: number) => boolean
   names: () => string[]
+  /** knobs this browser has moved or explicitly reset; the file must not override them */
+  touched?: () => Set<string>
 }
 
 /** What the site file overwrote, so leaving the site can put it back. */
@@ -52,23 +60,30 @@ export async function loadSiteTuning(slug: string): Promise<SiteTuning | null> {
  * for the status line — silence about an override that did not take is how a knob gets tuned
  * twice.
  */
-export async function applySiteTuning(slug: string, tune: TuneAccess): Promise<{ applied: number; restored: number; unknown: string[]; look?: SiteTuning['look'] }> {
+export async function applySiteTuning(slug: string, tune: TuneAccess): Promise<{ applied: number; restored: number; unknown: string[]; kept: string[]; look?: SiteTuning['look'] }> {
   let restored = 0
   if (applied) {
     for (const [k, v] of Object.entries(applied.before)) if (tune.set(k, v)) restored++
     applied = null
   }
   const doc = await loadSiteTuning(slug)
-  if (!doc) return { applied: 0, restored, unknown: [] }
+  if (!doc) return { applied: 0, restored, unknown: [], kept: [] }
   const look = doc.look && typeof doc.look === 'object' ? doc.look : undefined
   const known = new Set(tune.names())
+  const mine = tune.touched?.() ?? new Set<string>()
   const before: Record<string, number> = {}
   const unknown: string[] = []
+  const kept: string[] = []
   let n = 0
   for (const [k, v] of Object.entries(doc.values)) {
     if (!known.has(k)) {
       // a knob that has been renamed or removed since the file was written
       unknown.push(k)
+      continue
+    }
+    // this browser has an opinion about this one — see the note at the top of the file
+    if (mine.has(k)) {
+      kept.push(k)
       continue
     }
     if (typeof v !== 'number' || !Number.isFinite(v)) continue
@@ -77,7 +92,7 @@ export async function applySiteTuning(slug: string, tune: TuneAccess): Promise<{
     if (tune.set(k, v)) n++
   }
   applied = { slug, before }
-  return { applied: n, restored, unknown, look }
+  return { applied: n, restored, unknown, kept, look }
 }
 
 /**

@@ -85,6 +85,10 @@ export class Car {
   private steerVisual = 0
   mesh: THREE.Group
   private wheels: THREE.Mesh[] = []
+  /** the headlamp meshes and their beams; setLights drives both (main.ts, from the sun's elevation) */
+  private headLamps: THREE.Mesh[] = []
+  private beams: THREE.SpotLight[] = []
+  private lightsOn = 0
   /** dash, pillars and wheel: drawn only from inside (setCockpit) */
   private interior: THREE.Group | null = null
   private shell: THREE.Object3D[] = []
@@ -416,6 +420,15 @@ export class Car {
       const head = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.13, 0.42), lampMat)
       head.position.set(2.14, 0.66, zz * 0.52)
       g.add(head)
+      this.headLamps.push(head)
+      // THE BEAM. A lamp that glows but lights nothing is a lamp in a photograph; at night the
+      // road ahead is the only thing you steer by. One spot per side, aimed down the nose and a
+      // little down, with its target parented to the car so it turns with the wheel.
+      const beam = new THREE.SpotLight(0xfff4de, 0, 70, 0.42, 0.55, 1.4)
+      beam.position.set(2.1, 0.7, zz * 0.52)
+      beam.target.position.set(2.1 + 40, -2.5, zz * 0.52)
+      g.add(beam, beam.target)
+      this.beams.push(beam)
       const tail = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.12, 0.38), tailMat)
       tail.position.set(-2.2, 0.66, zz * 0.56)
       g.add(tail)
@@ -469,6 +482,28 @@ export class Car {
     }
     g.name = 'car'
     return g
+  }
+
+  /**
+   * Headlights, 0 … 1 — the night fraction, not a switch, so they fade up through dusk the way a
+   * driver reaches for them. The glow on the lamp itself is what you see from outside; the spot is
+   * what lets you drive.
+   */
+  setLights(on: number) {
+    const v = Math.min(1, Math.max(0, on))
+    if (Math.abs(v - this.lightsOn) < 0.01) return
+    this.lightsOn = v
+    for (const b of this.beams) {
+      b.intensity = v * 140 * T.HEADLIGHT
+      b.distance = T.HEADLIGHT_RANGE
+      b.target.position.x = 2.1 + T.HEADLIGHT_RANGE * 0.6
+      b.target.position.y = -T.HEADLIGHT_RANGE * 0.04
+      b.visible = v > 0.02
+    }
+    for (const m of this.headLamps) {
+      const mat = m.material as THREE.MeshStandardMaterial
+      mat.emissiveIntensity = 0.35 + 2.2 * v
+    }
   }
 
   /** Inside or outside: swap the body shell for the dash, pillars and wheel. */

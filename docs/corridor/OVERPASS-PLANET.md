@@ -1,6 +1,6 @@
 # The full world pull
 
-**Status:** Europe is importing. 2026-09-23.
+**Status:** Europe serves (in-cluster `overpass-eu`, 2026-09-26). The flip into the editor's rotation is the remaining step.
 **Now:** the editor and the baker still run on the four public query mirrors. `overpass` holds
 Maryland and is deliberately NOT their first upstream — see "The silent empty" below. `overpass-eu`
 holds Europe and is **not yet in any client's list**; it goes in only when
@@ -263,6 +263,29 @@ size equals allocated size, file by file), plus the 58.6 GB bz2 that can be dele
 size a continent volume from `du -sb`, never from `df`. 4 Ti remains obviously right, and the
 order-of-magnitude uncertainty this document opened with is now closed at roughly **a quarter of a
 terabyte for Europe**.
+
+## It landed: Europe serves, 2026-09-26 08:55 UTC
+
+Second import, `useAreas: false`, start 2026-09-24 20:17 → serving 2026-09-26 08:55: **36 h 38 m**
+end to end, 254 GB on disk, `replicate_id` 4924 (caught up to the day's diffs).
+
+`tools/overpass/verify.sh --pod overpass-eu`:
+
+```
+Crofton, Maryland        0  EMPTY
+Stelvio pass, Italy    343  ok
+Sydney, Australia        0  EMPTY
+```
+
+That is the RIGHT answer for a Europe extract and the probe's FAIL is doing its job: a regional
+instance must never be first in the rotation without a coverage box, or it answers Maryland with
+a silent empty. The flip therefore declares coverage on both of ours and lets the public mirrors
+take the rest (see `tools/worldeditor/overpass.mjs`, `#south/west/north/east`).
+
+**One more thing the watcher got wrong:** after `touch /db/init_done` the container EXITS 0 and
+Kubernetes restarts it; the restart finds the marker, skips init and `exec`s supervisord. A
+restart count of 1 with `init_done` present is the serving start, not a failure. A restart
+WITHOUT the marker is the disaster above.
 
 ## Areas killed it at the finish line, and `rulesLoad: 0` does not turn them off
 

@@ -19,12 +19,76 @@ export interface Way {
   line: [number, number][]
 }
 
-export interface Place {
+export interface Box {
+  south: number
+  west: number
+  north: number
+  east: number
+}
+
+export interface TileId {
+  z: number
+  x: number
+  y: number
+}
+
+export interface TileDoc {
+  layer: string
+  z: number
+  x: number
+  y: number
+  kind: 'points' | 'lines'
+  bounds: Box
+  items: unknown[]
+  raw: number
+  cache: 'hit' | 'miss'
+  upstream: string | null
+  seconds: number
+  provisional?: boolean
+  note?: string
+}
+
+export interface BorderFeature {
+  properties: { name: string | null; iso: string | null }
+  geometry: { type: string; coordinates: number[][][] | number[][][][] }
+}
+
+export interface WorldCity {
   name: string
-  kind: string
+  country: string | null
+  region: string | null
+  pop: number
+  rank: number
   lat: number
   lon: number
-  state: string | null
+}
+
+/** A geocoder result. `bbox` is why this exists: you frame a country, you do not pin it. */
+export interface Place {
+  name: string
+  short: string
+  kind: string
+  category: string
+  lat: number
+  lon: number
+  bbox: Box | null
+  importance: number
+}
+
+/** A place somebody kept. Upstream of a world: cheap to add, promoted when it earns it. */
+export interface IndexedPlace {
+  id: string
+  name: string
+  note?: string
+  lat: number
+  lon: number
+  bbox?: Box | null
+  kind?: string
+  country?: string | null
+  source?: string
+  added?: string
+  /** set once this place has become a world */
+  world?: string | null
 }
 
 export interface World {
@@ -82,7 +146,8 @@ export interface Config {
   assetsvc: string | null
   bucket: { bucket: string; endpoint: string; prefix: string } | null
   authored: string[]
-  limits: { min_radius_m: number; warn_radius_m: number; max_radius_m: number }
+  limits: { min_radius_m: number; warn_radius_m: number; max_radius_m: number; max_span_lat: number; max_span_lon: number }
+  layers: { id: string; label: string; minZoom: number; maxZoom: number; tile: number; kind: 'points' | 'lines' }[]
   adoptedRuns: string[]
 }
 
@@ -121,11 +186,34 @@ export const api = {
   ready: () => call<Ready>('/api/ready'),
 
   roads: (b: { south: number; west: number; north: number; east: number }, signal?: AbortSignal) =>
-    call<{ ways: Way[]; cache: 'hit' | 'miss'; key: string }>(
+    call<{ ways: Way[]; cache: 'hit' | 'miss'; upstream: string | null; fellBack: boolean | null; key: string }>(
       `/api/osm/roads?south=${b.south.toFixed(6)}&west=${b.west.toFixed(6)}&north=${b.north.toFixed(6)}&east=${b.east.toFixed(6)}`,
       { signal },
     ),
-  search: (q: string) => call<{ places: Place[] }>(`/api/osm/search?q=${encodeURIComponent(q)}`),
+  search: (q: string) => call<{ places: Place[]; cache: string }>(`/api/osm/search?q=${encodeURIComponent(q)}`),
+
+  /* ---- the layer stack ---- */
+  plan: (b: Box, zoom: number, signal?: AbortSignal) =>
+    call<{ zoom: number; plan: { layer: string; kind: 'points' | 'lines'; tiles: TileId[]; total: number }[] }>(
+      `/api/osm/plan?south=${b.south.toFixed(5)}&west=${b.west.toFixed(5)}&north=${b.north.toFixed(5)}&east=${b.east.toFixed(5)}&zoom=${zoom.toFixed(2)}`,
+      { signal },
+    ),
+  tile: (layer: string, t: TileId, zoom: number, signal?: AbortSignal) =>
+    call<TileDoc>(`/api/osm/tile/${layer}/${t.z}/${t.x}/${t.y}?zoom=${zoom.toFixed(2)}`, { signal }),
+  borders: () => call<{ features: BorderFeature[]; source: string | null; note?: string }>('/api/osm/borders'),
+  cities: () => call<{ cities: WorldCity[]; source: string | null; note?: string }>('/api/osm/cities'),
+  purgeEmpty: () => call<{ responses: unknown[]; tiles: unknown[] }>('/api/osm/cache/purge-empty', { method: 'POST' }),
+
+  /* ---- the place index ---- */
+  places: () => call<{ places: IndexedPlace[] }>('/api/places'),
+  addPlace: (p: Partial<IndexedPlace>) => call<{ place: IndexedPlace }>('/api/places', { method: 'POST', body: JSON.stringify(p) }),
+  updatePlace: (id: string, p: Partial<IndexedPlace>) => call<{ place: IndexedPlace }>(`/api/places/${id}`, { method: 'PUT', body: JSON.stringify(p) }),
+  deletePlace: (id: string) => call<{ deleted: string }>(`/api/places/${id}`, { method: 'DELETE' }),
+  /** Every upstream in the order they are tried, and what each just answered. */
+  overpassStatus: () =>
+    call<{ ours: string | null; using: string | null; cache: string; upstreams: { url: string; host: string; ok: boolean; status?: number; ms: number; detail?: string }[] }>(
+      '/api/osm/status',
+    ),
 
   worlds: () => call<{ worlds: World[] }>('/api/worlds'),
   world: (slug: string) => call<{ world: World }>(`/api/worlds/${slug}`),

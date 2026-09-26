@@ -90,6 +90,7 @@ body.worldedit .inspector {
 }
 .search-results {
   position: absolute;
+  min-width: 34ch;
   top: calc(100% + var(--s1));
   left: 0;
   min-width: 28ch;
@@ -104,12 +105,28 @@ body.worldedit .inspector {
 .search-results:empty {
   display: none;
 }
+.search-row-wrap {
+  display: flex;
+  align-items: center;
+  gap: var(--s1);
+  padding-right: var(--s1);
+}
+.search-row-wrap .btn { flex: none; }
+.search-text { display: grid; min-width: 0; }
+.search-where {
+  font-size: var(--text-xs);
+  color: var(--ink-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .search-row {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: var(--s3);
   width: 100%;
+  min-width: 0;
   padding: var(--s2) var(--s3);
   background: none;
   border: 0;
@@ -202,6 +219,11 @@ body.worldedit .inspector {
   margin-top: 1px;
 }
 .panel-hint.warn {
+  color: var(--warn);
+}
+/* A readout whose VALUE is the warning — "fell back to a public mirror" — rather than a hint
+   about one. It sits in the same column as the numbers, so it must not shout louder than them. */
+.readout .field-value.warn {
   color: var(--warn);
 }
 .panel-actions {

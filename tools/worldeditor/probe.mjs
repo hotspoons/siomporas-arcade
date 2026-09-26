@@ -23,7 +23,10 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { createServer } from 'node:http'
+
 import { circleFor, minimumEnclosingCircle, localFrame, haversineM } from './geo.mjs'
+import { Overpass } from './overpass.mjs'
 import { Store } from './store.mjs'
 import * as worlds from './worlds.mjs'
 
@@ -310,6 +313,196 @@ const checkMerge = check('merging into catalog.json keeps every entry that was a
   return '3 assets, a partial update merged rather than replaced'
 })
 
+/* ---- 6b. the upstream rotation, against upstreams this probe owns ------------------------------- */
+
+/**
+ * A fake Overpass on a loopback port. Hermetic on purpose: these checks are about the ROTATION,
+ * and hanging them off public mirrors would make them a weather report.
+ */
+function fakeOverpass({ region = null, ways = 1, hang = false } = {}) {
+  let asked = 0
+  const srv = createServer((req, res) => {
+    let body = ''
+    req.on('data', (c) => (body += c))
+    req.on('end', () => {
+      asked++
+      if (hang) return // accept the connection and never answer — a service mid-restart
+      const m = /way\(([-\d.]+),([-\d.]+),([-\d.]+),([-\d.]+)\)/.exec(body)
+      const inside =
+        !region || (m && +m[1] >= region.south && +m[3] <= region.north && +m[2] >= region.west && +m[4] <= region.east)
+      const elements = inside
+        ? Array.from({ length: ways }, (_, i) => ({
+            type: 'way', id: i + 1, nodes: [1, 2],
+            tags: { highway: 'residential', name: `Fake Road ${i + 1}` },
+            geometry: [{ lat: m ? +m[1] : 0, lon: m ? +m[2] : 0 }, { lat: m ? +m[3] : 0, lon: m ? +m[4] : 0 }],
+          }))
+        : []
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ elements }))
+    })
+  })
+  return new Promise((resolve) => {
+    srv.listen(0, '127.0.0.1', () =>
+      resolve({ url: `http://127.0.0.1:${srv.address().port}/api/interpreter`, get asked() { return asked }, close: () => srv.close() }),
+    )
+  })
+}
+
+const MARYLAND = { south: 37.9, west: -79.5, north: 39.8, east: -75.0 }
+const IN_MD = { south: 39.002, west: -76.688, north: 39.006, east: -76.682 }
+const STELVIO = { south: 46.5, west: 10.4, north: 46.56, east: 10.5 }
+
+const checkSilentEmpty = check('a regional upstream’s empty 200 is not believed while another upstream is left', async () => {
+  const regional = await fakeOverpass({ region: MARYLAND, ways: 3 })
+  const planet = await fakeOverpass({ ways: 7 })
+  const store = new Store(await mkdtemp(path.join(tmpdir(), 'we-probe-')))
+  await store.init()
+  const op = new Overpass(store, [regional.url, planet.url], { timeoutMs: 5000, deadlineMs: 20000 })
+  try {
+    // in the extract: the regional one answers and is believed
+    const near = await op.drivable(IN_MD)
+    assert(near.ways.length === 3, `in-extract gave ${near.ways.length} ways, expected the regional upstream's 3`)
+    // OUT of the extract: 200 with nothing in it, which is NOT an error and NOT the answer
+    const far = await op.drivable(STELVIO)
+    assert(far.ways.length === 7, `out-of-extract gave ${far.ways.length} ways — the silent empty was believed`)
+    assert(far.fellBack === true, 'it did not record that it fell back')
+    assert(planet.asked === 1, `the second upstream was asked ${planet.asked} times`)
+    return `regional 3 ways in area, planet 7 ways outside it`
+  } finally {
+    regional.close()
+    planet.close()
+    await rm(store.root, { recursive: true, force: true })
+  }
+})
+
+const checkEmptyIsBelievedEventually = check('an empty answer IS believed when nothing else is left — the sea is allowed to be empty', async () => {
+  const only = await fakeOverpass({ region: MARYLAND })
+  const store = new Store(await mkdtemp(path.join(tmpdir(), 'we-probe-')))
+  await store.init()
+  const op = new Overpass(store, [only.url], { timeoutMs: 5000, deadlineMs: 20000 })
+  try {
+    const far = await op.drivable(STELVIO)
+    assert(far.ways.length === 0, `expected an empty answer, got ${far.ways.length}`)
+    assert(far.empty === true, 'the reply does not mark itself as a believed-empty')
+    return 'empty, and flagged as such'
+  } finally {
+    only.close()
+    await rm(store.root, { recursive: true, force: true })
+  }
+})
+
+const checkCoverageSkip = check('a declared coverage box means a regional upstream is never asked about elsewhere', async () => {
+  const regional = await fakeOverpass({ region: MARYLAND, ways: 3 })
+  const planet = await fakeOverpass({ ways: 7 })
+  const store = new Store(await mkdtemp(path.join(tmpdir(), 'we-probe-')))
+  await store.init()
+  const decl = `${regional.url}#${MARYLAND.south}/${MARYLAND.west}/${MARYLAND.north}/${MARYLAND.east}`
+  const op = new Overpass(store, [decl, planet.url], { timeoutMs: 5000, deadlineMs: 20000 })
+  try {
+    assert(Object.keys(op.describe().coverage).length === 1, `the coverage box was not parsed: ${JSON.stringify(op.describe().coverage)}`)
+    await op.drivable(IN_MD)
+    const askedAfterNear = regional.asked
+    assert(askedAfterNear === 1, `the regional upstream was asked ${askedAfterNear} times for its own area`)
+    await op.drivable(STELVIO)
+    assert(regional.asked === askedAfterNear, `the regional upstream was asked about an area it does not hold (${regional.asked} vs ${askedAfterNear})`)
+    return 'asked in area, skipped outside it'
+  } finally {
+    regional.close()
+    planet.close()
+    await rm(store.root, { recursive: true, force: true })
+  }
+})
+
+const checkFastFallback = check('a hanging upstream costs one timeout, then is skipped rather than waited on', async () => {
+  const hanging = await fakeOverpass({ hang: true })
+  const good = await fakeOverpass({ ways: 4 })
+  const store = new Store(await mkdtemp(path.join(tmpdir(), 'we-probe-')))
+  await store.init()
+  const op = new Overpass(store, [hanging.url, good.url], { timeoutMs: 2000, deadlineMs: 30000, downForMs: 30000 })
+  try {
+    const t0 = Date.now()
+    const a = await op.drivable(IN_MD)
+    const first = Date.now() - t0
+    assert(a.ways.length === 4, `expected the healthy upstream, got ${a.ways.length} ways`)
+    assert(first >= 1500, `it did not even try the hanging upstream (${first} ms)`)
+    const t1 = Date.now()
+    const b = await op.drivable({ south: 39.01, west: -76.688, north: 39.014, east: -76.682 })
+    const second = Date.now() - t1
+    assert(b.ways.length === 4, 'the second query did not answer')
+    assert(second < first / 2, `the second query still waited on the hanging upstream: ${second} ms against ${first} ms`)
+    return `first ${first} ms (paid the timeout), second ${second} ms (skipped it)`
+  } finally {
+    hanging.close()
+    good.close()
+    await rm(store.root, { recursive: true, force: true })
+  }
+})
+
+/* ---- 6c. the layer stack ------------------------------------------------------------------------ */
+
+const checkBands = check('every zoom from the world to a street has something to draw, and one question per cache key', async () => {
+  const { LAYERS, layersAt, tilesFor, variantOf } = await import('./layers.mjs')
+  // No zoom between 2 and 18 may be a dead band with the basemap gone and no layer yet. Below 6
+  // the basemap (borders + world cities) is the answer, so the assertion starts there.
+  for (let z = 6; z <= 18; z += 0.5) {
+    assert(layersAt(z).length > 0, `zoom ${z} has no layer at all — the map would be blank`)
+  }
+  // The cache key must change whenever the QUESTION changes, or a hit returns the wrong answer.
+  for (const layer of LAYERS) {
+    const seen = new Map()
+    for (let z = layer.minZoom; z < Math.min(layer.maxZoom, 20); z += 0.5) {
+      const v = variantOf(layer, z)
+      const q = layer.query({ south: 45, west: 9, north: 46, east: 10 }, v)
+      const prev = seen.get(v.key)
+      if (prev === undefined) seen.set(v.key, q)
+      else assert(prev === q, `layer ${layer.id} produces two different queries under one cache key "${v.key}"`)
+    }
+    // ...and conversely, two different keys must not be the same question, or the cache is split
+    // for nothing.
+    const byQuery = new Map()
+    for (const [key, q] of seen) {
+      assert(!byQuery.has(q), `layer ${layer.id} splits one question across keys "${byQuery.get(q)}" and "${key}"`)
+      byQuery.set(q, key)
+    }
+  }
+  // A viewport must map to a finite, sane number of tiles at every scale.
+  const world = tilesFor(4, { south: -85, west: -180, north: 85, east: 180 })
+  assert(world.length === 2 ** 5 * 2 ** 4, `the world is ${world.length} level-4 tiles, expected ${2 ** 5 * 2 ** 4}`)
+  return `${LAYERS.length} layers, ${LAYERS.map((l) => `${l.id}@${l.minZoom}`).join(' ')}`
+})
+
+const checkTileVariantKeys = check('a tile fetched at one zoom band is not served to another', async () => {
+  const { Tiles } = await import('./tiles.mjs')
+  const store = new Store(await mkdtemp(path.join(tmpdir(), 'we-probe-')))
+  await store.init()
+  const t = new Tiles(store, null)
+  // `places` asks for cities below zoom 5 and cities+towns above 7 — different files.
+  const a = t.file('places', 4, 1, 2, 4)
+  const b = t.file('places', 4, 1, 2, 8)
+  assert(a !== b, `the same tile at two different zoom bands maps to one file: ${a}`)
+  assert(t.file('places', 4, 1, 2, 4) === a, 'the file name is not stable for one band')
+  await rm(store.root, { recursive: true, force: true })
+  return path.basename(a) + ' vs ' + path.basename(b)
+})
+
+const checkTrimGuard = check('a layer that trims a full response to nothing is refused, not cached', async () => {
+  const { Tiles } = await import('./tiles.mjs')
+  const store = new Store(await mkdtemp(path.join(tmpdir(), 'we-probe-')))
+  await store.init()
+  // The real bug this guards: `out tags` returns place nodes with NO COORDINATES, the trim quite
+  // reasonably requires a position, and 3 751 cities became an empty tile that cached like any
+  // other. Here the upstream is stubbed to return elements the trim cannot use.
+  const fakeOverpass = { run: async () => ({ elements: Array.from({ length: 50 }, (_, i) => ({ type: 'node', id: i, tags: { name: 'X', place: 'city' } })) }) }
+  const t = new Tiles(store, fakeOverpass)
+  const doc = await t.tile('places', 4, 1, 2, 6)
+  assert(doc.items.length === 0 && doc.raw === 50, `expected 50 raw and 0 kept, got ${doc.raw}/${doc.items.length}`)
+  assert(doc.provisional === true, 'a tile whose trim ate everything was treated as a real answer')
+  const onDisk = await readFile(t.file('places', 4, 1, 2, 6), 'utf8').catch(() => null)
+  assert(onDisk === null, 'it was cached — a bug in the layer is now permanent on the volume')
+  await rm(store.root, { recursive: true, force: true })
+  return 'not cached, and flagged'
+})
+
 /* ---- 7. the Job the service builds ------------------------------------------------------------- */
 
 const checkJobSpec = check('the Job this service builds is accepted by the real Kubernetes API', async () => {
@@ -497,9 +690,9 @@ async function uiChecks(url) {
         accent: getComputedStyle(document.documentElement).getPropertyValue('--accent').trim(),
       }))
       assert(found.bar && found.inspector && found.map, JSON.stringify(found))
-      assert(found.segs === 3, `${found.segs} modes in the rail, expected 3`)
+      assert(found.segs === 4, `${found.segs} modes in the rail, expected 4 (explore, index, define, bake)`)
       assert(found.accent.length > 0, 'tokens.css did not load — the page is unstyled')
-      return `3 modes, accent ${found.accent}`
+      return `4 modes, accent ${found.accent}`
     })()
 
     await check('the map canvas actually fills its box', async () => {
@@ -533,8 +726,16 @@ async function uiChecks(url) {
       const stats = await page.evaluate(() => {
         const ways = window.__we.map.ways
         const pts = ways.reduce((n, w) => n + w.line.length, 0)
-        const lons = ways.flatMap((w) => w.line.map((p) => p[0]))
-        return { ways: ways.length, pts, minLon: Math.min(...lons), maxLon: Math.max(...lons), named: ways.filter((w) => w.name).length }
+        // A LOOP, not `Math.min(...lons)`. There are tens of thousands of vertices now that the
+        // detail layer is assembled from tiles, and spreading them into a call blows the stack —
+        // the probe failed with RangeError on a page that was working perfectly.
+        let minLon = Infinity
+        let maxLon = -Infinity
+        for (const w of ways) for (const p of w.line) {
+          if (p[0] < minLon) minLon = p[0]
+          if (p[0] > maxLon) maxLon = p[0]
+        }
+        return { ways: ways.length, pts, minLon, maxLon, named: ways.filter((w) => w.name).length }
       })
       assert(stats.ways > 20, `only ${stats.ways} ways`)
       assert(stats.pts > stats.ways, 'every way is a single point — this is not geometry')
@@ -564,6 +765,66 @@ async function uiChecks(url) {
       assert(got.square.ways >= got.boundary.ways, `the square (${got.square.ways}) holds fewer ways than the boundary (${got.boundary.ways}) — the wrong way round`)
       assert(got.extent, 'the map was not given the extent to draw')
       return `boundary ${got.boundary.ways} ways / ${(got.boundary.metres / 1000).toFixed(1)} km · square ${got.square.ways} / ${(got.square.metres / 1000).toFixed(1)} km · primary ${got.primary}`
+    })()
+
+    await check('roads come BACK after zooming out past the query limit and in again', async () => {
+      // Rich's report, 2026-09-22: "starting zoomed in it shows streets, I zoom out and they
+      // disappear, and zooming in I don't see them again." The cause was two variables that could
+      // disagree — `map.ways` was emptied and the box it was fetched for was not — so the return
+      // journey found the viewport inside a box it believed it still held and never asked again.
+      // Measured before the fix: ONE request across in -> out -> in, and an empty map for ever.
+      let requests = 0
+      const count = (r) => {
+        if (new URL(r.url()).pathname.startsWith('/api/osm/tile/')) requests++
+      }
+      page.on('response', count)
+      const fly = async (z) => {
+        await page.evaluate((zz) => window.__we.map.flyTo({ lat: 39.004, lon: -76.683 }, zz), z)
+        await page.waitForTimeout(6000)
+        return page.evaluate(() => window.__we.roads())
+      }
+      try {
+        const zoomedIn = await fly(15)
+        assert(zoomedIn.ways > 0, 'no roads at the starting zoom — this check cannot say anything')
+        const wide = await fly(10)
+        assert(wide.ways === 0, `zoomed out past the detail band but still holding ${wide.ways} ways — stale geometry is being drawn`)
+        // Count only the RETURN leg. Earlier checks in this run have already warmed the coverage,
+        // so the opening `fly(15)` may legitimately need no request at all; counting from the top
+        // made this assert on how much the rest of the probe happened to have fetched.
+        requests = 0
+        const back = await fly(15)
+        assert(back.ways > 0, 'the roads did not come back — the bug is present')
+        assert(back.tiles.some((t) => t.layer === 'roads'), 'roads are drawn but no roads tile is held')
+        assert(requests >= 1, 'the return journey never asked for anything')
+        return `${zoomedIn.ways} -> 0 -> ${back.ways} ways, ${requests} request on the way back`
+      } finally {
+        page.off('response', count)
+      }
+    })()
+
+    await check('the page never asks for a box the service will refuse', async () => {
+      // At zoom 12 on a 1500px window the old code asked for 0.335 x 0.597 degrees against a cap
+      // of 0.25 x 0.35 and got a 400, so the widest useful view was a guaranteed error toast. Now
+      // the walk goes all the way out to the world, where the answer is a basemap and no request
+      // at all — and nothing on the way may be refused.
+      const bad = []
+      const watch = (r) => {
+        const u = new URL(r.url())
+        if (!u.pathname.startsWith('/api/osm/')) return
+        if (r.status() >= 400) bad.push(`${r.status()} on ${u.pathname}`)
+      }
+      page.on('response', watch)
+      try {
+        for (const z of [16, 14, 13, 12.5, 12, 11.5, 11, 8, 5, 3]) {
+          await page.evaluate((zz) => window.__we.map.flyTo({ lat: 39.004, lon: -76.683 }, zz), z)
+          await page.waitForTimeout(2500)
+        }
+        await page.waitForTimeout(4000)
+        assert(bad.length === 0, `the page fired ${bad.length} request(s) the service refused: ${bad.join(', ')}`)
+        return 'zooms 16 down to 11, no refusals'
+      } finally {
+        page.off('response', watch)
+      }
     })()
 
     await check('the modes switch and each renders its own panel', async () => {
@@ -654,6 +915,61 @@ async function proveChecks() {
     assert(stored.detail === 'cancelled', `the stored reason became "${stored.detail}" — something finished it twice`)
   })()
 
+  await proves('the coverage check, against the two-variable design it replaced', () => {
+    // `map.ways` and a separate `lastBox`, exactly as they were. Zooming out clears the ways and
+    // leaves the box; zooming back in finds the viewport inside it and returns early.
+    let ways = 1808
+    let lastBox = { south: 38.9, north: 39.1, west: -76.8, east: -76.6 }
+    const viewport = { south: 38.99, north: 39.02, west: -76.71, east: -76.66 }
+    const tooWide = () => {
+      ways = 0 // the bug: the box is not cleared beside it
+    }
+    const contains = (o, i) => i.south >= o.south && i.north <= o.north && i.west >= o.west && i.east <= o.east
+    let requests = 0
+    const load = (bbox) => {
+      if (lastBox && contains(lastBox, bbox)) return
+      requests++
+      ways = 1783
+    }
+    tooWide()
+    load(viewport)
+    assert(ways > 0, 'the roads did not come back — the bug is present')
+    void requests
+  })()
+
+  await proves('the silent-empty check, against a rotation that only turns on an error', () => {
+    // What `run()` did before: a 200 is a 200, so an out-of-extract answer of zero ways is the
+    // answer and nothing else is ever asked.
+    const upstreams = [
+      { host: 'regional', reply: { status: 200, elements: [] } },
+      { host: 'planet', reply: { status: 200, elements: [1, 2, 3, 4, 5, 6, 7] } },
+    ]
+    let got = null
+    for (const u of upstreams) {
+      if (u.reply.status !== 200) continue
+      got = u.reply.elements
+      break
+    }
+    assert(got.length === 7, `out-of-extract gave ${got.length} ways — the silent empty was believed`)
+  })()
+
+  await proves('the trim guard, against a tile layer that caches whatever it gets', () => {
+    // What it did before: 3 751 elements in, 0 items out, written to the volume as a fact.
+    const raw = Array.from({ length: 3751 }, () => ({ type: 'node', tags: { name: 'Milano' } }))
+    const items = raw.filter((e) => e.lat != null) // the trim requires a position `out tags` omits
+    const cached = true // the old code path wrote it regardless
+    assert(!(raw.length > 0 && items.length === 0 && cached), `the ${raw.length}-element response cached as an empty tile`)
+  })()
+
+  await proves('the band check, against a stack with a hole in it', () => {
+    const layers = [
+      { id: 'places', minZoom: 6, maxZoom: 9 },
+      { id: 'roads', minZoom: 11, maxZoom: 22 }, // nothing between 9 and 11
+    ]
+    const at = (z) => layers.filter((l) => z >= l.minZoom && z < l.maxZoom)
+    for (let z = 6; z <= 18; z += 0.5) assert(at(z).length > 0, `zoom ${z} has no layer at all — the map would be blank`)
+  })()
+
   await proves('the “no HTML 200” check', () => {
     // Vite's SPA fallback, which is what this check exists to catch
     const t = '<!doctype html><html>…'
@@ -679,6 +995,13 @@ if (PROVE) {
   await checkBbox()
   await checkSitesJson()
   await checkMerge()
+  await checkSilentEmpty()
+  await checkEmptyIsBelievedEventually()
+  await checkCoverageSkip()
+  await checkFastFallback()
+  await checkBands()
+  await checkTileVariantKeys()
+  await checkTrimGuard()
   await checkJobSpec()
   if (typeof api === 'string') {
     console.log(`  … against the service at ${api}`)

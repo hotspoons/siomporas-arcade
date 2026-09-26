@@ -13,20 +13,20 @@
 // authored files and the placement catalog are all on the service's volume, so closing the tab,
 // reloading, or the pod restarting loses a scroll position and nothing else.
 import { Drawer, button, el, installShellKeys, status, clearStatus, toast, typing } from '../ui/shell'
-import { segmented, select } from '../ui/controls'
+import { bodyOf, empty, group, readout, segmented, select, textField } from '../ui/controls'
 import { icon } from '../ui/icons'
 import { AssetCatalog } from '../ui/assets'
-import { api, type Config, type World } from './api'
+import { api, type Config, type IndexedPlace, type Way, type World } from './api'
 import { MapView, type LonLat } from './map'
 import { DefinePanel, zoomFor } from './define'
 import { LogView, RunsPanel } from './runs'
 import { AdoptDialog } from './adopt'
 
-type Mode = 'explore' | 'define' | 'bake'
+type Mode = 'explore' | 'index' | 'define' | 'bake'
 
 const canvas = document.getElementById('map') as HTMLCanvasElement
 const inspector = document.getElementById('panel') as HTMLElement
-const readout = document.getElementById('readout') as HTMLElement
+const readoutEl = document.getElementById('readout') as HTMLElement
 
 let config: Config | null = null
 let worlds: World[] = []
@@ -36,8 +36,7 @@ let dirty = false
 
 /* ---- the map ------------------------------------------------------------------------------- */
 
-let roadsReq: AbortController | null = null
-let lastBox: { south: number; west: number; north: number; east: number } | null = null
+type Box = { south: number; west: number; north: number; east: number }
 
 const map = new MapView({
   canvas,
@@ -45,44 +44,171 @@ const map = new MapView({
   onBoundary: (ring, closed) => define.onBoundary(ring, closed),
   onPick: (way, additive) => define.onPick(way, additive),
   onHover: (p, mpp) => {
-    readout.textContent = `${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}  ·  ${mpp < 1 ? `${(mpp * 100).toFixed(0)} cm` : `${mpp.toFixed(1)} m`}/px`
+    readoutEl.textContent = `${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}  ·  ${mpp < 1 ? `${(mpp * 100).toFixed(0)} cm` : mpp < 1000 ? `${mpp.toFixed(1)} m` : `${(mpp / 1000).toFixed(1)} km`}/px`
   },
 })
 
 /**
- * Fetch the roads for a viewport, unless the last fetch already covers it.
+ * THE LAYER LOADER.
  *
- * Panning inside a box that has already been answered must not re-query: the cache makes a repeat
- * cheap on the server but the round trip and the re-render are not free, and a drag fires this on
- * every settle. The box asked for is padded 25% beyond the screen so a small pan is covered.
+ * What replaced a single "fetch every drivable way in this box" is a stack the SERVER decides:
+ * `/api/osm/plan` says which layers apply at this zoom and which tiles of each cover the view, and
+ * this fetches them one at a time, newest-view-first, drawing as they land. Zoom numbers live in
+ * `tools/worldeditor/layers.mjs` beside the queries they select, because a client that hard-coded
+ * them would drift from the questions they stand for.
+ *
+ * WHY TILES. The old cache was viewport-shaped, so every pan was a box nobody had ever asked for
+ * and therefore a miss. Tiles are a fixed grid — the same geographic quadtree as the rest of the
+ * project — so panning re-uses whole cells and the cache is bounded and shareable.
+ *
+ * WHY ONE AT A TIME. A screenful can be nine tiles and Overpass is a shared service. Nine at once
+ * is how a public mirror decides it has heard enough from you; and the tiles nearest the middle of
+ * the screen are fetched first, so what you are looking at fills in before its corners.
  */
-async function loadRoads(bbox: { south: number; west: number; north: number; east: number }, zoom: number) {
-  if (zoom < 12) {
-    map.ways = []
-    map.draw()
-    clearStatus()
+let planReq: AbortController | null = null
+let loading = 0
+let roadsOff: string | null = null
+/** What the last tile fetch did, for the Explore panel to report. */
+let lastRoads: { count: number; cache: string; upstream: string | null; layer: string } | null = null
+/** Tiles already held or in flight, so a re-plan after a small pan asks for nothing new. */
+const tileState = new Map<string, 'live' | 'done'>()
+
+const tileKey = (layer: string, t: { z: number; x: number; y: number }) => `${layer}/${t.z}/${t.x}/${t.y}`
+
+/**
+ * Drop tiles that are far outside the view.
+ *
+ * Without this, an afternoon of panning across Europe is every tile ever fetched held in memory and
+ * re-drawn every frame. Keeps what intersects a box three times the viewport, which is generous
+ * enough that a pan back does not re-fetch.
+ */
+function pruneTiles(bbox: Box) {
+  const padLat = (bbox.north - bbox.south) * 1.5
+  const padLon = (bbox.east - bbox.west) * 1.5
+  const keep = { south: bbox.south - padLat, north: bbox.north + padLat, west: bbox.west - padLon, east: bbox.east + padLon }
+  for (const [key, t] of map.tiles) {
+    const b = t.bounds
+    if (b.south > keep.north || b.north < keep.south || b.west > keep.east || b.east < keep.west) {
+      map.tiles.delete(key)
+      tileState.delete(key)
+    }
+  }
+}
+
+/** The basemap: fetched once, then local for ever. Borders and world cities. */
+let basemapDone = false
+async function ensureBasemap() {
+  if (basemapDone) return
+  basemapDone = true
+  const [borders, cities] = await Promise.allSettled([api.borders(), api.cities()])
+  if (borders.status === 'fulfilled') {
+    map.borders = borders.value.features
+    if (!borders.value.features.length && borders.value.note) toast(borders.value.note, 'warn', 6000)
+  }
+  if (cities.status === 'fulfilled') map.worldCities = cities.value.cities
+  map.draw()
+}
+
+async function loadLayers(bbox: Box, zoom: number) {
+  void ensureBasemap()
+  pruneTiles(bbox)
+  planReq?.abort()
+  const mine = new AbortController()
+  planReq = mine
+  let plan
+  try {
+    plan = (await api.plan(bbox, zoom, mine.signal)).plan
+  } catch (e) {
+    if ((e as Error).name !== 'AbortError') {
+      roadsOff = (e as Error).message
+      if (mode === 'explore') renderExplore()
+    }
     return
   }
-  if (lastBox && bbox.south >= lastBox.south && bbox.north <= lastBox.north && bbox.west >= lastBox.west && bbox.east <= lastBox.east) return
-  const padLat = (bbox.north - bbox.south) * 0.25
-  const padLon = (bbox.east - bbox.west) * 0.25
-  const want = { south: bbox.south - padLat, north: bbox.north + padLat, west: bbox.west - padLon, east: bbox.east + padLon }
-  roadsReq?.abort()
-  roadsReq = new AbortController()
-  status('reading OSM…')
-  try {
-    const r = await api.roads(want, roadsReq.signal)
-    map.ways = r.ways
-    lastBox = want
-    map.draw()
-    toast(`${r.ways.length} drivable ways${r.cache === 'hit' ? ' (cached)' : ''}`, 'info', 1600)
-  } catch (e) {
-    if ((e as Error).name === 'AbortError') return
-    lastBox = null
-    toast((e as Error).message, 'danger', 6000)
-  } finally {
-    clearStatus()
+  roadsOff = plan.length ? null : 'nothing to fetch at this zoom — the country outlines and world cities are the whole picture out here'
+  // Always, even when the plan is empty: at world zoom nothing loads, and without this the panel
+  // kept whatever numbers it had when the last tile landed — it read "zoom 15" over Europe.
+  if (mode === 'explore') renderExplore()
+  const wanted = new Set<string>()
+  for (const layer of plan) for (const t of layer.tiles) wanted.add(tileKey(layer.layer, t))
+
+  for (const layer of plan) {
+    for (const t of layer.tiles) {
+      const key = tileKey(layer.layer, t)
+      if (tileState.has(key)) continue
+      tileState.set(key, 'live')
+      loading++
+      if (mode === 'explore') renderExplore()
+      try {
+        const doc = await api.tile(layer.layer, t, zoom)
+        // The view may have moved on while this was in flight; keep it anyway if it is still
+        // near, drop it if not. Cheaper than cancelling and re-asking for it a second later.
+        map.tiles.set(key, doc)
+        tileState.set(key, 'done')
+        lastRoads = { count: doc.items.length, cache: doc.cache, upstream: doc.upstream, layer: layer.layer }
+        if (doc.provisional && doc.note) toast(doc.note, 'warn', 8000)
+        if (layer.layer === 'roads') syncDetail()
+        map.draw()
+      } catch (e) {
+        tileState.delete(key)
+        if ((e as Error).name !== 'AbortError') roadsOff = (e as Error).message
+      } finally {
+        loading--
+        if (mode === 'explore') renderExplore()
+      }
+      // A newer viewport has superseded this plan; stop working through a stale one.
+      if (planReq !== mine) return
+    }
   }
+  void wanted
+}
+
+/**
+ * The detail layer, in the shape the Define panel needs.
+ *
+ * `roads` tiles carry the same records the old single-box fetch produced, so everything downstream
+ * — picking a road, counting what a boundary holds — reads one array and does not know it is now
+ * assembled from tiles.
+ */
+function detailWays(): Way[] {
+  // Out of the detail band there is nothing to hand the rest of the app: the Define panel counts
+  // what a boundary holds, and counting tiles left over from three zoom levels ago is worse than
+  // counting nothing.
+  if (!map.inBand('roads')) return []
+  const seen = new Set<number>()
+  const out: Way[] = []
+  for (const t of map.tiles.values()) {
+    if (t.layer !== 'roads') continue
+    for (const w of t.items as Way[]) {
+      // A way crossing a tile edge is in both tiles; the bake dedupes by id and so must this.
+      if (seen.has(w.id)) continue
+      seen.add(w.id)
+      out.push(w)
+    }
+  }
+  return out
+}
+
+/**
+ * Keep `map.ways` — the detail layer everything downstream reads — in step with the tiles.
+ *
+ * Called BEFORE the load as well as after each tile, and that is the point: at zoom 10 the plan
+ * contains `places` and `major`, whose tiles can take a minute each against a public mirror, and
+ * the detail band is long gone. Updating only after the whole load resolved meant the map went on
+ * drawing 59 474 street segments from three zoom levels ago for as long as the fetch took.
+ */
+function syncDetail() {
+  const next = detailWays()
+  if (next.length !== map.ways.length) {
+    map.ways = next
+    map.draw()
+  }
+}
+
+async function loadRoads(bbox: Box, zoom: number) {
+  syncDetail()
+  await loadLayers(bbox, zoom)
+  syncDetail()
 }
 
 /* ---- panels -------------------------------------------------------------------------------- */
@@ -132,8 +258,9 @@ function buildBar() {
       value: mode,
       options: [
         { value: 'explore', label: 'Explore', icon: 'map', key: '1' },
-        { value: 'define', label: 'Define', icon: 'pencil-square', key: '2' },
-        { value: 'bake', label: 'Bake', icon: 'play', key: '3' },
+        { value: 'index', label: 'Index', icon: 'map-pin', key: '2' },
+        { value: 'define', label: 'Define', icon: 'pencil-square', key: '3' },
+        { value: 'bake', label: 'Bake', icon: 'play', key: '4' },
       ],
       onChange: (m) => setMode(m),
     }),
@@ -206,24 +333,153 @@ async function search(q: string) {
       return
     }
   }
+  searchResults.append(el('p', 'search-empty', 'searching…'))
   try {
-    const { places } = await api.search(text)
+    const { places, cache } = await api.search(text)
+    searchResults.replaceChildren()
     if (!places.length) {
-      searchResults.append(el('p', 'search-empty', 'nothing in the loaded extract'))
+      searchResults.append(el('p', 'search-empty', 'nothing found'))
       return
     }
-    for (const p of places.slice(0, 12)) {
+    for (const p of places.slice(0, 10)) {
       const b = el('button', 'search-row')
-      b.append(el('span', 'search-name', p.name), el('span', 'search-kind', p.kind))
+      const t = el('span', 'search-text')
+      t.append(el('span', 'search-name', p.short), el('span', 'search-where', p.name.split(',').slice(1, 4).join(',').trim()))
+      b.append(t, el('span', 'search-kind', p.kind))
       b.onclick = () => {
-        map.flyTo({ lat: p.lat, lon: p.lon }, 14)
+        frame(p)
         searchResults.replaceChildren()
-        searchInput.value = p.name
+        searchInput.value = p.short
       }
-      searchResults.append(b)
+      // Keeping a place is one click from finding it — that is the whole point of an index.
+      const keep = button({
+        icon: 'plus',
+        variant: 'ghost',
+        title: `keep ${p.short} in the index`,
+        onClick: (ev) => {
+          ev.stopPropagation()
+          void keepPlace({ name: p.short, lat: p.lat, lon: p.lon, bbox: p.bbox, kind: p.kind, source: 'search', note: p.name })
+        },
+      })
+      const row = el('div', 'search-row-wrap')
+      row.append(b, keep)
+      searchResults.append(row)
     }
+    if (cache === 'hit') searchResults.append(el('p', 'search-empty', 'from the cache'))
   } catch (e) {
-    searchResults.append(el('p', 'search-empty', (e as Error).message))
+    searchResults.replaceChildren(el('p', 'search-empty', (e as Error).message))
+  }
+}
+
+/**
+ * Put a search result on screen at the size of the thing it is.
+ *
+ * A country, a region and a mountain pass are all "a place", and dropping a pin at street zoom for
+ * all three is why the old search was useless for exploring: you asked for Italy and got a car
+ * park in Rome. Nominatim returns the extent, so this frames it and lets the zoom fall out of how
+ * big the thing actually is.
+ */
+function frame(p: { lat: number; lon: number; bbox: { south: number; west: number; north: number; east: number } | null }) {
+  if (!p.bbox) return map.flyTo({ lat: p.lat, lon: p.lon }, Math.max(map.zoom, 13))
+  const spanLat = Math.max(1e-4, p.bbox.north - p.bbox.south)
+  const spanLon = Math.max(1e-4, p.bbox.east - p.bbox.west)
+  const r = map.canvasSize
+  // The zoom at which the extent fills the canvas, minus a margin, clamped to the map's range.
+  const zLat = Math.log2((r.h * 180) / (spanLat * 256))
+  const zLon = Math.log2((r.w * 360) / (spanLon * 256))
+  const zoom = Math.max(2, Math.min(17, Math.min(zLat, zLon) - 0.25))
+  map.flyTo({ lat: (p.bbox.north + p.bbox.south) / 2, lon: (p.bbox.east + p.bbox.west) / 2 }, zoom)
+}
+
+/* ---- the index: places worth coming back to ------------------------------------------------- */
+
+let indexed: IndexedPlace[] = []
+
+async function refreshPlaces() {
+  indexed = (await api.places().catch(() => ({ places: [] }))).places
+  map.pins = indexed.map((p) => ({ id: p.id, name: p.name, lat: p.lat, lon: p.lon, world: !!p.world }))
+  map.draw()
+  if (mode === 'explore') renderExplore()
+}
+
+async function keepPlace(p: Partial<IndexedPlace>) {
+  try {
+    const { place } = await api.addPlace(p)
+    toast(`kept “${place.name}”`, 'ok')
+    await refreshPlaces()
+  } catch (e) {
+    toast((e as Error).message, 'danger', 6000)
+  }
+}
+
+/** The index, as a panel: what you have found, and what to do with it. */
+function renderIndex(host: HTMLElement) {
+  host.replaceChildren()
+  const hint = el('p', 'panel-hint')
+  hint.append(
+    icon('information-circle', 14),
+    el(
+      'span',
+      '',
+      'Places worth coming back to. Finding somewhere is a different job from deciding what to bake, so this is cheap — a search result, or a click on the map — and a world is promoted from one when it earns it.',
+    ),
+  )
+  host.append(hint)
+
+  const acts = el('div', 'panel-actions')
+  acts.append(
+    button({
+      label: 'Keep this view',
+      icon: 'map-pin',
+      title: 'index the middle of the screen',
+      onClick: () => {
+        const b = map.bbox()
+        void keepPlace({ name: `${map.centre.lat.toFixed(4)}, ${map.centre.lon.toFixed(4)}`, lat: map.centre.lat, lon: map.centre.lon, bbox: b, source: 'view' })
+      },
+    }),
+  )
+  host.append(acts)
+
+  if (!indexed.length) {
+    host.append(empty('nothing indexed yet — search for somewhere, or keep this view'))
+    return
+  }
+  for (const p of indexed) {
+    const g = group(p.name, { collapsed: true })
+    const b = bodyOf(g)
+    b.append(readout('where', `${p.lat.toFixed(4)}, ${p.lon.toFixed(4)}`))
+    if (p.kind) b.append(readout('kind', p.kind))
+    if (p.world) b.append(readout('world', p.world))
+    if (p.note) b.append(el('p', 'panel-hint', p.note))
+    b.append(
+      textField({
+        label: 'note',
+        value: p.note ?? '',
+        onChange: (v) => void api.updatePlace(p.id, { note: v }).then(refreshPlaces),
+      }),
+    )
+    const row = el('div', 'panel-actions')
+    row.append(
+      button({ label: 'Go', icon: 'viewfinder-circle', onClick: () => frame({ lat: p.lat, lon: p.lon, bbox: p.bbox ?? null }) }),
+      button({
+        label: 'Make a world here',
+        icon: 'plus',
+        variant: 'primary',
+        onClick: () => {
+          frame({ lat: p.lat, lon: p.lon, bbox: p.bbox ?? null })
+          newWorld()
+          toast(`draw the extent for “${p.name}”`, 'info', 5000)
+        },
+      }),
+      button({
+        icon: 'trash',
+        variant: 'danger',
+        title: `forget ${p.name}`,
+        onClick: () => void api.deletePlace(p.id).then(refreshPlaces),
+      }),
+    )
+    b.append(row)
+    host.append(g)
   }
 }
 
@@ -314,7 +570,9 @@ function setMode(m: Mode) {
 }
 
 function renderPanel() {
-  if (mode === 'define') {
+  if (mode === 'index') {
+    renderIndex(inspector)
+  } else if (mode === 'define') {
     const w = worlds.find((x) => x.slug === selected)
     if (w && w.source !== 'bake-only' && !define.preview) define.load(w)
     else define.render()
@@ -326,37 +584,109 @@ function renderPanel() {
   }
 }
 
-/** Explore: what is on screen, and what the numbers mean. */
+/**
+ * Explore: what is on screen, where it came from, and — when there is nothing — why.
+ *
+ * The "why" is the part that matters. An empty map used to look identical whether the view was too
+ * wide to query, the request had failed, or Overpass was down, and there was nowhere to look but
+ * the network tab. Each of those now says which it is, in the panel, in words.
+ */
 function renderExplore() {
   inspector.replaceChildren()
   const wrap = el('div', 'explore')
-  wrap.append(
-    el('p', 'panel-hint', ''),
-    ...[
-      ['Roads on screen', `${map.ways.length}`],
-      ['Zoom', map.zoom.toFixed(1)],
-      ['Scale', `${map.metresPerPixel.toFixed(2)} m/px`],
-      ['Worlds defined', `${worlds.length}`],
-      ['Baked', `${worlds.filter((w) => w.baked).length}`],
-    ].map(([k, v]) => {
-      const row = el('div', 'readout')
-      row.append(el('span', 'field-label', k), el('span', 'field-value mono', v))
-      return row
-    }),
-  )
-  const p = wrap.firstChild as HTMLElement
-  p.append(
+  const intro = el('p', 'panel-hint')
+  intro.append(
     icon('information-circle', 14),
     el(
       'span',
       '',
-      'These are the drivable ways our own Overpass returns — the same query the bake chains, not a basemap. Zoom past 12 to load them. Existing worlds are outlined faintly.',
+      'Country outlines and world cities are loaded once and kept. Towns arrive at zoom 6, motorways at 7, and every drivable street — the ways the bake will chain — at 11. Zoom in to go deeper.',
     ),
   )
+  wrap.append(intro)
+
+  if (roadsOff) {
+    const p = el('p', 'panel-hint warn')
+    p.append(icon('exclamation-triangle', 14), el('span', '', roadsOff))
+    wrap.append(p)
+  }
+
+  const mpp = map.metresPerPixel
+  const b = map.bbox()
+  const kmW = (b.east - b.west) * 111.1 * Math.cos((map.centre.lat * Math.PI) / 180)
+  const kmH = (b.north - b.south) * 111.1
+  const km = (v: number) => (v > 999 ? `${(v / 1000).toFixed(1)}k` : v.toFixed(0))
+  const rows: [string, string][] = [
+    ['Zoom', map.zoom.toFixed(1)],
+    ['Scale', mpp > 1000 ? `${(mpp / 1000).toFixed(1)} km/px` : `${mpp.toFixed(1)} m/px`],
+    ['View', `${km(kmW)} x ${km(kmH)} km`],
+  ]
+
+  // WHAT IS ON SCREEN, layer by layer — and ONLY the layers that are actually being drawn.
+  // "The map is empty" has several very different causes (too far out for this layer, nothing
+  // fetched yet, the fetch failed, there is genuinely nothing there) and this is where they stop
+  // looking the same. Tiles outside their zoom band are still held — so coming back is instant —
+  // but listing them would say "28 720 roads" over the Atlantic.
+  const held = new Map<string, number>()
+  for (const t of map.tiles.values()) if (map.inBand(t.layer)) held.set(t.layer, (held.get(t.layer) ?? 0) + t.items.length)
+  rows.push(['borders', map.borders.length ? `${map.borders.length} countries` : 'not loaded'])
+  if (!held.has('places')) rows.push(['cities', `${map.worldCities.length} world (basemap)`])
+  for (const l of config?.layers ?? []) {
+    const n = held.get(l.id)
+    if (n != null) rows.push([l.id, `${n.toLocaleString()} items`])
+    else if (map.zoom >= l.minZoom && map.zoom < l.maxZoom) rows.push([l.id, loading ? 'loading…' : 'none here'])
+  }
+  if (loading) rows.push(['', `${loading} tile${loading === 1 ? '' : 's'} in flight`])
+  if (lastRoads) {
+    // WHERE THE DATA CAME FROM. Rich's first question was "does it fall back to the public
+    // Overpass" and the honest place to answer it is beside the map itself.
+    rows.push(['last tile', `${lastRoads.layer} · ${lastRoads.cache === 'hit' ? 'cache' : (lastRoads.upstream ?? 'overpass')}`])
+  }
+  rows.push(['Worlds defined', `${worlds.length}`], ['Baked', `${worlds.filter((w) => w.baked).length}`])
+  for (const [k, v] of rows) {
+    const row = el('div', 'readout')
+    row.append(el('span', 'field-label', k), el('span', `field-value mono${k === '' ? ' warn' : ''}`, v))
+    wrap.append(row)
+  }
+
   const acts = el('div', 'panel-actions')
-  acts.append(button({ label: 'New world here', icon: 'plus', variant: 'primary', onClick: () => newWorld() }))
+  acts.append(
+    button({ label: 'New world here', icon: 'plus', variant: 'primary', onClick: () => newWorld() }),
+    button({
+      label: 'Reload roads',
+      icon: 'arrow-path',
+      title: 'drop what is held and ask again for this view',
+      onClick: () => {
+        map.tiles.clear()
+        tileState.clear()
+        map.ways = []
+        void loadRoads(map.bbox(), map.zoom)
+      },
+    }),
+    button({ label: 'Overpass status', icon: 'server-stack', onClick: () => void showOverpass() }),
+  )
   wrap.append(acts)
   inspector.append(wrap)
+}
+
+/**
+ * Every upstream, in the order they are tried, and what each just answered.
+ *
+ * This is the answer to "is it using ours, or did it fall back?" without opening a terminal.
+ */
+async function showOverpass() {
+  status('probing every Overpass upstream…')
+  try {
+    const s = await api.overpassStatus()
+    const lines = s.upstreams.map((u) => `${u.ok ? '  up  ' : ' DOWN '} ${u.host.padEnd(44)} ${u.ok ? `${u.ms} ms` : (u.detail ?? '').slice(0, 60)}`)
+    const using = s.using ? `using ${s.using}${s.using !== new URL(s.ours ?? 'http://x').host ? '  (FELL BACK — ours is not answering)' : '  (ours)'}` : 'nothing is answering'
+    console.log(`overpass\n${using}\n${lines.join('\n')}`)
+    toast(using, s.using ? (s.using === new URL(s.ours ?? 'http://x').host ? 'ok' : 'warn') : 'danger', 8000)
+  } catch (e) {
+    toast((e as Error).message, 'danger', 6000)
+  } finally {
+    clearStatus()
+  }
 }
 
 function newWorld() {
@@ -401,8 +731,9 @@ async function boot() {
   addEventListener('keydown', (e) => {
     if (typing(e)) return
     if (e.key === '1') setMode('explore')
-    else if (e.key === '2') setMode('define')
-    else if (e.key === '3') setMode('bake')
+    else if (e.key === '2') setMode('index')
+    else if (e.key === '3') setMode('define')
+    else if (e.key === '4') setMode('bake')
     else if (e.key.toLowerCase() === 'n') newWorld()
     else if (e.key === 'Enter' && mode === 'define') map.closeRing()
     else if (e.key === '/') {
@@ -420,6 +751,7 @@ async function boot() {
 
   try {
     config = await api.config()
+    for (const l of config.layers ?? []) map.bands.set(l.id, { minZoom: l.minZoom, maxZoom: l.maxZoom })
     runsPanel.bucket = config.bucket
     runsPanel.runner = config.runs.runner
     if (config.adoptedRuns.length) toast(`picked ${config.adoptedRuns.length} run(s) back up after a restart`, 'info', 5000)
@@ -427,11 +759,13 @@ async function boot() {
     toast(`the world editor service is not answering: ${(e as Error).message}`, 'danger', 0)
   }
   await refreshWorlds().catch(() => {})
+  await refreshPlaces().catch(() => {})
 
   const start = worlds.find((w) => w.slug === selected) ?? worlds.find((w) => w.baked)
   if (start && Number.isFinite(start.lat)) {
     selected = start.slug
-    map.flyTo({ lat: start.lat, lon: start.lon }, zoomFor(start.radius_m))
+    // Only if nobody has moved the map while the world list was loading — see `MapView.moved`.
+    if (!map.moved) map.flyTo({ lat: start.lat, lon: start.lon }, zoomFor(start.radius_m), { user: false })
   }
   renderWorldSelect()
   setMode((new URLSearchParams(location.search).get('mode') as Mode) ?? 'explore')
@@ -459,6 +793,17 @@ declare global {
       selected: () => string | null
       config: () => Config | null
       refreshWorlds: () => Promise<void>
+      /** The layer stack's state. A probe that cannot see this can only see symptoms. */
+      roads: () => {
+        off: string | null
+        ways: number
+        last: typeof lastRoads
+        loading: number
+        tiles: { layer: string; z: number; x: number; y: number; items: number }[]
+        borders: number
+        worldCities: number
+      }
+      loadRoads: (bbox: Box, zoom: number) => Promise<void>
     }
   }
 }
@@ -472,6 +817,16 @@ window.__we = {
   selected: () => selected,
   config: () => config,
   refreshWorlds,
+  roads: () => ({
+    off: roadsOff,
+    ways: map.ways.length,
+    last: lastRoads,
+    loading,
+    tiles: [...map.tiles.values()].map((t) => ({ layer: t.layer, z: t.z, x: t.x, y: t.y, items: t.items.length })),
+    borders: map.borders.length,
+    worldCities: map.worldCities.length,
+  }),
+  loadRoads,
 }
 
 void boot()

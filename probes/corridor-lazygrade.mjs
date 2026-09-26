@@ -41,7 +41,9 @@ console.log(`ready after ${ready.toFixed(1)} s; build ${first.total} ms; phases 
 console.log('at ready:', JSON.stringify(first.graded))
 // the pump starts with the first frame, which can precede this read by a unit or two
 if (first.graded.built > 3) fail(`built ${first.graded.built} units during load — the load is supposed to grade nothing`)
-for (const [ph, ms] of first.grading) if (/lazy/.test(ph) && ms > 300) fail(`setting up the lazy units costs ${ms} ms at load`)
+// the phase named 'grade: units listed' is the units' own setup; the 'grade: lazy…' phase after it
+// is the cul-de-sac bulbs and driveways, which were always there
+for (const [ph, ms] of first.grading) if (/units listed/.test(ph) && ms > 300) fail(`setting up the lazy units costs ${ms} ms at load`)
 // let the frames run: the scheduler builds around the eye
 let last = -1, same = 0, snap
 for (let i = 0; i < 240; i++) {

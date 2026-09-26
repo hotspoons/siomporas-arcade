@@ -59,9 +59,20 @@ units within 1500 m of the photo stance (239 strips, 4,237 buildings) arrive in 
 headless wall time, nearest first; the slowest synchronous unit is a primary chunk at ~180 ms
 headless, which is the hitch to shrink next (smaller chunks, or an async lattice).
 
-Not lazy yet: the road meshes (`buildRoads`, 0.9 s), the furniture family (signs, masts,
-blades, stop bars, walks, parking, barriers — ~0.8 s together, most of it one fetch), trees
-(already per CHM tile). Those follow the same unit pattern; the buildings cell is the template.
+Later the same day: the branch road meshes joined their units, and every unit is bounded by
+`STREAM_CHUNK_M` (long branches chunk like the primary): worst synchronous unit headless 36 ms
+on Crofton, 47 ms on crownsville (was 184 / 480).
+
+What is still built at load, crownsville headless (its 1,271 units arrive lazily): trees
+("growing…" 4.8 s — the records and geometry for the whole site), the furniture family
+(signs, masts, lots, barriers, walks, signals, blades, stop bars: ~0.6 s of JS + one fetch),
+paving (the primary road mesh and 600 curves, 0.9 s), tile decode (1.4 s). Trees are the next
+unit; the buildings cell is the template.
+
+A measurement trap: numbers read from a **background tab** are not the code. Chrome clamps the
+Budget's yields to ~1 Hz there and deprioritises the renderer, so a 47 ms unit read as 9.9 s
+and the pump looked stuck (`document.visibilityState === 'hidden'` — the bridge can read it).
+Measure with the tab in front.
 
 ### 1. Strips into the packs
 

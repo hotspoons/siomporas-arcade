@@ -121,6 +121,25 @@ export class Car {
     this.updateMesh()
   }
 
+  /**
+   * Manual recover, stuntin's rule: right the car where it stands and BACK IT OUT of whatever it
+   * is in, keeping the heading. R used to teleport to the photo station — "car reset in driving
+   * mode should follow the stuntin' rules - back you out a bunch, not reset to home" (Rich,
+   * 2026-09-26). Every press steps back `back` metres the way you came, and keeps stepping while
+   * the spot it lands on still has a tree in it, up to six more times, so one press gets you out
+   * of a copse rather than into the next trunk.
+   */
+  recover(back: number) {
+    const yaw = this.yaw
+    const step = (d: number) => {
+      const x = this.pos.x - this.forward.x * d
+      const z = this.pos.z - this.forward.z * d
+      this.place(x, z, yaw)
+    }
+    step(back)
+    for (let i = 0; i < 6 && this.surface.treesNear(this.pos.x, this.pos.z, 2.5).length; i++) step(back * 0.6)
+  }
+
   private ground(x: number, z: number, fallback: number) {
     return this.surface.heightAt(x, z) ?? fallback
   }

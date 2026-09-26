@@ -183,6 +183,7 @@ export let CAR_GRASS_EDGE = 0.3
 export let CAR_BUMP_BOUNCE = 0.25
 // ride
 export let CAR_RIDE = 0.35
+export let CAR_RECOVER_BACK = 9
 export let CAR_CLIMB_SLOPE = 1.5
 // jumps (Stunts homages; the mechanics are stuntin's, the switches default off here)
 /** below this speed the car follows the ground down instead of leaving it (m/s) */
@@ -577,6 +578,7 @@ export const TUNE_TABS: TuneTab[] = [
         title: 'ride',
         keys: [
           tune('CAR_RIDE', () => CAR_RIDE, (v) => (CAR_RIDE = v), [0.1, 1], 0.01, 'reference point above the surface (m)'),
+          tune('CAR_RECOVER_BACK', () => CAR_RECOVER_BACK, (v) => (CAR_RECOVER_BACK = v), [0, 40], 1, 'metres R backs you out'),
           tune('CAR_CLIMB_SLOPE', () => CAR_CLIMB_SLOPE, (v) => (CAR_CLIMB_SLOPE = v), [0.25, 6], 0.25, 'how steeply the wheels may ride up onto a kerb'),
         ],
       },

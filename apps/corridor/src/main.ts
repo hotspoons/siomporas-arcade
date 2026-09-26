@@ -6,6 +6,7 @@ import { buildSite, describe, type Site } from './scene'
 import { Car, type CarInput } from './car'
 import { FlyControls } from './fly'
 import { MiniMap } from './minimap'
+import { Sky } from './sky'
 import * as T from './tuning'
 import { TUNE_TABS } from './tuning'
 import { applySiteTuning, saveSiteTuning } from './sitetuning'
@@ -35,6 +36,10 @@ scene.add(ambient)
 const sun = new THREE.DirectionalLight(0xfff0d8, 2.0)
 sun.position.set(-3000, 4000, 2500)
 scene.add(sun)
+// the dome behind everything; `scene.background` stays as the colour under it for the one frame
+// before the shader compiles and for anything that reads it
+const skyDome = new Sky()
+scene.add(skyDome.mesh)
 
 let site: Site | null = null
 let minimap: MiniMap | null = null
@@ -335,6 +340,16 @@ function applySky(s: Season) {
   ;(scene.background as THREE.Color).copy(sky)
   ;(scene.fog as THREE.FogExp2).color.copy(sky)
   ;(scene.fog as THREE.FogExp2).density = look.fog * w.fogScale
+  // the dome reads the same two inputs: the season's blue overhead, the fog colour at the horizon,
+  // the weather's cover — a clear day is a third cumulus, an overcast one (skyMix ~0.9) is shut
+  skyDome.set({
+    zenith: look.sky.clone().lerp(new THREE.Color(0x4f86d2), 0.55).lerp(w.skyTint, w.skyMix),
+    horizon: sky,
+    cover: 0.3 + 0.7 * w.skyMix,
+    haze: Math.min(1, 0.35 + w.skyMix * 0.6),
+    sunDir: sun.position,
+    sunColour: look.sun.colour,
+  })
   sun.color.copy(look.sun.colour)
   // overcast: the sun goes down and the sky comes up, which is what a grey day actually is
   sun.intensity = look.sun.intensity * (1 - 0.72 * w.skyMix)
@@ -452,12 +467,16 @@ async function copyStance() {
   const st = captureStance()
   if (!st) return
   const url = stanceUrl(st)
-  history.replaceState(null, '', url)
+  // The clipboard only. This used to also rewrite the address bar, so the page's own URL changed
+  // under you every time you pressed C — Rich: "copy a link to this view replaces the URL for no
+  // reason" (2026-09-26). The address bar is left alone; if the clipboard is blocked the link is
+  // printed to the console instead, which is where a blocked clipboard's caller is looking anyway.
   try {
     await navigator.clipboard.writeText(url)
-    toast('view copied to the clipboard, and to the address bar', 'ok')
+    toast('view copied to the clipboard', 'ok')
   } catch {
-    toast('the view is in the address bar — copy the URL', 'warn')
+    console.log(url)
+    toast('clipboard blocked — the view link is in the console', 'warn')
   }
 }
 
@@ -490,7 +509,7 @@ async function doSaveSiteTuning() {
     toast(`site tuning: ${(e as Error).message}`, 'danger')
   }
 }
-// Tab toggles drive/fly. Driving: W/S throttle/brake, A/D steer, Space handbrake, R resets to the
+// Tab toggles drive/fly. Driving: W/S throttle/brake, A/D steer, Space handbrake, R backs you out (Shift+R resets to the
 // road. Flying: see fly.ts (WASD move, Q/E rotate, R/F dolly, T/G lift, right-drag look). P and
 // H (home = top) are shared.
 /** one knob of the F6 panel by name, wherever its tab is; undefined if there is no such knob */
@@ -519,7 +538,13 @@ addEventListener('keydown', (e) => {
     case 'KeyX': void copyStance(); break
     case 'KeyM': setChromeHidden(!document.body.classList.contains('chrome-off')); break
     case 'KeyN': minimap?.setExpanded(!minimap.expanded); break
-    case 'KeyR': if (drive.on && site && drive.car) { const p = site.spineAt(site.manifest.spine.photo_s); const side = p.dir.clone().cross(up).multiplyScalar(1.83); drive.car.place(p.pos.x + side.x, p.pos.z + side.z, Math.atan2(p.dir.z, p.dir.x)) } break
+    // R backs you out the way you came (stuntin's recover); Shift+R is the old teleport to the
+    // photo station, kept for getting back to the start of the corridor
+    case 'KeyR':
+      if (!(drive.on && site && drive.car)) break
+      if (e.shiftKey) { const p = site.spineAt(site.manifest.spine.photo_s); const side = p.dir.clone().cross(up).multiplyScalar(1.83); drive.car.place(p.pos.x + side.x, p.pos.z + side.z, Math.atan2(p.dir.z, p.dir.x)) }
+      else drive.car.recover(T.CAR_RECOVER_BACK)
+      break
   }
   if (drive.on && (['KeyW', 'KeyS', 'KeyA', 'KeyD', 'Space'].includes(e.code) || e.code.startsWith('Arrow'))) e.preventDefault()
 })
@@ -605,6 +630,7 @@ function frame() {
     if (drive.on && drive.car) minimap?.draw({ x: drive.car.pos.x, y: -drive.car.pos.z, yaw: Math.atan2(-drive.car.forward.z, drive.car.forward.x) })
     else minimap?.draw({ x: camera.position.x, y: -camera.position.z, yaw: Math.atan2(-fwd.z, fwd.x) })
   }
+  skyDome.tick(performance.now() / 1000)
   renderer.render(scene, camera)
   requestAnimationFrame(frame)
 }

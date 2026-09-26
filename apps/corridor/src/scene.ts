@@ -3,6 +3,7 @@
 // three's camera/controls code has to be told about Z-up.
 import * as THREE from 'three'
 import { VegCover } from './vegmask'
+import { landuseZone, zoneOfRoad } from './zoning'
 import * as T from './tuning'
 import { Anchor } from '@apex/engine/geo/wgs84'
 import { RasterFrame } from '@apex/engine/geo/raster'
@@ -100,6 +101,8 @@ export interface Site {
   grassRoadDistance: (x: number, z: number) => number
   /** the full edge record at world (x, z): signed distance to the nearest pavement edge, which road (`who`, < 0 for a driveway or bulb), its surface height and along-track s. For probes. */
   edgeInfo: (x: number, z: number, exclude?: number, roadsOnly?: boolean) => { d: number; who: number; y: number; s: number }
+  /** kept (trimmed lawn) or rural (mown shoulder, tall grass) at world (x, z), from landuse then road class — see zoning.ts */
+  zoneAt: (x: number, z: number) => 'kept' | 'rural' | null
   /** how many junctions had an inferior road re-graded to meet the superior one, and the largest step closed (m) */
   junctionMeet: { junctions: number; warped: number; maxStep: number; noTarget: number }
   /** the vegetation mask: tile photos classified so far, of those with a photo */
@@ -861,7 +864,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
   // `road` builds the branch's asphalt and paint; it runs inside the branch's lazy unit, with its strip
   // one per branchAts entry, same order: the raw graded points and a way to rebuild the curve after they move
   const branchRaw: { br: NonNullable<Manifest['branches']>[number]; rawB: THREE.Vector3[]; dirty: boolean; recurve: () => void }[] = []
-  const branchAts: { at: (s: number) => { pos: THREE.Vector3; dir: THREE.Vector3 }; len: number; half: number; name: string; road: () => THREE.Group; bounds: [number, number, number, number] }[] = []
+  const branchAts: { at: (s: number) => { pos: THREE.Vector3; dir: THREE.Vector3 }; len: number; half: number; name: string; highway: string | null; road: () => THREE.Group; bounds: [number, number, number, number] }[] = []
   for (const br of manifest.branches ?? []) {
     if (!br.coords || br.coords.length < 2) continue
     const rawB = br.coords.map(([x, y, z]) => toWorld(x, y, (Number.isFinite(z) ? z : heightAt(x, y)) + 0.4))
@@ -887,7 +890,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     let bx0 = Infinity, bz0 = Infinity, bx1 = -Infinity, bz1 = -Infinity
     for (const q of rawB) { if (q.x < bx0) bx0 = q.x; if (q.x > bx1) bx1 = q.x; if (q.z < bz0) bz0 = q.z; if (q.z > bz1) bz1 = q.z }
     branchRaw.push({ br, rawB, dirty: false, recurve: () => { cB = new THREE.CatmullRomCurve3(rawB, false, 'centripetal'); cB.arcLengthDivisions = Math.max(100, rawB.length * 8); lenB = cB.getLength(); branchAts[branchRaw.length - 1].len = lenB } })
-    branchAts.push({ at: atB, len: lenB, half: halfB, name: br.name ?? br.ref ?? 'branch', bounds: [bx0, bz0, bx1, bz1], road: () => roadMesh(stations(atB, lenB, 6), () => lanesB, () => 'asphalt_aged', surfaceSets!, 0.02, () => twoWayB, paintOff, () => kerbedB) })
+    branchAts.push({ at: atB, len: lenB, half: halfB, name: br.name ?? br.ref ?? 'branch', highway: br.highway ?? null, bounds: [bx0, bz0, bx1, bz1], road: () => roadMesh(stations(atB, lenB, 6), () => lanesB, () => 'asphalt_aged', surfaceSets!, 0.02, () => twoWayB, paintOff, () => kerbedB) })
   }
   mark('paving: branch curves')
   // --- ROADS MEET AT THE SAME HEIGHT ---------------------------------------------------------
@@ -1039,6 +1042,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
   }
   // the grass generator's road-distance answer, lifted out of the strip block for the Site's probes
   let grassRoadDistanceOut: (x: number, z: number) => number = () => Infinity
+  let zoneAtOut: (x: number, z: number) => 'kept' | 'rural' | null = () => null
   let edgeInfoOut: (x: number, z: number, exclude?: number, roadsOnly?: boolean) => { d: number; who: number; y: number; s: number } = () => ({ d: Infinity, who: -1, y: 0, s: 0 })
   let edgeDistanceWorld: (x: number, z: number) => number = () => Infinity
   /** the road surface under a point near a carriageway: the spline's height, which the asphalt is built from */
@@ -1556,7 +1560,19 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     const canopyAt = sampler(chm)
     canopyAtRef = canopyAt
     const grassAdj = { ...NEUTRAL_ADJ }
-    const grass = new Grass(groundNear, canopyAt, grassRoadDistance, 0, look(currentSeason), lite ? 90_000 : 400_000, lite ? 26 : 40, fog, adjustments.active ? (x, y) => { const a = adjustments.at(x, y, grassAdj); return a.cover === 'crop' ? [1, 0] : [a.grass_height, a.grass_density] } : undefined, undefined, heightAt)
+    // kept or rural (zoning.ts): the landuse polygon the point is in, else the nearest road's class
+    const luZone = landuseZone(manifest)
+    const zoneAtWorld = (x: number, z: number) => {
+      const lu = luZone(x, -z)
+      if (lu) return lu
+      // carriageways only: the nearest station beside a house is its driveway, which has no class
+      const e = edgeDistance(x, z, -1, true)
+      if (!Number.isFinite(e.d) || e.d > 60) return null
+      const hw = e.who === 0 ? segAt(e.s)?.tags?.highway : e.who >= branchWho0 ? branchAts[e.who - branchWho0]?.highway : null
+      return zoneOfRoad(hw)
+    }
+    zoneAtOut = zoneAtWorld
+    const grass = new Grass(groundNear, canopyAt, grassRoadDistance, 0, look(currentSeason), lite ? 90_000 : 400_000, lite ? 26 : 40, fog, adjustments.active ? (x, y) => { const a = adjustments.at(x, y, grassAdj); return a.cover === 'crop' ? [1, 0] : [a.grass_height, a.grass_density] } : undefined, undefined, heightAt, zoneAtWorld)
     // NOT a child of `trees`. It was, and so the trees checkbox turned off all ground cover with
     // them — you could not hide the trees to look at the grass, which is most of what looking at
     // grass involves. Its own group, its own layer toggle.
@@ -2034,6 +2050,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     edgeDistance: edgeDistanceWorld,
     grassRoadDistance: (x, z) => grassRoadDistanceOut(x, z),
     edgeInfo: (x, z, exclude, roadsOnly) => edgeInfoOut(x, z, exclude, roadsOnly),
+    zoneAt: (x, z) => zoneAtOut(x, z),
     junctionMeet,
     vegCover: () => ({ loaded: veg?.loaded ?? 0, total: veg?.total ?? 0, inFlight: veg?.inFlightCount ?? 0, failed: veg?.failedCount ?? 0, lastMs: veg?.lastMs ?? null }),
     treesNear: treesNearWorld,

@@ -23,6 +23,12 @@ export let GRASS_HEIGHT_SCALE = 1.5
 export let GRASS_WIDTH_SCALE = 0.55
 /** how far from the pavement edge the mow line runs, and where grass stops entirely */
 export let GRASS_MOW_LINE = 13
+// zoning (zoning.ts): in a RURAL zone only this much beside the pavement is mown, the rest grows
+// GRASS_RURAL_TALL times the rough height; a KEPT zone is mown everywhere
+export let GRASS_RURAL_MOW_LINE = 3
+export let GRASS_RURAL_TALL = 1.3
+// a new grass tile grows in over this many seconds instead of appearing at full height
+export let GRASS_GROW_S = 0.8
 export let GRASS_MAX_FROM_ROAD = 24
 /** blade heights (m): mown turf, and the rough before the season multiplier */
 export let GRASS_MOWN_HEIGHT = 0.22

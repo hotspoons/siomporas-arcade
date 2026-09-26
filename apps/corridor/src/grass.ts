@@ -36,7 +36,7 @@ import * as T from './tuning'
 
 const SEGMENTS = 6
 const TILE = 8
-const BLADE_F = 7 // x y z | rand height width lean
+const BLADE_F = 8 // x y z | rand height width lean mown
 const CARD_F = 6 // x y z | size rand mown
 
 function bladeGeometry(): THREE.InstancedBufferGeometry {
@@ -116,6 +116,8 @@ interface Tile {
   cards: Float32Array // CARD_F per card, in random-rank order
   nc: number
   mown: boolean // most of the tile inside the mow line (drives card look)
+  /** uTime when the tile was generated: its blades and cards grow in from then (GRASS_GROW_S) */
+  born: number
 }
 
 const GLSL_NOISE = /* glsl */ `
@@ -135,9 +137,10 @@ export class Grass {
   private bladeGeo: THREE.InstancedBufferGeometry
   private cardGeo: THREE.InstancedBufferGeometry
   private aRoot: THREE.InstancedBufferAttribute
+  private aExtra: THREE.InstancedBufferAttribute // (born, mown)
   private aBlade: THREE.InstancedBufferAttribute // (rand, height, width, lean)
   private aCard: THREE.InstancedBufferAttribute // (x, y, z, size)
-  private aCard2: THREE.InstancedBufferAttribute // (rand, mown)
+  private aCard2: THREE.InstancedBufferAttribute // (rand, mown, born)
   private bladeMat: THREE.ShaderMaterial
   private cardMat: THREE.ShaderMaterial
   private capacity: number
@@ -146,6 +149,10 @@ export class Grass {
   private groundAt: (x: number, y: number) => number
   private canopyAt: (x: number, y: number) => number
   private roadDistance: (x: number, z: number) => number
+  /** kept (mown lawn everywhere) or rural (a mown shoulder, then tall grass), world x,z — see zoning.ts */
+  private zoneAt: ((x: number, z: number) => 'kept' | 'rural' | null) | undefined
+  /** the last uTime pushed to the shaders; a tile born now grows in from here */
+  private now = 0
   private pavedHalf: number
   private adjustAt: ((x: number, y: number) => [number, number]) | undefined
   /** the bare DEM, for the shelf test in generate(); undefined means the test is skipped */
@@ -194,8 +201,10 @@ export class Grass {
     adjustAt: ((x: number, y: number) => [number, number]) | undefined = undefined,
     sun = new THREE.Vector3(-3000, 4000, 2500).normalize(),
     demAt: ((x: number, y: number) => number) | undefined = undefined,
+    zoneAt: ((x: number, z: number) => 'kept' | 'rural' | null) | undefined = undefined,
   ) {
     this.demAt = demAt
+    this.zoneAt = zoneAt
     this.adjustAt = adjustAt
     this.groundAt = groundAt
     this.canopyAt = canopyAt
@@ -211,16 +220,20 @@ export class Grass {
     this.bladeGeo = bladeGeometry()
     this.aRoot = new THREE.InstancedBufferAttribute(new Float32Array(capacity * 3), 3)
     this.aBlade = new THREE.InstancedBufferAttribute(new Float32Array(capacity * 4), 4)
+    this.aExtra = new THREE.InstancedBufferAttribute(new Float32Array(capacity * 2), 2)
     this.aRoot.setUsage(THREE.DynamicDrawUsage)
     this.aBlade.setUsage(THREE.DynamicDrawUsage)
+    this.aExtra.setUsage(THREE.DynamicDrawUsage)
     this.bladeGeo.setAttribute('aRoot', this.aRoot)
     this.bladeGeo.setAttribute('aBlade', this.aBlade)
+    this.bladeGeo.setAttribute('aExtra', this.aExtra)
     this.bladeGeo.instanceCount = 0
     this.bladeMat = new THREE.ShaderMaterial({
       uniforms: {
         ...THREE.UniformsUtils.merge([THREE.UniformsLib.fog]),
         uTime: { value: 0 },
         uWind: { value: 1 },
+        uGrow: { value: 0.8 },
         uRadius: { value: 40 },
         uBase: { value: look.grass.base.clone() },
         uTip: { value: look.grass.tip.clone() },
@@ -234,8 +247,10 @@ export class Grass {
       vertexShader: /* glsl */ `
         attribute vec3 aRoot;
         attribute vec4 aBlade; // rand, height, width, lean
+        attribute vec2 aExtra; // born (uTime of the tile), mown
         uniform float uTime;
         uniform float uWind;
+        uniform float uGrow;
         uniform float uRadius;
         varying float vT;
         varying float vRand;
@@ -255,7 +270,10 @@ export class Grass {
           // and grows as you approach; size, not alpha, so there is no alpha-test pop either.
           float dEye = length((cameraPosition - aRoot).xz);
           float rim = 1.0 - smoothstep(uRadius - 14.0, uRadius + 2.0, dEye);
-          float h = aBlade.y * rim;
+          // NO POP ON A NEW TILE EITHER: a tile generated late (the eye outran the generator, a
+          // hedgerow's worth of blades in one frame) grows from the ground over uGrow seconds
+          float grow = smoothstep(aExtra.x, aExtra.x + uGrow, uTime);
+          float h = aBlade.y * rim * grow;
           float width = aBlade.z;
           float lean = aBlade.w;
           vec3 root = aRoot;
@@ -268,7 +286,8 @@ export class Grass {
           float gust = (vnoise(root.xz * 0.06 + vec2(uTime * 0.35, uTime * 0.12)) - 0.5) * 0.9;
           float turb = sin(uTime * 4.0 + aBlade.x * 60.0) * 0.06 * (0.5 + gust);
           vec3 windDir = normalize(vec3(0.8, 0.0, 0.5));
-          vec3 windTip = windDir * (sway + gust + turb) * h * uWind;
+          // trimmed lawn does not sway: a mown blade keeps a tenth of the wind
+          vec3 windTip = windDir * (sway + gust + turb) * h * uWind * (1.0 - 0.9 * aExtra.y);
 
           // quadratic bezier from root through a leaned control point to a wind-blown tip
           vec3 P0 = root;
@@ -356,7 +375,7 @@ export class Grass {
     // --- clump cards ---------------------------------------------------------------------------
     this.cardGeo = cardGeometry()
     this.aCard = new THREE.InstancedBufferAttribute(new Float32Array(this.cardCapacity * 4), 4)
-    this.aCard2 = new THREE.InstancedBufferAttribute(new Float32Array(this.cardCapacity * 2), 2)
+    this.aCard2 = new THREE.InstancedBufferAttribute(new Float32Array(this.cardCapacity * 3), 3)
     this.aCard.setUsage(THREE.DynamicDrawUsage)
     this.aCard2.setUsage(THREE.DynamicDrawUsage)
     this.cardGeo.setAttribute('aCard', this.aCard)
@@ -367,6 +386,7 @@ export class Grass {
         ...THREE.UniformsUtils.merge([THREE.UniformsLib.fog]),
         uTime: { value: 0 },
         uWind: { value: 1 },
+        uGrow: { value: 0.8 },
         uBase: { value: look.grass.base.clone() },
         uTip: { value: look.grass.tip.clone() },
         uDry: { value: look.grass.dry },
@@ -383,9 +403,10 @@ export class Grass {
       },
       vertexShader: /* glsl */ `
         attribute vec4 aCard;  // x y z size
-        attribute vec2 aCard2; // rand mown
+        attribute vec3 aCard2; // rand mown born
         uniform float uTime;
         uniform float uWind;
+        uniform float uGrow;
         uniform float uFadeIn;
         uniform float uFadeOut;
         uniform float uWidth;
@@ -410,8 +431,8 @@ export class Grass {
           // cards grow in where the blades thin out and shrink away at the far rim — size, not
           // alpha, so there is no alpha-test pop
           float fade = smoothstep(uFadeIn - 8.0, uFadeIn, d) * (1.0 - smoothstep(uFadeOut * 0.8, uFadeOut, d));
-          float size = aCard.w * fade;
-          float gust = (vnoise(root.xz * 0.06 + vec2(uTime * 0.35, uTime * 0.12)) - 0.5) * 0.35 * uWind;
+          float size = aCard.w * fade * smoothstep(aCard2.z, aCard2.z + uGrow, uTime);
+          float gust = (vnoise(root.xz * 0.06 + vec2(uTime * 0.35, uTime * 0.12)) - 0.5) * 0.35 * uWind * (1.0 - 0.9 * aCard2.y);
           // lean: the top of the card shears sideways by a per-card amount, so a field is not a row of fence posts
           float lean = (aCard2.x - 0.5) * 2.0 * uLean;
           vec3 world = root + right * (position.x * size * uWidth + lean * position.y * size) + vec3(0.0, position.y * size, 0.0)
@@ -531,8 +552,10 @@ export class Grass {
 
   tick(t: number) {
     this.bladeMat.uniforms.uRadius.value = T.GRASS_RADIUS
+    this.now = t
     for (const m of [this.bladeMat, this.cardMat]) {
       m.uniforms.uTime.value = t
+      m.uniforms.uGrow.value = T.GRASS_GROW_S
       // no sway from a moving car: the eye speed (measured in update) fades the wind out
       m.uniforms.uWind.value = T.GRASS_WIND * this.motion
       m.uniforms.uDry.value = Math.min(1, Math.max(0, this.dryBase + T.GRASS_DRY_ADD + this.look.dry))
@@ -745,7 +768,11 @@ export class Grass {
         const patch = hash(Math.floor(cx / patchCells) * 971 + Math.floor(cz / patchCells) * 337)
         if (patch < T.GRASS_PATCHINESS) continue
         cells++
-        const mown = roadD < this.pavedHalf + T.GRASS_MOW_LINE
+        // the zone (zoning.ts): kept is mown everywhere; rural is a mown shoulder then tall rough
+        // grass; no zone means the old mow line
+        const zone = this.zoneAt ? this.zoneAt(wx, wz) : null
+        const mown = zone === 'kept' ? true : roadD < this.pavedHalf + (zone === 'rural' ? T.GRASS_RURAL_MOW_LINE : T.GRASS_MOW_LINE)
+        const tall = zone === 'rural' && !mown ? T.GRASS_RURAL_TALL : 1
         if (mown) mownCells++
         // the editor's local corrections: [height multiplier, density multiplier]
         const [ah, ad] = this.adjustAt ? this.adjustAt(wx, -wz) : [1, 1]
@@ -767,7 +794,7 @@ export class Grass {
           const y = this.groundAt(x, -z) - 0.02
           const rnd = hash(cx * 29 + cz * 31 + b * 3)
           const shape = mown ? this.look.mown : this.look.height
-          const height = (mown ? T.GRASS_MOWN_HEIGHT : this.heightScale * T.GRASS_ROUGH_HEIGHT) * shape * ah * T.GRASS_HEIGHT_SCALE * (0.6 + 0.8 * hash(cx * 3 + cz * 5 + b * 7))
+          const height = (mown ? T.GRASS_MOWN_HEIGHT : this.heightScale * T.GRASS_ROUGH_HEIGHT * tall) * shape * ah * T.GRASS_HEIGHT_SCALE * (0.6 + 0.8 * hash(cx * 3 + cz * 5 + b * 7))
           const width = (mown ? 0.035 : 0.05 + 0.03 * rnd) * T.GRASS_WIDTH_SCALE * this.look.width
           const lean = Math.max(0, 0.15 + this.look.lean + T.GRASS_LEAN * hash(cx * 11 + cz * 19 + b * 23))
           const o = n * BLADE_F
@@ -778,6 +805,7 @@ export class Grass {
           blades[o + 4] = height
           blades[o + 5] = width
           blades[o + 6] = lean
+          blades[o + 7] = mown ? 1 : 0
           rank[n] = hash(cx * 41 + cz * 43 + b * 47)
           n++
         }
@@ -789,7 +817,7 @@ export class Grass {
           // a card is a metre wide and stands where it is put: the same test, at its own foot
           if (this.roadDistance(x, z) < this.pavedHalf + 0.3) continue
           const y = this.groundAt(x, -z) - 0.03
-          const base = (mown ? T.GRASS_MOWN_HEIGHT * 1.6 * this.look.mown : this.heightScale * T.GRASS_ROUGH_HEIGHT * 0.8 * this.look.height)
+          const base = (mown ? T.GRASS_MOWN_HEIGHT * 1.6 * this.look.mown : this.heightScale * T.GRASS_ROUGH_HEIGHT * tall * 0.8 * this.look.height)
           const size = base * ah * T.GRASS_HEIGHT_SCALE * T.GRASS_SPRITE_SCALE * (0.75 + 0.5 * hash(cx * 101 + cz * 103 + b * 107))
           const o = nc * CARD_F
           cards[o] = x
@@ -803,13 +831,14 @@ export class Grass {
         }
       }
     }
-    return { hasBlades: withBlades, blades: sortByRank(blades, rank, n, BLADE_F), n, cards: sortByRank(cards, crank, nc, CARD_F), nc, mown: mownCells * 2 > cells }
+    return { hasBlades: withBlades, blades: sortByRank(blades, rank, n, BLADE_F), n, cards: sortByRank(cards, crank, nc, CARD_F), nc, mown: mownCells * 2 > cells, born: this.now }
   }
 
   /** Copy the visible prefixes of the cached tiles into the instance buffers. */
   private assemble() {
     const rootArr = this.aRoot.array as Float32Array
     const bladeArr = this.aBlade.array as Float32Array
+    const extraArr = this.aExtra.array as Float32Array
     const cardArr = this.aCard.array as Float32Array
     const card2Arr = this.aCard2.array as Float32Array
     let k = 0, kc = 0
@@ -832,6 +861,8 @@ export class Grass {
           bladeArr[k * 4 + 1] = tile.blades[o + 4]
           bladeArr[k * 4 + 2] = tile.blades[o + 5]
           bladeArr[k * 4 + 3] = tile.blades[o + 6]
+          extraArr[k * 2] = tile.born
+          extraArr[k * 2 + 1] = tile.blades[o + 7]
           k++
         }
       }
@@ -846,8 +877,9 @@ export class Grass {
           cardArr[kc * 4 + 1] = tile.cards[o + 1]
           cardArr[kc * 4 + 2] = tile.cards[o + 2]
           cardArr[kc * 4 + 3] = tile.cards[o + 3]
-          card2Arr[kc * 2] = tile.cards[o + 4]
-          card2Arr[kc * 2 + 1] = tile.cards[o + 5]
+          card2Arr[kc * 3] = tile.cards[o + 4]
+          card2Arr[kc * 3 + 1] = tile.cards[o + 5]
+          card2Arr[kc * 3 + 2] = tile.born
           kc++
         }
       }

@@ -364,8 +364,8 @@ export let SIGNAL_RATE = 1
 /** the lit lens disc's radius (m); the dark lens it covers is 0.12 */
 export let SIGNAL_LENS_R = 0.125
 /** a stop bar's depth along the lane and its float over the asphalt (m) */
-export let STOPBAR_DEPTH = 0.5
-export let STOPBAR_LIFT = 0.025
+export let STOPBAR_DEPTH = 0.6
+export let STOPBAR_LIFT = 0.05 // above the lane paint (asphalt +0.02, paint +0.04): at 0.025 the bars were under it and invisible from above
 /** a bar further than this from a carriageway is not painted (m) */
 export let STOPBAR_MAX_FROM_ROAD = 12
 /** street name blades: post height, blade height, and the clear ground a corner post needs (m) */

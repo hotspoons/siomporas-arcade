@@ -326,7 +326,7 @@ function niceScale(m: number): number {
  * Exact, not a rotation of the UTM grid: verified against the baked spines at 0.6-0.7 m mean,
  * which is OSM's own digitising accuracy.
  */
-function enuProjector(lon0: number, lat0: number, h0: number): (lon: number, lat: number) => [number, number] {
+export function enuProjector(lon0: number, lat0: number, h0: number): (lon: number, lat: number) => [number, number] {
   const A = 6378137, F = 1 / 298.257223563, E2 = F * (2 - F)
   const D = Math.PI / 180
   const ecef = (lon: number, lat: number, h: number): [number, number, number] => {
@@ -349,7 +349,7 @@ function enuProjector(lon0: number, lat0: number, h0: number): (lon: number, lat
  * forward formula (Krüger series, good to mm), because osm.geojson is the only layer the viewer
  * reads that is not already in metres.
  */
-function utmProjector(epsg: number, ox: number, oy: number): (lon: number, lat: number) => [number, number] {
+export function utmProjector(epsg: number, ox: number, oy: number): (lon: number, lat: number) => [number, number] {
   const zone = epsg % 100
   const south = Math.floor(epsg / 100) === 327
   const lon0 = ((zone - 1) * 6 - 180 + 3) * (Math.PI / 180)
@@ -368,4 +368,9 @@ function utmProjector(epsg: number, ox: number, oy: number): (lon: number, lat: 
     }
     return [E0 + k0 * A * E - ox, N0 + k0 * A * N - oy]
   }
+}
+
+/** WGS84 → this site's metres, whichever frame the manifest holds — see the note in `load()`. */
+export function siteProjector(frame: { epsg: number; origin: [number, number]; kind?: string; anchor?: { lon: number; lat: number; h?: number } }): (lon: number, lat: number) => [number, number] {
+  return frame.kind === 'enu' && frame.anchor ? enuProjector(frame.anchor.lon, frame.anchor.lat, frame.anchor.h ?? 0) : utmProjector(frame.epsg, frame.origin[0], frame.origin[1])
 }

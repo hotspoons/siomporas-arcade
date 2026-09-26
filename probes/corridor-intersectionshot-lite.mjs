@@ -28,7 +28,7 @@ console.log(await page.evaluate(() => {
     if (L[k]) L[k].visible = false
   }
   if (site.grass) site.grass.mesh.visible = false
-  return 'stripped'
+  return JSON.stringify({ stripped: true, junctionPaint: site.junctionPaint ?? null })
 }))
 
 const shoot = async (name, fn) => {

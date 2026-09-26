@@ -97,6 +97,26 @@ def _lanes(tags: dict, highway: str) -> int:
     return 4 if highway in ("motorway", "trunk", "primary") else 2
 
 
+def _dir_lanes(tags: dict, oneway: str, sgn: int, total: int) -> int:
+    """The lanes an approach has in ITS direction — what a mast's heads should count.
+
+    Rich, at a signal on Davidsonville Road: "why 5 stop lights for 2 lanes?" Because the mast
+    carried the way's `lanes=5`, which is both directions. A one-way carriageway keeps the whole
+    count; a two-way road takes `lanes:forward` / `lanes:backward` where OSM has them and half the
+    total (rounded up, so a three-lane road with a centre turn lane gets two heads) where it does
+    not."""
+    if oneway in ("yes", "true", "1", "-1", "reverse"):
+        return total
+    key = "lanes:forward" if sgn > 0 else "lanes:backward"
+    try:
+        n = int(str(tags.get(key, "")).split(";")[0])
+        if 1 <= n <= 8:
+            return n
+    except (TypeError, ValueError):
+        pass
+    return max(1, math.ceil(total / 2))
+
+
 def _bearing(dx: float, dy: float) -> float:
     """ENU delta -> true compass bearing. ENU north IS true north, so there is no convergence term
     here; `export._bearing` carries one because it is handed UTM grid deltas."""
@@ -694,10 +714,34 @@ def furniture(built: dict, roads_by_id: dict) -> dict:
             travel = a["bearing_deg"]
             heads = (travel + 180.0) % 360.0
             if X["control"] == "signals":
+                dir_lanes = _dir_lanes(road.get("tags") or {}, str(road.get("oneway") or "no"), a.get("sgn", 1), a["lanes"])
+                # FAR SIDE. A signal's heads hang across the junction from the traffic they control,
+                # at the far-right corner, so a driver at the stop line looks ahead at them and not
+                # straight up (Rich, 2026-09-26: "I've seen a lot on the near side ... makes no
+                # sense"). The pole goes on this approach's travel line PAST the centre: to the
+                # opposite arm's stop line where the road continues, or just past the cross
+                # street's far kerb at a T. The viewer then walks it sideways to the kerb and hangs
+                # the arm back over the approach's lanes.
+                tb = math.radians(a["bearing_deg"])
+                tx, ty = math.sin(tb), math.cos(tb)
+                opp = None
+                for o in X["approaches"]:
+                    if o is a:
+                        continue
+                    dd = abs(((o["bearing_deg"] - a["bearing_deg"] + 180.0) % 360.0) - 180.0)
+                    if dd > 145.0:
+                        opp = o
+                        break
+                if opp is not None:
+                    far = math.hypot(opp["stop_x"] - X["x"], opp["stop_y"] - X["y"])
+                else:
+                    far = max((o["lanes"] * LANE_W / 2 for o in X["approaches"] if o is not a), default=LANE_W) + 1.5
+                mx, my = X["x"] + tx * far, X["y"] + ty * far
                 masts.append({
-                    "x": a["stop_x"], "y": a["stop_y"], "z": z,
+                    "x": round(mx, 2), "y": round(my, 2), "z": z, "far_side": True,
                     "yaw_deg": round(heads, 1), "travel_deg": round(travel, 1),
-                    "arm_m": round(a["lanes"] * LANE_W / 2 + 1.4, 2), "lanes": a["lanes"],
+                    # the arm reaches over this approach's lanes, and carries one head per lane
+                    "arm_m": round(dir_lanes * LANE_W + 1.4, 2), "lanes": dir_lanes,
                     "junction": X["arms"], "tagged": False,
                     "x_id": X["id"], "phase": a.get("phase", 0), "arm": ai,
                 })

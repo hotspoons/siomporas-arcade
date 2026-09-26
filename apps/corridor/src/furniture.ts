@@ -327,11 +327,13 @@ function signTexture(kind: 'stop' | 'give_way'): THREE.CanvasTexture {
     // white behind everything, then the red field inset — the ring between them is the border
     ctx.fillStyle = '#ffffff'
     ctx.fillRect(0, 0, S, S)
-    poly(8, S / 2 - 12, Math.PI / 8)
+    poly(8, S / 2 - 14, Math.PI / 8)
     ctx.fillStyle = '#b8261f'
     ctx.fill()
     ctx.fillStyle = '#ffffff'
-    ctx.font = `bold ${Math.round(S * 0.36)}px "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif`
+    // R1-1 proportions: the legend is about 60 % of the sign's width, with clear red either side
+    // — "stop signs and street signs need a little padding around the text" (Rich, 2026-09-26)
+    ctx.font = `bold ${Math.round(S * 0.27)}px "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif`
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
     ctx.fillText('STOP', S / 2, S / 2 + 4)
@@ -344,10 +346,10 @@ function signTexture(kind: 'stop' | 'give_way'): THREE.CanvasTexture {
     ctx.fillStyle = '#ffffff'
     ctx.fill()
     ctx.fillStyle = '#c62828'
-    ctx.font = `bold ${Math.round(S * 0.13)}px "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif`
+    ctx.font = `bold ${Math.round(S * 0.11)}px "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif`
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
-    ctx.fillText('YIELD', S / 2, S / 2 - 18)
+    ctx.fillText('YIELD', S / 2, S / 2 - 22)
   }
   const tex = new THREE.CanvasTexture(cv)
   tex.colorSpace = THREE.SRGBColorSpace
@@ -474,7 +476,12 @@ export function buildFurniture(
       counts.noRoadNearby++
       continue
     }
-    const { p, moved, clear, sign } = toKerb(p0, right, headDir)
+    // A FAR-SIDE mast (the bake puts a signal's pole across the junction from the traffic it
+    // controls, where a driver at the stop line sees it ahead rather than straight up) must walk
+    // ONWARD past the junction to find its kerb, not back toward the traffic — back is into the
+    // box — and it must land on the right, the far-right corner, so the arm reaches back over the
+    // approach's lanes. A near-side record (an older bake) keeps the old walk.
+    const { p, moved, clear, sign } = m.far_side ? toKerb(p0, right, travel, T.FURNITURE_SIGN_RIGHT_M) : toKerb(p0, right, headDir)
     if (moved) counts.movedOffPavement++
     if (!clear) counts.stillOnPavement++
     if (sign < 0) counts.onTheLeft++

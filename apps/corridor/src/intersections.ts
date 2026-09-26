@@ -168,16 +168,25 @@ export interface BarsResult {
   counts: { bars: number; metres: number; clipped: number; noRoad: number }
 }
 
+/**
+ * `roadAt(x, z)` is the ROAD SURFACE — the carriageway spline's height plus the asphalt's lift —
+ * not the ground. Measured at an all-way stop on crofton-triangle (2026-09-26): the ground
+ * sampler said 53.6 m where the asphalt mesh sat at 54.12, and every bar drawn at ground + 0.05
+ * was buried 0.4 m under the pavement while its counts read as fine. Paint goes on the road.
+ */
 export function buildStopBars(
   manifest: Manifest,
-  groundAt: (x: number, z: number) => number | null,
+  roadAt: (x: number, z: number) => number | null,
   edgeDistance: (x: number, z: number) => number,
+  info: LaneInfoMap = new Map(),
 ): BarsResult {
   const group = new THREE.Group()
   group.name = 'stopbars'
   const counts = { bars: 0, metres: 0, clipped: 0, noRoad: 0 }
-  const bars = manifest.signals?.bars ?? []
+  // the bake's bars are the stop signs'; a signal's approaches get theirs here
+  const bars = [...(manifest.signals?.bars ?? []), ...signalBars(manifest)]
   if (!bars.length) return { group, counts }
+  const byId = new Map(((manifest.intersections?.list ?? []) as unknown as Junction[]).map((X) => [X.id, X]))
 
   const pos: number[] = []
   const idx: number[] = []
@@ -190,6 +199,12 @@ export function buildStopBars(
     const th = (b.travel_deg * Math.PI) / 180
     const travel = new THREE.Vector3(Math.sin(th), 0, -Math.cos(th))
     const across = new THREE.Vector3(-travel.z, 0, travel.x)
+    // a bar spans the lanes that STOP here: the whole carriageway of a one-way road, and on a
+    // two-way road only the approach's own half — the oncoming lanes have their own bar
+    const appr = b.x_id != null && b.arm != null ? byId.get(b.x_id)?.approaches[b.arm] : undefined
+    const lanesHere = appr ? approachLanes(appr, info) : null
+    const oneway = lanesHere?.oneway ?? false
+    const ownHalf = lanesHere && !oneway ? Math.min(b.width_m / 2, lanesHere.count * T.LANE_WIDTH) : b.width_m / 2
     // how wide is the asphalt here? walk out both ways until it ends
     const reach = (sgn: number) => {
       let d = 0
@@ -206,10 +221,9 @@ export function buildStopBars(
       continue
     }
     if (rL + rR < b.width_m - 0.5) counts.clipped++
-    // a stop bar spans the APPROACH lanes only, which on a two-way road is the half you are on
-    const half = b.width_m / 2
-    const a0 = Math.min(rL, half)
-    const a1 = Math.min(rR, half)
+    // right of travel is +across: the approach's own half runs from the centre line outward
+    const a0 = oneway ? Math.min(rL, b.width_m / 2) : 0
+    const a1 = Math.min(rR, ownHalf)
     const hw = T.STOPBAR_DEPTH / 2
     const corners = [
       [a0, hw], [-a1, hw], [-a1, -hw], [a0, -hw],
@@ -218,7 +232,7 @@ export function buildStopBars(
     for (const [u, v] of corners) {
       const x = p.x + across.x * u + travel.x * v
       const z = p.z + across.z * u + travel.z * v
-      pos.push(x, (groundAt(x, z) ?? b.z) + T.STOPBAR_LIFT, z)
+      pos.push(x, (roadAt(x, z) ?? b.z) + T.STOPBAR_LIFT, z)
     }
     idx.push(base, base + 1, base + 2, base, base + 2, base + 3)
     counts.bars++
@@ -230,7 +244,8 @@ export function buildStopBars(
   geo.setIndex(idx)
   geo.computeVertexNormals()
   geo.computeBoundingSphere()
-  const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: 0xd8d8d0, roughness: 0.85, metalness: 0 }))
+  // unlit and white: a lit grey on grey asphalt was invisible from above, and paint is white
+  const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: 0xf4f4f0 }))
   mesh.name = 'stopbars:paint'
   group.add(mesh)
   counts.metres = Math.round(counts.metres)
@@ -280,10 +295,12 @@ function bladeAtlas(texts: string[]): { tex: THREE.CanvasTexture; uv: Map<string
     ctx.textBaseline = 'middle'
     // shrink to fit rather than overflow: the bake has already truncated to the character budget,
     // and this is the backstop for a name that is short but wide
-    let px = 30
+    // and a real margin: a street blade carries its legend well inside the border, about a
+    // letter-height clear at each end (Rich, 2026-09-26: "need a little padding around the text")
+    let px = 26
     do {
-      ctx.font = `600 ${px}px system-ui, sans-serif`
-      if (ctx.measureText(t).width <= CELL_W - 22) break
+      ctx.font = `600 ${px}px "IBM Plex Sans", system-ui, sans-serif`
+      if (ctx.measureText(t).width <= CELL_W - 56) break
       px -= 2
     } while (px > 10)
     ctx.fillText(t, cx + CELL_W / 2, cy + CELL_H / 2 + 1)
@@ -428,4 +445,355 @@ export function buildBlades(
   pg.computeBoundingSphere()
   group.add(new THREE.Mesh(pg, new THREE.MeshStandardMaterial({ color: 0x6e6e68, roughness: 0.7, metalness: 0.2 })))
   return { group, counts }
+}
+
+// --- the junction, drawn with opinions --------------------------------------------------------
+//
+// Rich (2026-09-26): "Intersections still look like a mess — the last agent just avoided the
+// issue by not drawing lines at them, but there needs to be opinions here. Stop lights and stop
+// signs get a thick white cross street line before lane markings disappear. Turn lanes get dashed
+// marking denoting direction of travel. Anywhere we know has a crosswalk gets a crosswalk marking."
+//
+// Everything below is drawn from records the bake and OSM already hold: every approach of every
+// junction carries its stop-line position, width, lane count and travel bearing; OSM carries
+// `turn:lanes` on the arterials and `highway=crossing` nodes. Nothing here is invented — where the
+// data is silent (a residential T with no lane tags) nothing is drawn, which is also what the
+// county paints there.
+
+export interface Approach {
+  road: string
+  name?: string | null
+  highway: string
+  lanes: number
+  bearing_deg: number
+  sgn: number
+  stop: boolean
+  stop_x: number
+  stop_y: number
+  width_m: number
+}
+export interface Junction {
+  id: string
+  x: number
+  y: number
+  control: 'signals' | 'two_way_stop' | 'all_way_stop' | string
+  approaches: Approach[]
+}
+
+/** Lane facts per OSM way, read from the site's osm.geojson: counts per direction and turn:lanes. */
+export interface LaneInfo {
+  lanes: number | null
+  forward: number | null
+  backward: number | null
+  oneway: boolean
+  turn: string[] | null
+  turnForward: string[] | null
+  turnBackward: string[] | null
+}
+export type LaneInfoMap = Map<string, LaneInfo>
+
+const splitLanes = (v: unknown): string[] | null => (typeof v === 'string' && v.length ? v.split('|').map((s) => s.trim()) : null)
+const num = (v: unknown): number | null => { const n = parseInt(String(v ?? ''), 10); return Number.isFinite(n) && n > 0 && n < 16 ? n : null }
+
+export interface JunctionFacts {
+  lanes: LaneInfoMap
+  /** OSM highway=crossing nodes, WGS84; `marked` is false only for crossing=unmarked */
+  crossings: { lon: number; lat: number; marked: boolean }[]
+}
+
+/** osm.geojson, keyed by the bake's road id (`r<osm id>` ↔ `way/<osm id>`), plus the crossing nodes. */
+export async function loadJunctionFacts(slug: string, base = '/sites'): Promise<JunctionFacts> {
+  const out: LaneInfoMap = new Map()
+  const crossings: JunctionFacts['crossings'] = []
+  try {
+    const r = await fetch(`${base}/${slug}/osm.geojson`, { cache: 'force-cache' })
+    if (!r.ok) return { lanes: out, crossings }
+    const gj = (await r.json()) as { features: { id?: string; geometry: { type: string; coordinates: number[] | number[][] }; properties: Record<string, string> }[] }
+    for (const f of gj.features) {
+      if (f.geometry.type === 'Point' && f.properties.highway === 'crossing') {
+        const [lon, lat] = f.geometry.coordinates as number[]
+        crossings.push({ lon, lat, marked: f.properties.crossing !== 'unmarked' })
+        continue
+      }
+      if (f.geometry.type !== 'LineString' || !f.id?.startsWith('way/')) continue
+      const p = f.properties
+      const oneway = p.oneway === 'yes' || p.oneway === '-1' || p.highway === 'motorway'
+      out.set('r' + f.id.slice(4), {
+        lanes: num(p.lanes), forward: num(p['lanes:forward']), backward: num(p['lanes:backward']), oneway,
+        turn: splitLanes(p['turn:lanes']), turnForward: splitLanes(p['turn:lanes:forward']), turnBackward: splitLanes(p['turn:lanes:backward']),
+      })
+    }
+  } catch {
+    /* no osm layer: nothing lane-level to draw */
+  }
+  return { lanes: out, crossings }
+}
+
+/** The lanes of one approach in its own direction, leftmost first, with each lane's movements. */
+export function approachLanes(a: Approach, info: LaneInfoMap): { count: number; turns: string[][] | null; oneway: boolean } {
+  const li = info.get(a.road)
+  const oneway = li?.oneway ?? false
+  const turnTags = li ? (oneway ? li.turn : a.sgn > 0 ? (li.turnForward ?? null) : (li.turnBackward ?? null)) : null
+  let count: number | null = turnTags ? turnTags.length : null
+  if (!count && li) count = oneway ? li.lanes : a.sgn > 0 ? li.forward : li.backward
+  if (!count) count = oneway ? Math.max(1, a.lanes) : Math.max(1, Math.ceil(a.lanes / 2))
+  const turns = turnTags ? turnTags.map((t) => t.split(';').map((m) => m.trim()).filter((m) => m && m !== 'none')) : null
+  return { count, turns, oneway }
+}
+
+/** unit travel vector (world) for a compass bearing, and its right-hand normal */
+function frameOf(bearingDeg: number) {
+  const th = (bearingDeg * Math.PI) / 180
+  const travel = new THREE.Vector3(Math.sin(th), 0, -Math.cos(th))
+  const right = new THREE.Vector3(-travel.z, 0, travel.x)
+  return { travel, right }
+}
+
+/**
+ * Stop lines for every approach of every SIGNALISED junction. The bake's `signals.bars` are the
+ * stop-sign bars only (522 on crofton-triangle, one per sign); a signal's approaches had none,
+ * which is exactly the "lane markings just disappear" Rich saw at the lights.
+ */
+export function signalBars(manifest: Manifest): { x: number; y: number; z: number; travel_deg: number; width_m: number; x_id: string; arm: number }[] {
+  const out: ReturnType<typeof signalBars> = []
+  const list = ((manifest.intersections?.list ?? []) as unknown as Junction[])
+  for (const X of list) {
+    if (X.control !== 'signals') continue
+    X.approaches.forEach((a, i) => {
+      out.push({ x: a.stop_x, y: a.stop_y, z: 0, travel_deg: a.bearing_deg, width_m: a.width_m, x_id: X.id, arm: i })
+    })
+  }
+  return out
+}
+
+export interface CrosswalksResult {
+  group: THREE.Group
+  counts: { atSignals: number; atNodes: number; skippedNoWalk: number; skippedNoRoad: number }
+}
+
+/**
+ * Ladder crosswalks: across every arm of a signalised junction that has a sidewalk to arrive
+ * from, and at every OSM `highway=crossing` node that is not `unmarked`. MUTCD ladder: 0.4 m bars
+ * on 0.6 m gaps, 2.4 m deep, the near edge 1.2 m past the stop line toward the junction.
+ */
+export function buildCrosswalks(
+  manifest: Manifest,
+  roadAt: (x: number, z: number) => number | null,
+  edgeDistance: (x: number, z: number) => number,
+  onSidewalk: (x: number, z: number) => boolean,
+  crossingNodes: { x: number; y: number; marked: boolean }[],
+): CrosswalksResult {
+  const group = new THREE.Group()
+  group.name = 'crosswalks'
+  const counts = { atSignals: 0, atNodes: 0, skippedNoWalk: 0, skippedNoRoad: 0 }
+  const pos: number[] = []
+  const idx: number[] = []
+  const placed: THREE.Vector3[] = []
+  const DEPTH = 2.4, BAR = 0.4, GAP = 0.6
+
+  /** walk out from `p` along ±across until the asphalt ends; the ladder spans what it finds */
+  const reach = (p: THREE.Vector3, across: THREE.Vector3, sgn: number, max: number) => {
+    let d = 0
+    for (let k = 0.25; k <= max; k += 0.25) {
+      if (edgeDistance(p.x + across.x * k * sgn, p.z + across.z * k * sgn) >= 0) break
+      d = k
+    }
+    return d
+  }
+  const ladder = (centre: THREE.Vector3, travel: THREE.Vector3, halfMax: number, needWalk: boolean): boolean => {
+    const across = new THREE.Vector3(-travel.z, 0, travel.x)
+    const rL = reach(centre, across, -1, halfMax + 3), rR = reach(centre, across, 1, halfMax + 3)
+    if (rL + rR < 3) { counts.skippedNoRoad++; return false }
+    if (needWalk) {
+      // a crossing goes somewhere: a sidewalk within a few metres of either kerb
+      let walk = false
+      for (const [sgn, r] of [[-1, rL], [1, rR]] as [number, number][]) for (let k = 0.5; k <= 5 && !walk; k += 0.5) {
+        if (onSidewalk(centre.x + across.x * (r + k) * sgn, centre.z + across.z * (r + k) * sgn)) walk = true
+      }
+      if (!walk) { counts.skippedNoWalk++; return false }
+    }
+    for (let u = -rL + GAP / 2; u + BAR <= rR; u += BAR + GAP) {
+      const c0 = u, c1 = u + BAR
+      const base = pos.length / 3
+      for (const [cu, cv] of [[c0, -DEPTH / 2], [c1, -DEPTH / 2], [c1, DEPTH / 2], [c0, DEPTH / 2]] as [number, number][]) {
+        const x = centre.x + across.x * cu + travel.x * cv
+        const z = centre.z + across.z * cu + travel.z * cv
+        pos.push(x, (roadAt(x, z) ?? centre.y) + T.STOPBAR_LIFT + 0.005, z)
+      }
+      idx.push(base, base + 2, base + 1, base, base + 3, base + 2)
+    }
+    placed.push(centre.clone())
+    return true
+  }
+
+  const list = ((manifest.intersections?.list ?? []) as unknown as Junction[])
+  for (const X of list) {
+    if (X.control !== 'signals') continue
+    for (const a of X.approaches) {
+      const { travel } = frameOf(a.bearing_deg)
+      const stop = toWorld(a.stop_x, a.stop_y)
+      // between the stop line and the box: 1.2 m clear, then the 2.4 m ladder
+      const centre = stop.clone().add(travel.clone().multiplyScalar(1.2 + DEPTH / 2))
+      centre.y = roadAt(centre.x, centre.z) ?? 0
+      if (ladder(centre, travel, a.width_m / 2, true)) counts.atSignals++
+    }
+  }
+  // OSM crossing nodes not already covered by a signal's ladder: the direction comes from the
+  // nearest branch segment, because a node has no bearing of its own
+  const branches = ((manifest as unknown as { branches?: { coords: number[][] }[] }).branches ?? [])
+  for (const n of crossingNodes) {
+    if (!n.marked) continue
+    const w = toWorld(n.x, n.y)
+    if (placed.some((p) => p.distanceTo(w) < 10)) continue
+    let best = Infinity, dir: THREE.Vector3 | null = null
+    for (const b of branches) {
+      const c = b.coords
+      for (let k = 1; k < c.length; k++) {
+        const ax = c[k - 1][0], ay = c[k - 1][1], bx = c[k][0], by = c[k][1]
+        const dx = bx - ax, dy = by - ay
+        const l2 = dx * dx + dy * dy || 1
+        const t = Math.max(0, Math.min(1, ((n.x - ax) * dx + (n.y - ay) * dy) / l2))
+        const d = Math.hypot(ax + t * dx - n.x, ay + t * dy - n.y)
+        if (d < best) { best = d; dir = new THREE.Vector3(dx, 0, -dy).normalize() }
+      }
+    }
+    if (!dir || best > 15) { counts.skippedNoRoad++; continue }
+    w.y = roadAt(w.x, w.z) ?? 0
+    if (ladder(w, dir, 12, false)) counts.atNodes++
+  }
+  if (idx.length) {
+    const geo = new THREE.BufferGeometry()
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
+    geo.setIndex(idx)
+    geo.computeVertexNormals()
+    geo.computeBoundingSphere()
+    const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: 0xf4f4f0 }))
+    mesh.name = 'crosswalks:paint'
+    group.add(mesh)
+  }
+  return { group, counts }
+}
+
+export interface ArrowsResult {
+  group: THREE.Group
+  counts: { approaches: number; arrows: number; lanesTagged: number }
+}
+
+/**
+ * Lane-use arrows from `turn:lanes`, two per lane in the last twenty metres before the stop line:
+ * a straight arrow for through, a hooked one for left or right, both on a lane that allows both.
+ * Lanes are listed left to right in OSM; for right-hand traffic lane 0 sits against the centre
+ * line on a two-way road and against the left edge on a one-way carriageway.
+ */
+export function buildLaneArrows(manifest: Manifest, roadAt: (x: number, z: number) => number | null, info: LaneInfoMap): ArrowsResult {
+  const group = new THREE.Group()
+  group.name = 'lanearrows'
+  const counts = { approaches: 0, arrows: 0, lanesTagged: 0 }
+  const pos: number[] = []
+  const idx: number[] = []
+  const LW = T.LANE_WIDTH
+  const tri = (a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3) => {
+    const k = pos.length / 3
+    pos.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z)
+    idx.push(k, k + 1, k + 2)
+  }
+  const quad = (a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, d: THREE.Vector3) => { tri(a, b, c); tri(a, c, d) }
+  /** one arrow at `origin` (the lane centre, arrow base), travel/right frame; movements decide the heads */
+  const arrow = (origin: THREE.Vector3, travel: THREE.Vector3, right: THREE.Vector3, moves: string[]) => {
+    const P = (s: number, r: number) => { const x = origin.x + travel.x * s + right.x * r, z = origin.z + travel.z * s + right.z * r; return new THREE.Vector3(x, (roadAt(x, z) ?? origin.y) + T.STOPBAR_LIFT + 0.01, z) }
+    const through = moves.some((m) => m === 'through' || m === 'slight_left' || m === 'slight_right' || m === 'merge_to_left' || m === 'merge_to_right')
+    const left = moves.some((m) => m === 'left' || m === 'sharp_left')
+    const rightT = moves.some((m) => m === 'right' || m === 'sharp_right')
+    if (!through && !left && !rightT) return false
+    // the shaft, 2.4 m; a through head on top; a side head off the shaft's top for each turn
+    quad(P(0, -0.15), P(0, 0.15), P(2.4, 0.15), P(2.4, -0.15))
+    if (through) tri(P(2.4, -0.6), P(2.4, 0.6), P(3.6, 0))
+    for (const [on, sgn] of [[left, -1], [rightT, 1]] as [boolean, number][]) {
+      if (!on) continue
+      quad(P(1.7, 0), P(2.0, 0), P(2.0, sgn * 0.9), P(1.7, sgn * 0.9))
+      tri(P(1.3, sgn * 0.9), P(2.4, sgn * 0.9), P(1.85, sgn * 1.7))
+    }
+    counts.arrows++
+    return true
+  }
+  const list = ((manifest.intersections?.list ?? []) as unknown as Junction[])
+  for (const X of list) {
+    for (const a of X.approaches) {
+      const { count, turns, oneway } = approachLanes(a, info)
+      if (!turns) continue
+      counts.approaches++
+      const { travel, right } = frameOf(a.bearing_deg)
+      const stop = toWorld(a.stop_x, a.stop_y)
+      stop.y = roadAt(stop.x, stop.z) ?? 0
+      turns.forEach((moves, j) => {
+        if (!moves.length) return
+        counts.lanesTagged++
+        // lane centre, right of the road's centre line (two-way) or of the carriageway's centre
+        const rOff = oneway ? (j + 0.5) * LW - (count * LW) / 2 : (j + 0.5) * LW
+        for (const back of [6, 18]) {
+          const origin = stop.clone().add(travel.clone().multiplyScalar(-back - 3.6)).add(right.clone().multiplyScalar(rOff))
+          arrow(origin, travel, right, moves)
+        }
+      })
+    }
+  }
+  if (idx.length) {
+    const geo = new THREE.BufferGeometry()
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
+    geo.setIndex(idx)
+    geo.computeVertexNormals()
+    geo.computeBoundingSphere()
+    const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: 0xf4f4f0 }))
+    mesh.name = 'lanearrows:paint'
+    group.add(mesh)
+  }
+  return { group, counts }
+}
+
+/**
+ * The paint cut at a junction, per ARM: a marking is off when it lies between a junction's centre
+ * and that arm's stop line. Replaces a circle of JUNCTION_CLEAR, which cut every arm at the same
+ * radius whatever its stop line said and left a bare disc with lines stopping short of it.
+ */
+export function junctionPaintCut(manifest: Manifest): (x: number, z: number) => boolean {
+  const list = ((manifest.intersections?.list ?? []) as unknown as Junction[])
+  const J = list.map((X) => {
+    const c = toWorld(X.x, X.y)
+    const arms = X.approaches.map((a) => {
+      const s = toWorld(a.stop_x, a.stop_y)
+      const dx = s.x - c.x, dz = s.z - c.z
+      const d = Math.hypot(dx, dz) || 1
+      return { ox: dx / d, oz: dz / d, stop: d + 0.3 }
+    })
+    const R = Math.max(1, ...arms.map((a) => a.stop)) + 2
+    return { x: c.x, z: c.z, R2: R * R, arms }
+  })
+  const cell = 200
+  const grid = new Map<string, typeof J>()
+  for (const j of J) {
+    const r = Math.sqrt(j.R2)
+    for (let gx = Math.floor((j.x - r) / cell); gx <= Math.floor((j.x + r) / cell); gx++) for (let gz = Math.floor((j.z - r) / cell); gz <= Math.floor((j.z + r) / cell); gz++) {
+      const k = `${gx},${gz}`
+      const arr = grid.get(k)
+      if (arr) arr.push(j)
+      else grid.set(k, [j])
+    }
+  }
+  return (x, z) => {
+    const arr = grid.get(`${Math.floor(x / cell)},${Math.floor(z / cell)}`)
+    if (!arr) return false
+    for (const j of arr) {
+      const dx = x - j.x, dz = z - j.z
+      const d2 = dx * dx + dz * dz
+      if (d2 > j.R2) continue
+      const d = Math.sqrt(d2) || 1e-6
+      let best = -2, stop = 0
+      for (const a of j.arms) {
+        const dot = (dx * a.ox + dz * a.oz) / d
+        if (dot > best) { best = dot; stop = a.stop }
+      }
+      if (d < stop) return true
+    }
+    return false
+  }
 }

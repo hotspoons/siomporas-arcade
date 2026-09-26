@@ -100,8 +100,27 @@ What a cleaner renderer does, in order:
    controller already phases by road; adding a protected-left phase where a `left` pocket exists is
    one rule.
 
-It is a bake-side module (`lanes.py` beside `intersections.py`) plus a rewrite of the junction
-half of `road` in `scene.ts`. Two to three days. The subdivision junctions stay derived.
+**Built the same day, in the viewer, from records the bake and OSM already held** (Rich: "there
+needs to be opinions here"):
+
+- **stop lines at every controlled approach** — the bake's 522 stop-sign bars plus one per
+  signal approach (39 on Crofton), white, unlit, 0.6 m, on the approach's own half of a two-way
+  road and the whole of a one-way carriageway. They were buried: drawn at ground + 0.05 where the
+  asphalt rides the carriageway spline 0.4 m higher near a junction. Junction paint is now placed
+  on the road surface (`roadHeightWorld`, the spline's height), never the ground.
+- **lane paint ends at the stop line, per arm** — `junctionPaintCut` replaces the JUNCTION_CLEAR
+  circle; the cut is the sector of each approach out to its own stop line.
+- **ladder crosswalks** — across every arm of a signalised junction that has a sidewalk to arrive
+  from (18), and at every OSM `highway=crossing` node not tagged unmarked (21).
+- **lane-use arrows from `turn:lanes`** — 142 arrows on 25 approaches / 71 lanes, two per lane
+  in the last twenty metres, straight / hooked / both.
+- **one signal head per lane in the mast's own direction** — the bake wrote the way's total
+  (`lanes=5` on Davidsonville Road) onto every mast; `_dir_lanes` uses `lanes:forward/backward`
+  or half the total.
+
+Still to do from the list above: the junction polygon itself (the box is still the union of
+ribbons), the solid line beside a turn pocket, and a protected-left phase where a `left` pocket
+exists. The subdivision junctions stay derived.
 
 ## Imagery resolution
 

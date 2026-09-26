@@ -24,13 +24,14 @@ import { buildPlacements, loadCatalog, loadPlacements } from './placements'
 import { buildBuildings } from './buildings'
 import { buildPower } from './power'
 import { buildBarriers, buildFurniture, buildSidewalks, sidewalkCover } from './furniture'
-import { buildBlades, buildSignals, buildStopBars } from './intersections'
+import { buildBlades, buildCrosswalks, buildLaneArrows, buildSignals, buildStopBars, junctionPaintCut, loadJunctionFacts, type ArrowsResult, type BarsResult, type CrosswalksResult } from './intersections'
 import { buildParking, parkingCover } from './parking'
 import { buildBridges, flattenSpine, loadStructureOverrides, suppressed } from './structures'
 import { loadSurfaceSets, overpassMesh, pavedOffset, pavedWidth, repaintMarkings, roadMesh, stations, taperedLanes, treesFromCanopy, type SurfaceSet } from './props'
 import { STYLE, styled, type Style } from './style'
 import { buildRocks } from './rocks'
 import { buildWater } from './water'
+import { siteProjector } from './minimap'
 
 let surfaceSets: Record<string, SurfaceSet> | null = null
 
@@ -65,6 +66,8 @@ export interface Site {
   /** terrain-and-data: rock instances placed per rock type, and what water was drawn (for probes) */
   rockCounts: Record<string, number>
   waterStats: { lines: number; areas: number; falls: number; length_m: number }
+  /** what the junction paint drew, for probes: stop lines, ladders, lane arrows */
+  junctionPaint: { bars: BarsResult['counts']; crosswalks: CrosswalksResult['counts']; arrows: ArrowsResult['counts'] }
   /** canopy height (m) above the ground at site x,y — the CHM the trees and the grass rule read */
   canopyAt: (x: number, y: number) => number
   /** what grows here: LANDFIRE classes, the FIA species mix and Daymet climate. Null on an old bake. */
@@ -768,8 +771,14 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
       }
     }
   }
-  /** inside any junction circle? asked per marking quad, at that line's own lateral offset */
+  /**
+   * Is this marking inside a junction? Asked per marking quad, at that line's own lateral offset.
+   * With the bake's junction model the cut is per ARM, at that arm's stop line
+   * (`junctionPaintCut`); the circles above are the fallback for a bake without one.
+   */
+  const sectorCut = manifest.intersections?.list?.length ? junctionPaintCut(manifest) : null
   const paintOff = (x: number, z: number) => {
+    if (sectorCut) return sectorCut(x, z)
     for (const j of junctions) if ((j.x - x) ** 2 + (j.z - z) ** 2 < j.r * j.r) return true
     return false
   }
@@ -858,6 +867,8 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
   let setSeason: (season: Season) => void = () => {}
   let groundAtWorld: (x: number, z: number) => number | null = (x, z) => heightAt(x, -z)
   let edgeDistanceWorld: (x: number, z: number) => number = () => Infinity
+  /** the road surface under a point near a carriageway: the spline's height, which the asphalt is built from */
+  let roadHeightWorld: (x: number, z: number) => number | null = () => null
   let treesNearWorld: (x: number, z: number, r: number) => [number, number, number][] = () => []
   let currentSeason: Season = initialSeason
   let grassRef: Grass | null = null
@@ -1257,6 +1268,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     const groundNear = (x: number, y: number) => stripHeight(x, -y) ?? heightAt(x, y)
     groundAtWorld = (x, z) => stripHeight(x, z) ?? heightAt(x, -z)
     edgeDistanceWorld = (x, z) => edgeDistance(x, z).d
+    roadHeightWorld = (x, z) => { const e = edgeDistance(x, z); return e.d <= T.STOPBAR_MAX_FROM_ROAD ? e.y : null }
     status('planting…')
     const treeAdj = { ...NEUTRAL_ADJ }
     const t = treesFromCanopy(chm.data, chm.layer.size, chm.layer.bbox, chm.layer.res, heightAt, lite ? 25_000 : 120_000, 3, (x, y) => {
@@ -1617,7 +1629,23 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
   // centreline position by a metre or twenty and the lenses have to hang under the real head.
   const signals = buildSignals(manifest, furniture.placed)
   group.add(signals.group)
-  const stopbars = buildStopBars(manifest, groundAtWorld, edgeDistanceWorld)
+  // junction paint goes on the ROAD SURFACE: the carriageway spline's height plus the asphalt's
+  // lift, which is what the asphalt mesh itself is built from. The ground sampler is the strip or
+  // the DEM and near a junction it ran 0.4 m under the pavement, burying every bar.
+  const roadSurfaceAt = (x: number, z: number): number | null => {
+    const y = roadHeightWorld(x, z)
+    return y === null ? null : y + 0.02
+  }
+  const facts = await loadJunctionFacts(manifest.slug, `${DATA_BASE}/sites`)
+  const stopbars = buildStopBars(manifest, roadSurfaceAt, edgeDistanceWorld, facts.lanes)
+  // the rest of the junction's paint, from OSM's lane tags and crossing nodes: crosswalks and
+  // lane-use arrows live under the stop-bar layer so one toggle covers the junction's paint
+  const proj = manifest.frame ? siteProjector(manifest.frame as Parameters<typeof siteProjector>[0]) : null
+  const crossingNodes = proj ? facts.crossings.map((c) => { const [x, y] = proj(c.lon, c.lat); return { x, y, marked: c.marked } }) : []
+  const crosswalks = buildCrosswalks(manifest, roadSurfaceAt, edgeDistanceWorld, sidewalkCover(manifest, 1.0), crossingNodes)
+  stopbars.group.add(crosswalks.group)
+  const arrows = buildLaneArrows(manifest, roadSurfaceAt, facts.lanes)
+  stopbars.group.add(arrows.group)
   group.add(stopbars.group)
   const blades = buildBlades(manifest, groundAtWorld, edgeDistanceWorld)
   group.add(blades.group)
@@ -1675,6 +1703,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     bladeCounts: blades.counts,
     rockCounts: rocks.counts,
     waterStats: { lines: water.lines, areas: water.areas, falls: water.falls, length_m: water.length_m },
+    junctionPaint: { bars: stopbars.counts, crosswalks: crosswalks.counts, arrows: arrows.counts },
     setStyle,
     canopyAt: canopyAtRef,
     // what grows here, for probes and the console

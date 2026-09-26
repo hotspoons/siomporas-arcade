@@ -134,6 +134,29 @@ lidar pass (the tiles' DEM and CHM stay; only `naip.jpg`/`.ktx2` are rewritten).
 Outside the US the answer is Sentinel-2 at 10 m and it is honest about it
 (`DATA-OUTSIDE-US.md`).
 
+## Why tree density differs between the two Crofton bakes
+
+Rich: "tree density varies from map to map in the same exact area." Measured 2026-09-26 over the
+same 2 km around the triangle's centre, 8 158 shared samples:
+
+| | crofton-triangle | crofton-crownsville |
+|---|---|---|
+| canopy > 3 m in the web CHM tiles | **40.7 %** | **10.2 %** |
+| source `lidar/chm.vrt`, same points | 43.2 % | 7.8 % |
+| source `dsm.vrt` valid | 97 % | **16 %** |
+| source `dtm.vrt` valid | 83 % | 14 % |
+
+Same lidar project, similar class counts site-wide. The difference is coverage: a network bake
+rasterises lidar only in a band along the roads it DRAWS, and crownsville draws 18 roads where
+the triangle draws 388, so most of the triangle's ground has no lidar in crownsville's rasters —
+and `chm.vrt` has no nodata value, so "no lidar here" is written as "0 m canopy", which the tree
+planter reads as "no trees". The photo says Crofton is heavily wooded; crownsville is the wrong
+one.
+
+The fix is in the bake, not the viewer: outside the lidar band the canopy tile should carry the
+global 1 m canopy (`corridor.canopy`, Meta/WRI — already fetched for the outside-US work) or
+nodata, never zero. It is a crownsville re-export of the CHM tiles, not a re-bake of the lidar.
+
 ## What this plan does not do
 
 It does not make Crofton look different. It makes Crofton load in a second, makes a county

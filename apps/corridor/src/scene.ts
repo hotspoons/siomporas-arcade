@@ -842,13 +842,14 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     sibAts.push({ at: sibAt, len: len2, spineS: (s: number) => { const p = sibAt(s).pos; return nearestSpine(p.x, p.z).s } })
     roadBuilders.push(() => roadMesh(stations(sibAt, len2, 6), () => 2, () => 'asphalt_aged', surfaceSets!, 0.02, () => false, paintOff))
   }
+  mark('paving: spine mesh setup + siblings')
   // --- network branches: every other road of a network site is a first-class carriageway --------
   // Its grade is its own lidar profile (the bake densified it like the spine), its lanes and
   // direction its own OSM tags; it gets stations in the edge grid (so grass, trees and the car
   // know it is pavement), an asphalt+paint mesh, and below, its own strip. Kept apart from the
   // divided-highway siblings: those share the spine's grade and widen the spine's strip.
   // `road` builds the branch's asphalt and paint; it runs inside the branch's lazy unit, with its strip
-  const branchAts: { at: (s: number) => { pos: THREE.Vector3; dir: THREE.Vector3 }; len: number; half: number; name: string; road: () => THREE.Group }[] = []
+  const branchAts: { at: (s: number) => { pos: THREE.Vector3; dir: THREE.Vector3 }; len: number; half: number; name: string; road: () => THREE.Group; bounds: [number, number, number, number] }[] = []
   for (const br of manifest.branches ?? []) {
     if (!br.coords || br.coords.length < 2) continue
     const rawB = br.coords.map(([x, y, z]) => toWorld(x, y, (Number.isFinite(z) ? z : heightAt(x, y)) + 0.4))
@@ -871,9 +872,13 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     const twoWayB = br.oneway === 'yes' || br.oneway === '-1' ? false : br.oneway === 'no' ? true : !['motorway', 'motorway_link', 'trunk_link', 'primary_link'].includes(br.highway ?? '')
     const kerbedB = isKerbed(br.highway)
     const halfB = pavedWidth(lanesB, twoWayB, kerbedB) / 2
-    branchAts.push({ at: atB, len: lenB, half: halfB, name: br.name ?? br.ref ?? 'branch', road: () => roadMesh(stations(atB, lenB, 6), () => lanesB, () => 'asphalt_aged', surfaceSets!, 0.02, () => twoWayB, paintOff, () => kerbedB) })
+    let bx0 = Infinity, bz0 = Infinity, bx1 = -Infinity, bz1 = -Infinity
+    for (const q of rawB) { if (q.x < bx0) bx0 = q.x; if (q.x > bx1) bx1 = q.x; if (q.z < bz0) bz0 = q.z; if (q.z > bz1) bz1 = q.z }
+    branchAts.push({ at: atB, len: lenB, half: halfB, name: br.name ?? br.ref ?? 'branch', bounds: [bx0, bz0, bx1, bz1], road: () => roadMesh(stations(atB, lenB, 6), () => lanesB, () => 'asphalt_aged', surfaceSets!, 0.02, () => twoWayB, paintOff, () => kerbedB) })
   }
+  mark('paving: branch curves')
   buildRoads()
+  mark('paving: primary road mesh')
 
   // --- trees, one per canopy cell, as tall as the lidar says ---------------------------------
   let trees: THREE.Group | undefined
@@ -1225,23 +1230,43 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
      * ground beyond the verge is the coarse terrain, which is what it should be that far from a
      * residential street anyway.
      */
-    const branchUnits: GradeUnit[] = branchAts.map((b, i) => {
-      // the branch's extent, from its curve: a centre and a radius the scheduler can measure
-      let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity
-      for (let s = 0; s <= b.len; s += 25) { const q = b.at(s).pos; if (q.x < x0) x0 = q.x; if (q.x > x1) x1 = q.x; if (q.z < z0) z0 = q.z; if (q.z > z1) z1 = q.z }
-      return { key: `branch:${i}`, x: (x0 + x1) / 2, z: (z0 + z1) / 2, r: Math.hypot(x1 - x0, z1 - z0) / 2 + T.BRANCH_VERGE + 20, done: false, run: () => {
-        // the asphalt and paint first, then the strip beneath them
-        const rm = b.road()
-        if (paintNow) repaintMarkings(rm, paintNow.centre, paintNow.edge)
-        road.add(rm)
-        roadParts.push(rm)
-        adoptStrip(buildStrip(b.at, b.len, T.BRANCH_VERGE, T.BRANCH_VERGE, edgeAt, heightAt, imagery, manifest.bbox, grassTex('grass_mown'), grassTex('grass_rough'), lite ? 4 : 3, lite ? 3 : 2, offsetFn, (s) => {
-          const q = b.at(s).pos
-          return edgeDistance(q.x, q.z, branchWho0 + i).d < T.BRANCH_VERGE
-        }))
-      } }
+    // A BRANCH LONGER THAN A CHUNK IS CHUNKED LIKE THE PRIMARY, so no unit is bigger than
+    // STREAM_CHUNK_M of road: the biggest branch on crownsville took 480 ms headless as one unit,
+    // and a unit is one synchronous hitch. The branch's asphalt and paint (one mesh for the whole
+    // road) are built by whichever of its chunks the eye reaches first.
+    const branchUnits: GradeUnit[] = []
+    const roadBuilt = new Uint8Array(branchAts.length)
+    const buildBranchRoad = (i: number) => {
+      if (roadBuilt[i]) return
+      roadBuilt[i] = 1
+      const rm = branchAts[i].road()
+      if (paintNow) repaintMarkings(rm, paintNow.centre, paintNow.edge)
+      road.add(rm)
+      roadParts.push(rm)
+    }
+    branchAts.forEach((b, i) => {
+      const skip = (s: number) => {
+        const q = b.at(s).pos
+        return edgeDistance(q.x, q.z, branchWho0 + i).d < T.BRANCH_VERGE
+      }
+      const nChunks = Math.max(1, Math.ceil(b.len / CHUNK))
+      for (let k = 0; k < nChunks; k++) {
+        const s0 = (k * b.len) / nChunks, s1 = ((k + 1) * b.len) / nChunks
+        let x0: number, z0: number, x1: number, z1: number
+        if (nChunks === 1) [x0, z0, x1, z1] = b.bounds
+        else {
+          // this chunk's own extent, sampled along its metres
+          x0 = Infinity; z0 = Infinity; x1 = -Infinity; z1 = -Infinity
+          for (let s = s0; s <= s1; s += 20) { const q = b.at(s).pos; if (q.x < x0) x0 = q.x; if (q.x > x1) x1 = q.x; if (q.z < z0) z0 = q.z; if (q.z > z1) z1 = q.z }
+        }
+        branchUnits.push({ key: `branch:${i}:${k}`, x: (x0 + x1) / 2, z: (z0 + z1) / 2, r: Math.hypot(x1 - x0, z1 - z0) / 2 + T.BRANCH_VERGE + 20, done: false, run: () => {
+          buildBranchRoad(i)
+          adoptStrip(buildStrip((s) => b.at(s0 + s), s1 - s0, T.BRANCH_VERGE, T.BRANCH_VERGE, edgeAt, heightAt, imagery, manifest.bbox, grassTex('grass_mown'), grassTex('grass_rough'), lite ? 4 : 3, lite ? 3 : 2, offsetFn, (s) => skip(s0 + s)))
+        } })
+      }
     })
     gradeUnits.push(...spineUnits, ...branchUnits)
+    mark('grade: units listed')
     // --- driveways -------------------------------------------------------------------------
     // Every house on Rich's court has one in OSM and we were dropping them, so the houses stood
     // in grass. Unmarked asphalt, 3.2 m, laid on the strip where the strip covers them and on the
@@ -1382,6 +1407,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
       gradeStats.strips = 0
       for (const u of spineUnits) u.done = false
       for (const u of branchUnits) u.done = false
+      roadBuilt.fill(0)
     }
     group.add(road)
     // everything that stands on the ground near the road stands on the strip
@@ -1795,7 +1821,9 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     const y = roadHeightWorld(x, z)
     return y === null ? null : y + 0.02
   }
+  mark('furniture: signs, masts, lots, barriers, walks, signals')
   const facts = await loadJunctionFacts(manifest.slug, `${DATA_BASE}/sites`)
+  mark('furniture: junction facts fetch')
   const stopbars = buildStopBars(manifest, roadSurfaceAt, edgeDistanceWorld, facts.lanes)
   // the rest of the junction's paint, from OSM's lane tags and crossing nodes: crosswalks and
   // lane-use arrows live under the stop-bar layer so one toggle covers the junction's paint
@@ -1809,7 +1837,9 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
   const blades = buildBlades(manifest, groundAtWorld, edgeDistanceWorld)
   group.add(blades.group)
   // authored bridges over the road (structures.json bridge_over)
+  mark('furniture: stop bars, crosswalks, arrows, blades')
   structures.add(await buildBridges(overrides, catalog, spineAt, groundAtWorld, (s) => pavedHalfAt(s) * 2))
+  mark('furniture: bridges')
 
   // terrain features (terrain-and-data agent): rock on the measured cut faces and outcrops, water in
   // the measured channels. Both stand on groundAt; the water's ripples tick with the near update.

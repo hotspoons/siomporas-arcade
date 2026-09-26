@@ -455,9 +455,24 @@ export function repaintMarkings(road: THREE.Object3D, centre: THREE.Color, edge:
 }
 
 /**
- * Trees from the canopy height model: walk the CHM on a coarse cell, and where the canopy is
- * taller than `minH` plant one tree of that height, jittered inside the cell. Two instanced
- * meshes (crowns, trunks). `budget` caps the count for the GPU at hand; the cell grows to fit.
+ * Trees from the canopy height model, at a FIXED density, around a centre.
+ *
+ * It used to walk the whole site and coarsen its cell — 6 m, 8 m, 10 m … up to 40 — until the
+ * whole site's tree count fitted one global budget. That makes density a function of SITE SIZE:
+ * measured on 2026-09-26, arrowhead-farms (0.68 km²) planted one tree per 6.1 m of canopy and
+ * crofton-crownsville (355 km²) one per 34.2 m — the same woods, 31× thinner, which is exactly
+ * what Rich saw ("trees still seem sparser in the crownsville and Crofton worlds than the
+ * arrowhead farms world where I live").
+ *
+ * So the cell is fixed (`cellM`) and the budget is spent AROUND THE EYE instead: candidates
+ * inside `radius` of the plant centre, nearest first, up to `budget`. A site ten times larger
+ * now looks the same from the driver's seat; what it loses is trees beyond the radius, where the
+ * imagery and the horizon drape already carry the woods.
+ *
+ * The lattice is WORLD-ALIGNED and every jitter is a hash of the cell indices, so a replant puts
+ * every tree back exactly where it was; only the set near the eye changes. `plant` may be called
+ * again with a new centre (the meshes and the record array are allocated once, at `budget`, and
+ * the array is MUTATED IN PLACE so NearTrees' reference stays live).
  */
 export function treesFromCanopy(
   chm: Float32Array,
@@ -469,45 +484,83 @@ export function treesFromCanopy(
   minH = 3,
   exclude: (x: number, y: number) => boolean = () => false,
   speciesAt?: (x: number, y: number) => string | null,
-): { crowns: THREE.InstancedMesh; trunks: THREE.InstancedMesh; count: number; records: TreeRecord[]; refresh: (skip: Set<number>) => void } {
+  opts: {
+    /** canopy height at site (x, y); the default reads the raster passed in. A tiled site should
+     * pass its TileSet's sampler: the tiles are 2 m where this overview is 8 m. */
+    canopyAt?: (x: number, y: number) => number
+    /** metres between candidate trees */
+    cellM?: number
+    /** plant no further than this from the centre */
+    radius?: number
+    /** site (x, y) to plant around */
+    centre?: [number, number]
+  } = {},
+): { crowns: THREE.InstancedMesh; trunks: THREE.InstancedMesh; count: number; records: TreeRecord[]; refresh: (skip: Set<number>) => void; plant: (cx: number, cy: number) => number; stats: () => { count: number; cellM: number; radius: number; centre: [number, number]; capped: boolean } } {
   const [w, h] = size
   const [xmin, , , ymax] = bbox
-  // count candidate cells at the finest useful cell (6 m), then coarsen until under budget
-  let cellM = 6
-  let count = 0
-  let stride = Math.max(1, Math.round(cellM / res))
-  for (;;) {
-    count = 0
-    for (let r = 0; r < h; r += stride) for (let c = 0; c < w; c += stride) if (chm[r * w + c] >= minH) count++
-    if (count <= budget || cellM >= 40) break
-    cellM += 2
-    stride = Math.max(1, Math.round(cellM / res))
-  }
+  const cellM = Math.max(1, opts.cellM ?? 6)
+  const radius = opts.radius && opts.radius > 0 ? opts.radius : Infinity
+  const capacity = Math.max(1, Math.round(budget))
+  const sample =
+    opts.canopyAt ??
+    ((x: number, y: number) => {
+      const c = Math.min(w - 1, Math.max(0, Math.floor((x - xmin) / res)))
+      const r = Math.min(h - 1, Math.max(0, Math.floor((ymax - y) / res)))
+      return chm[r * w + c]
+    })
   const crownGeo = new THREE.IcosahedronGeometry(1, 1)
   const trunkGeo = new THREE.CylinderGeometry(0.12, 0.22, 1, 5)
   trunkGeo.translate(0, 0.5, 0) // base at origin
-  const crowns = new THREE.InstancedMesh(crownGeo, new THREE.MeshStandardMaterial({ roughness: 0.9, flatShading: true }), Math.max(1, count))
-  const trunks = new THREE.InstancedMesh(trunkGeo, new THREE.MeshStandardMaterial({ color: 0x4a3a2a, roughness: 1 }), Math.max(1, count))
+  const crowns = new THREE.InstancedMesh(crownGeo, new THREE.MeshStandardMaterial({ roughness: 0.9, flatShading: true }), capacity)
+  const trunks = new THREE.InstancedMesh(trunkGeo, new THREE.MeshStandardMaterial({ color: 0x4a3a2a, roughness: 1 }), capacity)
   const m = new THREE.Matrix4()
   const q = new THREE.Quaternion()
   const col = new THREE.Color()
-  let rnd = 1234567
-  const rand = () => ((rnd = (rnd * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff)
+  /** deterministic in the cell indices and a salt: the same cell always grows the same tree */
+  const hash = (i: number, j: number, salt: number) => {
+    let n = (i * 73856093) ^ (j * 19349663) ^ (salt * 83492791)
+    n = (n ^ (n >>> 13)) >>> 0
+    n = (Math.imul(n, 1274126177) ^ (n >>> 16)) >>> 0
+    return n / 4294967296
+  }
   // the tree list: measured position and height, kept so the near-field LOD can pick from it
   const records: (TreeRecord & { rad: number; hue: number })[] = []
-  for (let r = 0; r < h && records.length < count; r += stride) {
-    for (let c = 0; c < w && records.length < count; c += stride) {
-      const hgt = chm[r * w + c]
-      if (hgt < minH) continue
+  let centre: [number, number] = opts.centre ?? [(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2]
+  let capped = false
+  const plant = (cx: number, cy: number): number => {
+    centre = [cx, cy]
+    const r = Number.isFinite(radius) ? radius : Math.max(bbox[2] - bbox[0], bbox[3] - bbox[1])
+    const i0 = Math.floor((cx - r) / cellM), i1 = Math.ceil((cx + r) / cellM)
+    const j0 = Math.floor((cy - r) / cellM), j1 = Math.ceil((cy + r) / cellM)
+    const cand: { x: number; y: number; hgt: number; d2: number; i: number; j: number }[] = []
+    const r2 = r * r
+    for (let j = j0; j <= j1; j++) {
+      for (let i = i0; i <= i1; i++) {
+        const x0 = (i + 0.5) * cellM, y0 = (j + 0.5) * cellM
+        const dx = x0 - cx, dy = y0 - cy
+        const d2 = dx * dx + dy * dy
+        if (d2 > r2) continue
+        if (x0 < bbox[0] || x0 > bbox[2] || y0 < bbox[1] || y0 > bbox[3]) continue
+        const hgt = sample(x0, y0)
+        if (!(hgt >= minH)) continue
+        cand.push({ x: x0, y: y0, hgt, d2, i, j })
+      }
+    }
+    capped = cand.length > capacity
+    if (capped) cand.sort((a, b) => a.d2 - b.d2)
+    records.length = 0
+    for (let k = 0; k < cand.length && records.length < capacity; k++) {
+      const c = cand[k]
       const jitter = cellM * 0.45
-      const x = xmin + (c + 0.5) * res + (rand() - 0.5) * 2 * jitter
-      const y = ymax - (r + 0.5) * res + (rand() - 0.5) * 2 * jitter
-      const H = hgt * (0.9 + rand() * 0.2)
-      const rad = Math.min(7, Math.max(1.2, H * 0.28 * (0.8 + rand() * 0.4)))
+      const x = c.x + (hash(c.i, c.j, 1) - 0.5) * 2 * jitter
+      const y = c.y + (hash(c.i, c.j, 2) - 0.5) * 2 * jitter
+      const H = c.hgt * (0.9 + hash(c.i, c.j, 3) * 0.2)
+      const rad = Math.min(7, Math.max(1.2, H * 0.28 * (0.8 + hash(c.i, c.j, 4) * 0.4)))
       if (exclude(x, y)) continue
       const sp = speciesAt?.(x, y) ?? undefined
-      records.push({ x, z: -y, y: groundAt(x, y), h: H, rad, hue: 0.27 + (rand() - 0.5) * 0.05, species: sp as TreeRecord['species'] })
+      records.push({ x, z: -y, y: groundAt(x, y), h: H, rad, hue: 0.27 + (hash(c.i, c.j, 5) - 0.5) * 0.05, species: sp as TreeRecord['species'] })
     }
+    return records.length
   }
   const refresh = (skip: Set<number>) => {
     let k = 0
@@ -530,10 +583,11 @@ export function treesFromCanopy(
     trunks.instanceMatrix.needsUpdate = true
     if (crowns.instanceColor) crowns.instanceColor.needsUpdate = true
   }
+  plant(centre[0], centre[1])
   refresh(new Set())
   crowns.name = 'trees'
   trunks.name = 'trunks'
-  return { crowns, trunks, count: records.length, records, refresh }
+  return { crowns, trunks, count: records.length, records, refresh, plant, stats: () => ({ count: records.length, cellM, radius: Number.isFinite(radius) ? radius : 0, centre, capped }) }
 }
 
 /** An overpass stand-in: a deck slab over our road on two piers down to the measured ground. */

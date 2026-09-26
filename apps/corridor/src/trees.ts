@@ -206,6 +206,19 @@ export class NearTrees {
     return this
   }
 
+  /**
+   * The record array was replanted in place (props.treesFromCanopy's `plant`): rebuild the grid
+   * and the memoised variant choice. The array OBJECT is the same one this was constructed with —
+   * it is mutated, never replaced, so nothing else has to be rewired.
+   */
+  reindex() {
+    this.grid.clear()
+    if (this.chosen.length < this.trees.length) this.chosen = new Int16Array(this.trees.length)
+    this.chosen.fill(-1)
+    this.last.set(Infinity, Infinity, Infinity)
+    this.indexTrees(this.trees)
+  }
+
   private indexTrees(trees: TreeRecord[]) {
     trees.forEach((t, i) => {
       const k = `${Math.floor(t.x / this.cell)},${Math.floor(t.z / this.cell)}`

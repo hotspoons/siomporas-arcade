@@ -80,6 +80,8 @@ export interface Site {
   treePalette: () => { id: string; after: string; leaf: string; evergreen: boolean }[]
   /** every measured tree's silhouette, counted — the whole species assignment as a histogram */
   treeSpecies: (legacy?: boolean) => Record<string, number>
+  /** how the trees were planted and replanted: cell, radius, centre, count, and whether the budget capped it */
+  treePlanting: () => { count: number; cellM: number; radius: number; centre: [number, number]; capped: boolean; replants: number; lastMs: number }
   /** crop rows built per field, by crop type (probes read this) */
   cropRows: Record<string, number>
   /** what is falling and what has settled */
@@ -400,10 +402,14 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     pyrSet = new PyramidSet(L.pyramid.zmin, L.pyramid.zmax, overviewHeight)
   }
 
+  /** the 8 m overview canopy; the tiles' 2 m CHM is preferred wherever a tile is resident */
+  let overviewCanopy: (x: number, y: number) => number = () => 0
   let tileSet: TileSet | null = null
   if (L.tiles && anchor && !pyrSet) {
     status('decoding terrain tiles…')
-    tileSet = new TileSet(L.tiles.size_m, overviewHeight, null)
+    // the tiles carry a 2 m CHM; the 8 m overview is only the fallback outside them (the closure
+    // reads `overviewCanopy`, which the canopy decode sets further down)
+    tileSet = new TileSet(L.tiles.size_m, overviewHeight, (x, y) => overviewCanopy(x, y))
     // Budgeted: four hundred packs decoded in one call stack is the same freeze the branch
     // builder had, and the budget already knows not to wait on a frame that a hidden tab will
     // never deliver.
@@ -624,6 +630,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
       }
       if (touched) console.info(`adjustments: canopy changed in ${touched} cells`)
     }
+    overviewCanopy = sampler(chm)
     // The blanket is a DIAGNOSTIC layer, off unless someone ticks the box — and building it was
     // 72 MB of geometry and 1 057 160 vertices that almost every session throws away unseen. So it
     // is a closure now, run on the first tick. The CHM itself stays: `canopyAt`, the tree planter
@@ -1054,6 +1061,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
   // this site built and which one every one of its tens of thousands of trees drew
   let nearRef: NearTrees | null = null
   let treeRecords: TreeRecord[] = []
+  let treePlantingRef: () => { count: number; cellM: number; radius: number; centre: [number, number]; capped: boolean; replants: number; lastMs: number } = () => ({ count: 0, cellM: 0, radius: 0, centre: [0, 0], capped: false, replants: 0, lastMs: 0 })
   let crops: ReturnType<typeof buildCrops> | null = null
   let precip: Precipitation | null = null
   let canopyAtRef: (x: number, y: number) => number = () => 0
@@ -1519,23 +1527,37 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     roadHeightWorld = (x, z) => { const e = edgeDistance(x, z); return e.d <= T.STOPBAR_MAX_FROM_ROAD ? e.y : null }
     status('planting…')
     const treeAdj = { ...NEUTRAL_ADJ }
-    const t = treesFromCanopy(chm.data, chm.layer.size, chm.layer.bbox, chm.layer.res, heightAt, lite ? 25_000 : 120_000, 3, (x, y) => {
+    // 2 m from the tiles where they are resident, the 8 m overview beyond
+    const canopyOf = tileSet ? tileSet.canopyAt : pyrSet ? pyrSet.canopyAt : (x: number, y: number) => overviewCanopy(x, y)
+    // where the visit starts: the spine's photo station, which is where toPhoto() puts the camera
+    const photo0 = spineAt(Math.min(curveLen, Math.max(0, manifest.spine.photo_s ?? curveLen / 2))).pos
+    const treeBudget = lite ? 25_000 : 120_000
+    const t = treesFromCanopy(chm.data, chm.layer.size, chm.layer.bbox, chm.layer.res, heightAt, treeBudget, 3, (x, y) => {
       if (roadDistance(x, -y) < 3) return true
       if (!adjustments.active) return false
       const a = adjustments.at(x, y, treeAdj)
       // thin (or thicken, up to the canopy cells available) by a stable hash of position
       return a.tree_density < 1 && hash2(x, y) > a.tree_density
-    }, adjustments.active ? (x, y) => adjustments.at(x, y, treeAdj).species : undefined)
+    }, adjustments.active ? (x, y) => adjustments.at(x, y, treeAdj).species : undefined, {
+      canopyAt: (x, y) => canopyOf(x, y),
+      cellM: T.TREE_CELL_M,
+      radius: T.TREE_PLANT_RADIUS_M,
+      centre: [photo0.x, -photo0.z],
+    })
     // a coarse grid of the trees for collision queries: cell 16 m, trunk radius from height
     const tgCell = 16
     const treeGrid = new Map<string, [number, number, number][]>()
-    for (const r of t.records) {
-      const k = `${Math.floor(r.x / tgCell)},${Math.floor(r.z / tgCell)}`
-      const arr = treeGrid.get(k)
-      const rec: [number, number, number] = [r.x, r.z, Math.max(0.25, r.h * 0.025)]
-      if (arr) arr.push(rec)
-      else treeGrid.set(k, [rec])
+    const indexTreeGrid = () => {
+      treeGrid.clear()
+      for (const r of t.records) {
+        const k = `${Math.floor(r.x / tgCell)},${Math.floor(r.z / tgCell)}`
+        const arr = treeGrid.get(k)
+        const rec: [number, number, number] = [r.x, r.z, Math.max(0.25, r.h * 0.025)]
+        if (arr) arr.push(rec)
+        else treeGrid.set(k, [rec])
+      }
     }
+    indexTreeGrid()
     treesNearWorld = (x, z, rad) => {
       const out: [number, number, number][] = []
       const cx = Math.floor(x / tgCell), cz = Math.floor(z / tgCell)
@@ -1555,9 +1577,11 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     const near = await new NearTrees(t.records, lite ? 140 : 240, lite ? 60 : 300, flora).grow() // capacity here is the allocation ceiling; the live cap is the knob
     nearRef = near
     treeRecords = t.records
+    treePlantingRef = () => ({ ...t.stats(), replants: replantStats.replants, lastMs: replantStats.lastMs })
     trees.add(near.group)
     // grass on the verge: open ground (no canopy), off the pavement, mown near the shoulder
-    const canopyAt = sampler(chm)
+    // the same sampler the trees were planted from: grass rejection and the strip's forest floor
+    const canopyAt = canopyOf
     canopyAtRef = canopyAt
     const grassAdj = { ...NEUTRAL_ADJ }
     // kept or rural (zoning.ts): the landuse polygon the point is in, else the nearest road's class
@@ -1640,22 +1664,57 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     const bakedGrassType = cover.grass
     grass.setType(bakedGrassType, GROUND_COVER[cover.open].blades)
     let imp: Impostors | null = null
+    let reseat = () => {}
     let refreshFar = (_skip: Set<number>, _eye?: THREE.Vector3, _fwd?: THREE.Vector3, _pitch?: number) => {}
+    /**
+     * The budget is spent around the eye, so driving out of it has to replant. The lattice is
+     * world-aligned and every jitter is a hash of the cell, so the trees that were already there
+     * stay exactly where they were; what changes is which cells are in the set. Everything that
+     * indexes the records — the near set's grid, the collision grid, the impostor slots — is
+     * rebuilt from the same array, which is mutated in place.
+     */
+    const replantStats = { replants: 0, lastMs: 0, count: 0, centre: [0, 0] as [number, number] }
+    const replantTrees = (eye: THREE.Vector3, fwd?: THREE.Vector3, pitch = 0) => {
+      const t0 = performance.now()
+      treeCount = t.plant(eye.x, -eye.z)
+      indexTreeGrid()
+      near.reindex()
+      reseat()
+      near.update(eye, true, fwd, pitch)
+      // the coarse lollipops are only in the scene when there is no renderer (no impostors);
+      // writing 120k instance matrices for a mesh nobody draws is the replant's whole cost
+      if (t.crowns.parent) t.refresh(near.near)
+      refreshFar(near.near, eye, fwd, pitch)
+      replantStats.replants++
+      replantStats.lastMs = Math.round(performance.now() - t0)
+      replantStats.count = treeCount
+      replantStats.centre = [+eye.x.toFixed(0), +(-eye.z).toFixed(0)]
+    }
+    const replantIfMoved = (eye: THREE.Vector3, fwd?: THREE.Vector3, pitch = 0) => {
+      if (!(T.TREE_REPLANT_M > 0) || !(T.TREE_PLANT_RADIUS_M > 0)) return
+      const c = t.stats().centre
+      if (Math.hypot(eye.x - c[0], -eye.z - c[1]) < T.TREE_REPLANT_M) return
+      replantTrees(eye, fwd, pitch)
+    }
     if (renderer) {
       // far field: the SAME models as impostors, one quad a tree, re-assigned as the eye moves
       status('baking impostors…')
       near.setSeason(look(currentSeason))
-      imp = new Impostors(renderer, near.sources(), t.records.length, fog)
+      imp = new Impostors(renderer, near.sources(), treeBudget, fog)
       trees.add(imp.mesh)
       const m = new THREE.Matrix4()
       // every tree gets its impostor slot ONCE (slot = tree index); the near set only toggles
-      const sizes = new Float32Array(t.records.length)
-      t.records.forEach((r, i) => {
-        const v = near.variantFor(r, i)
-        sizes[i] = r.h * imp!.extents[v]
-        imp!.set(i, r.x, r.y, r.z, r.h, v, ((i * 137) % 360) * (Math.PI / 180), m)
-      })
-      imp.commit(t.records.length)
+      const sizes = new Float32Array(treeBudget)
+      const seatImpostors = () => {
+        t.records.forEach((r, i) => {
+          const v = near.variantFor(r, i)
+          sizes[i] = r.h * imp!.extents[v]
+          imp!.set(i, r.x, r.y, r.z, r.h, v, ((i * 137) % 360) * (Math.PI / 180), m)
+        })
+        imp!.commit(t.records.length)
+      }
+      seatImpostors()
+      reseat = seatImpostors
       // `shown` holds the indices whose card is currently HIDDEN (the name is the original's).
       let shown = new Set<number>()
       let faded = new Set<number>()
@@ -1697,6 +1756,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
         faded = new Set(keep.keys())
       }
       updateNear = (eye: THREE.Vector3, time: number, fwd?: THREE.Vector3, pitch = 0) => {
+        replantIfMoved(eye, fwd, pitch)
         if (near.update(eye, false, fwd, pitch)) refreshFar(near.near, eye, fwd, pitch)
         grass.update(eye, fwd, pitch)
         grass.tick(time)
@@ -1708,6 +1768,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
       // no renderer (tests): lollipops for everything
       trees.add(t.crowns, t.trunks)
       updateNear = (eye: THREE.Vector3, time: number, fwd?: THREE.Vector3, pitch = 0) => {
+        replantIfMoved(eye, fwd, pitch)
         if (near.update(eye, false, fwd, pitch)) t.refresh(near.near)
         grass.update(eye, fwd, pitch)
         grass.tick(time)
@@ -1997,6 +2058,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     buildingStats: built.stats,
     adjustments,
     treeCount,
+    treePlanting: () => ({ ...treePlantingRef() }),
     grass: grassRef,
     buildProfile: (mark('done'), buildProfile),
     furnitureCounts: furniture.counts,

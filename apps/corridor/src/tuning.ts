@@ -252,6 +252,12 @@ export let WATER_OPACITY = 0.82
 export let STREAM_BUILD_M = 1500
 export let STREAM_BUDGET_MS = 6
 export let STREAM_CHUNK_M = 250
+// trees (props.treesFromCanopy): a FIXED cell so density does not depend on how big the site is,
+// the budget spent within TREE_PLANT_RADIUS_M of the eye, replanted when the eye leaves that
+// centre by TREE_REPLANT_M
+export let TREE_CELL_M = 6
+export let TREE_PLANT_RADIUS_M = 1400
+export let TREE_REPLANT_M = 350
 // grass grows only where the tile photo reads as vegetation (vegmask.ts): how far around the eye
 // the tile photos are classified, and the excess-green threshold (2G - R - B on 0..1 channels)
 export let VEG_RADIUS_M = 700

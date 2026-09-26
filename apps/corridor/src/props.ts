@@ -392,8 +392,33 @@ export function roadMesh(st: Station[], lanesAt: (s: number) => number, classAt:
   mg.setIndex(midx)
   const marksMesh = new THREE.Mesh(mg, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide }))
   marksMesh.name = 'road:markings' // probes read the paint off this geometry (probes/corridor-geometry.mjs)
+  // the paint as laid, so a style can repaint it and the realistic style can put it back
+  marksMesh.userData.paintAsLaid = Float32Array.from(mcol)
   g.add(marksMesh)
   return g
+}
+
+/**
+ * Repaint every marking in a road group: a vertex that was laid yellow (the centre line) takes
+ * `centre`, one laid white takes `edge`. Yellow is told from white by the blue channel, which is
+ * what separates the two paints in the colours `roadMesh` lays.
+ */
+export function repaintMarkings(road: THREE.Object3D, centre: THREE.Color, edge: THREE.Color) {
+  road.traverse((o) => {
+    const m = o as THREE.Mesh
+    const laid = m.userData?.paintAsLaid as Float32Array | undefined
+    if (!laid || !m.geometry) return
+    const attr = m.geometry.getAttribute('color') as THREE.BufferAttribute
+    const arr = attr.array as Float32Array
+    for (let i = 0; i < laid.length; i += 3) {
+      const yellow = laid[i + 2] < 0.6 && laid[i] > 0.6
+      const cc = yellow ? centre : edge
+      arr[i] = cc.r
+      arr[i + 1] = cc.g
+      arr[i + 2] = cc.b
+    }
+    attr.needsUpdate = true
+  })
 }
 
 /**

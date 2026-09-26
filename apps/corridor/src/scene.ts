@@ -27,7 +27,8 @@ import { buildBarriers, buildFurniture, buildSidewalks, sidewalkCover } from './
 import { buildBlades, buildSignals, buildStopBars } from './intersections'
 import { buildParking, parkingCover } from './parking'
 import { buildBridges, flattenSpine, loadStructureOverrides, suppressed } from './structures'
-import { loadSurfaceSets, overpassMesh, pavedOffset, pavedWidth, roadMesh, stations, taperedLanes, treesFromCanopy, type SurfaceSet } from './props'
+import { loadSurfaceSets, overpassMesh, pavedOffset, pavedWidth, repaintMarkings, roadMesh, stations, taperedLanes, treesFromCanopy, type SurfaceSet } from './props'
+import { STYLE, styled, type Style } from './style'
 import { buildRocks } from './rocks'
 import { buildWater } from './water'
 
@@ -85,6 +86,8 @@ export interface Site {
   retune: () => void
   /** recolour everything living */
   setSeason: (season: Season) => void
+  /** the palette: realistic is the bake as measured; anything else is a place that is not this one */
+  setStyle: (style: Style) => void
   /** world-frame ground height under x,z: the fine strip near the road, the DEM beyond */
   groundAt: (x: number, z: number) => number | null
   /** signed distance to the nearest pavement edge (negative on the pavement) */
@@ -322,7 +325,7 @@ const hypso = (z: number): [number, number, number] => {
 }
 
 
-export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => void, lite = false, renderer?: THREE.WebGLRenderer, fog: THREE.FogExp2 | null = null, initialSeason: Season = 'summer'): Promise<Site> {
+export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => void, lite = false, renderer?: THREE.WebGLRenderer, fog: THREE.FogExp2 | null = null, initialSeason: Season = 'summer', initialStyle: Style = 'realistic'): Promise<Site> {
   let manifest = manifestIn
   const base = `/sites/${manifest.slug}/web/`
   const group = new THREE.Group()
@@ -361,7 +364,9 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
   // falls back to what it did then.
   const flora: Flora | null = await loadFlora(manifest).catch(() => null)
   const cover = siteCover(manifest, flora)
-  const look = (s: Season) => siteLook(s, flora)
+  let currentStyle: Style = initialStyle
+  // the site's own palette for the season, then the style over it — see style.ts
+  const look = (s: Season) => styled(siteLook(s, flora), currentStyle)
   const overrides = await loadStructureOverrides(manifest.slug)
   // authored `flatten` intervals rewrite the spine's grade before anything is built from it
   if (overrides.length) manifest = { ...manifest, spine: { ...manifest.spine, coords: flattenSpine(manifest.spine.coords, overrides) }, structures: suppressed(manifest.structures, overrides) }
@@ -449,20 +454,24 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
   const bare = new THREE.Color(0x6f6a5a)
   // the coarse terrain takes the settled layer as well, or snow stops at the strip's rim
   const terrainWeather = accumUniforms()
+  /** one object shared by every terrain material: a style's hold on the photo (0 as shot, 1 grey) */
+  const terrainDesat = { value: STYLE[initialStyle].desaturate }
   /** Every terrain surface — the overview and each tile — is the same material with its own map. */
   const terrainMaterial = (map: THREE.Texture | null) => {
     const m = new THREE.MeshStandardMaterial({ map, color: map ? 0xffffff : bare, roughness: 1, metalness: 0 })
     m.onBeforeCompile = (shader) => {
       Object.assign(shader.uniforms, terrainWeather)
       shader.uniforms.uBare = { value: bare }
+      shader.uniforms.uDesat = terrainDesat
       shader.vertexShader = shader.vertexShader
         .replace('#include <common>', '#include <common>\nvarying vec3 vWWorld;\nvarying vec3 vWNormal;')
         .replace('#include <begin_vertex>', '#include <begin_vertex>\nvWWorld = (modelMatrix * vec4(position, 1.0)).xyz;\nvWNormal = normalize(mat3(modelMatrix) * objectNormal);')
       shader.fragmentShader = shader.fragmentShader
-        .replace('#include <map_pars_fragment>', `#include <map_pars_fragment>\nvarying vec3 vWWorld;\nvarying vec3 vWNormal;\nuniform vec3 uBare;\n${ACCUM_PARS}`)
+        .replace('#include <map_pars_fragment>', `#include <map_pars_fragment>\nvarying vec3 vWWorld;\nvarying vec3 vWNormal;\nuniform vec3 uBare;\nuniform float uDesat;\n${ACCUM_PARS}`)
         // a placeholder tile past the overview's edge carries the (-1, -1) uv sentinel: bare ground
-        // there, not the overview's last row stretched across the rim
-        .replace('#include <map_fragment>', '#include <map_fragment>\n#ifdef USE_MAP\nif (vMapUv.x < -0.01) diffuseColor.rgb = uBare;\n#endif\ndiffuseColor.rgb = applyWeather(diffuseColor.rgb, normalize(vWNormal), vWWorld);')
+        // there, not the overview's last row stretched across the rim; then the style's
+        // desaturation of the photo (the material colour, the ground tint, multiplies after)
+        .replace('#include <map_fragment>', '#include <map_fragment>\n#ifdef USE_MAP\nif (vMapUv.x < -0.01) diffuseColor.rgb = uBare;\ndiffuseColor.rgb = mix(diffuseColor.rgb, vec3(dot(diffuseColor.rgb, vec3(0.3, 0.5, 0.2))), uDesat);\n#endif\ndiffuseColor.rgb = applyWeather(diffuseColor.rgb, normalize(vWNormal), vWWorld);')
     }
     m.customProgramCacheKey = () => 'corridor-terrain'
     return m
@@ -1460,6 +1469,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
       for (const st of [strip, ...branchStrips]) {
         st.setTint(lk.grass.base.clone().multiplyScalar(2.0).lerp(new THREE.Color(0xffffff), 0.4), imagery ? lk.ground : bare)
         st.setLitter(lk.litter.tint, lk.litter.spread)
+        st.setImageryDesat(STYLE[currentStyle].desaturate)
       }
       for (const m of terrainMats) m.color.copy(m.map ? lk.ground : bare)
       if (horizon && (horizon.material as THREE.MeshStandardMaterial).map) (horizon.material as THREE.MeshStandardMaterial).color.copy(lk.ground)
@@ -1620,6 +1630,21 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
   const rocks = await buildRocks(manifest.cuts, manifest.rock, catalog, groundAtWorld, edgeDistanceWorld)
   group.add(rocks.group)
   const water = buildWater(manifest.water, groundAtWorld)
+  /**
+   * A style is the season re-applied (trees, grass, strips, terrain, horizon and impostors all
+   * read the styled look), plus the four things a season never touched: the photo's
+   * desaturation, the building palettes, the water, and the road paint.
+   */
+  const setStyle = (style: Style) => {
+    currentStyle = style
+    const def = STYLE[style]
+    setSeason(currentSeason)
+    terrainDesat.value = def.desaturate
+    built.recolour(def.walls, def.roofs)
+    water.setColours(def.water.stream, def.water.still, def.water.sea, def.water.opacityBias)
+    repaintMarkings(road, def.paint.centre, def.paint.edge)
+  }
+  if (initialStyle !== 'realistic') setStyle(initialStyle)
   group.add(water.group)
   {
     const inner = updateNear
@@ -1650,6 +1675,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     bladeCounts: blades.counts,
     rockCounts: rocks.counts,
     waterStats: { lines: water.lines, areas: water.areas, falls: water.falls, length_m: water.length_m },
+    setStyle,
     canopyAt: canopyAtRef,
     // what grows here, for probes and the console
     flora,

@@ -162,6 +162,8 @@ export interface WaterResult {
   falls: number
   /** metres of channel drawn */
   length_m: number
+  /** a style's water: stream, still, and the sea plane */
+  setColours: (stream: THREE.Color, still: THREE.Color, sea: THREE.Color, opacityBias?: number) => void
 }
 
 /**
@@ -181,10 +183,19 @@ export function buildWater(water: WaterLayer | null | undefined, groundAt: (x: n
     sea.scale.set(T.WATER_LEVEL_SPAN * 2, 1, T.WATER_LEVEL_SPAN * 2)
   }
   placeSea()
-  const empty: WaterResult = { group, tick: (t: number) => { uniforms.uTime.value = t * T.WATER_SPEED; placeSea() }, lines: 0, areas: 0, falls: 0, length_m: 0 }
+  const seaMat = sea.material as THREE.MeshStandardMaterial
+  const setColours = (streamC: THREE.Color, stillC: THREE.Color, seaC: THREE.Color, opacityBias = 0) => {
+    seaMat.color.copy(seaC)
+    seaMat.opacity = Math.min(0.98, T.WATER_OPACITY + 0.08 + opacityBias)
+    if (stream) { stream.color.copy(streamC); stream.opacity = Math.min(0.98, T.WATER_OPACITY + opacityBias) }
+    if (still) { still.color.copy(stillC); still.opacity = Math.min(1, T.WATER_OPACITY + 0.05 + opacityBias) }
+  }
+  let stream: THREE.MeshStandardMaterial | null = null
+  let still: THREE.MeshStandardMaterial | null = null
+  const empty: WaterResult = { group, tick: (t: number) => { uniforms.uTime.value = t * T.WATER_SPEED; placeSea() }, lines: 0, areas: 0, falls: 0, length_m: 0, setColours }
   if (!water || (!water.lines?.length && !water.areas?.length)) return empty
-  const stream = waterMaterial(uniforms, 0x3d6b73, T.WATER_OPACITY, 0.28)
-  const still = waterMaterial(uniforms, 0x46707a, Math.min(1, T.WATER_OPACITY + 0.05), 0.2)
+  stream = waterMaterial(uniforms, 0x3d6b73, T.WATER_OPACITY, 0.28)
+  still = waterMaterial(uniforms, 0x46707a, Math.min(1, T.WATER_OPACITY + 0.05), 0.2)
   const foam = foamMaterial(uniforms)
   let nLines = 0, nFalls = 0, length = 0
 
@@ -248,5 +259,5 @@ export function buildWater(water: WaterLayer | null | undefined, groundAt: (x: n
   add(areaGeo, still, 'water:areas')
   add(foamGeo, foam, 'water:foam')
 
-  return { group, tick: (t) => { uniforms.uTime.value = t * T.WATER_SPEED; placeSea() }, lines: nLines, areas: water.areas?.length ?? 0, falls: nFalls, length_m: Math.round(length) }
+  return { group, tick: (t) => { uniforms.uTime.value = t * T.WATER_SPEED; placeSea() }, lines: nLines, areas: water.areas?.length ?? 0, falls: nFalls, length_m: Math.round(length), setColours }
 }

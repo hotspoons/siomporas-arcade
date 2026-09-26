@@ -54,6 +54,7 @@ export function buildStrip(
   /** the strip's own extent in world metres, [minX, minZ, maxX, maxZ] — sinkUnderStrip's fast path */
   bounds: [number, number, number, number]
   setLitter: (tint: THREE.Color, spread: number) => void
+  setImageryDesat: (v: number) => void
   weatherUniforms: Record<string, THREE.IUniform>
   setTint: (c: THREE.Color, ground: THREE.Color) => void
 } {
@@ -146,6 +147,8 @@ export function buildStrip(
     litterSpread: { value: 0.2 },
     ...accumUniforms(),
     grassTint: { value: new THREE.Color(0xffffff) },
+    /** a style's hold on the photo: 0 as shot, 1 greyscale under the ground tint */
+    imageryDesat: { value: 0 },
   }
   mat.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms)
@@ -161,6 +164,7 @@ export function buildStrip(
         uniform int hasForest;
         uniform vec3 litterTint;
         uniform float litterSpread;
+        uniform float imageryDesat;
         uniform vec3 grassTint;
         varying float vEdge;
         varying float vCanopy;
@@ -188,11 +192,16 @@ export function buildStrip(
         `
         #ifdef USE_MAP
           vec4 img = texture2D(map, vMapUv);
+          img.rgb = mix(img.rgb, vec3(dot(img.rgb, vec3(0.3, 0.5, 0.2))), imageryDesat);
           vec4 ground = img;
           if (hasGrass == 1) {
             vec3 n = normalize(vWorldN);
             vec3 mown = triplanar(grassMown, vWorldXZ, n, 0.5, vec2(0.0));
             vec3 rough = triplanar(grassRough, vWorldXZ, n, 0.485, vec2(0.13, 0.41));
+            // a style that greys the photo greys the turf too, or a lilac tint over a green
+            // texture is mud; greyscale turf under the tint IS lilac turf
+            mown = mix(mown, vec3(dot(mown, vec3(0.3, 0.5, 0.2))), imageryDesat);
+            rough = mix(rough, vec3(dot(rough, vec3(0.3, 0.5, 0.2))), imageryDesat);
             // the mow line ~8 m out, rough grass to ~22 m, then the air photo takes over; the
             // imagery's own brightness is kept as a large-scale modulation so fields and woods
             // still read through the grass tiles
@@ -337,6 +346,8 @@ export function buildStrip(
       uniforms.litterTint.value.copy(tint)
       uniforms.litterSpread.value = spread
     },
+    /** how much of the photo a style leaves: 0 realistic, toward 1 for a palette that is not this place */
+    setImageryDesat: (v: number) => { uniforms.imageryDesat.value = v },
     /** hand these to Precipitation.follow so the settled layer and the wet look drive them */
     weatherUniforms: uniforms as unknown as Record<string, THREE.IUniform>,
   }

@@ -13,6 +13,7 @@ import { applySiteTuning, saveSiteTuning } from './sitetuning'
 
 import { fetchJSON, type IndexEntry, type Manifest, type Structure, type Crossing } from './site'
 import { LOOK, SEASONS, type Season } from './season'
+import { STYLE, styled, isStyle, type Style } from './style'
 import { WEATHER, WEATHERS, type Weather } from './weather'
 import { ViewerUI, restoreTheme } from './ui/viewer'
 import { TuneUI } from './ui/tune'
@@ -58,6 +59,7 @@ const ui = new ViewerUI({
     void loadSite(slug)
   },
   onSeason: (s) => setSeason(s),
+  onStyle: (s) => setStyle(s),
   onWeather: (w) => setWeatherSelection(w),
   onLayers: () => applyLayers(),
   onDrive: () => setDrive(!drive.on),
@@ -113,7 +115,7 @@ async function loadSite(slug: string) {
   minimap = null
   status(`loading ${slug}…`)
   const manifest = await fetchJSON<Manifest>(`/sites/${slug}/web/manifest.json`)
-  site = await buildSite(manifest, status, LITE, renderer, scene.fog as THREE.FogExp2, season)
+  site = await buildSite(manifest, status, LITE, renderer, scene.fog as THREE.FogExp2, season, style)
   applySky(season)
   scene.add(site.group)
   // for probes and the console. `tune` is the same knob table the F6 panel drives, so a probe can
@@ -328,13 +330,17 @@ function applyMove(dt: number) {
 // season: sky, fog, ground tint here; leaves and grass in the scene
 let season: Season = (new URLSearchParams(location.search).get('season') as Season) || 'summer'
 if (!SEASONS.includes(season)) season = 'summer'
+// style: realistic is the bake as measured; ?style=fantasy is the first palette that is not Crofton
+const styleParam = new URLSearchParams(location.search).get('style')
+let style: Style = isStyle(styleParam) ? styleParam : 'realistic'
 /**
  * Sky, fog and LIGHT for the season, then the weather pulled over the top of it. Both in one place
  * because weather is a modifier on a season and not a state of its own: snow under a winter sun is
  * a different scene from snow under a summer one.
  */
 function applySky(s: Season) {
-  const look = LOOK[s]
+  const look = styled(LOOK[s], style)
+  const def = STYLE[style]
   const w = WEATHER[weatherNow()]
   const sky = look.sky.clone().lerp(w.skyTint, w.skyMix)
   ;(scene.background as THREE.Color).copy(sky)
@@ -343,9 +349,9 @@ function applySky(s: Season) {
   // the dome reads the same two inputs: the season's blue overhead, the fog colour at the horizon,
   // the weather's cover — a clear day is a third cumulus, an overcast one (skyMix ~0.9) is shut
   skyDome.set({
-    zenith: look.sky.clone().lerp(new THREE.Color(0x4f86d2), 0.55).lerp(w.skyTint, w.skyMix),
+    zenith: (def.sky ? def.sky.zenith.clone() : look.sky.clone().lerp(new THREE.Color(0x4f86d2), 0.55)).lerp(w.skyTint, w.skyMix),
     horizon: sky,
-    cover: 0.3 + 0.7 * w.skyMix,
+    cover: Math.min(1, 0.3 + (def.sky?.cloudBias ?? 0) + 0.7 * w.skyMix),
     haze: Math.min(1, 0.35 + w.skyMix * 0.6),
     sunDir: sun.position,
     sunColour: look.sun.colour,
@@ -369,6 +375,12 @@ function setSeason(s: Season) {
   season = s
   applySky(s)
   site?.setSeason(s)
+  toast(s, 'info', 1200)
+}
+function setStyle(s: Style) {
+  style = s
+  applySky(season)
+  site?.setStyle(s)
   toast(s, 'info', 1200)
 }
 
@@ -409,6 +421,7 @@ interface Stance {
   v: 1
   site: string
   season: Season
+  style?: Style
   mode: 'fly' | 'drive'
   cam?: { p: number[]; t: number[] }
   car?: { p: number[]; yaw: number; speed: number; look: number[] }
@@ -419,7 +432,7 @@ function captureStance(): Stance | null {
   if (!site) return null
   const layers: Record<string, boolean> = {}
   Object.assign(layers, ui.layers())
-  const st: Stance = { v: 1, site: site.manifest.slug, season, mode: drive.on ? 'drive' : 'fly', layers, lite: LITE }
+  const st: Stance = { v: 1, site: site.manifest.slug, season, style, mode: drive.on ? 'drive' : 'fly', layers, lite: LITE }
   const r3 = (v: THREE.Vector3) => [+v.x.toFixed(2), +v.y.toFixed(2), +v.z.toFixed(2)]
   if (drive.on && drive.car) st.car = { p: r3(drive.car.pos), yaw: +drive.car.yaw.toFixed(4), speed: +drive.car.speed.toFixed(2), look: [+drive.yaw.toFixed(3), +drive.pitch.toFixed(3)] }
   else st.cam = { p: r3(camera.position), t: r3(orbit.target) }
@@ -429,12 +442,15 @@ function stanceUrl(st: Stance): string {
   const u = new URL(location.href)
   u.searchParams.set('stance', btoa(JSON.stringify(st)))
   u.searchParams.set('season', st.season)
+  if (st.style && st.style !== 'realistic') u.searchParams.set('style', st.style)
+  else u.searchParams.delete('style')
   u.hash = st.site
   return u.toString()
 }
 function applyStance(st: Stance) {
   ui.setLayers(st.layers)
   applyLayers()
+  if (st.style && isStyle(st.style) && st.style !== style) setStyle(st.style)
   if (st.mode === 'drive' && st.car) {
     setDrive(true)
     if (drive.car) {

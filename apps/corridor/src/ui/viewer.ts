@@ -18,6 +18,7 @@ import { icon } from './icons'
 import { empty, group, bodyOf, layerToggle, readout, select, toggle } from './controls'
 import type { IndexEntry, Manifest } from '../site'
 import { SEASONS, type Season } from '../season'
+import { STYLES, type Style } from '../style'
 import { WEATHERS, type Weather } from '../weather'
 
 /**
@@ -155,6 +156,7 @@ const KEYS: { group: string; rows: [string, string][] }[] = [
 export interface ViewerUIOpts {
   onSite: (slug: string) => void
   onSeason: (s: Season) => void
+  onStyle: (s: Style) => void
   onWeather: (w: Weather) => void
   onLayers: (layers: Record<string, boolean>) => void
   onDrive: () => void
@@ -274,6 +276,12 @@ export class ViewerUI {
         value: 'summer',
         options: SEASONS.map((s) => ({ value: s, label: s[0].toUpperCase() + s.slice(1) })),
         onChange: (v) => this.o.onSeason(v),
+      }),
+      select<Style>({
+        label: 'Style',
+        value: (new URLSearchParams(location.search).get('style') as Style) || 'realistic',
+        options: STYLES.map((s) => ({ value: s, label: s[0].toUpperCase() + s.slice(1) })),
+        onChange: (v) => this.o.onStyle(v),
       }),
       select<Weather>({
         label: 'Weather',

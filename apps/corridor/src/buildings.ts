@@ -57,14 +57,17 @@ function signedArea(ring: [number, number][]): number {
 interface Build {
   pos: number[]
   col: number[]
+  /** which palette entry coloured each vertex: 0..6 a wall, 100 + 0..3 a roof — so a style can recolour in place */
+  pal: number[]
   idx: number[]
 }
 
-function pushTri(b: Build, a: THREE.Vector3, c: THREE.Vector3, d: THREE.Vector3, colour: [number, number, number]) {
+function pushTri(b: Build, a: THREE.Vector3, c: THREE.Vector3, d: THREE.Vector3, colour: [number, number, number], pal: number) {
   const k = b.pos.length / 3
   for (const v of [a, c, d]) {
     b.pos.push(v.x, v.y, v.z)
     b.col.push(colour[0], colour[1], colour[2])
+    b.pal.push(pal)
   }
   b.idx.push(k, k + 1, k + 2)
 }
@@ -84,11 +87,11 @@ function pushTri(b: Build, a: THREE.Vector3, c: THREE.Vector3, d: THREE.Vector3,
  * frame back every few milliseconds so the page paints and the progress message moves; the total
  * work is unchanged.
  */
-export async function buildBuildings(manifest: Manifest, groundAt: (x: number, z: number) => number | null, sliceMs = 8): Promise<{ group: THREE.Group; stats: BuildingStats }> {
+export async function buildBuildings(manifest: Manifest, groundAt: (x: number, z: number) => number | null, sliceMs = 8): Promise<{ group: THREE.Group; stats: BuildingStats; recolour: (walls: [number, number, number][], roofs: [number, number, number][]) => void }> {
   const group = new THREE.Group()
   group.name = 'buildings'
   const list = manifest.buildings ?? []
-  const b: Build = { pos: [], col: [], idx: [] }
+  const b: Build = { pos: [], col: [], pal: [], idx: [] }
   let gabled = 0
   let fromLidar = 0
 
@@ -113,8 +116,10 @@ export async function buildBuildings(manifest: Manifest, groundAt: (x: number, z
     const cw = signedArea(ring) < 0
     const r = cw ? [...ring].reverse() : ring
     const seed = hash2(r[0][0], r[0][1])
-    const wall = WALLS[Math.floor(seed * WALLS.length) % WALLS.length]
-    const roof = ROOFS[Math.floor(hash2(r[0][1], r[0][0]) * ROOFS.length) % ROOFS.length]
+    const wi = Math.floor(seed * WALLS.length) % WALLS.length
+    const ri = Math.floor(hash2(r[0][1], r[0][0]) * ROOFS.length) % ROOFS.length
+    const wall = WALLS[wi]
+    const roof = ROOFS[ri]
 
     // house-sized things get a gable; sheds, strip malls, warehouses and towers stay flat
     const area = bd.area_m2 ?? 0
@@ -129,8 +134,8 @@ export async function buildBuildings(manifest: Manifest, groundAt: (x: number, z
       const c = toWorld(x1, y1, base)
       const d = toWorld(x1, y1, eaves)
       const e = toWorld(x0, y0, eaves)
-      pushTri(b, a, c, d, wall)
-      pushTri(b, a, d, e, wall)
+      pushTri(b, a, c, d, wall, wi)
+      pushTri(b, a, d, e, wall, wi)
     }
 
     if (gable && rect) {
@@ -149,13 +154,13 @@ export async function buildBuildings(manifest: Manifest, groundAt: (x: number, z
       const e00 = corner(-1, -1, eaves), e10 = corner(1, -1, eaves), e11 = corner(1, 1, eaves), e01 = corner(-1, 1, eaves)
       const rA = rEnd(-1), rB = rEnd(1)
       // two slopes
-      pushTri(b, e00, e10, rB, roof)
-      pushTri(b, e00, rB, rA, roof)
-      pushTri(b, e11, e01, rA, roof)
-      pushTri(b, e11, rA, rB, roof)
+      pushTri(b, e00, e10, rB, roof, 100 + ri)
+      pushTri(b, e00, rB, rA, roof, 100 + ri)
+      pushTri(b, e11, e01, rA, roof, 100 + ri)
+      pushTri(b, e11, rA, rB, roof, 100 + ri)
       // two gable ends
-      pushTri(b, e00, rA, e01, wall)
-      pushTri(b, e10, e11, rB, wall)
+      pushTri(b, e00, rA, e01, wall, wi)
+      pushTri(b, e10, e11, rB, wall, wi)
       gabled++
     } else {
       // flat roof: fan from the centroid, which is exact for convex rings and close enough for
@@ -166,21 +171,37 @@ export async function buildBuildings(manifest: Manifest, groundAt: (x: number, z
       for (let i = 0; i < r.length; i++) {
         const [x0, y0] = r[i]
         const [x1, y1] = r[(i + 1) % r.length]
-        pushTri(b, mid, toWorld(x0, y0, eaves), toWorld(x1, y1, eaves), roof)
+        pushTri(b, mid, toWorld(x0, y0, eaves), toWorld(x1, y1, eaves), roof, 100 + ri)
       }
     }
   }
 
+  let recolour = (_w: [number, number, number][], _r: [number, number, number][]) => {}
   if (b.idx.length) {
     const geo = new THREE.BufferGeometry()
     geo.setAttribute('position', new THREE.Float32BufferAttribute(b.pos, 3))
-    geo.setAttribute('color', new THREE.Float32BufferAttribute(b.col, 3))
+    const colAttr = new THREE.Float32BufferAttribute(b.col, 3)
+    geo.setAttribute('color', colAttr)
     geo.setIndex(b.idx)
     geo.computeVertexNormals()
     const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.92, metalness: 0, side: THREE.DoubleSide })
     const mesh = new THREE.Mesh(geo, mat)
     mesh.name = 'buildings:massing'
     group.add(mesh)
+    // a style swaps the palettes: every vertex remembers which entry it drew, so this is one
+    // pass over the colour attribute and no geometry
+    const pal = Int16Array.from(b.pal)
+    recolour = (walls, roofs) => {
+      const arr = colAttr.array as Float32Array
+      for (let i = 0; i < pal.length; i++) {
+        const k = pal[i]
+        const e = k >= 100 ? roofs[(k - 100) % roofs.length] : walls[k % walls.length]
+        arr[i * 3] = e[0]
+        arr[i * 3 + 1] = e[1]
+        arr[i * 3 + 2] = e[2]
+      }
+      colAttr.needsUpdate = true
+    }
   }
-  return { group, stats: { count: list.length, gabled, fromLidar } }
+  return { group, stats: { count: list.length, gabled, fromLidar }, recolour }
 }

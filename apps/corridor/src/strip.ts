@@ -196,8 +196,11 @@ export function buildStrip(
           vec4 ground = img;
           if (hasGrass == 1) {
             vec3 n = normalize(vWorldN);
-            vec3 mown = triplanar(grassMown, vWorldXZ, n, 0.5, vec2(0.0));
-            vec3 rough = triplanar(grassRough, vWorldXZ, n, 0.485, vec2(0.13, 0.41));
+            // two scales of each turf, the second four times larger and offset, mixed 40 %: a
+            // single 2 m tile repeats visibly from any height ("the repeating grass texture is
+            // terrible") and the product of two incommensurate periods does not
+            vec3 mown = mix(triplanar(grassMown, vWorldXZ, n, 0.5, vec2(0.0)), triplanar(grassMown, vWorldXZ, n, 0.137, vec2(0.31, 0.77)), 0.4);
+            vec3 rough = mix(triplanar(grassRough, vWorldXZ, n, 0.485, vec2(0.13, 0.41)), triplanar(grassRough, vWorldXZ, n, 0.121, vec2(0.62, 0.19)), 0.4);
             // a style that greys the photo greys the turf too, or a lilac tint over a green
             // texture is mud; greyscale turf under the tint IS lilac turf
             mown = mix(mown, vec3(dot(mown, vec3(0.3, 0.5, 0.2))), imageryDesat);

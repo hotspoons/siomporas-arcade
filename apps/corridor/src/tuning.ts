@@ -17,7 +17,7 @@ export let GRASS_RADIUS = 106
 export let GRASS_LOD_NEAR = 12
 export let GRASS_LOD_MID = 39
 export let GRASS_LOD_MID_DENSITY = 0.55
-export let GRASS_LOD_FAR_DENSITY = 0.45
+export let GRASS_LOD_FAR_DENSITY = 0.6
 /** blade size multipliers over the season palette */
 export let GRASS_HEIGHT_SCALE = 1.5
 export let GRASS_WIDTH_SCALE = 0.55
@@ -29,7 +29,7 @@ export let GRASS_MOWN_HEIGHT = 0.22
 export let GRASS_ROUGH_HEIGHT = 1.8
 /** how far a blade's tip leans from its root (fraction of height), and how hard the wind blows */
 export let GRASS_LEAN = 0.45
-export let GRASS_WIND = 1.0
+export let GRASS_WIND = 0.45 // was 1.0: "way too much emphasis on its motion" (Rich, 2026-09-26)
 /** bare patches: the share of patch cells left bare, and the patch size (m) */
 export let GRASS_PATCHINESS = 0.12
 export let GRASS_PATCH_SIZE = 6
@@ -79,7 +79,7 @@ export let GRASS_SPRITE_SCALE = 1.0
 /** sprite look: card width multiplier, lean (shear of the top), and the density kept at the far rim */
 export let GRASS_SPRITE_WIDTH = 1.2
 export let GRASS_SPRITE_LEAN = 0.25
-export let GRASS_SPRITE_FAR_DENSITY = 0.25
+export let GRASS_SPRITE_FAR_DENSITY = 0.5 // was 0.25: the far rim was a quarter as dense as the near, and read as bare
 /** colour over the season palette: hue shift (deg), saturation, lightness, and extra straw/dryness
  *  (September verge grass is not April grass: default +0.3 dryness) */
 export let GRASS_HUE = 0

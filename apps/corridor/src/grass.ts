@@ -221,6 +221,7 @@ export class Grass {
         ...THREE.UniformsUtils.merge([THREE.UniformsLib.fog]),
         uTime: { value: 0 },
         uWind: { value: 1 },
+        uRadius: { value: 40 },
         uBase: { value: look.grass.base.clone() },
         uTip: { value: look.grass.tip.clone() },
         uDry: { value: look.grass.dry },
@@ -235,6 +236,7 @@ export class Grass {
         attribute vec4 aBlade; // rand, height, width, lean
         uniform float uTime;
         uniform float uWind;
+        uniform float uRadius;
         varying float vT;
         varying float vRand;
         varying vec3 vNormal;
@@ -247,7 +249,13 @@ export class Grass {
           float t = position.y;
           vT = t;
           vRand = aBlade.x;
-          float h = aBlade.y;
+          // NO POP AT THE RIM. Blade tiles are generated out to uRadius and used to appear there
+          // at full height — "grass still pops in" (Rich, 2026-09-26). The height goes to zero
+          // over the last 14 m before the radius, so a tile arriving at the rim arrives invisible
+          // and grows as you approach; size, not alpha, so there is no alpha-test pop either.
+          float dEye = length((cameraPosition - aRoot).xz);
+          float rim = 1.0 - smoothstep(uRadius - 14.0, uRadius + 2.0, dEye);
+          float h = aBlade.y * rim;
           float width = aBlade.z;
           float lean = aBlade.w;
           vec3 root = aRoot;
@@ -522,6 +530,7 @@ export class Grass {
   private dryBase = 0
 
   tick(t: number) {
+    this.bladeMat.uniforms.uRadius.value = T.GRASS_RADIUS
     for (const m of [this.bladeMat, this.cardMat]) {
       m.uniforms.uTime.value = t
       // no sway from a moving car: the eye speed (measured in update) fades the wind out

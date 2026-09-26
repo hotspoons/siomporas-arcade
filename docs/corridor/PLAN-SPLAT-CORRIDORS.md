@@ -98,6 +98,12 @@ gaussworks as `corridor.json` passes, the viewer as the spine and branch splines
 4. iterate two or three times (it is an ICP with a very good starting guess);
 5. **report RMS before and after, and refuse to attach above a threshold.**
 
+**Answered 2026-09-26: the rig is 2.32 m ±0.05** (14 in above the R1S roof at normal ride height,
+measured, not fitted), and **the altitudes are MSL, not ellipsoidal** — GPMF says `GPSA = MSLV`.
+That second one kills the 33–35 m correction below: the viewer's ground is NAVD88, which is
+orthometric like MSL, so what is left between them is of order a metre. A fit that comes out tens
+of metres off is now a BUG rather than a datum, which is a far more useful thing to be able to say.
+
 The camera height is the one number worth asking Rich for rather than fitting (a roof mount on a
 particular car), because fitting it is degenerate with `Δz`. If it is unknown, it can be recovered
 from the splat itself: take the 5th percentile of gaussian height within 2 m of each pass point —

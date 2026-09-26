@@ -82,10 +82,11 @@ What the bake already knows: `manifest.pois` — crofton-triangle has 237, of wh
   road, the nearest park) and distance banding. The minimap shows a direction arc, not a pin.
 - **Movement**: on foot (the fly camera at eye height with ground clamp — a walk mode is a few
   lines on `fly.ts`) and the car.
-- **Multiplayer**: a relay — a WebSocket room on the world-editor pod, `{id, pos, yaw, haul}` at
-  10 Hz, hauls claimed first-come. No physics on the wire, no authority beyond "who claimed it".
-  Friends see each other as the car or a marker; that is enough for a nine-year-old's first
-  session.
+- **Multiplayer** — built 2026-09-26: `tools/worldeditor/rooms.mjs`, a relay on the world-editor
+  service. Server-Sent Events push room state, players POST a pose four times a second and a
+  claim when they pick up; first claim wins and a late one is refused. `?room=name&player=Ava`
+  joins. Friends are capsules with their name over their head; a squishy a friend claims vanishes
+  for everyone with a toast. In memory, no dependencies, no authority beyond "who claimed it".
 - **Two worlds, one bake**: the same site with `style: realistic` and `style: fantasy`.
 
 Sits in the arcade catalog as a fourth cabinet; the corridor viewer is its engine, the game is a
@@ -113,5 +114,5 @@ scoring geometry are already there. Same engine, same catalog entry pattern.
 
 1. `style.ts` with `realistic` and `fantasy`; the picker; the stance field. One evening.
 2. Terrain exaggeration on `heightAt`, `WATER_LEVEL_M` exposed on the world record.
-3. Squishy Hunt: hauls + hints + walk mode single-player, then the relay.
+3. ~~Squishy Hunt: hauls + hints + walk mode single-player, then the relay.~~ Done 2026-09-26; the world-editor pod needs redeploying for the relay to exist outside a dev box.
 4. Parkour: the character, then tricks, then the bow, then enemies.

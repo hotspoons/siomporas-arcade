@@ -73,6 +73,15 @@ export let WEATHER_WIND = 1
 /** how much settles, × the weather's own figure */
 export let WEATHER_ACCUM = 1
 /** how fast the settled layer builds and melts, per second */
+// how fast a surface wets (per second) and how slowly it dries after the rain stops
+export let WEATHER_WET_RATE = 0.5
+export let WEATHER_DRY_RATE = 0.006
+/** a soaked road's roughness: low is a mirror for the sky and the headlights */
+export let WET_ROUGHNESS = 0.18
+/** how much water darkens what it soaks */
+export let WET_DARKEN = 0.45
+/** how hard a wet surface reflects the sky */
+export let WET_REFLECT = 1.8
 export let WEATHER_SETTLE_RATE = 0.012
 export let WEATHER_MELT_RATE = 0.06
 /**
@@ -515,6 +524,11 @@ export const TUNE_TABS: TuneTab[] = [
           tune('WEATHER_BOX', () => WEATHER_BOX, (v) => (WEATHER_BOX = v), [0.3, 3], 0.05, 'the camera-following box ×'),
           tune('WEATHER_ACCUM', () => WEATHER_ACCUM, (v) => (WEATHER_ACCUM = v), [0, 1], 0.02, 'how much settles'),
           tune('WEATHER_SETTLE_RATE', () => WEATHER_SETTLE_RATE, (v) => (WEATHER_SETTLE_RATE = v), [0.005, 1], 0.005, 'settled per second'),
+          tune('WEATHER_WET_RATE', () => WEATHER_WET_RATE, (v) => (WEATHER_WET_RATE = v), [0.05, 2], 0.05, 'how fast a surface soaks, per second'),
+          tune('WEATHER_DRY_RATE', () => WEATHER_DRY_RATE, (v) => (WEATHER_DRY_RATE = v), [0.001, 0.2], 0.001, 'how slowly it dries after the rain stops — 0.006 is about three minutes'),
+          tune('WET_ROUGHNESS', () => WET_ROUGHNESS, (v) => (WET_ROUGHNESS = v), [0.02, 1], 0.02, 'a soaked road\'s roughness: low is a mirror for the sky and the headlights'),
+          tune('WET_DARKEN', () => WET_DARKEN, (v) => (WET_DARKEN = v), [0, 0.9], 0.05, 'how much water darkens what it soaks'),
+          tune('WET_REFLECT', () => WET_REFLECT, (v) => (WET_REFLECT = v), [0, 4], 0.1, 'how hard a wet surface reflects the sky'),
           tune('WEATHER_MELT_RATE', () => WEATHER_MELT_RATE, (v) => (WEATHER_MELT_RATE = v), [0.01, 2], 0.01, 'melted per second'),
           tune('WEATHER_GRIP_SCALE', () => WEATHER_GRIP_SCALE, (v) => (WEATHER_GRIP_SCALE = v), [0.05, 1], 0.01, 'grip left — car.ts reads this'),
         ],

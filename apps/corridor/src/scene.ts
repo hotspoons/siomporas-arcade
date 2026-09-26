@@ -86,7 +86,7 @@ export interface Site {
   cropRows: Record<string, number>
   /** what is falling and what has settled */
   setWeather: (w: Weather) => void
-  weather: { current: Weather; settled: number; particles: number }
+  weather: { current: Weather; settled: number; particles: number; wetness: number }
   /** per-frame: move the near-field tree models and the grass ring to follow the eye; fwd/pitch shape the LOD footprint */
   updateNear: (eye: THREE.Vector3, time: number, fwd?: THREE.Vector3, pitch?: number) => void
   /** a knob changed: re-pick trees and re-seed grass on the next frame */
@@ -98,6 +98,14 @@ export interface Site {
   /** the scene's day/night light level and colour, for the shaders that do their own lighting:
    * the grass and the tree impostors, which would otherwise glow in the dark */
   setLight: (level: number, tint: THREE.Color) => void
+  /**
+   * How wet the world looks, 0…1 (weather.ts ramps it). Water lowers a surface's roughness, which
+   * is the whole effect: with the sky in an environment map a wet road reflects it, and at night a
+   * low roughness is what turns headlights into a long streak down the tarmac. Only the PHYSICAL
+   * materials take it — the strip, the terrain and the grass already darken through the weather's
+   * own shader chunk.
+   */
+  setWet: (wet: number) => void
   /** world-frame ground height under x,z: the fine strip near the road, the DEM beyond */
   groundAt: (x: number, z: number) => number | null
   /** signed distance to the nearest pavement edge (negative on the pavement) */
@@ -1065,6 +1073,18 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
   let nearRef: NearTrees | null = null
   /** the impostor field, for the Site's setLight — a baked card lights itself */
   let impRef: Impostors | null = null
+  /** every physical material that can be wet, with what it looks like dry */
+  const wettable = new Map<THREE.MeshStandardMaterial, { roughness: number; metalness: number; env: number; colour: THREE.Color }>()
+  let wetNow = 0
+  const canBeWet = (o: THREE.Object3D) => {
+    o.traverse((c) => {
+      const m = (c as THREE.Mesh).material as THREE.MeshStandardMaterial | THREE.MeshStandardMaterial[] | undefined
+      for (const mat of Array.isArray(m) ? m : m ? [m] : []) {
+        if (!(mat as THREE.MeshStandardMaterial).isMeshStandardMaterial || wettable.has(mat)) continue
+        wettable.set(mat, { roughness: mat.roughness, metalness: mat.metalness, env: mat.envMapIntensity ?? 1, colour: mat.color.clone() })
+      }
+    })
+  }
   let treeRecords: TreeRecord[] = []
   let treePlantingRef: () => { count: number; cellM: number; radius: number; centre: [number, number]; capped: boolean; replants: number; lastMs: number } = () => ({ count: 0, cellM: 0, radius: 0, centre: [0, 0], capped: false, replants: 0, lastMs: 0 })
   let crops: ReturnType<typeof buildCrops> | null = null
@@ -2031,6 +2051,16 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
   group.add(barriers.group)
   const sidewalks = buildSidewalks(manifest, groundAtWorld, edgeDistanceWorld)
   group.add(sidewalks.group)
+  // WHAT GETS WET: the hard surfaces. Roads (the surface sets' own materials, which is what the
+  // asphalt and the paint are drawn with), car parks, footways and kerbs. Registered after they
+  // are built and again whenever a road is rebuilt, since roadMesh makes new meshes.
+  const registerWet = () => {
+    canBeWet(road)
+    canBeWet(parking.group)
+    canBeWet(sidewalks.group)
+    for (const s of Object.values(surfaceSets ?? {})) canBeWet(new THREE.Mesh(undefined, s.material))
+  }
+  registerWet()
   // the signals cycle, the stop lines are painted and the corners are named. The controller is fed
   // the masts furniture.ts ACTUALLY placed, because the kerb walk moves each one off the bake's
   // centreline position by a metre or twenty and the lenses have to hang under the real head.
@@ -2121,6 +2151,18 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     junctionPaint: { bars: stopbars.counts, crosswalks: crosswalks.counts, arrows: arrows.counts },
     setStyle,
     setLight: (level: number, tint: THREE.Color) => { grassRef?.setLight(level, tint); impRef?.setLight(level, tint) },
+    setWet: (wet: number) => {
+      const w = Math.min(1, Math.max(0, wet))
+      if (Math.abs(w - wetNow) < 0.005) return
+      registerWet() // a road rebuilt by a knob change brings new materials with it
+      wetNow = w
+      for (const [m, base] of wettable) {
+        m.roughness = base.roughness * (1 - w) + T.WET_ROUGHNESS * w
+        m.metalness = base.metalness * (1 - w) + 0.12 * w
+        m.envMapIntensity = base.env * (1 + (T.WET_REFLECT - 1) * w)
+        m.color.copy(base.colour).multiplyScalar(1 - T.WET_DARKEN * w)
+      }
+    },
     canopyAt: canopyAtRef,
     // what grows here, for probes and the console
     flora,
@@ -2152,7 +2194,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     cropRows: crops?.counts ?? {},
     setWeather: (w: Weather) => precip?.set(w),
     get weather() {
-      return { current: precip?.current ?? ('clear' as Weather), settled: precip?.settled ?? 0, particles: precip?.count ?? 0 }
+      return { current: precip?.current ?? ('clear' as Weather), settled: precip?.settled ?? 0, particles: precip?.count ?? 0, wetness: precip?.wetness ?? 0 }
     },
     updateNear,
     retune,

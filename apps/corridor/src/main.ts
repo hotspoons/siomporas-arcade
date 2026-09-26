@@ -1046,6 +1046,8 @@ function frame() {
     const fwd = camera.getWorldDirection(viewDir)
     const pitch = Math.max(0, -Math.asin(THREE.MathUtils.clamp(fwd.y, -1, 1))) // 0 level, +down
     site.updateNear(camera.position, clock.elapsedTime, fwd, pitch)
+    // the world looks wet while it is wet: the weather ramps it, the surfaces follow
+    site.setWet(site.weather.wetness)
     // the player is the car when driving, the eye on foot or in the air; heading is compass from north
     if (game) game.tick(dt, drive.on && drive.car ? drive.car.pos : camera.position, drive.on && drive.car ? Math.atan2(drive.car.forward.x, -drive.car.forward.z) : Math.atan2(fwd.x, -fwd.z))
     // the inset map follows the car when driving, the camera when flying; site frame is x east, y north = -z

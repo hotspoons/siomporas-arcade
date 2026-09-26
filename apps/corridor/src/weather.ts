@@ -285,6 +285,11 @@ export class Precipitation {
   }
 
   /** the settled layer, 0…1 — probes and the HUD read it */
+  /** how wet the world is, 0…1 — ramped up while it rains and drying slowly after */
+  get wetness(): number {
+    return this.wet
+  }
+
   get settled(): number {
     return this.accum
   }
@@ -316,7 +321,13 @@ export class Precipitation {
     const target = this.look.accum * T.WEATHER_ACCUM
     const rate = target > this.accum ? T.WEATHER_SETTLE_RATE : T.WEATHER_MELT_RATE
     this.accum += Math.max(-rate * dt, Math.min(rate * dt, target - this.accum))
-    this.wet += Math.max(-dt * 0.6, Math.min(dt * 0.6, this.look.wet - this.wet))
+    // WET GOES ON FASTER THAN IT COMES OFF. A road soaks in a minute of rain and stays dark and
+    // reflective for many minutes after it stops (Rich, 2026-09-26: "when it is raining and a
+    // short period after … so the world looks wet when it is wet"). One rate for both was why the
+    // world dried the instant the rain did.
+    const wetTarget = this.look.wet
+    const wetRate = wetTarget > this.wet ? T.WEATHER_WET_RATE : T.WEATHER_DRY_RATE
+    this.wet += Math.max(-wetRate * dt, Math.min(wetRate * dt, wetTarget - this.wet))
     for (const u of this.followers) {
       u.uAccum.value = this.accum
       u.uWet.value = this.wet

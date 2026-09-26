@@ -847,7 +847,8 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
   // direction its own OSM tags; it gets stations in the edge grid (so grass, trees and the car
   // know it is pavement), an asphalt+paint mesh, and below, its own strip. Kept apart from the
   // divided-highway siblings: those share the spine's grade and widen the spine's strip.
-  const branchAts: { at: (s: number) => { pos: THREE.Vector3; dir: THREE.Vector3 }; len: number; half: number; name: string }[] = []
+  // `road` builds the branch's asphalt and paint; it runs inside the branch's lazy unit, with its strip
+  const branchAts: { at: (s: number) => { pos: THREE.Vector3; dir: THREE.Vector3 }; len: number; half: number; name: string; road: () => THREE.Group }[] = []
   for (const br of manifest.branches ?? []) {
     if (!br.coords || br.coords.length < 2) continue
     const rawB = br.coords.map(([x, y, z]) => toWorld(x, y, (Number.isFinite(z) ? z : heightAt(x, y)) + 0.4))
@@ -870,8 +871,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     const twoWayB = br.oneway === 'yes' || br.oneway === '-1' ? false : br.oneway === 'no' ? true : !['motorway', 'motorway_link', 'trunk_link', 'primary_link'].includes(br.highway ?? '')
     const kerbedB = isKerbed(br.highway)
     const halfB = pavedWidth(lanesB, twoWayB, kerbedB) / 2
-    roadBuilders.push(() => roadMesh(stations(atB, lenB, 6), () => lanesB, () => 'asphalt_aged', surfaceSets!, 0.02, () => twoWayB, paintOff, () => kerbedB))
-    branchAts.push({ at: atB, len: lenB, half: halfB, name: br.name ?? br.ref ?? 'branch' })
+    branchAts.push({ at: atB, len: lenB, half: halfB, name: br.name ?? br.ref ?? 'branch', road: () => roadMesh(stations(atB, lenB, 6), () => lanesB, () => 'asphalt_aged', surfaceSets!, 0.02, () => twoWayB, paintOff, () => kerbedB) })
   }
   buildRoads()
 
@@ -892,6 +892,8 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
   // worstMs is the longest SYNCHRONOUS unit — the hitch a frame can feel; an async unit (a
   // buildings cell) yields inside buildBuildings and its wall time is not a hitch
   const gradeStats = { built: 0, strips: 0, buildings: 0, ms: 0, worstMs: 0, worst: '' }
+  // the style's road paint, applied to a road mesh that arrives after the style was set
+  let paintNow: { centre: THREE.Color; edge: THREE.Color } | null = null
   const gradeEye = new THREE.Vector3(NaN, NaN, NaN)
   let gradePumping = false
   /** the nearest unfinished unit inside STREAM_BUILD_M of the eye, or null */
@@ -1228,6 +1230,11 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
       let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity
       for (let s = 0; s <= b.len; s += 25) { const q = b.at(s).pos; if (q.x < x0) x0 = q.x; if (q.x > x1) x1 = q.x; if (q.z < z0) z0 = q.z; if (q.z > z1) z1 = q.z }
       return { key: `branch:${i}`, x: (x0 + x1) / 2, z: (z0 + z1) / 2, r: Math.hypot(x1 - x0, z1 - z0) / 2 + T.BRANCH_VERGE + 20, done: false, run: () => {
+        // the asphalt and paint first, then the strip beneath them
+        const rm = b.road()
+        if (paintNow) repaintMarkings(rm, paintNow.centre, paintNow.edge)
+        road.add(rm)
+        roadParts.push(rm)
         adoptStrip(buildStrip(b.at, b.len, T.BRANCH_VERGE, T.BRANCH_VERGE, edgeAt, heightAt, imagery, manifest.bbox, grassTex('grass_mown'), grassTex('grass_rough'), lite ? 4 : 3, lite ? 3 : 2, offsetFn, (s) => {
           const q = b.at(s).pos
           return edgeDistance(q.x, q.z, branchWho0 + i).d < T.BRANCH_VERGE
@@ -1822,6 +1829,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     terrainDesat.value = def.desaturate
     built.recolour(def.walls, def.roofs)
     water.setColours(def.water.stream, def.water.still, def.water.sea, def.water.opacityBias)
+    paintNow = { centre: def.paint.centre, edge: def.paint.edge }
     repaintMarkings(road, def.paint.centre, def.paint.edge)
   }
   if (initialStyle !== 'realistic') setStyle(initialStyle)

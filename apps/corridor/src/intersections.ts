@@ -221,9 +221,12 @@ export function buildStopBars(
       continue
     }
     if (rL + rR < b.width_m - 0.5) counts.clipped++
-    // right of travel is +across: the approach's own half runs from the centre line outward
-    const a0 = oneway ? Math.min(rL, b.width_m / 2) : 0
-    const a1 = Math.min(rR, ownHalf)
+    // +across is the RIGHT of travel (`reach(1)` walks it, and the corners run -a1..+a0), so
+    // the approach's own lanes on a two-way road are 0..+ownHalf and the oncoming half is left
+    // out. The first cut of this had the sign backwards and painted the bar across the
+    // oncoming lanes; Rich saw it in the plan view.
+    const a0 = Math.min(rL, oneway ? b.width_m / 2 : ownHalf)
+    const a1 = oneway ? Math.min(rR, b.width_m / 2) : 0
     const hw = T.STOPBAR_DEPTH / 2
     const corners = [
       [a0, hw], [-a1, hw], [-a1, -hw], [a0, -hw],

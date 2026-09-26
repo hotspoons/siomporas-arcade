@@ -304,38 +304,54 @@ export function roadMesh(st: Station[], lanesAt: (s: number) => number, classAt:
       [0, a.s / mpt, wa / mpt, a.s / mpt, 0, b.s / mpt, wb / mpt, b.s / mpt], bk.uv)
     // Paint runs over the untrimmed station interval: it sits 0.04 m above the asphalt, so it
     // crosses the blend band without a gap and without fighting it.
-    const ml = 0.12, y2a = ya + 0.02, y2b = yb + 0.02
-    // is this line, at this lateral offset, inside a junction? test both ends of the quad
-    const off2 = (oa: number, ob: number) =>
-      !!paintOff && (paintOff(a.pos.x + sa.x * oa, a.pos.z + sa.z * oa) || paintOff(b.pos.x + sb.x * ob, b.pos.z + sb.z * ob))
+    const ml = 0.12
+    /**
+     * One marking from station `from` to station `to`, at lateral offsets o0 → o1, CLIPPED where
+     * it enters a junction. The first version dropped any quad whose either end was inside, so
+     * every line stopped up to a whole station (6 m) short of the stop bar — Rich: "lines didn't
+     * intersect at stop lines. That was a big tell." Now the boundary is found by bisection on
+     * the predicate (seven steps, 5 cm on a 6 m quad) and the quad ends exactly there.
+     */
+    const paintSeg = (o0: number, o1: number, half: number, col: number[], from: Station = a, to: Station = b) => {
+      const at = (t: number) => {
+        const s = t <= 0 ? from : t >= 1 ? to : lerpSt(from, to, t)
+        const sd = s.dir.clone().cross(UP)
+        const o = o0 + (o1 - o0) * t
+        return { s, sd, o }
+      }
+      let t0 = 0, t1 = 1
+      if (paintOff) {
+        const inside = (t: number) => { const q = at(t); return paintOff(q.s.pos.x + q.sd.x * q.o, q.s.pos.z + q.sd.z * q.o) }
+        const i0 = inside(0), i1 = inside(1)
+        if (i0 && i1) return
+        if (i0) { let lo = 0, hi = 1; for (let k = 0; k < 7; k++) { const m = (lo + hi) / 2; if (inside(m)) lo = m; else hi = m } t0 = hi }
+        if (i1) { let lo = 0, hi = 1; for (let k = 0; k < 7; k++) { const m = (lo + hi) / 2; if (inside(m)) hi = m; else lo = m } t1 = lo }
+        if (t1 - t0 < 0.02) return
+      }
+      const A = at(t0), B = at(t1)
+      const yA = A.s.pos.y + lift + 0.02, yB = B.s.pos.y + lift + 0.02
+      quad(marks, midx, P(A.s.pos, A.sd, A.o - half, yA), P(A.s.pos, A.sd, A.o + half, yA), P(B.s.pos, B.sd, B.o - half, yB), P(B.s.pos, B.sd, B.o + half, yB), col, mcol)
+    }
     const cycle = Math.floor(a0.s / 12) * 12
     const dash = a0.s - cycle < 3.01 && Math.round(la) === Math.round(lb)
     const dashLen = Math.min(3, b0.s - a0.s)
-    const bb = a0.pos.clone().add(a0.dir.clone().multiplyScalar(dashLen))
+    const dashEnd: Station = { pos: a0.pos.clone().add(a0.dir.clone().multiplyScalar(dashLen)), dir: a0.dir, s: a0.s + dashLen }
     if (twoWay) {
       // two-way: white edge lines on both shoulders, double yellow at the centre, white dashes
       // between the lanes of each direction (3+ lanes a side)
       const edgeA = wa / 2 - T.SHOULDER_OUT + off, edgeB = wb / 2 - T.SHOULDER_OUT + off
-      for (const sgn of [-1, 1]) { if (off2(sgn * edgeA, sgn * edgeB)) continue; quad(marks, midx, P(a.pos, sa, sgn * edgeA - ml, y2a), P(a.pos, sa, sgn * edgeA + ml, y2a), P(b.pos, sb, sgn * edgeB - ml, y2b), P(b.pos, sb, sgn * edgeB + ml, y2b), white, mcol) }
-      for (const off of [-0.16, 0.16]) { if (off2(off, off)) continue; quad(marks, midx, P(a.pos, sa, off - 0.1, y2a), P(a.pos, sa, off + 0.1, y2a), P(b.pos, sb, off - 0.1, y2b), P(b.pos, sb, off + 0.1, y2b), yellow, mcol) }
+      for (const sgn of [-1, 1]) paintSeg(sgn * edgeA, sgn * edgeB, ml, white)
+      for (const off of [-0.16, 0.16]) paintSeg(off, off, 0.1, yellow)
       const perSide = Math.max(1, Math.floor(la / 2))
-      if (dash) for (const sgn of [-1, 1]) for (let l = 1; l < perSide; l++) {
-        const off = sgn * l * T.LANE_WIDTH
-        if (off2(off, off)) continue
-        quad(marks, midx, P(a.pos, sa, off - 0.08, y2a), P(a.pos, sa, off + 0.08, y2a), P(bb, sa, off - 0.08, y2a), P(bb, sa, off + 0.08, y2a), white, mcol)
-      }
+      if (dash) for (const sgn of [-1, 1]) for (let l = 1; l < perSide; l++) paintSeg(sgn * l * T.LANE_WIDTH, sgn * l * T.LANE_WIDTH, 0.08, white, a0, dashEnd)
     } else {
       // one-way carriageway: yellow left (median side), white right, on the shoulder boundaries
       const leftA = -wa / 2 + T.SHOULDER_IN + off, leftB = -wb / 2 + T.SHOULDER_IN + off
       const rightA = wa / 2 - T.SHOULDER_OUT + off, rightB = wb / 2 - T.SHOULDER_OUT + off
-      if (!off2(leftA, leftB)) quad(marks, midx, P(a.pos, sa, leftA - ml, y2a), P(a.pos, sa, leftA + ml, y2a), P(b.pos, sb, leftB - ml, y2b), P(b.pos, sb, leftB + ml, y2b), yellow, mcol)
-      if (!off2(rightA, rightB)) quad(marks, midx, P(a.pos, sa, rightA - ml, y2a), P(a.pos, sa, rightA + ml, y2a), P(b.pos, sb, rightB - ml, y2b), P(b.pos, sb, rightB + ml, y2b), white, mcol)
+      paintSeg(leftA, leftB, ml, yellow)
+      paintSeg(rightA, rightB, ml, white)
       // lane dashes: 3 m paint / 9 m gap is the US standard; one dash per 12 m station cycle
-      if (dash) for (let l = 1; l < la; l++) {
-        const off = leftA + l * T.LANE_WIDTH
-        if (off2(off, off)) continue
-        quad(marks, midx, P(a.pos, sa, off - 0.08, y2a), P(a.pos, sa, off + 0.08, y2a), P(bb, sa, off - 0.08, y2a), P(bb, sa, off + 0.08, y2a), white, mcol)
-      }
+      if (dash) for (let l = 1; l < la; l++) paintSeg(leftA + l * T.LANE_WIDTH, leftA + l * T.LANE_WIDTH, 0.08, white, a0, dashEnd)
     }
 
     // the transition strip into the gap this quad's trimmed end left

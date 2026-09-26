@@ -30,6 +30,8 @@ const NAMES = [
   // editor
   'pencil-square', 'rectangle-group', 'sparkles', 'document-arrow-down', 'lock-closed',
   'arrow-uturn-left',
+  // the minimap: expand to the whole screen, back to the corner, follow the car again
+  'arrows-pointing-out', 'arrows-pointing-in',
   // world editor: find a place, draw its extent, run a bake, watch it, publish it
   'magnifying-glass', 'cloud-arrow-up', 'stop', 'bolt', 'clock', 'server-stack',
   'arrow-down-tray', 'queue-list', 'exclamation-triangle', 'folder-open',

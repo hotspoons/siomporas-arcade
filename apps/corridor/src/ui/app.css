@@ -143,42 +143,50 @@ body.chrome-off .drivepad { display: none; }
    of this file styled `.minimap` and therefore styled nothing — the map was on the page, unpinned
    and invisible behind the scene. */
 
-#minimap { position: fixed; right: var(--s3); bottom: var(--s3); z-index: var(--z-hud); }
+#minimap {
+  position: fixed; right: var(--s3); bottom: var(--s3); z-index: var(--z-hud);
+  /* the panel IS the resize box: drag its corner and the canvas follows (minimap.ts) */
+  resize: both; overflow: hidden;
+  min-width: 160px; min-height: 160px; max-width: calc(100vw - 2 * var(--s3)); max-height: calc(100vh - var(--bar-h, 48px) - 2 * var(--s3));
+  border-radius: var(--r3);
+}
 #minimap canvas {
   display: block; touch-action: none;
-  border-radius: 50%;
   background: var(--bg-1);
-  border: 1px solid var(--hud-line);
   box-shadow: var(--shadow-2);
 }
-#minimap button {
-  position: absolute; left: var(--s1); bottom: var(--s1);
-  width: 26px; height: 26px; padding: 0;
+#minimap .btn.ghost {
+  position: absolute; bottom: var(--s1);
+  width: 28px; height: 28px; padding: 0;
   display: grid; place-items: center;
-  font: inherit; font-size: var(--text-xs);
   color: var(--ink-1); background: var(--hud-bg);
   border: 1px solid var(--hud-line); border-radius: 50%;
-  backdrop-filter: blur(8px);
-  cursor: pointer;
+  opacity: 0.55; transition: opacity 120ms;
 }
-#minimap button:hover { background: var(--bg-3); color: var(--accent); }
-#minimap button.expand { left: auto; right: var(--s1); bottom: var(--s1); }
+#minimap:hover .btn.ghost, #minimap.expanded .btn.ghost { opacity: 1; }
+#minimap .btn.ghost:hover { background: var(--bg-3); color: var(--accent); }
+#minimap .mm-locate { left: var(--s1); }
+#minimap .mm-expand { right: var(--s1); }
+/* the corner grip that `resize` draws is invisible on a dark canvas; give it a mark */
+#minimap:not(.expanded)::after {
+  content: ''; position: absolute; right: 3px; bottom: 3px; width: 10px; height: 10px; pointer-events: none;
+  background: linear-gradient(135deg, transparent 50%, rgb(255 255 255 / 45%) 50%, rgb(255 255 255 / 45%) 60%, transparent 60%, transparent 75%, rgb(255 255 255 / 45%) 75%, rgb(255 255 255 / 45%) 85%, transparent 85%);
+}
 
 #minimap.expanded {
-  inset: 0; right: 0; bottom: 0;
-  display: flex; align-items: center; justify-content: center;
-  background: var(--scrim);
+  inset: 0; right: 0; bottom: 0; width: auto; height: auto; max-width: none; max-height: none;
+  resize: none; border-radius: 0;
   z-index: var(--z-modal);
 }
-#minimap.expanded canvas { border-radius: var(--r3); }
-#minimap.expanded button { bottom: var(--s5); }
-#minimap.expanded button.expand { right: var(--s5); }
-#minimap.expanded button:not(.expand) { left: var(--s5); }
+#minimap.expanded canvas { box-shadow: none; }
+#minimap.expanded .btn.ghost { bottom: var(--s5); width: 40px; height: 40px; }
+#minimap.expanded .mm-locate { left: var(--s5); }
+#minimap.expanded .mm-expand { right: var(--s5); }
 
 /* On a phone the map moves out from under the thumb and shrinks; expanded, it fills the screen. */
 @media (max-width: 760px), (pointer: coarse) and (max-width: 1024px) {
-  #minimap { right: var(--s2); bottom: auto; top: calc(var(--bar-h) + var(--s2)); transform: scale(0.65); transform-origin: top right; }
-  #minimap.expanded { transform: none; top: 0; right: 0; }
+  #minimap { right: var(--s2); bottom: auto; top: calc(var(--bar-h) + var(--s2)); }
+  #minimap.expanded { top: 0; right: 0; }
 }
 
 @media (max-width: 640px) {

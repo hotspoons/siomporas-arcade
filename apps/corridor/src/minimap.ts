@@ -3,10 +3,20 @@
 // pull out. Sources are the site's own web layers (the 1 m NAIP JPEG) and osm.geojson for the
 // roads, so it needs nothing the viewer does not already have.
 //
-//   wheel over the map   zoom about the cursor
-//   drag                 pan (the map stops following; click the ⌖ button or move to re-centre)
-//   the marker           the car in drive mode, the camera in fly mode, with its heading
+// THE CHROME, after Rich (2026-09-26): "should just be resizable and full screen interaction
+// without having to click tiny buttons to dismiss". So:
+//
+//   drag the corner        resize it — the panel is a plain CSS `resize` box and the canvas
+//                          follows it; the scale (px/m) is kept, so a bigger map shows more ground
+//   double-click           the whole screen; double-click, Esc, N or the button bring it back
+//   wheel over the map     zoom about the cursor
+//   drag                   pan (the map stops following; the locate button or moving re-centres)
+//   the marker             the car in drive mode, the camera in fly mode, with its heading
+//
+// The two buttons are Heroicons like the rest of the interface, not glyphs from whichever font
+// the browser had, and the size you drag it to is remembered in this browser.
 import { DATA_BASE, type Manifest } from './site'
+import { button } from './ui/shell'
 
 interface Road {
   pts: Float32Array // site x,y pairs
@@ -29,6 +39,10 @@ const CLASS_STYLE: Record<string, { w: number; c: string; minPxPerM: number }> =
   waterway: { w: 1.5, c: '#5a8ad0', minPxPerM: 0.05 },
 }
 
+const SIZE_KEY = 'apex-corridor-minimap-size'
+const MIN = 160
+const DEFAULT = 240
+
 export class MiniMap {
   el: HTMLElement
   private canvas: HTMLCanvasElement
@@ -41,12 +55,17 @@ export class MiniMap {
   private pxPerM = 0.25 // zoom
   private centre = { x: 0, y: 0 } // site frame
   private follow = true
-  private size = 240
+  private w = DEFAULT
+  private h = DEFAULT
   private dragging = false
+  private moved = 0
   private lastX = 0
   private lastY = 0
   private manifest: Manifest
   private frameCount = 0
+  private expandBtn: HTMLButtonElement
+  private ro: ResizeObserver
+  private onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && this.expanded) this.setExpanded(false) }
   expanded = false
 
   constructor(parent: HTMLElement, manifest: Manifest) {
@@ -54,28 +73,43 @@ export class MiniMap {
     this.el = document.createElement('div')
     this.el.id = 'minimap'
     this.canvas = document.createElement('canvas')
-    this.canvas.width = this.canvas.height = this.size * devicePixelRatio
-    this.canvas.style.width = this.canvas.style.height = `${this.size}px`
     this.ctx = this.canvas.getContext('2d')!
-    const recentre = document.createElement('button')
-    recentre.textContent = '⌖'
-    recentre.title = 'follow the car / camera again'
-    recentre.onclick = () => (this.follow = true)
-    const expand = document.createElement('button')
-    expand.className = 'expand'
-    expand.textContent = '⤢'
-    expand.title = 'expand the map to the whole screen (N); again to shrink'
-    expand.onclick = () => this.setExpanded(!this.expanded)
-    this.el.append(this.canvas, recentre, expand)
+    const locate = button({ icon: 'viewfinder-circle', variant: 'ghost', title: 'follow the car / camera again', onClick: () => { this.follow = true; this.draw(null) } })
+    locate.classList.add('mm-locate')
+    this.expandBtn = button({ icon: 'arrows-pointing-out', variant: 'ghost', title: 'the whole screen', key: 'N', onClick: () => this.setExpanded(!this.expanded) })
+    this.expandBtn.classList.add('mm-expand')
+    this.el.append(this.canvas, locate, this.expandBtn)
     parent.append(this.el)
     this.spine = new Float32Array(manifest.spine.coords.flatMap(([x, y]) => [x, y]))
     this.siblings = manifest.siblings.map((s) => new Float32Array(s.flatMap(([x, y]) => [x, y])))
+
+    // the remembered size, then let the CSS resize handle change it from there
+    try {
+      const saved = JSON.parse(localStorage.getItem(SIZE_KEY) ?? 'null') as { w: number; h: number } | null
+      if (saved && saved.w >= MIN && saved.h >= MIN) { this.w = saved.w; this.h = saved.h }
+    } catch { /* fresh browser */ }
+    this.el.style.width = `${this.w}px`
+    this.el.style.height = `${this.h}px`
+    this.fit()
+    // the canvas follows whatever the panel was dragged to
+    this.ro = new ResizeObserver(() => {
+      if (this.expanded) return
+      const r = this.el.getBoundingClientRect()
+      if (Math.abs(r.width - this.w) < 1 && Math.abs(r.height - this.h) < 1) return
+      this.w = Math.max(MIN, Math.round(r.width))
+      this.h = Math.max(MIN, Math.round(r.height))
+      try { localStorage.setItem(SIZE_KEY, JSON.stringify({ w: this.w, h: this.h })) } catch { /* private window */ }
+      this.fit()
+      this.draw(null)
+    })
+    this.ro.observe(this.el)
+
     this.canvas.addEventListener('wheel', (e) => {
       e.preventDefault()
       const f = Math.exp(-e.deltaY * 0.0015)
       // zoom about the cursor: keep the site point under the cursor fixed
       const r = this.canvas.getBoundingClientRect()
-      const px = e.clientX - r.left - this.size / 2, py = e.clientY - r.top - this.size / 2
+      const px = e.clientX - r.left - this.w / 2, py = e.clientY - r.top - this.h / 2
       const sx = this.centre.x + px / this.pxPerM, sy = this.centre.y - py / this.pxPerM
       this.pxPerM = Math.min(4, Math.max(0.02, this.pxPerM * f))
       this.centre.x = sx - px / this.pxPerM
@@ -83,10 +117,11 @@ export class MiniMap {
       this.follow = false
       this.draw(null)
     }, { passive: false })
-    this.canvas.addEventListener('pointerdown', (e) => { this.dragging = true; this.lastX = e.clientX; this.lastY = e.clientY; e.stopPropagation() })
+    this.canvas.addEventListener('pointerdown', (e) => { this.dragging = true; this.moved = 0; this.lastX = e.clientX; this.lastY = e.clientY; e.stopPropagation() })
     addEventListener('pointerup', () => (this.dragging = false))
     addEventListener('pointermove', (e) => {
       if (!this.dragging) return
+      this.moved += Math.abs(e.clientX - this.lastX) + Math.abs(e.clientY - this.lastY)
       this.centre.x -= (e.clientX - this.lastX) / this.pxPerM
       this.centre.y += (e.clientY - this.lastY) / this.pxPerM
       this.lastX = e.clientX
@@ -94,7 +129,19 @@ export class MiniMap {
       this.follow = false
       this.draw(null)
     })
+    // double-click is the big/small toggle — no small button to find, and it works on a phone
+    this.canvas.addEventListener('dblclick', (e) => { e.preventDefault(); this.setExpanded(!this.expanded) })
+    addEventListener('keydown', this.onKey)
     void this.load()
+  }
+
+  /** the backing store follows the CSS size and the device pixel ratio */
+  private fit() {
+    const dpr = devicePixelRatio
+    this.canvas.width = Math.round(this.w * dpr)
+    this.canvas.height = Math.round(this.h * dpr)
+    this.canvas.style.width = `${this.w}px`
+    this.canvas.style.height = `${this.h}px`
   }
 
   private async load() {
@@ -144,16 +191,18 @@ export class MiniMap {
     }
     // redraw at most every other frame; the map is small but the imagery blit is not free
     if (marker && ++this.frameCount % 2) return
-    const ctx = this.ctx, S = this.size, dpr = devicePixelRatio
+    const ctx = this.ctx, W = this.w, H = this.h, dpr = devicePixelRatio
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-    ctx.clearRect(0, 0, S, S)
+    ctx.clearRect(0, 0, W, H)
     ctx.save()
     ctx.beginPath()
-    ctx.arc(S / 2, S / 2, S / 2 - 1, 0, Math.PI * 2)
+    // round in the corner, a rounded rectangle when it has been stretched or filled
+    if (!this.expanded && Math.abs(W - H) < 2) ctx.arc(W / 2, H / 2, W / 2 - 1, 0, Math.PI * 2)
+    else ctx.roundRect(1, 1, W - 2, H - 2, this.expanded ? 0 : 11)
     ctx.clip()
     ctx.fillStyle = '#1b2a1f'
-    ctx.fillRect(0, 0, S, S)
-    const toPx = (x: number, y: number): [number, number] => [S / 2 + (x - this.centre.x) * this.pxPerM, S / 2 - (y - this.centre.y) * this.pxPerM]
+    ctx.fillRect(0, 0, W, H)
+    const toPx = (x: number, y: number): [number, number] => [W / 2 + (x - this.centre.x) * this.pxPerM, H / 2 - (y - this.centre.y) * this.pxPerM]
     if (this.imagery && this.imgBbox) {
       const [x0, y0, x1, y1] = this.imgBbox
       const [px0, py1] = toPx(x0, y0)
@@ -202,30 +251,46 @@ export class MiniMap {
     ctx.strokeStyle = 'rgba(255,255,255,0.6)'
     ctx.lineWidth = 1
     ctx.beginPath()
-    ctx.arc(S / 2, S / 2, S / 2 - 1, 0, Math.PI * 2)
+    if (!this.expanded && Math.abs(W - H) < 2) ctx.arc(W / 2, H / 2, W / 2 - 1, 0, Math.PI * 2)
+    else ctx.roundRect(1, 1, W - 2, H - 2, this.expanded ? 0 : 11)
     ctx.stroke()
     ctx.fillStyle = '#fff'
-    ctx.font = 'bold 11px system-ui'
+    ctx.font = 'bold 11px "IBM Plex Sans", system-ui'
     ctx.textAlign = 'center'
-    ctx.fillText('N', S / 2, 14)
+    ctx.fillText('N', W / 2, 14)
     const barM = niceScale(60 / this.pxPerM)
     const barPx = barM * this.pxPerM
     ctx.fillStyle = 'rgba(255,255,255,0.85)'
-    ctx.fillRect(S / 2 - barPx / 2, S - 14, barPx, 2)
-    ctx.font = '10px system-ui'
-    ctx.fillText(barM >= 1000 ? `${barM / 1000} km` : `${barM} m`, S / 2, S - 18)
+    ctx.fillRect(W / 2 - barPx / 2, H - 14, barPx, 2)
+    ctx.font = '10px "IBM Plex Sans", system-ui'
+    ctx.fillText(barM >= 1000 ? `${barM / 1000} km` : `${barM} m`, W / 2, H - 18)
   }
 
-  /** Full screen or corner. The canvas is re-sized to fit; the scale (px/m) is kept, so expanding
-   *  shows more ground rather than a blown-up thumbnail. */
+  /**
+   * The whole screen or the corner. The scale (px/m) is kept, so expanding shows more ground
+   * rather than a blown-up thumbnail; the corner size you dragged to is kept for when it shrinks.
+   */
   setExpanded(on: boolean) {
+    if (on === this.expanded) return
     this.expanded = on
     this.el.classList.toggle('expanded', on)
-    const S = on ? Math.min(innerWidth, innerHeight) - 24 : 240
-    this.size = S
-    this.canvas.width = this.canvas.height = S * devicePixelRatio
-    this.canvas.style.width = this.canvas.style.height = `${S}px`
-    if (on) this.pxPerM = Math.max(this.pxPerM, 0.12)
+    if (on) {
+      this.el.style.width = this.el.style.height = ''
+      this.w = innerWidth
+      this.h = innerHeight
+      this.pxPerM = Math.max(this.pxPerM, 0.12)
+    } else {
+      this.el.style.width = `${this.w = Math.max(MIN, this.w)}px`
+      this.el.style.height = `${this.h = Math.max(MIN, this.h)}px`
+      try {
+        const saved = JSON.parse(localStorage.getItem(SIZE_KEY) ?? 'null') as { w: number; h: number } | null
+        if (saved) { this.w = saved.w; this.h = saved.h; this.el.style.width = `${this.w}px`; this.el.style.height = `${this.h}px` }
+      } catch { /* keep what we have */ }
+    }
+    this.expandBtn.replaceChildren()
+    this.expandBtn.append(iconOf(on ? 'arrows-pointing-in' : 'arrows-pointing-out'))
+    this.expandBtn.title = on ? 'back to the corner (N, Esc, or double-click)' : 'the whole screen (N, or double-click)'
+    this.fit()
     this.draw(null)
   }
 
@@ -241,9 +306,13 @@ export class MiniMap {
   }
 
   dispose() {
+    this.ro.disconnect()
+    removeEventListener('keydown', this.onKey)
     this.el.remove()
   }
 }
+
+import { icon as iconOf } from './ui/icons'
 
 function niceScale(m: number): number {
   const p = Math.pow(10, Math.floor(Math.log10(m)))
@@ -251,11 +320,6 @@ function niceScale(m: number): number {
   return (n >= 5 ? 5 : n >= 2 ? 2 : 1) * p
 }
 
-/**
- * WGS84 → site frame (UTM easting/northing minus the origin). A compact transverse-Mercator
- * forward formula (Krüger series, good to mm), because osm.geojson is the only layer the viewer
- * reads that is not already in metres.
- */
 /**
  * WGS84 → local east/north metres about the site anchor (the `enu` frame), through ECEF.
  *
@@ -280,6 +344,11 @@ function enuProjector(lon0: number, lat0: number, h0: number): (lon: number, lat
   }
 }
 
+/**
+ * WGS84 → site frame (UTM easting/northing minus the origin). A compact transverse-Mercator
+ * forward formula (Krüger series, good to mm), because osm.geojson is the only layer the viewer
+ * reads that is not already in metres.
+ */
 function utmProjector(epsg: number, ox: number, oy: number): (lon: number, lat: number) => [number, number] {
   const zone = epsg % 100
   const south = Math.floor(epsg / 100) === 327
@@ -300,4 +369,3 @@ function utmProjector(epsg: number, ox: number, oy: number): (lon: number, lat: 
     return [E0 + k0 * A * E - ox, N0 + k0 * A * N - oy]
   }
 }
-

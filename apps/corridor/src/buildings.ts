@@ -41,6 +41,70 @@ const ROOFS: [number, number, number][] = [
   [0.38, 0.28, 0.24],
 ]
 
+/**
+ * Carve a footprint into rectangles, in the footprint's own frame.
+ *
+ * Rich: "steepled roofs don't follow the OSM data for the house layout." The first roof was one
+ * ridge along the minimum rotated rectangle of the whole ring, so an L-shaped house wore a
+ * bounding-box hat. A straight skeleton is the proper answer and a lot of code; suburban
+ * footprints are rectilinear in practice, so this rasterises the ring at `cell` metres in the
+ * frame of its long axis and pulls out the largest all-inside rectangle repeatedly (the
+ * histogram-and-stack maximal rectangle, O(cells) a pass) until the ring is covered or the next
+ * piece would be too narrow to roof. Each rectangle gets its own gable. An L is two gables that
+ * meet; a T is three; a plain box is still one.
+ */
+function carveRects(ring: [number, number][], cx: number, cy: number, ux: number, uy: number, cell: number): { u0: number; u1: number; v0: number; v1: number }[] {
+  // the ring in the local frame: u along the long axis, v across
+  const loc = ring.map(([x, y]) => [(x - cx) * ux + (y - cy) * uy, -(x - cx) * uy + (y - cy) * ux] as [number, number])
+  let u0 = Infinity, u1 = -Infinity, v0 = Infinity, v1 = -Infinity
+  for (const [u, v] of loc) { if (u < u0) u0 = u; if (u > u1) u1 = u; if (v < v0) v0 = v; if (v > v1) v1 = v }
+  const cols = Math.max(1, Math.ceil((u1 - u0) / cell)), rows = Math.max(1, Math.ceil((v1 - v0) / cell))
+  if (cols * rows > 12000) return []
+  const inside = new Uint8Array(cols * rows)
+  let total = 0
+  for (let r = 0; r < rows; r++) {
+    const v = v0 + (r + 0.5) * cell
+    for (let c = 0; c < cols; c++) {
+      const u = u0 + (c + 0.5) * cell
+      // even-odd point in polygon
+      let hit = false
+      for (let i = 0, j = loc.length - 1; i < loc.length; j = i++) {
+        const [ui, vi] = loc[i], [uj, vj] = loc[j]
+        if (vi > v !== vj > v && u < ((uj - ui) * (v - vi)) / (vj - vi) + ui) hit = !hit
+      }
+      if (hit) { inside[r * cols + c] = 1; total++ }
+    }
+  }
+  const out: { u0: number; u1: number; v0: number; v1: number }[] = []
+  let covered = 0
+  const heights = new Int32Array(cols)
+  for (let pass = 0; pass < 6 && covered < total * 0.94; pass++) {
+    // largest rectangle of uncovered inside cells
+    let best = { area: 0, r0: 0, r1: 0, c0: 0, c1: 0 }
+    heights.fill(0)
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) heights[c] = inside[r * cols + c] ? heights[c] + 1 : 0
+      const stack: number[] = []
+      for (let c = 0; c <= cols; c++) {
+        const h = c < cols ? heights[c] : 0
+        while (stack.length && heights[stack[stack.length - 1]] >= h) {
+          const top = stack.pop()!
+          const hh = heights[top]
+          const left = stack.length ? stack[stack.length - 1] + 1 : 0
+          const area = hh * (c - left)
+          if (area > best.area) best = { area, r0: r - hh + 1, r1: r, c0: left, c1: c - 1 }
+        }
+        stack.push(c)
+      }
+    }
+    const w = (best.c1 - best.c0 + 1) * cell, d = (best.r1 - best.r0 + 1) * cell
+    if (best.area === 0 || Math.min(w, d) < 2.4) break
+    for (let r = best.r0; r <= best.r1; r++) for (let c = best.c0; c <= best.c1; c++) { inside[r * cols + c] = 0; covered++ }
+    out.push({ u0: u0 + best.c0 * cell, u1: u0 + (best.c1 + 1) * cell, v0: v0 + best.r0 * cell, v1: v0 + (best.r1 + 1) * cell })
+  }
+  return out
+}
+
 function hash2(x: number, y: number): number {
   let n = Math.imul(Math.round(x * 7.3) | 0, 374761393) ^ Math.imul(Math.round(y * 7.3) | 0, 668265263)
   n = Math.imul(n ^ (n >>> 13), 1274126177)
@@ -139,28 +203,51 @@ export async function buildBuildings(manifest: Manifest, groundAt: (x: number, z
     }
 
     if (gable && rect) {
-      // a ridge along the long axis of the minimum rotated rectangle, over a flat eaves plane.
       // rect.yaw_deg is a MATH angle counter-clockwise from east describing the long axis (see
-      // buildings.py) — the long axis is therefore (cos, sin) of it, in SITE coordinates.
+      // buildings.py) — the long axis is therefore (cos, sin) of it, in SITE coordinates. The
+      // ring is carved into rectangles in that frame and each one gets a gable along ITS long
+      // side; a ring that carves to nothing (a round or diagonal footprint) falls back to one
+      // ridge over the bounding rectangle, as before.
       const cxs = r.reduce((s, p) => s + p[0], 0) / r.length
       const cys = r.reduce((s, p) => s + p[1], 0) / r.length
       const a2 = (rect.yaw_deg * Math.PI) / 180
-      const ux = Math.cos(a2), uy = Math.sin(a2) // along the ridge
+      const ux = Math.cos(a2), uy = Math.sin(a2) // along the long axis
       const vx = -uy, vy = ux // across it
-      const hw = rect.w / 2, hd = rect.d / 2
+      const cell = Math.max(0.5, Math.sqrt(area) / 40)
+      let pieces = carveRects(r, cxs, cys, ux, uy, cell)
+      if (!pieces.length) pieces = [{ u0: -rect.w / 2, u1: rect.w / 2, v0: -rect.d / 2, v1: rect.d / 2 }]
       const ridgeY = base + h
-      const corner = (su: number, sv: number, y: number) => toWorld(cxs + ux * hw * su + vx * hd * sv, cys + uy * hw * su + vy * hd * sv, y)
-      const rEnd = (su: number) => toWorld(cxs + ux * hw * su, cys + uy * hw * su, ridgeY)
-      const e00 = corner(-1, -1, eaves), e10 = corner(1, -1, eaves), e11 = corner(1, 1, eaves), e01 = corner(-1, 1, eaves)
-      const rA = rEnd(-1), rB = rEnd(1)
-      // two slopes
-      pushTri(b, e00, e10, rB, roof, 100 + ri)
-      pushTri(b, e00, rB, rA, roof, 100 + ri)
-      pushTri(b, e11, e01, rA, roof, 100 + ri)
-      pushTri(b, e11, rA, rB, roof, 100 + ri)
-      // two gable ends
-      pushTri(b, e00, rA, e01, wall, wi)
-      pushTri(b, e10, e11, rB, wall, wi)
+      const OVER = 0.3 // eaves overhang past the wall
+      const at = (u: number, v: number, y: number) => toWorld(cxs + ux * u + vx * v, cys + uy * u + vy * v, y)
+      for (const q of pieces) {
+        const w = q.u1 - q.u0, d = q.v1 - q.v0
+        const alongU = w >= d // the ridge runs along the longer side
+        const pu0 = q.u0 - OVER, pu1 = q.u1 + OVER, pv0 = q.v0 - OVER, pv1 = q.v1 + OVER
+        // the ridge line, at the piece's centre across its short axis; a narrow piece stays
+        // lower so a porch roof does not tower over the house it is attached to
+        const rise = Math.min(h - (eaves - base), Math.min(w, d) * 0.45)
+        const ry = eaves + rise
+        const um = (pu0 + pu1) / 2, vm = (pv0 + pv1) / 2
+        const e00 = at(pu0, pv0, eaves), e10 = at(pu1, pv0, eaves), e11 = at(pu1, pv1, eaves), e01 = at(pu0, pv1, eaves)
+        if (alongU) {
+          const rA = at(pu0, vm, ry), rB = at(pu1, vm, ry)
+          pushTri(b, e00, e10, rB, roof, 100 + ri)
+          pushTri(b, e00, rB, rA, roof, 100 + ri)
+          pushTri(b, e11, e01, rA, roof, 100 + ri)
+          pushTri(b, e11, rA, rB, roof, 100 + ri)
+          pushTri(b, e00, rA, e01, wall, wi)
+          pushTri(b, e10, e11, rB, wall, wi)
+        } else {
+          const rA = at(um, pv0, ry), rB = at(um, pv1, ry)
+          pushTri(b, e10, e11, rB, roof, 100 + ri)
+          pushTri(b, e10, rB, rA, roof, 100 + ri)
+          pushTri(b, e01, e00, rA, roof, 100 + ri)
+          pushTri(b, e01, rA, rB, roof, 100 + ri)
+          pushTri(b, e00, e10, rA, wall, wi)
+          pushTri(b, e11, e01, rB, wall, wi)
+        }
+      }
+      void ridgeY
       gabled++
     } else {
       // flat roof: fan from the centroid, which is exact for convex rings and close enough for

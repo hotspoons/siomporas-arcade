@@ -39,6 +39,7 @@ import { K8s } from './k8s.mjs'
 import { Runs } from './runs.mjs'
 import { bboxOf, circleFor } from './geo.mjs'
 import * as worlds from './worlds.mjs'
+import * as rooms from './rooms.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const REPO = path.resolve(HERE, '../..')
@@ -382,6 +383,9 @@ async function api(req, res, seg, q) {
       adoptedRuns: adopted,
     })
   }
+
+  /* ---- the games' relay: who is where in a shared Squishy Hunt, and who claimed what ---- */
+  if (seg[0] === 'rooms') return rooms.handle(req, res, seg.slice(1), { json, readJson, cors: CORS })
 
   /* ---- the map ---- */
   if (seg[0] === 'osm' && seg[1] === 'roads' && req.method === 'GET') {

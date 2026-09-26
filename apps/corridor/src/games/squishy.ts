@@ -105,6 +105,9 @@ function squishyMesh(colour: THREE.Color): THREE.Group {
   return g
 }
 
+/** another player in the room, as we draw them */
+interface Friend { id: string; name: string; mesh: THREE.Group; label: THREE.Sprite; target: THREE.Vector3; yaw: number; found: number }
+
 export class SquishyHunt {
   readonly group = new THREE.Group()
   readonly hud: HTMLElement
@@ -116,8 +119,16 @@ export class SquishyHunt {
   private hintEl: HTMLElement
   private scoreEl: HTMLElement
   private arrowEl: HTMLElement
+  private playersEl: HTMLElement
   private site: Site
   private done = false
+  // the room, when friends are in it
+  private room: string | null = null
+  private me = { id: Math.random().toString(36).slice(2, 10), name: 'you', colour: 0xff9ec9 }
+  private friends = new Map<string, Friend>()
+  private events: EventSource | null = null
+  private poseAt = 0
+  private claimedByOthers = new Set<string>()
 
   constructor(site: Site, parent: HTMLElement, opts: { count?: number; seed?: number } = {}) {
     this.site = site
@@ -180,9 +191,99 @@ export class SquishyHunt {
     this.arrowEl.append(icon('map-pin', 18))
     const row = el('div', 'squishy-row')
     row.append(this.arrowEl, this.hintEl)
-    this.hud.append(title, this.scoreEl, row)
+    this.playersEl = el('div', 'squishy-players')
+    this.hud.append(title, this.scoreEl, row, this.playersEl)
     parent.append(this.hud)
     site.group.add(this.group)
+  }
+
+  /** a stable key for a haul across machines: the store, not the index */
+  private keyOf(h: Haul) { return `${h.poi.kind}|${h.poi.name}|${Math.round(h.poi.x)}|${Math.round(h.poi.y)}` }
+
+  /**
+   * Share this hunt with friends. The relay is the world-editor service's `/api/rooms`; it only
+   * carries poses and claims, the world and the hunt are the same seed on every machine. Fails
+   * soft: no service, no room, the hunt is single-player and says so once.
+   */
+  join(room: string, name: string, colour?: number) {
+    this.room = room
+    this.me.name = name || 'you'
+    if (colour != null) this.me.colour = colour
+    const base = `/api/rooms/${encodeURIComponent(room)}`
+    try {
+      this.events = new EventSource(`${base}/events`)
+    } catch {
+      this.events = null
+    }
+    if (!this.events) { toast('no relay reachable — hunting alone', 'warn', 3000); this.room = null; return }
+    this.events.addEventListener('state', (e) => this.onState(JSON.parse((e as MessageEvent).data)))
+    this.events.onerror = () => { if (this.room) { toast('lost the room — hunting alone until it comes back', 'warn', 3000) } }
+    this.playersEl.textContent = `room ${room} · waiting for friends…`
+  }
+
+  private onState(s: { players: Record<string, { name: string; colour: number; pos: number[]; yaw: number; found: number }>; claims: Record<string, string> }) {
+    // claims by others: their squishies vanish for us too, and we do not get the point
+    for (const [key, by] of Object.entries(s.claims)) {
+      if (by === this.me.id || this.claimedByOthers.has(key)) continue
+      const h = this.hauls.find((x) => this.keyOf(x) === key)
+      if (!h) continue
+      this.claimedByOthers.add(key)
+      if (!h.found) {
+        h.found = true
+        h.mesh.visible = false
+        const who = s.players[by]?.name ?? 'a friend'
+        toast(`${who} got the ${h.poi.name} squishy!`, 'info', 2600)
+        if (h === this.active) this.active = this.hauls.find((x) => !x.found) ?? null
+      }
+    }
+    // friends: make, move, drop
+    const seen = new Set<string>()
+    for (const [id, p] of Object.entries(s.players)) {
+      if (id === this.me.id) continue
+      seen.add(id)
+      let f = this.friends.get(id)
+      if (!f) {
+        f = this.makeFriend(id, p.name, p.colour)
+        this.friends.set(id, f)
+      }
+      f.target.set(p.pos[0], p.pos[1], p.pos[2])
+      f.yaw = p.yaw
+      f.found = p.found
+    }
+    for (const [id, f] of this.friends) if (!seen.has(id)) { this.group.remove(f.mesh); this.friends.delete(id) }
+    const names = [...this.friends.values()].map((f) => `${f.name} ${f.found}`)
+    this.playersEl.textContent = `room ${this.room} · ${names.length ? names.join(' · ') : 'nobody else yet'}`
+  }
+
+  private makeFriend(id: string, name: string, colour: number): Friend {
+    const mesh = new THREE.Group()
+    const c = new THREE.Color(colour)
+    const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.35, 0.9, 4, 10), new THREE.MeshStandardMaterial({ color: c, roughness: 0.6 }))
+    body.position.y = 0.8
+    const nose = new THREE.Mesh(new THREE.ConeGeometry(0.15, 0.4, 8), new THREE.MeshBasicMaterial({ color: 0xffffff }))
+    nose.rotation.x = -Math.PI / 2
+    nose.position.set(0, 1.2, -0.45)
+    mesh.add(body, nose)
+    // the name over their head
+    const cv = document.createElement('canvas'); cv.width = 256; cv.height = 64
+    const ctx = cv.getContext('2d')!
+    ctx.fillStyle = 'rgba(13,16,20,0.7)'; ctx.fillRect(0, 0, 256, 64)
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 30px "IBM Plex Sans", sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+    ctx.fillText(name, 128, 34)
+    const tex = new THREE.CanvasTexture(cv)
+    const label = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false }))
+    label.scale.set(2.2, 0.55, 1)
+    label.position.y = 2.2
+    mesh.add(label)
+    this.group.add(mesh)
+    return { id, name, mesh, label, target: new THREE.Vector3(), yaw: 0, found: 0 }
+  }
+
+  private async sendPose(player: THREE.Vector3, heading: number) {
+    if (!this.room) return
+    try {
+      await fetch(`/api/rooms/${encodeURIComponent(this.room)}/pose`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: this.me.id, name: this.me.name, colour: this.me.colour, pos: [player.x, player.y, player.z], yaw: heading, found: this.score }) })
+    } catch { /* the relay is gone; the next state event or its error says so */ }
   }
 
   /** Every frame: the squishies bob, the hint follows the player, a close player collects. */
@@ -202,11 +303,28 @@ export class SquishyHunt {
       this.hintAt = this.t
       this.hint(player, heading)
     }
+    // friends glide toward their last reported spot and face their heading
+    for (const f of this.friends.values()) {
+      f.mesh.position.lerp(f.target, 1 - Math.exp(-6 * dt))
+      f.mesh.rotation.y = -f.yaw
+    }
+    if (this.room && this.t - this.poseAt > 0.25) {
+      this.poseAt = this.t
+      void this.sendPose(player, heading)
+    }
   }
 
   private collect(h: Haul) {
     h.found = true
     h.mesh.visible = false
+    // in a room the first claim wins; if a friend beat us to it the relay's state event already
+    // took it off our list, so this only races on the last few metres
+    if (this.room) {
+      const key = this.keyOf(h)
+      void fetch(`/api/rooms/${encodeURIComponent(this.room)}/claim`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: this.me.id, haul: key }) })
+        .then((r) => r.json()).then((j: { ok: boolean; by?: string }) => { if (!j.ok) { this.score = Math.max(0, this.score - 1); this.scoreEl.textContent = `${this.score} / ${this.hauls.length}`; toast('a friend got that one first!', 'warn', 2000) } })
+        .catch(() => { /* offline: keep the point */ })
+    }
     this.score++
     this.scoreEl.textContent = `${this.score} / ${this.hauls.length}`
     toast(`You got the ${h.poi.name} squishy! ${this.score} of ${this.hauls.length}`, 'ok', 2600)
@@ -234,6 +352,8 @@ export class SquishyHunt {
   }
 
   dispose() {
+    this.events?.close()
+    this.events = null
     this.site.group.remove(this.group)
     this.group.traverse((o) => {
       const m = o as THREE.Mesh

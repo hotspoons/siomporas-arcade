@@ -199,6 +199,8 @@ body.chrome-off .drivepad { display: none; }
 #squishy .squishy-row { display: flex; align-items: center; gap: var(--s2); margin-top: var(--s2); }
 #squishy .squishy-arrow { flex: none; width: 28px; height: 28px; display: grid; place-items: center; color: #ff9ec9; transition: transform 200ms; }
 #squishy .squishy-hint { line-height: 1.35; }
+#squishy .squishy-players { margin-top: var(--s2); font-size: var(--text-xs, 12px); opacity: 0.75; }
+#squishy .squishy-players:empty { display: none; }
 body.chrome-off #squishy { display: none; }
 
 /* On a phone the map moves out from under the thumb and shrinks; expanded, it fills the screen. */

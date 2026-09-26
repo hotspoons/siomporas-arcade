@@ -224,6 +224,10 @@ function startSquishy() {
   if (!site) return
   game?.dispose()
   game = new SquishyHunt(site, document.body)
+  // ?room=name&player=Ava shares the hunt through the world-editor service's relay
+  const qs = new URLSearchParams(location.search)
+  const roomName = qs.get('room')
+  if (roomName) game.join(roomName, qs.get('player') ?? 'you')
   setDrive(false)
   setWalk(true)
   toast(`Squishy Hunt: ${game.hauls.length} squishies hidden around town. Walk with W/A/S/D, look with the right mouse button.`, 'info', 6000)

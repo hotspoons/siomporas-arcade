@@ -81,7 +81,19 @@ export function taperedLanes(lanesAt: (s: number) => number, length: number, tap
 }
 
 /** Width of the paved surface at station s: lanes × 3.66 + both shoulders. */
-export function pavedWidth(lanes: number, twoWay = false): number {
+/**
+ * Road classes that are KERBED in an American suburb: the asphalt ends at a gutter a few hundred
+ * millimetres past the lane, there is no shoulder and no edge line, and a stop line runs from
+ * the centre line to the kerb. Everything else (arterials, links, motorways) carries shoulders
+ * and edge lines. Rich, at an all-way stop in Crofton: "the line not spanning the lane" — the
+ * residential street was modelled with a 3 m shoulder and its edge line 2.5 m from the centre,
+ * so the bar crossed the edge line onto asphalt that is not there.
+ */
+export const KERBED = new Set(['residential', 'living_street', 'unclassified', 'service', 'tertiary', 'tertiary_link'])
+export const isKerbed = (highway: string | undefined | null) => KERBED.has(highway ?? '')
+
+export function pavedWidth(lanes: number, twoWay = false, kerbed = false): number {
+  if (kerbed) return lanes * T.LANE_WIDTH + 2 * T.KERB_GUTTER
   return lanes * T.LANE_WIDTH + T.SHOULDER_OUT + (twoWay ? T.SHOULDER_OUT : T.SHOULDER_IN)
 }
 
@@ -97,8 +109,8 @@ export function pavedWidth(lanes: number, twoWay = false): number {
  * `ROAD_ONEWAY_CENTRE` = 0 anchors the lanes on the spine (the truthful one, default); 1 restores
  * the old symmetric asphalt. Two-way roads have equal shoulders, so their offset is always 0.
  */
-export function pavedOffset(twoWay = false): number {
-  if (twoWay || T.ROAD_ONEWAY_CENTRE >= 0.5) return 0
+export function pavedOffset(twoWay = false, kerbed = false): number {
+  if (twoWay || kerbed || T.ROAD_ONEWAY_CENTRE >= 0.5) return 0
   return (T.SHOULDER_OUT - T.SHOULDER_IN) / 2
 }
 
@@ -238,7 +250,7 @@ function blendFor(sets: Record<string, SurfaceSet>, from: string, to: string): T
  * (Rich, twice). The predicate is asked for each marking quad at its own lateral offset, so a
  * junction on the right erases the right-hand edge line and leaves the left one alone.
  */
-export function roadMesh(st: Station[], lanesAt: (s: number) => number, classAt: (s: number) => string = () => 'asphalt_aged', sets: Record<string, SurfaceSet> = {}, lift = 0.02, twoWayAt: (s: number) => boolean = () => false, paintOff: ((x: number, z: number) => boolean) | null = null): THREE.Group {
+export function roadMesh(st: Station[], lanesAt: (s: number) => number, classAt: (s: number) => string = () => 'asphalt_aged', sets: Record<string, SurfaceSet> = {}, lift = 0.02, twoWayAt: (s: number) => boolean = () => false, paintOff: ((x: number, z: number) => boolean) | null = null, kerbedAt: (s: number) => boolean = () => false): THREE.Group {
   const g = new THREE.Group()
   // one asphalt geometry per surface class, so each gets its own textured material
   const byClass: Record<string, { pos: number[]; uv: number[]; idx: number[] }> = {}
@@ -286,10 +298,11 @@ export function roadMesh(st: Station[], lanesAt: (s: number) => number, classAt:
     // where 3.66 was meant (0.75×). The paved-edge lookup in scene.ts already used the flag, so
     // the strip and the asphalt disagreed by 0.9 m a side as well.
     const twoWay = twoWayAt((a.s + b.s) / 2)
-    const wa = pavedWidth(la, twoWay), wb = pavedWidth(lb, twoWay)
+    const kerbed = kerbedAt((a.s + b.s) / 2)
+    const wa = pavedWidth(la, twoWay, kerbed), wb = pavedWidth(lb, twoWay, kerbed)
     // the asphalt's centre, right of the spine: 0 for a two-way road, half the shoulder difference
     // for a carriageway (see pavedOffset)
-    const off = pavedOffset(twoWay)
+    const off = pavedOffset(twoWay, kerbed)
     const sa = a.dir.clone().cross(UP), sb = b.dir.clone().cross(UP) // right of travel
     const ya = a.pos.y + lift, yb = b.pos.y + lift
     const P = (base: THREE.Vector3, side: THREE.Vector3, off: number, y: number) => new THREE.Vector3(base.x + side.x * off, y, base.z + side.z * off)
@@ -303,8 +316,9 @@ export function roadMesh(st: Station[], lanesAt: (s: number) => number, classAt:
     quad(bk.pos, bk.idx, P(a.pos, sa, off - wa / 2, ya), P(a.pos, sa, off + wa / 2, ya), P(b.pos, sb, off - wb / 2, yb), P(b.pos, sb, off + wb / 2, yb), undefined, undefined,
       [0, a.s / mpt, wa / mpt, a.s / mpt, 0, b.s / mpt, wb / mpt, b.s / mpt], bk.uv)
     // Paint runs over the untrimmed station interval: it sits 0.04 m above the asphalt, so it
-    // crosses the blend band without a gap and without fighting it.
-    const ml = 0.12
+    // crosses the blend band without a gap and without fighting it. Widths are MUTCD's: normal
+    // lines 150 mm (edge, lane), the double yellow two 100 mm lines 100 mm apart.
+    const ml = 0.075
     /**
      * One marking from station `from` to station `to`, at lateral offsets o0 → o1, CLIPPED where
      * it enters a junction. The first version dropped any quad whose either end was inside, so
@@ -339,11 +353,14 @@ export function roadMesh(st: Station[], lanesAt: (s: number) => number, classAt:
     if (twoWay) {
       // two-way: white edge lines on both shoulders, double yellow at the centre, white dashes
       // between the lanes of each direction (3+ lanes a side)
-      const edgeA = wa / 2 - T.SHOULDER_OUT + off, edgeB = wb / 2 - T.SHOULDER_OUT + off
-      for (const sgn of [-1, 1]) paintSeg(sgn * edgeA, sgn * edgeB, ml, white)
-      for (const off of [-0.16, 0.16]) paintSeg(off, off, 0.1, yellow)
+      // a kerbed street has no edge line; an arterial's sits SHOULDER_OUT in from the edge
+      if (!kerbed) {
+        const edgeA = wa / 2 - T.SHOULDER_OUT + off, edgeB = wb / 2 - T.SHOULDER_OUT + off
+        for (const sgn of [-1, 1]) paintSeg(sgn * edgeA, sgn * edgeB, ml, white)
+      }
+      for (const off of [-0.1, 0.1]) paintSeg(off, off, 0.05, yellow)
       const perSide = Math.max(1, Math.floor(la / 2))
-      if (dash) for (const sgn of [-1, 1]) for (let l = 1; l < perSide; l++) paintSeg(sgn * l * T.LANE_WIDTH, sgn * l * T.LANE_WIDTH, 0.08, white, a0, dashEnd)
+      if (dash) for (const sgn of [-1, 1]) for (let l = 1; l < perSide; l++) paintSeg(sgn * l * T.LANE_WIDTH, sgn * l * T.LANE_WIDTH, ml, white, a0, dashEnd)
     } else {
       // one-way carriageway: yellow left (median side), white right, on the shoulder boundaries
       const leftA = -wa / 2 + T.SHOULDER_IN + off, leftB = -wb / 2 + T.SHOULDER_IN + off
@@ -351,7 +368,7 @@ export function roadMesh(st: Station[], lanesAt: (s: number) => number, classAt:
       paintSeg(leftA, leftB, ml, yellow)
       paintSeg(rightA, rightB, ml, white)
       // lane dashes: 3 m paint / 9 m gap is the US standard; one dash per 12 m station cycle
-      if (dash) for (let l = 1; l < la; l++) paintSeg(leftA + l * T.LANE_WIDTH, leftA + l * T.LANE_WIDTH, 0.08, white, a0, dashEnd)
+      if (dash) for (let l = 1; l < la; l++) paintSeg(leftA + l * T.LANE_WIDTH, leftA + l * T.LANE_WIDTH, ml, white, a0, dashEnd)
     }
 
     // the transition strip into the gap this quad's trimmed end left
@@ -362,12 +379,12 @@ export function roadMesh(st: Station[], lanesAt: (s: number) => number, classAt:
       const n0 = lerpSt(a0, b0, 1 - cutEnd / span) // = b
       const nextSpan = st[i + 2] ? st[i + 2].s - b0.s || 1 : span
       const n1 = st[i + 2] ? lerpSt(b0, st[i + 2], Math.min(T.ROAD_BLEND_M / 2, nextSpan * 0.4) / nextSpan) : b0
-      const w0 = pavedWidth(lanesAt(n0.s), twoWayAt(n0.s)), w1 = pavedWidth(lanesAt(n1.s), twoWayAt(n1.s))
+      const w0 = pavedWidth(lanesAt(n0.s), twoWayAt(n0.s), kerbedAt(n0.s)), w1 = pavedWidth(lanesAt(n1.s), twoWayAt(n1.s), kerbedAt(n1.s))
       const s0 = n0.dir.clone().cross(UP), s1 = n1.dir.clone().cross(UP)
       const y0 = n0.pos.y + lift, y1 = n1.pos.y + lift
       const k = bk2.pos.length / 3
       for (const [p, sd, w, yy] of [[n0, s0, w0, y0], [n1, s1, w1, y1]] as [Station, THREE.Vector3, number, number][]) {
-        const bo = pavedOffset(twoWayAt(p.s))
+        const bo = pavedOffset(twoWayAt(p.s), kerbedAt(p.s))
         for (const o of [bo - w / 2, bo + w / 2]) bk2.pos.push(p.pos.x + sd.x * o, yy, p.pos.z + sd.z * o)
       }
       // uv in METRES here (blendMaterial divides by each set's metresPerTile)

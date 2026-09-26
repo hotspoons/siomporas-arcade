@@ -27,7 +27,7 @@ import { buildBarriers, buildFurniture, buildSidewalks, sidewalkCover } from './
 import { buildBlades, buildCrosswalks, buildLaneArrows, buildSignals, buildStopBars, junctionPaintCut, loadJunctionFacts, type ArrowsResult, type BarsResult, type CrosswalksResult } from './intersections'
 import { buildParking, parkingCover } from './parking'
 import { buildBridges, flattenSpine, loadStructureOverrides, suppressed } from './structures'
-import { loadSurfaceSets, overpassMesh, pavedOffset, pavedWidth, repaintMarkings, roadMesh, stations, taperedLanes, treesFromCanopy, type SurfaceSet } from './props'
+import { isKerbed, loadSurfaceSets, overpassMesh, pavedOffset, pavedWidth, repaintMarkings, roadMesh, stations, taperedLanes, treesFromCanopy, type SurfaceSet } from './props'
 import { STYLE, styled, type Style } from './style'
 import { buildRocks } from './rocks'
 import { buildWater } from './water'
@@ -717,13 +717,15 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     if (tg.oneway === 'no') return true
     return !['motorway', 'motorway_link', 'trunk_link', 'primary_link'].includes(tg.highway ?? '')
   }
-  const pavedHalfAt = (s: number) => pavedWidth(lanesAt(s), twoWayAt(s)) / 2
+  /** a kerbed street (residential, tertiary…) has a gutter, no shoulder and no edge line — see props.KERBED */
+  const kerbedAt = (s: number) => isKerbed(segAt(s)?.tags?.highway)
+  const pavedHalfAt = (s: number) => pavedWidth(lanesAt(s), twoWayAt(s), kerbedAt(s)) / 2
   // How far right of the spine the asphalt's centre sits: 0 on a two-way road, half the shoulder
   // difference on a carriageway, because OSM draws a motorway down its travel lanes and not down
   // the middle of its asphalt. edgeDistance has to use this or the pavement the car and the grass
   // believe in drifts 0.9 m from the one the asphalt mesh draws — the same class of disagreement
   // the two-way width fix removed.
-  const pavedOffsetAt = (s: number) => pavedOffset(twoWayAt(s))
+  const pavedOffsetAt = (s: number) => pavedOffset(twoWayAt(s), kerbedAt(s))
   const road = new THREE.Group()
   road.name = 'road'
   surfaceSets ??= await loadSurfaceSets()
@@ -784,7 +786,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
   }
 
   // the asphalt and paint are rebuilt when a road knob moves (F6 → road), so keep the builders
-  const roadBuilders: (() => THREE.Object3D)[] = [() => roadMesh(mainSt, lanesAt, classAt, surfaceSets!, 0.02, twoWayAt, paintOff)]
+  const roadBuilders: (() => THREE.Object3D)[] = [() => roadMesh(mainSt, lanesAt, classAt, surfaceSets!, 0.02, twoWayAt, paintOff, kerbedAt)]
   let roadParts: THREE.Object3D[] = []
   const buildRoads = () => {
     for (const o of roadParts) {
@@ -853,8 +855,9 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     }
     const lanesB = Number(br.lanes) > 0 ? Number(br.lanes) : 2
     const twoWayB = br.oneway === 'yes' || br.oneway === '-1' ? false : br.oneway === 'no' ? true : !['motorway', 'motorway_link', 'trunk_link', 'primary_link'].includes(br.highway ?? '')
-    const halfB = pavedWidth(lanesB, twoWayB) / 2
-    roadBuilders.push(() => roadMesh(stations(atB, lenB, 6), () => lanesB, () => 'asphalt_aged', surfaceSets!, 0.02, () => twoWayB, paintOff))
+    const kerbedB = isKerbed(br.highway)
+    const halfB = pavedWidth(lanesB, twoWayB, kerbedB) / 2
+    roadBuilders.push(() => roadMesh(stations(atB, lenB, 6), () => lanesB, () => 'asphalt_aged', surfaceSets!, 0.02, () => twoWayB, paintOff, () => kerbedB))
     branchAts.push({ at: atB, len: lenB, half: halfB, name: br.name ?? br.ref ?? 'branch' })
   }
   buildRoads()

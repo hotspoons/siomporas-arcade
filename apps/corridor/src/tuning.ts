@@ -131,6 +131,8 @@ export let CULDESAC_RADIUS = 9
 /** paint stops this far from the centre of a junction; nothing is painted through one */
 export let JUNCTION_CLEAR = 9
 export let SHOULDER_OUT = 3.0
+/** a KERBED street has no shoulder: the asphalt ends this far past the lane at the gutter (m) */
+export let KERB_GUTTER = 0.3
 export let SHOULDER_IN = 1.2
 /** m: width of the transition strip where the surface class changes. 0 = the old hard joint. */
 export let ROAD_BLEND_M = 0.15
@@ -519,6 +521,7 @@ export const TUNE_TABS: TuneTab[] = [
           tune('CULDESAC_RADIUS', () => CULDESAC_RADIUS, (v) => (CULDESAC_RADIUS = v), [0, 20], 0.5, 'turning bulb at a dead end (m); 0 = none'),
           tune('JUNCTION_CLEAR', () => JUNCTION_CLEAR, (v) => (JUNCTION_CLEAR = v), [0, 30], 0.5, 'bare asphalt radius at a junction (m)'),
           tune('SHOULDER_OUT', () => SHOULDER_OUT, (v) => (SHOULDER_OUT = v), [0, 5], 0.1),
+          tune('KERB_GUTTER', () => KERB_GUTTER, (v) => (KERB_GUTTER = v), [0, 1.5], 0.05, 'a kerbed street: gutter past the lane instead of a shoulder (m)'),
           tune('SHOULDER_IN', () => SHOULDER_IN, (v) => (SHOULDER_IN = v), [0, 5], 0.1),
           tune('ROAD_BLEND_M', () => ROAD_BLEND_M, (v) => (ROAD_BLEND_M = v), [0, 2], 0.05, 'transition strip where the surface class changes (m); 0 = hard joint'),
           tune('ROAD_TAPER_M', () => ROAD_TAPER_M, (v) => (ROAD_TAPER_M = v), [0, 200], 5, 'length a lane-count change is ramped over (m); 0 = a step'),

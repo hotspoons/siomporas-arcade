@@ -150,6 +150,7 @@ const KEYS: { group: string; rows: [string, string][] }[] = [
       ['M', 'hide the interface'],
       ['B', 'on foot / back to flying'],
       ['G', 'Squishy Hunt on this site'],
+      ['P', 'Parkour on this site'],
       ['Esc', 'close what is open'],
     ],
   },

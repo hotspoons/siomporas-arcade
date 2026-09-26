@@ -8,6 +8,7 @@ import { FlyControls } from './fly'
 import { MiniMap } from './minimap'
 import { Sky } from './sky'
 import { SquishyHunt } from './games/squishy'
+import { Parkour } from './games/parkour'
 import * as T from './tuning'
 import { TUNE_TABS } from './tuning'
 import { applySiteTuning, saveSiteTuning } from './sitetuning'
@@ -78,6 +79,7 @@ const drive = { on: false, cockpit: false, yaw: 0, pitch: 0, car: null as Car | 
 let fly: FlyControls | null = null
 // the games ride on the viewer: ?game=squishy starts one when the site lands, G toggles it
 let game: SquishyHunt | null = null
+let parkour: Parkour | null = null
 const wantGame = new URLSearchParams(location.search).get('game')
 
 function resize() {
@@ -153,7 +155,9 @@ async function loadSite(slug: string) {
   fly ??= new FlyControls(camera, orbit, canvas, (x, z) => site?.groundAt(x, z) ?? null)
   game?.dispose()
   game = null
+  endParkour()
   if (wantGame === 'squishy') startSquishy()
+  if (wantGame === 'parkour') startParkour()
   minimap = new MiniMap(document.body, manifest)
   const st = readStanceParam()
   if (st && st.site === slug) applyStance(st)
@@ -231,6 +235,25 @@ function startSquishy() {
   setDrive(false)
   setWalk(true)
   toast(`Squishy Hunt: ${game.hauls.length} squishies hidden around town. Walk with W/A/S/D, look with the right mouse button.`, 'info', 6000)
+}
+/** Parkour on this site: the runner takes the camera; P again ends it. */
+function startParkour() {
+  if (!site || !fly) return
+  game?.dispose()
+  game = null
+  setDrive(false)
+  fly.setWalk(false)
+  fly.enabled = false
+  orbit.enabled = true
+  parkour = new Parkour(site, camera, orbit, canvas, document.body)
+  ;(window as unknown as { __parkour: Parkour }).__parkour = parkour // probes drive the tick directly
+  toast('Parkour: W/A/S/D run, Space jumps, A/D spin in the air, Space again to roll it out. F draws the bow.', 'info', 7000)
+}
+function endParkour() {
+  if (!parkour) return
+  parkour.dispose()
+  parkour = null
+  if (fly) fly.enabled = !drive.on
 }
 function setWalk(on: boolean) {
   if (!fly) return
@@ -582,6 +605,7 @@ addEventListener('keydown', (e) => {
     case 'KeyN': minimap?.setExpanded(!minimap.expanded); break
     case 'KeyB': if (!drive.on && fly) setWalk(!fly.walk); break
     case 'KeyG': if (game) { game.dispose(); game = null; toast('hunt over', 'info', 1200) } else startSquishy(); break
+    case 'KeyP': if (parkour) { endParkour(); toast('parkour over', 'info', 1200) } else startParkour(); break
     // R backs you out the way you came (stuntin's recover); Shift+R is the old teleport to the
     // photo station, kept for getting back to the start of the corridor
     case 'KeyR':
@@ -660,6 +684,9 @@ function frame() {
     camera.lookAt(car.pos.clone().add(car.forward.clone().multiplyScalar(T.CHASE_LOOK_AHEAD)).add(new THREE.Vector3(0, 1.0, 0)))
     if (car.event === 'bump') status('bump')
     ui.setPos(`${(Math.abs(car.speed) * 2.237).toFixed(0)} mph · ${car.onGrass ? 'grass' : 'pavement'}${Math.abs(car.slide) > 1 ? ' · sliding' : ''}`)
+  } else if (parkour) {
+    parkour.tick(dt)
+    ui.setPos(`${parkour.score} pts`)
   } else {
     fly?.update(dt)
     applyMove(dt)

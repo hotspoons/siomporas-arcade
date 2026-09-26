@@ -202,6 +202,20 @@ body.chrome-off .drivepad { display: none; }
 #squishy .squishy-players { margin-top: var(--s2); font-size: var(--text-xs, 12px); opacity: 0.75; }
 #squishy .squishy-players:empty { display: none; }
 body.chrome-off #squishy { display: none; }
+#parkour {
+  position: fixed; left: var(--s3); top: calc(var(--bar-h, 48px) + var(--s3)); z-index: var(--z-hud);
+  width: min(360px, calc(100vw - 2 * var(--s3)));
+  padding: var(--s2) var(--s3); border-radius: var(--r3);
+  color: var(--ink-1); background: var(--hud-bg); border: 1px solid var(--hud-line); box-shadow: var(--shadow-2);
+  font-size: var(--text-sm, 13px);
+}
+#parkour .parkour-title { display: flex; align-items: center; gap: var(--s1); font-weight: 600; letter-spacing: 0.02em; }
+#parkour .parkour-title svg { color: #ffd23f; }
+#parkour .parkour-score { font-family: 'IBM Plex Mono', monospace; font-size: 26px; font-weight: 600; margin-top: 2px; }
+#parkour .parkour-trick { margin-top: var(--s1); line-height: 1.35; }
+#parkour .parkour-status { margin-top: var(--s1); font-size: var(--text-xs, 12px); opacity: 0.75; }
+#parkour .parkour-status:empty { display: none; }
+body.chrome-off #parkour { display: none; }
 
 /* On a phone the map moves out from under the thumb and shrinks; expanded, it fills the screen. */
 @media (max-width: 760px), (pointer: coarse) and (max-width: 1024px) {

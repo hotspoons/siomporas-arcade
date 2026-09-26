@@ -830,6 +830,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     const c2 = new THREE.CatmullRomCurve3(raw2, false, 'centripetal')
     c2.arcLengthDivisions = Math.max(100, raw2.length * 8)
     const len2 = c2.getLength()
+    if (!(len2 > 1)) continue // a sibling whose points coincide (see the branch guard below)
     const sibAt = (s: number) => {
       const u = Math.min(1, Math.max(0, s / len2))
       return { pos: c2.getPointAt(u), dir: c2.getTangentAt(u) }
@@ -849,6 +850,14 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     const cB = new THREE.CatmullRomCurve3(rawB, false, 'centripetal')
     cB.arcLengthDivisions = Math.max(100, rawB.length * 8)
     const lenB = cB.getLength()
+    // A branch whose points all coincide has no length, and s / 0 is NaN: getPointAt(NaN) reads
+    // an undefined point and the WHOLE site fails to load ("corridor: load failed ... reading
+    // 'x'"). A re-vector on 2026-09-26 produced one such branch on crofton-triangle and took the
+    // viewer down for everyone until this guard. A road shorter than a metre is not a road.
+    if (!(lenB > 1)) {
+      console.warn(`${manifest.slug}: branch ${(br as { id?: string }).id ?? br.name ?? '?'} has ${rawB.length} points and ${lenB.toFixed(2)} m of length — skipped`)
+      continue
+    }
     const atB = (s: number) => {
       const u = Math.min(1, Math.max(0, s / lenB))
       return { pos: cB.getPointAt(u), dir: cB.getTangentAt(u) }

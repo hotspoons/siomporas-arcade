@@ -587,14 +587,87 @@ def reprofile(site_dir: Path) -> dict:
     return {"chains": len(chains), "branches": len(branches)}
 
 
+def reprofile_from_dtm(site_dir: Path, step_m: float = 2.0) -> dict:
+    """Branch profiles from the DTM alone, for a box that cannot hold the point cloud.
+
+    `reprofile` above rebuilds every branch from the near-road points and the full structure test,
+    and needs the machine to itself: crofton-triangle's 72.6 M returns were OOM-killed with 5 GB
+    free (2026-09-26). A residential street's driving surface IS the ground in the lidar DTM to
+    within centimetres, so sampling `lidar/dtm.vrt` every `step_m` along each chain gives the
+    same road_z for grading without touching the points. No structures — a side street's
+    overpasses are not found this way, and the primary keeps its own profile.json. Falls back to
+    the 1 m DEM where the DTM is nodata (the band-limited rasters stop at the lidar corridor).
+    """
+    import rasterio
+    from shapely.geometry import LineString as LS
+
+    spine = json.loads((site_dir / "spine_utm.json").read_text())
+    if not spine.get("network"):
+        raise SystemExit(f"{site_dir.name} is not a network site")
+    dtm = rasterio.open(site_dir / "lidar" / "dtm.vrt")
+    dem_p = site_dir / "dem_1m.tif"
+    dem = rasterio.open(dem_p) if dem_p.exists() else None
+    branches_old: dict[str, dict] = {}
+    if (site_dir / "branches.json").exists():
+        for b in json.loads((site_dir / "branches.json").read_text()).get("branches", []):
+            if b.get("id"):
+                branches_old[b["id"]] = b
+    prim = LS(spine["coords"])
+    branches = []
+    filled = 0
+    for sib in spine.get("siblings", []):
+        g = sib["geometry"]
+        parts = [g["coordinates"]] if g["type"] == "LineString" else g["coordinates"]
+        coords = [c for part in parts for c in part]
+        if len(coords) < 2:
+            continue
+        line = LS(coords)
+        s = np.arange(0.0, line.length, step_m).tolist() + [line.length]
+        xy = [line.interpolate(v).coords[0] for v in s]
+        z = np.array([v[0] for v in dtm.sample(xy)], dtype=float)
+        bad = ~np.isfinite(z) | (z == (dtm.nodata if dtm.nodata is not None else -9999)) | (z < -100)
+        if bad.any() and dem is not None:
+            zd = np.array([v[0] for v in dem.sample([xy[i] for i in np.flatnonzero(bad)])], dtype=float)
+            z[bad] = zd
+            filled += int(bad.sum())
+        bad = ~np.isfinite(z) | (z < -100)
+        if bad.any():
+            good = ~bad
+            z[bad] = np.interp(np.flatnonzero(bad), np.flatnonzero(good), z[good]) if good.any() else 0.0
+        # a light smoothing, the same spirit as the bake's station clamp: a DTM has kerbs and cars in it
+        if len(z) >= 5:
+            k = np.array([1, 2, 3, 2, 1], float) / 9.0
+            zp = np.pad(z, 2, mode="edge")
+            z = np.convolve(zp, k, mode="valid")
+        old = branches_old.get(sib.get("id"), {})
+        branches.append({
+            **old,
+            "id": sib["id"], "ident": sib.get("ident"), "name": sib.get("name"), "ref": sib.get("ref"),
+            "highway": sib.get("highway"), "lanes": sib.get("lanes"), "oneway": sib.get("oneway"),
+            "length_m": sib.get("length_m"), "junctions": sib.get("junctions") or [],
+            "dead_ends": sib.get("dead_ends") or [],
+            "s_on_primary": old.get("s_on_primary") if old.get("s_on_primary") is not None else round(float(prim.project(line.interpolate(0.5, normalized=True))), 1),
+            "profile": {"step_m": step_m, "s": [round(float(v), 1) for v in s], "road_z": [round(float(v), 2) for v in z], "source": "dtm"},
+            "structures": old.get("structures") or [],
+        })
+    dtm.close()
+    if dem is not None:
+        dem.close()
+    (site_dir / "branches.json").write_text(json.dumps({"frame": "enu", "branches": branches}))
+    print(f"  reprofile(dtm) {len(branches)} branches from the DTM, {filled} samples filled from the DEM", flush=True)
+    return {"branches": len(branches), "filled": filled}
+
+
 def main() -> None:
     import sys
 
     from .__main__ import DATA
 
-    for slug in sys.argv[1:]:
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    from_dtm = "--dtm" in sys.argv
+    for slug in args:
         print(f"=== {slug}")
-        reprofile(DATA / "sites" / slug)
+        (reprofile_from_dtm if from_dtm else reprofile)(DATA / "sites" / slug)
 
 
 if __name__ == "__main__":

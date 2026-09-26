@@ -27,8 +27,21 @@ ribbon along the second; dropping everything under `MIN_ZONE_AREA` leaves exactl
 areas. On crofton-triangle that is the Crofton triangle and the Crofton Mews/north Crofton pocket,
 which are the two Rich named, found rather than guessed.
 
+A ZONE NEEDS EVIDENCE. Density alone put sidewalks on every subdivision in the bake, and Rich,
+who lives there: "neighborhoods to the south of 450 in the crofton map have sidewalks when they
+shouldn't" (2026-09-26). Whether a 1970s subdivision was built with sidewalks is not something a
+street mesh knows — but OSM does, thinly: where a neighbourhood has them, a mapper has usually
+tagged at least one street `sidewalk=both` or drawn one `footway=sidewalk`. So each density blob is
+first SPLIT along the arterials that bound real subdivisions (motorway/trunk/primary/secondary —
+Defense Highway is the line here), and a part keeps its sidewalks only if some OSM sidewalk
+evidence falls inside it. Measured on crofton-triangle before this rule: thirteen parts, of which
+exactly two carry evidence — the triangle (244 streets, 49 tags, 8 sidewalk ways) and north
+Crofton (182 streets, 2 sidewalk ways) — which are the two Rich named on day one. Every part south
+of 450 has zero. The rule finds his answer instead of needing to be told it.
+
 An authored `sidewalk_zones.json` beside the bake overrides the derivation completely, for the case
-where the answer is local knowledge rather than geometry.
+where the answer is local knowledge rather than geometry — a subdivision with sidewalks and no
+mapper, for instance.
 
 What is emitted goes into the manifest's existing `sidewalks` list with `source: "zone"`, so
 `furniture.buildSidewalks` draws it with the kerb, the dropped kerb and the crossing logic it
@@ -48,6 +61,9 @@ WALKABLE = {"residential", "unclassified", "living_street", "tertiary", "seconda
 ZONE_BUFFER_M = 110.0     # half a Crofton block: closes a subdivision, not a rural road
 ZONE_MIN_AREA_M2 = 250_000.0
 ZONE_SIMPLIFY_M = 25.0
+# the roads that bound a subdivision; a density blob is cut along them before evidence is counted
+ZONE_SPLITTERS = {"motorway", "trunk", "primary", "secondary"}
+ZONE_PART_MIN_M2 = 50_000.0   # slivers left by the cut are not neighbourhoods
 
 VERGE_M = 2.0             # kerb face to the near edge of the walk
 WALK_W = 1.5
@@ -66,7 +82,7 @@ def _lanes(tags: dict, highway: str) -> int:
     return 4 if highway in ("motorway", "trunk", "primary") else 2
 
 
-def zones(roads: list[dict], authored: Path | None = None, frame=None) -> list:
+def zones(roads: list[dict], authored: Path | None = None, frame=None, existing: list[dict] | None = None) -> list:
     """The polygons inside which a street is assumed to have a sidewalk.
 
     `roads` are the drawn roads with an ENU `line`. Returns shapely polygons in ENU metres.
@@ -95,7 +111,7 @@ def zones(roads: list[dict], authored: Path | None = None, frame=None) -> list:
         return []
     blob = unary_union([ln.buffer(ZONE_BUFFER_M, resolution=4) for ln in dense])
     polys = list(getattr(blob, "geoms", [blob]))
-    out = []
+    blobs = []
     for p in polys:
         if p.area < ZONE_MIN_AREA_M2:
             continue
@@ -104,7 +120,41 @@ def zones(roads: list[dict], authored: Path | None = None, frame=None) -> list:
         for r in getattr(q, "geoms", [q]):
             if r.is_empty or r.area < ZONE_MIN_AREA_M2 * 0.5:
                 continue
-            out.append(r.simplify(ZONE_SIMPLIFY_M))
+            blobs.append(r.simplify(ZONE_SIMPLIFY_M))
+    return _with_evidence(blobs, roads, existing)
+
+
+def _with_evidence(blobs: list, roads: list[dict], existing: list[dict] | None) -> list:
+    """Cut each blob along the arterials and keep the parts OSM says have sidewalks.
+
+    Evidence is a walkable street tagged `sidewalk=both|left|right` or a mapped `footway=sidewalk`
+    way with its midpoint inside the part. One is enough: the question is whether the subdivision
+    was built with sidewalks, and a single tagged street answers it.
+    """
+    from shapely.geometry import LineString
+    from shapely.ops import unary_union
+
+    if not blobs:
+        return []
+    splitters = [LineString(r["line"]).buffer(2.0) for r in roads if r["highway"] in ZONE_SPLITTERS and len(r["line"]) > 1]
+    cut = unary_union(splitters) if splitters else None
+    marks = []
+    for r in roads:
+        tags = r.get("tags") or {}
+        if r["highway"] in WALKABLE and str(tags.get("sidewalk") or "").lower() in ("both", "left", "right") and len(r["line"]) > 1:
+            marks.append(LineString(r["line"]).interpolate(0.5, normalized=True))
+    for e in existing or []:
+        cs = e.get("coords") or []
+        if e.get("kind") == "sidewalk" and len(cs) > 1:
+            marks.append(LineString([(c[0], c[1]) for c in cs]).interpolate(0.5, normalized=True))
+    out = []
+    for b in blobs:
+        pieces = b.difference(cut) if cut is not None else b
+        for part in getattr(pieces, "geoms", [pieces]):
+            if part.is_empty or part.area < ZONE_PART_MIN_M2:
+                continue
+            if any(part.contains(m) for m in marks):
+                out.append(part)
     return out
 
 
@@ -114,7 +164,7 @@ def build(site_dir: Path, frame, roads: list[dict], existing: list[dict] | None)
     from shapely.ops import unary_union
     from shapely.strtree import STRtree
 
-    Z = zones(roads, site_dir / "sidewalk_zones.json", frame)
+    Z = zones(roads, site_dir / "sidewalk_zones.json", frame, existing)
     if not Z:
         return {"runs": [], "zones": [], "counts": {"zones": 0}}
     area = unary_union(Z)

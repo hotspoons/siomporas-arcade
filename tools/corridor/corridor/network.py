@@ -435,10 +435,31 @@ def fetch_site(site: dict, half_width: float, lidar_half_width: float, skip: set
             branches.append(branch_rec(c, lidar.profile(c["line"], r["dtm"], r["chm"], r["transform"], r["pts"])))
         print(f"  branch  {len(branches)} branches profiled, {sum(len(b['structures']) for b in branches)} structures on them", flush=True)
     else:
+        # A partial re-run with lidar skipped ("a partial re-run updates the manifest it finds
+        # rather than forgetting the rest") used to write every branch with profile: null and the
+        # export then put all 427 of crofton-triangle's side streets at z = 0 — sea level, 40 m
+        # under the terrain, with the verges grading down to them as walls (2026-09-26, after an
+        # imagery-only re-fetch). The profiles the previous run computed are kept, keyed by id.
+        had: dict[str, dict] = {}
+        old_p = out / "branches.json"
+        if old_p.exists():
+            try:
+                for b in (json.loads(old_p.read_text()).get("branches") or []):
+                    if b.get("profile") and b.get("id"):
+                        had[b["id"]] = b
+            except Exception as exc:
+                print(f"  branch  could not read the previous branches.json: {exc}")
+        kept = 0
         for c in R["chains"]:
             if c is prim:
                 continue
-            branches.append(branch_rec(c, None))
+            prev = had.get(c["id"])
+            bp = {"step_m": prev["profile"].get("step_m", 2.0), "s": prev["profile"]["s"], "road_z": prev["profile"]["road_z"], "structures": prev.get("structures") or []} if prev else None
+            if bp:
+                kept += 1
+            branches.append(branch_rec(c, bp))
+        if had:
+            print(f"  branch  lidar skipped: kept {kept} of {len(branches)} branch profiles from the previous run", flush=True)
     (out / "branches.json").write_text(json.dumps({"frame": "enu", "branches": branches}))
     manifest["branches"] = {"count": len(branches), "structures": sum(len(b["structures"]) for b in branches)}
     try:

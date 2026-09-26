@@ -315,6 +315,7 @@ export class ImageryStream {
     const t = this.targets.get(key)
     if (!tex || !t) return
     t.mat.map = t.fallback
+    t.mat.userData.own = null
     t.mat.needsUpdate = true
     this.bytes -= ImageryStream.bytesOf(tex)
     tex.dispose()
@@ -341,6 +342,7 @@ export class ImageryStream {
       this.loaded.set(key, tex)
       this.loads++
       t.mat.map = tex
+      t.mat.userData.own = tex // so the imagery toggle can restore it (scene.ts setImagery)
       t.mat.color.setRGB(1, 1, 1)
       t.mat.needsUpdate = true
     })

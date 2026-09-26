@@ -9,7 +9,7 @@
 // the printed counts; THIN=0 shoots it as Rich has it, slowly.
 //
 // HIDE takes mesh or layer names: terrain, strip, road, trees, grass, imagery, structures,
-// horizon, placements. That is the bisection — hide one surface at a time until the gap between
+// horizon, placements, litter (the strip's forest-floor blend). That is the bisection — hide one surface at a time until the gap between
 // two of them shows which is which.
 import { chromium } from 'playwright'
 
@@ -43,6 +43,16 @@ console.log(await page.evaluate(({ thin, hide, wire }) => {
   site.group.traverse((o) => { if (o.name) named.set(o.name, o) })
   const hideOne = (n) => {
     if (n === 'grass' && site.grass) { site.grass.mesh.visible = false; return true }
+    if (n === 'litter' || n === 'grasstex') {
+      // the strip's ground blend is not a mesh and its uniforms are not on the material (they are
+      // merged into the compiled shader); the one handle the page keeps is the weather system's
+      // follower list, which every strip registers its uniforms with. litter = forest floor off;
+      // grasstex = the mown/rough turf textures off, imagery only.
+      const key = n === 'litter' ? 'hasForest' : 'hasGrass'
+      let k = 0
+      site.group.traverse((o) => { const u = o.userData?.uniforms; if (u && key in u) { u[key].value = 0; k++ } })
+      return k > 0
+    }
     if (n === 'imagery') {
       site.setImagery(false)
       return true

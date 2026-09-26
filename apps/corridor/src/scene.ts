@@ -23,7 +23,7 @@ import { Adjustments, NEUTRAL as NEUTRAL_ADJ } from './adjust'
 import { buildPlacements, loadCatalog, loadPlacements } from './placements'
 import { buildBuildings } from './buildings'
 import { buildPower } from './power'
-import { buildBarriers, buildFurniture, buildSidewalks } from './furniture'
+import { buildBarriers, buildFurniture, buildSidewalks, sidewalkCover } from './furniture'
 import { buildBlades, buildSignals, buildStopBars } from './intersections'
 import { buildParking, parkingCover } from './parking'
 import { buildBridges, flattenSpine, loadStructureOverrides, suppressed } from './structures'
@@ -150,25 +150,43 @@ function sampler(f: Field) {
   }
 }
 
-/** A regular grid mesh over a height field, sampled every `stride` cells. */
-function gridGeometry(f: Field, stride: number, lift: (i: number, r: number, c: number) => number, color?: (i: number) => [number, number, number]) {
+/**
+ * A regular grid mesh over a height field, sampled every `stride` cells.
+ *
+ * THE MESH MUST REACH THE RASTER'S EDGE. Two things used to stop it, and together they left an
+ * 8 m trench along the east and south side of every 1 km tile — Rich's "big blue water seams
+ * between tiles" (2026-09-26), blue because the sea plane at 0 m showed through the gap. Found by
+ * measurement, not by looking: the DEMs of two neighbouring tiles agree along their shared column
+ * to 0.01 m, so the data was fine; the live meshes were 100 x 100 vertices from 500 x 500 cells,
+ * stride 5, and the last vertex sat at cell 495 — the last four cells were never meshed.
+ *
+ *   1. `floor((w-1)/stride) + 1` columns dropped the remainder. It is `ceil` now, and the final
+ *      column is pinned to cell w-1 whatever the stride.
+ *   2. Every vertex sat at its cell CENTRE, so even a full grid stopped half a cell short of the
+ *      raster edge on all four sides. The outermost vertices now sit ON the edge (u = 0 and 1),
+ *      carrying the edge cell's height: a half-cell stretch of the edge texel, exact everywhere
+ *      else, and two neighbours now share a line instead of leaving one between them.
+ */
+function gridGeometry(f: Field, stride: number, lift: (i: number, r: number, c: number) => number, color?: (i: number) => [number, number, number], uv1At?: (x: number, y: number) => [number, number]) {
   const [xmin, , , ymax] = f.layer.bbox
   const [w, h] = f.layer.size
   const rf = f.rf
   const enu = [0, 0, 0]
-  const cols = Math.floor((w - 1) / stride) + 1
-  const rows = Math.floor((h - 1) / stride) + 1
+  const cols = Math.ceil((w - 1) / stride) + 1
+  const rows = Math.ceil((h - 1) / stride) + 1
   const pos = new Float32Array(cols * rows * 3)
   const uv = new Float32Array(cols * rows * 2)
+  const uv1 = uv1At ? new Float32Array(cols * rows * 2) : null
   const col = color ? new Float32Array(cols * rows * 3) : null
   let k = 0
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
-      const rr = Math.min(h - 1, r * stride)
-      const cc = Math.min(w - 1, c * stride)
+      const rr = r === rows - 1 ? h - 1 : Math.min(h - 1, r * stride)
+      const cc = c === cols - 1 ? w - 1 : Math.min(w - 1, c * stride)
       const i = rr * w + cc
-      const u = (cc + 0.5) / w
-      const v = (rr + 0.5) / h
+      // cell centres inside; the raster's own edge on the rim
+      const u = c === 0 ? 0 : c === cols - 1 ? 1 : (cc + 0.5) / w
+      const v = r === 0 ? 0 : r === rows - 1 ? 1 : (rr + 0.5) / h
       const z = f.data[i] + lift(i, rr, cc)
       if (rf) {
         // geodetic from the lattice, then the ellipsoid: the curvature is not a correction added
@@ -178,12 +196,21 @@ function gridGeometry(f: Field, stride: number, lift: (i: number, r: number, c: 
         pos[k * 3 + 1] = enu[2]
         pos[k * 3 + 2] = -enu[1]
       } else {
-        pos[k * 3] = xmin + (cc + 0.5) * f.layer.res
+        pos[k * 3] = xmin + u * w * f.layer.res
         pos[k * 3 + 1] = z
-        pos[k * 3 + 2] = -(ymax - (rr + 0.5) * f.layer.res)
+        pos[k * 3 + 2] = -(ymax - v * h * f.layer.res)
       }
       uv[k * 2] = u
       uv[k * 2 + 1] = 1 - v
+      if (uv1 && uv1At) {
+        // where this vertex falls in ANOTHER raster (the site overview), in that raster's own
+        // normalised coordinates: exact through the lattices, so a placeholder drawn from it sits
+        // on the same ground as the tile's own imagery will
+        const q = uv1At(pos[k * 3], -pos[k * 3 + 2])
+        uv1[k * 2] = q[0]
+        uv1[k * 2 + 1] = q[0] < 0 ? -1 : 1 - q[1] // the (-1, -1) sentinel means "no data here"
+
+      }
       if (col && color) {
         const [cr, cg, cb] = color(i)
         col[k * 3] = cr
@@ -208,10 +235,56 @@ function gridGeometry(f: Field, stride: number, lift: (i: number, r: number, c: 
   const g = new THREE.BufferGeometry()
   g.setAttribute('position', new THREE.BufferAttribute(pos, 3))
   g.setAttribute('uv', new THREE.BufferAttribute(uv, 2))
+  if (uv1) g.setAttribute('uv1', new THREE.BufferAttribute(uv1, 2))
   if (col) g.setAttribute('color', new THREE.BufferAttribute(col, 3))
   g.setIndex(new THREE.BufferAttribute(idx, 1))
   g.computeVertexNormals()
   return g
+}
+
+/**
+ * Which pixels of an air photo are pavement — see the call site for why and the thresholds. Half
+ * resolution (2 m on a 1 m overview) is plenty for a car park and a quarter of the work.
+ */
+function pavedFromImagery(img: HTMLImageElement): Float32Array {
+  const w = Math.floor(img.naturalWidth / 2), h = Math.floor(img.naturalHeight / 2)
+  const c = document.createElement('canvas')
+  c.width = w
+  c.height = h
+  const ctx = c.getContext('2d', { willReadFrequently: true })!
+  ctx.drawImage(img, 0, 0, w, h)
+  const px = ctx.getImageData(0, 0, w, h).data
+  const raw = new Uint8Array(w * h)
+  for (let i = 0, k = 0; i < raw.length; i++, k += 4) {
+    const r = px[k] / 255, g = px[k + 1] / 255, b = px[k + 2] / 255
+    const luma = 0.299 * r + 0.587 * g + 0.114 * b
+    const chroma = Math.max(r, g, b) - Math.min(r, g, b)
+    const greenish = g - Math.max(r, b)
+    raw[i] = chroma < 0.14 && luma > 0.42 && luma < 0.92 && greenish < 0.02 ? 1 : 0
+  }
+  // 5x5 majority (>= 13 of 25), as two separable box sums
+  const rows = new Uint8Array(w * h)
+  for (let y = 0; y < h; y++) {
+    let s = 0
+    const o = y * w
+    for (let x = 0; x < Math.min(w, 2); x++) s += raw[o + x]
+    for (let x = 0; x < w; x++) {
+      if (x + 2 < w) s += raw[o + x + 2]
+      if (x - 3 >= 0) s -= raw[o + x - 3]
+      rows[o + x] = s
+    }
+  }
+  const out = new Float32Array(w * h)
+  for (let x = 0; x < w; x++) {
+    let s = 0
+    for (let y = 0; y < Math.min(h, 2); y++) s += rows[y * w + x]
+    for (let y = 0; y < h; y++) {
+      if (y + 2 < h) s += rows[(y + 2) * w + x]
+      if (y - 3 >= 0) s -= rows[(y - 3) * w + x]
+      out[y * w + x] = s >= 13 ? 1 : 0
+    }
+  }
+  return out
 }
 
 /** Pick a stride so a grid stays under `maxVerts` vertices. */
@@ -357,6 +430,22 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     // NOTE: minimap.ts fetches layers.naip.file separately and that is not waste — it draws the
     // imagery into a 2D canvas, which cannot read a GPU-compressed texture.
   }
+  // PAVED, READ OFF THE PHOTO. OSM knows 64 of Crofton's car parks; the air photo shows every one,
+  // and Rich's "parking lots which are obviously parking lots are covered in grass" (2026-09-26)
+  // was the ones OSM does not have. So the overview is classified once, at half resolution: a
+  // pixel is paved when it is grey (low chroma), bright (a lot is lighter than a canopy, and the
+  // canopy was the false positive the first cut of this drowned in) and not green-on-top, then a
+  // 5x5 majority so a single grey pixel in a lawn is nothing. Measured on crofton-triangle: 3.5 %
+  // of the site, which is the roads, the lots and the roofs. The grass planter asks it per blade.
+  let pavedAt: ((x: number, y: number) => number) | null = null
+  if (L.naip && !lite) {
+    try {
+      const img = await loadImage(base + L.naip.file)
+      pavedAt = sampler(framed({ ...L.naip, size: [Math.floor(img.naturalWidth / 2), Math.floor(img.naturalHeight / 2)], res: L.naip.res * 2 }, pavedFromImagery(img), anchor))
+    } catch (e) {
+      console.warn('paved-from-imagery skipped', e)
+    }
+  }
   const bare = new THREE.Color(0x6f6a5a)
   // the coarse terrain takes the settled layer as well, or snow stops at the strip's rim
   const terrainWeather = accumUniforms()
@@ -365,12 +454,15 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     const m = new THREE.MeshStandardMaterial({ map, color: map ? 0xffffff : bare, roughness: 1, metalness: 0 })
     m.onBeforeCompile = (shader) => {
       Object.assign(shader.uniforms, terrainWeather)
+      shader.uniforms.uBare = { value: bare }
       shader.vertexShader = shader.vertexShader
         .replace('#include <common>', '#include <common>\nvarying vec3 vWWorld;\nvarying vec3 vWNormal;')
         .replace('#include <begin_vertex>', '#include <begin_vertex>\nvWWorld = (modelMatrix * vec4(position, 1.0)).xyz;\nvWNormal = normalize(mat3(modelMatrix) * objectNormal);')
       shader.fragmentShader = shader.fragmentShader
-        .replace('#include <map_pars_fragment>', `#include <map_pars_fragment>\nvarying vec3 vWWorld;\nvarying vec3 vWNormal;\n${ACCUM_PARS}`)
-        .replace('#include <map_fragment>', '#include <map_fragment>\ndiffuseColor.rgb = applyWeather(diffuseColor.rgb, normalize(vWNormal), vWWorld);')
+        .replace('#include <map_pars_fragment>', `#include <map_pars_fragment>\nvarying vec3 vWWorld;\nvarying vec3 vWNormal;\nuniform vec3 uBare;\n${ACCUM_PARS}`)
+        // a placeholder tile past the overview's edge carries the (-1, -1) uv sentinel: bare ground
+        // there, not the overview's last row stretched across the rim
+        .replace('#include <map_fragment>', '#include <map_fragment>\n#ifdef USE_MAP\nif (vMapUv.x < -0.01) diffuseColor.rgb = uBare;\n#endif\ndiffuseColor.rgb = applyWeather(diffuseColor.rgb, normalize(vWNormal), vWWorld);')
     }
     m.customProgramCacheKey = () => 'corridor-terrain'
     return m
@@ -394,18 +486,45 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     stream = new ImageryStream(base, L.tiles, renderer)
     const grp = new THREE.Group()
     grp.name = 'terrain:tiles'
+    // Until its own imagery streams in, a tile wears the site's NAIP overview — THROUGH A SECOND
+    // UV SET that maps the tile's vertices into the overview raster. It used to be handed the
+    // overview with the tile's own 0..1 UVs, which drew the whole site's photograph, black
+    // corners and all, squashed into every 1 km tile beyond the 2 km imagery ring. From 5 km up
+    // that is a grid of dark wedges on every tile edge: Rich's "big blue water seams between
+    // tiles" (2026-09-26), isolated by hiding the imagery (the terrain under it was seamless) and
+    // by counting resident textures on his GPU (8 of 59 had their own). The overview's texture is
+    // cloned per tile so each clone can read channel 1; a clone shares its Source, so the GPU
+    // holds the image once.
+    const ovRF = anchor && L.naip?.geo ? new RasterFrame({ size: L.naip.size, geo: L.naip.geo }, anchor) : null
+    const ovBbox = L.naip?.bbox
+    // Where the overview has no data — the tile grid is the hull snapped to 1 km and the overview
+    // is the fetched bbox, so crofton-triangle's outer ring of tiles runs 100-850 m past it — the
+    // vertex gets a SENTINEL uv (-1) and the shader paints the bare tone there instead of
+    // clamping to the overview's last row and smearing it across the rim. `toGrid` clamps, so it
+    // cannot say "outside"; `contains` can.
+    const OUT: [number, number] = [-1, -1]
+    const overviewUv = ovRF
+      ? (x: number, y: number): [number, number] => { if (!ovRF.contains(x, y)) return OUT; const g = ovRF.toGrid(x, y); return [g[0], g[1]] }
+      : ovBbox
+        ? (x: number, y: number): [number, number] => (x < ovBbox[0] || x > ovBbox[2] || y < ovBbox[1] || y > ovBbox[3] ? OUT : [(x - ovBbox[0]) / (ovBbox[2] - ovBbox[0]), (ovBbox[3] - y) / (ovBbox[3] - ovBbox[1])])
+        : undefined
     for (const t of tileSet.tiles) {
-      const geo = gridGeometry(t.dem, tileStride, () => 0)
-      // Until its own imagery streams in, a tile wears the site's NAIP overview. That is the same
-      // picture the overview mesh under it is already showing, so a tile appearing is a sharpening
-      // rather than a flash of a different colour.
-      const mat = terrainMaterial(imagery)
+      const geo = gridGeometry(t.dem, tileStride, () => 0, undefined, overviewUv)
+      let placeholder: THREE.Texture | null = null
+      if (imagery && overviewUv) {
+        placeholder = imagery.clone()
+        placeholder.channel = 1
+      }
+      const mat = terrainMaterial(placeholder)
+      // what this tile wears when it has nothing of its own; the imagery toggle restores THIS,
+      // never the raw overview (which reads channel 0 and is the squashed-site picture again)
+      mat.userData.placeholder = placeholder
       const mesh = new THREE.Mesh(geo, mat)
       mesh.name = `terrain:${t.x}_${t.y}`
       grp.add(mesh)
       terrainMats.push(mat)
       terrainGeos.push(geo)
-      stream.add(t, mat, imagery)
+      stream.add(t, mat, placeholder)
     }
     group.add(grp)
     // The overview is still under the tiles, and two surfaces of the same ground at 8 m and 2 m
@@ -881,7 +1000,9 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     // visible as green tufts over any open lot. Parking meshes are built much later than the
     // grass, so the cover comes from the manifest directly.
     const onParking = parkingCover(manifest)
-    const grassRoadDistance = (x: number, z: number) => (onParking(x, z) ? -1 : roadDistance(x, z))
+    const onSidewalk = sidewalkCover(manifest)
+    // -1 means "do not plant here": a mapped lot, a walk, or anything the air photo says is paved
+    const grassRoadDistance = (x: number, z: number) => (onParking(x, z) || onSidewalk(x, z) || (pavedAt !== null && pavedAt(x, -z) > 0.5) ? -1 : roadDistance(x, z))
 
     // --- the corridor strip: fine terrain across every carriageway and 40 m of verge each side ---
     status('grading…')
@@ -1417,9 +1538,20 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
       }
       continue
     } else if (st.kind === 'gantry') {
+      // NOT SCENERY. A "gantry" is the lidar's overhead detector finding a planar span under 5 m
+      // long, 4.5 m up, and on a suburban road that is a tree limb: crofton-triangle carries four,
+      // two of them 22 m apart on the main road. They were drawn as 24 m translucent cyan slabs
+      // across the carriageway, which Rich read as "big blue water seams between tiles"
+      // (2026-09-26). The record is still worth keeping — a real sign gantry on a motorway is in
+      // the same list — so it lives with the analysis markers, visible when they are, and no
+      // longer stands in the world as a piece of glass.
       const deck = st.deck_z_min ?? mid.pos.y + (st.clearance_m ?? 6)
-      mesh = new THREE.Mesh(new THREE.BoxGeometry(24, 0.6, Math.max(1, st.length_m)), new THREE.MeshStandardMaterial({ color: 0x9fe8ff, transparent: true, opacity: 0.8 }))
-      mesh.position.set(mid.pos.x, deck + 0.3, mid.pos.z)
+      mesh = new THREE.Mesh(new THREE.BoxGeometry(24, 0.3, Math.max(1, st.length_m)), new THREE.MeshBasicMaterial({ color: 0x9fe8ff, transparent: true, opacity: 0.6 }))
+      mesh.position.set(mid.pos.x, deck + 0.15, mid.pos.z)
+      mesh.rotation.y = yaw(mid.dir)
+      mesh.userData = { structure: st }
+      markers.add(mesh)
+      continue
     } else {
       const deck = st.deck_z_min ?? mid.pos.y + (st.clearance_m ?? 6)
       const width = pavedHalfAt((st.s_start + st.s_end) / 2) * 2
@@ -1571,7 +1703,10 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
       for (const m of terrainMats) {
         if (!on) m.map = null
         else if (m === terrainMat) m.map = imagery
-        else if (!m.map) m.map = imagery // a tile whose stream has not arrived goes back to the overview
+        // a tile: its own streamed texture if resident, else its placeholder (the overview through
+        // uv1), else bare — never the raw overview, which the first cut of this handed out and
+        // which put the whole site's photo on every tile the overview did not reach
+        else m.map = (m.userData.own as THREE.Texture | undefined) ?? (m.userData.placeholder as THREE.Texture | null) ?? null
         m.color.copy(on && m.map ? look(currentSeason).ground : bare)
         m.needsUpdate = true
       }

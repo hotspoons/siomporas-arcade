@@ -23,6 +23,7 @@
 // willow). That is the whole palette, so a species is recognised by SILHOUETTE and colour, not by
 // leaf detail — which is also how it works at 30 m through a windscreen.
 import { TreePreset } from '@dgreenheck/ez-tree'
+import * as T from './tuning'
 import type { FloraSpecies } from './flora'
 
 /** Which entry of the season palette a tree dresses in. See season.ts. */
@@ -370,5 +371,35 @@ export function optionsFor(a: Archetype, h: number): any {
   o.leaves ??= {}
   o.bark ??= {}
   a.tune?.(o, h)
+  applyKnobs(o)
   return o
+}
+
+/**
+ * The F6 panel's shape knobs, applied over whatever the archetype asked for — so they are a
+ * multiplier on this corridor's own species, not a replacement for them. Level 0 is the trunk:
+ * its LENGTH is the height reference (`optionsFor`'s callers scale the whole tree by the measured
+ * canopy height), so crown spread deliberately leaves it alone and only widens the branches.
+ */
+function applyKnobs(o: any) {
+  const scale = (obj: Record<string, number> | undefined, k: number, from = 0) => {
+    if (!obj || k === 1) return
+    for (const key of Object.keys(obj)) if (Number(key) >= from) obj[key] *= k
+  }
+  scale(o.branch?.length, T.TREE_CROWN_SPREAD, 1)
+  scale(o.branch?.children, T.TREE_BRANCH_COUNT)
+  scale(o.branch?.gnarliness, T.TREE_GNARLINESS)
+  scale(o.branch?.taper, T.TREE_TAPER)
+  scale(o.branch?.radius, T.TREE_TRUNK_RADIUS)
+  if (T.TREE_DETAIL !== 1) {
+    for (const key of ['sections', 'segments'] as const) {
+      const obj = o.branch?.[key] as Record<string, number> | undefined
+      if (!obj) continue
+      for (const k of Object.keys(obj)) obj[k] = Math.max(3, Math.round(obj[k] * T.TREE_DETAIL))
+    }
+  }
+  if (o.leaves) {
+    if (T.TREE_LEAF_COUNT !== 1) o.leaves.count = Math.max(1, Math.round((o.leaves.count ?? 10) * T.TREE_LEAF_COUNT))
+    if (T.TREE_LEAF_SIZE !== 1) o.leaves.size = (o.leaves.size ?? 1) * T.TREE_LEAF_SIZE
+  }
 }

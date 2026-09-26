@@ -258,6 +258,27 @@ export let STREAM_CHUNK_M = 250
 // the budget spent within TREE_PLANT_RADIUS_M of the eye, replanted when the eye leaves that
 // centre by TREE_REPLANT_M
 export let TREE_CELL_M = 6
+/** canopy height that counts as a tree (m): the CHM's own threshold for "this is a crown" */
+export let TREE_MIN_H = 3
+/** multiplies every measured canopy height — the wood as it is, taller, or scrub */
+export let TREE_HEIGHT_SCALE = 1
+/** 1 = every candidate cell gets its tree; below that a stable hash thins them */
+export let TREE_DENSITY = 1
+// --- shape: multipliers over the ez-tree preset each archetype starts from (species.ts
+// optionsFor). A change regrows the variants, which is ~100 ms, so the panel debounces it.
+export let TREE_LEAF_COUNT = 1
+export let TREE_LEAF_SIZE = 1
+export let TREE_CROWN_SPREAD = 1
+export let TREE_BRANCH_COUNT = 1
+export let TREE_GNARLINESS = 1
+export let TREE_TAPER = 1
+export let TREE_TRUNK_RADIUS = 1
+/** sections and segments per branch level: the cost knob, and how round a trunk looks close up */
+export let TREE_DETAIL = 1
+/** -1 = the site's own species mix; 0..n forces one archetype everywhere (see species.ts ARCHETYPES) */
+export let TREE_SPECIES = -1
+/** how many variants the palette may hold */
+export let TREE_SPECIES_LIMIT = 6
 export let TREE_PLANT_RADIUS_M = 1400
 export let TREE_REPLANT_M = 350
 // grass grows only where the tile photo reads as vegetation (vegmask.ts): how far around the eye
@@ -521,6 +542,37 @@ export const TUNE_TABS: TuneTab[] = [
           tune('TREE_FADE_M', () => TREE_FADE_M, (v) => (TREE_FADE_M = v), [0, 120], 1, 'band outside that radius where the card dissolves; 0 = hard switch'),
           tune('TREE_NEAR_CAPACITY', () => TREE_NEAR_CAPACITY, (v) => (TREE_NEAR_CAPACITY = v), [10, 500], 5, 'models per species variant'),
           tune('IMPOSTOR_FLAT_PITCH', () => IMPOSTOR_FLAT_PITCH, (v) => (IMPOSTOR_FLAT_PITCH = v), [0.2, 1.5], 0.02, 'cards lie flat above this view pitch (rad)'),
+        ],
+      },
+      {
+        title: 'planting (replants around the eye)',
+        keys: [
+          tune('TREE_CELL_M', () => TREE_CELL_M, (v) => (TREE_CELL_M = v), [3, 24], 0.5, 'metres between candidate trees — the density, and it no longer depends on how big the site is'),
+          tune('TREE_MIN_H', () => TREE_MIN_H, (v) => (TREE_MIN_H = v), [1, 14], 0.5, 'canopy height (m) that counts as a tree; lower plants the scrub the CHM sees'),
+          tune('TREE_HEIGHT_SCALE', () => TREE_HEIGHT_SCALE, (v) => (TREE_HEIGHT_SCALE = v), [0.3, 2.5], 0.05, 'multiplies every measured height'),
+          tune('TREE_DENSITY', () => TREE_DENSITY, (v) => (TREE_DENSITY = v), [0.05, 1], 0.05, '1 = every candidate; below that a stable hash thins them'),
+          tune('TREE_PLANT_RADIUS_M', () => TREE_PLANT_RADIUS_M, (v) => (TREE_PLANT_RADIUS_M = v), [200, 3000], 50, 'how far around the eye the budget is spent'),
+          tune('TREE_REPLANT_M', () => TREE_REPLANT_M, (v) => (TREE_REPLANT_M = v), [50, 1200], 25, 'replant once the eye is this far from where it last planted'),
+        ],
+      },
+      {
+        title: 'shape (regrows the species models)',
+        keys: [
+          tune('TREE_LEAF_COUNT', () => TREE_LEAF_COUNT, (v) => (TREE_LEAF_COUNT = v), [0.15, 3], 0.05, 'leaves per tree, over the preset'),
+          tune('TREE_LEAF_SIZE', () => TREE_LEAF_SIZE, (v) => (TREE_LEAF_SIZE = v), [0.3, 3], 0.05, 'leaf billboard size'),
+          tune('TREE_CROWN_SPREAD', () => TREE_CROWN_SPREAD, (v) => (TREE_CROWN_SPREAD = v), [0.3, 2.5], 0.05, 'branch length away from the trunk — a columnar tree or a spreading one'),
+          tune('TREE_BRANCH_COUNT', () => TREE_BRANCH_COUNT, (v) => (TREE_BRANCH_COUNT = v), [0.2, 3], 0.05, 'children per branch level'),
+          tune('TREE_GNARLINESS', () => TREE_GNARLINESS, (v) => (TREE_GNARLINESS = v), [0, 4], 0.05, 'how much a branch wanders as it grows'),
+          tune('TREE_TAPER', () => TREE_TAPER, (v) => (TREE_TAPER = v), [0.3, 1.4], 0.02, 'how fast a branch thins along its length'),
+          tune('TREE_TRUNK_RADIUS', () => TREE_TRUNK_RADIUS, (v) => (TREE_TRUNK_RADIUS = v), [0.3, 3], 0.05, 'trunk thickness'),
+          tune('TREE_DETAIL', () => TREE_DETAIL, (v) => (TREE_DETAIL = v), [0.35, 2], 0.05, 'sections and segments per branch: the cost knob'),
+        ],
+      },
+      {
+        title: 'palette',
+        keys: [
+          tune('TREE_SPECIES', () => TREE_SPECIES, (v) => (TREE_SPECIES = v), [-1, 20], 1, '-1 the site\'s own mix; 0+ forces one archetype everywhere (species.ts ARCHETYPES, in order)'),
+          tune('TREE_SPECIES_LIMIT', () => TREE_SPECIES_LIMIT, (v) => (TREE_SPECIES_LIMIT = v), [1, 8], 1, 'how many species models the palette may hold'),
         ],
       },
     ],

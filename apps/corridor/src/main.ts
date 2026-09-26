@@ -99,6 +99,9 @@ function resize() {
   camera.updateProjectionMatrix()
 }
 addEventListener('resize', resize)
+// the last quarter-second is worth keeping too: a reload can land between ticks
+addEventListener('pagehide', saveResume)
+addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveResume() })
 resize()
 
 // ---------------------------------------------------------------------------------------------
@@ -183,7 +186,9 @@ async function loadSite(slug: string) {
   if (wantGame === 'parkour') startParkour()
   minimap = new MiniMap(document.body, manifest)
   const st = readStanceParam()
+  const resume = st && st.site === slug ? null : readResume(slug)
   if (st && st.site === slug) applyStance(st)
+  else if (resume) applyStance(resume)
   else toPhoto()
   // per-site knob overrides, applied AFTER the panels have restored the browser's values so the
   // committed file wins, and undoing whatever the previous site's file had set
@@ -305,7 +310,10 @@ function setDrive(on: boolean) {
     }
     drive.yaw = 0
     drive.pitch = 0
+    drive.car.setCockpit(drive.cockpit)
   }
+  // leaving the seat: the body shell comes back, or the car is a dashboard floating in a field
+  if (!on) drive.car?.setCockpit(false)
   // the analysis overlays (centreline, photo ring) are for the map view; from the seat they read
   // as paint on the road, so they step aside while driving
   if (site) {
@@ -520,6 +528,40 @@ function captureStance(): Stance | null {
   else st.cam = { p: r3(camera.position), t: r3(orbit.target) }
   return st
 }
+/**
+ * WHERE YOU WERE, KEPT ACROSS A RELOAD.
+ *
+ * A stance is already everything needed to reproduce a frame, so parking one in localStorage a
+ * couple of times a second is all "don't dump me back at the start" takes — and an HMR reload
+ * while driving (which is every edit I make while Rich is in the car) lands back on the same
+ * stretch of road at the same speed instead of at the photo point. Per site, so switching sites
+ * returns to where you last were in THAT one.
+ *
+ * Order of authority on load: `?stance=` in the URL (a shared link must mean what it says), then
+ * the saved stance, then the photo point. `?fresh` skips the saved one.
+ */
+const RESUME_KEY = 'apex-corridor-resume'
+const RESUME_MS = 400
+let resumeAt = 0
+function saveResume() {
+  const st = captureStance()
+  if (!st) return
+  try {
+    const all = JSON.parse(localStorage.getItem(RESUME_KEY) ?? '{}') as Record<string, Stance & { t?: number }>
+    all[st.site] = { ...st, t: Date.now() }
+    localStorage.setItem(RESUME_KEY, JSON.stringify(all))
+  } catch { /* private window, or the quota is full: losing the resume point is not worth a throw */ }
+}
+function readResume(slug: string): Stance | null {
+  if (new URLSearchParams(location.search).has('fresh')) return null
+  try {
+    const all = JSON.parse(localStorage.getItem(RESUME_KEY) ?? '{}') as Record<string, Stance>
+    const st = all[slug]
+    return st && st.v === 1 && st.site === slug ? st : null
+  } catch {
+    return null
+  }
+}
 function stanceUrl(st: Stance): string {
   const u = new URL(location.href)
   u.searchParams.set('stance', btoa(JSON.stringify(st)))
@@ -634,7 +676,7 @@ addEventListener('keydown', (e) => {
   switch (e.code) {
     case 'KeyP': toPhoto(); break
     case 'KeyH': toTop(); break
-    case 'KeyC': if (drive.on) { drive.cockpit = !drive.cockpit; break } void copyStance(); break
+    case 'KeyC': if (drive.on) { drive.cockpit = !drive.cockpit; drive.car?.setCockpit(drive.cockpit); break } void copyStance(); break
     case 'KeyX': void copyStance(); break
     case 'KeyM': setChromeHidden(!document.body.classList.contains('chrome-off')); break
     case 'KeyN': minimap?.setExpanded(!minimap.expanded); break
@@ -704,19 +746,23 @@ function frame() {
     drive.input.brake = padB
     // chase camera: behind and above, looking over the bonnet; drag adds a look-around yaw
     if (drive.cockpit) {
-      // cockpit: eye at the driver's head, looking down the nose (stuntin's C view); drive.yaw/pitch look around
+      // cockpit: eye at the driver's head, looking down the nose (stuntin's C view); drive.yaw/pitch look around.
+      // NO EARLY RETURN HERE. It used to `return` out of frame(), which skipped everything below —
+      // site.updateNear (the grass, the trees, the tile stream and the grading pump all take the
+      // eye from it) and the minimap. Pressing C stopped the world (Rich, 2026-09-26): the frames
+      // kept coming, but nothing was ever told where the camera had got to.
       const eye = car.pos.clone().add(new THREE.Vector3(0, T.COCKPIT_EYE_UP, 0)).add(car.forward.clone().multiplyScalar(T.COCKPIT_EYE_FWD))
       camera.position.copy(eye)
       const ahead = car.forward.clone().applyAxisAngle(up, drive.yaw)
       camera.lookAt(eye.clone().add(ahead.multiplyScalar(30)).add(new THREE.Vector3(0, -Math.tan(drive.pitch) * 30 + T.COCKPIT_LOOK_UP, 0)))
-      return
+    } else {
+      const back = car.forward.clone().applyAxisAngle(up, drive.yaw).multiplyScalar(-T.CHASE_BACK)
+      const want = car.pos.clone().add(back).add(new THREE.Vector3(0, T.CHASE_UP + Math.tan(drive.pitch) * 4, 0))
+      const gy = site.groundAt(want.x, want.z)
+      if (gy !== null && want.y < gy + 1.2) want.y = gy + 1.2
+      camera.position.lerp(want, 1 - Math.exp(-T.CHASE_LAG * dt))
+      camera.lookAt(car.pos.clone().add(car.forward.clone().multiplyScalar(T.CHASE_LOOK_AHEAD)).add(new THREE.Vector3(0, 1.0, 0)))
     }
-    const back = car.forward.clone().applyAxisAngle(up, drive.yaw).multiplyScalar(-T.CHASE_BACK)
-    const want = car.pos.clone().add(back).add(new THREE.Vector3(0, T.CHASE_UP + Math.tan(drive.pitch) * 4, 0))
-    const gy = site.groundAt(want.x, want.z)
-    if (gy !== null && want.y < gy + 1.2) want.y = gy + 1.2
-    camera.position.lerp(want, 1 - Math.exp(-T.CHASE_LAG * dt))
-    camera.lookAt(car.pos.clone().add(car.forward.clone().multiplyScalar(T.CHASE_LOOK_AHEAD)).add(new THREE.Vector3(0, 1.0, 0)))
     if (car.event === 'bump') status('bump')
     ui.setPos(`${(Math.abs(car.speed) * 2.237).toFixed(0)} mph · ${car.onGrass ? 'grass' : 'pavement'}${Math.abs(car.slide) > 1 ? ' · sliding' : ''}`)
   } else if (parkour) {
@@ -727,6 +773,10 @@ function frame() {
     applyMove(dt)
     orbit.update()
     ui.setPos('')
+  }
+  if (site && clock.elapsedTime * 1000 - resumeAt > RESUME_MS) {
+    resumeAt = clock.elapsedTime * 1000
+    saveResume()
   }
   if (site) {
     const fwd = camera.getWorldDirection(viewDir)

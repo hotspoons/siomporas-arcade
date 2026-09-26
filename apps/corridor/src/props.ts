@@ -498,7 +498,6 @@ export function treesFromCanopy(
 ): { crowns: THREE.InstancedMesh; trunks: THREE.InstancedMesh; count: number; records: TreeRecord[]; refresh: (skip: Set<number>) => void; plant: (cx: number, cy: number) => number; stats: () => { count: number; cellM: number; radius: number; centre: [number, number]; capped: boolean } } {
   const [w, h] = size
   const [xmin, , , ymax] = bbox
-  const cellM = Math.max(1, opts.cellM ?? 6)
   const radius = opts.radius && opts.radius > 0 ? opts.radius : Infinity
   const capacity = Math.max(1, Math.round(budget))
   const sample =
@@ -526,10 +525,12 @@ export function treesFromCanopy(
   // the tree list: measured position and height, kept so the near-field LOD can pick from it
   const records: (TreeRecord & { rad: number; hue: number })[] = []
   let centre: [number, number] = opts.centre ?? [(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2]
+  /** the cell and radius are read live at every plant, so F6 → trees → planting just replants */
   let capped = false
   const plant = (cx: number, cy: number): number => {
     centre = [cx, cy]
-    const r = Number.isFinite(radius) ? radius : Math.max(bbox[2] - bbox[0], bbox[3] - bbox[1])
+    const cellM = Math.max(1, T.TREE_CELL_M || opts.cellM || 6)
+    const r = T.TREE_PLANT_RADIUS_M > 0 ? T.TREE_PLANT_RADIUS_M : Number.isFinite(radius) ? radius : Math.max(bbox[2] - bbox[0], bbox[3] - bbox[1])
     const i0 = Math.floor((cx - r) / cellM), i1 = Math.ceil((cx + r) / cellM)
     const j0 = Math.floor((cy - r) / cellM), j1 = Math.ceil((cy + r) / cellM)
     const cand: { x: number; y: number; hgt: number; d2: number; i: number; j: number }[] = []
@@ -542,7 +543,9 @@ export function treesFromCanopy(
         if (d2 > r2) continue
         if (x0 < bbox[0] || x0 > bbox[2] || y0 < bbox[1] || y0 > bbox[3]) continue
         const hgt = sample(x0, y0)
-        if (!(hgt >= minH)) continue
+        if (!(hgt >= Math.max(0.2, T.TREE_MIN_H || minH))) continue
+        // a stable thinning, so turning the density down takes trees away rather than reshuffling them
+        if (T.TREE_DENSITY < 1 && hash(i, j, 9) > T.TREE_DENSITY) continue
         cand.push({ x: x0, y: y0, hgt, d2, i, j })
       }
     }
@@ -554,7 +557,7 @@ export function treesFromCanopy(
       const jitter = cellM * 0.45
       const x = c.x + (hash(c.i, c.j, 1) - 0.5) * 2 * jitter
       const y = c.y + (hash(c.i, c.j, 2) - 0.5) * 2 * jitter
-      const H = c.hgt * (0.9 + hash(c.i, c.j, 3) * 0.2)
+      const H = c.hgt * (0.9 + hash(c.i, c.j, 3) * 0.2) * T.TREE_HEIGHT_SCALE
       const rad = Math.min(7, Math.max(1.2, H * 0.28 * (0.8 + hash(c.i, c.j, 4) * 0.4)))
       if (exclude(x, y)) continue
       const sp = speciesAt?.(x, y) ?? undefined
@@ -587,7 +590,7 @@ export function treesFromCanopy(
   refresh(new Set())
   crowns.name = 'trees'
   trunks.name = 'trunks'
-  return { crowns, trunks, count: records.length, records, refresh, plant, stats: () => ({ count: records.length, cellM, radius: Number.isFinite(radius) ? radius : 0, centre, capped }) }
+  return { crowns, trunks, count: records.length, records, refresh, plant, stats: () => ({ count: records.length, cellM: Math.max(1, T.TREE_CELL_M || opts.cellM || 6), radius: T.TREE_PLANT_RADIUS_M, centre, capped }) }
 }
 
 /** An overpass stand-in: a deck slab over our road on two piers down to the measured ground. */

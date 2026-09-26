@@ -64,6 +64,10 @@ const FALLBACK = ['oak', 'hardwood', 'aspen', 'oak-large', 'hardwood-small']
  */
 export function paletteFor(flora: Flora | null, heights: number[] = [], limit = 6): Archetype[] {
   const byId = new Map(ARCHETYPES.map((a) => [a.id, a]))
+  // F6 → trees → palette: force one archetype everywhere (to look at one species), and cap how
+  // many the site's own mix may produce
+  if (T.TREE_SPECIES >= 0) return [ARCHETYPES[Math.min(ARCHETYPES.length - 1, Math.round(T.TREE_SPECIES))]]
+  limit = Math.max(1, Math.min(limit, Math.round(T.TREE_SPECIES_LIMIT)))
   if (!flora) return FALLBACK.map((id) => byId.get(id)!).filter(Boolean)
   const weight = new Map<string, number>()
   const add = (a: Archetype, w: number) => weight.set(a.id, (weight.get(a.id) ?? 0) + w)
@@ -329,6 +333,22 @@ export class NearTrees {
   /** Force a re-pick on the next update (a knob changed). */
   invalidate() {
     this.last.set(Infinity, Infinity, Infinity)
+  }
+
+  /**
+   * Throw the species models away and build them again — what a SHAPE knob needs (F6 → trees →
+   * shape), since every variant's geometry came out of ez-tree with the old numbers. ~100 ms for
+   * five variants, which is why the panel debounces it. The caller re-bakes the impostors after,
+   * or the cards still show the old tree.
+   */
+  async regrow(): Promise<this> {
+    for (const v of this.variants) { v.branches.dispose(); v.leaves.dispose(); v.leavesSparse.geometry.dispose() }
+    this.group.clear()
+    this.variants.length = 0
+    this.chosen.fill(-1)
+    await this.grow()
+    this.invalidate()
+    return this
   }
 
   update(eye: THREE.Vector3, force = false, fwd = new THREE.Vector3(1, 0, 0), pitch = 0): boolean {

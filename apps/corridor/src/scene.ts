@@ -1512,6 +1512,11 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     // a road knob moved: every station's half width, the asphalt, then the strip that hugs it
     const roadSignature = () => `${T.LANE_WIDTH}|${T.SHOULDER_OUT}|${T.SHOULDER_IN}|${T.ROAD_BLEND_M}|${T.ROAD_TAPER_M}|${T.ROAD_ONEWAY_CENTRE}|${T.CULDESAC_RADIUS}`
     let roadSig = roadSignature()
+    const plantSignature = () => `${T.TREE_CELL_M}|${T.TREE_MIN_H}|${T.TREE_HEIGHT_SCALE}|${T.TREE_DENSITY}|${T.TREE_PLANT_RADIUS_M}`
+    const shapeSignature = () => `${T.TREE_LEAF_COUNT}|${T.TREE_LEAF_SIZE}|${T.TREE_CROWN_SPREAD}|${T.TREE_BRANCH_COUNT}|${T.TREE_GNARLINESS}|${T.TREE_TAPER}|${T.TREE_TRUNK_RADIUS}|${T.TREE_DETAIL}|${T.TREE_SPECIES}|${T.TREE_SPECIES_LIMIT}`
+    let treeSig = plantSignature()
+    let treeShapeSig = shapeSignature()
+    let treeTimer: ReturnType<typeof setTimeout> | undefined
     let roadTimer: ReturnType<typeof setTimeout> | undefined
     // async because the branch strips are budgeted: a knob change on a 427-branch network used to
     // freeze the tab for as long as the first build did
@@ -1545,7 +1550,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     // where the visit starts: the spine's photo station, which is where toPhoto() puts the camera
     const photo0 = spineAt(Math.min(curveLen, Math.max(0, manifest.spine.photo_s ?? curveLen / 2))).pos
     const treeBudget = lite ? 25_000 : 120_000
-    const t = treesFromCanopy(chm.data, chm.layer.size, chm.layer.bbox, chm.layer.res, heightAt, treeBudget, 3, (x, y) => {
+    const t = treesFromCanopy(chm.data, chm.layer.size, chm.layer.bbox, chm.layer.res, heightAt, treeBudget, T.TREE_MIN_H, (x, y) => {
       if (roadDistance(x, -y) < 3) return true
       if (!adjustments.active) return false
       const a = adjustments.at(x, y, treeAdj)
@@ -1703,7 +1708,9 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
       replantStats.count = treeCount
       replantStats.centre = [+eye.x.toFixed(0), +(-eye.z).toFixed(0)]
     }
+    const lastEye = new THREE.Vector3()
     const replantIfMoved = (eye: THREE.Vector3, fwd?: THREE.Vector3, pitch = 0) => {
+      lastEye.copy(eye)
       if (!(T.TREE_REPLANT_M > 0) || !(T.TREE_PLANT_RADIUS_M > 0)) return
       const c = t.stats().centre
       if (Math.hypot(eye.x - c[0], -eye.z - c[1]) < T.TREE_REPLANT_M) return
@@ -1791,6 +1798,28 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     }
     retune = () => {
       near.invalidate()
+      // F6 → trees. Planting knobs replant where the eye is; shape and palette knobs have to
+      // regrow the ez-tree variants (~100 ms) and re-bake the impostor atlas off them, so both
+      // are debounced the way the road's cross-section knobs are.
+      const plantSig = plantSignature()
+      const shapeSig = shapeSignature()
+      if (plantSig !== treeSig || shapeSig !== treeShapeSig) {
+        const replantWanted = plantSig !== treeSig
+        const regrowWanted = shapeSig !== treeShapeSig
+        treeSig = plantSig
+        treeShapeSig = shapeSig
+        clearTimeout(treeTimer)
+        treeTimer = setTimeout(() => {
+          void (async () => {
+            if (regrowWanted) {
+              await near.regrow()
+              imp?.rebake(near.sources())
+              near.setSeason(look(currentSeason))
+            }
+            if (replantWanted || regrowWanted) replantTrees(lastEye)
+          })()
+        }, 250)
+      }
       const wantType = T.GRASS_TYPE < 0 ? bakedGrassType : GRASS_TYPES[Math.min(GRASS_TYPES.length - 1, Math.max(0, Math.round(T.GRASS_TYPE)))]
       grass.setType(wantType, T.GRASS_TYPE < 0 ? GROUND_COVER[cover.open].blades : 1)
       grass.invalidate()

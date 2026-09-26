@@ -43,6 +43,11 @@ from . import lidar
 from .geo import Frame
 
 TILE_M = 1000.0
+# NAIP is 0.6 m in Maryland (0.3 in some states) and the tiles were cut at 1 m, throwing away 2.8x
+# the pixels the fetch had already paid for — Rich: "the satellite imagery in my home town seems
+# really low res" (2026-09-26). The fetch asks for this and the tile export cuts at the source's
+# own resolution, rounded to a multiple of four pixels for the KTX2 encoder.
+NAIP_RES_M = 0.6
 BAND_M = 15.0        # near-road points kept for the structure tests
 CHM_MAX = 80.0
 
@@ -357,7 +362,9 @@ def export_tiles(site_dir: Path, web: Path, frame, mask_shapes: list, vivid) -> 
             entry["chm"] = True
         if naip_ds is not None:
             win = rasterio.windows.from_bounds(bx0, by0, bx1, by1, transform=naip_ds.transform)
-            rgb = naip_ds.read(out_shape=(3, n, n), window=win, resampling=Resampling.average, boundless=True, fill_value=0)
+            # the tile at the source's own resolution (a 0.6 m NAIP gives 1668 px, a 1 m one 1000)
+            nn = int(round(TILE_M / max(0.25, float(naip_ds.res[0])) / 4.0)) * 4
+            rgb = naip_ds.read(out_shape=(3, nn, nn), window=win, resampling=Resampling.average, boundless=True, fill_value=0)
             # A TILE AT THE EDGE OF COVERAGE IS NOT BLACK GROUND. `boundless=True` lets the window
             # run past the source raster and fills whatever it finds outside with 0, and the tile
             # grid is the corridor hull snapped to 1 km — so edge tiles legitimately reach past
@@ -392,6 +399,7 @@ def export_tiles(site_dir: Path, web: Path, frame, mask_shapes: list, vivid) -> 
         # where this tile's corners actually are on the ellipsoid
         entry["geo"] = frame.control_lattice((bx0, by0, bx1, by1), 3)
         entries.append(entry)
+    naip_res_src = round(float(naip_ds.res[0]), 3) if naip_ds is not None else 1.0
     for ds in (dem_ds, chm_ds, naip_ds):
         if ds is not None:
             ds.close()
@@ -403,7 +411,7 @@ def export_tiles(site_dir: Path, web: Path, frame, mask_shapes: list, vivid) -> 
         # arithmetic is out by up to 384.9 m across 125 tiles. `geo` on each entry is the only
         # thing that places a tile; this is for a coarse cull and for debugging, nothing else.
         "origin": [round(float(v), 2) for v in frame.to_enu(x0, y0)],
-        "res": {"dem": 2.0, "naip": 1.0, "chm": 2.0},
+        "res": {"dem": 2.0, "naip": naip_res_src, "chm": 2.0},
         "dir": "tiles/0",
         "format": "pack-1",
         "texture": "naip.jpg",

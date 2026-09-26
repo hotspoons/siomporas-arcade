@@ -358,7 +358,8 @@ def fetch_site(site: dict, half_width: float, lidar_half_width: float, skip: set
         if tiled:
             from . import network_tiles
 
-            manifest["naip"] = network_tiles.naip_tiled(frame, bbox, corridor, out / "naip_1m.tif", cache)
+            # the file keeps its name (several readers key off it); the resolution is NAIP_RES_M
+            manifest["naip"] = network_tiles.naip_tiled(frame, bbox, corridor, out / "naip_1m.tif", cache, res=network_tiles.NAIP_RES_M)
         else:
             manifest["naip"] = naip.fetch_naip(frame, bbox, out / "naip.tif", cache)
     if "horizon" not in skip:

@@ -330,6 +330,18 @@ def export_tiles(site_dir: Path, web: Path, frame, mask_shapes: list, vivid) -> 
     dem_ds = rasterio.open(dem_p) if dem_p.exists() else None
     chm_ds = rasterio.open(chm_p) if chm_p.exists() else None
     naip_ds = rasterio.open(naip_p) if naip_p.exists() else None
+    # WHERE THE LIDAR STOPS, THE CANOPY MUST NOT READ AS ZERO. A network bake rasterises lidar
+    # only in a band along the roads it draws, and chm.vrt has no nodata value, so outside the
+    # band "no lidar" was written as "0 m canopy" and the tree planter grew nothing there.
+    # Measured 2026-09-26 over the same 2 km of Crofton: crofton-triangle 40.7 % canopy > 3 m,
+    # crofton-crownsville 10.2 %, with crownsville's DTM valid on 16 % of that ground. If the site
+    # carries the global 1 m canopy (`canopy_global.tif`, from corridor.canopy / Meta-WRI), it
+    # fills every cell the lidar DTM does not cover.
+    dtm_p = _raster(site_dir / "lidar", "dtm")
+    gchm_p = site_dir / "canopy_global.tif"
+    dtm_ds = rasterio.open(dtm_p) if (dtm_p.exists() and gchm_p.exists()) else None
+    gchm_ds = rasterio.open(gchm_p) if gchm_p.exists() else None
+    canopy_filled = 0
     for tx, ty in tiles:
         bx0, by0 = x0 + tx * TILE_M, y0 + ty * TILE_M
         bx1, by1 = bx0 + TILE_M, by0 + TILE_M
@@ -350,6 +362,16 @@ def export_tiles(site_dir: Path, web: Path, frame, mask_shapes: list, vivid) -> 
             win = rasterio.windows.from_bounds(bx0, by0, bx1, by1, transform=chm_ds.transform)
             c = chm_ds.read(1, window=win, out_shape=(n // 2, n // 2), resampling=Resampling.average, boundless=True, fill_value=0).astype(np.float32)
             c = np.nan_to_num(c, nan=0.0)
+            if dtm_ds is not None and gchm_ds is not None:
+                wl = rasterio.windows.from_bounds(bx0, by0, bx1, by1, transform=dtm_ds.transform)
+                zl = dtm_ds.read(1, window=wl, out_shape=c.shape, resampling=Resampling.nearest, boundless=True, fill_value=-9999).astype(np.float32)
+                nolidar = ~np.isfinite(zl) | (zl <= -9998)
+                if nolidar.any():
+                    wg = rasterio.windows.from_bounds(bx0, by0, bx1, by1, transform=gchm_ds.transform)
+                    g = gchm_ds.read(1, window=wg, out_shape=c.shape, resampling=Resampling.average, boundless=True, fill_value=0).astype(np.float32)
+                    g = np.clip(np.nan_to_num(g, nan=0.0), 0.0, 60.0)
+                    c[nolidar] = g[nolidar]
+                    canopy_filled += int(nolidar.sum())
             if mask_shapes:
                 tr2 = from_origin(bx0, by1, 2.0, 2.0)
                 sub = [(g, 1) for g in mask_shapes if g.intersects(box(bx0, by0, bx1, by1))]
@@ -400,7 +422,9 @@ def export_tiles(site_dir: Path, web: Path, frame, mask_shapes: list, vivid) -> 
         entry["geo"] = frame.control_lattice((bx0, by0, bx1, by1), 3)
         entries.append(entry)
     naip_res_src = round(float(naip_ds.res[0]), 3) if naip_ds is not None else 1.0
-    for ds in (dem_ds, chm_ds, naip_ds):
+    if canopy_filled:
+        print(f"  canopy  {canopy_filled:,} tile cells outside the lidar band took the global canopy", flush=True)
+    for ds in (dem_ds, chm_ds, naip_ds, dtm_ds, gchm_ds):
         if ds is not None:
             ds.close()
     return {

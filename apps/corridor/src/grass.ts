@@ -675,6 +675,20 @@ export class Grass {
     this.visStale = false
   }
 
+  /** forget the cached tiles inside a world box (x0, z0, x1, z1) so they regenerate: the vegetation mask for that ground just arrived */
+  invalidateWithin(x0: number, z0: number, x1: number, z1: number) {
+    let n = 0
+    for (const k of [...this.tiles.keys()]) {
+      const [tx, tz] = k.split(',').map(Number)
+      const ax = tx * TILE, az = tz * TILE
+      if (ax + TILE < x0 || ax > x1 || az + TILE < z0 || az > z1) continue
+      this.tiles.delete(k)
+      n++
+    }
+    if (n) { this.dirty = true; this.queueMissing() }
+    return n
+  }
+
   private queueMissing() {
     const rBlade = T.GRASS_RADIUS + TILE * 0.71
     this.pending = []

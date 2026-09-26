@@ -246,6 +246,10 @@ export let WATER_OPACITY = 0.82
 export let STREAM_BUILD_M = 1500
 export let STREAM_BUDGET_MS = 6
 export let STREAM_CHUNK_M = 250
+// grass grows only where the tile photo reads as vegetation (vegmask.ts): how far around the eye
+// the tile photos are classified, and the excess-green threshold (2G - R - B on 0..1 channels)
+export let VEG_RADIUS_M = 700
+export let VEG_EXG_MIN = 0.04
 // an inferior road is re-graded to meet the superior one at a junction, fading out over this many metres
 export let JUNCTION_MEET_M = 40
 export let WATER_LEVEL_M = 0

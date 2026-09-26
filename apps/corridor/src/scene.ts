@@ -2,6 +2,7 @@
 // Z = south — i.e. (x, y, z)_site -> (x, z, -y)_three, right-handed with Y up so nothing in
 // three's camera/controls code has to be told about Z-up.
 import * as THREE from 'three'
+import { VegCover } from './vegmask'
 import * as T from './tuning'
 import { Anchor } from '@apex/engine/geo/wgs84'
 import { RasterFrame } from '@apex/engine/geo/raster'
@@ -100,7 +101,9 @@ export interface Site {
   /** the full edge record at world (x, z): signed distance to the nearest pavement edge, which road (`who`, < 0 for a driveway or bulb), its surface height and along-track s. For probes. */
   edgeInfo: (x: number, z: number, exclude?: number, roadsOnly?: boolean) => { d: number; who: number; y: number; s: number }
   /** how many junctions had an inferior road re-graded to meet the superior one, and the largest step closed (m) */
-  junctionMeet: { junctions: number; warped: number; maxStep: number }
+  junctionMeet: { junctions: number; warped: number; maxStep: number; noTarget: number }
+  /** the vegetation mask: tile photos classified so far, of those with a photo */
+  vegCover: () => { loaded: number; total: number; inFlight: number; failed: number; lastMs: { fetch: number; decode: number; classify: number } | null }
   /** trees within r of world x,z as [x, z, trunkRadius] */
   treesNear: (x: number, z: number, r: number) => [number, number, number][]
   terrain: THREE.Mesh
@@ -450,6 +453,8 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
   // 5x5 majority so a single grey pixel in a lawn is nothing. Measured on crofton-triangle: 3.5 %
   // of the site, which is the roads, the lots and the roofs. The grass planter asks it per blade.
   let pavedAt: ((x: number, y: number) => number) | null = null
+  // the per-tile vegetation mask (vegmask.ts); grass grows only where it says so
+  let veg: VegCover | null = null
   if (L.naip && !lite) {
     try {
       const img = await loadImage(base + L.naip.file)
@@ -500,6 +505,11 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     // their edge vertices and you get a lit crack between them at every boundary.
     const tileStride = strideFor(tileSet.tiles[0].dem.layer, lite ? 4_000 : 14_000)
     stream = new ImageryStream(base, L.tiles, renderer)
+    // the vegetation mask from the same tiles' photos: grass grows only where the photo is green
+    veg = new VegCover(tileSet.tiles, (t) => `${DATA_BASE}${base}${L.tiles!.dir}/${t.x}_${t.y}.${L.tiles!.texture ?? 'naip.jpg'}`, (t) => {
+      const [x0, y0, x1, y1] = t.bounds
+      grassRef?.invalidateWithin(x0, -y1, x1, -y0)
+    })
     const grp = new THREE.Group()
     grp.name = 'terrain:tiles'
     // Until its own imagery streams in, a tile wears the site's NAIP overview — THROUGH A SECOND
@@ -890,7 +900,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
   // if the node sits on it, else the better road class (the longer road on a tie) — with the
   // correction fading out over JUNCTION_MEET_M along the inferior road. The superior road, and
   // the spine always, keep their grade.
-  const junctionMeet = { junctions: 0, warped: 0, maxStep: 0 }
+  const junctionMeet = { junctions: 0, warped: 0, maxStep: 0, noTarget: 0 }
   {
     const RANK: Record<string, number> = { motorway: 0, trunk: 1, primary: 2, secondary: 3, tertiary: 4, unclassified: 5, residential: 6, living_street: 7, service: 8 }
     const rank = (hw?: string | null) => RANK[(hw ?? '').replace(/_link$/, '')] ?? 9
@@ -930,7 +940,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
             }
           }
         }
-        if (!Number.isFinite(target)) continue
+        if (!Number.isFinite(target)) { junctionMeet.noTarget++; continue }
         let vi = -1, best = Infinity
         b.rawB.forEach((q, k) => { const d = (q.x - w.x) ** 2 + (q.z - w.z) ** 2; if (d < best) { best = d; vi = k } })
         if (vi < 0 || best > 6 * 6) continue
@@ -1187,7 +1197,9 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     const onParking = parkingCover(manifest)
     const onSidewalk = sidewalkCover(manifest)
     // -1 means "do not plant here": a mapped lot, a walk, or anything the air photo says is paved
-    const grassRoadDistance = (x: number, z: number) => (onParking(x, z) || onSidewalk(x, z) || (pavedAt !== null && pavedAt(x, -z) > 0.5) ? -1 : roadDistance(x, z))
+    // -1 also where the tile photo says the ground is not vegetation (a lot OSM never mapped, an
+    // apron, bare dirt); the overview classifier is the fallback until that tile's photo is read
+    const grassRoadDistance = (x: number, z: number) => (onParking(x, z) || onSidewalk(x, z) || (veg !== null && veg.at(x, -z) === 0) || (pavedAt !== null && pavedAt(x, -z) > 0.5) ? -1 : roadDistance(x, z))
     grassRoadDistanceOut = grassRoadDistance
     edgeInfoOut = edgeDistance
 
@@ -1958,6 +1970,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
       pyr?.update(eye.x, -eye.z)
       signals.tick(time)
       gradeNear(eye)
+      veg?.update(eye.x, -eye.z)
     }
   }
 
@@ -2022,6 +2035,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     grassRoadDistance: (x, z) => grassRoadDistanceOut(x, z),
     edgeInfo: (x, z, exclude, roadsOnly) => edgeInfoOut(x, z, exclude, roadsOnly),
     junctionMeet,
+    vegCover: () => ({ loaded: veg?.loaded ?? 0, total: veg?.total ?? 0, inFlight: veg?.inFlightCount ?? 0, failed: veg?.failedCount ?? 0, lastMs: veg?.lastMs ?? null }),
     treesNear: treesNearWorld,
     terrain,
     /** tiled sites only: imagery streaming counts, for probes and the console */

@@ -27,6 +27,7 @@
 import * as THREE from 'three'
 import type { Manifest } from './site'
 import * as T from './tuning'
+import { BoundsIndex } from './strip'
 
 const toWorld = (x: number, y: number) => new THREE.Vector3(x, 0, -y)
 
@@ -260,27 +261,99 @@ function mastGeometry(lanes: number, arm: number, side: number): THREE.BufferGeo
   return merge(parts)
 }
 
-/** A sign on a post: an octagon for stop, a down triangle for give way. */
-function signGeometry(kind: 'stop' | 'give_way'): THREE.BufferGeometry {
+/**
+ * The post and the back plate of a sign; the legend is a separate textured face (`signFace`),
+ * because the post is vertex-coloured metal and the face is a painted picture, and one instanced
+ * mesh cannot be both.
+ */
+function signPostGeometry(kind: 'stop' | 'give_way'): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = []
   const H = T.FURNITURE_SIGN_HEIGHT
   const post = new THREE.CylinderGeometry(0.035, 0.035, H, 5)
   post.translate(0, H / 2, 0)
   parts.push(tint(post, 0x6e6e68))
-  const face =
-    kind === 'stop'
-      ? new THREE.CircleGeometry(0.38, 8)
-      : new THREE.CircleGeometry(0.45, 3)
-  if (kind === 'give_way') face.rotateZ(Math.PI) // point down
-  face.rotateY(Math.PI) // face −Z
-  face.translate(0, H - 0.05, -0.04)
-  parts.push(tint(face, kind === 'stop' ? 0xa8231f : 0xd8d8d2))
-  // the back, so it is not a hole when you drive past it
-  const back = face.clone()
-  back.rotateY(Math.PI)
-  back.translate(0, 0, 0.08)
+  // the back, so it is not a hole when you drive past it. Same outline as the face.
+  const back = signOutline(kind)
+  back.translate(0, H - 0.05, 0.02)
   parts.push(tint(back, 0x8e8e88))
   return merge(parts)
+}
+
+/**
+ * The outline of a sign, EDGE UP. `CircleGeometry(r, 8)` starts its first vertex at θ = 0, on the
+ * +X axis, which puts a CORNER at the top and every edge 22.5° off the horizontal — Rich: "stop
+ * signs are mounted like 22.5 degrees off" (2026-09-26). thetaStart = π/8 rotates the polygon half
+ * a step so a flat edge is on top, which is how an octagon is hung.
+ */
+function signOutline(kind: 'stop' | 'give_way'): THREE.BufferGeometry {
+  const g = kind === 'stop' ? new THREE.CircleGeometry(0.38, 8, Math.PI / 8) : new THREE.CircleGeometry(0.45, 3, -Math.PI / 2)
+  g.rotateY(Math.PI) // face −Z, the way every head here faces
+  return g
+}
+
+/** The painted face, its texture drawn once and shared by every sign of that kind on the site. */
+function signFace(kind: 'stop' | 'give_way'): { geometry: THREE.BufferGeometry; material: THREE.MeshStandardMaterial } {
+  const geometry = signOutline(kind)
+  geometry.translate(0, T.FURNITURE_SIGN_HEIGHT - 0.05, -0.04)
+  const material = new THREE.MeshStandardMaterial({ map: signTexture(kind), roughness: 0.55, metalness: 0.05 })
+  return { geometry, material }
+}
+
+const signTextures = new Map<string, THREE.CanvasTexture>()
+/**
+ * The legend as a canvas: MUTCD R1-1 for stop — red field, white border, white STOP — and R1-2
+ * for give way. `CircleGeometry`'s UVs map the polygon's bounding square to 0..1, so the picture
+ * is drawn on a square and the geometry clips it to the outline; the border is drawn as its own
+ * inset polygon so it is white in the texture, not a rim the geometry happens to leave.
+ */
+function signTexture(kind: 'stop' | 'give_way'): THREE.CanvasTexture {
+  const had = signTextures.get(kind)
+  if (had) return had
+  const S = 256
+  const cv = document.createElement('canvas')
+  cv.width = cv.height = S
+  const ctx = cv.getContext('2d')!
+  const poly = (n: number, r: number, start: number) => {
+    ctx.beginPath()
+    for (let i = 0; i < n; i++) {
+      const a = start + (i / n) * Math.PI * 2
+      const x = S / 2 + Math.cos(a) * r, y = S / 2 - Math.sin(a) * r
+      if (i === 0) ctx.moveTo(x, y)
+      else ctx.lineTo(x, y)
+    }
+    ctx.closePath()
+  }
+  if (kind === 'stop') {
+    // white behind everything, then the red field inset — the ring between them is the border
+    ctx.fillStyle = '#ffffff'
+    ctx.fillRect(0, 0, S, S)
+    poly(8, S / 2 - 12, Math.PI / 8)
+    ctx.fillStyle = '#b8261f'
+    ctx.fill()
+    ctx.fillStyle = '#ffffff'
+    ctx.font = `bold ${Math.round(S * 0.36)}px "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif`
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText('STOP', S / 2, S / 2 + 4)
+  } else {
+    // give way: white triangle, red border, point down. The geometry's UV square is the triangle's
+    // bounding box, so the drawing uses the same start angle the outline does.
+    ctx.fillStyle = '#c62828'
+    ctx.fillRect(0, 0, S, S)
+    poly(3, S / 2 - 22, -Math.PI / 2)
+    ctx.fillStyle = '#ffffff'
+    ctx.fill()
+    ctx.fillStyle = '#c62828'
+    ctx.font = `bold ${Math.round(S * 0.13)}px "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif`
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText('YIELD', S / 2, S / 2 - 18)
+  }
+  const tex = new THREE.CanvasTexture(cv)
+  tex.colorSpace = THREE.SRGBColorSpace
+  tex.anisotropy = 4
+  signTextures.set(kind, tex)
+  return tex
 }
 
 /**
@@ -491,8 +564,14 @@ export function buildFurniture(
     counts.signs++
   }
   for (const [kind, at] of bySign) {
-    const mesh = new THREE.InstancedMesh(signGeometry(kind), metal, at.length)
+    // two instanced meshes with the same transforms: the metal (post + back plate) and the
+    // painted face. `furniture:sign:<kind>` keeps its name so the probes that count signs and
+    // read `userData.src` per instance are unchanged.
+    const face = signFace(kind)
+    const mesh = new THREE.InstancedMesh(signPostGeometry(kind), metal, at.length)
     mesh.name = `furniture:sign:${kind}`
+    const faces = new THREE.InstancedMesh(face.geometry, face.material, at.length)
+    faces.name = `furniture:sign:${kind}:face`
     const mat4 = new THREE.Matrix4()
     const q = new THREE.Quaternion()
     const one = new THREE.Vector3(1, 1, 1)
@@ -500,13 +579,17 @@ export function buildFurniture(
       q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), -(a.yaw * Math.PI) / 180)
       mat4.compose(a.pos, q, one)
       mesh.setMatrixAt(i, mat4)
+      faces.setMatrixAt(i, mat4)
     })
     mesh.instanceMatrix.needsUpdate = true
+    faces.instanceMatrix.needsUpdate = true
     mesh.frustumCulled = false
+    faces.frustumCulled = false
     // the source record per instance, in instance order — so a probe can ask whether a sign faces
     // the traffic it stops, which is the one thing about a sign that a screenshot cannot show
     mesh.userData.src = at.map((a) => a.src)
     group.add(mesh)
+    group.add(faces)
   }
 
   return { group, counts, placed }
@@ -727,6 +810,44 @@ export function buildBarriers(
 }
 
 // --- sidewalks, kerbs and crossings -----------------------------------------------------------
+//
+/**
+ * Is this world point on a sidewalk? For the grass planter, which used to grow turf straight
+ * through every walk — "sidewalks have grass growing over them" (Rich, 2026-09-26) — because it
+ * only knew the road's edge. Polylines bucketed by bounds; a hit is within half the walk's width
+ * plus a small margin of any segment. The verge between kerb and walk keeps its grass.
+ */
+export function sidewalkCover(manifest: Manifest, margin = 0.35): (x: number, z: number) => boolean {
+  const runs = (manifest.sidewalks ?? []).filter((r) => r.kind === 'sidewalk' && r.coords.length > 1)
+  if (!runs.length) return () => false
+  const items = runs.map((r) => {
+    const pts = r.coords.map(([x, y]) => [x, -y] as [number, number])
+    let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity
+    for (const [x, z] of pts) {
+      if (x < x0) x0 = x
+      if (x > x1) x1 = x
+      if (z < z0) z0 = z
+      if (z > z1) z1 = z
+    }
+    const half = (r.width_m || 1.5) / 2 + margin
+    return { pts, half, bounds: [x0 - half, z0 - half, x1 + half, z1 + half] as [number, number, number, number] }
+  })
+  const index = new BoundsIndex(items, 250, 1)
+  const near = (it: (typeof items)[number], x: number, z: number): true | null => {
+    const h2 = it.half * it.half
+    const p = it.pts
+    for (let i = 1; i < p.length; i++) {
+      const [ax, az] = p[i - 1], [bx, bz] = p[i]
+      const dx = bx - ax, dz = bz - az
+      const len2 = dx * dx + dz * dz
+      const u = len2 > 0 ? Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / len2)) : 0
+      const qx = ax + u * dx - x, qz = az + u * dz - z
+      if (qx * qx + qz * qz < h2) return true
+    }
+    return null
+  }
+  return (x, z) => index.firstAt(x, z, (it) => near(it, x, z)) === true
+}
 //
 // Crofton maps 626 `footway=sidewalk` ways and 446 `footway=crossing` ways explicitly, and another
 // 78 roads say `sidewalk=both|left|right` with no separate geometry — the same walk, recorded as

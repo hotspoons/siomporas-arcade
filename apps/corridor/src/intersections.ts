@@ -382,7 +382,10 @@ export function buildBlades(
     const w = toWorld(spot.x, spot.y)
     const gy = groundAt(w.x, w.z) ?? 0
     counts.junctions++
-    // a post, and the blades stacked on it, tallest name first
+    // a post, and the blades stacked ON TOP of it, the way a street sign is actually mounted: a
+    // bracket on the post cap carries the plates, one above the other, at 90 degrees. They used to
+    // hang from the top DOWN the post, which put the post through the middle of every legend and
+    // hid the letters behind it (Rich, 2026-09-26). The post ends where the lowest blade starts.
     const top = gy + T.BLADE_POST_H
     const r = 0.045
     const seg = 6
@@ -390,7 +393,7 @@ export function buildBlades(
     for (let s = 0; s <= seg; s++) {
       const a = (s / seg) * Math.PI * 2
       postPos.push(w.x + Math.cos(a) * r, gy, w.z + Math.sin(a) * r)
-      postPos.push(w.x + Math.cos(a) * r, top + 0.05, w.z + Math.sin(a) * r)
+      postPos.push(w.x + Math.cos(a) * r, top, w.z + Math.sin(a) * r)
     }
     for (let s = 0; s < seg; s++) {
       const b = pb + s * 2
@@ -401,7 +404,7 @@ export function buildBlades(
       if (!cell) return
       const h = T.BLADE_H
       const wdt = Math.max(T.BLADE_H * 2.2, bl.text.length * T.BLADE_H * 0.46)
-      quad(w.x, top - i * (h + 0.06) - h / 2, w.z, bl.yaw_deg, wdt, h, cell)
+      quad(w.x, top + i * (h + 0.04) + h / 2, w.z, bl.yaw_deg, wdt, h, cell)
       counts.blades++
       if (bl.truncated) counts.truncated++
     })

@@ -220,7 +220,14 @@ export function buildStrip(
               // alone, is what makes a winter wood read as winter.
               float lo = mix(3.0, 0.2, litterSpread), hi = mix(5.0, 1.2, litterSpread);
               float wForest = smoothstep(lo, hi, vCanopy) * smoothstep(4.0, 10.0, vEdge);
-              vec3 litter = triplanar(forestFloor, vWorldXZ, n, 0.5, vec2(0.37, 0.11)) * litterTint * 1.6 * lum;
+              // NOT multiplied by the photo's luminance. Under a crown the air photo shows the
+              // crown, and the crown is dark, so litter x lum came out near black: the "weird
+              // brown areas along roadways" Rich saw from the air (2026-09-26), isolated by
+              // switching this blend off. The floor keeps its own brightness and is pulled a
+              // third of the way toward the photo, so from above it reads as shaded ground under
+              // trees and from the car it reads as litter, and neither is a black stripe.
+              vec3 litter = triplanar(forestFloor, vWorldXZ, n, 0.5, vec2(0.37, 0.11)) * litterTint * 1.6;
+              litter = mix(litter, img.rgb, 0.35);
               ground = vec4(mix(ground.rgb, litter, wForest), 1.0);
             }
           }
@@ -234,6 +241,10 @@ export function buildStrip(
   mat.customProgramCacheKey = () => 'corridor-strip'
   const mesh = new THREE.Mesh(geo, mat)
   mesh.name = 'strip'
+  // the blend uniforms are merged into the compiled shader and otherwise unreachable from outside;
+  // a probe that wants to switch the forest floor or the turf off to see what is under it (the
+  // bisection in probes/corridor-stanceshot.mjs) finds them here
+  mesh.userData.uniforms = uniforms
   // CULL IT. This was off, which is right for one 5 km corridor strip whose bounding sphere covers
   // the site anyway, and wrong the moment a network gave every branch its own: 428 of them were
   // submitted in full from anywhere on crofton-triangle. The primary's sphere is still site-sized

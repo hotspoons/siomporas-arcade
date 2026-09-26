@@ -115,4 +115,10 @@ scoring geometry are already there. Same engine, same catalog entry pattern.
 1. `style.ts` with `realistic` and `fantasy`; the picker; the stance field. One evening.
 2. Terrain exaggeration on `heightAt`, `WATER_LEVEL_M` exposed on the world record.
 3. ~~Squishy Hunt: hauls + hints + walk mode single-player, then the relay.~~ Done 2026-09-26; the world-editor pod needs redeploying for the relay to exist outside a dev box.
-4. Parkour: the character, then tricks, then the bow, then enemies.
+4. Parkour: ~~the character, then tricks, then the bow, then enemies.~~ First pass 2026-09-26
+   (`apps/corridor/src/games/parkour.ts`, `?game=parkour` or P): a capsule runner on the real
+   ground, the bake's buildings as solids with mantle-able roofs, jump + air spin scored (half
+   turn, pirouette, roof landing, big air, clean roll on a second Space), a bow with falling
+   arrows, six goblins that wander, chase within 25 m, knock back on contact and drop to an arrow;
+   first person within arm's reach. No rigged figure or animation yet — that is the next visible
+   step, and a Mixamo-style rig on the same controller is the honest way to get it.

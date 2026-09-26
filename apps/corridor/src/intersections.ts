@@ -351,13 +351,19 @@ export function buildBlades(
       for (const [u, v] of c) {
         pos.push(cx + ax * u * flip, cy + v, cz + az * u * flip)
       }
-      // both faces read correctly: the back sheet mirrors its UVs rather than the text
-      const t = flip > 0
-        ? [[u0, v0 + dv], [u0 + du, v0 + dv], [u0 + du, v0], [u0, v0]]
-        : [[u0 + du, v0 + dv], [u0, v0 + dv], [u0, v0], [u0 + du, v0]]
-      for (const [a, b] of t) uvs.push(a, b)
-      if (flip > 0) idx.push(base, base + 2, base + 1, base, base + 3, base + 2)
-      else idx.push(base, base + 1, base + 2, base, base + 2, base + 3)
+      // The SAME UVs on both sheets. The back sheet's corners are mirrored in space (u * flip), so
+      // giving its corners the same texture coordinates puts the legend's left end at the other end
+      // of the plate — which is exactly what reading correctly from behind means. Mirroring the
+      // UVs as well (the old code) put both legends the same way round in space, and the back one
+      // read backwards: "Crofton Parkway" in mirror writing at Farnborn Street.
+      for (const [a, b] of [[u0, v0 + dv], [u0 + du, v0 + dv], [u0 + du, v0], [u0, v0]]) uvs.push(a, b)
+      // ONE index order for both sheets. Mirroring the positions along the blade (u * flip) already
+      // reverses the winding, so reversing the indices as well put both sheets' normals on the SAME
+      // side: the blade was one-sided, and from behind it was culled. At Farnborn Street the
+      // "Crofton Parkway" plate faced away from the car and vanished, leaving its slot as a gap
+      // under the other plate, which then looked as if it floated (Rich, 2026-09-26). Measured:
+      // every triangle's normal was (-0.445, 0, 0.137) for both flips.
+      idx.push(base, base + 2, base + 1, base, base + 3, base + 2)
     }
   }
 

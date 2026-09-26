@@ -739,7 +739,14 @@ export class Grass {
         // one clump centre per cell; blades scatter around it
         const ccx = wx + (hash(cx * 7919 + cz * 104729) - 0.5) * cell
         const ccz = wz + (hash(cx * 15485863 + cz * 32452843) - 0.5) * cell
-        for (let b = 0; b < perCell && n < maxBlades; b++) {
+        // THE CLUMP IS WHERE THE BLADES STAND, NOT THE CELL CENTRE. The cell-centre test above
+        // passes a cell 1.1 m from a walk's centreline, but its clump wanders up to 0.5 m and the
+        // blades scatter 0.35 m beyond that, so blades landed 0.25 m from the centreline of a
+        // 1.5 m walk — "grass growing over the sidewalk" (Rich, 2026-09-26), measured as 289
+        // blades inside one walk with the cover answering "sidewalk" at every point of it. Asked
+        // at the clump, a clump on pavement or a walk grows nothing.
+        const clumpClear = this.roadDistance(ccx, ccz) >= this.pavedHalf + 0.3
+        for (let b = 0; b < (clumpClear ? perCell : 0) && n < maxBlades; b++) {
           const h1 = hash(cx * 31 + cz * 17 + b * 101), h2 = hash(cx * 13 + cz * 29 + b * 53)
           const scatter = T.GRASS_SCATTER * this.look.scatter
           const x = ccx + (h1 - 0.5) * scatter, z = ccz + (h2 - 0.5) * scatter
@@ -765,6 +772,8 @@ export class Grass {
         const want = Math.floor(cardsHere) + (hash(cx * 61 + cz * 67) < cardsHere % 1 ? 1 : 0)
         for (let b = 0; b < want && nc < maxCards; b++) {
           const x = wx + (hash(cx * 71 + cz * 73 + b * 79) - 0.5) * cell, z = wz + (hash(cx * 83 + cz * 89 + b * 97) - 0.5) * cell
+          // a card is a metre wide and stands where it is put: the same test, at its own foot
+          if (this.roadDistance(x, z) < this.pavedHalf + 0.3) continue
           const y = this.groundAt(x, -z) - 0.03
           const base = (mown ? T.GRASS_MOWN_HEIGHT * 1.6 * this.look.mown : this.heightScale * T.GRASS_ROUGH_HEIGHT * 0.8 * this.look.height)
           const size = base * ah * T.GRASS_HEIGHT_SCALE * T.GRASS_SPRITE_SCALE * (0.75 + 0.5 * hash(cx * 101 + cz * 103 + b * 107))

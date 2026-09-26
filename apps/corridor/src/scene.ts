@@ -95,6 +95,8 @@ export interface Site {
   groundAt: (x: number, z: number) => number | null
   /** signed distance to the nearest pavement edge (negative on the pavement) */
   edgeDistance: (x: number, z: number) => number
+  /** what the grass generator is told at world (x, z): -1 on pavement, a lot, a walk or air-photo paving; else metres from the nearest road. For probes. */
+  grassRoadDistance: (x: number, z: number) => number
   /** trees within r of world x,z as [x, z, trunkRadius] */
   treesNear: (x: number, z: number, r: number) => [number, number, number][]
   terrain: THREE.Mesh
@@ -878,6 +880,8 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
   let retune: () => void = () => {}
   let setSeason: (season: Season) => void = () => {}
   let groundAtWorld: (x: number, z: number) => number | null = (x, z) => heightAt(x, -z)
+  // the grass generator's road-distance answer, lifted out of the strip block for the Site's probes
+  let grassRoadDistanceOut: (x: number, z: number) => number = () => Infinity
   let edgeDistanceWorld: (x: number, z: number) => number = () => Infinity
   /** the road surface under a point near a carriageway: the spline's height, which the asphalt is built from */
   let roadHeightWorld: (x: number, z: number) => number | null = () => null
@@ -1035,6 +1039,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     const onSidewalk = sidewalkCover(manifest)
     // -1 means "do not plant here": a mapped lot, a walk, or anything the air photo says is paved
     const grassRoadDistance = (x: number, z: number) => (onParking(x, z) || onSidewalk(x, z) || (pavedAt !== null && pavedAt(x, -z) > 0.5) ? -1 : roadDistance(x, z))
+    grassRoadDistanceOut = grassRoadDistance
 
     // --- the corridor strip: fine terrain across every carriageway and 40 m of verge each side ---
     status('grading…')
@@ -1755,6 +1760,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     setSeason,
     groundAt: groundAtWorld,
     edgeDistance: edgeDistanceWorld,
+    grassRoadDistance: (x, z) => grassRoadDistanceOut(x, z),
     treesNear: treesNearWorld,
     terrain,
     /** tiled sites only: imagery streaming counts, for probes and the console */

@@ -19,6 +19,8 @@ import { DATA_BASE } from './site'
 export interface SiteTuning {
   version: 1
   values: Record<string, number>
+  /** what the world's author chose it to open with; the URL's ?style / ?season win over it */
+  look?: { style?: string; season?: string }
 }
 
 export interface TuneAccess {
@@ -50,7 +52,7 @@ export async function loadSiteTuning(slug: string): Promise<SiteTuning | null> {
  * for the status line — silence about an override that did not take is how a knob gets tuned
  * twice.
  */
-export async function applySiteTuning(slug: string, tune: TuneAccess): Promise<{ applied: number; restored: number; unknown: string[] }> {
+export async function applySiteTuning(slug: string, tune: TuneAccess): Promise<{ applied: number; restored: number; unknown: string[]; look?: SiteTuning['look'] }> {
   let restored = 0
   if (applied) {
     for (const [k, v] of Object.entries(applied.before)) if (tune.set(k, v)) restored++
@@ -58,6 +60,7 @@ export async function applySiteTuning(slug: string, tune: TuneAccess): Promise<{
   }
   const doc = await loadSiteTuning(slug)
   if (!doc) return { applied: 0, restored, unknown: [] }
+  const look = doc.look && typeof doc.look === 'object' ? doc.look : undefined
   const known = new Set(tune.names())
   const before: Record<string, number> = {}
   const unknown: string[] = []
@@ -74,7 +77,7 @@ export async function applySiteTuning(slug: string, tune: TuneAccess): Promise<{
     if (tune.set(k, v)) n++
   }
   applied = { slug, before }
-  return { applied: n, restored, unknown }
+  return { applied: n, restored, unknown, look }
 }
 
 /**
@@ -89,6 +92,9 @@ export async function saveSiteTuning(slug: string, tune: TuneAccess, baseline: R
     if (baseline[name] === undefined || Math.abs(baseline[name] - v) > 1e-9) values[name] = v
   }
   const body: SiteTuning = { version: 1, values }
+  // the world editor writes the site's look into this same file; the knob save keeps it
+  const prev = await loadSiteTuning(slug)
+  if (prev?.look) body.look = prev.look
   const r = await fetch(`/sites/${slug}/tuning.json`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body, null, 1) })
   const j = (await r.json().catch(() => ({}))) as { ok?: boolean; bytes?: number; error?: string }
   if (!r.ok || !j.ok) throw new Error(j.error ?? `HTTP ${r.status} — is "tuning" in the PUT whitelist in vite.config.ts?`)

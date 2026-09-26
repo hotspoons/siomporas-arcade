@@ -59,8 +59,22 @@ export function validate(world) {
   } else if (world.kind) {
     errors.push(`unknown kind "${world.kind}" — this editor makes network sites`)
   }
+  // the look a published world opens with: a style palette, a season, and the water level (the
+  // waterworld knob). Optional, every field; anything else is left to the viewer's defaults.
+  if (world.look != null) {
+    const L = world.look
+    if (typeof L !== 'object') errors.push('look must be an object')
+    else {
+      if (L.style != null && !STYLES.includes(L.style)) errors.push(`look.style must be one of ${STYLES.join(', ')}`)
+      if (L.season != null && !SEASONS.includes(L.season)) errors.push(`look.season must be one of ${SEASONS.join(', ')}`)
+      if (L.water_level_m != null && !(Number.isFinite(L.water_level_m) && L.water_level_m >= -100 && L.water_level_m <= 1000)) errors.push('look.water_level_m must be a number between -100 and 1000 (metres NAVD88 / above the ellipsoid)')
+    }
+  }
   return { ok: errors.length === 0, errors, warnings }
 }
+/** the palettes the viewer has (apps/corridor/src/style.ts) and the four seasons */
+export const STYLES = ['realistic', 'fantasy']
+export const SEASONS = ['winter', 'spring', 'summer', 'autumn']
 
 /**
  * Build a definition from what the editor drew.
@@ -71,7 +85,7 @@ export function validate(world) {
  * of the street furniture built from OSM had nothing to attach to. The editor defaults to
  * `all_streets` and says that.
  */
-export function fromDraw({ slug, name, boundary, centre, radius_m, primary, roads, all_streets = true, region, note }) {
+export function fromDraw({ slug, name, boundary, centre, radius_m, primary, roads, all_streets = true, region, note, look }) {
   const ring = (boundary ?? []).map(toPoint)
   const circle = ring.length >= 3 ? circleFor(ring) : null
   const lat = centre?.lat ?? circle?.lat
@@ -91,6 +105,13 @@ export function fromDraw({ slug, name, boundary, centre, radius_m, primary, road
   else world.roads = [...new Set(roads ?? [])]
   if (region) world.region = region
   if (note) world.note = note
+  if (look && typeof look === 'object') {
+    const L = {}
+    if (look.style) L.style = look.style
+    if (look.season) L.season = look.season
+    if (Number.isFinite(look.water_level_m)) L.water_level_m = Number(look.water_level_m)
+    if (Object.keys(L).length) world.look = L
+  }
   if (ring.length >= 3) world.boundary = ring.map((p) => [round6(p.lon), round6(p.lat)])
   world.source = 'world-editor'
   world.created = new Date().toISOString()

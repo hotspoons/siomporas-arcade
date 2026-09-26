@@ -364,6 +364,15 @@ export class Runs {
     run.detail = detail
     run.finished = now()
     await this.#append(run.id, `\n=== ${state} ${run.finished}${detail ? ` — ${detail}` : ''}\n`)
+    if (state === 'done' && run.kind === 'bake') {
+      // the site now exists: give it the world's look (see store.applyLook)
+      try {
+        const world = await this.store.getWorld(run.slug)
+        if (world) await this.store.applyLook(world)
+      } catch (e) {
+        await this.#append(run.id, `(look not applied: ${e.message ?? e})\n`)
+      }
+    }
     // Returns the run: `cancel` hands this straight back to the caller, and without the return it
     // answered `{run: undefined}` with a 200 — a cancel that worked and reported nothing.
     return this.#save(run)

@@ -105,6 +105,8 @@ export interface World {
   boundary?: [number, number][]
   source?: string
   created?: string
+  /** the look a published world opens with */
+  look?: { style?: string; season?: string; water_level_m?: number }
   baked?: { slug: string; fetched: string | null; frame: { kind?: string; epsg?: number; anchor?: { lon: number; lat: number } } | null; seconds: number | null; web: boolean } | null
 }
 

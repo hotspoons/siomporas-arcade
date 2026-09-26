@@ -278,6 +278,68 @@ export class DefinePanel {
     rb.append(hint('the primary becomes the spine: the profile, the structures and every branch’s position along the world are measured against it.'))
     host.append(roads)
 
+    /* how it looks: the palette, the season and the water the world opens with */
+    const lookG = group('Look', { note: 'What the world opens with. A viewer link with ?style or ?season still wins.' })
+    const lb = bodyOf(lookG)
+    const look = (this.draft.look ??= {})
+    lb.append(
+      select<'realistic' | 'fantasy'>({
+        label: 'style',
+        value: (look.style as 'realistic' | 'fantasy') ?? 'realistic',
+        options: [
+          { value: 'realistic', label: 'Realistic' },
+          { value: 'fantasy', label: 'Fantasy' },
+        ],
+        onChange: (v) => {
+          look.style = v
+          this.o.onDirty(true)
+        },
+      }),
+      select<'winter' | 'spring' | 'summer' | 'autumn'>({
+        label: 'season',
+        value: (look.season as 'winter' | 'spring' | 'summer' | 'autumn') ?? 'summer',
+        options: [
+          { value: 'spring', label: 'Spring' },
+          { value: 'summer', label: 'Summer' },
+          { value: 'autumn', label: 'Autumn' },
+          { value: 'winter', label: 'Winter' },
+        ],
+        onChange: (v) => {
+          look.season = v
+          this.o.onDirty(true)
+        },
+      }),
+      toggle({
+        label: 'set the water level',
+        value: look.water_level_m != null,
+        note: 'Waterworld: the sea plane rises to this height. Off leaves the site’s own water.',
+        onChange: (on) => {
+          if (on) look.water_level_m = look.water_level_m ?? 0
+          else delete look.water_level_m
+          this.o.onDirty(true)
+          this.render()
+        },
+      }),
+    )
+    if (look.water_level_m != null) {
+      lb.append(
+        slider({
+          label: 'water level',
+          value: look.water_level_m,
+          min: -100,
+          max: 1000,
+          step: 1,
+          unit: 'm',
+          note: 'metres above the ellipsoid, the height the bake’s DEM uses',
+          onInput: (v) => {
+            look.water_level_m = v
+            this.o.onDirty(true)
+          },
+        }),
+      )
+    }
+    host.append(lookG)
+
     /* naming and saving */
     const name = group('Name')
     const nb = bodyOf(name)
@@ -333,6 +395,7 @@ export class DefinePanel {
       roads: [...this.roads],
       note: d.note,
       boundary: this.o.map.ring.map((p) => [p.lon, p.lat]),
+      look: d.look && Object.keys(d.look).length ? d.look : undefined,
     }
     try {
       const res = this.editing

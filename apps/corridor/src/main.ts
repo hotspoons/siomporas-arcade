@@ -165,6 +165,11 @@ async function loadSite(slug: string) {
   // per-site knob overrides, applied AFTER the panels have restored the browser's values so the
   // committed file wins, and undoing whatever the previous site's file had set
   const tuned = await applySiteTuning(slug, siteTuneAccess)
+  // the world's own look (tuning.json `look`, written by the world editor): the URL's ?style and
+  // ?season win, so a shared link keeps saying what it said
+  const urlQ = new URLSearchParams(location.search)
+  if (tuned.look?.style && !urlQ.get('style') && isStyle(tuned.look.style) && tuned.look.style !== style) setStyle(tuned.look.style)
+  if (tuned.look?.season && !urlQ.get('season') && SEASONS.includes(tuned.look.season as Season) && tuned.look.season !== season) setSeason(tuned.look.season as Season)
   if (tuned.applied || tuned.unknown.length) {
     onTuneChange()
     toast(`${slug}: ${tuned.applied} site knobs applied${tuned.unknown.length ? `, ${tuned.unknown.length} unknown (${tuned.unknown.slice(0, 3).join(', ')})` : ''}`, 'ok', 4000)

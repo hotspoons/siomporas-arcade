@@ -127,7 +127,34 @@ export class Store {
   async putWorld(world) {
     await this.writeAtomic(path.join(this.worlds, `${world.slug}.json`), Buffer.from(JSON.stringify(world, null, 1)))
     await this.materialise()
+    await this.applyLook(world)
     return world
+  }
+
+  /**
+   * A world's `look` (style, season, water level) is carried to the viewer by the site's own
+   * `tuning.json` — the file the viewer already fetches per site — so a published world opens as
+   * its author meant it, with no new request and nothing for the bake to know. Written when the
+   * world is saved (a site that exists gets it at once) and again when a bake finishes (the bake
+   * never writes tuning.json, so the first bake of a new world lands on an empty site).
+   * The URL's ?style / ?season still win in the viewer, so a shared link keeps its meaning.
+   */
+  async applyLook(world) {
+    const dir = path.join(this.sites, world.slug)
+    if (!world?.slug || !existsSync(dir)) return false
+    const file = path.join(dir, 'tuning.json')
+    const doc = (await this.readJson(file)) ?? { version: 1, values: {} }
+    if (typeof doc.values !== 'object' || doc.values === null) doc.values = {}
+    const L = world.look ?? {}
+    const look = {}
+    if (L.style) look.style = L.style
+    if (L.season) look.season = L.season
+    if (Object.keys(look).length) doc.look = look
+    else delete doc.look
+    if (Number.isFinite(L.water_level_m)) doc.values.WATER_LEVEL_M = L.water_level_m
+    else delete doc.values.WATER_LEVEL_M
+    await this.writeAtomic(file, Buffer.from(JSON.stringify(doc, null, 1)))
+    return true
   }
 
   async removeWorld(slug) {

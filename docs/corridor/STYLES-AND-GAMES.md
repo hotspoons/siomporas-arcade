@@ -113,7 +113,11 @@ scoring geometry are already there. Same engine, same catalog entry pattern.
 ## Order
 
 1. `style.ts` with `realistic` and `fantasy`; the picker; the stance field. One evening.
-2. Terrain exaggeration on `heightAt`, `WATER_LEVEL_M` exposed on the world record.
+2. ~~`WATER_LEVEL_M` exposed on the world record~~ done 2026-09-26: a world carries `look:
+   {style, season, water_level_m}`; the editor's Define form has a Look group; the service writes
+   it into the site's `tuning.json` (on save, and again when a bake finishes, since the bake never
+   writes that file) and the viewer applies it unless the URL says `?style`/`?season`. Terrain
+   exaggeration on `heightAt` is still to do.
 3. ~~Squishy Hunt: hauls + hints + walk mode single-player, then the relay.~~ Done 2026-09-26; the world-editor pod needs redeploying for the relay to exist outside a dev box.
 4. Parkour: ~~the character, then tricks, then the bow, then enemies.~~ First pass 2026-09-26
    (`apps/corridor/src/games/parkour.ts`, `?game=parkour` or P): a capsule runner on the real

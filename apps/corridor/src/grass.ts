@@ -151,6 +151,9 @@ export class Grass {
   private roadDistance: (x: number, z: number) => number
   /** kept (mown lawn everywhere) or rural (a mown shoulder, then tall grass), world x,z — see zoning.ts */
   private zoneAt: ((x: number, z: number) => 'kept' | 'rural' | null) | undefined
+  /** the direction in which the road distance grows (scene.ts edgeDistance): a blade's own distance
+   * from the cell's, without a second grid walk per blade */
+  private roadGrad: ((x: number, z: number) => [number, number]) | undefined
   /** the last uTime pushed to the shaders; a tile born now grows in from here */
   private now = 0
   private pavedHalf: number
@@ -202,9 +205,11 @@ export class Grass {
     sun = new THREE.Vector3(-3000, 4000, 2500).normalize(),
     demAt: ((x: number, y: number) => number) | undefined = undefined,
     zoneAt: ((x: number, z: number) => 'kept' | 'rural' | null) | undefined = undefined,
+    roadGrad: ((x: number, z: number) => [number, number]) | undefined = undefined,
   ) {
     this.demAt = demAt
     this.zoneAt = zoneAt
+    this.roadGrad = roadGrad
     this.adjustAt = adjustAt
     this.groundAt = groundAt
     this.canopyAt = canopyAt
@@ -787,6 +792,9 @@ export class Grass {
         // blades inside one walk with the cover answering "sidewalk" at every point of it. Asked
         // at the clump, a clump on pavement or a walk grows nothing.
         const clumpClear = this.roadDistance(ccx, ccz) >= this.pavedHalf + 0.3
+        // the distance field near the road is linear, so a blade's own distance is the cell's plus
+        // its offset along the gradient — a per-blade test for the price of one grid walk a cell
+        const g = clumpClear && this.roadGrad ? this.roadGrad(wx, wz) : null
         for (let b = 0; b < (clumpClear ? perCell : 0) && n < maxBlades; b++) {
           const h1 = hash(cx * 31 + cz * 17 + b * 101), h2 = hash(cx * 13 + cz * 29 + b * 53)
           const scatter = T.GRASS_SCATTER * this.look.scatter
@@ -797,6 +805,15 @@ export class Grass {
           const height = (mown ? T.GRASS_MOWN_HEIGHT : this.heightScale * T.GRASS_ROUGH_HEIGHT * tall) * shape * ah * T.GRASS_HEIGHT_SCALE * (0.6 + 0.8 * hash(cx * 3 + cz * 5 + b * 7))
           const width = (mown ? 0.035 : 0.05 + 0.03 * rnd) * T.GRASS_WIDTH_SCALE * this.look.width
           const lean = Math.max(0, 0.15 + this.look.lean + T.GRASS_LEAN * hash(cx * 11 + cz * 19 + b * 23))
+          // A BLADE'S TIP MUST CLEAR THE PAVEMENT, NOT JUST ITS ROOT. The cell and the clump were
+          // tested, but a blade scatters up to GRASS_SCATTER/2 beyond the clump — measured on
+          // 2026-09-26, blades stood at −0.13 m (on the asphalt) and 715 of 20,725 near an edge
+          // leaned over it by up to 0.52 m. The root's own distance, and the bend the shader gives
+          // it (lean plus the wind's share, which a mown blade barely feels), both have to fit.
+          if (g) {
+            const dRoot = roadD + (x - wx) * g[0] + (z - wz) * g[1]
+            if (dRoot < this.pavedHalf + T.GRASS_ROAD_CLEAR + height * (lean + (mown ? 0.05 : 0.3))) continue
+          }
           const o = n * BLADE_F
           blades[o] = x
           blades[o + 1] = y
@@ -815,7 +832,7 @@ export class Grass {
         for (let b = 0; b < want && nc < maxCards; b++) {
           const x = wx + (hash(cx * 71 + cz * 73 + b * 79) - 0.5) * cell, z = wz + (hash(cx * 83 + cz * 89 + b * 97) - 0.5) * cell
           // a card is a metre wide and stands where it is put: the same test, at its own foot
-          if (this.roadDistance(x, z) < this.pavedHalf + 0.3) continue
+          if (this.roadDistance(x, z) < this.pavedHalf + T.GRASS_ROAD_CLEAR) continue
           const y = this.groundAt(x, -z) - 0.03
           const base = (mown ? T.GRASS_MOWN_HEIGHT * 1.6 * this.look.mown : this.heightScale * T.GRASS_ROUGH_HEIGHT * tall * 0.8 * this.look.height)
           const size = base * ah * T.GRASS_HEIGHT_SCALE * T.GRASS_SPRITE_SCALE * (0.75 + 0.5 * hash(cx * 101 + cz * 103 + b * 107))

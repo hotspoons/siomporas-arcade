@@ -482,8 +482,14 @@ export class Car {
     this.mesh.position.copy(this.pos).y -= T.CAR_RIDE
     // yaw about Y (three: +yaw turns from +X toward -Z, our forward is (cos, 0, sin) so negate)
     this.mesh.rotation.set(0, -this.yaw, 0)
-    this.mesh.rotateZ(-Math.atan(this.pitch))
-    this.mesh.rotateX(Math.atan(this.roll))
+    // The body sits ON the slope. The model's nose is local +X, up +Y, right +Z, so a nose-up
+    // pitch is a POSITIVE rotation about local Z (X tips toward Y) and ground that is higher on
+    // the right is a NEGATIVE rotation about local X (which would otherwise tip up toward the
+    // right). Both were negated, so the car leaned into every hill and camber instead of over it
+    // (Rich, 2026-09-26) — probes/corridor-carpose.mjs reads these two lines and checks the body's
+    // up vector against the ground normal.
+    this.mesh.rotateZ(Math.atan(this.pitch))
+    this.mesh.rotateX(-Math.atan(this.roll))
     if (this.steeringWheel) this.steeringWheel.rotation.z = this.steerVisual * 2.6
     for (const [i, w] of this.wheels.entries()) {
       w.rotation.set(0, i < 2 ? -this.steerVisual : 0, 0)

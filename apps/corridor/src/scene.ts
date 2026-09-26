@@ -102,7 +102,7 @@ export interface Site {
   /** what the grass generator is told at world (x, z): -1 on pavement, a lot, a walk or air-photo paving; else metres from the nearest road. For probes. */
   grassRoadDistance: (x: number, z: number) => number
   /** the full edge record at world (x, z): signed distance to the nearest pavement edge, which road (`who`, < 0 for a driveway or bulb), its surface height and along-track s. For probes. */
-  edgeInfo: (x: number, z: number, exclude?: number, roadsOnly?: boolean) => { d: number; who: number; y: number; s: number }
+  edgeInfo: (x: number, z: number, exclude?: number, roadsOnly?: boolean) => { d: number; who: number; y: number; s: number; gx: number; gz: number }
   /** kept (trimmed lawn) or rural (mown shoulder, tall grass) at world (x, z), from landuse then road class — see zoning.ts */
   zoneAt: (x: number, z: number) => 'kept' | 'rural' | null
   /** how many junctions had an inferior road re-graded to meet the superior one, and the largest step closed (m) */
@@ -1050,7 +1050,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
   // the grass generator's road-distance answer, lifted out of the strip block for the Site's probes
   let grassRoadDistanceOut: (x: number, z: number) => number = () => Infinity
   let zoneAtOut: (x: number, z: number) => 'kept' | 'rural' | null = () => null
-  let edgeInfoOut: (x: number, z: number, exclude?: number, roadsOnly?: boolean) => { d: number; who: number; y: number; s: number } = () => ({ d: Infinity, who: -1, y: 0, s: 0 })
+  let edgeInfoOut: (x: number, z: number, exclude?: number, roadsOnly?: boolean) => { d: number; who: number; y: number; s: number; gx: number; gz: number } = () => ({ d: Infinity, who: -1, y: 0, s: 0, gx: 0, gz: 0 })
   let edgeDistanceWorld: (x: number, z: number) => number = () => Infinity
   /** the road surface under a point near a carriageway: the spline's height, which the asphalt is built from */
   let roadHeightWorld: (x: number, z: number) => number | null = () => null
@@ -1169,9 +1169,13 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     }
     placeBulbs()
     /** signed distance to the nearest pavement edge, and which carriageway that was */
-    const edgeDistance = (x: number, z: number, exclude = -1, roadsOnly = false): { d: number; who: number; y: number; s: number } => {
+    const edgeDistance = (x: number, z: number, exclude = -1, roadsOnly = false): { d: number; who: number; y: number; s: number; gx: number; gz: number } => {
       const cx = Math.floor(x / stCell), cz = Math.floor(z / stCell)
       let best = Infinity, who = -1, bp: (typeof stGrid extends Map<string, (infer R)[]> ? R : never) | null = null
+      // how the distance GROWS from the winning station: away from its centreline inside the
+      // along-track band, radially outside it. The grass planter needs it to place a blade's own
+      // distance from the cell's, without a second (expensive) grid walk per blade.
+      let bLat = false, bux = 0, buz = 0
       for (let a = -3; a <= 3; a++) {
         for (let b = -3; b <= 3; b++) {
           const arr = stGrid.get(`${cx + a},${cz + b}`)
@@ -1186,20 +1190,29 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
             // from the asphalt's centre rather than the spine; with off = 0 this is the old |lat|
             const lat = Math.abs(uz * p.dx - ux * p.dz - p.off)
             const d = (Math.abs(along) <= 2.6 ? lat : Math.hypot(ux, uz)) - p.half
-            if (d < best) { best = d; who = p.who; bp = p }
+            if (d < best) { best = d; who = p.who; bp = p; bLat = Math.abs(along) <= 2.6; bux = ux; buz = uz }
           }
         }
       }
-      if (!bp) return { d: best, who, y: 0, s: 0 }
+      if (!bp) return { d: best, who, y: 0, s: 0, gx: 0, gz: 0 }
       // a driveway (who < 0) is not a carriageway and has no spline: it carries its own height
-      if (bp.who < 0) return { d: best, who: bp.who, y: bp.y ?? 0, s: 0 }
+      const grad = (): [number, number] => {
+        if (bLat) {
+          const sgn = Math.sign(buz * bp!.dx - bux * bp!.dz - bp!.off) || 1
+          return [-bp!.dz * sgn, bp!.dx * sgn]
+        }
+        const L = Math.hypot(bux, buz) || 1
+        return [bux / L, buz / L]
+      }
+      if (bp.who < 0) { const [gx, gz] = grad(); return { d: best, who: bp.who, y: bp.y ?? 0, s: 0, gx, gz } }
       // the road height HERE, from the carriageway spline at the projected along-track metre —
       // the very same function the asphalt mesh is built from, so ground and road agree to the mm
       const along = (x - bp.x) * bp.dx + (z - bp.z) * bp.dz
       const c = curves[bp.who]
       const sOn = Math.min(c.len, Math.max(0, bp.s + along))
       const y = c.at(sOn).pos.y // the spline IS the road surface
-      return { d: best, who, y, s: sOn }
+      const [gx, gz] = grad()
+      return { d: best, who, y, s: sOn, gx, gz }
     }
     const roadDistance = (x: number, z: number) => edgeDistance(x, z).d
     // A CAR PARK IS NOT A VERGE. The grass planter only knows how far it is from the pavement
@@ -1596,7 +1609,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
       return zoneOfRoad(hw)
     }
     zoneAtOut = zoneAtWorld
-    const grass = new Grass(groundNear, canopyAt, grassRoadDistance, 0, look(currentSeason), lite ? 90_000 : 400_000, lite ? 26 : 40, fog, adjustments.active ? (x, y) => { const a = adjustments.at(x, y, grassAdj); return a.cover === 'crop' ? [1, 0] : [a.grass_height, a.grass_density] } : undefined, undefined, heightAt, zoneAtWorld)
+    const grass = new Grass(groundNear, canopyAt, grassRoadDistance, 0, look(currentSeason), lite ? 90_000 : 400_000, lite ? 26 : 40, fog, adjustments.active ? (x, y) => { const a = adjustments.at(x, y, grassAdj); return a.cover === 'crop' ? [1, 0] : [a.grass_height, a.grass_density] } : undefined, undefined, heightAt, zoneAtWorld, (x, z) => { const e = edgeDistance(x, z); return [e.gx, e.gz] })
     // NOT a child of `trees`. It was, and so the trees checkbox turned off all ground cover with
     // them — you could not hide the trees to look at the grass, which is most of what looking at
     // grass involves. Its own group, its own layer toggle.

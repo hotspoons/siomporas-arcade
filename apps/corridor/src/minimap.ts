@@ -64,6 +64,7 @@ export class MiniMap {
   private manifest: Manifest
   private frameCount = 0
   private expandBtn: HTMLButtonElement
+  private grip: HTMLDivElement
   private ro: ResizeObserver
   private onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && this.expanded) this.setExpanded(false) }
   expanded = false
@@ -78,7 +79,37 @@ export class MiniMap {
     locate.classList.add('mm-locate')
     this.expandBtn = button({ icon: 'arrows-pointing-out', variant: 'ghost', title: 'the whole screen', key: 'N', onClick: () => this.setExpanded(!this.expanded) })
     this.expandBtn.classList.add('mm-expand')
-    this.el.append(this.canvas, locate, this.expandBtn)
+    // THE GRIP IS AT THE TOP-LEFT. The panel is pinned to the bottom-right corner of the screen,
+    // so the browser's own `resize: both` handle — always bottom-right — grew the map INTO the
+    // corner it is anchored to: you drag down-right and the map grows up-left, which is backwards
+    // (Rich, 2026-09-26). This one is where the map's free corner actually is.
+    this.grip = document.createElement('div')
+    this.grip.className = 'mm-grip'
+    this.grip.title = 'drag to resize'
+    this.grip.addEventListener('pointerdown', (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      if (this.expanded) return
+      this.grip.setPointerCapture(e.pointerId)
+      const x0 = e.clientX, y0 = e.clientY, w0 = this.w, h0 = this.h
+      const maxW = innerWidth - 24, maxH = innerHeight - 72
+      const move = (m: PointerEvent) => {
+        this.w = Math.round(Math.min(maxW, Math.max(MIN, w0 - (m.clientX - x0))))
+        this.h = Math.round(Math.min(maxH, Math.max(MIN, h0 - (m.clientY - y0))))
+        this.el.style.width = `${this.w}px`
+        this.el.style.height = `${this.h}px`
+        this.fit()
+        this.draw(null)
+      }
+      const up = () => {
+        this.grip.removeEventListener('pointermove', move)
+        this.grip.removeEventListener('pointerup', up)
+        try { localStorage.setItem(SIZE_KEY, JSON.stringify({ w: this.w, h: this.h })) } catch { /* private window */ }
+      }
+      this.grip.addEventListener('pointermove', move)
+      this.grip.addEventListener('pointerup', up)
+    })
+    this.el.append(this.canvas, locate, this.expandBtn, this.grip)
     parent.append(this.el)
     this.spine = new Float32Array(manifest.spine.coords.flatMap(([x, y]) => [x, y]))
     this.siblings = manifest.siblings.map((s) => new Float32Array(s.flatMap(([x, y]) => [x, y])))
@@ -287,9 +318,11 @@ export class MiniMap {
         if (saved) { this.w = saved.w; this.h = saved.h; this.el.style.width = `${this.w}px`; this.el.style.height = `${this.h}px` }
       } catch { /* keep what we have */ }
     }
+    // full screen closes with an X in the corner a person looks for it, not a small glyph at the
+    // bottom (Rich, 2026-09-26). Esc, N and a double-click still work.
     this.expandBtn.replaceChildren()
-    this.expandBtn.append(iconOf(on ? 'arrows-pointing-in' : 'arrows-pointing-out'))
-    this.expandBtn.title = on ? 'back to the corner (N, Esc, or double-click)' : 'the whole screen (N, or double-click)'
+    this.expandBtn.append(iconOf(on ? 'x-mark' : 'arrows-pointing-out'))
+    this.expandBtn.title = on ? 'close the map (N, Esc, or double-click)' : 'the whole screen (N, or double-click)'
     this.fit()
     this.draw(null)
   }

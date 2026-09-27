@@ -62,6 +62,15 @@ let site: Site | null = null
 let minimap: MiniMap | null = null
 /** captured worlds attached to this site (splats.ts) */
 let splats: SplatField[] = []
+/**
+ * A probe's direct hold on the seam's strength.
+ *
+ * Going through the knob would work and would also `retune()` — re-seeding the grass and
+ * re-picking the trees between the two frames a difference image is comparing, so the measurement
+ * would be of the vegetation rather than of the seam. Four rounds of exactly that were spent on
+ * the splat depth test in September. This writes the uniform and nothing else.
+ */
+let splatFadeOverride: number | null = null
 /** the seam: where a capture has taken over, as a texture the built world's shaders sample */
 const splatMask = splatMaskUniforms()
 let splatCover: { w: number; h: number; covered: number; segments: number } | null = null
@@ -244,6 +253,10 @@ async function loadSite(slug: string) {
       const i = Math.min(splatCover.w - 1, Math.max(0, Math.floor(u * splatCover.w)))
       const j = Math.min(splatCover.h - 1, Math.max(0, Math.floor(v * splatCover.h)))
       return (t.image.data as Uint8Array)[j * splatCover.w + i] / 255
+    },
+    /** set the seam's strength directly, with no retune — see `splatFadeOverride` */
+    splatFade: (v: number | null) => {
+      splatFadeOverride = v
     },
     /** the rasterised seam: its size and how much of the site a capture covers */
     splatCover: () => (splatCover ? { ...splatCover, cellM: T.SPLAT_MASK_CELL_M, fade: splatMask.uSplatFade.value } : null),
@@ -1249,7 +1262,7 @@ function frame() {
     // ONLY where a seam was actually drawn. `splats.length` is not the test: a capture with no
     // usable corridor.json attaches fine and rasterises to nothing, and dissolving the built world
     // against an empty seam is how the site went dark (Rich, 2026-09-27).
-    splatMask.uSplatFade.value = splatCover && splatCover.covered > 0 ? T.SPLAT_WORLD_FADE : 0
+    splatMask.uSplatFade.value = splatFadeOverride ?? (splatCover && splatCover.covered > 0 ? T.SPLAT_WORLD_FADE : 0)
     const lamps = drive.car?.lamps()
     retro.setLamps(lamps?.each ?? [], lamps?.on ?? 0)
     retro.tick()

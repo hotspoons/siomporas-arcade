@@ -37,7 +37,34 @@ await page.goto(`http://localhost:${PORT}/?lite=1#${slug}`, { waitUntil: 'domcon
 await page.waitForFunction(() => !!window.corridor?.tune, null, { timeout: 600000 })
 await page.evaluate(() => window.corridor.tune.set('SPLAT_ENABLED', 0))
 await page.waitForFunction(() => !!window.corridor?.site && !!window.corridor.splatCover?.(), null, { timeout: 600000 })
+/*
+ * PUT THE SUN UP FIRST.
+ *
+ * The world clock homes to the real time, and the first run of this measured a site at night: the
+ * ground was there, 818,644 triangles of it, and not one pixel passed a brightness threshold, so
+ * the control point read as "nothing is drawn here" and the whole comparison was against black.
+ * Solar noon is `12 - lon/15` in UTC, which lands within an hour anywhere, and the elevation is
+ * read back rather than assumed.
+ */
+await page.evaluate(async () => {
+  const c = window.corridor
+  const lon = c.site.manifest.frame?.anchor?.lon ?? 0
+  const noon = (12 - lon / 15 + 24) % 24
+  const fmt = (h) => `${String(((Math.round(h) % 24) + 24) % 24).padStart(2, '0')}:00`
+  let h = noon
+  let el = -99
+  for (let k = 0; k < 4; k++) {
+    c.time.setLocal('2026-09-26', fmt(h))
+    await new Promise((r) => requestAnimationFrame(r))
+    const e = c.time.sun().el
+    if (e < el) { c.time.setLocal('2026-09-26', fmt(h - 1)); break }
+    el = e
+    h += 1
+  }
+})
 await page.waitForTimeout(2000)
+const sunEl = await page.evaluate(() => +window.corridor.time.sun().el.toFixed(1))
+console.log('  sun elevation for the measurement:', sunEl, 'degrees')
 
 const info = await page.evaluate(() => {
   const c = window.corridor
@@ -67,54 +94,124 @@ const info = await page.evaluate(() => {
 })
 if (info.error) { console.log(JSON.stringify(info, null, 1)); await browser.close(); console.error(`FAIL: ${info.error}`); process.exit(1) }
 
-/** stand at a site point, look down, render, and report how many fragments of the built world survive */
-const litAt = async (p, fade) =>
+/**
+ * Stand at a site point, LET THE WORLD FINISH BUILDING, then take a frame at each seam strength.
+ *
+ * The build is lazy and eye-driven, so the first frame after a camera move is a half-built world
+ * and differencing it against a later one measures the build pump. The settle loop below waits
+ * for the drawn-pixel count to stop changing before anything is compared — and the seam is moved
+ * through `splatFade`, which writes the uniform and does NOT retune, because a retune re-seeds
+ * the grass and re-picks the trees and the difference image would then be of the vegetation.
+ */
+const settleAt = async (p) =>
   page.evaluate(
-    ({ p, fade }) =>
+    ({ p }) =>
       new Promise((resolve) => {
         const c = window.corridor
-        c.tune.set('SPLAT_WORLD_FADE', fade)
         const g = c.site.groundAt(p.x, p.z) ?? 0
         c.camera.position.set(p.x, g + 26, p.z)
         c.orbit.target.set(p.x, g, p.z)
         c.orbit.update()
+        let last = -1
+        let stable = 0
         let n = 0
         const tick = () => {
-          if (++n < 8) return requestAnimationFrame(tick)
+          n++
+          const r = c.renderer
+          r.render(c.scene, c.camera)
+          const tris = r.info.render.triangles
+          if (Math.abs(tris - last) < Math.max(200, last * 0.002)) stable++
+          else stable = 0
+          last = tris
+          if (stable >= 12 || n > 600) return resolve({ frames: n, triangles: tris })
+          requestAnimationFrame(tick)
+        }
+        requestAnimationFrame(tick)
+      }),
+    { p },
+  )
+
+/**
+ * Take a frame at each seam strength and DIFF THEM IN THE PAGE.
+ *
+ * Counting "lit" pixels against a brightness threshold cannot work: at night the ground is below
+ * any threshold that excludes the background, and in daylight the sky is above it, so the same
+ * test read 0% and then 100% of the same scene. What the seam does is CHANGE pixels, and that
+ * needs no absolute threshold at all — it is its own control.
+ *
+ * Both frames stay in the page; shipping two 850 kB buffers over the debugging protocol per point
+ * is slower than the measurement.
+ */
+const seamDiff = async (to) =>
+  page.evaluate(
+    ({ to }) =>
+      new Promise((resolve) => {
+        const c = window.corridor
+        const grab = () => {
           const r = c.renderer
           r.render(c.scene, c.camera)
           const gl = r.getContext()
           const w = gl.drawingBufferWidth, h = gl.drawingBufferHeight
           const buf = new Uint8Array(w * h * 4)
           gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, buf)
-          // the built world is everything that is not the clear colour; count what is drawn
-          let drawn = 0
-          for (let i = 0; i < w * h; i++) {
-            const o = i * 4
-            if (buf[o] + buf[o + 1] + buf[o + 2] > 24) drawn++
-          }
-          resolve({ drawn, px: w * h })
+          return { w, h, buf }
         }
-        requestAnimationFrame(tick)
+        const settle = (n, then) => {
+          let k = 0
+          const t = () => (++k < n ? requestAnimationFrame(t) : then())
+          requestAnimationFrame(t)
+        }
+        c.splatFade(0)
+        settle(6, () => {
+          const a = grab()
+          c.splatFade(to)
+          settle(6, () => {
+            const b = grab()
+            let changed = 0
+            let darker = 0
+            for (let i = 0; i < a.w * a.h; i++) {
+              const o = i * 4
+              const d = Math.abs(a.buf[o] - b.buf[o]) + Math.abs(a.buf[o + 1] - b.buf[o + 1]) + Math.abs(a.buf[o + 2] - b.buf[o + 2])
+              if (d > 24) {
+                changed++
+                if (b.buf[o] + b.buf[o + 1] + b.buf[o + 2] < a.buf[o] + a.buf[o + 1] + a.buf[o + 2]) darker++
+              }
+            }
+            c.splatFade(null)
+            resolve({ px: a.w * a.h, changed, darker, changedPct: +((100 * changed) / (a.w * a.h)).toFixed(1) })
+          })
+        })
       }),
-    { p, fade },
+    { to },
   )
 
 const res = {}
-if (info.inside) { res.insideOff = await litAt(info.inside, 0); res.insideOn = await litAt(info.inside, 1) }
-if (info.outside) { res.outsideOff = await litAt(info.outside, 0); res.outsideOn = await litAt(info.outside, 1) }
-console.log(JSON.stringify({ ...info, res }, null, 1))
+if (info.inside) {
+  res.insideSettle = await settleAt(info.inside)
+  // a crossfade, not a switch: half the strength must remove less than all of it
+  res.insideHalf = await seamDiff(0.5)
+  res.inside = await seamDiff(1)
+}
+if (info.outside) { res.outsideSettle = await settleAt(info.outside); res.outside = await seamDiff(1) }
+console.log(JSON.stringify({ ...info, sunEl, res }, null, 1))
 await browser.close()
 
 const fail = (m) => { console.error(`FAIL: ${m}`); process.exitCode = 1 }
-const keep = (a) => (a ? a.drawn / a.px : 0)
-if (!info.inside) fail('found no point inside a capture envelope — the seam raster covers nothing')
+const IN = res.inside
+const OUT = res.outside
+if (!(sunEl > 10)) fail(`the sun is at ${sunEl} degrees — too dark to see what a dissolve removed`)
+else if (!info.inside) fail('found no point inside a capture envelope — the seam raster covers nothing')
 else if (!info.outside) fail('found no point clear of every capture — cannot tell yielding from disappearing')
 else if (!(info.cov.covered > 0)) fail('the seam raster is empty')
-// liveness: the built world must actually be drawing at these points, or nothing is being measured
-else if (!(keep(res.insideOff) > 0.5)) fail(`with the seam off, only ${(100 * keep(res.insideOff)).toFixed(0)}% of the frame is built world — nothing was measured`)
-// 1. inside the envelope the bake must yield
-else if (!(keep(res.insideOn) < keep(res.insideOff) * 0.35)) fail(`inside a capture the built world still covers ${(100 * keep(res.insideOn)).toFixed(0)}% of the frame against ${(100 * keep(res.insideOff)).toFixed(0)}% with the seam off — it is not yielding`)
-// 2. and outside it, it must not
-else if (!(keep(res.outsideOn) > keep(res.outsideOff) * 0.95)) fail(`away from every capture the built world lost fragments (${(100 * keep(res.outsideOn)).toFixed(0)}% against ${(100 * keep(res.outsideOff)).toFixed(0)}%) — the seam is leaking outside the envelope`)
-else console.log(`PASS: seam ${info.cov.w}x${info.cov.h} at ${info.cov.cellM} m from ${info.cov.segments} pass segments. Inside a capture the built world goes ${(100 * keep(res.insideOff)).toFixed(0)}% -> ${(100 * keep(res.insideOn)).toFixed(0)}% of the frame; away from one it holds at ${(100 * keep(res.outsideOn)).toFixed(0)}%.`)
+// liveness: both points must have a settled, built world under them, or the diff is of the build
+else if (!(res.insideSettle?.triangles > 100000)) fail(`only ${res.insideSettle?.triangles} triangles at the inside point — the world has not built there`)
+else if (!(res.outsideSettle?.triangles > 100000)) fail(`only ${res.outsideSettle?.triangles} triangles at the outside point — the world has not built there`)
+// 1. inside a capture the bake must yield, and yield by going AWAY (darker), not by changing colour
+else if (!(IN.changedPct > 10)) fail(`inside a capture the seam changed only ${IN.changedPct}% of the frame — the built world is not yielding`)
+// a FADE and not a switch, which is what Rich asked for: half the strength must remove
+// noticeably less. (Removed fragments reveal whatever is behind them — often the sky, which is
+// brighter than shaded ground — so "did it get darker" is not the test it looks like.)
+else if (!(res.insideHalf.changed < IN.changed * 0.85)) fail(`half strength changed ${res.insideHalf.changedPct}% against ${IN.changedPct}% at full — the seam is a switch, not a crossfade`)
+// 2. and away from every capture it must not move at all
+else if (!(OUT.changedPct < 1)) fail(`away from every capture the seam changed ${OUT.changedPct}% of the frame — it is leaking outside the envelope`)
+else console.log(`PASS: seam ${info.cov.w}x${info.cov.h} at ${info.cov.cellM} m from ${info.cov.segments} pass segments, sun ${sunEl}deg. Inside a capture it dissolves ${IN.changedPct}% of the frame at full strength and ${res.insideHalf.changedPct}% at half; away from one it changes ${OUT.changedPct}%.`)

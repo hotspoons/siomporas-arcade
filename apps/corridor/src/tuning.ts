@@ -389,15 +389,18 @@ export let SPLAT_ENABLED = 1
  * other; 1 hands the ground to the capture and dissolves the bake away across its edge.
  */
 /*
- * OFF BY DEFAULT until the seam has been proven on a real GPU.
+ * How hard the BUILT world yields where a capture has taken over. 0 draws both on top of each
+ * other; 1 hands the ground to the capture and dissolves the bake away across its edge.
  *
- * It broke Rich's site on 2026-09-27 and I could not reproduce it headlessly -- the machine was
- * busy baking 112 km2 of lidar and the software rasteriser was crashing on load with the feature
- * switched off entirely, so every measurement I took was of the bake, not of the seam. A feature
- * I cannot currently measure does not get to be on by default. Turn it up in F6 -> environment ->
- * captures and it does what it says; it is one uniform and needs no reload.
+ * This was off by default for a while, because it appeared to break the site and I could not
+ * reproduce it. Both halves of that turned out to be something else: the break was a backtick in
+ * a GLSL comment taking the whole module down, and the crashes I kept hitting while investigating
+ * were a 112 km2 lidar bake saturating the machine. `probes/corridor-splatseam.mjs` measures it
+ * now -- inside a capture envelope it dissolves 83.6% of the frame at full strength and 41.9% at
+ * half, and away from one it changes 0.0% -- so it is a crossfade rather than a switch, and it is
+ * back on.
  */
-export let SPLAT_WORLD_FADE = 0
+export let SPLAT_WORLD_FADE = 1
 /**
  * The seam raster's cell, metres.
  *

@@ -82,7 +82,8 @@ today, so no existing site changes underneath anyone.
 | # | change | where | done when |
 |---|---|---|---|
 | 1 | compute `region` from the network's bounds + `world_margin_m`, write it to `site.json` beside `corridor` | `network.py` `write_vectors` | `site.json` carries both, and the manifest records which was used |
-| 2 | clip imagery, lidar and EVT to `region` instead of `corridor` | `network.py`, `network_tiles.py`, `flora.py` | a probe finds canopy and an EVT class 1 km from the nearest road |
+| 2 | clip imagery and EVT to `region` instead of `corridor` | `network.py`, `flora.py` | **done** — a world bake reports its region and covers it |
+| 2b | canopy over the region, from the GLOBAL model rather than the point cloud | `network.py` + `canopy.py` | a probe finds canopy 1 km from the nearest road |
 | 3 | re-bake `crofton-world` as a new slug, leaving `crofton-triangle` alone | — | the two sit side by side and can be compared |
 | 4 | raise `radius_m` so the network is not cut mid-junction | `sites.json` | the US 3 × Johns Hopkins junction is in the road graph (`docs/corridor/LANES-AND-SIGNALS.md`) |
 | 5 | grass follows the EYE, not the road | `tuning.ts` `GRASS_MAX_FROM_ROAD` | walking into a field does not walk out of the grass |
@@ -91,6 +92,24 @@ today, so no existing site changes underneath anyone.
 Steps 5 and 6 are viewer work and are the point of steps 1 to 4: baking the data is no use if the
 renderer still spends its whole budget on the verge. `GRASS_MAX_FROM_ROAD` is commented "spend the
 budget on the verge, where the eye is" — which was true of a corridor and is false of a world.
+
+## 4b. The point cloud is not part of the world, and that is not a compromise
+
+The first cut clipped the LIDAR to the region too, and the bake died twice in that stage with no
+traceback — 2.45× the ground is 2.45× the points, on a machine with four gigabytes free. The
+memory is the symptom; the argument is that **everything the point cloud is for is road-local**.
+The DTM under the carriageway, bridge-deck clearances, the structures, the along-track profile and
+its cut-and-fill: none of it means anything in the middle of a field.
+
+What a world needs from lidar is the CANOPY, and `corridor/canopy.py` already has a better source
+for that — the Meta/WRI global 1 m model, precomputed, worldwide, whose own docstring calls it "a
+candidate replacement for the US lidar CHM too". It is not called by any bake today. Wiring
+`canopy.fetch_chm(frame, region_bbox, ...)` into a world bake is what turns "imagery and
+vegetation everywhere" into "trees everywhere", and it costs an HTTP fetch of a precomputed raster
+rather than a point cloud.
+
+Until that lands, a world bake gives ground and vegetation across the whole rectangle and its
+canopy still stops at the corridor — so the trees still do.
 
 ## 5. What does NOT change
 

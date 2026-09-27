@@ -365,9 +365,21 @@ def fetch_site(site: dict, half_width: float, lidar_half_width: float, skip: set
     region = V["region"]
     world = V["world"]
     bbox = V["bbox"]
-    # The imagery, the lidar and the vegetation cover the WORLD; the road buffer is still what
-    # "near a road" means for everything that really is road-local (see write_vectors).
-    lidar_corridor = region if world else unary_union([c["line"].buffer(lidar_half_width, cap_style="flat") for c in R["chains"]])
+    #
+    # THE IMAGERY AND THE VEGETATION COVER THE WORLD. THE POINT CLOUD DOES NOT, AND SHOULD NOT.
+    #
+    # It did, briefly, and the bake died twice in the lidar stage with no traceback: 2.45x the
+    # ground meant 2.45x the points, on a machine with four gigabytes free. But the memory is the
+    # symptom, not the argument. Everything the point cloud is actually FOR is road-local -- the
+    # DTM under the carriageway, bridge-deck clearances, the structures, the along-track profile
+    # with its cut-and-fill. None of that means anything in the middle of a field.
+    #
+    # What the world needs from lidar is the CANOPY, and there is a better source for that which
+    # covers the whole planet already: the Meta/WRI global 1 m canopy model in `canopy.py`, which
+    # its own docstring calls "a candidate replacement for the US lidar CHM too". Wiring it in for
+    # a world bake is the remaining step for trees away from roads; until then a world gets
+    # imagery and vegetation everywhere and its canopy still stops at the corridor.
+    lidar_corridor = unary_union([c["line"].buffer(lidar_half_width, cap_style="flat") for c in R["chains"]])
     print(f"  osm     {V['features']} features, {len(V['crossings'])} crossings on the primary; bbox {(bbox[2] - bbox[0]) / 1000:.1f} × {(bbox[3] - bbox[1]) / 1000:.1f} km, corridor {corridor.area / 1e6:.1f} km²" + (f", WORLD {region.area / 1e6:.1f} km² ({region.area / max(corridor.area, 1):.2f}x)" if world else ""), flush=True)
     prim = R["primary"]
     tiled = bool(site.get("tiled")) or max(bbox[2] - bbox[0], bbox[3] - bbox[1]) > 6000.0

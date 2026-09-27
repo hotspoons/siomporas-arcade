@@ -66,6 +66,20 @@ export interface SplatAttachment {
    * streaming and the depth path against real data while the rest are re-run (2026-09-27).
    */
   tiles?: string[]
+  /**
+   * Which LOD directory to stream, naming a key of `world.json`'s `lods` block
+   * (gaussworks writes each level to `tiles_<name>/`). Unset streams the full
+   * tiles.
+   *
+   * This exists so the render path can be ASSERTED rather than assumed. The
+   * full tiles are ~52-97 MB each and pulling two through a software
+   * rasteriser kills the tab, which is why corridor-splatseam.mjs measures the
+   * envelope with the stream switched off and loads no gaussians at all. The
+   * `probe` level is the same tiles at 1/8 the gaussians with the spherical
+   * harmonics dropped -- 2-3 MB -- which is small enough to actually draw
+   * headlessly. Same filenames, same frame, same bounds.
+   */
+  lod?: string
   /** metres of crossfade outside the capture envelope */
   fade_m?: number
   /** multiplies the capture's own radius */
@@ -203,6 +217,15 @@ export class SplatField {
     // outside its own cell, so none survived the ownership test. Skipping on file existence would
     // load it, spend a slot on it and hold it resident for ever (splats lane, 2026-09-27).
     const allow = att.tiles?.length ? new Set(att.tiles) : null
+    // A named LOD must EXIST in world.json, or we would silently stream 404s and
+    // report a world with no resident tiles as if it were merely far away.
+    const lods = (world as { lods?: Record<string, { dir?: string }> }).lods
+    let tileDir = 'tiles'
+    if (att.lod) {
+      const dir = lods?.[att.lod]?.dir
+      if (dir) tileDir = dir
+      else console.warn(`splats: ${att.id} has no lod '${att.lod}' in world.json; streaming full tiles`)
+    }
     field.tiles = world.tiles
       .filter((t) => (t.gaussians ?? 0) > 0)
       .filter((t) => !allow || allow.has(t.tile) || allow.has(t.chunk))
@@ -210,7 +233,7 @@ export class SplatField {
       const [x0, y0, x1, y1] = t.bounds_enu_m
       v.set((x0 + x1) / 2, (y0 + y1) / 2, 0).applyMatrix4(field.toSite)
       return {
-        name: `${base}tiles/${t.tile}`,
+        name: `${base}${tileDir}/${t.tile}`,
         cx: v.x,
         cy: v.y,
         r: Math.hypot(x1 - x0, y1 - y0) / 2,

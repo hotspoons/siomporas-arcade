@@ -1,17 +1,27 @@
-siomporas-arcade
+Apex Conduit
 Copyright 2026 Rich Siomporas
 
-This product includes software developed by Rich Siomporas, licensed under the
-Apache License, Version 2.0. See the LICENSE file for terms.
+This product includes software developed as part of the Apex Conduit project,
+licensed under the Apache License, Version 2.0.
 
-Third-party components are redistributed under their own licences:
+--------------------------------------------------------------------------------
+Third-party dependencies with obligations worth stating plainly
+--------------------------------------------------------------------------------
 
-  three.js                 MIT          https://threejs.org
-  postprocessing           Zlib         https://github.com/pmndrs/postprocessing
+bitECS — https://github.com/NateTheGreatt/bitECS — Mozilla Public License 2.0
 
-Bundled artwork, models and typefaces are covered by CC0 1.0, the SIL Open Font
-License 1.1, or the Apache License 2.0, and are attributed in CREDITS.md.
-Licence texts ship alongside the files they cover:
+  Used as the entity-component system (apps/corridor/src/actors.ts).
 
-  apps/<app>/public/fonts/LICENSES.txt
-  apps/<app>/public/assets/LICENSES.md
+  MPL-2.0 is FILE-LEVEL copyleft. It permits combining with other licences into
+  a "Larger Work" distributed under different terms — which is what this project
+  is, and why an Apache-2.0 release may include it. The obligation is narrow and
+  specific: if bitECS's own source files are MODIFIED, those files must be made
+  available under MPL-2.0. Our own files that merely use it are unaffected.
+
+  We do not modify bitECS. If that ever changes, the modified files must be
+  published under MPL-2.0 and this notice updated to say where.
+
+Third-party data and models carry their own terms and are credited in the
+viewer's attribution panel (apps/corridor/src/attribution.ts) — OpenStreetMap
+(ODbL), Macrostrat (CC BY 4.0), USGS 3DEP, USDA NAIP, LANDFIRE, the Yale Bright
+Star Catalogue, and the Milky Way isophotes from d3-celestial (BSD 3-clause).

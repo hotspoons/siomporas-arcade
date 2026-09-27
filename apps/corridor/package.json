@@ -13,7 +13,7 @@
     "@apex/engine": "*",
     "@dgreenheck/ez-tree": "^1.1.0",
     "@sparkjsdev/spark": "^2.2.0",
-    "koota": "^0.6.6",
+    "bitecs": "^0.4.0",
     "three": "^0.185.1"
   }
 }

@@ -1,20 +1,19 @@
-// The world the actors live in: one koota world, a fixed step, and the systems that run on it.
+// The world the actors live in: one bitECS world, a fixed step, and the systems that run on it.
 //
-// SEPARATE FROM THE SCENE, on purpose. `scene.ts` owns three.js objects and is about drawing;
-// this is about what things ARE and what they do, and it runs whether or not anything is drawn —
-// which is what lets a probe step ten thousand vehicles headlessly, and what will let a server
-// step them for several clients later without a renderer in the process.
+// SEPARATE FROM THE SCENE, on purpose. `scene.ts` owns three.js objects and is about drawing; this
+// is about what things ARE and what they do, and it runs whether or not anything is drawn — which
+// is what lets a probe step ten thousand vehicles headlessly, and what will let a server step them
+// for several clients later without a renderer in the process.
 //
-// THE STEP IS FIXED. A simulation whose behaviour depends on the frame rate is one that behaves
-// differently on Rich's machine and in a probe, and traffic is exactly the kind of system where
-// that shows up as "it only jams on the slow laptop". The renderer calls `tick(realSeconds)` and
-// this runs as many 20 ms steps as that buys, capped — the same shape as car.ts's 120 Hz loop and
-// for the same reason.
+// THE STEP IS FIXED. A simulation whose behaviour depends on the frame rate behaves differently on
+// Rich's machine and in a probe, and traffic is exactly where that shows up as "it only jams on
+// the slow laptop". The renderer calls `tick(realSeconds)` and this runs as many 20 ms steps as
+// that buys, capped — the same shape as car.ts's 120 Hz loop, for the same reason.
 
-import { createWorld, type Entity, type World } from 'koota'
-import { Autonomous, Doomed, Health, Hostile, SETS, Transform, Vehicle, Velocity, Visual, Walking } from './actors'
+import { addComponent, addEntity, createWorld, entityExists, hasComponent, query, removeComponent, removeEntity, type World } from 'bitecs'
+import { Autonomous, Doomed, Health, Hostile, Human, SETS, Transform, Vehicle, Velocity, Visual, Walking } from './actors'
 
-/** 50 Hz: fine enough for traffic, coarse enough to be cheap, and a round number of milliseconds. */
+/** 50 Hz: fine enough for traffic, cheap, and a round number of milliseconds. */
 export const STEP_S = 0.02
 /** Never run more than this many steps for one frame — a stall must not become a burst. */
 const MAX_STEPS = 5
@@ -35,11 +34,11 @@ export class ActorWorld {
   }
 
   /**
-   * Advance by a real-time delta. Returns how many fixed steps were run.
+   * Advance by a real-time delta. Returns how many fixed steps ran.
    *
-   * The leftover is CARRIED rather than dropped, so the simulation keeps real time over many
+   * The leftover is CARRIED rather than dropped, so the simulation keeps real time across many
    * frames even though no single frame lands on a step boundary. Dropping it makes a world that
-   * runs slightly slow for ever and nothing that says so.
+   * runs slightly slow for ever with nothing saying so.
    */
   tick(realSeconds: number): number {
     const t0 = performance.now()
@@ -55,11 +54,11 @@ export class ActorWorld {
       }
       this.reap()
     }
-    // a long stall must not be paid back all at once; drop what is past the cap and say so in the
-    // stats rather than silently running the world at double speed for a second
+    // a long stall is not paid back all at once: drop what is past the cap rather than run the
+    // world at five times speed for a second
     if (this.carry >= STEP_S * MAX_STEPS) this.carry = 0
     this.stats.steps += n
-    this.stats.actors = this.world.query(Transform).length
+    this.stats.actors = query(this.world, [Transform]).length
     this.stats.lastMs = performance.now() - t0
     for (const s of this.systems) this.stats.systems[s.name] = +s.ms.toFixed(3)
     return n
@@ -69,18 +68,23 @@ export class ActorWorld {
    * Remove what asked to be removed, once, at the end of a step.
    *
    * Systems mark `Doomed` rather than destroying, because a system that deletes while another is
-   * mid-query is the oldest bug in this shape of code.
+   * mid-query is the oldest bug in this shape of code. The list is copied before the loop for the
+   * same reason: a query result is a live view.
    */
   private reap() {
-    const dead = this.world.query(Doomed)
-    if (!dead.length) return
-    dead.forEach((e: Entity) => e.destroy())
+    const dead = [...query(this.world, [Doomed])]
+    for (const e of dead) removeEntity(this.world, e)
   }
 
-  /** Everything, gone. A level change is a new world, not a world with the old one's ghosts. */
+  /** Everything, gone. A level change is a new world, not one with the old world's ghosts. */
   clear() {
-    this.world.query(Transform).forEach((e: Entity) => e.destroy())
+    for (const e of [...query(this.world, [Transform])]) removeEntity(this.world, e)
     this.stats.steps = 0
+  }
+
+  /** Is this entity still real? Ids are recycled, so holding one across a step proves nothing. */
+  alive(e: number) {
+    return entityExists(this.world, e)
   }
 }
 
@@ -88,42 +92,51 @@ export class ActorWorld {
 
 /** Position follows velocity. The one system that runs over everything that moves. */
 export const integrate: System = (world, dt) => {
-  world.query(...SETS.moving).updateEach(([t, v]) => {
-    t.x += v.x * dt
-    t.y += v.y * dt
-    t.z += v.z * dt
-  })
+  const ents = query(world, SETS.moving)
+  for (let i = 0; i < ents.length; i++) {
+    const e = ents[i]
+    Transform.x[e] += Velocity.x[e] * dt
+    Transform.y[e] += Velocity.y[e] * dt
+    Transform.z[e] += Velocity.z[e] * dt
+  }
 }
 
 /** Facing follows motion, for anything moving fast enough to have an opinion about it. */
 export const face: System = (world) => {
-  world.query(...SETS.moving).updateEach(([t, v]) => {
-    const speed2 = v.x * v.x + v.y * v.y
-    if (speed2 > 0.04) t.yaw = Math.atan2(v.x, v.y)
-  })
+  const ents = query(world, SETS.moving)
+  for (let i = 0; i < ents.length; i++) {
+    const e = ents[i]
+    const vx = Velocity.x[e]
+    const vy = Velocity.y[e]
+    if (vx * vx + vy * vy > 0.04) Transform.yaw[e] = Math.atan2(vx, vy)
+  }
 }
 
 /** Walkers steer toward their target and stop when they arrive. */
 export const walk: System = (world) => {
-  world.query(Walking, Transform, Velocity).updateEach(([w, t, v]) => {
-    const dx = w.toX - t.x
-    const dy = w.toY - t.y
+  const ents = query(world, [Walking, Transform, Velocity])
+  for (let i = 0; i < ents.length; i++) {
+    const e = ents[i]
+    const dx = Walking.toX[e] - Transform.x[e]
+    const dy = Walking.toY[e] - Transform.y[e]
     const d = Math.hypot(dx, dy)
     if (d < 0.5) {
-      v.x = 0
-      v.y = 0
-      return
+      Velocity.x[e] = 0
+      Velocity.y[e] = 0
+      continue
     }
-    v.x = (dx / d) * w.speed
-    v.y = (dy / d) * w.speed
-  })
+    Velocity.x[e] = (dx / d) * Walking.speed[e]
+    Velocity.y[e] = (dy / d) * Walking.speed[e]
+  }
 }
 
 /** Nothing with no health left stays in the world. */
 export const mortality: System = (world) => {
-  world.query(Health).updateEach(([h], e) => {
-    if (h.hp <= 0 && !e.has(Doomed)) e.add(Doomed({ why: 'hp' }))
-  })
+  const ents = query(world, [Health])
+  for (let i = 0; i < ents.length; i++) {
+    const e = ents[i]
+    if (Health.hp[e] <= 0 && !hasComponent(world, e, Doomed)) addComponent(world, e, Doomed)
+  }
 }
 
 /* ---- spawning, in the vocabulary a level speaks ----------------------------------------------- */
@@ -134,29 +147,68 @@ export interface SpawnAt {
   yaw?: number
 }
 
-/** A vehicle the simulation drives. `hostile` is a trait added on top, not a different function. */
-export function spawnVehicle(aw: ActorWorld, at: SpawnAt, opts: { asset?: string; maxSpeed?: number; hostile?: boolean } = {}): Entity {
-  const e = aw.world.spawn(
-    Transform({ x: at.x, y: at.y, yaw: at.yaw ?? 0 }),
-    Velocity,
-    Vehicle({ maxSpeed: opts.maxSpeed ?? 25, asset: opts.asset ?? '' }),
-    Visual({ asset: opts.asset ?? '' }),
-    Autonomous,
-    Health,
-  )
-  if (opts.hostile) e.add(Hostile())
+/** A vehicle the simulation drives. `hostile` adds a component on top; it is not another function. */
+export function spawnVehicle(aw: ActorWorld, at: SpawnAt, opts: { asset?: number; maxSpeed?: number; hostile?: boolean } = {}): number {
+  const w = aw.world
+  const e = addEntity(w)
+  addComponent(w, e, Transform)
+  addComponent(w, e, Velocity)
+  addComponent(w, e, Vehicle)
+  addComponent(w, e, Visual)
+  addComponent(w, e, Autonomous)
+  addComponent(w, e, Health)
+  Transform.x[e] = at.x
+  Transform.y[e] = at.y
+  Transform.yaw[e] = at.yaw ?? 0
+  Velocity.x[e] = 0
+  Velocity.y[e] = 0
+  Velocity.z[e] = 0
+  Vehicle.lengthM[e] = 4.4
+  Vehicle.widthM[e] = 1.8
+  Vehicle.speed[e] = 0
+  Vehicle.maxSpeed[e] = opts.maxSpeed ?? 25
+  Visual.asset[e] = opts.asset ?? 0
+  Visual.scale[e] = 1
+  Health.hp[e] = 100
+  Health.max[e] = 100
+  if (opts.hostile) {
+    addComponent(w, e, Hostile)
+    Hostile.aggression[e] = 1
+  }
   return e
 }
 
 /** A person on foot, walking somewhere. */
-export function spawnPedestrian(aw: ActorWorld, at: SpawnAt, to: { x: number; y: number }, opts: { hostile?: boolean; asset?: string } = {}): Entity {
-  const e = aw.world.spawn(
-    Transform({ x: at.x, y: at.y, yaw: at.yaw ?? 0 }),
-    Velocity,
-    Walking({ toX: to.x, toY: to.y }),
-    Visual({ asset: opts.asset ?? '' }),
-    Health,
-  )
-  if (opts.hostile) e.add(Hostile())
+export function spawnPedestrian(aw: ActorWorld, at: SpawnAt, to: { x: number; y: number }, opts: { hostile?: boolean; asset?: number; speed?: number } = {}): number {
+  const w = aw.world
+  const e = addEntity(w)
+  addComponent(w, e, Transform)
+  addComponent(w, e, Velocity)
+  addComponent(w, e, Human)
+  addComponent(w, e, Walking)
+  addComponent(w, e, Visual)
+  addComponent(w, e, Health)
+  Transform.x[e] = at.x
+  Transform.y[e] = at.y
+  Transform.yaw[e] = at.yaw ?? 0
+  Velocity.x[e] = 0
+  Velocity.y[e] = 0
+  Walking.toX[e] = to.x
+  Walking.toY[e] = to.y
+  Walking.speed[e] = opts.speed ?? 1.4
+  Visual.asset[e] = opts.asset ?? 0
+  Visual.scale[e] = 1
+  Health.hp[e] = 100
+  Health.max[e] = 100
+  if (opts.hostile) {
+    addComponent(w, e, Hostile)
+    Hostile.aggression[e] = 1
+  }
   return e
+}
+
+/** Hand a vehicle to a player: it stops being driven by the simulation and stays the same thing. */
+export function takeOver(aw: ActorWorld, e: number, Player: Record<string, never>) {
+  removeComponent(aw.world, e, Autonomous)
+  addComponent(aw.world, e, Player)
 }

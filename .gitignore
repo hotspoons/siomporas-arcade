@@ -60,3 +60,8 @@ __pycache__/
 # road-and-car: synthetic tiled-site fixture (probes/make-tiles.py), regenerable, not a bake
 apps/corridor/public/testdata/
 tools/corridor/.bin
+
+# enginesim's wasm is a COMMITTED artefact, not build output to ignore: apps/corridor imports
+# wasm/engines.json at build time, so an image build with it absent fails. Its provenance is in
+# wasm/BUILD.json and its licence beside it.
+!packages/enginesim/wasm/

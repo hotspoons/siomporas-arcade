@@ -345,6 +345,27 @@ export const api = {
   /** how big a chunk may be — only the server knows what ingress is in front of it */
   uploadLimits: () => call<{ chunkBytes: number; why: string }>('/api/uploads/limits'),
 
+  /**
+   * Send one slice of a chapter.
+   *
+   * RAW, not through `call`: the body is a Blob of video and `call` is for JSON. The range header
+   * is what the server appends at, and it refuses anything that does not start where the file
+   * currently ends — so a 409 here is not a failure, it is the server telling us where to resume,
+   * and it carries the offset to do it with.
+   */
+  putChunk: async (upload: string, offset: number, blob: Blob, total: number, signal?: AbortSignal): Promise<{ resumeAt: number } | { offset: number }> => {
+    const r = await fetch(`/api/uploads/${encodeURIComponent(upload)}`, {
+      method: 'PUT',
+      headers: { 'content-range': `bytes ${offset}-${offset + blob.size - 1}/${total}` },
+      body: blob,
+      signal,
+    })
+    const body = (await r.json().catch(() => null)) as { offset?: number; error?: string } | null
+    if (r.status === 409 && typeof body?.offset === 'number') return { resumeAt: body.offset } as const
+    if (!r.ok) throw new Error(body?.error ?? `upload: HTTP ${r.status}`)
+    return { offset: body?.offset ?? offset + blob.size } as const
+  },
+
   /* ---- training: the featured TrainingDeployment, or a plain JobSet ---- */
   trainingPlan: () => call<{ via: string; kind: string | null; available: boolean; featured?: boolean; why?: string }>('/api/training/plan'),
   trainingPreview: (body: Record<string, unknown>, as?: string) =>

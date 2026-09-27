@@ -73,6 +73,34 @@ export class Captures {
   constructor(root) {
     this.root = path.join(path.resolve(root), 'captures')
     this.uploads = path.join(path.resolve(root), 'uploads')
+    /**
+     * ONE WRITER AT A TIME, PER CAPTURE.
+     *
+     * Every mutation here is read-modify-write on one `capture.json`, and dropping several
+     * chapters onto the panel at once makes those calls concurrent. Two `beginChapter`s then both
+     * read a capture with no chapters, each appends its own, and the second write erases the
+     * first — after which its upload succeeds and `done` fails with "this capture has no chapter
+     * for that upload", which is a bewildering thing to be told about a file you just watched
+     * upload. Measured by driving the panel with two files; a sequential curl test never sees it.
+     *
+     * A promise chain per id is the whole fix: cheap, and it serialises exactly what must be.
+     */
+    this.locks = new Map()
+  }
+
+  /** Run `fn` with nothing else mutating this capture. */
+  async #withLock(id, fn) {
+    const prev = this.locks.get(id) ?? Promise.resolve()
+    let release
+    const mine = new Promise((r) => (release = r))
+    this.locks.set(id, prev.then(() => mine))
+    await prev
+    try {
+      return await fn()
+    } finally {
+      release()
+      if (this.locks.get(id) === mine) this.locks.delete(id)
+    }
   }
 
   async init() {
@@ -127,7 +155,11 @@ export class Captures {
    * always zero: asking twice for the same chapter RESUMES it rather than starting a second one,
    * because "I lost my connection and clicked upload again" is the common case, not an error.
    */
-  async beginChapter(captureId, { camera, name, bytes }) {
+  beginChapter(captureId, opts) {
+    return this.#withLock(captureId, () => this.#beginChapter(captureId, opts))
+  }
+
+  async #beginChapter(captureId, { camera, name, bytes }) {
     const capture = await this.get(captureId)
     if (!capture) throw Object.assign(new Error(`no capture ${captureId}`), { status: 404 })
     if (!SLUG.test(camera ?? '')) throw Object.assign(new Error(`"${camera}" is not a usable camera name (lower case, digits, dashes)`), { status: 400 })
@@ -176,7 +208,11 @@ export class Captures {
   }
 
   /** Finish a chapter: move the part into the capture and mark it complete. */
-  async finishChapter(captureId, upload) {
+  finishChapter(captureId, upload) {
+    return this.#withLock(captureId, () => this.#finishChapter(captureId, upload))
+  }
+
+  async #finishChapter(captureId, upload) {
     const capture = await this.get(captureId)
     if (!capture) throw Object.assign(new Error(`no capture ${captureId}`), { status: 404 })
     const ch = capture.chapters.find((c) => c.upload === upload)
@@ -198,7 +234,11 @@ export class Captures {
     return ch
   }
 
-  async removeChapter(captureId, camera, name) {
+  removeChapter(captureId, camera, name) {
+    return this.#withLock(captureId, () => this.#removeChapter(captureId, camera, name))
+  }
+
+  async #removeChapter(captureId, camera, name) {
     const capture = await this.get(captureId)
     if (!capture) throw Object.assign(new Error(`no capture ${captureId}`), { status: 404 })
     const i = capture.chapters.findIndex((c) => c.camera === camera && c.name === name)

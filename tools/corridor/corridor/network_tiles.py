@@ -105,6 +105,21 @@ def tile_index(bbox, corridor) -> tuple[tuple[float, float], list[tuple[int, int
     return (x0, y0), tiles
 
 
+class NoLidarHere(RuntimeError):
+    """
+    There is no airborne lidar for this place, which is not an error about this place.
+
+    TNM is the USGS's index and it covers the United States. Rich drew a world over Monte Bondone
+    on 2026-09-27 and the bake ran the whole way through roads, OSM, GLO-30 elevation, Sentinel-2
+    imagery, horizon and geology, and then died here with a bare RuntimeError and a backoff limit.
+    Everything before it was already on disk and correct.
+
+    So this is its own type: the caller catches it and carries on with elevation-derived road
+    profiles, and any OTHER failure in the lidar stage still stops the bake, because that one
+    really is a fault.
+    """
+
+
 def _tnm_tiles(frame: Frame, bbox, cache: Path) -> tuple[str, list[Path]]:
     """TNM LPC tiles of the newest project over the bbox, downloaded (dem.download, cached)."""
     from concurrent.futures import ThreadPoolExecutor
@@ -116,7 +131,7 @@ def _tnm_tiles(frame: Frame, bbox, cache: Path) -> tuple[str, list[Path]]:
     r.raise_for_status()
     items = r.json().get("items", [])
     if not items:
-        raise RuntimeError("no TNM lidar for this region")
+        raise NoLidarHere(f"no TNM lidar over {w:.4f},{s:.4f},{e:.4f},{n:.4f}")
     by_proj: dict[str, list[dict]] = {}
     for it in items:
         by_proj.setdefault(" ".join(it["title"].split(" ")[4:-1]), []).append(it)
@@ -329,8 +344,17 @@ def export_tiles(site_dir: Path, web: Path, frame, mask_shapes: list, vivid) -> 
     # road-local, and the canopy comes from the global model), so for one the grid comes from the
     # site's own bbox, which is what the grid was always describing.
     #
+    #
+    # ...and it is not the WORLD FLAG's to decide either.
+    #
+    # This fell back to the site's bbox only when the site was marked `world`, and the world editor
+    # does not mark them: Rich's Monte Bondone came through as a plain `kind: network` with
+    # `all_streets`, so a bake with no point cloud -- which is every bake outside the United States
+    # -- would have produced no tiles, no elevation, no imagery and no canopy, silently. The test
+    # is now simply "the lidar did not give us a grid", which is the thing that actually matters.
+    #
     site_cfg = json.loads((site_dir / "site.json").read_text()) if (site_dir / "site.json").exists() else {}
-    if (x0 is None or not tiles) and (site_cfg.get("world") or man.get("world")):
+    if x0 is None or not tiles:
         bx = site_cfg.get("bbox_utm")
         if bx:
             x0 = math.floor(bx[0] / TILE_M) * TILE_M
@@ -338,7 +362,7 @@ def export_tiles(site_dir: Path, web: Path, frame, mask_shapes: list, vivid) -> 
             nx = int(math.ceil((bx[2] - x0) / TILE_M))
             ny = int(math.ceil((bx[3] - y0) / TILE_M))
             tiles = [(tx, ty) for ty in range(ny) for tx in range(nx)]
-            print(f"  tiles   no point cloud: {nx}x{ny} = {len(tiles)} tiles from the world's own bbox", flush=True)
+            print(f"  tiles   no point cloud: {nx}x{ny} = {len(tiles)} tiles from the site's own bbox", flush=True)
     if x0 is None or not tiles:
         return {}
     tdir = web / "tiles" / "0"
@@ -572,6 +596,45 @@ def profile_tiled(line: LineString, ldir: Path, pts: dict | None, road_index: in
     finally:
         dtm.close()
         chm.close()
+
+
+def profile_from_dem(line: LineString, dem_path: Path, chm_path: Path | None = None) -> dict:
+    """
+    The along-track profile of a road with NO POINT CLOUD: height from the elevation model.
+
+    `lidar.profile` already takes the rasters and the points separately, so this is the same
+    function with the DEM standing in for the lidar DTM and no points at all. What comes back is
+    road height and the ground beside it -- but not STRUCTURES, which are read from classified
+    returns (bridge decks) and cannot be inferred from a surface.
+
+    The canopy column is ZERO here rather than the global model, because `lidar.profile` samples
+    every raster through ONE transform: a 2 m canopy raster read on the DEM's 1 m lattice would be
+    sampled in the wrong place, which is worse than admitting we do not have it. Nothing the
+    viewer draws depends on it -- the trees come from `canopy_global.tif` through the tiles.
+
+    Be clear about what this costs. Outside the United States the DEM is Copernicus GLO-30, a 30 m
+    SURFACE model: it includes the tree canopy and the buildings, so a road under trees reads high
+    and a road in a city reads like its rooftops. That is a worse road than lidar gives and a far
+    better one than `profile: null`, which puts every branch at z = 0 -- sea level, with the verges
+    grading down to it as walls (2026-09-26).
+    """
+
+    class _Zero:
+        """`arr[rows, cols]` of zeros, without allocating a world-sized array to hold them."""
+
+        def __init__(self, shape):
+            self.shape = shape
+
+        def __getitem__(self, idx):
+            r = np.atleast_1d(np.asarray(idx[0]))
+            return np.zeros(r.shape, np.float32)
+
+    dtm = LazyRaster(dem_path)
+    try:
+        empty = {"x": np.zeros(0), "y": np.zeros(0), "z": np.zeros(0), "cls": np.zeros(0, np.uint8), "rn": np.zeros(0, np.uint8), "nr": np.zeros(0, np.uint8), "i": np.zeros(0, np.uint16)}
+        return _fill_profile(lidar.profile(line, dtm, _Zero(dtm.shape), dtm.transform, empty))
+    finally:
+        dtm.close()
 
 
 def elapsed(t0: float) -> str:

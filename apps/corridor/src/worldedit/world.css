@@ -29,7 +29,7 @@ body.worldedit {
      there. The token is the fallback, so the page is never broken before the measurement lands. */
   top: var(--we-bar-h, var(--bar-h));
   left: 0;
-  width: calc(100vw - min(340px, 92vw));
+  width: calc(100vw - var(--inspector-w, min(340px, 92vw)));
   height: calc(100vh - var(--we-bar-h, var(--bar-h)));
   display: block;
   background: var(--bg-0);

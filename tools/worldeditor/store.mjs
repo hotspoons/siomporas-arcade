@@ -221,6 +221,43 @@ export class Store {
     return out
   }
 
+  /**
+   * Every file of a baked site, for an archive. Relative paths, deterministic order.
+   *
+   * `web/` is what a viewer needs and the rest is what a RE-BAKE needs, so both go in and the
+   * caller says which. The cache is never included: it is megabytes of somebody else's data that
+   * the next machine can fetch for itself.
+   */
+  async siteFiles(slug, { webOnly = false } = {}) {
+    const root = path.join(this.sites, slug)
+    const out = []
+    const walk = async (rel) => {
+      const here = path.join(root, rel)
+      for (const d of (await readdir(here, { withFileTypes: true }).catch(() => [])).sort((a, b) => (a.name < b.name ? -1 : 1))) {
+        const r = rel ? `${rel}/${d.name}` : d.name
+        if (d.isDirectory()) {
+          if (d.name === 'cache' || d.name === 'web.staging') continue
+          await walk(r)
+        } else if (d.isFile()) {
+          if (webOnly && !r.startsWith('web/')) continue
+          const st = await stat(path.join(root, r))
+          out.push({ rel: r, bytes: st.size, mtime: st.mtimeMs })
+        }
+      }
+    }
+    if (!(await stat(root).then(() => true).catch(() => false))) return null
+    await walk('')
+    return out
+  }
+
+  /** The absolute path of one file of a baked site, refusing anything outside it. */
+  siteFile(slug, rel) {
+    const root = path.join(this.sites, slug)
+    const f = path.resolve(root, rel)
+    if (f !== root && !f.startsWith(root + path.sep)) return null
+    return f
+  }
+
   /* ---- the place index --------------------------------------------------------------------- */
 
   /**

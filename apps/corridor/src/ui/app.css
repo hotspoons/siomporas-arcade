@@ -47,15 +47,40 @@
 
 .inspector {
   position: fixed; top: var(--bar-h); right: 0; bottom: 0; z-index: var(--z-panel);
-  width: min(340px, 92vw);
+  /* --inspector-w is set by ui/dockwidth.ts when the panel is draggable; the literal is both the
+     default and the answer for a page that never loads it. Anything sizing itself against the
+     panel (the world editor's map) uses the same expression, so there is one number. */
+  width: var(--inspector-w, min(340px, 92vw));
   display: flex; flex-direction: column;
   background: var(--bg-1);
   border-left: 1px solid var(--line-1);
   box-shadow: var(--shadow-2);
 }
+
+/* the drag handle, sitting on the panel's left edge and overhanging it slightly so it is
+   catchable without hunting for a one-pixel border */
+.dock-grip {
+  position: absolute; left: -3px; top: 0; bottom: 0; width: 9px;
+  cursor: ew-resize; z-index: 1;
+  background: transparent;
+  touch-action: none;
+}
+.dock-grip:hover, .dock-grip:focus-visible { background: color-mix(in srgb, var(--accent) 35%, transparent); outline: none; }
+/* while dragging, the pointer must not select text or land on the map underneath */
+body.dock-dragging { user-select: none; cursor: ew-resize; }
+body.dock-dragging * { pointer-events: none; }
+body.dock-dragging .dock-grip { pointer-events: auto; }
 .inspector-head { padding: var(--s3) var(--s4) var(--s2); border-bottom: 1px solid var(--line-1); }
 .inspector-head h2 { font-size: var(--text-sm); text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-3); }
-.inspector-body { flex: 1; overflow-y: auto; padding: var(--s3) var(--s4) var(--s6); display: grid; gap: var(--s3); align-content: start; }
+/* NEVER SIDEWAYS. A grid item's automatic minimum size is its CONTENT size, so one long road
+   name or one unbreakable token makes the whole column refuse to narrow and the panel's text runs
+   off under its own edge -- which is what Rich saw at 340 px. `min-width: 0` lets the items obey
+   the column, `overflow-x: hidden` refuses the scroll outright, and the wrapping rules below give
+   long words somewhere to break. */
+.inspector-body { flex: 1; overflow-y: auto; overflow-x: hidden; padding: var(--s3) var(--s4) var(--s6); display: grid; gap: var(--s3); align-content: start; }
+.inspector-body > * { min-width: 0; }
+.inspector-body, .inspector-body p, .inspector-body label, .inspector-body span, .inspector-body div { overflow-wrap: anywhere; }
+.inspector-body input, .inspector-body select, .inspector-body textarea, .inspector-body .field { max-width: 100%; min-width: 0; }
 .inspector-body h2 { font-size: var(--text-md); }
 
 .mode-host { display: flex; align-items: center; gap: var(--s2); }
@@ -64,7 +89,9 @@
 .dirty.on { color: var(--warn); }
 
 @media (max-width: 900px) {
+  /* docked to the bottom: the width is the window's and the grip would resize the wrong axis */
   .inspector { width: 100%; top: auto; height: 46vh; border-left: 0; border-top: 1px solid var(--line-1); }
+  .dock-grip { display: none; }
 }
 
 /* Driving wants the road, not the furniture: the bar thins out and the secondary buttons go. */

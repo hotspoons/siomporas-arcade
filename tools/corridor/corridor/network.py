@@ -455,14 +455,6 @@ def fetch_site(site: dict, half_width: float, lidar_half_width: float, skip: set
     # At 2 m rather than 1: the viewer plants from a CHM it reads on a 4 m lattice, and 112 km2 at
     # 1 m is 450 MB of Float32 to produce a picture nothing samples that finely.
     #
-    if world and "canopy" not in skip:
-        from . import canopy
-
-        try:
-            manifest["canopy"] = canopy.fetch_chm(frame, tuple(bbox), out / "canopy_global.tif", cache, res=2.0)
-        except Exception as exc:
-            # not fatal: a world without trees is worse than a world, but it is still a world
-            print(f"  canopy  global CHM unavailable: {exc}", flush=True)
     if "horizon" not in skip:
         manifest["horizon"] = horizon.fetch_horizon(frame, out / "horizon_30m.tif", cache, radius_m=30000.0)
     if "geology" not in skip:
@@ -485,12 +477,34 @@ def fetch_site(site: dict, half_width: float, lidar_half_width: float, skip: set
     def branch_rec(c: dict, bp: dict | None) -> dict:
         return {"id": c["id"], "ident": c["ident"], "name": c["name"], "ref": c["ref"], "highway": c["highway"], "lanes": c["lanes"], "oneway": c["oneway"], "length_m": c["length_m"], "s_on_primary": round(float(prim["line"].project(c["line"].interpolate(0.5, normalized=True))), 1), "junctions": c["junctions"], "dead_ends": c.get("dead_ends", []), "profile": {"step_m": bp["step_m"], "s": bp["s"], "road_z": bp["road_z"]} if bp else None, "structures": bp["structures"] if bp else []}
 
+    #
+    # NO LIDAR IS NOT A FAILED BAKE.
+    #
+    # TNM is the USGS's index, so it stops at the United States border. Rich drew a world over
+    # Monte Bondone on 2026-09-27; the bake ran roads, OSM, GLO-30 elevation, Sentinel-2 imagery,
+    # horizon and geology, and then died in this stage with `no TNM lidar for this region` and a
+    # Job backoff limit. Every earlier stage was already on disk and correct.
+    #
+    # So the point cloud is now OPTIONAL and the profiles fall back to the elevation model. What
+    # is lost is real and worth naming: bridge decks and overpasses (read from classified returns,
+    # not inferrable from a surface), and the accuracy of the road itself, because GLO-30 is a 30 m
+    # SURFACE model that includes the trees and the roofs. What is kept is a world with its roads
+    # at the right height instead of at sea level.
+    #
+    no_lidar: str | None = None
     if "lidar" not in skip and tiled:
         from . import network_tiles
 
         ldir = out / "lidar"
         lbbox = snap_bbox(lidar_corridor.bounds)
-        meta = network_tiles.lidar_tiled(frame, lbbox, lidar_corridor, R["chains"], ldir, cache)
+        try:
+            meta = network_tiles.lidar_tiled(frame, lbbox, lidar_corridor, R["chains"], ldir, cache)
+        except network_tiles.NoLidarHere as exc:
+            no_lidar = str(exc)
+            meta = None
+    else:
+        meta = None
+    if no_lidar is None and "lidar" not in skip and tiled:
         pts = meta.pop("pts")
         idx = {c["id"]: i + 1 for i, c in enumerate(R["chains"])}
         prof = network_tiles.profile_tiled(prim["line"], ldir, pts, idx[prim["id"]])
@@ -510,31 +524,81 @@ def fetch_site(site: dict, half_width: float, lidar_half_width: float, skip: set
                 bp = None
             branches.append(branch_rec(c, bp))
         print(f"  branch  {len(branches)} branches profiled, {sum(len(b['structures']) for b in branches)} structures on them", flush=True)
+    elif no_lidar:
+        # Elevation-derived profiles: the road is where the DEM says, and there are no structures.
+        from . import network_tiles
+
+        print(f"  lidar   none here ({no_lidar}); road profiles from the elevation model instead", flush=True)
+        dem_p = out / "dem_1m.tif"
+        if not dem_p.exists():
+            print("  lidar   and no elevation model either — every branch would sit at sea level, so this bake stops", flush=True)
+            raise RuntimeError("no lidar and no DEM: nothing can say how high the roads are")
+        prof = network_tiles.profile_from_dem(prim["line"], dem_p)
+        (out / "profile.json").write_text(json.dumps(prof))
+        manifest["lidar"] = {"source": "none", "why": no_lidar, "profiles_from": "dem", "structures": []}
+        failed = 0
+        for c in R["chains"]:
+            if c is prim:
+                continue
+            try:
+                bp = network_tiles.profile_from_dem(c["line"], dem_p)
+            except Exception as exc:
+                if failed == 0:
+                    print(f"  branch  {c['ident']} profile failed: {exc}")
+                failed += 1
+                bp = None
+            branches.append(branch_rec(c, bp))
+        print(f"  branch  {len(branches)} branches profiled from the DEM, {failed} failed; no structures (a surface model has no bridge decks)", flush=True)
     elif "lidar" not in skip:
         # the single-image path: the whole corridor's points in memory, as for a single road
         ldir = out / "lidar"
         ldir.mkdir(exist_ok=True)
         lbbox = snap_bbox(lidar_corridor.bounds)
-        pts, meta = lidar.fetch_points(frame, lbbox, cache, clip=lidar_corridor)
-        if (out / "dem_1m.tif").exists():
-            f = lidar.check_units(pts, out / "dem_1m.tif")
-            if f != 1.0:
-                pts["z"] = pts["z"] * f
-            meta["z_factor"] = f
-        meta["classification"] = lidar.classification_quality(pts)
-        r = lidar.rasters(pts, lbbox, frame, lidar_corridor, ldir)
-        prof = lidar.profile(prim["line"], r["dtm"], r["chm"], r["transform"], r["pts"])
-        (out / "profile.json").write_text(json.dumps(prof))
-        cls = r["classes"]
-        print(f"  lidar   {r['points_in_corridor']:,} pts in corridor; ground {cls.get('ground', 0):,} veg {cls.get('veg_high', 0) + cls.get('veg_med', 0) + cls.get('veg_low', 0):,} building {cls.get('building', 0):,} bridge_deck {cls.get('bridge_deck', 0):,}")
-        for st in prof["structures"]:
-            print(f"  struct  {st['kind']:8s} s={st['s_start']:.0f}..{st['s_end']:.0f} m ({st['length_m']} m)  clearance={st['clearance_m']}  above_ground={st['height_above_ground_m']}")
-        manifest["lidar"] = {**meta, "points_in_corridor": r["points_in_corridor"], "classes": cls, "rasters": r["rasters"], "structures": prof["structures"]}
-        for c in R["chains"]:
-            if c is prim:
-                continue
-            branches.append(branch_rec(c, lidar.profile(c["line"], r["dtm"], r["chm"], r["transform"], r["pts"])))
-        print(f"  branch  {len(branches)} branches profiled, {sum(len(b['structures']) for b in branches)} structures on them", flush=True)
+        try:
+            pts, meta = lidar.fetch_points(frame, lbbox, cache, clip=lidar_corridor)
+        except Exception as exc:
+            # the same border, on the path a small site takes. lidar.py raises its own message
+            # rather than NoLidarHere, so the test is on what it says.
+            if "no lidar" not in str(exc).lower() and "no tnm" not in str(exc).lower():
+                raise
+            from . import network_tiles
+
+            print(f"  lidar   none here ({exc}); road profiles from the elevation model instead", flush=True)
+            dem_p = out / "dem_1m.tif"
+            if not dem_p.exists():
+                raise RuntimeError("no lidar and no DEM: nothing can say how high the roads are") from exc
+            prof = network_tiles.profile_from_dem(prim["line"], dem_p)
+            (out / "profile.json").write_text(json.dumps(prof))
+            manifest["lidar"] = {"source": "none", "why": str(exc), "profiles_from": "dem", "structures": []}
+            for c in R["chains"]:
+                if c is prim:
+                    continue
+                try:
+                    branches.append(branch_rec(c, network_tiles.profile_from_dem(c["line"], dem_p)))
+                except Exception:
+                    branches.append(branch_rec(c, None))
+            print(f"  branch  {len(branches)} branches profiled from the DEM; no structures", flush=True)
+            pts = None
+        if pts is not None:  # the lidar half; the DEM fallback above already wrote its profiles
+            if (out / "dem_1m.tif").exists():
+                f = lidar.check_units(pts, out / "dem_1m.tif")
+                if f != 1.0:
+                    pts["z"] = pts["z"] * f
+                meta["z_factor"] = f
+            meta["classification"] = lidar.classification_quality(pts)
+            r = lidar.rasters(pts, lbbox, frame, lidar_corridor, ldir)
+            prof = lidar.profile(prim["line"], r["dtm"], r["chm"], r["transform"], r["pts"])
+            (out / "profile.json").write_text(json.dumps(prof))
+            cls = r["classes"]
+            print(f"  lidar   {r['points_in_corridor']:,} pts in corridor; ground {cls.get('ground', 0):,} veg {cls.get('veg_high', 0) + cls.get('veg_med', 0) + cls.get('veg_low', 0):,} building {cls.get('building', 0):,} bridge_deck {cls.get('bridge_deck', 0):,}")
+            for st in prof["structures"]:
+                print(f"  struct  {st['kind']:8s} s={st['s_start']:.0f}..{st['s_end']:.0f} m ({st['length_m']} m)  clearance={st['clearance_m']}  above_ground={st['height_above_ground_m']}")
+            manifest["lidar"] = {**meta, "points_in_corridor": r["points_in_corridor"], "classes": cls, "rasters": r["rasters"], "structures": prof["structures"]}
+            for c in R["chains"]:
+                if c is prim:
+                    continue
+                branches.append(branch_rec(c, lidar.profile(c["line"], r["dtm"], r["chm"], r["transform"], r["pts"])))
+            print(f"  branch  {len(branches)} branches profiled, {sum(len(b['structures']) for b in branches)} structures on them", flush=True)
     else:
         # A partial re-run with lidar skipped ("a partial re-run updates the manifest it finds
         # rather than forgetting the rest") used to write every branch with profile: null and the
@@ -561,6 +625,28 @@ def fetch_site(site: dict, half_width: float, lidar_half_width: float, skip: set
             branches.append(branch_rec(c, bp))
         if had:
             print(f"  branch  lidar skipped: kept {kept} of {len(branches)} branch profiles from the previous run", flush=True)
+    #
+    # THE GLOBAL CANOPY, AND WHEN IT IS NEEDED.
+    #
+    # This used to run only for a site marked `world`, and before the lidar stage -- so it could
+    # not know whether there was a lidar canopy to fall back FROM. The world editor does not set
+    # that flag (Rich's Monte Bondone came through as a plain `kind: network`), and outside the
+    # United States there is no lidar canopy at all, so a bake there got no canopy from either
+    # source. The viewer gates its whole distance field on having one: no canopy is a site that
+    # comes up with nothing on it (export.py).
+    #
+    # So the test is now what it always meant: fetch the global model when this site is a world,
+    # or when the point cloud did not give us a canopy of our own.
+    #
+    have_lidar_chm = (out / "lidar" / "chm.tif").exists() or (out / "lidar" / "chm.vrt").exists()
+    if (world or no_lidar or not have_lidar_chm) and "canopy" not in skip:
+        from . import canopy
+
+        try:
+            manifest["canopy"] = canopy.fetch_chm(frame, tuple(bbox), out / "canopy_global.tif", cache, res=2.0)
+        except Exception as exc:
+            # not fatal: a world without trees is worse than a world, but it is still a world
+            print(f"  canopy  global CHM unavailable: {exc}", flush=True)
     (out / "branches.json").write_text(json.dumps({"frame": "enu", "branches": branches}))
     manifest["branches"] = {"count": len(branches), "structures": sum(len(b["structures"]) for b in branches)}
     try:

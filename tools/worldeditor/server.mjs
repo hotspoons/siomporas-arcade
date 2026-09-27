@@ -24,12 +24,13 @@
 
 import http from 'node:http'
 import { createReadStream } from 'node:fs'
-import { stat } from 'node:fs/promises'
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { createGzip, gzip } from 'node:zlib'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { Store } from './store.mjs'
+import { zipRead, zipWrite } from './zip.mjs'
 import { Overpass, PUBLIC_MIRRORS } from './overpass.mjs'
 import { Tiles } from './tiles.mjs'
 import { Basemap } from './basemap.mjs'
@@ -82,7 +83,22 @@ const MAX_SPAN_LON = 0.35
 const store = new Store(DATA)
 store.catalogSeed = path.join(REPO, 'apps/corridor/public/assets/catalog.json')
 await store.init()
-await store.seedWorlds(env.WORLDEDITOR_SEED_SITES ?? path.join(REPO, 'tools/corridor/sites.json'))
+/*
+ * SEEDING IS OPT-IN, AND IT DID NOT USED TO BE.
+ *
+ * This seeded from the repo's `tools/corridor/sites.json` whenever the volume was empty, which is
+ * right for a laptop -- the sites you already have are the ones you want to open -- and wrong for
+ * a deployment, where it means a fresh instance comes up carrying thirty of somebody else's
+ * worlds (Rich, 2026-09-27). Set WORLDEDITOR_SEED_SITES to a path to seed from it, or to the word
+ * `repo` for the checked-in list. Unset, a new volume starts empty, which is what a blank world
+ * map should mean.
+ */
+const seedFrom = env.WORLDEDITOR_SEED_SITES
+if (seedFrom) {
+  const r = await store.seedWorlds(seedFrom === 'repo' ? path.join(REPO, 'tools/corridor/sites.json') : seedFrom)
+  if (r.seeded) console.log(`  seeded    ${r.seeded} world definitions from ${r.from}`)
+  else console.log(`  seeded    nothing (${r.reason})`)
+}
 
 // THE DEFAULT IS THE PUBLIC MIRRORS, AND OURS IS OPT-IN. It used to be the other way round, and
 // that was wrong for one measured reason: our instance holds ONE REGION, and a regional instance
@@ -518,6 +534,97 @@ async function api(req, res, seg, q) {
       await store.removePlace(id)
       return json(res, 200, { deleted: id })
     }
+  }
+
+  /*
+   * ---- import and export -------------------------------------------------------------------
+   *
+   * Rich, 2026-09-27: "we should be able to import and export world definitions and upload and
+   * download baked worlds in zip files as well as directly publish to a bucket."
+   *
+   * Two different things, deliberately kept apart. A world DEFINITION is a few hundred bytes of
+   * JSON -- where, how big, which road is the spine -- and moving it between machines is how you
+   * hand somebody a place to bake. A BAKED world is hundreds of megabytes of raster and is moved
+   * when you want the result without the eight hours. The bucket is a third route to the same
+   * place and stays exactly as it was.
+   */
+  if (seg[0] === 'worlds' && seg[1] === 'export' && req.method === 'GET') {
+    // ?slug=a&slug=b, or everything
+    const want = q.getAll('slug')
+    const all = await store.listWorlds()
+    const picked = want.length ? all.filter((w) => want.includes(w.slug)) : all
+    const body = { kind: 'corridor-worlds', version: 1, exported: new Date().toISOString(), worlds: picked }
+    res.writeHead(200, { ...CORS, 'content-type': 'application/json', 'content-disposition': `attachment; filename="worlds-${picked.length}.json"` })
+    return res.end(JSON.stringify(body, null, 1))
+  }
+  if (seg[0] === 'worlds' && seg[1] === 'import' && req.method === 'POST') {
+    const body = await readJson(req)
+    // one world, a bare array, or the export envelope above: all three are things a person will
+    // paste, and refusing two of them would be pedantry
+    const list = Array.isArray(body) ? body : Array.isArray(body?.worlds) ? body.worlds : body?.slug ? [body] : null
+    if (!list) return json(res, 400, { error: 'expected a world, an array of worlds, or {worlds:[...]}' })
+    const replace = q.get('replace') === '1'
+    const added = []
+    const skipped = []
+    for (const w of list) {
+      if (!w?.slug || !/^[a-z0-9][a-z0-9-]{1,63}$/.test(w.slug)) { skipped.push({ slug: w?.slug ?? null, why: 'not a usable slug' }); continue }
+      // AWAITED. `getWorld` is async, and an unawaited Promise is always truthy — so without this
+      // every import was refused as "already here", including on a volume with nothing on it.
+      if (!replace && (await store.getWorld(w.slug))) { skipped.push({ slug: w.slug, why: 'already here — pass ?replace=1 to overwrite' }); continue }
+      added.push((await store.putWorld({ ...w, source: 'import', imported: new Date().toISOString() })).slug)
+    }
+    return json(res, 200, { imported: added, skipped })
+  }
+
+  /* a baked world, as one file. `?web=1` is the viewer's half only, which is most of the value
+     and a fraction of the bytes; the default carries the source rasters a re-bake would need. */
+  if (seg[0] === 'sites' && seg[2] === 'archive' && req.method === 'GET') {
+    const slug = seg[1]
+    const files = await store.siteFiles(slug, { webOnly: q.get('web') === '1' })
+    if (!files) return json(res, 404, { error: `no baked site ${slug}` })
+    if (!files.length) return json(res, 404, { error: `${slug} is on the volume but has no files` })
+    const total = files.reduce((n, f) => n + f.bytes, 0)
+    // THE WHOLE ARCHIVE IS BUILT IN MEMORY, so the limit is stated rather than discovered. A
+    // 1 GiB site would be 1 GiB of Buffer in a pod with a memory limit, and the failure mode of
+    // finding that out during a download is a restarted service.
+    const cap = Number(env.WORLDEDITOR_ARCHIVE_MAX_MB ?? 1536) * 2 ** 20
+    if (total > cap) {
+      return json(res, 413, { error: `${slug} is ${(total / 2 ** 20).toFixed(0)} MiB, over the ${(cap / 2 ** 20).toFixed(0)} MiB archive limit`, hint: 'try ?web=1, or publish to the bucket instead', bytes: total, files: files.length })
+    }
+    const entries = []
+    for (const f of files) entries.push({ name: `${slug}/${f.rel}`, data: await readFile(store.siteFile(slug, f.rel)), mtime: f.mtime })
+    const zip = zipWrite(entries)
+    res.writeHead(200, { ...CORS, 'content-type': 'application/zip', 'content-length': String(zip.length), 'content-disposition': `attachment; filename="${slug}${q.get('web') === '1' ? '-web' : ''}.zip"` })
+    return res.end(zip)
+  }
+  /* and back in. The archive names its own site, so an upload needs no slug in the URL. */
+  if (seg[0] === 'sites' && seg[1] === 'import' && req.method === 'POST') {
+    // the default body limit is 8 MiB, which is a rounding error against a baked world
+    const body = await readBody(req, Number(env.WORLDEDITOR_ARCHIVE_MAX_MB ?? 1536) * 2 ** 20)
+    let entries
+    try {
+      entries = zipRead(body)
+    } catch (e) {
+      return json(res, 400, { error: `not a usable archive: ${e.message}` })
+    }
+    const slugs = [...new Set(entries.map((e) => e.name.split('/')[0]))]
+    if (slugs.length !== 1) return json(res, 400, { error: `an archive holds one site; this one has ${slugs.length}`, slugs: slugs.slice(0, 8) })
+    const slug = slugs[0]
+    if (!/^[a-z0-9][a-z0-9-]{1,63}$/.test(slug)) return json(res, 400, { error: `"${slug}" is not a usable slug` })
+    if (q.get('replace') !== '1' && (await store.siteFiles(slug))) {
+      return json(res, 409, { error: `${slug} is already baked here — pass ?replace=1 to overwrite it` })
+    }
+    let bytes = 0
+    for (const e of entries) {
+      const rel = e.name.slice(slug.length + 1)
+      if (!rel) continue
+      const dest = store.siteFile(slug, rel)
+      if (!dest) return json(res, 400, { error: `refusing ${e.name}` }) // zipRead checks too; twice is right for a path
+      await mkdir(path.dirname(dest), { recursive: true })
+      await writeFile(dest, e.data)
+      bytes += e.data.length
+    }
+    return json(res, 200, { imported: slug, files: entries.length, bytes })
   }
 
   /* ---- worlds ---- */

@@ -21,11 +21,16 @@ import { MapView, type LonLat } from './map'
 import { DefinePanel, zoomFor } from './define'
 import { LogView, RunsPanel } from './runs'
 import { AdoptDialog } from './adopt'
+import { dockWidth } from '../ui/dockwidth'
 
 type Mode = 'explore' | 'index' | 'define' | 'bake'
 
 const canvas = document.getElementById('map') as HTMLCanvasElement
 const inspector = document.getElementById('panel') as HTMLElement
+// the panel is draggable by its left edge and remembers the width (ui/dockwidth.ts); the map
+// sizes itself from the same custom property, so there is nothing to keep in step
+const aside = inspector.closest('aside') as HTMLElement | null
+if (aside) dockWidth(aside)
 const readoutEl = document.getElementById('readout') as HTMLElement
 
 let config: Config | null = null

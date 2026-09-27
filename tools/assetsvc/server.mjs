@@ -313,3 +313,29 @@ server.listen(PORT, HOST, () => {
   console.log(`  mesh      ${d.defaults.mesh ?? '(none)'}  ${registry.models.get(d.defaults.mesh)?.url ?? ''}`)
   console.log(`  s3        ${s3.configured ? `${s3.bucket}/${s3.prefix}` : 'not configured'}`)
 })
+
+/*
+ * SHUT DOWN WHEN ASKED, because as PID 1 nothing else will.
+ *
+ * The same trap as tools/worldeditor/server.mjs, which is where it was found and measured. This
+ * is the container's entrypoint, so `node` is process 1, and the kernel does not apply default
+ * signal dispositions to PID 1 — a signal with no handler is IGNORED there, the opposite of what
+ * happens for every other process. Kubernetes then waits out the whole termination grace period
+ * and SIGKILLs, which on the world editor turned every rollout into a thirty-second 503.
+ *
+ * `closeIdleConnections` as well as `close`: a keep-alive socket from a browser doing nothing
+ * still holds the server open, and `close` alone waits for it. Measured at 21 ms with one held
+ * open, against a grace period of thirty seconds.
+ */
+let stopping = false
+for (const signal of ['SIGTERM', 'SIGINT']) {
+  process.on(signal, () => {
+    if (stopping) return process.exit(0) // a second one means "now"
+    stopping = true
+    console.log(`${signal}: closing`)
+    const hard = setTimeout(() => process.exit(0), 5000)
+    hard.unref()
+    server.closeIdleConnections()
+    server.close(() => process.exit(0))
+  })
+}

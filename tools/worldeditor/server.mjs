@@ -914,3 +914,47 @@ server.listen(PORT, HOST, () => {
   console.log(`  bucket    ${runs.cfg.bucket ? `${runs.cfg.bucket}/${runs.cfg.prefix}` : 'not configured'}`)
   if (adopted.length) console.log(`  adopted   ${adopted.length} run(s) that were live when this last stopped`)
 })
+
+/*
+ * SHUT DOWN WHEN ASKED, because as PID 1 nothing else will.
+ *
+ * This is the container's entrypoint, so `node` is process 1 — and the kernel does not apply
+ * default signal dispositions to PID 1. A signal with no handler registered is simply IGNORED
+ * there, which is the opposite of what it does for every other process. So `kubectl rollout
+ * restart` sent SIGTERM, nothing happened, Kubernetes waited out the full 30 s grace period and
+ * then SIGKILLed it.
+ *
+ * MEASURED, not inferred: "Killing" at 23:28:20 and the replacement pod Scheduled at 23:28:50.
+ * Exactly thirty seconds, which is a number that can only come from the grace period elapsing.
+ * The deployment is `strategy: Recreate` — deliberately, because two processes would both adopt
+ * the same live run at start-up and interleave their writes into one log file on the volume — so
+ * the old pod has to be gone before the new one starts, and every one of those thirty seconds was
+ * a 503 for whoever was using the editor (Rich, 2026-09-27: "getting a 503").
+ *
+ * The new pod is ready two seconds after it is scheduled, so this takes the outage from about
+ * thirty-two seconds to about three.
+ *
+ * `closeIdleConnections` matters as much as `close` does: keep-alive sockets from a browser that
+ * is doing nothing still hold the server open, and `close` alone waits for every one of them to
+ * go away by itself. The timer is the backstop for a request that is genuinely mid-flight — a
+ * bake log being streamed, say — and it is well inside the grace period rather than at the edge
+ * of it.
+ */
+let stopping = false
+for (const signal of ['SIGTERM', 'SIGINT']) {
+  process.on(signal, () => {
+    if (stopping) return process.exit(0) // a second one means "now"
+    stopping = true
+    console.log(`${signal}: closing`)
+    const hard = setTimeout(() => {
+      console.log('  still had connections open; exiting anyway')
+      process.exit(0)
+    }, 5000)
+    hard.unref()
+    server.closeIdleConnections()
+    server.close(() => {
+      console.log('  closed')
+      process.exit(0)
+    })
+  })
+}

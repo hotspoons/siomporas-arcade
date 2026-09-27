@@ -269,6 +269,17 @@ export class EngineSim {
     return this.node.connect(destination)
   }
 
+  /**
+   * The worklet itself, for graphs that need to fan it out rather than chain it.
+   *
+   * `connect` covers the common case; a spatialiser sends the same source down two buses (see
+   * SpatialVoice), and doing that through two `connect` calls works but reads as if there were two
+   * engines. This says plainly that there is one.
+   */
+  get output(): AudioNode {
+    return this.node
+  }
+
   disconnect(): void {
     this.node.disconnect()
   }

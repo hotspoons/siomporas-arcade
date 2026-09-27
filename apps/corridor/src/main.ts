@@ -389,6 +389,12 @@ async function loadSite(slug: string) {
       range: retro.uniforms.uLampRange.value,
       cosOuter: +retro.uniforms.uCosOuter.value.toFixed(3),
     }),
+    /**
+     * Where the engine is, as the spatialiser last decided it: distance to the ears, how much of
+     * the cabin bus is in the mix, and the gain the distance curve is holding it to. Exposed
+     * because "does the sound come from the car" is not answerable from a screenshot.
+     */
+    audio: () => ({ state: engineSound.state, error: engineSound.error, ...engineSound.placement }),
     splats: () => splats.map((f) => f.counts()),
     /** show/hide the captured world WITHOUT a retune — a knob change re-seeds the grass and
      * re-picks the trees, so a probe comparing two frames would be measuring that instead */
@@ -1451,6 +1457,10 @@ function pick(e: PointerEvent): boolean {
 const clock = new THREE.Clock()
 const up = new THREE.Vector3(0, 1, 0)
 const viewDir = new THREE.Vector3()
+// The camera's ears. Reused rather than allocated, because this is every frame.
+const earDir = new THREE.Vector3()
+const earUp = new THREE.Vector3()
+const UP_LOCAL = new THREE.Vector3(0, 1, 0)
 /** the simulated instant the sky was last built for; 20 s of world time is well under a degree of sun */
 let lastSkyMs = -1e15
 let lastSkyReal = -1e15
@@ -1498,9 +1508,6 @@ function frame() {
       Transform.y[playerEngine] = -car.pos.z
       Transform.z[playerEngine] = car.pos.y
       engineSound.syncFromCar(playerEngine, car, drive.input.throttle, dt)
-      engineSound.update(actors.world, {
-        x: camera.position.x, y: -camera.position.z, z: camera.position.y,
-      })
     }
     // chase camera: behind and above, looking over the bonnet; drag adds a look-around yaw
     if (drive.cockpit) {
@@ -1520,6 +1527,24 @@ function frame() {
       if (gy !== null && want.y < gy + 1.2) want.y = gy + 1.2
       camera.position.lerp(want, 1 - Math.exp(-T.CHASE_LAG * dt))
       camera.lookAt(car.pos.clone().add(car.forward.clone().multiplyScalar(T.CHASE_LOOK_AHEAD)).add(new THREE.Vector3(0, 1.0, 0)))
+    }
+    // WHERE THE ENGINE IS, from where the camera ended up — which is why this is here and not up
+    // with syncFromCar: the camera is placed by the block above, and voicing the engine before it
+    // moved would pan every frame to where you were looking last frame. Cheap to get wrong and
+    // very hard to hear as anything but "the audio feels laggy".
+    //
+    // Site metres, x east, y north, z up. Three's world is (east, up, −north), so y = −z and
+    // z = y — the same conversion the Transform above does, applied to a direction as well as a
+    // point. The up vector is the camera's own, not world up: corridor does not roll today, but
+    // taking it from the quaternion means a camera that does is right for free.
+    if (playerEngine) {
+      camera.getWorldDirection(earDir)
+      earUp.copy(UP_LOCAL).applyQuaternion(camera.quaternion)
+      engineSound.update(actors.world, {
+        position: { x: camera.position.x, y: -camera.position.z, z: camera.position.y },
+        forward: { x: earDir.x, y: -earDir.z, z: earDir.y },
+        up: { x: earUp.x, y: -earUp.z, z: earUp.y },
+      })
     }
     if (car.event === 'bump') status('bump')
     // what road is this? The name comes from the same station grid the car stands on, so the

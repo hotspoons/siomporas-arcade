@@ -22,7 +22,8 @@
 // real click or keypress; `state` says which of the several ways this can be not-running applies,
 // so the UI can say so rather than shrug.
 
-import { EngineSim, Drivetrain, DEFAULT_DRIVETRAIN, ENGINES, type DrivetrainSpec, type EngineProfile }
+import { EngineSim, Drivetrain, DEFAULT_DRIVETRAIN, ENGINES, SpatialVoice,
+  type DrivetrainSpec, type EngineProfile, type Listener, type Placement, type VoiceOptions }
   from '@apex/enginesim'
 import { addComponent, addEntity, query, type World } from 'bitecs'
 import { Engine, Transform, SETS } from './actors'
@@ -53,6 +54,20 @@ export interface EngineSoundOptions {
   volume?: number
 }
 
+/** The F6 panel's spatial knobs, in the shape SpatialVoice wants. Read fresh every frame: these
+ * are `export let`s and a captured copy would be a dead one. */
+function voiceOptions(): VoiceOptions {
+  return {
+    refDistance: T.ENGINE_REF_M,
+    maxDistance: T.ENGINE_MAX_M,
+    rolloffFactor: T.ENGINE_ROLLOFF,
+    interiorM: T.ENGINE_INTERIOR_M,
+    exteriorM: T.ENGINE_EXTERIOR_M,
+    muffleHz: T.ENGINE_MUFFLE_HZ,
+    hrtf: T.ENGINE_HRTF >= 0.5,
+  }
+}
+
 export class EngineSound {
   state: EngineSoundState = 'off'
   error: string | null = null
@@ -64,6 +79,9 @@ export class EngineSound {
   private context: AudioContext | null = null
   private sim: EngineSim | null = null
   private gain: GainNode | null = null
+  private voice: SpatialVoice | null = null
+  /** what the spatialiser last decided — for the HUD, the tuning panel and probes */
+  placement: Placement | null = null
   private readonly options: EngineSoundOptions
   private playerEntity = 0
   private enginePath = ''
@@ -90,17 +108,24 @@ export class EngineSound {
     try {
       const context = new AudioContext({ latencyHint: 'interactive' })
       await context.resume()
-      const gain = context.createGain()
-      gain.gain.value = this.options.volume ?? 0.9
-      gain.connect(context.destination)
+
+      const master = context.createGain()
+      master.gain.value = this.options.volume ?? 0.9
+      master.connect(context.destination)
+
+      // The spatialiser. Two buses — a panned one and an unpanned, lowpassed cabin one — crossfaded
+      // by how much you are sitting in the thing; see SpatialVoice in @apex/enginesim.
+      const voice = new SpatialVoice(context, voiceOptions())
+      voice.out.connect(master)
 
       const sim = await EngineSim.create(context, {
         onError: (message) => { this.error = message },
       })
-      sim.connect(gain)
+      voice.connectFrom(sim.output)
       this.context = context
       this.sim = sim
-      this.gain = gain
+      this.gain = master
+      this.voice = voice
       this.state = 'running'
       this.error = null
       // Honour a saved ENGINE_INDEX if this browser has one, but fall back to the path rather than
@@ -120,6 +145,9 @@ export class EngineSound {
     this.context = null
     this.sim = null
     this.gain = null
+    this.voice?.disconnect()
+    this.voice = null
+    this.placement = null
     this.state = 'off'
   }
 
@@ -148,27 +176,26 @@ export class EngineSound {
   /**
    * The system. Reads every `Engine` in the world and voices the one that has a voice.
    *
-   * `listener` is where the camera is, in SITE metres — x east, y north, z up, the same frame as
-   * `Transform` and NOT three's world axes. Converting at this edge is the rule the ECS already
-   * follows (see actors.ts); a second convention inside the simulation is how something ends up
-   * mirrored across a road. For the car you are sitting in the distance is nearly zero and the
-   * attenuation is inaudible, which is correct.
+   * `listener` is the camera: where it is and which way it faces, in SITE metres — x east, y north,
+   * z up, the same frame as `Transform` and NOT three's world axes. Converting at this edge is the
+   * rule the ECS already follows (see actors.ts); a second convention inside the simulation is how
+   * something ends up mirrored across a road.
+   *
+   * The geometry itself lives in @apex/enginesim (spatial.ts decides, voice.ts carries it out),
+   * because none of it is about engines and traffic will want the same thing fifty times over.
    */
-  update(world: World, listener: { x: number; y: number; z: number }): void {
+  update(world: World, listener: Listener): void {
     if (this.state !== 'running' || !this.sim || !this.context) return
     for (const entity of query(world, SETS.engines)) {
       if (Engine.voice[entity] !== 1) continue
       this.sim.drive(Engine.rpm[entity], Engine.pedal[entity])
-      // Distance attenuation only; a PannerNode would need the listener's orientation and corridor's
-      // camera basis, and for the car you are sitting in it would earn nothing.
-      if (this.gain) {
-        const dx = Transform.x[entity] - listener.x
-        const dy = Transform.y[entity] - listener.y
-        const dz = Transform.z[entity] - listener.z
-        const distance = Math.sqrt(dx * dx + dy * dy + dz * dz)
-        const attenuation = 1 / (1 + Math.max(0, distance - 2) * T.ENGINE_FALLOFF)
-        this.gain.gain.setTargetAtTime(
-          T.ENGINE_MASTER * attenuation, this.context.currentTime, 0.05)
+      if (this.voice && this.gain) {
+        this.placement = this.voice.place(
+          { x: Transform.x[entity], y: Transform.y[entity], z: Transform.z[entity] },
+          listener,
+          voiceOptions(),
+        )
+        this.gain.gain.setTargetAtTime(T.ENGINE_MASTER, this.context.currentTime, 0.05)
       }
       return // one voice
     }

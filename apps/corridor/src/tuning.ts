@@ -216,11 +216,35 @@ export let ROAD_ONEWAY_CENTRE = 0
 export let ENGINE_INDEX = 14
 /** Master gain for the whole engine, after everything else. 0 is silence. */
 export let ENGINE_MASTER = 0.9
-/**
- * How far away before the engine starts fading, and how fast. Only audible in chase view or when
- * something else is voiced; in the cockpit the distance is nearly zero.
+/*
+ * WHERE THE ENGINE IS. These are the inverse distance model Web Audio itself uses, spelled out so
+ * the unspatialised interior bus can share the curve (see @apex/enginesim `inverseGain`).
+ *
+ *     gain = ref / (ref + rolloff * (clamp(d, ref, max) - ref))
  */
-export let ENGINE_FALLOFF = 0.08
+/** Full volume inside this radius. A car is about this big, so sitting in it is never quiet. */
+export let ENGINE_REF_M = 2.5
+/** Beyond this the attenuation stops getting worse — the floor, not silence. */
+export let ENGINE_MAX_M = 400
+/** How fast it falls off between the two. 1 is the physical inverse law; less is more generous. */
+export let ENGINE_ROLLOFF = 0.9
+/**
+ * Inside this many metres you are in the cabin and the sound stops being panned; beyond
+ * ENGINE_EXTERIOR_M it is fully a point source out in the world. Between them it crossfades, so
+ * cockpit↔chase is a short blend rather than a click.
+ */
+export let ENGINE_INTERIOR_M = 1.6
+export let ENGINE_EXTERIOR_M = 4.0
+/** A cabin is a lowpass. The corner applied when you are fully inside. */
+export let ENGINE_MUFFLE_HZ = 900
+/**
+ * 1 = HRTF panning, a measured head model. OFF by default, and the reason is measured: Chromium's
+ * HRTF gain swings 5.25× across frequency and azimuth (+3.8 dB at 220 Hz ahead, −10.6 dB at
+ * 12 kHz behind), so it re-colours the engine every time you turn the wheel — and the timbre being
+ * the real resonance of the real cylinders is the entire point of simulating one. Equal-power is
+ * flat to four decimals at every angle. Turn this on to hear the difference.
+ */
+export let ENGINE_HRTF = 0
 
 /** Gearbox. Ratios are first through sixth; a ratio of 0 takes that gear out of the box. */
 export let ENGINE_GEAR_1 = 3.9
@@ -1076,8 +1100,19 @@ export const TUNE_TABS: TuneTab[] = [
         keys: [
           tune('ENGINE_INDEX', () => ENGINE_INDEX, (v) => (ENGINE_INDEX = v), [0, 19], 1, 'index into the catalog; 14 is the GM LS'),
           tune('ENGINE_MASTER', () => ENGINE_MASTER, (v) => (ENGINE_MASTER = v), [0, 1], 0.05, 'master gain'),
-          tune('ENGINE_FALLOFF', () => ENGINE_FALLOFF, (v) => (ENGINE_FALLOFF = v), [0, 0.5], 0.01, 'distance fade, per metre beyond 2 m'),
           tune('ENGINE_SIM_HZ', () => ENGINE_SIM_HZ, (v) => (ENGINE_SIM_HZ = v), [0, 48000], 500, 'physics steps/s; 0 = whatever the script asked for'),
+        ],
+      },
+      {
+        title: 'where it is (3D position and attenuation)',
+        keys: [
+          tune('ENGINE_REF_M', () => ENGINE_REF_M, (v) => (ENGINE_REF_M = v), [0.5, 20], 0.1, 'full volume inside this radius'),
+          tune('ENGINE_MAX_M', () => ENGINE_MAX_M, (v) => (ENGINE_MAX_M = v), [10, 2000], 10, 'attenuation stops getting worse past this'),
+          tune('ENGINE_ROLLOFF', () => ENGINE_ROLLOFF, (v) => (ENGINE_ROLLOFF = v), [0, 3], 0.05, '1 = the physical inverse law'),
+          tune('ENGINE_INTERIOR_M', () => ENGINE_INTERIOR_M, (v) => (ENGINE_INTERIOR_M = v), [0, 10], 0.1, 'inside this, stop panning: you are in the cabin'),
+          tune('ENGINE_EXTERIOR_M', () => ENGINE_EXTERIOR_M, (v) => (ENGINE_EXTERIOR_M = v), [0, 20], 0.1, 'beyond this, fully a point source out in the world'),
+          tune('ENGINE_MUFFLE_HZ', () => ENGINE_MUFFLE_HZ, (v) => (ENGINE_MUFFLE_HZ = v), [200, 20000], 50, 'cabin lowpass corner at interior = 1'),
+          tune('ENGINE_HRTF', () => ENGINE_HRTF, (v) => (ENGINE_HRTF = v), [0, 1], 1, '1 = HRTF head model (colours the engine), 0 = flat equal-power pan'),
         ],
       },
       {

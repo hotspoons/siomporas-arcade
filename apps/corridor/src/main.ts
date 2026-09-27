@@ -279,6 +279,25 @@ addEventListener('resize', resize)
 // the last quarter-second is worth keeping too: a reload can land between ticks
 addEventListener('pagehide', saveResume)
 addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveResume() })
+
+/*
+ * GO QUIET WHEN NOBODY IS LOOKING (Rich, 2026-09-27: "it would be great if we muted the corridor
+ * UI when the tab isn't active. We do that for the other games here").
+ *
+ * BOTH SIGNALS, because they mean different things and the other games only listen for one.
+ * stuntin and coast use window blur/focus, which catches switching tabs and switching apps but
+ * NOT a minimised window on every browser; `visibilitychange` catches the tab going to the
+ * background but not another application taking the foreground. Corridor wants both: hidden OR
+ * unfocused is "nobody is listening".
+ *
+ * `document.hasFocus()` rather than a flag we keep ourselves — a page loaded in a background tab
+ * never fires `blur`, so a flag that starts false would be wrong from the first frame.
+ */
+const listening = () => document.visibilityState === 'visible' && document.hasFocus()
+const syncAudible = () => engineSound.setMuted(!listening())
+for (const ev of ['visibilitychange', 'blur', 'focus'] as const) {
+  addEventListener(ev, syncAudible, ev === 'visibilitychange' ? undefined : true)
+}
 resize()
 
 // ---------------------------------------------------------------------------------------------
@@ -403,7 +422,11 @@ async function loadSite(slug: string) {
      * the cabin bus is in the mix, and the gain the distance curve is holding it to. Exposed
      * because "does the sound come from the car" is not answerable from a screenshot.
      */
-    audio: () => ({ state: engineSound.state, error: engineSound.error, ...engineSound.placement }),
+    audio: () => ({
+      state: engineSound.state, error: engineSound.error,
+      muted: engineSound.isMuted, ctx: engineSound.contextState,
+      ...engineSound.placement,
+    }),
     splats: () => splats.map((f) => f.counts()),
     /** show/hide the captured world WITHOUT a retune — a knob change re-seeds the grass and
      * re-picks the trees, so a probe comparing two frames would be measuring that instead */

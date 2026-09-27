@@ -80,6 +80,8 @@ export class EngineSound {
   private sim: EngineSim | null = null
   private gain: GainNode | null = null
   private voice: SpatialVoice | null = null
+  private muted = false
+  private suspendTimer: ReturnType<typeof setTimeout> | null = null
   /** what the spatialiser last decided — for the HUD, the tuning panel and probes */
   placement: Placement | null = null
   private readonly options: EngineSoundOptions
@@ -140,6 +142,8 @@ export class EngineSound {
   }
 
   async stop(): Promise<void> {
+    if (this.suspendTimer !== null) { clearTimeout(this.suspendTimer); this.suspendTimer = null }
+    this.muted = false
     this.sim?.disconnect()
     await this.context?.close()
     this.context = null
@@ -171,6 +175,60 @@ export class EngineSound {
     Engine.rpm[entity] = this.drivetrain.rpm
     Engine.pedal[entity] = this.drivetrain.pedal
     Engine.gear[entity] = this.drivetrain.gear + 1
+  }
+
+  /**
+   * The tab is not the one you are looking at. Go quiet, and stop burning a core.
+   *
+   * Rich, 2026-09-27: "it would be great if we muted the corridor UI when the tab isn't active.
+   * We do that for the other games here" — stuntin and coast both mute on `blur` and unmute on
+   * `focus` (apps/stuntin/src/app/Game.ts).
+   *
+   * TWO THINGS, not one. The gain ramp is the audible half and happens immediately. Suspending
+   * the context is the half that matters on a laptop: this engine is a rigid-body solver running
+   * inside the audio callback at about 45% of a core, and a browser throttles a background tab's
+   * TIMERS but keeps its audio thread running at full rate — so a corridor tab left open behind a
+   * video call is a fan that never stops for a sound nobody can hear.
+   *
+   * The ramp comes first and the suspend follows it, because suspending mid-note freezes the
+   * waveform wherever it was and resuming steps straight back to it. That step is a click, and
+   * it is the one artefact a person would actually notice about this feature.
+   */
+  setMuted(muted: boolean): void {
+    if (this.muted === muted) return
+    this.muted = muted
+    const ctx = this.context
+    if (!ctx || !this.gain) return
+    const RAMP = 0.08
+    if (muted) {
+      this.gain.gain.setTargetAtTime(0, ctx.currentTime, RAMP / 3)
+      // four time constants is within 2% of silence; suspending before that is the click
+      this.suspendTimer = setTimeout(() => {
+        this.suspendTimer = null
+        if (this.muted) void ctx.suspend().catch(() => { /* already closing */ })
+      }, RAMP * 4 * 1000)
+    } else {
+      if (this.suspendTimer !== null) { clearTimeout(this.suspendTimer); this.suspendTimer = null }
+      void ctx.resume()
+        .then(() => this.gain?.gain.setTargetAtTime(T.ENGINE_MASTER, ctx.currentTime, RAMP / 3))
+        .catch(() => { /* the page is going away */ })
+    }
+  }
+
+  /** Whether `setMuted` has been asked for silence. Read by the HUD and by probes. */
+  get isMuted(): boolean {
+    return this.muted
+  }
+
+  /**
+   * What the AudioContext is really doing: 'running', 'suspended', 'closed' or null.
+   *
+   * Separate from `isMuted` on purpose. Muted is what we ASKED for; this is what happened, and
+   * the two are briefly different by design while the ramp runs. A probe that checks only the
+   * flag would pass on a build where the suspend never fires.
+   */
+  get contextState(): AudioContextState | null {
+    return this.context?.state ?? null
   }
 
   /**
@@ -211,7 +269,10 @@ export class EngineSound {
           listener,
           voiceOptions(),
         )
-        this.gain.gain.setTargetAtTime(T.ENGINE_MASTER, this.context.currentTime, 0.05)
+        // NOT while muted: this runs every frame, and writing the master gain here would undo
+        // the mute ramp on the very next one. The frame loop keeps running in a hidden tab — at
+        // one frame a second rather than sixty, but it runs.
+        if (!this.muted) this.gain.gain.setTargetAtTime(T.ENGINE_MASTER, this.context.currentTime, 0.05)
       }
       return // one voice
     }

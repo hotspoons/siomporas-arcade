@@ -342,6 +342,8 @@ export let STAR_SIZE = 1
 /** faintest magnitude drawn. 6.5 is the naked-eye limit on a dark night; 4 is a city. */
 export let STAR_MAG_LIMIT = 6.5
 export let SKY_STARS = 0.8
+/** the Milky Way, 0 … 1. Dimmer than it looks in a photograph, because so is the real one. */
+export let SKY_MILKYWAY = 0.5
 /** the wispy high layer, 0 … 1; the cumulus layer is the weather's own cover */
 export let SKY_CIRRUS = 0.3
 /** moonlight at full moon, as a fraction of the sun's intensity */
@@ -635,6 +637,7 @@ export const TUNE_TABS: TuneTab[] = [
           tune('STAR_SIZE', () => STAR_SIZE, (v) => (STAR_SIZE = v), [0.3, 3], 0.05, 'all of them, scaled'),
           tune('STAR_MAG_LIMIT', () => STAR_MAG_LIMIT, (v) => (STAR_MAG_LIMIT = v), [1, 8], 0.1, 'faintest magnitude drawn \u2014 6.5 is a dark sky, 4 is a city'),
           tune('SKY_STARS', () => SKY_STARS, (v) => (SKY_STARS = v), [0, 1], 0.05, 'how many stars on a clear night'),
+          tune('SKY_MILKYWAY', () => SKY_MILKYWAY, (v) => (SKY_MILKYWAY = v), [0, 2], 0.05, 'the Milky Way \u2014 the real isophotes, on the same sphere as the stars'),
           tune('SKY_CIRRUS', () => SKY_CIRRUS, (v) => (SKY_CIRRUS = v), [0, 1], 0.05, 'the wispy high layer'),
           tune('MOON_LIGHT', () => MOON_LIGHT, (v) => (MOON_LIGHT = v), [0, 0.3], 0.01, 'moonlight at full moon, against the sun'),
           tune('SUNSET_BOLD', () => SUNSET_BOLD, (v) => (SUNSET_BOLD = v), [0, 3], 0.05, 'how hard a low sun paints the sky; 1 is what the air really does'),

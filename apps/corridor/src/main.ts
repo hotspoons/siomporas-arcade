@@ -13,6 +13,7 @@ import { FlyControls } from './fly'
 import { MiniMap, siteProjector } from './minimap'
 import { Sky } from './sky'
 import { Stars } from './stars'
+import { MilkyWay } from './milkyway'
 import { timeControls } from './ui/timecontrols'
 import { celestialToWorld, julianDate, moonPosition, radecToVec } from './celestial'
 import { SquishyHunt } from './games/squishy'
@@ -70,6 +71,11 @@ let minimap: MiniMap | null = null
  * procedural stars stay on, which is a night sky rather than a crash.
  */
 let stars: Stars | null = null
+/**
+ * And the galaxy they sit in: the real isophotes, on the same sphere and turned by the same
+ * matrix. Null when the asset is absent, which is a sky with stars and no band in it.
+ */
+let galaxy: MilkyWay | null = null
 /** what `applySky` last worked out, so the per-frame star turn matches the dome exactly */
 let skyNight = 0
 let skyCover = 0
@@ -116,11 +122,11 @@ const tuneUI = new TuneUI({
         },
         setLocal: (date, time) => {
           worldClock.setLocal(siteZone(), date, time)
-          applySky(season)
+          applySky(season, false)
         },
         home: () => {
           worldClock.home()
-          applySky(season)
+          applySky(season, false)
         },
       }).el,
   },
@@ -242,6 +248,10 @@ async function loadSite(slug: string) {
       console.log(`sky: ${stars.count} catalogue stars`)
     }
   }
+  if (!galaxy) {
+    galaxy = await MilkyWay.load()
+    if (galaxy) scene.add(galaxy.mesh)
+  }
   retro.clear() // the previous site's paint and signs are gone
   ui.setSearch(null) // the old site's index is meaningless now
   site = await buildSite(manifest, status, LITE, renderer, scene.fog as THREE.FogExp2, season, style)
@@ -331,12 +341,20 @@ async function loadSite(slug: string) {
     // the world's clock: probes and the console drive time of day through this
     time: {
       get ms() { return worldClock.ms },
-      set ms(v: number) { worldClock.ms = v; applySky(season) },
-      home: () => { worldClock.home(); applySky(season) },
+      /*
+       * MOVING THE CLOCK DOES NOT REBUILD THE ENVIRONMENT MAP HERE.
+       *
+       * It is owed and the frame loop pays for it under its own budget. A probe that steps the
+       * clock hour by hour looking for night -- which is the right way to find night, since
+       * headless Chromium runs in UTC -- asked for twenty-four PMREM renders in one tick and
+       * crashed the tab.
+       */
+      set ms(v: number) { worldClock.ms = v; applySky(season, false) },
+      home: () => { worldClock.home(); applySky(season, false) },
       parts: (tz = Intl.DateTimeFormat().resolvedOptions().timeZone) => worldClock.parts(tz),
       setLocal: (date?: string, time?: string, tz = Intl.DateTimeFormat().resolvedOptions().timeZone) => {
         worldClock.setLocal(tz, date, time)
-        applySky(season)
+        applySky(season, false)
       },
       sun: () => sunNow(),
     },
@@ -1377,6 +1395,10 @@ function frame() {
       stars.setTransform(celestialToWorld(a?.lat ?? 39, a?.lon ?? -76.7, julianDate(worldClock.ms)))
       stars.setLook(skyNight, T.SKY_STARS, skyCover)
       stars.tick(clock.elapsedTime, renderer.getDrawingBufferSize(new THREE.Vector2()).y, T.STAR_PIXELS, T.STAR_SIZE, T.STAR_MAG_LIMIT)
+      // the galaxy takes the same rotation: it is the same sky, and any second copy of that
+      // arithmetic is a copy that can disagree with the first one
+      galaxy?.setTransform(stars.points.matrix)
+      galaxy?.setLook(skyNight, T.SKY_MILKYWAY, skyCover)
     }
     // where the headlamps are pointing THIS frame, straight off the car's own spot lights, so the
     // retro cone and the visible beam cannot drift apart (retro.ts, car.lamps)

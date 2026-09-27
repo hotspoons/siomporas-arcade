@@ -12,6 +12,8 @@ const COMPASS = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', '
 import { FlyControls } from './fly'
 import { MiniMap, siteProjector } from './minimap'
 import { Sky } from './sky'
+import { Stars } from './stars'
+import { celestialToWorld, julianDate, moonPosition, radecToVec } from './celestial'
 import { SquishyHunt } from './games/squishy'
 import { Parkour } from './games/parkour'
 import * as T from './tuning'
@@ -60,6 +62,16 @@ scene.add(skyDome.mesh)
 
 let site: Site | null = null
 let minimap: MiniMap | null = null
+/**
+ * The real sky, once loaded: 9,096 catalogue stars as one Points object turned by one matrix.
+ *
+ * Null until the asset arrives, and null for ever if it does not — in which case the dome's own
+ * procedural stars stay on, which is a night sky rather than a crash.
+ */
+let stars: Stars | null = null
+/** what `applySky` last worked out, so the per-frame star turn matches the dome exactly */
+let skyNight = 0
+let skyCover = 0
 /** captured worlds attached to this site (splats.ts) */
 let splats: SplatField[] = []
 /**
@@ -176,6 +188,13 @@ async function loadSite(slug: string) {
     setRelief(reliefWanted, spineDatum(manifest))
     reliefManifest(manifest)
     ui.setRelief(reliefWanted)
+  }
+  if (!stars) {
+    stars = await Stars.load()
+    if (stars) {
+      scene.add(stars.points)
+      console.log(`sky: ${stars.count} catalogue stars`)
+    }
   }
   retro.clear() // the previous site's paint and signs are gone
   ui.setSearch(null) // the old site's index is meaningless now
@@ -594,25 +613,37 @@ let reliefWanted = 1
  */
 const worldClock = new WorldClock()
 /** where the sun is for this site, right now on the world's clock */
-function sunNow(): { el: number; az: number; dir: THREE.Vector3; moon: THREE.Vector3; phase: number } {
+function sunNow(): { el: number; az: number; dir: THREE.Vector3; moon: THREE.Vector3; phase: number; jd: number; lat: number; lon: number } {
   const a = site?.manifest.frame?.anchor
   const lat = a?.lat ?? 39, lon = a?.lon ?? -76.7
   const s = sunPosition(worldClock.ms, lat, lon)
   const v = sunVector(s.elevation, s.azimuth, T.SUN_ARC)
-  // The moon, cheaply: it runs the same arc about 50 minutes later each day, and its phase is the
-  // synodic month since a known new moon (2026-01-18 19:52 UTC). This is not an ephemeris — it is
-  // a light in the sky that is in roughly the right place at roughly the right brightness, which
-  // is all a night drive needs. A real one is Meeus chapter 47 if it ever matters.
-  const SYNODIC = 29.530588853 * 86400000
-  const phase = (((worldClock.ms - Date.parse('2026-01-18T19:52:00Z')) % SYNODIC) + SYNODIC) % SYNODIC / SYNODIC
-  const m = sunPosition(worldClock.ms - phase * SYNODIC + SYNODIC / 2, lat, lon)
-  const mv = sunVector(m.elevation, m.azimuth, T.SUN_ARC)
+  /*
+   * THE MOON IS A REAL MOON NOW.
+   *
+   * It used to run the sun's arc fifty minutes later each day with a sawtooth phase, and the note
+   * beside it said "a real one is Meeus chapter 47 if it ever matters". It matters: Rich asked for
+   * the moon and the stars to move as they really do, and a moon that follows the sun's arc is in
+   * the wrong part of the sky for most of the month — it never rides high in winter or skims the
+   * horizon in summer, which is the thing you notice.
+   *
+   * So it comes from the same celestial machinery as the stars: an abridged lunar theory for its
+   * right ascension and declination, and the observer's own equatorial-to-horizon rotation. The
+   * phase is the angle between the Sun and the Moon as seen from here, not a 29.53-day counter —
+   * so it cannot drift, and a gibbous moon is lit on the side the Sun is actually on.
+   */
+  const jd = julianDate(worldClock.ms)
+  const mp = moonPosition(jd)
+  const mv = radecToVec(mp.ra, mp.dec).applyMatrix4(celestialToWorld(lat, lon, jd))
   return {
     el: s.elevation,
     az: s.azimuth,
     dir: new THREE.Vector3(v.x, v.y, v.z),
-    moon: new THREE.Vector3(mv.x, mv.y, mv.z),
-    phase: 1 - Math.abs(phase * 2 - 1), // 0 new, 1 full
+    moon: mv,
+    phase: mp.phase,
+    jd,
+    lat,
+    lon,
   }
 }
 
@@ -727,15 +758,19 @@ function applySky(s: Season) {
   // the sun is a direction now, not a fixed corner of the sky; the light is 3 km out along it so
   // shadows and specular agree with the disc the dome draws
   sun.position.copy(sunAt.dir).multiplyScalar(5000)
+  skyNight = night
+  skyCover = Math.min(1, 0.3 + (def.sky?.cloudBias ?? 0) + 0.7 * w.skyMix)
   skyDome.set({
     zenith: (def.sky ? def.sky.zenith.clone() : look.sky.clone().lerp(new THREE.Color(0x4f86d2), 0.55)).lerp(w.skyTint, w.skyMix).lerp(NIGHT_SKY, night * 0.99),
     horizon: sky,
-    cover: Math.min(1, 0.3 + (def.sky?.cloudBias ?? 0) + 0.7 * w.skyMix),
+    cover: skyCover,
     haze: Math.min(1, 0.35 + w.skyMix * 0.6),
     sunDir: sunAt.dir,
     sunColour: look.sun.colour.clone().lerp(new THREE.Color(0xff6b2a), Math.min(0.95, golden * 0.8 * T.SUNSET_BOLD)),
     night,
-    stars: T.SKY_STARS,
+    // the dome's procedural stars are the FALLBACK: a hash has no Orion in it, so once the real
+    // catalogue is loaded the dome draws none and `stars.ts` owns them
+    stars: stars ? 0 : T.SKY_STARS,
     cirrus: T.SKY_CIRRUS * (1 - w.skyMix * 0.6),
     moonDir: sunAt.moon,
     moonPhase: sunAt.phase,
@@ -1256,6 +1291,15 @@ function frame() {
     for (const f of splats) f.update(camera.position.x, -camera.position.z)
     // the world looks wet while it is wet: the weather ramps it, the surfaces follow
     site.setWet(site.weather.wetness)
+    // THE SKY TURNS. One matrix for nine thousand stars, rebuilt each frame from the clock — so
+    // time acceleration moves the stars exactly as it moves the sun, because it is the same
+    // rotation of the same Earth (celestial.ts).
+    if (stars) {
+      const a = site.manifest.frame?.anchor
+      stars.setTransform(celestialToWorld(a?.lat ?? 39, a?.lon ?? -76.7, julianDate(worldClock.ms)))
+      stars.setLook(skyNight, T.SKY_STARS, skyCover)
+      stars.tick(clock.elapsedTime, renderer.getDrawingBufferSize(new THREE.Vector2()).y, T.STAR_PIXELS, T.STAR_SIZE, T.STAR_MAG_LIMIT)
+    }
     // where the headlamps are pointing THIS frame, straight off the car's own spot lights, so the
     // retro cone and the visible beam cannot drift apart (retro.ts, car.lamps)
     // how hard the built world yields to a capture: 0 leaves it alone, 1 hands the ground over

@@ -13,6 +13,7 @@ import { FlyControls } from './fly'
 import { MiniMap, siteProjector } from './minimap'
 import { Sky } from './sky'
 import { Stars } from './stars'
+import { timeControls } from './ui/timecontrols'
 import { celestialToWorld, julianDate, moonPosition, radecToVec } from './celestial'
 import { SquishyHunt } from './games/squishy'
 import { Parkour } from './games/parkour'
@@ -89,6 +90,14 @@ let splatCover: { w: number; h: number; covered: number; segments: number } | nu
 /** the credits line: two of the sources require it, the rest deserve it */
 const attribution = new Attribution(document.body)
 
+/**
+ * THE WORLD'S CLOCK. It starts at the real now and keeps up with it (sun.ts WorldClock), so a
+ * session opens at today's light without anyone choosing anything; the date and time controls move
+ * an OFFSET from real time rather than an absolute instant, which is what lets a world left paused
+ * yesterday still open on today. TIME_RATE is how fast it runs.
+ */
+const worldClock = new WorldClock()
+
 // The interface. Built before anything else touches a tunable, because TuneUI's constructor
 // restores this browser's saved knobs and everything downstream reads them as its starting value.
 restoreTheme()
@@ -97,7 +106,44 @@ const tuneUI = new TuneUI({
   onChange: () => onTuneChange(),
   onSaveSite: () => void doSaveSiteTuning(),
   onClearSite: () => void doClearSiteTuning(),
+  extras: {
+    // the clock is not a slider: a date and a time, running, that you can also set
+    'time of day': () =>
+      timeControls({
+        read: () => {
+          const p = worldClock.parts(siteZone())
+          return { date: p.date, time: p.time, offsetMs: worldClock.offsetMs, rate: T.TIME_RATE }
+        },
+        setLocal: (date, time) => {
+          worldClock.setLocal(siteZone(), date, time)
+          applySky(season)
+        },
+        home: () => {
+          worldClock.home()
+          applySky(season)
+        },
+      }).el,
+  },
 })
+
+/**
+ * The zone the clock's date and time are read and written in.
+ *
+ * The SITE's, not the browser's. A world in Maryland shows Maryland's evening whoever is looking
+ * at it — otherwise setting "19:00" from another continent puts the sun somewhere else, which is
+ * exactly the trap a headless probe fell into earlier today when it asked for 22:00, got UTC, and
+ * measured a sky with the sun ten degrees above the horizon.
+ *
+ * Longitude is the honest approximation: an IANA zone would need a lookup this app does not carry,
+ * and the difference between solar time and civil time is under an hour almost everywhere.
+ */
+function siteZone(): string {
+  const lon = site?.manifest.frame?.anchor?.lon
+  if (lon === undefined) return Intl.DateTimeFormat().resolvedOptions().timeZone
+  const off = Math.round(lon / 15)
+  // Etc/GMT is signed the other way round from everything else, which is a real and famous trap
+  return off === 0 ? 'Etc/GMT' : `Etc/GMT${off > 0 ? '-' : '+'}${Math.abs(off)}`
+}
 const ui = new ViewerUI({
   onSite: (slug) => {
     location.hash = slug
@@ -605,13 +651,6 @@ let reliefWanted = 1
  * because weather is a modifier on a season and not a state of its own: snow under a winter sun is
  * a different scene from snow under a summer one.
  */
-/**
- * THE WORLD'S CLOCK. It starts at the real now and keeps up with it (sun.ts WorldClock), so a
- * session opens at today's light without anyone choosing anything; the date and time controls move
- * an OFFSET from real time rather than an absolute instant, which is what lets a world left paused
- * yesterday still open on today. TIME_RATE is how fast it runs.
- */
-const worldClock = new WorldClock()
 /** where the sun is for this site, right now on the world's clock */
 function sunNow(): { el: number; az: number; dir: THREE.Vector3; moon: THREE.Vector3; phase: number; jd: number; lat: number; lon: number } {
   const a = site?.manifest.frame?.anchor
@@ -719,7 +758,18 @@ function applyCanopyShade(immediate = false) {
 const pmrem = new THREE.PMREMGenerator(renderer)
 const skyScene = new THREE.Scene()
 let envRT: THREE.WebGLRenderTarget | null = null
+/**
+ * The environment map: the sky, prefiltered, as the thing that lights everything.
+ *
+ * This is the EXPENSIVE half of applySky -- a PMREM render and a fresh render target every call,
+ * everything else in there being scalar colour work. So it is timed, and `frame()` uses the
+ * measurement to decide how often it can afford to run (see `envCostMs`). Do not call it in a
+ * loop without that guard: at TIME_RATE 3600 the sky wants rebuilding every frame, and that is
+ * how the tab used to stop answering.
+ */
+let envCostMs = 0
 function skyEnvironment() {
+  const t0 = performance.now()
   // the dome lives in the main scene; borrow it for the capture and put it straight back
   const parent = skyDome.mesh.parent
   skyScene.add(skyDome.mesh)
@@ -728,9 +778,18 @@ function skyEnvironment() {
   envRT?.dispose()
   envRT = next
   scene.environment = next.texture
+  // a rolling measure, so one hitch does not shut the sky down for a second
+  envCostMs = envCostMs === 0 ? performance.now() - t0 : envCostMs * 0.7 + (performance.now() - t0) * 0.3
 }
 
-function applySky(s: Season) {
+/** set when the light has moved but the environment map has not been rebuilt for it yet */
+let envDue = false
+/**
+ * `env` false does everything but the environment map, leaving it owed: the sun, the sky colour,
+ * the dome and every light move on the frame the clock moves them, and only the prefiltered
+ * irradiance lags — which is the one term that can lag without anyone seeing it.
+ */
+function applySky(s: Season, env = true) {
   const look = styled(LOOK[s], style)
   const def = STYLE[style]
   const w = WEATHER[weatherNow()]
@@ -801,7 +860,8 @@ function applySky(s: Season) {
   baseAmbient = ambient.intensity
   baseEnv = T.SKY_LIGHT * (day + night * (T.NIGHT_AMBIENT * 1.2 + 1.5 * moonlight))
   applyCanopyShade(true)
-  skyEnvironment()
+  if (env) skyEnvironment()
+  else envDue = true
   // headlights follow the night, not the clock: they come on as the sun goes and off as it returns
   drive.car?.setLights(night * (drive.on ? 1 : 0.6))
   // and the retroreflectors take the same day/night level as the grass and the impostors, so the
@@ -1199,6 +1259,7 @@ const up = new THREE.Vector3(0, 1, 0)
 const viewDir = new THREE.Vector3()
 /** the simulated instant the sky was last built for; 20 s of world time is well under a degree of sun */
 let lastSkyMs = -1e15
+let lastSkyReal = -1e15
 function frame() {
   const real = clock.getDelta()
   const dt = Math.min(0.1, real)
@@ -1207,9 +1268,26 @@ function frame() {
   // a real day, and far less than that at a high TIME_RATE.
   worldClock.rate = T.TIME_RATE
   worldClock.tick(real) // real time, not the capped physics step: the sun does not care about hitches
+  /*
+   * THE SKY, AT ANY TIME RATE.
+   *
+   * The cheap half runs whenever the simulated clock has moved twenty seconds, so at 3600x the sun
+   * slides across the sky continuously. The environment MAP is a PMREM render, and it is allowed
+   * at most an eighth of real time: `envCostMs` is measured, so this is the same rule on Rich's
+   * GPU (a rebuild every few frames) and on a software rasteriser (a rebuild every second or two)
+   * without a constant that means different things on each. Before this, twenty simulated seconds
+   * arrived every five real milliseconds at 3600x, the map was rebuilt every frame, and the tab
+   * stopped drawing entirely -- measured at 0 frames in 5 s.
+   */
+  const nowReal = performance.now()
   if (Math.abs(worldClock.ms - lastSkyMs) > 20000) {
     lastSkyMs = worldClock.ms
-    applySky(season)
+    applySky(season, false)
+  }
+  if (envDue && nowReal - lastSkyReal > Math.max(120, envCostMs * 8)) {
+    lastSkyReal = nowReal
+    envDue = false
+    skyEnvironment()
   }
   if (site && drive.on && drive.car) {
     const car = drive.car

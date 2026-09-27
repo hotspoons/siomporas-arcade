@@ -23,6 +23,15 @@ export interface TuneUIOpts {
   onSaveSite: () => void
   /** empty that file and put the knobs it set back */
   onClearSite: () => void
+  /**
+   * Controls a section wants that are not knobs, keyed by section title.
+   *
+   * The time of day needs a date and a clock, which are not sliders. Rather than teach the shared
+   * `TuneSection` type about DOM — it is a data description of knobs and should stay one — a
+   * section may name an extra, and the app supplies it. The panel puts it above that section's
+   * knobs.
+   */
+  extras?: Record<string, () => HTMLElement>
 }
 
 export class TuneUI {
@@ -65,6 +74,8 @@ export class TuneUI {
           // shut, and only the section itself knows which those are.
           const g = group(sec.title, { collapsed: sec.collapsed ?? sec.keys.length > 12, actions: [reset] })
           const body = bodyOf(g)
+          const extra = this.o.extras?.[sec.title]
+          if (extra) body.append(extra())
           for (const k of sec.keys) body.append(this.field(tab.name, k))
           this.groups.push({ el: g, keys: sec.keys })
           host.append(g)

@@ -136,16 +136,26 @@ export class WorldClock {
   offsetMs = 0
   /** simulated seconds per real second */
   rate = 1
-  private simMs = Date.now()
   private realMs = Date.now()
 
-  /** advance by a real-time delta (seconds) */
+  /**
+   * Advance by a real-time delta (seconds).
+   *
+   * What actually moves is the OFFSET, and only by the part of the advance that is not real time:
+   * at rate 1 the offset does not change at all, so a tab left in the background for an hour --
+   * where rAF does not fire and the delta comes back as one huge number -- still reads the correct
+   * time when you look at it again, with no catching up to do.
+   *
+   * The accelerated part IS capped. A 43-second stall was measured on a software rasteriser in
+   * September; at 3600x, applying it whole is a fortnight of sun in a single frame. Slowing down
+   * (rate below 1, paused included) is never capped, or a paused world left in a background tab
+   * comes back with the sun moved on.
+   */
   tick(dt: number) {
     const now = Date.now()
+    const k = this.rate - 1
+    this.offsetMs += (k >= 0 ? Math.min(dt, 0.25) : dt) * k * 1000
     this.realMs = now
-    this.simMs += dt * 1000 * this.rate
-    // the offset is the truth; the accumulated time is a convenience that must not drift from it
-    this.offsetMs = this.simMs - now
   }
 
   /** the simulated instant, ms since the epoch */
@@ -154,9 +164,8 @@ export class WorldClock {
   }
 
   set ms(v: number) {
-    this.simMs = v
-    this.offsetMs = v - Date.now()
     this.realMs = Date.now()
+    this.offsetMs = v - this.realMs
   }
 
   /** back to the real here and now */
@@ -178,15 +187,19 @@ export class WorldClock {
   setLocal(timeZone: string, date?: string, time?: string) {
     const cur = this.parts(timeZone)
     const d = date ?? cur.date
-    const t = time ?? cur.time
+    // "HH:MM", always. An <input type=time> with a seconds step hands back "HH:MM:SS", and
+    // `${d}T12:00:00:00Z` parses to NaN -- which becomes an Invalid Date, which Intl throws on,
+    // inside whatever loop happens to be reading the clock. Refuse a bad instant here instead.
+    const t = (time ?? cur.time).slice(0, 5)
+    const want = Date.parse(`${d}T${t}:00Z`)
+    if (!Number.isFinite(want)) return
     // find the UTC instant whose wall clock in `timeZone` is (d, t): guess, measure the error in
     // the zone itself, correct. Two passes settle it, DST included, without a zone database.
-    let guess = Date.parse(`${d}T${t}:00Z`)
+    let guess = want
     for (let i = 0; i < 2; i++) {
       const got = new WorldClock()
       got.ms = guess
       const p = got.parts(timeZone)
-      const want = Date.parse(`${d}T${t}:00Z`)
       const has = Date.parse(`${p.date}T${p.time}:00Z`)
       guess += want - has
     }

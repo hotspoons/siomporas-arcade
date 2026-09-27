@@ -105,7 +105,7 @@ const frame = async (name, knobs, timeOfDay) =>
         const tick = () => {
           if (++n < 8) return requestAnimationFrame(tick)
           const r = c.renderer
-          r.render(c.scene, c.camera)
+          c.drawFrame()
           const gl = r.getContext()
           const w = gl.drawingBufferWidth, h = gl.drawingBufferHeight
           const buf = new Uint8Array(w * h * 4)

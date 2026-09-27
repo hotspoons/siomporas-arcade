@@ -118,7 +118,7 @@ const settleAt = async (p) =>
         const tick = () => {
           n++
           const r = c.renderer
-          r.render(c.scene, c.camera)
+          c.drawFrame()
           const tris = r.info.render.triangles
           if (Math.abs(tris - last) < Math.max(200, last * 0.002)) stable++
           else stable = 0
@@ -147,14 +147,25 @@ const seamDiff = async (to) =>
     ({ to }) =>
       new Promise((resolve) => {
         const c = window.corridor
+        /*
+         * THE TRIANGLE COUNT TRAVELS WITH THE PIXELS.
+         *
+         * This difference attributes every changed pixel to the seam, and the world is STILL
+         * BUILDING underneath it: tiles arrive asynchronously, the settle loop can go quiet while
+         * one is in flight, and the geometry that lands between the two grabs is counted as the
+         * seam leaking. That is what a 4.4% "leak" at a point whose mask reads 0, with nothing
+         * within 120 m of it, turned out to be — 1.8 M triangles where a settled world there has
+         * over 4 M. A difference taken across a changing world is not a measurement of anything,
+         * so the comparison now knows whether it was.
+         */
         const grab = () => {
           const r = c.renderer
-          r.render(c.scene, c.camera)
+          c.drawFrame()
           const gl = r.getContext()
           const w = gl.drawingBufferWidth, h = gl.drawingBufferHeight
           const buf = new Uint8Array(w * h * 4)
           gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, buf)
-          return { w, h, buf }
+          return { w, h, buf, tris: r.info.render.triangles }
         }
         const settle = (n, then) => {
           let k = 0
@@ -178,7 +189,15 @@ const seamDiff = async (to) =>
               }
             }
             c.splatFade(null)
-            resolve({ px: a.w * a.h, changed, darker, changedPct: +((100 * changed) / (a.w * a.h)).toFixed(1) })
+            resolve({
+              px: a.w * a.h,
+              changed,
+              darker,
+              changedPct: +((100 * changed) / (a.w * a.h)).toFixed(1),
+              tris: [a.tris, b.tris],
+              // the world must be the SAME world in both frames, or the difference is of the world
+              steady: Math.abs(a.tris - b.tris) <= Math.max(500, a.tris * 0.002),
+            })
           })
         })
       }),
@@ -213,5 +232,7 @@ else if (!(IN.changedPct > 10)) fail(`inside a capture the seam changed only ${I
 // brighter than shaded ground — so "did it get darker" is not the test it looks like.)
 else if (!(res.insideHalf.changed < IN.changed * 0.85)) fail(`half strength changed ${res.insideHalf.changedPct}% against ${IN.changedPct}% at full — the seam is a switch, not a crossfade`)
 // 2. and away from every capture it must not move at all
+else if (!OUT.steady) fail(`the world was still building at the outside point (${OUT.tris[0]} then ${OUT.tris[1]} triangles) — this difference is of the world, not of the seam`)
+else if (!IN.steady) fail(`the world was still building at the inside point (${IN.tris[0]} then ${IN.tris[1]} triangles) — this difference is of the world, not of the seam`)
 else if (!(OUT.changedPct < 1)) fail(`away from every capture the seam changed ${OUT.changedPct}% of the frame — it is leaking outside the envelope`)
 else console.log(`PASS: seam ${info.cov.w}x${info.cov.h} at ${info.cov.cellM} m from ${info.cov.segments} pass segments, sun ${sunEl}deg. Inside a capture it dissolves ${IN.changedPct}% of the frame at full strength and ${res.insideHalf.changedPct}% at half; away from one it changes ${OUT.changedPct}%.`)

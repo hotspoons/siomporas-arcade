@@ -399,6 +399,28 @@ async function loadSite(slug: string) {
     splatCover: () => (splatCover ? { ...splatCover, cellM: T.SPLAT_MASK_CELL_M, fade: splatMask.uSplatFade.value } : null),
     /** what the canopy overhead is doing to the ambient light, and the numbers behind it */
     light: () => ({ canopyShade: +canopyShade.toFixed(3), baseAmbient: +baseAmbient.toFixed(3), baseEnv: +baseEnv.toFixed(3), foliage: +foliageFraction().toFixed(2), ambient: +ambient.intensity.toFixed(3), env: +scene.environmentIntensity.toFixed(3) }),
+    /*
+     * DRAW A FRAME THE WAY THE APP DRAWS ONE.
+     *
+     * Every probe that reads pixels used to call `renderer.render(scene, camera)` itself. Since
+     * post-process anti-aliasing arrived that is the WRONG CALL: with a composer the final pass
+     * owns the default framebuffer, a bare `renderer.render` draws somewhere else, and
+     * `gl.readPixels` then reads a buffer nobody just wrote. It does not throw and it does not
+     * come back black — corridor-splatseam.mjs reported the capture seam "leaking" 17.6% of a
+     * frame at a point whose mask reads zero, with every changed pixel BRIGHTER, which is a very
+     * convincing bug report about nothing.
+     *
+     * So the app exposes its own draw, and probes use it instead of reaching for the renderer.
+     */
+    drawFrame: (cam?: THREE.Camera) => {
+      if (!composer) return renderer.render(scene, cam ?? camera)
+      // a probe that points its own camera somewhere (the sky, a junction) has to point the
+      // composer's RenderPass too, or the composer draws the app's view and the probe measures
+      // a frame it did not ask for
+      if (cam) for (const p of composer.passes) if (p instanceof RenderPass) p.camera = cam
+      composer.render()
+      if (cam) for (const p of composer.passes) if (p instanceof RenderPass) p.camera = camera
+    },
     THREE, // probes need Raycaster/Vector3 in the page, and there is no other handle on it
     // the world's clock: probes and the console drive time of day through this
     time: {

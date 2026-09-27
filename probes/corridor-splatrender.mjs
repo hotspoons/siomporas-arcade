@@ -84,7 +84,7 @@ const res = await page.evaluate(() => new Promise((resolve) => {
   let n = 0
   const tick = () => {
     n++
-    c.renderer.render(c.scene, c.camera)
+    c.drawFrame()
     const f = c.splats()[0]
     if ((f.resident ?? 0) > 0 && (f.gaussians ?? 0) > 0 && n > 60) return resolve({ n, ...f })
     if (n > 3000) return resolve({ n, timeout: true, ...f })
@@ -109,8 +109,8 @@ const diff = await page.evaluate(async () => {
   const grab = async (on) => {
     c.tune.set('SPLAT_ENABLED', on ? 1 : 0)
     // Spark sorts off the main thread, so a single render after a change can draw nothing.
-    for (let i = 0; i < 40; i++) { c.renderer.render(c.scene, c.camera); await new Promise((r) => requestAnimationFrame(r)) }
-    c.renderer.render(c.scene, c.camera)
+    for (let i = 0; i < 40; i++) { c.drawFrame(); await new Promise((r) => requestAnimationFrame(r)) }
+    c.drawFrame()
     const px = new Uint8Array(w * h * 4)
     gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px)
     return px

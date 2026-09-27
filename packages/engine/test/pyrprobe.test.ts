@@ -11,14 +11,36 @@ const WEB = `${S}/pyrweb`
 // bake is 122 MB of scratch that CI has no reason to build — but with PYRAMID_PROBE=1 it is an
 // ERROR for the bake to be missing, so "it passed" can never mean "it did not run".
 const asked = process.env.PYRAMID_PROBE === '1'
-const run = existsSync(BLOCK)
-if (asked && !run) throw new Error(`PYRAMID_PROBE=1 but no bake at ${BLOCK} — nothing was verified`)
+/*
+ * BOTH FILES, because this reads two and only checked one.
+ *
+ * The block is scratch; `site.json` is under `tools/corridor/data`, which is GITIGNORED and
+ * therefore cannot exist in CI at all. Guarding on the block alone meant any machine with the
+ * scratch file but no bake — which is CI, and was this devcontainer — got past the skip and
+ * failed at collection on the second read.
+ */
+const SITE = `${process.cwd()}/tools/corridor/data/sites/crofton-crownsville/site.json`
+const run = existsSync(BLOCK) && existsSync(SITE)
+if (asked && !run) throw new Error(`PYRAMID_PROBE=1 but no bake: need ${BLOCK} and ${SITE} — nothing was verified`)
 
 describe.skipIf(!run)('pyramid probe against a real crownsville bake', () => {
+  /*
+   * `skipIf` SKIPS THE TESTS, NOT THIS CALLBACK.
+   *
+   * vitest runs a describe body at COLLECTION time to find out what tests are in it, and only
+   * then marks them skipped — so every `readFileSync` below ran even when the bake was absent,
+   * and the suite failed at collection with an ENOENT rather than reporting a skip. It has been
+   * failing CI that way, where `tools/corridor/data` is gitignored and cannot exist: reproduced
+   * from a clean clone, 1 file failed of 37.
+   *
+   * The early return is what actually implements the intent in the comment at the top of this
+   * file. `skipIf` stays because it is what makes the skip visible in the report.
+   */
+  if (!run) return
   const block = JSON.parse(readFileSync(BLOCK, 'utf8'))
   const list: { z: number; x: number; y: number; empty?: boolean }[] = block.list
   const have = new Set(list.map((e) => `${e.z}/${e.x}/${e.y}`))
-  const site = JSON.parse(readFileSync(`${process.cwd()}/tools/corridor/data/sites/crofton-crownsville/site.json`, 'utf8'))
+  const site = JSON.parse(readFileSync(SITE, 'utf8'))
   const anchor = new Anchor(site.lon, site.lat, 0)
 
   const place = (t: TileId) => {

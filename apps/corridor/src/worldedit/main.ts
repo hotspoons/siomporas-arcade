@@ -142,33 +142,48 @@ async function loadLayers(bbox: Box, zoom: number) {
   const wanted = new Set<string>()
   for (const layer of plan) for (const t of layer.tiles) wanted.add(tileKey(layer.layer, t))
 
+  /*
+   * A LAYER'S TILES GO TOGETHER, NOT ONE AFTER ANOTHER.
+   *
+   * This awaited each tile in turn, and the server ran one at a time per layer on top of that. A
+   * Northern Italy view is six motorway tiles at fifteen seconds each, so the two serialisations
+   * multiplied into a minute and a half of a browser waiting on a server that was idle for most
+   * of it. The server has lanes now; this stops holding them shut.
+   *
+   * Layers still go in order, because the plan is ordered by what matters — a road layer arriving
+   * before the place names is the right way round, and a screen that fills in that order reads as
+   * progress rather than as a flicker.
+   */
   for (const layer of plan) {
-    for (const t of layer.tiles) {
-      const key = tileKey(layer.layer, t, layer.variant)
-      if (tileState.has(key)) continue
-      tileState.set(key, 'live')
-      loading++
-      if (mode === 'explore') renderExplore()
-      try {
-        const doc = await api.tile(layer.layer, t, zoom)
-        // The view may have moved on while this was in flight; keep it anyway if it is still
-        // near, drop it if not. Cheaper than cancelling and re-asking for it a second later.
-        map.tiles.set(key, doc)
-        tileState.set(key, 'done')
-        lastRoads = { count: doc.items.length, cache: doc.cache, upstream: doc.upstream, layer: layer.layer }
-        if (doc.provisional && doc.note) toast(doc.note, 'warn', 8000)
-        if (layer.layer === 'roads') syncDetail()
-        map.draw()
-      } catch (e) {
-        tileState.delete(key)
-        if ((e as Error).name !== 'AbortError') roadsOff = (e as Error).message
-      } finally {
-        loading--
+    const want = layer.tiles.filter((t) => !tileState.has(tileKey(layer.layer, t, layer.variant)))
+    if (!want.length) continue
+    await Promise.all(
+      want.map(async (t) => {
+        const key = tileKey(layer.layer, t, layer.variant)
+        tileState.set(key, 'live')
+        loading++
         if (mode === 'explore') renderExplore()
-      }
-      // A newer viewport has superseded this plan; stop working through a stale one.
-      if (planReq !== mine) return
-    }
+        try {
+          // the plan's own signal, so a pan ABORTS the tiles it superseded instead of leaving
+          // them to finish into a view nobody is looking at any more
+          const doc = await api.tile(layer.layer, t, zoom, mine?.signal)
+          map.tiles.set(key, doc)
+          tileState.set(key, 'done')
+          lastRoads = { count: doc.items.length, cache: doc.cache, upstream: doc.upstream, layer: layer.layer }
+          if (doc.provisional && doc.note) toast(doc.note, 'warn', 8000)
+          if (layer.layer === 'roads') syncDetail()
+          map.draw()
+        } catch (e) {
+          tileState.delete(key)
+          if ((e as Error).name !== 'AbortError') roadsOff = (e as Error).message
+        } finally {
+          loading--
+          if (mode === 'explore') renderExplore()
+        }
+      }),
+    )
+    // A newer viewport has superseded this plan; stop working through a stale one.
+    if (planReq !== mine) return
   }
   void wanted
 }

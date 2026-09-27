@@ -22,12 +22,22 @@ import path from 'node:path'
 import { layerById, tileBounds, variantOf } from './layers.mjs'
 
 export class Tiles {
-  constructor(store, overpass) {
+  constructor(store, overpass, opts = {}) {
     this.store = store
     this.overpass = overpass
     this.root = path.join(store.root, 'cache', 'osmtiles')
     this.inflight = new Map()
-    /** Per-layer serialisation, so one screenful is a queue rather than a stampede. */
+    /**
+     * Per-layer concurrency, so one screenful is a queue rather than a stampede — but a queue of
+     * WIDTH, not a single file.
+     *
+     * It was a strict chain: one tile at a time per layer, and the client awaiting one at a time
+     * on top of that. A Northern Italy view is six `major` tiles at 15 s each, and end to end that
+     * is a minute and a half of one machine waiting on another that is idle for most of it.
+     * Overpass is perfectly happy with a few concurrent queries against one extract; what it is
+     * not happy with is a stampede, which is what the serialisation was really there to prevent.
+     */
+    this.lanes = Math.max(1, Number(opts.lanes ?? process.env.WORLDEDITOR_TILE_LANES ?? 3))
     this.queues = new Map()
   }
 
@@ -41,12 +51,26 @@ export class Tiles {
     return path.join(this.root, layerId, String(z), String(x), `${y}.${key}.json`)
   }
 
+  /**
+   * Run `fn` on the shortest of this layer's lanes.
+   *
+   * Each lane is a promise chain, so a lane never runs two queries at once and the layer never
+   * runs more than `lanes`. Picking the shortest rather than round-robin matters because tiles
+   * cost wildly different amounts — a cached hit returns instantly and a cold motorway tile takes
+   * fifteen seconds, and round-robin would park a fast tile behind a slow one.
+   */
   async #queue(layer, fn) {
-    const prev = this.queues.get(layer) ?? Promise.resolve()
-    const next = prev.then(fn, fn)
-    this.queues.set(
-      layer,
-      next.catch(() => {}),
+    let lanes = this.queues.get(layer)
+    if (!lanes) {
+      lanes = Array.from({ length: this.lanes }, () => ({ tail: Promise.resolve(), depth: 0 }))
+      this.queues.set(layer, lanes)
+    }
+    const lane = lanes.reduce((a, b) => (b.depth < a.depth ? b : a))
+    lane.depth++
+    const next = lane.tail.then(fn, fn)
+    lane.tail = next.then(
+      () => { lane.depth-- },
+      () => { lane.depth-- },
     )
     return next
   }

@@ -21,9 +21,10 @@ import { MapView, type LonLat } from './map'
 import { DefinePanel, zoomFor } from './define'
 import { LogView, RunsPanel } from './runs'
 import { AdoptDialog } from './adopt'
+import { StagePanel } from './stage'
 import { dockWidth } from '../ui/dockwidth'
 
-type Mode = 'explore' | 'index' | 'define' | 'bake'
+type Mode = 'explore' | 'index' | 'define' | 'bake' | 'stage'
 
 const canvas = document.getElementById('map') as HTMLCanvasElement
 const inspector = document.getElementById('panel') as HTMLElement
@@ -31,6 +32,23 @@ const inspector = document.getElementById('panel') as HTMLElement
 // sizes itself from the same custom property, so there is nothing to keep in step
 const aside = inspector.closest('aside') as HTMLElement | null
 if (aside) dockWidth(aside)
+
+/**
+ * The Stage panel: a baked world, dressed and given something to do.
+ *
+ * `bakedWorlds` is what is ACTUALLY on the volume, not every world definition — a level for a
+ * world that was drawn but never baked cannot open, and the server refuses it, so the panel
+ * should not offer it either.
+ */
+const stagePanel = new StagePanel({
+  host: inspector,
+  bakedWorlds: () => worlds.filter((w) => w.baked).map((w) => w.slug),
+  play: (level) => {
+    // the viewer, on that world, with the level applied — `?level=` in main.ts
+    window.open(`/?level=${encodeURIComponent(level.id)}#${level.world}`, '_blank', 'noopener')
+  },
+  onDirty: (d) => setDirty(d, 'level'),
+})
 const readoutEl = document.getElementById('readout') as HTMLElement
 
 let config: Config | null = null
@@ -255,12 +273,15 @@ const define = new DefinePanel({
     await refreshWorlds()
     setMode('bake')
   },
-  onDirty: (d) => {
-    dirty = d
-    dirtyEl.classList.toggle('on', d)
-    dirtyEl.textContent = d ? 'unsaved boundary' : ''
-  },
+  onDirty: (d) => setDirty(d, 'boundary'),
 })
+
+/** One unsaved mark for the whole bar, naming what is unsaved — two panels can both be editing. */
+function setDirty(d: boolean, what = 'changes') {
+  dirty = d
+  dirtyEl.classList.toggle('on', d)
+  dirtyEl.textContent = d ? `unsaved ${what}` : ''
+}
 
 const runsPanel = new RunsPanel({
   host: inspector,
@@ -291,6 +312,7 @@ function buildBar() {
         { value: 'index', label: 'Index', icon: 'map-pin', key: '2' },
         { value: 'define', label: 'Define', icon: 'pencil-square', key: '3' },
         { value: 'bake', label: 'Bake', icon: 'play', key: '4' },
+        { value: 'stage', label: 'Stage', icon: 'flag', key: '5' },
       ],
       onChange: (m) => setMode(m),
     }),
@@ -600,7 +622,9 @@ function setMode(m: Mode) {
 }
 
 function renderPanel() {
-  if (mode === 'index') {
+  if (mode === 'stage') {
+    void stagePanel.load()
+  } else if (mode === 'index') {
     renderIndex(inspector)
   } else if (mode === 'define') {
     const w = worlds.find((x) => x.slug === selected)

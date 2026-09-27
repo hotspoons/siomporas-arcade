@@ -211,6 +211,14 @@ export function textField(o: {
   value: string
   type?: 'text' | 'number'
   step?: number
+  /**
+   * The SHAPE of what goes here, shown while it is empty.
+   *
+   * Not a substitute for the label — a placeholder that disappears the moment you type is a label
+   * you cannot re-read. This is for the cases where the shape is the hard part: a scenario
+   * condition is `<fact> <op> <number>` and nothing about a box called "when" says so.
+   */
+  placeholder?: string
   onChange: (v: string) => void
 }): HTMLElement {
   const wrap = el('label', 'field text')
@@ -221,6 +229,7 @@ export function textField(o: {
   i.type = o.type ?? 'text'
   if (o.step) i.step = String(o.step)
   i.value = o.value
+  if (o.placeholder) i.placeholder = o.placeholder
   i.onchange = () => o.onChange(i.value)
   wrap.append(i)
   return wrap

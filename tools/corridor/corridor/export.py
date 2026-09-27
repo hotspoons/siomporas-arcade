@@ -414,8 +414,21 @@ def _signals(site_dir: Path, frame, ox: float, oy: float, bbox) -> dict:
             continue  # a signal on a way we do not draw (a cycleway, a private service road)
         nodes.append({"x": x, "y": y, "lon": lon, "lat": lat, "ways": ways, "dir": p.get("traffic_signals:direction")})
 
-    # junctions: signal nodes within JUNCTION_R of each other are arms of one crossing
+    # Junctions: signal nodes belong to one crossing if they are close, OR if they sit on the SAME
+    # WAY and are merely near. A divided highway is two carriageways, so its signal nodes are one
+    # per carriageway and as far apart as the median is wide -- 67 m at Route 3 and Johns Hopkins
+    # Road, against a 45 m radius, so they never grouped and each was treated as its own junction.
+    # What ties them together is not distance, it is that the crossing road runs through both.
     JUNCTION_R = 45.0
+    SHARED_WAY_R = 140.0
+    wayset = [{id(w) for w, _ in n["ways"]} for n in nodes]
+
+    def linked(i: int, j: int) -> bool:
+        d = math.hypot(nodes[i]["x"] - nodes[j]["x"], nodes[i]["y"] - nodes[j]["y"])
+        if d <= JUNCTION_R:
+            return True
+        return d <= SHARED_WAY_R and bool(wayset[i] & wayset[j])
+
     unassigned = list(range(len(nodes)))
     groups: list[list[int]] = []
     while unassigned:
@@ -425,52 +438,90 @@ def _signals(site_dir: Path, frame, ox: float, oy: float, bbox) -> dict:
         while changed:
             changed = False
             for i in list(unassigned):
-                if any(math.hypot(nodes[i]["x"] - nodes[j]["x"], nodes[i]["y"] - nodes[j]["y"]) <= JUNCTION_R for j in grp):
+                if any(linked(i, j) for j in grp):
                     grp.append(i)
                     unassigned.remove(i)
                     changed = True
         groups.append(grp)
 
+    # ONE MAST PER APPROACH, NOT ONE PER NODE.
+    #
+    # This used to read `n["ways"][0]` -- one arbitrary way of however many meet at the node -- and
+    # emit a single mast from it. At Route 3 and Johns Hopkins Road that list happens to begin with
+    # Johns Hopkins Road, so the junction got one mast, facing along Johns Hopkins Road, sized for
+    # its two lanes, and Route 3 got nothing at all. That is exactly the "a stop light only on
+    # Johns Hopkins Rd" Rich saw, and the same blind spot gave every mast at every junction the
+    # lane count of whichever arm happened to sort first.
+    #
+    # An approach is a way at the node with road BEHIND it to arrive from, travelled in a
+    # direction the way allows. A through road contributes two, one each way; a road that ends at
+    # the node contributes one; a oneway contributes only its legal direction, which is what stops
+    # a divided highway growing a mast that faces its own traffic from in front.
+    #
+    # `lanes`, and so `arm_m`, now come from the approach's OWN way: the mast over four lanes of
+    # Route 3 is the size of four lanes of Route 3.
     masts = []
     for grp in groups:
-        cx = sum(nodes[i]["x"] for i in grp) / len(grp)
-        cy = sum(nodes[i]["y"] for i in grp) / len(grp)
+        seen: list[tuple[float, float, float]] = []
         for i in grp:
             n = nodes[i]
-            way, vi = n["ways"][0]
-            cs = way["geometry"]["coordinates"]
-            # the arm's own tangent at this vertex, in UTM
-            a = cs[max(0, vi - 1)]
-            b = cs[min(len(cs) - 1, vi + 1)]
-            ax, ay = frame.from_wgs(a[0], a[1])
-            bx, by = frame.from_wgs(b[0], b[1])
-            tx, ty = bx - ax, by - ay
-            tl = math.hypot(tx, ty) or 1.0
-            tx, ty = tx / tl, ty / tl
-            # which way does traffic run? toward the junction centre when there is one, otherwise
-            # the tag, otherwise the tangent as it lies
-            dx, dy = cx - n["x"], cy - n["y"]
-            d = math.hypot(dx, dy)
-            if len(grp) > 1 and d > 3.0:
-                # project the centre direction onto the arm, so the signal stays on its own road
-                sgn = 1.0 if (dx * tx + dy * ty) >= 0 else -1.0
-                trav = (tx * sgn, ty * sgn)
-            else:
-                sgn = -1.0 if n["dir"] == "backward" else 1.0
-                trav = (tx * sgn, ty * sgn)
-            heads = _bearing(-trav[0], -trav[1])  # the heads look back at the traffic
-            lanes = _lanes_of(way["properties"])
-            masts.append({
-                "x": _enu(frame, n["x"], n["y"])[0],
-                "y": _enu(frame, n["x"], n["y"])[1],
-                "z": round(ground(n["x"], n["y"]), 2),
-                "yaw_deg": round(heads, 1),            # compass bearing the heads face
-                "travel_deg": round(_bearing(*trav, conv), 1),
-                "arm_m": round(lanes * 3.66 / 2 + 1.4, 2),
-                "lanes": lanes,
-                "junction": len(grp),
-                "tagged": bool(n["dir"]),
-            })
+            nx, ny = n["x"], n["y"]
+            for way, vi in n["ways"]:
+                cs = way["geometry"]["coordinates"]
+                wp = way["properties"]
+                ow = str(wp.get("oneway", "")).strip().lower()
+                one_fwd = ow in ("yes", "true", "1")
+                one_rev = ow == "-1"
+                # the arm's own tangent at this vertex, in UTM
+                a = cs[max(0, vi - 1)]
+                b = cs[min(len(cs) - 1, vi + 1)]
+                ax, ay = frame.from_wgs(a[0], a[1])
+                bx, by = frame.from_wgs(b[0], b[1])
+                tx, ty = bx - ax, by - ay
+                tl = math.hypot(tx, ty) or 1.0
+                tx, ty = tx / tl, ty / tl
+                for sgn in (1.0, -1.0):
+                    # traffic travelling this way needs road behind it to have come from
+                    if sgn > 0 and vi == 0:
+                        continue
+                    if sgn < 0 and vi >= len(cs) - 1:
+                        continue
+                    if one_fwd and sgn < 0:
+                        continue
+                    if one_rev and sgn > 0:
+                        continue
+                    # a direction tag is about the node's own way, so it is only unambiguous when
+                    # the node HAS one way -- a mid-block pedestrian crossing, which is most of them
+                    if n["dir"] and len(n["ways"]) == 1:
+                        want = -1.0 if n["dir"] == "backward" else 1.0
+                        if sgn != want:
+                            continue
+                    trav = (tx * sgn, ty * sgn)
+                    # the heads look back at the traffic. WITH the grid convergence, like every
+                    # other bearing this file emits: the stop signs were corrected on 2026-09-26
+                    # and the masts beside them were not, so every signal head in every baked site
+                    # was rotated by the convergence -- 1.06 deg at Crofton, 1.73 at the worst site.
+                    heads = _bearing(-trav[0], -trav[1], conv)
+                    # two ways collinear at one node are one road split at the signal, not two
+                    # approaches; emitting both is a mast inside a mast
+                    if any(
+                        math.hypot(sx - nx, sy - ny) <= 12.0 and min(abs(sh - heads), 360.0 - abs(sh - heads)) <= 25.0
+                        for sx, sy, sh in seen
+                    ):
+                        continue
+                    seen.append((nx, ny, heads))
+                    lanes = _lanes_of(wp)
+                    masts.append({
+                        "x": _enu(frame, nx, ny)[0],
+                        "y": _enu(frame, nx, ny)[1],
+                        "z": round(ground(nx, ny), 2),
+                        "yaw_deg": round(heads, 1),            # compass bearing the heads face
+                        "travel_deg": round(_bearing(*trav, conv), 1),
+                        "arm_m": round(lanes * 3.66 / 2 + 1.4, 2),
+                        "lanes": lanes,
+                        "junction": len(grp),
+                        "tagged": bool(n["dir"]),
+                    })
 
     # stop and give-way: a sign on a post, facing the traffic it stops
     signs = []

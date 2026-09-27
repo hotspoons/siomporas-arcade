@@ -62,6 +62,46 @@ def _ident(tags: dict, refs: set[str], names: set[str]) -> str | None:
     return None
 
 
+def _chain_lanes(chain: list[dict], frame: Frame) -> int | None:
+    """
+    How many lanes does this chain have? The count most of its LENGTH actually carries, as a NUMBER.
+
+    A chain is many OSM ways joined end to end, and they disagree: a road crosses a junction where
+    turn pockets make one 40-metre way four lanes wide while the two kilometres either side are
+    two. The old rule kept every distinct value as a sorted set of STRINGS and handed the whole
+    list downstream -- so the viewer, which takes the minimum, drew Annapolis Road (a primary
+    arterial, tagged 1, 2, 3 and 4 along its length) as ONE LANE. The same shape is most of why
+    Rich's Route 3 renders as two.
+
+    Weighted by metres, so a short turn pocket cannot outvote the road it is attached to, and
+    returned as an int so nothing downstream has to guess at the type. None when OSM says nothing,
+    which is the honest answer for 93 % of residential streets and is what the highway-class
+    fallback is for.
+
+    Per-station lane counts, with the taper through the junction, are the real answer and a bigger
+    job; see docs/corridor/LANES-AND-SIGNALS.md. This is the number that is right for most of the
+    road rather than the number that is right for none of it.
+    """
+    metres: dict[int, float] = {}
+    for wy in chain:
+        raw = str(wy.get("tags", {}).get("lanes", "")).split(";")[0].strip()
+        try:
+            n = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if not 1 <= n <= 12:
+            continue
+        pts = [(p["lon"], p["lat"]) for p in wy.get("geometry", [])]
+        if len(pts) < 2:
+            continue
+        x, y = frame.from_wgs(np.array([p[0] for p in pts]), np.array([p[1] for p in pts]))
+        length = float(np.hypot(np.diff(x), np.diff(y)).sum())
+        metres[n] = metres.get(n, 0.0) + length
+    if not metres:
+        return None
+    return max(metres.items(), key=lambda kv: kv[1])[0]
+
+
 def _chain_line(chain: list[dict], frame: Frame) -> LineString:
     coords: list[tuple[float, float]] = []
     for wy in chain:
@@ -136,11 +176,10 @@ def roads(site: dict, frame: Frame, cache: Path) -> dict:
             if ln.length < MIN_CHAIN_M:
                 continue
             tags0 = c[0].get("tags", {})
-            lanes = sorted({str(w2.get("tags", {}).get("lanes")) for w2 in c if w2.get("tags", {}).get("lanes")})
             chains.append({
                 "ident": ident, "ways": c, "line": ln, "length_m": round(float(ln.length), 1),
                 "name": tags0.get("name"), "ref": tags0.get("ref"), "highway": tags0.get("highway"),
-                "lanes": lanes[0] if len(lanes) == 1 else (lanes or None), "oneway": tags0.get("oneway"),
+                "lanes": _chain_lanes(c, frame), "oneway": tags0.get("oneway"),
                 "nodes": {nid for w2 in c for nid in w2["nodes"]},
             })
     if not chains:

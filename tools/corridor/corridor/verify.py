@@ -241,6 +241,62 @@ def verify(site_dir: Path) -> dict:
             elif worst > 60:
                 warnings.append(f"a junction sits {worst:.0f} m from its own road's polyline over {n_j} junctions")
 
+    # 9. a signal mast carries the lane count of the road it actually governs
+    #
+    # `export._signals` used to read `n["ways"][0]` -- one arbitrary way of however many meet at a
+    # signal node -- so a mast at Route 3 and Johns Hopkins Road was built from Johns Hopkins Road:
+    # two lanes, its bearing, and nothing at all on Route 3. Nothing could see that from the
+    # manifest alone, because the mast was internally consistent; it was consistent with the WRONG
+    # ROAD. The manifest already holds every road's polyline and lane count, so the two halves can
+    # be made to agree with each other.
+    #
+    # The road a mast governs is not simply the nearest one -- at a junction two roads cross within
+    # metres -- it is the one running ALONG the mast's own direction of travel. That is what makes
+    # this a check and not a coin toss.
+    masts = ((m.get("signals") or {}).get("masts")) or []
+    branches = m.get("branches") or []
+    if masts and branches:
+        def _seg_bearing(a, b) -> float:
+            return math.degrees(math.atan2(b[0] - a[0], b[1] - a[1])) % 360.0
+
+        wrong: list[str] = []
+        checked = 0
+        for mast in masts:
+            mx, my, want = mast.get("x"), mast.get("y"), mast.get("travel_deg")
+            if not all(isinstance(v, (int, float)) for v in (mx, my, want)):
+                continue
+            best = None  # (bearing error, lanes, name)
+            for br in branches:
+                lanes = br.get("lanes")
+                if not isinstance(lanes, int):
+                    continue
+                cs = br.get("coords") or []
+                for i in range(len(cs) - 1):
+                    a, b = cs[i], cs[i + 1]
+                    if abs(a[0] - mx) > 25 or abs(a[1] - my) > 25:
+                        continue
+                    if math.hypot(a[0] - mx, a[1] - my) > 25:
+                        continue
+                    bear = _seg_bearing(a, b)
+                    # either way along a two-way road: the mast may face with it or against it
+                    err = min(abs((bear - want + 180) % 360 - 180), abs((bear + 180 - want + 180) % 360 - 180))
+                    if best is None or err < best[0]:
+                        best = (err, lanes, br.get("name") or br.get("ref") or br.get("id"))
+            # only where the road is unambiguous: 20 degrees is well inside the angle between any
+            # two arms of a junction and well outside the wobble of a polyline vertex
+            if best and best[0] <= 20.0:
+                checked += 1
+                if best[1] != mast.get("lanes"):
+                    wrong.append(f"{best[2]} is {best[1]} lanes, its mast says {mast.get('lanes')}")
+        if checked >= 4 and len(wrong) > max(1, checked // 10):
+            errors.append(
+                f"{len(wrong)} of {checked} signal masts carry a different lane count from the road they stand on "
+                f"and face along, e.g. {wrong[0]}. That is the signature of a mast built from the wrong arm of its "
+                f"junction (export._signals)."
+            )
+        elif wrong:
+            warnings.append(f"{len(wrong)} of {checked} signal masts disagree with their road's lane count, e.g. {wrong[0]}")
+
     return {"slug": slug, "errors": errors, "warnings": warnings, "ok": not errors}
 
 

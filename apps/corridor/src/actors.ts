@@ -83,6 +83,21 @@ export const Vehicle = { lengthM: f32(), widthM: f32(), speed: f32(), maxSpeed: 
 /** What draws it: an index into the catalog's asset list, and a scale. 0 means nothing yet. */
 export const Visual = { asset: u16(), scale: f32() }
 
+/**
+ * An engine, as SOUND wants it. `rpm` and `pedal` are the only two numbers that decide what a
+ * combustion engine sounds like at any instant, so they are the whole interface: whoever owns the
+ * car writes them, and `enginesound.ts` reads them and makes a noise. Nothing here knows whether
+ * the car is the player's, traffic, or something hostile.
+ *
+ * `voice` is which simulated engine is speaking for this entity, 1-based, 0 for none. It is not a
+ * flag and there will not be many: a full engine-sim voice costs a real slice of a core (measured
+ * — packages/enginesim/scripts/measure.mjs), so the player gets one and traffic will get recorded
+ * samples driven off these same two fields. Writing rpm and pedal for a traffic car is free and
+ * correct whether or not anything is listening, which is why the component is not reserved for
+ * whatever happens to be voiced.
+ */
+export const Engine = { rpm: f32(), pedal: f32(), gear: u8(), voice: u8() }
+
 /* ---- what something is DOING ----------------------------------------------------------------- */
 
 /** Driven by the simulation rather than by a person. Remove it to hand something to a player. */
@@ -161,4 +176,6 @@ export const SETS = {
   threats: [Hostile, Transform],
   /** everything drawable, which is not the same as everything placed */
   drawable: [Transform, Visual],
+  /** anything with a running engine, voiced or not */
+  engines: [Engine, Transform],
 }

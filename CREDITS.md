@@ -24,11 +24,13 @@ tooling that never leaves this machine.
 | [postprocessing](https://github.com/pmndrs/postprocessing) | Zlib | bloom, SMAA and the effect composer behind the modern style |
 | [ez-tree](https://github.com/dgreenheck/ez-tree) | MIT | corridor's procedural near trees |
 | [Heroicons](https://heroicons.com) | MIT | corridor's interface icons. The package itself is dev-only; `scripts/heroicons.mjs` inlines the path data of the ~35 icons used into `apps/corridor/src/ui/icons.ts`, so what ships is that generated file, not the 1,300-icon package |
+| [Engine Simulator](https://github.com/ange-yaghi/engine-sim) — with [piranha](https://github.com/ange-yaghi/piranha) and [simple-2d-constraint-solver](https://github.com/ange-yaghi/simple-2d-constraint-solver) | MIT | the engine you hear in corridor. Compiled to WebAssembly and shipped as `packages/enginesim/wasm/enginesim.wasm` — see below |
 
 | Build-time only | Licence | Reached via |
 |---|---|---|
 | [Vite](https://vite.dev), [Vitest](https://vitest.dev), [TypeScript](https://www.typescriptlang.org), [Playwright](https://playwright.dev), [ws](https://github.com/websockets/ws) | MIT / Apache-2.0 | direct dev dependencies |
 | [oxlint](https://oxc.rs) | MIT | direct dev dependency |
+| [Emscripten](https://emscripten.org), [CMake](https://cmake.org), [Flex](https://github.com/westes/flex), [GNU Bison](https://www.gnu.org/software/bison/) | MIT / BSD-3-Clause / GPL-2.0-or-later | only to rebuild `packages/enginesim/wasm`, which is committed. Bison is GPL but its **output** carries the [Bison exception](https://www.gnu.org/software/bison/manual/html_node/Conditions.html), so the generated Piranha parser does not become GPL |
 | [Wrangler](https://developers.cloudflare.com/workers/wrangler/) and the Cloudflare toolchain | MIT **or** Apache-2.0 (we take Apache-2.0) | direct dev dependency |
 | [lightningcss](https://lightningcss.dev) | MPL-2.0 | Vite's CSS minifier |
 | [sharp](https://sharp.pixelplumbing.com) and its libvips binaries | Apache-2.0 / LGPL-3.0-or-later | Wrangler → Miniflare |
@@ -40,8 +42,41 @@ redistribute it, and minified CSS is output, not a derivative work.
 dev-only dependency of the local Workers emulator — it is never linked into
 anything, never redistributed, and never present in a deployed bundle.
 
-The deployed Worker contains our own code, three.js, postprocessing, ez-tree and
-the inlined Heroicons path data. That is all.
+The deployed Worker contains our own code, three.js, postprocessing, ez-tree,
+the inlined Heroicons path data, and the engine simulator's WebAssembly module.
+
+### The engine simulator
+
+Corridor's engine sound is a real combustion simulation rather than a sample
+set: [Engine Simulator](https://github.com/ange-yaghi/engine-sim) by
+**AngeTheGreat (Ange Yaghi), MIT, Copyright 2022**, compiled to WebAssembly and
+driven from an audio worklet. `packages/enginesim/README.md` explains how and
+why; what matters here is what is in the shipped binary.
+
+`enginesim.wasm` is a single 1.28 MB artifact and everything inside it is MIT,
+Copyright 2022 Ange Yaghi:
+
+| Inside the wasm | What it is |
+|---|---|
+| `engine-sim` core | the simulation and the synthesiser |
+| `simple-2d-constraint-solver` | the rigid-body solver underneath it |
+| `piranha` | the scripting language the engine definitions are written in |
+| `assets/engines/**.mr` | the twenty engine definitions in the picker |
+| `assets/es/**` | the Piranha standard library and the impulse-response library (the `.wav` files the exhaust is convolved against) |
+
+Two notes for anyone auditing this. First, we build against
+[Open Engine Simulator](https://github.com/zabayone/open-engine-sim), the
+community fork, because the original's browser support was never published as
+source; the fork is MIT, preserves upstream's copyright notice, and is pinned by
+commit in `packages/enginesim/scripts/build-wasm.mjs`. Second, `piranha` had no
+`LICENSE` file at the commit the fork pins — it was added to that repository
+later. The file now present on its default branch is MIT, Copyright 2022 Ange
+Yaghi, and GitHub reports the repository as MIT; the same author released the
+rest of the project under the same terms at the same time.
+
+Our own code in `packages/enginesim` — the C API in `native/`, the worklet, the
+gearbox, the bench — is Apache-2.0 like the rest of this repository. We do not
+modify upstream's sources: the build fetches them and links against them.
 
 ## Models and textures
 

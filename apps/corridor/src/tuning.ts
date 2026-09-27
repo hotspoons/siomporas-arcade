@@ -190,6 +190,74 @@ export let ROAD_TAPER_M = 60
  *  lanes, so this is the truthful one); 1 = the asphalt is centred instead, as it was before. */
 export let ROAD_ONEWAY_CENTRE = 0
 
+
+// --- engine sound (packages/enginesim) ---------------------------------------------------------
+//
+// The car you hear. `enginesound.ts` runs Ange Yaghi's combustion simulator in an audio worklet;
+// these are the knobs for the car you are driving RIGHT NOW, as opposed to the bench
+// (`npm run bench -w @apex/enginesim`), which is for voicing an engine as an asset.
+//
+// Two groups, and they are not the same kind of thing. The DRIVETRAIN is ours — corridor's car has
+// a speed and no crankshaft, so a gearbox turns one into the other, and these numbers are the only
+// description of it anywhere. The VOICING belongs to the engine script, which ships its own; the
+// panel's copies are what you get when ENGINE_VOICE_OVERRIDE is on, and their defaults below are
+// the GM LS's own values so that turning it on changes nothing until you move something.
+
+/**
+ * Which engine, as an index into the generated catalog (packages/enginesim/wasm/engines.json,
+ * sorted by path). 14 is the GM LS. An index rather than a name because this panel is sliders and
+ * numbers all the way down — and being able to walk through twenty engines with an arrow key while
+ * driving is most of the point.
+ *
+ * `enginesound.ts` resolves the DEFAULT by path, not by this number, so if the catalog gains an
+ * engine and the indices shift the car still starts on the right one and only the saved value in
+ * someone's browser points somewhere new.
+ */
+export let ENGINE_INDEX = 14
+/** Master gain for the whole engine, after everything else. 0 is silence. */
+export let ENGINE_MASTER = 0.9
+/**
+ * How far away before the engine starts fading, and how fast. Only audible in chase view or when
+ * something else is voiced; in the cockpit the distance is nearly zero.
+ */
+export let ENGINE_FALLOFF = 0.08
+
+/** Gearbox. Ratios are first through sixth; a ratio of 0 takes that gear out of the box. */
+export let ENGINE_GEAR_1 = 3.9
+export let ENGINE_GEAR_2 = 2.35
+export let ENGINE_GEAR_3 = 1.62
+export let ENGINE_GEAR_4 = 1.24
+export let ENGINE_GEAR_5 = 1.0
+export let ENGINE_GEAR_6 = 0.82
+export let ENGINE_FINAL_DRIVE = 3.45
+/** Rolling radius, metres. car.ts spins the wheel meshes at 0.34, so they agree by default. */
+export let ENGINE_TYRE_RADIUS = 0.34
+export let ENGINE_IDLE_RPM = 850
+export let ENGINE_REDLINE_RPM = 7000
+export let ENGINE_SHIFT_UP_RPM = 6500
+export let ENGINE_SHIFT_DOWN_RPM = 2200
+/** How long the clutch is out. Too short and a gearchange is a blip; too long and it is a lull. */
+export let ENGINE_SHIFT_SECONDS = 0.18
+
+/** 1 = the knobs below drive the synthesizer; 0 = whatever the engine script asked for. */
+export let ENGINE_VOICE_OVERRIDE = 0
+export let ENGINE_VOLUME = 0.25
+export let ENGINE_CONVOLUTION = 1
+export let ENGINE_HF_GAIN = 0.01
+export let ENGINE_HF_NOISE = 0.6
+export let ENGINE_HF_CUTOFF = 10000
+export let ENGINE_LF_NOISE = 1
+export let ENGINE_LF_CUTOFF = 2000
+export let ENGINE_LEVELER_TARGET = 30000
+export let ENGINE_LEVELER_MAX_GAIN = 1.9
+export let ENGINE_LEVELER_MIN_GAIN = 0.00001
+/**
+ * Physics steps per second. The first thing to turn down if the audio crackles — it costs more than
+ * the exhaust convolution does. 0 leaves whatever the engine script asked for, which is usually
+ * 10000 and sometimes 40000.
+ */
+export let ENGINE_SIM_HZ = 0
+
 // --- car (stuntin's Tuning.ts defaults and the Kestrel S9 spec; see apps/stuntin/src/sim) -------
 // engine (CarSpec 'kestrel' + longitudinal)
 export let CAR_TOP_SPEED = 82
@@ -996,6 +1064,55 @@ export const TUNE_TABS: TuneTab[] = [
           tune('CAR_ROCKET_CHANCE', () => CAR_ROCKET_CHANCE, (v) => (CAR_ROCKET_CHANCE = v), [0, 1], 0.05, 'share of qualifying launches that fire'),
           tune('CAR_ROCKET_SPEED', () => CAR_ROCKET_SPEED, (v) => (CAR_ROCKET_SPEED = v), [20, 400], 10, 'straight up, m/s'),
           tune('CAR_ROCKET_MIN_SPEED', () => CAR_ROCKET_MIN_SPEED, (v) => (CAR_ROCKET_MIN_SPEED = v), [0.5, 1], 0.02, 'share of top speed needed'),
+        ],
+      },
+    ],
+  },
+  {
+    name: 'engine',
+    sections: [
+      {
+        title: 'which engine',
+        keys: [
+          tune('ENGINE_INDEX', () => ENGINE_INDEX, (v) => (ENGINE_INDEX = v), [0, 19], 1, 'index into the catalog; 14 is the GM LS'),
+          tune('ENGINE_MASTER', () => ENGINE_MASTER, (v) => (ENGINE_MASTER = v), [0, 1], 0.05, 'master gain'),
+          tune('ENGINE_FALLOFF', () => ENGINE_FALLOFF, (v) => (ENGINE_FALLOFF = v), [0, 0.5], 0.01, 'distance fade, per metre beyond 2 m'),
+          tune('ENGINE_SIM_HZ', () => ENGINE_SIM_HZ, (v) => (ENGINE_SIM_HZ = v), [0, 48000], 500, 'physics steps/s; 0 = whatever the script asked for'),
+        ],
+      },
+      {
+        title: 'gearbox (ours: the car has a speed, not a crankshaft)',
+        keys: [
+          tune('ENGINE_GEAR_1', () => ENGINE_GEAR_1, (v) => (ENGINE_GEAR_1 = v), [0, 6], 0.01),
+          tune('ENGINE_GEAR_2', () => ENGINE_GEAR_2, (v) => (ENGINE_GEAR_2 = v), [0, 6], 0.01),
+          tune('ENGINE_GEAR_3', () => ENGINE_GEAR_3, (v) => (ENGINE_GEAR_3 = v), [0, 6], 0.01),
+          tune('ENGINE_GEAR_4', () => ENGINE_GEAR_4, (v) => (ENGINE_GEAR_4 = v), [0, 6], 0.01),
+          tune('ENGINE_GEAR_5', () => ENGINE_GEAR_5, (v) => (ENGINE_GEAR_5 = v), [0, 6], 0.01),
+          tune('ENGINE_GEAR_6', () => ENGINE_GEAR_6, (v) => (ENGINE_GEAR_6 = v), [0, 6], 0.01, '0 takes the gear out of the box'),
+          tune('ENGINE_FINAL_DRIVE', () => ENGINE_FINAL_DRIVE, (v) => (ENGINE_FINAL_DRIVE = v), [1, 6], 0.01),
+          tune('ENGINE_TYRE_RADIUS', () => ENGINE_TYRE_RADIUS, (v) => (ENGINE_TYRE_RADIUS = v), [0.2, 0.6], 0.005, 'm'),
+          tune('ENGINE_IDLE_RPM', () => ENGINE_IDLE_RPM, (v) => (ENGINE_IDLE_RPM = v), [400, 2000], 10, 'the floor; a car held at 0 rpm has stalled'),
+          tune('ENGINE_REDLINE_RPM', () => ENGINE_REDLINE_RPM, (v) => (ENGINE_REDLINE_RPM = v), [3000, 20000], 100),
+          tune('ENGINE_SHIFT_UP_RPM', () => ENGINE_SHIFT_UP_RPM, (v) => (ENGINE_SHIFT_UP_RPM = v), [2000, 20000], 100),
+          tune('ENGINE_SHIFT_DOWN_RPM', () => ENGINE_SHIFT_DOWN_RPM, (v) => (ENGINE_SHIFT_DOWN_RPM = v), [800, 8000], 50, 'keep well below the upshift or it hunts'),
+          tune('ENGINE_SHIFT_SECONDS', () => ENGINE_SHIFT_SECONDS, (v) => (ENGINE_SHIFT_SECONDS = v), [0.05, 1], 0.01, 'clutch out'),
+        ],
+      },
+      {
+        title: 'voicing (the script ships its own; override to use these)',
+        collapsed: true,
+        keys: [
+          tune('ENGINE_VOICE_OVERRIDE', () => ENGINE_VOICE_OVERRIDE, (v) => (ENGINE_VOICE_OVERRIDE = v), [0, 1], 1, '1 = these knobs win'),
+          tune('ENGINE_VOLUME', () => ENGINE_VOLUME, (v) => (ENGINE_VOLUME = v), [0, 1], 0.01, 'above ~0.3 the synthesizer clips in 16-bit'),
+          tune('ENGINE_CONVOLUTION', () => ENGINE_CONVOLUTION, (v) => (ENGINE_CONVOLUTION = v), [0, 1], 0.01, 'exhaust dry/wet; 0 skips the filter entirely'),
+          tune('ENGINE_HF_GAIN', () => ENGINE_HF_GAIN, (v) => (ENGINE_HF_GAIN = v), [0, 0.5], 0.001, 'edge and rasp; past ~0.1 it is hiss'),
+          tune('ENGINE_HF_NOISE', () => ENGINE_HF_NOISE, (v) => (ENGINE_HF_NOISE = v), [0, 2], 0.01, 'jitter: mechanical rather than synthetic'),
+          tune('ENGINE_HF_CUTOFF', () => ENGINE_HF_CUTOFF, (v) => (ENGINE_HF_CUTOFF = v), [100, 20000], 100, 'Hz'),
+          tune('ENGINE_LF_NOISE', () => ENGINE_LF_NOISE, (v) => (ENGINE_LF_NOISE = v), [0, 2], 0.01, 'intake and turbulence'),
+          tune('ENGINE_LF_CUTOFF', () => ENGINE_LF_CUTOFF, (v) => (ENGINE_LF_CUTOFF = v), [20, 8000], 20, 'Hz'),
+          tune('ENGINE_LEVELER_TARGET', () => ENGINE_LEVELER_TARGET, (v) => (ENGINE_LEVELER_TARGET = v), [1000, 32767], 100, 'automatic gain target, 16-bit counts'),
+          tune('ENGINE_LEVELER_MAX_GAIN', () => ENGINE_LEVELER_MAX_GAIN, (v) => (ENGINE_LEVELER_MAX_GAIN = v), [0.01, 8], 0.01, 'lower it to stop idle being pumped up to match full throttle'),
+          tune('ENGINE_LEVELER_MIN_GAIN', () => ENGINE_LEVELER_MIN_GAIN, (v) => (ENGINE_LEVELER_MIN_GAIN = v), [0.000001, 1], 0.000001),
         ],
       },
     ],

@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Engine bench</title>
+    <link rel="stylesheet" href="./bench.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Engine bench</h1>
+      <button id="power" class="power">Start audio</button>
+      <span id="status" class="status">not running</span>
+    </header>
+
+    <main hidden id="main">
+      <section class="panel">
+        <h2>Engine</h2>
+        <select id="engines"></select>
+        <dl id="spec" class="spec"></dl>
+      </section>
+
+      <section class="panel">
+        <h2>Running</h2>
+        <div class="modes">
+          <label><input type="radio" name="mode" value="follow" checked /> Hold an RPM</label>
+          <label><input type="radio" name="mode" value="free" /> Free, on the dyno</label>
+        </div>
+        <div class="knob">
+          <label for="rpm">RPM <output id="rpm-out"></output></label>
+          <input type="range" id="rpm" min="0" max="9000" step="10" value="900" />
+        </div>
+        <div class="knob">
+          <label for="pedal">Throttle <output id="pedal-out"></output></label>
+          <input type="range" id="pedal" min="0" max="1" step="0.01" value="0" />
+        </div>
+        <div class="row">
+          <button id="starter">Starter (hold)</button>
+          <button id="ignition" class="toggle on">Ignition</button>
+        </div>
+        <dl id="telemetry" class="spec"></dl>
+      </section>
+
+      <section class="panel wide">
+        <h2>Voicing</h2>
+        <p class="hint">
+          These are the synthesizer's own parameters — the same ones the desktop application binds
+          to a scroll wheel. They change what you hear immediately and do not recompile anything.
+        </p>
+        <div id="params"></div>
+      </section>
+
+      <section class="panel wide">
+        <h2>Preset</h2>
+        <p class="hint">
+          Only the knobs moved off what the script asked for. Hand this to
+          <code>EngineSim.apply()</code>.
+        </p>
+        <textarea id="preset" rows="8" readonly></textarea>
+        <div class="row">
+          <button id="copy">Copy</button>
+          <button id="reset">Back to the script's own voicing</button>
+        </div>
+      </section>
+
+      <section class="panel wide">
+        <h2>Script</h2>
+        <p class="hint">
+          Piranha source, compiled inside the audio thread. Everything the engine physically is —
+          bore, stroke, firing order, cam profiles, exhaust — is in here rather than in the knobs
+          above. Applying one recompiles, which costs a single audible break.
+        </p>
+        <textarea id="source" rows="12" spellcheck="false" placeholder="Paste an engine .mr here"></textarea>
+        <div class="row">
+          <button id="apply-source">Compile and run</button>
+          <span id="source-error" class="error"></span>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="./bench.ts"></script>
+  </body>
+</html>

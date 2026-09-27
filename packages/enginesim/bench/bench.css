@@ -1,0 +1,134 @@
+/*
+ * The bench's styling.
+ *
+ * The token names and values are corridor's (apps/corridor/src/ui/tokens.css) so the two look like
+ * one product, but this is a COPY of the subset used rather than an import. A package reaching up
+ * into an app for its stylesheet is a dependency in the wrong direction — the package has no idea
+ * which app is embedding it, and the bench has to work when nothing is. If the palette moves, the
+ * dozen values below move with it; that is a cheaper problem than the coupling.
+ *
+ * Fonts are deliberately the system stack. Corridor self-hosts IBM Plex from its own public/, which
+ * a package cannot reach, and a Google Fonts round-trip fails in exactly the places this repo cares
+ * about — off a memory stick, inside a cluster pod.
+ */
+
+:root {
+  --font-body: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s5: 24px;
+  --r1: 4px;
+  --r2: 7px;
+
+  --bg-0: #0d1014;
+  --bg-1: #151a20;
+  --bg-2: #1c232b;
+  --bg-3: #252e38;
+  --line-1: #2b343e;
+  --line-2: #3a4652;
+  --ink-1: #e6ecf2;
+  --ink-2: #a3b1bf;
+  --ink-3: #6b7a89;
+  --accent: #4aa8e8;
+  --accent-ink: #0a1219;
+  --danger: #e2685f;
+
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 0 0 var(--s5);
+  background: var(--bg-0);
+  color: var(--ink-1);
+  font: 13px/1.5 var(--font-body);
+}
+
+header {
+  display: flex;
+  gap: var(--s3);
+  align-items: center;
+  flex-wrap: wrap;
+  padding: var(--s3) var(--s4);
+  border-bottom: 1px solid var(--line-1);
+  background: var(--bg-1);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+h1 { margin: 0; font-size: 15px; font-weight: 600; }
+h2 { margin: 0 0 var(--s3); font-size: 12px; font-weight: 600; color: var(--ink-2);
+     text-transform: uppercase; letter-spacing: 0.06em; }
+
+.status { color: var(--ink-3); font-family: var(--font-mono); font-size: 12px; }
+.error { color: var(--danger); font-family: var(--font-mono); font-size: 12px; }
+
+button, select, textarea, input[type='range'] {
+  font: inherit;
+  color: var(--ink-1);
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r1);
+  padding: var(--s1) var(--s2);
+}
+button { cursor: pointer; }
+button:hover:not(:disabled) { background: var(--bg-3); }
+button:disabled { opacity: 0.5; cursor: default; }
+
+.power { background: var(--accent); color: var(--accent-ink); border-color: transparent;
+         font-weight: 600; padding: var(--s2) var(--s4); }
+.toggle.on { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+
+main {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: var(--s4);
+  padding: var(--s4);
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+.panel {
+  background: var(--bg-1);
+  border: 1px solid var(--line-1);
+  border-radius: var(--r2);
+  padding: var(--s4);
+}
+.panel.wide { grid-column: 1 / -1; }
+
+.row { display: flex; gap: var(--s2); align-items: center; flex-wrap: wrap; margin-top: var(--s3); }
+.modes { display: flex; gap: var(--s4); margin-bottom: var(--s3); color: var(--ink-2); }
+.modes label { display: flex; gap: var(--s1); align-items: center; cursor: pointer; }
+
+select, textarea { width: 100%; }
+textarea { font-family: var(--font-mono); font-size: 12px; resize: vertical; }
+
+.knob { margin-bottom: var(--s4); }
+.knob label { display: flex; justify-content: space-between; gap: var(--s2);
+              color: var(--ink-2); font-size: 12px; margin-bottom: var(--s1); }
+.knob output { font-family: var(--font-mono); color: var(--ink-1); }
+.knob input[type='range'] { width: 100%; padding: 0; background: none; border: none; accent-color: var(--accent); }
+
+/* Ten knobs in one column is a scroll; at any real width they read as a grid. */
+#params { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 0 var(--s5); }
+
+.hint { margin: var(--s1) 0 0; color: var(--ink-3); font-size: 11px; line-height: 1.45; }
+
+.spec { display: grid; grid-template-columns: auto 1fr; gap: var(--s1) var(--s3);
+        margin: var(--s3) 0 0; font-size: 12px; }
+.spec dt { color: var(--ink-3); }
+.spec dd { margin: 0; font-family: var(--font-mono); }
+
+code { font-family: var(--font-mono); color: var(--ink-2); }
+
+@media (max-width: 600px) {
+  main { padding: var(--s3); gap: var(--s3); }
+  header { padding: var(--s3); }
+}

@@ -1,0 +1,12 @@
+{
+  "upstream": {
+    "repo": "https://github.com/zabayone/open-engine-sim.git",
+    "commit": "9abd876e8521a39ad3b423bf03a4b2325d4f8338"
+  },
+  "optimise": [
+    "-O3",
+    "-msimd128",
+    "-ffast-math"
+  ],
+  "builtAt": "2026-09-27"
+}

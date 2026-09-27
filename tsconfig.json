@@ -5,6 +5,9 @@
       "path": "./packages/engine"
     },
     {
+      "path": "./packages/enginesim"
+    },
+    {
       "path": "./apps/conduit"
     },
     {

@@ -4,6 +4,9 @@ import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { buildSite, describe, type Site } from './scene'
 import { Car, type CarInput } from './car'
+import { EngineSound, spawnPlayerEngine } from './enginesound'
+import { ActorWorld } from './actorworld'
+import { Transform } from './actors'
 import { retro } from './retro'
 import { SiteSearch } from './search'
 
@@ -204,6 +207,22 @@ installShellKeys(() => ui.drawer)
 let dragging = false, lastX = 0, lastY = 0, downAt = 0
 // drive mode: a real car (stuntin dynamics) on the corridor strip, chase camera behind it
 const drive = { on: false, cockpit: false, yaw: 0, pitch: 0, car: null as Car | null, input: { throttle: 0, brake: 0, steer: 0, handbrake: false } as CarInput, steerKey: 0 }
+
+/*
+ * THE ENGINE YOU CAN HEAR.
+ *
+ * `enginesound.ts` runs Ange Yaghi's combustion simulator in an audio worklet and reads the two
+ * numbers that decide what an engine sounds like off an `Engine` component. Corridor's car has a
+ * speed and no crankshaft, so a gearbox in the package turns one into the other.
+ *
+ * The world here is a real bitECS world with exactly one entity in it. That is not ceremony for its
+ * own sake: it is the join the traffic model already wants, so a car the player takes over keeps
+ * making the right noise without anything being rewritten, and a traffic car can be voiced by
+ * writing the same two fields.
+ */
+const actors = new ActorWorld()
+const engineSound = new EngineSound()
+let playerEngine = 0
 let fly: FlyControls | null = null
 // the games ride on the viewer: ?game=squishy starts one when the site lands, G toggles it
 let game: SquishyHunt | null = null
@@ -683,6 +702,16 @@ function setWalk(on: boolean) {
 }
 function setDrive(on: boolean) {
   drive.on = on
+  if (on) {
+    // Entering drive mode is always a click or a keypress, which is the gesture the browser wants
+    // before it will let an AudioContext make a sound. Starting anywhere else gets a context that
+    // is created already suspended and never recovers.
+    if (!playerEngine) {
+      playerEngine = spawnPlayerEngine(actors.world)
+      engineSound.setVoiced(playerEngine)
+    }
+    void engineSound.start()
+  }
   if (on && fly?.walk) fly.setWalk(false)
   orbit.enabled = !on
   ui.setDriveMode(on)
@@ -1078,6 +1107,9 @@ function applySeasonKnob() {
  * hook called `retune()` alone and the season knob silently did nothing under it.
  */
 function onTuneChange() {
+  // The engine tab is live: the gearbox and the voicing take effect while you are driving, and
+  // swapping ENGINE_INDEX recompiles in the audio thread. Cheap when nothing engine-shaped moved.
+  engineSound.applyTuning()
   applySeasonKnob()
   applySky(season) // the WEATHER knob lives here: sky, fog, sun, grip and what is falling
   site?.retune()
@@ -1460,6 +1492,16 @@ function frame() {
     for (let acc = dt; acc > 0; acc -= 1 / 120) car.tick(Math.min(acc, 1 / 120), drive.input)
     drive.input.throttle = padT
     drive.input.brake = padB
+    // Site metres — x east, y north, z up — not three's axes. The conversion happens here, once.
+    if (playerEngine) {
+      Transform.x[playerEngine] = car.pos.x
+      Transform.y[playerEngine] = -car.pos.z
+      Transform.z[playerEngine] = car.pos.y
+      engineSound.syncFromCar(playerEngine, car, drive.input.throttle, dt)
+      engineSound.update(actors.world, {
+        x: camera.position.x, y: -camera.position.z, z: camera.position.y,
+      })
+    }
     // chase camera: behind and above, looking over the bonnet; drag adds a look-around yaw
     if (drive.cockpit) {
       // cockpit: eye at the driver's head, looking down the nose (stuntin's C view); drive.yaw/pitch look around.

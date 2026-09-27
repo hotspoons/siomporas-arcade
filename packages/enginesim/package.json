@@ -1,0 +1,19 @@
+{
+  "name": "@apex/enginesim",
+  "private": true,
+  "version": "0.0.0",
+  "license": "Apache-2.0",
+  "type": "module",
+  "description": "Ange Yaghi's engine simulator as a Web Audio node: a real combustion simulation voicing the car, plus the knobs to tune it.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./*": "./src/*.ts",
+    "./wasm/*": "./wasm/*"
+  },
+  "scripts": {
+    "build:wasm": "node scripts/build-wasm.mjs",
+    "bundle:worklet": "node scripts/bundle-worklet.mjs",
+    "measure": "node scripts/measure.mjs",
+    "bench": "vite --config bench/vite.config.ts"
+  }
+}

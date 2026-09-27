@@ -21,6 +21,25 @@ bitECS — https://github.com/NateTheGreatt/bitECS — Mozilla Public License 2.
   We do not modify bitECS. If that ever changes, the modified files must be
   published under MPL-2.0 and this notice updated to say where.
 
+Engine Simulator — https://github.com/ange-yaghi/engine-sim — MIT
+Copyright 2022 AngeTheGreat (Ange Yaghi)
+
+  The combustion engine you hear in corridor, compiled to WebAssembly and
+  shipped as packages/enginesim/wasm/enginesim.wasm. With it, under the same
+  MIT licence and the same copyright: piranha (the scripting language),
+  simple-2d-constraint-solver (the rigid-body solver), and the engine
+  definitions and impulse-response library embedded in that binary.
+
+  We build against Open Engine Simulator (https://github.com/zabayone/open-engine-sim),
+  the community fork, which is MIT and preserves the upstream notice. We do not
+  modify any of it: the build fetches the pinned sources and links against them.
+  Our own code in packages/enginesim — the C API, the audio worklet, the
+  gearbox, the bench — is Apache-2.0.
+
+  MIT requires the copyright notice and permission text to travel with the
+  software. They do: packages/enginesim/wasm/LICENSE-engine-sim.txt ships beside
+  the binary and is served with it, and CREDITS.md says what is inside.
+
 Third-party data and models carry their own terms and are credited in the
 viewer's attribution panel (apps/corridor/src/attribution.ts) — OpenStreetMap
 (ODbL), Macrostrat (CC BY 4.0), USGS 3DEP, USDA NAIP, LANDFIRE, the Yale Bright

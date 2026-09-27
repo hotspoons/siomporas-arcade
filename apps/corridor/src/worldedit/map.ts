@@ -217,10 +217,42 @@ export class MapView {
     return 2 ** this.zoom
   }
 
-  toScreen(p: LonLat): [number, number] {
-    const [wx, wy] = project(p)
+  /**
+   * The view's own transform, recomputed once per paint rather than once per vertex.
+   *
+   * `toScreen` projected `this.centre` on every call — a `sin`, a `log` and two allocations — and
+   * a country view now puts well over a hundred thousand vertices through it, first to decide what
+   * is on screen and then to draw it. The centre and the zoom cannot change in the middle of a
+   * paint, so this is the same arithmetic done once instead of two hundred thousand times.
+   */
+  private vx = 0
+  private vy = 0
+  private vs = 1
+
+  private syncView() {
     const [cx, cy] = project(this.centre)
-    return [this.w / 2 + (wx - cx) * this.scale, this.h / 2 + (wy - cy) * this.scale]
+    this.vs = this.scale
+    this.vx = this.w / 2 - cx * this.vs
+    this.vy = this.h / 2 - cy * this.vs
+  }
+
+  toScreen(p: LonLat): [number, number] {
+    // safe outside a paint too: callers that project a single point (a click, the scale bar) do
+    // not care about the cost, and the transform is only stale if the view moved since the frame
+    this.syncView()
+    const [wx, wy] = project(p)
+    return [this.vx + wx * this.vs, this.vy + wy * this.vs]
+  }
+
+  /** a screen point back to lon/lat against the synced transform — for the viewport's own box */
+  private unprojectScreen(x: number, y: number): LonLat {
+    return unproject((x - this.vx) / this.vs, (y - this.vy) / this.vs)
+  }
+
+  /** the hot path, inside a paint: lon/lat straight to screen against the synced transform */
+  private xyOf(lon: number, lat: number): [number, number] {
+    const [wx, wy] = project({ lon, lat })
+    return [this.vx + wx * this.vs, this.vy + wy * this.vs]
   }
 
   toLonLat(x: number, y: number): LonLat {
@@ -380,8 +412,8 @@ export class MapView {
     let bestD = 36
     for (const w of this.ways) {
       for (let i = 1; i < w.line.length; i++) {
-        const [ax, ay] = this.toScreen({ lon: w.line[i - 1][0], lat: w.line[i - 1][1] })
-        const [bx, by] = this.toScreen({ lon: w.line[i][0], lat: w.line[i][1] })
+        const [ax, ay] = this.xyOf(w.line[i - 1][0], w.line[i - 1][1])
+        const [bx, by] = this.xyOf(w.line[i][0], w.line[i][1])
         const d = segDist2(x, y, ax, ay, bx, by)
         if (d < bestD) {
           bestD = d
@@ -402,7 +434,14 @@ export class MapView {
     })
   }
 
+  /** how long the last paint took, and what it drew — the status panel and the probes read it */
+  lastPaint = { ms: 0, majorHeld: 0, majorDrawn: 0, refs: 0 }
+
   private paint() {
+    const t0 = performance.now()
+    // the view cannot change in the middle of a paint, so project its centre once rather than
+    // once per vertex — see `syncView`
+    this.syncView()
     const g = this.ctx
     g.setTransform(this.dpr, 0, 0, this.dpr, 0, 0)
     const css = getComputedStyle(document.documentElement)
@@ -419,6 +458,7 @@ export class MapView {
     this.paintPlaces(g)
     this.paintPins(g)
     this.paintScale(g)
+    this.lastPaint = { ms: +(performance.now() - t0).toFixed(2), majorHeld: this.majorHeld, majorDrawn: this.majorDrawn, refs: this.refsDrawn }
   }
 
   /** A degree grid, so a featureless area is not a blank screen and a pan has something to hold. */
@@ -496,6 +536,9 @@ export class MapView {
 
   /** how many `major` ways survived the viewport cull last paint — the status panel reads it */
   majorDrawn = 0
+  /** how many it held before the cull, and how many shields it placed */
+  majorHeld = 0
+  refsDrawn = 0
 
   /**
    * The motorway skeleton. Drawn under the detail roads so a town reads over its bypass.
@@ -513,24 +556,44 @@ export class MapView {
   private paintMajor(g: CanvasRenderingContext2D) {
     const lines = this.itemsOf<MajorLine>('major')
     if (!lines.length) return
-    // a margin, so a line that crosses the view is kept even when both ends are outside it
-    const m = 64
+    /*
+     * CULLED IN LON/LAT, WITH NO PROJECTION AT ALL.
+     *
+     * The first version of this projected every vertex of every way to find its screen box — a
+     * `sin` and a `log` each, a hundred thousand times a frame, to then throw most of them away.
+     * Web Mercator is monotonic in both longitude and latitude, so a lon/lat box test gives
+     * exactly the same answer for nothing: unproject the VIEW's two corners once, and compare.
+     *
+     * The box is memoised on the way. A tile's geometry never changes after it lands, so every
+     * paint after the first does no box work at all — which is what panning is.
+     */
+    const nw = this.unprojectScreen(-64, -64)
+    const se = this.unprojectScreen(this.w + 64, this.h + 64)
+    const west = Math.min(nw.lon, se.lon)
+    const east = Math.max(nw.lon, se.lon)
+    const south = Math.min(nw.lat, se.lat)
+    const north = Math.max(nw.lat, se.lat)
     const byClass = new Map<string, MajorLine[]>()
     let kept = 0
     for (const w of lines) {
       if (w.line.length < 2) continue
-      let minX = Infinity
-      let minY = Infinity
-      let maxX = -Infinity
-      let maxY = -Infinity
-      for (const p of w.line) {
-        const [x, y] = this.toScreen({ lon: p[0], lat: p[1] })
-        if (x < minX) minX = x
-        if (x > maxX) maxX = x
-        if (y < minY) minY = y
-        if (y > maxY) maxY = y
+      const cache = w as MajorLine & { _bb?: [number, number, number, number] }
+      let b = cache._bb
+      if (!b) {
+        let x0 = Infinity
+        let y0 = Infinity
+        let x1 = -Infinity
+        let y1 = -Infinity
+        for (const p of w.line) {
+          if (p[0] < x0) x0 = p[0]
+          if (p[0] > x1) x1 = p[0]
+          if (p[1] < y0) y0 = p[1]
+          if (p[1] > y1) y1 = p[1]
+        }
+        b = [x0, y0, x1, y1]
+        cache._bb = b
       }
-      if (maxX < -m || minX > this.w + m || maxY < -m || minY > this.h + m) continue
+      if (b[2] < west || b[0] > east || b[3] < south || b[1] > north) continue
       kept++
       const k = w.highway ?? 'road'
       const arr = byClass.get(k)
@@ -538,6 +601,7 @@ export class MapView {
       else byClass.set(k, [w])
     }
     this.majorDrawn = kept
+    this.majorHeld = lines.length
     g.save()
     g.lineCap = 'round'
     g.lineJoin = 'round'
@@ -550,7 +614,7 @@ export class MapView {
       g.beginPath()
       for (const w of byClass.get(k)!) {
         for (let i = 0; i < w.line.length; i++) {
-          const [x, y] = this.toScreen({ lon: w.line[i][0], lat: w.line[i][1] })
+          const [x, y] = this.xyOf(w.line[i][0], w.line[i][1])
           if (i === 0) g.moveTo(x, y)
           else g.lineTo(x, y)
         }
@@ -615,6 +679,7 @@ export class MapView {
       g.fillText(ref, x, y)
       placed.add(ref)
     }
+    this.refsDrawn = placed.size
     g.restore()
   }
 
@@ -688,7 +753,7 @@ export class MapView {
         g.globalAlpha = on || w.id === this.hovered ? 1 : 0.85
         g.beginPath()
         for (let i = 0; i < w.line.length; i++) {
-          const [x, y] = this.toScreen({ lon: w.line[i][0], lat: w.line[i][1] })
+          const [x, y] = this.xyOf(w.line[i][0], w.line[i][1])
           if (i === 0) g.moveTo(x, y)
           else g.lineTo(x, y)
         }
@@ -711,8 +776,8 @@ export class MapView {
       let bi = -1
       let bl = 0
       for (let i = 1; i < w.line.length; i++) {
-        const [ax, ay] = this.toScreen({ lon: w.line[i - 1][0], lat: w.line[i - 1][1] })
-        const [bx, by] = this.toScreen({ lon: w.line[i][0], lat: w.line[i][1] })
+        const [ax, ay] = this.xyOf(w.line[i - 1][0], w.line[i - 1][1])
+        const [bx, by] = this.xyOf(w.line[i][0], w.line[i][1])
         const l = Math.hypot(bx - ax, by - ay)
         if (l > bl) {
           bl = l
@@ -720,8 +785,8 @@ export class MapView {
         }
       }
       if (bi < 0 || bl < 60 || (placed.get(w.name) ?? 0) > 0) continue
-      const [ax, ay] = this.toScreen({ lon: w.line[bi - 1][0], lat: w.line[bi - 1][1] })
-      const [bx, by] = this.toScreen({ lon: w.line[bi][0], lat: w.line[bi][1] })
+      const [ax, ay] = this.xyOf(w.line[bi - 1][0], w.line[bi - 1][1])
+      const [bx, by] = this.xyOf(w.line[bi][0], w.line[bi][1])
       const mx = (ax + bx) / 2
       const my = (ay + by) / 2
       if (mx < 0 || mx > this.w || my < 0 || my > this.h) continue

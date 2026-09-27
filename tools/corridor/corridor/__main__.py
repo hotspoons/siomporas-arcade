@@ -312,7 +312,10 @@ def cmd_flora(a: argparse.Namespace) -> None:
         site = json.loads((d / "site.json").read_text())
         frame = geo.Frame.at(site["lon"], site["lat"])
         t0 = time.time()
-        f = flora_mod.along_spine(None, frame, site, shape(site["corridor"]), CACHE, d)
+        # `region` is the WORLD on a site baked with world: true, and is the road corridor on
+        # every other site -- so vegetation covers whatever that site decided its world is, and
+        # trees stop being a function of how near a road you are (PLAN-OPEN-WORLD.md).
+        f = flora_mod.along_spine(None, frame, site, shape(site.get("region") or site["corridor"]), CACHE, d)
         top = ", ".join(f"{c['name']} {100 * c['share']:.0f}%" for c in f["evt"]["classes"][:3])
         sp = ", ".join(f"{f['canopy']['ref'][s['key']]['common']} {100 * s['weight']:.0f}%" for s in f["canopy"]["species"][:4])
         print(f"{d.name:24s} {time.time() - t0:5.0f}s  {len(f['evt']['classes'])} classes; {top}")

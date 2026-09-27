@@ -150,6 +150,13 @@ export interface Branch {
 }
 
 export interface Manifest {
+  /**
+   * True when this site was baked as a WORLD: imagery, lidar and vegetation cover the whole
+   * rectangle the network spans, not a buffer around each road. Where it is false, there is no
+   * data past the verge and distance-from-a-road is a fair stand-in for "is there anything here".
+   * Where it is true, it is not, and the ground itself decides. See PLAN-OPEN-WORLD.md.
+   */
+  world?: boolean
   slug: string
   ident: Record<string, string> | null
   /**

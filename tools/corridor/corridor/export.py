@@ -1184,6 +1184,11 @@ def export_site(site_dir: Path, web: Path | None = None) -> dict:
     out = {
         "slug": site["slug"],
         "ident": site.get("ident"),
+        # A WORLD, not a corridor: imagery, lidar and vegetation cover the whole rectangle the
+        # network spans rather than a 150 m buffer around each road, so the viewer can stop
+        # treating distance-from-a-road as a stand-in for "is there any data here".
+        # See docs/corridor/PLAN-OPEN-WORLD.md.
+        "world": bool(site.get("world")),
         # the geodetic frame, so the viewer can place this site on the ellipsoid without a
         # projection library — see docs/corridor/FRAME.md
         "frame": frame.manifest_frame(),

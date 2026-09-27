@@ -1754,6 +1754,8 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     // NOT a child of `trees`. It was, and so the trees checkbox turned off all ground cover with
     // them — you could not hide the trees to look at the grass, which is most of what looking at
     // grass involves. Its own group, its own layer toggle.
+    // a world bake covers everything, so the ground decides where grass grows (PLAN-OPEN-WORLD.md)
+    grass.world = manifest.world === true
     group.add(grass.mesh)
     grassRef = grass
 

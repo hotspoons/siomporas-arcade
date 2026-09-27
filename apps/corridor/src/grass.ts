@@ -168,6 +168,8 @@ export class Grass {
    * spots where grass is growing through the road."
    */
   private blockedAt: ((x: number, z: number) => boolean) | undefined
+  /** this site was baked as a world, so the ground decides where grass grows, not the road */
+  world = false
   /** the last uTime pushed to the shaders; a tile born now grows in from here */
   private now = 0
   private pavedHalf: number
@@ -809,7 +811,21 @@ export class Grass {
         const wx = cx + 0.5 * cell, wz = cz + 0.5 * cell
         const roadD = this.roadDistance(wx, wz)
         if (roadD < this.pavedHalf + 0.3) continue // pavement
-        if (roadD > this.pavedHalf + T.GRASS_MAX_FROM_ROAD) continue // spend the budget on the verge, where the eye is
+        /*
+         * "Spend the budget on the verge, where the eye is" -- true of a CORRIDOR, false of a
+         * WORLD.
+         *
+         * On a corridor bake there is no imagery and no vegetation mask past the road buffer, so
+         * distance-from-a-road is a fair stand-in for "is there any data here" and this keeps the
+         * blades where they can be judged. On a world bake the data covers everything, and the
+         * same line means grass stops twenty-four metres from the tarmac and you walk out of it
+         * into a bare field. Rich, 2026-09-27: "proximity to a road shouldn't really dictate tree
+         * mappings and ground textures."
+         *
+         * The budget is not at risk either way: the ring radius and the LOD rings are already
+         * eye-relative and the blade count is capped, so a bigger area is spread, not added.
+         */
+        if (!this.world && roadD > this.pavedHalf + T.GRASS_MAX_FROM_ROAD) continue
         if (this.canopyAt(wx, -wz) > 3.0) continue // a real crown
         // slope rejection: a cut face or a steep embankment is rock and scrub, not turf
         const gy = this.groundAt(wx, -wz)

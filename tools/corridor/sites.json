@@ -452,5 +452,20 @@
   "heading_deg": null,
   "note": "MD 450 (Defense Hwy) between Patuxent River Rd and Staples Corner (MD 424); `road` pins the snap, the point is only a hint",
   "road": "MD 450"
+ },
+ {
+  "slug": "crofton-world",
+  "kind": "network",
+  "region": "crofton-crownsville",
+  "primary": "Crofton Parkway",
+  "all_streets": true,
+  "lat": 39.004,
+  "lon": -76.683,
+  "radius_m": 3400,
+  "photos": [],
+  "heading_deg": null,
+  "note": "the Crofton triangle as a WORLD rather than a corridor: every drivable street, and imagery/lidar/vegetation over the whole rectangle the network spans rather than a 150 m buffer around each road. radius_m raised from 2600 so the US 3 x Johns Hopkins junction is inside the road graph. See docs/corridor/PLAN-OPEN-WORLD.md",
+  "world": true,
+  "world_margin_m": 400
  }
 ]

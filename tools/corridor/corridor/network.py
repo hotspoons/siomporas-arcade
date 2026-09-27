@@ -35,7 +35,7 @@ from pathlib import Path
 
 import numpy as np
 import shapely
-from shapely.geometry import LineString, MultiLineString, Point, mapping
+from shapely.geometry import LineString, MultiLineString, Point, box as shp_box, mapping
 from shapely.ops import linemerge, unary_union
 
 from . import osm
@@ -298,15 +298,36 @@ def write_vectors(site: dict, frame: Frame, R: dict, out: Path, half_width: floa
     lon, lat = frame.to_wgs(xs, ys)
     (out / "spine.geojson").write_text(json.dumps({"type": "FeatureCollection", "features": [{"type": "Feature", "properties": {"name": prim["ident"], "photo_s": round(photo_s, 1)}, "geometry": {"type": "LineString", "coordinates": np.column_stack([lon, lat]).round(7).tolist()}}]}))
     corridor = unary_union([c["line"].buffer(half_width, cap_style="flat") for c in R["chains"]])
-    bbox = snap_bbox(corridor.bounds)
+    #
+    # THE CORRIDOR IS NOT THE WORLD.
+    #
+    # `corridor` means "near a road" and keeps meaning it: the lidar profile along each chain, the
+    # near-road point accounting, structures and clearances all want it. But clipping the IMAGERY,
+    # the LIDAR and the VEGETATION to it is what makes trees stop 150 m from the tarmac -- Rich,
+    # 2026-09-27: "proximity to a road shouldn't really dictate tree mappings and ground textures
+    # -- let's build the full world out for a given network."
+    #
+    # So `region` is the world: the rectangle the network spans plus a margin, so you do not drive
+    # to a hard edge the moment you leave the outermost street. A rectangle rather than the
+    # network's convex hull because a hull gives a world ragged diagonal edges for nothing, and
+    # measured on crofton-triangle the bbox is only 1.29x the hull.
+    #
+    # Opt-in per site. On a dense suburban network the corridor already covers half the bbox and
+    # this costs about 2x; on one highway through open country it would cost far more, and there
+    # the corridor idea is still right. See docs/corridor/PLAN-OPEN-WORLD.md.
+    #
+    world = bool(site.get("world"))
+    margin = float(site.get("world_margin_m", 300.0))
+    bbox = snap_bbox(corridor.buffer(margin).bounds if world else corridor.bounds)
+    region = shp_box(*bbox) if world else corridor
     ident = {"ref": prim["ref"]} if prim["ref"] else {"name": prim["ident"]}
-    site_json = {**site, "frame": {"epsg": frame.epsg, "origin": frame.origin}, "bbox_utm": bbox, "corridor": mapping(corridor), "ident": ident}
+    site_json = {**site, "frame": {"epsg": frame.epsg, "origin": frame.origin}, "bbox_utm": bbox, "corridor": mapping(corridor), "region": mapping(region), "world": world, "ident": ident}
     (out / "site.json").write_text(json.dumps(site_json))
-    feats = osm.features(corridor.convex_hull, frame, cache)
+    feats = osm.features(region.convex_hull if world else corridor.convex_hull, frame, cache)
     (out / "osm.geojson").write_text(json.dumps(feats))
     cross = osm.crossings(line, feats, ident, frame, segs)
     (out / "crossings.json").write_text(json.dumps(cross, indent=1))
-    return {"corridor": corridor, "bbox": bbox, "segments": segs, "crossings": cross, "features": len(feats["features"]), "ident": ident, "photo_s": photo_s}
+    return {"corridor": corridor, "region": region, "world": world, "bbox": bbox, "segments": segs, "crossings": cross, "features": len(feats["features"]), "ident": ident, "photo_s": photo_s}
 
 
 def summary(R: dict) -> str:
@@ -341,9 +362,13 @@ def fetch_site(site: dict, half_width: float, lidar_half_width: float, skip: set
     dead_ends(R["chains"], frame, cache / "overpass", float(site.get("radius_m", 9000)), site["lat"], site["lon"])
     V = write_vectors(site, frame, R, out, half_width, cache / "overpass")
     corridor = V["corridor"]
+    region = V["region"]
+    world = V["world"]
     bbox = V["bbox"]
-    lidar_corridor = unary_union([c["line"].buffer(lidar_half_width, cap_style="flat") for c in R["chains"]])
-    print(f"  osm     {V['features']} features, {len(V['crossings'])} crossings on the primary; bbox {(bbox[2] - bbox[0]) / 1000:.1f} × {(bbox[3] - bbox[1]) / 1000:.1f} km, corridor {corridor.area / 1e6:.1f} km²", flush=True)
+    # The imagery, the lidar and the vegetation cover the WORLD; the road buffer is still what
+    # "near a road" means for everything that really is road-local (see write_vectors).
+    lidar_corridor = region if world else unary_union([c["line"].buffer(lidar_half_width, cap_style="flat") for c in R["chains"]])
+    print(f"  osm     {V['features']} features, {len(V['crossings'])} crossings on the primary; bbox {(bbox[2] - bbox[0]) / 1000:.1f} × {(bbox[3] - bbox[1]) / 1000:.1f} km, corridor {corridor.area / 1e6:.1f} km²" + (f", WORLD {region.area / 1e6:.1f} km² ({region.area / max(corridor.area, 1):.2f}x)" if world else ""), flush=True)
     prim = R["primary"]
     tiled = bool(site.get("tiled")) or max(bbox[2] - bbox[0], bbox[3] - bbox[1]) > 6000.0
     manifest["tiled"] = tiled
@@ -359,7 +384,7 @@ def fetch_site(site: dict, half_width: float, lidar_half_width: float, skip: set
             from . import network_tiles
 
             # the file keeps its name (several readers key off it); the resolution is NAIP_RES_M
-            manifest["naip"] = network_tiles.naip_tiled(frame, bbox, corridor, out / "naip_1m.tif", cache, res=network_tiles.NAIP_RES_M)
+            manifest["naip"] = network_tiles.naip_tiled(frame, bbox, region, out / "naip_1m.tif", cache, res=network_tiles.NAIP_RES_M)
         else:
             manifest["naip"] = naip.fetch_naip(frame, bbox, out / "naip.tif", cache)
     if "horizon" not in skip:

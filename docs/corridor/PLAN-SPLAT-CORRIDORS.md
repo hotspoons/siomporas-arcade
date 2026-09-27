@@ -167,7 +167,7 @@ force here: a splat tile is hundreds of thousands of alpha-blended gaussians. So
 a dither on the procedural side and an opacity ramp on the splat side, and there is never a blend
 order to get wrong.
 
-### 3.3 The trap: `logarithmicDepthBuffer`
+### 3.3 The trap: `logarithmicDepthBuffer` — ANSWERED, 2026-09-27
 
 `main.ts` builds its renderer with `logarithmicDepthBuffer: true`. A splat renderer that writes
 ordinary depth will z-fight everything in the scene. This has to be settled before any of the rest
@@ -181,8 +181,20 @@ is worth building:
 - The fallback is to turn log depth **off** and measure what it was buying (it predates the
   horizon-cut work; the near/far split may make it unnecessary now).
 
-`probes/corridor-splatdepth.mjs`: a splat plane behind a known building must be occluded, and in
-front of it must occlude — asserted on pixels, not on hope.
+**It works.** Measured on `apps/corridor/splatdepth.html`, a page with three objects and no time:
+a renderer built exactly as the viewer builds it (`logarithmicDepthBuffer: true`, confirmed on
+`capabilities`), an opaque wall 10 m out, and a ball of gaussians moved in front of it and behind
+it. With nothing in the way the centre pixel is the wall; with the splat in front it is the splat;
+with the splat behind the wall it is the wall again. Spark's splat shaders carry three's
+`logdepthbuf_*` chunks, which is why. `probes/corridor-splatdepth.mjs` asserts all three.
+
+**The trap underneath the trap: Spark sorts asynchronously.** A single `render()` after moving a
+splat can legitimately draw nothing, which reads exactly like "splats do not work here". Several
+frames have to go by. Two evenings of confusing measurements came from this, and from the other
+half of the same mistake: an earlier version of that probe differenced two frames of the LIVING
+viewer, where the clock advances the sun, the grass sways, a stream animates, the lazy build pump
+is still building and the canopy shade is easing after a camera move — all of which are differences
+that are not splats. **A question about depth does not need a world.**
 
 ---
 
@@ -293,7 +305,7 @@ Worth stating plainly, because it decides the whole layering:
 
 | # | step | done when |
 |---|---|---|
-| 1 | Spark in the scene, one static tile, log-depth settled | `corridor-splatdepth.mjs` passes |
+| 1 | ~~Spark in the scene, one static tile, log-depth settled~~ **done 2026-09-27** | `corridor-splatdepth.mjs` passes |
 | 2 | frame transform + `splats.json` + attach | a synthetic world lands where it was put |
 | 3 | the fitter (ICP against the road network) + its numbers in the file | `corridor-splatfit.mjs` passes |
 | 4 | tile streaming with a byte budget | `corridor-splatstream.mjs` passes |

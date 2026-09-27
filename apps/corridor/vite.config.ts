@@ -13,6 +13,9 @@ const here = fileURLToPath(new URL('.', import.meta.url))
 const roots: Record<string, string> = {
   '/sites/': resolve(here, '../../tools/corridor/data/sites'),
   '/photos/': resolve(here, '../../ext/ref-driving/small'),
+  // gaussian splat worlds: a capture is not part of a site's bake, it is attached to one
+  // (docs/corridor/PLAN-SPLAT-CORRIDORS.md)
+  '/splats/': resolve(here, '../../tools/corridor/data/splats'),
 }
 const types: Record<string, string> = {
   '.json': 'application/json',
@@ -21,6 +24,9 @@ const types: Record<string, string> = {
   '.geojson': 'application/geo+json',
   '.tif': 'image/tiff',
   '.laz': 'application/vnd.laszip',
+  '.ply': 'application/octet-stream',
+  '.spz': 'application/octet-stream',
+  '.ksplat': 'application/octet-stream',
 }
 
 function serveBake(): Plugin {

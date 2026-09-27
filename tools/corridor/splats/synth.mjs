@@ -40,6 +40,9 @@ const ORIGIN_KM = Number(opt('origin-km', 1.5))  // how far the capture's own an
 const CELL_M = Number(opt('cell-m', 200))
 const STEP = Number(opt('step', 0.6))            // along-road spacing of the ribbon's gaussians
 const DEPTH_TEST = flag('depth-test')
+// only the depth-test sheets, with no ribbon and no hedges: a probe that measures "what did the
+// splats change in this frame" cannot tell a sheet from a ribbon if both are in view
+const SHEETS_ONLY = flag('sheets-only')
 
 const site = JSON.parse(readFileSync(`tools/corridor/data/sites/${slug}/web/manifest.json`, 'utf8'))
 const anchor = site.frame?.anchor
@@ -85,7 +88,7 @@ const at = (s) => {
 const splats = []
 const push = (e, n, u, col, r, a = 0.95) => splats.push({ e, n, u, col, r, a })
 const s0 = Math.max(0, photoS - LENGTH / 2), s1 = Math.min(total, photoS + LENGTH / 2)
-for (let s = s0; s <= s1; s += STEP) {
+for (let s = s0; s <= s1 && !SHEETS_ONLY; s += STEP) {
   const { p, normal } = at(s)
   const [nx, ny] = normal
   // a painted ribbon just over the road: the eye can see at a glance whether the world landed right
@@ -115,9 +118,12 @@ if (DEPTH_TEST) {
     }
     sheets.push({ name, s, up, colour: col, splats: splats.length - first, centre: [p[0], p[1], p[2] + up + 3] })
   }
-  mk('ahead', photoS + 30, 1.0, [1, 0.1, 0.1])     // in front of the camera: must be visible
-  mk('behind', photoS - 30, 1.0, [0.1, 0.1, 1])    // behind it: must not be
-  mk('buried', photoS + 60, -26, [0.1, 1, 0.1])    // under the ground: must be occluded by the terrain
+  // FAR APART. The probe measures "what did the splats change in this frame", so two sheets within
+  // sight of each other cannot be told apart: looking at the buried one from 35 m away had the
+  // one in front of it still in frame, and the depth test measured that instead.
+  mk('ahead', photoS + 30, 1.0, [1, 0.1, 0.1])      // in front of the camera: must be visible
+  mk('behind', photoS - 300, 1.0, [0.1, 0.1, 1])    // behind it: must not be
+  mk('buried', photoS + 330, -26, [0.1, 1, 0.1])    // under the ground: must be occluded by the terrain
 }
 
 // ---- tiles ---------------------------------------------------------------------------------------
@@ -198,7 +204,7 @@ writeFileSync(join(out, 'world.json'), JSON.stringify({
   corridor_pruned: false,
   corridor: 'corridor.json',
   corridor_passes: 1,
-  synthetic: { site: slug, length_m: LENGTH, origin_km: ORIGIN_KM, depth_test: DEPTH_TEST, sheets, camera_height_m: 1.9 },
+  synthetic: { site: slug, length_m: LENGTH, origin_km: ORIGIN_KM, depth_test: DEPTH_TEST, sheets_only: SHEETS_ONLY, sheets, camera_height_m: 1.9 },
   tiles,
 }, null, 1))
 console.log(JSON.stringify({

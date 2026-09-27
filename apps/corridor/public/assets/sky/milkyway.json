@@ -1,0 +1,17 @@
+{
+ "width": 2048,
+ "height": 1024,
+ "levels": 5,
+ "rings": 202,
+ "projection": "equirectangular, x = (RA + 180)/360, y = (90 - Dec)/180",
+ "blurTexels": 6,
+ "asset": "milkyway.png",
+ "bytes": 144146,
+ "source": "Milky Way isophotes (d3-celestial)",
+ "sourceUrl": "https://raw.githubusercontent.com/ofrohn/d3-celestial/master/data/mw.json",
+ "sourceSha256": "aee221a7a0e879418e685de00c3e68fbdfac5667c0a8aab74929ef9cf4aab4fb",
+ "credit": "Milky Way outline: d3-celestial (Olaf Frohn, BSD 3-clause)",
+ "note": "Five nested brightness contours as GeoJSON in equatorial degrees, rasterised here into an equirectangular luminance map. VECTOR rather than a photograph on purpose: the sky in this renderer is stylised, and a Brunier panorama would look like a photograph pasted behind a drawing. Contours give a soft band that sits with the stars.",
+ "fetched": "2026-09-27T14:04:46.722Z",
+ "tool": "tools/sky/ingest.mjs"
+}

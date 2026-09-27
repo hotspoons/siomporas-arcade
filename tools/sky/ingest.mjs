@@ -126,23 +126,56 @@ function fillFeature(acc, w, h, rings, add) {
       ys.push(lat)
     }
     /*
-     * EACH RING IS SAMPLED EXACTLY ONCE PER MERIDIAN.
+     * EVERY WRAP OF EVERY SEGMENT COUNTS, and the reason is worth keeping.
      *
-     * One of the Milky Way's contours spans 361.2 degrees after unwrapping — it overlaps itself
-     * slightly at the seam — so near that seam a column matched TWO wrap offsets, contributed two
-     * crossings instead of one, and flipped the parity for everything inside. That is what put a
-     * bright patch on the north galactic pole and a hole at the anticentre.
+     * One of these contours spans 361.3 degrees after unwrapping: it is a closed curve that winds
+     * once round the sky and, near its own start, wanders 1.2 degrees further west before coming
+     * back. Over that 1.2-degree stripe the curve genuinely crosses the meridian one more time,
+     * and an earlier version of this function -- which resolved each column to a single position
+     * in a 360-degree window, on the theory that the overlap was double counting -- threw that
+     * real crossing away and flipped the parity of everything above it. It drew a band from the
+     * galactic plane to the north celestial pole, 34 columns wide at longitude 77.5 to 83.3,
+     * which is exactly where that ring's seam falls.
      *
-     * `base` is where this ring's own 360-degree window starts, so every column resolves to one
-     * position on the ring and one crossing.
+     * The intervals below are half-open, so a ring that closes on itself at some meridian counts
+     * there once rather than twice.
      */
     const base = Math.min(...xs)
-    for (let i = 0, j = xs.length - 1; i < xs.length; j = i++) {
+    /*
+     * A RING THAT CIRCLES THE SKY IS CLOSED AT THE POLE.
+     *
+     * The Milky Way's faintest contour is not a loop: its two edges each run right round the
+     * celestial sphere, winding -360 degrees, and in longitude/latitude they never close. Scanning
+     * a meridian then finds an ODD number of crossings from each, so pairing them from the south
+     * pole upward fills the complement of the band wherever the count goes wrong -- measured as a
+     * horizontal stripe right across declination +30, a second across -60, and a HOLE at the
+     * galactic anticentre where the band actually is.
+     *
+     * Closing each wrapping ring over the north pole fixes it by construction: the cap adds
+     * exactly one crossing per meridian, the count becomes even everywhere, and the pole itself is
+     * covered by both edges of the band, which cancel under even-odd. That is why the north
+     * galactic pole comes out black rather than merely dark.
+     */
+    let wind = 0
+    for (let i = 1; i < xs.length; i++) wind += xs[i] - xs[i - 1]
+    const wraps = Math.abs(wind) > 180
+    if (wraps) {
+      const s = segs.length
+      segs.push([base, 90, base + 360, 90])
+      for (let c = 0; c < w; c++) buckets[c].push(s)
+    }
+    // ...and the edge that would otherwise close it -- last vertex back to first -- is DROPPED.
+    // Unwrapped, that edge spans the whole 360 degrees, so it laid a crossing on every meridian at
+    // one almost-constant latitude: measured at declination +34.7 for one edge of the band and
+    // +26.5 for the other, which is exactly the horizontal stripe across the finished map and
+    // exactly the gap that swallowed the anticentre between them.
+    let j = wraps ? 0 : xs.length - 1
+    for (let i = wraps ? 1 : 0; i < xs.length; j = i++) {
       const x0 = xs[j]
       const x1 = xs[i]
       if (x0 === x1) continue
       const s = segs.length
-      segs.push([x0, ys[j], x1, ys[i], base])
+      segs.push([x0, ys[j], x1, ys[i]])
       // every column this segment spans, at every wrap that lands it on the canvas
       const lo = Math.min(x0, x1)
       const hi = Math.max(x0, x1)
@@ -161,20 +194,25 @@ function fillFeature(acc, w, h, rings, add) {
     const lonBase = (c + 0.5) * (360 / w) - 180
     ys.length = 0
     for (const si of buckets[c]) {
-      const [x0, y0, x1, y1, base] = segs[si]
+      const [x0, y0, x1, y1] = segs[si]
       const lo = Math.min(x0, x1)
       const hi = Math.max(x0, x1)
-      // the single position on THIS ring that this meridian corresponds to
-      const lon = base + (((lonBase - base) % 360) + 360) % 360
-      if (lon < lo || lon >= hi) continue
-      ys.push(y0 + ((lon - x0) / (x1 - x0)) * (y1 - y0))
+      // this meridian at every wrap: a segment may be a turn of the sky away from the canvas
+      for (let k = -2; k <= 2; k++) {
+        const lon = lonBase + 360 * k
+        if (lon < lo || lon >= hi) continue
+        ys.push(y0 + ((lon - x0) / (x1 - x0)) * (y1 - y0))
+      }
     }
     if (ys.length < 2) continue
     ys.sort((a, b) => a - b)
     for (let k = 0; k + 1 < ys.length; k += 2) {
-      // declination to row: north at the top
-      const r0 = Math.max(0, Math.floor(((90 - ys[k + 1]) / 180) * h))
-      const r1 = Math.min(h - 1, Math.ceil(((90 - ys[k]) / 180) * h))
+      // Rows whose CENTRE lies between the two crossings, north at the top. Testing the centre
+      // rather than the edges is what makes a pair that spans no sky draw nothing -- the pole cap
+      // above closes every wrapping ring at declination 90 and would otherwise paint the whole top
+      // row of the map, a bright ring around the north celestial pole.
+      const r0 = Math.max(0, Math.ceil(((90 - ys[k + 1]) / 180) * h - 0.5))
+      const r1 = Math.min(h - 1, Math.floor(((90 - ys[k]) / 180) * h - 0.5))
       for (let r = r0; r <= r1; r++) acc[r * w + c] += add
     }
   }
@@ -317,48 +355,44 @@ const SOURCES = [
         const y = Math.min(g.h - 1, Math.max(0, Math.round(((90 - decDeg) / 180) * g.h)))
         return g.data[y * g.w + x]
       }
-      const onPlane = []
-      for (let l = 0; l < 360; l += 15) {
-        const e = galacticToEquatorial(l, 0)
-        onPlane.push(at(e.raDeg, e.decDeg))
-      }
-      // THE POLES THEMSELVES, not merely high latitudes. Sampling b = +/-70 and +/-80 read 5 and
-      // passed, while the north galactic pole itself read 38 — the check was looking next to the
-      // fault rather than at it.
-      const atPoles = []
-      for (const b of [90, -90, 88, -88, 80, -80, 70, -70]) {
-        for (const l of [0, 90, 180, 270]) {
-          const e = galacticToEquatorial(l, b)
-          atPoles.push(at(e.raDeg, e.decDeg))
-        }
+      const atGal = (l, b) => {
+        const e = galacticToEquatorial(l, b)
+        return at(e.raDeg, e.decDeg)
       }
       const mean = (a) => a.reduce((p, q) => p + q, 0) / a.length
+      // 1. the plane is bright and the centre in Sagittarius brightest of all
+      const onPlane = []
+      for (let l = 0; l < 360; l += 15) onPlane.push(atGal(l, 0))
       const plane = mean(onPlane)
-      // the MAXIMUM off the plane, not the mean: the fault is a bright patch somewhere, and a
-      // mean over the whole high-latitude sky averages one away against the dark half
+      const centre = atGal(0, 0)
+      // 2. THE POLES THEMSELVES, not merely high latitudes. Sampling b = +/-70 and +/-80 read 5
+      //    and passed while the north galactic pole itself read 38: the check was looking next to
+      //    the fault rather than at it. The maximum, not the mean, for the same reason -- the
+      //    fault is a bright patch somewhere and a mean averages one away against the dark half.
+      const atPoles = []
+      for (const b of [90, -90, 88, -88, 80, -80, 70, -70]) for (const l of [0, 90, 180, 270]) atPoles.push(atGal(l, b))
       const poles = Math.max(...atPoles)
-      const centre = at(galacticToEquatorial(0, 0).raDeg, galacticToEquatorial(0, 0).decDeg)
-      /*
-       * STRICT ON PURPOSE, AND CURRENTLY RED.
-       *
-       * Measured 2026-09-27: plane 74, centre 137, south galactic pole 0, Coma 0 — all correct —
-       * but the NORTH galactic pole reads 38 where it should be near 0, and the anticentre reads
-       * 1 where the band should be faintly visible. So the rasteriser is right about the galaxy
-       * and wrong about two places, and a map with a bright patch on the galactic pole is worse
-       * than no map.
-       *
-       * The check is left strict and the asset is therefore NOT WRITTEN. Loosening it to let the
-       * build pass would be choosing not to know. Ruled out already: flattening polygons across a
-       * level (filling per polygon changes nothing, since each level is one polygon), and a
-       * contour that spans 361.2 degrees being sampled twice near the seam (sampling each ring
-       * once per meridian changes nothing — byte-identical output).
-       */
-      const ok = plane > 60 && centre > plane && poles < 20 && plane > poles * 3
-      return {
-        ok,
-        why: `plane ${plane.toFixed(0)}, brightest off-plane ${poles.toFixed(0)}, centre ${centre}`,
-        detail: `galactic plane mean ${plane.toFixed(0)}/255, brightest off-plane ${poles.toFixed(0)}, centre ${centre}`,
+      // 3. THE BAND GOES ALL THE WAY ROUND. The fault this replaced was a HOLE -- a stripe of sky
+      //    where the fill's parity had flipped, which read 1 at the galactic anticentre where the
+      //    band belongs. A mean over the plane survives a hole; a minimum does not. Ten degrees
+      //    either side, because these are brightness contours and toward the anticentre the band
+      //    is faint, narrow and sits a few degrees south of b = 0.
+      const round = []
+      for (let l = 0; l < 360; l += 5) {
+        let m = 0
+        for (let b = -10; b <= 10; b++) m = Math.max(m, atGal(l, b))
+        round.push(m)
       }
+      const thinnest = Math.min(...round)
+      // 4. NOTHING AT THE CELESTIAL POLES. Not an astronomical claim -- a rasteriser one. Closing
+      //    a ring that circles the sky has to happen over a pole, and every way of getting that
+      //    wrong paints the top or bottom row of an equirectangular map. It is the cheapest
+      //    possible test for the whole family of wrap faults, and it caught two of them.
+      let capRow = 0
+      for (let x = 0; x < g.w; x++) capRow = Math.max(capRow, g.data[x], g.data[(g.h - 1) * g.w + x])
+      const ok = plane > 60 && centre > plane && poles < 20 && plane > poles * 3 && thinnest > 20 && capRow === 0
+      const why = `plane ${plane.toFixed(0)}, centre ${centre}, brightest off-plane ${poles}, faintest along the band ${thinnest}, celestial-pole rows ${capRow}`
+      return { ok, why, detail: why }
     },
     /** what `--prove` feeds it: every contour flattened onto the celestial equator */
     break: (text) => {

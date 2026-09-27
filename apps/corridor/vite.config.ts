@@ -16,6 +16,10 @@ const roots: Record<string, string> = {
   // gaussian splat worlds: a capture is not part of a site's bake, it is attached to one
   // (docs/corridor/PLAN-SPLAT-CORRIDORS.md)
   '/splats/': resolve(here, '../../tools/corridor/data/splats'),
+  // levels: a world dressed and given something to do. The world editor writes these to its
+  // volume; in dev they are beside the sites, and without this line a fetch for one gets the
+  // SPA fallback -- HTTP 200 and index.html -- which is not a missing file, it is a worse one.
+  '/levels/': resolve(here, '../../tools/corridor/data/levels'),
 }
 const types: Record<string, string> = {
   '.json': 'application/json',

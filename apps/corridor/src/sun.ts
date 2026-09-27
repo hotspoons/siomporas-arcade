@@ -139,22 +139,30 @@ export class WorldClock {
   private realMs = Date.now()
 
   /**
-   * Advance by a real-time delta (seconds).
+   * Advance the clock. Called once a frame; `dt` is accepted and IGNORED, and that is the point.
    *
-   * What actually moves is the OFFSET, and only by the part of the advance that is not real time:
-   * at rate 1 the offset does not change at all, so a tab left in the background for an hour --
-   * where rAF does not fire and the delta comes back as one huge number -- still reads the correct
-   * time when you look at it again, with no catching up to do.
+   * What moves is the OFFSET, and only by the part of the advance that is not real time. At rate 1
+   * the offset does not change at all, so a tab left in the background for an hour — where rAF
+   * does not fire and a frame delta comes back as one huge number — still reads the correct time
+   * with no catching up to do.
    *
-   * The accelerated part IS capped. A 43-second stall was measured on a software rasteriser in
-   * September; at 3600x, applying it whole is a fortnight of sun in a single frame. Slowing down
-   * (rate below 1, paused included) is never capped, or a paused world left in a background tab
-   * comes back with the sun moved on.
+   * THE REAL PART COMES FROM THE WALL CLOCK, NOT FROM THE FRAME DELTA, and this is the fix for a
+   * bug that looked like arithmetic. A frame's `dt` and `Date.now()` disagree by a millisecond or
+   * so every frame; the offset was moved by `dt` while `ms` is read against `Date.now()`, so a
+   * clock at rate 0 — paused — drifted a few milliseconds a frame. A level that opened at 19:20
+   * read 19:19 a second later, because `parts()` reports whole minutes and the instant had slipped
+   * just below the boundary. Using the same clock for both halves makes rate 1 and rate 0 exact by
+   * construction rather than by luck.
+   *
+   * Speeding up is still capped: a 43-second stall measured on a software rasteriser, at 3600x,
+   * is a fortnight of sun in one frame. Slowing down is never capped, or a paused world left in a
+   * background tab comes back with the sun moved on.
    */
-  tick(dt: number) {
+  tick(_dt?: number) {
     const now = Date.now()
-    const k = this.rate - 1
-    this.offsetMs += (k >= 0 ? Math.min(dt, 0.25) : dt) * k * 1000
+    const wall = Math.max(0, now - this.realMs)
+    const advance = (this.rate > 1 ? Math.min(wall, 250) : wall) * this.rate
+    this.offsetMs += advance - wall
     this.realMs = now
   }
 
@@ -203,6 +211,13 @@ export class WorldClock {
       const has = Date.parse(`${p.date}T${p.time}:00Z`)
       guess += want - has
     }
-    this.ms = guess
+    /*
+     * SNAP TO THE MINUTE. `parts()` reports whole minutes, so each correction pass above can only
+     * measure the error to a minute, and the instant it converges on can sit a fraction of a
+     * second BELOW the target — 19:20 asked for, 19:19 reported, because truncation takes
+     * 19:19:59.6 down rather than up. Every zone offset is a whole number of minutes, so aligning
+     * the instant to a UTC minute boundary puts the local clock exactly on the minute asked for.
+     */
+    this.ms = Math.round(guess / 60000) * 60000
   }
 }

@@ -14,6 +14,8 @@ import { MiniMap, siteProjector } from './minimap'
 import { Sky } from './sky'
 import { Stars } from './stars'
 import { MilkyWay } from './milkyway'
+import { applyLevel, loadLevel, type LevelPlacement } from './level'
+import { buildPlacements, loadCatalog } from './placements'
 import { timeControls } from './ui/timecontrols'
 import { celestialToWorld, julianDate, moonPosition, radecToVec } from './celestial'
 import { SquishyHunt } from './games/squishy'
@@ -395,6 +397,9 @@ async function loadSite(slug: string) {
     splatFade: (v: number | null) => {
       splatFadeOverride = v
     },
+    /** the level in force, if `?level=` named one: what a scenario and a simulation will read */
+    level: () => level,
+    openLevel: (id: string) => openLevel(id),
     /** the rasterised seam: its size and how much of the site a capture covers */
     splatCover: () => (splatCover ? { ...splatCover, cellM: T.SPLAT_MASK_CELL_M, fade: splatMask.uSplatFade.value } : null),
     /** what the canopy overhead is doing to the ambient light, and the numbers behind it */
@@ -532,7 +537,60 @@ async function loadSite(slug: string) {
     onTuneChange()
     toast(`${slug}: ${tuned.applied} site knobs applied${tuned.kept.length ? `, ${tuned.kept.length} left as you set them (${tuned.kept.slice(0, 3).join(', ')})` : ''}${tuned.unknown.length ? `, ${tuned.unknown.length} unknown (${tuned.unknown.slice(0, 3).join(', ')})` : ''}`, 'ok', 4000)
   } else clearStatus()
+
+  /*
+   * THE LEVEL, LAST. `?level=<id>` dresses the world that was just loaded: its time and weather,
+   * the assets in it, the captures over it. Last because everything it sets is a setting ON the
+   * site, so it has to win over the site's own tuning.json rather than be overwritten by it.
+   */
+  const wantLevel = new URLSearchParams(location.search).get('level')
+  if (wantLevel) await openLevel(wantLevel)
 }
+
+/** Apply a level to the site on screen, and say plainly what did not apply. */
+async function openLevel(id: string) {
+  const lvl = await loadLevel(id)
+  if (!lvl) return toast(`no level "${id}"`, 'warn', 4000)
+  const report = await applyLevel(lvl, {
+    world: site?.manifest.slug ?? '',
+    setTimeLocal: (date, time) => {
+      worldClock.setLocal(siteZone(), date, time)
+      applySky(season, false)
+    },
+    setWeather: (w) => setWeatherSelection(w as Weather),
+    setSeason: (x) => { if (SEASONS.includes(x as Season)) setSeason(x as Season) },
+    place: async (items: LevelPlacement[]) => {
+      if (!site) return 0
+      const catalog = await loadCatalog()
+      // the level's own frame: [x, y] in site metres, y north, which is what placements.json uses
+      const mapped = items.map((p) => ({ asset: p.asset, x: p.at[0], y: p.at[1], z: p.at.length > 2 ? p.at[2] : undefined, yaw: p.yaw ?? 0 }))
+      const g = await buildPlacements(mapped as never, catalog, (x: number, z: number) => site?.groundAt(x, z) ?? 0)
+      site.layers.placements.add(...g.children.slice())
+      return mapped.filter((m) => catalog.has(m.asset)).length
+    },
+    attachSplats: async (names) => {
+      const anchor = site?.manifest.frame?.anchor
+      if (!anchor) return 0
+      let n = 0
+      for (const att of await attachmentsFor(site!.manifest.slug)) {
+        if (!names.includes(att.id)) continue
+        if (splats.some((f) => f.id === att.id)) { n++; continue }
+        const f = await SplatField.attach(att, anchor, renderer)
+        if (!f) continue
+        scene.add(f.group)
+        splats.push(f)
+        n++
+      }
+      return n
+    },
+    say: (m) => toast(m, 'ok', 4000),
+  })
+  level = lvl
+  for (const s of report.skipped) toast(`${lvl.id}: ${s.part} — ${s.why}`, 'warn', 6000)
+}
+
+/** the level in force, for the probe surface and for whatever runs simulations later */
+let level: Awaited<ReturnType<typeof loadLevel>> = null
 
 // ---------------------------------------------------------------------------------------------
 // layers

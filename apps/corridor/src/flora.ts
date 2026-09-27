@@ -14,6 +14,8 @@
 // Everything in here is a read of that. No region, state or species is named in this file: a
 // corridor anywhere in the United States comes out of the same code, and the only thing that
 // changes is the numbers LANDFIRE and FIA return for it.
+import { Anchor } from '@apex/engine/geo/wgs84'
+import { RasterFrame } from '@apex/engine/geo/raster'
 import { decodeIndex, loadImage, type Layer, type Manifest } from './site'
 
 export interface FloraSpecies {
@@ -109,10 +111,14 @@ export class Flora {
   private mixes: SpeciesWeight[][]
   readonly siteMix: SpeciesWeight[]
 
-  constructor(block: FloraBlock, grid: Uint8Array | null, layer: Layer | null) {
+  /** the raster's true placement, from its control lattice; null on a bake without one */
+  private frame: RasterFrame | null = null
+
+  constructor(block: FloraBlock, grid: Uint8Array | null, layer: Layer | null, frame: RasterFrame | null = null) {
     this.block = block
     this.grid = grid
     this.layer = layer
+    this.frame = frame
     this.classes = block.evt.classes
     const ref = block.canopy.ref
     const resolve = (m: { key: string; weight: number }[] | undefined): SpeciesWeight[] =>
@@ -122,33 +128,81 @@ export class Flora {
   }
 
   /**
-   * The EVT class at a point in site metres, or null outside the corridor / with no grid.
+   * The EVT class at a point in site metres (x east, y north), or null outside the corridor.
    *
-   * KNOWN WRONG BY UP TO ~158 m AT THE SITE CORNERS, and left that way deliberately for now.
+   * A RASTER CANNOT BE SAMPLED FROM ITS BOUNDING BOX, and this used to try.
    *
-   * This indexes the grid by interpolating `layer.bbox`, and a raster cannot be placed OR sampled
-   * from its bounding box — `packages/engine/src/geo/raster.ts` opens by saying so. The EVT grid's
-   * own axes are UTM zone 18N, 1.06 degrees off the ENU true north these coordinates are in, so
-   * the bbox is the axis-aligned box AROUND a rotated rectangle: zero error at the site centre,
-   * growing linearly outwards. It is the same fault that drew the minimap's photograph askew
-   * (fixed 2026-09-27, `probes/corridor-minimap-registration.mjs`).
+   * The EVT grid's own axes are UTM zone 18N, 1.06 degrees off the ENU true north these
+   * coordinates are in, so `layer.bbox` is the axis-aligned box AROUND a rotated rectangle:
+   * zero error at the site centre, growing linearly to about 158 m at the corners. It is the
+   * same fault that drew the minimap's photograph askew (both 2026-09-27). A tree near the edge
+   * of the site was picking its neighbour's species mix.
    *
-   * The fix is `RasterFrame(layer, anchor).indexAt(east, north)`, which the terrain already uses.
-   * It is not applied here yet because the row order has to be established first: the control
-   * lattice runs SOUTH to north while an image's rows run north to south, and getting that
-   * backwards flips every species mix on the site without looking obviously wrong. The cost of
-   * the bug meanwhile is a tree picking its neighbour's mix near the edges of the site, which is
-   * why it is not urgent.
+   * THE ROW ORDER IS THE PART THAT HAD TO BE MEASURED, because getting it backwards flips every
+   * species mix on the site and still looks plausible. Reading the two ends suggested they
+   * disagreed — the control lattice runs south to north, so `RasterFrame`'s `v` should be 0 at
+   * the SOUTH, while the PNG is written unflipped from a north-up GeoTIFF, so its row 0 should be
+   * the NORTH — which argued for `1 - v`. That argument is WRONG, and the grid itself says so.
+   *
+   * `probes/corridor-flora-registration.mjs` scores all four conventions against a fact neither
+   * end of the argument can bend: the bake writes 255 for every pixel outside the corridor
+   * polygon, and the corridor polygon is the road network. Measured on crofton-triangle:
+   *
+   *     v, no flip   100% of spine points inside the corridor, 20% of points 1.5 km away
+   *     1 - v         91%                                       38%
+   *     1 - v, 1 - u  92%                                       33%
+   *     v, 1 - u      72%                                       42%
+   *
+   * So `v` straight through. Somewhere between the GeoTIFF and the PNG the row order is already
+   * reconciled; the point is that it is not worth arguing about when the data will answer.
    */
   at(x: number, y: number): FloraClass | null {
     if (!this.grid || !this.layer) return null
-    const [xmin, ymin, xmax, ymax] = this.layer.bbox
-    if (x < xmin || x >= xmax || y < ymin || y >= ymax) return null
     const [w, h] = this.layer.size
-    const c = Math.floor(((x - xmin) / (xmax - xmin)) * w)
-    const r = Math.floor(((ymax - y) / (ymax - ymin)) * h)
+    let c: number
+    let r: number
+    if (this.frame) {
+      // `toGrid` CLAMPS, so it cannot answer "is this inside?" — `contains` is the honest test,
+      // and without it every point outside the raster silently reads the nearest edge pixel.
+      if (!this.frame.contains(x, y, this.layer.res ?? 30)) return null
+      const g = this.frame.toGrid(x, y)
+      c = Math.min(w - 1, Math.max(0, Math.floor(g[0] * w)))
+      r = Math.min(h - 1, Math.max(0, Math.floor(g[1] * h)))
+    } else {
+      // a bake with no control lattice: the bounding box is all there is
+      const [xmin, ymin, xmax, ymax] = this.layer.bbox
+      if (x < xmin || x >= xmax || y < ymin || y >= ymax) return null
+      c = Math.floor(((x - xmin) / (xmax - xmin)) * w)
+      r = Math.floor(((ymax - y) / (ymax - ymin)) * h)
+    }
     const i = this.grid[r * w + c]
     return i === 255 || i >= this.classes.length ? null : this.classes[i]
+  }
+
+  /** the class stored at a grid index, or null for 255 — for probes comparing conventions */
+  classOfCell(i: number | null): FloraClass | null {
+    if (i === null || !this.grid || i < 0 || i >= this.grid.length) return null
+    const k = this.grid[i]
+    return k === 255 || k >= this.classes.length ? null : this.classes[k]
+  }
+
+  /**
+   * Which grid cell a point lands in, by the lattice (the truth) or by the bounding box (what it
+   * used to do). For probes: the two disagreeing is the measure of the fault that was fixed.
+   */
+  cellAt(x: number, y: number, viaBbox = false, flipV = false, flipU = false): number | null {
+    if (!this.layer) return null
+    const [w, h] = this.layer.size
+    if (!viaBbox && this.frame) {
+      if (!this.frame.contains(x, y, this.layer.res ?? 30)) return null
+      const g = this.frame.toGrid(x, y)
+      const u = flipU ? 1 - g[0] : g[0]
+      const v = flipV ? 1 - g[1] : g[1]
+      return Math.min(h - 1, Math.max(0, Math.floor(v * h))) * w + Math.min(w - 1, Math.max(0, Math.floor(u * w)))
+    }
+    const [xmin, ymin, xmax, ymax] = this.layer.bbox
+    if (x < xmin || x >= xmax || y < ymin || y >= ymax) return null
+    return Math.floor(((ymax - y) / (ymax - ymin)) * h) * w + Math.floor(((x - xmin) / (xmax - xmin)) * w)
   }
 
   /** The species mix at a point: the pixel's class where there is one, the whole site otherwise. */
@@ -239,5 +293,7 @@ export async function loadFlora(manifest: Manifest): Promise<Flora | null> {
       grid = null // the class table alone still gives a site-wide mix
     }
   }
-  return new Flora(block, grid, layer)
+  const a = manifest.frame?.anchor
+  const frame = a && layer?.geo && layer?.size ? new RasterFrame({ size: layer.size, geo: layer.geo }, new Anchor(a.lon, a.lat, a.h ?? 0)) : null
+  return new Flora(block, grid, layer, frame)
 }

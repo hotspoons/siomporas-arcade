@@ -531,9 +531,10 @@ export class Car {
       b.target.getWorldPosition(t)
       each.push({ pos: p, dir: t.sub(p).normalize() })
     }
-    // what the beam is really doing, knob included — retroreflection must follow the light that
-    // is actually there, or turning the headlights off leaves the paint still answering them
-    return { each, on: this.lightsOn * (T.HEADLIGHT > 0 ? 1 : 0) }
+    // What the beam is really doing, knob included — retroreflection must follow the light that
+    // is actually there, or turning the headlights down leaves the paint still answering them at
+    // full strength. Scaled rather than switched, so half the beam gives half the answer back.
+    return { each, on: this.lightsOn * Math.min(1, Math.max(0, T.HEADLIGHT)) }
   }
 
   /** Inside or outside: swap the body shell for the dash, pillars and wheel. */

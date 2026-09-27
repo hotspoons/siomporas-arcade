@@ -42,6 +42,7 @@ export class AssetsPanel {
   private chosen: string | null = null
   private chosenSeed: number | null = null
   private job: AssetJob | null = null
+  private mesh: AssetJob | null = null
   private poll: ReturnType<typeof setInterval> | null = null
   private drawCount = 4
 
@@ -122,6 +123,39 @@ export class AssetsPanel {
    * Pick one. NO SEED IS SENT — the service takes it from the view's own provenance, because the
    * caller here is a person clicking a picture and does not know what made it.
    */
+  /**
+   * Reconstruct the chosen picture. THE EXPENSIVE HALF: one GPU, serialised inside the service,
+   * thirty to forty seconds — which is why nothing reaches here until a person has accepted an
+   * image, and why the button reports the stage rather than spinning silently.
+   */
+  private async reconstruct() {
+    const s = this.spec
+    if (!s || !this.chosen) return
+    try {
+      this.mesh = await api.reconstruct(s.id)
+      this.render()
+      this.watchMesh()
+    } catch (e) {
+      toast(`could not reconstruct: ${(e as Error).message}`, 'danger', 7000)
+    }
+  }
+
+  private watchMesh() {
+    this.stop()
+    this.poll = setInterval(async () => {
+      try {
+        const { jobs } = await api.assetJobs()
+        const mine = jobs.find((j) => j.job === this.mesh?.job)
+        if (!mine) return
+        this.mesh = mine
+        if (mine.state === 'done' || mine.state === 'failed') this.stop()
+        this.render()
+      } catch {
+        this.stop()
+      }
+    }, 2000)
+  }
+
   private async choose(file: string) {
     const s = this.spec
     if (!s) return
@@ -232,7 +266,19 @@ export class AssetsPanel {
       const mb = bodyOf(make)
       mb.append(readout('chosen', this.chosen), readout('seed', String(this.chosenSeed ?? '—')))
       mb.append(hint('The seed is pinned, so this asset can be made again. Reconstruction is the expensive half and runs one at a time.'))
-      mb.append(button({ label: 'Reconstruct', icon: 'cube', variant: 'primary', onClick: () => toast('the mesh lane is next — the pick and the seed are saved', 'info', 4000) }))
+      mb.append(
+        button({
+          label: this.mesh && this.mesh.state === 'running' ? 'Reconstructing…' : 'Reconstruct',
+          icon: 'cube',
+          variant: 'primary',
+          onClick: () => void this.reconstruct(),
+        }),
+      )
+      if (this.mesh) {
+        const p = this.mesh.progress as { state?: string } | undefined
+        mb.append(readout('mesh', this.mesh.state === 'done' ? `${(this.mesh.result as { bytes?: number })?.bytes ?? 0} bytes` : (p?.state ?? this.mesh.state)))
+        if (this.mesh.detail) mb.append(hint(this.mesh.detail.slice(0, 180), true))
+      }
       host.append(make)
     }
   }

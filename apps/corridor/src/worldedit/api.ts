@@ -381,6 +381,8 @@ export const api = {
     call<{ job: { job: string }; recipe: Recipe }>(`/assetsvc/specs/${id}/candidates`, { method: 'POST', body: JSON.stringify(body) }),
   assetJobs: () => call<{ jobs: AssetJob[] }>('/assetsvc/jobs'),
   chooseView: (id: string, view: string) => call<{ item: CatalogItem }>(`/assetsvc/catalog/${id}/choose`, { method: 'POST', body: JSON.stringify({ view }) }),
+  /** the expensive half: one GPU, serialised, thirty to forty seconds. Only after a human picked. */
+  reconstruct: (id: string, body: { finish?: boolean } = {}) => call<AssetJob>(`/assetsvc/catalog/${id}/mesh`, { method: 'POST', body: JSON.stringify(body) }),
 
   catalog: () => call<{ assets: { id: string; name: string; category: string; glb?: string; footprint_m: [number, number]; height_m: number }[] }>('/api/catalog'),
   mergeCatalog: (assets: Record<string, unknown>[]) =>

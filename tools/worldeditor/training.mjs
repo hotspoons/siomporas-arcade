@@ -101,20 +101,34 @@ export function normalise(run = {}) {
  */
 export function roleArgs(r, role) {
   if (r.args) return r.args
-  const a = ['run', '--capture', `/data/captures/${r.capture}`, '--out', '/out', '--role', role]
-  if (r.world) a.push('--site', `/data/sites/${r.world}`)
+  const a = ['run', '--capture', `${EDITOR_MOUNT}/captures/${r.capture}`, '--out', '/out', '--role', role]
+  if (r.world) a.push('--site', `${EDITOR_MOUNT}/sites/${r.world}`)
   if (r.config) a.push('--config', r.config)
   return a
 }
+
+/*
+ * WHERE THE EDITOR'S VOLUME IS MOUNTED, AND WHY NOT `/data`.
+ *
+ * The operator mounts its OWN volume at /data — that is where `paths` are materialised — so a
+ * pvcMount there collides, and the failure does not arrive at admission. The API server validates
+ * the TrainingDeployment; the JobSet is derived from it afterwards and is what is invalid:
+ *
+ *   JobSet ... is invalid: volumeMounts[2]: Duplicate value: {"mountPath":"/data"}
+ *
+ * A server-side dry run of the TrainingDeployment says nothing about this, which is the argument
+ * for actually submitting one once.
+ */
+const EDITOR_MOUNT = '/editor'
 
 /** The environment a gaussworks container gets, whichever object started it. */
 function env(r) {
   return [
     { name: 'CAPTURE_ID', value: r.capture },
-    { name: 'CAPTURE_DIR', value: `/data/captures/${r.capture}` },
-    { name: 'CAPTURE_MANIFEST', value: `/data/captures/${r.capture}/capture.json` },
+    { name: 'CAPTURE_DIR', value: `${EDITOR_MOUNT}/captures/${r.capture}` },
+    { name: 'CAPTURE_MANIFEST', value: `${EDITOR_MOUNT}/captures/${r.capture}/capture.json` },
     { name: 'WORLD_SLUG', value: r.world ?? '' },
-    { name: 'SITE_DIR', value: r.world ? `/data/sites/${r.world}` : '' },
+    { name: 'SITE_DIR', value: r.world ? `${EDITOR_MOUNT}/sites/${r.world}` : '' },
     { name: 'OUT_DIR', value: '/out' },
     { name: 'SPLAT_NODES', value: String(r.nodes) },
     { name: 'SPLAT_GPUS_PER_NODE', value: String(r.gpusPerNode) },
@@ -178,7 +192,7 @@ export function trainingDeployment(run, apiVersion = `${GROUP}/${FALLBACK_VERSIO
               ...(r.limits ? { limits: { items: r.limits } } : {}),
             },
             // the footage, read-only: it was uploaded here and nothing in training should edit it
-            pvcMounts: [{ name: 'editor-data', claimName: r.claim, path: '/data', readOnly: true }],
+            pvcMounts: [{ name: 'editor-data', claimName: r.claim, path: EDITOR_MOUNT, readOnly: true }],
             envVars: { items: env(r) },
             // multi-node rendezvous, which is most of why this object is worth using
             ...(r.nodes > 1 ? { nccl: {}, rendezvousPort: 29500 } : {}),
@@ -205,7 +219,7 @@ export function jobSet(run) {
     env: [...env(r), { name: 'PAI_PATH_0', value: '/out' }, { name: 'SPLAT_ROLE', value: role }],
     resources: { limits: { [r.gpuResource]: String(r.gpusPerNode), ...(r.limits ?? {}) } },
     volumeMounts: [
-      { name: 'editor-data', mountPath: '/data', readOnly: true },
+      { name: 'editor-data', mountPath: EDITOR_MOUNT, readOnly: true },
       { name: 'out', mountPath: '/out' },
     ],
   })

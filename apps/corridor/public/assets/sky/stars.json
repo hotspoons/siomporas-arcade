@@ -1,0 +1,24 @@
+{
+ "count": 9096,
+ "skipped": 14,
+ "magMin": -1.46,
+ "magMax": 7.96,
+ "bytesPerStar": 12,
+ "order": "brightest first",
+ "fields": [
+  "ra float32 rad J2000",
+  "dec float32 rad J2000",
+  "mag int16 x100",
+  "bv int8 x50",
+  "pad int8"
+ ],
+ "asset": "stars.bin",
+ "bytes": 109152,
+ "source": "Bright Star Catalogue (BSC5)",
+ "sourceUrl": "http://tdc-www.harvard.edu/catalogs/bsc5.dat.gz",
+ "sourceSha256": "0471ced07fc241e625613baa689b2fa5f4b59fd733f731003e57d2d436036cdb",
+ "credit": "Star positions: Yale Bright Star Catalogue (Hoffleit & Warren 1991)",
+ "note": "Every star brighter than about magnitude 6.5 — precisely the set a person can see. Fixed-width ASCII; the column positions below are the catalogue ReadMe’s own and are checked against Sirius by `verify`.",
+ "fetched": "2026-09-27T13:04:13.210Z",
+ "tool": "tools/sky/ingest.mjs"
+}

@@ -155,6 +155,19 @@ export class Grass {
   /** the direction in which the road distance grows (scene.ts edgeDistance): a blade's own distance
    * from the cell's, without a second grid walk per blade */
   private roadGrad: ((x: number, z: number) => [number, number]) | undefined
+  /**
+   * The masks, asked per blade rather than per cell.
+   *
+   * `roadDistance` folds two different things together: a smooth distance to the nearest
+   * carriageway, and a set of hard-edged rasters — a parking bay, a walk, the vegetation mask,
+   * the paving classifier — which it reports as the sentinel -1. The per-blade test below places
+   * a blade's own distance by stepping along the GEOMETRY's gradient, which is legitimate (the
+   * station field changes by about a third of a metre every half metre) but which steps straight
+   * over a raster edge, because a raster has no gradient. So the geometry is extrapolated and the
+   * masks are asked directly, at the blade's own feet. Rich, 2026-09-27: "found a couple more
+   * spots where grass is growing through the road."
+   */
+  private blockedAt: ((x: number, z: number) => boolean) | undefined
   /** the last uTime pushed to the shaders; a tile born now grows in from here */
   private now = 0
   private pavedHalf: number
@@ -207,10 +220,13 @@ export class Grass {
     demAt: ((x: number, y: number) => number) | undefined = undefined,
     zoneAt: ((x: number, z: number) => 'kept' | 'rural' | null) | undefined = undefined,
     roadGrad: ((x: number, z: number) => [number, number]) | undefined = undefined,
+    /** where a MASK forbids grass — parking, a walk, bare ground, paved imagery. See below. */
+    blockedAt: ((x: number, z: number) => boolean) | undefined = undefined,
   ) {
     this.demAt = demAt
     this.zoneAt = zoneAt
     this.roadGrad = roadGrad
+    this.blockedAt = blockedAt
     this.adjustAt = adjustAt
     this.groundAt = groundAt
     this.canopyAt = canopyAt
@@ -848,9 +864,29 @@ export class Grass {
           // leaned over it by up to 0.52 m. The root's own distance, and the bend the shader gives
           // it (lean plus the wind's share, which a mown blade barely feels), both have to fit.
           if (g) {
-            const dRoot = roadD + (x - wx) * g[0] + (z - wz) * g[1]
-            if (dRoot < this.pavedHalf + T.GRASS_ROAD_CLEAR + height * (lean + (mown ? 0.05 : 0.3))) continue
+            const need = this.pavedHalf + T.GRASS_ROAD_CLEAR + height * (lean + (mown ? 0.05 : 0.3))
+            /*
+             * CLOSE IN, ASK. FURTHER OUT, STEP.
+             *
+             * The gradient step is exact where the field is locally linear, and along a road it
+             * is: measured at about a third of a metre of change per half metre. Beside a
+             * DRIVEWAY it is not. A driveway is a handful of short, sharply curved stations, and
+             * the field there bends faster than a straight line can follow — measured
+             * 2026-09-27, the step said "clear of the road" at 24 of 15,678 blade positions that
+             * were actually on asphalt, and all but two of them were on or beside a driveway.
+             * A driveway apron is also exactly where a tuft of grass standing on pavement gets
+             * noticed.
+             *
+             * So the blades that can be wrong pay for a real query and the rest do not. Only a
+             * cell already within a few metres of pavement is near enough to matter.
+             */
+            const dRoot = roadD < T.GRASS_EXACT_M ? this.roadDistance(x, z) : roadD + (x - wx) * g[0] + (z - wz) * g[1]
+            if (dRoot < need) continue
           }
+          // and the masks at the blade's OWN feet, which no gradient can predict — a raster has a
+          // hard edge and no gradient at all. Inside GRASS_EXACT_M the query above already asked
+          // them (roadDistance reports them as -1), so this is for the band beyond it.
+          if (this.blockedAt && roadD >= T.GRASS_EXACT_M && roadD < T.GRASS_MASK_CHECK_M && this.blockedAt(x, z)) continue
           const o = n * BLADE_F
           blades[o] = x
           blades[o + 1] = y
@@ -869,7 +905,13 @@ export class Grass {
         for (let b = 0; b < want && nc < maxCards; b++) {
           const x = wx + (hash(cx * 71 + cz * 73 + b * 79) - 0.5) * cell, z = wz + (hash(cx * 83 + cz * 89 + b * 97) - 0.5) * cell
           // a card is a metre wide and stands where it is put: the same test, at its own foot
-          if (this.roadDistance(x, z) < this.pavedHalf + T.GRASS_ROAD_CLEAR) continue
+          // A CARD IS WIDE, and it is centred on its foot. Measured 2026-09-27: a foot 0.08 m
+          // inside the asphalt drew a tuft about 0.6 m out over the road, which at fifty metres
+          // in headlights is exactly "grass growing through the road". Its half-width has to
+          // clear the kerb, not its centre.
+          if (this.roadDistance(x, z) < this.pavedHalf + T.GRASS_ROAD_CLEAR + (T.GRASS_SPRITE_WIDTH * T.GRASS_SPRITE_SCALE) / 2) continue
+          // a card is a metre across; its far edge must clear a mask too, not just its foot
+          if (this.blockedAt && (this.blockedAt(x + 0.5, z) || this.blockedAt(x - 0.5, z) || this.blockedAt(x, z + 0.5) || this.blockedAt(x, z - 0.5))) continue
           const y = this.groundAt(x, -z) - 0.03
           const base = (mown ? T.GRASS_MOWN_HEIGHT * 1.6 * this.look.mown : this.heightScale * T.GRASS_ROUGH_HEIGHT * tall * 0.8 * this.look.height)
           const size = base * ah * T.GRASS_HEIGHT_SCALE * T.GRASS_SPRITE_SCALE * (0.75 + 0.5 * hash(cx * 101 + cz * 103 + b * 107))

@@ -118,6 +118,8 @@ export interface Site {
   edgeDistance: (x: number, z: number) => number
   /** what the grass generator is told at world (x, z): -1 on pavement, a lot, a walk or air-photo paving; else metres from the nearest road. For probes. */
   grassRoadDistance: (x: number, z: number) => number
+  /** true where grass is forbidden by a MASK rather than by the road geometry — see scene.ts */
+  grassBlocked: (x: number, z: number) => boolean
   /** the full edge record at world (x, z): signed distance to the nearest pavement edge, which road (`who`, < 0 for a driveway or bulb), its surface height and along-track s. For probes. */
   edgeInfo: (x: number, z: number, exclude?: number, roadsOnly?: boolean) => { d: number; who: number; y: number; s: number; gx: number; gz: number }
   /** kept (trimmed lawn) or rural (mown shoulder, tall grass) at world (x, z), from landuse then road class — see zoning.ts */
@@ -949,7 +951,24 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     const halfB = pavedWidth(lanesB, twoWayB, kerbedB) / 2
     let bx0 = Infinity, bz0 = Infinity, bx1 = -Infinity, bz1 = -Infinity
     for (const q of rawB) { if (q.x < bx0) bx0 = q.x; if (q.x > bx1) bx1 = q.x; if (q.z < bz0) bz0 = q.z; if (q.z > bz1) bz1 = q.z }
-    branchRaw.push({ br, rawB, dirty: false, recurve: () => { cB = new THREE.CatmullRomCurve3(rawB, false, 'centripetal'); cB.arcLengthDivisions = Math.max(100, rawB.length * 8); lenB = cB.getLength(); branchAts[branchRaw.length - 1].len = lenB } })
+    /*
+     * `bi` IS CAPTURED HERE, not read inside the closure.
+     *
+     * It used to say `branchAts[branchRaw.length - 1].len = lenB`, and `branchRaw.length` is read
+     * when `recurve` RUNS, not when it is pushed — by then it is 427. So every junction-warped
+     * branch wrote its own new length into the LAST branch's entry. On crofton-triangle the last
+     * branch is Riedel Road, 2,515 m of tertiary that is superior at all thirteen of its
+     * junctions, so it never recurves and never repaired itself: it ended up carrying the length
+     * of Hawk Hollow Drive, 271 m.
+     *
+     * `addStations` bounds its loop with that length, so 2,235 m of Riedel Road had asphalt drawn
+     * full length (the mesh uses the closure's own `lenB`, which was right) and NO DISTANCE FIELD
+     * AT ALL. Grass, trees, the verge, the car's on-road test and the road-name readout were all
+     * blind to it — the field answered "+57 m to the nearest road" while you stood on it, which
+     * is how grass came to be growing through the asphalt there (Rich, 2026-09-27).
+     */
+    const bi = branchAts.length
+    branchRaw.push({ br, rawB, dirty: false, recurve: () => { cB = new THREE.CatmullRomCurve3(rawB, false, 'centripetal'); cB.arcLengthDivisions = Math.max(100, rawB.length * 8); lenB = cB.getLength(); branchAts[bi].len = lenB } })
     branchAts.push({ at: atB, len: lenB, half: halfB, name: br.name ?? br.ref ?? 'branch', highway: br.highway ?? null, bounds: [bx0, bz0, bx1, bz1], road: () => roadMesh(stations(atB, lenB, 6), () => lanesB, () => 'asphalt_aged', surfaceSets!, 0.02, () => twoWayB, paintOff, () => kerbedB) })
   }
   mark('paving: branch curves')
@@ -1102,6 +1121,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
   }
   // the grass generator's road-distance answer, lifted out of the strip block for the Site's probes
   let grassRoadDistanceOut: (x: number, z: number) => number = () => Infinity
+  let grassBlockedOut: (x: number, z: number) => boolean = () => false
   let zoneAtOut: (x: number, z: number) => 'kept' | 'rural' | null = () => null
   let roadAtOut: (x: number, z: number) => { name: string | null; ref: string | null; highway: string | null; d: number } | null = () => null
   let edgeInfoOut: (x: number, z: number, exclude?: number, roadsOnly?: boolean) => { d: number; who: number; y: number; s: number; gx: number; gz: number } = () => ({ d: Infinity, who: -1, y: 0, s: 0, gx: 0, gz: 0 })
@@ -1259,8 +1279,25 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
             // signed lateral, + to the right of travel (right = dir x UP = (-dz, 0, dx)), measured
             // from the asphalt's centre rather than the spine; with off = 0 this is the old |lat|
             const lat = Math.abs(uz * p.dx - ux * p.dz - p.off)
-            const d = (Math.abs(along) <= 2.6 ? lat : Math.hypot(ux, uz)) - p.half
-            if (d < best) { best = d; who = p.who; bp = p; bLat = Math.abs(along) <= 2.6; bux = ux; buz = uz }
+            /*
+             * THE BAND HAS TO OVERLAP, or there is a wedge between stations with nothing in it.
+             *
+             * Inside the band the distance is measured laterally from the station's tangent;
+             * outside it, radially from the station itself, which is what makes a lone station a
+             * disc and gives cul-de-sac bulbs their shape for free. Stations are 5 m apart, so a
+             * band of +/-2.6 m covers 5.2 m — twenty centimetres of overlap, on a STRAIGHT road.
+             * On the outside of a bend consecutive tangent bands fan apart, the overlap goes, and
+             * a point in the wedge falls through to the radial branch, which over-reports by
+             * roughly along^2 / (2 * half) — about 0.85 m. The road mesh interpolates its ribbon
+             * continuously between the same stations and has no such wedge, so the asphalt
+             * reached past what the field believed and grass grew on it.
+             *
+             * A wider band closes the wedge and errs the safe way: the tangent leans INSIDE the
+             * curve, so a lateral measure taken a little further along under-reports the distance
+             * and keeps grass off rather than letting it on.
+             */
+            const d = (Math.abs(along) <= T.EDGE_BAND_M ? lat : Math.hypot(ux, uz)) - p.half
+            if (d < best) { best = d; who = p.who; bp = p; bLat = Math.abs(along) <= T.EDGE_BAND_M; bux = ux; buz = uz }
           }
         }
       }
@@ -1294,8 +1331,21 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     // -1 means "do not plant here": a mapped lot, a walk, or anything the air photo says is paved
     // -1 also where the tile photo says the ground is not vegetation (a lot OSM never mapped, an
     // apron, bare dirt); the overview classifier is the fallback until that tile's photo is read
-    const grassRoadDistance = (x: number, z: number) => (onParking(x, z) || onSidewalk(x, z) || (veg !== null && veg.at(x, -z) === 0) || (pavedAt !== null && pavedAt(x, -z) > 0.5) ? -1 : roadDistance(x, z))
+    /*
+     * WHERE GRASS MAY NOT GROW, other than the carriageway: a parking bay, a walk, ground the
+     * vegetation mask classified as bare, and imagery the paving classifier calls paved.
+     *
+     * Separated out because these are the DISCONTINUOUS half. The station field is smooth —
+     * measured at 0.35 m of change per half metre — which is what lets the grass planter place a
+     * blade's own distance by stepping along the gradient instead of walking the station grid
+     * again. A mask has no gradient at all: it is a raster with a hard edge, and a step along the
+     * geometry's gradient steps straight over it. So a blade has to ask this one directly.
+     */
+    const grassBlocked = (x: number, z: number) => onParking(x, z) || onSidewalk(x, z) || (veg !== null && veg.at(x, -z) === 0) || (pavedAt !== null && pavedAt(x, -z) > 0.5)
+    // -1 is a SENTINEL here, not a distance: "no grass, whatever the geometry says".
+    const grassRoadDistance = (x: number, z: number) => (grassBlocked(x, z) ? -1 : roadDistance(x, z))
     grassRoadDistanceOut = grassRoadDistance
+    grassBlockedOut = grassBlocked
     edgeInfoOut = edgeDistance
 
     // --- the corridor strip: fine terrain across every carriageway and 40 m of verge each side ---
@@ -1700,7 +1750,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
       if (b) return { name: b.name === 'branch' ? null : b.name, ref: null, highway: b.highway, d: e.d }
       return null
     }
-    const grass = new Grass(groundNear, canopyAt, grassRoadDistance, 0, look(currentSeason), lite ? 90_000 : 400_000, lite ? 26 : 40, fog, adjustments.active ? (x, y) => { const a = adjustments.at(x, y, grassAdj); return a.cover === 'crop' ? [1, 0] : [a.grass_height, a.grass_density] } : undefined, undefined, heightAt, zoneAtWorld, (x, z) => { const e = edgeDistance(x, z); return [e.gx, e.gz] })
+    const grass = new Grass(groundNear, canopyAt, grassRoadDistance, 0, look(currentSeason), lite ? 90_000 : 400_000, lite ? 26 : 40, fog, adjustments.active ? (x, y) => { const a = adjustments.at(x, y, grassAdj); return a.cover === 'crop' ? [1, 0] : [a.grass_height, a.grass_density] } : undefined, undefined, heightAt, zoneAtWorld, (x, z) => { const e = edgeDistance(x, z); return [e.gx, e.gz] }, grassBlocked)
     // NOT a child of `trees`. It was, and so the trees checkbox turned off all ground cover with
     // them — you could not hide the trees to look at the grass, which is most of what looking at
     // grass involves. Its own group, its own layer toggle.
@@ -2308,6 +2358,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     groundAt: groundAtWorld,
     edgeDistance: edgeDistanceWorld,
     grassRoadDistance: (x, z) => grassRoadDistanceOut(x, z),
+    grassBlocked: (x, z) => grassBlockedOut(x, z),
     edgeInfo: (x, z, exclude, roadsOnly) => edgeInfoOut(x, z, exclude, roadsOnly),
     zoneAt: (x, z) => zoneAtOut(x, z),
     roadAt: (x, z) => roadAtOut(x, z),

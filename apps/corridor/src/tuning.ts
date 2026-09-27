@@ -26,7 +26,37 @@ export let GRASS_MOW_LINE = 13
 // zoning (zoning.ts): in a RURAL zone only this much beside the pavement is mown, the rest grows
 // GRASS_RURAL_TALL times the rough height; a KEPT zone is mown everywhere
 // how far a blade's ROOT stands back from the pavement edge, before its own lean is allowed for
+/**
+ * Half the along-track band of a road station, metres.
+ *
+ * Stations are 5 m apart. Inside this band the distance field measures laterally from the
+ * station's tangent; outside it, radially from the station. It must be more than half the spacing
+ * or consecutive bands leave a wedge on the outside of a bend where the field over-reports by
+ * about 0.85 m — which is how grass came to stand on the asphalt (2026-09-27). It is also what
+ * gives a lone station (a cul-de-sac bulb) its shape, so raising it stretches a bulb's disc into
+ * a stadium.
+ */
+export let EDGE_BAND_M = 3.5
 export let GRASS_ROAD_CLEAR = 0.3
+/**
+ * How near a road a blade has to be before its own position is checked against the MASKS
+ * (parking, walks, bare ground, paved imagery) rather than extrapolated from its cell.
+ *
+ * The masks have hard edges and no gradient, so a step along the geometry's gradient cannot see
+ * them. It was 10 m, which covered the kerb but not the middle of a car park: 262 of 971 blades
+ * at one of Rich's stances stood on ground a mask calls bare or paved (2026-09-27). A raster
+ * lookup is cheaper than the station walk, so it now covers the whole verge band.
+ */
+export let GRASS_MASK_CHECK_M = 60
+/**
+ * Within this of pavement, every blade asks the distance field for its OWN position instead of
+ * stepping there along the gradient from its cell.
+ *
+ * The step is exact along a road and wrong beside a driveway, where a handful of short, sharply
+ * curved stations make the field bend faster than a straight line can follow. Raising this buys
+ * accuracy with a grid walk per blade; lowering it puts grass back on the apron.
+ */
+export let GRASS_EXACT_M = 3
 export let GRASS_RURAL_MOW_LINE = 3
 export let GRASS_RURAL_TALL = 1.3
 // a new grass tile grows in over this many seconds instead of appearing at full height
@@ -606,6 +636,9 @@ export const TUNE_TABS: TuneTab[] = [
           tune('GRASS_PATCHINESS', () => GRASS_PATCHINESS, (v) => (GRASS_PATCHINESS = v), [0, 0.7], 0.01, 'share of patches left bare'),
           tune('GRASS_PATCH_SIZE', () => GRASS_PATCH_SIZE, (v) => (GRASS_PATCH_SIZE = v), [1, 30], 1, 'bare patch size (m)'),
           tune('GRASS_SCATTER', () => GRASS_SCATTER, (v) => (GRASS_SCATTER = v), [0.1, 2], 0.05, 'blade scatter around the clump (m)'),
+          tune('EDGE_BAND_M', () => EDGE_BAND_M, (v) => (EDGE_BAND_M = v), [2.5, 8], 0.1, 'half the along-track band of a road station (m); must exceed half the 5 m spacing'),
+          tune('GRASS_EXACT_M', () => GRASS_EXACT_M, (v) => (GRASS_EXACT_M = v), [0, 12], 0.5, 'within this of pavement a blade asks the field directly instead of stepping along the gradient (m)'),
+          tune('GRASS_MASK_CHECK_M', () => GRASS_MASK_CHECK_M, (v) => (GRASS_MASK_CHECK_M = v), [0, 40], 1, 'check each blade against the parking/walk/paving masks within this of a road (m)'),
           tune('GRASS_SLOPE_MAX', () => GRASS_SLOPE_MAX, (v) => (GRASS_SLOPE_MAX = v), [0.1, 3], 0.05, 'no turf steeper than this (m/m)'),
           tune('GRASS_MAX_SHELF', () => GRASS_MAX_SHELF, (v) => (GRASS_MAX_SHELF = v), [0, 8], 0.1, 'no turf this far above the bare DEM (m); 0 = off'),
         ],

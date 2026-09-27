@@ -1,0 +1,50 @@
+# The North America instance.
+#
+# Rich, 2026-09-27: "My goal for the morning is to have a fully functioning world editor for the
+# Americas and Europe." Europe serves. The Americas did not: the only other extract is MARYLAND,
+# a 60 GiB volume holding one state, so every map tile outside that one box fell through to the
+# public mirrors — which is precisely the 33-to-78-seconds-a-tile that made Northern Italy take
+# three minutes, except across a continent.
+#
+#   helm upgrade --install overpass-na tools/overpass/chart -n default -f tools/overpass/values-na.yaml
+#
+# EXPECT ABOUT A DAY. Europe imported over 2026-09-22..24 from a 28 GB pbf and settled at 254 GB.
+# North America's pbf is roughly half that, so budget 12-24 hours and do not watch it. It is
+# additive: a new release on a new volume, and the Maryland and Europe instances keep serving
+# throughout, exactly as Maryland did while Europe imported.
+#
+# BEFORE re-running this against an existing volume, read the note on useAreas in
+# chart/values.yaml. A container that dies anywhere in the entrypoint's && chain never reaches
+# `touch /db/init_done`, and the next start reads the missing marker as "no database" and
+# re-imports on top of a finished one.
+fullnameOverride: overpass-na
+
+planetUrl: https://download.geofabrik.de/north-america-latest.osm.pbf
+diffUrl: https://download.geofabrik.de/north-america-updates/
+
+# The importer wants bz2 XML and cannot be handed a pbf, and the image ships only single-threaded
+# bzip2. lbzip2 installs from bookworm and the conversion streams, so no giant intermediate.
+preprocess: >-
+  apt-get update -qq && apt-get install -y -qq lbzip2 &&
+  mv /db/planet.osm.bz2 /db/planet.osm.pbf &&
+  osmium cat -o - -f osm /db/planet.osm.pbf | lbzip2 -c -n 8 > /db/planet.osm.bz2 &&
+  rm -f /db/planet.osm.pbf
+
+compression: "no"    # gz and lz4 both fail to read back here. Not negotiable.
+useAreas: false      # see chart/values.yaml; this is what killed Europe's first run at the finish line
+rulesLoad: 0
+flushSize: 4
+
+storage:
+  size: 2Ti                      # Europe settled at 254 GB from a 28 GB pbf; this pbf is ~14 GB
+  className: ceph-filesystem     # proven for this workload with compression=no
+
+resources:
+  requests: { cpu: "4", memory: 8Gi }
+  limits: { cpu: "16", memory: 32Gi }
+
+# Not exposed, and it goes into NO client's rotation until tools/overpass/verify.sh passes against
+# it. An extract that answers confidently for ground it does not hold is the worst failure mode in
+# this system — see "The silent empty" in docs/corridor/OVERPASS-PLANET.md.
+ingress:
+  enabled: false

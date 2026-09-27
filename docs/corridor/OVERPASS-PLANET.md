@@ -1,6 +1,9 @@
 # The full world pull
 
-**Status:** Europe serves (in-cluster `overpass-eu`, 2026-09-26). The flip into the editor's rotation is the remaining step.
+**Status:** Europe serves (in-cluster `overpass-eu`, 2026-09-26) and is in the editor's rotation.
+**North America is importing** (`overpass-na`, started 2026-09-27 06:28 UTC, `values-na.yaml`) —
+until it finishes, the only American coverage is the Maryland extract and everything outside that
+one box falls through to the public mirrors at 30 to 80 seconds a tile.
 **Now:** the editor and the baker still run on the four public query mirrors. `overpass` holds
 Maryland and is deliberately NOT their first upstream — see "The silent empty" below. `overpass-eu`
 holds Europe and is **not yet in any client's list**; it goes in only when

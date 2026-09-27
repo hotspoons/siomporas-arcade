@@ -1,0 +1,1383 @@
+{
+  "$comment": [
+    "Traffic, commercial and plant. Same rules as the hero cars: no badge, wordmark or fleet name ever,",
+    "prohibitions live in negative_prompt, and the silhouette carries recognition.",
+    "WHAT IS DIFFERENT IS FRAMING. flux's framing prior does not move for words, and most of this",
+    "roster is either very long (semis, trailers, buses) or very tall (excavators, combines, tractors).",
+    "Wide subjects frame themselves, so long vehicles are asked for in a 1344x768 frame and tall ones",
+    "in 768x1344. That is the only lever that has ever worked on the crop.",
+    "Trailers are drawn WITHOUT a tractor and plant WITHOUT its attachment, so they compose in-game."
+  ],
+  "defaults": {
+    "class": "traffic",
+    "view": "front-three-quarter"
+  },
+  "assets": [
+    {
+      "id": "traffic-sedan-90s",
+      "subject": "1990s American mid-size family saloon car",
+      "era": "1992-1999",
+      "paint": "deep teal-free metallic blue",
+      "dims": {
+        "lengthM": 4.9,
+        "widthM": 1.81,
+        "heightM": 1.4,
+        "wheelbaseM": 2.76
+      },
+      "silhouette": [
+        "A rounded four-door saloon with a short sloping bonnet, a tall glasshouse and a short boot",
+        "Soft aerodynamic surfaces with no hard creases"
+      ],
+      "cues": [
+        "wide wraparound headlamps in a low rounded nose with a small grille slot",
+        "flush door handles and body-coloured mirrors",
+        "wraparound tail lamps on a short high boot",
+        "plain plastic wheel covers over steel wheels",
+        "a thin dark rubbing strip along each door"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "dark tinted glass, black tyres"
+      ],
+      "avoid": [
+        "a boxy square body",
+        "a hatchback or estate tail"
+      ]
+    },
+    {
+      "id": "traffic-sedan-modern",
+      "subject": "modern mid-size family saloon car",
+      "era": "2015-2022",
+      "paint": "metallic burgundy",
+      "dims": {
+        "lengthM": 4.88,
+        "widthM": 1.84,
+        "heightM": 1.45,
+        "wheelbaseM": 2.82
+      },
+      "silhouette": [
+        "A four-door saloon with a long cabin, a short deck and a low wide nose",
+        "A strong crease running from the headlamp along the flank to the tail lamp"
+      ],
+      "cues": [
+        "slim angular headlamps wrapping into the wings with a bright daytime running strip",
+        "a wide low trapezoid grille",
+        "slim wraparound tail lamps and a subtle boot lip",
+        "multi-spoke alloy wheels",
+        "a black lower bumper valance"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "dark glass, black tyres"
+      ],
+      "avoid": [
+        "a tall narrow cabin",
+        "chrome bumpers"
+      ]
+    },
+    {
+      "id": "traffic-compact",
+      "subject": "small modern economy hatchback car",
+      "era": "2010-2020",
+      "paint": "bright tangerine orange",
+      "dims": {
+        "lengthM": 4.06,
+        "widthM": 1.75,
+        "heightM": 1.47,
+        "wheelbaseM": 2.54
+      },
+      "silhouette": [
+        "A short five-door hatchback with a tall cabin, a stubby nose and a near-vertical tailgate",
+        "A high waistline over small wheels"
+      ],
+      "cues": [
+        "small swept headlamps either side of a narrow grille",
+        "tall narrow tail lamps flanking the hatch",
+        "a roof spoiler over the tailgate glass",
+        "plastic wheel covers",
+        "black plastic bumper inserts"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "black plastic trim, black tyres"
+      ],
+      "avoid": [
+        "a long bonnet or a boot",
+        "large wheels"
+      ]
+    },
+    {
+      "id": "traffic-sedan-fullsize",
+      "subject": "1990s American full-size rear-drive saloon car",
+      "era": "1992-2002",
+      "paint": "dark navy blue",
+      "dims": {
+        "lengthM": 5.4,
+        "widthM": 1.98,
+        "heightM": 1.45,
+        "wheelbaseM": 2.91
+      },
+      "silhouette": [
+        "A long wide four-door saloon with a long bonnet, a long boot and a formal upright roof",
+        "Slab sides with a soft rounded shoulder"
+      ],
+      "cues": [
+        "wide rectangular headlamps beside a broad chrome grille",
+        "chrome window surrounds and a chrome strip along the sills",
+        "wide horizontal tail lamps across a long boot",
+        "plain steel wheels with chrome hub caps",
+        "a body-coloured bumper with a chrome insert"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "chrome trim, black tyres"
+      ],
+      "avoid": [
+        "a short body or a small cabin",
+        "sporting body addenda"
+      ],
+      "size": "1344x768"
+    },
+    {
+      "id": "traffic-wagon-90s",
+      "subject": "1990s mid-size estate car with a roof rack",
+      "era": "1990-1999",
+      "paint": "dark green metallic",
+      "dims": {
+        "lengthM": 4.95,
+        "widthM": 1.79,
+        "heightM": 1.5,
+        "wheelbaseM": 2.77
+      },
+      "silhouette": [
+        "A four-door estate with the roof carried flat all the way back to a vertical tailgate",
+        "A long glasshouse with a fixed rear quarter window"
+      ],
+      "cues": [
+        "rounded headlamps and a small grille in a soft nose",
+        "black roof rails running the length of the roof",
+        "tall vertical tail lamps flanking a wide tailgate",
+        "a dark rubbing strip along each flank",
+        "plastic wheel covers"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "black plastic trim, black tyres"
+      ],
+      "avoid": [
+        "a sloping fastback tail",
+        "a saloon boot"
+      ]
+    },
+    {
+      "id": "traffic-wagon-woodgrain",
+      "subject": "1970s American full-size estate car with wood-effect side panels",
+      "era": "1975-1985",
+      "paint": "deep colonial blue with dark wood-effect panelling along the doors and rear wings",
+      "dims": {
+        "lengthM": 5.6,
+        "widthM": 2.0,
+        "heightM": 1.5,
+        "wheelbaseM": 2.95
+      },
+      "silhouette": [
+        "A very long low estate car with a flat roof, a long bonnet and a vertical tailgate",
+        "Straight slab sides with squared wheel arches"
+      ],
+      "cues": [
+        "four square headlamps in pairs beside a wide chrome grille",
+        "wood-effect panels framed in light trim along both flanks",
+        "a chrome roof rack",
+        "long horizontal tail lamps",
+        "chrome bumpers front and rear"
+      ],
+      "materials": [
+        "glossy painted steel with printed wood-effect panels",
+        "chrome trim, black tyres"
+      ],
+      "avoid": [
+        "a short or rounded body",
+        "alloy wheels"
+      ],
+      "size": "1344x768"
+    },
+    {
+      "id": "traffic-minivan",
+      "subject": "modern front-drive passenger minivan",
+      "era": "2011-2020",
+      "paint": "metallic bronze",
+      "dims": {
+        "lengthM": 5.16,
+        "widthM": 2.0,
+        "heightM": 1.75,
+        "wheelbaseM": 3.08
+      },
+      "silhouette": [
+        "A tall one-box people carrier with a short sloping nose and a long flat roof",
+        "Sliding side doors with their track hidden in a dark strip below the rear side window"
+      ],
+      "cues": [
+        "swept headlamps and a wide grille in a rounded nose",
+        "tall tail lamps running up each side of the tailgate",
+        "body-coloured sliding door handles",
+        "a roof spoiler over the tailgate",
+        "plain multi-spoke alloy wheels"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "dark privacy glass, black tyres"
+      ],
+      "avoid": [
+        "a boxy commercial van body",
+        "a pickup bed"
+      ]
+    },
+    {
+      "id": "traffic-taxi",
+      "subject": "modern saloon car in taxi livery with a roof sign",
+      "era": "2010-2020",
+      "paint": "bright taxi yellow",
+      "dims": {
+        "lengthM": 4.88,
+        "widthM": 1.84,
+        "heightM": 1.48,
+        "wheelbaseM": 2.82
+      },
+      "silhouette": [
+        "A four-door saloon with a plain roof sign box mounted centrally above the windscreen",
+        "An ordinary family car body with no sporting addenda"
+      ],
+      "cues": [
+        "a small rectangular illuminated sign box on the roof",
+        "swept headlamps and a plain grille",
+        "wraparound tail lamps",
+        "plain alloy wheels",
+        "a dark rubbing strip along each door"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "dark glass, black tyres"
+      ],
+      "avoid": [
+        "any company name, telephone number or lettering",
+        "a hatchback tail"
+      ]
+    },
+    {
+      "id": "traffic-police",
+      "subject": "American police patrol saloon car with a roof light bar",
+      "era": "2012-2020",
+      "paint": "deep navy blue",
+      "dims": {
+        "lengthM": 5.0,
+        "widthM": 1.9,
+        "heightM": 1.48,
+        "wheelbaseM": 2.9
+      },
+      "silhouette": [
+        "A broad four-door saloon with a low wide stance and a full-width light bar across the roof",
+        "A push bar of dark steel tubing across the front bumper"
+      ],
+      "cues": [
+        "a slim low-profile light bar spanning the roof above the windscreen",
+        "a black tubular push bar on the nose",
+        "a spotlight on a short arm by the driver's A-pillar",
+        "plain black steel wheels",
+        "antenna stubs on the boot lid"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "black steel fittings, black tyres"
+      ],
+      "avoid": [
+        "any department name, badge, crest, numbering or lettering",
+        "a pickup or van body"
+      ]
+    },
+    {
+      "id": "traffic-police-suv",
+      "subject": "American police patrol sport utility vehicle with a roof light bar",
+      "era": "2015-2022",
+      "paint": "deep navy blue",
+      "dims": {
+        "lengthM": 5.05,
+        "widthM": 2.0,
+        "heightM": 1.78,
+        "wheelbaseM": 3.03
+      },
+      "silhouette": [
+        "A tall four-door sport utility with a squared body, a flat roof and a vertical tailgate",
+        "A light bar across the roof and a push bar on the nose"
+      ],
+      "cues": [
+        "a slim full-width light bar above the windscreen",
+        "a black tubular push bar across the front bumper",
+        "tall tail lamps flanking the tailgate",
+        "black steel wheels with chunky tyres",
+        "black roof rails"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "black fittings, black tyres"
+      ],
+      "avoid": [
+        "any department name, badge, crest or lettering",
+        "a saloon body"
+      ]
+    },
+    {
+      "id": "suv-bodyonframe-90s",
+      "subject": "1990s American mid-size body-on-frame sport utility vehicle",
+      "era": "1995-2001",
+      "paint": "deep forest metallic with dark cladding",
+      "dims": {
+        "lengthM": 4.77,
+        "widthM": 1.8,
+        "heightM": 1.72,
+        "wheelbaseM": 2.79
+      },
+      "silhouette": [
+        "A boxy two-box four-door four-wheel drive with a flat roof and a vertical tailgate",
+        "A high flat bonnet and squared wheel arches on a tall body"
+      ],
+      "cues": [
+        "rectangular headlamps beside a plain slatted grille",
+        "grey plastic cladding along the lower body and around the arches",
+        "tall rectangular tail lamps flanking the tailgate",
+        "black roof rails",
+        "five-spoke alloy wheels with chunky all-terrain tyres"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "grey plastic cladding, black tyres"
+      ],
+      "avoid": [
+        "a rounded car-like crossover body",
+        "a low stance"
+      ]
+    },
+    {
+      "id": "suv-fullsize",
+      "subject": "modern American full-size sport utility vehicle",
+      "era": "2015-2022",
+      "paint": "deep metallic bronze",
+      "dims": {
+        "lengthM": 5.35,
+        "widthM": 2.06,
+        "heightM": 1.93,
+        "wheelbaseM": 3.07
+      },
+      "silhouette": [
+        "A very large squared four-door sport utility with a tall flat-sided body and a long roof",
+        "A big upright nose and a vertical tailgate"
+      ],
+      "cues": [
+        "a tall wide grille with heavy horizontal bars and large squared headlamps",
+        "chrome side steps below each door",
+        "tall vertical tail lamps",
+        "large polished multi-spoke alloy wheels",
+        "chrome roof rails and window surrounds"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "chrome trim, dark privacy glass, black tyres"
+      ],
+      "avoid": [
+        "a compact or car-like body",
+        "a pickup bed"
+      ],
+      "size": "1344x768"
+    },
+    {
+      "id": "suv-boxy-4x4",
+      "subject": "boxy short-wheelbase off-road four-wheel drive with removable doors",
+      "era": "1997-2006",
+      "paint": "bright safety yellow",
+      "dims": {
+        "lengthM": 3.88,
+        "widthM": 1.72,
+        "heightM": 1.8,
+        "wheelbaseM": 2.37
+      },
+      "silhouette": [
+        "A short tall utilitarian box with flat vertical sides, a flat vertical windscreen and a flat roof",
+        "Round headlamps in a flat slotted grille, wheels pushed to the extreme corners"
+      ],
+      "cues": [
+        "seven vertical slots in a flat upright grille with a round lamp each side",
+        "exposed door hinges and a flat folding windscreen frame",
+        "a spare wheel mounted on the vertical tailgate",
+        "black tubular side steps",
+        "steel wheels with deep off-road tyres"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "matt black trim, black tyres"
+      ],
+      "avoid": [
+        "a rounded aerodynamic body",
+        "a long wheelbase"
+      ]
+    },
+    {
+      "id": "pickup-halfton-90s",
+      "subject": "1990s American half-ton regular-cab pickup truck",
+      "era": "1994-2002",
+      "paint": "brick red",
+      "dims": {
+        "lengthM": 5.33,
+        "widthM": 1.98,
+        "heightM": 1.85,
+        "wheelbaseM": 3.02
+      },
+      "silhouette": [
+        "A two-door pickup with a long open cargo bed behind a short upright cab",
+        "A tall flat bonnet and squared wheel arches"
+      ],
+      "cues": [
+        "rectangular headlamps beside a plain horizontal-bar grille",
+        "a chrome front bumper and chrome mirrors on arms",
+        "a step cut into the rear bumper below the tailgate",
+        "plain steel wheels with chrome hub caps",
+        "a dark rubbing strip along each door"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "chrome trim, black tyres"
+      ],
+      "avoid": [
+        "a crew cab with four doors",
+        "a covered or enclosed cargo bed"
+      ],
+      "size": "1344x768"
+    },
+    {
+      "id": "pickup-crewcab-modern",
+      "subject": "modern American crew-cab pickup truck",
+      "era": "2018-2023",
+      "paint": "deep metallic copper",
+      "dims": {
+        "lengthM": 5.89,
+        "widthM": 2.03,
+        "heightM": 1.96,
+        "wheelbaseM": 3.68
+      },
+      "silhouette": [
+        "A very large four-door pickup with a tall slab-sided cab and a shorter open cargo bed",
+        "A huge upright nose standing well above the wheel tops"
+      ],
+      "cues": [
+        "a very tall wide grille with heavy bars and big squared headlamps",
+        "black side steps under each door",
+        "a sculpted bed side with a flared rear arch",
+        "large alloy wheels with all-terrain tyres",
+        "a body-coloured tailgate with a recessed handle"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "black plastic trim, black tyres"
+      ],
+      "avoid": [
+        "a two-door cab",
+        "a low car-like stance"
+      ],
+      "size": "1344x768"
+    },
+    {
+      "id": "pickup-compact-80s",
+      "subject": "1980s compact two-door pickup truck",
+      "era": "1983-1992",
+      "paint": "pale blue",
+      "dims": {
+        "lengthM": 4.65,
+        "widthM": 1.68,
+        "heightM": 1.6,
+        "wheelbaseM": 2.85
+      },
+      "silhouette": [
+        "A small plain two-door pickup with a short upright cab and an open cargo bed",
+        "Flat slab sides and a low flat bonnet"
+      ],
+      "cues": [
+        "two square headlamps beside a small slotted grille",
+        "a plain chrome bumper and black mirrors on arms",
+        "a simple drop tailgate with a horizontal handle",
+        "narrow steel wheels with small hub caps",
+        "black plastic wheel arch lips"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "black trim, black tyres"
+      ],
+      "avoid": [
+        "a large modern pickup body",
+        "a crew cab"
+      ]
+    },
+    {
+      "id": "truck-flatbed-dually",
+      "subject": "medium work pickup truck with dual rear wheels and a flatbed",
+      "era": "2005-2018",
+      "paint": "strong utility red",
+      "dims": {
+        "lengthM": 6.6,
+        "widthM": 2.3,
+        "heightM": 2.05,
+        "wheelbaseM": 4.1
+      },
+      "silhouette": [
+        "A tall work truck with a crew cab and a flat wooden-decked bed with no sides",
+        "Four wheels on the rear axle, the rear wings flared wide to cover them"
+      ],
+      "cues": [
+        "a plain tall grille with square headlamps",
+        "a steel headache rack behind the cab",
+        "wide flared rear wings over twin rear wheels",
+        "a flat deck with stake pockets along its edges",
+        "plain steel wheels"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "bare timber deck, black tyres"
+      ],
+      "avoid": [
+        "an enclosed body or box",
+        "a short single-cab body"
+      ],
+      "size": "1344x768"
+    },
+    {
+      "id": "van-cargo-fullsize",
+      "subject": "American full-size panel cargo van",
+      "era": "1995-2014",
+      "paint": "deep delivery blue",
+      "dims": {
+        "lengthM": 5.5,
+        "widthM": 2.0,
+        "heightM": 2.1,
+        "wheelbaseM": 3.51
+      },
+      "silhouette": [
+        "A tall box-shaped van with a short bonnet, a flat vertical nose and a long blank flank",
+        "Twin hinged rear doors and a flat roof"
+      ],
+      "cues": [
+        "rectangular headlamps beside a plain grille on a short bonnet",
+        "no side windows behind the front doors, just blank painted panel",
+        "twin rear doors with small square windows",
+        "black plastic bumpers",
+        "plain steel wheels with black centre caps"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "black plastic trim, black tyres"
+      ],
+      "avoid": [
+        "any company lettering, logo or graphics",
+        "side windows along the cargo area"
+      ],
+      "size": "1344x768"
+    },
+    {
+      "id": "van-step-delivery",
+      "subject": "walk-in step delivery van",
+      "era": "1990-2015",
+      "paint": "rich chocolate brown",
+      "dims": {
+        "lengthM": 6.4,
+        "widthM": 2.3,
+        "heightM": 2.8,
+        "wheelbaseM": 3.4
+      },
+      "silhouette": [
+        "A tall slab-sided walk-in van: a near-vertical windscreen right at the front, a flat roof and a long box body",
+        "A roll-up door at the back and a sliding door on the driver's side"
+      ],
+      "cues": [
+        "a very upright two-piece windscreen with the door immediately behind it",
+        "a bulkhead-mounted mirror on a long arm each side",
+        "horizontal ribs pressed along the body sides",
+        "a roll-up shutter door at the rear",
+        "plain steel wheels, twin at the rear"
+      ],
+      "materials": [
+        "painted aluminium panels",
+        "black rubber, black tyres"
+      ],
+      "avoid": [
+        "any company lettering, logo or livery graphics",
+        "a bonnet ahead of the windscreen"
+      ],
+      "size": "1344x768"
+    },
+    {
+      "id": "truck-box-medium",
+      "subject": "medium box truck with a separate cab and cargo box",
+      "era": "2005-2020",
+      "paint": "strong cobalt blue",
+      "dims": {
+        "lengthM": 8.2,
+        "widthM": 2.44,
+        "heightM": 3.4,
+        "wheelbaseM": 5.2
+      },
+      "silhouette": [
+        "A short forward cab with a long tall rectangular cargo box behind it, taller than the cab",
+        "A roll-up door at the back above a folding tail lift"
+      ],
+      "cues": [
+        "a small two-door cab with a plain grille and square headlamps",
+        "a smooth-sided cargo box with a rounded front fairing on its roof",
+        "a steel tail lift folded flat against the rear",
+        "mirrors on long brackets each side",
+        "plain steel wheels, twin at the rear"
+      ],
+      "materials": [
+        "painted steel cab with an aluminium box",
+        "black tyres"
+      ],
+      "avoid": [
+        "any company lettering, logo or graphics",
+        "a trailer or articulated joint"
+      ],
+      "size": "1344x768"
+    },
+    {
+      "id": "semi-conventional",
+      "subject": "American conventional long-nose articulated truck tractor unit",
+      "era": "1995-2015",
+      "paint": "deep maroon with polished aluminium tanks and trim",
+      "dims": {
+        "lengthM": 7.4,
+        "widthM": 2.55,
+        "heightM": 3.9,
+        "wheelbaseM": 4.6
+      },
+      "silhouette": [
+        "A long bonnet ahead of a tall square cab with a sleeper box behind it, and a bare fifth-wheel deck at the back",
+        "Two chrome exhaust stacks standing vertically behind the cab"
+      ],
+      "cues": [
+        "a tall upright chrome grille with square headlamps either side",
+        "twin vertical chrome exhaust stacks and air horns on the roof",
+        "polished cylindrical fuel tanks under each door with a step above",
+        "a large flat sun visor over the windscreen",
+        "polished alloy wheels, twin at the rear"
+      ],
+      "materials": [
+        "glossy painted steel with polished aluminium",
+        "chrome, black tyres"
+      ],
+      "avoid": [
+        "any fleet name, logo or lettering",
+        "a flat-fronted cab with no bonnet",
+        "a trailer attached"
+      ],
+      "size": "1344x768"
+    },
+    {
+      "id": "semi-daycab",
+      "subject": "flat-fronted articulated truck tractor day cab with no sleeper",
+      "era": "2010-2022",
+      "paint": "deep fleet blue",
+      "dims": {
+        "lengthM": 6.1,
+        "widthM": 2.55,
+        "heightM": 3.7,
+        "wheelbaseM": 3.8
+      },
+      "silhouette": [
+        "A short cab sitting directly above the front axle with a very short sloping nose and no sleeper behind it",
+        "A bare fifth-wheel deck and frame rails visible behind the cab"
+      ],
+      "cues": [
+        "a wide low grille with rectangular headlamps set into a sloping nose",
+        "large mirrors on tubular brackets each side of the windscreen",
+        "a single exhaust stack behind the cab",
+        "air tanks and a battery box on the frame rails",
+        "plain steel wheels, twin at the rear"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "black plastic trim, black tyres"
+      ],
+      "avoid": [
+        "any fleet name, logo or lettering",
+        "a long bonnet",
+        "a sleeper cab"
+      ],
+      "size": "1344x768"
+    },
+    {
+      "id": "trailer-dryvan",
+      "subject": "long enclosed semi-trailer box with no tractor unit",
+      "era": "2000-2022",
+      "paint": "strong fleet blue with a bare aluminium lower rail",
+      "dims": {
+        "lengthM": 16.15,
+        "widthM": 2.6,
+        "heightM": 4.1,
+        "wheelbaseM": 10.0
+      },
+      "silhouette": [
+        "A very long plain rectangular box on a rear bogie, with landing legs down at the front and no tractor unit",
+        "Twin hinged doors at the rear with vertical locking bars"
+      ],
+      "cues": [
+        "a smooth riveted aluminium side wall with a horizontal rail top and bottom",
+        "two hinged rear doors with four vertical locking bars",
+        "a rear underrun bar below the doors",
+        "landing legs with a crank handle at the front",
+        "plain steel wheels on a tandem rear bogie"
+      ],
+      "materials": [
+        "painted aluminium panels",
+        "bare aluminium rails, black tyres"
+      ],
+      "avoid": [
+        "any fleet name, logo, lettering or graphics",
+        "a tractor unit attached"
+      ],
+      "size": "1344x768"
+    },
+    {
+      "id": "trailer-flatbed",
+      "subject": "long flat semi-trailer deck with no tractor unit",
+      "era": "2000-2022",
+      "paint": "oxide red steel frame with a bare timber deck",
+      "dims": {
+        "lengthM": 14.6,
+        "widthM": 2.6,
+        "heightM": 1.5,
+        "wheelbaseM": 9.0
+      },
+      "silhouette": [
+        "A long bare flat deck on a rear bogie with nothing on it, landing legs down at the front",
+        "A row of stake pockets along each edge and no sides at all"
+      ],
+      "cues": [
+        "a timber plank deck over steel cross members",
+        "stake pockets and rub rail along both edges",
+        "landing legs at the front",
+        "a tandem rear bogie with mudguards over the wheels",
+        "a toolbox slung under the deck"
+      ],
+      "materials": [
+        "painted steel frame with a timber deck",
+        "black tyres"
+      ],
+      "avoid": [
+        "any cargo, straps or load",
+        "a tractor unit attached",
+        "an enclosed body"
+      ],
+      "size": "1344x768"
+    },
+    {
+      "id": "truck-dump",
+      "subject": "heavy tipper dump truck with a raised-sided body",
+      "era": "2005-2020",
+      "paint": "highway orange",
+      "dims": {
+        "lengthM": 8.5,
+        "widthM": 2.5,
+        "heightM": 3.3,
+        "wheelbaseM": 4.5
+      },
+      "silhouette": [
+        "A short forward cab with a deep open steel dump body behind it, sloping up towards the tailgate",
+        "Three axles, the rear two close together"
+      ],
+      "cues": [
+        "a plain tall grille with square headlamps and a black bumper",
+        "a deep steel body with reinforcing ribs pressed down its sides",
+        "twin hydraulic rams visible below the body front",
+        "a folding steel tailgate hinged at the top",
+        "plain steel wheels, twin at the rear"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "bare steel body, black tyres"
+      ],
+      "avoid": [
+        "any company lettering or logo",
+        "a flat deck or enclosed box"
+      ],
+      "size": "1344x768"
+    },
+    {
+      "id": "truck-tow-rollback",
+      "subject": "flatbed rollback recovery truck with a tilting deck",
+      "era": "2005-2020",
+      "paint": "bright orange",
+      "dims": {
+        "lengthM": 9.0,
+        "widthM": 2.5,
+        "heightM": 3.1,
+        "wheelbaseM": 5.6
+      },
+      "silhouette": [
+        "A medium cab with a long flat steel deck behind it that slides back and tilts down to the ground",
+        "A winch and control levers at the front of the deck"
+      ],
+      "cues": [
+        "a plain grille with square headlamps and amber marker lamps above the windscreen",
+        "a long ribbed steel deck with a shallow ramp angle at the rear",
+        "a winch drum and cable at the head of the deck",
+        "an amber beacon bar above the cab",
+        "plain steel wheels, twin at the rear"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "bare steel deck, black tyres"
+      ],
+      "avoid": [
+        "any recovery company name, telephone number or lettering",
+        "a car on the deck"
+      ],
+      "size": "1344x768"
+    },
+    {
+      "id": "truck-tow-wheellift",
+      "subject": "medium wrecker recovery truck with a boom and wheel lift",
+      "era": "2000-2018",
+      "paint": "strong recovery blue",
+      "dims": {
+        "lengthM": 7.2,
+        "widthM": 2.4,
+        "heightM": 3.0,
+        "wheelbaseM": 4.2
+      },
+      "silhouette": [
+        "A pickup-derived cab with a heavy steel body behind it carrying a rear boom and an underlift arm",
+        "Toolbox lockers down each side of the body"
+      ],
+      "cues": [
+        "a folding steel underlift arm projecting from under the rear",
+        "a short boom and winch above it",
+        "an amber light bar on the body headboard",
+        "lockers with flat hinged doors along each flank",
+        "plain steel wheels, twin at the rear"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "bare steel fittings, black tyres"
+      ],
+      "avoid": [
+        "any recovery company name or telephone number",
+        "a flat tilting deck"
+      ],
+      "size": "1344x768"
+    },
+    {
+      "id": "truck-garbage-rearload",
+      "subject": "rear-loading refuse collection truck",
+      "era": "2005-2020",
+      "paint": "municipal deep green",
+      "dims": {
+        "lengthM": 9.5,
+        "widthM": 2.5,
+        "heightM": 3.6,
+        "wheelbaseM": 5.2
+      },
+      "silhouette": [
+        "A forward cab with a tall enclosed refuse body behind it and a sloping hopper at the very back",
+        "A hydraulic packer panel closing the rear hopper"
+      ],
+      "cues": [
+        "a plain grille with square headlamps and a black steel bumper",
+        "a smooth-sided compaction body with a curved roof",
+        "a deep open hopper at the rear with hydraulic rams each side",
+        "grab handles and a standing step at the back",
+        "plain steel wheels, twin at the rear"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "bare steel hopper, black tyres"
+      ],
+      "avoid": [
+        "any municipality or company name or lettering",
+        "a tipper or flat body"
+      ],
+      "size": "1344x768"
+    },
+    {
+      "id": "truck-mixer",
+      "subject": "concrete mixer truck with a rotating drum",
+      "era": "2005-2020",
+      "paint": "strong red cab with a deep ochre drum",
+      "dims": {
+        "lengthM": 9.2,
+        "widthM": 2.55,
+        "heightM": 3.9,
+        "wheelbaseM": 4.8
+      },
+      "silhouette": [
+        "A forward cab with a large inclined rotating drum behind it, wider at its middle and tapering at both ends",
+        "A delivery chute folded at the rear below the drum mouth"
+      ],
+      "cues": [
+        "a spiral reinforcing rib wrapping around the drum",
+        "a steel access ladder up the rear of the frame",
+        "a folding delivery chute hinged under the drum mouth",
+        "a water tank mounted on the frame",
+        "plain steel wheels on three axles"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "bare steel drum fittings, black tyres"
+      ],
+      "avoid": [
+        "any concrete company name or logo",
+        "a flat or enclosed body"
+      ],
+      "size": "1344x768"
+    },
+    {
+      "id": "bus-school",
+      "subject": "American yellow school bus",
+      "era": "1995-2020",
+      "paint": "school bus yellow",
+      "dims": {
+        "lengthM": 10.7,
+        "widthM": 2.44,
+        "heightM": 3.1,
+        "wheelbaseM": 6.0
+      },
+      "silhouette": [
+        "A long flat-sided bus with a short bonnet ahead of a near-vertical windscreen and a flat roof",
+        "A long row of evenly spaced square side windows"
+      ],
+      "cues": [
+        "a short bonnet with a plain grille and round headlamps",
+        "a folding passenger door immediately behind the front wheel",
+        "red and amber warning lamps at roof level front and rear",
+        "a hinged stop-sign paddle folded flat against the driver's side",
+        "black rubber crossing arm at the front bumper"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "black rubber trim, black tyres"
+      ],
+      "avoid": [
+        "any school district name, number or lettering",
+        "a flat-fronted transit body"
+      ],
+      "size": "1344x768"
+    },
+    {
+      "id": "bus-transit-city",
+      "subject": "modern low-floor city transit bus",
+      "era": "2010-2022",
+      "paint": "deep transit teal-free blue with a lighter band",
+      "dims": {
+        "lengthM": 12.2,
+        "widthM": 2.55,
+        "heightM": 3.2,
+        "wheelbaseM": 6.0
+      },
+      "silhouette": [
+        "A long flat-fronted low-floor bus with a large single-piece windscreen and a flat roof",
+        "Two wide double doors on the kerb side and a continuous band of side glass"
+      ],
+      "cues": [
+        "a deep flat windscreen with the destination display recessed above it, blank",
+        "two sets of wide outward-folding doors on one side",
+        "a roof-mounted air conditioning pod",
+        "a wheelchair ramp edge at the front door",
+        "plain steel wheels with chrome hub rings"
+      ],
+      "materials": [
+        "painted composite panels",
+        "dark tinted glass, black tyres"
+      ],
+      "avoid": [
+        "any transit authority name, route number or lettering",
+        "a bonnet ahead of the windscreen"
+      ],
+      "size": "1344x768"
+    },
+    {
+      "id": "bus-coach",
+      "subject": "long-distance touring coach with a raised passenger deck",
+      "era": "2005-2020",
+      "paint": "deep coach maroon",
+      "dims": {
+        "lengthM": 13.7,
+        "widthM": 2.6,
+        "heightM": 3.7,
+        "wheelbaseM": 7.2
+      },
+      "silhouette": [
+        "A tall long coach with a raised passenger floor above deep luggage lockers along each flank",
+        "A steeply raked windscreen and tinted glass running the length of the body"
+      ],
+      "cues": [
+        "a deep two-piece raked windscreen with a blank destination panel above",
+        "long luggage locker doors hinged upward along the lower body",
+        "a single entrance door ahead of the front wheel",
+        "dark tinted side glass in one continuous band",
+        "polished alloy wheels on three axles"
+      ],
+      "materials": [
+        "painted composite panels",
+        "dark tinted glass, black tyres"
+      ],
+      "avoid": [
+        "any operator name, logo or lettering",
+        "a low-floor city bus layout"
+      ],
+      "size": "1344x768"
+    },
+    {
+      "id": "plant-excavator",
+      "subject": "tracked hydraulic excavator with the boom folded",
+      "era": "2005-2020",
+      "paint": "construction yellow",
+      "dims": {
+        "lengthM": 9.5,
+        "widthM": 2.8,
+        "heightM": 3.0,
+        "wheelbaseM": 3.5
+      },
+      "silhouette": [
+        "A boxy cab and engine house on a slewing platform above two long steel crawler tracks",
+        "A jointed boom and dipper folded forward with the bucket resting near the tracks"
+      ],
+      "cues": [
+        "steel crawler tracks with link plates and idler wheels",
+        "a glazed cab on one side of the platform with a counterweight at the rear",
+        "a jointed boom with hydraulic rams along its top",
+        "a toothed digging bucket at the end of the dipper",
+        "handrails along the top of the engine house"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "bare steel tracks and rams, black rubber"
+      ],
+      "avoid": [
+        "any manufacturer name, model number or lettering",
+        "wheels instead of tracks"
+      ],
+      "size": "768x1344"
+    },
+    {
+      "id": "plant-backhoe",
+      "subject": "wheeled backhoe loader with a front bucket and a rear digging arm",
+      "era": "2005-2020",
+      "paint": "construction yellow",
+      "dims": {
+        "lengthM": 5.8,
+        "widthM": 2.35,
+        "heightM": 3.7,
+        "wheelbaseM": 2.2
+      },
+      "silhouette": [
+        "A tractor-like machine with a wide loader bucket on arms at the front and a folded digging arm at the rear",
+        "Small front wheels and much larger rear wheels"
+      ],
+      "cues": [
+        "a wide flat loader bucket carried on two arms over the front",
+        "a jointed backhoe arm folded over the rear with a narrow toothed bucket",
+        "two hydraulic stabiliser legs either side of the rear",
+        "a boxy glazed cab in the middle",
+        "deep-treaded tyres, large at the rear"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "bare steel rams, black tyres"
+      ],
+      "avoid": [
+        "any manufacturer name or model number",
+        "crawler tracks"
+      ],
+      "size": "768x1344"
+    },
+    {
+      "id": "plant-skidsteer",
+      "subject": "compact skid-steer loader with a front bucket",
+      "era": "2005-2020",
+      "paint": "construction yellow",
+      "dims": {
+        "lengthM": 3.4,
+        "widthM": 1.7,
+        "heightM": 2.1,
+        "wheelbaseM": 1.1
+      },
+      "silhouette": [
+        "A very small square machine with a narrow upright cage cab between two lift arms that sweep up behind it",
+        "Four small wheels close together under a compact body"
+      ],
+      "cues": [
+        "two lift arms running from the rear up and over to a flat bucket at the front",
+        "an open steel cage cab with a front entry",
+        "a boxy engine housing behind the cab",
+        "small deep-treaded tyres",
+        "hydraulic hoses running along the lift arms"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "bare steel bucket, black tyres"
+      ],
+      "avoid": [
+        "any manufacturer name or model number",
+        "crawler tracks"
+      ]
+    },
+    {
+      "id": "plant-wheelloader",
+      "subject": "articulated wheeled front loader with a large bucket",
+      "era": "2005-2020",
+      "paint": "construction yellow",
+      "dims": {
+        "lengthM": 7.6,
+        "widthM": 2.7,
+        "heightM": 3.4,
+        "wheelbaseM": 3.2
+      },
+      "silhouette": [
+        "A large machine hinged in the middle, with a wide bucket on two arms at the front and the engine at the rear",
+        "Four very large equal wheels"
+      ],
+      "cues": [
+        "a wide flat-bottomed bucket on two heavy lift arms",
+        "a clear articulation joint between front and rear halves",
+        "a glazed cab set above the joint",
+        "a boxy engine hood with a grille at the rear",
+        "very large deep-treaded tyres"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "bare steel bucket, black tyres"
+      ],
+      "avoid": [
+        "any manufacturer name or model number",
+        "crawler tracks"
+      ],
+      "size": "1344x768"
+    },
+    {
+      "id": "plant-bulldozer",
+      "subject": "tracked crawler bulldozer with a straight blade",
+      "era": "2005-2020",
+      "paint": "construction yellow",
+      "dims": {
+        "lengthM": 5.6,
+        "widthM": 3.2,
+        "heightM": 3.1,
+        "wheelbaseM": 2.6
+      },
+      "silhouette": [
+        "A heavy tracked machine with a wide straight blade carried on arms across the front",
+        "A glazed cab set centrally above the tracks with a ripper at the rear"
+      ],
+      "cues": [
+        "a wide steel blade with a replaceable cutting edge along its bottom",
+        "steel crawler tracks with raised drive sprockets at the rear",
+        "push arms running from the blade back to the track frames",
+        "a single-shank ripper tooth at the rear",
+        "handrails and steps up to the cab"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "bare steel blade and tracks"
+      ],
+      "avoid": [
+        "any manufacturer name or model number",
+        "wheels instead of tracks"
+      ],
+      "size": "1344x768"
+    },
+    {
+      "id": "plant-roller",
+      "subject": "twin-drum vibratory road roller",
+      "era": "2005-2020",
+      "paint": "construction yellow",
+      "dims": {
+        "lengthM": 4.6,
+        "widthM": 1.8,
+        "heightM": 2.9,
+        "wheelbaseM": 2.8
+      },
+      "silhouette": [
+        "A small machine with a wide smooth steel drum at each end and an operator platform between them",
+        "Hinged in the middle between the two drums"
+      ],
+      "cues": [
+        "two wide smooth steel drums, front and rear",
+        "an open canopy roof on four posts over the seat",
+        "water spray tanks mounted above each drum",
+        "a scraper bar touching each drum",
+        "a control console with a single lever"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "bare polished steel drums"
+      ],
+      "avoid": [
+        "any manufacturer name or model number",
+        "rubber tyres instead of drums"
+      ],
+      "size": "768x1344"
+    },
+    {
+      "id": "farm-tractor-utility",
+      "subject": "mid-size farm utility tractor with a cab",
+      "era": "2000-2020",
+      "paint": "deep green with a pale yellow chassis and wheels",
+      "dims": {
+        "lengthM": 4.4,
+        "widthM": 2.1,
+        "heightM": 2.8,
+        "wheelbaseM": 2.4
+      },
+      "silhouette": [
+        "A farm tractor with small front wheels, very large rear wheels and a glazed cab set back over the rear axle",
+        "A long bonnet sloping down to the front axle"
+      ],
+      "cues": [
+        "very large deep-lugged rear tyres and much smaller front ones",
+        "a narrow sloping bonnet with the exhaust stack standing beside the windscreen",
+        "a glazed cab with a flat roof and wide rear window",
+        "a three-point linkage and drawbar at the rear",
+        "front weights on the nose"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "bare steel linkage, black tyres"
+      ],
+      "avoid": [
+        "any manufacturer name or model number",
+        "crawler tracks"
+      ],
+      "size": "768x1344"
+    },
+    {
+      "id": "farm-tractor-rowcrop",
+      "subject": "large row-crop farm tractor with dual rear wheels",
+      "era": "2005-2020",
+      "paint": "deep green with a pale yellow chassis",
+      "dims": {
+        "lengthM": 5.8,
+        "widthM": 2.9,
+        "heightM": 3.3,
+        "wheelbaseM": 3.0
+      },
+      "silhouette": [
+        "A large high-clearance tractor with a tall glazed cab and twin wheels on each side of the rear axle",
+        "A long high bonnet and a narrow front axle"
+      ],
+      "cues": [
+        "twin deep-lugged tyres on each rear hub",
+        "a tall vertical exhaust stack and air cleaner beside the windscreen",
+        "a wide glazed cab with roof work lamps",
+        "a heavy three-point linkage at the rear",
+        "front suitcase weights on a bracket"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "bare steel linkage, black tyres"
+      ],
+      "avoid": [
+        "any manufacturer name or model number",
+        "a small compact body"
+      ],
+      "size": "768x1344"
+    },
+    {
+      "id": "farm-combine",
+      "subject": "self-propelled combine harvester with the header removed",
+      "era": "2005-2020",
+      "paint": "deep green with a pale yellow grain tank and header mounting",
+      "dims": {
+        "lengthM": 9.0,
+        "widthM": 3.5,
+        "heightM": 4.0,
+        "wheelbaseM": 3.8
+      },
+      "silhouette": [
+        "A very large machine with a tall body, a glazed cab high at the front and an open grain tank above",
+        "A long unloading auger folded along one side, and no cutting header fitted"
+      ],
+      "cues": [
+        "a bare header mounting frame and feeder house sloping down at the front",
+        "a long tubular unloading auger folded back along the side",
+        "an open-topped grain tank with folding extensions",
+        "very large front drive wheels and small steered rear wheels",
+        "a glazed cab with a ladder up to it"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "bare steel auger, black tyres"
+      ],
+      "avoid": [
+        "any manufacturer name or model number",
+        "a cutting header attached"
+      ],
+      "size": "1344x768"
+    },
+    {
+      "id": "farm-baler",
+      "subject": "towed round hay baler",
+      "era": "2000-2020",
+      "paint": "deep green with pale yellow trim",
+      "dims": {
+        "lengthM": 4.8,
+        "widthM": 2.6,
+        "heightM": 2.7,
+        "wheelbaseM": 2.0
+      },
+      "silhouette": [
+        "A towed machine shaped like a big drum on two wheels, with a pickup reel low at the front and a hinged tailgate",
+        "A drawbar running forward to a hitch eye"
+      ],
+      "cues": [
+        "a wide spring-tine pickup reel across the bottom front",
+        "a rounded body hinged across its middle so the rear half lifts",
+        "a drawbar with a hitch eye and a driveline shaft along it",
+        "two road wheels under the body",
+        "a control box on the drawbar"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "bare steel tines, black tyres"
+      ],
+      "avoid": [
+        "any manufacturer name or model number",
+        "a tractor attached"
+      ]
+    },
+    {
+      "id": "farm-grain-wagon",
+      "subject": "towed grain wagon with sloping sides",
+      "era": "2000-2020",
+      "paint": "deep red",
+      "dims": {
+        "lengthM": 6.2,
+        "widthM": 2.6,
+        "heightM": 3.1,
+        "wheelbaseM": 3.0
+      },
+      "silhouette": [
+        "A large open-topped hopper with steeply sloping sides on a four-wheel running gear, with a drawbar at the front",
+        "An unloading auger folded along one side"
+      ],
+      "cues": [
+        "a deep hopper body tapering to a discharge at the bottom",
+        "a folded unloading auger with a small hood at its top",
+        "a ladder up one side to the hopper rim",
+        "a long drawbar with a hitch eye",
+        "four road wheels on a steered front bogie"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "bare steel auger, black tyres"
+      ],
+      "avoid": [
+        "any manufacturer name or model number",
+        "a tractor attached"
+      ],
+      "size": "1344x768"
+    }
+  ]
+}

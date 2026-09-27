@@ -1,0 +1,844 @@
+{
+  "$comment": [
+    "Hero cars, European. Same rule as the JDM roster: the silhouette is exact and the lamps,",
+    "mirrors and bumpers are deliberately wrong, so the car is unmistakable and is not the car.",
+    "Cars whose entire fame is their pop-up headlamps are therefore asked for fixed ones — that is",
+    "the single most effective lever here, because a pop-up era wedge with flush lamps reads as a",
+    "period-correct sibling of the real thing rather than a bad copy of it.",
+    "Paint words are checked against BOTH despills before a GPU is spent: yellow goes on magenta,",
+    "purple goes on green. style.mjs picks; it is not a matter of taste."
+  ],
+  "defaults": {
+    "class": "hero-car",
+    "view": "front-three-quarter"
+  },
+  "assets": [
+    {
+      "id": "f40-analogue",
+      "subject": "late-1980s Italian mid-engined twin-turbo supercar",
+      "era": "1987-1992",
+      "paint": "bright racing red, matte composite finish",
+      "dims": {
+        "lengthM": 4.36,
+        "widthM": 1.97,
+        "heightM": 1.12,
+        "wheelbaseM": 2.45
+      },
+      "silhouette": [
+        "A raw racing shape: a low flat nose, a tiny forward cabin, then a long FLAT horizontal rear deck",
+        "Defined by one enormous flat rear wing spanning the full width, rising straight out of the tail on two short fins"
+      ],
+      "cues": [
+        "a transparent slatted cover over the rear deck showing the engine",
+        "small fixed rectangular lamps flush behind clear covers in the nose",
+        "NACA duct scoops cut flat into the bonnet and flanks",
+        "a lightly textured matte composite body, not glossy",
+        "wide five-spoke wheels, fatter at the rear"
+      ],
+      "materials": [
+        "lightly textured composite, slightly matte",
+        "black mesh grilles, black tyres"
+      ],
+      "avoid": [
+        "a knife-edge nose at ground level or box scoops above the rear shoulders",
+        "scissor doors, a long tapering tail, or a glossy rounded body"
+      ],
+      "fillHoles": false
+    },
+    {
+      "id": "f355-analogue",
+      "subject": "mid-1990s Italian mid-engined V8 sports coupe",
+      "era": "1994-1999",
+      "paint": "deep metallic silver-grey",
+      "dims": {
+        "lengthM": 4.25,
+        "widthM": 1.9,
+        "heightM": 1.17,
+        "wheelbaseM": 2.45
+      },
+      "silhouette": [
+        "A smooth flowing mid-engined coupe, low and wide, with a soft rounded nose and a high rounded tail",
+        "A small cabin set forward with a curved rear screen over a short engine deck"
+      ],
+      "cues": [
+        "small fixed almond lamps in a low rounded nose with an oval central intake",
+        "large scooped air intakes in the body sides ahead of the rear wheels",
+        "four round tail lamps, two each side, in a black tail panel",
+        "a small integrated lip on the tail and a black lower diffuser",
+        "five-spoke alloy wheels, wider at the rear"
+      ],
+      "materials": [
+        "glossy painted body with a deep clear coat",
+        "black mesh, black tyres"
+      ],
+      "avoid": [
+        "pop-up headlamps",
+        "a large fixed rear wing"
+      ],
+      "shape": "organic"
+    },
+    {
+      "id": "testarossa-analogue",
+      "subject": "1980s Italian wide flat mid-engined twelve-cylinder coupe",
+      "era": "1984-1991",
+      "paint": "bright racing red",
+      "dims": {
+        "lengthM": 4.48,
+        "widthM": 1.98,
+        "heightM": 1.13,
+        "wheelbaseM": 2.55
+      },
+      "silhouette": [
+        "Extremely wide and flat, the rear track far wider than the front, with a long flat bonnet",
+        "A low wedge nose rising to a flat roof and a squared, chopped-off tail"
+      ],
+      "cues": [
+        "long horizontal strakes running across each side intake and into the door",
+        "slim fixed lamps set flush in the leading edge of the low nose",
+        "a full-width black slatted grille across the tail",
+        "flat door mirrors on tall single stalks set high on the pillars",
+        "wide flat-faced five-spoke wheels"
+      ],
+      "materials": [
+        "glossy painted steel and alloy",
+        "matt black slats and sills, black tyres"
+      ],
+      "avoid": [
+        "pop-up headlamps",
+        "a tall rear wing"
+      ]
+    },
+    {
+      "id": "308-analogue",
+      "subject": "late-1970s Italian mid-engined V8 coupe",
+      "era": "1975-1985",
+      "paint": "bright racing red",
+      "dims": {
+        "lengthM": 4.25,
+        "widthM": 1.73,
+        "heightM": 1.12,
+        "wheelbaseM": 2.34
+      },
+      "silhouette": [
+        "A compact mid-engined coupe with a low wedge nose, a small upright cabin and a short flat tail",
+        "Sharply scalloped flanks cut in ahead of the rear wheels"
+      ],
+      "cues": [
+        "small fixed rectangular lamps flush in the nose above a slim black bumper",
+        "a deep concave scoop carved into each body side feeding the rear wheels",
+        "flying buttresses running back from the roof around a recessed rear window",
+        "four round tail lamps, two each side",
+        "five-spoke star-pattern alloy wheels"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "matt black sills and bumpers, black tyres"
+      ],
+      "avoid": [
+        "pop-up headlamps",
+        "a rear wing or spoiler"
+      ]
+    },
+    {
+      "id": "countach-analogue",
+      "subject": "1970s Italian extreme wedge mid-engined twelve-cylinder supercar",
+      "era": "1974-1990",
+      "paint": "vivid arancio orange",
+      "dims": {
+        "lengthM": 4.14,
+        "widthM": 2.0,
+        "heightM": 1.07,
+        "wheelbaseM": 2.45
+      },
+      "silhouette": [
+        "SHORT and enormously WIDE — almost square seen from above — with a knife-edge nose starting at ground level",
+        "One unbroken straight line runs from that nose over a tiny forward cabin to a chopped vertical tail"
+      ],
+      "cues": [
+        "a small box air intake moulded into each rear shoulder",
+        "huge NACA ducts cut flat into each flank",
+        "telephone-dial alloy wheels with deep recessed holes",
+        "fixed slim lamps in the very leading edge of the wedge",
+        "a flat slatted louvre over the engine deck"
+      ],
+      "materials": [
+        "glossy painted flat composite panels",
+        "matt black trim, black tyres"
+      ],
+      "avoid": [
+        "a long tapering rear deck or a long body of any kind",
+        "a full-width flat wing rising out of the tail, or any soft rounded curve",
+        "open doors, raised doors, gullwing doors, any panel standing away from the body, flat slabs projecting from the sides"
+      ],
+      "fillHoles": false,
+      "shape": "boxy"
+    },
+    {
+      "id": "diablo-analogue",
+      "subject": "1990s Italian wide mid-engined twelve-cylinder supercar",
+      "era": "1990-2001",
+      "paint": "brilliant metallic orange",
+      "dims": {
+        "lengthM": 4.46,
+        "widthM": 2.04,
+        "heightM": 1.1,
+        "wheelbaseM": 2.65
+      },
+      "silhouette": [
+        "VERY LONG and very wide, and notably smooth: soft full surfaces with no hard fold anywhere",
+        "A small forward cabin, then a very long rear deck tapering to a narrow tail"
+      ],
+      "cues": [
+        "wide fixed lamps under flush clear covers in a low rounded nose",
+        "scooped intakes ahead of each rear wheel and low vents on the rear deck",
+        "a broad flat tail with a black slatted grille and round lamps",
+        "wide multi-spoke alloy wheels, much fatter at the rear",
+        "doors closed flush into the body sides"
+      ],
+      "materials": [
+        "glossy painted body with a deep clear coat",
+        "matt black sills, black tyres"
+      ],
+      "avoid": [
+        "a short body, a knife-edge nose, or box scoops above the rear shoulders",
+        "a large wing standing above the tail, or hard folded flat panels",
+        "doors standing open, raised or hinged upward"
+      ],
+      "shape": "organic"
+    },
+    {
+      "id": "miura-analogue",
+      "subject": "late-1960s Italian low mid-engined twelve-cylinder coupe",
+      "era": "1966-1973",
+      "paint": "brilliant metallic orange",
+      "dims": {
+        "lengthM": 4.36,
+        "widthM": 1.76,
+        "heightM": 1.05,
+        "wheelbaseM": 2.5
+      },
+      "silhouette": [
+        "Exceptionally low and voluptuous, one continuous curve from the rounded nose over a tiny cabin to a rounded tail",
+        "A transverse engine behind the cabin under a low slatted deck"
+      ],
+      "cues": [
+        "round lamps laid nearly flat in shallow recesses on top of the nose",
+        "black slats laid over the rear window and the engine deck",
+        "a row of small vents cut into the rear haunches",
+        "slim chrome bumperettes and a chrome mirror on a thin stalk",
+        "narrow deep-dished five-spoke wheels with knock-off centres"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "chrome and matt black trim, black tyres"
+      ],
+      "avoid": [
+        "pop-up headlamps",
+        "a rear wing or any hard edges"
+      ],
+      "shape": "organic"
+    },
+    {
+      "id": "stratos-analogue",
+      "subject": "1970s Italian tiny mid-engined rally homologation coupe",
+      "era": "1973-1978",
+      "paint": "bright rally red with a broad white band across the nose",
+      "dims": {
+        "lengthM": 3.71,
+        "widthM": 1.75,
+        "heightM": 1.11,
+        "wheelbaseM": 2.18
+      },
+      "silhouette": [
+        "Extraordinarily short and wide, almost square in plan, with a very short wheelbase",
+        "A steeply raked wraparound windscreen curving right around into the door glass"
+      ],
+      "cues": [
+        "four small round lamps set in a black recessed panel across the low nose",
+        "a curved helmet-visor cabin with a sharply cut-off roof",
+        "a small lip spoiler across the squared tail",
+        "black slatted vents behind each side window",
+        "wide flat-faced alloy wheels filling square arches"
+      ],
+      "materials": [
+        "glossy painted composite",
+        "matt black trim, black tyres"
+      ],
+      "avoid": [
+        "pop-up headlamps",
+        "a long bonnet or a long wheelbase"
+      ]
+    },
+    {
+      "id": "delta-integrale",
+      "subject": "late-1980s Italian boxy all-wheel-drive turbo rally hatchback",
+      "era": "1987-1994",
+      "paint": "gloss white",
+      "dims": {
+        "lengthM": 3.9,
+        "widthM": 1.77,
+        "heightM": 1.37,
+        "wheelbaseM": 2.48
+      },
+      "silhouette": [
+        "A short upright five-door hatchback, plain and square, made absurdly wide by huge bolted arch flares",
+        "A tall boxy glasshouse over a stubby body"
+      ],
+      "cues": [
+        "four round lamps in a plain rectangular grille across a flat blunt nose",
+        "huge blistered wheel arch extensions standing well proud of the body",
+        "a raised bonnet with two rows of louvred vents",
+        "a roof spoiler over a near-vertical hatch",
+        "gold-painted multi-spoke alloy wheels"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "matt black arch flares and trim, black tyres"
+      ],
+      "avoid": [
+        "a low sleek body",
+        "a three-door or coupe roofline"
+      ],
+      "shape": "boxy"
+    },
+    {
+      "id": "911-g",
+      "subject": "late-1970s German rear-engined flat-six sports coupe",
+      "era": "1974-1989, the impact-bumper generation",
+      "paint": "guards red",
+      "dims": {
+        "lengthM": 4.29,
+        "widthM": 1.65,
+        "heightM": 1.32,
+        "wheelbaseM": 2.27
+      },
+      "silhouette": [
+        "The unmistakable rear-engined profile: a short sloping bonnet, a domed roof and a long tail falling away behind the rear axle",
+        "Upright round headlamp pods standing proud on top of each front wing"
+      ],
+      "cues": [
+        "large round headlamps set upright in raised wing-top pods",
+        "deep concertina-pleated impact bumpers front and rear with rubber strips",
+        "a slim full-width tail lamp band under the engine lid",
+        "a black slatted engine grille in the tail",
+        "narrow deep-dished five-spoke wheels"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "matt black trim and pleated rubber, black tyres"
+      ],
+      "avoid": [
+        "a front engine with a long bonnet",
+        "pop-up or flush headlamps"
+      ]
+    },
+    {
+      "id": "911-964",
+      "subject": "early-1990s German rear-engined flat-six sports coupe",
+      "era": "1989-1994",
+      "paint": "guards red",
+      "dims": {
+        "lengthM": 4.25,
+        "widthM": 1.65,
+        "heightM": 1.31,
+        "wheelbaseM": 2.27
+      },
+      "silhouette": [
+        "The same rear-engined profile as its predecessor but smoothed: bumpers now flow into the body instead of standing off it",
+        "A short sloping bonnet, a domed roof, and a tail falling away behind the rear axle"
+      ],
+      "cues": [
+        "large round headlamps upright in raised wing-top pods",
+        "smooth body-coloured bumpers integrated flush into the nose and tail",
+        "a retractable spoiler sitting flat in the engine lid",
+        "a slim full-width tail lamp band",
+        "five-spoke alloy wheels with a flat dished face"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "black trim, black tyres"
+      ],
+      "avoid": [
+        "deep pleated rubber impact bumpers",
+        "a front engine"
+      ]
+    },
+    {
+      "id": "930-turbo",
+      "subject": "1980s German widebody rear-engined turbo sports coupe",
+      "era": "1978-1989",
+      "paint": "gloss white",
+      "dims": {
+        "lengthM": 4.29,
+        "widthM": 1.78,
+        "heightM": 1.31,
+        "wheelbaseM": 2.27
+      },
+      "silhouette": [
+        "A rear-engined coupe made deliberately wide, with enormously flared rear arches standing proud of the doors",
+        "A short sloping bonnet, a domed roof, and a broad squared tail"
+      ],
+      "cues": [
+        "large round headlamps upright in raised wing-top pods",
+        "an enormous flat rear wing like a tea tray sitting on the engine lid",
+        "a deep front air dam under pleated impact bumpers",
+        "air intake slots cut into the leading edge of each rear arch",
+        "very wide deep-dished five-spoke wheels at the rear"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "matt black trim, black tyres"
+      ],
+      "avoid": [
+        "narrow unflared rear arches",
+        "a front engine"
+      ]
+    },
+    {
+      "id": "944-turbo",
+      "subject": "1980s German front-engined rear-drive sports hatchback coupe",
+      "era": "1985-1991",
+      "paint": "guards red",
+      "dims": {
+        "lengthM": 4.32,
+        "widthM": 1.74,
+        "heightM": 1.28,
+        "wheelbaseM": 2.4
+      },
+      "silhouette": [
+        "A long flat bonnet, a cabin set well back and a curved glass hatch falling to a squared tail",
+        "Broad squared arch blisters standing clearly proud of flat body sides"
+      ],
+      "cues": [
+        "slim fixed lamps sunk flush into a smooth sloping body-coloured nose",
+        "a full-width slim tail lamp band across a flat tail panel",
+        "a small spoiler wrapped around the base of the hatch glass",
+        "body-coloured bumpers integrated into the nose and tail",
+        "wide flat-faced alloy wheels with a shallow dish"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "black trim, black tyres"
+      ],
+      "avoid": [
+        "pop-up headlamps",
+        "a notchback boot"
+      ]
+    },
+    {
+      "id": "928-analogue",
+      "subject": "late-1970s German front-engined V8 grand touring coupe",
+      "era": "1978-1995",
+      "paint": "metallic bronze",
+      "dims": {
+        "lengthM": 4.45,
+        "widthM": 1.84,
+        "heightM": 1.31,
+        "wheelbaseM": 2.5
+      },
+      "silhouette": [
+        "A soft rounded fastback with no sharp edge anywhere, wide hips and a large curved glass tailgate",
+        "A short blunt nose and a cabin set well back over the rear axle"
+      ],
+      "cues": [
+        "large round headlamps lying flat and exposed in shallow recesses on top of the front wings",
+        "body-coloured deformable bumpers that blend seamlessly into the body",
+        "a wide wraparound tail lamp band across a rounded tail",
+        "flush glass and almost no exterior trim",
+        "wide dished alloy wheels with a distinctive dished star face"
+      ],
+      "materials": [
+        "glossy painted steel and aluminium",
+        "dark glass, black tyres"
+      ],
+      "avoid": [
+        "sharp creases or hard folds",
+        "a notchback boot"
+      ],
+      "shape": "organic"
+    },
+    {
+      "id": "959-analogue",
+      "subject": "late-1980s German all-wheel-drive twin-turbo technology supercar",
+      "era": "1986-1989",
+      "paint": "gloss white",
+      "dims": {
+        "lengthM": 4.26,
+        "widthM": 1.84,
+        "heightM": 1.28,
+        "wheelbaseM": 2.27
+      },
+      "silhouette": [
+        "A rear-engined coupe silhouette smoothed into one continuous flowing shell, with the arches swelled into the body rather than bolted on",
+        "A low nose, a domed roof and a tail that flows into an integrated full-width wing"
+      ],
+      "cues": [
+        "large round headlamps in raised wing-top pods behind flush clear covers",
+        "a rear wing integrated smoothly into the tail rather than standing on stalks",
+        "air intake slots cut into each rear arch ahead of the wheel",
+        "a flat smooth undertray with no visible sill step",
+        "wide hollow-spoke alloy wheels"
+      ],
+      "materials": [
+        "glossy painted composite",
+        "black mesh, black tyres"
+      ],
+      "avoid": [
+        "pleated rubber impact bumpers",
+        "a front engine"
+      ]
+    },
+    {
+      "id": "e30-m3",
+      "subject": "late-1980s German boxy rear-drive homologation sports saloon coupe",
+      "era": "1986-1991",
+      "paint": "bright cobalt blue",
+      "dims": {
+        "lengthM": 4.36,
+        "widthM": 1.68,
+        "heightM": 1.37,
+        "wheelbaseM": 2.56
+      },
+      "silhouette": [
+        "A small upright two-door saloon, all straight lines and flat panels, with box-flared arches added to every corner",
+        "A tall glasshouse with slim pillars and a short formal boot raised higher than standard"
+      ],
+      "cues": [
+        "four round headlamps, two each side, in a plain rectangular grille with twin kidney slots",
+        "squared box arch flares bolted proud of flat body sides",
+        "a raised boot lid with a rubber lip spoiler across it",
+        "deep front air dam with three rectangular openings",
+        "cross-spoke alloy wheels"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "black trim and flares, black tyres"
+      ],
+      "avoid": [
+        "rounded organic bodywork",
+        "a hatchback or fastback tail"
+      ],
+      "shape": "boxy"
+    },
+    {
+      "id": "e36-m3",
+      "subject": "1990s German rear-drive sports coupe",
+      "era": "1992-1999",
+      "paint": "estoril blue metallic",
+      "dims": {
+        "lengthM": 4.43,
+        "widthM": 1.71,
+        "heightM": 1.34,
+        "wheelbaseM": 2.7
+      },
+      "silhouette": [
+        "A long low two-door coupe with a smooth wedge profile rising gently to a short high boot",
+        "A frameless-glass cabin with slim pillars, set back on a long wheelbase"
+      ],
+      "cues": [
+        "four round headlamps, two each side, behind flush glass covers beside twin kidney slots",
+        "a deep front bumper with three wide low intakes",
+        "wraparound tail lamps in a smooth rounded tail",
+        "smooth unflared arches over a flat body side with one soft crease",
+        "seventeen-inch multi-spoke alloy wheels"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "black trim, black tyres"
+      ],
+      "avoid": [
+        "box-flared bolt-on arches",
+        "hard square edges"
+      ],
+      "shape": "organic"
+    },
+    {
+      "id": "190e-evo",
+      "subject": "1990 German boxy rear-drive homologation touring saloon",
+      "era": "1990, built to homologate a touring car",
+      "paint": "deep metallic steel blue",
+      "dims": {
+        "lengthM": 4.45,
+        "widthM": 1.72,
+        "heightM": 1.37,
+        "wheelbaseM": 2.67
+      },
+      "silhouette": [
+        "A small formal four-door saloon, upright and square, wearing extreme aerodynamic addenda that plainly do not belong on it",
+        "A tall cabin and a short high boot"
+      ],
+      "cues": [
+        "an enormous multi-plane adjustable rear wing standing tall above the boot lid",
+        "deep squared arch extensions and wide flat sill skirts",
+        "a large rectangular grille with a flat upright face and rectangular lamps",
+        "a deep front spoiler splitting the lower bumper",
+        "flat-faced multi-spoke alloy wheels"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "matt black addenda, black tyres"
+      ],
+      "avoid": [
+        "a two-door or coupe body",
+        "rounded organic bodywork"
+      ],
+      "fillHoles": false,
+      "shape": "boxy"
+    },
+    {
+      "id": "ur-quattro",
+      "subject": "1980s German boxy all-wheel-drive turbo rally coupe",
+      "era": "1980-1991",
+      "paint": "bright rally white",
+      "dims": {
+        "lengthM": 4.4,
+        "widthM": 1.72,
+        "heightM": 1.34,
+        "wheelbaseM": 2.52
+      },
+      "silhouette": [
+        "An upright square two-door coupe with a very large glasshouse and a flat roof",
+        "Straight slab sides interrupted by squared blistered arches on all four corners"
+      ],
+      "cues": [
+        "two wide rectangular headlamps flanking a plain rectangular grille",
+        "squared arch blisters with a straight crease running between them along the body",
+        "a deep front spoiler and a rubber lip spoiler on the boot",
+        "large flat door mirrors on short stalks",
+        "flat-faced multi-spoke alloy wheels"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "matt black trim, black tyres"
+      ],
+      "avoid": [
+        "a fastback or hatchback roofline",
+        "rounded organic bodywork"
+      ],
+      "shape": "boxy"
+    },
+    {
+      "id": "sierra-cosworth",
+      "subject": "late-1980s British boxy rear-drive turbo homologation hatchback",
+      "era": "1986-1990",
+      "paint": "gloss white",
+      "dims": {
+        "lengthM": 4.46,
+        "widthM": 1.72,
+        "heightM": 1.36,
+        "wheelbaseM": 2.61
+      },
+      "silhouette": [
+        "An ordinary mid-size three-door family hatchback, rounded at the nose, carrying an enormous rear wing",
+        "A tall glasshouse and a steeply raked hatch"
+      ],
+      "cues": [
+        "an enormous deep whale-tail wing spanning the whole width of the hatch",
+        "a smooth rounded nose with wide rectangular lamps and a slim grille slot",
+        "a deep front air dam with round auxiliary lamps set in it",
+        "additional louvred vents cut into the bonnet",
+        "seven-spoke alloy wheels"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "matt black addenda, black tyres"
+      ],
+      "avoid": [
+        "a low sleek sports car body",
+        "a notchback boot"
+      ],
+      "fillHoles": false,
+      "shape": "boxy"
+    },
+    {
+      "id": "esprit-wedge",
+      "subject": "late-1970s British mid-engined folded-wedge sports coupe",
+      "era": "1976-1987",
+      "paint": "gloss white",
+      "dims": {
+        "lengthM": 4.19,
+        "widthM": 1.86,
+        "heightM": 1.11,
+        "wheelbaseM": 2.44
+      },
+      "silhouette": [
+        "A pure origami wedge of flat folded planes with no curve anywhere: a knife nose rising straight to a flat roof",
+        "A tiny glasshouse and a chopped vertical tail on a very low wide body"
+      ],
+      "cues": [
+        "small rectangular lamps sunk flush into the flat wedge nose",
+        "a flat slatted louvre laid over the rear window",
+        "a straight crease running the full length of the body side at bumper height",
+        "a flat squared tail panel with rectangular lamps",
+        "narrow flat-faced alloy wheels"
+      ],
+      "materials": [
+        "glossy painted fibreglass",
+        "matt black trim, black tyres"
+      ],
+      "avoid": [
+        "pop-up headlamps",
+        "any rounded or organic curve"
+      ],
+      "shape": "boxy"
+    },
+    {
+      "id": "pantera-analogue",
+      "subject": "1970s Italian-American mid-engined V8 supercar coupe",
+      "era": "1971-1992",
+      "paint": "bright metallic blue",
+      "dims": {
+        "lengthM": 4.27,
+        "widthM": 1.83,
+        "heightM": 1.1,
+        "wheelbaseM": 2.51
+      },
+      "silhouette": [
+        "A low wide mid-engined coupe with a short blunt wedge nose and a high squared tail",
+        "A compact cabin set forward with thick buttresses running back beside a recessed rear window"
+      ],
+      "cues": [
+        "twin round lamps set in squared recesses each side of a blunt nose",
+        "large slatted intakes cut into each rear flank",
+        "a squared cut-off tail with round lamps and four exhaust pipes beneath",
+        "wide flared arches over deep-dished wheels",
+        "slim chrome bumperettes"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "matt black trim, black tyres"
+      ],
+      "avoid": [
+        "pop-up headlamps",
+        "a front engine with a long bonnet"
+      ]
+    },
+    {
+      "id": "m1-analogue",
+      "subject": "late-1970s German mid-engined homologation supercar coupe",
+      "era": "1978-1981",
+      "paint": "gloss white",
+      "dims": {
+        "lengthM": 4.36,
+        "widthM": 1.82,
+        "heightM": 1.14,
+        "wheelbaseM": 2.56
+      },
+      "silhouette": [
+        "NARROW for a supercar and completely FLAT-SIDED — every panel is a flat plane and there is no curve anywhere on the body",
+        "A low flat nose, an upright cabin, and a long flat engine deck, with almost no overhang at either end"
+      ],
+      "cues": [
+        "black slatted louvres laid over BOTH the rear window and the engine deck",
+        "two small square lamps each side, sunk in a flat vertical nose panel",
+        "two small black rectangular grille slots low in the nose",
+        "a straight black rubbing strip along each flat body side",
+        "flat-faced alloy wheels"
+      ],
+      "materials": [
+        "glossy painted fibreglass",
+        "matt black trim, black tyres"
+      ],
+      "avoid": [
+        "a wide body, scissor doors, or a wing standing above the tail",
+        "NACA ducts, box shoulder scoops, or any rounded or organic surface"
+      ],
+      "shape": "boxy"
+    },
+    {
+      "id": "xj220-analogue",
+      "subject": "1990s British mid-engined twin-turbo supercar coupe",
+      "era": "1992-1994",
+      "paint": "metallic silver-blue",
+      "dims": {
+        "lengthM": 4.93,
+        "widthM": 2.0,
+        "heightM": 1.15,
+        "wheelbaseM": 2.64
+      },
+      "silhouette": [
+        "Exceptionally long, wide and low, one single sweeping curve from nose to tail with no hard edge",
+        "A cabin set well forward, an extremely long tapering rear deck, and a high kicked-up tail"
+      ],
+      "cues": [
+        "wide slim lamps under flush clear covers in a rounded low nose",
+        "enormous scooped intakes ahead of the rear wheels",
+        "a curved integrated tail spoiler flowing out of the bodywork",
+        "a deep venturi tunnel under the tail",
+        "wide multi-spoke alloy wheels"
+      ],
+      "materials": [
+        "glossy painted aluminium",
+        "dark glass, black tyres"
+      ],
+      "avoid": [
+        "pop-up headlamps",
+        "a short stubby body"
+      ],
+      "shape": "organic"
+    },
+    {
+      "id": "mclaren-f1-analogue",
+      "subject": "1990s British central-seat naturally aspirated V12 supercar coupe",
+      "era": "1992-1998",
+      "paint": "deep metallic slate",
+      "dims": {
+        "lengthM": 4.29,
+        "widthM": 1.82,
+        "heightM": 1.14,
+        "wheelbaseM": 2.72
+      },
+      "silhouette": [
+        "A compact teardrop: a rounded low nose swelling into a bubble canopy set well forward, then tapering to a cut-off tail",
+        "Narrow for a supercar, with a smooth uninterrupted upper surface"
+      ],
+      "cues": [
+        "small rounded lamp clusters low in a smooth nose with two oval intakes",
+        "a roof-mounted air intake snorkel above the cabin",
+        "upward-hinged butterfly doors, shown closed",
+        "a high kicked-up tail with a black mesh diffuser beneath",
+        "five-spoke alloy wheels"
+      ],
+      "materials": [
+        "glossy painted carbon composite",
+        "black mesh, black tyres"
+      ],
+      "avoid": [
+        "pop-up headlamps",
+        "a tall fixed rear wing"
+      ],
+      "shape": "organic"
+    },
+    {
+      "id": "r5-turbo-analogue",
+      "subject": "1980s French mid-engined widebody rally homologation hatchback",
+      "era": "1980-1986",
+      "paint": "bright rally red with a broad white lower band",
+      "dims": {
+        "lengthM": 3.66,
+        "widthM": 1.77,
+        "heightM": 1.32,
+        "wheelbaseM": 2.43
+      },
+      "silhouette": [
+        "A tiny upright economy hatchback grotesquely widened: enormous box arches over the rear wheels, far wider at the back than the front",
+        "A short boxy cabin with the engine behind the seats under a raised rear deck"
+      ],
+      "cues": [
+        "two large rectangular lamps in a plain flat nose above a black bumper",
+        "huge angular air scoops built into the leading edge of each rear arch",
+        "a raised squared rear deck with black slatted vents",
+        "a deep front spoiler with round auxiliary lamps",
+        "wide flat-faced alloy wheels, much wider at the rear"
+      ],
+      "materials": [
+        "glossy painted steel with composite arches",
+        "matt black trim, black tyres"
+      ],
+      "avoid": [
+        "a front engine",
+        "narrow unflared arches"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,285 @@
+{
+ "$comment": [
+  "Mid-Atlantic building materials. metres_per_tile is REAL and is the whole point: a brick course",
+  "is 65 mm plus a 10 mm joint, clapboard shows ~150 mm, a CMU block is 400x200. Every prompt states",
+  "the size of the area it draws and the entry records the same number.",
+  "Prompts must be STATIONARY \u2014 no feature larger than a hand \u2014 or the roll-and-blend tiler smears",
+  "the one big feature into a cross down the middle of the tile.",
+  "glazing entries also emit glass_mask.png: the panes, for a transmissive material. A dark jpg is",
+  "not a window."
+ ],
+ "seed": 11,
+ "materials": {
+  "clapboard_white": {
+   "name": "Colonial white clapboard",
+   "category": "wall_house",
+   "metres_per_tile": 2.0,
+   "prompt": "Crisp white painted wooden clapboard siding, horizontal overlapping boards with about 150 mm of each board exposed, a fine shadow line under every lap, a few hairline paint cracks. A 2.0 metre by 2.0 metre area. Flat orthographic photograph of a wall seen square on, camera perpendicular to the surface, uniform flat overcast daylight, no cast shadows, no windows, doors, gutters, downpipes, wires, signs, vegetation or objects of any kind, edge to edge material only, photorealistic and sharp. Variation spread evenly across the whole frame with no single feature larger than a hand.",
+   "relief": 3.0
+  },
+  "clapboard_craftsman": {
+   "name": "Craftsman painted clapboard",
+   "category": "wall_house",
+   "metres_per_tile": 2.0,
+   "prompt": "Sage green painted wooden clapboard on a 1920s catalogue-kit craftsman house, about 180 mm exposure, boards very slightly uneven, weathered paint with fine checking and chalking. A 2.0 metre by 2.0 metre area. Flat orthographic photograph of a wall seen square on, camera perpendicular to the surface, uniform flat overcast daylight, no cast shadows, no windows, doors, gutters, downpipes, wires, signs, vegetation or objects of any kind, edge to edge material only, photorealistic and sharp. Variation spread evenly across the whole frame with no single feature larger than a hand.",
+   "relief": 3.0
+  },
+  "cedar_shingle": {
+   "name": "Weathered cedar shingle",
+   "category": "wall_house",
+   "metres_per_tile": 2.0,
+   "prompt": "Weathered cedar shingle siding in staggered courses of hand-split shakes, silvered grey with warm brown patches, edges slightly curled and irregular. A 2.0 metre by 2.0 metre area. Flat orthographic photograph of a wall seen square on, camera perpendicular to the surface, uniform flat overcast daylight, no cast shadows, no windows, doors, gutters, downpipes, wires, signs, vegetation or objects of any kind, edge to edge material only, photorealistic and sharp. Variation spread evenly across the whole frame with no single feature larger than a hand.",
+   "relief": 3.5
+  },
+  "vinyl_siding_70s": {
+   "name": "1970s aluminium lap siding",
+   "category": "wall_house",
+   "metres_per_tile": 2.0,
+   "prompt": "Nineteen-seventies pale butter yellow aluminium lap siding with about 200 mm exposure, panels faintly wavy, chalky sun-faded finish, a few small dents and a chalk bloom. A 2.0 metre by 2.0 metre area. Flat orthographic photograph of a wall seen square on, camera perpendicular to the surface, uniform flat overcast daylight, no cast shadows, no windows, doors, gutters, downpipes, wires, signs, vegetation or objects of any kind, edge to edge material only, photorealistic and sharp. Variation spread evenly across the whole frame with no single feature larger than a hand.",
+   "relief": 2.2
+  },
+  "vinyl_siding_modern": {
+   "name": "Modern vinyl double-lap",
+   "category": "wall_house",
+   "metres_per_tile": 2.0,
+   "prompt": "Modern beige vinyl double-lap siding, clean crisp panels with about 150 mm exposure and a subtle woodgrain emboss, even colour. A 2.0 metre by 2.0 metre area. Flat orthographic photograph of a wall seen square on, camera perpendicular to the surface, uniform flat overcast daylight, no cast shadows, no windows, doors, gutters, downpipes, wires, signs, vegetation or objects of any kind, edge to edge material only, photorealistic and sharp. Variation spread evenly across the whole frame with no single feature larger than a hand.",
+   "relief": 2.2
+  },
+  "brick_colonial_red": {
+   "name": "Colonial hand-made brick",
+   "category": "wall_house",
+   "metres_per_tile": 2.0,
+   "prompt": "Eighteenth century red brick wall laid in Flemish bond, hand-made bricks varying from deep red to orange with a few dark burnt headers, thick soft lime mortar joints, 65 mm courses. A 2.0 metre by 2.0 metre area. Flat orthographic photograph of a wall seen square on, camera perpendicular to the surface, uniform flat overcast daylight, no cast shadows, no windows, doors, gutters, downpipes, wires, signs, vegetation or objects of any kind, edge to edge material only, photorealistic and sharp. Variation spread evenly across the whole frame with no single feature larger than a hand.",
+   "relief": 3.2
+  },
+  "brick_running_red": {
+   "name": "Modern red brick",
+   "category": "wall_house",
+   "metres_per_tile": 2.0,
+   "prompt": "Twentieth century red brick wall in running bond, uniform machine-made bricks, neat 10 mm grey mortar joints, 65 mm courses, slight colour variation brick to brick. A 2.0 metre by 2.0 metre area. Flat orthographic photograph of a wall seen square on, camera perpendicular to the surface, uniform flat overcast daylight, no cast shadows, no windows, doors, gutters, downpipes, wires, signs, vegetation or objects of any kind, edge to edge material only, photorealistic and sharp. Variation spread evenly across the whole frame with no single feature larger than a hand.",
+   "relief": 3.0
+  },
+  "brick_painted_white": {
+   "name": "Painted brick",
+   "category": "wall_house",
+   "metres_per_tile": 2.0,
+   "prompt": "Red brick wall painted white, brush and roller texture following the brick relief, paint thinning at the brick arrises so a little colour shows through, mortar joints filled with paint. A 2.0 metre by 2.0 metre area. Flat orthographic photograph of a wall seen square on, camera perpendicular to the surface, uniform flat overcast daylight, no cast shadows, no windows, doors, gutters, downpipes, wires, signs, vegetation or objects of any kind, edge to edge material only, photorealistic and sharp. Variation spread evenly across the whole frame with no single feature larger than a hand.",
+   "relief": 2.6
+  },
+  "formstone": {
+   "name": "Baltimore formstone",
+   "category": "wall_house",
+   "metres_per_tile": 2.0,
+   "prompt": "Baltimore formstone: moulded cement panels imitating rough-cut ashlar stone in warm greys, tans and pinks, scored false joints, slightly glossy where weathered. A 2.0 metre by 2.0 metre area. Flat orthographic photograph of a wall seen square on, camera perpendicular to the surface, uniform flat overcast daylight, no cast shadows, no windows, doors, gutters, downpipes, wires, signs, vegetation or objects of any kind, edge to edge material only, photorealistic and sharp. Variation spread evenly across the whole frame with no single feature larger than a hand.",
+   "relief": 3.0
+  },
+  "stucco_cream": {
+   "name": "Cream stucco render",
+   "category": "wall_house",
+   "metres_per_tile": 2.0,
+   "prompt": "Cream painted stucco render with a fine sand float finish, subtle trowel mottling and a faint hairline crack or two. A 2.0 metre by 2.0 metre area. Flat orthographic photograph of a wall seen square on, camera perpendicular to the surface, uniform flat overcast daylight, no cast shadows, no windows, doors, gutters, downpipes, wires, signs, vegetation or objects of any kind, edge to edge material only, photorealistic and sharp. Variation spread evenly across the whole frame with no single feature larger than a hand.",
+   "relief": 1.8
+  },
+  "halftimber_tudor": {
+   "name": "Tudor half-timbering",
+   "category": "wall_house",
+   "metres_per_tile": 3.0,
+   "prompt": "Cream roughcast stucco render with a coarse pebbly aggregate finish, even tone, faint trowel marks. A 3.0 metre by 3.0 metre area. Flat orthographic photograph of a wall seen square on, camera perpendicular to the surface, uniform flat overcast daylight, no cast shadows, no windows, doors, gutters, downpipes, wires, signs, vegetation or objects of any kind, edge to edge material only, photorealistic and sharp. Variation spread evenly across the whole frame with no single feature larger than a hand.",
+   "relief": 2.0,
+   "overlay": {
+    "type": "halftimber",
+    "width": 0.16,
+    "bays": 2,
+    "colour": [
+     62,
+     43,
+     30
+    ]
+   }
+  },
+  "stone_veneer": {
+   "name": "Cultured stone veneer",
+   "category": "wall_house",
+   "metres_per_tile": 2.0,
+   "prompt": "Modern cultured stone veneer, irregular flat ledgestone pieces in warm grey, tan and rust, laid in broken courses with tight raked mortar joints. A 2.0 metre by 2.0 metre area. Flat orthographic photograph of a wall seen square on, camera perpendicular to the surface, uniform flat overcast daylight, no cast shadows, no windows, doors, gutters, downpipes, wires, signs, vegetation or objects of any kind, edge to edge material only, photorealistic and sharp. Variation spread evenly across the whole frame with no single feature larger than a hand.",
+   "relief": 3.6
+  },
+  "fieldstone": {
+   "name": "Maryland fieldstone",
+   "category": "wall_house",
+   "metres_per_tile": 2.0,
+   "prompt": "Maryland fieldstone wall of rounded and angular stones in mixed greys and browns, sizes from fist to head, set in thick pale grey mortar. A 2.0 metre by 2.0 metre area. Flat orthographic photograph of a wall seen square on, camera perpendicular to the surface, uniform flat overcast daylight, no cast shadows, no windows, doors, gutters, downpipes, wires, signs, vegetation or objects of any kind, edge to edge material only, photorealistic and sharp. Variation spread evenly across the whole frame with no single feature larger than a hand.",
+   "relief": 4.0
+  },
+  "board_batten": {
+   "name": "Board and batten",
+   "category": "wall_house",
+   "metres_per_tile": 2.0,
+   "prompt": "Vertical board and batten siding on a farm building, weathered barn-red painted pine boards about 250 mm wide with narrow battens over every joint, paint worn thin along the grain. A 2.0 metre by 2.0 metre area. Flat orthographic photograph of a wall seen square on, camera perpendicular to the surface, uniform flat overcast daylight, no cast shadows, no windows, doors, gutters, downpipes, wires, signs, vegetation or objects of any kind, edge to edge material only, photorealistic and sharp. Variation spread evenly across the whole frame with no single feature larger than a hand.",
+   "relief": 3.0
+  },
+  "shingle_3tab_charcoal": {
+   "name": "3-tab asphalt, charcoal",
+   "category": "roof",
+   "metres_per_tile": 2.0,
+   "prompt": "Charcoal grey three-tab asphalt roof shingles in straight horizontal courses, regular vertical tab slots, about 145 mm exposure, fine mineral granule texture. A 2.0 metre by 2.0 metre area. Flat orthographic photograph of a roof surface seen square on from directly above, uniform flat overcast daylight, no cast shadows, no vents, chimneys, ridges, valleys, flashing or objects, edge to edge material only, photorealistic and sharp. Variation spread evenly across the whole frame with no single feature larger than a hand.",
+   "relief": 2.4
+  },
+  "shingle_3tab_brown": {
+   "name": "3-tab asphalt, weathered brown",
+   "category": "roof",
+   "metres_per_tile": 2.0,
+   "prompt": "Weathered brown three-tab asphalt roof shingles, faded unevenly, tabs very slightly cupped and some granule loss showing darker patches. A 2.0 metre by 2.0 metre area. Flat orthographic photograph of a roof surface seen square on from directly above, uniform flat overcast daylight, no cast shadows, no vents, chimneys, ridges, valleys, flashing or objects, edge to edge material only, photorealistic and sharp. Variation spread evenly across the whole frame with no single feature larger than a hand.",
+   "relief": 2.4,
+   "seed_override": 29
+  },
+  "shingle_arch_charcoal": {
+   "name": "Architectural asphalt, charcoal",
+   "category": "roof",
+   "metres_per_tile": 2.0,
+   "prompt": "Charcoal architectural laminated asphalt roof shingles, thick irregular staggered tabs with real depth and soft shadow under each edge, blended grey and near-black granules. A 2.0 metre by 2.0 metre area. Flat orthographic photograph of a roof surface seen square on from directly above, uniform flat overcast daylight, no cast shadows, no vents, chimneys, ridges, valleys, flashing or objects, edge to edge material only, photorealistic and sharp. Variation spread evenly across the whole frame with no single feature larger than a hand.",
+   "relief": 3.4
+  },
+  "shingle_arch_driftwood": {
+   "name": "Architectural asphalt, driftwood",
+   "category": "roof",
+   "metres_per_tile": 2.0,
+   "prompt": "Driftwood grey-brown architectural laminated asphalt shingles, thick staggered tabs, blended tan, grey and charcoal granules. A 2.0 metre by 2.0 metre area. Flat orthographic photograph of a roof surface seen square on from directly above, uniform flat overcast daylight, no cast shadows, no vents, chimneys, ridges, valleys, flashing or objects, edge to edge material only, photorealistic and sharp. Variation spread evenly across the whole frame with no single feature larger than a hand.",
+   "relief": 3.4
+  },
+  "standing_seam_tin": {
+   "name": "Barn standing-seam tin",
+   "category": "roof",
+   "metres_per_tile": 3.0,
+   "prompt": "Old galvanised zinc sheet metal, dull mottled grey with orange rust staining and chalky white zinc bloom spread evenly, no seams, ribs or panel lines of any kind. A 3.0 metre by 3.0 metre area. Flat orthographic photograph of a roof surface seen square on from directly above, uniform flat overcast daylight, no cast shadows, no vents, chimneys, ridges, valleys, flashing or objects, edge to edge material only, photorealistic and sharp. Variation spread evenly across the whole frame with no single feature larger than a hand.",
+   "relief": 2.8,
+   "overlay": {
+    "type": "vseams",
+    "spacing": 0.45,
+    "width": 0.035,
+    "highlight": 0.26,
+    "shadow": 0.2
+   }
+  },
+  "corrugated_metal": {
+   "name": "Corrugated galvanised sheet",
+   "category": "roof",
+   "metres_per_tile": 3.0,
+   "prompt": "Weathered galvanised steel sheet, flat with no profile, chalky grey zinc bloom and patches of light orange rust spread evenly, no ribs, waves or panel lines. A 3.0 metre by 3.0 metre area. Flat orthographic photograph of a roof surface seen square on from directly above, uniform flat overcast daylight, no cast shadows, no vents, chimneys, ridges, valleys, flashing or objects, edge to edge material only, photorealistic and sharp. Variation spread evenly across the whole frame with no single feature larger than a hand.",
+   "relief": 3.0,
+   "overlay": {
+    "type": "corrugate",
+    "period": 0.076,
+    "depth": 0.3
+   }
+  },
+  "slate_roof": {
+   "name": "Natural slate",
+   "category": "roof",
+   "metres_per_tile": 2.0,
+   "prompt": "Grey-purple natural slate roof tiles in regular overlapping courses, tone varying tile to tile from blue-grey to plum, a few chipped corners. A 2.0 metre by 2.0 metre area. Flat orthographic photograph of a roof surface seen square on from directly above, uniform flat overcast daylight, no cast shadows, no vents, chimneys, ridges, valleys, flashing or objects, edge to edge material only, photorealistic and sharp. Variation spread evenly across the whole frame with no single feature larger than a hand.",
+   "relief": 3.0
+  },
+  "cmu_bare": {
+   "name": "Bare concrete block",
+   "category": "wall_commercial",
+   "metres_per_tile": 3.0,
+   "prompt": "Bare grey concrete masonry unit wall, standard 400 by 200 mm blocks in running bond, slightly porous open-textured faces, recessed grey mortar joints. A 3.0 metre by 3.0 metre area. Flat orthographic photograph of a wall seen square on, camera perpendicular to the surface, uniform flat overcast daylight, no cast shadows, no windows, doors, gutters, downpipes, wires, signs, vegetation or objects of any kind, edge to edge material only, photorealistic and sharp. Variation spread evenly across the whole frame with no single feature larger than a hand.",
+   "relief": 2.8
+  },
+  "cmu_painted": {
+   "name": "Painted concrete block",
+   "category": "wall_commercial",
+   "metres_per_tile": 3.0,
+   "prompt": "Painted concrete block wall, pale institutional beige paint rolled over 400 by 200 mm blocks so the block texture and joints still read through, a few scuffs. A 3.0 metre by 3.0 metre area. Flat orthographic photograph of a wall seen square on, camera perpendicular to the surface, uniform flat overcast daylight, no cast shadows, no windows, doors, gutters, downpipes, wires, signs, vegetation or objects of any kind, edge to edge material only, photorealistic and sharp. Variation spread evenly across the whole frame with no single feature larger than a hand.",
+   "relief": 2.4
+  },
+  "brick_buff_commercial": {
+   "name": "Buff commercial brick",
+   "category": "wall_commercial",
+   "metres_per_tile": 3.0,
+   "prompt": "Buff and tan commercial brick wall in running bond from the nineteen-twenties, subtle colour variation brick to brick, pale mortar joints, a soda-fired speckle. A 3.0 metre by 3.0 metre area. Flat orthographic photograph of a wall seen square on, camera perpendicular to the surface, uniform flat overcast daylight, no cast shadows, no windows, doors, gutters, downpipes, wires, signs, vegetation or objects of any kind, edge to edge material only, photorealistic and sharp. Variation spread evenly across the whole frame with no single feature larger than a hand.",
+   "relief": 3.0
+  },
+  "concrete_precast": {
+   "name": "Precast concrete panel",
+   "category": "wall_commercial",
+   "metres_per_tile": 4.0,
+   "prompt": "Precast concrete panel wall, smooth light warm grey with faint form marks, scattered small air bubble pits and thin recessed joint lines between panels. A 4.0 metre by 4.0 metre area. Flat orthographic photograph of a wall seen square on, camera perpendicular to the surface, uniform flat overcast daylight, no cast shadows, no windows, doors, gutters, downpipes, wires, signs, vegetation or objects of any kind, edge to edge material only, photorealistic and sharp. Variation spread evenly across the whole frame with no single feature larger than a hand.",
+   "relief": 1.8
+  },
+  "stone_ashlar": {
+   "name": "Limestone ashlar",
+   "category": "wall_commercial",
+   "metres_per_tile": 4.0,
+   "prompt": "Cut limestone ashlar wall on a courthouse, large rectangular blocks in regular courses with fine joints, pale warm grey, faint tooling marks across each face. A 4.0 metre by 4.0 metre area. Flat orthographic photograph of a wall seen square on, camera perpendicular to the surface, uniform flat overcast daylight, no cast shadows, no windows, doors, gutters, downpipes, wires, signs, vegetation or objects of any kind, edge to edge material only, photorealistic and sharp. Variation spread evenly across the whole frame with no single feature larger than a hand.",
+   "relief": 2.6
+  },
+  "curtain_wall_glass": {
+   "name": "Glass curtain wall",
+   "category": "glazing",
+   "metres_per_tile": 3.0,
+   "prompt": "Modern glass curtain wall fa\u00e7ade seen square on, dark blue-green tinted glazing panels in a regular grid of slim silver aluminium mullions, panes about 1.5 m wide and 1.2 m tall, flat even pale sky reflection with no buildings, clouds or interior visible. A 3.0 metre by 3.0 metre area. Flat orthographic photograph of a wall seen square on, camera perpendicular to the surface, uniform flat overcast daylight, no cast shadows, no windows, doors, gutters, downpipes, wires, signs, vegetation or objects of any kind, edge to edge material only, photorealistic and sharp. Variation spread evenly across the whole frame with no single feature larger than a hand.",
+   "relief": 1.6,
+   "glass": {
+    "tint": [
+     0.42,
+     0.55,
+     0.52
+    ],
+    "transmission": 0.85,
+    "roughness": 0.03
+   },
+   "procedural": {
+    "bay_w": 1.5,
+    "bay_h": 1.2,
+    "mullion": 0.06,
+    "frame_colour": [
+     176,
+     180,
+     184
+    ],
+    "pane_colour": [
+     46,
+     72,
+     70
+    ],
+    "pane_variation": 0.07,
+    "seed": 3
+   }
+  },
+  "storefront_glazing": {
+   "name": "Aluminium shopfront glazing",
+   "category": "glazing",
+   "metres_per_tile": 3.0,
+   "prompt": "Aluminium shopfront glazing seen square on, large clear plate glass panes in dark bronze anodised frames with a horizontal transom bar above and a low solid bulkhead below, flat even reflection with nothing recognisable in it. A 3.0 metre by 3.0 metre area. Flat orthographic photograph of a wall seen square on, camera perpendicular to the surface, uniform flat overcast daylight, no cast shadows, no windows, doors, gutters, downpipes, wires, signs, vegetation or objects of any kind, edge to edge material only, photorealistic and sharp. Variation spread evenly across the whole frame with no single feature larger than a hand.",
+   "relief": 1.6,
+   "glass": {
+    "tint": [
+     0.82,
+     0.86,
+     0.86
+    ],
+    "transmission": 0.95,
+    "roughness": 0.02
+   },
+   "procedural": {
+    "bay_w": 1.5,
+    "bay_h": 3.0,
+    "mullion": 0.09,
+    "frame_colour": [
+     74,
+     58,
+     44
+    ],
+    "pane_colour": [
+     120,
+     132,
+     132
+    ],
+    "pane_variation": 0.05,
+    "seed": 5
+   }
+  }
+ }
+}

@@ -1,0 +1,886 @@
+{
+  "$comment": [
+    "Hero cars, Japanese. THE RULE IS ROCKSTAR'S: the silhouette is exact, the details are not.",
+    "Proportion carries recognition — wheelbase, overhangs, roofline, haunches, greenhouse shape —",
+    "so those are described precisely. Recognition is then deliberately broken at the lamps, the",
+    "mirrors and the bumpers, which is why a car whose real fame is its pop-up headlamps is asked",
+    "for flush ones. You should know what it is meant to be and be certain it is not that.",
+    "No badge, wordmark or model script ever appears; that is enforced in style.mjs, not here.",
+    "dims are real-world metres and exist to be checked against the measured mesh afterwards —",
+    "TRELLIS normalises to a 1m cube, so what matters is the RATIO the reconstruction came back with."
+  ],
+  "defaults": {
+    "class": "hero-car",
+    "view": "front-three-quarter"
+  },
+  "assets": [
+    {
+      "id": "rx7-fd",
+      "subject": "compact 1990s Japanese rear-drive rotary sports coupe",
+      "era": "1992-2002",
+      "paint": "deep pearlescent yellow",
+      "dims": {
+        "lengthM": 4.3,
+        "widthM": 1.76,
+        "heightM": 1.23,
+        "wheelbaseM": 2.43
+      },
+      "silhouette": [
+        "EXTREMELY low, wide and clean: one unbroken arc from the nose over a small shallow cabin to the tail, with no crease or edge in it",
+        "The waist pinches inward between two swollen wheel haunches, so it is widest at the arches"
+      ],
+      "cues": [
+        "a smooth unbroken nose with NO headlamps visible, concealed under flush panels",
+        "one slim mouth low under the nose, no upper grille",
+        "a very short front overhang, the front wheel close behind the nose",
+        "a small glass fastback hatch over a low ducktail",
+        "deep-dished five-spoke wheels"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "dark glass, black tyres"
+      ],
+      "avoid": [
+        "raised pop-up headlamps or any lamp visible on the nose",
+        "vents, scoops, louvres, wings on stalks, a tall cabin or hard creases"
+      ],
+      "seed": 4,
+      "shape": "organic"
+    },
+    {
+      "id": "rx7-fb",
+      "subject": "small late-1970s Japanese rear-drive sports hatchback coupe",
+      "era": "1978-1985, the first rotary sports car of its line",
+      "paint": "bright signal red",
+      "dims": {
+        "lengthM": 4.29,
+        "widthM": 1.67,
+        "heightM": 1.26,
+        "wheelbaseM": 2.42
+      },
+      "silhouette": [
+        "A crisp low wedge with a long flat bonnet and a glass fastback hatch running to the tail",
+        "Thin pillars and a large glass area, the tail cut off vertically"
+      ],
+      "cues": [
+        "a slim horizontal grille slot with small rectangular lamps set into the nose",
+        "flat body sides with a single straight crease along them",
+        "round tail lamps in a flat black tail panel",
+        "slim chrome bumpers front and rear",
+        "narrow gold-painted alloy wheels"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "chrome trim, black rubber tyres"
+      ],
+      "avoid": [
+        "pop-up headlamps",
+        "flared or bulging wheel arches"
+      ]
+    },
+    {
+      "id": "rx7-fc",
+      "subject": "1980s Japanese front-engined rear-drive sports coupe",
+      "era": "1985-1991",
+      "paint": "gloss white",
+      "dims": {
+        "lengthM": 4.31,
+        "widthM": 1.69,
+        "heightM": 1.27,
+        "wheelbaseM": 2.43
+      },
+      "silhouette": [
+        "A squared-off low coupe with straight edges, a flat bonnet and a steeply raked glass hatch",
+        "Squared wheel arches standing slightly proud of flat body sides"
+      ],
+      "cues": [
+        "a plain blunt nose with a thin slot and small square lamps flush in it",
+        "black plastic bumpers wrapping the full width",
+        "a full-width horizontal tail lamp bar",
+        "a small raised spoiler at the top of the hatch glass",
+        "square-edged alloy wheels with fine spokes"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "matt black plastic trim, black tyres"
+      ],
+      "avoid": [
+        "pop-up headlamps",
+        "soft rounded organic bodywork"
+      ],
+      "shape": "organic"
+    },
+    {
+      "id": "supra-mk4",
+      "subject": "1990s Japanese front-engined rear-drive grand touring coupe",
+      "era": "1993-2002, twin-turbo six",
+      "paint": "bright metallic orange-red",
+      "dims": {
+        "lengthM": 4.51,
+        "widthM": 1.81,
+        "heightM": 1.27,
+        "wheelbaseM": 2.55
+      },
+      "silhouette": [
+        "Long rounded bonnet, cab set well back, huge rounded rear haunches over the back wheels",
+        "A bubble greenhouse with strongly curved glass and a fast sloping hatch"
+      ],
+      "cues": [
+        "a tall wide rear wing mounted clear of the boot on two uprights",
+        "a low oval nose intake with slim wraparound lamps",
+        "four round tail lamps set in a body-coloured panel",
+        "a wide flat sill skirt along each side",
+        "large multi-spoke alloy wheels"
+      ],
+      "materials": [
+        "glossy painted steel with a deep clear coat",
+        "dark glass, black tyres"
+      ],
+      "avoid": [
+        "a flat low boot with no wing",
+        "a narrow tall cabin"
+      ],
+      "fillHoles": false,
+      "shape": "organic"
+    },
+    {
+      "id": "300zx-z32",
+      "subject": "1990s Japanese wide low twin-turbo sports coupe",
+      "era": "1989-1996",
+      "paint": "deep metallic burgundy",
+      "dims": {
+        "lengthM": 4.52,
+        "widthM": 1.8,
+        "heightM": 1.25,
+        "wheelbaseM": 2.57
+      },
+      "silhouette": [
+        "Exceptionally wide, flat and low, the whole car looking pressed towards the ground",
+        "A shallow curved glasshouse with removable roof panels and a near-horizontal rear screen"
+      ],
+      "cues": [
+        "slim slanted composite headlamps sunk flush into a flat wide nose",
+        "a full-width slim tail lamp panel across the back",
+        "flat sculpted body sides with a shallow scallop ahead of the rear wheel",
+        "a small lip spoiler across the tail",
+        "wide seven-spoke alloy wheels"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "dark tinted glass, black tyres"
+      ],
+      "avoid": [
+        "pop-up headlamps",
+        "a tall narrow cabin or upright screen"
+      ],
+      "shape": "organic"
+    },
+    {
+      "id": "skyline-r32",
+      "subject": "late-1980s Japanese boxy all-wheel-drive turbo sports coupe",
+      "era": "1989-1994",
+      "paint": "bright gunmetal silver",
+      "dims": {
+        "lengthM": 4.55,
+        "widthM": 1.76,
+        "heightM": 1.34,
+        "wheelbaseM": 2.62
+      },
+      "silhouette": [
+        "An upright square-shouldered two-door coupe with short overhangs and a formal notchback tail",
+        "Blistered wheel arches standing clearly proud of otherwise flat slab sides"
+      ],
+      "cues": [
+        "a plain rectangular grille with slim rectangular lamps each side",
+        "four round tail lamps, two each side, in a flat tail panel",
+        "a modest boot-lid spoiler",
+        "a small bonnet vent slot",
+        "bronze-faced five-spoke alloy wheels"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "black plastic trim, black tyres"
+      ],
+      "avoid": [
+        "soft rounded organic bodywork",
+        "a fastback or hatchback roofline"
+      ],
+      "shape": "boxy"
+    },
+    {
+      "id": "skyline-r33",
+      "subject": "mid-1990s Japanese all-wheel-drive turbo sports coupe",
+      "era": "1995-1998",
+      "paint": "midnight purple metallic",
+      "dims": {
+        "lengthM": 4.67,
+        "widthM": 1.78,
+        "heightM": 1.36,
+        "wheelbaseM": 2.72
+      },
+      "silhouette": [
+        "Longer and softer than its boxy predecessor, still a formal notchback two-door with a long cabin",
+        "Rounded shoulders and gently blistered arches"
+      ],
+      "cues": [
+        "a low wide grille with softly rounded rectangular lamps",
+        "four round tail lamps, two each side",
+        "a tall rear wing standing on two uprights above the boot",
+        "a shallow bonnet bulge",
+        "five-spoke alloy wheels"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "dark glass, black tyres"
+      ],
+      "avoid": [
+        "hard square edges everywhere",
+        "a hatchback tail"
+      ],
+      "fillHoles": false,
+      "shape": "organic"
+    },
+    {
+      "id": "skyline-r34",
+      "subject": "late-1990s Japanese all-wheel-drive turbo sports coupe",
+      "era": "1999-2002",
+      "paint": "bright bayside blue metallic",
+      "dims": {
+        "lengthM": 4.6,
+        "widthM": 1.79,
+        "heightM": 1.36,
+        "wheelbaseM": 2.67
+      },
+      "silhouette": [
+        "Short, squared and stocky with very short overhangs and an upright squared-off tail",
+        "A tall square glasshouse over strongly blistered arches"
+      ],
+      "cues": [
+        "a squared aggressive nose with slim angular lamps and a wide lower intake",
+        "four round tail lamps, two each side, in a squared panel",
+        "a large adjustable rear wing on two uprights",
+        "vented bonnet with two slots",
+        "wide five-spoke alloy wheels"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "carbon-look trim, black tyres"
+      ],
+      "avoid": [
+        "a long soft rounded body",
+        "a fastback roofline"
+      ],
+      "fillHoles": false,
+      "shape": "organic"
+    },
+    {
+      "id": "nsx-na1",
+      "subject": "1990s Japanese mid-engined aluminium supercar coupe",
+      "era": "1990-2001",
+      "paint": "bright championship red",
+      "dims": {
+        "lengthM": 4.43,
+        "widthM": 1.81,
+        "heightM": 1.17,
+        "wheelbaseM": 2.53
+      },
+      "silhouette": [
+        "A very low cab-forward wedge: the cockpit well forward, a long flat engine deck behind it",
+        "A wraparound canopy glasshouse with very thin pillars, like a fighter canopy"
+      ],
+      "cues": [
+        "small flush rectangular headlamps in a low chisel nose",
+        "a full-width slim tail lamp bar across a black tail panel",
+        "air intakes cut into the body sides ahead of the rear wheels",
+        "a subtle lip spoiler on the engine deck",
+        "five-spoke alloy wheels, wider at the rear"
+      ],
+      "materials": [
+        "glossy painted aluminium",
+        "dark glass, black tyres"
+      ],
+      "avoid": [
+        "pop-up headlamps",
+        "a long bonnet ahead of the cabin"
+      ],
+      "shape": "organic"
+    },
+    {
+      "id": "integra-type-r",
+      "subject": "1990s Japanese front-wheel-drive sports coupe",
+      "era": "1994-2001",
+      "paint": "championship white",
+      "dims": {
+        "lengthM": 4.38,
+        "widthM": 1.71,
+        "heightM": 1.32,
+        "wheelbaseM": 2.57
+      },
+      "silhouette": [
+        "A light low three-door coupe with a long shallow bonnet and a fast sloping hatch",
+        "Slim pillars, a large glass area and flat body sides"
+      ],
+      "cues": [
+        "four separate round headlamps, two each side, behind flush glass covers",
+        "a tall rear wing on two uprights above the hatch",
+        "slim wraparound tail lamps",
+        "a shallow front lip spoiler",
+        "white-painted five-spoke alloy wheels"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "dark glass, black tyres"
+      ],
+      "avoid": [
+        "a notchback boot",
+        "flared or bulging arches"
+      ],
+      "fillHoles": false,
+      "shape": "organic"
+    },
+    {
+      "id": "civic-eg",
+      "subject": "early-1990s Japanese compact front-wheel-drive hot hatchback",
+      "era": "1992-1995",
+      "paint": "bright milano red",
+      "dims": {
+        "lengthM": 4.07,
+        "widthM": 1.68,
+        "heightM": 1.35,
+        "wheelbaseM": 2.57
+      },
+      "silhouette": [
+        "A small rounded three-door hatch with a very low sloping nose and a steeply raked windscreen",
+        "A compact cut-off tail with a near-vertical hatch"
+      ],
+      "cues": [
+        "a slim low grille slot with small rounded rectangular lamps",
+        "a large wraparound rear screen",
+        "tall narrow tail lamps flanking the hatch",
+        "plain unadorned body sides with a soft shoulder line",
+        "small multi-spoke alloy wheels"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "black plastic trim, black tyres"
+      ],
+      "avoid": [
+        "a tall boxy cabin",
+        "a notchback boot"
+      ],
+      "shape": "organic"
+    },
+    {
+      "id": "civic-ek",
+      "subject": "late-1990s Japanese compact front-wheel-drive hot hatchback",
+      "era": "1996-2000",
+      "paint": "electron blue pearl",
+      "dims": {
+        "lengthM": 4.18,
+        "widthM": 1.69,
+        "heightM": 1.37,
+        "wheelbaseM": 2.62
+      },
+      "silhouette": [
+        "A small three-door hatch, slightly taller and squarer than its predecessor, with a short nose",
+        "A near-vertical hatch and a squared-off tail"
+      ],
+      "cues": [
+        "a small squared grille with rounded rectangular lamps",
+        "a subtle rear roof spoiler over the hatch glass",
+        "squared tall tail lamps flanking the hatch",
+        "a soft crease running the length of the body side",
+        "lightweight multi-spoke alloy wheels"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "black plastic trim, black tyres"
+      ],
+      "avoid": [
+        "a notchback boot",
+        "flared arches"
+      ],
+      "shape": "organic"
+    },
+    {
+      "id": "eclipse-1g",
+      "subject": "early-1990s Japanese-American all-wheel-drive turbo sports coupe",
+      "era": "1990-1994",
+      "paint": "deep metallic teal-free indigo",
+      "dims": {
+        "lengthM": 4.36,
+        "widthM": 1.69,
+        "heightM": 1.31,
+        "wheelbaseM": 2.47
+      },
+      "silhouette": [
+        "A rounded low three-door coupe with a smooth continuous curve from nose to tail",
+        "A shallow raked windscreen running into a long sloping glass hatch"
+      ],
+      "cues": [
+        "slim flush lamps set into a rounded low nose with a small central slot",
+        "a raised rear spoiler across the top of the hatch",
+        "a full-width slim tail lamp band",
+        "a shallow bonnet scoop offset to one side",
+        "seven-spoke alloy wheels"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "dark tinted glass, black tyres"
+      ],
+      "avoid": [
+        "pop-up headlamps",
+        "hard square edges"
+      ],
+      "shape": "organic"
+    },
+    {
+      "id": "3000gt-vr4",
+      "subject": "1990s Japanese wide all-wheel-drive twin-turbo grand touring coupe",
+      "era": "1991-1999",
+      "paint": "deep metallic blue",
+      "dims": {
+        "lengthM": 4.57,
+        "widthM": 1.84,
+        "heightM": 1.29,
+        "wheelbaseM": 2.47
+      },
+      "silhouette": [
+        "Wide, heavy and rounded, with a long nose, a short cabin and a broad flat tail",
+        "Full curved bodywork with pronounced hips over the rear wheels"
+      ],
+      "cues": [
+        "wide flush wraparound headlamps in a rounded nose with a broad lower intake",
+        "large vents cut into the front wings behind the wheels",
+        "an active-looking rear wing on two uprights",
+        "a full-width tail lamp panel",
+        "wide multi-spoke alloy wheels"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "dark glass, black tyres"
+      ],
+      "avoid": [
+        "pop-up headlamps",
+        "a narrow lightweight body"
+      ],
+      "fillHoles": false,
+      "shape": "organic"
+    },
+    {
+      "id": "mr2-aw11",
+      "subject": "mid-1980s Japanese mid-engined two-seat targa sports car",
+      "era": "1984-1989",
+      "paint": "gloss white with a black lower body band",
+      "dims": {
+        "lengthM": 3.95,
+        "widthM": 1.67,
+        "heightM": 1.25,
+        "wheelbaseM": 2.32
+      },
+      "silhouette": [
+        "A tiny origami wedge, all flat panels and hard folds, with a chisel nose and a chopped vertical tail",
+        "A short upright cabin set forward, a flat engine deck behind it"
+      ],
+      "cues": [
+        "small rectangular lamps sunk flush into the flat chisel nose",
+        "a flat black slatted louvre over the rear engine deck",
+        "straight slab sides with a deep straight crease",
+        "a squared tail panel with rectangular lamps",
+        "small flat-faced alloy wheels"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "matt black plastic trim, black tyres"
+      ],
+      "avoid": [
+        "pop-up headlamps",
+        "any rounded or organic curves"
+      ]
+    },
+    {
+      "id": "mr2-sw20",
+      "subject": "1990s Japanese mid-engined two-seat sports coupe",
+      "era": "1989-1999",
+      "paint": "deep metallic blue",
+      "dims": {
+        "lengthM": 4.17,
+        "widthM": 1.7,
+        "heightM": 1.24,
+        "wheelbaseM": 2.4
+      },
+      "silhouette": [
+        "A small curved mid-engined coupe with a low rounded nose and a high rounded tail",
+        "A compact bubble cabin set well forward with a flat engine deck behind"
+      ],
+      "cues": [
+        "small flush oval lamps in a rounded low nose",
+        "deep scooped air intakes just ahead of each rear wheel",
+        "a raised rear spoiler on the engine deck",
+        "a full-width slim tail lamp band",
+        "five-spoke alloy wheels, wider at the rear"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "dark glass, black tyres"
+      ],
+      "avoid": [
+        "pop-up headlamps",
+        "a long bonnet ahead of the cabin"
+      ],
+      "shape": "organic"
+    },
+    {
+      "id": "impreza-22b",
+      "subject": "late-1990s Japanese widebody all-wheel-drive rally homologation coupe",
+      "era": "1998, a two-door built to celebrate a rally championship",
+      "paint": "vivid rally blue",
+      "dims": {
+        "lengthM": 4.35,
+        "widthM": 1.77,
+        "heightM": 1.41,
+        "wheelbaseM": 2.52
+      },
+      "silhouette": [
+        "A small two-door saloon made deliberately too wide, with enormous blistered arches on all four corners",
+        "An upright cabin and a short formal boot"
+      ],
+      "cues": [
+        "a low wide nose with rounded rectangular lamps and two round auxiliary lamps in the bumper",
+        "a large bonnet scoop set centrally",
+        "a tall adjustable rear wing on two uprights",
+        "gold-painted five-spoke alloy wheels",
+        "a slim front lip spoiler"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "black plastic arch lips, black tyres"
+      ],
+      "avoid": [
+        "a four-door body",
+        "flat unflared wheel arches"
+      ],
+      "fillHoles": false
+    },
+    {
+      "id": "evo-3",
+      "subject": "mid-1990s Japanese boxy all-wheel-drive turbo rally saloon",
+      "era": "1995",
+      "paint": "gloss white",
+      "dims": {
+        "lengthM": 4.31,
+        "widthM": 1.7,
+        "heightM": 1.42,
+        "wheelbaseM": 2.5
+      },
+      "silhouette": [
+        "A plain upright four-door saloon with a tall cabin, a short boot and hard square edges",
+        "Modest arch flares on an otherwise ordinary family shape"
+      ],
+      "cues": [
+        "a squared nose with rectangular lamps and a very large lower intake",
+        "a deep front lip spoiler under the bumper",
+        "a large squared rear wing on two uprights",
+        "a bonnet with two vent slots",
+        "plain white six-spoke alloy wheels"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "black plastic trim, black tyres"
+      ],
+      "avoid": [
+        "a two-door body",
+        "rounded organic bodywork"
+      ],
+      "fillHoles": false,
+      "shape": "boxy"
+    },
+    {
+      "id": "evo-4",
+      "subject": "late-1990s Japanese all-wheel-drive turbo rally saloon",
+      "era": "1996-1998",
+      "paint": "bright scarlet red",
+      "dims": {
+        "lengthM": 4.33,
+        "widthM": 1.69,
+        "heightM": 1.41,
+        "wheelbaseM": 2.51
+      },
+      "silhouette": [
+        "A compact four-door saloon, rounder at the corners than its boxy predecessor but still upright",
+        "A tall glasshouse over a short bonnet and a short boot"
+      ],
+      "cues": [
+        "two large round auxiliary lamps set in a wide black lower bumper intake",
+        "softly rounded rectangular headlamps",
+        "a tall squared rear wing on two uprights",
+        "a bonnet scoop and two vents",
+        "white-faced multi-spoke alloy wheels"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "black plastic trim, black tyres"
+      ],
+      "avoid": [
+        "a two-door body",
+        "a fastback roofline"
+      ],
+      "fillHoles": false
+    },
+    {
+      "id": "miata-na",
+      "subject": "early-1990s Japanese two-seat sports roadster",
+      "era": "1989-1997",
+      "paint": "classic bright red",
+      "dims": {
+        "lengthM": 3.97,
+        "widthM": 1.68,
+        "heightM": 1.23,
+        "wheelbaseM": 2.27
+      },
+      "silhouette": [
+        "A classic long-bonnet short-deck roadster: the bonnet runs well ahead of a cockpit set back near the rear axle, over a short tail",
+        "Low, wide and softly rounded with the roof down, the cowl barely above the top of the front wheels"
+      ],
+      "cues": [
+        "round headlamps flush in the top of the rounded nose",
+        "a simple small oval grille slot low in the nose",
+        "fifteen-inch seven-spoke alloy wheels filling their arches",
+        "small oval tail lamps and a short rounded tail",
+        "an open cockpit with two seats and a roll bar behind them"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "black interior, black tyres"
+      ],
+      "avoid": [
+        "pop-up headlamps or a fixed roof",
+        "a tall cabin, upright glass, or a cabin large in proportion to the body"
+      ],
+      "seed": 4
+    },
+    {
+      "id": "miata-nb",
+      "subject": "late-1990s Japanese two-seat sports roadster",
+      "era": "1998-2005",
+      "paint": "deep metallic silver",
+      "dims": {
+        "lengthM": 3.95,
+        "widthM": 1.68,
+        "heightM": 1.23,
+        "wheelbaseM": 2.27
+      },
+      "silhouette": [
+        "A classic long-bonnet short-deck roadster: a long bonnet ahead of a cockpit set back near the rear axle, over a short tail",
+        "Low and wide with the roof down, slightly sharper edged than its predecessor"
+      ],
+      "cues": [
+        "fixed teardrop headlamps sunk into the top of the nose",
+        "a small oval grille opening low in the nose",
+        "sixteen-inch five-spoke alloy wheels filling their arches",
+        "rounded triangular tail lamps on a short tail",
+        "an open cockpit with two seats and twin roll hoops"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "black interior, black tyres"
+      ],
+      "avoid": [
+        "pop-up headlamps or a fixed roof",
+        "a tall cabin, upright glass, or a cabin large in proportion to the body"
+      ],
+      "seed": 1,
+      "shape": "organic"
+    },
+    {
+      "id": "celica-gt4",
+      "subject": "mid-1990s Japanese all-wheel-drive turbo rally coupe",
+      "era": "1994-1999",
+      "paint": "gloss white",
+      "dims": {
+        "lengthM": 4.42,
+        "widthM": 1.75,
+        "heightM": 1.31,
+        "wheelbaseM": 2.54
+      },
+      "silhouette": [
+        "A rounded liftback coupe with a very low nose, a curved cabin and a fast sloping tail",
+        "Softly blistered arches on a smooth body"
+      ],
+      "cues": [
+        "large round headlamps set into rounded nose pods",
+        "a bonnet with a wide flat scoop and two vents",
+        "a tall rear wing on two uprights",
+        "wraparound tail lamps in a rounded tail",
+        "white six-spoke alloy wheels"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "dark glass, black tyres"
+      ],
+      "avoid": [
+        "pop-up headlamps",
+        "hard square edges"
+      ],
+      "fillHoles": false,
+      "shape": "organic"
+    },
+    {
+      "id": "silvia-s13",
+      "subject": "late-1980s Japanese rear-drive turbo sports coupe",
+      "era": "1988-1994",
+      "paint": "deep metallic amber",
+      "dims": {
+        "lengthM": 4.47,
+        "widthM": 1.69,
+        "heightM": 1.29,
+        "wheelbaseM": 2.47
+      },
+      "silhouette": [
+        "A clean simple notchback coupe with a long flat bonnet, a smooth cabin and a short boot",
+        "Flat body sides with almost no decoration"
+      ],
+      "cues": [
+        "very slim wide rectangular headlamps in a plain low nose",
+        "a narrow grille slot barely visible above the bumper",
+        "slim wide rectangular tail lamps across a flat tail",
+        "a small boot lip spoiler",
+        "simple five-spoke alloy wheels"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "dark glass, black tyres"
+      ],
+      "avoid": [
+        "pop-up headlamps",
+        "a hatchback tail"
+      ]
+    },
+    {
+      "id": "silvia-s14",
+      "subject": "mid-1990s Japanese rear-drive turbo sports coupe",
+      "era": "1993-1998",
+      "paint": "pearl white",
+      "dims": {
+        "lengthM": 4.52,
+        "widthM": 1.73,
+        "heightM": 1.29,
+        "wheelbaseM": 2.53
+      },
+      "silhouette": [
+        "A wider rounder notchback coupe than its predecessor, low and broad with a smooth cabin",
+        "Gently swollen rear haunches and a short high boot"
+      ],
+      "cues": [
+        "large rounded almond-shaped headlamps in a smooth nose",
+        "a small oval grille slot",
+        "wide wraparound tail lamps",
+        "a subtle boot lip spoiler",
+        "multi-spoke alloy wheels"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "dark glass, black tyres"
+      ],
+      "avoid": [
+        "pop-up headlamps",
+        "a hatchback tail"
+      ],
+      "shape": "organic"
+    },
+    {
+      "id": "ae86",
+      "subject": "mid-1980s Japanese small rear-drive sports hatchback coupe",
+      "era": "1983-1987",
+      "paint": "gloss white over a black lower half, split along the body line",
+      "dims": {
+        "lengthM": 4.2,
+        "widthM": 1.63,
+        "heightM": 1.34,
+        "wheelbaseM": 2.4
+      },
+      "silhouette": [
+        "A small boxy three-door hatch, all straight lines, with a flat bonnet and a raked glass hatch",
+        "A tall upright glasshouse on a narrow body"
+      ],
+      "cues": [
+        "small square lamps set flush in a flat blunt nose above a slim grille slot",
+        "black plastic bumpers front and rear",
+        "flat rectangular tail lamps in a squared tail panel",
+        "a small spoiler at the top of the hatch",
+        "narrow eight-spoke alloy wheels"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "matt black plastic trim, black tyres"
+      ],
+      "avoid": [
+        "pop-up headlamps",
+        "flared arches or rounded bodywork"
+      ],
+      "shape": "boxy"
+    },
+    {
+      "id": "datsun-240z",
+      "subject": "late-1960s Japanese long-nosed rear-drive sports fastback coupe",
+      "era": "1969-1973",
+      "paint": "bright safari orange",
+      "dims": {
+        "lengthM": 4.14,
+        "widthM": 1.63,
+        "heightM": 1.29,
+        "wheelbaseM": 2.3
+      },
+      "silhouette": [
+        "A very long bonnet, a cabin set far back over the rear axle, and a fastback tail",
+        "A slim body with a high shoulder line and a large curved rear screen"
+      ],
+      "cues": [
+        "round headlamps set deep in scooped buckets either side of the nose",
+        "a simple rectangular grille slot with a fine mesh",
+        "small round tail lamps in a cut-off tail",
+        "slim chrome bumpers and a chrome door mirror on a long stalk",
+        "narrow steel wheels with polished hub caps"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "chrome trim, black tyres"
+      ],
+      "avoid": [
+        "pop-up headlamps",
+        "flared arches or a rear wing"
+      ]
+    },
+    {
+      "id": "crx-si",
+      "subject": "late-1980s Japanese tiny front-wheel-drive two-seat sports hatchback",
+      "era": "1988-1991",
+      "paint": "bright yellow",
+      "dims": {
+        "lengthM": 3.76,
+        "widthM": 1.68,
+        "heightM": 1.27,
+        "wheelbaseM": 2.3
+      },
+      "silhouette": [
+        "A very short low two-seat wedge with a chopped vertical kammback tail",
+        "A steeply raked windscreen and a small cabin pushed to the back of a stubby body"
+      ],
+      "cues": [
+        "small flush rectangular lamps in a very low sloping nose",
+        "a split rear window with a horizontal band across the tail glass",
+        "tall narrow tail lamps flanking a short hatch",
+        "black plastic sill and bumper trim",
+        "small multi-spoke alloy wheels"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "matt black plastic trim, black tyres"
+      ],
+      "avoid": [
+        "pop-up headlamps",
+        "a long sloping fastback tail"
+      ]
+    }
+  ]
+}

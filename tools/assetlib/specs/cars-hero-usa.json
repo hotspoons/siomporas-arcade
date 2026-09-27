@@ -1,0 +1,773 @@
+{
+  "$comment": [
+    "Hero cars, American, late 1960s to early 2000s. Same rule as the other two rosters: the",
+    "silhouette is exact, the lamps and bumpers are deliberately wrong, and no badge or script ever",
+    "appears. Muscle-era cars are carried almost entirely by PROPORTION — the ratio of bonnet to",
+    "cabin to tail, and the height of the shoulder line — so those are stated plainly and the",
+    "chrome detail is left loose.",
+    "Period paint names are used freely; style.mjs picks the backdrop that will not destroy them, so",
+    "a lime green car goes on magenta without anyone having to remember to ask."
+  ],
+  "defaults": {
+    "class": "hero-car",
+    "view": "front-three-quarter"
+  },
+  "assets": [
+    {
+      "id": "camaro-gen2",
+      "subject": "1970s American long-nosed rear-drive V8 muscle coupe",
+      "era": "1970-1981",
+      "paint": "hugger orange with two broad white stripes over the bonnet",
+      "dims": {
+        "lengthM": 4.75,
+        "widthM": 1.89,
+        "heightM": 1.27,
+        "wheelbaseM": 2.74
+      },
+      "silhouette": [
+        "A very long low bonnet, a small cabin set far back, and a short high tail — roughly two thirds bonnet to one third cabin",
+        "A high shoulder line with the body swelling over each wheel arch"
+      ],
+      "cues": [
+        "a deep oval grille opening low in a forward-leaning nose with round lamps flanking it",
+        "a fastback roof falling in one long line into a short ducktail",
+        "two round tail lamps each side in a recessed black panel",
+        "slim chrome bumperettes rather than a full-width bumper",
+        "five-spoke alloy wheels with a deep dish"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "chrome trim, black tyres"
+      ],
+      "avoid": [
+        "a short bonnet or a cabin set forward",
+        "a tall upright greenhouse"
+      ]
+    },
+    {
+      "id": "camaro-gen3",
+      "subject": "1980s American wedge-shaped rear-drive V8 sports hatchback coupe",
+      "era": "1982-1992",
+      "paint": "bright metallic bronze",
+      "dims": {
+        "lengthM": 4.77,
+        "widthM": 1.85,
+        "heightM": 1.27,
+        "wheelbaseM": 2.57
+      },
+      "silhouette": [
+        "A hard flat wedge: a very low pointed nose rising in a straight line to a low flat roof, then a long glass hatch",
+        "An enormous single-piece wraparound rear window running almost to the tail"
+      ],
+      "cues": [
+        "pop-up headlamp panels shown CLOSED, so the nose is smooth and unbroken",
+        "a narrow slot grille low under the nose with no upper opening",
+        "a full-width slim tail lamp panel with fine horizontal louvre bars",
+        "body-coloured plastic bumpers blending flush into the nose and tail",
+        "wide flat-faced five-spoke alloy wheels"
+      ],
+      "materials": [
+        "glossy painted steel and plastic",
+        "dark tinted glass, black tyres"
+      ],
+      "avoid": [
+        "raised or open pop-up headlamps",
+        "chrome bumpers or a chrome grille"
+      ],
+      "shape": "boxy"
+    },
+    {
+      "id": "corvette-c3",
+      "subject": "1970s American long-nosed fibreglass rear-drive V8 sports coupe",
+      "era": "1968-1982",
+      "paint": "bright corvette red",
+      "dims": {
+        "lengthM": 4.65,
+        "widthM": 1.75,
+        "heightM": 1.22,
+        "wheelbaseM": 2.49
+      },
+      "silhouette": [
+        "Extreme coke-bottle shaping: the body pinches sharply inward at the waist between hugely swollen front and rear fenders",
+        "A very long pointed bonnet with raised fender crowns, a tiny cabin, and a chopped tail"
+      ],
+      "cues": [
+        "a long nose with a pointed prow and concealed headlamps shown closed and flush",
+        "raised humps arching over each wheel with a sharp crease along their tops",
+        "four round tail lamps in a rounded cut-off tail with chrome exhaust tips below",
+        "a removable roof panel with a body-coloured centre spine",
+        "five-spoke alloy wheels with a deep dish"
+      ],
+      "materials": [
+        "glossy painted fibreglass",
+        "chrome trim, black tyres"
+      ],
+      "avoid": [
+        "exposed round headlamps standing on the nose",
+        "flat unswollen fenders"
+      ]
+    },
+    {
+      "id": "corvette-c4",
+      "subject": "1980s American flat-panelled rear-drive V8 sports coupe",
+      "era": "1984-1996",
+      "paint": "bright white",
+      "dims": {
+        "lengthM": 4.48,
+        "widthM": 1.8,
+        "heightM": 1.19,
+        "wheelbaseM": 2.44
+      },
+      "silhouette": [
+        "A flat low wedge of broad simple panels, much squarer and cleaner than its curvaceous predecessor",
+        "A long flat clamshell bonnet, a glass targa roof and a large curved glass hatch over a squared tail"
+      ],
+      "cues": [
+        "pop-up headlamp panels shown CLOSED, leaving a smooth flat nose with a slim lower slot",
+        "a straight crease running the full length of the body side at bumper height",
+        "four round tail lamps in a flat squared tail panel",
+        "a wide flat sill skirt along each side",
+        "wide flat-faced multi-spoke alloy wheels"
+      ],
+      "materials": [
+        "glossy painted fibreglass",
+        "dark glass, black tyres"
+      ],
+      "avoid": [
+        "raised pop-up headlamps",
+        "coke-bottle waist pinching or swollen fenders"
+      ],
+      "shape": "boxy"
+    },
+    {
+      "id": "corvette-c5",
+      "subject": "late-1990s American rounded rear-drive V8 sports coupe",
+      "era": "1997-2004",
+      "paint": "torch red",
+      "dims": {
+        "lengthM": 4.56,
+        "widthM": 1.87,
+        "heightM": 1.21,
+        "wheelbaseM": 2.65
+      },
+      "silhouette": [
+        "A smooth rounded wedge with soft full surfaces, a long bonnet and a large curved glass hatch",
+        "Gently swollen haunches and a high rounded tail"
+      ],
+      "cues": [
+        "slim fixed teardrop lamps under flush clear covers in a rounded nose",
+        "four round tail lamps, two each side, in a rounded tail",
+        "a quad exhaust exiting centrally under the tail",
+        "small round side vents behind the front wheels",
+        "five-spoke alloy wheels"
+      ],
+      "materials": [
+        "glossy painted composite",
+        "dark glass, black tyres"
+      ],
+      "avoid": [
+        "pop-up headlamps",
+        "flat square panels or hard folds"
+      ],
+      "shape": "organic"
+    },
+    {
+      "id": "mustang-foxbody",
+      "subject": "late-1980s American boxy rear-drive V8 sports hatchback coupe",
+      "era": "1987-1993",
+      "paint": "oxford white",
+      "dims": {
+        "lengthM": 4.65,
+        "widthM": 1.75,
+        "heightM": 1.32,
+        "wheelbaseM": 2.55
+      },
+      "silhouette": [
+        "A boxy three-door fastback with straight flat sides, a squared nose and a long steeply raked glass hatch",
+        "An upright glasshouse on a flat-sided body with almost no curvature"
+      ],
+      "cues": [
+        "wide flush rectangular lamps either side of a slim slot in a flat sloping nose",
+        "a row of louvred slots moulded into the lower body sides ahead of each rear wheel",
+        "a three-bar vertical tail lamp cluster each side",
+        "a rubber lip spoiler across the top of the hatch",
+        "ten-hole flat-faced alloy wheels"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "matt black trim, black tyres"
+      ],
+      "avoid": [
+        "a notchback boot",
+        "rounded organic bodywork"
+      ],
+      "shape": "boxy"
+    },
+    {
+      "id": "mustang-boss302",
+      "subject": "1969 American long-nosed rear-drive V8 muscle fastback",
+      "era": "1969-1970",
+      "paint": "grabber blue with matte black bonnet stripes",
+      "dims": {
+        "lengthM": 4.76,
+        "widthM": 1.83,
+        "heightM": 1.29,
+        "wheelbaseM": 2.74
+      },
+      "silhouette": [
+        "A long flat bonnet, a fastback roof falling in one unbroken line all the way to the tail, and a short tail",
+        "A high flat shoulder line with a deep sculpted scallop ahead of each rear wheel"
+      ],
+      "cues": [
+        "a wide rectangular grille with four round lamps set across it",
+        "a matte black rear window louvre laid over the backlight",
+        "three vertical tail lamp bars each side in a recessed black tail panel",
+        "a black rubber lip spoiler on the boot and a front chin spoiler",
+        "five-spoke chrome-rimmed wheels"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "matte black trim, chrome, black tyres"
+      ],
+      "avoid": [
+        "a notchback or convertible roof",
+        "a short bonnet"
+      ]
+    },
+    {
+      "id": "charger-rt",
+      "subject": "1969 American long rear-drive V8 muscle coupe",
+      "era": "1968-1970",
+      "paint": "plum crazy metallic",
+      "dims": {
+        "lengthM": 5.28,
+        "widthM": 1.95,
+        "heightM": 1.35,
+        "wheelbaseM": 2.97
+      },
+      "silhouette": [
+        "Very long and slab-sided with a flat roof and a deeply recessed tunnel-backed rear window between two flying buttresses",
+        "A long flat bonnet and a high straight shoulder line running the whole length"
+      ],
+      "cues": [
+        "a full-width blacked-out grille with concealed headlamps shown closed",
+        "a deep scalloped indent pressed into each door",
+        "a full-width tail lamp panel divided into two long rectangles",
+        "a simple chrome bumper at each end",
+        "five-spoke chrome wheels with raised white-letter tyres"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "chrome and matte black trim, black tyres"
+      ],
+      "avoid": [
+        "a fastback roof sloping to the tail",
+        "exposed headlamps"
+      ]
+    },
+    {
+      "id": "challenger-rt",
+      "subject": "1970 American wide rear-drive V8 muscle coupe",
+      "era": "1970-1974",
+      "paint": "sublime lime green",
+      "dims": {
+        "lengthM": 4.92,
+        "widthM": 1.95,
+        "heightM": 1.32,
+        "wheelbaseM": 2.79
+      },
+      "silhouette": [
+        "Wide, low and squared with a long flat bonnet, a formal notchback roof and a short high tail",
+        "A straight shoulder line and flat slab sides with a subtle crease along them"
+      ],
+      "cues": [
+        "a wide rectangular grille split centrally with round lamps at the outer ends",
+        "a matte black bonnet with two raised scoops and chrome hold-down pins",
+        "a full-width slim tail lamp band",
+        "a black rubber lip spoiler on the boot",
+        "five-spoke chrome wheels with raised white-letter tyres"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "matte black bonnet, chrome, black tyres"
+      ],
+      "avoid": [
+        "a fastback roofline",
+        "a narrow body"
+      ]
+    },
+    {
+      "id": "cuda-426",
+      "subject": "1970 American short-tailed rear-drive V8 muscle coupe",
+      "era": "1970-1971",
+      "paint": "vitamin c orange",
+      "dims": {
+        "lengthM": 4.86,
+        "widthM": 1.92,
+        "heightM": 1.3,
+        "wheelbaseM": 2.74
+      },
+      "silhouette": [
+        "Short overhangs, a wide low stance and a compact formal roof set well back over a long bonnet",
+        "Flared arch lips standing slightly proud of flat body sides"
+      ],
+      "cues": [
+        "a wide grille with two round lamps at each outer end and a body-coloured centre bar",
+        "a raised bonnet scoop standing clear of the bonnet surface",
+        "four small rectangular tail lamps across a flat tail panel",
+        "black hockey-stick stripes sweeping along the front wings",
+        "chrome five-spoke wheels with raised white-letter tyres"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "chrome and matte black trim, black tyres"
+      ],
+      "avoid": [
+        "a fastback roofline",
+        "a long rear overhang"
+      ]
+    },
+    {
+      "id": "chevelle-ss",
+      "subject": "1970 American long rear-drive V8 muscle coupe",
+      "era": "1970",
+      "paint": "cranberry red with two broad white stripes over bonnet and boot",
+      "dims": {
+        "lengthM": 5.04,
+        "widthM": 1.92,
+        "heightM": 1.32,
+        "wheelbaseM": 2.9
+      },
+      "silhouette": [
+        "A long formal notchback coupe with a flat roof, a long bonnet and a long flat boot",
+        "A straight high shoulder line with the body kicking up slightly over each rear wheel"
+      ],
+      "cues": [
+        "a blacked-out split grille with two round lamps at each outer end",
+        "twin raised bonnet power bulges running the length of the bonnet",
+        "two square tail lamps each side in a chrome-framed tail panel",
+        "full chrome bumpers front and rear",
+        "five-spoke chrome wheels with raised white-letter tyres"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "chrome and matte black trim, black tyres"
+      ],
+      "avoid": [
+        "a fastback roofline",
+        "a short bonnet"
+      ]
+    },
+    {
+      "id": "gto-judge",
+      "subject": "1969 American long rear-drive V8 muscle coupe",
+      "era": "1969",
+      "paint": "carousel red-orange with contrasting stripe decals",
+      "dims": {
+        "lengthM": 5.13,
+        "widthM": 1.9,
+        "heightM": 1.34,
+        "wheelbaseM": 2.9
+      },
+      "silhouette": [
+        "A long formal coupe with a flat roof, a long bonnet and a body-coloured nose with no chrome across it",
+        "A straight shoulder line and a kicked-up rear quarter"
+      ],
+      "cues": [
+        "a smooth body-coloured nose with two blacked-out grille slots and round lamps outboard",
+        "twin raised bonnet scoops set well forward",
+        "a tall rear wing standing clear of the boot lid on two short uprights",
+        "slim horizontal tail lamps in a chrome tail panel",
+        "chrome five-spoke wheels with raised white-letter tyres"
+      ],
+      "materials": [
+        "glossy painted steel with a soft body-coloured nose",
+        "chrome trim, black tyres"
+      ],
+      "avoid": [
+        "a chrome front bumper across the nose",
+        "a fastback roofline"
+      ],
+      "fillHoles": false
+    },
+    {
+      "id": "superbird",
+      "subject": "1970 American winged aerodynamic rear-drive V8 stock-car homologation coupe",
+      "era": "1970",
+      "paint": "petty blue",
+      "dims": {
+        "lengthM": 5.56,
+        "widthM": 1.93,
+        "heightM": 1.35,
+        "wheelbaseM": 2.97
+      },
+      "silhouette": [
+        "An ordinary long muscle coupe wearing two absurd aerodynamic additions: a long pointed nose cone and a towering rear wing",
+        "The nose extends far beyond where the body should end; the wing stands on two tall vertical struts"
+      ],
+      "cues": [
+        "a smooth pointed body-coloured nose cone with a slim lower intake and pop-up lamps shown closed",
+        "an enormous rear wing on two tall vertical uprights standing well above the boot",
+        "black vinyl roof covering and rear-facing scoops on the front wings",
+        "a full-width tail lamp panel beneath the wing",
+        "chrome wheels with raised white-letter tyres"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "black vinyl roof, chrome, black tyres"
+      ],
+      "avoid": [
+        "a short conventional nose",
+        "a small boot-lid spoiler"
+      ],
+      "fillHoles": false
+    },
+    {
+      "id": "trans-am-gen2",
+      "subject": "late-1970s American long-nosed rear-drive V8 muscle coupe",
+      "era": "1977-1981",
+      "paint": "dark bronze metallic",
+      "dims": {
+        "lengthM": 4.98,
+        "widthM": 1.85,
+        "heightM": 1.27,
+        "wheelbaseM": 2.74
+      },
+      "silhouette": [
+        "A very long low bonnet with a small cabin set far back and a short tail, the whole car low and wide",
+        "A fastback roof with a large wraparound rear window"
+      ],
+      "cues": [
+        "four square lamps set in pairs in a forward-leaning nose with two low grille slots",
+        "a rear-facing shaker scoop standing proud of the bonnet",
+        "flared arch extensions and a deep front air dam",
+        "a full-width slim tail lamp band with fine louvre bars",
+        "snowflake-pattern alloy wheels"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "gold decal, matte black trim, black tyres"
+      ],
+      "avoid": [
+        "a short bonnet",
+        "a notchback boot"
+      ]
+    },
+    {
+      "id": "grand-national-gnx",
+      "subject": "1987 American boxy blacked-out rear-drive turbo V6 muscle coupe",
+      "era": "1987",
+      "paint": "dark graphite grey",
+      "dims": {
+        "lengthM": 5.03,
+        "widthM": 1.85,
+        "heightM": 1.37,
+        "wheelbaseM": 2.75
+      },
+      "silhouette": [
+        "A plain upright two-door saloon coupe, entirely square, with a formal notchback roof and a flat boot",
+        "A tall glasshouse and a straight flat shoulder line, utterly undecorated"
+      ],
+      "cues": [
+        "a plain rectangular grille with stacked square lamps each side, all in black",
+        "black arch flares and black vents cut into the front wings",
+        "a small black boot lip spoiler",
+        "slim rectangular tail lamps in a blacked-out panel",
+        "black mesh-pattern alloy wheels"
+      ],
+      "materials": [
+        "gloss black paint with matte black trim",
+        "black tyres"
+      ],
+      "avoid": [
+        "any chrome or bright trim at all",
+        "a fastback or sloping roofline"
+      ],
+      "shape": "boxy"
+    },
+    {
+      "id": "viper-gts",
+      "subject": "late-1990s American wide front-engined V10 sports coupe",
+      "era": "1996-2002",
+      "paint": "brilliant blue with two broad white stripes over the whole car",
+      "dims": {
+        "lengthM": 4.49,
+        "widthM": 1.92,
+        "heightM": 1.19,
+        "wheelbaseM": 2.44
+      },
+      "silhouette": [
+        "A very long rounded bonnet, a tiny cabin set far back, and a short rounded tail — extremely wide and low",
+        "A double-bubble roof with two shallow domes over the seats"
+      ],
+      "cues": [
+        "large rounded lamp clusters under flush covers in a wide rounded nose",
+        "side exhaust pipes exiting through the sill just behind each front wheel",
+        "deep vents cut into the top of each front wing behind the wheel",
+        "a rounded glass hatch over a short high tail",
+        "wide five-spoke alloy wheels"
+      ],
+      "materials": [
+        "glossy painted composite",
+        "dark glass, black tyres"
+      ],
+      "avoid": [
+        "pop-up headlamps",
+        "a narrow body or a long tail"
+      ],
+      "shape": "organic"
+    },
+    {
+      "id": "viper-rt10",
+      "subject": "early-1990s American wide front-engined V10 open roadster",
+      "era": "1992-1995",
+      "paint": "brilliant red",
+      "dims": {
+        "lengthM": 4.45,
+        "widthM": 1.92,
+        "heightM": 1.12,
+        "wheelbaseM": 2.44
+      },
+      "silhouette": [
+        "An open two-seater with no roof and no side windows: a very long rounded bonnet and a cut-off tail",
+        "Extremely wide and low with a cockpit set far back"
+      ],
+      "cues": [
+        "large rounded lamp clusters under flush covers in a wide rounded nose",
+        "side exhaust pipes exiting through the sill behind each front wheel",
+        "a low wraparound windscreen with no frame above it",
+        "two humps behind the seats and a plain cut-off tail",
+        "wide five-spoke alloy wheels"
+      ],
+      "materials": [
+        "glossy painted composite",
+        "black interior, black tyres"
+      ],
+      "avoid": [
+        "a fixed roof or hardtop",
+        "pop-up headlamps"
+      ],
+      "shape": "organic"
+    },
+    {
+      "id": "fiero-gt",
+      "subject": "mid-1980s American small mid-engined two-seat sports coupe",
+      "era": "1984-1988",
+      "paint": "bright red",
+      "dims": {
+        "lengthM": 4.14,
+        "widthM": 1.75,
+        "heightM": 1.19,
+        "wheelbaseM": 2.37
+      },
+      "silhouette": [
+        "A small low wedge with a short flat nose, a cabin set forward and a fastback tail over a mid-mounted engine",
+        "Flat plastic body panels with visible straight shut lines"
+      ],
+      "cues": [
+        "pop-up headlamp panels shown CLOSED, so the flat nose is smooth",
+        "scooped air intakes just ahead of each rear wheel",
+        "a fastback rear window flowing into a short ducktail",
+        "black plastic bumpers and sill mouldings wrapping the body",
+        "flat-faced multi-spoke alloy wheels"
+      ],
+      "materials": [
+        "glossy painted plastic panels",
+        "matt black trim, black tyres"
+      ],
+      "avoid": [
+        "raised pop-up headlamps",
+        "a long bonnet ahead of the cabin"
+      ]
+    },
+    {
+      "id": "delorean-analogue",
+      "subject": "early-1980s American stainless-steel mid-engined wedge coupe",
+      "era": "1981-1983",
+      "paint": "bare brushed stainless steel, unpainted, with a fine horizontal grain",
+      "dims": {
+        "lengthM": 4.27,
+        "widthM": 1.99,
+        "heightM": 1.14,
+        "wheelbaseM": 2.41
+      },
+      "silhouette": [
+        "A flat folded wedge of straight planes with a low chisel nose rising to a flat roof and a squared tail",
+        "A wide low body with black louvres over the rear deck"
+      ],
+      "cues": [
+        "two rectangular lamps each side set flush in the flat nose above a slim black bumper",
+        "upward-hinging gullwing doors, shown closed",
+        "black slatted louvres laid over the rear window and engine deck",
+        "a straight black rubbing strip running the length of each body side",
+        "flat-faced multi-spoke alloy wheels"
+      ],
+      "materials": [
+        "brushed unpainted stainless steel",
+        "matt black trim, black tyres"
+      ],
+      "avoid": [
+        "any painted colour on the body",
+        "rounded or organic curves"
+      ],
+      "shape": "boxy"
+    },
+    {
+      "id": "cobra-427",
+      "subject": "1960s British-American tiny open two-seat V8 roadster",
+      "era": "1965-1967",
+      "paint": "dark blue with two broad white stripes over nose, body and tail",
+      "dims": {
+        "lengthM": 3.91,
+        "widthM": 1.73,
+        "heightM": 1.24,
+        "wheelbaseM": 2.29
+      },
+      "silhouette": [
+        "A tiny open roadster of almost nothing but fenders: a short rounded nose, an open cockpit and a stubby rounded tail",
+        "Hugely bulged wheel arches on all four corners over a very narrow body"
+      ],
+      "cues": [
+        "a small oval mouth low in the nose with round lamps set into the fender tops",
+        "side exhaust pipes running along the sill below each door",
+        "a low wraparound windscreen with a roll bar behind the seats",
+        "a filler cap standing proud on the rear deck",
+        "chrome knock-off centre-lock wire or five-spoke wheels"
+      ],
+      "materials": [
+        "glossy painted aluminium",
+        "chrome trim, black tyres"
+      ],
+      "avoid": [
+        "a fixed roof",
+        "a long bonnet or a large body"
+      ]
+    },
+    {
+      "id": "gt40-analogue",
+      "subject": "1960s American-British extremely low mid-engined V8 endurance racing coupe",
+      "era": "1966-1969",
+      "paint": "pale powder blue with a broad orange stripe over nose and roof",
+      "dims": {
+        "lengthM": 4.19,
+        "widthM": 1.78,
+        "heightM": 1.02,
+        "wheelbaseM": 2.41
+      },
+      "silhouette": [
+        "Astonishingly low — barely higher than its own wheels — with a rounded low nose and a long flat engine deck",
+        "A tiny bubble cabin set forward with doors cutting up into the roof"
+      ],
+      "cues": [
+        "two round lamps each side set behind clear faired covers in a rounded low nose",
+        "a wide low mouth across the nose with two round brake ducts beside it",
+        "black slatted louvres over the rear engine deck",
+        "a chopped vertical tail with a lip spoiler and exhausts beneath",
+        "deep-dished five-spoke magnesium wheels, fatter at the rear"
+      ],
+      "materials": [
+        "glossy painted fibreglass",
+        "black mesh, black tyres"
+      ],
+      "avoid": [
+        "a tall cabin or upright screen",
+        "a front engine with a long bonnet"
+      ]
+    },
+    {
+      "id": "vector-w8",
+      "subject": "early-1990s American extreme wedge mid-engined twin-turbo supercar",
+      "era": "1990-1993",
+      "paint": "bright silver-white",
+      "dims": {
+        "lengthM": 4.37,
+        "widthM": 1.93,
+        "heightM": 1.12,
+        "wheelbaseM": 2.62
+      },
+      "silhouette": [
+        "An aggressive flat wedge, wider than it is tall by a long way, with a blunt chisel nose and a chopped vertical tail",
+        "Hard folded planes and a tiny slot-like glasshouse"
+      ],
+      "cues": [
+        "pop-up headlamp panels shown CLOSED, leaving a flat blunt nose with a slim slot",
+        "large angular intakes cut into each flank ahead of the rear wheels",
+        "black slatted louvres over the rear deck and a full-width tail lamp panel",
+        "a squared roof scoop standing above the cabin",
+        "wide flat-faced multi-spoke alloy wheels"
+      ],
+      "materials": [
+        "glossy painted composite",
+        "matt black trim, black tyres"
+      ],
+      "avoid": [
+        "raised pop-up headlamps",
+        "rounded organic curves"
+      ],
+      "shape": "boxy"
+    },
+    {
+      "id": "amx-analogue",
+      "subject": "late-1960s American short two-seat rear-drive V8 muscle coupe",
+      "era": "1968-1970",
+      "paint": "bright big bad blue",
+      "dims": {
+        "lengthM": 4.5,
+        "widthM": 1.82,
+        "heightM": 1.31,
+        "wheelbaseM": 2.44
+      },
+      "silhouette": [
+        "A short stubby two-seat muscle coupe: a long bonnet on a very short wheelbase with almost no rear overhang",
+        "A fastback roof flowing into a chopped vertical tail"
+      ],
+      "cues": [
+        "a wide mesh grille with two round lamps set at each outer end",
+        "a raised bonnet with two long functional scoops",
+        "slim horizontal tail lamps in a flat tail panel",
+        "a black rear window louvre and a boot lip spoiler",
+        "chrome five-spoke wheels with raised white-letter tyres"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "chrome and matte black trim, black tyres"
+      ],
+      "avoid": [
+        "four seats or a long wheelbase",
+        "a notchback roofline"
+      ]
+    },
+    {
+      "id": "mustang-sn95-cobra",
+      "subject": "late-1990s American rounded rear-drive V8 sports coupe",
+      "era": "1994-1998",
+      "paint": "laser red metallic",
+      "dims": {
+        "lengthM": 4.65,
+        "widthM": 1.82,
+        "heightM": 1.34,
+        "wheelbaseM": 2.57
+      },
+      "silhouette": [
+        "A softly rounded notchback coupe with a curved nose, a domed roof and a short high boot",
+        "Twin shallow bonnet bulges and softly swollen rear haunches"
+      ],
+      "cues": [
+        "rounded rectangular lamps flanking a small oval grille opening in a curved nose",
+        "two round fog lamps set low in the front bumper",
+        "three vertical tail lamp bars each side, set in a rounded tail",
+        "a small rear spoiler on the boot lid",
+        "five-spoke alloy wheels"
+      ],
+      "materials": [
+        "glossy painted steel",
+        "dark glass, black tyres"
+      ],
+      "avoid": [
+        "a boxy flat-sided body",
+        "a hatchback tail"
+      ],
+      "shape": "organic"
+    }
+  ]
+}

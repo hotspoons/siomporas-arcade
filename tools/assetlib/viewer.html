@@ -1,0 +1,382 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>assetlib</title>
+<style>
+  :root {
+    --bg: #0d0f12; --panel: #14171c; --line: #242a33; --ink: #e6e9ef;
+    --dim: #8b94a3; --accent: #ffdc00; --ok: #3ddc84; --busy: #58a6ff;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink);
+    font: 14px/1.45 ui-sans-serif, system-ui, -apple-system, sans-serif; overflow: hidden; }
+  #app { display: grid; grid-template-columns: 272px 1fr; height: 100%; }
+
+  aside { background: var(--panel); border-right: 1px solid var(--line); display: flex;
+    flex-direction: column; min-height: 0; }
+  header { padding: 12px 14px; border-bottom: 1px solid var(--line); }
+  header h1 { margin: 0; font-size: 13px; letter-spacing: .14em; text-transform: uppercase; color: var(--accent); }
+  header p { margin: 3px 0 0; font-size: 12px; color: var(--dim); }
+  #search { width: 100%; margin-top: 10px; padding: 7px 9px; background: #0b0d10; color: var(--ink);
+    border: 1px solid var(--line); border-radius: 6px; font: inherit; font-size: 13px; }
+  #search:focus { outline: none; border-color: #3a4454; }
+
+  #list { overflow-y: auto; flex: 1; padding: 6px; }
+  .grp { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--dim);
+    padding: 12px 8px 5px; }
+  .item { display: grid; grid-template-columns: 46px 1fr; gap: 9px; align-items: center;
+    padding: 6px; border-radius: 7px; cursor: pointer; border: 1px solid transparent; }
+  .item:hover { background: #1a1e25; }
+  .item[aria-selected="true"] { background: #1d232d; border-color: #33507a; }
+  .item img { width: 46px; height: 34px; object-fit: contain; background: #0b0d10; border-radius: 4px; }
+  .item .ph { width: 46px; height: 34px; background: #0b0d10; border-radius: 4px; }
+  .item b { display: block; font-weight: 600; font-size: 13px; }
+  .item small { color: var(--dim); font-size: 11px; }
+  .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 5px;
+    vertical-align: middle; }
+  .dot.ready { background: var(--ok); } .dot.meshing { background: var(--busy); }
+  .dot.drawing { background: var(--accent); }
+
+  main { position: relative; min-width: 0; }
+  canvas { display: block; width: 100%; height: 100%; }
+
+  #bar { position: absolute; top: 12px; left: 12px; right: 12px; display: flex; gap: 8px;
+    flex-wrap: wrap; align-items: center; pointer-events: none; }
+  #bar > * { pointer-events: auto; }
+  .btn { background: rgba(20,23,28,.9); border: 1px solid var(--line); color: var(--ink);
+    padding: 6px 11px; border-radius: 6px; cursor: pointer; font: inherit; font-size: 12px;
+    backdrop-filter: blur(8px); }
+  .btn:hover { border-color: #3a4454; }
+  .btn[aria-pressed="true"] { background: #23303f; border-color: #3f6191; color: #cfe2ff; }
+  #title { margin-left: auto; text-align: right; background: rgba(20,23,28,.9); padding: 6px 11px;
+    border-radius: 6px; border: 1px solid var(--line); backdrop-filter: blur(8px); }
+  #title b { font-size: 13px; } #title small { display: block; color: var(--dim); font-size: 11px; }
+
+  #info { position: absolute; left: 12px; bottom: 12px; max-width: 460px;
+    background: rgba(20,23,28,.94); border: 1px solid var(--line); border-radius: 8px;
+    padding: 10px 12px; backdrop-filter: blur(8px); font-size: 12px; }
+  #info table { border-collapse: collapse; }
+  #info td { padding: 1px 12px 1px 0; vertical-align: top; }
+  #info td:first-child { color: var(--dim); white-space: nowrap; }
+  #info .warn { color: #ff9e64; }
+  details { margin-top: 8px; } details summary { cursor: pointer; color: var(--dim); font-size: 11px; }
+  details p { margin: 6px 0 0; color: #b9c1cf; font-size: 11px; line-height: 1.5;
+    max-height: 180px; overflow-y: auto; }
+
+  #src { position: absolute; right: 12px; bottom: 12px; width: 190px; border: 1px solid var(--line);
+    border-radius: 8px; overflow: hidden; background: rgba(20,23,28,.94); backdrop-filter: blur(8px); }
+  #src img { display: block; width: 100%; background: #16181d; }
+  #src span { display: block; padding: 5px 9px; font-size: 11px; color: var(--dim); }
+  #err { position: absolute; inset: 0; display: none; place-items: center; text-align: center;
+    padding: 30px; color: #ff9e64; font-size: 13px; }
+  #empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--dim); }
+</style>
+<script type="importmap">
+{"imports": {
+  "three": "/vendor/three/build/three.module.js",
+  "three/addons/": "/vendor/three/addons/"
+}}
+</script>
+</head>
+<body>
+<div id="app">
+  <aside>
+    <header>
+      <h1>assetlib</h1>
+      <div id="modes" style="display:flex;gap:6px;margin:8px 0 2px">
+        <button class="btn" id="m-models" aria-pressed="true" style="flex:1">models</button>
+        <button class="btn" id="m-mats" aria-pressed="false" style="flex:1">materials</button>
+      </div>
+      <p id="count">scanning…</p>
+      <input id="search" placeholder="filter…" autocomplete="off">
+    </header>
+    <div id="list"></div>
+  </aside>
+  <main>
+    <canvas id="c"></canvas>
+    <div id="bar">
+      <button class="btn" id="spin" aria-pressed="true">spin</button>
+      <button class="btn" id="wire" aria-pressed="false">wireframe</button>
+      <button class="btn" id="grid" aria-pressed="true">grid</button>
+      <button class="btn" id="src-tog" aria-pressed="false">raw mesh</button>
+      <button class="btn" id="glass-tog" aria-pressed="false" hidden>glass</button>
+      <div id="title"><b>—</b><small></small></div>
+    </div>
+    <div id="info"></div>
+    <div id="src" hidden><img id="srcimg" alt="the flux view this was reconstructed from"><span>source view</span></div>
+    <div id="err"></div>
+    <div id="empty">nothing on disk yet</div>
+  </main>
+</div>
+
+<script type="module">
+import * as THREE from 'three'
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
+import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js'
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
+
+const $ = (s) => document.querySelector(s)
+const canvas = $('#c')
+
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true })
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2))
+renderer.toneMapping = THREE.ACESFilmicToneMapping
+renderer.toneMappingExposure = 1.0
+const scene = new THREE.Scene()
+scene.background = new THREE.Color(0x15181d)
+
+// A real environment, because these models KEEP their PBR material — finish() is called with
+// unlit:false here, unlike Radrun's sprite path. Judging a clear-coat with a bare directional
+// light would flatter a bad bake and punish a good one.
+const pmrem = new THREE.PMREMGenerator(renderer)
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture
+scene.add(new THREE.HemisphereLight(0xffffff, 0x30343c, 0.7))
+const key = new THREE.DirectionalLight(0xffffff, 1.6); key.position.set(3, 5, 4); scene.add(key)
+
+const camera = new THREE.PerspectiveCamera(32, 1, 0.005, 200)
+const controls = new OrbitControls(camera, canvas)
+controls.enableDamping = true
+controls.dampingFactor = 0.07
+
+const grid = new THREE.GridHelper(4, 40, 0x3a4250, 0x232a34)
+grid.material.transparent = true; grid.material.opacity = 0.55
+scene.add(grid)
+
+const pivot = new THREE.Group(); scene.add(pivot)
+window.__v = { pivot, camera, controls, get spin() { return spin } }
+
+const draco = new DRACOLoader().setDecoderPath('/vendor/draco/')
+const loader = new GLTFLoader().setDRACOLoader(draco)
+
+let assets = [], materials = [], mode = 'models'
+let current = null, spin = true, wire = false, showRaw = false, showGlass = false
+const texLoader = new THREE.TextureLoader()
+
+function resize() {
+  const w = canvas.clientWidth, h = canvas.clientHeight
+  if (canvas.width === w * renderer.getPixelRatio() && canvas.height === h * renderer.getPixelRatio()) return
+  renderer.setSize(w, h, false)
+  camera.aspect = w / h; camera.updateProjectionMatrix()
+}
+new ResizeObserver(resize).observe(canvas)
+
+renderer.setAnimationLoop(() => {
+  resize()
+  if (spin) pivot.rotation.y += 0.0045
+  controls.update()
+  renderer.render(scene, camera)
+})
+
+const fmt = (n) => n >= 1e6 ? `${(n / 1e6).toFixed(2)} MB` : `${(n / 1e3).toFixed(0)} kB`
+
+async function show(a) {
+  current = a
+  $('#empty').style.display = 'none'
+  $('#err').style.display = 'none'
+  for (const el of document.querySelectorAll('.item')) el.setAttribute('aria-selected', String(el.dataset.id === a.id))
+  $('#title').innerHTML = `<b>${a.id}</b><small>${a.subject || ''}</small>`
+  $('#srcimg').src = (showRaw ? a.raw : a.thumb) ? `/${showRaw ? a.raw : a.thumb}` : ''
+  $('#src').hidden = !(a.thumb || a.raw)
+
+  // The glass variant only exists for assets glass.mjs has been run on, so the button hides
+  // itself rather than offering a toggle that would silently fall back to the plain mesh.
+  const glassBtn = $('#glass-tog')
+  glassBtn.hidden = !a.glbGlass
+  if (!a.glbGlass && showGlass) { showGlass = false; glassBtn.setAttribute('aria-pressed', 'false') }
+  const url = showRaw ? a.glbRaw : (showGlass && a.glbGlass) ? a.glbGlass : a.glb
+  pivot.clear()
+  if (!url) {
+    $('#err').style.display = 'grid'
+    $('#err').textContent = `${a.id}: ${a.state === 'drawing' ? 'still being drawn' : 'mesh not finished yet'}`
+    info(a, null)
+    return
+  }
+  try {
+    const gltf = await loader.loadAsync(`/${url}?t=${a.bytes}`)
+    const root = gltf.scene
+    root.traverse((o) => {
+      if (!o.isMesh) return
+      o.material.wireframe = wire
+      // Transmissive glass must stay double-sided or the far pane vanishes; everything else is
+      // front-side so the inside of the shell does not z-fight through the paint.
+      if (!(o.material.transmission > 0)) o.material.side = THREE.FrontSide
+    })
+    const box = new THREE.Box3().setFromObject(root)
+    const c = box.getCenter(new THREE.Vector3()), s = box.getSize(new THREE.Vector3())
+    root.position.sub(c); root.position.y += s.y / 2       // sit it on the grid
+    pivot.add(root)
+    const r = Math.max(s.x, s.y, s.z)
+    grid.scale.setScalar(r)
+    camera.position.set(r * 1.5, r * 0.85, r * 2.0)
+    controls.target.set(0, s.y / 2, 0)
+    controls.update()
+    info(a, s)
+  } catch (e) {
+    // A GLTFLoader without a working DRACOLoader REJECTS rather than warning. Say so plainly —
+    // a silent empty stage is indistinguishable from a bad reconstruction.
+    $('#err').style.display = 'grid'
+    $('#err').textContent = `failed to load ${url}\n${e.message}`
+  }
+}
+
+const WALL_M = 8   // the sample wall is 8 metres across, so the grid reads as metres
+
+async function showMaterial(m) {
+  current = m
+  $('#empty').style.display = 'none'
+  $('#err').style.display = 'none'
+  for (const el of document.querySelectorAll('.item')) el.setAttribute('aria-selected', String(el.dataset.id === m.id))
+  $('#title').innerHTML = `<b>${m.id}</b><small>${m.name} · ${m.metres_per_tile} m tile</small>`
+  $('#src').hidden = false
+  $('#srcimg').src = `/${m.albedo}`
+  pivot.clear()
+
+  const repeat = WALL_M / m.metres_per_tile
+  const load = (url) => new Promise((res) => texLoader.load(url, (t) => {
+    t.wrapS = t.wrapT = THREE.RepeatWrapping
+    t.repeat.set(repeat, repeat)
+    t.anisotropy = 8
+    res(t)
+  }, undefined, () => res(null)))
+
+  const [map, normalMap, roughnessMap] = await Promise.all([
+    load(`/${m.albedo}`), load(`/${m.normal}`), load(`/${m.roughness}`),
+  ])
+  if (map) map.colorSpace = THREE.SRGBColorSpace
+  // DoubleSide, and the pivot reset below: a single-sided plane on a spinning pivot is invisible
+  // for half of every turn, which looks exactly like a texture that failed to load.
+  const mat = new THREE.MeshStandardMaterial({ map, normalMap, roughnessMap, metalness: 0, side: THREE.DoubleSide })
+  const wall = new THREE.Mesh(new THREE.PlaneGeometry(WALL_M, WALL_M), mat)
+  wall.position.y = WALL_M / 2
+  pivot.add(wall)
+
+  // A 1.8 m figure beside it: the fastest way to see whether metres_per_tile is honest.
+  const person = new THREE.Mesh(
+    new THREE.CapsuleGeometry(0.22, 1.3, 4, 8),
+    new THREE.MeshStandardMaterial({ color: 0x2f3742, roughness: 0.9 }))
+  person.position.set(-WALL_M / 2 - 0.7, 0.9, 0.6)
+  pivot.add(person)
+
+  // A wall is looked at, not orbited on a turntable; the pivot carries rotation over from whatever
+  // model was shown last, so reset it rather than inherit a random yaw.
+  pivot.rotation.y = 0
+  grid.scale.setScalar(WALL_M / 4)
+  // Far enough back that the whole wall AND the figure beside it are in frame — the figure is the
+  // entire point of this view, so cropping it defeats it.
+  camera.position.set(0, WALL_M * 0.42, WALL_M * 2.1)
+  controls.target.set(-0.4, WALL_M * 0.42, 0)
+  controls.update()
+
+  const rows = [`<tr><td>category</td><td>${m.category}</td></tr>`,
+    `<tr><td>tile</td><td>${m.metres_per_tile} m — shown on an 8 m wall beside a 1.8 m figure</td></tr>`]
+  if (m.glass) rows.push(`<tr><td>glass</td><td>transmission ${m.glass.transmission}, ior ${m.glass.ior}${m.glass_coverage != null ? `, ${Math.round(m.glass_coverage * 100)}% panes` : ''}</td></tr>`)
+  $('#info').innerHTML = `<table>${rows.join('')}</table>` +
+    (m.prompt ? `<details><summary>prompt</summary><p>${m.prompt.replace(/</g, '&lt;')}</p></details>` : '')
+}
+
+function info(a, size) {
+  const rows = []
+  const push = (k, v, cls = '') => rows.push(`<tr><td>${k}</td><td class="${cls}">${v}</td></tr>`)
+  if (size) {
+    const ext = [size.x, size.y, size.z]
+    const long = Math.max(...ext)
+    push('extent', ext.map((v) => v.toFixed(3)).join(' × '))
+    push('length : height', (long / size.y).toFixed(2))
+  }
+  if (a.mesh) push('recon', `${a.mesh.seconds}s · ${(a.mesh.faces / 1e6).toFixed(1)}M faces · ${a.mesh.textured ? 'textured' : 'UNTEXTURED'}`, a.mesh.textured ? '' : 'warn')
+  if (a.finished) push('finished', `${fmt(a.finished.from)} → ${fmt(a.finished.bytes)}`)
+  if (a.key) push('key', `${a.key.ink.toFixed(1)}% ink · ${a.chroma} backdrop`, a.key.ink < 8 ? 'warn' : '')
+  if (a.view) push('view', a.view)
+  if (a.glbGlass) push('glass', 'KHR_materials_transmission, ior 1.5')
+  $('#info').innerHTML = `<table>${rows.join('')}</table>` +
+    (a.prompt ? `<details><summary>prompt</summary><p>${a.prompt.replace(/</g, '&lt;')}</p></details>` : '')
+}
+
+function renderMaterials() {
+  const q = $('#search').value.trim().toLowerCase()
+  const shown = materials.filter((m) => !q || m.id.includes(q) || m.name.toLowerCase().includes(q))
+  const groups = {}
+  for (const m of shown) (groups[m.category] ??= []).push(m)
+  $('#list').innerHTML = Object.entries(groups).map(([k, v]) => `<div class="grp">${k.replace('_', ' ')} · ${v.length}</div>` + v.map((m) => `
+    <div class="item" data-id="${m.id}" aria-selected="${current?.id === m.id}">
+      <img src="/${m.albedo}" loading="lazy" alt="">
+      <div><b>${m.id}</b><small>${m.metres_per_tile} m tile</small></div>
+    </div>`).join('')).join('')
+  $('#count').textContent = `${materials.length} materials`
+  for (const el of document.querySelectorAll('.item')) el.onclick = () => showMaterial(materials.find((m) => m.id === el.dataset.id))
+}
+
+function render() {
+  if (mode === 'materials') return renderMaterials()
+  const q = $('#search').value.trim().toLowerCase()
+  const shown = assets.filter((a) => !q || a.id.includes(q) || (a.subject || '').toLowerCase().includes(q))
+  const groups = {}
+  for (const a of shown) (groups[a.class] ??= []).push(a)
+  $('#list').innerHTML = Object.entries(groups).map(([k, v]) => `<div class="grp">${k} · ${v.length}</div>` + v.map((a) => `
+    <div class="item" data-id="${a.id}" aria-selected="${current?.id === a.id}">
+      ${a.thumb ? `<img src="/${a.thumb}" loading="lazy" alt="">` : '<div class="ph"></div>'}
+      <div><b>${a.id}</b><small><span class="dot ${a.state}"></span>${a.state}${a.bytes ? ` · ${fmt(a.bytes)}` : ''}</small></div>
+    </div>`).join('')).join('')
+  $('#count').textContent = `${assets.filter((a) => a.state === 'ready').length} ready · ${assets.length} on disk`
+  for (const el of document.querySelectorAll('.item')) {
+    el.onclick = () => show(assets.find((a) => a.id === el.dataset.id))
+  }
+}
+
+async function poll() {
+  if (mode === 'materials') return
+  try {
+    const next = await (await fetch('/api/assets')).json()
+    const grew = next.length !== assets.length ||
+      next.some((a, i) => a.state !== assets[i]?.state || a.bytes !== assets[i]?.bytes)
+    assets = next
+    if (grew) render()
+    if (!current && assets.length) { const first = assets.find((a) => a.glb) ?? assets[0]; show(first) }
+    if (assets.length) $('#empty').style.display = 'none'
+  } catch { /* server restarting */ }
+}
+poll(); setInterval(poll, 6000)
+
+$('#search').oninput = render
+
+async function setMode(next) {
+  mode = next
+  $('#m-models').setAttribute('aria-pressed', String(next === 'models'))
+  $('#m-mats').setAttribute('aria-pressed', String(next === 'materials'))
+  current = null
+  pivot.clear()
+  for (const id of ['#spin', '#wire', '#src-tog', '#glass-tog']) $(id).hidden = next === 'materials'
+  spin = next === 'models'
+  $('#spin').setAttribute('aria-pressed', String(spin))
+  if (next === 'materials') pivot.rotation.y = 0
+  if (next === 'materials' && !materials.length) {
+    materials = (await (await fetch('/api/materials')).json()).materials ?? []
+  }
+  render()
+  const first = next === 'materials' ? materials[0] : assets.find((a) => a.glb)
+  if (first) (next === 'materials' ? showMaterial : show)(first)
+}
+$('#m-models').onclick = () => setMode('models')
+$('#m-mats').onclick = () => setMode('materials')
+const toggle = (sel, fn) => { const b = $(sel); b.onclick = () => { const on = b.getAttribute('aria-pressed') !== 'true'; b.setAttribute('aria-pressed', String(on)); fn(on) } }
+toggle('#spin', (on) => { spin = on })
+toggle('#grid', (on) => { grid.visible = on })
+toggle('#wire', (on) => { wire = on; pivot.traverse((o) => { if (o.isMesh) o.material.wireframe = on }) })
+toggle('#src-tog', (on) => { showRaw = on; if (current) show(current) })
+toggle('#glass-tog', (on) => { showGlass = on; if (current) show(current) })
+
+// Arrow keys walk the roster — the fastest way to judge a batch is to flick through it.
+addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'INPUT') return
+  if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
+  e.preventDefault()
+  const i = assets.findIndex((a) => a.id === current?.id)
+  const n = (i + (e.key === 'ArrowDown' ? 1 : -1) + assets.length) % assets.length
+  show(assets[n])
+})
+</script>
+</body>
+</html>

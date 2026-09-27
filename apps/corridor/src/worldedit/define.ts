@@ -137,11 +137,9 @@ export class DefinePanel {
     host.replaceChildren()
     const ring = this.o.map.ring
 
-    host.append(
-      hint(
-        this.editing ? `Editing “${this.editing}”.` : 'Click on the map to drop boundary points. Click the first point again to close the ring — right-click removes the last.',
-      ),
-    )
+    if (!this.preview && !this.o.map.ring.length) {
+      host.append(hint('Drag a box on the map. Drag its corners or edges to adjust.'))
+    }
 
     /* where */
     const where = group('Extent')
@@ -152,7 +150,7 @@ export class DefinePanel {
         button({
           label: 'Use the current view',
           icon: 'viewfinder-circle',
-          title: 'take the centre and half-width of what is on screen, instead of drawing',
+          title: 'use the current view',
           onClick: () => {
             const b = this.o.map.bbox()
             this.draft.lat = (b.north + b.south) / 2
@@ -175,7 +173,7 @@ export class DefinePanel {
           step: 50,
           neutral: c.radius_m,
           unit: 'm',
-          note: 'sized from the smallest circle containing what you drew, but the bake uses it as a HALF-WIDTH: drag to widen or tighten the square',
+          note: 'half the side of the square the bake takes',
           onInput: (v) => {
             this.draft.radius_m = v
             this.o.map.extent = { centre: { lat: c.lat, lon: c.lon }, radius_m: v }
@@ -187,8 +185,7 @@ export class DefinePanel {
             }, 500)
           },
         }),
-        readout('the bake takes', `${(c.radius_m * 2).toLocaleString()} m square`),
-        hint('`radius_m` is the bake’s own name for this and it is a half-width, not a radius: `network.roads` builds a square of side 2× it and never clips to a circle. A square is 4/π = 1.27× the area the name implies.'),
+        readout('bake area', `${(c.radius_m * 2).toLocaleString()} m square · ${((c.radius_m * 2 / 1000) ** 2).toFixed(1)} km²`),
       )
       for (const w of this.preview.warnings) wb.append(warn(w))
     }
@@ -197,17 +194,16 @@ export class DefinePanel {
     /* how much */
     if (this.preview) {
       const s = this.preview.selection
-      const size = group('What is in it', {
-        note: 'The bake queries a SQUARE of side 2× the half-width and never clips roads to a circle or to your polygon. Both numbers are here so the difference is visible.',
-      })
+      const size = group('Contents')
       const sb = bodyOf(size)
-      sb.append(readout('in the square (baked)', `${s.square.ways} ways · ${km(s.square.metres)}`))
+      sb.append(readout('baked', `${s.square.ways.toLocaleString()} ways · ${km(s.square.metres)}`))
       if (s.boundary) {
-        sb.append(readout('inside your boundary', `${s.boundary.ways} ways · ${km(s.boundary.metres)}`))
+        sb.append(readout('inside boundary', `${s.boundary.ways.toLocaleString()} ways · ${km(s.boundary.metres)}`))
         const extra = s.square.metres - s.boundary.metres
-        if (extra > s.boundary.metres * 0.15) sb.append(hint(`the square drags in ${km(extra)} of road your boundary excluded — tighten the shape or accept it`))
+        // Actionable, and only when it is: the bake squares off your shape, and past a sixth of
+        // the total that is enough road to be worth tightening.
+        if (extra > s.boundary.metres * 0.15) sb.append(hint(`+${km(extra)} outside your boundary — the bake squares it off`))
       }
-      sb.append(readout('for scale', `${this.preview.selection.reference.slug} is ${this.preview.selection.reference.ways} ways`))
       if (this.previewing) sb.append(hint('measuring…'))
       host.append(size)
     }
@@ -230,14 +226,8 @@ export class DefinePanel {
         },
       }),
     )
-    if (this.draft.all_streets) {
-      rb.append(
-        hint(
-          'every drivable way in the square, the way crofton-triangle is built. A named list is a ceiling you cannot see: crofton-crownsville named 18 roads and drew 18 of the 10 593 drivable ways in its extract, so most of the street furniture had no road to belong to.',
-        ),
-      )
-    } else {
-      rb.append(hint('click roads on the map to add them; shift-click toggles. The map is in pick mode.'))
+    if (!this.draft.all_streets) {
+      rb.append(hint('Click roads to add · shift-click toggles'))
       if (!this.roads.size) rb.append(empty('nothing picked'))
       for (const r of this.roads) {
         const row = el('div', 'road-row')
@@ -262,7 +252,7 @@ export class DefinePanel {
     const idents = this.preview?.selection.idents ?? []
     rb.append(
       select({
-        label: 'Primary (the spine)',
+        label: 'Spine',
         value: this.draft.primary ?? '',
         options: [
           { value: '', label: '— pick one —' },
@@ -275,11 +265,10 @@ export class DefinePanel {
         },
       }),
     )
-    rb.append(hint('the primary becomes the spine: the profile, the structures and every branch’s position along the world are measured against it.'))
     host.append(roads)
 
     /* how it looks: the palette, the season and the water the world opens with */
-    const lookG = group('Look', { note: 'What the world opens with. A viewer link with ?style or ?season still wins.' })
+    const lookG = group('Look', { note: 'Defaults; ?style and ?season in a viewer link override them.' })
     const lb = bodyOf(lookG)
     const look = (this.draft.look ??= {})
     lb.append(
@@ -317,7 +306,7 @@ export class DefinePanel {
         step: 0.25,
         neutral: 1,
         unit: '×',
-        note: 'exaggerates the hills about the primary road; 1 is the world as measured',
+        note: '1 = as measured',
         onInput: (v) => {
           if (v === 1) delete look.relief
           else look.relief = v
@@ -327,7 +316,7 @@ export class DefinePanel {
       toggle({
         label: 'set the water level',
         value: look.water_level_m != null,
-        note: 'Waterworld: the sea plane rises to this height. Off leaves the site’s own water.',
+        note: 'Off = the site’s own water',
         onChange: (on) => {
           if (on) look.water_level_m = look.water_level_m ?? 0
           else delete look.water_level_m
@@ -345,7 +334,7 @@ export class DefinePanel {
           max: 1000,
           step: 1,
           unit: 'm',
-          note: 'metres above the ellipsoid, the height the bake’s DEM uses',
+          note: 'NAVD88',
           onInput: (v) => {
             look.water_level_m = v
             this.o.onDirty(true)
@@ -371,14 +360,6 @@ export class DefinePanel {
         value: this.draft.note ?? '',
         onChange: (v) => {
           this.draft.note = v
-        },
-      }),
-      toggle({
-        label: 'keep the drawn boundary on the definition',
-        value: true,
-        note: 'provenance only — the bake never reads it. Keeping it means this world can be re-opened and redrawn.',
-        onChange: () => {
-          /* the boundary is always kept; this switch exists to say so, and is disabled below */
         },
       }),
     )

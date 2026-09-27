@@ -25,20 +25,20 @@ import { circleFor, haversineM, lengthM, pointInRing, slugify } from './geo.mjs'
 const SLUG_RE = /^[a-z0-9][a-z0-9-]{1,47}$/
 
 /**
- * A radius the bake will survive.
+ * A half-width the bake will survive.
  *
- * Every source scales with the area: Overpass, the DEM tiles, NAIP, and worst of all the lidar
- * octree. crofton-crownsville at 9 km is the largest thing baked so far and it is hours. Above
- * `WARN_M` the editor says how much bigger than Crofton this is instead of silently accepting it,
- * and `MAX_M` is a refusal rather than a warning because the failure mode is a Job that fills the
- * volume and then dies.
+ * Every source scales with AREA — Overpass, the DEM tiles, NAIP, and worst of all the lidar
+ * octree — and the bake takes a square of side 2r, so doubling this quadruples the work. Above
+ * `WARN_M` the editor states the area rather than silently accepting it. `MAX_M` is a refusal
+ * rather than a warning because the failure mode is a Job that fills the volume and then dies.
+ *
+ * The warning used to compare against a named world that shipped in the image. It no longer does,
+ * on both counts: the image ships empty, so the comparison was to something the reader had never
+ * seen, and an area in km² is a fact about their own bake instead of trivia about someone else's.
  */
 export const MIN_M = 150
 export const WARN_M = 4000
 export const MAX_M = 20000
-
-/** The reference, so a warning can be a comparison rather than an adjective. */
-const REFERENCE = { slug: 'crofton-triangle', radius_m: 2600, ways: 854, note: 'every drivable street in the Crofton triangle' }
 
 export function validate(world) {
   const errors = []
@@ -49,13 +49,13 @@ export function validate(world) {
   const r = Number(world.radius_m)
   if (!Number.isFinite(r) || r < MIN_M) errors.push(`radius_m must be at least ${MIN_M} m`)
   else if (r > MAX_M) errors.push(`radius_m ${Math.round(r)} m is over the ${MAX_M} m ceiling — bake it in pieces`)
-  else if (r > WARN_M) warnings.push(`${Math.round(r)} m radius is ${(r / REFERENCE.radius_m).toFixed(1)}× ${REFERENCE.slug} on a side, so roughly ${((r / REFERENCE.radius_m) ** 2).toFixed(1)}× the area and the sources scale with area`)
+  else if (r > WARN_M) warnings.push(`${((r * 2 / 1000) ** 2).toFixed(0)} km² to bake — every source scales with area, so expect hours`)
 
   if (world.kind === 'network') {
     const roads = world.roads ?? []
-    if (!world.all_streets && !roads.length) errors.push('a network site needs `all_streets: true` or a non-empty `roads` list — network.roads raises otherwise')
-    if (!world.primary) errors.push('a network site needs a `primary` road: it becomes the spine, and the profile and structures are measured along it')
-    if (!world.all_streets && world.primary && !roads.includes(world.primary)) errors.push(`primary "${world.primary}" is not in the roads list`)
+    if (!world.all_streets && !roads.length) errors.push('pick at least one road, or choose Every street')
+    if (!world.primary) errors.push('a spine road is required')
+    if (!world.all_streets && world.primary && !roads.includes(world.primary)) errors.push(`spine "${world.primary}" is not in the roads list`)
   } else if (world.kind) {
     errors.push(`unknown kind "${world.kind}" — this editor makes network sites`)
   }
@@ -80,11 +80,10 @@ export const SEASONS = ['winter', 'spring', 'summer', 'autumn']
 /**
  * Build a definition from what the editor drew.
  *
- * `roads` (the names picked on the map) and `all_streets` are alternatives, and picking names is
- * worth doing only when a person wants a few specific roads: crofton-crownsville named 18 roads
- * over a 9 km radius and drew 18 of the 10 593 drivable ways in that extract, which is why most
- * of the street furniture built from OSM had nothing to attach to. The editor defaults to
- * `all_streets` and says that.
+ * `roads` (names picked on the map) and `all_streets` are alternatives. Naming roads is worth
+ * doing only for a handful of specific ones: measured on a 9 km site, a list of 18 named roads
+ * drew 18 of the 10 593 drivable ways in that extract, so nearly all the street furniture built
+ * from OSM had nothing to attach to. `all_streets` is the default.
  */
 export function fromDraw({ slug, name, boundary, centre, radius_m, primary, roads, all_streets = true, region, note, look }) {
   const ring = (boundary ?? []).map(toPoint)
@@ -160,7 +159,6 @@ export function selectWays(ways, { centre, radius_m, boundary }) {
     square: { ways: inSquare.length, metres: Math.round(lengthM(inSquare.map((w) => w.line.map(([lon, lat]) => ({ lon, lat }))))) },
     boundary: ring.length >= 3 ? { ways: inBoundary.length, metres: Math.round(lengthM(inBoundary.map((w) => w.line.map(([lon, lat]) => ({ lon, lat }))))) } : null,
     idents: [...idents.values()].map((e) => ({ ...e, metres: Math.round(e.metres) })).sort((a, b) => b.metres - a.metres),
-    reference: REFERENCE,
   }
 }
 

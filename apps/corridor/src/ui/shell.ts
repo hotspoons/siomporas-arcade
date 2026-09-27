@@ -431,6 +431,98 @@ let toastTimer = 0
  * Replaces `#status`, which was a div that different parts of the app wrote into and then raced
  * each other to clear with their own setTimeout.
  */
+/*
+ * ASK AND CONFIRM, in the app rather than in the browser chrome.
+ *
+ * `prompt()` and `confirm()` work, and they look like 1998 — a grey box with the hostname above
+ * it, no styling, no validation until you have already pressed OK, and on some browsers a
+ * "prevent this page from creating additional dialogs" checkbox that silently disables the app.
+ * There was a full Dialog class here the whole time; the native calls were shortcuts
+ * (Rich, 2026-09-27: "got hit with this unintuitive mess ... make these more production grade").
+ *
+ * Both return a Promise, so the call sites read the same way the native ones did.
+ */
+
+/** One line of text, validated as it is typed. Resolves null if dismissed. */
+export function ask(o: {
+  title: string
+  label: string
+  value?: string
+  placeholder?: string
+  /** return a message to block OK, or null when the value is usable */
+  validate?: (v: string) => string | null
+  ok?: string
+  icon?: IconName
+}): Promise<string | null> {
+  return new Promise((resolve) => {
+    let done = false
+    const finish = (v: string | null) => { if (!done) { done = true; resolve(v) } }
+    const d = new Dialog({ title: o.title, size: 'sm', icon: o.icon, onClose: () => finish(null) })
+
+    const field = el('label', 'field text')
+    field.append(el('span', 'field-label', o.label))
+    const input = el('input', 'input wide')
+    input.type = 'text'
+    input.value = o.value ?? ''
+    if (o.placeholder) input.placeholder = o.placeholder
+    field.append(input)
+    const why = el('p', 'field-error')
+    why.hidden = true
+
+    const accept = button({
+      label: o.ok ?? 'OK',
+      variant: 'primary',
+      onClick: () => {
+        const v = input.value.trim()
+        const bad = o.validate?.(v) ?? (v ? null : `${o.label} is required`)
+        if (bad) { why.textContent = bad; why.hidden = false; input.focus(); return }
+        finish(v)
+        d.close()
+      },
+    })
+    // Validate WHILE TYPING, not after OK. A rule you are told about only once you have committed
+    // is a rule you have to guess at.
+    input.oninput = () => {
+      const bad = o.validate?.(input.value.trim()) ?? null
+      why.textContent = bad ?? ''
+      why.hidden = !bad
+      accept.disabled = !!bad || !input.value.trim()
+    }
+    input.onkeydown = (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); accept.click() }
+    }
+    accept.disabled = !(o.value ?? '').trim()
+
+    d.body.append(field, why)
+    d.footer(button({ label: 'Cancel', onClick: () => d.close() }), accept).open()
+    requestAnimationFrame(() => { input.focus(); input.select() })
+  })
+}
+
+/** A yes/no. `danger` colours the confirming button, for the ones that destroy something. */
+export function confirm(o: {
+  title: string
+  message: string
+  ok?: string
+  danger?: boolean
+  icon?: IconName
+}): Promise<boolean> {
+  return new Promise((resolve) => {
+    let done = false
+    const finish = (v: boolean) => { if (!done) { done = true; resolve(v) } }
+    const d = new Dialog({ title: o.title, size: 'sm', icon: o.icon, onClose: () => finish(false) })
+    d.body.append(el('p', 'dialog-message', o.message))
+    d.footer(
+      button({ label: 'Cancel', onClick: () => d.close() }),
+      button({
+        label: o.ok ?? 'OK',
+        variant: o.danger ? 'danger' : 'primary',
+        onClick: () => { finish(true); d.close() },
+      }),
+    ).open()
+  })
+}
+
 export function toast(message: string, kind: 'info' | 'ok' | 'warn' | 'danger' = 'info', ms = 3200) {
   if (!toastHost) {
     toastHost = el('div', 'toast')

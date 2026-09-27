@@ -8,7 +8,7 @@
 // which image model draws the view and which reconstructor meshes it is the service's business and
 // is shown, read-only, under Service so that a person can see what they are about to spend a
 // GPU-minute on.
-import { Dialog, Tabs, button, el, toast, type Tab } from './shell'
+import { Dialog, Tabs, ask, button, confirm, el, toast, type Tab } from './shell'
 import { icon } from './icons'
 import { bodyOf, empty, group, readout, textField } from './controls'
 import { assetsvc, type AssetItem, type AssetJob, type ModelRoster } from '../assetsvc'
@@ -79,23 +79,17 @@ export class AssetCatalog {
   }
 
   /**
-   * "No service" is a normal state, not an error: asset generation is off by default and the
-   * editor works completely without it. So this says where it looked and how to start one, rather
-   * than showing a failure.
+   * "No service" is a normal state, not an error — generation is off by default and everything
+   * else works without it. But it is a state for a PERSON, not a paragraph of setup instructions:
+   * what is off, where it looked, and one line saying where the instructions are. The previous
+   * version put the README path, the two commands and a query-string override into the panel
+   * (Rich, 2026-09-27: "make these more production grade").
    */
   private notConfigured(): HTMLElement {
     const wrap = el('div', 'asset-none')
-    wrap.append(el('p', '', 'No asset service is answering.'))
-    wrap.append(readout('Tried', assetsvc.url, true))
-    const p = el('p', 'dim')
-    p.append(
-      el('span', '', 'Generation is off by default. To run one locally, port-forward the models and start the service — '),
-      el('code', '', 'tools/assetsvc/README.md'),
-      el('span', '', ' has the two commands. Point the editor elsewhere with '),
-      el('code', '', '?assetsvc=<url>'),
-      el('span', '', '.'),
-    )
-    wrap.append(p)
+    wrap.append(el('p', '', 'Asset generation is off.'))
+    wrap.append(readout('endpoint', assetsvc.url, true), readout('status', 'not answering'))
+    wrap.append(el('p', 'dim', 'Everything else in the editor works without it.'))
     return wrap
   }
 
@@ -298,9 +292,19 @@ export class AssetCatalog {
   }
 
   private async create() {
-    const id = prompt('An id for the new item — lower case, hyphens (e.g. roadside-mailbox)')?.trim()
+    // Validated as it is typed, rather than refused by a toast after the browser's own prompt has
+    // already gone away taking what you typed with it.
+    const id = await ask({
+      title: 'New item',
+      label: 'id',
+      placeholder: 'roadside-mailbox',
+      icon: 'cube',
+      ok: 'Create',
+      validate: (v) => (!v ? 'an id is required'
+        : /^[a-z0-9][a-z0-9-]{0,63}$/.test(v) ? null
+        : 'lower case letters, digits and hyphens; must start with a letter or digit'),
+    })
     if (!id) return
-    if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(id)) return toast('ids are lower case letters, digits and hyphens', 'warn')
     try {
       await assetsvc.put({ id, subject: id.replace(/-/g, ' '), prompt: '', negative: '' })
       this.selected = id
@@ -312,7 +316,14 @@ export class AssetCatalog {
   }
 
   private async remove(id: string) {
-    if (!confirm(`Delete ${id} and every file generated for it? This cannot be undone.`)) return
+    const yes = await confirm({
+      title: `Delete ${id}?`,
+      message: `${id} and every file generated for it will be removed. This cannot be undone.`,
+      ok: 'Delete',
+      danger: true,
+      icon: 'trash',
+    })
+    if (!yes) return
     try {
       await assetsvc.remove(id)
       if (this.selected === id) this.selected = null

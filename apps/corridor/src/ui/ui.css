@@ -446,3 +446,15 @@ body.chrome-off #chrome-restore { display: block; }
   opacity: 0.8;
 }
 #attribution .attrib-short.open .attrib-caret { transform: rotate(90deg); }
+
+/* ask() and confirm() — the in-app replacements for prompt() and confirm(). */
+.dialog-message {
+  margin: 0;
+  color: var(--ink-2);
+  line-height: 1.5;
+}
+.field-error {
+  margin: var(--s1) 0 0;
+  color: var(--danger);
+  font-size: var(--text-sm);
+}

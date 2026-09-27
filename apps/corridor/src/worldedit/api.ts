@@ -114,7 +114,6 @@ export interface Selection {
   square: { ways: number; metres: number }
   boundary: { ways: number; metres: number } | null
   idents: { ident: string; ways: number; metres: number; highway: string }[]
-  reference: { slug: string; radius_m: number; ways: number; note: string }
 }
 
 export interface Preview {

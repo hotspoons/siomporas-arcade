@@ -56,8 +56,8 @@ export class AdoptDialog {
     this.host.replaceChildren()
     if (!this.reachable) {
       this.host.append(
-        empty('assetsvc is not reachable'),
-        note('generation is off by default and corridor works completely without it. Turn the chart on with `--set enabled=true`, and point this pod at it with WORLDEDITOR_ASSETSVC.'),
+        empty('Asset generation is off.'),
+        note('Everything else in the editor works without it.'),
       )
       this.dialog.footer(button({ label: 'Retry', icon: 'arrow-path', onClick: () => void this.refresh() }))
       return
@@ -68,14 +68,14 @@ export class AdoptDialog {
       button({
         label: 'Generate…',
         icon: 'sparkles',
-        title: 'the generation UI — describe a prop, draw it, mesh it',
-        onClick: () => toast('open Assets from the menu to describe and generate; come back here to place what it finishes', 'info', 6000),
+        title: 'describe a prop, draw it, mesh it',
+        onClick: () => toast('Open Assets to generate; come back here to place what it finishes.', 'info', 5000),
       }),
     )
     if (!finished.length) {
       this.host.append(
-        empty(`${this.items.length} item(s) in assetsvc, none finished yet`),
-        note('an item becomes placeable once it has a finished mesh: spec → drawn → meshed → ready. The state is derived from which files exist, so it cannot go stale.'),
+        empty(`${this.items.length} item${this.items.length === 1 ? '' : 's'}, none finished yet`),
+        note('Placeable once meshed: spec → drawn → meshed → ready.'),
       )
       return
     }
@@ -111,7 +111,7 @@ export class AdoptDialog {
         ],
         onChange: (v) => (draft.fit = v),
       }),
-      note('a bridge is laid across the road and it is its LENGTH that has to be right, not its height — that is what “span” is for.'),
+      note('Span: scale by the long axis instead — for bridges and anything laid across a road.'),
     )
 
     const acts = el('div', 'panel-actions')

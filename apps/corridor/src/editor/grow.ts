@@ -15,6 +15,7 @@ import { DEFAULTS, generate, type Params } from './autogen'
 import { isGenerated, type Placement } from './schema'
 import type { PlaceMode } from './place'
 import type { Site } from '../scene'
+import { confirm } from '../ui/shell'
 import { el, slider } from './ui'
 
 const KNOBS: [keyof Params, string, number, number, number, string][] = [
@@ -113,7 +114,12 @@ export class GrowMode {
     gen.onclick = () => site && void this.run(site, catalog)
     const clr = el('button', 'danger')
     clr.textContent = 'clear generated'
-    clr.onclick = () => { if (confirm('Throw away every generated item, including ones you locked?')) void this.clear() }
+    clr.onclick = () => void confirm({
+      title: 'Clear generated items',
+      message: 'Every generated item goes, including the ones you locked.',
+      ok: 'Clear',
+      danger: true,
+    }).then((yes) => { if (yes) void this.clear() })
     tools.append(gen, clr)
     root.append(tools)
 

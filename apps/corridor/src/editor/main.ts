@@ -22,7 +22,7 @@ import { CAN_SAVE, type Area } from './schema'
 import { LOOK, type Season } from '../season'
 import { EditorUI } from '../ui/editor'
 import { AssetCatalog } from '../ui/assets'
-import { installShellKeys, toast, status } from '../ui/shell'
+import { confirm, installShellKeys, toast, status } from '../ui/shell'
 import { restoreTheme } from '../ui/viewer'
 
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector<T>(sel)!
@@ -113,7 +113,12 @@ async function loadIndex() {
 let siteHasImpostors = false
 
 async function loadSite(slug: string, quality: 'edit' | 'preview' = 'edit') {
-  if (unsaved() && !confirm('There are unsaved edits. Load another site anyway?')) {
+  if (unsaved() && !(await confirm({
+    title: 'Unsaved edits',
+    message: 'This site has edits that have not been saved. Load another one anyway?',
+    ok: 'Discard and load',
+    danger: true,
+  }))) {
     ui.setSite(site?.manifest.slug ?? slug)
     return
   }

@@ -22,7 +22,7 @@
 
 import { api, type World } from './api'
 import { bodyOf, empty, group, readout, toggle } from '../ui/controls'
-import { button, el, toast } from '../ui/shell'
+import { button, confirm, el, toast } from '../ui/shell'
 
 /** Ask for a file without keeping an `<input>` in the DOM for the rest of the session. */
 function pickFile(accept: string): Promise<File | null> {
@@ -103,7 +103,12 @@ export function worldMenuTransfer(o: TransferOpts, close: () => void): HTMLEleme
       // "already here" is the common case when you are moving a world between two editors, and
       // making someone find a checkbox to say "yes, that one" is a worse question than asking.
       const clashes = r.skipped.filter((s) => s.why.includes('already here'))
-      if (clashes.length && confirm(`${clashes.length} of these are already here.\n\nOverwrite them?`)) {
+      if (clashes.length && await confirm({
+        title: 'Already here',
+        message: `${clashes.length} of these already exist on this volume. Overwrite them?`,
+        ok: 'Overwrite',
+        danger: true,
+      })) {
         r = await api.importWorlds(bundle, true)
       }
       toast(importSummary(r), r.imported.length || r.levels.length ? 'ok' : 'warn', 6000)
@@ -176,7 +181,12 @@ export function bakedTransferGroup(o: TransferOpts): HTMLElement {
         await o.reload()
       } catch (e) {
         const message = (e as Error).message
-        if (message.includes('already baked') && confirm(`${message}\n\nOverwrite it?`)) {
+        if (message.includes('already baked') && await confirm({
+          title: 'Already baked',
+          message: `${message} Overwrite it?`,
+          ok: 'Overwrite',
+          danger: true,
+        })) {
           try {
             const r = await api.importSite(file, true, (sent, total) => {
               progress.querySelector('.field-value')!.textContent = `${mb(sent)} of ${mb(total)}`

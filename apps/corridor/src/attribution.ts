@@ -90,13 +90,26 @@ export class Attribution {
     const short = document.createElement('button')
     short.className = 'attrib-short'
     short.type = 'button'
-    short.textContent = '© OpenStreetMap contributors'
+    // It was always expandable; nothing SAID so. A caret and aria-expanded make the
+    // affordance visible, which is the whole difference between a control and a line of text.
+    short.setAttribute('aria-expanded', 'false')
+    const caret = document.createElement('span')
+    caret.className = 'attrib-caret'
+    caret.textContent = '\u203A'
+    caret.setAttribute('aria-hidden', 'true')
+    const shortLabel = document.createElement('span')
+    shortLabel.className = 'attrib-label'
+    shortLabel.textContent = '© OpenStreetMap contributors'
+    short.append(caret, shortLabel)
     short.title = 'where this world’s data comes from'
     this.list = document.createElement('div')
     this.list.className = 'attrib-list'
     this.list.hidden = true
     short.addEventListener('click', () => {
-      this.list.hidden = !this.list.hidden
+      const open = this.list.hidden === true
+      this.list.hidden = !open
+      short.setAttribute('aria-expanded', String(open))
+      short.classList.toggle('open', open)
     })
     this.el.append(short, this.list)
     parent.append(this.el)
@@ -109,7 +122,8 @@ export class Attribution {
     this.credits = creditsFor(m)
     // the short line names the one that is always required and counts the rest
     const extra = this.credits.length - 1
-    this.short.textContent = extra > 0 ? `© OpenStreetMap contributors + ${extra}` : '© OpenStreetMap contributors'
+    const label = this.short.querySelector('.attrib-label')
+    if (label) label.textContent = extra > 0 ? `© OpenStreetMap contributors + ${extra}` : '© OpenStreetMap contributors'
     this.list.replaceChildren()
     for (const c of this.credits) {
       const row = document.createElement('a')

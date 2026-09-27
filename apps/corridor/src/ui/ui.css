@@ -405,3 +405,44 @@ input.range::-moz-range-thumb { width: 13px; height: 13px; border: 0; border-rad
   .dialog.size-lg, .dialog.size-md { max-width: 100%; }
   .tab-body { padding: var(--s3); }
 }
+
+
+/* The only control that survives `chrome-off`, so there is a way back from a hidden
+   interface without knowing the keyboard shortcut. Nearly invisible until approached. */
+#chrome-restore {
+  position: fixed;
+  right: 10px;
+  bottom: 10px;
+  z-index: 60;
+  display: none;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--line, #555) 60%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel, #12151a) 70%, transparent);
+  color: var(--text, #e8edf5);
+  font: 16px/1 system-ui, sans-serif;
+  cursor: pointer;
+  opacity: 0.18;
+  transition: opacity 120ms ease;
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+}
+body.chrome-off #chrome-restore { display: block; }
+#chrome-restore:hover,
+#chrome-restore:focus-visible { opacity: 1; }
+/* Touch has no hover, so leave it legible rather than a ghost you cannot find. */
+@media (hover: none) {
+  #chrome-restore { opacity: 0.5; }
+}
+
+
+/* The attribution line was always a button; now it looks like one. */
+#attribution .attrib-short { display: inline-flex; align-items: center; gap: 4px; }
+#attribution .attrib-caret {
+  display: inline-block;
+  transition: transform 120ms ease;
+  opacity: 0.8;
+}
+#attribution .attrib-short.open .attrib-caret { transform: rotate(90deg); }

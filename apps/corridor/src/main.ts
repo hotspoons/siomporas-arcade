@@ -5,6 +5,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { buildSite, describe, type Site } from './scene'
 import { Car, type CarInput } from './car'
 import { retro } from './retro'
+import { SiteSearch } from './search'
 
 /** 16-point compass, indexed by bearing/22.5 — N at 0, clockwise through E. */
 const COMPASS = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW']
@@ -94,6 +95,7 @@ const ui = new ViewerUI({
   onTop: () => toTop(),
   onStance: () => void copyStance(),
   onTune: () => tuneUI.toggle(),
+  onGoto: (h) => gotoHit(h),
   onStructure: (i) => site && goToStructure(site.manifest.structures[i]),
 })
 ui.describe = (s) => describe(s as Structure)
@@ -163,12 +165,23 @@ async function loadSite(slug: string) {
     ui.setRelief(reliefWanted)
   }
   retro.clear() // the previous site's paint and signs are gone
+  ui.setSearch(null) // the old site's index is meaningless now
   site = await buildSite(manifest, status, LITE, renderer, scene.fog as THREE.FogExp2, season, style)
   applySky(season)
   scene.add(site.group)
   // for probes and the console. `tune` is the same knob table the F6 panel drives, so a probe can
   // sweep a knob exactly as Rich would and see the same rebuild — the module's `export let`s
   // cannot be written from outside, and a dynamic import of tuning.ts under HMR is a dead copy.
+  // The address index, from the site's own OSM extract. Built after the world is up rather than
+  // before it, because it is a convenience and the world is not — and `force-cache` means the
+  // file is usually already local, the minimap having asked for it first.
+  const searchIndex = new SiteSearch()
+  void searchIndex
+    .load(manifest)
+    .then(() => {
+      ui.setSearch((q) => searchIndex.find(q), `${searchIndex.counts.address} addresses`)
+    })
+    .catch((e) => console.warn('address index:', e))
   ;(window as unknown as { corridor: unknown }).corridor = {
     site,
     scene,
@@ -190,6 +203,9 @@ async function loadSite(slug: string) {
      */
     project: (lon: number, lat: number) => siteProjector(site!.manifest.frame as Parameters<typeof siteProjector>[0])(lon, lat),
     tuneDialog: tuneUI.dialog, // probes drive the panel's dock/float through this
+    /** the address index, for probes: `search('1053 route 3')` */
+    search: (q: string) => (searchIndex.ready ? searchIndex.find(q) : null),
+    searchCounts: () => ({ ready: searchIndex.ready, ...searchIndex.counts }),
     /** the retroreflection rig: what the paint and the signs were told this frame */
     retro: () => ({
       ...retro.count,
@@ -1021,6 +1037,44 @@ function driveHere(e: PointerEvent): boolean {
   status(edge.d < 30 ? 'drive here — on the road' : 'drive here')
   return true
 }
+/**
+ * Go to a search result.
+ *
+ * Rich, 2026-09-26: "picking the address flies you to it." Which is what happens on foot or in
+ * the air. Driving, flying the camera away from the car would be a worse answer than moving the
+ * car, so the car goes instead — and it goes to the nearest ROAD, using the same gradient step as
+ * `driveHere`, because a house's centroid is the middle of a building and nobody parks there.
+ */
+function gotoHit(h: { label: string; x: number; z: number; kind: string }) {
+  if (!site) return
+  const g = site.groundAt(h.x, h.z) ?? 0
+  if (drive.on && drive.car) {
+    const edge = site.edgeInfo(h.x, h.z)
+    let x = h.x
+    let z = h.z
+    let yaw = drive.car.yaw
+    if (Number.isFinite(edge.d) && edge.who >= 0) {
+      // step back along the gradient onto the pavement; the road runs across it
+      const back = Math.min(edge.d + 1.8, 60)
+      x = h.x - edge.gx * back
+      z = h.z - edge.gz * back
+      yaw = Math.atan2(edge.gx, -edge.gz)
+    }
+    drive.car.place(x, z, yaw)
+    drive.yaw = 0
+    drive.pitch = 0
+    toast(`${h.label} — on the road`, 'ok', 2200)
+    return
+  }
+  // in the air: stand off and look down at it, far enough to see the thing and its surroundings
+  const back = h.kind === 'road' ? 220 : 90
+  const up = h.kind === 'road' ? 140 : 55
+  camera.position.set(h.x - back * 0.55, g + up, h.z + back * 0.83)
+  orbit.target.set(h.x, g + 2, h.z)
+  orbit.update()
+  toast(h.label, 'ok', 2200)
+}
+
 function pick(e: PointerEvent): boolean {
   if (!site) return false
   ray.setFromCamera(new THREE.Vector2((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1), camera)

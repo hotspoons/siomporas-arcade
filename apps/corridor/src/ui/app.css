@@ -278,3 +278,43 @@ body.chrome-off #parkour { display: none; }
   .topbar .btn .btn-label { display: none; }
   .topbar .btn { padding: 6px; }
 }
+
+/* ---- address search ------------------------------------------------------------------------
+ * A box in the top bar, and its results hanging under it. Rich, 2026-09-26: "an address search
+ * with autocomplete that pulls from the OSM data for a scene, and picking the address flies you
+ * to it." The list is absolutely positioned so it never pushes the bar around as you type, and it
+ * is capped in height so a street with four hundred house numbers on it stays a list.
+ */
+.topbar-search { position: relative; flex: 0 1 260px; min-width: 0; }
+.search-input {
+  width: 100%;
+  font: inherit; font-size: var(--text-sm);
+  color: var(--ink-1);
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r1);
+  padding: 5px var(--s3);
+  min-width: 0;
+}
+.search-input::placeholder { color: var(--ink-3); }
+.search-input:disabled { opacity: 0.45; cursor: default; }
+.search-input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.search-results {
+  position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 30;
+  max-height: min(58vh, 420px); overflow-y: auto; overflow-x: hidden;
+  background: var(--bg-1);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r1);
+  box-shadow: 0 8px 28px rgb(0 0 0 / 0.35);
+}
+.search-row {
+  display: flex; flex-direction: column; gap: 1px; width: 100%;
+  padding: var(--s2) var(--s3);
+  font: inherit; text-align: left;
+  background: none; border: 0; cursor: pointer;
+}
+.search-row.on, .search-row:hover { background: var(--bg-2); }
+.search-row-label { font-size: var(--text-sm); color: var(--ink-1); }
+.search-row-detail { font-size: var(--text-xs); color: var(--ink-3); }
+/* a phone has no room for a search box beside six buttons; the menu still has everything else */
+@media (max-width: 620px) { .topbar-search { display: none; } }

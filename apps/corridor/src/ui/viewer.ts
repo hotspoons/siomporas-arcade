@@ -176,6 +176,8 @@ export interface ViewerUIOpts {
   onStance: () => void
   onTune: () => void
   onStructure: (index: number) => void
+  /** an address, place or road was picked from the search box: go there */
+  onGoto: (hit: { label: string; x: number; z: number; kind: string }) => void
 }
 
 export class ViewerUI {
@@ -189,6 +191,13 @@ export class ViewerUI {
     s.value = v
   }
   bar = el('header', 'topbar')
+  /** the address box and its result list — see `buildSearch` and search.ts */
+  private search = el('div', 'topbar-search')
+  private searchInput = document.createElement('input')
+  private searchList = el('div', 'search-results')
+  private searchHits: { label: string; detail: string; x: number; z: number; kind: string }[] = []
+  private searchSel = -1
+  private searchFind: ((q: string) => { label: string; detail: string; x: number; z: number; kind: string }[]) | null = null
   drawer = new Drawer('corridor', 'a strip of real road, measured')
   settings: Dialog
   private siteSel = el('div', 'topbar-site')
@@ -213,6 +222,7 @@ export class ViewerUI {
     this.bar.append(
       hamburger,
       this.siteSel,
+      this.search,
       el('div', 'topbar-spacer'),
       this.posEl,
       this.driveBtn,
@@ -222,6 +232,7 @@ export class ViewerUI {
       button({ icon: 'adjustments-horizontal', title: 'tuning', key: 'F6', onClick: () => this.o.onTune() }),
       button({ icon: 'cog-6-tooth', title: 'settings', onClick: () => this.settings.open() }),
     )
+    this.buildSearch()
     document.body.append(this.bar)
 
     // ---- settings dialog
@@ -266,6 +277,94 @@ export class ViewerUI {
   }
 
   // ---- settings tabs -----------------------------------------------------------------------
+  /**
+   * The address box.
+   *
+   * Nothing is searched until a site hands over a `find` (see `setSearch`), because the index is
+   * built from the site's own OSM extract and there is nothing to look in before one is loaded.
+   * Keyboard first: typing filters, up and down move, Enter goes, Escape closes — and the box
+   * refuses to eat the driving keys, which is the whole reason it is an input and not a dialog.
+   */
+  private buildSearch() {
+    const i = this.searchInput
+    i.type = 'search'
+    i.className = 'search-input'
+    i.placeholder = 'address, place or road'
+    i.autocomplete = 'off'
+    i.spellcheck = false
+    i.disabled = true
+    const close = () => {
+      this.searchList.hidden = true
+      this.searchSel = -1
+    }
+    const draw = () => {
+      this.searchList.replaceChildren()
+      if (!this.searchHits.length) {
+        close()
+        return
+      }
+      this.searchHits.forEach((h, n) => {
+        const row = el('button', `search-row${n === this.searchSel ? ' on' : ''}`)
+        row.append(el('span', 'search-row-label', h.label), el('span', 'search-row-detail', h.detail))
+        row.addEventListener('mousedown', (e) => {
+          // mousedown, not click: `blur` closes the list and a click would land on nothing
+          e.preventDefault()
+          this.pickSearch(n)
+        })
+        this.searchList.append(row)
+      })
+      this.searchList.hidden = false
+    }
+    i.addEventListener('input', () => {
+      this.searchHits = this.searchFind ? this.searchFind(i.value) : []
+      this.searchSel = this.searchHits.length ? 0 : -1
+      draw()
+    })
+    i.addEventListener('keydown', (e) => {
+      // the viewer listens for single keys on the window; while this box has focus they are text
+      e.stopPropagation()
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault()
+        if (!this.searchHits.length) return
+        this.searchSel = (this.searchSel + (e.key === 'ArrowDown' ? 1 : this.searchHits.length - 1)) % this.searchHits.length
+        draw()
+      } else if (e.key === 'Enter') {
+        e.preventDefault()
+        if (this.searchSel >= 0) this.pickSearch(this.searchSel)
+      } else if (e.key === 'Escape') {
+        i.value = ''
+        this.searchHits = []
+        close()
+        i.blur()
+      }
+    })
+    i.addEventListener('blur', () => setTimeout(close, 120))
+    i.addEventListener('focus', () => {
+      if (this.searchHits.length) draw()
+    })
+    this.searchList.hidden = true
+    this.search.append(i, this.searchList)
+  }
+
+  private pickSearch(n: number) {
+    const h = this.searchHits[n]
+    if (!h) return
+    this.searchInput.value = h.label
+    this.searchList.hidden = true
+    this.searchInput.blur()
+    this.o.onGoto(h)
+  }
+
+  /** a site is loaded: this is how to search it (null while none is) */
+  setSearch(find: ((q: string) => { label: string; detail: string; x: number; z: number; kind: string }[]) | null, note = '') {
+    this.searchFind = find
+    this.searchInput.disabled = !find
+    this.searchInput.placeholder = find ? note || 'address, place or road' : 'address, place or road'
+    this.searchInput.value = ''
+    this.searchHits = []
+    this.searchList.hidden = true
+  }
+
   private buildLayers(host: HTMLElement) {
     for (const g of LAYER_GROUPS) {
       const sec = group(g.title)

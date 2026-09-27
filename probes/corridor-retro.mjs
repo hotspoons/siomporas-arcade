@@ -48,6 +48,44 @@ const setup = await page.evaluate(() => {
 })
 await page.waitForTimeout(3000)
 
+/*
+ * FIND NIGHT BY LOOKING AT THE SUN, not by naming a time -- ONCE, before any frame is taken.
+ *
+ * `setLocal(date, time)` interprets the time in the BROWSER's zone, and headless Chromium runs in
+ * UTC. Asking for 22:00 put the sun 10.2 degrees ABOVE the horizon over Maryland, and a whole run
+ * measured dusk while reporting "night". Sweeping the day to find it crashed the tab instead:
+ * every clock change rebuilds the sky environment map, and dozens of those in a tight loop is a
+ * stress test, not a measurement. So: one guess from longitude, which lands within an hour
+ * anywhere, then a few steps with a frame between them.
+ */
+const times = await page.evaluate(async () => {
+  const c = window.corridor
+  const lon = c.site.manifest.frame?.anchor?.lon ?? 0
+  const solarNoonUtc = (12 - lon / 15 + 24) % 24
+  const fmt = (h) => `${String(((Math.round(h) % 24) + 24) % 24).padStart(2, '0')}:00`
+  const at = async (h) => {
+    c.time.setLocal('2026-09-26', fmt(h))
+    await new Promise((r) => requestAnimationFrame(r))
+    return c.time.sun().el
+  }
+  const seek = async (start, want) => {
+    let h = start
+    let el = await at(h)
+    for (let k = 0; k < 3; k++) {
+      const next = await at(h + 1)
+      if (want < 0 ? next >= el : next <= el) break
+      h += 1
+      el = next
+    }
+    return { time: fmt(h), el: +el.toFixed(1) }
+  }
+  const night = await seek(solarNoonUtc + 12, -1)
+  const day = await seek(solarNoonUtc, 1)
+  return { night, day }
+})
+const NIGHT = times.night.time
+const DAY = times.day.time
+
 /**
  * Render once and read the frame back in the SAME turn — the renderer has no
  * preserveDrawingBuffer, so a readback a frame later reads a cleared buffer.

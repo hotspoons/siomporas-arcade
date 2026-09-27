@@ -28,11 +28,20 @@ const SERVICES = [
   'worldeditor',
 ].map((name) => ({ metadata: { name } }))
 
-/** a K8s stand-in that answers with whatever this test wants the cluster to be */
-const fakeK8s = ({ crds = CRDS, services = SERVICES, broken = false }) => ({
+/*
+ * A K8s stand-in that answers with whatever this test wants the cluster to be.
+ *
+ * It serves the DISCOVERY DOCUMENT too, because finding the group version is part of the path
+ * now: the CRD is named `inferencedeployments.richard-siomporas.patapsco.ai` and its group is
+ * `richard-siomporas.patapsco.ai` at v1alpha1, and having those two confused is what made the
+ * whole CRD rung unreachable from a pod while kubectl worked fine beside it.
+ */
+const GROUPS = { groups: [{ name: 'richard-siomporas.patapsco.ai', preferredVersion: { groupVersion: 'richard-siomporas.patapsco.ai/v1alpha1' } }] }
+const fakeK8s = ({ crds = CRDS, services = SERVICES, broken = false, groups = GROUPS }) => ({
   usable: () => !broken,
   raw: async (_m, p) => {
     if (broken) throw new Error('no api server')
+    if (p === '/apis') return groups
     if (p.includes('inferencedeployments')) {
       if (crds === null) throw new Error('the server could not find the requested resource')
       return { items: crds }
@@ -67,6 +76,13 @@ console.log('model resolver\n')
   const img = await r.resolve('image')
   check('no CRD: image says so plainly', img.url, null)
   console.log(`       why: ${img.why}`)
+}
+
+/* 2b. the operator's API GROUP is not on this cluster at all -- the real shape of "no CRD" */
+{
+  const r = new ModelResolver(fakeK8s({ groups: { groups: [] } }), {})
+  check('no API group: image says so', (await r.resolve('image')).url, null)
+  check('no API group: mesh is unaffected', brief(await r.resolve('mesh')), { via: 'service', url: 'http://recon.default.svc:80' })
 }
 
 /* 3. the CRD is there but not Ready: fall past it rather than route into a starting pod */

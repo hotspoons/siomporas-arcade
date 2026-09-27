@@ -34,9 +34,18 @@ rules:
   - apiGroups: [""]
     resources: ["services"]
     verbs: ["get", "list"]
-  - apiGroups: ["inferencedeployments.richard-siomporas.patapsco.ai"]
+  # The GROUP, not the CRD names. A CRD is called `<plural>.<group>` and putting that whole string
+  # in apiGroups grants nothing, silently.
+  - apiGroups: ["richard-siomporas.patapsco.ai"]
     resources: ["inferencedeployments"]
     verbs: ["get", "list"]
+  # and the training runs this service creates and watches
+  - apiGroups: ["richard-siomporas.patapsco.ai"]
+    resources: ["trainingdeployments"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+  - apiGroups: ["jobset.x-k8s.io"]
+    resources: ["jobsets"]
+    verbs: ["create", "get", "list", "watch", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

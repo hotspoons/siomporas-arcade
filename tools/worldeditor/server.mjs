@@ -34,6 +34,7 @@ import { zipRead, zipWrite } from './zip.mjs'
 import { Captures } from './captures.mjs'
 import { ModelResolver } from './models.mjs'
 import * as levels from './levels.mjs'
+import * as training from './training.mjs'
 import { Overpass, PUBLIC_MIRRORS } from './overpass.mjs'
 import { Tiles } from './tiles.mjs'
 import { Basemap } from './basemap.mjs'
@@ -738,6 +739,22 @@ async function api(req, res, seg, q) {
       return json(res, 200, { deleted: id })
     }
   }
+  /*
+   * ---- splat training ------------------------------------------------------------------------
+   *
+   * Rich, 2026-09-27: the platform's TrainingDeployment as "an optional (but featured) wrapper
+   * for jobset". `plan` says which this cluster can run and `manifestFor` builds it; `?as=jobset`
+   * forces the plain one, which is how you show the difference rather than describe it.
+   */
+  if (seg[0] === 'training' && seg[1] === 'plan' && req.method === 'GET') {
+    return json(res, 200, await training.plan(k8s, { namespace: env.WORLDEDITOR_NAMESPACE ?? 'default' }))
+  }
+  if (seg[0] === 'training' && seg[1] === 'preview' && req.method === 'POST') {
+    // what WOULD be created, without creating it: the editor shows this before spending a GPU
+    const body = await readJson(req)
+    return json(res, 200, await training.manifestFor(body, k8s, { namespace: env.WORLDEDITOR_NAMESPACE ?? 'default', force: q.get('as') }))
+  }
+
   /* ---- worlds ---- */
   if (seg[0] === 'worlds' && seg.length === 1) {
     if (req.method === 'GET') {

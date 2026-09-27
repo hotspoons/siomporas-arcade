@@ -25,6 +25,9 @@
 // NOTHING HERE HARD-CODES A PUBLIC HOSTNAME. The external endpoint is read from the CRD's status
 // when it is needed, so a renamed deployment does not leave a stale `basedweights.com` in a file.
 
+/** the operator's API group. The CRD NAMES are `<plural>.<group>`; this is just the group. */
+export const PAI_GROUP = 'richard-siomporas.patapsco.ai'
+
 const READY = (o) => (o?.status?.conditions ?? []).some((c) => c.type === 'Ready' && c.status === 'True')
 
 /** ASSETSVC_URL_FLUX2_DEV, MODEL_URL_IMAGE — upper case, non-alphanumerics to underscores. */
@@ -60,24 +63,39 @@ export class ModelResolver {
     this.cache = new Map()
   }
 
-  /** Every InferenceDeployment in the namespace, or [] when the CRD is not installed. */
+  /**
+   * Every InferenceDeployment in the namespace, or [] when the CRD is not installed.
+   *
+   * THE GROUP IS DISCOVERED, NOT PINNED. `inferencedeployments.richard-siomporas.patapsco.ai` is
+   * the CRD's NAME; its API group is `richard-siomporas.patapsco.ai` and the served version today
+   * is v1alpha1. I had the name where the group goes and `v1` where v1alpha1 goes, which made the
+   * whole CRD rung silently unreachable from a pod -- it would have fallen all the way to "no
+   * image model" while `kubectl get inferencedeployments` worked perfectly beside it. Asking the
+   * discovery document is one request and it survives the day v1alpha1 becomes v1.
+   */
   async #deployments() {
     if (!this.k8s?.usable?.()) return []
     try {
-      const r = await this.k8s.raw('GET', `/apis/inferencedeployments.richard-siomporas.patapsco.ai/v1/namespaces/${this.namespace}/inferencedeployments`)
+      const gv = await this.groupVersion()
+      if (!gv) return []
+      const r = await this.k8s.raw('GET', `/apis/${gv}/namespaces/${this.namespace}/inferencedeployments`)
       return r?.items ?? []
     } catch {
-      // the group may be versioned differently, or absent entirely: try the discovery document
-      try {
-        const groups = await this.k8s.raw('GET', '/apis')
-        const g = (groups?.groups ?? []).find((x) => x.name?.endsWith('patapsco.ai') && x.name.includes('inferencedeployments'))
-        if (!g) return []
-        const r = await this.k8s.raw('GET', `/apis/${g.preferredVersion.groupVersion}/namespaces/${this.namespace}/inferencedeployments`)
-        return r?.items ?? []
-      } catch {
-        return []
-      }
+      return []
     }
+  }
+
+  /** `richard-siomporas.patapsco.ai/v1alpha1` today, whatever it is tomorrow. */
+  async groupVersion() {
+    if (this._gv !== undefined) return this._gv
+    try {
+      const groups = await this.k8s.raw('GET', '/apis')
+      const g = (groups?.groups ?? []).find((x) => x.name === PAI_GROUP)
+      this._gv = g?.preferredVersion?.groupVersion ?? null
+    } catch {
+      this._gv = null
+    }
+    return this._gv
   }
 
   async #services() {

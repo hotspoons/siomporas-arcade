@@ -174,6 +174,22 @@ export class EngineSound {
   }
 
   /**
+   * Nobody is driving it. Shut the throttle and let it settle to idle where it stands.
+   *
+   * A parked car is not silent and it is not held at 4,000 rpm either, which is what happens if
+   * the last values `syncFromCar` wrote are simply left there — the gearbox is only turned by
+   * someone driving, so without this the engine screams wherever you abandoned it. The decay is a
+   * first-order ease rather than the drivetrain's own model because there is no drivetrain case
+   * for it: the wheels are not turning, so nothing is driving the crank but its own inertia.
+   */
+  coast(entity: number, dt: number): void {
+    const idle = this.drivetrain.spec.idleRpm
+    Engine.pedal[entity] = 0
+    Engine.rpm[entity] += (idle - Engine.rpm[entity]) * Math.min(1, dt * 2.5)
+    Engine.gear[entity] = 0 // neutral: it is parked
+  }
+
+  /**
    * The system. Reads every `Engine` in the world and voices the one that has a voice.
    *
    * `listener` is the camera: where it is and which way it faces, in SITE metres — x east, y north,

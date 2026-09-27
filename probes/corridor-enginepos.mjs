@@ -96,6 +96,30 @@ const curve = 2.5 / (2.5 + 0.9 * (far.distance - 2.5))
 ok('on the inverse-distance curve we advertise',
   Math.abs(far.attenuation - curve) < 1e-3, `measured ${far.attenuation.toFixed(4)}, curve ${curve.toFixed(4)}`)
 
+// ── leave the car and fly away ────────────────────────────────────────────────────────────────
+//
+// The car keeps existing when you stop driving it, and the engine used to keep sounding exactly as
+// it did the instant you left — frozen at the last listener position, so flying a hundred metres
+// off changed nothing at all. The ears belong to whoever is looking, in every mode.
+const parked = await audio()
+await page.keyboard.press('Tab') // out of drive, into the free camera
+await page.waitForFunction(() => window.corridor.drive.on === false, null, { timeout: 15000 }).catch(() => {})
+const leftIt = await page.evaluate(() => window.corridor.drive.on)
+ok('we are out of the car', leftIt === false, `drive.on ${leftIt}`)
+await page.evaluate(() => {
+  const c = window.corridor
+  // straight up, so the fly camera cannot be dragged back by anything that follows the car
+  c.camera.position.y += 150
+})
+await page.waitForFunction(() => window.corridor.audio().distance > 100, null, { timeout: 20000 })
+  .catch(() => {})
+const flown = await audio()
+ok('flying away makes the engine recede',
+  flown.distance > parked.distance + 50, `${parked.distance.toFixed(1)} m → ${flown.distance.toFixed(1)} m`)
+ok('and the attenuation follows it down',
+  flown.attenuation < parked.attenuation / 2,
+  `gain ${parked.attenuation.toFixed(4)} → ${flown.attenuation.toFixed(4)}`)
+
 await browser.close()
 console.log(fails.length ? `\nFAIL: ${fails.length} — ${fails.join('; ')}` : '\nPASS: the engine follows the camera')
 process.exit(fails.length ? 1 : 0)

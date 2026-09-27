@@ -1528,24 +1528,6 @@ function frame() {
       camera.position.lerp(want, 1 - Math.exp(-T.CHASE_LAG * dt))
       camera.lookAt(car.pos.clone().add(car.forward.clone().multiplyScalar(T.CHASE_LOOK_AHEAD)).add(new THREE.Vector3(0, 1.0, 0)))
     }
-    // WHERE THE ENGINE IS, from where the camera ended up — which is why this is here and not up
-    // with syncFromCar: the camera is placed by the block above, and voicing the engine before it
-    // moved would pan every frame to where you were looking last frame. Cheap to get wrong and
-    // very hard to hear as anything but "the audio feels laggy".
-    //
-    // Site metres, x east, y north, z up. Three's world is (east, up, −north), so y = −z and
-    // z = y — the same conversion the Transform above does, applied to a direction as well as a
-    // point. The up vector is the camera's own, not world up: corridor does not roll today, but
-    // taking it from the quaternion means a camera that does is right for free.
-    if (playerEngine) {
-      camera.getWorldDirection(earDir)
-      earUp.copy(UP_LOCAL).applyQuaternion(camera.quaternion)
-      engineSound.update(actors.world, {
-        position: { x: camera.position.x, y: -camera.position.z, z: camera.position.y },
-        forward: { x: earDir.x, y: -earDir.z, z: earDir.y },
-        up: { x: earUp.x, y: -earUp.z, z: earUp.y },
-      })
-    }
     if (car.event === 'bump') status('bump')
     // what road is this? The name comes from the same station grid the car stands on, so the
     // readout and the physics can never disagree about which road you are on (Rich, 2026-09-26).
@@ -1578,6 +1560,36 @@ function frame() {
     applyMove(dt)
     orbit.update()
     ui.setPos('')
+  }
+  /*
+   * WHERE THE ENGINE IS, from wherever the camera ended up.
+   *
+   * AFTER the mode branches, not inside the driving one. The car keeps existing when you fly away
+   * from it, and it used to keep sounding exactly as it did the instant you left — frozen at the
+   * last listener position, so walking or flying a hundred metres away changed nothing (Rich,
+   * 2026-09-27: "it just keeps the audio for the engine where you were last driving"). The engine
+   * is a thing in the world; the ears belong to whoever is looking, in every mode.
+   *
+   * After, also, because the camera is PLACED by those branches. Voicing before they run pans
+   * every frame to where you were looking last frame, which is inaudible as anything but a vague
+   * sense that the audio lags.
+   *
+   * Site metres, x east, y north, z up. Three's world is (east, up, −north), so y = −z and z = y
+   * — the same conversion Transform gets, applied to a direction as well as a point. The up
+   * vector comes off the quaternion rather than being assumed to be world up: corridor does not
+   * roll today, and a camera that does is then right for free.
+   */
+  if (playerEngine) {
+    // Nobody has their foot on it while you are off flying, so let it settle to idle where it
+    // stands rather than holding the revs it had when you stepped out.
+    if (!(drive.on && drive.car)) engineSound.coast(playerEngine, dt)
+    camera.getWorldDirection(earDir)
+    earUp.copy(UP_LOCAL).applyQuaternion(camera.quaternion)
+    engineSound.update(actors.world, {
+      position: { x: camera.position.x, y: -camera.position.z, z: camera.position.y },
+      forward: { x: earDir.x, y: -earDir.z, z: earDir.y },
+      up: { x: earUp.x, y: -earUp.z, z: earUp.y },
+    })
   }
   if (site) {
     // the canopy overhead changes as you drive; the light under it follows, smoothed

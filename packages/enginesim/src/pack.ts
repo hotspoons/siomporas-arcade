@@ -115,6 +115,22 @@ export function bakeRpm(rpm: number, sampleRate: number): number {
 }
 
 /**
+ * The same, but never ABOVE what was asked for.
+ *
+ * `bakeRpm` moves to the nearest whole-sample cycle, which is usually what you want and is wrong
+ * at exactly one place: the top of the ladder. An engine has a limiter, and asking follow mode for
+ * one rev above it gets you the limiter — so a layer whose loop was cut for 6501.13 rpm gets audio
+ * at 6500, and the loop is no longer a whole number of cycles. That is a permanent click on the
+ * top layer of every engine whose redline happens to round the wrong way, and it is invisible
+ * unless something measures the seam.
+ *
+ * Rounding the cycle UP instead lands at or below the request, always.
+ */
+export function bakeRpmAtMost(rpm: number, sampleRate: number): number {
+  return (120 * sampleRate) / Math.ceil((120 * sampleRate) / rpm)
+}
+
+/**
  * How many cycles to loop.
  *
  * Long enough that the ear does not hear the repeat, short enough that twenty cars is not a

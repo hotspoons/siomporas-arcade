@@ -14,6 +14,7 @@
     "build:wasm": "node scripts/build-wasm.mjs",
     "bundle:worklet": "node scripts/bundle-worklet.mjs",
     "measure": "node scripts/measure.mjs",
-    "bench": "vite --config bench/vite.config.ts"
+    "bench": "vite --config bench/vite.config.ts",
+    "bake": "node scripts/bake.mjs"
   }
 }

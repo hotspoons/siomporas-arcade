@@ -1,8 +1,8 @@
 // The arithmetic a baked engine rests on. Every one of these is a click or a wrong note if it
 // is off by a little, and none of them needs a browser to check.
 import { describe, expect, it } from 'vitest'
-import { bakeRpm, bracket, cycleSamples, loopCycles, playbackRate, rpmLadder, type PackLayer }
-  from '../src/pack'
+import { bakeRpm, bakeRpmAtMost, bracket, cycleSamples, loopCycles, playbackRate, rpmLadder,
+  type PackLayer } from '../src/pack'
 
 const SR = 48000
 
@@ -67,6 +67,46 @@ describe('the loop length', () => {
   // One cycle loops at the firing rate, which the ear hears as a buzz rather than an engine.
   it('never emits a one-cycle loop, however slowly the thing turns', () => {
     for (let rpm = 60; rpm <= 500; rpm += 10) expect(loopCycles(rpm)).toBeGreaterThanOrEqual(2)
+  })
+})
+
+describe('the top of the ladder, where the limiter is', () => {
+  // The bug this exists for: bakeRpm(6500) is 6501.13, follow mode gives 6500 because that IS the
+  // GM LS's limiter, and the loop is then cut for a speed the engine never reached. A click on the
+  // top layer of every engine whose redline rounds up, audible forever, invisible without a seam
+  // check. Found by the baker refusing to write it.
+  it('never rounds a redline UP past the limiter', () => {
+    for (const redline of [3000, 3600, 5000, 5500, 6000, 6500, 8400, 9000, 11000, 18000]) {
+      expect(bakeRpmAtMost(redline, SR)).toBeLessThanOrEqual(redline)
+      expect(bakeRpm(6500, SR)).toBeGreaterThan(6500) // the trap itself, so it cannot quietly go away
+    }
+  })
+
+  it('still lands on a whole number of samples per cycle', () => {
+    for (let rpm = 600; rpm <= 18000; rpm += 13) {
+      const r = bakeRpmAtMost(rpm, SR)
+      expect(Number.isInteger(Math.round((120 * SR) / r))).toBe(true)
+      expect((120 * SR) / r).toBeCloseTo(Math.round((120 * SR) / r), 9)
+    }
+  })
+
+  // Always rounding down costs a whole sample of cycle rather than half, so the worst case is
+  // twice bakeRpm's: rpm/(120·sampleRate), which is 5.3 cents at 18000 rpm on a 48 kHz bake.
+  //
+  // THAT IS NOT A PITCH ERROR. The layer is played at rate = wanted/baked, so wherever the bake
+  // landed is corrected exactly at playback. All this number says is how far the layer sits from
+  // the rev it nominally represents, which costs a hair more resampling at its neighbours and
+  // nothing else — so the bound is here to stay understood, not because anyone could hear it.
+  it('sits within about five cents of the rev it represents, and playbackRate erases even that', () => {
+    let worst = 0
+    for (let rpm = 600; rpm <= 18000; rpm += 1) {
+      worst = Math.max(worst, (rpm - bakeRpmAtMost(rpm, SR)) / rpm)
+    }
+    expect(1200 * Math.log2(1 + worst)).toBeLessThan(6)
+    expect(worst).toBeLessThanOrEqual(18000 / (120 * SR) + 1e-9)
+    // and playback puts it exactly back
+    const baked = bakeRpmAtMost(18000, SR)
+    expect(baked * playbackRate(baked, 18000)).toBeCloseTo(18000, 9)
   })
 })
 

@@ -65,3 +65,11 @@ tools/corridor/.bin
 # wasm/engines.json at build time, so an image build with it absent fails. Its provenance is in
 # wasm/BUILD.json and its licence beside it.
 !packages/enginesim/wasm/
+
+# packages/enginesim/packs — the baked engine library (npm run bake -w @apex/enginesim).
+#
+# A working artefact, not a source one. The full catalog is twenty engines, 357 loops and about
+# 16 MiB of WAV, and nothing in the game needs twenty engines of traffic — the shipped set will be
+# a handful of archetypes, baked with `--engine` and committed where it is served from. There is
+# no Opus encoder in this container, so a WAV bake of the whole catalog stays local.
+packages/enginesim/packs/

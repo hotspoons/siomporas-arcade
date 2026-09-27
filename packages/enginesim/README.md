@@ -149,6 +149,86 @@ Clang, so the wasm path is fine; a native GCC build of the scripting layer is no
 prunes the set of `Module` properties it reads, so `wasmBinary` is silently ignored — the processor
 uses the `instantiateWasm` hook instead, which is in the default set.
 
+## The baked library
+
+One simulated engine costs about 45% of a core. That is the right price for the car you are
+sitting in — the note is the actual resonance of the actual cylinders firing at the actual RPM,
+so it never loops and never crossfades — and the wrong price for the twenty cars going past.
+Those get **packs**: the same engine, the same script, the same synthesizer, recorded at a ladder
+of revs and played back on four `AudioBufferSourceNode`s.
+
+```
+npm run bake -w @apex/enginesim                        # every engine in the catalog
+npm run bake -w @apex/enginesim -- --engine gm_ls      # ones whose path matches
+```
+
+It runs in **Node**, not a browser: the same wasm has a CJS build with the C API exposed, and
+`es_set_follow_rpm` holds a fixed rev, which is exactly what a baker needs and what a game never
+does. The whole catalog is 20 packs, 357 loops and about four minutes.
+
+### Three things it works out rather than being told
+
+**The redline is measured.** `es_cylinders` and `es_displacement` are exported; the rev limit is
+not. But follow mode holds the rpm it is given exactly — to the hundredth, at every rev, with zero
+drift — right up to the engine's own limiter, where it clamps. So asking for 100,000 rpm and
+reading back what happened *is* the redline. Across this catalog that ranges from 3000 (the Merlin
+V12 and the radials) to 18000 (the Ferrari 412 T2), which no typed default could have covered.
+The first version typed 7000 for everything, and the GM LS then ran at 6500 while its top loop was
+cut for 6999 — a permanent click on every traffic car.
+
+**The loop is a whole number of engine cycles.** An engine repeats every two crank revolutions,
+whatever the cylinder count, which is 120/rpm seconds; a loop of any other length clicks once per
+wrap at a rate that tracks the revs. That length is rarely a whole number of samples, so the
+*bake* rpm moves onto the nearest one whose cycle is — at most 1.4 cents away — and `playbackRate`
+puts the exact rev back at playback.
+
+**The loop is crossfaded closed, and alignment is what makes that free.** Cycle alignment lines up
+the *periodic* part, and this synthesizer is not purely periodic: it has noise in it, and noise
+does not repeat. Measured, that left the wrap discontinuity as a random draw from the noise
+amplitude — a fixed threshold kept the GM LS at 3422 rpm and dropped it at 4238, kept the LFA at
+9000 and dropped it at 5772. Scattered, not systematic, which is the shape of measuring noise
+rather than a fault. So one extra cycle is rendered and faded over the head: `out[0]` then
+literally *is* the sample that followed `out[N−1]`, and because the two sides are one whole cycle
+apart their periodic content is identical, so the fade averages only the noise. The bake asserts
+both halves — that the indices close the loop **exactly** (`out[0] === x[N]`, one right answer),
+and that a deliberately misaligned crossfade smears several times more than the aligned one, so
+the arithmetic is provably what is doing the work rather than luck.
+
+A note on measuring that, because it caught me out twice. Once the loop is crossfaded the wrap is
+a *genuine sample step* of the signal, so "how big is the step at the wrap" can no longer fail:
+the Audi I5 at 1547 rpm has a legitimate step there larger than its own 99th percentile, and a
+threshold on it failed a loop that was closed to the bit. The size of the wrap is recorded per
+layer; the exact index comparison is what is enforced.
+
+### Playing one back
+
+`SampledEngine` has the same interface as `EngineSim` — `drive(rpm, pedal)` and an `output` node —
+so `SpatialVoice` cannot tell which it is feeding and a traffic car can be promoted to the
+simulated voice by swapping one object.
+
+Four sources, not one per layer: the rev is between two layers and the throttle is between closed
+and open, so the mix is a bilinear blend of four recordings. Blended equal-gain in both
+directions, because they are recordings of the same engine and sum coherently — the same reason
+the interior and exterior buses blend linearly in `voice.ts`. Each source starts at a random point
+in its loop, so four cars on one street do not phase-lock into a single loud one.
+
+`probes/enginesim-sampled.mjs` measures the **firing frequency** of what comes out: a four-stroke
+fires cylinders/2 times per revolution, so at R rpm with C cylinders the fundamental is R·C/120 Hz.
+At five revs chosen deliberately between baked layers it lands within 0.11%. The control is a fact
+about engines rather than about this code — at one rev, a V12 must fire exactly 1.5x a V8, and it
+measures 1.499. Remove the playback rate and every pitch check fails; remove the upper layer from
+the blend and the steps across a layer boundary go from 1.17x to 14.9x.
+
+Two notes on measuring that, because both cost a round. An engine's spectrum is a comb of ORDERS
+at multiples of half the crank frequency, so a search band of +/-20% around the firing frequency
+finds the neighbouring half-order instead and reports a confident "off by -12.5%" twice. And the
+level is *not* flat across the rev range: every layer is baked to the same peak, so what varies is
+the waveform — a V8 at 550 rpm fires 37 times a second with silence between, at 5800 it is a
+continuous tone, and the 30 dB between them is the thing sounding like an engine. What must hold
+is that a layer boundary is no bumpier than anywhere else, which is what is asserted.
+
+`packs/` is gitignored: it is a working artefact, and nothing needs twenty engines of traffic.
+
 ## Upstream, and the licences
 
 We build against [Open Engine Simulator](https://github.com/zabayone/open-engine-sim), the

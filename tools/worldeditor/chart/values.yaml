@@ -19,6 +19,18 @@ image:
   tag: "latest"
   pullPolicy: Always
 
+# A BLANK WORLD MAP MEANS BLANK. Empty is the default and a populated editor is a choice.
+#
+# The image used to come up holding thirty-one Maryland corridors — somebody else's worlds on
+# somebody else's fresh volume. The way in is to draw an area or import a definition, not to
+# inherit a list (Rich, 2026-09-27: "I want to reset the image so it ships with zero built in
+# configs and we can start by importing crofton or crownsville or arrowhead").
+#
+# The list is still IN the image, so opting back in is a flag rather than a rebuild:
+#   --set seedSites=/app/tools/corridor/sites.json
+# It only ever applies to a volume with no worlds on it; it cannot overwrite what you have.
+seedSites: ""
+
 replicaCount: 1
 
 # THE BAKE'S VOLUME. A bake Job writes `sites/<slug>/web/`, this pod serves it, and the editor
@@ -100,8 +112,16 @@ ingress:
   className: nginx
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt-issuer
-    # A world's manifest is megabytes of JSON and a bake log is long-lived; nginx's defaults are not
-    nginx.ingress.kubernetes.io/proxy-body-size: "64m"
+    # A world's manifest is megabytes of JSON and a bake log is long-lived; nginx's defaults are not.
+    #
+    # THIS NUMBER AND THE SERVER'S OWN CAP HAVE TO AGREE. The service accepts an uploaded baked
+    # world up to WORLDEDITOR_ARCHIVE_MAX_MB (1536 MiB), and this used to say 64m — so importing a
+    # real world through the ingress died at the proxy, twenty-four times earlier than the limit
+    # the service declares and reports. `0` turns nginx's body check off entirely and lets the
+    # service be the single place that says no, with a message that explains itself. Capture
+    # uploads are already chunked below this (see /api/uploads/limits), so the only thing that
+    # relies on it is the archive import.
+    nginx.ingress.kubernetes.io/proxy-body-size: "0"
     nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
   hosts:

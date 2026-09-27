@@ -34,8 +34,19 @@ const NAMES = [
   'arrows-pointing-out', 'arrows-pointing-in',
   // world editor: find a place, draw its extent, run a bake, watch it, publish it
   'magnifying-glass', 'cloud-arrow-up', 'stop', 'bolt', 'clock', 'server-stack',
-  'arrow-down-tray', 'queue-list', 'exclamation-triangle', 'folder-open',
+  'arrow-down-tray', 'arrow-up-tray', 'queue-list', 'exclamation-triangle', 'folder-open',
+  // back out of a panel, step back through a list, mark a level's finish
+  'chevron-left', 'arrow-left', 'flag',
 ]
+
+/*
+ * IF YOU ADD A NAME HERE, RE-RUN THIS. It is not automatic and nothing checks it, and when this
+ * list and icons.ts drifted apart the result was invisible rather than loud: `IconName` was
+ * `keyof typeof ICONS` over a `Record<string, string>`, which is `string`, so a name this file
+ * knows and icons.ts does not type-checked fine and rendered an empty <svg>. Five buttons in the
+ * shipped world editor had no picture on them — back, back, back, and two finish flags — and the
+ * way it was found was changing icons.ts to `satisfies` so the union is real.
+ */
 
 /** The bit between <svg …> and </svg> — one or more <path>, already stroke-styled by the wrapper. */
 function inner(name) {
@@ -57,10 +68,20 @@ writeFileSync(
 // no icon font and no sprite sheet — the whole set here is about 11 kB of markup — and they inherit
 // currentColor, so a button's colour is its icon's colour and there is nothing to keep in sync.
 
-/** Inner markup of each icon, keyed by its Heroicons name. */
-export const ICONS: Record<string, string> = {
+/**
+ * Inner markup of each icon, keyed by its Heroicons name.
+ *
+ * \`satisfies\` RATHER THAN A TYPE ANNOTATION, and it is not a style preference. Annotating this
+ * \`Record<string, string>\` makes \`keyof typeof ICONS\` equal to \`string\`, so \`IconName\`
+ * accepted anything, a misspelled name type-checked, and \`icon()\` set \`innerHTML\` to the
+ * string "undefined" — a button that renders its label and no picture, with no error anywhere.
+ * Five buttons in the shipped world editor had none: three backs and two finish flags.
+ * \`satisfies\` keeps the shape check AND keeps the literal key union, so the next typo is a
+ * compile error.
+ */
+export const ICONS = {
 ${entries}
-}
+} satisfies Record<string, string>
 
 export type IconName = keyof typeof ICONS
 

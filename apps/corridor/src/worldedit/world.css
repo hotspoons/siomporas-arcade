@@ -194,6 +194,17 @@ body.worldedit .inspector {
   color: var(--ink-3);
   flex: none;
 }
+/* Import and export sit below the worlds, with a line between: they act on the LIST rather than
+   being one of its entries, and on a fresh install the list above this line is empty. */
+.world-sep {
+  height: 1px;
+  margin: var(--s1) calc(var(--s2) * -1 + var(--s2));
+  background: var(--line-1);
+}
+.world-row.transfer .world-slug {
+  color: var(--ink-2);
+  font-weight: 400;
+}
 .world-slug {
   flex: 1;
   font-weight: 500;

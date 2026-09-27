@@ -54,8 +54,16 @@ WORKDIR /app
 # hand, the Kubernetes API by hand, no SDK — which is why there is no `npm install` in this stage.
 COPY tools/worldeditor/ tools/worldeditor/
 COPY --from=app /src/apps/corridor/dist/ apps/corridor/dist/
-# The seed: a volume with no worlds on it starts life knowing about the sites already in the repo,
-# so a fresh pod is not an empty list. It is copied, never read at runtime after the first start.
+# The seed list is CARRIED but NOT ENABLED.
+#
+# This image used to set WORLDEDITOR_SEED_SITES to this file, so every fresh volume came up
+# holding thirty-one Maryland corridors that belong to whoever baked them. server.mjs was changed
+# to make seeding opt-in and the ENV below quietly defeated it — the comment said one thing and
+# the image did another (Rich, 2026-09-27: "I want to reset the image so it ships with zero built
+# in configs and we can start by importing crofton or crownsville or arrowhead").
+#
+# The file is still here so that turning the seed back on is `--set seedSites=/app/...` and not a
+# rebuild. An empty editor is the default; a populated one is a choice.
 COPY tools/corridor/sites.json tools/corridor/sites.json
 # The placement catalog the editor reads, as the fallback under whatever the volume holds.
 COPY apps/corridor/public/assets/catalog.json apps/corridor/public/assets/catalog.json
@@ -65,7 +73,6 @@ USER 10001
 
 ENV WORLDEDITOR_DATA=/data \
     WORLDEDITOR_APP=/app/apps/corridor/dist \
-    WORLDEDITOR_SEED_SITES=/app/tools/corridor/sites.json \
     WORLDEDITOR_HOST=0.0.0.0 \
     WORLDEDITOR_PORT=8780 \
     NODE_ENV=production

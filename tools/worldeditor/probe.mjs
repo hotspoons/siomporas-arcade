@@ -613,6 +613,71 @@ async function apiChecks(base) {
     return r.body.data
   })()
 
+  /*
+   * MOVING A WORLD BETWEEN MACHINES, which is now the only way anything gets into a fresh editor:
+   * the image ships with no worlds at all (Rich, 2026-09-27). So the round trip is not a
+   * convenience, it is the way in, and it has to survive a volume that has never seen the world
+   * or the levels set in it.
+   */
+  await check('a world and the levels set in it survive a round trip through export/import', async () => {
+    const slug = 'probe-transfer'
+    const levelId = 'probe-transfer-run'
+    const world = { slug, lat: 39.02, lon: -76.68, radius_m: 900, title: 'transfer probe' }
+    // start clean, whatever a previous run left
+    await fetch(`${base}/api/levels/${levelId}`, { method: 'DELETE' })
+    await fetch(`${base}/api/worlds/${slug}`, { method: 'DELETE' })
+
+    const bundle = {
+      kind: 'corridor-worlds', version: 1,
+      worlds: [world],
+      levels: [{ id: levelId, world: slug, title: 'A run', mode: 'drive', defaults: { time: '06:15' } }],
+    }
+    const post = (p, body) => get(p, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+
+    const first = await post('/api/worlds/import', bundle)
+    assert(first.body.imported?.includes(slug), `the world did not import: ${JSON.stringify(first.body)}`)
+    assert(first.body.levels?.includes(levelId), `the LEVEL did not import: ${JSON.stringify(first.body)}`)
+
+    // it really is on the volume, with the fields it was given
+    const back = await get(`/api/levels/${levelId}`)
+    assert(back.body.level?.world === slug, `level came back pointing at ${back.body.level?.world}`)
+    assert(back.body.level?.defaults?.time === '06:15', 'the level lost its defaults on the way through')
+
+    // exporting it again produces the same pair — this is the half that makes it a ROUND trip
+    const out = await get(`/api/worlds/export?slug=${slug}`)
+    assert(out.body.worlds?.length === 1 && out.body.worlds[0].slug === slug, 'the export lost the world')
+    assert(out.body.levels?.some((l) => l.id === levelId), 'the export did not carry the level set in that world')
+    assert(out.type?.includes('json'), `export answered ${out.type}`)
+
+    // ?levels=0 is the opt-out, and it has to actually opt out
+    const bare = await get(`/api/worlds/export?slug=${slug}&levels=0`)
+    assert((bare.body.levels ?? []).length === 0, 'levels=0 still carried levels')
+
+    // a second import must REFUSE rather than silently overwrite
+    const again = await post('/api/worlds/import', bundle)
+    assert(again.body.imported.length === 0 && again.body.levels.length === 0, 'a re-import overwrote without being asked')
+    assert(again.body.skipped.length === 2, `expected both to be skipped, got ${JSON.stringify(again.body.skipped)}`)
+
+    // and ?replace=1 must go through
+    const forced = await post(`/api/worlds/import?replace=1`, bundle)
+    assert(forced.body.imported.includes(slug) && forced.body.levels.includes(levelId), 'replace=1 did not replace')
+
+    // A LEVEL POINTING AT NOTHING IS REFUSED. It validates, it saves, it shows up in the Stage
+    // list, and it can never be opened — the quietest possible way to import a broken thing. An
+    // early version of this accepted it without a murmur.
+    await fetch(`${base}/api/levels/probe-transfer-orphan`, { method: 'DELETE' })
+    const orphan = await post('/api/worlds/import?replace=1', {
+      worlds: [], levels: [{ id: 'probe-transfer-orphan', world: 'no-such-world-at-all', mode: 'drive' }],
+    })
+    assert(orphan.body.levels.length === 0, 'a level naming a world that does not exist was imported')
+    assert(/neither in this bundle nor on this volume/.test(orphan.body.skipped[0]?.why ?? ''),
+      `refused for the wrong reason: ${JSON.stringify(orphan.body.skipped)}`)
+
+    await fetch(`${base}/api/levels/${levelId}`, { method: 'DELETE' })
+    await fetch(`${base}/api/worlds/${slug}`, { method: 'DELETE' })
+    return 'world + level out and back, replace honoured, orphan refused'
+  })()
+
   await check('a missing site file is a JSON 404, never an HTML 200', async () => {
     const r = await fetch(`${base}/sites/definitely-not-a-site/placements.json`)
     const t = await r.text()

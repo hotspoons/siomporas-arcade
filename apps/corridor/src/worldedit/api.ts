@@ -314,6 +314,56 @@ export const api = {
     call<{ world: World; warnings: string[]; movedM: number }>(`/api/worlds/${slug}`, { method: 'PUT', body: JSON.stringify(body) }),
   deleteWorld: (slug: string) => call<{ deleted: string }>(`/api/worlds/${slug}`, { method: 'DELETE' }),
 
+  /* ---- moving worlds between machines -------------------------------------------------------
+   *
+   * Two different sizes of thing, deliberately kept apart. A DEFINITION is a few hundred bytes of
+   * JSON — where, how big, which road is the spine, and the levels set there — and it is how you
+   * hand somebody a place to bake. A BAKED world is hundreds of megabytes of raster and is how
+   * you hand them the result without the eight hours.
+   *
+   * These go through the browser rather than `call()` because one is a download and the other is
+   * a file the person picked: neither is JSON in and JSON out. */
+
+  /** The URL of a world bundle — definitions plus the levels set in them. Empty slugs = all. */
+  exportWorldsUrl: (slugs: string[] = [], levels = true) => {
+    const q = new URLSearchParams()
+    for (const s of slugs) q.append('slug', s)
+    if (!levels) q.set('levels', '0')
+    const query = q.toString()
+    return `/api/worlds/export${query ? `?${query}` : ''}`
+  },
+  importWorlds: (bundle: unknown, replace = false) =>
+    call<{ imported: string[]; levels: string[]; skipped: { slug?: string; level?: string; why: string }[] }>(
+      `/api/worlds/import${replace ? '?replace=1' : ''}`,
+      { method: 'POST', body: JSON.stringify(bundle) },
+    ),
+
+  /** A baked world as one zip. `web` is the viewer's half — most of the value, a fraction of the bytes. */
+  archiveUrl: (slug: string, web = true) => `/api/sites/${slug}/archive${web ? '?web=1' : ''}`,
+  /**
+   * Upload a baked world. Raw bytes, not multipart: the service reads the body as the zip, and
+   * wrapping it in a form boundary would mean parsing multipart in a dependency-free server for
+   * no gain. Progress is reported because these are big enough that silence reads as a hang.
+   */
+  importSite: (file: File, replace: boolean, onProgress?: (sent: number, total: number) => void) =>
+    new Promise<{ site: string; files: number; bytes: number }>((resolve, reject) => {
+      const xhr = new XMLHttpRequest()
+      xhr.open('POST', `/api/sites/import${replace ? '?replace=1' : ''}`)
+      xhr.setRequestHeader('Content-Type', 'application/zip')
+      xhr.upload.onprogress = (e) => onProgress?.(e.loaded, e.total || file.size)
+      xhr.onload = () => {
+        let body: { error?: string } = {}
+        try { body = JSON.parse(xhr.responseText) } catch { /* a proxy's HTML error page */ }
+        if (xhr.status >= 200 && xhr.status < 300) resolve(body as { site: string; files: number; bytes: number })
+        // An ingress that refuses the body answers before the service ever sees it, and its page
+        // is HTML — so say which limit was hit rather than printing a fragment of nginx.
+        else if (xhr.status === 413) reject(new Error(body.error ?? 'too large for the proxy in front of the service (nginx proxy-body-size)'))
+        else reject(new Error(body.error ?? `HTTP ${xhr.status}`))
+      }
+      xhr.onerror = () => reject(new Error('the upload failed before it reached the service'))
+      xhr.send(file)
+    }),
+
   runs: () => call<{ runs: Run[]; runner: string }>('/api/runs'),
   run: (id: string) => call<{ run: Run }>(`/api/runs/${id}`),
   bake: (slug: string, opts: { skip?: string } = {}) => call<{ run: Run }>('/api/runs/bake', { method: 'POST', body: JSON.stringify({ slug, ...opts }) }),

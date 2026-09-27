@@ -575,8 +575,22 @@ async function api(req, res, seg, q) {
     const want = q.getAll('slug')
     const all = await store.listWorlds()
     const picked = want.length ? all.filter((w) => want.includes(w.slug)) : all
-    const body = { kind: 'corridor-worlds', version: 1, exported: new Date().toISOString(), worlds: picked }
-    res.writeHead(200, { ...CORS, 'content-type': 'application/json', 'content-disposition': `attachment; filename="worlds-${picked.length}.json"` })
+    /*
+     * THE GAMES COME WITH THE PLACE, unless you say otherwise.
+     *
+     * A world is where; a level is what you do there (Rich, 2026-09-27: "the ability to import and
+     * export world configs for each area and game"). Handing somebody a world without its levels
+     * hands them an empty road, and they are a few hundred bytes — so `?levels=0` is the opt-out
+     * rather than `?levels=1` being the opt-in. Only the levels that name one of the worlds being
+     * exported come along: a level pointing at a world that is not in the bundle would import as
+     * something that can never be opened.
+     */
+    const withLevels = q.get('levels') !== '0'
+    const slugs = new Set(picked.map((w) => w.slug))
+    const levels = withLevels ? (await store.listLevels()).filter((l) => slugs.has(l.world)) : []
+    const body = { kind: 'corridor-worlds', version: 1, exported: new Date().toISOString(), worlds: picked, levels }
+    const name = picked.length === 1 ? picked[0].slug : `worlds-${picked.length}`
+    res.writeHead(200, { ...CORS, 'content-type': 'application/json', 'content-disposition': `attachment; filename="${name}.corridor.json"` })
     return res.end(JSON.stringify(body, null, 1))
   }
   if (seg[0] === 'worlds' && seg[1] === 'import' && req.method === 'POST') {
@@ -595,7 +609,42 @@ async function api(req, res, seg, q) {
       if (!replace && (await store.getWorld(w.slug))) { skipped.push({ slug: w.slug, why: 'already here — pass ?replace=1 to overwrite' }); continue }
       added.push((await store.putWorld({ ...w, source: 'import', imported: new Date().toISOString() })).slug)
     }
-    return json(res, 200, { imported: added, skipped })
+    /*
+     * The levels come too, and they are validated rather than trusted.
+     *
+     * A level names a world, an entry point and a list of scenario steps, and an invalid one is
+     * how the viewer ends up throwing on load rather than saying what is wrong. `validate` is the
+     * same function the editor's own panel runs as you type, so an imported level cannot be in a
+     * state the editor would not let you save.
+     *
+     * IT DOES NOT REQUIRE THE WORLD TO BE BAKED, and POST /api/levels does. That difference is
+     * deliberate: creating a level means dressing a world you are looking at, so the bake has to
+     * exist; importing a bundle means receiving a place AND what to do there, on a machine that
+     * has neither yet. Requiring the bake would make a bundle un-importable exactly where it is
+     * most useful — a fresh editor with nothing on it.
+     */
+    const incoming = Array.isArray(body?.levels) ? body.levels : []
+    // NOT `levels`: that is the module imported at the top of this file, and shadowing it here
+    // made every import fail with "levels.withDefaults is not a function" — which no unit test
+    // would have caught, because the shadow only exists inside this block.
+    const addedLevels = []
+    // A level must name a world that will EXIST once this import is done — one that came in the
+    // bundle, or one already on the volume. Without this a bundle whose world was skipped (or
+    // that never carried one) imports a level pointing at nothing: it validates, it saves, it
+    // appears in the Stage list, and it can never be opened. Measured, not imagined — an early
+    // version accepted `world: "no-such-world"` without a murmur.
+    const known = new Set([...added, ...(await store.listWorlds()).map((w) => w.slug)])
+    for (const l of incoming) {
+      if (!l?.id || !/^[a-z0-9][a-z0-9-]{1,63}$/.test(l.id)) { skipped.push({ level: l?.id ?? null, why: 'not a usable level id' }); continue }
+      const full = levels.withDefaults(l)
+      const v = levels.validate(full)
+      if (!v.ok) { skipped.push({ level: l.id, why: v.errors[0] ?? 'did not validate' }); continue }
+      if (!known.has(full.world)) { skipped.push({ level: l.id, why: `names world "${full.world}", which is neither in this bundle nor on this volume` }); continue }
+      if (!replace && (await store.getLevel(l.id))) { skipped.push({ level: l.id, why: 'already here — pass ?replace=1 to overwrite' }); continue }
+      await store.putLevel(full)
+      addedLevels.push(l.id)
+    }
+    return json(res, 200, { imported: added, levels: addedLevels, skipped })
   }
 
   /* a baked world, as one file. `?web=1` is the viewer's half only, which is most of the value

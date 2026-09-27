@@ -56,6 +56,11 @@ spec:
               value: {{ toJson .Values.bake.resources | quote }}
             - name: WORLDEDITOR_HORIZON_M
               value: {{ .Values.bake.horizonRadiusM | quote }}
+            # Always set, EMPTY BY DEFAULT. Set explicitly rather than only when non-empty, so
+            # that turning the seed off is a value change and not a redeploy of a different
+            # template — the image carries the list and an unset variable is what disables it.
+            - name: WORLDEDITOR_SEED_SITES
+              value: {{ .Values.seedSites | quote }}
             {{- if .Values.publish.bucket }}
             - name: WORLDEDITOR_S3_BUCKET
               value: {{ .Values.publish.bucket | quote }}

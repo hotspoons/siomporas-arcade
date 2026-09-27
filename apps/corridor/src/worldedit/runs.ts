@@ -14,6 +14,7 @@ import { Dialog, button, el, toast } from '../ui/shell'
 import { bodyOf, empty, group, readout } from '../ui/controls'
 import { icon } from '../ui/icons'
 import { api, type Run, type World } from './api'
+import { bakedTransferGroup } from './transfer'
 
 const STATE_KIND: Record<Run['state'], 'info' | 'ok' | 'warn' | 'danger'> = {
   starting: 'info',
@@ -109,6 +110,8 @@ export interface RunsOpts {
   selected: () => string | null
   /** a run finished — the world list's "baked" state has moved and wants re-reading */
   onFinished: () => void
+  /** re-read the world list, after an uploaded archive brought a new baked world with it */
+  refreshWorlds: () => Promise<void>
 }
 
 /** The Bake panel: what exists, what has been baked, what is running. */
@@ -279,6 +282,14 @@ export class RunsPanel {
       pb.append(note('objects whose size already matches are skipped, so publishing after every bake is cheap and safe.'))
     }
     host.append(pub)
+
+    /* the same result as a file rather than as a bucket. Three routes to one place: publish,
+       download, or hand somebody the definition and let them bake it themselves. */
+    host.append(bakedTransferGroup({
+      selected: () => world?.slug ?? null,
+      worlds: () => this.o.worlds(),
+      reload: () => this.o.refreshWorlds(),
+    }))
 
     /* history */
     const hist = group('Runs')

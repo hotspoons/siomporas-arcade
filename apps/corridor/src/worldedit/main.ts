@@ -24,6 +24,7 @@ import { AdoptDialog } from './adopt'
 import { StagePanel } from './stage'
 import { AssetsPanel } from './assets'
 import { SplatsPanel } from './splats'
+import { worldMenuTransfer } from './transfer'
 import { dockWidth } from '../ui/dockwidth'
 
 type Mode = 'explore' | 'index' | 'define' | 'bake' | 'stage' | 'assets' | 'splats'
@@ -297,6 +298,7 @@ const runsPanel = new RunsPanel({
   worlds: () => worlds,
   selected: () => selected,
   onFinished: () => void refreshWorlds(),
+  refreshWorlds,
 })
 
 /* ---- chrome -------------------------------------------------------------------------------- */
@@ -607,6 +609,16 @@ function openWorldMenu(anchor: HTMLElement) {
     }
     menu.append(row)
   }
+  /*
+   * IMPORT LIVES HERE, at the bottom of the picker, because of what this menu looks like on a
+   * fresh install: empty. The image ships with no worlds now (Rich, 2026-09-27) and an empty menu
+   * with no way out of it is a dead end — so the way IN is on the thing everyone clicks first.
+   */
+  menu.append(el('div', 'world-sep'), ...worldMenuTransfer({
+    selected: () => selected,
+    worlds: () => worlds,
+    reload: async () => { await refreshWorlds(); renderWorldSelect(); renderPanel() },
+  }, () => menu.remove()))
   const r = anchor.getBoundingClientRect()
   menu.style.left = `${r.left}px`
   menu.style.top = `${r.bottom + 6}px`

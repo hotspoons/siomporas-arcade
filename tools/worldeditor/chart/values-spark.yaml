@@ -56,7 +56,8 @@ ingress:
   enabled: true
   annotations:
     # must exceed uploadChunkMiB with room; preflight checks it
-    nginx.ingress.kubernetes.io/proxy-body-size: "64m"
+    # 0 = no nginx body check; the service's own WORLDEDITOR_ARCHIVE_MAX_MB is the one limit
+    nginx.ingress.kubernetes.io/proxy-body-size: "0"
     # a chapter upload holds a connection for as long as a chunk takes on a home connection
     nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "600"

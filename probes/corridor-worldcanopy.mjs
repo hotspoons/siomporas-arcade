@@ -73,13 +73,36 @@ const out = await page.evaluate(async () => {
   // and trees actually planted out there: put the eye in the far band and count
   let treesFar = null
   if (far.length) {
+    /*
+     * MOVE THE CAMERA, NOT AN EYE OF MY OWN.
+     *
+     * The trees follow the eye -- TREE_PLANT_RADIUS_M of them are planted around it and replanted
+     * once it has moved TREE_REPLANT_M -- and the app's frame loop calls updateNear with the real
+     * camera every frame. A probe that calls updateNear itself with a borrowed eye therefore
+     * replants to its point and is immediately replanted back to the camera, and the first run of
+     * this reported "0 trees 80 m from a road" at a point 3.9 km from a planting centre that had
+     * never moved. Eighty replants had happened; all of them were to the camera.
+     */
     const [fx, fy] = far[0]
-    const eye = new THREE.Vector3(fx, (site.groundAt(fx, -fy) ?? 0) + 2, -fy)
-    for (let k = 0; k < 40; k++) {
-      site.updateNear(eye, k * 0.05, new THREE.Vector3(1, 0, 0), 0)
-      await new Promise((r) => requestAnimationFrame(r))
+    const cam = window.corridor.camera
+    cam.position.set(fx, (site.groundAt(fx, -fy) ?? 0) + 2, -fy)
+    window.corridor.orbit.target.set(fx + 30, site.groundAt(fx + 30, -fy) ?? 0, -fy)
+    window.corridor.orbit.update()
+    for (let k = 0; k < 90; k++) await new Promise((r) => requestAnimationFrame(r))
+    /*
+     * ASK THE PLANTER, not only the result. "0 trees here" has two very different causes -- the
+     * world has no canopy out here, or the planter never moved -- and the difference is the whole
+     * diagnosis. `treePlanting()` reports where the last plant was centred and how many it made.
+     */
+    const plant = site.treePlanting?.() ?? null
+    treesFar = {
+      at: [Math.round(fx), Math.round(fy)],
+      within300m: site.treesNear(fx, -fy, 300).length,
+      roadDist: +site.edgeInfo(fx, -fy).d.toFixed(0),
+      canopyHere: +(site.canopyAt(fx, fy) ?? 0).toFixed(1),
+      planting: plant,
+      movedTo: plant?.centre ? +Math.hypot(plant.centre[0] - fx, plant.centre[1] - fy).toFixed(0) : null,
     }
-    treesFar = { at: [Math.round(fx), Math.round(fy)], within300m: site.treesNear(fx, -fy, 300).length, roadDist: +site.edgeInfo(fx, -fy).d.toFixed(0) }
   }
   return { farBandFrom: +p90.toFixed(0), furthestFromRoad: +maxD.toFixed(0), world: m.world === true, tiles: (m.layers?.tiles?.list?.length ?? m.layers?.tiles?.count ?? null), near: await stat(near), far: await stat(far), treesFar }
 })

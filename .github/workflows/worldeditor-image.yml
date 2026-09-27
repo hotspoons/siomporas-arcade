@@ -81,7 +81,28 @@ jobs:
             curl -sf "localhost:8780$p" | grep -qi '<html' || { echo "no page at $p"; exit 1; }
           done
           curl -sf localhost:8780/ | grep -q 'worldedit/main' || { echo "/ is not the world editor"; exit 1; }
-          # and the volume was seeded, so a fresh pod is not an empty list
+          # A FRESH IMAGE COMES UP EMPTY, and this used to assert the opposite.
+          #
+          # It checked `worlds.length > 5`, because the image seeded itself from the repo's
+          # sites.json. That is wrong for a deployment: a new volume came up holding thirty-one
+          # of somebody else's worlds (Rich, 2026-09-27: "I want to reset the image so it ships
+          # with zero built in configs"). A blank world map should mean blank, and the way in is
+          # to draw an area or import a bundle.
           curl -sf localhost:8780/api/worlds \
-            | node -e 'const b=JSON.parse(require("fs").readFileSync(0,"utf8")); if (!(b.worlds?.length > 5)) { console.error("only", b.worlds?.length, "worlds seeded"); process.exit(1) } console.log(b.worlds.length, "worlds seeded")'
+            | node -e 'const b=JSON.parse(require("fs").readFileSync(0,"utf8")); if (b.worlds?.length !== 0) { console.error("a fresh image came up with", b.worlds?.length, "worlds — something is seeding it"); process.exit(1) } console.log("fresh image: 0 worlds, as it should be")'
+          # and an import is the way to fill it, which is the half that makes empty usable
+          curl -sf -X POST -H 'content-type: application/json' \
+            -d '{"kind":"corridor-worlds","worlds":[{"slug":"smoke-world","lat":39.02,"lon":-76.68,"radius_m":900}],"levels":[{"id":"smoke-level","world":"smoke-world","mode":"drive"}]}' \
+            localhost:8780/api/worlds/import \
+            | node -e 'const b=JSON.parse(require("fs").readFileSync(0,"utf8")); if (!b.imported?.includes("smoke-world") || !b.levels?.includes("smoke-level")) { console.error("import did not take:", JSON.stringify(b)); process.exit(1) } console.log("imported a world and the level set in it")'
           docker rm -f worldeditor
+
+          # THE SEED IS STILL IN THE IMAGE, opt-in rather than gone. If this stops working, the
+          # chart's `seedSites` value points at a path that is no longer there and would fail on
+          # somebody's cluster instead of here.
+          docker run -d --name worldeditor-seeded -p 8781:8780 \
+            -e WORLDEDITOR_SEED_SITES=/app/tools/corridor/sites.json ${{ env.IMAGE }}:latest
+          for i in $(seq 1 30); do curl -sf localhost:8781/api/health >/dev/null && break || sleep 1; done
+          curl -sf localhost:8781/api/worlds \
+            | node -e 'const b=JSON.parse(require("fs").readFileSync(0,"utf8")); if (!(b.worlds?.length > 5)) { console.error("seeding is opt-in but opting in gave", b.worlds?.length, "worlds"); process.exit(1) } console.log("opting in still seeds", b.worlds.length, "worlds")'
+          docker rm -f worldeditor-seeded

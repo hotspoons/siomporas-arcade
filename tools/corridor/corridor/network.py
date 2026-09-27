@@ -356,7 +356,7 @@ def fetch_site(site: dict, half_width: float, lidar_half_width: float, skip: set
     print(f"=== {slug}  network ({site['lat']:.5f}, {site['lon']:.5f}) {asked}")
     frame = Frame.at(site["lon"], site["lat"])
     manifest: dict = json.loads((out / "manifest.json").read_text()) if (out / "manifest.json").exists() else {}
-    manifest |= {"slug": slug, "kind": "network", "frame": {"epsg": frame.epsg, "origin": frame.origin}, "fetched": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "params": {"half_width_m": half_width, "lidar_half_width_m": lidar_half_width, "radius_m": site.get("radius_m"), "horizon_radius_m": 30000.0}}
+    manifest |= {"slug": slug, "world": bool(site.get("world")), "kind": "network", "frame": {"epsg": frame.epsg, "origin": frame.origin}, "fetched": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "params": {"half_width_m": half_width, "lidar_half_width_m": lidar_half_width, "radius_m": site.get("radius_m"), "horizon_radius_m": 30000.0}}
     R = roads(site, frame, cache / "overpass")
     print(f"  roads   {summary(R)}", flush=True)
     dead_ends(R["chains"], frame, cache / "overpass", float(site.get("radius_m", 9000)), site["lat"], site["lon"])
@@ -399,6 +399,31 @@ def fetch_site(site: dict, half_width: float, lidar_half_width: float, skip: set
             manifest["naip"] = network_tiles.naip_tiled(frame, bbox, region, out / "naip_1m.tif", cache, res=network_tiles.NAIP_RES_M)
         else:
             manifest["naip"] = naip.fetch_naip(frame, bbox, out / "naip.tif", cache)
+    #
+    # THE CANOPY OF A WORLD COMES FROM THE GLOBAL MODEL, NOT FROM THE POINT CLOUD.
+    #
+    # `network_tiles` has read `canopy_global.tif` for a while and nothing has ever written it, so
+    # the fill path it describes has never once run. That is what makes a world's trees stop at the
+    # corridor: the lidar CHM is rasterised only in a band along the roads, and outside that band
+    # "no lidar" was written as "0 m canopy", which the tree planter reads as "no trees".
+    #
+    # The Meta/WRI global model is the same product at the same resolution for the whole planet,
+    # and `canopy.fetch_chm` streams it out of S3 through gdalwarp -- so it costs an HTTP fetch of
+    # a precomputed raster and a few hundred megabytes of output, against the tens of gigabytes of
+    # LAZ that the point cloud needs. It is also the only canopy available outside the United
+    # States at all.
+    #
+    # At 2 m rather than 1: the viewer plants from a CHM it reads on a 4 m lattice, and 112 km2 at
+    # 1 m is 450 MB of Float32 to produce a picture nothing samples that finely.
+    #
+    if world and "canopy" not in skip:
+        from . import canopy
+
+        try:
+            manifest["canopy"] = canopy.fetch_chm(frame, tuple(bbox), out / "canopy_global.tif", cache, res=2.0)
+        except Exception as exc:
+            # not fatal: a world without trees is worse than a world, but it is still a world
+            print(f"  canopy  global CHM unavailable: {exc}", flush=True)
     if "horizon" not in skip:
         manifest["horizon"] = horizon.fetch_horizon(frame, out / "horizon_30m.tif", cache, radius_m=30000.0)
     if "geology" not in skip:

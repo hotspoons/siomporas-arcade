@@ -931,8 +931,26 @@ def export_site(site_dir: Path, web: Path | None = None) -> dict:
         derived = {"buildings": [], "landuse": [], "pois": [], "summary": {}}
 
     # --- canopy on the same lattice ------------------------------------------------------------
+    #
+    # A WORLD BAKE'S CANOPY IS THE GLOBAL ONE, AND IT IS AN OVERVIEW LAYER EVEN THOUGH IT IS TILED.
+    #
+    # The viewer gates its whole distance field -- and therefore its roads, grass and trees -- on
+    # having this `chm` layer (scene.ts: `if (chm) { ... }`), so a site without one comes up with
+    # nothing on it at all. The `not tiled` condition below is about the COST of an 85-megapixel
+    # overview from a point cloud; the global canopy is already a modest raster over the whole
+    # region, so there is nothing to avoid.
     chm_path = site_dir / "lidar" / "chm.tif"
-    if chm_path.exists() and "dem" in layers and not tiled:
+    world_chm = site_dir / "canopy_global.tif"
+    # the global canopy stands in where there is no lidar one, and unlike the lidar overview it is
+    # cheap enough to write for a tiled site too. `tiled` itself is NOT touched here -- it decides
+    # whether the per-tile export runs, and a world wants both.
+    use_global = not chm_path.exists() and world_chm.exists()
+    if use_global:
+        chm_path = world_chm
+    # `"dem" in layers` means the 2 m NEAR-terrain overview, which a tiled site does not write —
+    # so requiring it here is what kept a tiled world from ever getting a canopy overview. The
+    # canopy block reads its own raster on its own lattice and does not need the DEM at all.
+    if chm_path.exists() and (use_global or ("dem" in layers and not tiled)):
         c, g = _read_at(chm_path, 2.0, bbox)  # boundless: 0 outside the lidar corridor
         c = np.nan_to_num(c, nan=0.0)
         # The canopy model is "unclassified points above ground", and on a working interstate that

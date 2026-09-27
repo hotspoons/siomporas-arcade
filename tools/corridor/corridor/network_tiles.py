@@ -26,6 +26,7 @@ in row bands, so a 16 km branch's transects cost a few hundred MB of reads, not 
 """
 from __future__ import annotations
 
+import math
 import io
 import json
 import subprocess
@@ -313,10 +314,31 @@ def export_tiles(site_dir: Path, web: Path, frame, mask_shapes: list, vivid) -> 
     from .export import _encode_height, _fill
     from .pack import write_pack
 
-    lidar_meta = json.loads((site_dir / "manifest.json").read_text()).get("lidar", {}) if (site_dir / "manifest.json").exists() else {}
+    man = json.loads((site_dir / "manifest.json").read_text()) if (site_dir / "manifest.json").exists() else {}
+    lidar_meta = man.get("lidar", {})
     tinfo = lidar_meta.get("tiles") or {}
     x0, y0 = tinfo.get("origin", [None, None])
     tiles = [tuple(t) for t in tinfo.get("list", [])]
+    #
+    # THE TILE GRID IS NOT THE LIDAR'S TO DECIDE.
+    #
+    # It was: the 1 km grid came from `manifest.lidar.tiles`, so a bake without a point cloud
+    # produced no tiles, and therefore no per-tile elevation, imagery or canopy -- the whole
+    # streamed world, gone, because one optional stage was skipped. A WORLD bake is exactly the
+    # case that does not want a point cloud (see network.py: everything lidar is for is
+    # road-local, and the canopy comes from the global model), so for one the grid comes from the
+    # site's own bbox, which is what the grid was always describing.
+    #
+    site_cfg = json.loads((site_dir / "site.json").read_text()) if (site_dir / "site.json").exists() else {}
+    if (x0 is None or not tiles) and (site_cfg.get("world") or man.get("world")):
+        bx = site_cfg.get("bbox_utm")
+        if bx:
+            x0 = math.floor(bx[0] / TILE_M) * TILE_M
+            y0 = math.floor(bx[1] / TILE_M) * TILE_M
+            nx = int(math.ceil((bx[2] - x0) / TILE_M))
+            ny = int(math.ceil((bx[3] - y0) / TILE_M))
+            tiles = [(tx, ty) for ty in range(ny) for tx in range(nx)]
+            print(f"  tiles   no point cloud: {nx}x{ny} = {len(tiles)} tiles from the world's own bbox", flush=True)
     if x0 is None or not tiles:
         return {}
     tdir = web / "tiles" / "0"
@@ -358,7 +380,25 @@ def export_tiles(site_dir: Path, web: Path, frame, mask_shapes: list, vivid) -> 
             Image.fromarray(rgb, "RGB").save(buf, "PNG", optimize=True)
             parts["dem.png"] = buf.getvalue()
             entry["dem"] = {"zmin": zmin, "zscale": scale}
-        if chm_ds is not None:
+        # A world bake may have NO lidar canopy at all -- the point cloud is road-local now, and
+        # the global model covers the whole rectangle. Where there is no lidar CHM, the global one
+        # is not a fill, it IS the canopy.
+        if chm_ds is None and gchm_ds is not None:
+            wg = rasterio.windows.from_bounds(bx0, by0, bx1, by1, transform=gchm_ds.transform)
+            c = gchm_ds.read(1, window=wg, out_shape=(n // 2, n // 2), resampling=Resampling.average, boundless=True, fill_value=0).astype(np.float32)
+            c = np.clip(np.nan_to_num(c, nan=0.0), 0.0, 60.0)
+            canopy_filled += int(c.size)
+            if mask_shapes:
+                tr2 = from_origin(bx0, by1, 2.0, 2.0)
+                sub = [(g, 1) for g in mask_shapes if g.intersects(box(bx0, by0, bx1, by1))]
+                if sub:
+                    m = rasterize(sub, out_shape=c.shape, transform=tr2, fill=0, dtype=np.uint8).astype(bool)
+                    c[m] = 0.0
+            buf = io.BytesIO()
+            Image.fromarray(np.clip(np.round(c * 4), 0, 255).astype(np.uint8), "L").save(buf, "PNG", optimize=True)
+            parts["chm.png"] = buf.getvalue()
+            entry["chm"] = True
+        elif chm_ds is not None:
             win = rasterio.windows.from_bounds(bx0, by0, bx1, by1, transform=chm_ds.transform)
             c = chm_ds.read(1, window=win, out_shape=(n // 2, n // 2), resampling=Resampling.average, boundless=True, fill_value=0).astype(np.float32)
             c = np.nan_to_num(c, nan=0.0)

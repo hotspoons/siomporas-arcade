@@ -32,7 +32,16 @@ interface SplatWorld {
   frame: 'enu'
   origin: { lat: number; lon: number }
   cell_m: number
-  tiles: { tile: string; chunk: string; bounds_enu_m: [number, number, number, number]; centre?: [number, number]; gaussians: number }[]
+  tiles: {
+    tile: string
+    chunk: string
+    bounds_enu_m: [number, number, number, number]
+    /** GEODETIC, not metres — gaussworks' merge writes `{lat, lon}`. The stream uses
+     *  `bounds_enu_m` instead, which is the right call anyway; this is here so nobody reaches for
+     *  `centre[0]` and gets `undefined` rather than an error (splats lane, 2026-09-27). */
+    centre?: { lat: number; lon: number }
+    gaussians: number
+  }[]
 }
 
 /** `corridor.json`: where the camera actually was */
@@ -49,6 +58,14 @@ export interface SplatAttachment {
   base: string
   /** the fitted correction, in SITE metres and degrees — written by the fitter, never guessed here */
   fit?: { dx?: number; dy?: number; dz?: number; yaw_deg?: number }
+  /**
+   * Only these tiles, by file name. For a world that is partly wrong: the splats lane found that
+   * 18 of the 29 tiles in arrowhead-2026-09 contain TWO COPIES of the road at different heights,
+   * tens of metres apart, and that every one of those tiles registered 100% of its images --
+   * registration is not correctness. Naming the healthy ones exercises the frame composition, the
+   * streaming and the depth path against real data while the rest are re-run (2026-09-27).
+   */
+  tiles?: string[]
   /** metres of crossfade outside the capture envelope */
   fade_m?: number
   /** multiplies the capture's own radius */
@@ -76,6 +93,13 @@ export class SplatField {
   private spark: SparkRenderer | null = null
   private tiles: Tile[] = []
   private passes: { x: number; y: number }[][] = []
+  /** capture passes whose height band was impossible, and so were not used for the envelope */
+  rejectedPasses = 0
+
+  /** the envelope, for the seam raster: the passes in site metres and the tube around them */
+  envelope(): { passes: { x: number; y: number }[][]; core: number; fade: number } {
+    return { passes: this.passes, core: this.radius, fade: this.fade }
+  }
   private band: [number, number] = [-1e9, 1e9]
   private radius = 25
   private fade = 15
@@ -144,16 +168,45 @@ export class SplatField {
       field.radius = (corridor.radius_m ?? 25) * (att.core_scale ?? 1)
       field.band = corridor.height_band_m ?? field.band
       const v = new THREE.Vector3()
-      field.passes = corridor.passes.map((p) =>
-        p.points.map(([e, n, u]) => {
-          v.set(e, n, u).applyMatrix4(field.toSite)
-          return { x: v.x, y: v.y }
-        }),
-      )
+      /*
+       * REJECT THE PASSES THAT CANNOT BE WHERE THEY SAY THEY ARE.
+       *
+       * 7 of the 72 passes in arrowhead-2026-09 sit more than 15 m from any road, and one carries
+       * `u` from -27 m to -17 m -- below the ENU origin, where the real MSL ground here is 20 to
+       * 85 m. Those are misplaced reconstructions, not terrain. They are a minority, and they are
+       * exactly the kind of outlier that drags an envelope (and would drag a fit) outwards.
+       *
+       * The test is the capture's OWN height band, which it published, so this needs no second
+       * opinion about where the ground is (splats lane, 2026-09-27).
+       */
+      const lo = field.band[0] - 5
+      const hi = field.band[1] + 5
+      let rejected = 0
+      field.passes = corridor.passes
+        .filter((p) => {
+          const bad = p.points.filter(([, , u]) => u < lo || u > hi).length
+          if (bad > p.points.length * 0.5) { rejected++; return false }
+          return true
+        })
+        .map((p) =>
+          p.points.map(([e, n, u]) => {
+            v.set(e, n, u).applyMatrix4(field.toSite)
+            return { x: v.x, y: v.y }
+          }),
+        )
+      field.rejectedPasses = rejected
     }
     // --- the tiles ---------------------------------------------------------------------------
     const v = new THREE.Vector3()
-    field.tiles = world.tiles.map((t) => {
+    // A TILE CAN BE REAL AND EMPTY. `chunk_x-2_y1.ply` in arrowhead-2026-09 is a valid PLY with a
+    // valid header and zero vertices: it trained 117,861 gaussians whose reconstruction landed
+    // outside its own cell, so none survived the ownership test. Skipping on file existence would
+    // load it, spend a slot on it and hold it resident for ever (splats lane, 2026-09-27).
+    const allow = att.tiles?.length ? new Set(att.tiles) : null
+    field.tiles = world.tiles
+      .filter((t) => (t.gaussians ?? 0) > 0)
+      .filter((t) => !allow || allow.has(t.tile) || allow.has(t.chunk))
+      .map((t) => {
       const [x0, y0, x1, y1] = t.bounds_enu_m
       v.set((x0 + x1) / 2, (y0 + y1) / 2, 0).applyMatrix4(field.toSite)
       return {
@@ -262,6 +315,8 @@ export class SplatField {
     return {
       id: this.id,
       tiles: this.tiles.length,
+      passes: this.passes.length,
+      rejectedPasses: this.rejectedPasses,
       resident: this.tiles.filter((t) => t.mesh).length,
       loading: this.tiles.filter((t) => t.loading).length,
       failed: this.fails,

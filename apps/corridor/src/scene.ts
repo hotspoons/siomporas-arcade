@@ -7,6 +7,7 @@ import { landuseZone, zoneOfRoad } from './zoning'
 import * as T from './tuning'
 import { Anchor } from '@apex/engine/geo/wgs84'
 import { RasterFrame } from '@apex/engine/geo/raster'
+import { makeSplatFading, type SplatMaskUniforms } from './splatmask'
 import { ImageryStream, PyramidSet, TileSet, loadTiles } from './tiles'
 import { PyramidStream } from './pyramidstream'
 import { loadBakedTexture } from './textures'
@@ -117,6 +118,15 @@ export interface Site {
   /** signed distance to the nearest pavement edge (negative on the pavement) */
   edgeDistance: (x: number, z: number) => number
   /** what the grass generator is told at world (x, z): -1 on pavement, a lot, a walk or air-photo paving; else metres from the nearest road. For probes. */
+  /**
+   * Hand the built world the seam: where a capture has taken over, it dissolves away.
+   *
+   * Every ordinary lit material gets the dithered discard through `onBeforeCompile`, and the
+   * shaders that light themselves (grass, the tree cards, the road paint) get the uniforms
+   * directly. Called once when a site's captures are attached; a site with none never calls it
+   * and nothing in the built world changes at all.
+   */
+  setSplatMask: (u: SplatMaskUniforms) => { materials: number }
   grassRoadDistance: (x: number, z: number) => number
   /** true where grass is forbidden by a MASK rather than by the road geometry — see scene.ts */
   grassBlocked: (x: number, z: number) => boolean
@@ -2359,6 +2369,29 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     setSeason,
     groundAt: groundAtWorld,
     edgeDistance: edgeDistanceWorld,
+    setSplatMask: (u) => {
+      let n = 0
+      const seen = new Set<THREE.Material>()
+      group.traverse((o) => {
+        const m = (o as THREE.Mesh).material
+        if (!m) return
+        for (const mm of Array.isArray(m) ? m : [m]) {
+          if (seen.has(mm)) continue
+          seen.add(mm)
+          // a self-lighting shader already owns its fragment shader; give it the uniforms and it
+          // calls splatDissolve itself (grass.ts, impostors.ts, retro.ts)
+          const sh = mm as THREE.ShaderMaterial
+          if (sh.uniforms) {
+            Object.assign(sh.uniforms, u)
+            n++
+            continue
+          }
+          makeSplatFading(mm, u)
+          n++
+        }
+      })
+      return { materials: n }
+    },
     grassRoadDistance: (x, z) => grassRoadDistanceOut(x, z),
     grassBlocked: (x, z) => grassBlockedOut(x, z),
     edgeInfo: (x, z, exclude, roadsOnly) => edgeInfoOut(x, z, exclude, roadsOnly),

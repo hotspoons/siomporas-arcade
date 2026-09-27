@@ -34,6 +34,7 @@
 
 import * as THREE from 'three'
 import * as T from './tuning'
+import { SPLAT_MASK_PARS, splatMaskUniforms } from './splatmask'
 
 /** One lamp: where it is, where it points, in world space. */
 interface Lamp {
@@ -204,11 +205,13 @@ export function paintMaterial(u: RetroUniforms, opts: { vertexColors?: boolean; 
       #include <fog_pars_fragment>
       #include <logdepthbuf_pars_fragment>
       ${RETRO_PARS}
+      ${SPLAT_MASK_PARS}
       uniform vec3 uBase;
       varying vec3 vCol;
       varying vec3 vWorld;
       varying vec3 vNrm;
       void main() {
+        splatDissolve(vWorld);
         #include <logdepthbuf_fragment>
         vec3 base = uBase * vCol;
         // the ambient half goes to almost nothing at night; the retro half is all yours
@@ -222,7 +225,7 @@ export function paintMaterial(u: RetroUniforms, opts: { vertexColors?: boolean; 
     fog: true,
   })
   // share the rig's uniforms by reference, and give this material its own gain
-  Object.assign(m.uniforms, u, {
+  Object.assign(m.uniforms, u, splatMaskUniforms(), {
     uBase: { value: new THREE.Color(opts.color ?? 0xffffff) },
     uRetro: { value: 0 },
     uRetroFacing: { value: 0 },

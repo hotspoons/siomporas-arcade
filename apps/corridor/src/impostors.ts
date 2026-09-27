@@ -5,6 +5,7 @@
 // species. This is what the coast game does for its roadside sprites, brought to the corridor.
 import * as THREE from 'three'
 import { LAMP_PARS, retro } from './retro'
+import { SPLAT_MASK_PARS, splatMaskUniforms } from './splatmask'
 import * as T from './tuning'
 
 export interface ImpostorSource {
@@ -48,7 +49,7 @@ export class Impostors {
     this.material = new THREE.ShaderMaterial({
       // merge() clones uniform values and cannot clone a render-target texture (it silently becomes
       // null and every quad is discarded); the atlas is attached after the merge instead
-      uniforms: { ...THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { cols: { value: COLS }, yaws: { value: YAWS }, rows: { value: rows }, flatPitch: { value: T.IMPOSTOR_FLAT_PITCH } }]), atlas: { value: this.target.texture }, uLight: { value: 1 }, uLightTint: { value: new THREE.Color(1, 1, 1) }, ...retro.uniforms, uLampGain: { value: 1 } },
+      uniforms: { ...THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { cols: { value: COLS }, yaws: { value: YAWS }, rows: { value: rows }, flatPitch: { value: T.IMPOSTOR_FLAT_PITCH } }]), atlas: { value: this.target.texture }, uLight: { value: 1 }, uLightTint: { value: new THREE.Color(1, 1, 1) }, ...retro.uniforms, uLampGain: { value: 1 }, ...splatMaskUniforms() },
       vertexShader: /* glsl */ `
         attribute float aVariant;
         attribute float aYaw;
@@ -106,10 +107,12 @@ export class Impostors {
         varying float vFade;
         varying vec3 vCardWorld;
         ${LAMP_PARS}
+        ${SPLAT_MASK_PARS}
         uniform float uLampGain;
         #include <fog_pars_fragment>
         #include <logdepthbuf_pars_fragment>
         void main() {
+          splatDissolve(vCardWorld);
           #include <logdepthbuf_fragment>
           vec4 c = texture2D(atlas, vUv);
           // DITHER, not alpha blending. This material is alpha-TESTED and opaque -- see

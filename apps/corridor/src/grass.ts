@@ -30,6 +30,7 @@
 // ring cost anything, and no more than GRASS_TILES_PER_FRAME of them per frame.
 import * as THREE from 'three'
 import { LAMP_PARS, retro } from './retro'
+import { SPLAT_MASK_PARS, splatMaskUniforms } from './splatmask'
 import type { SeasonLook } from './season'
 import { GRASS_LOOK, type GrassType } from './groundcover'
 import { ACCUM_PARS, accumUniforms } from './weather'
@@ -269,6 +270,8 @@ export class Grass {
         // the car's lamps, shared BY REFERENCE with every other self-lighting shader (retro.ts)
         ...retro.uniforms,
         uLampGain: { value: 1 },
+        // the seam: where a capture has taken over, the blades dissolve away (splatmask.ts)
+        ...splatMaskUniforms(),
         uNightMul: { value: 1 },
         uLightTint: { value: new THREE.Color(1, 1, 1) },
         ...this.weatherUniforms,
@@ -373,8 +376,10 @@ export class Grass {
     return max(c * light, 0.0);
   }
         ${LAMP_PARS}
+        ${SPLAT_MASK_PARS}
         uniform float uLampGain;
         void main() {
+          splatDissolve(vWorld);
           #include <logdepthbuf_fragment>
           vec3 n = normalize(gl_FrontFacing ? vNormal : -vNormal);
           vec3 v = normalize(cameraPosition - vWorld);
@@ -439,6 +444,8 @@ export class Grass {
         // the car's lamps, shared BY REFERENCE with every other self-lighting shader (retro.ts)
         ...retro.uniforms,
         uLampGain: { value: 1 },
+        // the seam: where a capture has taken over, the blades dissolve away (splatmask.ts)
+        ...splatMaskUniforms(),
         uNightMul: { value: 1 },
         uLightTint: { value: new THREE.Color(1, 1, 1) },
         ...this.weatherUniforms,
@@ -516,8 +523,10 @@ export class Grass {
     return max(c * light, 0.0);
   }
         ${LAMP_PARS}
+        ${SPLAT_MASK_PARS}
         uniform float uLampGain;
         void main() {
+          splatDissolve(vCardWorld);
           #include <logdepthbuf_fragment>
           vec4 s = texture2D(uMap, vUv);
           if (s.a < 0.5) discard;

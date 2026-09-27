@@ -24,6 +24,7 @@ import { STYLE, styled, isStyle, type Style } from './style'
 import { setRelief, relief, clampRelief, spineDatum, reliefManifest } from './relief'
 import { WorldClock, sunPosition, sunVector } from './sun'
 import { SplatField, attachmentsFor } from './splats'
+import { rasteriseEnvelope, splatMaskUniforms } from './splatmask'
 import { Attribution } from './attribution'
 import { loadSiteTuning } from './sitetuning'
 import { WEATHER, WEATHERS, type Weather } from './weather'
@@ -61,6 +62,9 @@ let site: Site | null = null
 let minimap: MiniMap | null = null
 /** captured worlds attached to this site (splats.ts) */
 let splats: SplatField[] = []
+/** the seam: where a capture has taken over, as a texture the built world's shaders sample */
+const splatMask = splatMaskUniforms()
+let splatCover: { w: number; h: number; covered: number; segments: number } | null = null
 /** the credits line: two of the sources require it, the rest deserve it */
 const attribution = new Attribution(document.body)
 
@@ -223,6 +227,26 @@ async function loadSite(slug: string) {
      * re-picks the trees, so a probe comparing two frames would be measuring that instead */
     splatsVisible: (on: boolean) => { for (const f of splats) f.group.visible = on },
     splatWeight: (x: number, y: number, z?: number) => splats.reduce((w, f) => Math.max(w, f.weightAt(x, y, z)), 0),
+    /**
+     * The seam as the shaders see it: sample the coverage raster at a world point.
+     *
+     * Not `splatWeight`, which also asks whether the tile is resident — that is right for a point
+     * query and wrong as a description of what is being drawn, because the raster is geometric
+     * and does not move when a tile streams in or out.
+     */
+    splatSeamAt: (x: number, z: number) => {
+      const t = splatMask.uSplatMap.value as THREE.DataTexture | null
+      if (!t || !splatCover) return 0
+      const b = splatMask.uSplatBox.value
+      const u = (x - b.x) / Math.max(1e-3, b.z - b.x)
+      const v = (z - b.y) / Math.max(1e-3, b.w - b.y)
+      if (u < 0 || u > 1 || v < 0 || v > 1) return 0
+      const i = Math.min(splatCover.w - 1, Math.max(0, Math.floor(u * splatCover.w)))
+      const j = Math.min(splatCover.h - 1, Math.max(0, Math.floor(v * splatCover.h)))
+      return (t.image.data as Uint8Array)[j * splatCover.w + i] / 255
+    },
+    /** the rasterised seam: its size and how much of the site a capture covers */
+    splatCover: () => (splatCover ? { ...splatCover, cellM: T.SPLAT_MASK_CELL_M, fade: splatMask.uSplatFade.value } : null),
     /** what the canopy overhead is doing to the ambient light, and the numbers behind it */
     light: () => ({ canopyShade: +canopyShade.toFixed(3), baseAmbient: +baseAmbient.toFixed(3), baseEnv: +baseEnv.toFixed(3), foliage: +foliageFraction().toFixed(2), ambient: +ambient.intensity.toFixed(3), env: +scene.environmentIntensity.toFixed(3) }),
     THREE, // probes need Raycaster/Vector3 in the page, and there is no other handle on it
@@ -275,6 +299,36 @@ async function loadSite(slug: string) {
         splats.push(f)
         toast(`splats: ${att.id} attached`, 'ok', 2500)
       }
+    }
+    /*
+     * THE SEAM. Rasterise every attached capture's envelope into one coverage texture in site
+     * metres, and hand it to the built world so it can get out of the way.
+     *
+     * Once, here, rather than per frame: `weightAt` walks every segment of every capture pass --
+     * 7,703 of them on arrowhead-2026-09 -- which is fine a few times and impossible per fragment.
+     * The raster IS `weightAt`, sampled on a lattice, so what the shaders draw and what a probe
+     * measures cannot drift apart.
+     */
+    splatCover = null
+    if (splats.length && site) {
+      const b = manifest.bbox // site metres, (east, north)
+      const box = { x0: b[0], z0: -b[3], x1: b[2], z1: -b[1] }
+      const env = splats.map((f) => f.envelope())
+      const r = rasteriseEnvelope(
+        box,
+        Math.max(1, T.SPLAT_MASK_CELL_M),
+        env.flatMap((e) => e.passes),
+        Math.max(...env.map((e) => e.core)),
+        Math.max(...env.map((e) => e.fade)),
+      )
+      // the NUMBERS only: `r` carries the DataTexture, and a probe that prints this should not
+      // get six megabytes of pixel data back
+      splatCover = { w: r.w, h: r.h, covered: r.covered, segments: r.segments }
+      splatMask.uSplatMap.value = r.tex
+      splatMask.uSplatBox.value.copy(r.box)
+      const pct = (100 * r.covered) / (r.w * r.h)
+      console.log(`splats: seam ${r.w}x${r.h} at ${T.SPLAT_MASK_CELL_M} m from ${r.segments} pass segments, ${pct.toFixed(1)}% of the site inside a capture envelope`)
+      site.setSplatMask(splatMask)
     }
   }
   attribution.set(manifest)
@@ -1191,6 +1245,11 @@ function frame() {
     site.setWet(site.weather.wetness)
     // where the headlamps are pointing THIS frame, straight off the car's own spot lights, so the
     // retro cone and the visible beam cannot drift apart (retro.ts, car.lamps)
+    // how hard the built world yields to a capture: 0 leaves it alone, 1 hands the ground over
+    // ONLY where a seam was actually drawn. `splats.length` is not the test: a capture with no
+    // usable corridor.json attaches fine and rasterises to nothing, and dissolving the built world
+    // against an empty seam is how the site went dark (Rich, 2026-09-27).
+    splatMask.uSplatFade.value = splatCover && splatCover.covered > 0 ? T.SPLAT_WORLD_FADE : 0
     const lamps = drive.car?.lamps()
     retro.setLamps(lamps?.each ?? [], lamps?.on ?? 0)
     retro.tick()

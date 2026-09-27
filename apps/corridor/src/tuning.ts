@@ -384,6 +384,28 @@ export let HUD_ROAD_NAME = 1
 /** ground elevation and compass heading alongside the speed and surface */
 export let HUD_TELEMETRY = 1
 export let SPLAT_ENABLED = 1
+/**
+ * How hard the BUILT world yields where a capture has taken over. 0 draws both on top of each
+ * other; 1 hands the ground to the capture and dissolves the bake away across its edge.
+ */
+/*
+ * OFF BY DEFAULT until the seam has been proven on a real GPU.
+ *
+ * It broke Rich's site on 2026-09-27 and I could not reproduce it headlessly -- the machine was
+ * busy baking 112 km2 of lidar and the software rasteriser was crashing on load with the feature
+ * switched off entirely, so every measurement I took was of the bake, not of the seam. A feature
+ * I cannot currently measure does not get to be on by default. Turn it up in F6 -> environment ->
+ * captures and it does what it says; it is one uniform and needs no reload.
+ */
+export let SPLAT_WORLD_FADE = 0
+/**
+ * The seam raster's cell, metres.
+ *
+ * The envelope is a 25 m tube around a driven path with an 18 m fade on it, so 4 m resolves the
+ * fade to about a fifth of its width and the bilinear read smooths what is left. Changing it
+ * rebuilds the raster, which happens when a site loads.
+ */
+export let SPLAT_MASK_CELL_M = 4
 /** load a tile once it is this close to the eye, drop it beyond SPLAT_KEEP_M */
 export let SPLAT_LOAD_M = 400
 export let SPLAT_KEEP_M = 700
@@ -559,6 +581,18 @@ export const TUNE_TABS: TuneTab[] = [
   {
     name: 'environment',
     sections: [
+      {
+        title: 'captures (gaussian splats)',
+        collapsed: false,
+        keys: [
+          tune('SPLAT_ENABLED', () => SPLAT_ENABLED, (v) => (SPLAT_ENABLED = v), [0, 1], 1, 'draw the captured world at all'),
+          tune('SPLAT_WORLD_FADE', () => SPLAT_WORLD_FADE, (v) => (SPLAT_WORLD_FADE = v), [0, 1], 0.05, 'how hard the BUILT world dissolves where a capture takes over'),
+          tune('SPLAT_MASK_CELL_M', () => SPLAT_MASK_CELL_M, (v) => (SPLAT_MASK_CELL_M = v), [1, 20], 1, 'the seam raster\u2019s cell (m) \u2014 reload to rebuild'),
+          tune('SPLAT_LOAD_M', () => SPLAT_LOAD_M, (v) => (SPLAT_LOAD_M = v), [50, 2000], 25, 'load a tile once it is this close (m)'),
+          tune('SPLAT_KEEP_M', () => SPLAT_KEEP_M, (v) => (SPLAT_KEEP_M = v), [100, 4000], 25, 'drop it beyond this (m)'),
+          tune('SPLAT_BUDGET_MB', () => SPLAT_BUDGET_MB, (v) => (SPLAT_BUDGET_MB = v), [64, 2048], 32, 'megabytes of gaussians that may be resident'),
+        ],
+      },
       {
         title: 'weather',
         collapsed: false,

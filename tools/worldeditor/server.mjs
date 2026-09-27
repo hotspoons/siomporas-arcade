@@ -33,6 +33,7 @@ import { Store } from './store.mjs'
 import { zipRead, zipWrite } from './zip.mjs'
 import { Captures } from './captures.mjs'
 import { ModelResolver } from './models.mjs'
+import * as levels from './levels.mjs'
 import { Overpass, PUBLIC_MIRRORS } from './overpass.mjs'
 import { Tiles } from './tiles.mjs'
 import { Basemap } from './basemap.mjs'
@@ -693,6 +694,50 @@ async function api(req, res, seg, q) {
     return json(res, 200, { chapter: await captures.finishChapter(b.capture, seg[1]) })
   }
 
+  /*
+   * ---- levels --------------------------------------------------------------------------------
+   *
+   * A level names a baked world and dresses it: splats over it, assets in it, simulations running
+   * in it, and a scenario saying what you are meant to do. See levels.mjs for why the scenario is
+   * three declarative primitives and not a scripting language.
+   */
+  if (seg[0] === 'levels' && seg.length === 1) {
+    if (req.method === 'GET') return json(res, 200, { levels: await store.listLevels(), facts: levels.FACTS, actions: levels.ACTIONS, modes: levels.MODES })
+    if (req.method === 'POST') {
+      const body = levels.withDefaults(await readJson(req))
+      const v = levels.validate(body)
+      // the world has to be a world: levels.mjs has no filesystem on purpose, so this is here
+      const baked = await store.bakedSlugs()
+      if (v.ok && !baked.has(body.world)) v.errors.push(`world "${body.world}" is not baked on this volume — have ${[...baked.keys()].slice(0, 6).join(', ') || 'none'}`)
+      if (v.errors.length) return json(res, 400, { error: 'this level does not validate', ...v, ok: false })
+      if (await store.getLevel(body.id)) return json(res, 409, { error: `level ${body.id} already exists` })
+      return json(res, 201, { level: await store.putLevel(body), warnings: v.warnings })
+    }
+  }
+  /* validate without saving: what the in-app agent calls before it writes anything. ABOVE the
+     /levels/<id> routes, so "validate" can never be read as the name of a level. */
+  if (seg[0] === 'levels' && seg[1] === 'validate' && req.method === 'POST') {
+    return json(res, 200, levels.validate(levels.withDefaults(await readJson(req))))
+  }
+  if (seg[0] === 'levels' && seg.length === 2) {
+    const id = seg[1]
+    if (req.method === 'GET') {
+      const l = await store.getLevel(id)
+      return l ? json(res, 200, { level: l, ...levels.validate(l) }) : json(res, 404, { error: `no level ${id}` })
+    }
+    if (req.method === 'PUT') {
+      const prev = await store.getLevel(id)
+      if (!prev) return json(res, 404, { error: `no level ${id}` })
+      const body = levels.withDefaults({ ...prev, ...(await readJson(req)), id })
+      const v = levels.validate(body)
+      if (v.errors.length) return json(res, 400, { error: 'this level does not validate', ...v, ok: false })
+      return json(res, 200, { level: await store.putLevel(body), warnings: v.warnings })
+    }
+    if (req.method === 'DELETE') {
+      await store.removeLevel(id)
+      return json(res, 200, { deleted: id })
+    }
+  }
   /* ---- worlds ---- */
   if (seg[0] === 'worlds' && seg.length === 1) {
     if (req.method === 'GET') {

@@ -42,12 +42,13 @@ export class Store {
     this.worlds = path.join(this.root, 'worlds')
     this.places = path.join(this.root, 'places')
     this.runs = path.join(this.root, 'runs')
+    this.levels = path.join(this.root, 'levels')
     this.overpassCache = path.join(this.root, 'cache', 'overpass')
     this.assets = path.join(this.root, 'assets')
   }
 
   async init() {
-    for (const d of [this.sites, this.worlds, this.places, this.runs, this.overpassCache, this.assets]) await mkdir(d, { recursive: true })
+    for (const d of [this.sites, this.worlds, this.places, this.runs, this.levels, this.overpassCache, this.assets]) await mkdir(d, { recursive: true })
   }
 
   /** Write through a temp file in the same directory, so a reader never sees a half-written JSON. */
@@ -256,6 +257,31 @@ export class Store {
     const f = path.resolve(root, rel)
     if (f !== root && !f.startsWith(root + path.sep)) return null
     return f
+  }
+
+  /* ---- levels: a world, dressed and given something to do ---------------------------------- */
+
+  async listLevels() {
+    const out = []
+    for (const f of await readdir(this.levels).catch(() => [])) {
+      if (!f.endsWith('.json')) continue
+      const l = await this.readJson(path.join(this.levels, f))
+      if (l) out.push(l)
+    }
+    return out.sort((a, b) => (a.id < b.id ? -1 : 1))
+  }
+
+  getLevel(id) {
+    return this.readJson(path.join(this.levels, `${id}.json`))
+  }
+
+  async putLevel(level) {
+    await this.writeAtomic(path.join(this.levels, `${level.id}.json`), Buffer.from(JSON.stringify(level, null, 1)))
+    return level
+  }
+
+  removeLevel(id) {
+    return rm(path.join(this.levels, `${id}.json`), { force: true })
   }
 
   /* ---- the place index --------------------------------------------------------------------- */

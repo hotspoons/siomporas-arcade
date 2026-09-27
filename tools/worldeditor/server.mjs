@@ -32,6 +32,7 @@ import { fileURLToPath } from 'node:url'
 import { Store } from './store.mjs'
 import { zipRead, zipWrite } from './zip.mjs'
 import { Captures } from './captures.mjs'
+import { ModelResolver } from './models.mjs'
 import { Overpass, PUBLIC_MIRRORS } from './overpass.mjs'
 import { Tiles } from './tiles.mjs'
 import { Basemap } from './basemap.mjs'
@@ -135,6 +136,10 @@ const geocoder = new Geocoder(store, {
   minIntervalMs: Number(env.WORLDEDITOR_NOMINATIM_INTERVAL ?? 1100),
 })
 const k8s = new K8s(env)
+// where flux, TRELLIS and qwen are TODAY: discovered through the cluster, never hard-coded
+// (models.mjs). Declared HERE and not beside the other services, because it takes `k8s` and a
+// const used above its own declaration throws on the first request rather than at startup.
+const models = new ModelResolver(k8s, env)
 const runs = new Runs(store, k8s, {
   force: env.WORLDEDITOR_RUNNER ?? null,
   image: env.WORLDEDITOR_BAKE_IMAGE ?? 'ghcr.io/hotspoons/corridor:latest',
@@ -362,6 +367,10 @@ const server = http.createServer(async (req, res) => {
 async function api(req, res, seg, q) {
   /* ---- liveness, readiness, what this is pointed at ---- */
   if (seg[0] === 'health') return json(res, 200, { ok: true, data: store.root })
+  /* which inference is reachable from this pod, and how it was found. `?live=1` asks each one. */
+  if (seg[0] === 'models' && req.method === 'GET') {
+    return json(res, 200, { models: await models.describe({ live: q.get('live') === '1' }) })
+  }
   if (seg[0] === 'ready') {
     // Readiness reports; it does NOT gate. If Overpass is down this can still serve baked sites,
     // save authored files and watch a run, and taking the pod out of the Service for that would

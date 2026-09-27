@@ -74,6 +74,22 @@ export class K8s {
     })
   }
 
+  /** Is there an API server and a token to talk to it with? */
+  usable() {
+    return !!this.available
+  }
+
+  /**
+   * A GET (or anything) against an arbitrary API path.
+   *
+   * Discovery needs this: the model resolver reads InferenceDeployments and Services, and neither
+   * is a Job. It is deliberately thin -- no retries, no shaping -- because everything it is for
+   * treats a failure as "that API is not here", which is an answer rather than an error.
+   */
+  raw(method, apiPath, opts) {
+    return this.#request(method, apiPath, opts)
+  }
+
   /** Can this service actually do what it claims? Reported by /ready, so a failure is visible. */
   async permitted() {
     if (!this.available) return { ok: false, detail: 'not running in a cluster' }

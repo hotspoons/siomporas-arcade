@@ -28,6 +28,15 @@ rules:
   - apiGroups: [""]
     resources: ["pods/log"]
     verbs: ["get"]
+  # Model discovery (models.mjs): which inference deployments are Ready, and what Services they
+  # brought up. READ ONLY, and list/get only -- the editor never changes a model deployment, it
+  # only needs to find out where flux is today rather than carry a hostname in a file.
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list"]
+  - apiGroups: ["inferencedeployments.richard-siomporas.patapsco.ai"]
+    resources: ["inferencedeployments"]
+    verbs: ["get", "list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

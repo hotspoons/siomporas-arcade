@@ -110,7 +110,7 @@ export class FlyControls {
       if (yaw) this.lookBy(yaw * (sprint ? 2.1 : 1.2) * d, 0)
       const off = ctl.target.clone().sub(cam.position)
       const heading = Math.atan2(off.x, off.z)
-      const step = (sprint ? 6.5 : 3.2) * d
+      const step = T.WALK_SPEED * (sprint ? T.WALK_SPRINT_X : 1) * d
       const mx = (Math.sin(heading) * fwd + Math.cos(heading) * strafe) * step
       const mz = (Math.cos(heading) * fwd - Math.sin(heading) * strafe) * step
       cam.position.x += mx
@@ -126,19 +126,25 @@ export class FlyControls {
     }
     const zoom = Number(k.has('KeyF')) - Number(k.has('KeyR'))
     const lift = Number(k.has('KeyT')) - Number(k.has('KeyG'))
-    if (yaw) this.lookBy(yaw * (sprint ? 2.1 : 1.2) * d, 0)
+    if (yaw) this.lookBy(yaw * T.FLY_LOOK * (sprint ? T.FLY_SPRINT_X : 1) * d, 0)
     if (zoom) {
-      const f = Math.exp(zoom * (sprint ? 1.6 : 0.9) * d)
+      const f = Math.exp(zoom * T.FLY_ZOOM * (sprint ? T.FLY_SPRINT_X : 1) * d)
       cam.position.sub(ctl.target).multiplyScalar(f).add(ctl.target)
     }
     if (lift) {
       const dist = cam.position.distanceTo(ctl.target)
-      cam.position.y += lift * Math.max(dist, 60) * (sprint ? 1.4 : 0.6) * d
+      cam.position.y += lift * Math.max(dist, T.FLY_LIFT_FLOOR_M) * T.FLY_LIFT * (sprint ? T.FLY_SPRINT_X : 1) * d
     }
     let nx = ctl.target.x, nz = ctl.target.z
     if (fwd || strafe) {
       const dist = cam.position.distanceTo(ctl.target)
-      const step = Math.max(dist, 40) * (sprint ? 2.4 : 0.8) * d
+      // THE FLOOR IS WHAT MAKES IT FEEL FAST. Speed scales with how far the camera is from its
+      // target — right, because a view from 2 km wants to cross 2 km — but the floor means that
+      // down at street level it still moves at FLY_SPEED_FLOOR_M × FLY_SPEED metres a second
+      // whatever the zoom says. At the old fixed 40 m that was 32 m/s, or 72 mph, a foot off the
+      // kerb (Rich, 2026-09-27: "right now it feels too fast"). Lower the floor to slow down
+      // near the ground without making a high pass sluggish.
+      const step = Math.max(dist, T.FLY_SPEED_FLOOR_M) * T.FLY_SPEED * (sprint ? T.FLY_SPRINT_X : 1) * d
       const heading = Math.atan2(cam.position.x - ctl.target.x, cam.position.z - ctl.target.z)
       nx += (-Math.sin(heading) * fwd + Math.cos(heading) * strafe) * step
       nz += (-Math.cos(heading) * fwd - Math.sin(heading) * strafe) * step

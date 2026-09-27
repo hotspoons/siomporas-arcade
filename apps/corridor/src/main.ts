@@ -365,6 +365,15 @@ async function loadSite(slug: string) {
     // only writes camera.position gets dragged back; set orbit.target too, as applyStance does
     orbit,
     drive,
+    /**
+     * The free camera, so a probe can step it by a known dt.
+     *
+     * Driving it through the real frame loop measures the RENDERER: under swiftshader the loop
+     * stalls for seconds while tiles stream, and a "hold W for 1.2 s" probe read 138 m on its
+     * first pass and 0 m on the next two. Speed is metres per second of simulation, and this is
+     * how you ask for exactly that.
+     */
+    get fly() { return fly },
     /** the car itself, so a probe can check what the HUD claims against what the car is doing */
     get car() { return drive.car },
     /**

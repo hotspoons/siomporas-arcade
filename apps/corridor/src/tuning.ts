@@ -246,6 +246,41 @@ export let ENGINE_MUFFLE_HZ = 900
  */
 export let ENGINE_HRTF = 0
 
+/*
+ * THE FREE CAMERA. Rich, 2026-09-27: "can we make flying speed adjustable? Right now it feels too
+ * fast, I'd like to be able to crank it down in the tuning panel."
+ *
+ * Flying speed is not one number, and the one people reach for first is not the one that matters.
+ * The camera moves at `max(distanceToTarget, FLY_SPEED_FLOOR_M) × FLY_SPEED` metres a second: the
+ * distance term is what lets a view from two kilometres up cross two kilometres, and the FLOOR is
+ * what governs how it feels down at street level. At the floor's old fixed 40 m it was 32 m/s —
+ * 72 mph — a foot off the kerb. Turn FLY_SPEED_FLOOR_M down to walk-ish, or FLY_SPEED down to
+ * scale everything at once.
+ */
+/** Metres per second per metre of camera-to-target distance. The overall pace. */
+export let FLY_SPEED = 0.8
+/**
+ * Below this distance the scaling stops, so this sets the speed near the ground.
+ *
+ * WAS 40, WHICH IS WHY IT FELT TOO FAST: 40 x 0.8 = 32 m/s, or 72 mph, a metre off the kerb
+ * whatever the zoom said. At 12 it is 9.6 m/s near the ground and — measured, not assumed — it
+ * changes nothing at all above 12 m, because the floor only binds when the camera is closer in
+ * than this (probes/corridor-flyspeed.mjs asserts both halves).
+ */
+export let FLY_SPEED_FLOOR_M = 12
+/** What Shift multiplies movement, lift, zoom and Q/E look by. */
+export let FLY_SPRINT_X = 3
+/** T/G, as a fraction of distance per second, with its own floor. */
+export let FLY_LIFT = 0.6
+export let FLY_LIFT_FLOOR_M = 60
+/** R/F dolly, exponential: e^(FLY_ZOOM·dt) per second. */
+export let FLY_ZOOM = 0.9
+/** Q/E yaw about the camera, radians per second. */
+export let FLY_LOOK = 1.2
+/** On foot (B): metres per second, and what Shift does to it. */
+export let WALK_SPEED = 3.2
+export let WALK_SPRINT_X = 2
+
 /** Gearbox. Ratios are first through sixth; a ratio of 0 takes that gear out of the box. */
 export let ENGINE_GEAR_1 = 3.9
 export let ENGINE_GEAR_2 = 2.35
@@ -1155,6 +1190,20 @@ export const TUNE_TABS: TuneTab[] = [
   {
     name: 'view',
     sections: [
+      {
+        title: 'flying and walking (the free camera)',
+        keys: [
+          tune('FLY_SPEED', () => FLY_SPEED, (v) => (FLY_SPEED = v), [0.05, 3], 0.05, 'overall pace: m/s per metre of camera-to-target distance'),
+          tune('FLY_SPEED_FLOOR_M', () => FLY_SPEED_FLOOR_M, (v) => (FLY_SPEED_FLOOR_M = v), [1, 200], 1, 'THE ONE FOR "too fast": speed near the ground stops scaling below this'),
+          tune('FLY_SPRINT_X', () => FLY_SPRINT_X, (v) => (FLY_SPRINT_X = v), [1, 10], 0.1, 'what Shift multiplies everything by'),
+          tune('FLY_LIFT', () => FLY_LIFT, (v) => (FLY_LIFT = v), [0, 3], 0.05, 'T/G rise and fall'),
+          tune('FLY_LIFT_FLOOR_M', () => FLY_LIFT_FLOOR_M, (v) => (FLY_LIFT_FLOOR_M = v), [1, 300], 1),
+          tune('FLY_ZOOM', () => FLY_ZOOM, (v) => (FLY_ZOOM = v), [0.05, 4], 0.05, 'R/F dolly, exponential'),
+          tune('FLY_LOOK', () => FLY_LOOK, (v) => (FLY_LOOK = v), [0.1, 5], 0.05, 'Q/E yaw, rad/s'),
+          tune('WALK_SPEED', () => WALK_SPEED, (v) => (WALK_SPEED = v), [0.5, 12], 0.1, 'on foot (B), m/s — 3.2 is a brisk walk'),
+          tune('WALK_SPRINT_X', () => WALK_SPRINT_X, (v) => (WALK_SPRINT_X = v), [1, 5], 0.1),
+        ],
+      },
       {
         title: 'chase',
         keys: [

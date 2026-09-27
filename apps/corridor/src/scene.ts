@@ -116,6 +116,12 @@ export interface Site {
   edgeInfo: (x: number, z: number, exclude?: number, roadsOnly?: boolean) => { d: number; who: number; y: number; s: number; gx: number; gz: number }
   /** kept (trimmed lawn) or rural (mown shoulder, tall grass) at world (x, z), from landuse then road class — see zoning.ts */
   zoneAt: (x: number, z: number) => 'kept' | 'rural' | null
+  /**
+   * WHICH ROAD IS THIS. The name, ref and class of the carriageway nearest a world point, from the
+   * same station grid the car already stands on — so what the HUD says you are driving on is the
+   * road the physics thinks you are on, not a second opinion.
+   */
+  roadAt: (x: number, z: number) => { name: string | null; ref: string | null; highway: string | null; d: number } | null
   /** how many junctions had an inferior road re-graded to meet the superior one, and the largest step closed (m) */
   junctionMeet: { junctions: number; warped: number; maxStep: number; noTarget: number }
   /** the vegetation mask: tile photos classified so far, of those with a photo */
@@ -1061,6 +1067,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
   // the grass generator's road-distance answer, lifted out of the strip block for the Site's probes
   let grassRoadDistanceOut: (x: number, z: number) => number = () => Infinity
   let zoneAtOut: (x: number, z: number) => 'kept' | 'rural' | null = () => null
+  let roadAtOut: (x: number, z: number) => { name: string | null; ref: string | null; highway: string | null; d: number } | null = () => null
   let edgeInfoOut: (x: number, z: number, exclude?: number, roadsOnly?: boolean) => { d: number; who: number; y: number; s: number; gx: number; gz: number } = () => ({ d: Infinity, who: -1, y: 0, s: 0, gx: 0, gz: 0 })
   let edgeDistanceWorld: (x: number, z: number) => number = () => Infinity
   /** the road surface under a point near a carriageway: the spline's height, which the asphalt is built from */
@@ -1639,6 +1646,19 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
       return zoneOfRoad(hw)
     }
     zoneAtOut = zoneAtWorld
+    roadAtOut = (x, z) => {
+      const e = edgeDistance(x, z, -1, true) // carriageways only: a driveway has no name
+      if (!Number.isFinite(e.d) || e.d > 40) return null
+      if (e.who === 0) {
+        const seg = segAt(e.s)
+        return { name: seg?.tags?.name ?? null, ref: (seg?.tags as { ref?: string } | undefined)?.ref ?? null, highway: seg?.tags?.highway ?? null, d: e.d }
+      }
+      // branchAts, not manifest.branches: the viewer skips branches under a metre, so the two
+      // lists are not index-aligned and `who` counts the ones that were actually built
+      const b = branchAts[e.who - branchWho0]
+      if (b) return { name: b.name === 'branch' ? null : b.name, ref: null, highway: b.highway, d: e.d }
+      return null
+    }
     const grass = new Grass(groundNear, canopyAt, grassRoadDistance, 0, look(currentSeason), lite ? 90_000 : 400_000, lite ? 26 : 40, fog, adjustments.active ? (x, y) => { const a = adjustments.at(x, y, grassAdj); return a.cover === 'crop' ? [1, 0] : [a.grass_height, a.grass_density] } : undefined, undefined, heightAt, zoneAtWorld, (x, z) => { const e = edgeDistance(x, z); return [e.gx, e.gz] })
     // NOT a child of `trees`. It was, and so the trees checkbox turned off all ground cover with
     // them — you could not hide the trees to look at the grass, which is most of what looking at
@@ -2204,6 +2224,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     grassRoadDistance: (x, z) => grassRoadDistanceOut(x, z),
     edgeInfo: (x, z, exclude, roadsOnly) => edgeInfoOut(x, z, exclude, roadsOnly),
     zoneAt: (x, z) => zoneAtOut(x, z),
+    roadAt: (x, z) => roadAtOut(x, z),
     junctionMeet,
     vegCover: () => ({ loaded: veg?.loaded ?? 0, total: veg?.total ?? 0, inFlight: veg?.inFlightCount ?? 0, failed: veg?.failedCount ?? 0, lastMs: veg?.lastMs ?? null }),
     treesNear: treesNearWorld,

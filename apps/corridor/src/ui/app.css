@@ -188,6 +188,29 @@ body.chrome-off .drivepad { display: none; }
 /* close where a person looks for it: the top right of the screen */
 #minimap.expanded .mm-expand { top: calc(var(--bar-h, 48px) + var(--s3)); right: var(--s5); bottom: auto; opacity: 1; }
 
+/* ---- attribution ------------------------------------------------------------------------------
+   Two of these are licence conditions (OSM's ODbL, Macrostrat's CC-BY), so the line is always on
+   screen; it is small because it is a credit, and it opens into the full list when clicked. It
+   sits bottom-left, out of the minimap's corner. */
+#attribution {
+  position: fixed; left: var(--s2); bottom: var(--s2); z-index: var(--z-hud);
+  font-size: 10px; line-height: 1.5; color: var(--ink-3);
+  max-width: min(46vw, 420px);
+}
+#attribution .attrib-short {
+  font: inherit; color: inherit; background: var(--hud-bg); border: 1px solid var(--hud-line);
+  border-radius: var(--r1); padding: 1px 6px; cursor: pointer; opacity: 0.75;
+}
+#attribution .attrib-short:hover { opacity: 1; color: var(--ink-1); }
+#attribution .attrib-list {
+  display: grid; gap: 2px; margin-bottom: var(--s1);
+  padding: var(--s2); border-radius: var(--r2);
+  background: var(--hud-bg); border: 1px solid var(--hud-line);
+}
+#attribution .attrib-row { color: var(--ink-2); text-decoration: none; }
+#attribution .attrib-row:hover { color: var(--accent); text-decoration: underline; }
+body.chrome-off #attribution { display: none; }
+
 /* ---- Squishy Hunt --------------------------------------------------------------------------
    The game's one panel: the score, the hint, an arrow that points at the next squishy relative
    to where you are looking. Under the top bar on the left, where the eye goes for a message. */

@@ -18,6 +18,8 @@ import { LOOK, SEASONS, type Season } from './season'
 import { STYLE, styled, isStyle, type Style } from './style'
 import { setRelief, relief, clampRelief, spineDatum, reliefManifest } from './relief'
 import { WorldClock, sunPosition, sunVector } from './sun'
+import { SplatField, attachmentsFor } from './splats'
+import { Attribution } from './attribution'
 import { loadSiteTuning } from './sitetuning'
 import { WEATHER, WEATHERS, type Weather } from './weather'
 import { ViewerUI, restoreTheme } from './ui/viewer'
@@ -52,6 +54,10 @@ scene.add(skyDome.mesh)
 
 let site: Site | null = null
 let minimap: MiniMap | null = null
+/** captured worlds attached to this site (splats.ts) */
+let splats: SplatField[] = []
+/** the credits line: two of the sources require it, the rest deserve it */
+const attribution = new Attribution(document.body)
 
 // The interface. Built before anything else touches a tunable, because TuneUI's constructor
 // restores this browser's saved knobs and everything downstream reads them as its starting value.
@@ -167,6 +173,11 @@ async function loadSite(slug: string) {
     orbit,
     drive,
     tuneDialog: tuneUI.dialog, // probes drive the panel's dock/float through this
+    splats: () => splats.map((f) => f.counts()),
+    /** show/hide the captured world WITHOUT a retune — a knob change re-seeds the grass and
+     * re-picks the trees, so a probe comparing two frames would be measuring that instead */
+    splatsVisible: (on: boolean) => { for (const f of splats) f.group.visible = on },
+    splatWeight: (x: number, y: number, z?: number) => splats.reduce((w, f) => Math.max(w, f.weightAt(x, y, z)), 0),
     /** what the canopy overhead is doing to the ambient light, and the numbers behind it */
     light: () => ({ canopyShade: +canopyShade.toFixed(3), baseAmbient: +baseAmbient.toFixed(3), baseEnv: +baseEnv.toFixed(3), foliage: +foliageFraction().toFixed(2), ambient: +ambient.intensity.toFixed(3), env: +scene.environmentIntensity.toFixed(3) }),
     THREE, // probes need Raycaster/Vector3 in the page, and there is no other handle on it
@@ -205,6 +216,23 @@ async function loadSite(slug: string) {
   endParkour()
   if (wantGame === 'squishy') startSquishy()
   if (wantGame === 'parkour') startParkour()
+  // the captured world, if this site has one attached (or ?splats=<world> named one). It is a
+  // skin over the bake, never the ground: see docs/corridor/PLAN-SPLAT-CORRIDORS.md.
+  for (const f of splats) f.dispose()
+  splats = []
+  {
+    const anchor = manifest.frame?.anchor
+    if (anchor) {
+      for (const att of await attachmentsFor(slug)) {
+        const f = await SplatField.attach(att, anchor, renderer)
+        if (!f) continue
+        scene.add(f.group)
+        splats.push(f)
+        toast(`splats: ${att.id} attached`, 'ok', 2500)
+      }
+    }
+  }
+  attribution.set(manifest)
   minimap = new MiniMap(document.body, manifest)
   const st = readStanceParam()
   const resume = st && st.site === slug ? null : readResume(slug)
@@ -1021,7 +1049,11 @@ function frame() {
       camera.lookAt(car.pos.clone().add(car.forward.clone().multiplyScalar(T.CHASE_LOOK_AHEAD)).add(new THREE.Vector3(0, 1.0, 0)))
     }
     if (car.event === 'bump') status('bump')
-    ui.setPos(`${(Math.abs(car.speed) * 2.237).toFixed(0)} mph · ${car.onGrass ? 'grass' : 'pavement'}${Math.abs(car.slide) > 1 ? ' · sliding' : ''}`)
+    // what road is this? The name comes from the same station grid the car stands on, so the
+    // readout and the physics can never disagree about which road you are on (Rich, 2026-09-26).
+    const on = T.HUD_ROAD_NAME > 0 ? site.roadAt(car.pos.x, car.pos.z) : null
+    const road = on ? (on.ref && on.name ? `${on.name} (${on.ref})` : on.name ?? on.ref ?? null) : null
+    ui.setPos(`${(Math.abs(car.speed) * 2.237).toFixed(0)} mph · ${car.onGrass ? 'grass' : 'pavement'}${Math.abs(car.slide) > 1 ? ' · sliding' : ''}${road ? ` · ${road}` : ''}`)
   } else if (parkour) {
     parkour.tick(dt)
     ui.setPos(`${parkour.score} pts`)
@@ -1046,6 +1078,8 @@ function frame() {
     const fwd = camera.getWorldDirection(viewDir)
     const pitch = Math.max(0, -Math.asin(THREE.MathUtils.clamp(fwd.y, -1, 1))) // 0 level, +down
     site.updateNear(camera.position, clock.elapsedTime, fwd, pitch)
+    // splat tiles stream by locality like the imagery; site frame is x east, y north = -z
+    for (const f of splats) f.update(camera.position.x, -camera.position.z)
     // the world looks wet while it is wet: the weather ramps it, the surfaces follow
     site.setWet(site.weather.wetness)
     // the player is the car when driving, the eye on foot or in the air; heading is compass from north

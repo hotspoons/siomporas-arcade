@@ -320,6 +320,16 @@ export let CANOPY_SHADE = 0.75
 /** headlights while driving: intensity, and how far down the road they reach (m) */
 export let HEADLIGHT = 1
 export let HEADLIGHT_RANGE = 70
+// --- splat corridors (splats.ts, docs/corridor/PLAN-SPLAT-CORRIDORS.md) -----------------------
+/** 0 turns the captured world off entirely and leaves the built one */
+/** show the name of the road you are on while driving; 0 hides it */
+export let HUD_ROAD_NAME = 1
+export let SPLAT_ENABLED = 1
+/** load a tile once it is this close to the eye, drop it beyond SPLAT_KEEP_M */
+export let SPLAT_LOAD_M = 400
+export let SPLAT_KEEP_M = 700
+/** how many megabytes of gaussians may be resident */
+export let SPLAT_BUDGET_MB = 512
 export let WATER_LEVEL_M = 0
 export let WATER_LEVEL_SPAN = 30000
 
@@ -840,6 +850,18 @@ export const TUNE_TABS: TuneTab[] = [
       },
     ],
   },
+  {
+    name: 'HUD',
+    sections: [
+      {
+        title: 'what the readout says',
+        keys: [
+          tune('HUD_ROAD_NAME', () => HUD_ROAD_NAME, (v) => (HUD_ROAD_NAME = v), [0, 1], 1, 'show the name of the road you are on while driving'),
+        ],
+      },
+    ],
+  },
+
   {
     name: 'camera',
     sections: [

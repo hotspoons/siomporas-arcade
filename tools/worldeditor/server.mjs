@@ -31,6 +31,7 @@ import { fileURLToPath } from 'node:url'
 
 import { Store } from './store.mjs'
 import { zipRead, zipWrite } from './zip.mjs'
+import { Captures } from './captures.mjs'
 import { Overpass, PUBLIC_MIRRORS } from './overpass.mjs'
 import { Tiles } from './tiles.mjs'
 import { Basemap } from './basemap.mjs'
@@ -80,6 +81,8 @@ const ASSETSVC = (env.WORLDEDITOR_ASSETSVC ?? '').replace(/\/$/, '')
 const MAX_SPAN_LAT = 0.25
 const MAX_SPAN_LON = 0.35
 
+const captures = new Captures(DATA)
+await captures.init()
 const store = new Store(DATA)
 store.catalogSeed = path.join(REPO, 'apps/corridor/public/assets/catalog.json')
 await store.init()
@@ -625,6 +628,60 @@ async function api(req, res, seg, q) {
       bytes += e.data.length
     }
     return json(res, 200, { imported: slug, files: entries.length, bytes })
+  }
+
+  /*
+   * ---- captures: footage in, splat world out ------------------------------------------------
+   *
+   * Rich, 2026-09-27: "upload one or more video chapters from one or more cameras and then have
+   * that be fed to the big job that kicks off."
+   *
+   * The upload is resumable and streams to disk; see captures.mjs for the protocol and why it is
+   * not the archive path. Nothing here holds a chapter in memory, so the body limit that guards
+   * every other route deliberately does not apply.
+   */
+  if (seg[0] === 'captures' && seg.length === 1) {
+    if (req.method === 'GET') return json(res, 200, { captures: await captures.list() })
+    if (req.method === 'POST') {
+      const b = await readJson(req)
+      return json(res, 201, { capture: await captures.create({ id: b.id, world: b.world ?? null, note: b.note ?? '', rig: b.rig ?? null }) })
+    }
+  }
+  if (seg[0] === 'captures' && seg.length === 2 && req.method === 'GET') {
+    const c = await captures.get(seg[1])
+    return c ? json(res, 200, { capture: c, manifest: await captures.manifest(seg[1]) }) : json(res, 404, { error: `no capture ${seg[1]}` })
+  }
+  if (seg[0] === 'captures' && seg.length === 2 && req.method === 'PATCH') {
+    const c = await captures.get(seg[1])
+    if (!c) return json(res, 404, { error: `no capture ${seg[1]}` })
+    const b = await readJson(req)
+    // the world it belongs to, the rig it was shot on, a note: the chapters are not editable here
+    return json(res, 200, { capture: await captures.put({ ...c, ...(b.world !== undefined ? { world: b.world } : {}), ...(b.note !== undefined ? { note: b.note } : {}), ...(b.rig !== undefined ? { rig: b.rig } : {}) }) })
+  }
+  if (seg[0] === 'captures' && seg[2] === 'chapters' && req.method === 'POST') {
+    return json(res, 200, await captures.beginChapter(seg[1], await readJson(req)))
+  }
+  if (seg[0] === 'captures' && seg[2] === 'chapters' && req.method === 'DELETE') {
+    return json(res, 200, { removed: await captures.removeChapter(seg[1], q.get('camera'), q.get('name')) })
+  }
+  if (seg[0] === 'uploads' && seg.length === 2 && req.method === 'GET') {
+    const st = await captures.uploadState(seg[1])
+    return st ? json(res, 200, st) : json(res, 400, { error: 'not a usable upload id' })
+  }
+  if (seg[0] === 'uploads' && seg.length === 2 && req.method === 'PUT') {
+    // Content-Range: bytes <start>-<end>/<total>, or ?offset= for a client that cannot set headers
+    const cr = /bytes\s+(\d+)-/.exec(req.headers['content-range'] ?? '')
+    const offset = cr ? Number(cr[1]) : Number(q.get('offset') ?? NaN)
+    try {
+      return json(res, 200, await captures.append(seg[1], offset, req))
+    } catch (e) {
+      // the offset travels with the refusal, so a confused client can simply continue
+      return json(res, e.status ?? 500, { error: e.message, offset: e.offset })
+    }
+  }
+  if (seg[0] === 'uploads' && seg[2] === 'done' && req.method === 'POST') {
+    const b = await readJson(req)
+    return json(res, 200, { chapter: await captures.finishChapter(b.capture, seg[1]) })
   }
 
   /* ---- worlds ---- */

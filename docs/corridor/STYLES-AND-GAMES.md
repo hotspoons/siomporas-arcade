@@ -167,3 +167,16 @@ Measured after (`probes/corridor-treedensity.mjs`, trees per CANOPY km², which 
 number): 27,519 crownsville / 27,053 crofton-triangle / 27,318 arrowhead; implied cell
 6.0 / 6.1 / 6.1 m. A replant costs ~200 ms under swiftshader and is the next thing to chunk
 through the grading pump if it is felt on a real GPU.
+
+## Two more, and the system under both (2026-09-27)
+
+Rich's tractor beam (lift the car doing 38 in a no-passing zone over your roof and set it down
+behind you) and the Carmageddon-style rage simulator (stuck on Route 3, fire missiles, discover
+that wreckage jams the road worse than traffic did) are written up in
+[PLAN-TRAFFIC-AND-RAGE.md](PLAN-TRAFFIC-AND-RAGE.md).
+
+The short version: both are thin layers over **traffic that behaves like traffic**, and the bake
+already carries what that needs — 408 junctions on crofton-triangle with per-approach stop lines,
+lane counts, priority and signal phases. IDM plus MOBIL plus the baked phases gives stop-and-go
+waves as an emergent property rather than a scripted effect, and every other mode in this engine
+gets better the moment the roads have cars on them.

@@ -93,6 +93,17 @@ export class Catalog {
       notes: spec.notes ?? before.notes ?? '',
       tags: spec.tags ?? before.tags ?? [],
       chosen: spec.chosen ?? before.chosen ?? null,
+      /*
+       * THE SEED IS PART OF THE ASSET, not a detail of the run that made it.
+       *
+       * Two generations from one prompt are two different cars. So the seed that produced the
+       * view a human accepted is the only thing that makes the asset reproducible — regenerate
+       * without it and you get a different car with the same name, which is worse than no asset
+       * because nothing says so. Pinned here when a view is chosen.
+       */
+      seed: spec.seed ?? before.seed ?? null,
+      /** the roster entry this came from, when it came from one */
+      spec: spec.spec ?? before.spec ?? null,
       updated: new Date().toISOString(),
       history: before.history ?? [],
     }

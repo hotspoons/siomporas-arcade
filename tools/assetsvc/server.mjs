@@ -31,6 +31,7 @@ import { buildRegistry } from './adapters.mjs'
 import { Catalog } from './catalog.mjs'
 import { Jobs } from './jobs.mjs'
 import { S3 } from './s3.mjs'
+import { recipeFor, roster } from './specs.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const REPO = path.resolve(HERE, '../..')
@@ -199,6 +200,62 @@ const server = http.createServer(async (req, res) => {
       const d = registry.describe()
       const checks = await Promise.all([...registry.models.values()].map(async (m) => [m.id, await m.available()]))
       return json(res, 200, { ...d, reachable: Object.fromEntries(checks), s3: s3.describe() })
+    }
+
+    /*
+     * ---- the roster, and drawing from it ------------------------------------------------------
+     *
+     * The recipe lives in tools/assetlib and this calls it (specs.mjs). What the editor needs on
+     * top is the asymmetry made visible: an image is ten seconds and a mesh is thirty to forty on
+     * one serialised GPU, so you draw SEVERAL and a human picks one, and only then is a GPU spent
+     * on geometry. Pick from pictures, commit to meshes.
+     */
+    if (seg[0] === 'specs' && seg.length === 1) {
+      const r = await roster({ refresh: url.searchParams.get('refresh') === '1' })
+      const byClass = {}
+      for (const s of r.byId.values()) (byClass[s.class ?? 'unclassified'] ??= []).push({ id: s.id, subject: s.subject ?? null, paint: s.paint ?? null, era: s.era ?? null, roster: s.roster })
+      return json(res, 200, { rosters: r.files, count: r.byId.size, classes: byClass })
+    }
+    if (seg[0] === 'specs' && seg.length === 2 && req.method === 'GET') {
+      const rec = await recipeFor(seg[1], { view: url.searchParams.get('view') ?? undefined })
+      return rec ? json(res, 200, rec) : json(res, 404, { error: `no spec ${seg[1]}` })
+    }
+    /** draw N candidates for a spec, each with its own seed, into a catalog item */
+    if (seg[0] === 'specs' && seg[2] === 'candidates' && req.method === 'POST') {
+      const id = seg[1]
+      const body = await readJson(req).catch(() => ({}))
+      const rec = await recipeFor(id, { view: body.view, chroma: body.chroma, glassKey: body.glassKey })
+      if (!rec) return json(res, 404, { error: `no spec ${id}` })
+      const n = Math.min(8, Math.max(1, Number(body.count ?? 4)))
+      // seeds are EXPLICIT and reported, so the one a person picks can be pinned
+      const seeds = body.seeds?.length ? body.seeds.slice(0, n) : Array.from({ length: n }, (_, i) => Number(body.seed ?? 1) + i)
+      await catalog.put(id, { subject: rec.subject ?? id, kind: rec.class ?? 'prop', prompt: rec.prompt, negative: rec.negative, spec: { id: rec.id, roster: rec.roster, chroma: rec.chroma, glassKey: rec.glassKey } })
+      const job = jobs.start('image', `candidates ${id} x${n}`, async (report) => {
+        const drawn = []
+        for (const [i, seed] of seeds.entries()) {
+          report({ state: 'generating', drawn: i, of: n, seed })
+          const out = await registry.image.generate({ prompt: rec.prompt, negative: body.negative ?? rec.negative, size: body.size, steps: body.steps, seed, trueCfg: body.trueCfg })
+          const file = await catalog.addView(id, out.png, { model: registry.image.id, seconds: out.seconds, seed, spec: rec.id, ...out.meta })
+          drawn.push({ file: `views/${file}`, seed, seconds: out.seconds })
+        }
+        return { id, drawn, recipe: { chroma: rec.chroma, glassKey: rec.glassKey, why: rec.why } }
+      })
+      return json(res, 202, { job, recipe: rec })
+    }
+    /** a human picked one: pin the view AND its seed, which is what makes it reproducible */
+    if (seg[0] === 'catalog' && seg[2] === 'choose' && req.method === 'POST') {
+      const id = seg[1]
+      const body = await readJson(req)
+      const item = await catalog.get(id)
+      if (!item) return json(res, 404, { error: `no item ${id}` })
+      const view = String(body.view ?? '').replace(/^views\//, '')
+      if (!item.views?.includes(view)) return json(res, 400, { error: `${id} has no view ${JSON.stringify(view)}`, views: item.views ?? [] })
+      // the seed comes from the provenance of that view, not from the caller: the caller is a
+      // person clicking a picture and does not know what made it
+      const made = (item.history ?? []).filter((h) => h.file === `views/${view}` || h.name === view).pop()
+      const seed = body.seed ?? made?.seed ?? null
+      await catalog.record(id, { step: 'choose', file: `views/${view}`, seed })
+      return json(res, 200, { item: await catalog.put(id, { chosen: view, seed }) })
     }
 
     if (seg[0] === 'jobs') {

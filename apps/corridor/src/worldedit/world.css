@@ -374,3 +374,46 @@ body.worldedit .inspector {
     width: 12ch;
   }
 }
+
+/* ---- candidates: pick from pictures ---------------------------------------------------------- */
+
+/* Two across at any panel width, because the choice is between IMAGES and a thumbnail you cannot
+   read is not a choice. The panel is draggable (ui/dockwidth.ts), so someone comparing carefully
+   makes it wider and these grow with it. */
+.candidate-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--s2);
+  margin-top: var(--s2);
+}
+.candidate {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 0; border: 2px solid transparent; border-radius: var(--r2);
+  background: var(--bg-2); cursor: pointer; overflow: hidden;
+  font: inherit; color: var(--ink-2); text-align: left;
+}
+.candidate img {
+  width: 100%; aspect-ratio: 1; object-fit: cover; display: block;
+  background: var(--bg-0);
+}
+.candidate-seed { font-family: var(--num); font-size: var(--text-xs); padding: 2px var(--s2) 4px; }
+.candidate:hover { border-color: var(--line-2); }
+/* the pinned one, which is the only state that matters here */
+.candidate.on { border-color: var(--accent); }
+.candidate.on .candidate-seed { color: var(--accent); }
+
+.rows { display: grid; gap: 2px; margin-top: var(--s2); max-height: 42vh; overflow-y: auto; }
+
+/* A list row that is a button: the roster, the levels. `search-row` in app.css is the same idea
+   for the search dropdown, but it is positioned for an overlay and this one sits in a panel. */
+.row {
+  display: flex; align-items: baseline; justify-content: space-between; gap: var(--s2);
+  width: 100%; padding: var(--s2) var(--s2);
+  background: none; border: 0; border-radius: var(--r1);
+  font: inherit; color: var(--ink-1); text-align: left; cursor: pointer;
+}
+.row:hover { background: var(--bg-2); }
+.row-name { font-weight: 500; }
+/* the note has to be allowed to shrink or a long one pushes the name out of the panel — the same
+   min-width: 0 that the inspector needs, for the same reason */
+.row-note { color: var(--ink-3); font-size: var(--text-xs); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -22,9 +22,10 @@ import { DefinePanel, zoomFor } from './define'
 import { LogView, RunsPanel } from './runs'
 import { AdoptDialog } from './adopt'
 import { StagePanel } from './stage'
+import { AssetsPanel } from './assets'
 import { dockWidth } from '../ui/dockwidth'
 
-type Mode = 'explore' | 'index' | 'define' | 'bake' | 'stage'
+type Mode = 'explore' | 'index' | 'define' | 'bake' | 'stage' | 'assets'
 
 const canvas = document.getElementById('map') as HTMLCanvasElement
 const inspector = document.getElementById('panel') as HTMLElement
@@ -49,6 +50,9 @@ const stagePanel = new StagePanel({
   },
   onDirty: (d) => setDirty(d, 'level'),
 })
+
+/** Pick from pictures, commit to meshes — the asymmetry made visible (assets.ts). */
+const assetsPanel = new AssetsPanel({ host: inspector })
 const readoutEl = document.getElementById('readout') as HTMLElement
 
 let config: Config | null = null
@@ -313,6 +317,7 @@ function buildBar() {
         { value: 'define', label: 'Define', icon: 'pencil-square', key: '3' },
         { value: 'bake', label: 'Bake', icon: 'play', key: '4' },
         { value: 'stage', label: 'Stage', icon: 'flag', key: '5' },
+        { value: 'assets', label: 'Assets', icon: 'cube', key: '6' },
       ],
       onChange: (m) => setMode(m),
     }),
@@ -613,6 +618,7 @@ function openWorldMenu(anchor: HTMLElement) {
 
 function setMode(m: Mode) {
   if (mode === 'bake') runsPanel.stop()
+  if (mode === 'assets') assetsPanel.stop() // a poll for a draw that nobody is watching
   mode = m
   for (const b of bar.querySelectorAll<HTMLButtonElement>('.seg')) b.classList.toggle('on', b.dataset.value === m)
   // Define puts the map in draw mode; the panel switches it to `pick` itself when the world is a
@@ -624,6 +630,8 @@ function setMode(m: Mode) {
 function renderPanel() {
   if (mode === 'stage') {
     void stagePanel.load()
+  } else if (mode === 'assets') {
+    void assetsPanel.load()
   } else if (mode === 'index') {
     renderIndex(inspector)
   } else if (mode === 'define') {

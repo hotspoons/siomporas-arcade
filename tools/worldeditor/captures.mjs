@@ -30,6 +30,42 @@ import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 
 const SLUG = /^[a-z0-9][a-z0-9-]{1,63}$/
+
+/*
+ * GOPRO NAMES A FILE `GS<chapter><recording>.360` — CHAPTER FIRST, RECORDING LAST.
+ *
+ * So sorting by name is chronological within one recording and silently interleaved across
+ * several. The splats lane caught this before the first multi-recording capture:
+ *
+ *     GS010002  GS020002  GS030002     recording 0002, chapters 1, 2, 3      correct
+ *     GS010002  GS010003  GS020002     ch1 of rec2, ch1 of rec3, ch2 of rec2 WRONG
+ *
+ * What it costs them is not obvious, which is why it would have gone unnoticed: chunking is
+ * spatial, so frames land in the right cells regardless, but pass splitting works on gaps in time
+ * and source video, so a shuffled order invents pass boundaries and quietly degrades every
+ * per-pass diagnostic built on them.
+ */
+const GOPRO = /^G[A-Z](\d{2})(\d{4})\.(360|mp4|lrv)$/i
+
+/**
+ * A sort key that is chronological across recordings as well as within one.
+ *
+ * `[recording, chapter]` where the name says so, and the upload order otherwise — because a name
+ * we cannot parse is a name we must not guess at, and the order a person added the files is a
+ * better guess than alphabetical.
+ */
+export function chapterOrder(ch, i = 0) {
+  const m = GOPRO.exec(ch.name ?? '')
+  if (m) return [0, Number(m[2]), Number(m[1]), ch.name]
+  return [1, ch.index ?? i, 0, ch.name ?? '']
+}
+
+const byOrder = (a, b) => {
+  const ka = chapterOrder(a, a.index ?? 0)
+  const kb = chapterOrder(b, b.index ?? 0)
+  for (let i = 0; i < ka.length; i++) if (ka[i] !== kb[i]) return ka[i] < kb[i] ? -1 : 1
+  return 0
+}
 /** a chapter file name: no directories, no surprises, and an extension we know is video */
 const CHAPTER = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.(mp4|mov|insv|360|mkv|lrv)$/i
 
@@ -105,7 +141,8 @@ export class Captures {
     const part = path.join(this.uploads, `${upload}.part`)
     const at = await stat(part).then((s) => s.size).catch(() => 0)
     if (!existing) {
-      capture.chapters.push({ camera, name, bytes: total, upload, offset: at, complete: false })
+      // the order this chapter was ADDED, kept for names we cannot parse a recording out of
+      capture.chapters.push({ camera, name, bytes: total, upload, offset: at, complete: false, index: capture.chapters.length })
       await this.put(capture)
     }
     return { upload, offset: at, bytes: total }
@@ -180,15 +217,31 @@ export class Captures {
     const byCamera = {}
     for (const ch of capture.chapters) {
       if (!ch.complete) continue
-      ;(byCamera[ch.camera] ??= []).push({ name: ch.name, bytes: ch.bytes, path: `captures/${captureId}/video/${ch.camera}/${ch.name}` })
+      ;(byCamera[ch.camera] ??= []).push(ch)
     }
-    for (const k of Object.keys(byCamera)) byCamera[k].sort((a, b) => (a.name < b.name ? -1 : 1))
+    for (const k of Object.keys(byCamera)) {
+      // ORDERED HERE, AND THE ORDER IS PUBLISHED. The consumer must never sort this by name —
+      // see chapterOrder — so each entry carries its place explicitly.
+      byCamera[k].sort(byOrder)
+      byCamera[k] = byCamera[k].map((ch, i) => {
+        const m = GOPRO.exec(ch.name)
+        return {
+          order: i,
+          name: ch.name,
+          bytes: ch.bytes,
+          path: `captures/${captureId}/video/${ch.camera}/${ch.name}`,
+          ...(m ? { recording: Number(m[2]), chapter: Number(m[1]) } : { uploaded: ch.index ?? null }),
+        }
+      })
+    }
     const complete = capture.chapters.filter((c) => c.complete)
     return {
       id: capture.id,
       world: capture.world,
       rig: capture.rig,
       cameras: byCamera,
+      // said out loud, so nobody downstream reaches for a sort of their own
+      ordering: 'explicit: use `order`. Sorting by name interleaves GoPro recordings (GS<chapter><recording>).',
       chapters: complete.length,
       pending: capture.chapters.length - complete.length,
       bytes: complete.reduce((n, c) => n + c.bytes, 0),

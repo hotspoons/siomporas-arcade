@@ -250,6 +250,11 @@ body.chrome-off .drivepad { display: none; }
   border-radius: var(--r1); padding: 1px 6px; cursor: pointer; opacity: 0.75;
 }
 #attribution .attrib-short:hover { opacity: 1; color: var(--ink-1); }
+/* `display: grid` OVERRIDES `[hidden]`, which is only a UA rule of `display: none`. So the panel
+   set `hidden = true`, the attribute landed, aria-expanded flipped, the caret turned — and the
+   list stayed on screen under the collapsed pill, with nothing in the JavaScript to blame
+   (Rich, 2026-09-27). Any element this stylesheet gives a `display` to needs this line beside it. */
+#attribution .attrib-list[hidden] { display: none; }
 #attribution .attrib-list {
   display: grid; gap: 2px; margin-bottom: var(--s1);
   padding: var(--s2); border-radius: var(--r2);

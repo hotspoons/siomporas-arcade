@@ -59,17 +59,52 @@ export function normalise(run = {}) {
     nodes: Math.max(1, Number(run.nodes ?? 1)),
     gpusPerNode: Math.max(1, Number(run.gpusPerNode ?? 1)),
     image: run.image ?? process.env.WORLDEDITOR_SPLAT_IMAGE ?? 'ghcr.io/hotspoons/gaussworks:latest',
-    // the splats lane's entrypoint. Configuration, deliberately: see the note at the top.
-    command: run.command ?? (process.env.WORLDEDITOR_SPLAT_COMMAND ? JSON.parse(process.env.WORLDEDITOR_SPLAT_COMMAND) : null),
+    /*
+     * THE ENTRYPOINT, answered by the splats lane (gaussworks 5071e04):
+     *
+     *     splatpipe run --capture <dir> --out <dir> --role leader|worker
+     *
+     * Two roles because the pipeline has two shapes. The LEADER ingests, masks and chunks — serial,
+     * once, and the only role that reads the video — then merges and writes the LOD levels at the
+     * end. A WORKER poses and trains, claiming chunks from a queue.
+     *
+     * THE WORKER COUNT IS NOT A FUNCTION OF THE FOOTAGE. It is a function of free GPUs: a worker
+     * that finds an empty queue finishes, and one that starts before the chunks exist waits. So
+     * over-provisioning costs an idle pod rather than a wrong answer, which is exactly the
+     * property that makes this safe to hand to a scheduler. The leader works the queue too once
+     * it has chunked, so a one-pod run is still the whole pipeline.
+     */
+    command: run.command ?? (process.env.WORLDEDITOR_SPLAT_COMMAND ? JSON.parse(process.env.WORLDEDITOR_SPLAT_COMMAND) : ['splatpipe']),
     args: run.args ?? (process.env.WORLDEDITOR_SPLAT_ARGS ? JSON.parse(process.env.WORLDEDITOR_SPLAT_ARGS) : null),
+    /** extra workers beside the leader. 0 is a complete run on one pod. */
+    workers: Math.max(0, Number(run.workers ?? 0)),
+    config: run.config ?? null,
     claim: run.claim ?? process.env.WORLDEDITOR_CLAIM ?? 'worldeditor-data',
     storageClass: run.storageClass ?? process.env.WORLDEDITOR_SPLAT_STORAGE_CLASS ?? 'ceph-filesystem',
     outputSize: run.outputSize ?? process.env.WORLDEDITOR_SPLAT_OUTPUT_SIZE ?? '500Gi',
     gpuResource: run.gpuResource ?? process.env.WORLDEDITOR_GPU_RESOURCE ?? 'nvidia.com/gpu',
     // extra container limits (memory, cpu) as a plain map; the GPU count is `gpusPerNode`
     limits: run.limits ?? null,
+    /** the RWX claim the pods share as /out; the CRD provisions its own, a bare JobSet does not */
+    outClaim: run.outClaim ?? null,
     ttlSeconds: Number(run.ttlSeconds ?? process.env.WORLDEDITOR_SPLAT_TTL ?? 604800),
   }
+}
+
+/**
+ * `splatpipe run --capture ... --out ... --role <role>`, plus the site when there is one.
+ *
+ * `--site` is what levelling against `lidar/dtm.tif` needs, and it is load-bearing: with it, the
+ * capture is put on the ground (Arrowhead went from floating 5.33 m to a median camera height of
+ * 2.32 m against a measured rig height of 2.32 m). Without it the world is internally consistent
+ * and absolutely unverified, and gaussworks says so in `world.json`.
+ */
+export function roleArgs(r, role) {
+  if (r.args) return r.args
+  const a = ['run', '--capture', `/data/captures/${r.capture}`, '--out', '/out', '--role', role]
+  if (r.world) a.push('--site', `/data/sites/${r.world}`)
+  if (r.config) a.push('--config', r.config)
+  return a
 }
 
 /** The environment a gaussworks container gets, whichever object started it. */
@@ -123,8 +158,12 @@ export function trainingDeployment(run, apiVersion = `${GROUP}/${FALLBACK_VERSIO
           runtimeConfig: {
             runtime: 'gaussworks',
             image: r.image,
-            ...(r.command ? { command: r.command } : {}),
-            ...(r.args ? { args: r.args } : {}),
+            command: r.command,
+            // the CRD carries a leader/worker split of its own, which is exactly the shape
+            // splatpipe has. `nodes` is 1 + workers; rank 0 leads.
+            ...(r.workers > 0
+              ? { leaderCommand: r.command, leaderArgs: roleArgs(r, 'leader'), workerCommand: r.command, workerArgs: roleArgs(r, 'worker') }
+              : { args: roleArgs(r, 'leader') }),
             /*
              * `gpusPerNode` IS THE GPU REQUEST. The operator turns it into the container's
              * resource limits itself, and `limits` here is a wrapped ResourceList -- `{ items:
@@ -134,7 +173,7 @@ export function trainingDeployment(run, apiVersion = `${GROUP}/${FALLBACK_VERSIO
              * cpu -- goes through `limits.items`.
              */
             resources: {
-              nodes: r.nodes,
+              nodes: r.workers > 0 ? r.workers + 1 : r.nodes,
               gpusPerNode: r.gpusPerNode,
               ...(r.limits ? { limits: { items: r.limits } } : {}),
             },
@@ -158,18 +197,47 @@ export function trainingDeployment(run, apiVersion = `${GROUP}/${FALLBACK_VERSIO
  */
 export function jobSet(run) {
   const r = normalise(run)
-  const container = {
+  const container = (role) => ({
     name: 'gaussworks',
     image: r.image,
-    ...(r.command ? { command: r.command } : {}),
-    ...(r.args ? { args: r.args } : {}),
-    env: [...env(r), { name: 'PAI_PATH_0', value: '/out' }],
-    resources: { limits: { [r.gpuResource]: String(r.gpusPerNode) } },
+    command: r.command,
+    args: roleArgs(r, role),
+    env: [...env(r), { name: 'PAI_PATH_0', value: '/out' }, { name: 'SPLAT_ROLE', value: role }],
+    resources: { limits: { [r.gpuResource]: String(r.gpusPerNode), ...(r.limits ?? {}) } },
     volumeMounts: [
       { name: 'editor-data', mountPath: '/data', readOnly: true },
       { name: 'out', mountPath: '/out' },
     ],
-  }
+  })
+  /*
+   * THE OUTPUT VOLUME IS SHARED, and that is the whole reason this is not N independent Jobs.
+   * The leader chunks, the workers claim chunks and write trained ones back, and the leader
+   * merges what they wrote. A per-pod emptyDir would give every pod its own empty /out and the
+   * merge would find nothing — so it is an RWX claim, which on this cluster means
+   * ceph-filesystem. Without the CRD nobody provisions one for us, so it is named and expected.
+   */
+  const outClaim = r.outClaim ?? `${r.name}-out`
+  const job = (name, role, replicas, parallelism) => ({
+    name,
+    replicas,
+    template: {
+      spec: {
+        parallelism,
+        completions: parallelism,
+        backoffLimit: 0,
+        template: {
+          spec: {
+            restartPolicy: 'Never',
+            containers: [container(role)],
+            volumes: [
+              { name: 'editor-data', persistentVolumeClaim: { claimName: r.claim, readOnly: true } },
+              { name: 'out', persistentVolumeClaim: { claimName: outClaim } },
+            ],
+          },
+        },
+      },
+    },
+  })
   return {
     apiVersion: 'jobset.x-k8s.io/v1alpha2',
     kind: 'JobSet',
@@ -182,29 +250,9 @@ export function jobSet(run) {
       // one failed pod fails the run: a half-trained splat world is worse than none, and the log
       // is what a person needs, not a retry that overwrites it
       failurePolicy: { maxRestarts: 0 },
-      replicatedJobs: [
-        {
-          name: 'train',
-          replicas: 1,
-          template: {
-            spec: {
-              parallelism: r.nodes,
-              completions: r.nodes,
-              backoffLimit: 0,
-              template: {
-                spec: {
-                  restartPolicy: 'Never',
-                  containers: [container],
-                  volumes: [
-                    { name: 'editor-data', persistentVolumeClaim: { claimName: r.claim, readOnly: true } },
-                    { name: 'out', emptyDir: {} },
-                  ],
-                },
-              },
-            },
-          },
-        },
-      ],
+      // a worker that finds an empty queue finishes and a worker that starts early waits, so the
+      // two jobs need no ordering between them
+      replicatedJobs: r.workers > 0 ? [job('leader', 'leader', 1, 1), job('worker', 'worker', 1, r.workers)] : [job('leader', 'leader', 1, 1)],
     },
   }
 }

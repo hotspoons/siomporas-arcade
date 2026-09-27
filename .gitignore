@@ -73,3 +73,6 @@ tools/corridor/.bin
 # a handful of archetypes, baked with `--engine` and committed where it is served from. There is
 # no Opus encoder in this container, so a WAV bake of the whole catalog stays local.
 packages/enginesim/packs/
+
+# the local editor's data dir (just worldeditor-local) — a scratch volume, never content
+.local-editor-data/

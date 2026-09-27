@@ -851,7 +851,13 @@ async function boot() {
   }
   renderWorldSelect()
   setMode((new URLSearchParams(location.search).get('mode') as Mode) ?? 'explore')
+  // LAST LINE OF BOOT, and it exists because `window.__we` is assigned when the module finishes
+  // evaluating — long before this runs. A probe that waited for the handle and then set a mode
+  // had it silently undone by the setMode above, and the failure was intermittent because it
+  // depended on how fast the world list came back.
+  booted = true
 }
+let booted = false
 
 /**
  * The handle a probe or a console session drives this page by: `window.__we`.
@@ -867,6 +873,8 @@ async function boot() {
 declare global {
   interface Window {
     __we: {
+      ready: () => boolean
+      mode: () => Mode
       map: MapView
       define: DefinePanel
       runs: RunsPanel
@@ -891,6 +899,10 @@ declare global {
 }
 
 window.__we = {
+  /** false until boot() has finished; see the note where it is set */
+  ready: () => booted,
+  /** which panel is showing */
+  mode: () => mode,
   map,
   define,
   runs: runsPanel,

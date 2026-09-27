@@ -145,7 +145,7 @@ export class DefinePanel {
     const where = group('Extent')
     const wb = bodyOf(where)
     if (!this.preview) {
-      wb.append(empty(ring.length ? `${ring.length} point${ring.length === 1 ? '' : 's'} — close the ring to measure it` : 'nothing drawn yet'))
+      wb.append(empty(ring.length ? 'measuring…' : 'No area drawn'))
       wb.append(
         button({
           label: 'Use the current view',

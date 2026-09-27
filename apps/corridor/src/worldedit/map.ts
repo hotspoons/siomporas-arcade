@@ -117,6 +117,11 @@ const styleOf = (hw: string) => STYLE[hw] ?? (hw?.endsWith('_link') ? LINK : { w
 
 export type Mode = 'pan' | 'draw' | 'pick'
 
+/** A lon/lat rectangle — what a world actually is. */
+interface Box { west: number; east: number; south: number; north: number }
+/** Which part of the box is being dragged. */
+type Handle = 'nw' | 'ne' | 'sw' | 'se' | 'n' | 's' | 'e' | 'w' | 'move'
+
 export interface MapOpts {
   canvas: HTMLCanvasElement
   /** the viewport settled — time to ask for roads */
@@ -182,7 +187,11 @@ export class MapView {
   private h = 0
   private frame = 0
   private settleTimer = 0
-  private dragging: { x: number; y: number; moved: boolean; vertex: number | null } | null = null
+  private dragging:
+    | { kind: 'pan'; x: number; y: number; moved: boolean }
+    | { kind: 'vertex'; x: number; y: number; moved: boolean; vertex: number }
+    | { kind: 'box'; x: number; y: number; moved: boolean; handle: Handle; anchor: LonLat; start: Box }
+    | null = null
 
   constructor(o: MapOpts) {
     this.o = o
@@ -295,14 +304,104 @@ export class MapView {
     this.settleTimer = window.setTimeout(() => this.o.onViewport(this.bbox(), this.zoom), ms)
   }
 
+  /* ---- the box -------------------------------------------------------------------------------
+   *
+   * A WORLD IS A BOX, so drawing one is dragging a box (Rich, 2026-09-27: "when creating a world,
+   * you need to be able to drag the bounding box and modify the corners as the first interaction.
+   * Right now not very intuitive").
+   *
+   * It used to be a polygon tool: click to drop a vertex, click the first one again to close,
+   * right-click to undo. That is the right interface for an arbitrary shape and the wrong one
+   * here, because the bake does not take an arbitrary shape — it takes a SQUARE about a centre,
+   * and the polygon was only ever reduced to the smallest circle containing it. Four clicks and a
+   * closing gesture to produce something the bake immediately threw away.
+   *
+   * The ring is still a ring of four points, so everything downstream — the preview, the
+   * enclosing circle, a saved boundary — is unchanged. An arbitrary ring loaded from a saved world
+   * still edits vertex by vertex; only a rectangular one gets handles.
+   */
+
+  /** The ring as a screen-space rectangle, when it is one. */
+  private box(): Box | null {
+    if (this.ring.length !== 4) return null
+    const lons = this.ring.map((p) => p.lon)
+    const lats = this.ring.map((p) => p.lat)
+    const west = Math.min(...lons), east = Math.max(...lons)
+    const south = Math.min(...lats), north = Math.max(...lats)
+    // it has to BE axis-aligned, not merely have four points: a saved world's boundary may be any
+    // quadrilateral and dragging a corner of that would silently square it off
+    const square = this.ring.every((p) =>
+      (Math.abs(p.lon - west) < 1e-9 || Math.abs(p.lon - east) < 1e-9) &&
+      (Math.abs(p.lat - south) < 1e-9 || Math.abs(p.lat - north) < 1e-9))
+    return square && east > west && north > south ? { west, east, south, north } : null
+  }
+
+  /** Which handle is under the cursor: a corner, an edge, the inside, or nothing. */
+  private handleAt(x: number, y: number): Handle | null {
+    const b = this.box()
+    if (!b) return null
+    const [x0, y0] = this.toScreen({ lon: b.west, lat: b.north })
+    const [x1, y1] = this.toScreen({ lon: b.east, lat: b.south })
+    const [l, r] = [Math.min(x0, x1), Math.max(x0, x1)]
+    const [t, bo] = [Math.min(y0, y1), Math.max(y0, y1)]
+    const G = 9 // grab radius, generous: these are small targets on a big map
+    const nearL = Math.abs(x - l) < G, nearR = Math.abs(x - r) < G
+    const nearT = Math.abs(y - t) < G, nearB = Math.abs(y - bo) < G
+    const inX = x > l - G && x < r + G, inY = y > t - G && y < bo + G
+    if (inY && inX) {
+      if (nearL && nearT) return 'nw'
+      if (nearR && nearT) return 'ne'
+      if (nearL && nearB) return 'sw'
+      if (nearR && nearB) return 'se'
+      if (nearL) return 'w'
+      if (nearR) return 'e'
+      if (nearT) return 'n'
+      if (nearB) return 's'
+      if (x > l && x < r && y > t && y < bo) return 'move'
+    }
+    return null
+  }
+
+  private static readonly CURSOR: Record<string, string> = {
+    nw: 'nwse-resize', se: 'nwse-resize', ne: 'nesw-resize', sw: 'nesw-resize',
+    n: 'ns-resize', s: 'ns-resize', e: 'ew-resize', w: 'ew-resize', move: 'move',
+  }
+
+  /** Write a box back into the ring, north-west first and clockwise. */
+  private setBox(b: Box) {
+    this.ring = [
+      { lon: b.west, lat: b.north }, { lon: b.east, lat: b.north },
+      { lon: b.east, lat: b.south }, { lon: b.west, lat: b.south },
+    ]
+    this.ringClosed = true
+  }
+
   /* ---- input ------------------------------------------------------------------------------- */
 
   private bind() {
     const c = this.canvas
     c.addEventListener('pointerdown', (e) => {
       c.setPointerCapture(e.pointerId)
-      const v = this.mode === 'draw' ? this.vertexAt(e.offsetX, e.offsetY) : null
-      this.dragging = { x: e.offsetX, y: e.offsetY, moved: false, vertex: v }
+      const x = e.offsetX, y = e.offsetY
+      if (this.mode === 'draw') {
+        const b = this.box()
+        const h = b ? this.handleAt(x, y) : null
+        if (b && h) {
+          this.dragging = { kind: 'box', x, y, moved: false, handle: h, anchor: this.toLonLat(x, y), start: b }
+          return
+        }
+        // Not on the box, or there is no box: start a new one from here. Dragging over the map in
+        // draw mode is always "draw a box" — panning is what the Explore mode and the wheel are
+        // for, and a drag that means two different things depending on what is underneath it is
+        // the thing that made this confusing.
+        const at = this.toLonLat(x, y)
+        this.dragging = { kind: 'box', x, y, moved: false, handle: 'se', anchor: at, start: { west: at.lon, east: at.lon, south: at.lat, north: at.lat } }
+        return
+      }
+      const v = this.mode === 'pick' ? null : this.vertexAt(x, y)
+      this.dragging = v != null
+        ? { kind: 'vertex', x, y, moved: false, vertex: v }
+        : { kind: 'pan', x, y, moved: false }
     })
     c.addEventListener('pointermove', (e) => {
       const p = this.toLonLat(e.offsetX, e.offsetY)
@@ -314,7 +413,25 @@ export class MapView {
           this.dragging.moved = true
           this.moved = true
         }
-        if (this.dragging.vertex != null) {
+        if (this.dragging.kind === 'box') {
+          const d = this.dragging
+          const b = { ...d.start }
+          const dLon = p.lon - d.anchor.lon
+          const dLat = p.lat - d.anchor.lat
+          if (d.handle === 'move') {
+            b.west += dLon; b.east += dLon; b.south += dLat; b.north += dLat
+          } else {
+            if (d.handle.includes('w')) b.west = p.lon
+            if (d.handle.includes('e')) b.east = p.lon
+            if (d.handle.includes('n')) b.north = p.lat
+            if (d.handle.includes('s')) b.south = p.lat
+            // dragging a corner past the opposite one flips it rather than inverting the box
+            if (b.east < b.west) { const t = b.east; b.east = b.west; b.west = t }
+            if (b.north < b.south) { const t = b.north; b.north = b.south; b.south = t }
+          }
+          this.setBox(b)
+          this.o.onBoundary(this.ring, true)
+        } else if (this.dragging.kind === 'vertex') {
           this.ring[this.dragging.vertex] = p
           this.o.onBoundary(this.ring, this.ringClosed)
         } else {
@@ -325,6 +442,12 @@ export class MapView {
         this.dragging.x = e.offsetX
         this.dragging.y = e.offsetY
         this.draw()
+        return
+      }
+      if (this.mode === 'draw') {
+        const h = this.handleAt(e.offsetX, e.offsetY)
+        const want = h ? MapView.CURSOR[h] : 'crosshair'
+        if (c.style.cursor !== want) c.style.cursor = want
         return
       }
       if (this.mode === 'pick') {
@@ -339,16 +462,20 @@ export class MapView {
     c.addEventListener('pointerup', (e) => {
       const drag = this.dragging
       this.dragging = null
-      if (!drag || drag.moved) return
-      const p = this.toLonLat(e.offsetX, e.offsetY)
-      if (this.mode === 'draw') {
-        // clicking the first vertex closes the ring, which is the gesture every drawing tool has
-        if (this.ring.length >= 3 && this.vertexAt(e.offsetX, e.offsetY) === 0) return this.closeRing()
-        this.ring.push(p)
-        this.ringClosed = false
-        this.o.onBoundary(this.ring, false)
+      if (drag?.kind === 'box' && drag.moved) {
+        // a real box: tell the panel it is closed so it measures, once, on release rather than on
+        // every pixel of the drag
+        this.o.onBoundary(this.ring, true)
         this.draw()
-      } else if (this.mode === 'pick') {
+        return
+      }
+      if (!drag || drag.moved) return
+      if (this.mode === 'draw') {
+        // A CLICK IS NOT A GESTURE HERE any more. It used to drop a vertex, which meant a stray
+        // click while reading the panel silently started a polygon.
+        return
+      }
+      if (this.mode === 'pick') {
         const w = this.wayAt(e.offsetX, e.offsetY)
         if (w) this.o.onPick(w, e.shiftKey)
       }
@@ -356,12 +483,8 @@ export class MapView {
     c.addEventListener('contextmenu', (e) => {
       e.preventDefault()
       if (this.mode !== 'draw' || !this.ring.length) return
-      const v = this.vertexAt(e.offsetX, e.offsetY)
-      if (v != null) this.ring.splice(v, 1)
-      else this.ring.pop()
-      this.ringClosed = this.ringClosed && this.ring.length >= 3
-      this.o.onBoundary(this.ring, this.ringClosed)
-      this.draw()
+      // one meaning: throw the box away and start again
+      this.clearRing()
     })
     c.addEventListener(
       'wheel',
@@ -839,7 +962,7 @@ export class MapView {
     g.fillStyle = '#4aa8e8'
     g.font = '11px ui-monospace, monospace'
     g.textAlign = 'left'
-    g.fillText(`the bake takes this square · ${(radius_m * 2).toLocaleString()} m a side (radius_m is a half-width)`, cx - rpx + 6, cy - rpx - 6)
+    g.fillText(`${(radius_m * 2).toLocaleString()} m square`, cx - rpx + 6, cy - rpx - 6)
     g.restore()
   }
 
@@ -882,12 +1005,34 @@ export class MapView {
       g.fill()
     }
     g.stroke()
-    for (let i = 0; i < this.ring.length; i++) {
-      const [x, y] = this.toScreen(this.ring[i])
-      g.beginPath()
-      g.arc(x, y, i === 0 && !this.ringClosed && this.ring.length >= 3 ? 6 : 4, 0, Math.PI * 2)
-      g.fillStyle = i === 0 && !this.ringClosed && this.ring.length >= 3 ? '#56b982' : '#d9a441'
-      g.fill()
+
+    const box = this.box()
+    if (box && this.mode === 'draw') {
+      // EIGHT SQUARE HANDLES, the shape every selection tool uses, so it looks like something you
+      // can grab before you try. Round dots read as vertices of a polygon, which is what this
+      // stopped being.
+      const [x0, y0] = this.toScreen({ lon: box.west, lat: box.north })
+      const [x1, y1] = this.toScreen({ lon: box.east, lat: box.south })
+      const [l, r] = [Math.min(x0, x1), Math.max(x0, x1)]
+      const [t, b] = [Math.min(y0, y1), Math.max(y0, y1)]
+      const mx = (l + r) / 2, my = (t + b) / 2
+      g.fillStyle = '#d9a441'
+      g.strokeStyle = '#1b1b1f'
+      g.lineWidth = 1
+      for (const [hx, hy] of [[l, t], [mx, t], [r, t], [r, my], [r, b], [mx, b], [l, b], [l, my]]) {
+        g.beginPath()
+        g.rect(hx - 4, hy - 4, 8, 8)
+        g.fill()
+        g.stroke()
+      }
+    } else {
+      for (let i = 0; i < this.ring.length; i++) {
+        const [x, y] = this.toScreen(this.ring[i])
+        g.beginPath()
+        g.arc(x, y, 4, 0, Math.PI * 2)
+        g.fillStyle = '#d9a441'
+        g.fill()
+      }
     }
     g.restore()
   }

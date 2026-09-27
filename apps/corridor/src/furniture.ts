@@ -25,6 +25,7 @@
 // -(yaw_deg · π / 180)` (placements.ts), and under that a model's −Z is what ends up pointing
 // along the bearing.
 import * as THREE from 'three'
+import { makeRetroreflective, retro } from './retro'
 import type { Manifest } from './site'
 import * as T from './tuning'
 import { BoundsIndex } from './strip'
@@ -298,7 +299,11 @@ function signOutline(kind: 'stop' | 'give_way'): THREE.BufferGeometry {
 function signFace(kind: 'stop' | 'give_way'): { geometry: THREE.BufferGeometry; material: THREE.MeshStandardMaterial } {
   const geometry = signOutline(kind)
   geometry.translate(0, T.FURNITURE_SIGN_HEIGHT - 0.05, -0.04)
+  // a regulatory sign is prismatic sheeting: by day a painted plate, at night the brightest thing
+  // on the road because it throws your own headlights straight back at you (retro.ts)
   const material = new THREE.MeshStandardMaterial({ map: signTexture(kind), roughness: 0.55, metalness: 0.05 })
+  makeRetroreflective(material, retro.uniforms, 1)
+  retro.add(material, 'sign')
   return { geometry, material }
 }
 
@@ -877,17 +882,23 @@ export function sidewalkCover(manifest: Manifest, margin = 0.35): (x: number, z:
 
 export interface SidewalkResult {
   group: THREE.Group
-  counts: { walks: number; crossings: number; marked: number; bars: number; metres: number; kerbFlat: number }
+  counts: { walks: number; crossings: number; marked: number; bars: number; metres: number; kerbFlat: number; overRoad: number }
 }
 
 export function buildSidewalks(
   manifest: Manifest,
   groundAt: (x: number, z: number) => number | null,
   edgeDistance: (x: number, z: number) => number,
+  /**
+   * The same field asking about CARRIAGEWAYS ONLY (a walk should cross a driveway), and reporting
+   * WHICH road it found — that identity is what separates a walk sitting a little inside the
+   * shoulder of its own road from a walk running out across somebody else's.
+   */
+  roadInfo: (x: number, z: number) => { d: number; who: number } = (x, z) => ({ d: edgeDistance(x, z), who: -1 }),
 ): SidewalkResult {
   const group = new THREE.Group()
   group.name = 'sidewalks'
-  const counts = { walks: 0, crossings: 0, marked: 0, bars: 0, metres: 0, kerbFlat: 0 }
+  const counts = { walks: 0, crossings: 0, marked: 0, bars: 0, metres: 0, kerbFlat: 0, overRoad: 0 }
   const runs = manifest.sidewalks ?? []
   if (!runs.length) return { group, counts }
 
@@ -912,7 +923,33 @@ export function buildSidewalks(
   }
 
   for (const r of runs) {
-    const pts = r.coords.map((p) => {
+    /*
+     * DENSIFY FIRST.
+     *
+     * The coordinates are the bake's, which are OSM's, which average about nine and a half metres
+     * apart and sometimes run to fifty. The concrete is emitted between consecutive stations, so
+     * the station spacing is also the granularity at which a piece of walk can be REMOVED — and
+     * dropping a fifty-metre span to take out a twelve-metre junction crossing threw away three
+     * times more pavement than it fixed. Resampling to a few metres first makes the cut fit the
+     * thing being cut out, and it lets the kerb follow the ground while it is here.
+     */
+    const step = Math.max(1, T.SIDEWALK_STATION_M)
+    const raw = r.coords
+    const dense: [number, number, number][] = []
+    for (let i = 0; i < raw.length; i++) {
+      dense.push(raw[i])
+      const b = raw[i + 1]
+      if (!b) break
+      const a = raw[i]
+      const len = Math.hypot(b[0] - a[0], b[1] - a[1])
+      const n = Math.floor(len / step)
+      for (let k = 1; k <= n; k++) {
+        const u = (k * step) / len
+        if (u >= 1) break
+        dense.push([a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u, a[2] + (b[2] - a[2]) * u])
+      }
+    }
+    const pts = dense.map((p) => {
       const x = p[0]
       const z = -p[1]
       return { x, z, y: groundAt(x, z) ?? p[2] }
@@ -955,7 +992,25 @@ export function buildSidewalks(
 
     counts.walks++
     const w = Math.max(0.9, r.width_m) * T.SIDEWALK_WIDTH_SCALE
+    /*
+     * WHICH ROAD IS THIS WALK'S OWN?
+     *
+     * The bake does not say. A walk is a lateral offset of some road's centreline and the record
+     * carries only its width and its source — so the road it belongs to is worked out here, from
+     * the geometry: it is the carriageway nearest the walk along most of its length. Everything
+     * else the walk comes near is a road it is passing, and concrete on one of THOSE is the bug
+     * Rich saw. Doing it by distance alone was too blunt: a walk beside a road the bake does not
+     * treat as kerbed already sits a metre or two inside the drawn asphalt for its whole length,
+     * and a flat distance rule deleted 56 km of real pavement to remove 3 km of crossings.
+     */
+    const tally = new Map<number, number>()
+    const info = pts.map((p) => roadInfo(p.x, p.z))
+    for (const q of info) tally.set(q.who, (tally.get(q.who) ?? 0) + 1)
+    let own = -1
+    let ownN = 0
+    for (const [who, n] of tally) if (n > ownN) [own, ownN] = [who, n]
     let ring: number[][] = []
+    let lastOnRoad = false
     for (let i = 0; i < pts.length; i++) {
       const a = pts[Math.max(0, i - 1)]
       const d = pts[Math.min(pts.length - 1, i + 1)]
@@ -982,10 +1037,50 @@ export function buildSidewalks(
         { out: (-side * w) / 2, y: kerb + T.SIDEWALK_LIFT, c: cWalk },
       ]
       const here = profile.map((q) => [pts[i].x + px * q.out, pts[i].y + q.y, pts[i].z + pz * q.out, 0, 1, q.c.r, q.c.g, q.c.b])
-      if (i > 0) {
+      /*
+       * KEEP THE CONCRETE OFF THE CARRIAGEWAY.
+       *
+       * Rich, 2026-09-27: "sidewalks rendering over streets, in this case 3 sidewalks extending
+       * over streets." Nothing in the bake or the viewer had ever clipped a walk against another
+       * road. A zone walk is a pure lateral offset of one road's centreline, and OSM splits a road
+       * at its junction nodes — so each way's offset curve ends about six metres out from the
+       * junction node, which is a point in the MIDDLE of the cross street, and the next way's
+       * offset starts there. The concrete ran straight across every intersection, on both sides,
+       * for both roads: four ribbons per crossroads. Measured near his stance: 440 of 3,978
+       * sidewalk vertices sat on a carriageway, 69 per cent of them more than 2 m past the kerb,
+       * the worst 8.55 m in — out over the travel lane of Middlebridge Court.
+       *
+       * The threshold is a knob and not zero on purpose. A walk alongside a road the bake does not
+       * think is kerbed already sits a metre or so inside the drawn asphalt for its whole length,
+       * and dropping every such walk would lose real pavement to fix a junction problem. What this
+       * removes is the part nobody can defend: concrete well out into another road.
+       */
+      /*
+       * Two ways for concrete to end up on asphalt, and they need different thresholds.
+       *
+       * ANOTHER ROAD, at all: the walk is crossing a street. A junction is the common case — the
+       * offset curve of each way ends in the middle of the cross street and the next one starts
+       * there — and 1.5 m of slack is only for the kerb line itself.
+       *
+       * ITS OWN ROAD, but deep: a walk alongside a road the bake does not treat as kerbed sits a
+       * metre or two inside the drawn asphalt for its whole length, and deleting those loses real
+       * pavement — so its own road gets a wide allowance. Past that allowance it is not a shoulder
+       * overlap any more, it is the walk cutting straight across a cul-de-sac's turning bulb
+       * (measured at 6.3 m and 7.1 m in, against a 9 m bulb radius).
+       */
+      //
+      // Measured at the KERB EDGE, not the centreline. The walk has width, so a centreline just
+      // inside the allowance still puts its road-side edge half a width further in — the knob
+      // then quietly means "clearance plus about a metre", which is not what it says.
+      const ex = pts[i].x + px * ((side * w) / 2)
+      const ez = pts[i].z + pz * ((side * w) / 2)
+      const edge = roadInfo(ex, ez)
+      const onRoad = edge.d < -(edge.who !== own ? T.SIDEWALK_ROAD_CLEAR_M : T.SIDEWALK_OWN_CLEAR_M)
+      if (i > 0 && !onRoad && !lastOnRoad) {
         concrete.strip(ring, here)
         counts.metres += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].z - pts[i - 1].z)
-      }
+      } else if (onRoad || lastOnRoad) counts.overRoad++
+      lastOnRoad = onRoad
       ring = here
     }
   }

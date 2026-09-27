@@ -17,6 +17,12 @@ export interface TuneKey {
 export interface TuneSection {
   title: string
   keys: TuneKey[]
+  /**
+   * Whether the section starts shut. Left out, a panel may decide for itself — corridor's does it
+   * by length — but a section that the person opens every single time should say so here. Weather
+   * was collapsed only because it happened to carry fourteen knobs (Rich, 2026-09-27).
+   */
+  collapsed?: boolean
 }
 
 /** Build a TuneKey with sensible auto ranges around the default. */

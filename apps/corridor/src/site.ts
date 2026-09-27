@@ -133,7 +133,11 @@ export interface Branch {
   name: string | null
   ref?: string | null
   highway?: string | null
-  lanes?: number | null
+  /**
+   * What OSM said, as the bake left it: a number, a numeric string, or — when the ways along the
+   * chain disagreed — a SORTED SET OF STRINGS of every value seen. See `branchLanes` in scene.ts.
+   */
+  lanes?: number | string | string[] | null
   oneway?: string | null
   length_m: number
   /** site x, y and lidar road grade z, densified ~10 m like the spine */

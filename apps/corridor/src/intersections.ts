@@ -25,6 +25,14 @@
 // recolouring it: the mast is one merged geometry per lane-count bucket, so its vertex colours are
 // shared by every instance in the bucket and cannot say anything per-signal.
 import * as THREE from 'three'
+import { makeRetroreflective, paintMaterial, retro } from './retro'
+
+/** road paint: lit, and retroreflective — see retro.ts */
+function paint(color = 0xf4f4f0): THREE.Material {
+  const m = paintMaterial(retro.uniforms, { color })
+  retro.add(m, 'paint')
+  return m
+}
 import { SIGNAL_LENS_Y, signalLensOffsets, type FurnitureResult } from './furniture'
 import type { Manifest } from './site'
 import * as T from './tuning'
@@ -247,8 +255,10 @@ export function buildStopBars(
   geo.setIndex(idx)
   geo.computeVertexNormals()
   geo.computeBoundingSphere()
-  // unlit and white: a lit grey on grey asphalt was invisible from above, and paint is white
-  const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: 0xf4f4f0 }))
+  // Paint is lit, and retroreflective. It was unlit white because "a lit grey on grey asphalt was
+  // invisible from above" — true, and the reason real paint has glass beads in it. retro.ts gives
+  // it those instead of giving it immunity to the sun.
+  const mesh = new THREE.Mesh(geo, paint())
   mesh.name = 'stopbars:paint'
   group.add(mesh)
   counts.metres = Math.round(counts.metres)
@@ -443,7 +453,12 @@ export function buildBlades(
   geo.setIndex(idx)
   geo.computeVertexNormals()
   geo.computeBoundingSphere()
-  const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ map: tex, roughness: 0.6, metalness: 0, side: THREE.FrontSide }))
+  // a street blade is retroreflective sheeting: it keeps its PBR look by day and answers the
+  // headlights at night, which is how you actually read one (retro.ts)
+  const bladeMat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.6, metalness: 0, side: THREE.FrontSide })
+  makeRetroreflective(bladeMat, retro.uniforms, 1)
+  retro.add(bladeMat, 'sign')
+  const mesh = new THREE.Mesh(geo, bladeMat)
   mesh.name = 'blades:faces'
   group.add(mesh)
 
@@ -676,7 +691,7 @@ export function buildCrosswalks(
     geo.setIndex(idx)
     geo.computeVertexNormals()
     geo.computeBoundingSphere()
-    const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: 0xf4f4f0 }))
+    const mesh = new THREE.Mesh(geo, paint())
     mesh.name = 'crosswalks:paint'
     group.add(mesh)
   }
@@ -752,7 +767,7 @@ export function buildLaneArrows(manifest: Manifest, roadAt: (x: number, z: numbe
     geo.setIndex(idx)
     geo.computeVertexNormals()
     geo.computeBoundingSphere()
-    const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: 0xf4f4f0 }))
+    const mesh = new THREE.Mesh(geo, paint())
     mesh.name = 'lanearrows:paint'
     group.add(mesh)
   }

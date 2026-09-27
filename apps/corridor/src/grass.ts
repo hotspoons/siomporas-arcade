@@ -29,6 +29,7 @@
 // assembling the visible set is a typed-array copy of cached prefixes. Only tiles entering the
 // ring cost anything, and no more than GRASS_TILES_PER_FRAME of them per frame.
 import * as THREE from 'three'
+import { LAMP_PARS, retro } from './retro'
 import type { SeasonLook } from './season'
 import { GRASS_LOOK, type GrassType } from './groundcover'
 import { ACCUM_PARS, accumUniforms } from './weather'
@@ -247,6 +248,9 @@ export class Grass {
         uHue: { value: 0 },
         uSat: { value: 1 },
         uLight: { value: 1 },
+        // the car's lamps, shared BY REFERENCE with every other self-lighting shader (retro.ts)
+        ...retro.uniforms,
+        uLampGain: { value: 1 },
         uNightMul: { value: 1 },
         uLightTint: { value: new THREE.Color(1, 1, 1) },
         ...this.weatherUniforms,
@@ -350,6 +354,8 @@ export class Grass {
     c = mix(vec3(dot(c, vec3(0.299, 0.587, 0.114))), c, sat);
     return max(c * light, 0.0);
   }
+        ${LAMP_PARS}
+        uniform float uLampGain;
         void main() {
           #include <logdepthbuf_fragment>
           vec3 n = normalize(gl_FrontFacing ? vNormal : -vNormal);
@@ -368,6 +374,8 @@ export class Grass {
           vec3 hvec = normalize(uSun + v);
           lit += vec3(0.08) * pow(max(0.0, dot(n, hvec)), 24.0) * vT;
           vec3 outCol = grade(lit, uHue, uSat, uLight) * uNightMul * uLightTint;
+          // and the car's headlights, which a self-lighting shader would otherwise never see
+          outCol += c * ao * lampDiffuse(vWorld, n, uLampGain);
           // a blade catches the settled layer at its TIP, not at its root, so the normal it is
           // weighed by is faked upright near the top — the real one points sideways all the way up
           outCol = applyWeather(outCol, vec3(0.0, mix(0.1, 1.0, vT), 0.0), vWorld);
@@ -410,6 +418,9 @@ export class Grass {
         uHue: { value: 0 },
         uSat: { value: 1 },
         uLight: { value: 1 },
+        // the car's lamps, shared BY REFERENCE with every other self-lighting shader (retro.ts)
+        ...retro.uniforms,
+        uLampGain: { value: 1 },
         uNightMul: { value: 1 },
         uLightTint: { value: new THREE.Color(1, 1, 1) },
         ...this.weatherUniforms,
@@ -486,6 +497,8 @@ export class Grass {
     c = mix(vec3(dot(c, vec3(0.299, 0.587, 0.114))), c, sat);
     return max(c * light, 0.0);
   }
+        ${LAMP_PARS}
+        uniform float uLampGain;
         void main() {
           #include <logdepthbuf_fragment>
           vec4 s = texture2D(uMap, vUv);
@@ -498,6 +511,9 @@ export class Grass {
           // a mown card is a low even turf; keep it a touch darker like the strip's mown texture
           c *= shade * mix(1.0, 0.85, vMown);
           vec3 outCol = grade(c, uHue, uSat, uLight) * uNightMul * uLightTint;
+          // a card is a billboard with no honest normal; light it as the turf it represents,
+          // which is flat, so the beam rakes across it the way it rakes across the verge
+          outCol += c * lampDiffuse(vCardWorld, vec3(0.0, 1.0, 0.0), uLampGain);
           outCol = applyWeather(outCol, vec3(0.0, mix(0.1, 1.0, vUv.y), 0.0), vCardWorld);
           gl_FragColor = vec4(outCol, 1.0);
           #include <fog_fragment>
@@ -579,6 +595,7 @@ export class Grass {
       m.uniforms.uHue.value = T.GRASS_HUE + this.look.hue
       m.uniforms.uSat.value = T.GRASS_SAT * this.look.sat
       m.uniforms.uLight.value = T.GRASS_LIGHT
+      m.uniforms.uLampGain.value = T.HEADLIGHT_BOUNCE
     }
     this.cardMat.uniforms.uWidth.value = T.GRASS_SPRITE_WIDTH
     this.cardMat.uniforms.uLean.value = T.GRASS_SPRITE_LEAN

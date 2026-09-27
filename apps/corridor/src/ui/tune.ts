@@ -59,7 +59,11 @@ export class TuneUI {
             title: `put ${sec.title} back to the code defaults`,
             onClick: () => this.resetSection(tab.name, sec),
           })
-          const g = group(sec.title, { collapsed: sec.keys.length > 12, actions: [reset] })
+          // A section says whether it starts shut; where it does not, length decides. The length
+          // rule alone put `weather` and `intersections` away purely because they are long, which
+          // is not a reason (Rich, 2026-09-27) — it is the sections nobody touches that should be
+          // shut, and only the section itself knows which those are.
+          const g = group(sec.title, { collapsed: sec.collapsed ?? sec.keys.length > 12, actions: [reset] })
           const body = bodyOf(g)
           for (const k of sec.keys) body.append(this.field(tab.name, k))
           this.groups.push({ el: g, keys: sec.keys })

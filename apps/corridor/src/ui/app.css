@@ -110,7 +110,28 @@ body.chrome-off .drivepad { display: none; }
 
 /* The tuning dialog is a wall of sliders: give it a fixed tall body so the tab strip never moves. */
 .tune-body { height: min(72vh, 680px); }
-.tune-body .tab-body { column-width: 260px; column-gap: var(--s5); }
+/*
+ * The tuning panel flows its sections into columns when there is room, and into ONE column when
+ * there is not.
+ *
+ * It used to do that with `column-width`, which was wrong in a way that only showed up docked: a
+ * multi-column box with a definite height does not grow downwards, it FRAGMENTS, laying column
+ * after column off to the right. Docked to a side at 238px the panel was 1405px of content in six
+ * columns, five of them past the edge — Rich, 2026-09-27: "should never scroll horizontally, just
+ * stack things vertically if they don't fit in one panel."
+ *
+ * A grid cannot do that. auto-fill takes as many 240px tracks as fit and no fewer than one, and
+ * the `min(240px, 100%)` is what stops the single track from being wider than the panel holding
+ * it. Narrow: one column, scrolls down. Wide: two or three, still scrolls down.
+ */
+.tune-body .tab-panel {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(240px, 100%), 1fr));
+  gap: 0 var(--s5);
+  align-content: start;
+}
+/* `hidden` must still win: the rule above is more specific than the UA's [hidden] */
+.tune-body .tab-panel[hidden] { display: none; }
 .tune-body .group { break-inside: avoid; }
 
 /* ---- touch pads ---------------------------------------------------------------------------- */

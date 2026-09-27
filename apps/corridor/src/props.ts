@@ -8,6 +8,7 @@
 // Everything is in the viewer's world frame (X east, Y up, Z south) and sized in metres, so
 // swapping a stand-in for a generated glb later is a one-line change per prop kind.
 import * as THREE from 'three'
+import { paintMaterial, retro } from './retro'
 import { HEX_GLSL } from './hextile'
 import type { TreeRecord } from './trees'
 
@@ -423,7 +424,15 @@ export function roadMesh(st: Station[], lanesAt: (s: number) => number, classAt:
   mg.setAttribute('position', new THREE.Float32BufferAttribute(marks, 3))
   mg.setAttribute('color', new THREE.Float32BufferAttribute(mcol, 3))
   mg.setIndex(midx)
-  const marksMesh = new THREE.Mesh(mg, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide }))
+  // the paint shader wants a normal: without one the attribute is absent and every normal reads
+  // zero, and `mix(1.0, dot(NaN), 0.0)` is NaN, not 1.0 — GLSL's mix multiplies before it adds
+  mg.computeVertexNormals()
+  // Paint is LIT, and retroreflective. It used to be a MeshBasicMaterial, which ignores every
+  // light in the scene by definition — so at midnight the lines glowed (Rich, 2026-09-27). See
+  // retro.ts for why "lit" alone is not enough and what replaces the glow.
+  const marksMat = paintMaterial(retro.uniforms, { vertexColors: true })
+  retro.add(marksMat, 'paint')
+  const marksMesh = new THREE.Mesh(mg, marksMat)
   marksMesh.name = 'road:markings' // probes read the paint off this geometry (probes/corridor-geometry.mjs)
   // the paint as laid, so a style can repaint it and the realistic style can put it back
   marksMesh.userData.paintAsLaid = Float32Array.from(mcol)

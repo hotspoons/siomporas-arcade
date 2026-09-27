@@ -82,6 +82,12 @@ export interface Site {
   treeSpecies: (legacy?: boolean) => Record<string, number>
   /** how the trees were planted and replanted: cell, radius, centre, count, and whether the budget capped it */
   treePlanting: () => { count: number; cellM: number; radius: number; centre: [number, number]; capped: boolean; replants: number; lastMs: number }
+  /**
+   * The far-field invariant, read straight off the instance matrices: a tree the near set is
+   * drawing as a MODEL must not also be drawing a CARD, unless it is inside the dissolve band.
+   * `doubled` is the number that are — a flat billboard standing in a procedural tree.
+   */
+  treeCards: () => { nearSet: number; cards: number; inBand: number; doubled: number; band: number; replants: number }
   /** crop rows built per field, by crop type (probes read this) */
   cropRows: Record<string, number>
   /** what is falling and what has settled */
@@ -356,6 +362,36 @@ const hypso = (z: number): [number, number, number] => {
   return [a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u, a[2] + (b[2] - a[2]) * u]
 }
 
+
+/**
+ * How many lanes a branch road carries.
+ *
+ * `Number(br.lanes) > 0 ? … : 2` looks harmless and was silently drawing almost the whole road
+ * network two lanes wide. The bake collapses a chain's per-way `lanes` tags into a sorted SET OF
+ * STRINGS, so a five-kilometre trunk road that is three lanes for most of its length and widens
+ * at its junctions arrives as `["3","4","5","6","7"]`. `Number(that)` is NaN, `NaN > 0` is false,
+ * and the road came out at the default. Measured on crofton-triangle: 397 of 427 branches carry
+ * `null`, 10 carry an array, and only 20 carry a plain number — so US 3 through Crofton, which
+ * Rich drives, was drawn at two lanes (2026-09-27).
+ *
+ * The SMALLEST member of that set is the honest reading of it: the through count, the width the
+ * road holds for most of its length. Taking the largest would smear a junction's turn pockets
+ * over five kilometres. The real fix is per-station lane counts for branches, the way the spine
+ * already has them (`manifest.spine.segments[].tags.lanes` and `taperedLanes`) — that is a bake
+ * change, and this is what the viewer can do correctly with what it is given today.
+ */
+function branchLanes(v: unknown, fallback = 2): number {
+  if (typeof v === 'number') return v > 0 ? v : fallback
+  if (typeof v === 'string') {
+    const n = Number(v)
+    return n > 0 ? n : fallback
+  }
+  if (Array.isArray(v)) {
+    const ns = v.map(Number).filter((n) => n > 0)
+    return ns.length ? Math.min(...ns) : fallback
+  }
+  return fallback
+}
 
 export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => void, lite = false, renderer?: THREE.WebGLRenderer, fog: THREE.FogExp2 | null = null, initialSeason: Season = 'summer', initialStyle: Style = 'realistic'): Promise<Site> {
   let manifest = manifestIn
@@ -794,7 +830,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     for (const br of manifest.branches ?? []) {
       for (const j of br.junctions ?? []) {
         const w = toWorld(j.x, j.y, 0)
-        pushJ(w.x, w.z, Math.max(T.JUNCTION_CLEAR, ((br.lanes ?? 2) * T.LANE_WIDTH) / 2 + T.JUNCTION_CLEAR * 0.4))
+        pushJ(w.x, w.z, Math.max(T.JUNCTION_CLEAR, (branchLanes(br.lanes) * T.LANE_WIDTH) / 2 + T.JUNCTION_CLEAR * 0.4))
       }
     }
     for (const sb of manifest.stubs ?? []) {
@@ -907,7 +943,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
       const u = Math.min(1, Math.max(0, s / lenB))
       return { pos: cB.getPointAt(u), dir: cB.getTangentAt(u) }
     }
-    const lanesB = Number(br.lanes) > 0 ? Number(br.lanes) : 2
+    const lanesB = branchLanes(br.lanes)
     const twoWayB = br.oneway === 'yes' || br.oneway === '-1' ? false : br.oneway === 'no' ? true : !['motorway', 'motorway_link', 'trunk_link', 'primary_link'].includes(br.highway ?? '')
     const kerbedB = isKerbed(br.highway)
     const halfB = pavedWidth(lanesB, twoWayB, kerbedB) / 2
@@ -1070,6 +1106,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
   let roadAtOut: (x: number, z: number) => { name: string | null; ref: string | null; highway: string | null; d: number } | null = () => null
   let edgeInfoOut: (x: number, z: number, exclude?: number, roadsOnly?: boolean) => { d: number; who: number; y: number; s: number; gx: number; gz: number } = () => ({ d: Infinity, who: -1, y: 0, s: 0, gx: 0, gz: 0 })
   let edgeDistanceWorld: (x: number, z: number) => number = () => Infinity
+  let roadInfoWorld: (x: number, z: number) => { d: number; who: number } = () => ({ d: Infinity, who: -1 })
   /** the road surface under a point near a carriageway: the spline's height, which the asphalt is built from */
   let roadHeightWorld: (x: number, z: number) => number | null = () => null
   let treesNearWorld: (x: number, z: number, r: number) => [number, number, number][] = () => []
@@ -1094,6 +1131,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
   }
   let treeRecords: TreeRecord[] = []
   let treePlantingRef: () => { count: number; cellM: number; radius: number; centre: [number, number]; capped: boolean; replants: number; lastMs: number } = () => ({ count: 0, cellM: 0, radius: 0, centre: [0, 0], capped: false, replants: 0, lastMs: 0 })
+  let treeCardsRef: () => { nearSet: number; cards: number; inBand: number; doubled: number; band: number; replants: number } = () => ({ nearSet: 0, cards: 0, inBand: 0, doubled: 0, band: 0, replants: 0 })
   let crops: ReturnType<typeof buildCrops> | null = null
   let precip: Precipitation | null = null
   let canopyAtRef: (x: number, y: number) => number = () => 0
@@ -1574,6 +1612,9 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     const groundNear = (x: number, y: number) => gradedHeight(x, -y) ?? heightAt(x, y)
     groundAtWorld = (x, z) => gradedHeight(x, z) ?? heightAt(x, -z)
     edgeDistanceWorld = (x, z) => edgeDistance(x, z).d
+    // the same field, but blind to driveways: a sidewalk SHOULD cross a drive, so a rule that
+    // keeps concrete off the carriageway has to ask about carriageways only
+    roadInfoWorld = (x, z) => edgeDistance(x, z, undefined, true)
     roadHeightWorld = (x, z) => { const e = edgeDistance(x, z); return e.d <= T.STOPBAR_MAX_FROM_ROAD ? e.y : null }
     status('planting…')
     const treeAdj = { ...NEUTRAL_ADJ }
@@ -1771,19 +1812,33 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
       const m = new THREE.Matrix4()
       // every tree gets its impostor slot ONCE (slot = tree index); the near set only toggles
       const sizes = new Float32Array(treeBudget)
+      // `shown` holds the indices whose card is currently HIDDEN (the name is the original's),
+      // `faded` the ones mid-dissolve. Both are a CACHE of what was written to the instance
+      // buffers, kept so a near-set move writes only the slots that changed.
+      let shown = new Set<number>()
+      let faded = new Set<number>()
       const seatImpostors = () => {
+        // a seat rewrites every matrix, so anything a partial upload had pending is moot
+        imp!.clearRanges()
         t.records.forEach((r, i) => {
           const v = near.variantFor(r, i)
           sizes[i] = r.h * imp!.extents[v]
           imp!.set(i, r.x, r.y, r.z, r.h, v, ((i * 137) % 360) * (Math.PI / 180), m)
         })
         imp!.commit(t.records.length)
+        // `set` writes a FULL-SIZE matrix, so the seat has just made EVERY card visible again.
+        // The two sets above now describe a state that no longer exists, and refreshFar trusts
+        // them: `if (!shown.has(i)) setVisible(i, false)` skips hiding an index it believes is
+        // already hidden, leaving a solid card standing in the procedural model it was meant to
+        // hand over to. That is the doubled tree — it appeared after a replant, and only after a
+        // replant, which is why reloading the page cleared it. Re-state the cache to match what
+        // was actually written: all visible, all solid.
+        for (const i of faded) imp!.setFade(i, 1)
+        faded.clear()
+        shown.clear()
       }
       seatImpostors()
       reseat = seatImpostors
-      // `shown` holds the indices whose card is currently HIDDEN (the name is the original's).
-      let shown = new Set<number>()
-      let faded = new Set<number>()
       /**
        * Which far trees draw a card, and how solidly.
        *
@@ -1799,10 +1854,20 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
        * set uses to choose its members, or the fade ring and the swap boundary would be
        * different shapes.
        */
+      const lastLod = { eye: new THREE.Vector3(), fwd: null as THREE.Vector3 | null, pitch: 0 }
       refreshFar = (skip: Set<number>, eye?: THREE.Vector3, fwd?: THREE.Vector3, pitch = 0) => {
         imp!.clearRanges()
+        if (eye) lastLod.eye.copy(eye)
+        lastLod.fwd = fwd ? fwd.clone() : null
+        lastLod.pitch = pitch
         const band = Math.max(0, T.TREE_FADE_M)
-        const inner = T.TREE_NEAR_RADIUS
+        // THE HANDOVER IS WHERE THE MODELS ACTUALLY STOP, not where the radius knob says.
+        // `near.horizon` is the lodDistance of the farthest tree the near set managed to seat;
+        // under a capacity cap that is far inside TREE_NEAR_RADIUS, and a band measured from the
+        // radius then selects no one and the card simply vanishes when the model appears. Taking
+        // the smaller of the two puts the dissolve exactly at the edge of the models, wherever
+        // that edge happens to be this frame.
+        const inner = Math.min(T.TREE_NEAR_RADIUS, near.horizon || T.TREE_NEAR_RADIUS)
         // near-set trees that should still show a dissolving card, and how solid it is
         const keep = new Map<number, number>()
         if (band > 0 && eye && fwd) {
@@ -1820,6 +1885,26 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
         for (const [i, f] of keep) imp!.setFade(i, f)
         for (const i of faded) if (!keep.has(i)) imp!.setFade(i, 1)
         faded = new Set(keep.keys())
+      }
+      // Measured from the instance matrices themselves rather than from the two sets above,
+      // because the two sets above are the thing under suspicion.
+      treeCardsRef = () => {
+        const band = Math.max(0, T.TREE_FADE_M)
+        const inner = Math.min(T.TREE_NEAR_RADIUS, near.horizon || T.TREE_NEAR_RADIUS)
+        const mat = imp!.mesh.instanceMatrix.array as Float32Array
+        let cards = 0
+        let inBand = 0
+        let doubled = 0
+        for (const i of near.near) {
+          const visible = mat[i * 16] > 1e-4
+          const r = t.records[i]
+          const f = lastLod.fwd
+          const banded = band > 0 && !!f && T.lodDistance(r.x - lastLod.eye.x, r.z - lastLod.eye.z, f.x, f.z, lastLod.pitch) >= inner - band
+          if (visible) cards++
+          if (banded) inBand++
+          if (visible && !banded) doubled++
+        }
+        return { nearSet: near.near.size, cards, inBand, doubled, band, replants: replantStats.replants }
       }
       updateNear = (eye: THREE.Vector3, time: number, fwd?: THREE.Vector3, pitch = 0) => {
         replantIfMoved(eye, fwd, pitch)
@@ -2069,7 +2154,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
   group.add(parking.group)
   const barriers = buildBarriers(manifest, groundAtWorld)
   group.add(barriers.group)
-  const sidewalks = buildSidewalks(manifest, groundAtWorld, edgeDistanceWorld)
+  const sidewalks = buildSidewalks(manifest, groundAtWorld, edgeDistanceWorld, roadInfoWorld)
   group.add(sidewalks.group)
   // WHAT GETS WET: the hard surfaces. Roads (the surface sets' own materials, which is what the
   // asphalt and the paint are drawn with), car parks, footways and kerbs. Registered after they
@@ -2157,6 +2242,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     adjustments,
     treeCount,
     treePlanting: () => ({ ...treePlantingRef() }),
+    treeCards: () => treeCardsRef(),
     grass: grassRef,
     buildProfile: (mark('done'), buildProfile),
     furnitureCounts: furniture.counts,

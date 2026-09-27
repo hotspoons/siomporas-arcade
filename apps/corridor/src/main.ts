@@ -4,8 +4,12 @@ import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { buildSite, describe, type Site } from './scene'
 import { Car, type CarInput } from './car'
+import { retro } from './retro'
+
+/** 16-point compass, indexed by bearing/22.5 — N at 0, clockwise through E. */
+const COMPASS = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW']
 import { FlyControls } from './fly'
-import { MiniMap } from './minimap'
+import { MiniMap, siteProjector } from './minimap'
 import { Sky } from './sky'
 import { SquishyHunt } from './games/squishy'
 import { Parkour } from './games/parkour'
@@ -158,6 +162,7 @@ async function loadSite(slug: string) {
     reliefManifest(manifest)
     ui.setRelief(reliefWanted)
   }
+  retro.clear() // the previous site's paint and signs are gone
   site = await buildSite(manifest, status, LITE, renderer, scene.fog as THREE.FogExp2, season, style)
   applySky(season)
   scene.add(site.group)
@@ -168,11 +173,33 @@ async function loadSite(slug: string) {
     site,
     scene,
     camera,
+    // probes that need to read PIXELS must render and call gl.readPixels in the same turn: the
+    // viewer's renderer has no preserveDrawingBuffer, so a drawImage a frame later reads a
+    // cleared buffer and every measurement comes back black
+    renderer,
     // the orbit controls re-derive the camera from their own target every frame, so a probe that
     // only writes camera.position gets dragged back; set orbit.target too, as applyStance does
     orbit,
     drive,
+    /** the car itself, so a probe can check what the HUD claims against what the car is doing */
+    get car() { return drive.car },
+    /**
+     * lon/lat to the site's PLAN coordinates (east, north metres about the frame anchor) — the
+     * same projector the minimap draws with. World is (east, up, -north), so plan y is -worldZ.
+     * Exposed because it is the only honest way for a probe to ask which way is north.
+     */
+    project: (lon: number, lat: number) => siteProjector(site!.manifest.frame as Parameters<typeof siteProjector>[0])(lon, lat),
     tuneDialog: tuneUI.dialog, // probes drive the panel's dock/float through this
+    /** the retroreflection rig: what the paint and the signs were told this frame */
+    retro: () => ({
+      ...retro.count,
+      night: +retro.uniforms.uNight.value.toFixed(3),
+      lampOn: +retro.uniforms.uLampOn.value.toFixed(3),
+      lampPos: retro.uniforms.uLampPos.value.map((v) => [+v.x.toFixed(1), +v.y.toFixed(1), +v.z.toFixed(1)]),
+      lampDir: retro.uniforms.uLampDir.value.map((v) => [+v.x.toFixed(2), +v.y.toFixed(2), +v.z.toFixed(2)]),
+      range: retro.uniforms.uLampRange.value,
+      cosOuter: +retro.uniforms.uCosOuter.value.toFixed(3),
+    }),
     splats: () => splats.map((f) => f.counts()),
     /** show/hide the captured world WITHOUT a retune — a knob change re-seeds the grass and
      * re-picks the trees, so a probe comparing two frames would be measuring that instead */
@@ -657,6 +684,12 @@ function applySky(s: Season) {
   skyEnvironment()
   // headlights follow the night, not the clock: they come on as the sun goes and off as it returns
   drive.car?.setLights(night * (drive.on ? 1 : 0.6))
+  // and the retroreflectors take the same day/night level as the grass and the impostors, so the
+  // paint and the signs go dark with everything else and come back only in the beam (retro.ts)
+  retro.setLight(
+    Math.max(0.02, day + night * (T.NIGHT_AMBIENT * 1.1 + 1.6 * moonlight)) * Math.max(0.05, T.AMBIENT_GAIN),
+    new THREE.Color(1, 1, 1).lerp(new THREE.Color(0x7f93c4), night * 0.85),
+  )
   // the knob is the single source of truth for road-and-car: car.ts reads T.WEATHER_GRIP_SCALE
   tuneKey('WEATHER_GRIP_SCALE')?.set(w.grip)
   site?.setWeather(weatherNow())
@@ -1053,7 +1086,25 @@ function frame() {
     // readout and the physics can never disagree about which road you are on (Rich, 2026-09-26).
     const on = T.HUD_ROAD_NAME > 0 ? site.roadAt(car.pos.x, car.pos.z) : null
     const road = on ? (on.ref && on.name ? `${on.name} (${on.ref})` : on.name ?? on.ref ?? null) : null
-    ui.setPos(`${(Math.abs(car.speed) * 2.237).toFixed(0)} mph · ${car.onGrass ? 'grass' : 'pavement'}${Math.abs(car.slide) > 1 ? ' · sliding' : ''}${road ? ` · ${road}` : ''}`)
+    // Elevation and heading (Rich, 2026-09-27: "the ground elevation (e.g. 121 feet) and heading
+    // (e.g. e/ne) at the current position of the car").
+    //
+    // The number is real rather than decorative: the corridor DEM is NAVD88 metres and the bake
+    // anchors the frame at h = 0, so world Y IS height above the vertical datum. Feet, because
+    // the line already reads in mph. It follows the GROUND under the car, not the car body, so
+    // it does not jump when you land.
+    //
+    // Heading is a true bearing. World is (east, up, −north), so north is −z and the bearing is
+    // atan2(east, north) — not atan2 of the raw x and z, which would read 90° out.
+    let tele = ''
+    if (T.HUD_TELEMETRY > 0) {
+      const gy = site.groundAt(car.pos.x, car.pos.z)
+      const ft = Math.round((gy ?? car.pos.y) * 3.28084)
+      const brg = (Math.atan2(car.forward.x, -car.forward.z) * (180 / Math.PI) + 360) % 360
+      const pt = COMPASS[Math.round(brg / 22.5) % 16]
+      tele = ` · ${ft} ft · ${pt} ${brg.toFixed(0).padStart(3, '0')}°`
+    }
+    ui.setPos(`${(Math.abs(car.speed) * 2.237).toFixed(0)} mph · ${car.onGrass ? 'grass' : 'pavement'}${Math.abs(car.slide) > 1 ? ' · sliding' : ''}${road ? ` · ${road}` : ''}${tele}`)
   } else if (parkour) {
     parkour.tick(dt)
     ui.setPos(`${parkour.score} pts`)
@@ -1082,6 +1133,11 @@ function frame() {
     for (const f of splats) f.update(camera.position.x, -camera.position.z)
     // the world looks wet while it is wet: the weather ramps it, the surfaces follow
     site.setWet(site.weather.wetness)
+    // where the headlamps are pointing THIS frame, straight off the car's own spot lights, so the
+    // retro cone and the visible beam cannot drift apart (retro.ts, car.lamps)
+    const lamps = drive.car?.lamps()
+    retro.setLamps(lamps?.each ?? [], lamps?.on ?? 0)
+    retro.tick()
     // the player is the car when driving, the eye on foot or in the air; heading is compass from north
     if (game) game.tick(dt, drive.on && drive.car ? drive.car.pos : camera.position, drive.on && drive.car ? Math.atan2(drive.car.forward.x, -drive.car.forward.z) : Math.atan2(fwd.x, -fwd.z))
     // the inset map follows the car when driving, the camera when flying; site frame is x east, y north = -z
@@ -1119,6 +1175,16 @@ registerBridgeContext({
   orbit,
   renderer,
   drive,
+  // the car itself, so a probe can check what the HUD says against what the car is doing
+  get car() {
+    return drive.car
+  },
+  /**
+   * lon/lat to the site's PLAN coordinates (east, north metres about the frame anchor) — the
+   * same projector the minimap draws with. World is (east, up, -north), so plan y is -worldZ.
+   * Exposed because it is the only honest way for a probe to ask which way is north.
+   */
+  project: (lon: number, lat: number) => (site ? siteProjector(site.manifest.frame as Parameters<typeof siteProjector>[0])(lon, lat) : null),
   THREE,
   tune: TUNE_TABS,
   /**

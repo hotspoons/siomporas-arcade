@@ -158,6 +158,18 @@ export class NearTrees {
   private last = new THREE.Vector3(Infinity, Infinity, Infinity)
   private lastHeading = 0
   private capacity: number
+  /**
+   * How far the procedural models ACTUALLY reach this frame, in lodDistance.
+   *
+   * Not the same as TREE_NEAR_RADIUS. The near set takes the closest `capacity x variants`
+   * candidates inside that radius, so in woodland it runs out of capacity long before it runs out
+   * of radius and the real model horizon is much closer in — and a dissolve band anchored to the
+   * radius then covers trees the near set never drew, i.e. nobody, which is why the impostor
+   * cards were popping rather than fading (Rich, 2026-09-27: "design a cross fading mechanism for
+   * trees and sprites, where imposters fade out as full detail trees fade in"). `cands` is sorted
+   * by distance, so the last one seated is the farthest, and that is where the handover is.
+   */
+  horizon = 0
   private flora: Flora | null
   /** memoised variant per tree index: the draw is stable, so it is worth computing once */
   private chosen: Int16Array
@@ -382,6 +394,7 @@ export class NearTrees {
     const s = new THREE.Vector3()
     const p = new THREE.Vector3()
     this.near.clear()
+    this.horizon = 0
     for (let k = 0; k < total; k++) {
       const { i } = cands[k]
       const t = this.trees[i]
@@ -399,6 +412,7 @@ export class NearTrees {
       v.leavesSparse.setMatrixAt(counts[vi], m)
       counts[vi]++
       this.near.add(i)
+      this.horizon = Math.sqrt(cands[k].d2)
     }
     this.variants.forEach((v, vi) => {
       v.branches.count = counts[vi]

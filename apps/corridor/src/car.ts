@@ -88,6 +88,7 @@ export class Car {
   /** the headlamp meshes and their beams; setLights drives both (main.ts, from the sun's elevation) */
   private headLamps: THREE.Mesh[] = []
   private beams: THREE.SpotLight[] = []
+  private lightSig = ''
   private lightsOn = 0
   /** dash, pillars and wheel: drawn only from inside (setCockpit) */
   private interior: THREE.Group | null = null
@@ -424,7 +425,7 @@ export class Car {
       // THE BEAM. A lamp that glows but lights nothing is a lamp in a photograph; at night the
       // road ahead is the only thing you steer by. One spot per side, aimed down the nose and a
       // little down, with its target parented to the car so it turns with the wheel.
-      const beam = new THREE.SpotLight(0xfff4de, 0, 70, 0.42, 0.55, 1.4)
+      const beam = new THREE.SpotLight(0xfff4de, 0, 70, T.HEADLIGHT_ANGLE, 0.55, 1.4)
       beam.position.set(2.1, 0.7, zz * 0.52)
       beam.target.position.set(2.1 + 40, -2.5, zz * 0.52)
       g.add(beam, beam.target)
@@ -491,11 +492,17 @@ export class Car {
    */
   setLights(on: number) {
     const v = Math.min(1, Math.max(0, on))
-    if (Math.abs(v - this.lightsOn) < 0.01) return
+    // The early-out has to watch the KNOBS as well as the level. It used to compare only `v`, so
+    // turning HEADLIGHT down did nothing at all until the sun next moved — the panel moved, the
+    // beam did not, and the only way to see the change was to wait for dusk (2026-09-27).
+    const sig = `${v.toFixed(3)}|${T.HEADLIGHT}|${T.HEADLIGHT_RANGE}|${T.HEADLIGHT_ANGLE}`
+    if (sig === this.lightSig) return
+    this.lightSig = sig
     this.lightsOn = v
     for (const b of this.beams) {
       b.intensity = v * 140 * T.HEADLIGHT
       b.distance = T.HEADLIGHT_RANGE
+      b.angle = T.HEADLIGHT_ANGLE
       b.target.position.x = 2.1 + T.HEADLIGHT_RANGE * 0.6
       b.target.position.y = -T.HEADLIGHT_RANGE * 0.04
       b.visible = v > 0.02
@@ -504,6 +511,29 @@ export class Car {
       const mat = m.material as THREE.MeshStandardMaterial
       mat.emissiveIntensity = 0.35 + 2.2 * v
     }
+  }
+
+  /**
+   * Where the lamps are and where they point, in WORLD space, and how hard they are on.
+   *
+   * The retroreflective materials (retro.ts) light themselves against these rather than against
+   * three.js's lights, because a retroreflector returns light along the incoming ray and the
+   * standard BRDF cannot express that. Taking the numbers off the SpotLights themselves means
+   * the retro cone and the visible beam cannot drift apart: there is one source of truth for
+   * where the headlights are pointing, and it is the car.
+   */
+  lamps(): { each: { pos: THREE.Vector3; dir: THREE.Vector3 }[]; on: number } {
+    const each: { pos: THREE.Vector3; dir: THREE.Vector3 }[] = []
+    for (const b of this.beams) {
+      const p = new THREE.Vector3()
+      const t = new THREE.Vector3()
+      b.getWorldPosition(p)
+      b.target.getWorldPosition(t)
+      each.push({ pos: p, dir: t.sub(p).normalize() })
+    }
+    // what the beam is really doing, knob included — retroreflection must follow the light that
+    // is actually there, or turning the headlights off leaves the paint still answering them
+    return { each, on: this.lightsOn * (T.HEADLIGHT > 0 ? 1 : 0) }
   }
 
   /** Inside or outside: swap the body shell for the dash, pillars and wheel. */

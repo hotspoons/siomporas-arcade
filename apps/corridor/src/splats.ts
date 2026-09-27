@@ -247,7 +247,12 @@ export class SplatField {
     // Spark renders every SplatMesh in the scene; one renderer for the whole viewer. Its shaders
     // already carry three's logarithmic-depth chunks, which is why this can share a scene with a
     // world drawn under logarithmicDepthBuffer at all.
-    field.spark = new SparkRenderer({ renderer })
+    // minSortIntervalMs, because Spark's default of 0 means "re-sort whenever
+    // you like" and the sort is the ONLY thing the capture costs: measured on a
+    // real GPU with 2.2M gaussians resident, the median frame is the same with
+    // the capture on and off, and the p90 is 59 ms against 18 ms. See
+    // SPLAT_SORT_MS in tuning.ts for the numbers.
+    field.spark = new SparkRenderer({ renderer, minSortIntervalMs: T.SPLAT_SORT_MS })
     field.group.add(field.spark)
     return field
   }
@@ -257,6 +262,10 @@ export class SplatField {
     if (!T.SPLAT_ENABLED) {
       for (const t of this.tiles) this.drop(t)
       return
+    }
+    // keep the knob live: it is the one people will reach for when it stutters
+    if (this.spark && this.spark.minSortIntervalMs !== T.SPLAT_SORT_MS) {
+      this.spark.minSortIntervalMs = T.SPLAT_SORT_MS
     }
     const load = T.SPLAT_LOAD_M, keep = T.SPLAT_KEEP_M
     let inFlight = 0

@@ -425,6 +425,23 @@ export let SPLAT_LOAD_M = 400
 export let SPLAT_KEEP_M = 700
 /** how many megabytes of gaussians may be resident */
 export let SPLAT_BUDGET_MB = 512
+/**
+ * Floor on how often Spark re-sorts its gaussians, in ms.
+ *
+ * Spark's default is 0 -- sort whenever it likes -- and on a real GPU with
+ * ~2-3M gaussians resident that is a 60-80 ms stall every ~8 frames, with the
+ * car stationary. Measured on Rich's machine at the Gosheff stance: the MEDIAN
+ * frame time is identical with the capture on and off (16.6 vs 16.7 ms), so
+ * drawing the gaussians is free; the whole cost is the periodic re-sort.
+ *
+ *   sort interval   p50     p90     p99
+ *   0 (default)     16.6    59.1    81.5
+ *   250 ms          16.8    23.0   100.2
+ *
+ * The visible cost of sorting less often is blend-order error while turning
+ * quickly, which is much cheaper than a stutter you can feel.
+ */
+export let SPLAT_SORT_MS = 200
 export let WATER_LEVEL_M = 0
 export let WATER_LEVEL_SPAN = 30000
 
@@ -605,6 +622,7 @@ export const TUNE_TABS: TuneTab[] = [
           tune('SPLAT_LOAD_M', () => SPLAT_LOAD_M, (v) => (SPLAT_LOAD_M = v), [50, 2000], 25, 'load a tile once it is this close (m)'),
           tune('SPLAT_KEEP_M', () => SPLAT_KEEP_M, (v) => (SPLAT_KEEP_M = v), [100, 4000], 25, 'drop it beyond this (m)'),
           tune('SPLAT_BUDGET_MB', () => SPLAT_BUDGET_MB, (v) => (SPLAT_BUDGET_MB = v), [64, 2048], 32, 'megabytes of gaussians that may be resident'),
+          tune('SPLAT_SORT_MS', () => SPLAT_SORT_MS, (v) => (SPLAT_SORT_MS = v), [0, 1000], 25, 'floor on how often Spark re-sorts the gaussians (ms) \u2014 0 is Spark\u2019s default and stutters'),
         ],
       },
       {

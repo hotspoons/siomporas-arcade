@@ -28,6 +28,12 @@ import { STYLE, styled, isStyle, type Style } from './style'
 import { setRelief, relief, clampRelief, spineDatum, reliefManifest } from './relief'
 import { WorldClock, sunPosition, sunVector } from './sun'
 import { SplatField, attachmentsFor } from './splats'
+import { antialiasFor, bootSlug, noteCaptureAttached, postAAFor } from './render'
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js'
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
+import { FXAAPass } from 'three/examples/jsm/postprocessing/FXAAPass.js'
+import { SMAAPass } from 'three/examples/jsm/postprocessing/SMAAPass.js'
 import { rasteriseEnvelope, splatMaskUniforms } from './splatmask'
 import { Attribution } from './attribution'
 import { loadSiteTuning } from './sitetuning'
@@ -39,7 +45,11 @@ import { installShellKeys, toast, status, clearStatus } from './ui/shell'
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector<T>(sel)!
 
 const canvas = $<HTMLCanvasElement>('#gl')
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, logarithmicDepthBuffer: true })
+// MSAA is a CONTEXT attribute, so it is decided here and nowhere else: it cannot be
+// toggled on a live renderer. See render.ts for why a capture makes it expensive and
+// why turning it off makes the grass sparkle.
+const antialias = antialiasFor(bootSlug())
+const renderer = new THREE.WebGLRenderer({ canvas, antialias, logarithmicDepthBuffer: true })
 renderer.setPixelRatio(Math.min(2, devicePixelRatio))
 const scene = new THREE.Scene()
 scene.background = new THREE.Color(0xbfd2ea)
@@ -151,6 +161,18 @@ function siteZone(): string {
   return off === 0 ? 'Etc/GMT' : `Etc/GMT${off > 0 ? '-' : '+'}${Math.abs(off)}`
 }
 const ui = new ViewerUI({
+  // Post-process AA can be rebuilt in place; MSAA is a context attribute and needs a
+  // new context, so that one and only that one reloads.
+  onAAChange: () => {
+    const slug = site?.manifest.slug ?? bootSlug()
+    if (antialiasFor(slug) !== renderer.getContext().getContextAttributes()?.antialias) {
+      const u = new URL(location.href)
+      u.searchParams.delete('aa')
+      location.replace(u.toString())
+      return
+    }
+    buildPostAA(postAAFor(slug))
+  },
   onSite: (slug) => {
     location.hash = slug
     void loadSite(slug)
@@ -186,12 +208,52 @@ let game: SquishyHunt | null = null
 let parkour: Parkour | null = null
 const wantGame = new URLSearchParams(location.search).get('game')
 
+/**
+ * Post-process anti-aliasing, built only if a mode asks for it.
+ *
+ * The chain is RenderPass -> the AA pass -> OutputPass, and the ORDER is the
+ * whole trick. EffectComposer renders into a linear half-float target, and
+ * OutputPass is what converts that to sRGB for the screen -- so it has to be
+ * LAST. Putting it earlier (which reads more naturally: "convert, then filter
+ * what the viewer sees") makes the final pass convert an already-converted
+ * frame, and the picture comes out uniformly brighter. Measured when this was
+ * wrong: mean RGB 113.4/116.6/82.4 against 105.4/108.9/74.6 for the same view,
+ * +8 on every channel.
+ */
+let composer: EffectComposer | null = null
+function buildPostAA(mode: 'fxaa' | 'smaa' | null) {
+  composer?.dispose()
+  composer = null
+  if (!mode) return
+  const c = new EffectComposer(renderer)
+  c.addPass(new RenderPass(scene, camera))
+  c.addPass(mode === 'smaa' ? new SMAAPass() : new FXAAPass())
+  c.addPass(new OutputPass())
+  c.setSize(innerWidth, innerHeight)
+  c.setPixelRatio(renderer.getPixelRatio())
+  composer = c
+}
+
 function resize() {
   const w = innerWidth, h = innerHeight
   renderer.setSize(w, h, false)
+  composer?.setSize(w, h)
   camera.aspect = w / h
   camera.updateProjectionMatrix()
 }
+// A way BACK from a hidden interface. `M` toggles it, but a hidden interface hides the
+// thing that told you about `M`, so a keyboard-only escape is a trap for anyone who hid
+// it by clicking. This is the only chrome that survives chrome-off, and it fades to
+// almost nothing until you go near it.
+const chromeBack = document.createElement('button')
+chromeBack.id = 'chrome-restore'
+chromeBack.type = 'button'
+chromeBack.title = 'Show the interface (M)'
+chromeBack.setAttribute('aria-label', 'Show the interface')
+chromeBack.textContent = '\u2261'
+chromeBack.onclick = () => document.body.classList.remove('chrome-off')
+document.body.append(chromeBack)
+
 addEventListener('resize', resize)
 // the last quarter-second is worth keeping too: a reload can land between ticks
 addEventListener('pagehide', saveResume)
@@ -373,6 +435,7 @@ async function loadSite(slug: string) {
       },
     },
   }
+  buildPostAA(postAAFor(slug))
   applyLayers()
   fillInfo(manifest)
   fly ??= new FlyControls(camera, orbit, canvas, (x, z) => site?.groundAt(x, z) ?? null)
@@ -389,6 +452,7 @@ async function loadSite(slug: string) {
     const anchor = manifest.frame?.anchor
     if (anchor) {
       for (const att of await attachmentsFor(slug)) {
+        noteCaptureAttached(slug)
         const f = await SplatField.attach(att, anchor, renderer)
         if (!f) continue
         scene.add(f.group)
@@ -1417,7 +1481,8 @@ function frame() {
     else minimap?.draw({ x: camera.position.x, y: -camera.position.z, yaw: Math.atan2(-fwd.z, fwd.x) })
   }
   skyDome.tick(performance.now() / 1000)
-  renderer.render(scene, camera)
+  if (composer) composer.render()
+  else renderer.render(scene, camera)
   requestAnimationFrame(frame)
 }
 

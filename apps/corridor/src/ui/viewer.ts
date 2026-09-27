@@ -13,6 +13,7 @@
 //
 // The old panel had all four of these in one always-on column, which is why finding anything in it
 // meant scrolling past everything else.
+import { aaMode, setAAMode, resolvedAA, type AAMode } from '../render'
 import { Dialog, Drawer, Tabs, button, el, type Tab } from './shell'
 import { icon } from './icons'
 import { empty, group, bodyOf, layerToggle, readout, select, toggle } from './controls'
@@ -163,7 +164,16 @@ const KEYS: { group: string; rows: [string, string][] }[] = [
   },
 ]
 
+const AA_LABEL: Record<Exclude<AAMode, 'auto'>, string> = {
+  msaa: 'MSAA (needs reload)',
+  fxaa: 'FXAA',
+  smaa: 'SMAA',
+  off: 'none',
+}
+
 export interface ViewerUIOpts {
+  /** the AA mode changed; MSAA needs a reload, the post-process ones do not */
+  onAAChange?: (m: AAMode) => void
   onSite: (slug: string) => void
   onSeason: (s: Season) => void
   onStyle: (s: Style) => void
@@ -416,6 +426,33 @@ export class ViewerUI {
       }),
     )
     host.append(g)
+
+    // Rendering, not tuning: MSAA is a WebGL context attribute, so unlike a tuning knob
+    // it cannot be nudged while you watch it. The reasoning lives in render.ts; the panel
+    // just says what is on.
+    const slug = this.manifest?.slug ?? ''
+    const r = group('Rendering')
+    const now = readout('Now', AA_LABEL[resolvedAA(slug)])
+    bodyOf(r).append(
+      select<AAMode>({
+        label: 'Anti-aliasing',
+        value: aaMode(),
+        options: [
+          { value: 'auto', label: 'Auto' },
+          { value: 'msaa', label: 'MSAA' },
+          { value: 'fxaa', label: 'FXAA' },
+          { value: 'smaa', label: 'SMAA' },
+          { value: 'off', label: 'Off' },
+        ],
+        onChange: (v) => {
+          setAAMode(v)
+          this.o.onAAChange?.(v)
+          now.querySelector('.field-value')!.textContent = AA_LABEL[resolvedAA(slug)]
+        },
+      }),
+      now,
+    )
+    host.append(r)
 
     const t = group('Interface')
     bodyOf(t).append(

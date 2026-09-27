@@ -121,7 +121,25 @@ export class Flora {
     this.siteMix = resolve(block.canopy.species)
   }
 
-  /** The EVT class at a point in site metres, or null outside the corridor / with no grid. */
+  /**
+   * The EVT class at a point in site metres, or null outside the corridor / with no grid.
+   *
+   * KNOWN WRONG BY UP TO ~158 m AT THE SITE CORNERS, and left that way deliberately for now.
+   *
+   * This indexes the grid by interpolating `layer.bbox`, and a raster cannot be placed OR sampled
+   * from its bounding box — `packages/engine/src/geo/raster.ts` opens by saying so. The EVT grid's
+   * own axes are UTM zone 18N, 1.06 degrees off the ENU true north these coordinates are in, so
+   * the bbox is the axis-aligned box AROUND a rotated rectangle: zero error at the site centre,
+   * growing linearly outwards. It is the same fault that drew the minimap's photograph askew
+   * (fixed 2026-09-27, `probes/corridor-minimap-registration.mjs`).
+   *
+   * The fix is `RasterFrame(layer, anchor).indexAt(east, north)`, which the terrain already uses.
+   * It is not applied here yet because the row order has to be established first: the control
+   * lattice runs SOUTH to north while an image's rows run north to south, and getting that
+   * backwards flips every species mix on the site without looking obviously wrong. The cost of
+   * the bug meanwhile is a tree picking its neighbour's mix near the edges of the site, which is
+   * why it is not urgent.
+   */
   at(x: number, y: number): FloraClass | null {
     if (!this.grid || !this.layer) return null
     const [xmin, ymin, xmax, ymax] = this.layer.bbox

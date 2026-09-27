@@ -369,6 +369,14 @@ const server = http.createServer(async (req, res) => {
 async function api(req, res, seg, q) {
   /* ---- liveness, readiness, what this is pointed at ---- */
   if (seg[0] === 'health') return json(res, 200, { ok: true, data: store.root })
+  /*
+   * How big a chunk may an upload send? THE SERVER SAYS, because only the server knows what is in
+   * front of it. An ingress with `proxy-body-size: 64m` turns a 64 MiB chunk into a 413 three
+   * hours into a capture, and the client has no way to find that out for itself.
+   */
+  if (seg[0] === 'uploads' && seg[1] === 'limits' && req.method === 'GET') {
+    return json(res, 200, { chunkBytes: Number(env.WORLDEDITOR_UPLOAD_CHUNK_MIB ?? 32) * 2 ** 20, why: 'the ingress in front of this service limits a single body; stay under it' })
+  }
   /* which inference is reachable from this pod, and how it was found. `?live=1` asks each one. */
   if (seg[0] === 'models' && req.method === 'GET') {
     return json(res, 200, { models: await models.describe({ live: q.get('live') === '1' }) })

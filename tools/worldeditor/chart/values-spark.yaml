@@ -1,0 +1,74 @@
+# Six DGX Sparks.
+#
+# A GB10 is 20 Arm cores and 128 GB of UNIFIED memory — the GPU and the CPU share one pool. That
+# last word is why this is not the default values file with smaller numbers: on gh200-1 a model
+# sits in 96 GB of HBM and the host has 573 GiB of its own, and on a Spark a resident model and a
+# running bake are spending the same 128.
+#
+#   node tools/worldeditor/preflight.mjs --profile spark      # before installing anything
+#   helm install worldeditor tools/worldeditor/chart -f tools/worldeditor/chart/values-spark.yaml
+#
+# WHAT HAS TO BE DECIDED LOCALLY, because no default can be right:
+#
+#   * `data.storageClass`. The editor, the bake Job and the training pods mount one volume AT ONCE,
+#     so it must be ReadWriteMany. A Spark cluster does not come with Ceph; the usual answers are
+#     an NFS CSI driver against one node's NVMe, or Longhorn with RWX enabled. `local-path`, which
+#     is what k3s gives you, is ReadWriteOnce and will fail the moment a bake starts.
+#   * the image tags. `latest` with IfNotPresent silently re-runs a cached old image — it has cost
+#     two identical diagnoses already — so pin `sha-`.
+#
+# Everything we publish is already linux/arm64, so nothing needs rebuilding: gh200-1 is Grace Arm
+# too and this has been an arm64 product from the start without anybody saying so.
+
+data:
+  size: 500Gi
+  accessMode: ReadWriteMany
+  storageClass: ""          # SET THIS. See above; there is no safe default.
+
+worldeditor:
+  # 8 of 20 cores, 32 of 128 GiB: two bakes can run on two nodes and neither starves its kubelet.
+  # The default (16 cpu, 48 GiB) schedules on a Spark and takes 80% of the node — preflight says
+  # so rather than letting you find out.
+  bake:
+    resources:
+      requests: {cpu: "2", memory: 8Gi}
+      limits: {cpu: "8", memory: 32Gi}
+    horizonRadiusM: 30000
+
+  # The service itself is small and should stay off the GPU nodes' backs.
+  resources:
+    requests: {cpu: "200m", memory: 256Mi}
+    limits: {cpu: "1", memory: 2Gi}
+
+  # 32 MiB chunks against a 64m ingress limit. Equal numbers are a coin toss: what nginx measures
+  # is not exactly what the client counted, so the chunk is half the limit and not all of it.
+  uploadChunkMiB: 32
+
+  splat:
+    # One GPU per Spark, so a run is a leader plus up to five workers. The count is a function of
+    # FREE GPUS and not of the footage — a worker that finds an empty queue finishes — so this is
+    # a ceiling, not a requirement.
+    workers: 5
+    storageClass: ""        # SET THIS too: the training output volume, also RWX
+    outputSize: 500Gi
+
+ingress:
+  enabled: true
+  annotations:
+    # must exceed uploadChunkMiB with room; preflight checks it
+    nginx.ingress.kubernetes.io/proxy-body-size: "64m"
+    # a chapter upload holds a connection for as long as a chunk takes on a home connection
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
+
+# The models. On unified memory these are not free the way they are on a GH200: whatever is
+# resident is memory a bake on that node cannot have. Two reasonable shapes —
+#
+#   * one Spark dedicated to inference, five for bakes and training. Simplest, and what
+#     `modelsResidentGiB: 40` in the spark preflight profile assumes.
+#   * no resident models, and the editor points at flux and qwen somewhere else entirely
+#     (MODEL_URL_IMAGE / MODEL_URL_TEXT / MODEL_URL_MESH). The resolver takes an explicit URL
+#     ahead of anything it can discover, precisely so this is a configuration choice.
+models:
+  resolve: true             # discover through the CRD, then Services; see models.mjs
+  urls: {}                  # or pin: { image: "http://...", mesh: "http://...", text: "http://..." }

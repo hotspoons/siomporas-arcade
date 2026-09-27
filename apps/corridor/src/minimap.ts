@@ -49,6 +49,24 @@ export class MiniMap {
   private ctx: CanvasRenderingContext2D
   private imagery: HTMLImageElement | null = null
   private imgBbox: [number, number, number, number] | null = null
+  /**
+   * WHERE THE PHOTOGRAPH REALLY SITS: its three corners in PLAN metres, not its bounding box.
+   *
+   * The NAIP overview's own grid is UTM zone 18N, and UTM grid north is 1.06 degrees off true
+   * north here (`frame.utm_convergence_deg`). The vectors go through the ENU projector, which is
+   * true north and right. Stamping the photo into `layers.naip.bbox` therefore drew it rotated
+   * back by that angle — and, because an axis-aligned bounding box of a rotated rectangle is
+   * bigger than the rectangle, stretched by 1.7 per cent east and 2.0 per cent north as well.
+   *
+   * Measured across the 81 control points: zero at the site centre, growing linearly to 158 m at
+   * the corners, and 64 m almost due east where Rich was parked — "the rendered vectors drifting
+   * from the sat imagery, this time mostly horizontally" (2026-09-27). A least-squares affine fit
+   * left 6 cm, so the residual really was just the rotation and the stretch.
+   *
+   * The three corners give the affine the canvas needs; `layers.naip.geo` is the lattice the bake
+   * wrote for exactly this purpose, and the 3D world has been using it all along (RasterFrame).
+   */
+  private imgQuad: { tl: [number, number]; tr: [number, number]; bl: [number, number] } | null = null
   private roads: Road[] = []
   private spine: Float32Array
   private siblings: Float32Array[]
@@ -175,12 +193,72 @@ export class MiniMap {
     this.canvas.style.height = `${this.h}px`
   }
 
+  /**
+   * The raster's own corners, in plan metres, from its geodetic control lattice.
+   *
+   * Rows run SOUTH-to-north in these bakes (row 0 is the southern edge) while an image's first
+   * pixel row is its TOP, so the image's top-left is the lattice's LAST row, first column. Null
+   * for a bake made before the lattice existed, and then the bounding box is all there is.
+   */
+  private quadOf(L: { geo?: { n: number; lon: number[]; lat: number[] } }): { tl: [number, number]; tr: [number, number]; bl: [number, number] } | null {
+    const g = L.geo
+    if (!g || !g.n || !g.lon || !g.lat) return null
+    const fr = this.manifest.frame as { epsg: number; origin: [number, number]; kind?: string; anchor?: { lon: number; lat: number; h?: number } }
+    const proj = siteProjector(fr)
+    const n = g.n
+    const at = (r: number, c: number): [number, number] => proj(g.lon[r * n + c], g.lat[r * n + c])
+    // which row is north? ask the lattice rather than remember
+    const northIsLastRow = g.lat[(n - 1) * n] > g.lat[0]
+    const top = northIsLastRow ? n - 1 : 0
+    const bot = northIsLastRow ? 0 : n - 1
+    return { tl: at(top, 0), tr: at(top, n - 1), bl: at(bot, 0) }
+  }
+
+  /**
+   * How far the photograph is from the linework, in metres, at the bake's own control points.
+   *
+   * Measured through the SAME quad `draw` uses, so it cannot pass while the drawing is wrong.
+   * Returns null until the image has loaded.
+   */
+  registration(): { points: number; maxM: number; meanM: number; worst: [number, number] } | null {
+    const L = this.manifest.layers.naip as { geo?: { n: number; lon: number[]; lat: number[] } } | undefined
+    const g = L?.geo
+    const q = this.imgQuad
+    if (!g || !q || !this.imagery) return null
+    const fr = this.manifest.frame as Parameters<typeof siteProjector>[0]
+    const proj = siteProjector(fr)
+    const n = g.n
+    const northIsLastRow = g.lat[(n - 1) * n] > g.lat[0]
+    let max = 0
+    let sum = 0
+    let worst: [number, number] = [0, 0]
+    for (let r = 0; r < n; r++) {
+      for (let c = 0; c < n; c++) {
+        // where this control point sits in IMAGE pixels, then through the quad into plan metres
+        const u = c / (n - 1)
+        const v = (northIsLastRow ? n - 1 - r : r) / (n - 1)
+        const px = q.tl[0] + u * (q.tr[0] - q.tl[0]) + v * (q.bl[0] - q.tl[0])
+        const py = q.tl[1] + u * (q.tr[1] - q.tl[1]) + v * (q.bl[1] - q.tl[1])
+        const [tx, ty] = proj(g.lon[r * n + c], g.lat[r * n + c])
+        const d = Math.hypot(px - tx, py - ty)
+        sum += d
+        if (d > max) { max = d; worst = [+(px - tx).toFixed(2), +(py - ty).toFixed(2)] }
+      }
+    }
+    return { points: n * n, maxM: +max.toFixed(2), meanM: +(sum / (n * n)).toFixed(2), worst }
+  }
+
   private async load() {
     const L = this.manifest.layers.naip
     if (L) {
       const img = new Image()
       img.crossOrigin = 'anonymous'
-      img.onload = () => { this.imagery = img; this.imgBbox = L.bbox; this.draw(null) }
+      img.onload = () => {
+        this.imagery = img
+        this.imgBbox = L.bbox
+        this.imgQuad = this.quadOf(L)
+        this.draw(null)
+      }
       img.src = `${DATA_BASE}/sites/${this.manifest.slug}/web/${L.file}`
     }
     try {
@@ -234,7 +312,24 @@ export class MiniMap {
     ctx.fillStyle = '#1b2a1f'
     ctx.fillRect(0, 0, W, H)
     const toPx = (x: number, y: number): [number, number] => [W / 2 + (x - this.centre.x) * this.pxPerM, H / 2 - (y - this.centre.y) * this.pxPerM]
-    if (this.imagery && this.imgBbox) {
+    if (this.imagery && this.imgQuad) {
+      // The photo is a ROTATED rectangle in this frame, and `drawImage` only draws upright ones —
+      // so the transform does the rotating. Its columns are the image's own u and v axes, in
+      // canvas pixels, and its offset is where pixel (0, 0) goes.
+      const q = this.imgQuad
+      const tl = toPx(q.tl[0], q.tl[1])
+      const tr = toPx(q.tr[0], q.tr[1])
+      const bl = toPx(q.bl[0], q.bl[1])
+      const iw = this.imagery.width || 1
+      const ih = this.imagery.height || 1
+      ctx.save()
+      ctx.globalAlpha = 0.85
+      ctx.transform((tr[0] - tl[0]) / iw, (tr[1] - tl[1]) / iw, (bl[0] - tl[0]) / ih, (bl[1] - tl[1]) / ih, tl[0], tl[1])
+      ctx.drawImage(this.imagery, 0, 0)
+      ctx.restore()
+      ctx.globalAlpha = 1
+    } else if (this.imagery && this.imgBbox) {
+      // a bake from before the geodetic lattice: the bounding box is all there is
       const [x0, y0, x1, y1] = this.imgBbox
       const [px0, py1] = toPx(x0, y0)
       const [px1, py0] = toPx(x1, y1)

@@ -203,6 +203,8 @@ async function loadSite(slug: string) {
      */
     project: (lon: number, lat: number) => siteProjector(site!.manifest.frame as Parameters<typeof siteProjector>[0])(lon, lat),
     tuneDialog: tuneUI.dialog, // probes drive the panel's dock/float through this
+    /** how far the minimap's photograph is from its linework, at the bake's own control points */
+    minimapRegistration: () => minimap?.registration() ?? null,
     /** the address index, for probes: `search('1053 route 3')` */
     search: (q: string) => (searchIndex.ready ? searchIndex.find(q) : null),
     searchCounts: () => ({ ready: searchIndex.ready, ...searchIndex.counts }),

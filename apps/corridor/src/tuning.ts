@@ -780,7 +780,7 @@ export const TUNE_TABS: TuneTab[] = [
       },
       {
         title: 'sidewalks',
-        collapsed: true,
+        collapsed: false,
         keys: [
           tune('SIDEWALK_KERB_H', () => SIDEWALK_KERB_H, (v) => (SIDEWALK_KERB_H = v), [0, 0.5], 0.01, 'kerb lip (m)'),
           tune('SIDEWALK_WIDTH_SCALE', () => SIDEWALK_WIDTH_SCALE, (v) => (SIDEWALK_WIDTH_SCALE = v), [0.4, 3], 0.05, 'width ×'),
@@ -801,7 +801,7 @@ export const TUNE_TABS: TuneTab[] = [
       },
       {
         title: 'intersections',
-        collapsed: true,
+        collapsed: false,
         keys: [
           tune('SIGNAL_GREEN_MAJOR', () => SIGNAL_GREEN_MAJOR, (v) => (SIGNAL_GREEN_MAJOR = v), [5, 300], 5, 'green on the superior road (s)'),
           tune('SIGNAL_GREEN_MINOR', () => SIGNAL_GREEN_MINOR, (v) => (SIGNAL_GREEN_MINOR = v), [5, 120], 1, 'green on the inferior road (s)'),

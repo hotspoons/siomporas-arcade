@@ -110,6 +110,11 @@ else if (layout.stripWrap !== 'wrap') fail(`the tab strip is ${layout.stripWrap}
 else if (!weather) fail('no weather section in the environment tab')
 else if (weather.collapsed) fail('weather still starts collapsed')
 else if (env.touchAction !== 'pan-y') fail(`sliders have touch-action: ${env.touchAction} — a vertical swipe will drag them instead of scrolling`)
+// Rich's report was that sidewalks "has no settings and hides intersections tuning" — both
+// sections are long, both were shut by the length rule, and two headings with nothing under them
+// is indistinguishable from two empty sections. They start OPEN.
 else if (!sidewalks || sidewalks.fields < 10) fail(`the sidewalks section has ${sidewalks?.fields ?? 0} fields`)
+else if (sidewalks.collapsed) fail('the sidewalks section still starts collapsed, which is what read as "no settings"')
 else if (!inter || inter.fields < 10) fail(`the intersections section has ${inter?.fields ?? 0} fields`)
+else if (inter.collapsed) fail('the intersections section still starts collapsed')
 else console.log(`PASS: ${table.total} knobs across ${table.tabs.length} tabs, ${layout.tabCount} tabs on ${layout.tabRows} row(s) at ${layout.panelW}px, no sideways scroll, weather open, sliders pan-y`)

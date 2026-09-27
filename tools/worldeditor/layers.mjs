@@ -76,6 +76,13 @@ export const LAYERS = [
     minZoom: 6,
     maxZoom: 12,
     tile: 4, // 11.25 deg cells — all of Italy is two of them
+    /**
+     * Cities and towns are sparse enough for an 11.25-degree cell; villages are not. Measured over
+     * Bologna, 2026-09-27: `city|town|village` on a level-4 cell returned 24,000 elements and hit
+     * the cap. Level 6 is 2.8 degrees, sixteen cells for the same ground, each a sixteenth of the
+     * work — and at zoom 10 and above the viewport only covers one or two of them anyway.
+     */
+    tileAt: (zoom) => (zoom < 10 ? 4 : 6),
     kind: 'points',
     /**
      * Which places, by zoom. A world view wants twenty capitals, not two thousand villages; and
@@ -240,6 +247,19 @@ export const layerById = (id) => LAYERS.find((l) => l.id === id) ?? null
  * rather than the zoom, and the two cannot drift apart.
  */
 export const variantOf = (layer, zoom) => layer.variant(zoom)
+
+/**
+ * Which quadtree level a layer is fetched on AT THIS ZOOM.
+ *
+ * A layer's tile size is not one number, because a layer does not ask one question. `places` over
+ * an 11.25-degree cell is two cheap queries for a whole country when it wants cities; the same
+ * cell asking for VILLAGES returns more than twenty-four thousand nodes and hits the element cap
+ * — which truncates in OSM id order, i.e. spatially at random, and then the "biggest first" sort
+ * runs over an arbitrary sample. A finer question needs a finer grid.
+ *
+ * A layer says so by exporting `tileAt(zoom)`; without one, its fixed `tile` stands.
+ */
+export const tileLevelOf = (layer, zoom) => (typeof layer.tileAt === 'function' ? layer.tileAt(zoom) : layer.tile)
 
 /** Which layers are worth drawing at this zoom, coarsest first. */
 export const layersAt = (zoom) => LAYERS.filter((l) => zoom >= l.minZoom && zoom < l.maxZoom)

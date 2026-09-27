@@ -34,7 +34,7 @@ import { Overpass, PUBLIC_MIRRORS } from './overpass.mjs'
 import { Tiles } from './tiles.mjs'
 import { Basemap } from './basemap.mjs'
 import { Geocoder } from './geocode.mjs'
-import { LAYERS, layersAt, tilesFor, variantOf } from './layers.mjs'
+import { LAYERS, layersAt, tilesFor, variantOf, tileLevelOf } from './layers.mjs'
 import { K8s } from './k8s.mjs'
 import { Runs } from './runs.mjs'
 import { bboxOf, circleFor } from './geo.mjs'
@@ -425,12 +425,13 @@ async function api(req, res, seg, q) {
     for (const [k, v] of Object.entries({ ...bbox, zoom })) if (!Number.isFinite(v)) return json(res, 400, { error: `${k} is required` })
     const plan = []
     for (const layer of layersAt(zoom)) {
-      const want = tilesFor(layer.tile, bbox)
+      const lvl = tileLevelOf(layer, zoom)
+      const want = tilesFor(lvl, bbox)
       // A cap on tiles, not on span. The world at zoom 2 is 512 `places` cells and nobody needs
       // 512 requests; the biggest ones are in the middle of the screen, so take those.
       const cx = (bbox.west + bbox.east) / 2
       const cy = (bbox.south + bbox.north) / 2
-      want.sort((a, b) => dist2(a, layer.tile, cx, cy) - dist2(b, layer.tile, cx, cy))
+      want.sort((a, b) => dist2(a, lvl, cx, cy) - dist2(b, lvl, cx, cy))
       // Capped per layer by what a tile COSTS, not by a single number: a places tile is one cheap
       // node query, a major tile is 5 MB and fifteen seconds. Sorted by distance from the middle of
       // the screen first, so the cap keeps what you are looking at.

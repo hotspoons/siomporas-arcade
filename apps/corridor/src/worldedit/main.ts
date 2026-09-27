@@ -73,7 +73,17 @@ let lastRoads: { count: number; cache: string; upstream: string | null; layer: s
 /** Tiles already held or in flight, so a re-plan after a small pan asks for nothing new. */
 const tileState = new Map<string, 'live' | 'done'>()
 
-const tileKey = (layer: string, t: { z: number; x: number; y: number }) => `${layer}/${t.z}/${t.x}/${t.y}`
+/**
+ * A tile's identity includes the QUESTION it answered, not just where it is.
+ *
+ * `major` is motorway+trunk below zoom 9 and adds primary above it, and the server's cache file
+ * has always keyed on that. The client's key did not, so a tile fetched at zoom 9 stayed in the
+ * map, was drawn unchanged at zoom 8 beside neighbours that had answered a different question, and
+ * `tileState.has(key)` stopped it ever being re-asked at the right one. That is why primary road
+ * numbers appeared on a motorways-only view of Northern Italy and why road density jumped from
+ * tile to tile (Rich, 2026-09-27).
+ */
+const tileKey = (layer: string, t: { z: number; x: number; y: number }, variant = '') => `${layer}/${variant}/${t.z}/${t.x}/${t.y}`
 
 /**
  * Drop tiles that are far outside the view.
@@ -134,7 +144,7 @@ async function loadLayers(bbox: Box, zoom: number) {
 
   for (const layer of plan) {
     for (const t of layer.tiles) {
-      const key = tileKey(layer.layer, t)
+      const key = tileKey(layer.layer, t, layer.variant)
       if (tileState.has(key)) continue
       tileState.set(key, 'live')
       loading++

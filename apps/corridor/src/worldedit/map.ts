@@ -31,6 +31,14 @@
 
 import type { Way } from './api'
 
+/**
+ * How many motorway shields one frame may carry.
+ *
+ * Not a style choice: 316 were measured on a single Northern Italy frame with no collision test
+ * at all, and a map with three hundred labels on it has none, because you cannot read any of them.
+ */
+const MAX_REF_LABELS = 48
+
 export interface LonLat {
   lon: number
   lat: number
@@ -486,23 +494,66 @@ export class MapView {
     g.restore()
   }
 
-  /** The motorway skeleton. Drawn under the detail roads so a town reads over its bypass. */
+  /** how many `major` ways survived the viewport cull last paint — the status panel reads it */
+  majorDrawn = 0
+
+  /**
+   * The motorway skeleton. Drawn under the detail roads so a town reads over its bypass.
+   *
+   * CULLED, THEN GROUPED, THEN STROKED ONCE PER CLASS.
+   *
+   * OSM splits a road at every junction and tag change, so the A1 arrives as 2,114 separate ways
+   * of which three quarters are shorter than one screen pixel at a country view. Drawing each one
+   * with its own `beginPath`/`stroke` was 64,443 stroke calls a frame, 72% of them for geometry
+   * entirely off screen (measured on Rich's Northern Italy view, 2026-09-27). One path per
+   * highway class, and only what is actually in view, is the same picture for a fraction of the
+   * work — and `lineJoin: round` plus the shared path is what makes the fragments read as a road
+   * rather than as dots.
+   */
   private paintMajor(g: CanvasRenderingContext2D) {
     const lines = this.itemsOf<MajorLine>('major')
     if (!lines.length) return
+    // a margin, so a line that crosses the view is kept even when both ends are outside it
+    const m = 64
+    const byClass = new Map<string, MajorLine[]>()
+    let kept = 0
+    for (const w of lines) {
+      if (w.line.length < 2) continue
+      let minX = Infinity
+      let minY = Infinity
+      let maxX = -Infinity
+      let maxY = -Infinity
+      for (const p of w.line) {
+        const [x, y] = this.toScreen({ lon: p[0], lat: p[1] })
+        if (x < minX) minX = x
+        if (x > maxX) maxX = x
+        if (y < minY) minY = y
+        if (y > maxY) maxY = y
+      }
+      if (maxX < -m || minX > this.w + m || maxY < -m || minY > this.h + m) continue
+      kept++
+      const k = w.highway ?? 'road'
+      const arr = byClass.get(k)
+      if (arr) arr.push(w)
+      else byClass.set(k, [w])
+    }
+    this.majorDrawn = kept
     g.save()
     g.lineCap = 'round'
     g.lineJoin = 'round'
-    for (const w of lines) {
-      const s = styleOf(w.highway)
+    g.globalAlpha = 0.9
+    // trunk under motorway, so a motorway reads over the road it replaced
+    for (const k of [...byClass.keys()].sort((a, b) => styleOf(a).w - styleOf(b).w)) {
+      const s = styleOf(k)
       g.strokeStyle = s.c
       g.lineWidth = s.w
-      g.globalAlpha = 0.9
       g.beginPath()
-      for (let i = 0; i < w.line.length; i++) {
-        const [x, y] = this.toScreen({ lon: w.line[i][0], lat: w.line[i][1] })
-        if (i === 0) g.moveTo(x, y)
-        else g.lineTo(x, y)
+      for (const w of byClass.get(k)!) {
+        for (let i = 0; i < w.line.length; i++) {
+          const [x, y] = this.toScreen({ lon: w.line[i][0], lat: w.line[i][1] })
+          if (i === 0) g.moveTo(x, y)
+          else g.lineTo(x, y)
+        }
       }
       g.stroke()
     }
@@ -510,19 +561,48 @@ export class MapView {
     if (this.zoom >= 7) this.paintRefs(g, lines)
   }
 
-  /** Motorway numbers — an A4 shield is how you recognise a road you have never driven. */
+  /**
+   * Motorway numbers — an A4 shield is how you recognise a road you have never driven.
+   *
+   * DECLUTTERED, like the place labels beside them. Dedupe by ref string alone put 316 shields on
+   * one frame, overlapping into an unreadable mess (measured, 2026-09-27) — because a ref is
+   * deduped but an `A1` and an `SS36` half a pixel apart are two different strings. A box
+   * collision test and a cap are what `paintPlaces` has always had; this just did not.
+   *
+   * And the shield goes on the LONGEST way carrying that ref, at its middle, rather than on
+   * whichever fragment came first: 99% of ways here are two points, so "the middle" of an
+   * arbitrary stub is its end vertex, which is why shields sat on junctions.
+   */
   private paintRefs(g: CanvasRenderingContext2D, lines: MajorLine[]) {
     const placed = new Set<string>()
+    const boxes: [number, number, number, number][] = []
+    const hits = (a: [number, number, number, number]) =>
+      boxes.some((b) => a[0] < b[2] && a[2] > b[0] && a[1] < b[3] && a[3] > b[1])
+    // one candidate per ref: the longest way carrying it, which is the one worth labelling
+    const best = new Map<string, { w: MajorLine; len: number }>()
+    for (const w of lines) {
+      const ref = w.ref?.split(';')[0]?.trim()
+      if (!ref || w.line.length < 2) continue
+      let len = 0
+      for (let i = 1; i < w.line.length; i++) len += Math.hypot(w.line[i][0] - w.line[i - 1][0], w.line[i][1] - w.line[i - 1][1])
+      const cur = best.get(ref)
+      if (!cur || len > cur.len) best.set(ref, { w, len })
+    }
+    const order = [...best.entries()].sort((a, b) => b[1].len - a[1].len)
     g.save()
     g.font = '600 10px ui-monospace, monospace'
     g.textAlign = 'center'
     g.textBaseline = 'middle'
-    for (const w of lines) {
-      const ref = w.ref?.split(';')[0]?.trim()
-      if (!ref || placed.has(ref) || w.line.length < 2) continue
+    for (const [ref, { w }] of order) {
+      if (placed.size >= MAX_REF_LABELS) break
+      if (placed.has(ref)) continue
       const mid = w.line[Math.floor(w.line.length / 2)]
       const [x, y] = this.toScreen({ lon: mid[0], lat: mid[1] })
       if (x < 20 || x > this.w - 20 || y < 12 || y > this.h - 12) continue
+      const half = g.measureText(ref).width / 2 + 5
+      const box: [number, number, number, number] = [x - half - 2, y - 9, x + half + 2, y + 9]
+      if (hits(box)) continue
+      boxes.push(box)
       const width = g.measureText(ref).width + 8
       g.fillStyle = 'rgba(13,16,20,0.85)'
       g.strokeStyle = 'rgba(217,136,79,0.8)'

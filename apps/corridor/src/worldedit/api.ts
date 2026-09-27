@@ -196,7 +196,9 @@ export const api = {
 
   /* ---- the layer stack ---- */
   plan: (b: Box, zoom: number, signal?: AbortSignal) =>
-    call<{ zoom: number; plan: { layer: string; kind: 'points' | 'lines'; tiles: TileId[]; total: number }[] }>(
+    // `variant` is the QUESTION the layer asks at this zoom — part of a tile's identity, not just
+    // a server-side cache detail. See `tileKey` in main.ts.
+    call<{ zoom: number; plan: { layer: string; kind: 'points' | 'lines'; variant?: string; tiles: TileId[]; total: number }[] }>(
       `/api/osm/plan?south=${b.south.toFixed(5)}&west=${b.west.toFixed(5)}&north=${b.north.toFixed(5)}&east=${b.east.toFixed(5)}&zoom=${zoom.toFixed(2)}`,
       { signal },
     ),

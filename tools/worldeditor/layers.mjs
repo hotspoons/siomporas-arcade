@@ -81,8 +81,16 @@ export const LAYERS = [
      * Which places, by zoom. A world view wants twenty capitals, not two thousand villages; and
      * the same query at every zoom either floods the world view or leaves the regional one empty.
      */
+    /**
+     * VILLAGES ARE THE EXPENSIVE PART AND THEY ARE NEVER DRAWN.
+     *
+     * Asking for villages over an 11.25-degree cell returned 12,391 nodes in Rich's session and
+     * cost 40 to 78 seconds a tile -- three quarters of a three-minute map -- so that the client
+     * could draw at most 120 dots (`map.ts` caps it). They earn their place when the view is
+     * small enough to read them, which is not at a 358 km view.
+     */
     variant(zoom) {
-      const kinds = zoom < 5 ? ['city'] : zoom < 7 ? ['city', 'town'] : ['city', 'town', 'village']
+      const kinds = zoom < 5 ? ['city'] : zoom < 10 ? ['city', 'town'] : ['city', 'town', 'village']
       return { key: kinds.map((k) => k[0]).join(''), kinds, cap: zoom < 5 ? 400 : 3000 }
     },
     query(bounds, v) {
@@ -93,7 +101,12 @@ export const LAYERS = [
       // perfectly good response and cached an empty tile. It looked exactly like "there are no
       // cities in the Alps". Verified against Overpass directly: `out tags` on a place node has
       // no `lat` field, `out body` does.
-      return `[out:json][timeout:180];node(${f(south)},${f(west)},${f(north)},${f(east)})[place~"^(${v.kinds.join('|')})$"];out body 6000;`
+      // `out body 24000`, not 6000. Overpass applies an element cap in ID order, and OSM ids are
+      // chronological, so a cap truncates SPATIALLY AT RANDOM -- and it does it before `trim`'s
+      // "biggest first" sort ever sees the data, so a capital can be discarded in favour of a
+      // hamlet that happened to be mapped earlier. Four of Rich's tiles came back at exactly
+      // 6000. The cap is a backstop against a runaway query, not a budget.
+      return `[out:json][timeout:180];node(${f(south)},${f(west)},${f(north)},${f(east)})[place~"^(${v.kinds.join('|')})$"];out body 24000;`
     },
     /** name, rank and position. Nothing else — the raw tags are 90% of the bytes and 0% of the map. */
     trim(elements, v) {
@@ -142,7 +155,17 @@ export const LAYERS = [
     },
     query(bounds, v) {
       const { south, west, north, east } = bounds
-      return `[out:json][timeout:300];way(${f(south)},${f(west)},${f(north)},${f(east)})[highway~"^(${v.kinds.join('|')}|${v.kinds.map((k) => `${k}_link`).join('|')})$"];out geom 12000;`
+      // `out geom 60000`, not 12000. THIS IS THE FRAGMENTED MAP.
+      //
+      // Overpass applies the cap in ID order and OSM way ids are chronological, so what came back
+      // was an arbitrary, spatially random 14-41% of the motorway network -- measured on Rich's
+      // own tiles: 28,973 motorway+trunk ways exist in tile 6/67/15 and we drew 12,000 of them.
+      // Four of his six tiles came back at exactly the cap. A road drawn from a random sample of
+      // its segments is not a thinner road, it is a dotted line.
+      //
+      // The client merges by ref and culls to the viewport now, so the extra ways cost bytes and
+      // not frames. The cap stays as a backstop against a runaway query.
+      return `[out:json][timeout:300];way(${f(south)},${f(west)},${f(north)},${f(east)})[highway~"^(${v.kinds.join('|')}|${v.kinds.map((k) => `${k}_link`).join('|')})$"];out geom 60000;`
     },
     trim(elements, v) {
       return elements

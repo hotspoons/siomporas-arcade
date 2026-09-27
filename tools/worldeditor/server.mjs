@@ -34,7 +34,7 @@ import { Overpass, PUBLIC_MIRRORS } from './overpass.mjs'
 import { Tiles } from './tiles.mjs'
 import { Basemap } from './basemap.mjs'
 import { Geocoder } from './geocode.mjs'
-import { LAYERS, layersAt, tilesFor } from './layers.mjs'
+import { LAYERS, layersAt, tilesFor, variantOf } from './layers.mjs'
 import { K8s } from './k8s.mjs'
 import { Runs } from './runs.mjs'
 import { bboxOf, circleFor } from './geo.mjs'
@@ -434,7 +434,13 @@ async function api(req, res, seg, q) {
       // Capped per layer by what a tile COSTS, not by a single number: a places tile is one cheap
       // node query, a major tile is 5 MB and fifteen seconds. Sorted by distance from the middle of
       // the screen first, so the cap keeps what you are looking at.
-      plan.push({ layer: layer.id, kind: layer.kind, tiles: want.slice(0, CAPS[layer.id] ?? 12), total: want.length })
+      // THE VARIANT TRAVELS WITH THE PLAN. A layer asks a different question at different zooms —
+      // `major` is motorway+trunk below zoom 9 and adds primary above it — and the server's cache
+      // file already carries that in its key. The client's did not, so a tile fetched at zoom 9
+      // was kept, drawn unchanged at zoom 8, and never re-asked at the right variant: primary
+      // roads appearing on a motorways-only view, and road density visibly different tile to tile
+      // (Rich's Northern Italy screenshot, 2026-09-27).
+      plan.push({ layer: layer.id, kind: layer.kind, variant: variantOf(layer, zoom).key, tiles: want.slice(0, CAPS[layer.id] ?? 12), total: want.length })
     }
     return json(res, 200, { zoom, plan })
   }

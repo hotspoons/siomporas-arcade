@@ -66,7 +66,7 @@ export class Overpass {
    * @param deadlineMs for the whole call, across every upstream. Without one, ten attempts at the
    *                   per-attempt timeout is half an hour of a page saying "reading OSM".
    */
-  constructor(store, urls, { timeoutMs = 120000, deadlineMs = 240000, downForMs = 45000 } = {}) {
+  constructor(store, urls, { timeoutMs = 120000, deadlineMs = 240000, downForMs = 45000, coverSlack = 0.05 } = {}) {
     this.store = store
     const parsed = urls.filter(Boolean).map(parseUpstream).filter((u) => {
       try {
@@ -96,6 +96,8 @@ export class Overpass {
      * Nothing is inferred: an upstream with no declared coverage is assumed to hold everything,
      * because that is what a public mirror does and what our own will do once it holds the planet.
      */
+    /** how much of a box may fall outside an extract before it is passed over — see `#covers` */
+    this.coverSlack = coverSlack
     this.coverage = new Map(parsed.filter((u) => u.bbox).map((u) => [u.url, u.bbox]))
     this.timeoutMs = timeoutMs
     this.deadlineMs = deadlineMs
@@ -220,11 +222,33 @@ export class Overpass {
    * Identical queries in flight are coalesced: dragging the map fires the same box repeatedly and
    * without this each drag would be its own 20-second query against our one extract.
    */
-  /** Does this upstream hold the box being asked about? No declaration means "assume yes". */
+  /**
+   * Does this upstream hold the box being asked about? No declaration means "assume yes".
+   *
+   * STRICT CONTAINMENT WAS TOO STRICT, and it cost more than it saved.
+   *
+   * `places` asks on 11.25-degree cells, and the row covering Italy spans 33.75 to 45 degrees
+   * north. Our Europe extract declares its south edge at 34. `33.75 >= 34` is false, so every
+   * places tile over Italy, Spain, southern France and Greece was rejected for the extract that
+   * holds them and sent to a public mirror instead. Measured on Rich's own session, 2026-09-27:
+   * 33 s and 78 s against overpass-api.de for two tiles our own extract answers in 11 s. That is
+   * 111 seconds of a three-minute map, for a quarter of a degree of Mediterranean.
+   *
+   * So a SMALL shortfall is allowed, and it is recorded rather than swallowed. The shortfall here
+   * is 2.2% of the tile's area, all of it sea. The risk this trades against is real -- an extract
+   * answering for ground it does not hold returns a confident partial answer, which is the worst
+   * failure mode in this whole system -- so the allowance is a fraction of AREA rather than a
+   * distance, it is small, and `shortfall` comes back so the caller can say so.
+   */
   #covers(url, bbox) {
     const c = this.coverage.get(url)
-    if (!c || !bbox) return true
-    return bbox.south >= c.south && bbox.north <= c.north && bbox.west >= c.west && bbox.east <= c.east
+    if (!c || !bbox) return { ok: true, shortfall: 0 }
+    const area = Math.max(1e-9, (bbox.north - bbox.south) * (bbox.east - bbox.west))
+    const ins =
+      Math.max(0, Math.min(bbox.north, c.north) - Math.max(bbox.south, c.south)) *
+      Math.max(0, Math.min(bbox.east, c.east) - Math.max(bbox.west, c.west))
+    const shortfall = Math.max(0, 1 - ins / area)
+    return { ok: shortfall <= this.coverSlack, shortfall }
   }
 
   async run(query, { refresh = false, bbox = null } = {}) {
@@ -248,8 +272,9 @@ export class Overpass {
       let empty = null
       for (let attempt = 0; attempt < this.urls.length * 2; attempt++) {
         const url = this.urls[attempt % this.urls.length]
-        if (!this.#covers(url, bbox)) {
-          tried.push(`${new URL(url).host}: does not hold this area`)
+        const cov = this.#covers(url, bbox)
+        if (!cov.ok) {
+          tried.push(`${new URL(url).host}: does not hold this area (${(100 * cov.shortfall).toFixed(1)}% outside)`)
           continue
         }
         if (this.#skip(url)) {

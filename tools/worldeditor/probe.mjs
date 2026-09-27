@@ -413,6 +413,43 @@ const checkCoverageSkip = check('a declared coverage box means a regional upstre
   }
 })
 
+const checkCoverageSlack = check('a box that overhangs a regional upstream by a sliver still goes to it, but one mostly outside does not', async () => {
+  /*
+   * THE BUG THIS EXISTS FOR.
+   *
+   * `places` asks on 11.25-degree cells and the row covering Italy spans 33.75 to 45 north, while
+   * our Europe extract declares its south edge at 34. Strict containment rejected the extract that
+   * HOLDS Italy over a quarter of a degree of Mediterranean and sent every such tile to a public
+   * mirror instead: 33 s and 78 s measured against overpass-api.de for tiles our own extract
+   * answers in 11 s, three quarters of a three-minute map.
+   *
+   * So a small shortfall is allowed now. The whole risk of allowing one is that an extract answers
+   * confidently for ground it does not hold — the worst failure mode in this system — so this
+   * asserts BOTH directions, and the second half is the one that matters.
+   */
+  const regional = await fakeOverpass({ region: MARYLAND, ways: 3 })
+  const planet = await fakeOverpass({ ways: 7 })
+  const store = new Store(await mkdtemp(path.join(tmpdir(), 'we-probe-')))
+  await store.init()
+  const decl = `${regional.url}#${MARYLAND.south}/${MARYLAND.west}/${MARYLAND.north}/${MARYLAND.east}`
+  const op = new Overpass(store, [decl, planet.url], { timeoutMs: 5000, deadlineMs: 20000 })
+  try {
+    const h = MARYLAND.north - MARYLAND.south
+    // hanging a hair below the declared south edge: about 2% of the box's area, as Italy's was
+    await op.drivable({ south: MARYLAND.south - h * 0.02, west: MARYLAND.west, north: MARYLAND.north, east: MARYLAND.east })
+    assert(regional.asked === 1, `a 2% overhang was sent past the regional upstream (asked ${regional.asked})`)
+    // and a box half outside it must NOT be: that is a real gap, not a rounding edge
+    const before = regional.asked
+    await op.drivable({ south: MARYLAND.south - h, west: MARYLAND.west, north: MARYLAND.south + h * 0.1, east: MARYLAND.east })
+    assert(regional.asked === before, `a box mostly outside the coverage was still asked of the regional upstream (${regional.asked} vs ${before})`)
+    return 'a 2% overhang is asked, a mostly-outside box is not'
+  } finally {
+    regional.close()
+    planet.close()
+    await rm(store.root, { recursive: true, force: true })
+  }
+})
+
 const checkFastFallback = check('a hanging upstream costs one timeout, then is skipped rather than waited on', async () => {
   const hanging = await fakeOverpass({ hang: true })
   const good = await fakeOverpass({ ways: 4 })
@@ -998,6 +1035,7 @@ if (PROVE) {
   await checkSilentEmpty()
   await checkEmptyIsBelievedEventually()
   await checkCoverageSkip()
+  await checkCoverageSlack()
   await checkFastFallback()
   await checkBands()
   await checkTileVariantKeys()

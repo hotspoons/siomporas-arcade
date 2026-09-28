@@ -28,19 +28,25 @@ test('a clean failure reports its exit code', () => {
   assert.equal(reason(2, null), 'exited 2')
 })
 
-test('a SIGKILL says it was killed AND names the likely cause', () => {
+test('a SIGKILL says what it was, in a few words', () => {
   // nothing sends SIGKILL to a bake except the kernel running out of memory; a cancel sends
-  // SIGTERM. The guess is worth making, and it is hedged rather than asserted.
+  // SIGTERM. The reasoning belongs in the comment, not in the line somebody reads.
   const why = reason(null, 'SIGKILL')
-  assert.match(why, /SIGKILL/)
-  assert.match(why, /out of memory/)
-  assert.ok(!why.includes('null'), why)
+  assert.equal(why, 'killed — out of memory')
 })
 
 test('a cancel is not reported as a crash', () => {
   const why = reason(null, 'SIGTERM')
-  assert.match(why, /SIGTERM/)
+  assert.equal(why, 'stopped')
   assert.ok(!/out of memory/.test(why), why)
+})
+
+test('no reason is longer than a glance', () => {
+  // a failure line is read at a glance in a list of runs; an explanation of why the guess is a
+  // fair one belongs in the source
+  for (const [code, signal] of [[null, 'SIGKILL'], [null, 'SIGTERM'], [null, 'SIGSEGV'], [1, null]]) {
+    assert.ok(reason(code, signal).length <= 32, `${reason(code, signal)} is ${reason(code, signal).length} characters`)
+  }
 })
 
 test('any other signal is named rather than swallowed', () => {

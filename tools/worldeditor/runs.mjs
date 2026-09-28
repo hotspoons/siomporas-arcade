@@ -335,16 +335,16 @@ export class Runs {
      * cgroup reported 46 OOM kills (measured: one 213 MiB LAZ tile peaks at 2.44 GB, and there
      * were 3 GB free).
      *
-     * SIGKILL gets named for what it almost always is. Nothing sends SIGKILL to a bake except the
-     * kernel running out of memory — a cancel sends SIGTERM — so the guess is worth making and is
-     * hedged rather than asserted.
+     * SIGKILL is named as out of memory because that is what sends it here — a cancel sends
+     * SIGTERM, and nothing else signals a bake. The reasoning stays in this comment; the line a
+     * person reads says the thing and stops.
      */
     child.on('close', (code, signal) => {
       sink.end()
       const why = signal === 'SIGKILL'
-        ? 'killed (SIGKILL) — almost certainly out of memory: nothing else sends it, and a cancel sends SIGTERM'
+        ? 'killed — out of memory'
         : signal === 'SIGTERM'
-          ? 'stopped (SIGTERM)'
+          ? 'stopped'
           : signal
             ? `killed by ${signal}`
             : `exited ${code}`

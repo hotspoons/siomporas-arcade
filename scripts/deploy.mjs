@@ -97,22 +97,34 @@ const run = (cmd, args) => execFileSync(cmd, args, { cwd: ROOT, encoding: 'utf8'
  * `null` means the question could not be asked (no credential, no network). That is NOT the same
  * as "no", and bumping is refused rather than guessed either way.
  */
-async function published(image, tag) {
-  let pat
+const tokens = new Map()
+
+/** The PAT, once. `git credential fill` shells out and may prompt; asking it per tag is absurd. */
+let PAT
+function pat() {
+  if (PAT !== undefined) return PAT
   try {
-    pat = execFileSync('git', ['credential', 'fill'], { input: 'protocol=https\nhost=github.com\n\n', encoding: 'utf8' })
-      .split('\n').find((l) => l.startsWith('password='))?.slice('password='.length)
+    PAT = execFileSync('git', ['credential', 'fill'], { input: 'protocol=https\nhost=github.com\n\n', encoding: 'utf8' })
+      .split('\n').find((l) => l.startsWith('password='))?.slice('password='.length) ?? null
   } catch {
-    return null
+    PAT = null
   }
-  if (!pat) return null
+  return PAT
+}
+
+async function published(image, tag) {
+  const p = pat()
+  if (!p) return null
   const repo = image.replace(/^ghcr\.io\//, '').replace(/:.*$/, '')
   try {
-    const auth = await fetch(`https://ghcr.io/token?scope=repository:${repo}:pull&service=ghcr.io`, {
-      headers: { Authorization: `Basic ${Buffer.from(`x:${pat}`).toString('base64')}` },
-    })
-    if (!auth.ok) return null
-    const { token } = await auth.json()
+    if (!tokens.has(repo)) {
+      const auth = await fetch(`https://ghcr.io/token?scope=repository:${repo}:pull&service=ghcr.io`, {
+        headers: { Authorization: `Basic ${Buffer.from(`x:${p}`).toString('base64')}` },
+      })
+      tokens.set(repo, auth.ok ? (await auth.json()).token : null)
+    }
+    const token = tokens.get(repo)
+    if (!token) return null
     const r = await fetch(`https://ghcr.io/v2/${repo}/manifests/${tag}`, {
       method: 'HEAD',
       headers: {
@@ -136,15 +148,20 @@ async function published(image, tag) {
  * HEAD's sha whether or not an image had been built for it — and an image is only built when its
  * own paths change, so a commit touching the world editor bumped assetsvc to a tag that has never
  * existed. Deploying that is an ImagePullBackOff, found by a pod rather than by this.
+ *
+ * AND IT SEARCHES THE HISTORY, not just HEAD. "The newest build" is per release: a commit that
+ * only adds a probe builds nothing, and asking about HEAD alone reported "nothing in its paths
+ * changed" for every release and left the whole cluster on last week's images — which is worse
+ * than the bug above, because it looks like a considered answer. So each release walks back from
+ * HEAD to the first ancestor that has an image, which IS the newest build of that release.
  */
 if (BUMP) {
-  const sha = run('git', ['rev-parse', '--short=7', 'HEAD']).trim()
+  const shas = run('git', ['rev-list', '--max-count=40', '--abbrev=7', '--abbrev-commit', 'HEAD']).trim().split('\n')
   let skipped = 0
   for (const r of releases) {
     const file = path.join(DIR, `${r.name}.yaml`)
     const before = readFileSync(file, 'utf8')
-    const after = before.replace(/(\n\s*tag:\s*)sha-[0-9a-f]+/, `$1sha-${sha}`)
-    if (after === before) { console.log(`${r.name}: already sha-${sha}`); continue }
+    const at = /\n\s*tag:\s*(sha-[0-9a-f]+)/.exec(before)?.[1] ?? '?'
 
     // the release file pins only the TAG; the repository is the chart's, so ask the chart. Not a
     // `ghcr.io/hotspoons/<name>` default: a wrong repository answers 404 for every tag and turns
@@ -156,20 +173,31 @@ if (BUMP) {
       skipped++
       continue
     }
-    const exists = await published(repo, `sha-${sha}`)
-    if (exists === false) {
-      const at = /\n\s*tag:\s*(sha-[0-9a-f]+)/.exec(before)?.[1] ?? '?'
-      console.log(`${r.name}: no image for sha-${sha} — left at ${at} (nothing in its paths changed)`)
+
+    let found = null
+    let unknown = false
+    let looked = 0
+    for (const sha of shas) {
+      looked++
+      const exists = await published(repo, `sha-${sha}`)
+      // `null` is "could not ask", which is not "no": stop rather than walk the whole history
+      // getting the same non-answer and then claim nothing was ever built.
+      if (exists === null) { unknown = true; break }
+      if (exists) { found = sha; break }
+    }
+    if (unknown) {
+      console.log(`${r.name}: could not ask the registry — left at ${at}`)
       skipped++
       continue
     }
-    if (exists === null) {
-      console.log(`${r.name}: could not ask the registry whether sha-${sha} exists — left alone`)
+    if (!found) {
+      console.log(`${r.name}: no image for any of the last ${shas.length} commits — left at ${at}`)
       skipped++
       continue
     }
-    writeFileSync(file, after)
-    console.log(`${r.name}: -> sha-${sha}  (${file.replace(ROOT + '/', '')})`)
+    if (at === `sha-${found}`) { console.log(`${r.name}: already sha-${found}, the newest build`); continue }
+    writeFileSync(file, before.replace(/(\n\s*tag:\s*)sha-[0-9a-f]+/, `$1sha-${found}`))
+    console.log(`${r.name}: ${at} -> sha-${found}${looked > 1 ? `  (HEAD~${looked - 1}, the newest with an image)` : ''}`)
   }
   console.log(skipped ? '\nreview the diff, commit it, then deploy. Releases left alone are already on an image that exists.' : '\nreview the diff, commit it, then deploy.')
   process.exit(0)

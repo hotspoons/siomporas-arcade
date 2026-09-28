@@ -12,7 +12,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
-const spec = JSON.parse(readFileSync(new URL('./specs/buildings-dressing.json', import.meta.url), 'utf8'))
+const spec = JSON.parse(readFileSync(new URL('../assetlib/specs/buildings-dressing.json', import.meta.url), 'utf8'))
 const assets = spec.assets
 
 test('every part says where it attaches', () => {

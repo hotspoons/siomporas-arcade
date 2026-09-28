@@ -150,3 +150,22 @@ podAnnotations: {}
 nodeSelector: {}
 tolerations: []
 affinity: {}
+
+# The splat bake, when a capture is trained into a gaussian world.
+splat:
+  # The image the run uses. Multi-arch; nothing here pins an architecture.
+  image: ghcr.io/hotspoons/gaussworks:latest
+  # THE BAKE CONFIG, settled by experiment by the splats lane: survey resolution with
+  # `cell_m: 120`. Seven of eight seams matched to within 3 cm between that and high resolution,
+  # and high resolution bought +0.7 dB of PSNR for 5.9x the bytes per square metre — at world
+  # scale, the difference between shippable and not. The path is inside the image
+  # (`COPY . /opt/splatpipe`), so it travels with the code that reads it.
+  config: /opt/splatpipe/configs/arrowhead-c120.yaml
+  # Worst acceptable seam, in metres. Neighbouring chunks are levelled independently, so they can
+  # disagree about the height of the same road — a step a driver hits. Carried on the run object;
+  # the pipeline gates on it once run.py calls `splatpipe seams` (noted to the splats lane).
+  seamFailOver: 3.0
+  # The commit the job must find on the volume, when the code lives there rather than in the
+  # image. Empty means no check — and a job running stale code does not fail, it succeeds and
+  # hands back a plausible wrong number, so set this whenever the PVC path is in use.
+  codeSha: ""

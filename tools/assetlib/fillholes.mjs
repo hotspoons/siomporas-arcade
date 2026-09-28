@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Close the holes the chroma key punches through a subject's GLAZING.
 //
-//   node ext/assetlib/tool/fillholes.mjs ext/assetlib/out/civic-eg/view-1-keyed.png
+//   node tools/assetlib/fillholes.mjs tools/assetlib/out/civic-eg/view-1-keyed.png
 //
 // WHY THIS EXISTS. The keyer is correct and this is not a bug in it: a car's windows genuinely
 // show the backdrop, through them and reflected in them, so green dominance is genuinely high

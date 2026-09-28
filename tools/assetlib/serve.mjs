@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // A browser viewer for the library that scans itself.
 //
-//   node ext/assetlib/tool/serve.mjs                 # http://localhost:5199
-//   node ext/assetlib/tool/serve.mjs --tunnel        # ...and a public trycloudflare URL
+//   node tools/assetlib/serve.mjs                 # http://localhost:5199
+//   node tools/assetlib/serve.mjs --tunnel        # ...and a public trycloudflare URL
 //
 // It lists whatever is on disk RIGHT NOW and re-scans on every poll, so a batch that is still
 // running fills the gallery as it goes — no restart, no rebuild, no manifest to keep in step.

@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Turn a reconstruction's glazing into actual glass.
 //
-//   node ext/assetlib/tool/glass.mjs --id nsx-na1
-//   node ext/assetlib/tool/glass.mjs --id nsx-na1 --debug   # paint the selection magenta instead
+//   node tools/assetlib/glass.mjs --id nsx-na1
+//   node tools/assetlib/glass.mjs --id nsx-na1 --debug   # paint the selection magenta instead
 //
 // WHY THIS AND NOT MORE HOLE-FILLING. fillholes.mjs stops TRELLIS inventing an interior, and it
 // works, but it can only ever produce an OPAQUE panel where the window should be. A car whose
@@ -63,6 +63,66 @@ const KEY_TEST = {
   cyan:    (r, g, b) => Math.min(g, b) - r,
 }
 
+/**
+ * Drive transmission from TRELLIS's own alpha channel, continuously — no threshold, no face split.
+ *
+ * WHY THIS BEATS SPLITTING. A chroma key, and any threshold on top of the alpha, produces a BINARY
+ * mask: a face is glass or it is not, the boundary is aliased, and every windscreen is uniformly
+ * transparent. TRELLIS predicts a CONTINUOUS per-texel alpha — it can say a screen is more
+ * transparent at its centre than at its frit, and that a pillar is solid. `KHR_materials_transmission`
+ * takes a `transmissionTexture` (red channel), so the prediction can be used as it stands.
+ *
+ * Rich, 2026-09-28: "I'm not as concerned with the reliability — we can reprompt. I am concerned
+ * with the kind of lousy quality of the chromakeyed glass, and I trust the model's ability to
+ * better represent transparency if it can infer it."
+ *
+ * So: transmission = 1 - alpha, as a texture, on the single existing material. Nothing is keyed,
+ * nothing is split, and there is no threshold to tune per asset.
+ */
+export async function alphaTransmission(src, out, opts = {}) {
+  const io = new NodeIO().registerExtensions(ALL_EXTENSIONS)
+  const doc = await io.read(src)
+  const root = doc.getRoot()
+  const transmission = doc.createExtension(KHRMaterialsTransmission)
+  const ior = doc.createExtension(KHRMaterialsIOR)
+  const volume = doc.createExtension(KHRMaterialsVolume)
+  const tmpDir = path.join(path.dirname(out), '.glass-tmp')
+  mkdirSync(tmpDir, { recursive: true })
+
+  let applied = 0, mean = 0
+  for (const mat of root.listMaterials()) {
+    const tex = mat.getBaseColorTexture()
+    if (!tex) continue
+    const inPng = path.join(tmpDir, 'base.png')
+    const trPng = path.join(tmpDir, 'trans.png')
+    writeFileSync(inPng, Buffer.from(tex.getImage()))
+    // How much transparency did the model actually predict here?
+    const a = Number(magick([inPng, '-alpha', 'extract', '-format', '%[fx:mean]', 'info:'])) || 1
+    void a
+    // transmission = 1 - alpha, EXCEPT where alpha is ~0, which is unused atlas rather than glass
+    // and would otherwise come out fully transmissive. Same floor as the threshold version, applied
+    // continuously: below the floor the surface is treated as solid.
+    const floor = opts.alphaFloor ?? 0.08
+    magick([inPng, '-alpha', 'extract', '-fx', `u<${floor} ? 0 : 1-u`, trPng])
+    const trTex = doc.createTexture('transmission')
+      .setImage(new Uint8Array(readFileSync(trPng)))
+      .setMimeType('image/png')
+    mat.setExtension('KHR_materials_transmission',
+      transmission.createTransmission().setTransmissionFactor(1).setTransmissionTexture(trTex))
+    mat.setExtension('KHR_materials_ior', ior.createIOR().setIOR(1.5))
+    mat.setExtension('KHR_materials_volume',
+      volume.createVolume().setThicknessFactor(0.01).setAttenuationDistance(0.8)
+        .setAttenuationColor([0.85, 0.9, 0.92]))
+    mat.setDoubleSided(true)
+    mean = Number(magick([trPng, '-format', '%[fx:mean]', 'info:'])) || 0
+    rmSync(inPng, { force: true }); rmSync(trPng, { force: true })
+    applied += 1
+  }
+  rmSync(tmpDir, { recursive: true, force: true })
+  await io.write(out, doc)
+  return { applied, meanTransmission: +(100 * mean).toFixed(2) }
+}
+
 export async function separateGlass(src, out, opts = {}) {
   const { luma = 0.22, minHeight = 0.40, maxUp = 0.86, roofBand = 0.85, debug = false } = opts
   // A KEYED GLASS COLOUR MAKES THIS A LOOKUP. Without one we fall back to the old heuristic —
@@ -71,6 +131,32 @@ export async function separateGlass(src, out, opts = {}) {
   // the whole body turns to glass. Everything generated from now on carries a key.
   const key = opts.glassKey ? KEY_TEST[opts.glassKey] : null
   const keyCut = opts.keyCut ?? 0.18
+
+  // TRELLIS PREDICTS GLASS ITSELF, and the exporter throws it away. `to_glb` extracts a per-texel
+  // alpha from the attribute volume (`attr_layout['alpha']`) and then hardcodes `alpha_mode =
+  // 'OPAQUE'`, so the channel survives in the PNG while the material ignores it. The README says
+  // as much: "the alpha channel is preserved within the texture map... not active initially".
+  //
+  // Measured on a 911 generated with ORDINARY tinted glass and no colour key at all: 5.26% of the
+  // atlas came back semi-transparent, peaking at alpha 0.4, and those texels average rgb(20,62,87)
+  // — dark blue-grey, which is what tinted automotive glass looks like.
+  //
+  // If this holds it replaces the whole keyed-colour apparatus, and with it the paint constraints
+  // that forced the fleet blue and purple. Nothing has to be pink.
+  const byAlpha = opts.byAlpha === true
+  const alphaCut = opts.alphaCut ?? 0.75
+  // AND A FLOOR, because fully transparent is not glass. A red 911 came back with 11.1% of its
+  // atlas at alpha EXACTLY 0 and mean rgb(22,19,20) — unused atlas, not glazing, and selecting it
+  // took the asset to 19.8% "glass". The two clean cars had no alpha-zero bucket at all and their
+  // glazing sat at 0.4-0.5. Glass is PARTIALLY transparent; empty atlas is fully transparent.
+  const alphaFloor = opts.alphaFloor ?? 0.08
+  // AND THE TEXEL MUST LOOK LIKE GLASS. Alpha alone was validated on three cars and did not
+  // generalise: over 61 assets the median was fine but ten came back above 12% and one at 42.96%.
+  // The tell is the colour of what got selected — glass reflects sky and comes back BLUE-grey
+  // (911-964: rgb 20,63,89; civic-eg: 130,140,150), while the over-selected regions are dark trim
+  // and shadow, which are neutral or warm (eclipse-1g: 11,9,10; miata-na: 26,14,12). Requiring
+  // blue to beat red keeps the glazing and drops the trim.
+  const blueBias = opts.blueBias ?? -1   // disabled: population eval put blue>red worst (29/45 dead)
   const io = new NodeIO().registerExtensions(ALL_EXTENSIONS)
   const doc = await io.read(src)
   const root = doc.getRoot()
@@ -109,6 +195,19 @@ export async function separateGlass(src, out, opts = {}) {
         pos.getElement(i0, a); pos.getElement(i1, b); pos.getElement(i2, c)
         const cy = (a[1] + b[1] + c[1]) / 3
         let glass = false
+        if (byAlpha) {
+          uv.getElement(i0, ua); uv.getElement(i1, ub); uv.getElement(i2, uc)
+          const px = Math.min(w - 1, Math.floor(wrap((ua[0] + ub[0] + uc[0]) / 3) * w))
+          const py = Math.min(h - 1, Math.floor(wrap((ua[1] + ub[1] + uc[1]) / 3) * h))
+          const o = (py * w + px) * 4
+          const av = data[o + 3] / 255
+          const rr = data[o] / 255, bb = data[o + 2] / 255
+          glass = av > alphaFloor && av < alphaCut && (bb - rr) > blueBias
+          ;(glass ? glassIdx : bodyIdx).push(i0, i1, i2)
+          total += 1
+          if (glass) picked += 1
+          continue
+        }
         if (key) {
           uv.getElement(i0, ua); uv.getElement(i1, ub); uv.getElement(i2, uc)
           const px = Math.min(w - 1, Math.floor(wrap((ua[0] + ub[0] + uc[0]) / 3) * w))
@@ -254,12 +353,16 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const glassKey = flag('key', meta.glassKey ?? null)
   if (!glassKey) console.warn('  ! no glassKey in meta — falling back to the heuristic, which does not port')
   const r = await separateGlass(src, out, {
-    glassKey,
+    glassKey: argv.includes('--by-alpha') ? null : glassKey,
+    byAlpha: argv.includes('--by-alpha'),
+    alphaCut: Number(flag('alpha-cut', 0.75)),
+    alphaFloor: Number(flag('alpha-floor', 0.08)),
+    blueBias: Number(flag('blue-bias', 0.02)),
     luma: Number(flag('luma', 0.22)),
     minHeight: Number(flag('min-height', 0.40)),
     maxUp: Number(flag('max-up', 0.86)),
     roofBand: Number(flag('roof-band', 0.85)),
     debug,
   })
-  console.log(`${path.basename(out)}  ${r.picked}/${r.total} triangles as glass (${r.share}%) via ${glassKey ?? 'heuristic'}`)
+  console.log(`${path.basename(out)}  ${r.picked}/${r.total} triangles as glass (${r.share}%) via ${argv.includes('--by-alpha') ? 'ALPHA' : (glassKey ?? 'heuristic')}`)
 }

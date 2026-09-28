@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Look at the mesh. A proportion that reads like a car does not prove the thing is a car.
 //
-//   node ext/assetlib/tool/turntable.mjs --id rx7-fd
-//   node ext/assetlib/tool/turntable.mjs --class hero-car --out /tmp/sheet
+//   node tools/assetlib/turntable.mjs --id rx7-fd
+//   node tools/assetlib/turntable.mjs --class hero-car --out /tmp/sheet
 //
 // Renders each finished glb from four yaws into one contact sheet, so the half TRELLIS invented
 // from a single three-quarter view is visible next to the half it was shown. That far flank is the

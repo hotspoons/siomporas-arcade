@@ -159,7 +159,7 @@ const GLASS_BY_BACKDROP = { green: ['magenta', 'blue', 'red'], magenta: ['green'
 const PAINT_FAMILY = {
   magenta: /\b(magenta|pink|purple|violet|lilac|lavender|mauve|plum|fuchsia|rose)\b/i,
   blue:    /\b(blue|navy|azure|cobalt|indigo|sapphire|petty|bayside|estoril)\b/i,
-  red:     /\b(red|crimson|scarlet|maroon|burgundy|cranberry|rosso|cherry)\b/i,
+  red:     /\b(red|crimson|scarlet|maroon|burgundy|cranberry|rosso|cherry|guards|oxide|orange|tangerine|arancio|copper|bronze|rust|amber|ochre|brick|hugger|vitamin|carousel)\b/i,
   green:   /\b(green|lime|olive|emerald|jade|mint|chartreuse|sublime|sage|moss|forest)\b/i,
   cyan:    /\b(cyan|turquoise|teal|aqua|aquamarine)\b/i,
 }
@@ -179,6 +179,29 @@ const PAINT_HUE = [
   [/\b(purple|violet|magenta|pink|lilac|lavender|mauve|plum|fuchsia|rose)\b/i, 300],
 ]
 const GLASS_HUE = { red: 0, green: 120, cyan: 180, blue: 240, magenta: 300 }
+
+/**
+ * How well each key SURVIVES reconstruction, best first. Survivability ranks ahead of hue
+ * separation: a key that is maximally contrasting and GONE is worth less than one that is merely
+ * contrasting and still there.
+ *
+ * Traced through all three stages on single assets, which is the reliable measurement — the share
+ * of the keyed cut-out carrying the key, against the share of the reconstructed texture:
+ *
+ *   red   16.54% of cut-out -> 4.75% of atlas, peak dominance 0.894   SURVIVES
+ *   blue  12.36%            -> 0.00%,          peak 0.200             DESTROYED
+ *   green 11.49%            -> 0.00%,          peak 0.216             DESTROYED
+ *
+ * TRELLIS is trained on photographs of real objects. Red is deeply in-distribution and it keeps
+ * it; blue and green glazing are not, and it regresses them to plausible greys and browns. An
+ * aggregate over the roster appeared to say green was best — that was n=3 and confounded by which
+ * backdrop each key rides on. Trust the trace.
+ *
+ * Consequence: the BODY must stay out of red's way, which is why PAINT_FAMILY.red below also
+ * covers orange, bronze and copper — `r - max(g,b)` is 0.5 for orange, well over the 0.18 cut,
+ * so an orange car would key its own bodywork as glass.
+ */
+const KEY_SURVIVAL = ['red', 'cyan', 'blue', 'magenta', 'green']
 const hueOf = (text) => { for (const [re, h] of PAINT_HUE) if (re.test(text)) return h; return null }
 const hueGap = (a, b) => { const d = Math.abs(a - b) % 360; return d > 180 ? 360 - d : d }
 
@@ -193,7 +216,10 @@ const hueGap = (a, b) => { const d = Math.abs(a - b) % 360; return d > 180 ? 360
  * Throws if every candidate clashes outright — better than silently keying the bodywork.
  */
 export function glassKeyFor(spec, chroma) {
-  if (spec.glassKey === false) return null
+  // DEFAULT OFF. The glazing no longer needs painting a key colour: TRELLIS predicts per-texel
+  // alpha and glass.mjs reads it (see build.mjs). Keeping the instruction would cost prompt budget,
+  // constrain the paint, and put coloured windows in a picture that no longer needs them.
+  if (spec.glassKey === false || spec.glassMode !== 'key') return null
   const said = [spec.paint, ...(spec.materials ?? [])].filter(Boolean).join(' ')
   const candidates = (GLASS_BY_BACKDROP[chroma] ?? []).filter((c) => !PAINT_FAMILY[c].test(said))
   if (spec.glassKey) {
@@ -205,9 +231,15 @@ export function glassKeyFor(spec, chroma) {
   if (!candidates.length) {
     throw new Error(`${spec.id}: no glass key survives a ${chroma} backdrop without clashing with "${spec.paint}"`)
   }
+  // Survivability first, hue separation as the tie-break. Picking purely by hue distance sent the
+  // NSX from magenta (2.61% of faces) to blue and then to nothing at all.
   const h = hueOf(said)
-  if (h === null) return candidates[0]        // neutral paint: any candidate is equally separable
-  return candidates.slice().sort((a, b) => hueGap(GLASS_HUE[b], h) - hueGap(GLASS_HUE[a], h))[0]
+  const rank = (k) => KEY_SURVIVAL.indexOf(k)
+  return candidates.slice().sort((a, b) => {
+    const r = rank(a) - rank(b)
+    if (r !== 0) return r
+    return h === null ? 0 : hueGap(GLASS_HUE[b], h) - hueGap(GLASS_HUE[a], h)
+  })[0]
 }
 
 /** The backdrop description that goes into the prompt, matched to the keyer's two despills. */

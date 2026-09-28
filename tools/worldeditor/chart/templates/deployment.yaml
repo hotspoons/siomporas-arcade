@@ -61,6 +61,16 @@ spec:
             # template — the image carries the list and an unset variable is what disables it.
             - name: WORLDEDITOR_SEED_SITES
               value: {{ .Values.seedSites | quote }}
+            - name: WORLDEDITOR_SPLAT_IMAGE
+              value: {{ .Values.splat.image | quote }}
+            - name: WORLDEDITOR_SPLAT_CONFIG
+              value: {{ .Values.splat.config | quote }}
+            - name: WORLDEDITOR_SPLAT_SEAM_MAX
+              value: {{ .Values.splat.seamFailOver | quote }}
+            {{- if .Values.splat.codeSha }}
+            - name: WORLDEDITOR_SPLAT_CODE_SHA
+              value: {{ .Values.splat.codeSha | quote }}
+            {{- end }}
             {{- if .Values.publish.bucket }}
             - name: WORLDEDITOR_S3_BUCKET
               value: {{ .Values.publish.bucket | quote }}

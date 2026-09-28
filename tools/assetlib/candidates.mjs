@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Draw one spec several times so a human can pick the good one.
 //
-//   node ext/assetlib/tool/candidates.mjs --id civic-eg --n 6
-//   node ext/assetlib/tool/candidates.mjs --class hero-car --n 4     # the whole roster
+//   node tools/assetlib/candidates.mjs --id civic-eg --n 6
+//   node tools/assetlib/candidates.mjs --class hero-car --n 4     # the whole roster
 //
 // WHY SEED SELECTION IS THE MAIN QUALITY LEVER NOW. Once the glazing holes are closed
 // (fillholes.mjs), what is left is not a reconstruction problem — it is what flux drew. The first

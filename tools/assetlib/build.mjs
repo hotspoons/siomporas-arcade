@@ -7,8 +7,6 @@
 //   node tools/assetlib/build.mjs --class hero-car          # the whole roster
 //   node tools/assetlib/build.mjs --id rx7-fd --recon-only  # cut-out already on disk
 //
-// ASSETLIB_DATA points specs/, out/ and candidates/ at a volume; unset, they are beside this file.
-//
 // WHAT IS BORROWED AND WHAT IS NOT. `keyChroma` and `chromaFor` come from tools/assetgen, and the
 // comment above them is worth reading before touching anything here — the green-dominance test with
 // its relative shadow branch is the reason cut-outs do not arrive with a green rim around every
@@ -28,23 +26,15 @@ import path from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 
-import { chromaFor, keyChroma } from '../assetgen/generate.mjs'
-import { finish } from '../assetgen/finish.mjs'
+import { chromaFor, keyChroma } from '../../../tools/assetgen/generate.mjs'
+import { finish } from '../../../tools/assetgen/finish.mjs'
 import { fillHoles } from './fillholes.mjs'
-import { separateGlass } from './glass.mjs'
+import { alphaTransmission, separateGlass } from './glass.mjs'
 import { buildPrompt, chromaForPaint } from './style.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
-/*
- * WHERE THE SPECS AND THE OUTPUT LIVE, which is not where the code lives.
- *
- * This ran from `ext/assetlib/tool/` with its data one directory up, so both were one expression.
- * In a pod they are nothing like each other: the code is baked into the image and the specs,
- * candidates and finished glb files are on a volume that outlives it. ASSETLIB_DATA is that
- * volume; unset, it is this directory, which is what a checkout looks like.
- */
-const LIB = path.resolve(process.env.ASSETLIB_DATA ?? HERE)
-const ROOT = path.resolve(HERE, '../..')
+const LIB = path.resolve(HERE, '..')
+const ROOT = path.resolve(LIB, '../..')
 
 // The public hostname's certificate does not chain in this container, and every client in the repo
 // works around it the same way (FLUX_VERIFY=0, curl -k). `rejectUnauthorized: false` is that.
@@ -252,27 +242,47 @@ export async function build(spec, opts) {
   // a loss. Defaults are the ones tuned on the NSX; a spec can override them or opt out with
   // `"glass": false`. See glass.mjs for why the selection needs colour, a height floor AND a
   // face-normal test that only applies at the top of the body.
+  // GLASS FROM TRELLIS'S OWN ALPHA, CONTINUOUSLY. The model predicts per-texel transparency and
+  // `to_glb` discards it with a hardcoded OPAQUE; this feeds it back in as a transmissionTexture,
+  // so a windscreen can be more transparent at its centre than at its edge. A chroma key could
+  // only ever produce a binary, aliased mask.
+  //
+  // It is not uniformly reliable — across 45 assets the prediction is clean on roughly half and
+  // diffuse on the rest, and a diffuse one makes the whole BODY faintly transmissive. Rich's call
+  // (2026-09-28) is that quality matters more than first-pass reliability because we can reprompt.
+  // So this measures the result and RE-ROLLS THE SEED rather than falling back to a worse method.
+  //
+  // The gate is the mean of the transmission map: too high and the body is bleeding, too low and
+  // the model predicted no glass at all. Both are re-rollable; neither is tunable.
   if (spec.glass !== false && !opts.finishOnly && opts.recon !== false && existsSync(glb)) {
-    const g = { glassKey, luma: 0.20, minHeight: 0.45, maxUp: 0.86, roofBand: 0.85, ...(spec.glass ?? {}) }
-    const cut2 = path.join(dir, `${spec.id}-glass.glb`)
+    const lo = spec.glassMin ?? 0.4, hi = spec.glassMax ?? 8
+    const tries = opts.rerolls ?? 3
+    const trans = path.join(dir, `${spec.id}-trans.glb`)
     const gOut = path.join(dir, `${spec.id}-glass-finished.glb`)
-    const fresh = existsSync(gOut) && !opts.redo && statSync(gOut).mtimeMs >= statSync(glb).mtimeMs
-    if (fresh) {
-      console.log(`  ${spec.id}-glass-finished.glb  (reused)`)
-    } else {
-      try {
-        const r = await separateGlass(glb, cut2, g)
-        const gf = finish(cut2, gOut, { ratio: opts.ratio, texture: opts.texture, unlit: false })
-        // The raw split is ~25 MB and only the finished one is ever served; keeping it would cost
-        // two gigabytes across the roster for nothing.
-        rmSync(cut2, { force: true })
-        meta.glass = { ...r, bytes: gf.bytes }
-        console.log(`  ${spec.id}-glass-finished.glb  ${r.share}% as glass (${glassKey ?? 'heuristic'})  ${(gf.bytes / 1e6).toFixed(2)} MB`)
-      } catch (e) {
-        // A failed glass split must not cost the asset: the plain finished mesh is already written.
-        console.warn(`  ! glass split failed: ${e.message}`)
-      }
+    let best = null
+
+    for (let attempt = 0; attempt <= tries; attempt++) {
+      const r = await alphaTransmission(glb, trans, { alphaFloor: 0.08 })
+      const v = r.meanTransmission
+      if (!best || Math.abs(v - 2.5) < Math.abs(best.v - 2.5)) best = { v, seed: opts.seed }
+      const ok = v >= lo && v <= hi
+      console.log(`  transmission ${v}%${ok ? '' : attempt < tries ? '  — out of band, re-rolling' : '  — out of band, keeping best'}`)
+      if (ok || attempt === tries) break
+      // Re-roll: a new seed is a new picture, and the alpha prediction follows the picture.
+      opts = { ...opts, seed: (opts.seed ?? 1) + 101 * (attempt + 1) }
+      const raw2 = path.join(dir, 'view-1.png')
+      const r2 = await generateView(prompt, raw2, { ...opts, negative })
+      const k2 = keyChroma(raw2, cut, chromaFor({ ...spec, chroma }), opts.threshold)
+      if (spec.fillHoles !== false) fillHoles(cut)
+      meta.draw = r2; meta.key = k2; meta.rerolledTo = opts.seed
+      const s2 = await recon([cut], glb, { seed: opts.seed })
+      meta.mesh = s2
     }
+
+    const gf = finish(trans, gOut, { ratio: opts.ratio, texture: opts.texture, unlit: false })
+    rmSync(trans, { force: true })
+    meta.glass = { meanTransmission: best.v, bytes: gf.bytes, mode: 'alpha-transmission' }
+    console.log(`  ${spec.id}-glass-finished.glb  ${best.v}% transmission  ${(gf.bytes / 1e6).toFixed(2)} MB`)
   }
 
   writeFileSync(metaPath, `${JSON.stringify(meta, null, 2)}\n`)
@@ -291,13 +301,30 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     const by = {}
     for (const s of specs) (by[s.class] ??= []).push(s.id)
     for (const [k, v] of Object.entries(by)) console.log(`${k} (${v.length})\n  ${v.join('  ')}`)
-    if (!specs.length) console.log(`no specs in ${path.join(LIB, 'specs')}`)
+    if (!specs.length) console.log('no specs in tools/assetlib/specs/')
     process.exit(0)
   }
 
   const id = flag('id')
   const klass = flag('class')
-  const chosen = specs.filter((s) => (id ? s.id === id : klass ? s.class === klass : true))
+  let chosen = specs.filter((s) => (id ? s.id === id : klass ? s.class === klass : true))
+
+  // --stale: only the assets whose PROMPT has changed since they were built. meta.json records the
+  // exact prompt, so a spec edit or a style change is detectable without guessing which assets a
+  // sweep touched — and without re-running three and a half hours to fix twenty-seven of them.
+  if (has('stale')) {
+    const before = chosen.length
+    chosen = chosen.filter((spec) => {
+      const f = path.join(LIB, 'out', spec.id, 'meta.json')
+      if (!existsSync(f)) return true
+      try {
+        const built = JSON.parse(readFileSync(f, 'utf8'))
+        return built.prompt !== buildPrompt(spec, { view: spec.view }).prompt
+      } catch { return true }
+    })
+    console.log(`${chosen.length} of ${before} assets are stale`)
+    if (!chosen.length) process.exit(0)
+  }
   if (!chosen.length) { console.error(`nothing matches ${id ?? klass ?? 'the filter'}`); process.exit(1) }
 
   const opts = {

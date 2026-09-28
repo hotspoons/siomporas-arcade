@@ -54,6 +54,32 @@ const ROLE_PATTERNS: [string, RegExp][] = [
   ['head', /head|neck|jaw|eye/],
 ]
 
+/**
+ * Triangles, vertices, meshes and materials in a loaded scene.
+ *
+ * Indexed geometry counts its INDEX triples, not its positions: a cube is eight vertices and
+ * twelve triangles, and counting positions/3 would report four. Materials are counted by identity
+ * because a mesh list of forty that shares one material is one draw call's worth of state, which
+ * is the number that matters when somebody is deciding whether to ship the raw mesh.
+ */
+function countGeometry(root: THREE.Object3D): { triangles: number; vertices: number; meshes: number; materials: number } {
+  let triangles = 0
+  let vertices = 0
+  let meshes = 0
+  const materials = new Set<THREE.Material>()
+  root.traverse((o) => {
+    const m = o as THREE.Mesh
+    if (!m.isMesh || !m.geometry) return
+    meshes++
+    const g = m.geometry
+    const pos = g.getAttribute('position')
+    vertices += pos ? pos.count : 0
+    triangles += g.index ? g.index.count / 3 : (pos ? pos.count / 3 : 0)
+    for (const mat of Array.isArray(m.material) ? m.material : [m.material]) if (mat) materials.add(mat)
+  })
+  return { triangles: Math.round(triangles), vertices, meshes, materials: materials.size }
+}
+
 /** Which named roles a bone list contains, and how many bones claim each. */
 function matchRoles(names: string[]): Map<string, number> {
   const out = new Map<string, number>()
@@ -129,6 +155,15 @@ export class MeshView {
   private disposed = false
   /** the size of the last thing loaded, in metres — the caller shows it */
   size: THREE.Vector3 | null = null
+  /**
+   * WHAT IS ACTUALLY IN THE FILE, counted after it loads.
+   *
+   * The reason to look at the raw reconstruction beside the finished one is to find out what the
+   * decimation cost: "236k triangles down to 41k" is the answer, and two file sizes are not — a
+   * Draco'd file is a tenth the bytes of the same geometry, so comparing sizes tells you about
+   * the compressor rather than about the model.
+   */
+  stats: { triangles: number; vertices: number; meshes: number; materials: number } | null = null
   private skeletonHelper: THREE.SkeletonHelper | null = null
   private skinned: THREE.SkinnedMesh | null = null
   /**
@@ -427,6 +462,7 @@ export class MeshView {
       this.controls.target.set(0, size.y / 2, 0)
       this.controls.update()
       this.size = size
+      this.stats = countGeometry(root)
       // the wireframe choice is remembered, and the materials it applies to did not exist until now
       if (this.wire) this.setWireframe(true)
       /*
@@ -553,6 +589,7 @@ export class MeshView {
   clear() {
     this.grid.visible = true
     if (this.boneMark) this.boneMark.visible = false
+    this.stats = null
     this.pivot.clear()
     this.skeletonHelper = null
     this.skinned = null

@@ -12,7 +12,7 @@ import { Dialog, Tabs, ask, button, confirm, el, lightbox, toast, type Tab } fro
 import { icon } from './icons'
 import { bodyOf, empty, group, readout, segmented, select, textArea, textField, toggle } from './controls'
 import { MeshView } from './meshview'
-import { assetsvc, type AssetItem, type AssetJob, type Material, type ModelRoster } from '../assetsvc'
+import { MESH_FILE, assetsvc, type AssetItem, type AssetJob, type Material, type MeshVariant, type ModelRoster } from '../assetsvc'
 
 /**
  * WHAT SORT OF THING IT IS, and where the list of sorts comes from.
@@ -37,6 +37,52 @@ const RIG_ROLES = [
   'wheel', 'steer', 'suspension', 'door', 'slew', 'boom', 'stick', 'bucket',
   'rotor', 'propeller', 'control-surface', 'spine', 'limb', 'head',
 ]
+
+/**
+ * WHAT AN ASSET IS BEING USED AS, when a level loads it.
+ *
+ * Four roles, because four is what distinguishes the cases Rich named: the car you are in and the
+ * ones chasing you are worth the best mesh, the fifty on the road are not, and anything far enough
+ * away to be scenery is not either.
+ */
+const USE_ROLES = ['hero', 'opponent', 'traffic', 'scenery'] as const
+
+/** The vocabulary `editor/autogen.ts` classifies into and `editor/catalog.ts` tints by. */
+const PLACE_CATEGORIES = [
+  'shed', 'house', 'house_large', 'townhouse', 'apartments', 'restaurant', 'retail_unit',
+  'strip_mall', 'big_box', 'gas_station', 'hotel', 'office', 'warehouse', 'school', 'church',
+  'barn', 'utility', 'sign', 'bridge', 'rock',
+]
+
+/**
+ * The default variant per class and role — the table that means nobody has to fill this in.
+ *
+ * A hero car gets the glass mesh because it is the one you are looking at from inside; traffic
+ * gets the finished one because fifty transmissive materials is fifty extra render passes, and
+ * you cannot see through a car two hundred metres away anyway.
+ */
+function defaultVariantFor(kind: string | undefined, role: (typeof USE_ROLES)[number]): MeshVariant {
+  const precious = kind === 'hero-car' || kind === 'emergency'
+  if (role === 'hero') return 'glass'
+  if (role === 'opponent') return precious ? 'glass' : 'finished'
+  return 'finished'
+}
+
+/** What a thing of this class is usually used as, when nobody has said otherwise. */
+function roleForKind(kind: string | undefined): (typeof USE_ROLES)[number] {
+  if (kind === 'hero-car' || kind === 'emergency') return 'hero'
+  if (kind === 'traffic' || kind === 'commercial-vehicle') return 'traffic'
+  return 'scenery'
+}
+
+/** Which of the three this item actually has, best first. */
+function variantsOf(it: AssetItem): MeshVariant[] {
+  const out: MeshVariant[] = []
+  if (it.glass) out.push('glass')
+  if (it.finished) out.push('finished')
+  if (it.mesh) out.push('raw')
+  return out.length ? out : ['raw']
+}
 
 const KINDS = [
   'hero-car', 'traffic', 'emergency', 'commercial-vehicle', 'pedestrian', 'animal',
@@ -99,13 +145,25 @@ export interface AssetCatalogOpts {
   /** the world that is open, for shared-versus-this-world */
   world?: () => string | null
   /**
-   * Turn a finished mesh into something a level can place.
+   * WHETHER A LEVEL MAY PLACE IT, and what it needs to know to.
    *
-   * It belongs on the ITEM rather than in a toolbar: "make this placeable" is a thing you do to
-   * the thing you are looking at, and it needs a footprint and a height that only somebody
-   * looking at the model can give.
+   * Rich, 2026-09-28: "So confused about the make placable button - why don't we just have a
+   * checkbox in the catalog editor so it adds it to the list."
+   *
+   * He is right. "Make placeable" was a separate dialog with its own list of finished items, its
+   * own copy of the category vocabulary and its own idea of which mesh to use — a second screen
+   * for a boolean. It is a tick box on the item now, and the footprint and height it needs sit
+   * under it in the same form, saved by the same Save.
+   *
+   * Supplied only by a page that HAS a placeable catalog: the world editor has one per volume,
+   * the viewer does not, and a tick that writes nowhere is worse than no tick.
    */
-  onAdopt?: (id: string) => void
+  placeable?: {
+    /** which ids are in the list right now */
+    listed: () => Promise<Set<string>>
+    add: (entry: { id: string; name: string; category: string; glb: string; footprint_m: [number, number]; height_m: number; fit: string }) => Promise<void>
+    remove: (id: string) => Promise<void>
+  }
 }
 
 export class AssetCatalog {
@@ -147,6 +205,18 @@ export class AssetCatalog {
   private scope: 'all' | 'shared' | 'world' = 'all'
   /** a pinned seed per item; absent means "a new one every draw" */
   private seeds = new Map<string, number>()
+  /**
+   * WHICH OF THE TWO MESHES IS ON THE STAGE.
+   *
+   * Rich, 2026-09-28: "Is it possible to see the original raw mesh in addition to the decimated
+   * mesh as an option?" Both files are kept — `mesh.glb` as TRELLIS returned it and
+   * `mesh.finished.glb` after simplifying, unlitting and Draco — and until now only the finished
+   * one could be looked at, which is the wrong way round for deciding whether finishing went too
+   * far. Finished is the default because it is what a level loads.
+   */
+  private meshVariant: MeshVariant | null = null
+  /** the viewer, keyed by what it is showing, so re-rendering the pane does not refetch 26 MB */
+  private mesh3dKey: string | null = null
 
   /* ---- the materials half ------------------------------------------------------------------- */
   private materials: Material[] = []
@@ -206,7 +276,7 @@ export class AssetCatalog {
       // A BOOLEAN when there is nothing to ask: the promise path costs a dialog round trip and is
       // the interesting case, so the common one should not go anywhere near it.
       beforeClose: () => (this.dirty ? this.mayLeave('close the catalog') : true),
-      onClose: () => { this.mesh3d?.dispose(); this.mesh3d = null },
+      onClose: () => { this.mesh3d?.dispose(); this.mesh3d = null; this.mesh3dKey = null },
     })
     this.dialog.body.append(this.tabs.root)
     this.dialog.body.classList.add('asset-body')
@@ -251,6 +321,7 @@ export class AssetCatalog {
   }
 
   async refresh() {
+    if (this.o.placeable) this.placed = await this.o.placeable.listed().catch(() => this.placed)
     this.reachable = await assetsvc.health()
     if (this.reachable) {
       try {
@@ -472,15 +543,6 @@ export class AssetCatalog {
         onClick: () => void this.forkForWorld(it),
       }))
     }
-    if (this.o.onAdopt && it.finished) {
-      tools.append(button({
-        label: 'Make placeable',
-        icon: 'cube',
-        variant: 'primary',
-        title: 'give it a footprint and a height, so a level can put it in a world',
-        onClick: () => this.o.onAdopt!(it.id),
-      }))
-    }
     if (owner && it.forkedFrom) tools.append(el('span', 'dim', `copied from ${it.forkedFrom}`))
     this.detailHost.append(tools)
 
@@ -597,13 +659,33 @@ export class AssetCatalog {
        * One MeshView per panel render, disposed with the panel: a WebGL context is not free and
        * leaking one per click is how a tab runs out of them (browsers cap it around sixteen).
        */
-      this.mesh3d?.dispose()
-      const view = new MeshView({ remember: 'catalog' })
-      this.mesh3d = view
+      /*
+       * WHICH OF THE THREE, and glass by default when there is one.
+       *
+       * The glass variant is the only one whose windows are windows — the other two have them
+       * painted on, which is why they looked solid. It is also the best-looking thing to show
+       * somebody who just asked "did that reconstruct well".
+       */
+      const have = variantsOf(it)
+      const variant: MeshVariant = (this.meshVariant && have.includes(this.meshVariant)) ? this.meshVariant : have[0]
+      const file = MESH_FILE[variant]
+      const key = `${it.id}:${file}`
+      /*
+       * KEPT ACROSS RENDERS, rebuilt only when what it is showing changes. This pane re-renders
+       * on every save and every selection, and the raw mesh is twenty-six megabytes — refetching
+       * that because somebody edited a prompt is a long wait for nothing. A WebGL context is not
+       * free either; browsers cap a tab at around sixteen.
+       */
+      if (this.mesh3dKey !== key) {
+        this.mesh3d?.dispose()
+        this.mesh3d = new MeshView({ remember: 'catalog' })
+        this.mesh3dKey = key
+        void this.mesh3d.load(assetsvc.fileUrl(it.id, file))
+      }
+      const view = this.mesh3d!
       // for probes: the one preview currently on screen
       ;(window as unknown as { __meshview?: MeshView }).__meshview = view
       meshBody.append(view.root)
-      void view.load(assetsvc.fileUrl(it.id, it.finished ? 'mesh.finished.glb' : 'mesh.glb'))
       view.start()
       // the toggles read the viewer, which read what it was left as — a hard-coded `true` here
       // would turn spin back on at every render and make the preference look ignored
@@ -613,6 +695,34 @@ export class AssetCatalog {
         toggle({ label: 'wireframe', value: view.wireframe, onChange: (v) => view.setWireframe(v) }),
       )
       meshBody.append(viewControls)
+
+      /*
+       * RAW OR FINISHED, side by side in one viewer.
+       *
+       * Only offered when there are two of them — an item that has never been finished has one
+       * mesh and a choice with one option in it is furniture. The counts arrive after the load,
+       * so the panel is redrawn once when they do.
+       */
+      if (have.length > 1) {
+        meshBody.append(segmented<MeshVariant>({
+          value: variant,
+          options: have.map((v) => ({ value: v, label: v })),
+          onChange: (v) => { this.meshVariant = v; this.renderDetail() },
+        }))
+      }
+      if (variant !== 'glass' && have.includes('glass')) {
+        meshBody.append(hint('The windows are painted on in this one. “glass” is the variant with real glazing.'))
+      }
+      const counted = readout('showing', `${file} · counting…`)
+      meshBody.append(counted)
+      void view.loaded.then(() => {
+        if (this.mesh3d !== view) return
+        const st = view.stats
+        const value = counted.querySelector('.field-value')
+        if (st && value) {
+          value.textContent = `${file} · ${st.triangles.toLocaleString()} triangles · ${st.meshes} mesh${st.meshes === 1 ? '' : 'es'}`
+        }
+      })
       /*
        * IF IT IS RIGGED, SAY SO — and say what kind of rig.
        *
@@ -649,18 +759,57 @@ export class AssetCatalog {
           onClick: () => this.rigEditor(it, rig.names, view),
         }))
       })
+      /*
+       * WHICH MESH IS USED WHERE.
+       *
+       * Rich, 2026-09-28: "I would want the original models for the hero car of any game plus
+       * direct opponents, while traffic would use lower quality models." So the asset says it
+       * once, per role, and every level gets the same answer — rather than each level choosing a
+       * file and half of them choosing the one with solid windows.
+       *
+       * The class default is shown as the value when nothing has been set, so a library nobody
+       * has filled in still resolves and only the assets that genuinely differ need touching.
+       */
+      const useGroup = group('Used for', { collapsed: true, note: 'which mesh each role loads' })
+      const ub = bodyOf(useGroup)
+      for (const role of USE_ROLES) {
+        const current = it.use?.[role] ?? defaultVariantFor(it.kind, role)
+        ub.append(select<MeshVariant>({
+          label: role,
+          value: have.includes(current) ? current : have[0],
+          options: have.map((v) => ({ value: v, label: v })),
+          note: it.use?.[role] ? undefined : `default for ${it.kind || 'prop'}`,
+          onChange: (v) => {
+            const next = { ...(this.draft.use ?? it.use ?? {}), [role]: v }
+            this.draft.use = next
+            this.showSaveBar()
+          },
+        }))
+      }
+      meshBody.append(useGroup)
+      this.placeableGroup(meshBody, it, have)
       meshBody.append(readout('Raw mesh', `${(it.mesh / 1e6).toFixed(1)} MB`))
-      if (it.finished) meshBody.append(readout('Finished', `${(it.finished / 1e3).toFixed(0)} kB`))
+      if (it.glass) meshBody.append(readout('With glass', `${(it.glass / 1e3).toFixed(0)} kB`))
+      if (it.finished) {
+        meshBody.append(readout('Finished', `${(it.finished / 1e3).toFixed(0)} kB`))
+        // THE SIZES ARE NOT THE COMPARISON. The finished file is Draco-compressed and the raw one
+        // is not, so this ratio is mostly the compressor; the triangle counts above are the
+        // question anybody actually has about decimation.
+        meshBody.append(el('p', 'dim', 'Sizes differ mostly by compression — compare the triangle counts.'))
+      }
       const links = rowOf()
-      const a = el('a', 'btn')
-      a.href = assetsvc.fileUrl(it.id, it.finished ? 'mesh.finished.glb' : 'mesh.glb')
-      a.download = `${it.id}.glb`
-      a.append(icon('cube', 16), el('span', 'btn-label', it.finished ? 'Download finished glb' : 'Download raw glb'))
-      links.append(a)
+      for (const v of have) {
+        const a = el('a', 'btn')
+        a.href = assetsvc.fileUrl(it.id, MESH_FILE[v])
+        a.download = `${it.id}.${v}.glb`
+        a.append(icon('cube', 16), el('span', 'btn-label', `Download ${v}`))
+        links.append(a)
+      }
       meshBody.append(links)
     } else {
       this.mesh3d?.dispose()
       this.mesh3d = null
+      this.mesh3dKey = null
       meshBody.append(empty(it.views.length ? 'Not meshed yet.' : 'Draw a view first.'))
     }
     meshBody.append(
@@ -1443,6 +1592,96 @@ export class AssetCatalog {
       toast(`${made.id} belongs to ${world}; the shared one is untouched`, 'ok', 6000)
     } catch (e) {
       toast(`copy: ${(e as Error).message}`, 'danger')
+    }
+  }
+
+  /**
+   * The tick that puts it in the world's placeable list, and the three numbers it needs.
+   *
+   * A FOOTPRINT AND A HEIGHT ARE ASKED FOR, NOT MEASURED. The glb's scale is not evidence: a
+   * reconstruction comes back in whatever units the model felt like and a diner two metres long
+   * looks perfectly fine on its own. So the defaults are a guess with its reasoning on screen and
+   * somebody corrects them.
+   */
+  private placeableGroup(into: HTMLElement, it: AssetItem, have: MeshVariant[]): void {
+    const P = this.o.placeable
+    if (!P) return
+    const listed = this.placed.has(it.id)
+    const draft = (this.placeDraft[it.id] ??= {
+      category: it.kind === 'hero-car' || it.kind === 'traffic' ? 'sign' : 'house',
+      w: 8, d: 6, h: 5, fit: 'height',
+      // the role this CLASS is usually used as decides the default mesh: a hero car gets the one
+      // with real glazing, a bollard does not need it and fifty of them would cost a pass each
+      variant: (() => {
+        const role = roleForKind(it.kind)
+        const want = it.use?.[role] ?? defaultVariantFor(it.kind, role)
+        return (have.includes(want) ? want : have[0]) as MeshVariant
+      })(),
+    })
+
+    const g = group('Placeable', { note: listed ? 'a level may place this' : 'not in this world’s list' })
+    const b = bodyOf(g)
+    b.append(toggle({
+      label: 'placeable in worlds',
+      value: listed,
+      onChange: (on) => void this.setPlaceable(it, on, draft),
+    }))
+    if (listed || this.placeDraftOpen.has(it.id)) {
+      b.append(
+        select({
+          label: 'category',
+          value: draft.category,
+          options: PLACE_CATEGORIES.map((c) => ({ value: c, label: c.replace(/_/g, ' ') })),
+          onChange: (v) => { draft.category = v; if (listed) void this.setPlaceable(it, true, draft) },
+        }),
+        textField({ label: 'footprint long (m)', value: String(draft.w), type: 'number', step: 0.5, onChange: (v) => { draft.w = Number(v); if (listed) void this.setPlaceable(it, true, draft) } }),
+        textField({ label: 'footprint short (m)', value: String(draft.d), type: 'number', step: 0.5, onChange: (v) => { draft.d = Number(v); if (listed) void this.setPlaceable(it, true, draft) } }),
+        textField({ label: 'height (m)', value: String(draft.h), type: 'number', step: 0.5, onChange: (v) => { draft.h = Number(v); if (listed) void this.setPlaceable(it, true, draft) } }),
+        select({
+          label: 'mesh',
+          value: draft.variant,
+          options: have.map((v) => ({ value: v, label: v })),
+          note: 'glass has real glazing; finished paints it on; raw is unsimplified',
+          onChange: (v) => { draft.variant = v; if (listed) void this.setPlaceable(it, true, draft) },
+        }),
+      )
+      b.append(hint('Asked for rather than measured: a reconstruction comes back in whatever scale it likes.'))
+    }
+    into.append(g)
+  }
+
+  /** the numbers a placeable entry needs, per item, while the pane is open */
+  private placeDraft: Record<string, { category: string; w: number; d: number; h: number; fit: string; variant: MeshVariant }> = {}
+  private placeDraftOpen = new Set<string>()
+  /** which ids the world's placeable list holds, as of the last refresh */
+  private placed = new Set<string>()
+
+  private async setPlaceable(it: AssetItem, on: boolean, draft: { category: string; w: number; d: number; h: number; fit: string; variant: MeshVariant }): Promise<void> {
+    const P = this.o.placeable
+    if (!P) return
+    try {
+      if (on) {
+        await P.add({
+          id: it.id,
+          name: it.subject || it.id,
+          category: draft.category,
+          // served by assetsvc through this origin's proxy, so a level needs no second host
+          glb: `assetsvc/catalog/${encodeURIComponent(it.id)}/file/${MESH_FILE[draft.variant]}`,
+          footprint_m: [draft.w, draft.d],
+          height_m: draft.h,
+          fit: draft.fit,
+        })
+        this.placed.add(it.id)
+        this.placeDraftOpen.add(it.id)
+      } else {
+        await P.remove(it.id)
+        this.placed.delete(it.id)
+        this.placeDraftOpen.delete(it.id)
+      }
+      this.renderDetail()
+    } catch (e) {
+      toast(`placeable: ${(e as Error).message}`, 'danger')
+      this.renderDetail()
     }
   }
 

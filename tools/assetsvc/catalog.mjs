@@ -69,6 +69,16 @@ export class Catalog {
       views,
       mesh: (await has('mesh.glb')) || null,
       finished: (await has('mesh.finished.glb')) || null,
+      /*
+       * THE ONE WITH REAL GLASS.
+       *
+       * `finish.mjs` emits a third file whose glazing is split into KHR_materials_transmission
+       * with a per-texel mask — the raw reconstruction and the plain finished one both have the
+       * windows PAINTED ON, opaque. Nothing reported this file, so nothing ever loaded it and
+       * every car in the editor had solid windows (Rich, 2026-09-28: "I notice the window
+       * transparency isn't working on either the original or decimated models").
+       */
+      glass: (await has('mesh.glass.glb')) || null,
       // What the editor shows as a status chip, derived rather than stored, so it cannot go stale.
       state: (await has('mesh.finished.glb')) ? 'finished' : (await has('mesh.glb')) ? 'meshed' : views.length ? 'drawn' : 'spec',
     }
@@ -105,6 +115,17 @@ export class Catalog {
       /** the roster entry this came from, when it came from one */
       spec: spec.spec ?? before.spec ?? null,
       /*
+       * WHICH MESH IS USED WHERE.
+       *
+       * Rich, 2026-09-28: "I would want the original models for the hero car of any game plus
+       * direct opponents, while traffic would use lower quality models."
+       *
+       * Role → variant. Absent means the class default (see `USED_FOR` in ui/assets.ts), so a
+       * library nobody has filled in still resolves — and an asset that genuinely differs can say
+       * so without every asset having to.
+       */
+      use: spec.use === undefined ? (before.use ?? null) : spec.use,
+      /*
        * SHARED, OR THIS WORLD'S.
        *
        * Rich, 2026-09-28: "we should have a shared vs world concept for assets where you can take
@@ -124,6 +145,20 @@ export class Catalog {
        * it is stored with the asset because it is a fact about the model rather than about a level.
        */
       rig: spec.rig === undefined ? (before.rig ?? null) : spec.rig,
+      /*
+       * HOW IT DRIVES, when it is a vehicle.
+       *
+       * Beside the asset rather than inside a level, for the same reason `rig` is: a car's mass,
+       * grip, gearing and engine note are facts about the CAR, and a level that carried them would
+       * mean the same car handled differently in two games by accident rather than on purpose. A
+       * level may still override — the document holds a profile REFERENCE plus overrides, never a
+       * copy, so improving `street` improves every car that names it.
+       *
+       * The schema and every unit are in `apps/corridor/src/vehicles.ts`; this only stores it. The
+       * service deliberately does not validate it: the editor reports every problem at once while
+       * somebody is typing, which is better than a 400 from here naming the first one.
+       */
+      vehicle: spec.vehicle === undefined ? (before.vehicle ?? null) : spec.vehicle,
       updated: new Date().toISOString(),
       history: before.history ?? [],
     }

@@ -522,4 +522,7 @@ export const api = {
   catalog: () => call<{ assets: { id: string; name: string; category: string; glb?: string; footprint_m: [number, number]; height_m: number }[] }>('/api/catalog'),
   mergeCatalog: (assets: Record<string, unknown>[]) =>
     call<{ total: number; added: string[]; updated: string[] }>('/api/catalog', { method: 'POST', body: JSON.stringify({ assets }) }),
+  /** take one out of the placeable list. The asset in the library is untouched. */
+  unlistAsset: (id: string) =>
+    call<{ removed: number; total: number }>(`/api/catalog/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 }

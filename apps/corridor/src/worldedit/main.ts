@@ -20,7 +20,6 @@ import { api, type Config, type IndexedPlace, type Way, type World } from './api
 import { MapView, type LonLat } from './map'
 import { DefinePanel, zoomFor } from './define'
 import { LogView, RunsPanel } from './runs'
-import { AdoptDialog } from './adopt'
 import { StagePanel } from './stage'
 import { ProgramPanel } from '../ui/programpanel'
 import { ShellPanel } from '../ui/shellpanel'
@@ -429,9 +428,18 @@ const logs = new LogView()
 const assets = new AssetCatalog({
   host: document.getElementById('assets')!,
   world: () => selected,
-  onAdopt: () => void adopt.open(),
+  /*
+   * PLACEABLE IS A TICK BOX, not a second screen.
+   *
+   * The world's placeable catalog is this volume's (`/api/catalog`), which is why this is wired
+   * here and not inside the library: the viewer has a library too and no catalog to add to.
+   */
+  placeable: {
+    listed: async () => new Set((await api.catalog()).assets.map((a) => a.id)),
+    add: async (entry) => { await api.mergeCatalog([entry]) },
+    remove: async (id) => { await api.unlistAsset(id) },
+  },
 })
-const adopt = new AdoptDialog()
 
 const define = new DefinePanel({
   map,

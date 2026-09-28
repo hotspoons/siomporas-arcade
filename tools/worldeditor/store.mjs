@@ -542,4 +542,20 @@ export class Store {
     const file = path.join(this.assets, 'catalog.json')
     return (await this.readJson(file)) ?? (await this.readJson(this.catalogSeed ?? '', null)) ?? { assets: [] }
   }
+
+  /**
+   * Take one out of the placeable catalog.
+   *
+   * The pair of `mergeCatalog`, and it exists because the editor's control for this is a CHECKBOX
+   * now — a tick you cannot untick is not a tick. The asset itself is untouched: this is the list
+   * of what a level may place, not the library.
+   */
+  async unlistCatalog(id) {
+    const file = path.join(this.assets, 'catalog.json')
+    const doc = (await this.readJson(file)) ?? (await this.readJson(this.catalogSeed ?? '', null)) ?? { assets: [] }
+    const before = (doc.assets ?? []).length
+    doc.assets = (doc.assets ?? []).filter((a) => a.id !== id)
+    await this.writeAtomic(file, Buffer.from(JSON.stringify(doc, null, 1)))
+    return { removed: before - doc.assets.length, total: doc.assets.length }
+  }
 }

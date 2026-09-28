@@ -88,6 +88,104 @@ const zoomed = await camera(page)
 say('wheel', { was: dragged.dist, now: zoomed.dist })
 if (Math.abs(zoomed.dist - dragged.dist) < 0.01) fail.push('the wheel did not zoom')
 
+/* ---- 2b · the raw mesh, beside the finished one ---- */
+//
+// Rich, 2026-09-28: "Is it possible to see the original raw mesh in addition to the decimated mesh
+// as an option?" Both files are kept — `mesh.glb` as TRELLIS returned it, `mesh.finished.glb`
+// after simplifying and Draco — and only the finished one could be looked at, which is the wrong
+// way round for judging whether the decimation went too far.
+//
+// THE TRIANGLE COUNT IS THE CHECK, not the file size: the finished file is compressed and the raw
+// one is not, so a probe comparing bytes would pass on two copies of the same geometry.
+const variants = await page.evaluate(() =>
+  [...document.querySelectorAll('#assets .segmented button, #assets .seg')].map((n) => n.textContent.trim()))
+say('mesh variants', variants)
+
+/* ---- 2c · the windows are windows ---- */
+//
+// Rich, 2026-09-28: "I notice the window transparency isn't working on either the original or
+// decimated models." It was not working because neither of them HAS any: `finish.mjs` emits a
+// third file whose glazing is split into KHR_materials_transmission with a per-texel mask, and
+// nothing reported or loaded it.
+//
+// THE MATERIAL BEING RIGHT PROVES NOTHING — a transmissive material that the renderer never runs
+// its transmission pass over looks exactly like an opaque one. So this turns transmission off on
+// the loaded model and checks the picture changes.
+if (variants.includes('glass')) {
+  const chosen = await page.evaluate(() =>
+    [...document.querySelectorAll('#assets .segmented button, #assets .seg')].filter((n) => n.classList.contains('on')).map((n) => n.textContent.trim())[0])
+  say('shown by default', chosen)
+  if (chosen !== 'glass') fail.push(`it shows ${chosen} by default — the one with painted-on windows`)
+
+  const mat = await page.evaluate(() => {
+    let found = null
+    window.__meshview.pivot.traverse((o) => {
+      for (const m of Array.isArray(o.material) ? o.material : o.material ? [o.material] : []) {
+        if (m.transmission > 0 && !found) found = { transmission: m.transmission, map: !!m.transmissionMap, ior: m.ior }
+      }
+    })
+    return found
+  })
+  say('transmissive material', mat ?? 'none')
+  if (!mat) fail.push('the glass variant loaded with no transmissive material in it')
+  else {
+    const frame = () => page.evaluate(() => {
+      const v = window.__meshview
+      v.renderer.render(v.scene, v.camera)
+      const off = document.createElement('canvas')
+      off.width = 160
+      off.height = 120
+      const g = off.getContext('2d')
+      g.drawImage(v.renderer.domElement, 0, 0, 160, 120)
+      return [...g.getImageData(0, 0, 160, 120).data]
+    })
+    const withGlass = await frame()
+    await page.evaluate(() => window.__meshview.pivot.traverse((o) => {
+      for (const m of Array.isArray(o.material) ? o.material : o.material ? [o.material] : []) {
+        if ('transmission' in m) { m.transmission = 0; m.needsUpdate = true }
+      }
+    }))
+    await page.waitForTimeout(600)
+    const without = await frame()
+    let changed = 0
+    for (let i = 0; i < withGlass.length; i += 4) if (Math.abs(withGlass[i] - without[i]) > 6) changed++
+    say('pixels transmission is worth', `${changed} of ${withGlass.length / 4}`)
+    if (changed < 20) fail.push('turning transmission off changed nothing — the pass is not running')
+    await page.evaluate(() => window.__meshview.pivot.traverse((o) => {
+      for (const m of Array.isArray(o.material) ? o.material : o.material ? [o.material] : []) {
+        if ('transmission' in m) { m.transmission = 1; m.needsUpdate = true }
+      }
+    }))
+  }
+}
+
+if (!variants.includes('raw') || !variants.includes('finished')) {
+  fail.push('no way to choose the raw mesh')
+} else {
+  await page.evaluate(() => [...document.querySelectorAll('#assets button')].find((x) => x.textContent?.trim() === 'finished')?.click())
+  await page.waitForTimeout(3000)
+  const finished = await page.evaluate(() => window.__meshview.stats)
+  await page.evaluate(() => [...document.querySelectorAll('#assets button')].find((x) => x.textContent?.trim() === 'raw')?.click())
+  const swapped = await page.waitForFunction((was) => {
+    const st = window.__meshview?.stats
+    return st && st.triangles !== was
+  }, finished.triangles, { timeout: 90000 }).then(() => true).catch(() => false)
+  await page.waitForTimeout(600)
+  const raw = await page.evaluate(() => window.__meshview.stats)
+  say('finished vs raw', { finished: finished.triangles, raw: raw?.triangles })
+  if (!swapped) fail.push('choosing the raw mesh loaded the same geometry')
+  else if (raw.triangles <= finished.triangles) {
+    fail.push(`the raw mesh has ${raw.triangles} triangles against the finished ${finished.triangles} — one of them is not what it says`)
+  }
+  // and back, because the rest of this probe is about the finished one
+  await page.evaluate(() => [...document.querySelectorAll('#assets button')].find((x) => x.textContent?.trim() === 'finished')?.click())
+  await page.waitForTimeout(3000)
+}
+
+const downloads = await page.evaluate(() => [...document.querySelectorAll('#assets a.btn')].map((a) => a.textContent.trim()))
+say('downloads', downloads)
+if (downloads.length < 2) fail.push('only one of the two meshes can be downloaded')
+
 /* ---- 3 · pop out ---- */
 await page.evaluate(() => [...document.querySelectorAll('#assets button')].find((x) => /Pop out/.test(x.textContent))?.click())
 await page.waitForTimeout(900)

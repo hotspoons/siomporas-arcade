@@ -1089,6 +1089,9 @@ async function api(req, res, seg, q) {
     const entries = Array.isArray(body) ? body : body.assets ? body.assets : [body]
     return json(res, 200, await store.mergeCatalog(entries))
   }
+  if (seg[0] === 'catalog' && seg.length === 2 && req.method === 'DELETE') {
+    return json(res, 200, await store.unlistCatalog(decodeURIComponent(seg[1])))
+  }
   return undefined
 }
 

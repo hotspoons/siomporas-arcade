@@ -28,6 +28,8 @@ export interface AssetItem {
   views: string[]
   mesh: number | null
   finished: number | null
+  /** the finished mesh with its glazing split into KHR_materials_transmission — the one with glass */
+  glass?: number | null
   state: 'spec' | 'drawn' | 'meshed' | 'finished'
   history: { at: string; step: string; file?: string; model?: string; seconds?: number }[]
   /** `null` is shared with every world; a slug belongs to that world alone */
@@ -36,6 +38,16 @@ export interface AssetItem {
   forkedFrom?: string | null
   /** which bone does what, when somebody has said rather than letting the names be guessed */
   rig?: RigBinding | null
+  /** role → which mesh that role loads. Absent means the class default; see `USED_FOR` */
+  use?: Record<string, MeshVariant> | null
+  /**
+   * How it drives, when it is a vehicle. The schema and the units are in `src/vehicles.ts`.
+   *
+   * Typed as `unknown` here on purpose: this file is the transport, and giving it the real type
+   * would make the service client import the physics engine to describe a field it only forwards.
+   * Callers narrow it with `validateVehicle`, which is the thing that actually knows.
+   */
+  vehicle?: unknown
 }
 
 /**
@@ -44,6 +56,23 @@ export interface AssetItem {
  * The viewer guesses from bone NAMES and is right most of the time; this is what you write when
  * it is not — a rig whose wheels are `Bone.007`, or one whose "arm" is an excavator's stick.
  */
+/**
+ * The three meshes an asset can have, in order of fidelity.
+ *
+ * `glass` is the finished mesh with its glazing split into KHR_materials_transmission — the only
+ * one whose windows are actually windows; `finished` is the same geometry with them painted on;
+ * `raw` is what the reconstructor returned, before simplifying: several times the triangles and
+ * no compression.
+ */
+export type MeshVariant = 'glass' | 'finished' | 'raw'
+
+/** The file each variant is stored as. One place, so the viewer and the placeable catalog agree. */
+export const MESH_FILE: Record<MeshVariant, string> = {
+  glass: 'mesh.glass.glb',
+  finished: 'mesh.finished.glb',
+  raw: 'mesh.glb',
+}
+
 export interface RigBinding {
   /** role → bone names, in the order the game expects them (wheels: FL, FR, RL, RR) */
   roles: Record<string, string[]>

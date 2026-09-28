@@ -58,9 +58,21 @@ RUN npm run build -w apps/corridor
 # ---- the service -------------------------------------------------------------------------------
 FROM node:22-slim
 WORKDIR /app
-# No dependencies. Every module here is node builtins plus the four files beside it — SigV4 by
-# hand, the Kubernetes API by hand, no SDK — which is why there is no `npm install` in this stage.
+# ONE dependency, and it is named here because this stage has no `npm install` and never will:
+# everything else is node builtins plus the files beside it — SigV4 by hand, the Kubernetes API by
+# hand, no SDK.
+#
+# `ws` arrived with the agent tunnel relay (agentws.mjs). A browser's WebSocket cannot send the
+# header the platform's tunnel wants, so the service holds the token and relays the bytes — and
+# there is no WebSocket in node's standard library to do it with. Copied from the build stage
+# rather than installed, so this stage still needs no network and no registry; it is pure
+# JavaScript with no native build.
+#
+# The image went red once because this line was missing: the service threw on the import at
+# startup, `/api/health` answered nothing, and the smoke test said "Unexpected end of JSON input".
+# probes/worldeditor-imagefiles.mjs now checks every bare import against what is copied here.
 COPY tools/worldeditor/ tools/worldeditor/
+COPY --from=app /src/node_modules/ws/ node_modules/ws/
 COPY --from=app /src/apps/corridor/dist/ apps/corridor/dist/
 # The seed list is CARRIED but NOT ENABLED.
 #

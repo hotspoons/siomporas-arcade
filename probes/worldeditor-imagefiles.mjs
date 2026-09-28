@@ -10,8 +10,16 @@
 // build time and which lives with the asset library that generates it — deliberately, because a
 // second copy of a spec is a spec that drifts.
 //
-// So this reads the COPY lines out of the Dockerfile and checks every import that leaves the app
-// against them. Static, so it is a second, not four minutes.
+// The RUNTIME stage has the same problem from the other direction. It ships no `npm install` on
+// purpose — SigV4 by hand, the Kubernetes API by hand — so a BARE import there is only resolvable
+// if the package was copied in. The agent tunnel relay added `ws` (a browser's WebSocket cannot
+// send the header the platform's tunnel wants, so the service relays the bytes, and node has no
+// WebSocket to do it with), the line to copy it was missing, and the service threw on the import
+// at startup: `/api/health` answered nothing and the smoke test said "Unexpected end of JSON
+// input" — after the image had been pushed.
+//
+// So this reads the COPY lines out of both stages and checks both kinds of import against them.
+// Static, so it is a second, not a push and four minutes of buildx.
 //
 //   node probes/worldeditor-imagefiles.mjs
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
@@ -22,30 +30,56 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const DOCKERFILE = path.join(ROOT, 'tools/worldeditor/Dockerfile')
 const APP = 'apps/corridor'
 
-/** The paths the Dockerfile's FIRST stage copies in — the one that runs `vite build`. */
-function copiedPaths(dockerfile) {
+/** One stage's text: `which` 0 is the build stage, 1 the runtime stage. */
+function stageText(dockerfile, which) {
   const text = readFileSync(dockerfile, 'utf8')
-  // everything up to the second FROM: the build stage
-  const stage = text.slice(0, text.indexOf('\nFROM ', text.indexOf('\nFROM ') + 1) + 1)
+  const froms = [...text.matchAll(/^FROM /gm)].map((m) => m.index)
+  const from = froms[which]
+  const to = froms[which + 1] ?? text.length
+  return text.slice(from, to)
+}
+
+/** What a stage COPYs in. `--from=` sources are destinations in this stage, so they count too. */
+function copiedPaths(stage) {
   const out = []
   for (const line of stage.split('\n')) {
-    const m = /^COPY\s+(?:--from=\S+\s+)?(.+)$/.exec(line.trim())
+    const m = /^COPY\s+(?:--from=(\S+)\s+)?(.+)$/.exec(line.trim())
     if (!m) continue
-    const parts = m[1].split(/\s+/)
-    for (const src of parts.slice(0, -1)) out.push(src.replace(/\/$/, ''))
+    const parts = m[2].split(/\s+/)
+    if (m[1]) {
+      // from another stage: the DESTINATION is what this stage ends up holding
+      out.push({ from: m[1], src: parts[0], dest: parts[parts.length - 1].replace(/\/$/, '') })
+      continue
+    }
+    for (const src of parts.slice(0, -1)) out.push({ src: src.replace(/\/$/, ''), dest: parts[parts.length - 1].replace(/\/$/, '') })
   }
   return out
 }
 
-/** Is this repo-relative path inside something the build stage copied? */
+/** Is this repo-relative path inside something the stage copied? */
 function isCopied(rel, copied) {
-  return copied.some((c) => {
+  return copied.map((x) => x.src).some((c) => {
     if (c.includes('*')) {
       const re = new RegExp('^' + c.split('*').map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('[^/]*') + '$')
       return re.test(rel)
     }
     return rel === c || rel.startsWith(`${c}/`)
   })
+}
+
+/**
+ * Every import specifier in a file: static, side-effect and dynamic.
+ *
+ * LINE-ANCHORED for the static forms, because `from '` and `import '` occur in prose all over
+ * this codebase's comments — the first version of this reported that the service imports `go` and
+ * `' && req.method === '`, having found them in a sentence.
+ */
+function specifiers(text) {
+  const out = []
+  for (const m of text.matchAll(/^\s*(?:export\s+\*\s+from|export\s+\{[^}]*\}\s*from|import\s+(?:[^'"()]*?\s+from\s+)?)['"]([^'"]+)['"]/gm)) out.push(m[1])
+  // dynamic, which can legitimately sit mid-line — `(?<!\w)` keeps it off `.import(`
+  for (const m of text.matchAll(/(?<![\w.])import\s*\(\s*(?:\/\*[^*]*\*\/\s*)?['"]([^'"]+)['"]\s*\)/g)) out.push(m[1])
+  return out
 }
 
 /** Every source file under the app that a bundler would follow. */
@@ -59,7 +93,7 @@ function sources(dir) {
   return out
 }
 
-const copied = copiedPaths(DOCKERFILE)
+const copied = copiedPaths(stageText(DOCKERFILE, 0))
 const files = [
   ...sources(path.join(ROOT, APP, 'src')),
   ...readdirSync(path.join(ROOT, APP)).filter((f) => f.endsWith('.html')).map((f) => path.join(ROOT, APP, f)),
@@ -70,8 +104,9 @@ const escaping = []
 for (const file of files) {
   const text = readFileSync(file, 'utf8')
   // relative specifiers only: a bare one is a package and npm ci put it there
-  for (const m of text.matchAll(/(?:from|import)\s*\(?\s*['"](\.[^'"]+)['"]/g)) {
-    const spec = m[1].split('?')[0]
+  for (const raw of specifiers(text)) {
+    if (!raw.startsWith('.')) continue // a bare one is a package and npm ci put it there
+    const spec = raw.split('?')[0]
     const abs = path.resolve(path.dirname(file), spec)
     const rel = path.relative(ROOT, abs)
     if (rel.startsWith(`${APP}/`) || rel.startsWith('..')) continue // inside the app, or outside the repo
@@ -94,5 +129,64 @@ if (!escaping.length) {
   console.log('\nFAIL: no import reaches outside the app — either the scanner is broken or this check is no longer needed')
   process.exit(1)
 }
+/* ---- the runtime stage: a bare import needs its package copied in ------------------------- */
+
+const runtime = copiedPaths(stageText(DOCKERFILE, 1))
+
+/**
+ * What the service actually loads, from its ENTRYPOINT outwards.
+ *
+ * The import graph and not a glob of the directory: `probe.mjs` sits beside the service and
+ * imports playwright, and a glob calls that a missing dependency. Reachability is the real
+ * question — "what does the running service need" — and it also catches a new file added to the
+ * graph with a new dependency, which a hand-kept list would not.
+ *
+ * The entrypoint is read from the Dockerfile for the same reason everything else here is.
+ */
+function entrypointOf(stage) {
+  const m = /^ENTRYPOINT\s+\[(.+)\]/m.exec(stage)
+  if (!m) return null
+  const args = m[1].split(',').map((a) => a.trim().replace(/^"|"$/g, ''))
+  return args.find((a) => a.endsWith('.mjs') || a.endsWith('.js')) ?? null
+}
+
+function reachable(entry) {
+  const seen = new Set()
+  const bare = new Set()
+  const queue = [path.join(ROOT, entry)]
+  while (queue.length) {
+    const file = queue.pop()
+    if (seen.has(file) || !existsSync(file)) continue
+    seen.add(file)
+    for (const spec of specifiers(readFileSync(file, 'utf8'))) {
+      if (spec.startsWith('node:')) continue
+      if (!spec.startsWith('.')) { bare.add(spec); continue }
+      const abs = path.resolve(path.dirname(file), spec)
+      queue.push(...[abs, `${abs}.mjs`, `${abs}.js`, path.join(abs, 'index.mjs')].filter(existsSync))
+    }
+  }
+  return { files: seen, bare }
+}
+
+const entry = entrypointOf(stageText(DOCKERFILE, 1))
+if (!entry) {
+  fail.push('the Dockerfile names no ENTRYPOINT script, so nothing could be traced')
+}
+const { files: serviceFiles, bare } = entry ? reachable(entry) : { files: new Set(), bare: new Set() }
+// a package is available only if some COPY lands it under node_modules/
+const packaged = new Set(
+  runtime.filter((c) => /(^|\/)node_modules\//.test(c.dest)).map((c) => c.dest.replace(/^.*node_modules\//, '').replace(/\/$/, '')),
+)
+console.log(`\n${entry} reaches ${serviceFiles.size} files and imports ${bare.size} packages`)
+for (const b of [...bare].sort()) {
+  const ok = [...packaged].some((pkg) => b === pkg || b.startsWith(`${pkg}/`))
+  console.log(`  ${b.padEnd(52)} ${ok ? 'copied in' : 'NOT IN THE IMAGE'}`)
+  if (!ok) fail.push(`${entry} reaches an import of '${b}', which the runtime stage never copies — the service throws on startup`)
+}
+// this half of the check is worth nothing if the graph walk found nothing
+if (entry && serviceFiles.size < 5) {
+  fail.push(`only ${serviceFiles.size} files were reached from ${entry} — the import graph walk is broken`)
+}
+
 if (fail.length) { console.log('\nFAIL:\n  ' + fail.join('\n  ')); process.exit(1) }
-console.log('\nPASS: every import that leaves the app is copied into the image')
+console.log('\nPASS: every import that leaves the app, and every package the service needs, is in the image')

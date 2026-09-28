@@ -144,17 +144,20 @@ export function roleArgs(r, role) {
    * here and never fired, because the config defaulted to null; giving it an env default would
    * have armed it on every run.
    *
-   * There is no `--seam-fail-over`. The gate exists as its own subcommand — `splatpipe seams
-   * --chunks <dir> --fail-over 3.0` — and `run` does not call it: the leader goes poses ->
-   * train with nothing in between. Inventing a flag `run` does not accept would fail every job
-   * loudly, which is at least honest, but it would not gate anything. The threshold is carried on
-   * the object as a label instead, and running the gate is a change to run.py, which belongs to
-   * the splats lane.
+   * `--seam-fail-over` IS A REAL FLAG NOW (splats lane, f2fd0830). It was not when this was
+   * written, and the note here said so; the gate has since been wired into `run` between poses
+   * and train, which is where it earns its keep — the seam answer comes from poses and training
+   * is the expensive half. A non-zero exit with the worst seam on stdout, and the verdict written
+   * to `<chunks>/.seam-gate.json` for the workers to read.
+   *
+   * `none` disables it. Passing 0 or a negative would be ambiguous — "no bar" and "an impossible
+   * bar" are opposite intentions — so anything non-positive is sent as the word.
    */
   const a = []
   if (r.config) a.push('--config', r.config)
   a.push('run', '--capture', `${EDITOR_MOUNT}/captures/${r.capture}`, '--out', '/out', '--role', role)
   if (r.world) a.push('--site', `${EDITOR_MOUNT}/sites/${r.world}`)
+  a.push('--seam-fail-over', Number.isFinite(r.seamFailOver) && r.seamFailOver > 0 ? String(r.seamFailOver) : 'none')
   return a
 }
 

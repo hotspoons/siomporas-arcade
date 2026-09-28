@@ -229,14 +229,24 @@ test('--config goes BEFORE the subcommand, because that is where splatpipe decla
 })
 
 test('no flag is passed that splatpipe run does not declare', () => {
-  // `run` takes exactly these; anything else is a usage error on the first line of the job
-  const ALLOWED = new Set(['--capture', '--out', '--role', '--site', '--work', '--config'])
+  // `run` takes exactly these; anything else is a usage error on the first line of the job.
+  // `--seam-fail-over` was added by the splats lane when the gate landed — this list is the
+  // contract between the two, and it is worth keeping literal rather than inferred.
+  const ALLOWED = new Set(['--capture', '--out', '--role', '--site', '--work', '--config', '--seam-fail-over'])
   const r = normalise({ capture: 'x', world: 'w', config: 'c.yaml', seamFailOver: 3 })
   for (const role of ['leader', 'worker']) {
     for (const a of roleArgs(r, role)) {
       if (a.startsWith('--')) assert.ok(ALLOWED.has(a), `run does not accept ${a}`)
     }
   }
+})
+
+test('the gate threshold is passed, and disabling it is a word rather than a zero', () => {
+  const on = roleArgs(normalise({ capture: 'x', seamFailOver: 2.5 }), 'leader')
+  assert.equal(on[on.indexOf('--seam-fail-over') + 1], '2.5')
+  // "no bar" and "an impossible bar" are opposite intentions; 0 could be read as either
+  const off = roleArgs(normalise({ capture: 'x', seamFailOver: 0 }), 'leader')
+  assert.equal(off[off.indexOf('--seam-fail-over') + 1], 'none')
 })
 
 test('the roles really differ, and only in the role', () => {

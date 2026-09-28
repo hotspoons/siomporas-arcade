@@ -302,6 +302,12 @@ const define = new DefinePanel({
     setMode('bake')
   },
   onDirty: (d) => setDirty(d, 'boundary'),
+  worlds: () => worlds,
+  onImported: async () => {
+    await refreshWorlds()
+    renderWorldSelect()
+    renderPanel()
+  },
 })
 
 /** One unsaved mark for the whole bar, naming what is unsaved — two panels can both be editing. */

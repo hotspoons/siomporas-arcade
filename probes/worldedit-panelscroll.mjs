@@ -37,7 +37,9 @@ await page.waitForTimeout(500)
 const geom = await page.evaluate(() => {
   const body = document.querySelector('#panel')
   const panel = document.querySelector('aside.inspector')
-  const acts = body?.querySelector('.panel-actions')
+  // DIRECT CHILD, which is what the sticky rule matches. A group inside the form can have its own
+  // action bar — the import step does — and `querySelector` finds that one first.
+  const acts = body?.querySelector(':scope > .panel-actions')
   const r = (n) => { const b = n.getBoundingClientRect(); return { top: b.top, bottom: b.bottom, h: b.height } }
   return {
     overflows: body.scrollHeight > body.clientHeight + 1,
@@ -71,7 +73,7 @@ ok('the panel has its action buttons', geom.hasActions && geom.buttons >= 2, `${
 const after = await page.evaluate(() => {
   const body = document.querySelector('#panel')
   body.scrollTop = body.scrollHeight
-  const acts = body.querySelector('.panel-actions')
+  const acts = body.querySelector(':scope > .panel-actions')
   const a = acts.getBoundingClientRect()
   const p = document.querySelector('aside.inspector').getBoundingClientRect()
   return { scrolled: body.scrollTop > 0, actTop: a.top, actBottom: a.bottom, panelBottom: p.bottom, panelTop: p.top }
@@ -86,7 +88,7 @@ ok('and the buttons are on screen at the bottom of the scroll',
 const atTop = await page.evaluate(() => {
   const body = document.querySelector('#panel')
   body.scrollTop = 0
-  const a = body.querySelector('.panel-actions').getBoundingClientRect()
+  const a = body.querySelector(':scope > .panel-actions').getBoundingClientRect()
   const p = document.querySelector('aside.inspector').getBoundingClientRect()
   return { actBottom: a.bottom, panelBottom: p.bottom, visible: a.top < p.bottom && a.bottom > p.top }
 })

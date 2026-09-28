@@ -14,7 +14,7 @@ import { Dialog, button, el, toast } from '../ui/shell'
 import { bodyOf, empty, group, readout } from '../ui/controls'
 import { icon } from '../ui/icons'
 import { api, type Run, type World } from './api'
-import { bakedTransferGroup } from './transfer'
+import { downloadBakeGroup } from './transfer'
 
 const STATE_KIND: Record<Run['state'], 'info' | 'ok' | 'warn' | 'danger'> = {
   starting: 'info',
@@ -171,14 +171,14 @@ export class RunsPanel {
     bodyOf(where).append(
       readout('runner', this.runner),
       this.runner === 'local'
-        ? note('a subprocess on this machine — the cluster Job path is off, or this is not running in a pod')
-        : note('one Kubernetes Job per bake, onto the shared volume. `python -m corridor fetch <slug>` is the whole bake: it fetches, measures and writes web/ and sites/index.json.'),
+        ? note('Runs as a subprocess here.')
+        : note('Runs as a Kubernetes Job on the shared volume.'),
     )
     host.append(where)
 
     const sel = group(world ? `Bake “${world.slug}”` : 'Bake')
     const sb = bodyOf(sel)
-    if (!world) sb.append(empty('pick a world from the menu first'))
+    if (!world) sb.append(empty('No world selected'))
     else {
       sb.append(
         readout('centre', `${world.lat.toFixed(5)}, ${world.lon.toFixed(5)}`),
@@ -195,9 +195,9 @@ export class RunsPanel {
         sb.append(readout('frame', frame.kind ?? 'unstamped'))
         if (frame.anchor) sb.append(readout('anchor', `${frame.anchor.lat.toFixed(5)}, ${frame.anchor.lon.toFixed(5)}`))
         if (frame.kind && frame.kind !== 'enu') {
-          sb.append(warn('this bake holds the OLD UTM-relative metres. Re-baking re-exports it as true ENU about a declared anchor; until then anything authored against it is in a frame that has moved — a median of 40 m and up to 439 m, measured.'))
+          sb.append(warn('Old UTM-relative frame — re-bake before authoring against it.'))
         } else if (!frame.kind) {
-          sb.append(warn('this bake has no frame stamp, so nothing here can say which metres it holds. If it was baked before 2026-09-22 it is UTM-relative. Re-bake it.'))
+          sb.append(warn('No frame stamp — re-bake.'))
         }
       }
       const acts = el('div', 'panel-actions')
@@ -233,7 +233,7 @@ export class RunsPanel {
         )
       }
       sb.append(acts)
-      if (world.baked) sb.append(note('a re-bake of a baked world is minutes, not hours: every source is cached on the volume.'))
+      if (world.baked) sb.append(note('Re-baking is quicker: the sources are cached.'))
     }
     host.append(sel)
 
@@ -242,8 +242,8 @@ export class RunsPanel {
     const pb = bodyOf(pub)
     if (!this.bucket) {
       pb.append(
-        empty('no bucket configured'),
-        note('set WORLDEDITOR_S3_BUCKET / _ENDPOINT and mount the credentials Secret (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY — an R2 API token is exactly that). Publishing runs `python -m corridor publish`, which mirrors data/sites to <bucket>/<prefix>/sites/<slug>/ and rewrites <prefix>/index.json.'),
+        empty('No bucket configured'),
+        note('Set a bucket to publish baked worlds.'),
       )
     } else {
       pb.append(readout('bucket', `${this.bucket.bucket}/${this.bucket.prefix}`), readout('endpoint', this.bucket.endpoint))
@@ -279,13 +279,14 @@ export class RunsPanel {
         }),
       )
       pb.append(acts)
-      pb.append(note('objects whose size already matches are skipped, so publishing after every bake is cheap and safe.'))
+      pb.append(note('Unchanged files are skipped.'))
     }
     host.append(pub)
 
-    /* the same result as a file rather than as a bucket. Three routes to one place: publish,
-       download, or hand somebody the definition and let them bake it themselves. */
-    host.append(bakedTransferGroup({
+    /* Download only. IMPORTING a baked world is part of making one, so it lives on the world
+       form beside "draw an area" rather than here under a heading called "move" — which is what
+       it was, and read as a third thing you might do to a world you already had. */
+    host.append(downloadBakeGroup({
       selected: () => world?.slug ?? null,
       worlds: () => this.o.worlds(),
       reload: () => this.o.refreshWorlds(),
@@ -294,7 +295,7 @@ export class RunsPanel {
     /* history */
     const hist = group('Runs')
     const hb = bodyOf(hist)
-    if (!this.runs.length) hb.append(empty('nothing has run yet'))
+    if (!this.runs.length) hb.append(empty('Nothing has run yet'))
     for (const r of this.runs.slice(0, 20)) {
       const row = el('button', 'run-row')
       row.append(chip(r.state), el('span', 'run-title', r.label), el('span', 'run-meta', when(r)))

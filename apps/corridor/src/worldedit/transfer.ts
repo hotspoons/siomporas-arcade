@@ -128,57 +128,69 @@ export function worldMenuTransfer(o: TransferOpts, close: () => void): HTMLEleme
 }
 
 /**
- * The baked half, for the Bake panel: the result as one zip, in and out.
+ * Download a bake, for the Bake panel.
  *
- * Separate from the definition above because the numbers are four orders of magnitude apart and
- * so are the failure modes. A definition either parses or it does not; an archive can be refused
- * by a proxy that never showed it to the service, can be too big for the service to hold in
- * memory, and takes long enough that silence reads as a hang.
+ * Only the download. Importing one is part of MAKING a world — see `importBakeGroup` — and this
+ * used to carry both under the heading "Move a baked world", which read as a third thing you
+ * might do to a world you already had (Rich, 2026-09-28: "the 'move a baked world' should be on
+ * the previous form as an import step, not move, this is confusing").
  */
-export function bakedTransferGroup(o: TransferOpts): HTMLElement {
-  const g = group('Move a baked world', {
-    note: 'The bake itself, as one file — for getting a world onto another machine without the hours.',
-  })
+export function downloadBakeGroup(o: TransferOpts): HTMLElement {
+  const g = group('Download')
   const body = bodyOf(g)
   const slug = o.selected()
   const world = o.worlds().find((w) => w.slug === slug)
 
-  let webOnly = true
-  body.append(toggle({
-    label: 'viewer half only',
-    value: webOnly,
-    note: 'web/ alone: what the browser needs. The full archive also carries the source rasters a re-bake would want, and is several times larger.',
-    onChange: (v) => { webOnly = v },
-  }))
-
-  const bar = el('div', 'row-actions')
-  if (world?.baked) {
-    bar.append(button({
-      label: `Download ${slug}`,
-      icon: 'arrow-down-tray',
-      onClick: () => download(api.archiveUrl(slug!, webOnly)),
-    }))
-  } else {
-    body.append(empty(slug ? `${slug} is not baked yet — nothing to download.` : 'No world selected.'))
+  if (!world?.baked) {
+    body.append(empty(slug ? 'Not baked yet' : 'No world selected'))
+    return g
   }
 
-  const progress = readout('upload', 'idle')
+  let webOnly = true
+  body.append(toggle({
+    label: 'viewer files only',
+    value: webOnly,
+    note: 'Without the source rasters. Much smaller.',
+    onChange: (v) => { webOnly = v },
+  }))
+  const bar = el('div', 'panel-actions')
   bar.append(button({
-    label: 'Upload a baked world…',
+    label: `Download ${slug}`,
+    icon: 'arrow-down-tray',
+    onClick: () => download(api.archiveUrl(slug!, webOnly)),
+  }))
+  body.append(bar)
+  return g
+}
+
+/**
+ * Import a baked world, for the world form: the other way to get one, beside drawing an area.
+ *
+ * The archive names its own world from its top-level directory, so there is no slug to ask for —
+ * and asking would let the two disagree.
+ */
+export function importBakeGroup(o: TransferOpts): HTMLElement {
+  const g = group('Or import one', { note: 'A baked world as a .zip — no bake needed.' })
+  const body = bodyOf(g)
+  const progress = readout('upload', 'idle')
+  const setProgress = (t: string) => { progress.querySelector('.field-value')!.textContent = t }
+  const mb = (n: number) => `${(n / 2 ** 20).toFixed(1)} MiB`
+
+  const send = async (file: File, replace: boolean) => {
+    const r = await api.importSite(file, replace, (sent, total) => setProgress(`${mb(sent)} of ${mb(total)}`))
+    toast(`${r.site}: ${r.files} files, ${mb(r.bytes)}`, 'ok', 6000)
+    await o.reload()
+  }
+
+  const bar = el('div', 'panel-actions')
+  bar.append(button({
+    label: 'Import a baked world…',
     icon: 'arrow-up-tray',
     onClick: async () => {
       const file = await pickFile('.zip,application/zip')
       if (!file) return
-      const mb = (n: number) => `${(n / 2 ** 20).toFixed(1)} MiB`
       try {
-        // The archive names its own site from its top-level directory, so there is no slug to ask
-        // for — and asking would let the two disagree.
-        let r = await api.importSite(file, false, (sent, total) => {
-          progress.querySelector('.field-value')!.textContent = `${mb(sent)} of ${mb(total)}`
-        })
-        toast(`${r.site}: ${r.files} files, ${mb(r.bytes)}`, 'ok', 6000)
-        void r
-        await o.reload()
+        await send(file, false)
       } catch (e) {
         const message = (e as Error).message
         if (message.includes('already baked') && await confirm({
@@ -187,20 +199,12 @@ export function bakedTransferGroup(o: TransferOpts): HTMLElement {
           ok: 'Overwrite',
           danger: true,
         })) {
-          try {
-            const r = await api.importSite(file, true, (sent, total) => {
-              progress.querySelector('.field-value')!.textContent = `${mb(sent)} of ${mb(total)}`
-            })
-            toast(`${r.site}: ${r.files} files, ${mb(r.bytes)}`, 'ok', 6000)
-            await o.reload()
-          } catch (e2) {
-            toast(`upload failed: ${(e2 as Error).message}`, 'danger', 9000)
-          }
+          try { await send(file, true) } catch (e2) { toast(`Import failed: ${(e2 as Error).message}`, 'danger', 9000) }
         } else {
-          toast(`upload failed: ${message}`, 'danger', 9000)
+          toast(`Import failed: ${message}`, 'danger', 9000)
         }
       } finally {
-        progress.querySelector('.field-value')!.textContent = 'idle'
+        setProgress('idle')
       }
     },
   }))

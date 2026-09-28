@@ -12,6 +12,7 @@ import { button, el, toast } from '../ui/shell'
 import { bodyOf, empty, group, readout, segmented, select, slider, textField, toggle } from '../ui/controls'
 import { icon } from '../ui/icons'
 import { api, type Preview, type Way, type World } from './api'
+import { importBakeGroup } from './transfer'
 import type { LonLat, MapView } from './map'
 
 const km = (m: number) => (m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m)} m`)
@@ -21,6 +22,10 @@ export interface DefineOpts {
   host: HTMLElement
   onSaved: (w: World) => void
   onDirty: (dirty: boolean) => void
+  /** the world list, for the import step */
+  worlds: () => World[]
+  /** a baked world arrived by upload: re-read the list and show it */
+  onImported: () => Promise<void>
 }
 
 export class DefinePanel {
@@ -141,6 +146,34 @@ export class DefinePanel {
       host.append(hint('Drag a box on the map. Drag its corners or edges to adjust.'))
     }
 
+    /* Name first. It used to be the last group on the form, below the extent, the contents, the
+       roads and the look — so the two fields you have to fill in to save anything were the two
+       furthest from the button (Rich, 2026-09-28: "you should be able to edit the slug and
+       description before submitting"). */
+    const name = group('Name')
+    const nb = bodyOf(name)
+    const slugField = textField({
+      label: 'slug',
+      value: this.draft.slug ?? '',
+      placeholder: 'lower-case-with-hyphens',
+      onChange: (v) => {
+        this.draft.slug = v.trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '')
+        this.render()
+      },
+    })
+    nb.append(
+      slugField,
+      textField({
+        label: 'description',
+        value: this.draft.note ?? '',
+        placeholder: 'what this place is',
+        onChange: (v) => {
+          this.draft.note = v
+        },
+      }),
+    )
+    host.append(name)
+
     /* where */
     const where = group('Extent')
     const wb = bodyOf(where)
@@ -190,6 +223,15 @@ export class DefinePanel {
       for (const w of this.preview.warnings) wb.append(warn(w))
     }
     host.append(where)
+    // The other way to get a world: import one somebody else baked. Only when making a new one —
+    // on an existing world it would read as "replace this", which is not what it does.
+    if (!this.editing) {
+      host.append(importBakeGroup({
+        selected: () => this.draft.slug ?? null,
+        worlds: () => this.o.worlds(),
+        reload: () => this.o.onImported(),
+      }))
+    }
 
     /* how much */
     if (this.preview) {
@@ -345,25 +387,6 @@ export class DefinePanel {
     host.append(lookG)
 
     /* naming and saving */
-    const name = group('Name')
-    const nb = bodyOf(name)
-    nb.append(
-      textField({
-        label: 'slug',
-        value: this.draft.slug ?? '',
-        onChange: (v) => {
-          this.draft.slug = v.trim()
-        },
-      }),
-      textField({
-        label: 'note',
-        value: this.draft.note ?? '',
-        onChange: (v) => {
-          this.draft.note = v
-        },
-      }),
-    )
-    host.append(name)
 
     const acts = el('div', 'panel-actions')
     acts.append(
@@ -371,6 +394,8 @@ export class DefinePanel {
         label: this.editing ? 'Save changes' : 'Create world',
         icon: 'document-arrow-down',
         variant: 'primary',
+        title: !this.draft.slug ? 'give it a slug first'
+          : !this.draft.radius_m ? 'draw an area first' : '',
         onClick: () => void this.save(),
       }),
       button({ label: 'Clear', icon: 'arrow-uturn-left', onClick: () => this.fresh() }),

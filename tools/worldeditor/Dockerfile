@@ -43,6 +43,14 @@ COPY packages/engine/ packages/engine/
 # Provenance — the pinned upstream commit and the optimiser flags — is in wasm/BUILD.json.
 COPY packages/enginesim/ packages/enginesim/
 COPY apps/corridor/ apps/corridor/
+# The building dressing kit, which `src/buildings.ts` imports AT BUILD TIME to know where a window
+# goes. It lives with the asset library because that is what generates the parts, and the app reads
+# the same file rather than a copy — a second copy of a spec is a spec that drifts.
+#
+# THE IMAGE HAS TO BE TOLD. `npm run build` at the repo root has the whole tree and never notices;
+# this stage has only what is copied into it, so the import resolved on a laptop and 404'd here.
+# Same shape as the assetsvc image shipping with 136 specs and finding none.
+COPY tools/assetlib/specs/ tools/assetlib/specs/
 # `vite build`, not `npm run build` at the root: that builds every app in the repo and this image
 # serves one of them.
 RUN npm run build -w apps/corridor

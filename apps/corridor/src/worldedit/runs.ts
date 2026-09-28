@@ -200,9 +200,20 @@ export class RunsPanel {
     const sb = bodyOf(sel)
     if (!world) sb.append(empty('No world selected'))
     else {
+      /*
+       * A WORLD FOUND FROM A BAKE HAS NO DEFINITION. The store materialises one for every bake it
+       * finds on the volume, so it has a slug and a bake and need not have a centre, a radius or a
+       * road list at all — `define.ts` says so about `radius_m` in as many words, and this panel
+       * called `.toFixed` on it anyway. Selecting an imported world in the Bake tab threw and took
+       * the whole panel with it, which is now much easier to reach: the editor comes back to the
+       * tab you were last in.
+       */
+      const num = (v: number | undefined, f: (n: number) => string) => (Number.isFinite(v) ? f(v as number) : '—')
       sb.append(
-        readout('centre', `${world.lat.toFixed(5)}, ${world.lon.toFixed(5)}`),
-        readout('radius', `${world.radius_m.toLocaleString()} m`),
+        readout('centre', Number.isFinite(world.lat) && Number.isFinite(world.lon)
+          ? `${world.lat.toFixed(5)}, ${world.lon.toFixed(5)}`
+          : 'not defined — this world came from a bake'),
+        readout('radius', num(world.radius_m, (n) => `${n.toLocaleString()} m`)),
         readout('roads', world.all_streets ? 'every drivable street' : `${world.roads?.length ?? 0} named`),
         readout('primary', world.primary ?? '—'),
         readout('baked', world.baked ? `${world.baked.fetched ?? 'yes'}${world.baked.seconds ? ` · ${world.baked.seconds} s` : ''}` : 'never'),
@@ -213,7 +224,7 @@ export class RunsPanel {
       const frame = world.baked?.frame
       if (frame) {
         sb.append(readout('frame', frame.kind ?? 'unstamped'))
-        if (frame.anchor) sb.append(readout('anchor', `${frame.anchor.lat.toFixed(5)}, ${frame.anchor.lon.toFixed(5)}`))
+        if (frame.anchor && Number.isFinite(frame.anchor.lat)) sb.append(readout('anchor', `${frame.anchor.lat.toFixed(5)}, ${frame.anchor.lon.toFixed(5)}`))
         if (frame.kind && frame.kind !== 'enu') {
           sb.append(warn('Old UTM-relative frame — re-bake before authoring against it.'))
         } else if (!frame.kind) {

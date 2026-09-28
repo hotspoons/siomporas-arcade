@@ -23,13 +23,24 @@ import { LogView, RunsPanel } from './runs'
 import { AdoptDialog } from './adopt'
 import { StagePanel } from './stage'
 import { ProgramPanel } from '../ui/programpanel'
+import { ShellPanel } from '../ui/shellpanel'
+import { fromUrl, load as loadNav, resolve as resolveNav, save as saveNav, toUrl } from './nav'
+import { ROOT, SITE_DOCS } from '../agent/projection'
 import { AssetsPanel } from './assets'
 import { SplatsPanel } from './splats'
 import { worldMenuTransfer } from './transfer'
 import { GitPanel } from './gitpanel'
 import { dockWidth } from '../ui/dockwidth'
 
-type Mode = 'explore' | 'index' | 'define' | 'bake' | 'place' | 'stage' | 'program' | 'assets' | 'splats'
+/**
+ * The tabs, as one list.
+ *
+ * A list and not just a union, because the navigation restore has to be able to ask whether a
+ * remembered tab still exists — a stored `'places'` from before a rename would otherwise open a
+ * page with no panel and no way to see why.
+ */
+const MODES = ['explore', 'index', 'define', 'bake', 'place', 'stage', 'program', 'shell', 'assets', 'splats'] as const
+type Mode = (typeof MODES)[number]
 
 /*
  * THE SITE EDITOR IS A MODE, not another page.
@@ -87,7 +98,7 @@ const readoutEl = document.getElementById('readout') as HTMLElement
 
 let config: Config | null = null
 let worlds: World[] = []
-let selected: string | null = new URLSearchParams(location.search).get('world')
+let selected: string | null = fromUrl(location.search).world ?? loadNav().world
 /**
  * The Program panel: stage 6, the code half of a level.
  *
@@ -103,6 +114,50 @@ const programPanel = new ProgramPanel({
   save: async (id, source) => { await api.saveProgram(id, source) },
   remove: async (id) => { await api.deleteProgram(id) },
   refresh: () => { if (mode === 'program') void programPanel.render() },
+})
+
+/**
+ * The Shell panel: a prompt over the editor's own documents.
+ *
+ * `docs` asks the service what exists and `read` fetches one document's text; the shell projects
+ * both into an in-browser filesystem and saves a write back. The reads happen HERE rather than in
+ * the worker because the worker has no network at all by design — see src/agent/shell.ts.
+ */
+const shellPanel = new ShellPanel({
+  host: document.getElementById('code')!,
+  sidebarHost: inspector,
+  docs: async () => {
+    const [w, l, p] = await Promise.all([
+      api.worlds().then((r) => r.worlds).catch(() => []),
+      api.levels().then((r) => r.levels).catch(() => []),
+      api.programs().then((r) => r.programs).catch(() => []),
+    ])
+    // a site's authored documents: offered for every baked world, and the ones that do not exist
+    // simply come back empty and are not projected
+    const sites = w.filter((x) => x.baked).map((x) => ({ slug: x.slug, docs: SITE_DOCS }))
+    return { worlds: w.map((x) => ({ slug: x.slug })), levels: l.map((x) => ({ id: x.id })), programs: p, sites }
+  },
+  read: async (path) => {
+    const rel = path.slice(`${ROOT}/`.length)
+    try {
+      if (rel.startsWith('worlds/')) {
+        const w = (await api.worlds()).worlds.find((x) => `worlds/${x.slug}.json` === rel)
+        return w ? JSON.stringify(w, null, 1) : null
+      }
+      if (rel.startsWith('levels/')) return JSON.stringify((await api.level(rel.slice(7, -5))).level, null, 1)
+      if (rel.startsWith('programs/')) return (await api.program(rel.slice(9, -3))).source
+      if (rel.startsWith('sites/')) {
+        // static files beside the bake; a missing optional document is a 404, not an error
+        const r = await fetch(`/${rel}`, { cache: 'no-cache' })
+        if (!r.ok) return null
+        const text = await r.text()
+        return text.trimStart().startsWith('{') ? text : null
+      }
+    } catch {
+      return null
+    }
+    return null
+  },
 })
 
 let mode: Mode = 'explore'
@@ -373,8 +428,9 @@ function buildBar() {
         { value: 'place', label: 'Place', icon: 'pencil-square', key: '5' },
         { value: 'stage', label: 'Stage', icon: 'flag', key: '6' },
         { value: 'program', label: 'Program', icon: 'beaker', key: '7' },
-        { value: 'assets', label: 'Assets', icon: 'cube', key: '8' },
-        { value: 'splats', label: 'Splats', icon: 'camera', key: '9' },
+        { value: 'shell', label: 'Shell', icon: 'server-stack', key: '8' },
+        { value: 'assets', label: 'Assets', icon: 'cube', key: '9' },
+        { value: 'splats', label: 'Splats', icon: 'camera', key: '0' },
       ],
       onChange: (m) => setMode(m),
     }),
@@ -537,7 +593,7 @@ function renderIndex(host: HTMLElement) {
     el(
       'span',
       '',
-      'Places worth coming back to. Finding somewhere is a different job from deciding what to bake, so this is cheap — a search result, or a click on the map — and a world is promoted from one when it earns it.',
+      'Places you have kept. Make a world from one when you want to bake it.',
     ),
   )
   host.append(hint)
@@ -697,6 +753,7 @@ function selectWorld(slug: string) {
   const w = worlds.find((x) => x.slug === slug)
   if (!w) return
   selected = slug
+  rememberNav()
   renderWorldSelect()
   if (Number.isFinite(w.lat)) {
     map.flyTo({ lat: w.lat, lon: w.lon }, zoomFor(w.radius_m))
@@ -747,16 +804,35 @@ function openWorldMenu(anchor: HTMLElement) {
 function setMode(m: Mode) {
   if (mode === 'bake') runsPanel.stop()
   if (mode === 'assets') assetsPanel.stop() // a poll for a draw that nobody is watching
+  // NOT shellPanel.stop(): a machine with a Pyodide in it takes fifteen seconds to come back, and
+  // leaving the tab to look something up must not cost that
   // NOT splatsPanel.stop(): leaving the tab must not abort a forty-gigabyte upload
   if (mode === 'place' && m !== 'place') siteEditor?.setActive(false)
   mode = m
+  rememberNav()
   for (const b of bar.querySelectorAll<HTMLButtonElement>('.seg')) b.classList.toggle('on', b.dataset.value === m)
   showSiteEditor(m === 'place')
-  showCode(m === 'program')
+  // one pane, three things that want it: the map, the Place scene, and the code surface the
+  // Program and Shell modes share
+  showCode(m === 'program' || m === 'shell')
   // Define puts the map in draw mode; the panel switches it to `pick` itself when the world is a
   // named-roads one, because then clicking is choosing a road rather than dropping a vertex.
   map.mode = m === 'define' ? 'draw' : 'pan'
   renderPanel()
+}
+
+/**
+ * Keep where you are, in the URL and in this browser.
+ *
+ * `replaceState`, not `pushState`: switching tabs is not navigating, and forty tab switches should
+ * not be forty presses of the back button to leave the page. Guarded on `booted` so the restore
+ * itself does not immediately write back a half-built state.
+ */
+function rememberNav() {
+  if (!booted) return
+  const nav = { mode, world: selected }
+  saveNav(nav)
+  history.replaceState(null, '', toUrl(location.search, nav))
 }
 
 /** Swap the program editor in and out. Same pane as the map and the Place scene, one at a time. */
@@ -768,7 +844,7 @@ function showCode(on: boolean) {
   // mode that was never showing it
   if (mapCanvas && (on || mode !== 'place')) mapCanvas.hidden = on
   const title = document.getElementById('panel-title')
-  if (title && on) title.textContent = 'Program'
+  if (title && on) title.textContent = mode === 'shell' ? 'Shell' : 'Program'
   const readout = document.getElementById('readout')
   if (readout) readout.hidden = on || readout.hidden
 }
@@ -812,6 +888,10 @@ function renderPanel() {
   }
   if (mode === 'program') {
     void programPanel.render()
+    return
+  }
+  if (mode === 'shell') {
+    void shellPanel.render()
     return
   }
   if (mode === 'stage') {
@@ -1014,19 +1094,28 @@ async function boot() {
   await refreshWorlds().catch(() => {})
   await refreshPlaces().catch(() => {})
 
-  const start = worlds.find((w) => w.slug === selected) ?? worlds.find((w) => w.baked)
+  /*
+   * WHERE YOU WERE. The URL wins over this browser's memory, per field — a link that names a world
+   * and no tab opens that world where you left off rather than throwing your tab away because the
+   * link was silent about it.
+   */
+  const want = resolveNav(fromUrl(location.search), loadNav(), { modes: [...MODES], worlds: worlds.map((w) => w.slug) })
+  const start = worlds.find((w) => w.slug === want.world) ?? worlds.find((w) => w.baked)
   if (start && Number.isFinite(start.lat)) {
     selected = start.slug
     // Only if nobody has moved the map while the world list was loading — see `MapView.moved`.
     if (!map.moved) map.flyTo({ lat: start.lat, lon: start.lon }, zoomFor(start.radius_m), { user: false })
   }
   renderWorldSelect()
-  setMode((new URLSearchParams(location.search).get('mode') as Mode) ?? 'explore')
+  setMode((want.mode as Mode) ?? 'explore')
   // LAST LINE OF BOOT, and it exists because `window.__we` is assigned when the module finishes
   // evaluating — long before this runs. A probe that waited for the handle and then set a mode
   // had it silently undone by the setMode above, and the failure was intermittent because it
   // depended on how fast the world list came back.
   booted = true
+  // and write where we landed into the URL, so the address bar is copyable the moment the page is
+  // up rather than only after the next click
+  rememberNav()
 }
 let booted = false
 

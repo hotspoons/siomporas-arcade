@@ -97,6 +97,48 @@ body.worldedit {
 .row.diag.warning .row-name { color: var(--warn); }
 .note.ok { color: var(--ok); }
 
+/* The terminal, in the Shell mode. Same pane as the code editor, and the same grid: a bar, then
+   the thing taking whatever is left. */
+#code .term {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  min-height: 0;
+  background: var(--bg-0);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--fs-0);
+}
+#code .term-out {
+  margin: 0;
+  padding: var(--s3);
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--fg-1);
+  min-height: 0;
+}
+#code .term-line {
+  display: flex;
+  align-items: center;
+  gap: var(--s1);
+  padding: var(--s2) var(--s3);
+  border-top: 1px solid var(--line);
+  background: var(--bg-1);
+}
+#code .term-prompt { color: var(--accent); }
+#code .term-input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: none;
+  color: var(--fg-0);
+  font: inherit;
+  outline: none;
+}
+.term-echo { color: var(--fg-2); }
+.term-dim { color: var(--fg-3, var(--fg-2)); }
+.term-ok { color: var(--ok); }
+.term-bad { color: var(--danger); }
+
 /* The site editor's scene, in the Place mode. Exactly where the map is, because it replaces it:
    editor.css positions #gl for a page that is only the editor, and here it is one pane of two. */
 body.worldedit #gl {

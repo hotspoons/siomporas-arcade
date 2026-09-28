@@ -1,0 +1,15 @@
+# gh200-1 — 8x GH200, aarch64.
+#
+# Facts about the cluster, for the deploy script to read. Nothing here is release configuration:
+# a release's values live beside this file.
+cluster:
+  name: gh200-1
+  namespace: default
+  # The charts do not name a storage class — the cluster's default applies, which is what its
+  # admin has chosen. Recorded here so the reason is visible, not so anything reads it.
+  note: "RWX is required (a bake writes while the editor serves); the default class provides it."
+releases:
+  - name: worldeditor
+    chart: tools/worldeditor/chart
+  - name: assetsvc
+    chart: tools/assetsvc/chart

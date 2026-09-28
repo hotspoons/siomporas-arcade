@@ -1,0 +1,37 @@
+# The world editor on gh200-1.
+#
+# The WHOLE input to this release. Not a patch over what is already there.
+enabled: true
+fullnameOverride: worldeditor
+
+image:
+  # Pinned. `latest` would make "what is deployed" depend on when the pod last restarted.
+  tag: sha-04a4738
+
+ingress:
+  enabled: true
+
+# Ours first, then the public mirrors. Each carries the box it actually holds — a regional
+# instance answers a query about somewhere else with HTTP 200 and zero ways, which is
+# indistinguishable from "no roads here", so the coverage box is what stops that being believed.
+overpassUrl: "http://overpass-eu/api/interpreter#34/-25/72/45,http://overpass/api/interpreter#37.9/-79.5/39.8/-75.0"
+
+# Count free GPUs to size a splat run's fan-out. A CLUSTER-scoped read of nodes and of pods in
+# every namespace — wider than anything else this chart asks for, which is why it is opt-in.
+# Without it the editor reports that it could not ask, rather than reporting zero.
+gpuVisibility: true
+
+# Ships empty. A blank world map means blank; worlds arrive by being drawn or imported.
+seedSites: ""
+
+data:
+  # NAMED HERE, NOT IN THE CHART. The chart deliberately names no storage class so the cluster's
+  # own default applies anywhere — but THIS cluster's claim already exists and was created on
+  # ceph-filesystem, and a PVC's spec is immutable after creation. Omitting it made helm try to
+  # patch the claim to no class at all and the upgrade was refused:
+  #
+  #   PersistentVolumeClaim "worldeditor-data" is invalid: spec: Forbidden: spec is immutable
+  #
+  # Which is the division of labour working correctly: the chart stays portable, and the file
+  # that describes one cluster records what that cluster actually has.
+  storageClass: ceph-filesystem

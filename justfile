@@ -191,3 +191,19 @@ worldeditor-probe mode="":
     else
       node tools/worldeditor/probe.mjs --api http://localhost:8780 --ui http://localhost:5212/world.html
     fi
+
+# --- deployment -------------------------------------------------------------
+# Every cluster install is deploy/<cluster>/*.yaml plus this. Nothing is applied with
+# `helm --set` from a shell: a flag typed once is a deployment nobody can review or reproduce.
+
+# apply a cluster's releases, or one of them
+deploy cluster release="":
+    node scripts/deploy.mjs {{cluster}} {{release}}
+
+# render and validate against the live API server; changes nothing
+deploy-check cluster:
+    node scripts/deploy.mjs {{cluster}} --check
+
+# rewrite the pinned image tags to the current commit, for review and commit
+deploy-bump cluster:
+    node scripts/deploy.mjs {{cluster}} --bump

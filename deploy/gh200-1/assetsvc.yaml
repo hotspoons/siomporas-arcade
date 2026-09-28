@@ -1,0 +1,8 @@
+# The asset service on gh200-1.
+#
+# Off in the chart by default — generation is not required for the editor to work — so this file
+# turning it on IS the decision, recorded where it can be reviewed.
+enabled: true
+
+image:
+  tag: sha-4c9c608

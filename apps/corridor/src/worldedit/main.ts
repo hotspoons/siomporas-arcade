@@ -27,7 +27,7 @@ import { ShellPanel } from '../ui/shellpanel'
 import { AgentPanel } from '../ui/agentpanel'
 import { fromUrl, load as loadNav, resolve as resolveNav, save as saveNav, toUrl } from './nav'
 import { ROOT, SITE_DOCS } from '../agent/projection'
-import { AssetsPanel } from './assets'
+import { RosterPanel } from './roster'
 import { SplatsPanel } from './splats'
 import { worldMenuTransfer } from './transfer'
 import { GitPanel } from './gitpanel'
@@ -86,11 +86,27 @@ const stagePanel = new StagePanel({
   onDirty: (d) => setDirty(d, 'level'),
 })
 
-/** Pick from pictures, commit to meshes — the asymmetry made visible (assets.ts). */
-const assetsPanel = new AssetsPanel({
+/**
+ * What can be placed, and placing it (roster.ts).
+ *
+ * NOT a second generation interface. This panel used to hold a roster of generation specs with a
+ * prompt, a draw button and a reconstruct button — beside the catalog dialog that does all three
+ * properly (Rich, 2026-09-28: "we already have a generate interface, this is so confusing").
+ * Generating is the button at the top; the panel itself is the placeable catalog, searchable, with
+ * a preview, and its rows drag onto the world.
+ */
+const assetsPanel = new RosterPanel({
   host: inspector,
   openCatalog: () => void assets.open(),
   openAdopt: () => void adopt.open(),
+  ready: () => !!siteEditor && !!selected,
+  showScene: () => { if (mode !== 'place' && selected) setMode('place') },
+  place: (id) => {
+    if (!siteEditor || !selected) return false
+    setMode('place')
+    siteEditor.armAsset(id)
+    return true
+  },
 })
 
 /** Footage in, a captured world out: uploads, then the training run (splats.ts). */

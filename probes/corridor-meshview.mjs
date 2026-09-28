@@ -26,8 +26,8 @@ const say = (k, v) => console.log(`${k.padEnd(28)} ${typeof v === 'object' ? JSO
 async function openCatalog(p) {
   await p.waitForSelector('.seg')
   await p.click('.seg[data-value="assets"]')
-  await p.waitForSelector('#panel .rows .row', { timeout: 20000 })
-  await p.evaluate(() => [...document.querySelectorAll('#panel button')].find((x) => /Catalog & generate/.test(x.textContent))?.click())
+  await p.locator('#panel button', { hasText: 'Catalog & generate' }).waitFor({ timeout: 20000 })
+  await p.locator('#panel button', { hasText: 'Catalog & generate' }).click()
   await p.waitForSelector('.dialog', { timeout: 10000 })
   await p.waitForTimeout(1200)
   const id = await p.evaluate(() => {

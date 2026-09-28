@@ -598,3 +598,16 @@ body.worldedit .inspector {
 /* the note has to be allowed to shrink or a long one pushes the name out of the panel — the same
    min-width: 0 that the inspector needs, for the same reason */
 .row-note { color: var(--ink-3); font-size: var(--text-xs); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---- the placeable roster (worldedit/roster.ts) ---------------------------------------------
+   Rows drag onto the world, so they need a grab cursor and a state while they are in flight. */
+.roster-row { cursor: grab; }
+.roster-row:active { cursor: grabbing; }
+.roster-row.dragging { opacity: 0.45; }
+.roster-row.on { background: var(--bg-2); color: var(--ink-0); }
+.roster-row-wrap { display: grid; gap: var(--s2); }
+.roster-detail { display: grid; gap: var(--s2); padding: var(--s2) 0 var(--s3); }
+/* small: this is "is that the right barn", not a model viewer */
+.roster-detail .meshview { aspect-ratio: 4 / 3; min-height: 150px; max-height: 200px; }
+/* the scene while something is being dragged over it */
+canvas.drop-target { outline: 2px dashed var(--accent); outline-offset: -4px; }

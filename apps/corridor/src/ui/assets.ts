@@ -89,6 +89,8 @@ export class AssetCatalog {
   /** what is typed in the search box; a question being asked now, so it is not remembered */
   private find = ''
   private listBox = el('div', 'asset-list-box')
+  /** a pinned seed per item; absent means "a new one every draw" */
+  private seeds = new Map<string, number>()
   /** the 3D preview, one at a time — a WebGL context per click exhausts the browser's supply */
   private mesh3d: MeshView | null = null
   private listHost = el('div', 'asset-list')
@@ -363,6 +365,19 @@ export class AssetCatalog {
       drawnBody.append(empty('No view yet.'))
     }
     drawnBody.append(
+      textField({
+        label: 'seed',
+        value: this.seeds.has(it.id) ? String(this.seeds.get(it.id)) : '',
+        type: 'number',
+        step: 1,
+        placeholder: 'a new one each draw',
+        note: 'a seed draws the same thing again, which is how you tell a prompt change from a dice roll',
+        onChange: (v) => {
+          const n = Math.floor(Number(v))
+          if (v.trim() && Number.isFinite(n) && n >= 0) this.seeds.set(it.id, n)
+          else this.seeds.delete(it.id)
+        },
+      }),
       rowOf(
         button({ label: it.views.length ? 'Draw another' : 'Draw', icon: 'sparkles', variant: it.views.length ? 'default' : 'primary', onClick: () => void this.draw(it.id) }),
         el('span', 'dim', 'flux — about ten seconds'),
@@ -917,8 +932,17 @@ export class AssetCatalog {
     }
   }
 
+  /**
+   * Draw one, with the seed if a seed was given.
+   *
+   * Rich, 2026-09-28: "being able to override the seed number would be good for the image
+   * generator." Blank draws a new one every time, which is what you want while you are still
+   * looking for the car; a number draws the same one again, which is what tells a prompt change
+   * from a dice roll. It is per item, kept beside the draw button.
+   */
   private async draw(id: string) {
-    await this.run(() => assetsvc.image(id), `drawing ${id}`)
+    const seed = this.seeds.get(id)
+    await this.run(() => assetsvc.image(id, seed === undefined ? {} : { seed }), `drawing ${id}`)
   }
 
   private async mesh(id: string) {

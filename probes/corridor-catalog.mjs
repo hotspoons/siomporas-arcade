@@ -38,8 +38,8 @@ await fetch(`http://localhost:8790/catalog/${ID}`, { method: 'DELETE' }).catch((
 await page.goto(`http://localhost:${PORT}/world.html`, { waitUntil: 'networkidle', timeout: 60000 })
 await page.waitForSelector('.seg')
 await page.click('.seg[data-value="assets"]')
-await page.waitForSelector('#panel .rows .row', { timeout: 20000 })
-await page.evaluate(() => [...document.querySelectorAll('#panel button')].find((x) => /Catalog & generate/.test(x.textContent))?.click())
+await page.locator('#panel button', { hasText: 'Catalog & generate' }).waitFor({ timeout: 20000 })
+await page.locator('#panel button', { hasText: 'Catalog & generate' }).click()
 await page.waitForSelector('.dialog', { timeout: 10000 })
 await page.waitForTimeout(1200)
 

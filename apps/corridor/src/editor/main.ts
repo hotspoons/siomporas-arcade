@@ -244,6 +244,31 @@ function groundAt(e: PointerEvent): { x: number; y: number } | null {
   return hit ? { x: hit.point.x, y: -hit.point.z } : null
 }
 
+/*
+ * A DROP FROM THE ROSTER.
+ *
+ * `dragover` must preventDefault or the browser refuses the drop — that is the whole protocol, and
+ * forgetting it is a drag that visibly works and silently ends in nothing. The asset id travels as
+ * a string on the dataTransfer rather than through a shared object, so a panel rebuilt mid-gesture
+ * cannot break the drag.
+ */
+canvas.addEventListener('dragover', (e) => {
+  if (!e.dataTransfer?.types.includes('text/apex-asset')) return
+  e.preventDefault()
+  e.dataTransfer.dropEffect = 'copy'
+  canvas.classList.add('drop-target')
+})
+canvas.addEventListener('dragleave', () => canvas.classList.remove('drop-target'))
+canvas.addEventListener('drop', (e) => {
+  canvas.classList.remove('drop-target')
+  const id = e.dataTransfer?.getData('text/apex-asset')
+  if (!id) return
+  e.preventDefault()
+  void dropAsset(id, e.clientX, e.clientY).then((ok) => {
+    if (!ok) status('drop it on the ground')
+  })
+})
+
 canvas.addEventListener('pointerdown', (e) => {
   down = { x: e.clientX, y: e.clientY, t: performance.now() }
   const r = castRay(e)
@@ -453,6 +478,43 @@ export async function openSite(slug: string) {
 }
 /** Which site it is looking at, so the host can tell whether it has to load one. */
 export const currentSite = () => site?.manifest.slug ?? null
+
+/**
+ * Drop an asset from the roster onto the ground under the cursor.
+ *
+ * Rich, 2026-09-28: "We should be able to drag from the roster, place it on the map, set the pose,
+ * that's it." The roster lives in the host's inspector and knows nothing about cameras, so it
+ * hands over the asset and the screen point and this does the raycast — the same one every click
+ * in this editor goes through, so a drop lands exactly where a click would have.
+ *
+ * False means the cursor was not over the terrain, which the caller reports rather than placing
+ * something at an arbitrary point the person did not choose.
+ */
+export async function dropAsset(assetId: string, clientX: number, clientY: number): Promise<boolean> {
+  if (!site) return false
+  const pt = groundAt({ clientX, clientY } as PointerEvent)
+  if (!pt) return false
+  const ok = await place.addAt(assetId, pt.x, pt.y)
+  if (ok) refresh()
+  return ok
+}
+
+/** Arm an asset so the next click on the ground places it — the keyboard-and-click route. */
+export function armAsset(assetId: string | null) {
+  place.arming = assetId
+  refresh()
+}
+
+/** What can be placed, for a roster that lives outside this module. */
+export const placeCatalog = () => place.catalog.assets
+
+// For probes: what is actually in the placements document. A drop that "worked" has to be
+// visible as an item in the document, not as an event that fired.
+;(window as unknown as { __apexPlace: unknown }).__apexPlace = {
+  count: () => place.doc.items.length,
+  last: () => place.doc.items[place.doc.items.length - 1] ?? null,
+  armed: () => place.arming,
+}
 
 const clock = new THREE.Clock()
 function frame() {

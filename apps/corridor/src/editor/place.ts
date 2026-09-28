@@ -144,6 +144,25 @@ export class PlaceMode {
     this.onChange()
   }
 
+  /**
+   * Put one down at a point, without arming first.
+   *
+   * For a DRAG from the roster: arming is a mode ("pick an asset, then click the ground") and a
+   * drag is not — the asset and the place arrive together, in one gesture, and toggling `armed`
+   * to fake it would leave the editor in a mode nobody asked for if the drop failed.
+   */
+  async addAt(assetId: string, x: number, y: number): Promise<boolean> {
+    if (!this.entry(assetId)) return false
+    await this.add(assetId, x, y)
+    return true
+  }
+
+  /** Arm this one specifically, rather than toggling it. */
+  set arming(assetId: string | null) {
+    this.armed = assetId
+    this.onChange()
+  }
+
   private async add(assetId: string, x: number, y: number) {
     const e = this.entry(assetId)
     if (!e) return

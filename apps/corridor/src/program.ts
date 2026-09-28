@@ -1,0 +1,380 @@
+// Stage 6 of the game pipeline: the program layer — the thing that makes a world a game.
+//
+// Rich: "apply a goal and actual game over top with a program — which can choose to do things like
+// hide street names, alter modes of transport, even define new exploration techniques."
+//
+// Those three examples are deliberately different in kind, and they set the bar:
+//
+//   1. hide street names          a render flag. A declarative setting could do it.
+//   2. alter modes of transport   swapping the player's controller. Not a setting — a choice
+//                                 between implementations.
+//   3. new exploration techniques arbitrary new behaviour. ONLY CODE CAN DO THIS.
+//
+// So the program layer is code, and the declarative `scenario` primitives (facts, conditions,
+// actions — tools/worldeditor/levels.mjs) stay as the simple path rather than being replaced. A
+// program is what you write when the simple path runs out.
+//
+// THE API SURFACE IS THE PRODUCT. It is what an agent is prompted against, what a person reads
+// the types of, and what has to stay still while everything under it moves. So it is small, it is
+// declarative wherever it can be, and it hands over the ECS world directly where it cannot —
+// there is no point pretending a "new exploration technique" can be expressed as a setting.
+//
+// WHAT IS IN HERE AND WHAT IS NOT. This file is the API's SHAPE and its bookkeeping: the events, the
+// scoring, the goal, the clock, the lifecycle. It holds no THREE, no DOM and no fetch, so a whole
+// game can be stepped in a test — which is the only way "did the win condition ever fire" is a
+// question with an answer. Everything that touches the renderer arrives through `ProgramHost`,
+// which the app implements and a test fakes.
+import type { World } from 'bitecs'
+import type { ActorWorld } from './actorworld'
+
+/* ---- what a program can ask the world to do ---------------------------------------------- */
+
+/**
+ * The things a program may turn off.
+ *
+ * A closed list, because "hide street names" has to mean the same thing to the program, the
+ * editor's form and the renderer, and a free-form string means a typo that silently hides nothing.
+ */
+export const HIDEABLE = {
+  'street-names': 'the blades on the corner posts and the names in the HUD',
+  minimap: 'the map in the corner',
+  hud: 'the whole readout',
+  traffic: 'the simulated vehicles',
+  signals: 'the traffic lights, as if the power were out',
+  buildings: 'the generated massing',
+} as const
+export type Hideable = keyof typeof HIDEABLE
+
+/**
+ * How the player gets about. Each is a controller, not a setting.
+ *
+ * Rich's library of interaction types: "definitely need a first person and third person character
+ * mode... also basic helic/omnic/ornith-opter and jet and plane and UFO flying dynamics too so we
+ * have a library of interaction types." `transport.ts` implements them; this names them.
+ */
+export const TRANSPORT = [
+  'drive', 'walk', 'walk-third', 'fly', 'helicopter', 'omnicopter', 'ornithopter', 'plane', 'jet', 'ufo', 'parkour',
+] as const
+export type Transport = (typeof TRANSPORT)[number]
+
+/** What the program layer needs from the app. Everything renderer-shaped lives behind this. */
+export interface ProgramHost {
+  /** the simulation the program's entities live in */
+  actors: ActorWorld
+  /** turn something off, or back on */
+  hide: (what: Hideable, hidden: boolean) => void
+  /** swap the player's controller */
+  transport: (mode: Transport) => void
+  /** apply or tween a named look from the world's presets library */
+  preset: (id: string | Record<string, number>, opts?: { over?: number }) => void
+  /** say something to the player */
+  say: (text: string, kind?: 'info' | 'ok' | 'warn') => void
+  /** where the player is, in site metres */
+  playerAt: () => { x: number; y: number; z: number } | null
+  /** the player's speed, m/s */
+  playerSpeed: () => number
+  /** set the clock, "HH:MM" local to the site */
+  setTime?: (hhmm: string) => void
+  /** the weather selection, by name */
+  setWeather?: (what: string) => void
+}
+
+/* ---- zones: the one spatial primitive ---------------------------------------------------- */
+
+/**
+ * A named region a program can ask about.
+ *
+ * Circles and boxes only. Every goal anyone has described so far — reach a place, stay out of an
+ * area, collect the things on a rooftop — is one of those two, and a polygon primitive is a
+ * point-in-polygon test plus an editor for drawing them, which is a lot of surface for a case
+ * nobody has yet.
+ */
+export type Zone =
+  | { kind: 'circle'; x: number; y: number; r: number }
+  | { kind: 'box'; x0: number; y0: number; x1: number; y1: number }
+
+export function inZone(z: Zone, x: number, y: number): boolean {
+  if (z.kind === 'circle') return (x - z.x) ** 2 + (y - z.y) ** 2 <= z.r * z.r
+  return x >= Math.min(z.x0, z.x1) && x <= Math.max(z.x0, z.x1) && y >= Math.min(z.y0, z.y1) && y <= Math.max(z.y0, z.y1)
+}
+
+/* ---- facts: the vocabulary a condition is written against -------------------------------- */
+
+/**
+ * Everything a program or a scenario may read about the run.
+ *
+ * The same idea as the service's `FACTS` table, and deliberately the same words where they
+ * overlap: a condition that mentions something nothing measures never fires, and nothing anywhere
+ * says so. When something genuinely does not fit, the answer is one more fact here.
+ */
+export interface Facts {
+  /** seconds since the run started, on the run's own clock */
+  time: number
+  score: number
+  /** the player's speed, m/s */
+  speed: number
+  /** metres travelled */
+  distance_m: number
+  /** how many zones the player is inside right now */
+  in_zones: number
+  /** 1 while the run is over, else 0 */
+  finished: number
+}
+
+export type Outcome = 'win' | 'lose' | 'abandoned'
+
+/* ---- the API a program is written against ------------------------------------------------ */
+
+export interface GameApi {
+  /** the ECS world, for everything the declarative surface cannot express */
+  readonly world: World
+  readonly actors: ActorWorld
+  /** the facts, as of this frame */
+  facts(): Facts
+
+  hide(what: Hideable): void
+  show(what: Hideable): void
+  transport(mode: Transport): void
+  preset(id: string | Record<string, number>, opts?: { over?: number }): void
+  say(text: string, kind?: 'info' | 'ok' | 'warn'): void
+  time(hhmm: string): void
+  weather(what: string): void
+
+  /** name a region, so `on('enters', …)` and `in()` can refer to it */
+  zone(name: string, z: Zone): void
+  /** is the player in it right now */
+  in(name: string): boolean
+
+  award(points: number): void
+  /** what the player is trying to do, in a sentence the HUD can show */
+  goal(text: string): void
+  win(text?: string): void
+  lose(text?: string): void
+
+  /** every frame, with the real delta */
+  each(fn: (dt: number, facts: Facts) => void): void
+  /** once, after `after` seconds of run time */
+  after(seconds: number, fn: () => void): void
+  /** every `seconds` of run time */
+  every(seconds: number, fn: () => void): void
+  /** the player crossed into or out of a zone */
+  on(event: 'enters' | 'leaves', zone: string, fn: () => void): void
+  /** the run ended */
+  on(event: 'ends', fn: (outcome: Outcome) => void): void
+  /** when a fact crosses a threshold, once per crossing */
+  when(condition: (f: Facts) => boolean, fn: () => void): void
+}
+
+export interface GameDef {
+  /** run once when the level starts */
+  setup?: (api: GameApi) => void | Promise<void>
+  /** run every frame. `api.each` is the same thing; this is here because it reads better. */
+  update?: (dt: number, api: GameApi) => void
+  /** run when the level is torn down */
+  teardown?: (api: GameApi) => void
+}
+
+/** What `programs/<id>.ts` default-exports. A function only so the shape is checkable. */
+export function defineGame(def: GameDef): GameDef {
+  return def
+}
+
+/* ---- the runner -------------------------------------------------------------------------- */
+
+interface Timer { at: number; every: number | null; fn: () => void }
+interface Watch { cond: (f: Facts) => boolean; fn: () => void; was: boolean }
+
+/**
+ * One run of one program.
+ *
+ * TIME IS THE RUN'S OWN, advanced by `tick`, not read from a clock. A program that says "after 30
+ * seconds" means thirty seconds of play, so pausing has to pause it and a test has to be able to
+ * step it — reading `performance.now()` here would make every timed goal untestable and every
+ * paused game keep counting.
+ *
+ * NOTHING THROWN BY A PROGRAM ESCAPES. A program is code from a person or an agent; a typo in
+ * somebody's `update` must show up as one message and a stopped program, not as a dead frame loop
+ * that takes the rest of the viewer with it.
+ */
+export class GameRun {
+  private readonly host: ProgramHost
+  private readonly def: GameDef
+  private zones = new Map<string, Zone>()
+  private inside = new Set<string>()
+  private frameFns: ((dt: number, f: Facts) => void)[] = []
+  private timers: Timer[] = []
+  private watches: Watch[] = []
+  private enters = new Map<string, (() => void)[]>()
+  private leaves = new Map<string, (() => void)[]>()
+  private endFns: ((o: Outcome) => void)[] = []
+
+  private t = 0
+  private travelled = 0
+  private last: { x: number; y: number } | null = null
+
+  score = 0
+  goalText = ''
+  outcome: Outcome | null = null
+  /** what went wrong, if the program threw. A stopped program is not a silent one. */
+  error: string | null = null
+  readonly messages: { text: string; kind: string; at: number }[] = []
+
+  constructor(host: ProgramHost, def: GameDef) {
+    this.host = host
+    this.def = def
+  }
+
+  get api(): GameApi {
+    const H = this.host
+    const api: GameApi = {
+      get world() { return H.actors.world },
+      get actors() { return H.actors },
+      facts: () => this.facts(),
+
+      hide: (w) => H.hide(w, true),
+      show: (w) => H.hide(w, false),
+      transport: (m) => H.transport(m),
+      preset: (id, o) => H.preset(id, o),
+      say: (t, k) => { this.messages.push({ text: t, kind: k ?? 'info', at: this.t }); H.say(t, k) },
+      time: (hhmm) => H.setTime?.(hhmm),
+      weather: (w) => H.setWeather?.(w),
+
+      zone: (name, z) => { this.zones.set(name, z) },
+      in: (name) => this.inside.has(name),
+
+      award: (p) => { this.score += p },
+      goal: (text) => { this.goalText = text },
+      win: (text) => this.finish('win', text),
+      lose: (text) => this.finish('lose', text),
+
+      each: (fn) => { this.frameFns.push(fn) },
+      after: (s, fn) => { this.timers.push({ at: this.t + s, every: null, fn }) },
+      every: (s, fn) => { this.timers.push({ at: this.t + s, every: Math.max(1e-3, s), fn }) },
+      on: ((event: string, a: unknown, b?: unknown) => {
+        if (event === 'ends') { this.endFns.push(a as (o: Outcome) => void); return }
+        const map = event === 'enters' ? this.enters : this.leaves
+        const name = a as string
+        const list = map.get(name) ?? []
+        list.push(b as () => void)
+        map.set(name, list)
+      }) as GameApi['on'],
+      when: (cond, fn) => { this.watches.push({ cond, fn, was: cond(this.facts()) }) },
+    }
+    return api
+  }
+
+  facts(): Facts {
+    return {
+      time: this.t,
+      score: this.score,
+      speed: this.host.playerSpeed(),
+      distance_m: this.travelled,
+      in_zones: this.inside.size,
+      finished: this.outcome ? 1 : 0,
+    }
+  }
+
+  /** Run `setup`. Returns false if the program threw, with `error` set. */
+  async start(): Promise<boolean> {
+    // WHERE THE PLAYER IS WHEN THE LEVEL STARTS is where `distance_m` counts from. Without this,
+    // the first tick only establishes the origin and the distance covered in that frame is lost —
+    // small every frame, and exactly wrong for a "travel one kilometre" goal measured from a spawn.
+    const at = this.host.playerAt()
+    if (at) this.last = { x: at.x, y: at.y }
+    try {
+      await this.def.setup?.(this.api)
+      return true
+    } catch (e) {
+      this.error = String((e as Error)?.message ?? e)
+      return false
+    }
+  }
+
+  /**
+   * Advance the run by `dt` real seconds.
+   *
+   * Order matters and is the order a person would expect: move the clock, work out where the
+   * player is, fire the zone crossings, fire the timers, fire the watches, then the frame
+   * callbacks and `update`. Zones before timers so a program that awards on entry and checks the
+   * score on a timer sees the award.
+   */
+  tick(dt: number): void {
+    if (this.outcome || this.error) return
+    const step = Math.max(0, dt)
+    this.t += step
+
+    const at = this.host.playerAt()
+    if (at) {
+      if (this.last) this.travelled += Math.hypot(at.x - this.last.x, at.y - this.last.y)
+      this.last = { x: at.x, y: at.y }
+      for (const [name, z] of this.zones) {
+        const now = inZone(z, at.x, at.y)
+        const was = this.inside.has(name)
+        if (now && !was) { this.inside.add(name); this.fire(this.enters.get(name)) }
+        else if (!now && was) { this.inside.delete(name); this.fire(this.leaves.get(name)) }
+      }
+    }
+
+    // a copy, because a timer may add another and a repeating one is rescheduled in place
+    for (const timer of [...this.timers]) {
+      if (this.outcome || this.error) break
+      if (this.t < timer.at) continue
+      this.guard(timer.fn)
+      if (timer.every) timer.at += timer.every
+      else this.timers = this.timers.filter((x) => x !== timer)
+    }
+
+    for (const w of this.watches) {
+      if (this.outcome || this.error) break
+      let now = false
+      try { now = w.cond(this.facts()) } catch (e) { this.fault(e); break }
+      // ONCE PER CROSSING, not every frame it holds: `when(f => f.score >= 100)` firing sixty
+      // times a second is the difference between a bonus and an infinite loop
+      if (now && !w.was) this.guard(w.fn)
+      w.was = now
+    }
+
+    for (const fn of [...this.frameFns]) {
+      if (this.outcome || this.error) break
+      this.guard(() => fn(step, this.facts()))
+    }
+    if (!this.outcome && !this.error && this.def.update) this.guard(() => this.def.update!(step, this.api))
+  }
+
+  finish(outcome: Outcome, text?: string): void {
+    if (this.outcome) return
+    this.outcome = outcome
+    if (text) {
+      this.messages.push({ text, kind: outcome === 'win' ? 'ok' : 'warn', at: this.t })
+      this.host.say(text, outcome === 'win' ? 'ok' : 'warn')
+    }
+    for (const fn of this.endFns) this.guard(fn as () => void, outcome)
+  }
+
+  stop(): void {
+    if (!this.outcome) this.finish('abandoned')
+    this.guard(() => this.def.teardown?.(this.api))
+  }
+
+  /** Run a program's callback; a throw stops the program and says so, and takes nothing with it. */
+  private guard(fn: (...a: never[]) => void, ...args: unknown[]): void {
+    try {
+      ;(fn as (...a: unknown[]) => void)(...args)
+    } catch (e) {
+      this.fault(e)
+    }
+  }
+
+  private fault(e: unknown): void {
+    if (this.error) return
+    this.error = String((e as Error)?.message ?? e)
+    this.host.say(`the level's program stopped: ${this.error}`, 'warn')
+  }
+
+  private fire(list: (() => void)[] | undefined): void {
+    for (const fn of list ?? []) {
+      if (this.outcome || this.error) return
+      this.guard(fn)
+    }
+  }
+}

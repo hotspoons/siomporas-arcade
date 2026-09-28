@@ -7,6 +7,7 @@ import * as THREE from 'three'
 import { LAMP_PARS, retro } from './retro'
 import { SPLAT_MASK_PARS, splatMaskUniforms } from './splatmask'
 import * as T from './tuning'
+import { Uploads } from './uploads'
 
 export interface ImpostorSource {
   branches: THREE.Mesh
@@ -28,6 +29,15 @@ export class Impostors {
   private aYaw: THREE.InstancedBufferAttribute
   /** 1 = solid, 0 = gone: a dither dissolve so a card does not pop when the model takes over */
   private aFade: THREE.InstancedBufferAttribute
+  /**
+   * What still has to reach the GPU, per attribute.
+   *
+   * The instance matrix and the fade are written both wholesale (a re-seat) and one slot at a time
+   * (a card hidden, a card dissolving), and three treats those two as different kinds of upload.
+   * Mixing them loses writes silently — see uploads.ts for which sequences and what they look like.
+   */
+  private matrixUploads = new Uploads()
+  private fadeUploads = new Uploads()
   private material: THREE.ShaderMaterial
 
   private renderer: THREE.WebGLRenderer
@@ -137,6 +147,15 @@ export class Impostors {
       side: THREE.DoubleSide,
     })
     this.mesh = new THREE.InstancedMesh(geo, this.material, capacity)
+    /*
+     * THREE'S OWN SIGNAL THAT THE UPLOAD HAPPENED, and the only correct one.
+     *
+     * Not the frame loop: the renderer uploads an attribute when it next DRAWS it, which is not
+     * every frame — a frame that culls this mesh uploads nothing, and clearing the pending set on
+     * a timer throws away writes that were never sent. `onUpload` fires after `bufferSubData`.
+     */
+    this.mesh.instanceMatrix.onUpload(() => this.matrixUploads.uploaded())
+    this.aFade.onUpload(() => this.fadeUploads.uploaded())
     this.mesh.count = 0
     this.mesh.frustumCulled = false
     this.mesh.name = 'impostors'
@@ -228,9 +247,19 @@ export class Impostors {
     this.material.uniforms.uLampGain.value = T.HEADLIGHT_BOUNCE
   }
 
+  /**
+   * A full rewrite has just happened: every matrix, every variant, every yaw.
+   *
+   * `markAll` matters as much as `needsUpdate` does. To three, a non-empty update-range list means
+   * "send only these", so a ranged write registered after this would demote the whole rewrite to a
+   * partial upload and the rest of it would never arrive — see uploads.ts.
+   */
   commit(count: number) {
     this.mesh.count = count
+    this.matrixUploads.markAll()
+    this.fadeUploads.markAll()
     this.mesh.instanceMatrix.needsUpdate = true
+    this.aFade.needsUpdate = true
     this.aVariant.needsUpdate = true
     this.aYaw.needsUpdate = true
   }
@@ -250,7 +279,8 @@ export class Impostors {
     const a = this.aFade.array as Float32Array
     if (a[i] === f) return
     a[i] = f
-    this.aFade.addUpdateRange(i, 1)
+    this.fadeUploads.mark(i, 1)
+    if (this.fadeUploads.shouldRegister()) this.aFade.addUpdateRange(i, 1)
     this.aFade.needsUpdate = true
   }
 
@@ -260,12 +290,23 @@ export class Impostors {
     a[i * 16] = s
     a[i * 16 + 5] = s
     a[i * 16 + 10] = s
-    this.mesh.instanceMatrix.addUpdateRange(i * 16, 16)
+    this.matrixUploads.mark(i * 16, 16)
+    if (this.matrixUploads.shouldRegister()) this.mesh.instanceMatrix.addUpdateRange(i * 16, 16)
     this.mesh.instanceMatrix.needsUpdate = true
   }
 
-  clearRanges() {
-    this.mesh.instanceMatrix.clearUpdateRanges()
-    this.aFade.clearUpdateRanges()
+  /** What is still pending, for a probe: the bug it exists for is invisible from the CPU array. */
+  uploadState() {
+    return {
+      matrixAll: this.matrixUploads.pendingAll,
+      matrixRanges: this.matrixUploads.pendingRanges.length,
+      fadeAll: this.fadeUploads.pendingAll,
+      fadeRanges: this.fadeUploads.pendingRanges.length,
+      // the pair that matters: if `sent` ever lags `marked`, a write never reached the GPU
+      matrixMarked: this.matrixUploads.marked,
+      matrixSent: this.matrixUploads.sent,
+      fadeMarked: this.fadeUploads.marked,
+      fadeSent: this.fadeUploads.sent,
+    }
   }
 }

@@ -16,6 +16,13 @@
 // the cache of which ones were hidden went stale — so this probe drives, and a run that never
 // replants proves nothing and fails.
 //
+// AND THE SECOND CAUSE, found when Rich reported it again on 2026-09-28: the counter above reads
+// the CPU array, which was right while the screen was wrong. `refreshFar` cleared the attribute's
+// pending upload ranges at its start, and it runs TWICE in a frame whenever a replant fires one
+// and the near set then moves — so the first pass's hides were written to memory and never sent
+// to the GPU. `uploads.marked` against `uploads.sent` is the half the matrices cannot show: they
+// diverge by exactly the writes that were dropped.
+//
 //   PORT=5185 node probes/corridor-treecards.mjs [slug] [steps] [step_m]
 import { chromium } from 'playwright'
 const slug = process.argv[2] ?? 'crofton-triangle'
@@ -59,6 +66,10 @@ const out = await page.evaluate(
       const eye = new THREE.Vector3(px, (site.groundAt(px, -py) ?? 0) + 2, -py)
       const fwd = new THREE.Vector3(dx, 0, -dy).normalize()
       site.updateNear(eye, 0, fwd, 0)
+      // DRAW between steps, because an upload happens when the renderer next draws the mesh — not
+      // every frame and not on a timer. Without this nothing is ever uploaded and `sent` lags
+      // `marked` for a reason that is not the bug.
+      window.corridor.drawFrame?.()
       const c = site.treeCards()
       samples.push(c)
       if (c.doubled > worst.doubled) worst = { ...c, at: [Math.round(px), Math.round(py)] }
@@ -74,6 +85,8 @@ const out = await page.evaluate(
       band: samples.length ? samples[samples.length - 1].band : 0,
       doubledMax: worst.doubled,
       doubledTotalStepsAffected: samples.filter((s) => s.doubled > 0).length,
+      // what reached the GPU, against what was written
+      uploads: samples.length ? samples[samples.length - 1].uploads : null,
       worst,
     }
   },
@@ -95,4 +108,12 @@ else if (!(out.nearSetMax > 50)) fail(`near set never exceeded ${out.nearSetMax}
 // switched off there is legitimately never one, and `doubled` is then simply every visible card.
 else if (out.band > 0 && !(out.inBandMax > 0)) fail(`no near-set tree ever showed a dissolving card across a ${out.band} m band — the accessor is reading the wrong buffer`)
 else if (out.doubledMax > 0) fail(`${out.doubledMax} impostor cards drawn inside near-field models (${out.doubledTotalStepsAffected}/${out.steps} steps affected)`)
-else console.log('PASS: no card drawn over a near-field model outside the dissolve band')
+// THE HALF THE MATRICES CANNOT SHOW. Every count above reads the CPU array, which stays right
+// while the screen is wrong; these two say whether what was written actually reached the GPU.
+else if (!out.uploads) fail('the impostor upload state was not reported — nothing checked whether the writes were sent')
+else if (!(out.uploads.matrixMarked > 0)) fail('no instance matrix was ever written — this run measured nothing')
+else if (out.uploads.matrixSent < out.uploads.matrixMarked) {
+  fail(`${out.uploads.matrixMarked - out.uploads.matrixSent} of ${out.uploads.matrixMarked} matrix writes never reached the GPU — a card is hidden in memory and standing on the screen`)
+} else if (out.uploads.fadeSent < out.uploads.fadeMarked) {
+  fail(`${out.uploads.fadeMarked - out.uploads.fadeSent} of ${out.uploads.fadeMarked} fade writes never reached the GPU`)
+} else console.log(`PASS: no card over a near-field model, and all ${out.uploads.matrixMarked} matrix writes reached the GPU`)

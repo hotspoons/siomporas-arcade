@@ -88,7 +88,15 @@ export interface Site {
    * drawing as a MODEL must not also be drawing a CARD, unless it is inside the dissolve band.
    * `doubled` is the number that are — a flat billboard standing in a procedural tree.
    */
-  treeCards: () => { nearSet: number; cards: number; inBand: number; doubled: number; band: number; replants: number }
+  /**
+   * The tree LOD handover, and whether the GPU has been told about it.
+   *
+   * `doubled` counts cards standing in procedural models — but it is computed from the CPU array,
+   * which is right even when the screen is wrong. `uploads` is the other half: `sent` lagging
+   * `marked` means a write never left the process, which is the failure that looks intermittent
+   * and clears on a reload.
+   */
+  treeCards: () => { nearSet: number; cards: number; inBand: number; doubled: number; band: number; replants: number; uploads: Record<string, number | boolean> | null }
   /** crop rows built per field, by crop type (probes read this) */
   cropRows: Record<string, number>
   /** what is falling and what has settled */
@@ -1161,7 +1169,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
   }
   let treeRecords: TreeRecord[] = []
   let treePlantingRef: () => { count: number; cellM: number; radius: number; centre: [number, number]; capped: boolean; replants: number; lastMs: number } = () => ({ count: 0, cellM: 0, radius: 0, centre: [0, 0], capped: false, replants: 0, lastMs: 0 })
-  let treeCardsRef: () => { nearSet: number; cards: number; inBand: number; doubled: number; band: number; replants: number } = () => ({ nearSet: 0, cards: 0, inBand: 0, doubled: 0, band: 0, replants: 0 })
+  let treeCardsRef: () => { nearSet: number; cards: number; inBand: number; doubled: number; band: number; replants: number; uploads: Record<string, number | boolean> | null } = () => ({ nearSet: 0, cards: 0, inBand: 0, doubled: 0, band: 0, replants: 0, uploads: null })
   let crops: ReturnType<typeof buildCrops> | null = null
   let precip: Precipitation | null = null
   let canopyAtRef: (x: number, y: number) => number = () => 0
@@ -1880,8 +1888,8 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
       let shown = new Set<number>()
       let faded = new Set<number>()
       const seatImpostors = () => {
-        // a seat rewrites every matrix, so anything a partial upload had pending is moot
-        imp!.clearRanges()
+        // a seat rewrites every matrix, and `commit` below tells the upload bookkeeping so —
+        // anything a partial upload had pending is carried by the full one
         t.records.forEach((r, i) => {
           const v = near.variantFor(r, i)
           sizes[i] = r.h * imp!.extents[v]
@@ -1918,7 +1926,19 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
        */
       const lastLod = { eye: new THREE.Vector3(), fwd: null as THREE.Vector3 | null, pitch: 0 }
       refreshFar = (skip: Set<number>, eye?: THREE.Vector3, fwd?: THREE.Vector3, pitch = 0) => {
-        imp!.clearRanges()
+        /*
+         * NO CLEARING HERE, and that was the bug (Rich, 2026-09-28: "tree impostors sometimes do
+         * not disappear when real trees are drawn... refresh the page then it goes away then the
+         * problem comes back").
+         *
+         * This runs TWICE in a frame whenever a replant fires one and the near set then moves —
+         * `updateNear` calls `replantIfMoved` and then `near.update`, and both end here. Clearing
+         * at the start threw away the ranges the first pass had registered, so those hides stayed
+         * in the CPU array and never reached the GPU: a card left standing on the model it had
+         * handed over to. A reload re-seats everything and the card goes, until it happens again.
+         *
+         * The ranges now accumulate and three clears them when it uploads (see uploads.ts).
+         */
         if (eye) lastLod.eye.copy(eye)
         lastLod.fwd = fwd ? fwd.clone() : null
         lastLod.pitch = pitch
@@ -1966,7 +1986,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
           if (banded) inBand++
           if (visible && !banded) doubled++
         }
-        return { nearSet: near.near.size, cards, inBand, doubled, band, replants: replantStats.replants }
+        return { nearSet: near.near.size, cards, inBand, doubled, band, replants: replantStats.replants, uploads: imp!.uploadState() }
       }
       updateNear = (eye: THREE.Vector3, time: number, fwd?: THREE.Vector3, pitch = 0) => {
         replantIfMoved(eye, fwd, pitch)

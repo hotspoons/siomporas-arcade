@@ -17,7 +17,7 @@
 // no renderer behind it, steps it for a few simulated seconds, and reports what happened — the
 // zones declared, the goal set, the messages said, the outcome, and the throw if there was one.
 // That is the difference between "the compiler is happy" and "this is a level".
-import { CodeEditor, type Diagnostic } from './codeeditor'
+import { CodeEditor, forget, knowAbout, languageForPath, type Diagnostic } from './codeeditor'
 import * as programApi from '../program'
 import * as actorsApi from '../actors'
 import * as actorworldApi from '../actorworld'
@@ -238,10 +238,37 @@ function rewriteImports(js: string): string {
 /** What may live here. Matches PROGRAM_EXT in tools/worldeditor/store.mjs, which is the authority. */
 const EXT = ['.ts', '.tsx', '.js', '.mjs', '.json', '.md', '.txt', '.glsl', '.frag', '.vert', '.css', '.yaml', '.yml']
 
-/** A typed path with no extension gets `.ts`; most of these are TypeScript. */
-const withExt = (v: string): string => {
-  const t = v.trim()
-  return EXT.includes(t.slice(t.lastIndexOf('.'))) ? t : `${t.replace(/\.$/, '')}.ts`
+/** The ones the TypeScript service should know about: what a program can actually import. */
+const CODE = ['.ts', '.tsx', '.js', '.mjs', '.json']
+
+/** The last segment's extension, or '' when the name has no dot in it at all. */
+export const extOf = (p: string): string => {
+  const name = p.slice(p.lastIndexOf('/') + 1)
+  const dot = name.lastIndexOf('.')
+  return dot > 0 ? name.slice(dot) : ''
+}
+
+/**
+ * The extension a typed path ends up with.
+ *
+ * THREE CASES, AND THEY ARE NOT THE SAME (Rich, 2026-09-28: "Its okay to auto-name things with a
+ * .ts extension but don't always add it on files especially on renames/moves. We might want json
+ * too"):
+ *
+ *   A NAME WITH NO DOT gets one. On a new file that is `.ts`, because most of these are
+ *   TypeScript and asking every time is a tax on the common case. On a rename it is the
+ *   extension the file already had — renaming `chase.json` to `pursuit` means `pursuit.json`,
+ *   and turning it into TypeScript behind somebody's back would be an odd thing to do.
+ *
+ *   A NAME WITH A DOT IS TAKEN AS TYPED, whatever it says. That is how an extension gets CHANGED,
+ *   which is a thing this editor is supposed to be able to do; if the extension is not one this
+ *   store keeps, `badPath` says so. It used to append `.ts` to anything it did not recognise, so
+ *   renaming a file to `test.xyz` silently produced `test.xyz.ts`.
+ */
+export const withExt = (v: string, from?: string): string => {
+  const t = v.trim().replace(/\.$/, '')
+  if (extOf(t)) return t
+  return `${t}${(from && extOf(from)) || '.ts'}`
 }
 
 /**
@@ -344,8 +371,41 @@ export class ProgramPanel {
     if (!r) return
     // defaulted, because a service that predates folders answers without `dirs` — and an
     // undefined here is a TypeError inside path validation, which reads as "rename is broken"
+    const before = this.files
     this.files = r.programs ?? []
     this.dirs = r.dirs ?? []
+    // a file that is gone must stop resolving; otherwise `import './old'` keeps typechecking
+    for (const f of before) if (!this.files.some((n) => n.id === f.id)) void forget(`programs/${f.id}`)
+    void this.teachService()
+  }
+
+  /**
+   * Put every file on the volume into the compilation, whether or not it is open.
+   *
+   * WHAT THIS BUYS: `import { chase } from '../lib/chase'` resolves, its exports complete, and a
+   * typo in the path is an error rather than silence. Monaco only knows the models that exist, so
+   * without this a multi-file game behaves as if every file were alone.
+   *
+   * Fetched ONCE per file and never refetched here: the open ones are authoritative in their own
+   * buffers (`knowAbout` will not touch a model that exists), and re-reading a file on every
+   * listing would fight with what somebody is typing into it. A file changed on the volume by
+   * something else is picked up when it is opened.
+   */
+  private taught = new Set<string>()
+  private async teachService(): Promise<void> {
+    const want = this.files.filter((f) => !this.taught.has(f.id) && CODE.includes(f.id.slice(f.id.lastIndexOf('.'))))
+    if (!want.length) return
+    for (const f of want) this.taught.add(f.id)
+    const texts: { path: string; text: string; language: string }[] = []
+    for (const f of want) {
+      // a runaway file is not worth putting in the compilation; the service slows down for every
+      // model it holds and a 500 kB generated blob helps nobody's completions
+      if (f.bytes > 256 * 1024) continue
+      const text = await this.o.load(f.id).catch(() => null)
+      if (text === null) continue
+      texts.push({ path: `programs/${f.id}`, text, language: languageForPath(f.id) })
+    }
+    if (texts.length) await knowAbout(texts)
   }
 
   /** Put back the tabs that were open before the page was reloaded. */
@@ -656,7 +716,7 @@ export class ProgramPanel {
       title: 'New file',
       label: 'path',
       value: prefix,
-      placeholder: 'levels/rooftop-run.ts',
+      placeholder: 'levels/rooftop-run.ts, or lib/data.json',
       icon: 'document-plus',
       ok: 'Create',
       validate: (v) => this.badPath(withExt(v), 'file'),
@@ -674,7 +734,7 @@ export class ProgramPanel {
     const t = v.trim()
     if (!/^[a-z0-9][a-z0-9._-]*(\/[a-z0-9][a-z0-9._-]*)*$/.test(t)) return 'lower case letters, digits, dots, hyphens — and slashes for folders'
     if (t.split('/').some((p) => p.startsWith('.'))) return 'no segment may start with a dot'
-    if (what === 'file' && !EXT.includes(t.slice(t.lastIndexOf('.')))) return `the extension must be one of ${EXT.join(' ')}`
+    if (what === 'file' && !EXT.includes(extOf(t))) return `${extOf(t) || 'no extension'} — it must be one of ${EXT.join(' ')}`
     if (this.files.some((f) => f.id === t) || this.dirs.includes(t)) return `${t} already exists`
     return null
   }
@@ -687,10 +747,10 @@ export class ProgramPanel {
       value: id,
       icon: 'pencil-square',
       ok: 'Move',
-      validate: (v) => (v.trim() === id ? null : this.badPath(withExt(v), 'file')),
+      validate: (v) => (v.trim() === id ? null : this.badPath(withExt(v, id), 'file')),
     })
     if (to === null) return
-    const id2 = withExt(to)
+    const id2 = withExt(to, id)
     if (id2 === id) return
     try {
       // save first: a move renames what is ON THE VOLUME, and an unsaved buffer would be left

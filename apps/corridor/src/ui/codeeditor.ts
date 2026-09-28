@@ -33,6 +33,7 @@ import type * as Ts from 'monaco-editor/languages/features/typescript/register.j
 interface MonacoApi {
   editor: typeof Api.editor
   Uri: typeof Api.Uri
+  languages: typeof Api.languages
   ts: typeof Ts
 }
 
@@ -48,6 +49,45 @@ let monacoPromise: Promise<MonacoApi> | null = null
 export function loadMonaco(): Promise<MonacoApi> {
   monacoPromise ??= (async () => {
     const api = await import('monaco-editor/editor/editor.api.js')
+    /*
+     * THE EDITOR'S BEHAVIOUR IS NOT IN THE API.
+     *
+     * `editor.api.js` is the types, the namespaces and a bare editor widget: it registers NO
+     * contributions, so there is no suggest controller, no parameter hints, no hover, no find and
+     * no right-click menu. The editor renders, colours text and typechecks — and then Ctrl-Space
+     * does nothing at all, which is exactly what it did here (Rich, 2026-09-28: "an LSP for
+     * typescript, javascript and json would be nice so we can see what options exist as we type").
+     * The language service was fine the whole time; there was nothing on screen to show it.
+     *
+     * `editor.main.js` fixes that AND registers eighty language definitions, which is the reason
+     * this file imports the api rather than the main entry in the first place. So the
+     * contributions are named one by one. Each of these is a thing a person expects a code editor
+     * to do; anything not listed is a thing this editor deliberately does not have.
+     */
+    await Promise.all([
+      import('monaco-editor/editor/contrib/suggest/browser/suggestController.js'),
+      import('monaco-editor/editor/contrib/parameterHints/browser/parameterHints.js'),
+      import('monaco-editor/editor/contrib/hover/browser/hoverContribution.js'),
+      import('monaco-editor/editor/contrib/bracketMatching/browser/bracketMatching.js'),
+      import('monaco-editor/editor/contrib/folding/browser/folding.js'),
+      import('monaco-editor/editor/contrib/comment/browser/comment.js'),
+      import('monaco-editor/editor/contrib/contextmenu/browser/contextmenu.js'),
+      import('monaco-editor/editor/contrib/find/browser/findController.js'),
+      import('monaco-editor/editor/contrib/gotoSymbol/browser/goToCommands.js'),
+      import('monaco-editor/editor/contrib/gotoError/browser/gotoError.js'),
+      import('monaco-editor/editor/contrib/rename/browser/rename.js'),
+      import('monaco-editor/editor/contrib/format/browser/formatActions.js'),
+      import('monaco-editor/editor/contrib/snippet/browser/snippetController2.js'),
+      import('monaco-editor/editor/contrib/wordOperations/browser/wordOperations.js'),
+      import('monaco-editor/editor/contrib/linesOperations/browser/linesOperations.js'),
+      import('monaco-editor/editor/contrib/multicursor/browser/multicursor.js'),
+      import('monaco-editor/editor/contrib/cursorUndo/browser/cursorUndo.js'),
+      import('monaco-editor/editor/contrib/clipboard/browser/clipboard.js'),
+      import('monaco-editor/editor/contrib/smartSelect/browser/smartSelect.js'),
+      import('monaco-editor/editor/contrib/wordHighlighter/browser/wordHighlighter.js'),
+      import('monaco-editor/editor/contrib/indentation/browser/indentation.js'),
+      import('monaco-editor/editor/browser/coreCommands.js'),
+    ])
     // THE LANGUAGE BEFORE THE SERVICE, and not in the same `Promise.all`. The definition registers
     // `typescript` as a language; the feature module attaches the worker-backed service to it and
     // throws "TypeScript not registered!" if it gets there first. Loading them concurrently is a
@@ -80,7 +120,7 @@ export function loadMonaco(): Promise<MonacoApi> {
         return new editorWorker.default()
       },
     }
-    const monaco: MonacoApi = { editor: api.editor, Uri: api.Uri, ts }
+    const monaco: MonacoApi = { editor: api.editor, Uri: api.Uri, languages: api.languages, ts }
     ts.typescriptDefaults.setCompilerOptions({
       target: ts.ScriptTarget.ES2020, // the newest this build of the service names; ESNext emits the same for what a program uses
       module: ts.ModuleKind.ESNext,
@@ -89,6 +129,9 @@ export function loadMonaco(): Promise<MonacoApi> {
       noImplicitAny: true,
       lib: ['es2022', 'dom'],
       allowNonTsExtensions: true,
+      // `import data from './lib/tuning.json'` is a normal thing to want now that a file can be
+      // JSON, and without this the service reports it as a module that does not exist
+      resolveJsonModule: true,
       skipLibCheck: true,
       // NO `paths`. The declarations are laid out as a node_modules tree by
       // scripts/gen-program-types.mjs, which is the one layout the real resolver handles without
@@ -105,6 +148,7 @@ export function loadMonaco(): Promise<MonacoApi> {
 
     const doc = types.default as ProgramTypes
     for (const [uri, text] of Object.entries(doc.libs)) ts.typescriptDefaults.addExtraLib(text, uri)
+    registerImportPaths(monaco, Object.keys(doc.alias))
 
     api.editor.defineTheme('corridor', {
       base: 'vs-dark',
@@ -125,6 +169,132 @@ interface ProgramTypes {
 }
 
 /** One diagnostic, flattened to what a panel shows. */
+/**
+ * WHAT CAN GO IN THE QUOTES OF AN IMPORT.
+ *
+ * TypeScript's own completions do everything else — members, named imports, the core package's
+ * exports — but not the module SPECIFIER, because working out what `'./` could be means listing a
+ * directory and Monaco's worker has no filesystem to list. Inside the quotes you got the ordinary
+ * word suggestions instead, which is worse than nothing: `chaseSpeed` offered as a module path.
+ *
+ * The editor knows the answer without a filesystem. The core packages are the aliases in the
+ * generated declarations, and every other file is a model that already exists — so this offers
+ * `@apex/program` and the relative path from here to there, with `.ts` dropped (TypeScript
+ * resolves it) and `.json` kept (it does not).
+ */
+function registerImportPaths(monaco: MonacoApi, packages: string[]): void {
+  const provider = {
+    triggerCharacters: ["'", '"', '/', '@', '.'],
+    provideCompletionItems(model: Api.editor.ITextModel, position: Api.Position) {
+      const line = model.getValueInRange({ startLineNumber: position.lineNumber, startColumn: 1, endLineNumber: position.lineNumber, endColumn: position.column })
+      // an import (or a re-export, or a dynamic import) whose string is still open
+      const m = /(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*)(['"])([^'"]*)$/.exec(line)
+      if (!m) return { suggestions: [] }
+      const typed = m[2]
+      const word = model.getWordUntilPosition(position)
+      void word
+      const range = {
+        startLineNumber: position.lineNumber,
+        endLineNumber: position.lineNumber,
+        startColumn: position.column - typed.length,
+        endColumn: position.column,
+      }
+      const here = model.uri.path.replace(/^\//, '')
+      const suggestions: Api.languages.CompletionItem[] = []
+      for (const p of packages) {
+        suggestions.push({
+          label: p,
+          kind: monaco.languages.CompletionItemKind.Module,
+          detail: 'the game API',
+          insertText: p,
+          range,
+          sortText: `0${p}`,
+        })
+      }
+      for (const other of monaco.editor.getModels()) {
+        const there = other.uri.path.replace(/^\//, '')
+        if (there === here || !there.startsWith('programs/')) continue
+        const rel = relativeSpecifier(here, there)
+        if (!rel) continue
+        suggestions.push({
+          label: rel,
+          kind: monaco.languages.CompletionItemKind.File,
+          detail: there,
+          insertText: rel,
+          range,
+          sortText: `1${rel}`,
+        })
+      }
+      return { suggestions }
+    },
+  }
+  monaco.languages.registerCompletionItemProvider('typescript', provider)
+  monaco.languages.registerCompletionItemProvider('javascript', provider)
+}
+
+/**
+ * The specifier that gets you from one file to another: `./sibling`, `../lib/thing`.
+ *
+ * ALWAYS EXPLICITLY RELATIVE. A bare `lib/thing` is a package name to a module resolver, so a
+ * suggestion missing the `./` resolves to nothing and reads as a broken import.
+ */
+export function relativeSpecifier(from: string, to: string): string | null {
+  const ext = to.slice(to.lastIndexOf('.'))
+  if (!['.ts', '.tsx', '.js', '.mjs', '.json'].includes(ext)) return null
+  const a = from.split('/').slice(0, -1)
+  const b = to.split('/')
+  const name = b.pop()!
+  let i = 0
+  while (i < a.length && i < b.length && a[i] === b[i]) i++
+  const up = a.length - i
+  const parts = [...(up ? Array(up).fill('..') : ['.']), ...b.slice(i), ext === '.json' ? name : name.slice(0, -ext.length)]
+  return parts.join('/')
+}
+
+/**
+ * Make sure the service knows about a file, without opening it.
+ *
+ * WHY THIS EXISTS: Monaco's TypeScript service only knows the MODELS that have been created. A
+ * program that imports `./lib/chase` from a file nobody has clicked on gets "cannot find module",
+ * no completions for what that module exports, and no rename across the two — so a multi-file
+ * game behaves as if every file were alone (Rich, 2026-09-28: "We need autocompletion for imports
+ * and other TS libraries that are part of the core package plus anything referenced from the
+ * program's scope").
+ *
+ * Creating a model is not opening an editor: it costs the text and nothing else, and it is what
+ * puts the file in the compilation.
+ */
+export async function knowAbout(files: { path: string; text: string; language?: string }[]): Promise<number> {
+  const monaco = await loadMonaco()
+  let made = 0
+  for (const f of files) {
+    const uri = monaco.Uri.parse(`file:///${f.path.replace(/^\/+/, '')}`)
+    const already = monaco.editor.getModel(uri)
+    if (already) {
+      // an OPEN file's buffer is the truth, including its unsaved edits — never overwrite it here
+      continue
+    }
+    monaco.editor.createModel(f.text, f.language ?? languageForPath(f.path), uri)
+    made++
+  }
+  return made
+}
+
+/** Monaco's language id for a path. The one place the mapping lives. */
+export function languageForPath(path: string): string {
+  const ext = path.slice(path.lastIndexOf('.'))
+  if (ext === '.json') return 'json'
+  if (ext === '.js' || ext === '.mjs') return 'javascript'
+  if (ext === '.ts' || ext === '.tsx') return 'typescript'
+  return 'plaintext'
+}
+
+/** Forget a file the volume no longer has, so it stops resolving and stops being suggested. */
+export async function forget(path: string): Promise<void> {
+  const monaco = await loadMonaco()
+  monaco.editor.getModel(monaco.Uri.parse(`file:///${path.replace(/^\/+/, '')}`))?.dispose()
+}
+
 export interface Diagnostic {
   severity: 'error' | 'warning' | 'info'
   message: string

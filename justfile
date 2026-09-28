@@ -40,6 +40,7 @@ check:
     npm run lint
     npx tsc -b
     npx vitest run
+    node --test tools/worldeditor/*.test.mjs
 
 lint:
     npm run lint
@@ -50,6 +51,7 @@ typecheck:
 # unit tests only
 test:
     npx vitest run
+    node --test tools/worldeditor/*.test.mjs
 
 # measure every cabinet's artwork against the machine it goes on (see apps/arcade/ART.md)
 art-check *games:

@@ -13,7 +13,9 @@ metadata:
     helm.sh/resource-policy: keep
 spec:
   accessModes: [{{ .Values.data.accessMode }}]
+  {{- if .Values.data.storageClass }}
   storageClassName: {{ .Values.data.storageClass }}
+  {{- end }}
   resources:
     requests:
       storage: {{ .Values.data.size }}

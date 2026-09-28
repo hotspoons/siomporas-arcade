@@ -49,7 +49,15 @@ replicaCount: 1
 data:
   existingClaim: ""
   size: 500Gi
-  storageClass: ceph-filesystem
+  # EMPTY MEANS THE CLUSTER'S OWN DEFAULT, which is what its admin has already decided. A named
+  # class is one cluster's name for it: on anybody else's the PVC stays Pending forever with a
+  # message nobody reads (Rich, 2026-09-28: "no binding to cephfs as well ... needs to be generic
+  # for all deployments not to overfit our cluster"). Set it only if you mean a specific one.
+  storageClass: ""
+  # ReadWriteMany IS REQUIRED, and it is the one storage property this really does need: a bake
+  # Job writes the world while this pod serves it, and a splat run has a leader and N workers
+  # sharing one output directory. Not every default StorageClass provides RWX — `just preflight`
+  # checks, because the failure is a Pod stuck Pending rather than an error anyone is shown.
   accessMode: ReadWriteMany
 
 # Ours first. The public mirrors are appended by the service itself, exactly as osm.py does, so a

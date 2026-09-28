@@ -209,7 +209,11 @@ export function readCluster() {
       arch: x.status?.nodeInfo?.architecture ?? '?',
       cpu: qty(x.status?.allocatable?.cpu),
       mem: qty(x.status?.allocatable?.memory),
-      gpus: Number(x.status?.allocatable?.['nvidia.com/gpu'] ?? 0),
+      // ANY GPU RESOURCE, not NVIDIA's alone: AMD advertises amd.com/gpu, Intel gpu.intel.com/i915,
+      // Habana habana.ai/gaudi. Counting one vendor reports a GPU cluster as having none.
+      gpus: Object.entries(x.status?.allocatable ?? {})
+        .filter(([k, v]) => k.includes('/') && /(^|\/)(gpu|gaudi|i915|xe)s?$|gpu\.intel\.com|habana\.ai/i.test(k) && Number(v) > 0)
+        .reduce((n, [, v]) => n + Number(v), 0),
     })),
     storageClasses: (sc?.items ?? []).map((x) => ({ name: x.metadata.name, provisioner: x.provisioner })),
     crds: (crd?.items ?? []).map((x) => x.metadata.name),

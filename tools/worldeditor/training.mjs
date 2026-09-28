@@ -80,9 +80,16 @@ export function normalise(run = {}) {
     workers: Math.max(0, Number(run.workers ?? 0)),
     config: run.config ?? null,
     claim: run.claim ?? process.env.WORLDEDITOR_CLAIM ?? 'worldeditor-data',
-    storageClass: run.storageClass ?? process.env.WORLDEDITOR_SPLAT_STORAGE_CLASS ?? 'ceph-filesystem',
+    /*
+     * NO DEFAULT STORAGE CLASS. `ceph-filesystem` was one cluster's name for it; on anybody
+     * else's it does not exist and the PVC stays Pending forever with a message nobody reads.
+     * Omitted, Kubernetes uses the cluster's own default StorageClass, which is the right answer
+     * everywhere and is what a cluster admin has already decided.
+     */
+    storageClass: run.storageClass ?? process.env.WORLDEDITOR_SPLAT_STORAGE_CLASS ?? null,
     outputSize: run.outputSize ?? process.env.WORLDEDITOR_SPLAT_OUTPUT_SIZE ?? '500Gi',
-    gpuResource: run.gpuResource ?? process.env.WORLDEDITOR_GPU_RESOURCE ?? 'nvidia.com/gpu',
+    /* null means "discover it" — see `gpuResources`. NVIDIA is the common case, not the only one. */
+    gpuResource: run.gpuResource ?? process.env.WORLDEDITOR_GPU_RESOURCE ?? null,
     // extra container limits (memory, cpu) as a plain map; the GPU count is `gpusPerNode`
     limits: run.limits ?? null,
     /** the RWX claim the pods share as /out; the CRD provisions its own, a bare JobSet does not */
@@ -159,7 +166,9 @@ export function trainingDeployment(run, apiVersion = `${GROUP}/${FALLBACK_VERSIO
         accessModes: ['ReadWriteMany'],
         ephemeral: false,
         size: r.outputSize,
-        storageClassName: r.storageClass,
+        // OMITTED when unset, so the cluster's own default StorageClass applies. An explicit
+        // null here is not the same thing: it asks for a PVC with no class at all.
+        ...(r.storageClass ? { storageClassName: r.storageClass } : {}),
       },
       enableObservabilityScraping: true,
       // the JobSet the operator builds. Empty means "as the platform sees fit", which is the
@@ -227,8 +236,10 @@ export function jobSet(run) {
    * THE OUTPUT VOLUME IS SHARED, and that is the whole reason this is not N independent Jobs.
    * The leader chunks, the workers claim chunks and write trained ones back, and the leader
    * merges what they wrote. A per-pod emptyDir would give every pod its own empty /out and the
-   * merge would find nothing — so it is an RWX claim, which on this cluster means
-   * ceph-filesystem. Without the CRD nobody provisions one for us, so it is named and expected.
+   * merge would find nothing — so it is an RWX claim. WHICH storage class provides RWX is the
+   * cluster's business, not ours: no class is named, so the cluster's default applies. RWX itself
+   * is not negotiable and is what preflight checks. Without the CRD nobody provisions this claim
+   * for us, so it is named and expected to exist.
    */
   const outClaim = r.outClaim ?? `${r.name}-out`
   const job = (name, role, replicas, parallelism) => ({
@@ -272,6 +283,56 @@ export function jobSet(run) {
 }
 
 /**
+ * The same run as plain batch Jobs, for a cluster with neither CRD.
+ *
+ * Rich, 2026-09-28: "targeting the training deployment crd from my platform if it exists with a
+ * fallback to jobset, and finally raw batch jobs if neither crd is there."
+ *
+ * Every cluster has `batch/v1`, so this tier always works — which makes it the one that decides
+ * whether this is a product or a demo of one platform.
+ *
+ * TWO JOBS, NOT ONE, and the ordering between them is still none. The leader job is a single pod;
+ * the worker job is `parallelism: workers` pods that claim from the same queue. A JobSet would
+ * manage the pair as a unit and clean them up together — that is what it is for, and it is why it
+ * is preferred — so here the two carry a shared label and are started, watched and deleted as a
+ * pair by name. The work itself is identical: the same image, the same args, the same shared
+ * output claim.
+ */
+export function batchJobs(run) {
+  const r = normalise(run)
+  const js = jobSet(r)
+  const outClaim = r.outClaim ?? `${r.name}-out`
+  const common = {
+    'app.kubernetes.io/managed-by': 'worldeditor',
+    'corridor.capture': r.capture,
+    // what ties the pair together in the absence of an object that owns both
+    'corridor.run': r.name,
+    ...(r.world ? { 'corridor.world': r.world } : {}),
+  }
+  const fromReplicated = (rj) => ({
+    apiVersion: 'batch/v1',
+    kind: 'Job',
+    metadata: { name: `${r.name}-${rj.name}`, labels: { ...common, 'corridor.role': rj.name } },
+    spec: {
+      ...rj.template.spec,
+      ttlSecondsAfterFinished: r.ttlSeconds,
+      template: {
+        metadata: { labels: { ...common, 'corridor.role': rj.name } },
+        spec: rj.template.spec.template.spec,
+      },
+    },
+  })
+  return {
+    // A LIST, because there is no single object. The caller creates each and treats the set as
+    // the run; `corridor.run` is how they are found again.
+    kind: 'List',
+    run: r.name,
+    items: js.spec.replicatedJobs.map(fromReplicated),
+    outClaim,
+  }
+}
+
+/**
  * Which object this cluster can run, preferring the platform's.
  *
  * Returns `{ via, kind, available }`. `via: 'training'` is the featured path; `via: 'jobset'` is
@@ -293,15 +354,46 @@ export async function plan(k8s, { namespace = 'default' } = {}) {
   if (training) return { via: 'training', kind: 'TrainingDeployment', available: true, featured: true, apiVersion: gv }
   const js = await has(`/apis/jobset.x-k8s.io/v1alpha2/namespaces/${namespace}/jobsets?limit=1`)
   if (js) return { via: 'jobset', kind: 'JobSet', available: true, featured: false, why: 'no TrainingDeployment CRD on this cluster' }
-  return { via: 'none', kind: null, available: false, why: 'neither TrainingDeployment nor JobSet is installed' }
+  /*
+   * THE FLOOR. `batch/v1` is in every Kubernetes, so if this is not there nothing is, and the
+   * honest answer is "not a cluster" rather than "no CRD". Reaching this tier is not a failure —
+   * it is the same run, managed by hand instead of by an operator.
+   */
+  const batch = await has(`/apis/batch/v1/namespaces/${namespace}/jobs?limit=1`)
+  if (batch) return { via: 'batch', kind: 'Job', available: true, featured: false, why: 'neither TrainingDeployment nor JobSet is installed; using plain Jobs' }
+  return { via: 'none', kind: null, available: false, why: 'no batch/v1 — this does not look like a cluster' }
+}
+
+/**
+ * Fill in what only the cluster can answer.
+ *
+ * `normalise` is synchronous and deliberately knows nothing about any particular cluster, so the
+ * fields whose right value is a property of the cluster arrive null and are resolved here. The
+ * fallback when discovery finds nothing is NVIDIA's name — not because it is the only one, but
+ * because a manifest has to be previewable off-cluster and that is the likeliest guess. It is a
+ * guess only when there is no cluster to ask.
+ */
+export async function resolve(run, k8s) {
+  const r = normalise(run)
+  if (!r.gpuResource) {
+    const found = await gpuResources(k8s).catch(() => [])
+    r.gpuResource = found[0] ?? 'nvidia.com/gpu'
+    r.gpuResourceDiscovered = found.length > 0
+  }
+  return r
 }
 
 /** Build whichever this cluster can run. `force` overrides, for showing the difference. */
 export async function manifestFor(run, k8s, { namespace = 'default', force = null } = {}) {
-  const p = force ? { via: force, kind: force === 'training' ? 'TrainingDeployment' : 'JobSet', available: true } : await plan(k8s, { namespace })
+  const KINDS = { training: 'TrainingDeployment', jobset: 'JobSet', batch: 'Job' }
+  const p = force ? { via: force, kind: KINDS[force] ?? 'JobSet', available: true } : await plan(k8s, { namespace })
   if (!p.available) throw Object.assign(new Error(p.why), { status: 501 })
   const gv = p.apiVersion ?? (await apiVersionFor(k8s))
-  return { ...p, manifest: p.via === 'training' ? trainingDeployment(run, gv) : jobSet(run) }
+  const r = await resolve(run, k8s)
+  const manifest = p.via === 'training' ? trainingDeployment(r, gv)
+    : p.via === 'batch' ? batchJobs(r)
+    : jobSet(r)
+  return { ...p, gpuResource: r.gpuResource, manifest }
 }
 
 /**
@@ -357,29 +449,89 @@ export function readStatus(obj) {
  *   sha it asked for so a result can be traced to code.
  */
 
-/** Free GPUs, by asking the scheduler: allocatable minus what Running and Pending pods request. */
-export async function freeGpus(k8s, { resource = 'nvidia.com/gpu' } = {}) {
+/**
+ * Which extended resource this cluster's GPUs are advertised as.
+ *
+ * NOT `nvidia.com/gpu` BY ASSUMPTION. That is the common one and it is not the only one: AMD
+ * advertises `amd.com/gpu`, Intel `gpu.intel.com/i915`, Habana `habana.ai/gaudi`, and a cluster
+ * can carry more than one at once. Hard-coding the NVIDIA name means this counts zero free GPUs
+ * on somebody else's cluster and silently schedules a run with no accelerator — the failure being
+ * a pod that starts, finds no device, and trains nothing.
+ *
+ * Discovered the same way the count is: by asking the nodes what they have. The pattern is
+ * deliberately broad because the vendor prefix is the only stable part of these names.
+ */
+const GPU_RESOURCE = /(^|\/)(gpu|gaudi|i915|xe)s?$|gpu\.intel\.com|habana\.ai/i
+
+export async function gpuResources(k8s) {
+  if (!k8s?.usable?.()) return []
+  const nodes = await k8s.raw('GET', '/api/v1/nodes').catch(() => ({ items: [] }))
+  const found = new Set()
+  for (const node of nodes.items ?? []) {
+    for (const [k, v] of Object.entries(node.status?.allocatable ?? {})) {
+      // an extended resource is vendor-qualified; `cpu`, `memory`, `pods` are not
+      if (k.includes('/') && GPU_RESOURCE.test(k) && Number(v) > 0) found.add(k)
+    }
+  }
+  return [...found].sort()
+}
+
+/**
+ * Free GPUs, by asking the scheduler: allocatable minus what Running and Pending pods request.
+ *
+ * `resource` omitted means "whatever this cluster has", summed across every kind it advertises.
+ */
+export async function freeGpus(k8s, { resource = null } = {}) {
   if (!k8s?.usable?.()) return { free: 0, total: 0, why: 'not running in a cluster' }
   const num = (v) => (v == null ? 0 : Number(String(v).replace(/[^0-9.]/g, '')) || 0)
+  const kinds = resource ? [resource] : await gpuResources(k8s)
+  if (!kinds.length) return { free: 0, total: 0, resources: [], why: 'no nodes advertise a GPU resource' }
   const nodes = await k8s.raw('GET', '/api/v1/nodes')
-  const total = (nodes.items ?? []).reduce((n, node) => n + num(node.status?.allocatable?.[resource]), 0)
-  // EVERY namespace: a GPU held by flux or recon is not free just because it is not ours.
+  let total = 0
+  for (const node of nodes.items ?? []) {
+    for (const k of kinds) total += num(node.status?.allocatable?.[k])
+  }
+  // EVERY namespace: a GPU held by another team's workload is not free because it is not ours.
   const pods = await k8s.raw('GET', '/api/v1/pods?fieldSelector=status.phase!=Succeeded,status.phase!=Failed')
   let used = 0
   for (const p of pods.items ?? []) {
     for (const c of [...(p.spec?.containers ?? []), ...(p.spec?.initContainers ?? [])]) {
-      used += num(c.resources?.limits?.[resource] ?? c.resources?.requests?.[resource])
+      for (const k of kinds) used += num(c.resources?.limits?.[k] ?? c.resources?.requests?.[k])
     }
   }
-  return { free: Math.max(0, total - used), total, used }
+  return { free: Math.max(0, total - used), total, used, resources: kinds }
 }
 
 /** Where a run's object lives, whichever kind it is. */
 function pathFor(via, apiVersion, namespace, name = '') {
   const base = via === 'training'
     ? `/apis/${apiVersion}/namespaces/${namespace}/trainingdeployments`
-    : `/apis/jobset.x-k8s.io/v1alpha2/namespaces/${namespace}/jobsets`
+    : via === 'batch'
+      ? `/apis/batch/v1/namespaces/${namespace}/jobs`
+      : `/apis/jobset.x-k8s.io/v1alpha2/namespaces/${namespace}/jobsets`
   return name ? `${base}/${encodeURIComponent(name)}` : base
+}
+
+/** The batch tier's run is a pair of Jobs sharing `corridor.run`; roll them into one row. */
+function foldBatch(items) {
+  const byRun = new Map()
+  for (const j of items) {
+    const run = j.metadata?.labels?.['corridor.run']
+    if (!run) continue
+    const prev = byRun.get(run) ?? { name: run, jobs: [], failed: 0, active: 0, succeeded: 0, createdAt: j.metadata.creationTimestamp, capture: j.metadata?.labels?.['corridor.capture'] ?? null, world: j.metadata?.labels?.['corridor.world'] ?? null }
+    prev.jobs.push(j.metadata.name)
+    prev.failed += j.status?.failed ?? 0
+    prev.active += j.status?.active ?? 0
+    prev.succeeded += j.status?.succeeded ?? 0
+    if (j.metadata.creationTimestamp < prev.createdAt) prev.createdAt = j.metadata.creationTimestamp
+    byRun.set(run, prev)
+  }
+  return [...byRun.values()].map((r) => ({
+    ...r,
+    // one failed pod fails the run: a half-trained world is worse than none
+    state: r.failed > 0 ? 'failed' : r.active > 0 ? 'running' : r.succeeded > 0 ? 'done' : 'starting',
+    via: 'batch',
+  }))
 }
 
 /**
@@ -391,9 +543,27 @@ function pathFor(via, apiVersion, namespace, name = '') {
  * not consequences.
  */
 export async function createRun(run, k8s, { namespace = 'default', force = null, dryRun = false } = {}) {
-  const r = normalise(run)
+  const r = await resolve(run, k8s)
   const { via, kind, manifest, apiVersion } = await manifestFor(r, k8s, { namespace, force })
   const gv = apiVersion ?? (await apiVersionFor(k8s))
+  /*
+   * THE BATCH TIER CREATES TWO OBJECTS, because no single one owns both. They go up leader-first
+   * — a worker that starts before the chunks exist waits rather than failing, so the order is a
+   * courtesy rather than a requirement, but if the second create fails the first is already
+   * running and the caller is told which.
+   */
+  if (via === 'batch') {
+    const base = `/apis/batch/v1/namespaces/${namespace}/jobs` + (dryRun ? '?dryRun=All' : '')
+    const made = []
+    for (const item of manifest.items) {
+      const created = await k8s.raw('POST', base, { body: item }).catch((e) => {
+        throw Object.assign(new Error(`${item.metadata.name}: ${e.message}${made.length ? ` (${made.join(', ')} already started)` : ''}`), { status: e.status ?? 500 })
+      })
+      made.push(created?.metadata?.name ?? item.metadata.name)
+    }
+    return { name: manifest.run, kind, via, namespace, dryRun, jobs: made, capture: r.capture, world: r.world, workers: r.workers, createdAt: new Date().toISOString() }
+  }
+
   const path = pathFor(via, gv, namespace) + (dryRun ? '?dryRun=All' : '')
   const created = await k8s.raw('POST', path, { body: manifest })
   return {
@@ -411,6 +581,11 @@ export async function runStatus(name, k8s, { namespace = 'default' } = {}) {
   const p = await plan(k8s, { namespace })
   if (!p.available) return { state: 'unknown', why: p.why }
   const gv = p.apiVersion ?? (await apiVersionFor(k8s))
+  if (p.via === 'batch') {
+    const list = await k8s.raw('GET', `${pathFor(p.via, gv, namespace)}?labelSelector=${encodeURIComponent(`corridor.run=${name}`)}`).catch(() => ({ items: [] }))
+    const folded = foldBatch(list.items ?? [])
+    return folded[0] ?? { state: 'gone', name }
+  }
   const obj = await k8s.raw('GET', pathFor(p.via, gv, namespace, name)).catch(() => null)
   if (!obj) return { state: 'gone', name }
   return { name, ...readStatus({ kind: p.kind, ...obj }) }
@@ -422,6 +597,10 @@ export async function listRuns(k8s, { namespace = 'default' } = {}) {
   if (!p.available) return []
   const gv = p.apiVersion ?? (await apiVersionFor(k8s))
   const list = await k8s.raw('GET', pathFor(p.via, gv, namespace)).catch(() => ({ items: [] }))
+  if (p.via === 'batch') {
+    return foldBatch((list.items ?? []).filter((o) => o.metadata?.labels?.['app.kubernetes.io/managed-by'] === 'worldeditor'))
+      .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
+  }
   return (list.items ?? [])
     // `managed-by`, which is what the two builders above actually write. `created-by` was a
     // plausible guess that would have returned an empty list forever — a filter matching nothing
@@ -442,6 +621,11 @@ export async function deleteRun(name, k8s, { namespace = 'default' } = {}) {
   const p = await plan(k8s, { namespace })
   if (!p.available) throw Object.assign(new Error(p.why), { status: 501 })
   const gv = p.apiVersion ?? (await apiVersionFor(k8s))
+  if (p.via === 'batch') {
+    // a collection delete by label, since the pair has no owner to cascade from
+    await k8s.raw('DELETE', `${pathFor(p.via, gv, namespace)}?labelSelector=${encodeURIComponent(`corridor.run=${name}`)}&propagationPolicy=Background`)
+    return { deleted: name, via: 'batch' }
+  }
   await k8s.raw('DELETE', `${pathFor(p.via, gv, namespace, name)}?propagationPolicy=Background`)
   return { deleted: name }
 }

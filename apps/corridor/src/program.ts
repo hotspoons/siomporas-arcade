@@ -57,6 +57,15 @@ export const TRANSPORT = [
 ] as const
 export type Transport = (typeof TRANSPORT)[number]
 
+/**
+ * The ones `transport.ts` flies, as opposed to the ones the viewer already had.
+ *
+ * `drive` is the car, `fly` is the free camera and `parkour` is a game mode; the rest are craft
+ * with physics. Kept here so a program's `api.transport(...)` and the viewer's switch agree about
+ * which is which — a name in one list and not the other is a transport that silently does nothing.
+ */
+export const CRAFT_TRANSPORT = ['walk', 'walk-third', 'helicopter', 'omnicopter', 'ornithopter', 'plane', 'jet', 'ufo'] as const
+
 /** What the program layer needs from the app. Everything renderer-shaped lives behind this. */
 export interface ProgramHost {
   /** the simulation the program's entities live in */

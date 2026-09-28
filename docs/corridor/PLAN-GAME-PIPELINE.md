@@ -442,10 +442,10 @@ a named implementation a level selects**, not a branch inside the camera code.
 | `drive-sim` | later | a focused simulator; a second controller, not a knob on the first |
 | `fly` (free camera) | *exists* | authoring tool today, could be a mode |
 | `walk` | *exists*, thin | first person on foot, already used by the kids' games |
-| `walk-third` | **needed** | third person character — needs a rigged character and a follow camera |
-| `helicopter` / `omnicopter` / `ornithopter` | **needed** | collective + cyclic; the ornithopter is flap-driven lift |
-| `plane` / `jet` | **needed** | lift from airspeed; the jet differs in thrust and authority, not in kind |
-| `ufo` | **needed** | no aerodynamics at all — direct velocity control, which makes it the easiest |
+| `walk-third` | **built** | third person character, with a follow camera. Still drawn as the camera, not a rigged figure |
+| `helicopter` / `omnicopter` / `ornithopter` | **built** | thrust along the mast, so it goes where it is pointed; the ornithopter's lift arrives in beats |
+| `plane` / `jet` | **built** | lift from v² × angle of attack, and it stalls; the jet differs in thrust, authority and stall speed |
+| `ufo` | **built** | no inertia and no gravity — the velocity IS the input |
 
 They share one interface — sample input, integrate, produce a transform and a camera pose — so
 the level says `transport: 'helicopter'` and nothing else changes. The engine audio already works
@@ -453,7 +453,36 @@ this way: whatever holds an `Engine` component gets voiced, and the spatial laye
 what is carrying it.
 
 `walk-third` is the one with a dependency outside this list: it needs a rigged character, which is
-what the Blender-in-the-image work is for.
+what the Blender-in-the-image work is for. It ships with the follow camera and the character
+physics and no figure in front of them.
+
+### Built, 2026-09-28
+
+`src/transport.ts` is the physics and holds no THREE, no camera and no input, so a flight model is
+something a test can fly: 42 of them, each asking for a behaviour rather than an equation — can it
+hold a hover, does it fall below its stall speed, does a bank turn it, does it stop when you let
+go. `src/transportcam.ts` is the thin part that reads the keys and moves the camera. V cycles the
+library; a program says `api.transport('helicopter')`, and `CRAFT_TRANSPORT` in program.ts is
+asserted against the library's own list so a name cannot exist in one and not the other.
+
+The numbers are real ones where a real one exists — an R22 is 620 kg and about 7.5 kN of rotor
+thrust, an F-16 12 000 kg and 76 kN dry — because a helicopter that weighs 1 and thrusts 2 flies
+like nothing and there is no way to tell whether it is right.
+
+Four findings, and each was a sign or a term rather than a design:
+
+- **`up` was pointing at the ground.** `fwd × right` instead of `right × fwd`. It does not look
+  like a sign error: the helicopter still flies, downwards, and the angle of attack comes out
+  negated, so a wing makes lift exactly when it should stall.
+- **A wing turns by banking**, at `g·tan(bank)/v`, which is why a fast aircraft turns lazily and a
+  slow one pivots. With the rudder at 0.3 of its yaw rate it out-turned the bank over eight
+  seconds, which makes an aeroplane a car that can climb. It is trim, at 0.1.
+- **Stalled is not only slow.** A wing past its critical angle has stopped working however fast the
+  air is going — that is what a spin is. Testing airspeed alone had an aircraft hanging on its tail
+  and dropping at 36 m/s reporting itself as flying normally with no lift: the same state described
+  two contradictory ways.
+- **A walker eased onto the floor asymptotically** and therefore settled a centimetre underground
+  for ever. Ground that comes up is a step: snap. Ground that falls away is a kerb: ease.
 
 ---
 

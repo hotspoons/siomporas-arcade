@@ -13,6 +13,8 @@ import { SiteSearch } from './search'
 /** 16-point compass, indexed by bearing/22.5 — N at 0, clockwise through E. */
 const COMPASS = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW']
 import { FlyControls } from './fly'
+import { TransportControls } from './transportcam'
+import { CRAFT, CRAFT_KINDS, type CraftKind } from './transport'
 import { MiniMap, siteProjector } from './minimap'
 import { Sky } from './sky'
 import { Stars } from './stars'
@@ -259,6 +261,16 @@ const actors = new ActorWorld()
 const engineSound = new EngineSound()
 let playerEngine = 0
 let fly: FlyControls | null = null
+
+/**
+ * The transport library: a helicopter, a plane, a jet, a UFO, a character in third person.
+ *
+ * Separate from `fly`, which is the free camera you look at a bake with and is not a vehicle. This
+ * one is a craft with physics, and a program says which (`api.transport('helicopter')`). Null
+ * until something asks for one — every session that never leaves the free camera pays nothing.
+ */
+let transport: TransportControls | null = null
+let craft: CraftKind | null = null
 // the games ride on the viewer: ?game=squishy starts one when the site lands, G toggles it
 let game: SquishyHunt | null = null
 let parkour: Parkour | null = null
@@ -447,6 +459,18 @@ async function loadSite(slug: string) {
      * `presets` is the library itself — list, snapshot, put, remove, export — and `preset` is the
      * one call a story tells it to make.
      */
+    /**
+     * The transport library: `__apex.craft('helicopter')`, or null for the free camera.
+     *
+     * The same call the program layer's `api.transport(...)` makes, so what a level does and what
+     * a probe does go through one path — two ways into a mode is how they end up disagreeing about
+     * whether the free camera is enabled.
+     */
+    craft: (kind: CraftKind | null) => {
+      setCraft(kind)
+      return transport?.readout() ?? null
+    },
+    get transport() { return transport },
     get presets() { return presets },
     preset: (target: string | Record<string, number>, opts?: { over?: number; ease?: 'linear' | 'in' | 'out' | 'inOut'; done?: () => void }) => {
       if (!presets) return null
@@ -577,6 +601,7 @@ async function loadSite(slug: string) {
   applyLayers()
   fillInfo(manifest)
   fly ??= new FlyControls(camera, orbit, canvas, (x, z) => site?.groundAt(x, z) ?? null)
+  transport ??= new TransportControls(camera, orbit, canvas, (x, z) => site?.groundAt(x, z) ?? null)
   game?.dispose()
   game = null
   endParkour()
@@ -827,6 +852,42 @@ function endParkour() {
   parkour = null
   if (fly) fly.enabled = !drive.on
 }
+/**
+ * Get into, or out of, one of the craft in the transport library.
+ *
+ * `null` puts you back in the free camera. It takes over from driving and from the free camera
+ * rather than sitting beside them, because they all move the same one camera and two things
+ * writing it is a camera that vibrates.
+ */
+function setCraft(kind: CraftKind | null) {
+  if (!transport) return
+  if (kind) {
+    if (drive.on) setDrive(false)
+    if (parkour) endParkour()
+    transport.take(kind)
+    transport.enabled = true
+    if (fly) fly.enabled = false
+    orbit.enabled = false
+    toast(`${CRAFT[kind].name}: ${CRAFT[kind].note}`, 'info', 5000)
+  } else {
+    transport.enabled = false
+    if (fly) fly.enabled = !drive.on
+    orbit.enabled = !drive.on
+    if (craft) toast('back to the free camera', 'info', 1500)
+  }
+  craft = kind
+}
+
+/** V cycles through the library, which is how you find out what is in it. */
+function cycleCraft(back = false) {
+  // 'walk' is left out: the free camera already has a first-person walk on B, and two first-person
+  // walkers on two keys is the kind of duplication the editor's once-over was about
+  const kinds: CraftKind[] = CRAFT_KINDS.filter((k) => k !== 'walk')
+  const i = craft ? kinds.indexOf(craft) : -1
+  const next = back ? i - 1 : i + 1
+  setCraft(next < 0 || next >= kinds.length ? null : kinds[next])
+}
+
 function setWalk(on: boolean) {
   if (!fly) return
   fly.setWalk(on)
@@ -1441,7 +1502,11 @@ addEventListener('keydown', (e) => {
     case 'KeyN': minimap?.setExpanded(!minimap.expanded); break
     case 'KeyB': if (!drive.on && fly) setWalk(!fly.walk); break
     case 'KeyG': if (game) { game.dispose(); game = null; toast('hunt over', 'info', 1200) } else startSquishy(); break
-    case 'KeyP': if (parkour) { endParkour(); toast('parkour over', 'info', 1200) } else startParkour(); break
+    // KeyP IS TAKEN by the photo stance six lines up, and a `switch` runs the first matching case
+    // — so this was dead from the day it was written and parkour could not be started from the
+    // keyboard at all. K, which nothing else uses.
+    case 'KeyK': if (parkour) { endParkour(); toast('parkour over', 'info', 1200) } else startParkour(); break
+    case 'KeyV': cycleCraft(e.shiftKey); break
     // R backs you out the way you came (stuntin's recover); Shift+R is the old teleport to the
     // photo station, kept for getting back to the start of the corridor
     case 'KeyR':
@@ -1686,6 +1751,10 @@ function frame() {
   } else if (parkour) {
     parkour.tick(dt)
     ui.setPos(`${parkour.score} pts`)
+  } else if (craft && transport) {
+    transport.update(dt)
+    const r = transport.readout()
+    ui.setPos(`${r.craft} · ${(r.speed * 2.237).toFixed(0)} mph · ${r.altitude.toFixed(0)} m${r.stalled ? ' · STALLED' : ''}${r.grounded ? ' · on the ground' : ''}`)
   } else {
     fly?.update(dt)
     applyMove(dt)

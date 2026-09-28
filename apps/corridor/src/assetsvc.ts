@@ -133,6 +133,19 @@ export const assetsvc = {
    * a material is three maps and `metres_per_tile`, which is what turns a photograph of bricks
    * into a wall of the right size — and is the field a generated texture gets wrong. */
   materials: () => call<{ materials: Material[] }>('/materials'),
+  /** Upload one map. One file per request, so a failed upload loses a map rather than a material. */
+  putMaterialFile: async (id: string, name: string, file: Blob): Promise<{ bytes: number }> => {
+    const r = await fetch(`${ASSETSVC}/materials/${encodeURIComponent(id)}/file/${encodeURIComponent(name)}`, {
+      method: 'PUT', body: file,
+    })
+    const body = await r.json().catch(() => ({}))
+    if (!r.ok) throw new Error(body.error ?? `HTTP ${r.status}`)
+    return body
+  },
+  putMaterial: (id: string, patch: Partial<Material>) =>
+    call<{ material: Material }>(`/materials/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(patch) }),
+  deleteMaterial: (id: string) =>
+    call<{ deleted: string }>(`/materials/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   materialUrl: (id: string, rel: string) =>
     `${ASSETSVC}/materials/${encodeURIComponent(id)}/file/${rel.split('/').pop()!.split('/').map(encodeURIComponent).join('/')}`,
 

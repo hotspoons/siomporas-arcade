@@ -21,7 +21,7 @@
 // Configuration is environment; see models.example.json and README.md.
 
 import http from 'node:http'
-import { readFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -88,7 +88,14 @@ const readJson = async (req) => {
   return b.length ? JSON.parse(b.toString('utf8')) : {}
 }
 
-const TYPES = { '.png': 'image/png', '.glb': 'model/gltf-binary', '.json': 'application/json', '.webp': 'image/webp' }
+// `.jpg` WAS MISSING and every albedo in the library is one — they were served as
+// application/octet-stream, which a browser will still decode as an <img> but which defeats
+// caching heuristics and is simply wrong.
+const TYPES = {
+  '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp',
+  '.ktx2': 'image/ktx2', '.glb': 'model/gltf-binary', '.gltf': 'model/gltf+json',
+  '.json': 'application/json',
+}
 
 /* ---- the work ------------------------------------------------------------------------------- */
 
@@ -310,6 +317,61 @@ const server = http.createServer(async (req, res) => {
         const doc = JSON.parse(raw)
         return json(res, 200, { materials: doc.materials ?? doc })
       }
+      /*
+       * UPLOAD AND MANAGE. Rich, 2026-09-28: "there is a pain free way to upload and manage these
+       * textures."
+       *
+       * Raw bytes to a named file, and a JSON record beside it — the same two-part shape the
+       * baked-world import uses, and for the same reason: a dependency-free server parsing
+       * multipart is a lot of code to get subtly wrong, and the client already knows how to PUT a
+       * Blob. One file per request means a failed upload loses one map rather than a material.
+       */
+      if (seg.length >= 4 && seg[2] === 'file' && req.method === 'PUT') {
+        const id = seg[1]
+        if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(id)) return json(res, 400, { error: `bad material id ${JSON.stringify(id)}` })
+        const name = seg.slice(3).map(decodeURIComponent).join('/')
+        if (!/^[a-z0-9][a-z0-9_.-]{0,63}$/i.test(name) || name.includes('..')) {
+          return json(res, 400, { error: `bad file name ${JSON.stringify(name)}` })
+        }
+        const ext = path.extname(name).toLowerCase()
+        if (!['.jpg', '.jpeg', '.png', '.webp', '.ktx2'].includes(ext)) {
+          return json(res, 400, { error: `${ext || 'no extension'} is not a texture — jpg, png, webp or ktx2` })
+        }
+        const buf = await body(req, 64 * 2 ** 20)
+        await mkdir(path.join(dir, id), { recursive: true })
+        await writeFile(path.join(dir, id, name), buf)
+        return json(res, 200, { id, file: name, bytes: buf.length })
+      }
+
+      // PUT /materials/<id> — the record. Merged, so uploading a normal map later keeps the rest.
+      if (seg.length === 2 && req.method === 'PUT') {
+        const id = seg[1]
+        if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(id)) return json(res, 400, { error: `bad material id ${JSON.stringify(id)}` })
+        const patch = await readJson(req)
+        const f = path.join(dir, 'materials.json')
+        const doc = JSON.parse(await readFile(f, 'utf8').catch(() => '{"materials":[]}'))
+        const list = doc.materials ?? []
+        const at = list.findIndex((m) => m.id === id)
+        const next = { ...(at >= 0 ? list[at] : {}), ...patch, id }
+        if (!(next.metres_per_tile > 0)) return json(res, 400, { error: 'metres_per_tile must be a positive number — it is what makes the texture the right size' })
+        if (at >= 0) list[at] = next
+        else list.push(next)
+        list.sort((a, b) => ((a.category ?? '') + a.id < (b.category ?? '') + b.id ? -1 : 1))
+        await mkdir(dir, { recursive: true })
+        await writeFile(f, JSON.stringify({ materials: list }, null, 1))
+        return json(res, 200, { material: next })
+      }
+
+      if (seg.length === 2 && req.method === 'DELETE') {
+        const id = seg[1]
+        const f = path.join(dir, 'materials.json')
+        const doc = JSON.parse(await readFile(f, 'utf8').catch(() => '{"materials":[]}'))
+        const list = (doc.materials ?? []).filter((m) => m.id !== id)
+        await writeFile(f, JSON.stringify({ materials: list }, null, 1))
+        // the files stay: a record removed by accident is one PUT away, a directory is not
+        return json(res, 200, { deleted: id, filesKept: true })
+      }
+
       // /materials/<id>/file/<name>
       if (seg.length >= 4 && seg[2] === 'file') {
         const id = seg[1]

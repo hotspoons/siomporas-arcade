@@ -449,8 +449,76 @@ export class AssetCatalog {
       browser.append(g)
     }
 
-    host.append(stage, browser)
+    host.append(stage, this.materialUpload(host), browser)
     show(list[0])
+  }
+
+  /**
+   * Add a texture: the three maps, an id, what it is, and how big a tile is.
+   *
+   * `metres_per_tile` IS THE REQUIRED FIELD and the form says so, because it is the one a person
+   * uploading a photograph of bricks has no habit of thinking about — and getting it wrong
+   * produces a texture that looks perfect in isolation and absurd on a building. Albedo is the
+   * only required map: normal and roughness are improvements, and refusing an upload without
+   * them would mean a library that cannot hold what people actually have.
+   */
+  private materialUpload(host: HTMLElement): HTMLElement {
+    const g = group('Add a texture', { collapsed: true })
+    const b = bodyOf(g)
+    const draft = { id: '', category: 'wall_house', metres_per_tile: 2 }
+    const files: Record<string, File | null> = { albedo: null, normal: null, roughness: null }
+
+    b.append(
+      textField({ label: 'id', value: '', placeholder: 'brick_red_common', onChange: (v) => { draft.id = v.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '_') } }),
+      textField({ label: 'category', value: draft.category, placeholder: 'wall_house, road, ground_cover…', onChange: (v) => { draft.category = v.trim() || 'other' } }),
+      textField({ label: 'metres per tile', value: String(draft.metres_per_tile), type: 'number', step: 0.1, onChange: (v) => { draft.metres_per_tile = Number(v) } }),
+    )
+    for (const map of ['albedo', 'normal', 'roughness'] as const) {
+      const row = el('label', 'field text')
+      row.append(el('span', 'field-label', map + (map === 'albedo' ? '' : ' (optional)')))
+      const input = el('input', 'input wide')
+      input.type = 'file'
+      input.accept = 'image/png,image/jpeg,image/webp'
+      input.onchange = () => { files[map] = input.files?.[0] ?? null }
+      row.append(input)
+      b.append(row)
+    }
+
+    const status = readout('upload', 'idle')
+    const set = (t: string) => { status.querySelector('.field-value')!.textContent = t }
+    b.append(
+      rowOf(button({
+        label: 'Add it',
+        icon: 'plus',
+        variant: 'primary',
+        onClick: async () => {
+          if (!draft.id) return toast('give it an id first', 'warn')
+          if (!files.albedo) return toast('an albedo map is required', 'warn')
+          if (!(draft.metres_per_tile > 0)) return toast('metres per tile must be more than zero', 'warn')
+          try {
+            const record: Record<string, unknown> = { category: draft.category, name: draft.id.replace(/_/g, ' '), metres_per_tile: draft.metres_per_tile }
+            for (const map of ['albedo', 'normal', 'roughness'] as const) {
+              const f = files[map]
+              if (!f) continue
+              set(`${map}…`)
+              const name = `${map}${(f.name.match(/\.[a-z0-9]+$/i) ?? ['.jpg'])[0]}`.toLowerCase()
+              await assetsvc.putMaterialFile(draft.id, name, f)
+              record[map] = name
+            }
+            set('record…')
+            await assetsvc.putMaterial(draft.id, record)
+            toast(`${draft.id} added`, 'ok')
+            void this.buildMaterials(host)
+          } catch (e) {
+            toast(`upload failed: ${(e as Error).message}`, 'danger', 8000)
+          } finally {
+            set('idle')
+          }
+        },
+      })),
+      status,
+    )
+    return g
   }
 
   private async create() {

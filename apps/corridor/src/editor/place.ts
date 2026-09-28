@@ -8,6 +8,7 @@
 // Height is NOT authored by default: `z: null` means "the viewer resolves it from site.groundAt",
 // so a re-bake with a better DEM moves the diner with the hillside instead of burying it.
 import * as THREE from 'three'
+import { TransformControls } from 'three/addons/controls/TransformControls.js'
 import { instanceOf, loadCatalog, tintOf, type Catalog, type CatalogEntry } from './catalog'
 import { frameMismatch, frameOf, isGenerated, loadPlacements, nextId, savePlacements, type Placement, type Placements } from './schema'
 import { yawFacingRoad } from './corridor'
@@ -37,6 +38,21 @@ export class PlaceMode {
   /** set when the file's coordinates were authored in a different frame from the bake's */
   frameWarning: string | null = null
   private grabbed: string | null = null
+  /**
+   * The move/rotate handles on the selected object.
+   *
+   * Rich, 2026-09-28: "We can't move or rotate the item after we place it, we need handles so we
+   * can do this." You could, in fact — press and drag moved it, Q and E spun it — but neither of
+   * those is visible, and an editor whose capabilities are only discoverable by trying things is
+   * an editor that does not have them.
+   *
+   * Created lazily in `attach`, because it needs the camera and the canvas and this class is
+   * constructed before either exists.
+   */
+  private gizmo: TransformControls | null = null
+  private gizmoMode: 'translate' | 'rotate' = 'translate'
+  /** set while a handle is being dragged, so the ordinary pointer handling keeps out of the way */
+  dragging = false
   /** `false` = only a value changed; the panel must not be rebuilt under the pointer. */
   private onChange: (structural?: boolean) => void
 
@@ -141,7 +157,87 @@ export class PlaceMode {
   select(id: string | null) {
     this.selected = id
     this.markSelected()
+    this.attachGizmo()
     this.onChange()
+  }
+
+  /**
+   * Give the editor a camera and a canvas, so the handles can exist.
+   *
+   * `onOrbit(false)` has to turn the camera controls off while a handle is being dragged, or the
+   * same pointer both drags the object and orbits the world, and the object runs away.
+   */
+  useGizmo(camera: THREE.Camera, dom: HTMLElement, onOrbit: (enabled: boolean) => void): void {
+    if (this.gizmo) return
+    const g = new TransformControls(camera, dom)
+    g.setSpace('world')
+    // METRES AND DEGREES THAT A PERSON CHOSE. Free dragging gives 4.37 m and 22.6°, which is how
+    // a row of fence posts ends up nearly aligned. Hold shift for the fine version.
+    g.setTranslationSnap(0.5)
+    g.setRotationSnap(THREE.MathUtils.degToRad(5))
+    g.addEventListener('dragging-changed', (e) => {
+      this.dragging = !!(e as unknown as { value: boolean }).value
+      onOrbit(!this.dragging)
+      // the panel is rebuilt only when the drag ENDS: doing it per frame tears the field you are
+      // dragging out from under the pointer
+      if (!this.dragging) this.onChange()
+    })
+    g.addEventListener('objectChange', () => this.readGizmo())
+    this.gizmo = g
+    const helper = g.getHelper()
+    helper.name = 'place-gizmo'
+    this.group.add(helper)
+    this.attachGizmo()
+  }
+
+  /** Which handles, if any, are on screen. */
+  private attachGizmo(): void {
+    const g = this.gizmo
+    if (!g) return
+    const o = this.selected ? this.objects.get(this.selected) : null
+    if (!o) { g.detach(); return }
+    g.setMode(this.gizmoMode)
+    // ROTATION IS YAW ONLY. A building tilted off the vertical is never what somebody meant, and
+    // the document has one angle in it — pitch and roll would be edits with nowhere to be saved.
+    g.showX = this.gizmoMode === 'translate'
+    g.showZ = this.gizmoMode === 'translate'
+    g.showY = this.gizmoMode === 'rotate'
+    g.attach(o)
+  }
+
+  setGizmoMode(mode: 'translate' | 'rotate'): void {
+    this.gizmoMode = mode
+    this.attachGizmo()
+    this.onChange()
+  }
+
+  get gizmoModeNow(): 'translate' | 'rotate' {
+    return this.gizmoMode
+  }
+
+  /**
+   * The handle moved the OBJECT; write that back to the document.
+   *
+   * The object is the thing three is dragging, so it is the truth for this instant — and the
+   * placement is the truth that gets saved. Converting back uses the same conventions `place()`
+   * uses in the other direction: y is −z, and the compass bearing is the negative of the rotation.
+   */
+  private readGizmo(): void {
+    const id = this.selected
+    const o = id ? this.objects.get(id) : null
+    const p = this.doc.items.find((x) => x.id === id)
+    if (!o || !p) return
+    p.x = Math.round(o.position.x * 10) / 10
+    p.y = Math.round(-o.position.z * 10) / 10
+    const offset = this.entry(p.asset)?.yaw_offset_deg ?? 0
+    p.yaw_deg = Math.round((((-o.rotation.y * 180) / Math.PI - offset) % 360 + 360) % 360)
+    // snapped to the ground as it moves, unless somebody asked for a height
+    if (p.snap !== 'free') p.z = null
+    o.position.set(p.x, this.zOf(p), -p.y)
+    if (isGenerated(p)) p.locked = true
+    this.dirty = true
+    this.markSelected()
+    this.onChange(false)
   }
 
   /**
@@ -221,6 +317,7 @@ export class PlaceMode {
 
   // --- input -------------------------------------------------------------------------------------
   click(pt: { x: number; y: number } | null) {
+    if (this.dragging) return
     if (!pt) return this.select(null)
     if (this.armed) return void this.add(this.armed, pt.x, pt.y)
     this.select(null)
@@ -228,8 +325,10 @@ export class PlaceMode {
 
   /** Press on an object to select and drag it in one gesture, the way every level editor does. */
   grab(ray: THREE.Raycaster): boolean {
-    if (this.armed) return false
+    // a press that started on a handle belongs to the handle
+    if (this.armed || this.dragging) return false
     const hit = ray.intersectObjects([...this.objects.values()], true)[0]
+    if (hit?.object.userData.isGizmo) return false
     const id = hit?.object.userData.placeId as string | undefined
     if (!id) return false
     if (id !== this.selected) this.select(id)
@@ -275,6 +374,8 @@ export class PlaceMode {
       case '[': zoom(1 / 1.1); return true
       case ']': zoom(1.1); return true
       case 'Delete': case 'Backspace': this.remove(this.selected); return true
+      case 'g': case 'G': this.setGizmoMode('translate'); return true
+      case 'r': case 'R': this.setGizmoMode('rotate'); return true
       case 'Escape': this.arm(null); this.select(null); return true
     }
     return false
@@ -332,6 +433,22 @@ export class PlaceMode {
     if (!p) return
     const det = el('div', 'detail')
     det.append(el('h2', '', `${p.id} · ${this.entry(p.asset)?.name ?? p.asset}`))
+    /*
+     * THE HANDLES, AND WHICH ONES.
+     *
+     * Dragging and Q/E have always worked and nothing on screen said so. Two buttons that say
+     * which handles are showing is the whole fix — the numbers below stay, because a person
+     * placing a row of posts wants to type 12 rather than nudge towards it.
+     */
+    const handles = el('div', 'row')
+    for (const [mode, label, key] of [['translate', 'move', 'G'], ['rotate', 'rotate', 'R']] as const) {
+      const btn = el('button', this.gizmoModeNow === mode ? 'on' : '')
+      btn.textContent = `${label} (${key})`
+      btn.onclick = () => this.setGizmoMode(mode)
+      handles.append(btn)
+    }
+    handles.append(el('span', 'dim', 'drag the handles; hold shift for fine'))
+    det.append(handles)
     det.append(this.num('x (m east)', p.x, 0.5, (v) => this.mutate((q) => (q.x = v))))
     det.append(this.num('y (m north)', p.y, 0.5, (v) => this.mutate((q) => (q.y = v))))
     det.append(this.num('yaw°  (Q/E, shift+wheel)', p.yaw_deg, 1, (v) => this.mutate((q) => (q.yaw_deg = v))))

@@ -96,6 +96,8 @@ let season: Season = 'summer'
 // Every group an editing mode puts in the scene is marked, so the preview can stand all of them
 // down without knowing which modes exist. A new mode marks its group and needs no other change.
 scene.add(markOverlay(areas.group), markOverlay(place.group))
+// the move/rotate handles, now that there is a camera and a canvas to hang them on
+place.useGizmo(camera, canvas, (on) => { orbit.enabled = on })
 scene.add(markOverlay(structs.group))
 // road cross-section preview: its own floating panel and its own overlay group, so it survives the
 // panel rebuilds in refresh() and touches nothing else here (road-and-car agent)

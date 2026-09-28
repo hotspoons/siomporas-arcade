@@ -27,7 +27,26 @@ import { SplatsPanel } from './splats'
 import { worldMenuTransfer } from './transfer'
 import { dockWidth } from '../ui/dockwidth'
 
-type Mode = 'explore' | 'index' | 'define' | 'bake' | 'stage' | 'assets' | 'splats'
+type Mode = 'explore' | 'index' | 'define' | 'bake' | 'place' | 'stage' | 'assets' | 'splats'
+
+/*
+ * THE SITE EDITOR IS A MODE, not another page.
+ *
+ * It used to be a link that opened a new tab (Rich, 2026-09-27: "why are we just linking to a
+ * place editor — I thought the world editor was the place editor ... it isn't dumping you into
+ * new tabs, very amateurish"). It is loaded on first use rather than up front, because it brings
+ * three.js and the whole scene builder with it and most sessions here never open it.
+ */
+type SiteEditor = typeof import('../editor/main')
+let siteEditor: SiteEditor | null = null
+let siteEditorLoading: Promise<SiteEditor> | null = null
+
+async function siteEditorFor(slug: string): Promise<SiteEditor> {
+  siteEditorLoading ??= import('../editor/main')
+  siteEditor = await siteEditorLoading
+  await siteEditor.openSite(slug)
+  return siteEditor
+}
 
 const canvas = document.getElementById('map') as HTMLCanvasElement
 const inspector = document.getElementById('panel') as HTMLElement
@@ -322,9 +341,10 @@ function buildBar() {
         { value: 'index', label: 'Index', icon: 'map-pin', key: '2' },
         { value: 'define', label: 'Define', icon: 'pencil-square', key: '3' },
         { value: 'bake', label: 'Bake', icon: 'play', key: '4' },
-        { value: 'stage', label: 'Stage', icon: 'flag', key: '5' },
-        { value: 'assets', label: 'Assets', icon: 'cube', key: '6' },
-        { value: 'splats', label: 'Splats', icon: 'camera', key: '7' },
+        { value: 'place', label: 'Place', icon: 'pencil-square', key: '5' },
+        { value: 'stage', label: 'Stage', icon: 'flag', key: '6' },
+        { value: 'assets', label: 'Assets', icon: 'cube', key: '7' },
+        { value: 'splats', label: 'Splats', icon: 'camera', key: '8' },
       ],
       onChange: (m) => setMode(m),
     }),
@@ -552,8 +572,10 @@ function buildDrawer() {
   drawer.item(nav, { id: 'new', label: 'New world', icon: 'plus', hint: 'draw a boundary on the map', key: 'N', onClick: () => newWorld() })
   drawer.item(nav, { id: 'assets', label: 'Assets', icon: 'sparkles', hint: 'describe a prop and generate it', onClick: () => void assets.open() })
   drawer.item(nav, { id: 'place', label: 'Place assets', icon: 'cube', hint: 'make a finished mesh placeable', onClick: () => void adopt.open() })
-  drawer.item(nav, { id: 'viewer', label: 'Viewer', icon: 'globe-alt', hint: 'drive a baked world', onClick: () => window.open(selected ? `/index.html?site=${selected}` : '/index.html', '_blank') })
-  drawer.item(nav, { id: 'editor', label: 'Site editor', icon: 'pencil-square', hint: 'areas, placements, structures', onClick: () => window.open(selected ? `/editor.html?site=${selected}` : '/editor.html', '_blank') })
+  // NO NEW TABS. The site editor is the Place mode above; the viewer is the one thing that is
+  // genuinely a different application — you drive it — and it navigates in place, carrying the
+  // world, so the browser's own back button returns you here.
+  drawer.item(nav, { id: 'viewer', label: 'Drive it', icon: 'globe-alt', hint: 'open the baked world in the viewer', onClick: () => { location.href = selected ? `/index.html?site=${selected}` : '/index.html' } })
 
   const look = drawer.section('Appearance')
   drawer.custom(
@@ -586,10 +608,38 @@ function renderWorldSelect() {
   b.append(icon('map-pin', 15))
   const t = el('span', 'site-text')
   t.append(el('span', 'site-name', w?.slug ?? 'no world'))
-  t.append(el('span', 'site-meta', w ? `${w.radius_m.toLocaleString()} m · ${w.baked ? 'baked' : 'not baked'}` : `${worlds.length} defined`))
+  // `radius_m` IS OPTIONAL HERE. A world the store materialised from a bake it found on the
+  // volume has a slug and a bake and need not have a definition at all, so this threw the moment
+  // one of those was picked — and the picker is the first thing anyone touches.
+  t.append(el('span', 'site-meta', w
+    ? `${Number.isFinite(w.radius_m) ? `${w.radius_m.toLocaleString()} m · ` : ''}${w.baked ? 'baked' : 'not baked'}`
+    : `${worlds.length} defined`))
   b.append(t, icon('chevron-down', 14))
   b.onclick = () => openWorldMenu(b)
   worldSel.append(b)
+}
+
+/**
+ * Point the whole page at a world: the map, the panel, and whichever mode is showing.
+ *
+ * One function, called by the picker and by `__we.select`, because "choose a world" now means
+ * four things at once — fly the map there, draw its extent, re-render the panel, and tell the
+ * Place mode to load that bake. Two code paths for that is how the picker and the 3D scene end up
+ * looking at different places.
+ */
+function selectWorld(slug: string) {
+  const w = worlds.find((x) => x.slug === slug)
+  if (!w) return
+  selected = slug
+  renderWorldSelect()
+  if (Number.isFinite(w.lat)) {
+    map.flyTo({ lat: w.lat, lon: w.lon }, zoomFor(w.radius_m))
+    map.extent = { centre: { lat: w.lat, lon: w.lon }, radius_m: w.radius_m }
+  } else {
+    map.extent = null
+  }
+  map.draw()
+  renderPanel()
 }
 
 function openWorldMenu(anchor: HTMLElement) {
@@ -599,13 +649,8 @@ function openWorldMenu(anchor: HTMLElement) {
     const row = el('button', `world-row${w.slug === selected ? ' on' : ''}`)
     row.append(icon(w.baked ? 'check' : 'clock', 13), el('span', 'world-slug', w.slug), el('span', 'world-meta', `${w.radius_m?.toLocaleString() ?? '?'} m`))
     row.onclick = () => {
-      selected = w.slug
       menu.remove()
-      renderWorldSelect()
-      if (Number.isFinite(w.lat)) map.flyTo({ lat: w.lat, lon: w.lon }, zoomFor(w.radius_m))
-      map.extent = Number.isFinite(w.lat) ? { centre: { lat: w.lat, lon: w.lon }, radius_m: w.radius_m } : null
-      map.draw()
-      renderPanel()
+      selectWorld(w.slug)
     }
     menu.append(row)
   }
@@ -637,15 +682,53 @@ function setMode(m: Mode) {
   if (mode === 'bake') runsPanel.stop()
   if (mode === 'assets') assetsPanel.stop() // a poll for a draw that nobody is watching
   // NOT splatsPanel.stop(): leaving the tab must not abort a forty-gigabyte upload
+  if (mode === 'place' && m !== 'place') siteEditor?.setActive(false)
   mode = m
   for (const b of bar.querySelectorAll<HTMLButtonElement>('.seg')) b.classList.toggle('on', b.dataset.value === m)
+  showSiteEditor(m === 'place')
   // Define puts the map in draw mode; the panel switches it to `pick` itself when the world is a
   // named-roads one, because then clicking is choosing a road rather than dropping a vertex.
   map.mode = m === 'define' ? 'draw' : 'pan'
   renderPanel()
 }
 
+/** Swap the 3D scene and its chrome in and out. The map keeps its own canvas either way. */
+function showSiteEditor(on: boolean) {
+  const gl = document.querySelector<HTMLCanvasElement>('#gl')
+  const mapCanvas = document.querySelector<HTMLCanvasElement>('#map')
+  if (gl) gl.hidden = !on
+  if (mapCanvas) mapCanvas.hidden = on
+  for (const id of ['se-rail', 'se-inspector', 'se-actions']) {
+    const n = document.getElementById(id)
+    if (n) n.hidden = !on
+  }
+  const panel = document.getElementById('panel')
+  if (panel) panel.hidden = on
+  const title = document.getElementById('panel-title')
+  if (title) title.textContent = on ? 'Place' : 'World'
+  const readout = document.getElementById('readout')
+  if (readout) readout.hidden = on
+}
+
 function renderPanel() {
+  if (mode === 'place') {
+    // Needs a BAKED world: there is nothing to stand on otherwise.
+    const w = worlds.find((x) => x.slug === selected)
+    if (!w?.baked) {
+      showSiteEditor(false)
+      inspector.replaceChildren()
+      inspector.append(empty(selected ? `${selected} is not baked yet.` : 'No world selected.'))
+      if (selected) inspector.append(empty('Bake it first — Place edits what the bake produced.'))
+      return
+    }
+    void siteEditorFor(w.slug)
+      .then((se) => se.setActive(true))
+      .catch((e) => {
+        showSiteEditor(false)
+        toast(`place editor: ${(e as Error).message}`, 'danger', 8000)
+      })
+    return
+  }
   if (mode === 'stage') {
     void stagePanel.load()
   } else if (mode === 'assets') {
@@ -881,6 +964,7 @@ declare global {
       setMode: (m: Mode) => void
       worlds: () => World[]
       selected: () => string | null
+      select: (slug: string) => void
       config: () => Config | null
       refreshWorlds: () => Promise<void>
       /** The layer stack's state. A probe that cannot see this can only see symptoms. */
@@ -909,6 +993,8 @@ window.__we = {
   setMode,
   worlds: () => worlds,
   selected: () => selected,
+  /** point the page at a world, exactly as clicking it in the picker does */
+  select: selectWorld,
   config: () => config,
   refreshWorlds,
   roads: () => ({

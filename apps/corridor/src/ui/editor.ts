@@ -97,12 +97,35 @@ export interface EditorUIOpts {
   onAssets: () => void
 }
 
+/**
+ * Where this editor's chrome goes.
+ *
+ * ABSORBED, NOT LINKED. The site editor used to be its own page, reached by opening a new tab
+ * (Rich, 2026-09-27: "why are we just linking to a place editor — I thought the world editor was
+ * the place editor ... it isn't dumping you into new tabs, very amateurish"). It is now a mode of
+ * the world editor, which means it can no longer own the top bar, the drawer or the inspector —
+ * the host page has those, along with the world picker that used to be duplicated here as a site
+ * picker.
+ *
+ * So: given mount points, this builds no chrome of its own and puts its mode rail, its panels and
+ * its buttons where it is told. Given none, it behaves exactly as it always did, which is what
+ * keeps editor.html working as a page in its own right.
+ */
+export interface EditorMounts {
+  /** where the areas/place/structures/grow rail goes */
+  rail: HTMLElement
+  /** where the per-mode panels render */
+  inspector: HTMLElement
+  /** where Save / Preview / Settings go */
+  actions: HTMLElement
+}
+
 export class EditorUI {
   bar = el('header', 'topbar')
   drawer = new Drawer('corridor editor', 'areas, placements, structures')
   settings: Dialog
-  /** where the per-mode panels render — the old `#body` */
-  inspector = el('div', 'inspector-body')
+  /** where the per-mode panels render — the old `#body`, or the host's when embedded */
+  inspector: HTMLElement = el('div', 'inspector-body')
   /** the mode rail, so roadwidth.ts can mount its control beside the modes as it did before */
   modeHost = el('div', 'mode-host')
 
@@ -115,9 +138,13 @@ export class EditorUI {
   private current = ''
   private mode: Mode = 'areas'
   private o: EditorUIOpts
+  /** null when this owns the page, set when it is a panel inside another one */
+  readonly mounts: EditorMounts | null
 
-  constructor(o: EditorUIOpts) {
+  constructor(o: EditorUIOpts, mounts: EditorMounts | null = null) {
     this.o = o
+    this.mounts = mounts
+    if (mounts) this.inspector = mounts.inspector
     for (const g of EDITOR_LAYERS) for (const l of g.layers) this.layerState[l.id] = l.on
 
     const hamburger = button({ icon: 'bars-3', variant: 'ghost', title: 'menu', onClick: () => this.drawer.toggle() })
@@ -133,24 +160,35 @@ export class EditorUI {
     this.modeHost.append(rail)
 
     this.saveBtn = button({ label: 'Save', icon: 'document-arrow-down', key: 'Ctrl S', onClick: () => this.o.onSave() })
-    this.bar.append(
-      hamburger,
-      this.siteSel,
-      this.modeHost,
-      el('div', 'topbar-spacer'),
-      this.dirtyEl,
-      this.saveBtn,
-      button({ label: 'Preview', icon: 'eye', variant: 'primary', key: 'V', onClick: () => this.o.onPreview() }),
-      button({ icon: 'cube', title: 'generated assets', onClick: () => this.o.onAssets() }),
-      button({ icon: 'cog-6-tooth', title: 'settings', onClick: () => this.settings.open() }),
-    )
-    document.body.append(this.bar)
+    const preview = button({ label: 'Preview', icon: 'eye', variant: 'primary', key: 'V', onClick: () => this.o.onPreview() })
+    const settings = button({ icon: 'cog-6-tooth', title: 'settings', onClick: () => this.settings.open() })
 
-    // the docked inspector
-    const head = el('header', 'inspector-head')
-    head.append(el('h2', '', 'Inspector'))
-    this.aside.append(head, this.inspector)
-    document.body.append(this.aside)
+    if (mounts) {
+      // No bar, no aside, no drawer, and no site picker: the host owns all four, and a second
+      // picker for the same thing under a different name is how somebody ends up with the world
+      // editor pointed at one place and the site editor at another.
+      mounts.rail.append(this.modeHost)
+      mounts.actions.append(this.dirtyEl, this.saveBtn, preview, settings)
+    } else {
+      this.bar.append(
+        hamburger,
+        this.siteSel,
+        this.modeHost,
+        el('div', 'topbar-spacer'),
+        this.dirtyEl,
+        this.saveBtn,
+        preview,
+        button({ icon: 'cube', title: 'generated assets', onClick: () => this.o.onAssets() }),
+        settings,
+      )
+      document.body.append(this.bar)
+
+      // the docked inspector
+      const head = el('header', 'inspector-head')
+      head.append(el('h2', '', 'Inspector'))
+      this.aside.append(head, this.inspector)
+      document.body.append(this.aside)
+    }
 
     const tabs: Tab[] = [
       { id: 'layers', label: 'Layers', icon: 'squares-2x2', build: (h) => this.buildLayers(h) },
@@ -160,7 +198,7 @@ export class EditorUI {
     this.settings = new Dialog({ title: 'Settings', icon: 'cog-6-tooth', size: 'md' })
     this.settings.body.append(this.settingsTabs.root)
 
-    this.buildDrawer()
+    if (!mounts) this.buildDrawer()
   }
 
   private buildDrawer() {

@@ -12,6 +12,8 @@
     <link rel="stylesheet" href="/src/ui/ui.css" />
     <link rel="stylesheet" href="/src/ui/app.css" />
     <link rel="stylesheet" href="/src/worldedit/world.css" />
+    <!-- The site editor is a MODE here, not another page, so its stylesheet belongs to this one. -->
+    <link rel="stylesheet" href="/src/editor/editor.css" />
     <script>
       // `src/assetsvc.ts` resolves to same-origin `/assetsvc` only on port 80/443 — which is how
       // it looks in the pod — and to localhost:8770 otherwise, which is right for a laptop running
@@ -29,9 +31,17 @@
     <!-- The bar, the drawer and the dialogs are built in src/worldedit/main.ts. This file owns the
          map canvas, the docked inspector it renders into, and the coordinate readout. -->
     <canvas id="map"></canvas>
+    <!-- The site editor's 3D scene. Present from the start because src/editor/main.ts takes its
+         canvas at import time; hidden until the Place mode is entered, and imported only then. -->
+    <canvas id="gl" hidden></canvas>
     <aside class="inspector">
-      <header class="inspector-head"><h2>World</h2></header>
+      <header class="inspector-head"><h2 id="panel-title">World</h2></header>
+      <!-- Where the site editor puts its mode rail and its buttons when it is the mode showing.
+           Their PRESENCE is what tells it that this page owns the shell. -->
+      <div id="se-rail" hidden></div>
       <div id="panel" class="inspector-body"></div>
+      <div id="se-inspector" class="inspector-body" hidden></div>
+      <div id="se-actions" class="panel-actions" hidden></div>
     </aside>
     <div id="readout" class="map-readout"></div>
     <script type="module" src="/src/worldedit/main.ts"></script>

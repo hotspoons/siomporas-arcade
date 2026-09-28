@@ -27,6 +27,26 @@ import { restoreTheme } from '../ui/viewer'
 
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector<T>(sel)!
 
+/*
+ * WHOSE SHELL IS THIS?
+ *
+ * This file is loaded two ways now. On editor.html it is the page and builds its own bar, drawer
+ * and inspector, exactly as before. Inside the world editor it is a MODE, and the host owns all
+ * three — plus the world picker, which used to be duplicated here as a site picker (Rich,
+ * 2026-09-27: "I thought the world editor was the place editor ... it isn't dumping you into new
+ * tabs, very amateurish").
+ *
+ * The host says so by putting the three mount points in the document before importing this. No
+ * flags, no globals: if they are there, this is a panel; if they are not, it is a page.
+ */
+const mounts = document.querySelector('#se-rail')
+  ? {
+      rail: $('#se-rail'),
+      inspector: $('#se-inspector'),
+      actions: $('#se-actions'),
+    }
+  : null
+
 const canvas = $<HTMLCanvasElement>('#gl')
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, logarithmicDepthBuffer: true })
 renderer.setPixelRatio(Math.min(2, devicePixelRatio))
@@ -70,8 +90,8 @@ const ui = new EditorUI({
   onLayers: () => applyLayers(),
   onSave: () => void doSave(),
   onPreview: () => void openPreview(),
-})
-installShellKeys(() => ui.drawer)
+}, mounts)
+if (!mounts) installShellKeys(() => ui.drawer)
 let season: Season = 'summer'
 // Every group an editing mode puts in the scene is marked, so the preview can stand all of them
 // down without knowing which modes exist. A new mode marks its group and needs no other change.
@@ -88,8 +108,12 @@ const preview = new Preview(scene, canvas, document.body, () => {
 })
 
 function resize() {
-  renderer.setSize(innerWidth, innerHeight, false)
-  camera.aspect = innerWidth / innerHeight
+  // The CANVAS's box, not the window's. As a page those are the same thing; as a panel inside the
+  // world editor they are not, and sizing to the window puts the horizon behind the inspector.
+  const w = Math.max(1, canvas.clientWidth || innerWidth)
+  const h = Math.max(1, canvas.clientHeight || innerHeight)
+  renderer.setSize(w, h, false)
+  camera.aspect = w / h
   camera.updateProjectionMatrix()
 }
 addEventListener('resize', resize)
@@ -276,6 +300,8 @@ canvas.addEventListener('wheel', (e) => {
 }, { passive: false })
 
 addEventListener('keydown', (e) => {
+  // Not our keys when we are not the mode being looked at: the world editor's map is using them.
+  if (!active) return
   if (preview.open) return // the preview owns the keyboard while it is up
   const t = e.target as HTMLElement
   if (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA') return
@@ -405,9 +431,39 @@ addEventListener('beforeunload', (e) => {
 })
 
 setMode(mode)
+/*
+ * ACTIVE ONLY WHEN IT IS THE MODE YOU ARE IN.
+ *
+ * Embedded, this shares a document with the world editor, so two things have to stop when it is
+ * hidden: the render loop, which would otherwise draw a whole 3D scene behind a 2D map forever,
+ * and the key handler, which would otherwise answer to keys the map is using.
+ */
+let active = !mounts
+export function setActive(on: boolean) {
+  active = on
+  if (on) {
+    resize()
+    orbit.enabled = true
+  }
+}
+/** Point the editor at a world. Called by the host when the picker changes. */
+export async function openSite(slug: string) {
+  if (site?.manifest.slug === slug) return
+  await loadSite(slug)
+}
+/** Which site it is looking at, so the host can tell whether it has to load one. */
+export const currentSite = () => site?.manifest.slug ?? null
+
 const clock = new THREE.Clock()
 function frame() {
   const dt = Math.min(0.1, clock.getDelta())
+  // Hidden: keep the loop alive but draw nothing. Stopping it entirely would mean re-entering the
+  // mode had to restart it, and a loop that can be started twice eventually is.
+  if (!active) {
+    clock.getDelta()
+    requestAnimationFrame(frame)
+    return
+  }
   if (preview.open) {
     preview.tick(dt, clock.elapsedTime)
     preview.render(renderer)

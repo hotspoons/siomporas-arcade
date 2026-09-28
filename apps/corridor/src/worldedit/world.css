@@ -37,6 +37,28 @@ body.worldedit {
   touch-action: none;
 }
 
+/* The site editor's scene, in the Place mode. Exactly where the map is, because it replaces it:
+   editor.css positions #gl for a page that is only the editor, and here it is one pane of two. */
+body.worldedit #gl {
+  position: fixed;
+  top: var(--we-bar-h, var(--bar-h));
+  left: 0;
+  width: calc(100vw - var(--inspector-w, min(340px, 92vw)));
+  height: calc(100vh - var(--we-bar-h, var(--bar-h)));
+  display: block;
+  touch-action: none;
+}
+body.worldedit #gl[hidden] { display: none; }
+/* The rail the site editor mounts into sits above the panels, not inside them. */
+body.worldedit #se-rail {
+  padding: var(--s2);
+  border-bottom: 1px solid var(--line-1);
+}
+body.worldedit #se-actions {
+  padding: var(--s2);
+  border-top: 1px solid var(--line-1);
+}
+
 body.worldedit .inspector {
   top: var(--we-bar-h, var(--bar-h));
 }

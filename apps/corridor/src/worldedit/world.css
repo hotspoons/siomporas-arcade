@@ -36,6 +36,9 @@ body.worldedit {
   cursor: crosshair;
   touch-action: none;
 }
+/* `display: block` above beats the `hidden` attribute, so hiding the map needs saying twice. The
+   modes that take the whole screen — Place, Program, Assets — all rely on this. */
+#map[hidden] { display: none; }
 
 /* The program editor, in the Program mode. Exactly where the map is, for the same reason the
    Place mode's scene is: it replaces it. A code editor in a 340 px inspector is a code editor
@@ -58,6 +61,21 @@ body.worldedit {
   background: var(--bg-0);
 }
 #code[hidden] { display: none; }
+
+/* The asset library takes the same box the code editor does, and the inspector with it: there is
+   nothing in the world panel that helps while you are working on a texture. */
+#assets {
+  position: fixed;
+  top: var(--we-bar-h, var(--bar-h));
+  left: 0;
+  width: 100vw;
+  height: calc(100vh - var(--we-bar-h, var(--bar-h)));
+  overflow: auto;
+  padding: var(--s4);
+  background: var(--bg-0);
+}
+#assets[hidden] { display: none; }
+.asset-pane { height: auto; }
 
 .code-pane { display: grid; grid-template-rows: auto minmax(0, 1fr); min-height: 0; min-width: 0; }
 .code-pane[hidden] { display: none; }

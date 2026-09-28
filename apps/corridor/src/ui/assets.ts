@@ -27,6 +27,17 @@ import { assetsvc, type AssetItem, type AssetJob, type Material, type ModelRoste
 /** The texture classes worth offering on an empty library; the rest come from what is in it. */
 const MATERIAL_CATEGORIES = ['wall_house', 'wall_commercial', 'roof', 'road', 'ground_cover', 'metal', 'glass', 'wood', 'other']
 
+/**
+ * The roles a game knows how to drive.
+ *
+ * The same list `meshview.ts` matches names against — this is the explicit version of the same
+ * vocabulary, so a hand-bound rig and a guessed one produce the same words.
+ */
+const RIG_ROLES = [
+  'wheel', 'steer', 'suspension', 'door', 'slew', 'boom', 'stick', 'bucket',
+  'rotor', 'propeller', 'control-surface', 'spine', 'limb', 'head',
+]
+
 const KINDS = [
   'hero-car', 'traffic', 'emergency', 'commercial-vehicle', 'pedestrian', 'animal',
   'furniture', 'building-dressing', 'vegetation', 'signage', 'prop',
@@ -54,6 +65,13 @@ const EMPTY_ITEM: AssetItem = {
   chosen: null, created: '', updated: '', views: [], mesh: null, finished: null, state: 'spec', history: [],
 }
 
+/** A line of explanation, in the smaller ink. */
+const hint = (text: string) => {
+  const p = el('div', 'panel-hint')
+  p.append(icon('information-circle', 14), el('span', '', text))
+  return p
+}
+
 /** A line with a warning triangle on it — for a state a person has to act on. */
 const warnNote = (text: string) => {
   const p = el('div', 'panel-hint warn')
@@ -68,8 +86,32 @@ const STATE_LABEL: Record<AssetItem['state'], string> = {
   finished: 'ready',
 }
 
+export interface AssetCatalogOpts {
+  /**
+   * Where it lives. A HOST means it fills that element and there is no dialog at all.
+   *
+   * Rich, 2026-09-28: "No reason to have the map visible, no reason to have place buttons - this
+   * should really just be the catalog and materials and service form taking up the whole area in
+   * tabs". In the world editor the library IS the tab, so it gets the pane; the viewer still
+   * opens it over the scene, where a dialog is right.
+   */
+  host?: HTMLElement
+  /** the world that is open, for shared-versus-this-world */
+  world?: () => string | null
+  /**
+   * Turn a finished mesh into something a level can place.
+   *
+   * It belongs on the ITEM rather than in a toolbar: "make this placeable" is a thing you do to
+   * the thing you are looking at, and it needs a footprint and a height that only somebody
+   * looking at the model can give.
+   */
+  onAdopt?: (id: string) => void
+}
+
 export class AssetCatalog {
-  dialog: Dialog
+  /** null when this one lives in a pane rather than over a scene */
+  dialog: Dialog | null = null
+  private readonly o: AssetCatalogOpts
   private tabs: Tabs
   private items: AssetItem[] = []
   private roster: ModelRoster | null = null
@@ -99,6 +141,10 @@ export class AssetCatalog {
   /** what is typed in the search box; a question being asked now, so it is not remembered */
   private find = ''
   private listBox = el('div', 'asset-list-box')
+  /** which class is showing, or '' for every one */
+  private klass = ''
+  /** shared, this world's, or both */
+  private scope: 'all' | 'shared' | 'world' = 'all'
   /** a pinned seed per item; absent means "a new one every draw" */
   private seeds = new Map<string, number>()
 
@@ -126,13 +172,19 @@ export class AssetCatalog {
   private listHost = el('div', 'asset-list')
   private detailHost = el('div', 'asset-detail')
 
-  constructor() {
+  constructor(o: AssetCatalogOpts = {}) {
+    this.o = o
     const tabs: Tab[] = [
       { id: 'catalog', label: 'Catalog', icon: 'cube', build: (h) => this.buildCatalog(h) },
       { id: 'materials', label: 'Materials', icon: 'swatch', build: (h) => void this.buildMaterials(h) },
       { id: 'service', label: 'Service', icon: 'beaker', build: (h) => void this.buildService(h) },
     ]
     this.tabs = new Tabs(tabs)
+    if (o.host) {
+      o.host.replaceChildren(this.tabs.root)
+      o.host.classList.add('asset-body', 'asset-pane')
+      return
+    }
     // A closed dialog must give its WebGL context back. Browsers cap live contexts (around
     // sixteen in Chromium) and silently lose the oldest when you go over, so a preview left
     // running behind a closed panel eventually kills the viewer in another tab of the same app.
@@ -161,8 +213,13 @@ export class AssetCatalog {
   }
 
   async open() {
-    this.dialog.open()
+    this.dialog?.open()
     await this.refresh()
+  }
+
+  /** Leaving the tab: the preview stops drawing but keeps what it loaded. */
+  stop() {
+    this.mesh3d?.stop()
   }
 
   private get dirty(): boolean {
@@ -208,7 +265,7 @@ export class AssetCatalog {
      * class — the three things anybody knows about a thing they are looking for — and it is not
      * remembered between visits, because it is a question rather than a preference.
      */
-    this.listBox.replaceChildren(this.searchBox(), this.listHost)
+    this.listBox.replaceChildren(this.classTabs(), this.scopeTabs(), this.searchBox(), this.listHost)
     split.append(this.listBox, this.detailHost)
     host.append(split)
     this.renderList()
@@ -230,6 +287,68 @@ export class AssetCatalog {
     return wrap
   }
 
+  /**
+   * ONE TAB PER CLASS — and a barn is managed exactly as a car is.
+   *
+   * Rich, 2026-09-28: "a new tab to manage static props like barns, stores, etc. in the exact
+   * same way we manage cars from the catalog. We maybe need tabs for each class". A separate
+   * Props tab would be a second implementation of this one that drifts from it; a filter over the
+   * same list is the same screen, and "exactly the same way" is then true by construction.
+   *
+   * The classes are the ones in use plus the standard vocabulary, so the tabs cannot go stale.
+   */
+  private classTabs(): HTMLElement {
+    const counts = new Map<string, number>()
+    for (const it of this.items) {
+      if (!this.inScope(it)) continue
+      counts.set(it.kind || 'prop', (counts.get(it.kind || 'prop') ?? 0) + 1)
+    }
+    const row = el('div', 'class-tabs')
+    const add = (value: string, label: string, n: number) => {
+      const b = el('button', `class-tab${this.klass === value ? ' on' : ''}`)
+      b.append(el('span', '', label), el('span', 'class-tab-n', String(n)))
+      b.onclick = () => { this.klass = value; this.renderList(); this.listBox.replaceChildren(this.classTabs(), this.scopeTabs(), this.searchBox(), this.listHost) }
+      row.append(b)
+    }
+    add('', 'all', [...counts.values()].reduce((a, b) => a + b, 0))
+    for (const k of [...counts.keys()].sort()) add(k, k.replace(/-/g, ' '), counts.get(k)!)
+    return row
+  }
+
+  /**
+   * SHARED, OR THIS WORLD'S.
+   *
+   * A shared asset is offered in every world and editing it changes it everywhere, which is right
+   * for a fire hydrant and wrong for the diner on this corner. The default shows both, because
+   * that is what "what can I place here" means.
+   */
+  private scopeTabs(): HTMLElement | HTMLElement {
+    const world = this.o.world?.() ?? null
+    if (!world) return el('span', '')
+    return segmented<'all' | 'shared' | 'world'>({
+      value: this.scope,
+      options: [
+        { value: 'all', label: 'everything' },
+        { value: 'shared', label: 'shared' },
+        { value: 'world', label: world },
+      ],
+      onChange: (v) => {
+        this.scope = v
+        this.renderList()
+        this.listBox.replaceChildren(this.classTabs(), this.scopeTabs(), this.searchBox(), this.listHost)
+      },
+    })
+  }
+
+  private inScope(it: AssetItem): boolean {
+    const world = this.o.world?.() ?? null
+    const owner = it.world ?? null
+    // an asset belonging to ANOTHER world is never offered here: it is not a thing this world has
+    if (owner && owner !== world) return false
+    if (!world || this.scope === 'all') return true
+    return this.scope === 'shared' ? owner === null : owner === world
+  }
+
   private searchBox(): HTMLElement {
     const wrap = el('div', 'tree-filter')
     const i = el('input', 'input wide') as HTMLInputElement
@@ -244,7 +363,9 @@ export class AssetCatalog {
   }
 
   /** Does this row answer what was typed? Id, subject and class — nothing else is searched for. */
-  private matches(it: { id: string; subject?: string; kind?: string }): boolean {
+  private matches(it: AssetItem): boolean {
+    if (!this.inScope(it)) return false
+    if (this.klass && (it.kind || 'prop') !== this.klass) return false
     const q = this.find.trim().toLowerCase()
     if (!q) return true
     return `${it.id} ${it.subject ?? ''} ${it.kind ?? ''}`.toLowerCase().includes(q)
@@ -316,8 +437,40 @@ export class AssetCatalog {
     }
 
     const head = el('header', 'asset-detail-head')
+    const world = this.o.world?.() ?? null
+    const owner = it.world ?? null
     head.append(el('h2', '', it.id), el('span', `chip state-${it.state}`, STATE_LABEL[it.state]))
+    // WHO IT BELONGS TO, always said: editing a shared asset changes it in every world, and that
+    // is not a thing anybody should discover afterwards
+    head.append(el('span', `chip ${owner ? 'scope-world' : 'scope-shared'}`, owner ? `only ${owner}` : 'shared'))
     this.detailHost.append(head)
+
+    const tools = el('div', 'panel-actions')
+    tools.append(button({
+      label: 'Import a model',
+      icon: 'arrow-up-tray',
+      title: 'a .glb replaces the mesh; other formats are stored and need converting',
+      onClick: () => this.importModel(it.id),
+    }))
+    if (!owner && world) {
+      tools.append(button({
+        label: `Customise for ${world}`,
+        icon: 'document-plus',
+        title: 'a copy that belongs to this world, so editing it changes nothing else',
+        onClick: () => void this.forkForWorld(it),
+      }))
+    }
+    if (this.o.onAdopt && it.finished) {
+      tools.append(button({
+        label: 'Make placeable',
+        icon: 'cube',
+        variant: 'primary',
+        title: 'give it a footprint and a height, so a level can put it in a world',
+        onClick: () => this.o.onAdopt!(it.id),
+      }))
+    }
+    if (owner && it.forkedFrom) tools.append(el('span', 'dim', `copied from ${it.forkedFrom}`))
+    this.detailHost.append(tools)
 
     // ---- the pipeline, as three steps in order
     const steps = el('div', 'asset-steps')
@@ -477,6 +630,12 @@ export class AssetCatalog {
         if (roles.length) {
           meshBody.append(readout('Drives', roles.map(([r, n]) => (n > 1 ? `${n}x ${r}` : r)).join(' · ')))
         }
+        meshBody.append(button({
+          label: 'Edit the rig',
+          icon: 'adjustments-horizontal',
+          title: 'say which bone does what, instead of letting the names be guessed',
+          onClick: () => this.rigEditor(it, rig.names, view),
+        }))
       })
       meshBody.append(readout('Raw mesh', `${(it.mesh / 1e6).toFixed(1)} MB`))
       if (it.finished) meshBody.append(readout('Finished', `${(it.finished / 1e3).toFixed(0)} kB`))
@@ -1138,6 +1297,140 @@ export class AssetCatalog {
       toast(`${p.id} created — describe it, then draw`, 'ok')
     } catch (e) {
       toast(`create: ${(e as Error).message}`, 'danger')
+    }
+  }
+
+  /**
+   * THE RIG EDITOR: which bone does what.
+   *
+   * Rich, 2026-09-28: "we need to integrate the rigging editor here too so if we have a rigged
+   * model we can edit the rigging in the editor" and "I see the word rig but no button for it, I
+   * think this was meant to happen but never did."
+   *
+   * WHAT RIGGING MEANS FOR THIS GAME is binding, not posing. Nothing here needs to move a bone by
+   * hand — Blender does that, and doing it badly in a browser helps nobody. What the game needs
+   * is to FIND things: the four wheels in the order FL, FR, RL, RR, the steering axis, the boom
+   * and the stick. The viewer guesses those from bone names and is right most of the time; this
+   * is what you write when it is not, and it is stored with the asset because it is a fact about
+   * the model rather than about a level.
+   *
+   * Clicking a bone lights it up in the preview, because a list of forty names is not how anybody
+   * knows which one is the near-side front wheel.
+   */
+  private rigEditor(item: AssetItem, bones: string[], view: MeshView): void {
+    const d = new Dialog({ title: `Rig · ${item.id}`, size: 'lg', icon: 'adjustments-horizontal', movable: true })
+    // a copy: nothing is written until Save, the same as everywhere else in here
+    const roles: Record<string, string[]> = JSON.parse(JSON.stringify(item.rig?.roles ?? {}))
+    const roleOf = (bone: string): string => {
+      for (const [role, list] of Object.entries(roles)) if (list.includes(bone)) return role
+      return ''
+    }
+    const body = el('div', 'rig-body')
+
+    const draw = () => {
+      body.replaceChildren()
+      const summary = Object.entries(roles).filter(([, v]) => v.length)
+      body.append(hint(summary.length
+        ? summary.map(([r, v]) => `${r}: ${v.join(', ')}`).join(' · ')
+        : 'Nothing bound yet — the game will guess from the names.'))
+      const list = el('div', 'rows rig-rows')
+      for (const bone of bones) {
+        const row = el('div', 'rig-row')
+        const name = el('button', 'rig-bone')
+        name.textContent = bone
+        name.title = 'show it in the preview'
+        name.onclick = () => { view.setSkeleton(true); view.highlightBone(bone) }
+        const pick = select({
+          label: '',
+          value: roleOf(bone),
+          options: [{ value: '', label: '—' }, ...RIG_ROLES.map((r) => ({ value: r, label: r }))],
+          onChange: (v) => {
+            for (const key of Object.keys(roles)) roles[key] = roles[key].filter((b) => b !== bone)
+            if (v) roles[v] = [...(roles[v] ?? []), bone]
+            for (const key of Object.keys(roles)) if (!roles[key].length) delete roles[key]
+            draw()
+          },
+        })
+        row.append(name, pick)
+        list.append(row)
+      }
+      body.append(list)
+    }
+    draw()
+    d.body.append(body)
+    d.footer(
+      button({ label: 'Clear', variant: 'ghost', onClick: () => { for (const k of Object.keys(roles)) delete roles[k]; draw() } }),
+      button({ label: 'Cancel', variant: 'ghost', onClick: () => d.close() }),
+      button({
+        label: 'Save the rig',
+        icon: 'document-arrow-down',
+        variant: 'primary',
+        onClick: async () => {
+          try {
+            await assetsvc.put({ id: item.id, rig: { roles, convention: item.rig?.convention, updated: new Date().toISOString() } })
+            toast(`${item.id}: rig saved`, 'ok')
+            d.close()
+            await this.refresh()
+          } catch (e) {
+            toast(`rig: ${(e as Error).message}`, 'danger')
+          }
+        },
+      }),
+    )
+    d.open()
+  }
+
+  /**
+   * IMPORT A MODEL over whatever is there.
+   *
+   * Rich, 2026-09-28: "You should also be able to import 3d models, not just generate them, there
+   * should be an import button when creating or editing that will overwrite the one provided."
+   * `.glb` becomes the mesh; the rest are stored and the service says they need converting,
+   * because an entry that looks meshed and fails at load is worse than one that says what it needs.
+   */
+  private importModel(id: string): void {
+    const input = el('input') as HTMLInputElement
+    input.type = 'file'
+    input.accept = '.glb,.gltf,.fbx,.obj,.dae,.stl,.ply,.usdz'
+    input.onchange = async () => {
+      const file = input.files?.[0]
+      if (!file) return
+      try {
+        toast(`importing ${file.name}…`, 'info', 0)
+        const r = await assetsvc.importModel(id, file)
+        toast(r.loadable
+          ? `${id}: ${file.name} imported (${(r.bytes / 1024 / 1024).toFixed(1)} MB)`
+          : `${id}: ${file.name} stored as ${r.stored} — it needs converting to .glb before a level can place it`,
+        r.loadable ? 'ok' : 'warn', 8000)
+        await this.refresh()
+      } catch (e) {
+        toast(`import: ${(e as Error).message}`, 'danger', 8000)
+      }
+    }
+    input.click()
+  }
+
+  /** Make this world's own copy of a shared asset, so editing it changes nothing else. */
+  private async forkForWorld(item: AssetItem): Promise<void> {
+    const world = this.o.world?.() ?? null
+    if (!world) return void toast('no world is open', 'warn')
+    const to = await ask({
+      title: `Customise ${item.id} for ${world}`,
+      label: 'new id',
+      value: `${item.id}-${world}`.slice(0, 63),
+      icon: 'cube',
+      ok: 'Make a copy',
+      validate: (v) => (!slugOf(v) ? 'letters and digits' : this.items.some((x) => x.id === slugOf(v)) ? 'that id is taken' : null),
+    })
+    if (!to) return
+    try {
+      const made = await assetsvc.fork(item.id, slugOf(to), world)
+      this.selected = made.id
+      this.scope = 'all'
+      await this.refresh()
+      toast(`${made.id} belongs to ${world}; the shared one is untouched`, 'ok', 6000)
+    } catch (e) {
+      toast(`copy: ${(e as Error).message}`, 'danger')
     }
   }
 

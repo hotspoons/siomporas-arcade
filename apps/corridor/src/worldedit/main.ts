@@ -27,7 +27,6 @@ import { ShellPanel } from '../ui/shellpanel'
 import { AgentPanel } from '../ui/agentpanel'
 import { fromUrl, load as loadNav, resolve as resolveNav, save as saveNav, toUrl } from './nav'
 import { ROOT, SITE_DOCS } from '../agent/projection'
-import { RosterPanel } from './roster'
 import { SplatsPanel } from './splats'
 import { worldMenuTransfer } from './transfer'
 import { GitPanel } from './gitpanel'
@@ -84,29 +83,6 @@ const stagePanel = new StagePanel({
     window.open(`/?level=${encodeURIComponent(level.id)}#${level.world}`, '_blank', 'noopener')
   },
   onDirty: (d) => setDirty(d, 'level'),
-})
-
-/**
- * What can be placed, and placing it (roster.ts).
- *
- * NOT a second generation interface. This panel used to hold a roster of generation specs with a
- * prompt, a draw button and a reconstruct button — beside the catalog dialog that does all three
- * properly (Rich, 2026-09-28: "we already have a generate interface, this is so confusing").
- * Generating is the button at the top; the panel itself is the placeable catalog, searchable, with
- * a preview, and its rows drag onto the world.
- */
-const assetsPanel = new RosterPanel({
-  host: inspector,
-  openCatalog: () => void assets.open(),
-  openAdopt: () => void adopt.open(),
-  ready: () => !!siteEditor && !!selected,
-  showScene: () => { if (mode !== 'place' && selected) setMode('place') },
-  place: (id) => {
-    if (!siteEditor || !selected) return false
-    setMode('place')
-    siteEditor.armAsset(id)
-    return true
-  },
 })
 
 /** Footage in, a captured world out: uploads, then the training run (splats.ts). */
@@ -440,7 +416,21 @@ async function loadRoads(bbox: Box, zoom: number) {
 /* ---- panels -------------------------------------------------------------------------------- */
 
 const logs = new LogView()
-const assets = new AssetCatalog()
+/**
+ * THE ASSET LIBRARY IS A TAB, not a dialog over the map.
+ *
+ * Rich, 2026-09-28: "No reason to have the map visible, no reason to have place buttons - this
+ * should really just be the catalog and materials and service form taking up the whole area in
+ * tabs... The assets area really needs to focus on the assets and materials."
+ *
+ * So it takes `#assets`, the same full-width box the code editor takes, and the Place mode is
+ * where placing happens — its palette is the roster now.
+ */
+const assets = new AssetCatalog({
+  host: document.getElementById('assets')!,
+  world: () => selected,
+  onAdopt: () => void adopt.open(),
+})
 const adopt = new AdoptDialog()
 
 const define = new DefinePanel({
@@ -876,7 +866,7 @@ function openWorldMenu(anchor: HTMLElement) {
 
 function setMode(m: Mode) {
   if (mode === 'bake') runsPanel.stop()
-  if (mode === 'assets') assetsPanel.stop() // a poll for a draw that nobody is watching
+  if (mode === 'assets') assets.stop() // a preview spinning for nobody
   // NOT shellPanel.stop(): a machine with a Pyodide in it takes fifteen seconds to come back, and
   // leaving the tab to look something up must not cost that
   // NOT splatsPanel.stop(): leaving the tab must not abort a forty-gigabyte upload
@@ -888,6 +878,7 @@ function setMode(m: Mode) {
   // one pane, three things that want it: the map, the Place scene, and the code surface the
   // Program and Shell modes share
   showCode(m === 'program' || m === 'shell' || m === 'agent')
+  showAssets(m === 'assets')
   // Define puts the map in draw mode; the panel switches it to `pick` itself when the world is a
   // named-roads one, because then clicking is choosing a road rather than dropping a vertex.
   map.mode = m === 'define' ? 'draw' : 'pan'
@@ -909,6 +900,18 @@ function rememberNav() {
 }
 
 /** Swap the program editor in and out. Same pane as the map and the Place scene, one at a time. */
+function showAssets(on: boolean) {
+  const pane = document.getElementById('assets')
+  if (pane) pane.hidden = !on
+  const mapCanvas = document.querySelector<HTMLCanvasElement>('#map')
+  if (mapCanvas && (on || mode !== 'place')) mapCanvas.hidden = on
+  // the inspector too: nothing in the world panel helps while you are working on a texture
+  const aside = document.querySelector<HTMLElement>('.inspector')
+  if (aside) aside.hidden = on
+  const readout = document.getElementById('readout')
+  if (readout && on) readout.hidden = true
+}
+
 function showCode(on: boolean) {
   const code = document.getElementById('code')
   const mapCanvas = document.querySelector<HTMLCanvasElement>('#map')
@@ -977,7 +980,7 @@ function renderPanel() {
   if (mode === 'stage') {
     void stagePanel.load()
   } else if (mode === 'assets') {
-    void assetsPanel.load()
+    void assets.open()
   } else if (mode === 'splats') {
     void splatsPanel.load()
   } else if (mode === 'index') {

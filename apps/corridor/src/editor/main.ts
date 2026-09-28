@@ -321,6 +321,20 @@ addEventListener('pointerup', (e) => {
   }
   down = null
 })
+/*
+ * A DOUBLE CLICK PLACES, a single one selects.
+ *
+ * Rich, 2026-09-28: "Should be double click to place new instance, not single." With an asset
+ * armed, every click on the ground dropped another copy — including the click you make to look at
+ * something, or to deselect. Two clicks is the deliberate gesture, and it matches the drag, which
+ * is also something you cannot do by accident.
+ */
+canvas.addEventListener('dblclick', (e) => {
+  if (mode !== 'place') return
+  const pt = groundAt(e as unknown as PointerEvent)
+  if (pt) void place.placeAt(pt)
+})
+
 canvas.addEventListener('wheel', (e) => {
   // shift+wheel rotates the selected placement; everything else is the orbit's zoom
   if (mode === 'place' && e.shiftKey && place.wheel(e)) e.preventDefault()

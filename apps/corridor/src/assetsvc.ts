@@ -30,6 +30,26 @@ export interface AssetItem {
   finished: number | null
   state: 'spec' | 'drawn' | 'meshed' | 'finished'
   history: { at: string; step: string; file?: string; model?: string; seconds?: number }[]
+  /** `null` is shared with every world; a slug belongs to that world alone */
+  world?: string | null
+  /** what it was forked from, when it was */
+  forkedFrom?: string | null
+  /** which bone does what, when somebody has said rather than letting the names be guessed */
+  rig?: RigBinding | null
+}
+
+/**
+ * The roles a game drives, bound to the bones that actually do them.
+ *
+ * The viewer guesses from bone NAMES and is right most of the time; this is what you write when
+ * it is not — a rig whose wheels are `Bone.007`, or one whose "arm" is an excavator's stick.
+ */
+export interface RigBinding {
+  /** role → bone names, in the order the game expects them (wheels: FL, FR, RL, RR) */
+  roles: Record<string, string[]>
+  /** what it is, for anything that treats a car differently from a person */
+  convention?: string
+  updated?: string
 }
 
 export interface AssetJob {
@@ -112,6 +132,24 @@ export const assetsvc = {
   get: (id: string) => call<AssetItem>(`/catalog/${encodeURIComponent(id)}`),
   put: (spec: Partial<AssetItem> & { id: string }) => call<AssetItem>('/catalog', { method: 'POST', body: JSON.stringify(spec) }),
   remove: (id: string) => call<{ deleted: string }>(`/catalog/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  /** copy it, files and all, usually to make a world's own version of a shared thing */
+  fork: (id: string, to: string, world: string | null) =>
+    call<AssetItem>(`/catalog/${encodeURIComponent(id)}/fork`, { method: 'POST', body: JSON.stringify({ to, world }) }),
+
+  /**
+   * IMPORT A MODEL SOMEBODY ALREADY HAS, over whatever is there.
+   *
+   * Rich, 2026-09-28: "You should also be able to import 3d models, not just generate them."
+   * `.glb` becomes the mesh directly; the other formats are stored and reported as needing
+   * converting, because a catalog entry that looks meshed and fails at load is worse than one
+   * that says what it needs.
+   */
+  importModel: async (id: string, file: File): Promise<{ stored: string; format: string; bytes: number; loadable: boolean }> => {
+    const r = await fetch(`${ASSETSVC}/catalog/${encodeURIComponent(id)}/model/${encodeURIComponent(file.name)}`, { method: 'PUT', body: file })
+    const body = await r.json().catch(() => ({}))
+    if (!r.ok) throw new Error(body.error ?? `HTTP ${r.status}`)
+    return body
+  },
 
   image: (id: string, opts: { prompt?: string; negative?: string; size?: string; steps?: number; seed?: number } = {}) =>
     call<AssetJob>(`/catalog/${encodeURIComponent(id)}/image`, { method: 'POST', body: JSON.stringify(opts) }),

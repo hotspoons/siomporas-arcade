@@ -56,6 +56,10 @@
   border-left: 1px solid var(--line-1);
   box-shadow: var(--shadow-2);
 }
+/* A `display` RULE BEATS THE `hidden` ATTRIBUTE, so this is not redundant: the world editor hides
+   the whole inspector for the modes that take the screen, and without it the panel stayed on top
+   of them at full width. The same trap `.meshview-status` fell into. */
+.inspector[hidden] { display: none; }
 
 /* the drag handle, sitting on the panel's left edge and overhanging it slightly so it is
    catchable without hunting for a one-pixel border */

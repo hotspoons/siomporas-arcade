@@ -139,6 +139,8 @@ export class MeshView {
    * it. Looking only at `skeleton.bones` finds nothing on a vehicle and reports it unrigged.
    */
   private boneRoots: THREE.Object3D[] = []
+  /** the dot that says which bone is which, in the rig editor */
+  private boneMark: THREE.Mesh | null = null
   private readonly textures = new THREE.TextureLoader()
 
   constructor(o: MeshViewOpts = {}) {
@@ -334,6 +336,36 @@ export class MeshView {
     }
   }
 
+  /**
+   * Light one bone up, so a name in a list becomes a thing in the model.
+   *
+   * A rig editor is forty names and no way to tell which is the near-side front wheel; clicking
+   * one has to point at it. The marker is drawn over everything (`depthTest: false`) because a
+   * wheel bone is inside the wheel.
+   */
+  highlightBone(name: string | null): void {
+    if (!this.boneMark) {
+      const m = new THREE.Mesh(
+        new THREE.SphereGeometry(1, 16, 12),
+        new THREE.MeshBasicMaterial({ color: 0x2ee6c0, depthTest: false, transparent: true, opacity: 0.85, toneMapped: false }),
+      )
+      m.renderOrder = 30
+      m.visible = false
+      this.scene.add(m)
+      this.boneMark = m
+    }
+    const mark = this.boneMark
+    if (!name) { mark.visible = false; return }
+    let found: THREE.Object3D | null = null
+    this.pivot.traverse((o) => { if (!found && o.name === name) found = o })
+    if (!found) { mark.visible = false; return }
+    mark.position.setFromMatrixPosition((found as THREE.Object3D).matrixWorld)
+    // sized against the model, so it is a dot on a car and a dot on a water tower
+    const r = this.size ? Math.max(this.size.x, this.size.y, this.size.z) : 1
+    mark.scale.setScalar(Math.max(0.005, r * 0.02))
+    mark.visible = true
+  }
+
   setWireframe(on: boolean) {
     this.wire = on
     this.pivot.traverse((o) => {
@@ -520,6 +552,7 @@ export class MeshView {
 
   clear() {
     this.grid.visible = true
+    if (this.boneMark) this.boneMark.visible = false
     this.pivot.clear()
     this.skeletonHelper = null
     this.skinned = null

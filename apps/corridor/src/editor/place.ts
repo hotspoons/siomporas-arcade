@@ -13,6 +13,7 @@ import { instanceOf, loadCatalog, tintOf, type Catalog, type CatalogEntry } from
 import { frameMismatch, frameOf, isGenerated, loadPlacements, nextId, savePlacements, type Placement, type Placements } from './schema'
 import { yawFacingRoad } from './corridor'
 import { el, frameBanner } from './ui'
+import { MeshView } from '../ui/meshview'
 import type { Site } from '../scene'
 
 const SELECT = 0x2ee6c0
@@ -171,10 +172,7 @@ export class PlaceMode {
     if (this.gizmo) return
     const g = new TransformControls(camera, dom)
     g.setSpace('world')
-    // METRES AND DEGREES THAT A PERSON CHOSE. Free dragging gives 4.37 m and 22.6°, which is how
-    // a row of fence posts ends up nearly aligned. Hold shift for the fine version.
-    g.setTranslationSnap(0.5)
-    g.setRotationSnap(THREE.MathUtils.degToRad(5))
+    this.snapOn()
     g.addEventListener('dragging-changed', (e) => {
       this.dragging = !!(e as unknown as { value: boolean }).value
       onOrbit(!this.dragging)
@@ -182,6 +180,39 @@ export class PlaceMode {
       // dragging out from under the pointer
       if (!this.dragging) this.onChange()
     })
+
+    /*
+     * THE CAMERA MUST LET GO BEFORE THE HANDLE IS GRABBED, not after.
+     *
+     * `dragging-changed` fires from TransformControls' own pointerdown — by which time
+     * OrbitControls has already seen the same event and begun a rotate, because it captured the
+     * pointer and only consults `enabled` when the gesture STARTS. So dragging a handle also spun
+     * the world (Rich, 2026-09-28: "Clicking and dragging the gizmo also rotates the map").
+     *
+     * A capture-phase listener runs before either of them. `axis` is non-null whenever the
+     * pointer is over a handle, which is exactly the condition for "this press belongs to the
+     * gizmo".
+     */
+    dom.addEventListener('pointerdown', (e) => {
+      if (g.axis === null) return
+      onOrbit(false)
+      e.stopPropagation()
+    }, true)
+    addEventListener('pointerup', () => { if (!this.dragging) onOrbit(true) })
+
+    /*
+     * SNAPPED BY DEFAULT, FREE WHILE SHIFT IS DOWN.
+     *
+     * Rich, 2026-09-28: "I'd want autorotation that snaps and then manual rotation." A dropped
+     * asset already takes the road's bearing; from there every nudge lands on five degrees, which
+     * is how a row of fence posts ends up actually aligned rather than nearly. Shift is the
+     * escape hatch for the one that has to sit at 37°.
+     *
+     * three's TransformControls has no modifier of its own — the snap values are simply on or
+     * off — so the modifier is wired here.
+     */
+    addEventListener('keydown', (e) => { if (e.key === 'Shift') this.snapOff() })
+    addEventListener('keyup', (e) => { if (e.key === 'Shift') this.snapOn() })
     g.addEventListener('objectChange', () => this.readGizmo())
     this.gizmo = g
     const helper = g.getHelper()
@@ -197,12 +228,29 @@ export class PlaceMode {
     const o = this.selected ? this.objects.get(this.selected) : null
     if (!o) { g.detach(); return }
     g.setMode(this.gizmoMode)
+    // SIZED AGAINST THE THING. The default gizmo is one unit across, which on a 40 m barn is a
+    // dot in the middle of it and on a 0.3 m bollard swallows the model — and a rotate ring you
+    // cannot see is a rotate ring you cannot drag.
+    const e = this.entry(this.doc.items.find((x) => x.id === this.selected)?.asset ?? '')
+    const span = e ? Math.max(e.footprint_m[0], e.footprint_m[1], e.height_m) : 4
+    g.setSize(Math.max(0.6, Math.min(3, 12 / Math.max(2, span))))
     // ROTATION IS YAW ONLY. A building tilted off the vertical is never what somebody meant, and
     // the document has one angle in it — pitch and roll would be edits with nowhere to be saved.
     g.showX = this.gizmoMode === 'translate'
     g.showZ = this.gizmoMode === 'translate'
     g.showY = this.gizmoMode === 'rotate'
     g.attach(o)
+  }
+
+  /** Half a metre and five degrees: free dragging gives 4.37 m and 22.6°. */
+  private snapOn(): void {
+    this.gizmo?.setTranslationSnap(0.5)
+    this.gizmo?.setRotationSnap(THREE.MathUtils.degToRad(5))
+  }
+
+  private snapOff(): void {
+    this.gizmo?.setTranslationSnap(null)
+    this.gizmo?.setRotationSnap(null)
   }
 
   setGizmoMode(mode: 'translate' | 'rotate'): void {
@@ -276,6 +324,9 @@ export class PlaceMode {
     this.doc.items.push(p)
     this.dirty = true
     await this.spawn(p)
+    // straight to the half of the panel that has its pose in it: you just put it down, and the
+    // next thing anybody does is nudge it
+    this.panelTab = 'placed'
     this.select(p.id)
   }
 
@@ -316,11 +367,18 @@ export class PlaceMode {
   }
 
   // --- input -------------------------------------------------------------------------------------
+  /** A single click SELECTS — or clears the selection. It never puts anything down. */
   click(pt: { x: number; y: number } | null) {
     if (this.dragging) return
-    if (!pt) return this.select(null)
-    if (this.armed) return void this.add(this.armed, pt.x, pt.y)
+    void pt
     this.select(null)
+  }
+
+  /** A double click on the ground puts the armed asset there. */
+  async placeAt(pt: { x: number; y: number }): Promise<void> {
+    const what = this.armed ?? this.picked
+    if (!what) return
+    await this.add(what, pt.x, pt.y)
   }
 
   /** Press on an object to select and drag it in one gesture, the way every level editor does. */
@@ -399,21 +457,144 @@ export class PlaceMode {
   }
 
   // --- panel ---------------------------------------------------------------------------------------
+  /** what the palette is showing a preview of */
+  private picked: string | null = null
+  private palFind = ''
+  private palView: MeshView | null = null
+
   panel(root: HTMLElement, fly: (pts: [number, number][]) => void) {
     root.replaceChildren()
+
+    /*
+     * TWO TABS, because they are two activities.
+     *
+     * Rich, 2026-09-28: "the assset listing and palette should be two tabs, the form jumps all
+     * around in its current iteration." It was one column — a preview, a search, forty chips,
+     * then the placed list, then the detail of whatever was selected — so choosing an asset moved
+     * the list, and selecting something in the world moved everything under it. Picking what to
+     * place and adjusting what you have placed are separate jobs; each gets the panel.
+     */
+    const tabs = el('div', 'place-tabs')
+    for (const [id, label] of [['assets', 'Assets'], ['placed', `Placed (${this.doc.items.length})`]] as const) {
+      const b = el('button', `place-tab${this.panelTab === id ? ' on' : ''}`)
+      b.textContent = label
+      b.onclick = () => { this.panelTab = id; this.onChange() }
+      tabs.append(b)
+    }
+    root.append(tabs)
     if (this.frameWarning) root.append(frameBanner('placements.json', this.frameWarning))
-    root.append(el('h2', '', this.armed ? 'click the ground to place' : 'pick an asset, then click the ground'))
+    if (this.panelTab === 'assets') this.assetsTab(root)
+    else this.placedTab(root, fly)
+  }
+
+  /** which half of the panel is showing */
+  private panelTab: 'assets' | 'placed' = 'assets'
+
+  private assetsTab(root: HTMLElement) {
+
+    /*
+     * THE PREVIEW GOES AT THE TOP, where the warning used to be.
+     *
+     * Rich, 2026-09-28: "if you click something it should show a little preview at the top
+     * instead of the awful placements.json warning, and you should be able to click and drag
+     * either the preview or from the palette directly to the world preview."
+     *
+     * The warning is still here — a document authored in another frame really does put things in
+     * the wrong place — but it is one line under the thing you are actually doing, with the
+     * explanation on it rather than in front of it.
+     */
+    const picked = this.picked ? this.entry(this.picked) : null
+    if (picked) {
+      const box = el('div', 'palette-preview')
+      if (picked.glb) {
+        this.palView ??= new MeshView({ remember: 'palette' })
+        const view = this.palView
+        ;(window as unknown as { __paletteview?: MeshView }).__paletteview = view
+        if (view.root.dataset.asset !== picked.id) {
+          view.root.dataset.asset = picked.id
+          void view.load(`/${picked.glb.replace(/^\/+/, '')}`)
+        }
+        view.start()
+        box.append(view.root)
+      } else {
+        box.append(el('p', 'dim', 'No model — it places as a box of the right size.'))
+      }
+      const cap = el('div', 'palette-caption')
+      cap.append(
+        el('span', 'nm', picked.name),
+        el('span', 'mono', `${picked.footprint_m[0]}×${picked.footprint_m[1]} m · ${picked.height_m} m`),
+      )
+      // CLOSABLE, because a preview you cannot dismiss is a preview that has taken a third of the
+      // panel for good (Rich, 2026-09-28: "the preview should be fixed and closable, then the
+      // palette should scroll").
+      const shut = el('button', 'palette-close')
+      shut.textContent = '×'
+      shut.title = 'close the preview'
+      shut.onclick = (e) => {
+        e.stopPropagation()
+        this.picked = null
+        this.palView?.stop()
+        this.onChange()
+      }
+      cap.append(shut)
+      box.append(cap)
+      // the preview drags too, which is the nearest thing to hand once you are looking at it
+      box.draggable = true
+      box.ondragstart = (e) => {
+        e.dataTransfer?.setData('text/apex-asset', picked.id)
+        if (e.dataTransfer) e.dataTransfer.effectAllowed = 'copy'
+      }
+      box.title = `${picked.id} — drag it onto the world, or click the ground`
+      root.append(box)
+    }
+
+    root.append(el('h2', '', this.armed ? 'double-click the ground to place it' : 'drag one in, or pick it and double-click the ground'))
+
     const pal = el('div', 'palette')
-    for (const a of this.catalog.assets) {
-      const b = el('button', `chip${this.armed === a.id ? ' on' : ''}`)
+    if (this.catalog.assets.length > 12) {
+      const find = el('div', 'palette-find')
+      const i = el('input') as HTMLInputElement
+      i.type = 'search'
+      i.placeholder = `find one of ${this.catalog.assets.length}`
+      i.value = this.palFind
+      // ONLY THE CHIPS ARE REDRAWN. Rebuilding the panel on every keystroke — which is what
+      // `onChange` does — destroys this input as you type into it: the first letter lands, the
+      // box is replaced, and the rest go nowhere.
+      i.oninput = () => { this.palFind = i.value; fillPalette() }
+      find.append(i)
+      root.append(find)
+    }
+
+    const fillPalette = () => {
+    pal.replaceChildren()
+    const q = this.palFind.trim().toLowerCase()
+    const shown = this.catalog.assets.filter((a) => !q || `${a.id} ${a.name} ${a.category}`.toLowerCase().includes(q))
+    for (const a of shown) {
+      const b = el('button', `chip${this.armed === a.id ? ' on' : ''}${this.picked === a.id ? ' picked' : ''}`)
       b.style.borderLeft = `4px solid #${new THREE.Color(tintOf(a.category)).getHexString()}`
       b.append(el('span', 'nm', a.name), el('span', 'mono', `${a.footprint_m[0]}×${a.footprint_m[1]} m${a.glb ? '' : ' · box'}`))
-      b.onclick = () => this.arm(a.id)
+      // DRAG FROM THE PALETTE ITSELF. The canvas reads `text/apex-asset` on drop — the same
+      // protocol the asset library used, so there is one way in rather than two.
+      b.draggable = true
+      b.ondragstart = (e) => {
+        e.dataTransfer?.setData('text/apex-asset', a.id)
+        if (e.dataTransfer) e.dataTransfer.effectAllowed = 'copy'
+        this.picked = a.id
+      }
+      b.title = `${a.id} — drag it onto the world, or click to arm it`
+      b.onclick = () => {
+        this.picked = a.id
+        this.arm(a.id)
+      }
       pal.append(b)
     }
-    if (!this.catalog.assets.length) pal.append(el('p', 'dim', 'No catalog. Expected public/assets/catalog.json.'))
+    if (!shown.length) pal.append(el('p', 'dim', this.catalog.assets.length ? `Nothing matching “${this.palFind.trim()}”.` : 'No catalog. Expected public/assets/catalog.json.'))
+    }
+    fillPalette()
     root.append(pal)
+  }
 
+  private placedTab(root: HTMLElement, fly: (pts: [number, number][]) => void) {
     const list = el('div', 'list')
     for (const p of this.doc.items) {
       const e = this.entry(p.asset)

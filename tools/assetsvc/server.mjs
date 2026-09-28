@@ -333,6 +333,20 @@ const server = http.createServer(async (req, res) => {
           return json(res, 200, { deleted: id })
         }
       }
+      /*
+       * FORK IT FOR ONE WORLD. Rich, 2026-09-28: "you can take a shared asset and customize it
+       * for your world, or create a world-specific asset." A copy rather than an override layer:
+       * an override means editing the shared one silently changes the customised one underneath,
+       * which is the thing forking was meant to prevent.
+       */
+      if (seg.length === 3 && req.method === 'POST' && seg[2] === 'fork') {
+        const b = await readJson(req)
+        try {
+          return json(res, 200, await catalog.fork(id, b?.to, b?.world ?? null))
+        } catch (e) {
+          return json(res, e.status ?? 500, { error: String(e.message ?? e) })
+        }
+      }
       if (seg.length === 3 && req.method === 'POST' && seg[2] === 'image') return json(res, 202, startImage(id, await readJson(req)))
       if (seg.length === 3 && req.method === 'POST' && seg[2] === 'mesh') return json(res, 202, startMesh(id, await readJson(req)))
       /*

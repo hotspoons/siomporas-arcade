@@ -14,7 +14,7 @@
 // with which seed, at which time. An asset whose origin nobody can reconstruct is one you cannot
 // regenerate when the style changes, and this pipeline exists to be re-run.
 
-import { mkdir, readFile, writeFile, readdir, rm, stat } from 'node:fs/promises'
+import { cp, mkdir, readFile, writeFile, readdir, rm, stat } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import path from 'node:path'
 
@@ -104,10 +104,57 @@ export class Catalog {
       seed: spec.seed ?? before.seed ?? null,
       /** the roster entry this came from, when it came from one */
       spec: spec.spec ?? before.spec ?? null,
+      /*
+       * SHARED, OR THIS WORLD'S.
+       *
+       * Rich, 2026-09-28: "we should have a shared vs world concept for assets where you can take
+       * a shared asset and customize it for your world, or create a world-specific asset."
+       *
+       * `null` means shared: every world may place it, and editing it changes it everywhere,
+       * which is right for a fire hydrant and wrong for the diner on the corner of THIS road. A
+       * slug means it belongs to that world and is only offered there. Forking a shared one (see
+       * `fork`) is how the second becomes true of a thing that used to be the first.
+       */
+      world: spec.world === undefined ? (before.world ?? null) : spec.world,
+      /*
+       * WHAT THE BONES ARE FOR, when somebody has said.
+       *
+       * The viewer guesses roles from bone NAMES, which works until it does not: a rig calls its
+       * front wheels `Bone.007`, or calls an excavator's stick an arm. This is the override, and
+       * it is stored with the asset because it is a fact about the model rather than about a level.
+       */
+      rig: spec.rig === undefined ? (before.rig ?? null) : spec.rig,
       updated: new Date().toISOString(),
       history: before.history ?? [],
     }
     await writeFile(file, JSON.stringify(item, null, 2))
+    return this.#withFiles(item)
+  }
+
+  /**
+   * Copy an item, files and all, under a new id.
+   *
+   * FOR CUSTOMISING A SHARED ASSET FOR ONE WORLD. The alternative — a world-specific override
+   * layer pointing at a shared item — means an edit to the shared one silently changes the
+   * customised one underneath, which is exactly what somebody forking it was trying to avoid. A
+   * copy is bytes on a volume and no surprises.
+   */
+  async fork(id, to, world = null) {
+    if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(to ?? '')) throw Object.assign(new Error(`${JSON.stringify(to)} is not a usable id`), { status: 400 })
+    const from = this.dir(id)
+    const dest = this.dir(to)
+    if (!existsSync(from)) throw Object.assign(new Error(`no asset ${id}`), { status: 404 })
+    if (existsSync(dest)) throw Object.assign(new Error(`${to} already exists`), { status: 409 })
+    await cp(from, dest, { recursive: true })
+    const item = JSON.parse(await readFile(path.join(dest, 'item.json'), 'utf8'))
+    item.id = to
+    item.world = world
+    item.forkedFrom = id
+    item.updated = new Date().toISOString()
+    // the provenance says where it came from; a copy with the original's history and none of this
+    // is an asset nobody can explain later
+    item.history = [...(item.history ?? []), { at: item.updated, step: 'fork', from: id, world }]
+    await writeFile(path.join(dest, 'item.json'), JSON.stringify(item, null, 2))
     return this.#withFiles(item)
   }
 

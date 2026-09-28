@@ -262,3 +262,149 @@
   .asset-split { grid-template-columns: 1fr; }
   .asset-list { max-height: 28vh; }
 }
+
+/* ---- the place palette (editor/place.ts) -----------------------------------------------------
+   The preview sits at the top, where the frame warning used to be: what you are about to put in
+   the world matters more than a caveat about a document. */
+/* PINNED, AND THE LIST SCROLLS UNDER IT. The panel is one scrolling column; the preview is the
+   one thing in it that has to stay where it is while you look through forty assets. */
+.palette-preview {
+  position: sticky; top: 0; z-index: 2;
+  display: grid; gap: var(--s2);
+  margin-bottom: var(--s3); padding-bottom: var(--s2);
+  background: var(--bg-1);
+  cursor: grab;
+}
+.palette-close {
+  padding: 0 var(--s1); line-height: 1;
+  background: none; border: 0; border-radius: var(--r1);
+  color: var(--ink-3); font-size: 18px; cursor: pointer;
+}
+.palette-close:hover { color: var(--ink-0); background: var(--bg-2); }
+.palette { max-height: 46vh; overflow-y: auto; align-content: start; }
+.palette-preview:active { cursor: grabbing; }
+.palette-preview .meshview { aspect-ratio: 16 / 10; min-height: 130px; max-height: 190px; }
+.palette-caption { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s2); }
+.palette-find input {
+  width: 100%; padding: var(--s1) var(--s2);
+  background: var(--bg-0); color: var(--ink-1);
+  border: 1px solid var(--line-1); border-radius: var(--r1); font: inherit;
+}
+.chip[draggable='true'] { cursor: grab; }
+.chip.picked { outline: 1px solid var(--accent); }
+/* the frame warning is still true and no longer the loudest thing in the panel */
+.framewarn { font-size: var(--text-xs); padding: var(--s2); }
+.framewarn .dim { display: block; opacity: 0.75; }
+
+/* ---- the asset library, in a pane rather than a dialog ---------------------------------------- */
+.class-tabs { display: flex; flex-wrap: wrap; gap: 2px; }
+.class-tab {
+  display: flex; align-items: center; gap: var(--s1);
+  padding: var(--s1) var(--s2);
+  background: var(--bg-2); border: 1px solid transparent; border-radius: var(--r1);
+  font: inherit; font-size: var(--text-xs); color: var(--ink-2); cursor: pointer;
+}
+.class-tab:hover { color: var(--ink-1); }
+.class-tab.on { background: var(--accent-dim); border-color: var(--accent-line); color: var(--ink-0); }
+.class-tab-n { color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.chip.scope-shared { color: var(--ink-3); }
+.chip.scope-world { color: var(--accent); border-color: var(--accent-line); background: var(--accent-dim); }
+
+/* ---- the rig editor -------------------------------------------------------------------------- */
+.rig-body { display: grid; gap: var(--s3); }
+.rig-rows { max-height: 52vh; overflow-y: auto; }
+.rig-row { display: flex; align-items: center; gap: var(--s2); }
+.rig-bone {
+  flex: 1; min-width: 0; padding: var(--s1) var(--s2); text-align: left;
+  background: none; border: 0; border-radius: var(--r1);
+  font: inherit; font-family: var(--mono, monospace); font-size: var(--text-xs); color: var(--ink-1); cursor: pointer;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.rig-bone:hover { background: var(--bg-2); color: var(--accent); }
+.rig-row .field { flex: none; }
+
+/* ---- BARE CONTROLS IN THE AUTHORING PANELS ---------------------------------------------------
+   Rich, 2026-09-28: "Still got these unstyled form items."
+
+   areas.ts, grow.ts, place.ts and structures.ts build plain `<button>`, `<input>` and `<label>`
+   elements — they predate the shared `button()` helper and there are dozens of them, each with a
+   keyboard hint in its text ("generate (G)", "reseed (1)"). Restyling them one call site at a
+   time is a large diff that changes no behaviour and misses the next one somebody adds; giving
+   the panel's own bare elements the design language covers every one, including the next.
+
+   Scoped to the editor's three mounts, so nothing here can reach the shell's own controls. */
+#se-inspector button:not(.btn):not(.chip):not(.rig-bone):not(.tree-twist):not(.tree-open),
+#se-actions button:not(.btn),
+#se-rail button:not(.btn):not(.seg) {
+  display: inline-flex; align-items: center; gap: var(--s2);
+  padding: 6px var(--s3);
+  font: inherit; font-size: var(--text-sm); font-weight: 500;
+  color: var(--ink-1);
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r2);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease), color var(--dur-1) var(--ease);
+}
+#se-inspector button:not(.btn):hover,
+#se-actions button:not(.btn):hover,
+#se-rail button:not(.btn):not(.seg):hover { background: var(--bg-3); }
+/* `.on` is what these files already set on the current mode and the armed asset */
+#se-inspector button.on:not(.btn):not(.chip),
+#se-actions button.on:not(.btn) { background: var(--accent-dim); border-color: var(--accent-line); color: var(--accent); }
+/* destructive ones say so — `danger` is the class they already use */
+#se-inspector button.danger:not(.btn),
+#se-actions button.danger:not(.btn) {
+  color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, transparent); background: var(--danger-dim);
+}
+#se-inspector button[disabled], #se-actions button[disabled] { opacity: 0.45; cursor: default; }
+
+/* text, number and search boxes that are not in a `.detail` block */
+#se-inspector input[type='text'], #se-inspector input[type='number'], #se-inspector input[type='search'], #se-inspector select {
+  padding: 5px var(--s2);
+  font: inherit; font-family: var(--num); font-size: var(--text-sm);
+  color: var(--ink-1); background: var(--bg-2);
+  border: 1px solid var(--line-2); border-radius: var(--r2);
+}
+#se-inspector input:focus, #se-inspector select:focus { border-color: var(--accent); outline: none; }
+
+/* A CHECKBOX THE SAME SIZE AS THE TEXT BESIDE IT. The default is a 13px system control that
+   inherits none of the page's colours — the one thing in these panels that still looked like a
+   1998 form. `accent-color` is the one line that tints a native checkbox and keeps its semantics. */
+#se-inspector input[type='checkbox'] {
+  appearance: none;
+  width: 15px; height: 15px; flex: none; margin: 0;
+  background: var(--bg-2); border: 1px solid var(--line-2); border-radius: var(--r1);
+  cursor: pointer; position: relative;
+}
+#se-inspector input[type='checkbox']:checked { background: var(--accent); border-color: var(--accent); }
+#se-inspector input[type='checkbox']:checked::after {
+  content: ''; position: absolute; left: 4px; top: 1px;
+  width: 4px; height: 8px;
+  border: solid var(--accent-ink); border-width: 0 2px 2px 0;
+  transform: rotate(42deg);
+}
+#se-inspector input[type='checkbox']:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* the label a checkbox sits in: the two belong on one line, with the box after the words */
+#se-inspector label:has(> input[type='checkbox']) {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--s2);
+  font-size: var(--text-sm); color: var(--ink-2); cursor: pointer;
+}
+
+/* headings inside the panels — `h2` is what these files emit for a section */
+#se-inspector h2 {
+  font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--ink-3); font-weight: 600; margin: var(--s2) 0 0;
+}
+#se-inspector .row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); }
+
+/* two activities, two tabs: picking what to place, and adjusting what you placed */
+.place-tabs { display: flex; gap: 2px; margin-bottom: var(--s2); }
+.place-tab {
+  flex: 1; padding: var(--s2);
+  background: var(--bg-2); border: 1px solid transparent; border-radius: var(--r1);
+  font: inherit; font-size: var(--text-sm); color: var(--ink-2); cursor: pointer;
+}
+.place-tab:hover { color: var(--ink-1); }
+.place-tab.on { background: var(--accent-dim); border-color: var(--accent-line); color: var(--ink-0); font-weight: 500; }

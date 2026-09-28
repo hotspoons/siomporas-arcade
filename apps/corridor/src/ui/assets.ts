@@ -228,12 +228,41 @@ export class AssetCatalog {
       meshBody.append(view.root)
       void view.load(assetsvc.fileUrl(it.id, it.finished ? 'mesh.finished.glb' : 'mesh.glb'))
       view.start()
-      meshBody.append(
-        rowOf(
-          toggle({ label: 'spin', value: true, onChange: (v) => view.setSpin(v) }),
-          toggle({ label: 'wireframe', value: false, onChange: (v) => view.setWireframe(v) }),
-        ),
+      const viewControls = rowOf(
+        toggle({ label: 'spin', value: true, onChange: (v) => view.setSpin(v) }),
+        toggle({ label: 'wireframe', value: false, onChange: (v) => view.setWireframe(v) }),
       )
+      meshBody.append(viewControls)
+      /*
+       * IF IT IS RIGGED, SAY SO — and say what kind of rig.
+       *
+       * A Rigify control rig is around seven hundred bones and only a few dozen deform the mesh;
+       * the rest is IK plumbing and the handles a human grabs in Blender. A character that
+       * arrives with all of them is an AUTHORING rig, not a runtime one, and the difference is
+       * the sort of thing that is discovered much later and much more expensively.
+       *
+       * Added after the load resolves, because whether there is a skeleton is not known until
+       * the glb has been parsed.
+       */
+      void view.loaded.then(() => {
+        const rig = view.rig()
+        if (!rig) {
+          meshBody.append(readout('Rig', 'none'))
+          return
+        }
+        viewControls.append(toggle({ label: 'skeleton', value: false, onChange: (v) => view.setSkeleton(v) }))
+        meshBody.append(readout('Rig', `${rig.convention} · ${rig.bones} bones${rig.skinned ? ' · skinned' : ''}`))
+        if (rig.convention === 'rigify') {
+          meshBody.append(readout('', `${rig.deform} deform · ${rig.control} control · ${rig.mch} mechanism`))
+        }
+        // THE ROLES ARE THE USEFUL PART for anything that is not a character: a car's rig matters
+        // because something can find its four wheels and its steering axis, not because it has
+        // eleven bones.
+        const roles = Object.entries(rig.roles).sort((a, b) => b[1] - a[1])
+        if (roles.length) {
+          meshBody.append(readout('Drives', roles.map(([r, n]) => (n > 1 ? `${n}x ${r}` : r)).join(' · ')))
+        }
+      })
       meshBody.append(readout('Raw mesh', `${(it.mesh / 1e6).toFixed(1)} MB`))
       if (it.finished) meshBody.append(readout('Finished', `${(it.finished / 1e3).toFixed(0)} kB`))
       const links = rowOf()

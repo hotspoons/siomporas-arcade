@@ -26,6 +26,65 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js'
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
 import { el } from './shell'
 
+/**
+ * The roles a game knows how to drive, and the names that mean them.
+ *
+ * Loose on purpose. Exporters disagree about separators and casing — `wheel_FL`, `Wheel.Fl`,
+ * `wheel-front-left` are all the same thing — and a rig that fails to bind because of a full stop
+ * is a bad tool rather than a bad rig. The corner suffixes are matched separately so `wheel` and
+ * `fl` need not be adjacent.
+ */
+const ROLE_PATTERNS: [string, RegExp][] = [
+  ['wheel', /wheel|tyre|tire/],
+  ['steer', /steer/],
+  ['suspension', /susp|damper|shock|strut|axle/],
+  ['door', /door|hatch|tailgate|bonnet|hood|trunk|boot(?!.*strap)/],
+  ['slew', /slew|turret|cab_rot|swing/],
+  ['boom', /boom/],
+  // NOT `arm`. An excavator's second boom section is a "stick" or a "dipper"; `arm` matches
+  // `upper_arm` and `forearm` on every character rig, and because the first pattern wins, a
+  // person's twenty-eight arm bones were being reported as excavator sticks.
+  ['stick', /stick|dipper/],
+  ['bucket', /bucket|blade|scoop|claw|grap/],
+  ['rotor', /rotor|blade_main|tail_rotor/],
+  ['propeller', /prop(?!erty)|airscrew/],
+  ['control-surface', /aileron|elevator|rudder|flap|canard/],
+  ['spine', /spine|torso|chest|hips|pelvis/],
+  ['limb', /arm|leg|hand|foot|thigh|shin|forearm|shoulder/],
+  ['head', /head|neck|jaw|eye/],
+]
+
+/** Which named roles a bone list contains, and how many bones claim each. */
+function matchRoles(names: string[]): Map<string, number> {
+  const out = new Map<string, number>()
+  for (const raw of names) {
+    // strip Rigify's machinery prefixes before matching: MCH-thigh is plumbing, not a limb
+    if (/^(MCH|ORG)-/.test(raw)) continue
+    const n = raw.toLowerCase().replace(/[.\-\s]+/g, '_')
+    for (const [role, re] of ROLE_PATTERNS) {
+      if (re.test(n)) {
+        out.set(role, (out.get(role) ?? 0) + 1)
+        break // first match wins: a name matches one role, not four
+      }
+    }
+  }
+  return out
+}
+
+export interface RigInfo {
+  bones: number
+  skinned: boolean
+  /** rigify = a character authoring rig; named = roles were recognised; flat = neither */
+  convention: 'rigify' | 'named' | 'flat'
+  deform: number
+  org: number
+  mch: number
+  control: number
+  /** role -> how many bones claim it, e.g. { wheel: 4, steer: 1 } */
+  roles: Record<string, number>
+  names: string[]
+}
+
 export interface MeshViewOpts {
   /** spin the model. On by default: a still three-quarter view hides the far flank. */
   spin?: boolean
@@ -45,9 +104,21 @@ export class MeshView {
   private readonly observer: ResizeObserver
   private spin: boolean
   private running = false
+  /** resolves when the current `load()` has settled, so a caller can inspect what arrived */
+  loaded: Promise<void> = Promise.resolve()
   private disposed = false
   /** the size of the last thing loaded, in metres — the caller shows it */
   size: THREE.Vector3 | null = null
+  private skeletonHelper: THREE.SkeletonHelper | null = null
+  private skinned: THREE.SkinnedMesh | null = null
+  /**
+   * Bones found OUTSIDE a skin.
+   *
+   * A character is skinned: its mesh deforms with the bones. A car is not — its wheels are
+   * separate meshes parented to nodes that rotate, which is a rig with no skinning anywhere in
+   * it. Looking only at `skeleton.bones` finds nothing on a vehicle and reports it unrigged.
+   */
+  private boneRoots: THREE.Object3D[] = []
 
   constructor(o: MeshViewOpts = {}) {
     this.spin = o.spin ?? true
@@ -115,6 +186,74 @@ export class MeshView {
     this.spin = on
   }
 
+  /**
+   * Show the skeleton over the mesh.
+   *
+   * Only meaningful for a character. `SkeletonHelper` draws every bone in the hierarchy, which on
+   * a Rigify rig is seven hundred of them — see `rig()` for why that number is not a mistake.
+   */
+  setSkeleton(on: boolean) {
+    const from = this.skinned
+      ? this.skinned.skeleton.bones[0]?.parent ?? this.skinned
+      : this.boneRoots[0]?.parent ?? this.boneRoots[0]
+    if (on && !this.skeletonHelper && from) {
+      const h = new THREE.SkeletonHelper(from)
+      // over the mesh rather than inside it: a skeleton hidden by the skin it drives is no help
+      const m = h.material as THREE.LineBasicMaterial
+      m.depthTest = false
+      m.transparent = true
+      m.opacity = 0.9
+      h.renderOrder = 2
+      this.skeletonHelper = h
+      this.pivot.add(h)
+    }
+    if (this.skeletonHelper) this.skeletonHelper.visible = on
+  }
+
+  /**
+   * What kind of rig this is.
+   *
+   * NOT CHARACTERS ONLY. Rich, 2026-09-28: "we want to also make this work to rig vehicles
+   * (suspension, wheels) and potentially things like an excavator, basically anything we are
+   * building into our asset lib." Those are rigs in exactly the sense that matters — a named
+   * hierarchy the game drives — and they look nothing like a character rig:
+   *
+   *   a character   700 bones, four naming classes, a skinned mesh, weights that matter
+   *   a car         a dozen: four wheels, a steering axis, four suspension travels, doors
+   *   an excavator  a kinematic chain: slew, boom, stick, bucket
+   *
+   * So there are two questions, and only the first is about counting. **Which convention is
+   * this**, and **which bones have ROLES the game knows how to drive**. A car's rig is useless
+   * unless something can find the front-left wheel; the fact that it has eleven bones is not the
+   * interesting part.
+   *
+   * Roles are matched on the name, because that is all a glb carries. The patterns are
+   * deliberately loose — exporters disagree about separators and casing, and a rig that fails to
+   * bind because somebody wrote `Wheel.FL` instead of `wheel_fl` is a bad tool, not a bad rig.
+   */
+  rig(): RigInfo | null {
+    if (!this.skinned && !this.boneRoots.length) return null
+    const bones = this.skinned
+      ? this.skinned.skeleton.bones.map((b) => b.name)
+      : this.boneRoots.map((b) => b.name)
+    const count = (p: string) => bones.filter((n) => n.startsWith(p)).length
+    const deform = count('DEF-')
+    const org = count('ORG-')
+    const mch = count('MCH-')
+    // Rigify is unmistakable: no other convention emits these three prefixes together.
+    const rigify = deform > 0 && mch > 0
+    const roles = matchRoles(bones)
+    return {
+      bones: bones.length,
+      skinned: !!this.skinned,
+      convention: rigify ? 'rigify' : roles.size ? 'named' : 'flat',
+      // only meaningful for rigify; zero elsewhere, and the caller does not show them
+      deform, org, mch, control: bones.length - deform - org - mch,
+      roles: Object.fromEntries(roles),
+      names: bones,
+    }
+  }
+
   setWireframe(on: boolean) {
     this.pivot.traverse((o) => {
       const m = (o as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined
@@ -123,7 +262,12 @@ export class MeshView {
   }
 
   /** Load a .glb. Rejects loudly in the panel rather than leaving an empty stage. */
-  async load(url: string): Promise<void> {
+  load(url: string): Promise<void> {
+    this.loaded = this.#load(url)
+    return this.loaded
+  }
+
+  async #load(url: string): Promise<void> {
     this.clear()
     this.say('loading…')
     try {
@@ -137,6 +281,14 @@ export class MeshView {
         // Glass keeps both faces; everything else is front-only so the inside of the shell does
         // not z-fight through the paint.
         if (!(m && m.transmission > 0)) m.side = THREE.FrontSide
+      })
+      // Find the skinned mesh, if this is a character rather than a prop.
+      this.skinned = null
+      this.boneRoots = []
+      root.traverse((o) => {
+        const sm = o as THREE.SkinnedMesh
+        if (sm.isSkinnedMesh && !this.skinned) this.skinned = sm
+        if ((o as THREE.Bone).isBone) this.boneRoots.push(o)
       })
       const box = new THREE.Box3().setFromObject(root)
       const centre = box.getCenter(new THREE.Vector3())
@@ -161,6 +313,9 @@ export class MeshView {
 
   clear() {
     this.pivot.clear()
+    this.skeletonHelper = null
+    this.skinned = null
+    this.boneRoots = []
     this.size = null
   }
 

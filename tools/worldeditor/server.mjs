@@ -37,6 +37,7 @@ import * as levels from './levels.mjs'
 import { GitRepo, scan as gitScan } from './gitrepo.mjs'
 import { Platform } from './platform.mjs'
 import { attachAgentRelay } from './agentws.mjs'
+import * as mcp from './mcp.mjs'
 import * as training from './training.mjs'
 import { Overpass, PUBLIC_MIRRORS } from './overpass.mjs'
 import { Tiles } from './tiles.mjs'
@@ -92,6 +93,20 @@ await captures.init()
 const store = new Store(DATA)
 /** The platform, for the agent picker and the tunnel relay. Holds the PAT; see platform.mjs. */
 const platform = new Platform(DATA)
+
+/**
+ * Where an agent reaches this editor's MCP server.
+ *
+ * From the REQUEST's own host, not a configured one: in a cluster this service is reached by a
+ * name only the cluster knows, and a hard-coded `localhost` would be a URL that works on a laptop
+ * and resolves to the agent's own pod everywhere else. `WORLDEDITOR_PUBLIC_URL` overrides it for
+ * the case where the agent comes in by a different route than the browser does.
+ */
+function mcpUrl(req) {
+  if (env.WORLDEDITOR_PUBLIC_URL) return `${env.WORLDEDITOR_PUBLIC_URL.replace(/\/$/, '')}/api/agent/mcp`
+  const host = req.headers.host ?? `localhost:${PORT}`
+  return `http://${host}/api/agent/mcp`
+}
 store.catalogSeed = path.join(REPO, 'apps/corridor/public/assets/catalog.json')
 await store.init()
 /*
@@ -819,6 +834,33 @@ async function api(req, res, seg, q) {
       if (seg[1] === 'credential') {
         if (req.method === 'PUT') return json(res, 200, await platform.set(await readJson(req)))
         if (req.method === 'DELETE') return json(res, 200, await platform.clear())
+      }
+      /*
+       * THE MCP SERVER, and what a session should be told about it.
+       *
+       * `GET /api/agent/mcp` answers with the `mcpServers` entry to put in `session/new` — the
+       * editor's own documents as tools, for an agent whose harness prefers tools to a filesystem
+       * or which has no page attached. It is CONFIGURATION rather than a constant because the
+       * command that bridges a stdio-only client to an HTTP server depends on what the agent's
+       * image has; `WORLDEDITOR_MCP_COMMAND` names it, and with nothing set nothing is injected.
+       */
+      if (seg[1] === 'mcp' && req.method === 'GET') {
+        const command = env.WORLDEDITOR_MCP_COMMAND
+        if (!command) return json(res, 200, { servers: [], url: mcpUrl(req), why: 'set WORLDEDITOR_MCP_COMMAND to inject this editor as an MCP server' })
+        return json(res, 200, {
+          url: mcpUrl(req),
+          servers: [{
+            name: 'corridor-world-editor',
+            command,
+            args: (env.WORLDEDITOR_MCP_ARGS ?? mcpUrl(req)).split(' ').filter(Boolean),
+          }],
+        })
+      }
+      if (seg[1] === 'mcp' && req.method === 'POST') {
+        const out = await mcp.handle(await readJson(req), { root: store.root, store, levels })
+        // a JSON-RPC notification has no reply, and 202 with an empty body is what says so
+        if (!out) { res.writeHead(202, CORS); res.end(); return }
+        return json(res, 200, out)
       }
       if (seg[1] === 'agents' && req.method === 'GET') {
         // `q`, not `url`: this is `api(req, res, seg, q)` and the URL object belongs to the

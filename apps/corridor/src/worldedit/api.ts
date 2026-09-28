@@ -413,6 +413,8 @@ export const api = {
   /* ---- the agent: the platform's deployments, and a tunnel to one (tools/worldeditor/platform.mjs) ---- */
   agentPlatform: () => call<{ set: boolean; base: string | null; user: string | null }>('/api/agent'),
   agentDeployments: () => call<{ agents: { name: string; namespace?: string; phase?: string }[] }>('/api/agent/agents'),
+  /** the editor as an MCP server, if the service is configured to offer itself as one */
+  agentMcp: () => call<{ servers: { name: string; command: string; args?: string[] }[]; url: string; why?: string }>('/api/agent/mcp'),
   /** write-only: the personal access token goes up and nothing brings it back */
   setAgentCredential: (body: { base: string; token: string; user?: string }) =>
     call<{ set: boolean; base: string | null }>('/api/agent/credential', { method: 'PUT', body: JSON.stringify(body) }),

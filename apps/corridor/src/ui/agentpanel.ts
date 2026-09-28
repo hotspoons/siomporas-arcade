@@ -47,6 +47,7 @@ export class AgentPanel {
   private detail = ''
   private entries: Entry[] = []
   private out: HTMLElement | null = null
+  private mcp: { servers: { name: string }[]; url: string; why?: string } | null = null
 
   constructor(o: AgentPanelOpts) {
     this.o = o
@@ -57,6 +58,7 @@ export class AgentPanel {
     if (this.platform?.set && !this.agents.length) {
       this.agents = await api.agentDeployments().then((r) => r.agents).catch(() => [])
     }
+    this.mcp ??= await api.agentMcp().catch(() => null)
     this.draw()
   }
 
@@ -215,6 +217,7 @@ export class AgentPanel {
       },
       onState: (s, d) => { this.state = s; this.detail = d ?? ''; this.draw() },
       ask: (q) => this.permission(q),
+      mcpServers: () => api.agentMcp().then((r) => r.servers).catch(() => []),
     })
     try {
       await this.session.connect({ kind: 'agent', namespace: a.namespace ?? '', name: a.name })

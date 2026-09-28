@@ -16,7 +16,7 @@
 // PERMISSION IS NOT AUTOMATIC. `session/request_permission` is answered by asking, because the
 // thing on the other end is about to edit a world. The one exception is a read, which cannot
 // damage anything and would otherwise put a dialog in front of every file an agent looks at.
-import { PROTOCOL_VERSION, type ContentBlock, type SessionNotification, type SessionUpdate } from './acp'
+import { PROTOCOL_VERSION, type ContentBlock, type McpServerConfig, type SessionNotification, type SessionUpdate } from './acp'
 import { JsonRpcPeer, type JsonRpcTransport } from './rpc'
 import { EDITOR_CAPABILITIES, type Shell } from './shell'
 
@@ -76,6 +76,8 @@ export interface SessionOpts {
   onState: (s: 'connecting' | 'ready' | 'thinking' | 'closed' | 'failed', detail?: string) => void
   /** what an agent may do to the documents; returns which option id was chosen */
   ask: (q: { title: string; detail: string; options: { id: string; name: string; kind: string }[] }) => Promise<string | null>
+  /** the MCP servers to hand the session, if the service has any configured */
+  mcpServers?: () => Promise<McpServerConfig[]>
 }
 
 const text = (blocks: ContentBlock[] | undefined) =>
@@ -136,9 +138,18 @@ export class Session {
     })
     this.o.onEntry({ kind: 'note', text: `connected — protocol v${init.protocolVersion}` })
 
+    /*
+     * MCP INJECTION. The editor offers itself as a tool server as well as a filesystem, and the
+     * service says how to reach it — the command that bridges a stdio-only client to an HTTP
+     * server depends on what the agent's image has, so it is configuration and not a constant.
+     * With nothing configured the list is empty and the agent has the shell's files, which is the
+     * surface this panel is built around anyway.
+     */
+    const mcpServers = await this.o.mcpServers?.().catch(() => []) ?? []
+    if (mcpServers.length) this.o.onEntry({ kind: 'note', text: `tools: ${mcpServers.map((m) => m.name).join(', ')}` })
     const s = await peer.request<{ sessionId: string }>('session/new', {
       cwd: this.o.cwd ?? '/workspace',
-      mcpServers: [],
+      mcpServers,
     })
     this.id = s.sessionId
     this.o.onState('ready')

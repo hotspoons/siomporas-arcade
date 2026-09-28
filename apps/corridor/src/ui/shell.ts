@@ -118,6 +118,17 @@ export class Tabs {
 
 /* ------------------------------------------------------------------------------------------- */
 
+/**
+ * The open lightbox, if any. It sits ON TOP of a dialog, so Escape belongs to it first.
+ *
+ * Registered here rather than handled in the lightbox's own listener, because the app's Escape
+ * handler is installed on `window` in the CAPTURE phase at start-up — and two capture listeners
+ * on the same target run in REGISTRATION order, so a listener added later cannot get in front of
+ * it. `stopImmediatePropagation` from the second one is too late: the first has already closed
+ * the dialog. One handler that knows what is on top is the design this file already claims.
+ */
+let openLightbox: (() => void) | null = null
+
 /** The one open dialog, if any — so Escape and the scrim know what they are closing. */
 let openDialog: Dialog | null = null
 
@@ -556,7 +567,10 @@ export function installShellKeys(drawer: () => Drawer | null) {
     (e) => {
       if (e.key !== 'Escape') return
       const d = drawer()
-      if (openDialog) {
+      if (openLightbox) {
+        openLightbox()
+        e.stopPropagation()
+      } else if (openDialog) {
         openDialog.close()
         e.stopPropagation()
       } else if (d?.open) {
@@ -573,4 +587,97 @@ export function typing(e: KeyboardEvent): boolean {
   const t = e.target as HTMLElement | null
   if (!t) return false
   return t.isContentEditable || /^(input|select|textarea)$/i.test(t.tagName)
+}
+
+/*
+ * A LIGHTBOX. Click a thumbnail, see the thing.
+ *
+ * Rich, 2026-09-28: "clicking a thumbnail should open it in a lightbox from that interface".
+ *
+ * Thumbnails in these panels are ~90 px wide and the things they stand for are decisions — which
+ * of six drawings gets reconstructed into a mesh. You cannot make that decision at 90 px, and the
+ * only way to see one properly was to open the file URL in another tab.
+ *
+ * It takes a LIST and an index rather than one image, because the decision is a comparison: the
+ * arrow keys step through the set without going back to the grid between each one.
+ */
+export interface LightboxItem {
+  src: string
+  caption?: string
+  /** marked as the current choice, whatever "choice" means to the caller */
+  current?: boolean
+}
+
+export function lightbox(o: {
+  items: LightboxItem[]
+  index?: number
+  /** an action on the item being looked at — "use this one", say. Closes after it runs. */
+  action?: { label: string; icon?: IconName; onPick: (index: number) => void }
+}): void {
+  if (!o.items.length) return
+  let i = Math.min(Math.max(0, o.index ?? 0), o.items.length - 1)
+
+  const root = el('div', 'lightbox')
+  const figure = el('figure', 'lightbox-figure')
+  const img = el('img', 'lightbox-img')
+  const cap = el('figcaption', 'lightbox-cap')
+  figure.append(img, cap)
+
+  const close = () => {
+    removeEventListener('keydown', onKey, true)
+    if (openLightbox === close) openLightbox = null
+    root.classList.remove('in')
+    setTimeout(() => root.remove(), 200)
+  }
+  const step = (by: number) => {
+    i = (i + by + o.items.length) % o.items.length
+    show()
+  }
+  function show() {
+    const item = o.items[i]
+    img.src = item.src
+    img.alt = item.caption ?? ''
+    cap.textContent = [item.caption, o.items.length > 1 ? `${i + 1} of ${o.items.length}` : '']
+      .filter(Boolean).join(' · ')
+    pick?.classList.toggle('hidden', !!item.current)
+  }
+  function onKey(e: KeyboardEvent) {
+    // Escape is NOT handled here — see `openLightbox`. The app's handler runs first whatever this
+    // one does, so it is the one that has to know a lightbox is on top.
+    if (e.key === 'ArrowRight') { e.preventDefault(); step(1) }
+    else if (e.key === 'ArrowLeft') { e.preventDefault(); step(-1) }
+    else return
+  }
+
+  const bar = el('div', 'lightbox-bar')
+  let pick: HTMLButtonElement | null = null
+  if (o.action) {
+    pick = button({
+      label: o.action.label,
+      icon: o.action.icon,
+      variant: 'primary',
+      onClick: () => { o.action!.onPick(i); close() },
+    })
+    bar.append(pick)
+  }
+  bar.append(button({ icon: 'x-mark', variant: 'ghost', title: 'close', key: 'Esc', onClick: close }))
+
+  if (o.items.length > 1) {
+    root.append(
+      button({ icon: 'chevron-left', variant: 'ghost', title: 'previous', onClick: () => step(-1) }),
+    )
+  }
+  root.append(figure, bar)
+  if (o.items.length > 1) {
+    root.append(button({ icon: 'chevron-right', variant: 'ghost', title: 'next', onClick: () => step(1) }))
+  }
+  // A click on the backdrop closes; one on the picture does not, so dragging to compare is safe.
+  root.addEventListener('pointerdown', (e) => { if (e.target === root) close() })
+  // CAPTURE, because the editors bind their own Escape and arrow handlers on window and the
+  // lightbox is on top of whatever raised it — the keys belong to it while it is open.
+  addEventListener('keydown', onKey, true)
+  openLightbox = close
+  document.body.append(root)
+  show()
+  requestAnimationFrame(() => root.classList.add('in'))
 }

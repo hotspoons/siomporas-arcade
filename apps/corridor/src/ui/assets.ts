@@ -8,7 +8,7 @@
 // which image model draws the view and which reconstructor meshes it is the service's business and
 // is shown, read-only, under Service so that a person can see what they are about to spend a
 // GPU-minute on.
-import { Dialog, Tabs, ask, button, confirm, el, toast, type Tab } from './shell'
+import { Dialog, Tabs, ask, button, confirm, el, lightbox, toast, type Tab } from './shell'
 import { icon } from './icons'
 import { bodyOf, empty, group, readout, textField } from './controls'
 import { assetsvc, type AssetItem, type AssetJob, type ModelRoster } from '../assetsvc'
@@ -159,8 +159,29 @@ export class AssetCatalog {
         img.src = assetsvc.fileUrl(it.id, `views/${v}`)
         img.loading = 'lazy'
         a.append(img)
-        a.title = `${v}${v === it.chosen ? ' — the one that will be meshed' : ' — click to choose for meshing'}`
-        a.onclick = () => void this.save(it.id, { chosen: v })
+        /*
+         * CLICK OPENS IT; the choice is made from inside.
+         *
+         * A click used to pick the view for meshing straight from the grid — a decision about
+         * which of six drawings becomes a mesh, taken at ninety pixels wide, with no way to see
+         * one properly short of opening its file URL in another tab. The lightbox carries the
+         * whole set so the comparison can be made with the arrow keys, and the choice is a button
+         * in it rather than a side effect of looking.
+         */
+        a.title = v === it.chosen ? `${v} — the one that will be meshed` : v
+        a.onclick = () => lightbox({
+          items: it.views.map((name) => ({
+            src: assetsvc.fileUrl(it.id, `views/${name}`),
+            caption: name === it.chosen ? `${name} — will be meshed` : name,
+            current: name === it.chosen,
+          })),
+          index: it.views.indexOf(v),
+          action: {
+            label: 'Mesh this one',
+            icon: 'cube',
+            onPick: (idx) => void this.save(it.id, { chosen: it.views[idx] }),
+          },
+        })
         strip.append(a)
       }
       drawnBody.append(strip)

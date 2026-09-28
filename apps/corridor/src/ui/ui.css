@@ -496,3 +496,23 @@ body.chrome-off #chrome-restore { display: block; }
 
 .group.invalid .group-head { color: var(--danger); }
 .group-error { margin: 0 0 var(--s2); color: var(--danger); font-size: var(--text-xs); }
+
+/* the lightbox */
+.lightbox {
+  position: fixed; inset: 0; z-index: calc(var(--z-modal) + 10);
+  display: flex; align-items: center; justify-content: center; gap: var(--s3);
+  padding: var(--s5);
+  background: rgb(0 0 0 / 82%);
+  opacity: 0; transition: opacity var(--dur-2, 160ms) ease;
+}
+.lightbox.in { opacity: 1; }
+.lightbox-figure { margin: 0; display: flex; flex-direction: column; align-items: center; gap: var(--s2); min-width: 0; }
+.lightbox-img {
+  max-width: min(86vw, 1400px); max-height: 80vh;
+  object-fit: contain; border-radius: var(--r2);
+  background: var(--bg-0); box-shadow: var(--shadow-3);
+}
+.lightbox-cap { color: var(--ink-2); font-size: var(--text-sm); text-align: center; }
+.lightbox-bar { position: absolute; top: var(--s4); right: var(--s4); display: flex; gap: var(--s2); }
+.lightbox-bar .btn.hidden { display: none; }
+.lightbox > .btn { flex: none; color: var(--ink-1); }

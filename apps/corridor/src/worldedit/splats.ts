@@ -180,13 +180,23 @@ export class SplatsPanel {
   private async start() {
     const cap = this.open?.capture
     if (!cap) return
-    const gpus = await api.trainingGpus().catch(() => ({ free: 0, total: 0, why: 'could not ask the scheduler' }))
-    const workers = Math.max(0, Math.min(this.workers, Math.max(0, gpus.free - 1)))
+    const gpus = await api.trainingGpus().catch(() => ({ free: 0, total: 0, known: false, why: 'could not ask the scheduler' }))
+    /*
+     * AN UNKNOWN COUNT IS NOT ZERO.
+     *
+     * Listing nodes is cluster-scoped and the chart's Role is namespaced, so unless it was
+     * installed with gpuVisibility the answer is "could not ask" — and treating that as "no GPUs
+     * free" would quietly refuse to fan any run out, forever, on a cluster with eight idle GPUs.
+     * When the count is unknown the person's own number stands and the dialog says why.
+     */
+    const workers = gpus.known === false ? this.workers : Math.max(0, Math.min(this.workers, Math.max(0, gpus.free - 1)))
     const yes = await confirm({
       title: `Start a splat run on ${cap.id}?`,
-      message: workers === this.workers
-        ? `A leader and ${workers} worker${workers === 1 ? '' : 's'}. ${gpus.free} of ${gpus.total} GPUs are free.`
-        : `Only ${gpus.free} of ${gpus.total} GPUs are free, so this will run a leader and ${workers} worker${workers === 1 ? '' : 's'} rather than ${this.workers}. Extra workers would sit idle, not fail — but they would hold GPUs.`,
+      message: gpus.known === false
+        ? `A leader and ${workers} worker${workers === 1 ? '' : 's'}. Free GPUs are unknown — ${gpus.why}. Extra workers sit idle rather than failing, but they do hold a GPU.`
+        : workers === this.workers
+          ? `A leader and ${workers} worker${workers === 1 ? '' : 's'}. ${gpus.free} of ${gpus.total} GPUs are free.`
+          : `Only ${gpus.free} of ${gpus.total} GPUs are free, so this will run a leader and ${workers} worker${workers === 1 ? '' : 's'} rather than ${this.workers}. Extra workers would sit idle, not fail — but they would hold GPUs.`,
       ok: 'Start it',
     })
     if (!yes) return

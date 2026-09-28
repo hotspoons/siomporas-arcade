@@ -542,7 +542,16 @@ const GPU_RESOURCE = /(^|\/)(gpu|gaudi|i915|xe)s?$|gpu\.intel\.com|habana\.ai/i
 
 export async function gpuResources(k8s) {
   if (!k8s?.usable?.()) return []
-  const nodes = await k8s.raw('GET', '/api/v1/nodes').catch(() => ({ items: [] }))
+  /*
+   * A REFUSAL IS NOT AN EMPTY CLUSTER.
+   *
+   * Listing nodes is cluster-scoped, and this pod's Role is namespaced by default — so without
+   * the opt-in ClusterRole this 403s, and swallowing that reported "0 free of 0" on an
+   * eight-GPU cluster. That is the silent-success failure this codebase keeps meeting: an
+   * answer that is indistinguishable from a true one and is not. It throws now, and the caller
+   * says it could not ask.
+   */
+  const nodes = await k8s.raw('GET', '/api/v1/nodes')
   const found = new Set()
   for (const node of nodes.items ?? []) {
     for (const [k, v] of Object.entries(node.status?.allocatable ?? {})) {
@@ -559,10 +568,22 @@ export async function gpuResources(k8s) {
  * `resource` omitted means "whatever this cluster has", summed across every kind it advertises.
  */
 export async function freeGpus(k8s, { resource = null } = {}) {
-  if (!k8s?.usable?.()) return { free: 0, total: 0, why: 'not running in a cluster' }
+  if (!k8s?.usable?.()) return { free: 0, total: 0, known: false, why: 'not running in a cluster' }
   const num = (v) => (v == null ? 0 : Number(String(v).replace(/[^0-9.]/g, '')) || 0)
-  const kinds = resource ? [resource] : await gpuResources(k8s)
-  if (!kinds.length) return { free: 0, total: 0, resources: [], why: 'no nodes advertise a GPU resource' }
+  let kinds
+  try {
+    kinds = resource ? [resource] : await gpuResources(k8s)
+  } catch (e) {
+    // `known: false` is the load-bearing field. A caller that treats this as "no GPUs" would
+    // silently refuse to fan a run out; one that reads `known` offers what was asked for instead.
+    return {
+      free: 0, total: 0, known: false,
+      why: /forbidden|403/i.test(String(e.message ?? e))
+        ? 'this service may not list nodes — install the chart with gpuVisibility=true to count free GPUs'
+        : `could not ask the scheduler: ${e.message ?? e}`,
+    }
+  }
+  if (!kinds.length) return { free: 0, total: 0, known: true, resources: [], why: 'no nodes advertise a GPU resource' }
   const nodes = await k8s.raw('GET', '/api/v1/nodes')
   let total = 0
   for (const node of nodes.items ?? []) {
@@ -576,7 +597,7 @@ export async function freeGpus(k8s, { resource = null } = {}) {
       for (const k of kinds) used += num(c.resources?.limits?.[k] ?? c.resources?.requests?.[k])
     }
   }
-  return { free: Math.max(0, total - used), total, used, resources: kinds }
+  return { free: Math.max(0, total - used), total, used, known: true, resources: kinds }
 }
 
 /** Where a run's object lives, whichever kind it is. */

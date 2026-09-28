@@ -266,3 +266,24 @@ test('what the run was asked to accept is written on the object', () => {
   assert.equal(m.metadata.annotations['corridor.seam-fail-over'], '1.5')
   assert.equal(m.metadata.annotations['corridor.code-sha'], 'deadbee')
 })
+
+test('a refusal to list nodes is not reported as an empty cluster', async () => {
+  // Listing nodes is cluster-scoped and this pod's Role is namespaced by default, so without the
+  // opt-in ClusterRole it 403s. Swallowing that reported "0 free of 0" on an eight-GPU cluster —
+  // an answer indistinguishable from a true one, and not one.
+  const forbidden = {
+    usable: () => true,
+    namespace: 'default',
+    raw: async () => { throw Object.assign(new Error('nodes is forbidden: User cannot list resource "nodes"'), { status: 403 }) },
+  }
+  const r = await freeGpus(forbidden)
+  assert.equal(r.known, false, 'the count must declare itself unknown')
+  assert.match(r.why, /gpuVisibility/, 'and say what would fix it')
+})
+
+test('an actually empty cluster says so, and says it KNOWS', async () => {
+  const r = await freeGpus(fake([node({})]))
+  assert.equal(r.known, true, 'nothing was refused; this answer is real')
+  assert.equal(r.total, 0)
+  assert.match(r.why, /no nodes advertise/)
+})

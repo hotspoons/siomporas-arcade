@@ -440,7 +440,8 @@ export const api = {
   trainingPreview: (body: Record<string, unknown>, as?: string) =>
     call<{ via: string; kind: string; manifest: unknown }>(`/api/training/preview${as ? `?as=${as}` : ''}`, { method: 'POST', body: JSON.stringify(body) }),
   /** Free GPUs, asked of the scheduler. The worker count is a function of this, not of the footage. */
-  trainingGpus: () => call<{ free: number; total: number; used?: number; why?: string }>('/api/training/gpus'),
+  /** `known: false` means the count could not be taken — which is not the same as zero free. */
+  trainingGpus: () => call<{ free: number; total: number; used?: number; known?: boolean; resources?: string[]; why?: string }>('/api/training/gpus'),
   startTraining: (body: Record<string, unknown>) =>
     call<{ run: TrainingRun }>('/api/training/runs', { method: 'POST', body: JSON.stringify(body) }),
   trainingRuns: () => call<{ runs: TrainingRun[] }>('/api/training/runs'),

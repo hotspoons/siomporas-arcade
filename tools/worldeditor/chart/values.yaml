@@ -169,3 +169,10 @@ splat:
   # image. Empty means no check — and a job running stale code does not fail, it succeeds and
   # hands back a plausible wrong number, so set this whenever the PVC path is in use.
   codeSha: ""
+
+# Let the editor count free GPUs across the cluster, to size a splat run's worker fan-out.
+#
+# This is a CLUSTER-scoped read of nodes and of pods in every namespace, which is a wider grant
+# than anything else this chart asks for — so it is opt-in. Off, the editor says it could not ask
+# rather than reporting zero, and the worker count is whatever the person chose.
+gpuVisibility: false

@@ -62,3 +62,45 @@ subjects:
     namespace: {{ .Release.Namespace }}
 {{- end }}
 {{- end }}
+{{- if .Values.gpuVisibility }}
+---
+# COUNTING FREE GPUs NEEDS TO SEE THE WHOLE CLUSTER, and that is a bigger grant than everything
+# above it, so it is opt-in and separate.
+#
+# Nodes are cluster-scoped, and a GPU held by another team's pod in another namespace is still
+# held — so an accurate count needs `nodes` and `pods` across all namespaces. The namespaced Role
+# above cannot express either.
+#
+# WITHOUT IT THE ANSWER IS NOT WRONG, IT IS ABSENT: the service reports that it could not ask,
+# rather than reporting zero free GPUs, because "0 free of 0" on an eight-GPU cluster is the
+# silent-success failure this codebase keeps running into. The worker count then falls back to
+# what the person asked for.
+#
+# Read only. Nothing here can change a node or a pod.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "worldeditor.fullname" . }}-gpu-visibility
+  labels: {{- include "worldeditor.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "worldeditor.fullname" . }}-gpu-visibility
+  labels: {{- include "worldeditor.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "worldeditor.fullname" . }}-gpu-visibility
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.serviceAccount.name | default (include "worldeditor.fullname" .) }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

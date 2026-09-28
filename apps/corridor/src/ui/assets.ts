@@ -10,7 +10,8 @@
 // GPU-minute on.
 import { Dialog, Tabs, ask, button, confirm, el, lightbox, toast, type Tab } from './shell'
 import { icon } from './icons'
-import { bodyOf, empty, group, readout, textField } from './controls'
+import { bodyOf, empty, group, readout, textField, toggle } from './controls'
+import { MeshView } from './meshview'
 import { assetsvc, type AssetItem, type AssetJob, type ModelRoster } from '../assetsvc'
 
 const STATE_LABEL: Record<AssetItem['state'], string> = {
@@ -27,6 +28,8 @@ export class AssetCatalog {
   private roster: ModelRoster | null = null
   private reachable = false
   private selected: string | null = null
+  /** the 3D preview, one at a time — a WebGL context per click exhausts the browser's supply */
+  private mesh3d: MeshView | null = null
   private listHost = el('div', 'asset-list')
   private detailHost = el('div', 'asset-detail')
 
@@ -36,7 +39,13 @@ export class AssetCatalog {
       { id: 'service', label: 'Service', icon: 'beaker', build: (h) => void this.buildService(h) },
     ]
     this.tabs = new Tabs(tabs)
-    this.dialog = new Dialog({ title: 'Assets', icon: 'cube', size: 'lg' })
+    // A closed dialog must give its WebGL context back. Browsers cap live contexts (around
+    // sixteen in Chromium) and silently lose the oldest when you go over, so a preview left
+    // running behind a closed panel eventually kills the viewer in another tab of the same app.
+    this.dialog = new Dialog({
+      title: 'Assets', icon: 'cube', size: 'lg',
+      onClose: () => { this.mesh3d?.dispose(); this.mesh3d = null },
+    })
     this.dialog.body.append(this.tabs.root)
     this.dialog.body.classList.add('asset-body')
     this.dialog.footer(
@@ -200,6 +209,31 @@ export class AssetCatalog {
     const meshed = group('3 · Meshed')
     const meshBody = bodyOf(meshed)
     if (it.mesh) {
+      /*
+       * THE MESH, IN 3D, HERE.
+       *
+       * This used to be two file sizes and a download link — so the only way to see whether a
+       * reconstruction was any good was to download it and open it in something else. The viewer
+       * came from ext/assetlib, which was a separate process on a separate port behind a tunnel,
+       * and `ext/*` is gitignored so it does not survive a clone.
+       *
+       * One MeshView per panel render, disposed with the panel: a WebGL context is not free and
+       * leaking one per click is how a tab runs out of them (browsers cap it around sixteen).
+       */
+      this.mesh3d?.dispose()
+      const view = new MeshView()
+      this.mesh3d = view
+      // for probes: the one preview currently on screen
+      ;(window as unknown as { __meshview?: MeshView }).__meshview = view
+      meshBody.append(view.root)
+      void view.load(assetsvc.fileUrl(it.id, it.finished ? 'mesh.finished.glb' : 'mesh.glb'))
+      view.start()
+      meshBody.append(
+        rowOf(
+          toggle({ label: 'spin', value: true, onChange: (v) => view.setSpin(v) }),
+          toggle({ label: 'wireframe', value: false, onChange: (v) => view.setWireframe(v) }),
+        ),
+      )
       meshBody.append(readout('Raw mesh', `${(it.mesh / 1e6).toFixed(1)} MB`))
       if (it.finished) meshBody.append(readout('Finished', `${(it.finished / 1e3).toFixed(0)} kB`))
       const links = rowOf()
@@ -210,6 +244,8 @@ export class AssetCatalog {
       links.append(a)
       meshBody.append(links)
     } else {
+      this.mesh3d?.dispose()
+      this.mesh3d = null
       meshBody.append(empty(it.views.length ? 'Not meshed yet.' : 'Draw a view first.'))
     }
     meshBody.append(

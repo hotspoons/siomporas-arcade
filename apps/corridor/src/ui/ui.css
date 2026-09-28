@@ -516,3 +516,13 @@ body.chrome-off #chrome-restore { display: block; }
 .lightbox-bar { position: absolute; top: var(--s4); right: var(--s4); display: flex; gap: var(--s2); }
 .lightbox-bar .btn.hidden { display: none; }
 .lightbox > .btn { flex: none; color: var(--ink-1); }
+
+/* the 3D asset preview */
+.meshview { position: relative; width: 100%; aspect-ratio: 4 / 3; min-height: 220px; border-radius: var(--r2); overflow: hidden; background: var(--bg-0); border: 1px solid var(--line-1); }
+.meshview-canvas { display: block; width: 100%; height: 100%; }
+.meshview-status {
+  position: absolute; inset: 0; display: grid; place-items: center;
+  padding: var(--s4); text-align: center;
+  color: var(--ink-3); font-size: var(--text-sm);
+  background: rgb(0 0 0 / 35%);
+}

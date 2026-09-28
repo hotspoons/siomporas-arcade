@@ -18,6 +18,7 @@
 // zones declared, the goal set, the messages said, the outcome, and the throw if there was one.
 // That is the difference between "the compiler is happy" and "this is a level".
 import { CodeEditor, forget, knowAbout, languageForPath, type Diagnostic } from './codeeditor'
+import * as bitecsApi from 'bitecs'
 import * as programApi from '../program'
 import * as actorsApi from '../actors'
 import * as actorworldApi from '../actorworld'
@@ -29,19 +30,136 @@ import { bodyOf, group, readout } from './controls'
 import { FileTree } from './filetree'
 import { ask, button, confirm, el, toast } from './shell'
 
-/** What a new program starts as: the shortest thing that is a real level. */
+/**
+ * WHAT A NEW PROGRAM STARTS AS.
+ *
+ * Rich, 2026-09-28: "we should have access to the full game API and have a well sorted example
+ * where we essentially port the current driving and flying game with no real goal or points
+ * system as an example project to get you started. Can you set a much richer default that
+ * includes the full ECS scaffolding?"
+ *
+ * It used to be nine lines that won the game when you drove into a circle — which is a fine
+ * smallest-possible level and a terrible starting point, because it shows one corner of the API
+ * and nothing about the simulation underneath. This one is the game as it currently plays, with
+ * no goal and no score, and every part labelled: drive, get out and walk, fly, spawn actors,
+ * query them, move something the editor placed, and react to where the player is.
+ *
+ * IT IS MEANT TO BE DELETED FROM, not read. Each block stands alone, so the way to use it is to
+ * throw away the parts you do not want.
+ */
 export const TEMPLATE = `import { defineGame } from '@apex/program'
+import { addComponent, addEntity, query, removeComponent } from 'bitecs'
+import { Animal, Autonomous, Health, Hostile, Player, SETS, Transform, Vehicle, Velocity, Visual } from '@apex/actors'
+import { face, integrate, mortality, spawnPedestrian, spawnVehicle, walk } from '@apex/actorworld'
 
+/*
+ * A world with nothing to do in it — which is the point of a starting project.
+ *
+ * Everything below is a block you can delete. Nothing here wins, loses or scores; add that when
+ * you know what the level is about.
+ */
 export default defineGame({
   setup(api) {
-    api.goal('Reach the water tower')
-    api.hide('street-names')
-    api.zone('tower', { kind: 'circle', x: 0, y: 0, r: 20 })
-    api.on('enters', 'tower', () => {
-      api.award(100)
-      api.win('Found it')
+    // ---- 1 · how the player gets about -----------------------------------------------------
+    //
+    // Each of these is a controller, not a setting. 'drive' is the car; 'walk' and 'walk-third'
+    // are on foot; the rest fly, with real masses and thrusts (see @apex/program TRANSPORT).
+    api.transport('drive')
+    api.goal('Drive. Press F to fly, G to get out and walk.')
+
+    // ---- 2 · the world's own furniture -----------------------------------------------------
+    //
+    // Anything placed in the editor is an entity here, by its id. \`api.placements()\` is the list;
+    // the editor shows the same ids beside this code.
+    for (const thing of api.placements()) {
+      console.log('placed:', thing.id, thing.asset, thing.tags.join(' '))
+    }
+
+    // Move one, and the world moves: this is the ECS, so anything that writes a Transform works.
+    const spinner = api.placedWith('utility')[0] ?? null
+    if (spinner !== null) {
+      api.each((dt) => {
+        Transform.yaw[spinner] += dt * 0.3
+      })
+    }
+
+    // ---- 3 · the simulation --------------------------------------------------------------
+    //
+    // The systems run in the order they are added, at a fixed 20 ms step, however long a frame
+    // takes. \`integrate\` moves anything with a Velocity; \`walk\` steers pedestrians to where they
+    // are going; \`face\` points things the way they are travelling; \`mortality\` removes the dead
+    // once, at the end of a step.
+    api.actors
+      .add('walk', walk)
+      .add('integrate', integrate)
+      .add('face', face)
+      .add('mortality', mortality)
+
+    // ---- 4 · some traffic and some people --------------------------------------------------
+    //
+    // Spawned relative to the player, so this works in any world. A real level would use the
+    // level's ECS config (@apex/ecsconfig) to populate along the roads instead.
+    const at = api.facts()
+    void at
+    for (let i = 0; i < 12; i++) {
+      const lane = i % 2 === 0 ? 4 : -4
+      spawnVehicle(api.actors, { x: lane, y: 60 + i * 25 }, { asset: 0, maxSpeed: 14 })
+    }
+    for (let i = 0; i < 8; i++) {
+      spawnPedestrian(api.actors, { x: 9, y: 20 + i * 12 }, { x: 9, y: 200 }, { speed: 1.3 })
+    }
+
+    // ---- 5 · one query, many shapes --------------------------------------------------------
+    //
+    // An enemy can take any form: this finds the hostile car, the hostile dog and the hostile
+    // person without naming any of them. That is why this is an ECS and not a class hierarchy.
+    api.every(5, () => {
+      const threats = query(api.world, SETS.threats)
+      if (threats.length) api.say(\`\${threats.length} hostile\`, 'warn')
     })
-    api.after(120, () => api.lose('Out of time'))
+
+    // Make something hostile by GIVING it a component — the same entity, still where it was.
+    api.after(20, () => {
+      const cars = query(api.world, [Vehicle, Autonomous])
+      const it = cars[0]
+      if (it === undefined) return
+      addComponent(api.world, it, Hostile)
+      Hostile.faction[it] = 1
+      Hostile.aggression[it] = 0.8
+      api.say('one of them has taken an interest', 'warn')
+    })
+
+    // ---- 6 · a zone, and reacting to it ----------------------------------------------------
+    //
+    // Circles and boxes are the only spatial primitive. Naming one lets \`on('enters')\`,
+    // \`on('leaves')\` and \`in()\` talk about it.
+    api.zone('start', { kind: 'circle', x: 0, y: 0, r: 80 })
+    api.on('leaves', 'start', () => api.say('off we go'))
+    api.on('enters', 'start', () => api.say('back at the start'))
+
+    // ---- 7 · the look of the place ---------------------------------------------------------
+    //
+    // Presets are the tuning library, by name; \`over\` tweens instead of cutting.
+    api.time('17:30')
+    api.preset('golden-hour', { over: 4 })
+    api.hide('minimap')
+
+    // ---- 8 · facts, which are how conditions are written ------------------------------------
+    api.when((f) => f.speed > 30, () => api.say('quick'))
+  },
+
+  /*
+   * Every frame, with the real delta. \`api.each\` is the same thing; this reads better for the
+   * one loop that is about the whole level rather than one feature of it.
+   */
+  update(dt, api) {
+    void dt
+    void api
+  },
+
+  teardown(api) {
+    // the world is torn down for you; this is for anything you attached to it
+    api.actors.clear()
   },
 })
 `
@@ -68,6 +186,14 @@ export interface ProgramPanelOpts {
   removeDir?: (id: string) => Promise<void>
   /** redraw, after the list changed */
   refresh: () => void
+  /**
+   * What the editor has placed in the world that is open, if any.
+   *
+   * So the ids a program refers to are ON SCREEN beside the code (Rich, 2026-09-28: "with
+   * instances listed in the editor we can reference from code by an id or something"). Without
+   * this you would have to open placements.json to find out what `api.placed('…')` may be given.
+   */
+  instances?: () => Promise<{ world: string | null; items: { id: string; asset: string; tags: string[] }[] }>
 }
 
 /** What a dry run found out. Every field is something a person would otherwise have to play for. */
@@ -166,6 +292,10 @@ export async function dryRun(js: string, { seconds = 5, step = 0.05 }: { seconds
  * you import and what the dry run can resolve are the same list.
  */
 const MODULES: Record<string, Record<string, unknown>> = {
+  // BITECS TOO, because a program that touches the ECS imports it directly — `addComponent`,
+  // `query`, `removeEntity`. Without it a dry run of anything real fails at module resolution
+  // with "failed to fetch dynamically imported module", which says nothing about the cause.
+  bitecs: bitecsApi as unknown as Record<string, unknown>,
   '@apex/program': programApi as unknown as Record<string, unknown>,
   '@apex/actors': actorsApi as unknown as Record<string, unknown>,
   '@apex/actorworld': actorworldApi as unknown as Record<string, unknown>,
@@ -206,7 +336,7 @@ function shimFor(name: string): string | null {
 
 /** Point every `@apex/…` import at its shim. */
 function rewriteImports(js: string): string {
-  return js.replace(/(['"])(@apex\/[a-z]+)\1/g, (m, q, name) => {
+  return js.replace(/(['"])(@apex\/[a-z]+|bitecs)\1/g, (m, q, name) => {
     const url = shimFor(name)
     return url ? `${q}${url}${q}` : m
   })
@@ -354,6 +484,7 @@ export class ProgramPanel {
     if (root.parentElement !== host) host.append(root)
 
     await this.reload()
+    void this.reloadInstances()
     if (!this.restored) {
       this.restored = true
       await this.reopenLast()
@@ -585,6 +716,8 @@ export class ProgramPanel {
     bodyOf(g).append(this.tree.root)
     r.append(g)
 
+    this.drawInstances(r)
+
     if (!this.open.size) {
       r.append(el('p', 'note', 'Open a file, or make one.'))
       return
@@ -620,6 +753,44 @@ export class ProgramPanel {
       for (const m of d.messages) b.append(el('p', 'note', `said: ${m}`))
       r.append(g2)
     }
+  }
+
+  /**
+   * The things in this world, by the id a program says.
+   *
+   * Clicking one puts `api.placed('p-07')` at the caret, because the useful thing to do with an
+   * id you just found is use it, and retyping it from a list is where the typo comes from.
+   */
+  private instances: { id: string; asset: string; tags: string[] }[] = []
+  private instanceWorld: string | null = null
+  private drawInstances(into: HTMLElement): void {
+    if (!this.o.instances) return
+    const g = group(`In this world (${this.instances.length})`, { collapsed: !this.instances.length, note: this.instanceWorld ?? undefined })
+    const b = bodyOf(g)
+    if (!this.instances.length) {
+      b.append(el('p', 'note', this.instanceWorld ? 'Nothing placed yet. Place mode puts things here.' : 'No world open.'))
+    }
+    for (const it of this.instances.slice(0, 200)) {
+      const row = el('button', 'row')
+      row.append(el('span', 'row-name', it.id), el('span', 'row-note', `${it.asset}${it.tags.length ? ` · ${it.tags.join(' ')}` : ''}`))
+      row.title = `insert api.placed('${it.id}')`
+      row.onclick = () => this.editor()?.insert(`api.placed('${it.id}')`)
+      b.append(row)
+    }
+    into.append(g)
+  }
+
+  /** Read them again — after a world changes, or after something is placed. */
+  async reloadInstances(): Promise<void> {
+    if (!this.o.instances) return
+    try {
+      const r = await this.o.instances()
+      this.instances = r.items
+      this.instanceWorld = r.world
+    } catch {
+      this.instances = []
+    }
+    this.drawReport()
   }
 
   private isDirtyPath(id: string): boolean {

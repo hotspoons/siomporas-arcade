@@ -6,3 +6,4 @@
 // describe. A wildcard declaration says "these are real" without inventing a shape for them.
 declare module 'monaco-editor/editor/contrib/*'
 declare module 'monaco-editor/editor/browser/*'
+declare module 'monaco-editor/editor/common/*'

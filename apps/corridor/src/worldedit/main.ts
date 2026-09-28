@@ -152,6 +152,24 @@ const programPanel = new ProgramPanel({
   save: async (id, source) => { await api.saveProgram(id, source) },
   remove: async (id) => { await api.deleteProgram(id) },
   move: async (id, to) => { await api.moveProgram(id, to) },
+  /*
+   * WHAT IS IN THE WORLD, for the list beside the code.
+   *
+   * Read straight from the document the Place editor saves, rather than through the scene — the
+   * scene only exists while Place is open, and the ids a program refers to are a property of the
+   * world, not of what happens to be loaded.
+   */
+  instances: async () => {
+    if (!selected) return { world: null, items: [] }
+    try {
+      const r = await fetch(`/sites/${selected}/placements.json`, { cache: 'no-cache' })
+      if (!r.ok) return { world: selected, items: [] }
+      const doc = (await r.json()) as { items?: { id: string; asset: string; tags?: string[] }[] }
+      return { world: selected, items: (doc.items ?? []).map((i) => ({ id: i.id, asset: i.asset, tags: i.tags ?? [] })) }
+    } catch {
+      return { world: selected, items: [] }
+    }
+  },
   makeDir: async (id) => { await api.makeProgramDir(id) },
   removeDir: async (id) => { await api.deleteProgramDir(id) },
   refresh: () => { if (mode === 'program') void programPanel.render() },

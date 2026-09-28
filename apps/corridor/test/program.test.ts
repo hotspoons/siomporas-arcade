@@ -365,3 +365,93 @@ describe('a program that throws', () => {
     expect(teardown).toHaveBeenCalledOnce()
   })
 })
+
+/*
+ * THINGS THE EDITOR PLACED, AS ENTITIES A PROGRAM CAN DRIVE.
+ *
+ * Rich, 2026-09-28: "Anything placed in the map should be accessible from the code editor as an
+ * instance that can be controlled in the ECS system". The interesting half is the write-back: a
+ * program moves the ENTITY, and the scene has to follow — without that, `Transform.x[e] = 100`
+ * looks like it worked and the water tower never moves.
+ */
+describe('what the editor placed', () => {
+  const placedHost = () => {
+    const { h, state } = host()
+    const things = [
+      { id: 'p-01', asset: 'watertower-01', x: 10, y: 20, z: null, yaw_deg: 90, scale: 1, tags: ['utility'] },
+      { id: 'p-02', asset: 'barn-01', x: -5, y: 0, z: null, yaw_deg: 0, scale: 2, tags: ['barn', 'farm'] },
+      { id: 'p-03', asset: 'barn-01', x: 40, y: 40, z: 12, yaw_deg: 180, scale: 1, tags: ['farm'] },
+    ]
+    const moved: { id: string; to: { x: number; y: number; yaw_deg: number; scale: number } }[] = []
+    h.placements = () => things
+    h.movePlacement = (id, to) => { moved.push({ id, to }) }
+    return { h, state, things, moved }
+  }
+
+  it('an id is an entity, and it starts where the document says', async () => {
+    const { h } = placedHost()
+    let e: number | null = null
+    await play(defineGame({ setup: (api) => { e = api.placed('p-01') } }), h, 0.1)
+    expect(e).not.toBe(null)
+    expect(Transform.x[e!]).toBe(10)
+    expect(Transform.y[e!]).toBe(20)
+    expect(Transform.yaw[e!]).toBeCloseTo(Math.PI / 2, 5)
+  })
+
+  it('asking twice gives the SAME entity', async () => {
+    // `api.placed(...)` in an `each` runs sixty times a second; a new entity each time is a leak
+    // that fills the world in under a minute
+    const { h } = placedHost()
+    const seen = new Set<number>()
+    await play(defineGame({ setup: (api) => { api.each(() => { seen.add(api.placed('p-01')!) }) } }), h, 1)
+    expect(seen.size).toBe(1)
+  })
+
+  it('an id that is not there is null, not a throw', async () => {
+    const { h } = placedHost()
+    let e: number | null = -1
+    await play(defineGame({ setup: (api) => { e = api.placed('nope') } }), h, 0.1)
+    expect(e).toBe(null)
+  })
+
+  it('a tag finds every one that carries it', async () => {
+    const { h } = placedHost()
+    let farm: number[] = []
+    let barn: number[] = []
+    await play(defineGame({ setup: (api) => { farm = api.placedWith('farm'); barn = api.placedWith('barn') } }), h, 0.1)
+    expect(farm.length).toBe(2)
+    expect(barn.length).toBe(1)
+  })
+
+  it('MOVING THE ENTITY MOVES THE THING — that is the whole point', async () => {
+    const { h, moved } = placedHost()
+    await play(defineGame({
+      setup: (api) => {
+        const e = api.placed('p-01')!
+        api.after(0.1, () => { Transform.x[e] = 100; Transform.yaw[e] = Math.PI })
+      },
+    }), h, 0.5)
+    expect(moved.length).toBeGreaterThan(0)
+    expect(moved[0].id).toBe('p-01')
+    expect(moved[0].to.x).toBe(100)
+    expect(moved[0].to.yaw_deg).toBeCloseTo(180, 3)
+  })
+
+  it('and something that did not move is not told to', async () => {
+    // this runs every tick over every placement a program has touched; telling the viewer to put
+    // an object exactly where it already is rebuilds a matrix per frame per prop for nothing
+    const { h, moved } = placedHost()
+    await play(defineGame({ setup: (api) => { api.placed('p-01'); api.placed('p-02') } }), h, 1)
+    expect(moved).toEqual([])
+  })
+
+  it('a host with no placements answers null rather than breaking', async () => {
+    // a dry run has no world behind it, and a program written against one must still load
+    const { h } = host()
+    let e: number | null = -1
+    let all: unknown[] = [1]
+    await play(defineGame({ setup: (api) => { e = api.placed('p-01'); all = api.placements() } }), h, 0.1)
+    expect(e).toBe(null)
+    expect(all).toEqual([])
+  })
+})

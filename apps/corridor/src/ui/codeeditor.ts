@@ -87,6 +87,17 @@ export function loadMonaco(): Promise<MonacoApi> {
       import('monaco-editor/editor/contrib/wordHighlighter/browser/wordHighlighter.js'),
       import('monaco-editor/editor/contrib/indentation/browser/indentation.js'),
       import('monaco-editor/editor/browser/coreCommands.js'),
+      /*
+       * AND THE TWO SERVICES THAT CONTRIBUTIONS WE DID NOT ASK FOR NEED.
+       *
+       * `CodeLensContribution` and `DropIntoEditorController` are registered by the TypeScript
+       * feature module, not by anything in the list above — and they are instantiated for every
+       * editor, so from the SECOND tab onwards each one threw "depends on UNKNOWN service" into
+       * the console. Registering the singletons they want is two imports; the alternative is two
+       * errors per editor for a feature nobody uses.
+       */
+      import('monaco-editor/editor/contrib/codelens/browser/codeLensCache.js'),
+      import('monaco-editor/editor/common/services/treeViewsDndService.js'),
     ])
     // THE LANGUAGE BEFORE THE SERVICE, and not in the same `Promise.all`. The definition registers
     // `typescript` as a language; the feature module attaches the worker-backed service to it and
@@ -389,6 +400,20 @@ export class CodeEditor {
     this.editor?.revealLineInCenter(line)
     this.editor?.setPosition({ lineNumber: line, column })
     this.editor?.focus()
+  }
+
+  /**
+   * Type something at the caret, as if a person had.
+   *
+   * `executeEdits` rather than `setValue`: it keeps the undo history, so an id inserted from a
+   * list can be undone like anything else, and it leaves the caret after what it inserted.
+   */
+  insert(text: string): void {
+    const ed = this.editor
+    const sel = ed?.getSelection()
+    if (!ed || !sel) return
+    ed.executeEdits('insert', [{ range: sel, text, forceMoveMarkers: true }])
+    ed.focus()
   }
 
   dispose(): void {

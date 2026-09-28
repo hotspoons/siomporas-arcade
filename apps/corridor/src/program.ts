@@ -24,7 +24,8 @@
 // game can be stepped in a test — which is the only way "did the win condition ever fire" is a
 // question with an answer. Everything that touches the renderer arrives through `ProgramHost`,
 // which the app implements and a test fakes.
-import type { World } from 'bitecs'
+import { addComponent, addEntity, type World } from 'bitecs'
+import { Transform, Visual } from './actors'
 import type { ActorWorld } from './actorworld'
 
 /* ---- what a program can ask the world to do ---------------------------------------------- */
@@ -86,6 +87,37 @@ export interface ProgramHost {
   setTime?: (hhmm: string) => void
   /** the weather selection, by name */
   setWeather?: (what: string) => void
+
+  /*
+   * WHAT THE WORLD HAS IN IT, and how to move it.
+   *
+   * Rich, 2026-09-28: "Anything placed in the map should be accessible from the code editor as an
+   * instance that can be controlled in the ECS system (with instances listed in the editor we can
+   * reference from code by an id or something)."
+   *
+   * The editor writes `placements.json`; the viewer loads it and puts objects in the scene. Until
+   * now a program could not see any of it — you could spawn a car from nothing but not refer to
+   * the water tower somebody placed, which is the thing levels are actually about.
+   *
+   * These two are the whole contract: what is there, and a way to put one somewhere else. A host
+   * with no placements (a dry run, a bare test) simply omits them and `api.placed` returns null,
+   * which is the same answer as "there is no such id" and needs no special case in a program.
+   */
+  placements?: () => PlacedThing[]
+  /** move a placed object. The program moves the ENTITY; this is how that reaches the scene. */
+  movePlacement?: (id: string, to: { x: number; y: number; z?: number | null; yaw_deg: number; scale: number }) => void
+}
+
+/** One thing the editor placed in this world. Site metres, compass bearing — as saved. */
+export interface PlacedThing {
+  id: string
+  asset: string
+  x: number
+  y: number
+  z: number | null
+  yaw_deg: number
+  scale: number
+  tags: string[]
 }
 
 /* ---- zones: the one spatial primitive ---------------------------------------------------- */
@@ -148,6 +180,22 @@ export interface GameApi {
   say(text: string, kind?: 'info' | 'ok' | 'warn'): void
   time(hhmm: string): void
   weather(what: string): void
+
+  /*
+   * THINGS THE EDITOR PLACED, AS ENTITIES.
+   *
+   * `placed('p-07')` is the water tower somebody dragged into the world, as an ECS entity with a
+   * Transform and a Visual — so every system that moves things moves it, and a program can make
+   * the crane swing by writing to `Transform.yaw`. The entity is created the first time it is
+   * asked for and the same one comes back afterwards, so `placed` in an `each` is not a leak.
+   *
+   * The ids are what the editor lists beside the code, which is how you know what to type.
+   */
+  placed(id: string): number | null
+  /** every placement carrying a tag — the editor writes the asset's category as one */
+  placedWith(tag: string): number[]
+  /** what is in this world, ids and all, for a program that would rather look than be told */
+  placements(): PlacedThing[]
 
   /** name a region, so `on('enters', …)` and `in()` can refer to it */
   zone(name: string, z: Zone): void
@@ -248,6 +296,10 @@ export class GameRun {
       time: (hhmm) => H.setTime?.(hhmm),
       weather: (w) => H.setWeather?.(w),
 
+      placed: (id) => this.entityFor(id),
+      placedWith: (tag) => (H.placements?.() ?? []).filter((p) => p.tags.includes(tag)).map((p) => this.entityFor(p.id)).filter((e): e is number => e !== null),
+      placements: () => H.placements?.() ?? [],
+
       zone: (name, z) => { this.zones.set(name, z) },
       in: (name) => this.inside.has(name),
 
@@ -270,6 +322,77 @@ export class GameRun {
       when: (cond, fn) => { this.watches.push({ cond, fn, was: cond(this.facts()) }) },
     }
     return api
+  }
+
+  /**
+   * The entity for a placement, made once.
+   *
+   * IT CARRIES THE SAME NUMBERS THE DOCUMENT DOES, which is what makes it controllable: a system
+   * that writes `Transform.x` has moved the thing in the world, and `syncPlaced` carries that
+   * back out to the scene at the end of the tick. The entity is NOT given `Autonomous`: a placed
+   * building is not traffic, and anything that should drive itself is a program's decision.
+   */
+  private placedEntities = new Map<string, number>()
+  private entityFor(id: string): number | null {
+    const known = this.placedEntities.get(id)
+    if (known !== undefined) return known
+    const p = (this.host.placements?.() ?? []).find((x) => x.id === id)
+    if (!p) return null
+    const w = this.host.actors.world
+    const e = addEntity(w)
+    addComponent(w, e, Transform)
+    addComponent(w, e, Visual)
+    Transform.x[e] = p.x
+    Transform.y[e] = p.y
+    Transform.z[e] = p.z ?? 0
+    Transform.yaw[e] = (p.yaw_deg * Math.PI) / 180
+    Visual.scale[e] = p.scale
+    this.placedEntities.set(id, e)
+    // SEEDED FROM THE ENTITY, NOT THE DOCUMENT. `Transform` is a Float32Array, so 90° stored and
+    // read back is 90.000001 — and comparing that against the document's 90 reports every
+    // placement as moved on the first tick, which is a scene rebuild per prop for nothing.
+    this.placedWas.set(id, { ...this.poseOf(e), z: p.z })
+    return e
+  }
+
+  /**
+   * Carry any entity the program moved back out to the scene.
+   *
+   * ONLY WHAT CHANGED. This runs every tick over every placement a program has touched, and
+   * telling the viewer to move an object that is exactly where it already is would rebuild a
+   * matrix per frame per prop for nothing.
+   */
+  private placedWas = new Map<string, { x: number; y: number; z: number | null; yaw: number; scale: number }>()
+
+  /** What the entity says its pose is, in the document's units. */
+  private poseOf(e: number): { x: number; y: number; z: number; yaw: number; scale: number } {
+    return {
+      x: Transform.x[e],
+      y: Transform.y[e],
+      z: Transform.z[e],
+      yaw: (((Transform.yaw[e] * 180) / Math.PI) % 360 + 360) % 360,
+      scale: Visual.scale[e] || 1,
+    }
+  }
+
+  private syncPlaced(): void {
+    const move = this.host.movePlacement
+    if (!move) return
+    for (const [id, e] of this.placedEntities) {
+      const was = this.placedWas.get(id)!
+      const now = this.poseOf(e)
+      // A TOLERANCE, not equality. These are float32s written and read every tick, so an exact
+      // comparison reports movement that never happened; a millimetre and a thousandth of a
+      // degree are below anything a person placed and above the noise.
+      const still = Math.abs(now.x - was.x) < 1e-3
+        && Math.abs(now.y - was.y) < 1e-3
+        && Math.abs(now.scale - was.scale) < 1e-4
+        && Math.min(Math.abs(now.yaw - was.yaw), 360 - Math.abs(now.yaw - was.yaw)) < 1e-3
+        && (was.z === null || Math.abs(now.z - was.z) < 1e-3)
+      if (still) continue
+      move(id, { x: now.x, y: now.y, z: was.z === null ? null : now.z, yaw_deg: now.yaw, scale: now.scale })
+      this.placedWas.set(id, { ...now, z: was.z })
+    }
   }
 
   /** The zones this program declared, by name — what a dry run reports and a HUD can list. */
@@ -353,6 +476,9 @@ export class GameRun {
       this.guard(() => fn(step, this.facts()))
     }
     if (!this.outcome && !this.error && this.def.update) this.guard(() => this.def.update!(step, this.api))
+    // LAST, so a program that moved something this frame sees it move this frame. Before the
+    // update it would be one tick behind, which reads as input lag on anything being steered.
+    this.syncPlaced()
   }
 
   finish(outcome: Outcome, text?: string): void {

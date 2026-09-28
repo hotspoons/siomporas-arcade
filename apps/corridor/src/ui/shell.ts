@@ -24,6 +24,14 @@ export interface ButtonOpts {
   /** shown in the tooltip after the label, e.g. 'Tab' */
   key?: string
   title?: string
+  /**
+   * Greyed out and unclickable.
+   *
+   * On the element rather than left to the handler: a button that looks pressable and does nothing
+   * reads as a broken button, and "push" during a push is exactly the case — the second click is
+   * a second push, not a no-op.
+   */
+  disabled?: boolean
   onClick?: (ev: MouseEvent) => void
 }
 
@@ -35,6 +43,7 @@ export function button(o: ButtonOpts): HTMLButtonElement {
   const tip = [o.title ?? o.label, o.key ? `(${o.key})` : ''].filter(Boolean).join(' ')
   if (tip) b.title = tip
   if (!o.label) b.setAttribute('aria-label', o.title ?? o.icon ?? 'button')
+  if (o.disabled) b.disabled = true
   if (o.onClick) b.onclick = o.onClick
   return b
 }

@@ -34,6 +34,7 @@ import { zipRead, zipWrite } from './zip.mjs'
 import { Captures } from './captures.mjs'
 import { ModelResolver } from './models.mjs'
 import * as levels from './levels.mjs'
+import { GitRepo, scan as gitScan } from './gitrepo.mjs'
 import * as training from './training.mjs'
 import { Overpass, PUBLIC_MIRRORS } from './overpass.mjs'
 import { Tiles } from './tiles.mjs'
@@ -796,6 +797,37 @@ async function api(req, res, seg, q) {
       return json(res, 200, { deleted: id })
     }
   }
+  /*
+   * ---- git: the volume as a repository --------------------------------------------------------
+   *
+   * Rich, 2026-09-28: "being able to hook the games code base and assets up to a git lfs repo
+   * would be a nice touch. We'll need a way to manage git credentials to push to a remote repo."
+   *
+   * THE CREDENTIAL NEVER COMES BACK OUT. `PUT /api/git/credential` writes it into a 0600 file the
+   * git credential helper reads, and every response says whether one is set and for which host —
+   * never the token. A panel that can display a token is a panel that puts it in a screenshot.
+   */
+  if (seg[0] === 'git') {
+    const repo = new GitRepo(store.root)
+    try {
+      if (seg.length === 1 && req.method === 'GET') return json(res, 200, await repo.status())
+      if (seg[1] === 'scan' && req.method === 'GET') return json(res, 200, await gitScan(store.root))
+      if (seg[1] === 'init' && req.method === 'POST') return json(res, 200, await repo.init(await readJson(req)))
+      if (seg[1] === 'commit' && req.method === 'POST') {
+        const r = await repo.commit((await readJson(req))?.message)
+        return json(res, 200, r ? { ...r, committed: true } : { committed: false, why: 'nothing has changed since the last commit' })
+      }
+      if (seg[1] === 'push' && req.method === 'POST') return json(res, 200, await repo.push(await readJson(req)))
+      if (seg[1] === 'pull' && req.method === 'POST') return json(res, 200, await repo.pull())
+      if (seg[1] === 'credential') {
+        if (req.method === 'PUT') return json(res, 200, await repo.setCredential(await readJson(req)))
+        if (req.method === 'DELETE') return json(res, 200, await repo.clearCredential())
+      }
+    } catch (e) {
+      return json(res, e.status ?? 500, { error: String(e.message ?? e) })
+    }
+  }
+
   /*
    * ---- programs ------------------------------------------------------------------------------
    *

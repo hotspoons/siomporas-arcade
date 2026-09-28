@@ -12,7 +12,7 @@
 // WHERE THE DATA LIVES. Nothing in this page holds state that matters. Worlds, runs, logs, the
 // authored files and the placement catalog are all on the service's volume, so closing the tab,
 // reloading, or the pod restarting loses a scroll position and nothing else.
-import { Drawer, button, el, installShellKeys, status, clearStatus, toast, typing } from '../ui/shell'
+import { Dialog, Drawer, button, el, installShellKeys, status, clearStatus, toast, typing } from '../ui/shell'
 import { bodyOf, empty, group, readout, segmented, select, textField } from '../ui/controls'
 import { icon } from '../ui/icons'
 import { AssetCatalog } from '../ui/assets'
@@ -26,6 +26,7 @@ import { ProgramPanel } from '../ui/programpanel'
 import { AssetsPanel } from './assets'
 import { SplatsPanel } from './splats'
 import { worldMenuTransfer } from './transfer'
+import { GitPanel } from './gitpanel'
 import { dockWidth } from '../ui/dockwidth'
 
 type Mode = 'explore' | 'index' | 'define' | 'bake' | 'place' | 'stage' | 'program' | 'assets' | 'splats'
@@ -608,6 +609,22 @@ function buildDrawer() {
   // world, so the browser's own back button returns you here.
   drawer.item(nav, { id: 'viewer', label: 'Drive it', icon: 'globe-alt', hint: 'open the baked world in the viewer', onClick: () => { location.href = selected ? `/index.html?site=${selected}` : '/index.html' } })
 
+  /*
+   * VERSION CONTROL, in the drawer rather than as a mode.
+   *
+   * It is not part of making a world — it is what you do with the worlds after you have made
+   * them — and the modes along the top are the steps of the pipeline. A ninth tab there would say
+   * that pushing is a stage of building a level, which it is not.
+   */
+  const vcs = drawer.section('Version control')
+  drawer.item(vcs, {
+    id: 'git',
+    label: 'Git and LFS',
+    icon: 'cloud-arrow-up',
+    hint: 'push this volume\u2019s worlds, levels, programs and assets to a remote',
+    onClick: () => openGit(),
+  })
+
   const look = drawer.section('Appearance')
   drawer.custom(
     look,
@@ -629,6 +646,24 @@ function buildDrawer() {
       },
     }),
   )
+}
+
+/**
+ * The git panel, in a dialog.
+ *
+ * A dialog and not the docked inspector: it is about the whole volume rather than the world the
+ * inspector is describing, and opening it must not throw away whatever mode was showing.
+ */
+let gitDialog: Dialog | null = null
+function openGit() {
+  drawer.set(false)
+  if (!gitDialog) {
+    gitDialog = new Dialog({ title: 'Git and LFS', icon: 'cloud-arrow-up', size: 'lg' })
+    const panel = new GitPanel({ host: gitDialog.body, refresh: () => void panel.load() })
+    ;(gitDialog as unknown as { panel: GitPanel }).panel = panel
+  }
+  gitDialog.open()
+  void (gitDialog as unknown as { panel: GitPanel }).panel.load()
 }
 
 /** The world picker, and what it says about each one. */

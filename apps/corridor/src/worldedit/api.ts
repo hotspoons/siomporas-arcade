@@ -7,6 +7,8 @@
 // Kubernetes API URL and no GPU service URL anywhere in the bundle. If you find yourself wanting
 // to add one, the backend is missing an endpoint.
 
+import type { GitScan, GitStatus } from './gittypes'
+
 export interface Way {
   id: number
   ident: string
@@ -405,6 +407,18 @@ export const api = {
   program: (id: string) => call<{ id: string; source: string }>(`/api/programs/${id}`),
   saveProgram: (id: string, source: string) => call<{ id: string; bytes: number }>(`/api/programs/${id}`, { method: 'PUT', body: JSON.stringify({ source }) }),
   deleteProgram: (id: string) => call<{ deleted: string }>(`/api/programs/${id}`, { method: 'DELETE' }),
+
+  /* ---- git: the volume as a repository (tools/worldeditor/gitrepo.mjs) ---- */
+  gitStatus: () => call<GitStatus>('/api/git'),
+  gitScan: () => call<GitScan>('/api/git/scan'),
+  gitInit: (body: { remote?: string; branch?: string; bakes?: boolean }) => call<GitStatus & { scan: GitScan }>('/api/git/init', { method: 'POST', body: JSON.stringify(body) }),
+  gitCommit: (message: string) => call<{ committed: boolean; commit?: string; files?: number; why?: string }>('/api/git/commit', { method: 'POST', body: JSON.stringify({ message }) }),
+  gitPush: () => call<{ ok: boolean; branch: string; output: string }>('/api/git/push', { method: 'POST', body: '{}' }),
+  gitPull: () => call<{ output: string }>('/api/git/pull', { method: 'POST', body: '{}' }),
+  /** write-only: the token goes up and nothing ever brings it back */
+  gitCredential: (body: { kind: 'https-token' | 'ssh-key'; host?: string; username?: string; secret: string }) =>
+    call<{ set: boolean; kind: string }>('/api/git/credential', { method: 'PUT', body: JSON.stringify(body) }),
+  gitClearCredential: () => call<{ set: boolean }>('/api/git/credential', { method: 'DELETE' }),
 
   /* ---- captures: footage in, splat world out ---- */
   captures: () => call<{ captures: Capture[] }>('/api/captures'),

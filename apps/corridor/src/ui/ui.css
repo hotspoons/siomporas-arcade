@@ -562,7 +562,8 @@ body.chrome-off #chrome-restore { display: block; }
 .meshview-status[hidden] { display: none; }
 
 /* the materials browser: the sample wall stays put, the library scrolls beside it */
-.material-split { display: grid; grid-template-columns: minmax(280px, 380px) 1fr; gap: var(--s4); align-items: start; }
+.material-split { display: grid; grid-template-columns: minmax(300px, 440px) 1fr; gap: var(--s4); align-items: start; }
+.material-right { display: grid; gap: var(--s3); min-width: 0; align-content: start; }
 .material-side { position: sticky; top: 0; display: grid; gap: var(--s2); }
 /* SMALLER. A 4:3 sample wall the width of the dialog pushed the library off the bottom, and the
    question it answers — is the tile the right size — is legible at a third of that. */

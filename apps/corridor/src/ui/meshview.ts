@@ -432,7 +432,28 @@ export class MeshView {
    * DoubleSide, and the spin is left to the caller: a single-sided plane on a spinning pivot is
    * invisible for half of every turn, which looks exactly like a texture that failed to load.
    */
-  async showMaterial(m: { metres_per_tile: number; albedo: string; normal?: string; roughness?: string }): Promise<void> {
+  /**
+   * A material, one way or the other.
+   *
+   * `tiled` is a sample wall eight metres across, which is the only way to judge
+   * `metres_per_tile` — it is legible as a RATIO: at 2 m you count four courses across it, at
+   * 0.5 m sixteen. `flat` is one tile filling the frame, which is the only way to judge the
+   * PIXELS: whether the albedo is full of JPEG mush, whether the normal map is inverted.
+   *
+   * ONE VIEWER, TWO MODES, rather than a viewer and a lightbox. Rich, 2026-09-28: "These buttons
+   * are confusing, they do kind of the same thing. Why isn't the tiled vs up close just an option
+   * in the viewer?" — so it is, and the map being looked at is part of the same choice.
+   */
+  async showMaterial(m: {
+    metres_per_tile: number
+    albedo: string
+    normal?: string
+    roughness?: string
+    /** 'tiled' is the sample wall; the others show that one map, flat and unlit */
+    mode?: 'tiled' | 'albedo' | 'normal' | 'roughness'
+  }): Promise<void> {
+    const mode = m.mode ?? 'tiled'
+    if (mode !== 'tiled') return this.showFlat(mode === 'albedo' ? m.albedo : mode === 'normal' ? m.normal : m.roughness, mode)
     this.clear()
     this.say('loading…')
     const WALL_M = 8
@@ -462,7 +483,43 @@ export class MeshView {
     this.say(null)
   }
 
+  /**
+   * One map, flat, filling the frame, and NOT lit.
+   *
+   * MeshBasicMaterial on purpose: this is the picture, not a surface. Lighting a normal map with
+   * the room environment shows you what the room looks like reflected in a picture of a normal
+   * map, which is worse than useless — it hides exactly the inverted-green mistake you are looking
+   * for.
+   */
+  private async showFlat(url: string | undefined, what: string): Promise<void> {
+    this.clear()
+    if (!url) { this.say(`no ${what} map`); return }
+    this.say('loading…')
+    const tex = await new Promise<THREE.Texture | null>((resolve) => {
+      this.textures.load(url, (t) => resolve(t), undefined, () => resolve(null))
+    })
+    if (this.disposed) return
+    if (!tex) { this.say(`could not load the ${what} map`); return }
+    // the albedo is colour; a normal and a roughness map are DATA and must not be gamma-decoded
+    tex.colorSpace = what === 'albedo' ? THREE.SRGBColorSpace : THREE.NoColorSpace
+    tex.anisotropy = 8
+    const size = 4
+    const plane = new THREE.Mesh(
+      new THREE.PlaneGeometry(size, size),
+      new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide, toneMapped: false }),
+    )
+    plane.position.y = size / 2
+    this.pivot.add(plane)
+    this.grid.visible = false
+    this.camera.position.set(0, size / 2, size * 1.05)
+    this.controls.target.set(0, size / 2, 0)
+    this.controls.update()
+    this.size = new THREE.Vector3(size, size, 0)
+    this.say(null)
+  }
+
   clear() {
+    this.grid.visible = true
     this.pivot.clear()
     this.skeletonHelper = null
     this.skinned = null

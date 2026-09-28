@@ -32,6 +32,7 @@ import { Catalog } from './catalog.mjs'
 import { Jobs } from './jobs.mjs'
 import { S3 } from './s3.mjs'
 import { promptFor, recipeFor, roster } from './specs.mjs'
+import { commitDraft, discardDraft, generateDraft, readDraft } from './materials.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const REPO = path.resolve(HERE, '../..')
@@ -419,6 +420,43 @@ const server = http.createServer(async (req, res) => {
         await mkdir(path.join(dir, id), { recursive: true })
         await writeFile(path.join(dir, id, name), buf)
         return json(res, 200, { id, file: name, bytes: buf.length })
+      }
+
+      /*
+       * GENERATE ONE, INTO A DRAFT.
+       *
+       * Rich, 2026-09-28: "we need a generator form, not an upload form for textures... don't blow
+       * away old copies until an explicit save operation happens!" So this writes only into
+       * `<id>/draft/`, and `save` is the separate call that accepts it — which even then keeps
+       * what it replaced under `previous/`.
+       */
+      if (seg.length === 3 && seg[2] === 'generate' && req.method === 'POST') {
+        const id = seg[1]
+        if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(id)) return json(res, 400, { error: `bad material id ${JSON.stringify(id)}` })
+        const b = await readJson(req)
+        if (!String(b?.prompt ?? '').trim()) return json(res, 400, { error: 'a prompt is what makes the texture — say what it is' })
+        const model = registry.image
+        if (!model) return json(res, 503, { error: 'no image model configured' })
+        return json(res, 202, jobs.start('image', `texture ${id}`, (report) => generateDraft({
+          dir, id, subject: b.prompt, metresPerTile: Number(b.metres_per_tile) || 2,
+          seed: b.seed === undefined || b.seed === null || b.seed === '' ? undefined : Number(b.seed),
+          size: b.size, model, report,
+        })))
+      }
+
+      if (seg.length === 3 && seg[2] === 'draft' && req.method === 'GET') {
+        return json(res, 200, { draft: await readDraft(dir, seg[1]) })
+      }
+      if (seg.length === 3 && seg[2] === 'draft' && req.method === 'DELETE') {
+        return json(res, 200, await discardDraft(dir, seg[1]))
+      }
+      /** The explicit save. Everything before this left the live files alone. */
+      if (seg.length === 3 && seg[2] === 'save' && req.method === 'POST') {
+        try {
+          return json(res, 200, { material: await commitDraft(dir, seg[1]) })
+        } catch (e) {
+          return json(res, e.status ?? 500, { error: String(e.message ?? e) })
+        }
       }
 
       // PUT /materials/<id> — the record. Merged, so uploading a normal map later keeps the rest.

@@ -5,7 +5,11 @@
 # that builds in a minute for both architectures, rather than a CUDA base that takes an hour.
 #
 # WHAT IT DOES NEED is the glTF toolchain, because finishing a reconstruction runs
-# @gltf-transform/cli three times. That is installed HERE rather than fetched by `npx` at runtime:
+# @gltf-transform/cli three times — and `sharp`, because generating a material is a flux image
+# plus arithmetic over its pixels (tileable roll-and-blend, a normal map, a roughness map). That
+# arithmetic is a port of tools/surfaces/gen.py, which needs numpy, scipy and PIL; sharp is one
+# prebuilt binary for both architectures and does the decode, the blur and the encode, with the
+# per-pixel work in plain JavaScript. That is installed HERE rather than fetched by `npx` at runtime:
 # a pod that reaches out to the npm registry the first time somebody finishes a mesh is a pod that
 # fails on an air-gapped cluster and is slow on every cold start.
 FROM node:22-slim
@@ -22,6 +26,7 @@ RUN npm install --no-audit --no-fund --omit=dev \
       @gltf-transform/functions@4 \
       draco3dgltf@1 \
       meshoptimizer@0.22 \
+      sharp@0.35 \
  && npm cache clean --force
 
 # The service, and the finisher it calls. finish-one.mjs imports finish() out of

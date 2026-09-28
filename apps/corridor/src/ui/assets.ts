@@ -10,7 +10,7 @@
 // GPU-minute on.
 import { Dialog, Tabs, ask, button, confirm, el, lightbox, toast, type Tab } from './shell'
 import { icon } from './icons'
-import { bodyOf, empty, group, readout, select, textField, toggle } from './controls'
+import { bodyOf, empty, group, readout, segmented, select, textArea, textField, toggle } from './controls'
 import { MeshView } from './meshview'
 import { assetsvc, type AssetItem, type AssetJob, type Material, type ModelRoster } from '../assetsvc'
 
@@ -24,6 +24,9 @@ import { assetsvc, type AssetItem, type AssetJob, type Material, type ModelRoste
  * PLUS every class already in use, so adding one is adding it to an item and there is no second
  * place for a class to exist and go stale. Same rule for material categories.
  */
+/** The texture classes worth offering on an empty library; the rest come from what is in it. */
+const MATERIAL_CATEGORIES = ['wall_house', 'wall_commercial', 'roof', 'road', 'ground_cover', 'metal', 'glass', 'wood', 'other']
+
 const KINDS = [
   'hero-car', 'traffic', 'emergency', 'commercial-vehicle', 'pedestrian', 'animal',
   'furniture', 'building-dressing', 'vegetation', 'signage', 'prop',
@@ -49,6 +52,13 @@ function slugOf(name: string): string {
 const EMPTY_ITEM: AssetItem = {
   id: '', subject: '', kind: 'prop', prompt: '', negative: '', notes: '', tags: [],
   chosen: null, created: '', updated: '', views: [], mesh: null, finished: null, state: 'spec', history: [],
+}
+
+/** A line with a warning triangle on it — for a state a person has to act on. */
+const warnNote = (text: string) => {
+  const p = el('div', 'panel-hint warn')
+  p.append(icon('exclamation-triangle', 14), el('span', '', text))
+  return p
 }
 
 const STATE_LABEL: Record<AssetItem['state'], string> = {
@@ -91,6 +101,26 @@ export class AssetCatalog {
   private listBox = el('div', 'asset-list-box')
   /** a pinned seed per item; absent means "a new one every draw" */
   private seeds = new Map<string, number>()
+
+  /* ---- the materials half ------------------------------------------------------------------- */
+  private materials: Material[] = []
+  private matHost: HTMLElement | null = null
+  private material: string | null = null
+  private matFind = ''
+  /** which view of the material is on the stage — the sample wall, or one map flat */
+  private matMode: 'tiled' | 'albedo' | 'normal' | 'roughness' = 'tiled'
+  /** edits to the record that have not been saved, exactly as the catalog half works */
+  private matDraft: Partial<Material> = {}
+  /**
+   * Materials with a freshly drawn set waiting to be accepted.
+   *
+   * The maps are on the service under `<id>/draft/` and the live ones are untouched, so this is
+   * only "is there one to look at" — the truth is on disk and survives a reload.
+   */
+  private matDrafts = new Set<string>()
+  private matBusy: string | null = null
+  /** a texture being described that does not exist yet */
+  private pendingMaterial: { id: string; name: string; category: string; metres_per_tile: number; prompt: string; seed?: number; idTouched: boolean } | null = null
   /** the 3D preview, one at a time — a WebGL context per click exhausts the browser's supply */
   private mesh3d: MeshView | null = null
   private listHost = el('div', 'asset-list')
@@ -582,43 +612,45 @@ export class AssetCatalog {
   }
 
   /**
-   * The materials browser: the other half of the library.
+   * The materials browser: the other half of the library, and the same shape as the first half.
    *
-   * Grouped by category, because that is how you look for one — you want a wall, not an id. The
-   * preview is a sample wall eight metres across so `metres_per_tile` is legible as a RATIO: at
-   * 2 m you count four courses across it, at 0.5 m sixteen. A texture whose tile size is wrong
+   * A LIST AND A DETAIL PANEL, because a texture is a thing you keep working on. Rich,
+   * 2026-09-28: "Need a detail panel for each texture where we can capture prompts and edit them
+   * and regenerate textures (don't blow away old copies until an explicit save operation
+   * happens!)" — so the prompt lives on the record, Regenerate writes a DRAFT, and the live maps
+   * are only replaced when somebody presses Save.
+   *
+   * The preview is a sample wall eight metres across so `metres_per_tile` is legible as a RATIO:
+   * at 2 m you count four courses across it, at 0.5 m sixteen. A texture whose tile size is wrong
    * looks perfectly good on its own and absurd on a building, and that number is the one thing a
-   * generated surface reliably gets wrong.
+   * generated surface reliably gets wrong. The same viewer shows one map flat when what you are
+   * judging is the pixels rather than the scale.
    */
   private async buildMaterials(host: HTMLElement) {
     host.replaceChildren()
-    let list: Material[] = []
     try {
-      list = (await assetsvc.materials()).materials
+      this.materials = (await assetsvc.materials()).materials
     } catch {
       host.append(this.notConfigured())
       return
     }
-    if (!list.length) {
-      host.append(empty('No materials in this library.'))
-      return
-    }
+    this.matHost = el('div', 'material-split')
+    host.append(this.matHost)
+    if (!this.material && this.materials.length) this.material = this.materials[0].id
+    this.renderMaterials()
+  }
 
-    /*
-     * THE PREVIEW STAYS PUT AND THE LIST SCROLLS.
-     *
-     * Rich, 2026-09-28: "Materials viewer is a mess, needs to be smaller with a lightbox where you
-     * can view the material up close, and the preview window needs to be affixed and the selection
-     * scrolls." It was one column — a tall sample wall, then the upload form, then every material
-     * under it — so choosing the fourth one scrolled the thing you are choosing it BY off the top
-     * of the dialog, which makes comparing two of them impossible.
-     */
-    const split = el('div', 'material-split')
+  private renderMaterials() {
+    const host = this.matHost
+    if (!host) return
+    host.replaceChildren()
+
+    /* left: the one you are looking at */
     const left = el('div', 'material-side')
     const stage = el('div', 'material-stage')
-    this.mesh3d?.dispose()
-    const view = new MeshView({ spin: false, remember: 'materials' })
-    this.mesh3d = view
+    const current = this.materials.find((m) => m.id === this.material) ?? null
+    this.mesh3d ??= new MeshView({ spin: false, remember: 'materials' })
+    const view = this.mesh3d
     ;(window as unknown as { __meshview?: MeshView }).__meshview = view
     stage.append(view.root)
     const caption = el('div', 'material-caption')
@@ -626,159 +658,354 @@ export class AssetCatalog {
     view.start()
 
     /*
-     * AND THE MAPS THEMSELVES, FULL SIZE.
+     * ONE CONTROL FOR WHAT YOU ARE LOOKING AT, not two buttons that do nearly the same thing.
      *
-     * A sample wall answers "is the tile the right size"; it cannot answer "is this albedo full of
-     * JPEG mush" or "is the normal map inverted", which are questions about the pixels. The
-     * lightbox carries all three maps so the arrow keys step between them.
+     * "tiled" answers "is the tile the right size"; the three maps answer "are the pixels any
+     * good". They were a Pop out button and a lightbox button side by side, which is two ways to
+     * make it bigger and no way to say what you wanted bigger (Rich, 2026-09-28: "These buttons
+     * are confusing, they do kind of the same thing. Why isn't the tiled vs up close just an
+     * option in the viewer?").
      */
-    let current: Material | null = null
-    const closeUp = () => {
-      const m = current
-      if (!m) return
-      const maps = ([['albedo', m.albedo], ['normal', m.normal], ['roughness', m.roughness]] as const)
-        .filter(([, file]) => !!file)
-        .map(([what, file]) => ({ src: assetsvc.materialUrl(m.id, file!), caption: `${m.name} · ${what} · ${m.metres_per_tile} m tile` }))
-      if (maps.length) lightbox({ items: maps })
-    }
+    const modes = segmented<'tiled' | 'albedo' | 'normal' | 'roughness'>({
+      value: this.matMode,
+      options: [
+        { value: 'tiled', label: 'tiled' },
+        { value: 'albedo', label: 'albedo' },
+        { value: 'normal', label: 'normal' },
+        { value: 'roughness', label: 'rough' },
+      ],
+      onChange: (v) => { this.matMode = v; this.showMaterial(current, caption) },
+    })
+    const acts = el('div', 'panel-actions')
+    acts.append(
+      button({ label: 'Pop out', icon: 'arrows-pointing-out', title: 'the same view, big', onClick: () => view.popOut(current?.name ?? 'Material') }),
+      button({ label: 'New texture', icon: 'plus', variant: 'primary', onClick: () => this.newMaterial() }),
+    )
+    left.append(stage, modes, acts)
+    this.showMaterial(current, caption)
 
-    const show = (m: Material) => {
-      current = m
-      caption.textContent = `${m.name} · ${m.metres_per_tile} m tile · ${m.category.replace(/_/g, ' ')}`
-      void view.showMaterial({
-        metres_per_tile: m.metres_per_tile,
-        albedo: assetsvc.materialUrl(m.id, m.albedo),
-        normal: m.normal ? assetsvc.materialUrl(m.id, m.normal) : undefined,
-        roughness: m.roughness ? assetsvc.materialUrl(m.id, m.roughness) : undefined,
-      })
-      for (const n of host.querySelectorAll('.material-row')) {
-        n.classList.toggle('on', (n as HTMLElement).dataset.id === m.id)
-      }
-    }
+    /* right: the library, and the one selected in detail */
+    const right = el('div', 'material-right')
+    right.append(this.materialSearch())
+    const q = this.matFind.trim().toLowerCase()
+    const shown = this.materials.filter((m) => !q || `${m.id} ${m.name} ${m.category}`.toLowerCase().includes(q))
+    if (this.pendingMaterial) right.append(this.materialForm(null))
+    else if (current) right.append(this.materialForm(current))
 
     const browser = el('div', 'material-list')
     const byCategory = new Map<string, Material[]>()
-    for (const m of list) {
-      const k = m.category ?? 'other'
-      byCategory.set(k, [...(byCategory.get(k) ?? []), m])
-    }
+    for (const m of shown) byCategory.set(m.category ?? 'other', [...(byCategory.get(m.category ?? 'other') ?? []), m])
     for (const [cat, items] of [...byCategory].sort()) {
       const g = group(`${cat.replace(/_/g, ' ')} (${items.length})`)
       const b = bodyOf(g)
       for (const m of items) {
-        const row = el('button', 'material-row')
+        const row = el('button', `material-row${m.id === this.material ? ' on' : ''}`)
         row.dataset.id = m.id
-        const swatch = el('img', 'material-swatch')
+        const swatch = el('img', 'material-swatch') as HTMLImageElement
         swatch.src = assetsvc.materialUrl(m.id, m.albedo)
         swatch.loading = 'lazy'
         swatch.alt = ''
         const text = el('div', 'material-text')
         text.append(el('span', 'material-name', m.name), el('span', 'material-sub', `${m.metres_per_tile} m tile`))
         row.append(swatch, text)
-        // a click chooses it; the magnifier is the close look, so choosing does not cost a
-        // dismissal and looking does not cost the comparison
-        row.onclick = () => show(m)
-        row.append(button({
-          icon: 'arrows-pointing-out',
-          variant: 'ghost',
-          title: `look at ${m.name} up close`,
-          onClick: () => { show(m); closeUp() },
-        }))
+        row.onclick = () => {
+          this.material = m.id
+          this.pendingMaterial = null
+          this.matDraft = {}
+          this.renderMaterials()
+        }
         b.append(row)
       }
       browser.append(g)
     }
+    if (!shown.length) browser.append(empty(this.materials.length ? `Nothing matching “${this.matFind.trim()}”.` : 'No materials yet. “New texture” describes one.'))
+    right.append(browser)
+    host.append(left, right)
+  }
 
-    const stageActions = el('div', 'panel-actions')
-    stageActions.append(
-      button({ label: 'Pop out', icon: 'arrows-pointing-out', title: 'the sample wall, big', onClick: () => view.popOut(current?.name ?? 'Material') }),
-      button({ label: 'The maps', icon: 'photo', title: 'albedo, normal and roughness at full size', onClick: () => closeUp() }),
-      // NOT a collapsed group at the bottom of a long scroll, which is where this was and why
-      // there was "no obvious way to add a new material"
-      button({ label: 'Add a texture', icon: 'plus', variant: 'primary', onClick: () => void this.addMaterial(host, list) }),
-    )
-    left.append(stage, stageActions)
-    split.append(left, browser)
-    host.append(split)
-    show(list[0])
+  private materialSearch(): HTMLElement {
+    const wrap = el('div', 'tree-filter')
+    const i = el('input', 'input wide') as HTMLInputElement
+    i.type = 'search'
+    i.placeholder = `find one of ${this.materials.length}`
+    i.value = this.matFind
+    i.oninput = () => {
+      this.matFind = i.value
+      this.renderMaterials()
+      const again = this.matHost?.querySelector<HTMLInputElement>('.tree-filter input')
+      if (again) { again.focus(); again.setSelectionRange(again.value.length, again.value.length) }
+    }
+    wrap.append(icon('magnifying-glass', 14), i)
+    return wrap
+  }
+
+  /** Put the current material (or its draft) on the stage, in whichever mode is chosen. */
+  private showMaterial(m: Material | null, caption: HTMLElement): void {
+    const view = this.mesh3d
+    if (!view) return
+    if (!m) { view.clear(); caption.textContent = this.pendingMaterial ? 'nothing drawn yet' : 'nothing selected'; return }
+    // a draft is shown INSTEAD of the live maps, and said so, because otherwise "regenerate" looks
+    // like it did nothing
+    const drafted = this.matDrafts.has(m.id)
+    const at = (f?: string) => (f ? assetsvc.materialUrl(m.id, drafted ? `draft/${f.split('/').pop()}` : f) : undefined)
+    caption.textContent = `${m.name} · ${m.metres_per_tile} m tile · ${(m.category ?? 'other').replace(/_/g, ' ')}${drafted ? ' · DRAFT, not saved' : ''}`
+    void view.showMaterial({
+      metres_per_tile: m.metres_per_tile,
+      albedo: at(drafted ? 'albedo.jpg' : m.albedo)!,
+      normal: at(drafted ? 'normal.png' : m.normal),
+      roughness: at(drafted ? 'roughness.jpg' : m.roughness),
+      mode: this.matMode,
+    })
+    for (const n of this.matHost?.querySelectorAll('.material-row') ?? []) {
+      n.classList.toggle('on', (n as HTMLElement).dataset.id === m.id)
+    }
   }
 
   /**
-   * Add a texture: the three maps, an id, what it is, and how big a tile is.
+   * The form for one texture: what it is, how big a tile is, and the prompt that drew it.
    *
-   * `metres_per_tile` IS THE REQUIRED FIELD and the form says so, because it is the one a person
-   * uploading a photograph of bricks has no habit of thinking about — and getting it wrong
-   * produces a texture that looks perfect in isolation and absurd on a building. Albedo is the
-   * only required map: normal and roughness are improvements, and refusing an upload without
-   * them would mean a library that cannot hold what people actually have.
+   * THE PROMPT IS THE MATERIAL. A texture you cannot re-draw is a texture you cannot improve, so
+   * it is kept on the record and it is editable — and Regenerate spends a GPU on the edited one
+   * without touching what is on disk (Rich: "don't blow away old copies until an explicit save
+   * operation happens!").
    */
-  private addMaterial(host: HTMLElement, existing: Material[]): void {
-    const d = new Dialog({ title: 'Add a texture', size: 'md', icon: 'swatch' })
-    const b = d.body
-    const draft = { id: '', category: 'wall_house', metres_per_tile: 2 }
-    const files: Record<string, File | null> = { albedo: null, normal: null, roughness: null }
+  private materialForm(m: Material | null): HTMLElement {
+    const making = !m
+    const p = this.pendingMaterial
+    const g = group(making ? 'New texture' : m!.name, { note: making ? undefined : m!.id })
+    const b = bodyOf(g)
+    const draft = this.matDraft
+    const val = <K extends keyof Material>(k: K): Material[K] | undefined =>
+      (draft[k] as Material[K] | undefined) ?? (making ? (p as unknown as Material)?.[k] : m![k])
 
-    const cats = classesIn(existing.map((m) => m.category), ['wall_house', 'wall_commercial', 'road', 'ground_cover', 'roof', 'metal', 'glass', 'other'])
-    const catField = select({
-      label: 'category',
-      value: draft.category,
-      options: [...cats.map((c) => ({ value: c, label: c.replace(/_/g, ' ') })), { value: NEW_CLASS, label: 'new class…' }],
+    const set = <K extends keyof Material>(k: K, v: Material[K]) => {
+      if (making) { (p as unknown as Record<string, unknown>)[k as string] = v; this.renderMaterials(); return }
+      if (v === m![k]) delete draft[k]
+      else (draft as Record<string, unknown>)[k as string] = v
+      this.renderMaterials()
+    }
+
+    const nameField = textField({
+      label: 'name',
+      value: String(val('name') ?? ''),
+      placeholder: 'red common brick',
       onChange: (v) => {
-        if (v !== NEW_CLASS) { draft.category = v; return }
-        void ask({ title: 'New texture class', label: 'name', placeholder: 'cobblestone', icon: 'plus', validate: (x) => (slugOf(x) ? null : 'letters and digits') })
-          .then((name) => {
-            const k = name ? slugOf(name).replace(/-/g, '_') : draft.category
-            draft.category = k
-            const sel = catField.querySelector('select')!
-            if (name && !cats.includes(k)) sel.append(Object.assign(document.createElement('option'), { value: k, textContent: k.replace(/_/g, ' ') }))
-            sel.value = k
-          })
+        if (making) { p!.name = v; p!.id = p!.idTouched ? p!.id : slugOf(v).replace(/-/g, '_'); this.renderMaterials() }
+        else set('name', v)
       },
     })
-    b.append(
-      textField({ label: 'id', value: '', placeholder: 'brick_red_common', onChange: (v) => { draft.id = v.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '_') } }),
-      catField,
-      textField({ label: 'metres per tile', value: String(draft.metres_per_tile), type: 'number', step: 0.1, note: 'the whole game: how much wall one tile covers', onChange: (v) => { draft.metres_per_tile = Number(v) } }),
-    )
+    b.append(nameField)
+    if (making) {
+      const idField = textField({
+        label: 'id',
+        value: p!.id,
+        placeholder: 'red_common_brick',
+        note: 'what it is filed under; follows the name until you change it',
+        onChange: (v) => { p!.idTouched = true; p!.id = slugOf(v).replace(/-/g, '_'); this.renderMaterials() },
+      })
+      b.append(idField)
+    }
+
+    const cats = classesIn(this.materials.map((x) => x.category), MATERIAL_CATEGORIES)
+    b.append(select({
+      label: 'category',
+      value: String(val('category') ?? 'wall_house'),
+      options: [...cats.map((c) => ({ value: c, label: c.replace(/_/g, ' ') })), { value: NEW_CLASS, label: 'new class…' }],
+      onChange: (v) => {
+        if (v !== NEW_CLASS) { set('category', v); return }
+        void ask({ title: 'New texture class', label: 'name', placeholder: 'cobblestone', icon: 'plus', validate: (x) => (slugOf(x) ? null : 'letters and digits') })
+          .then((name) => { if (name) set('category', slugOf(name).replace(/-/g, '_')); else this.renderMaterials() })
+      },
+    }))
+    b.append(textField({
+      label: 'metres per tile',
+      value: String(val('metres_per_tile') ?? 2),
+      type: 'number',
+      step: 0.1,
+      note: 'the whole game: how much wall one tile covers',
+      onChange: (v) => set('metres_per_tile', Number(v) as Material['metres_per_tile']),
+    }))
+    b.append(textArea({
+      label: 'prompt',
+      value: String(val('prompt') ?? ''),
+      rows: 4,
+      note: 'what it is. The straight-down, flat-light, edge-to-edge rules are added for you.',
+      onChange: (v) => set('prompt', v as Material['prompt']),
+    }))
+    b.append(textField({
+      label: 'seed',
+      value: val('seed') === undefined || val('seed') === null ? '' : String(val('seed')),
+      type: 'number',
+      step: 1,
+      placeholder: 'a new one each time',
+      onChange: (v) => set('seed', (v.trim() ? Number(v) : undefined) as Material['seed']),
+    }))
+
+    const acts = el('div', 'panel-actions')
+    if (making) {
+      acts.append(
+        button({
+          label: 'Draw it',
+          icon: 'sparkles',
+          variant: 'primary',
+          onClick: () => void this.generateMaterial(p!.id, true),
+        }),
+        button({ label: 'Cancel', variant: 'ghost', onClick: () => { this.pendingMaterial = null; this.renderMaterials() } }),
+        button({ label: 'Upload instead', icon: 'arrow-up-tray', variant: 'ghost', onClick: () => this.uploadMaterial(p!.id) }),
+      )
+    } else {
+      const drafted = this.matDrafts.has(m!.id)
+      acts.append(button({
+        label: this.matBusy === m!.id ? 'Drawing…' : 'Regenerate',
+        icon: 'sparkles',
+        onClick: () => void this.generateMaterial(m!.id, false),
+      }))
+      if (drafted) {
+        acts.append(
+          button({ label: 'Save the new one', icon: 'document-arrow-down', variant: 'primary', onClick: () => void this.saveMaterialDraft(m!.id) }),
+          button({ label: 'Discard it', icon: 'arrow-uturn-left', variant: 'ghost', onClick: () => void this.discardMaterialDraft(m!.id) }),
+        )
+      } else if (Object.keys(draft).length) {
+        acts.append(button({ label: 'Save changes', icon: 'document-arrow-down', variant: 'primary', onClick: () => void this.saveMaterialRecord(m!.id) }))
+      }
+      acts.append(button({ label: 'Upload maps', icon: 'arrow-up-tray', variant: 'ghost', onClick: () => this.uploadMaterial(m!.id) }))
+    }
+    b.append(acts)
+    if (this.matDrafts.has(m?.id ?? '')) {
+      b.append(warnNote('A newly drawn set is on the stage. The one in use has not been touched until you save.'))
+    }
+    return g
+  }
+
+  private newMaterial(): void {
+    this.pendingMaterial = { id: '', name: '', category: 'wall_house', metres_per_tile: 2, prompt: '', idTouched: false }
+    this.material = null
+    this.matDraft = {}
+    this.renderMaterials()
+    this.matHost?.querySelector('input')?.focus()
+  }
+
+  /**
+   * Draw one. It lands in a draft and nothing on disk changes.
+   *
+   * For a NEW texture the record is written first — a draft has to belong to something, and an id
+   * with a prompt and no maps is a perfectly good row that says "described, not drawn".
+   */
+  private async generateMaterial(id: string, creating: boolean): Promise<void> {
+    const p = this.pendingMaterial
+    const m = this.materials.find((x) => x.id === id)
+    const spec = creating
+      ? { name: p!.name || id, category: p!.category, metres_per_tile: p!.metres_per_tile, prompt: p!.prompt, seed: p!.seed }
+      : { ...m!, ...this.matDraft }
+    if (!id) return void toast('give it a name first', 'warn')
+    if (!String(spec.prompt ?? '').trim()) return void toast('say what the texture is — the prompt is what draws it', 'warn')
+    this.matBusy = id
+    this.renderMaterials()
+    try {
+      if (creating || Object.keys(this.matDraft).length) {
+        await assetsvc.putMaterial(id, { ...spec, albedo: m?.albedo ?? 'albedo.jpg' })
+      }
+      const job = await assetsvc.generateMaterial(id, { prompt: spec.prompt!, metres_per_tile: spec.metres_per_tile, seed: spec.seed })
+      toast(`drawing ${id}…`, 'info', 0)
+      const done = await assetsvc.wait(job.job, (j) => toast(`drawing ${id} — ${j.progress?.state ?? j.state}`, 'info', 0))
+      if (done.state === 'failed') { toast(`${id}: ${done.detail}`, 'danger', 8000); return }
+      toast(`${id} drawn — look at it, then save it`, 'ok')
+      this.matDrafts.add(id)
+      this.pendingMaterial = null
+      this.material = id
+      this.matDraft = {}
+      this.materials = (await assetsvc.materials()).materials
+    } catch (e) {
+      toast(`${id}: ${(e as Error).message}`, 'danger', 8000)
+    } finally {
+      this.matBusy = null
+      this.renderMaterials()
+    }
+  }
+
+  private async saveMaterialDraft(id: string): Promise<void> {
+    try {
+      await assetsvc.saveMaterialDraft(id)
+      this.matDrafts.delete(id)
+      this.materials = (await assetsvc.materials()).materials
+      toast(`${id} saved — the previous maps are kept beside it`, 'ok')
+    } catch (e) {
+      toast(`save: ${(e as Error).message}`, 'danger')
+    }
+    this.renderMaterials()
+  }
+
+  private async discardMaterialDraft(id: string): Promise<void> {
+    try {
+      await assetsvc.discardMaterialDraft(id)
+    } catch { /* it may already be gone; the point is that it is not shown */ }
+    this.matDrafts.delete(id)
+    this.renderMaterials()
+  }
+
+  private async saveMaterialRecord(id: string): Promise<void> {
+    try {
+      await assetsvc.putMaterial(id, this.matDraft)
+      this.matDraft = {}
+      this.materials = (await assetsvc.materials()).materials
+      toast(`saved ${id}`, 'ok')
+    } catch (e) {
+      toast(`save: ${(e as Error).message}`, 'danger')
+    }
+    this.renderMaterials()
+  }
+
+  /**
+   * Upload maps by hand — still here, because a library that can only hold what it drew cannot
+   * hold the photograph somebody already has. It is the secondary path now, not the only one.
+   */
+  private uploadMaterial(id: string): void {
+    if (!id) return void toast('give it a name first', 'warn')
+    const d = new Dialog({ title: `Upload maps for ${id}`, size: 'md', icon: 'arrow-up-tray' })
+    const files: Record<string, File | null> = { albedo: null, normal: null, roughness: null }
     for (const map of ['albedo', 'normal', 'roughness'] as const) {
       const row = el('label', 'field text')
       row.append(el('span', 'field-label', map + (map === 'albedo' ? '' : ' (optional)')))
-      const input = el('input', 'input wide')
+      const input = el('input', 'input wide') as HTMLInputElement
       input.type = 'file'
       input.accept = 'image/png,image/jpeg,image/webp'
       input.onchange = () => { files[map] = input.files?.[0] ?? null }
       row.append(input)
-      b.append(row)
+      d.body.append(row)
     }
-
     const status = readout('upload', 'idle')
     const set = (t: string) => { status.querySelector('.field-value')!.textContent = t }
-    b.append(status)
+    d.body.append(status)
     d.footer(
       button({ label: 'Cancel', variant: 'ghost', onClick: () => d.close() }),
       button({
-        label: 'Add it',
-        icon: 'plus',
+        label: 'Upload',
+        icon: 'arrow-up-tray',
         variant: 'primary',
         onClick: async () => {
-          if (!draft.id) return toast('give it an id first', 'warn')
-          if (!files.albedo) return toast('an albedo map is required', 'warn')
-          if (!(draft.metres_per_tile > 0)) return toast('metres per tile must be more than zero', 'warn')
+          if (!files.albedo && !this.materials.some((x) => x.id === id)) return void toast('an albedo map is required', 'warn')
           try {
-            const record: Record<string, unknown> = { category: draft.category, name: draft.id.replace(/_/g, ' '), metres_per_tile: draft.metres_per_tile }
+            const record: Record<string, unknown> = {}
             for (const map of ['albedo', 'normal', 'roughness'] as const) {
-              const f = files[map]
-              if (!f) continue
+              const file = files[map]
+              if (!file) continue
               set(`${map}…`)
-              const name = `${map}${(f.name.match(/\.[a-z0-9]+$/i) ?? ['.jpg'])[0]}`.toLowerCase()
-              await assetsvc.putMaterialFile(draft.id, name, f)
+              const name = `${map}${(file.name.match(/\.[a-z0-9]+$/i) ?? ['.jpg'])[0]}`.toLowerCase()
+              await assetsvc.putMaterialFile(id, name, file)
               record[map] = name
             }
-            set('record…')
-            await assetsvc.putMaterial(draft.id, record)
-            toast(`${draft.id} added`, 'ok')
+            const p = this.pendingMaterial
+            if (p && p.id === id) {
+              await assetsvc.putMaterial(id, { name: p.name || id, category: p.category, metres_per_tile: p.metres_per_tile, prompt: p.prompt, ...record })
+              this.pendingMaterial = null
+              this.material = id
+            } else if (Object.keys(record).length) {
+              await assetsvc.putMaterial(id, record)
+            }
+            this.materials = (await assetsvc.materials()).materials
+            toast(`${id} updated`, 'ok')
             d.close()
-            void this.buildMaterials(host)
+            this.renderMaterials()
           } catch (e) {
             toast(`upload failed: ${(e as Error).message}`, 'danger', 8000)
           } finally {
@@ -789,7 +1016,6 @@ export class AssetCatalog {
     )
     d.open()
   }
-
   /**
    * A NAME, AND THE ID FOLLOWS IT.
    *

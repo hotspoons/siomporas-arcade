@@ -89,6 +89,7 @@ export interface Material {
   albedo: string
   normal?: string
   roughness?: string
+  /** the seed and the prompt that drew it — what makes a texture improvable rather than final */
   seed?: number
   prompt?: string
 }
@@ -146,6 +147,22 @@ export const assetsvc = {
     call<{ material: Material }>(`/materials/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(patch) }),
   deleteMaterial: (id: string) =>
     call<{ deleted: string }>(`/materials/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+
+  /*
+   * DRAWING A TEXTURE, AND NOT LOSING THE OLD ONE.
+   *
+   * Rich, 2026-09-28: "don't blow away old copies until an explicit save operation happens!" So
+   * generation writes into the material's `draft/` and these three are the whole lifecycle:
+   * draw it, look at it, then either keep it or throw it away. `save` even keeps what it replaced.
+   */
+  generateMaterial: (id: string, body: { prompt: string; metres_per_tile?: number; seed?: number; size?: string }) =>
+    call<AssetJob>(`/materials/${encodeURIComponent(id)}/generate`, { method: 'POST', body: JSON.stringify(body) }),
+  materialDraft: (id: string) =>
+    call<{ draft: { prompt: string; seed: number | null; at: string } | null }>(`/materials/${encodeURIComponent(id)}/draft`),
+  saveMaterialDraft: (id: string) =>
+    call<{ material: Material }>(`/materials/${encodeURIComponent(id)}/save`, { method: 'POST', body: '{}' }),
+  discardMaterialDraft: (id: string) =>
+    call<{ discarded: boolean }>(`/materials/${encodeURIComponent(id)}/draft`, { method: 'DELETE' }),
   materialUrl: (id: string, rel: string) =>
     `${ASSETSVC}/materials/${encodeURIComponent(id)}/file/${rel.split('/').pop()!.split('/').map(encodeURIComponent).join('/')}`,
 

@@ -8,7 +8,7 @@
 // does no work — so each is checked against a cluster that is deliberately nothing like ours.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { freeGpus, gpuResources, normalise, resolve, jobSet } from './training.mjs'
+import { freeGpus, gpuResources, normalise, resolve, jobSet, roleArgs } from './training.mjs'
 
 /** A fake cluster: whatever nodes and pods you hand it. */
 const fake = (nodes, pods = []) => ({
@@ -212,4 +212,57 @@ test('a batch run is one row, not two, and one failed pod fails it', () => {
     assert.equal(runs[0].state, 'running', 'still running while any pod is active')
     assert.equal(runs[0].jobs.length, 2)
   })
+})
+
+/* ---- the arguments have to be ones splatpipe accepts ------------------------------------------
+ *
+ * A manifest that is valid Kubernetes and invalid splatpipe schedules perfectly and dies on its
+ * first line. Both of these were wrong before they were checked.
+ */
+test('--config goes BEFORE the subcommand, because that is where splatpipe declares it', () => {
+  const r = normalise({ capture: 'x', config: 'configs/arrowhead-c120.yaml' })
+  const args = roleArgs(r, 'leader')
+  assert.equal(args[0], '--config', `args began ${JSON.stringify(args.slice(0, 3))}`)
+  assert.equal(args[1], 'configs/arrowhead-c120.yaml')
+  assert.equal(args[2], 'run', 'the subcommand follows the global option')
+  assert.ok(args.indexOf('--config') < args.indexOf('run'), 'a global option after the subcommand is "unrecognized arguments"')
+})
+
+test('no flag is passed that splatpipe run does not declare', () => {
+  // `run` takes exactly these; anything else is a usage error on the first line of the job
+  const ALLOWED = new Set(['--capture', '--out', '--role', '--site', '--work', '--config'])
+  const r = normalise({ capture: 'x', world: 'w', config: 'c.yaml', seamFailOver: 3 })
+  for (const role of ['leader', 'worker']) {
+    for (const a of roleArgs(r, role)) {
+      if (a.startsWith('--')) assert.ok(ALLOWED.has(a), `run does not accept ${a}`)
+    }
+  }
+})
+
+test('the roles really differ, and only in the role', () => {
+  const r = normalise({ capture: 'x' })
+  const l = roleArgs(r, 'leader')
+  const w = roleArgs(r, 'worker')
+  assert.equal(l.length, w.length)
+  const diff = l.map((v, i) => (v === w[i] ? null : [v, w[i]])).filter(Boolean)
+  assert.deepEqual(diff, [['leader', 'worker']])
+})
+
+test('a named commit becomes a guard that runs before the work', () => {
+  const r = normalise({ capture: 'x', codeSha: 'abc1234' })
+  const spec = jobSet(r).spec.replicatedJobs[0].template.spec.template.spec
+  assert.ok(spec.initContainers?.length, 'assert-code must run first')
+  assert.match(spec.initContainers[0].command[0], /assert-code\.sh$/)
+  assert.deepEqual(spec.initContainers[0].args, ['abc1234'])
+})
+
+test('and no guard is added when no commit was named, rather than an empty one', () => {
+  const spec = jobSet(normalise({ capture: 'x' })).spec.replicatedJobs[0].template.spec.template.spec
+  assert.equal(spec.initContainers, undefined)
+})
+
+test('what the run was asked to accept is written on the object', () => {
+  const m = jobSet(normalise({ capture: 'x', codeSha: 'deadbee', seamFailOver: 1.5, config: 'c.yaml' }))
+  assert.equal(m.metadata.annotations['corridor.seam-fail-over'], '1.5')
+  assert.equal(m.metadata.annotations['corridor.code-sha'], 'deadbee')
 })

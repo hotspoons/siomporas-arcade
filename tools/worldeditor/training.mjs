@@ -78,7 +78,35 @@ export function normalise(run = {}) {
     args: run.args ?? (process.env.WORLDEDITOR_SPLAT_ARGS ? JSON.parse(process.env.WORLDEDITOR_SPLAT_ARGS) : null),
     /** extra workers beside the leader. 0 is a complete run on one pod. */
     workers: Math.max(0, Number(run.workers ?? 0)),
-    config: run.config ?? null,
+    /*
+     * THE BAKE CONFIG, settled by experiment by the splats lane: survey resolution with
+     * `cell_m: 120`. Seven of eight seams matched to within 3 cm between that and high
+     * resolution, and high resolution bought +0.7 dB of PSNR for 5.9x the bytes per square
+     * metre — at world scale, the difference between shippable and not.
+     */
+    config: run.config ?? process.env.WORLDEDITOR_SPLAT_CONFIG ?? null,
+    /*
+     * THE COMMIT THIS RUN EXPECTS TO FIND ON THE VOLUME.
+     *
+     * `/workspace/gaussworks` on the PVC is a COPY with no `.git`, and the CUDA images ship no
+     * `git`, so a pull fails silently and the job runs whatever was last left there. That does
+     * not fail — it SUCCEEDS and hands back a plausible wrong number, which is strictly worse
+     * than crashing. `scripts/assert-code.sh <sha>` runs before anything else and exits non-zero
+     * on a mismatch; set this and it becomes an init container.
+     *
+     * Recorded on the object too, so a result can be traced to the code that produced it.
+     */
+    codeSha: run.codeSha ?? process.env.WORLDEDITOR_SPLAT_CODE_SHA ?? null,
+    /*
+     * THE SEAM THRESHOLD, in metres. Neighbouring chunks are levelled independently against their
+     * own GPS priors, so they can disagree about the height of the same road — a step a driver
+     * hits, and the reason splats appear to float. PSNR is nearly blind to it: two worlds over
+     * identical ground differed by 0.7 dB and by 3.4 m of worst seam.
+     *
+     * Passed through to the pipeline, which is where the gate belongs — before training, because
+     * the seam answer comes from `poses` and training is the expensive half.
+     */
+    seamFailOver: run.seamFailOver == null ? Number(process.env.WORLDEDITOR_SPLAT_SEAM_MAX ?? 3.0) : Number(run.seamFailOver),
     claim: run.claim ?? process.env.WORLDEDITOR_CLAIM ?? 'worldeditor-data',
     /*
      * NO DEFAULT STORAGE CLASS. `ceph-filesystem` was one cluster's name for it; on anybody
@@ -108,9 +136,25 @@ export function normalise(run = {}) {
  */
 export function roleArgs(r, role) {
   if (r.args) return r.args
-  const a = ['run', '--capture', `${EDITOR_MOUNT}/captures/${r.capture}`, '--out', '/out', '--role', role]
-  if (r.world) a.push('--site', `${EDITOR_MOUNT}/sites/${r.world}`)
+  /*
+   * `--config` GOES BEFORE THE SUBCOMMAND, and that is not a style choice.
+   *
+   * It is declared on splatpipe's MAIN parser, not on `run`'s — so `splatpipe run --config x` is
+   * "unrecognized arguments" and the job dies on its first line. It was written the other way
+   * here and never fired, because the config defaulted to null; giving it an env default would
+   * have armed it on every run.
+   *
+   * There is no `--seam-fail-over`. The gate exists as its own subcommand — `splatpipe seams
+   * --chunks <dir> --fail-over 3.0` — and `run` does not call it: the leader goes poses ->
+   * train with nothing in between. Inventing a flag `run` does not accept would fail every job
+   * loudly, which is at least honest, but it would not gate anything. The threshold is carried on
+   * the object as a label instead, and running the gate is a change to run.py, which belongs to
+   * the splats lane.
+   */
+  const a = []
   if (r.config) a.push('--config', r.config)
+  a.push('run', '--capture', `${EDITOR_MOUNT}/captures/${r.capture}`, '--out', '/out', '--role', role)
+  if (r.world) a.push('--site', `${EDITOR_MOUNT}/sites/${r.world}`)
   return a
 }
 
@@ -127,6 +171,24 @@ export function roleArgs(r, role) {
  * for actually submitting one once.
  */
 const EDITOR_MOUNT = '/editor'
+
+/**
+ * The guard that runs before anything else, when a commit was named.
+ *
+ * An init container rather than a `&&` in the command: a failed init container is a clear pod
+ * status and a clear event, where a shell prefix is a line partway down a log that nobody reads
+ * until the numbers look wrong.
+ */
+function assertCodeInit(r) {
+  if (!r.codeSha) return []
+  return [{
+    name: 'assert-code',
+    image: r.image,
+    command: ['/workspace/gaussworks/scripts/assert-code.sh'],
+    args: [r.codeSha],
+    volumeMounts: [{ name: 'out', mountPath: '/out' }],
+  }]
+}
 
 /** The environment a gaussworks container gets, whichever object started it. */
 function env(r) {
@@ -158,6 +220,13 @@ export function trainingDeployment(run, apiVersion = `${GROUP}/${FALLBACK_VERSIO
     metadata: {
       name: r.name,
       labels: { 'app.kubernetes.io/managed-by': 'worldeditor', 'corridor.capture': r.capture, ...(r.world ? { 'corridor.world': r.world } : {}) },
+      // What this run was asked to accept and which code it expects. Annotations rather than
+      // labels: both can exceed what a label value may hold, and neither is selected on.
+      annotations: {
+        'corridor.seam-fail-over': String(r.seamFailOver),
+        ...(r.codeSha ? { 'corridor.code-sha': r.codeSha } : {}),
+        ...(r.config ? { 'corridor.config': r.config } : {}),
+      },
     },
     spec: {
       volumeType: 'pvc',
@@ -253,6 +322,7 @@ export function jobSet(run) {
         template: {
           spec: {
             restartPolicy: 'Never',
+            ...(assertCodeInit(r).length ? { initContainers: assertCodeInit(r) } : {}),
             containers: [container(role)],
             volumes: [
               { name: 'editor-data', persistentVolumeClaim: { claimName: r.claim, readOnly: true } },
@@ -269,6 +339,13 @@ export function jobSet(run) {
     metadata: {
       name: r.name,
       labels: { 'app.kubernetes.io/managed-by': 'worldeditor', 'corridor.capture': r.capture, ...(r.world ? { 'corridor.world': r.world } : {}) },
+      // What this run was asked to accept and which code it expects. Annotations rather than
+      // labels: both can exceed what a label value may hold, and neither is selected on.
+      annotations: {
+        'corridor.seam-fail-over': String(r.seamFailOver),
+        ...(r.codeSha ? { 'corridor.code-sha': r.codeSha } : {}),
+        ...(r.config ? { 'corridor.config': r.config } : {}),
+      },
     },
     spec: {
       ttlSecondsAfterFinished: r.ttlSeconds,

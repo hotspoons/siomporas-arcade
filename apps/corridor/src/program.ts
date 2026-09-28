@@ -263,6 +263,11 @@ export class GameRun {
     return api
   }
 
+  /** The zones this program declared, by name — what a dry run reports and a HUD can list. */
+  get zoneNames(): string[] {
+    return [...this.zones.keys()]
+  }
+
   facts(): Facts {
     return {
       time: this.t,

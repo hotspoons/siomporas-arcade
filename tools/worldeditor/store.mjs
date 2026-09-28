@@ -43,12 +43,13 @@ export class Store {
     this.places = path.join(this.root, 'places')
     this.runs = path.join(this.root, 'runs')
     this.levels = path.join(this.root, 'levels')
+    this.programs = path.join(this.root, 'programs')
     this.overpassCache = path.join(this.root, 'cache', 'overpass')
     this.assets = path.join(this.root, 'assets')
   }
 
   async init() {
-    for (const d of [this.sites, this.worlds, this.places, this.runs, this.levels, this.overpassCache, this.assets]) await mkdir(d, { recursive: true })
+    for (const d of [this.sites, this.worlds, this.places, this.runs, this.levels, this.programs, this.overpassCache, this.assets]) await mkdir(d, { recursive: true })
   }
 
   /** Write through a temp file in the same directory, so a reader never sees a half-written JSON. */
@@ -282,6 +283,49 @@ export class Store {
 
   removeLevel(id) {
     return rm(path.join(this.levels, `${id}.json`), { force: true })
+  }
+
+  /* ---- programs: the code half of a level -------------------------------------------------- */
+  //
+  // Stage 6 of the pipeline. A level's declarative `scenario` covers the simple path; a program is
+  // what you write when it runs out — hiding street names is a flag, changing transport is a
+  // choice between implementations, and "define new exploration techniques" is arbitrary code.
+  //
+  // TYPESCRIPT ON DISK, NOT JSON. It is source, people diff it, and the editor typechecks it in
+  // the browser against generated declarations (apps/corridor/src/generated/program-types.json).
+  // The service does not compile it and deliberately does not try: a service that refuses to save
+  // code with a type error is a service you cannot save work-in-progress to.
+
+  async listPrograms() {
+    const out = []
+    for (const f of await readdir(this.programs).catch(() => [])) {
+      if (!f.endsWith('.ts')) continue
+      const file = path.join(this.programs, f)
+      const st = await stat(file).catch(() => null)
+      out.push({ id: f.slice(0, -3), bytes: st?.size ?? 0, modified: st?.mtime?.toISOString() ?? null })
+    }
+    return out.sort((a, b) => (a.id < b.id ? -1 : 1))
+  }
+
+  async getProgram(id) {
+    if (!/^[a-z0-9][a-z0-9-]{1,63}$/.test(id ?? '')) return null
+    const text = await readFile(path.join(this.programs, `${id}.ts`), 'utf8').catch(() => null)
+    return text === null ? null : { id, source: text }
+  }
+
+  async putProgram(id, source) {
+    if (!/^[a-z0-9][a-z0-9-]{1,63}$/.test(id ?? '')) throw Object.assign(new Error(`program id ${JSON.stringify(id)} is not a usable slug`), { status: 400 })
+    if (typeof source !== 'string') throw Object.assign(new Error('a program is a string of TypeScript'), { status: 400 })
+    // a cap, because this arrives over HTTP from a browser and a runaway paste should be refused
+    // here rather than fill the volume
+    if (source.length > 512 * 1024) throw Object.assign(new Error(`a program may be 512 kB; that is ${Math.round(source.length / 1024)} kB`), { status: 413 })
+    await this.writeAtomic(path.join(this.programs, `${id}.ts`), Buffer.from(source))
+    return { id, bytes: source.length }
+  }
+
+  removeProgram(id) {
+    if (!/^[a-z0-9][a-z0-9-]{1,63}$/.test(id ?? '')) return Promise.resolve()
+    return rm(path.join(this.programs, `${id}.ts`), { force: true })
   }
 
   /* ---- the place index --------------------------------------------------------------------- */

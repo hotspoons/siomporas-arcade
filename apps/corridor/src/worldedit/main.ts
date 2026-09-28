@@ -22,12 +22,13 @@ import { DefinePanel, zoomFor } from './define'
 import { LogView, RunsPanel } from './runs'
 import { AdoptDialog } from './adopt'
 import { StagePanel } from './stage'
+import { ProgramPanel } from '../ui/programpanel'
 import { AssetsPanel } from './assets'
 import { SplatsPanel } from './splats'
 import { worldMenuTransfer } from './transfer'
 import { dockWidth } from '../ui/dockwidth'
 
-type Mode = 'explore' | 'index' | 'define' | 'bake' | 'place' | 'stage' | 'assets' | 'splats'
+type Mode = 'explore' | 'index' | 'define' | 'bake' | 'place' | 'stage' | 'program' | 'assets' | 'splats'
 
 /*
  * THE SITE EDITOR IS A MODE, not another page.
@@ -86,6 +87,23 @@ const readoutEl = document.getElementById('readout') as HTMLElement
 let config: Config | null = null
 let worlds: World[] = []
 let selected: string | null = new URLSearchParams(location.search).get('world')
+/**
+ * The Program panel: stage 6, the code half of a level.
+ *
+ * It renders into `#code` — the whole main area — rather than the inspector, because Monaco in a
+ * 340 px dock is a code editor nobody writes anything in. Its diagnostics go in the inspector
+ * beside it, where a row is a jump to the line.
+ */
+const programPanel = new ProgramPanel({
+  host: document.getElementById('code')!,
+  reportHost: inspector,
+  list: async () => (await api.programs()).programs,
+  load: async (id) => (await api.program(id).catch(() => null))?.source ?? null,
+  save: async (id, source) => { await api.saveProgram(id, source) },
+  remove: async (id) => { await api.deleteProgram(id) },
+  refresh: () => { if (mode === 'program') void programPanel.render() },
+})
+
 let mode: Mode = 'explore'
 let dirty = false
 
@@ -353,8 +371,9 @@ function buildBar() {
         { value: 'bake', label: 'Bake', icon: 'play', key: '4' },
         { value: 'place', label: 'Place', icon: 'pencil-square', key: '5' },
         { value: 'stage', label: 'Stage', icon: 'flag', key: '6' },
-        { value: 'assets', label: 'Assets', icon: 'cube', key: '7' },
-        { value: 'splats', label: 'Splats', icon: 'camera', key: '8' },
+        { value: 'program', label: 'Program', icon: 'beaker', key: '7' },
+        { value: 'assets', label: 'Assets', icon: 'cube', key: '8' },
+        { value: 'splats', label: 'Splats', icon: 'camera', key: '9' },
       ],
       onChange: (m) => setMode(m),
     }),
@@ -698,10 +717,25 @@ function setMode(m: Mode) {
   mode = m
   for (const b of bar.querySelectorAll<HTMLButtonElement>('.seg')) b.classList.toggle('on', b.dataset.value === m)
   showSiteEditor(m === 'place')
+  showCode(m === 'program')
   // Define puts the map in draw mode; the panel switches it to `pick` itself when the world is a
   // named-roads one, because then clicking is choosing a road rather than dropping a vertex.
   map.mode = m === 'define' ? 'draw' : 'pan'
   renderPanel()
+}
+
+/** Swap the program editor in and out. Same pane as the map and the Place scene, one at a time. */
+function showCode(on: boolean) {
+  const code = document.getElementById('code')
+  const mapCanvas = document.querySelector<HTMLCanvasElement>('#map')
+  if (code) code.hidden = !on
+  // only the Place mode may hide the map as well; this must not un-hide it on the way out of a
+  // mode that was never showing it
+  if (mapCanvas && (on || mode !== 'place')) mapCanvas.hidden = on
+  const title = document.getElementById('panel-title')
+  if (title && on) title.textContent = 'Program'
+  const readout = document.getElementById('readout')
+  if (readout) readout.hidden = on || readout.hidden
 }
 
 /** Swap the 3D scene and its chrome in and out. The map keeps its own canvas either way. */
@@ -739,6 +773,10 @@ function renderPanel() {
         showSiteEditor(false)
         toast(`place editor: ${(e as Error).message}`, 'danger', 8000)
       })
+    return
+  }
+  if (mode === 'program') {
+    void programPanel.render()
     return
   }
   if (mode === 'stage') {

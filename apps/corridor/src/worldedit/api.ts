@@ -400,6 +400,12 @@ export const api = {
   /** check without saving — what the in-app agent calls before it writes anything */
   validateLevel: (body: Partial<Level>) => call<{ ok: boolean; errors: string[]; warnings: string[] }>('/api/levels/validate', { method: 'POST', body: JSON.stringify(body) }),
 
+  /* ---- programs: the code half of a level (src/program.ts, stage 6) ---- */
+  programs: () => call<{ programs: { id: string; bytes: number; modified: string | null }[] }>('/api/programs'),
+  program: (id: string) => call<{ id: string; source: string }>(`/api/programs/${id}`),
+  saveProgram: (id: string, source: string) => call<{ id: string; bytes: number }>(`/api/programs/${id}`, { method: 'PUT', body: JSON.stringify({ source }) }),
+  deleteProgram: (id: string) => call<{ deleted: string }>(`/api/programs/${id}`, { method: 'DELETE' }),
+
   /* ---- captures: footage in, splat world out ---- */
   captures: () => call<{ captures: Capture[] }>('/api/captures'),
   capture: (id: string) => call<{ capture: Capture; manifest: CaptureManifest }>(`/api/captures/${id}`),

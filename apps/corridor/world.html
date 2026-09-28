@@ -43,6 +43,11 @@
       <div id="se-inspector" class="inspector-body" hidden></div>
       <div id="se-actions" class="panel-actions" hidden></div>
     </aside>
+    <!-- The program editor. A code editor needs the width the inspector does not have, so it
+         takes the whole main area the way the Place mode takes it, and its diagnostics go in the
+         inspector beside it. Empty until the Program mode is entered: Monaco is two megabytes and
+         most sessions never open one. -->
+    <div id="code" hidden></div>
     <div id="readout" class="map-readout"></div>
     <script type="module" src="/src/worldedit/main.ts"></script>
   </body>

@@ -37,6 +37,66 @@ body.worldedit {
   touch-action: none;
 }
 
+/* The program editor, in the Program mode. Exactly where the map is, for the same reason the
+   Place mode's scene is: it replaces it. A code editor in a 340 px inspector is a code editor
+   nobody writes anything in, and "improve the UX for humans typing" (Rich, 2026-09-28) starts
+   with giving it the room. */
+#code {
+  position: fixed;
+  top: var(--we-bar-h, var(--bar-h));
+  left: 0;
+  width: calc(100vw - var(--inspector-w, min(340px, 92vw)));
+  height: calc(100vh - var(--we-bar-h, var(--bar-h)));
+  display: grid;
+  /* the bar, then the editor taking whatever is left. `minmax(0, 1fr)` and not `1fr`: Monaco
+     measures its own host, and a grid row that sizes to its content gives it a height of zero and
+     an editor one line tall. */
+  grid-template-rows: auto minmax(0, 1fr);  /* the bar, then the editor */
+  background: var(--bg-0);
+}
+#code[hidden] { display: none; }
+
+#code .panel-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s2) var(--s3);
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-1);
+}
+#code .panel-title {
+  font-weight: 600;
+  font-size: var(--fs-1);
+}
+#code .panel-bar-actions {
+  display: flex;
+  gap: var(--s1);
+  margin-left: auto;
+}
+#code .code-host {
+  min-height: 0;
+  min-width: 0;
+}
+
+/* The diagnostics, in the inspector. A row is a jump: clicking it puts the caret on the line,
+   which is what makes a list of problems useful rather than a report about them. */
+.row.diag {
+  align-items: flex-start;
+  text-align: left;
+}
+.row.diag .row-name {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-2);
+}
+.row.diag .row-note {
+  white-space: normal;
+  overflow-wrap: break-word;
+}
+.row.diag.error .row-name { color: var(--danger); }
+.row.diag.warning .row-name { color: var(--warn); }
+.note.ok { color: var(--ok); }
+
 /* The site editor's scene, in the Place mode. Exactly where the map is, because it replaces it:
    editor.css positions #gl for a page that is only the editor, and here it is one pane of two. */
 body.worldedit #gl {

@@ -797,6 +797,41 @@ async function api(req, res, seg, q) {
     }
   }
   /*
+   * ---- programs ------------------------------------------------------------------------------
+   *
+   * Stage 6: the code half of a level. TypeScript source on the volume, beside the levels that
+   * name it.
+   *
+   * THE SERVICE DOES NOT COMPILE IT, and deliberately does not try. The editor typechecks in the
+   * browser against generated declarations (apps/corridor/src/generated/program-types.json) and
+   * shows the errors where they are, on the line they are on. A service that refused to save code
+   * with a type error would be a service you could not save work in progress to — which is most
+   * of the time you are writing any.
+   */
+  if (seg[0] === 'programs' && seg.length === 1 && req.method === 'GET') {
+    return json(res, 200, { programs: await store.listPrograms() })
+  }
+  if (seg[0] === 'programs' && seg.length === 2) {
+    const id = seg[1]
+    if (req.method === 'GET') {
+      const p = await store.getProgram(id)
+      return p ? json(res, 200, p) : json(res, 404, { error: `no program ${id}` })
+    }
+    if (req.method === 'PUT') {
+      const body = await readJson(req)
+      try {
+        return json(res, 200, await store.putProgram(id, body?.source))
+      } catch (e) {
+        return json(res, e.status ?? 500, { error: String(e.message ?? e) })
+      }
+    }
+    if (req.method === 'DELETE') {
+      await store.removeProgram(id)
+      return json(res, 200, { deleted: id })
+    }
+  }
+
+  /*
    * ---- splat training ------------------------------------------------------------------------
    *
    * Rich, 2026-09-27: the platform's TrainingDeployment as "an optional (but featured) wrapper

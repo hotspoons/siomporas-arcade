@@ -95,6 +95,27 @@ else {
   say('showing', showing.join(' '))
 }
 
+/* ---- 2b · a candidate opens big enough to decide on ---- */
+//
+// "I don't see a lightbox pop up when I go to inspect the output... can't expand these" — and the
+// decision these 140px tiles carry is which drawing gets forty seconds of GPU. So the check is
+// that a click gets you a picture MUCH bigger than the tile, with the action on it.
+if (tiles) {
+  const tile = await page.locator('#panel .candidate').first().boundingBox()
+  await page.locator('#panel .candidate').first().click()
+  await page.waitForSelector('.lightbox img', { timeout: 5000 }).catch(() => {})
+  await page.waitForTimeout(400)
+  const box = await page.locator('.lightbox img').boundingBox().catch(() => null)
+  const act = await page.locator('.lightbox button:not(.hidden)').evaluateAll((ns) => ns.map((n) => n.textContent?.trim()).filter(Boolean)).catch(() => [])
+  say('tile → lightbox', box ? `${Math.round(tile.width)}px → ${Math.round(box.width)}px` : 'did not open')
+  say('lightbox offers', act.join(' · ') || '(nothing)')
+  if (!box) fail.push('clicking a candidate opened no lightbox')
+  else if (box.width < tile.width * 2) fail.push(`the lightbox is ${Math.round(box.width)}px against a ${Math.round(tile.width)}px tile — not worth opening`)
+  if (!act.some((t) => /use this one/i.test(t))) fail.push('the lightbox cannot choose the picture it is showing')
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(300)
+}
+
 /* ---- 3 · the seed reaches the service ---- */
 const typed = await page.evaluate(() => {
   const f = [...document.querySelectorAll('#panel .field.text')].find((n) => n.querySelector('.field-label')?.textContent === 'seed')

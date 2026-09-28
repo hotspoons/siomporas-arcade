@@ -44,7 +44,15 @@ const arg = (name, dflt) => {
 
 const PORT = Number(arg('port', process.env.ASSETSVC_PORT ?? 8770))
 const HOST = arg('host', process.env.ASSETSVC_HOST ?? '0.0.0.0')
-const DATA = path.resolve(arg('data', process.env.ASSETSVC_DATA ?? path.join(REPO, 'ext/assetsvc')))
+/*
+ * `tools/assetsvc/data`, NOT `ext/assetsvc`.
+ *
+ * `ext/*` is gitignored, so the old default pointed a fresh clone at a directory that does not
+ * exist — and worse, implied the library lived outside the repo, which is the arrangement this
+ * work exists to end. In a pod the chart sets ASSETSVC_DATA and none of this applies; locally,
+ * a predictable path beside the code is what somebody running it for the first time wants.
+ */
+const DATA = path.resolve(arg('data', process.env.ASSETSVC_DATA ?? path.join(REPO, 'tools/assetsvc/data')))
 const CONFIG = arg('models', process.env.ASSETSVC_MODELS ?? path.join(HERE, 'models.example.json'))
 
 const config = existsSync(CONFIG) ? JSON.parse(await readFile(CONFIG, 'utf8')) : { models: {}, defaults: {} }

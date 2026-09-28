@@ -27,9 +27,18 @@ const ok = (name, cond, detail) => { console.log(`${cond ? 'ok  ' : 'FAIL'}  ${n
  * list; until it is resolved a probe has to say which one it means, and this one means the dialog,
  * because that is where the thumbnails are.
  */
+/*
+ * THROUGH THE ASSETS MODE, which is now the only way in.
+ *
+ * This used to click a toolbar icon. "Assets" existed three times — that icon, a mode, and two
+ * drawer items opening a different dialog — and de-duplicating it left this probe clicking a
+ * button that is gone. The catalog opens from inside the mode, which is where generating and
+ * placing both live now.
+ */
+await page.evaluate(() => window.__we.setMode('assets'))
+await page.waitForFunction(() => [...document.querySelectorAll('#panel button')].some((n) => /catalog & generate/i.test(n.textContent ?? '')), null, { timeout: 30000 })
 await page.evaluate(() => {
-  const b = [...document.querySelectorAll('header.topbar button')]
-    .find((n) => /generate an asset/i.test(n.getAttribute('title') ?? ''))
+  const b = [...document.querySelectorAll('#panel button')].find((n) => /catalog & generate/i.test(n.textContent ?? ''))
   b?.click()
 })
 await page.waitForFunction(() => !!document.querySelector('.asset-row'), null, { timeout: 30000 }).catch(() => {})

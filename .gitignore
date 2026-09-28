@@ -77,3 +77,6 @@ packages/enginesim/packs/
 # the local editor's data dir (just worldeditor-local) — a scratch volume, never content
 .local-editor-data/
 .local-assets/
+
+# the asset service's local catalog — a working store, never content
+tools/assetsvc/data/

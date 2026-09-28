@@ -106,6 +106,57 @@ export interface ProgramHost {
   placements?: () => PlacedThing[]
   /** move a placed object. The program moves the ENTITY; this is how that reaches the scene. */
   movePlacement?: (id: string, to: { x: number; y: number; z?: number | null; yaw_deg: number; scale: number }) => void
+
+  /**
+   * THE PHYSICS WORLD, when there is one behind this run.
+   *
+   * Optional, and absent in a dry run — which is the point: `program.ts` holds no THREE, no DOM
+   * and no wasm, so a whole game can be stepped in a test, and a program written against physics
+   * still LOADS where there is none instead of throwing on its first line. Every method on
+   * `api.physics` answers harmlessly when this is missing.
+   *
+   * See docs/corridor/PLAN-EDITOR-IDE.md §4. The engine's side of this lives in
+   * `packages/engine/src/physics/`; nothing in this file imports it, because the boundary is what
+   * keeps the program layer testable.
+   */
+  physics?: PhysicsHost
+}
+
+/** Site metres — x east, y north, z up. The frame every number in a program is in. */
+export type Vec3 = { x: number; y: number; z: number }
+
+/** What the player's car is doing, as the HUD, the sound and a program all read it. */
+export interface CarState {
+  /** m/s along the nose; negative in reverse */
+  speed: number
+  /** m/s across the car, + right */
+  slide: number
+  /** 0…1: how far past what the tyres hold the corner is asking */
+  slip: number
+  /** 0…1: the share of the demanded drive the tyres refused */
+  wheelslip: number
+  /** how many of the four wheels are on something */
+  grounded: number
+  airborne: boolean
+  /** 0…1, accumulated impact damage */
+  damage: number
+}
+
+/**
+ * What the app's physics can be asked for. Every member optional on purpose — a host may have a
+ * world and no destruction, and a program should degrade rather than explode.
+ */
+export interface PhysicsHost {
+  setProfile?: (id: string, overrides?: Record<string, number>) => void
+  blendProfile?: (id: string, t: number, opts?: { over?: number }) => void
+  explode?: (at: Vec3, opts: { radius: number; impulse: number; lift?: number; lineOfSight?: boolean; breakAt?: number }) => number
+  impulse?: (entity: number, v: Vec3) => void
+  break?: (what: number | string) => number
+  ray?: (from: Vec3, dir: Vec3, maxDistance: number) => { entity: number; point: Vec3; normal: Vec3 } | null
+  car?: () => CarState | null
+  onImpact?: (fn: (e: { a: number; b: number; point: Vec3; impulse: number }) => void) => void
+  /** give one entity its own handling, for a chase car that is not the player's */
+  setEntityProfile?: (entity: number, id: string, overrides?: Record<string, number>) => void
 }
 
 /** One thing the editor placed in this world. Site metres, compass bearing — as saved. */
@@ -197,6 +248,39 @@ export interface GameApi {
   /** what is in this world, ids and all, for a program that would rather look than be told */
   placements(): PlacedThing[]
 
+  /**
+   * PHYSICS, for the games that want their own.
+   *
+   * "let you define your own physics for individual games" — a level may say how the car handles,
+   * blow something up, shove an entity, ask what is solid along a ray, and watch for impacts.
+   *
+   * IT IS SAFE WITHOUT A PHYSICS WORLD. A dry run has none; every call here does nothing and the
+   * readers answer null, so a program that uses physics is still a program you can step in a test.
+   * `available` is how a program asks rather than guesses.
+   */
+  readonly physics: {
+    /** is there a physics world behind this run at all */
+    available(): boolean
+    /** how the player's car handles. `overrides` is a partial DriveProfile, by key */
+    profile(id: string, overrides?: Record<string, number>): void
+    /** move toward another profile — the car gets looser as it takes damage */
+    blend(id: string, t: number, opts?: { over?: number }): void
+    /** one entity's own handling, for something that is not the player */
+    entityProfile(entity: number, id: string, overrides?: Record<string, number>): void
+    /** a bomb, in site metres. Returns how many things it moved */
+    explode(at: Vec3, opts: { radius: number; impulse: number; lift?: number; lineOfSight?: boolean; breakAt?: number }): number
+    /** shove one entity */
+    impulse(entity: number, v: Vec3): void
+    /** break a named breakable, or an entity. Returns how many pieces */
+    break(what: number | string): number
+    /** what is solid along this ray — the primitive a new exploration technique needs */
+    ray(from: Vec3, dir: Vec3, maxDistance: number): { entity: number; point: Vec3; normal: Vec3 } | null
+    /** the player's car, read-only */
+    car(): Readonly<CarState> | null
+    /** something was hit hard enough to matter */
+    onImpact(fn: (e: { a: number; b: number; point: Vec3; impulse: number }) => void): void
+  }
+
   /** name a region, so `on('enters', …)` and `in()` can refer to it */
   zone(name: string, z: Zone): void
   /** is the player in it right now */
@@ -235,6 +319,11 @@ export interface GameDef {
 export function defineGame(def: GameDef): GameDef {
   return def
 }
+
+/** A number that is actually a number. `NaN` in a radius is a query over the whole world. */
+const finite = (n: unknown): boolean => typeof n === 'number' && Number.isFinite(n)
+/** A point that is actually a point. */
+const vec = (v: unknown): boolean => !!v && finite((v as Vec3).x) && finite((v as Vec3).y) && finite((v as Vec3).z)
 
 /* ---- the runner -------------------------------------------------------------------------- */
 
@@ -295,6 +384,29 @@ export class GameRun {
       say: (t, k) => { this.messages.push({ text: t, kind: k ?? 'info', at: this.t }); H.say(t, k) },
       time: (hhmm) => H.setTime?.(hhmm),
       weather: (w) => H.setWeather?.(w),
+
+      /*
+       * NOTHING HERE THROWS AND NOTHING HERE ASSUMES.
+       *
+       * A program is code from a person or an agent, and a host may be a dry run with no physics
+       * at all — so every call is guarded at this one boundary rather than in each program. A
+       * number that is not a number is refused here too: `explode` with a radius of NaN reaches
+       * Rapier as a query over the whole world.
+       */
+      physics: {
+        available: () => !!H.physics,
+        profile: (id, o) => H.physics?.setProfile?.(id, o),
+        blend: (id, t, o) => H.physics?.blendProfile?.(id, finite(t) ? t : 0, o),
+        entityProfile: (e, id, o) => H.physics?.setEntityProfile?.(e, id, o),
+        explode: (at, opts) => (H.physics?.explode && vec(at) && finite(opts?.radius) && finite(opts?.impulse)
+          ? H.physics.explode(at, opts)
+          : 0),
+        impulse: (e, v) => { if (H.physics?.impulse && vec(v)) H.physics.impulse(e, v) },
+        break: (what) => H.physics?.break?.(what) ?? 0,
+        ray: (from, dir, max) => (H.physics?.ray && vec(from) && vec(dir) && finite(max) ? H.physics.ray(from, dir, max) : null),
+        car: () => H.physics?.car?.() ?? null,
+        onImpact: (fn) => H.physics?.onImpact?.((e) => this.guard(() => fn(e))),
+      },
 
       placed: (id) => this.entityFor(id),
       placedWith: (tag) => (H.placements?.() ?? []).filter((p) => p.tags.includes(tag)).map((p) => this.entityFor(p.id)).filter((e): e is number => e !== null),

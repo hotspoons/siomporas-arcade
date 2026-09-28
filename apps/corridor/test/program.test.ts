@@ -455,3 +455,102 @@ describe('what the editor placed', () => {
     expect(all).toEqual([])
   })
 })
+
+/*
+ * PHYSICS, INCLUDING WHEN THERE IS NONE.
+ *
+ * `api.physics` is the seam the editor and the engine meet at (PLAN-EDITOR-IDE.md §4). The rule
+ * that makes it safe is that a dry run has no physics world — `program.ts` holds no wasm on
+ * purpose — so every call has to do nothing rather than throw. A program written against physics
+ * must still LOAD and STEP where there is none, or the toolkit that checks levels cannot check
+ * the levels that matter.
+ */
+describe('physics, through the host', () => {
+  const physHost = () => {
+    const { h } = host()
+    const log: string[] = []
+    h.physics = {
+      setProfile: (id, o) => log.push(`profile ${id} ${JSON.stringify(o ?? {})}`),
+      blendProfile: (id, t) => log.push(`blend ${id} ${t}`),
+      setEntityProfile: (e, id) => log.push(`entity ${e} ${id}`),
+      explode: (at, o) => { log.push(`explode ${at.x},${at.y} r${o.radius}`); return 3 },
+      impulse: (e, v) => log.push(`impulse ${e} ${v.x}`),
+      break: (what) => { log.push(`break ${what}`); return 2 },
+      ray: () => ({ entity: 7, point: { x: 1, y: 2, z: 3 }, normal: { x: 0, y: 0, z: 1 } }),
+      car: () => ({ speed: 22, slide: 0.4, slip: 0.1, wheelslip: 0, grounded: 4, airborne: false, damage: 0.2 }),
+      onImpact: (fn) => log.push(`onImpact ${typeof fn}`),
+    }
+    return { h, log }
+  }
+
+  it('a program with no physics behind it still runs', async () => {
+    const { h } = host()
+    let saw: unknown[] = []
+    const run = await play(defineGame({
+      setup: (api) => {
+        saw = [api.physics.available(), api.physics.car(), api.physics.explode({ x: 0, y: 0, z: 0 }, { radius: 5, impulse: 1 }), api.physics.break('x')]
+        api.physics.profile('street')
+        api.physics.impulse(1, { x: 0, y: 0, z: 1 })
+      },
+    }), h, 0.2)
+    expect(run.error).toBe(null)
+    expect(saw).toEqual([false, null, 0, 0])
+  })
+
+  it('and with one, every call reaches it', async () => {
+    const { h, log } = physHost()
+    let car: unknown = null
+    let hit: unknown = null
+    await play(defineGame({
+      setup: (api) => {
+        api.physics.profile('street', { gripRear: 1.1 })
+        api.physics.blend('sim', 0.5)
+        api.physics.entityProfile(4, 'rush')
+        api.physics.explode({ x: 10, y: 20, z: 0 }, { radius: 8, impulse: 900 })
+        api.physics.impulse(4, { x: 0, y: 0, z: 5 })
+        api.physics.break('sign-01')
+        api.physics.onImpact(() => {})
+        car = api.physics.car()
+        hit = api.physics.ray({ x: 0, y: 0, z: 1 }, { x: 0, y: 0, z: -1 }, 10)
+      },
+    }), h, 0.2)
+    expect(log).toEqual([
+      'profile street {"gripRear":1.1}',
+      'blend sim 0.5',
+      'entity 4 rush',
+      'explode 10,20 r8',
+      'impulse 4 0',
+      'break sign-01',
+      'onImpact function',
+    ])
+    expect((car as { speed: number }).speed).toBe(22)
+    expect((hit as { entity: number }).entity).toBe(7)
+  })
+
+  it('a NaN never reaches the engine', async () => {
+    // `explode` with a radius of NaN is a query over the whole world, and a program is code from
+    // a person or an agent
+    const { h, log } = physHost()
+    let n = -1
+    await play(defineGame({
+      setup: (api) => {
+        n = api.physics.explode({ x: 0, y: NaN, z: 0 }, { radius: 5, impulse: 1 })
+        api.physics.explode({ x: 0, y: 0, z: 0 }, { radius: Number.NaN, impulse: 1 })
+        api.physics.impulse(1, { x: Infinity, y: 0, z: 0 })
+        api.physics.ray({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: -1 }, NaN)
+      },
+    }), h, 0.2)
+    expect(n).toBe(0)
+    expect(log).toEqual([])
+  })
+
+  it('a throw inside an impact handler stops the program, not the frame loop', async () => {
+    const { h } = physHost()
+    let handler: ((e: { a: number; b: number; point: { x: number; y: number; z: number }; impulse: number }) => void) | null = null
+    h.physics!.onImpact = (fn) => { handler = fn }
+    const run = await play(defineGame({ setup: (api) => api.physics.onImpact(() => { throw new Error('boom') }) }), h, 0.2)
+    expect(run.error).toBe(null)
+    handler!({ a: 1, b: 2, point: { x: 0, y: 0, z: 0 }, impulse: 10 })
+    expect(run.error).toMatch(/boom/)
+  })
+})

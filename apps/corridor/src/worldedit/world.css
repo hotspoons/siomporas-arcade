@@ -70,12 +70,35 @@ body.worldedit {
   left: 0;
   width: 100vw;
   height: calc(100vh - var(--we-bar-h, var(--bar-h)));
-  overflow: auto;
   padding: var(--s4);
   background: var(--bg-0);
+  /* THE WHOLE HEIGHT, ALL THE WAY DOWN.
+     `.asset-body` carries `height: min(72vh, 680px)` from when this was a dialog, which in a pane
+     that owns the screen leaves several hundred pixels of nothing under the scroll area (Rich,
+     2026-09-28). Every box from here to the two columns is a `minmax(0, 1fr)` row, and the two
+     columns are what scroll — `minmax(0, …)` rather than `1fr` because a grid row sized to its
+     content will not shrink, which is how a scroll container ends up taller than its parent. */
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
 }
 #assets[hidden] { display: none; }
-.asset-pane { height: auto; }
+.asset-pane { height: 100%; min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); }
+.asset-pane .tabs { min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); }
+.asset-pane .tab-body { min-height: 0; overflow: hidden; padding: var(--s4) 0 0; }
+/* and the PANEL inside the body — the chain of bounded heights has to reach the columns without a
+   single content-sized box in it, or everything below that box grows instead of scrolling */
+.asset-pane .tab-panel { height: 100%; min-height: 0; overflow: hidden; }
+/* ONE ROW, BOUNDED. Without `grid-template-rows` the row is `auto` — sized to its content — so
+   the two columns grew to six thousand pixels and scrolled the page instead of themselves. */
+.asset-pane .asset-split { height: 100%; min-height: 0; align-items: stretch; grid-template-rows: minmax(0, 1fr); }
+.asset-pane .asset-list, .asset-pane .asset-detail { overflow-y: auto; }
+.asset-pane .asset-list-box { min-height: 0; grid-template-rows: auto auto auto minmax(0, 1fr); }
+.asset-pane .asset-list { max-height: none; min-height: 0; }
+.asset-pane .asset-detail { max-height: none; min-height: 0; }
+.asset-pane .material-split { height: 100%; min-height: 0; }
+.asset-pane .material-right { min-height: 0; overflow-y: auto; }
+.asset-pane .material-list { max-height: none; }
 
 .code-pane { display: grid; grid-template-rows: auto minmax(0, 1fr); min-height: 0; min-width: 0; }
 .code-pane[hidden] { display: none; }
@@ -629,3 +652,6 @@ body.worldedit .inspector {
 .roster-detail .meshview { aspect-ratio: 4 / 3; min-height: 150px; max-height: 200px; }
 /* the scene while something is being dragged over it */
 canvas.drop-target { outline: 2px dashed var(--accent); outline-offset: -4px; }
+
+/* the library's own toolbar: what the dialog kept in its footer, where a pane can show it */
+.asset-pane-bar { display: flex; gap: var(--s2); justify-content: flex-end; margin-bottom: var(--s2); }

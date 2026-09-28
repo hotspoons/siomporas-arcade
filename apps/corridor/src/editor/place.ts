@@ -474,10 +474,14 @@ export class PlaceMode {
      * the list, and selecting something in the world moved everything under it. Picking what to
      * place and adjusting what you have placed are separate jobs; each gets the panel.
      */
-    const tabs = el('div', 'place-tabs')
+    // THE SAME TABS THE ASSET LIBRARY USES. Rich, 2026-09-28: "Tabs from assets should be used in
+    // the place things editor tabs, not what ever this is." `tab-strip` / `tab` are what `Tabs`
+    // in ui/shell.ts emits, so these are the same control by class rather than by resemblance.
+    const tabs = el('div', 'tab-strip')
     for (const [id, label] of [['assets', 'Assets'], ['placed', `Placed (${this.doc.items.length})`]] as const) {
-      const b = el('button', `place-tab${this.panelTab === id ? ' on' : ''}`)
-      b.textContent = label
+      const b = el('button', `tab${this.panelTab === id ? ' on' : ''}`)
+      b.setAttribute('role', 'tab')
+      b.append(el('span', '', label))
       b.onclick = () => { this.panelTab = id; this.onChange() }
       tabs.append(b)
     }

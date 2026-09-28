@@ -1,19 +1,18 @@
-// Do dialogs stack, and does closing one actually close it?
+// Does a dialog open, close, and leave the tab alive?
 //
-// Both of these were broken by the same file on the same day, in opposite directions:
+// Two bugs on 2026-09-28, from the same file, in opposite directions:
 //
-//   `open()` used to close whatever was already open, so `ask` — which is a dialog — closed the
-//   panel that raised it. Pressing "New item" in the catalog made the catalog vanish.
+//   `open()` used to close whatever was already open, and `ask` is a dialog — so asking a question
+//   from inside a panel closed the panel that raised it. Dialogs are a stack now.
 //
-//   Then `beforeClose` was added to guard unsaved edits, and its answer arrives in a microtask, so
+//   Then `beforeClose` was added to guard unsaved edits. Its answer arrives in a microtask, so
 //   acting on it means calling `close()` again — which asks again. The guard was cleared before
-//   that second call, so a `beforeClose` that says yes produced an unbounded chain of microtasks:
-//   the queue never drained, timers never ran, nothing painted (Rich, 2026-09-28: "Closing the
-//   assets form freezes the tab and you need to wait to kill it so you can get the aw snap!
+//   that second call: an unbounded chain of microtasks, no timer ran, nothing painted, and the tab
+//   had to be killed (Rich: "Closing the assets form freezes the tab... you get the aw snap!
 //   screen").
 //
-// THE SECOND ONE IS WHY THIS PROBE ASKS WHETHER THE PAGE IS STILL ANSWERING, not just whether the
-// dialog is gone. A wedged tab and a dialog that declined to close look identical from a selector.
+// WHICH IS WHY THIS ASKS WHETHER THE PAGE IS STILL ANSWERING as well as whether the dialog is
+// gone. A wedged tab and a dialog that declined to close are the same thing to a selector.
 //
 //   node probes/corridor-dialogs.mjs
 import { chromium } from 'playwright'
@@ -22,7 +21,7 @@ const PORT = process.env.PORT ?? '5185'
 const browser = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader'] })
 const page = await browser.newPage({ viewport: { width: 1400, height: 950 } })
 const errs = []
-page.on('pageerror', (e) => errs.push(e.message))
+page.on('pageerror', (e) => errs.push(e.message.split('\n')[0]))
 const fail = []
 const say = (k, v) => console.log(`${k.padEnd(26)} ${typeof v === 'object' ? JSON.stringify(v) : v}`)
 
@@ -34,59 +33,64 @@ const answering = async (ms = 4000) => {
   ])
   return r === 'alive'
 }
+const dialogs = () => page.evaluate(() => document.querySelectorAll('.dialog').length)
+const settle = (n) => page.waitForFunction((want) => document.querySelectorAll('.dialog').length === want, n, { timeout: 6000 })
+  .then(() => true).catch(() => false)
 
 await page.goto(`http://localhost:${PORT}/world.html`, { waitUntil: 'networkidle', timeout: 60000 })
-await page.waitForSelector('.seg')
+await page.waitForSelector('.seg', { timeout: 30000 })
 await page.click('.seg[data-value="assets"]')
-await page.locator('#panel button', { hasText: 'Catalog & generate' }).click()
-await page.waitForSelector('.dialog', { timeout: 10000 })
-await page.waitForTimeout(1500)
-say('opened', await page.locator('.dialog').count())
+await page.waitForSelector('#assets .asset-row', { timeout: 30000 })
+await page.waitForTimeout(800)
 
-/* ---- a question opens ON TOP, it does not replace ---- */
-//
-// "new class…" is the one place in here that still raises an `ask` from inside the panel, which
-// is exactly the shape that used to close the panel underneath it. (Making a new item no longer
-// opens a dialog at all — it fills in the catalog, which is the other half of the same fix.)
-await page.locator('.asset-row').first().click()
+/* ---- a question raised from a panel ---- */
+await page.evaluate(() => document.querySelector('#assets .asset-row')?.click())
 await page.waitForTimeout(900)
-await page.locator('.asset-detail select').first().selectOption({ label: 'new class…' })
-await page.waitForTimeout(700)
-const stacked = await page.locator('.dialog').count()
-say('with a question open', stacked)
-if (stacked !== 2) fail.push(`${stacked} dialogs — a question should sit on top of the panel that raised it`)
+await page.evaluate(() => {
+  const s = document.querySelector('#assets .asset-detail select')
+  const opt = [...s.options].find((o) => /new class/.test(o.textContent))
+  s.value = opt.value
+  s.dispatchEvent(new Event('change', { bubbles: true }))
+})
+say('question opened', await settle(1) ? await dialogs() : 'never appeared')
+if (await dialogs() !== 1) fail.push('choosing “new class…” opened no dialog')
+
+/* ---- Escape closes it, and the page survives ---- */
 await page.keyboard.press('Escape')
-// WAIT FOR IT TO SETTLE rather than guessing: the close transition takes ~200ms and the node is
-// removed after it, so a count read on a fixed timer reports whichever side of that it lands on
-const settled = await page.waitForFunction(() => document.querySelectorAll('.dialog').length === 1, null, { timeout: 5000 }).then(() => true).catch(() => false)
-say('after Escape', await page.locator('.dialog').evaluateAll((ns) => ns.map((n) => n.getAttribute('aria-label'))))
-if (!settled) fail.push('Escape did not close the question on top')
-
-/* ---- closing closes, and the tab survives it ---- */
-const close = page.locator('.dialog-head button').last()
-await close.click({ timeout: 8000 }).catch((e) => fail.push(`the close button never became clickable: ${e.message.split('\n')[0]}`))
-await page.waitForTimeout(1200)
+const gone = await settle(0)
 const alive = await answering()
-const left = alive ? await page.locator('.dialog').count() : -1
-say('after closing', { pageAnswering: alive, dialogs: left })
+say('after Escape', { dialogs: await dialogs(), pageAnswering: alive })
 if (!alive) fail.push('the page stopped answering — closing wedged the tab')
-else if (left !== 0) fail.push(`${left} dialogs still open after pressing close`)
+if (!gone) fail.push('Escape did not close it')
 
-/* ---- and it can be opened again ---- */
-if (alive) {
-  await page.locator('#panel button', { hasText: 'Catalog & generate' }).click()
-  await page.waitForTimeout(1200)
-  say('reopened', await page.locator('.dialog').count())
-  if (await page.locator('.dialog').count() !== 1) fail.push('it would not open again')
-  await page.keyboard.press('Escape')
-  await page.waitForTimeout(800)
-  const stillAlive = await answering()
-  say('Escape closes too', { pageAnswering: stillAlive, dialogs: stillAlive ? await page.locator('.dialog').count() : -1 })
-  if (!stillAlive) fail.push('Escape wedged the tab')
-  else if (await page.locator('.dialog').count() !== 0) fail.push('Escape did not close it')
+/* ---- and a dialog with a form in it, closed by its own X ---- */
+await page.evaluate(() => [...document.querySelectorAll('#assets [role="tab"], #assets .tab')].find((n) => /Materials/.test(n.textContent))?.click())
+await page.waitForTimeout(2500)
+await page.evaluate(() => [...document.querySelectorAll('#assets button')].find((b) => /New texture/.test(b.textContent))?.click())
+await page.waitForTimeout(1200)
+// it needs a name before it will upload anything — "give it a name first" is the right answer to
+// an anonymous upload, and it is a toast rather than a dialog
+await page.evaluate(() => {
+  const i = document.querySelector('#assets .material-right .group input')
+  i.value = 'Probe Cobble'
+  i.dispatchEvent(new Event('input', { bubbles: true }))
+  i.dispatchEvent(new Event('change', { bubbles: true }))
+})
+await page.waitForTimeout(500)
+await page.evaluate(() => [...document.querySelectorAll('#assets button')].find((b) => /Upload instead/.test(b.textContent))?.click())
+const opened = await settle(1)
+say('upload dialog', opened ? 'open' : 'never appeared')
+if (!opened) fail.push('the upload dialog did not open')
+else {
+  await page.evaluate(() => [...document.querySelectorAll('.dialog-head button')].pop()?.click())
+  const shut = await settle(0)
+  const still = await answering()
+  say('after its X', { dialogs: await dialogs(), pageAnswering: still })
+  if (!still) fail.push('closing it wedged the tab')
+  if (!shut) fail.push('it would not close')
 }
 
-if (errs.length) { say('page errors', errs.slice(0, 3)); fail.push(`${errs.length} page errors`) }
-console.log(fail.length ? `\nFAIL:\n  ${fail.join('\n  ')}` : '\nPASS: they stack, they close, and the tab is still alive afterwards')
+if (errs.length) { say('page errors', [...new Set(errs)].slice(0, 3)); fail.push(`${errs.length} page errors`) }
+console.log(fail.length ? `\nFAIL:\n  ${fail.join('\n  ')}` : '\nPASS: they open, they close, and the tab is still alive afterwards')
 await browser.close()
 process.exit(fail.length ? 1 : 0)

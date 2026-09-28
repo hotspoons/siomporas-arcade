@@ -38,23 +38,25 @@ await fetch(`http://localhost:8790/catalog/${ID}`, { method: 'DELETE' }).catch((
 await page.goto(`http://localhost:${PORT}/world.html`, { waitUntil: 'networkidle', timeout: 60000 })
 await page.waitForSelector('.seg')
 await page.click('.seg[data-value="assets"]')
-await page.locator('#panel button', { hasText: 'Catalog & generate' }).waitFor({ timeout: 20000 })
-await page.locator('#panel button', { hasText: 'Catalog & generate' }).click()
-await page.waitForSelector('.dialog', { timeout: 10000 })
+// the library is a full-width pane now, not a dialog over the map: the Assets tab IS the catalog
+await page.waitForSelector('#assets .asset-row', { timeout: 30000 })
 await page.waitForTimeout(1200)
 
 const rows = () => page.locator('.asset-row').count()
 const ids = () => page.locator('.asset-row .asset-row-id').allTextContents()
 say('rows to start', await rows())
-say('push-to-s3 in the footer', await page.locator('.dialog-foot button', { hasText: 'Push to S3' }).count())
-if (await page.locator('.dialog-foot button', { hasText: 'Push to S3' }).count()) fail.push('a deployment button is still beside “New item”')
+const pushes = await page.evaluate(() => [...document.querySelectorAll('#assets .asset-pane-bar button')].filter((b) => /Push to S3/.test(b.textContent)).length)
+say('push-to-s3 in the toolbar', pushes)
+if (pushes) fail.push('a deployment button is still beside “New item”')
 
 /* ---- 1 · new item, in the catalog, not in a modal ---- */
 const before = await rows()
-await page.locator('.dialog-foot button', { hasText: 'New item' }).click()
+await page.evaluate(() => [...document.querySelectorAll('#assets .asset-pane-bar button')].find((b) => /New item/.test(b.textContent))?.click())
 await page.waitForTimeout(500)
+// the library is a pane now, so the right number of dialogs is NONE: naming a new item happens
+// in the list and the detail pane, not in a modal over them
 say('dialogs open', await page.locator('.dialog').count())
-if (await page.locator('.dialog').count() !== 1) fail.push('“New item” opened a second dialog — it should fill in the catalog itself')
+if (await page.locator('.dialog').count() !== 0) fail.push('“New item” opened a dialog — it should fill in the catalog itself')
 if (await rows() !== before + 1) fail.push('no new row appeared in the list')
 
 /* ---- 2 · the id follows the name, and the row walks to where it will live ---- */
@@ -85,7 +87,7 @@ await page.locator('.asset-detail select').first().selectOption({ label: 'traffi
 await page.locator('.asset-detail button', { hasText: 'Create' }).click()
 await page.waitForTimeout(1800)
 say('after Create', { dialogs: await page.locator('.dialog').count(), rows: await rows(), stillThere: (await ids()).includes(ID) })
-if (await page.locator('.dialog').count() !== 1) fail.push('the catalog disappeared on Create')
+if (await page.locator('.dialog').count() !== 0) fail.push('Create left a dialog open')
 if (!(await ids()).includes(ID)) fail.push('the created item is not in the list')
 
 /* ---- 4 · editing is a draft until you save it ---- */

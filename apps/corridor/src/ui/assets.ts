@@ -181,7 +181,19 @@ export class AssetCatalog {
     ]
     this.tabs = new Tabs(tabs)
     if (o.host) {
-      o.host.replaceChildren(this.tabs.root)
+      /*
+       * THE PANE NEEDS THE FOOTER'S ACTIONS SOMEWHERE.
+       *
+       * "New item" and "Refresh" were in the dialog's footer, and a pane has no footer — so in
+       * the world editor there was no way to make an asset at all. They go at the top, beside the
+       * tabs, which is where a toolbar belongs when there is no bottom edge to pin one to.
+       */
+      const bar = el('div', 'asset-pane-bar')
+      bar.append(
+        button({ label: 'New item', icon: 'plus', variant: 'primary', onClick: () => this.create() }),
+        button({ label: 'Refresh', icon: 'arrow-path', variant: 'ghost', onClick: () => void this.refresh() }),
+      )
+      o.host.replaceChildren(bar, this.tabs.root)
       o.host.classList.add('asset-body', 'asset-pane')
       return
     }

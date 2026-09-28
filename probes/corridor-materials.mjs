@@ -26,10 +26,9 @@ const say = (k, v) => console.log(`${k.padEnd(28)} ${typeof v === 'object' ? JSO
 await page.goto(`http://localhost:${PORT}/world.html`, { waitUntil: 'networkidle', timeout: 60000 })
 await page.waitForSelector('.seg')
 await page.click('.seg[data-value="assets"]')
-await page.locator('#panel button', { hasText: 'Catalog & generate' }).waitFor({ timeout: 20000 })
-await page.locator('#panel button', { hasText: 'Catalog & generate' }).click()
-await page.waitForSelector('.dialog', { timeout: 10000 })
-await page.locator('.dialog .tab, .dialog [role="tab"]', { hasText: 'Materials' }).first().click()
+// the library is a full-width pane now, not a dialog over the map: the Assets tab IS the catalog
+await page.waitForSelector('#assets .asset-row', { timeout: 30000 })
+await page.evaluate(() => [...document.querySelectorAll('#assets [role="tab"], #assets .tab')].find((n) => /Materials/.test(n.textContent))?.click())
 await page.waitForSelector('.material-row', { timeout: 20000 })
 await page.waitForFunction(() => window.__meshview?.size, null, { timeout: 60000 }).catch(() => {})
 await page.waitForTimeout(800)

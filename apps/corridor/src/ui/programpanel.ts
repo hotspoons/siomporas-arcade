@@ -146,6 +146,34 @@ export default defineGame({
 
     // ---- 8 · facts, which are how conditions are written ------------------------------------
     api.when((f) => f.speed > 30, () => api.say('quick'))
+
+    // ---- 9 · physics, if this world has any ------------------------------------------------
+    //
+    // \`available()\` rather than a guess: a dry run has no physics world, and everything below is
+    // a no-op there, so a level that uses physics is still a level you can check headlessly.
+    //
+    // A PROFILE IS THE WHOLE HANDLING MODEL by name — stunts, taxi, street, rush, sim — and the
+    // second argument overrides individual numbers without carrying a copy of the other forty
+    // that then stops tracking the base.
+    if (api.physics.available()) {
+      api.physics.profile('street', { gripRear: 1.05 })
+
+      // ONE ENTITY'S OWN HANDLING. The car chasing you does not have to drive like the one you
+      // are in — this is how a pursuit feels different from a commute.
+      const hostiles = query(api.world, SETS.threats)
+      for (const e of hostiles) api.physics.entityProfile(e, 'rush')
+
+      // the car gets looser as it takes damage: read the state, blend toward the loose profile
+      api.each(() => {
+        const car = api.physics.car()
+        if (car && car.damage > 0.3) api.physics.blend('stunts', car.damage, { over: 1 })
+      })
+
+      // something was hit hard enough to matter
+      api.physics.onImpact((e) => {
+        if (e.impulse > 8000) api.say('that was a big one', 'warn')
+      })
+    }
   },
 
   /*

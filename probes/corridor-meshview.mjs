@@ -26,9 +26,8 @@ const say = (k, v) => console.log(`${k.padEnd(28)} ${typeof v === 'object' ? JSO
 async function openCatalog(p) {
   await p.waitForSelector('.seg')
   await p.click('.seg[data-value="assets"]')
-  await p.locator('#panel button', { hasText: 'Catalog & generate' }).waitFor({ timeout: 20000 })
-  await p.locator('#panel button', { hasText: 'Catalog & generate' }).click()
-  await p.waitForSelector('.dialog', { timeout: 10000 })
+  // the library is a full-width pane now, not a dialog over the map
+  await p.waitForSelector('#assets .asset-row', { timeout: 30000 })
   await p.waitForTimeout(1200)
   const id = await p.evaluate(() => {
     for (const r of document.querySelectorAll('.asset-row')) {
@@ -90,7 +89,7 @@ say('wheel', { was: dragged.dist, now: zoomed.dist })
 if (Math.abs(zoomed.dist - dragged.dist) < 0.01) fail.push('the wheel did not zoom')
 
 /* ---- 3 · pop out ---- */
-await page.evaluate(() => [...document.querySelectorAll('.dialog button')].find((x) => /Pop out/.test(x.textContent))?.click())
+await page.evaluate(() => [...document.querySelectorAll('#assets button')].find((x) => /Pop out/.test(x.textContent))?.click())
 await page.waitForTimeout(900)
 const big = await page.locator('.meshview.big canvas').boundingBox().catch(() => null)
 say('popped out', big ? { w: Math.round(big.width), h: Math.round(big.height) } : 'did not open')

@@ -730,6 +730,18 @@ export let BLADE_WALK_M = 14
  */
 export let BRANCH_VERGE = 14
 
+/**
+ * The building dressing: the windows, doors, gutters and trim `buildings.ts` puts on the massing.
+ *
+ * DRESS_WINDOW_WALLS is the cost knob and it is not a small one. Glazing all four elevations of
+ * crofton-triangle's 7506 footprints plans 138,532 windows; most of them are on the back of a
+ * house with another house behind it. 3 spends the budget on the street and the two long
+ * elevations. 0 on BUILDING_DRESSING gives the bare massing back. Both take effect on the cells
+ * built after they change, so reload to redress the whole site.
+ */
+export let BUILDING_DRESSING = 1
+export let DRESS_WINDOW_WALLS = 3
+
 export interface TuneTab {
   name: string
   sections: TuneSection[]
@@ -743,8 +755,8 @@ export const TUNE_TABS: TuneTab[] = [
         title: 'captures (gaussian splats)',
         collapsed: false,
         keys: [
-          tune('SPLAT_ENABLED', () => SPLAT_ENABLED, (v) => (SPLAT_ENABLED = v), [0, 1], 1, 'draw the captured world at all'),
-          tune('SPLAT_WORLD_FADE', () => SPLAT_WORLD_FADE, (v) => (SPLAT_WORLD_FADE = v), [0, 1], 0.05, 'how hard the BUILT world dissolves where a capture takes over'),
+          tune('SPLAT_ENABLED', () => SPLAT_ENABLED, (v) => (SPLAT_ENABLED = v), [0, 1], 1, 'draw the captured world at all', { scope: 'world' }),
+          tune('SPLAT_WORLD_FADE', () => SPLAT_WORLD_FADE, (v) => (SPLAT_WORLD_FADE = v), [0, 1], 0.05, 'how hard the BUILT world dissolves where a capture takes over', { scope: 'world' }),
           tune('SPLAT_MASK_CELL_M', () => SPLAT_MASK_CELL_M, (v) => (SPLAT_MASK_CELL_M = v), [1, 20], 1, 'the seam raster\u2019s cell (m) \u2014 reload to rebuild'),
           tune('SPLAT_LOAD_M', () => SPLAT_LOAD_M, (v) => (SPLAT_LOAD_M = v), [50, 2000], 25, 'load a tile once it is this close (m)'),
           tune('SPLAT_KEEP_M', () => SPLAT_KEEP_M, (v) => (SPLAT_KEEP_M = v), [100, 4000], 25, 'drop it beyond this (m)'),
@@ -754,6 +766,7 @@ export const TUNE_TABS: TuneTab[] = [
       },
       {
         title: 'weather',
+        scope: 'world',
         collapsed: false,
         keys: [
           tune('WEATHER', () => WEATHER, (v) => (WEATHER = v), [0, 4], 1, '0 clear 1 rain 2 sleet 3 snow 4 ice'),
@@ -774,11 +787,12 @@ export const TUNE_TABS: TuneTab[] = [
       },
       {
         title: 'time of day',
+        scope: 'world',
         collapsed: false,
         keys: [
           tune('TIME_RATE', () => TIME_RATE, (v) => (TIME_RATE = v), [0, 3600], 1, 'simulated seconds per real second: 1 real time, 600 a day in four minutes, 0 stops the sun'),
           tune('SUN_ARC', () => SUN_ARC, (v) => (SUN_ARC = v), [0.2, 3], 0.05, 'stretches the sun\'s arc about the horizon; 1 is this latitude as it really is'),
-          tune('STAR_PIXELS', () => STAR_PIXELS, (v) => (STAR_PIXELS = v), [0.5, 8], 0.1, 'a star\u2019s sprite, in pixels at 900p'),
+          tune('STAR_PIXELS', () => STAR_PIXELS, (v) => (STAR_PIXELS = v), [0.5, 8], 0.1, 'a star\u2019s sprite, in pixels at 900p', { scope: 'machine' }),
           tune('STAR_SIZE', () => STAR_SIZE, (v) => (STAR_SIZE = v), [0.3, 3], 0.05, 'all of them, scaled'),
           tune('STAR_MAG_LIMIT', () => STAR_MAG_LIMIT, (v) => (STAR_MAG_LIMIT = v), [1, 8], 0.1, 'faintest magnitude drawn \u2014 6.5 is a dark sky, 4 is a city'),
           tune('SKY_STARS', () => SKY_STARS, (v) => (SKY_STARS = v), [0, 1], 0.05, 'how many stars on a clear night'),
@@ -801,6 +815,7 @@ export const TUNE_TABS: TuneTab[] = [
       },
       {
         title: 'colour (over the season)',
+        scope: 'world',
         keys: [
           tune('GRASS_HUE', () => GRASS_HUE, (v) => (GRASS_HUE = v), [-60, 60], 1, 'degrees'),
           tune('GRASS_SAT', () => GRASS_SAT, (v) => (GRASS_SAT = v), [0, 2], 0.02),
@@ -818,6 +833,7 @@ export const TUNE_TABS: TuneTab[] = [
     sections: [
       {
         title: 'density',
+        scope: 'world',
         keys: [
           tune('GRASS_MOWN_PER_M2', () => GRASS_MOWN_PER_M2, (v) => (GRASS_MOWN_PER_M2 = v), [0, 120], 1, 'blades/m² inside the mow line'),
           tune('GRASS_ROUGH_PER_M2', () => GRASS_ROUGH_PER_M2, (v) => (GRASS_ROUGH_PER_M2 = v), [0, 80], 1, 'blades/m² beyond it'),
@@ -827,6 +843,7 @@ export const TUNE_TABS: TuneTab[] = [
       },
       {
         title: 'placement',
+        scope: 'world',
         keys: [
           tune('GRASS_MOW_LINE', () => GRASS_MOW_LINE, (v) => (GRASS_MOW_LINE = v), [0, 30], 0.5, 'mown strip width from the pavement edge (m)'),
           tune('GRASS_MAX_FROM_ROAD', () => GRASS_MAX_FROM_ROAD, (v) => (GRASS_MAX_FROM_ROAD = v), [10, 200], 1),
@@ -842,6 +859,7 @@ export const TUNE_TABS: TuneTab[] = [
       },
       {
         title: 'blades',
+        scope: 'world',
         keys: [
           tune('GRASS_MOWN_HEIGHT', () => GRASS_MOWN_HEIGHT, (v) => (GRASS_MOWN_HEIGHT = v), [0.05, 1], 0.01, 'm'),
           tune('GRASS_ROUGH_HEIGHT', () => GRASS_ROUGH_HEIGHT, (v) => (GRASS_ROUGH_HEIGHT = v), [0.2, 4], 0.05, 'm before the season multiplier'),
@@ -875,6 +893,7 @@ export const TUNE_TABS: TuneTab[] = [
       },
       {
         title: 'crops',
+        scope: 'world',
         keys: [
           tune('CROP_AUTO_FARMLAND', () => CROP_AUTO_FARMLAND, (v) => (CROP_AUTO_FARMLAND = v), [0, 1], 1, 'grow crops on OSM farmland too, not only authored areas'),
           tune('CROP_ROW_SCALE', () => CROP_ROW_SCALE, (v) => (CROP_ROW_SCALE = v), [0.3, 4], 0.05, 'row spacing ×'),
@@ -900,6 +919,7 @@ export const TUNE_TABS: TuneTab[] = [
       },
       {
         title: 'planting (replants around the eye)',
+        scope: 'world',
         keys: [
           tune('TREE_CELL_M', () => TREE_CELL_M, (v) => (TREE_CELL_M = v), [3, 24], 0.5, 'metres between candidate trees — the density, and it no longer depends on how big the site is'),
           tune('TREE_MIN_H', () => TREE_MIN_H, (v) => (TREE_MIN_H = v), [1, 14], 0.5, 'canopy height (m) that counts as a tree; lower plants the scrub the CHM sees'),
@@ -911,6 +931,7 @@ export const TUNE_TABS: TuneTab[] = [
       },
       {
         title: 'shape (regrows the species models)',
+        scope: 'world',
         keys: [
           tune('TREE_LEAF_COUNT', () => TREE_LEAF_COUNT, (v) => (TREE_LEAF_COUNT = v), [0.15, 3], 0.05, 'leaves per tree, over the preset'),
           tune('TREE_LEAF_SIZE', () => TREE_LEAF_SIZE, (v) => (TREE_LEAF_SIZE = v), [0.3, 3], 0.05, 'leaf billboard size'),
@@ -924,6 +945,7 @@ export const TUNE_TABS: TuneTab[] = [
       },
       {
         title: 'palette',
+        scope: 'world',
         keys: [
           tune('TREE_SPECIES', () => TREE_SPECIES, (v) => (TREE_SPECIES = v), [-1, 20], 1, '-1 the site\'s own mix; 0+ forces one archetype everywhere (species.ts ARCHETYPES, in order)'),
           tune('TREE_SPECIES_LIMIT', () => TREE_SPECIES_LIMIT, (v) => (TREE_SPECIES_LIMIT = v), [1, 8], 1, 'how many species models the palette may hold'),
@@ -935,7 +957,16 @@ export const TUNE_TABS: TuneTab[] = [
     name: 'world',
     sections: [
       {
+        title: 'buildings (reload to redress)',
+        scope: 'world',
+        keys: [
+          tune('BUILDING_DRESSING', () => BUILDING_DRESSING, (v) => (BUILDING_DRESSING = v), [0, 1], 1, 'windows, doors, gutters and trim on the generated massing'),
+          tune('DRESS_WINDOW_WALLS', () => DRESS_WINDOW_WALLS, (v) => (DRESS_WINDOW_WALLS = v), [1, 4], 1, 'how many elevations get glass: the street\u2019s first, then the longest'),
+        ],
+      },
+      {
         title: 'cross-section (road and strip rebuild live)',
+        scope: 'world',
         keys: [
           tune('LANE_WIDTH', () => LANE_WIDTH, (v) => (LANE_WIDTH = v), [2.5, 4.5], 0.01),
           tune('CULDESAC_RADIUS', () => CULDESAC_RADIUS, (v) => (CULDESAC_RADIUS = v), [0, 20], 0.5, 'turning bulb at a dead end (m); 0 = none'),
@@ -950,6 +981,7 @@ export const TUNE_TABS: TuneTab[] = [
       },
       {
         title: 'rock (cut faces and outcrops; reload to rebuild)',
+        scope: 'world',
         keys: [
           tune('ROCK_PER_M', () => ROCK_PER_M, (v) => (ROCK_PER_M = v), [0, 4], 0.05, 'boulders per metre of face'),
           tune('ROCK_OUTCROP_PER_M2', () => ROCK_OUTCROP_PER_M2, (v) => (ROCK_OUTCROP_PER_M2 = v), [0, 0.5], 0.01, 'per m² of exposed rock'),
@@ -960,6 +992,7 @@ export const TUNE_TABS: TuneTab[] = [
       },
       {
         title: 'water',
+        scope: 'world',
         keys: [
           tune('WATER_DEPTH', () => WATER_DEPTH, (v) => (WATER_DEPTH = v), [0, 2], 0.05, 'surface above the channel bottom (m)'),
           tune('WATER_WIDTH_SCALE', () => WATER_WIDTH_SCALE, (v) => (WATER_WIDTH_SCALE = v), [0.3, 3], 0.05),
@@ -979,6 +1012,7 @@ export const TUNE_TABS: TuneTab[] = [
     sections: [
       {
         title: 'signals and signs',
+        scope: 'world',
         keys: [
           tune('FURNITURE_SIGNAL_HEIGHT', () => FURNITURE_SIGNAL_HEIGHT, (v) => (FURNITURE_SIGNAL_HEIGHT = v), [3, 12], 0.1, 'mast pole height (m)'),
           tune('FURNITURE_SIGNAL_ARM_SCALE', () => FURNITURE_SIGNAL_ARM_SCALE, (v) => (FURNITURE_SIGNAL_ARM_SCALE = v), [0.4, 2.5], 0.05, 'arm reach ×'),
@@ -994,6 +1028,7 @@ export const TUNE_TABS: TuneTab[] = [
       },
       {
         title: 'parking',
+        scope: 'world',
         keys: [
           tune('PARKING_STALL_W', () => PARKING_STALL_W, (v) => (PARKING_STALL_W = v), [2, 4], 0.05, 'bay width (m)'),
           tune('PARKING_STALL_D', () => PARKING_STALL_D, (v) => (PARKING_STALL_D = v), [3.5, 8], 0.1, 'bay depth (m)'),
@@ -1010,6 +1045,7 @@ export const TUNE_TABS: TuneTab[] = [
       },
       {
         title: 'sidewalks',
+        scope: 'world',
         collapsed: false,
         keys: [
           tune('SIDEWALK_KERB_H', () => SIDEWALK_KERB_H, (v) => (SIDEWALK_KERB_H = v), [0, 0.5], 0.01, 'kerb lip (m)'),
@@ -1031,6 +1067,7 @@ export const TUNE_TABS: TuneTab[] = [
       },
       {
         title: 'intersections',
+        scope: 'world',
         collapsed: false,
         keys: [
           tune('SIGNAL_GREEN_MAJOR', () => SIGNAL_GREEN_MAJOR, (v) => (SIGNAL_GREEN_MAJOR = v), [5, 300], 5, 'green on the superior road (s)'),
@@ -1056,6 +1093,7 @@ export const TUNE_TABS: TuneTab[] = [
     sections: [
       {
         title: 'engine',
+        scope: 'world',
         keys: [
           tune('CAR_TOP_SPEED', () => CAR_TOP_SPEED, (v) => (CAR_TOP_SPEED = v), [10, 150], 1, 'm/s'),
           tune('CAR_ACCEL', () => CAR_ACCEL, (v) => (CAR_ACCEL = v), [1, 40], 0.5, 'm/s² at low speed'),
@@ -1069,6 +1107,7 @@ export const TUNE_TABS: TuneTab[] = [
       },
       {
         title: 'handling (the tyres deliver what grip allows)',
+        scope: 'world',
         keys: [
           tune('CAR_STEER_RATE', () => CAR_STEER_RATE, (v) => (CAR_STEER_RATE = v), [0.5, 6], 0.1, 'rad/s of yaw asked for at full lock'),
           tune('CAR_STEER_FULL_SPEED', () => CAR_STEER_FULL_SPEED, (v) => (CAR_STEER_FULL_SPEED = v), [2, 40], 0.5, 'full authority below this (m/s); demand ramps up to it'),
@@ -1089,6 +1128,7 @@ export const TUNE_TABS: TuneTab[] = [
       },
       {
         title: 'surface (grass = off the pavement)',
+        scope: 'world',
         keys: [
           tune('CAR_GRASS_DRAG', () => CAR_GRASS_DRAG, (v) => (CAR_GRASS_DRAG = v), [0, 4], 0.05, 'extra m/s² of drag'),
           tune('CAR_GRASS_GRIP_SCALE', () => CAR_GRASS_GRIP_SCALE, (v) => (CAR_GRASS_GRIP_SCALE = v), [0.05, 1], 0.05, 'grip left on grass'),
@@ -1100,6 +1140,7 @@ export const TUNE_TABS: TuneTab[] = [
       },
       {
         title: 'ride',
+        scope: 'world',
         keys: [
           tune('CAR_RIDE', () => CAR_RIDE, (v) => (CAR_RIDE = v), [0.1, 1], 0.01, 'reference point above the surface (m)'),
           tune('CAR_RECOVER_BACK', () => CAR_RECOVER_BACK, (v) => (CAR_RECOVER_BACK = v), [0, 40], 1, 'metres R backs you out'),
@@ -1108,6 +1149,7 @@ export const TUNE_TABS: TuneTab[] = [
       },
       {
         title: 'jumps (switches default off)',
+        scope: 'world',
         keys: [
           tune('CAR_LAUNCH_MIN_SPEED', () => CAR_LAUNCH_MIN_SPEED, (v) => (CAR_LAUNCH_MIN_SPEED = v), [0, 40], 1, 'slower than this and a crest is just followed (m/s)'),
           tune('CAR_LAUNCH_GAP', () => CAR_LAUNCH_GAP, (v) => (CAR_LAUNCH_GAP = v), [0.02, 2], 0.02, 'ground must fall this far away before you are airborne (m)'),
@@ -1132,14 +1174,16 @@ export const TUNE_TABS: TuneTab[] = [
     sections: [
       {
         title: 'which engine',
+        scope: 'world',
         keys: [
           tune('ENGINE_INDEX', () => ENGINE_INDEX, (v) => (ENGINE_INDEX = v), [0, 19], 1, 'index into the catalog; 14 is the GM LS'),
           tune('ENGINE_MASTER', () => ENGINE_MASTER, (v) => (ENGINE_MASTER = v), [0, 1], 0.05, 'master gain'),
-          tune('ENGINE_SIM_HZ', () => ENGINE_SIM_HZ, (v) => (ENGINE_SIM_HZ = v), [0, 48000], 500, 'physics steps/s; 0 = whatever the script asked for'),
+          tune('ENGINE_SIM_HZ', () => ENGINE_SIM_HZ, (v) => (ENGINE_SIM_HZ = v), [0, 48000], 500, 'physics steps/s; 0 = whatever the script asked for', { scope: 'machine' }),
         ],
       },
       {
         title: 'where it is (3D position and attenuation)',
+        scope: 'world',
         keys: [
           tune('ENGINE_REF_M', () => ENGINE_REF_M, (v) => (ENGINE_REF_M = v), [0.5, 20], 0.1, 'full volume inside this radius'),
           tune('ENGINE_MAX_M', () => ENGINE_MAX_M, (v) => (ENGINE_MAX_M = v), [10, 2000], 10, 'attenuation stops getting worse past this'),
@@ -1152,6 +1196,7 @@ export const TUNE_TABS: TuneTab[] = [
       },
       {
         title: 'gearbox (ours: the car has a speed, not a crankshaft)',
+        scope: 'world',
         keys: [
           tune('ENGINE_GEAR_1', () => ENGINE_GEAR_1, (v) => (ENGINE_GEAR_1 = v), [0, 6], 0.01),
           tune('ENGINE_GEAR_2', () => ENGINE_GEAR_2, (v) => (ENGINE_GEAR_2 = v), [0, 6], 0.01),
@@ -1170,6 +1215,7 @@ export const TUNE_TABS: TuneTab[] = [
       },
       {
         title: 'voicing (the script ships its own; override to use these)',
+        scope: 'world',
         collapsed: true,
         keys: [
           tune('ENGINE_VOICE_OVERRIDE', () => ENGINE_VOICE_OVERRIDE, (v) => (ENGINE_VOICE_OVERRIDE = v), [0, 1], 1, '1 = these knobs win'),

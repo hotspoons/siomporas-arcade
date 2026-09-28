@@ -59,6 +59,16 @@ export function slider(o: {
   onInput: (v: number) => void
   /** show a reset button that puts this one knob back to `neutral` */
   resettable?: boolean
+  /**
+   * Handed a function that moves the control to a value WITHOUT calling `onInput`.
+   *
+   * For when something other than this control is the source of truth — a preset tween writing
+   * the knob every frame, say. The obvious way to redraw a slider is to set `range.value` and
+   * dispatch an `input` event, and that is wrong in two ways at once: the browser snaps the range
+   * to `step` first, so a tween through a 0.05-step slider moves in twenty visible jumps; and the
+   * dispatch re-enters `onInput`, so every programmatic set is indistinguishable from a drag.
+   */
+  onSync?: (set: (v: number) => void) => void
 }): HTMLElement {
   const wrap = el('label', 'field slider')
   const neutral = o.neutral ?? o.value
@@ -108,6 +118,11 @@ export function slider(o: {
     })
     head.append(reset)
   }
+  o.onSync?.((v) => {
+    // the readout shows the REAL value; the range itself can only sit on the step grid
+    range.value = String(v)
+    show(v)
+  })
   wrap.append(head, range)
   return wrap
 }

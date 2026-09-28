@@ -33,6 +33,15 @@ export interface TuneAccess {
   get: (name: string) => number | undefined
   set: (name: string, v: number) => boolean
   names: () => string[]
+  /**
+   * Write a knob and nothing else — no touch flag, no persist, no per-knob re-derive.
+   *
+   * A preset tween (src/presets.ts) writes every knob it carries on every frame, and doing that
+   * through `set` quantises the value to the slider's step, records it as this browser's opinion
+   * and re-derives the world once per knob. Optional, so a host that has no panel behind it can
+   * leave it out and `set` is used.
+   */
+  setExact?: (name: string, v: number) => boolean
   /** knobs this browser has moved or explicitly reset; the file must not override them */
   touched?: () => Set<string>
 }

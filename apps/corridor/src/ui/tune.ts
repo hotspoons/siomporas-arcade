@@ -11,6 +11,7 @@ import { TUNE_TABS } from '../tuning'
 import type { TuneKey } from '@apex/engine/app/TunePanel'
 import { Dialog, Tabs, button, toast, type Tab } from './shell'
 import { bodyOf, group, slider } from './controls'
+import { buildPresetPanel, type PresetPanelOpts } from './presetpanel'
 
 const storeKey = (tab: string) => `apex-corridor-${tab}.tune.v1`
 
@@ -32,6 +33,14 @@ export interface TuneUIOpts {
    * knobs.
    */
   extras?: Record<string, () => HTMLElement>
+  /**
+   * The presets manager, as one more tab.
+   *
+   * A preset IS this panel's state, filtered to the world-scope knobs (src/presets.ts), so it
+   * belongs here rather than in a surface of its own that shows the same numbers and leaves a
+   * person guessing which is in force.
+   */
+  presets?: PresetPanelOpts
 }
 
 export class TuneUI {
@@ -41,6 +50,8 @@ export class TuneUI {
   private keys = new Map<string, TuneKey>()
   /** the live range inputs, so a programmatic set redraws the control */
   private redraw = new Map<string, () => void>()
+  /** move a control to an exact value without re-entering its own input handler; see `setExact` */
+  private sync = new Map<string, (v: number) => void>()
   /** each rendered section, so the changed dot can be kept in step with its knobs */
   private groups: { el: HTMLElement; keys: TuneKey[] }[] = []
   /** every knob this browser has moved or explicitly reset — a site file does not override these */
@@ -85,6 +96,17 @@ export class TuneUI {
         this.markGroups()
       },
     }))
+    if (this.o.presets) {
+      const opts = this.o.presets
+      tabs.push({
+        id: 'presets',
+        label: 'presets',
+        build: (host) => {
+          host.textContent = ''
+          buildPresetPanel(host, { ...opts, refresh: () => this.tabs.invalidate('presets') })
+        },
+      })
+    }
     this.tabs = new Tabs(tabs)
 
     // movable: tuning is a loop of change-something / look-at-it, so this one docks to a side and
@@ -110,6 +132,7 @@ export class TuneUI {
       neutral: k.default,
       note: k.hint,
       resettable: true,
+      onSync: (set) => this.sync.set(k.name, set),
       onInput: (v) => {
         k.set(v)
         this.touched.add(k.name)
@@ -231,6 +254,23 @@ export class TuneUI {
         return true
       },
       names: () => [...this.keys.keys()],
+      /**
+       * Write a knob with no side effects but the knob itself.
+       *
+       * `set` above goes through the slider's own input event, which is right for a site file —
+       * it marks the knob touched, persists it and re-derives the world, exactly as a drag would.
+       * It is wrong for a PRESET TWEEN, in three ways: the range snaps the value to its `step`, so
+       * a smooth transition moves in twenty jumps; the knob is recorded as this browser's opinion,
+       * which it is not; and the world is re-derived once per knob, so a 237-knob preset costs 237
+       * retunes a frame. The tween re-derives once from the frame loop instead.
+       */
+      setExact: (name: string, v: number) => {
+        const k = this.keys.get(name)
+        if (!k) return false
+        k.set(v)
+        this.sync.get(name)?.(v)
+        return true
+      },
       /** what this browser has an opinion about; a site's tuning.json leaves these alone */
       touched: () => this.touched,
     }
@@ -241,6 +281,16 @@ export class TuneUI {
     const out: Record<string, number> = {}
     for (const [name, k] of this.keys) out[name] = k.default
     return out
+  }
+
+  /**
+   * Throw away the built presets tab, so it is rebuilt from the new world's library.
+   *
+   * The tabs are built once and cached, which is what makes a 200-slider panel open instantly and
+   * what would otherwise leave the previous world's presets on screen after a site change.
+   */
+  invalidatePresets() {
+    this.tabs.invalidate('presets')
   }
 
   toggle() {

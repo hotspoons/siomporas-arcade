@@ -26,6 +26,15 @@ export interface LevelPlacement {
 export interface Level {
   id: string
   world: string
+  /**
+   * The middle layer of the three-layer look resolve (src/presets.ts): a named entry in the
+   * world's presets library, or an inline map of knob values for a one-off.
+   *
+   * Applied BEFORE `defaults`, because time/weather/season here are the specific overrides a
+   * level makes on top of the preset it chose, and after the world's own tuning.json, because
+   * "this game is set at dusk in the rain" has to win over "this place usually looks like this".
+   */
+  preset?: string | Record<string, number>
   defaults?: { time?: string; weather?: string; season?: string }
   splats?: { run?: string; id?: string; at?: number[] }[]
   placements?: LevelPlacement[]
@@ -67,6 +76,8 @@ export interface LevelHost {
   world: string
   setTimeLocal: (date: string | undefined, time: string) => void
   setWeather: (w: string) => void
+  /** apply the level's preset; returns how many knobs it moved, or null if there is no such preset */
+  applyPreset?: (p: string | Record<string, number>) => number | null
   setSeason: (s: string) => void
   /** put assets in: the same call `placements.json` goes through */
   place: (items: LevelPlacement[]) => Promise<number>
@@ -92,6 +103,16 @@ export async function applyLevel(level: Level, host: LevelHost): Promise<{ ok: b
       world: host.world,
       applied,
       skipped: [{ part: 'world', why: `this level is for "${level.world}" and "${host.world}" is loaded — open #${level.world} first` }],
+    }
+  }
+
+  // the preset first: `defaults` below is what this level changes ON TOP of the look it chose
+  if (level.preset !== undefined) {
+    if (!host.applyPreset) skipped.push({ part: 'preset', why: 'this viewer has no presets library loaded' })
+    else {
+      const n = host.applyPreset(level.preset)
+      if (n === null) skipped.push({ part: 'preset', why: `no preset "${String(level.preset)}" in this world's library` })
+      else applied.push(`preset ${typeof level.preset === 'string' ? level.preset : `${n} knobs`}`)
     }
   }
 

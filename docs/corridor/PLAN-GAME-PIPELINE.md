@@ -36,7 +36,7 @@ editor's forms, or by an agent — and nothing downstream can tell which.
 | # | Stage | Document | Today |
 |---|-------|----------|-------|
 | 1 | **Define a map** | `worlds/<slug>.json` | *exists* — drag a box, measure, save |
-| 2 | **World settings** | `worlds/<slug>.json#look` + **preset** | partial: style/season/relief/water only |
+| 2 | **World settings** | `worlds/<slug>.json#look` + `sites/<slug>/presets.json` | **built** — see below |
 | 3 | **Props and furniture** | `sites/<slug>/placements.json`, `areas.json`, `structures.json` | *exists* — the Place mode |
 | 4 | **ECS config** | `levels/<id>.json#simulations` | stub: a `kind` and a `seed`, nothing reads richer |
 | 5 | **Bind assets to entities** | `catalog.json` + a binding table | partial: a catalog exists, binding does not |
@@ -140,6 +140,33 @@ while authoring rather than in a cutscene.
 Same shape as the world bundles that already work: a `.corridor.json` envelope with a `kind`, a
 version and an array. A preset is a document, so it exports, imports, diffs and round-trips with
 the machinery that is already written and probed.
+
+### Built, 2026-09-28
+
+What shipped, and where it differs from the design above.
+
+| Design | Shipped |
+|---|---|
+| `scope: 'world' \| 'machine'` on `tune()` | on `tune()` **and on `TuneSection`**, inherited. 26 sections marked, four knobs overriding their section, 237 world knobs of ~380. |
+| `lerp` declared per knob | declared where it differs, **derived otherwise**: step 1 over a range of ≤12 is a switch or an enumeration, so `WEATHER` 0..4 and `SEASON` -1..3 come out discrete without a hand-kept list. |
+| `resolve(world, level, session)` | `resolve(...layers)`, key by key. |
+| a named library | `sites/<slug>/presets.json`, beside the site's `tuning.json`, through the same dev middleware and world-editor volume. Not a service: it is a property of the world and has to survive a fresh clone. |
+| `api.preset(id, { over, ease })` | `window.corridor.preset(...)` and the same on the dev bridge, so it can be driven against a real GPU. |
+| ground state inferred at start | computed from the **documents** — code defaults, then the world's `tuning.json` — and deliberately not read off the live knobs, because the panel has already restored this browser's scratch values by then. |
+| a preset may only hold tweenable knobs | it may hold any world knob; a discrete one **snaps at the midpoint** and the row says which ones will, so an author finds out while authoring. |
+
+Two things measurement changed:
+
+- **A tween must not go through the panel's setter.** The obvious redraw — set `range.value`,
+  dispatch `input` — snaps to the slider's `step` and re-enters the handler. On the real page a
+  tween of `WEATHER_RATE` (step 0.05) moved 0.5 → 0.6 → 0.65 in visible jumps, was recorded as the
+  person's own opinion, and re-derived the world once per knob. `TuneAccess.setExact` writes the
+  knob and syncs the control, and the frame loop re-derives once.
+- **The transition runs on REAL seconds.** `TIME_RATE` is itself a knob a preset may tween, so
+  driving the animator off simulated time gives a transition that speeds up as it changes the
+  clock it is measured against.
+
+Still not built from this section: the **sandbox slice** (§ below) and per-preset thumbnails.
 
 ### The prototype slice
 
@@ -348,8 +375,9 @@ was a scratch directory with one test car in it.
 ## Order of work
 
 1. **Fold assetlib in.** Nothing else is safe while the content lives outside the repo.
-2. **Presets** — stage 2, the smallest complete vertical slice, and the one that proves the
-   three-layer resolve.
+2. ~~**Presets** — stage 2, the smallest complete vertical slice, and the one that proves the
+   three-layer resolve.~~ Done 2026-09-28: `src/presets.ts`, `src/presetstore.ts`,
+   `src/ui/presetpanel.ts`, 33 unit tests, `probes/corridor-presets.mjs`.
 3. **The sandbox preview**, once presets have something to preview.
 4. **ECS config and binding** — stages 4 and 5.
 5. **The program layer** — stage 6, the API surface first and the sandboxing decision with it.

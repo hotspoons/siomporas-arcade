@@ -2,6 +2,32 @@
 // game in localStorage, with Copy JSON (paste it back to whoever maintains the
 // defaults) / Paste / Reset. Games describe their knobs as TuneKey lists.
 
+/**
+ * Whether a knob describes THE WORLD or THE MACHINE.
+ *
+ * A level preset may carry the world's decisions — season, weather, the time of day, how dense the
+ * trees are — and must never carry the machine's: render scale, shadow map size, tile budgets, LOD
+ * distances. A preset that pins those is a level that is unplayable on a laptop and looks like a
+ * bug in the renderer rather than in the level.
+ *
+ * DEFAULTS TO `machine`, so a knob added later cannot leak into a preset by being forgotten. The
+ * cost of that choice is that a new world knob has to say so; the cost of the other choice is a
+ * shipped level that sets somebody's shadow resolution.
+ */
+export type TuneScope = 'world' | 'machine'
+
+/**
+ * How a knob moves when a preset is tweened rather than applied.
+ *
+ * `linear` interpolates the number. `mix` also interpolates, but the renderer reads it as a blend
+ * weight between two states it is already drawing (a season tint, a species mix), so the
+ * intermediate values are meaningful rather than merely arithmetic. `step` CANNOT be interpolated
+ * — a tree model, a signal program, an engine script — and snaps at the midpoint of the
+ * transition. Naming it here is what lets the editor say so while somebody is authoring, instead
+ * of it being discovered in a cutscene.
+ */
+export type TuneLerp = 'linear' | 'mix' | 'step'
+
 export interface TuneKey {
   name: string
   get: () => number
@@ -12,11 +38,25 @@ export interface TuneKey {
   step: number
   /** Optional note shown under the label. */
   hint?: string
+  /** world-authoring decision or machine capability; see TuneScope. Unset means `machine`. */
+  scope?: TuneScope
+  /** how it behaves in a tween; see TuneLerp. Unset means `linear` for a world knob. */
+  lerp?: TuneLerp
 }
 
 export interface TuneSection {
   title: string
   keys: TuneKey[]
+  /**
+   * Scope for every knob in the section that does not set its own.
+   *
+   * Declared per section because that is how the tabs are actually organised — "weather" and
+   * "time of day" are wholly the world's, "performance" is wholly the machine's — and annotating
+   * five hundred call sites one at a time is how half of them end up wrong.
+   */
+  scope?: TuneScope
+  /** default tween behaviour for the section's knobs; a knob may still override it */
+  lerp?: TuneLerp
   /**
    * Whether the section starts shut. Left out, a panel may decide for itself — corridor's does it
    * by length — but a section that the person opens every single time should say so here. Weather
@@ -26,13 +66,13 @@ export interface TuneSection {
 }
 
 /** Build a TuneKey with sensible auto ranges around the default. */
-export function tune(name: string, get: () => number, set: (v: number) => void, range?: [number, number], step?: number, hint?: string): TuneKey {
+export function tune(name: string, get: () => number, set: (v: number) => void, range?: [number, number], step?: number, hint?: string, opts?: { scope?: TuneScope; lerp?: TuneLerp }): TuneKey {
   const d = get()
   const mag = Math.abs(d) || 1
   const min = range ? range[0] : d >= 0 ? 0 : -mag * 3
   const max = range ? range[1] : d >= 0 ? mag * 3 : mag * 3
   const st = step ?? Math.pow(10, Math.floor(Math.log10(mag)) - 2)
-  return { name, get, set, default: d, min, max, step: st, hint }
+  return { name, get, set, default: d, min, max, step: st, hint, scope: opts?.scope, lerp: opts?.lerp }
 }
 
 export class TunePanel {

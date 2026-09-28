@@ -26,6 +26,8 @@ import { Parkour } from './games/parkour'
 import * as T from './tuning'
 import { TUNE_TABS } from './tuning'
 import { applySiteTuning, clearSiteTuning, saveSiteTuning } from './sitetuning'
+import { Presets, resolve, worldKnobs } from './presets'
+import { loadPresets, savePresets } from './presetstore'
 
 import { fetchJSON, type IndexEntry, type Manifest, type Structure, type Crossing } from './site'
 import { LOOK, SEASONS, type Season } from './season'
@@ -46,6 +48,7 @@ import { WEATHER, WEATHERS, type Weather } from './weather'
 import { ViewerUI, restoreTheme } from './ui/viewer'
 import { TuneUI } from './ui/tune'
 import { installShellKeys, toast, status, clearStatus } from './ui/shell'
+import { downloadJSON, readJSONFile } from './ui/files'
 
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector<T>(sel)!
 
@@ -127,6 +130,38 @@ const tuneUI = new TuneUI({
   onChange: () => onTuneChange(),
   onSaveSite: () => void doSaveSiteTuning(),
   onClearSite: () => void doClearSiteTuning(),
+  presets: {
+    presets: () => presets,
+    slug: () => site?.manifest.slug ?? null,
+    onChange: () => onTuneChange(),
+    refresh: () => {}, // TuneUI supplies this: it owns the tab it has to rebuild
+    save: async () => {
+      const slug = site?.manifest.slug
+      if (!slug || !presets) return
+      try {
+        const r = await savePresets(slug, presets.toDoc(slug))
+        toast(`saved ${r.count} preset${r.count === 1 ? '' : 's'} to tools/corridor/data/sites/${slug}/presets.json (${r.bytes} bytes)`, 'ok', 6000)
+      } catch (e) {
+        toast(`presets: ${(e as Error).message}`, 'danger')
+      }
+    },
+    exportDoc: () => {
+      const slug = site?.manifest.slug
+      if (!slug || !presets) return
+      downloadJSON(`${slug}-presets.corridor.json`, presets.toDoc(slug))
+    },
+    importDoc: async () => {
+      if (!presets) return
+      const doc = await readJSONFile()
+      if (!doc) return
+      if (doc.kind !== 'corridor-presets') return toast(`that file is a "${String(doc.kind ?? 'unknown')}", not a presets library`, 'warn', 5000)
+      // MERGED, not replaced: importing somebody's dusk into a world that already has a midwinter
+      // should give you both. Same id replaces, which is how you take an updated one.
+      const r = presets.load(doc as never, { merge: true })
+      for (const d of r.dropped) toast(`presets: ${d}`, 'warn', 5000)
+      toast(`imported ${r.loaded.length} preset${r.loaded.length === 1 ? '' : 's'} — press Save to keep them`, 'ok', 6000)
+    },
+  },
   extras: {
     // the clock is not a slider: a date and a time, running, that you can also set
     'time of day': () =>
@@ -402,6 +437,25 @@ async function loadSite(slug: string) {
      */
     project: (lon: number, lat: number) => siteProjector(site!.manifest.frame as Parameters<typeof siteProjector>[0])(lon, lat),
     tuneDialog: tuneUI.dialog, // probes drive the panel's dock/float through this
+    /**
+     * THE PRESETS API, which is also the scripting API a program layer calls:
+     *
+     *   __apex.preset('dusk-rain', { over: 8 })        // tween over eight real seconds
+     *   __apex.preset('midwinter', { over: 60 })       // during a cutscene
+     *   __apex.preset(__apex.presets.ground)           // back to where the world started
+     *
+     * `presets` is the library itself — list, snapshot, put, remove, export — and `preset` is the
+     * one call a story tells it to make.
+     */
+    get presets() { return presets },
+    preset: (target: string | Record<string, number>, opts?: { over?: number; ease?: 'linear' | 'in' | 'out' | 'inOut'; done?: () => void }) => {
+      if (!presets) return null
+      const t = presets.apply(target, opts)
+      // an instant apply has already written every knob and nothing will tick; a tween re-derives
+      // from the loop, one frame at a time
+      if (!t) onTuneChange()
+      return t ? { over: t.over, stepped: presets.stepped(target) } : { over: 0, stepped: presets.stepped(target) }
+    },
     /** how far the minimap's photograph is from its linework, at the bake's own control points */
     minimapRegistration: () => minimap?.registration() ?? null,
     /** the address index, for probes: `search('1053 route 3')` */
@@ -600,9 +654,41 @@ async function loadSite(slug: string) {
    * the assets in it, the captures over it. Last because everything it sets is a setting ON the
    * site, so it has to win over the site's own tuning.json rather than be overwritten by it.
    */
+  /*
+   * THE PRESETS LIBRARY, and the GROUND STATE it comes home to.
+   *
+   * The ground state is computed from the DOCUMENTS — the code defaults for every world-scope
+   * knob, then the world's tuning.json — and not read off the live knobs, because by the time
+   * this runs the panel has already restored whatever this browser was last playing with, and a
+   * ground state that includes somebody's scratch values is not a ground state. See
+   * docs/corridor/PLAN-GAME-PIPELINE.md.
+   */
+  {
+    const doc = await loadSiteTuning(slug)
+    const codeWorld: Record<string, number> = {}
+    for (const k of worldKnobs(TUNE_TABS)) codeWorld[k.name] = k.default
+    const worldValues: Record<string, number> = {}
+    for (const [k, v] of Object.entries(doc?.values ?? {})) if (k in codeWorld) worldValues[k] = v
+    presets = new Presets(TUNE_TABS, siteTuneAccess, resolve(codeWorld, worldValues))
+    const lib = await loadPresets(slug)
+    const r = presets.load(lib)
+    for (const d of r.dropped) toast(`presets: ${d}`, 'warn', 5000)
+    // the tab is built once and cached; without this the previous world's library stays on screen
+    tuneUI.invalidatePresets()
+  }
+
   const wantLevel = new URLSearchParams(location.search).get('level')
   if (wantLevel) await openLevel(wantLevel)
 }
+
+/**
+ * The world's named look snapshots, and the animator that moves between them.
+ *
+ * Rebuilt per site, because the library, the ground state and the knobs it may touch all belong
+ * to the world. Null before the first site has loaded, which is the only state the scripting API
+ * has to guard for.
+ */
+let presets: Presets | null = null
 
 /** Apply a level to the site on screen, and say plainly what did not apply. */
 async function openLevel(id: string) {
@@ -615,6 +701,14 @@ async function openLevel(id: string) {
       applySky(season, false)
     },
     setWeather: (w) => setWeatherSelection(w as Weather),
+    applyPreset: (p) => {
+      if (!presets) return null
+      if (typeof p === 'string' && !presets.get(p)) return null
+      presets.apply(p)
+      onTuneChange()
+      const n = typeof p === 'string' ? Object.keys(presets.get(p)?.values ?? {}).length : Object.keys(p).length
+      return n
+    },
     setSeason: (x) => { if (SEASONS.includes(x as Season)) setSeason(x as Season) },
     place: async (items: LevelPlacement[]) => {
       if (!site) return 0
@@ -1502,6 +1596,11 @@ function frame() {
   // the world's clock, and the light that follows from it. applySky is cheap (no geometry), so it
   // runs whenever the sun has moved enough to see — a degree of elevation is about four minutes of
   // a real day, and far less than that at a high TIME_RATE.
+  // a preset transition in flight, on REAL seconds: TIME_RATE is itself a knob a preset may tween,
+  // and driving the animator off simulated time makes a transition that speeds up as it changes
+  // the clock it is being measured against
+  // the same cost as dragging a slider, and only while a transition is in flight
+  if (presets?.tick(real)) onTuneChange()
   worldClock.rate = T.TIME_RATE
   worldClock.tick(real) // real time, not the capped physics step: the sun does not care about hitches
   /*
@@ -1715,6 +1814,21 @@ registerBridgeContext({
   project: (lon: number, lat: number) => (site ? siteProjector(site.manifest.frame as Parameters<typeof siteProjector>[0])(lon, lat) : null),
   THREE,
   tune: TUNE_TABS,
+  /**
+   * The presets library, over the bridge as well as on `window.corridor`.
+   *
+   * Because this is the surface that reaches Rich's GPU browser, and "make it night over eight
+   * seconds and tell me what snapped" is a thing to ask of a real card rather than of swiftshader.
+   */
+  get presets() {
+    return presets
+  },
+  preset: (target: string | Record<string, number>, opts?: { over?: number; ease?: 'linear' | 'in' | 'out' | 'inOut' }) => {
+    if (!presets) return null
+    const t = presets.apply(target, opts)
+    if (!t) onTuneChange()
+    return { over: t?.over ?? 0, stepped: presets.stepped(target) }
+  },
   /**
    * What the renderer really did, and what the frames really cost.
    *

@@ -52,10 +52,14 @@ function serveBake(): Plugin {
         // built the whole save path and could not ship it because this one word was missing and
         // this file was not theirs to edit — their error message names the fix exactly.
         //
+        // `presets` is the world's named library of look snapshots — the keyframes a level and a
+        // program tween between (src/presets.ts). Same shape of file as `tuning`, same lifetime as
+        // the world, so it lives beside it rather than in a service.
+        //
         // `dead_ends` is Rich's third editor ask, keyed on the OSM NODE ID rather than on `s` or a
         // chain id: the node id is in every dead_ends entry the bake emits and it survives a
         // re-bake, a re-chaining and a change of chain set, which stations and chain ids do not.
-        if (req.method === 'PUT' && prefix === '/sites/' && /^[a-z0-9-]+\/(adjustments|placements|structures|dead_ends|tuning)\.json$/.test(rel.replaceAll('\\', '/'))) {
+        if (req.method === 'PUT' && prefix === '/sites/' && /^[a-z0-9-]+\/(adjustments|placements|structures|dead_ends|tuning|presets)\.json$/.test(rel.replaceAll('\\', '/'))) {
           const chunks: Buffer[] = []
           req.on('data', (c) => chunks.push(c))
           req.on('end', () => {

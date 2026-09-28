@@ -300,6 +300,8 @@ export interface TrainingRun {
   steps?: { step: string; ok: boolean; why: string | null }[]
 }
 
+const progPath = (id: string) => id.split('/').map(encodeURIComponent).join('/')
+
 export const api = {
   config: () => call<Config>('/api/config'),
   ready: () => call<Ready>('/api/ready'),
@@ -414,9 +416,16 @@ export const api = {
 
   /* ---- programs: the code half of a level (src/program.ts, stage 6) ---- */
   programs: () => call<{ programs: { id: string; bytes: number; modified: string | null }[] }>('/api/programs'),
-  program: (id: string) => call<{ id: string; source: string }>(`/api/programs/${id}`),
-  saveProgram: (id: string, source: string) => call<{ id: string; bytes: number }>(`/api/programs/${id}`, { method: 'PUT', body: JSON.stringify({ source }) }),
-  deleteProgram: (id: string) => call<{ deleted: string }>(`/api/programs/${id}`, { method: 'DELETE' }),
+  /**
+   * A program id is a PATH, so each segment is encoded but the slashes are not.
+   *
+   * `encodeURIComponent('a/b')` is `a%2Fb`, which arrives as one segment and makes a file with a
+   * slash in its name rather than a file in a folder.
+   */
+  program: (id: string) => call<{ id: string; source: string }>(`/api/programs/${progPath(id)}`),
+  saveProgram: (id: string, source: string) => call<{ id: string; bytes: number }>(`/api/programs/${progPath(id)}`, { method: 'PUT', body: JSON.stringify({ source }) }),
+  deleteProgram: (id: string) => call<{ deleted: string }>(`/api/programs/${progPath(id)}`, { method: 'DELETE' }),
+  moveProgram: (id: string, to: string) => call<{ id: string }>(`/api/programs/${progPath(id)}`, { method: 'PUT', body: JSON.stringify({ move: to }) }),
 
   /* ---- the agent: the platform's deployments, and a tunnel to one (tools/worldeditor/platform.mjs) ---- */
   agentPlatform: () => call<{ set: boolean; base: string | null; user: string | null }>('/api/agent'),

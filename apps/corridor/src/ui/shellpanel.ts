@@ -15,7 +15,8 @@
 // person needs to see which ones the moment it happens rather than find out later.
 import { Shell, type ExecResult, type ShellFile } from '../agent/shell'
 import { ROOT, type DocSources } from '../agent/projection'
-import { bodyOf, empty, group, readout } from './controls'
+import { bodyOf, group, readout } from './controls'
+import { FileTree } from './filetree'
 import { button, el } from './shell'
 
 export interface ShellPanelOpts {
@@ -39,6 +40,7 @@ export class ShellPanel {
   private at = 0
   private saved: { path: string; what: string; ok: boolean; error?: string }[] = []
   private files: ShellFile[] = []
+  private tree: FileTree | null = null
   private booting = false
 
   constructor(o: ShellPanelOpts) {
@@ -167,15 +169,31 @@ export class ShellPanel {
     const host = this.o.sidebarHost
     host.replaceChildren()
 
+    /*
+     * THE PROJECTION, AS A TREE.
+     *
+     * It was a flat list of absolute paths cut off at sixty rows — which for a volume with a few
+     * worlds on it is a file browser that silently omits most of the machine, and every row was
+     * the same forty characters of `/workspace/…` prefix before the part that differs. The
+     * projection is already `worlds/`, `levels/`, `programs/`, `sites/`, `out/`: it IS a tree, and
+     * ui/filetree.ts is the same control the program editor uses (Rich, 2026-09-28: "make a folder
+     * control we can use for both the program editor and the shell").
+     */
     const g = group(`Files (${this.files.length})`, { collapsed: false })
-    const b = bodyOf(g)
-    if (!this.files.length) b.append(empty('nothing projected yet'))
-    for (const f of [...this.files].sort((a, c) => (a.path < c.path ? -1 : 1)).slice(0, 60)) {
-      const row = el('button', 'row')
-      row.append(el('span', 'row-name', f.path.replace(`${ROOT}/`, '')), el('span', 'row-note', `${f.size} B`))
-      row.onclick = () => { if (this.input) { this.input.value = `cat ${f.path.replace(`${ROOT}/`, '')}`; this.input.focus() } }
-      b.append(row)
-    }
+    this.tree ??= new FileTree({
+      storageKey: 'shell',
+      empty: 'nothing projected yet',
+      files: () => this.files.map((f) => ({ path: f.path.replace(`${ROOT}/`, ''), note: `${f.size} B` })),
+      // a click writes the command rather than running it: this is a shell, and what you want to
+      // do with the file you just found is usually not `cat`
+      onOpen: (p) => { if (this.input) { this.input.value = `cat ${p}`; this.input.focus() } },
+      actions: (p) => [
+        { icon: 'eye', title: `cat ${p}`, onClick: () => void this.run(`cat ${p}`) },
+        { icon: 'pencil-square', title: `put the path in the prompt`, onClick: () => { if (this.input) { this.input.value += (this.input.value ? ' ' : '') + p; this.input.focus() } } },
+      ],
+    })
+    this.tree.render()
+    bodyOf(g).append(this.tree.root)
     host.append(g)
 
     if (this.saved.length) {

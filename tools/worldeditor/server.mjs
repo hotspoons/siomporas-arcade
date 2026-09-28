@@ -918,8 +918,13 @@ async function api(req, res, seg, q) {
   if (seg[0] === 'programs' && seg.length === 1 && req.method === 'GET') {
     return json(res, 200, { programs: await store.listPrograms() })
   }
-  if (seg[0] === 'programs' && seg.length === 2) {
-    const id = seg[1]
+  /*
+   * THE ID IS THE REST OF THE PATH, slashes and all: `programs/levels/rooftop/run` is the program
+   * `levels/rooftop/run`. A route that matched one segment is what made programs a flat list.
+   * The store decides what a usable path is; this only has to stop cutting it short.
+   */
+  if (seg[0] === 'programs' && seg.length >= 2) {
+    const id = seg.slice(1).map(decodeURIComponent).join('/')
     if (req.method === 'GET') {
       const p = await store.getProgram(id)
       return p ? json(res, 200, p) : json(res, 404, { error: `no program ${id}` })
@@ -927,6 +932,10 @@ async function api(req, res, seg, q) {
     if (req.method === 'PUT') {
       const body = await readJson(req)
       try {
+        // a PUT with a `move` is a rename: the same file under another path, in one operation,
+        // because read-write-delete from a browser leaves two copies when the tab is closed
+        // between the write and the delete
+        if (typeof body?.move === 'string') return json(res, 200, await store.moveProgram(id, body.move))
         return json(res, 200, await store.putProgram(id, body?.source))
       } catch (e) {
         return json(res, e.status ?? 500, { error: String(e.message ?? e) })

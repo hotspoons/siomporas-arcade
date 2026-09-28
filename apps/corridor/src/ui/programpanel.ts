@@ -25,7 +25,8 @@ import * as ecsconfigApi from '../ecsconfig'
 import * as trafficApi from '../traffic'
 import { GameRun, type GameDef, type ProgramHost, type Transport } from '../program'
 import { ActorWorld } from '../actorworld'
-import { bodyOf, empty, group, readout } from './controls'
+import { bodyOf, group, readout } from './controls'
+import { FileTree } from './filetree'
 import { ask, button, confirm, el, toast } from './shell'
 
 /** What a new program starts as: the shortest thing that is a real level. */
@@ -61,6 +62,8 @@ export interface ProgramPanelOpts {
   load: (id: string) => Promise<string | null>
   save: (id: string, source: string) => Promise<void>
   remove: (id: string) => Promise<void>
+  /** rename or move one; the tree offers it only when a caller can do it */
+  move?: (id: string, to: string) => Promise<void>
   /** redraw, after the list changed */
   refresh: () => void
 }
@@ -208,126 +211,290 @@ function rewriteImports(js: string): string {
 }
 
 /* ---- the panel ---------------------------------------------------------------------------- */
+/*
+ * ONE PANEL, MANY FILES.
+ *
+ * Rich, 2026-09-28: "How are you supposed to manage multiple files in the editor, there is no
+ * folders and no file system and no tabs", and "it does not store state and what ever was typed
+ * is wiped when you move away."
+ *
+ * Both of those are the same mistake. The panel rebuilt itself from the server on every render —
+ * one file, no tabs, and `render()` meaning "throw away the editor and fetch the source again",
+ * which is a destructive operation bound to a tab click. What is here instead:
+ *
+ *   A TREE, from ui/filetree.ts, over ids that are now paths (see store.mjs `#programFile`).
+ *   TABS, one per open file, each with its own Monaco editor that is created once and kept.
+ *   DRAFTS, written to localStorage as you type and restored on the way back.
+ *
+ * The draft is the part that matters. Everything else can be rebuilt from the service; the two
+ * minutes of typing that have not been saved yet cannot, and they were being discarded by a
+ * click on another tab, by a page refresh, and by the browser being closed. They now survive all
+ * three, and the file is still not saved until somebody presses Save — an editor that writes to
+ * the volume as you type is a different and much worse promise.
+ */
+
+/** Where an unsaved buffer lives between visits. One key per path, so a stale one is orphaned. */
+const DRAFT = (path: string) => `apex-program-draft.${path}`
+/** Which files were open, and which was on top. */
+const TABS = 'apex-program-tabs.v1'
+
+interface Open {
+  path: string
+  editor: CodeEditor
+  host: HTMLElement
+  /** the source as the service has it, so "dirty" is a comparison and not a flag that drifts */
+  saved: string
+}
 
 export class ProgramPanel {
   private readonly o: ProgramPanelOpts
-  private editor: CodeEditor | null = null
-  private id: string | null = null
-  private dirty = false
+  private open = new Map<string, Open>()
+  private active: string | null = null
+  private files: { id: string; bytes: number; modified: string | null }[] = []
   private diagnostics: Diagnostic[] = []
   private last: DryRun | null = null
-  private report: HTMLElement | null = null
+  private tree: FileTree | null = null
+  /** built once and kept in the host; see the note above about what `render` must not destroy */
+  private root: HTMLElement | null = null
+  private tabsRow = el('div', 'code-tabs')
+  private stack = el('div', 'code-stack')
+  private restored = false
 
   constructor(o: ProgramPanelOpts) {
     this.o = o
   }
 
-  async render(): Promise<void> {
-    const host = this.o.host
-    host.replaceChildren()
+  /* ---- the chrome ---------------------------------------------------------------------------- */
 
-    this.o.reportHost.replaceChildren()
-    if (!this.id) {
-      const list = await this.o.list().catch(() => [])
-      const g = group(`Programs (${list.length})`, {
-        collapsed: false,
-        actions: [button({ label: 'New', icon: 'plus', variant: 'primary', onClick: () => void this.create() })],
-      })
-      const b = bodyOf(g)
-      if (!list.length) b.append(empty('No programs yet.'))
-      for (const p of list) {
-        const row = el('button', 'row')
-        row.append(
-          el('span', 'row-name', p.id),
-          el('span', 'row-note', `${(p.bytes / 1024).toFixed(1)} kB${p.modified ? ` · ${p.modified.slice(0, 16).replace('T', ' ')}` : ''}`),
-        )
-        row.onclick = () => void this.open(p.id)
-        b.append(row)
-      }
-      this.o.reportHost.append(g)
-      return
-    }
-
-    /* the editor */
+  private build(): HTMLElement {
+    if (this.root) return this.root
+    const root = el('div', 'code-root')
     const bar = el('div', 'panel-bar')
-    bar.append(
-      button({ label: 'Back', icon: 'arrow-left', variant: 'ghost', onClick: () => void this.close() }),
-      el('span', 'panel-title', this.id + (this.dirty ? ' •' : '')),
-    )
+    bar.append(this.tabsRow)
     const actions = el('div', 'panel-bar-actions')
     actions.append(
       button({ label: 'Check', icon: 'check', title: 'typecheck it, against the real API declarations', onClick: () => void this.check() }),
       button({ label: 'Dry run', icon: 'beaker', title: 'compile it, load it and play five seconds of it against a stub world', onClick: () => void this.dry() }),
-      button({ label: 'Save', icon: 'document-arrow-down', variant: 'primary', onClick: () => void this.save() }),
-      button({ label: 'Delete', icon: 'trash', variant: 'ghost', onClick: () => void this.del() }),
+      button({ label: 'Save', icon: 'document-arrow-down', variant: 'primary', key: '⌘S', onClick: () => void this.save() }),
     )
     bar.append(actions)
-    host.append(bar)
+    root.append(bar, this.stack)
+    this.root = root
 
-    const editorHost = el('div', 'code-host')
-    host.append(editorHost)
-    this.report = this.o.reportHost
-    this.report.replaceChildren()
-
-    const source = (await this.o.load(this.id)) ?? TEMPLATE
-    this.editor = new CodeEditor({
-      host: editorHost,
-      path: `programs/${this.id}.ts`,
-      value: source,
-      onChange: () => {
-        if (this.dirty) return
-        this.dirty = true
-        const title = this.o.host.querySelector('.panel-title')
-        if (title) title.textContent = `${this.id} •`
-      },
+    // Save with the keyboard, because this is a code editor and the muscle is already there.
+    root.addEventListener('keydown', (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault()
+        e.stopPropagation()
+        void this.save()
+      }
     })
-    await this.editor.whenReady()
-    // for probes and the console, the way the viewer exposes its knobs. The toolkit is three
-    // asynchronous services behind an editor, and every one of them fails by doing nothing
-    // visible; this is how probes/corridor-program-editor.mjs asks them directly.
-    ;(window as unknown as { __apexProgram: unknown }).__apexProgram = {
-      id: this.id,
-      value: () => this.editor?.value() ?? '',
-      setValue: (v: string) => this.editor?.setValue(v),
-      check: () => this.check().then(() => this.diagnostics),
-      emit: () => this.editor?.emit() ?? Promise.resolve(null),
-      dryRun: async () => {
-        const js = await this.editor?.emit()
-        if (!js) return null
-        this.last = await dryRun(js)
-        this.drawReport()
-        return this.last
-      },
+    return root
+  }
+
+  async render(): Promise<void> {
+    const host = this.o.host
+    const root = this.build()
+    // appended, NOT replaced: the editors live in here and a rebuild would dispose a tab's
+    // undo history and its scroll position along with its DOM
+    if (root.parentElement !== host) host.append(root)
+
+    this.files = await this.o.list().catch(() => [])
+    if (!this.restored) {
+      this.restored = true
+      await this.reopenLast()
     }
+    this.drawTabs()
     this.drawReport()
-    // check once on open: opening a program that has been broken by an API change and saying
-    // nothing is how somebody spends an evening on a level that was never going to run
+  }
+
+  /** Put back the tabs that were open before the page was reloaded. */
+  private async reopenLast(): Promise<void> {
+    let want: { open?: string[]; active?: string } | null = null
+    try { want = JSON.parse(localStorage.getItem(TABS) ?? 'null') } catch { /* fresh browser */ }
+    const exists = new Set(this.files.map((f) => f.id))
+    for (const p of want?.open ?? []) if (exists.has(p)) await this.openFile(p, false)
+    if (want?.active && this.open.has(want.active)) this.show(want.active)
+    else if (this.open.size) this.show([...this.open.keys()][0])
+  }
+
+  private rememberTabs(): void {
+    try { localStorage.setItem(TABS, JSON.stringify({ open: [...this.open.keys()], active: this.active })) } catch { /* private window */ }
+  }
+
+  /* ---- tabs ---------------------------------------------------------------------------------- */
+
+  private drawTabs(): void {
+    this.tabsRow.replaceChildren()
+    if (!this.open.size) {
+      this.tabsRow.append(el('span', 'panel-title', 'Program'))
+      return
+    }
+    for (const [path, o] of this.open) {
+      const tab = el('div', `code-tab${path === this.active ? ' on' : ''}`)
+      const pick = el('button', 'code-tab-name')
+      pick.append(el('span', '', path.split('/').pop() ?? path))
+      if (this.isDirty(o)) pick.append(el('span', 'tree-mark', '•'))
+      pick.title = path
+      pick.onclick = () => this.show(path)
+      const shut = button({ icon: 'x-mark', variant: 'ghost', title: `close ${path}`, onClick: () => this.closeTab(path) })
+      shut.classList.add('code-tab-x')
+      tab.append(pick, shut)
+      this.tabsRow.append(tab)
+    }
+  }
+
+  private isDirty(o: Open): boolean {
+    return o.editor.value() !== o.saved
+  }
+
+  /** Which editor is on screen. The others stay built, with their undo history and their scroll. */
+  private show(path: string): void {
+    this.active = path
+    for (const [p, o] of this.open) o.host.hidden = p !== path
+    this.drawTabs()
+    this.rememberTabs()
+    this.exposeForProbes()
+    this.diagnostics = []
+    this.last = null
+    this.drawReport()
     void this.check()
   }
 
+  private closeTab(path: string): void {
+    const o = this.open.get(path)
+    if (!o) return
+    // NO CONFIRMATION, because nothing is lost: the draft is on disk and reopening the file
+    // brings it back with the dot still on it. A dialog here would be asking permission to do
+    // something that does not happen.
+    o.editor.dispose()
+    o.host.remove()
+    this.open.delete(path)
+    if (this.active === path) {
+      const next = [...this.open.keys()].pop() ?? null
+      this.active = next
+      if (next) this.show(next)
+      else { this.drawTabs(); this.drawReport() }
+    } else this.drawTabs()
+    this.rememberTabs()
+  }
+
+  /* ---- opening ------------------------------------------------------------------------------- */
+
+  /**
+   * Open a file into a tab, restoring whatever was typed into it last time.
+   *
+   * A DRAFT WINS OVER THE SERVER, and that is the whole point of having one: a person who typed
+   * something and navigated away expects to find it, and the saved copy is one keystroke away
+   * through undo. It is announced, because silently showing something other than what the volume
+   * holds is how two people edit different files with the same name.
+   */
+  async openFile(path: string, focus = true): Promise<void> {
+    const already = this.open.get(path)
+    if (already) { if (focus) this.show(path); return }
+
+    const saved = (await this.o.load(path)) ?? TEMPLATE
+    let value = saved
+    let draft: string | null = null
+    try { draft = localStorage.getItem(DRAFT(path)) } catch { /* private window */ }
+    if (draft !== null && draft !== saved) value = draft
+
+    const host = el('div', 'code-host')
+    host.dataset.path = path
+    this.stack.append(host)
+    const editor = new CodeEditor({
+      host,
+      path: `programs/${path}.ts`,
+      value,
+      onChange: () => this.onEdited(path),
+    })
+    const o: Open = { path, editor, host, saved }
+    this.open.set(path, o)
+    await editor.whenReady()
+    if (focus) this.show(path)
+    else host.hidden = true
+    this.drawTabs()
+    this.rememberTabs()
+    if (draft !== null && draft !== saved) toast(`${path}: restored what you had typed but not saved`, 'info', 5000)
+  }
+
+  /**
+   * Somebody typed. Keep the draft, and keep it cheap.
+   *
+   * Debounced, because this runs on every keystroke and `localStorage` is synchronous — writing a
+   * 40 kB program to disk on each character is a stutter you can feel. Half a second is short
+   * enough that closing the tab immediately after a keystroke still keeps it.
+   */
+  private drafts = new Map<string, ReturnType<typeof setTimeout>>()
+  private onEdited(path: string): void {
+    const o = this.open.get(path)
+    if (!o) return
+    clearTimeout(this.drafts.get(path))
+    this.drafts.set(path, setTimeout(() => {
+      try {
+        if (this.isDirty(o)) localStorage.setItem(DRAFT(path), o.editor.value())
+        else localStorage.removeItem(DRAFT(path))
+      } catch { /* private window: the tab still works, the draft is simply not kept */ }
+    }, 500))
+    this.drawTabs()
+    if (this.tree) this.tree.render()
+  }
+
+  /* ---- the tree, in the inspector ------------------------------------------------------------- */
+
   private drawReport(): void {
-    const r = this.report
-    if (!r) return
+    const r = this.o.reportHost
     r.replaceChildren()
 
+    const g = group(`Files (${this.files.length})`, {
+      collapsed: false,
+      actions: [
+        button({ icon: 'document-plus', title: 'new program', variant: 'ghost', onClick: () => void this.create('') }),
+      ],
+    })
+    this.tree ??= new FileTree({
+      storageKey: 'programs',
+      empty: 'No programs yet.',
+      files: () => this.files.map((f) => ({
+        path: `${f.id}.ts`,
+        note: `${(f.bytes / 1024).toFixed(1)} kB`,
+        mark: this.isDirtyPath(f.id) ? '•' : undefined,
+      })),
+      selected: () => (this.active ? `${this.active}.ts` : null),
+      onOpen: (p) => void this.openFile(p.replace(/\.ts$/, '')),
+      folderActions: (dir) => [{ icon: 'document-plus', title: `new program in ${dir}`, onClick: () => void this.create(`${dir}/`) }],
+      actions: (p) => [
+        { icon: 'pencil-square', title: 'rename or move', onClick: () => void this.rename(p.replace(/\.ts$/, '')) },
+        { icon: 'trash', title: 'delete', danger: true, onClick: () => void this.del(p.replace(/\.ts$/, '')) },
+      ],
+    })
+    this.tree.render()
+    bodyOf(g).append(this.tree.root)
+    r.append(g)
+
+    if (!this.open.size) {
+      r.append(el('p', 'note', 'Open a file, or make one.'))
+      return
+    }
+
     if (this.diagnostics.length) {
-      const g = group(`${this.diagnostics.length} problem${this.diagnostics.length === 1 ? '' : 's'}`, { collapsed: false })
-      const b = bodyOf(g)
-      for (const d of this.diagnostics) {
-        const row = el('button', `row diag ${d.severity}`)
-        row.append(el('span', 'row-name', `${d.line}:${d.column}`), el('span', 'row-note', d.message))
-        row.onclick = () => this.editor?.reveal(d.line, d.column)
+      const d = group(`${this.diagnostics.length} problem${this.diagnostics.length === 1 ? '' : 's'}`, { collapsed: false })
+      const b = bodyOf(d)
+      for (const x of this.diagnostics) {
+        const row = el('button', `row diag ${x.severity}`)
+        row.append(el('span', 'row-name', `${x.line}:${x.column}`), el('span', 'row-note', x.message))
+        row.onclick = () => this.editor()?.reveal(x.line, x.column)
         b.append(row)
       }
-      r.append(g)
-    } else if (this.editor) {
+      r.append(d)
+    } else {
       r.append(el('p', 'note ok', 'No type errors.'))
     }
 
     if (this.last) {
       const d = this.last
-      const g = group(d.ok ? 'Dry run' : 'Dry run failed', { collapsed: false })
-      const b = bodyOf(g)
+      const g2 = group(d.ok ? 'Dry run' : 'Dry run failed', { collapsed: false })
+      const b = bodyOf(g2)
       if (d.error) b.append(el('p', 'note warn', d.error))
       b.append(readout('played', `${d.played} s`))
       if (d.goal) b.append(readout('goal', d.goal))
@@ -338,21 +505,58 @@ export class ProgramPanel {
       if (d.transport) b.append(readout('transport', d.transport))
       if (d.presets.length) b.append(readout('presets', d.presets.join(', ')))
       for (const m of d.messages) b.append(el('p', 'note', `said: ${m}`))
-      r.append(g)
+      r.append(g2)
+    }
+  }
+
+  private isDirtyPath(id: string): boolean {
+    const o = this.open.get(id)
+    return !!o && this.isDirty(o)
+  }
+
+  private editor(): CodeEditor | null {
+    return this.active ? this.open.get(this.active)?.editor ?? null : null
+  }
+
+  /* ---- the toolkit ---------------------------------------------------------------------------- */
+
+  private exposeForProbes(): void {
+    // for probes and the console, the way the viewer exposes its knobs. The toolkit is three
+    // asynchronous services behind an editor, and every one of them fails by doing nothing
+    // visible; this is how probes/corridor-program-editor.mjs asks them directly.
+    ;(window as unknown as { __apexProgram: unknown }).__apexProgram = {
+      id: this.active,
+      open: () => [...this.open.keys()],
+      dirty: () => [...this.open.keys()].filter((p) => this.isDirtyPath(p)),
+      value: () => this.editor()?.value() ?? '',
+      setValue: (v: string) => this.editor()?.setValue(v),
+      openFile: (p: string) => this.openFile(p),
+      save: () => this.save(),
+      check: () => this.check().then(() => this.diagnostics),
+      emit: () => this.editor()?.emit() ?? Promise.resolve(null),
+      dryRun: async () => {
+        const js = await this.editor()?.emit()
+        if (!js) return null
+        this.last = await dryRun(js)
+        this.drawReport()
+        return this.last
+      },
     }
   }
 
   private async check(): Promise<void> {
-    if (!this.editor) return
-    this.diagnostics = await this.editor.check()
+    const ed = this.editor()
+    if (!ed) return
+    this.diagnostics = await ed.check()
     this.drawReport()
   }
 
   private async dry(): Promise<void> {
-    if (!this.editor) return
-    this.diagnostics = await this.editor.check()
+    const ed = this.editor()
+    if (!ed) return
+    this.diagnostics = await ed.check()
     const fatal = this.diagnostics.filter((d) => d.severity === 'error')
-    const js = await this.editor.emit()
+    const js = await ed.emit()
     if (!js) {
       this.last = { ...(this.last ?? ({} as DryRun)), ok: false, error: 'it does not compile', played: 0 } as DryRun
       this.drawReport()
@@ -367,55 +571,95 @@ export class ProgramPanel {
   }
 
   private async save(): Promise<void> {
-    if (!this.editor || !this.id) return
+    const path = this.active
+    const o = path ? this.open.get(path) : null
+    if (!path || !o) return
     try {
-      await this.o.save(this.id, this.editor.value())
-      this.dirty = false
-      toast(`saved ${this.id}`, 'ok')
-      const title = this.o.host.querySelector('.panel-title')
-      if (title) title.textContent = this.id
+      const text = o.editor.value()
+      await this.o.save(path, text)
+      o.saved = text
+      try { localStorage.removeItem(DRAFT(path)) } catch { /* private window */ }
+      toast(`saved ${path}`, 'ok')
+      this.files = await this.o.list().catch(() => this.files)
+      this.drawTabs()
+      this.drawReport()
     } catch (e) {
       toast(`save failed: ${(e as Error).message}`, 'danger')
     }
   }
 
-  private async create(): Promise<void> {
+  /* ---- the file system ------------------------------------------------------------------------ */
+
+  /**
+   * A new program, at a path.
+   *
+   * The dialog takes the WHOLE path, prefilled with the folder it was started from, because a
+   * folder here exists only by being in one — there is nothing to create separately, and a "new
+   * folder" button would make a thing the store cannot represent.
+   */
+  private async create(prefix: string): Promise<void> {
     const name = await ask({
       title: 'New program',
-      label: 'id',
-      placeholder: 'rooftop-run',
-      icon: 'plus',
-      validate: (v) => (/^[a-z0-9][a-z0-9-]{1,63}$/.test(v.trim()) ? null : 'lower case letters, digits and hyphens'),
+      label: 'path',
+      value: prefix,
+      placeholder: 'levels/rooftop-run',
+      icon: 'document-plus',
+      validate: (v) => {
+        const t = v.trim().replace(/\.ts$/, '')
+        if (!/^[a-z0-9][a-z0-9._-]*(\/[a-z0-9][a-z0-9._-]*)*$/.test(t)) return 'lower case letters, digits, dots, hyphens — and slashes for folders'
+        if (this.files.some((f) => f.id === t)) return `${t} already exists`
+        return null
+      },
     })
     if (name === null) return
-    await this.o.save(name.trim(), TEMPLATE)
-    await this.open(name.trim())
-  }
-
-  private async open(id: string): Promise<void> {
-    this.id = id
-    this.dirty = false
-    this.diagnostics = []
-    this.last = null
-    await this.render()
-  }
-
-  private async close(): Promise<void> {
-    if (this.dirty && !(await confirm({ title: 'Leave without saving?', message: `${this.id} has unsaved changes.`, ok: 'Discard', danger: true }))) return
-    this.editor?.dispose()
-    this.editor = null
-    this.id = null
+    const id = name.trim().replace(/\.ts$/, '')
+    await this.o.save(id, TEMPLATE)
+    this.files = await this.o.list().catch(() => this.files)
+    await this.openFile(id)
     this.o.refresh()
-    await this.render()
   }
 
-  private async del(): Promise<void> {
-    if (!this.id) return
-    if (!(await confirm({ title: `Delete ${this.id}?`, message: 'Any level that names it will stop finding it.', ok: 'Delete', danger: true }))) return
-    await this.o.remove(this.id)
-    this.editor?.dispose()
-    this.editor = null
-    this.id = null
-    await this.render()
+  private async rename(id: string): Promise<void> {
+    if (!this.o.move) return
+    const to = await ask({
+      title: `Move ${id}`,
+      label: 'new path',
+      value: id,
+      icon: 'pencil-square',
+      ok: 'Move',
+      validate: (v) => {
+        const t = v.trim().replace(/\.ts$/, '')
+        if (!/^[a-z0-9][a-z0-9._-]*(\/[a-z0-9][a-z0-9._-]*)*$/.test(t)) return 'lower case letters, digits, dots, hyphens — and slashes for folders'
+        if (t !== id && this.files.some((f) => f.id === t)) return `${t} already exists`
+        return null
+      },
+    })
+    if (to === null) return
+    const id2 = to.trim().replace(/\.ts$/, '')
+    if (id2 === id) return
+    try {
+      // save first: a move renames what is ON THE VOLUME, and an unsaved buffer would be left
+      // pointing at a path that no longer exists
+      const o = this.open.get(id)
+      if (o && this.isDirty(o)) await this.o.save(id, o.editor.value())
+      await this.o.move(id, id2)
+      if (o) { this.closeTab(id); try { localStorage.removeItem(DRAFT(id)) } catch { /* ignore */ } }
+      this.files = await this.o.list().catch(() => this.files)
+      await this.openFile(id2)
+      this.o.refresh()
+      toast(`moved to ${id2}`, 'ok')
+    } catch (e) {
+      toast(`move failed: ${(e as Error).message}`, 'danger')
+    }
+  }
+
+  private async del(id: string): Promise<void> {
+    if (!(await confirm({ title: `Delete ${id}?`, message: 'Any level that names it will stop finding it.', ok: 'Delete', danger: true }))) return
+    await this.o.remove(id)
+    try { localStorage.removeItem(DRAFT(id)) } catch { /* private window */ }
+    if (this.open.has(id)) this.closeTab(id)
+    this.files = await this.o.list().catch(() => this.files)
+    this.drawReport()
+    this.o.refresh()
   }
 }

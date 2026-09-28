@@ -563,3 +563,32 @@ body.chrome-off #chrome-restore { display: block; }
 .material-text { display: grid; min-width: 0; }
 .material-name { font-size: var(--text-sm); }
 .material-sub { font-size: var(--text-xs); color: var(--ink-3); font-family: var(--mono, monospace); }
+
+/* ---- the file tree (ui/filetree.ts) ---------------------------------------------------------
+   Indentation is a CSS variable set per row rather than nested boxes: a tree drawn as nested
+   elements cannot have one scroll container and one hover rule, and at four levels deep the
+   padding compounds into a column two characters wide. */
+.filetree { display: grid; gap: 1px; }
+.tree-filter { display: flex; align-items: center; gap: var(--s2); padding: 0 var(--s1) var(--s2); color: var(--ink-3); }
+.tree-filter input { flex: 1; min-width: 0; }
+.tree-empty { color: var(--ink-3); font-size: var(--text-xs); padding: var(--s2); margin: 0; }
+.tree-row { display: flex; align-items: center; gap: 2px; border-radius: var(--r1); }
+.tree-row:hover { background: var(--bg-2); }
+.tree-row.on { background: var(--bg-3, var(--bg-2)); }
+.tree-twist, .tree-open {
+  display: flex; align-items: center; gap: var(--s2); min-width: 0; flex: 1;
+  padding: var(--s1) var(--s2) var(--s1) calc(var(--s2) + var(--depth, 0) * 14px);
+  background: none; border: 0; border-radius: var(--r1);
+  font: inherit; color: var(--ink-1); text-align: left; cursor: pointer;
+}
+.tree-row.on .tree-open { color: var(--accent, var(--ink-0)); font-weight: 500; }
+.tree-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tree-count, .tree-note { margin-left: auto; color: var(--ink-3); font-size: var(--text-xs); flex: none; }
+/* the unsaved dot sits with the name, not with the note: it is about the file, not about its size */
+.tree-mark { color: var(--warn); flex: none; }
+.tree-twist svg, .tree-open svg { flex: none; color: var(--ink-3); }
+/* Actions appear on hover and on the row you are on, and are always reachable by keyboard —
+   `visibility` rather than `display` so the row does not change width when you point at it. */
+.tree-actions { display: flex; gap: 0; visibility: hidden; flex: none; }
+.tree-row:hover .tree-actions, .tree-row.on .tree-actions, .tree-actions:focus-within { visibility: visible; }
+.tree-actions .btn { padding: 2px 4px; }

@@ -296,36 +296,83 @@ export class Store {
   // The service does not compile it and deliberately does not try: a service that refuses to save
   // code with a type error is a service you cannot save work-in-progress to.
 
+  /**
+   * PROGRAM IDS ARE PATHS, so a game can be more than one file.
+   *
+   * Rich, 2026-09-28: "How are you supposed to manage multiple files in the editor, there is no
+   * folders and no file system and no tabs". The id was one slug with no slash in it, which meant
+   * every program in one flat directory and no way to write a level that imports a helper.
+   *
+   * A path is segments of `[a-z0-9][a-z0-9._-]*`, joined by single slashes. That grammar is what
+   * refuses `..`, an absolute path, a dotfile and a trailing slash, all without a special case —
+   * but it is NOT the check, because a grammar is an argument and the containing directory is a
+   * fact. `under()` resolves the result and refuses anything that landed outside, which is the
+   * check that still holds if this regexp is ever loosened.
+   */
+  #programFile(id) {
+    if (typeof id !== 'string' || !/^[a-z0-9][a-z0-9._-]*(\/[a-z0-9][a-z0-9._-]*)*$/.test(id)) return null
+    if (id.split('/').some((p) => p === '.' || p === '..')) return null
+    const file = path.resolve(this.programs, `${id}.ts`)
+    return file.startsWith(path.resolve(this.programs) + path.sep) ? file : null
+  }
+
   async listPrograms() {
     const out = []
-    for (const f of await readdir(this.programs).catch(() => [])) {
-      if (!f.endsWith('.ts')) continue
-      const file = path.join(this.programs, f)
-      const st = await stat(file).catch(() => null)
-      out.push({ id: f.slice(0, -3), bytes: st?.size ?? 0, modified: st?.mtime?.toISOString() ?? null })
+    const walk = async (dir, prefix) => {
+      for (const e of await readdir(dir, { withFileTypes: true }).catch(() => [])) {
+        const rel = prefix ? `${prefix}/${e.name}` : e.name
+        if (e.isDirectory()) { await walk(path.join(dir, e.name), rel); continue }
+        if (!e.name.endsWith('.ts')) continue
+        const st = await stat(path.join(dir, e.name)).catch(() => null)
+        out.push({ id: rel.slice(0, -3), bytes: st?.size ?? 0, modified: st?.mtime?.toISOString() ?? null })
+      }
     }
+    await walk(this.programs, '')
     return out.sort((a, b) => (a.id < b.id ? -1 : 1))
   }
 
   async getProgram(id) {
-    if (!/^[a-z0-9][a-z0-9-]{1,63}$/.test(id ?? '')) return null
-    const text = await readFile(path.join(this.programs, `${id}.ts`), 'utf8').catch(() => null)
+    const file = this.#programFile(id)
+    if (!file) return null
+    const text = await readFile(file, 'utf8').catch(() => null)
     return text === null ? null : { id, source: text }
   }
 
   async putProgram(id, source) {
-    if (!/^[a-z0-9][a-z0-9-]{1,63}$/.test(id ?? '')) throw Object.assign(new Error(`program id ${JSON.stringify(id)} is not a usable slug`), { status: 400 })
+    const file = this.#programFile(id)
+    if (!file) throw Object.assign(new Error(`program id ${JSON.stringify(id)} is not a usable path`), { status: 400 })
     if (typeof source !== 'string') throw Object.assign(new Error('a program is a string of TypeScript'), { status: 400 })
     // a cap, because this arrives over HTTP from a browser and a runaway paste should be refused
     // here rather than fill the volume
     if (source.length > 512 * 1024) throw Object.assign(new Error(`a program may be 512 kB; that is ${Math.round(source.length / 1024)} kB`), { status: 413 })
-    await this.writeAtomic(path.join(this.programs, `${id}.ts`), Buffer.from(source))
+    await this.writeAtomic(file, Buffer.from(source))
     return { id, bytes: source.length }
   }
 
-  removeProgram(id) {
-    if (!/^[a-z0-9][a-z0-9-]{1,63}$/.test(id ?? '')) return Promise.resolve()
-    return rm(path.join(this.programs, `${id}.ts`), { force: true })
+  async removeProgram(id) {
+    const file = this.#programFile(id)
+    if (!file) return
+    await rm(file, { force: true })
+    // and take the folder with it if that was the last thing in it: an empty folder nobody can
+    // put anything into is a row in the tree that does nothing.
+    for (let dir = path.dirname(file); dir.startsWith(path.resolve(this.programs) + path.sep); dir = path.dirname(dir)) {
+      const left = await readdir(dir).catch(() => ['.'])
+      if (left.length) break
+      await rm(dir, { recursive: false, force: true }).catch(() => {})
+    }
+  }
+
+  /** Rename or move one. Atomic, so a move cannot leave two copies or none. */
+  async moveProgram(from, to) {
+    const src = this.#programFile(from)
+    const dst = this.#programFile(to)
+    if (!src || !dst) throw Object.assign(new Error('both paths must be usable program paths'), { status: 400 })
+    if (!existsSync(src)) throw Object.assign(new Error(`no program ${from}`), { status: 404 })
+    if (existsSync(dst)) throw Object.assign(new Error(`${to} already exists`), { status: 409 })
+    await mkdir(path.dirname(dst), { recursive: true })
+    await rename(src, dst)
+    await this.removeProgram(from) // prunes the folder it left behind; the file is already gone
+    return { id: to }
   }
 
   /* ---- the place index --------------------------------------------------------------------- */

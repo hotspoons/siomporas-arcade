@@ -107,13 +107,35 @@ let selected: string | null = fromUrl(location.search).world ?? loadNav().world
  * 340 px dock is a code editor nobody writes anything in. Its diagnostics go in the inspector
  * beside it, where a row is a jump to the line.
  */
+/**
+ * ONE PANE, THREE PANELS, A DIV EACH.
+ *
+ * Program, Shell and Agent share `#code`, and each of them opened by calling
+ * `host.replaceChildren()` — so visiting the Shell destroyed the program editor's DOM, taking
+ * with it every open tab, its undo history and anything typed but not saved (Rich, 2026-09-28:
+ * "it does not store state and what ever was typed is wiped when you move away"). They get a
+ * child each, and `showCode` shows one.
+ */
+const codePane = document.getElementById('code')!
+function pane(name: string): HTMLElement {
+  const found = codePane.querySelector<HTMLElement>(`:scope > [data-pane="${name}"]`)
+  if (found) return found
+  const p = document.createElement('div')
+  p.className = 'code-pane'
+  p.dataset.pane = name
+  p.hidden = true
+  codePane.append(p)
+  return p
+}
+
 const programPanel = new ProgramPanel({
-  host: document.getElementById('code')!,
+  host: pane('program'),
   reportHost: inspector,
   list: async () => (await api.programs()).programs,
   load: async (id) => (await api.program(id).catch(() => null))?.source ?? null,
   save: async (id, source) => { await api.saveProgram(id, source) },
   remove: async (id) => { await api.deleteProgram(id) },
+  move: async (id, to) => { await api.moveProgram(id, to) },
   refresh: () => { if (mode === 'program') void programPanel.render() },
 })
 
@@ -125,7 +147,7 @@ const programPanel = new ProgramPanel({
  * the worker because the worker has no network at all by design — see src/agent/shell.ts.
  */
 const shellPanel = new ShellPanel({
-  host: document.getElementById('code')!,
+  host: pane('shell'),
   sidebarHost: inspector,
   docs: async () => {
     const [w, l, p] = await Promise.all([
@@ -169,7 +191,7 @@ const shellPanel = new ShellPanel({
  * filesystems over the same documents is two answers to "what does this file say".
  */
 const agentPanel = new AgentPanel({
-  host: document.getElementById('code')!,
+  host: pane('agent'),
   transcriptHost: inspector,
   shell: () => shellPanel.machine,
 })
@@ -855,6 +877,9 @@ function showCode(on: boolean) {
   const code = document.getElementById('code')
   const mapCanvas = document.querySelector<HTMLCanvasElement>('#map')
   if (code) code.hidden = !on
+  // and which of the three panes inside it. Hidden rather than removed, so a panel keeps its DOM
+  // — see `pane`.
+  for (const p of codePane.querySelectorAll<HTMLElement>(':scope > [data-pane]')) p.hidden = !on || p.dataset.pane !== mode
   // only the Place mode may hide the map as well; this must not un-hide it on the way out of a
   // mode that was never showing it
   if (mapCanvas && (on || mode !== 'place')) mapCanvas.hidden = on

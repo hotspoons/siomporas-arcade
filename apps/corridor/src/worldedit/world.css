@@ -51,10 +51,37 @@ body.worldedit {
   /* the bar, then the editor taking whatever is left. `minmax(0, 1fr)` and not `1fr`: Monaco
      measures its own host, and a grid row that sizes to its content gives it a height of zero and
      an editor one line tall. */
-  grid-template-rows: auto minmax(0, 1fr);  /* the bar, then the editor */
+  /* ONE ROW NOW: the pane inside it is the thing with a bar and a body. Program, Shell and Agent
+     each own a `.code-pane` child so that showing one does not destroy the others — see `pane()`
+     in main.ts. */
+  grid-template-rows: minmax(0, 1fr);
   background: var(--bg-0);
 }
 #code[hidden] { display: none; }
+
+.code-pane { display: grid; grid-template-rows: auto minmax(0, 1fr); min-height: 0; min-width: 0; }
+.code-pane[hidden] { display: none; }
+/* the program pane's own root carries the bar; the other two put theirs straight in the pane */
+.code-pane[data-pane='program'] { grid-template-rows: minmax(0, 1fr); }
+.code-root { display: grid; grid-template-rows: auto minmax(0, 1fr); min-height: 0; min-width: 0; }
+
+/* Every open file is stacked in one cell and all but one is hidden: a tab switch must not move
+   an editor in the DOM, because Monaco re-measures and loses the scroll position when it does. */
+.code-stack { display: grid; min-height: 0; min-width: 0; }
+.code-stack > .code-host { grid-area: 1 / 1; }
+.code-stack > .code-host[hidden] { display: none; }
+
+.code-tabs { display: flex; align-items: stretch; gap: 2px; min-width: 0; overflow-x: auto; scrollbar-width: thin; }
+.code-tab { display: flex; align-items: center; border-radius: var(--r1); background: var(--bg-2); }
+.code-tab.on { background: var(--bg-0); box-shadow: inset 0 -2px 0 var(--accent); }
+.code-tab-name {
+  display: flex; align-items: center; gap: var(--s1);
+  padding: var(--s1) var(--s2); max-width: 22ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  background: none; border: 0; font: inherit; color: var(--ink-1); cursor: pointer;
+}
+.code-tab.on .code-tab-name { color: var(--ink-0); font-weight: 500; }
+.code-tab-x.btn { padding: 2px 4px; opacity: 0.6; }
+.code-tab-x.btn:hover { opacity: 1; }
 
 #code .panel-bar {
   display: flex;

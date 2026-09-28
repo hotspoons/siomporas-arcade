@@ -138,13 +138,20 @@ export class Tabs {
  */
 let openLightbox: (() => void) | null = null
 
-/** The one open dialog, if any — so Escape and the scrim know what they are closing. */
-let openDialog: Dialog | null = null
-
-/** A tiny registry, so opening a dialog does not read as assigning `this` to a loose variable. */
-function registerOpen(d: Dialog | null) {
-  openDialog = d
-}
+/**
+ * The open dialogs, innermost LAST — so Escape and the scrim know what they are closing.
+ *
+ * A STACK, not a slot. `open()` used to close whatever was already open, on the reasoning that
+ * one modal at a time is the whole point of a modal. But `ask` and `confirm` are dialogs too, so
+ * asking a question from inside a panel closed the panel: pressing "New item" in the catalog made
+ * the catalog vanish, the item was created into nothing, and what a person saw was their work
+ * disappearing (Rich, 2026-09-28: "why after submitting the new item does it just disappear?").
+ *
+ * A prompt on top of the thing that raised it is the correct behaviour anyway. The stack is what
+ * makes Escape mean "the innermost one" rather than "some dialog".
+ */
+const stack: Dialog[] = []
+const top = () => stack[stack.length - 1] ?? null
 
 export interface DialogOpts {
   title: string
@@ -210,7 +217,9 @@ export class Dialog {
     this.root.addEventListener('pointerdown', (e) => {
       // a docked panel has no backdrop to click: the rest of the screen is the scene, and clicks
       // belong to it
-      if (e.target === this.root && this.docked === 'float') this.close()
+      // and only when it is the top one: a click on a question's backdrop must not close the
+      // panel underneath it as well
+      if (e.target === this.root && this.docked === 'float' && top() === this) this.close()
     })
     if (o.movable) {
       try {
@@ -332,10 +341,12 @@ export class Dialog {
   }
 
   open(): this {
-    if (openDialog && openDialog !== this) openDialog.close()
     this.lastFocus = document.activeElement
     document.body.append(this.root)
-    registerOpen(this)
+    if (!stack.includes(this)) stack.push(this)
+    // stacking is DOM order among equal z-indexes, and `append` already put this last — but a
+    // dialog re-opened while another is above it would otherwise sit underneath it.
+    else { stack.splice(stack.indexOf(this), 1); stack.push(this) }
     // next frame, so the transition has a start state to move from
     requestAnimationFrame(() => this.root.classList.add('in'))
     // a docked panel must not steal focus: the keys belong to the car
@@ -344,7 +355,8 @@ export class Dialog {
   }
 
   close() {
-    if (openDialog === this) registerOpen(null)
+    const i = stack.indexOf(this)
+    if (i >= 0) stack.splice(i, 1)
     this.root.classList.remove('in')
     const done = () => this.root.remove()
     // match --dur-2; if the transition never fires (reduced motion) remove on the next tick
@@ -355,7 +367,7 @@ export class Dialog {
   }
 
   get isOpen() {
-    return openDialog === this
+    return stack.includes(this)
   }
 
   toggle() {
@@ -579,8 +591,8 @@ export function installShellKeys(drawer: () => Drawer | null) {
       if (openLightbox) {
         openLightbox()
         e.stopPropagation()
-      } else if (openDialog) {
-        openDialog.close()
+      } else if (top()) {
+        top()!.close()
         e.stopPropagation()
       } else if (d?.open) {
         d.set(false)
@@ -595,7 +607,23 @@ export function installShellKeys(drawer: () => Drawer | null) {
 export function typing(e: KeyboardEvent): boolean {
   const t = e.target as HTMLElement | null
   if (!t) return false
-  return t.isContentEditable || /^(input|select|textarea)$/i.test(t.tagName)
+  if (t.isContentEditable || /^(input|select|textarea)$/i.test(t.tagName)) return true
+  /*
+   * THE EDIT CONTEXT API, which is how Monaco 0.57 takes text.
+   *
+   * It is neither an input nor a contenteditable: the focused element is a plain
+   * `<div class="native-edit-context">` with `isContentEditable === false`, and the characters
+   * reach it through an `EditContext` object rather than through the DOM. So every keystroke in
+   * the code editor looked to this function like a keystroke at the page, and the world editor's
+   * single-letter shortcuts fired: typing "n" in a program opened the new-world form and threw
+   * away what had been typed (Rich, 2026-09-28: "as soon as I press n, takes me to the define
+   * screen").
+   *
+   * Asked of the element first, because that is the platform feature and it is what any future
+   * editor will use too; the class is the belt-and-braces for a browser without it.
+   */
+  if ((t as { editContext?: unknown }).editContext) return true
+  return !!t.closest?.('.monaco-editor, [role="textbox"], [contenteditable]')
 }
 
 /*

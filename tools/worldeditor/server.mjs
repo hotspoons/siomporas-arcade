@@ -806,6 +806,29 @@ async function api(req, res, seg, q) {
   if (seg[0] === 'training' && seg[1] === 'plan' && req.method === 'GET') {
     return json(res, 200, await training.plan(k8s, { namespace: env.WORLDEDITOR_NAMESPACE ?? 'default' }))
   }
+  /*
+   * STARTING ONE, which until now nothing could do: the panel showed a manifest and said "not yet
+   * created", because there was no route behind it.
+   */
+  if (seg[0] === 'training' && seg[1] === 'runs' && req.method === 'POST') {
+    const body = await readJson(req)
+    const run = await training.createRun(body, k8s, { namespace: k8s.namespace, force: body.via ?? null, dryRun: body.dryRun === true })
+    return json(res, body.dryRun ? 200 : 201, { run })
+  }
+  if (seg[0] === 'training' && seg[1] === 'runs' && seg.length === 2 && req.method === 'GET') {
+    return json(res, 200, { runs: await training.listRuns(k8s, { namespace: k8s.namespace }) })
+  }
+  if (seg[0] === 'training' && seg[1] === 'runs' && seg.length === 3 && req.method === 'GET') {
+    return json(res, 200, await training.runStatus(seg[2], k8s, { namespace: k8s.namespace }))
+  }
+  if (seg[0] === 'training' && seg[1] === 'runs' && seg.length === 3 && req.method === 'DELETE') {
+    return json(res, 200, await training.deleteRun(seg[2], k8s, { namespace: k8s.namespace }))
+  }
+  /* How many GPUs are actually free — asked of the scheduler, never inferred from pod names. */
+  if (seg[0] === 'training' && seg[1] === 'gpus' && req.method === 'GET') {
+    return json(res, 200, await training.freeGpus(k8s))
+  }
+
   if (seg[0] === 'training' && seg[1] === 'preview' && req.method === 'POST') {
     // what WOULD be created, without creating it: the editor shows this before spending a GPU
     const body = await readJson(req)

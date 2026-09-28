@@ -335,3 +335,113 @@ export function readStatus(obj) {
     via: 'jobset',
   }
 }
+
+/*
+ * ------------------------------------------------------------------------------------------------
+ * ACTUALLY CREATING ONE.
+ *
+ * Everything above this line builds a manifest and shows it. Nothing submitted it, so the panel's
+ * buttons said "Show what would run" and the toast said "not yet created" — an honest label on a
+ * feature that did not exist. This is the half that does.
+ *
+ * The splats lane's handoff decided the shape, and two of its points are load-bearing here:
+ *
+ *   THE WORKER COUNT IS SET FROM FREE GPUS, ASKED OF THE SCHEDULER. Not from the footage, and
+ *   never by grepping pod names — "I got this wrong; Rich was right". A worker that finds an empty
+ *   queue exits and one that starts early waits, so over-provisioning costs an idle pod rather
+ *   than a wrong answer. That is the property that makes this safe to schedule at all.
+ *
+ *   A JOB RUNNING STALE CODE DOES NOT FAIL. `/workspace/gaussworks` on the PVC is a copy with no
+ *   `.git`, the CUDA images ship no `git`, so a pull fails silently and the job "succeeds" with a
+ *   plausible wrong number. `assert-code.sh <sha>` goes FIRST in every job. The editor records the
+ *   sha it asked for so a result can be traced to code.
+ */
+
+/** Free GPUs, by asking the scheduler: allocatable minus what Running and Pending pods request. */
+export async function freeGpus(k8s, { resource = 'nvidia.com/gpu' } = {}) {
+  if (!k8s?.usable?.()) return { free: 0, total: 0, why: 'not running in a cluster' }
+  const num = (v) => (v == null ? 0 : Number(String(v).replace(/[^0-9.]/g, '')) || 0)
+  const nodes = await k8s.raw('GET', '/api/v1/nodes')
+  const total = (nodes.items ?? []).reduce((n, node) => n + num(node.status?.allocatable?.[resource]), 0)
+  // EVERY namespace: a GPU held by flux or recon is not free just because it is not ours.
+  const pods = await k8s.raw('GET', '/api/v1/pods?fieldSelector=status.phase!=Succeeded,status.phase!=Failed')
+  let used = 0
+  for (const p of pods.items ?? []) {
+    for (const c of [...(p.spec?.containers ?? []), ...(p.spec?.initContainers ?? [])]) {
+      used += num(c.resources?.limits?.[resource] ?? c.resources?.requests?.[resource])
+    }
+  }
+  return { free: Math.max(0, total - used), total, used }
+}
+
+/** Where a run's object lives, whichever kind it is. */
+function pathFor(via, apiVersion, namespace, name = '') {
+  const base = via === 'training'
+    ? `/apis/${apiVersion}/namespaces/${namespace}/trainingdeployments`
+    : `/apis/jobset.x-k8s.io/v1alpha2/namespaces/${namespace}/jobsets`
+  return name ? `${base}/${encodeURIComponent(name)}` : base
+}
+
+/**
+ * Submit a run.
+ *
+ * `dryRun` uses the API server's own validation rather than ours — worth having, and worth knowing
+ * its limit: a server-side dry run of a TrainingDeployment says nothing about the JobSet derived
+ * from it afterwards, which is where the /data mount collision surfaced. It catches shape errors,
+ * not consequences.
+ */
+export async function createRun(run, k8s, { namespace = 'default', force = null, dryRun = false } = {}) {
+  const r = normalise(run)
+  const { via, kind, manifest, apiVersion } = await manifestFor(r, k8s, { namespace, force })
+  const gv = apiVersion ?? (await apiVersionFor(k8s))
+  const path = pathFor(via, gv, namespace) + (dryRun ? '?dryRun=All' : '')
+  const created = await k8s.raw('POST', path, { body: manifest })
+  return {
+    name: created?.metadata?.name ?? manifest.metadata.name,
+    kind, via, namespace, dryRun,
+    capture: r.capture,
+    world: r.world,
+    workers: r.workers,
+    createdAt: created?.metadata?.creationTimestamp ?? new Date().toISOString(),
+  }
+}
+
+/** One run's status, in the shape `readStatus` produces. */
+export async function runStatus(name, k8s, { namespace = 'default' } = {}) {
+  const p = await plan(k8s, { namespace })
+  if (!p.available) return { state: 'unknown', why: p.why }
+  const gv = p.apiVersion ?? (await apiVersionFor(k8s))
+  const obj = await k8s.raw('GET', pathFor(p.via, gv, namespace, name)).catch(() => null)
+  if (!obj) return { state: 'gone', name }
+  return { name, ...readStatus({ kind: p.kind, ...obj }) }
+}
+
+/** Every run this editor started, newest first. */
+export async function listRuns(k8s, { namespace = 'default' } = {}) {
+  const p = await plan(k8s, { namespace })
+  if (!p.available) return []
+  const gv = p.apiVersion ?? (await apiVersionFor(k8s))
+  const list = await k8s.raw('GET', pathFor(p.via, gv, namespace)).catch(() => ({ items: [] }))
+  return (list.items ?? [])
+    // `managed-by`, which is what the two builders above actually write. `created-by` was a
+    // plausible guess that would have returned an empty list forever — a filter matching nothing
+    // and an editor that has started nothing look exactly alike.
+    .filter((o) => o.metadata?.labels?.['app.kubernetes.io/managed-by'] === 'worldeditor')
+    .map((o) => ({
+      name: o.metadata.name,
+      createdAt: o.metadata.creationTimestamp,
+      capture: o.metadata?.labels?.['corridor.capture'] ?? null,
+      world: o.metadata?.labels?.['corridor.world'] ?? null,
+      ...readStatus({ kind: p.kind, ...o }),
+    }))
+    .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
+}
+
+/** Stop one. Background propagation so the pods go too — an orphan keeps the volume mounted. */
+export async function deleteRun(name, k8s, { namespace = 'default' } = {}) {
+  const p = await plan(k8s, { namespace })
+  if (!p.available) throw Object.assign(new Error(p.why), { status: 501 })
+  const gv = p.apiVersion ?? (await apiVersionFor(k8s))
+  await k8s.raw('DELETE', `${pathFor(p.via, gv, namespace, name)}?propagationPolicy=Background`)
+  return { deleted: name }
+}

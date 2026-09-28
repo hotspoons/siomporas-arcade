@@ -18,10 +18,10 @@
 // name interleaves recordings, silently. The server carries an `order` and says so; nothing here
 // sorts anything.
 
-import { button, el, toast } from '../ui/shell'
+import { button, confirm, el, toast } from '../ui/shell'
 import { bodyOf, empty, group, readout, select, textField } from '../ui/controls'
 import { icon } from '../ui/icons'
-import { api, type Capture, type CaptureManifest } from './api'
+import { api, type Capture, type CaptureManifest, type TrainingRun } from './api'
 
 const hint = (text: string, warn = false) => {
   const p = el('div', `panel-hint${warn ? ' warn' : ''}`)
@@ -53,6 +53,8 @@ export class SplatsPanel {
   private sending: Sending[] = []
   private chunkBytes = 32 * 2 ** 20
   private plan: { via: string; kind: string | null; available: boolean; featured?: boolean; why?: string } | null = null
+  private preview: { kind: string; yaml: string } | null = null
+  private runs: TrainingRun[] = []
   private workers = 0
   private abort: AbortController | null = null
 
@@ -62,10 +64,16 @@ export class SplatsPanel {
 
   async load() {
     try {
-      const [cs, limits, plan] = await Promise.all([api.captures(), api.uploadLimits().catch(() => null), api.trainingPlan().catch(() => null)])
+      const [cs, limits, plan, runs] = await Promise.all([
+        api.captures(),
+        api.uploadLimits().catch(() => null),
+        api.trainingPlan().catch(() => null),
+        api.trainingRuns().then((r) => r.runs).catch(() => []),
+      ])
       this.captures = cs.captures
       if (limits) this.chunkBytes = limits.chunkBytes
       this.plan = plan
+      this.runs = runs
     } catch (e) {
       toast(`captures: ${(e as Error).message}`, 'warn', 5000)
     }
@@ -143,23 +151,57 @@ export class SplatsPanel {
     }
   }
 
-  private async startRun(as?: string) {
+  /** Show the object before spending hours of several GPUs on it. */
+  private async previewRun(as?: string) {
     const cap = this.open?.capture
     if (!cap) return
     try {
       const r = await api.trainingPreview({ capture: cap.id, world: cap.world, workers: this.workers }, as)
-      const yaml = JSON.stringify(r.manifest, null, 1)
-      // SHOW BEFORE SPENDING. A splat run is hours of several GPUs; a person should see the object
-      // that is about to be created, which is also the only way the "featured wrapper" is a
-      // showcase rather than a claim.
-      toast(`${r.kind} ready — ${yaml.length} bytes of manifest, not yet created`, 'ok', 5000)
-      const pre = el('pre', 'manifest')
-      pre.textContent = yaml.slice(0, 4000)
-      const host = this.o.host
-      host.append(group('What would be created'), pre)
+      this.preview = { kind: r.kind, yaml: JSON.stringify(r.manifest, null, 1) }
+      this.render()
     } catch (e) {
       toast((e as Error).message, 'danger', 7000)
     }
+  }
+
+  /**
+   * Actually start it.
+   *
+   * This is what the buttons used to only pretend to do — they showed a manifest and toasted
+   * "not yet created", which was an honest label on a feature that did not exist.
+   *
+   * THE WORKER COUNT COMES FROM FREE GPUS, asked of the scheduler. Not from the length of the
+   * footage, and never by counting pods by name. A worker that finds an empty queue exits and one
+   * that starts before the chunks exist waits, so over-provisioning costs an idle pod rather than
+   * a wrong answer — which is the property that makes this safe to schedule at all. Measured on
+   * this cluster while writing it: 8 allocatable, 8 in use by flux, recon, a qwen server and the
+   * splats lane's own pose job. Free is a real number and it is often zero.
+   */
+  private async start() {
+    const cap = this.open?.capture
+    if (!cap) return
+    const gpus = await api.trainingGpus().catch(() => ({ free: 0, total: 0, why: 'could not ask the scheduler' }))
+    const workers = Math.max(0, Math.min(this.workers, Math.max(0, gpus.free - 1)))
+    const yes = await confirm({
+      title: `Start a splat run on ${cap.id}?`,
+      message: workers === this.workers
+        ? `A leader and ${workers} worker${workers === 1 ? '' : 's'}. ${gpus.free} of ${gpus.total} GPUs are free.`
+        : `Only ${gpus.free} of ${gpus.total} GPUs are free, so this will run a leader and ${workers} worker${workers === 1 ? '' : 's'} rather than ${this.workers}. Extra workers would sit idle, not fail — but they would hold GPUs.`,
+      ok: 'Start it',
+    })
+    if (!yes) return
+    try {
+      const { run } = await api.startTraining({ capture: cap.id, world: cap.world, workers })
+      toast(`${run.kind} ${run.name} started`, 'ok', 6000)
+      await this.loadRuns()
+      this.render()
+    } catch (e) {
+      toast(`could not start: ${(e as Error).message}`, 'danger', 9000)
+    }
+  }
+
+  private async loadRuns() {
+    this.runs = await api.trainingRuns().then((r) => r.runs).catch(() => [])
   }
 
   render() {
@@ -260,9 +302,45 @@ export class SplatsPanel {
     tb.append(hint('0 workers is a complete run on one pod. More is a leader plus that many, and the count follows free GPUs rather than the footage.'))
     if (m.pending) tb.append(hint(`${m.pending} chapter(s) are still uploading — a run started now would train on part of the footage.`, true))
     tb.append(
-      button({ label: 'Show what would run', icon: 'eye', onClick: () => void this.startRun() }),
-      button({ label: 'As a plain JobSet', icon: 'eye', variant: 'ghost', onClick: () => void this.startRun('jobset') }),
+      button({ label: 'Start run', icon: 'play', variant: 'primary', onClick: () => void this.start() }),
+      button({ label: 'Show what would run', icon: 'eye', onClick: () => void this.previewRun() }),
+      button({ label: 'As a plain JobSet', icon: 'eye', variant: 'ghost', onClick: () => void this.previewRun('jobset') }),
     )
     host.append(train)
+
+    /* The manifest, when it has been asked for. Inside render() rather than appended from the
+       click handler: appending from outside meant repeated clicks stacked duplicate blocks and
+       the next render silently discarded them. */
+    if (this.preview) {
+      const g = group(`What would be created — ${this.preview.kind}`, { collapsed: false })
+      const pre = el('pre', 'manifest')
+      pre.textContent = this.preview.yaml
+      bodyOf(g).append(pre)
+      host.append(g)
+    }
+
+    /* Runs this editor has started. */
+    const runs = group('Runs')
+    const rb = bodyOf(runs)
+    if (!this.runs.length) rb.append(empty('none started from here'))
+    for (const r of this.runs) {
+      const row = el('div', 'run-row')
+      row.append(
+        el('span', `chip state-${r.state ?? 'unknown'}`, r.state ?? 'unknown'),
+        el('span', 'run-title', r.name),
+        el('span', 'run-meta', [r.capture, r.phase].filter(Boolean).join(' · ')),
+      )
+      row.append(button({
+        icon: 'stop', variant: 'ghost', title: `stop ${r.name}`,
+        onClick: async () => {
+          if (!(await confirm({ title: `Stop ${r.name}?`, message: 'The pods go with it. Work already written to the volume stays.', ok: 'Stop it', danger: true }))) return
+          await api.stopTraining(r.name).catch((e) => toast((e as Error).message, 'danger'))
+          await this.loadRuns()
+          this.render()
+        },
+      }))
+      rb.append(row)
+    }
+    host.append(runs)
   }
 }

@@ -268,6 +268,20 @@ export interface CatalogItem {
   spec?: { id: string; roster: string; chroma: string; glassKey: string }
 }
 
+export interface TrainingRun {
+  name: string
+  kind?: string
+  via?: string
+  capture?: string | null
+  world?: string | null
+  workers?: number
+  createdAt?: string
+  state?: string
+  phase?: string | null
+  message?: string | null
+  steps?: { step: string; ok: boolean; why: string | null }[]
+}
+
 export const api = {
   config: () => call<Config>('/api/config'),
   ready: () => call<Ready>('/api/ready'),
@@ -419,6 +433,13 @@ export const api = {
   trainingPlan: () => call<{ via: string; kind: string | null; available: boolean; featured?: boolean; why?: string }>('/api/training/plan'),
   trainingPreview: (body: Record<string, unknown>, as?: string) =>
     call<{ via: string; kind: string; manifest: unknown }>(`/api/training/preview${as ? `?as=${as}` : ''}`, { method: 'POST', body: JSON.stringify(body) }),
+  /** Free GPUs, asked of the scheduler. The worker count is a function of this, not of the footage. */
+  trainingGpus: () => call<{ free: number; total: number; used?: number; why?: string }>('/api/training/gpus'),
+  startTraining: (body: Record<string, unknown>) =>
+    call<{ run: TrainingRun }>('/api/training/runs', { method: 'POST', body: JSON.stringify(body) }),
+  trainingRuns: () => call<{ runs: TrainingRun[] }>('/api/training/runs'),
+  stopTraining: (name: string) =>
+    call<{ deleted: string }>(`/api/training/runs/${encodeURIComponent(name)}`, { method: 'DELETE' }),
 
   /* ---- which inference this pod can reach, and how it found it ---- */
   models: (live = false) => call<{ models: Record<string, ModelTarget> }>(`/api/models${live ? '?live=1' : ''}`),

@@ -18,9 +18,19 @@
 // from the view's own provenance rather than from the caller, who is a person clicking a picture.
 
 import { button, el, toast } from '../ui/shell'
-import { bodyOf, empty, group, readout, select, textField } from '../ui/controls'
+import { bodyOf, empty, group, readout, select, textArea, textField } from '../ui/controls'
 import { icon } from '../ui/icons'
 import { api, type AssetJob, type Recipe, type SpecSummary } from './api'
+
+/**
+ * The backdrops and the camera angles the recipe knows.
+ *
+ * Kept short deliberately: `CHROMA_SAYS` in tools/assetlib/style.mjs has two entries and `VIEWS`
+ * has the angles flux will actually honour. A free-text field here would offer a person a fifth
+ * backdrop that the prompt builder has no words for.
+ */
+const CHROMA = ['green', 'magenta']
+const VIEWS = ['front-three-quarter', 'rear-three-quarter', 'side', 'front', 'rear']
 
 const hint = (text: string, warn = false) => {
   const p = el('div', `panel-hint${warn ? ' warn' : ''}`)
@@ -42,6 +52,14 @@ export class AssetsPanel {
   private count = 0
   private klass = ''
   private spec: Recipe | null = null
+  /**
+   * What has been changed by hand, over the recipe.
+   *
+   * Separate from `spec` so "Back to the recipe" is emptying an object rather than a re-fetch that
+   * has to guess which fields were touched — and so a rebuild can refresh the prompt while
+   * keeping a hand-edited one.
+   */
+  private over: { chroma?: string; glassKey?: string; view?: string; prompt?: string; negative?: string } = {}
   private views: { file: string; seed: number; seconds: number }[] = []
   private chosen: string | null = null
   private chosenSeed: number | null = null
@@ -75,6 +93,7 @@ export class AssetsPanel {
 
   private async open(id: string) {
     this.spec = null
+    this.over = {} // another spec's hand edits are not this one's
     this.views = []
     this.chosen = null
     this.chosenSeed = null
@@ -87,11 +106,40 @@ export class AssetsPanel {
     this.render()
   }
 
+  /**
+   * Re-derive the recipe after a field changed, and refresh the prompt with it.
+   *
+   * The prompt is BUILT from the backdrop, the view and the glass key, so changing one of those
+   * has to be visible in the prompt or the panel is lying about what will be sent. A prompt that
+   * was edited by hand is kept: overwriting somebody's edit because they then changed the
+   * backdrop is the worse of the two surprises.
+   */
+  private async rebuild() {
+    const s = this.spec
+    if (!s) return
+    const handEdited = this.over.prompt !== undefined
+    try {
+      const fresh = await api.recipe(s.id, this.over.view)
+      this.spec = fresh
+      if (!handEdited) delete this.over.prompt
+      if (this.over.negative === undefined) delete this.over.negative
+    } catch (e) {
+      toast(`could not rebuild the recipe: ${(e as Error).message}`, 'warn', 5000)
+    }
+    this.render()
+  }
+
   private async draw() {
     const s = this.spec
     if (!s) return
     try {
-      const r = await api.candidates(s.id, { count: this.drawCount, steps: 24, seed: Math.floor(Math.random() * 100000) })
+      // whatever was changed by hand goes with it; the rest the service takes from the recipe
+      const r = await api.candidates(s.id, {
+        count: this.drawCount,
+        steps: 24,
+        seed: Math.floor(Math.random() * 100000),
+        ...this.over,
+      })
       this.job = { job: r.job.job, lane: 'image', label: `candidates ${s.id}`, state: 'running' }
       this.render()
       this.watch()
@@ -199,7 +247,7 @@ export class AssetsPanel {
     }
 
     if (!this.spec) {
-      host.append(hint(`${this.count} specs. Pick one to see what it will be drawn as.`))
+      host.append(hint(`${this.count} specs.`))
       const pick = group('Roster')
       const pb = bodyOf(pick)
       pb.append(
@@ -230,17 +278,67 @@ export class AssetsPanel {
       button({ label: 'Back to the roster', icon: 'arrow-left', variant: 'ghost', onClick: () => { this.spec = null; this.stop(); this.render() } }),
     )
 
-    /* what it will be drawn as, and why */
+    /*
+     * WHAT IT WILL BE DRAWN AS, AND YOU CAN CHANGE IT.
+     *
+     * This used to be four readouts — including `prompt  1640 chars`, which is the one thing
+     * somebody actually wants to correct and the one thing that could not be read (Rich,
+     * 2026-09-28: "how am I supposed to see or edit the prompt? Or any of the fields"). The
+     * recipe already sends the whole prompt; the panel was throwing it away and counting it.
+     *
+     * The recipe's reasons are attached to the field they are about, rather than listed
+     * underneath as statements: `why.glassKey` matters when you are changing the glass key and is
+     * noise otherwise.
+     */
     const how = group(s.id, { note: s.subject ?? undefined })
     const hb = bodyOf(how)
-    hb.append(readout('paint', s.paint ?? '—'), readout('backdrop', s.chroma), readout('glass key', s.glassKey), readout('prompt', `${s.chars} chars${s.over ? ' — over budget' : ''}`))
-    // WHY, not just what. These were expensive to learn and an unexplained choice gets overridden.
-    for (const [k, v] of Object.entries(s.why ?? {})) hb.append(hint(`${k}: ${v}`))
-    if (s.over) hb.append(hint('this prompt is over the budget the recipe sets — the tail may be ignored', true))
+    hb.append(readout('paint', s.paint ?? '—'))
+    hb.append(select({
+      label: 'backdrop',
+      value: this.over.chroma ?? s.chroma,
+      options: CHROMA.map((c) => ({ value: c, label: c })),
+      note: s.why?.chroma,
+      onChange: (v) => { this.over.chroma = v; void this.rebuild() },
+    }))
+    hb.append(select({
+      label: 'view',
+      value: this.over.view ?? s.view ?? VIEWS[0],
+      options: VIEWS.map((v) => ({ value: v, label: v.replace(/-/g, ' ') })),
+      onChange: (v) => { this.over.view = v; void this.rebuild() },
+    }))
+    hb.append(textField({
+      label: 'glass key',
+      value: this.over.glassKey ?? s.glassKey,
+      onChange: (v) => { this.over.glassKey = v.trim(); void this.rebuild() },
+    }))
+    const chars = () => (this.over.prompt ?? s.prompt).length
+    hb.append(textArea({
+      label: `prompt — ${chars()} chars${s.over ? ' (over the recipe\u2019s budget; the tail may be ignored)' : ''}`,
+      value: this.over.prompt ?? s.prompt,
+      mono: true,
+      rows: 10,
+      onChange: (v) => { this.over.prompt = v; this.render() },
+    }))
+    hb.append(textArea({
+      label: 'negative',
+      value: this.over.negative ?? s.negative,
+      note: 'prohibitions belong here as nouns; asking the prompt not to draw something draws it',
+      mono: true,
+      rows: 3,
+      onChange: (v) => { this.over.negative = v },
+    }))
+    if (Object.keys(this.over).length) {
+      hb.append(button({
+        label: 'Back to the recipe',
+        icon: 'arrow-uturn-left',
+        variant: 'ghost',
+        onClick: () => { this.over = {}; void this.rebuild() },
+      }))
+    }
     host.append(how)
 
     /* draw some */
-    const draw = group('Candidates', { note: 'An image is about ten seconds. A mesh is thirty to forty on one GPU that serialises — so choose a picture first.' })
+    const draw = group('Candidates')
     const db = bodyOf(draw)
     db.append(
       textField({
@@ -283,7 +381,7 @@ export class AssetsPanel {
       const make = group('Make the model')
       const mb = bodyOf(make)
       mb.append(readout('chosen', this.chosen), readout('seed', String(this.chosenSeed ?? '—')))
-      mb.append(hint('The seed is pinned, so this asset can be made again. Reconstruction is the expensive half and runs one at a time.'))
+      mb.append(hint('The seed is pinned, so this can be drawn again.'))
       mb.append(
         button({
           label: this.mesh && this.mesh.state === 'running' ? 'Reconstructing…' : 'Reconstruct',

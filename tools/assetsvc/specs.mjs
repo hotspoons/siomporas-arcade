@@ -69,6 +69,27 @@ export async function spec(id) {
  * glass because magenta shares red with its paint, or the choice looks arbitrary and the first
  * thing anybody does is override it.
  */
+/**
+ * Which prompt and negative to draw with: the recipe's, or the ones somebody edited.
+ *
+ * A HAND-WRITTEN PROMPT WINS. The recipe builds a good one from the spec and there is no
+ * substitute for being able to change it — every asset that came out nearly right came out nearly
+ * right for a reason a person could see and the recipe could not.
+ *
+ * An empty prompt is a MISTAKE and falls back: asking flux for '' draws something arbitrary and
+ * charges for it. An empty NEGATIVE is a real choice, because "draw whatever you like" is a thing
+ * to want and is not the same as saying nothing. Neither is coerced: these arrive from a browser
+ * over JSON, and `String(null)` would prompt the model with "null".
+ *
+ * `edited` travels with them because the catalog entry is what says how an asset was made.
+ */
+export function promptFor(recipe, body = {}) {
+  const prompt = typeof body.prompt === 'string' && body.prompt.trim() ? body.prompt : recipe.prompt
+  const negative = typeof body.negative === 'string' ? body.negative : recipe.negative
+  return { prompt, negative, edited: prompt !== recipe.prompt || negative !== recipe.negative }
+}
+
+
 export async function recipeFor(id, opts = {}) {
   const s = await spec(id)
   if (!s) return null

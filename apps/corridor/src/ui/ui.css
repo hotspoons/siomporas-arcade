@@ -367,6 +367,22 @@ input.range::-moz-range-thumb { width: 13px; height: 13px; border: 0; border-rad
 .field.text .input:focus { border-color: var(--accent); }
 .input.wide { width: auto; flex: 1; min-width: 0; text-align: left; font-family: var(--font-body); }
 
+/* a multi-line field: the label above, the box filling the width. A prompt is 1,600 characters and
+   does not belong beside its own label. */
+.field.area { display: flex; flex-direction: column; align-items: stretch; gap: var(--s1); }
+.field.area .input.area {
+  width: auto; text-align: left;
+  font-family: var(--font-body); line-height: 1.45;
+  resize: vertical; overflow-y: auto;
+}
+.field.area .input.area.mono { font-family: var(--num); font-size: var(--text-xs); }
+.field.area .input.area:focus { border-color: var(--accent); outline: none; }
+.field-note { font-size: var(--text-xs); color: var(--ink-3); }
+/* a select that carries a note is no longer one row: label and control on the first line, the
+   note under both */
+.field.select.with-note { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: var(--s1) var(--s3); }
+.field.select.with-note .field-note { grid-column: 1 / -1; }
+
 /* segmented */
 .segmented { display: inline-flex; padding: 2px; background: var(--bg-2); border: 1px solid var(--line-1); border-radius: var(--r2); }
 .seg {
@@ -382,6 +398,11 @@ input.range::-moz-range-thumb { width: 13px; height: 13px; border: 0; border-rad
 
 /* readout / empty */
 .readout { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s4); padding: 3px 0; }
+/* THE LABEL KEEPS ITS WORD. A long value squeezed the label until `paint` broke as "pain / t" —
+   the same shape as `Spine` shattering into five lines at a 200 px panel. The label never shrinks
+   and never wraps; the value takes what is left and wraps inside it. */
+.readout > .field-label { flex: 0 0 auto; white-space: nowrap; }
+.readout > .field-value { flex: 1 1 auto; min-width: 0; text-align: right; overflow-wrap: break-word; }
 .readout + .readout { border-top: 1px solid var(--line-1); }
 .empty { margin: 0; padding: var(--s5) 0; text-align: center; font-size: var(--text-sm); color: var(--ink-3); }
 

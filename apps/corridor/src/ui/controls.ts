@@ -169,6 +169,8 @@ export function select<T extends string>(o: {
   value: T
   options: { value: T; label: string }[]
   onChange: (v: T) => void
+  /** a line under it, for what the recipe said about this choice */
+  note?: string
 }): HTMLElement {
   const wrap = el('label', 'field select')
   if (o.label) wrap.append(el('span', 'field-label', o.label))
@@ -183,6 +185,11 @@ export function select<T extends string>(o: {
   const box = el('div', 'select-box')
   box.append(s, icon('chevron-down', 14))
   wrap.append(box)
+  // the note goes UNDER, which means the field stops being one flex row
+  if (o.note) {
+    wrap.classList.add('with-note')
+    wrap.append(el('span', 'field-note', o.note))
+  }
   return wrap
 }
 
@@ -247,6 +254,45 @@ export function textField(o: {
   if (o.placeholder) i.placeholder = o.placeholder
   i.onchange = () => o.onChange(i.value)
   wrap.append(i)
+  return wrap
+}
+
+/**
+ * A multi-line field, for the text that is too long to be a line.
+ *
+ * A prompt is 1,600 characters. Shown as `1640 chars` it cannot be read, let alone corrected — and
+ * a recipe's prompt is exactly the thing somebody wants to correct (Rich, 2026-09-28: "how am I
+ * supposed to see or edit the prompt?"). It grows to fit what is in it, up to a cap, because a
+ * four-line box with a scrollbar inside a panel that also scrolls is two scrollbars for one text.
+ */
+export function textArea(o: {
+  label: string
+  value: string
+  placeholder?: string
+  note?: string
+  rows?: number
+  mono?: boolean
+  onChange: (v: string) => void
+  onInput?: (v: string) => void
+}): HTMLElement {
+  const wrap = el('label', 'field area')
+  wrap.append(el('span', 'field-label', o.label))
+  const t = el('textarea', `input area${o.mono ? ' mono' : ''}`)
+  t.value = o.value
+  t.rows = o.rows ?? 6
+  t.spellcheck = false
+  if (o.placeholder) t.placeholder = o.placeholder
+  const grow = () => {
+    t.style.height = 'auto'
+    t.style.height = `${Math.min(420, t.scrollHeight + 2)}px`
+  }
+  t.oninput = () => { grow(); o.onInput?.(t.value) }
+  t.onchange = () => o.onChange(t.value)
+  // the editor's own shortcuts must not fire while somebody is typing into this
+  t.onkeydown = (e) => e.stopPropagation()
+  wrap.append(t)
+  if (o.note) wrap.append(el('span', 'field-note', o.note))
+  requestAnimationFrame(grow)
   return wrap
 }
 

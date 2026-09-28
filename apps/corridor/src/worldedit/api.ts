@@ -250,6 +250,8 @@ export interface SpecSummary {
 }
 
 export interface Recipe extends SpecSummary {
+  /** which camera angle the prompt was built for */
+  view?: string
   class: string | null
   chroma: string
   glassKey: string
@@ -485,8 +487,10 @@ export const api = {
 
   /* ---- the asset pipeline, through the assetsvc proxy ---- */
   specs: () => call<{ rosters: string[]; count: number; classes: Record<string, SpecSummary[]> }>('/assetsvc/specs'),
-  recipe: (id: string) => call<Recipe>(`/assetsvc/specs/${id}`),
-  candidates: (id: string, body: { count?: number; steps?: number; seed?: number }) =>
+  /** `view` rebuilds the prompt for another camera angle */
+  recipe: (id: string, view?: string) => call<Recipe>(`/assetsvc/specs/${id}${view ? `?view=${encodeURIComponent(view)}` : ''}`),
+  /** `prompt`, `negative`, `chroma`, `glassKey` and `view` OVERRIDE the recipe's own */
+  candidates: (id: string, body: { count?: number; steps?: number; seed?: number; prompt?: string; negative?: string; chroma?: string; glassKey?: string; view?: string }) =>
     call<{ job: { job: string }; recipe: Recipe }>(`/assetsvc/specs/${id}/candidates`, { method: 'POST', body: JSON.stringify(body) }),
   assetJobs: () => call<{ jobs: AssetJob[] }>('/assetsvc/jobs'),
   chooseView: (id: string, view: string) => call<{ item: CatalogItem }>(`/assetsvc/catalog/${id}/choose`, { method: 'POST', body: JSON.stringify({ view }) }),

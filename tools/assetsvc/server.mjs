@@ -31,7 +31,7 @@ import { buildRegistry } from './adapters.mjs'
 import { Catalog } from './catalog.mjs'
 import { Jobs } from './jobs.mjs'
 import { S3 } from './s3.mjs'
-import { recipeFor, roster } from './specs.mjs'
+import { promptFor, recipeFor, roster } from './specs.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const REPO = path.resolve(HERE, '../..')
@@ -264,18 +264,31 @@ const server = http.createServer(async (req, res) => {
       const rec = await recipeFor(id, { view: body.view, chroma: body.chroma, glassKey: body.glassKey })
       if (!rec) return json(res, 404, { error: `no spec ${id}` })
       const n = Math.min(8, Math.max(1, Number(body.count ?? 4)))
+      /*
+       * A HAND-WRITTEN PROMPT WINS, and what is RECORDED is the one that was used.
+       *
+       * The recipe builds a good prompt from the spec and there is no substitute for being able
+       * to change it — every asset that came out nearly right came out nearly right for a reason
+       * somebody could see and the recipe could not (Rich, 2026-09-28: "how am I supposed to see
+       * or edit the prompt?"). The editor sends one when it has been edited.
+       *
+       * Recording the edited one matters as much: the catalog entry is what says how this asset
+       * was made, and an entry claiming the recipe's prompt for an image drawn from another is a
+       * reproduction that produces a different car.
+       */
+      const { prompt, negative, edited } = promptFor(rec, body)
       // seeds are EXPLICIT and reported, so the one a person picks can be pinned
       const seeds = body.seeds?.length ? body.seeds.slice(0, n) : Array.from({ length: n }, (_, i) => Number(body.seed ?? 1) + i)
-      await catalog.put(id, { subject: rec.subject ?? id, kind: rec.class ?? 'prop', prompt: rec.prompt, negative: rec.negative, spec: { id: rec.id, roster: rec.roster, chroma: rec.chroma, glassKey: rec.glassKey } })
+      await catalog.put(id, { subject: rec.subject ?? id, kind: rec.class ?? 'prop', prompt, negative, spec: { id: rec.id, roster: rec.roster, chroma: rec.chroma, glassKey: rec.glassKey, view: body.view ?? null, edited } })
       const job = jobs.start('image', `candidates ${id} x${n}`, async (report) => {
         const drawn = []
         for (const [i, seed] of seeds.entries()) {
           report({ state: 'generating', drawn: i, of: n, seed })
-          const out = await registry.image.generate({ prompt: rec.prompt, negative: body.negative ?? rec.negative, size: body.size, steps: body.steps, seed, trueCfg: body.trueCfg })
+          const out = await registry.image.generate({ prompt, negative, size: body.size, steps: body.steps, seed, trueCfg: body.trueCfg })
           const file = await catalog.addView(id, out.png, { model: registry.image.id, seconds: out.seconds, seed, spec: rec.id, ...out.meta })
           drawn.push({ file: `views/${file}`, seed, seconds: out.seconds })
         }
-        return { id, drawn, recipe: { chroma: rec.chroma, glassKey: rec.glassKey, why: rec.why } }
+        return { id, drawn, recipe: { chroma: rec.chroma, glassKey: rec.glassKey, view: body.view ?? null, edited, why: rec.why } }
       })
       return json(res, 202, { job, recipe: rec })
     }

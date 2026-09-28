@@ -79,6 +79,20 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
   return body as T
 }
 
+/** One tileable surface: three maps, and the number that makes them the right size. */
+export interface Material {
+  id: string
+  category: string
+  name: string
+  /** how many metres one tile of these maps covers. The whole game. */
+  metres_per_tile: number
+  albedo: string
+  normal?: string
+  roughness?: string
+  seed?: number
+  prompt?: string
+}
+
 export const assetsvc = {
   url: ASSETSVC,
 
@@ -112,6 +126,15 @@ export const assetsvc = {
 
   /** A URL the browser can put in an <img> or hand to GLTFLoader. */
   fileUrl: (id: string, rel: string) => `${ASSETSVC}/catalog/${encodeURIComponent(id)}/file/${rel.split('/').map(encodeURIComponent).join('/')}`,
+
+  /* ---- materials: the tileable surfaces half of the library ---------------------------------
+   *
+   * A different shape from a prop, and the difference is one number. A prop is a mesh with a size;
+   * a material is three maps and `metres_per_tile`, which is what turns a photograph of bricks
+   * into a wall of the right size — and is the field a generated texture gets wrong. */
+  materials: () => call<{ materials: Material[] }>('/materials'),
+  materialUrl: (id: string, rel: string) =>
+    `${ASSETSVC}/materials/${encodeURIComponent(id)}/file/${rel.split('/').pop()!.split('/').map(encodeURIComponent).join('/')}`,
 
   /**
    * Poll a job to completion.

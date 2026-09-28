@@ -526,3 +526,19 @@ body.chrome-off #chrome-restore { display: block; }
   color: var(--ink-3); font-size: var(--text-sm);
   background: rgb(0 0 0 / 35%);
 }
+
+/* the materials browser */
+.material-stage { position: relative; margin-bottom: var(--s3); }
+.material-caption { padding: var(--s2) 0 0; color: var(--ink-2); font-size: var(--text-sm); }
+.material-list { display: grid; gap: var(--s3); }
+.material-row {
+  display: flex; align-items: center; gap: var(--s3); width: 100%;
+  padding: var(--s2); border: 1px solid transparent; border-radius: var(--r1);
+  background: none; color: var(--ink-2); font: inherit; text-align: left; cursor: pointer;
+}
+.material-row:hover { background: var(--bg-2); color: var(--ink-1); }
+.material-row.on { border-color: var(--accent); color: var(--ink-1); }
+.material-swatch { width: 44px; height: 44px; object-fit: cover; border-radius: var(--r1); flex: none; background: var(--bg-0); }
+.material-text { display: grid; min-width: 0; }
+.material-name { font-size: var(--text-sm); }
+.material-sub { font-size: var(--text-xs); color: var(--ink-3); font-family: var(--mono, monospace); }

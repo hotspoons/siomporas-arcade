@@ -291,6 +291,37 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
+    /*
+     * MATERIALS: the tileable surfaces half of the library.
+     *
+     * A second kind of asset with a different shape. A prop is a mesh; a material is three maps
+     * and one number — `metres_per_tile`, which is the whole game: it is what turns a picture of
+     * bricks into a wall of the right size, and it is the field a generated texture gets wrong.
+     *
+     * Served from `<data>/surfaces/`, alongside the catalog rather than inside it, because a
+     * material belongs to no item — several buildings share one brick.
+     */
+    if (seg[0] === 'materials') {
+      const dir = path.join(DATA, 'surfaces')
+      if (seg.length === 1) {
+        const f = path.join(dir, 'materials.json')
+        const raw = await readFile(f, 'utf8').catch(() => null)
+        if (!raw) return json(res, 200, { materials: [] })
+        const doc = JSON.parse(raw)
+        return json(res, 200, { materials: doc.materials ?? doc })
+      }
+      // /materials/<id>/file/<name>
+      if (seg.length >= 4 && seg[2] === 'file') {
+        const id = seg[1]
+        if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(id)) return json(res, 400, { error: `bad material id ${JSON.stringify(id)}` })
+        const rel = seg.slice(3).map(decodeURIComponent).join('/')
+        // no traversal: a material's files are its own directory and nothing above it
+        if (rel.includes('..') || rel.startsWith('/')) return json(res, 400, { error: 'bad path' })
+        const buf = await readFile(path.join(dir, id, rel))
+        return send(res, 200, buf, TYPES[path.extname(rel).toLowerCase()] ?? 'application/octet-stream')
+      }
+    }
+
     if (seg[0] === 'sync' && req.method === 'POST') {
       if (!s3.configured) return json(res, 400, { error: 'S3 is not configured', s3: s3.describe() })
       if (seg[1] === 'push') return json(res, 200, await s3.pushDir(catalog.root, 'catalog/'))

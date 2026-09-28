@@ -12,7 +12,7 @@ import { Dialog, Tabs, ask, button, confirm, el, lightbox, toast, type Tab } fro
 import { icon } from './icons'
 import { bodyOf, empty, group, readout, textField, toggle } from './controls'
 import { MeshView } from './meshview'
-import { assetsvc, type AssetItem, type AssetJob, type ModelRoster } from '../assetsvc'
+import { assetsvc, type AssetItem, type AssetJob, type Material, type ModelRoster } from '../assetsvc'
 
 const STATE_LABEL: Record<AssetItem['state'], string> = {
   spec: 'described',
@@ -36,6 +36,7 @@ export class AssetCatalog {
   constructor() {
     const tabs: Tab[] = [
       { id: 'catalog', label: 'Catalog', icon: 'cube', build: (h) => this.buildCatalog(h) },
+      { id: 'materials', label: 'Materials', icon: 'swatch', build: (h) => void this.buildMaterials(h) },
       { id: 'service', label: 'Service', icon: 'beaker', build: (h) => void this.buildService(h) },
     ]
     this.tabs = new Tabs(tabs)
@@ -375,6 +376,81 @@ export class AssetCatalog {
     } catch (e) {
       toast(`save: ${(e as Error).message}`, 'danger')
     }
+  }
+
+  /**
+   * The materials browser: the other half of the library.
+   *
+   * Grouped by category, because that is how you look for one — you want a wall, not an id. The
+   * preview is a sample wall eight metres across so `metres_per_tile` is legible as a RATIO: at
+   * 2 m you count four courses across it, at 0.5 m sixteen. A texture whose tile size is wrong
+   * looks perfectly good on its own and absurd on a building, and that number is the one thing a
+   * generated surface reliably gets wrong.
+   */
+  private async buildMaterials(host: HTMLElement) {
+    host.replaceChildren()
+    let list: Material[] = []
+    try {
+      list = (await assetsvc.materials()).materials
+    } catch {
+      host.append(this.notConfigured())
+      return
+    }
+    if (!list.length) {
+      host.append(empty('No materials in this library.'))
+      return
+    }
+
+    const stage = el('div', 'material-stage')
+    this.mesh3d?.dispose()
+    const view = new MeshView({ spin: false })
+    this.mesh3d = view
+    ;(window as unknown as { __meshview?: MeshView }).__meshview = view
+    stage.append(view.root)
+    const caption = el('div', 'material-caption')
+    stage.append(caption)
+    view.start()
+
+    const show = (m: Material) => {
+      caption.textContent = `${m.name} · ${m.metres_per_tile} m tile · ${m.category.replace(/_/g, ' ')}`
+      void view.showMaterial({
+        metres_per_tile: m.metres_per_tile,
+        albedo: assetsvc.materialUrl(m.id, m.albedo),
+        normal: m.normal ? assetsvc.materialUrl(m.id, m.normal) : undefined,
+        roughness: m.roughness ? assetsvc.materialUrl(m.id, m.roughness) : undefined,
+      })
+      for (const n of host.querySelectorAll('.material-row')) {
+        n.classList.toggle('on', (n as HTMLElement).dataset.id === m.id)
+      }
+    }
+
+    const browser = el('div', 'material-list')
+    const byCategory = new Map<string, Material[]>()
+    for (const m of list) {
+      const k = m.category ?? 'other'
+      byCategory.set(k, [...(byCategory.get(k) ?? []), m])
+    }
+    for (const [cat, items] of [...byCategory].sort()) {
+      const g = group(`${cat.replace(/_/g, ' ')} (${items.length})`)
+      const b = bodyOf(g)
+      for (const m of items) {
+        const row = el('button', 'material-row')
+        row.dataset.id = m.id
+        const swatch = el('img', 'material-swatch')
+        swatch.src = assetsvc.materialUrl(m.id, m.albedo)
+        swatch.loading = 'lazy'
+        swatch.alt = ''
+        const text = el('div', 'material-text')
+        text.append(el('span', 'material-name', m.name), el('span', 'material-sub', `${m.metres_per_tile} m tile`))
+        row.append(swatch, text)
+        row.onclick = () => show(m)
+        b.append(row)
+      }
+      browser.append(g)
+    }
+
+    host.append(stage, browser)
+    show(list[0])
   }
 
   private async create() {

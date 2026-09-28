@@ -122,7 +122,37 @@ for (const id of ids) {
   imported += 1
 }
 
+/*
+ * THE SURFACES COME TOO.
+ *
+ * A material is the other kind of asset in this library: three maps and a `metres_per_tile`,
+ * shared between buildings rather than belonging to any item. They go beside the catalog, not
+ * inside it — `<data>/surfaces/` — which is also where the server looks.
+ */
+const SRC_SURF = path.join(FROM, 'surfaces')
+let materials = 0
+if (existsSync(SRC_SURF)) {
+  // TO is the catalog root, so the surfaces sit beside it rather than under it
+  const dstSurf = path.join(path.dirname(TO), 'surfaces')
+  if (!DRY) await mkdir(dstSurf, { recursive: true })
+  const manifest = await readFile(path.join(SRC_SURF, 'materials.json'), 'utf8').catch(() => null)
+  if (manifest) {
+    if (!DRY) await writeFile(path.join(dstSurf, 'materials.json'), manifest)
+    const docs = JSON.parse(manifest)
+    for (const m of docs.materials ?? docs) {
+      const src = path.join(SRC_SURF, m.id)
+      if (!existsSync(src)) { problems.push(`material ${m.id}: no directory`); continue }
+      if (!DRY) await mkdir(path.join(dstSurf, m.id), { recursive: true })
+      for (const f of await readdir(src)) await place(path.join(src, f), path.join(dstSurf, m.id, f))
+      materials += 1
+    }
+  } else {
+    problems.push('surfaces/materials.json is missing — no materials imported')
+  }
+}
+
 console.log(`${DRY ? '[dry run] ' : ''}${imported} items into ${TO}`)
+if (materials) console.log(`  ${materials} materials into ${path.join(path.dirname(TO), 'surfaces')}`)
 console.log(`  ${meshes} with a mesh, ${(bytes / 2 ** 30).toFixed(2)} GiB ${COPY ? 'copied' : 'symlinked'}`)
 if (skipped) console.log(`  ${skipped} skipped`)
 for (const p of problems.slice(0, 12)) console.log(`  - ${p}`)

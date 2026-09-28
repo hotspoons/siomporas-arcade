@@ -119,6 +119,7 @@ export class MeshView {
    * it. Looking only at `skeleton.bones` finds nothing on a vehicle and reports it unrigged.
    */
   private boneRoots: THREE.Object3D[] = []
+  private readonly textures = new THREE.TextureLoader()
 
   constructor(o: MeshViewOpts = {}) {
     this.spin = o.spin ?? true
@@ -309,6 +310,47 @@ export class MeshView {
       // the difference between "no mesh" and "a mesh we cannot read" is visible.
       this.say(`could not load the mesh — ${(e as Error).message}`)
     }
+  }
+
+  /**
+   * Show a tileable material on a sample wall.
+   *
+   * EIGHT METRES ACROSS, fixed, so the grid reads as metres and two materials can be compared by
+   * eye: at `metres_per_tile` 2 you see four courses across the wall, at 0.5 you see sixteen.
+   * That ratio IS the thing being judged — a texture whose tile size is wrong looks perfectly
+   * good on its own and absurd on a building.
+   *
+   * DoubleSide, and the spin is left to the caller: a single-sided plane on a spinning pivot is
+   * invisible for half of every turn, which looks exactly like a texture that failed to load.
+   */
+  async showMaterial(m: { metres_per_tile: number; albedo: string; normal?: string; roughness?: string }): Promise<void> {
+    this.clear()
+    this.say('loading…')
+    const WALL_M = 8
+    const repeat = WALL_M / Math.max(0.01, m.metres_per_tile)
+    const load = (url?: string) => new Promise<THREE.Texture | null>((resolve) => {
+      if (!url) return resolve(null)
+      this.textures.load(url, (t) => {
+        t.wrapS = t.wrapT = THREE.RepeatWrapping
+        t.repeat.set(repeat, repeat)
+        t.anisotropy = 8
+        resolve(t)
+      }, undefined, () => resolve(null))
+    })
+    const [map, normalMap, roughnessMap] = await Promise.all([load(m.albedo), load(m.normal), load(m.roughness)])
+    if (this.disposed) return
+    if (!map) { this.say('could not load the albedo map'); return }
+    map.colorSpace = THREE.SRGBColorSpace
+    const mat = new THREE.MeshStandardMaterial({ map, normalMap, roughnessMap, side: THREE.DoubleSide })
+    const wall = new THREE.Mesh(new THREE.PlaneGeometry(WALL_M, WALL_M), mat)
+    wall.position.y = WALL_M / 2
+    this.pivot.add(wall)
+    this.grid.scale.setScalar(WALL_M / 4)
+    this.camera.position.set(0, WALL_M * 0.5, WALL_M * 1.25)
+    this.controls.target.set(0, WALL_M / 2, 0)
+    this.controls.update()
+    this.size = new THREE.Vector3(WALL_M, WALL_M, 0)
+    this.say(null)
   }
 
   clear() {

@@ -277,6 +277,12 @@ export interface CatalogItem {
   chosen: string | null
   seed: number | null
   views?: string[]
+  /** bytes of mesh.glb / mesh.finished.glb, or null when there is none — derived, never stored */
+  mesh?: number | null
+  finished?: number | null
+  state?: 'spec' | 'drawn' | 'meshed' | 'finished'
+  /** every step that made this thing; the per-view seed lives here and nowhere else */
+  history?: { step?: string; file?: string; seed?: number; seconds?: number }[]
   spec?: { id: string; roster: string; chroma: string; glassKey: string }
 }
 
@@ -493,6 +499,8 @@ export const api = {
   candidates: (id: string, body: { count?: number; steps?: number; seed?: number; prompt?: string; negative?: string; chroma?: string; glassKey?: string; view?: string }) =>
     call<{ job: { job: string }; recipe: Recipe }>(`/assetsvc/specs/${id}/candidates`, { method: 'POST', body: JSON.stringify(body) }),
   assetJobs: () => call<{ jobs: AssetJob[] }>('/assetsvc/jobs'),
+  /** what has already been drawn and meshed for this id, from an earlier session or the import */
+  assetItem: (id: string) => call<CatalogItem>(`/assetsvc/catalog/${id}`),
   chooseView: (id: string, view: string) => call<{ item: CatalogItem }>(`/assetsvc/catalog/${id}/choose`, { method: 'POST', body: JSON.stringify({ view }) }),
   /** the expensive half: one GPU, serialised, thirty to forty seconds. Only after a human picked. */
   reconstruct: (id: string, body: { finish?: boolean } = {}) => call<AssetJob>(`/assetsvc/catalog/${id}/mesh`, { method: 'POST', body: JSON.stringify(body) }),

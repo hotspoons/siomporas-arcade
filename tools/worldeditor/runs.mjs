@@ -22,6 +22,8 @@ import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { createWriteStream, existsSync } from 'node:fs'
 import { open, stat } from 'node:fs/promises'
+import { bboxOf } from './geo.mjs'
+import { mirrorsFor } from './overpass.mjs'
 
 const now = () => new Date().toISOString()
 
@@ -76,6 +78,34 @@ export class Runs {
     if (opts.skip) args.push('--skip', opts.skip)
     if (opts.halfWidth) args.push('--half-width', String(opts.halfWidth))
     return this.#start({ kind: 'bake', slug, args, label: `bake ${slug}` })
+  }
+
+  /**
+   * The Overpass upstreams that can answer for this world, fences stripped.
+   *
+   * THE BAKE DOES NOT UNDERSTAND FENCES. `osm.py` splits `CORRIDOR_OVERPASS_URL` on commas and
+   * posts to the first entry, and a `#south/west/north/east` fragment is never sent on the wire —
+   * so handing it this service's whole fenced list sent a MARYLAND world to the EUROPE extract,
+   * which answered 200 with no elements and the bake raised "no ways for roads [] within 1219 m".
+   * Working mirror, correct query, silent empty.
+   *
+   * The fence logic stays in one place (overpass.mjs, where it is tested) and the Job is given a
+   * list it can use blindly. An empty result is not an error: it means nothing we run covers this
+   * place, and the bake's own public mirrors are the right answer — so the variable is left unset
+   * and `osm.py` falls through to them.
+   */
+  async #overpassFor(slug) {
+    if (!this.cfg.overpassUrl) return null
+    const world = await this.store.getWorld(slug).catch(() => null)
+    if (!world || !Number.isFinite(world.lat) || !Number.isFinite(world.lon)) {
+      // a world with no centre cannot be placed, so every mirror is a candidate
+      return this.cfg.overpassUrl.split(',').map((u) => u.split('#')[0].trim()).filter(Boolean).join(',') || null
+    }
+    // `radius_m` is a HALF-WIDTH (see worlds.mjs), so the square is the centre plus and minus it
+    const r = Number.isFinite(world.radius_m) ? world.radius_m : 1000
+    const bbox = bboxOf([{ lat: world.lat, lon: world.lon }], r)
+    const urls = mirrorsFor(this.cfg.overpassUrl, bbox)
+    return urls.length ? urls.join(',') : null
   }
 
   /** Mirror a baked world into the bucket. Needs the credentials Secret; see the chart. */
@@ -146,13 +176,14 @@ export class Runs {
    */
   async #startJob(run) {
     const name = `corridor-${run.kind}-${short(run.slug)}-${Date.now().toString(36)}`.slice(0, 60).replace(/-+$/, '')
+    const overpass = await this.#overpassFor(run.slug)
     const env = [
       { name: 'CORRIDOR_DATA', value: '/data' },
       { name: 'CORRIDOR_SITES', value: '/data/sites.json' },
       { name: 'CORRIDOR_HORIZON_M', value: String(this.cfg.horizonM ?? 30000) },
       { name: 'PYTHONUNBUFFERED', value: '1' }, // or the log arrives in 4 KiB lumps, minutes late
     ]
-    if (this.cfg.overpassUrl) env.push({ name: 'CORRIDOR_OVERPASS_URL', value: this.cfg.overpassUrl })
+    if (overpass) env.push({ name: 'CORRIDOR_OVERPASS_URL', value: overpass })
     if (this.cfg.bucket) {
       env.push(
         { name: 'CORRIDOR_S3_BUCKET', value: this.cfg.bucket },
@@ -302,12 +333,13 @@ export class Runs {
    */
   async #startLocal(run) {
     const sink = createWriteStream(this.store.logFile(run.id), { flags: 'a' })
+    const overpass = await this.#overpassFor(run.slug)
     const env = {
       ...process.env,
       CORRIDOR_DATA: this.store.root,
       CORRIDOR_SITES: `${this.store.root}/sites.json`,
       PYTHONUNBUFFERED: '1',
-      ...(this.cfg.overpassUrl ? { CORRIDOR_OVERPASS_URL: this.cfg.overpassUrl } : {}),
+      ...(overpass ? { CORRIDOR_OVERPASS_URL: overpass } : {}),
       ...(this.cfg.bucket
         ? {
             CORRIDOR_S3_BUCKET: this.cfg.bucket,

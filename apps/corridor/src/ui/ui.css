@@ -380,8 +380,8 @@ input.range::-moz-range-thumb { width: 13px; height: 13px; border: 0; border-rad
 .field-note { font-size: var(--text-xs); color: var(--ink-3); }
 /* a select that carries a note is no longer one row: label and control on the first line, the
    note under both */
-.field.select.with-note { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: var(--s1) var(--s3); }
-.field.select.with-note .field-note { grid-column: 1 / -1; }
+.field.with-note { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: var(--s1) var(--s3); }
+.field.with-note .field-note { grid-column: 1 / -1; }
 
 /* segmented */
 .segmented { display: inline-flex; padding: 2px; background: var(--bg-2); border: 1px solid var(--line-1); border-radius: var(--r2); }

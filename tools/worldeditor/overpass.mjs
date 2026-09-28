@@ -426,6 +426,55 @@ export class Overpass {
  * rotation tried to parse a number as a URL. Caught by the probe asking `/api/config` what
  * coverage it had actually read, which answered `{}`.
  */
+/**
+ * Which upstreams can answer for this box, in the order to try them, with the fences stripped.
+ *
+ * FOR HANDING TO SOMETHING THAT DOES NOT UNDERSTAND FENCES. The bake does not: `osm.py` splits
+ * `CORRIDOR_OVERPASS_URL` on commas and posts to the first entry, and a fragment is never sent on
+ * the wire — so a Maryland world went to the EUROPE extract, which answered 200 with zero
+ * elements and the bake raised "no ways for roads [] within 1219 m". A silent empty, from a
+ * mirror that was working perfectly and had simply never heard of Maryland.
+ *
+ * An upstream with NO fence is kept for every box: it is a claim to cover everything, which is
+ * what a public mirror is. `null` for the bbox returns them all, which is the honest answer to
+ * "I do not know where this is going".
+ */
+export function mirrorsFor(raw, bbox, { slack = 0.02 } = {}) {
+  const ups = String(raw ?? '')
+    .split(',')
+    .map((u) => u.trim())
+    .filter(Boolean)
+    .map(parseUpstream)
+  if (!bbox) return ups.map((u) => u.url)
+  const area = Math.max(1e-9, (bbox.north - bbox.south) * (bbox.east - bbox.west))
+  const scored = []
+  for (const u of ups) {
+    // An unfenced upstream claims everywhere, so it covers — but it sorts LAST among equals: it
+    // is the public mirror or the one nobody has told us about, and it is the fallback.
+    if (!u.bbox) { scored.push({ url: u.url, shortfall: 0, fence: Infinity }); continue }
+    const ins =
+      Math.max(0, Math.min(bbox.north, u.bbox.north) - Math.max(bbox.south, u.bbox.south)) *
+      Math.max(0, Math.min(bbox.east, u.bbox.east) - Math.max(bbox.west, u.bbox.west))
+    const shortfall = Math.max(0, 1 - ins / area)
+    const fence = (u.bbox.north - u.bbox.south) * (u.bbox.east - u.bbox.west)
+    if (shortfall <= slack) scored.push({ url: u.url, shortfall, fence })
+  }
+  /*
+   * THE TIGHTEST FENCE THAT COVERS YOU, FIRST.
+   *
+   * Two upstreams can both contain a half-mile box — a mid-Atlantic extract and something fenced
+   * to the whole planet — and they are not equally good answers. A fence somebody drew around
+   * your region is a regional extract that certainly has the data; a fence around everything is
+   * either a public mirror or an upstream nobody has described, and asking it first spends
+   * somebody else's rate limit on a query the local one would have answered.
+   *
+   * This used to be "configuration order breaks a tie", which gave the right answer for the
+   * cluster's two extracts by accident and the wrong one the moment a planet-wide entry was
+   * listed first.
+   */
+  return scored.sort((a, b) => a.shortfall - b.shortfall || a.fence - b.fence).map((x) => x.url)
+}
+
 function parseUpstream(raw) {
   const i = raw.indexOf('#')
   if (i < 0) return { url: raw, bbox: null }

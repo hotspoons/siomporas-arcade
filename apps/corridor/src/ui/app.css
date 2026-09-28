@@ -90,7 +90,14 @@ body.dock-dragging .dock-grip { pointer-events: auto; }
    be restructured and works for the ones that have no actions at all. The negative margins undo
    the body's padding so the bar reaches both edges, and the background is opaque because the
    content passes underneath it. */
-.inspector-body > .panel-actions {
+/* ONLY THE LAST ONE, and that is the whole of this fix. The rule below is for a panel's TRAILING
+   bar, and its negative bottom margin (-s6) exists to undo the body's bottom padding so the bar
+   reaches the edge. On a `.panel-actions` that is not last — the Assets panel opens with one, for
+   "Catalog & generate" and "Make placeable" — that negative margin pulls the NEXT element up 48px,
+   underneath an opaque background with `z-index: 1` over it. "Back to the roster" was rendering at
+   its full 32px and being covered by the block above it (Rich, 2026-09-28: "back to the roster is
+   hidden"). */
+.inspector-body > .panel-actions:last-child {
   position: sticky;
   bottom: calc(var(--s6) * -1);
   z-index: 1;

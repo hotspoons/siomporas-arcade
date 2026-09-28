@@ -241,6 +241,8 @@ export function textField(o: {
    * condition is `<fact> <op> <number>` and nothing about a box called "when" says so.
    */
   placeholder?: string
+  /** a line under it, in the smaller ink — what the field is for, not what to type */
+  note?: string
   onChange: (v: string) => void
 }): HTMLElement {
   const wrap = el('label', 'field text')
@@ -254,6 +256,10 @@ export function textField(o: {
   if (o.placeholder) i.placeholder = o.placeholder
   i.onchange = () => o.onChange(i.value)
   wrap.append(i)
+  if (o.note) {
+    wrap.classList.add('with-note')
+    wrap.append(el('span', 'field-note', o.note))
+  }
   return wrap
 }
 
@@ -294,6 +300,37 @@ export function textArea(o: {
   if (o.note) wrap.append(el('span', 'field-note', o.note))
   requestAnimationFrame(grow)
   return wrap
+}
+
+/**
+ * Rebuild a panel's contents without throwing away where somebody had scrolled to.
+ *
+ * Every one of these panels re-renders by replacing its children, which resets `scrollTop` to
+ * zero. On a short panel nobody notices; on the Assets panel, pressing Draw — which is near the
+ * bottom, under a 1,600-character prompt — threw the view back to the top (Rich, 2026-09-28:
+ * "clicking draw locally scrolls you to the top of the form"). The button you just pressed
+ * vanishing upward reads as the page having navigated.
+ *
+ * Restored twice on purpose: once synchronously, which is right when the new content is at least
+ * as tall, and once after a frame, for when it is not yet — an image that has not loaded has no
+ * height, so the first restore is clamped to a container that is about to grow.
+ */
+export function keepScroll(host: HTMLElement, rebuild: () => void): void {
+  const box = scroller(host)
+  const at = box?.scrollTop ?? 0
+  rebuild()
+  if (!box || !at) return
+  box.scrollTop = at
+  requestAnimationFrame(() => { if (box.scrollTop !== at) box.scrollTop = at })
+}
+
+/** The nearest thing that actually scrolls — the panel body, usually, not the panel. */
+function scroller(from: HTMLElement): HTMLElement | null {
+  for (let n: HTMLElement | null = from; n; n = n.parentElement) {
+    const o = getComputedStyle(n).overflowY
+    if ((o === 'auto' || o === 'scroll') && n.scrollHeight > n.clientHeight) return n
+  }
+  return null
 }
 
 /** An empty-state line, so a panel with nothing in it still says something. */

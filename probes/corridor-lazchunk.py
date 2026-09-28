@@ -28,7 +28,7 @@ from pyproj import Transformer  # noqa: E402
 from shapely.geometry import Polygon  # noqa: E402
 
 from corridor.geo import Frame  # noqa: E402
-from corridor.lidar import LAZ_CHUNK, _read_laz_tile  # noqa: E402
+from corridor.lidar import LAZ_CHUNK, _join, _read_laz_tile  # noqa: E402
 
 #: what the chunked reader may peak at, in GB, for any tile. Generous against the 0.72 measured.
 CEILING_GB = 1.25
@@ -122,6 +122,24 @@ def main() -> int:
     # a run over a tile the corridor misses entirely proves nothing about either claim
     if new is not None and len(new["x"]) < 10_000:
         bad.append(f"only {len(new['x'])} points fell in the test corridor — this run measured nothing")
+
+    # AND THE JOIN, which is the other half of the memory: np.concatenate allocates the result
+    # while every input is still alive, so the peak used to be twice the cloud. On t-section tiles
+    # 11 and 12 alone keep 16.7 and 25.5 million points.
+    a = _read_laz_tile(path, frame, bbox, clip)
+    b = _read_laz_tile(path, frame, bbox, clip)
+    want = {k: np.concatenate([a[k], b[k]]) for k in a}
+    got = _join([a, b])
+    for k in want:
+        if got[k].dtype != want[k].dtype:
+            bad.append(f"join: {k} dtype {got[k].dtype} against {want[k].dtype}")
+        elif not np.array_equal(got[k], want[k]):
+            bad.append(f"join: {k} differs from a plain concatenate")
+    # the saving IS the dropping: without it the caller's list keeps every input alive
+    if a["x"] is not None or b["x"] is not None:
+        bad.append("join: the parts were not released, so the peak is still the cloud twice")
+    if not bad:
+        print(f"  join         {len(got['x']):,} points, same as a concatenate, parts released")
 
     if bad:
         print("\nFAIL:\n  " + "\n  ".join(bad))

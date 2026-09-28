@@ -344,10 +344,35 @@ def _fetch_tnm_laz(frame: Frame, bbox, cache: Path, jobs: int, clip: Polygon | N
         print(f"  lidar   tile {i}/{len(paths)} {pth.name}: {len(part['x']) if part else 0:,} pts in bbox", flush=True)
     if not parts:
         raise RuntimeError("TNM tiles intersect the bbox but hold no points in it")
-    pts = {k: np.concatenate([p[k] for p in parts]) for k in parts[0]}
+    pts = _join(parts)
     print(f"  lidar   {len(pts['x']):,} points in bbox", flush=True)
     return pts, {"dataset": f"TNM:{proj}", "tiles": len(paths), "points": int(len(pts["x"]))}
 
+
+def _join(parts: list[dict]) -> dict:
+    """One cloud from many tiles, without holding two copies of it.
+
+    `np.concatenate` allocates the result while every input is still alive, so the peak is twice
+    the cloud. On t-section that is not academic: tiles 11 and 12 alone keep 16.7 and 25.5 million
+    points, and the doubling lands on a machine that has already spent its memory on the tiles.
+
+    So the total is counted first, the output allocated once, and each part copied in and then
+    DROPPED — `parts[i][k] = None` is what makes it a saving rather than a rearrangement, because
+    the caller's list holds a reference to every array until it does. Peak is the cloud plus the
+    largest single part, rather than the cloud twice.
+    """
+    total = sum(len(p["x"]) for p in parts)
+    out = {}
+    for k in parts[0]:
+        arr = np.empty(total, dtype=parts[0][k].dtype)
+        at = 0
+        for p in parts:
+            v = p[k]
+            arr[at:at + len(v)] = v
+            at += len(v)
+            p[k] = None  # the only reference left; without this the old copy survives the loop
+        out[k] = arr
+    return out
 
 def _grid(bbox, res=1.0):
     xmin, ymin, xmax, ymax = bbox

@@ -18,8 +18,13 @@
 // at startup: `/api/health` answered nothing and the smoke test said "Unexpected end of JSON
 // input" — after the image had been pushed.
 //
-// So this reads the COPY lines out of both stages and checks both kinds of import against them.
-// Static, so it is a second, not a push and four minutes of buildx.
+// AND THE BINARIES. A third way to ship a feature that cannot run: shell out to something the
+// image does not have. The git LFS support runs `git`, and there was no git in the image at all —
+// `/api/git` answered `repo: false, lfs: false` and every action would have failed with ENOENT,
+// on the one machine where the volume it pushes actually lives.
+//
+// So this reads the COPY and RUN lines out of both stages and checks imports and spawned binaries
+// against them. Static, so it is a second, not a push and four minutes of buildx.
 //
 //   node probes/worldeditor-imagefiles.mjs
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
@@ -188,5 +193,52 @@ if (entry && serviceFiles.size < 5) {
   fail.push(`only ${serviceFiles.size} files were reached from ${entry} — the import graph walk is broken`)
 }
 
+/* ---- the binaries the service shells out to ----------------------------------------------- */
+
+/** What an `apt-get install` in the runtime stage puts on the PATH. */
+function installed(stage) {
+  const out = new Set()
+  // a RUN can be line-continued, so the whole stage is searched rather than line by line
+  for (const m of stage.matchAll(/apt-get\s+install[^\n]*(?:\\\n[^\n]*)*/g)) {
+    const words = m[0].replace(/\\\n/g, ' ').split(/\s+/)
+    for (const w of words) {
+      if (/^-/.test(w) || /^\\$/.test(w) || ['apt-get', 'install', '&&', 'RUN'].includes(w)) continue
+      out.add(w)
+    }
+  }
+  return out
+}
+
+/** Every binary a reachable service file spawns by a literal name. */
+function spawned(files) {
+  const out = new Map()
+  for (const file of files) {
+    const text = readFileSync(file, 'utf8')
+    for (const m of text.matchAll(/(?:spawn|spawnSync|execFile|execFileSync)\s*\(\s*['"]([^'"/]+)['"]/g)) {
+      out.set(m[1], path.relative(ROOT, file))
+    }
+    // `run('git', …)` and friends: a promisified execFile behind a one-word alias
+    for (const m of text.matchAll(/\brun\s*\(\s*['"]([a-z][\w-]*)['"]\s*,\s*\[/g)) {
+      out.set(m[1], path.relative(ROOT, file))
+    }
+  }
+  return out
+}
+
+const runtimeStage = stageText(DOCKERFILE, 1)
+const pkgs = installed(runtimeStage)
+const bins = spawned([...serviceFiles])
+// node is the ENTRYPOINT's own interpreter; the bake's python runs in another image entirely, as a
+// Job this service creates, and `kubectl` is only used by the preflight probe on a developer's box
+const PROVIDED = new Set(['node', 'npm', 'sh', 'python', 'python3', 'kubectl'])
+console.log(`\nthe runtime stage installs [${[...pkgs].join(', ') || 'nothing'}]; the service spawns ${bins.size} binaries`)
+for (const [bin, from] of [...bins].sort()) {
+  if (PROVIDED.has(bin)) { console.log(`  ${bin.padEnd(52)} provided`); continue }
+  // a package name is usually the binary name; git-lfs ships `git lfs` as a git subcommand
+  const ok = pkgs.has(bin) || [...pkgs].some((pkg) => pkg === bin || pkg.startsWith(`${bin}-`))
+  console.log(`  ${bin.padEnd(52)} ${ok ? 'installed' : 'NOT IN THE IMAGE'}  ← ${from}`)
+  if (!ok) fail.push(`${from} spawns '${bin}', which the runtime stage never installs — the feature fails with ENOENT`)
+}
+
 if (fail.length) { console.log('\nFAIL:\n  ' + fail.join('\n  ')); process.exit(1) }
-console.log('\nPASS: every import that leaves the app, and every package the service needs, is in the image')
+console.log('\nPASS: every import, package and binary the app and service need is in the image')

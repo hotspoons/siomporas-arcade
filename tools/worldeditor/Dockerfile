@@ -71,6 +71,16 @@ WORKDIR /app
 # The image went red once because this line was missing: the service threw on the import at
 # startup, `/api/health` answered nothing, and the smoke test said "Unexpected end of JSON input".
 # probes/worldeditor-imagefiles.mjs now checks every bare import against what is copied here.
+# git AND git-lfs, because the editor pushes this volume to a remote (gitrepo.mjs) and the volume
+# is HERE. The feature worked on a laptop and did nothing in the pod: `/api/git` reported
+# `repo: false, lfs: false` and every action would have failed with ENOENT on a binary that was
+# never in the image — which is the cluster, where the worlds actually live.
+#
+# The "no dependencies" note below is about node packages and SDKs. A git client needs git.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git git-lfs ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY tools/worldeditor/ tools/worldeditor/
 COPY --from=app /src/node_modules/ws/ node_modules/ws/
 COPY --from=app /src/apps/corridor/dist/ apps/corridor/dist/

@@ -265,7 +265,12 @@ kbd {
 .field { display: block; cursor: pointer; }
 /* the label and the readout wrap onto two lines rather than forcing the panel wider */
 .field-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s3); flex-wrap: wrap; }
-.field-label { font-size: var(--text-sm); color: var(--ink-2); }
+/* A LABEL IS NOT A PARAGRAPH. The inspector sets `overflow-wrap: anywhere` so a long road name
+   cannot push the panel sideways, and that rule applies to labels too — so "Spine", squeezed
+   between the panel edge and a select holding a long street name, broke one letter per line. A
+   label never wraps inside a word; the control beside it is what gives way, and it already may
+   (min-width: 0 on every field control). */
+.field-label { font-size: var(--text-sm); color: var(--ink-2); overflow-wrap: normal; word-break: normal; }
 /* the per-knob reset, shown only once the knob has been moved off neutral */
 .field-reset { display: none; margin-left: auto; padding: 0 4px; color: var(--ink-3); background: none; border: 0; cursor: pointer; line-height: 0; }
 .field-reset:hover { color: var(--accent); }
@@ -336,6 +341,9 @@ input.range::-moz-range-thumb { width: 13px; height: 13px; border: 0; border-rad
 
 /* select */
 .field.select { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); }
+.field.select > .field-label { flex: 0 0 auto; }
+.field.select > .select-box { flex: 1 1 auto; min-width: 0; justify-content: flex-end; }
+.field.select .select-box select { max-width: 100%; text-overflow: ellipsis; }
 .select-box { position: relative; display: inline-flex; align-items: center; }
 .select-box .icon { position: absolute; right: var(--s2); pointer-events: none; color: var(--ink-3); }
 .select-box select {

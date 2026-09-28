@@ -77,8 +77,38 @@ body.dock-dragging .dock-grip { pointer-events: auto; }
    off under its own edge -- which is what Rich saw at 340 px. `min-width: 0` lets the items obey
    the column, `overflow-x: hidden` refuses the scroll outright, and the wrapping rules below give
    long words somewhere to break. */
-.inspector-body { flex: 1; overflow-y: auto; overflow-x: hidden; padding: var(--s3) var(--s4) var(--s6); display: grid; gap: var(--s3); align-content: start; }
+/* `min-height: 0` is the vertical twin of the `min-width: 0` above: a flex item's automatic
+   minimum size is its CONTENT, so without it a long form can grow past the bottom of a fixed
+   panel and the overflow has nowhere to happen. Belt and braces — measured against the broken
+   build, the body DID stay inside its panel, so this was not what cut the form off. That was the
+   `[hidden]` rule below. Kept because it is correct, and noted because it was my first theory. */
+.inspector-body { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: var(--s3) var(--s4) var(--s6); display: grid; gap: var(--s3); align-content: start; }
+
+/* THE BUTTONS STAY PUT WHILE THE FORM SCROLLS BEHIND THEM ("buttons need to be fixed on the
+   bottom, if the form overflows it needs to scroll above the buttons"). Sticky rather than a
+   separate footer element: every panel already ends with its actions, so this needs no panel to
+   be restructured and works for the ones that have no actions at all. The negative margins undo
+   the body's padding so the bar reaches both edges, and the background is opaque because the
+   content passes underneath it. */
+.inspector-body > .panel-actions {
+  position: sticky;
+  bottom: calc(var(--s6) * -1);
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+  margin: var(--s2) calc(var(--s4) * -1) calc(var(--s6) * -1);
+  padding: var(--s3) var(--s4);
+  background: var(--bg-1);
+  border-top: 1px solid var(--line-1);
+}
 .inspector-body > * { min-width: 0; }
+/* A `display` RULE BEATS THE `hidden` ATTRIBUTE, every time. The rule above sets `display: grid`
+   on every .inspector-body, so marking one hidden did nothing at all — the world editor carries a
+   second body for the Place mode and an actions row beside it, and both kept their share of the
+   panel while showing nothing. Measured: the visible panel body was 299px inside a 657px column.
+   The same trap the attribution list fell into on 2026-09-26. */
+.inspector-body[hidden], .panel-actions[hidden] { display: none; }
 .inspector-body, .inspector-body p, .inspector-body label, .inspector-body span, .inspector-body div { overflow-wrap: anywhere; }
 .inspector-body input, .inspector-body select, .inspector-body textarea, .inspector-body .field { max-width: 100%; min-width: 0; }
 .inspector-body h2 { font-size: var(--text-md); }

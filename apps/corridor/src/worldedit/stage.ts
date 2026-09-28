@@ -107,7 +107,7 @@ export class StagePanel {
     host.replaceChildren()
 
     if (!this.draft) {
-      host.append(hint('A level is a baked world with the lights set, things put in it, and something to do. Pick one to edit, or start a new one.'))
+      host.append(hint('A baked world with the lights set, things put in it, and something to do.'))
       const list = group('Levels')
       const lb = bodyOf(list)
       if (!this.levels.length) lb.append(empty('no levels yet'))
@@ -169,7 +169,7 @@ export class StagePanel {
     host.append(what)
 
     /* what it opens like */
-    const look = group('What it opens like', { note: 'Rush hour is not a difficulty setting, it is half past five.' })
+    const look = group('What it opens like')
     const kb = bodyOf(look)
     d.defaults ??= {}
     kb.append(
@@ -204,7 +204,7 @@ export class StagePanel {
     host.append(look)
 
     /* what is running in it */
-    const sim = group('Running in it', { note: 'Traffic is IDM and MOBIL: the queues and the waves are emergent, not scripted.' })
+    const sim = group('Running in it')
     const sb = bodyOf(sim)
     d.simulations ??= []
     if (!d.simulations.length) sb.append(empty('nothing running'))
@@ -242,7 +242,6 @@ export class StagePanel {
     // level had no scenario — which hid the only button that adds one, precisely in the state
     // where you need it. A section is collapsed because it is long, not because it is empty.
     const sc = group('Something to do', {
-      note: 'Three primitives — a goal, events, scoring. Deliberately not a scripting language.',
     })
     const cb = bodyOf(sc)
     if (!d.scenario) {

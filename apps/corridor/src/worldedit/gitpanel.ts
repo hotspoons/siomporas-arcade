@@ -92,7 +92,7 @@ export class GitPanel {
       const s = this.scan
       const g = group(`What would be committed (${s.files} files, ${size(s.bytes)})`, { collapsed: false })
       const b = bodyOf(g)
-      b.append(el('p', 'note', 'The authored half: worlds, levels, programs, places, assets, and the tuning and presets beside each bake. The download cache and the bake rasters are excluded — they are reproducible, and they are most of this volume.'))
+      b.append(el('p', 'note', 'Worlds, levels, programs, places, assets, and the tuning and presets beside each bake. The download cache and the bake rasters are excluded.'))
       for (const e of s.exts.slice(0, 10)) {
         const row = el('div', 'readout')
         row.append(
@@ -143,9 +143,9 @@ export class GitPanel {
       if (c.set) {
         b.append(readout('stored', c.kind === 'ssh-key' ? 'an SSH private key' : `a token for ${c.host}`))
         if (c.username) b.append(readout('as', c.username))
-        b.append(el('p', 'note', 'Stored on the service, never sent back here. Replace it by filling the fields below.'))
+        b.append(el('p', 'note', 'Replace it by filling the fields below.'))
       } else {
-        b.append(el('p', 'note', 'A personal access token with write access to the repository. It is stored on the service in a file only it can read, and no screen here can show it again.'))
+        b.append(el('p', 'note', 'A personal access token with write access to the repository. Stored on the service; nothing here can show it again.'))
       }
       let host_ = c.host ?? ''
       let user = c.username ?? ''

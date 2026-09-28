@@ -54,13 +54,7 @@ export function buildPresetPanel(host: HTMLElement, o: PresetPanelOpts): void {
       })],
     })
     const body = bodyOf(g)
-    body.append(el(
-      'p',
-      'note',
-      'The look this world loads with: its code defaults, then its own tuning.json, with nothing '
-      + 'from this browser over the top. A story that tweens away from it comes home to here, and '
-      + 'so does a reload.',
-    ))
+    body.append(el('p', 'note', 'The look this world loads with, before anything you change here.'))
     body.append(readout('knobs', String(Object.keys(p.ground).length)))
     host.append(g)
   }
@@ -97,7 +91,7 @@ export function buildPresetPanel(host: HTMLElement, o: PresetPanelOpts): void {
       step: 1,
       onChange: (v) => { const n = Number(v); if (Number.isFinite(n) && n >= 0) overSeconds = n },
     }))
-    body.append(el('p', 'note', 'What "Tween" on a row below takes, in REAL seconds — a preset may change the clock rate, so it is not measured against the world’s own time.'))
+    body.append(el('p', 'note', 'How long "Tween" takes, in real seconds.'))
     host.append(g)
   }
 

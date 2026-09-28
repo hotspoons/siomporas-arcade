@@ -234,7 +234,7 @@ export class ProgramPanel {
         actions: [button({ label: 'New', icon: 'plus', variant: 'primary', onClick: () => void this.create() })],
       })
       const b = bodyOf(g)
-      if (!list.length) b.append(empty('No programs yet. A level without one uses its declarative scenario; a program is what you write when that runs out.'))
+      if (!list.length) b.append(empty('No programs yet.'))
       for (const p of list) {
         const row = el('button', 'row')
         row.append(

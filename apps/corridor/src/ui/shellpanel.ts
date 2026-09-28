@@ -189,8 +189,8 @@ export class ShellPanel {
     bodyOf(help).append(el(
       'p',
       'note',
-      'coreutils over the editor’s documents, plus `python` (Pyodide, loaded on first use) and `js` (QuickJS). '
-      + 'No network of its own. Writing worlds/, levels/, programs/ or sites/ saves that document immediately; out/ is yours.',
+      'coreutils, python and js over the editor’s documents. No network. Writing worlds/, levels/, programs/ '
+      + 'or sites/ saves that document immediately; out/ is yours.',
     ))
     host.append(help)
   }

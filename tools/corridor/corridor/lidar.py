@@ -192,61 +192,105 @@ def fetch_points(frame: Frame, bbox: tuple[float, float, float, float], cache: P
 TNM = "https://tnmaccess.nationalmap.gov/api/v1/products"
 
 
-def _read_laz_tile(path: Path, frame: Frame, bbox, clip: Polygon | None = None) -> dict | None:
-    """One delivery tile: read, re-project from ITS declared CRS to the site frame, clip."""
+#: How many points are reprojected at a time.
+#:
+#: MEASURED, not chosen. `laspy.read` on one 213 MiB delivery tile holds 36.5 million points and
+#: peaks at 2.44 GB — the point record, then x and y materialised as float64, then the reprojected
+#: pair, then z. 72 bytes of peak per point, for a tile of which a 9.5 km² corridor keeps under a
+#: million of them. Rich's t-section bake was killed by the kernel on the fifth of seventeen tiles
+#: with 3 GB free, and the runner said `exited null`.
+#:
+#: At four million the peak is bounded by the CHUNK rather than by the tile, so a 40 MiB delivery
+#: and a 2 GiB one cost the same. Larger buys nothing: the work is one pyproj call per chunk and
+#: its per-call overhead is lost against four million coordinates.
+LAZ_CHUNK = 4_000_000
+
+
+def _laz_crs(reader, path: Path, frame: Frame, bbox):
+    """The tile's CRS: what its header says, or where its extent lands."""
     from pyproj import Transformer
 
-    las = laspy.read(path)
-    crs = las.header.parse_crs()
-    rx, ry = np.asarray(las.x), np.asarray(las.y)
-    if crs is None:
-        # Deliveries from before the convention of writing a CRS into the header exist and are
-        # otherwise fine: OR_NorthCoast_2008-2009 is why Ecola would not bake. Decide it by
-        # geometry instead of guessing — try the site's own CRS and the UTM zone either side, and
-        # keep the one whose transformed extent lands on the corridor we asked USGS for.
-        cx, cy = float(np.median(rx)), float(np.median(ry))
-        xmin, ymin, xmax, ymax = bbox
-        pad = 20_000.0
-        for cand in (frame.crs, f"EPSG:{frame.epsg - 1}", f"EPSG:{frame.epsg + 1}"):
-            try:
-                tx, ty = Transformer.from_crs(cand, frame.crs, always_xy=True).transform(cx, cy)
-            except Exception:
-                continue
-            if xmin - pad <= tx <= xmax + pad and ymin - pad <= ty <= ymax + pad:
-                crs = cand
-                print(f"  lidar   {path.name}: no CRS in the header; its extent fits {cand}", flush=True)
-                break
-        if crs is None:
-            print(f"  lidar   {path.name}: no CRS in the header and no candidate fits its extent; skipped", flush=True)
-            return None
-    tr = Transformer.from_crs(crs, frame.crs, always_xy=True)
-    x, y = tr.transform(rx, ry)
-    x, y = np.asarray(x), np.asarray(y)
+    crs = reader.header.parse_crs()
+    if crs is not None:
+        return crs
+    # Deliveries from before the convention of writing a CRS into the header exist and are
+    # otherwise fine: OR_NorthCoast_2008-2009 is why Ecola would not bake. Decide it by geometry
+    # instead of guessing — try the site's own CRS and the UTM zone either side, and keep the one
+    # whose transformed extent lands on the corridor we asked USGS for.
+    #
+    # FROM THE HEADER'S EXTENT, not a median over the points: the header records the tile's bounds,
+    # so this reads nothing. The median version read all thirty-six million points to take the
+    # middle of two columns.
+    cx = (reader.header.mins[0] + reader.header.maxs[0]) / 2
+    cy = (reader.header.mins[1] + reader.header.maxs[1]) / 2
     xmin, ymin, xmax, ymax = bbox
-    m = (x >= xmin) & (x < xmax) & (y >= ymin) & (y < ymax)
-    if clip is not None and m.any():
-        # the corridor is a strip on a diagonal; its bbox is mostly air. Clip per tile so the
-        # concatenated cloud is the strip, not the box (memory: 300 M points vs 40 M on Clarksburg)
-        idx = np.flatnonzero(m)
-        inside = shapely.contains_xy(clip, x[idx], y[idx])
-        m[idx[~inside]] = False
-    if not m.any():
+    pad = 20_000.0
+    for cand in (frame.crs, f"EPSG:{frame.epsg - 1}", f"EPSG:{frame.epsg + 1}"):
+        try:
+            tx, ty = Transformer.from_crs(cand, frame.crs, always_xy=True).transform(cx, cy)
+        except Exception:
+            continue
+        if xmin - pad <= tx <= xmax + pad and ymin - pad <= ty <= ymax + pad:
+            print(f"  lidar   {path.name}: no CRS in the header; its extent fits {cand}", flush=True)
+            return cand
+    print(f"  lidar   {path.name}: no CRS in the header and no candidate fits its extent; skipped", flush=True)
+    return None
+
+
+def _read_laz_tile(path: Path, frame: Frame, bbox, clip: Polygon | None = None) -> dict | None:
+    """One delivery tile: read, re-project from ITS declared CRS to the site frame, clip.
+
+    IN CHUNKS (LAZ_CHUNK), because the whole tile does not have to be in memory at once and on a
+    loaded machine it does not fit. Only the points that survive the bbox and the corridor clip are
+    kept, and on a 9.5 km² site that is a per cent or two of what was read.
+    """
+    from pyproj import Transformer
+
+    reader = laspy.open(path)
+    crs = _laz_crs(reader, path, frame, bbox)
+    if crs is None:
+        reader.close()
         return None
-    z = np.asarray(las.z)[m]
+    tr = Transformer.from_crs(crs, frame.crs, always_xy=True)
     # a compound CRS in US survey feet puts Z in feet too; check_units() confirms against the DEM
     try:
         unit = crs.axis_info[0].unit_name if crs.axis_info else "metre"
     except Exception:
         unit = "metre"
-    if "foot" in unit or "feet" in unit:
-        z = z * 0.3048006096
-    return {
-        "x": x[m], "y": y[m], "z": z,
-        "cls": np.asarray(las.classification)[m].astype(np.uint8),
-        "rn": np.asarray(las.return_number)[m].astype(np.uint8),
-        "nr": np.asarray(las.number_of_returns)[m].astype(np.uint8),
-        "i": np.asarray(las.intensity)[m].astype(np.uint16),
-    }
+    zf = 0.3048006096 if ("foot" in unit or "feet" in unit) else 1.0
+    xmin, ymin, xmax, ymax = bbox
+
+    keep: dict[str, list] = {k: [] for k in ("x", "y", "z", "cls", "rn", "nr", "i")}
+    with reader as r:
+        for chunk in r.chunk_iterator(LAZ_CHUNK):
+            x, y = tr.transform(np.asarray(chunk.x), np.asarray(chunk.y))
+            x, y = np.asarray(x), np.asarray(y)
+            m = (x >= xmin) & (x < xmax) & (y >= ymin) & (y < ymax)
+            if not m.any():
+                continue
+            if clip is not None:
+                # the corridor is a strip on a diagonal; its bbox is mostly air. Clip per chunk so
+                # the concatenated cloud is the strip, not the box (memory: 300 M points vs 40 M
+                # on Clarksburg)
+                idx = np.flatnonzero(m)
+                inside = shapely.contains_xy(clip, x[idx], y[idx])
+                m[idx[~inside]] = False
+                if not m.any():
+                    continue
+            z = np.asarray(chunk.z)[m]
+            keep["x"].append(x[m])
+            keep["y"].append(y[m])
+            keep["z"].append(z * zf if zf != 1.0 else z)
+            keep["cls"].append(np.asarray(chunk.classification)[m].astype(np.uint8))
+            keep["rn"].append(np.asarray(chunk.return_number)[m].astype(np.uint8))
+            keep["nr"].append(np.asarray(chunk.number_of_returns)[m].astype(np.uint8))
+            keep["i"].append(np.asarray(chunk.intensity)[m].astype(np.uint16))
+
+    if not keep["x"]:
+        return None
+    # one chunk is the common case on a small site; concatenating a single array copies it for
+    # nothing, and this runs once per tile per bake
+    return {k: (v[0] if len(v) == 1 else np.concatenate(v)) for k, v in keep.items()}
 
 
 def _fetch_tnm_laz(frame: Frame, bbox, cache: Path, jobs: int, clip: Polygon | None = None) -> tuple[dict, dict]:

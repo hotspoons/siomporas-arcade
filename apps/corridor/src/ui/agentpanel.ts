@@ -117,7 +117,7 @@ export class AgentPanel {
     if (!this.platform?.set) {
       const g = group('Connect to the platform', { collapsed: false })
       const b = bodyOf(g)
-      b.append(el('p', 'note', 'A personal access token, stored on the service and never sent back here. The service mints the tunnel’s one-time token and opens the socket, because a browser cannot send the header the platform wants.'))
+      b.append(el('p', 'note', 'A personal access token with access to the agent deployments. Stored on the service; nothing here can show it again.'))
       let base = ''
       let token = ''
       const baseField = textField({ label: 'platform', value: '', placeholder: 'https://platform.example.com', onChange: (v) => { base = v.trim(); setFieldError(baseField, null) } })
@@ -179,8 +179,8 @@ export class AgentPanel {
       bodyOf(g).append(el(
         'p',
         'note',
-        'Read and write the editor’s documents, and run commands in the browser shell over them. '
-        + 'A write is a live edit with no undo, so it asks first — except for a read, which cannot damage anything.',
+        'Read and write the editor’s documents, and run commands in the shell over them. A write is a '
+        + 'live edit with no undo, so it asks first.',
       ))
       host.append(g)
     }

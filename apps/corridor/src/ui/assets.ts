@@ -12,7 +12,11 @@ import { Dialog, Tabs, ask, button, confirm, el, lightbox, toast, type Tab } fro
 import { icon } from './icons'
 import { bodyOf, empty, group, readout, segmented, select, textArea, textField, toggle } from './controls'
 import { MeshView } from './meshview'
+import { KINDS } from '../classes'
 import { MESH_FILE, assetsvc, type AssetItem, type AssetJob, type Material, type MeshVariant, type ModelRoster } from '../assetsvc'
+import { actorExtension } from './actors'
+import { weaponExtension } from './weapons'
+import { vehicleExtension } from './vehicles'
 
 /**
  * WHAT SORT OF THING IT IS, and where the list of sorts comes from.
@@ -63,8 +67,9 @@ const PLACE_CATEGORIES = [
  */
 function defaultVariantFor(kind: string | undefined, role: (typeof USE_ROLES)[number]): MeshVariant {
   const precious = kind === 'hero-car' || kind === 'emergency'
-  if (role === 'hero') return 'glass'
-  if (role === 'opponent') return precious ? 'glass' : 'finished'
+  // the raw mesh for the car you are looking at from a metre away; the finished one for the rest.
+  // Both have real glass — it comes from the texture's alpha, not from the file you pick.
+  if (role === 'hero') return precious ? 'raw' : 'finished'
   return 'finished'
 }
 
@@ -75,19 +80,23 @@ function roleForKind(kind: string | undefined): (typeof USE_ROLES)[number] {
   return 'scenery'
 }
 
-/** Which of the three this item actually has, best first. */
+/**
+ * Which meshes this item has, best first.
+ *
+ * `mesh.glass.glb` is NOT offered. It is the chroma-keyed split — glazing picked by colour with a
+ * height guard, which picks the roof and the sill trim with it (Rich, 2026-09-28: "we should not
+ * be using any chroma-keyed glass which was the original approach, it looks terrible"). The
+ * glazing is in the alpha channel of every asset's own texture, put there by the reconstructor,
+ * and `src/glazing.ts` switches it on at load — so the finished and raw meshes have real glass
+ * and the keyed file is redundant. It stays on disk and stays loadable; nothing chooses it.
+ */
 function variantsOf(it: AssetItem): MeshVariant[] {
   const out: MeshVariant[] = []
-  if (it.glass) out.push('glass')
   if (it.finished) out.push('finished')
   if (it.mesh) out.push('raw')
   return out.length ? out : ['raw']
 }
 
-const KINDS = [
-  'hero-car', 'traffic', 'emergency', 'commercial-vehicle', 'pedestrian', 'animal',
-  'furniture', 'building-dressing', 'vegetation', 'signage', 'prop',
-]
 
 /** The classes on offer: the standard ones, plus whatever is already in the library. */
 function classesIn(used: (string | null | undefined)[], base = KINDS): string[] {
@@ -158,12 +167,53 @@ export interface AssetCatalogOpts {
    * Supplied only by a page that HAS a placeable catalog: the world editor has one per volume,
    * the viewer does not, and a tick that writes nowhere is worse than no tick.
    */
+  /**
+   * TABS AND DETAIL SECTIONS ANOTHER LANE OWNS.
+   *
+   * The physics lane's vehicle document lives in `src/vehicles.ts` and its UI in
+   * `src/ui/vehicles.ts`; this is the whole boundary between us. It is a seam rather than a
+   * merge because the alternative is two lanes editing one 1,500-line file — and because what a
+   * vehicle needs to say about itself has nothing to do with what this file knows.
+   */
+  extensions?: AssetExtension[]
   placeable?: {
     /** which ids are in the list right now */
     listed: () => Promise<Set<string>>
     add: (entry: { id: string; name: string; category: string; glb: string; footprint_m: [number, number]; height_m: number; fit: string }) => Promise<void>
     remove: (id: string) => Promise<void>
   }
+}
+
+/** What an extension may add: tabs of its own, and a section at the foot of the detail pane. */
+export interface AssetExtension {
+  tabs?: Tab[]
+  /** called at the end of `renderDetail`, with the item and the pane it is rendering into */
+  detail?: (item: AssetItem, host: HTMLElement, ctx: AssetDetailCtx) => void
+}
+
+export interface AssetDetailCtx {
+  /**
+   * The live preview, when one is up — `rig()` off it is how a vehicle knows whether the model
+   * has four wheel bones. Null when the item has no mesh or the preview has been disposed, which
+   * an extension has to handle rather than assume.
+   */
+  mesh3d: MeshView | null
+  /**
+   * STAGE A CHANGE THE WAY THE PANE'S OWN FIELDS DO.
+   *
+   * `edit({ vehicle: doc })` is the right way in, and it is the only way in — the answer to the
+   * physics lane's question. The draft is keyed by `AssetItem` field and `commit()` sends the
+   * whole thing as one `assetsvc.put`, so a staged `vehicle` gets the Save button, the unsaved
+   * marker, the confirmation before navigating away and Discard, all of it, for free. Anything
+   * that writes to the service directly would bypass every one of those and leave the pane
+   * claiming there is nothing to save.
+   *
+   * Pass the WHOLE document each time. The service merges by top-level field, so a partial
+   * `vehicle` replaces the one on disk rather than merging into it.
+   */
+  edit: (patch: Partial<AssetItem>) => void
+  /** what the class defaults to, so an extension need not reimplement the vocabulary */
+  kind: string
 }
 
 export class AssetCatalog {
@@ -214,7 +264,17 @@ export class AssetCatalog {
    * one could be looked at, which is the wrong way round for deciding whether finishing went too
    * far. Finished is the default because it is what a level loads.
    */
-  private meshVariant: MeshVariant | null = null
+  private meshVariant: MeshVariant | null = (() => {
+    // REMEMBERED. Which mesh you are looking at is a working preference, not a mode: choosing raw
+    // and finding it back on finished after every reload is the panel forgetting what you asked
+    // for (Rich, 2026-09-28: "finished and raw keeps resetting on each reload of the site").
+    try {
+      const v = localStorage.getItem('apex-assets.variant')
+      return v === 'raw' || v === 'finished' || v === 'glass' ? v : null
+    } catch {
+      return null
+    }
+  })()
   /** the viewer, keyed by what it is showing, so re-rendering the pane does not refetch 26 MB */
   private mesh3dKey: string | null = null
 
@@ -248,6 +308,7 @@ export class AssetCatalog {
       { id: 'catalog', label: 'Catalog', icon: 'cube', build: (h) => this.buildCatalog(h) },
       { id: 'materials', label: 'Materials', icon: 'swatch', build: (h) => void this.buildMaterials(h) },
       { id: 'service', label: 'Service', icon: 'beaker', build: (h) => void this.buildService(h) },
+      ...(o.extensions?.flatMap((e) => e.tabs ?? []) ?? []),
     ]
     this.tabs = new Tabs(tabs)
     if (o.host) {
@@ -707,11 +768,12 @@ export class AssetCatalog {
         meshBody.append(segmented<MeshVariant>({
           value: variant,
           options: have.map((v) => ({ value: v, label: v })),
-          onChange: (v) => { this.meshVariant = v; this.renderDetail() },
+          onChange: (v) => {
+            this.meshVariant = v
+            try { localStorage.setItem('apex-assets.variant', v) } catch { /* private window */ }
+            this.renderDetail()
+          },
         }))
-      }
-      if (variant !== 'glass' && have.includes('glass')) {
-        meshBody.append(hint('The windows are painted on in this one. “glass” is the variant with real glazing.'))
       }
       const counted = readout('showing', `${file} · counting…`)
       meshBody.append(counted)
@@ -789,7 +851,6 @@ export class AssetCatalog {
       meshBody.append(useGroup)
       this.placeableGroup(meshBody, it, have)
       meshBody.append(readout('Raw mesh', `${(it.mesh / 1e6).toFixed(1)} MB`))
-      if (it.glass) meshBody.append(readout('With glass', `${(it.glass / 1e3).toFixed(0)} kB`))
       if (it.finished) {
         meshBody.append(readout('Finished', `${(it.finished / 1e3).toFixed(0)} kB`))
         // THE SIZES ARE NOT THE COMPARISON. The finished file is Draco-compressed and the raw one
@@ -827,6 +888,23 @@ export class AssetCatalog {
     steps.append(meshed)
 
     this.detailHost.append(steps)
+
+    /*
+     * WHATEVER ANOTHER LANE ADDS, at the foot of the pane.
+     *
+     * After the pipeline and before the provenance: a vehicle's dynamics are about the thing, and
+     * the history is about how it got here.
+     */
+    for (const ext of this.o.extensions ?? []) {
+      ext.detail?.(it, this.detailHost, {
+        mesh3d: this.mesh3d,
+        kind: it.kind || 'prop',
+        edit: (patch) => {
+          Object.assign(this.draft, patch)
+          this.showSaveBar()
+        },
+      })
+    }
 
     // ---- provenance. The reason this is here and not hidden: an asset whose origin nobody can
     // reconstruct is one you cannot regenerate when the style changes.
@@ -1774,5 +1852,5 @@ function promptField(label: string, value: string, onChange: (v: string) => void
 
 /** Where the drawer entry and the keyboard shortcut land. */
 export function installAssetCatalog(): AssetCatalog {
-  return new AssetCatalog()
+  return new AssetCatalog({ extensions: [vehicleExtension(), actorExtension(), weaponExtension()] })
 }

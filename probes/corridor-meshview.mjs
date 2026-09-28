@@ -104,59 +104,75 @@ say('mesh variants', variants)
 /* ---- 2c · the windows are windows ---- */
 //
 // Rich, 2026-09-28: "I notice the window transparency isn't working on either the original or
-// decimated models." It was not working because neither of them HAS any: `finish.mjs` emits a
-// third file whose glazing is split into KHR_materials_transmission with a per-texel mask, and
-// nothing reported or loaded it.
+// decimated models", then: "trellis.2 puts alpha information into the voxel cloud, we should not
+// be using any chroma-keyed glass which was the original approach, it looks terrible."
 //
-// THE MATERIAL BEING RIGHT PROVES NOTHING — a transmissive material that the renderer never runs
-// its transmission pass over looks exactly like an opaque one. So this turns transmission off on
-// the loaded model and checks the picture changes.
-if (variants.includes('glass')) {
-  const chosen = await page.evaluate(() =>
-    [...document.querySelectorAll('#assets .segmented button, #assets .seg')].filter((n) => n.classList.contains('on')).map((n) => n.textContent.trim())[0])
-  say('shown by default', chosen)
-  if (chosen !== 'glass') fail.push(`it shows ${chosen} by default — the one with painted-on windows`)
+// The glazing is in the base colour texture's ALPHA — TRELLIS.2 puts it there and exports the
+// material as OPAQUE, so it is in every asset and nothing ever switched it on. `src/glazing.ts`
+// does, at load, for whichever mesh is showing.
+//
+// THE MATERIAL BEING RIGHT PROVES NOTHING: a transmissive material the renderer never runs its
+// transmission pass over looks exactly like an opaque one. So this turns transmission off on the
+// loaded model and checks the picture changes.
+if (variants.includes('glass')) fail.push('the chroma-keyed glass file is still being offered')
 
-  const mat = await page.evaluate(() => {
-    let found = null
+const glazed = await page.evaluate(() => window.__meshview.glazed)
+say('glazed from alpha', glazed)
+if (!glazed || glazed.glazed < 1) {
+  fail.push('no glazing was separated — the texture alpha is not being read')
+} else {
+  /*
+   * THE GLASS HAS TO BE ITS OWN MATERIAL, and that is the whole finding.
+   *
+   * Putting a transmission MASK on the one material the reconstruction comes with did nothing
+   * visible: that material describes the BODY, so it is roughness 1 and metalness 1, and a fully
+   * rough transmissive surface is frosted to opacity while a metal has no diffuse for
+   * transmission to replace. The mask was correct the whole time — painted onto the body it lit
+   * up the windscreen and nothing else.
+   */
+  const mats = await page.evaluate(() => {
+    const out = []
     window.__meshview.pivot.traverse((o) => {
       for (const m of Array.isArray(o.material) ? o.material : o.material ? [o.material] : []) {
-        if (m.transmission > 0 && !found) found = { transmission: m.transmission, map: !!m.transmissionMap, ior: m.ior }
+        out.push({ type: m.type, transmission: m.transmission ?? 0, roughness: +(m.roughness ?? 0).toFixed(2), metalness: m.metalness ?? 0 })
       }
     })
-    return found
+    return out
   })
-  say('transmissive material', mat ?? 'none')
-  if (!mat) fail.push('the glass variant loaded with no transmissive material in it')
+  say('materials', mats)
+  const glass = mats.find((m) => m.transmission > 0)
+  const bodyKept = mats.some((m) => m.transmission === 0)
+  if (!glass) fail.push('nothing transmissive after the split')
   else {
-    const frame = () => page.evaluate(() => {
-      const v = window.__meshview
-      v.renderer.render(v.scene, v.camera)
-      const off = document.createElement('canvas')
-      off.width = 160
-      off.height = 120
-      const g = off.getContext('2d')
-      g.drawImage(v.renderer.domElement, 0, 0, 160, 120)
-      return [...g.getImageData(0, 0, 160, 120).data]
-    })
-    const withGlass = await frame()
-    await page.evaluate(() => window.__meshview.pivot.traverse((o) => {
-      for (const m of Array.isArray(o.material) ? o.material : o.material ? [o.material] : []) {
-        if ('transmission' in m) { m.transmission = 0; m.needsUpdate = true }
-      }
-    }))
-    await page.waitForTimeout(600)
-    const without = await frame()
-    let changed = 0
-    for (let i = 0; i < withGlass.length; i += 4) if (Math.abs(withGlass[i] - without[i]) > 6) changed++
-    say('pixels transmission is worth', `${changed} of ${withGlass.length / 4}`)
-    if (changed < 20) fail.push('turning transmission off changed nothing — the pass is not running')
-    await page.evaluate(() => window.__meshview.pivot.traverse((o) => {
-      for (const m of Array.isArray(o.material) ? o.material : o.material ? [o.material] : []) {
-        if ('transmission' in m) { m.transmission = 1; m.needsUpdate = true }
-      }
-    }))
+    if (glass.roughness > 0.3) fail.push(`the glass is roughness ${glass.roughness} — frosted to opacity`)
+    if (glass.metalness > 0.1) fail.push(`the glass is metalness ${glass.metalness} — a metal has no diffuse to transmit`)
   }
+  if (!bodyKept) fail.push('the body lost its own material in the split')
+
+  const frame = () => page.evaluate(() => {
+    const v = window.__meshview
+    v.renderer.render(v.scene, v.camera)
+    const off = document.createElement('canvas')
+    off.width = 160
+    off.height = 120
+    const g = off.getContext('2d')
+    g.drawImage(v.renderer.domElement, 0, 0, 160, 120)
+    return [...g.getImageData(0, 0, 160, 120).data]
+  })
+  const setT = (t) => page.evaluate((v) => window.__meshview.pivot.traverse((o) => {
+    for (const m of Array.isArray(o.material) ? o.material : o.material ? [o.material] : []) {
+      if ('transmission' in m) { m.transmission = v; m.needsUpdate = true }
+    }
+  }), t)
+  const on = await frame()
+  await setT(0)
+  await page.waitForTimeout(600)
+  const off = await frame()
+  await setT(1)
+  let changed = 0
+  for (let i = 0; i < on.length; i += 4) if (Math.abs(on[i] - off[i]) > 6) changed++
+  say('pixels transmission is worth', `${changed} of ${on.length / 4}`)
+  if (changed < 20) fail.push('turning transmission off changed nothing — the pass is not running')
 }
 
 if (!variants.includes('raw') || !variants.includes('finished')) {

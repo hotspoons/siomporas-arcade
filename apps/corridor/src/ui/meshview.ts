@@ -25,6 +25,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js'
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
 import { Dialog, button, el } from './shell'
+import { applyAlphaGlazing, type GlazingResult } from '../glazing'
 
 /**
  * The roles a game knows how to drive, and the names that mean them.
@@ -129,6 +130,8 @@ interface MeshPrefs {
   wire?: boolean
   /** camera position and orbit target, in the viewer's own units */
   cam?: [number, number, number, number, number, number]
+  /** how tall the viewer was left, in pixels */
+  height?: number
 }
 
 export class MeshView {
@@ -164,6 +167,8 @@ export class MeshView {
    * the compressor rather than about the model.
    */
   stats: { triangles: number; vertices: number; meshes: number; materials: number } | null = null
+  /** what `src/glazing.ts` found and turned into glass on the last load */
+  glazed: GlazingResult | null = null
   private skeletonHelper: THREE.SkeletonHelper | null = null
   private skinned: THREE.SkinnedMesh | null = null
   /**
@@ -212,6 +217,33 @@ export class MeshView {
 
     this.status.hidden = true
     this.root.append(this.canvas, this.status)
+
+    /*
+     * DRAG THE BOTTOM EDGE, AND IT STAYS THAT SIZE.
+     *
+     * A fixed aspect ratio is right for a thumbnail and wrong for the thing you are judging a
+     * reconstruction with — how tall it should be depends on the model and on the screen, and
+     * neither of those is known here. The height is kept with the spin and the camera, under the
+     * same key, so it comes back the way it was left.
+     */
+    if (this.prefs.height) this.setHeight(this.prefs.height)
+    const grip = el('div', 'meshview-grip')
+    grip.title = 'drag to resize'
+    grip.addEventListener('pointerdown', (e) => {
+      e.preventDefault()
+      grip.setPointerCapture(e.pointerId)
+      const from = this.root.getBoundingClientRect().height
+      const y0 = e.clientY
+      const move = (m: PointerEvent) => this.setHeight(from + (m.clientY - y0))
+      const up = () => {
+        grip.removeEventListener('pointermove', move)
+        grip.removeEventListener('pointerup', up)
+        this.savePrefs()
+      }
+      grip.addEventListener('pointermove', move)
+      grip.addEventListener('pointerup', up)
+    })
+    this.root.append(grip)
     // The canvas has no intrinsic size inside a panel that resizes, so its box is the authority.
     this.observer = new ResizeObserver(() => this.resize())
     this.observer.observe(this.canvas)
@@ -261,11 +293,23 @@ export class MeshView {
     return this.wire
   }
 
+  /** Between a thumbnail and most of a screen; anything outside that is a mis-drag. */
+  private setHeight(px: number): void {
+    const h = Math.round(Math.max(140, Math.min(Math.max(240, innerHeight - 160), px)))
+    this.height = h
+    this.root.style.height = `${h}px`
+    this.root.style.aspectRatio = 'auto'
+    this.root.style.maxHeight = 'none'
+    this.resize()
+  }
+
+  private height = 0
+
   private savePrefs(): void {
     if (!this.prefKey || this.restoring) return
     const c = this.camera.position
     const t = this.controls.target
-    this.prefs = { spin: this.spin, wire: this.wire, cam: [c.x, c.y, c.z, t.x, t.y, t.z] }
+    this.prefs = { spin: this.spin, wire: this.wire, cam: [c.x, c.y, c.z, t.x, t.y, t.z], height: this.height || this.prefs.height }
     try { localStorage.setItem(this.prefKey, JSON.stringify(this.prefs)) } catch { /* private window */ }
   }
 
@@ -449,6 +493,16 @@ export class MeshView {
         if (sm.isSkinnedMesh && !this.skinned) this.skinned = sm
         if ((o as THREE.Bone).isBone) this.boneRoots.push(o)
       })
+      /*
+       * THE GLAZING THE RECONSTRUCTOR ALREADY DREW.
+       *
+       * TRELLIS.2 writes the window mask into the base colour texture's ALPHA and exports the
+       * material as OPAQUE, so it is there in every asset and nothing has ever switched it on.
+       * See src/glazing.ts — this is the one call, and it is a no-op on a file that already
+       * declares transmission or on anything with no transparent texels.
+       */
+      this.glazed = applyAlphaGlazing(root)
+
       const box = new THREE.Box3().setFromObject(root)
       const centre = box.getCenter(new THREE.Vector3())
       const size = box.getSize(new THREE.Vector3())
@@ -590,6 +644,7 @@ export class MeshView {
     this.grid.visible = true
     if (this.boneMark) this.boneMark.visible = false
     this.stats = null
+    this.glazed = null
     this.pivot.clear()
     this.skeletonHelper = null
     this.skinned = null

@@ -32,6 +32,17 @@ RUN npm install --no-audit --no-fund --omit=dev \
 # three files is the whole closure. `grep "from './" tools/assetgen/*.mjs` if that ever changes.
 COPY tools/assetsvc/ tools/assetsvc/
 COPY tools/assetgen/finish.mjs tools/assetgen/proportion.mjs tools/assetgen/generate.mjs tools/assetgen/
+# tools/assetlib — the ROSTERS and the taste.
+#
+# `specs.mjs` imports `../assetlib/style.mjs` for buildPrompt, and reads the rosters from
+# `assetlib/specs/`: the hero cars, the traffic vehicles, the building materials and the buildings
+# dressing kit. Without this the service starts, answers, and reports zero specs — which looks
+# like an empty library rather than a missing directory.
+#
+# The .mjs files and specs/ only. `out/` is the built library and belongs on a volume; it is
+# gigabytes and `tools/assetsvc/import-assetlib.mjs` is how it gets there.
+COPY tools/assetlib/*.mjs tools/assetlib/
+COPY tools/assetlib/specs/ tools/assetlib/specs/
 
 # Data never lives in the image: ASSETSVC_DATA is the mount (a PVC in the chart).
 RUN useradd -u 10001 -m app && mkdir -p /data && chown app /data

@@ -410,6 +410,14 @@ export const api = {
   saveProgram: (id: string, source: string) => call<{ id: string; bytes: number }>(`/api/programs/${id}`, { method: 'PUT', body: JSON.stringify({ source }) }),
   deleteProgram: (id: string) => call<{ deleted: string }>(`/api/programs/${id}`, { method: 'DELETE' }),
 
+  /* ---- the agent: the platform's deployments, and a tunnel to one (tools/worldeditor/platform.mjs) ---- */
+  agentPlatform: () => call<{ set: boolean; base: string | null; user: string | null }>('/api/agent'),
+  agentDeployments: () => call<{ agents: { name: string; namespace?: string; phase?: string }[] }>('/api/agent/agents'),
+  /** write-only: the personal access token goes up and nothing brings it back */
+  setAgentCredential: (body: { base: string; token: string; user?: string }) =>
+    call<{ set: boolean; base: string | null }>('/api/agent/credential', { method: 'PUT', body: JSON.stringify(body) }),
+  clearAgentCredential: () => call<{ set: boolean }>('/api/agent/credential', { method: 'DELETE' }),
+
   /* ---- git: the volume as a repository (tools/worldeditor/gitrepo.mjs) ---- */
   gitStatus: () => call<GitStatus>('/api/git'),
   gitScan: () => call<GitScan>('/api/git/scan'),

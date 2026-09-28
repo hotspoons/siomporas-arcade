@@ -35,6 +35,8 @@ import { Captures } from './captures.mjs'
 import { ModelResolver } from './models.mjs'
 import * as levels from './levels.mjs'
 import { GitRepo, scan as gitScan } from './gitrepo.mjs'
+import { Platform } from './platform.mjs'
+import { attachAgentRelay } from './agentws.mjs'
 import * as training from './training.mjs'
 import { Overpass, PUBLIC_MIRRORS } from './overpass.mjs'
 import { Tiles } from './tiles.mjs'
@@ -88,6 +90,8 @@ const MAX_SPAN_LON = 0.35
 const captures = new Captures(DATA)
 await captures.init()
 const store = new Store(DATA)
+/** The platform, for the agent picker and the tunnel relay. Holds the PAT; see platform.mjs. */
+const platform = new Platform(DATA)
 store.catalogSeed = path.join(REPO, 'apps/corridor/public/assets/catalog.json')
 await store.init()
 /*
@@ -798,6 +802,35 @@ async function api(req, res, seg, q) {
     }
   }
   /*
+   * ---- the agent: the platform's deployments, and a tunnel to one ------------------------------
+   *
+   * Rich, 2026-09-28: embed the patapsco-remote client — "the agent picker, session manager, ACP
+   * client, and editor controls" — into the editor, against "the current platform client which is
+   * a few rest endpoints, a tunnel token minting endpoint, and a websocket connection".
+   *
+   * THE PAT NEVER REACHES THE BROWSER, and here that is not only good practice: a browser's
+   * WebSocket cannot send headers, and the platform's tunnel needs the PAT in `Authorization` AND
+   * a single-use OTP in `?t=`. A page can do the second half only. So the token lives here, this
+   * service mints the OTP and opens the upstream socket, and `/api/agent/tunnel` relays the bytes.
+   */
+  if (seg[0] === 'agent') {
+    try {
+      if (seg.length === 1 && req.method === 'GET') return json(res, 200, await platform.info())
+      if (seg[1] === 'credential') {
+        if (req.method === 'PUT') return json(res, 200, await platform.set(await readJson(req)))
+        if (req.method === 'DELETE') return json(res, 200, await platform.clear())
+      }
+      if (seg[1] === 'agents' && req.method === 'GET') {
+        // `q`, not `url`: this is `api(req, res, seg, q)` and the URL object belongs to the
+        // caller. `url` resolved to nothing and the route answered "url is not defined".
+        return json(res, 200, { agents: await platform.agents({ workspace: q.get('workspace') ?? undefined }) })
+      }
+    } catch (e) {
+      return json(res, e.status ?? 500, { error: String(e.message ?? e) })
+    }
+  }
+
+  /*
    * ---- git: the volume as a repository --------------------------------------------------------
    *
    * Rich, 2026-09-28: "being able to hook the games code base and assets up to a git lfs repo
@@ -993,6 +1026,14 @@ async function api(req, res, seg, q) {
   }
   return undefined
 }
+
+/**
+ * The agent relay, on the same server.
+ *
+ * Attached before `listen` because `upgrade` is an event on the server and a browser that connects
+ * in the first milliseconds would otherwise be dropped with no handler and no explanation.
+ */
+attachAgentRelay(server, { platform })
 
 server.listen(PORT, HOST, () => {
   console.log(`worldeditor on http://${HOST}:${PORT}`)

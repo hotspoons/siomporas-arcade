@@ -24,6 +24,7 @@ import { AdoptDialog } from './adopt'
 import { StagePanel } from './stage'
 import { ProgramPanel } from '../ui/programpanel'
 import { ShellPanel } from '../ui/shellpanel'
+import { AgentPanel } from '../ui/agentpanel'
 import { fromUrl, load as loadNav, resolve as resolveNav, save as saveNav, toUrl } from './nav'
 import { ROOT, SITE_DOCS } from '../agent/projection'
 import { AssetsPanel } from './assets'
@@ -39,7 +40,7 @@ import { dockWidth } from '../ui/dockwidth'
  * remembered tab still exists — a stored `'places'` from before a rename would otherwise open a
  * page with no panel and no way to see why.
  */
-const MODES = ['explore', 'index', 'define', 'bake', 'place', 'stage', 'program', 'shell', 'assets', 'splats'] as const
+const MODES = ['explore', 'index', 'define', 'bake', 'place', 'stage', 'program', 'shell', 'agent', 'assets', 'splats'] as const
 type Mode = (typeof MODES)[number]
 
 /*
@@ -158,6 +159,19 @@ const shellPanel = new ShellPanel({
     }
     return null
   },
+})
+
+/**
+ * The Agent panel: the picker, the session and the transcript.
+ *
+ * Its FILES are the Shell's — an agent's read of `worlds/x.json` is the projection's read and its
+ * write is a live edit — so it asks for the live machine rather than making a second one. Two
+ * filesystems over the same documents is two answers to "what does this file say".
+ */
+const agentPanel = new AgentPanel({
+  host: document.getElementById('code')!,
+  transcriptHost: inspector,
+  shell: () => shellPanel.machine,
 })
 
 let mode: Mode = 'explore'
@@ -429,8 +443,9 @@ function buildBar() {
         { value: 'stage', label: 'Stage', icon: 'flag', key: '6' },
         { value: 'program', label: 'Program', icon: 'beaker', key: '7' },
         { value: 'shell', label: 'Shell', icon: 'server-stack', key: '8' },
-        { value: 'assets', label: 'Assets', icon: 'cube', key: '9' },
-        { value: 'splats', label: 'Splats', icon: 'camera', key: '0' },
+        { value: 'agent', label: 'Agent', icon: 'sparkles', key: '9' },
+        { value: 'assets', label: 'Assets', icon: 'cube', key: '0' },
+        { value: 'splats', label: 'Splats', icon: 'camera' },
       ],
       onChange: (m) => setMode(m),
     }),
@@ -814,7 +829,7 @@ function setMode(m: Mode) {
   showSiteEditor(m === 'place')
   // one pane, three things that want it: the map, the Place scene, and the code surface the
   // Program and Shell modes share
-  showCode(m === 'program' || m === 'shell')
+  showCode(m === 'program' || m === 'shell' || m === 'agent')
   // Define puts the map in draw mode; the panel switches it to `pick` itself when the world is a
   // named-roads one, because then clicking is choosing a road rather than dropping a vertex.
   map.mode = m === 'define' ? 'draw' : 'pan'
@@ -844,7 +859,7 @@ function showCode(on: boolean) {
   // mode that was never showing it
   if (mapCanvas && (on || mode !== 'place')) mapCanvas.hidden = on
   const title = document.getElementById('panel-title')
-  if (title && on) title.textContent = mode === 'shell' ? 'Shell' : 'Program'
+  if (title && on) title.textContent = mode === 'shell' ? 'Shell' : mode === 'agent' ? 'Agent' : 'Program'
   const readout = document.getElementById('readout')
   if (readout) readout.hidden = on || readout.hidden
 }
@@ -892,6 +907,10 @@ function renderPanel() {
   }
   if (mode === 'shell') {
     void shellPanel.render()
+    return
+  }
+  if (mode === 'agent') {
+    void agentPanel.render()
     return
   }
   if (mode === 'stage') {

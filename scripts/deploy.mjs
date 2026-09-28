@@ -87,23 +87,91 @@ if (!releases.length) {
 
 const run = (cmd, args) => execFileSync(cmd, args, { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
 
+/**
+ * Does this image really have a build for that tag?
+ *
+ * GHCR in two steps: a PAT buys a registry token for one repository, and that token reads the
+ * manifest. `HEAD` rather than `GET` because the manifest itself is not wanted, and the Accept
+ * headers matter — without them a multi-arch index answers 404 as if the tag did not exist.
+ *
+ * `null` means the question could not be asked (no credential, no network). That is NOT the same
+ * as "no", and bumping is refused rather than guessed either way.
+ */
+async function published(image, tag) {
+  let pat
+  try {
+    pat = execFileSync('git', ['credential', 'fill'], { input: 'protocol=https\nhost=github.com\n\n', encoding: 'utf8' })
+      .split('\n').find((l) => l.startsWith('password='))?.slice('password='.length)
+  } catch {
+    return null
+  }
+  if (!pat) return null
+  const repo = image.replace(/^ghcr\.io\//, '').replace(/:.*$/, '')
+  try {
+    const auth = await fetch(`https://ghcr.io/token?scope=repository:${repo}:pull&service=ghcr.io`, {
+      headers: { Authorization: `Basic ${Buffer.from(`x:${pat}`).toString('base64')}` },
+    })
+    if (!auth.ok) return null
+    const { token } = await auth.json()
+    const r = await fetch(`https://ghcr.io/v2/${repo}/manifests/${tag}`, {
+      method: 'HEAD',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json',
+      },
+    })
+    if (r.status === 200) return true
+    if (r.status === 404) return false
+    return null
+  } catch {
+    return null
+  }
+}
+
 /*
  * --bump rewrites the pinned tags, and it is a deliberate edit to a tracked file rather than
- * something a deploy does behind you. It asks the registry which build exists for HEAD, so a
- * bump to a commit whose image never published fails here instead of leaving a pod pulling a tag
- * that is not there.
+ * something a deploy does behind you.
+ *
+ * IT ASKS THE REGISTRY, and until 2026-09-28 it only said it did. Every release was rewritten to
+ * HEAD's sha whether or not an image had been built for it — and an image is only built when its
+ * own paths change, so a commit touching the world editor bumped assetsvc to a tag that has never
+ * existed. Deploying that is an ImagePullBackOff, found by a pod rather than by this.
  */
 if (BUMP) {
   const sha = run('git', ['rev-parse', '--short=7', 'HEAD']).trim()
+  let skipped = 0
   for (const r of releases) {
     const file = path.join(DIR, `${r.name}.yaml`)
     const before = readFileSync(file, 'utf8')
     const after = before.replace(/(\n\s*tag:\s*)sha-[0-9a-f]+/, `$1sha-${sha}`)
     if (after === before) { console.log(`${r.name}: already sha-${sha}`); continue }
+
+    // the release file pins only the TAG; the repository is the chart's, so ask the chart. Not a
+    // `ghcr.io/hotspoons/<name>` default: a wrong repository answers 404 for every tag and turns
+    // this check into a switch that is always off.
+    const chart = path.join(ROOT, r.chart, 'values.yaml')
+    const repo = existsSync(chart) ? /^\s*repository:\s*(\S+)/m.exec(readFileSync(chart, 'utf8'))?.[1] : null
+    if (!repo) {
+      console.log(`${r.name}: ${r.chart}/values.yaml names no image repository — left alone`)
+      skipped++
+      continue
+    }
+    const exists = await published(repo, `sha-${sha}`)
+    if (exists === false) {
+      const at = /\n\s*tag:\s*(sha-[0-9a-f]+)/.exec(before)?.[1] ?? '?'
+      console.log(`${r.name}: no image for sha-${sha} — left at ${at} (nothing in its paths changed)`)
+      skipped++
+      continue
+    }
+    if (exists === null) {
+      console.log(`${r.name}: could not ask the registry whether sha-${sha} exists — left alone`)
+      skipped++
+      continue
+    }
     writeFileSync(file, after)
     console.log(`${r.name}: -> sha-${sha}  (${file.replace(ROOT + '/', '')})`)
   }
-  console.log('\nreview the diff, commit it, then deploy.')
+  console.log(skipped ? '\nreview the diff, commit it, then deploy. Releases left alone are already on an image that exists.' : '\nreview the diff, commit it, then deploy.')
   process.exit(0)
 }
 

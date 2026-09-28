@@ -16,6 +16,7 @@ import { api, type Preview, type Way, type World } from './api'
 import { importBakeGroup } from './transfer'
 import { assetsvc } from '../assetsvc'
 import { type SurfaceRole } from './api'
+import { slugFromName } from './slug'
 
 /**
  * Which surface role a material's category fills.
@@ -33,6 +34,7 @@ const ROLE_FOR_CATEGORY: Record<string, SurfaceRole> = {
   verge: 'verge',
 }
 import type { LonLat, MapView } from './map'
+
 
 const km = (m: number) => (m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m)} m`)
 
@@ -187,17 +189,34 @@ export class DefinePanel {
        description before submitting"). */
     const name = group('Name')
     const nb = bodyOf(name)
+    /*
+     * THE FIELD IS THE NAME. The slug is derived from it and shown underneath, so you can see
+     * what the files and the URLs will be called without having to type it in that shape.
+     *
+     * Rich, 2026-09-28: "name should be name, slug should be auto-derived from it." The field was
+     * labelled `slug` under a group called `Name`, which asked a person to think in file names
+     * while naming a place — and lost the capitals and the spaces of the name they had in mind.
+     */
+    const slugLine = readout('slug', this.draft.slug || '—', true)
     this.slugField = textField({
-      label: 'slug',
-      value: this.draft.slug ?? '',
-      placeholder: 'lower-case-with-hyphens',
+      label: 'name',
+      value: this.draft.name ?? this.draft.slug ?? '',
+      placeholder: 'Crofton Triangle',
       onChange: (v) => {
-        this.draft.slug = v.trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '')
+        this.draft.name = v.trim()
+        // derived ONLY while it follows: once a slug has been edited by hand, or the world has
+        // been saved under one, renaming must not move the documents out from under it
+        if (!this.editing) this.draft.slug = slugFromName(v)
+        const cell = slugLine.querySelector('.field-value')
+        if (cell) cell.textContent = this.draft.slug || '—'
         this.render()
       },
     })
+    nb.append(this.slugField, slugLine)
+    if (this.editing) {
+      nb.append(el('p', 'panel-hint', `The slug is fixed at ${this.editing}: it names this world\u2019s files, its bake and its URLs.`))
+    }
     nb.append(
-      this.slugField,
       textField({
         label: 'description',
         value: this.draft.note ?? '',
@@ -465,7 +484,7 @@ export class DefinePanel {
         label: this.editing ? 'Save changes' : 'Create world',
         icon: 'document-arrow-down',
         variant: 'primary',
-        title: !this.draft.slug ? 'give it a slug first'
+        title: !this.draft.slug ? 'give it a name first'
           : !this.draft.radius_m ? 'draw an area first' : '',
         onClick: () => void this.save(),
       }),
@@ -483,7 +502,7 @@ export class DefinePanel {
      * cursor goes there, and it all clears at the first keystroke.
      */
     const problems: { field: HTMLElement; message: string }[] = []
-    if (!d.slug && this.slugField) problems.push({ field: this.slugField, message: 'A slug is required' })
+    if (!d.slug && this.slugField) problems.push({ field: this.slugField, message: 'Give it a name' })
     if ((!d.lat || !d.radius_m) && this.extentGroup) {
       // The extent is not a text field — it is the map — so the message goes on the group and the
       // focus moves to the one control in it that CAN be used from the keyboard.
@@ -497,6 +516,7 @@ export class DefinePanel {
     }
     const body: Record<string, unknown> = {
       slug: d.slug,
+      name: d.name ?? d.slug,
       centre: { lat: d.lat, lon: d.lon },
       radius_m: d.radius_m,
       primary: d.primary,

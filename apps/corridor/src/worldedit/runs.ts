@@ -74,7 +74,7 @@ export class LogView {
       this.head.replaceChildren(
         chip(run.state),
         el('span', 'run-title', run.label),
-        el('span', 'run-meta', `${run.runner}${run.job ? ` · ${run.job}` : ''}${run.pod ? ` · ${run.pod}` : ''}`),
+        liveMeta(run),
       )
       this.dialog.footer(
         run.state === 'done' || run.state === 'failed'
@@ -112,6 +112,26 @@ export interface RunsOpts {
   onFinished: () => void
   /** re-read the world list, after an uploaded archive brought a new baked world with it */
   refreshWorlds: () => Promise<void>
+}
+
+/**
+ * The live run's line: where it is running, and how long it has been.
+ *
+ * TICKING, because the panel itself only re-renders on the four-second poll and a duration that
+ * jumps in four-second steps reads as a stuck number. One `setInterval` per row, stopped when the
+ * row leaves the DOM, so a closed panel is not running a clock.
+ */
+function liveMeta(run: Run): HTMLElement {
+  const where = `${run.runner}${run.job ? ` \u00b7 ${run.job}` : ''}${run.pod ? ` \u00b7 ${run.pod}` : ''}`
+  const meta = el('span', 'run-meta')
+  meta.title = startedAt(run)
+  const tick = () => {
+    if (!meta.isConnected) { clearInterval(timer); return }
+    meta.textContent = `${where} \u00b7 ${when(run)}`
+  }
+  const timer = setInterval(tick, 1000)
+  tick()
+  return meta
 }
 
 /** The Bake panel: what exists, what has been baked, what is running. */
@@ -298,7 +318,9 @@ export class RunsPanel {
     if (!this.runs.length) hb.append(empty('Nothing has run yet'))
     for (const r of this.runs.slice(0, 20)) {
       const row = el('button', 'run-row')
-      row.append(chip(r.state), el('span', 'run-title', r.label), el('span', 'run-meta', when(r)))
+      const meta = el('span', 'run-meta', when(r))
+      meta.title = startedAt(r)
+      row.append(chip(r.state), el('span', 'run-title', r.label), meta)
       row.onclick = () => void this.o.logs.open(r.id)
       hb.append(row)
     }
@@ -312,10 +334,37 @@ function chip(state: Run['state']): HTMLElement {
   return s
 }
 
-function when(r: Run): string {
-  if (!r.finished) return `since ${new Date(r.started).toLocaleTimeString()}`
-  const s = Math.round((Date.parse(r.finished) - Date.parse(r.started)) / 1000)
-  return s >= 60 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${s}s`
+/**
+ * A duration, in the largest unit that still says something.
+ *
+ * `1h 12m`, not `72m` and not `4320s`: a bake runs for hours and the question a person has is
+ * whether it has been going for ten minutes or all afternoon.
+ */
+export function elapsed(seconds: number): string {
+  const s = Math.max(0, Math.round(seconds))
+  if (s < 60) return `${s}s`
+  if (s < 3600) return `${Math.floor(s / 60)}m ${s % 60}s`
+  const h = Math.floor(s / 3600)
+  return `${h}h ${Math.floor((s % 3600) / 60)}m`
+}
+
+/**
+ * How long a run has been going, or how long it took.
+ *
+ * ELAPSED, NOT THE START TIME. Rich, 2026-09-28: "would be helpful to show how many seconds or
+ * minutes or hours the bake is running, not just start time." A clock time makes the reader do the
+ * subtraction, and they have to know what time it is now to do it. The start time is still there,
+ * in the tooltip, because it is the thing you need when correlating with a log.
+ */
+function when(r: Run, now = Date.now()): string {
+  if (!r.finished) return `${elapsed((now - Date.parse(r.started)) / 1000)} so far`
+  return elapsed((Date.parse(r.finished) - Date.parse(r.started)) / 1000)
+}
+
+/** The start time, for the tooltip — the thing you want when reading a log beside this. */
+function startedAt(r: Run): string {
+  const d = new Date(r.started)
+  return `started ${d.toLocaleTimeString()} on ${d.toLocaleDateString()}`
 }
 
 function note(text: string): HTMLElement {

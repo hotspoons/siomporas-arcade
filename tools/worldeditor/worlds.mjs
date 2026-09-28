@@ -126,6 +126,11 @@ export function fromDraw({ slug, name, boundary, centre, radius_m, primary, road
   const r = radius_m ?? circle?.radius_m
   const world = {
     slug: slugify(slug ?? name ?? ''),
+    // THE NAME IS THE THING SOMEBODY TYPED, and the slug is derived from it (Rich, 2026-09-28:
+    // "name should be name, slug should be auto-derived from it"). Kept separately because the
+    // derivation loses information nobody should have to retype — "Crofton Triangle" and
+    // "crofton-triangle" are not the same string, and the first is what belongs on a label.
+    name: String(name ?? slug ?? '').trim() || slugify(slug ?? name ?? ''),
     kind: 'network',
     lat: round6(lat),
     lon: round6(lon),

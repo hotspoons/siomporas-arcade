@@ -99,6 +99,8 @@ export type SurfaceRole = (typeof SURFACE_ROLES)[number]
 
 export interface World {
   slug: string
+  /** what somebody typed; the slug is derived from it */
+  name?: string
   kind?: string
   lat: number
   lon: number

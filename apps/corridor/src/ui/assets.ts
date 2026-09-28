@@ -138,8 +138,10 @@ export class AssetCatalog {
     // running behind a closed panel eventually kills the viewer in another tab of the same app.
     this.dialog = new Dialog({
       title: 'Assets', icon: 'cube', size: 'xl', movable: true,
-      // unsaved edits in the detail pane are the one thing in here that only exists in the page
-      beforeClose: () => this.mayLeave('close the catalog'),
+      // unsaved edits in the detail pane are the one thing in here that only exists in the page.
+      // A BOOLEAN when there is nothing to ask: the promise path costs a dialog round trip and is
+      // the interesting case, so the common one should not go anywhere near it.
+      beforeClose: () => (this.dirty ? this.mayLeave('close the catalog') : true),
       onClose: () => { this.mesh3d?.dispose(); this.mesh3d = null },
     })
     this.dialog.body.append(this.tabs.root)
@@ -298,7 +300,7 @@ export class AssetCatalog {
     const thumb = el('div', 'asset-thumb')
     thumb.append(icon('plus', 18))
     const text = el('div', 'asset-row-text')
-    text.append(el('span', 'asset-row-id', p.id || 'new item'), el('span', 'asset-row-sub', p.subject || 'name it on the right'))
+    text.append(el('span', 'asset-row-id', p.id || 'new item'), el('span', 'asset-row-sub', p.subject || ''))
     row.append(thumb, text, el('span', 'chip state-spec', 'not created'))
     row.onclick = () => { this.selected = PENDING; this.renderList(); this.renderDetail() }
     return row

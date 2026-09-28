@@ -182,8 +182,8 @@ export class Dialog {
   private size: { w: number; h: number } | null = null
   private at: { x: number; y: number } | null = null
   private prefKey: string
-  /** a `beforeClose` is in flight; the second call through is the one that goes ahead */
-  private closing = false
+  /** permission granted by `beforeClose`, for exactly the one nested `close()` that follows it */
+  private approved = false
 
   private o: DialogOpts
 
@@ -365,12 +365,28 @@ export class Dialog {
   }
 
   close() {
-    if (this.o.beforeClose && !this.closing) {
+    /*
+     * ASKING FIRST, WITHOUT ASKING FOREVER.
+     *
+     * The answer arrives in a microtask and the only way to act on it is to call `close()` again —
+     * which asks again. The first version cleared its guard BEFORE that second call, so a
+     * `beforeClose` that says yes produced an unbounded chain of microtasks: the queue never
+     * drained, timers never ran, nothing painted, and the tab had to be killed (Rich, 2026-09-28:
+     * "Closing the assets form freezes the tab and you need to wait to kill it so you can get the
+     * aw snap! screen").
+     *
+     * So the flag is a one-shot permission that spans the nested call and is cleared after it.
+     */
+    if (this.o.beforeClose && !this.approved) {
       const answer = this.o.beforeClose()
       if (answer instanceof Promise) {
-        // asking is itself a dialog, so this one must stay where it is until the answer comes back
-        this.closing = true
-        void answer.then((ok) => { this.closing = false; if (ok) this.close() })
+        // asking is itself a dialog, so this one stays where it is until the answer comes back
+        void answer.then((ok) => {
+          if (!ok) return
+          this.approved = true
+          this.close()
+          this.approved = false
+        })
         return
       }
       if (!answer) return

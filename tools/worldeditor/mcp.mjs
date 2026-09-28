@@ -32,6 +32,8 @@ export const SITE_DOCS = ['tuning.json', 'presets.json', 'placements.json', 'adj
  */
 const WORLD_SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/
 const ID_SLUG = /^[a-z0-9][a-z0-9-]{1,63}$/
+/** Matches `PROGRAM_EXT` in store.mjs — what may live under `programs/`. */
+const PROGRAM_EXT = ['.ts', '.tsx', '.js', '.mjs', '.json', '.md', '.txt', '.glsl', '.frag', '.vert', '.css', '.yaml', '.yml']
 
 /**
  * Where a document path lives on the volume, or null.
@@ -48,8 +50,23 @@ export function resolveDoc(root, docPath) {
   if (parts.length === 2 && parts[0] === 'levels' && parts[1].endsWith('.json') && ID_SLUG.test(parts[1].slice(0, -5))) {
     return { file: path.join(root, 'levels', parts[1]), kind: 'level' }
   }
-  if (parts.length === 2 && parts[0] === 'programs' && parts[1].endsWith('.ts') && ID_SLUG.test(parts[1].slice(0, -3))) {
-    return { file: path.join(root, 'programs', parts[1]), kind: 'program' }
+  /*
+   * A PROGRAM IS A PATH NOW, with folders in it and an extension that is not always `.ts` — so
+   * this one cannot be a single matched slug. It is still built segment by segment from matched
+   * names rather than checked for `..`: every segment must be a slug, and the extension must be
+   * one of the few this editor keeps beside code. An agent that could not reach
+   * `programs/levels/rooftop.ts` would be an agent that cannot see half the volume.
+   */
+  if (parts.length >= 2 && parts[0] === 'programs') {
+    const rest = parts.slice(1)
+    const name = rest[rest.length - 1]
+    const dot = name.lastIndexOf('.')
+    const ext = dot > 0 ? name.slice(dot) : ''
+    const ok = rest.length >= 1
+      && PROGRAM_EXT.includes(ext)
+      && rest.slice(0, -1).every((p) => ID_SLUG.test(p))
+      && ID_SLUG.test(name.slice(0, dot))
+    if (ok) return { file: path.join(root, 'programs', ...rest), kind: 'program' }
   }
   if (parts.length === 3 && parts[0] === 'sites' && WORLD_SLUG.test(parts[1]) && SITE_DOCS.includes(parts[2])) {
     return { file: path.join(root, 'sites', parts[1], parts[2]), kind: 'site-doc' }
@@ -69,7 +86,15 @@ export async function listDocs(root) {
   }
   await dir('worlds', '.json')
   await dir('levels', '.json')
-  await dir('programs', '.ts')
+  // programs recurse, because they have folders
+  const walkPrograms = async (rel) => {
+    for (const e of await readdir(path.join(root, 'programs', rel), { withFileTypes: true }).catch(() => [])) {
+      const next = rel ? `${rel}/${e.name}` : e.name
+      if (e.isDirectory()) { await walkPrograms(next); continue }
+      if (resolveDoc(root, `programs/${next}`)) out.push(`programs/${next}`)
+    }
+  }
+  await walkPrograms('')
   for (const slug of await readdir(path.join(root, 'sites')).catch(() => [])) {
     if (!WORLD_SLUG.test(slug)) continue
     for (const d of SITE_DOCS) if (existsSync(path.join(root, 'sites', slug, d))) out.push(`sites/${slug}/${d}`)

@@ -53,15 +53,31 @@ export function loadMonaco(): Promise<MonacoApi> {
     // throws "TypeScript not registered!" if it gets there first. Loading them concurrently is a
     // race that wins on a warm cache and loses on a cold one.
     await import('monaco-editor/languages/definitions/typescript/register.js')
-    const [ts, editorWorker, tsWorker, types] = await Promise.all([
+    // JavaScript is a separate DEFINITION (its own tokenizer) served by the SAME service as
+    // TypeScript. JSON is the other way round: no definition module, because its feature brings
+    // its own tokenization with it.
+    await import('monaco-editor/languages/definitions/javascript/register.js')
+    const [ts, , editorWorker, tsWorker, jsonWorker, types] = await Promise.all([
       import('monaco-editor/languages/features/typescript/register.js'),
+      import('monaco-editor/languages/features/json/register.js'),
       import('monaco-editor/editor/editor.worker.js?worker'),
       import('monaco-editor/languages/features/typescript/ts.worker.js?worker'),
+      import('monaco-editor/languages/features/json/json.worker.js?worker'),
       import('../generated/program-types.json'),
     ])
+    /*
+     * ONE WORKER PER LANGUAGE SERVICE, and the label is how Monaco asks for it.
+     *
+     * A json model whose label falls through to the plain editor worker gets no completions, no
+     * schema validation and no formatting — and, as ever here, says nothing about why. Rich,
+     * 2026-09-28: "an LSP for typescript, javascript and json would be nice so we can see what
+     * options exist as we type."
+     */
     ;(self as unknown as { MonacoEnvironment: unknown }).MonacoEnvironment = {
       getWorker(_id: string, label: string) {
-        return label === 'typescript' || label === 'javascript' ? new tsWorker.default() : new editorWorker.default()
+        if (label === 'typescript' || label === 'javascript') return new tsWorker.default()
+        if (label === 'json') return new jsonWorker.default()
+        return new editorWorker.default()
       },
     }
     const monaco: MonacoApi = { editor: api.editor, Uri: api.Uri, ts }
@@ -78,10 +94,14 @@ export function loadMonaco(): Promise<MonacoApi> {
       // scripts/gen-program-types.mjs, which is the one layout the real resolver handles without
       // argument; a `paths` mapping over extra libs resolves the module and then reports that it
       // has no exported members, which reads as "the types did not load" with nothing saying why.
-      allowJs: false,
+      // ALLOW JS, because `.js` is one of the extensions a file here may have now — and without
+      // it the service parses a JavaScript model and then declines to say anything about it.
+      allowJs: true,
+      checkJs: false, // its diagnostics on untyped JavaScript are noise, not help
     })
     // a program is authored, run and thrown away; there is no build step to complain to
     ts.typescriptDefaults.setDiagnosticsOptions({ noSemanticValidation: false, noSyntaxValidation: false })
+    ts.javascriptDefaults?.setCompilerOptions?.({ target: ts.ScriptTarget.ES2020, allowJs: true, allowNonTsExtensions: true, lib: ['es2022', 'dom'] })
 
     const doc = types.default as ProgramTypes
     for (const [uri, text] of Object.entries(doc.libs)) ts.typescriptDefaults.addExtraLib(text, uri)
@@ -117,7 +137,8 @@ export interface CodeEditorOpts {
   value: string
   /** a stable name; it is the module's URI, so two editors must not share one */
   path: string
-  language?: 'typescript' | 'json'
+  /** Monaco's language id. From the file's extension — see `languageOf` in programpanel.ts. */
+  language?: 'typescript' | 'javascript' | 'json' | 'plaintext'
   onChange?: (value: string) => void
   readOnly?: boolean
 }
@@ -157,6 +178,18 @@ export class CodeEditor {
       fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
       minimap: { enabled: false },
       scrollBeyondLastLine: false,
+      /*
+       * SUGGESTIONS AS YOU TYPE, which is the whole point of having a language service.
+       *
+       * Monaco's defaults offer them only on an explicit Ctrl-Space or after a trigger character,
+       * so an editor with a perfectly good service in it looks like a text box until you know the
+       * shortcut. `quickSuggestions` is the "what can go here" list appearing on its own.
+       */
+      quickSuggestions: { other: true, comments: false, strings: true },
+      suggestOnTriggerCharacters: true,
+      tabCompletion: 'on',
+      parameterHints: { enabled: true },
+      fixedOverflowWidgets: true, // the popup must escape a dialog with `overflow: hidden` on it
       readOnly: this.o.readOnly,
       tabSize: 2,
       renderWhitespace: 'selection',

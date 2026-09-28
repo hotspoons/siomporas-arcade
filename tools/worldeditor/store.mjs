@@ -32,6 +32,16 @@ import path from 'node:path'
  * and an editor bug that PUT over `manifest.json` would destroy a bake that cost an hour of USGS
  * bandwidth. Adding a name here is a decision about who owns that file.
  */
+/**
+ * What may live under `programs/`.
+ *
+ * A closed list rather than "anything": this directory is served to a browser and projected into
+ * the shell, and a place a browser can write arbitrary filenames into is a place to put something
+ * that gets executed by something else. TypeScript is the point; the rest are the files that sit
+ * beside code — data it imports, notes about it, a shader it needs.
+ */
+const PROGRAM_EXT = new Set(['.ts', '.tsx', '.js', '.mjs', '.json', '.md', '.txt', '.glsl', '.frag', '.vert', '.css', '.yaml', '.yml'])
+
 export const AUTHORED = ['adjustments', 'placements', 'structures', 'dead_ends', 'tuning']
 const AUTHORED_RE = new RegExp(`^[a-z0-9-]+/(${AUTHORED.join('|')})\\.json$`)
 
@@ -286,6 +296,7 @@ export class Store {
   }
 
   /* ---- programs: the code half of a level -------------------------------------------------- */
+  // (PROGRAM_EXT is at the top of this file, with the other constants)
   //
   // Stage 6 of the pipeline. A level's declarative `scenario` covers the simple path; a program is
   // what you write when it runs out — hiding street names is a flag, changing transport is a
@@ -297,7 +308,8 @@ export class Store {
   // code with a type error is a service you cannot save work-in-progress to.
 
   /**
-   * PROGRAM IDS ARE PATHS, so a game can be more than one file.
+   * PROGRAM IDS ARE PATHS WITH THEIR EXTENSION ON, so a game can be more than one file and the
+   * files can be more than one kind of thing.
    *
    * Rich, 2026-09-28: "How are you supposed to manage multiple files in the editor, there is no
    * folders and no file system and no tabs". The id was one slug with no slash in it, which meant
@@ -306,29 +318,48 @@ export class Store {
    * A path is segments of `[a-z0-9][a-z0-9._-]*`, joined by single slashes. That grammar is what
    * refuses `..`, an absolute path, a dotfile and a trailing slash, all without a special case —
    * but it is NOT the check, because a grammar is an argument and the containing directory is a
-   * fact. `under()` resolves the result and refuses anything that landed outside, which is the
-   * check that still holds if this regexp is ever loosened.
+   * fact. The resolve below is, and it still holds if this regexp is ever loosened.
+   *
+   * A FOLDER IS A PATH WITH NOTHING AFTER THE LAST SLASH, so the same routine checks both and
+   * `isDir` decides whether the extension is required.
    */
-  #programFile(id) {
+  #programPath(id, isDir = false) {
     if (typeof id !== 'string' || !/^[a-z0-9][a-z0-9._-]*(\/[a-z0-9][a-z0-9._-]*)*$/.test(id)) return null
-    if (id.split('/').some((p) => p === '.' || p === '..')) return null
-    const file = path.resolve(this.programs, `${id}.ts`)
-    return file.startsWith(path.resolve(this.programs) + path.sep) ? file : null
+    if (id.split('/').some((p) => p === '.' || p === '..' || p.startsWith('.'))) return null
+    if (!isDir && !PROGRAM_EXT.has(path.extname(id))) return null
+    const full = path.resolve(this.programs, id)
+    return full.startsWith(path.resolve(this.programs) + path.sep) ? full : null
   }
 
+  #programFile(id) {
+    return this.#programPath(id, false)
+  }
+
+  /**
+   * Every file and every folder under `programs/`.
+   *
+   * THE FOLDERS ARE LISTED SEPARATELY and not derived from the files, which is the difference
+   * between a tree drawn from paths and a filesystem you can make a folder in: a folder somebody
+   * just created is empty by definition, and deriving folders from files would make it vanish the
+   * moment they looked away (Rich, 2026-09-28: "need ability to create folders...").
+   */
   async listPrograms() {
     const out = []
+    const dirs = []
     const walk = async (dir, prefix) => {
       for (const e of await readdir(dir, { withFileTypes: true }).catch(() => [])) {
+        if (e.name.startsWith('.')) continue
         const rel = prefix ? `${prefix}/${e.name}` : e.name
-        if (e.isDirectory()) { await walk(path.join(dir, e.name), rel); continue }
-        if (!e.name.endsWith('.ts')) continue
+        if (e.isDirectory()) { dirs.push(rel); await walk(path.join(dir, e.name), rel); continue }
+        if (!PROGRAM_EXT.has(path.extname(e.name))) continue
         const st = await stat(path.join(dir, e.name)).catch(() => null)
-        out.push({ id: rel.slice(0, -3), bytes: st?.size ?? 0, modified: st?.mtime?.toISOString() ?? null })
+        out.push({ id: rel, bytes: st?.size ?? 0, modified: st?.mtime?.toISOString() ?? null })
       }
     }
     await walk(this.programs, '')
-    return out.sort((a, b) => (a.id < b.id ? -1 : 1))
+    out.sort((a, b) => (a.id < b.id ? -1 : 1))
+    dirs.sort()
+    return { programs: out, dirs }
   }
 
   async getProgram(id) {
@@ -340,7 +371,7 @@ export class Store {
 
   async putProgram(id, source) {
     const file = this.#programFile(id)
-    if (!file) throw Object.assign(new Error(`program id ${JSON.stringify(id)} is not a usable path`), { status: 400 })
+    if (!file) throw Object.assign(new Error(`${JSON.stringify(id)} is not a usable path — ${[...PROGRAM_EXT].join(' ')} only`), { status: 400 })
     if (typeof source !== 'string') throw Object.assign(new Error('a program is a string of TypeScript'), { status: 400 })
     // a cap, because this arrives over HTTP from a browser and a runaway paste should be refused
     // here rather than fill the volume
@@ -353,26 +384,59 @@ export class Store {
     const file = this.#programFile(id)
     if (!file) return
     await rm(file, { force: true })
-    // and take the folder with it if that was the last thing in it: an empty folder nobody can
-    // put anything into is a row in the tree that does nothing.
-    for (let dir = path.dirname(file); dir.startsWith(path.resolve(this.programs) + path.sep); dir = path.dirname(dir)) {
+    await this.#pruneEmpty(path.dirname(file))
+  }
+
+  /**
+   * Rename or move — a file OR a folder, whichever the path names.
+   *
+   * ONE OPERATION FOR BOTH, because they are the same operation: changing a file's extension,
+   * moving it into another folder, and renaming a folder full of files are all `rename(2)`, and
+   * it is atomic, so none of them can leave two copies or none.
+   */
+  async moveProgram(from, to) {
+    const dir = existsSync(this.#programPath(from, true) ?? '\u0000') && (await stat(this.#programPath(from, true))).isDirectory()
+    const src = this.#programPath(from, dir)
+    const dst = this.#programPath(to, dir)
+    if (!src || !dst) throw Object.assign(new Error(`${JSON.stringify(to)} is not a usable path`), { status: 400 })
+    if (!existsSync(src)) throw Object.assign(new Error(`no ${from}`), { status: 404 })
+    if (existsSync(dst)) throw Object.assign(new Error(`${to} already exists`), { status: 409 })
+    // a folder cannot be moved inside itself: rename(2) allows it and the tree becomes unreachable
+    if (dir && (dst + path.sep).startsWith(src + path.sep)) {
+      throw Object.assign(new Error(`${to} is inside ${from}`), { status: 400 })
+    }
+    await mkdir(path.dirname(dst), { recursive: true })
+    await rename(src, dst)
+    await this.#pruneEmpty(path.dirname(src))
+    return { id: to, dir }
+  }
+
+  /** Make an empty folder. It exists on disk, which is why it survives being looked away from. */
+  async makeProgramDir(id) {
+    const dir = this.#programPath(id, true)
+    if (!dir) throw Object.assign(new Error(`${JSON.stringify(id)} is not a usable folder name`), { status: 400 })
+    if (existsSync(dir)) throw Object.assign(new Error(`${id} already exists`), { status: 409 })
+    await mkdir(dir, { recursive: true })
+    return { id, dir: true }
+  }
+
+  /** Delete a folder AND what is in it. The caller is the one that has to ask first. */
+  async removeProgramDir(id) {
+    const dir = this.#programPath(id, true)
+    if (!dir) return { deleted: null }
+    await rm(dir, { recursive: true, force: true })
+    await this.#pruneEmpty(path.dirname(dir))
+    return { deleted: id }
+  }
+
+  /** Walk up from a folder that just lost something, removing the ones nothing is left in. */
+  async #pruneEmpty(from) {
+    const root = path.resolve(this.programs)
+    for (let dir = from; dir.startsWith(root + path.sep); dir = path.dirname(dir)) {
       const left = await readdir(dir).catch(() => ['.'])
       if (left.length) break
       await rm(dir, { recursive: false, force: true }).catch(() => {})
     }
-  }
-
-  /** Rename or move one. Atomic, so a move cannot leave two copies or none. */
-  async moveProgram(from, to) {
-    const src = this.#programFile(from)
-    const dst = this.#programFile(to)
-    if (!src || !dst) throw Object.assign(new Error('both paths must be usable program paths'), { status: 400 })
-    if (!existsSync(src)) throw Object.assign(new Error(`no program ${from}`), { status: 404 })
-    if (existsSync(dst)) throw Object.assign(new Error(`${to} already exists`), { status: 409 })
-    await mkdir(path.dirname(dst), { recursive: true })
-    await rename(src, dst)
-    await this.removeProgram(from) // prunes the folder it left behind; the file is already gone
-    return { id: to }
   }
 
   /* ---- the place index --------------------------------------------------------------------- */

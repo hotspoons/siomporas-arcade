@@ -36,6 +36,7 @@ export interface Endpoint {
 export interface DocSources {
   worlds?: { slug: string }[]
   levels?: { id: string }[]
+  /** ids carry their folders and their extension: `levels/rooftop.ts` */
   programs?: { id: string }[]
   /** which sites have authored documents, and which of them */
   sites?: { slug: string; docs: string[] }[]
@@ -43,6 +44,9 @@ export interface DocSources {
 
 /** The authored documents beside a bake. The same list gitrepo.mjs commits, deliberately. */
 export const SITE_DOCS = ['tuning.json', 'presets.json', 'placements.json', 'adjustments.json', 'structures.json', 'dead_ends.json']
+
+/** Matches PROGRAM_EXT in tools/worldeditor/store.mjs, which is the authority. */
+const PROGRAM_EXT = ['.ts', '.tsx', '.js', '.mjs', '.json', '.md', '.txt', '.glsl', '.frag', '.vert', '.css', '.yaml', '.yml']
 
 const SLUG = /^[a-z0-9][a-z0-9-]{0,63}$/
 
@@ -68,9 +72,19 @@ export function endpointFor(path: string): Endpoint | null {
     if (!SLUG.test(id)) return null
     return { method: 'PUT', url: `/api/levels/${id}`, body: 'json', what: `the level ${id}` }
   }
-  if (parts.length === 2 && parts[0] === 'programs' && parts[1].endsWith('.ts')) {
-    const id = parts[1].slice(0, -3)
-    if (!SLUG.test(id)) return null
+  /*
+   * A PROGRAM PATH CARRIES ITS FOLDERS AND ITS EXTENSION, so this matches the rest of the path
+   * rather than one slug: `programs/levels/rooftop.ts` is a program, and so is
+   * `programs/lib/data.json`. Every segment still has to be a slug — the shell can write anywhere
+   * it can name, so the names are the boundary.
+   */
+  if (parts.length >= 2 && parts[0] === 'programs') {
+    const rest = parts.slice(1)
+    const name = rest[rest.length - 1]
+    const dot = name.lastIndexOf('.')
+    if (dot <= 0 || !PROGRAM_EXT.includes(name.slice(dot))) return null
+    if (!rest.slice(0, -1).every((p) => SLUG.test(p)) || !SLUG.test(name.slice(0, dot))) return null
+    const id = rest.join('/')
     // the service takes `{ source }`, not the bare text: a program is source and a document at once
     return { method: 'PUT', url: `/api/programs/${id}`, body: 'source', what: `the program ${id}` }
   }
@@ -87,7 +101,7 @@ export function pathsFor(docs: DocSources): string[] {
   const out: string[] = []
   for (const w of docs.worlds ?? []) if (SLUG.test(w.slug)) out.push(`${ROOT}/worlds/${w.slug}.json`)
   for (const l of docs.levels ?? []) if (SLUG.test(l.id)) out.push(`${ROOT}/levels/${l.id}.json`)
-  for (const p of docs.programs ?? []) if (SLUG.test(p.id)) out.push(`${ROOT}/programs/${p.id}.ts`)
+  for (const p of docs.programs ?? []) if (endpointFor(`${ROOT}/programs/${p.id}`)) out.push(`${ROOT}/programs/${p.id}`)
   for (const s of docs.sites ?? []) {
     if (!SLUG.test(s.slug)) continue
     for (const d of s.docs) if (SITE_DOCS.includes(d)) out.push(`${ROOT}/sites/${s.slug}/${d}`)
@@ -111,7 +125,7 @@ entirely in this browser tab and has no network of its own.
 
     worlds/<slug>.json          ${n(docs.worlds)} world definitions: where, how big, which road is the spine
     levels/<id>.json            ${n(docs.levels)} levels: a world dressed and given something to do
-    programs/<id>.ts            ${n(docs.programs)} programs: the code half of a level
+    programs/<path>             ${n(docs.programs)} programs: the code half of a level
     sites/<slug>/tuning.json    per-world knob overrides, and presets.json beside it
     out/                        yours; nothing here is saved anywhere
 

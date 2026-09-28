@@ -11,7 +11,10 @@ describe('endpointFor', () => {
   it('maps each kind of document to its own endpoint', () => {
     expect(endpointFor(`${ROOT}/worlds/crofton-triangle.json`)).toMatchObject({ url: '/api/worlds/crofton-triangle', body: 'json' })
     expect(endpointFor(`${ROOT}/levels/rooftop.json`)).toMatchObject({ url: '/api/levels/rooftop', body: 'json' })
-    expect(endpointFor(`${ROOT}/programs/rooftop.ts`)).toMatchObject({ url: '/api/programs/rooftop', body: 'source' })
+    // a program id carries its folders and its extension, so the path IS the id
+    expect(endpointFor(`${ROOT}/programs/rooftop.ts`)).toMatchObject({ url: '/api/programs/rooftop.ts', body: 'source' })
+    expect(endpointFor(`${ROOT}/programs/levels/rooftop.ts`)).toMatchObject({ url: '/api/programs/levels/rooftop.ts', body: 'source' })
+    expect(endpointFor(`${ROOT}/programs/lib/data.json`)).toMatchObject({ url: '/api/programs/lib/data.json', body: 'source' })
     expect(endpointFor(`${ROOT}/sites/crofton-triangle/presets.json`)).toMatchObject({ url: '/sites/crofton-triangle/presets.json', body: 'json' })
   })
 
@@ -35,11 +38,19 @@ describe('endpointFor', () => {
       `${ROOT}/../etc/passwd`,
       `${ROOT}/worlds/../../api/git/credential`,
       `${ROOT}/worlds/..%2f..%2fsecret.json`,
-      `${ROOT}/programs/a/b.ts`,
       `${ROOT}/sites/crofton/dem_1m.tif`,
       `${ROOT}/sites/crofton/tiles/0_0.ktx2`,
       `${ROOT}/worlds/Crofton.json`,
       `${ROOT}/worlds/.json`,
+      // still refused under programs/, which now takes folders: every segment must be a slug, the
+      // extension must be one this editor keeps, and nothing may start with a dot
+      `${ROOT}/programs/../secret.ts`,
+      `${ROOT}/programs/a/../../secret.ts`,
+      `${ROOT}/programs/.hidden.ts`,
+      `${ROOT}/programs/a/.env`,
+      `${ROOT}/programs/Rooftop.ts`,
+      `${ROOT}/programs/rooftop.sh`,
+      `${ROOT}/programs/rooftop`,
     ]) {
       expect(endpointFor(p), p).toBeNull()
     }
@@ -60,7 +71,7 @@ describe('pathsFor', () => {
     const paths = pathsFor({
       worlds: [{ slug: 'crofton-triangle' }, { slug: 'arrowhead-farms' }],
       levels: [{ id: 'rooftop' }],
-      programs: [{ id: 'rooftop' }],
+      programs: [{ id: 'rooftop.ts' }, { id: 'levels/harbour.ts' }],
       sites: [{ slug: 'crofton-triangle', docs: ['tuning.json', 'presets.json', 'dem_1m.tif'] }],
     })
     expect(paths).toEqual([
@@ -68,6 +79,7 @@ describe('pathsFor', () => {
       `${ROOT}/worlds/arrowhead-farms.json`,
       `${ROOT}/levels/rooftop.json`,
       `${ROOT}/programs/rooftop.ts`,
+      `${ROOT}/programs/levels/harbour.ts`,
       `${ROOT}/sites/crofton-triangle/tuning.json`,
       `${ROOT}/sites/crofton-triangle/presets.json`,
     ])
@@ -87,7 +99,7 @@ describe('pathsFor', () => {
     const docs = {
       worlds: [{ slug: 'a' }],
       levels: [{ id: 'b' }],
-      programs: [{ id: 'c' }],
+      programs: [{ id: 'c.ts' }, { id: 'd/e.json' }],
       sites: [{ slug: 'd', docs: SITE_DOCS }],
     }
     for (const p of pathsFor(docs)) expect(endpointFor(p), p).toBeTruthy()

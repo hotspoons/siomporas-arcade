@@ -131,11 +131,13 @@ function pane(name: string): HTMLElement {
 const programPanel = new ProgramPanel({
   host: pane('program'),
   reportHost: inspector,
-  list: async () => (await api.programs()).programs,
+  list: () => api.programs(),
   load: async (id) => (await api.program(id).catch(() => null))?.source ?? null,
   save: async (id, source) => { await api.saveProgram(id, source) },
   remove: async (id) => { await api.deleteProgram(id) },
   move: async (id, to) => { await api.moveProgram(id, to) },
+  makeDir: async (id) => { await api.makeProgramDir(id) },
+  removeDir: async (id) => { await api.deleteProgramDir(id) },
   refresh: () => { if (mode === 'program') void programPanel.render() },
 })
 
@@ -168,7 +170,7 @@ const shellPanel = new ShellPanel({
         return w ? JSON.stringify(w, null, 1) : null
       }
       if (rel.startsWith('levels/')) return JSON.stringify((await api.level(rel.slice(7, -5))).level, null, 1)
-      if (rel.startsWith('programs/')) return (await api.program(rel.slice(9, -3))).source
+      if (rel.startsWith('programs/')) return (await api.program(rel.slice(9))).source
       if (rel.startsWith('sites/')) {
         // static files beside the bake; a missing optional document is a 404, not an error
         const r = await fetch(`/${rel}`, { cache: 'no-cache' })

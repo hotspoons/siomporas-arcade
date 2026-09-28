@@ -24,7 +24,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js'
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
-import { el } from './shell'
+import { Dialog, button, el } from './shell'
 
 /**
  * The roles a game knows how to drive, and the names that mean them.
@@ -88,6 +88,21 @@ export interface RigInfo {
 export interface MeshViewOpts {
   /** spin the model. On by default: a still three-quarter view hides the far flank. */
   spin?: boolean
+  /**
+   * Remember how it was left — spin, wireframe and where the camera was — under this key.
+   *
+   * Rich, 2026-09-28: "it should remember last settings on refreshes". Per key rather than
+   * globally, because the sample wall in the materials tab and the car in the catalog are looked
+   * at from different places and neither wants the other's camera.
+   */
+  remember?: string
+}
+
+interface MeshPrefs {
+  spin?: boolean
+  wire?: boolean
+  /** camera position and orbit target, in the viewer's own units */
+  cam?: [number, number, number, number, number, number]
 }
 
 export class MeshView {
@@ -103,7 +118,12 @@ export class MeshView {
   private readonly loader: GLTFLoader
   private readonly observer: ResizeObserver
   private spin: boolean
+  private wire = false
   private running = false
+  private readonly prefKey: string | null
+  private prefs: MeshPrefs = {}
+  /** set while a load is applying a remembered camera, so it is not saved back mid-flight */
+  private restoring = false
   /** resolves when the current `load()` has settled, so a caller can inspect what arrived */
   loaded: Promise<void> = Promise.resolve()
   private disposed = false
@@ -122,7 +142,12 @@ export class MeshView {
   private readonly textures = new THREE.TextureLoader()
 
   constructor(o: MeshViewOpts = {}) {
-    this.spin = o.spin ?? true
+    this.prefKey = o.remember ? `apex-meshview.${o.remember}` : null
+    if (this.prefKey) {
+      try { this.prefs = JSON.parse(localStorage.getItem(this.prefKey) ?? '{}') as MeshPrefs } catch { this.prefs = {} }
+    }
+    this.spin = this.prefs.spin ?? o.spin ?? true
+    this.wire = this.prefs.wire ?? false
     this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, alpha: true })
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2))
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping
@@ -142,6 +167,8 @@ export class MeshView {
     this.controls = new OrbitControls(this.camera, this.canvas)
     this.controls.enableDamping = true
     this.controls.dampingFactor = 0.07
+    // where you left it, kept when you let go rather than on every frame of a drag
+    this.controls.addEventListener('end', () => this.savePrefs())
 
     const draco = new DRACOLoader().setDecoderPath('/assets/vendor/draco/')
     this.loader = new GLTFLoader().setDRACOLoader(draco)
@@ -185,6 +212,58 @@ export class MeshView {
 
   setSpin(on: boolean) {
     this.spin = on
+    this.savePrefs()
+  }
+
+  /** What the toggles should say when they are built — the remembered value, not a hard-coded one. */
+  get spinning(): boolean {
+    return this.spin
+  }
+
+  get wireframe(): boolean {
+    return this.wire
+  }
+
+  private savePrefs(): void {
+    if (!this.prefKey || this.restoring) return
+    const c = this.camera.position
+    const t = this.controls.target
+    this.prefs = { spin: this.spin, wire: this.wire, cam: [c.x, c.y, c.z, t.x, t.y, t.z] }
+    try { localStorage.setItem(this.prefKey, JSON.stringify(this.prefs)) } catch { /* private window */ }
+  }
+
+  /**
+   * The same viewer, big, over everything.
+   *
+   * Rich, 2026-09-28: "we need the ability to pop it out larger". The ROOT IS MOVED rather than a
+   * second viewer being made: a MeshView is a WebGL context and a loaded glb, and making another
+   * one costs both and starts it looking somewhere else. It goes back where it came from when the
+   * dialog closes.
+   */
+  popOut(title = 'Model'): void {
+    const home = this.root.parentElement
+    const next = this.root.nextSibling
+    const d = new Dialog({
+      title,
+      icon: 'cube',
+      size: 'xl',
+      movable: true,
+      onClose: () => {
+        this.root.classList.remove('big')
+        if (home) home.insertBefore(this.root, next)
+        this.resize()
+      },
+    })
+    this.root.classList.add('big')
+    d.body.append(this.root)
+    d.footer(
+      button({ label: 'Reset the view', icon: 'arrow-uturn-left', variant: 'ghost', onClick: () => this.frame() }),
+      button({ label: 'Done', variant: 'primary', onClick: () => d.close() }),
+    )
+    d.open()
+    this.start()
+    // the box it is in changed, and a canvas does not notice on its own until the observer fires
+    requestAnimationFrame(() => this.resize())
   }
 
   /**
@@ -256,10 +335,22 @@ export class MeshView {
   }
 
   setWireframe(on: boolean) {
+    this.wire = on
     this.pivot.traverse((o) => {
       const m = (o as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined
       if (m && 'wireframe' in m) m.wireframe = on
     })
+    this.savePrefs()
+  }
+
+  /** Put the camera back where a freshly loaded model would have put it. */
+  frame(): void {
+    const s = this.size
+    const r = s ? Math.max(s.x, s.y, s.z) || 1 : 1
+    this.camera.position.set(r * 1.5, r * 0.85, r * 2.0)
+    this.controls.target.set(0, (s?.y ?? 1) / 2, 0)
+    this.controls.update()
+    this.savePrefs()
   }
 
   /** Load a .glb. Rejects loudly in the panel rather than leaving an empty stage. */
@@ -304,6 +395,24 @@ export class MeshView {
       this.controls.target.set(0, size.y / 2, 0)
       this.controls.update()
       this.size = size
+      // the wireframe choice is remembered, and the materials it applies to did not exist until now
+      if (this.wire) this.setWireframe(true)
+      /*
+       * AND THE CAMERA, IF THERE IS ONE REMEMBERED — but only if it is a sane distance for THIS
+       * model. A camera kept from a two-metre car applied to a unit-normalised prop puts you
+       * inside it, which looks exactly like a failed load.
+       */
+      const cam = this.prefs.cam
+      if (cam && Number.isFinite(cam[0])) {
+        const dist = Math.hypot(cam[0] - cam[3], cam[1] - cam[4], cam[2] - cam[5])
+        if (dist > r * 0.4 && dist < r * 20) {
+          this.restoring = true
+          this.camera.position.set(cam[0], cam[1], cam[2])
+          this.controls.target.set(cam[3], cam[4], cam[5])
+          this.controls.update()
+          this.restoring = false
+        }
+      }
       this.say(null)
     } catch (e) {
       // GLTFLoader REJECTS on undecodable Draco rather than warning, so this is the only place

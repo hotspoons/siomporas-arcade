@@ -10,9 +10,46 @@
 // GPU-minute on.
 import { Dialog, Tabs, ask, button, confirm, el, lightbox, toast, type Tab } from './shell'
 import { icon } from './icons'
-import { bodyOf, empty, group, readout, textField, toggle } from './controls'
+import { bodyOf, empty, group, readout, select, textField, toggle } from './controls'
 import { MeshView } from './meshview'
 import { assetsvc, type AssetItem, type AssetJob, type Material, type ModelRoster } from '../assetsvc'
+
+/**
+ * WHAT SORT OF THING IT IS, and where the list of sorts comes from.
+ *
+ * Rich, 2026-09-28: "we need to be able to set the catagory like traffic, hero car, furnature,
+ * etc. and we need to be able to provide new classes of models and textures."
+ *
+ * These are the ones worth offering on an empty library; the list a person actually sees is these
+ * PLUS every class already in use, so adding one is adding it to an item and there is no second
+ * place for a class to exist and go stale. Same rule for material categories.
+ */
+const KINDS = [
+  'hero-car', 'traffic', 'emergency', 'commercial-vehicle', 'pedestrian', 'animal',
+  'furniture', 'building-dressing', 'vegetation', 'signage', 'prop',
+]
+
+/** The classes on offer: the standard ones, plus whatever is already in the library. */
+function classesIn(used: (string | null | undefined)[], base = KINDS): string[] {
+  const out = new Set(base)
+  for (const k of used) if (k) out.add(k)
+  return [...out].sort()
+}
+
+const NEW_CLASS = '\u0000new'
+/** The selection when what is selected has not been created yet. Not a usable id, by construction. */
+const PENDING = '\u0000pending'
+
+/** A name to the id it will be filed under. Matches worldedit/slug.ts, which is not importable here. */
+function slugOf(name: string): string {
+  return String(name).toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48)
+}
+
+/** Enough of an item to show while the service confirms it. Every generated field is empty. */
+const EMPTY_ITEM: AssetItem = {
+  id: '', subject: '', kind: 'prop', prompt: '', negative: '', notes: '', tags: [],
+  chosen: null, created: '', updated: '', views: [], mesh: null, finished: null, state: 'spec', history: [],
+}
 
 const STATE_LABEL: Record<AssetItem['state'], string> = {
   spec: 'described',
@@ -28,6 +65,30 @@ export class AssetCatalog {
   private roster: ModelRoster | null = null
   private reachable = false
   private selected: string | null = null
+  /**
+   * EDITS THAT HAVE NOT BEEN SAVED, and the bar that says so.
+   *
+   * Every field used to PUT on blur, which is a library that changes under you as you tab through
+   * it and has no way back. Rich, 2026-09-28: "if editing an item we need a save changes button
+   * and confirmation before navigating away." So a field writes here, and only Save writes to the
+   * service — which also means the change to the id, the class and the prompt land as one record
+   * rather than three.
+   */
+  private draft: Partial<AssetItem> = {}
+  private saveBar: HTMLElement | null = null
+  /**
+   * AN ITEM THAT DOES NOT EXIST YET, sitting in the list where it will live.
+   *
+   * Rich, 2026-09-28: "This form needs some work, it is super cramped. Why don't we just not have
+   * a dialog and just place it in the catalog directly, then move it in the listing order once the
+   * slug is set (or changed)". A 420px modal over the catalog is a worse place to fill in three
+   * fields than the detail pane, which is right there and empty — and a new item appearing in the
+   * list as you name it says what will happen far better than any label can.
+   */
+  private pending: { id: string; subject: string; kind: string } | null = null
+  /** what is typed in the search box; a question being asked now, so it is not remembered */
+  private find = ''
+  private listBox = el('div', 'asset-list-box')
   /** the 3D preview, one at a time — a WebGL context per click exhausts the browser's supply */
   private mesh3d: MeshView | null = null
   private listHost = el('div', 'asset-list')
@@ -44,21 +105,46 @@ export class AssetCatalog {
     // sixteen in Chromium) and silently lose the oldest when you go over, so a preview left
     // running behind a closed panel eventually kills the viewer in another tab of the same app.
     this.dialog = new Dialog({
-      title: 'Assets', icon: 'cube', size: 'lg',
+      title: 'Assets', icon: 'cube', size: 'xl', movable: true,
+      // unsaved edits in the detail pane are the one thing in here that only exists in the page
+      beforeClose: () => this.mayLeave('close the catalog'),
       onClose: () => { this.mesh3d?.dispose(); this.mesh3d = null },
     })
     this.dialog.body.append(this.tabs.root)
     this.dialog.body.classList.add('asset-body')
+    /*
+     * TWO THINGS, BOTH ABOUT THE LIBRARY IN FRONT OF YOU.
+     *
+     * "Push to S3" was here as well — a deployment operation, offered beside "New item", visible
+     * whether or not a bucket is configured, and already present in the Service tab beside the
+     * endpoint it pushes to and the note about what it skips (Rich, 2026-09-28: "Still have push
+     * to s3 buttons on assets, no makey sense"). It lives there, where the bucket does.
+     */
     this.dialog.footer(
-      button({ label: 'New item', icon: 'plus', onClick: () => void this.create() }),
+      button({ label: 'New item', icon: 'plus', onClick: () => this.create() }),
       button({ label: 'Refresh', icon: 'arrow-path', onClick: () => void this.refresh() }),
-      button({ label: 'Push to S3', icon: 'document-arrow-down', title: 'sync the catalog to the bucket', onClick: () => void this.sync('push') }),
     )
   }
 
   async open() {
     this.dialog.open()
     await this.refresh()
+  }
+
+  private get dirty(): boolean {
+    return Object.keys(this.draft).length > 0
+  }
+
+  /** Ask before throwing away unsaved edits. True means "go ahead". */
+  private async mayLeave(what: string): Promise<boolean> {
+    if (!this.dirty) return true
+    const fields = Object.keys(this.draft).join(', ')
+    return confirm({
+      title: 'Unsaved changes',
+      message: `${this.selected}: ${fields} changed but not saved. ${what[0].toUpperCase()}${what.slice(1)} anyway?`,
+      ok: 'Discard',
+      danger: true,
+    })
   }
 
   async refresh() {
@@ -82,7 +168,14 @@ export class AssetCatalog {
       return
     }
     const split = el('div', 'asset-split')
-    split.append(this.listHost, this.detailHost)
+    /*
+     * A SEARCH BOX, because the catalog is a hundred and twenty rows in a 280px column (Rich,
+     * 2026-09-28: "Need a search field for the catalog"). It matches the id, the subject and the
+     * class — the three things anybody knows about a thing they are looking for — and it is not
+     * remembered between visits, because it is a question rather than a preference.
+     */
+    this.listBox.replaceChildren(this.searchBox(), this.listHost)
+    split.append(this.listBox, this.detailHost)
     host.append(split)
     this.renderList()
     this.renderDetail()
@@ -103,13 +196,38 @@ export class AssetCatalog {
     return wrap
   }
 
+  private searchBox(): HTMLElement {
+    const wrap = el('div', 'tree-filter')
+    const i = el('input', 'input wide') as HTMLInputElement
+    i.type = 'search'
+    i.placeholder = 'find a car, a class, a word'
+    i.value = this.find
+    // `input`, not `change`: a filter you have to leave the box to apply is a filter you have to
+    // be told about
+    i.oninput = () => { this.find = i.value; this.renderList() }
+    wrap.append(icon('magnifying-glass', 14), i)
+    return wrap
+  }
+
+  /** Does this row answer what was typed? Id, subject and class — nothing else is searched for. */
+  private matches(it: { id: string; subject?: string; kind?: string }): boolean {
+    const q = this.find.trim().toLowerCase()
+    if (!q) return true
+    return `${it.id} ${it.subject ?? ''} ${it.kind ?? ''}`.toLowerCase().includes(q)
+  }
+
   private renderList() {
     this.listHost.replaceChildren()
-    if (!this.items.length) {
+    if (!this.items.length && !this.pending) {
       this.listHost.append(empty('Nothing in the catalog yet. “New item” describes one.'))
       return
     }
+    // the new row sorts by the id as it is typed, so it walks to where it will live
+    const rows: { id: string; node: HTMLElement }[] = []
+    // the one being named always shows, whatever is in the search box: it is what you are doing
+    if (this.pending) rows.push({ id: this.pending.id, node: this.pendingRow() })
     for (const it of this.items) {
+      if (!this.matches(it)) continue
       const row = el('button', `asset-row${it.id === this.selected ? ' on' : ''}`)
       const thumb = el('div', 'asset-thumb')
       if (it.chosen) {
@@ -124,17 +242,39 @@ export class AssetCatalog {
       text.append(el('span', 'asset-row-id', it.id))
       text.append(el('span', 'asset-row-sub', it.subject))
       row.append(thumb, text, el('span', `chip state-${it.state}`, STATE_LABEL[it.state]))
-      row.onclick = () => {
+      row.onclick = async () => {
+        if (it.id === this.selected) return
+        if (!(await this.mayLeave(`open ${it.id}`))) return
+        this.draft = {}
         this.selected = it.id
         this.renderList()
         this.renderDetail()
       }
-      this.listHost.append(row)
+      rows.push({ id: it.id, node: row })
     }
+    rows.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    for (const r of rows) this.listHost.append(r.node)
+    if (rows.length <= (this.pending ? 1 : 0) && this.find.trim()) {
+      this.listHost.append(empty(`Nothing matching “${this.find.trim()}”.`))
+    }
+  }
+
+  /** The row for the item being named: no thumbnail, no state, because neither exists yet. */
+  private pendingRow(): HTMLElement {
+    const p = this.pending!
+    const row = el('button', `asset-row new${this.selected === PENDING ? ' on' : ''}`)
+    const thumb = el('div', 'asset-thumb')
+    thumb.append(icon('plus', 18))
+    const text = el('div', 'asset-row-text')
+    text.append(el('span', 'asset-row-id', p.id || 'new item'), el('span', 'asset-row-sub', p.subject || 'name it on the right'))
+    row.append(thumb, text, el('span', 'chip state-spec', 'not created'))
+    row.onclick = () => { this.selected = PENDING; this.renderList(); this.renderDetail() }
+    return row
   }
 
   private renderDetail() {
     this.detailHost.replaceChildren()
+    if (this.selected === PENDING && this.pending) { this.renderNew(); return }
     const it = this.items.find((x) => x.id === this.selected)
     if (!it) {
       this.detailHost.append(empty('Pick an item.'))
@@ -151,11 +291,35 @@ export class AssetCatalog {
     // 1 · the description
     const spec = group('1 · Described')
     const specBody = bodyOf(spec)
+    const edit = <K extends keyof AssetItem>(k: K, v: AssetItem[K]) => {
+      if (v === it[k]) delete this.draft[k]
+      else this.draft[k] = v
+      this.showSaveBar()
+    }
+    const kinds = classesIn(this.items.map((x) => x.kind))
     specBody.append(
-      textField({ label: 'Subject', value: it.subject, onChange: (v) => void this.save(it.id, { subject: v }) }),
-      promptField('Prompt', it.prompt, (v) => void this.save(it.id, { prompt: v })),
-      promptField('Avoid', it.negative, (v) => void this.save(it.id, { negative: v })),
+      textField({ label: 'Subject', value: this.draft.subject ?? it.subject, onChange: (v) => edit('subject', v) }),
+      select({
+        label: 'Class',
+        value: this.draft.kind ?? it.kind ?? 'prop',
+        options: [...kinds.map((k) => ({ value: k, label: k.replace(/-/g, ' ') })), { value: NEW_CLASS, label: 'new class…' }],
+        note: 'what it is, for the roster and for what places it',
+        onChange: (v) => {
+          if (v !== NEW_CLASS) { edit('kind', v); return }
+          void ask({ title: 'New class', label: 'name', placeholder: 'market-stall', icon: 'plus', validate: (x) => (slugOf(x) ? null : 'letters and digits') })
+            .then((name) => { if (name) { edit('kind', slugOf(name)); this.renderDetail() } else this.renderDetail() })
+        },
+      }),
+      promptField('Prompt', this.draft.prompt ?? it.prompt, (v) => edit('prompt', v)),
+      promptField('Avoid', this.draft.negative ?? it.negative, (v) => edit('negative', v)),
     )
+    this.saveBar = el('div', 'panel-actions asset-save')
+    this.saveBar.append(
+      button({ label: 'Save changes', icon: 'document-arrow-down', variant: 'primary', onClick: () => void this.commit() }),
+      button({ label: 'Discard', icon: 'arrow-uturn-left', variant: 'ghost', onClick: () => { this.draft = {}; this.renderDetail() } }),
+    )
+    specBody.append(this.saveBar)
+    this.showSaveBar()
     steps.append(spec)
 
     // 2 · the view
@@ -222,16 +386,19 @@ export class AssetCatalog {
        * leaking one per click is how a tab runs out of them (browsers cap it around sixteen).
        */
       this.mesh3d?.dispose()
-      const view = new MeshView()
+      const view = new MeshView({ remember: 'catalog' })
       this.mesh3d = view
       // for probes: the one preview currently on screen
       ;(window as unknown as { __meshview?: MeshView }).__meshview = view
       meshBody.append(view.root)
       void view.load(assetsvc.fileUrl(it.id, it.finished ? 'mesh.finished.glb' : 'mesh.glb'))
       view.start()
+      // the toggles read the viewer, which read what it was left as — a hard-coded `true` here
+      // would turn spin back on at every render and make the preference look ignored
       const viewControls = rowOf(
-        toggle({ label: 'spin', value: true, onChange: (v) => view.setSpin(v) }),
-        toggle({ label: 'wireframe', value: false, onChange: (v) => view.setWireframe(v) }),
+        button({ label: 'Pop out', icon: 'arrows-pointing-out', title: 'the model, big', onClick: () => view.popOut(it.id) }),
+        toggle({ label: 'spin', value: view.spinning, onChange: (v) => view.setSpin(v) }),
+        toggle({ label: 'wireframe', value: view.wireframe, onChange: (v) => view.setWireframe(v) }),
       )
       meshBody.append(viewControls)
       /*
@@ -369,6 +536,27 @@ export class AssetCatalog {
 
   // ---- actions --------------------------------------------------------------------------------
 
+  /** The bar only exists while there is something to save. */
+  private showSaveBar(): void {
+    if (this.saveBar) this.saveBar.hidden = !this.dirty
+  }
+
+  /** Write the draft, as one record. */
+  private async commit(): Promise<void> {
+    const id = this.selected
+    if (!id || !this.dirty) return
+    const patch = this.draft
+    this.draft = {}
+    try {
+      await assetsvc.put({ id, ...patch })
+      await this.refresh()
+      toast(`saved ${id}`, 'ok')
+    } catch (e) {
+      this.draft = patch // it did not land, so it is still unsaved
+      toast(`save: ${(e as Error).message}`, 'danger')
+    }
+  }
+
   private async save(id: string, spec: Partial<AssetItem>) {
     try {
       await assetsvc.put({ id, ...spec })
@@ -401,9 +589,20 @@ export class AssetCatalog {
       return
     }
 
+    /*
+     * THE PREVIEW STAYS PUT AND THE LIST SCROLLS.
+     *
+     * Rich, 2026-09-28: "Materials viewer is a mess, needs to be smaller with a lightbox where you
+     * can view the material up close, and the preview window needs to be affixed and the selection
+     * scrolls." It was one column — a tall sample wall, then the upload form, then every material
+     * under it — so choosing the fourth one scrolled the thing you are choosing it BY off the top
+     * of the dialog, which makes comparing two of them impossible.
+     */
+    const split = el('div', 'material-split')
+    const left = el('div', 'material-side')
     const stage = el('div', 'material-stage')
     this.mesh3d?.dispose()
-    const view = new MeshView({ spin: false })
+    const view = new MeshView({ spin: false, remember: 'materials' })
     this.mesh3d = view
     ;(window as unknown as { __meshview?: MeshView }).__meshview = view
     stage.append(view.root)
@@ -411,7 +610,25 @@ export class AssetCatalog {
     stage.append(caption)
     view.start()
 
+    /*
+     * AND THE MAPS THEMSELVES, FULL SIZE.
+     *
+     * A sample wall answers "is the tile the right size"; it cannot answer "is this albedo full of
+     * JPEG mush" or "is the normal map inverted", which are questions about the pixels. The
+     * lightbox carries all three maps so the arrow keys step between them.
+     */
+    let current: Material | null = null
+    const closeUp = () => {
+      const m = current
+      if (!m) return
+      const maps = ([['albedo', m.albedo], ['normal', m.normal], ['roughness', m.roughness]] as const)
+        .filter(([, file]) => !!file)
+        .map(([what, file]) => ({ src: assetsvc.materialUrl(m.id, file!), caption: `${m.name} · ${what} · ${m.metres_per_tile} m tile` }))
+      if (maps.length) lightbox({ items: maps })
+    }
+
     const show = (m: Material) => {
+      current = m
       caption.textContent = `${m.name} · ${m.metres_per_tile} m tile · ${m.category.replace(/_/g, ' ')}`
       void view.showMaterial({
         metres_per_tile: m.metres_per_tile,
@@ -443,13 +660,31 @@ export class AssetCatalog {
         const text = el('div', 'material-text')
         text.append(el('span', 'material-name', m.name), el('span', 'material-sub', `${m.metres_per_tile} m tile`))
         row.append(swatch, text)
+        // a click chooses it; the magnifier is the close look, so choosing does not cost a
+        // dismissal and looking does not cost the comparison
         row.onclick = () => show(m)
+        row.append(button({
+          icon: 'arrows-pointing-out',
+          variant: 'ghost',
+          title: `look at ${m.name} up close`,
+          onClick: () => { show(m); closeUp() },
+        }))
         b.append(row)
       }
       browser.append(g)
     }
 
-    host.append(stage, this.materialUpload(host), browser)
+    const stageActions = el('div', 'panel-actions')
+    stageActions.append(
+      button({ label: 'Pop out', icon: 'arrows-pointing-out', title: 'the sample wall, big', onClick: () => view.popOut(current?.name ?? 'Material') }),
+      button({ label: 'The maps', icon: 'photo', title: 'albedo, normal and roughness at full size', onClick: () => closeUp() }),
+      // NOT a collapsed group at the bottom of a long scroll, which is where this was and why
+      // there was "no obvious way to add a new material"
+      button({ label: 'Add a texture', icon: 'plus', variant: 'primary', onClick: () => void this.addMaterial(host, list) }),
+    )
+    left.append(stage, stageActions)
+    split.append(left, browser)
+    host.append(split)
     show(list[0])
   }
 
@@ -462,16 +697,33 @@ export class AssetCatalog {
    * only required map: normal and roughness are improvements, and refusing an upload without
    * them would mean a library that cannot hold what people actually have.
    */
-  private materialUpload(host: HTMLElement): HTMLElement {
-    const g = group('Add a texture', { collapsed: true })
-    const b = bodyOf(g)
+  private addMaterial(host: HTMLElement, existing: Material[]): void {
+    const d = new Dialog({ title: 'Add a texture', size: 'md', icon: 'swatch' })
+    const b = d.body
     const draft = { id: '', category: 'wall_house', metres_per_tile: 2 }
     const files: Record<string, File | null> = { albedo: null, normal: null, roughness: null }
 
+    const cats = classesIn(existing.map((m) => m.category), ['wall_house', 'wall_commercial', 'road', 'ground_cover', 'roof', 'metal', 'glass', 'other'])
+    const catField = select({
+      label: 'category',
+      value: draft.category,
+      options: [...cats.map((c) => ({ value: c, label: c.replace(/_/g, ' ') })), { value: NEW_CLASS, label: 'new class…' }],
+      onChange: (v) => {
+        if (v !== NEW_CLASS) { draft.category = v; return }
+        void ask({ title: 'New texture class', label: 'name', placeholder: 'cobblestone', icon: 'plus', validate: (x) => (slugOf(x) ? null : 'letters and digits') })
+          .then((name) => {
+            const k = name ? slugOf(name).replace(/-/g, '_') : draft.category
+            draft.category = k
+            const sel = catField.querySelector('select')!
+            if (name && !cats.includes(k)) sel.append(Object.assign(document.createElement('option'), { value: k, textContent: k.replace(/_/g, ' ') }))
+            sel.value = k
+          })
+      },
+    })
     b.append(
       textField({ label: 'id', value: '', placeholder: 'brick_red_common', onChange: (v) => { draft.id = v.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '_') } }),
-      textField({ label: 'category', value: draft.category, placeholder: 'wall_house, road, ground_cover…', onChange: (v) => { draft.category = v.trim() || 'other' } }),
-      textField({ label: 'metres per tile', value: String(draft.metres_per_tile), type: 'number', step: 0.1, onChange: (v) => { draft.metres_per_tile = Number(v) } }),
+      catField,
+      textField({ label: 'metres per tile', value: String(draft.metres_per_tile), type: 'number', step: 0.1, note: 'the whole game: how much wall one tile covers', onChange: (v) => { draft.metres_per_tile = Number(v) } }),
     )
     for (const map of ['albedo', 'normal', 'roughness'] as const) {
       const row = el('label', 'field text')
@@ -486,8 +738,10 @@ export class AssetCatalog {
 
     const status = readout('upload', 'idle')
     const set = (t: string) => { status.querySelector('.field-value')!.textContent = t }
-    b.append(
-      rowOf(button({
+    b.append(status)
+    d.footer(
+      button({ label: 'Cancel', variant: 'ghost', onClick: () => d.close() }),
+      button({
         label: 'Add it',
         icon: 'plus',
         variant: 'primary',
@@ -508,6 +762,7 @@ export class AssetCatalog {
             set('record…')
             await assetsvc.putMaterial(draft.id, record)
             toast(`${draft.id} added`, 'ok')
+            d.close()
             void this.buildMaterials(host)
           } catch (e) {
             toast(`upload failed: ${(e as Error).message}`, 'danger', 8000)
@@ -515,31 +770,129 @@ export class AssetCatalog {
             set('idle')
           }
         },
-      })),
-      status,
+      }),
     )
-    return g
+    d.open()
   }
 
-  private async create() {
-    // Validated as it is typed, rather than refused by a toast after the browser's own prompt has
-    // already gone away taking what you typed with it.
-    const id = await ask({
-      title: 'New item',
+  /**
+   * A NAME, AND THE ID FOLLOWS IT.
+   *
+   * It asked for an id and nothing else — so the thing you type is a slug, the readable name is
+   * derived backwards from it by putting the hyphens back as spaces, and there is nowhere to say
+   * what sort of thing it is (Rich, 2026-09-28: "why does new item only have an ID field (and why
+   * can't we have a name field and an auto-generated id from the slug or something)").
+   *
+   * The id follows the name until somebody edits the id, and then it stops: a derived field that
+   * overwrites what you typed into it is worse than no derivation.
+   */
+  /** Start naming one. Nothing is sent until Create. */
+  private create(): void {
+    this.pending = { id: '', subject: '', kind: 'prop' }
+    this.draft = {}
+    this.selected = PENDING
+    // straight to the tab it lands in, because "it appeared and then vanished" was the bug
+    this.tabs.show('catalog')
+    this.renderList()
+    this.renderDetail()
+    this.detailHost.querySelector('input')?.focus()
+  }
+
+  /**
+   * The new item, filled in where it will live.
+   *
+   * The id follows the name until somebody edits the id, and then it stops: a derived field that
+   * overwrites what you typed into it is worse than no derivation. Both of them re-sort the list
+   * as they are typed — which is the thing that makes putting this here worth doing, because you
+   * can see where it is going.
+   */
+  private renderNew(): void {
+    const p = this.pending!
+    const head = el('header', 'asset-detail-head')
+    head.append(el('h2', '', 'New item'), el('span', 'chip state-spec', 'not created'))
+    this.detailHost.append(head)
+
+    const g = group('1 · Described')
+    const b = bodyOf(g)
+    let idTouched = false
+    const why = el('p', 'field-error')
+    why.hidden = true
+
+    const idField = textField({
       label: 'id',
+      value: p.id,
       placeholder: 'roadside-mailbox',
-      icon: 'cube',
-      ok: 'Create',
-      validate: (v) => (!v ? 'an id is required'
-        : /^[a-z0-9][a-z0-9-]{0,63}$/.test(v) ? null
-        : 'lower case letters, digits and hyphens; must start with a letter or digit'),
+      note: 'what it is filed under; follows the name until you change it',
+      onChange: (v) => { idTouched = true; p.id = slugOf(v); idInput.value = p.id; this.renderList() },
     })
-    if (!id) return
+    const idInput = idField.querySelector('input')!
+    const nameField = textField({
+      label: 'name',
+      value: p.subject,
+      placeholder: 'roadside mailbox',
+      onChange: (v) => { p.subject = v.trim(); this.renderList() },
+    })
+    // live, not on blur: the point of naming it here is watching it find its place in the list
+    nameField.querySelector('input')!.addEventListener('input', (e) => {
+      p.subject = (e.target as HTMLInputElement).value.trim()
+      if (!idTouched) { p.id = slugOf(p.subject); idInput.value = p.id }
+      why.hidden = true
+      this.renderList()
+    })
+
+    const kinds = classesIn(this.items.map((x) => x.kind))
+    const kindField = select({
+      label: 'class',
+      value: p.kind,
+      options: [...kinds.map((k) => ({ value: k, label: k.replace(/-/g, ' ') })), { value: NEW_CLASS, label: 'new class…' }],
+      note: 'what it is, for the roster and for what places it',
+      onChange: (v) => {
+        if (v !== NEW_CLASS) { p.kind = v; return }
+        void ask({ title: 'New class', label: 'name', placeholder: 'market-stall', icon: 'plus', validate: (x) => (slugOf(x) ? null : 'letters and digits') })
+          .then((name) => { if (name) p.kind = slugOf(name); this.renderDetail() })
+      },
+    })
+
+    const bar = el('div', 'panel-actions')
+    bar.append(
+      button({
+        label: 'Create',
+        icon: 'plus',
+        variant: 'primary',
+        onClick: () => {
+          if (!p.id) { why.textContent = 'a name (or an id) is required'; why.hidden = false; return }
+          if (this.items.some((x) => x.id === p.id)) { why.textContent = `${p.id} already exists`; why.hidden = false; return }
+          void this.commitNew()
+        },
+      }),
+      button({ label: 'Cancel', variant: 'ghost', onClick: () => { this.pending = null; this.selected = null; this.renderList(); this.renderDetail() } }),
+    )
+    b.append(nameField, idField, kindField, why, bar)
+    this.detailHost.append(g)
+    this.detailHost.append(el('p', 'note', 'Drawing and meshing open once it exists.'))
+  }
+
+  private async commitNew(): Promise<void> {
+    const p = this.pending
+    if (!p) return
     try {
-      await assetsvc.put({ id, subject: id.replace(/-/g, ' '), prompt: '', negative: '' })
-      this.selected = id
+      await assetsvc.put({ id: p.id, subject: p.subject || p.id.replace(/-/g, ' '), kind: p.kind, prompt: '', negative: '' })
+      this.pending = null
+      this.draft = {}
+      this.selected = p.id
+      /*
+       * SHOW IT AS THE ITEM IMMEDIATELY, before the refresh.
+       *
+       * `refresh` re-lists a catalog of a hundred and twenty items, which takes long enough to
+       * see — and until it lands the pane is still the form you just submitted, with the Create
+       * button still on it. Pressing it again is the obvious thing to do and creates nothing,
+       * because the item is already there.
+       */
+      this.items = [...this.items, { ...EMPTY_ITEM, id: p.id, subject: p.subject || p.id.replace(/-/g, ' '), kind: p.kind }]
+      this.renderList()
+      this.renderDetail()
       await this.refresh()
-      toast(`${id} created — describe it, then draw`, 'ok')
+      toast(`${p.id} created — describe it, then draw`, 'ok')
     } catch (e) {
       toast(`create: ${(e as Error).message}`, 'danger')
     }

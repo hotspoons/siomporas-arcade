@@ -183,7 +183,17 @@
    a person actually has is "which of these still needs something doing to it". */
 
 .asset-body { height: min(72vh, 680px); }
-.asset-split { display: grid; grid-template-columns: minmax(200px, 280px) 1fr; gap: var(--s4); align-items: start; }
+
+/* THE PREVIEW MUST FIT ABOVE THE FOOTER.
+   `.meshview` is `aspect-ratio: 4/3`, so in a wide dialog it became 976 x 731 — taller than the
+   scrolling body, which put its middle underneath the sticky footer. Everything about it worked;
+   the pointer simply never reached the canvas, so it could not be spun or zoomed at all (Rich,
+   2026-09-28: "we should be able to click in it and spin and zoom with the mouse"). Pop out is
+   for when you want it big. */
+.asset-detail .meshview { max-height: min(42vh, 380px); }
+.asset-split { display: grid; grid-template-columns: minmax(200px, 300px) 1fr; gap: var(--s4); align-items: start; }
+/* the search box stays put and the rows scroll under it */
+.asset-list-box { display: grid; gap: var(--s2); align-content: start; min-width: 0; }
 
 .asset-list { display: flex; flex-direction: column; gap: 2px; max-height: 58vh; overflow-y: auto; }
 .asset-row {

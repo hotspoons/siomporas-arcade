@@ -158,9 +158,17 @@ export interface DialogOpts {
   /** can be dragged, resized and docked to a side (Dialog.dock) — for panels you work WITH, not modals */
   movable?: boolean
   icon?: IconName
-  /** 'md' is the common settings size; 'lg' is for the tuning wall of sliders */
-  size?: 'sm' | 'md' | 'lg'
+  /** 'md' is the common settings size; 'lg' is for the tuning wall of sliders, 'xl' for a library */
+  size?: 'sm' | 'md' | 'lg' | 'xl'
   onClose?: () => void
+  /**
+   * A veto on closing, for a panel with unsaved work in it.
+   *
+   * Returning false — or a promise of false — leaves the dialog open. It runs for every way out:
+   * the X, Escape and a click on the backdrop, which is the point, because a person who has typed
+   * into a form loses it to whichever one they happen to use.
+   */
+  beforeClose?: () => boolean | Promise<boolean>
 }
 
 export class Dialog {
@@ -174,6 +182,8 @@ export class Dialog {
   private size: { w: number; h: number } | null = null
   private at: { x: number; y: number } | null = null
   private prefKey: string
+  /** a `beforeClose` is in flight; the second call through is the one that goes ahead */
+  private closing = false
 
   private o: DialogOpts
 
@@ -355,6 +365,16 @@ export class Dialog {
   }
 
   close() {
+    if (this.o.beforeClose && !this.closing) {
+      const answer = this.o.beforeClose()
+      if (answer instanceof Promise) {
+        // asking is itself a dialog, so this one must stay where it is until the answer comes back
+        this.closing = true
+        void answer.then((ok) => { this.closing = false; if (ok) this.close() })
+        return
+      }
+      if (!answer) return
+    }
     const i = stack.indexOf(this)
     if (i >= 0) stack.splice(i, 1)
     this.root.classList.remove('in')
@@ -588,6 +608,12 @@ export function installShellKeys(drawer: () => Drawer | null) {
     (e) => {
       if (e.key !== 'Escape') return
       const d = drawer()
+      // a context menu is on top of everything, including a lightbox
+      if (openMenu) {
+        openMenu()
+        e.stopPropagation()
+        return
+      }
       if (openLightbox) {
         openLightbox()
         e.stopPropagation()
@@ -717,4 +743,63 @@ export function lightbox(o: {
   document.body.append(root)
   show()
   requestAnimationFrame(() => root.classList.add('in'))
+}
+
+/* ------------------------------------------------------------------------------------------- */
+
+/**
+ * A menu at a point — for right-clicking a row.
+ *
+ * Rich, 2026-09-28: "Context menu would be nice on the folder controls". The tree's actions are
+ * icon buttons that appear on hover, which is fine for the two you use constantly and poor for the
+ * six a folder has: at that count they are a row of unlabelled glyphs, and half of them are off
+ * the end of a narrow inspector. The same actions, with their names on, on the button everybody
+ * already presses to ask "what can I do with this".
+ *
+ * ONE OPEN AT A TIME, and it closes on anything that is not a choice: a click elsewhere, Escape,
+ * a scroll, or the window changing size. A menu that survives the thing it was about scrolling
+ * away is a menu that acts on something else.
+ */
+export interface MenuItem {
+  label: string
+  icon?: IconName
+  danger?: boolean
+  onPick: () => void
+}
+
+let openMenu: (() => void) | null = null
+
+export function contextMenu(at: { x: number; y: number }, items: (MenuItem | 'separator')[]): void {
+  openMenu?.()
+  const root = el('div', 'ctx-menu')
+  const close = () => {
+    if (openMenu === close) openMenu = null
+    removeEventListener('pointerdown', away, true)
+    removeEventListener('resize', close)
+    removeEventListener('wheel', close, true)
+    root.remove()
+  }
+  const away = (e: PointerEvent) => { if (!root.contains(e.target as Node)) close() }
+
+  for (const item of items) {
+    if (item === 'separator') { root.append(el('div', 'ctx-sep')); continue }
+    const b = el('button', `ctx-item${item.danger ? ' danger' : ''}`)
+    if (item.icon) b.append(icon(item.icon, 14))
+    b.append(el('span', '', item.label))
+    b.onclick = () => { close(); item.onPick() }
+    root.append(b)
+  }
+
+  // placed off-screen first so it can be measured, then flipped if it would hang off an edge
+  root.style.left = '-9999px'
+  root.style.top = '0'
+  document.body.append(root)
+  const r = root.getBoundingClientRect()
+  root.style.left = `${Math.max(4, Math.min(at.x, innerWidth - r.width - 4))}px`
+  root.style.top = `${Math.max(4, Math.min(at.y, innerHeight - r.height - 4))}px`
+
+  openMenu = close
+  addEventListener('pointerdown', away, true)
+  addEventListener('resize', close)
+  addEventListener('wheel', close, true)
 }

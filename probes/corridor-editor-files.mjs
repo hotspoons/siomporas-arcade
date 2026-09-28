@@ -22,8 +22,8 @@
 import { chromium } from 'playwright'
 
 const PORT = process.env.PORT ?? '5185'
-const A = 'probe-tree/alpha'
-const B = 'probe-tree/beta'
+const A = 'probe-tree/alpha.ts'
+const B = 'probe-tree/beta.ts'
 const TYPED = '// typed into alpha and never saved'
 
 const browser = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader'] })
@@ -59,7 +59,7 @@ if (!dirs.includes('probe-tree')) fail.push('a program id with a slash in it did
 
 /* ---- 3 · two tabs ---- */
 const openFile = async (id) => {
-  const leaf = `${id.split('/').pop()}.ts`
+  const leaf = id.split('/').pop()
   await page.locator('#panel .tree-file .tree-name', { hasText: leaf }).first().click()
   await page.waitForFunction((n) => window.__apexProgram?.open?.().includes(n), id, { timeout: 30000 })
 }
@@ -106,10 +106,47 @@ say('after a reload', { kept: afterReload.value.includes(TYPED), open: afterRelo
 if (afterReload.open.length !== 2) fail.push(`${afterReload.open.length} tabs came back after a reload, not 2`)
 if (!afterReload.value.includes(TYPED)) fail.push('a page reload threw away what was typed — the draft is not being kept')
 
+const cleanOnDisk = !(await fetch(`http://localhost:8780/api/programs/${A}`).then((r) => r.json())).source.includes(TYPED)
+
+/* ---- 5 · the filesystem: make a folder, rename a file into it, delete it again ---- */
+//
+// "Need ability to create folders, rename folders, delete folders, move folders (rename path) and
+// move and rename files and change extensions" — all of which are `rename(2)` and `mkdir`, and all
+// of which were impossible when an id was one slug with no slash and no extension in it.
+const api = async (path, init) => {
+  const r = await fetch(`http://localhost:8780/api/programs${path}`, init)
+  return { ok: r.ok, body: await r.json().catch(() => ({})) }
+}
+const listing = async () => (await api('')).body
+await api('/probe-fs', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })
+let l = await listing()
+say('empty folder exists', l.dirs.includes('probe-fs'))
+if (!l.dirs.includes('probe-fs')) fail.push('a folder with nothing in it does not survive being listed')
+
+await api(`/${A}`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ move: 'probe-fs/moved.json' }) })
+l = await listing()
+say('file moved and extension changed', l.programs.some((f) => f.id === 'probe-fs/moved.json'))
+if (!l.programs.some((f) => f.id === 'probe-fs/moved.json')) fail.push('a file could not be moved into a folder with a new extension')
+
+await api('/probe-fs', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ move: 'probe-fs2' }) })
+l = await listing()
+say('folder renamed, contents with it', l.programs.some((f) => f.id === 'probe-fs2/moved.json'))
+if (!l.programs.some((f) => f.id === 'probe-fs2/moved.json')) fail.push('renaming a folder did not bring its files')
+
+const inside = await api('/probe-fs2/../../../etc/passwd', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ source: 'x' }) })
+say('escape refused', !inside.ok)
+if (inside.ok) fail.push('a path with .. in it was accepted — the store is not containing writes')
+
+await api('/probe-fs2?dir=1', { method: 'DELETE' })
+l = await listing()
+say('folder deleted with its files', !l.dirs.includes('probe-fs2') && !l.programs.some((f) => f.id.startsWith('probe-fs2/')))
+if (l.dirs.includes('probe-fs2')) fail.push('the folder is still there after a recursive delete')
+
 /* ---- and the volume was NOT written to ---- */
-const onDisk = await fetch(`http://localhost:8780/api/programs/${A}`).then((r) => r.json())
-say('saved copy still clean', !onDisk.source.includes(TYPED))
-if (onDisk.source.includes(TYPED)) fail.push('an unsaved buffer reached the volume — the editor is saving as you type')
+// read BEFORE the filesystem section moves it: the buffer was never saved, so the file on the
+// volume must still be what the probe wrote at the start
+say('saved copy still clean', cleanOnDisk)
+if (!cleanOnDisk) fail.push('an unsaved buffer reached the volume — the editor is saving as you type')
 
 if (errs.length) { say('page errors', errs.slice(0, 3)); fail.push(`${errs.length} page errors`) }
 for (const id of [A, B]) await fetch(`http://localhost:8780/api/programs/${id}`, { method: 'DELETE' })

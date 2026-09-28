@@ -152,6 +152,11 @@ kbd {
 .dialog.size-sm { max-width: 420px; }
 .dialog.size-md { max-width: 640px; }
 .dialog.size-lg { max-width: 940px; }
+/* A LIBRARY IS NOT A SETTINGS PANEL. The catalog is a list, a form and a 3D preview side by side,
+   and at 940px the preview was a postage stamp (Rich, 2026-09-28: "it needs to be larger and
+   resizable and movable"). It is movable too, so this is only where it starts. */
+.dialog.size-xl { max-width: min(1500px, 94vw); }
+.dialog.size-xl .dialog-body { max-height: none; }
 
 /* ---- a dialog you work WITH: dragged, resized, or docked to a side ---------------------------
    Docked, the scrim is gone entirely — the scene behind it is live and clicks reach it — so the
@@ -431,7 +436,7 @@ input.range::-moz-range-thumb { width: 13px; height: 13px; border: 0; border-rad
 
 @media (max-width: 640px) {
   .dialog { max-height: 92vh; }
-  .dialog.size-lg, .dialog.size-md { max-width: 100%; }
+  .dialog.size-lg, .dialog.size-md, .dialog.size-xl { max-width: 100%; }
   .tab-body { padding: var(--s3); }
 }
 
@@ -541,17 +546,35 @@ body.chrome-off #chrome-restore { display: block; }
 /* the 3D asset preview */
 .meshview { position: relative; width: 100%; aspect-ratio: 4 / 3; min-height: 220px; border-radius: var(--r2); overflow: hidden; background: var(--bg-0); border: 1px solid var(--line-1); }
 .meshview-canvas { display: block; width: 100%; height: 100%; }
+/* popped out: as much of the dialog as it can have, and no aspect ratio fighting it */
+.meshview.big { aspect-ratio: auto; height: min(74vh, 780px); max-height: none; }
 .meshview-status {
   position: absolute; inset: 0; display: grid; place-items: center;
   padding: var(--s4); text-align: center;
   color: var(--ink-3); font-size: var(--text-sm);
   background: rgb(0 0 0 / 35%);
 }
+/* A `display` RULE BEATS THE `hidden` ATTRIBUTE, and this overlay is `inset: 0` over the canvas.
+   So `say(null)` hid nothing: the status sat on top of the viewer for its whole life, dimming it
+   by 35% and — because it is a real element — swallowing every pointerdown before OrbitControls
+   could see it. The model could not be spun, zoomed or dragged in any viewer in the app (Rich,
+   2026-09-28: "we should be able to click in it and spin and zoom with the mouse"). */
+.meshview-status[hidden] { display: none; }
 
-/* the materials browser */
-.material-stage { position: relative; margin-bottom: var(--s3); }
+/* the materials browser: the sample wall stays put, the library scrolls beside it */
+.material-split { display: grid; grid-template-columns: minmax(280px, 380px) 1fr; gap: var(--s4); align-items: start; }
+.material-side { position: sticky; top: 0; display: grid; gap: var(--s2); }
+/* SMALLER. A 4:3 sample wall the width of the dialog pushed the library off the bottom, and the
+   question it answers — is the tile the right size — is legible at a third of that. */
+.material-side .meshview { aspect-ratio: 4 / 3; min-height: 180px; }
+.material-list { max-height: min(62vh, 620px); overflow-y: auto; padding-right: var(--s2); }
+@media (max-width: 860px) {
+  .material-split { grid-template-columns: 1fr; }
+  .material-side { position: static; }
+}
+.material-stage { position: relative; }
 .material-caption { padding: var(--s2) 0 0; color: var(--ink-2); font-size: var(--text-sm); }
-.material-list { display: grid; gap: var(--s3); }
+.material-list { display: grid; gap: var(--s3); align-content: start; }
 .material-row {
   display: flex; align-items: center; gap: var(--s3); width: 100%;
   padding: var(--s2); border: 1px solid transparent; border-radius: var(--r1);
@@ -592,3 +615,22 @@ body.chrome-off #chrome-restore { display: block; }
 .tree-actions { display: flex; gap: 0; visibility: hidden; flex: none; }
 .tree-row:hover .tree-actions, .tree-row.on .tree-actions, .tree-actions:focus-within { visibility: visible; }
 .tree-actions .btn { padding: 2px 4px; }
+
+/* ---- a context menu (ui/shell.ts `contextMenu`) ---------------------------------------------- */
+.ctx-menu {
+  position: fixed; z-index: 90; min-width: 180px; padding: var(--s1);
+  display: grid; gap: 1px;
+  background: var(--bg-1); border: 1px solid var(--line-1); border-radius: var(--r2);
+  box-shadow: var(--shadow-3);
+}
+.ctx-item {
+  display: flex; align-items: center; gap: var(--s2);
+  width: 100%; padding: var(--s2);
+  background: none; border: 0; border-radius: var(--r1);
+  font: inherit; font-size: var(--text-sm); color: var(--ink-1); text-align: left; cursor: pointer;
+}
+.ctx-item:hover { background: var(--bg-2); }
+.ctx-item.danger { color: var(--danger); }
+.ctx-item svg { flex: none; color: var(--ink-3); }
+.ctx-item.danger svg { color: inherit; }
+.ctx-sep { height: 1px; margin: var(--s1) 0; background: var(--line-1); }

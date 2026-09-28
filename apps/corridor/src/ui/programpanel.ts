@@ -57,13 +57,15 @@ export interface ProgramPanelOpts {
    * about at the same time.
    */
   reportHost: HTMLElement
-  /** every program on the volume */
-  list: () => Promise<{ id: string; bytes: number; modified: string | null }[]>
+  /** every file on the volume, and every folder — including the empty ones */
+  list: () => Promise<{ programs: { id: string; bytes: number; modified: string | null }[]; dirs: string[] }>
   load: (id: string) => Promise<string | null>
   save: (id: string, source: string) => Promise<void>
   remove: (id: string) => Promise<void>
-  /** rename or move one; the tree offers it only when a caller can do it */
+  /** rename or move one — a file or a folder; the tree offers it only when a caller can do it */
   move?: (id: string, to: string) => Promise<void>
+  makeDir?: (id: string) => Promise<void>
+  removeDir?: (id: string) => Promise<void>
   /** redraw, after the list changed */
   refresh: () => void
 }
@@ -233,6 +235,30 @@ function rewriteImports(js: string): string {
  * the volume as you type is a different and much worse promise.
  */
 
+/** What may live here. Matches PROGRAM_EXT in tools/worldeditor/store.mjs, which is the authority. */
+const EXT = ['.ts', '.tsx', '.js', '.mjs', '.json', '.md', '.txt', '.glsl', '.frag', '.vert', '.css', '.yaml', '.yml']
+
+/** A typed path with no extension gets `.ts`; most of these are TypeScript. */
+const withExt = (v: string): string => {
+  const t = v.trim()
+  return EXT.includes(t.slice(t.lastIndexOf('.'))) ? t : `${t.replace(/\.$/, '')}.ts`
+}
+
+/**
+ * Which language Monaco should use, from the extension.
+ *
+ * It was `typescript` for everything because everything was `.ts`. A JSON file in a TypeScript
+ * model is a syntax error on line 1, and worse, it is a syntax error that the type service will
+ * then report about a file that is perfectly good JSON.
+ */
+const languageOf = (path: string): 'typescript' | 'javascript' | 'json' | 'plaintext' => {
+  const ext = path.slice(path.lastIndexOf('.'))
+  if (ext === '.json') return 'json'
+  if (ext === '.js' || ext === '.mjs') return 'javascript'
+  if (ext === '.ts' || ext === '.tsx') return 'typescript'
+  return 'plaintext'
+}
+
 /** Where an unsaved buffer lives between visits. One key per path, so a stale one is orphaned. */
 const DRAFT = (path: string) => `apex-program-draft.${path}`
 /** Which files were open, and which was on top. */
@@ -251,6 +277,7 @@ export class ProgramPanel {
   private open = new Map<string, Open>()
   private active: string | null = null
   private files: { id: string; bytes: number; modified: string | null }[] = []
+  private dirs: string[] = []
   private diagnostics: Diagnostic[] = []
   private last: DryRun | null = null
   private tree: FileTree | null = null
@@ -299,13 +326,26 @@ export class ProgramPanel {
     // undo history and its scroll position along with its DOM
     if (root.parentElement !== host) host.append(root)
 
-    this.files = await this.o.list().catch(() => [])
+    await this.reload()
     if (!this.restored) {
       this.restored = true
       await this.reopenLast()
     }
     this.drawTabs()
     this.drawReport()
+    // before anything is open, too: a handle that only appears once a file is showing cannot be
+    // used to open one, which is the first thing a probe or a console wants to do
+    this.exposeForProbes()
+  }
+
+  /** What is on the volume. One call, because folders and files come back together. */
+  private async reload(): Promise<void> {
+    const r = await this.o.list().catch(() => null)
+    if (!r) return
+    // defaulted, because a service that predates folders answers without `dirs` — and an
+    // undefined here is a TypeError inside path validation, which reads as "rename is broken"
+    this.files = r.programs ?? []
+    this.dirs = r.dirs ?? []
   }
 
   /** Put back the tabs that were open before the page was reloaded. */
@@ -404,7 +444,8 @@ export class ProgramPanel {
     this.stack.append(host)
     const editor = new CodeEditor({
       host,
-      path: `programs/${path}.ts`,
+      path: `programs/${path}`,
+      language: languageOf(path),
       value,
       onChange: () => this.onEdited(path),
     })
@@ -449,23 +490,35 @@ export class ProgramPanel {
     const g = group(`Files (${this.files.length})`, {
       collapsed: false,
       actions: [
-        button({ icon: 'document-plus', title: 'new program', variant: 'ghost', onClick: () => void this.create('') }),
+        button({ icon: 'document-plus', title: 'new file', variant: 'ghost', onClick: () => void this.create('') }),
+        button({ icon: 'folder-plus', title: 'new folder', variant: 'ghost', onClick: () => void this.makeDir('') }),
       ],
     })
+    /*
+     * THE PATH IS THE ID, extension and all — so a rename, a move between folders and a change of
+     * extension are one operation with one dialog, which is what they are on any filesystem
+     * (Rich, 2026-09-28: "move and rename files and change extensions").
+     */
     this.tree ??= new FileTree({
       storageKey: 'programs',
-      empty: 'No programs yet.',
+      empty: 'No files yet.',
       files: () => this.files.map((f) => ({
-        path: `${f.id}.ts`,
+        path: f.id,
         note: `${(f.bytes / 1024).toFixed(1)} kB`,
         mark: this.isDirtyPath(f.id) ? '•' : undefined,
       })),
-      selected: () => (this.active ? `${this.active}.ts` : null),
-      onOpen: (p) => void this.openFile(p.replace(/\.ts$/, '')),
-      folderActions: (dir) => [{ icon: 'document-plus', title: `new program in ${dir}`, onClick: () => void this.create(`${dir}/`) }],
+      dirs: () => this.dirs,
+      selected: () => this.active,
+      onOpen: (p) => void this.openFile(p),
+      folderActions: (dir) => [
+        { icon: 'document-plus', title: `new file in ${dir}`, onClick: () => void this.create(`${dir}/`) },
+        { icon: 'folder-plus', title: `new folder in ${dir}`, onClick: () => void this.makeDir(`${dir}/`) },
+        { icon: 'pencil-square', title: `rename or move ${dir}`, onClick: () => void this.renameDir(dir) },
+        { icon: 'trash', title: `delete ${dir} and everything in it`, danger: true, onClick: () => void this.delDir(dir) },
+      ],
       actions: (p) => [
-        { icon: 'pencil-square', title: 'rename or move', onClick: () => void this.rename(p.replace(/\.ts$/, '')) },
-        { icon: 'trash', title: 'delete', danger: true, onClick: () => void this.del(p.replace(/\.ts$/, '')) },
+        { icon: 'pencil-square', title: 'rename, move or change the extension', onClick: () => void this.rename(p) },
+        { icon: 'trash', title: 'delete', danger: true, onClick: () => void this.del(p) },
       ],
     })
     this.tree.render()
@@ -580,7 +633,7 @@ export class ProgramPanel {
       o.saved = text
       try { localStorage.removeItem(DRAFT(path)) } catch { /* private window */ }
       toast(`saved ${path}`, 'ok')
-      this.files = await this.o.list().catch(() => this.files)
+      await this.reload()
       this.drawTabs()
       this.drawReport()
     } catch (e) {
@@ -591,32 +644,39 @@ export class ProgramPanel {
   /* ---- the file system ------------------------------------------------------------------------ */
 
   /**
-   * A new program, at a path.
+   * A new file, at a path.
    *
-   * The dialog takes the WHOLE path, prefilled with the folder it was started from, because a
-   * folder here exists only by being in one — there is nothing to create separately, and a "new
-   * folder" button would make a thing the store cannot represent.
+   * "New program" was the wrong name for this: what it makes is a file, and since the extension
+   * is part of the path it need not be TypeScript at all (Rich, 2026-09-28: "'new program'
+   * probably isn't the best name for this interface"). A file with no extension typed gets `.ts`,
+   * because that is what most of them are and asking for it every time is a tax on the common case.
    */
   private async create(prefix: string): Promise<void> {
     const name = await ask({
-      title: 'New program',
+      title: 'New file',
       label: 'path',
       value: prefix,
-      placeholder: 'levels/rooftop-run',
+      placeholder: 'levels/rooftop-run.ts',
       icon: 'document-plus',
-      validate: (v) => {
-        const t = v.trim().replace(/\.ts$/, '')
-        if (!/^[a-z0-9][a-z0-9._-]*(\/[a-z0-9][a-z0-9._-]*)*$/.test(t)) return 'lower case letters, digits, dots, hyphens — and slashes for folders'
-        if (this.files.some((f) => f.id === t)) return `${t} already exists`
-        return null
-      },
+      ok: 'Create',
+      validate: (v) => this.badPath(withExt(v), 'file'),
     })
     if (name === null) return
-    const id = name.trim().replace(/\.ts$/, '')
-    await this.o.save(id, TEMPLATE)
-    this.files = await this.o.list().catch(() => this.files)
+    const id = withExt(name)
+    await this.o.save(id, id.endsWith('.ts') ? TEMPLATE : '')
+    await this.reload()
     await this.openFile(id)
     this.o.refresh()
+  }
+
+  /** The one rule, asked once: is this a path this store will take, and is it free? */
+  private badPath(v: string, what: 'file' | 'folder'): string | null {
+    const t = v.trim()
+    if (!/^[a-z0-9][a-z0-9._-]*(\/[a-z0-9][a-z0-9._-]*)*$/.test(t)) return 'lower case letters, digits, dots, hyphens — and slashes for folders'
+    if (t.split('/').some((p) => p.startsWith('.'))) return 'no segment may start with a dot'
+    if (what === 'file' && !EXT.includes(t.slice(t.lastIndexOf('.')))) return `the extension must be one of ${EXT.join(' ')}`
+    if (this.files.some((f) => f.id === t) || this.dirs.includes(t)) return `${t} already exists`
+    return null
   }
 
   private async rename(id: string): Promise<void> {
@@ -627,15 +687,10 @@ export class ProgramPanel {
       value: id,
       icon: 'pencil-square',
       ok: 'Move',
-      validate: (v) => {
-        const t = v.trim().replace(/\.ts$/, '')
-        if (!/^[a-z0-9][a-z0-9._-]*(\/[a-z0-9][a-z0-9._-]*)*$/.test(t)) return 'lower case letters, digits, dots, hyphens — and slashes for folders'
-        if (t !== id && this.files.some((f) => f.id === t)) return `${t} already exists`
-        return null
-      },
+      validate: (v) => (v.trim() === id ? null : this.badPath(withExt(v), 'file')),
     })
     if (to === null) return
-    const id2 = to.trim().replace(/\.ts$/, '')
+    const id2 = withExt(to)
     if (id2 === id) return
     try {
       // save first: a move renames what is ON THE VOLUME, and an unsaved buffer would be left
@@ -644,7 +699,7 @@ export class ProgramPanel {
       if (o && this.isDirty(o)) await this.o.save(id, o.editor.value())
       await this.o.move(id, id2)
       if (o) { this.closeTab(id); try { localStorage.removeItem(DRAFT(id)) } catch { /* ignore */ } }
-      this.files = await this.o.list().catch(() => this.files)
+      await this.reload()
       await this.openFile(id2)
       this.o.refresh()
       toast(`moved to ${id2}`, 'ok')
@@ -653,12 +708,99 @@ export class ProgramPanel {
     }
   }
 
+  private async makeDir(prefix: string): Promise<void> {
+    if (!this.o.makeDir) return
+    const name = await ask({
+      title: 'New folder',
+      label: 'path',
+      value: prefix,
+      placeholder: 'levels/chapter-two',
+      icon: 'folder-plus',
+      ok: 'Create',
+      validate: (v) => this.badPath(v, 'folder'),
+    })
+    if (name === null) return
+    try {
+      await this.o.makeDir(name.trim())
+      await this.reload()
+      this.drawReport()
+    } catch (e) {
+      toast(`could not make the folder: ${(e as Error).message}`, 'danger')
+    }
+  }
+
+  /**
+   * Rename or move a folder, and everything in it comes along.
+   *
+   * The open tabs are re-pointed rather than closed: this is one `rename(2)` on the volume, and a
+   * person who renamed a folder has not asked for their editor to be emptied. Drafts move with
+   * their file, because an unsaved buffer is keyed by path.
+   */
+  private async renameDir(dir: string): Promise<void> {
+    if (!this.o.move) return
+    const to = await ask({
+      title: `Move ${dir}`,
+      label: 'new path',
+      value: dir,
+      icon: 'pencil-square',
+      ok: 'Move',
+      validate: (v) => (v.trim() === dir ? null : this.badPath(v, 'folder')),
+    })
+    if (to === null || to.trim() === dir) return
+    const to2 = to.trim()
+    try {
+      // unsaved buffers under it are written first: after the move their old path is gone, and a
+      // draft keyed to a path that no longer exists is work nobody will find again
+      for (const [p, o] of this.open) {
+        if (p === dir || p.startsWith(`${dir}/`)) { if (this.isDirty(o)) await this.o.save(p, o.editor.value()) }
+      }
+      await this.o.move(dir, to2)
+      for (const p of [...this.open.keys()]) {
+        if (p !== dir && !p.startsWith(`${dir}/`)) continue
+        this.closeTab(p)
+        try { localStorage.removeItem(DRAFT(p)) } catch { /* ignore */ }
+        await this.openFile(`${to2}${p.slice(dir.length)}`, false)
+      }
+      await this.reload()
+      this.drawTabs()
+      this.drawReport()
+      this.o.refresh()
+      toast(`moved to ${to2}`, 'ok')
+    } catch (e) {
+      toast(`move failed: ${(e as Error).message}`, 'danger')
+    }
+  }
+
+  private async delDir(dir: string): Promise<void> {
+    if (!this.o.removeDir) return
+    const inside = this.files.filter((f) => f.id.startsWith(`${dir}/`)).length
+    if (!(await confirm({
+      title: `Delete ${dir}?`,
+      // the count is the whole message: "delete this folder" reads as a tidy-up until you know
+      // it is taking eleven files with it
+      message: inside ? `${inside} file${inside === 1 ? '' : 's'} in it will be deleted too. This cannot be undone.` : 'It is empty.',
+      ok: 'Delete',
+      danger: true,
+    }))) return
+    try {
+      await this.o.removeDir(dir)
+      for (const p of [...this.open.keys()]) {
+        if (p.startsWith(`${dir}/`)) { this.closeTab(p); try { localStorage.removeItem(DRAFT(p)) } catch { /* ignore */ } }
+      }
+      await this.reload()
+      this.drawReport()
+      this.o.refresh()
+    } catch (e) {
+      toast(`delete failed: ${(e as Error).message}`, 'danger')
+    }
+  }
+
   private async del(id: string): Promise<void> {
     if (!(await confirm({ title: `Delete ${id}?`, message: 'Any level that names it will stop finding it.', ok: 'Delete', danger: true }))) return
     await this.o.remove(id)
     try { localStorage.removeItem(DRAFT(id)) } catch { /* private window */ }
     if (this.open.has(id)) this.closeTab(id)
-    this.files = await this.o.list().catch(() => this.files)
+    await this.reload()
     this.drawReport()
     this.o.refresh()
   }

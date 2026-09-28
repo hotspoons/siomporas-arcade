@@ -18,7 +18,7 @@
 // What is remembered per caller is which folders are shut, and nothing else. A selection belongs
 // to the caller (it is usually a URL or an open tab), and a filter is a question you are asking
 // right now rather than a preference.
-import { el, button } from './shell'
+import { contextMenu, el, button } from './shell'
 import { icon, type IconName } from './icons'
 
 export interface FileRow {
@@ -32,6 +32,7 @@ export interface FileRow {
 
 export interface RowAction {
   icon: IconName
+  /** used as the button's tooltip AND as its label in the context menu, so it reads as a sentence */
   title: string
   danger?: boolean
   onClick: () => void
@@ -40,6 +41,14 @@ export interface RowAction {
 export interface FileTreeOpts {
   /** every file, flat. Called on each render, so the caller keeps no copy in step with this one */
   files: () => FileRow[]
+  /**
+   * Folders that exist in their own right, including the empty ones.
+   *
+   * A tree derived only from file paths cannot hold an empty folder — so one you just made would
+   * vanish as soon as anything re-rendered, which is not a filesystem. A caller with no such
+   * concept (the shell's projection) leaves this out and nothing changes.
+   */
+  dirs?: () => string[]
   /** the one that is current, if any */
   selected?: () => string | null
   onOpen: (path: string) => void
@@ -70,8 +79,18 @@ const newDir = (name: string, path: string): Dir => ({ name, path, dirs: new Map
  * browser: a path is split on `/`, everything before the last segment is folders, and a file
  * whose name is empty (a path ending in `/`) is not a file at all.
  */
-export function treeOf(files: FileRow[]): Dir {
+export function treeOf(files: FileRow[], dirs: string[] = []): Dir {
   const root = newDir('', '')
+  for (const d of dirs) {
+    let at = root
+    const walked: string[] = []
+    for (const p of d.split('/').filter(Boolean)) {
+      walked.push(p)
+      const here = walked.join('/')
+      if (!at.dirs.has(p)) at.dirs.set(p, newDir(p, here))
+      at = at.dirs.get(p)!
+    }
+  }
   for (const f of files) {
     // SPLIT FIRST, DROP THE EMPTIES AFTER. Filtering before taking the last segment loses a
     // trailing slash, and `out/` — which is a folder — became a file called `out` sitting beside
@@ -131,12 +150,12 @@ export class FileTree {
 
     const q = this.filter.trim().toLowerCase()
     const shown = q ? all.filter((f) => f.path.toLowerCase().includes(q)) : all
-    if (!shown.length) {
+    if (!shown.length && !(this.o.dirs?.().length && !q)) {
       this.root.append(el('p', 'tree-empty', q ? `nothing matching “${this.filter}”` : (this.o.empty ?? 'nothing here yet')))
       return
     }
 
-    const tree = treeOf(shown)
+    const tree = treeOf(shown, q ? [] : (this.o.dirs?.() ?? []))
     // While filtering, everything is open: a match hidden inside a shut folder is a search that
     // says "no results" while holding one.
     this.draw(tree, this.root, 0, selected, !!q)
@@ -177,7 +196,7 @@ export class FileTree {
         this.render()
       }
       row.append(twist)
-      this.addActions(row, this.o.folderActions?.(dir.path) ?? [])
+      this.addActions(row, this.o.folderActions?.(dir.path) ?? [], dir.path)
       into.append(row)
       if (open) this.draw(dir, into, depth + 1, selected, forceOpen)
     }
@@ -193,17 +212,41 @@ export class FileTree {
       open.title = f.path
       open.onclick = () => this.o.onOpen(f.path)
       row.append(open)
-      this.addActions(row, this.o.actions?.(f.path) ?? [])
+      this.addActions(row, this.o.actions?.(f.path) ?? [], f.path, () => this.o.onOpen(f.path))
       into.append(row)
     }
   }
 
-  private addActions(row: HTMLElement, actions: RowAction[]): void {
+  /**
+   * The same actions twice: the common one or two as buttons, all of them on right-click.
+   *
+   * A folder has six things you can do to it and an inspector is 340px wide, so six icon buttons
+   * is a row of glyphs with the last of them off the end. The buttons are capped at two — the ones
+   * you reach for without thinking — and the menu is the full set, with names (Rich, 2026-09-28:
+   * "Context menu would be nice on the folder controls").
+   */
+  private addActions(row: HTMLElement, actions: RowAction[], path: string, open?: () => void): void {
     if (!actions.length) return
     const box = el('div', 'tree-actions')
-    for (const a of actions) {
+    for (const a of actions.slice(0, 2)) {
       box.append(button({ icon: a.icon, title: a.title, variant: a.danger ? 'danger' : 'ghost', onClick: a.onClick }))
     }
+    if (actions.length > 2) {
+      box.append(button({
+        icon: 'bars-3',
+        title: `more for ${path}`,
+        variant: 'ghost',
+        onClick: (e) => {
+          const r = (e?.currentTarget as HTMLElement | undefined)?.getBoundingClientRect()
+          contextMenu({ x: r?.left ?? 0, y: (r?.bottom ?? 0) + 2 }, actions.map((a) => ({ label: a.title, icon: a.icon, danger: a.danger, onPick: a.onClick })))
+        },
+      }))
+    }
     row.append(box)
+    row.addEventListener('contextmenu', (e) => {
+      e.preventDefault()
+      const items: (RowAction | 'separator')[] = open ? [{ icon: 'document-text', title: 'Open', onClick: open }, 'separator', ...actions] : [...actions]
+      contextMenu({ x: e.clientX, y: e.clientY }, items.map((a) => (a === 'separator' ? 'separator' : { label: a.title, icon: a.icon, danger: a.danger, onPick: a.onClick })))
+    })
   }
 }

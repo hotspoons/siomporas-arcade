@@ -916,7 +916,9 @@ async function api(req, res, seg, q) {
    * of the time you are writing any.
    */
   if (seg[0] === 'programs' && seg.length === 1 && req.method === 'GET') {
-    return json(res, 200, { programs: await store.listPrograms() })
+    // `dirs` as well as `programs`: an empty folder is a thing somebody just made, and a tree
+    // derived only from file paths would lose it between one render and the next
+    return json(res, 200, await store.listPrograms())
   }
   /*
    * THE ID IS THE REST OF THE PATH, slashes and all: `programs/levels/rooftop/run` is the program
@@ -932,16 +934,28 @@ async function api(req, res, seg, q) {
     if (req.method === 'PUT') {
       const body = await readJson(req)
       try {
-        // a PUT with a `move` is a rename: the same file under another path, in one operation,
-        // because read-write-delete from a browser leaves two copies when the tab is closed
-        // between the write and the delete
+        // a PUT with a `move` is a rename: the same file (or folder) under another path, in one
+        // operation, because read-write-delete from a browser leaves two copies when the tab is
+        // closed between the write and the delete
         if (typeof body?.move === 'string') return json(res, 200, await store.moveProgram(id, body.move))
         return json(res, 200, await store.putProgram(id, body?.source))
       } catch (e) {
         return json(res, e.status ?? 500, { error: String(e.message ?? e) })
       }
     }
+    // POST makes a FOLDER at this path. The path says which: a folder and a file cannot both be
+    // `levels/rooftop`, so there is nothing to disambiguate with a flag.
+    if (req.method === 'POST') {
+      try {
+        return json(res, 200, await store.makeProgramDir(id))
+      } catch (e) {
+        return json(res, e.status ?? 500, { error: String(e.message ?? e) })
+      }
+    }
     if (req.method === 'DELETE') {
+      // `?dir=1` deletes a folder and everything under it. Asked for explicitly rather than
+      // inferred, so a mistyped file path can never turn into a recursive delete.
+      if (q.get('dir')) return json(res, 200, await store.removeProgramDir(id))
       await store.removeProgram(id)
       return json(res, 200, { deleted: id })
     }

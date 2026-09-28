@@ -415,7 +415,8 @@ export const api = {
   validateLevel: (body: Partial<Level>) => call<{ ok: boolean; errors: string[]; warnings: string[] }>('/api/levels/validate', { method: 'POST', body: JSON.stringify(body) }),
 
   /* ---- programs: the code half of a level (src/program.ts, stage 6) ---- */
-  programs: () => call<{ programs: { id: string; bytes: number; modified: string | null }[] }>('/api/programs'),
+  /** every file, and every folder — including the empty ones, which no file path would mention */
+  programs: () => call<{ programs: { id: string; bytes: number; modified: string | null }[]; dirs: string[] }>('/api/programs'),
   /**
    * A program id is a PATH, so each segment is encoded but the slashes are not.
    *
@@ -425,7 +426,11 @@ export const api = {
   program: (id: string) => call<{ id: string; source: string }>(`/api/programs/${progPath(id)}`),
   saveProgram: (id: string, source: string) => call<{ id: string; bytes: number }>(`/api/programs/${progPath(id)}`, { method: 'PUT', body: JSON.stringify({ source }) }),
   deleteProgram: (id: string) => call<{ deleted: string }>(`/api/programs/${progPath(id)}`, { method: 'DELETE' }),
+  /** renames, moves between folders and changes extensions — one `rename(2)`, for files and folders alike */
   moveProgram: (id: string, to: string) => call<{ id: string }>(`/api/programs/${progPath(id)}`, { method: 'PUT', body: JSON.stringify({ move: to }) }),
+  makeProgramDir: (id: string) => call<{ id: string }>(`/api/programs/${progPath(id)}`, { method: 'POST', body: JSON.stringify({}) }),
+  /** and everything under it. The asking happens in the panel, not here. */
+  deleteProgramDir: (id: string) => call<{ deleted: string }>(`/api/programs/${progPath(id)}?dir=1`, { method: 'DELETE' }),
 
   /* ---- the agent: the platform's deployments, and a tunnel to one (tools/worldeditor/platform.mjs) ---- */
   agentPlatform: () => call<{ set: boolean; base: string | null; user: string | null }>('/api/agent'),

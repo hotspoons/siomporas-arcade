@@ -24,7 +24,7 @@ import { buildStrip, sinkUnderStrips } from './strip'
 import { Budget } from './budget'
 import { Adjustments, NEUTRAL as NEUTRAL_ADJ } from './adjust'
 import { buildPlacements, loadCatalog, loadPlacements } from './placements'
-import { buildBuildings } from './buildings'
+import { buildBuildings, buildRoadIndex } from './buildings'
 import { buildPower } from './power'
 import { buildBarriers, buildFurniture, buildSidewalks, sidewalkCover } from './furniture'
 import { buildBlades, buildCrosswalks, buildLaneArrows, buildSignals, buildStopBars, junctionPaintCut, loadJunctionFacts, type ArrowsResult, type BarsResult, type CrosswalksResult } from './intersections'
@@ -45,7 +45,7 @@ export interface Site {
   group: THREE.Group
   layers: { imagery?: THREE.Mesh; trees?: THREE.Group; grass?: THREE.Group; crops?: THREE.Group; road: THREE.Group; horizon?: THREE.Mesh; structures: THREE.Group; spine: THREE.Group; markers: THREE.Group; placements: THREE.Group; buildings: THREE.Group; power: THREE.Group; furniture: THREE.Group; parking: THREE.Group; barriers: THREE.Group; sidewalks: THREE.Group; rocks: THREE.Group; water: THREE.Group; signals: THREE.Group; stopbars: THREE.Group; blades: THREE.Group }
   /** how many footprints were massed, and how many had a real measured height */
-  buildingStats: { count: number; gabled: number; fromLidar: number }
+  buildingStats: { count: number; gabled: number; fromLidar: number; dressed: number }
   adjustments: Adjustments
   treeCount: number
   /** the grass field, when this site has one (probes and the HUD read `grass.counts`) */
@@ -2173,7 +2173,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
   let palette: { walls: [number, number, number][]; roofs: [number, number, number][] } | null = null
   const built = {
     group: buildingsGroup,
-    stats: { count: 0, gabled: 0, fromLidar: 0 },
+    stats: { count: 0, gabled: 0, fromLidar: 0, dressed: 0 },
     recolour: (walls: [number, number, number][], roofs: [number, number, number][]) => {
       palette = { walls, roofs }
       for (const p of builtParts) p.recolour(walls, roofs)
@@ -2190,16 +2190,20 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
       if (arr) arr.push(bd)
       else cells.set(k, [bd])
     }
+    // one index for the whole site, not one per cell: the cells slice the BUILDINGS, and a house
+    // in the last cell still needs to know about the road in the first
+    const roads = buildRoadIndex(manifest)
     for (const [k, list] of cells) {
       const [cx, cy] = k.split(',').map(Number)
       gradeUnits.push({ key: `buildings:${k}`, x: cx * CELL + CELL / 2, z: -(cy * CELL + CELL / 2), r: CELL * 0.71 + 10, done: false, run: async () => {
-        const b = await buildBuildings({ ...manifest, buildings: list }, groundAtWorld, 4)
+        const b = await buildBuildings({ ...manifest, buildings: list }, groundAtWorld, 4, { roads })
         buildingsGroup.add(b.group)
         builtParts.push(b)
         if (palette) b.recolour(palette.walls, palette.roofs)
         built.stats.count += b.stats.count
         built.stats.gabled += b.stats.gabled
         built.stats.fromLidar += b.stats.fromLidar
+        built.stats.dressed += b.stats.dressed
         gradeStats.buildings += b.stats.count
       } })
     }

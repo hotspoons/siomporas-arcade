@@ -59,6 +59,31 @@ export function validate(world) {
   } else if (world.kind) {
     errors.push(`unknown kind "${world.kind}" — this editor makes network sites`)
   }
+  /*
+   * WHICH TEXTURES THIS WORLD USES, by role.
+   *
+   * Rich, 2026-09-28: the texture library should be "configurable per world with defaults". So a
+   * world names a material id for each surface role it cares about, and says nothing about the
+   * rest — an absent role means the viewer's default, which is what makes this additive rather
+   * than a thing every world must now fill in.
+   *
+   * Ids are NOT validated against the library here. The library lives on the asset service, which
+   * a world definition must be writable without: a definition is a few hundred bytes of JSON that
+   * moves between machines, and refusing to save one because a texture service is down would make
+   * the two hard-coupled for no gain. The viewer falls back per role when an id is missing, and
+   * the editor's picker only offers ids that exist.
+   */
+  if (world.surfaces != null) {
+    const S = world.surfaces
+    if (typeof S !== 'object' || Array.isArray(S)) errors.push('surfaces must be an object of role -> material id')
+    else {
+      for (const [role, id] of Object.entries(S)) {
+        if (!SURFACE_ROLES.includes(role)) errors.push(`surfaces.${role} is not a surface role — one of ${SURFACE_ROLES.join(', ')}`)
+        else if (typeof id !== 'string' || !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(id)) errors.push(`surfaces.${role} must be a material id`)
+      }
+    }
+  }
+
   // the look a published world opens with: a style palette, a season, and the water level (the
   // waterworld knob). Optional, every field; anything else is left to the viewer's defaults.
   if (world.look != null) {
@@ -73,6 +98,14 @@ export function validate(world) {
   }
   return { ok: errors.length === 0, errors, warnings }
 }
+/**
+ * The surfaces a world draws, by role.
+ *
+ * These are the things the bake produces geometry for and the viewer has to texture. A world may
+ * override any of them and need not mention any: the list is the vocabulary, not a requirement.
+ */
+export const SURFACE_ROLES = ['road', 'shoulder', 'sidewalk', 'paving', 'ground_cover', 'verge']
+
 /** the palettes the viewer has (apps/corridor/src/style.ts) and the four seasons */
 export const STYLES = ['realistic', 'fantasy']
 export const SEASONS = ['winter', 'spring', 'summer', 'autumn']
@@ -85,7 +118,7 @@ export const SEASONS = ['winter', 'spring', 'summer', 'autumn']
  * drew 18 of the 10 593 drivable ways in that extract, so nearly all the street furniture built
  * from OSM had nothing to attach to. `all_streets` is the default.
  */
-export function fromDraw({ slug, name, boundary, centre, radius_m, primary, roads, all_streets = true, region, note, look }) {
+export function fromDraw({ slug, name, boundary, centre, radius_m, primary, roads, all_streets = true, region, note, look, surfaces }) {
   const ring = (boundary ?? []).map(toPoint)
   const circle = ring.length >= 3 ? circleFor(ring) : null
   const lat = centre?.lat ?? circle?.lat
@@ -112,6 +145,13 @@ export function fromDraw({ slug, name, boundary, centre, radius_m, primary, road
     if (Number.isFinite(look.water_level_m)) L.water_level_m = Number(look.water_level_m)
     if (Number.isFinite(look.relief) && Number(look.relief) !== 1) L.relief = Number(look.relief)
     if (Object.keys(L).length) world.look = L
+  }
+  // only the roles that were actually chosen: an empty object would say "this world overrides
+  // nothing" in a way that reads like "this world was configured", and they are not the same
+  if (surfaces && typeof surfaces === 'object') {
+    const S = {}
+    for (const role of SURFACE_ROLES) if (surfaces[role]) S[role] = surfaces[role]
+    if (Object.keys(S).length) world.surfaces = S
   }
   if (ring.length >= 3) world.boundary = ring.map((p) => [round6(p.lon), round6(p.lat)])
   world.source = 'world-editor'

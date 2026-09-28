@@ -73,7 +73,11 @@ const stagePanel = new StagePanel({
 })
 
 /** Pick from pictures, commit to meshes — the asymmetry made visible (assets.ts). */
-const assetsPanel = new AssetsPanel({ host: inspector })
+const assetsPanel = new AssetsPanel({
+  host: inspector,
+  openCatalog: () => void assets.open(),
+  openAdopt: () => void adopt.open(),
+})
 
 /** Footage in, a captured world out: uploads, then the training run (splats.ts). */
 const splatsPanel = new SplatsPanel({ host: inspector, worlds: () => worlds.filter((w) => w.baked).map((w) => w.slug) })
@@ -357,8 +361,10 @@ function buildBar() {
     searchBox,
     el('div', 'topbar-spacer'),
     dirtyEl,
-    button({ icon: 'cube', title: 'place generated assets', onClick: () => void adopt.open() }),
-    button({ icon: 'sparkles', title: 'generate an asset', onClick: () => void assets.open() }),
+    // NO ASSET BUTTONS HERE. "Assets" existed three times — this pair of icons, the mode below,
+    // and two more items in the drawer, two of which opened a DIFFERENT dialog from the mode
+    // (Rich, 2026-09-27: "this whole thing needs a once over for UX, it is a mess"). The rule
+    // now: the bar is the pipeline, the drawer is the app, and nothing appears in both.
     button({ icon: 'information-circle', title: 'what this is pointed at', onClick: () => void showConfig() }),
   )
   document.body.append(bar)
@@ -576,8 +582,8 @@ function renderIndex(host: HTMLElement) {
 function buildDrawer() {
   const nav = drawer.section('')
   drawer.item(nav, { id: 'new', label: 'New world', icon: 'plus', hint: 'draw a boundary on the map', key: 'N', onClick: () => newWorld() })
-  drawer.item(nav, { id: 'assets', label: 'Assets', icon: 'sparkles', hint: 'describe a prop and generate it', onClick: () => void assets.open() })
-  drawer.item(nav, { id: 'place', label: 'Place assets', icon: 'cube', hint: 'make a finished mesh placeable', onClick: () => void adopt.open() })
+  // Assets is a MODE (key 7), and placing what it finishes is a step inside it. Both used to be
+  // here as well, opening dialogs that were not the mode's panel.
   // NO NEW TABS. The site editor is the Place mode above; the viewer is the one thing that is
   // genuinely a different application — you drive it — and it navigates in place, carrying the
   // world, so the browser's own back button returns you here.
@@ -744,6 +750,9 @@ function renderPanel() {
   } else if (mode === 'index') {
     renderIndex(inspector)
   } else if (mode === 'define') {
+    // the texture library, for the per-world surface picker. Fire and forget: it re-renders when
+    // it lands, and the form works without it.
+    void define.loadSurfaces().then(() => { if (mode === 'define') define.render() })
     const w = worlds.find((x) => x.slug === selected)
     if (w && w.source !== 'bake-only' && !define.preview) define.load(w)
     else define.render()

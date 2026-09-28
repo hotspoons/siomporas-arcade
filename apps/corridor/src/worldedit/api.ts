@@ -91,6 +91,10 @@ export interface IndexedPlace {
   world?: string | null
 }
 
+/** The surface roles a world can override. Mirrors SURFACE_ROLES in tools/worldeditor/worlds.mjs. */
+export const SURFACE_ROLES = ['road', 'shoulder', 'sidewalk', 'paving', 'ground_cover', 'verge'] as const
+export type SurfaceRole = (typeof SURFACE_ROLES)[number]
+
 export interface World {
   slug: string
   kind?: string
@@ -107,6 +111,8 @@ export interface World {
   created?: string
   /** the look a published world opens with */
   look?: { style?: string; season?: string; water_level_m?: number; relief?: number }
+  /** role -> material id. An absent role uses the viewer's default. */
+  surfaces?: Partial<Record<SurfaceRole, string>>
   baked?: { slug: string; fetched: string | null; frame: { kind?: string; epsg?: number; anchor?: { lon: number; lat: number } } | null; seconds: number | null; web: boolean } | null
 }
 

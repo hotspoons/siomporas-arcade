@@ -30,6 +30,10 @@ const hint = (text: string, warn = false) => {
 
 export interface AssetsOpts {
   host: HTMLElement
+  /** the catalog and generation dialog (ui/assets.ts) */
+  openCatalog: () => void
+  /** turn a finished mesh into a placeable catalog entry (adopt.ts) */
+  openAdopt: () => void
 }
 
 export class AssetsPanel {
@@ -174,8 +178,22 @@ export class AssetsPanel {
     const host = this.o.host
     host.replaceChildren()
 
+    /*
+     * ONE HOME FOR ASSETS.
+     *
+     * Generating and placing used to be two drawer items and two toolbar icons opening dialogs
+     * that were not this panel — the same word meaning three things in one bar. They are steps of
+     * one flow: describe it, draw it, mesh it, make it placeable. So they open from here.
+     */
+    const flow = el('div', 'panel-actions')
+    flow.append(
+      button({ label: 'Catalog & generate', icon: 'sparkles', onClick: () => void this.o.openCatalog() }),
+      button({ label: 'Make placeable', icon: 'cube', title: 'turn a finished mesh into a catalog entry a level can place', onClick: () => void this.o.openAdopt() }),
+    )
+    host.append(flow)
+
     if (!this.count) {
-      host.append(hint('The asset service is not reachable from here. It generates the models a level places; everything else works without it.', true))
+      host.append(hint('Asset generation is off. Everything else in the editor works without it.', true))
       host.append(button({ label: 'Try again', icon: 'arrow-path', onClick: () => void this.load() }))
       return
     }

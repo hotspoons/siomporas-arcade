@@ -94,7 +94,29 @@ const readJson = async (req) => {
 const TYPES = {
   '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp',
   '.ktx2': 'image/ktx2', '.glb': 'model/gltf-binary', '.gltf': 'model/gltf+json',
-  '.json': 'application/json',
+  '.json': 'application/json', '.fbx': 'application/octet-stream', '.obj': 'text/plain',
+  '.dae': 'model/vnd.collada+xml', '.stl': 'model/stl', '.ply': 'application/octet-stream',
+  '.usdz': 'model/vnd.usdz+zip',
+}
+
+/**
+ * The model formats this will hold, and which of them a browser can load as they are.
+ *
+ * `loadable` is the honest distinction. three.js ships loaders for all of these, but only glTF
+ * carries PBR materials, a scene graph and skinning in one file the way the game expects — so an
+ * .fbx is STORED rather than pretended to be a mesh, and an item holding only one still reads as
+ * `spec`. A catalog entry that looks meshed and fails at load is worse than one that says it
+ * needs converting.
+ */
+const MODEL_FORMATS = {
+  '.glb': { loadable: true, note: 'what the game loads' },
+  '.gltf': { loadable: true, note: 'glTF, unpacked — its .bin and textures must come too' },
+  '.fbx': { loadable: false, note: 'common from Maya and Blender exports; convert to glb' },
+  '.obj': { loadable: false, note: 'geometry only, no materials or rig' },
+  '.dae': { loadable: false, note: 'COLLADA' },
+  '.stl': { loadable: false, note: 'geometry only, no UVs — printing rather than games' },
+  '.ply': { loadable: false, note: 'point clouds and scans' },
+  '.usdz': { loadable: false, note: 'Apple AR; convert to glb' },
 }
 
 /* ---- the work ------------------------------------------------------------------------------- */
@@ -291,6 +313,41 @@ const server = http.createServer(async (req, res) => {
       }
       if (seg.length === 3 && req.method === 'POST' && seg[2] === 'image') return json(res, 202, startImage(id, await readJson(req)))
       if (seg.length === 3 && req.method === 'POST' && seg[2] === 'mesh') return json(res, 202, startMesh(id, await readJson(req)))
+      /*
+       * UPLOAD A MODEL SOMEBODY ALREADY HAS.
+       *
+       * Rich, 2026-09-28: "make sure we support importing common 3d model formats suitable for
+       * games." The heavyweight end of the spectrum — a mesh modelled by a person rather than
+       * reconstructed — has to land in the same catalog as a generated one, or there are two
+       * libraries again.
+       *
+       * .glb IS THE ONE THE GAME LOADS, and it is what this stores as `mesh.glb`. The others are
+       * accepted and kept under their own name, because refusing an .fbx somebody has is worse
+       * than holding it until it can be converted — but they are NOT renamed to .glb, which would
+       * produce a catalog entry that looks meshed and fails at load. `state` stays honest: an item
+       * with only a .fbx reads `spec`, not `meshed`.
+       */
+      if (seg.length >= 3 && seg[2] === 'model' && req.method === 'PUT') {
+        const name = seg.slice(3).map(decodeURIComponent).join('/') || 'model.glb'
+        const ext = path.extname(name).toLowerCase()
+        if (!MODEL_FORMATS[ext]) {
+          return json(res, 400, {
+            error: `${ext || 'no extension'} is not a model format this holds`,
+            accepted: Object.keys(MODEL_FORMATS),
+            note: '.glb and .gltf load directly; the rest are stored and need converting before a level can place them',
+          })
+        }
+        const buf = await body(req, 512 * 2 ** 20)
+        if (!buf.length) return json(res, 400, { error: 'empty upload' })
+        // a .glb that is not a glb is the one error worth catching here: the magic is four bytes
+        if (ext === '.glb' && buf.slice(0, 4).toString('ascii') !== 'glTF') {
+          return json(res, 400, { error: 'that file is named .glb but does not start with the glTF magic' })
+        }
+        const dest = ext === '.glb' ? 'mesh.glb' : `source${ext}`
+        await catalog.writeFileFor(id, dest, buf, { step: 'import', format: ext, originalName: name, bytes: buf.length })
+        return json(res, 200, { id, stored: dest, format: ext, bytes: buf.length, loadable: MODEL_FORMATS[ext].loadable })
+      }
+
       if (seg.length >= 3 && seg[2] === 'file') {
         const rel = seg.slice(3).map(decodeURIComponent).join('/')
         const buf = await catalog.read(id, rel)

@@ -14,6 +14,24 @@ import { bodyOf, empty, focusField, group, readout, segmented, select, setFieldE
 import { icon } from '../ui/icons'
 import { api, type Preview, type Way, type World } from './api'
 import { importBakeGroup } from './transfer'
+import { assetsvc } from '../assetsvc'
+import { type SurfaceRole } from './api'
+
+/**
+ * Which surface role a material's category fills.
+ *
+ * The library's categories are what a material IS ("road", "ground_cover"); the roles are what a
+ * world DRAWS. They mostly coincide, which is why this is a map and not an inference — the two
+ * vocabularies are allowed to diverge, and when they do this is the one place that has to know.
+ */
+const ROLE_FOR_CATEGORY: Record<string, SurfaceRole> = {
+  road: 'road',
+  paving: 'paving',
+  sidewalk: 'sidewalk',
+  shoulder: 'shoulder',
+  ground_cover: 'ground_cover',
+  verge: 'verge',
+}
 import type { LonLat, MapView } from './map'
 
 const km = (m: number) => (m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m)} m`)
@@ -39,6 +57,8 @@ export class DefinePanel {
      in a toast that appears somewhere else and then takes itself away. Re-made on every render,
      so they are refs to the live nodes and never to a detached one. */
   private slugField: HTMLElement | null = null
+  /** what the texture library has, for the per-world surface picker. Empty if it is not reachable. */
+  private surfaces: { id: string; name: string; category: string }[] = []
   private extentGroup: HTMLElement | null = null
   private previewing = false
   private pending = 0
@@ -107,6 +127,13 @@ export class DefinePanel {
     // setTimeout, not a frame callback — a preview asked for before the tab lost focus must still
     // arrive. rAF would simply never fire.
     this.pending = window.setTimeout(() => void this.refresh(), 250)
+  }
+
+  /** What the texture library has. Failure is silent: the picker simply does not appear. */
+  async loadSurfaces() {
+    this.surfaces = await assetsvc.materials()
+      .then((r) => r.materials.filter((m) => ROLE_FOR_CATEGORY[m.category]).map((m) => ({ id: m.id, name: m.name, category: m.category })))
+      .catch(() => [])
   }
 
   async refresh() {
@@ -398,6 +425,38 @@ export class DefinePanel {
     }
     host.append(lookG)
 
+    /*
+     * WHICH TEXTURES THIS WORLD USES.
+     *
+     * Only the roles the library actually has something for, and every one defaults to "the
+     * viewer's default" rather than to a specific material — a world that says nothing about its
+     * road is not misconfigured, it is ordinary. Listing roles the library cannot fill would be
+     * offering a choice with one option.
+     */
+    if (this.surfaces.length) {
+      const surf = group('Surfaces', { collapsed: true, note: 'Leave a role on its default unless this world needs a different one.' })
+      const sb = bodyOf(surf)
+      const chosen = (this.draft.surfaces ??= {})
+      const byRole = new Map<string, { id: string; name: string }[]>()
+      for (const m of this.surfaces) {
+        const role = ROLE_FOR_CATEGORY[m.category] ?? null
+        if (role) byRole.set(role, [...(byRole.get(role) ?? []), { id: m.id, name: m.name }])
+      }
+      for (const [role, options] of byRole) {
+        sb.append(select({
+          label: role.replace(/_/g, ' '),
+          value: chosen[role as SurfaceRole] ?? '',
+          options: [{ value: '', label: 'default' }, ...options.map((o) => ({ value: o.id, label: o.name }))],
+          onChange: (v) => {
+            if (v) chosen[role as SurfaceRole] = v
+            else delete chosen[role as SurfaceRole]
+            this.o.onDirty(true)
+          },
+        }))
+      }
+      host.append(surf)
+    }
+
     /* naming and saving */
 
     const acts = el('div', 'panel-actions')
@@ -444,6 +503,7 @@ export class DefinePanel {
       all_streets: !!d.all_streets,
       roads: [...this.roads],
       note: d.note,
+      surfaces: d.surfaces,
       boundary: this.o.map.ring.map((p) => [p.lon, p.lat]),
       look: d.look && Object.keys(d.look).length ? d.look : undefined,
     }

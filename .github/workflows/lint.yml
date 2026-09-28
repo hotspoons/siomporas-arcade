@@ -29,5 +29,5 @@ jobs:
           # tools/ was ever run by CI — the world editor had three suites and has four, and none of
           # them had ever gone red anywhere but on somebody's laptop. A test CI does not run is a
           # test that rots.
-          node --test tools/worldeditor/*.test.mjs
+          node --test tools/worldeditor/*.test.mjs tools/assetsvc/*.test.mjs
           npm run build -ws --if-present

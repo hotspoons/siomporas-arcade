@@ -61,15 +61,24 @@ spec:
             # template — the image carries the list and an unset variable is what disables it.
             - name: WORLDEDITOR_SEED_SITES
               value: {{ .Values.seedSites | quote }}
+            {{- /*
+              GUARDED, because `helm upgrade --reuse-values` keeps the values the PREVIOUS release
+              was installed with — so a block added to the chart afterwards is nil, and an upgrade
+              from a release that predates it fails with "nil pointer evaluating interface {}".
+              That is not a hypothetical: it is how this was found, on the first upgrade after
+              adding it. A chart has to survive being upgraded from its own past.
+            */}}
+            {{- with .Values.splat }}
             - name: WORLDEDITOR_SPLAT_IMAGE
-              value: {{ .Values.splat.image | quote }}
+              value: {{ .image | default "ghcr.io/hotspoons/gaussworks:latest" | quote }}
             - name: WORLDEDITOR_SPLAT_CONFIG
-              value: {{ .Values.splat.config | quote }}
+              value: {{ .config | default "" | quote }}
             - name: WORLDEDITOR_SPLAT_SEAM_MAX
-              value: {{ .Values.splat.seamFailOver | quote }}
-            {{- if .Values.splat.codeSha }}
+              value: {{ .seamFailOver | default 3.0 | quote }}
+            {{- if .codeSha }}
             - name: WORLDEDITOR_SPLAT_CODE_SHA
-              value: {{ .Values.splat.codeSha | quote }}
+              value: {{ .codeSha | quote }}
+            {{- end }}
             {{- end }}
             {{- if .Values.publish.bucket }}
             - name: WORLDEDITOR_S3_BUCKET

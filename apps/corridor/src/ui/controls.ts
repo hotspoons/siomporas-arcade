@@ -239,3 +239,84 @@ export function textField(o: {
 export function empty(message: string): HTMLElement {
   return el('p', 'empty', message)
 }
+
+/*
+ * ERRORS BELONG ON THE FIELD, NOT IN A TOAST.
+ *
+ * Rich, 2026-09-28: "need error marking on forms (e.g. red outline on text boxes) and focus
+ * handling for things like 'give it a slug first' and no toast for this, just show it on the form
+ * and hide once you start filling."
+ *
+ * A toast says what is wrong somewhere else on the screen, for four seconds, and then takes the
+ * message away — so it cannot be re-read, it does not say WHICH field, and on a form long enough
+ * to scroll the field it is about may not even be in view. The three things a person needs are
+ * the message, the place, and the way back: the outline marks the place, the focus is the way
+ * back, and the message stays until they start fixing it.
+ */
+
+/** Which element inside a field actually takes focus. */
+function control(field: HTMLElement): HTMLElement | null {
+  return field.querySelector<HTMLElement>('input, select, textarea')
+}
+
+/**
+ * Mark a field wrong, or clear it with `null`.
+ *
+ * Clears itself on the first keystroke: "hide once you start filling". On `input` rather than
+ * `change`, so it goes the moment they start rather than when they leave the field — the error is
+ * about a field being empty, and it stops being empty at the first character, not at blur.
+ */
+export function setFieldError(field: HTMLElement, message: string | null): void {
+  const input = control(field)
+  const existing = field.querySelector<HTMLElement>('.field-error')
+  if (!message) {
+    field.classList.remove('invalid')
+    input?.removeAttribute('aria-invalid')
+    existing?.remove()
+    return
+  }
+  field.classList.add('invalid')
+  input?.setAttribute('aria-invalid', 'true')
+  const line = existing ?? el('p', 'field-error')
+  line.textContent = message
+  // aria-describedby so a screen reader reads the reason with the field, not as a loose paragraph
+  if (input) {
+    const id = line.id || `err-${Math.random().toString(36).slice(2, 9)}`
+    line.id = id
+    input.setAttribute('aria-describedby', id)
+  }
+  if (!existing) field.append(line)
+  input?.addEventListener('input', () => setFieldError(field, null), { once: true })
+}
+
+/** Put the cursor in the first field that is wrong and scroll it into view. */
+export function focusField(field: HTMLElement): void {
+  const input = control(field)
+  // `block: 'nearest'` rather than 'center': on a form that scrolls under a sticky button bar,
+  // centring a field near the end of the form leaves it behind the bar.
+  field.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  input?.focus()
+}
+
+/**
+ * The same, for something that is not a field at all.
+ *
+ * Not every requirement is a text box. "Drag an area on the map" is about the map, and the only
+ * thing on the form that represents it is the group heading it sits under — so the message goes
+ * there, and the focus goes to whichever control in the group can take it (the "use the current
+ * view" button), which is also the one that can satisfy the requirement without the map.
+ */
+export function setGroupError(g: HTMLElement, message: string | null): void {
+  const body = bodyOf(g)
+  const existing = g.querySelector<HTMLElement>(':scope > .group-error, .group-body > .group-error')
+  if (!message) {
+    g.classList.remove('invalid')
+    existing?.remove()
+    return
+  }
+  g.classList.add('invalid')
+  const line = existing ?? el('p', 'group-error')
+  line.textContent = message
+  if (!existing) body.prepend(line)
+  // cleared by whatever satisfies it, which the caller signals by calling again with null
+}

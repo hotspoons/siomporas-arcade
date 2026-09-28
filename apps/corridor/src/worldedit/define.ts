@@ -9,7 +9,8 @@
 //   3. WHICH ROAD IS THE SPINE — `primary` is not decoration: it becomes the spine, and the
 //      profile, the structures and every branch's `s_on_primary` are measured along it.
 import { button, el, toast } from '../ui/shell'
-import { bodyOf, empty, group, readout, segmented, select, slider, textField, toggle } from '../ui/controls'
+import { bodyOf, empty, focusField, group, readout, segmented, select, setFieldError, setGroupError, slider, textField, toggle }
+  from '../ui/controls'
 import { icon } from '../ui/icons'
 import { api, type Preview, type Way, type World } from './api'
 import { importBakeGroup } from './transfer'
@@ -34,6 +35,11 @@ export class DefinePanel {
   private o: DefineOpts
   private draft: Partial<World> = { all_streets: true }
   private editing: string | null = null
+  /* The fields `save()` can complain about. Held so the complaint can be put ON them rather than
+     in a toast that appears somewhere else and then takes itself away. Re-made on every render,
+     so they are refs to the live nodes and never to a detached one. */
+  private slugField: HTMLElement | null = null
+  private extentGroup: HTMLElement | null = null
   private previewing = false
   private pending = 0
   private roads = new Set<string>()
@@ -140,6 +146,8 @@ export class DefinePanel {
   render() {
     const host = this.o.host
     host.replaceChildren()
+    this.slugField = null
+    this.extentGroup = null
     const ring = this.o.map.ring
 
     if (!this.preview && !this.o.map.ring.length) {
@@ -152,7 +160,7 @@ export class DefinePanel {
        description before submitting"). */
     const name = group('Name')
     const nb = bodyOf(name)
-    const slugField = textField({
+    this.slugField = textField({
       label: 'slug',
       value: this.draft.slug ?? '',
       placeholder: 'lower-case-with-hyphens',
@@ -162,7 +170,7 @@ export class DefinePanel {
       },
     })
     nb.append(
-      slugField,
+      this.slugField,
       textField({
         label: 'description',
         value: this.draft.note ?? '',
@@ -176,7 +184,11 @@ export class DefinePanel {
 
     /* where */
     const where = group('Extent')
+    this.extentGroup = where
     const wb = bodyOf(where)
+    // render() runs on every boundary change, so an extent that now exists clears its own
+    // complaint without anything having to remember it was made.
+    if (this.preview) setGroupError(where, null)
     if (!this.preview) {
       wb.append(empty(ring.length ? 'measuring…' : 'No area drawn'))
       wb.append(
@@ -405,8 +417,25 @@ export class DefinePanel {
 
   private async save() {
     const d = this.draft
-    if (!d.slug) return toast('give it a slug first', 'warn')
-    if (!d.lat || !d.radius_m) return toast('draw a boundary, or use the current view', 'warn')
+    /*
+     * ON THE FORM, NOT IN A TOAST. Both of these used to be `toast(..., 'warn')`: a message about
+     * a specific field, shown somewhere else, for four seconds, with no indication of which field
+     * and no way to read it again. Now the field is outlined, the message sits under it, the
+     * cursor goes there, and it all clears at the first keystroke.
+     */
+    const problems: { field: HTMLElement; message: string }[] = []
+    if (!d.slug && this.slugField) problems.push({ field: this.slugField, message: 'A slug is required' })
+    if ((!d.lat || !d.radius_m) && this.extentGroup) {
+      // The extent is not a text field — it is the map — so the message goes on the group and the
+      // focus moves to the one control in it that CAN be used from the keyboard.
+      setGroupError(this.extentGroup, 'Drag an area on the map, or use the current view')
+      problems.push({ field: this.extentGroup, message: '' })
+    }
+    if (problems.length) {
+      for (const p of problems) if (p.message) setFieldError(p.field, p.message)
+      focusField(problems[0].field)
+      return
+    }
     const body: Record<string, unknown> = {
       slug: d.slug,
       centre: { lat: d.lat, lon: d.lon },

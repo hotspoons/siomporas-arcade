@@ -466,3 +466,33 @@ body.chrome-off #chrome-restore { display: block; }
   color: var(--danger);
   font-size: var(--text-sm);
 }
+
+/* A field that is wrong. The outline is on the CONTROL rather than the row, so the label and the
+   message keep their own colour and only the thing you have to change is marked.
+
+   `:focus` IS LISTED EXPLICITLY, and that is the point rather than belt and braces. `.field.text
+   .input:focus` above turns a focused input's border the accent colour, and an invalid field is
+   focused BY DEFINITION here — we put the cursor in it. So the red outline was painted and then
+   immediately overwritten by the blue one, at exactly the moment it was meant to be read. The
+   probe measured rgb(74, 168, 232) where it wanted red, which is the only way this shows up: the
+   class applied, the rule present, and the colour on screen wrong.
+
+   The `:focus-visible` outline near the top is left alone — that says "the keyboard is here",
+   which is still true and is a different question from "this value is wrong". */
+.field.invalid .input,
+.field.invalid select,
+.field.invalid textarea,
+.field.invalid .input:focus,
+.field.invalid select:focus,
+.field.invalid textarea:focus {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 1px var(--danger);
+}
+.field.invalid .field-label { color: var(--danger); }
+.field .field-error { margin: 4px 0 0; color: var(--danger); font-size: var(--text-xs); }
+/* a text field is a row, so the message needs a line of its own under the input */
+.field.text { flex-wrap: wrap; }
+.field.text .field-error { flex: 1 0 100%; }
+
+.group.invalid .group-head { color: var(--danger); }
+.group-error { margin: 0 0 var(--s2); color: var(--danger); font-size: var(--text-xs); }

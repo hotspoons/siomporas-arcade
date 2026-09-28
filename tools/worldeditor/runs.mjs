@@ -326,9 +326,29 @@ export class Runs {
       sink.end()
       void this.#finish(run, 'failed', -1, `could not start ${this.cfg.python}: ${e.message ?? e}`)
     })
-    child.on('close', (code) => {
+    /*
+     * THE SIGNAL IS THE ONLY THING THAT SAYS WHAT HAPPENED, and this used to throw it away.
+     *
+     * Node calls `close(code, signal)`: a process that was KILLED has a null code and a signal,
+     * and reporting that as "exited null" tells a person nothing at all. Rich's t-section bake
+     * died after twelve minutes and said exactly that; it had been SIGKILLed, and this box's
+     * cgroup reported 46 OOM kills (measured: one 213 MiB LAZ tile peaks at 2.44 GB, and there
+     * were 3 GB free).
+     *
+     * SIGKILL gets named for what it almost always is. Nothing sends SIGKILL to a bake except the
+     * kernel running out of memory — a cancel sends SIGTERM — so the guess is worth making and is
+     * hedged rather than asserted.
+     */
+    child.on('close', (code, signal) => {
       sink.end()
-      void this.#finish(run, code === 0 ? 'done' : 'failed', code, code === 0 ? null : `exited ${code}`)
+      const why = signal === 'SIGKILL'
+        ? 'killed (SIGKILL) — almost certainly out of memory: nothing else sends it, and a cancel sends SIGTERM'
+        : signal === 'SIGTERM'
+          ? 'stopped (SIGTERM)'
+          : signal
+            ? `killed by ${signal}`
+            : `exited ${code}`
+      void this.#finish(run, code === 0 ? 'done' : 'failed', code, code === 0 ? null : why)
     })
     child.stdout.pipe(sink, { end: false })
     child.stderr.pipe(sink, { end: false })

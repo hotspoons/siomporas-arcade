@@ -199,6 +199,18 @@ export interface Level {
   world: string
   defaults?: { time?: string; weather?: string; season?: string }
   mode?: string
+  /**
+   * The car you drive, as opposed to the cars standing around.
+   *
+   * `vehicle` is a catalog id; `profile` is one of the engine's five drive profiles. The handling
+   * numbers are on the ASSET and deliberately not copied here — they are a fact about the car,
+   * and a level holding its own copy would go stale the moment somebody tuned it. The profile is
+   * a fact about the level: the same car is a different game in `sim` and in `taxi`.
+   *
+   * Absent on every level written before 2026-09-29, and absent is valid: the engine falls back
+   * to its built-in car.
+   */
+  player?: { vehicle: string; profile?: string } | null
   placements?: { asset: string; at: number[]; yaw?: number }[]
   splats?: { run?: string; id?: string }[]
   simulations?: { kind: string; [k: string]: unknown }[]

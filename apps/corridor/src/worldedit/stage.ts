@@ -15,6 +15,11 @@ import { button, el, toast } from '../ui/shell'
 import { bodyOf, empty, group, readout, select, textField } from '../ui/controls'
 import { icon } from '../ui/icons'
 import { api, type Level } from './api'
+import { assetsvc, type AssetItem } from '../assetsvc'
+import { typeOf } from '../classes'
+// PROFILES only — `profiles.ts` is pure data with no imports of its own, so the world editor does
+// not drag Rapier into its bundle to offer five strings, and there is no second copy to drift.
+import { PROFILES } from '@apex/engine/physics/profiles'
 
 const hint = (text: string, warn = false) => {
   const p = el('div', `panel-hint${warn ? ' warn' : ''}`)
@@ -39,6 +44,8 @@ export class StagePanel {
   private facts: Record<string, string> = {}
   private actions: Record<string, string> = {}
   private modes: string[] = ['drive', 'fly', 'walk']
+  /** what the library holds that can be driven; empty when the asset service is not configured */
+  private vehicles: AssetItem[] = []
   private draft: Level | null = null
   private dirty = false
   private problems: { errors: string[]; warnings: string[] } = { errors: [], warnings: [] }
@@ -56,6 +63,11 @@ export class StagePanel {
       this.facts = r.facts ?? {}
       this.actions = r.actions ?? {}
       this.modes = r.modes ?? this.modes
+      /*
+       * The library's vehicles, for the player picker. Fire and forget and never fatal: the asset
+       * service is optional, and a level whose car you cannot choose is still a level you can edit.
+       */
+      this.vehicles = await assetsvc.list().then((all) => all.filter((it) => typeOf(it) === 'vehicle')).catch(() => [])
     } catch (e) {
       this.levels = []
       toast(`levels: ${(e as Error).message}`, 'warn', 5000)
@@ -167,6 +179,74 @@ export class StagePanel {
       }),
     )
     host.append(what)
+
+    /*
+     * WHAT YOU DRIVE — the link that did not exist.
+     *
+     * Rich, 2026-09-29: "I have no idea how to take a car model and attach a physics model to it,
+     * configure the engine sound and performance, overall car performance, and use it in a level."
+     * The last clause had no answer: a level could place a car as SCENERY, and the engine spawned
+     * a procedural box whatever the library held.
+     *
+     * THE HANDLING IS NOT HERE. Mass, wheelbase, gearing and the engine note are on the ASSET —
+     * they are facts about the car, and a level that copied them would go stale the moment
+     * somebody tuned it. Only the profile is a fact about the level, because the same car is a
+     * different game in `sim` and in `taxi`. The link below goes to where the numbers are.
+     */
+    if (d.mode === 'drive' || d.mode === undefined) {
+      const who = group('What you drive')
+      const pb = bodyOf(who)
+      if (!this.vehicles.length) {
+        pb.append(hint('no vehicles in the library — anything classed hero-car, traffic, emergency or commercial-vehicle shows up here', true))
+      } else {
+        pb.append(
+          select({
+            label: 'vehicle',
+            value: d.player?.vehicle ?? '',
+            options: [
+              { value: '', label: 'the engine\u2019s built-in car' },
+              ...this.vehicles.map((v) => ({ value: v.id, label: `${v.id} · ${v.kind}${v.vehicle ? '' : ' (no dynamics yet)'}` })),
+            ],
+            onChange: (v) => {
+              if (!v) delete d.player
+              else d.player = { ...(d.player ?? {}), vehicle: v }
+              this.mark(true)
+              this.render()
+              void this.check()
+            },
+          }),
+        )
+        if (d.player?.vehicle) {
+          const car = this.vehicles.find((v) => v.id === d.player!.vehicle)
+          pb.append(
+            select({
+              label: 'handling',
+              value: d.player.profile ?? 'street',
+              options: Object.keys(PROFILES).map((x) => ({ value: x, label: x })),
+              onChange: (v) => {
+                d.player = { ...(d.player ?? { vehicle: '' }), profile: v }
+                this.mark(true)
+                void this.check()
+              },
+            }),
+          )
+          /*
+           * SAY WHEN THE CAR HAS NO NUMBERS, and say where to put them. A vehicle with no
+           * dynamics document drives on its class defaults, which is a working car and not an
+           * error — but it is also the reason somebody would think the physics "does not work",
+           * so it is stated here rather than discovered at speed.
+           */
+          if (!car?.vehicle) {
+            pb.append(hint(`${d.player.vehicle} has no dynamics saved — it will drive on ${car?.kind ?? 'its class'} defaults. Assets \u2192 Vehicles \u2192 ${d.player.vehicle} \u2192 Dynamics.`, true))
+          }
+          // unrigged is FINE and must not read as a problem: the engine's wheels come from the
+          // wheelbase and track, and only the visible wheels ever needed bones
+          const wheels = (car?.rig?.roles?.wheel ?? []).length
+          pb.append(readout('wheels', wheels >= 4 ? `${wheels} bones — they will turn` : 'no rig — it drives the same, the wheels just will not turn'))
+        }
+      }
+      host.append(who)
+    }
 
     /* what it opens like */
     const look = group('What it opens like')

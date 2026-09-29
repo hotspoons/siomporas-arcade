@@ -61,6 +61,16 @@ function bad(msg) {
  * the caller against the volume: this module has no filesystem and is therefore testable without
  * one, and the same function validates a level an agent just wrote before it ever reaches disk.
  */
+/**
+ * The drive profiles, by id. Mirrors `PROFILES` in `packages/engine/src/physics/profiles.ts`.
+ *
+ * A COPY, and deliberately so: this module is validation with no filesystem and no bundler, and
+ * importing the physics engine into it to read five strings would make the service depend on the
+ * game. `levels.test.mjs` holds this list against that file, so the copy cannot drift silently —
+ * which is the only thing wrong with a copy.
+ */
+export const PROFILES = ['stunts', 'taxi', 'street', 'rush', 'sim']
+
 export function validate(level) {
   const errors = []
   const warnings = []
@@ -69,6 +79,44 @@ export function validate(level) {
   if (!SLUG.test(level?.id ?? '')) E(`id ${JSON.stringify(level?.id)} is not a usable slug`)
   if (!SLUG.test(level?.world ?? '')) E(`world ${JSON.stringify(level?.world)} is not a usable slug`)
   if (level.mode !== undefined && !MODES.includes(level.mode)) E(`mode ${JSON.stringify(level.mode)} is not one of ${MODES.join(', ')}`)
+
+  /*
+   * WHO YOU ARE DRIVING.
+   *
+   * Rich, 2026-09-29: "I have no idea how to take a car model and attach a physics model to it,
+   * configure the engine sound and performance, overall car performance, and use it in a level."
+   *
+   * The last clause had no answer at all: a level could place a car as SCENERY and had no way to
+   * say which car you drive. The engine spawned a procedural box whatever the library held. This
+   * is the link — a catalog id, and which of the five drive profiles it uses.
+   *
+   * The handling numbers do NOT live here. They are on the asset (`vehicle` on its catalog
+   * record), because they are a fact about the car and not about the level; a level that copied
+   * them would go stale the moment somebody tuned the car. The profile is here because it IS a
+   * fact about the level: the same car is a different game in `sim` and in `taxi`.
+   *
+   * NOTHING ABOUT A RIG. "Unrigged cars should still be usable as vehicles, the wheels just won't
+   * turn" — the engine places its raycast wheels from the wheelbase and track and has never needed
+   * bones, so a level may name any vehicle in the library.
+   */
+  const pl = level.player
+  if (pl !== undefined && pl !== null) {
+    if (typeof pl !== 'object') E('player must be an object naming a vehicle')
+    else {
+      if (!pl.vehicle) E('player.vehicle names no asset — it is a catalog id')
+      else if (typeof pl.vehicle !== 'string') E('player.vehicle must be a catalog id')
+      if (pl.profile !== undefined && !PROFILES.includes(pl.profile)) {
+        E(`player.profile ${JSON.stringify(pl.profile)} is not one of ${PROFILES.join(', ')}`)
+      }
+    }
+  }
+  /*
+   * AND NO WARNING WHEN IT IS ABSENT. The first version of this warned that a drive level with no
+   * `player` gets the engine's built-in car — true, and it fired on every level ever written,
+   * including the fixtures. A warning that every document trips is not a signal, it is a thing
+   * people learn to scroll past, and it would have devalued the two warnings in here that mean
+   * something. The picker in the Stage panel is how somebody finds out this field exists.
+   */
 
   const d = level.defaults ?? {}
   if (d.time !== undefined && !/^([01]\d|2[0-3]):[0-5]\d$/.test(d.time)) E(`defaults.time ${JSON.stringify(d.time)} is not HH:MM`)

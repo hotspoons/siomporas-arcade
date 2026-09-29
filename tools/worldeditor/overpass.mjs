@@ -68,7 +68,28 @@ export class Overpass {
    */
   constructor(store, urls, { timeoutMs = 120000, deadlineMs = 240000, downForMs = 45000, coverSlack = 0.05 } = {}) {
     this.store = store
-    const parsed = urls.filter(Boolean).map(parseUpstream).filter((u) => {
+    this.setUpstreams(urls)
+    this.coverSlack = coverSlack
+    this.timeoutMs = timeoutMs
+    this.deadlineMs = deadlineMs
+    this.downForMs = downForMs
+    this.inflight = new Map()
+    this.down = new Map()
+  }
+
+  /**
+   * Replace the upstream list, as from the editor's Settings.
+   *
+   * Everything that is DERIVED from the list — the coverage boxes and the recently-down marks — is
+   * rebuilt with it. The down marks are dropped rather than carried: an upstream that failed a
+   * minute ago may be exactly the one somebody just fixed and re-entered, and remembering it as down
+   * would make the change look like it did nothing for a minute.
+   *
+   * In-flight queries finish against the upstream they started on. The list is read at the start
+   * of each query, so nothing mid-request changes shape underneath it.
+   */
+  setUpstreams(urls) {
+    const parsed = (urls ?? []).filter(Boolean).map(parseUpstream).filter((u) => {
       try {
         new URL(u.url)
         return true
@@ -96,27 +117,7 @@ export class Overpass {
      * Nothing is inferred: an upstream with no declared coverage is assumed to hold everything,
      * because that is what a public mirror does and what our own will do once it holds the planet.
      */
-    /** how much of a box may fall outside an extract before it is passed over — see `#covers` */
-    this.coverSlack = coverSlack
     this.coverage = new Map(parsed.filter((u) => u.bbox).map((u) => [u.url, u.bbox]))
-    this.timeoutMs = timeoutMs
-    this.deadlineMs = deadlineMs
-    this.downForMs = downForMs
-    this.inflight = new Map()
-    /**
-     * Upstreams that just failed, and when.
-     *
-     * A HANGING upstream costs a full `timeoutMs` before anything else is tried, and while our own
-     * Overpass is being rebuilt that is the normal state, not the exception — every pan of the map
-     * would pay it. So a failure is remembered for `downForMs` and that upstream is SKIPPED with no
-     * wait at all until the memo expires. Costs nothing when everything is healthy (nothing fails,
-     * so nothing is memoed), and turns "every query takes two minutes" into "one query a minute
-     * takes two minutes, the rest are immediate".
-     *
-     * Deliberately not a background health check: a poller that says an upstream is up tells you
-     * about a moment that has passed, and this only ever needs to know about failures it has just
-     * seen for itself.
-     */
     this.down = new Map()
   }
 

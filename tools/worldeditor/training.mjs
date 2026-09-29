@@ -48,6 +48,28 @@ export async function apiVersionFor(k8s) {
   }
 }
 
+/*
+ * WHERE THE DEFAULTS COME FROM.
+ *
+ * `normalise` read `process.env` directly, which made the splat pipeline configurable from the
+ * chart and from nowhere else. The service now points this at its settings (settings.mjs), so a
+ * value saved in the editor's Settings wins over the environment — and a caller that never sets
+ * one, which is every test in training.test.mjs, gets exactly the old behaviour: the environment.
+ *
+ * Keyed by the ENVIRONMENT VARIABLE NAME on purpose. That name is already the documented contract
+ * for every one of these, in the chart and in this file; a second vocabulary for the same knobs
+ * would be a translation table that drifts.
+ */
+let lookup = (name) => process.env[name]
+/** Point the defaults at something other than the environment. `null` restores the environment. */
+export function useConfig(fn) {
+  lookup = fn ?? ((name) => process.env[name])
+}
+const cfg = (name) => {
+  const v = lookup(name)
+  return v === undefined || v === '' ? undefined : v
+}
+
 /** What a splat run needs to know. Everything has a default that is honest about being one. */
 export function normalise(run = {}) {
   const capture = run.capture ?? run.id
@@ -58,7 +80,7 @@ export function normalise(run = {}) {
     world: run.world ?? null,
     nodes: Math.max(1, Number(run.nodes ?? 1)),
     gpusPerNode: Math.max(1, Number(run.gpusPerNode ?? 1)),
-    image: run.image ?? process.env.WORLDEDITOR_SPLAT_IMAGE ?? 'ghcr.io/hotspoons/gaussworks:latest',
+    image: run.image ?? cfg('WORLDEDITOR_SPLAT_IMAGE') ?? 'ghcr.io/hotspoons/gaussworks:latest',
     /*
      * THE ENTRYPOINT, answered by the splats lane (gaussworks 5071e04):
      *
@@ -74,8 +96,8 @@ export function normalise(run = {}) {
      * property that makes this safe to hand to a scheduler. The leader works the queue too once
      * it has chunked, so a one-pod run is still the whole pipeline.
      */
-    command: run.command ?? (process.env.WORLDEDITOR_SPLAT_COMMAND ? JSON.parse(process.env.WORLDEDITOR_SPLAT_COMMAND) : ['splatpipe']),
-    args: run.args ?? (process.env.WORLDEDITOR_SPLAT_ARGS ? JSON.parse(process.env.WORLDEDITOR_SPLAT_ARGS) : null),
+    command: run.command ?? (cfg('WORLDEDITOR_SPLAT_COMMAND') ? JSON.parse(cfg('WORLDEDITOR_SPLAT_COMMAND')) : ['splatpipe']),
+    args: run.args ?? (cfg('WORLDEDITOR_SPLAT_ARGS') ? JSON.parse(cfg('WORLDEDITOR_SPLAT_ARGS')) : null),
     /** extra workers beside the leader. 0 is a complete run on one pod. */
     workers: Math.max(0, Number(run.workers ?? 0)),
     /*
@@ -84,7 +106,7 @@ export function normalise(run = {}) {
      * resolution, and high resolution bought +0.7 dB of PSNR for 5.9x the bytes per square
      * metre — at world scale, the difference between shippable and not.
      */
-    config: run.config ?? process.env.WORLDEDITOR_SPLAT_CONFIG ?? null,
+    config: run.config ?? cfg('WORLDEDITOR_SPLAT_CONFIG') ?? null,
     /*
      * THE COMMIT THIS RUN EXPECTS TO FIND ON THE VOLUME.
      *
@@ -96,7 +118,7 @@ export function normalise(run = {}) {
      *
      * Recorded on the object too, so a result can be traced to the code that produced it.
      */
-    codeSha: run.codeSha ?? process.env.WORLDEDITOR_SPLAT_CODE_SHA ?? null,
+    codeSha: run.codeSha ?? cfg('WORLDEDITOR_SPLAT_CODE_SHA') ?? null,
     /*
      * THE SEAM THRESHOLD, in metres. Neighbouring chunks are levelled independently against their
      * own GPS priors, so they can disagree about the height of the same road — a step a driver
@@ -106,23 +128,23 @@ export function normalise(run = {}) {
      * Passed through to the pipeline, which is where the gate belongs — before training, because
      * the seam answer comes from `poses` and training is the expensive half.
      */
-    seamFailOver: run.seamFailOver == null ? Number(process.env.WORLDEDITOR_SPLAT_SEAM_MAX ?? 3.0) : Number(run.seamFailOver),
-    claim: run.claim ?? process.env.WORLDEDITOR_CLAIM ?? 'worldeditor-data',
+    seamFailOver: run.seamFailOver == null ? Number(cfg('WORLDEDITOR_SPLAT_SEAM_MAX') ?? 3.0) : Number(run.seamFailOver),
+    claim: run.claim ?? cfg('WORLDEDITOR_CLAIM') ?? 'worldeditor-data',
     /*
      * NO DEFAULT STORAGE CLASS. `ceph-filesystem` was one cluster's name for it; on anybody
      * else's it does not exist and the PVC stays Pending forever with a message nobody reads.
      * Omitted, Kubernetes uses the cluster's own default StorageClass, which is the right answer
      * everywhere and is what a cluster admin has already decided.
      */
-    storageClass: run.storageClass ?? process.env.WORLDEDITOR_SPLAT_STORAGE_CLASS ?? null,
-    outputSize: run.outputSize ?? process.env.WORLDEDITOR_SPLAT_OUTPUT_SIZE ?? '500Gi',
+    storageClass: run.storageClass ?? cfg('WORLDEDITOR_SPLAT_STORAGE_CLASS') ?? null,
+    outputSize: run.outputSize ?? cfg('WORLDEDITOR_SPLAT_OUTPUT_SIZE') ?? '500Gi',
     /* null means "discover it" — see `gpuResources`. NVIDIA is the common case, not the only one. */
-    gpuResource: run.gpuResource ?? process.env.WORLDEDITOR_GPU_RESOURCE ?? null,
+    gpuResource: run.gpuResource ?? cfg('WORLDEDITOR_GPU_RESOURCE') ?? null,
     // extra container limits (memory, cpu) as a plain map; the GPU count is `gpusPerNode`
     limits: run.limits ?? null,
     /** the RWX claim the pods share as /out; the CRD provisions its own, a bare JobSet does not */
     outClaim: run.outClaim ?? null,
-    ttlSeconds: Number(run.ttlSeconds ?? process.env.WORLDEDITOR_SPLAT_TTL ?? 604800),
+    ttlSeconds: Number(run.ttlSeconds ?? cfg('WORLDEDITOR_SPLAT_TTL') ?? 604800),
   }
 }
 
@@ -643,10 +665,56 @@ function foldBatch(items) {
  * from it afterwards, which is where the /data mount collision surfaced. It catches shape errors,
  * not consequences.
  */
+/**
+ * The shared output volume, for the two tiers that do not get one for free.
+ *
+ * A TrainingDeployment provisions its own storage — that is half of what the operator is for. A
+ * JobSet or a pair of plain Jobs does not, and both mount `<name>-out` as their /out. That claim
+ * was "named and expected to exist", and nothing created it, so on a cluster without the CRD every
+ * run sat Pending for ever on a volume nobody had made. The fallback tiers only work if they bring
+ * their own volume, so they do.
+ *
+ * RWX, because that is the whole design: the leader chunks, workers write trained chunks back, and
+ * the leader merges what they wrote. IDEMPOTENT: a claim already there (409) is used, which is what
+ * makes a retry after a failed Job create safe. And it OUTLIVES the run — the trained splats are the
+ * point of running it, and deleting a run must not delete its result. It is labelled, so it can be
+ * found and removed on purpose.
+ */
+export function outputClaim(r) {
+  return {
+    apiVersion: 'v1',
+    kind: 'PersistentVolumeClaim',
+    metadata: {
+      name: r.outClaim ?? `${r.name}-out`,
+      labels: { 'corridor.run': r.name, 'corridor.role': 'splat-output', ...(r.world ? { 'corridor.world': r.world } : {}) },
+    },
+    spec: {
+      accessModes: ['ReadWriteMany'],
+      resources: { requests: { storage: r.outputSize } },
+      ...(r.storageClass ? { storageClassName: r.storageClass } : {}),
+    },
+  }
+}
+
 export async function createRun(run, k8s, { namespace = 'default', force = null, dryRun = false } = {}) {
   const r = await resolve(run, k8s)
   const { via, kind, manifest, apiVersion } = await manifestFor(r, k8s, { namespace, force })
   const gv = apiVersion ?? (await apiVersionFor(k8s))
+  /*
+   * THE VOLUME FIRST, for the tiers that need one. Unless the caller named a claim of their own,
+   * which means it already exists and is theirs to manage.
+   */
+  let claim = null
+  if (via !== 'training' && !run.outClaim) {
+    const pvc = outputClaim(r)
+    const base = `/api/v1/namespaces/${namespace}/persistentvolumeclaims` + (dryRun ? '?dryRun=All' : '')
+    claim = await k8s.raw('POST', base, { body: pvc })
+      .then((c) => ({ name: c?.metadata?.name ?? pvc.metadata.name, created: true }))
+      .catch((e) => {
+        if (e.status === 409) return { name: pvc.metadata.name, created: false }
+        throw Object.assign(new Error(`the output volume ${pvc.metadata.name}: ${e.message}`), { status: e.status ?? 500 })
+      })
+  }
   /*
    * THE BATCH TIER CREATES TWO OBJECTS, because no single one owns both. They go up leader-first
    * — a worker that starts before the chunks exist waits rather than failing, so the order is a
@@ -662,14 +730,14 @@ export async function createRun(run, k8s, { namespace = 'default', force = null,
       })
       made.push(created?.metadata?.name ?? item.metadata.name)
     }
-    return { name: manifest.run, kind, via, namespace, dryRun, jobs: made, capture: r.capture, world: r.world, workers: r.workers, createdAt: new Date().toISOString() }
+    return { name: manifest.run, kind, via, namespace, dryRun, jobs: made, claim, capture: r.capture, world: r.world, workers: r.workers, createdAt: new Date().toISOString() }
   }
 
   const path = pathFor(via, gv, namespace) + (dryRun ? '?dryRun=All' : '')
   const created = await k8s.raw('POST', path, { body: manifest })
   return {
     name: created?.metadata?.name ?? manifest.metadata.name,
-    kind, via, namespace, dryRun,
+    kind, via, namespace, dryRun, claim,
     capture: r.capture,
     world: r.world,
     workers: r.workers,

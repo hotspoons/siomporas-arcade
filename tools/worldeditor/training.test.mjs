@@ -297,3 +297,109 @@ test('an actually empty cluster says so, and says it KNOWS', async () => {
   assert.equal(r.total, 0)
   assert.match(r.why, /no nodes advertise/)
 })
+
+/* ---- creating a run, on each tier ----------------------------------------------------------------
+ * What the cluster is ASKED to create is the claim: which objects, in which order, and whether the
+ * output volume the fallback tiers depend on is among them. A fake records every write.
+ */
+import { createRun, outputClaim } from './training.mjs'
+
+/** A cluster that has whichever APIs you say, and records every POST. */
+function recording({ training = false, jobset = false, pvcExists = false } = {}) {
+  const posts = []
+  const k8s = {
+    usable: () => true,
+    namespace: 'default',
+    raw: async (method, path, opts = {}) => {
+      if (method === 'GET' && path === '/apis') {
+        return { groups: training ? [{ name: 'richard-siomporas.patapsco.ai', preferredVersion: { groupVersion: 'richard-siomporas.patapsco.ai/v1alpha1' } }] : [] }
+      }
+      if (method === 'GET' && path.includes('/trainingdeployments')) {
+        if (!training) throw Object.assign(new Error('not found'), { status: 404 })
+        return { items: [] }
+      }
+      if (method === 'GET' && path.includes('/jobsets')) {
+        if (!jobset) throw Object.assign(new Error('not found'), { status: 404 })
+        return { items: [] }
+      }
+      if (method === 'GET' && path.includes('/apis/batch/v1')) return { items: [] }
+      if (method === 'GET' && path.startsWith('/api/v1/nodes')) return { items: [] }
+      if (method === 'GET' && path.startsWith('/api/v1/pods')) return { items: [] }
+      if (method === 'POST') {
+        posts.push({ path, kind: opts.body?.kind, name: opts.body?.metadata?.name })
+        if (opts.body?.kind === 'PersistentVolumeClaim' && pvcExists) throw Object.assign(new Error('already exists'), { status: 409 })
+        return { metadata: { name: opts.body?.metadata?.name } }
+      }
+      throw new Error(`unexpected ${method} ${path}`)
+    },
+  }
+  return { k8s, posts }
+}
+
+test('a TrainingDeployment brings its own volume, so no claim is created', async () => {
+  const { k8s, posts } = recording({ training: true, jobset: true })
+  const r = await createRun({ capture: 'cap1' }, k8s, { namespace: 'default' })
+  assert.equal(r.via, 'training')
+  assert.deepEqual(posts.map((p) => p.kind), ['TrainingDeployment'])
+  assert.equal(r.claim, null)
+})
+
+test('a JobSet gets its RWX output volume created FIRST', async () => {
+  // The bug this pins: the JobSet mounted `<name>-out` and nothing made it, so the run sat
+  // Pending for ever on any cluster without the CRD.
+  const { k8s, posts } = recording({ jobset: true })
+  const r = await createRun({ capture: 'cap1' }, k8s, { namespace: 'default' })
+  assert.equal(r.via, 'jobset')
+  assert.deepEqual(posts.map((p) => p.kind), ['PersistentVolumeClaim', 'JobSet'])
+  assert.equal(r.claim.name, 'splat-cap1-out')
+  assert.equal(r.claim.created, true)
+})
+
+test('plain Jobs — the head and its workers — get the volume first as well', async () => {
+  // `workers` defaults to 0, and then the head does everything alone: that is one claim and one
+  // Job. With workers asked for there is a second Job, and both follow the claim.
+  const { k8s, posts } = recording()
+  const r = await createRun({ capture: 'cap1', workers: 2 }, k8s, { namespace: 'default' })
+  assert.equal(r.via, 'batch')
+  assert.equal(posts[0].kind, 'PersistentVolumeClaim')
+  assert.deepEqual(posts.slice(1).map((p) => p.kind), ['Job', 'Job'])
+  assert.ok(posts[1].name.endsWith('-leader'), 'the head goes first')
+})
+
+test('a run with no workers is the head alone', async () => {
+  const { k8s, posts } = recording()
+  await createRun({ capture: 'cap1' }, k8s, { namespace: 'default' })
+  assert.deepEqual(posts.map((p) => p.kind), ['PersistentVolumeClaim', 'Job'])
+})
+
+test('a claim that already exists is used, which is what makes a retry safe', async () => {
+  const { k8s, posts } = recording({ jobset: true, pvcExists: true })
+  const r = await createRun({ capture: 'cap1' }, k8s, { namespace: 'default' })
+  assert.equal(r.claim.created, false)
+  assert.equal(posts.at(-1).kind, 'JobSet', 'the run still went ahead')
+})
+
+test('a caller that names its own claim gets no claim made for it', async () => {
+  const { k8s, posts } = recording({ jobset: true })
+  await createRun({ capture: 'cap1', outClaim: 'mine' }, k8s, { namespace: 'default' })
+  assert.ok(!posts.some((p) => p.kind === 'PersistentVolumeClaim'))
+})
+
+test('the runner can be PINNED, whatever the cluster offers', async () => {
+  // what the `splat.runner` setting does: the featured path is misbehaving and you want to know
+  // whether it is the operator or the workload
+  const { k8s, posts } = recording({ training: true, jobset: true })
+  const r = await createRun({ capture: 'cap1' }, k8s, { namespace: 'default', force: 'batch' })
+  assert.equal(r.via, 'batch')
+  assert.ok(!posts.some((p) => p.kind === 'TrainingDeployment'))
+})
+
+test('the output claim is RWX, sized, and labelled so it can be found', () => {
+  const pvc = outputClaim({ name: 'splat-x', outputSize: '200Gi', storageClass: 'cephfs', world: 'crofton' })
+  assert.deepEqual(pvc.spec.accessModes, ['ReadWriteMany'])
+  assert.equal(pvc.spec.resources.requests.storage, '200Gi')
+  assert.equal(pvc.spec.storageClassName, 'cephfs')
+  assert.equal(pvc.metadata.labels['corridor.role'], 'splat-output')
+  // and no class named means the cluster's default, not an empty string
+  assert.equal('storageClassName' in outputClaim({ name: 'y', outputSize: '1Gi' }).spec, false)
+})

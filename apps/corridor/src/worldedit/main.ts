@@ -25,6 +25,7 @@ import { ProgramPanel } from '../ui/programpanel'
 import { ShellPanel } from '../ui/shellpanel'
 import { AgentPanel } from '../ui/agentpanel'
 import { AgentBridge } from '../agent/bridge'
+import { buildReach, buildSettings } from './settingspanel'
 import { McpPanel } from '../ui/mcppanel'
 import { fromUrl, load as loadNav, resolve as resolveNav, save as saveNav, toUrl } from './nav'
 import { ROOT, SITE_DOCS } from '../agent/projection'
@@ -874,7 +875,20 @@ function openSettings() {
         },
         { id: 'agent', label: 'Agent', icon: 'sparkles', build: (h) => buildAgentSettings(h) },
         { id: 'look', label: 'Appearance', icon: 'eye', build: (h) => buildAppearance(h) },
-        { id: 'services', label: 'Services', icon: 'server-stack', build: (h) => void buildServices(h) },
+        {
+          id: 'services',
+          label: 'Services',
+          icon: 'server-stack',
+          // EDITABLE now, not a readout: every external service is settable here as well as from
+          // the environment, with each value saying where it came from (settingspanel.ts)
+          build: (h) => {
+            const reach = el('div', 'settings-reach')
+            const form = el('div', 'settings-form')
+            h.append(reach, form)
+            void buildReach(reach)
+            buildSettings(form)
+          },
+        },
       ]).root,
     )
   }
@@ -920,26 +934,6 @@ function buildAppearance(host: HTMLElement) {
   )
 }
 
-/**
- * What this editor is pointed at.
- *
- * This was a toast — six lines of configuration fired at the corner of the screen for nine seconds,
- * which is long enough to read none of it and no way to get it back except pressing the button
- * again. It is a readout, and it belongs where the rest of the installation's truth is.
- */
-async function buildServices(host: HTMLElement) {
-  host.append(el('p', 'dim', 'reading…'))
-  const ready = await api.ready().catch(() => null)
-  host.replaceChildren()
-  host.append(readout('data', config?.data ?? '?'))
-  host.append(readout('runner', `${config?.runs.runner ?? '?'}${config?.runs.runner === 'kubernetes' ? ` · ${config?.runs.namespace}` : ''}`))
-  if (config?.runs.runner === 'kubernetes') host.append(readout('image', config?.runs.image ?? '?'))
-  host.append(readout('overpass', ready?.overpass.ok ? `up (${ready.overpass.ms} ms)` : `DOWN — ${ready?.overpass.detail?.slice(0, 120) ?? 'no answer'}`))
-  host.append(readout('kubernetes', ready?.kubernetes.ok ? `ok (${ready.kubernetes.namespace})` : ready?.kubernetes.detail ?? '?'))
-  host.append(readout('assetsvc', config?.assetsvc ?? 'not configured'))
-  host.append(readout('bucket', config?.bucket ? `${config.bucket.bucket}/${config.bucket.prefix}` : 'not configured'))
-  host.append(button({ label: 'Check again', icon: 'arrow-path', variant: 'ghost', onClick: () => void buildServices(host) }))
-}
 
 
 /** The world picker, and what it says about each one. */

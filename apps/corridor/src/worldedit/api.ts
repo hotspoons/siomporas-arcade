@@ -162,6 +162,22 @@ export interface Config {
   adoptedRuns: string[]
 }
 
+/** One setting, as either service describes it. */
+export interface SettingRow {
+  key: string
+  group: string
+  kind: 'url' | 'string' | 'enum' | 'json' | 'bool'
+  label: string
+  note: string | null
+  options: string[] | null
+  value: string
+  /** where the value came from — the question everybody has first when a service is unreachable */
+  source: 'ui' | 'env' | 'default'
+  env: string | null
+  /** what clearing the UI value would land on */
+  fallback: string
+}
+
 export interface BlenderStatus {
   up: boolean
   /** only when it is down: the message says which command starts it */
@@ -334,6 +350,19 @@ const progPath = (id: string) => id.split('/').map(encodeURIComponent).join('/')
 
 export const api = {
   config: () => call<Config>('/api/config'),
+
+  /* ---- settings: every external service, from the environment AND the UI ------------------
+   * Two sets, because two services own them: this editor's (assetsvc, Overpass, the bake, the
+   * splat runner, Blender) and the asset service's (the image generator and TRELLIS — the endpoints
+   * it calls). The second goes through the same /assetsvc proxy as everything else the library
+   * does; the browser still never reaches a model directly.
+   */
+  settings: () => call<{ settings: SettingRow[] }>('/api/settings'),
+  putSettings: (patch: Record<string, string | null>) =>
+    call<{ changed: string[]; settings: SettingRow[] }>('/api/settings', { method: 'PUT', body: JSON.stringify(patch) }),
+  assetSettings: () => call<{ settings: SettingRow[] }>('/assetsvc/settings'),
+  putAssetSettings: (patch: Record<string, string | null>) =>
+    call<{ settings: SettingRow[] }>('/assetsvc/settings', { method: 'PUT', body: JSON.stringify(patch) }),
 
   /* ---- blender ----------------------------------------------------------------------------
    * The live session and the batch riggers, behind one prefix. `status` is the one to call first:

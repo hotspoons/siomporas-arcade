@@ -25,6 +25,9 @@ on:
       - 'packages/enginesim/**'
       - 'package-lock.json'
       - '.github/workflows/worldeditor-image.yml'
+      # the image now CONTAINS the rigging pipeline, so a change to it changes the image
+      - 'tools/rigging/**'
+      - 'tools/sf2-probe/rigging/**'
   workflow_dispatch:
 
 env:
@@ -35,14 +38,153 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # ONE JOB PER ARCHITECTURE, each on a native runner, each smoked BEFORE it is pushed.
+  #
+  # This used to build both on one amd64 runner under QEMU and smoke only the amd64 half after
+  # publishing. That was tolerable for an image of node and JSON. It is not for one that carries
+  # Blender: the build RUNS Blender to install the rigging add-on, and the cluster is arm64 end to
+  # end — so the half that matters was the one never started. Now each runner builds its own
+  # platform, loads it, and runs the smoke test on the architecture it will actually run on.
   build:
-    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-24.04
+            slug: amd64
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+            slug: arm64
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
       packages: write
     steps:
       - uses: actions/checkout@v4
-      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # build and LOAD, so the smoke test runs against exactly what will be pushed
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: tools/worldeditor/Dockerfile
+          platforms: ${{ matrix.platform }}
+          load: true
+          tags: worldeditor:smoke
+          # a cache per architecture: one shared ref would have each overwrite the other
+          cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache-${{ matrix.slug }}
+          cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache-${{ matrix.slug }},mode=max
+
+      # An image that starts but serves no app is the failure this image can actually have, and it
+      # would only show the first time somebody opened it. So: start it, and ask it for the page.
+      - name: smoke — the service and the app
+        run: |
+          docker run -d --name worldeditor -p 8780:8780 worldeditor:smoke
+          for i in $(seq 1 30); do curl -sf localhost:8780/api/health && break || sleep 1; done
+          # Parse the JSON, do not grep it — the response is pretty-printed, so `"ok":true` with
+          # no space could never match and would fail the run AFTER the push (assetsvc's lesson).
+          curl -sf localhost:8780/api/health | tee /dev/stderr \
+            | node -e 'const b=JSON.parse(require("fs").readFileSync(0,"utf8")); if (b.ok !== true) { console.error("health.ok was", b.ok); process.exit(1) }'
+          for p in / /index.html /editor.html; do
+            curl -sf "localhost:8780$p" | grep -qi '<html' || { echo "no page at $p"; exit 1; }
+          done
+          curl -sf localhost:8780/ | grep -q 'worldedit/main' || { echo "/ is not the world editor"; exit 1; }
+          # A FRESH IMAGE COMES UP EMPTY (Rich, 2026-09-27: "I want to reset the image so it ships
+          # with zero built in configs"), and an import is the way to fill it.
+          curl -sf localhost:8780/api/worlds \
+            | node -e 'const b=JSON.parse(require("fs").readFileSync(0,"utf8")); if (b.worlds?.length !== 0) { console.error("a fresh image came up with", b.worlds?.length, "worlds"); process.exit(1) } console.log("fresh image: 0 worlds")'
+          curl -sf -X POST -H 'content-type: application/json' \
+            -d '{"kind":"corridor-worlds","worlds":[{"slug":"smoke-world","lat":39.02,"lon":-76.68,"radius_m":900}],"levels":[{"id":"smoke-level","world":"smoke-world","mode":"drive"}]}' \
+            localhost:8780/api/worlds/import \
+            | node -e 'const b=JSON.parse(require("fs").readFileSync(0,"utf8")); if (!b.imported?.includes("smoke-world")) { console.error("import did not take:", JSON.stringify(b)); process.exit(1) } console.log("imported a world")'
+          docker rm -f worldeditor
+
+      # THE SETTINGS round-trip: a value saved over the API wins over the environment, and clearing
+      # it lands back on the environment — the order the whole feature is built on.
+      - name: smoke — settings, env and UI
+        run: |
+          docker run -d --name we-settings -p 8782:8780 -e WORLDEDITOR_ASSETSVC=http://from-env worldeditor:smoke
+          for i in $(seq 1 30); do curl -sf localhost:8782/api/health >/dev/null && break || sleep 1; done
+          get() { curl -sf localhost:8782/api/settings | node -e 'const k=process.argv[1]; const r=JSON.parse(require("fs").readFileSync(0,"utf8")).settings.find(s=>s.key===k); console.log(r.value+" "+r.source)' "$1"; }
+          [ "$(get assetsvc.url)" = "http://from-env env" ] || { echo "env not read: $(get assetsvc.url)"; exit 1; }
+          curl -sf -X PUT -H 'content-type: application/json' -d '{"assetsvc.url":"http://from-ui"}' localhost:8782/api/settings >/dev/null
+          [ "$(get assetsvc.url)" = "http://from-ui ui" ] || { echo "ui did not win: $(get assetsvc.url)"; exit 1; }
+          curl -sf -X PUT -H 'content-type: application/json' -d '{"assetsvc.url":null}' localhost:8782/api/settings >/dev/null
+          [ "$(get assetsvc.url)" = "http://from-env env" ] || { echo "clearing did not fall back to env: $(get assetsvc.url)"; exit 1; }
+          echo "settings: env, then ui wins, then clear falls back to env"
+          docker rm -f we-settings
+
+      # BLENDER, on the architecture it will run on. Three separate failures, each silent in a
+      # different way, so each is checked on its own:
+      #   runs      a binary built against the wrong glibc does not start at all
+      #   renders   without Mesa's EGL, Workbench fails with a GPU error and the agent is blind
+      #   bridges   the supervised headless session comes up and answers on its socket
+      - name: smoke — blender runs, renders, and bridges
+        run: |
+          docker run --rm --entrypoint blender worldeditor:smoke --version | head -1
+          docker run --rm --entrypoint blender worldeditor:smoke --background --factory-startup --python-expr '
+          import bpy, os
+          bpy.ops.mesh.primitive_monkey_add()
+          s = bpy.context.scene
+          s.render.engine = "BLENDER_WORKBENCH"
+          s.render.resolution_x = s.render.resolution_y = 128
+          s.render.filepath = "/tmp/smoke.png"
+          bpy.ops.render.render(write_still=True)
+          n = os.path.getsize("/tmp/smoke.png")
+          print("RENDERED", n)
+          assert n > 1000, "a render that small is not a picture"
+          ' 2>&1 | tee /tmp/render.log | tail -3
+          grep -q RENDERED /tmp/render.log || { echo "Workbench did not render — is Mesa EGL in the image?"; exit 1; }
+          docker run -d --name we-blender -p 8783:8780 -e WORLDEDITOR_BLENDER_AUTOSTART=true worldeditor:smoke
+          for i in $(seq 1 90); do
+            up=$(curl -sf localhost:8783/api/blender/status | node -e 'try{console.log(JSON.parse(require("fs").readFileSync(0,"utf8")).up)}catch{console.log(false)}')
+            [ "$up" = "true" ] && break || sleep 2
+          done
+          curl -sf localhost:8783/api/blender/status | tee /dev/stderr \
+            | node -e 'const b=JSON.parse(require("fs").readFileSync(0,"utf8")); if (b.up !== true) { console.error("the supervised bridge never came up:", JSON.stringify(b.process)); process.exit(1) } console.log("bridge up, Blender", b.version)'
+          docker rm -f we-blender
+
+      # only now, having started it, push this architecture by digest
+      - id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: tools/worldeditor/Dockerfile
+          platforms: ${{ matrix.platform }}
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache-${{ matrix.slug }}
+      - name: export digest
+        run: |
+          mkdir -p /tmp/digests
+          d="${{ steps.push.outputs.digest }}"
+          touch "/tmp/digests/${d#sha256:}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ matrix.slug }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  # Stitch the two into the tags the chart pins: `sha-<short>` for a deployment, `latest` for a
+  # person. Pushing a tag from each runner would have the second overwrite the first.
+  merge:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digest-*
+          merge-multiple: true
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
@@ -56,53 +198,9 @@ jobs:
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=sha,format=short
-      - uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: tools/worldeditor/Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache
-          cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache,mode=max
-
-      # An image that starts but serves no app is the failure this image can actually have, and it
-      # would only show the first time somebody opened it. So: start it, and ask it for the page.
-      - name: smoke the published image
+      - name: stitch
+        working-directory: /tmp/digests
         run: |
-          docker run -d --name worldeditor -p 8780:8780 ${{ env.IMAGE }}:latest
-          for i in $(seq 1 30); do curl -sf localhost:8780/api/health && break || sleep 1; done
-          # Parse the JSON, do not grep it — the response is pretty-printed, so `"ok":true` with
-          # no space could never match and would fail the run AFTER the push (assetsvc's lesson).
-          curl -sf localhost:8780/api/health | tee /dev/stderr \
-            | node -e 'const b=JSON.parse(require("fs").readFileSync(0,"utf8")); if (b.ok !== true) { console.error("health.ok was", b.ok); process.exit(1) }'
-          # the three pages are really in there, and `/` really is the world editor
-          for p in / /index.html /editor.html; do
-            curl -sf "localhost:8780$p" | grep -qi '<html' || { echo "no page at $p"; exit 1; }
-          done
-          curl -sf localhost:8780/ | grep -q 'worldedit/main' || { echo "/ is not the world editor"; exit 1; }
-          # A FRESH IMAGE COMES UP EMPTY, and this used to assert the opposite.
-          #
-          # It checked `worlds.length > 5`, because the image seeded itself from the repo's
-          # sites.json. That is wrong for a deployment: a new volume came up holding thirty-one
-          # of somebody else's worlds (Rich, 2026-09-27: "I want to reset the image so it ships
-          # with zero built in configs"). A blank world map should mean blank, and the way in is
-          # to draw an area or import a bundle.
-          curl -sf localhost:8780/api/worlds \
-            | node -e 'const b=JSON.parse(require("fs").readFileSync(0,"utf8")); if (b.worlds?.length !== 0) { console.error("a fresh image came up with", b.worlds?.length, "worlds — something is seeding it"); process.exit(1) } console.log("fresh image: 0 worlds, as it should be")'
-          # and an import is the way to fill it, which is the half that makes empty usable
-          curl -sf -X POST -H 'content-type: application/json' \
-            -d '{"kind":"corridor-worlds","worlds":[{"slug":"smoke-world","lat":39.02,"lon":-76.68,"radius_m":900}],"levels":[{"id":"smoke-level","world":"smoke-world","mode":"drive"}]}' \
-            localhost:8780/api/worlds/import \
-            | node -e 'const b=JSON.parse(require("fs").readFileSync(0,"utf8")); if (!b.imported?.includes("smoke-world") || !b.levels?.includes("smoke-level")) { console.error("import did not take:", JSON.stringify(b)); process.exit(1) } console.log("imported a world and the level set in it")'
-          docker rm -f worldeditor
-
-          # THE SEED IS STILL IN THE IMAGE, opt-in rather than gone. If this stops working, the
-          # chart's `seedSites` value points at a path that is no longer there and would fail on
-          # somebody's cluster instead of here.
-          docker run -d --name worldeditor-seeded -p 8781:8780 \
-            -e WORLDEDITOR_SEED_SITES=/app/tools/corridor/sites.json ${{ env.IMAGE }}:latest
-          for i in $(seq 1 30); do curl -sf localhost:8781/api/health >/dev/null && break || sleep 1; done
-          curl -sf localhost:8781/api/worlds \
-            | node -e 'const b=JSON.parse(require("fs").readFileSync(0,"utf8")); if (!(b.worlds?.length > 5)) { console.error("seeding is opt-in but opting in gave", b.worlds?.length, "worlds"); process.exit(1) } console.log("opting in still seeds", b.worlds.length, "worlds")'
-          docker rm -f worldeditor-seeded
+          tags=$(echo "${{ steps.meta.outputs.tags }}" | sed 's/^/-t /' | tr '\n' ' ')
+          docker buildx imagetools create $tags $(printf '${{ env.IMAGE }}@sha256:%s ' *)
+          docker buildx imagetools inspect ${{ env.IMAGE }}:${{ steps.meta.outputs.version }}

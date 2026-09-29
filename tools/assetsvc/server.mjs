@@ -28,6 +28,7 @@ import { fileURLToPath } from 'node:url'
 import { spawn } from 'node:child_process'
 
 import { buildRegistry } from './adapters.mjs'
+import { AssetSettings } from './settings.mjs'
 import { Catalog } from './catalog.mjs'
 import { Jobs } from './jobs.mjs'
 import { S3 } from './s3.mjs'
@@ -43,6 +44,21 @@ const arg = (name, dflt) => {
   return i >= 0 ? argv[i + 1] : dflt
 }
 
+/**
+ * The build collections: a visual plus its configuration. See the `BUILD_KINDS` route below.
+ *
+ * `traffic` is a SET: which vehicle builds the traffic is made of and how common each one is
+ * (src/trafficsets.ts). It is a build like the others — a name plus a document — and it names
+ * vehicle builds rather than catalog rows, because traffic made of unconfigured prop cars would
+ * have no mass, no gearbox and no engine note.
+ *
+ * `presets` is the same shape and stored the same way — a saved starting point, with no model on it,
+ * that any of the three can be built from. One collection rather than three because a preset row
+ * carries `for: vehicle | actor | weapon` and the picker filters on it; three near-identical files
+ * would drift.
+ */
+const BUILD_KINDS = ['vehicles', 'actors', 'weapons', 'presets', 'traffic']
+
 const PORT = Number(arg('port', process.env.ASSETSVC_PORT ?? 8770))
 const HOST = arg('host', process.env.ASSETSVC_HOST ?? '0.0.0.0')
 /*
@@ -57,7 +73,13 @@ const DATA = path.resolve(arg('data', process.env.ASSETSVC_DATA ?? path.join(REP
 const CONFIG = arg('models', process.env.ASSETSVC_MODELS ?? path.join(HERE, 'models.example.json'))
 
 const config = existsSync(CONFIG) ? JSON.parse(await readFile(CONFIG, 'utf8')) : { models: {}, defaults: {} }
-const registry = buildRegistry(config)
+/*
+ * THE REGISTRY IS REBUILT WHEN THE SETTINGS CHANGE, so an endpoint saved in the editor is used by
+ * the next job with no restart. Safe to swap because everything reads `registry` at call time, and
+ * a job already running holds the model it took when it started — it finishes where it began.
+ */
+const settings = await new AssetSettings(DATA, process.env, config).load()
+let registry = buildRegistry(config, settings.effectiveEnv())
 const catalog = new Catalog(path.join(DATA, 'catalog'))
 const jobs = new Jobs()
 const s3 = new S3()
@@ -234,6 +256,21 @@ const server = http.createServer(async (req, res) => {
       ])
       return json(res, image.ok && mesh.ok ? 200 : 503, { image, mesh })
     }
+    /*
+     * The image generator's and TRELLIS's endpoints, from the environment AND the editor. GET is
+     * every setting and where each value came from; PUT saves a patch (`null` clears a key back to
+     * the environment) and REBUILDS the registry, so the next job uses the new endpoint.
+     */
+    if (url.pathname === '/settings') {
+      if (req.method === 'GET') return json(res, 200, { settings: settings.describe() })
+      if (req.method === 'PUT') {
+        const described = await settings.set(await readJson(req))
+        registry = buildRegistry(config, settings.effectiveEnv())
+        const d = registry.describe()
+        console.log(`settings: image ${d.defaults.image} ${registry.models.get(d.defaults.image)?.url ?? ''} · mesh ${d.defaults.mesh} ${registry.models.get(d.defaults.mesh)?.url ?? ''}`)
+        return json(res, 200, { settings: described, models: d })
+      }
+    }
     if (url.pathname === '/models') {
       const d = registry.describe()
       const checks = await Promise.all([...registry.models.values()].map(async (m) => [m.id, await m.available()]))
@@ -401,6 +438,58 @@ const server = http.createServer(async (req, res) => {
      * Served from `<data>/surfaces/`, alongside the catalog rather than inside it, because a
      * material belongs to no item — several buildings share one brick.
      */
+    /*
+     * BUILDS: vehicles, actors and weapons.
+     *
+     * Rich, 2026-09-29: *"The catalog is for visuals, a vehicle is a visual plus the dynamics,
+     * layout, physics, configuration"* — so a build is its own record that NAMES a catalog asset
+     * rather than living on it. Three consequences, all of them the point:
+     *
+     *   - two builds may share one model (a taxi and a police car off the same saloon);
+     *   - a build may exist before its model does, or outlive it;
+     *   - the catalog stays what it is, a library of visuals, and does not grow a second meaning.
+     *
+     * One file per kind beside the catalog, the same shape `materials.json` uses, because these are
+     * a dozen records rather than a thousand and a file somebody can open and read is worth more
+     * here than a directory per item.
+     */
+    if (BUILD_KINDS.includes(seg[0])) {
+      const kind = seg[0]
+      const f = path.join(DATA, `${kind}.json`)
+      const load = async () => JSON.parse(await readFile(f, 'utf8').catch(() => 'null')) ?? { [kind]: [] }
+
+      if (seg.length === 1 && req.method === 'GET') {
+        const doc = await load()
+        return json(res, 200, { [kind]: doc[kind] ?? [] })
+      }
+
+      // PUT /<kind>/<id> — merged, so saving dynamics later keeps the name and the model.
+      if (seg.length === 2 && req.method === 'PUT') {
+        const id = seg[1]
+        if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(id)) return json(res, 400, { error: `bad id ${JSON.stringify(id)}` })
+        const patch = await readJson(req)
+        const doc = await load()
+        const list = doc[kind] ?? []
+        const at = list.findIndex((m) => m.id === id)
+        const next = { ...(at >= 0 ? list[at] : {}), ...patch, id, updated: new Date().toISOString() }
+        if (!next.created) next.created = next.updated
+        if (at >= 0) list[at] = next
+        else list.push(next)
+        list.sort((a, b) => (String(a.name ?? a.id) < String(b.name ?? b.id) ? -1 : 1))
+        await mkdir(DATA, { recursive: true })
+        await writeFile(f, JSON.stringify({ [kind]: list }, null, 1))
+        return json(res, 200, { [kind.replace(/s$/, '')]: next })
+      }
+
+      if (seg.length === 2 && req.method === 'DELETE') {
+        const doc = await load()
+        const list = (doc[kind] ?? []).filter((m) => m.id !== seg[1])
+        await mkdir(DATA, { recursive: true })
+        await writeFile(f, JSON.stringify({ [kind]: list }, null, 1))
+        return json(res, 200, { ok: true })
+      }
+    }
+
     if (seg[0] === 'materials') {
       const dir = path.join(DATA, 'surfaces')
       if (seg.length === 1) {

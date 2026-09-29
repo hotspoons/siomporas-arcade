@@ -107,9 +107,19 @@ probes:
   startupPeriodSeconds: 2
   startupFailureThreshold: 30
 
+# RAISED FOR BLENDER, 2026-09-29. The service alone is a few hundred megabytes; the pod now also
+# runs a live headless Blender that holds a whole scene between calls, and the riggers each start
+# another. A 250k-vertex character head OOM-killed the bridge three times at a few gigabytes on a
+# dev box, so 2Gi would mean the rigging pipeline dies on its first real asset. gh200-1's nodes have
+# 480 GB; the request stays small so an idle editor reserves little.
 resources:
-  requests: {cpu: "200m", memory: 256Mi}
-  limits: {cpu: "2", memory: 2Gi}
+  requests: {cpu: "500m", memory: 2Gi}
+  limits: {cpu: "8", memory: 24Gi}
+
+# The live headless Blender this editor supervises: started with the pod, restarted if it dies, and
+# its last exit reported in the Blender tab. Settable in the editor too.
+blender:
+  autostart: true
 
 # Turn on EITHER ingress or httpRoute, never both: external-dns publishes whichever object carries
 # the hostname and two objects claiming one name fight over the record. The nginx Ingress is the
@@ -169,6 +179,19 @@ splat:
   # image. Empty means no check — and a job running stale code does not fail, it succeeds and
   # hands back a plausible wrong number, so set this whenever the PVC path is in use.
   codeSha: ""
+  # WHICH RUNNER, in Rich's order of preference (2026-09-29): a Patapsco AI TrainingDeployment if
+  # the CRD is installed, else a JobSet, else plain Jobs — a head and its workers. `auto` asks the
+  # cluster each time; `training`, `jobset` or `batch` pins one, for when the featured path is
+  # misbehaving and you need to know whether it is the operator or the workload.
+  runner: auto
+  # The entrypoint the splats lane published; a JSON array. Unset uses ["splatpipe"].
+  command: []
+  args: []
+  # The RWX class the fallback tiers' shared output volume is made from. Empty is the cluster's
+  # default. A TrainingDeployment provisions its own storage and ignores this.
+  storageClass: ""
+  # Empty is discovered from the nodes — nvidia.com/gpu on gh200-1.
+  gpuResource: ""
 
 # Let the editor count free GPUs across the cluster, to size a splat run's worker fan-out.
 #

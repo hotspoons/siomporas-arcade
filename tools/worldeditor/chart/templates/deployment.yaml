@@ -79,7 +79,37 @@ spec:
             - name: WORLDEDITOR_SPLAT_CODE_SHA
               value: {{ .codeSha | quote }}
             {{- end }}
+            {{- /*
+              THE RUNNER TIER, and the rest of the pipeline's knobs. Each is also settable in the
+              editor (Settings → Services), where a saved value wins over these and clearing it falls
+              back to them — so these are the deployment's answer, not the only one.
+            */}}
+            - name: WORLDEDITOR_SPLAT_RUNNER
+              value: {{ .runner | default "auto" | quote }}
+            {{- with .command }}
+            - name: WORLDEDITOR_SPLAT_COMMAND
+              value: {{ toJson . | quote }}
             {{- end }}
+            {{- with .args }}
+            - name: WORLDEDITOR_SPLAT_ARGS
+              value: {{ toJson . | quote }}
+            {{- end }}
+            {{- with .storageClass }}
+            - name: WORLDEDITOR_SPLAT_STORAGE_CLASS
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .gpuResource }}
+            - name: WORLDEDITOR_GPU_RESOURCE
+              value: {{ . | quote }}
+            {{- end }}
+            {{- end }}
+            {{- with .Values.nominatimUrl }}
+            - name: WORLDEDITOR_NOMINATIM
+              value: {{ . | quote }}
+            {{- end }}
+            {{- /* the live headless Blender the rigging pipeline and MCP clients drive */}}
+            - name: WORLDEDITOR_BLENDER_AUTOSTART
+              value: {{ (dig "autostart" false (.Values.blender | default dict)) | toString | quote }}
             {{- if .Values.publish.bucket }}
             - name: WORLDEDITOR_S3_BUCKET
               value: {{ .Values.publish.bucket | quote }}

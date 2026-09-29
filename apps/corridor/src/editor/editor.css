@@ -500,3 +500,14 @@
   background: color-mix(in srgb, var(--danger) 18%, var(--bg-2));
   color: var(--ink-1);
 }
+
+/* ---- Settings → Services -------------------------------------------------------------------- */
+.settings-section { display: grid; gap: var(--s3); margin-bottom: var(--s4); }
+.setting-row { display: grid; gap: var(--s1); padding: var(--s2) 0; border-bottom: 1px solid var(--line-1); }
+.setting-meta { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; font-size: var(--text-xs); }
+/* WHERE THE VALUE CAME FROM, in three tones: set here is the loud one because it is the one that
+   overrides what the deployment said, and a person should see at a glance that they have done so */
+.setting-source { padding: 1px var(--s2); border-radius: var(--r-full); border: 1px solid var(--line-2); color: var(--ink-3); }
+.setting-source.source-ui { color: var(--accent); border-color: var(--accent-line); background: var(--accent-dim); }
+.setting-source.source-env { color: var(--ink-2); }
+.setting-note { margin: 0; font-size: var(--text-xs); }

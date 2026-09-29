@@ -46,6 +46,15 @@ rules:
   - apiGroups: ["jobset.x-k8s.io"]
     resources: ["jobsets"]
     verbs: ["create", "get", "list", "watch", "delete"]
+  # The splat output volume, for the two runner tiers that do not get one from an operator. A
+  # TrainingDeployment provisions its own; a JobSet or a head-and-workers pair of Jobs mounts
+  # `<run>-out`, and until 2026-09-29 nothing created it, so every run on a cluster without the CRD
+  # waited Pending for a claim that would never exist. No `delete` on purpose is NOT the choice
+  # here: it is granted so a person can clean up from the editor, but deleting a RUN leaves its
+  # claim alone — the trained splats are the result.
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["create", "get", "list", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

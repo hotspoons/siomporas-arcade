@@ -308,3 +308,96 @@ export async function rigCharacter(root, { src, out, height, noFace } = {}) {
   const r = await run(args)
   return { ...r, file: path.basename(dst) }
 }
+
+/* ---- the live Blender, owned by this service --------------------------------------------------
+ * In a pod there is nobody to type `blender --background --command blender_mcp` into a terminal,
+ * so the service starts it, watches it, and restarts it when it dies. It WILL die: it holds the
+ * whole scene in memory between calls — which is what makes it useful — and on 2026-09-29 it was
+ * OOM-killed three times in an afternoon loading 250k-vertex heads.
+ *
+ * AND IT SAYS WHY. Before this, a bridge the kernel killed and a bridge nobody started both
+ * answered "no Blender bridge", which is useless for deciding what to do. `describe()` reports the
+ * last exit — code, signal, when — so "exit 137, 40 s ago, restarting" is on the screen.
+ */
+export class BridgeProcess {
+  constructor({ bin = BLENDER, port = PORT, log = console } = {}) {
+    this.bin = bin
+    this.port = port
+    this.log = log
+    this.proc = null
+    this.wanted = false
+    this.restarts = 0
+    this.lastExit = null
+    this.startedAt = null
+    this.backoffMs = 1000
+    this.timer = null
+  }
+
+  start() {
+    this.wanted = true
+    if (this.proc) return this.describe()
+    this.#spawn()
+    return this.describe()
+  }
+
+  stop() {
+    this.wanted = false
+    clearTimeout(this.timer)
+    this.timer = null
+    this.proc?.kill('SIGTERM')
+    return this.describe()
+  }
+
+  #spawn() {
+    // --host and --port as ARGUMENTS, not only the environment. The addon's CLI ignored
+    // BLENDER_MCP_PORT until blender-agent@feature/overhaul fixed it, and an argument works against
+    // either build — so the bridge listens where `exec()` will dial whichever fork is installed.
+    const p = spawn(this.bin, ['--background', '--online-mode', '--command', 'blender_mcp', '--host', HOST, '--port', String(this.port)], {
+      env: { ...process.env, BLENDER_MCP_PORT: String(this.port), BLENDER_MCP_HOST: HOST },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    this.proc = p
+    this.startedAt = new Date().toISOString()
+    const tail = []
+    const keep = (d) => {
+      for (const line of String(d).split('\n')) if (line.trim()) tail.push(line)
+      while (tail.length > 20) tail.shift()
+    }
+    p.stdout.on('data', keep)
+    p.stderr.on('data', keep)
+    p.on('error', (e) => {
+      this.lastExit = { code: null, signal: null, error: e.message, at: new Date().toISOString(), tail: [] }
+    })
+    p.on('exit', (code, signal) => {
+      const lived = Date.now() - Date.parse(this.startedAt)
+      this.proc = null
+      this.lastExit = {
+        code, signal, at: new Date().toISOString(), livedMs: lived, tail: tail.slice(-8),
+        // 137 is 128 + SIGKILL, which in a pod is almost always the OOM killer — worth saying in
+        // words, because "137" is the number people search for and "out of memory" is the answer
+        why: code === 137 || signal === 'SIGKILL' ? 'killed — in a pod this is almost always the memory limit'
+          : code === 0 ? 'exited cleanly' : `exited ${code ?? signal}`,
+      }
+      this.log.warn?.(`[blender] bridge ${this.lastExit.why} after ${Math.round(lived / 1000)}s`)
+      if (!this.wanted) return
+      // A process that ran for a while earns a fast restart; one that dies at once is crashing on
+      // startup and gets backed off, or this becomes a loop that eats the CPU it was dying for.
+      this.backoffMs = lived > 60_000 ? 1000 : Math.min(this.backoffMs * 2, 60_000)
+      this.restarts++
+      this.timer = setTimeout(() => this.#spawn(), this.backoffMs)
+    })
+  }
+
+  describe() {
+    return {
+      managed: true,
+      wanted: this.wanted,
+      running: !!this.proc,
+      pid: this.proc?.pid ?? null,
+      startedAt: this.proc ? this.startedAt : null,
+      restarts: this.restarts,
+      lastExit: this.lastExit,
+      restartingInMs: this.timer && !this.proc ? this.backoffMs : null,
+    }
+  }
+}

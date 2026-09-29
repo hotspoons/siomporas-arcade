@@ -49,6 +49,7 @@ import { Geocoder } from './geocode.mjs'
 import { LAYERS, layersAt, tilesFor, variantOf, tileLevelOf } from './layers.mjs'
 import { K8s } from './k8s.mjs'
 import { Runs } from './runs.mjs'
+import { Settings } from './settings.mjs'
 import { bboxOf, circleFor } from './geo.mjs'
 import * as worlds from './worlds.mjs'
 import * as rooms from './rooms.mjs'
@@ -67,7 +68,14 @@ const PORT = Number(arg('port', env.WORLDEDITOR_PORT ?? 8780))
 const HOST = arg('host', env.WORLDEDITOR_HOST ?? '0.0.0.0')
 const DATA = path.resolve(arg('data', env.WORLDEDITOR_DATA ?? path.join(REPO, 'tools/corridor/data')))
 const APP = path.resolve(arg('app', env.WORLDEDITOR_APP ?? path.join(REPO, 'apps/corridor/dist')))
-const ASSETSVC = (env.WORLDEDITOR_ASSETSVC ?? '').replace(/\/$/, '')
+/*
+ * THE SETTINGS, before anything that reads one. Every external service this editor reaches is
+ * settable from the environment AND from the UI, with a UI value winning and clearing back to the
+ * environment — see settings.mjs for the order and why. Consumers read through these rather than
+ * `env` so a change in the editor's Settings takes effect without a restart.
+ */
+const settings = await new Settings(DATA, env).load()
+const assetsvcUrl = () => settings.get('assetsvc.url').replace(/\/$/, '')
 
 /**
  * The biggest road query this will run, MEASURED rather than guessed.
@@ -136,7 +144,8 @@ if (seedFrom) {
 // that is a coverage box on the URL (`#south/west/north/east`) — so if you want ours in the list,
 // declare what it holds, and the rotation will use it where it helps and skip it where it lies.
 // When it holds the planet (docs/corridor/OVERPASS-PLANET.md) it needs no box and should be first.
-const configured = (env.WORLDEDITOR_OVERPASS_URL ?? '').split(',').map((s) => s.trim()).filter(Boolean)
+const overpassUpstreams = () => settings.get('overpass.url').split(',').map((s) => s.trim()).filter(Boolean)
+const configured = overpassUpstreams()
 for (const u of configured) {
   if (!u.includes('#') && !/overpass-api\.de|kumi\.systems|private\.coffee/.test(u)) {
     console.warn(`overpass: ${u.split('#')[0]} has no coverage box. If it is regional, add #south/west/north/east or it will answer HTTP 200 with nothing outside its extent and that answer looks exactly like "no roads here".`)
@@ -157,7 +166,7 @@ const overpass = new Overpass(
 const tiles = new Tiles(store, overpass)
 const basemap = new Basemap(store, { enabled: env.WORLDEDITOR_BASEMAP !== 'off' })
 const geocoder = new Geocoder(store, {
-  url: env.WORLDEDITOR_NOMINATIM ?? 'https://nominatim.openstreetmap.org',
+  url: settings.get('nominatim.url'),
   minIntervalMs: Number(env.WORLDEDITOR_NOMINATIM_INTERVAL ?? 1100),
 })
 const k8s = new K8s(env)
@@ -167,20 +176,68 @@ const k8s = new K8s(env)
 const models = new ModelResolver(k8s, env)
 const runs = new Runs(store, k8s, {
   force: env.WORLDEDITOR_RUNNER ?? null,
-  image: env.WORLDEDITOR_BAKE_IMAGE ?? 'ghcr.io/hotspoons/corridor:latest',
+  image: settings.get('bake.image'),
   claim: env.WORLDEDITOR_CLAIM ?? 'corridor-data',
   secretName: env.WORLDEDITOR_S3_SECRET ?? 'corridor-r2',
   bucket: env.WORLDEDITOR_S3_BUCKET ?? '',
   endpoint: env.WORLDEDITOR_S3_ENDPOINT ?? '',
   region: env.WORLDEDITOR_S3_REGION ?? 'auto',
   prefix: env.WORLDEDITOR_S3_PREFIX ?? 'corridor',
-  overpassUrl: env.WORLDEDITOR_OVERPASS_URL ?? '',
+  overpassUrl: settings.get('overpass.url'),
   horizonM: Number(env.WORLDEDITOR_HORIZON_M ?? 30000),
   resources: JSON.parse(env.WORLDEDITOR_BAKE_RESOURCES ?? '{"requests":{"cpu":"4","memory":"16Gi"},"limits":{"cpu":"16","memory":"48Gi"}}'),
   python: env.WORLDEDITOR_PYTHON ?? path.join(REPO, 'tools/corridor/.venv/bin/python'),
   cwd: env.WORLDEDITOR_CORRIDOR ?? path.join(REPO, 'tools/corridor'),
 })
 const adopted = await runs.reconcile()
+
+/*
+ * THE SPLAT PIPELINE'S DEFAULTS, from the settings rather than straight from the environment.
+ * training.mjs keys them by environment-variable name — that name is the documented contract in
+ * the chart — so this maps each one onto the setting that owns it and lets anything unmapped fall
+ * through to the environment as before.
+ */
+const SPLAT_ENV = {
+  WORLDEDITOR_SPLAT_IMAGE: 'splat.image',
+  WORLDEDITOR_SPLAT_COMMAND: 'splat.command',
+  WORLDEDITOR_SPLAT_ARGS: 'splat.args',
+  WORLDEDITOR_SPLAT_STORAGE_CLASS: 'splat.storageClass',
+  WORLDEDITOR_GPU_RESOURCE: 'splat.gpuResource',
+}
+training.useConfig((name) => (SPLAT_ENV[name] ? settings.get(SPLAT_ENV[name]) : env[name]))
+/** `auto` means ask the cluster; anything else pins a runner tier. */
+const splatRunner = () => {
+  const r = settings.get('splat.runner')
+  return r === 'auto' ? null : r
+}
+
+/*
+ * THE THINGS BUILT ONCE AT STARTUP, rebuilt when their setting changes — so saving a new Overpass
+ * or Nominatim URL in the editor takes effect on the next request, with no restart. Anything read
+ * at call time (assetsvc, the splat defaults) needs nothing here: it reads the setting each time.
+ */
+/*
+ * THE LIVE BLENDER, owned by this service when the setting says so. In a pod nobody is at a
+ * terminal to start it, and it dies under memory pressure — so it is started, watched and
+ * restarted here, and `/api/blender/status` says why it last died.
+ */
+const blenderBridge = new blender.BridgeProcess({ bin: settings.get('blender.bin') })
+if (settings.value('blender.autostart')) blenderBridge.start()
+
+settings.onChange((changed) => {
+  if (changed.includes('blender.bin')) blenderBridge.bin = settings.get('blender.bin')
+  if (changed.includes('blender.autostart')) {
+    if (settings.value('blender.autostart')) blenderBridge.start()
+    else blenderBridge.stop()
+  }
+  if (changed.includes('overpass.url')) {
+    overpass.setUpstreams([...overpassUpstreams(), ...PUBLIC_MIRRORS])
+    runs.cfg.overpassUrl = settings.get('overpass.url')
+  }
+  if (changed.includes('nominatim.url')) geocoder.url = settings.get('nominatim.url').replace(/\/$/, '')
+  if (changed.includes('bake.image')) runs.cfg.image = settings.get('bake.image')
+  if (changed.length) console.log(`settings: ${changed.join(', ')} changed`)
+})
 
 /* ---- http plumbing ---------------------------------------------------------------------------- */
 
@@ -311,7 +368,8 @@ async function sendFile(req, res, file, { cache = 'no-cache' } = {}) {
  * whole design rests on.
  */
 async function proxyAssetsvc(req, res, rest) {
-  if (!ASSETSVC) return json(res, 503, { error: 'assetsvc is not configured', hint: 'set WORLDEDITOR_ASSETSVC' })
+  const ASSETSVC = assetsvcUrl()
+  if (!ASSETSVC) return json(res, 503, { error: 'assetsvc is not configured', hint: 'Settings → Services, or set WORLDEDITOR_ASSETSVC' })
   const url = `${ASSETSVC}/${rest}${req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : ''}`
   const init = { method: req.method, headers: {}, signal: AbortSignal.timeout(300000) }
   if (req.headers['content-type']) init.headers['content-type'] = req.headers['content-type']
@@ -449,7 +507,7 @@ async function api(req, res, seg, q) {
       overpass: { ...ours, using, fellBack: !!(using && using !== overpass.ours), upstreams: fallbacks },
       kubernetes: kube,
       runner: runs.runner,
-      assetsvc: ASSETSVC || null,
+      assetsvc: assetsvcUrl() || null,
     })
   }
   if (seg[0] === 'config') {
@@ -461,7 +519,7 @@ async function api(req, res, seg, q) {
       geocoder: geocoder.describe(),
       layers: LAYERS.map((l) => ({ id: l.id, label: l.label, minZoom: l.minZoom, maxZoom: l.maxZoom, tile: l.tile, kind: l.kind })),
       runs: runs.describe(),
-      assetsvc: ASSETSVC ? '/assetsvc' : null,
+      assetsvc: assetsvcUrl() ? '/assetsvc' : null,
       bucket: runs.cfg.bucket ? { bucket: runs.cfg.bucket, endpoint: runs.cfg.endpoint || 'aws', prefix: runs.cfg.prefix } : null,
       authored: (await import('./store.mjs')).AUTHORED,
       limits: {
@@ -829,7 +887,11 @@ async function api(req, res, seg, q) {
    * are looking at the same files.
    */
   if (seg[0] === 'blender') {
-    if (seg[1] === 'status' && req.method === 'GET') return json(res, 200, await blender.status())
+    // the socket's answer AND the process's: "not listening" means something different when this
+    // service started it forty seconds ago and it was killed than when nobody ever did
+    if (seg[1] === 'status' && req.method === 'GET') return json(res, 200, { ...(await blender.status()), process: blenderBridge.describe() })
+    if (seg[1] === 'bridge' && seg[2] === 'start' && req.method === 'POST') return json(res, 200, blenderBridge.start())
+    if (seg[1] === 'bridge' && seg[2] === 'stop' && req.method === 'POST') return json(res, 200, blenderBridge.stop())
     if (seg[1] === 'outputs' && seg.length === 2 && req.method === 'GET') {
       return json(res, 200, await blender.listOutputs(store.root))
     }
@@ -1078,7 +1140,22 @@ async function api(req, res, seg, q) {
    * forces the plain one, which is how you show the difference rather than describe it.
    */
   if (seg[0] === 'training' && seg[1] === 'plan' && req.method === 'GET') {
-    return json(res, 200, await training.plan(k8s, { namespace: env.WORLDEDITOR_NAMESPACE ?? 'default' }))
+    const p = await training.plan(k8s, { namespace: env.WORLDEDITOR_NAMESPACE ?? 'default' })
+    // what the cluster OFFERS and what the setting PINS are different facts, and a run uses the
+    // second when it is set — so the plan reports both rather than letting one hide the other
+    return json(res, 200, { ...p, pinned: splatRunner(), runner: settings.get('splat.runner'), runnerSource: settings.source('splat.runner') })
+  }
+
+  /*
+   * ---- settings: every external service, from the environment AND the UI ----------------------
+   * GET is everything and where each value came from; PUT saves a patch, where `null` clears a key
+   * back to the environment. The asset service keeps its OWN settings (the image generator and
+   * TRELLIS endpoints are assetsvc's to call) and the Settings panel reaches those at
+   * /assetsvc/settings through the same proxy as everything else it does.
+   */
+  if (seg[0] === 'settings' && seg.length === 1) {
+    if (req.method === 'GET') return json(res, 200, { settings: settings.describe() })
+    if (req.method === 'PUT') return json(res, 200, await settings.set(await readJson(req)))
   }
   /*
    * STARTING ONE, which until now nothing could do: the panel showed a manifest and said "not yet
@@ -1086,7 +1163,7 @@ async function api(req, res, seg, q) {
    */
   if (seg[0] === 'training' && seg[1] === 'runs' && req.method === 'POST') {
     const body = await readJson(req)
-    const run = await training.createRun(body, k8s, { namespace: k8s.namespace, force: body.via ?? null, dryRun: body.dryRun === true })
+    const run = await training.createRun(body, k8s, { namespace: k8s.namespace, force: body.via ?? splatRunner(), dryRun: body.dryRun === true })
     return json(res, body.dryRun ? 200 : 201, { run })
   }
   if (seg[0] === 'training' && seg[1] === 'runs' && seg.length === 2 && req.method === 'GET') {
@@ -1106,7 +1183,7 @@ async function api(req, res, seg, q) {
   if (seg[0] === 'training' && seg[1] === 'preview' && req.method === 'POST') {
     // what WOULD be created, without creating it: the editor shows this before spending a GPU
     const body = await readJson(req)
-    return json(res, 200, await training.manifestFor(body, k8s, { namespace: env.WORLDEDITOR_NAMESPACE ?? 'default', force: q.get('as') }))
+    return json(res, 200, await training.manifestFor(body, k8s, { namespace: env.WORLDEDITOR_NAMESPACE ?? 'default', force: q.get('as') ?? splatRunner() }))
   }
 
   /* ---- worlds ---- */
@@ -1219,7 +1296,7 @@ server.listen(PORT, HOST, () => {
   console.log(`  app       ${APP}`)
   console.log(`  overpass  ${overpass.urls[0] ?? '(none)'}`)
   console.log(`  runner    ${runs.runner}${runs.runner === 'kubernetes' ? ` (${k8s.namespace}, ${runs.cfg.image}, pvc ${runs.cfg.claim})` : ` (${runs.cfg.python})`}`)
-  console.log(`  assetsvc  ${ASSETSVC || 'not configured'}`)
+  console.log(`  assetsvc  ${assetsvcUrl() || 'not configured'}  (${settings.source('assetsvc.url')})`)
   console.log(`  bucket    ${runs.cfg.bucket ? `${runs.cfg.bucket}/${runs.cfg.prefix}` : 'not configured'}`)
   if (adopted.length) console.log(`  adopted   ${adopted.length} run(s) that were live when this last stopped`)
 })

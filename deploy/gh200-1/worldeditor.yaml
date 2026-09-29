@@ -35,3 +35,15 @@ data:
   # Which is the division of labour working correctly: the chart stays portable, and the file
   # that describes one cluster records what that cluster actually has.
   storageClass: ceph-filesystem
+
+splat:
+  # RWX IS NOT OPTIONAL, and this cluster's DEFAULT class cannot do it. `ceph-block` / `ceph-rbd`
+  # are RBD, which is ReadWriteOnce; the fallback runner tiers' output volume is shared by a head
+  # and its workers, so it needs CephFS. Left to the default it would sit Pending for ever — the
+  # same failure the missing claim had, one layer down. (TrainingDeployment is installed here, so
+  # `auto` picks that and this only matters when a run is pinned to jobset or batch.)
+  storageClass: ceph-filesystem
+
+# The live headless Blender, supervised by the pod: the rigging pipeline and MCP clients drive it.
+blender:
+  autostart: true

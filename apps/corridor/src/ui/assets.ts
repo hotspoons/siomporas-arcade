@@ -12,7 +12,7 @@ import { Dialog, Tabs, ask, button, confirm, el, lightbox, toast, type Tab } fro
 import { icon } from './icons'
 import { bodyOf, empty, group, readout, segmented, select, textArea, textField, toggle } from './controls'
 import { MeshView } from './meshview'
-import { KINDS } from '../classes'
+import { KINDS, TYPES, TYPE_LABEL, typeOf, type AssetType } from '../classes'
 import { guessWheelSlots, swapEnds, swapSides, WHEEL_SLOTS } from '../rigslots'
 import { MESH_FILE, assetsvc, type AssetItem, type AssetJob, type Material, type MeshVariant, type ModelRoster } from '../assetsvc'
 import { actorExtension } from './actors'
@@ -252,6 +252,8 @@ export class AssetCatalog {
   private listBox = el('div', 'asset-list-box')
   /** which class is showing, or '' for every one */
   private klass = ''
+  /** '' is everything; otherwise one of TYPES — see `typeTabs` for why this is the first filter */
+  private atype: AssetType | '' = ''
   /** shared, this world's, or both */
   private scope: 'all' | 'shared' | 'world' = 'all'
   /** a pinned seed per item; absent means "a new one every draw" */
@@ -408,7 +410,7 @@ export class AssetCatalog {
      * class — the three things anybody knows about a thing they are looking for — and it is not
      * remembered between visits, because it is a question rather than a preference.
      */
-    this.listBox.replaceChildren(this.classTabs(), this.scopeTabs(), this.searchBox(), this.listHost)
+    this.listBox.replaceChildren(this.typeTabs(), this.classTabs(), this.scopeTabs(), this.searchBox(), this.listHost)
     split.append(this.listBox, this.detailHost)
     wrap.append(bar, split)
     host.append(wrap)
@@ -445,18 +447,70 @@ export class AssetCatalog {
     const counts = new Map<string, number>()
     for (const it of this.items) {
       if (!this.inScope(it)) continue
+      // WITHIN THE TYPE. Offering `vegetation` while Vehicles is selected is offering a filter
+      // that empties the list, which reads as the library being broken rather than as a choice.
+      if (this.atype && typeOf(it) !== this.atype) continue
       counts.set(it.kind || 'prop', (counts.get(it.kind || 'prop') ?? 0) + 1)
     }
     const row = el('div', 'class-tabs')
     const add = (value: string, label: string, n: number) => {
       const b = el('button', `class-tab${this.klass === value ? ' on' : ''}`)
       b.append(el('span', '', label), el('span', 'class-tab-n', String(n)))
-      b.onclick = () => { this.klass = value; this.renderList(); this.listBox.replaceChildren(this.classTabs(), this.scopeTabs(), this.searchBox(), this.listHost) }
+      b.onclick = () => { this.klass = value; this.redrawList() }
       row.append(b)
     }
     add('', 'all', [...counts.values()].reduce((a, b) => a + b, 0))
     for (const k of [...counts.keys()].sort()) add(k, k.replace(/-/g, ' '), counts.get(k)!)
     return row
+  }
+
+  /**
+   * WHAT IT IS, above what it is filed under.
+   *
+   * Rich, 2026-09-29: "I don't like how they used classes to link catalog types — things from the
+   * catalog should be either a prop/furniture/building type of thing, a vehicle, an actor, or a
+   * weapon", and, about the physics tabs: "nothing works. I have no idea how to take a car model
+   * and attach a physics model to it".
+   *
+   * Both of those were the same field. Whether an asset got a dynamics form was decided by its
+   * CLASS, and `kind` was unset on 119 of 125 items — so a library holding 77 hero-cars and 43
+   * traffic cars presented 125 props, offered none of them a gearbox, and showed an empty fleet
+   * beside them with no error anywhere. The service now promotes the class the import already
+   * knew (`origin.class`), and this row is the axis that decides what an asset can HAVE.
+   *
+   * It is a row of counts and not a dropdown because the counts are the answer to "where are my
+   * cars" — the question that started this.
+   */
+  private typeTabs(): HTMLElement {
+    const counts = new Map<AssetType, number>()
+    for (const it of this.items) {
+      if (!this.inScope(it)) continue
+      const t = typeOf(it)
+      counts.set(t, (counts.get(t) ?? 0) + 1)
+    }
+    const row = el('div', 'class-tabs type-tabs')
+    const add = (value: AssetType | '', label: string, n: number) => {
+      const b = el('button', `class-tab${this.atype === value ? ' on' : ''}`)
+      b.append(el('span', '', label), el('span', 'class-tab-n', String(n)))
+      b.onclick = () => {
+        this.atype = value
+        // the class filter belonged to the old type and would now match nothing
+        this.klass = ''
+        this.redrawList()
+      }
+      row.append(b)
+    }
+    add('', 'everything', [...counts.values()].reduce((a, b) => a + b, 0))
+    // EVERY TYPE, ALWAYS, including the empty ones: "Vehicles 0" is a fact worth reading, and it
+    // is exactly the fact that was invisible while the whole library claimed to be props.
+    for (const t of TYPES) add(t, TYPE_LABEL[t], counts.get(t) ?? 0)
+    return row
+  }
+
+  /** The left column, rebuilt — the filters above it are part of what a filter change changes. */
+  private redrawList() {
+    this.renderList()
+    this.listBox.replaceChildren(this.typeTabs(), this.classTabs(), this.scopeTabs(), this.searchBox(), this.listHost)
   }
 
   /**
@@ -478,8 +532,7 @@ export class AssetCatalog {
       ],
       onChange: (v) => {
         this.scope = v
-        this.renderList()
-        this.listBox.replaceChildren(this.classTabs(), this.scopeTabs(), this.searchBox(), this.listHost)
+        this.redrawList()
       },
     })
   }
@@ -509,6 +562,7 @@ export class AssetCatalog {
   /** Does this row answer what was typed? Id, subject and class — nothing else is searched for. */
   private matches(it: AssetItem): boolean {
     if (!this.inScope(it)) return false
+    if (this.atype && typeOf(it) !== this.atype) return false
     if (this.klass && (it.kind || 'prop') !== this.klass) return false
     const q = this.find.trim().toLowerCase()
     if (!q) return true

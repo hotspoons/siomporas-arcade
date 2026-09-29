@@ -98,7 +98,8 @@ body.worldedit {
    the two columns grew to six thousand pixels and scrolled the page instead of themselves. */
 .asset-pane .asset-split { height: 100%; min-height: 0; align-items: stretch; grid-template-rows: minmax(0, 1fr); }
 .asset-pane .asset-list, .asset-pane .asset-detail { overflow-y: auto; }
-.asset-pane .asset-list-box { min-height: 0; grid-template-rows: auto auto auto minmax(0, 1fr); }
+/* four content-sized rows now — types, classes, scope, search — and the list takes the rest */
+.asset-pane .asset-list-box { min-height: 0; grid-template-rows: auto auto auto auto minmax(0, 1fr); }
 .asset-pane .asset-list { max-height: none; min-height: 0; }
 .asset-pane .asset-detail { max-height: none; min-height: 0; }
 .asset-pane .material-split { height: 100%; min-height: 0; }

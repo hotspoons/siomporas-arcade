@@ -56,6 +56,23 @@ export class Catalog {
 
   async #withFiles(item) {
     const dir = this.dir(item.id)
+    /*
+     * THE CLASS THE IMPORT ALREADY KNEW.
+     *
+     * Measured 2026-09-29: 125 items, and `kind` set on SIX of them. `origin.class` was set on
+     * 120 — 77 `hero-car`, 43 `traffic` — because `assetlib` writes the class it generated from
+     * into the provenance and the importer never promoted it to the field the editor filters on.
+     *
+     * So the whole library read as props. Every car in it showed no vehicle form, the fleet
+     * roster was empty beside a library full of cars, and there was no error anywhere — the two
+     * fields simply never met (Rich, 2026-09-29: "the other guy added 3 tabs for physics but
+     * nothing works. I have no idea how to take a car model and attach a physics model to it").
+     *
+     * Derived on READ rather than migrated on disk, deliberately: a migration can half-run and
+     * leaves nothing to say which half, and a new import would arrive un-promoted the next day.
+     * Writing a `kind` explicitly still wins — `put` stores it, and this only fills a hole.
+     */
+    const kind = item.kind ?? item.origin?.class ?? 'prop'
     const views = existsSync(path.join(dir, 'views')) ? (await readdir(path.join(dir, 'views'))).filter((f) => f.endsWith('.png')).sort() : []
     const has = async (f) => {
       try {
@@ -66,6 +83,7 @@ export class Catalog {
     }
     return {
       ...item,
+      kind,
       views,
       mesh: (await has('mesh.glb')) || null,
       finished: (await has('mesh.finished.glb')) || null,
@@ -98,6 +116,19 @@ export class Catalog {
       id,
       subject: spec.subject ?? before.subject ?? id,
       kind: spec.kind ?? before.kind ?? 'prop',
+      /*
+       * WHAT IT IS, as opposed to what it is filed under.
+       *
+       * Rich, 2026-09-29: "I don't like how they used classes to link catalog types — things from
+       * the catalog should be either a prop/furniture/building type of thing, a vehicle, an actor,
+       * or a weapon."
+       *
+       * `kind` answers "which sort of vehicle"; `type` answers "is this a vehicle at all", and
+       * only the second decides which documents an asset can have. Stored only when somebody sets
+       * it: the client derives it from `kind` otherwise, so the mapping lives in exactly one place
+       * (`apps/corridor/src/classes.ts`) rather than in a copy here that drifts.
+       */
+      type: spec.type ?? before.type ?? null,
       prompt: spec.prompt ?? before.prompt ?? '',
       negative: spec.negative ?? before.negative ?? '',
       notes: spec.notes ?? before.notes ?? '',
@@ -159,6 +190,10 @@ export class Catalog {
        * somebody is typing, which is better than a 400 from here naming the first one.
        */
       vehicle: spec.vehicle === undefined ? (before.vehicle ?? null) : spec.vehicle,
+      /** how it moves and fights, for a person, an animal or an enemy (`src/actorspecs.ts`) */
+      actor: spec.actor === undefined ? (before.actor ?? null) : spec.actor,
+      /** what it does when fired (`src/weapons.ts`) */
+      weapon: spec.weapon === undefined ? (before.weapon ?? null) : spec.weapon,
       updated: new Date().toISOString(),
       history: before.history ?? [],
     }

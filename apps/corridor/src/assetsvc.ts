@@ -17,7 +17,17 @@
 export interface AssetItem {
   id: string
   subject: string
+  /** which sort of thing it is filed as — open vocabulary, decides DEFAULTS */
   kind: string
+  /**
+   * What it IS: prop, vehicle, actor or weapon. Closed, and it decides CAPABILITY.
+   *
+   * Absent on almost everything, and that is the normal case rather than a gap: `typeOf` in
+   * `classes.ts` reads it off the class, so the mapping lives in one place instead of being
+   * stamped onto every record at import time and going stale there. Stored only when somebody
+   * overrides it.
+   */
+  type?: string | null
   prompt: string
   negative: string
   notes: string
@@ -48,6 +58,10 @@ export interface AssetItem {
    * Callers narrow it with `validateVehicle`, which is the thing that actually knows.
    */
   vehicle?: unknown
+  /** how it moves and fights, when it is a person, an animal or an enemy. Schema: `src/actorspecs.ts` */
+  actor?: unknown
+  /** what it does when fired, when it is a weapon. Schema: `src/weapons.ts` */
+  weapon?: unknown
 }
 
 /**

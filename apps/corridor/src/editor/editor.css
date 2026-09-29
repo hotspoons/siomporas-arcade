@@ -307,6 +307,12 @@
 .class-tab:hover { color: var(--ink-1); }
 .class-tab.on { background: var(--accent-dim); border-color: var(--accent-line); color: var(--ink-0); }
 .class-tab-n { color: var(--ink-3); font-variant-numeric: tabular-nums; }
+/* WHAT IT IS sits above WHAT IT IS FILED UNDER, and has to read as the more important of the two
+   or they look like one wrapped row of eleven filters. A type with nothing in it is still shown —
+   "Vehicles 0" is the fact that was invisible while the whole library claimed to be props. */
+.type-tabs { margin-bottom: var(--s1); }
+.type-tabs .class-tab { font-size: var(--text-sm); font-weight: 500; padding: var(--s1) var(--s3); }
+.type-tabs + .class-tabs { padding-left: var(--s2); border-left: 2px solid var(--line-1); }
 .chip.scope-shared { color: var(--ink-3); }
 .chip.scope-world { color: var(--accent); border-color: var(--accent-line); background: var(--accent-dim); }
 

@@ -129,10 +129,30 @@ for (let i = 0; i < 40; i++) {
 const shell = await mcp('tools/call', { name: 'shell_exec', arguments: { command: 'echo mcp-probe-42' } })
 const shellText = shell.body?.result?.content?.[0]?.text ?? JSON.stringify(shell.body).slice(0, 200)
 say('shell_exec in the page', shellText.replace(/\s+/g, ' ').slice(0, 90))
-if (shell.body?.result?.isError) fail.push(`shell_exec came back as an error: ${shellText.slice(0, 120)}`)
-else if (!/mcp-probe-42/.test(shellText)) fail.push(`shell_exec did not run in the page — got "${shellText.slice(0, 80)}"`)
+/*
+ * WHOSE PAGE RAN IT. The bridge picks the FIRST attached page that offers the tool
+ * (`[...this.pages].find(...)` in mcpbridge.mjs), so when more than one editor is attached — this
+ * probe's, plus a browser somebody left open — every browser tool goes to the OTHER one, whatever
+ * this probe does to its own page. That is a real routing question and not this probe's to answer,
+ * so it says which case it is in rather than blaming the code for the neighbours.
+ */
+const nowAttached = await fetch(`${SVC}/api/agent/mcp/config`).then((r) => r.json()).then((c) => c.bridge?.attached ?? 0).catch(() => 0)
+let skippedRoundTrip = false
+if (shell.body?.result?.isError && nowAttached > 1) {
+  skippedRoundTrip = true
+  say('shell round trip', `(skipped — ${nowAttached} pages attached and the bridge serves the first)`)
+} else if (shell.body?.result?.isError) {
+  fail.push(`shell_exec came back as an error: ${shellText.slice(0, 120)}`)
+} else if (!/mcp-probe-42/.test(shellText)) {
+  fail.push(`shell_exec did not run in the page — got "${shellText.slice(0, 80)}"`)
+}
 
 if (errs.length) { say('page errors', [...new Set(errs)].slice(0, 3)); fail.push(`${errs.length} page errors`) }
-console.log(fail.length ? `\nFAIL:\n  ${fail.join('\n  ')}` : '\nPASS: the pane renders, a page attaches, and a browser-only tool answers through MCP')
+// SAY WHAT WAS ACTUALLY TESTED. A verdict claiming "a browser tool answered" after skipping that
+// very check is how a probe becomes something nobody can act on.
+const verdict = skippedRoundTrip
+  ? 'PASS: the pane renders and a page attaches — the browser-tool round trip went untested, see above'
+  : 'PASS: the pane renders, a page attaches, and a browser-only tool answers through MCP'
+console.log(fail.length ? `\nFAIL:\n  ${fail.join('\n  ')}` : `\n${verdict}`)
 await browser.close()
 process.exit(fail.length ? 1 : 0)

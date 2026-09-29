@@ -135,6 +135,19 @@ export default defineConfig({
         proxy: {
           '/api': { target: process.env.WORLDEDITOR, ws: true, changeOrigin: true },
           '/assetsvc': { target: process.env.WORLDEDITOR, changeOrigin: true },
+          /*
+           * THE PLACEABLE CATALOG, and only that one file.
+           *
+           * In a pod the world editor serves `/assets/catalog.json` from the volume, merged — it
+           * is what the "placeable" tick in the asset library writes into. In development Vite
+           * serves `public/assets/catalog.json`, a static file of 56 entries that nothing updates,
+           * so making an asset placeable appeared to do nothing: the editor said it had been added
+           * and the viewer had never heard of it. No error on either side.
+           *
+           * `/assets` as a whole must NOT be proxied — the built bundle, the Draco decoder and the
+           * shipped models all live under it. This is the one path whose meaning differs.
+           */
+          '/assets/catalog.json': { target: process.env.WORLDEDITOR, changeOrigin: true },
         },
       }
       : {}),

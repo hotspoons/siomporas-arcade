@@ -5,6 +5,7 @@
 import * as THREE from 'three'
 import { reliefZ } from './relief'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
+import { applyAlphaGlazing } from './glazing'
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js'
 import { DATA_BASE } from './site'
 
@@ -40,6 +41,27 @@ export interface CatalogEntry {
 const draco = new DRACOLoader()
 draco.setDecoderPath('/assets/vendor/draco/')
 const loader = new GLTFLoader()
+
+/**
+ * Load a model once, with its windows working.
+ *
+ * `applyAlphaGlazing` goes here rather than at the two call sites because both hand out
+ * `clone(true)` of the same cached root, and `clone` SHARES material references — so glazing the
+ * root glazes every copy ever placed, and doing it after the clone would re-scan the texture per
+ * instance for no benefit.
+ *
+ * Why it is needed at all: TRELLIS exports `alphaMode: OPAQUE` and keeps the transparency in the
+ * base-colour texture's alpha, so without this every car placed in a world has its windows painted
+ * on in solid black. There is deliberately no classifier deciding which texels are glass — see
+ * `glazing.ts`, where two attempts at one are recorded along with why both were wrong.
+ */
+function loadGlazed(url: string): Promise<THREE.Group> {
+  return loader.loadAsync(url).then((gltf) => {
+    applyAlphaGlazing(gltf.scene)
+    return gltf.scene
+  })
+}
+
 loader.setDRACOLoader(draco)
 const glbCache = new Map<string, Promise<THREE.Group>>()
 
@@ -103,7 +125,7 @@ export async function buildPlacements(items: Placement[], catalog: Map<string, C
       const url = `/${entry.glb.replace(/^\//, '')}`
       let p = glbCache.get(url)
       if (!p) {
-        p = loader.loadAsync(url).then((gltf) => gltf.scene)
+        p = loadGlazed(url)
         glbCache.set(url, p)
       }
       try {
@@ -160,7 +182,7 @@ export async function loadAssetModel(entry: CatalogEntry | undefined): Promise<T
   const url = `/${entry.glb.replace(/^\//, '')}`
   let p = glbCache.get(url)
   if (!p) {
-    p = loader.loadAsync(url).then((gltf) => gltf.scene)
+    p = loadGlazed(url)
     glbCache.set(url, p)
   }
   try {

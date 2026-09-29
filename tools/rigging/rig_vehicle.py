@@ -236,8 +236,19 @@ def main():
     # one. Turning each wheel a quarter turn and measuring its own bounds is the check that a
     # count of four bones cannot make.
     checks = []
+    hub_error = []
     for slot in SLOTS:
         w = wheels[slot]["object"]
+        # WHERE IT IS, BEFORE ANYTHING IS TURNED. A wheel parented through the wrong origin sits in
+        # the wrong place at REST, and every rotation test in the world still passes on it — span
+        # does not notice a translation. This compares the parented wheel against the hub the
+        # circle fit found, which is the only fixed point that means anything here.
+        cu, cv = wheels[slot]["hub"]
+        pts0 = [w.matrix_world @ Vector(c) for c in w.bound_box]
+        mid = Vector((sum(p[0] for p in pts0) / 8, sum(p[1] for p in pts0) / 8,
+                      sum(p[2] for p in pts0) / 8))
+        hub_error.append({"wheel": slot,
+                          "off_m": round(math.hypot(mid[li] - cu, mid[2] - cv), 4)})
         # WORLD SPACE. `bound_box` is the object's LOCAL box and a parent bone's rotation does not
         # touch it — the first version of this check read it directly and returned exactly 1.000
         # for all four wheels whatever the bones did, which is a check that cannot fail.
@@ -250,14 +261,32 @@ def main():
         bpy.context.view_layer.update()
         after = world()
         grew = max((span(after, a) + 1e-9) / (span(before, a) + 1e-9) for a in (0, 1, 2))
+        centre = lambda pts: Vector((sum(p[0] for p in pts) / 8, sum(p[1] for p in pts) / 8,
+                                     sum(p[2] for p in pts) / 8))
+        moved = (centre(after) - centre(before)).length
         pb.rotation_euler[1] = 0
         bpy.context.view_layer.update()
-        checks.append({"wheel": slot, "bbox_growth": round(grew, 3)})
+        checks.append({"wheel": slot, "bbox_growth": round(grew, 3),
+                       "centre_moved_m": round(moved, 4)})
+    say("sits_where_the_hub_is", {"wheels": hub_error})
     say("spin_check", {"quarter_turn": checks,
-                       "note": "about 1.0 means it turned about its own axle"})
+                       "note": "growth near 1.0 means it turned about its own axle; "
+                               "centre_moved near 0 means it turned rather than orbited"})
+
+    mean_r = report["radius_m"]
+    worst_rest = max(h["off_m"] for h in hub_error)
+    if worst_rest > 0.25 * mean_r:
+        say("refused", {"why": "a wheel is parked {:.3f} m from its hub before anything moved"
+                               .format(worst_rest)})
+        raise SystemExit(2)
     worst = max(c["bbox_growth"] for c in checks)
     if worst > 1.35:
         say("refused", {"why": "a wheel swept {:.2f}x its own box on a quarter turn".format(worst)})
+        raise SystemExit(2)
+    drift = max(c["centre_moved_m"] for c in checks)
+    if drift > 0.15 * mean_r:
+        say("refused", {"why": "a wheel's centre travelled {:.3f} m on a quarter turn — it is "
+                               "orbiting something, not spinning".format(drift)})
         raise SystemExit(2)
 
     if args.dst:
@@ -372,13 +401,25 @@ def build_rig(obj, wheels, li, ti):
         order.append(b.name)
     bpy.ops.object.mode_set(mode="OBJECT")
 
-    # the body follows the root; each wheel follows its own bone
+    # The body follows the root; each wheel follows its own bone.
+    #
+    # KEEP THE WORLD TRANSFORM BY RESTORING IT, not by computing a parent inverse. Blender's BONE
+    # parenting places the child relative to the bone's TAIL, while `pose_bone.matrix` has its
+    # origin at the HEAD — so an inverse built from the pose matrix is off by the whole bone, and
+    # every wheel ended up displaced down and outboard of its arch. It looked like the wheels were
+    # orbiting when spun; they were not (measured: the centre moves 2 mm), they were simply parked
+    # in the wrong place from the moment they were parented, at rest as much as in motion.
+    #
+    # Assigning `matrix_world` after the parent is set makes Blender solve for the local transform
+    # itself, which is correct whatever origin the parent type uses.
     for target, bone in [(obj, "body")] + [(wheels[s]["object"], "wheel_" + s.lower())
                                            for s in SLOTS if s in wheels]:
+        keep = target.matrix_world.copy()
         target.parent = rig
         target.parent_type = "BONE"
         target.parent_bone = bone
-        target.matrix_parent_inverse = (rig.matrix_world @ rig.pose.bones[bone].matrix).inverted()
+        bpy.context.view_layer.update()
+        target.matrix_world = keep
     say("rig", {"armature": rig.name, "bones": len(rig.data.bones), "wheel_order": order})
     return rig, order
 

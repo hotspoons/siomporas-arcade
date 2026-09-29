@@ -35,6 +35,14 @@ export interface AgentPanelOpts {
   transcriptHost: HTMLElement
   /** the shell that answers the agent's fs/* and terminal/* — the editor tools */
   shell: () => Shell | null
+  /**
+   * Anything else the sidebar should carry, drawn last.
+   *
+   * A hook rather than an import so this panel keeps knowing only about the session: the MCP
+   * section (ui/mcppanel.ts, agentmcp lane) is about an agent that is NOT in this transcript, and
+   * wiring it in here would make this file own both.
+   */
+  extraSections?: (host: HTMLElement) => void
 }
 
 export class AgentPanel {
@@ -184,6 +192,8 @@ export class AgentPanel {
       ))
       host.append(g)
     }
+
+    this.o.extraSections?.(host)
   }
 
   private async reload(): Promise<void> {

@@ -648,3 +648,34 @@ body.chrome-off #chrome-restore { display: block; }
   background: var(--ink-3); border-radius: 2px; opacity: 0.35;
 }
 .meshview:hover .meshview-grip::after { opacity: 0.7; }
+
+/* ---- MCP: this editor as tools (agentmcp lane) ------------------------------------------------
+   The pane's one job is producing a block of JSON somebody pastes into an agent config, so the
+   token and the snippet are both sized to be selected and copied rather than skimmed. */
+
+.mcp-section { display: block; }
+.mcp-token { display: flex; align-items: center; gap: var(--s2); }
+.mcp-token .input { font-family: var(--num); font-size: var(--text-xs); }
+
+.mcp-snippet {
+  margin: var(--s1) 0 var(--s2);
+  padding: var(--s3);
+  max-height: 220px; overflow: auto;
+  font-family: var(--num); font-size: var(--text-xs); line-height: 1.5;
+  color: var(--ink-1); background: var(--bg-2);
+  border: 1px solid var(--line-1); border-radius: var(--r2);
+  white-space: pre; tab-size: 2;
+  /* selectable on a click-drag without the pane scrolling away under the pointer */
+  user-select: text;
+}
+
+.mcp-live { display: flex; align-items: center; gap: var(--s2); font-size: var(--text-sm); color: var(--ink-2); padding: var(--s1) 0; }
+
+/* A status dot, shared with the asset panel's model list. Colour IS the state here, so it is
+   paired with words rather than carrying the meaning alone. */
+.dot { width: 8px; height: 8px; border-radius: var(--r-full); flex: none; background: var(--line-2); }
+.dot.ok { background: var(--ok); }
+.dot.bad { background: var(--danger); }
+.dot.off { background: var(--line-2); }
+
+.asset-row-actions { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; }

@@ -215,7 +215,38 @@ Fixed; the file is 348 KB smaller and every consumer stops allocating 546 useles
 This was hard to see because the script's own log said `vertex_groups_on_mesh: 160` — Blender held
 160 groups and the exporter wrote 706 joints, and only the first number was printed.
 
-### Why lips and eyes do not move, and what would fix it
+### Lips now move; eyes can only blink — and that is the mesh, not the rig
+
+`face_weights()` in `rig_character.py` computes the face bones' weights on the REAL mesh instead of
+inheriting them from the cage: a radial falloff from each bone's segment, taken FROM whatever
+already owned the vertex so the total stays 1, capped at 0.85 so the head keeps enough of the skull
+to carry it, then smoothed — without the smooth the falloffs meet in a step and the mouth creases
+into flat facets when posed.
+
+Measured on Kestrel, by the bones' real names:
+
+| | before | after |
+|---|---|---|
+| lips (`DEF-lip.*`) | **0 bones, 0 weight** | 4 bones, 12.3 |
+| eyelids (`DEF-lid.*`) | 4 bones, 23.3 | 8 bones, 24.1 |
+| brows | 2 bones, 45.9 | 12 bones, 65.4 |
+| nose and chin | 2 bones, 0.6 | 9 bones, 953 |
+| groups carrying any weight | 73 | 100 |
+| vertices whose weights do not sum to 1 | 0 | 0 |
+
+**Measure by the bone names, not by the English.** An earlier pass of this reported "eyes: 0" for a
+rig whose eyelids were weighted, because nothing in a Rigify face is called "eye" — the lids are
+`DEF-lid.*`. The same run reported face weight on `DEF-forearm`, because "ear" is inside "forearm".
+
+**What the eyes cannot do, ever, from this mesh.** A render of the head settles it: Kestrel's eyes
+are sculpted SHUT with the lashes painted on, and there is no eyeball behind them. Lid bones can
+squint and approximate a blink; nothing downstream can make an eye look left, because there is no
+eye. The same is true of the mouth — the lips are real volumes with a seam and they deform, but
+there is no mouth interior, so pushing the lower lip down stretches skin rather than opening a
+mouth. Both are assetgen problems: they want a reconstruction that has an eyeball and a parted lip
+line, or separate eye geometry added before rigging.
+
+### The older reading of this, kept because the reasoning still applies
 
 Bone-heat runs over the **voxel-remeshed cage**, and at that resolution a cage has no lip seam and
 no eye socket — the mouth is one surface and the lids are fused to the eyeball. Heat therefore

@@ -62,6 +62,10 @@ def parse_args():
     p.add_argument("--cage-faces", type=int, default=60000)
     p.add_argument("--renders", default="", help="directory for pose renders; skipped if unset")
     p.add_argument("--keep-cage", action="store_true")
+    p.add_argument("--no-face", action="store_true",
+                   help="skip the face-weight pass (the cage leaves lips and eyes at zero)")
+    p.add_argument("--face-reach", type=float, default=1.6,
+                   help="how far a face bone reaches, in multiples of its own length")
     p.add_argument("--metarig", default="human", choices=("human", "basic_human"))
     p.add_argument("--export-joints", default="",
                    help="fit the metarig, write its body joints to this file, and stop. "
@@ -176,6 +180,120 @@ def build_cage(obj, voxel, target_faces):
         dec.ratio = target_faces / float(faces)
         bpy.ops.object.modifier_apply(modifier=dec.name)
     return cage
+
+
+# The face bones a reconstruction can actually drive, and the ones it cannot.
+#
+# MEASURED on Kestrel before this existed: lip bones with any weight, 0. Eye bones, 0. Brow bones,
+# 2 — carrying 45.9 against the jaw's 1,918. The face rig was 173 bones that deformed nothing.
+#
+# WHY. Bone-heat runs over the voxel-remeshed CAGE, and a cage has no lip seam and no eye socket:
+# the mouth is one closed surface and the lids are fused to the face. Heat cannot tell `lip.T` from
+# `lip.B` when there is nothing between them, so those bones own nothing. The jaw works because it
+# is a large volume; the brows barely work because they are a ridge.
+#
+# The fix is not a finer cage — the cage must stay watertight, and a closed mouth stays closed at
+# any resolution. The face bones do not need heat: they need a local falloff, which can be computed
+# on the REAL mesh where the lip line and the lids exist.
+FACE_BONES = re.compile(r"^DEF-(lip\.|lips\.|lid\.|brow\.|cheek\.|nose|chin)")
+
+# and the honest limit, worth stating where somebody will read it: the eyes of a single-view
+# reconstruction are sculpted SHUT, with the lashes painted on and no eyeball behind them. Lid
+# bones can squint and blink-ish; nothing here can make an eye look left, because there is no eye.
+
+
+def face_weights(obj, armature, reach=1.6, floor=0.02):
+    """
+    Give the face bones weights, computed on the real mesh rather than inherited from the cage.
+
+    For each face deform bone, every vertex within `reach` bone-lengths of the bone's segment gets
+    a weight that falls off with distance. The weight is taken FROM whatever already owns that
+    vertex — the head and the jaw — rather than added on top, so the total per vertex stays 1 and
+    nothing inflates when posed.
+
+    Returns what it did, per bone, because "the face has weights now" is not a claim anybody should
+    accept without the numbers behind it.
+    """
+    bones = [b for b in armature.data.bones if b.use_deform and FACE_BONES.match(b.name)]
+    if not bones:
+        return {"bones": 0}
+    groups = {b.name: (obj.vertex_groups.get(b.name) or obj.vertex_groups.new(name=b.name))
+              for b in bones}
+    inv = obj.matrix_world.inverted()
+    segs = []
+    for b in bones:
+        head = inv @ (armature.matrix_world @ b.head_local)
+        tail = inv @ (armature.matrix_world @ b.tail_local)
+        length = (tail - head).length or 1e-4
+        segs.append((b.name, head, tail, length))
+
+    # only the head end of the character is a candidate; a lip bone must not reach an ankle
+    zs = [v.co.z for v in obj.data.vertices]
+    top = max(zs)
+    span = top - min(zs)
+    near_head = [v for v in obj.data.vertices if v.co.z > top - 0.22 * span]
+
+    added = {name: 0 for name, _, _, _ in segs}
+    for v in near_head:
+        contrib = []
+        for name, head, tail, length in segs:
+            d = _point_to_segment(v.co, head, tail)
+            r = reach * length
+            if d >= r:
+                continue
+            w = (1.0 - d / r) ** 2
+            if w > floor:
+                contrib.append((name, w))
+        if not contrib:
+            continue
+        total = sum(w for _, w in contrib)
+        # HOW MUCH OF THIS VERTEX THE FACE MAY CLAIM. Capped, so the head bone keeps enough of the
+        # skull to carry it: a vertex entirely owned by lip bones detaches from the head when the
+        # head turns.
+        claim = min(0.85, total)
+        scale = claim / total
+        for name, w in contrib:
+            groups[name].add([v.index], w * scale, "REPLACE")
+            added[name] += 1
+        for vg in obj.vertex_groups:
+            if vg.name in groups:
+                continue
+            try:
+                had = vg.weight(v.index)
+            except RuntimeError:
+                continue
+            vg.add([v.index], had * (1.0 - claim), "REPLACE")
+    # SMOOTH THEM, or the falloffs meet in a seam.
+    #
+    # Each bone's weight is a radial falloff that stops dead at its reach, so where two of them
+    # meet the sum steps rather than blends, and the mesh creases along that step when posed — the
+    # first render of a moving mouth showed flat facets around the lips and nose rather than skin.
+    # Smoothing is over the face groups only; the body's weights came from bone-heat and are
+    # already continuous.
+    bpy.ops.object.select_all(action="DESELECT")
+    obj.select_set(True)
+    bpy.context.view_layer.objects.active = obj
+    bpy.ops.object.mode_set(mode="WEIGHT_PAINT")
+    for name in groups:
+        obj.vertex_groups.active_index = obj.vertex_groups[name].index
+        try:
+            bpy.ops.object.vertex_group_smooth(group_select_mode="ACTIVE", factor=0.5, repeat=3)
+        except RuntimeError:
+            pass
+    bpy.ops.object.mode_set(mode="OBJECT")
+
+    return {"bones": len(bones), "vertices_touched": sum(1 for _ in near_head),
+            "smoothed": len(groups),
+            "per_bone": {k: n for k, n in sorted(added.items(), key=lambda kv: -kv[1])[:8]}}
+
+
+def _point_to_segment(p, a, b):
+    ab = b - a
+    denom = ab.dot(ab)
+    if denom < 1e-12:
+        return (p - a).length
+    t = max(0.0, min(1.0, (p - a).dot(ab) / denom))
+    return (p - (a + ab * t)).length
 
 
 def transfer_weights(cage, obj, armature):
@@ -448,6 +566,8 @@ def main():
 
     groups = transfer_weights(cage, obj, rig)
     say("weights", {"vertex_groups_on_mesh": groups})
+    if not args.no_face:
+        say("face_weights", face_weights(obj, rig, reach=args.face_reach))
 
     if not args.keep_cage:
         bpy.data.objects.remove(cage, do_unlink=True)

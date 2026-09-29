@@ -482,7 +482,9 @@ export class MeshView {
         if (!mesh.isMesh) return
         const m = mesh.material as THREE.MeshPhysicalMaterial
         // Glass keeps both faces; everything else is front-only so the inside of the shell does
-        // not z-fight through the paint.
+        // not z-fight through the paint. `applyAlphaGlazing` below runs AFTER this and puts
+        // DoubleSide back on the materials that turn out to have windows in them — through which
+        // the inside of the far panels is exactly what you are meant to see.
         if (!(m && m.transmission > 0)) m.side = THREE.FrontSide
       })
       // Find the skinned mesh, if this is a character rather than a prop.

@@ -122,32 +122,34 @@ if (!glazed || glazed.glazed < 1) {
   fail.push('no glazing was separated — the texture alpha is not being read')
 } else {
   /*
-   * THE GLASS HAS TO BE ITS OWN MATERIAL, and that is the whole finding.
+   * THE ALPHA IS USED AS ALPHA, and there is no classifier to get wrong.
    *
-   * Putting a transmission MASK on the one material the reconstruction comes with did nothing
-   * visible: that material describes the BODY, so it is roughness 1 and metalness 1, and a fully
-   * rough transmissive surface is frosted to opacity while a metal has no diffuse for
-   * transmission to replace. The mask was correct the whole time — painted onto the body it lit
-   * up the windscreen and nothing else.
+   * Two earlier versions tried to work out which texels were glass — from colour, then from a
+   * threshold on the alpha plus a blob filter — and both were wrong the same way: that alpha is
+   * the reconstruction's OPACITY, low wherever the model is see-through AND wherever the field
+   * was uncertain. At `alpha < 224` a 911's rear fender came out as cut glass while its windows
+   * stayed black.
    */
   const mats = await page.evaluate(() => {
     const out = []
     window.__meshview.pivot.traverse((o) => {
       for (const m of Array.isArray(o.material) ? o.material : o.material ? [o.material] : []) {
-        out.push({ type: m.type, transmission: m.transmission ?? 0, roughness: +(m.roughness ?? 0).toFixed(2), metalness: m.metalness ?? 0 })
+        out.push({ type: m.type, transparent: m.transparent, depthWrite: m.depthWrite, side: m.side })
       }
     })
     return out
   })
   say('materials', mats)
-  const glass = mats.find((m) => m.transmission > 0)
-  const bodyKept = mats.some((m) => m.transmission === 0)
-  if (!glass) fail.push('nothing transmissive after the split')
+  const lit = mats.find((m) => m.transparent)
+  if (!lit) fail.push('nothing was made transparent')
   else {
-    if (glass.roughness > 0.3) fail.push(`the glass is roughness ${glass.roughness} — frosted to opacity`)
-    if (glass.metalness > 0.1) fail.push(`the glass is metalness ${glass.metalness} — a metal has no diffuse to transmit`)
+    // the body's opaque texels have to occlude what is behind them, or the far side of the shell
+    // draws through the near side
+    if (!lit.depthWrite) fail.push('the transparent material stopped writing depth')
+    if (lit.side !== 2) fail.push('the glass is single-sided — a windscreen shows nothing behind it')
   }
-  if (!bodyKept) fail.push('the body lost its own material in the split')
+  // and nothing was split into a second material: that was the previous, wrong, approach
+  if (mats.length > 1) fail.push(`${mats.length} materials — the mesh is being split again`)
 
   const frame = () => page.evaluate(() => {
     const v = window.__meshview
@@ -161,7 +163,8 @@ if (!glazed || glazed.glazed < 1) {
   })
   const setT = (t) => page.evaluate((v) => window.__meshview.pivot.traverse((o) => {
     for (const m of Array.isArray(o.material) ? o.material : o.material ? [o.material] : []) {
-      if ('transmission' in m) { m.transmission = v; m.needsUpdate = true }
+      m.transparent = !!v
+      m.needsUpdate = true
     }
   }), t)
   const on = await frame()
@@ -171,8 +174,8 @@ if (!glazed || glazed.glazed < 1) {
   await setT(1)
   let changed = 0
   for (let i = 0; i < on.length; i += 4) if (Math.abs(on[i] - off[i]) > 6) changed++
-  say('pixels transmission is worth', `${changed} of ${on.length / 4}`)
-  if (changed < 20) fail.push('turning transmission off changed nothing — the pass is not running')
+  say('pixels the alpha is worth', `${changed} of ${on.length / 4}`)
+  if (changed < 20) fail.push('ignoring the alpha changed nothing — it is not reaching the render')
 }
 
 if (!variants.includes('raw') || !variants.includes('finished')) {
@@ -217,6 +220,9 @@ await page.keyboard.press('Escape')
 await page.waitForTimeout(600)
 
 /* ---- 4 · remembered across a reload ---- */
+// closing the pop-out moves the viewer's root back and re-renders the pane, so wait for the
+// handle again rather than assuming the one from before the dialog is still the current one
+await page.waitForFunction(() => !!window.__meshview?.size, null, { timeout: 60000 })
 await page.evaluate(() => window.__meshview.setSpin(false))
 const left = await camera(page)
 await page.waitForTimeout(400)

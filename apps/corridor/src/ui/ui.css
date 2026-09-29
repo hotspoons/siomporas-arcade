@@ -22,6 +22,29 @@ body {
 
 canvas#gl { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
 
+/* ---- CHROME IS NOT TEXT ------------------------------------------------------------------------
+   Rich, 2026-09-29: "Lots of times clicking things will highlight text in menus."
+
+   It does, and the reason is that every control in here is a real element with a real text node in
+   it. A double-click on a tab selects its word; a click that drags four pixels — which most clicks
+   do — paints the label blue and leaves it that way. Nothing reads as pressable when it also
+   behaves like a paragraph.
+
+   So chrome opts OUT of selection, and the things that are genuinely worth copying opt back IN. A
+   blanket `user-select: none` on `body` would be the shorter rule and the wrong one: a coordinate,
+   a slug, a run id and an error message are all things somebody needs to get into a message, and
+   taking that away trades one irritation for a worse one. */
+.btn, .tab, .seg, .chip, .drawer-item, .field-label, .tab-strip, .segmented,
+.inspector-head, .drawer-head, .topbar, .group > summary, .class-tab, .rig-slot {
+  user-select: none;
+  -webkit-user-select: none;
+}
+/* and back on for anything you would put in a message */
+.mono, .field-value, .readout, code, pre, kbd, input, textarea, .log, .log *, .readout * {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
 .mono, kbd, .field-value { font-family: var(--num); font-variant-numeric: tabular-nums; }
 
 h1, h2, h3 { margin: 0; font-weight: 600; letter-spacing: -0.01em; }

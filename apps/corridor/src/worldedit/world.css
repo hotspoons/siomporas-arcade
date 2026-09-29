@@ -667,3 +667,15 @@ canvas.drop-target { outline: 2px dashed var(--accent); outline-offset: -4px; }
 
 /* the library's own toolbar: what the dialog kept in its footer, where a pane can show it */
 .asset-pane-bar { display: flex; gap: var(--s2); justify-content: flex-end; margin-bottom: var(--s2); }
+
+/* ---- the world wizard ---------------------------------------------------------------------- */
+/* The four stages of making a world, in the inspector above the stage's own panel. It is the
+   shared `.tab-strip`, so this is only the two things that differ: it sits flush in a column that
+   already has its own padding, and a finished stage is marked. */
+#steps { flex: none; }
+#steps[hidden] { display: none; }
+.tab-strip.steps { padding: 0 var(--s3); margin-bottom: var(--s2); }
+/* DONE IS QUIET. A tick that shouts competes with the tab you are on, and the one you are on is
+   the more useful of the two facts. */
+.tab-strip.steps .tab.done { color: var(--ok); }
+.tab-strip.steps .tab.done.on { color: var(--accent); }

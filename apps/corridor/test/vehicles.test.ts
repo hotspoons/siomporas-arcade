@@ -342,3 +342,40 @@ describe('the class vocabulary', () => {
     for (const k of ['furniture', 'vegetation', 'signage', 'prop']) expect(VEHICLE_CLASSES).not.toContain(k)
   })
 })
+
+describe('a level naming the car, and a car naming its own engine', () => {
+  it('lets the LEVEL pick the game and the CAR keep its engine', () => {
+    /*
+     * The layering `physics.spawnCar` relies on, and the claim made to the editor lane.
+     *
+     * A level says `profile: "taxi"`; the asset says 205 kW through a 3.7 final drive. Taking the
+     * level's profile whole would give the hatchback the taxi's power and gearbox, which is not what
+     * anybody means by choosing a handling model. Swapping only the BASE keeps both.
+     */
+    const doc = defaultVehicle('hero-car') // base: street
+    const asStreet = toDriveProfile(doc)
+    const asTaxi = toDriveProfile({ ...doc, profile: { ...doc.profile, base: 'taxi' } })
+
+    // the game changed
+    expect(asStreet.yawAssist).toBe(PROFILES.street.yawAssist)
+    expect(asTaxi.yawAssist).toBe(PROFILES.taxi.yawAssist)
+    expect(asTaxi.gripFront).toBe(PROFILES.taxi.gripFront)
+
+    // the car did not: power, top speed and brakes still come from this car's own drivetrain
+    expect(asTaxi.powerPerKg).toBeCloseTo(asStreet.powerPerKg, 9)
+    expect(asTaxi.topSpeed).toBeCloseTo(asStreet.topSpeed, 9)
+    expect(asTaxi.brakePerKg).toBeCloseTo(asStreet.brakePerKg, 9)
+    // and they are the CAR's numbers, not the profile's
+    expect(asTaxi.powerPerKg).not.toBeCloseTo(PROFILES.taxi.powerPerKg, 3)
+    expect(asTaxi.topSpeed).not.toBeCloseTo(PROFILES.taxi.topSpeed, 3)
+  })
+
+  it('still gives a usable car when the level names one with no dynamics document', () => {
+    // 120 of the library's 120 vehicles have no dynamics saved, so "no document" is the common case
+    // and must mean "the default chassis", never "no car".
+    const p = toDriveProfile(defaultVehicle('hero-car'))
+    expect(Number.isFinite(p.powerPerKg)).toBe(true)
+    expect(p.powerPerKg).toBeGreaterThan(0)
+    expect(validateVehicle(defaultVehicle('hero-car')).ok).toBe(true)
+  })
+})

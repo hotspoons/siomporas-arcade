@@ -32,6 +32,7 @@ import { addStatic, addTree, Terrain } from '@apex/engine/physics/terrain'
 import { Vehicle } from '@apex/engine/physics/vehicle'
 import { PhysicsWorld } from '@apex/engine/physics/world'
 import type { Site } from './scene'
+import { toDriveProfile, toVehicleSpec, type VehicleDoc } from './vehicles'
 import { catalogue, detachInstance, detachedOffset, type PropRecord } from './worldbodies'
 import * as T from './tuning'
 
@@ -68,7 +69,21 @@ export interface CorridorPhysics {
    * PLAN-PHYSICS; this is the half that can be driven headlessly and measured, which is the half
    * worth having first.
    */
-  spawnCar(at: { x: number; z: number; yaw?: number }, profileId?: string): Vehicle
+  /**
+   * Put a car on the ground.
+   *
+   * `doc` is the vehicle document off the ASSET (`AssetItem.vehicle`, schema in `vehicles.ts`) — the
+   * mass, wheelbase, track, CG height, gearing and brakes that are facts about that car. `profileId`
+   * is the LEVEL's choice of game. They layer, and the order is the point:
+   *
+   *   the profile decides how the game feels        `yawAssist`, grip, the assists
+   *   the document decides what the car is          power, gearing, top speed, brakes, mass, CG
+   *
+   * So the same hatchback is a hatchback in `sim` and in `taxi`, and swapping the level's profile
+   * does not quietly give it somebody else's engine. Without a `doc` it is the engine's default
+   * chassis, which is what every level built before today gets.
+   */
+  spawnCar(at: { x: number; z: number; yaw?: number }, profileId?: string, doc?: VehicleDoc): Vehicle
   /**
    * The breakables register, for whatever the game wants to knock down.
    *
@@ -335,14 +350,28 @@ export async function buildPhysics(site: Site, opts: { enabled?: boolean } = {})
     phys,
     terrain,
 
-    spawnCar(at, profileId) {
+    spawnCar(at, profileId, doc) {
       // `?profile=stunts` beats the knob, like `?phys=` and `?car=` — and this is the one that
       // matters most, because driving the Stunts PROFILE against the kinematic model it was ported
       // from is the only real test of the port, and it should not need a panel to set up.
       const fromUrl = new URLSearchParams(location.search).get('profile')
       const id = profileId ?? (fromUrl && PROFILES[fromUrl] ? fromUrl : T.physProfileId())
-      const p: DriveProfile = PROFILES[id] ? profile(id) : profile('street')
-      const v = new Vehicle(phys, {}, p)
+      /*
+       * THE DOCUMENT'S OWN NUMBERS, ON THE LEVEL'S CHOICE OF PROFILE.
+       *
+       * `toDriveProfile` reads the base named IN THE DOCUMENT and then lays the car's real
+       * drivetrain over it — power per kilo from the gearing, top speed from redline in top gear,
+       * brake force from the brake torque. Swapping the base to the LEVEL's profile before calling
+       * it keeps that layering: the level decides the game, the car keeps its engine.
+       *
+       * Doing it the other way round — taking the level's profile whole — would mean putting a
+       * hatchback in `taxi` gave it the taxi's power and gearbox, which is not what anybody means
+       * by choosing a handling model.
+       */
+      const p: DriveProfile = doc
+        ? toDriveProfile({ ...doc, profile: { ...doc.profile, base: PROFILES[id] ? id : doc.profile.base } })
+        : (PROFILES[id] ? profile(id) : profile('street'))
+      const v = new Vehicle(phys, doc ? toVehicleSpec(doc, p) : {}, p)
       /*
        * WHAT THE TYRES ARE STANDING ON, from the site's own distance field.
        *

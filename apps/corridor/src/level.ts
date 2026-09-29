@@ -39,6 +39,19 @@ export interface Level {
   splats?: { run?: string; id?: string; at?: number[] }[]
   placements?: LevelPlacement[]
   simulations?: { kind: string; [k: string]: unknown }[]
+  /**
+   * THE CAR YOU DRIVE, when the level names one.
+   *
+   * `vehicle` is a catalog id and `profile` is one of the engine's five handling models. The
+   * HANDLING NUMBERS ARE NOT HERE, deliberately: mass, wheelbase, gearing and brake bias live on
+   * the asset (`AssetItem.vehicle`, schema in `src/vehicles.ts`) because they are facts about the
+   * car, and a level that copied them would go stale the moment somebody tuned it. Only `profile`
+   * belongs to the level — the same car is a different game in `sim` and in `taxi`.
+   *
+   * Absent is valid and means the engine's default chassis, which is what every level written
+   * before 2026-09-29 gets.
+   */
+  player?: { vehicle: string; profile?: string } | null
   mode?: 'drive' | 'fly' | 'walk'
   scenario?: unknown
 }

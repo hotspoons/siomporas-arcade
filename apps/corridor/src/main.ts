@@ -5,6 +5,8 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { buildSite, describe, type Site } from './scene'
 import { buildPhysics, type CorridorPhysics } from './physics'
 import { RapierCar } from './rapiercar'
+import { assetsvc } from './assetsvc'
+import type { VehicleDoc } from './vehicles'
 import { Car, type CarInput, type DrivableCar } from './car'
 import { EngineSound, spawnPlayerEngine } from './enginesound'
 import { ActorWorld } from './actorworld'
@@ -760,6 +762,23 @@ let presets: Presets | null = null
 async function openLevel(id: string) {
   const lvl = await loadLevel(id)
   if (!lvl) return toast(`no level "${id}"`, 'warn', 4000)
+  /*
+   * THE CAR THE LEVEL NAMES. Fetched here, before anything can press Tab.
+   *
+   * Every way this can fail is ordinary — no `player`, no asset service, an asset that has no
+   * dynamics document yet — and every one of them means "the default chassis" rather than "no car".
+   * Refusing to drive because a catalog entry is missing would be the worst of the options.
+   */
+  playerVehicle = null
+  if (lvl.player?.vehicle) {
+    try {
+      const item = await assetsvc.get(lvl.player.vehicle)
+      playerVehicle = (item?.vehicle as VehicleDoc | undefined) ?? null
+      if (!playerVehicle) toast(`${lvl.player.vehicle} has no dynamics saved — driving the default chassis`, 'warn', 5000)
+    } catch {
+      toast(`could not read ${lvl.player.vehicle} — driving the default chassis`, 'warn', 5000)
+    }
+  }
   const report = await applyLevel(lvl, {
     world: site?.manifest.slug ?? '',
     setTimeLocal: (date, time) => {
@@ -808,6 +827,15 @@ async function openLevel(id: string) {
 
 /** the level in force, for the probe surface and for whatever runs simulations later */
 let level: Awaited<ReturnType<typeof loadLevel>> = null
+/**
+ * The dynamics of the car the open level names, fetched when the level opens.
+ *
+ * Held here rather than fetched in `setDrive` because `setDrive` is synchronous and a car that
+ * appears one network round-trip after you press Tab is a car you have already tried to drive. A
+ * level with no `player`, a level whose asset has no dynamics, and no asset service at all are all
+ * the same state as far as this is concerned: null, and the engine's default chassis.
+ */
+let playerVehicle: VehicleDoc | null = null
 
 // ---------------------------------------------------------------------------------------------
 // layers
@@ -970,8 +998,13 @@ function setDrive(on: boolean) {
         // exists half a kilometre away for one frame is a heightfield tile built somewhere nobody
         // is ever going to drive.
         const at = site.spineAt(site.manifest.spine.photo_s)
-        drive.car = new RapierCar(physics.spawnCar({ x: at.pos.x, z: at.pos.z, yaw: Math.atan2(at.dir.z, at.dir.x) }), surface)
-        status(`driving: rapier, ${T.physProfileId()}`)
+        // the level's choice of game, the asset's own engine — see `spawnCar`
+        const wantProfile = level?.player?.profile
+        drive.car = new RapierCar(
+          physics.spawnCar({ x: at.pos.x, z: at.pos.z, yaw: Math.atan2(at.dir.z, at.dir.x) }, wantProfile, playerVehicle ?? undefined),
+          surface,
+        )
+        status(`driving: rapier, ${wantProfile ?? T.physProfileId()}${playerVehicle ? `, ${level?.player?.vehicle}` : ''}`)
       } else {
         drive.car = new Car(surface)
       }

@@ -556,10 +556,55 @@ export class Car {
     // up vector against the ground normal.
     this.mesh.rotateZ(Math.atan(this.pitch))
     this.mesh.rotateX(-Math.atan(this.roll))
-    if (this.steeringWheel) this.steeringWheel.rotation.z = this.steerVisual * 2.6
+    this.poseParts(this.steerVisual, this.wheelSpin)
+  }
+
+  /**
+   * Pose the moving PARTS — the front wheels' steer, every wheel's spin, and the steering wheel —
+   * without touching where the body is or which way it faces.
+   *
+   * Split out of `updateMesh` so a car driven by something other than this class can borrow the
+   * whole model: `rapiercar.ts` puts a Rapier rigid body's position and quaternion on `mesh`
+   * directly — a real quaternion says things the yaw/pitch/roll Euler above cannot, like being on
+   * your roof — and then calls this for the parts that still have to turn.
+   *
+   * Deliberately NOT a move of the two `rotate` lines above. `probes/corridor-carpose.mjs` reads
+   * them out of this file by name and evaluates them against a ground normal; moving them to
+   * another module would break that probe silently, and they are the thing it exists to check.
+   */
+  poseParts(steer: number, spin: number) {
+    if (this.steeringWheel) this.steeringWheel.rotation.z = steer * 2.6
     for (const [i, w] of this.wheels.entries()) {
-      w.rotation.set(0, i < 2 ? -this.steerVisual : 0, 0)
-      w.rotateZ(-this.wheelSpin)
+      w.rotation.set(0, i < 2 ? -steer : 0, 0)
+      w.rotateZ(-spin)
     }
   }
+}
+
+/**
+ * What the viewer needs from whatever is driving.
+ *
+ * `Car` above is one implementation — the hand-written kinematic model this app has always had.
+ * `RapierCar` in `rapiercar.ts` is the other, and the whole point of the interface is that the
+ * chase camera, the cockpit, the HUD, the minimap and the engine sound cannot tell which is
+ * running. Both stay until the Stunts profile has been driven back to back with the model it was
+ * ported from, because that comparison is the only real test of the port.
+ */
+export interface DrivableCar {
+  readonly pos: THREE.Vector3
+  readonly forward: THREE.Vector3
+  readonly right: THREE.Vector3
+  yaw: number
+  speed: number
+  /** m/s across the car, + right */
+  readonly slide: number
+  onGrass: boolean
+  event: CarEvent
+  readonly mesh: THREE.Group
+  place(x: number, z: number, yaw: number): void
+  recover(back: number): void
+  tick(dt: number, input: CarInput): void
+  setLights(on: number): void
+  setCockpit(on: boolean): void
+  lamps(): { each: { pos: THREE.Vector3; dir: THREE.Vector3 }[]; on: number }
 }

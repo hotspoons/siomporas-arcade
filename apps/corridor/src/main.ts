@@ -3,7 +3,9 @@ import { registerBridgeContext, startDevBridge } from 'virtual:dev-bridge'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { buildSite, describe, type Site } from './scene'
-import { Car, type CarInput } from './car'
+import { buildPhysics, type CorridorPhysics } from './physics'
+import { RapierCar } from './rapiercar'
+import { Car, type CarInput, type DrivableCar } from './car'
 import { EngineSound, spawnPlayerEngine } from './enginesound'
 import { ActorWorld } from './actorworld'
 import { Transform } from './actors'
@@ -83,6 +85,11 @@ const skyDome = new Sky()
 scene.add(skyDome.mesh)
 
 let site: Site | null = null
+/**
+ * The physics world, when `PHYS_ENABLED` is on — null otherwise, and null is the honest answer
+ * rather than a live-looking object that simulates nothing (see physics.ts).
+ */
+let physics: CorridorPhysics | null = null
 let minimap: MiniMap | null = null
 /**
  * The real sky, once loaded: 9,096 catalogue stars as one Points object turned by one matrix.
@@ -243,7 +250,7 @@ ui.describe = (s) => describe(s as Structure)
 installShellKeys(() => ui.drawer)
 let dragging = false, lastX = 0, lastY = 0, downAt = 0
 // drive mode: a real car (stuntin dynamics) on the corridor strip, chase camera behind it
-const drive = { on: false, cockpit: false, yaw: 0, pitch: 0, car: null as Car | null, input: { throttle: 0, brake: 0, steer: 0, handbrake: false } as CarInput, steerKey: 0 }
+const drive = { on: false, cockpit: false, yaw: 0, pitch: 0, car: null as DrivableCar | null, input: { throttle: 0, brake: 0, steer: 0, handbrake: false } as CarInput, steerKey: 0 }
 
 /*
  * THE ENGINE YOU CAN HEAR.
@@ -372,7 +379,19 @@ async function loadSite(slug: string) {
     })
     site = null
   }
-  if (drive.car) { scene.remove(drive.car.mesh); drive.car = null }
+  // THE CAR GOES BEFORE THE WORLD IT IS IN. A `RapierCar` holds rigid bodies that belong to the
+  // physics world, so freeing the world first and the car second hands wasm-freed handles to
+  // `vehicle.free()` — the order here is the whole of what stops that.
+  if (drive.car) {
+    scene.remove(drive.car.mesh)
+    ;(drive.car as { free?: () => void }).free?.()
+    drive.car = null
+  }
+  // The physics world belongs to the SITE. A new site is a new world, not one carrying the old
+  // world's heightfield tiles at the old site's origin — which would be ground in the right place
+  // and the wrong bake.
+  physics?.free()
+  physics = null
   minimap?.dispose()
   minimap = null
   status(`loading ${slug}…`)
@@ -404,6 +423,18 @@ async function loadSite(slug: string) {
   retro.clear() // the previous site's paint and signs are gone
   ui.setSearch(null) // the old site's index is meaningless now
   site = await buildSite(manifest, status, LITE, renderer, scene.fog as THREE.FogExp2, season, style)
+  // Built AFTER the site and awaited, because it is bound to `site.groundAt` and because the first
+  // thing it does is a 4.3 MB dynamic import. A failure here must not take the world with it: a
+  // viewer with no physics is the viewer as it has always been, and a viewer that failed to load
+  // is nothing at all.
+  // `?phys=1` / `?phys=0` beats the knob, because the knob is read once and this is the only hook
+  // that runs before that happens. Same shape as the `relief` block above.
+  const physParam = new URLSearchParams(location.search).get('phys')
+  physics = await buildPhysics(site, { enabled: physParam != null ? Number(physParam) > 0 : undefined }).catch((e) => {
+    console.warn('physics: not started —', e)
+    return null
+  })
+  if (physics) status(`physics: ${physics.phys.hz} Hz`)
   applySky(season)
   scene.add(site.group)
   // for probes and the console. `tune` is the same knob table the F6 panel drives, so a probe can
@@ -421,6 +452,16 @@ async function loadSite(slug: string) {
     .catch((e) => console.warn('address index:', e))
   ;(window as unknown as { corridor: unknown }).corridor = {
     site,
+    /**
+     * The physics world, or null when `PHYS_ENABLED` is off.
+     *
+     * A getter, not a value: this object is built once per site load and `physics` is assigned
+     * after `buildSite` returns, so a plain property here would be permanently null and every
+     * probe would conclude the physics never started.
+     */
+    get physics() {
+      return physics
+    },
     scene,
     camera,
     // probes that need to read PIXELS must render and call gl.readPixels in the same turn: the
@@ -911,7 +952,29 @@ function setDrive(on: boolean) {
   if (fly) fly.enabled = !on
   if (on && site) {
     if (!drive.car) {
-      drive.car = new Car({ heightAt: site.groundAt, edgeDistance: site.edgeDistance, treesNear: site.treesNear })
+      const surface = { heightAt: site.groundAt, edgeDistance: site.edgeDistance, treesNear: site.treesNear }
+      /*
+       * WHICH MODEL IS DRIVING.
+       *
+       * `PHYS_CAR` picks, and it only has a choice when there is a physics world at all (`?phys=1`).
+       * Both models stay: the Stunts profile is a port of the kinematic one and the only real test
+       * of the port is driving them back to back. Everything downstream talks to `DrivableCar` and
+       * cannot tell which it has.
+       */
+      // `?car=rapier` beats the knob, for the same reason `?phys=1` does: this is read once, when
+      // drive mode is first entered, and `tune.set` persists nothing across a reload.
+      const carParam = new URLSearchParams(location.search).get('car')
+      const wantRapier = carParam ? /^(rapier|physics|1)$/i.test(carParam) : T.PHYS_CAR > 0
+      if (physics && wantRapier) {
+        // Spawned at the photo station, which is where `place` below puts it anyway — a car that
+        // exists half a kilometre away for one frame is a heightfield tile built somewhere nobody
+        // is ever going to drive.
+        const at = site.spineAt(site.manifest.spine.photo_s)
+        drive.car = new RapierCar(physics.spawnCar({ x: at.pos.x, z: at.pos.z, yaw: Math.atan2(at.dir.z, at.dir.x) }), surface)
+        status(`driving: rapier, ${T.physProfileId()}`)
+      } else {
+        drive.car = new Car(surface)
+      }
       scene.add(drive.car.mesh)
       // spawn in the right-hand lane at the photo, facing along the road
       const p = site.spineAt(site.manifest.spine.photo_s)
@@ -1658,6 +1721,18 @@ let lastSkyReal = -1e15
 function frame() {
   const real = clock.getDelta()
   const dt = Math.min(0.1, real)
+  /*
+   * The physics world, once a frame.
+   *
+   * The eye is the CAR when there is one, not the camera: the tiles have to be solid where the
+   * wheels are, and the chase camera sits eight metres behind and four above, which at the edge of
+   * the radius is the difference between ground and a hole. One frame of lag on tile placement is
+   * nothing at 180 m; one tile of lag under the car is the car falling through the world.
+   *
+   * `real`, not `dt`: the accumulator inside the physics world does its own capping, and handing it
+   * an already-capped delta would make the simulation quietly run slow through every hitch.
+   */
+  if (physics) physics.update(drive.car?.pos ?? camera.position, real)
   // the world's clock, and the light that follows from it. applySky is cheap (no geometry), so it
   // runs whenever the sun has moved enough to see — a degree of elevation is about four minutes of
   // a real day, and far less than that at a high TIME_RATE.
@@ -1874,6 +1949,17 @@ registerBridgeContext({
   // the car itself, so a probe can check what the HUD says against what the car is doing
   get car() {
     return drive.car
+  },
+  /**
+   * The physics world, or null when it is switched off.
+   *
+   * `groundUnder` is the interesting one: it ray-casts the heightfield the wheels will stand on, so
+   * a probe can hold it against `site.groundAt` — the surface everything else is built from — and
+   * find out whether the two agree. They must, to a centimetre, or the car floats and sinks in ways
+   * nothing else explains. probes/corridor-physground.mjs is that comparison.
+   */
+  get physics() {
+    return physics
   },
   /**
    * lon/lat to the site's PLAN coordinates (east, north metres about the frame anchor) — the

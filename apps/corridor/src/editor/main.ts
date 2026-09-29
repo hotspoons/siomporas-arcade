@@ -77,12 +77,15 @@ const grow = new GrowMode(place, (structural) => refresh(structural))
 // a `mode === 'structures'` branch ahead of the areas/place pair, never mixed into them.
 const structs = new StructureMode((structural) => refresh(structural))
 import type { Mode } from '../ui/editor'
+import { actorExtension } from '../ui/actors'
+import { weaponExtension } from '../ui/weapons'
+import { vehicleExtension } from '../ui/vehicles'
 let mode: Mode = (location.hash.split(':')[1] as Mode) || 'areas'
 
 // The interface. Every callback here is a function declared later in this file, which is fine —
 // they are declarations, so they are hoisted, and none of them runs before the first event.
 restoreTheme()
-const assets = new AssetCatalog()
+const assets = new AssetCatalog({ extensions: [vehicleExtension(), actorExtension(), weaponExtension()] })
 const ui = new EditorUI({
   onAssets: () => void assets.open(),
   onSite: (slug) => void loadSite(slug),

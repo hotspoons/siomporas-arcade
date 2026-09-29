@@ -5,8 +5,8 @@
 // hostile person with ONE query that mentions none of them.
 import { describe, expect, it } from 'vitest'
 import { addComponent, addEntity, hasComponent, query, removeComponent, getRelationTargets, removeEntity } from 'bitecs'
-import { Animal, AttachedTo, Autonomous, DrivenBy, Health, Hostile, Human, MemberOf, Player, SETS, Transform, Vehicle, Velocity, Visual, Walking } from '../src/actors'
-import { ActorWorld, STEP_S, face, integrate, mortality, spawnPedestrian, spawnVehicle, walk } from '../src/actorworld'
+import { Animal, Armed, AttachedTo, Autonomous, DrivenBy, Health, Hostile, Human, MemberOf, PHYS_MODE, Physical, Player, SETS, Transform, Vehicle, Velocity, Visual, Walking } from '../src/actors'
+import { ActorWorld, STEP_S, arm, cooldowns, face, integrate, mortality, setPhysical, spawnActor, spawnPedestrian, spawnVehicle, walk } from '../src/actorworld'
 
 describe('an enemy can take any form', () => {
   it('one query finds hostiles whatever they are attached to', () => {
@@ -187,5 +187,78 @@ describe('the world steps', () => {
     }
     // generous, because a CI box is not a GPU box — the measured figure is ~0.03 ms
     expect(best).toBeLessThan(8)
+  })
+})
+
+/*
+ * THE PHYSICS SEAM, and the spawn path from a document.
+ *
+ * `Physical.mode` is the field that decides whether a busy road is affordable — traffic is
+ * KINEMATIC until something hits it and DYNAMIC afterwards, same entity throughout. These assert
+ * the transition works on the entity rather than by replacing it, because replacing it is exactly
+ * what `actors.ts` was designed to avoid.
+ */
+describe('Physical, Armed and spawning from a document', () => {
+  it('moves an entity between physics modes without replacing it', () => {
+    const aw = new ActorWorld()
+    const e = spawnVehicle(aw, { x: 0, y: 0 })
+    setPhysical(aw, e, 'kinematic', { mass: 1500, handle: 17 })
+    expect(Physical.mode[e]).toBe(PHYS_MODE.kinematic)
+    expect(Physical.mass[e]).toBe(1500)
+    expect(Physical.handle[e]).toBe(17)
+
+    // wrecked: the same entity becomes dynamic, keeping its handle and its mass
+    setPhysical(aw, e, 'dynamic')
+    expect(Physical.mode[e]).toBe(PHYS_MODE.dynamic)
+    expect(Physical.handle[e]).toBe(17)
+    expect(Physical.mass[e]).toBe(1500)
+    expect(aw.alive(e)).toBe(true)
+    expect(query(aw.world, SETS.bodied)).toContain(e)
+  })
+
+  it('holds a Rapier handle without truncating it', () => {
+    // Physical.handle is a Uint32Array because that is what a handle is. A Uint16 would wrap at
+    // 65,535 and hand the physics world somebody else's body — silently.
+    const aw = new ActorWorld()
+    const e = spawnVehicle(aw, { x: 0, y: 0 })
+    setPhysical(aw, e, 'dynamic', { handle: 4_000_000_000 })
+    expect(Physical.handle[e]).toBe(4_000_000_000)
+  })
+
+  it('spawns an actor with the health its document asked for', () => {
+    const aw = new ActorWorld()
+    const e = spawnActor(aw, { x: 1, y: 2 }, { speed: 1.4, health: 250, mass: 78 })
+    // Health is a Uint16Array, so it is exact. Walking.speed and Physical.mass are Float32Arrays,
+    // so 1.4 written and read back is 1.399999976 — the brief's own warning, and it applies to
+    // every f32 field here, not just Transform.
+    expect(Health.hp[e]).toBe(250)
+    expect(Health.max[e]).toBe(250)
+    expect(Walking.speed[e]).toBeCloseTo(1.4, 6)
+    expect(Physical.mass[e]).toBeCloseTo(78, 4)
+    expect(Physical.mode[e]).toBe(PHYS_MODE.none) // a body is given later, when it is near enough
+  })
+
+  it('counts a weapon down and refuses to let it fire faster than its rate', () => {
+    const aw = new ActorWorld()
+    aw.add('cooldowns', cooldowns)
+    const e = spawnActor(aw, { x: 0, y: 0 }, { speed: 1.4, health: 100 })
+    arm(aw, e, 3, 15)
+    expect(Armed.weapon[e]).toBe(3)
+    expect(Armed.ammo[e]).toBe(15)
+    expect(query(aw.world, SETS.armed)).toContain(e)
+
+    // The exact number of steps in 0.1 s is NOT five: the accumulator subtracts 0.02 in floating
+    // point, so after four it holds 0.019999999 and stops. Asserting "five steps" would be
+    // asserting a float coincidence, so this asserts what the cooldown is actually for — it goes
+    // down, it does not overshoot, and it lands exactly on zero rather than going negative.
+    Armed.cooldown[e] = 0.25
+    aw.tick(0.1)
+    expect(Armed.cooldown[e]).toBeLessThan(0.25)
+    expect(Armed.cooldown[e]).toBeGreaterThan(0.1)
+    // And ONE tick of 0.4 s does not deliver 0.4 s: MAX_STEPS caps a tick at five steps and drops
+    // the rest, deliberately, so a stall cannot become a burst. Ticking repeatedly is what a frame
+    // loop does and what a test has to do too.
+    for (let i = 0; i < 10; i++) aw.tick(0.05)
+    expect(Armed.cooldown[e]).toBe(0)
   })
 })

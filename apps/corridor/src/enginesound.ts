@@ -27,7 +27,6 @@ import { EngineSim, Drivetrain, DEFAULT_DRIVETRAIN, ENGINES, SpatialVoice,
   from '@apex/enginesim'
 import { addComponent, addEntity, query, type World } from 'bitecs'
 import { Engine, Transform, SETS } from './actors'
-import type { Car } from './car'
 import * as T from './tuning'
 
 export type EngineSoundState =
@@ -170,7 +169,7 @@ export class EngineSound {
    * no crankshaft, and it writes only the ECS. Anything else that wants to drive an engine — a
    * replay, the traffic model, a test — writes the same two fields and gets the same sound.
    */
-  syncFromCar(entity: number, car: Car, throttle: number, dt: number): void {
+  syncFromCar(entity: number, car: { speed: number }, throttle: number, dt: number): void {
     this.drivetrain.update(car.speed, throttle, dt)
     Engine.rpm[entity] = this.drivetrain.rpm
     Engine.pedal[entity] = this.drivetrain.pedal

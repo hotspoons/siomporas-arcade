@@ -1,0 +1,535 @@
+// What a vehicle IS, as a document — and the arithmetic that turns it into something the engine can
+// drive.
+//
+// docs/corridor/PLAN-VEHICLES-ACTORS.md, from Rich: "Vehicles should be a combination of a vehicle
+// model, a rig (if we defined it), and vehicle physics dynamics that will impact each game type
+// differently, but roll stiffness, grip front/rear/side to side, other things like this - plus we
+// want to be able to assign an engine simulator setup and local config for the audio, as well as
+// set things like engine power, gearing, braking."
+//
+// THREE THINGS ARE SEPARATE AND STAY SEPARATE, and the whole file follows from it:
+//
+//   the MODEL      a mesh in the catalog. Two cars may share one.
+//   the RIG        which bone is the near-side front wheel. A fact about the model (`AssetItem.rig`).
+//   the VEHICLE    mass, grip, gearing, what it sounds like. A fact about the CAR.
+//
+// So a vehicle document lives beside the asset, the way `rig` already does, and two assets can share
+// a model and handle nothing alike.
+//
+// NO DOM, NO THREE, NO RAPIER. This file is types, defaults, validation and arithmetic, so the
+// mapping from "205 kW through a 3.7 final drive" to "this much force at the contact patch" can be
+// checked in a test rather than discovered by driving. `src/ui/vehicles.ts` is the form over it.
+//
+// THE PROFILE IS A REFERENCE, NEVER A COPY. `{ base: 'street', overrides: { gripRear: 1.08 } }` is
+// how a car says "street, but grippier" and keeps tracking `street` when somebody improves it. A
+// flattened copy of all forty numbers is forty numbers that silently stop tracking, and nothing ever
+// says so.
+import { PROFILES, profile, type DriveProfile } from '@apex/engine/physics/profiles'
+import type { VehicleSpec } from '@apex/engine/physics/vehicle'
+
+/* ---- the document ---------------------------------------------------------------------------- */
+
+/** The chassis, in metres and kilograms. What the car IS, before any game gets an opinion. */
+export interface VehicleChassis {
+  /** kg, dry */
+  mass: number
+  /** m, front axle to rear axle */
+  wheelbase: number
+  /** m, left wheel to right wheel */
+  track: number
+  /**
+   * m, the centre of gravity ABOVE THE GROUND.
+   *
+   * The number people get wrong, and the one that decides whether a car rolls over. It is measured
+   * from the road, not from the model's origin, because that is the only definition somebody
+   * reading a spec sheet will recognise — `toVehicleSpec` does the conversion into the engine's
+   * body-relative frame, and `cgHeightOf` measures it back out of a settled car so the two can be
+   * held against each other.
+   */
+  cgHeight: number
+  /** m */
+  wheelRadius: number
+  /**
+   * Which wheels are driven.
+   *
+   * ON THE CHASSIS, NOT ON THE PROFILE, although the engine's `DriveProfile` also carries one. A
+   * Mustang is rear-wheel drive in an arcade racer and in a simulator alike — it is a fact about the
+   * car, not about the game — so the chassis wins and `toDriveProfile` overrides the profile's. The
+   * engine keeping its own is right for the five presets, which describe cars nobody has modelled.
+   */
+  drive: 'rwd' | 'fwd' | 'awd'
+  /** m, overall length and width of the body. Defaulted from the class when the model has not said */
+  length?: number
+  width?: number
+  height?: number
+  /**
+   * m, the gap between the road and the bottom of the body at rest. Default 0.16.
+   *
+   * It is here because it is what POSITIONS the body, and positioning it any other way produces a
+   * car whose sills are at knee height — see `originHeight`.
+   */
+  rideHeight?: number
+}
+
+/** A handling profile by reference, plus the handful of numbers this car differs by. */
+export interface VehicleHandling {
+  /** a `DriveProfile` id: stunts | taxi | street | rush | sim */
+  base: string
+  /** partial `DriveProfile`, by key. Validated against the real keys, so a typo is an error */
+  overrides?: Record<string, number>
+  /**
+   * Blend toward a second profile, 0…1. `blendProfiles` exists so somebody can sit a car between
+   * Rush and the simulator rather than being made to pick a side.
+   */
+  blendWith?: string
+  blend?: number
+}
+
+/** The drivetrain, as a spec sheet gives it. */
+export interface VehicleEngine {
+  power_kw: number
+  /**
+   * N·m at the crank. Optional: when it is missing it is estimated from power and redline, which is
+   * a HEURISTIC and says so — see `peakTorque`.
+   */
+  torque_nm?: number
+  redline_rpm: number
+  idle_rpm: number
+  /** gear ratios, first to top */
+  gears: number[]
+  final_drive: number
+  /** N·m of braking torque at the wheels, both axles together */
+  brake_torque_nm: number
+  /** 0…1, the share of it on the front axle */
+  brake_bias: number
+}
+
+/** enginesim, per vehicle. */
+export interface VehicleAudio {
+  /** which enginesim configuration */
+  setup: string
+  gain: number
+  lowpass_hz: number
+  /** how much of it is heard from inside the cabin, 0…1 */
+  cabin_mix: number
+}
+
+export interface VehicleWheels {
+  /**
+   * Take the wheels from `AssetItem.rig.roles.wheel`, in FL, FR, RL, RR order.
+   *
+   * **Defaults to FALSE, because nothing in the library has a skeleton.** Measured by the editor
+   * lane, 2026-09-29: 125 items, 121 with a mesh, `rig` set on zero of them — and that is the
+   * FILES, not missing metadata. TRELLIS reconstructs a surface and nothing in the chain rigs it.
+   *
+   * With it off the engine drives four proxy wheels off `wheelbase` and `track`, which needs no
+   * bones and is what a traffic car should do anyway. Turning it on for a car that has been rigged
+   * is the opt-in, and then the validator's "binds N wheel bones" warning means something — which
+   * is why the check stays and only the default moved.
+   */
+  from_rig: boolean
+  steer_max_deg: number
+}
+
+export interface VehicleDoc {
+  spec: VehicleChassis
+  profile: VehicleHandling
+  engine: VehicleEngine
+  audio: VehicleAudio
+  wheels: VehicleWheels
+}
+
+/* ---- defaults, per class --------------------------------------------------------------------- */
+
+/**
+ * Sensible numbers per vehicle class.
+ *
+ * NOT because guessing is good, but because a form full of zeroes is a form nobody fills in, and
+ * `mass` and `cgHeight` left at zero fail invisibly and late. The UI's job is to say these are
+ * defaults; this table's job is to make them defensible ones.
+ *
+ * The `hero-car` row is the Kestrel-ish body the corridor already draws (4.4 × 1.9 m) with the
+ * mass and CG of an ordinary saloon.
+ */
+export const VEHICLE_TEMPLATES: Record<string, VehicleDoc> = {
+  'hero-car': doc({ mass: 1420, wheelbase: 2.65, track: 1.55, cgHeight: 0.52, wheelRadius: 0.32, drive: 'rwd', length: 4.4, width: 1.9, height: 1.35 }, 'street', { power_kw: 205, redline_rpm: 7200, idle_rpm: 850, gears: [3.42, 2.05, 1.42, 1.0, 0.82, 0.68], final_drive: 3.7, brake_torque_nm: 2400, brake_bias: 0.62 }, 'inline-6-na'),
+  traffic: doc({ mass: 1500, wheelbase: 2.7, track: 1.56, cgHeight: 0.58, wheelRadius: 0.33, drive: 'fwd', length: 4.5, width: 1.82, height: 1.48 }, 'street', { power_kw: 110, redline_rpm: 6200, idle_rpm: 750, gears: [3.55, 1.95, 1.3, 0.95, 0.74], final_drive: 4.05, brake_torque_nm: 1900, brake_bias: 0.65 }, 'inline-4-na'),
+  van: doc({ mass: 2300, rideHeight: 0.24, wheelbase: 3.2, track: 1.7, cgHeight: 0.85, wheelRadius: 0.36, drive: 'rwd', length: 5.5, width: 2.0, height: 2.4 }, 'street', { power_kw: 96, redline_rpm: 4600, idle_rpm: 700, gears: [4.2, 2.3, 1.45, 1.0, 0.8, 0.66], final_drive: 3.9, brake_torque_nm: 2600, brake_bias: 0.6 }, 'diesel-4'),
+  truck: doc({ mass: 8000, rideHeight: 0.32, wheelbase: 4.8, track: 2.0, cgHeight: 1.25, wheelRadius: 0.52, drive: 'rwd', length: 9.0, width: 2.5, height: 3.4 }, 'street', { power_kw: 180, redline_rpm: 2600, idle_rpm: 600, gears: [7.2, 4.2, 2.6, 1.7, 1.0, 0.78], final_drive: 4.3, brake_torque_nm: 9000, brake_bias: 0.55 }, 'diesel-6'),
+  bus: doc({ mass: 12000, rideHeight: 0.3, wheelbase: 5.9, track: 2.1, cgHeight: 1.4, wheelRadius: 0.55, drive: 'rwd', length: 12.0, width: 2.55, height: 3.2 }, 'street', { power_kw: 210, redline_rpm: 2400, idle_rpm: 600, gears: [6.7, 3.8, 2.3, 1.5, 1.0], final_drive: 4.6, brake_torque_nm: 13000, brake_bias: 0.5 }, 'diesel-6'),
+}
+
+function doc(spec: VehicleChassis, base: string, engine: VehicleEngine, setup: string): VehicleDoc {
+  return {
+    spec,
+    profile: { base, overrides: {} },
+    engine,
+    audio: { setup, gain: 0.8, lowpass_hz: 9000, cabin_mix: 0.35 },
+    wheels: { from_rig: false, steer_max_deg: 34 },
+  }
+}
+
+/** The starting points on offer, for a "begin from" picker. Keys of `VEHICLE_TEMPLATES`. */
+export const VEHICLE_TEMPLATE_IDS = Object.keys(VEHICLE_TEMPLATES)
+
+/**
+ * The CATALOG CLASSES that get a vehicle document at all. Everything else is scenery.
+ *
+ * THESE ARE THE ASSET LIBRARY'S OWN WORDS, not ours — `KINDS` in `src/ui/assets.ts`. That is the
+ * whole point of the list and it is worth saying because getting it wrong fails quietly: a class
+ * vocabulary invented here would simply match nothing, and the Vehicles tab would sit there
+ * reporting an empty fleet while the library was full of cars.
+ */
+export const VEHICLE_CLASSES = ['hero-car', 'traffic', 'emergency', 'commercial-vehicle']
+
+/**
+ * Which template a catalog class starts from.
+ *
+ * Separate from the class list because they are different questions: "does this thing have
+ * dynamics" is about the library's vocabulary, and "what numbers should it start at" is about what
+ * the thing physically is. A `commercial-vehicle` may be a van or a lorry, so the mapping is a
+ * STARTING POINT the form says is a default and somebody changes — not a claim.
+ */
+const CLASS_TEMPLATE: Record<string, string> = {
+  'hero-car': 'hero-car',
+  traffic: 'traffic',
+  emergency: 'van',
+  'commercial-vehicle': 'truck',
+}
+
+/** A fresh document for a class or a template id, deep-copied so editing one does not edit the table. */
+export function defaultVehicle(kind: string): VehicleDoc {
+  const id = CLASS_TEMPLATE[kind] ?? kind
+  return structuredClone(VEHICLE_TEMPLATES[id] ?? VEHICLE_TEMPLATES['hero-car'])
+}
+
+/* ---- validation ------------------------------------------------------------------------------- */
+
+export interface VehicleReport {
+  ok: boolean
+  errors: string[]
+  warnings: string[]
+}
+
+/**
+ * Check a document. Reports EVERY problem, not the first.
+ *
+ * Same contract as `validateEcs` and the service's level validator, for the same reason: somebody
+ * authoring wants to see everything that is wrong at once, and a car that saves cleanly and then
+ * has no wheels is a worse outcome than a form with four red fields.
+ *
+ * `rigWheels` is how many bones the asset's rig binds to the `wheel` role. Passing it is what turns
+ * "your wheels will not turn" from something discovered while driving into a warning on the form.
+ */
+export function validateVehicle(v: VehicleDoc | null | undefined, opts: { rigWheels?: number; audioSetups?: string[] } = {}): VehicleReport {
+  const errors: string[] = []
+  const warnings: string[] = []
+  if (!v) return { ok: true, errors, warnings }
+
+  const s = v.spec
+  const pos = (n: number, name: string, max: number) => {
+    if (!Number.isFinite(n) || n <= 0) errors.push(`spec.${name} must be a positive number`)
+    else if (n > max) warnings.push(`spec.${name} is ${n}, which is past anything real`)
+  }
+  pos(s?.mass, 'mass', 40000)
+  pos(s?.wheelbase, 'wheelbase', 12)
+  pos(s?.track, 'track', 4)
+  pos(s?.cgHeight, 'cgHeight', 3)
+  pos(s?.wheelRadius, 'wheelRadius', 1.2)
+  if (s && !['rwd', 'fwd', 'awd'].includes(s.drive)) errors.push(`spec.drive is ${JSON.stringify(s?.drive)}; it must be rwd, fwd or awd`)
+  // The rollover check, and the reason `cgHeight` is in metres above the ground rather than
+  // relative to a model origin nobody can picture. Half the track over the CG height is the static
+  // stability factor; under about 1.0 a car tips before it slides, which is a monster truck.
+  if (s?.track > 0 && s?.cgHeight > 0) {
+    const ssf = s.track / 2 / s.cgHeight
+    if (ssf < 1.0) warnings.push(`static stability factor ${ssf.toFixed(2)}: this will roll over before it slides — cgHeight ${s.cgHeight} m is high for a ${s.track} m track`)
+    if (ssf > 2.5) warnings.push(`static stability factor ${ssf.toFixed(2)}: this cannot be made to roll at all`)
+  }
+  if (s?.wheelbase > 0 && s?.length && s.length < s.wheelbase) errors.push(`spec.length ${s.length} m is shorter than the wheelbase ${s.wheelbase} m`)
+
+  // the profile
+  if (!v.profile?.base) errors.push('profile.base is required — name one of ' + Object.keys(PROFILES).join(', '))
+  else if (!PROFILES[v.profile.base]) errors.push(`profile.base ${JSON.stringify(v.profile.base)} is not a drive profile (have ${Object.keys(PROFILES).join(', ')})`)
+  if (v.profile?.blendWith && !PROFILES[v.profile.blendWith]) errors.push(`profile.blendWith ${JSON.stringify(v.profile.blendWith)} is not a drive profile`)
+  // Overrides are checked against the REAL keys, so `rollStiffness` — a plausible name that does not
+  // exist — is an error here rather than a number that is silently ignored for ever.
+  const keys = new Set(Object.keys(PROFILES.street))
+  for (const [k, val] of Object.entries(v.profile?.overrides ?? {})) {
+    if (!keys.has(k)) errors.push(`profile.overrides.${k} is not a DriveProfile key`)
+    else if (typeof (PROFILES.street as unknown as Record<string, unknown>)[k] !== 'number') errors.push(`profile.overrides.${k} is not a number on DriveProfile`)
+    else if (!Number.isFinite(val)) errors.push(`profile.overrides.${k} must be a number`)
+  }
+
+  // the engine
+  const e = v.engine
+  if (!e) errors.push('engine is required')
+  else {
+    if (!Number.isFinite(e.power_kw) || e.power_kw <= 0) errors.push('engine.power_kw must be a positive number')
+    if (!Array.isArray(e.gears) || !e.gears.length) errors.push('engine.gears must have at least one ratio')
+    else {
+      if (e.gears.some((g) => !Number.isFinite(g) || g <= 0)) errors.push('engine.gears must all be positive')
+      for (let i = 1; i < e.gears.length; i++) if (e.gears[i] >= e.gears[i - 1]) warnings.push(`engine.gears[${i}] (${e.gears[i]}) is not lower than the gear before it — the box will not shift up`)
+    }
+    if (!Number.isFinite(e.final_drive) || e.final_drive <= 0) errors.push('engine.final_drive must be a positive number')
+    if (!Number.isFinite(e.redline_rpm) || e.redline_rpm <= 0) errors.push('engine.redline_rpm must be a positive number')
+    else if (e.idle_rpm >= e.redline_rpm) errors.push(`engine.idle_rpm ${e.idle_rpm} is not below the redline ${e.redline_rpm}`)
+    if (!Number.isFinite(e.brake_bias) || e.brake_bias < 0 || e.brake_bias > 1) errors.push('engine.brake_bias must be between 0 and 1')
+  }
+
+  // the wheels
+  if (v.wheels?.from_rig && opts.rigWheels !== undefined && opts.rigWheels < 4) {
+    warnings.push(`the rig binds ${opts.rigWheels} wheel bone${opts.rigWheels === 1 ? '' : 's'}; this car needs four (FL, FR, RL, RR) or its wheels will not turn and nothing else will say so`)
+  }
+  if (!Number.isFinite(v.wheels?.steer_max_deg) || v.wheels.steer_max_deg <= 0) errors.push('wheels.steer_max_deg must be a positive number')
+  else if (v.wheels.steer_max_deg > 60) warnings.push(`wheels.steer_max_deg ${v.wheels.steer_max_deg}° is past what a road car's rack reaches`)
+
+  if (opts.audioSetups && v.audio?.setup && !opts.audioSetups.includes(v.audio.setup)) {
+    warnings.push(`audio.setup ${JSON.stringify(v.audio.setup)} is not an enginesim configuration this build has`)
+  }
+
+  return { ok: errors.length === 0, errors, warnings }
+}
+
+/* ---- the arithmetic: a document becomes something the engine can drive ------------------------ */
+
+/**
+ * Peak crank torque, N·m.
+ *
+ * Exact when the document states it. Otherwise ESTIMATED, and the estimate is stated rather than
+ * hidden: peak torque on a naturally-aspirated engine usually lands near 70–80% of the rev range, so
+ * `T = P / ω` evaluated there. It is within about 10% for most road engines and it is wrong for a
+ * turbo diesel, which is exactly why `torque_nm` is a field somebody can fill in.
+ */
+export function peakTorque(e: VehicleEngine): { nm: number; estimated: boolean } {
+  if (Number.isFinite(e.torque_nm) && (e.torque_nm as number) > 0) return { nm: e.torque_nm as number, estimated: false }
+  const rpm = Math.max(1, e.redline_rpm * 0.75)
+  return { nm: (e.power_kw * 1000) / ((rpm * 2 * Math.PI) / 60), estimated: true }
+}
+
+/**
+ * The force the tyres could push with in first gear, N. Exact, given the torque.
+ *
+ * `T × gear × final / r` is the whole of it, and it is the number that decides whether a car pulls
+ * away or bogs down. Note it says nothing about whether the tyres can HOLD that force — the engine's
+ * vehicle spends a friction circle and refuses what is past it, which is where wheelspin comes from.
+ */
+export function tractiveForce(e: VehicleEngine, wheelRadius: number, gear = 0): number {
+  const g = e.gears[Math.min(gear, e.gears.length - 1)] ?? 1
+  return (peakTorque(e).nm * g * e.final_drive) / Math.max(0.05, wheelRadius)
+}
+
+/**
+ * Top speed from the gearing, m/s. Exact.
+ *
+ * Redline in top gear, which is what the gearbox actually permits — so changing the final drive
+ * changes the top speed, instead of the gearing being decoration beside a number somebody typed.
+ * The car may not REACH it: the engine's model tapers drive against speed and drag, so top speed in
+ * play is where those balance, and this is the ceiling the gearbox puts above that.
+ */
+export function gearedTopSpeed(e: VehicleEngine, wheelRadius: number): number {
+  const top = e.gears[e.gears.length - 1] ?? 1
+  const wheelRps = e.redline_rpm / 60 / (top * e.final_drive)
+  return wheelRps * 2 * Math.PI * wheelRadius
+}
+
+/**
+ * How far the suspension gives under the car's own weight at rest, m.
+ *
+ * Rapier's raycast vehicle is Bullet's, and Bullet's suspension force is
+ * `stiffness × compression × chassisMass`. At rest each of four wheels carries `mass × g / 4`, so
+ *
+ *     stiffness × δ × mass = mass × g / 4      →      δ = g / (4 × stiffness)
+ *
+ * and the MASS CANCELS: a bus and a hatchback on the same springs sag the same, which is wrong about
+ * real cars and is what Bullet does. Checked against a built car rather than taken on trust — the
+ * closed form and the settled body agree to about 5 mm (test/vehicles.test.ts).
+ *
+ * This matters because it is the difference between a car sitting where the document said and a car
+ * sitting several centimetres into the road with nothing saying so.
+ */
+export function suspensionSag(p: DriveProfile): number {
+  return 9.81 / (4 * Math.max(1e-3, p.suspensionStiffness))
+}
+
+/**
+ * Where the chassis' origin sits above the road at rest, m.
+ *
+ * THE BODY IS POSITIONED BY ITS RIDE HEIGHT, NOT BY ITS SUSPENSION. That is the whole of this
+ * function and getting it the other way round is a real bug that this code had: pinning the axle
+ * mounts to the bottom of the chassis box (`axleY = -halfHeight`) and letting the spring's rest
+ * length set the body's height puts a 1.35 m car's floor 0.66 m above the road — sills at knee
+ * height — and then drags the centre of gravity out of the shell, where `toVehicleSpec` has to clamp
+ * it. Measured: a hero-car asking for a 0.52 m CG settled at 0.67 m.
+ *
+ * So the body sits at `rideHeight + halfHeight`, which is a fact about how the car LOOKS, and
+ * `axleYOf` then works out where the suspension has to hang to put the wheels on the road.
+ */
+export function originHeight(spec: VehicleChassis, _p: DriveProfile, halfHeight: number): number {
+  return (spec.rideHeight ?? 0.16) + halfHeight
+}
+
+/**
+ * Where the suspension mounts sit, relative to the body origin, m.
+ *
+ * Chosen so that at rest — with the spring already given up its `suspensionSag` — the wheel centres
+ * are exactly `wheelRadius` above the road and the contact patches are on it. Everything else
+ * follows: get this wrong and the car either floats or starts the simulation with its springs
+ * fully compressed, and both look like a physics bug rather than an arithmetic one.
+ */
+export function axleYOf(spec: VehicleChassis, p: DriveProfile, halfHeight: number): number {
+  return spec.wheelRadius + p.suspensionRest - suspensionSag(p) - originHeight(spec, p, halfHeight)
+}
+
+/**
+ * The document, as the engine's `VehicleSpec`.
+ *
+ * The conversions worth knowing about:
+ *
+ *   `mass`       → `massKg`, unchanged.
+ *   `length/width/height` → half-extents. Defaulted from the class when the model has not said, and
+ *                  `height` is the BODY, not the roofline over the wheels.
+ *   `cgHeight`   → `comY`, which is body-RELATIVE. This is the conversion, and it is clamped into
+ *                  the box: a CG outside the shell it belongs to is a car that behaves like a
+ *                  pendulum, and a typo of 5.2 for 0.52 would otherwise do exactly that silently.
+ *   `wheelRadius`, `wheelbase`, `track` pass through.
+ */
+export function toVehicleSpec(v: VehicleDoc, p: DriveProfile = toDriveProfile(v)): VehicleSpec {
+  const s = v.spec
+  const halfLength = (s.length ?? s.wheelbase * 1.6) / 2
+  const halfWidth = (s.width ?? s.track * 1.2) / 2
+  const halfHeight = (s.height ?? 1.4) / 2
+  const origin = originHeight(s, p, halfHeight)
+  // CG above the road, minus where the origin is: the CG in the body's own frame.
+  const comY = Math.max(-halfHeight, Math.min(halfHeight, s.cgHeight - origin))
+  return {
+    massKg: s.mass,
+    halfLength,
+    halfHeight,
+    halfWidth,
+    comX: 0,
+    comY,
+    wheelbase: s.wheelbase,
+    track: s.track,
+    wheelRadius: s.wheelRadius,
+    axleY: axleYOf(s, p, halfHeight),
+  }
+}
+
+/**
+ * The document, as a `DriveProfile`.
+ *
+ * Base, then blend, then this car's own overrides, then the things the chassis and the engine are
+ * entitled to decide — in that order, because an override somebody typed must beat a number derived
+ * from a spec sheet, and both must beat the preset.
+ */
+export function toDriveProfile(v: VehicleDoc): DriveProfile {
+  let p = profile(v.profile.base)
+  if (v.profile.blendWith && PROFILES[v.profile.blendWith] && Number.isFinite(v.profile.blend)) {
+    // imported lazily at the top; kept as a separate step so the order above reads as written
+    p = blend(p, PROFILES[v.profile.blendWith], Math.max(0, Math.min(1, v.profile.blend as number)))
+  }
+  const derived: Partial<DriveProfile> = {}
+  if (v.spec?.drive) derived.drive = v.spec.drive
+  if (v.engine && v.spec?.wheelRadius > 0 && v.spec?.mass > 0) {
+    // Force per kilogram, which is what the profile speaks: the profile's `powerPerKg` is an
+    // acceleration in m/s², and first-gear tractive force over mass is exactly that.
+    derived.powerPerKg = tractiveForce(v.engine, v.spec.wheelRadius) / v.spec.mass
+    derived.topSpeed = gearedTopSpeed(v.engine, v.spec.wheelRadius)
+    derived.brakePerKg = v.engine.brake_torque_nm / Math.max(0.05, v.spec.wheelRadius) / v.spec.mass
+  }
+  if (v.wheels?.steer_max_deg > 0) derived.steerMax = (v.wheels.steer_max_deg * Math.PI) / 180
+  return { ...p, ...derived, ...(v.profile.overrides as Partial<DriveProfile>), id: `${v.profile.base}:vehicle` }
+}
+
+/** `blendProfiles`, re-exported through a local name so the order of operations above reads clean. */
+function blend(a: DriveProfile, b: DriveProfile, t: number): DriveProfile {
+  const out = { ...(t < 0.5 ? a : b) }
+  for (const k of Object.keys(a) as (keyof DriveProfile)[]) {
+    const av = a[k]
+    const bv = b[k]
+    if (typeof av === 'number' && typeof bv === 'number') (out[k] as number) = av + (bv - av) * t
+  }
+  return out
+}
+
+/**
+ * What the drivetrain means for the corridor's engine-sound knobs.
+ *
+ * `enginesound.ts` drives a voice from `rpm` and `pedal` alone, and works out rpm from road speed
+ * through ENGINE_GEAR_* and ENGINE_FINAL_DRIVE. This is the same numbers, per vehicle, so a bus
+ * does not sound like a hot hatch because both read one global gearbox.
+ */
+export function toEngineTuning(v: VehicleDoc): Record<string, number> {
+  const e = v.engine
+  const out: Record<string, number> = {
+    ENGINE_FINAL_DRIVE: e.final_drive,
+    ENGINE_TYRE_RADIUS: v.spec.wheelRadius,
+    ENGINE_IDLE_RPM: e.idle_rpm,
+    ENGINE_REDLINE_RPM: e.redline_rpm,
+    // Shift points as fractions of the range rather than absolutes, so a 2400 rpm diesel and a 7200
+    // rpm petrol both shift where they should instead of one of them never shifting at all.
+    ENGINE_SHIFT_UP_RPM: e.idle_rpm + (e.redline_rpm - e.idle_rpm) * 0.85,
+    ENGINE_SHIFT_DOWN_RPM: e.idle_rpm + (e.redline_rpm - e.idle_rpm) * 0.35,
+    ENGINE_VOLUME: v.audio.gain,
+    ENGINE_HF_CUTOFF: v.audio.lowpass_hz,
+  }
+  for (let i = 0; i < 6; i++) out[`ENGINE_GEAR_${i + 1}`] = e.gears[i] ?? 0
+  return out
+}
+
+/**
+ * The CG height a BUILT car actually settled at, m above its own contact patches.
+ *
+ * The other half of `toVehicleSpec`'s stated assumption: ask the car rather than the arithmetic. The
+ * editor shows this beside the number somebody typed, and a probe asserts they agree — which is the
+ * only way a unit mistake in `cgHeight` fails early instead of as "it rolls over too easily" three
+ * weeks later.
+ */
+export function cgHeightOf(body: { translation(): { y: number } }, spec: VehicleSpec, groundY: number): number {
+  return body.translation().y + (spec.comY ?? 0) - groundY
+}
+
+/** A one-line summary for the list: what this car is, in the words a person would use. */
+export function describeVehicle(v: VehicleDoc): string {
+  const hp = Math.round(v.engine.power_kw * 1.341)
+  const mph = Math.round(gearedTopSpeed(v.engine, v.spec.wheelRadius) * 2.237)
+  return `${v.spec.mass} kg · ${hp} hp · ${v.spec.drive.toUpperCase()} · ${v.engine.gears.length}-speed · ${mph} mph geared · ${v.profile.base}`
+}
+
+/* ---- decisions the form makes, extracted so they can be tested without a browser --------------- */
+
+/**
+ * How many bones drive the wheels, from the two things that can answer — and they are NOT the same
+ * kind of answer.
+ *
+ * `bound` is `AssetItem.rig.roles.wheel`, a `string[]`: the bones somebody SAID are the wheels, in
+ * the rig editor. Authoritative, stored with the asset, and present whether or not a preview is up.
+ *
+ * `guessed` is `MeshView.rig().roles.wheel`, a `number`: how many bones the viewer recognised from
+ * their NAMES. A count, not names, and only while a preview is open.
+ *
+ * Mixing the two up is a real bug and it happened here: reading `.length` off the guess gives
+ * `undefined` on every asset, so the four-wheel warning silently never fires. Hence this function
+ * and the test beside it.
+ *
+ * `undefined` — neither answered — is NOT zero. "We cannot tell" reported as "this car has no
+ * wheels" would put a red warning on every asset whose preview happens to be shut.
+ */
+export function wheelBoneCount(bound: string[] | undefined | null, guessed: number | undefined | null): { count: number | undefined; guessed: boolean } {
+  if (bound) return { count: bound.length, guessed: false }
+  if (typeof guessed === 'number') return { count: guessed, guessed: true }
+  return { count: undefined, guessed: false }
+}
+
+/**
+ * The range a generated override slider should span, around the profile's own value.
+ *
+ * The engine declares no bounds for these forty numbers and inventing forty pairs by hand is forty
+ * more things to get wrong, so the range is derived: symmetric about zero for a value that can go
+ * negative, zero-based otherwise, and always wide enough to be worth dragging even when the default
+ * is zero (`airPitch` on the ground profiles is 0, and a slider from 0 to 0 is a dead control).
+ */
+export function overrideRange(def: number): { min: number; max: number; step: number } {
+  const span = Math.max(Math.abs(def) * 2, 1)
+  return { min: def >= 0 ? 0 : -span, max: span, step: span / 200 }
+}

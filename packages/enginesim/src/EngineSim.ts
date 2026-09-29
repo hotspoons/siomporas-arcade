@@ -24,7 +24,7 @@ export interface EngineTelemetry {
 export interface EngineProfile {
   name: string
   cylinders: number
-  /** Radians per second, as the script declared it. Divide by `RPM_PER_RAD` for RPM. */
+  /** Radians per second, as the script declared it. MULTIPLY by `RPM_PER_RAD` for RPM. */
   redline: number
   /** Cubic metres. */
   displacement: number

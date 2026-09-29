@@ -1,7 +1,10 @@
 # Vehicles, actors and weapons: the asset library's two missing tabs
 
-**Status:** brief, 2026-09-28. Nothing in it is built.
-**Audience:** a standalone agent, working in its own worktree.
+**Status:** **done**, physics lane, 2026-09-28. All five items of §4 are built and tested — 79
+headless assertions across `test/{vehicles,actorspecs,weapons,actors,program}.test.ts`.
+**Audience:** was a standalone agent; Rich handed it to the physics lane instead, so the `packages/
+engine/**` and `src/actors.ts` coordination in §5 is now internal and only the `src/ui/assets.ts`
+boundary needs agreeing.
 **Companions:** [`PLAN-EDITOR-IDE.md`](PLAN-EDITOR-IDE.md) (the editor and the physics seams),
 [`PLAN-PHYSICS.md`](PLAN-PHYSICS.md) (the engine).
 
@@ -197,13 +200,27 @@ offers a picker over `kind === 'weapon'` assets. The program API gets a small na
 
 ## 4. Order
 
-1. **The vehicle document and the Vehicles tab**, with the profile picker and generated overrides.
-   Nothing else is useful before a car has numbers.
-2. **The engine and audio block**, wired to enginesim's existing bench so "listen" works.
-3. **The actor document and the Actors tab.**
-4. **Weapons: the document, the picker, and the two API calls.**
-5. **The ECS components and the spawn path**, last, and only after agreeing `actors.ts` with the
-   physics lane.
+1. ~~**The vehicle document and the Vehicles tab**~~ — **done**. `apps/corridor/src/vehicles.ts`
+   (document, defaults, validation, arithmetic), `src/ui/vehicles.ts` (the Dynamics group and the
+   roster tab), the `vehicle` field in `tools/assetsvc/catalog.mjs`, and `test/vehicles.test.ts`.
+   The editor lane added an `extensions` seam to `AssetCatalog` for it, so the list, the search,
+   the scope and the save bar are still theirs and there is one of each.
+2. ~~**The engine and audio block**~~ — **done**. `src/ui/enginelisten.ts` is a one-at-a-time dyno:
+   the setup field is a picker over the engine scripts the build ships, and Listen starts an
+   `AudioContext` inside the click (which is the gesture autoplay needs), free-revs the engine with
+   `setFree({ dyno: true })`, and stops itself after twenty seconds. The gain and low-pass sliders
+   are wired into the running bench, so tuning them is something you hear.
+3. ~~**The actor document and the Actors tab**~~ — **done**, `src/actorspecs.ts` and
+   `src/ui/actors.ts`. NOTE THE FILE NAME: `actors.ts` is the ECS and `actorspecs.ts` is not it —
+   see that file's header for why the two must not be confused.
+4. ~~**Weapons**~~ — **done**. `src/weapons.ts`, `src/ui/weapons.ts`, and four calls on `GameApi`
+   rather than two: `arm`, `armed`, `fire`, `hurt`, behind a `CombatHost` seam that is safe when the
+   app has no combat at all. `api.arm` takes an ASSET ID, so a program names a weapon in the library
+   rather than restating one.
+5. ~~**The ECS components and the spawn path**~~ — **done**; `actors.ts` is the physics lane's own
+   file so there was nobody to agree with. `Physical` (handle, mode, mass, layer) with the four
+   modes that decide whether a busy road is affordable, `Armed` (weapon index, ammo, cooldown), the
+   `cooldowns` system, `setPhysical`, `spawnActor` and `arm` in `actorworld.ts`.
 
 ---
 
@@ -217,12 +234,72 @@ never `git add -A`** — somebody has already swept another lane's files that wa
 - **Ask first:** `src/ui/assets.ts` (the editor lane's; you need two `Tab` entries and a filtered
   list — propose the smallest possible seam), `src/actors.ts` and `src/actorworld.ts` (shared with
   the physics lane), `packages/engine/**` (theirs, entirely).
-- **Mailbox:** `/tmp/corridor-mail/`. Write to `to-editor/` for the editor lane and `to-main/` for
-  the physics lane; announce yourself before your first commit that touches a shared file.
+- **Mailbox:** `/tmp/messages/`, NOT `/tmp/corridor-mail/` — that one is from an older round and
+  nobody reads it. The lanes are `splats`, `viewer`, `worldeditor` and `physics`, each with an
+  `inbox/` and an `outbox/`; `PROTOCOL.md` there is the rule. The seam proposal for `assets.ts` is
+  `physics/outbox/003-assets-seam-for-vehicles-tab.md`.
 
 Verify with headless probes, not screenshots: `probes/corridor-*.mjs` are the pattern, and the
 house rule is that a probe must be shown able to FAIL before it is trusted. Assert the mechanism —
 "the wheels turn" is `rig.roles.wheel.length === 4` and a spin in the preview, not a vibe.
+
+---
+
+## 8. What §2 turned out to mean
+
+**The `Vehicles tab` is a roster, not a second catalog.** The pane already has per-class tabs over
+the same list, so reproducing the list, the search and the shared-versus-world scope would be a
+second route to one place and the two would drift the first time somebody added a class. What the
+tab gives instead is the across-the-fleet view no per-item pane can: which cars have no dynamics at
+all, which have numbers that do not validate, `N ready · N with no dynamics · N with problems`.
+
+**Health is a `Uint16Array`.** `toSpawnOpts` clamps to 65,535, because a 70,000 hp boss silently
+becoming a 4,464 hp one is exactly the class of quiet failure this codebase keeps finding.
+
+**A density check has to scale isometrically or it libels every animal.** The first cut multiplied a
+human's fixed cross-section by the height, which called a perfectly ordinary 0.4 kg, 0.25 m bird
+"lighter than air" — a bird is not a short human. Scaling all three dimensions with height puts
+bird, dog, deer and person between 210 and 1600 kg/m³ of loose box, while a vehicle's mass typed
+into a person still lands above 20,000. The band is wide on purpose: this is a check for a MISTAKE,
+and a warning that fires on real animals is a warning people learn to ignore.
+
+**`armour` refuses a share, it does not subtract.** Subtraction makes a heavily armoured thing
+invulnerable to small hits and then wildly vulnerable one point later, which is a cliff nobody
+tuning it can see.
+
+---
+
+## 7. What §1 turned out to mean, once it was built
+
+Three things the brief could not have known, all of which came out of writing the arithmetic down.
+
+**`rollStiffness` is not a thing.** The brief's own override example names it; the real
+`DriveProfile` keys are `antiRollPerKg` and `rollResist`. `validateVehicle` reports an unknown
+override key as an ERROR rather than ignoring it, and the tab's override fields are generated by
+walking the profile type, so neither can go stale.
+
+**`drive` belongs on the chassis, not on the profile.** The engine's `DriveProfile` carries one,
+which is right for five presets describing cars nobody has modelled. But a Mustang is rear-wheel
+drive in an arcade racer and in a simulator alike, so the chassis wins and `toDriveProfile`
+overrides the profile's.
+
+**The gearing now decides the top speed, and the ride height decides the geometry.** `power_kw`,
+`gears` and `final_drive` were going to be decoration beside a `topSpeed` somebody typed. Instead:
+tractive force is `torque × gear × final ÷ radius` and top speed is redline in top gear, both exact,
+so doubling the final drive halves the top speed and a test says so. Torque is estimated from power
+when the document does not state it, and `peakTorque` returns `{ nm, estimated }` so the UI can say
+which it is.
+
+That left `cgHeight`, which the brief flags as one of the three numbers people get wrong. It is
+worse than it looks: the first implementation pinned the axle mounts to the bottom of the chassis box
+and let the spring's rest length position the body, which put a 1.35 m car's floor 0.66 m above the
+road and dragged the centre of gravity out of the shell entirely. A hero-car asking for a 0.52 m CG
+settled at 0.67 m. The fix is that the body is positioned by its **ride height** and the axle mounts
+are then placed to put the wheels on the road — and the sag has a closed form, because Bullet's
+suspension force is `stiffness × compression × mass`, so at rest `δ = g / (4 × stiffness)` and **the
+mass cancels**. A bus and a hatchback on the same springs sag identically, which is wrong about real
+cars and is what the engine does. The test builds a car from a document, settles it, measures the CG
+back out and holds it to ±0.02 m of what was asked for.
 
 ---
 

@@ -43,6 +43,7 @@ import { createRelation, withAutoRemoveSubject } from 'bitecs'
 export const MAX_ACTORS = 65536
 
 const f32 = () => new Float32Array(MAX_ACTORS)
+const u32 = () => new Uint32Array(MAX_ACTORS)
 const u16 = () => new Uint16Array(MAX_ACTORS)
 const u8 = () => new Uint8Array(MAX_ACTORS)
 
@@ -126,6 +127,44 @@ export const Player = {}
 /** Can be hurt, and is not simply gone when it is. */
 export const Health = { hp: u16(), max: u16() }
 
+/* ---- the physics seam ------------------------------------------------------------------------- */
+
+/**
+ * How something exists in the PHYSICS world, if it does at all.
+ *
+ * `mode` is the field that decides whether a busy road is affordable, and it is worth the paragraph
+ * (docs/corridor/PLAN-PHYSICS.md §2.5):
+ *
+ *   NONE       no body. Scenery, distant traffic, anything outside the physics radius.
+ *   KINEMATIC  a collider things bounce off, moved by the ECS. **This is what traffic is.**
+ *   DYNAMIC    a real rigid body. Wreckage, debris, thrown things.
+ *   VEHICLE    a raycast vehicle with a DriveProfile. The player, and anything chasing them.
+ *
+ * A hundred IDM cars as dynamic bodies is a hundred vehicle controllers and four hundred wheel
+ * rays, and it is not even desirable — a car following a lane model should follow it, not fight a
+ * suspension. So traffic is KINEMATIC until something hits it hard enough, and then becomes
+ * DYNAMIC in place: same entity, same collider, same Rapier handle. `Breakables` already does
+ * exactly that move for a street sign; a car is the same thing with more mass.
+ *
+ * `handle` is Rapier's rigid-body handle, 0 for "no body yet". It is a `Uint32Array` because that
+ * is what a handle is; nothing outside the physics binding should read it.
+ */
+export const PHYS_MODE = { none: 0, kinematic: 1, dynamic: 2, vehicle: 3 } as const
+export type PhysMode = keyof typeof PHYS_MODE
+export const Physical = { handle: u32(), mode: u8(), mass: f32(), layer: u8() }
+
+/**
+ * Holding a weapon.
+ *
+ * `weapon` is an INDEX into a string table the app keeps, not the asset id — a component is a
+ * TypedArray per field and an id is a string, so the table is where the two meet. 0 means empty
+ * handed, which is why the table's slot 0 is never a weapon.
+ *
+ * `cooldown` counts down in seconds; a system decrements it and refuses to fire while it is
+ * positive, which is the whole of a rate of fire.
+ */
+export const Armed = { weapon: u16(), ammo: u16(), cooldown: f32() }
+
 /** Marked for removal at the end of the step, so no system deletes out from under another. */
 export const Doomed = { why: u8() }
 
@@ -178,4 +217,8 @@ export const SETS = {
   drawable: [Transform, Visual],
   /** anything with a running engine, voiced or not */
   engines: [Engine, Transform],
+  /** anything the physics world has a body for */
+  bodied: [Physical, Transform],
+  /** anything holding a weapon */
+  armed: [Armed, Transform],
 }

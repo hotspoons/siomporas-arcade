@@ -11,7 +11,7 @@
 // that buys, capped — the same shape as car.ts's 120 Hz loop, for the same reason.
 
 import { addComponent, addEntity, createWorld, entityExists, hasComponent, query, removeComponent, removeEntity, type World } from 'bitecs'
-import { Autonomous, Doomed, Health, Hostile, Human, SETS, Transform, Vehicle, Velocity, Visual, Walking } from './actors'
+import { Armed, Autonomous, Doomed, Health, Hostile, Human, PHYS_MODE, Physical, SETS, Transform, Vehicle, Velocity, Visual, Walking, type PhysMode } from './actors'
 
 /** 50 Hz: fine enough for traffic, cheap, and a round number of milliseconds. */
 export const STEP_S = 0.02
@@ -205,6 +205,77 @@ export function spawnPedestrian(aw: ActorWorld, at: SpawnAt, to: { x: number; y:
     Hostile.aggression[e] = 1
   }
   return e
+}
+
+/* ---- spawning from a DOCUMENT, which is what the asset library produces ------------------------ */
+
+/**
+ * Give an entity a place in the physics world.
+ *
+ * Separate from spawning because the two happen at different times: an entity exists as soon as a
+ * population is planned, and it gets a body only once it is near enough to the player for one to be
+ * worth having. `mode` moves over an entity's life — a traffic car is KINEMATIC until something
+ * hits it and DYNAMIC afterwards — and this is the one place that says so.
+ */
+export function setPhysical(aw: ActorWorld, e: number, mode: PhysMode, opts: { mass?: number; handle?: number; layer?: number } = {}) {
+  const w = aw.world
+  if (!hasComponent(w, e, Physical)) addComponent(w, e, Physical)
+  Physical.mode[e] = PHYS_MODE[mode]
+  if (opts.mass !== undefined) Physical.mass[e] = opts.mass
+  if (opts.handle !== undefined) Physical.handle[e] = opts.handle
+  if (opts.layer !== undefined) Physical.layer[e] = opts.layer
+}
+
+/**
+ * What an actor document describes, as an entity.
+ *
+ * THE DOCUMENT IS NOT IMPORTED HERE. This takes the handful of numbers it produces rather than an
+ * `ActorDoc`, so `actorworld.ts` stays free of the authoring layer — the ECS is the runtime and a
+ * document is a file somebody edits, and `toSpawnOpts` in `actorspecs.ts` is the one place that
+ * converts between them. A world that could not be stepped without the asset library loaded would
+ * be a world no test could step.
+ */
+export function spawnActor(
+  aw: ActorWorld,
+  at: SpawnAt,
+  spec: { speed: number; health: number; hostile?: boolean; asset?: number; mass?: number },
+  to: { x: number; y: number } = { x: at.x, y: at.y },
+): number {
+  const e = spawnPedestrian(aw, at, to, { speed: spec.speed, hostile: spec.hostile, asset: spec.asset })
+  Health.hp[e] = spec.health
+  Health.max[e] = spec.health
+  if (spec.mass !== undefined) setPhysical(aw, e, 'none', { mass: spec.mass })
+  return e
+}
+
+/**
+ * Put a weapon in an entity's hand.
+ *
+ * `weapon` is an index into whatever string table the app keeps, never the asset id — a component
+ * is a TypedArray per field. 0 is empty handed, so a table's slot 0 is never a weapon.
+ */
+export function arm(aw: ActorWorld, e: number, weapon: number, ammo: number) {
+  const w = aw.world
+  if (!hasComponent(w, e, Armed)) addComponent(w, e, Armed)
+  Armed.weapon[e] = weapon
+  Armed.ammo[e] = ammo
+  Armed.cooldown[e] = 0
+}
+
+/**
+ * Rates of fire, as one system.
+ *
+ * The whole of a weapon's timing: a cooldown counts down and nothing may fire while it is positive.
+ * Here rather than in whatever fires, because there will be several things that fire — a player, a
+ * hostile, a turret — and three copies of a countdown is three places for a weapon to be twice as
+ * fast as it says.
+ */
+export const cooldowns: System = (world, dt) => {
+  const ents = query(world, [Armed])
+  for (let i = 0; i < ents.length; i++) {
+    const e = ents[i]
+    if (Armed.cooldown[e] > 0) Armed.cooldown[e] = Math.max(0, Armed.cooldown[e] - dt)
+  }
 }
 
 /** Hand a vehicle to a player: it stops being driven by the simulation and stays the same thing. */

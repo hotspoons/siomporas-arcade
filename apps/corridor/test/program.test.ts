@@ -554,3 +554,80 @@ describe('physics, through the host', () => {
     expect(run.error).toMatch(/boom/)
   })
 })
+
+/*
+ * COMBAT, through the host — the same rule as physics, one layer up.
+ *
+ * `api.arm` names a weapon in the asset library rather than describing one, so a program and the
+ * library cannot drift. And a dry run has no combat host at all, so every call has to do nothing
+ * rather than throw: a program that arms somebody must still be a program you can step in a test.
+ */
+describe('combat, through the host', () => {
+  function armed() {
+    const { h } = host()
+    const held = new Map<number, string>()
+    const shots: { entity: number; dir: unknown }[] = []
+    h.combat = {
+      arm: (e, id) => { if (id !== 'pistol-9mm') return false; held.set(e, id); return true },
+      armed: (e) => held.get(e) ?? null,
+      fire: (e, dir) => { shots.push({ entity: e, dir }); return { entity: 7, point: { x: 1, y: 0, z: 2 }, damage: 24 } },
+      damage: () => 76,
+    }
+    return { h, held, shots }
+  }
+
+  it('a program with no combat behind it still runs', async () => {
+    const { h } = host()
+    let saw: unknown[] = []
+    await play({
+      setup: (api) => {
+        saw = [api.arm(1, 'pistol-9mm'), api.armed(1), api.fire(1, { x: 1, y: 0, z: 0 }), api.hurt(1, 10)]
+      },
+    }, h, 0.2)
+    expect(saw).toEqual([false, null, null, 0])
+  })
+
+  it('arms from the library by id, and refuses one that is not there', async () => {
+    const { h, held } = armed()
+    let saw: unknown[] = []
+    await play({ setup: (api) => { saw = [api.arm(3, 'pistol-9mm'), api.arm(3, 'raygun'), api.armed(3)] } }, h, 0.2)
+    expect(saw).toEqual([true, false, 'pistol-9mm'])
+    expect(held.get(3)).toBe('pistol-9mm')
+  })
+
+  it('refuses an empty or non-string weapon id rather than passing it on', async () => {
+    const { h, shots } = armed()
+    let saw: unknown[] = []
+    await play({
+      setup: (api) => {
+        saw = [api.arm(1, ''), api.arm(1, null as unknown as string), api.arm(1, 5 as unknown as string)]
+      },
+    }, h, 0.2)
+    expect(saw).toEqual([false, false, false])
+    expect(shots).toEqual([])
+  })
+
+  it('fires in a direction, and does nothing at all given a direction that is not one', async () => {
+    const { h, shots } = armed()
+    let hit: unknown = null
+    let bad: unknown = 'unset'
+    await play({
+      setup: (api) => {
+        hit = api.fire(4, { x: 0, y: 0, z: 1 })
+        bad = api.fire(4, { x: NaN, y: 0, z: 1 })
+      },
+    }, h, 0.2)
+    expect(hit).toEqual({ entity: 7, point: { x: 1, y: 0, z: 2 }, damage: 24 })
+    expect(bad).toBeNull()
+    expect(shots).toHaveLength(1) // the bad one never reached the host
+  })
+
+  it('hurts something and hands back what it has left', async () => {
+    const { h } = armed()
+    let left: unknown = null
+    let nan: unknown = null
+    await play({ setup: (api) => { left = api.hurt(2, 24); nan = api.hurt(2, NaN) } }, h, 0.2)
+    expect(left).toBe(76)
+    expect(nan).toBe(0)
+  })
+})

@@ -120,6 +120,8 @@ export interface ProgramHost {
    * keeps the program layer testable.
    */
   physics?: PhysicsHost
+  /** weapons and damage, when the app has them */
+  combat?: CombatHost
 }
 
 /** Site metres — x east, y north, z up. The frame every number in a program is in. */
@@ -157,6 +159,26 @@ export interface PhysicsHost {
   onImpact?: (fn: (e: { a: number; b: number; point: Vec3; impulse: number }) => void) => void
   /** give one entity its own handling, for a chase car that is not the player's */
   setEntityProfile?: (entity: number, id: string, overrides?: Record<string, number>) => void
+}
+
+/**
+ * What the app's COMBAT can be asked for. Optional throughout, like `PhysicsHost` and for the same
+ * reason: a host may have weapons and no physics, or neither, and a program should degrade rather
+ * than explode.
+ *
+ * WEAPONS ARE NAMED, NOT DESCRIBED. `arm` takes an asset id, because a weapon is an ordinary item in
+ * the library with a document beside it (`src/weapons.ts`) — so a program says which weapon rather
+ * than restating one, and the two cannot drift.
+ */
+export interface CombatHost {
+  /** give an entity a weapon by asset id. False when there is no such weapon */
+  arm?: (entity: number, weaponId: string) => boolean
+  /** what it is holding, or null */
+  armed?: (entity: number) => string | null
+  /** fire what it is holding, in a direction. Returns what it hit, or null */
+  fire?: (entity: number, dir: Vec3) => { entity: number | null; point: Vec3; damage: number } | null
+  /** hurt something directly — a script, a trap, a fall */
+  damage?: (entity: number, amount: number) => number
 }
 
 /** One thing the editor placed in this world. Site metres, compass bearing — as saved. */
@@ -280,6 +302,25 @@ export interface GameApi {
     /** something was hit hard enough to matter */
     onImpact(fn: (e: { a: number; b: number; point: Vec3; impulse: number }) => void): void
   }
+
+  /**
+   * COMBAT: arm something, and make it fire.
+   *
+   * Deliberately four calls. Everything else a fight needs — who is hostile, how much health is
+   * left, what is in range — is already the ECS's, and a second vocabulary for it here would be a
+   * second thing to keep in step. These are the verbs the ECS has no way to express.
+   *
+   * Safe with no combat host: `arm` returns false, `fire` returns null, nothing throws, and a
+   * program that uses them is still a program you can step in a test.
+   */
+  /** give an entity a weapon from the asset library, by id. False if there is no such weapon */
+  arm(entity: number, weaponId: string): boolean
+  /** what an entity is holding, or null */
+  armed(entity: number): string | null
+  /** fire what it is holding. Returns what was hit, or null for a miss or an empty hand */
+  fire(entity: number, dir: Vec3): { entity: number | null; point: Vec3; damage: number } | null
+  /** hurt something directly. Returns the health it has left */
+  hurt(entity: number, amount: number): number
 
   /** name a region, so `on('enters', …)` and `in()` can refer to it */
   zone(name: string, z: Zone): void
@@ -407,6 +448,11 @@ export class GameRun {
         car: () => H.physics?.car?.() ?? null,
         onImpact: (fn) => H.physics?.onImpact?.((e) => this.guard(() => fn(e))),
       },
+
+      arm: (e, id) => (typeof id === 'string' && id ? H.combat?.arm?.(e, id) ?? false : false),
+      armed: (e) => H.combat?.armed?.(e) ?? null,
+      fire: (e, dir) => (H.combat?.fire && vec(dir) ? H.combat.fire(e, dir) : null),
+      hurt: (e, amount) => (H.combat?.damage && finite(amount) ? H.combat.damage(e, amount) : 0),
 
       placed: (id) => this.entityFor(id),
       placedWith: (tag) => (H.placements?.() ?? []).filter((p) => p.tags.includes(tag)).map((p) => this.entityFor(p.id)).filter((e): e is number => e !== null),

@@ -742,6 +742,71 @@ export let BRANCH_VERGE = 14
 export let BUILDING_DRESSING = 1
 export let DRESS_WINDOW_WALLS = 3
 
+// --- physics (docs/corridor/PLAN-PHYSICS.md) ------------------------------------------------------
+/**
+ * Rapier, on or off.
+ *
+ * OFF BY DEFAULT and `machine` scope, for two reasons. Rapier's compat build inlines its wasm as
+ * base64 — 4.3 MB — so turning it on is a download, not a flag; and while the car still runs on
+ * `car.ts` there is nothing for the physics world to do but build ground. It becomes a `world` knob
+ * when a level can legitimately require it.
+ *
+ * Changing it reloads nothing: the world is built with the site, so toggle it and reload.
+ */
+export let PHYS_ENABLED = 0
+/** fixed steps per second. 120 matches what the hand-written car already ran at */
+export let PHYS_HZ = 120
+/** most steps one frame may run before the rest of the backlog is DROPPED rather than banked */
+export let PHYS_MAX_STEPS = 4
+/** Rapier's constraint solver iterations. 4 is its default; a vehicle likes more */
+export let PHYS_ITERATIONS = 8
+/** newtons: a contact pair quieter than this never reports an impact. A parked car rests silently */
+export let PHYS_IMPACT_N = 30000
+/** metres across one heightfield tile, and samples along its edge — TILE_M/CELLS is what a wheel feels */
+export let PHYS_TILE_M = 64
+export let PHYS_TILE_CELLS = 64
+/** how many tiles may be BUILT in one frame. Each is CELLS² calls into the site's height function */
+export let PHYS_TILE_BUDGET = 1
+/** tiles are kept within this many metres of the eye */
+export let PHYS_RADIUS_M = 180
+/** the ground's friction coefficient before a profile's own grip is applied */
+export let PHYS_GROUND_FRICTION = 1
+/**
+ * How high `groundUnder` starts its ray, metres.
+ *
+ * Absolute, because world Y here IS height above NAVD88 — the bake anchors the frame at h = 0. It
+ * has to clear the highest site in `sites.json` with room to spare; South Mountain is the tall one.
+ */
+export let PHYS_RAY_FROM_M = 3000
+/**
+ * Which handling profile a car spawned by `physics.ts` starts on, as an INDEX into the engine's
+ * five: 0 stunts, 1 taxi, 2 street, 3 rush, 4 sim.
+ *
+ * An index rather than a name because the tuning panel is numbers all the way down — `TuneKey` is a
+ * number with a range, and a string knob would be the only one of its kind for the sake of one
+ * field. `PHYS_PROFILE_ID` turns it back into a name.
+ */
+export let PHYS_PROFILE = 2
+/**
+ * Which model drives the player's car: 0 the hand-written one (`car.ts`), 1 Rapier (`rapiercar.ts`).
+ *
+ * Only has a choice when there is a physics world at all, so it needs `?phys=1` as well. Read when
+ * drive mode is first entered, like `PHYS_ENABLED` and for the same reason — see `physProfileId`.
+ */
+export let PHYS_CAR = 0
+/** 1 = trunks you can hit. The hand-written car has always collided with trees; so should this one */
+export let PHYS_TREES = 1
+/** how far from the player static props get colliders. Smaller than the ground's radius: trunks are dense */
+export let PHYS_PROP_RADIUS_M = 90
+/** the most trunks that may stand at once. Nearest first, so the budget goes where it can be hit */
+export let PHYS_TREE_BUDGET = 300
+/** 1 = signs, masts, poles, fences and houses are solid */
+export let PHYS_PROPS = 1
+/** the most prop colliders that may stand at once. Nearest first */
+export let PHYS_PROP_BUDGET = 400
+/** ceiling on the catalogue itself — memory, not a per-frame budget */
+export let PHYS_PROP_CATALOGUE = 20000
+
 export interface TuneTab {
   name: string
   sections: TuneSection[]
@@ -1282,6 +1347,43 @@ export const TUNE_TABS: TuneTab[] = [
       },
     ],
   },
+  {
+    name: 'physics',
+    sections: [
+      {
+        title: 'the world (reload after changing any of these)',
+        keys: [
+          tune('PHYS_ENABLED', () => PHYS_ENABLED, (v) => (PHYS_ENABLED = v), [0, 1], 1, 'Rapier at all. Read once, when the site builds \u2014 use ?phys=1 in the URL, this slider needs a reload and does not persist'),
+          tune('PHYS_HZ', () => PHYS_HZ, (v) => (PHYS_HZ = v), [30, 240], 10, 'fixed steps per second'),
+          tune('PHYS_MAX_STEPS', () => PHYS_MAX_STEPS, (v) => (PHYS_MAX_STEPS = v), [1, 12], 1, 'a stall past this is dropped, never paid back'),
+          tune('PHYS_ITERATIONS', () => PHYS_ITERATIONS, (v) => (PHYS_ITERATIONS = v), [1, 32], 1, 'solver iterations; higher is stiffer and dearer'),
+          tune('PHYS_IMPACT_N', () => PHYS_IMPACT_N, (v) => (PHYS_IMPACT_N = v), [1000, 200000], 1000, 'quieter contacts than this report nothing'),
+        ],
+      },
+      {
+        title: 'the ground under the car',
+        keys: [
+          tune('PHYS_TILE_M', () => PHYS_TILE_M, (v) => (PHYS_TILE_M = v), [16, 256], 8, 'metres across one heightfield tile'),
+          tune('PHYS_TILE_CELLS', () => PHYS_TILE_CELLS, (v) => (PHYS_TILE_CELLS = v), [8, 128], 8, 'samples per edge \u2014 TILE_M/CELLS is the resolution a wheel feels'),
+          tune('PHYS_TILE_BUDGET', () => PHYS_TILE_BUDGET, (v) => (PHYS_TILE_BUDGET = v), [1, 8], 1, 'tiles built per frame. THE HITCH KNOB'),
+          tune('PHYS_RADIUS_M', () => PHYS_RADIUS_M, (v) => (PHYS_RADIUS_M = v), [64, 600], 10, 'how far the solid ground reaches'),
+          tune('PHYS_GROUND_FRICTION', () => PHYS_GROUND_FRICTION, (v) => (PHYS_GROUND_FRICTION = v), [0, 2], 0.05),
+        ],
+      },
+      {
+        title: 'the car',
+        keys: [
+          tune('PHYS_TREES', () => PHYS_TREES, (v) => (PHYS_TREES = v), [0, 1], 1, 'trunks you can hit', { scope: 'world', lerp: 'step' }),
+          tune('PHYS_PROP_RADIUS_M', () => PHYS_PROP_RADIUS_M, (v) => (PHYS_PROP_RADIUS_M = v), [20, 300], 10),
+          tune('PHYS_PROPS', () => PHYS_PROPS, (v) => (PHYS_PROPS = v), [0, 1], 1, 'signs, masts, poles, fences and houses are solid', { scope: 'world', lerp: 'step' }),
+          tune('PHYS_PROP_BUDGET', () => PHYS_PROP_BUDGET, (v) => (PHYS_PROP_BUDGET = v), [0, 3000], 25, 'nearest first'),
+          tune('PHYS_TREE_BUDGET', () => PHYS_TREE_BUDGET, (v) => (PHYS_TREE_BUDGET = v), [0, 2000], 25, 'nearest first'),
+          tune('PHYS_CAR', () => PHYS_CAR, (v) => (PHYS_CAR = v), [0, 1], 1, '0 = the hand-written car, 1 = Rapier. Needs ?phys=1 and a fresh press of Tab', { scope: 'world', lerp: 'step' }),
+          tune('PHYS_PROFILE', () => PHYS_PROFILE, (v) => (PHYS_PROFILE = v), [0, 4], 1, '0 stunts \u00b7 1 taxi \u00b7 2 street \u00b7 3 rush \u00b7 4 sim', { scope: 'world', lerp: 'step' }),
+        ],
+      },
+    ],
+  },
 ]
 
 /**
@@ -1297,4 +1399,10 @@ export function lodDistance(dx: number, dz: number, fwdX: number, fwdZ: number, 
   const behind = (1 - cos) * 0.5 // 0 ahead … 1 behind
   const topdown = Math.min(1, Math.max(0, (pitch - LOD_TOPDOWN_PITCH * 0.7) / (LOD_TOPDOWN_PITCH * 0.3)))
   return d * (1 + LOD_BEHIND_PENALTY * behind * (1 - topdown))
+}
+
+/** The drive profile `PHYS_PROFILE` names. The order is the engine's own `PROFILES` order. */
+export const PHYS_PROFILE_NAMES = ['stunts', 'taxi', 'street', 'rush', 'sim']
+export function physProfileId(): string {
+  return PHYS_PROFILE_NAMES[Math.round(PHYS_PROFILE)] ?? 'street'
 }

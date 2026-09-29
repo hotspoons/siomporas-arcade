@@ -238,8 +238,61 @@ Measured on Kestrel, by the bones' real names:
 rig whose eyelids were weighted, because nothing in a Rigify face is called "eye" — the lids are
 `DEF-lid.*`. The same run reported face weight on `DEF-forearm`, because "ear" is inside "forearm".
 
-**What the eyes cannot do, ever, from this mesh.** A render of the head settles it: Kestrel's eyes
-are sculpted SHUT with the lashes painted on, and there is no eyeball behind them. Lid bones can
+### THE ANSWER: reconstruct the HEAD on its own
+
+Rich asked whether running the character through TRELLIS again with an open mouth and eyes, and
+fusing the two, would give a rigging target. Fusing will not work and a second pass is not needed
+for the eyes — **the budget is the whole problem**, and the fix is a separate head pass.
+
+**Fusing is impossible as stated, and this is measured rather than argued.** Two reconstructions of
+the same character in different poses:
+
+```
+mesh-arms-clear   48,098 verts   175,131 indices
+mesh-arms-in      50,961 verts   177,441 indices
+```
+
+No correspondence. A shape key is a per-vertex offset array; it needs the same mesh vertex for
+vertex. Two TRELLIS runs give unrelated topology even from one subject, so there is nothing to pair.
+
+**But a head-only pass changes everything.** `ext/kestrel-portrait.png` already has her eyes OPEN;
+the body reconstruction closed them because a whole-body pass spends its voxels on the body and the
+face gets almost none. Cropping that portrait to the head and reconstructing it alone — 50 seconds
+on the cluster's `recon` service, `POST /reconstruct` with one image — gives 252,757 vertices of
+head, with **actual eyeballs sitting in sockets** and a clear lip line:
+
+![the head reconstructed on its own](img/kestrel-head-recon.png)
+
+Compare that with the face on the full-body mesh, whose lids are sculpted flat and fused. This is
+the single highest-value change available to the character pipeline, and it needs no new art: the
+source image is already in the repo.
+
+The eyeballs can then be found automatically, by the same reasoning the wheel fit uses — the ball is
+the most protruding thing in the band between the brow and the cheek, so fit a sphere to it and keep
+what lies on it. On Kestrel that gives two balls at x = ±0.042, both at z = 0.133, radii within 7%
+of each other: symmetric and self-validating, like four wheel radii agreeing.
+
+### What is still unproven, and honestly so
+
+Cutting a ball out and posing it is where the experiment stops being convincing. The separation
+tolerance takes sclera and socket along with the iris, so the piece that comes out is bigger than an
+eye; the lid deformation is a hand-rolled rotation with no anatomy behind it; and a blink needs the
+lid to slide OVER the ball, which is exactly what being welded to it prevents. So: **the geometry to
+blink and gaze now exists, and neither has been demonstrated convincingly.** What it would take, in
+order:
+
+1. **Tighten the cut.** Fit the sphere, then keep only what is on it AND in front of the socket
+   plane, and cap the hole left behind. The wheel separator does the equivalent for a tyre and is
+   the model to copy.
+2. **Lid bones that are lids.** Two arcs per eye following the lid margin, weighted with a falloff
+   along the arc rather than a ball around a point.
+3. **Gaze is translation, not rotation, on this mesh.** The iris IS the dark ball, not a mark
+   painted on a larger white one, so rotating it about its centre is invisible. Sliding it across
+   the sclera reads correctly; a proper eyeball with an iris texture would rotate.
+
+**What the eyes cannot do from the BODY mesh** — which is what the section above supersedes. A
+render of that head settles it: on the full-body reconstruction Kestrel's eyes are sculpted SHUT
+with the lashes painted on, and there is no eyeball behind them. Lid bones can
 squint and approximate a blink; nothing downstream can make an eye look left, because there is no
 eye. The same is true of the mouth — the lips are real volumes with a seam and they deform, but
 there is no mouth interior, so pushing the lower lip down stretches skin rather than opening a

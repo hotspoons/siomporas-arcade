@@ -27,6 +27,15 @@ export interface ShellPanelOpts {
   docs: () => Promise<DocSources>
   /** read one projected document's text */
   read: (path: string) => Promise<string | null>
+  /**
+   * Is the Shell the pane on screen right now?
+   *
+   * The agent can start this machine without anybody opening the tab (`ensureMachine`), and the
+   * sidebar it draws lives in the SHARED inspector — so drawing it while somebody is looking at
+   * the Agent tab would wipe the panel they are using. Absent means "assume visible", which is the
+   * behaviour every existing caller already had.
+   */
+  visible?: () => boolean
 }
 
 const PROMPT = '$ '
@@ -34,6 +43,10 @@ const PROMPT = '$ '
 export class ShellPanel {
   private readonly o: ShellPanelOpts
   private shell: Shell | null = null
+  /** the in-flight boot, shared by every concurrent caller */
+  private booting: Promise<void> | null = null
+  /** why the last boot failed, so ensureMachine can say rather than return null */
+  private bootError: string | null = null
   private out: HTMLElement | null = null
   private input: HTMLInputElement | null = null
   private history: string[] = []
@@ -41,7 +54,6 @@ export class ShellPanel {
   private saved: { path: string; what: string; ok: boolean; error?: string }[] = []
   private files: ShellFile[] = []
   private tree: FileTree | null = null
-  private booting = false
 
   constructor(o: ShellPanelOpts) {
     this.o = o
@@ -87,11 +99,46 @@ export class ShellPanel {
     this.out.scrollTop = this.out.scrollHeight
   }
 
+  /**
+   * Start the machine if it is not running, and resolve when it is usable.
+   *
+   * WHY THIS IS PUBLIC. `shell_exec` over MCP used to refuse with "open the Shell tab once, then
+   * try again" — which asks a human to click something before an agent can run a command, in a
+   * surface whose whole point is that the agent works on its own. The machine is a Worker; there
+   * is no reason a person has to have looked at it first.
+   *
+   * Idempotent and safe to call concurrently: several tool calls arriving together await one boot
+   * rather than racing three Workers into existence.
+   */
+  async ensureMachine(): Promise<Shell> {
+    // An IN-FLIGHT boot must be awaited before trusting `this.shell`. Returning early here was a
+    // race the pre-warm made certain: the machine object exists from the moment boot starts, but
+    // its Worker does not exist until start() resolves, so an exec against it died on
+    // `postMessage` of null.
+    if (this.booting) await this.booting
+    if (this.shell) return this.shell
+    await this.boot()
+    if (!this.shell) throw new Error(this.bootError ?? 'the shell did not start')
+    return this.shell
+  }
+
   private async boot(): Promise<void> {
-    if (this.booting) return
-    this.booting = true
+    // The in-flight boot, so concurrent callers wait for it rather than starting another. The old
+    // `if (this.booting) return` returned IMMEDIATELY — a second caller got no shell and no error.
+    if (this.booting) return this.booting
+    this.booting = this.doBoot().finally(() => { this.booting = null })
+    return this.booting
+  }
+
+  private async doBoot(): Promise<void> {
+    this.bootError = null
     this.write('starting the shell…\n', 'term-dim')
-    this.shell = new Shell({
+    /*
+     * BUILT INTO A LOCAL, published only once it has started. `this.shell` used to be assigned
+     * here, which meant it was non-null for the whole of the projection read — and anything that
+     * grabbed it in that window got a machine with no Worker behind it.
+     */
+    const shell = new Shell({
       onReady: (motd) => this.write(`${motd}\n\n`, 'term-dim'),
       onStatus: (t) => this.write(`${t}\n`, 'term-dim'),
       onFiles: (f) => { this.files = f; this.drawSidebar() },
@@ -106,18 +153,21 @@ export class ShellPanel {
     })
     try {
       const docs = await this.o.docs()
-      await this.shell.start(docs, (p) => this.o.read(p))
+      await shell.start(docs, (p) => this.o.read(p))
+      this.shell = shell
     } catch (e) {
-      this.write(`the shell did not start: ${(e as Error).message}\n`, 'term-bad')
+      this.bootError = `the shell did not start: ${(e as Error).message}`
+      this.write(`${this.bootError}\n`, 'term-bad')
+      shell.stop()
       this.shell = null
-    } finally {
-      this.booting = false
     }
   }
 
   private async reboot(): Promise<void> {
     this.shell?.stop()
     this.shell = null
+    // a reboot wants a NEW machine with freshly read documents, not whichever boot is in flight
+    this.booting = null
     this.saved = []
     if (this.out) this.out.textContent = ''
     await this.boot()
@@ -166,6 +216,9 @@ export class ShellPanel {
   }
 
   private drawSidebar(): void {
+    // Booting for the agent must not redraw a sidebar somebody else is using; the tree is rebuilt
+    // from `this.files` when the tab is next opened anyway.
+    if (this.o.visible && !this.o.visible()) return
     const host = this.o.sidebarHost
     host.replaceChildren()
 

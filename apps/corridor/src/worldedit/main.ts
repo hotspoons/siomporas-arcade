@@ -213,6 +213,9 @@ const shellRead = async (path: string): Promise<string | null> => {
 const shellPanel = new ShellPanel({
   host: pane('shell'),
   sidebarHost: inspector,
+  // the agent can boot this with the tab closed; the sidebar is SHARED, so it must not redraw
+  // over whatever pane the person is actually looking at
+  visible: () => mode === 'shell',
   docs: async () => {
     const [w, l, p] = await Promise.all([
       api.worlds().then((r) => r.worlds).catch(() => []),
@@ -246,7 +249,8 @@ const shellPanel = new ShellPanel({
  */
 const mcpSection = el('div', 'mcp-section')
 const bridge = new AgentBridge({
-  shell: () => shellPanel.machine,
+  // starts it if nobody has opened the Shell tab — an agent should not need a human to click first
+  shell: () => shellPanel.ensureMachine(),
   programs: async () => {
     const list = await api.programs().then((r) => r.programs).catch(() => [])
     const out: { path: string; text: string }[] = []
@@ -311,8 +315,19 @@ void api
     mcpToken = c.auth.token
     bridge.start()
   })
-  .catch(() => {
-    // An older service with no MCP config still runs the editor; the Agent tab says so.
+  .catch((e) => {
+    /*
+     * NOT A SILENT CATCH. The first version swallowed this, and when the bridge then failed to
+     * attach there was nothing anywhere saying why — no page error, no status, just a tools list
+     * missing seven entries. That is the same fail-soft the MCP report called out in code_hover,
+     * written by the same hands an hour later.
+     *
+     * An older service with no MCP config is a legitimate reason to have no bridge, so this is not
+     * fatal — but it is said out loud, in the console and in the Agent tab.
+     */
+    const why = String((e as Error)?.message ?? e)
+    console.warn(`[mcp] no bridge: the service did not answer /api/agent/mcp/config — ${why}`)
+    bridge.fail(`the service did not answer /api/agent/mcp/config: ${why}`)
   })
 
 let mode: Mode = 'world'

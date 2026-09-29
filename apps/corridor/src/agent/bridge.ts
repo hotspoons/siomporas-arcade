@@ -22,8 +22,14 @@ import type { Shell } from './shell'
 import * as lsp from './lsp'
 
 export interface BridgeOpts {
-  /** the wasm shell, once started — null while it is booting or if it failed */
-  shell: () => Shell | null
+  /**
+   * The wasm shell, STARTED IF IT IS NOT RUNNING.
+   *
+   * It used to be `() => Shell | null` and the tool refused with "open the Shell tab once" — which
+   * asks a human to click something before an agent can run a command, on a surface whose whole
+   * point is that the agent works alone. Starting a Worker needs nobody to have looked at it.
+   */
+  shell: () => Promise<Shell>
   /** every program on the volume, for the compilation the language tools answer from */
   programs: () => Promise<{ path: string; text: string }[]>
   /** what the person is looking at: world, level, selection, camera */
@@ -86,10 +92,18 @@ export class AgentBridge {
   /* ---- the tools this page brings ------------------------------------------------------------ */
 
   private build(): ToolDef[] {
-    const needShell = (): Shell => {
-      const s = this.o.shell()
-      if (!s) throw new Error('the editor’s shell has not started in this page — open the Shell tab once, then try again')
-      return s
+    /*
+     * Boots on first use, in the background, and every concurrent caller awaits the same boot. The
+     * first command in a session pays for the machine starting — seconds, not the tens that a
+     * Pyodide import costs — and the error if it genuinely cannot start says so rather than
+     * telling an agent to go and click a tab.
+     */
+    const needShell = async (): Promise<Shell> => {
+      try {
+        return await this.o.shell()
+      } catch (e) {
+        throw new Error(`the editor’s shell could not start: ${String((e as Error)?.message ?? e)}`)
+      }
     }
     /** Put every program in the compilation before a language question. Cheap after the first. */
     const compiled = async () => lsp.loadWorkspace(await this.o.programs())
@@ -123,7 +137,8 @@ export class AgentBridge {
            * when the caller did not say.
            */
           const cwd = a.cwd ? (String(a.cwd).startsWith('/') ? String(a.cwd) : `${SHELL_ROOT}/${String(a.cwd)}`) : SHELL_ROOT
-          const r = await needShell().exec(String(a.command), { cwd })
+          const shell = await needShell()
+          const r = await shell.exec(String(a.command), { cwd })
           // The effective cwd goes back in every answer: if it is ever not what the caller asked
           // for, that is visible rather than inferred from a later mystery.
           return { exitCode: r.exitCode, stdout: r.stdout, stderr: r.stderr, cwd }
@@ -141,7 +156,7 @@ export class AgentBridge {
            * "all changed at once, three hours ago". Renamed to what it actually is, with a pointer
            * to the tool that knows.
            */
-          const files = await needShell().list()
+          const files = await (await needShell()).list()
           return {
             files: files.map(({ mtime, ...f }) => ({ ...f, projectedAt: new Date(mtime).toISOString() })),
             note: 'projectedAt is when this page seeded the file, NOT when the document changed. program_list carries the real modified time.',
@@ -249,12 +264,28 @@ export class AgentBridge {
         }),
       )
       this.emit({ state: 'attached' })
+      /*
+       * WARM THE SHELL NOW, not on the first command. Booting the Worker and projecting the
+       * documents is ~8 s measured, which an agent pays as an unexplained pause on its first
+       * `shell_exec` — long enough to read as a hang. Attaching is the moment we know a page is
+       * going to be asked for things, so the cost is taken while nobody is waiting.
+       *
+       * Deliberately not awaited and deliberately swallowed: a shell that cannot start must not
+       * stop this page offering `code_check` and `editor_state`, which do not need it. A tool call
+       * that DOES need it will surface the real error through needShell().
+       */
+      void this.o
+        .shell()
+        .catch((e) => console.warn(`[mcp] the shell did not pre-start: ${String((e as Error)?.message ?? e)}`))
     }
 
     ws.onmessage = (ev) => void this.onCall(ev)
 
     ws.onclose = (ev) => {
       this.ws = null
+      // A bridge that never attaches is the failure with no symptom: the tools are simply absent
+      // from tools/list and nothing anywhere says why. One line per close is worth the noise.
+      console.warn(`[mcp] bridge socket closed (${ev.code})${ev.reason ? `: ${ev.reason}` : ''}`)
       // 1008 is the service refusing us — a wrong token. Retrying that forever is a hot loop
       // against a door that will not open, and it hides the reason behind "reconnecting".
       if (ev.code === 1008 || ev.code === 4401) return this.emit({ state: 'refused', detail: 'the service refused this page’s token — check the Agent tab' })
@@ -301,6 +332,12 @@ export class AgentBridge {
     const wait = Math.min(30_000, 500 * 2 ** this.retry++)
     this.emit({ state: 'retrying', detail: `${detail} — retrying in ${Math.round(wait / 1000)}s` })
     setTimeout(() => this.open(), wait)
+  }
+
+  /** Could not even try — no token, no config. Shows in the Agent tab instead of nothing. */
+  fail(detail: string): void {
+    this.stopped = true
+    this.emit({ state: 'refused', detail })
   }
 
   stop(): void {

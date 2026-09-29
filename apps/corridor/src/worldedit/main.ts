@@ -24,6 +24,8 @@ import { StagePanel } from './stage'
 import { ProgramPanel } from '../ui/programpanel'
 import { ShellPanel } from '../ui/shellpanel'
 import { AgentPanel } from '../ui/agentpanel'
+import { AgentBridge } from '../agent/bridge'
+import { McpPanel } from '../ui/mcppanel'
 import { fromUrl, load as loadNav, resolve as resolveNav, save as saveNav, toUrl } from './nav'
 import { ROOT, SITE_DOCS } from '../agent/projection'
 import { SplatsPanel } from './splats'
@@ -222,11 +224,63 @@ const shellPanel = new ShellPanel({
  * write is a live edit — so it asks for the live machine rather than making a second one. Two
  * filesystems over the same documents is two answers to "what does this file say".
  */
+/*
+ * THE MCP BRIDGE (agentmcp lane, 2026-09-29).
+ *
+ * This page dials the service and offers the tools that cannot live on it: the wasm shell and
+ * Monaco's TypeScript service. Everything else an outside agent can reach — worlds, levels,
+ * programs, the catalog, the runs, the splats — is a server-side tool and works with this tab shut
+ * (tools/worldeditor/mcptools.mjs). So this is not "the agent's access"; it is the part of it that
+ * needs a browser.
+ */
+const mcpSection = el('div', 'mcp-section')
+const bridge = new AgentBridge({
+  shell: () => shellPanel.machine,
+  programs: async () => {
+    const list = await api.programs().then((r) => r.programs).catch(() => [])
+    const out: { path: string; text: string }[] = []
+    // Sources one at a time rather than one bulk endpoint, because there is no bulk endpoint and
+    // a program list is tens of files, not thousands.
+    for (const p of list) {
+      const src = await api.program(p.id).then((r) => r.source).catch(() => null)
+      if (src !== null) out.push({ path: p.id, text: src })
+    }
+    return out
+  },
+  // `step` as well as `mode` since main split them: an agent asking what is on screen wants
+  // the stage, not just that we are in world mode.
+  state: () => ({ mode, step, world: selected, dirty }),
+  token: () => mcpToken,
+  label: 'world editor',
+  onStatus: (st) => mcpPanel.onBridge(st),
+})
+const mcpPanel = new McpPanel(mcpSection, () => bridge)
+
 const agentPanel = new AgentPanel({
   host: pane('agent'),
   transcriptHost: inspector,
   shell: () => shellPanel.machine,
+  extraSections: (host) => {
+    host.append(mcpSection)
+    void mcpPanel.load()
+  },
 })
+
+/*
+ * The token the bridge needs, fetched once. A browser's WebSocket cannot send an Authorization
+ * header, so the socket carries it in the query — same-origin, to our own service — and that means
+ * the page has to know it before it dials. See agent/bridge.ts.
+ */
+let mcpToken: string | null = null
+void api
+  .mcpConfig()
+  .then((c) => {
+    mcpToken = c.auth.token
+    bridge.start()
+  })
+  .catch(() => {
+    // An older service with no MCP config still runs the editor; the Agent tab says so.
+  })
 
 let mode: Mode = 'world'
 let step: Step = 'explore'

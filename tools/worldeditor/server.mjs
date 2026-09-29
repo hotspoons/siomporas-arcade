@@ -37,6 +37,8 @@ import * as levels from './levels.mjs'
 import { GitRepo, scan as gitScan } from './gitrepo.mjs'
 import { Platform } from './platform.mjs'
 import { attachAgentRelay } from './agentws.mjs'
+import { McpAuth } from './mcpauth.mjs'
+import { McpBridge } from './mcpbridge.mjs'
 import * as mcp from './mcp.mjs'
 import * as training from './training.mjs'
 import { Overpass, PUBLIC_MIRRORS } from './overpass.mjs'
@@ -335,6 +337,37 @@ function dist2(t, z, lon, lat) {
   const cx = -180 + ((t.x + 0.5) * 360) / cols
   const cy = 90 - ((t.y + 0.5) * 180) / rows
   return (cx - lon) ** 2 + (cy - lat) ** 2
+}
+
+/*
+ * THE MCP ENDPOINT'S TOKEN AND THE EDITOR BRIDGE (agentmcp lane, 2026-09-29).
+ *
+ * The token gates `/api/agent/mcp` and the bridge socket; see mcpauth.mjs for why it is optional
+ * and why it defaults on anywhere that is not plainly localhost. The bridge is how the service
+ * reaches tools that only exist in a page — the wasm shell and the TypeScript service.
+ */
+const mcpAuth = await new McpAuth({ dataDir: DATA, env }).load()
+const mcpBridge = new McpBridge({ log: console })
+
+/**
+ * The service calling itself, so an MCP tool takes exactly the path the editor's own request does
+ * — validation, warnings and all. One hop for one implementation of every rule.
+ */
+async function apiFetch(method, apiPath, body) {
+  const r = await fetch(`http://127.0.0.1:${PORT}${apiPath}`, {
+    method,
+    headers: body === undefined ? {} : { 'Content-Type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  })
+  const text = await r.text()
+  let parsed
+  try { parsed = text ? JSON.parse(text) : null } catch { parsed = { raw: text.slice(0, 2000) } }
+  if (!r.ok) {
+    const e = new Error(parsed?.error ?? `HTTP ${r.status} from ${apiPath}`)
+    e.status = r.status
+    throw e
+  }
+  return parsed
 }
 
 const server = http.createServer(async (req, res) => {
@@ -836,6 +869,24 @@ async function api(req, res, seg, q) {
         if (req.method === 'DELETE') return json(res, 200, await platform.clear())
       }
       /*
+       * WHAT THE AGENT TAB NEEDS: the URL, the token to paste, whether it is enforced, and who is
+       * attached. It is NOT gated by the token — the page asking is the page that shows you the
+       * token, and requiring the secret to learn the secret is a locked door with the key inside.
+       * It is same-origin and behind whatever fronts the editor, which is the boundary that counts.
+       */
+      if (seg[1] === 'mcp' && seg[2] === 'config' && req.method === 'GET') {
+        return json(res, 200, { url: mcpUrl(req), auth: mcpAuth.describe(), bridge: mcpBridge.describe() })
+      }
+      if (seg[1] === 'mcp' && seg[2] === 'config' && req.method === 'POST') {
+        const body = await readJson(req)
+        try {
+          const token = await mcpAuth.set(body?.token)
+          return json(res, 200, { url: mcpUrl(req), auth: { ...mcpAuth.describe(), token } })
+        } catch (e) {
+          return json(res, e.status ?? 500, { error: String(e.message ?? e) })
+        }
+      }
+      /*
        * THE MCP SERVER, and what a session should be told about it.
        *
        * `GET /api/agent/mcp` answers with the `mcpServers` entry to put in `session/new` — the
@@ -857,7 +908,9 @@ async function api(req, res, seg, q) {
         })
       }
       if (seg[1] === 'mcp' && req.method === 'POST') {
-        const out = await mcp.handle(await readJson(req), { root: store.root, store, levels })
+        const verdict = mcpAuth.check(req, new URL(req.url, 'http://localhost'))
+        if (!verdict.ok) return json(res, 401, { error: verdict.why })
+        const out = await mcp.handle(await readJson(req), { root: store.root, store, levels, apiFetch, bridge: mcpBridge })
         // a JSON-RPC notification has no reply, and 202 with an empty body is what says so
         if (!out) { res.writeHead(202, CORS); res.end(); return }
         return json(res, 200, out)
@@ -1102,6 +1155,7 @@ async function api(req, res, seg, q) {
  * in the first milliseconds would otherwise be dropped with no handler and no explanation.
  */
 attachAgentRelay(server, { platform })
+mcpBridge.attach(server, { auth: mcpAuth })
 
 server.listen(PORT, HOST, () => {
   console.log(`worldeditor on http://${HOST}:${PORT}`)

@@ -437,6 +437,23 @@ export const api = {
   agentDeployments: () => call<{ agents: { name: string; namespace?: string; phase?: string }[] }>('/api/agent/agents'),
   /** the editor as an MCP server, if the service is configured to offer itself as one */
   agentMcp: () => call<{ servers: { name: string; command: string; args?: string[] }[]; url: string; why?: string }>('/api/agent/mcp'),
+
+  /* ---- MCP: this editor as tools for an outside agent (agentmcp lane) ----
+   * `mcpConfig` is deliberately NOT gated by the token it returns — the page asking is the page
+   * that shows you the token, and needing the secret to read the secret is a locked door with the
+   * key inside. It is same-origin, behind whatever fronts the editor. */
+  mcpConfig: () =>
+    call<{
+      url: string
+      auth: { required: boolean; source: 'env' | 'file' | 'minted' | 'none'; token: string | null }
+      bridge: { attached: number; pages: { id: string; label: string; tools: number }[]; tools: string[] }
+    }>('/api/agent/mcp/config'),
+  /** An empty string mints a fresh one; anything else is an override. */
+  setMcpToken: (token: string) =>
+    call<{ url: string; auth: { required: boolean; source: 'env' | 'file' | 'minted' | 'none'; token: string | null } }>('/api/agent/mcp/config', {
+      method: 'POST',
+      body: JSON.stringify({ token }),
+    }),
   /** write-only: the personal access token goes up and nothing brings it back */
   setAgentCredential: (body: { base: string; token: string; user?: string }) =>
     call<{ set: boolean; base: string | null }>('/api/agent/credential', { method: 'PUT', body: JSON.stringify(body) }),

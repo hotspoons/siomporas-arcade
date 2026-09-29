@@ -16,6 +16,7 @@
 import { readdir, readFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import path from 'node:path'
+import { serverTools } from './mcptools.mjs'
 
 export const PROTOCOL_VERSION = '2025-06-18'
 
@@ -147,6 +148,13 @@ export const TOOLS = [
   },
 ]
 
+/*
+ * What an attached page is expected to offer (apps/corridor/src/agent/bridge.ts). This list exists
+ * ONLY to turn "no such tool" into "no editor is attached" — the page is still the authority on
+ * what it actually provides, and a name here that no page offers is refused exactly the same way.
+ */
+export const BRIDGE_TOOL_NAMES = new Set(['shell_exec', 'shell_list', 'code_check', 'code_outline', 'code_hover', 'code_definition', 'editor_state'])
+
 const ok = (text) => ({ content: [{ type: 'text', text }] })
 const bad = (text) => ({ content: [{ type: 'text', text }], isError: true })
 
@@ -229,12 +237,39 @@ export async function handle(message, ctx) {
     })
   }
   if (method === 'notifications/initialized' || id === undefined) return null // a notification wants no reply
-  if (method === 'tools/list') return reply({ tools: TOOLS })
+
+  /*
+   * THREE SOURCES OF TOOLS, and an agent should not be able to tell them apart:
+   *
+   *   TOOLS          the four document tools below — the original surface
+   *   serverTools    everything with an /api handler, run service-side so it works with no
+   *                  browser open (mcptools.mjs)
+   *   bridge         what an attached editor page brings — the wasm shell, the TypeScript
+   *                  service, the live view. Absent from the list when no page is attached,
+   *                  because advertising a tool that must fail is worse than not having it.
+   */
+  const extra = ctx.apiFetch ? serverTools({ apiFetch: ctx.apiFetch }) : []
+  const bridged = ctx.bridge?.tools() ?? []
+  // only the three fields MCP defines — `run` is ours and must not go over the wire
+  const all = [...TOOLS, ...extra.map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema })), ...bridged]
+
+  if (method === 'tools/list') return reply({ tools: all })
   if (method === 'tools/call') {
     const name = params?.name
-    if (!TOOLS.some((t) => t.name === name)) return error(-32602, `no such tool: ${name}`)
+    const args = params?.arguments ?? {}
     try {
-      return reply(await callTool(name, params?.arguments ?? {}, ctx))
+      if (TOOLS.some((t) => t.name === name)) return reply(await callTool(name, args, ctx))
+      const own = extra.find((t) => t.name === name)
+      if (own) return reply(ok(JSON.stringify(await own.run(args), null, 2)))
+      if (ctx.bridge?.has(name)) return reply(ok(JSON.stringify(await ctx.bridge.call(name, args), null, 2)))
+      /*
+       * A NAME THE BRIDGE WOULD OFFER IF A PAGE WERE OPEN is the single most likely miss here, and
+       * "no such tool" would send an agent looking for a typo. Say which it is.
+       */
+      if (BRIDGE_TOOL_NAMES.has(name)) {
+        return reply(bad(`"${name}" runs inside the editor page and no editor is attached. Open the world editor in a browser and call it again.`))
+      }
+      return error(-32602, `no such tool: ${name}`)
     } catch (e) {
       // a THROWN tool is still a tool result: MCP distinguishes a protocol error from a tool that
       // failed, and reporting the second as the first makes the agent think the server is broken

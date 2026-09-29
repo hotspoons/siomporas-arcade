@@ -459,8 +459,23 @@ def main():
     obj.select_set(True)
     rig.select_set(True)
     bpy.context.view_layer.objects.active = rig
-    bpy.ops.export_scene.gltf(filepath=args.dst, export_format="GLB", use_selection=True)
-    say("exported", {"path": args.dst, "bytes": os.path.getsize(args.dst)})
+    """
+    EXPORT THE DEFORM BONES ONLY.
+
+    Rigify emits 706 bones and 160 of them deform; the rest are controls, mechanisms and widget
+    holders. `export_scene.gltf` defaults to `export_def_bones=False`, which puts EVERY bone in the
+    skin — so the .glb carried 706 joints, of which measurement found 73 with any weight at all and
+    633 dead. Every consumer then allocates joint matrices for all 706 and skins against them, and
+    nothing anywhere says the other 633 do nothing.
+
+    The script already reported the right number ("vertex_groups_on_mesh: 160") which is what made
+    this hard to see: Blender held 160 groups and the exporter wrote 706 joints, and the log only
+    showed the first.
+    """
+    bpy.ops.export_scene.gltf(filepath=args.dst, export_format="GLB", use_selection=True,
+                              export_def_bones=True)
+    say("exported", {"path": args.dst, "bytes": os.path.getsize(args.dst),
+                     "skin_joints": sum(1 for b in rig.data.bones if b.use_deform)})
 
 
 main()

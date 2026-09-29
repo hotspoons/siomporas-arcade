@@ -1,9 +1,18 @@
 # Rigging: getting bones back into the platform
 
-**Status:** nothing in the library is rigged, and nothing in the pipeline rigs anything. The
-Blender half of a character rigger exists and works; it ran on an x86_64 box that this
-devcontainer is not. The editor half — the four wheel slots — landed 2026-09-29 and has never
-been opened on a real asset, because there is no asset it can open on.
+**Status (updated 2026-09-29, evening):** **Blender 5.1.2 now builds and runs on this aarch64
+box**, which was the blocker for everything below — see [the build note](#the-arm64-build-is-done).
+Both halves now run here:
+
+| | state |
+|---|---|
+| character rig (`tools/sf2-probe/rigging/rig_character.py`) | **runs green on Kestrel**: 706 bones, 160 deform, verify ok, pose volume ratios 0.981–0.997 |
+| vehicle rig (`tools/rigging/rig_vehicle.py`) | **new, works**: four wheels cut out of a fused reconstruction and given bones, FL/FR/RL/RR |
+| the editor's four wheel slots | still never opened on a real asset — now unblocked, since the vehicle rigger produces one |
+| lips and eyes | **measured: zero weight on every lip and eye bone.** The defect is real and named below |
+
+The original framing of this document — "no asset has a bone, and characters are blocked on
+arm64" — was right about the library and wrong about the blocker.
 **Audience:** whoever picks this up next.
 **Companions:** [`PLAN-PHYSICS.md`](PLAN-PHYSICS.md) (what the engine does and does not need bones
 for), [`PLAN-VEHICLES-ACTORS.md`](PLAN-VEHICLES-ACTORS.md) (the documents a rig feeds).
@@ -169,6 +178,62 @@ asset has real wheel nodes to drive"; the validator already reads `if (from_rig 
 so turning it on for a rigged asset restores a warning that will then mean something.
 
 ---
+
+## The arm64 build is done
+
+`.devcontainer/build-blender.sh` builds 5.1.2 from source into a named volume and it is installed:
+`/usr/local/bin/blender`. It had been stuck since 2026-09-16 for a reason worth writing down,
+because it will happen again: **three object files were 656-byte stubs defining zero symbols**,
+truncated by a compile the OOM killer interrupted. `make` treats them as up to date — their mtimes
+are newer than their sources — so the final link failed identically forever with undefined
+references to `node_deselect_all` and friends. Find them by comparing object size to SOURCE size
+(plenty of objects are legitimately tiny), delete the stubs and the `.a` archives holding them, and
+re-run. Memory is the job limit, not cores: budget ~2.5 GB per job.
+
+## What is actually wrong with the character rig
+
+Measured on the Kestrel output, freshly regenerated:
+
+| | |
+|---|---|
+| joint heights vs human proportions | within 0.02 of the Drillis–Contini fractions at every joint. **The fit is good.** |
+| pose volume ratios | 0.997 / 0.997 / 0.981 — the cage-and-transfer method works |
+| skin joints in the exported .glb | **was 706, now 160** (see below) |
+| bones with any weight at all | 73 |
+| lip bones with weight | **0** |
+| eye bones with weight | **0** |
+| brow bones with weight | 2, totalling 45.9 against the jaw's 1,918 |
+
+Rich remembers "her waist joints down by her feet, her legs coming out of her model's feet". That
+was real and it is **fixed** — the fork's `fa5dea2` ("read every bone before writing any, or
+connected bones transform twice") is exactly the cascade that produces it, and the joints now land
+where a human's do. What is left is the face.
+
+**`export_def_bones=True` was missing.** Rigify emits 706 bones and 160 deform; the glTF exporter
+defaults to putting EVERY bone in the skin, so the file carried 706 joints of which 633 were dead.
+Fixed; the file is 348 KB smaller and every consumer stops allocating 546 useless joint matrices.
+This was hard to see because the script's own log said `vertex_groups_on_mesh: 160` — Blender held
+160 groups and the exporter wrote 706 joints, and only the first number was printed.
+
+### Why lips and eyes do not move, and what would fix it
+
+Bone-heat runs over the **voxel-remeshed cage**, and at that resolution a cage has no lip seam and
+no eye socket — the mouth is one surface and the lids are fused to the eyeball. Heat therefore
+cannot separate `lip.T` from `lip.B`, and those bones end up owning nothing. The jaw works because
+it is a large volume; the brows barely work because they are a ridge.
+
+Three ways out, cheapest first, and none of them is "raise the voxel resolution" — the cage has to
+stay closed, and a finer cage still fuses a closed mouth:
+
+1. **Weight the face from the ORIGINAL mesh, not the cage.** Bone-heat needs a closed surface, but
+   the face bones do not need bone-heat: they need a local falloff. Assign lip, lid and brow
+   weights by distance to the bone segment on the real geometry, normalised against whatever the
+   cage already gave the head. The rest of the body keeps the cage path unchanged.
+2. **Shape keys instead of bones** for the face, driven by the same controls. A reconstruction's
+   face is a surface, and blendshapes do not care whether it is closed.
+3. **Give the reconstruction a mouth.** Neither of the above opens lips that were reconstructed
+   sealed — if the source has no lip line, nothing downstream can invent one, and that is an
+   assetgen problem rather than a rigging one.
 
 ## Stage 4 — characters
 

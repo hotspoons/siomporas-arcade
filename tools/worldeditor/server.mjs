@@ -911,8 +911,17 @@ async function api(req, res, seg, q) {
         const verdict = mcpAuth.check(req, new URL(req.url, 'http://localhost'))
         if (!verdict.ok) return json(res, 401, { error: verdict.why })
         const out = await mcp.handle(await readJson(req), { root: store.root, store, levels, apiFetch, bridge: mcpBridge })
-        // a JSON-RPC notification has no reply, and 202 with an empty body is what says so
-        if (!out) { res.writeHead(202, CORS); res.end(); return }
+        /*
+         * A JSON-RPC notification has no reply, and 202 with an empty body is what says so.
+         *
+         * `return true`, NOT a bare `return`. The dispatcher above reads `api()`'s return value —
+         * `if (r !== undefined) return r` — so a handler that answers the request and returns
+         * undefined falls through to the static file server and then to the 404, both of which
+         * write to a response that has already ended. The process died with
+         * ERR_HTTP_HEADERS_SENT on the first `notifications/initialized` any MCP client sent,
+         * which is the second message of every session.
+         */
+        if (!out) { res.writeHead(202, CORS); res.end(); return true }
         return json(res, 200, out)
       }
       if (seg[1] === 'agents' && req.method === 'GET') {

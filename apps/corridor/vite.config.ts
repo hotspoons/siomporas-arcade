@@ -119,7 +119,25 @@ export default defineConfig({
     // DEV ONLY, and only when WORLDEDITOR is set. `tools/worldeditor` serves these paths in the
     // pod, from the same origin as the app; this makes development identical to that, so the
     // world editor's fetches are relative in both places and there is no CORS anywhere.
-    ...(process.env.WORLDEDITOR ? { proxy: { '/api': process.env.WORLDEDITOR, '/assetsvc': process.env.WORLDEDITOR } } : {}),
+    /*
+     * `ws: true` IS NOT OPTIONAL, and the short form does not imply it.
+     *
+     * `{ '/api': url }` proxies HTTP and drops the WebSocket upgrade on the floor — no error, the
+     * socket simply never opens. The MCP bridge dials `/api/agent/bridge` from `location.origin`,
+     * which in development is Vite rather than the service, so every browser tool ("run this in
+     * the editor's shell", "what does TypeScript say about this file") came back as "no editor is
+     * attached" while an editor sat attached to nothing. In the pod there is no proxy — the world
+     * editor serves the page and the socket from one origin — so this is a development-only hole,
+     * which is the kind that stays open longest.
+     */
+    ...(process.env.WORLDEDITOR
+      ? {
+        proxy: {
+          '/api': { target: process.env.WORLDEDITOR, ws: true, changeOrigin: true },
+          '/assetsvc': { target: process.env.WORLDEDITOR, changeOrigin: true },
+        },
+      }
+      : {}),
   },
   build: {
     target: 'es2022',

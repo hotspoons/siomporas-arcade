@@ -120,6 +120,29 @@ export class AgentPanel {
   private drawSidebar(): void {
     const host = this.o.transcriptHost
     host.replaceChildren()
+    /*
+     * WHATEVER ELSE HAPPENS IN HERE, THE EXTRA SECTIONS GET DRAWN.
+     *
+     * This used to be one call at the very end, and every `return` above it silently skipped it —
+     * including the first one, which fires whenever no platform credential is stored. So the MCP
+     * pane, which the `agentmcp` lane hung on this hook, did not exist on any installation that
+     * had not connected to the platform: Rich looked for it and found nothing.
+     *
+     * The two things are unrelated, which is what makes the gate a bug rather than a policy. The
+     * platform credential is how THIS PAGE drives a hosted agent. MCP is how an OUTSIDE agent
+     * drives this editor — a different direction, a different token, and useful precisely when
+     * there is no hosted agent to talk to.
+     *
+     * `try`, because a section belonging to somebody else must not be able to take the sidebar
+     * down with it.
+     */
+    const extras = () => {
+      try {
+        this.o.extraSections?.(host)
+      } catch (e) {
+        console.warn('agent sidebar: an extra section threw', e)
+      }
+    }
 
     /* ---- the platform credential ---- */
     if (!this.platform?.set) {
@@ -145,6 +168,7 @@ export class AgentPanel {
         },
       }))
       host.append(g)
+      extras()
       return
     }
 
@@ -193,7 +217,7 @@ export class AgentPanel {
       host.append(g)
     }
 
-    this.o.extraSections?.(host)
+    extras()
   }
 
   private async reload(): Promise<void> {

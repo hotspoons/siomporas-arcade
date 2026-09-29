@@ -486,7 +486,11 @@ export class PlaceMode {
       tabs.append(b)
     }
     root.append(tabs)
-    if (this.frameWarning) root.append(frameBanner('placements.json', this.frameWarning))
+    // THE WARNING IS NOT THE FIRST THING. It was appended here, above the tab content, which put
+    // it back on top of the preview the moment a world actually had a frame mismatch — so the
+    // panel read exactly as it did before (Rich, 2026-09-28: "it should show a little preview at
+    // the top instead of the awful placements.json warning") on every world where the warning was
+    // true, which is the only case anybody sees it. Each tab now places it under its own heading.
     if (this.panelTab === 'assets') this.assetsTab(root)
     else this.placedTab(root, fly)
   }
@@ -551,6 +555,9 @@ export class PlaceMode {
       box.title = `${picked.id} — drag it onto the world, or click the ground`
       root.append(box)
     }
+    // under the preview, not in front of it — still unmissable, since nothing else in this editor
+    // gets a banner, but no longer standing between you and the thing you came here to do
+    if (this.frameWarning) root.append(frameBanner('placements.json', this.frameWarning))
 
     root.append(el('h2', '', this.armed ? 'double-click the ground to place it' : 'drag one in, or pick it and double-click the ground'))
 
@@ -599,6 +606,8 @@ export class PlaceMode {
   }
 
   private placedTab(root: HTMLElement, fly: (pts: [number, number][]) => void) {
+    // here it IS the first thing: every row below it is a coordinate the warning says is displaced
+    if (this.frameWarning) root.append(frameBanner('placements.json', this.frameWarning))
     const list = el('div', 'list')
     for (const p of this.doc.items) {
       const e = this.entry(p.asset)

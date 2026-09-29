@@ -83,8 +83,12 @@ const preview = await page.evaluate(() => {
   const box = document.querySelector('#se-inspector .palette-preview')
   if (!box) return null
   const panel = document.getElementById('se-inspector')
-  // the tab strip is first by design; the preview must be the first thing IN the Assets tab
-  const first = [...(panel?.children ?? [])].find((n) => !n.classList.contains('place-tabs'))
+  // The tab strip is first by design; the preview must be the first thing IN the Assets tab.
+  // `place-tabs` was this strip's class until it was rebuilt on the shared `Tabs` markup (Rich:
+  // "Tabs from assets should be used in the place things editor tabs"), and the stale name meant
+  // this filter skipped nothing and the check failed on a panel that was correct. Match either.
+  const first = [...(panel?.children ?? [])]
+    .find((n) => !n.classList.contains('place-tabs') && !n.classList.contains('tab-strip'))
   const pal = document.querySelector('#se-inspector .palette')
   return {
     first: first?.className,

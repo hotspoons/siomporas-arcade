@@ -13,6 +13,7 @@ import { icon } from './icons'
 import { bodyOf, empty, group, readout, segmented, select, textArea, textField, toggle } from './controls'
 import { MeshView } from './meshview'
 import { KINDS } from '../classes'
+import { guessWheelSlots, swapEnds, swapSides, WHEEL_SLOTS } from '../rigslots'
 import { MESH_FILE, assetsvc, type AssetItem, type AssetJob, type Material, type MeshVariant, type ModelRoster } from '../assetsvc'
 import { actorExtension } from './actors'
 import { weaponExtension } from './weapons'
@@ -1555,6 +1556,14 @@ export class AssetCatalog {
    *
    * Clicking a bone lights it up in the preview, because a list of forty names is not how anybody
    * knows which one is the near-side front wheel.
+   *
+   * THE WHEELS ARE FOUR LABELLED SLOTS, not four ticks in the `wheel` role. The physics lane asked
+   * for that and the reason stands on its own: nothing downstream can detect a wrong order. It can
+   * count four bones; it cannot tell a front-left from a rear-left. The wrong sequence builds a car
+   * that steers with its back wheels and drives with its front ones, which reads as "the handling
+   * feels weird", gets blamed on the handling profile, and costs a day before anybody suspects the
+   * rig. `guessWheelSlots` fills the slots from where the bones are, says what it assumed, and the
+   * two swap buttons are there because geometry cannot know which end of a car is the front.
    */
   private rigEditor(item: AssetItem, bones: string[], view: MeshView): void {
     const d = new Dialog({ title: `Rig · ${item.id}`, size: 'lg', icon: 'adjustments-horizontal', movable: true })
@@ -1566,12 +1575,80 @@ export class AssetCatalog {
     }
     const body = el('div', 'rig-body')
 
+    // the four slots, held apart from the other roles because their ORDER is the whole point
+    let wheels: string[] = [...(roles.wheel ?? [])].slice(0, 4)
+    while (wheels.length < 4) wheels.push('')
+    let inferred = ''
+
+    const wheelBlock = (): HTMLElement => {
+      const wrap = el('div', 'rig-wheels')
+      const head = el('div', 'rig-wheels-head')
+      const title = el('strong')
+      title.textContent = 'Wheels'
+      const bound = wheels.filter(Boolean).length
+      const warn = el('span', bound === 4 ? 'rig-note' : 'rig-note warn')
+      warn.textContent = bound === 4
+        ? (inferred || 'FL, FR, RL, RR — the order the handling reads')
+        : `${bound} of 4 — a car with fewer will not steer, and nothing downstream will say so`
+      head.append(title, warn)
+      wrap.append(head)
+      for (let i = 0; i < 4; i++) {
+        const row = el('div', 'rig-row')
+        const slot = el('button', 'rig-bone rig-slot')
+        slot.textContent = WHEEL_SLOTS[i]
+        slot.title = wheels[i] ? `show ${wheels[i]} in the preview` : 'nothing bound here yet'
+        slot.onclick = () => { if (wheels[i]) { view.setSkeleton(true); view.highlightBone(wheels[i]) } }
+        const pick = select({
+          label: '',
+          value: wheels[i],
+          options: [{ value: '', label: '—' }, ...bones.map((b) => ({ value: b, label: b }))],
+          onChange: (v) => {
+            // a bone can only be in one corner; taking it here takes it from wherever it was
+            for (let j = 0; j < 4; j++) if (j !== i && wheels[j] === v) wheels[j] = ''
+            wheels[i] = v
+            inferred = ''
+            draw()
+          },
+        })
+        row.append(slot, pick)
+        wrap.append(row)
+      }
+      const acts = el('div', 'rig-wheel-acts')
+      acts.append(
+        button({
+          label: 'Infer from the model',
+          variant: 'ghost',
+          onClick: () => {
+            const places = view.bonePlaces()
+            const candidates = wheels.filter(Boolean).length === 4
+              ? wheels.filter(Boolean)
+              : bones.filter((b) => /wheel|tyre|tire|rim/i.test(b))
+            const g = guessWheelSlots(candidates, places)
+            if (!g) {
+              toast(`could not place ${candidates.length} bone${candidates.length === 1 ? '' : 's'} at four corners — bind the four wheels and try again`, 'warn')
+              return
+            }
+            wheels = [...g.order]
+            // SAY WHAT WAS ASSUMED. The guess is certain about the split and not about the
+            // orientation, and a reading that hides which half it was sure of is worse than none.
+            inferred = g.oriented ? `${g.note} · the names said which end` : `${g.note} · assumed — check it and swap if it is backwards`
+            draw()
+          },
+        }),
+        button({ label: 'Swap front/rear', variant: 'ghost', onClick: () => { wheels = [...swapEnds(wheels)]; draw() } }),
+        button({ label: 'Swap sides', variant: 'ghost', onClick: () => { wheels = [...swapSides(wheels)]; draw() } }),
+      )
+      wrap.append(acts)
+      return wrap
+    }
+
     const draw = () => {
       body.replaceChildren()
       const summary = Object.entries(roles).filter(([, v]) => v.length)
       body.append(hint(summary.length
         ? summary.map(([r, v]) => `${r}: ${v.join(', ')}`).join(' · ')
         : 'Nothing bound yet — the game will guess from the names.'))
+      body.append(wheelBlock())
       const list = el('div', 'rows rig-rows')
       for (const bone of bones) {
         const row = el('div', 'rig-row')
@@ -1582,7 +1659,9 @@ export class AssetCatalog {
         const pick = select({
           label: '',
           value: roleOf(bone),
-          options: [{ value: '', label: '—' }, ...RIG_ROLES.map((r) => ({ value: r, label: r }))],
+          // `wheel` is deliberately absent: it is set in the four slots above, and two ways to
+          // bind the same role is how one of them ends up holding a stale third wheel
+          options: [{ value: '', label: '—' }, ...RIG_ROLES.filter((r) => r !== 'wheel').map((r) => ({ value: r, label: r }))],
           onChange: (v) => {
             for (const key of Object.keys(roles)) roles[key] = roles[key].filter((b) => b !== bone)
             if (v) roles[v] = [...(roles[v] ?? []), bone]
@@ -1598,7 +1677,7 @@ export class AssetCatalog {
     draw()
     d.body.append(body)
     d.footer(
-      button({ label: 'Clear', variant: 'ghost', onClick: () => { for (const k of Object.keys(roles)) delete roles[k]; draw() } }),
+      button({ label: 'Clear', variant: 'ghost', onClick: () => { for (const k of Object.keys(roles)) delete roles[k]; wheels = ['', '', '', '']; inferred = ''; draw() } }),
       button({ label: 'Cancel', variant: 'ghost', onClick: () => d.close() }),
       button({
         label: 'Save the rig',
@@ -1606,7 +1685,14 @@ export class AssetCatalog {
         variant: 'primary',
         onClick: async () => {
           try {
-            await assetsvc.put({ id: item.id, rig: { roles, convention: item.rig?.convention, updated: new Date().toISOString() } })
+            // the slots are the source of truth for `wheel`; empty ones are dropped rather than
+            // written as blanks, so a half-bound rig reads as a short list and the vehicle form's
+            // "binds N wheel bones" warning fires
+            const out = { ...roles }
+            const bound = wheels.filter(Boolean)
+            if (bound.length) out.wheel = bound
+            else delete out.wheel
+            await assetsvc.put({ id: item.id, rig: { roles: out, convention: item.rig?.convention, updated: new Date().toISOString() } })
             toast(`${item.id}: rig saved`, 'ok')
             d.close()
             await this.refresh()

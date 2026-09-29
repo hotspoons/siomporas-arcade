@@ -445,6 +445,30 @@ export class MeshView {
     mark.visible = true
   }
 
+  /**
+   * Where every bone is, in the model's own frame.
+   *
+   * For the rig editor to work out which of four wheel bones is the near-side front one. Taken
+   * relative to `pivot` rather than in world space on purpose: the preview spins, and a reading
+   * that changes with the turntable would have the front wheels swapping ends as you watch.
+   *
+   * No axis convention is asserted here — a glb carries whatever the exporter felt like, and
+   * deciding which way is forward is the caller's problem, with the model on screen to check it
+   * against. All this promises is that the four readings are in one consistent frame.
+   */
+  bonePlaces(): Record<string, { x: number, y: number, z: number }> {
+    const out: Record<string, { x: number, y: number, z: number }> = {}
+    const v = new THREE.Vector3()
+    this.pivot.updateWorldMatrix(true, true)
+    this.pivot.traverse((o) => {
+      if (!(o as THREE.Bone).isBone || !o.name || out[o.name]) return
+      v.setFromMatrixPosition(o.matrixWorld)
+      this.pivot.worldToLocal(v)
+      out[o.name] = { x: v.x, y: v.y, z: v.z }
+    })
+    return out
+  }
+
   setWireframe(on: boolean) {
     this.wire = on
     this.pivot.traverse((o) => {

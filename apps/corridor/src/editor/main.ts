@@ -86,6 +86,8 @@ let mode: Mode = (location.hash.split(':')[1] as Mode) || 'areas'
 // they are declarations, so they are hoisted, and none of them runs before the first event.
 restoreTheme()
 const assets = new AssetCatalog({ extensions: [vehicleExtension(), actorExtension(), weaponExtension()] })
+// A probe needs to open the library without hunting for the toolbar button; this is the one hook.
+;(window as unknown as { __apexEditorAssets: () => void }).__apexEditorAssets = () => void assets.open()
 const ui = new EditorUI({
   onAssets: () => void assets.open(),
   onSite: (slug) => void loadSite(slug),
@@ -174,7 +176,21 @@ async function loadSite(slug: string, quality: 'edit' | 'preview' = 'edit') {
   await structs.load(slug, site, place.catalog) // after place: it shares the catalog place loaded
   roadWidth.setSite(site)
   grow.adopt()
-  ;(window as unknown as { corridor: unknown }).corridor = { site, scene, camera, areas, place, grow, preview, orbitTarget: orbit.target } // probes
+  ;(window as unknown as { corridor: unknown }).corridor = {
+    site, scene, camera, areas, place, grow, preview, orbitTarget: orbit.target,
+    /*
+     * FOR PROBES: which tool has the pointer, and where a screen pixel lands on the ground.
+     *
+     * Both were invisible from outside, and both are the questions you actually have when a click
+     * does not do what you expected — "did it go to the tool I think is active" and "did the ray
+     * find the ground at all". Without them the only observable is that nothing happened, which is
+     * true of half a dozen different causes.
+     */
+    mode: () => mode,
+    orbit,
+    groundAtPixel: (clientX: number, clientY: number) =>
+      groundAt({ clientX, clientY } as PointerEvent),
+  } // probes
   ;(window as unknown as { corridor: { structs: unknown } }).corridor.structs = structs
   applyLayers()
   toTop()
@@ -232,11 +248,30 @@ function flyTo(pts: [number, number][]) {
 // pointer: one raycast against the ground gives every mode its site-frame point
 const ray = new THREE.Raycaster()
 const ndc = new THREE.Vector2()
-let down: { x: number; y: number; t: number } | null = null
+let down: { x: number; y: number } | null = null
 let grabbing = false
 
+/*
+ * THE CANVAS, NOT THE WINDOW.
+ *
+ * Rich, 2026-09-29: "The draw area tool in the place editor for defining special areas for the map
+ * drops the points no where near where it was clicked."
+ *
+ * This read `innerWidth`/`innerHeight` and raw `clientX`/`clientY`, which is only right when the
+ * canvas IS the viewport. On `editor.html` it is — `#gl` is `position: fixed; inset: 0` — so this
+ * was correct for as long as the site editor was its own page. Inside the world editor it is one
+ * pane of two: below the top bar and left of the inspector (`body.worldedit #gl` in world.css). So
+ * every ray was off by the bar's height and scaled by the inspector's width, and the error grows
+ * across the screen — a click near the left edge lands close, one near the inspector lands far
+ * away. Nothing errors; the point simply appears somewhere else.
+ *
+ * It is not only the area tool. Every pick in this editor goes through here: dropping a prop,
+ * grabbing a vertex handle, the structures picker. The handles are 2.2 m spheres, so a ray that
+ * misses by tens of metres never hits one — which is why area pins could not be dragged either.
+ */
 function castRay(e: PointerEvent | WheelEvent) {
-  ndc.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1)
+  const r = canvas.getBoundingClientRect()
+  ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1)
   ray.setFromCamera(ndc, camera)
   return ray
 }
@@ -275,7 +310,7 @@ canvas.addEventListener('drop', (e) => {
 })
 
 canvas.addEventListener('pointerdown', (e) => {
-  down = { x: e.clientX, y: e.clientY, t: performance.now() }
+  down = { x: e.clientX, y: e.clientY }
   const r = castRay(e)
   if (mode === 'structures') {
     grabbing = structs.grab(r)
@@ -285,8 +320,21 @@ canvas.addEventListener('pointerdown', (e) => {
   grabbing = mode === 'areas' ? areas.grab(r) : place.grab(r) // grow edits the same objects place does
   orbit.enabled = !grabbing
 })
-/** a press-and-release within 400 ms and 5 px is a click, not the end of an orbit drag */
-const isClick = (e: PointerEvent) => !!down && performance.now() - down.t < 400 && Math.hypot(e.clientX - down.x, e.clientY - down.y) < 5
+/**
+ * A click is a press and release that did not MOVE. How long you held it is not the question.
+ *
+ * This used to also require the whole gesture inside 400 ms, to tell a click from the end of an
+ * orbit drag — but distance already tells those apart, and the clock quietly rejected deliberate
+ * clicks: lining up a polygon vertex and pressing carefully takes longer than that, and so does
+ * any click at all on a loaded machine. The point silently did not go down, which reads as the
+ * draw tool being broken rather than as the click being too slow. (Measured while chasing exactly
+ * that: a press-and-release with zero movement, rejected at 751 ms.)
+ *
+ * The case the clock protected against — press, orbit away, orbit back to the same pixel, release
+ * — needs the camera to return within five pixels of where it started, and while you are drawing
+ * the camera cannot rotate at all.
+ */
+const isClick = (e: PointerEvent) => !!down && Math.hypot(e.clientX - down.x, e.clientY - down.y) < 5
 canvas.addEventListener('pointermove', (e) => {
   if (mode === 'structures') {
     // while an interval is being picked the panel shows where on the spine the click would land
@@ -300,6 +348,8 @@ canvas.addEventListener('pointermove', (e) => {
   else place.dragTo(pt)
 })
 addEventListener('pointerup', (e) => {
+  // `enabled` is the grab lock; `enableRotate`/`enablePan` are the draw lock, and this must not
+  // undo the second while releasing the first
   orbit.enabled = true
   if (mode === 'structures') {
     if (grabbing) {
@@ -316,8 +366,8 @@ addEventListener('pointerup', (e) => {
     down = null
     return
   }
-  // a click is a click, not the end of an orbit drag
-  if (down && performance.now() - down.t < 400 && Math.hypot(e.clientX - down.x, e.clientY - down.y) < 5) {
+  // a click is a click, not the end of an orbit drag — `isClick`, not a second copy of its rule
+  if (isClick(e as PointerEvent)) {
     const pt = groundAt(e as PointerEvent)
     if (mode === 'areas') areas.click(pt)
     else place.click(pt)
@@ -372,7 +422,7 @@ addEventListener('keydown', (e) => {
     return
   }
   switch (e.key.toLowerCase()) {
-    case 'n': if (mode === 'areas') areas.startDraw(); break
+    case 'n': if (mode === 'areas') areas.startDraw(); break // startDraw calls onChange, which is refresh
     case 't': toTop(); break
     case 'v': void openPreview(); break
     case 'f': {
@@ -449,8 +499,32 @@ async function openPreview() {
  * save button and nothing else. Everything that changes the SHAPE of the panel (selection,
  * adding, deleting, mode) rebuilds it.
  */
+/*
+ * WHILE YOU ARE DROPPING PINS, THE WORLD HOLDS STILL.
+ *
+ * Rich, 2026-09-29: "Also clicking moves the world around - we should disable world move and limit
+ * to zoom in/out only when dropping pins."
+ *
+ * Orbit takes a drag as a rotation and a click is a drag of a few pixels, so drawing a polygon
+ * spun the camera between vertices: the fourth point went down on a view that was not the one you
+ * chose the first three on. `isClick` upstream stops the rotation being COMMITTED as a click, but
+ * the camera has already moved by then and the damage is to your aim, not to the document.
+ *
+ * ZOOM STAYS. It is the one camera control you want mid-draw — a polygon is usually drawn around
+ * something you need to get closer to — and it is on the wheel, so it cannot be confused with
+ * placing a point.
+ */
+function holdTheCamera(still: boolean) {
+  orbit.enableRotate = !still
+  orbit.enablePan = !still
+  orbit.enableZoom = true
+}
+
 function refresh(structural = true) {
   season = preview.season
+  // the draw state changes from the panel, the keyboard and the canvas, so it is read here rather
+  // than mirrored at each of those
+  holdTheCamera(mode === 'areas' && areas.drawing)
   if (structural) {
     if (mode === 'areas') areas.panel(ui.inspector, (a: Area) => flyTo(a.polygon))
     else if (mode === 'grow') grow.panel(ui.inspector, site, place.assets, flyTo)

@@ -1371,7 +1371,15 @@ async function boot() {
     // because a wizard you bounce between with the mouse does not need eight shortcuts
     const nth = '12345678'.indexOf(e.key)
     if (nth >= 0 && nth < MODES.length) setMode(MODES[nth])
-    else if (e.key.toLowerCase() === 'n') newWorld()
+    /*
+     * NOT WHILE THE SITE EDITOR HAS THE KEYBOARD.
+     *
+     * `n` is "new world" here and "new area" in the site editor, and both handlers are on
+     * `window` — so pressing it in Place mode started a polygon AND threw you out of Place into
+     * the Define stage, which looked like the draw tool doing nothing. The site editor is a whole
+     * application inside this one; while it is showing, its shortcuts win.
+     */
+    else if (e.key.toLowerCase() === 'n' && mode !== 'place') newWorld()
     else if (e.key === 'Enter' && at('define')) map.closeRing()
     else if (e.key === '/') {
       e.preventDefault()

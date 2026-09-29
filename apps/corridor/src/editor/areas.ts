@@ -61,6 +61,17 @@ export class AreaMode {
     return this.draw !== null
   }
 
+  /**
+   * The vertices of the draw in progress, for a probe to measure against.
+   *
+   * Exposed because "a vertex was added" is not the question — it passes just as happily on a
+   * vertex a hundred metres from the click, which is precisely the bug this was added for. The
+   * only useful check compares WHERE it landed with where the cursor was.
+   */
+  drawPoints(): [number, number][] | null {
+    return this.draw ? this.draw.map(([x, y]) => [x, y]) : null
+  }
+
   // --- geometry ------------------------------------------------------------------------------
   private colorFor(a: Area) {
     if (a.id === this.selected) return COLOR.selected

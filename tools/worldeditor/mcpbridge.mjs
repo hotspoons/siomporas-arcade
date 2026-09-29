@@ -180,6 +180,32 @@ export class McpBridge {
   }
 
   /**
+   * Tell every attached page that documents changed under it.
+   *
+   * THE MISSING CHANNEL, and its absence was the worst bug in the first cut: a server-side write
+   * landed, the page's shell kept serving the copy it seeded at open, and the next ordinary
+   * `sed -i` wrote that stale copy back — destroying the agent's edit with exit 0 and no warning.
+   * The UI not repainting was the same silence with smaller teeth.
+   *
+   * Fire-and-forget on purpose. A page that has gone away must not fail somebody's write; the
+   * sweep will drop it.
+   */
+  invalidate(paths, origin = 'mcp') {
+    if (!paths?.length) return 0
+    const msg = JSON.stringify({ type: 'invalidate', paths, origin })
+    let sent = 0
+    for (const page of this.pages) {
+      try {
+        page.ws.send(msg)
+        sent++
+      } catch {
+        /* a socket mid-close; the sweep collects it */
+      }
+    }
+    return sent
+  }
+
+  /**
    * Forward one call to a page that claims the tool.
    *
    * The error when nothing is attached names the fix, because it is the single most likely thing

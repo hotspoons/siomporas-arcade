@@ -28,6 +28,14 @@ export interface BridgeOpts {
   programs: () => Promise<{ path: string; text: string }[]>
   /** what the person is looking at: world, level, selection, camera */
   state: () => Record<string, unknown>
+  /**
+   * Documents changed under this page — a server-side MCP write, or another tab.
+   *
+   * Without this the page holds a copy nobody refreshes: the shell keeps serving what it seeded at
+   * open, the next `sed -i` writes that stale text back, and an agent's edit is destroyed with
+   * exit 0. The UI not repainting was the same silence with smaller teeth.
+   */
+  onInvalidate?: (paths: string[], origin: string) => void
   /** where the service is; default same origin */
   base?: string
   /** the MCP token, when the endpoint is gated — a WebSocket cannot send a header */
@@ -52,6 +60,9 @@ interface ToolDef {
   inputSchema: Record<string, unknown>
   run: (args: Record<string, unknown>) => Promise<unknown>
 }
+
+/** Where the projection is mounted in the shell. The same constant agent/projection.ts exports. */
+const SHELL_ROOT = '/workspace'
 
 const str = (description: string) => ({ type: 'string', description })
 const num = (description: string) => ({ type: 'number', description })
@@ -87,18 +98,55 @@ export class AgentBridge {
       {
         name: 'shell_exec',
         description:
-          'Run a command in the editor’s shell: coreutils, python and js over the projected documents (worlds/, levels/, programs/). NO NETWORK. Writing a projected file is a LIVE edit to that document. This runs inside a browser tab, so it needs an editor open.',
-        inputSchema: { type: 'object', properties: { command: str('e.g. `grep -rn "api.physics" programs/`'), cwd: str('default /work') }, required: ['command'], additionalProperties: false },
+          'Run a command in the editor’s shell over the projected documents. Present: bash sh ls cat cp mv rm mkdir touch head tail wc sort uniq cut tr grep sed awk find diff xargs stat du tee jq rg python3 — with heredocs, pipes and redirection. NO node, NO git, NO patch, NO network. '
+          + 'The filesystem is /workspace: programs/, worlds/, levels/, sites/, out/ and README.md. '
+          + 'Writing under programs/, worlds/ or levels/ is a LIVE edit to that document and SAVING IS IMMEDIATE — no commit step, no undo. Use out/ for scratch; nothing there is a document. '
+          + 'Runs inside a browser tab, so it needs an editor open.',
+        inputSchema: {
+          type: 'object',
+          properties: { command: str('e.g. `grep -rn "api.physics" programs/`'), cwd: str('absolute, or relative to /workspace. Defaults to /workspace EVERY call') },
+          required: ['command'],
+          additionalProperties: false,
+        },
         run: async (a) => {
-          const r = await needShell().exec(String(a.command), { cwd: a.cwd ? String(a.cwd) : undefined })
-          return { exitCode: r.exitCode, stdout: r.stdout, stderr: r.stderr }
+          /*
+           * ALWAYS AN EXPLICIT cwd, and that is the fix for a real bug rather than tidiness.
+           *
+           * Shell.exec remembers the directory a command left it in, which is right for the
+           * interactive Shell tab — it is a terminal. It is wrong here: a `cd` inside one tool call
+           * silently became the working directory of every later call, so `ls programs/` came back
+           * empty six calls later and the agent concluded the document tree was corrupt. It was
+           * not. Hidden state that makes an unrelated tool look broken produces confident wrong
+           * diagnoses, which is the most expensive kind of failure for an agent.
+           *
+           * Passing cwd explicitly also stops Shell.exec persisting it, because it only remembers
+           * when the caller did not say.
+           */
+          const cwd = a.cwd ? (String(a.cwd).startsWith('/') ? String(a.cwd) : `${SHELL_ROOT}/${String(a.cwd)}`) : SHELL_ROOT
+          const r = await needShell().exec(String(a.command), { cwd })
+          // The effective cwd goes back in every answer: if it is ever not what the caller asked
+          // for, that is visible rather than inferred from a later mystery.
+          return { exitCode: r.exitCode, stdout: r.stdout, stderr: r.stderr, cwd }
         },
       },
       {
         name: 'shell_list',
-        description: 'Every file the shell can see, with size and modified time. The shell’s filesystem IS the editor’s documents.',
+        description: 'Every file the shell can see, with its size. The shell’s filesystem IS the editor’s documents. Needs an editor open, like shell_exec. NOTE: `mtime` is when this page projected the file, not when the document was last changed — use program_list for that.',
         inputSchema: { type: 'object', properties: {}, additionalProperties: false },
-        run: async () => ({ files: await needShell().list() }),
+        run: async () => {
+          /*
+           * `mtime` OUT OF THE MACHINE IS THE SEED TIME, not the document's. Every file came back
+           * with the instant the tab attached, which is worse than useless: an agent reaches for a
+           * modified time precisely to detect the drift in finding 01, and this one always says
+           * "all changed at once, three hours ago". Renamed to what it actually is, with a pointer
+           * to the tool that knows.
+           */
+          const files = await needShell().list()
+          return {
+            files: files.map(({ mtime, ...f }) => ({ ...f, projectedAt: new Date(mtime).toISOString() })),
+            note: 'projectedAt is when this page seeded the file, NOT when the document changed. program_list carries the real modified time.',
+          }
+        },
       },
       {
         name: 'code_check',
@@ -113,11 +161,21 @@ export class AgentBridge {
       {
         name: 'code_outline',
         description:
-          'The declarations in a program — classes, functions, methods, consts — nested, each with the lines it occupies. Use it to edit a specific function without reading or rewriting the whole file.',
-        inputSchema: { type: 'object', properties: { path: str(''), source: str('') }, required: ['path'], additionalProperties: false },
+          'The declarations in a program — classes, functions, methods, top-level consts — nested, each with the lines it occupies, in FILE ORDER. Use it to edit one function without reading the whole file. Imports and in-function locals are left out unless you ask for them, because they buried everything else.',
+        inputSchema: {
+          type: 'object',
+          properties: { path: str(''), source: str('check this text instead of what is on disk'), imports: { type: 'boolean', description: 'include import bindings' }, locals: { type: 'boolean', description: 'include variables declared inside functions' } },
+          required: ['path'],
+          additionalProperties: false,
+        },
         run: async (a) => {
           await compiled()
-          return { outline: await lsp.outline(String(a.path), a.source === undefined ? undefined : String(a.source)) }
+          return {
+            outline: await lsp.outline(String(a.path), a.source === undefined ? undefined : String(a.source), {
+              imports: a.imports === true,
+              locals: a.locals === true,
+            }),
+          }
         },
       },
       {
@@ -209,10 +267,16 @@ export class AgentBridge {
   }
 
   private async onCall(ev: MessageEvent): Promise<void> {
-    let msg: { type?: string; id?: string; name?: string; args?: Record<string, unknown> }
+    let msg: { type?: string; id?: string; name?: string; args?: Record<string, unknown>; paths?: unknown[]; origin?: string }
     try {
       msg = JSON.parse(String(ev.data))
     } catch {
+      return
+    }
+    if (msg.type === 'invalidate') {
+      // The page decides what to do with it — refresh the shell, repaint, reload a model. The
+      // bridge only carries the news.
+      this.o.onInvalidate?.(Array.isArray(msg.paths) ? msg.paths.map(String) : [], String(msg.origin ?? 'unknown'))
       return
     }
     if (msg.type !== 'call' || !msg.id) return

@@ -85,12 +85,59 @@ export function serverTools({ apiFetch }) {
      * folders are real and `move` is a rename rather than a copy-and-delete that can lose a file
      * if the tab closes in between.
      */
-    T('program_list', 'Every program file and folder. Folders are listed even when empty, because an empty folder is something somebody just made.', {}, [], () => get('/api/programs')),
-    T('program_read', 'One program’s source.', { path: str('e.g. levels/rooftop/run — no extension unless it has one') }, ['path'], (a) => get(`/api/programs/${a.path}`)),
-    T('program_write', 'Create or replace a program. LIVE: the editor reloads it. Writing is not compiling — use code_typecheck to find out whether it is valid.', { path: str(''), source: str('the whole file') }, ['path', 'source'], (a) => put(`/api/programs/${a.path}`, { source: a.source })),
+    T(
+      'program_list',
+      'Every program file and folder. Folders are listed even when empty, because an empty folder is something somebody just made. Each entry carries `path` — the same string every other program_* tool takes.',
+      {},
+      [],
+      async () => {
+        const r = await get('/api/programs')
+        // The service calls it `id` and every mutating tool takes `path`. Same string; two names
+        // cost a wasted call working out that `game` fails where `game.ts` works. Both are returned
+        // rather than renaming the service's field, which other callers read.
+        return { ...r, programs: (r.programs ?? []).map((p) => ({ ...p, path: p.id })), dirs: r.dirs ?? [] }
+      },
+    ),
+    T(
+      'program_read',
+      'One program’s source. The path INCLUDES the extension — `levels/rooftop.ts`, not `levels/rooftop`.',
+      { path: str('e.g. levels/rooftop.ts — extension required') },
+      ['path'],
+      async (a) => ({ ...(await get(`/api/programs/${a.path}`)), path: a.path }),
+    ),
+    T(
+      'program_write',
+      'Create or replace a program; parent folders are made as needed. LIVE: the editor reloads it and any attached page refreshes. Writing is not compiling — call code_check to find out whether it is valid.',
+      { path: str('extension required, e.g. levels/rooftop.ts'), source: str('the whole file') },
+      ['path', 'source'],
+      (a) => put(`/api/programs/${a.path}`, { source: a.source }),
+    ),
     T('program_move', 'Rename or move a program or folder, in one operation.', { path: str('current path'), to: str('new path') }, ['path', 'to'], (a) => put(`/api/programs/${a.path}`, { move: a.to })),
     T('program_mkdir', 'Make a folder.', { path: str('') }, ['path'], (a) => post(`/api/programs/${a.path}`, {})),
-    T('program_delete', 'Delete a program. Set recursive for a FOLDER and everything inside it — which is asked for explicitly so a mistyped file path can never become a recursive delete.', { path: str(''), recursive: bool('delete a folder and its contents') }, ['path'], (a) => del(`/api/programs/${a.path}${a.recursive ? '?dir=1' : ''}`)),
+    T(
+      'program_delete',
+      'Delete a program. Pass recursive to delete a FOLDER and everything inside it — asked for explicitly so a mistyped file path can never become a recursive delete.',
+      { path: str(''), recursive: bool('delete a folder and its contents') },
+      ['path'],
+      async (a) => {
+        /*
+         * A FOLDER WITHOUT `recursive` USED TO ANSWER `{"deleted": "scratch"}` AND DELETE NOTHING.
+         * The guard was right; the report was a lie, byte-identical to a real delete. An agent
+         * cleaning up believes it and moves on, leaving the files behind. So the folder case is
+         * caught here, before the service's silent no-op, and named.
+         */
+        if (!a.recursive) {
+          const listing = await get('/api/programs').catch(() => null)
+          const dirs = listing?.dirs ?? []
+          if (dirs.some((d) => (typeof d === 'string' ? d : d?.id ?? d?.path) === a.path)) {
+            const e = new Error(`"${a.path}" is a folder — pass recursive:true to delete it and everything inside it`)
+            e.status = 400
+            throw e
+          }
+        }
+        return del(`/api/programs/${a.path}${a.recursive ? '?dir=1' : ''}`)
+      },
+    ),
 
     /* ---- the asset catalog -------------------------------------------------------------------
      * Two different stores, and they are not the same thing. `catalog` is what this editor places:

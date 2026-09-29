@@ -197,6 +197,68 @@ export class Shell {
     await this.ask({ type: 'write', path, content })
   }
 
+  /**
+   * Re-seed files from the document store, because they changed underneath us.
+   *
+   * THE MISSING HALF of the projection. Writes propagate OUT of the machine and nothing came back
+   * in, so the shell served whatever it seeded when the tab opened. A server-side MCP write landed,
+   * the shell kept the old text, and the next `sed -i` wrote that old text back — destroying the
+   * edit with exit 0.
+   *
+   * `paths` are projected paths WITHOUT the root (`programs/game.ts`), which is how the service
+   * names them on the wire. Anything this shell is not holding is ignored rather than fetched: a
+   * file the machine never had is not stale, it is absent, and seeding it here would quietly
+   * change what the projection contains.
+   *
+   * Deliberately does NOT save back. This is the store's text arriving; writing it straight out
+   * again would be a loop and would stamp a fresh mtime on a document nobody edited.
+   */
+  async refresh(paths: string[], fetchDoc: (path: string) => Promise<string | null>): Promise<string[]> {
+    await this.ready
+    const enc = new TextEncoder()
+    const done: string[] = []
+    for (const rel of paths) {
+      const full = rel.startsWith(`${ROOT}/`) ? rel : `${ROOT}/${rel}`
+      // A namespace hint like `catalog/` is for the UI, not for the filesystem.
+      if (full.endsWith('/')) continue
+      const text = await fetchDoc(full).catch(() => null)
+      if (text === null) {
+        // gone at the source: drop it here too, so `ls` stops lying
+        if (this.mirror.has(full)) {
+          this.mirror.delete(full)
+          /*
+           * `rm`, not a worker message: the worker's protocol is init/exec/read/write/list/dir and
+           * has no remove. Asking it for one does not fail — `ask` waits for a reply that never
+           * comes, which hangs. The guard stops the removal notification bouncing back out as a
+           * DELETE of a document the service has already deleted.
+           */
+          this.syncing.add(full)
+          try {
+            await this.exec(`rm -f ${JSON.stringify(full)}`, { cwd: ROOT })
+          } finally {
+            this.syncing.delete(full)
+          }
+          done.push(full)
+        }
+        continue
+      }
+      const bytes = enc.encode(text)
+      const had = this.mirror.get(full)
+      if (had && had.length === bytes.length && text === new TextDecoder().decode(had)) continue // unchanged
+      this.mirror.set(full, bytes)
+      // `syncing` so the worker's own change notification does not bounce this straight back out
+      this.syncing.add(full)
+      try {
+        await this.write(full, text)
+      } finally {
+        this.syncing.delete(full)
+      }
+      done.push(full)
+    }
+    if (done.length) void this.list()
+    return done
+  }
+
   async list(): Promise<ShellFile[]> {
     await this.ready
     const r = await this.ask({ type: 'list' })
@@ -213,7 +275,19 @@ export class Shell {
    */
   private async changed(changed: string[], removed: string[]): Promise<void> {
     void this.list()
-    for (const p of removed) this.mirror.delete(p)
+    for (const p of removed) {
+      this.mirror.delete(p)
+      /*
+       * A `rm` IN THE SHELL USED TO STOP AT THE MACHINE. The file vanished from `ls` and stayed in
+       * `program_list` forever — the third asymmetry in the propagation matrix, and the one that
+       * makes an agent think a cleanup worked. A delete is a document change like any other.
+       */
+      if (this.syncing.has(p)) continue
+      const e = endpointFor(p)
+      if (!e || !e.url.startsWith('/api/programs/')) continue // only programs can be deleted this way
+      const r = await fetch(e.url, { method: 'DELETE' }).then((x) => ({ ok: x.ok })).catch(() => ({ ok: false }))
+      this.o.onSaved?.({ path: p, what: e.what, ok: r.ok, error: r.ok ? undefined : 'the document could not be deleted' })
+    }
     for (const p of changed) {
       if (this.syncing.has(p)) continue
       this.syncing.add(p)

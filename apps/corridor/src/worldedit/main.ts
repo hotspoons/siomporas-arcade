@@ -180,21 +180,15 @@ const programPanel = new ProgramPanel({
  * both into an in-browser filesystem and saves a write back. The reads happen HERE rather than in
  * the worker because the worker has no network at all by design — see src/agent/shell.ts.
  */
-const shellPanel = new ShellPanel({
-  host: pane('shell'),
-  sidebarHost: inspector,
-  docs: async () => {
-    const [w, l, p] = await Promise.all([
-      api.worlds().then((r) => r.worlds).catch(() => []),
-      api.levels().then((r) => r.levels).catch(() => []),
-      api.programs().then((r) => r.programs).catch(() => []),
-    ])
-    // a site's authored documents: offered for every baked world, and the ones that do not exist
-    // simply come back empty and are not projected
-    const sites = w.filter((x) => x.baked).map((x) => ({ slug: x.slug, docs: SITE_DOCS }))
-    return { worlds: w.map((x) => ({ slug: x.slug })), levels: l.map((x) => ({ id: x.id })), programs: p, sites }
-  },
-  read: async (path) => {
+/**
+ * One projected document's text, by its shell path.
+ *
+ * Hoisted out of the ShellPanel options because the invalidation path needs exactly the same
+ * reader: when the service says a document changed, the shell re-reads it through this. Two
+ * readers would be two answers to "what does this file say", which is the bug this whole
+ * channel exists to close.
+ */
+const shellRead = async (path: string): Promise<string | null> => {
     const rel = path.slice(`${ROOT}/`.length)
     try {
       if (rel.startsWith('worlds/')) {
@@ -214,7 +208,24 @@ const shellPanel = new ShellPanel({
       return null
     }
     return null
+  }
+
+const shellPanel = new ShellPanel({
+  host: pane('shell'),
+  sidebarHost: inspector,
+  docs: async () => {
+    const [w, l, p] = await Promise.all([
+      api.worlds().then((r) => r.worlds).catch(() => []),
+      api.levels().then((r) => r.levels).catch(() => []),
+      api.programs().then((r) => r.programs).catch(() => []),
+    ])
+    // a site's authored documents: offered for every baked world, and the ones that do not exist
+    // simply come back empty and are not projected
+    const sites = w.filter((x) => x.baked).map((x) => ({ slug: x.slug, docs: SITE_DOCS }))
+    return { worlds: w.map((x) => ({ slug: x.slug })), levels: l.map((x) => ({ id: x.id })), programs: p, sites }
   },
+  read: shellRead,
+
 })
 
 /**
@@ -250,6 +261,28 @@ const bridge = new AgentBridge({
   // `step` as well as `mode` since main split them: an agent asking what is on screen wants
   // the stage, not just that we are in world mode.
   state: () => ({ mode, step, world: selected, dirty }),
+  /*
+   * A SERVER-SIDE WRITE LANDED. Three things in this page hold a copy of that document and every
+   * one of them was stale until now:
+   *
+   *   the shell   seeded once at open. Its copy is what the next `sed -i` writes back, so a stale
+   *               one silently destroys the edit that just arrived. This is the dangerous one.
+   *   the panels  the program list, the world list — the UI simply never repainted.
+   *   Monaco      the model behind code_check and hover. An OPEN buffer is left alone on purpose;
+   *               overwriting somebody's unsaved edits to match a background write would be worse
+   *               than showing them stale text they can see and re-save.
+   */
+  onInvalidate: (paths, origin) => {
+    void shellPanel.machine?.refresh(paths, shellRead)
+    for (const p of paths) {
+      if (p.startsWith('programs/')) void programPanel.render()
+      else if (p.startsWith('worlds/')) void refreshWorlds()
+      else if (p.startsWith('places/')) void refreshPlaces()
+    }
+    // Quiet by design: this fires on every agent write and a toast per file would bury the person
+    // in notifications about work they asked for. The status line is enough to notice by.
+    if (paths.length) status(`${origin}: ${paths.length} document${paths.length === 1 ? '' : 's'} changed`)
+  },
   token: () => mcpToken,
   label: 'world editor',
   onStatus: (st) => mcpPanel.onBridge(st),

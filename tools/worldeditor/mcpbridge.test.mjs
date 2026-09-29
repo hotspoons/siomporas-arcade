@@ -148,6 +148,46 @@ test('the socket enforces the token', async () => {
   await h.close()
 })
 
+test('a server-side write reaches every attached page', async () => {
+  // FINDING 01. The channel that did not exist: an MCP write landed, the page's shell kept the
+  // copy it seeded at open, and the next `sed -i` wrote that stale text back — destroying the edit
+  // with exit 0. This asserts the news arrives; the page's reaction is tested in the browser.
+  const h = await harness()
+  const seenA = []
+  const seenB = []
+  const a = fakePage(h.url, TOOLS, {}, { label: 'tab-a' })
+  const b = fakePage(h.url, TOOLS, {}, { label: 'tab-b' })
+  a.ws.on('message', (raw) => {
+    const m = JSON.parse(String(raw))
+    if (m.type === 'invalidate') seenA.push(...m.paths)
+  })
+  b.ws.on('message', (raw) => {
+    const m = JSON.parse(String(raw))
+    if (m.type === 'invalidate') seenB.push(...m.paths)
+  })
+  await Promise.all([a.ready, b.ready])
+  await waitFor(() => h.bridge.attached === 2)
+
+  const sent = h.bridge.invalidate(['programs/game.ts'], 'mcp')
+  assert.equal(sent, 2, 'both pages told')
+  assert.ok(await waitFor(() => seenA.length === 1 && seenB.length === 1), 'both received it')
+  assert.deepEqual(seenA, ['programs/game.ts'])
+  assert.deepEqual(seenB, ['programs/game.ts'])
+
+  a.ws.close()
+  b.ws.close()
+  await h.close()
+})
+
+test('an invalidation with nothing attached is a no-op, not a throw', async () => {
+  // It fires on every write, including when nobody is looking. It must never fail somebody's save.
+  const h = await harness()
+  assert.equal(h.bridge.invalidate(['programs/game.ts'], 'mcp'), 0)
+  assert.equal(h.bridge.invalidate([], 'mcp'), 0)
+  assert.equal(h.bridge.invalidate(undefined, 'mcp'), 0)
+  await h.close()
+})
+
 test('two pages offering the same tool is not an error', async () => {
   const h = await harness()
   // the editor open in two tabs — the tools are the same tools

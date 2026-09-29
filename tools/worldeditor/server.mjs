@@ -367,7 +367,31 @@ async function apiFetch(method, apiPath, body) {
     e.status = r.status
     throw e
   }
+  // A write that nobody is told about is how an agent's edit gets silently reverted by the next
+  // shell command. One hook, here, because every server-side tool goes through this function.
+  if (method !== 'GET') mcpBridge.invalidate(documentsTouchedBy(apiPath), 'mcp')
   return parsed
+}
+
+/**
+ * Which PROJECTED DOCUMENT an API path is, in the shell's vocabulary.
+ *
+ * The page thinks in `/workspace/programs/game.ts`; the service thinks in `/api/programs/game.ts`.
+ * The invalidation has to arrive in the page's words or nothing on the other side can match it to
+ * the file it is holding. Anything unrecognised returns empty rather than guessing — a wrong path
+ * would make a page refetch something that did not change, which is merely wasteful, but it would
+ * also make a REAL change look handled.
+ */
+function documentsTouchedBy(apiPath) {
+  const clean = apiPath.split('?')[0].replace(/^\/api\//, '')
+  const parts = clean.split('/').filter(Boolean)
+  if (parts[0] === 'programs' && parts.length >= 2) return [`programs/${parts.slice(1).join('/')}`]
+  if (parts[0] === 'worlds' && parts.length === 2) return [`worlds/${parts[1]}.json`]
+  if (parts[0] === 'levels' && parts.length === 2) return [`levels/${parts[1]}.json`]
+  // A catalog or places write is not a projected file, but the UI still shows it — the page is
+  // told with a bare namespace so it can repaint without looking for a document that is not there.
+  if (parts[0] === 'catalog' || parts[0] === 'places') return [`${parts[0]}/`]
+  return []
 }
 
 const server = http.createServer(async (req, res) => {

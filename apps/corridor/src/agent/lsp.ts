@@ -84,6 +84,34 @@ async function ensure(path: string, text?: string) {
   return uri
 }
 
+/**
+ * Is the service actually able to answer about this file yet?
+ *
+ * THE FAIL-SOFT BUG. `getTypeScriptWorker()` resolving does not mean the worker has the file's
+ * program built. Ask it for hover at a valid position too early and it answers `null`; ask for a
+ * definition and it answers `[]` — and those are EXACTLY what "there is no symbol here" looks
+ * like. An agent records the wrong answer and never retries, which is worse than an error.
+ *
+ * So the file is probed first — diagnostics is the cheapest call that fails rather than shrugging
+ * — and anything that cannot answer throws. Never an empty-but-successful shape for a condition
+ * that means "ask me again".
+ */
+async function warm(client: { getSyntacticDiagnostics: (u: string) => Promise<unknown> }, key: string): Promise<void> {
+  const deadline = Date.now() + 10_000
+  for (;;) {
+    try {
+      const d = await client.getSyntacticDiagnostics(key)
+      if (Array.isArray(d)) return
+    } catch {
+      /* not built yet */
+    }
+    if (Date.now() > deadline) {
+      throw new Error('the TypeScript service has not finished loading this program yet — call again in a moment')
+    }
+    await new Promise((r) => setTimeout(r, 50))
+  }
+}
+
 function flatten(m: unknown): string {
   if (typeof m === 'string') return m
   const d = m as { messageText?: unknown; next?: unknown[] }
@@ -128,33 +156,59 @@ export async function check(path: string, text?: string): Promise<LspDiagnostic[
  * same for everything around it. The raw tree would be an order of magnitude more text and would
  * still have to be reduced to this before it could be acted on.
  */
-export async function outline(path: string, text?: string): Promise<OutlineNode[]> {
+/** TypeScript's word for an import binding. There are 21 of them in a 115-line program. */
+const IMPORT_KIND = 'alias'
+/** Things that are declared INSIDE a callable: destructured properties, loop counters, temporaries. */
+const LOCAL_KINDS = new Set(['var', 'let', 'const', 'property', 'parameter'])
+const CALLABLE_KINDS = new Set(['function', 'method', 'constructor', 'getter', 'setter', 'arrow function'])
+
+export async function outline(path: string, text?: string, opts: { imports?: boolean; locals?: boolean } = {}): Promise<OutlineNode[]> {
   const monaco = await loadMonaco()
   const uri = await ensure(path, text)
   const model = monaco.editor.getModel(uri)
   if (!model) throw new Error(`no such program: ${path}`)
   const worker = await service()
   const client = await worker(uri)
+  await warm(client, uri.toString())
   const tree = (await client.getNavigationTree(uri.toString())) as
     | { text: string; kind: string; spans?: { start: number; length: number }[]; childItems?: unknown[] }
     | undefined
   if (!tree) return []
-  const walk = (n: typeof tree): OutlineNode => {
+  /*
+   * WHAT COMES OUT OF getNavigationTree IS NOT AN OUTLINE, it is everything with a name. For a
+   * 115-line program that was longer than the file: 21 imports as top-level nodes, every
+   * destructured property, and both loop counters as separate `i` entries — burying `setup`,
+   * `update` and `teardown`, which are the three things this exists to find.
+   *
+   * So imports and in-function locals are dropped by DEFAULT and asked for by flag. And children
+   * are sorted by LINE rather than the alphabetical order the service returns them in: an outline
+   * is a map of the file, and a map that is not in the file's order is a list.
+   */
+  const walk = (n: typeof tree, insideCallable: boolean): OutlineNode | null => {
+    const kind = n?.kind ?? 'unknown'
+    if (kind === IMPORT_KIND && !opts.imports) return null
+    if (insideCallable && LOCAL_KINDS.has(kind) && !opts.locals) return null
+
     const span = n?.spans?.[0]
     const from = model.getPositionAt(span?.start ?? 0)
     const to = model.getPositionAt((span?.start ?? 0) + (span?.length ?? 0))
     const kids = (n?.childItems ?? []) as (typeof tree)[]
+    const nested = CALLABLE_KINDS.has(kind) || insideCallable
+    const children = kids
+      .map((k) => walk(k, nested))
+      .filter((k): k is OutlineNode => k !== null)
+      .sort((a, b) => a.line - b.line)
     return {
       name: n?.text ?? '(anonymous)',
-      kind: n?.kind ?? 'unknown',
+      kind,
       line: from.lineNumber,
       endLine: to.lineNumber,
-      ...(kids.length ? { children: kids.map(walk) } : {}),
+      ...(children.length ? { children } : {}),
     }
   }
   // The root is the file itself; its children are the declarations.
-  const root = walk(tree)
-  return root.children ?? []
+  const root = walk(tree, false)
+  return root?.children ?? []
 }
 
 /** What a symbol at a position IS — its type and its doc comment. */
@@ -165,6 +219,7 @@ export async function hover(path: string, line: number, column: number, text?: s
   if (!model) throw new Error(`no such program: ${path}`)
   const worker = await service()
   const client = await worker(uri)
+  await warm(client, uri.toString())
   const offset = model.getOffsetAt({ lineNumber: line, column })
   const info = (await client.getQuickInfoAtPosition(uri.toString(), offset)) as { displayParts?: { text: string }[]; documentation?: { text: string }[] } | undefined
   if (!info) return null
@@ -172,6 +227,26 @@ export async function hover(path: string, line: number, column: number, text?: s
     signature: (info.displayParts ?? []).map((p) => p.text).join(''),
     documentation: (info.documentation ?? []).map((p) => p.text).join('\n') || null,
   }
+}
+
+/**
+ * Line and column for an offset in a file the model set does not have.
+ *
+ * THE DECLARATIONS ARE NOT MODELS. `loadMonaco` registers the program API's `.d.ts` through
+ * `addExtraLib`, which puts them in the COMPILATION but not in `editor.getModel()` — so every
+ * definition that landed in one came back with `line: null`, and the single most useful artifact
+ * in the system, the API surface an agent writes against, was named by the tool and reachable by
+ * nothing. The text is still there to be counted through.
+ */
+async function positionInLib(fileName: string, offset: number): Promise<{ line: number; column: number } | null> {
+  const monaco = await loadMonaco()
+  const libs = (monaco.ts.typescriptDefaults.getExtraLibs?.() ?? {}) as Record<string, { content?: string }>
+  const text = libs[fileName]?.content
+  if (typeof text !== 'string') return null
+  const before = text.slice(0, offset)
+  const line = before.split('\n').length
+  const column = offset - (before.lastIndexOf('\n') + 1) + 1
+  return { line, column }
 }
 
 /** Where a symbol is declared — which file, which line. */
@@ -182,17 +257,25 @@ export async function definition(path: string, line: number, column: number, tex
   if (!model) throw new Error(`no such program: ${path}`)
   const worker = await service()
   const client = await worker(uri)
+  await warm(client, uri.toString())
   const offset = model.getOffsetAt({ lineNumber: line, column })
   const defs = ((await client.getDefinitionAtPosition(uri.toString(), offset)) ?? []) as { fileName: string; textSpan: { start: number } }[]
-  return defs.map((d) => {
-    const target = monaco.editor.getModel(monaco.Uri.parse(d.fileName))
-    const at = target?.getPositionAt(d.textSpan.start)
-    return {
-      path: d.fileName.replace(/^file:\/\/\//, ''),
-      line: at?.lineNumber ?? null,
-      column: at?.column ?? null,
-    }
-  })
+  return Promise.all(
+    defs.map(async (d) => {
+      const target = monaco.editor.getModel(monaco.Uri.parse(d.fileName))
+      const at = target?.getPositionAt(d.textSpan.start)
+      // a model first; an extra-lib declaration second — both are real places
+      const inLib = at ? null : await positionInLib(d.fileName, d.textSpan.start)
+      return {
+        path: d.fileName.replace(/^file:\/\/\//, ''),
+        line: at?.lineNumber ?? inLib?.line ?? null,
+        column: at?.column ?? inLib?.column ?? null,
+        // `declaration` says why program_read cannot open it: it is a generated .d.ts in the
+        // compilation, not a document on the volume. Use code_hover for its signature.
+        ...(target ? {} : { declaration: true }),
+      }
+    }),
+  )
 }
 
 /** Register every program with the compilation, so cross-file resolution works. */

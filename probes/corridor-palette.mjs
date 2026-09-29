@@ -13,7 +13,9 @@ import { chromium } from 'playwright'
 
 const PORT = process.env.PORT ?? '5185'
 const WORLD = process.argv[2] ?? 'crofton-triangle'
-const browser = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader'] })
+// `--disable-dev-shm-usage` is not optional in this container: /dev/shm is 64 MB, and a renderer
+// that fills it dies as "Target crashed" with nothing else to go on.
+const browser = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--disable-dev-shm-usage'] })
 const page = await browser.newPage({ viewport: { width: 1400, height: 950 } })
 const errs = []
 page.on('pageerror', (e) => errs.push(e.message.split('\n')[0]))
@@ -22,9 +24,19 @@ const say = (k, v) => console.log(`${k.padEnd(26)} ${typeof v === 'object' ? JSO
 
 await page.goto(`http://localhost:${PORT}/world.html?world=${WORLD}#${WORLD}`, { waitUntil: 'networkidle', timeout: 90000 })
 await page.waitForSelector('.seg', { timeout: 30000 })
-await page.click('.seg[data-value="place"]')
-const up = await page.waitForFunction(() => !!window.corridor?.place, null, { timeout: 90000 }).then(() => true).catch(() => false)
-if (!up) { console.log(`\nSKIP: ${WORLD} would not open in Place`); await browser.close(); process.exit(0) }
+
+// THE SEG NAVIGATES. `world.html` hands off to the site editor, so a `waitForFunction` installed
+// before the click is evaluating in a context that is about to be destroyed — it rejects with
+// "Execution context was destroyed", and this probe used to catch that and call it a SKIP. It
+// reported "would not open in Place" for a week while Place opened fine. Wait for the new document
+// first, and let a real timeout be a failure rather than a shrug.
+await Promise.all([
+  page.waitForNavigation({ waitUntil: 'networkidle', timeout: 90000 }).catch(() => {}),
+  page.click('.seg[data-value="place"]'),
+])
+const manifest = await page.evaluate(async (w) => (await fetch(`/sites/${w}/web/manifest.json`)).status, WORLD)
+if (manifest === 404) { console.log(`\nSKIP: ${WORLD} has no baked site to place anything in`); await browser.close(); process.exit(0) }
+await page.waitForFunction(() => !!window.corridor?.place, null, { timeout: 120000 })
 await page.waitForTimeout(2500)
 await page.evaluate(() => [...document.querySelectorAll('#se-rail button')].find((b) => /^place$/i.test(b.textContent.trim()))?.click())
 await page.waitForTimeout(900)

@@ -83,12 +83,17 @@ body.worldedit {
   overflow: hidden;
 }
 #assets[hidden] { display: none; }
-.asset-pane { height: 100%; min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); }
+/* ONE ROW NOW. The toolbar used to sit above the tab set and take the `auto` row; it moved into
+   the Catalog tab, and leaving `auto` behind would put the tabs in a content-sized row — the exact
+   unbounded box this chain of heights exists to avoid. */
+.asset-pane { height: 100%; min-height: 0; display: grid; grid-template-rows: minmax(0, 1fr); }
 .asset-pane .tabs { min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); }
 .asset-pane .tab-body { min-height: 0; overflow: hidden; padding: var(--s4) 0 0; }
 /* and the PANEL inside the body — the chain of bounded heights has to reach the columns without a
    single content-sized box in it, or everything below that box grows instead of scrolling */
 .asset-pane .tab-panel { height: 100%; min-height: 0; overflow: hidden; }
+/* a tab that has a toolbar of its own: the bar is content-sized, the rest gets what is left */
+.asset-pane .asset-tab { height: 100%; min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); }
 /* ONE ROW, BOUNDED. Without `grid-template-rows` the row is `auto` — sized to its content — so
    the two columns grew to six thousand pixels and scrolled the page instead of themselves. */
 .asset-pane .asset-split { height: 100%; min-height: 0; align-items: stretch; grid-template-rows: minmax(0, 1fr); }
@@ -97,8 +102,15 @@ body.worldedit {
 .asset-pane .asset-list { max-height: none; min-height: 0; }
 .asset-pane .asset-detail { max-height: none; min-height: 0; }
 .asset-pane .material-split { height: 100%; min-height: 0; }
-.asset-pane .material-right { min-height: 0; overflow-y: auto; }
-.asset-pane .material-list { max-height: none; }
+/* THE LIBRARY SCROLLS, and it is the LIST that has to do it, not the column.
+   `.material-right` holds the search, the form and the list in a grid whose last row was sized to
+   its content, so forty textures made the column tall and nothing scrolled (Rich, 2026-09-29:
+   "Materials listing doesn't scroll vertically"). */
+.asset-pane .material-right {
+  min-height: 0; overflow: hidden;
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+.asset-pane .material-list { max-height: none; min-height: 0; overflow-y: auto; }
 
 .code-pane { display: grid; grid-template-rows: auto minmax(0, 1fr); min-height: 0; min-width: 0; }
 .code-pane[hidden] { display: none; }

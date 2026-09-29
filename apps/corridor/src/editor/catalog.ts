@@ -6,6 +6,7 @@
 // the catalog can grow faster than the asset pipeline.
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
+import { applyAlphaGlazing } from '../glazing'
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js'
 
 export interface CatalogEntry {
@@ -159,6 +160,10 @@ function loadModel(entry: CatalogEntry): Promise<THREE.Object3D | null> {
       .loadAsync(`/${entry.glb.replace(/^\/+/, '')}`)
       .then((g) => {
         const root = g.scene
+        // Windows, once per asset rather than once per instance: `clone(true)` shares material
+        // references, so glazing the cached root glazes every copy of it that ever gets placed.
+        // See `glazing.ts` for why there is no classifier deciding what a window is.
+        applyAlphaGlazing(root)
         const bb = new THREE.Box3().setFromObject(root)
         const size = bb.getSize(new THREE.Vector3())
         const long = Math.max(size.x, size.z)

@@ -64,6 +64,37 @@ const placeButtons = await page.locator('#assets button', { hasText: /^Place$/ }
 say('place buttons', placeButtons)
 if (placeButtons) fail.push('the library still offers to place things')
 
+/* ---- 1b · the toolbar is the Catalog tab's, not the pane's ---- */
+// Rich, 2026-09-29: "New items should be under the assets tab set and specific to the catalog
+// tab". Above the tab set it read as a pane-wide action while doing nothing on Materials or
+// Service. Asserted by POSITION, not by existence: a button that merely exists somewhere in
+// `#assets` would pass this whether it moved or not.
+const toolbar = await page.evaluate(() => {
+  const b = [...document.querySelectorAll('#assets button')].find((x) => /New item/.test(x.textContent))
+  if (!b) return { found: false }
+  const panel = b.closest('.tab-panel')
+  return {
+    found: true,
+    inACatalogPanel: !!panel && !!panel.querySelector('.asset-split'),
+    aboveTheTabs: !!b.closest('#assets > .asset-pane-bar, .asset-pane > .asset-pane-bar'),
+  }
+})
+say('New item lives', toolbar)
+if (!toolbar.found) fail.push('there is no way to make a new item at all')
+else {
+  if (!toolbar.inACatalogPanel) fail.push('New item is not inside the Catalog tab')
+  if (toolbar.aboveTheTabs) fail.push('New item still sits above the tab set')
+}
+// and the list is still bounded: a toolbar added to the panel without a row for it would let the
+// columns size to their content, which is how this pane grew to six thousand pixels before
+const bounded = await page.evaluate(() => {
+  const l = document.querySelector('#assets .asset-list')
+  return l ? { scrolls: l.scrollHeight > l.clientHeight + 4, h: Math.round(l.clientHeight) } : null
+})
+say('the list still scrolls', bounded)
+// 950px viewport: a list taller than that is not scrolling, it is pushing the page
+if (!bounded || bounded.h < 80 || bounded.h > 950) fail.push(`the asset list is ${bounded?.h}px tall — the height chain is broken`)
+
 /* ---- 2 · one tab per class, filtering one list ---- */
 const classes = await page.locator('#assets .class-tab').allTextContents()
 say('class tabs', classes.slice(0, 6))

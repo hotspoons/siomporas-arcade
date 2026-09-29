@@ -313,19 +313,7 @@ export class AssetCatalog {
     ]
     this.tabs = new Tabs(tabs)
     if (o.host) {
-      /*
-       * THE PANE NEEDS THE FOOTER'S ACTIONS SOMEWHERE.
-       *
-       * "New item" and "Refresh" were in the dialog's footer, and a pane has no footer — so in
-       * the world editor there was no way to make an asset at all. They go at the top, beside the
-       * tabs, which is where a toolbar belongs when there is no bottom edge to pin one to.
-       */
-      const bar = el('div', 'asset-pane-bar')
-      bar.append(
-        button({ label: 'New item', icon: 'plus', variant: 'primary', onClick: () => this.create() }),
-        button({ label: 'Refresh', icon: 'arrow-path', variant: 'ghost', onClick: () => void this.refresh() }),
-      )
-      o.host.replaceChildren(bar, this.tabs.root)
+      o.host.replaceChildren(this.tabs.root)
       o.host.classList.add('asset-body', 'asset-pane')
       return
     }
@@ -343,17 +331,13 @@ export class AssetCatalog {
     this.dialog.body.append(this.tabs.root)
     this.dialog.body.classList.add('asset-body')
     /*
-     * TWO THINGS, BOTH ABOUT THE LIBRARY IN FRONT OF YOU.
-     *
-     * "Push to S3" was here as well — a deployment operation, offered beside "New item", visible
-     * whether or not a bucket is configured, and already present in the Service tab beside the
-     * endpoint it pushes to and the note about what it skips (Rich, 2026-09-28: "Still have push
-     * to s3 buttons on assets, no makey sense"). It lives there, where the bucket does.
+     * NO FOOTER. "New item" and "Refresh" were here, and "Push to S3" beside them — a deployment
+     * operation offered whether or not a bucket was configured (Rich, 2026-09-28: "Still have push
+     * to s3 buttons on assets, no makey sense"). That one moved to the Service tab, where the
+     * bucket is. The other two moved into the Catalog tab for the same reason: a new ITEM is a
+     * catalog thing, and a control that sits above the tab set claims to belong to all of them
+     * while doing nothing on Materials or Service.
      */
-    this.dialog.footer(
-      button({ label: 'New item', icon: 'plus', onClick: () => this.create() }),
-      button({ label: 'Refresh', icon: 'arrow-path', onClick: () => void this.refresh() }),
-    )
   }
 
   async open() {
@@ -403,6 +387,20 @@ export class AssetCatalog {
       host.append(this.notConfigured())
       return
     }
+    /*
+     * THE TOOLBAR BELONGS TO THIS TAB.
+     *
+     * Rich, 2026-09-29: "New items should be under the assets tab set and specific to the catalog
+     * tab". It was above the tabs, where it read as a pane-wide action — but "New item" makes a
+     * catalog entry, and pressing it from Materials or Service would have taken you somewhere
+     * else. Inside the tab, what it makes is what you are looking at.
+     */
+    const wrap = el('div', 'asset-tab')
+    const bar = el('div', 'asset-pane-bar')
+    bar.append(
+      button({ label: 'New item', icon: 'plus', variant: 'primary', onClick: () => this.create() }),
+      button({ label: 'Refresh', icon: 'arrow-path', variant: 'ghost', onClick: () => void this.refresh() }),
+    )
     const split = el('div', 'asset-split')
     /*
      * A SEARCH BOX, because the catalog is a hundred and twenty rows in a 280px column (Rich,
@@ -412,7 +410,8 @@ export class AssetCatalog {
      */
     this.listBox.replaceChildren(this.classTabs(), this.scopeTabs(), this.searchBox(), this.listHost)
     split.append(this.listBox, this.detailHost)
-    host.append(split)
+    wrap.append(bar, split)
+    host.append(wrap)
     this.renderList()
     this.renderDetail()
   }

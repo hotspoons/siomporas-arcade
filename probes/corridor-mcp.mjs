@@ -101,11 +101,19 @@ if (!/crofton|arrowhead|slug/i.test(worldText)) fail.push('world_list did not an
 // THE SHELL HAS TO HAVE BEEN STARTED. It is a wasm machine that boots when the Shell tab is first
 // opened, and until then `shell_exec` answers with a real instruction rather than a wrong result —
 // which is correct behaviour and worth seeing, so it is checked on the way past.
+// ONLY WHEN THIS PAGE IS THE ONLY ONE. The bridge keeps whatever is attached, so a browser left
+// open from an earlier run — or Rich's own editor — already has a booted shell, and asserting the
+// cold error unconditionally made this probe fail depending on what else was on the machine. A
+// check whose result depends on the neighbours is not a check; it is asserted when it is
+// answerable and reported as skipped when it is not.
 const cold = await mcp('tools/call', { name: 'shell_exec', arguments: { command: 'echo cold' } })
 const coldText = cold.body?.result?.content?.[0]?.text ?? ''
-say('before the shell exists', coldText.replace(/\s+/g, ' ').slice(0, 70))
-if (!cold.body?.result?.isError) fail.push('a shell tool answered before any shell had started')
-else if (!/shell/i.test(coldText)) fail.push('the cold error does not say what to do about it')
+const ours = attached?.pages?.length === 1
+say('before the shell exists', ours ? coldText.replace(/\s+/g, ' ').slice(0, 70) : '(skipped — another editor page is attached)')
+if (ours) {
+  if (!cold.body?.result?.isError) fail.push('a shell tool answered before any shell had started')
+  else if (!/shell/i.test(coldText)) fail.push('the cold error does not say what to do about it')
+}
 
 await page.click('.topbar .seg[data-value="shell"]')
 await page.waitForFunction(() => !!window.__we && document.querySelector('[data-pane="shell"]')?.textContent?.length > 20, null, { timeout: 60000 }).catch(() => {})

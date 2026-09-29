@@ -365,17 +365,21 @@ export class BridgeProcess {
     }
     p.stdout.on('data', keep)
     p.stderr.on('data', keep)
-    p.on('error', (e) => {
-      this.lastExit = { code: null, signal: null, error: e.message, at: new Date().toISOString(), tail: [] }
-    })
-    p.on('exit', (code, signal) => {
+    // 'CLOSE', NOT 'EXIT'. A binary that cannot be started at all — a wrong `blender.bin` typed in
+    // the editor — emits 'error' and 'close' and never 'exit', so listening for 'exit' left the
+    // supervisor holding a dead process for ever: no restart, and status still said it was running.
+    let failed = null
+    p.on('error', (e) => { failed = e })
+    p.on('close', (code, signal) => {
       const lived = Date.now() - Date.parse(this.startedAt)
       this.proc = null
       this.lastExit = {
-        code, signal, at: new Date().toISOString(), livedMs: lived, tail: tail.slice(-8),
+        code: failed ? null : code, signal, at: new Date().toISOString(), livedMs: lived, tail: tail.slice(-8),
+        ...(failed ? { error: failed.message } : {}),
         // 137 is 128 + SIGKILL, which in a pod is almost always the OOM killer — worth saying in
         // words, because "137" is the number people search for and "out of memory" is the answer
-        why: code === 137 || signal === 'SIGKILL' ? 'killed — in a pod this is almost always the memory limit'
+        why: failed ? `could not start ${this.bin}: ${failed.message}`
+          : code === 137 || signal === 'SIGKILL' ? 'killed — in a pod this is almost always the memory limit'
           : code === 0 ? 'exited cleanly' : `exited ${code ?? signal}`,
       }
       this.log.warn?.(`[blender] bridge ${this.lastExit.why} after ${Math.round(lived / 1000)}s`)

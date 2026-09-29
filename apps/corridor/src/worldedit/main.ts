@@ -252,7 +252,13 @@ const bridge = new AgentBridge({
   state: () => ({ mode, step, world: selected, dirty }),
   token: () => mcpToken,
   label: 'world editor',
-  onStatus: (st) => mcpPanel.onBridge(st),
+  onStatus: (st) => {
+    mcpPanel.onBridge(st)
+    // WHICH WINDOW THIS IS, for a probe and for a console session. Two editors attached are
+    // indistinguishable from outside without it, and the whole point of ownership is that they
+    // are not the same window.
+    ;(window as unknown as { __mcpown?: unknown }).__mcpown = st.own ?? null
+  },
 })
 const mcpPanel = new McpPanel(mcpSection, () => bridge)
 

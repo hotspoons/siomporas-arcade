@@ -115,6 +115,18 @@ if (ours) {
   else if (!/shell/i.test(coldText)) fail.push('the cold error does not say what to do about it')
 }
 
+/*
+ * TAKE THE CONNECTION FIRST. Browser tools run in the window that OWNS it, and a browser somebody
+ * left open may own it — which is why this check used to be skipped. Claiming is one call now, so
+ * the round trip can be tested for real instead of reported as untestable.
+ */
+const mine = await page.evaluate(() => window.__mcpown?.me?.name ?? null)
+if (mine) {
+  await mcp('tools/call', { name: 'editor_claim', arguments: { page: mine } })
+  await page.waitForFunction(() => window.__mcpown?.mine === true, null, { timeout: 15000 }).catch(() => {})
+}
+say('this page owns it', await page.evaluate(() => !!window.__mcpown?.mine))
+
 await page.click('.topbar .seg[data-value="shell"]')
 await page.waitForFunction(() => !!window.__we && document.querySelector('[data-pane="shell"]')?.textContent?.length > 20, null, { timeout: 60000 }).catch(() => {})
 // the machine takes a while to come up; wait for the tool to stop refusing rather than for a clock

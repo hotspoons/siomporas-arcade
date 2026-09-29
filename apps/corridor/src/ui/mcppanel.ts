@@ -50,9 +50,31 @@ export class McpPanel {
     this.draw()
   }
 
+  /** Ask the service to move the MCP connection to this window. */
+  private claim(): boolean {
+    return this.bridge()?.claim() ?? false
+  }
+
   /** The bridge pushes its state here so the pane can say "attached" without polling. */
   onBridge(s: BridgeStatus): void {
+    const was = this.status?.own?.mine
     this.status = s
+    // OWNERSHIP CHANGING REDRAWS, because the Take button has to appear and disappear with it.
+    // The live line updates in place for everything else; this is the one change that alters which
+    // controls exist.
+    if (was !== undefined && was !== s.own?.mine) {
+      if (!s.own?.mine) toast(`${s.own?.owner?.name ?? 'another window'} took the MCP connection`, 'warn', 6000)
+      /*
+       * ONLY ONCE THERE IS A CONFIG TO DRAW. `draw()` replaces the host and returns early when
+       * `cfg` is null — "The service did not answer about MCP" — and nothing draws again after
+       * that. The bridge reports ownership as soon as the socket opens, which can beat
+       * `load()`'s fetch, so redrawing unconditionally replaced a perfectly good panel with that
+       * message and left it there. `load()` draws when it lands, with the ownership already in
+       * `this.status`.
+       */
+      if (this.cfg) this.draw()
+      return
+    }
     // Only the one line changes; redrawing the whole pane would eat a click on the token field.
     const dot = this.host.querySelector('.mcp-live')
     if (dot) dot.replaceChildren(...this.liveBits())
@@ -61,13 +83,26 @@ export class McpPanel {
   private liveBits(): HTMLElement[] {
     const s = this.status
     const state = s?.state ?? 'off'
+    const own = s?.own
     const label =
-      state === 'attached' ? `this page is attached — ${s?.tools ?? 0} tools, ${s?.calls ?? 0} calls`
+      // WHICH WINDOW THIS IS, once the service has named it. Two editors open used to be
+      // indistinguishable from one, and the browser tools went to whichever attached first.
+      state === 'attached' && own?.me
+        ? own.mine
+          ? `${own.me.name} — this window has the MCP connection · ${s?.tools ?? 0} tools, ${s?.calls ?? 0} calls`
+          : `${own.me.name} — attached, but ${own.owner?.name ?? 'another window'} has the MCP connection`
+      : state === 'attached' ? `this page is attached — ${s?.tools ?? 0} tools, ${s?.calls ?? 0} calls`
       : state === 'connecting' ? 'connecting…'
       : state === 'retrying' ? (s?.detail ?? 'retrying')
       : state === 'refused' ? (s?.detail ?? 'refused')
       : 'not attached'
-    return [el('span', `dot ${state === 'attached' ? 'ok' : state === 'refused' ? 'bad' : 'off'}`), el('span', '', label)]
+    // amber, not green, when this window is attached but somebody else answers the tools: it is
+    // working and it is not the one an agent is talking to, and those are different things
+    const tone = state === 'refused' ? 'bad'
+      : state !== 'attached' ? 'off'
+      : own && !own.mine ? 'warn'
+      : 'ok'
+    return [el('span', `dot ${tone}`), el('span', '', label)]
   }
 
   draw(): void {
@@ -172,8 +207,28 @@ export class McpPanel {
     const live = el('div', 'mcp-live')
     live.append(...this.liveBits())
     b.append(el('label', 'field-label', 'This page'), live)
-    if (cfg.bridge.attached > 1) {
-      b.append(el('p', 'note', `${cfg.bridge.attached} editor pages are attached; a shell or code tool goes to whichever answers first.`))
+    /*
+     * TAKING IT. Rich, 2026-09-29: "on other tabs or windows connected to the same back end we
+     * offer the option to take the MCP connection and disconnect from the other one."
+     *
+     * No asking the current owner: the case this exists for is a window nobody is watching holding
+     * the connection, and a prompt there would never be answered. The window that loses it says so
+     * immediately, which is the honest half of that trade.
+     */
+    const own = this.status?.own
+    if (own && !own.mine && own.owner) {
+      b.append(button({
+        label: `Take the connection from ${own.owner.name}`,
+        icon: 'arrow-top-right-on-square',
+        variant: 'primary',
+        onClick: () => {
+          if (this.claim()) toast(`${own.me?.name ?? 'this window'} now has the MCP connection`, 'ok')
+          else toast('this window is not attached yet', 'warn')
+        },
+      }))
+    }
+    if (own && own.others.length) {
+      b.append(el('p', 'note', `Also attached: ${own.others.map((o) => o.name).join(', ')}. Browser tools — the shell and the TypeScript service — run only in the window that has the connection.`))
     }
 
     this.host.append(g)

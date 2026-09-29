@@ -184,6 +184,16 @@ export function serverTools({ apiFetch }) {
     T('place_add', 'Save a place to the index.', { place: obj('') }, ['place'], (a) => post('/api/places', a.place)),
     T('place_delete', 'Remove a place from the index.', { id: str('') }, ['id'], (a) => del(`/api/places/${a.id}`)),
 
+    /* ---- which editor window you are talking to -------------------------------------------------
+     * ONE WINDOW OWNS THE BROWSER TOOLS. `shell_exec`, `code_check` and the rest run inside an
+     * editor page, and when two are open they would otherwise run in whichever attached first —
+     * so an agent's commands would land in somebody else's tab, against their projection and their
+     * open files, plausibly and silently. Every window has a name; one of them owns the
+     * connection; you can move it.
+     */
+    T('editor_windows', 'The editor windows attached right now, their names, and which one owns the MCP connection. Browser tools (shell_*, code_*, editor_state) run in the OWNER. Call this when a browser tool says it is not offered, or when you want to be sure which screen you are acting on.', {}, [], async () => (await get('/api/agent/mcp/config')).bridge),
+    T('editor_claim', 'Move the MCP connection to a named editor window. The window that had it is told it lost it — there is no asking, because the case this exists for is a window nobody is watching holding the connection. Takes the window NAME (as editor_windows reports it) or its short id.', { page: str('window name or id') }, ['page'], (a) => post('/api/agent/mcp/claim', a)),
+
     /* ---- blender -------------------------------------------------------------------------------
      * Rigging, and looking at what you rigged. Two shapes and the difference matters to an agent:
      *

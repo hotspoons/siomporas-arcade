@@ -918,6 +918,12 @@ async function api(req, res, seg, q) {
       if (seg[1] === 'mcp' && seg[2] === 'config' && req.method === 'GET') {
         return json(res, 200, { url: mcpUrl(req), auth: mcpAuth.describe(), bridge: mcpBridge.describe() })
       }
+      /* which window owns the MCP connection, and moving it. The panel in every editor calls
+         this; `pageId` may be the short id or the window's name. */
+      if (seg[1] === 'mcp' && seg[2] === 'claim' && req.method === 'POST') {
+        const body = await readJson(req).catch(() => ({}))
+        return json(res, 200, mcpBridge.claim(body?.page))
+      }
       if (seg[1] === 'mcp' && seg[2] === 'config' && req.method === 'POST') {
         const body = await readJson(req)
         try {

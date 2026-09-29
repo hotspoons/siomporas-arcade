@@ -698,6 +698,9 @@ body.chrome-off #chrome-restore { display: block; }
    paired with words rather than carrying the meaning alone. */
 .dot { width: 8px; height: 8px; border-radius: var(--r-full); flex: none; background: var(--line-2); }
 .dot.ok { background: var(--ok); }
+/* working, but not the one being talked to — an editor attached while another window owns the MCP
+   connection. Green would say "you are the one"; grey would say "nothing is happening". */
+.dot.warn { background: var(--warn); }
 .dot.bad { background: var(--danger); }
 .dot.off { background: var(--line-2); }
 

@@ -27,6 +27,15 @@ import { WebSocketServer } from 'ws'
 import { randomUUID } from 'node:crypto'
 
 /** A page that has gone quiet for this long is not coming back; its tools stop being advertised. */
+/*
+ * Names for windows. Two syllables, easy to say out loud, and nothing that reads as a status —
+ * a window called "Primary" or "Main" would be mistaken for the one that matters.
+ */
+const WINDOW_NAMES = [
+  'Harbour', 'Meridian', 'Kestrel', 'Lantern', 'Compass', 'Thicket',
+  'Beacon', 'Quarry', 'Fathom', 'Willow', 'Marlow', 'Pike',
+]
+
 const HEARTBEAT_MS = 30_000
 /** How long a forwarded call may take. The shell can be slow; a python import is seconds. */
 const CALL_TIMEOUT_MS = 120_000
@@ -36,6 +45,22 @@ export class McpBridge {
     this.log = log
     /** @type {Set<{ws: WebSocket, id: string, tools: Map<string, object>, label: string, alive: boolean}>} */
     this.pages = new Set()
+    /*
+     * ONE WINDOW OWNS THE CONNECTION.
+     *
+     * Rich, 2026-09-29: "we need to detect this and allow only a single window to own the mcp
+     * access — and on other tabs or windows connected to the same back end we offer the option to
+     * take the MCP connection and disconnect from the other one."
+     *
+     * Before this, `call()` served the FIRST page that offered the tool, which with two editors
+     * open meant an agent's `shell_exec` ran in somebody else's tab against somebody else's
+     * projection, and `editor_state` reported their camera. Nothing errored; the agent simply got
+     * plausible answers to questions it had not asked.
+     *
+     * Ownership is explicit and visible instead: one page holds it, the others are told they do
+     * not, and taking it is a deliberate act with the previous owner informed.
+     */
+    this.owner = null
     /** @type {Map<string, {resolve: Function, reject: Function, timer: NodeJS.Timeout}>} */
     this.pending = new Map()
   }
@@ -79,9 +104,43 @@ export class McpBridge {
     return this
   }
 
+  /**
+   * A name for a window, unique among the ones attached right now.
+   *
+   * ASSIGNED BY THE SERVER, because only the server can see the others. A page naming itself
+   * cannot avoid a collision, and "world editor" three times over is exactly what an agent cannot
+   * act on — Rich, 2026-09-29: "we should probably uniquely title each window too so the agent can
+   * say which one is which".
+   *
+   * Words rather than numbers. `editor-2` and `editor-3` are a reading test in a log; "Harbour"
+   * and "Meridian" are not, and the name has to survive being read out in a sentence like "the
+   * shell has not started in Harbour".
+   */
+  #nameFor() {
+    const taken = new Set([...this.pages].map((p) => p.name))
+    for (const w of WINDOW_NAMES) if (!taken.has(w)) return w
+    for (let i = 2; ; i++) {
+      for (const w of WINDOW_NAMES) {
+        const n = `${w} ${i}`
+        if (!taken.has(n)) return n
+      }
+    }
+  }
+
   #register(ws, url) {
-    const page = { ws, id: randomUUID().slice(0, 8), tools: new Map(), label: url.searchParams.get('label') ?? 'editor', alive: true }
+    const page = {
+      ws,
+      id: randomUUID().slice(0, 8),
+      name: this.#nameFor(),
+      tools: new Map(),
+      label: url.searchParams.get('label') ?? 'editor',
+      alive: true,
+    }
     this.pages.add(page)
+    // THE FIRST WINDOW IN OWNS IT. Somebody opening one editor should not have to claim anything;
+    // the question only arises when there are two.
+    if (!this.owner) this.#setOwner(page, 'it was the first window attached')
+    else this.#tell(page)
 
     ws.on('pong', () => { page.alive = true })
     ws.on('message', (raw) => {
@@ -104,9 +163,61 @@ export class McpBridge {
           this.pending.delete(id)
         }
       }
-      this.log.log?.(`[bridge] ${page.label} (${page.id}) gone; ${this.pages.size} attached`)
+      this.log.log?.(`[bridge] ${page.name} gone; ${this.pages.size} attached`)
+      // HAND IT ON. A window closing must not leave the connection owned by nobody while another
+      // editor sits there able to serve it — that would turn "close the tab you were not using"
+      // into "the agent stops working".
+      if (this.owner === page) this.#setOwner([...this.pages][0] ?? null, 'the owner went away')
     })
     ws.on('error', () => {})
+  }
+
+  /** Tell one page where it stands: whether it owns the connection, and who does if not. */
+  #tell(page) {
+    const owner = this.owner
+    try {
+      page.ws.send(JSON.stringify({
+        type: 'ownership',
+        you: { id: page.id, name: page.name },
+        owner: owner ? { id: owner.id, name: owner.name } : null,
+        mine: owner === page,
+        others: [...this.pages].filter((p) => p !== page).map((p) => ({ id: p.id, name: p.name })),
+      }))
+    } catch {
+      /* a socket on its way out; the sweep will drop it */
+    }
+  }
+
+  /** Tell everybody, because ownership changing is news to the window that lost it too. */
+  #tellAll() {
+    for (const page of this.pages) this.#tell(page)
+  }
+
+  #setOwner(page, why) {
+    const before = this.owner
+    this.owner = page ?? null
+    if (before !== this.owner) {
+      this.log.log?.(`[bridge] ${this.owner ? this.owner.name : 'nobody'} now owns the MCP connection (${why})`)
+    }
+    this.#tellAll()
+  }
+
+  /**
+   * Take the connection, by page id.
+   *
+   * A TAKE IS ALWAYS ALLOWED, and that is the decision rather than an oversight. The alternative
+   * is asking the current owner, which needs somebody sitting at it to answer — and the case this
+   * exists for is a window nobody is watching holding the connection. Losing it is visible in the
+   * window that lost it, which is enough.
+   */
+  claim(pageId) {
+    const page = [...this.pages].find((p) => p.id === pageId || p.name === pageId)
+    if (!page) {
+      throw Object.assign(new Error(`no attached window called "${pageId}" (attached: ${[...this.pages].map((p) => p.name).join(', ') || 'none'})`), { status: 404 })
+    }
+    const previous = this.owner
+    this.#setOwner(page, 'it was claimed')
+    return { owner: { id: page.id, name: page.name }, took_from: previous && previous !== page ? { id: previous.id, name: previous.name } : null }
   }
 
   #onMessage(page, msg) {
@@ -117,7 +228,15 @@ export class McpBridge {
         page.tools.set(t.name, t)
       }
       page.label = msg.label ?? page.label
-      this.log.log?.(`[bridge] ${page.label} (${page.id}) offers ${page.tools.size} tools`)
+      this.log.log?.(`[bridge] ${page.name} offers ${page.tools.size} tools`)
+      // a window that registers when nothing owns the connection takes it: this is the reconnect
+      // case, where the owner went away and came back
+      if (!this.owner) this.#setOwner(page, 'nothing owned it')
+      else this.#tell(page)
+      return
+    }
+    if (msg.type === 'claim') {
+      this.#setOwner(page, 'the window asked for it')
       return
     }
     if (msg.type === 'result' || msg.type === 'error') {
@@ -131,6 +250,7 @@ export class McpBridge {
   }
 
   #sweep() {
+    const before = this.owner
     for (const page of this.pages) {
       if (!page.alive) {
         page.ws.terminate()
@@ -144,26 +264,25 @@ export class McpBridge {
         this.pages.delete(page)
       }
     }
+    // the sweep is the OTHER way a page leaves — a browser that crashed never sends a close — so
+    // the same hand-over has to happen here or a dead window keeps the connection for ever
+    if (before && !this.pages.has(before)) this.#setOwner([...this.pages][0] ?? null, 'the owner stopped answering')
   }
 
   /**
-   * Every tool any attached page offers.
+   * The tools that can actually run: the OWNER's.
    *
-   * Two pages offering the same name is normal — the editor open in two tabs — and the first wins
-   * rather than being an error, because the tools are the same tools. The call then goes to
-   * whichever page still claims it at call time.
+   * It was the union over every attached page, which advertised a tool that the window serving
+   * calls might not offer — a manifest that lies in the one direction an agent cannot recover
+   * from. Two editors offer the same seven tools in practice, so this changes nothing in the
+   * normal case and stops the manifest overpromising in the odd one.
    */
   tools() {
-    const out = new Map()
-    for (const page of this.pages) {
-      for (const [name, def] of page.tools) if (!out.has(name)) out.set(name, def)
-    }
-    return [...out.values()]
+    return this.owner ? [...this.owner.tools.values()] : []
   }
 
   has(name) {
-    for (const page of this.pages) if (page.tools.has(name)) return true
-    return false
+    return !!this.owner?.tools.has(name)
   }
 
   get attached() {
@@ -174,7 +293,10 @@ export class McpBridge {
   describe() {
     return {
       attached: this.pages.size,
-      pages: [...this.pages].map((p) => ({ id: p.id, label: p.label, tools: p.tools.size })),
+      owner: this.owner ? { id: this.owner.id, name: this.owner.name } : null,
+      pages: [...this.pages].map((p) => ({
+        id: p.id, name: p.name, label: p.label, tools: p.tools.size, owner: p === this.owner,
+      })),
       tools: this.tools().map((t) => t.name),
     }
   }
@@ -187,12 +309,24 @@ export class McpBridge {
    * was given, and the page it needs is simply not open.
    */
   async call(name, args, { timeoutMs = CALL_TIMEOUT_MS } = {}) {
-    const page = [...this.pages].find((p) => p.tools.has(name))
+    /*
+     * THE OWNER SERVES IT, and only the owner.
+     *
+     * This used to be `[...this.pages].find(p => p.tools.has(name))` — the first page to attach,
+     * for as long as it stayed. With two editors open an agent's `shell_exec` ran in the other
+     * window's shell and `editor_state` reported the other window's camera, silently and
+     * plausibly. Now there is exactly one window that answers, it has a name, and the answer says
+     * which one it was.
+     */
+    const page = this.owner
     if (!page) {
-      if (this.pages.size === 0) {
-        throw new Error(`"${name}" runs inside the editor page and no editor is attached. Open the world editor in a browser — the Agent tab shows the connection — and call it again.`)
-      }
-      throw new Error(`"${name}" is not offered by any attached editor page (${this.pages.size} attached, offering: ${this.tools().map((t) => t.name).join(', ') || 'nothing'})`)
+      throw new Error(`"${name}" runs inside the editor page and no editor is attached. Open the world editor in a browser — the Agent tab shows the connection — and call it again.`)
+    }
+    if (!page.tools.has(name)) {
+      const elsewhere = [...this.pages].filter((p) => p !== page && p.tools.has(name)).map((p) => p.name)
+      throw new Error(elsewhere.length
+        ? `"${name}" is not offered by ${page.name}, which owns the connection, but ${elsewhere.join(' and ')} offer${elsewhere.length === 1 ? 's' : ''} it. Use editor_claim to move the connection.`
+        : `"${name}" is not offered by ${page.name} (offering: ${[...page.tools.keys()].join(', ') || 'nothing'})`)
     }
 
     const id = randomUUID()

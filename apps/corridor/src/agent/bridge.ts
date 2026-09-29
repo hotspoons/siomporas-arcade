@@ -39,11 +39,27 @@ export interface BridgeOpts {
 
 export type BridgeState = 'off' | 'connecting' | 'attached' | 'retrying' | 'refused'
 
+/** This window, and which one the service will actually send tool calls to. */
+export interface Ownership {
+  /** this window's name, assigned by the service so it is unique among those attached */
+  me: { id: string; name: string } | null
+  owner: { id: string; name: string } | null
+  /** does this window own the connection? when false, browser tools run somewhere else */
+  mine: boolean
+  others: { id: string; name: string }[]
+}
+
 export interface BridgeStatus {
   state: BridgeState
   detail?: string
   tools: number
   calls: number
+  /**
+   * ONE WINDOW OWNS THE BROWSER TOOLS, and every window should be able to see whether it is that
+   * window. Before this, two editors open meant the service served whichever attached first, so an
+   * agent's shell commands ran in the other tab with nothing anywhere saying so.
+   */
+  own?: Ownership
 }
 
 interface ToolDef {
@@ -209,10 +225,18 @@ export class AgentBridge {
   }
 
   private async onCall(ev: MessageEvent): Promise<void> {
-    let msg: { type?: string; id?: string; name?: string; args?: Record<string, unknown> }
+    let msg: {
+      type?: string; id?: string; name?: string; args?: Record<string, unknown>
+      you?: { id: string; name: string }; owner?: { id: string; name: string } | null
+      mine?: boolean; others?: { id: string; name: string }[]
+    }
     try {
       msg = JSON.parse(String(ev.data))
     } catch {
+      return
+    }
+    if (msg.type === 'ownership') {
+      this.emit({ own: { me: msg.you ?? null, owner: msg.owner ?? null, mine: !!msg.mine, others: msg.others ?? [] } })
       return
     }
     if (msg.type !== 'call' || !msg.id) return
@@ -244,6 +268,19 @@ export class AgentBridge {
     this.ws?.close()
     this.ws = null
     this.emit({ state: 'off' })
+  }
+
+  /**
+   * Take the MCP connection for this window.
+   *
+   * Over the socket rather than the HTTP route, because the socket already identifies this page —
+   * the service knows which window asked, and the page does not have to know its own id to say
+   * "me".
+   */
+  claim(): boolean {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return false
+    this.ws.send(JSON.stringify({ type: 'claim' }))
+    return true
   }
 
   private emit(patch: Partial<BridgeStatus>): void {

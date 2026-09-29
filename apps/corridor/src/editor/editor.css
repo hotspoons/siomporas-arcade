@@ -81,7 +81,8 @@
 .preview {
   position: fixed; inset: 0; z-index: var(--z-modal);
   display: flex; flex-direction: column; align-items: center; justify-content: center;
-  padding: 3vh 3vw;
+  /* padding in per-cent of the window it frames, for the same reason the widths are — see `.pv-view` */
+  padding: 2% 2%;
   background: var(--scrim);
   backdrop-filter: blur(6px);
 }
@@ -90,7 +91,7 @@
 
 .pv-bar {
   display: flex; align-items: center; gap: var(--s2);
-  width: min(1500px, 94vw);
+  width: min(1500px, 100%);
   padding: var(--s2) var(--s3);
   background: var(--bg-1);
   border: 1px solid var(--line-1); border-bottom: 0;
@@ -107,21 +108,27 @@
   color: var(--ink-1); background: var(--bg-2);
   border: 1px solid var(--line-2); border-radius: var(--r2);
 }
+/* SIZED AGAINST THE WINDOW IT IS IN, NOT AGAINST THE VIEWPORT.
+   `94vw` and `82vh` are the browser window, and `.preview` is framed to the CANVAS — which in the
+   world editor is a pane stopping at the inspector. So the bar and the view stayed page-width
+   inside a pane-width window and hung out over the panel, which then showed through the scrim
+   (Rich, 2026-09-29: "the right panel is still covering the right part of the preview"). `100%` is
+   the parent, which is the right frame in both the standalone page and the pane. */
 .pv-view {
-  width: min(1500px, 94vw); flex: 1 1 auto; min-height: 0; max-height: 82vh;
+  width: min(1500px, 100%); flex: 1 1 auto; min-height: 0; max-height: 100%;
   border: 1px solid var(--line-1);
   cursor: grab; touch-action: none;
 }
 .pv-view:active { cursor: grabbing; }
 .pv-hud {
-  width: min(1500px, 94vw);
+  width: min(1500px, 100%);
   padding: var(--s2) var(--s3);
   background: var(--bg-1); color: var(--ink-1);
   border: 1px solid var(--line-1); border-top: 0;
   border-radius: 0 0 var(--r3) var(--r3);
   font-size: var(--text-sm);
 }
-.pv-help { width: min(1500px, 94vw); padding: var(--s2) 2px; color: var(--ink-3); font-size: var(--text-xs); }
+.pv-help { width: min(1500px, 100%); padding: var(--s2) 2px; color: var(--ink-3); font-size: var(--text-xs); }
 
 /* ---- the frame-mismatch banner --------------------------------------------------------------
    `frameBanner()` in editor/ui.ts, absorbed into the palette at the editor lane's request. Their
@@ -261,6 +268,9 @@
 .asset-model-detail { margin-left: auto; color: var(--ink-3); font-size: var(--text-xs); }
 .dot { width: 8px; height: 8px; border-radius: var(--r-full); flex: none; }
 .dot.ok { background: var(--ok); }
+/* attached, but another window owns the MCP connection: working, and not the one the agent is
+   talking to — which are different things and should not both read as green */
+.dot.warn { background: var(--warn); }
 .dot.bad { background: var(--danger); }
 .dot.off { background: var(--line-2); }
 
@@ -360,8 +370,17 @@
    time is a large diff that changes no behaviour and misses the next one somebody adds; giving
    the panel's own bare elements the design language covers every one, including the next.
 
-   Scoped to the editor's three mounts, so nothing here can reach the shell's own controls. */
+   Scoped to the editor's mounts, so nothing here can reach the shell's own controls.
+
+   AND THE EMBEDDED EDITOR HAS DIFFERENT MOUNTS. `#se-inspector`, `#se-actions` and `#se-rail` are
+   the ids the STANDALONE editor page gives its three panes. Embedded in the world editor the host
+   supplies its own — `.inspector-body` and the rest — so every one of these selectors missed, and
+   every plain button in the embedded editor was a raw browser button (Rich, 2026-09-29: "the
+   buttons are unstyled"). Both sets are listed rather than the ids dropped, because the point of
+   scoping is that nothing here reaches the shell's own controls. */
 #se-inspector button:not(.btn):not(.chip):not(.rig-bone):not(.tree-twist):not(.tree-open),
+.inspector-body button:not(.btn):not(.chip):not(.rig-bone):not(.tree-twist):not(.tree-open),
+.pv-bar button:not(.btn),
 #se-actions button:not(.btn),
 #se-rail button:not(.btn):not(.seg) {
   display: inline-flex; align-items: center; gap: var(--s2);
@@ -376,10 +395,13 @@
   transition: background var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease), color var(--dur-1) var(--ease);
 }
 #se-inspector button:not(.btn):hover,
+.inspector-body button:not(.btn):hover,
+.pv-bar button:not(.btn):hover,
 #se-actions button:not(.btn):hover,
 #se-rail button:not(.btn):not(.seg):hover { background: var(--bg-3); }
 /* `.on` is what these files already set on the current mode and the armed asset */
 #se-inspector button.on:not(.btn):not(.chip),
+.inspector-body button.on:not(.btn):not(.chip),
 #se-actions button.on:not(.btn) { background: var(--accent-dim); border-color: var(--accent-line); color: var(--accent); }
 /* destructive ones say so — `danger` is the class they already use */
 #se-inspector button.danger:not(.btn),
@@ -456,10 +478,6 @@
 .blender-head { display: grid; gap: var(--s2); }
 .blender-bar { align-items: center; justify-content: flex-start; gap: var(--s2); }
 .blender-status { font-size: var(--text-sm); color: var(--ink-2); }
-/* a live/dead light, because "is there a Blender" is the first question every time */
-.dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--ink-3); }
-.dot.ok { background: var(--ok); }
-.dot.off { background: var(--danger); }
 .blender-down { display: grid; gap: var(--s2); padding: var(--s3); border: 1px solid var(--line-1); border-radius: var(--r2); background: var(--bg-1); }
 .blender-cmd { margin: 0; padding: var(--s2); overflow-x: auto; font-size: var(--text-xs); background: var(--bg-2); border-radius: var(--r1); color: var(--ink-1); }
 .blender-outputs { display: grid; gap: var(--s2); min-height: 0; grid-template-rows: auto minmax(0, 1fr); }
@@ -468,3 +486,17 @@
 .asset-row-text { display: grid; min-width: 0; }
 .asset-row-text .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .blender-preview { max-width: 100%; border-radius: var(--r2); border: 1px solid var(--line-1); display: block; }
+
+/* A destructive plain button in the inspector — `remove` on a stunt fixture. The shared `button()`
+   helper has a `danger` variant, but these panels build plain elements (see the note above), so it
+   gets the same treatment by class. */
+#se-inspector button.danger:not(.btn),
+.inspector-body button.danger:not(.btn) {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+}
+#se-inspector button.danger:not(.btn):hover,
+.inspector-body button.danger:not(.btn):hover {
+  background: color-mix(in srgb, var(--danger) 18%, var(--bg-2));
+  color: var(--ink-1);
+}

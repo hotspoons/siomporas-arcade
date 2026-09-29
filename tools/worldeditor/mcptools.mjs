@@ -97,37 +97,65 @@ export function serverTools({ apiFetch }) {
      * the models it knows about. `assetsvc` is where an asset is GENERATED — a described prop in,
      * a textured glb out — and it is proxied through this service so the browser never reaches a
      * GPU. See tools/assetsvc/README.md.
+     *
+     * THE PROXY IS AT `/assetsvc/…`, NOT UNDER `/api`. Writing these by analogy with every other
+     * tool here produced a 404 from the ROUTER rather than a 503 from the proxy, which is the
+     * tell — the request never reached the proxy at all.
      */
     T('catalog_list', 'Everything placeable: models, their categories and where they came from.', {}, [], () => get('/api/catalog')),
     T('catalog_add', 'Add or update a catalog entry.', { entry: obj('the catalog item') }, ['entry'], (a) => post('/api/catalog', a.entry)),
     T('catalog_delete', 'Remove a catalog entry. The underlying model file is left alone.', { id: str('') }, ['id'], (a) => del(`/api/catalog/${a.id}`)),
     T('model_list', 'Every model file on the volume, with its size and format.', {}, [], () => get('/api/models')),
 
-    T('asset_list', 'The generation catalog: described props and how far along each is — described, drawn, meshed, ready.', {}, [], () => get('/api/assetsvc/catalog')),
-    T('asset_get', 'One generated asset: its prompt, its views, its mesh, and the provenance of every step.', { id: str('') }, ['id'], (a) => get(`/api/assetsvc/catalog/${a.id}`)),
+    T('asset_list', 'The generation catalog: described props and how far along each is — described, drawn, meshed, ready.', {}, [], () => get('/assetsvc/catalog')),
+    T('asset_get', 'One generated asset: its prompt, its views, its mesh, and the provenance of every step.', { id: str('') }, ['id'], (a) => get(`/assetsvc/catalog/${a.id}`)),
     T(
       'asset_describe',
       'Create or edit an asset’s SPEC — what it is, the prompt, what to avoid. Describing does not generate; asset_draw does.',
       { id: str('lower-case, hyphens'), subject: str('the noun'), prompt: str('the full description'), negative: str('what must not appear'), tags: { type: 'array', items: { type: 'string' } } },
       ['id'],
-      (a) => post('/api/assetsvc/catalog', a),
+      (a) => post('/assetsvc/catalog', a),
     ),
     T(
       'asset_draw',
       'Generate a 2D view from the asset’s prompt. Returns a JOB — poll asset_job. About ten seconds. Costs GPU time on a shared cluster.',
       { id: str(''), seed: num(''), steps: num(''), size: str('e.g. 1024x1024') },
       ['id'],
-      (a) => post(`/api/assetsvc/catalog/${a.id}/image`, { seed: a.seed, steps: a.steps, size: a.size }),
+      (a) => post(`/assetsvc/catalog/${a.id}/image`, { seed: a.seed, steps: a.steps, size: a.size }),
     ),
     T(
       'asset_mesh',
       'Reconstruct a 3D mesh from the chosen view, and finish it for the game. Returns a JOB — poll asset_job. Minutes, one at a time, and it is the expensive one.',
       { id: str(''), seed: num(''), finish: bool('run the simplify/unlit/Draco finisher; default true') },
       ['id'],
-      (a) => post(`/api/assetsvc/catalog/${a.id}/mesh`, { seed: a.seed, finish: a.finish }),
+      (a) => post(`/assetsvc/catalog/${a.id}/mesh`, { seed: a.seed, finish: a.finish }),
     ),
-    T('asset_job', 'How a generation job is going: queued, running with progress, done with numbers, or failed with why.', { job: str('') }, ['job'], (a) => get(`/api/assetsvc/jobs/${a.job}`)),
-    T('asset_services', 'Which generation models this editor is configured for and which are actually answering right now. Read-only: the roster is a deployment decision.', {}, [], () => get('/api/assetsvc/models')),
+    T('asset_job', 'How a generation job is going: queued, running with progress, done with numbers, or failed with why.', { job: str('') }, ['job'], (a) => get(`/assetsvc/jobs/${a.job}`)),
+    /* ---- materials: a surface rather than a prop -------------------------------------------
+     * A second kind of generated asset with a different shape. A prop is a mesh that belongs to
+     * one item; a material is three maps — colour, normal, roughness — that several buildings
+     * share, so it belongs to no item and is addressed by its own id.
+     *
+     * Generating one produces a DRAFT rather than overwriting what is live: a texture that turns
+     * out wrong should not have replaced the one that was working before anybody looked at it.
+     */
+    T('material_list', 'Every material: its id, its maps, and what it is meant to be.', {}, [], () => get('/assetsvc/materials')),
+    T(
+      'material_generate',
+      'Generate a texture set from a prompt. Produces a DRAFT — nothing live changes until material_save. Returns a JOB; poll asset_job.',
+      { id: str('lower-case, hyphens or underscores'), prompt: str('what the surface IS — "weathered red brick, running bond, mortar gone grey"'), seed: num('') },
+      ['id', 'prompt'],
+      (a) => post(`/assetsvc/materials/${a.id}/generate`, { prompt: a.prompt, seed: a.seed }),
+    ),
+    T('material_draft', 'The pending draft for a material, if there is one.', { id: str('') }, ['id'], (a) => get(`/assetsvc/materials/${a.id}/draft`)),
+    T('material_save', 'Commit the draft: the generated maps become the live material.', { id: str('') }, ['id'], (a) => post(`/assetsvc/materials/${a.id}/save`, {})),
+    T('material_discard', 'Throw the draft away and leave the live material alone.', { id: str('') }, ['id'], (a) => del(`/assetsvc/materials/${a.id}/draft`)),
+
+    T('asset_choose', 'Pick which generated view is the one to mesh from.', { id: str(''), view: str('a file name from asset_get') }, ['id', 'view'], (a) => post(`/assetsvc/catalog/${a.id}/choose`, { view: a.view })),
+    T('asset_fork', 'Copy an asset and its spec under a new id — the way to try a variation without losing the one that works.', { id: str(''), to: str('the new id') }, ['id', 'to'], (a) => post(`/assetsvc/catalog/${a.id}/fork`, { to: a.to })),
+    T('asset_sync', 'Push the generated catalog to the bucket, or pull it back. Objects whose size already matches are skipped.', { direction: { type: 'string', enum: ['push', 'pull'], description: '' } }, ['direction'], (a) => post(`/assetsvc/sync/${a.direction}`, {})),
+
+    T('asset_services', 'Which generation models this editor is configured for and which are actually answering right now. Read-only: the roster is a deployment decision.', {}, [], () => get('/assetsvc/models')),
 
     /* ---- bakes and publishes ------------------------------------------------------------------ */
     T('run_list', 'Every bake and publish, newest first, with state and duration.', {}, [], () => get('/api/runs')),

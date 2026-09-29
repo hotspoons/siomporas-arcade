@@ -107,15 +107,37 @@ else {
   if (!img) fail.push('no thumbnail for the render')
   else if (!(img.w > 0 && img.h > 0)) fail.push(`the thumbnail did not load (${img.src})`)
 
-  // and selecting the stl must SAY it cannot be previewed rather than showing an empty box
+  /* ---- the STL is DRAWN, not described ----
+   * Rich, 2026-09-29: "We need an stl previewer, no hand waving." The first version of this panel
+   * said an STL could not be previewed and offered to export a glb, which is a message where a
+   * viewer should be. So this asserts GEOMETRY REACHED THE VIEWER — a canvas alone proves nothing,
+   * since the viewer draws an empty stage exactly as happily as a loaded one.
+   */
   await page.click(`#assets .blender-outputs .asset-row:has-text("${stl.body.file}")`)
-  await page.waitForTimeout(700)
+  const drew = await page.waitForFunction(() => {
+    const v = window.__blenderview
+    return !!v?.stats && v.stats.triangles > 0 ? { ...v.stats, format: v.format } : false
+  }, null, { timeout: 45000 }).then((h) => h.jsonValue()).catch(() => null)
+  say('stl in the viewer', drew ?? 'nothing drew')
+  if (!drew) fail.push('the stl did not reach the 3D viewer')
+  else {
+    if (drew.format !== 'stl') fail.push(`the viewer thinks it loaded ${drew.format}`)
+    if (!(drew.triangles > 100)) fail.push(`only ${drew.triangles} triangles — that is not the model`)
+  }
   // `.blender-detail`, not `.asset-detail`: the catalog tab has one of those too and hidden tab
   // panels stay in the DOM, so the unscoped selector read the catalog's "Pick an item."
   const detail = await page.$eval('#assets .blender-detail', (n) => n.textContent.replace(/\s+/g, ' '))
-  say('stl detail says', detail.slice(0, 90))
-  if (!/triangles only|no rig|not previewed/i.test(detail)) {
-    fail.push('selecting an stl neither previews it nor says why it cannot')
+  say('stl detail says', detail.slice(0, 120))
+  // it still has to say what the format does NOT carry, under the model rather than instead of it
+  if (!/geometry only|no rig/i.test(detail)) fail.push('nothing says an stl has no materials or rig')
+  // and the readouts must have VALUES, not just labels
+  const readouts = await page.$$eval('#assets .blender-detail .readout', (rows) => rows.map((r) => ({
+    label: r.querySelector('.field-label')?.textContent?.trim() ?? '',
+    value: r.querySelector('.field-value')?.textContent?.trim() ?? '',
+  })))
+  say('readouts', readouts)
+  for (const r of readouts) {
+    if (!r.value) fail.push(`the "${r.label}" readout is empty`)
   }
 }
 

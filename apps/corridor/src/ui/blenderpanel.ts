@@ -18,6 +18,9 @@ import { icon } from './icons'
 import { api, type BlenderOutput, type BlenderStatus } from '../worldedit/api'
 import { MeshView } from './meshview'
 
+/** What the 3D viewer can draw. Everything else gets a download and an honest sentence. */
+const VIEWABLE = new Set(['glb', 'gltf', 'stl', 'obj', 'ply'])
+
 /** Bytes as something a person reads. */
 const size = (n: number) => (n > 1e6 ? `${(n / 1e6).toFixed(1)} MB` : n > 1e3 ? `${Math.round(n / 1e3)} kB` : `${n} B`)
 
@@ -172,26 +175,35 @@ export class BlenderPanel {
       const img = el('img', 'blender-preview') as HTMLImageElement
       img.src = url
       b.append(img)
-    } else if (f.ext === 'glb' || f.ext === 'gltf') {
-      // the same viewer the asset library uses, so a rigged result is inspected the same way a
-      // catalog mesh is — spin it, count its triangles, see its glazing
+    } else if (VIEWABLE.has(f.ext)) {
+      /*
+       * EVERY MODEL FORMAT GETS THE SAME VIEWER.
+       *
+       * The first version of this said an STL "cannot be previewed here" and offered to export a
+       * glb instead, which is a message where a viewer should be — three ships an STLLoader and it
+       * is four lines. An STL carries no materials, no colour and no rig; that is a fact about the
+       * format to state UNDER the model, not a reason to refuse to draw it.
+       */
       this.mesh ??= new MeshView({ remember: 'blender' })
+      // ITS OWN NAME. `__meshview` belongs to the catalog's viewer and both panels exist at once
+      // in the DOM, so sharing the handle means a probe cannot tell which one it is reading.
+      ;(window as unknown as { __blenderview?: MeshView }).__blenderview = this.mesh
       if (this.mesh.root.dataset.file !== f.name) {
         this.mesh.root.dataset.file = f.name
         void this.mesh.load(url)
       }
       this.mesh.start()
       b.append(this.mesh.root)
+      if (f.ext !== 'glb' && f.ext !== 'gltf') {
+        const p = el('p', 'panel-hint')
+        p.append(icon('information-circle', 14), el('span', '', f.ext === 'ply'
+          ? 'PLY is geometry and, sometimes, vertex colours — no materials and no rig. The grey is the viewer’s.'
+          : `${f.ext.toUpperCase()} is geometry only: no materials, no rig. The grey is the viewer’s, not the asset’s.`))
+        b.append(p)
+      }
     } else {
-      /*
-       * AND THE HONEST CASE. An .stl has no materials and no armature — that is the format, not a
-       * fault — and this viewer loads glTF, so there is nothing to spin. Saying so beats an empty
-       * box that looks broken.
-       */
       const p = el('p', 'panel-hint')
-      p.append(icon('information-circle', 14), el('span', '', f.ext === 'stl'
-        ? 'STL is triangles only: no materials, no rig, nothing to preview here. Export glb to look at it.'
-        : `${f.ext.toUpperCase()} is not previewed here; download it to open it elsewhere.`))
+      p.append(icon('information-circle', 14), el('span', '', `${f.ext.toUpperCase()} is not something this viewer draws; download it to open it elsewhere.`))
       b.append(p)
     }
     b.append(readout('size', size(f.bytes)), readout('made', ago(f.at)))

@@ -22,6 +22,18 @@
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
+/*
+ * THE OTHER THINGS BLENDER WRITES.
+ *
+ * A .glb is what the game loads, but the Blender tab also produces STL, OBJ and PLY — and the
+ * first version of that tab told you an STL could not be previewed, which is a message where a
+ * viewer should be. These are geometry-only formats: an STL has no materials, no colours and no
+ * rig, and a PLY may carry vertex colours. Loading them is four lines each; refusing to was
+ * hand-waving.
+ */
+import { STLLoader } from 'three/addons/loaders/STLLoader.js'
+import { OBJLoader } from 'three/addons/loaders/OBJLoader.js'
+import { PLYLoader } from 'three/addons/loaders/PLYLoader.js'
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js'
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
 import { Dialog, button, el } from './shell'
@@ -171,6 +183,8 @@ export class MeshView {
   glazed: GlazingResult | null = null
   private skeletonHelper: THREE.SkeletonHelper | null = null
   private skinned: THREE.SkinnedMesh | null = null
+  /** what the last load was, so a panel can say "no materials, and that is the format" */
+  format: 'gltf' | 'stl' | 'obj' | 'ply' = 'gltf'
   /**
    * Bones found OUTSIDE a skin.
    *
@@ -488,16 +502,59 @@ export class MeshView {
     this.savePrefs()
   }
 
-  /** Load a .glb. Rejects loudly in the panel rather than leaving an empty stage. */
+  /**
+   * Load a model. Rejects loudly in the panel rather than leaving an empty stage.
+   *
+   * glTF is the rich case — materials, a rig, the alpha glazing. STL, OBJ and PLY are geometry,
+   * and the viewer says so rather than pretending the grey is the asset's colour.
+   */
   load(url: string): Promise<void> {
     this.loaded = this.#load(url)
     return this.loaded
+  }
+
+  /** What the URL is, by extension — the query string is not part of the name. */
+  private static formatOf(url: string): 'gltf' | 'stl' | 'obj' | 'ply' {
+    const ext = (url.split(/[?#]/)[0].match(/\.([a-z0-9]+)$/i)?.[1] ?? '').toLowerCase()
+    return ext === 'stl' ? 'stl' : ext === 'obj' ? 'obj' : ext === 'ply' ? 'ply' : 'gltf'
+  }
+
+  /**
+   * The geometry-only formats, as something to look at.
+   *
+   * ONE MATERIAL, and it is honest about being ours: an STL carries no colour at all, so any
+   * colour here is the viewer's invention. Flat-shaded, because these come out of Blender as
+   * triangle soup with no normals worth smoothing and a smooth shader makes a facetted mesh look
+   * like a melted one.
+   */
+  async #loadPlain(url: string, format: 'stl' | 'obj' | 'ply'): Promise<THREE.Object3D> {
+    const material = () => new THREE.MeshStandardMaterial({
+      color: 0x9aa4b2, roughness: 0.65, metalness: 0.0, flatShading: true, side: THREE.DoubleSide,
+    })
+    if (format === 'obj') {
+      const obj = await new OBJLoader().loadAsync(url)
+      obj.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) m.material = material() })
+      return obj
+    }
+    const geometry = format === 'stl'
+      ? await new STLLoader().loadAsync(url)
+      : await new PLYLoader().loadAsync(url)
+    // STL has no normals of its own worth trusting and PLY often has none at all
+    if (!geometry.getAttribute('normal')) geometry.computeVertexNormals()
+    const mat = material()
+    // a PLY may carry per-vertex colour, which IS the asset's own and should win over ours
+    if (geometry.getAttribute('color')) { mat.vertexColors = true; mat.color.setHex(0xffffff) }
+    const root = new THREE.Object3D()
+    root.add(new THREE.Mesh(geometry, mat))
+    return root
   }
 
   async #load(url: string): Promise<void> {
     this.clear()
     this.say('loading…')
     try {
+      const format = MeshView.formatOf(url)
+      if (format !== 'gltf') return await this.#place(await this.#loadPlain(url, format), format)
       const gltf = await this.loader.loadAsync(url)
       if (this.disposed) return
       const root = gltf.scene
@@ -529,44 +586,54 @@ export class MeshView {
        */
       this.glazed = applyAlphaGlazing(root)
 
-      const box = new THREE.Box3().setFromObject(root)
-      const centre = box.getCenter(new THREE.Vector3())
-      const size = box.getSize(new THREE.Vector3())
-      root.position.sub(centre)
-      root.position.y += size.y / 2 // sit it on the grid rather than through it
-      this.pivot.add(root)
-
-      const r = Math.max(size.x, size.y, size.z) || 1
-      this.grid.scale.setScalar(r)
-      this.camera.position.set(r * 1.5, r * 0.85, r * 2.0)
-      this.controls.target.set(0, size.y / 2, 0)
-      this.controls.update()
-      this.size = size
-      this.stats = countGeometry(root)
-      // the wireframe choice is remembered, and the materials it applies to did not exist until now
-      if (this.wire) this.setWireframe(true)
-      /*
-       * AND THE CAMERA, IF THERE IS ONE REMEMBERED — but only if it is a sane distance for THIS
-       * model. A camera kept from a two-metre car applied to a unit-normalised prop puts you
-       * inside it, which looks exactly like a failed load.
-       */
-      const cam = this.prefs.cam
-      if (cam && Number.isFinite(cam[0])) {
-        const dist = Math.hypot(cam[0] - cam[3], cam[1] - cam[4], cam[2] - cam[5])
-        if (dist > r * 0.4 && dist < r * 20) {
-          this.restoring = true
-          this.camera.position.set(cam[0], cam[1], cam[2])
-          this.controls.target.set(cam[3], cam[4], cam[5])
-          this.controls.update()
-          this.restoring = false
-        }
-      }
-      this.say(null)
+      await this.#place(root, 'gltf')
     } catch (e) {
       // GLTFLoader REJECTS on undecodable Draco rather than warning, so this is the only place
       // the difference between "no mesh" and "a mesh we cannot read" is visible.
       this.say(`could not load the mesh — ${(e as Error).message}`)
     }
+  }
+
+  /**
+   * Centre it, sit it on the grid, frame it, and count it — the half of loading that is the same
+   * whatever the file was.
+   */
+  async #place(root: THREE.Object3D, format: 'gltf' | 'stl' | 'obj' | 'ply'): Promise<void> {
+    if (this.disposed) return
+    const box = new THREE.Box3().setFromObject(root)
+    const centre = box.getCenter(new THREE.Vector3())
+    const size = box.getSize(new THREE.Vector3())
+    root.position.sub(centre)
+    root.position.y += size.y / 2 // sit it on the grid rather than through it
+    this.pivot.add(root)
+
+    const r = Math.max(size.x, size.y, size.z) || 1
+    this.grid.scale.setScalar(r)
+    this.camera.position.set(r * 1.5, r * 0.85, r * 2.0)
+    this.controls.target.set(0, size.y / 2, 0)
+    this.controls.update()
+    this.size = size
+    this.stats = countGeometry(root)
+    this.format = format
+    // the wireframe choice is remembered, and the materials it applies to did not exist until now
+    if (this.wire) this.setWireframe(true)
+    /*
+     * AND THE CAMERA, IF THERE IS ONE REMEMBERED — but only if it is a sane distance for THIS
+     * model. A camera kept from a two-metre car applied to a unit-normalised prop puts you
+     * inside it, which looks exactly like a failed load.
+     */
+    const cam = this.prefs.cam
+    if (cam && Number.isFinite(cam[0])) {
+      const dist = Math.hypot(cam[0] - cam[3], cam[1] - cam[4], cam[2] - cam[5])
+      if (dist > r * 0.4 && dist < r * 20) {
+        this.restoring = true
+        this.camera.position.set(cam[0], cam[1], cam[2])
+        this.controls.target.set(cam[3], cam[4], cam[5])
+        this.controls.update()
+        this.restoring = false
+      }
+    }
+    this.say(null)
   }
 
   /**

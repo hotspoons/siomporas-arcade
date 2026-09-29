@@ -12,9 +12,9 @@
 // WHERE THE DATA LIVES. Nothing in this page holds state that matters. Worlds, runs, logs, the
 // authored files and the placement catalog are all on the service's volume, so closing the tab,
 // reloading, or the pod restarting loses a scroll position and nothing else.
-import { Dialog, Drawer, button, el, installShellKeys, status, clearStatus, toast, typing } from '../ui/shell'
+import { Dialog, Drawer, Tabs, button, el, installShellKeys, status, clearStatus, toast, typing } from '../ui/shell'
 import { bodyOf, empty, group, readout, segmented, select, textField } from '../ui/controls'
-import { icon } from '../ui/icons'
+import { icon, type IconName } from '../ui/icons'
 import { AssetCatalog } from '../ui/assets'
 import { api, type Config, type IndexedPlace, type Way, type World } from './api'
 import { MapView, type LonLat } from './map'
@@ -30,6 +30,9 @@ import { SplatsPanel } from './splats'
 import { worldMenuTransfer } from './transfer'
 import { GitPanel } from './gitpanel'
 import { dockWidth } from '../ui/dockwidth'
+import { actorExtension } from '../ui/actors'
+import { weaponExtension } from '../ui/weapons'
+import { vehicleExtension } from '../ui/vehicles'
 
 /**
  * The tabs, as one list.
@@ -38,8 +41,26 @@ import { dockWidth } from '../ui/dockwidth'
  * remembered tab still exists — a stored `'places'` from before a rename would otherwise open a
  * page with no panel and no way to see why.
  */
-const MODES = ['explore', 'index', 'define', 'bake', 'place', 'stage', 'program', 'shell', 'agent', 'assets', 'splats'] as const
+/*
+ * EIGHT PLACES TO BE, not eleven.
+ *
+ * Rich, 2026-09-29: "Explore, define, and bake need to be collapsed into a single item with a
+ * multistage wizard form or something, maybe with tabs to bounce between them. Total mess right
+ * now. Index doesn't make any sense."
+ *
+ * Those four were never four things. They are what you do to ONE world, in order: find the place,
+ * keep it, draw its boundary, bake it. A row of eleven peers said they were alternatives to each
+ * other and to the Assets library, which is a different kind of thing entirely — so the top bar
+ * read as a pile rather than as a pipeline, and there was nothing anywhere to say what to press
+ * first. They are steps inside `world` now, and `index` — which named itself after a data
+ * structure — is "Places", which is what it holds.
+ */
+const MODES = ['world', 'place', 'stage', 'assets', 'program', 'shell', 'agent', 'splats'] as const
 type Mode = (typeof MODES)[number]
+
+/** The stages of making a world, in the order you do them. */
+const STEPS = ['explore', 'places', 'define', 'bake'] as const
+type Step = (typeof STEPS)[number]
 
 /*
  * THE SITE EDITOR IS A MODE, not another page.
@@ -207,8 +228,12 @@ const agentPanel = new AgentPanel({
   shell: () => shellPanel.machine,
 })
 
-let mode: Mode = 'explore'
+let mode: Mode = 'world'
+let step: Step = 'explore'
 let dirty = false
+
+/** Showing that stage right now? Two facts, asked together everywhere, so asked once here. */
+const at = (s: Step) => mode === 'world' && step === s
 
 /* ---- the map ------------------------------------------------------------------------------- */
 
@@ -307,14 +332,14 @@ async function loadLayers(bbox: Box, zoom: number) {
   } catch (e) {
     if ((e as Error).name !== 'AbortError') {
       roadsOff = (e as Error).message
-      if (mode === 'explore') renderExplore()
+      if (at('explore')) renderExplore()
     }
     return
   }
   roadsOff = plan.length ? null : 'nothing to fetch at this zoom — the country outlines and world cities are the whole picture out here'
   // Always, even when the plan is empty: at world zoom nothing loads, and without this the panel
   // kept whatever numbers it had when the last tile landed — it read "zoom 15" over Europe.
-  if (mode === 'explore') renderExplore()
+  if (at('explore')) renderExplore()
   const wanted = new Set<string>()
   for (const layer of plan) for (const t of layer.tiles) wanted.add(tileKey(layer.layer, t))
 
@@ -338,7 +363,7 @@ async function loadLayers(bbox: Box, zoom: number) {
         const key = tileKey(layer.layer, t, layer.variant)
         tileState.set(key, 'live')
         loading++
-        if (mode === 'explore') renderExplore()
+        if (at('explore')) renderExplore()
         try {
           // the plan's own signal, so a pan ABORTS the tiles it superseded instead of leaving
           // them to finish into a view nobody is looking at any more
@@ -354,7 +379,7 @@ async function loadLayers(bbox: Box, zoom: number) {
           if ((e as Error).name !== 'AbortError') roadsOff = (e as Error).message
         } finally {
           loading--
-          if (mode === 'explore') renderExplore()
+          if (at('explore')) renderExplore()
         }
       }),
     )
@@ -428,6 +453,8 @@ const logs = new LogView()
 const assets = new AssetCatalog({
   host: document.getElementById('assets')!,
   world: () => selected,
+  // the physics lane's Dynamics group, on the items that are vehicles (src/ui/vehicles.ts)
+  extensions: [vehicleExtension(), actorExtension(), weaponExtension()],
   /*
    * PLACEABLE IS A TICK BOX, not a second screen.
    *
@@ -447,7 +474,7 @@ const define = new DefinePanel({
   onSaved: async (w) => {
     selected = w.slug
     await refreshWorlds()
-    setMode('bake')
+    setStep('bake')
   },
   onDirty: (d) => setDirty(d, 'boundary'),
   worlds: () => worlds,
@@ -490,18 +517,20 @@ function buildBar() {
     worldSel,
     segmented<Mode>({
       value: mode,
+      /*
+       * THE ORDER IS THE PIPELINE, left to right: make a world, dress it, turn it into a level,
+       * and the library of things all three draw on. Then the three surfaces that are about
+       * writing rather than building, and the capture rig at the end.
+       */
       options: [
-        { value: 'explore', label: 'Explore', icon: 'map', key: '1' },
-        { value: 'index', label: 'Index', icon: 'map-pin', key: '2' },
-        { value: 'define', label: 'Define', icon: 'pencil-square', key: '3' },
-        { value: 'bake', label: 'Bake', icon: 'play', key: '4' },
-        { value: 'place', label: 'Place', icon: 'pencil-square', key: '5' },
-        { value: 'stage', label: 'Stage', icon: 'flag', key: '6' },
-        { value: 'program', label: 'Program', icon: 'beaker', key: '7' },
-        { value: 'shell', label: 'Shell', icon: 'server-stack', key: '8' },
-        { value: 'agent', label: 'Agent', icon: 'sparkles', key: '9' },
-        { value: 'assets', label: 'Assets', icon: 'cube', key: '0' },
-        { value: 'splats', label: 'Splats', icon: 'camera' },
+        { value: 'world', label: 'World', icon: 'map', key: '1' },
+        { value: 'place', label: 'Place', icon: 'pencil-square', key: '2' },
+        { value: 'stage', label: 'Stage', icon: 'flag', key: '3' },
+        { value: 'assets', label: 'Assets', icon: 'cube', key: '4' },
+        { value: 'program', label: 'Program', icon: 'beaker', key: '5' },
+        { value: 'shell', label: 'Shell', icon: 'server-stack', key: '6' },
+        { value: 'agent', label: 'Agent', icon: 'sparkles', key: '7' },
+        { value: 'splats', label: 'Splats', icon: 'camera', key: '8' },
       ],
       onChange: (m) => setMode(m),
     }),
@@ -512,7 +541,10 @@ function buildBar() {
     // and two more items in the drawer, two of which opened a DIFFERENT dialog from the mode
     // (Rich, 2026-09-27: "this whole thing needs a once over for UX, it is a mess"). The rule
     // now: the bar is the pipeline, the drawer is the app, and nothing appears in both.
-    button({ icon: 'information-circle', title: 'what this is pointed at', onClick: () => void showConfig() }),
+    //
+    // "What this is pointed at" used to be an icon here that fired a nine-second toast. It is a
+    // readout in Settings → Services now, where it can be read twice.
+    button({ icon: 'cog-6-tooth', title: 'settings', variant: 'ghost', onClick: () => openSettings() }),
   )
   document.body.append(bar)
   measureBar()
@@ -642,7 +674,7 @@ async function refreshPlaces() {
   indexed = (await api.places().catch(() => ({ places: [] }))).places
   map.pins = indexed.map((p) => ({ id: p.id, name: p.name, lat: p.lat, lon: p.lon, world: !!p.world }))
   map.draw()
-  if (mode === 'explore') renderExplore()
+  if (at('explore')) renderExplore()
 }
 
 async function keepPlace(p: Partial<IndexedPlace>) {
@@ -726,35 +758,88 @@ function renderIndex(host: HTMLElement) {
   }
 }
 
+/*
+ * THE DRAWER IS THE APPLICATION; THE BAR IS THE WORK.
+ *
+ * Rich, 2026-09-29: "the hamburger menu and main menu need a rethink for what goes where. 'drive
+ * it' won't make any sense from that menu, new world is already in that explore tab, and we need a
+ * settings tab."
+ *
+ * Both of those were the same mistake — a menu of everything rather than a menu of one kind of
+ * thing. Two rules now, and they decide every row:
+ *
+ *   the BAR is where you work: eight surfaces, and the one you are on is the one you see.
+ *   the DRAWER is what is true of this installation: settings, and what it is pointed at.
+ *
+ * So `New world` is gone, because it is the Define stage and the Explore stage both offer it, and
+ * a third door to the same room is just somewhere else to look for it. `Drive it` is gone from
+ * here because it is not a property of the installation — it is an action on ONE world, which is
+ * why it now sits next to that world in the picker, where it can be disabled when the world is
+ * not baked. It could never be disabled here; it just took you to an empty viewer.
+ */
 function buildDrawer() {
   const nav = drawer.section('')
-  drawer.item(nav, { id: 'new', label: 'New world', icon: 'plus', hint: 'draw a boundary on the map', key: 'N', onClick: () => newWorld() })
-  // Assets is a MODE (key 7), and placing what it finishes is a step inside it. Both used to be
-  // here as well, opening dialogs that were not the mode's panel.
-  // NO NEW TABS. The site editor is the Place mode above; the viewer is the one thing that is
-  // genuinely a different application — you drive it — and it navigates in place, carrying the
-  // world, so the browser's own back button returns you here.
-  drawer.item(nav, { id: 'viewer', label: 'Drive it', icon: 'globe-alt', hint: 'open the baked world in the viewer', onClick: () => { location.href = selected ? `/index.html?site=${selected}` : '/index.html' } })
-
-  /*
-   * VERSION CONTROL, in the drawer rather than as a mode.
-   *
-   * It is not part of making a world — it is what you do with the worlds after you have made
-   * them — and the modes along the top are the steps of the pipeline. A ninth tab there would say
-   * that pushing is a stage of building a level, which it is not.
-   */
-  const vcs = drawer.section('Version control')
-  drawer.item(vcs, {
-    id: 'git',
-    label: 'Git and LFS',
-    icon: 'cloud-arrow-up',
-    hint: 'push this volume\u2019s worlds, levels, programs and assets to a remote',
-    onClick: () => openGit(),
+  drawer.item(nav, {
+    id: 'settings',
+    label: 'Settings',
+    icon: 'cog-6-tooth',
+    hint: 'git and LFS, the agent, appearance, and what this is pointed at',
+    onClick: () => openSettings(),
   })
+}
 
-  const look = drawer.section('Appearance')
-  drawer.custom(
-    look,
+/**
+ * Settings: everything that is true of this installation rather than of a world.
+ *
+ * A dialog and not a ninth mode, because none of it is a place you work — you come, change a
+ * thing, and go back to what you were doing. A mode would have thrown your panel away to show you
+ * a remote URL.
+ */
+let settingsDialog: Dialog | null = null
+let gitPanel: GitPanel | null = null
+function openSettings() {
+  drawer.set(false)
+  if (!settingsDialog) {
+    settingsDialog = new Dialog({ title: 'Settings', icon: 'cog-6-tooth', size: 'lg', movable: true })
+    settingsDialog.body.append(
+      new Tabs([
+        {
+          id: 'git',
+          label: 'Git and LFS',
+          icon: 'cloud-arrow-up',
+          build: (h) => {
+            gitPanel = new GitPanel({ host: h, refresh: () => void gitPanel?.load() })
+            void gitPanel.load()
+          },
+        },
+        { id: 'agent', label: 'Agent', icon: 'sparkles', build: (h) => buildAgentSettings(h) },
+        { id: 'look', label: 'Appearance', icon: 'eye', build: (h) => buildAppearance(h) },
+        { id: 'services', label: 'Services', icon: 'server-stack', build: (h) => void buildServices(h) },
+      ]).root,
+    )
+  }
+  settingsDialog.open()
+  void gitPanel?.load()
+}
+
+/**
+ * The agent's configuration — which is NOT here yet, on purpose.
+ *
+ * The `agentmcp` lane is inside `ui/agentpanel.ts` right now, adding an MCP section: a server URL,
+ * a minted token, a status and the config JSON to paste into a client. Copying today's fields into
+ * this tab would fork that work the day before it lands, and the copy would be the one that went
+ * stale. They are adding `mountAgentSettings(host)` to their own file; this calls it the moment it
+ * exists, and until then says where the settings are rather than pretending to be them.
+ */
+function buildAgentSettings(host: HTMLElement) {
+  const p = el('p', 'panel-hint')
+  p.append(icon('information-circle', 14), el('span', '', 'The agent’s connection and MCP settings are in the Agent surface while that work lands.'))
+  host.append(p)
+  host.append(el('p', 'dim', 'Bar → Agent (7).'))
+}
+
+function buildAppearance(host: HTMLElement) {
+  host.append(
     select({
       label: 'Theme',
       value: (localStorage.getItem('corridor.theme') as 'dark' | 'light') ?? 'dark',
@@ -776,22 +861,26 @@ function buildDrawer() {
 }
 
 /**
- * The git panel, in a dialog.
+ * What this editor is pointed at.
  *
- * A dialog and not the docked inspector: it is about the whole volume rather than the world the
- * inspector is describing, and opening it must not throw away whatever mode was showing.
+ * This was a toast — six lines of configuration fired at the corner of the screen for nine seconds,
+ * which is long enough to read none of it and no way to get it back except pressing the button
+ * again. It is a readout, and it belongs where the rest of the installation's truth is.
  */
-let gitDialog: Dialog | null = null
-function openGit() {
-  drawer.set(false)
-  if (!gitDialog) {
-    gitDialog = new Dialog({ title: 'Git and LFS', icon: 'cloud-arrow-up', size: 'lg' })
-    const panel = new GitPanel({ host: gitDialog.body, refresh: () => void panel.load() })
-    ;(gitDialog as unknown as { panel: GitPanel }).panel = panel
-  }
-  gitDialog.open()
-  void (gitDialog as unknown as { panel: GitPanel }).panel.load()
+async function buildServices(host: HTMLElement) {
+  host.append(el('p', 'dim', 'reading…'))
+  const ready = await api.ready().catch(() => null)
+  host.replaceChildren()
+  host.append(readout('data', config?.data ?? '?'))
+  host.append(readout('runner', `${config?.runs.runner ?? '?'}${config?.runs.runner === 'kubernetes' ? ` · ${config?.runs.namespace}` : ''}`))
+  if (config?.runs.runner === 'kubernetes') host.append(readout('image', config?.runs.image ?? '?'))
+  host.append(readout('overpass', ready?.overpass.ok ? `up (${ready.overpass.ms} ms)` : `DOWN — ${ready?.overpass.detail?.slice(0, 120) ?? 'no answer'}`))
+  host.append(readout('kubernetes', ready?.kubernetes.ok ? `ok (${ready.kubernetes.namespace})` : ready?.kubernetes.detail ?? '?'))
+  host.append(readout('assetsvc', config?.assetsvc ?? 'not configured'))
+  host.append(readout('bucket', config?.bucket ? `${config.bucket.bucket}/${config.bucket.prefix}` : 'not configured'))
+  host.append(button({ label: 'Check again', icon: 'arrow-path', variant: 'ghost', onClick: () => void buildServices(host) }))
 }
+
 
 /** The world picker, and what it says about each one. */
 function renderWorldSelect() {
@@ -810,6 +899,21 @@ function renderWorldSelect() {
   b.append(t, icon('chevron-down', 14))
   b.onclick = () => openWorldMenu(b)
   worldSel.append(b)
+  /*
+   * DRIVE IT, beside the world it drives.
+   *
+   * It was in the hamburger, where it could not be disabled and so happily sent you to an empty
+   * viewer (Rich, 2026-09-29: "'drive it' won't make any sense from that menu"). It is an action
+   * on ONE world, and here it knows which world and whether that world has anything to stand on.
+   * It navigates in place, carrying the slug, so the browser's own back button returns you here.
+   */
+  worldSel.append(button({
+    icon: 'globe-alt',
+    variant: 'ghost',
+    title: w?.baked ? `drive ${w.slug}` : w ? `${w.slug} is not baked yet` : 'no world selected',
+    disabled: !w?.baked,
+    onClick: () => { if (w?.baked) location.href = `/index.html?site=${w.slug}` },
+  }))
 }
 
 /**
@@ -873,7 +977,7 @@ function openWorldMenu(anchor: HTMLElement) {
 /* ---- modes --------------------------------------------------------------------------------- */
 
 function setMode(m: Mode) {
-  if (mode === 'bake') runsPanel.stop()
+  if (mode === 'world' && step === 'bake') runsPanel.stop()
   if (mode === 'assets') assets.stop() // a preview spinning for nobody
   // NOT shellPanel.stop(): a machine with a Pyodide in it takes fifteen seconds to come back, and
   // leaving the tab to look something up must not cost that
@@ -889,8 +993,73 @@ function setMode(m: Mode) {
   showAssets(m === 'assets')
   // Define puts the map in draw mode; the panel switches it to `pick` itself when the world is a
   // named-roads one, because then clicking is choosing a road rather than dropping a vertex.
-  map.mode = m === 'define' ? 'draw' : 'pan'
+  map.mode = m === 'world' && step === 'define' ? 'draw' : 'pan'
+  renderSteps()
   renderPanel()
+}
+
+/**
+ * Move between the stages of making a world.
+ *
+ * Separate from `setMode` because they are separate questions — "what am I working on" and "how
+ * far along am I" — and because the panels have per-stage teardown that a mode switch does not
+ * want to repeat. A stage switch is cheap; it must stay cheap, since the point of putting them in
+ * one place is that you bounce between them.
+ */
+function setStep(s: Step) {
+  if (step === 'bake' && s !== 'bake') runsPanel.stop()
+  step = s
+  rememberNav()
+  map.mode = s === 'define' ? 'draw' : 'pan'
+  renderSteps()
+  renderPanel()
+}
+
+/* ---- the world wizard ------------------------------------------------------------------------
+   Four stages of one job, with their state on them.
+
+   A plain tab strip would have been the smaller change, but it would not have answered the
+   question the old top bar could not answer either: WHICH ONE FIRST. So each stage says whether
+   it is done for the world you have selected — a tick on Define when there is a boundary, a tick
+   on Bake when there is a bake — and the strip reads as progress rather than as four alternatives.
+
+   Every stage stays clickable regardless. Rich asked to "bounce between them", and a wizard that
+   refuses to show you the next screen until you have finished this one is the reason people hate
+   wizards; the state is information, not a gate. */
+
+const STEP_LABEL: Record<Step, { label: string; icon: IconName; hint: string }> = {
+  explore: { label: 'Explore', icon: 'map', hint: 'find somewhere' },
+  places: { label: 'Places', icon: 'map-pin', hint: 'the ones you kept' },
+  define: { label: 'Define', icon: 'pencil-square', hint: 'draw its boundary' },
+  bake: { label: 'Bake', icon: 'play', hint: 'turn it into a world' },
+}
+
+/** Done, for the world in the picker. Unknowable without one, which is itself worth showing. */
+function stepDone(s: Step): boolean {
+  const w = worlds.find((x) => x.slug === selected)
+  if (!w) return false
+  if (s === 'define') return !!w.boundary?.length || w.source === 'bake-only'
+  if (s === 'bake') return !!w.baked
+  return false
+}
+
+function renderSteps() {
+  const host = document.getElementById('steps')
+  if (!host) return
+  host.hidden = mode !== 'world'
+  if (mode !== 'world') return
+  host.replaceChildren()
+  const strip = el('div', 'tab-strip steps')
+  for (const s of STEPS) {
+    const b = el('button', `tab${step === s ? ' on' : ''}${stepDone(s) ? ' done' : ''}`)
+    b.setAttribute('role', 'tab')
+    b.setAttribute('aria-selected', String(step === s))
+    b.append(icon(stepDone(s) ? 'check' : STEP_LABEL[s].icon, 16), el('span', '', STEP_LABEL[s].label))
+    b.title = STEP_LABEL[s].hint
+    b.onclick = () => setStep(s)
+    strip.append(b)
+  }
+  host.append(strip)
 }
 
 /**
@@ -902,7 +1071,9 @@ function setMode(m: Mode) {
  */
 function rememberNav() {
   if (!booted) return
-  const nav = { mode, world: selected }
+  // the step only travels with the mode that has steps, so a link to the Assets library does not
+  // carry an opinion about which stage of world-building the sender happened to be on
+  const nav = { mode, step: mode === 'world' ? step : null, world: selected }
   saveNav(nav)
   history.replaceState(null, '', toUrl(location.search, nav))
 }
@@ -991,16 +1162,16 @@ function renderPanel() {
     void assets.open()
   } else if (mode === 'splats') {
     void splatsPanel.load()
-  } else if (mode === 'index') {
+  } else if (at('places')) {
     renderIndex(inspector)
-  } else if (mode === 'define') {
+  } else if (at('define')) {
     // the texture library, for the per-world surface picker. Fire and forget: it re-renders when
     // it lands, and the form works without it.
-    void define.loadSurfaces().then(() => { if (mode === 'define') define.render() })
+    void define.loadSurfaces().then(() => { if (at('define')) define.render() })
     const w = worlds.find((x) => x.slug === selected)
     if (w && w.source !== 'bake-only' && !define.preview) define.load(w)
     else define.render()
-  } else if (mode === 'bake') {
+  } else if (at('bake')) {
     runsPanel.render()
     runsPanel.start()
   } else {
@@ -1117,23 +1288,11 @@ function newWorld() {
   selected = null
   renderWorldSelect()
   define.fresh()
-  setMode('define')
+  setMode('world')
+  setStep('define')
   toast('click on the map to drop boundary points; click the first one again to close the ring', 'info', 6000)
 }
 
-async function showConfig() {
-  const ready = await api.ready().catch(() => null)
-  const lines = [
-    `data       ${config?.data ?? '?'}`,
-    `runner     ${config?.runs.runner ?? '?'}${config?.runs.runner === 'kubernetes' ? ` · ${config?.runs.namespace} · ${config?.runs.image}` : ''}`,
-    `overpass   ${ready?.overpass.ok ? `up (${ready.overpass.ms} ms)` : `DOWN — ${ready?.overpass.detail?.slice(0, 80) ?? '?'}`}`,
-    `kubernetes ${ready?.kubernetes.ok ? `ok (${ready.kubernetes.namespace})` : ready?.kubernetes.detail ?? '?'}`,
-    `assetsvc   ${config?.assetsvc ?? 'not configured'}`,
-    `bucket     ${config?.bucket ? `${config.bucket.bucket}/${config.bucket.prefix}` : 'not configured'}`,
-  ]
-  toast(lines.join('   '), ready?.overpass.ok ? 'info' : 'warn', 9000)
-  console.log(lines.join('\n'))
-}
 
 /* ---- boot ---------------------------------------------------------------------------------- */
 
@@ -1154,12 +1313,12 @@ async function boot() {
 
   addEventListener('keydown', (e) => {
     if (typing(e)) return
-    if (e.key === '1') setMode('explore')
-    else if (e.key === '2') setMode('index')
-    else if (e.key === '3') setMode('define')
-    else if (e.key === '4') setMode('bake')
+    // the number keys are the top bar, in the order it is drawn; the steps are not on keys,
+    // because a wizard you bounce between with the mouse does not need eight shortcuts
+    const nth = '12345678'.indexOf(e.key)
+    if (nth >= 0 && nth < MODES.length) setMode(MODES[nth])
     else if (e.key.toLowerCase() === 'n') newWorld()
-    else if (e.key === 'Enter' && mode === 'define') map.closeRing()
+    else if (e.key === 'Enter' && at('define')) map.closeRing()
     else if (e.key === '/') {
       e.preventDefault()
       searchInput.focus()
@@ -1190,7 +1349,9 @@ async function boot() {
    * and no tab opens that world where you left off rather than throwing your tab away because the
    * link was silent about it.
    */
-  const want = resolveNav(fromUrl(location.search), loadNav(), { modes: [...MODES], worlds: worlds.map((w) => w.slug) })
+  const want = resolveNav(fromUrl(location.search), loadNav(), {
+    modes: [...MODES], steps: [...STEPS], worlds: worlds.map((w) => w.slug),
+  })
   const start = worlds.find((w) => w.slug === want.world) ?? worlds.find((w) => w.baked)
   if (start && Number.isFinite(start.lat)) {
     selected = start.slug
@@ -1198,7 +1359,8 @@ async function boot() {
     if (!map.moved) map.flyTo({ lat: start.lat, lon: start.lon }, zoomFor(start.radius_m), { user: false })
   }
   renderWorldSelect()
-  setMode((want.mode as Mode) ?? 'explore')
+  step = (want.step as Step) ?? 'explore'
+  setMode((want.mode as Mode) ?? 'world')
   // LAST LINE OF BOOT, and it exists because `window.__we` is assigned when the module finishes
   // evaluating — long before this runs. A probe that waited for the handle and then set a mode
   // had it silently undone by the setMode above, and the failure was intermittent because it
@@ -1226,10 +1388,14 @@ declare global {
     __we: {
       ready: () => boolean
       mode: () => Mode
+      /** which stage of `world`; meaningless in any other mode, and reported anyway rather than
+       *  hidden, because a probe that cannot see stale state cannot tell you it is stale */
+      step: () => Step
       map: MapView
       define: DefinePanel
       runs: RunsPanel
       setMode: (m: Mode) => void
+      setStep: (s: Step) => void
       worlds: () => World[]
       selected: () => string | null
       select: (slug: string) => void
@@ -1255,10 +1421,12 @@ window.__we = {
   ready: () => booted,
   /** which panel is showing */
   mode: () => mode,
+  step: () => step,
   map,
   define,
   runs: runsPanel,
   setMode,
+  setStep,
   worlds: () => worlds,
   selected: () => selected,
   /** point the page at a world, exactly as clicking it in the picker does */

@@ -36,6 +36,11 @@
     <canvas id="gl" hidden></canvas>
     <aside class="inspector">
       <header class="inspector-head"><h2 id="panel-title">World</h2></header>
+      <!-- The stages of making a world — Explore, Places, Define, Bake — which were four separate
+           items along the top until 2026-09-29. Outside `#panel` because every stage's panel
+           calls `replaceChildren` on that, and a strip you are navigating with must not be one of
+           the things the navigation throws away. -->
+      <div id="steps" hidden></div>
       <!-- Where the site editor puts its mode rail and its buttons when it is the mode showing.
            Their PRESENCE is what tells it that this page owns the shell. -->
       <div id="se-rail" hidden></div>

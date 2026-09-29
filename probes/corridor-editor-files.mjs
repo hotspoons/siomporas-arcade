@@ -86,7 +86,10 @@ say('the text arrived', typed.includes(TYPED))
 if (!typed.includes(TYPED)) fail.push('what was typed did not reach the buffer at all')
 
 /* ---- 4a · leave the tab and come back ---- */
-await page.click('.seg[data-value="bake"]')
+// Bake is a STAGE of the World mode now, not a mode — see `nav.ts` for why the old links still
+// work. A probe should drive the control a person drives, so this presses the stage in the strip.
+await page.click('.seg[data-value="world"]')
+await page.click('#steps .tab:has-text("Bake")')
 await page.waitForTimeout(700)
 await page.click('.seg[data-value="program"]')
 await page.waitForTimeout(1200)

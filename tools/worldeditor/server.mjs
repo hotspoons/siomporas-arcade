@@ -34,6 +34,7 @@ import { zipRead, zipWrite } from './zip.mjs'
 import { Captures } from './captures.mjs'
 import { ModelResolver } from './models.mjs'
 import * as levels from './levels.mjs'
+import * as blender from './blender.mjs'
 import { GitRepo, scan as gitScan } from './gitrepo.mjs'
 import { Platform } from './platform.mjs'
 import { attachAgentRelay } from './agentws.mjs'
@@ -812,6 +813,46 @@ async function api(req, res, seg, q) {
    * in it, and a scenario saying what you are meant to do. See levels.mjs for why the scenario is
    * three declarative primitives and not a scripting language.
    */
+  /*
+   * ---- blender ---------------------------------------------------------------------------------
+   *
+   * Rich, 2026-09-29: "make it so there's MCP tools that an agent can use to run blender using this
+   * tool kit but through our UI. And also make it so the UI shows any blender rendered stls or
+   * other exports."
+   *
+   * Two shapes behind one prefix. `/status`, `/load`, `/render`, `/export` and `/exec` talk to a
+   * LIVE headless Blender over its socket and the scene persists between them, which is what lets
+   * an agent look before it acts. `/rig/*` spawn their own Blender and take minutes.
+   *
+   * Everything either produces lands in one directory (`<data>/blender`), which `/outputs` lists
+   * and `/outputs/<name>` serves — so the editor has one place to look and the agent and the person
+   * are looking at the same files.
+   */
+  if (seg[0] === 'blender') {
+    if (seg[1] === 'status' && req.method === 'GET') return json(res, 200, await blender.status())
+    if (seg[1] === 'outputs' && seg.length === 2 && req.method === 'GET') {
+      return json(res, 200, await blender.listOutputs(store.root))
+    }
+    if (seg[1] === 'outputs' && seg.length === 3 && req.method === 'GET') {
+      const { bytes, ext } = await blender.readOutput(store.root, seg[2])
+      const type = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp',
+        glb: 'model/gltf-binary', gltf: 'model/gltf+json', stl: 'model/stl', obj: 'text/plain',
+        ply: 'application/octet-stream', mp4: 'video/mp4', webm: 'video/webm' }[ext] ?? 'application/octet-stream'
+      res.writeHead(200, { 'Content-Type': type, 'Content-Length': bytes.length, 'Cache-Control': 'no-cache', ...CORS })
+      res.end(bytes)
+      return true
+    }
+    if (req.method === 'POST') {
+      const body = await readJson(req).catch(() => ({}))
+      if (seg[1] === 'load') return json(res, 200, await blender.load(body?.file))
+      if (seg[1] === 'render') return json(res, 200, await blender.render(store.root, body ?? {}))
+      if (seg[1] === 'export') return json(res, 200, await blender.exportScene(store.root, body ?? {}))
+      if (seg[1] === 'exec') return json(res, 200, { result: await blender.exec(String(body?.code ?? '')) })
+      if (seg[1] === 'rig' && seg[2] === 'vehicle') return json(res, 200, await blender.rigVehicle(store.root, body ?? {}))
+      if (seg[1] === 'rig' && seg[2] === 'character') return json(res, 200, await blender.rigCharacter(store.root, body ?? {}))
+    }
+  }
+
   if (seg[0] === 'levels' && seg.length === 1) {
     if (req.method === 'GET') return json(res, 200, { levels: await store.listLevels(), facts: levels.FACTS, actions: levels.ACTIONS, modes: levels.MODES })
     if (req.method === 'POST') {

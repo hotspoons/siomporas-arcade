@@ -162,6 +162,24 @@ export interface Config {
   adoptedRuns: string[]
 }
 
+export interface BlenderStatus {
+  up: boolean
+  /** only when it is down: the message says which command starts it */
+  why?: string
+  version?: string
+  background?: boolean
+  objects?: { name: string; type: string }[]
+}
+
+/** A render or an export sitting in the volume's blender directory. */
+export interface BlenderOutput {
+  name: string
+  kind: 'image' | 'model' | 'video'
+  ext: string
+  bytes: number
+  at: string
+}
+
 export interface Ready {
   overpass: { ok: boolean; status?: number; ms?: number; detail?: string }
   kubernetes: { ok: boolean; namespace?: string; detail?: string }
@@ -316,6 +334,23 @@ const progPath = (id: string) => id.split('/').map(encodeURIComponent).join('/')
 
 export const api = {
   config: () => call<Config>('/api/config'),
+
+  /* ---- blender ----------------------------------------------------------------------------
+   * The live session and the batch riggers, behind one prefix. `status` is the one to call first:
+   * the bridge is a separate process, and when it is not running the answer says how to start it.
+   */
+  blenderStatus: () => call<BlenderStatus>('/api/blender/status'),
+  blenderOutputs: () => call<{ dir: string; files: BlenderOutput[] }>('/api/blender/outputs'),
+  blenderLoad: (file: string) =>
+    call<{ objects: string[]; file: string }>('/api/blender/load', { method: 'POST', body: JSON.stringify({ file }) }),
+  blenderRender: (o: { name?: string; az?: number; el?: number; dist?: number; width?: number; height?: number }) =>
+    call<{ file: string; bytes: number; subject: string[]; size_m: number }>('/api/blender/render', { method: 'POST', body: JSON.stringify(o) }),
+  blenderExport: (o: { format: string; name?: string; selectedOnly?: boolean }) =>
+    call<{ file: string; bytes: number; format: string }>('/api/blender/export', { method: 'POST', body: JSON.stringify(o) }),
+  blenderRig: (kind: 'vehicle' | 'character', o: Record<string, unknown>) =>
+    call<{ file: string; steps: { step: string; [k: string]: unknown }[] }>(`/api/blender/rig/${kind}`, { method: 'POST', body: JSON.stringify(o) }),
+  /** The URL to put in an <img> or hand to a loader. Served by the editor, same origin. */
+  blenderOutputUrl: (name: string) => `/api/blender/outputs/${encodeURIComponent(name)}`,
   ready: () => call<Ready>('/api/ready'),
 
   roads: (b: { south: number; west: number; north: number; east: number }, signal?: AbortSignal) =>

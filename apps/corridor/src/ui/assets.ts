@@ -13,6 +13,7 @@ import { icon } from './icons'
 import { bodyOf, empty, group, readout, segmented, select, textArea, textField, toggle } from './controls'
 import { MeshView } from './meshview'
 import { KINDS, TYPES, TYPE_LABEL, typeOf, type AssetType } from '../classes'
+import { blenderTab } from './blenderpanel'
 import { guessWheelSlots, swapEnds, swapSides, WHEEL_SLOTS } from '../rigslots'
 import { MESH_FILE, assetsvc, type AssetItem, type AssetJob, type Material, type MeshVariant, type ModelRoster } from '../assetsvc'
 import { actorExtension } from './actors'
@@ -302,6 +303,7 @@ export class AssetCatalog {
   private pendingMaterial: { id: string; name: string; category: string; metres_per_tile: number; prompt: string; seed?: number; idTouched: boolean } | null = null
   /** the 3D preview, one at a time — a WebGL context per click exhausts the browser's supply */
   private mesh3d: MeshView | null = null
+  private blender = blenderTab()
   private listHost = el('div', 'asset-list')
   private detailHost = el('div', 'asset-detail')
 
@@ -311,6 +313,10 @@ export class AssetCatalog {
       { id: 'catalog', label: 'Catalog', icon: 'cube', build: (h) => this.buildCatalog(h) },
       { id: 'materials', label: 'Materials', icon: 'swatch', build: (h) => void this.buildMaterials(h) },
       { id: 'service', label: 'Service', icon: 'beaker', build: (h) => void this.buildService(h) },
+      // BLENDER, because rigging is how an asset stops being a surface and starts being a thing
+      // the game can drive. It shows every render and export — whether this pane made it, an MCP
+      // client did, or somebody ran a rigger on the command line.
+      this.blender.tab,
       ...(o.extensions?.flatMap((e) => e.tabs ?? []) ?? []),
     ]
     this.tabs = new Tabs(tabs)
@@ -347,9 +353,10 @@ export class AssetCatalog {
     await this.refresh()
   }
 
-  /** Leaving the tab: the preview stops drawing but keeps what it loaded. */
+  /** Leaving the tab: the previews stop drawing but keep what they loaded. */
   stop() {
     this.mesh3d?.stop()
+    this.blender.stop()
   }
 
   private get dirty(): boolean {
@@ -1088,8 +1095,16 @@ export class AssetCatalog {
       host.append(this.notConfigured())
       return
     }
+    /*
+     * REPLACE, do not append — this runs AFTER an await.
+     *
+     * `host.replaceChildren()` at the top of this method clears what was there when the build
+     * STARTED, and the fetch above yields. Two builds in flight both clear an empty host and then
+     * both append, and the tab renders the whole materials screen twice, one grid under the other.
+     * Replacing here makes the last one to finish the only one that is mounted.
+     */
     this.matHost = el('div', 'material-split')
-    host.append(this.matHost)
+    host.replaceChildren(this.matHost)
     if (!this.material && this.materials.length) this.material = this.materials[0].id
     this.renderMaterials()
   }

@@ -182,7 +182,22 @@
    One column per item — described, drawn, meshed — because that IS the pipeline, and the question
    a person actually has is "which of these still needs something doing to it". */
 
-.asset-body { height: min(72vh, 680px); }
+/*
+ * THE LIBRARY'S OWN HEIGHT, AND WHY IT IS A FLEX COLUMN.
+ *
+ * Rich, 2026-09-29: "neither vehicles nor materials listings scroll". They did scroll — the whole
+ * `.dialog-body` did, all 947px of it — which is not the same thing: the search box and the tab
+ * strip scrolled away with the list, the dialog's own scrollbar is an overlay you cannot see until
+ * you are already scrolling, and a grid of cards taller than the dialog simply looked cut off.
+ *
+ * The cause was `.tabs { height: 100% }` not resolving here. `.dialog-body` is a block whose height
+ * comes from `flex: 1` on its parent, and a percentage height against that is not definite, so the
+ * tab column sized to its content and every `min-height: 0`/`overflow: auto` below it had nothing
+ * to bite on. Making this a flex column gives `.tabs` a real height by stretching instead of by
+ * percentage — which is what `.asset-pane .tabs` in `worldedit/world.css` does for the same reason.
+ */
+.asset-body { height: min(72vh, 680px); display: flex; flex-direction: column; overflow: hidden; }
+.asset-body > .tabs { flex: 1 1 auto; min-height: 0; }
 
 /* THE PREVIEW MUST FIT ABOVE THE FOOTER.
    `.meshview` is `aspect-ratio: 4/3`, so in a wide dialog it became 976 x 731 — taller than the
@@ -415,3 +430,41 @@
 /* two activities, two tabs — drawn by ui.css's own `.tab-strip`, so they are the library's tabs
    rather than something that looks like them */
 #se-inspector .tab-strip { margin-bottom: var(--s2); }
+
+/* ---- traffic zones (src/editor/zones.ts) ------------------------------------------------------
+   The five-level scale as buttons you press. The colour IS the value, so each swatch wears the
+   colour it sets and the label sits on top of it — a legend and a control in one row, which is
+   what a mapping application has always done with this scale. */
+.swatches { display: flex; gap: 4px; flex-wrap: wrap; margin: var(--s2) 0; }
+.swatch {
+  flex: 1 1 auto; min-width: 58px;
+  padding: 6px 4px; border-radius: var(--r1);
+  border: 2px solid transparent;
+  font-size: var(--text-xs); font-weight: 600;
+  /* dark text on every band: the greens and yellows are far too light for white, and one rule that
+     works on all five beats five rules that each work on one */
+  color: #10151a;
+  cursor: pointer;
+}
+.swatch:hover { filter: brightness(1.15); }
+.swatch.on { border-color: var(--ink-1); }
+/* the list row's colour chip, which is the same information at a glance */
+.list .item .tag[style*="background"] { border-radius: 3px; min-width: 20px; }
+
+/* ---- the Blender tab --------------------------------------------------------------------------
+   Renders and exports, whoever made them. */
+.blender-head { display: grid; gap: var(--s2); }
+.blender-bar { align-items: center; justify-content: flex-start; gap: var(--s2); }
+.blender-status { font-size: var(--text-sm); color: var(--ink-2); }
+/* a live/dead light, because "is there a Blender" is the first question every time */
+.dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--ink-3); }
+.dot.ok { background: var(--ok); }
+.dot.off { background: var(--danger); }
+.blender-down { display: grid; gap: var(--s2); padding: var(--s3); border: 1px solid var(--line-1); border-radius: var(--r2); background: var(--bg-1); }
+.blender-cmd { margin: 0; padding: var(--s2); overflow-x: auto; font-size: var(--text-xs); background: var(--bg-2); border-radius: var(--r1); color: var(--ink-1); }
+.blender-outputs { display: grid; gap: var(--s2); min-height: 0; grid-template-rows: auto minmax(0, 1fr); }
+.blender-outputs-head { display: flex; align-items: baseline; gap: var(--s2); justify-content: space-between; }
+.blender-outputs-head .rig-note { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60%; }
+.asset-row-text { display: grid; min-width: 0; }
+.asset-row-text .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.blender-preview { max-width: 100%; border-radius: var(--r2); border: 1px solid var(--line-1); display: block; }

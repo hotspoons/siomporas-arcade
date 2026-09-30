@@ -81,7 +81,7 @@ export class PlaceMode {
     this.ground = ground
     if (!this.catalog.assets.length) this.catalog = await loadCatalog()
     this.doc = await loadPlacements(slug)
-    this.frameWarning = frameMismatch(this.doc.frame, site.manifest)
+    this.frameWarning = frameMismatch(this.doc.frame, site.manifest, this.doc.items.length)
     this.dirty = false
     this.selected = null
     for (const o of this.objects.values()) this.group.remove(o)

@@ -66,8 +66,19 @@ export function frameOf(manifest: Manifest): FrameStamp {
   return { kind: f.kind ?? 'utm', epsg: f.epsg, anchor: f.anchor }
 }
 
-/** Non-null when a file was authored in a different frame from the one the bake now serves. */
-export function frameMismatch(stamp: FrameStamp | undefined, manifest: Manifest): string | null {
+/**
+ * Non-null when a file was authored in a different frame from the one the bake now serves.
+ *
+ * `coordinates` is how many things in the file HAVE coordinates. A frame warning is about
+ * coordinates, and a file with none — the empty default the loader hands back for a document
+ * that was never written — cannot be in the wrong frame. Without this, every fresh bake opened
+ * with a red banner saying its (nonexistent) areas were drawn before 2026-09-22 and would sit off
+ * the road (Rich, 2026-09-30: "this was a brand new bake with the latest code, looks like some
+ * nonsense"). The check is HERE, once, rather than a condition each caller remembers or forgets:
+ * zones remembered, areas and placements forgot.
+ */
+export function frameMismatch(stamp: FrameStamp | undefined, manifest: Manifest, coordinates = 1): string | null {
+  if (coordinates <= 0) return null
   const now = (manifest as unknown as { frame?: FrameStamp }).frame ?? {}
   if (!stamp || (!stamp.kind && !stamp.anchor)) {
     // written before stamping existed: it cannot be shown to match, so say so rather than assume
@@ -229,7 +240,8 @@ export const SLIDERS: SliderDef[] = [
   { key: 'ground_offset_m', label: 'ground +m', min: -10, max: 10, step: 0.25, note: 'raises or lowers the corridor strip off the pavement; it fades in from the pavement edge so the road itself never moves' },
 ]
 
-const base = new URLSearchParams(location.search).get('data') ?? ''
+// `location` guarded: the pure parts of this module (the frame check) are unit-tested under node
+const base = typeof location === 'undefined' ? '' : (new URLSearchParams(location.search).get('data') ?? '')
 /** Saving writes through the dev middleware; a remote ?data= bucket is read-only. */
 export const CAN_SAVE = base === ''
 

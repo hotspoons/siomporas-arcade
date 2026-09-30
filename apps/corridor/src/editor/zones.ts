@@ -64,15 +64,9 @@ export class ZoneMode {
     this.h = h
     this.site = site
     this.doc = await loadZones(slug)
-    /*
-     * ONLY WARN ABOUT A FILE THAT HAS SOMETHING IN IT.
-     *
-     * `frameMismatch(undefined, …)` says "authored before frames were stamped", which is true of a
-     * file that has never been authored at all — so a world with no zones opened with a red banner
-     * telling somebody their zones would sit off the road, about zones that do not exist. A frame
-     * warning is about coordinates, and an empty document has none.
-     */
-    this.frameWarning = site && this.doc.zones.length ? frameMismatch(this.doc.frame, site.manifest) : null
+    // only a file with coordinates in it can be in the wrong frame; `frameMismatch` knows (the
+    // rule used to live here alone, and areas and placements did not have it)
+    this.frameWarning = site ? frameMismatch(this.doc.frame, site.manifest, this.doc.zones.length) : null
     this.dirty = false
     this.selected = null
     this.draw = null

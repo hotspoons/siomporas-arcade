@@ -50,7 +50,7 @@ export class AreaMode {
     this.h = h
     this.site = site
     this.doc = await loadAdjustments(slug)
-    this.frameWarning = site ? frameMismatch(this.doc.frame, site.manifest) : null
+    this.frameWarning = site ? frameMismatch(this.doc.frame, site.manifest, this.doc.areas.length) : null
     this.dirty = false
     this.selected = null
     this.draw = null

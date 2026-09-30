@@ -9,10 +9,12 @@ plain LAZ tile cannot be read in part: 42 tiles, 7.6 GB, six hours at four conne
 TWO KINDS OF SOURCE, fastest first:
 
   EPT   Entwine Point Tiles: an octree of small LAZ nodes on S3, so a bake reads only the nodes over
-        its streets and only down to the density it needs. USGS stages 3DEP on `usgs-lidar-public`
-        (lidar.DATASETS, a hand-kept list, tried first so existing bakes are unchanged) and NOAA
-        Digital Coast stages ~1000 more on `noaa-nos-coastal-lidar-pds`, DISCOVERED from NOAA's own
-        STAC index rather than listed. Crofton: NOAA 10311 (2020 Anne Arundel, properly classified,
+        its streets and only down to the density it needs. USGS stages 2,279 3DEP projects on
+        `usgs-lidar-public` and NOAA Digital Coast ~1000 more on `noaa-nos-coastal-lidar-pds`, both
+        DISCOVERED from their indexes, not listed: with only a hand-kept list of five Maryland sets,
+        Pikes Peak (USGS CO_Eastern_ElPaso_2018) fell to the six-hour tiles and Mount Desert Island
+        took NOAA's 2010 survey over USGS's 2021 one. lidar.DATASETS is now only the fallback for a
+        bake that cannot reach the USGS index. Crofton: NOAA 10311 (2020 Anne Arundel, properly classified,
         43 MiB/s measured) covers 88 %; NOAA 9235 (2018 Prince George's) fills the western edge.
   TNM   the USGS delivery tiles, whole, through tnmaccess — the fallback when no EPT covers enough.
         Newer, sometimes (2024 vs 2020 at Crofton), and slow: a person can force it with
@@ -32,6 +34,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -48,6 +51,9 @@ from shapely.geometry.base import BaseGeometry
 from .geo import Frame
 
 NOAA_INDEX = "https://noaa-nos-coastal-lidar-pds.s3.us-east-1.amazonaws.com/entwine/stac/noaa_item_collection.json"
+# USGS's staged 3DEP as EPT: every set's real footprint, point count and ept.json, maintained by
+# Hobu (who stages the bucket for USGS). The bucket itself has no index (boundaries/ answers 404).
+USGS_INDEX = "https://raw.githubusercontent.com/hobuinc/usgs-lidar/master/boundaries/resources.geojson"
 # NOAA stages each dataset under several vertical datums; these two are NAVD88, which is what the
 # 3DEP DEM every bake also fetches is in. mllw / msl / igld85 / egm08 are right for their coasts and
 # lakes and wrong beside a NAVD88 DEM by up to a metre, so they are not candidates here.
@@ -125,36 +131,85 @@ def slim_noaa_index(collection: dict) -> list[dict]:
     return out
 
 
-def noaa_sources(cache: Path) -> list[EptSource]:
-    """NOAA's EPT datasets, from a slim copy of its index kept in the bake cache."""
-    slim = cache / "ept" / "noaa-index.json"
-    fresh = slim.exists() and time.time() - slim.stat().st_mtime < INDEX_MAX_AGE_S
-    if not fresh:
-        from .dem import download
+def survey_year(name: str) -> int | None:
+    """The year in a USGS project name: a funding code (`D21`, `B23`: fiscal 2021, 2023) or a plain
+    year (`CO_Eastern_ElPaso_2018`; the first one, so `..._2014_LAS_2015` is the 2014 flight).
+    None for the four statewide mosaics that carry no year, which then rank as oldest."""
+    for t in name.split("_"):
+        if re.fullmatch(r"[A-Z]\d\d", t):
+            return 2000 + int(t[1:])
+    m = re.search(r"(?<!\d)(19|20)\d\d(?!\d)", name)
+    return int(m.group(0)) if m else None
 
-        big = cache / "ept" / "noaa_item_collection.json"
+
+def slim_usgs_index(collection: dict) -> list[dict]:
+    """USGS's EPT boundaries (8.7 MB) down to what ranking needs; sets whose classes are junk bins
+    (lidar.PREFER_TNM_OVER) are left out, as the hand-kept path always skipped them."""
+    from .lidar import PREFER_TNM_OVER
+
+    out = []
+    for f in collection.get("features", []):
+        p = f.get("properties") or {}
+        name, url = p.get("name"), p.get("url") or ""
+        if not name or not url.endswith("ept.json") or name in PREFER_TNM_OVER:
+            continue
         try:
-            print("  lidar   refreshing NOAA's EPT index (188 MB, once a month)", flush=True)
-            big.unlink(missing_ok=True)
-            download(NOAA_INDEX, big)
-            entries = slim_noaa_index(json.loads(big.read_text()))
-            slim.parent.mkdir(parents=True, exist_ok=True)
-            slim.write_text(json.dumps(entries))
-        except Exception as exc:
-            # a stale index is still an index; no index at all only costs this bake NOAA
-            print(f"  lidar   NOAA index unavailable ({exc}); {'using the old copy' if slim.exists() else 'NOAA skipped'}", flush=True)
-            if not slim.exists():
-                return []
-        finally:
-            big.unlink(missing_ok=True)
-    return [
-        EptSource(name=f"NOAA:{e['id']}", base=e["base"], year=e.get("year"), points=e.get("points"), footprint=shapely.from_wkt(e["footprint"]))
-        for e in json.loads(slim.read_text())
-    ]
+            geom = shape(f["geometry"]).simplify(0.0005, preserve_topology=True)
+        except Exception:
+            continue
+        out.append({"id": name, "base": url[: -len("ept.json")], "year": survey_year(name), "points": p.get("count"), "footprint": shapely.to_wkt(geom, rounding_precision=5)})
+    return out
 
 
-def rank_noaa(sources: list[EptSource], area_wgs: BaseGeometry, min_share: float = 0.01) -> list[tuple[EptSource, float]]:
-    """NOAA candidates over the area: the most of it covered first, then the newest."""
+def _cached_index(cache: Path, name: str, url: str, slim_fn, what: str) -> list[dict] | None:
+    """An index, slimmed and kept in the bake cache for a month. A stale copy beats none; None
+    means there is no copy at all and the caller decides what that costs."""
+    slim = cache / "ept" / f"{name}-index.json"
+    if slim.exists() and time.time() - slim.stat().st_mtime < INDEX_MAX_AGE_S:
+        return json.loads(slim.read_text())
+    from .dem import download
+
+    big = cache / "ept" / f"{name}-index.raw.json"
+    try:
+        print(f"  lidar   refreshing {what} (once a month)", flush=True)
+        big.unlink(missing_ok=True)
+        download(url, big)
+        entries = slim_fn(json.loads(big.read_text()))
+        if not entries:
+            raise RuntimeError("it listed no usable datasets")
+        slim.parent.mkdir(parents=True, exist_ok=True)
+        slim.write_text(json.dumps(entries))
+    except Exception as exc:
+        print(f"  lidar   {what} unavailable ({exc}); {'using the old copy' if slim.exists() else 'none'}", flush=True)
+        if not slim.exists():
+            return None
+    finally:
+        big.unlink(missing_ok=True)
+    return json.loads(slim.read_text())
+
+
+def _from_entries(kind: str, entries: list[dict]) -> list[EptSource]:
+    return [EptSource(name=f"{kind}:{e['id']}", base=e["base"], year=e.get("year"), points=e.get("points"), footprint=shapely.from_wkt(e["footprint"])) for e in entries]
+
+
+def noaa_sources(cache: Path) -> list[EptSource]:
+    """NOAA's EPT datasets, from a slim copy of its STAC index (188 MB raw) in the bake cache."""
+    entries = _cached_index(cache, "noaa", NOAA_INDEX, slim_noaa_index, "NOAA's EPT index (188 MB)")
+    return _from_entries("NOAA", entries) if entries else []
+
+
+def usgs_sources(cache: Path) -> list[EptSource]:
+    """USGS's EPT datasets from its boundaries index; the hand-kept list only when that is out of reach."""
+    entries = _cached_index(cache, "usgs", USGS_INDEX, slim_usgs_index, "USGS's EPT index (8.7 MB)")
+    if entries:
+        return _from_entries("USGS", entries)
+    from .lidar import BASE, DATASETS, PREFER_TNM_OVER
+
+    return [EptSource(name=f"USGS:{ds}", base=BASE.format(ds=ds), year=survey_year(ds)) for ds in DATASETS if ds not in PREFER_TNM_OVER]
+
+
+def rank_by_footprint(sources: list[EptSource], area_wgs: BaseGeometry, min_share: float = 0.01) -> list[tuple[EptSource, float]]:
+    """Candidates with a footprint over the area: the most of it covered first, then the newest."""
     out = []
     a = max(area_wgs.area, 1e-15)
     for s in sources:
@@ -393,31 +448,20 @@ def _join(parts: list[dict]) -> dict:
     return parts[0] if len(parts) == 1 else {k: np.concatenate([p[k] for p in parts]) for k in parts[0]}
 
 
-def usgs_sources() -> list[EptSource]:
-    from .lidar import BASE, DATASETS, PREFER_TNM_OVER
-
-    out = []
-    for ds in DATASETS:
-        if ds in PREFER_TNM_OVER:
-            continue
-        year = next((int(t[1:]) + 2000 for t in ds.split("_") if len(t) == 3 and t[0] == "D" and t[1:].isdigit()), None)
-        year = year or next((int(t) for t in ds.split("_") if len(t) == 4 and t.isdigit()), None)
-        out.append(EptSource(name=f"USGS:{ds}", base=BASE.format(ds=ds), year=year))
-    return out
-
-
 def candidates(frame: Frame, bbox, clip, cache: Path) -> tuple[list[EptSource], float | None]:
-    """EPT sources worth trying, in order, and the share of the area NOAA's footprints cover.
+    """EPT sources worth trying, in order, and the share of the area their footprints cover.
 
-    USGS first, in lidar.DATASETS order, when the octree cube contains the bbox — exactly what the
-    single-road bakes have always used. Then NOAA by footprint coverage and date. The share is None
-    when a USGS cube is in the list, because a cube says nothing about where the points are.
+    USGS's and NOAA's together, in one plan (plan_cover): the newest survey over half the streets,
+    then whatever covers the gaps. A USGS set known only from the hand-kept fallback list has no
+    footprint, so it is tried first if its octree cube contains the bbox (what single-road bakes
+    always did) and the share is None, because a cube says nothing about where the points are.
     """
     from .lidar import _get_json
 
     area = area_in_wgs(frame, bbox, clip)
-    out: list[EptSource] = []
-    for s in usgs_sources():
+    usgs = usgs_sources(cache)
+    blind: list[EptSource] = []
+    for s in (u for u in usgs if u.footprint is None):
         try:
             s.ept = _get_json(s.base + "ept.json", cache / "ept" / s.slug / "ept.json")
         except Exception:
@@ -425,18 +469,18 @@ def candidates(frame: Frame, bbox, clip, cache: Path) -> tuple[list[EptSource], 
         b = s.ept["bounds"]
         x0, y0, x1, y1 = bbox_in(frame, bbox, ept_crs(s.ept))
         if b[0] <= x0 and b[1] <= y0 and b[3] >= x1 and b[4] >= y1:
-            out.append(s)
-    ranked = rank_noaa(noaa_sources(cache), area)
-    for s, share in ranked:
-        print(f"  lidar   NOAA candidate {s.label()}: footprint covers {share:.0%} of the streets", flush=True)
+            blind.append(s)
+    ranked = rank_by_footprint([u for u in usgs if u.footprint is not None] + noaa_sources(cache), area)
+    for s, share in ranked[:8]:
+        print(f"  lidar   candidate {s.label()}: footprint covers {share:.0%} of the streets", flush=True)
+    if len(ranked) > 8:
+        print(f"  lidar   ... and {len(ranked) - 8} more", flush=True)
     plan = plan_cover(ranked, area)
     if plan:
-        print("  lidar   NOAA plan: " + ", then ".join(f"{s.label()} (+{g:.0%})" for s, g in plan), flush=True)
+        print("  lidar   plan: " + ", then ".join(f"{s.label()} (+{g:.0%})" for s, g in plan), flush=True)
     for s, _ in plan:
         s.share = next(sh for r, sh in ranked if r is s)
-    out += [s for s, _ in plan]
-    usgs = len(out) - len(plan)
-    return out, (None if usgs else union_share(plan, area))
+    return blind + [s for s, _ in plan], (None if blind else union_share(plan, area))
 
 
 def stream_ept(frame: Frame, bbox, clip, cache: Path, sources: list[EptSource], meta: dict, jobs: int = 16) -> Iterator[tuple[str, dict]]:

@@ -71,13 +71,16 @@ delivery tiles is 850 MB. The bucket has no vertical CRS; Z is checked against t
 converted if it is in feet. There is no PDAL on Debian trixie/arm64, so `lidar.py` walks the
 octree itself and reads nodes with `laspy` + `lazrs`.
 
-**Where the points come from, in order** (`corridor/lidar_sources.py`). USGS's EPT sets in
-`lidar.DATASETS` first; then NOAA Digital Coast's ~1000 EPT sets on `noaa-nos-coastal-lidar-pds`,
-discovered from NOAA's own STAC index (a slim copy lives in the bake cache, refreshed monthly); and
-only when EPT covers under half the streets, the USGS delivery tiles through TNM — whole LAZ files
-from rockyweb, ~80 KB/s a connection, fetched 16 at a time. NOAA's primary is the newest survey over
-at least half the streets and later ones fill only the 25 m cells it left empty (Crofton: 2020 Anne
-Arundel, then 2018 Prince George's for the western edge; 30 s instead of six hours). The walk stops
+**Where the points come from, in order** (`corridor/lidar_sources.py`). EPT from both agencies,
+discovered from their indexes (slim copies in the bake cache, refreshed monthly): USGS's 2,279 3DEP
+sets on `usgs-lidar-public` (index: hobuinc/usgs-lidar `resources.geojson`; `lidar.DATASETS` is only
+the fallback when that is unreachable) and NOAA Digital Coast's ~1000 on `noaa-nos-coastal-lidar-pds`
+(its STAC item collection). Only when EPT covers under half the streets, the USGS delivery tiles
+through TNM — whole LAZ files from rockyweb, ~80 KB/s a connection, fetched 16 at a time. The
+primary is the newest survey over at least half the streets and later ones fill only the 25 m cells
+it left empty (Crofton: NOAA 2020 Anne Arundel, then 2018 Prince George's for the western edge — the
+whole bake in 4.7 minutes instead of six hours; Pikes Peak: USGS CO_Eastern_ElPaso_2018; Mount
+Desert Island: USGS ME_MidCoast_1_2021 over NOAA's 2010). The walk stops
 at the depth that reaches `CORRIDOR_LIDAR_DENSITY` points/m² (default 8). `CORRIDOR_LIDAR_SOURCE=tnm`
 forces the delivery tiles when the newest vintage matters more than the hours. Tests:
 `.venv/bin/python -m unittest discover -s tests`.

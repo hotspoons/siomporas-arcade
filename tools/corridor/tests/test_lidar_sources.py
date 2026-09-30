@@ -141,7 +141,7 @@ class NoaaIndexTest(unittest.TestCase):
         full_new = ls.EptSource("NOAA:2", "u", 2020, box(-77, 38, -76, 40))
         half = ls.EptSource("NOAA:3", "u", 2024, box(-76.70, 39.00, -76.68, 39.02))
         away = ls.EptSource("NOAA:4", "u", 2024, box(-75, 38, -74, 39))
-        ranked = ls.rank_noaa([half, full_old, away, full_new], area)
+        ranked = ls.rank_by_footprint([half, full_old, away, full_new], area)
         self.assertEqual([s.name for s, _ in ranked], ["NOAA:2", "NOAA:1", "NOAA:3"])
         self.assertAlmostEqual(ranked[2][1], 0.5, places=2)
         self.assertAlmostEqual(ls.union_share(ranked, area), 1.0, places=2)
@@ -156,7 +156,7 @@ class PlanTest(unittest.TestCase):
         aa_2017 = ls.EptSource("NOAA:9234", "u", 2017, box(1.0, 0, 10, 10))    # 90 %, the same county again
         old_2011 = ls.EptSource("NOAA:8494", "u", 2011, box(0.4, 0, 10, 10))   # 96 %, ground-only
         pg_2018 = ls.EptSource("NOAA:9235", "u", 2018, box(-5, 0, 1.6, 10))    # 16 %, the west edge
-        ranked = ls.rank_noaa([old_2011, aa_2017, aa_2020, pg_2018], area)
+        ranked = ls.rank_by_footprint([old_2011, aa_2017, aa_2020, pg_2018], area)
         plan = [s.name for s, _ in ls.plan_cover(ranked, area)]
         self.assertEqual(plan[0], "NOAA:10311", "the newest survey over half the streets, not the widest")
         self.assertEqual(plan[1], "NOAA:9235", "then the one covering the gap, not a re-fly of the same county")
@@ -166,8 +166,43 @@ class PlanTest(unittest.TestCase):
         area = box(0, 0, 10, 10)
         a = ls.EptSource("NOAA:1", "u", 2024, box(0, 0, 2, 10))
         b = ls.EptSource("NOAA:2", "u", 2010, box(0, 0, 4, 10))
-        plan = [s.name for s, _ in ls.plan_cover(ls.rank_noaa([a, b], area), area)]
+        plan = [s.name for s, _ in ls.plan_cover(ls.rank_by_footprint([a, b], area), area)]
         self.assertEqual(plan[0], "NOAA:2")
+
+
+class UsgsIndexTest(unittest.TestCase):
+    """The rest of the country: USGS's 2,279 EPT sets, discovered rather than hand-listed."""
+
+    def test_survey_years_from_project_names(self):
+        for name, year in [("MD_Western_2_D21", 2021), ("AL_11County_2_B23", 2023), ("CO_Eastern_ElPaso_2018", 2018),
+                           ("USGS_LPC_MD_VA_Sandy_NCR_2014_LAS_2015", 2014), ("ME_MidCoast_1_2021", 2021), ("IA_FullState", None)]:
+            self.assertEqual(ls.survey_year(name), year, name)
+
+    def test_the_index_is_slimmed_and_junk_classified_sets_are_left_out(self):
+        base = "https://s3-us-west-2.amazonaws.com/usgs-lidar-public"
+        feats = [{"properties": {"name": n, "count": 5, "url": f"{base}/{n}/ept.json"}, "geometry": box(-69, 44, -68, 45).__geo_interface__}
+                 for n in ("ME_MidCoast_1_2021", "USGS_LPC_MD_VA_Sandy_NCR_2014_LAS_2015")]
+        slim = ls.slim_usgs_index({"features": feats})
+        self.assertEqual([(e["id"], e["year"]) for e in slim], [("ME_MidCoast_1_2021", 2021)])
+        self.assertEqual(slim[0]["base"], f"{base}/ME_MidCoast_1_2021/")
+
+    def test_mount_desert_island_takes_the_2021_usgs_survey_over_noaas_2010(self):
+        # measured 2026-09-30: USGS ME_MidCoast_1_2021 covers 96 %, NOAA 2524 (2010) 84 %
+        area = box(0, 0, 10, 10)
+        usgs = ls.EptSource("USGS:ME_MidCoast_1_2021", "u", 2021, box(0, 0, 10, 9.6))
+        noaa = ls.EptSource("NOAA:2524", "u", 2010, box(0, 1.6, 10, 10))
+        plan = [s.name for s, _ in ls.plan_cover(ls.rank_by_footprint([noaa, usgs], area), area)]
+        self.assertEqual(plan[0], "USGS:ME_MidCoast_1_2021")
+
+    def test_an_unreachable_index_falls_back_to_the_hand_kept_list(self):
+        saved = ls._cached_index
+        ls._cached_index = lambda *a, **k: None
+        try:
+            got = ls.usgs_sources(Path("/nonexistent"))
+        finally:
+            ls._cached_index = saved
+        self.assertTrue(got and all(s.footprint is None for s in got), "the fallback sets carry no footprint")
+        self.assertEqual({s.name.split(":", 1)[1] for s in got}, set(lidar.DATASETS) - lidar.PREFER_TNM_OVER)
 
 
 class TnmTilesTest(unittest.TestCase):

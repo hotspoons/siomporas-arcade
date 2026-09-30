@@ -79,6 +79,7 @@ export function validate(level) {
   if (!SLUG.test(level?.id ?? '')) E(`id ${JSON.stringify(level?.id)} is not a usable slug`)
   if (!SLUG.test(level?.world ?? '')) E(`world ${JSON.stringify(level?.world)} is not a usable slug`)
   if (level.mode !== undefined && !MODES.includes(level.mode)) E(`mode ${JSON.stringify(level.mode)} is not one of ${MODES.join(', ')}`)
+  if (level.start !== undefined && level.start !== null && !/^[a-z0-9][a-z0-9_-]*$/.test(String(level.start))) E(`start ${JSON.stringify(level.start)} names a point in the world's points.json by id`)
 
   /*
    * WHO YOU ARE DRIVING.

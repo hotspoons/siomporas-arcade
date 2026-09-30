@@ -90,6 +90,12 @@ const traffic = new ZoneMode((structural) => refresh(structural))
 const stunts = new StuntMode((structural) => refresh(structural))
 // Circuits and stages: the gates you cross (src/races.ts, src/editor/coursemode.ts).
 const races = new CourseMode((structural) => refresh(structural))
+// Where a world opens and a level starts, ends and passes through (src/points.ts). Rich: "replace
+// races tab with something more generic" — the courses are its third tab.
+const points = new PointMode((structural) => refresh(structural))
+points.coursesTab = (root) => races.panel(root, (g) => flyTo([g.a, g.b]))
+/** the Courses tab of Points is showing: pointer and keys go to the race gates */
+const inCourses = () => mode === 'points' && points.panelTab === 'courses'
 import type { Mode } from '../ui/editor'
 import { actorExtension } from '../ui/actors'
 import { weaponExtension } from '../ui/weapons'
@@ -98,10 +104,13 @@ import { trafficExtension } from '../ui/trafficsets'
 import { ZoneMode } from './zones'
 import { StuntMode } from './stuntmode'
 import { CourseMode } from './coursemode'
+import { PointMode } from './pointmode'
 import { FlyCam } from './flycam'
 import { Zones } from '../zones'
 import { fixtureFootprint } from '../stunts'
-let mode: Mode = (location.hash.split(':')[1] as Mode) || 'areas'
+// an old link's `:races` and `:grow` are the Points and Place tabs now
+const hashMode = location.hash.split(':')[1]
+let mode: Mode = (hashMode === 'races' ? 'points' : hashMode === 'grow' ? 'place' : (hashMode as Mode)) || 'areas'
 
 // The interface. Every callback here is a function declared later in this file, which is fine —
 // they are declarations, so they are hoisted, and none of them runs before the first event.
@@ -141,6 +150,7 @@ scene.add(markOverlay(traffic.group))
 // NOT a mark overlay: a fixture is real road, so it is lit and occluded like the rest of the world
 scene.add(stunts.group)
 scene.add(markOverlay(races.group))
+scene.add(markOverlay(points.group))
 // road cross-section preview: its own floating panel and its own overlay group, so it survives the
 // panel rebuilds in refresh() and touches nothing else here (road-and-car agent)
 const roadWidth = new RoadWidth(scene)
@@ -236,6 +246,7 @@ async function loadSite(slug: string, quality: 'edit' | 'preview' = 'edit'): Pro
   await traffic.load(slug, ground, site)
   await stunts.load(slug, ground, site)
   await races.load(slug, ground, site)
+  await points.load(slug, ground, site)
   roadWidth.setSite(site)
   grow.adopt()
   ;(window as unknown as { corridor: unknown }).corridor = {
@@ -272,6 +283,7 @@ async function loadSite(slug: string, quality: 'edit' | 'preview' = 'edit'): Pro
   ;(window as unknown as { corridor: { zonesModule: unknown } }).corridor.zonesModule = { Zones }
   ;(window as unknown as { corridor: { stunts: unknown } }).corridor.stunts = stunts
   ;(window as unknown as { corridor: { races: unknown } }).corridor.races = races
+  ;(window as unknown as { corridor: { points: unknown } }).corridor.points = points
   applyLayers()
   toTop()
   refresh()
@@ -299,7 +311,8 @@ function applyLayers() {
   // stunts stay VISIBLE in every mode: they are part of the world, not an authoring overlay
   stunts.group.visible = true
   // gates are authoring marks, so they are shown only in their own mode
-  races.group.visible = mode === 'races'
+  races.group.visible = inCourses()
+  points.group.visible = mode === 'points'
 }
 
 /** Straight down, high enough that the whole baked corridor is in frame — both extents, not just
@@ -423,7 +436,7 @@ function dropThing(m: Mode, id: string, clientX: number, clientY: number): boole
   if (m !== mode) setMode(m)
   let ok = false
   if (m === 'stunts') ok = stunts.dropAt(pt, id)
-  else if (m === 'races') ok = races.dropAt(pt, id)
+  else if (m === 'points') ok = inCourses() ? races.dropAt(pt, id) : points.dropAt(pt, id) || races.dropAt(pt, id)
   else if (m === 'traffic') ok = traffic.dropAt(pt, id)
   else if (m === 'areas') ok = areas.dropAt(pt, id)
   else if (m === 'structures') ok = structs.dropAt(pt, id)
@@ -451,8 +464,8 @@ canvas.addEventListener('pointerdown', (e) => {
     orbit.enabled = !grabbing && !stunts.onGizmo
     return
   }
-  if (mode === 'races') {
-    grabbing = races.grab(r)
+  if (mode === 'points') {
+    grabbing = inCourses() ? races.grab(r) : points.grab(r)
     orbit.enabled = !grabbing
     return
   }
@@ -489,7 +502,7 @@ canvas.addEventListener('pointermove', (e) => {
   if (mode === 'areas') areas.dragTo(pt)
   else if (mode === 'traffic') traffic.dragTo(pt)
   else if (mode === 'stunts') stunts.dragTo(pt)
-  else if (mode === 'races') races.dragTo(pt)
+  else if (mode === 'points') (inCourses() ? races : points).dragTo(pt)
   else place.dragTo(pt)
 })
 addEventListener('pointerup', (e) => {
@@ -509,7 +522,7 @@ addEventListener('pointerup', (e) => {
     if (mode === 'areas') areas.drop()
     else if (mode === 'traffic') traffic.drop()
     else if (mode === 'stunts') stunts.drop()
-    else if (mode === 'races') races.drop()
+    else if (mode === 'points') (inCourses() ? races : points).drop()
     else place.drop()
     down = null
     return
@@ -570,7 +583,7 @@ addEventListener('keydown', (e) => {
     }
     if (e.key.toLowerCase() === 'n') return structs.startPick()
     if (e.key.toLowerCase() === 'c') return structs.flyToSelected(flyTo) // C centres; F is the camera's drop
-  } else if (mode === 'races' ? races.key(e) : mode === 'stunts' ? stunts.key(e) : mode === 'traffic' ? traffic.key(e) : mode === 'areas' ? areas.key(e) : place.key(e)) {
+  } else if (mode === 'points' ? (inCourses() ? races.key(e) : points.key(e)) : mode === 'stunts' ? stunts.key(e) : mode === 'traffic' ? traffic.key(e) : mode === 'areas' ? areas.key(e) : place.key(e)) {
     e.preventDefault()
     refresh()
     return
@@ -601,7 +614,7 @@ addEventListener('keydown', (e) => {
     case '3': setMode('structures'); break
     case '4': setMode('traffic'); break
     case '5': setMode('stunts'); break
-    case '6': setMode('races'); break
+    case '6': setMode('points'); break
     case '7': setMode('world'); break
   }
 })
@@ -743,7 +756,7 @@ function typingInAField(): boolean {
   return !!t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')
 }
 
-const unsaved = () => areas.dirty || place.dirty || structs.dirty || traffic.dirty || stunts.dirty || races.dirty
+const unsaved = () => areas.dirty || place.dirty || structs.dirty || traffic.dirty || stunts.dirty || races.dirty || points.dirty
 
 // The loaded site was built from the files as they were on disk at load time. Anything saved
 // since means the scene in front of you is behind the JSON — which matters only for the preview,
@@ -758,6 +771,7 @@ async function saveBoth(): Promise<string> {
   if (traffic.dirty) out.push(await traffic.save())
   if (stunts.dirty) out.push(await stunts.save())
   if (races.dirty) out.push(await races.save())
+  if (points.dirty) out.push(await points.save())
   if (out.length) sitePredatesEdits = true
   return out.join(' · ')
 }
@@ -789,13 +803,13 @@ function routeClick(pt: { x: number; y: number } | null) {
     if (m === 'areas') areas.click(pt)
     else if (m === 'traffic') traffic.click(pt)
     else if (m === 'stunts') stunts.click(pt)
-    else if (m === 'races') races.click(pt)
+    else if (m === 'points') (inCourses() ? races : points).click(pt)
     else place.click(pt)
   }
   const busy = mode === 'areas' ? areas.busy
     : mode === 'traffic' ? traffic.busy
       : mode === 'stunts' ? stunts.busy
-        : mode === 'races' ? false
+        : mode === 'points' ? (inCourses() ? false : points.busy)
           : place.busy
   if (!pt || busy) return give(mode)
 
@@ -810,9 +824,9 @@ function routeClick(pt: { x: number; y: number } | null) {
    *
    * The active mode wins a TIE, so clicking two things of the same size does not wander.
    */
-  const order: Mode[] = ['races', 'stunts', 'place', 'traffic', 'areas']
+  const order: Mode[] = ['points', 'stunts', 'place', 'traffic', 'areas']
   const hits = ([
-    { m: 'races' as Mode, hit: races.pick(pt) },
+    { m: 'points' as Mode, hit: points.pick(pt) ?? races.pick(pt) },
     { m: 'stunts' as Mode, hit: stunts.pick(pt) },
     { m: 'place' as Mode, hit: place.pick(pt) },
     { m: 'traffic' as Mode, hit: traffic.pick(pt) },
@@ -826,7 +840,11 @@ function routeClick(pt: { x: number; y: number } | null) {
   if (found.m === 'stunts') stunts.select(found.hit!.id)
   else if (found.m === 'traffic') traffic.select(found.hit!.id)
   else if (found.m === 'areas') areas.select(found.hit!.id)
-  else if (found.m === 'races') races.select(found.hit!.id)
+  else if (found.m === 'points') {
+    // a point, or a race gate through the Courses tab
+    if (points.doc.points.some((p) => p.id === found.hit!.id)) { points.panelTab = 'points'; points.select(found.hit!.id) }
+    else { points.panelTab = 'courses'; races.select(found.hit!.id) }
+  }
   else place.select(found.hit!.id)
   // the panel that just opened shows the thing: its placed tab, the row highlighted and in view
   refresh()
@@ -898,7 +916,7 @@ function refresh(structural = true) {
     else if (mode === 'structures') structs.panel(ui.inspector, flyTo)
     else if (mode === 'traffic') traffic.panel(ui.inspector, (z) => flyTo(z.polygon))
     else if (mode === 'stunts') stunts.panel(ui.inspector, (f) => flyTo(fixtureFootprint(f)))
-    else if (mode === 'races') races.panel(ui.inspector, (g) => flyTo([g.a, g.b]))
+    else if (mode === 'points') points.panel(ui.inspector, (p) => flyTo([p.at, [p.at[0] + 1, p.at[1] + 1]]))
     else place.panel(ui.inspector, flyTo)
     /*
      * AND THE SELECTED ROW IS BROUGHT INTO VIEW. A panel that lists forty placements and selects
@@ -907,7 +925,7 @@ function refresh(structural = true) {
      */
     ui.inspector.querySelector('.item.sel, .row.sel, .sel')?.scrollIntoView({ block: 'nearest' })
   }
-  const what = mode === 'areas' ? 'areas' : mode === 'structures' ? 'structures' : mode === 'traffic' ? 'traffic' : mode === 'stunts' ? 'stunts' : mode === 'races' ? 'races' : 'place'
+  const what = mode === 'areas' ? 'areas' : mode === 'structures' ? 'structures' : mode === 'traffic' ? 'traffic' : mode === 'stunts' ? 'stunts' : mode === 'points' ? (inCourses() ? 'races' : 'points') : 'place'
   ui.setDirty(CAN_SAVE && unsaved(), `Save ${what}`)
 }
 
@@ -946,7 +964,7 @@ async function doSave() {
     } else {
       status(mode === 'traffic' ? await traffic.save()
         : mode === 'stunts' ? await stunts.save()
-        : mode === 'races' ? await races.save()
+        : mode === 'points' ? (inCourses() ? await races.save() : await points.save())
         : await place.save())
     }
     sitePredatesEdits = true

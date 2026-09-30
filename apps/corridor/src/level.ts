@@ -60,6 +60,8 @@ export interface Level {
   /** a program under programs/ (e.g. `crofton/jam.ts`), built and run by the viewer when the level opens */
   program?: string | null
   mode?: 'drive' | 'fly' | 'walk'
+  /** a point in the world's points.json to start at; absent: the world's home, else the bake's photo station */
+  start?: string | null
   scenario?: unknown
 }
 

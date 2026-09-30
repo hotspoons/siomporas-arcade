@@ -13,7 +13,17 @@ Mode **9 · Deploy** (the top bar, or the `9` key). The form, top to bottom:
 1. **Token.** `CLOUDFLARE_API_TOKEN` in the service's environment, or typed into the panel. A
    typed token is verified against Cloudflare and then held in the server process's memory: it is
    never written to disk, never returned by any route, and never appears in a log. "Forget it"
-   clears it. The token needs *Workers Scripts: Edit*, *Workers R2 Storage: Edit*, *Account
+   clears it. **A rollout of the world editor forgets a typed token** (the process restarts); the
+   panel checks before every deploy and says so. To keep one on the cluster, put it in a Secret
+   and name it in the release file (`cloudflare.secretName`; key `CLOUDFLARE_API_TOKEN`):
+
+   ```
+   kubectl -n default create secret generic cloudflare --from-literal=CLOUDFLARE_API_TOKEN=<token>
+   ```
+
+   Both kinds of token work: a user token (My Profile → API Tokens) and an account-owned one
+   (the account's Manage Account → API Tokens). The second cannot answer the user verify call, so
+   it is verified by which accounts it can see. The token needs *Workers Scripts: Edit*, *Workers R2 Storage: Edit*, *Account
    Settings: Read* and, for a custom hostname, *Zone: Read* + *Workers Routes: Edit* on the zone.
 2. **Worlds.** Every baked world on the volume; tick one or several. Several share one address and
    the viewer's site picker chooses between them — that is the whole of "multiplexing".

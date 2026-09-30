@@ -19,7 +19,7 @@ import { icon } from './icons'
 import { bodyOf, group, layerToggle, segmented, select } from './controls'
 import type { IndexEntry } from '../site'
 
-export type Mode = 'areas' | 'place' | 'structures' | 'traffic' | 'stunts' | 'races' | 'world'
+export type Mode = 'areas' | 'place' | 'structures' | 'traffic' | 'stunts' | 'points' | 'world'
 
 const MODES: { value: Mode; label: string; icon: 'pencil-square' | 'map-pin' | 'sparkles' | 'rectangle-group' | 'map' | 'bolt' | 'flag' | 'adjustments-horizontal'; key: string }[] = [
   { value: 'areas', label: 'Areas', icon: 'pencil-square', key: '1' },
@@ -32,8 +32,9 @@ const MODES: { value: Mode; label: string; icon: 'pencil-square' | 'map-pin' | '
   // Stunt fixtures (src/editor/stuntmode.ts): a loop, a corkscrew or a jump standing on the road,
   // with its two ends linked back to the tarmac by a bezier.
   { value: 'stunts', label: 'Stunts', icon: 'bolt', key: '5' },
-  // Circuits and stages (src/editor/coursemode.ts): gates across the road, crossed in order.
-  { value: 'races', label: 'Races', icon: 'flag', key: '6' },
+  // Points (src/editor/pointmode.ts): where a world opens, where a level starts and ends, named,
+  // driving, walking or flying. The race courses (src/editor/coursemode.ts) are its third tab.
+  { value: 'points', label: 'Points', icon: 'flag', key: '6' },
   // The world's own settings — the road cross-section, the surfaces it is drawn with. It was a
   // floating "road" button that overlaid every mode; Rich: "maybe this needs to be world settings".
   { value: 'world', label: 'World', icon: 'adjustments-horizontal', key: '7' },
@@ -100,7 +101,11 @@ const KEYS: Record<Mode | 'general', [string, string][]> = {
     ['Z X', 'turn a bridge'],
     ['Del', 'remove'],
   ],
-  races: [
+  points: [
+    ['drag / click', 'place a home, a start, a finish, a checkpoint or a spot'],
+    ['Z X', 'turn the heading'],
+    ['Del', 'remove'],
+    ['Courses tab', 'the race gates, as before'],
     ['pick', 'a gate kind, then click the road — it is laid square across it'],
     ['arrow', 'which way counts; "turn it round" flips it'],
     ['drag', 'a post moves that end'],

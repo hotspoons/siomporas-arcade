@@ -77,7 +77,7 @@ export function serverTools({ apiFetch, root, siteDoc }) {
       ['level'],
       (a) => post('/api/levels/validate', a.level),
     ),
-    T('level_save', 'Create or replace a level. Validated first; an invalid level is refused with its problems rather than written. A level names its world, an optional player { vehicle: <vehicle build or catalog id>, profile }, an optional program (a path under programs/), simulations such as [{ kind: "traffic", set, density?, max?, seed?, blind? }] (blind drivers brake for nobody: a pile-up game), recoverRepairs (does R straighten the hero car\'s dents; default true), defaults { time, weather, season }, placements and splats.', { id: str(''), level: obj('') }, ['id', 'level'], async (a) => {
+    T('level_save', 'Create or replace a level. Validated first; an invalid level is refused with its problems rather than written. A level names its world, an optional player { vehicle: <vehicle build or catalog id>, profile }, an optional program (a path under programs/), simulations such as [{ kind: "traffic", set, density?, max?, seed?, blind? }] (blind drivers brake for nobody: a pile-up game), start (a point id from the world\'s points.json — where the level begins; absent: the world\'s home), recoverRepairs (does R straighten the hero car\'s dents; default true), defaults { time, weather, season }, placements and splats.', { id: str(''), level: obj('') }, ['id', 'level'], async (a) => {
       // PUT replaces an existing level and 404s on a new one; a new one is a POST. One tool, either way.
       try {
         return await put(`/api/levels/${a.id}`, a.level)

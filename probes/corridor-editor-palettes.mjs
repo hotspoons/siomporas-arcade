@@ -55,10 +55,11 @@ const panel = () => p.evaluate(() => {
 
 // 1. every mode: a palette tab of draggable chips, and a placed tab
 // Grow is a third tab inside Place now, and the World tab took key 7; the rail is 1–7 without it
-for (const [key, m] of [['1', 'areas'], ['3', 'structures'], ['4', 'traffic'], ['5', 'stunts'], ['6', 'races'], ['2', 'place']]) {
+for (const [key, m] of [['1', 'areas'], ['3', 'structures'], ['4', 'traffic'], ['5', 'stunts'], ['6', 'points'], ['2', 'place']]) {
   await p.keyboard.press(key); await p.waitForTimeout(400)
   const s = await panel()
-  const want = m === 'place' ? 3 : 2
+  // Place has a Grow tab; Points has Kinds, Points and the race Courses
+  const want = m === 'place' || m === 'points' ? 3 : 2
   check(s.tabs.length === want && s.chips > 0, `${m}: ${want === 3 ? 'three' : 'two'} tabs (${s.tabs.join(' | ')}) and ${s.chips} draggable chips`)
   if (m === 'stunts') check(s.tabLooksLikeTab, 'the tabs are styled as the shell’s tabs, not as grey buttons')
 }
@@ -67,15 +68,18 @@ for (const [key, m] of [['1', 'areas'], ['3', 'structures'], ['4', 'traffic'], [
 const drops = [['stunts', 'loop', 0], ['races', 'start', 120], ['traffic', 'slow', 260], ['structures', 'flatten', 400], ['areas', 'square', 540]]
 for (const [m, id, along] of drops) {
   const px = await roadPixel(along)
-  await dropOn(m, id, px)
+  // the race gates live in the Courses tab of Points: open it, so the drop is a gate and not a point
+  if (m === 'races') await p.evaluate(() => { window.corridor.setMode('points'); window.corridor.points.panelTab = 'courses' })
+  await dropOn(m === 'races' ? 'points' : m, id, px)
   await p.waitForTimeout(600)
   const s = await panel()
   const n = await p.evaluate((m) => {
     const c = window.corridor
     return m === 'stunts' ? c.stunts.doc.fixtures.length : m === 'races' ? c.races.doc.courses.reduce((a, x) => a + x.gates.length, 0) : m === 'traffic' ? c.traffic.doc.zones.length : m === 'structures' ? c.structs.doc.items.length : window.__ed.site && c.areas ? c.areas.doc.areas.length : -1
   }, m)
-  check(s.hash.endsWith(`:${m}`) && n >= 1, `dropping a ${id} from the ${m} palette placed it (${n} in the document, editor in ${s.hash.split(':')[1]})`)
-  check(s.tabs[1]?.endsWith('*') && s.listH > 40 && s.items >= 1, `…and the panel shows the placed tab with the list still there (${s.listH | 0} px, ${s.items} rows, ${s.sel ? 'one selected' : 'none selected'})`)
+  const modeOf = m === 'races' ? 'points' : m
+  check(s.hash.endsWith(`:${modeOf}`) && n >= 1, `dropping a ${id} from the ${m} palette placed it (${n} in the document, editor in ${s.hash.split(':')[1]})`)
+  check(s.tabs.some((t, i) => i > 0 && t.endsWith('*') && !/^(Kinds|Courses)/.test(t)) && s.listH > 40 && s.items >= 1, `…and the panel shows the placed tab with the list still there (${s.listH | 0} px, ${s.items} rows, ${s.sel ? 'one selected' : 'none selected'})`)
 }
 // the traffic strip hugs the road: the zone reads on the centreline it was dropped on
 const strip = await p.evaluate(() => {
@@ -110,7 +114,7 @@ const gatePx = await p.evaluate(() => {
 await p.mouse.click(gatePx.x, gatePx.y); await p.waitForTimeout(500)
 const afterGate = await panel()
 const gateSel = await p.evaluate(() => window.corridor.races.selectedGate)
-check(afterGate.hash.endsWith(':races') && gateSel === gatePx.id && afterGate.tabs[1]?.endsWith('*'), `clicking a gate from place mode opens Races on it (${afterGate.hash.split(':')[1]}, gate ${gateSel}, tab ${afterGate.tabs[1]})`)
+check(afterGate.hash.endsWith(':points') && gateSel === gatePx.id && afterGate.tabs.find((t) => /^Races/.test(t))?.endsWith('*'), `clicking a gate from place mode opens the Courses tab of Points on it (${afterGate.hash.split(':')[1]}, gate ${gateSel}, tabs ${afterGate.tabs.join(' | ')})`)
 // and with a piece ARMED, a click is a placement, never a selection of something else
 await p.keyboard.press('5'); await p.waitForTimeout(300)
 await p.evaluate(() => window.corridor.stunts.arm('hump'))

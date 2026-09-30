@@ -564,3 +564,55 @@ step of a resting pile) and the pile itself on the GPU; both are bounded now.
   Only what the worlds use goes up, measured by following ids through the documents and builds
   (Route 3: 254 objects, 129 MB, 11 of the library's cars). No real deploy has been run: there is
   no token here. Probes: `corridor-stages-lights.mjs`; tests: `cloudflare.test.mjs`, `deploy.test.mjs`.
+
+## The editor's list, the textures, the points, and the wall over the road (2026-09-30, late)
+
+Rich's list, after playing the deployed editor. What changed, in the order he wrote it:
+
+- **Switching worlds left the old tiles.** `loadSite` had no generation counter: a second switch
+  while the first build ran found `site` null, removed nothing, and both builds' groups stayed.
+  One load at a time now; a superseded build is dropped. Embedded, the editor no longer auto-loads
+  the first site under the host's choice.
+- **The tree preview was a disc** around the photo station because the editor never calls
+  `updateNear`. `buildSite({ plantWhole })` plants the whole bake at a 12 m cell.
+- **Tabs wrap** in a narrow dock (`#se-rail .segmented`). Palette rows size to their chips.
+- **Home and start points.** `sites/<slug>/points.json` (src/points.ts): named points with a kind
+  (home, start, finish, checkpoint, spot), a heading, and how you are there (drive, walk, fly;
+  `lift_m` above the ground or an absolute `z`). The Points tab replaces Races on the rail; the
+  race courses are its third tab. A level's `start` names a point (Stage panel: "start at"); the
+  viewer's `startPose` resolves level → world home → the photo station, and `goToStart` applies
+  the point's mode — the level's `mode`, stored for a year, is finally applied too.
+- **The palette draws from the library.** `src/catalogmerge.ts` merges the shipped kit (only
+  entries with a model; the 23 box-only ones are gone) with the asset library's props, buildings
+  and fixtures. A record carries `size_m` (asset form); a library item's footprint is measured from
+  its model on first load. Grow is a tab inside Place, with a choice of which assets it may place,
+  and a building filed simply as `building` stands in for any category the catalog lacks. A placed
+  asset has a size handle (G cycles move, turn, size).
+- **Textures.** The deployed viewer had none: the sets are generated and gitignored. They now come
+  from the asset service (every material, variants and macro found by listing its files;
+  `seed-materials.mjs` pushed the 36-material starter pack to the cluster). `surfaces.json`
+  (src/surfacesdoc.ts) is a world's own mapping — road class → material, the grasses, and wall and
+  roof pools for buildings — edited in the World tab (which also holds the road cross-section
+  that used to be a floating button). Buildings draw the pools projected by face normal at each
+  material's metres per tile. A deploy carries every surface material and whatever a world names.
+- **The wall over the road** on the cluster's Crofton bake was a cached `dem_1m.tif` from an
+  earlier, smaller bake: 79 of 158 tiles were solid nodata and the tiles at the old DEM's edge
+  copied its last row outward 10–29 m over the road. `corridor/rastercache.py`: a cached raster is
+  reused only when it is in the frame's CRS and contains the bbox; otherwise it is removed and
+  fetched (DEM, NAIP, horizon, canopy). The tile export skips a tile the DEM does not reach. The
+  world was re-baked on the cluster with the fix.
+- **Cloudflare tokens.** Account-owned tokens cannot answer `/user/tokens/verify`; a token that
+  fails it is asked which accounts it sees instead. A typed token lives in the service's memory
+  and every rollout of the editor forgets it — the panel says so before a deploy, and the chart
+  takes one from a Secret (`cloudflare.secretName`) that survives.
+
+Not done from the list: built-in fixtures (gates, stop signs, signals) and the shipped buildings
+are not yet LISTED in the asset library as catalog rows — they are overridable per world through
+the Fixtures tab, but Rich wants to see them in the catalog; and a premade (non-procgen) building
+does not yet take a wall/roof pool (the pools texture the procedural massing). Separately, the
+cluster bake's 2,049 false branch structures come from `profile_tiled` never passing
+`major_road`; they are not drawn, and are not fixed here.
+
+Probes: corridor-world-tab, corridor-points, corridor-editor-palettes (updated), worldedit-place
+(its stale `setMode('define')` fixed), corridor-fixtures (follows the document). Tests:
+surfacesdoc, frame-check, cloudflare (account tokens), deploy (materials), test_rastercache.py.

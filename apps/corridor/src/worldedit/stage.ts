@@ -44,6 +44,8 @@ export class StagePanel {
   private facts: Record<string, string> = {}
   private actions: Record<string, string> = {}
   private modes: string[] = ['drive', 'fly', 'walk']
+  /** the points of each world, fetched once per panel life */
+  private points = new Map<string, { id: string; name: string; kind: string; mode?: string }[]>()
   /** what the library holds that can be driven; empty when the asset service is not configured */
   private vehicles: AssetItem[] = []
   private draft: Level | null = null
@@ -178,6 +180,28 @@ export class StagePanel {
         },
       }),
     )
+    /*
+     * WHERE YOU START: one of the world's points (the site editor's Points tab). Nothing chosen is
+     * the world's home, and a world with no home opens at the bake's photo station as it always
+     * did. The list is fetched for the level's world; a world with no points.json has none.
+     */
+    const startSel = select({
+      label: 'start at',
+      value: d.start ?? '',
+      options: [{ value: '', label: 'the world’s home' }, ...(this.points.get(d.world) ?? []).map((p) => ({ value: p.id, label: `${p.name} (${p.kind}${p.mode ? `, ${p.mode}` : ''})` }))],
+      note: 'a point from the world’s Points tab; the point’s own mode wins over the level’s',
+      onChange: (v) => {
+        d.start = v || null
+        this.mark(true)
+      },
+    })
+    wb.append(startSel)
+    if (!this.points.has(d.world)) {
+      void fetch(`/sites/${d.world}/points.json`, { cache: 'no-cache' })
+        .then(async (r) => (r.ok ? ((await r.json()) as { points?: { id: string; name: string; kind: string; mode?: string }[] }).points ?? [] : []))
+        .catch(() => [])
+        .then((pts) => { this.points.set(d.world, pts); this.render() })
+    }
     host.append(what)
 
     /*

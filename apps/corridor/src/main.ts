@@ -33,6 +33,7 @@ import { MilkyWay } from './milkyway'
 import { applyLevel, loadLevel, type LevelPlacement } from './level'
 import { TrafficLayer, type TrafficSpec } from './trafficlayer'
 import { FixtureLayer, loadFixtures, settingsOf, type FixtureDoc } from './fixtures'
+import { EMPTY_POINTS, loadPoints, startOf, type Point, type PointsDoc } from './points'
 import { WaypointHud, type Waypoint } from './ui/waypoint'
 import { MissileLayer } from './missiles'
 import { dentObject, flushDents, repairObject } from './dents'
@@ -601,6 +602,7 @@ async function loadSite(slug: string) {
    * here too, on top of the procedural ones the site just drew.
    */
   fixtures = new FixtureLayer(site)
+  worldPoints = await loadPoints(slug)
   scene.add(fixtures.group)
   void loadFixtures(site.manifest.slug)
     .then(async (doc) => {
@@ -885,6 +887,7 @@ async function loadSite(slug: string) {
   const resume = st && st.site === slug ? null : readResume(slug)
   if (st && st.site === slug) applyStance(st)
   else if (resume) applyStance(resume)
+  else if (startOf(worldPoints, null)) goToStart(null)
   else toPhoto()
   // per-site knob overrides, applied AFTER the panels have restored the browser's values so the
   // committed file wins, and undoing whatever the previous site's file had set
@@ -1091,6 +1094,9 @@ async function openLevel(id: string) {
     drive.car = null
     if (wasDriving) setDrive(true)
   }
+  // the level's start (its point, else the world's home) in its mode — the level's `mode` was
+  // validated and stored and never applied; a point's own mode wins over it
+  if (lvl.start || lvl.mode || startOf(worldPoints, null)) goToStart(lvl.mode ?? null)
   // and the program, last: it may read the traffic and the races, so both are in place first
   if (lvl.program) await startProgram(lvl.program)
   else stopProgram()
@@ -1350,6 +1356,53 @@ function programHost(): ProgramHost {
  */
 /** the world's fixtures — the variants it wears for signs, signals, poles, gates and markers */
 let fixtures: FixtureLayer | null = null
+/** the world's named places (points.ts): where it opens, where a level starts */
+let worldPoints: PointsDoc = { ...EMPTY_POINTS, points: [] }
+
+/**
+ * Where the car is put when driving begins: the level's start point, else the world's home, else
+ * the bake's photo station in the right-hand lane — which is where every world opened before
+ * points existed. Three.js frame: x east, z south, yaw as `Car.place` takes it.
+ */
+function startPose(): { x: number; z: number; yaw: number; point: Point | null } {
+  const pt = startOf(worldPoints, level?.start)
+  if (pt) return { x: pt.at[0], z: -pt.at[1], yaw: -(pt.yaw_deg * Math.PI) / 180, point: pt }
+  const p = site!.spineAt(site!.manifest.spine.photo_s)
+  const side = p.dir.clone().cross(up).multiplyScalar(1.83)
+  return { x: p.pos.x + side.x, z: p.pos.z + side.z, yaw: Math.atan2(p.dir.z, p.dir.x), point: null }
+}
+
+/** the height a point is at: the ground here, lifted, or an absolute height */
+function pointHeight(pt: Point): number {
+  if (typeof pt.z === 'number') return pt.z
+  const g = site?.groundAt(pt.at[0], -pt.at[1]) ?? site?.heightAt(pt.at[0], pt.at[1]) ?? 0
+  return g + (pt.lift_m ?? 0)
+}
+
+/**
+ * Take the level (or the world) to its start: the car placed there and driving, or the camera
+ * hovering there for a flying start, or walking from there. `how` is the point's own mode, else
+ * the level's, else driving. Rich: "driving or walking or flying (in 3 dimensions so we can
+ * support flying levels, default to ground)".
+ */
+function goToStart(how?: string | null) {
+  if (!site) return
+  const pose = startPose()
+  const pt = pose.point
+  const mode = pt?.mode ?? how ?? 'drive'
+  if (mode === 'drive') {
+    if (!drive.on) setDrive(true)
+    drive.car?.place(pose.x, pose.z, pose.yaw)
+    return
+  }
+  if (drive.on) setDrive(false)
+  const y = pt ? pointHeight(pt) + (pt.lift_m || typeof pt.z === 'number' ? 0 : 1.8) : (site.groundAt(pose.x, pose.z) ?? 0) + 30
+  const look = new THREE.Vector3(Math.cos(pose.yaw), 0, Math.sin(pose.yaw))
+  camera.position.set(pose.x, y, pose.z)
+  orbit.target.copy(camera.position).add(look.multiplyScalar(40))
+  orbit.update()
+  if (mode === 'walk' && (CRAFT_KINDS as string[]).includes('walk')) setCraft('walk' as CraftKind)
+}
 
 /** (Re)build the races from courses.json with the fixtures' gate and marker settings and models. */
 async function loadRaces(): Promise<void> {
@@ -1541,7 +1594,7 @@ function setDrive(on: boolean) {
         // Spawned at the photo station, which is where `place` below puts it anyway — a car that
         // exists half a kilometre away for one frame is a heightfield tile built somewhere nobody
         // is ever going to drive.
-        const at = site.spineAt(site.manifest.spine.photo_s)
+        const at = startPose()
         /*
          * The level's choice of game, the asset's own engine — see `spawnCar`.
          *
@@ -1554,7 +1607,7 @@ function setDrive(on: boolean) {
         const stuntish = (stuntWorld?.count ?? 0) > 0 && T.physProfileId() === 'street'
         const wantProfile = level?.player?.profile ?? (stuntish ? 'stunts' : undefined)
         drive.car = new RapierCar(
-          physics.spawnCar({ x: at.pos.x, z: at.pos.z, yaw: Math.atan2(at.dir.z, at.dir.x) }, wantProfile, playerVehicle ?? undefined),
+          physics.spawnCar({ x: at.x, z: at.z, yaw: at.yaw }, wantProfile, playerVehicle ?? undefined),
           surface,
           playerModel?.object,
         )
@@ -1568,10 +1621,9 @@ function setDrive(on: boolean) {
         drive.car = car
       }
       scene.add(drive.car.mesh)
-      // spawn in the right-hand lane at the photo, facing along the road
-      const p = site.spineAt(site.manifest.spine.photo_s)
-      const side = p.dir.clone().cross(up).multiplyScalar(1.83)
-      drive.car.place(p.pos.x + side.x, p.pos.z + side.z, Math.atan2(p.dir.z, p.dir.x))
+      // at the level's start, the world's home, or the right-hand lane at the photo (startPose)
+      const p = startPose()
+      drive.car.place(p.x, p.z, p.yaw)
     }
     drive.yaw = 0
     drive.pitch = 0
@@ -2213,7 +2265,7 @@ addEventListener('keydown', (e) => {
     }
     case 'KeyR':
       if (!(drive.on && site && drive.car)) break
-      if (e.shiftKey) { const p = site.spineAt(site.manifest.spine.photo_s); const side = p.dir.clone().cross(up).multiplyScalar(1.83); drive.car.place(p.pos.x + side.x, p.pos.z + side.z, Math.atan2(p.dir.z, p.dir.x)) }
+      if (e.shiftKey) { const p = startPose(); drive.car.place(p.x, p.z, p.yaw) }
       else {
         drive.car.recover(T.CAR_RECOVER_BACK)
         // Rich: "make recover car (r key) reset the damage (optionally, this should be per game but

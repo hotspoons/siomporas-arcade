@@ -6,6 +6,9 @@ Cloudflare using R2 for assets and tiles and CF workers for the main app… copy
 used in the game, not the full library… support world multiplexing too so you can deploy
 multiple worlds to one URL."*
 
+What the Cloudflare account needs first — R2 added, the token's permissions, the cache switches — is
+in [CLOUDFLARE.md](CLOUDFLARE.md).
+
 ## From the world editor
 
 Mode **9 · Deploy** (the top bar, or the `9` key). The form, top to bottom:

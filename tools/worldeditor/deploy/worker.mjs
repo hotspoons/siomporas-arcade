@@ -9,6 +9,16 @@
 //
 // It is READ ONLY. The editor's saves are PUTs to `/sites/<slug>/<doc>.json`; here they get a
 // 405 that says where to go, rather than a 404 that looks like a lost file.
+//
+// AND IT CACHES. R2 charges per read (Class B operations, ten million a month free, then a few
+// cents a million), and a world is a few hundred tiles per player per session. Every object
+// read from the bucket is put in the Cloudflare cache under the request URL (the Cache API,
+// `caches.default`), so the next player in the same data centre — and with Tiered Cache on, in
+// the same region — is served from the edge and the bucket is not read at all. The tiles under
+// `web/` are immutable for a year; the documents for a minute, so an edit and a redeploy under
+// the same prefix show up. Rich, 2026-09-30: "is there a way we can use their CDN as a pull
+// through cache to minimize the cost?" — this is it; the rest is a dashboard switch (see
+// docs/corridor/CLOUDFLARE.md).
 
 const DATA = ['/sites/', '/levels/', '/assetsvc/', '/api/']
 
@@ -27,7 +37,7 @@ export function keyFor(pathname) {
 }
 
 export default {
-  async fetch(req, env) {
+  async fetch(req, env, ctx) {
     const url = new URL(req.url)
     const p = url.pathname
     if (req.method !== 'GET' && req.method !== 'HEAD') {
@@ -41,6 +51,13 @@ export default {
       } catch {
         return json(400, { error: 'bad path', path: p })
       }
+      // the edge first: the same URL served here before is served again without a bucket read
+      const cache = typeof caches !== 'undefined' ? caches.default : null
+      const cacheKey = new Request(`${url.origin}${p}`, { method: 'GET' })
+      if (cache) {
+        const hit = await cache.match(cacheKey)
+        if (hit) return req.method === 'HEAD' ? new Response(null, { headers: hit.headers }) : hit
+      }
       const obj = await env.DATA.get(`${env.PREFIX}/${decoded}`)
       if (!obj) return json(404, { error: 'not found', path: p })
       const headers = new Headers()
@@ -48,7 +65,9 @@ export default {
       headers.set('etag', obj.httpEtag)
       // the bake's tiles never change under a prefix; the docs might be redeployed under the same one
       headers.set('cache-control', decoded.includes('/web/') ? 'public, max-age=31536000, immutable' : 'public, max-age=60')
-      return new Response(req.method === 'HEAD' ? null : obj.body, { headers })
+      const res = new Response(obj.body, { headers })
+      if (cache && ctx?.waitUntil) ctx.waitUntil(cache.put(cacheKey, res.clone()))
+      return req.method === 'HEAD' ? new Response(null, { headers }) : res
     }
     if (p.startsWith('/api/')) return json(404, { error: 'no such API in a published world', path: p })
     return env.ASSETS.fetch(req)

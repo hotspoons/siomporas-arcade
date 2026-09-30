@@ -1377,7 +1377,24 @@ for (const signal of ['SIGTERM', 'SIGINT']) {
  *   POST   /api/deploy/plan   {worlds}   the object list, as a dry run
  *   POST   /api/deploy/start  {...}      a run; its log is the deploy's progress
  *   GET    /api/deploy/revisions?account=&bucket=   the ledger of deploys in a bucket
+ *   GET    /api/deploy/history           every deploy started from this editor: what was asked, and the URL it got
  */
+const DEPLOY_HISTORY = () => path.join(store.root, 'deploys.json')
+async function readDeployHistory() {
+  return (await store.readJson(DEPLOY_HISTORY())) ?? { deploys: [] }
+}
+async function recordDeploy(entry) {
+  const h = await readDeployHistory()
+  h.deploys = [entry, ...h.deploys.filter((d) => d.id !== entry.id)].slice(0, 200)
+  await store.writeAtomic(DEPLOY_HISTORY(), Buffer.from(JSON.stringify(h, null, 1)))
+}
+async function amendDeploy(id, patch) {
+  const h = await readDeployHistory()
+  const at = h.deploys.findIndex((d) => d.id === id)
+  if (at < 0) return
+  h.deploys[at] = { ...h.deploys[at], ...patch }
+  await store.writeAtomic(DEPLOY_HISTORY(), Buffer.from(JSON.stringify(h, null, 1)))
+}
 async function deployApi(req, res, seg, q) {
   const cfFor = () => new Cloudflare(() => cfTokens.use())
   const fail = (e) => json(res, e.status ?? 500, { error: String(e.message ?? e), errors: e.errors ?? undefined })
@@ -1429,6 +1446,7 @@ async function deployApi(req, res, seg, q) {
       // the object list is long; the panel wants the shape of it, and the keys only on request
       return json(res, 200, { ...p, objects: body?.objects ? p.objects.map((o) => ({ key: o.key, bytes: o.bytes, group: o.group })) : undefined, count: p.objects.length })
     }
+    if (seg[0] === 'history' && req.method === 'GET') return json(res, 200, await readDeployHistory())
     if (seg[0] === 'revisions' && req.method === 'GET') {
       const ledger = await cfFor().getJson(q.get('account'), q.get('bucket'), deploy.LEDGER_KEY)
       return json(res, 200, { deployments: ledger?.deployments ?? [] })
@@ -1441,6 +1459,7 @@ async function deployApi(req, res, seg, q) {
       cfTokens.use() // fail now, not in the log
       const name = deploy.workerName(body.worker?.name ?? `corridor-${worlds[0]}`)
       const prefix = body.prefix || deploy.defaultPrefix(worlds)
+      const worker = { name, workersDev: body.worker?.workersDev !== false, hostname: body.worker?.hostname || null, zoneId: body.worker?.zoneId || null }
       const run = await runs.startTask({
         kind: 'deploy',
         slug: worlds.join('+'),
@@ -1449,12 +1468,24 @@ async function deployApi(req, res, seg, q) {
           const p = await deploy.plan({ store, worlds, assetsvc: assetsvcUrl(), transpile: programs.transpile, appDir: APP })
           const out = await deploy.run({
             cf: cfFor(), accountId: body.account, bucket: body.bucket, createBucket: body.createBucket !== false, prefix, plan: p,
-            worker: { name, workersDev: body.worker?.workersDev !== false, hostname: body.worker?.hostname || null, zoneId: body.worker?.zoneId || null },
-            appDir: APP, prune: !!body.prune, dryRun: !!body.dryRun, log,
+            worker, appDir: APP, prune: !!body.prune, dryRun: !!body.dryRun, log,
           })
-          return out.dryRun ? `dry run: ${out.objects} objects, ${(out.bytes / 2 ** 20).toFixed(1)} MiB` : out.urls.length ? out.urls.join(' ') : `r2://${body.bucket}/${prefix}`
+          const detail = out.dryRun ? `dry run: ${out.objects} objects, ${(out.bytes / 2 ** 20).toFixed(1)} MiB` : out.urls.length ? out.urls.join(' ') : `r2://${body.bucket}/${prefix}`
+          if (!out.dryRun) await amendDeploy(run.id, { state: 'done', urls: out.urls, objects: out.objects, bytes: out.bytes, finished: new Date().toISOString() }).catch(() => {})
+          return detail
         },
       })
+      /*
+       * THE RECORD: what was asked, so it can be asked again. Rich, 2026-09-30: "keep a record of
+       * deployments and make them re-deployable based on current state… past deployments you can
+       * load from the menu with the worlds pre-selected". The request as the panel sent it (never
+       * the token), the run it became, and — once it finishes — the URL. A dry run is not
+       * recorded; it deployed nothing.
+       */
+      if (!body.dryRun) {
+        await recordDeploy({ id: run.id, at: run.started, state: 'running', worlds, account: body.account, bucket: body.bucket, prefix, worker, prune: !!body.prune }).catch(() => {})
+        runs.onFinished?.(run.id, (state) => { if (state !== 'done') void amendDeploy(run.id, { state }) })
+      }
       return json(res, 202, { run, prefix, worker: name })
     }
     return json(res, 404, { error: 'not found' })

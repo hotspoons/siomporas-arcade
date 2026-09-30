@@ -158,9 +158,17 @@ export class Runs {
       } catch (e) {
         await chain
         await this.#finish(run, 'failed', 1, String(e?.message ?? e))
+        this.finishedHooks.get(id)?.('failed')
       }
+      this.finishedHooks.delete(id)
     })()
     return run
+  }
+
+  /** what to tell when an in-process run ends other than well; one listener per run */
+  finishedHooks = new Map()
+  onFinished(id, fn) {
+    this.finishedHooks.set(id, fn)
   }
 
   async #start({ kind, slug, args, label, needsBucket = false }) {

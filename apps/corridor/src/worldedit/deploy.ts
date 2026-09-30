@@ -15,7 +15,7 @@
 //   5. the plan — what would be sent, by group, with every warning — then the deploy itself,
 //      which is a run: its log is the progress, and the last line is the URL.
 
-import { api, type DeployCloudflare, type DeployPlan, type DeployStatus } from './api'
+import { api, type DeployCloudflare, type DeployPlan, type DeployRecord, type DeployStatus } from './api'
 import { button, el, toast } from '../ui/shell'
 import { bodyOf, empty, group, readout, select, textField, toggle } from '../ui/controls'
 import type { LogView } from './runs'
@@ -32,6 +32,7 @@ export class DeployPanel {
   private status: DeployStatus | null = null
   private cf: DeployCloudflare | null = null
   private plan: DeployPlan | null = null
+  private history: DeployRecord[] = []
   private planning = false
   private busy = false
   private form = {
@@ -56,6 +57,7 @@ export class DeployPanel {
   async load() {
     try {
       this.status = await api.deployStatus()
+      this.history = (await api.deployHistory().catch(() => ({ deploys: [] }))).deploys
     } catch (e) {
       this.o.host.replaceChildren(empty(`deploy: ${(e as Error).message}`))
       return
@@ -151,6 +153,25 @@ export class DeployPanel {
     }
   }
 
+  /** Put a past deploy's choices back in the form: the worlds, the worker, its address, the bucket, pruning. */
+  private loadRecord(d: DeployRecord) {
+    const f = this.form
+    f.worlds = new Set(d.worlds)
+    f.account = d.account
+    f.bucket = d.bucket
+    f.newBucket = ''
+    f.worker = d.worker.name
+    f.workerTouched = true
+    f.workersDev = d.worker.workersDev !== false
+    f.zoneId = d.worker.zoneId ?? ''
+    f.host = d.worker.hostname ?? ''
+    f.prune = d.prune
+    f.prefixTouched = false // a redeploy is a new revision under a fresh prefix
+    this.plan = null
+    this.render()
+    toast(`loaded: ${d.worlds.join(', ')} → ${d.worker.name}${d.worker.hostname ? ` at ${d.worker.hostname}` : ''}`, 'ok')
+  }
+
   render() {
     const host = this.o.host
     host.replaceChildren()
@@ -158,6 +179,27 @@ export class DeployPanel {
     if (!st) return
     this.defaults()
     const f = this.form
+
+    /* 0 · what was deployed before: load one back into the form, or redeploy it as it stands */
+    if (this.history.length) {
+      const past = group(`Past deployments (${this.history.length})`, { collapsed: true, note: 'load one to pre-select its worlds and address; Redeploy sends the worlds as they are now under a new prefix' })
+      const pb = bodyOf(past)
+      for (const d of this.history.slice(0, 20)) {
+        const row = el('div', 'deploy-row')
+        const when = d.at.slice(0, 16).replace('T', ' ')
+        row.append(el('div', 'deploy-row-main', `${d.worlds.join(', ')} → ${d.worker.name}${d.worker.hostname ? ` · ${d.worker.hostname}` : ''}`))
+        row.append(el('div', 'deploy-row-note', `${when} · ${d.state}${d.bytes ? ` · ${MiB(d.bytes)}` : ''}${d.urls?.length ? ` · ${d.urls[0]}` : ''}`))
+        const acts = el('div', 'row')
+        acts.append(
+          button({ label: 'Load', icon: 'arrow-uturn-left', variant: 'ghost', onClick: () => this.loadRecord(d) }),
+          button({ label: 'Redeploy', icon: 'cloud-arrow-up', variant: 'ghost', disabled: this.busy || !st.token.present, onClick: () => { this.loadRecord(d); void this.start(false) } }),
+        )
+        if (d.urls?.[0]) acts.append(button({ label: 'Open', icon: 'arrow-top-right-on-square', variant: 'ghost', onClick: () => window.open(d.urls![0], '_blank', 'noopener') }))
+        row.append(acts)
+        pb.append(row)
+      }
+      host.append(past)
+    }
 
     /* 1 · the token */
     const tok = group('1 · Cloudflare token', { note: st.token.present ? (st.token.source === 'env' ? 'from the environment' : 'entered here, held in memory') : 'none yet' })
@@ -242,7 +284,7 @@ export class DeployPanel {
     host.append(where)
 
     /* 5 · the plan, then the deploy */
-    const go = group('5 · Deploy', { note: st.app ? `app: ${st.app}` : undefined })
+    const go = group('5 · Deploy', { note: st.app ? `app: ${st.app} · setup: docs/corridor/CLOUDFLARE.md` : 'setup: docs/corridor/CLOUDFLARE.md' })
     const gb = bodyOf(go)
     gb.append(button({ label: this.planning ? 'Planning…' : 'Plan (dry run)', icon: 'beaker', variant: 'ghost', disabled: this.planning || !this.worlds.length, onClick: () => void this.makePlan() }))
     const p = this.plan

@@ -258,6 +258,22 @@ export interface DeployRevision {
   objects: number
   bytes: number
 }
+/** one past deploy, as it was asked for — enough to ask again */
+export interface DeployRecord {
+  id: string
+  at: string
+  state: 'running' | 'done' | 'failed'
+  worlds: string[]
+  account: string
+  bucket: string
+  prefix: string
+  worker: { name: string; workersDev?: boolean; hostname?: string | null; zoneId?: string | null }
+  prune: boolean
+  urls?: string[]
+  objects?: number
+  bytes?: number
+  finished?: string
+}
 export interface DeployRequest {
   worlds: string[]
   account: string
@@ -534,6 +550,7 @@ export const api = {
   deployCreateBucket: (account: string, name: string) => call<{ bucket: string }>('/api/deploy/bucket', { method: 'POST', body: JSON.stringify({ account, name }) }),
   deployPlan: (worlds: string[]) => call<DeployPlan>('/api/deploy/plan', { method: 'POST', body: JSON.stringify({ worlds }) }),
   deployRevisions: (account: string, bucket: string) => call<{ deployments: DeployRevision[] }>(`/api/deploy/revisions?account=${encodeURIComponent(account)}&bucket=${encodeURIComponent(bucket)}`),
+  deployHistory: () => call<{ deploys: DeployRecord[] }>('/api/deploy/history'),
   deployStart: (body: DeployRequest) => call<{ run: Run; prefix: string; worker: string }>('/api/deploy/start', { method: 'POST', body: JSON.stringify(body) }),
   cancel: (id: string) => call<{ run: Run }>(`/api/runs/${id}/cancel`, { method: 'POST' }),
   /** Bytes from `offset`. The whole streaming protocol — see tools/worldeditor/runs.mjs. */

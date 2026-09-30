@@ -30,7 +30,7 @@ tools/corridor/.venv/bin/python -m corridor flora all     # backfill flora.json 
 | `crossings.json` | ways that cross the spine, and OSM's guess whether they pass over or under | OSM |
 | `dem_1m.tif` | bare earth, 1 m | USGS 3DEP via TNM |
 | `naip.tif` | natural colour, 0.3 m | USGS NAIPPlus |
-| `lidar/corridor.laz` | the classified points within 200 m of the spine, in the site frame | USGS 3DEP Entwine |
+| `lidar/corridor.laz` | the classified points within 200 m of the spine, in the site frame | USGS 3DEP / NOAA Digital Coast Entwine, TNM tiles as fallback |
 | `lidar/dtm.tif` `dsm.tif` `chm.tif` `deck_z.tif` `deck_n.tif` `building_n.tif` | ground, surface, canopy height, bridge-deck height and density, building density — 1 m | derived |
 | `profile.json` | every 2 m along the spine: road z; ground height relative to the road at 8/15/25/40/60 m left and right (cut vs fill); canopy at the same offsets; **structures** — bridges we are on and overpasses over us, measured from class-17 returns | derived |
 | `horizon_30m.tif` | 60 km of elevation around the site at 30 m — the far hills | USGS 3DEP seamless |
@@ -70,6 +70,17 @@ JSON hierarchy — on a public bucket. A 6 km corridor is a few dozen nodes; the
 delivery tiles is 850 MB. The bucket has no vertical CRS; Z is checked against the DEM on load and
 converted if it is in feet. There is no PDAL on Debian trixie/arm64, so `lidar.py` walks the
 octree itself and reads nodes with `laspy` + `lazrs`.
+
+**Where the points come from, in order** (`corridor/lidar_sources.py`). USGS's EPT sets in
+`lidar.DATASETS` first; then NOAA Digital Coast's ~1000 EPT sets on `noaa-nos-coastal-lidar-pds`,
+discovered from NOAA's own STAC index (a slim copy lives in the bake cache, refreshed monthly); and
+only when EPT covers under half the streets, the USGS delivery tiles through TNM — whole LAZ files
+from rockyweb, ~80 KB/s a connection, fetched 16 at a time. NOAA's primary is the newest survey over
+at least half the streets and later ones fill only the 25 m cells it left empty (Crofton: 2020 Anne
+Arundel, then 2018 Prince George's for the western edge; 30 s instead of six hours). The walk stops
+at the depth that reaches `CORRIDOR_LIDAR_DENSITY` points/m² (default 8). `CORRIDOR_LIDAR_SOURCE=tnm`
+forces the delivery tiles when the newest vintage matters more than the hours. Tests:
+`.venv/bin/python -m unittest discover -s tests`.
 
 **LANDFIRE's class at the centre of a corridor is always `Developed-Roads`.** The site point is on
 the pavement by construction, and LANDFIRE has a 30 m class for pavement. Vegetation is read as AREA

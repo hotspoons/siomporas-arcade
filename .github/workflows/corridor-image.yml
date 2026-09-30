@@ -43,6 +43,18 @@ jobs:
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=sha,format=short
+      # TESTED BEFORE IT IS PUBLISHED: the bake's own unit tests, inside the image they will run in
+      # (laspy, lazrs, pyproj and shapely as installed there, not as on somebody's laptop). The
+      # tests are mounted rather than baked in, so the published image is unchanged.
+      - uses: docker/build-push-action@v6
+        with:
+          context: tools/corridor
+          platforms: linux/amd64
+          load: true
+          tags: corridor:test
+          cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache
+      - name: unit tests
+        run: docker run --rm -v "$PWD/tools/corridor/tests:/app/tests:ro" -w /app --entrypoint python corridor:test -m unittest discover -s tests -v
       - uses: docker/build-push-action@v6
         with:
           context: tools/corridor

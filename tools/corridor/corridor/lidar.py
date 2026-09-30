@@ -27,6 +27,8 @@ converted if it is in feet — one older Maryland project is.
 from __future__ import annotations
 
 import json
+import os
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -79,114 +81,65 @@ def _get_json(url: str, cache: Path) -> dict:
     return r.json()
 
 
-def candidate_datasets(bbox_merc, cache: Path) -> list[tuple[str, dict]]:
-    """Datasets whose declared bounds contain the corridor, best first. The bounds are the
-    octree's CUBE, padded square around the real footprint, so containment is necessary but not
-    sufficient — Clarksburg sits inside MD_Western_2's cube and outside its points. The caller
-    walks the list until one actually yields points."""
-    x0, y0, x1, y1 = bbox_merc
-    out = []
-    for ds in DATASETS:
-        ept = _get_json(BASE.format(ds=ds) + "ept.json", cache / "ept" / ds / "ept.json")
-        b = ept["bounds"]
-        if b[0] <= x0 and b[1] <= y0 and b[3] >= x1 and b[4] >= y1:
-            out.append((ds, ept))
-    if not out:
-        # NOT an error: the caller falls back to the TNM delivery tiles, which is the only path
-        # that works outside the mid-Atlantic (DATASETS is a hand-kept list). Raising here killed
-        # every California / Oregon / Maine bake before the fallback could run.
-        print("  lidar   no EPT dataset covers this corridor; going straight to the TNM tiles", flush=True)
-        return []
-    return out
-
-
-def nodes_for(ds: str, ept: dict, bbox_merc, cache: Path) -> list[str]:
-    """Octree keys (D-X-Y-Z) with points whose XY footprint intersects the bbox, all depths."""
-    b = ept["bounds"]
-    size = b[3] - b[0]
-    x0, y0, x1, y1 = bbox_merc
-    hier: dict[str, int] = dict(_get_json(BASE.format(ds=ds) + "ept-hierarchy/0-0-0-0.json", cache / "ept" / ds / "h" / "0-0-0-0.json"))
-    out: list[str] = []
-    stack = ["0-0-0-0"]
-    while stack:
-        key = stack.pop()
-        d, x, y, z = (int(v) for v in key.split("-"))
-        ns = size / (2**d)
-        nx0, ny0 = b[0] + x * ns, b[1] + y * ns
-        if nx0 > x1 or nx0 + ns < x0 or ny0 > y1 or ny0 + ns < y0:
-            continue
-        count = hier.get(key)
-        if count is None:
-            continue
-        if count == -1:  # subtree lives in its own hierarchy file
-            hier.update(_get_json(BASE.format(ds=ds) + f"ept-hierarchy/{key}.json", cache / "ept" / ds / "h" / f"{key}.json"))
-            count = hier.get(key, 0)
-        if count > 0:
-            out.append(key)
-        for dx in (0, 1):
-            for dy in (0, 1):
-                for dz in (0, 1):
-                    child = f"{d + 1}-{2 * x + dx}-{2 * y + dy}-{2 * z + dz}"
-                    if child in hier:
-                        stack.append(child)
-    return out
-
-
-def _read_node(ds: str, key: str, bbox_merc, cache: Path) -> dict | None:
-    path = cache / "ept" / ds / "data" / f"{key}.laz"
-    if not path.exists():
-        path.parent.mkdir(parents=True, exist_ok=True)
-        r = session.get(BASE.format(ds=ds) + f"ept-data/{key}.laz", timeout=300)
-        r.raise_for_status()
-        tmp = path.with_suffix(".part")
-        tmp.write_bytes(r.content)
-        tmp.replace(path)
-    las = laspy.read(path)
-    x, y = np.asarray(las.x), np.asarray(las.y)
-    x0, y0, x1, y1 = bbox_merc
-    m = (x >= x0) & (x <= x1) & (y >= y0) & (y <= y1)
-    if not m.any():
-        return None
-    return {
-        "x": x[m], "y": y[m], "z": np.asarray(las.z)[m],
-        "cls": np.asarray(las.classification)[m].astype(np.uint8),
-        "rn": np.asarray(las.return_number)[m].astype(np.uint8),
-        "nr": np.asarray(las.number_of_returns)[m].astype(np.uint8),
-        "i": np.asarray(las.intensity)[m].astype(np.uint16),
-    }
-
-
-def fetch_points(frame: Frame, bbox: tuple[float, float, float, float], cache: Path, jobs: int = 8, clip: Polygon | None = None) -> tuple[dict, dict]:
-    bbox_merc = frame.bbox_merc(*bbox)
-    parts: list[dict] = []
-    ds = ""
-    keys: list[str] = []
-    for ds, ept in candidate_datasets(bbox_merc, cache):
-        if ds in PREFER_TNM_OVER:
-            print(f"  lidar   {ds}: junk-bin classification, preferring the TNM delivery tiles", flush=True)
-            continue
-        keys = nodes_for(ds, ept, bbox_merc, cache)
-        print(f"  lidar   {ds}: {len(keys)} octree nodes", flush=True)
-        if not keys:
-            continue
-        with ThreadPoolExecutor(jobs) as ex:
-            parts = [p for p in ex.map(lambda k: _read_node(ds, k, bbox_merc, cache), keys) if p]
-        if parts:
-            break
-        print(f"  lidar   {ds}: inside its cube but no points here; trying the next dataset", flush=True)
+def fetch_points(frame: Frame, bbox: tuple[float, float, float, float], cache: Path, jobs: int = 16, clip: Polygon | None = None) -> tuple[dict, dict]:
+    """The whole corridor's points in memory, for the single-image paths. See point_batches."""
+    meta: dict = {}
+    # no DEM check per batch here: both callers run check_units on the whole cloud afterwards
+    parts = [p for _, p in point_batches(frame, bbox, cache, clip, meta, None, jobs) if p]
     if not parts:
-        # Not staged as EPT (yet): MD_Central_Processing_D24 was published 2026-03 and covers
-        # Montgomery / Prince George's, where the Entwine bucket has nothing newer than 2014. Fall
-        # back to the delivery LAZ tiles through the TNM API — heavier, but the same points.
-        return _fetch_tnm_laz(frame, bbox, cache, jobs, clip)
-    pts = {k: np.concatenate([p[k] for p in parts]) for k in parts[0]}
-    ux, uy = frame.from_merc(pts["x"], pts["y"])
-    pts["x"], pts["y"] = np.asarray(ux), np.asarray(uy)
-    xmin, ymin, xmax, ymax = bbox
-    m = (pts["x"] >= xmin) & (pts["x"] < xmax) & (pts["y"] >= ymin) & (pts["y"] < ymax)
-    pts = {k: v[m] for k, v in pts.items()}
+        raise RuntimeError("the lidar sources intersect the bbox but hold no points in it")
+    pts = _join(parts)
     print(f"  lidar   {len(pts['x']):,} points in bbox", flush=True)
-    return pts, {"dataset": ds, "nodes": len(keys), "points": int(len(pts["x"]))}
+    meta["points"] = int(len(pts["x"]))
+    return pts, meta
+
+
+def dem_beside(site_dir: Path) -> Path | None:
+    """The site's 1 m DEM, which a batch with an undeclared vertical unit is checked against."""
+    for name in ("dem_1m.tif", "dem_1m.vrt"):
+        if (site_dir / name).exists():
+            return site_dir / name
+    return None
+
+
+def point_batches(frame: Frame, bbox, cache: Path, clip: Polygon | None, meta: dict, dem: Path | None = None, jobs: int = 16):
+    """Point batches in the site frame, clipped to the streets, from the best source there is.
+
+    EPT first (lidar_sources: USGS's staged sets, then NOAA's), when together they cover enough of
+    the streets; the TNM delivery tiles otherwise, or when CORRIDOR_LIDAR_SOURCE=tnm. Yields
+    (label, part) — part may be None for a tile with nothing inside — and fills `meta` with what
+    the manifest records. A batch from an EPT whose vertical unit is undeclared is checked against
+    the DEM once per source, as the single-road path always did for the whole cloud.
+    """
+    from . import lidar_sources as ls
+
+    choice = ls.source_choice()
+    if choice != "tnm":
+        cands, share = ls.candidates(frame, bbox, clip, cache)
+        if cands and (share is None or share >= ls.MIN_EPT_COVERAGE or choice == "ept"):
+            zf: dict[str, float] = {}
+            emitted = False
+            for label, part in ls.stream_ept(frame, bbox, clip, cache, cands, meta, jobs):
+                src = label.split(" ", 1)[0]
+                if src not in zf:
+                    zf[src] = check_units(part, dem) if dem is not None and (part["cls"] == 2).any() else 1.0
+                if zf[src] != 1.0:
+                    part["z"] = part["z"] * zf[src]
+                emitted = True
+                yield label, part
+            if emitted:
+                meta["z_factor"] = zf
+                return
+            print("  lidar   no EPT candidate had points over these streets; the TNM tiles instead", flush=True)
+        elif cands:
+            print(f"  lidar   EPT covers only {share:.0%} of the streets; the TNM tiles instead", flush=True)
+        elif choice == "ept":
+            raise RuntimeError("no lidar at all for this corridor as EPT (CORRIDOR_LIDAR_SOURCE=ept)")
+    proj, tiles = tnm_pick(frame, bbox, clip)
+    paths = tnm_download(proj, tiles, cache, int(os.environ.get("CORRIDOR_TNM_JOBS", "16")))
+    meta.update({"dataset": f"TNM:{proj}", "source": "tnm", "tiles_laz": len(paths)})
+    for i, pth in enumerate(paths, 1):
+        yield f"tile {i}/{len(paths)} {pth.name}", _read_laz_tile(pth, frame, bbox, clip)
 
 
 TNM = "https://tnmaccess.nationalmap.gov/api/v1/products"
@@ -293,20 +246,26 @@ def _read_laz_tile(path: Path, frame: Frame, bbox, clip: Polygon | None = None) 
     return {k: (v[0] if len(v) == 1 else np.concatenate(v)) for k, v in keep.items()}
 
 
-def _fetch_tnm_laz(frame: Frame, bbox, cache: Path, jobs: int, clip: Polygon | None = None) -> tuple[dict, dict]:
-    from .dem import download
+def tnm_pick(frame: Frame, bbox, clip: Polygon | None = None) -> tuple[str, list[dict]]:
+    """The TNM project to use and ITS tiles that touch the streets.
+
+    ONE project (mixing vintages inside a corridor makes seams no game wants) — but the one that
+    COVERS the corridor, then the newest. "Newest only" picked MD_4County_D24 for Bonnie Branch
+    because a single edge tile of it touched the bbox: 0.4 % of the corridor had lidar, the DTM
+    was nearest-filled from that sliver, and the road ran 60 m below the real ground in a canyon
+    of its own making (Rich, terrain-and-data agent, 2026-09-21).
+
+    BY THE STREETS, not the bbox. A tile is a whole download, so one no street comes near is
+    minutes of rockyweb for points the clip then throws away.
+    """
+    from . import lidar_sources as ls
 
     w, s, e, n = frame.bbox_wgs(*bbox)
-    r = session.get(TNM, params={"datasets": "Lidar Point Cloud (LPC)", "bbox": f"{w},{s},{e},{n}", "outputFormat": "JSON", "max": 400}, timeout=120)
+    r = session.get(TNM, params={"datasets": "Lidar Point Cloud (LPC)", "bbox": f"{w},{s},{e},{n}", "outputFormat": "JSON", "max": 800}, timeout=120)
     r.raise_for_status()
     items = r.json().get("items", [])
     if not items:
         raise RuntimeError("no lidar at all for this corridor (EPT or TNM)")
-    # ONE project (mixing vintages inside a corridor makes seams no game wants) — but the one that
-    # COVERS the corridor, then the newest. "Newest only" picked MD_4County_D24 for Bonnie Branch
-    # because a single edge tile of it touched the bbox: 0.4 % of the corridor had lidar, the DTM
-    # was nearest-filled from that sliver, and the road ran 60 m below the real ground in a canyon
-    # of its own making (Rich, terrain-and-data agent, 2026-09-21).
     by_proj: dict[str, list[dict]] = {}
     for it in items:
         by_proj.setdefault(" ".join(it["title"].split(" ")[4:-1]), []).append(it)
@@ -331,22 +290,63 @@ def _fetch_tnm_laz(frame: Frame, bbox, cache: Path, jobs: int, clip: Polygon | N
         print(f"  lidar   TNM candidate {k}: {len(by_proj[k])} tiles, covers {coverage(by_proj[k]):.0%} of the bbox, {max(i.get('publicationDate', '') for i in by_proj[k])[:10]}", flush=True)
     if coverage(tiles) < 0.6:
         print(f"  lidar   WARNING best TNM project covers only {coverage(tiles):.0%} of the corridor; gaps fall back to the 3DEP DEM", flush=True)
-    total = sum(i.get("sizeInBytes", 0) for i in tiles) / 2**20
-    print(f"  lidar   TNM {proj}: {len(tiles)} LAZ tiles, {total:.0f} MiB", flush=True)
-    paths = []
-    with ThreadPoolExecutor(min(jobs, 4)) as ex:
-        paths = list(ex.map(lambda it: download(it["downloadURL"], cache / "laz" / proj / it["downloadURL"].rsplit("/", 1)[1], it.get("sizeInBytes")), tiles))
-    parts = []
-    for i, pth in enumerate(paths, 1):
-        part = _read_laz_tile(pth, frame, bbox, clip)
-        if part:
-            parts.append(part)
-        print(f"  lidar   tile {i}/{len(paths)} {pth.name}: {len(part['x']) if part else 0:,} pts in bbox", flush=True)
-    if not parts:
-        raise RuntimeError("TNM tiles intersect the bbox but hold no points in it")
-    pts = _join(parts)
-    print(f"  lidar   {len(pts['x']):,} points in bbox", flush=True)
-    return pts, {"dataset": f"TNM:{proj}", "tiles": len(paths), "points": int(len(pts["x"]))}
+    kept = tiles_touching(tiles, ls.area_in_wgs(frame, bbox, clip)) if clip is not None else tiles
+    total = sum(i.get("sizeInBytes", 0) for i in kept) / 2**20
+    skipped = len(tiles) - len(kept)
+    print(f"  lidar   TNM {proj}: {len(kept)} LAZ tiles, {total:.0f} MiB" + (f" ({skipped} more over the bbox that no street touches)" if skipped else ""), flush=True)
+    return proj, kept
+
+
+def tiles_touching(tiles: list[dict], area_wgs) -> list[dict]:
+    """TNM tiles whose bounding box meets the area; a tile with no box is kept, not guessed away."""
+    from shapely.geometry import box as _box
+
+    out = []
+    for it in tiles:
+        bb = it.get("boundingBox") or {}
+        try:
+            tb = _box(float(bb["minX"]), float(bb["minY"]), float(bb["maxX"]), float(bb["maxY"]))
+        except (KeyError, TypeError, ValueError):
+            out.append(it)
+            continue
+        if tb.intersects(area_wgs):
+            out.append(it)
+    return out
+
+
+def tnm_download(proj: str, tiles: list[dict], cache: Path, jobs: int = 16) -> list[Path]:
+    """Every tile, `jobs` at a time, with a line per tile as it lands.
+
+    SIXTEEN, not four: rockyweb serves ~80 KB/s per connection and scales with connections (twelve
+    measured 930 KiB/s together, 2026-09-30), so four made a 7.6 GB project a six-hour bake. And a
+    LINE PER TILE, because the old map() printed nothing until the last of 42 had arrived — half an
+    hour of a log that looked like a hang.
+    """
+    from concurrent.futures import as_completed
+
+    from .dem import download
+
+    dest = [cache / "laz" / proj / it["downloadURL"].rsplit("/", 1)[1] for it in tiles]
+    total = sum(it.get("sizeInBytes", 0) for it in tiles) / 2**20
+    t0 = time.time()
+    got_mb = 0.0
+    fetched_mb = 0.0
+    with ThreadPoolExecutor(max(1, jobs)) as ex:
+        futs = {}
+        for it, d in zip(tiles, dest):
+            size = it.get("sizeInBytes")
+            cached = d.exists() and (size is None or d.stat().st_size == size)
+            futs[ex.submit(download, it["downloadURL"], d, size)] = (it, d, cached)
+        for k, f in enumerate(as_completed(futs), 1):
+            it, d, cached = futs[f]
+            f.result()
+            mb = (it.get("sizeInBytes") or d.stat().st_size) / 2**20
+            got_mb += mb
+            if not cached:
+                fetched_mb += mb
+            rate = fetched_mb / max(1e-6, time.time() - t0)
+            print(f"  lidar   tile {k}/{len(tiles)} {d.name}: {'cached' if cached else f'{mb:.0f} MiB'} — {got_mb:.0f} of {total:.0f} MiB, {rate:.1f} MiB/s", flush=True)
+    return dest
 
 
 def _join(parts: list[dict]) -> dict:

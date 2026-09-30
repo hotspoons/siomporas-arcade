@@ -120,30 +120,6 @@ class NoLidarHere(RuntimeError):
     """
 
 
-def _tnm_tiles(frame: Frame, bbox, cache: Path) -> tuple[str, list[Path]]:
-    """TNM LPC tiles of the newest project over the bbox, downloaded (dem.download, cached)."""
-    from concurrent.futures import ThreadPoolExecutor
-
-    from .dem import download
-
-    w, s, e, n = frame.bbox_wgs(*bbox)
-    r = lidar.session.get(lidar.TNM, params={"datasets": "Lidar Point Cloud (LPC)", "bbox": f"{w},{s},{e},{n}", "outputFormat": "JSON", "max": 800}, timeout=120)
-    r.raise_for_status()
-    items = r.json().get("items", [])
-    if not items:
-        raise NoLidarHere(f"no TNM lidar over {w:.4f},{s:.4f},{e:.4f},{n:.4f}")
-    by_proj: dict[str, list[dict]] = {}
-    for it in items:
-        by_proj.setdefault(" ".join(it["title"].split(" ")[4:-1]), []).append(it)
-    proj = max(by_proj, key=lambda k: (max(i.get("publicationDate", "") for i in by_proj[k]), len(by_proj[k])))
-    tiles = by_proj[proj]
-    total = sum(i.get("sizeInBytes", 0) for i in tiles) / 2**20
-    print(f"  lidar   TNM {proj}: {len(tiles)} LAZ tiles, {total:.0f} MiB", flush=True)
-    with ThreadPoolExecutor(4) as ex:
-        paths = list(ex.map(lambda it: download(it["downloadURL"], cache / "laz" / proj / it["downloadURL"].rsplit("/", 1)[1], it.get("sizeInBytes")), tiles))
-    return proj, paths
-
-
 def lidar_tiled(frame: Frame, bbox, corridor, chains: list[dict], ldir: Path, cache: Path) -> dict:
     """Points → per-tile rasters + near-road corridor.laz. Returns what the manifest records."""
     ldir.mkdir(exist_ok=True)
@@ -159,16 +135,25 @@ def lidar_tiled(frame: Frame, bbox, corridor, chains: list[dict], ldir: Path, ca
     bh = int(np.ceil((bbox[3] - bbox[1]) / 2.0))
     btr = from_origin(bbox[0], bbox[3], 2.0, 2.0)
     band = rasterize([(c["line"].buffer(BAND_M), i + 1) for i, c in enumerate(chains)], out_shape=(bh, bw), transform=btr, fill=0, dtype=np.int32)
-    proj, paths = _tnm_tiles(frame, bbox, cache)
     near_parts: list[dict] = []
     counts = np.zeros(32, np.int64)
     total = 0
     demoted = 0
-    zf = 1.0
-    for i, pth in enumerate(paths, 1):
-        part = lidar._read_laz_tile(pth, frame, bbox, corridor)
+    meta: dict = {}
+    # EPT (USGS, then NOAA) when it covers these streets, the TNM tiles otherwise — lidar.point_batches
+    batches = lidar.point_batches(frame, bbox, cache, corridor, meta, lidar.dem_beside(ldir.parent))
+    while True:
+        try:
+            label, part = next(batches)
+        except StopIteration:
+            break
+        except RuntimeError as exc:
+            # "no lidar at all" is a fact about the place (NoLidarHere); anything else is a fault
+            if total == 0 and "no lidar" in str(exc).lower():
+                raise NoLidarHere(str(exc)) from exc
+            raise
         if not part:
-            print(f"  lidar   tile {i}/{len(paths)} {pth.name}: outside the corridor", flush=True)
+            print(f"  lidar   {label}: outside the corridor", flush=True)
             continue
         cls = part["cls"]
         share17 = float((cls == 17).sum()) / max(1, len(cls))
@@ -214,7 +199,7 @@ def lidar_tiled(frame: Frame, bbox, corridor, chains: list[dict], ldir: Path, ca
         keep = road > 0
         if keep.any():
             near_parts.append({k2: v[keep] for k2, v in part.items()} | {"road": road[keep].astype(np.int16)})
-        print(f"  lidar   tile {i}/{len(paths)} {pth.name}: {len(cls):,} pts in corridor, {int(keep.sum()):,} near a road", flush=True)
+        print(f"  lidar   {label}: {len(cls):,} pts in corridor, {int(keep.sum()):,} near a road", flush=True)
         del part
     # write the tiles
     crs = frame.crs
@@ -261,7 +246,8 @@ def lidar_tiled(frame: Frame, bbox, corridor, chains: list[dict], ldir: Path, ca
         las.header.add_crs(pyproj.CRS.from_user_input(crs))
         las.write(ldir / "corridor.laz")
     classes = {lidar.CLASS_NAMES.get(i, str(i)): int(c) for i, c in enumerate(counts) if c}
-    return {"dataset": f"TNM:{proj}", "tiles_laz": len(paths), "points_in_corridor": int(total), "near_road_points": int(len(pts["x"])) if pts else 0, "classes": classes, "classification": {"tiles_demoted_17_18": demoted, "class17_trusted": demoted == 0}, "z_factor": zf, "tiles": {"size_m": TILE_M, "origin": [x0, y0], "list": written}, "rasters": ["tiles/*.dtm.tif", "tiles/*.dsm.tif", "tiles/*.chm.tif", "dtm.vrt", "dsm.vrt", "chm.vrt"], "pts": pts}
+    zf = meta.pop("z_factor", 1.0)
+    return {**meta, "points_in_corridor": int(total), "near_road_points": int(len(pts["x"])) if pts else 0, "classes": classes, "classification": {"tiles_demoted_17_18": demoted, "class17_trusted": demoted == 0}, "z_factor": zf, "tiles": {"size_m": TILE_M, "origin": [x0, y0], "list": written}, "rasters": ["tiles/*.dtm.tif", "tiles/*.dsm.tif", "tiles/*.chm.tif", "dtm.vrt", "dsm.vrt", "chm.vrt"], "pts": pts}
 
 
 def naip_tiled(frame: Frame, bbox, corridor, out: Path, cache: Path, res: float = 1.0) -> dict:

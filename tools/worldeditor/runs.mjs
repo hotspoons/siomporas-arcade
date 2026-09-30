@@ -161,6 +161,11 @@ export class Runs {
   }
 
   async #save(run) {
+    // A FINISHED RUN STAYS FINISHED. `cancel` reads its own copy of the record and finishes that;
+    // the log follower holds another, still "running", and saved it when the deleted Job's stream
+    // ended — so a cancelled bake read `running` again (2026-09-30, crofton-triangle), and the
+    // follower's periodic saves would do it every time. Only a terminal write may follow a terminal one.
+    if (this.done.has(run.id) && run.state !== 'done' && run.state !== 'failed') return run
     await this.store.writeAtomic(this.store.runFile(run.id), Buffer.from(JSON.stringify(run, null, 1)))
     return run
   }

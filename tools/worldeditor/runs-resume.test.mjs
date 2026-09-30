@@ -96,3 +96,28 @@ test('a pod killed without warning still hands over a recent position', async ()
   assert.deepEqual(got.slice(0, 6), expected.slice(0, 6))
   assert.equal(got.filter((l) => l === 'line 0').length, 1, 'the start of the log was not replayed')
 })
+
+test('a cancelled run stays cancelled when its log stream ends afterwards', async () => {
+  const { root, store } = await setup()
+  const k8s = cluster()
+  k8s.deleteJob = async () => {}
+  try {
+    const a = new Runs(store, k8s, {})
+    await a.reconcile()
+    await until(() => k8s.streams.length === 1)
+    for (const l of k8s.streams[0].backlog.slice(0, 3)) k8s.streams[0].write(`${l}\n`)
+    await sleep(2100) // past SAVE_EVERY_MS, so the follower saves on the next line
+    const cancelled = await a.cancel(ID)
+    assert.equal(cancelled.state, 'failed')
+    // the follower's copy still says running: another line, then the stream ends, as a deleted Job's does
+    k8s.streams[0].write(`${LINES[3]}\n`)
+    k8s.streams[0].end()
+    await sleep(300)
+    const onDisk = JSON.parse(await readFile(store.runFile(ID), 'utf8'))
+    assert.equal(onDisk.state, 'failed', 'the follower resurrected a cancelled run')
+    assert.equal(onDisk.detail, 'cancelled')
+  } finally {
+    for (const s of k8s.streams) s.destroy()
+    await rm(root, { recursive: true, force: true })
+  }
+})

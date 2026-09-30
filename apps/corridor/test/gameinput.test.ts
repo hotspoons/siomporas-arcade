@@ -102,14 +102,14 @@ describe('GameInput', () => {
 
   it('turns Start into pause and a pad button into a hotkey edge, once per press', () => {
     const inp = new GameInput(structuredClone(DEFAULT_KEYS), structuredClone(DEFAULT_PAD))
-    padsAre([fakePad({ 9: 1, 3: 1 })])
+    padsAre([fakePad({ 9: 1, 3: 1 })]) // Start, and Y = recover
     inp.poll(1 / 60)
     expect(inp.ui.pause).toBe(true)
-    expect(inp.padHotkey('camera')).toBe(true)
+    expect(inp.padHotkey('recover')).toBe(true)
     // still held next frame: no new edge
     inp.poll(1 / 60)
     expect(inp.ui.pause).toBe(false)
-    expect(inp.padHotkey('camera')).toBe(false)
+    expect(inp.padHotkey('recover')).toBe(false)
   })
 
   it('gives the menu nothing to drive with once the pad is switched off', () => {
@@ -208,5 +208,41 @@ describe('the audio gains', () => {
     for (const a of Object.keys(DEFAULT_SETTINGS.keys)) {
       expect((DEFAULT_KEYS[a].length + (DEFAULT_PAD[a]?.length ?? 0)) > 0, a).toBe(true)
     }
+  })
+})
+
+describe('the pad layout', () => {
+  it('puts the pedals on the triggers, recover on Y, lights on X, the view on the left centre button, and leaves B free', () => {
+    expect(DEFAULT_PAD.throttle).toEqual(['b7'])
+    expect(DEFAULT_PAD.brake).toEqual(['b6'])
+    expect(DEFAULT_PAD.handbrake).toEqual(['b0'])
+    expect(DEFAULT_PAD.recover).toEqual(['b3'])
+    expect(DEFAULT_PAD.lights).toEqual(['b2'])
+    expect(DEFAULT_PAD.camera).toEqual(['b8'])
+    expect(DEFAULT_PAD.pause).toEqual(['b9'])
+    expect(DEFAULT_PAD.objPrev).toEqual(['b14'])
+    expect(DEFAULT_PAD.objNext).toEqual(['b15'])
+    // flight is a level's decision, not a button; B is the menus' back and nothing in play
+    for (const a of ['drive', 'craft', 'walk'] as const) expect(DEFAULT_PAD[a]).toEqual([])
+    const used = new Set(Object.values(DEFAULT_PAD).flat())
+    expect(used.has('b1')).toBe(false)
+    expect(used.has('b4')).toBe(false)
+  })
+
+  it('reads the right stick as a look that is active only off centre, and not while the menu is up', () => {
+    const input = new GameInput(DEFAULT_KEYS, DEFAULT_PAD)
+    padsAre([fakePad({}, { 2: 0.8, 3: -0.5 })])
+    input.poll(1 / 60)
+    const l = input.look()
+    expect(l.active).toBe(true)
+    expect(l.x).toBeGreaterThan(0.5)
+    expect(l.y).toBeGreaterThan(0.1) // stick up is + up (after the dead zone)
+    padsAre([fakePad({}, { 2: 0, 3: 0 })])
+    input.poll(1 / 60)
+    expect(input.look()).toEqual({ x: 0, y: 0, active: false })
+    padsAre([fakePad({}, { 2: 0.8 })])
+    input.suppressGameplay = true
+    input.poll(1 / 60)
+    expect(input.look().active).toBe(false)
   })
 })

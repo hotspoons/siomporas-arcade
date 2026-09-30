@@ -500,7 +500,7 @@ function chooseAA(v: AAMode) {
 }
 let dragging = false, lastX = 0, lastY = 0, downAt = 0
 // drive mode: a real car (stuntin dynamics) on the corridor strip, chase camera behind it
-const drive = { on: false, cockpit: false, yaw: 0, pitch: 0, car: null as DrivableCar | null, input: { throttle: 0, brake: 0, steer: 0, handbrake: false } as CarInput, steerKey: 0 }
+const drive = { on: false, cockpit: false, yaw: 0, pitch: 0, stickYaw: 0, stickPitch: 0, car: null as DrivableCar | null, input: { throttle: 0, brake: 0, steer: 0, handbrake: false } as CarInput, steerKey: 0 }
 
 /*
  * THE ENGINE YOU CAN HEAR.
@@ -2982,6 +2982,27 @@ function frame() {
     const wantUp = up.clone().lerp(carUp, T.CHASE_ROLL)
     if (wantUp.lengthSq() > 1e-4) chaseUp.lerp(wantUp.normalize(), 1 - Math.exp(-T.CHASE_ROLL_LAG * dt)).normalize()
     camera.up.copy(chaseUp)
+    /*
+     * THE RIGHT STICK LOOKS ROUND THE CAR AND LETS GO. Rich, 2026-09-30: *"right stick should be
+     * view pan, but lock on car, not in front of car like current with the mouse, and releasing
+     * the stick should return the view direction back to default."* So the stick's deflection is
+     * a yaw (a full push is most of the way round) and a pitch, eased toward with a short lag,
+     * and eased back to zero when the stick is centred — on top of the mouse's own drag, which
+     * stays where it was put. The camera's aim moves from the road ahead to the car itself as
+     * the stick comes off centre (below), which is the "lock on car" half.
+     */
+    if (!paused) {
+      const look = input.look()
+      const wantYaw = look.active ? -look.x * Math.PI * 0.85 : 0
+      const wantPitch = look.active ? look.y * 0.6 : 0
+      const k = 1 - Math.exp(-(look.active ? 14 : 6) * dt)
+      drive.stickYaw += (wantYaw - drive.stickYaw) * k
+      drive.stickPitch += (wantPitch - drive.stickPitch) * k
+      if (Math.abs(drive.stickYaw) < 1e-3) drive.stickYaw = 0
+      if (Math.abs(drive.stickPitch) < 1e-3) drive.stickPitch = 0
+    }
+    const lookYaw = drive.yaw + drive.stickYaw
+    const lookPitch = Math.max(-0.8, Math.min(0.8, drive.pitch + drive.stickPitch))
     // chase camera: behind and above, looking over the bonnet; drag adds a look-around yaw
     if (drive.cockpit) {
       // cockpit: eye at the driver's head, looking down the nose (stuntin's C view); drive.yaw/pitch look around.
@@ -2994,16 +3015,18 @@ function frame() {
       const eye = car.pos.clone().add(headUp.clone().multiplyScalar(T.COCKPIT_EYE_UP)).add(car.forward.clone().multiplyScalar(T.COCKPIT_EYE_FWD))
       camera.position.copy(eye)
       camera.up.copy(headUp)
-      const ahead = car.forward.clone().applyAxisAngle(headUp, drive.yaw)
-      camera.lookAt(eye.clone().add(ahead.multiplyScalar(30)).add(headUp.multiplyScalar(-Math.tan(drive.pitch) * 30 + T.COCKPIT_LOOK_UP)))
+      const ahead = car.forward.clone().applyAxisAngle(headUp, lookYaw)
+      camera.lookAt(eye.clone().add(ahead.multiplyScalar(30)).add(headUp.multiplyScalar(-Math.tan(lookPitch) * 30 + T.COCKPIT_LOOK_UP)))
     } else {
-      const back = car.forward.clone().applyAxisAngle(chaseUp, drive.yaw).multiplyScalar(-T.CHASE_BACK)
-      const want = car.pos.clone().add(back).add(chaseUp.clone().multiplyScalar(T.CHASE_UP + Math.tan(drive.pitch) * 4))
+      const back = car.forward.clone().applyAxisAngle(chaseUp, lookYaw).multiplyScalar(-T.CHASE_BACK)
+      const want = car.pos.clone().add(back).add(chaseUp.clone().multiplyScalar(T.CHASE_UP + Math.tan(lookPitch) * 4))
       // the ground clamp is for a camera under the road, which only means something while up is up
       const gy = chaseUp.y > 0.5 ? site.groundAt(want.x, want.z) : null
       if (gy !== null && want.y < gy + 1.2) want.y = gy + 1.2
       camera.position.lerp(want, 1 - Math.exp(-T.CHASE_LAG * dt))
-      camera.lookAt(car.pos.clone().add(car.forward.clone().multiplyScalar(T.CHASE_LOOK_AHEAD)).add(chaseUp.clone().multiplyScalar(1.0)))
+      // the aim: the road ahead, or the car itself as the stick turns the view off the nose
+      const onCar = Math.min(1, Math.abs(drive.stickYaw) / 0.35)
+      camera.lookAt(car.pos.clone().add(car.forward.clone().multiplyScalar(T.CHASE_LOOK_AHEAD * (1 - onCar))).add(chaseUp.clone().multiplyScalar(1.0)))
     }
     if (car.event === 'bump') { status('bump'); input.haptics.rumble(0.45, 0.3, 120) }
     // the pad buzzes on the grass, quietly, the way the wheel would

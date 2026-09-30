@@ -71,8 +71,18 @@ export const DEFAULT_KEYS: KeyBindings = {
   confirm: ['Enter'],
 }
 /**
- * Standard-mapping pad: triggers are the pedals, the left stick steers, A is the handbrake as it
- * is in most driving games, Start pauses. B is the menus' "back" and is left free in play.
+ * Standard-mapping pad, laid out the way a driving game is (Rich, 2026-09-30, with an Xbox-style
+ * pad in hand):
+ *
+ *   RT / LT        accelerate / brake            A   handbrake        Y   recover the car
+ *   left stick     steer                         X   headlights       RB  fire
+ *   right stick    look round the car (main.ts)  LS  the map          Start  pause
+ *   D-pad ◀ ▶      the objective list            View (the left centre button)  chase / cockpit
+ *
+ * B is the menus' "back" and is left free in play. Getting in and out of the car, the craft and
+ * walking are NOT on the pad: a flight mode is a level's decision, not a button (Rich: "flight
+ * modes should not be a button at all, this should be an internal game mechanic"). The keyboard
+ * keeps Tab, V and B for the developer.
  */
 export const DEFAULT_PAD: PadBindings = {
   throttle: ['b7'],
@@ -80,13 +90,13 @@ export const DEFAULT_PAD: PadBindings = {
   steerLeft: ['a0-'],
   steerRight: ['a0+'],
   handbrake: ['b0'],
-  drive: ['b1'],
-  recover: ['b2'],
-  lights: ['b8'],
-  camera: ['b3'],
+  drive: [],
+  recover: ['b3'],
+  lights: ['b2'],
+  camera: ['b8'],
   map: ['b10'],
   fire: ['b5'],
-  craft: ['b4'],
+  craft: [],
   walk: [],
   interface: [],
   objPrev: ['b14'],
@@ -133,7 +143,7 @@ const KEYS_VERSION = 2
  * the accelerator was still on the right shoulder after the defaults said trigger
  * (Rich, 2026-09-30).
  */
-const PAD_VERSION = 1
+const PAD_VERSION = 2
 
 export const DEFAULT_SETTINGS: GameSettingsData = {
   keysV: KEYS_VERSION,

@@ -29,6 +29,16 @@ export interface DriveRead {
   handbrake: boolean
 }
 
+/** the right stick while driving: a look round the car that lets go */
+export interface LookRead {
+  /** -1…1, + right */
+  x: number
+  /** -1…1, + up */
+  y: number
+  /** the stick is off centre */
+  active: boolean
+}
+
 /** the free camera's sticks: move in the camera's horizontal frame, look about the camera */
 export interface FlyRead {
   fwd: number
@@ -290,6 +300,19 @@ export class GameInput {
       lookYaw: gp.value('a2+') - gp.value('a2-'),
       lookPitch: gp.value('a3+') - gp.value('a3-'),
     }
+  }
+
+  /**
+   * The right stick in the car: a look round it. Not a binding — the right stick is the look on
+   * every pad ever made, and a rebinding row for it would only be a way to break it. Dead-zoned by
+   * the engine's axis shaping; `active` is what the camera springs back on.
+   */
+  look(): LookRead {
+    const gp = this.gamepad
+    if (this.suppressGameplay || !this.gamepadEnabled || !gp.connected) return { x: 0, y: 0, active: false }
+    const x = gp.value('a2+') - gp.value('a2-')
+    const y = gp.value('a3-') - gp.value('a3+')
+    return { x, y, active: Math.abs(x) > 0.02 || Math.abs(y) > 0.02 }
   }
 
   get padConnected(): boolean {

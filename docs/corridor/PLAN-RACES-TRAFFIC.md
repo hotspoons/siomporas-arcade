@@ -468,3 +468,83 @@ Rich's morning list, each fixed where it was measured to be broken (`probes/corr
   hero model were missing that way); models lie along the nose axis with a wheel-overhang guess
   and `spec.nose` to overrule (five builds flipped over MCP); one-way carriageways use every lane
   and the cap thins evenly (Route 3: 182/182/183).
+
+## Crashes, missiles, and the things that gave way (2026-09-30, night)
+
+- **Traffic is physical.** A traffic car is kinematic while it drives and becomes a loose dynamic
+  body when hit harder than `TRAFFIC_WAKE_NS`, or when a blast reaches it: it bounces, tumbles,
+  goes where it was sent, and blocks its lane as a wreck. Both cars in a collision dent
+  (`dents.ts`, the engine's `Deformable`, geometry cloned per car on the first knock). Drivers see
+  the player now (`TrafficOpts.obstacle`) and brake for him in their lane — the "stuck in place"
+  in the jam was cars driving through him.
+- **The mass trap.** Rapier recomputes a body's mass on the NEXT step, so an impulse in the step
+  that woke a body is divided by its stale kinematic mass; a 1500 kg car left a blast at under a
+  metre a second. `TrafficBody.kick` sets VELOCITY instead, and `TrafficLayer.blast` throws its
+  own cars that way before `physics.explode` handles the rest. The same for a broken sign.
+- **Missiles.** `missiles.ts`: M fires from the bonnet along the nose (a point flown by hand, a
+  0.9 m ball swept over each frame's travel — a ray missed cars by a metre), landing is a blast
+  (`MISSILE_RADIUS`, `MISSILE_IMPULSE`) and a flash. `api.physics.explode` lands in the same
+  `boom`. `probes/corridor-crash.mjs`: a blast throws a car 42 m, a missile 33 m.
+- **Soft breakables.** A sign or post (breaking under `PHYS_SOFT_BREAK_NS`) is a sensor until it
+  is touched: no contact impulse, so no launch — a rigid post against the sled's raked nose had
+  put a 40 m/s stop into the car, upward, end over end. The touch breaks it and sets its velocity;
+  it flies, the car keeps going (`probes/corridor-stopsign.mjs`).
+- **Waypoint.** Lower left, off the corner, steps over the attribution block, turns with the
+  CAMERA; the goal no longer echoes on the bottom readout.
+
+## The pile-up, made to last (2026-09-30, later)
+
+Rich, driving the Route 3 jam: cars "appear out of thin air"; at speed a hit car "turns into one
+of these giant blobs"; the frame rate falls to 12 as the pile grows; the drivers "don't know to
+stop or slow down"; and at 12 fps "trying to straighten my car out was in slow motion". Then:
+"I wish we could have the cars keep piling up in a game mode where all of the drivers are blind
+… limit whatever is causing the CPU and GPU decline to a maximum number of bodies".
+
+- **The blob.** `Deformable` measured its radius (1.1 m) and its cap (0.35 m) in the MESH's
+  units, and a reconstruction is a unit cube scaled ×4.5 — so one knock reached the whole car and
+  folded every vertex a metre and a half. Every length is now divided by the mesh's world scale.
+  Nothing ever flushed a dent to the GPU either (the first showed by accident, as a fresh geometry
+  upload); `flushDents()` runs from the frame, two meshes a frame. A car is dented at most every
+  90 ms, and a kerb tap below the dent threshold no longer clones 130k vertices to find that out.
+- **Thin air.** A car that ran off the end of its chain came back at the chain's START, and on
+  Route 3 the chains run junction to junction, so the start was often in front of the player. It
+  now comes back at the first spot on its chain at least `TRAFFIC_RESPAWN_M` (260 m) from the
+  player, clear of the car already there, at 0.8 of the limit — or waits hidden until there is
+  one. `respawnMin` on the layer is the proof (the probe saw nothing nearer than 500 m).
+- **Wrecks are leaders.** The drivers only looked at driven cars, and a wreck has no driver: the
+  car behind a fresh wreck could not see it. Every car on a chain is a leader now; a wreck is
+  re-projected on to its lane every half second and leaves the road (`OFF_ROAD`) once the solver
+  has thrown it more than a lane's width off the line.
+- **Blind drivers.** `simulations[].blind: true` (or `traffic.blind` over the bridge): nobody
+  brakes for anybody — no leader, no light, no player. The game Rich asked for.
+- **The cap.** `TRAFFIC_WRECKS_MAX` (40) loose wrecks at once. Past it the oldest is straightened
+  (`repairObject`), put back on rails (`TrafficBody.rest`), given a driver again and respawned out
+  of sight. Every wreck was a dynamic body plus a 130k-vertex mesh drawn at full detail; the
+  screenshot with "962 draws · 27.65M tris · 13 fps" was a hundred of them.
+- **Bodies only near the player.** `TRAFFIC_PHYS_M` (220 m): a kinematic car beyond it is
+  disabled in the solver (`TrafficBody.enable`). Six hundred kinematic bodies were six hundred
+  broad-phase updates a step for cars nobody could reach.
+- **Slow motion.** `PHYS_MAX_STEPS` 4 at 120 Hz was 33 ms of world per frame: at 12 fps the world
+  ran at 40% speed. The engine's step loop now has a time budget (`PHYS_STEP_BUDGET_MS`, 10 ms)
+  and the cap is 12: a slow RENDER costs no world time, a slow SOLVE degrades to slow motion
+  rather than a spiral, and what is still owed past one step is dropped rather than carried.
+- **Wake threshold.** `TRAFFIC_WAKE_NS` 2500 → 8000. A kinematic car is infinitely heavy to the
+  solver, so a 12 m/s bump reads as 33 kN·s on both cars; at 2500 a nudge woke half the jam
+  through its neighbours. The tumble a blast gives now scales with the throw for the same reason.
+- **R repairs.** Recover straightens the hero car's dents unless the level says
+  `recoverRepairs: false`; Settings → Controls overrides either way (level / always / never).
+- **Orientation on the asset.** `AssetItem.orient.yaw_deg`, a select in the asset form's
+  "Described" group (0/90/180/270), turns the model wherever it is used and the preview with it
+  (an axes helper shows +X, the front). A vehicle whose asset is oriented is not turned or guessed
+  by the fitter; `spec.nose: 'flip'` still overrules.
+- **Probe traps, three of them.** The chase camera and the drivers' view of the player are both
+  set in `frame()`, which never runs inside a synchronous probe loop: the eye has to follow the
+  car and `traffic.player` has to be fed by hand, or cars 3 km from the camera are never placed
+  and a woken body falls from the origin for ever ("thrown 3218 m", green). And after an HMR
+  update a probe's `import('/src/traffic.ts')` is a second copy of the module with empty arrays;
+  `traffic.view(i)` reads the live one. `probes/corridor-pileup.mjs` covers all of the above;
+  `test/traffic-wrecks.test.ts` the leader rule and blind mode.
+
+Measured here (swiftshader, 600 cars): traffic actors 0.7 ms, place 0.3 ms, physics 0.2 ms a
+frame. The main-loop cost Rich saw was the dents (a 130k-vertex walk per impact per mesh, every
+step of a resting pile) and the pile itself on the GPU; both are bounded now.

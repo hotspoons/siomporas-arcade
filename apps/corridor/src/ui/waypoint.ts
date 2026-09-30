@@ -7,9 +7,14 @@
 // hopkins and route 3 south) that can be hidden and shown by clicking on it."*
 //
 // The arrow is drawn on a small canvas as a chevron lying on a tilted plane — a perspective
-// squash and a shaded near face — turned by the bearing from the car's heading to the target, so
-// straight ahead is up and behind you is down. The distance sits under it. The message is a
-// button: one click folds it to a marker, another opens it, and a new waypoint opens it again.
+// squash and a shaded near face — turned by the bearing from the CAMERA's heading to the target,
+// so straight ahead on screen is up and behind you is down, and twisting the camera round the car
+// turns the arrow with it. The distance sits under it. The message is a button: one click folds
+// it to a marker, another opens it, and a new waypoint opens it again.
+//
+// It lives in the LOWER LEFT, clear of the corner (Rich: the upper right is busy), and steps up
+// over the attribution block when that is open — measured each frame, since the block is a
+// different height for every world.
 
 import { el } from './shell'
 
@@ -48,13 +53,18 @@ export class WaypointHud {
     this.target = target
     this.root.hidden = !target
     this.renderMsg()
+    if (target) this.dodge()
   }
 
   get current(): Waypoint | null {
     return this.target
   }
 
-  /** Every frame: the car (site metres) and its heading, radians counter-clockwise from east. */
+  /**
+   * Every frame: where the player is (site metres) and which way the CAMERA looks, radians
+   * counter-clockwise from east. The camera's heading, not the car's: the arrow is read on the
+   * screen, and the screen turns with the camera.
+   */
   update(x: number, y: number, heading: number): void {
     const t = this.target
     if (!t) return
@@ -64,6 +74,24 @@ export class WaypointHud {
     const bearing = Math.atan2(dy, dx) - heading // 0 = dead ahead, +ve = to the left
     this.dist.textContent = d >= 1000 ? `${(d / 1000).toFixed(1)} km` : `${Math.round(d)} m`
     this.draw(bearing)
+    this.dodge()
+  }
+
+  private watching: HTMLElement | null = null
+
+  /** Sit above the attribution block while its list is open; otherwise a hand off the corner. */
+  private dodge(): void {
+    const attrib = document.getElementById('attribution')
+    const list = attrib?.querySelector('.attrib-list') as HTMLElement | null
+    // the block opens on a click, between frames: watch its list so the step happens at once
+    if (list && this.watching !== list) {
+      this.watching = list
+      new MutationObserver(() => this.dodge()).observe(list, { attributes: true, attributeFilter: ['hidden'] })
+    }
+    const open = !!attrib && !!list && !list.hidden
+    const clear = open ? Math.max(0, window.innerHeight - attrib!.getBoundingClientRect().top) + 8 : 0
+    const bottom = `${Math.max(56, clear)}px`
+    if (this.root.style.bottom !== bottom) this.root.style.bottom = bottom
   }
 
   private renderMsg(): void {

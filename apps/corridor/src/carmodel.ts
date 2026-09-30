@@ -104,6 +104,9 @@ export async function loadCarModel(assetId: string, spec: VehicleChassis): Promi
    * painted-on black windows. It is idempotent and a no-op on anything with no transparent texels.
    */
   const glazed = applyAlphaGlazing(root).glazed
+  // the asset's own orientation, under everything the fitter does: it says which way the front is
+  const declared = orientAsset(root, item)
+  if (declared) { const wrap = new THREE.Group(); wrap.add(root); root = wrap }
 
   // What we were given, before anything is done to it.
   const box = new THREE.Box3().setFromObject(root)
@@ -111,7 +114,7 @@ export async function loadCarModel(assetId: string, spec: VehicleChassis): Promi
   box.getSize(raw)
   if (!(raw.x > 0 && raw.y > 0 && raw.z > 0)) return null
 
-  const fit = fitToChassis(root, spec)
+  const fit = fitToChassis(root, spec, { declared })
   const holder = new THREE.Group()
   holder.name = `car:${assetId}`
   holder.add(root)
@@ -146,6 +149,7 @@ export async function loadAssetGlb(assetId: string, heightM?: number): Promise<T
   let root: THREE.Object3D
   try { root = (await gltf().loadAsync(assetsvc.fileUrl(item.id, MESH_FILE[variant]))).scene } catch { return null }
   applyAlphaGlazing(root)
+  orientAsset(root, item)
   const box = new THREE.Box3().setFromObject(root)
   const size = box.getSize(new THREE.Vector3())
   if (!(size.y > 1e-6)) return null
@@ -161,7 +165,20 @@ export async function loadAssetGlb(assetId: string, heightM?: number): Promise<T
   return holder
 }
 
-export function fitToChassis(object: THREE.Object3D, spec: VehicleChassis): { scale: number; rawSize: THREE.Vector3 } {
+/**
+ * Turn a loaded model the way its asset record says (`AssetItem.orient`), about its up axis.
+ * Returns whether the record said anything — a model that has been oriented on purpose has a
+ * known front, and nothing downstream should guess at it.
+ */
+export function orientAsset(root: THREE.Object3D, item: AssetItem | null | undefined): boolean {
+  const yaw = item?.orient?.yaw_deg
+  if (typeof yaw !== 'number' || !Number.isFinite(yaw)) return false
+  root.rotation.y = (yaw * Math.PI) / 180
+  root.updateMatrixWorld(true)
+  return true
+}
+
+export function fitToChassis(object: THREE.Object3D, spec: VehicleChassis, opts: { declared?: boolean } = {}): { scale: number; rawSize: THREE.Vector3 } {
   object.position.set(0, 0, 0)
   object.scale.setScalar(1)
   object.rotation.set(0, 0, 0)
@@ -176,9 +193,11 @@ export function fitToChassis(object: THREE.Object3D, spec: VehicleChassis): { sc
    * car in the game is sideways."* Turn the long axis onto X first; then decide which end is the
    * front, which the geometry can only guess at (see `noseSign`) and the spec can overrule.
    */
-  if (raw.z > raw.x) object.rotation.y = Math.PI / 2
+  // an asset that has been oriented on purpose already has its front along +X; only a model
+  // nobody has looked at gets turned and guessed
+  if (!opts.declared && raw.z > raw.x) object.rotation.y = Math.PI / 2
   object.updateMatrixWorld(true)
-  const guess = spec.nose === 'keep' ? 1 : spec.nose === 'flip' ? -1 : noseSign(object)
+  const guess = spec.nose === 'keep' ? 1 : spec.nose === 'flip' ? -1 : opts.declared ? 1 : noseSign(object)
   if (guess < 0) object.rotation.y += Math.PI
   object.updateMatrixWorld(true)
   const want = spec.length ?? spec.wheelbase * 1.6

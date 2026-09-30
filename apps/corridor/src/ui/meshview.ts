@@ -165,9 +165,31 @@ export class MeshView {
   private prefs: MeshPrefs = {}
   /** set while a load is applying a remembered camera, so it is not saved back mid-flight */
   private restoring = false
+  /** Turn the placed model about its up axis and seat it again. What the orientation control drives. */
+  setYawDeg(deg: number): void {
+    this.yawDeg = deg
+    if (this.placed) this.#seat(this.placed)
+  }
+
+  /** the model turned as asked, centred, sitting on the grid; returns its size */
+  #seat(root: THREE.Object3D): THREE.Vector3 {
+    root.rotation.y = (this.yawDeg * Math.PI) / 180
+    root.position.set(0, 0, 0)
+    root.updateMatrixWorld(true)
+    const box = new THREE.Box3().setFromObject(root)
+    const centre = box.getCenter(new THREE.Vector3())
+    const size = box.getSize(new THREE.Vector3())
+    root.position.sub(centre)
+    root.position.y += size.y / 2 // sit it on the grid rather than through it
+    return size
+  }
+
   /** resolves when the current `load()` has settled, so a caller can inspect what arrived */
   loaded: Promise<void> = Promise.resolve()
   private disposed = false
+  /** what `#place` put on the pivot, so an orientation can be applied after the fact */
+  private placed: THREE.Object3D | null = null
+  private yawDeg = 0
   /** the size of the last thing loaded, in metres — the caller shows it */
   size: THREE.Vector3 | null = null
   /**
@@ -600,14 +622,16 @@ export class MeshView {
    */
   async #place(root: THREE.Object3D, format: 'gltf' | 'stl' | 'obj' | 'ply'): Promise<void> {
     if (this.disposed) return
-    const box = new THREE.Box3().setFromObject(root)
-    const centre = box.getCenter(new THREE.Vector3())
-    const size = box.getSize(new THREE.Vector3())
-    root.position.sub(centre)
-    root.position.y += size.y / 2 // sit it on the grid rather than through it
+    this.placed = root
+    const size = this.#seat(root)
     this.pivot.add(root)
 
     const r = Math.max(size.x, size.y, size.z) || 1
+    // which way is which: the asset form's orientation control turns the model until its front
+    // is along the red (+X) axis, and it needs the axis to be visible to do it
+    const axes = new THREE.AxesHelper(r * 0.75)
+    axes.name = 'axes'
+    this.pivot.add(axes)
     this.grid.scale.setScalar(r)
     this.camera.position.set(r * 1.5, r * 0.85, r * 2.0)
     this.controls.target.set(0, size.y / 2, 0)

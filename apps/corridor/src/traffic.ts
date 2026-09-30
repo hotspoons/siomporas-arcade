@@ -20,12 +20,13 @@
 // then queues, decelerates smoothly, creeps, and discharges on green with no special case anywhere
 // — and a driver who ignores the red simply does not get the virtual leader.
 
-import { addComponent, query, type World } from 'bitecs'
+import { addComponent, hasComponent, query, type World } from 'bitecs'
 import { MAX_ACTORS, OnRoad, Transform, Vehicle, Velocity } from './actors'
 import { Demand, GREEN, RED, SignalHead, YELLOW, headFor } from './signals-ecs'
 
 const f32 = () => new Float32Array(MAX_ACTORS)
 const u8 = () => new Uint8Array(MAX_ACTORS)
+const u32 = () => new Uint32Array(MAX_ACTORS)
 
 /* ---- who is driving -------------------------------------------------------------------------- */
 
@@ -51,6 +52,10 @@ export const Driver = {
   compliance: f32(),
   /** 1 while this driver has decided to run the current light, so they do not dither mid-junction */
   running: u8(),
+  /** what the driver saw on the last step: the gap to whatever it is following, m (Infinity: nothing) */
+  gap: f32(),
+  /** …and which entity that was, plus one (0: nothing, or a light or the player) */
+  leader: u32(),
 }
 
 /** The speed limit in force where this vehicle is, m/s. Set by the road, read by the model. */
@@ -110,6 +115,15 @@ export interface TrafficOpts {
   heads: number[]
   /** how close a driver looks for a light governing them */
   lookM?: number
+  /**
+   * Something on the road that is not in the ECS — the PLAYER. Given a car's position and heading,
+   * the gap to it along the car's own lane and the closing speed, or null when it is not in the
+   * way. Without this the traffic drove straight through the player, and a player in a jam was
+   * pinned between cars that could not see him (Rich, 2026-09-30: "my car is stuck in place").
+   */
+  obstacle?: (x: number, y: number, yaw: number, speed: number) => { gap: number; dv: number } | null
+  /** when it says so, nobody sees anybody: no leader, no light, no player. A game mode, and a joke */
+  blind?: () => boolean
 }
 
 /**
@@ -122,7 +136,11 @@ export interface TrafficOpts {
 export function driveSystem(opts: TrafficOpts) {
   const look = opts.lookM ?? 70
   return (world: World, dt: number) => {
-    const cars = query(world, [Vehicle, Transform, Velocity, Driver])
+    // EVERY car on a road, not only the driven ones: a wreck has lost its `Driver` and is still
+    // in the lane, and a driver who cannot see it drives into it — Rich watched a jam pile up on
+    // Route 3 one wreck at a time. A wreck that left the road sits on a chain nobody drives
+    // (`OFF_ROAD` in trafficlayer.ts), so it is nobody's leader.
+    const cars = query(world, [Vehicle, Transform, Velocity, OnRoad])
     // NEIGHBOURS BY LANE POSITION, not by distance in the plane. Two cars twenty metres apart on
     // opposite carriageways are not following each other, and a plain nearest-neighbour search
     // makes them brake for each other, which looks exactly like a phantom jam.
@@ -139,17 +157,20 @@ export function driveSystem(opts: TrafficOpts) {
     for (const list of byChain.values()) {
       for (let i = 0; i < list.length; i++) {
         const e = list[i]
+        if (!hasComponent(world, e, Driver)) continue // a wreck: a leader for others, driven by nobody
         const v = Vehicle.speed[e]
         const v0 = SpeedLimit.v[e] * Driver.speedFactor[e]
 
         // the car ahead in this lane, if there is one
         let gap = Infinity
         let dv = 0
+        let leader = 0
         for (let k = i + 1; k < list.length; k++) {
           const f = list[k]
           if (OnRoad.lane[f] !== OnRoad.lane[e] || OnRoad.dir[f] !== OnRoad.dir[e]) continue
           gap = OnRoad.s[f] - OnRoad.s[e] - Vehicle.lengthM[f]
           dv = v - Vehicle.speed[f]
+          leader = f + 1
           break
         }
 
@@ -189,6 +210,11 @@ export function driveSystem(opts: TrafficOpts) {
           }
         }
 
+        const ob = opts.obstacle?.(Transform.x[e], Transform.y[e], Transform.yaw[e], v)
+        if (ob && ob.gap < gap) { gap = ob.gap; dv = ob.dv }
+        if (opts.blind?.()) { gap = Infinity; dv = 0; leader = 0 }
+        Driver.gap[e] = gap
+        Driver.leader[e] = leader
         const a = idm(v, v0, gap, dv, Driver.accelA[e], Driver.brakeB[e], JamGap.s0[e], Driver.headwayS[e])
         // real brakes have a limit, and without one IDM can ask for -40 m/s^2 at a stop line it
         // arrived at too fast, which reads as a car hitting a wall

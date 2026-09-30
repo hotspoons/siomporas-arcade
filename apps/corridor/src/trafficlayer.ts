@@ -24,9 +24,14 @@
 
 import * as THREE from 'three'
 import { addComponent } from 'bitecs'
-import { ActorWorld, spawnVehicle } from './actorworld'
+import { ActorWorld, setPhysical, spawnVehicle } from './actorworld'
+import { hasComponent, removeComponent } from 'bitecs'
+import { Driver } from './traffic'
+import { dentObject, repairObject } from './dents'
+import type { Impact } from '@apex/engine/physics/world'
+import type { TrafficBody } from './physics'
 import { OnRoad, Transform, Vehicle } from './actors'
-import { driveSystem, makeDriver, rng, SpeedLimit } from './traffic'
+import { Driver as DriverC, driveSystem, makeDriver, rng, SpeedLimit } from './traffic'
 import { lanesPerDirection, planTraffic, type RoadChain, type TrafficSlot } from './trafficplan'
 import { TRAFFIC_LEVELS, Zones, type ZoneDoc } from './zones'
 import { loadZones } from './editor/zonestore'
@@ -56,13 +61,27 @@ export interface TrafficSpec {
   obeyRate?: number
   /** a multiplier on the speed limit; the set's own wins */
   speedFactor?: number
+  /** nobody brakes for anybody: a pile-up as a game (Rich, 2026-09-30: "this is hilarious") */
+  blind?: boolean
 }
+
+/** `OnRoad.chain` of a wreck that has left the road: no chain has this index (the field is u16), so nobody follows it */
+const OFF_ROAD = 0xffff
 
 /** Where a car is on screen and in the solver, for one entity. */
 interface Shown {
   e: number
   mesh: THREE.Object3D
-  body: { move: (x: number, y: number, z: number, yaw: number) => void; free: () => void } | null
+  body: TrafficBody | null
+  massKg: number
+  /** knocked loose: driven by the solver now, not the road */
+  wrecked: boolean
+  /** off the road, waiting for somewhere out of sight to come back */
+  hidden: boolean
+  /** the chain it was planned on, for when a wreck comes back as a car */
+  chain: number
+  limit: number
+  obey: number
 }
 
 /** a chain the planner can use, plus what the follower needs that the planner does not */
@@ -116,8 +135,36 @@ export class TrafficLayer {
   private drive: ((world: ActorWorld['world'], dt: number) => void) | null = null
   private slots: TrafficSlot[] = []
   private built = false
+  private byCollider = new Map<number, Shown>()
+  private offImpact: (() => void) | null = null
+  /** how many cars have been knocked loose, for the HUD and for a probe */
+  wrecked = 0
   /** how many cars exist, for the HUD and for a probe */
   count = 0
+  /**
+   * The player, for the drivers to see: site metres and velocity. Set by the app each frame;
+   * null when nobody is driving. A car whose lane the player sits in ahead brakes for him.
+   */
+  player: { x: number; y: number; vx: number; vy: number; length: number } | null = null
+  /** where the camera is, in the site frame — what a respawn keeps away from when nobody is driving */
+  private eyeSite = { x: 0, y: 0 }
+  /** cars that ran off a road and were put back somewhere out of sight; a probe reads it */
+  respawned = 0
+  /** the closest to the player any respawn has been, m: the proof that none came from thin air */
+  respawnMin = Infinity
+  /** cars waiting, hidden, for a place to respawn that is far enough from the player */
+  parked = 0
+  /** the loose wrecks, oldest first; past `TRAFFIC_WRECKS_MAX` the oldest is recycled */
+  private wrecks: Shown[] = []
+  /** wrecks straightened out and sent back into traffic; a probe reads it */
+  recycled = 0
+  /** cars knocked loose, ever: `woken - recycled` is what is loose now */
+  woken = 0
+  /** the last twenty wakes and why, newest last — what a probe reads when a jam wakes itself */
+  readonly wakes: { index: number; why: 'blast' | 'impact'; impulse: number }[] = []
+  /** live: nobody brakes for anybody. Set from the level's traffic spec, or flipped from the bridge */
+  blind = false
+  private rand: () => number = rng(7)
   /** what could not be done, in words — a level with a set that names no built vehicle should say so */
   problems: string[] = []
 
@@ -138,6 +185,8 @@ export class TrafficLayer {
    */
   async load(slug: string, spec: TrafficSpec): Promise<number> {
     const rand = rng((spec.seed ?? 1) * 2654435761 + 7)
+    this.rand = rand
+    this.blind = !!spec.blind
     const doc: ZoneDoc = await loadZones(slug).catch(() => ({ version: 1, zones: [] }) as ZoneDoc)
     const zones = [...doc.zones]
     const floor = typeof spec.density === 'string' ? (TRAFFIC_LEVELS.find((l) => l.id === spec.density)?.density ?? (spec.density === 'rush' ? 0.8 : 0)) : spec.density ?? 0
@@ -223,34 +272,166 @@ export class TrafficLayer {
       this.group.add(mesh)
       const half = { x: (m.doc.spec.length ?? 4.4) / 2, y: (m.doc.spec.height ?? 1.4) / 2, z: (m.doc.spec.width ?? 1.8) / 2 }
       const body = this.physics ? this.physics.spawnKinematic(half) : null
-      this.shown.push({ e, mesh, body })
+      const shown: Shown = { e, mesh, body, massKg: m.doc.spec.mass ?? 1500, wrecked: false, hidden: false, chain: slot.chain, limit: SpeedLimit.v[e], obey: usable.mix.find((x) => x.vehicle === which)?.obeyRate ?? obey ?? 0.97 }
+      if (body) this.byCollider.set(body.colliderHandle, shown)
+      this.shown.push(shown)
     }
     this.count = this.shown.length
+    /*
+     * A HARD HIT KNOCKS A CAR LOOSE, AND DENTS IT. The world reports every impact above the
+     * physics threshold; one on a traffic car's collider harder than `TRAFFIC_WAKE_NS` turns it
+     * from a car on rails into a loose body that goes where it was sent, and both cars in the
+     * collision take a dent where they met.
+     */
+    if (this.physics) {
+      this.offImpact = this.physics.onImpact((im) => this.onImpact(im))
+    }
     // no signal heads yet: the lights are not in the ECS in the viewer, so every driver sees green
-    this.drive = driveSystem({ heads: [] })
+    this.drive = driveSystem({
+      heads: [],
+      blind: () => this.blind,
+      obstacle: (x, y, yaw, speed) => {
+        const p = this.player
+        if (!p) return null
+        const dx = p.x - x
+        const dy = p.y - y
+        if (dx * dx + dy * dy > 90 * 90) return null
+        const cos = Math.cos(yaw), sin = Math.sin(yaw)
+        const along = dx * cos + dy * sin
+        const across = Math.abs(-dx * sin + dy * cos)
+        // ahead, and in this lane (a lane and a half wide, so a car straddling the line still counts)
+        if (along <= 0 || across > T.LANE_WIDTH * 0.75) return null
+        const gap = along - p.length / 2 - 2.2
+        const playerAlong = p.vx * cos + p.vy * sin
+        return { gap: Math.max(0, gap), dv: speed - playerAlong }
+      },
+    })
     this.actors.add('traffic:drive', this.drive).add('traffic:follow', this.followRoad)
     this.built = true
     this.place(true)
     return this.count
   }
 
+  private onImpact(im: Impact): void {
+    const a = this.byCollider.get(im.a.handle)
+    const b = this.byCollider.get(im.b.handle)
+    if (!a && !b) return
+    this.stats.impacts++
+    for (const [s, other] of [[a, true], [b, false]] as const) {
+      if (!s) continue
+      if (im.impulse >= T.TRAFFIC_WAKE_NS) this.wake(s, 'impact', im.impulse)
+      this.stats.dents += dentObject(s.mesh, im, !other)
+    }
+  }
+
+  /** Knock one car loose: the solver owns it from here, the driver is gone, the wreck blocks its lane. */
+  private wake(s: Shown, why: 'blast' | 'impact' = 'blast', impulse = 0): void {
+    if (s.wrecked || !s.body) return
+    // no ground under it means no physics tile there yet: a loose body would fall through the
+    // world. It stays on rails — a blast that far from the player has nobody to see it anyway.
+    if (this.physics && this.physics.groundUnder(s.mesh.position.x, s.mesh.position.z) === null) return
+    s.wrecked = true
+    this.wrecked++
+    this.woken++
+    this.wakes.push({ index: this.shown.indexOf(s), why, impulse: Math.round(impulse) })
+    if (this.wakes.length > 20) this.wakes.shift()
+    s.body.enable(true)
+    s.body.wake(s.massKg)
+    // no longer driven: other drivers still see it, at its last place in the lane, which is a wreck
+    removeComponent(this.actors.world, s.e, Driver)
+    Vehicle.speed[s.e] = 0
+    setPhysical(this.actors, s.e, 'dynamic', { mass: s.massKg })
+    this.wrecks.push(s)
+    while (this.wrecks.length > Math.max(1, T.TRAFFIC_WRECKS_MAX)) this.recycle(this.wrecks.shift()!)
+  }
+
+  /**
+   * A wreck becomes a car again: straightened, back on rails, driven, and hidden until the road
+   * has a place for it out of the player's sight. The pile-up can go on for ever this way and
+   * the solver and the renderer only ever carry `TRAFFIC_WRECKS_MAX` of it.
+   */
+  private recycle(s: Shown): void {
+    if (!s.wrecked || !s.body) return
+    s.wrecked = false
+    this.wrecked--
+    this.recycled++
+    s.body.rest()
+    repairObject(s.mesh)
+    s.mesh.rotation.set(0, 0, 0)
+    const e = s.e
+    makeDriver(this.actors.world, e, this.rand, { obeyRate: s.obey })
+    SpeedLimit.v[e] = s.limit
+    setPhysical(this.actors, e, 'kinematic')
+    OnRoad.chain[e] = s.chain
+    OnRoad.s[e] = 0
+    Vehicle.speed[e] = 0
+    s.hidden = true
+    s.mesh.visible = false
+  }
+
+  /**
+   * A blast, as the traffic feels it: every car within reach is knocked loose and thrown away
+   * from it — `impulse` metres per second at the centre, falling off to nothing at the radius,
+   * swung upward by `lift`. Returns how many cars flew. The physics world's own `explode` cannot
+   * do this for a car that was kinematic a moment ago (see `TrafficBody.kick`), so the traffic
+   * does it for its own; `main.ts` calls this and then `physics.explode` for everything else.
+   */
+  blast(at: { x: number; y: number; z: number }, radius: number, impulse: number, lift = 0.55): number {
+    let n = 0
+    for (const s of this.shown) {
+      if (!s.body) continue
+      const p = s.mesh.position
+      let dx = p.x - at.x, dy = p.y + 0.7 - at.y, dz = p.z - at.z
+      const d = Math.hypot(dx, dy, dz)
+      const falloff = Math.max(0, 1 - d / radius)
+      if (falloff <= 0) continue
+      if (!s.wrecked) this.wake(s)
+      if (!s.wrecked) continue // no ground under it: it stays on rails
+      if (d < 1e-3) { dx = 0; dy = 1; dz = 0 } else { dx /= d; dy /= d; dz /= d }
+      dy += lift
+      const l = Math.hypot(dx, dy, dz) || 1
+      const v = impulse * falloff
+      // the tumble scales with the throw: a nudge that spun a car at full tilt swung its corners
+      // into the cars beside it and woke half the jam
+      s.body.kick((dx / l) * v, (dy / l) * v, (dz / l) * v, Math.min(4, v * 0.35))
+      n++
+    }
+    return n
+  }
+
   /**
    * `OnRoad.s` to a place in the world, every step.
    *
-   * THE END OF A CHAIN IS ITS BEGINNING: a car that runs off the end comes back at the start,
-   * which on a road with two ends is a teleport nobody sees (the ends are the edge of the world)
-   * and on a loop is simply a lap. The alternative — turning round — needs the network, which
-   * `site.chains()` does not hand over. Noted, and enough for a jam.
+   * THE END OF A CHAIN IS A RESPAWN, NOT A WRAP. The first version put a car that ran off the end
+   * back at the start, which is a teleport — and on Route 3 the chains are junction to junction,
+   * so the start was often twenty metres in front of the player. Rich: "there will be a car just
+   * appear out of thin air". Now a car that runs off is put back at the first place along its
+   * chain that is `TRAFFIC_RESPAWN_M` from the player and clear of the car already there, at the
+   * lane's speed rather than standing still. A chain with no such place (short, and the player is
+   * on it) keeps the car hidden until there is one. Turning round would be better and needs the
+   * network, which `site.chains()` does not hand over.
    */
   private followRoad = (world: ActorWorld['world'], _dt: number) => {
     void world
+    this.parked = 0
     for (const s of this.shown) {
+      if (s.wrecked) continue
       const e = s.e
       const road = this.roads[OnRoad.chain[e]]
       if (!road) continue
       let at = OnRoad.s[e]
-      if (at >= road.length_m) { at -= road.length_m; OnRoad.s[e] = at }
-      if (at < 0) { at += road.length_m; OnRoad.s[e] = at }
+      if (at >= road.length_m || at < 0 || s.hidden) {
+        const spot = this.respawnSpot(s, road)
+        if (spot === null) { s.hidden = true; this.parked++; continue }
+        if (s.hidden) s.hidden = false
+        at = spot
+        OnRoad.s[e] = at
+        Vehicle.speed[e] = SpeedLimit.v[e] * 0.8
+        this.respawned++
+        const q = road.at(OnRoad.dir[e] ? road.length_m - at : at)
+        const px = this.player?.x ?? this.eyeSite.x, py = this.player?.y ?? this.eyeSite.y
+        this.respawnMin = Math.min(this.respawnMin, Math.hypot(q.x - px, q.y - py))
+      }
       const dir = OnRoad.dir[e]
       // against the chain, the car reads the road backwards
       const along = dir ? road.length_m - at : at
@@ -266,31 +447,159 @@ export class TrafficLayer {
     }
   }
 
+  /**
+   * Somewhere on `road` to put a car back: at least `TRAFFIC_RESPAWN_M` from the player (or the
+   * camera, when nobody is driving), and with nobody in the same lane within a car's length and
+   * a bit. Walks the chain from the start in 15 m steps; null when nowhere on it qualifies.
+   */
+  private respawnSpot(s: Shown, road: Road): number | null {
+    const px = this.player?.x ?? this.eyeSite.x
+    const py = this.player?.y ?? this.eyeSite.y
+    const far2 = T.TRAFFIC_RESPAWN_M * T.TRAFFIC_RESPAWN_M
+    const e = s.e
+    const dir = OnRoad.dir[e]
+    const chain = OnRoad.chain[e]
+    const lane = OnRoad.lane[e]
+    const clear = Vehicle.lengthM[e] + 6
+    for (let at = 8; at < road.length_m - 8; at += 15) {
+      const along = dir ? road.length_m - at : at
+      const p = road.at(along)
+      if ((p.x - px) ** 2 + (p.y - py) ** 2 < far2) continue
+      let taken = false
+      for (const o of this.shown) {
+        if (o === s || o.hidden) continue
+        const f = o.e
+        if (OnRoad.chain[f] !== chain || OnRoad.lane[f] !== lane || OnRoad.dir[f] !== dir) continue
+        if (Math.abs(OnRoad.s[f] - at) < clear) { taken = true; break }
+      }
+      if (!taken) return at
+    }
+    return null
+  }
+
+  /**
+   * A wreck is a leader while it is IN its lane. Once the solver has thrown it somewhere else it
+   * is scenery, and the drivers behind its old place should not queue for a car that is in a
+   * field. Every half second, each wreck is re-projected on to its chain near where it was: still
+   * within a lane's width of the lane line, `OnRoad.s` follows it; further than that, it leaves
+   * the road (`chain` = `OFF_ROAD`) until it is recycled.
+   */
+  private reprojectWrecks(): void {
+    for (const s of this.shown) {
+      if (!s.wrecked) continue
+      const e = s.e
+      const chain = OnRoad.chain[e]
+      const road = this.roads[chain]
+      if (!road) continue
+      const dir = OnRoad.dir[e]
+      const off = laneOffset(OnRoad.lane[e], road.twoWay ? lanesPerDirection(road.lanes) : Math.max(1, Math.round(road.lanes)), road.twoWay)
+      const wx = Transform.x[e]
+      const wy = Transform.y[e]
+      let best = Infinity
+      let bestS = OnRoad.s[e]
+      const s0 = OnRoad.s[e]
+      for (let at = s0 - 40; at <= s0 + 40; at += 2.5) {
+        if (at < 0 || at > road.length_m) continue
+        const along = dir ? road.length_m - at : at
+        const p = road.at(along)
+        const d = road.dir(along)
+        const dx = dir ? -d.x : d.x
+        const dy = dir ? -d.y : d.y
+        const lx = p.x + dy * off
+        const ly = p.y - dx * off
+        const d2 = (lx - wx) ** 2 + (ly - wy) ** 2
+        if (d2 < best) { best = d2; bestS = at }
+      }
+      if (best < 2.6 * 2.6) OnRoad.s[e] = bestS
+      else OnRoad.chain[e] = OFF_ROAD
+    }
+  }
+  private sinceReproject = 0
+
+  /** what the last frame cost, ms, by part — for the perf panel and the bridge */
+  readonly stats = { actorsMs: 0, placeMs: 0, steps: 0, systems: {} as Record<string, number>, dents: 0, impacts: 0 }
+
   /** Step the simulation and put every car where it now is. */
   tick(dt: number, eye: THREE.Vector3): void {
     if (!this.built) return
-    this.actors.tick(dt)
+    const t0 = performance.now()
+    this.eyeSite.x = eye.x
+    this.eyeSite.y = -eye.z
+    this.sinceReproject += dt
+    if (this.wrecked && this.sinceReproject > 0.5) { this.sinceReproject = 0; this.reprojectWrecks() }
+    this.stats.steps = this.actors.tick(dt)
+    const t1 = performance.now()
     this.place(false, eye)
+    this.stats.actorsMs = t1 - t0
+    this.stats.placeMs = performance.now() - t1
+    this.stats.systems = { ...this.actors.stats.systems }
   }
 
   private place(all: boolean, eye?: THREE.Vector3): void {
     const drawM = T.TRAFFIC_DRAW_M
     for (const s of this.shown) {
       const e = s.e
+      if (s.wrecked && s.body) {
+        // a loose body: the mesh follows the solver, and the entity follows the mesh
+        const q = s.body.pose()
+        s.mesh.visible = true
+        s.mesh.position.set(q.x, q.y, q.z)
+        s.mesh.quaternion.set(q.qx, q.qy, q.qz, q.qw)
+        Transform.x[e] = q.x
+        Transform.y[e] = -q.z
+        Transform.z[e] = q.y
+        continue
+      }
+      if (s.hidden) { s.mesh.visible = false; continue }
       const x = Transform.x[e]
       const y = Transform.y[e]
       const yaw = Transform.yaw[e]
       // three: x east, y up, z south — the site's y is north
       const near = all || !eye || (eye.x - x) ** 2 + (eye.z + y) ** 2 < drawM * drawM
-      if (!near) { s.mesh.visible = false; continue }
+      if (!near) { s.mesh.visible = false; s.body?.enable(false); continue }
       const g = this.site.groundAt(x, -y) ?? this.site.heightAt(x, y) ?? 0
       Transform.z[e] = g
       s.mesh.visible = true
       s.mesh.position.set(x, g, -y)
       // the model's nose is +X; three's rotation about +Y takes +X toward -Z, which is NORTH here
       s.mesh.rotation.set(0, yaw, 0)
-      s.body?.move(x, g, -y, -yaw)
+      if (s.body) {
+        // a body only near the player: the rest of the solver's work on a kinematic car is a
+        // broad-phase update a step, and there were six hundred of them
+        const physM = T.TRAFFIC_PHYS_M
+        const near = !eye || (eye.x - x) ** 2 + (eye.z + y) ** 2 < physM * physM
+        s.body.enable(near)
+        if (near) s.body.move(x, g, -y, -yaw)
+      }
     }
+  }
+
+  /**
+   * One car as the simulation sees it, by index — for a probe. THROUGH THE LAYER, not through a
+   * dynamic import of `traffic.ts`: after an HMR update the page's copy of that module is
+   * `/src/traffic.ts?t=…` and a probe's `import('/src/traffic.ts')` is a second instance with its
+   * own empty component arrays (the tuning-knob trap again).
+   */
+  view(i: number) {
+    const s = this.shown[i]
+    if (!s) return null
+    const e = s.e
+    const w = this.actors.world
+    return {
+      e, x: Transform.x[e], y: Transform.y[e], yaw: Transform.yaw[e], chain: OnRoad.chain[e], s: OnRoad.s[e], lane: OnRoad.lane[e], dir: OnRoad.dir[e],
+      speed: Vehicle.speed[e], length: Vehicle.lengthM[e], limit: SpeedLimit.v[e], driven: hasComponent(w, e, DriverC), gap: DriverC.gap[e], leader: DriverC.leader[e] ? this.shown.findIndex((o) => o.e === DriverC.leader[e] - 1) : -1,
+      wrecked: s.wrecked, hidden: s.hidden, visible: s.mesh.visible,
+    }
+  }
+
+  /** the solver's view of one car's body, by index, for a probe */
+  bodyState(i: number) {
+    return this.shown[i]?.body?.state() ?? null
+  }
+
+  /** which cars (by index in `entities`/the group) have been knocked loose, for a probe */
+  wreckedIds(): number[] {
+    return this.shown.map((s, i) => (s.wrecked ? i : -1)).filter((i) => i >= 0)
   }
 
   /** The cars as the program sees them: entity ids, for `api.actors` queries. */
@@ -299,11 +608,16 @@ export class TrafficLayer {
   }
 
   dispose(): void {
+    this.offImpact?.()
+    this.offImpact = null
     for (const s of this.shown) {
       s.body?.free()
       s.mesh.removeFromParent()
     }
     this.shown = []
+    this.wrecks = []
+    this.byCollider.clear()
+    this.wrecked = 0
     this.count = 0
     this.built = false
     this.group.removeFromParent()

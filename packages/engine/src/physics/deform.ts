@@ -59,7 +59,7 @@ export interface DeformOptions {
   inward?: number
 }
 
-const DEFAULTS: Required<DeformOptions> = {
+export const DEFORM_DEFAULTS: Required<DeformOptions> = {
   perImpulse: 1.8e-5,
   radius: 1.1,
   maxDent: 0.35,
@@ -84,10 +84,12 @@ export class Deformable {
   private dirty = false
   /** 0…1: the deepest dent as a fraction of `maxDent`. The HUD's "how wrecked is it" */
   damage = 0
+  /** something has moved since the last `flush` */
+  get pending(): boolean { return this.dirty }
 
   constructor(mesh: Mesh, opts: DeformOptions = {}) {
     this.mesh = mesh
-    this.opts = { ...DEFAULTS, ...opts }
+    this.opts = { ...DEFORM_DEFAULTS, ...opts }
     // CLONE. Three shares geometry between meshes as a matter of course, and a dent applied to a
     // shared geometry appears on every car using it — including the ones parked two streets away.
     this.geo = mesh.geometry.clone()
@@ -104,16 +106,27 @@ export class Deformable {
    * direction are brought into local space first — via the mesh's inverse world matrix, which must
    * be up to date. A car whose matrix is stale gets its dents in the wrong place and it looks like
    * the deformation is random rather than that the matrix was old.
+   *
+   * THE OPTIONS ARE METRES; THE GEOMETRY IS WHATEVER THE EXPORTER USED. A reconstruction is a
+   * unit cube scaled up four and a half times to be a car, so a radius of 1.1 in ITS units is the
+   * whole car and a `maxDent` of 0.35 is a metre and a half. Every length here is divided by the
+   * mesh's world scale first — the first version did not, and one knock folded a car into a
+   * black polygonal blob the size of a bus (Rich, 2026-09-30, with a screenshot).
    */
   apply(im: Impact, intoOtherSide = false): boolean {
     const o = this.opts
     if (im.impulse < o.threshold) return false
-    const depth = Math.min(o.maxDent, im.impulse * o.perImpulse)
-    if (depth <= 1e-4) return false
+    const depthM = Math.min(o.maxDent, im.impulse * o.perImpulse)
+    if (depthM <= 1e-4) return false
 
     const m = this.mesh
     m.updateWorldMatrix(true, false)
     const inv = m.matrixWorld.clone().invert()
+    const me = m.matrixWorld.elements
+    const scale = Math.hypot(me[0], me[1], me[2]) || 1
+    const radius = o.radius / scale
+    const maxDent = o.maxDent / scale
+    const depth = depthM / scale
     // the contact point, in local space
     const px = im.x, py = im.y, pz = im.z
     const e = inv.elements
@@ -135,7 +148,14 @@ export class Deformable {
     const arr = pos.array as Float32Array
     const nrm = this.geo.getAttribute('normal')
     const nArr = nrm ? (nrm.array as Float32Array) : null
-    const r2 = o.radius * o.radius
+    const r2 = radius * radius
+    // nowhere near this mesh: no need to walk a hundred thousand vertices to find that out
+    if (!this.geo.boundingSphere) this.geo.computeBoundingSphere()
+    const bs = this.geo.boundingSphere!
+    if (bs.radius > 0) {
+      const reach = bs.radius + radius
+      if ((bs.center.x - lx) ** 2 + (bs.center.y - ly) ** 2 + (bs.center.z - lz) ** 2 > reach * reach) return false
+    }
     let touched = 0
     let worst = this.damage
 
@@ -146,7 +166,7 @@ export class Deformable {
       const d2 = vx * vx + vy * vy + vz * vz
       if (d2 > r2) continue
       // smooth falloff: 1 at the contact, 0 at the radius, flat at both ends so a dent has a lip
-      const t = 1 - Math.sqrt(d2) / o.radius
+      const t = 1 - Math.sqrt(d2) / radius
       const fall = t * t * (3 - 2 * t)
       let ax = dx
       let ay = dy
@@ -168,14 +188,14 @@ export class Deformable {
       const my = this.moved[i + 1] + ay * step
       const mz = this.moved[i + 2] + az * step
       const len = Math.hypot(mx, my, mz)
-      const k = len > o.maxDent ? o.maxDent / len : 1
+      const k = len > maxDent ? maxDent / len : 1
       this.moved[i] = mx * k
       this.moved[i + 1] = my * k
       this.moved[i + 2] = mz * k
       arr[i] = this.rest[i] + this.moved[i]
       arr[i + 1] = this.rest[i + 1] + this.moved[i + 1]
       arr[i + 2] = this.rest[i + 2] + this.moved[i + 2]
-      if (len * k > worst * o.maxDent) worst = (len * k) / o.maxDent
+      if (len * k > worst * maxDent) worst = (len * k) / maxDent
       touched++
     }
     if (!touched) return false

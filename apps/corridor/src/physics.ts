@@ -27,7 +27,8 @@ import * as THREE from 'three'
 import { loadRapier, rapier } from '@apex/engine/physics/rapier'
 import { QUERY } from '@apex/engine/physics/layers'
 import { PROFILES, profile, type DriveProfile } from '@apex/engine/physics/profiles'
-import { Breakables, type BreakEvent } from '@apex/engine/physics/destruction'
+import { Breakables, explode as blastWorld, type Blast, type BreakEvent } from '@apex/engine/physics/destruction'
+import type { Impact } from '@apex/engine/physics/world'
 import { addStatic, addSurface, addTree, Terrain } from '@apex/engine/physics/terrain'
 import { Vehicle } from '@apex/engine/physics/vehicle'
 import { PhysicsWorld } from '@apex/engine/physics/world'
@@ -92,7 +93,22 @@ export interface CorridorPhysics {
    * traffic model keeps driving it without knowing physics exists. `move` takes the car's floor
    * point and heading in three's frame; the box is lifted by half its height to sit on it.
    */
-  spawnKinematic(half: { x: number; y: number; z: number }): { move: (x: number, y: number, z: number, yaw: number) => void; free: () => void }
+  spawnKinematic(half: { x: number; y: number; z: number }): TrafficBody
+  /**
+   * A blast: everything dynamic within `radius` is thrown away from it, scaled by its mass
+   * (`impulse` is metres per second at the centre), breakables break. A KINEMATIC traffic car is
+   * not moved by this — wake it first (`TrafficLayer.wakeNear`), which `main.ts` does.
+   */
+  explode(at: { x: number; y: number; z: number }, opts: { radius: number; impulse: number; lift?: number; breakAt?: number }): number
+  /** every impact the world reports, for whoever wants to dent, wake or score on it */
+  onImpact(fn: (im: Impact) => void): () => void
+  /** the first solid thing along a ray, as a distance, or null; `exclude` is a collider handle to look past */
+  rayHit(from: { x: number; y: number; z: number }, dir: { x: number; y: number; z: number }, maxM: number, exclude?: number): number | null
+  /**
+   * The first solid thing a ball of `radius` sweeps into along a direction, as a distance, or
+   * null. A missile is not a line: a ray a metre from a car's flank misses it, a ball does not.
+   */
+  sweepHit(from: { x: number; y: number; z: number }, dir: { x: number; y: number; z: number }, maxM: number, radius: number, exclude?: number): number | null
   /**
    * The breakables register, for whatever the game wants to knock down.
    *
@@ -134,6 +150,31 @@ export interface CorridorPhysics {
   detachedProps(): { kind: string; x: number; y: number; z: number }[]
   stats(): PhysicsStats
   free(): void
+}
+
+/** A traffic car's body: moved along the road while it drives, a loose body once it is hit. */
+export interface TrafficBody {
+  /** the collider's handle — the Collider itself would type as the repo root's Rapier, not the engine's */
+  readonly colliderHandle: number
+  /** true once `wake` has made it dynamic */
+  readonly loose: boolean
+  move: (x: number, y: number, z: number, yaw: number) => void
+  wake: (massKg: number) => void
+  /** back on rails: kinematic again, still, undamaged as far as the solver knows */
+  rest: () => void
+  /** in or out of the solver. A car 600 m away costs a broad-phase update a step for nothing */
+  enable: (on: boolean) => void
+  /** the floor point and rotation, for a mesh that follows a loose body */
+  pose: () => { x: number; y: number; z: number; qx: number; qy: number; qz: number; qw: number }
+  /** what the solver thinks of it, for a probe */
+  state: () => { dynamic: boolean; mass: number; vx: number; vy: number; vz: number }
+  /**
+   * Add to its velocity, m/s, with a tumble. A VELOCITY, not an impulse: Rapier recomputes a
+   * body's mass on the next step, so an impulse in the step that woke it is divided by whatever
+   * mass it had as a kinematic — measured, a 1500 kg car left a blast at under a metre a second.
+   */
+  kick: (dvx: number, dvy: number, dvz: number, spin?: number) => void
+  free: () => void
 }
 
 export interface PhysicsStats {
@@ -186,6 +227,7 @@ export async function buildPhysics(site: Site, opts: { enabled?: boolean } = {})
   const phys = new PhysicsWorld({
     hz: T.PHYS_HZ,
     maxSteps: T.PHYS_MAX_STEPS,
+    budgetMs: T.PHYS_STEP_BUDGET_MS,
     solverIterations: T.PHYS_ITERATIONS,
     impactThreshold: T.PHYS_IMPACT_N,
   })
@@ -306,6 +348,8 @@ export async function buildPhysics(site: Site, opts: { enabled?: boolean } = {})
   const propList = (): PropRecord[] =>
     catalogue(site, { max: T.PHYS_PROP_CATALOGUE }).filter((p) => !site.sceneryCleared(p.x, -p.z))
   const standing = new Map<number, { rec: PropRecord; collider: ReturnType<typeof addStatic> }>()
+  /** the soft breakables, by collider handle: what breaks them is a touch, not an impulse */
+  const soft = new Map<number, { rec: PropRecord; spec: { threshold: number; mass: number; transfer: number; tag: number } }>()
   const detached: { mesh: THREE.Object3D; rec: PropRecord; collider: ReturnType<typeof addStatic> }[] = []
   let propsAt = { x: Infinity, z: Infinity }
   let brokenCount = 0
@@ -339,7 +383,22 @@ export async function buildPhysics(site: Site, opts: { enabled?: boolean } = {})
       })
       // the record's own orientation, which `addStatic` only knows how to take as a yaw
       collider.parent()?.setRotation({ x: p.qx, y: p.qy, z: p.qz, w: p.qw }, false)
-      if (p.breakAt > 0) breakables.add(collider, { threshold: p.breakAt, mass: p.mass, transfer: 0.35, tag: i })
+      if (p.breakAt > 0) {
+        const spec = { threshold: p.breakAt, mass: p.mass, transfer: 0.35, tag: i }
+        breakables.add(collider, spec)
+        /*
+         * SOFT: a sign or a post is a sensor until something touches it. Solid, it stopped the car
+         * dead in the step before it could break — and with the sled's raked nose, "stopped" meant
+         * "launched". As a sensor it takes no part in the solver; the touch breaks it, it becomes
+         * a solid dynamic body with its own small mass, and the car it hit sends it flying. The
+         * threshold decides: under `PHYS_SOFT_BREAK_NS` is soft, a signal mast is not.
+         */
+        if (p.breakAt <= T.PHYS_SOFT_BREAK_NS) {
+          collider.setSensor(true)
+          collider.setActiveEvents(R.ActiveEvents.COLLISION_EVENTS | R.ActiveEvents.CONTACT_FORCE_EVENTS)
+          soft.set(collider.handle, { rec: p, spec })
+        }
+      }
       standing.set(i, { rec: p, collider })
     }
     for (const [i, held] of standing) {
@@ -351,9 +410,42 @@ export async function buildPhysics(site: Site, opts: { enabled?: boolean } = {})
       if (breakables.isBroken(held.collider)) continue
       const body = held.collider.parent()
       if (body) phys.world.removeRigidBody(body)
+      soft.delete(held.collider.handle)
       standing.delete(i)
     }
   }
+
+  /*
+   * THE TOUCH THAT BREAKS A SOFT ONE. Whatever dynamic body reaches a soft breakable breaks it
+   * with the momentum a thing of the breakable's mass would take from it — enough to fly, not
+   * enough to slow a car — and from then on it is solid and loose.
+   */
+  phys.onTouch((a, b, started) => {
+    if (!started) return
+    for (const [c, other] of [[a, b], [b, a]] as const) {
+      const s = soft.get(c.handle)
+      if (!s) continue
+      const ob = other.parent()
+      if (!ob || !ob.isDynamic()) continue
+      soft.delete(c.handle)
+      const v = ob.linvel()
+      const speed = Math.hypot(v.x, v.y, v.z)
+      const d = speed > 1e-3 ? { x: v.x / speed, y: v.y / speed, z: v.z / speed } : { x: 0, y: 1, z: 0 }
+      const at = c.translation()
+      c.setSensor(false)
+      breakables.break(c, s.spec, s.spec.mass * Math.max(2, speed), at.x, at.y, at.z, d.x, d.y + 0.35, d.z)
+      // and the VELOCITY outright: the impulse `break` applied met a body whose mass the solver
+      // has not recomputed yet (it was fixed a moment ago), so it did next to nothing. The post
+      // leaves at most of the car's speed, a little upward, tumbling.
+      const pb = c.parent()
+      if (pb) {
+        const k = Math.max(2, speed) * 0.8
+        pb.setLinvel({ x: d.x * k, y: (d.y + 0.35) * k, z: d.z * k }, true)
+        pb.setAngvel({ x: d.z * 3, y: 1, z: -d.x * 3 }, true)
+      }
+      return
+    }
+  })
 
   /*
    * WHEN SOMETHING COMES OFF, TAKE IT OUT OF THE INSTANCE BUFFER.
@@ -462,18 +554,70 @@ export async function buildPhysics(site: Site, opts: { enabled?: boolean } = {})
     },
 
     spawnKinematic(half) {
-      const body = phys.world.createRigidBody(R.RigidBodyDesc.kinematicPositionBased())
-      const desc = R.ColliderDesc.cuboid(half.x, half.y, half.z).setFriction(0.6)
-      phys.describe(desc, 'vehicle')
-      phys.world.createCollider(desc, body)
+      const body = phys.world.createRigidBody(R.RigidBodyDesc.kinematicPositionBased().setCcdEnabled(true))
+      const desc = R.ColliderDesc.cuboid(half.x, half.y, half.z).setFriction(0.6).setRestitution(0.3)
+      // events on, so a hit on a traffic car is reported: that is what knocks it loose and dents it
+      phys.describe(desc, 'vehicle', { events: true })
+      const collider = phys.world.createCollider(desc, body)
       let alive = true
+      let loose = false
       return {
+        colliderHandle: collider.handle,
+        get loose() { return loose },
         move(x, y, z, yaw) {
-          if (!alive) return
+          if (!alive || loose) return
           const h = yaw * 0.5
           // the same sign as `Vehicle.place`: yaw increases to the right, rotation about +Y does not
           body.setNextKinematicTranslation({ x, y: y + half.y, z })
           body.setNextKinematicRotation({ x: 0, y: Math.sin(-h), z: 0, w: Math.cos(-h) })
+        },
+        /*
+         * FROM A CAR ON RAILS TO A CAR. Kinematic while it drives — immovable, the solver pushes
+         * everything else out of its way — and dynamic once something hits it hard: it now has a
+         * mass, it bounces (Rich: "elastic collisions"), and it goes where the impulse sends it.
+         */
+        wake(massKg) {
+          if (!alive || loose) return
+          loose = true
+          body.setBodyType(R.RigidBodyType.Dynamic, true)
+          // the MASS HAS TO BE ON THE BODY NOW: a collider's mass reaches its body at the next step,
+          // and a blast in this step would find a body that weighs nothing and give it nothing
+          body.setAdditionalMass(massKg, true)
+          collider.setMass(0)
+          collider.setRestitution(0.45)
+          collider.setFriction(0.9)
+          body.setAngularDamping(0.6)
+          body.setLinearDamping(0.05)
+        },
+        rest() {
+          if (!alive || !loose) return
+          loose = false
+          body.setLinvel({ x: 0, y: 0, z: 0 }, false)
+          body.setAngvel({ x: 0, y: 0, z: 0 }, false)
+          body.setBodyType(R.RigidBodyType.KinematicPositionBased, true)
+          collider.setRestitution(0.3)
+          collider.setFriction(0.6)
+        },
+        enable(on) {
+          if (!alive || loose) return
+          if (body.isEnabled() !== on) body.setEnabled(on)
+        },
+        kick(dvx, dvy, dvz, spin = 4) {
+          if (!alive || !loose) return
+          const v = body.linvel()
+          body.setLinvel({ x: v.x + dvx, y: v.y + dvy, z: v.z + dvz }, true)
+          // a deterministic tumble from the handle, so the same blast throws the same car the same way
+          const h = Math.imul(collider.handle | 0, 2654435761)
+          body.setAngvel({ x: (((h >>> 3) & 255) / 255 - 0.5) * spin, y: (((h >>> 11) & 255) / 255 - 0.5) * spin, z: (((h >>> 19) & 255) / 255 - 0.5) * spin }, true)
+        },
+        state() {
+          const v = body.linvel()
+          return { dynamic: body.isDynamic(), mass: body.mass(), vx: v.x, vy: v.y, vz: v.z }
+        },
+        pose() {
+          const t = body.translation()
+          const r = body.rotation()
+          return { x: t.x, y: t.y - half.y, z: t.z, qx: r.x, qy: r.y, qz: r.z, qw: r.w }
         },
         free() {
           if (!alive) return
@@ -481,6 +625,23 @@ export async function buildPhysics(site: Site, opts: { enabled?: boolean } = {})
           phys.world.removeRigidBody(body)
         },
       }
+    },
+
+    explode(at, opts) {
+      const blast: Blast = { x: at.x, y: at.y, z: at.z, radius: opts.radius, impulse: opts.impulse, lift: opts.lift ?? 0.55, breakAt: opts.breakAt ?? 1 }
+      return blastWorld(phys, blast, breakables)
+    },
+
+    onImpact: (fn) => phys.onImpact(fn),
+
+    sweepHit(from, dir, maxM, radius, exclude) {
+      const hit = phys.world.castShape(from, { x: 0, y: 0, z: 0, w: 1 }, dir, new R.Ball(radius), 0, maxM, true, undefined, QUERY.solid, undefined, undefined, exclude === undefined ? undefined : (c) => c.handle !== exclude)
+      return hit ? hit.time_of_impact : null
+    },
+
+    rayHit(from, dir, maxM, exclude) {
+      const hit = phys.world.castRay(new R.Ray(from, dir), maxM, true, undefined, QUERY.solid, undefined, undefined, exclude === undefined ? undefined : (c) => c.handle !== exclude)
+      return hit ? hit.timeOfImpact : null
     },
 
     breakables,

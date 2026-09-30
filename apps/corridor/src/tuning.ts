@@ -158,6 +158,22 @@ export let GRASS_CACHE_SLACK = 1.4
 export let TRAFFIC_MAX = 600
 /** traffic cars further than this from the eye are simulated but not drawn (m) */
 export let TRAFFIC_DRAW_M = 700
+/** m from the player a car that ran off its road may come back at. Closer is a car from thin air */
+export let TRAFFIC_RESPAWN_M = 260
+/** m from the player within which a traffic car has a body in the solver; further, it is a mesh */
+export let TRAFFIC_PHYS_M = 220
+/**
+ * Loose wrecks at once. Past this the OLDEST is straightened out, put back on rails and respawned
+ * out of sight — Rich wanted the pile-up to go on for ever in a blind-drivers game, and a wreck is
+ * a dynamic body plus a 130k-vertex mesh drawn at full detail, so a pile of hundreds was 13 fps.
+ */
+export let TRAFFIC_WRECKS_MAX = 40
+/** a traffic car hit harder than this (N·s) stops being driven and becomes a loose body */
+export let TRAFFIC_WAKE_NS = 8000
+/** the missile: how fast it leaves, how far its blast reaches, and how hard (m/s given to a car at the centre) */
+export let MISSILE_SPEED = 120
+export let MISSILE_RADIUS = 9
+export let MISSILE_IMPULSE = 14
 
 // --- trees --------------------------------------------------------------------------------------
 /**
@@ -916,11 +932,30 @@ export let PHYS_ENABLED = 0
 /** fixed steps per second. 120 matches what the hand-written car already ran at */
 export let PHYS_HZ = 120
 /** most steps one frame may run before the rest of the backlog is DROPPED rather than banked */
-export let PHYS_MAX_STEPS = 4
+export let PHYS_MAX_STEPS = 12
+/**
+ * ms of a frame the fixed steps may take before the rest of the backlog is dropped.
+ *
+ * The cap on steps alone made SLOW MOTION: four 120 Hz steps are 33 ms of world per frame, and
+ * at 12 fps (an 83 ms frame) the world ran at 40% speed — Rich straightened his car "in slow
+ * motion". Now the steps run until the backlog is paid or this much of the frame has gone,
+ * whichever first: a slow RENDER costs no world time, and a slow SOLVE degrades to slow motion
+ * instead of a spiral where more steps make a slower frame make more steps.
+ */
+export let PHYS_STEP_BUDGET_MS = 10
 /** Rapier's constraint solver iterations. 4 is its default; a vehicle likes more */
 export let PHYS_ITERATIONS = 8
 /** newtons: a contact pair quieter than this never reports an impact. A parked car rests silently */
 export let PHYS_IMPACT_N = 30000
+/**
+ * A breakable that breaks under this (N·s) is SOFT: not solid until it breaks, so it gives way
+ * to a car instead of stopping it. Rich, 2026-09-30, on the stop sign at the spawn: *"instead of
+ * yeeting the sign, your car flies hundreds of feet through the air going end over end."* A
+ * rigid post met the raked nose, the contact normal tilted up, and the solver put the whole of a
+ * 40 m/s stop into the car before the post got the chance to break. Signs and posts are soft;
+ * a signal mast (breaks at ~4000 N·s × its mass) is not.
+ */
+export let PHYS_SOFT_BREAK_NS = 5000
 /** metres across one heightfield tile, and samples along its edge — TILE_M/CELLS is what a wheel feels */
 export let PHYS_TILE_M = 64
 export let PHYS_TILE_CELLS = 64
@@ -1165,7 +1200,14 @@ export const TUNE_TABS: TuneTab[] = [
         title: 'LOD',
         keys: [
           tune('TRAFFIC_MAX', () => TRAFFIC_MAX, (v) => (TRAFFIC_MAX = v), [0, 2000], 10, 'cap on traffic cars (reload the level)'),
+          tune('TRAFFIC_WAKE_NS', () => TRAFFIC_WAKE_NS, (v) => (TRAFFIC_WAKE_NS = v), [200, 20000], 100, 'a hit harder than this (N·s) knocks a traffic car loose'),
+          tune('MISSILE_SPEED', () => MISSILE_SPEED, (v) => (MISSILE_SPEED = v), [20, 300], 5, 'm/s, plus the car’s own'),
+          tune('MISSILE_RADIUS', () => MISSILE_RADIUS, (v) => (MISSILE_RADIUS = v), [2, 30], 0.5, 'blast radius, m'),
+          tune('MISSILE_IMPULSE', () => MISSILE_IMPULSE, (v) => (MISSILE_IMPULSE = v), [1, 60], 1, 'm/s a car at the centre of the blast is given'),
           tune('TRAFFIC_DRAW_M', () => TRAFFIC_DRAW_M, (v) => (TRAFFIC_DRAW_M = v), [100, 3000], 50, 'traffic further than this is simulated, not drawn'),
+          tune('TRAFFIC_PHYS_M', () => TRAFFIC_PHYS_M, (v) => (TRAFFIC_PHYS_M = v), [50, 1000], 10, 'traffic further than this has no body in the solver'),
+          tune('TRAFFIC_RESPAWN_M', () => TRAFFIC_RESPAWN_M, (v) => (TRAFFIC_RESPAWN_M = v), [50, 1000], 10, 'a car that ran off its road comes back at least this far away'),
+          tune('TRAFFIC_WRECKS_MAX', () => TRAFFIC_WRECKS_MAX, (v) => (TRAFFIC_WRECKS_MAX = v), [1, 400], 1, 'loose wrecks at once; the oldest is recycled into traffic'),
           tune('TREE_NEAR_RADIUS', () => TREE_NEAR_RADIUS, (v) => (TREE_NEAR_RADIUS = v), [30, 600], 5, 'procedural models inside, impostors beyond (m)'),
           tune('TREE_FADE_M', () => TREE_FADE_M, (v) => (TREE_FADE_M = v), [0, 120], 1, 'band outside that radius where the card dissolves; 0 = hard switch'),
           tune('TREE_NEAR_CAPACITY', () => TREE_NEAR_CAPACITY, (v) => (TREE_NEAR_CAPACITY = v), [10, 500], 5, 'models per species variant'),
@@ -1555,8 +1597,10 @@ export const TUNE_TABS: TuneTab[] = [
         keys: [
           tune('PHYS_ENABLED', () => PHYS_ENABLED, (v) => (PHYS_ENABLED = v), [0, 1], 1, 'Rapier at all. Read once, when the site builds \u2014 use ?phys=1 in the URL, this slider needs a reload and does not persist'),
           tune('PHYS_HZ', () => PHYS_HZ, (v) => (PHYS_HZ = v), [30, 240], 10, 'fixed steps per second'),
-          tune('PHYS_MAX_STEPS', () => PHYS_MAX_STEPS, (v) => (PHYS_MAX_STEPS = v), [1, 12], 1, 'a stall past this is dropped, never paid back'),
+          tune('PHYS_MAX_STEPS', () => PHYS_MAX_STEPS, (v) => (PHYS_MAX_STEPS = v), [1, 24], 1, 'a stall past this is dropped, never paid back'),
+          tune('PHYS_STEP_BUDGET_MS', () => PHYS_STEP_BUDGET_MS, (v) => (PHYS_STEP_BUDGET_MS = v), [2, 30], 1, 'ms of a frame the steps may take; past it the backlog is dropped'),
           tune('PHYS_ITERATIONS', () => PHYS_ITERATIONS, (v) => (PHYS_ITERATIONS = v), [1, 32], 1, 'solver iterations; higher is stiffer and dearer'),
+          tune('PHYS_SOFT_BREAK_NS', () => PHYS_SOFT_BREAK_NS, (v) => (PHYS_SOFT_BREAK_NS = v), [0, 50000], 250, 'a breakable under this gives way to a car instead of stopping it (reload)'),
           tune('PHYS_IMPACT_N', () => PHYS_IMPACT_N, (v) => (PHYS_IMPACT_N = v), [1000, 200000], 1000, 'quieter contacts than this report nothing'),
         ],
       },

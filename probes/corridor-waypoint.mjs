@@ -5,6 +5,7 @@
 // commit it points at the entry ring and names the road; in the ring it asks for the start line;
 // running, it names the next gate.
 import { chromium } from 'playwright'
+const innerWidth = 900
 const b = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--disable-dev-shm-usage'] })
 const p = await b.newPage({ viewport: { width: 900, height: 640 } })
 p.on('pageerror', (e) => console.log('PAGEERROR', e.message.slice(0, 200)))
@@ -18,6 +19,19 @@ const read = () => p.evaluate(() => { const w = document.querySelector('.waypoin
 const idle = await read()
 console.log(JSON.stringify(idle))
 check(!idle.hidden && /starts at the ring on Robert Crain Highway/.test(idle.text) && /m|km/.test(idle.dist), `before committing it points at the ring and names the road ("${idle.text}", ${idle.dist})`)
+// lower left, off the corner, and above the attribution list when it is open
+const place = await p.evaluate(async () => {
+  const w = document.querySelector('.waypoint').getBoundingClientRect()
+  const short = document.querySelector('#attribution .attrib-short')
+  const closed = { left: w.left, bottomGap: innerHeight - w.bottom, right: w.right }
+  short.click(); await new Promise((r) => setTimeout(r, 900))
+  const a = document.getElementById('attribution').getBoundingClientRect()
+  const w2 = document.querySelector('.waypoint').getBoundingClientRect()
+  short.click()
+  return { closed, openTop: a.top, waypointBottom: w2.bottom }
+})
+check(place.closed.left >= 20 && place.closed.bottomGap >= 40 && place.closed.right < innerWidth / 2, `it sits in the lower left, off the corner (left ${place.closed.left | 0}, ${place.closed.bottomGap | 0} px up)`)
+check(place.waypointBottom <= place.openTop, `and steps over the attribution block when that is open (arrow bottom ${place.waypointBottom | 0} ≤ block top ${place.openTop | 0})`)
 await p.click('.waypoint-msg'); await p.waitForTimeout(300)
 const folded = await read()
 check(folded.folded && folded.text === '…', 'a click folds the message to a marker')

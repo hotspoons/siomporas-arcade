@@ -97,6 +97,11 @@ export class RapierCar implements DrivableCar {
   }
 
   /** What it is driving as, so a picker can show the truth rather than what it last set. */
+  /** the chassis collider's handle, so an impact listener can tell the player's hits from the rest */
+  get colliderHandle(): number {
+    return this.vehicle.collider.handle
+  }
+
   get profile(): DriveProfile {
     return this.vehicle.profile
   }

@@ -385,8 +385,8 @@ body.chrome-off #attribution { display: none; }
 
 /* the waypoint: top right, an arrow on a tilted plane, the distance, and a message you can fold */
 .waypoint {
-  position: fixed; top: var(--s3); right: var(--s3); z-index: var(--z-panel);
-  display: grid; justify-items: end; gap: var(--s1);
+  position: fixed; left: 28px; bottom: 56px; z-index: var(--z-panel);
+  display: grid; justify-items: start; gap: var(--s1);
   max-width: min(360px, 60vw); pointer-events: none;
 }
 .waypoint[hidden] { display: none; }
@@ -394,7 +394,7 @@ body.chrome-off #attribution { display: none; }
 .waypoint-dist { font: 600 var(--text-sm) var(--num); color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,0.8); }
 .waypoint-msg {
   pointer-events: auto; cursor: pointer;
-  font: inherit; font-size: var(--text-sm); color: #fff; text-align: right;
+  font: inherit; font-size: var(--text-sm); color: #fff; text-align: left;
   background: rgba(0,0,0,0.55); border: 1px solid rgba(255,255,255,0.25); border-radius: var(--r2);
   padding: var(--s1) var(--s2); max-width: 100%;
 }

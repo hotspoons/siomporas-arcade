@@ -48,6 +48,12 @@ export interface AssetItem {
   forkedFrom?: string | null
   /** which bone does what, when somebody has said rather than letting the names be guessed */
   rig?: RigBinding | null
+  /**
+   * How the model is turned about its up axis wherever it is used, degrees. A reconstruction
+   * faces whatever way the exporter felt like; this is the fact about the MODEL that says which
+   * way is its front (+X once turned), so no guess is needed. Absent: as exported, and guessed.
+   */
+  orient?: { yaw_deg: number } | null
   /** role → which mesh that role loads. Absent means the class default; see `USED_FOR` */
   use?: Record<string, MeshVariant> | null
   /**

@@ -9,19 +9,23 @@
 // perfectly ordinary empty tile), and the painter has to have stroked some of them in view.
 //
 //   PORT=5187 node probes/corridor-coastline.mjs
+//   BASE=https://worldeditor.richard-siomporas.basedweights.com node probes/corridor-coastline.mjs
 import { chromium } from 'playwright'
 
 const PORT = process.env.PORT ?? '5185'
+const BASE = process.env.BASE ?? `http://localhost:${PORT}`
+// RESOLVE=host=ip pins a hostname, for checking a deploy while its DNS record is still settling
+const RESOLVE = process.env.RESOLVE ? [`--host-resolver-rules=MAP ${process.env.RESOLVE.replace('=', ' ')}`] : []
 const OUT = process.env.OUT ?? '/tmp'
 const fail = []
 const say = (k, v) => console.log(`${k.padEnd(30)} ${typeof v === 'object' ? JSON.stringify(v) : v}`)
 
-const browser = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--disable-dev-shm-usage'] })
+const browser = await chromium.launch({ args: [...RESOLVE, '--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--disable-dev-shm-usage'] })
 const page = await browser.newPage({ viewport: { width: 1100, height: 800 } })
 const errs = []
 page.on('pageerror', (e) => errs.push(e.message.split('\n')[0]))
 // 'load', not 'networkidle': the map streams tiles for as long as it is open
-await page.goto(`http://localhost:${PORT}/world.html`, { waitUntil: 'load', timeout: 90000 })
+await page.goto(`${BASE}/world.html`, { waitUntil: 'load', timeout: 90000 })
 await page.waitForFunction(() => window.__we?.ready(), null, { timeout: 90000 })
 
 // THE VARIANT IS PART OF THE ASSERTION. The first cut of this passed at zoom 12 in 0.0 s, off the

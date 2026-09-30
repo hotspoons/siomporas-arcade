@@ -579,6 +579,21 @@ export class ViewerUI {
   }
 
   private buildControls(host: HTMLElement) {
+    let pref: string | null = null
+    try { pref = localStorage.getItem('corridor.recoverRepairs') } catch { /* no storage */ }
+    host.append(
+      select({
+        label: 'R also repairs the car',
+        value: (pref === 'on' || pref === 'off' ? pref : 'level') as 'level' | 'on' | 'off',
+        options: [
+          { value: 'level', label: 'the level decides' },
+          { value: 'on', label: 'always' },
+          { value: 'off', label: 'never' },
+        ],
+        note: 'recover straightens the dents out, unless the game wants you to carry them',
+        onChange: (v) => { try { localStorage.setItem('corridor.recoverRepairs', v) } catch { /* no storage */ } },
+      }),
+    )
     for (const k of KEYS) {
       const g = group(k.group)
       const body = bodyOf(g)

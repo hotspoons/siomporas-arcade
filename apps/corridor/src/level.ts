@@ -52,6 +52,11 @@ export interface Level {
    * before 2026-09-29 gets.
    */
   player?: { vehicle: string; profile?: string } | null
+  /**
+   * Whether R (recover) also straightens the hero car's dents. Absent: yes. A crash game may say
+   * no, so the damage is the score; the viewer's settings can overrule either way.
+   */
+  recoverRepairs?: boolean
   /** a program under programs/ (e.g. `crofton/jam.ts`), built and run by the viewer when the level opens */
   program?: string | null
   mode?: 'drive' | 'fly' | 'walk'

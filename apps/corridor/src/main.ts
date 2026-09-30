@@ -34,6 +34,8 @@ import { applyLevel, loadLevel, type LevelPlacement } from './level'
 import { TrafficLayer, type TrafficSpec } from './trafficlayer'
 import { FixtureLayer, loadFixtures, settingsOf, type FixtureDoc } from './fixtures'
 import { WaypointHud, type Waypoint } from './ui/waypoint'
+import { MissileLayer } from './missiles'
+import { dentObject, flushDents, repairObject } from './dents'
 import { GameRun, type ProgramHost } from './program'
 import { loadGameModule } from './programload'
 import { profile as driveProfile } from '@apex/engine/physics/profiles'
@@ -367,6 +369,13 @@ function holdToTrack(car: DrivableCar | null, dt: number): boolean {
   return true
 }
 
+// M fires a missile — an edge, not a held key, so one press is one shot
+addEventListener('keydown', (e) => {
+  if ((e.key === 'm' || e.key === 'M') && !e.repeat && drive.on && !(document.activeElement instanceof HTMLInputElement) && !(document.activeElement instanceof HTMLTextAreaElement)) {
+    if (fireMissile()) e.preventDefault()
+  }
+})
+
 const perfMeter = new PerfMeter()
 const perfHud = new PerfHud(perfMeter)
 // left on last time? then it comes back on, which is the whole point of remembering it
@@ -482,6 +491,10 @@ async function loadSite(slug: string) {
   stopProgram()
   traffic?.dispose()
   traffic = null
+  missiles?.dispose()
+  missiles = null
+  offPlayerImpact?.()
+  offPlayerImpact = null
   fixtures?.dispose()
   fixtures = null
   physics?.free()
@@ -1057,6 +1070,63 @@ async function openLevel(id: string) {
 let level: Awaited<ReturnType<typeof loadLevel>> = null
 /** the level's traffic, once a level with a traffic simulation has opened */
 let traffic: TrafficLayer | null = null
+/** what the player fires (M), and the bang where it lands */
+let missiles: MissileLayer | null = null
+let offPlayerImpact: (() => void) | null = null
+
+/**
+ * A blast at a point: the traffic within reach is knocked loose first — a car on rails ignores an
+ * impulse — then the physics world throws everything dynamic and breaks what breaks. The number
+ * is how many bodies moved. The program's `api.physics.explode` and a landing missile both end here.
+ */
+function boom(at: { x: number; y: number; z: number }, opts: { radius: number; impulse: number; lift?: number; breakAt?: number }): number {
+  if (!physics) return 0
+  const cars = traffic?.blast(at, opts.radius, opts.impulse, opts.lift) ?? 0
+  return cars + physics.explode(at, opts)
+}
+
+/** Fire a missile from the player's bonnet, along the nose, at the missile speed plus the car's. */
+function fireMissile(): boolean {
+  if (!drive.on || !drive.car || !physics || !site) return false
+  if (!missiles) {
+    missiles = new MissileLayer({
+      hitTest: (from, to) => {
+        const d = to.clone().sub(from)
+        const len = d.length()
+        if (len < 1e-4) return null
+        d.divideScalar(len)
+        const mine = drive.car instanceof RapierCar ? drive.car.colliderHandle : undefined
+        // a 0.45 m ball: fat enough to catch a car it grazes, thin enough to clear the road it
+        // is launched 0.7 m above — a 0.9 m one touched the ground at the muzzle and landed there
+        const toi = physics!.sweepHit(from, d, len, 0.45, mine)
+        return toi === null ? null : from.clone().addScaledVector(d, toi)
+      },
+      groundAt: (x, z) => site?.groundAt(x, z) ?? null,
+      onHit: (at) => { boom(at, { radius: T.MISSILE_RADIUS, impulse: T.MISSILE_IMPULSE, lift: 0.6, breakAt: 1 }) },
+    })
+    scene.add(missiles.group)
+  }
+  const car = drive.car
+  // from the bonnet, not the roof: the body origin is already a metre up, and a traffic car's box
+  // tops out at a metre and a half — a missile launched from two metres sailed over every one
+  const from = car.pos.clone().add(car.forward.clone().multiplyScalar(2.6)).add(new THREE.Vector3(0, 0.15, 0))
+  const dir = car.forward.clone()
+  missiles.fire(from, dir, Math.max(0, car.speed))
+  return true
+}
+
+/** The player's own dents: every impact on the chassis crumples the model where it was hit. */
+function watchPlayerImpacts(): void {
+  offPlayerImpact?.()
+  offPlayerImpact = null
+  if (!physics || !(drive.car instanceof RapierCar)) return
+  const mine = drive.car.colliderHandle
+  offPlayerImpact = physics.onImpact((im) => {
+    if (!playerModel || !drive.car) return
+    if (im.a.handle === mine) dentObject(playerModel.object, im, false)
+    else if (im.b.handle === mine) dentObject(playerModel.object, im, true)
+  })
+}
 /** the level's program, running: goal, score, outcome. Null when the level names none */
 let game: GameRun | null = null
 let gameLine = ''
@@ -1142,16 +1212,22 @@ function stopProgram() {
   if (!drive.on) clearStatus()
 }
 
-/** The goal and the score, on the readout, whenever they change; the outcome, once, as a toast. */
+/**
+ * The score when it changes, briefly; the outcome, once. NOT the goal: the goal used to sit on the
+ * bottom readout as well, which with the waypoint's message in the corner was the same sentence
+ * twice, one of them flashing (Rich, 2026-09-30). The waypoint carries the words; a program that
+ * wants its goal on screen says it with `api.say`.
+ */
 function showGame() {
   if (!game || hudHidden) return
   const line = game.outcome
     ? `${game.outcome === 'win' ? 'WIN' : game.outcome === 'lose' ? 'LOSE' : 'abandoned'} · ${game.score} pts`
-    : `${game.goalText || 'no goal yet'}${game.score ? ` · ${game.score} pts` : ''}`
+    : `${game.score} pts`
   if (line !== gameLine) {
+    const first = gameLine === ''
     gameLine = line
-    status(line)
     if (game.outcome) toast(line, game.outcome === 'win' ? 'ok' : 'warn', 8000)
+    else if (!first && game.score) toast(line, 'info', 2000)
   }
 }
 
@@ -1197,6 +1273,7 @@ function programHost(): ProgramHost {
       setProfile: (id, overrides) => {
         if (drive.car instanceof RapierCar) drive.car.setProfile(driveProfile(id, overrides))
       },
+      explode: (at, opts) => boom(at, { radius: opts.radius, impulse: opts.impulse, lift: opts.lift, breakAt: opts.breakAt }),
       car: () => (drive.car ? { speed: drive.car.speed, slide: drive.car.slide ?? 0, airborne: false, damage: 0 } as never : null),
     },
     layers: {
@@ -1279,6 +1356,14 @@ async function applyFixtureDoc(doc: FixtureDoc): Promise<void> {
 let playerVehicle: VehicleDoc | null = null
 /** the level's car as a MODEL, loaded beside its numbers. Null = the procedural wedge */
 let playerModel: CarModel | null = null
+/** does R straighten the car's dents: the settings say, else the level, else yes */
+function recoverRepairs(): boolean {
+  let pref: string | null = null
+  try { pref = localStorage.getItem('corridor.recoverRepairs') } catch { /* no storage */ }
+  if (pref === 'on') return true
+  if (pref === 'off') return false
+  return level?.recoverRepairs ?? true
+}
 
 // ---------------------------------------------------------------------------------------------
 // layers
@@ -1444,6 +1529,7 @@ function setDrive(on: boolean) {
           playerModel?.object,
         )
         status(`driving: rapier, ${wantProfile ?? T.physProfileId()}${playerVehicle ? `, ${level?.player?.vehicle}` : ''}`)
+        watchPlayerImpacts()
       } else {
         const car = new Car(surface)
         // the level's car on the kinematic model too — it was only ever hung on the physics one,
@@ -2075,7 +2161,12 @@ addEventListener('keydown', (e) => {
     case 'KeyR':
       if (!(drive.on && site && drive.car)) break
       if (e.shiftKey) { const p = site.spineAt(site.manifest.spine.photo_s); const side = p.dir.clone().cross(up).multiplyScalar(1.83); drive.car.place(p.pos.x + side.x, p.pos.z + side.z, Math.atan2(p.dir.z, p.dir.x)) }
-      else drive.car.recover(T.CAR_RECOVER_BACK)
+      else {
+        drive.car.recover(T.CAR_RECOVER_BACK)
+        // Rich: "make recover car (r key) reset the damage (optionally, this should be per game but
+        // overridable in the options)". The level says; the settings dialog can overrule it.
+        if (recoverRepairs() && playerModel && repairObject(playerModel.object)) toast('straightened out', 'info', 900)
+      }
       break
   }
   if (drive.on && (['KeyW', 'KeyS', 'KeyA', 'KeyD', 'Space'].includes(e.code) || e.code.startsWith('Arrow'))) e.preventDefault()
@@ -2237,8 +2328,17 @@ function frame() {
    * `real`, not `dt`: the accumulator inside the physics world does its own capping, and handing it
    * an already-capped delta would make the simulation quietly run slow through every hitch.
    */
+  if (missiles) missiles.tick(real)
   // the traffic steps before the physics, so its bodies are where the cars are when the player hits one
-  if (traffic) traffic.tick(real, camera.position)
+  if (traffic) {
+    // the drivers see the player: where he is and how fast, in the site frame
+    if (drive.on && drive.car) {
+      const c = drive.car
+      const sp = c.speed
+      traffic.player = { x: c.pos.x, y: -c.pos.z, vx: c.forward.x * sp, vy: -c.forward.z * sp, length: 4.6 }
+    } else traffic.player = null
+    traffic.tick(real, camera.position)
+  }
   if (game) {
     game.tick(real)
     showGame()
@@ -2250,11 +2350,17 @@ function frame() {
     const want = programWaypoint ?? raceWaypoint(at)
     const now = waypointHud.current
     if (want?.x !== now?.x || want?.y !== now?.y || want?.text !== now?.text) waypointHud.set(want)
-    if (want) waypointHud.update(at.x, at.y, Math.atan2(-drive.car.forward.z, drive.car.forward.x))
+    // from the camera's heading, not the car's: twist the camera round the car and the arrow turns with it
+    if (want) {
+      const look = camera.getWorldDirection(new THREE.Vector3())
+      waypointHud.update(at.x, at.y, Math.atan2(-look.z, look.x))
+    }
   } else if (waypointHud.current) {
     waypointHud.set(null)
   }
   if (physics) physics.update(drive.car?.pos ?? camera.position, real)
+  // the dents the steps just made, to the GPU — a couple of meshes a frame, the rest wait a frame
+  flushDents()
   // the world's clock, and the light that follows from it. applySky is cheap (no geometry), so it
   // runs whenever the sun has moved enough to see — a degree of elevation is about four minutes of
   // a real day, and far less than that at a high TIME_RATE.
@@ -2541,6 +2647,13 @@ registerBridgeContext({
   /** the world's fixtures layer: `document`, `placed`, `problems`; `applyFixtures(doc)` applies one live */
   get fixtures() {
     return fixtures
+  },
+  /** a blast at a point (three frame): wakes the traffic in reach and throws everything dynamic */
+  boom: (at: { x: number; y: number; z: number }, opts: { radius: number; impulse: number; lift?: number; breakAt?: number }) => boom(at, opts),
+  /** fire a missile from the player's car, as M does */
+  fire: () => fireMissile(),
+  get missiles() {
+    return missiles
   },
   applyFixtures: (doc: FixtureDoc) => applyFixtureDoc(doc),
   /** run a program by path, the way a level does — for a probe, and for trying one without a level */

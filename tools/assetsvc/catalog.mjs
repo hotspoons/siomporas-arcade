@@ -159,6 +159,8 @@ export class Catalog {
        * so without every asset having to.
        */
       use: spec.use === undefined ? (before.use ?? null) : spec.use,
+      /** how the model is turned about its up axis wherever it is used: { yaw_deg }. A fact about the model, not a placement */
+      orient: spec.orient === undefined ? (before.orient ?? null) : spec.orient,
       /*
        * SHARED, OR THIS WORLD'S.
        *

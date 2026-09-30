@@ -66,6 +66,13 @@ export interface PhysicsOptions {
   hz?: number
   /** most steps one call to `step` may run before the rest of the backlog is dropped */
   maxSteps?: number
+  /**
+   * ms of a frame the steps may take before the rest of the backlog is dropped. Absent: no
+   * budget, only `maxSteps`. With one, `maxSteps` can be generous: a slow RENDER costs no world
+   * time (the steps are cheap and all run), and a slow SOLVE degrades to slow motion instead of a
+   * spiral where more steps make a slower frame make more steps.
+   */
+  budgetMs?: number
   /** Rapier's constraint solver iterations. 4 is its default; a vehicle likes more */
   solverIterations?: number
   /**
@@ -96,11 +103,13 @@ export class PhysicsWorld {
   readonly hz: number
   readonly dt: number
   private readonly maxSteps: number
+  private readonly budgetMs: number
   private readonly events: EventQueue
   private readonly threshold: number
   private carry = 0
   private tracked = new Map<number, Tracked>()
   private listeners: ((i: Impact) => void)[] = []
+  private touches: ((a: Collider, b: Collider, started: boolean) => void)[] = []
   private pre: ((dt: number) => void)[] = []
   /** reused across every impact in a step: nothing in the drain loop allocates */
   private readonly impact: Impact = { a: null!, b: null!, x: 0, y: 0, z: 0, nx: 0, ny: 0, nz: 0, impulse: 0, peak: 0 }
@@ -113,6 +122,7 @@ export class PhysicsWorld {
     this.hz = opts.hz ?? 120
     this.dt = 1 / this.hz
     this.maxSteps = opts.maxSteps ?? 4
+    this.budgetMs = opts.budgetMs ?? Infinity
     this.threshold = opts.impactThreshold ?? 30_000
     this.world = new R.World({ x: 0, y: -(opts.gravity ?? 9.81), z: 0 })
     this.world.timestep = this.dt
@@ -139,18 +149,29 @@ export class PhysicsWorld {
     const t0 = performance.now()
     this.carry += Math.max(0, realSeconds)
     let n = 0
-    while (this.carry >= this.dt && n < this.maxSteps) {
+    // at least one step whenever one is owed, then as many as the count and the budget allow
+    while (this.carry >= this.dt && n < this.maxSteps && (n === 0 || performance.now() - t0 < this.budgetMs)) {
       this.carry -= this.dt
       n++
       for (const t of this.tracked.values()) t.prev.set(t.cur)
       for (const fn of this.pre) fn(this.dt)
       this.world.step(this.events)
       this.readPoses()
+      if (this.touches.length) {
+        this.events.drainCollisionEvents((h1, h2, started) => {
+          const a = this.world.colliders.get(h1)
+          const b = this.world.colliders.get(h2)
+          if (!a || !b) return
+          for (const fn of this.touches) fn(a, b, started)
+        })
+      }
       if (this.listeners.length) this.drainImpacts()
     }
-    if (this.carry >= this.dt * this.maxSteps) {
+    // whatever is still owed past one step is DROPPED, never paid back: a debt that carried
+    // would be paid as a burst of steps next frame, which is the spiral again
+    if (this.carry >= this.dt) {
       this.stats.dropped += Math.floor(this.carry / this.dt)
-      this.carry = 0
+      this.carry = this.carry % this.dt
     }
     this.stats.steps += n
     this.stats.bodies = this.world.bodies.len()
@@ -180,6 +201,19 @@ export class PhysicsWorld {
   /* ---- impacts ------------------------------------------------------------------------- */
 
   /** Listen for contacts above the threshold. Returns the function that stops listening. */
+  /**
+   * Every collision START and END the world reports — the one kind of event a SENSOR produces.
+   * A sensor is how a light breakable (a sign, a post) is made to give way instead of stopping a
+   * car: it is not solid, so there is no contact impulse, only the fact of the touch.
+   */
+  onTouch(fn: (a: Collider, b: Collider, started: boolean) => void): () => void {
+    this.touches.push(fn)
+    return () => {
+      const i = this.touches.indexOf(fn)
+      if (i >= 0) this.touches.splice(i, 1)
+    }
+  }
+
   onImpact(fn: (i: Impact) => void): () => void {
     this.listeners.push(fn)
     return () => {

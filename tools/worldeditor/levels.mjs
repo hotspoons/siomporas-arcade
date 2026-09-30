@@ -138,6 +138,7 @@ export function validate(level) {
     }
   }
 
+  if (level.recoverRepairs !== undefined && typeof level.recoverRepairs !== 'boolean') E('recoverRepairs is true or false — whether R straightens the hero car\'s dents')
   for (const [i, s] of (level.simulations ?? []).entries()) {
     if (!s?.kind) E(`simulations[${i}] has no kind`)
     if (s?.seed !== undefined && !Number.isInteger(s.seed)) E(`simulations[${i}].seed must be a whole number — it is what makes a run repeatable`)
@@ -149,6 +150,7 @@ export function validate(level) {
         E(`simulations[${i}].density is 0…1 or one of ${words.join(', ')} (a world-wide floor under the painted zones)`)
       }
       if (s.max !== undefined && !(Number.isInteger(s.max) && s.max >= 0)) E(`simulations[${i}].max is a whole number of cars`)
+      if (s.blind !== undefined && typeof s.blind !== 'boolean') E(`simulations[${i}].blind is true or false — blind drivers brake for nobody`)
       if (s.set === undefined && s.density === undefined) warnings.push(`simulations[${i}]: traffic with no set and no density puts the default saloon only where zones are painted`)
     }
   }

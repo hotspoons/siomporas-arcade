@@ -694,6 +694,22 @@ export class AssetCatalog {
             .then((name) => { if (name) { edit('kind', slugOf(name)); this.renderDetail() } else this.renderDetail() })
         },
       }),
+      select({
+        label: 'Orientation',
+        value: String((this.draft.orient === undefined ? it.orient : this.draft.orient)?.yaw_deg ?? 0) as '0' | '90' | '180' | '270',
+        options: [
+          { value: '0', label: 'as exported' },
+          { value: '90', label: 'turned 90°' },
+          { value: '180', label: 'turned 180°' },
+          { value: '270', label: 'turned 270°' },
+        ],
+        note: 'turns the model wherever it is used; a car is right when its front points along the red axis in the preview',
+        onChange: (v) => {
+          const deg = Number(v)
+          edit('orient', deg ? { yaw_deg: deg } : null)
+          this.mesh3d?.setYawDeg(deg)
+        },
+      }),
       promptField('Prompt', this.draft.prompt ?? it.prompt, (v) => edit('prompt', v)),
       promptField('Avoid', this.draft.negative ?? it.negative, (v) => edit('negative', v)),
     )
@@ -823,6 +839,7 @@ export class AssetCatalog {
       ;(window as unknown as { __meshview?: MeshView }).__meshview = view
       meshBody.append(view.root)
       view.start()
+      view.setYawDeg((this.draft.orient === undefined ? it.orient : this.draft.orient)?.yaw_deg ?? 0)
       // the toggles read the viewer, which read what it was left as — a hard-coded `true` here
       // would turn spin back on at every render and make the preference look ignored
       const viewControls = rowOf(

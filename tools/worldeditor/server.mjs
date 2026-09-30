@@ -1351,10 +1351,13 @@ for (const signal of ['SIGTERM', 'SIGINT']) {
       process.exit(0)
     }, 5000)
     hard.unref()
+    // where each followed bake log got to, so the next pod resumes rather than replays it; the
+    // exit waits for it (the hard timeout above still bounds the whole thing)
+    const flushed = runs.flush()
     server.closeIdleConnections()
     server.close(() => {
       console.log('  closed')
-      process.exit(0)
+      void flushed.finally(() => process.exit(0))
     })
   })
 }

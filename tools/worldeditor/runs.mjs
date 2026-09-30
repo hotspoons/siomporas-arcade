@@ -27,6 +27,10 @@ import { mirrorsFor } from './overpass.mjs'
 
 const now = () => new Date().toISOString()
 
+
+/** How often a followed log's position is written to the run record. */
+const SAVE_EVERY_MS = 2000
+
 export class Runs {
   /**
    * @param store    the volume
@@ -42,6 +46,16 @@ export class Runs {
     // holding two copies of the same run both pass a check on their own object, so the guard has
     // to be on the id.
     this.done = new Set()
+    // runs whose pod log is being followed right now, so a shutdown can save where each one got to
+    this.following = new Map()
+  }
+
+  /**
+   * Save every followed run's position (`lastStamp`). Called on SIGTERM, before the process goes:
+   * the next pod adopts the run from the saved record and resumes from that stamp.
+   */
+  async flush() {
+    await Promise.all([...this.following.values()].map((run) => this.#save(run).catch(() => {})))
   }
 
   describe() {
@@ -284,8 +298,25 @@ export class Runs {
    * line carries an RFC3339 stamp, the last one seen is remembered on the run record, and lines
    * at or before it on reconnect are dropped. Without that, a reconnect either loses the lines
    * written during the gap or repeats the last minute of them.
+   *
+   * THE STAMP IS SAVED AS IT MOVES, not only when a stream ends. It used to be written only at the
+   * end of a stream, and a bake's stream does not end until the bake does. So when this pod was
+   * replaced mid-bake (a deploy, 2026-09-30), the record said `lastStamp: null`, the new pod
+   * adopted the run and resumed from the very beginning, and the whole log was appended a second
+   * time (Rich: "It looks like it ran twice"). Saved at most every SAVE_EVERY_MS, and on SIGTERM
+   * by flush().
    */
   async #followPod(run) {
+    this.following.set(run.id, run)
+    try {
+      await this.#followPodLoop(run)
+    } finally {
+      this.following.delete(run.id)
+    }
+  }
+
+  async #followPodLoop(run) {
+    let savedAt = Date.now()
     for (;;) {
       if (!this.live.has(run.id)) return
       const res = await this.k8s.logStream(run.pod, { follow: true, sinceTime: run.lastStamp })
@@ -313,6 +344,10 @@ export class Runs {
             out += `${text}\n`
           }
           if (out) sink.write(out)
+          if (out && Date.now() - savedAt >= SAVE_EVERY_MS) {
+            savedAt = Date.now()
+            void this.#save(run).catch(() => {})
+          }
         })
         res.on('end', resolve)
         res.on('error', resolve)

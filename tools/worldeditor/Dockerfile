@@ -147,6 +147,12 @@ COPY tools/sf2-probe/rigging/ tools/sf2-probe/rigging/
 
 COPY tools/worldeditor/ tools/worldeditor/
 COPY --from=app /src/node_modules/ws/ node_modules/ws/
+# TypeScript too: `programs.mjs` transpiles and typechecks a level's program on request (`?js=1`
+# is what the viewer asks for when a level names one), and it `require('typescript')`s lazily —
+# so the image built, the smoke test passed, and the first level with a program answered HTTP 500
+# "Cannot find module 'typescript'" (Rich, 2026-09-30). Pure JavaScript, copied from the build
+# stage like `ws`, for the same reason: this stage has no registry.
+COPY --from=app /src/node_modules/typescript/ node_modules/typescript/
 COPY --from=app /src/apps/corridor/dist/ apps/corridor/dist/
 # The seed list is CARRIED but NOT ENABLED.
 #

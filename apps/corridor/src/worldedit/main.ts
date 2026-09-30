@@ -113,8 +113,10 @@ const stagePanel = new StagePanel({
   host: inspector,
   bakedWorlds: () => worlds.filter((w) => w.baked).map((w) => w.slug),
   play: (level) => {
-    // the viewer, on that world, with the level applied — `?level=` in main.ts
-    window.open(`/?level=${encodeURIComponent(level.id)}#${level.world}`, '_blank', 'noopener')
+    // the viewer, on that world, with the level applied — `?level=` in main.ts. `/index.html`
+    // by name: in the pod `/` IS this page (the world editor), so `/?level=` opened a second
+    // editor and never the game (Rich, 2026-09-30). The dev server serves index.html at both.
+    window.open(`/index.html?level=${encodeURIComponent(level.id)}#${level.world}`, '_blank', 'noopener')
   },
   onDirty: (d) => setDirty(d, 'level'),
 })

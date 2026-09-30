@@ -35,12 +35,21 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const DOCKERFILE = path.join(ROOT, 'tools/worldeditor/Dockerfile')
 const APP = 'apps/corridor'
 
-/** One stage's text: `which` 0 is the build stage, 1 the runtime stage. */
+/**
+ * One stage's text: `which` 0 is the build stage, -1 (or any index) the runtime stage.
+ *
+ * THE RUNTIME STAGE IS THE LAST ONE, not the second. The Dockerfile grew two stages in between
+ * (Blender, and the rigging add-on) on 2026-09-29, and `1` quietly became the Blender copy — no
+ * ENTRYPOINT, no COPYs of the service — so this probe reported "names no ENTRYPOINT script" and
+ * checked nothing, while the image shipped without `typescript` (Rich, 2026-09-30: HTTP 500 on
+ * the first level with a program).
+ */
 function stageText(dockerfile, which) {
   const text = readFileSync(dockerfile, 'utf8')
   const froms = [...text.matchAll(/^FROM /gm)].map((m) => m.index)
-  const from = froms[which]
-  const to = froms[which + 1] ?? text.length
+  const i = which < 0 ? froms.length + which : which
+  const from = froms[i]
+  const to = froms[i + 1] ?? text.length
   return text.slice(from, to)
 }
 
@@ -84,6 +93,9 @@ function specifiers(text) {
   for (const m of text.matchAll(/^\s*(?:export\s+\*\s+from|export\s+\{[^}]*\}\s*from|import\s+(?:[^'"()]*?\s+from\s+)?)['"]([^'"]+)['"]/gm)) out.push(m[1])
   // dynamic, which can legitimately sit mid-line — `(?<!\w)` keeps it off `.import(`
   for (const m of text.matchAll(/(?<![\w.])import\s*\(\s*(?:\/\*[^*]*\*\/\s*)?['"]([^'"]+)['"]\s*\)/g)) out.push(m[1])
+  // and a CommonJS require, which is how programs.mjs loads TypeScript lazily — it is every bit
+  // as much a dependency as an import, and it was the one the image was missing
+  for (const m of text.matchAll(/(?<![\w.])require\s*\(\s*['"]([^'"]+)['"]\s*\)/g)) out.push(m[1])
   return out
 }
 
@@ -136,7 +148,7 @@ if (!escaping.length) {
 }
 /* ---- the runtime stage: a bare import needs its package copied in ------------------------- */
 
-const runtime = copiedPaths(stageText(DOCKERFILE, 1))
+const runtime = copiedPaths(stageText(DOCKERFILE, -1))
 
 /**
  * What the service actually loads, from its ENTRYPOINT outwards.
@@ -173,7 +185,7 @@ function reachable(entry) {
   return { files: seen, bare }
 }
 
-const entry = entrypointOf(stageText(DOCKERFILE, 1))
+const entry = entrypointOf(stageText(DOCKERFILE, -1))
 if (!entry) {
   fail.push('the Dockerfile names no ENTRYPOINT script, so nothing could be traced')
 }
@@ -225,7 +237,7 @@ function spawned(files) {
   return out
 }
 
-const runtimeStage = stageText(DOCKERFILE, 1)
+const runtimeStage = stageText(DOCKERFILE, -1)
 const pkgs = installed(runtimeStage)
 const bins = spawned([...serviceFiles])
 // node is the ENTRYPOINT's own interpreter; the bake's python runs in another image entirely, as a

@@ -382,3 +382,22 @@ body.chrome-off #attribution { display: none; }
 .timectl-row .input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .timectl-now { padding: 2px var(--s2); font-size: var(--text-xs); }
 .timectl-offset { font-size: var(--text-xs); color: var(--ink-3); font-family: var(--num); }
+
+/* the waypoint: top right, an arrow on a tilted plane, the distance, and a message you can fold */
+.waypoint {
+  position: fixed; top: var(--s3); right: var(--s3); z-index: var(--z-panel);
+  display: grid; justify-items: end; gap: var(--s1);
+  max-width: min(360px, 60vw); pointer-events: none;
+}
+.waypoint[hidden] { display: none; }
+.waypoint-arrow { width: 88px; height: 88px; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5)); }
+.waypoint-dist { font: 600 var(--text-sm) var(--num); color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,0.8); }
+.waypoint-msg {
+  pointer-events: auto; cursor: pointer;
+  font: inherit; font-size: var(--text-sm); color: #fff; text-align: right;
+  background: rgba(0,0,0,0.55); border: 1px solid rgba(255,255,255,0.25); border-radius: var(--r2);
+  padding: var(--s1) var(--s2); max-width: 100%;
+}
+.waypoint-msg.folded { padding: 0 var(--s2); }
+.waypoint-msg[hidden] { display: none; }
+body.chrome-off .waypoint { display: none; }

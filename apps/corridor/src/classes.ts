@@ -17,8 +17,9 @@
 /** Every class an asset may be filed under. The library offers these plus whatever is already used. */
 export const KINDS = [
   'hero-car', 'traffic', 'emergency', 'commercial-vehicle', 'pedestrian', 'animal',
-  'furniture', 'building-dressing', 'vegetation', 'signage', 'prop',
+  'furniture', 'building', 'building-dressing', 'vegetation', 'signage', 'prop',
   'weapon',
+  'race-gate', 'race-marker', 'stop-sign', 'give-way-sign', 'signal', 'power-pole', 'lamp-post', 'street-sign',
 ]
 
 /*
@@ -45,7 +46,15 @@ export const KINDS = [
  * An unrigged car is still a vehicle. Rich, same day: "Unrigged cars should still be usable as
  * vehicles, the wheels just won't turn." Nothing in here may ask about a mesh or a skeleton.
  */
-export const TYPES = ['prop', 'vehicle', 'actor', 'weapon'] as const
+/**
+ * `fixture`: the things the world draws by itself — signs, signals, poles, race gates — which the
+ * asset manager can now offer variants of. Rich, 2026-09-30: *"make all of these built-in assets
+ * like light poles, power lines, stop signs, street sign components, start/finish lines, and
+ * checkpoint gates … fixtures with a few classes … and use different variants in our levels."*
+ * A fixture class always has a BUILT-IN (the procedural one); a catalog item of that class is a
+ * variant a world can choose instead. See `fixtures.ts`.
+ */
+export const TYPES = ['prop', 'vehicle', 'actor', 'weapon', 'fixture'] as const
 export type AssetType = (typeof TYPES)[number]
 
 export const TYPE_LABEL: Record<AssetType, string> = {
@@ -53,6 +62,7 @@ export const TYPE_LABEL: Record<AssetType, string> = {
   vehicle: 'Vehicles',
   actor: 'Actors',
   weapon: 'Weapons',
+  fixture: 'Fixtures',
 }
 
 /** Which classes belong to which type. The ONLY copy of this mapping; the service does not have one. */
@@ -60,7 +70,8 @@ export const CLASSES_BY_TYPE: Record<AssetType, string[]> = {
   vehicle: ['hero-car', 'traffic', 'emergency', 'commercial-vehicle'],
   actor: ['pedestrian', 'animal'],
   weapon: ['weapon'],
-  prop: ['furniture', 'building-dressing', 'vegetation', 'signage', 'prop'],
+  prop: ['furniture', 'building', 'building-dressing', 'vegetation', 'signage', 'prop'],
+  fixture: ['race-gate', 'race-marker', 'stop-sign', 'give-way-sign', 'signal', 'power-pole', 'lamp-post', 'street-sign'],
 }
 
 const TYPE_OF_CLASS: Record<string, AssetType> = Object.fromEntries(

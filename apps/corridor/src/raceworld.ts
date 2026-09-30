@@ -15,13 +15,18 @@
 
 import * as THREE from 'three'
 import { RaceSession, type RaceOpts, type RaceState, type RaceTick } from './racerun'
-import { gateWidth, midpoint, type Course, type CourseDoc, type Gate } from './races'
+import { gateWidth, midpoint, startGate, type Course, type CourseDoc, type Gate } from './races'
 
-const ENTRY_COLOUR = 0x3ddc84
-const GATE_COLOUR = 0xffd400
 const NEXT_COLOUR = 0x2ee6c0
 
 export interface RaceWorldOpts extends RaceOpts {
+  /** a chosen gate model (fixtures.json), cloned per gate and scaled to the gate's width; null = the built-in */
+  gateModel?: THREE.Object3D | null
+  /** a chosen entry-marker model, cloned per marker; null = the built-in ring and arch */
+  markerModel?: THREE.Object3D | null
+  /** the race-gate and race-marker settings from fixtures.json */
+  gate?: { height_m?: number; colour?: string; stripe?: boolean }
+  marker?: { arch?: boolean; colour?: string }
   /** the ground under a site-frame point, so the ring lies on the road rather than through it */
   groundAt: (x: number, y: number) => number
 }
@@ -32,6 +37,24 @@ export interface RaceWorldOpts extends RaceOpts {
  * Built once per site load. `tick` takes the player's position in SITE metres — x east, y north —
  * because that is the frame the courses are authored in; the caller converts from three's.
  */
+let chequerTex: THREE.CanvasTexture | null = null
+/** A black-and-white chequer, made once: the stripe on the road at a start or finish line. */
+function chequer(): THREE.CanvasTexture {
+  if (chequerTex) return chequerTex
+  const c = document.createElement('canvas')
+  c.width = 64
+  c.height = 8
+  const ctx = c.getContext('2d')!
+  for (let i = 0; i < 16; i++) for (let j = 0; j < 2; j++) {
+    ctx.fillStyle = (i + j) % 2 ? '#111' : '#f4f4f4'
+    ctx.fillRect(i * 4, j * 4, 4, 4)
+  }
+  chequerTex = new THREE.CanvasTexture(c)
+  chequerTex.wrapS = THREE.RepeatWrapping
+  chequerTex.repeat.set(2, 1)
+  return chequerTex
+}
+
 export class RaceWorld {
   readonly group = new THREE.Group()
   readonly session: RaceSession
@@ -65,67 +88,128 @@ export class RaceWorld {
   }
 
   private buildRings() {
+    const colour = new THREE.Color(this.opts.marker?.colour ?? '#ffd54f')
     for (const m of this.session.markers) {
-      const geo = new THREE.RingGeometry(m.r * 0.72, m.r, 64)
-      const mat = new THREE.MeshBasicMaterial({
-        color: ENTRY_COLOUR, side: THREE.DoubleSide, transparent: true, opacity: 0.75, depthWrite: false,
-      })
-      const ring = new THREE.Mesh(geo, mat)
-      // flat on the ground, a hand above it so it is not eaten by the road's own z-fighting
+      const ground = this.opts.groundAt(m.x, m.y)
+      const holder = new THREE.Group()
+      holder.name = `race-entry:${m.course.id}`
+      holder.position.set(m.x, ground, -m.y)
+      // the trigger area, flat on the road, a hand above it so the road cannot z-fight it away
+      const ring = new THREE.Mesh(
+        new THREE.RingGeometry(m.r * 0.72, m.r, 64),
+        new THREE.MeshBasicMaterial({ color: colour, side: THREE.DoubleSide, transparent: true, opacity: 0.75, depthWrite: false }),
+      )
       ring.rotation.x = -Math.PI / 2
-      ring.position.set(m.x, this.opts.groundAt(m.x, m.y) + 0.12, -m.y)
+      ring.position.y = 0.12
       ring.renderOrder = 9
-      ring.name = `race-entry:${m.course.id}`
-      this.rings.add(ring)
+      ring.name = 'ring'
+      holder.add(ring)
+      /*
+       * AND SOMETHING TO DRIVE THROUGH. Rich, 2026-09-30, after the first Route 3 run: *"The
+       * start's circle was flat on the road, not something to drive through like I would have
+       * thought."* A ring on the tarmac is the trigger; the arch standing over it, facing the
+       * start gate, is what you aim at. A chosen marker model stands in for the arch.
+       */
+      const start = startGate(m.course)
+      const toward = start ? midpoint(start) : null
+      const yaw = toward ? Math.atan2(toward.x - m.x, -(toward.y - m.y)) : 0
+      if (this.opts.markerModel) {
+        const inst = this.opts.markerModel.clone(true)
+        inst.rotation.y = yaw + Math.PI / 2
+        holder.add(inst)
+      } else if (this.opts.marker?.arch !== false) {
+        const r = Math.max(3, Math.min(7, m.r * 0.5))
+        const arch = new THREE.Mesh(
+          new THREE.TorusGeometry(r, 0.28, 12, 48),
+          new THREE.MeshBasicMaterial({ color: colour, transparent: true, opacity: 0.85, depthWrite: false }),
+        )
+        // a torus lies in its own XY plane, so its axis is Z: turn that axis to face the start
+        arch.rotation.y = yaw
+        arch.position.y = r + 0.6
+        arch.renderOrder = 9
+        arch.name = 'arch'
+        holder.add(arch)
+      }
+      this.rings.add(holder)
       this.ringOf.set(m.course.id, ring)
     }
   }
 
   /**
-   * The gates of the race you are in — and only of that one.
-   *
-   * Drawing every gate of every course at once turns a world with four stages into a forest of
-   * banners nobody can read. They appear when you commit and go when you are done.
+   * Every course's gates are in the world all the time. They used to appear only once you had
+   * committed to a race, which is why the finish was nowhere to be seen on a 4 km stage (Rich,
+   * 2026-09-30: *"I didn't actually see an end gate / finish line"*). Dim until you are in, bright
+   * for the race you are in, brightest for the gate you are being sent to.
    */
   private showGates(c: Course | null) {
-    if (this.shownFor === (c?.id ?? null)) return
+    if (this.shownFor === (c?.id ?? null) && this.gates.children.length) return
     this.shownFor = c?.id ?? null
     for (const o of [...this.gates.children]) {
       this.gates.remove(o)
-      const m = o as THREE.Mesh
-      m.geometry?.dispose()
-      ;(m.material as THREE.Material | undefined)?.dispose?.()
+      o.traverse((x) => {
+        const m = x as THREE.Mesh
+        m.geometry?.dispose?.()
+        ;(m.material as THREE.Material | undefined)?.dispose?.()
+      })
     }
-    if (!c) return
-    for (const g of c.gates) this.gates.add(this.gateBanner(g, GATE_COLOUR))
+    for (const course of this.session.list) {
+      for (const g of course.gates) this.gates.add(this.gateMesh(g, course, c?.id === course.id))
+    }
   }
 
-  private gateBanner(g: Gate, colour: number): THREE.Object3D {
+  private gateMesh(g: Gate, course: Course, inRace: boolean): THREE.Object3D {
     const za = this.opts.groundAt(g.a[0], g.a[1])
     const zb = this.opts.groundAt(g.b[0], g.b[1])
-    const h = 8
+    const h = this.opts.gate?.height_m ?? 6
+    const colour = new THREE.Color(this.opts.gate?.colour ?? '#4fc3f7')
+    const holder = new THREE.Group()
+    holder.name = `race-gate:${g.id}`
+    holder.userData.course = course.id
+    const mx = (g.a[0] + g.b[0]) / 2, my = (g.a[1] + g.b[1]) / 2
+    const w = gateWidth(g)
+    if (this.opts.gateModel) {
+      // a model spans the gate: its length along the gate line, scaled to the gate's width
+      const inst = this.opts.gateModel.clone(true)
+      const box = new THREE.Box3().setFromObject(inst)
+      const len = Math.max(box.max.x - box.min.x, 1e-3)
+      inst.scale.multiplyScalar(w / len)
+      inst.position.set(mx, (za + zb) / 2, -my)
+      inst.rotation.y = Math.atan2(-(g.b[1] - g.a[1]), g.b[0] - g.a[0])
+      holder.add(inst)
+      return holder
+    }
+    const post = new THREE.CylinderGeometry(0.16, 0.16, h, 10)
+    const postMat = new THREE.MeshStandardMaterial({ color: 0xeeeeee, roughness: 0.6 })
+    for (const [x, y, z] of [[g.a[0], za, g.a[1]], [g.b[0], zb, g.b[1]]]) {
+      const p = new THREE.Mesh(post, postMat)
+      p.position.set(x, y + h / 2, -z)
+      holder.add(p)
+    }
     const geo = new THREE.BufferGeometry()
-    // a quad standing on the two posts: cheap, readable, and visible from both sides
+    // a banner between the posts, from a little below the top: cheap, readable, both sides
     geo.setAttribute('position', new THREE.Float32BufferAttribute([
-      g.a[0], za, -g.a[1], g.b[0], zb, -g.b[1],
+      g.a[0], za + h * 0.72, -g.a[1], g.b[0], zb + h * 0.72, -g.b[1],
       g.a[0], za + h, -g.a[1], g.b[0], zb + h, -g.b[1],
     ], 3))
     geo.setIndex([0, 1, 2, 1, 3, 2])
-    const mat = new THREE.MeshBasicMaterial({
-      color: colour, side: THREE.DoubleSide, transparent: true, opacity: 0.22, depthWrite: false,
-    })
-    const mesh = new THREE.Mesh(geo, mat)
-    mesh.name = `race-gate:${g.id}`
-    mesh.renderOrder = 9
-    return mesh
+    const banner = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: colour, side: THREE.DoubleSide, transparent: true, opacity: inRace ? 0.5 : 0.28, depthWrite: false }))
+    banner.name = 'banner'
+    banner.renderOrder = 9
+    holder.add(banner)
+    // a chequered stripe on the road at a start or a finish, so the line is a line
+    const striped = g.role === 'start' || g.role === 'finish' || g.role === 'startfinish'
+    if (striped && this.opts.gate?.stripe !== false) {
+      const stripe = new THREE.Mesh(new THREE.PlaneGeometry(w, 2.2), new THREE.MeshBasicMaterial({ map: chequer(), transparent: true, opacity: 0.9, depthWrite: false }))
+      stripe.rotation.x = -Math.PI / 2
+      stripe.rotation.z = -Math.atan2(-(g.b[1] - g.a[1]), g.b[0] - g.a[0])
+      stripe.position.set(mx, (za + zb) / 2 + 0.08, -my)
+      stripe.renderOrder = 8
+      stripe.name = 'stripe'
+      holder.add(stripe)
+    }
+    return holder
   }
 
-  /**
-   * Advance the race and the world's own animation.
-   *
-   * The ring BREATHES rather than spins: a rotating ring on the ground reads as a loading spinner,
-   * and a loading spinner in the middle of a road is a thing people drive around.
-   */
   tick(at: { x: number; y: number }, dt: number): RaceTick {
     this.t += dt
     const out = this.session.tick(at, dt)
@@ -141,20 +225,25 @@ export class RaceWorld {
       mat.opacity = m.active ? 0.6 + Math.sin(this.t * 2.2) * 0.18 : 0.2
     }
 
-    // the gate you are being sent to next is picked out; the rest stay dim
+    // the gate you are being sent to next is picked out; the race you are in is bright; the rest dim
     const next = out.state.next?.id ?? null
+    const inRace = out.state.course?.id ?? null
     for (const o of this.gates.children) {
-      const mesh = o as THREE.Mesh
-      const isNext = mesh.name === `race-gate:${next}`
-      const mat = mesh.material as THREE.MeshBasicMaterial
-      mat.color.setHex(isNext ? NEXT_COLOUR : GATE_COLOUR)
-      mat.opacity = isNext ? 0.4 : 0.16
+      const banner = o.getObjectByName('banner') as THREE.Mesh | undefined
+      if (!banner) continue
+      const isNext = o.name === `race-gate:${next}`
+      const mine = o.userData.course === inRace
+      const mat = banner.material as THREE.MeshBasicMaterial
+      if (isNext) mat.color.setHex(NEXT_COLOUR)
+      else mat.color.set(this.opts.gate?.colour ?? '#4fc3f7')
+      mat.opacity = isNext ? 0.6 : mine ? 0.45 : 0.22
     }
     return out
   }
 
   dispose(): void {
-    this.showGates(null)
+    this.shownFor = null
+    for (const o of [...this.gates.children]) this.gates.remove(o)
     for (const ring of this.ringOf.values()) {
       ring.geometry.dispose()
       ;(ring.material as THREE.Material).dispose()

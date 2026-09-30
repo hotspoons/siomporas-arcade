@@ -58,6 +58,14 @@ export interface VehicleChassis {
    * engine keeping its own is right for the five presets, which describe cars nobody has modelled.
    */
   drive: 'rwd' | 'fwd' | 'awd'
+  /**
+   * Which end of the model is the front, once its length has been laid along the nose axis.
+   *
+   * A reconstruction has no idea which way it faces; the fitter guesses from the roofline (the
+   * tail rises more steeply than the windscreen on nearly everything). `keep` and `flip` override
+   * the guess for the ones it gets wrong. Absent means `auto`.
+   */
+  nose?: 'auto' | 'keep' | 'flip'
   /** m, overall length and width of the body. Defaulted from the class when the model has not said */
   length?: number
   width?: number

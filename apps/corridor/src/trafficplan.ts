@@ -28,6 +28,12 @@ export interface RoadChain {
   length_m: number
   /** total lanes, both directions */
   lanes: number
+  /**
+   * False for a carriageway: every lane runs the chain's own way. Left out, the road is two-way
+   * and the lanes are split between the directions — which on a three-lane one-way put every
+   * car in one lane (Rich, 2026-09-30: "traffic only uses the middle lane").
+   */
+  twoWay?: boolean
   /** a point at distance `s` along it */
   at: (s: number) => { x: number; y: number }
   /** m/s. Only used to seed `SpeedLimit`; the planner does not read it */
@@ -77,8 +83,10 @@ export function planTraffic(chains: RoadChain[], zones: Zones, rand: () => numbe
 
   for (const chain of chains) {
     if (!(chain.length_m > minChain)) continue
-    const perDir = lanesPerDirection(chain.lanes)
-    for (let dir = 0 as 0 | 1; dir <= 1; dir = (dir + 1) as 0 | 1) {
+    const oneWay = chain.twoWay === false
+    const perDir = oneWay ? Math.max(1, Math.round(chain.lanes)) : lanesPerDirection(chain.lanes)
+    const dirs: (0 | 1)[] = oneWay ? [0] : [0, 1]
+    for (const dir of dirs) {
       for (let lane = 0; lane < perDir; lane++) {
         /*
          * WALK THE CHAIN, ASKING AS WE GO. The density is read at each car's own position rather
@@ -87,7 +95,7 @@ export function planTraffic(chains: RoadChain[], zones: Zones, rand: () => numbe
          * downtown's traffic on the bypass at either end of it.
          */
         let s = rand() * 40 // a different starting offset per lane, so cars are not in ranks
-        while (s < chain.length_m && out.length < max) {
+        while (s < chain.length_m) {
           const p = chain.at(s)
           const density = zones.densityAt(p.x, p.y)
           if (density <= 0) {
@@ -102,9 +110,23 @@ export function planTraffic(chains: RoadChain[], zones: Zones, rand: () => numbe
         }
       }
     }
-    if (out.length >= max) break
   }
-  return out
+  /*
+   * THE CAP THINS EVERYWHERE, NOT AT THE END. Stopping when the cap was reached filled the first
+   * chains' first lanes and left the rest empty — measured on the Route 3 jam: 99 cars in lane 0
+   * of one carriageway, none in its other two lanes, none on the other carriageway (Rich,
+   * 2026-09-30: "traffic only uses the middle lane"). Keeping an even share of every slot keeps
+   * the shape of the jam and only its density changes.
+   */
+  if (out.length <= max) return out
+  const keep = max / out.length
+  let acc = 0
+  const thinned: TrafficSlot[] = []
+  for (const slot of out) {
+    acc += keep
+    if (acc >= 1) { acc -= 1; thinned.push(slot) }
+  }
+  return thinned
 }
 
 /**

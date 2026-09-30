@@ -429,3 +429,42 @@ Rich's morning list, each fixed where it was measured to be broken (`probes/corr
 - **Splats.** `SPLAT_ENABLED` off dropped the tiles but never told Spark, which draws what it was
   last handed — one more `spark.update` on the way out. Settings → Layers has a "Captured world"
   toggle now, so it is not an F6 knob.
+
+### Sideways cars and one lane (2026-09-30, later)
+
+- Every reconstruction was mounted a quarter turn off: `fitToChassis` scaled by the longest
+  horizontal axis but never turned it onto the nose axis (+X), and these models are long along Z.
+  It now does, then guesses the front from the roofline (the tail's climb is the steeper one on a
+  saloon, hatch, van, bus and pickup) — `noseSign` in carmodel.ts — and `spec.nose` (`keep` /
+  `flip`, on the vehicles screen as "Which end is the front") overrides the guess.
+- A three-lane one-way carriageway had every car in one lane: `lanesPerDirection(3)` is 1, and
+  the planner ran both directions on a one-way road. `RoadChain.twoWay` now tells it; a carriageway
+  gets all its lanes one way. And the cap stopped planning when reached — first chain, first lane
+  — instead of thinning; it thins evenly now, and `TRAFFIC_MAX` is 600. Route 3: 182/182/183 cars
+  across its three lanes.
+
+## Fixtures, colliders and the waypoint (2026-09-30, evening)
+
+- **Fixtures.** A new asset TYPE (`classes.ts`): race-gate, race-marker, stop-sign, give-way-sign,
+  signal, power-pole, lamp-post, street-sign, plus `building` under props. `fixtures.ts` is the
+  registry — per class: the built-in, its settings (per placed fixture), the procedural batches it
+  replaces and where the bake stands each one — and `FixtureLayer` applies a world's
+  `sites/<slug>/fixtures.json`: a chosen catalog asset of that class is fitted to the class height,
+  cloned onto every bake position, and the built-in batch is hidden; choose the built-in and it
+  comes back. The asset manager has a Fixtures tab (both editors); the document is a site doc for
+  the MCP tools. Proven with a stand-in on 523 stop signs (`probes/corridor-fixtures.mjs`).
+- **Race furniture.** Built-in gates are posts, a banner, and a chequered stripe at start/finish,
+  drawn for every course all the time (dim, bright in your race, brightest for the next gate);
+  the entry marker is a ring to trigger on and a standing arch facing the start. Height, colours
+  and the arch are fixture settings; a chosen model replaces either.
+- **Colliders.** A signal mast's collider is its post, not its arm (the invisible wall under the
+  lights). A detached sign takes its `:face` batch with it (the vanishing or floating octagon).
+  Street-name blades are one merged mesh per site and still cannot be hit or detached; that needs
+  them built as instances.
+- **Waypoint.** `ui/waypoint.ts`: a tilted-plane arrow in the corner, the distance, a message that
+  folds on a click. A program sets it with `api.waypoint(at, text)`; otherwise the races supply it:
+  the nearest ring and its road, "cross the start line", then each next gate.
+- **Also:** a level opened from the menu starts physics and rebuilds the car (collisions and the
+  hero model were missing that way); models lie along the nose axis with a wheel-overhang guess
+  and `spec.nose` to overrule (five builds flipped over MCP); one-way carriageways use every lane
+  and the cap thins evenly (Route 3: 182/182/183).

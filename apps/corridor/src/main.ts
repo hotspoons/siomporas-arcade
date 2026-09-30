@@ -32,6 +32,8 @@ import { Stars } from './stars'
 import { MilkyWay } from './milkyway'
 import { applyLevel, loadLevel, type LevelPlacement } from './level'
 import { TrafficLayer, type TrafficSpec } from './trafficlayer'
+import { FixtureLayer, loadFixtures, settingsOf, type FixtureDoc } from './fixtures'
+import { WaypointHud, type Waypoint } from './ui/waypoint'
 import { GameRun, type ProgramHost } from './program'
 import { loadGameModule } from './programload'
 import { profile as driveProfile } from '@apex/engine/physics/profiles'
@@ -480,6 +482,8 @@ async function loadSite(slug: string) {
   stopProgram()
   traffic?.dispose()
   traffic = null
+  fixtures?.dispose()
+  fixtures = null
   physics?.free()
   physics = null
   stuntDoc = null
@@ -568,15 +572,20 @@ async function loadSite(slug: string) {
    * Loaded beside the stunts and for the same reasons: after the site, because the rings are laid
    * on the ground, and tolerant of a world that has none, which is most of them.
    */
-  void loadRaceWorld(site.manifest.slug, {
-    groundAt: (x, y) => site!.groundAt(x, -y) ?? site!.heightAt(x, y) ?? 0,
-    countdown: 3,
-  }).then((w) => {
-    if (!w) return
-    raceWorld = w
-    scene.add(w.group)
-    status(`races: ${w.courses.length}`)
-  }).catch((e) => console.warn('races:', e))
+  /*
+   * THE FIXTURES FIRST, THEN THE RACES: a race gate may be a chosen model, and the model is the
+   * fixture layer's to load. Whatever the world wears for its signs, signals and poles is applied
+   * here too, on top of the procedural ones the site just drew.
+   */
+  fixtures = new FixtureLayer(site)
+  scene.add(fixtures.group)
+  void loadFixtures(site.manifest.slug)
+    .then(async (doc) => {
+      await fixtures!.apply(doc)
+      for (const p of fixtures!.problems) toast(`fixtures: ${p}`, 'warn', 6000)
+      return loadRaces()
+    })
+    .catch((e) => console.warn('fixtures:', e))
 
   /*
    * The document was already fetched, above, to decide about physics — building from it here
@@ -919,6 +928,17 @@ async function openLevel(id: string) {
    * dynamics document yet — and every one of them means "the default chassis" rather than "no car".
    * Refusing to drive because a catalog entry is missing would be the worst of the options.
    */
+  /*
+   * PHYSICS, IF THE LEVEL NEEDS IT AND THE SITE DID NOT. The site starts physics for a level named
+   * in the URL; a level opened from the menu arrived after the site was built, with no physics —
+   * so its traffic had no bodies and the player drove the kinematic car through it (Rich,
+   * 2026-09-30: "traffic has no collisions for some reason, I drive right through other cars").
+   */
+  const needsPhysics = !!lvl.simulations?.some((x) => x.kind === 'traffic')
+  if (needsPhysics && !physics && site) {
+    physics = await buildPhysics(site, { enabled: true }).catch((e) => { console.warn('physics: not started —', e); return null })
+    if (physics) status(`physics: ${physics.phys.hz} Hz`)
+  }
   playerVehicle = null
   playerModel = null
   if (lvl.player?.vehicle) {
@@ -1014,6 +1034,20 @@ async function openLevel(id: string) {
       toast(`traffic: ${String((e as Error).message ?? e)}`, 'warn', 8000)
     }
   }
+  /*
+   * THE CAR IS REBUILT FOR THE LEVEL. `drive.car` is made once and kept, so a car built before the
+   * level opened — the default wedge, on the kinematic model — stayed after it, wearing nothing
+   * the level said. Throw it away; the next Tab (or the program's `transport('drive')`) makes the
+   * level's car, on the level's physics.
+   */
+  if (drive.car) {
+    const wasDriving = drive.on
+    if (wasDriving) setDrive(false)
+    scene.remove(drive.car.mesh)
+    ;(drive.car as { free?: () => void }).free?.()
+    drive.car = null
+    if (wasDriving) setDrive(true)
+  }
   // and the program, last: it may read the traffic and the races, so both are in place first
   if (lvl.program) await startProgram(lvl.program)
   else stopProgram()
@@ -1027,6 +1061,34 @@ let traffic: TrafficLayer | null = null
 let game: GameRun | null = null
 let gameLine = ''
 let hudHidden = false
+/** the arrow in the corner: a program's waypoint wins, else the race supplies one */
+const waypointHud = new WaypointHud()
+document.body.append(waypointHud.root)
+let programWaypoint: Waypoint | null = null
+
+/**
+ * Where the arrow points this frame. A program that set one owns it. Otherwise the races: before
+ * you commit, the nearest entry ring and where it is; in a race, the gate you are being sent to.
+ */
+function raceWaypoint(at: { x: number; y: number }): Waypoint | null {
+  if (!raceWorld || !site) return null
+  const st = raceWorld.state
+  if (st.phase === 'finished' || st.phase === 'abandoned') return null
+  if (st.phase === 'idle' || st.phase === 'armed') {
+    let best: { m: { course: { id: string; name: string; intro?: string }; x: number; y: number }; d: number } | null = null
+    for (const m of raceWorld.markers) {
+      const d = Math.hypot(m.x - at.x, m.y - at.y)
+      if (!best || d < best.d) best = { m, d }
+    }
+    if (!best) return null
+    const road = site.roadAt(best.m.x, -best.m.y)
+    const where = road?.name ? ` on ${road.name}${road.ref ? ` (${road.ref})` : ''}` : ''
+    return { x: best.m.x, y: best.m.y, text: st.phase === 'armed' ? `${best.m.course.name}: cross the start line` : `${best.m.course.name} starts at the ring${where}` }
+  }
+  const g = st.next
+  if (!g) return null
+  return { x: (g.a[0] + g.b[0]) / 2, y: (g.a[1] + g.b[1]) / 2, text: `${g.name}${st.course ? ` — ${st.course.name}` : ''}` }
+}
 
 /**
  * Run the program a level names.
@@ -1071,6 +1133,7 @@ async function startProgram(path: string): Promise<boolean> {
 }
 
 function stopProgram() {
+  programWaypoint = null
   if (!game) return
   try { game.stop() } catch (e) { console.warn('program stop:', e) }
   game = null
@@ -1125,6 +1188,7 @@ function programHost(): ProgramHost {
       if (!t) onTuneChange()
     },
     say: (text, kind) => toast(text, kind ?? 'info', 4000),
+    waypoint: (at, text) => { programWaypoint = at ? { x: at.x, y: at.y, text } : null },
     playerAt: siteAt,
     playerSpeed: () => Math.abs(drive.car?.speed ?? 0),
     setTime: (hhmm) => { worldClock.setLocal(siteZone(), undefined, hhmm); applySky(season, false) },
@@ -1177,6 +1241,41 @@ function programHost(): ProgramHost {
  * level with no `player`, a level whose asset has no dynamics, and no asset service at all are all
  * the same state as far as this is concerned: null, and the engine's default chassis.
  */
+/** the world's fixtures — the variants it wears for signs, signals, poles, gates and markers */
+let fixtures: FixtureLayer | null = null
+
+/** (Re)build the races from courses.json with the fixtures' gate and marker settings and models. */
+async function loadRaces(): Promise<void> {
+  if (!site) return
+  const slug = site.manifest.slug
+  const doc = fixtures?.document ?? null
+  const [gateModel, markerModel] = await Promise.all([fixtures?.raceModel('race-gate') ?? null, fixtures?.raceModel('race-marker') ?? null])
+  const gate = settingsOf(doc, 'race-gate') as { height_m?: number; colour?: string; stripe?: boolean }
+  const marker = settingsOf(doc, 'race-marker') as { arch?: boolean; colour?: string }
+  try {
+    const w = await loadRaceWorld(slug, {
+      groundAt: (x, y) => site!.groundAt(x, -y) ?? site!.heightAt(x, y) ?? 0,
+      countdown: 3,
+      gateModel, markerModel, gate, marker,
+    })
+    if (raceWorld) { scene.remove(raceWorld.group); raceWorld.dispose(); raceWorld = null }
+    if (!w) return
+    raceWorld = w
+    scene.add(w.group)
+    status(`races: ${w.courses.length}`)
+  } catch (e) {
+    console.warn('races:', e)
+  }
+}
+
+/** Apply a fixtures document live: the layer, then the races that draw from it. */
+async function applyFixtureDoc(doc: FixtureDoc): Promise<void> {
+  if (!site || !fixtures) return
+  await fixtures.apply(doc)
+  for (const p of fixtures.problems) toast(`fixtures: ${p}`, 'warn', 6000)
+  await loadRaces()
+}
+
 let playerVehicle: VehicleDoc | null = null
 /** the level's car as a MODEL, loaded beside its numbers. Null = the procedural wedge */
 let playerModel: CarModel | null = null
@@ -1346,7 +1445,11 @@ function setDrive(on: boolean) {
         )
         status(`driving: rapier, ${wantProfile ?? T.physProfileId()}${playerVehicle ? `, ${level?.player?.vehicle}` : ''}`)
       } else {
-        drive.car = new Car(surface)
+        const car = new Car(surface)
+        // the level's car on the kinematic model too — it was only ever hung on the physics one,
+        // so a level opened without physics drove the default red wedge (Rich, 2026-09-30)
+        if (playerModel) car.setBodyMesh(playerModel.object)
+        drive.car = car
       }
       scene.add(drive.car.mesh)
       // spawn in the right-hand lane at the photo, facing along the road
@@ -2141,6 +2244,16 @@ function frame() {
     showGame()
     if (game.error) { toast(`program: ${game.error}`, 'warn', 8000); game = null }
   }
+  // the waypoint arrow, from wherever the player is and whichever way they face
+  if (site && drive.on && drive.car) {
+    const at = { x: drive.car.pos.x, y: -drive.car.pos.z }
+    const want = programWaypoint ?? raceWaypoint(at)
+    const now = waypointHud.current
+    if (want?.x !== now?.x || want?.y !== now?.y || want?.text !== now?.text) waypointHud.set(want)
+    if (want) waypointHud.update(at.x, at.y, Math.atan2(-drive.car.forward.z, drive.car.forward.x))
+  } else if (waypointHud.current) {
+    waypointHud.set(null)
+  }
   if (physics) physics.update(drive.car?.pos ?? camera.position, real)
   // the world's clock, and the light that follows from it. applySky is cheap (no geometry), so it
   // runs whenever the sun has moved enough to see — a degree of elevation is about four minutes of
@@ -2425,6 +2538,11 @@ registerBridgeContext({
   get game() {
     return game
   },
+  /** the world's fixtures layer: `document`, `placed`, `problems`; `applyFixtures(doc)` applies one live */
+  get fixtures() {
+    return fixtures
+  },
+  applyFixtures: (doc: FixtureDoc) => applyFixtureDoc(doc),
   /** run a program by path, the way a level does — for a probe, and for trying one without a level */
   startProgram: (path: string) => startProgram(path),
   /**

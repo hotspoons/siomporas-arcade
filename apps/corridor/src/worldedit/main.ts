@@ -12,6 +12,8 @@
 // WHERE THE DATA LIVES. Nothing in this page holds state that matters. Worlds, runs, logs, the
 // authored files and the placement catalog are all on the service's volume, so closing the tab,
 // reloading, or the pod restarting loses a scroll position and nothing else.
+import { fixturesExtension } from '../ui/fixtures'
+import { loadFixtures, saveFixtures } from '../fixtures'
 import { Dialog, Drawer, Tabs, button, el, installShellKeys, status, clearStatus, toast, typing } from '../ui/shell'
 import { bodyOf, empty, group, readout, segmented, select, textField } from '../ui/controls'
 import { icon, type IconName } from '../ui/icons'
@@ -545,7 +547,15 @@ const assets = new AssetCatalog({
   host: document.getElementById('assets')!,
   world: () => selected,
   // the physics lane's Dynamics group, on the items that are vehicles (src/ui/vehicles.ts)
-  extensions: [vehicleExtension(), actorExtension(), weaponExtension()],
+  extensions: [
+    vehicleExtension(), actorExtension(), weaponExtension(),
+    // what the selected world wears for its signs, signals, poles, gates and markers (src/fixtures.ts)
+    fixturesExtension({
+      slug: () => selected,
+      current: () => (selected ? loadFixtures(selected) : Promise.resolve({ version: 1 as const, choices: {} })),
+      save: async (doc) => { if (!selected) throw new Error('no world selected'); await saveFixtures(selected, doc) },
+    }),
+  ],
   /*
    * PLACEABLE IS A TICK BOX, not a second screen.
    *

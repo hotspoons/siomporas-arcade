@@ -122,6 +122,10 @@ function classOf(name: string) {
 }
 
 /** Which of the site's layers hold things you can hit. The rest is paint, water and scenery. */
+// NOT `blades`: the street-name signs are one merged mesh for the whole site (intersections.ts
+// buildBlades), so there is no instance to give a collider to or to detach — which is why you
+// drive through them (Rich, 2026-09-30: "street signs don't move when run over"). Making them
+// fly means building them as instances; a static collider alone would only make them walls.
 const SOLID_LAYERS = ['furniture', 'power', 'barriers', 'placements'] as const
 
 const m4 = new THREE.Matrix4()
@@ -171,6 +175,19 @@ export function catalogue(site: Site, opts: { max?: number; maxHalf?: number } =
       const bb = geo.boundingBox!
       const size = new THREE.Vector3().subVectors(bb.max, bb.min)
       const centre = new THREE.Vector3().addVectors(bb.max, bb.min).multiplyScalar(0.5)
+      /*
+       * A SIGNAL IS ITS POST, NOT ITS ARM. The geometry's box spans the mast AND the arm hanging
+       * the heads over the road, so the collider was a wall across the carriageway at head height
+       * — driving under the lights hit it and sent the post flying without touching it (Rich,
+       * 2026-09-30: "like there is an invisible wall here"). The post stands at the geometry's
+       * origin; the box is the post's width and the whole height, and the arm is not solid.
+       */
+      if (nm.startsWith('furniture:signal')) {
+        size.x = 0.5
+        size.z = 0.5
+        centre.x = 0
+        centre.z = 0
+      }
 
       /*
        * MASS ONCE PER BATCH, NOT ONCE PER PROP.
@@ -344,7 +361,7 @@ const ZERO = new THREE.Matrix4().makeScale(0, 0, 0)
  * the range. The buffers here are a few thousand matrices; a full upload on the frame a sign is hit
  * is cheaper than the class of bug the other way costs.
  */
-export function detachInstance(rec: PropRecord): THREE.Mesh | null {
+export function detachInstance(rec: PropRecord): THREE.Object3D | null {
   const inst = rec.mesh
   if (!inst || rec.instance === undefined) return null
   inst.setMatrixAt(rec.instance, ZERO)
@@ -353,7 +370,26 @@ export function detachInstance(rec: PropRecord): THREE.Mesh | null {
   loose.name = `${rec.kind}:detached`
   loose.castShadow = inst.castShadow
   loose.receiveShadow = inst.receiveShadow
-  return loose
+  /*
+   * THE FACE GOES WITH THE POST. A sign is two batches — the post, and its painted face — with the
+   * same instance index in each; only the post was detached, and the face batch was zeroed by
+   * nothing, so the sign vanished and a bare post flew off (Rich, 2026-09-30). Every companion
+   * batch beside the post (`<name>:face`, `<name>:lenses`) is zeroed and comes along as a child.
+   */
+  const siblings = (inst.parent?.children ?? []).filter((c) => c !== inst && c.name.startsWith(`${inst.name}:`) && (c as THREE.InstancedMesh).isInstancedMesh)
+  if (!siblings.length) return loose
+  const group = new THREE.Group()
+  group.name = loose.name
+  group.add(loose)
+  for (const s of siblings as THREE.InstancedMesh[]) {
+    if (rec.instance >= s.count) continue
+    s.setMatrixAt(rec.instance, ZERO)
+    s.instanceMatrix.needsUpdate = true
+    const part = new THREE.Mesh(s.geometry, s.material as THREE.Material)
+    part.name = `${s.name}:detached`
+    group.add(part)
+  }
+  return group
 }
 
 /**

@@ -155,7 +155,7 @@ export let GRASS_CACHE_SLACK = 1.4
 
 // --- traffic ------------------------------------------------------------------------------------
 /** never more traffic cars than this, whatever the zones and the level ask for */
-export let TRAFFIC_MAX = 240
+export let TRAFFIC_MAX = 600
 /** traffic cars further than this from the eye are simulated but not drawn (m) */
 export let TRAFFIC_DRAW_M = 700
 

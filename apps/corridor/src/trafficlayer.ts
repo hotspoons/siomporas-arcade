@@ -193,13 +193,8 @@ export class TrafficLayer {
       dir: (s: number) => { const d = c.at(s).dir; return { x: d.x, y: -d.z } },
     }))
     const max = Math.min(spec.max ?? Infinity, Math.round(T.TRAFFIC_MAX))
+    // the planner knows a carriageway from a two-way road (`twoWay` on the chain) and lanes it
     this.slots = planTraffic(this.roads, this.zones, rand, { max })
-    // a one-way road runs every lane the same way: the planner's against-the-chain slots become
-    // the outer lanes of the with-the-chain set
-    for (const s of this.slots) {
-      const r = this.roads[s.chain]
-      if (r && !r.twoWay && s.dir === 1) { s.dir = 0; s.lane += lanesPerDirection(r.lanes) }
-    }
 
     const obey = usable.obeyRate ?? spec.obeyRate
     const speedFactor = usable.speedFactor ?? spec.speedFactor ?? 1
@@ -264,7 +259,7 @@ export class TrafficLayer {
       const dx = dir ? -d.x : d.x
       const dy = dir ? -d.y : d.y
       // right of travel is (dy, -dx) in a y-north frame
-      const off = laneOffset(OnRoad.lane[e], lanesPerDirection(road.lanes), road.twoWay)
+      const off = laneOffset(OnRoad.lane[e], road.twoWay ? lanesPerDirection(road.lanes) : Math.max(1, Math.round(road.lanes)), road.twoWay)
       Transform.x[e] = p.x + dy * off
       Transform.y[e] = p.y - dx * off
       Transform.yaw[e] = Math.atan2(dy, dx)

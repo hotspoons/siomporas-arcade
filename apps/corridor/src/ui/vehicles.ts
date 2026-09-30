@@ -151,6 +151,13 @@ export function dynamicsForm(host: HTMLElement, getDoc: () => VehicleDoc, opts: 
     num(cb, 'CG height (m)', doc.spec.cgHeight, 0.01, (v) => (doc.spec.cgHeight = v), 'above the ROAD, as a spec sheet gives it — not above the model origin')
     num(cb, 'Ride height (m)', doc.spec.rideHeight ?? 0.16, 0.01, (v) => (doc.spec.rideHeight = v), 'road to the bottom of the body; this is what positions the car')
     cb.append(select({
+      label: 'Which end is the front',
+      value: doc.spec.nose ?? 'auto',
+      options: [{ value: 'auto' as const, label: 'Guess from the roofline' }, { value: 'keep' as const, label: 'As the model stands' }, { value: 'flip' as const, label: 'Turned round' }],
+      note: 'a reconstruction does not say; the guess is right for most shapes and this fixes the rest',
+      onChange: (v) => { doc.spec.nose = v; stage() },
+    }))
+    cb.append(select({
       label: 'Driven wheels',
       value: doc.spec.drive,
       options: [{ value: 'rwd' as const, label: 'Rear (RWD)' }, { value: 'fwd' as const, label: 'Front (FWD)' }, { value: 'awd' as const, label: 'All four (AWD)' }],

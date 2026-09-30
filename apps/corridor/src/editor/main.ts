@@ -7,6 +7,8 @@
 //
 // The scene itself is built by the viewer's own `buildSite`, read-only — the editor must be
 // looking at exactly what the game looks at, or it is correcting something else.
+import { fixturesExtension } from '../ui/fixtures'
+import { loadFixtures, saveFixtures } from '../fixtures'
 import { DROP_TYPE } from './ui'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
@@ -99,7 +101,16 @@ let mode: Mode = (location.hash.split(':')[1] as Mode) || 'areas'
 // The interface. Every callback here is a function declared later in this file, which is fine —
 // they are declarations, so they are hoisted, and none of them runs before the first event.
 restoreTheme()
-const assets = new AssetCatalog({ extensions: [vehicleExtension(), actorExtension(), weaponExtension(), trafficExtension()] })
+const assets = new AssetCatalog({
+  extensions: [
+    vehicleExtension(), actorExtension(), weaponExtension(), trafficExtension(),
+    fixturesExtension({
+      slug: () => site?.manifest.slug ?? null,
+      current: () => (site ? loadFixtures(site.manifest.slug) : Promise.resolve({ version: 1 as const, choices: {} })),
+      save: async (doc) => { if (!site) throw new Error('no site open'); await saveFixtures(site.manifest.slug, doc) },
+    }),
+  ],
+})
 // A probe needs to open the library without hunting for the toolbar button; this is the one hook.
 ;(window as unknown as { __apexEditorAssets: () => void }).__apexEditorAssets = () => void assets.open()
 const ui = new EditorUI({

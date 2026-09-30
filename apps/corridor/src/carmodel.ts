@@ -134,13 +134,53 @@ export async function loadCarModel(assetId: string, spec: VehicleChassis): Promi
  * backwards half the time; a car facing the wrong way is visible in a second and belongs in a field
  * on the document, not in a heuristic here.
  */
+/**
+ * Any finished catalog asset as an object, fitted to a height. For fixtures: a sign, a pole, a
+ * gate — things with a height on the spec sheet and no chassis. Null for every ordinary reason.
+ */
+export async function loadAssetGlb(assetId: string, heightM?: number): Promise<THREE.Object3D | null> {
+  let item: AssetItem | null = null
+  try { item = await assetsvc.get(assetId) } catch { return null }
+  const variant = item ? variantOf(item) : null
+  if (!item || !variant) return null
+  let root: THREE.Object3D
+  try { root = (await gltf().loadAsync(assetsvc.fileUrl(item.id, MESH_FILE[variant]))).scene } catch { return null }
+  applyAlphaGlazing(root)
+  const box = new THREE.Box3().setFromObject(root)
+  const size = box.getSize(new THREE.Vector3())
+  if (!(size.y > 1e-6)) return null
+  const k = heightM ? heightM / size.y : 1
+  root.scale.setScalar(k)
+  root.updateMatrixWorld(true)
+  const fitted = new THREE.Box3().setFromObject(root)
+  const c = fitted.getCenter(new THREE.Vector3())
+  root.position.set(-c.x, -fitted.min.y, -c.z)
+  const holder = new THREE.Group()
+  holder.name = `fixture:${assetId}`
+  holder.add(root)
+  return holder
+}
+
 export function fitToChassis(object: THREE.Object3D, spec: VehicleChassis): { scale: number; rawSize: THREE.Vector3 } {
   object.position.set(0, 0, 0)
   object.scale.setScalar(1)
+  object.rotation.set(0, 0, 0)
   object.updateMatrixWorld(true)
   const raw = new THREE.Vector3()
   new THREE.Box3().setFromObject(object).getSize(raw)
   const longest = Math.max(raw.x, raw.z)
+  /*
+   * THE LENGTH GOES ALONG THE NOSE AXIS. The car frame is nose +X, and these reconstructions are
+   * long along Z — so every model was fitted to the right size and mounted a quarter turn off.
+   * Rich, 2026-09-30, with a screenshot of a whole jam parked across its lanes: *"every single
+   * car in the game is sideways."* Turn the long axis onto X first; then decide which end is the
+   * front, which the geometry can only guess at (see `noseSign`) and the spec can overrule.
+   */
+  if (raw.z > raw.x) object.rotation.y = Math.PI / 2
+  object.updateMatrixWorld(true)
+  const guess = spec.nose === 'keep' ? 1 : spec.nose === 'flip' ? -1 : noseSign(object)
+  if (guess < 0) object.rotation.y += Math.PI
+  object.updateMatrixWorld(true)
   const want = spec.length ?? spec.wheelbase * 1.6
   const scale = longest > 1e-6 ? want / longest : 1
   object.scale.setScalar(scale)
@@ -155,4 +195,68 @@ export function fitToChassis(object: THREE.Object3D, spec: VehicleChassis): { sc
   object.position.set(-centre.x, -fitted.min.y, -centre.z)
   object.updateMatrixWorld(true)
   return { scale, rawSize: raw }
+}
+
+/**
+ * Which end of a car is the front: +1 for the +X end as it stands, −1 for the other.
+ *
+ * FROM THE WHEELS. The front overhang — bumper to front axle — is shorter than the rear one on
+ * nearly every road vehicle: a saloon, a hatch, a van, a pickup with a bed behind its cab, a bus
+ * with its engine at the back. The tyres are the lowest thing on the model, so the outermost
+ * points of the bottom band are the axles, near enough, and the shorter gap from axle to body end
+ * is the nose. The roofline breaks a tie (a raked windscreen climbs more gently than a tail), and
+ * it was the first guess on its own: right for the cars, wrong for the pickup and both buses,
+ * whose blunt ends have no climb to measure. Farm machinery is anyone's guess; `spec.nose` exists.
+ */
+export function noseSign(object: THREE.Object3D): 1 | -1 {
+  const box = new THREE.Box3().setFromObject(object)
+  const len = box.max.x - box.min.x
+  const height = box.max.y - box.min.y
+  if (!(len > 0) || !(height > 0)) return 1
+  const BINS = 40
+  const top = new Float32Array(BINS).fill(-Infinity)
+  // the bottom band, binned along the length: tyres are dense clusters of low points, a tow
+  // hitch or a rear step is a few — so the axles are the outermost DENSE bins, not the outermost points
+  const low = new Uint32Array(BINS)
+  const floor = box.min.y + height * 0.07
+  const v = new THREE.Vector3()
+  object.updateMatrixWorld(true)
+  object.traverse((o) => {
+    const m = o as THREE.Mesh
+    if (!m.isMesh || !m.geometry?.attributes?.position) return
+    const pos = m.geometry.attributes.position
+    const step = Math.max(1, Math.floor(pos.count / 40000))
+    for (let i = 0; i < pos.count; i += step) {
+      v.fromBufferAttribute(pos, i).applyMatrix4(m.matrixWorld)
+      const b = Math.min(BINS - 1, Math.max(0, Math.floor(((v.x - box.min.x) / len) * BINS)))
+      if (v.y > top[b]) top[b] = v.y
+      if (v.y <= floor) low[b]++
+    }
+  })
+  let peak = 0
+  for (const n of low) peak = Math.max(peak, n)
+  let wheelMin = Infinity
+  let wheelMax = -Infinity
+  for (let b = 0; b < BINS; b++) {
+    if (low[b] < peak * 0.35) continue
+    const x = box.min.x + ((b + 0.5) / BINS) * len
+    if (x < wheelMin) wheelMin = x
+    if (x > wheelMax) wheelMax = x
+  }
+  if (peak > 0 && Number.isFinite(wheelMin) && Number.isFinite(wheelMax) && wheelMax - wheelMin > len * 0.3) {
+    const lowOver = wheelMin - box.min.x // body beyond the −X axle
+    const highOver = box.max.x - wheelMax // body beyond the +X axle
+    const diff = highOver - lowOver
+    if (Math.abs(diff) > len * 0.03) return diff > 0 ? -1 : 1 // the shorter overhang is the front
+  }
+  // the roofline: the steepest climb from each end, skipping the bumper's own step at the very end
+  const climb = (from: number, dir: 1 | -1) => {
+    let worst = 0
+    for (let k = 3; k < BINS * 0.45; k++) {
+      const a = top[from + (k - 1) * dir], b = top[from + k * dir]
+      if (Number.isFinite(a) && Number.isFinite(b)) worst = Math.max(worst, b - a)
+    }
+    return worst
+  }
+  return climb(0, 1) <= climb(BINS - 1, -1) ? -1 : 1
 }

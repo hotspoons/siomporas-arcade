@@ -73,6 +73,8 @@ export interface ProgramHost {
   actors: ActorWorld
   /** turn something off, or back on */
   hide: (what: Hideable, hidden: boolean) => void
+  /** point the player somewhere, with a line about it; null takes it down and the races' own waypoints return */
+  waypoint?: (at: { x: number; y: number } | null, text?: string) => void
   /** swap the player's controller */
   transport: (mode: Transport) => void
   /** apply or tween a named look from the world's presets library */
@@ -422,6 +424,12 @@ export interface GameApi {
   award(points: number): void
   /** what the player is trying to do, in a sentence the HUD can show */
   goal(text: string): void
+  /**
+   * Point the player at a place, site metres, with a line about it — the arrow in the corner and
+   * the message under it. Null takes it down; while a program has none, the races supply their
+   * own (the entry ring, then the next gate).
+   */
+  waypoint(at: { x: number; y: number } | null, text?: string): void
   win(text?: string): void
   lose(text?: string): void
 
@@ -577,6 +585,7 @@ export class GameRun {
 
       award: (p) => { this.score += p },
       goal: (text) => { this.goalText = text },
+      waypoint: (at, text) => this.host.waypoint?.(at, text),
       win: (text) => this.finish('win', text),
       lose: (text) => this.finish('lose', text),
 

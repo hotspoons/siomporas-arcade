@@ -90,6 +90,8 @@ export interface Params {
    *  of thousands of draw calls. The cap is reported as a skip reason, never silent. */
   max_items: number
   seed: number
+  /** catalog ids Grow may place; empty means every entry. Rich: "select which assets to place" */
+  allow?: string[]
 }
 
 export const DEFAULTS: Params = {
@@ -106,6 +108,7 @@ export const DEFAULTS: Params = {
   invent_rural_chance: 0.15,
   max_items: 2500,
   seed: 1,
+  allow: [],
 }
 
 /** R1: what an OSM landuse value means to us. */
@@ -346,7 +349,9 @@ export function fitAsset(b: Building, category: string, catalog: CatalogEntry[],
     }
     return best
   }
-  return pick([category]) ?? pick(SUBSTITUTES[category] ?? []) ?? null
+  // a library building filed simply as `building` stands in for any building category the
+  // catalog has nothing specific for — a house-shaped model is still a better house than a box
+  return pick([category]) ?? pick(SUBSTITUTES[category] ?? []) ?? pick(['building']) ?? null
 }
 
 // --- context ----------------------------------------------------------------------------------
@@ -383,9 +388,11 @@ export interface Result {
 
 // --- the pass ---------------------------------------------------------------------------------
 
-export function generate(manifest: Manifest, site: Site, catalog: CatalogEntry[], params: Params): Result {
+export function generate(manifest: Manifest, site: Site, catalogAll: CatalogEntry[], params: Params): Result {
   const ctx = contextOf(manifest, site)
   const p = params
+  // only what the panel allowed, when it allowed anything in particular
+  const catalog = p.allow?.length ? catalogAll.filter((e) => p.allow!.includes(e.id)) : catalogAll
   const skipped: Record<string, number> = {}
   const byCategory: Record<string, number> = {}
   const drop = (why: string) => { skipped[why] = (skipped[why] ?? 0) + 1 }
@@ -523,7 +530,7 @@ function inventFrontage(
       if (chance <= 0 || rnd > chance) continue
       const mix = commercial ? STRIP_MIX : RURAL_MIX
       const category = mix[Math.floor(hash(p.seed + 11, n) * mix.length)]
-      const entry = catalog.filter((e) => e.category === category && e.fit !== 'span')[0]
+      const entry = catalog.filter((e) => e.category === category && e.fit !== 'span')[0] ?? catalog.filter((e) => e.category === 'building' && e.fit !== 'span')[0]
       if (!entry) continue
       // setback from the PAVEMENT EDGE, deeper for commerce because the parking goes in front
       const setback = (commercial ? 30 : 18) + hash(p.seed + 17, n) * 25

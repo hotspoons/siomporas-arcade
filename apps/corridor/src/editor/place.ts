@@ -51,7 +51,9 @@ export class PlaceMode {
    * constructed before either exists.
    */
   private gizmo: TransformControls | null = null
-  private gizmoMode: 'translate' | 'rotate' = 'translate'
+  private gizmoMode: 'translate' | 'rotate' | 'scale' = 'translate'
+  /** the Grow tab's body, rendered by whoever owns Grow (editor/main.ts) */
+  growTab: ((root: HTMLElement) => void) | null = null
   /**
    * True from the moment a press lands on a gizmo handle until it is released.
    *
@@ -299,9 +301,11 @@ export class PlaceMode {
     g.setSize(Math.max(0.6, Math.min(3, 12 / Math.max(2, span))))
     // ROTATION IS YAW ONLY. A building tilted off the vertical is never what somebody meant, and
     // the document has one angle in it — pitch and roll would be edits with nowhere to be saved.
-    g.showX = this.gizmoMode === 'translate'
-    g.showZ = this.gizmoMode === 'translate'
-    g.showY = this.gizmoMode === 'rotate'
+    // …and SCALE IS UNIFORM: any handle you pull scales the whole thing (readGizmo), because a
+    // stretched model is a different model, and the document has one number for it
+    g.showX = this.gizmoMode !== 'rotate'
+    g.showZ = this.gizmoMode !== 'rotate'
+    g.showY = this.gizmoMode !== 'translate'
     g.attach(o)
   }
 
@@ -316,13 +320,13 @@ export class PlaceMode {
     this.gizmo?.setRotationSnap(null)
   }
 
-  setGizmoMode(mode: 'translate' | 'rotate'): void {
+  setGizmoMode(mode: 'translate' | 'rotate' | 'scale'): void {
     this.gizmoMode = mode
     this.attachGizmo()
     this.onChange()
   }
 
-  get gizmoModeNow(): 'translate' | 'rotate' {
+  get gizmoModeNow(): 'translate' | 'rotate' | 'scale' {
     return this.gizmoMode
   }
 
@@ -342,6 +346,10 @@ export class PlaceMode {
     p.y = Math.round(-o.position.z * 10) / 10
     const offset = this.entry(p.asset)?.yaw_offset_deg ?? 0
     p.yaw_deg = Math.round((((-o.rotation.y * 180) / Math.PI - offset) % 360 + 360) % 360)
+    // whichever axis was pulled, the size is one number: clamped where [ and ] clamp it
+    const pulled = [o.scale.x, o.scale.y, o.scale.z].find((v) => Math.abs(v - p.scale) > 1e-6)
+    if (pulled !== undefined) p.scale = Math.max(0.1, Math.min(10, Math.round(pulled * 100) / 100))
+    o.scale.setScalar(p.scale)
     // snapped to the ground as it moves, unless somebody asked for a height
     if (p.snap !== 'free') p.z = null
     o.position.set(p.x, this.zOf(p), -p.y)
@@ -542,7 +550,7 @@ export class PlaceMode {
        * instead of two and cannot collide with the camera.
        */
       case 'g': case 'G':
-        this.setGizmoMode(this.gizmoMode === 'translate' ? 'rotate' : 'translate')
+        this.setGizmoMode(this.gizmoMode === 'translate' ? 'rotate' : this.gizmoMode === 'rotate' ? 'scale' : 'translate')
         return true
       case 'Escape': this.arm(null); this.select(null); return true
     }
@@ -605,8 +613,10 @@ export class PlaceMode {
     // THE SAME TABS THE ASSET LIBRARY USES. Rich, 2026-09-28: "Tabs from assets should be used in
     // the place things editor tabs, not what ever this is." `tab-strip` / `tab` are what `Tabs`
     // in ui/shell.ts emits, so these are the same control by class rather than by resemblance.
-    paneTabs(root, [{ id: 'assets', label: 'Assets' }, { id: 'placed', label: `Placed (${this.doc.items.length})` }], this.panelTab, (id) => {
-      this.panelTab = id as 'assets' | 'placed'
+    // Grow lives here as a tab (Rich, 2026-09-30: "put grow under the place menu as a tab"): it
+    // writes placements, so it is a way of placing, not a mode of its own
+    paneTabs(root, [{ id: 'assets', label: 'Assets' }, { id: 'placed', label: `Placed (${this.doc.items.length})` }, ...(this.growTab ? [{ id: 'grow', label: 'Grow' }] : [])], this.panelTab, (id) => {
+      this.panelTab = id as 'assets' | 'placed' | 'grow'
       this.onChange()
     })
     // THE WARNING IS NOT THE FIRST THING. It was appended here, above the tab content, which put
@@ -615,11 +625,19 @@ export class PlaceMode {
     // the top instead of the awful placements.json warning") on every world where the warning was
     // true, which is the only case anybody sees it. Each tab now places it under its own heading.
     if (this.panelTab === 'assets') this.assetsTab(root)
+    else if (this.panelTab === 'grow' && this.growTab) {
+      const g = el('div', 'grow-tab')
+      root.append(g)
+      this.growTab(g)
+    }
     else this.placedTab(root, fly)
   }
 
-  /** which half of the panel is showing */
-  private panelTab: 'assets' | 'placed' = 'assets'
+  /** which part of the panel is showing */
+  private panelTab: 'assets' | 'placed' | 'grow' = 'assets'
+  get panelTabNow(): 'assets' | 'placed' | 'grow' {
+    return this.panelTab
+  }
 
   private assetsTab(root: HTMLElement) {
 
@@ -758,7 +776,7 @@ export class PlaceMode {
      * placing a row of posts wants to type 12 rather than nudge towards it.
      */
     const handles = el('div', 'row')
-    for (const [mode, label] of [['translate', 'move'], ['rotate', 'turn']] as const) {
+    for (const [mode, label] of [['translate', 'move'], ['rotate', 'turn'], ['scale', 'size']] as const) {
       const btn = el('button', this.gizmoModeNow === mode ? 'on' : '')
       btn.textContent = `${label} (G)`
       btn.onclick = () => this.setGizmoMode(mode)

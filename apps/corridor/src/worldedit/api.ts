@@ -526,7 +526,7 @@ export const api = {
    * and where it came from, never what it is.
    */
   deployStatus: () => call<DeployStatus>('/api/deploy/status'),
-  deployToken: (token: string) => call<{ token: DeployStatus['token']; status?: string }>('/api/deploy/token', { method: 'POST', body: JSON.stringify({ token }) }),
+  deployToken: (token: string) => call<{ token: DeployStatus['token']; status?: string; kind?: 'user' | 'account' }>('/api/deploy/token', { method: 'POST', body: JSON.stringify({ token }) }),
   deployForgetToken: () => call<{ token: DeployStatus['token'] }>('/api/deploy/token', { method: 'DELETE' }),
   deployCloudflare: (account?: string | null) => call<DeployCloudflare>(`/api/deploy/cloudflare${account ? `?account=${encodeURIComponent(account)}` : ''}`),
   deployCreateBucket: (account: string, name: string) => call<{ bucket: string }>('/api/deploy/bucket', { method: 'POST', body: JSON.stringify({ account, name }) }),

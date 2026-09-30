@@ -112,9 +112,30 @@ export class Cloudflare {
     return doc?.result ?? doc
   }
 
-  /** Is the token good, and what does Cloudflare call it. */
-  verify() {
-    return this.api('/user/tokens/verify')
+  /**
+   * Is the token good, and which kind is it.
+   *
+   * Two kinds exist and only one of them can answer `/user/tokens/verify`: a USER token (made
+   * under My Profile) can; an ACCOUNT-OWNED token (made under the account's Manage Account →
+   * API Tokens) gets an authentication error there, because it has no user. Rich, 2026-09-30:
+   * "we need to be able to use account API tokens in addition to user API tokens". So a token
+   * that fails the user check is asked the question both kinds can answer — which accounts can
+   * you see — and is good if it sees any. `kind` is reported so the panel can say which it got.
+   */
+  async verify() {
+    try {
+      const r = await this.api('/user/tokens/verify')
+      return { kind: 'user', status: r?.status ?? 'active', id: r?.id ?? null }
+    } catch (userErr) {
+      let accounts = []
+      try {
+        accounts = await this.accounts()
+      } catch (accountErr) {
+        throw new CloudflareError(`not a usable token: as a user token, ${userErr.message}; as an account token, ${accountErr.message}`, accountErr.status ?? 401)
+      }
+      if (!accounts.length) throw new CloudflareError('the token is accepted but can see no account — give it Account Settings: Read', 403)
+      return { kind: 'account', status: 'active', id: null, accounts: accounts.map((a) => a.id) }
+    }
   }
 
   /** Every account the token can see; nearly always one. */

@@ -42,6 +42,7 @@ from shapely.geometry import LineString, box
 
 from . import lidar
 from .geo import Frame
+from . import rastercache
 
 TILE_M = 1000.0
 # NAIP is 0.6 m in Maryland (0.3 in some states) and the tiles were cut at 1 m, throwing away 2.8x
@@ -260,7 +261,7 @@ def naip_tiled(frame: Frame, bbox, corridor, out: Path, cache: Path, res: float 
     from . import naip as naip_mod
     from .naip import SERVICE, TILE_PX, _get_with_retry, session  # noqa: F401
 
-    if out.exists():
+    if rastercache.reuse(out, frame.crs, tuple(bbox), "naip"):
         return {"file": out.name, "cached": True, "res_m": res}
     # OUTSIDE THE UNITED STATES THERE IS NO NAIP, and the service does not say so — it answers
     # HTTP 200 with a black JPEG, tile after tile. The first Stelvio bake came out with a
@@ -382,9 +383,14 @@ def export_tiles(site_dir: Path, web: Path, frame, mask_shapes: list, vivid) -> 
         if dem_ds is not None:
             win = rasterio.windows.from_bounds(bx0, by0, bx1, by1, transform=dem_ds.transform)
             z = dem_ds.read(1, window=win, out_shape=(n // 2, n // 2), resampling=Resampling.average, boundless=True, fill_value=-9999).astype(np.float32)
-            z = _fill(z, -9999)
-            if not np.isfinite(z).any():
+            # NODATA IS -9999 AND -9999 IS FINITE. A tile the DEM does not reach at all came
+            # through here as a flat floor ten kilometres down, and `_fill` copies the DEM's edge
+            # outward over a tile it half reaches — both from a cached DEM smaller than the site
+            # (rastercache.py). The reuse check is the fix; this is the guard that keeps a hole a
+            # hole rather than a cliff if it ever happens again.
+            if not (np.isfinite(z) & (z > -9000)).any():
                 continue
+            z = _fill(z, -9999)
             rgb, zmin, scale = _encode_height(z)
             buf = io.BytesIO()
             Image.fromarray(rgb, "RGB").save(buf, "PNG", optimize=True)

@@ -65,7 +65,9 @@
 
 /* ---- the asset palette ---------------------------------------------------------------------- */
 
-.palette { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s1); }
+/* rows size to their chips: a scroller inside the inspector's grid was squeezing every row to the
+   minimum and the second line of each chip vanished under the next one */
+.palette { display: grid; grid-template-columns: 1fr 1fr; grid-auto-rows: min-content; gap: var(--s1); }
 .chip {
   display: flex; flex-direction: column; align-items: flex-start; gap: 1px;
   padding: var(--s1) var(--s2);
@@ -526,4 +528,4 @@
 
 /* the palette tab strip sits flush in the panel, no side padding of its own */
 .inspector-body > .tab-strip { padding-left: 0; padding-right: 0; }
-.inspector-body .palette .chip { min-height: 2.6em; }
+.inspector-body .palette .chip { min-height: 3.6em; }

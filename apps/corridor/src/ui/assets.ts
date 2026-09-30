@@ -681,6 +681,26 @@ export class AssetCatalog {
       this.showSaveBar()
     }
     const kinds = classesIn(this.items.map((x) => x.kind))
+    // THE SIZE, IN METRES. A reconstruction is a unit cube; when it is placed in a world the
+    // editor needs to know how tall the real thing is, and the footprint says how much ground it
+    // covers (Grow fits assets to measured footprints by it). Blank means the class's usual size.
+    const sizeRow = () => {
+      const cur = this.draft.size_m === undefined ? it.size_m : this.draft.size_m
+      const row = el('div', 'row')
+      const dim = (k: 'h' | 'w' | 'd', label: string) => textField({
+        label, type: 'number', step: 0.1, value: cur?.[k] === undefined || cur?.[k] === null ? '' : String(cur[k]),
+        onChange: (v) => {
+          const n = v.trim() === '' ? undefined : Number(v)
+          const next = { ...(this.draft.size_m === undefined ? it.size_m ?? {} : this.draft.size_m ?? {}) }
+          if (n === undefined || !Number.isFinite(n) || n <= 0) delete next[k]
+          else next[k] = n
+          edit('size_m', Object.keys(next).length ? next : null)
+        },
+      })
+      row.append(dim('h', 'Height (m)'), dim('w', 'Length (m)'), dim('d', 'Width (m)'))
+      row.title = 'the real size, so a placed copy stands at it; blank is the class’s usual size'
+      return row
+    }
     specBody.append(
       textField({ label: 'Subject', value: this.draft.subject ?? it.subject, onChange: (v) => edit('subject', v) }),
       select({
@@ -710,6 +730,7 @@ export class AssetCatalog {
           this.mesh3d?.setYawDeg(deg)
         },
       }),
+      sizeRow(),
       promptField('Prompt', this.draft.prompt ?? it.prompt, (v) => edit('prompt', v)),
       promptField('Avoid', this.draft.negative ?? it.negative, (v) => edit('negative', v)),
     )

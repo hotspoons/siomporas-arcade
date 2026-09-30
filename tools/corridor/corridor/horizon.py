@@ -20,6 +20,7 @@ from pathlib import Path
 import requests
 
 from .geo import Frame
+from . import rastercache
 
 SERVICE = "https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer/exportImage"
 RES = 30.0
@@ -45,10 +46,11 @@ def _get_with_retry(url: str, params: dict, timeout: int, tries: int = 5):
 
 
 def fetch_horizon(frame: Frame, out: Path, cache: Path, radius_m: float = 30000.0) -> dict:
-    if out.exists():
-        return {"file": out.name, "cached": True}
     ox, oy = frame.origin
     xmin, ymin, xmax, ymax = ox - radius_m, oy - radius_m, ox + radius_m, oy + radius_m
+    # a horizon fetched about an earlier centre is a horizon about the wrong place
+    if rastercache.reuse(out, frame.crs, (xmin, ymin, xmax, ymax), "horizon"):
+        return {"file": out.name, "cached": True}
     size = int(round(2 * radius_m / RES))
     if size > 4000:
         raise ValueError("horizon larger than the service's 4000 px cap; raise RES or lower radius")

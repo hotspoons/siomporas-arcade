@@ -54,10 +54,12 @@ const panel = () => p.evaluate(() => {
 })
 
 // 1. every mode: a palette tab of draggable chips, and a placed tab
-for (const [key, m] of [['1', 'areas'], ['4', 'structures'], ['5', 'traffic'], ['6', 'stunts'], ['7', 'races'], ['2', 'place']]) {
+// Grow is a third tab inside Place now, and the World tab took key 7; the rail is 1–7 without it
+for (const [key, m] of [['1', 'areas'], ['3', 'structures'], ['4', 'traffic'], ['5', 'stunts'], ['6', 'races'], ['2', 'place']]) {
   await p.keyboard.press(key); await p.waitForTimeout(400)
   const s = await panel()
-  check(s.tabs.length === 2 && s.chips > 0, `${m}: two tabs (${s.tabs.join(' | ')}) and ${s.chips} draggable chips`)
+  const want = m === 'place' ? 3 : 2
+  check(s.tabs.length === want && s.chips > 0, `${m}: ${want === 3 ? 'three' : 'two'} tabs (${s.tabs.join(' | ')}) and ${s.chips} draggable chips`)
   if (m === 'stunts') check(s.tabLooksLikeTab, 'the tabs are styled as the shell’s tabs, not as grey buttons')
 }
 
@@ -87,7 +89,7 @@ const strip = await p.evaluate(() => {
 check(strip.on > 0.7 && strip.off === 0, `the dropped traffic level is a strip of that road (${strip.on} on it, ${strip.off} three hundred metres on, ${strip.pts} points)`)
 
 // 3. selecting keeps the list: the stunt list, with its detail under it
-await p.keyboard.press('6'); await p.waitForTimeout(300)
+await p.keyboard.press('5'); await p.waitForTimeout(300)
 await p.evaluate(() => window.corridor.stunts.select(window.corridor.stunts.doc.fixtures[0].id))
 await p.waitForTimeout(300)
 const st = await panel()
@@ -110,7 +112,7 @@ const afterGate = await panel()
 const gateSel = await p.evaluate(() => window.corridor.races.selectedGate)
 check(afterGate.hash.endsWith(':races') && gateSel === gatePx.id && afterGate.tabs[1]?.endsWith('*'), `clicking a gate from place mode opens Races on it (${afterGate.hash.split(':')[1]}, gate ${gateSel}, tab ${afterGate.tabs[1]})`)
 // and with a piece ARMED, a click is a placement, never a selection of something else
-await p.keyboard.press('6'); await p.waitForTimeout(300)
+await p.keyboard.press('5'); await p.waitForTimeout(300)
 await p.evaluate(() => window.corridor.stunts.arm('hump'))
 await p.mouse.click(gatePx.x, gatePx.y); await p.waitForTimeout(600)
 const armed = await p.evaluate(() => ({ hash: location.hash, fixtures: window.corridor.stunts.doc.fixtures.length }))

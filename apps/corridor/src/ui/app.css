@@ -144,7 +144,10 @@ body.dock-dragging .dock-grip { pointer-events: auto; }
 .inspector-body input, .inspector-body select, .inspector-body textarea, .inspector-body .field { max-width: 100%; min-width: 0; }
 .inspector-body h2 { font-size: var(--text-md); }
 
-.mode-host { display: flex; align-items: center; gap: var(--s2); }
+.mode-host { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); }
+/* the site editor's rail wraps its tabs when the dock is narrow (Rich: "place tabs need to wrap");
+   scoped here, because the world editor's top bar must stay one row */
+#se-rail .segmented { flex-wrap: wrap; }
 
 .dirty { font-size: var(--text-xs); color: var(--ink-3); padding: 0 var(--s2); white-space: nowrap; }
 .dirty.on { color: var(--warn); }

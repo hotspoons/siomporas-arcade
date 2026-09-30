@@ -8,6 +8,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { applyAlphaGlazing } from './glazing'
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js'
 import { DATA_BASE } from './site'
+import { loadMergedCatalog } from './catalogmerge'
 
 export interface Placement {
   id: string
@@ -85,12 +86,8 @@ function label(text: string, w: number): THREE.Sprite {
 
 export async function loadCatalog(): Promise<Map<string, CatalogEntry>> {
   const m = new Map<string, CatalogEntry>()
-  try {
-    const r = await fetch('/assets/catalog.json', { cache: 'no-cache' })
-    if (r.ok) for (const e of ((await r.json()).assets ?? []) as CatalogEntry[]) m.set(e.id, e)
-  } catch {
-    /* no catalog yet */
-  }
+  // the shipped kit plus the asset library: the same merge the editor placed from
+  for (const e of (await loadMergedCatalog()).assets) m.set(e.id, e as CatalogEntry)
   return m
 }
 

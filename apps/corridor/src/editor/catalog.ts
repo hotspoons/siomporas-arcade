@@ -8,6 +8,7 @@ import * as THREE from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { applyAlphaGlazing } from '../glazing'
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js'
+import { loadMergedCatalog } from '../catalogmerge'
 
 export interface CatalogEntry {
   id: string
@@ -30,6 +31,10 @@ export interface CatalogEntry {
    * never guessed. The viewer's `placements.ts` applies it the same way, so the two agree.
    */
   yaw_offset_deg?: number
+  /** from the asset library rather than the shipped kit */
+  library?: boolean
+  /** the footprint was measured or typed; false means a guess until the model has loaded */
+  measured?: boolean
 }
 
 export interface Catalog {
@@ -168,6 +173,14 @@ function loadModel(entry: CatalogEntry): Promise<THREE.Object3D | null> {
         const size = bb.getSize(new THREE.Vector3())
         const long = Math.max(size.x, size.z)
         const k = entry.fit === 'span' ? (long > 1e-3 ? entry.footprint_m[0] / long : 1) : size.y > 1e-3 ? entry.height_m / size.y : 1
+        // A LIBRARY ITEM'S FOOTPRINT IS MEASURED HERE, from the model at its placed height, rather
+        // than typed into a table: the proxy box, the gizmo size and Grow's fit all read it
+        if (entry.measured === false) {
+          const a = Math.round(size.x * k * 10) / 10, b = Math.round(size.z * k * 10) / 10
+          entry.footprint_m = [Math.max(a, b, 0.1), Math.max(Math.min(a, b), 0.1)]
+          if (size.z > size.x && !entry.yaw_offset_deg) entry.yaw_offset_deg = 90
+          entry.measured = true
+        }
         root.scale.setScalar(k)
         const c = bb.getCenter(new THREE.Vector3()).multiplyScalar(k)
         root.position.set(-c.x, -bb.min.y * k, -c.z)
@@ -191,7 +204,6 @@ export async function instanceOf(entry: CatalogEntry): Promise<THREE.Object3D> {
 }
 
 export async function loadCatalog(): Promise<Catalog> {
-  const r = await fetch('/assets/catalog.json', { cache: 'no-cache' })
-  if (!r.ok) return { assets: [] }
-  return (await r.json()) as Catalog
+  // the shipped kit plus the asset library, merged once for the editor and the viewer alike
+  return (await loadMergedCatalog()) as Catalog
 }

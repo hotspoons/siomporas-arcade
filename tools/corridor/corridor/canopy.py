@@ -35,6 +35,7 @@ from pathlib import Path
 import requests
 
 from .geo import Frame
+from . import rastercache
 
 BUCKET = "https://dataforgood-fb-data.s3.amazonaws.com/forests/v1/alsgedi_global_v6_float"
 INDEX = f"{BUCKET}/tiles.geojson"
@@ -79,7 +80,7 @@ def tiles_for(cache: Path, w: float, s: float, e: float, n: float) -> list[str]:
 
 def fetch_chm(frame: Frame, bbox: tuple[float, float, float, float], out: Path, cache: Path, res: float = 1.0) -> dict:
     """The canopy height model over the site bbox, on the site lattice, in metres."""
-    if out.exists():
+    if rastercache.reuse(out, frame.crs, bbox, "canopy"):
         return {"file": out.name, "cached": True}
     w, s, e, n = frame.bbox_wgs(*bbox)
     cogs = tiles_for(cache, w, s, e, n)

@@ -86,6 +86,23 @@ const TYPE_OF_CLASS: Record<string, AssetType> = Object.fromEntries(
  * unrecognised class is a prop, which is the one answer that is never destructive: a prop places,
  * draws and collides, and the worst that happens is that nobody offers it a gearbox.
  */
+/**
+ * How tall a thing of this class is, metres, when nobody has said. A reconstruction is a unit
+ * cube with no scale; the class is the best guess there is until the asset record carries a
+ * `size_m` (the asset form) — and a guess that is written down here is one that can be corrected.
+ */
+const HEIGHT_OF_CLASS: Record<string, number> = {
+  'hero-car': 1.45, traffic: 1.5, emergency: 2.2, 'commercial-vehicle': 3.2,
+  pedestrian: 1.75, animal: 1.0,
+  furniture: 1.0, building: 8, 'building-dressing': 3, vegetation: 8, signage: 2.5, prop: 2,
+  weapon: 1,
+  'race-gate': 5, 'race-marker': 1.5, 'stop-sign': 2.4, 'give-way-sign': 2.4, signal: 6, 'power-pole': 10, 'lamp-post': 8, 'street-sign': 2.5,
+}
+const HEIGHT_OF_TYPE: Record<AssetType, number> = { prop: 2, vehicle: 1.5, actor: 1.75, weapon: 1, fixture: 3 }
+export function heightFor(kind: string | null | undefined, type: AssetType): number {
+  return HEIGHT_OF_CLASS[kind ?? ''] ?? HEIGHT_OF_TYPE[type]
+}
+
 export function typeOf(item: { type?: string | null; kind?: string | null }): AssetType {
   const t = item.type
   if (t && (TYPES as readonly string[]).includes(t)) return t as AssetType

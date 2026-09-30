@@ -80,7 +80,7 @@ ok('there is ONE world picker on the page, not one per editor',
   `${pickers.wrappers} picker, ${pickers.buttons} button`)
 
 // Back out: the scene must stop drawing and stop answering keys.
-await page.evaluate(() => window.__we.setMode('define'))
+await page.evaluate(() => { window.__we.setMode('world'); window.__we.setStep('define') })
 await page.waitForTimeout(400)
 ok('leaving Place puts the map back',
   await page.evaluate(() => document.querySelector('#gl')?.hidden === true && document.querySelector('#map')?.hidden === false),

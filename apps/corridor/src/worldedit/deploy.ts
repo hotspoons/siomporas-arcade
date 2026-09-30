@@ -156,7 +156,7 @@ export class DeployPanel {
       if (st.token.source === 'entered') tb.append(button({ label: 'Forget it', icon: 'trash', variant: 'ghost', onClick: async () => { await api.deployForgetToken(); this.cf = null; await this.load() } }))
     } else {
       let typed = ''
-      const field = textField({ label: 'API token', value: '', placeholder: 'an Edit Cloudflare Workers token with R2 write', note: 'kept in the server’s memory only; set CLOUDFLARE_API_TOKEN in the environment to skip this', onChange: (v) => (typed = v), onInput: (v) => (typed = v) })
+      const field = textField({ label: 'API token', value: '', placeholder: 'a user token, or an account-owned token', note: 'Workers Scripts, R2 Storage and Account Settings read; kept in the server’s memory only — set CLOUDFLARE_API_TOKEN in the environment to skip this', onChange: (v) => (typed = v), onInput: (v) => (typed = v) })
       const input = field.querySelector('input')
       if (input) input.type = 'password'
       tb.append(
@@ -167,8 +167,8 @@ export class DeployPanel {
           variant: 'primary',
           onClick: async () => {
             try {
-              await api.deployToken(typed)
-              toast('token accepted', 'ok')
+              const r = await api.deployToken(typed)
+              toast(`token accepted (${r.kind === 'account' ? 'account-owned' : 'user'} token)`, 'ok')
               await this.load()
             } catch (e) {
               toast((e as Error).message, 'danger', 8000)

@@ -54,6 +54,8 @@ export interface AssetItem {
    * way is its front (+X once turned), so no guess is needed. Absent: as exported, and guessed.
    */
   orient?: { yaw_deg: number } | null
+  /** metres: how big the thing is, so a unit-cube reconstruction is placed at its real size */
+  size_m?: { w?: number; d?: number; h?: number } | null
   /** role → which mesh that role loads. Absent means the class default; see `USED_FOR` */
   use?: Record<string, MeshVariant> | null
   /**

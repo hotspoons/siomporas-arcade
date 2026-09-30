@@ -25,7 +25,7 @@ import { CAN_SAVE, type Area } from './schema'
 import { LOOK, type Season } from '../season'
 import { EditorUI } from '../ui/editor'
 import { AssetCatalog } from '../ui/assets'
-import { confirm, installShellKeys, toast, status } from '../ui/shell'
+import { confirm, el, installShellKeys, toast, status } from '../ui/shell'
 import { restoreTheme } from '../ui/viewer'
 
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector<T>(sel)!
@@ -75,6 +75,8 @@ let site: Site | null = null
 const areas = new AreaMode((structural) => refresh(structural))
 const place = new PlaceMode((structural) => refresh(structural))
 const grow = new GrowMode(place, (structural) => refresh(structural))
+// Grow renders inside Place's third tab; the mode owns it, the tab shows it
+place.growTab = (root) => grow.panel(root, site, place.assets, flyTo)
 // STRUCTURES: intervals on the spine — a bridge over the road, a grade to flatten, a detection to
 // ignore. Its own file (structures.json) and its own pointer/key handling, so below it is always
 // a `mode === 'structures'` branch ahead of the areas/place pair, never mixed into them.
@@ -175,7 +177,18 @@ async function loadIndex() {
  */
 let siteHasImpostors = false
 
-async function loadSite(slug: string, quality: 'edit' | 'preview' = 'edit') {
+/** the load in flight: a later call supersedes an earlier one, and the earlier one's result is dropped */
+let loadGen = 0
+
+function dropSite(s: Site) {
+  scene.remove(s.group)
+  s.group.traverse((o) => {
+    if (o instanceof THREE.Mesh) o.geometry.dispose()
+  })
+}
+
+/** Returns the slug on screen afterwards: the one asked for, or the old one if the load was refused. */
+async function loadSite(slug: string, quality: 'edit' | 'preview' = 'edit'): Promise<string | null> {
   if (unsaved() && !(await confirm({
     title: 'Unsaved edits',
     message: 'This site has edits that have not been saved. Load another one anyway?',
@@ -183,20 +196,31 @@ async function loadSite(slug: string, quality: 'edit' | 'preview' = 'edit') {
     danger: true,
   }))) {
     ui.setSite(site?.manifest.slug ?? slug)
-    return
+    return site?.manifest.slug ?? null
   }
+  /*
+   * ONE LOAD AT A TIME, AND THE LAST ONE ASKED FOR WINS. `buildSite` takes seconds; while it ran,
+   * `site` was null, so a second switch saw nothing to remove and started a second build, and
+   * every finished build added its group to the scene — the old world's tiles stayed under the
+   * new one (Rich, 2026-09-30: "switching worlds in the place editor doesn't clear out tiles for
+   * the old world"). A generation counter: a build that finishes after a newer one was asked for
+   * is dropped, not shown.
+   */
+  const gen = ++loadGen
   location.hash = `${slug}:${mode}`
   ui.setSite(slug)
   if (site) {
-    scene.remove(site.group)
-    site.group.traverse((o) => {
-      if (o instanceof THREE.Mesh) o.geometry.dispose()
-    })
+    dropSite(site)
     site = null
   }
   status(`loading ${slug}…`)
   const manifest = await fetchJSON<Manifest>(`/sites/${slug}/web/manifest.json`)
-  site = await buildSite(manifest, status, false, quality === 'preview' ? renderer : undefined, scene.fog as THREE.FogExp2, season)
+  const built = await buildSite(manifest, status, false, quality === 'preview' ? renderer : undefined, scene.fog as THREE.FogExp2, season, undefined, { plantWhole: true })
+  if (gen !== loadGen) {
+    dropSite(built)
+    return null
+  }
+  site = built
   siteHasImpostors = quality === 'preview'
   sitePredatesEdits = false
   scene.add(site.group)
@@ -249,6 +273,7 @@ async function loadSite(slug: string, quality: 'edit' | 'preview' = 'edit') {
   toTop()
   refresh()
   status('')
+  return slug
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -547,7 +572,7 @@ addEventListener('keydown', (e) => {
     refresh()
     return
   }
-  if (mode === 'grow' && grow.key(e, site, place.assets)) {
+  if (mode === 'place' && place.panelTabNow === 'grow' && grow.key(e, site, place.assets)) {
     e.preventDefault()
     return
   }
@@ -570,11 +595,11 @@ addEventListener('keydown', (e) => {
     }
     case '1': setMode('areas'); break
     case '2': setMode('place'); break
-    case '3': setMode('grow'); break
-    case '4': setMode('structures'); break
-    case '5': setMode('traffic'); break
-    case '6': setMode('stunts'); break
-    case '7': setMode('races'); break
+    case '3': setMode('structures'); break
+    case '4': setMode('traffic'); break
+    case '5': setMode('stunts'); break
+    case '6': setMode('races'); break
+    case '7': setMode('world'); break
   }
 })
 
@@ -582,6 +607,8 @@ addEventListener('keydown', (e) => {
 // modes, panel, saving
 function setMode(m: Mode) {
   mode = m
+  // the proposed pavement edges are drawn only while the World tab is up
+  roadWidth.setShown(m === 'world')
   if (site) location.hash = `${site.manifest.slug}:${m}`
   ui.setMode(m)
   // The traffic overlay is shown only in its own mode, and `applyLayers` runs at load — so without
@@ -589,8 +616,12 @@ function setMode(m: Mode) {
   applyLayers()
   refresh()
 }
-// the road panel is not a mode — it overlays whatever mode you are in, so it gets its own button
-roadWidth.mount(ui.modeHost)
+/** The World tab: what is true of the whole world — the road's cross-section, and (next) its surfaces. */
+function worldPanel(root: HTMLElement) {
+  root.replaceChildren()
+  root.append(el('h2', '', 'road cross-section'))
+  roadWidth.panelInto(root)
+}
 // the same handle the viewer exposes as window.corridor, so probes can drive the editor too
 ;(window as unknown as { __ed: unknown }).__ed = { scene, camera, orbit, tune: TUNE_TABS, get site() { return site } }
 
@@ -766,7 +797,7 @@ function refresh(structural = true) {
   holdTheCamera((mode === 'areas' && areas.drawing) || (mode === 'traffic' && traffic.drawing))
   if (structural) {
     if (mode === 'areas') areas.panel(ui.inspector, (a: Area) => flyTo(a.polygon))
-    else if (mode === 'grow') grow.panel(ui.inspector, site, place.assets, flyTo)
+    else if (mode === 'world') worldPanel(ui.inspector)
     else if (mode === 'structures') structs.panel(ui.inspector, flyTo)
     else if (mode === 'traffic') traffic.panel(ui.inspector, (z) => flyTo(z.polygon))
     else if (mode === 'stunts') stunts.panel(ui.inspector, (f) => flyTo(fixtureFootprint(f)))
@@ -861,9 +892,9 @@ export function setActive(on: boolean) {
   }
 }
 /** Point the editor at a world. Called by the host when the picker changes. */
-export async function openSite(slug: string) {
-  if (site?.manifest.slug === slug) return
-  await loadSite(slug)
+export async function openSite(slug: string): Promise<string | null> {
+  if (site?.manifest.slug === slug) return slug
+  return loadSite(slug)
 }
 /** Which site it is looking at, so the host can tell whether it has to load one. */
 export const currentSite = () => site?.manifest.slug ?? null
@@ -927,4 +958,10 @@ function frame() {
   }
   requestAnimationFrame(frame)
 }
-loadIndex().then(frame).catch((e) => status(`failed: ${e.message}`))
+// EMBEDDED, THE HOST SAYS WHICH WORLD. On its own page the editor opens the hash's site or the
+// first one; inside the world editor that first site loaded UNDER whatever the host asked for,
+// and the two builds raced (see `loadSite`). The host calls `openSite`; here only the list.
+if (mounts) {
+  fetchJSON<{ sites: IndexEntry[] }>('/sites/index.json').then((idx) => ui.setSites(idx.sites, idx.sites[0]?.slug ?? '')).catch(() => {})
+  frame()
+} else loadIndex().then(frame).catch((e) => status(`failed: ${e.message}`))

@@ -18,6 +18,7 @@ from pathlib import Path
 import requests
 
 from .geo import Frame
+from . import rastercache
 
 TNM = "https://tnmaccess.nationalmap.gov/api/v1/products"
 session = requests.Session()
@@ -154,7 +155,8 @@ VSICURL_ENV = {
 
 
 def fetch_dem(frame: Frame, bbox: tuple[float, float, float, float], out: Path, cache: Path) -> dict:
-    if out.exists():
+    # only a cached DEM that COVERS this bbox is reused; see rastercache.py for the wall it built
+    if rastercache.reuse(out, frame.crs, bbox, "dem"):
         return {"file": out.name, "cached": True}
     w, s, e, n = frame.bbox_wgs(*bbox)
     items, native = [], 1.0

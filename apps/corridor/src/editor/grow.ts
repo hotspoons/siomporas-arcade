@@ -68,7 +68,7 @@ export class GrowMode {
     const fresh = r.items.filter((p) => !keptIds.has(p.id) && !dead.has(p.id))
     doc.items = [...kept, ...fresh]
     doc.autogen = {
-      params: { ...this.params } as unknown as Record<string, number | boolean>,
+      params: { ...this.params } as unknown as Record<string, number | boolean | string[]>,
       deleted: this.deleted,
       ran: new Date().toISOString(),
     }
@@ -82,7 +82,7 @@ export class GrowMode {
   async clear() {
     const doc = this.place.doc
     doc.items = doc.items.filter((p) => !isGenerated(p))
-    doc.autogen = { params: { ...this.params } as unknown as Record<string, number | boolean>, deleted: [] }
+    doc.autogen = { params: { ...this.params } as unknown as Record<string, number | boolean | string[]>, deleted: [] }
     this.last = null
     this.place.dirty = true
     await this.place.respawn()
@@ -122,6 +122,33 @@ export class GrowMode {
     }).then((yes) => { if (yes) void this.clear() })
     tools.append(gen, clr)
     root.append(tools)
+
+    /*
+     * WHICH ASSETS. The catalog used to be a hand-typed list of boxes; now it is the library, and
+     * a grown town should be made of the models you meant, not everything that happens to be
+     * filed as a building. Nothing ticked means everything is fair game.
+     */
+    const allow = new Set(this.params.allow ?? [])
+    const which = el('details', 'grow-which')
+    which.open = allow.size > 0
+    which.append(el('summary', '', `which assets (${allow.size ? `${allow.size} chosen` : 'any'})`))
+    const chips = el('div', 'palette')
+    for (const e of [...catalog].sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name))) {
+      const b = el('button', `chip${allow.has(e.id) ? ' on' : ''}`)
+      b.append(el('span', 'nm', e.name), el('span', 'mono', `${e.category}${e.library ? '' : ' · kit'}`))
+      b.onclick = () => {
+        if (allow.has(e.id)) allow.delete(e.id)
+        else allow.add(e.id)
+        this.params.allow = [...allow]
+        this.place.doc.autogen = { params: { ...(this.place.doc.autogen?.params ?? {}), ...this.params } as unknown as Record<string, number | boolean | string[]>, deleted: this.deleted }
+        this.place.dirty = true
+        this.onChange(true)
+      }
+      chips.append(b)
+    }
+    if (!catalog.length) chips.append(el('p', 'dim', 'nothing placeable: add a model to the library, or ship one in the kit'))
+    which.append(chips)
+    root.append(which)
 
     const c = this.counts()
     const tally = el('div', 'tally')

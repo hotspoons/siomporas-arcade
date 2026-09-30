@@ -1238,7 +1238,15 @@ function renderPanel() {
       return
     }
     void siteEditorFor(w.slug)
-      .then((se) => se.setActive(true))
+      .then((se) => {
+        // the load takes seconds; if Place was left (or another world picked) meanwhile, the
+        // 3D editor must not wake up under the map
+        if (mode !== 'place' || selected !== w.slug) return
+        se.setActive(true)
+        // the editor refused the switch (unsaved edits, kept): the picker follows the editor
+        const shown = se.currentSite()
+        if (shown && shown !== selected && worlds.some((x) => x.slug === shown)) selectWorld(shown)
+      })
       .catch((e) => {
         showSiteEditor(false)
         toast(`place editor: ${(e as Error).message}`, 'danger', 8000)

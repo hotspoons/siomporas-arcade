@@ -1401,7 +1401,7 @@ async function deployApi(req, res, seg, q) {
         // the one thing to check before the form goes on: is it a token Cloudflare accepts
         try {
           const v = await cfFor().verify()
-          return json(res, 200, { token: cfTokens.describe(), status: v?.status ?? 'active' })
+          return json(res, 200, { token: cfTokens.describe(), status: v.status, kind: v.kind })
         } catch (e) {
           cfTokens.clear()
           return json(res, 401, { error: `Cloudflare did not accept that token: ${e.message}`, token: cfTokens.describe() })

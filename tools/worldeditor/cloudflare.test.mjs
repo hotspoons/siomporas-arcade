@@ -22,7 +22,11 @@ function fake() {
     const ok = (result, extra = {}) => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ success: true, errors: [], messages: [], result, ...extra })) }
     const u = new URL(req.url, 'http://x')
     const p = u.pathname
-    if (p === '/user/tokens/verify') return ok({ id: 't', status: 'active' })
+    if (p === '/user/tokens/verify') {
+      // an account-owned token has no user: Cloudflare answers with an auth error
+      if (req.headers.authorization === 'Bearer account-token') { res.writeHead(400, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ success: false, errors: [{ code: 6003, message: 'Invalid request headers' }] })) }
+      return ok({ id: 't', status: 'active' })
+    }
     if (p === '/accounts') return ok([{ id: 'acc1', name: 'Rich' }])
     if (p === '/zones') return ok([{ id: 'z1', name: 'siomporas.com', status: 'active' }])
     if (p === '/accounts/acc1/workers/subdomain') return ok({ subdomain: 'rich' })
@@ -65,6 +69,18 @@ test('the token store holds a token in memory and describes it without showing i
   assert.throws(() => env.set('   '), /empty/)
   assert.equal(JSON.stringify(env).includes('typed'), false, 'a dump of the store shows no token')
   assert.deepEqual(env.clear(), { present: false, source: null })
+})
+
+test('a user token and an account-owned token both verify; a dead one does not', async () => {
+  const f = await fake()
+  try {
+    assert.deepEqual(await new Cloudflare('user-token', { base: f.base }).verify(), { kind: 'user', status: 'active', id: 't' })
+    const acct = await new Cloudflare('account-token', { base: f.base }).verify()
+    assert.equal(acct.kind, 'account')
+    assert.deepEqual(acct.accounts, ['acc1'])
+  } finally {
+    f.close()
+  }
 })
 
 test('queries: accounts, zones, subdomain, buckets — with the bearer header and without the token anywhere else', async () => {

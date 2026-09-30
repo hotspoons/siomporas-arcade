@@ -28,6 +28,7 @@ from PIL import Image
 from rasterio.transform import from_origin
 
 from .geo import Frame
+from . import rastercache
 
 SERVICE = "https://imagery.nationalmap.gov/arcgis/rest/services/USGSNAIPPlus/ImageServer/exportImage"
 RES = 0.3
@@ -166,7 +167,7 @@ def fetch_sentinel2(frame: Frame, bbox: tuple[float, float, float, float], out: 
 
 
 def fetch_naip(frame: Frame, bbox: tuple[float, float, float, float], out: Path, cache: Path) -> dict:
-    if out.exists():
+    if rastercache.reuse(out, frame.crs, bbox, "naip"):
         return {"file": out.name, "cached": True}
     if not covered(frame, bbox):
         return fetch_sentinel2(frame, bbox, out)

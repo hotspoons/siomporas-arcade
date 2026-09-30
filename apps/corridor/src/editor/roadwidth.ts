@@ -47,7 +47,6 @@ const KNOBS: Knob[] = [
 ].filter((k): k is Knob => k !== null)
 
 export class RoadWidth {
-  private panel: HTMLElement | null = null
   private group = new THREE.Group()
   private site: Site | null = null
   private st: Station[] = []
@@ -145,10 +144,12 @@ export class RoadWidth {
     onDone()
   }
 
-  /** Build the floating panel once and return its toggle button for the editor's toolbar. */
-  mount(host: HTMLElement): HTMLButtonElement {
-    const btn = el('button', '', 'road (5)') as HTMLButtonElement
-    const panel = el('div', 'roadwidth hidden')
+  /**
+   * The sliders, into a host: the World tab. It was a floating panel over every mode with its
+   * own toggle button on the rail (labelled "road (5)" long after 5 meant Traffic); a world's
+   * cross-section is a world setting and lives with the others.
+   */
+  panelInto(host: HTMLElement): void {
     const body = el('div', 'roadwidth-body')
     const note = el('div', 'roadwidth-note mono')
     const redraw = () => {
@@ -159,29 +160,25 @@ export class RoadWidth {
     }
     const applyBtn = el('button', 'roadwidth-apply', 'apply') as HTMLButtonElement
     applyBtn.onclick = () => this.apply(redraw)
-    panel.append(el('div', 'roadwidth-title', 'road cross-section'), body, note, applyBtn)
     for (const k of KNOBS) {
       body.append(
-        slider(k.name, k.get(), k.min, k.max, k.step, k.get(), k.note, (v) => {
+        slider(k.name, this.want.get(k.name) ?? k.get(), k.min, k.max, k.step, k.get(), k.note, (v) => {
           this.want.set(k.name, v)
           redraw()
         }),
       )
     }
-    btn.onclick = () => {
-      const on = panel.classList.toggle('hidden')
-      this.group.visible = !on
-      btn.classList.toggle('on', !on)
-      if (!on) redraw()
-    }
-    document.body.append(panel)
-    host.append(btn)
-    this.panel = panel
-    return btn
+    host.append(body, note, applyBtn)
+    redraw()
   }
 
-  /** Shown only while the panel is open, so it never clutters the other modes. */
+  /** The proposed edges are drawn only while the World tab is up, so they never clutter the other modes. */
+  setShown(on: boolean): void {
+    this.group.visible = on
+    if (on) this.redraw()
+  }
+
   get visible(): boolean {
-    return !!this.panel && !this.panel.classList.contains('hidden')
+    return this.group.visible
   }
 }

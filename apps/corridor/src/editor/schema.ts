@@ -120,7 +120,8 @@ export interface Placement {
 
 /** What autogen remembers between runs. The viewer ignores it; only `items` is rendered. */
 export interface AutogenState {
-  params: Record<string, number | boolean>
+  /** the knobs, plus `allow`: the catalog ids Grow may use */
+  params: Record<string, number | boolean | string[]>
   /** generated ids the human deleted — regeneration must not bring them back */
   deleted: string[]
   ran?: string

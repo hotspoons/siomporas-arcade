@@ -19,21 +19,24 @@ import { icon } from './icons'
 import { bodyOf, group, layerToggle, segmented, select } from './controls'
 import type { IndexEntry } from '../site'
 
-export type Mode = 'areas' | 'place' | 'grow' | 'structures' | 'traffic' | 'stunts' | 'races'
+export type Mode = 'areas' | 'place' | 'structures' | 'traffic' | 'stunts' | 'races' | 'world'
 
-const MODES: { value: Mode; label: string; icon: 'pencil-square' | 'map-pin' | 'sparkles' | 'rectangle-group' | 'map' | 'bolt' | 'flag'; key: string }[] = [
+const MODES: { value: Mode; label: string; icon: 'pencil-square' | 'map-pin' | 'sparkles' | 'rectangle-group' | 'map' | 'bolt' | 'flag' | 'adjustments-horizontal'; key: string }[] = [
   { value: 'areas', label: 'Areas', icon: 'pencil-square', key: '1' },
   { value: 'place', label: 'Place', icon: 'map-pin', key: '2' },
-  { value: 'grow', label: 'Grow', icon: 'sparkles', key: '3' },
-  { value: 'structures', label: 'Structures', icon: 'rectangle-group', key: '4' },
+  // Grow is a tab inside Place now (src/editor/place.ts `growTab`): it writes placements
+  { value: 'structures', label: 'Structures', icon: 'rectangle-group', key: '3' },
   // Traffic zones (src/editor/zones.ts): the same polygon tool, a different document. Painted with
   // the map colours everybody reads, because the fill IS the value.
-  { value: 'traffic', label: 'Traffic', icon: 'map', key: '5' },
+  { value: 'traffic', label: 'Traffic', icon: 'map', key: '4' },
   // Stunt fixtures (src/editor/stuntmode.ts): a loop, a corkscrew or a jump standing on the road,
   // with its two ends linked back to the tarmac by a bezier.
-  { value: 'stunts', label: 'Stunts', icon: 'bolt', key: '6' },
+  { value: 'stunts', label: 'Stunts', icon: 'bolt', key: '5' },
   // Circuits and stages (src/editor/coursemode.ts): gates across the road, crossed in order.
-  { value: 'races', label: 'Races', icon: 'flag', key: '7' },
+  { value: 'races', label: 'Races', icon: 'flag', key: '6' },
+  // The world's own settings — the road cross-section, the surfaces it is drawn with. It was a
+  // floating "road" button that overlaid every mode; Rich: "maybe this needs to be world settings".
+  { value: 'world', label: 'World', icon: 'adjustments-horizontal', key: '7' },
 ]
 
 export const EDITOR_LAYERS: { title: string; layers: { id: string; label: string; on: boolean }[] }[] = [
@@ -81,15 +84,15 @@ const KEYS: Record<Mode | 'general', [string, string][]> = {
   place: [
     ['pick', 'choose an asset, then click the ground'],
     ['drag', 'the gizmo handles — move, or turn'],
-    ['G', 'swap the gizmo between move and turn'],
+    ['G', 'cycle the gizmo: move, turn, size'],
     ['Z X', 'rotate (or shift+wheel)'],
     ['[ ]', 'scale'],
     ['Del', 'remove'],
+    ['Grow tab · G', 'generate from the bake’s footprints, with the assets you ticked'],
+    ['Grow tab', 'editing a generated item locks it; a deleted one stays deleted through a regenerate'],
   ],
-  grow: [
-    ['G', 'generate from the bake’s footprints'],
-    ['edit', 'editing a generated item locks it'],
-    ['Del', 'a deleted item stays deleted through a regenerate'],
+  world: [
+    ['sliders', 'the road cross-section: lane and shoulder widths, then apply to rebuild'],
   ],
   structures: [
     ['N', 'then click the road twice — start, then end'],

@@ -449,7 +449,17 @@ function branchLanes(v: unknown, fallback = 2): number {
   return fallback
 }
 
-export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => void, lite = false, renderer?: THREE.WebGLRenderer, fog: THREE.FogExp2 | null = null, initialSeason: Season = 'summer', initialStyle: Style = 'realistic'): Promise<Site> {
+/**
+ * `plantWhole`: the editor's ask. The game plants trees in a disc around the eye and replants as
+ * it moves; the editor never moves the eye that way (no `updateNear`), so its preview was a
+ * fixed disc around the photo station with bare canopy beyond. Whole-bake planting at a coarser
+ * cell covers the area within the same budget: 120k trees at 12 m is 17 km² of full canopy.
+ */
+export interface BuildSiteOpts {
+  plantWhole?: boolean
+}
+
+export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => void, lite = false, renderer?: THREE.WebGLRenderer, fog: THREE.FogExp2 | null = null, initialSeason: Season = 'summer', initialStyle: Style = 'realistic', opts: BuildSiteOpts = {}): Promise<Site> {
   let manifest = manifestIn
   const base = `/sites/${manifest.slug}/web/`
   const group = new THREE.Group()
@@ -1853,8 +1863,8 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
       return a.tree_density < 1 && hash2(x, y) > a.tree_density
     }, adjustments.active ? (x, y) => adjustments.at(x, y, treeAdj).species : undefined, {
       canopyAt: (x, y) => canopyOf(x, y),
-      cellM: T.TREE_CELL_M,
-      radius: T.TREE_PLANT_RADIUS_M,
+      cellM: opts.plantWhole ? Math.max(T.TREE_CELL_M, 12) : T.TREE_CELL_M,
+      radius: opts.plantWhole ? 0 : T.TREE_PLANT_RADIUS_M,
       centre: [photo0.x, -photo0.z],
     })
     // a coarse grid of the trees for collision queries: cell 16 m, trunk radius from height

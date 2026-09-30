@@ -39,14 +39,19 @@ const r = await p.evaluate(async () => {
     gates: gates.length, postH: post ? +post.geometry.parameters.height.toFixed(1) : null, stripe: !!stripe, bannerColour: banner ? '#' + banner.material.color.getHexString() : null,
     arch: !!entry?.getObjectByName('arch'), ring: !!entry?.getObjectByName('ring'),
     placed: ap.fixtures.placed, problems: ap.fixtures.problems, stopHidden: hidden, stopShown: shown,
+    // what fixtures.json actually asks for, so the checks below follow the document rather than a
+    // number typed here on the night it was authored
+    doc: await (await fetch('/sites/crofton-triangle/fixtures.json', { cache: 'no-cache' })).json().catch(() => null),
   }
 })
 console.log(JSON.stringify(r))
 check(r.signal && r.signal.hx <= 0.3 && r.signal.hz <= 0.3 && r.signal.hy > 2, `a signal mast's collider is its post, not its arm (half ${r.signal?.hx} × ${r.signal?.hz} m, ${r.signal?.hy} m tall)`)
 // street-name blades are one merged mesh per site and cannot be detached yet — see worldbodies.ts
-check(r.gates === 5 && r.stripe && r.postH === 9 && r.bannerColour === '#ff8800', `every gate stands at idle with posts, a stripe and fixtures.json's height and colour (${r.gates} gates, posts ${r.postH} m, ${r.bannerColour})`)
+const gateWant = r.doc?.choices?.['race-gate']?.settings ?? {}
+check(r.gates === 5 && r.stripe && (gateWant.height_m === undefined || r.postH === gateWant.height_m) && (gateWant.colour === undefined || r.bannerColour === gateWant.colour), `every gate stands at idle with posts, a stripe and fixtures.json's height and colour (${r.gates} gates, posts ${r.postH} m vs ${gateWant.height_m}, ${r.bannerColour} vs ${gateWant.colour})`)
 check(r.arch && r.ring, 'the entry marker has a ring to trigger on and an arch to drive through')
-check((r.placed['stop-sign'] ?? 0) > 100 && r.stopHidden > 0 && r.stopShown === 0, `the chosen stop-sign variant stands on every stop sign and the built-in batch is hidden (${r.placed['stop-sign']} placed, ${r.stopHidden} batches hidden)`)
+if (r.doc?.choices?.['stop-sign']?.asset) check((r.placed['stop-sign'] ?? 0) > 100 && r.stopHidden > 0 && r.stopShown === 0, `the chosen stop-sign variant stands on every stop sign and the built-in batch is hidden (${r.placed['stop-sign']} placed, ${r.stopHidden} batches hidden)`)
+else check(r.stopShown > 0 && r.stopHidden === 0, `no stop-sign variant is chosen, so the built-in batch stands (${r.stopShown} shown)`)
 console.log(bad ? `FAILED (${bad})` : 'OK')
 await b.close()
 process.exit(bad ? 1 : 0)

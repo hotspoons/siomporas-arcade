@@ -25,7 +25,8 @@ import { buildStrip, sinkUnderStrips } from './strip'
 import { Budget } from './budget'
 import { Adjustments, NEUTRAL as NEUTRAL_ADJ } from './adjust'
 import { buildPlacements, loadCatalog, loadPlacements } from './placements'
-import { buildBuildings, buildRoadIndex } from './buildings'
+import { buildBuildings, buildRoadIndex, type TexturePool } from './buildings'
+import { loadSurfacesDoc, resolveSurfaceSets, type SurfacesDoc } from './surfacesdoc'
 import { buildPower } from './power'
 import { buildBarriers, buildFurniture, buildSidewalks, sidewalkCover } from './furniture'
 import { buildBlades, buildCrosswalks, buildLaneArrows, buildSignals, buildStopBars, junctionPaintCut, loadJunctionFacts, type ArrowsResult, type BarsResult, type CrosswalksResult } from './intersections'
@@ -107,6 +108,10 @@ export interface Site {
   updateNear: (eye: THREE.Vector3, time: number, fwd?: THREE.Vector3, pitch?: number) => void
   /** a knob changed: re-pick trees and re-seed grass on the next frame */
   retune: () => void
+  /** the world's textures changed (World tab): the road is redrawn with them; buildings on the next load */
+  setSurfaces: (doc: SurfacesDoc) => void
+  /** the world's textures as loaded, for the World tab */
+  surfaces: () => SurfacesDoc
   /** recolour everything living */
   setSeason: (season: Season) => void
   /** the palette: realistic is the bake as measured; anything else is a place that is not this one */
@@ -872,6 +877,20 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
   const road = new THREE.Group()
   road.name = 'road'
   surfaceSets ??= await loadSurfaceSets()
+  /*
+   * THE WORLD'S OWN TEXTURES (surfacesdoc.ts): which library material draws each road class and
+   * the grasses, and the pools its buildings are drawn from. `roadSets` is what the road and the
+   * strips read; it is the defaults with the world's choices laid over, and `setSurfaces` swaps
+   * it and rebuilds the road when the World tab saves.
+   */
+  let surfacesDoc: SurfacesDoc = await loadSurfacesDoc(manifest.slug)
+  let roadSets = resolveSurfaceSets(surfaceSets, surfacesDoc)
+  const poolOf = (doc: SurfacesDoc): TexturePool | null => {
+    const b = doc.buildings
+    if (!b || (!b.walls?.length && !b.roofs?.length)) return null
+    const entry = (id: string) => ({ id, url: `/assetsvc/materials/${encodeURIComponent(id)}/file/albedo.jpg`, mpt: surfaceSets?.[id]?.metresPerTile ?? 2 })
+    return { walls: (b.walls ?? []).map(entry), roofs: (b.roofs ?? []).map(entry), seed: b.seed ?? 1 }
+  }
   const surf = manifest.surface
   const adjScratch = { ...NEUTRAL_ADJ }
   const classAt = (s: number) => {
@@ -940,7 +959,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
   // a builder takes the skip it should apply, so the same one makes the base road and the holed one
   type RoadSkip = ((chain: number, s: number) => boolean) | null
   const roadBuilders: ((skip: RoadSkip) => THREE.Object3D)[] = [
-    (skip) => roadMesh(mainSt, lanesAt, classAt, surfaceSets!, 0.02, twoWayAt, paintOff, kerbedAt, skip ? (s: number) => skip(0, s) : null),
+    (skip) => roadMesh(mainSt, lanesAt, classAt, roadSets, 0.02, twoWayAt, paintOff, kerbedAt, skip ? (s: number) => skip(0, s) : null),
   ]
   let roadParts: THREE.Object3D[] = []
   /*
@@ -1048,7 +1067,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
       return { pos: c2.getPointAt(u), dir: c2.getTangentAt(u) }
     }
     sibAts.push({ at: sibAt, len: len2, spineS: (s: number) => { const p = sibAt(s).pos; return nearestSpine(p.x, p.z).s } })
-    roadBuilders.push(() => roadMesh(stations(sibAt, len2, 6), () => 2, () => 'asphalt_aged', surfaceSets!, 0.02, () => false, paintOff))
+    roadBuilders.push(() => roadMesh(stations(sibAt, len2, 6), () => 2, () => 'asphalt_aged', roadSets, 0.02, () => false, paintOff))
   }
   mark('paving: spine mesh setup + siblings')
   // --- network branches: every other road of a network site is a first-class carriageway --------
@@ -1102,7 +1121,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
      */
     const bi = branchAts.length
     branchRaw.push({ br, rawB, dirty: false, recurve: () => { cB = new THREE.CatmullRomCurve3(rawB, false, 'centripetal'); cB.arcLengthDivisions = Math.max(100, rawB.length * 8); lenB = cB.getLength(); branchAts[bi].len = lenB } })
-    branchAts.push({ at: atB, len: lenB, half: halfB, name: br.name ?? br.ref ?? 'branch', ref: br.ref ?? null, lanes: lanesB, twoWay: twoWayB, highway: br.highway ?? null, bounds: [bx0, bz0, bx1, bz1], road: (skip = null) => roadMesh(stations(atB, lenB, 6), () => lanesB, () => 'asphalt_aged', surfaceSets!, 0.02, () => twoWayB, paintOff, () => kerbedB, skip) })
+    branchAts.push({ at: atB, len: lenB, half: halfB, name: br.name ?? br.ref ?? 'branch', ref: br.ref ?? null, lanes: lanesB, twoWay: twoWayB, highway: br.highway ?? null, bounds: [bx0, bz0, bx1, bz1], road: (skip = null) => roadMesh(stations(atB, lenB, 6), () => lanesB, () => 'asphalt_aged', roadSets, 0.02, () => twoWayB, paintOff, () => kerbedB, skip) })
   }
   mark('paving: branch curves')
   // --- ROADS MEET AT THE SAME HEIGHT ---------------------------------------------------------
@@ -1188,6 +1207,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
   let treeCount = 0
   let updateNear: (eye: THREE.Vector3, time: number, fwd?: THREE.Vector3, pitch?: number) => void = () => {}
   let retune: () => void = () => {}
+  let applySurfaces: (doc: SurfacesDoc) => void = () => {}
   let setSeason: (season: Season) => void = () => {}
   let groundAtWorld: (x: number, z: number) => number | null = (x, z) => heightAt(x, -z)
   // --- LAZY GRADING: the strips, the terrain sink and the buildings are built around the eye ---
@@ -1519,7 +1539,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
       }
     }
     const VERGE = 40
-    const grassTex = (cls: string) => ((surfaceSets?.[cls]?.material as THREE.MeshStandardMaterial | undefined)?.map ?? null)
+    const grassTex = (cls: string) => ((roadSets[cls]?.material as THREE.MeshStandardMaterial | undefined)?.map ?? null)
     // the CHM the grass generator already rejects cells by; the strip needs it to know where the
     // ground is forest floor rather than turf
     mark('grade: lateral extent')
@@ -2198,6 +2218,11 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
         precip?.tick(eye, time)
       }
     }
+    applySurfaces = (doc) => {
+      surfacesDoc = doc
+      roadSets = resolveSurfaceSets(surfaceSets!, doc)
+      void rebuildRoad()
+    }
     retune = () => {
       near.invalidate()
       // F6 → trees. Planting knobs replant where the eye is; shape and palette knobs have to
@@ -2405,7 +2430,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     for (const [k, list] of cells) {
       const [cx, cy] = k.split(',').map(Number)
       gradeUnits.push({ key: `buildings:${k}`, x: cx * CELL + CELL / 2, z: -(cy * CELL + CELL / 2), r: CELL * 0.71 + 10, done: false, run: async () => {
-        const b = await buildBuildings({ ...manifest, buildings: list }, groundAtWorld, 4, { roads })
+        const b = await buildBuildings({ ...manifest, buildings: list }, groundAtWorld, 4, { roads, pool: poolOf(surfacesDoc) })
         buildingsGroup.add(b.group)
         builtParts.push(b)
         if (palette) b.recolour(palette.walls, palette.roofs)
@@ -2579,6 +2604,8 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     },
     updateNear,
     retune,
+    setSurfaces: (doc) => applySurfaces(doc),
+    surfaces: () => surfacesDoc,
     setSeason,
     groundAt: groundAtWorld,
     edgeDistance: edgeDistanceWorld,

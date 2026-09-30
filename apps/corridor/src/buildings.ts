@@ -16,6 +16,7 @@ import type { Manifest } from './site'
 import { Budget } from './budget'
 import { RoadIndex, planDressing, type DressingPart, type DressingSite, type Footprint } from './dressing'
 import { BUILDING_DRESSING, DRESS_WINDOW_WALLS } from './tuning'
+import { pickFromPool } from './surfacesdoc'
 import kitSpec from '../../../tools/assetlib/specs/buildings-dressing.json'
 
 /** site x, y (north), z (up) → three.js world; the same mapping scene.ts uses, kept local to avoid an import cycle */
@@ -128,15 +129,35 @@ interface Build {
   col: number[]
   /** which palette entry coloured each vertex: 0..6 a wall, 100 + 0..3 a roof — so a style can recolour in place */
   pal: number[]
+  /** which layer of the world's texture pool draws each vertex; -1 is the flat palette colour */
+  lay: number[]
   idx: number[]
 }
 
+/**
+ * The world's building textures (surfacesdoc.ts): the wall and roof materials a building is
+ * drawn from, each a tileable albedo at `mpt` metres per tile. Walls first, then roofs, in one
+ * texture array; a vertex carries its layer.
+ */
+export interface TexturePool {
+  walls: { id: string; url: string; mpt: number }[]
+  roofs: { id: string; url: string; mpt: number }[]
+  seed: number
+}
+
+/** the building's textures, or nothing: the current triangle's layer while a building is pushed */
+let currentLayer = -1
+
 function pushTri(b: Build, a: THREE.Vector3, c: THREE.Vector3, d: THREE.Vector3, colour: [number, number, number], pal: number) {
   const k = b.pos.length / 3
+  const textured = currentLayer >= 0
   for (const v of [a, c, d]) {
     b.pos.push(v.x, v.y, v.z)
-    b.col.push(colour[0], colour[1], colour[2])
+    // a textured face is drawn white under its map; the palette colour would tint the bricks
+    if (textured) b.col.push(1, 1, 1)
+    else b.col.push(colour[0], colour[1], colour[2])
     b.pal.push(pal)
+    b.lay.push(currentLayer)
   }
   b.idx.push(k, k + 1, k + 2)
 }
@@ -226,6 +247,7 @@ function pushQuad(b: Build, p: [number, number, number][], colour: [number, numb
     b.pos.push(v.x, v.y, v.z)
     b.col.push(colour[0], colour[1], colour[2])
     b.pal.push(-1)
+    b.lay.push(-1)
   }
   b.idx.push(k, k + 1, k + 2, k, k + 2, k + 3)
 }
@@ -329,15 +351,69 @@ function dressBuilding(b: Build, bd: Footprint, base: number, street: [number, n
  * frame back every few milliseconds so the page paints and the progress message moves; the total
  * work is unchanged.
  */
-export async function buildBuildings(manifest: Manifest, groundAt: (x: number, z: number) => number | null, sliceMs = 8, opts: { roads?: RoadIndex | null; dress?: boolean } = {}): Promise<{ group: THREE.Group; stats: BuildingStats; recolour: (walls: [number, number, number][], roofs: [number, number, number][]) => void }> {
+/** one texture array per pool, shared by every cell of the site that builds with it */
+const poolAtlases = new Map<string, Promise<{ atlas: THREE.DataArrayTexture; mpt: number[] }>>()
+
+/**
+ * Draw the textured faces from the pool's albedos, projected by the face normal — walls take
+ * the world position along the wall and up, roofs the plan — at each material's metres per
+ * tile. UVs are not stored: a building's faces are all planar, and a projection from the world
+ * position is right for every one of them without a seam to author.
+ */
+async function texturePoolMaterial(mat: THREE.MeshStandardMaterial, pool: TexturePool): Promise<void> {
+  const layers = [...pool.walls, ...pool.roofs]
+  if (!layers.length) return
+  const key = layers.map((l) => `${l.id}@${l.mpt}`).join('|')
+  let p = poolAtlases.get(key)
+  if (!p) {
+    p = import('./hextile').then(async ({ arrayTexture }) => {
+      const atlas = await arrayTexture(layers.map((l) => l.url), true)
+      atlas.colorSpace = THREE.SRGBColorSpace
+      return { atlas, mpt: layers.map((l) => l.mpt) }
+    })
+    poolAtlases.set(key, p)
+  }
+  let atlas: { atlas: THREE.DataArrayTexture; mpt: number[] }
+  try {
+    atlas = await p
+  } catch {
+    return // a map that would not load: the palette colours stand
+  }
+  const mpt = new Array<number>(32).fill(1)
+  atlas.mpt.forEach((m, i) => { if (i < 32) mpt[i] = m })
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.poolMap = { value: atlas.atlas }
+    shader.uniforms.poolMpt = { value: mpt }
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute float layer;\nvarying float vLayer;\nvarying vec3 vPoolPos;\nvarying vec3 vPoolNrm;')
+      .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvLayer = layer;\nvPoolPos = (modelMatrix * vec4(transformed, 1.0)).xyz;\nvPoolNrm = normalize(mat3(modelMatrix) * objectNormal);')
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform sampler2DArray poolMap;\nuniform float poolMpt[32];\nvarying float vLayer;\nvarying vec3 vPoolPos;\nvarying vec3 vPoolNrm;')
+      .replace(
+        '#include <map_fragment>',
+        `#include <map_fragment>
+        if (vLayer >= 0.0) {
+          int L = int(vLayer + 0.5);
+          float m = poolMpt[L];
+          vec3 n = abs(normalize(vPoolNrm));
+          vec2 puv = n.y > 0.5 ? vPoolPos.xz : (n.x > n.z ? vec2(vPoolPos.z, vPoolPos.y) : vec2(vPoolPos.x, vPoolPos.y));
+          vec4 pc = texture(poolMap, vec3(puv / m, vLayer));
+          diffuseColor *= vec4(pc.rgb, 1.0);
+        }`,
+      )
+  }
+  mat.needsUpdate = true
+}
+
+export async function buildBuildings(manifest: Manifest, groundAt: (x: number, z: number) => number | null, sliceMs = 8, opts: { roads?: RoadIndex | null; dress?: boolean; pool?: TexturePool | null } = {}): Promise<{ group: THREE.Group; stats: BuildingStats; recolour: (walls: [number, number, number][], roofs: [number, number, number][]) => void }> {
   const group = new THREE.Group()
   group.name = 'buildings'
   const list = manifest.buildings ?? []
-  const b: Build = { pos: [], col: [], pal: [], idx: [] }
+  const b: Build = { pos: [], col: [], pal: [], lay: [], idx: [] }
   // the dressing is its own geometry, not more triangles in the massing: a style's `recolour`
   // sweeps every massing vertex through the wall and roof palettes, and a window swept to a
   // siding colour is a hole that fills itself in
-  const dg: Build = { pos: [], col: [], pal: [], idx: [] }
+  const dg: Build = { pos: [], col: [], pal: [], lay: [], idx: [] }
   const roads = opts.roads ?? buildRoadIndex(manifest)
   const dress = opts.dress !== false && BUILDING_DRESSING > 0
   let gabled = 0
@@ -369,6 +445,12 @@ export async function buildBuildings(manifest: Manifest, groundAt: (x: number, z
     const ri = Math.floor(hash2(r[0][1], r[0][0]) * ROOFS.length) % ROOFS.length
     const wall = WALLS[wi]
     const roof = ROOFS[ri]
+    // the world's pools, when it has them: a wall material and a roof material per building,
+    // stable for the building and the seed (surfacesdoc.ts)
+    const pool = opts.pool ?? null
+    const wallLayer = pool?.walls.length ? pool.walls.findIndex((w) => w.id === pickFromPool(pool.walls.map((w) => w.id), Math.floor(seed * 65536), pool.seed)) : -1
+    const roofLayer = pool?.roofs.length ? pool.walls.length + pool.roofs.findIndex((w) => w.id === pickFromPool(pool.roofs.map((w) => w.id), Math.floor(hash2(r[0][1], r[0][0]) * 65536), pool.seed + 7)) : -1
+    currentLayer = wallLayer
 
     // house-sized things get a gable; sheds, strip malls, warehouses and towers stay flat
     const area = bd.area_m2 ?? 0
@@ -416,18 +498,22 @@ export async function buildBuildings(manifest: Manifest, groundAt: (x: number, z
         const e00 = at(pu0, pv0, eaves), e10 = at(pu1, pv0, eaves), e11 = at(pu1, pv1, eaves), e01 = at(pu0, pv1, eaves)
         if (alongU) {
           const rA = at(pu0, vm, ry), rB = at(pu1, vm, ry)
+          currentLayer = roofLayer
           pushTri(b, e00, e10, rB, roof, 100 + ri)
           pushTri(b, e00, rB, rA, roof, 100 + ri)
           pushTri(b, e11, e01, rA, roof, 100 + ri)
           pushTri(b, e11, rA, rB, roof, 100 + ri)
+          currentLayer = wallLayer
           pushTri(b, e00, rA, e01, wall, wi)
           pushTri(b, e10, e11, rB, wall, wi)
         } else {
           const rA = at(um, pv0, ry), rB = at(um, pv1, ry)
+          currentLayer = roofLayer
           pushTri(b, e10, e11, rB, roof, 100 + ri)
           pushTri(b, e10, rB, rA, roof, 100 + ri)
           pushTri(b, e01, e00, rA, roof, 100 + ri)
           pushTri(b, e01, rA, rB, roof, 100 + ri)
+          currentLayer = wallLayer
           pushTri(b, e00, e10, rA, wall, wi)
           pushTri(b, e11, e01, rB, wall, wi)
         }
@@ -440,12 +526,14 @@ export async function buildBuildings(manifest: Manifest, groundAt: (x: number, z
       const cxs = r.reduce((s, p) => s + p[0], 0) / r.length
       const cys = r.reduce((s, p) => s + p[1], 0) / r.length
       const mid = toWorld(cxs, cys, eaves)
+      currentLayer = roofLayer
       for (let i = 0; i < r.length; i++) {
         const [x0, y0] = r[i]
         const [x1, y1] = r[(i + 1) % r.length]
         pushTri(b, mid, toWorld(x0, y0, eaves), toWorld(x1, y1, eaves), roof, 100 + ri)
       }
     }
+    currentLayer = -1
 
     if (dress) {
       const c: [number, number] = [r.reduce((t, q) => t + q[0], 0) / r.length, r.reduce((t, q) => t + q[1], 0) / r.length]
@@ -459,18 +547,22 @@ export async function buildBuildings(manifest: Manifest, groundAt: (x: number, z
     geo.setAttribute('position', new THREE.Float32BufferAttribute(b.pos, 3))
     const colAttr = new THREE.Float32BufferAttribute(b.col, 3)
     geo.setAttribute('color', colAttr)
+    geo.setAttribute('layer', new THREE.Float32BufferAttribute(b.lay, 1))
     geo.setIndex(b.idx)
     geo.computeVertexNormals()
     const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.92, metalness: 0, side: THREE.DoubleSide })
+    if (opts.pool && b.lay.some((l) => l >= 0)) await texturePoolMaterial(mat, opts.pool)
     const mesh = new THREE.Mesh(geo, mat)
     mesh.name = 'buildings:massing'
     group.add(mesh)
     // a style swaps the palettes: every vertex remembers which entry it drew, so this is one
-    // pass over the colour attribute and no geometry
+    // pass over the colour attribute and no geometry — and a textured vertex is left alone
     const pal = Int16Array.from(b.pal)
+    const lay = Int16Array.from(b.lay)
     recolour = (walls, roofs) => {
       const arr = colAttr.array as Float32Array
       for (let i = 0; i < pal.length; i++) {
+        if (lay[i] >= 0) continue
         const k = pal[i]
         const e = k >= 100 ? roofs[(k - 100) % roofs.length] : walls[k % walls.length]
         arr[i * 3] = e[0]

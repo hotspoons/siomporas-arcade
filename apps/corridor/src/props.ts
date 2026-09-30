@@ -648,18 +648,62 @@ export function fallbackMaterial(cls: string): THREE.Material {
   return new THREE.MeshStandardMaterial({ color: colour[cls] ?? colour.unknown, roughness: 0.95, metalness: 0, side: THREE.DoubleSide })
 }
 
+interface SurfaceEntry { name: string; albedo: string; normal: string; roughness: string; macro?: string; macro_metres?: number; metres_per_tile: number; variants?: { albedo: string; normal: string; roughness: string }[] }
+
+/**
+ * The same catalog, from the ASSET SERVICE: every material it holds, with the variants and the
+ * macro map found by listing its files. This is where a deployed copy gets its textures — the
+ * shipped pack under /surfaces/ is generated, gitignored and not in the image (Rich,
+ * 2026-09-30: "the deployed version ships with no textures") — and the library is what a world
+ * chooses its own textures from (surfacesdoc.ts), so it has to be loadable as sets anyway.
+ */
+async function serviceSurfaceCatalog(): Promise<{ sets: SurfaceEntry[] }> {
+  const sets: SurfaceEntry[] = []
+  const r = await fetch('/assetsvc/materials', { cache: 'no-cache' })
+  if (!r.ok) return { sets }
+  const list = ((await r.json()) as { materials?: { id: string; category?: string; metres_per_tile?: number; albedo?: string; normal?: string; roughness?: string }[] }).materials ?? []
+  await Promise.all(list.map(async (m) => {
+    let files: string[] = []
+    try {
+      const f = await fetch(`/assetsvc/materials/${encodeURIComponent(m.id)}/files`, { cache: 'no-cache' })
+      if (f.ok) files = ((await f.json()) as { files?: string[] }).files ?? []
+    } catch { /* no listing: the three named maps only */ }
+    const at = (n: string) => `assetsvc/materials/${encodeURIComponent(m.id)}/file/${n}`
+    const base = (p: string | undefined, dflt: string) => (p ? p.split('/').pop()! : dflt)
+    const albedo = base(m.albedo, 'albedo.jpg'), normal = base(m.normal, 'normal.png'), rough = base(m.roughness, 'roughness.jpg')
+    if (files.length && !files.includes(albedo)) return
+    const variants = [{ albedo: at(albedo), normal: at(normal), roughness: at(rough) }]
+    for (let i = 1; i < 8; i++) {
+      const a = albedo.replace(/(\.[a-z0-9]+)$/i, `_${i}$1`), nn = normal.replace(/(\.[a-z0-9]+)$/i, `_${i}$1`), rr = rough.replace(/(\.[a-z0-9]+)$/i, `_${i}$1`)
+      if (!files.includes(a)) break
+      variants.push({ albedo: at(a), normal: at(files.includes(nn) ? nn : normal), roughness: at(files.includes(rr) ? rr : rough) })
+    }
+    const macro = files.find((f) => /^macro\./i.test(f))
+    sets.push({ name: m.id, albedo: at(albedo), normal: at(normal), roughness: at(rough), macro: macro ? at(macro) : undefined, macro_metres: 8, metres_per_tile: m.metres_per_tile ?? 1, variants: variants.length > 1 ? variants : undefined })
+  }))
+  return { sets }
+}
+
 /** Load tools/surfaces output: a library of variants per class, hex-tiled at real scale. */
 export async function loadSurfaceSets(base = '/surfaces/'): Promise<Record<string, SurfaceSet>> {
   const out: Record<string, SurfaceSet> = {}
-  interface Entry { name: string; albedo: string; normal: string; roughness: string; macro?: string; macro_metres?: number; metres_per_tile: number; variants?: { albedo: string; normal: string; roughness: string }[] }
-  let cat: { sets: Entry[] }
+  let cat: { sets: SurfaceEntry[] } = { sets: [] }
   try {
     const r = await fetch(`${base}surfaces.json`, { cache: 'no-cache' })
-    if (!r.ok) return out
-    cat = await r.json()
+    if (r.ok) cat = await r.json()
   } catch {
-    return out
+    /* no shipped pack */
   }
+  // the shipped pack first (it is the same maps, without a round trip per material); the
+  // library for whatever it does not have — in a deployed copy, everything
+  try {
+    const svc = await serviceSurfaceCatalog()
+    const have = new Set(cat.sets.map((s) => s.name))
+    cat = { sets: [...cat.sets, ...svc.sets.filter((s) => !have.has(s.name))] }
+  } catch {
+    /* no service */
+  }
+  if (!cat.sets.length) return out
   const loader = new THREE.TextureLoader()
   const tex = (path: string, srgb: boolean) => {
     const t = loader.load(`/${path}`)

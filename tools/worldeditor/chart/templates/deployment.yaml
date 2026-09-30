@@ -124,6 +124,20 @@ spec:
             - name: WORLDEDITOR_S3_SECRET
               value: {{ .Values.publish.secretName | quote }}
             {{- end }}
+            {{- /*
+              The Cloudflare token the Deploy panel uses. Typed into the panel it lives in this
+              process's memory and is gone on the next rollout of this very chart; named here it
+              comes from a Secret the cluster already holds (key CLOUDFLARE_API_TOKEN) and survives.
+              The panel shows it as "from the environment". Never a value in a values file.
+            */}}
+            {{- with (dig "secretName" "" (.Values.cloudflare | default dict)) }}
+            - name: CLOUDFLARE_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . | quote }}
+                  key: CLOUDFLARE_API_TOKEN
+                  optional: true
+            {{- end }}
           volumeMounts:
             - name: data
               mountPath: /data

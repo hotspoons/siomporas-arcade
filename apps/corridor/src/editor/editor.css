@@ -529,3 +529,9 @@
 /* the palette tab strip sits flush in the panel, no side padding of its own */
 .inspector-body > .tab-strip { padding-left: 0; padding-right: 0; }
 .inspector-body .palette .chip { min-height: 3.6em; }
+
+/* ---- the World tab: textures by class, the grasses, the building pools ------------------------ */
+.world-surfaces { display: grid; gap: var(--s3); }
+.world-group { display: grid; gap: var(--s1); }
+.world-group h3 { margin: 0; font-size: var(--text-sm); color: var(--ink-2); }
+.world-group h4 { margin: var(--s1) 0 0; font-size: var(--text-xs); color: var(--ink-3); font-weight: 500; }

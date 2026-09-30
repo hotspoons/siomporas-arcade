@@ -71,7 +71,7 @@ function serveBake(): Plugin {
         // wrong and is true for every game played on that ground, while a traffic zone belongs to
         // one level, and a rally stage and a delivery game want different answers in the same
         // field. The pod-side twin of this list is `AUTHORED` in tools/worldeditor/store.mjs.
-        if (req.method === 'PUT' && prefix === '/sites/' && /^[a-z0-9-]+\/(adjustments|placements|structures|dead_ends|tuning|presets|zones|stunts|courses|fixtures)\.json$/.test(rel.replaceAll('\\', '/'))) {
+        if (req.method === 'PUT' && prefix === '/sites/' && /^[a-z0-9-]+\/(adjustments|placements|structures|dead_ends|tuning|presets|zones|stunts|courses|fixtures|surfaces|points)\.json$/.test(rel.replaceAll('\\', '/'))) {
           const chunks: Buffer[] = []
           req.on('data', (c) => chunks.push(c))
           req.on('end', () => {

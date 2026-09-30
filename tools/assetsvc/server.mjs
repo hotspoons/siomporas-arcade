@@ -21,7 +21,7 @@
 // Configuration is environment; see models.example.json and README.md.
 
 import http from 'node:http'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -608,6 +608,15 @@ const server = http.createServer(async (req, res) => {
         await writeFile(f, JSON.stringify({ materials: list }, null, 1))
         // the files stay: a record removed by accident is one PUT away, a directory is not
         return json(res, 200, { deleted: id, filesKept: true })
+      }
+
+      // /materials/<id>/files — what is in the directory, so a client can find the variants
+      // (albedo_1.jpg …) and the macro map without a list of names typed anywhere else
+      if (seg.length === 3 && seg[2] === 'files' && req.method === 'GET') {
+        const id = seg[1]
+        if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(id)) return json(res, 400, { error: `bad material id ${JSON.stringify(id)}` })
+        const names = (await readdir(path.join(dir, id)).catch(() => [])).filter((n) => /\.(jpe?g|png|webp|ktx2)$/i.test(n)).sort()
+        return json(res, 200, { id, files: names })
       }
 
       // /materials/<id>/file/<name>

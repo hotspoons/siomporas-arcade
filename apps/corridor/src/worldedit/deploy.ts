@@ -111,6 +111,17 @@ export class DeployPanel {
   private async start(dryRun: boolean) {
     const f = this.form
     if (!this.worlds.length) return toast('choose a world first', 'warn')
+    // THE TOKEN IS IN THE SERVICE'S MEMORY, and the service restarts on every deploy of the editor
+    // itself. Ask again before starting, so "no Cloudflare token" arrives as "enter it again"
+    // with the field on screen rather than as a bare error after the button (Rich, 2026-09-30).
+    try {
+      const st = await api.deployStatus()
+      if (!st.token.present) {
+        this.status = st
+        this.render()
+        return toast('the service has restarted since the token was entered — enter it again (or set CLOUDFLARE_API_TOKEN in its environment to keep it)', 'warn', 9000)
+      }
+    } catch { /* the start below reports it */ }
     if (!f.account) return toast('query Cloudflare first', 'warn')
     const bucket = f.newBucket.trim() || f.bucket
     if (!bucket) return toast('choose or name a bucket', 'warn')

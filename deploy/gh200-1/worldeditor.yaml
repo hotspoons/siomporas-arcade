@@ -28,6 +28,12 @@ overpassUrl: "http://overpass-eu/api/interpreter#34/-25/72/45,http://overpass/ap
 # Without it the editor reports that it could not ask, rather than reporting zero.
 gpuVisibility: true
 
+# The Deploy panel's Cloudflare token. A token typed into the panel is forgotten whenever this
+# release rolls; to keep one, create the Secret once and name it here:
+#   kubectl -n default create secret generic cloudflare --from-literal=CLOUDFLARE_API_TOKEN=<token>
+# cloudflare:
+#   secretName: cloudflare
+
 # Ships empty. A blank world map means blank; worlds arrive by being drawn or imported.
 seedSites: ""
 

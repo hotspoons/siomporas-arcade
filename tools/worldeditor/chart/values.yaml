@@ -82,6 +82,12 @@ bake:
 
 # Publishing runs `python -m corridor publish` in a Job with this Secret attached.
 #   kubectl create secret generic corridor-r2 --from-literal=AWS_ACCESS_KEY_ID=... --from-literal=AWS_SECRET_ACCESS_KEY=...
+# The Deploy panel's Cloudflare token, from a Secret with the key CLOUDFLARE_API_TOKEN:
+#   kubectl create secret generic cloudflare --from-literal=CLOUDFLARE_API_TOKEN=<token>
+# Empty: the token is typed into the panel and held in memory until the pod restarts.
+cloudflare:
+  secretName: ""
+
 publish:
   bucket: ""
   endpoint: ""      # R2: https://<account-id>.r2.cloudflarestorage.com ; empty for AWS

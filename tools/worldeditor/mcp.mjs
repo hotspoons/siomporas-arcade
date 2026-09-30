@@ -23,7 +23,7 @@ export const PROTOCOL_VERSION = '2025-06-18'
 /** The authored documents beside a bake — the same list the projection and gitrepo.mjs use. */
 // zones (traffic areas), courses (races) and stunts (fixtures) are authored beside the others and
 // are what a game is made of; an agent that could read tuning but not write a race was half a tool
-export const SITE_DOCS = ['tuning.json', 'presets.json', 'placements.json', 'adjustments.json', 'structures.json', 'dead_ends.json', 'zones.json', 'courses.json', 'stunts.json', 'fixtures.json']
+export const SITE_DOCS = ['tuning.json', 'presets.json', 'placements.json', 'adjustments.json', 'structures.json', 'dead_ends.json', 'zones.json', 'courses.json', 'stunts.json', 'fixtures.json', 'surfaces.json', 'points.json']
 
 /*
  * THE SERVICE'S OWN RULES, and they are not all the same one.

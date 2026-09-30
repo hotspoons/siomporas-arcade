@@ -26,6 +26,9 @@ import { LOOK, type Season } from '../season'
 import { EditorUI } from '../ui/editor'
 import { AssetCatalog } from '../ui/assets'
 import { confirm, el, installShellKeys, toast, status } from '../ui/shell'
+import { select } from '../ui/controls'
+import { assetsvc, type Material } from '../assetsvc'
+import { GROUND_CATEGORIES, ROAD_CATEGORIES, ROOF_CATEGORY_RE, WALL_CATEGORY_RE, saveSurfacesDoc } from '../surfacesdoc'
 import { restoreTheme } from '../ui/viewer'
 
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector<T>(sel)!
@@ -616,9 +619,103 @@ function setMode(m: Mode) {
   applyLayers()
   refresh()
 }
-/** The World tab: what is true of the whole world — the road's cross-section, and (next) its surfaces. */
+/**
+ * The World tab: what is true of the whole world — its textures (surfacesdoc.ts) and the road's
+ * cross-section. Rich, 2026-09-30: "apply default textures per world for things like roads by
+ * material, grass, buildings (have a pool to pick from randomly)… per world we can pick the
+ * textures from the place editor."
+ */
+let materialsCache: Material[] | null = null
 function worldPanel(root: HTMLElement) {
   root.replaceChildren()
+  if (!site) { root.append(el('p', 'dim', 'no world loaded')); return }
+  const slug = site.manifest.slug
+  const doc = structuredClone(site.surfaces())
+  root.append(el('h2', '', 'textures'))
+  const body = el('div', 'world-surfaces')
+  root.append(body)
+  const draw = (mats: Material[]) => {
+    body.replaceChildren()
+    const byCat = (test: (c: string) => boolean) => mats.filter((m) => test(m.category ?? '')).map((m) => ({ value: m.id, label: m.name || m.id }))
+    const roadOpts = byCat((c) => ROAD_CATEGORIES.includes(c))
+    const groundOpts = byCat((c) => GROUND_CATEGORIES.includes(c))
+    const walls = mats.filter((m) => WALL_CATEGORY_RE.test(m.category ?? ''))
+    const roofs = mats.filter((m) => ROOF_CATEGORY_RE.test(m.category ?? ''))
+    if (!mats.length) body.append(el('p', 'dim', 'no materials in the library — the asset service is not reachable, or holds none'))
+    // every road class the bake measured here, plus the one branches always take
+    const classes = [...new Set([...(site!.manifest.surface?.class ?? []), 'asphalt_aged'])].sort()
+    const roads = el('div', 'world-group')
+    roads.append(el('h3', '', 'road, by class'))
+    for (const cls of classes) {
+      roads.append(select({
+        label: cls.replace(/_/g, ' '),
+        value: doc.road?.[cls] ?? '',
+        options: [{ value: '', label: `default (${cls})` }, ...roadOpts],
+        onChange: (v) => { doc.road ??= {}; if (v) doc.road[cls] = v; else delete doc.road[cls] },
+      }))
+    }
+    body.append(roads)
+    const grass = el('div', 'world-group')
+    grass.append(el('h3', '', 'ground'))
+    for (const [k, label] of [['mown', 'mown verge'], ['rough', 'rough grass']] as const) {
+      grass.append(select({
+        label,
+        value: doc.ground?.[k] ?? '',
+        options: [{ value: '', label: `default (grass_${k})` }, ...groundOpts],
+        onChange: (v) => { doc.ground ??= {}; if (v) doc.ground[k] = v; else delete doc.ground[k] },
+      }))
+    }
+    body.append(grass)
+    const pools = el('div', 'world-group')
+    pools.append(el('h3', '', 'buildings'), el('p', 'dim', 'tick a pool; each building draws one wall and one roof from it by the seed. Nothing ticked is the flat palette.'))
+    const chipsFor = (list: Material[], key: 'walls' | 'roofs') => {
+      const wrap = el('div', 'palette')
+      for (const m of list) {
+        const on = (doc.buildings?.[key] ?? []).includes(m.id)
+        const b = el('button', `chip${on ? ' on' : ''}`)
+        b.append(el('span', 'nm', m.name || m.id), el('span', 'mono', `${m.category} · ${m.metres_per_tile} m`))
+        b.onclick = () => {
+          doc.buildings ??= {}
+          const cur = new Set(doc.buildings[key] ?? [])
+          if (cur.has(m.id)) cur.delete(m.id)
+          else cur.add(m.id)
+          doc.buildings[key] = [...cur]
+          b.classList.toggle('on', cur.has(m.id))
+        }
+        wrap.append(b)
+      }
+      return wrap
+    }
+    pools.append(el('h4', '', `walls (${walls.length})`), chipsFor(walls, 'walls'), el('h4', '', `roofs (${roofs.length})`), chipsFor(roofs, 'roofs'))
+    const seed = el('input', 'input') as HTMLInputElement
+    seed.type = 'number'
+    seed.step = '1'
+    seed.value = String(doc.buildings?.seed ?? 1)
+    seed.onchange = () => { doc.buildings ??= {}; doc.buildings.seed = Number(seed.value) || 1 }
+    const seedRow = el('label', 'field text')
+    seedRow.append(el('span', 'field-label', 'seed'), seed)
+    pools.append(seedRow)
+    body.append(pools)
+    const acts = el('div', 'row')
+    const save = el('button', 'primary', 'save textures') as HTMLButtonElement
+    save.onclick = async () => {
+      try {
+        await saveSurfacesDoc(slug, doc)
+        site?.setSurfaces(doc)
+        status(`saved ${slug}/surfaces.json — the road is redrawn; buildings take the pools on the next load`)
+        toast('textures saved', 'ok')
+      } catch (e) {
+        toast(`textures: ${(e as Error).message}`, 'danger', 8000)
+      }
+    }
+    acts.append(save)
+    body.append(acts)
+  }
+  if (materialsCache) draw(materialsCache)
+  else {
+    body.append(el('p', 'dim', 'reading the library…'))
+    assetsvc.materials().then((r) => { materialsCache = r.materials; if (mode === 'world') draw(materialsCache) }).catch(() => draw([]))
+  }
   root.append(el('h2', '', 'road cross-section'))
   roadWidth.panelInto(root)
 }

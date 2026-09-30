@@ -44,7 +44,7 @@ const PROGRAM_EXT = new Set(['.ts', '.tsx', '.js', '.mjs', '.json', '.md', '.txt
 
 // zones, courses and stunts are what a game is made of and presets are its looks; all four are
 // written by the editor's own modes and by the MCP tools, beside the five that came first
-export const AUTHORED = ['adjustments', 'placements', 'structures', 'dead_ends', 'tuning', 'presets', 'zones', 'courses', 'stunts', 'fixtures']
+export const AUTHORED = ['adjustments', 'placements', 'structures', 'dead_ends', 'tuning', 'presets', 'zones', 'courses', 'stunts', 'fixtures', 'surfaces', 'points']
 const AUTHORED_RE = new RegExp(`^[a-z0-9-]+/(${AUTHORED.join('|')})\\.json$`)
 
 export class Store {

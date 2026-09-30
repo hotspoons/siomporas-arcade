@@ -271,15 +271,34 @@ export async function plan({ store, worlds, assetsvc = '', transpile, fetch = gl
         add({ key: `assetsvc/catalog/${id}/file/${f}`, url, bytes, contentType: contentType(f), group: 'assets' })
       }
     }
-    // materials, when a world names one
+    /*
+     * MATERIALS. The viewer draws every road class, the verges and (when the world says so) the
+     * buildings from the library's materials, so a deployed copy carries: every road, paving,
+     * shoulder and ground material (the classes come from the bake and any of them may appear),
+     * plus whatever else the world's documents name — a wall pool, a roof pool. Each material is
+     * its record, its file listing (the viewer finds the hex-tiling variants and the macro map
+     * through it) and every map in it.
+     */
     try {
       const mats = (await get('/materials')).materials ?? []
-      for (const m of mats) {
-        if (!seen.has(m.id)) continue
+      const surfaceish = new Set(['road', 'paving', 'shoulder', 'ground_cover', 'verge', 'sidewalk'])
+      const carried = mats.filter((m) => surfaceish.has(m.category) || seen.has(m.id))
+      const list = JSON.stringify({ materials: carried })
+      add({ key: 'assetsvc/materials', body: list, bytes: Buffer.byteLength(list), contentType: 'application/json', group: 'assets' })
+      for (const m of carried) {
         assets.materials.push(m.id)
         const rec = JSON.stringify({ material: m })
         add({ key: `assetsvc/materials/${m.id}`, body: rec, bytes: Buffer.byteLength(rec), contentType: 'application/json', group: 'assets' })
-        for (const f of [m.albedo, m.normal, m.roughness].filter((x) => typeof x === 'string' && x)) {
+        let files = []
+        try {
+          files = (await get(`/materials/${encodeURIComponent(m.id)}/files`)).files ?? []
+        } catch {
+          files = [m.albedo, m.normal, m.roughness].filter((x) => typeof x === 'string' && x).map((x) => x.split('/').pop())
+        }
+        files = files.filter((f) => !/^raw/.test(f))
+        const listing = JSON.stringify({ id: m.id, files })
+        add({ key: `assetsvc/materials/${m.id}/files`, body: listing, bytes: Buffer.byteLength(listing), contentType: 'application/json', group: 'assets' })
+        for (const f of files) {
           add({ key: `assetsvc/materials/${m.id}/file/${f}`, url: `${assetsvc}/materials/${encodeURIComponent(m.id)}/file/${encodeURIComponent(f)}`, bytes: 0, contentType: contentType(f), group: 'assets' })
         }
       }

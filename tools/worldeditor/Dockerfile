@@ -32,10 +32,15 @@ COPY apps/fighter/package.json apps/fighter/
 COPY apps/drivin-redirect/package.json apps/drivin-redirect/
 COPY apps/corridor/package.json apps/corridor/
 COPY packages/enginesim/package.json packages/enginesim/
+COPY packages/stunt-pieces/package.json packages/stunt-pieces/
 RUN npm ci --no-audit --no-fund
 COPY tsconfig.base.json tsconfig.json ./
-COPY packages/engine/ packages/engine/
-# @apex/enginesim, which apps/corridor now depends on for engine audio.
+# EVERY WORKSPACE PACKAGE'S SOURCE, BY DIRECTORY, not by name. Naming them failed twice the same
+# way: @apex/enginesim on 2026-09-27, and @apex/stunt-pieces on 2026-09-30 (corridor's stunts.ts
+# imports it; the image went red on the commit that added it). They are small (about 2 MB tracked)
+# and the build context is a clean checkout, so the whole directory is the cheaper rule.
+COPY packages/ packages/
+# Why the SOURCE, and not just the manifest:
 #
 # THE SOURCE, NOT JUST THE MANIFEST, AND THAT IS THE WHOLE BUG. `npm ci` creates
 # `node_modules/@apex/enginesim -> ../../packages/enginesim` from the LOCKFILE, whether or not the
@@ -44,10 +49,9 @@ COPY packages/engine/ packages/engine/
 # import. That is how this image went red on 2026-09-27 while `npm ci` reported no problem, and it
 # is why the fix is a source COPY beside packages/engine rather than one more manifest line.
 #
-# Its `wasm/` is a COMMITTED artefact, not build output: `src/catalog.ts` imports
+# enginesim's `wasm/` is a COMMITTED artefact, not build output: `src/catalog.ts` imports
 # `../wasm/engines.json` at build time, and building it here would mean emscripten in this image.
 # Provenance — the pinned upstream commit and the optimiser flags — is in wasm/BUILD.json.
-COPY packages/enginesim/ packages/enginesim/
 COPY apps/corridor/ apps/corridor/
 # The building dressing kit, which `src/buildings.ts` imports AT BUILD TIME to know where a window
 # goes. It lives with the asset library because that is what generates the parts, and the app reads

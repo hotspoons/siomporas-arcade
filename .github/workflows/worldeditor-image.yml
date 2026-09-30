@@ -18,6 +18,8 @@ on:
       - '!tools/worldeditor/chart/**'
       - 'apps/corridor/**'
       - 'packages/engine/**'
+      # corridor imports @apex/stunt-pieces too; any workspace package it uses is in the image
+      - 'packages/stunt-pieces/**'
       # The Dockerfile COPIES this in (apps/corridor imports @apex/enginesim for the engine
       # audio), so a change here changes the image. Left out, an enginesim-only commit publishes
       # nothing and the deployed editor quietly keeps the old copy — which is the worst shape a

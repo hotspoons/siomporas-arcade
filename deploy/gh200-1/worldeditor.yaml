@@ -14,7 +14,14 @@ ingress:
 # Ours first, then the public mirrors. Each carries the box it actually holds — a regional
 # instance answers a query about somewhere else with HTTP 200 and zero ways, which is
 # indistinguishable from "no roads here", so the coverage box is what stops that being believed.
-overpassUrl: "http://overpass-eu/api/interpreter#34/-25/72/45,http://overpass/api/interpreter#37.9/-79.5/39.8/-75.0"
+#
+# overpass-na (Geofabrik north-america: the US, Canada, Mexico, Greenland) was deployed on
+# 2026-09-27 and never added here, so everything in North America outside the Maryland box went to
+# the public mirrors — minutes per tile, or a 406 (Rich's Maine view, 2026-09-30: one fragment of
+# US 1 after several minutes). From our own it is 447 Bar Harbor roads in 129 ms. Maryland stays
+# on `overpass` first; the NA box is drawn a little inside the extract so an edge query falls to
+# the mirrors rather than being told "nothing here" by a server that does not hold it.
+overpassUrl: "http://overpass-eu/api/interpreter#34/-25/72/45,http://overpass/api/interpreter#37.9/-79.5/39.8/-75.0,http://overpass-na/api/interpreter#14.5/-179.9/83.5/-12"
 
 # Count free GPUs to size a splat run's fan-out. A CLUSTER-scoped read of nodes and of pods in
 # every namespace — wider than anything else this chart asks for, which is why it is opt-in.

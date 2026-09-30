@@ -9,6 +9,7 @@
 //
 //   zoom      layer     what you are looking at            source
 //   0 – 6     borders   which country is that              Natural Earth, fetched once, cached
+//   6 +       coast     where the land stops               Overpass natural=coastline, by zoom
 //   2 – 11    places    cities, then towns, then villages  Overpass `node[place]`, rank by zoom
 //   5 – 10    major     the motorway skeleton              Overpass motorway/trunk (+primary at 9)
 //   11 +      roads     every street a car can drive       Overpass, the all_streets query
@@ -67,6 +68,43 @@ export function tilesFor(z, bbox) {
  * tile is a fifth of Europe, a roads tile is a town.
  */
 export const LAYERS = [
+  {
+    /*
+     * THE COASTLINE, FROM OSM, AT EVERY ZOOM PAST THE OVERVIEW.
+     *
+     * Rich, 2026-09-30, over Maine: "No coast line unless you zoom way out." The only shoreline the
+     * map had was Natural Earth's 1:110m country outline, which is generalised for a whole-world
+     * view: at zoom 8 the Maine coast was one straight diagonal through Bar Harbor, and it faded
+     * out with the land fill by zoom 9. OSM's `natural=coastline` is the real line, and from our
+     * own Overpass it is cheap: a 2.8 deg tile over Maine (the most fractal coast in the lower
+     * 48) is 280 k nodes, 17.8 MiB raw, 0.6 s from overpass-na, simplified here before it is
+     * cached so the browser gets a fraction of that.
+     *
+     * THREE BANDS, one breakpoint each for tile and tolerance together (the `major` lesson: two
+     * breakpoints make two cache keys for one question). 300 m below zoom 9 is under a pixel;
+     * 40 m to zoom 12; 3 m after, where a pier or a breakwater is something you might drive to.
+     */
+    id: 'coast',
+    label: 'Coastline',
+    minZoom: 6,
+    maxZoom: 22,
+    tile: 6,
+    tileAt: (zoom) => (zoom < 9 ? 6 : zoom < 12 ? 8 : 9),
+    kind: 'lines',
+    variant(zoom) {
+      return zoom < 9 ? { key: 'c', tol: 0.003 } : zoom < 12 ? { key: 'm', tol: 0.0004 } : { key: 'f', tol: 0.00003 }
+    },
+    query(bounds) {
+      const { south, west, north, east } = bounds
+      return `[out:json][timeout:300];way(${f(south)},${f(west)},${f(north)},${f(east)})["natural"="coastline"];out geom;`
+    },
+    trim(elements, v) {
+      return elements
+        .filter((e) => e.geometry?.length > 1)
+        .map((e) => ({ id: e.id, line: simplify(e.geometry.map((p) => [round5(p.lon), round5(p.lat)]), v.tol) }))
+        .filter((w) => w.line.length > 1)
+    },
+  },
   {
     id: 'places',
     label: 'Towns and villages',

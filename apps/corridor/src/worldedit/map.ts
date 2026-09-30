@@ -52,6 +52,8 @@ export interface TileDoc {
   kind: 'points' | 'lines'
   bounds: { south: number; west: number; north: number; east: number }
   items: unknown[]
+  /** the question the layer asked at the zoom it was fetched for (layers.mjs `variant`) */
+  variant?: string
 }
 
 export interface PlacePoint {
@@ -573,6 +575,7 @@ export class MapView {
 
     this.paintGraticule(g)
     this.paintBorders(g)
+    this.paintCoast(g)
     this.paintMajor(g)
     this.paintOthers(g)
     this.paintWays(g)
@@ -616,11 +619,27 @@ export class MapView {
     return !b || (this.zoom >= b.minZoom && this.zoom < b.maxZoom)
   }
 
-  /** Everything this map holds for a layer, across the tiles it has — empty when out of band. */
+  /** The variant the current plan wants per layer, set by the loader (main.ts) from each plan. */
+  variants = new Map<string, string>()
+
+  /**
+   * Everything this map holds for a layer at the variant the current zoom asks for — empty when out
+   * of band.
+   *
+   * THE VARIANT, NOT EVERY TILE EVER FETCHED. Tiles are kept after a zoom so zooming back is free,
+   * and this used to return all of them: at zoom 12 the coastline was drawn from its fine tiles
+   * AND from the 300 m-simplified tile fetched at zoom 8, a second shore cutting straight across
+   * every bay (2026-09-30). Until a tile of the new variant has arrived, the old ones stand in, so
+   * crossing a breakpoint does not blank the layer while the fetch is in flight.
+   */
   itemsOf<T>(layer: string): T[] {
     if (!this.inBand(layer)) return []
+    const want = this.variants.get(layer)
+    const mine = [...this.tiles.values()].filter((t) => t.layer === layer)
+    const current = want === undefined ? mine : mine.filter((t) => t.variant === want)
+    const use = current.length ? current : mine
     const out: T[] = []
-    for (const t of this.tiles.values()) if (t.layer === layer) out.push(...(t.items as T[]))
+    for (const t of use) out.push(...(t.items as T[]))
     return out
   }
 
@@ -654,6 +673,60 @@ export class MapView {
         g.stroke()
       }
     }
+    g.restore()
+  }
+
+  /** how many coastline ways were in view last paint — the probes read it */
+  coastDrawn = 0
+
+  /**
+   * The coastline, from OSM (layers.mjs `coast`). Rich, 2026-09-30: "No coast line unless you
+   * zoom way out." The country fill is Natural Earth at 1:110m and fades out by zoom 9; this is
+   * the real shore, from zoom 6 in. One path, culled in lon/lat like the motorways, because a
+   * coast is thousands of short ways and most of any tile is off screen.
+   */
+  private paintCoast(g: CanvasRenderingContext2D) {
+    const lines = this.itemsOf<{ id: number; line: [number, number][] }>('coast')
+    this.coastDrawn = 0
+    if (!lines.length) return
+    const nw = this.unprojectScreen(-64, -64)
+    const se = this.unprojectScreen(this.w + 64, this.h + 64)
+    const west = Math.min(nw.lon, se.lon)
+    const east = Math.max(nw.lon, se.lon)
+    const south = Math.min(nw.lat, se.lat)
+    const north = Math.max(nw.lat, se.lat)
+    g.save()
+    g.lineCap = 'round'
+    g.lineJoin = 'round'
+    g.strokeStyle = 'rgba(110,168,214,0.85)'
+    g.lineWidth = this.zoom < 9 ? 1.2 : 1.6
+    g.beginPath()
+    for (const w of lines) {
+      const cache = w as typeof w & { _bb?: [number, number, number, number] }
+      let b = cache._bb
+      if (!b) {
+        let x0 = Infinity
+        let y0 = Infinity
+        let x1 = -Infinity
+        let y1 = -Infinity
+        for (const p of w.line) {
+          if (p[0] < x0) x0 = p[0]
+          if (p[0] > x1) x1 = p[0]
+          if (p[1] < y0) y0 = p[1]
+          if (p[1] > y1) y1 = p[1]
+        }
+        b = [x0, y0, x1, y1]
+        cache._bb = b
+      }
+      if (b[2] < west || b[0] > east || b[3] < south || b[1] > north) continue
+      this.coastDrawn++
+      for (let i = 0; i < w.line.length; i++) {
+        const [x, y] = this.xyOf(w.line[i][0], w.line[i][1])
+        if (i === 0) g.moveTo(x, y)
+        else g.lineTo(x, y)
+      }
+    }
+    g.stroke()
     g.restore()
   }
 

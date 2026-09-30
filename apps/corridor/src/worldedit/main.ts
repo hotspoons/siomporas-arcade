@@ -435,6 +435,9 @@ async function loadLayers(bbox: Box, zoom: number) {
   if (at('explore')) renderExplore()
   const wanted = new Set<string>()
   for (const layer of plan) for (const t of layer.tiles) wanted.add(tileKey(layer.layer, t))
+  // what each layer is asking at this zoom, so the map draws that variant's tiles (map.itemsOf)
+  for (const layer of plan) if (layer.variant) map.variants.set(layer.layer, layer.variant)
+  map.draw()
 
   /*
    * A LAYER'S TILES GO TOGETHER, NOT ONE AFTER ANOTHER.
@@ -1317,7 +1320,8 @@ function renderExplore() {
   // looking the same. Tiles outside their zoom band are still held — so coming back is instant —
   // but listing them would say "28 720 roads" over the Atlantic.
   const held = new Map<string, number>()
-  for (const t of map.tiles.values()) if (map.inBand(t.layer)) held.set(t.layer, (held.get(t.layer) ?? 0) + t.items.length)
+  // what the map DRAWS for each layer (map.itemsOf: this zoom's variant), not every tile it holds
+  for (const layer of new Set([...map.tiles.values()].map((t) => t.layer))) if (map.inBand(layer)) held.set(layer, map.itemsOf(layer).length)
   rows.push(['borders', map.borders.length ? `${map.borders.length} countries` : 'not loaded'])
   if (!held.has('places')) rows.push(['cities', `${map.worldCities.length} world (basemap)`])
   for (const l of config?.layers ?? []) {

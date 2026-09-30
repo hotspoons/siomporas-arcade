@@ -388,7 +388,7 @@ async function proxyAssetsvc(req, res, rest) {
 /* ---- routes ------------------------------------------------------------------------------------ */
 
 /** How many tiles of each layer one viewport may ask for. See the note in the plan route. */
-const CAPS = { places: 16, major: 6, roads: 9 }
+const CAPS = { coast: 16, places: 16, major: 6, roads: 9 }
 
 /** Squared distance from a tile's centre to a point, for "fetch the middle of the screen first". */
 function dist2(t, z, lon, lat) {

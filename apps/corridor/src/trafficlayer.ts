@@ -376,6 +376,30 @@ export class TrafficLayer {
    * do this for a car that was kinematic a moment ago (see `TrafficBody.kick`), so the traffic
    * does it for its own; `main.ts` calls this and then `physics.explode` for everything else.
    */
+  /**
+   * A bullet landed here, going that way: the nearest car within reach is knocked loose and shoved
+   * along the shot, with some lift so it lifts and tumbles rather than skids. False when nothing
+   * was near enough.
+   */
+  shoot(at: { x: number; y: number; z: number }, dir: { x: number; y: number; z: number }, impulse: number, lift = 0.35): boolean {
+    let best: Shown | null = null
+    let bd = 3.2
+    for (const s of this.shown) {
+      if (!s.body) continue
+      const p = s.mesh.position
+      const d = Math.hypot(p.x - at.x, p.y + 0.7 - at.y, p.z - at.z)
+      if (d < bd) { bd = d; best = s }
+    }
+    if (!best) return false
+    if (!best.wrecked) this.wake(best, 'impact', impulse * best.massKg)
+    const body = best.body
+    if (!best.wrecked || !body) return false
+    const dy = dir.y + lift
+    const l = Math.hypot(dir.x, dy, dir.z) || 1
+    body.kick((dir.x / l) * impulse, (dy / l) * impulse, (dir.z / l) * impulse, Math.min(4, impulse * 0.5))
+    return true
+  }
+
   blast(at: { x: number; y: number; z: number }, radius: number, impulse: number, lift = 0.55): number {
     let n = 0
     for (const s of this.shown) {

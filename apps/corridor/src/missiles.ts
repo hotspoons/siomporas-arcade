@@ -20,6 +20,8 @@ export interface MissileHit {
 
 interface Missile {
   mesh: THREE.Object3D
+  /** the mesh's own forward axis, to turn along the flight: +Y for the cone, +X for a model */
+  axis: THREE.Vector3
   pos: THREE.Vector3
   vel: THREE.Vector3
   flown: number
@@ -40,6 +42,8 @@ export class MissileLayer {
   private hitTest: (from: THREE.Vector3, to: THREE.Vector3) => THREE.Vector3 | null
   private groundAt: (x: number, z: number) => number | null
   private onHit: (at: MissileHit) => void
+  /** the round's model, pointing +X — a fixture override or the built-in; null draws the cone */
+  model: (() => THREE.Object3D) | null = null
   /** fired and landed, for the HUD and for a probe */
   fired = 0
   landed = 0
@@ -56,15 +60,17 @@ export class MissileLayer {
   /** Away it goes: from a point, along a direction, at the missile speed plus whatever `carry` is. */
   fire(from: THREE.Vector3, dir: THREE.Vector3, carry = 0): void {
     const d = dir.clone().normalize()
-    const mesh = new THREE.Mesh(
+    const custom = this.model?.() ?? null
+    const mesh: THREE.Object3D = custom ?? new THREE.Mesh(
       new THREE.ConeGeometry(0.14, 1.1, 8),
       new THREE.MeshStandardMaterial({ color: 0xdddddd, emissive: 0xff5500, emissiveIntensity: 0.8, roughness: 0.4, metalness: 0.5 }),
     )
-    // a cone points up +Y; turn it to fly along `d`
-    mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), d)
+    // a cone points up +Y and a model +X; turn it to fly along `d`
+    const axis = custom ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0)
+    mesh.quaternion.setFromUnitVectors(axis, d)
     mesh.position.copy(from)
     this.group.add(mesh)
-    this.live.push({ mesh, pos: from.clone(), vel: d.multiplyScalar(T.MISSILE_SPEED + Math.max(0, carry)), flown: 0, age: 0 })
+    this.live.push({ mesh, axis, pos: from.clone(), vel: d.multiplyScalar(T.MISSILE_SPEED + Math.max(0, carry)), flown: 0, age: 0 })
     this.fired++
   }
 
@@ -93,7 +99,7 @@ export class MissileLayer {
       }
       m.pos.copy(next)
       m.mesh.position.copy(next)
-      m.mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), m.vel.clone().normalize())
+      m.mesh.quaternion.setFromUnitVectors(m.axis, m.vel.clone().normalize())
     }
     for (const f of [...this.flashes]) {
       f.age += dt

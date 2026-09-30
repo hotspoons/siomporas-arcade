@@ -226,7 +226,8 @@ describe('the pad layout', () => {
     for (const a of ['drive', 'craft', 'walk'] as const) expect(DEFAULT_PAD[a]).toEqual([])
     const used = new Set(Object.values(DEFAULT_PAD).flat())
     expect(used.has('b1')).toBe(false)
-    expect(used.has('b4')).toBe(false)
+    expect(DEFAULT_PAD.gun).toEqual(['b4'])
+    expect(DEFAULT_PAD.fire).toEqual(['b5'])
   })
 
   it('reads the right stick as a look that is active only off centre, and not while the menu is up', () => {

@@ -20,12 +20,12 @@ import type { UiMode } from './gamepolicy'
  */
 export type Action =
   | 'throttle' | 'brake' | 'steerLeft' | 'steerRight' | 'handbrake'
-  | 'drive' | 'recover' | 'lights' | 'camera' | 'map' | 'fire' | 'craft' | 'walk' | 'interface'
+  | 'drive' | 'recover' | 'lights' | 'camera' | 'map' | 'fire' | 'gun' | 'craft' | 'walk' | 'interface'
   | 'objPrev' | 'objNext'
   | 'pause' | 'confirm'
 export const ACTIONS: Action[] = [
   'throttle', 'brake', 'steerLeft', 'steerRight', 'handbrake',
-  'drive', 'recover', 'lights', 'camera', 'map', 'fire', 'craft', 'walk', 'interface',
+  'drive', 'recover', 'lights', 'camera', 'map', 'fire', 'gun', 'craft', 'walk', 'interface',
   'objPrev', 'objNext',
   'pause', 'confirm',
 ]
@@ -40,7 +40,8 @@ export const ACTION_LABELS: Record<Action, string> = {
   lights: 'Headlights',
   camera: 'Chase / cockpit view',
   map: 'Map: full screen',
-  fire: 'Fire',
+  fire: 'Fire a missile',
+  gun: 'Machine gun (hold)',
   craft: 'Next craft (Shift: previous)',
   walk: 'On foot / fly',
   interface: 'Hide the interface',
@@ -61,6 +62,7 @@ export const DEFAULT_KEYS: KeyBindings = {
   camera: ['KeyC'],
   map: ['KeyN'],
   fire: ['KeyM'],
+  gun: ['KeyG'],
   craft: ['KeyV'],
   walk: ['KeyB'],
   interface: ['KeyM'],
@@ -75,7 +77,7 @@ export const DEFAULT_KEYS: KeyBindings = {
  * pad in hand):
  *
  *   RT / LT        accelerate / brake            A   handbrake        Y   recover the car
- *   left stick     steer                         X   headlights       RB  fire
+ *   left stick     steer                         X   headlights       RB  missile   LB  machine gun
  *   right stick    look round the car (main.ts)  LS  the map          Start  pause
  *   D-pad ◀ ▶      the objective list            View (the left centre button)  chase / cockpit
  *
@@ -96,6 +98,7 @@ export const DEFAULT_PAD: PadBindings = {
   camera: ['b8'],
   map: ['b10'],
   fire: ['b5'],
+  gun: ['b4'],
   craft: [],
   walk: [],
   interface: [],
@@ -127,13 +130,15 @@ export interface GameSettingsData {
   /** rumble strength 0..1 */
   haptics: number
   units: 'mph' | 'kmh'
+  /** the physics world in the plain viewer: the world's own default, or forced on or off */
+  physics: 'world' | 'on' | 'off'
   /** the interface the player chose in the Escape menu; null = the deployment's default */
   ui: UiMode | null
 }
 
 export const SETTINGS_KEY = 'apex-corridor.settings.v1'
 /** bump when a NEW default key arrives: saved key lists gain it (a player's own stay) */
-const KEYS_VERSION = 2
+const KEYS_VERSION = 3
 /**
  * Bump when the default pad LAYOUT changes: the saved pad is replaced by the new defaults.
  *
@@ -143,7 +148,7 @@ const KEYS_VERSION = 2
  * the accelerator was still on the right shoulder after the defaults said trigger
  * (Rich, 2026-09-30).
  */
-const PAD_VERSION = 2
+const PAD_VERSION = 3
 
 export const DEFAULT_SETTINGS: GameSettingsData = {
   keysV: KEYS_VERSION,
@@ -154,6 +159,7 @@ export const DEFAULT_SETTINGS: GameSettingsData = {
   gamepad: true,
   haptics: 1,
   units: 'mph',
+  physics: 'world',
   ui: null,
 }
 

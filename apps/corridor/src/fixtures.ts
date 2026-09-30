@@ -19,7 +19,7 @@ import type { Manifest } from './site'
 import type { Site } from './scene'
 import { loadAssetGlb } from './carmodel'
 
-export type FixtureClassId = 'race-gate' | 'race-marker' | 'stop-sign' | 'give-way-sign' | 'signal' | 'power-pole' | 'lamp-post' | 'street-sign'
+export type FixtureClassId = 'race-gate' | 'race-marker' | 'stop-sign' | 'give-way-sign' | 'signal' | 'power-pole' | 'lamp-post' | 'street-sign' | 'missile-launcher' | 'machine-gun' | 'missile'
 
 export interface FixtureSetting {
   key: string
@@ -85,6 +85,23 @@ export const FIXTURES: FixtureClass[] = [
       colour('colour', 'Colour', '#ffd54f'),
     ],
     batches: [], places: null, fitHeight: 8,
+  },
+  /*
+   * THE WEAPONS. Not placed by the bake — they ride on the player's car (weaponfx.ts mounts them
+   * from the chassis spec) — but a class each, so the Fixtures tab can put a generated model in
+   * the place of the built-in launcher, gun or missile. A bullet is a shader and has no class.
+   */
+  {
+    id: 'missile-launcher', label: 'Missile launcher', note: 'on the roof of the player’s car; fires with RB / M',
+    builtin: 'a twin-tube launcher on a rail', settings: [], batches: [], places: null, fitHeight: 0.4,
+  },
+  {
+    id: 'machine-gun', label: 'Machine gun', note: 'one on each bonnet corner; hold LB / G',
+    builtin: 'a receiver, a barrel and an ammunition can', settings: [], batches: [], places: null, fitHeight: 0.25,
+  },
+  {
+    id: 'missile', label: 'Missile', note: 'the round the launcher fires',
+    builtin: 'a finned body with a red nose and a flame', settings: [], batches: [], places: null, fitHeight: 0.3,
   },
   {
     id: 'stop-sign', label: 'Stop sign', note: 'every stop sign the bake found', builtin: 'an octagon on a post, painted',
@@ -226,6 +243,11 @@ export class FixtureLayer {
 
   /** The chosen model for a race fixture, if any, fitted to the class's height. */
   async raceModel(id: 'race-gate' | 'race-marker'): Promise<THREE.Object3D | null> {
+    return this.fixtureModel(id)
+  }
+
+  /** The chosen model for any class the bake does not place itself (the races, the weapons): null means the built-in. */
+  async fixtureModel(id: FixtureClassId): Promise<THREE.Object3D | null> {
     const choice = this.doc.choices[id]
     if (!choice?.asset) return null
     const settings = settingsOf(this.doc, id)

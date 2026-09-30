@@ -151,6 +151,15 @@ export class GameMenu {
         onSelect: () => { h.transport.setDriving(!h.transport.driving()); h.resume() },
       })
     }
+    if (p.allows('game.physics')) {
+      const opts = ['world', 'on', 'off'] as const
+      items.push({
+        kind: 'choice', label: 'Physics', options: ['the world’s default', 'on', 'off'],
+        hint: 'solid buildings, traffic you can hit; takes effect when the world next loads',
+        get: () => Math.max(0, opts.indexOf(s().physics ?? 'world')),
+        set: (i) => h.settings.update((x) => (x.physics = opts[i] ?? 'world')),
+      })
+    }
     if (p.allows('audio.mute')) {
       items.push({
         kind: 'toggle',

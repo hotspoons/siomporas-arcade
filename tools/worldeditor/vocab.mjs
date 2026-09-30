@@ -32,7 +32,7 @@ export const SETTING_CONTROLS = [
   'layers.spine', 'layers.markers', 'layers.wire',
   'audio.master', 'audio.engine', 'audio.sfx', 'audio.mute',
   'controls.bindings', 'controls.gamepad', 'controls.haptics', 'controls.recover', 'controls.reset',
-  'game.tuning', 'game.developer', 'game.restart', 'game.transport',
+  'game.tuning', 'game.developer', 'game.restart', 'game.transport', 'game.physics',
 ]
 /** what a vehicle build's `spec.drive` may be */
 export const DRIVES = ['fwd', 'rwd', 'awd']

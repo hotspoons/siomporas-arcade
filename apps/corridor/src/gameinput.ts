@@ -266,6 +266,11 @@ export class GameInput {
     this.keyboard.endFrame()
   }
 
+  /** the action is held right now, key or pad — the machine gun's trigger */
+  held(a: Action): boolean {
+    return !this.suppressGameplay && (this.keyDown(a) || this.padValue(a) > 0.5)
+  }
+
   /** a pad button bound to this action went down this frame (keyboard hotkeys arrive by event) */
   padHotkey(a: Action): boolean {
     return !this.suppressGameplay && this.padEdges.has(a)

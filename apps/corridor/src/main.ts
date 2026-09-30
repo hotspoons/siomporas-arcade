@@ -36,6 +36,7 @@ import { FixtureLayer, loadFixtures, settingsOf, type FixtureDoc } from './fixtu
 import { EMPTY_POINTS, loadPoints, startOf, type Point, type PointsDoc } from './points'
 import { WaypointHud, type Waypoint } from './ui/waypoint'
 import { MissileLayer } from './missiles'
+import { GunLayer, builtinMissile, mountWeapons, type Mounted } from './weaponfx'
 import { dentObject, flushDents, repairObject } from './dents'
 import { GameRun, type ModelHost, type ModelPose, type ProgramHost } from './program'
 import { loadGameModule } from './programload'
@@ -705,6 +706,10 @@ async function loadSite(slug: string) {
   traffic = null
   missiles?.dispose()
   missiles = null
+  gun?.dispose()
+  gun = null
+  mounted = null
+  weaponModels = null
   offPlayerImpact?.()
   offPlayerImpact = null
   fixtures?.dispose()
@@ -774,7 +779,10 @@ async function loadSite(slug: string) {
   const early = levelId ? await loadLevel(levelId).catch(() => null) : null
   const trafficNeedsPhysics = !!early?.simulations?.some((x) => x.kind === 'traffic')
   physics = await buildPhysics(site, {
-    enabled: physParam != null ? Number(physParam) > 0 : stuntsNeedPhysics || trafficNeedsPhysics || undefined,
+    // `?phys=` first, then the player's own choice (Escape menu → Physics), then what the world
+    // needs, then the world's PHYS_ENABLED knob (its tuning.json) — Rich, 2026-09-30: a world may
+    // default physics on for the plain viewer, and the menu may overrule it
+    enabled: physParam != null ? Number(physParam) > 0 : settings.data.physics === 'on' ? true : settings.data.physics === 'off' ? false : stuntsNeedPhysics || trafficNeedsPhysics || undefined,
   }).catch((e) => {
     console.warn('physics: not started —', e)
     return null
@@ -1329,6 +1337,66 @@ let level: Awaited<ReturnType<typeof loadLevel>> = null
 let traffic: TrafficLayer | null = null
 /** what the player fires (M), and the bang where it lands */
 let missiles: MissileLayer | null = null
+/** the machine gun (weaponfx.ts): tracers, flashes, and the hits handed to the traffic */
+let gun: GunLayer | null = null
+/** the hardware on the player's car, and where its muzzles are */
+let mounted: Mounted | null = null
+/** the fixture overrides for the weapons, resolved when the car is armed; null = the built-ins */
+let weaponModels: { launcher: THREE.Object3D | null; gun: THREE.Object3D | null; missile: THREE.Object3D | null } | null = null
+
+/**
+ * Hang the launcher and the guns on a freshly built car. The Fixtures tab may have chosen a
+ * generated model for any of the three classes; otherwise the built-ins from weaponfx.ts.
+ */
+async function armCar(car: DrivableCar): Promise<void> {
+  const s = (playerVehicle ?? defaultVehicle('hero-car')).spec
+  const spec = { length: s.length ?? 4.5, width: s.width ?? 1.9, height: s.height ?? 1.5 }
+  if (!weaponModels) {
+    const [launcher, gunModel, missile] = await Promise.all([
+      fixtures?.fixtureModel('missile-launcher') ?? null,
+      fixtures?.fixtureModel('machine-gun') ?? null,
+      fixtures?.fixtureModel('missile') ?? null,
+    ])
+    weaponModels = { launcher, gun: gunModel, missile }
+  }
+  if (drive.car !== car) return // rebuilt while the models loaded
+  mounted?.root.removeFromParent()
+  mounted = mountWeapons(spec, weaponModels)
+  car.mesh.add(mounted.root)
+}
+
+/** The gun's world muzzles this frame, from the car mesh's frame. */
+function muzzlesNow(): THREE.Vector3[] {
+  if (!mounted || !drive.car) return []
+  return mounted.muzzles.map((m) => drive.car!.mesh.localToWorld(m.clone()))
+}
+
+/** Hold the trigger: the gun fires at its rate from alternating muzzles, along the nose. */
+function fireGun(dt: number): void {
+  if (!drive.on || !drive.car || !physics || !site) return
+  if (!gun) {
+    gun = new GunLayer({
+      hitTest: (from, to) => {
+        const d = to.clone().sub(from)
+        const len = d.length()
+        if (len < 1e-4) return null
+        d.divideScalar(len)
+        const mine = drive.car instanceof RapierCar ? drive.car.colliderHandle : undefined
+        const toi = physics!.sweepHit(from, d, len, 0.12, mine)
+        return toi === null ? null : from.clone().addScaledVector(d, toi)
+      },
+      groundAt: (x, z) => site?.groundAt(x, z) ?? null,
+      // a round that lands on a car knocks it loose and shoves it; one on a soft prop breaks it
+      onHit: ({ at, dir }) => {
+        if (!traffic?.shoot(at, dir, T.GUN_IMPULSE)) physics?.explode(at, { radius: 0.8, impulse: 0.5, breakAt: 1 })
+      },
+    })
+    scene.add(gun.group)
+  }
+  const muzzles = muzzlesNow()
+  const from = muzzles.length ? muzzles : [drive.car.pos.clone().add(drive.car.forward.clone().multiplyScalar(2.2)).add(new THREE.Vector3(0, 0.6, 0))]
+  gun.fire(from, drive.car.forward, dt)
+}
 let offPlayerImpact: (() => void) | null = null
 
 /**
@@ -1359,8 +1427,10 @@ function fireMissile(): boolean {
         return toi === null ? null : from.clone().addScaledVector(d, toi)
       },
       groundAt: (x, z) => site?.groundAt(x, z) ?? null,
-      onHit: (at) => { boom(at, { radius: T.MISSILE_RADIUS, impulse: T.MISSILE_IMPULSE, lift: 0.6, breakAt: 1 }) },
+      onHit: (at) => { boom(at, { radius: T.MISSILE_RADIUS, impulse: T.MISSILE_IMPULSE, lift: T.MISSILE_LIFT, breakAt: 1 }) },
     })
+    // the round: the Fixtures tab's choice, else the built-in finned missile
+    missiles.model = () => weaponModels?.missile?.clone(true) ?? builtinMissile()
     scene.add(missiles.group)
   }
   const car = drive.car
@@ -1964,6 +2034,7 @@ function setDrive(on: boolean) {
         drive.car = car
       }
       scene.add(drive.car.mesh)
+      void armCar(drive.car)
       // at the level's start, the world's home, or the right-hand lane at the photo (startPose)
       const p = startPose()
       drive.car.place(p.x, p.z, p.yaw)
@@ -2874,6 +2945,8 @@ function frame() {
    * an already-capped delta would make the simulation quietly run slow through every hitch.
    */
   if (missiles && !paused) missiles.tick(real)
+  if (!paused && !menu.open && drive.on && input.held('gun')) fireGun(real)
+  if (gun && !paused) gun.tick(real)
   // the traffic steps before the physics, so its bodies are where the cars are when the player hits one
   if (traffic && !paused) {
     // the drivers see the player: where he is and how fast, in the site frame

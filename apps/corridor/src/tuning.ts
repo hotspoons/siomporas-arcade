@@ -172,8 +172,20 @@ export let TRAFFIC_WRECKS_MAX = 40
 export let TRAFFIC_WAKE_NS = 8000
 /** the missile: how fast it leaves, how far its blast reaches, and how hard (m/s given to a car at the centre) */
 export let MISSILE_SPEED = 120
-export let MISSILE_RADIUS = 9
-export let MISSILE_IMPULSE = 14
+export let MISSILE_RADIUS = 11
+/** m/s a car at the centre of the blast is given. 30 is ridiculous, which is the brief (Rich, 2026-09-30) */
+export let MISSILE_IMPULSE = 30
+/** how much of the throw points up: 1 sends a car over the one beside it */
+export let MISSILE_LIFT = 1.1
+// --- the machine gun (weaponfx.ts) --------------------------------------------------------------
+/** rounds per second, both guns together */
+export let GUN_RATE = 14
+/** how far a round is looked for, m */
+export let GUN_RANGE = 180
+/** m/s the car a round lands on is given, along the shot */
+export let GUN_IMPULSE = 7
+/** spread, as a fraction of the aim: 0.015 is a hand-span at 50 m */
+export let GUN_SPREAD = 0.015
 
 // --- trees --------------------------------------------------------------------------------------
 /**
@@ -1203,7 +1215,12 @@ export const TUNE_TABS: TuneTab[] = [
           tune('TRAFFIC_WAKE_NS', () => TRAFFIC_WAKE_NS, (v) => (TRAFFIC_WAKE_NS = v), [200, 20000], 100, 'a hit harder than this (N·s) knocks a traffic car loose'),
           tune('MISSILE_SPEED', () => MISSILE_SPEED, (v) => (MISSILE_SPEED = v), [20, 300], 5, 'm/s, plus the car’s own'),
           tune('MISSILE_RADIUS', () => MISSILE_RADIUS, (v) => (MISSILE_RADIUS = v), [2, 30], 0.5, 'blast radius, m'),
-          tune('MISSILE_IMPULSE', () => MISSILE_IMPULSE, (v) => (MISSILE_IMPULSE = v), [1, 60], 1, 'm/s a car at the centre of the blast is given'),
+          tune('MISSILE_IMPULSE', () => MISSILE_IMPULSE, (v) => (MISSILE_IMPULSE = v), [1, 80], 1, 'm/s a car at the centre of the blast is given'),
+          tune('MISSILE_LIFT', () => MISSILE_LIFT, (v) => (MISSILE_LIFT = v), [0, 3], 0.05, 'how much of the throw points up'),
+          tune('GUN_RATE', () => GUN_RATE, (v) => (GUN_RATE = v), [2, 40], 1, 'rounds per second'),
+          tune('GUN_RANGE', () => GUN_RANGE, (v) => (GUN_RANGE = v), [30, 400], 10, 'm'),
+          tune('GUN_IMPULSE', () => GUN_IMPULSE, (v) => (GUN_IMPULSE = v), [0.5, 30], 0.5, 'm/s a car is given per round'),
+          tune('GUN_SPREAD', () => GUN_SPREAD, (v) => (GUN_SPREAD = v), [0, 0.1], 0.005),
           tune('TRAFFIC_DRAW_M', () => TRAFFIC_DRAW_M, (v) => (TRAFFIC_DRAW_M = v), [100, 3000], 50, 'traffic further than this is simulated, not drawn'),
           tune('TRAFFIC_PHYS_M', () => TRAFFIC_PHYS_M, (v) => (TRAFFIC_PHYS_M = v), [50, 1000], 10, 'traffic further than this has no body in the solver'),
           tune('TRAFFIC_RESPAWN_M', () => TRAFFIC_RESPAWN_M, (v) => (TRAFFIC_RESPAWN_M = v), [50, 1000], 10, 'a car that ran off its road comes back at least this far away'),

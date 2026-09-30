@@ -80,6 +80,7 @@ export const SETTING_CONTROLS = {
   'game.developer': 'the developer view toggle',
   'game.restart': 'restart from the start point',
   'game.transport': 'the drive / fly switch in the menu',
+  'game.physics': 'the physics world: the world’s default, or on, or off',
 } as const
 export type SettingControl = keyof typeof SETTING_CONTROLS
 export type SettingId = SettingTab | SettingControl

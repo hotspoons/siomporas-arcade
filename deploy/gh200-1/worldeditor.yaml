@@ -6,7 +6,7 @@ fullnameOverride: worldeditor
 
 image:
   # Pinned. `latest` would make "what is deployed" depend on when the pod last restarted.
-  tag: sha-9c3f352
+  tag: sha-43043c6
 
 ingress:
   enabled: true

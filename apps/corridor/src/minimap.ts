@@ -8,7 +8,7 @@
 //
 //   drag the corner        resize it — the panel is a plain CSS `resize` box and the canvas
 //                          follows it; the scale (px/m) is kept, so a bigger map shows more ground
-//   double-click           the whole screen; double-click, Esc, N or the button bring it back
+//   double-click           DROPS THE CAR THERE (2026-09-30); the button, Esc and N do full screen
 //   wheel over the map     zoom about the cursor
 //   drag                   pan (the map stops following; the locate button or moving re-centres)
 //   the marker             the car in drive mode, the camera in fly mode, with its heading
@@ -93,6 +93,22 @@ export class MiniMap {
   private dpr = 1
   private dprQuery: MediaQueryList | null = null
   expanded = false
+  /**
+   * A DOUBLE-CLICK DROPS THE CAR THERE. Rich, 2026-09-30: "Double clicking a spot on the break
+   * out map should drop your car there instead of enlarging or shrinking the map (there is a
+   * button for it, escape can also do that)". Site metres, x east, y north — the inverse of
+   * `toPx`. Unset, or refused by `teleportAllowed`, and a double-click does nothing at all: the
+   * button, N and Escape still grow and shrink the map.
+   */
+  onTeleport: ((x: number, y: number) => void) | null = null
+  teleportAllowed: () => boolean = () => true
+
+  /** the site point under a screen position — the inverse of `toPx` */
+  siteAt(clientX: number, clientY: number): { x: number; y: number } {
+    const r = this.canvas.getBoundingClientRect()
+    const px = clientX - r.left - this.w / 2, py = clientY - r.top - this.h / 2
+    return { x: this.centre.x + px / this.pxPerM, y: this.centre.y - py / this.pxPerM }
+  }
 
   constructor(parent: HTMLElement, manifest: Manifest) {
     this.manifest = manifest
@@ -102,7 +118,7 @@ export class MiniMap {
     this.ctx = this.canvas.getContext('2d')!
     const locate = button({ icon: 'viewfinder-circle', variant: 'ghost', title: 'follow the car / camera again', onClick: () => { this.follow = true; this.draw(null) } })
     locate.classList.add('mm-locate')
-    this.expandBtn = button({ icon: 'arrows-pointing-out', variant: 'ghost', title: 'the whole screen', key: 'N', onClick: () => this.setExpanded(!this.expanded) })
+    this.expandBtn = button({ icon: 'arrows-pointing-out', variant: 'ghost', title: 'the whole screen — double-click the map to drive there', key: 'N', onClick: () => this.setExpanded(!this.expanded) })
     this.expandBtn.classList.add('mm-expand')
     // THE GRIP IS AT THE TOP-LEFT. The panel is pinned to the bottom-right corner of the screen,
     // so the browser's own `resize: both` handle — always bottom-right — grew the map INTO the
@@ -186,8 +202,13 @@ export class MiniMap {
       this.follow = false
       this.draw(null)
     })
-    // double-click is the big/small toggle — no small button to find, and it works on a phone
-    this.canvas.addEventListener('dblclick', (e) => { e.preventDefault(); this.setExpanded(!this.expanded) })
+    // double-click puts the car where you pointed; the button, N and Escape do big/small
+    this.canvas.addEventListener('dblclick', (e) => {
+      e.preventDefault()
+      if (!this.onTeleport || !this.teleportAllowed()) return
+      const p = this.siteAt(e.clientX, e.clientY)
+      this.onTeleport(p.x, p.y)
+    })
     addEventListener('keydown', this.onKey)
     void this.load()
   }
@@ -464,7 +485,7 @@ export class MiniMap {
     // bottom (Rich, 2026-09-26). Esc, N and a double-click still work.
     this.expandBtn.replaceChildren()
     this.expandBtn.append(iconOf(on ? 'x-mark' : 'arrows-pointing-out'))
-    this.expandBtn.title = on ? 'close the map (N, Esc, or double-click)' : 'the whole screen (N, or double-click)'
+    this.expandBtn.title = on ? 'close the map (N or Esc)' : 'the whole screen (N) — double-click the map to drive there'
     this.fit()
     this.draw(null)
   }

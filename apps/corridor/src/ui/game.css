@@ -1,0 +1,140 @@
+/*
+ * Game mode: the HUD in the corner and the Escape menu over the world.
+ *
+ * `body.game-mode` is the whole switch. The developer's chrome — the bar with its picker, search
+ * box, readout and buttons — is display:none under it, and nothing else about the page changes;
+ * so the two views are one page with one stylesheet difference, and a probe of the developer view
+ * is a probe of the game view minus a bar. The menu's classes are the engine's MenuStack's
+ * (`.menu`, `.item`, `.selected`…), styled here in this app's tokens the way coast and stuntin
+ * style them in theirs — the engine ships no CSS.
+ */
+
+/* ---- the switch ---------------------------------------------------------------------------- */
+
+body.game-mode .topbar { display: none; }
+body.game-mode #chrome-restore { display: none; }
+/* the perf panel sits under the bar; with no bar it can come up to the corner */
+body.game-mode .perf-hud { top: var(--s3); }
+/* the credit is a licence condition, so it stays; the HUD sits above it */
+body.game-mode #attribution { opacity: 0.8; }
+
+/* while the menu is up the world is a backdrop: no pads, no map interaction */
+body.paused #minimap, body.paused .drivepad, body.paused .movepad { pointer-events: none; }
+body.paused .gamehud { opacity: 0.35; }
+
+/* ---- the HUD ------------------------------------------------------------------------------- */
+
+.gamehud {
+  position: fixed; left: var(--s4); bottom: 34px; z-index: var(--z-panel);
+  display: grid; gap: var(--s2); justify-items: start;
+  max-width: min(420px, 70vw);
+  pointer-events: none;
+  color: #fff;
+  text-shadow: 0 1px 2px rgb(0 0 0 / 85%), 0 0 8px rgb(0 0 0 / 55%);
+  transition: opacity 160ms ease;
+}
+.gamehud[hidden] { display: none; }
+.gamehud > [hidden], .gamehud [hidden] { display: none; }
+
+/* the waypoint arrow docks in the widget: no longer fixed to the corner on its own */
+.gamehud .gh-waypoint .waypoint { position: static; }
+
+/* the objective block: the outcome, the goal, the race line, the score, the last few messages */
+.gh-objective {
+  display: grid; gap: 2px;
+  padding: var(--s2) var(--s3);
+  background: var(--hud-bg); border: 1px solid var(--hud-line); border-radius: var(--r2);
+  backdrop-filter: blur(8px);
+  max-width: 100%;
+}
+.gh-outcome { font: 700 var(--text-xl) var(--font-body); letter-spacing: 0.14em; }
+.gh-outcome:empty { display: none; }
+.gh-outcome.win { color: var(--ok); }
+.gh-outcome.lose, .gh-outcome.abandoned { color: var(--danger); }
+.gh-goal { font-size: var(--text-md); line-height: 1.35; }
+.gh-goal:empty, .gh-race:empty, .gh-score:empty { display: none; }
+.gh-race { font-size: var(--text-sm); color: var(--ink-2); }
+.gh-score { font-size: var(--text-sm); color: var(--warn); }
+.gh-notes { display: grid; gap: 1px; }
+.gh-notes:empty { display: none; }
+.gh-note { font-size: var(--text-sm); color: var(--ink-2); line-height: 1.35; transition: opacity 600ms ease; }
+.gh-note.ok { color: var(--ok); }
+.gh-note.warn { color: var(--warn); }
+.gh-note.fade { opacity: 0; }
+
+/* the readout: the big speed, the gear and revs, the compass, the road, the height */
+.gh-telemetry {
+  display: grid; grid-template-columns: auto auto; column-gap: var(--s4); row-gap: 2px;
+  align-items: end;
+}
+.gh-craft { grid-column: 1 / -1; font-size: var(--text-xs); letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-2); }
+.gh-speed { display: flex; align-items: baseline; gap: var(--s1); }
+.gh-speed-num { font-size: 48px; font-weight: 600; line-height: 0.95; letter-spacing: -0.02em; }
+.gh-speed-unit { font-size: var(--text-sm); color: var(--ink-2); letter-spacing: 0.08em; }
+.gh-gear { display: grid; gap: 3px; justify-items: start; padding-bottom: 3px; }
+.gh-gear-num { font-size: 24px; font-weight: 600; line-height: 1; }
+.gh-rev { width: 84px; height: 5px; border-radius: 3px; background: rgb(255 255 255 / 22%); overflow: hidden; }
+.gh-rev-fill { height: 100%; width: 0; background: var(--accent); transition: width 60ms linear, background 120ms; }
+.gh-rev-fill.hot { background: var(--danger); }
+.gh-heading { display: flex; align-items: baseline; gap: var(--s1); }
+.gh-heading-pt { font-size: var(--text-lg); font-weight: 600; letter-spacing: 0.06em; }
+.gh-heading-deg { font-size: var(--text-xs); color: var(--ink-2); }
+.gh-road { font-size: var(--text-md); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 260px; }
+.gh-road:empty { display: none; }
+.gh-elev { font-size: var(--text-xs); color: var(--ink-2); }
+.gh-elev:empty { display: none; }
+.gh-tags { grid-column: 1 / -1; display: flex; gap: var(--s1); flex-wrap: wrap; }
+.gh-tags:empty { display: none; }
+.gh-tag {
+  font-size: var(--text-xs); letter-spacing: 0.06em; text-transform: uppercase;
+  padding: 0 var(--s1); border-radius: var(--r1);
+  background: rgb(0 0 0 / 45%); border: 1px solid rgb(255 255 255 / 25%); text-shadow: none;
+}
+
+/* the phone: the pads own the bottom, so the widget goes up and shrinks */
+@media (pointer: coarse) and (max-width: 900px) {
+  .gamehud { bottom: 96px; max-width: 56vw; }
+  .gh-speed-num { font-size: 36px; }
+}
+
+/* ---- the Escape menu ----------------------------------------------------------------------- */
+
+.menu {
+  position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  z-index: var(--z-modal);
+  min-width: min(92vw, 26em); max-width: 92vw; max-height: 88vh; overflow: auto;
+  padding: var(--s5) var(--s6);
+  font-family: var(--font-body); font-size: clamp(13px, 2.2vmin, 18px); color: var(--ink-1);
+  background: color-mix(in srgb, var(--bg-1) 88%, transparent);
+  border: 1px solid var(--line-2); border-radius: var(--r3);
+  box-shadow: var(--shadow-3);
+  backdrop-filter: blur(14px);
+  user-select: none;
+}
+.menu.hidden { display: none; }
+.menu.wide { min-width: min(92vw, 40em); }
+.menu h1 { margin: 0 0 var(--s1); font-size: 1.5em; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-1); }
+.menu .subtitle { margin: 0 0 var(--s4); font-size: 0.85em; color: var(--ink-2); line-height: 1.5; }
+.menu .items { display: flex; flex-direction: column; gap: 2px; }
+.menu .item {
+  display: flex; justify-content: space-between; align-items: center; gap: var(--s5);
+  padding: 0.5em 0.75em; border-radius: var(--r2);
+  border-left: 3px solid transparent; cursor: pointer;
+  font-size: 1em; letter-spacing: 0.03em; line-height: 1.3;
+}
+.menu .item.info { cursor: default; color: var(--ink-3); font-size: 0.8em; letter-spacing: 0.12em; text-transform: uppercase; padding-top: 0.9em; }
+.menu .item.info:first-child { padding-top: 0.2em; }
+.menu .item.selected { border-left-color: var(--accent); background: var(--accent-dim); }
+.menu .item.danger.selected { border-left-color: var(--danger); background: var(--danger-dim); }
+.menu .item.danger .label { color: var(--danger); }
+.menu .item .label { flex: 1 1 auto; min-width: 8em; }
+.menu .item .hint { display: block; font-size: 0.75em; color: var(--ink-3); letter-spacing: 0; text-transform: none; }
+.menu .item .value { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 0.35em; color: var(--accent); font-family: var(--num); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.menu .item.remap .value { font-size: 0.85em; color: var(--ink-2); }
+.menu .item .value .step { font: inherit; color: inherit; background: none; border: 0; padding: 0 0.35em; margin: 0; opacity: 0.45; cursor: pointer; line-height: 1; }
+.menu .item .value .step:hover { opacity: 1; }
+.menu .item.selected .value .step { opacity: 0.8; }
+.menu .item .value .v { min-width: 4.5em; text-align: right; }
+.menu .footer { margin: var(--s4) 0 0; font-size: 0.75em; color: var(--ink-3); line-height: 1.6; }
+
+@media (max-height: 520px) { .menu { padding: var(--s3) var(--s4); } .menu h1 { font-size: 1.2em; } }

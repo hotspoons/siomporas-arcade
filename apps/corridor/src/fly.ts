@@ -69,6 +69,12 @@ export class FlyControls {
     orbit.zoomSpeed = 1.2
   }
 
+  /** the pad's right stick: the same look as a right-drag, per frame */
+  look(yaw: number, pitch: number): void {
+    if (!this.enabled || (!yaw && !pitch)) return
+    this.lookBy(yaw, pitch)
+  }
+
   /** Rotate the view heading about the camera, FPS-style. */
   private lookBy(yaw: number, pitch: number) {
     const off = this.orbit.target.clone().sub(this.camera.position)

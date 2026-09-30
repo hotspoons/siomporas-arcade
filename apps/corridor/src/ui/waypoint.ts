@@ -78,9 +78,22 @@ export class WaypointHud {
   }
 
   private watching: HTMLElement | null = null
+  private docked = false
+
+  /**
+   * Live inside the game HUD's widget (game mode) or on its own in the corner (developer view).
+   * Docked, the widget does the dodging and this stays put.
+   */
+  dock(slot: HTMLElement | null): void {
+    this.docked = !!slot
+    if (slot) slot.append(this.root)
+    else document.body.append(this.root)
+    this.root.style.bottom = ''
+  }
 
   /** Sit above the attribution block while its list is open; otherwise a hand off the corner. */
   private dodge(): void {
+    if (this.docked) return
     const attrib = document.getElementById('attribution')
     const list = attrib?.querySelector('.attrib-list') as HTMLElement | null
     // the block opens on a click, between frames: watch its list so the step happens at once

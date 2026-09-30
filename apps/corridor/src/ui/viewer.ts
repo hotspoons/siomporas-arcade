@@ -16,8 +16,11 @@
 import { aaMode, setAAMode, resolvedAA, type AAMode } from '../render'
 import { Dialog, Drawer, Tabs, button, el, type Tab } from './shell'
 import { icon } from './icons'
-import { empty, group, bodyOf, layerToggle, readout, select, toggle } from './controls'
+import { empty, group, bodyOf, layerToggle, readout, select, slider, toggle } from './controls'
 import type { IndexEntry, Manifest } from '../site'
+import type { UiMode } from '../gamepolicy'
+import { ACTIONS, ACTION_LABELS, type GameSettings } from '../gamesettings'
+import { keyLabel, padBindingLabel } from '@apex/engine/input/bindings'
 import { SEASONS, type Season } from '../season'
 import { STYLES, type Style } from '../style'
 
@@ -138,29 +141,19 @@ const KEYS: { group: string; rows: [string, string][] }[] = [
       ['drag', 'orbit · right-drag looks'],
     ],
   },
-  {
-    group: 'Drive',
-    rows: [
-      ['Tab', 'enter / leave the car'],
-      ['W S', 'throttle / brake'],
-      ['A D', 'steer'],
-      ['Space', 'handbrake'],
-      ['R', 'reset the car'],
-      ['L', 'lights on or off (they follow the night until you press it)'],
-      ['drag', 'look around'],
-    ],
-  },
+  // the driving keys are the BINDINGS now (Settings → Controls lists them from the settings, and
+  // the Escape menu rebinds them), so the fixed table only carries what cannot be rebound
   {
     group: 'View',
     rows: [
       ['P', 'to the photo'],
       ['H', 'top down'],
       ['X', 'copy a link to this exact view'],
+      ['Shift R', 'the car back to the start'],
       ['F6', 'tuning'],
       ['F7', 'performance stats'],
-      ['M', 'hide the interface'],
-      ['B', 'on foot / back to flying'],
-      ['Esc', 'close what is open'],
+      ['drag', 'look around the car'],
+      ['Esc', 'the game menu — or close what is open'],
     ],
   },
 ]
@@ -202,6 +195,21 @@ export interface ViewerUIOpts {
   onStructure: (index: number) => void
   /** an address, place or road was picked from the search box: go there */
   onGoto: (hit: { label: string; x: number; z: number; kind: string }) => void
+  /**
+   * THE POLICY'S ONE QUESTION (gamepolicy.ts): may this tab or control be shown? A program hides
+   * settings by id, and the Escape menu asks the same function, so the two views agree.
+   */
+  allow?: (id: string) => boolean
+  /** the player's settings — volumes, bindings, units — for the Audio and Controls tabs */
+  settings?: GameSettings
+  /** a volume moved */
+  onAudio?: () => void
+  /** haptics or the gamepad switch moved */
+  onBindings?: () => void
+  /** open the Escape menu at its Controls screen, where keys are rebound */
+  onRebind?: () => void
+  /** the interface: the game's or the developer's */
+  uiMode?: { get: () => UiMode; set: (m: UiMode) => void; offered: () => boolean }
 }
 
 export class ViewerUI {
@@ -260,17 +268,39 @@ export class ViewerUI {
     document.body.append(this.bar)
 
     // ---- settings dialog
-    const tabs: Tab[] = [
-      { id: 'layers', label: 'Layers', icon: 'squares-2x2', build: (h) => this.buildLayers(h) },
-      { id: 'display', label: 'Display', icon: 'swatch', build: (h) => this.buildDisplay(h) },
-      { id: 'site', label: 'Site', icon: 'map-pin', build: (h) => this.buildSite(h) },
-      { id: 'controls', label: 'Controls', icon: 'information-circle', build: (h) => this.buildControls(h) },
-    ]
-    this.settingsTabs = new Tabs(tabs)
     this.settings = new Dialog({ title: 'Settings', icon: 'cog-6-tooth', size: 'md' })
+    this.settingsTabs = this.makeSettingsTabs()
     this.settings.body.append(this.settingsTabs.root)
 
     this.buildDrawer()
+  }
+
+  /** may this tab or control be shown? (the policy's question; everything is allowed without one) */
+  private allow(id: string): boolean {
+    return this.o.allow ? this.o.allow(id) : true
+  }
+
+  private makeSettingsTabs(): Tabs {
+    const all: Tab[] = [
+      { id: 'layers', label: 'Layers', icon: 'squares-2x2', build: (h) => this.buildLayers(h) },
+      { id: 'display', label: 'Display', icon: 'swatch', build: (h) => this.buildDisplay(h) },
+      { id: 'audio', label: 'Audio', icon: 'speaker-wave', build: (h) => this.buildAudio(h) },
+      { id: 'site', label: 'Site', icon: 'map-pin', build: (h) => this.buildSite(h) },
+      { id: 'controls', label: 'Controls', icon: 'information-circle', build: (h) => this.buildControls(h) },
+    ]
+    return new Tabs(all.filter((t) => this.allow(t.id)))
+  }
+
+  /**
+   * The policy changed under the dialog: throw the tab strip away and build it again from what is
+   * allowed now. Cheap — the panels are built lazily — and the only way a tab can disappear.
+   */
+  refreshSettings(): void {
+    const was = this.settingsTabs.current
+    this.settingsTabs.root.remove()
+    this.settingsTabs = this.makeSettingsTabs()
+    this.settings.body.append(this.settingsTabs.root)
+    if (was) this.settingsTabs.show(was)
   }
 
   private stagesSection: HTMLElement | null = null
@@ -413,10 +443,12 @@ export class ViewerUI {
 
   private buildLayers(host: HTMLElement) {
     for (const g of LAYER_GROUPS) {
+      const layers = g.layers.filter((l) => this.allow(`layers.${l.id}`))
+      if (!layers.length) continue
       const sec = group(g.title)
       const body = bodyOf(sec)
       body.classList.add('layer-list')
-      for (const l of g.layers) {
+      for (const l of layers) {
         body.append(
           layerToggle({
             label: l.label,
@@ -433,28 +465,28 @@ export class ViewerUI {
   }
 
   private buildDisplay(host: HTMLElement) {
-    const g = group('Conditions')
-    const body = bodyOf(g)
-    body.append(
-      select<Season>({
+    // each row asks the policy: a program may take any one of these away (gamepolicy.ts)
+    const only = (id: string, make: () => HTMLElement): HTMLElement[] => (this.allow(id) ? [make()] : [])
+    const conditions = [
+      ...only('display.season', () => select<Season>({
         label: 'Season',
         value: 'summer',
         options: SEASONS.map((s) => ({ value: s, label: s[0].toUpperCase() + s.slice(1) })),
         onChange: (v) => this.o.onSeason(v),
-      }),
-      select<Style>({
+      })),
+      ...only('display.style', () => select<Style>({
         label: 'Style',
         value: (new URLSearchParams(location.search).get('style') as Style) || 'realistic',
         options: STYLES.map((s) => ({ value: s, label: s[0].toUpperCase() + s.slice(1) })),
         onChange: (v) => this.o.onStyle(v),
-      }),
-      (this.reliefSel = select<string>({
+      })),
+      ...only('display.relief', () => (this.reliefSel = select<string>({
         label: 'Relief',
         value: String(clampReliefParam()),
         options: RELIEFS.map((k) => ({ value: String(k), label: k === 1 ? '1× as measured' : `${k}× hills` })),
         onChange: (v) => this.o.onRelief(Number(v)),
-      })),
-      select<TreeStyle>({
+      }))),
+      ...only('display.trees', () => select<TreeStyle>({
         label: 'Trees',
         value: 'realistic',
         options: [
@@ -463,15 +495,19 @@ export class ViewerUI {
           { value: 'lollipop', label: 'Lollipops — the editor’s trees' },
         ],
         onChange: (v) => this.o.onTrees(v),
-      }),
-      select<Weather>({
+      })),
+      ...only('display.weather', () => select<Weather>({
         label: 'Weather',
         value: WEATHERS[0],
         options: WEATHERS.map((w) => ({ value: w, label: w[0].toUpperCase() + w.slice(1) })),
         onChange: (v) => this.o.onWeather(v),
-      }),
-    )
-    host.append(g)
+      })),
+    ]
+    if (conditions.length) {
+      const g = group('Conditions')
+      bodyOf(g).append(...conditions)
+      host.append(g)
+    }
 
     // Rendering, not tuning: MSAA is a WebGL context attribute, so unlike a tuning knob
     // it cannot be nudged while you watch it. The reasoning lives in render.ts; the panel
@@ -482,47 +518,75 @@ export class ViewerUI {
      * tuning panel because it is a thing you SWITCH ON while you play, not a knob you sweep; and
      * remembered, because the person who wants it wants it every time.
      */
-    const p = group('Performance')
-    bodyOf(p).append(
-      toggle({
-        label: 'Show the stats panel',
-        value: perfWanted(),
-        note: 'frame rate, p95 and p99, the worst frame, stalls, draw calls and heap — F7',
-        onChange: (v) => {
-          try { localStorage.setItem(PERF_KEY, v ? '1' : '0') } catch { /* private window */ }
-          this.o.onPerf?.(v)
-        },
-      }),
-    )
-    host.append(p)
+    if (this.allow('display.perf')) {
+      const p = group('Performance')
+      bodyOf(p).append(
+        toggle({
+          label: 'Show the stats panel',
+          value: perfWanted(),
+          note: 'frame rate, p95 and p99, the worst frame, stalls, draw calls and heap — F7',
+          onChange: (v) => {
+            try { localStorage.setItem(PERF_KEY, v ? '1' : '0') } catch { /* private window */ }
+            this.o.onPerf?.(v)
+          },
+        }),
+      )
+      host.append(p)
+    }
 
-    const slug = this.manifest?.slug ?? ''
-    const r = group('Rendering')
-    const now = readout('Now', AA_LABEL[resolvedAA(slug)])
-    bodyOf(r).append(
-      select<AAMode>({
-        label: 'Anti-aliasing',
-        value: aaMode(),
-        options: [
-          { value: 'auto', label: 'Auto' },
-          { value: 'msaa', label: 'MSAA' },
-          { value: 'fxaa', label: 'FXAA' },
-          { value: 'smaa', label: 'SMAA' },
-          { value: 'off', label: 'Off' },
-        ],
-        onChange: (v) => {
-          setAAMode(v)
-          this.o.onAAChange?.(v)
-          now.querySelector('.field-value')!.textContent = AA_LABEL[resolvedAA(slug)]
-        },
-      }),
-      now,
-    )
-    host.append(r)
+    if (this.allow('display.aa')) {
+      const slug = this.manifest?.slug ?? ''
+      const r = group('Rendering')
+      const now = readout('Now', AA_LABEL[resolvedAA(slug)])
+      bodyOf(r).append(
+        select<AAMode>({
+          label: 'Anti-aliasing',
+          value: aaMode(),
+          options: [
+            { value: 'auto', label: 'Auto' },
+            { value: 'msaa', label: 'MSAA' },
+            { value: 'fxaa', label: 'FXAA' },
+            { value: 'smaa', label: 'SMAA' },
+            { value: 'off', label: 'Off' },
+          ],
+          onChange: (v) => {
+            setAAMode(v)
+            this.o.onAAChange?.(v)
+            now.querySelector('.field-value')!.textContent = AA_LABEL[resolvedAA(slug)]
+          },
+        }),
+        now,
+      )
+      host.append(r)
+    }
 
-    const t = group('Interface')
-    bodyOf(t).append(
-      select({
+    const iface = [
+      // GAME OR DEVELOPER. The game's interface is the deployment default; this is the way back
+      // to it from the developer view, and the Escape menu is the way back from the game.
+      ...(this.o.uiMode && this.o.uiMode.offered() && this.allow('game.developer')
+        ? [select<UiMode>({
+            label: 'Interface',
+            value: this.o.uiMode.get(),
+            options: [
+              { value: 'dev', label: 'Developer — the bar, the picker, the readout' },
+              { value: 'game', label: 'Game — the HUD and the Escape menu' },
+            ],
+            note: 'the game hides this bar; Esc opens its menu, where Developer view brings it back',
+            onChange: (v) => this.o.uiMode!.set(v),
+          })]
+        : []),
+      ...(this.o.settings && this.allow('display.units')
+        ? [select<'mph' | 'kmh'>({
+            label: 'Units',
+            value: this.o.settings.data.units,
+            options: [
+              { value: 'mph', label: 'mph, feet' },
+              { value: 'kmh', label: 'km/h, metres' },
+            ],
+            onChange: (v) => this.o.settings!.update((d) => (d.units = v)),
+          })]
+        : []),
+      ...only('display.theme', () => select({
         label: 'Theme',
         value: (localStorage.getItem('corridor.theme') as 'dark' | 'light') ?? 'dark',
         options: [
@@ -530,15 +594,50 @@ export class ViewerUI {
           { value: 'light', label: 'Light' },
         ],
         onChange: (v) => setTheme(v as 'dark' | 'light'),
-      }),
-      toggle({
+      })),
+      ...only('display.interface', () => toggle({
         label: 'Hide the interface',
         value: document.body.classList.contains('chrome-off'),
         note: 'M — everything but the canvas',
         onChange: (v) => document.body.classList.toggle('chrome-off', v),
-      }),
-    )
-    host.append(t)
+      })),
+    ]
+    if (iface.length) {
+      const t = group('Interface')
+      bodyOf(t).append(...iface)
+      host.append(t)
+    }
+    if (!host.childElementCount) host.append(empty('This level has switched the display settings off.'))
+  }
+
+  /**
+   * AUDIO. Rich, 2026-09-30: "we badly need audio settings and the ability to mute the game from
+   * the game menu as well as the settings menu." The same four fields the Escape menu's Audio
+   * screen edits, on the same store; one moves and the other shows it next time it is opened.
+   */
+  private buildAudio(host: HTMLElement) {
+    const st = this.o.settings
+    if (!st) {
+      host.append(empty('No settings store on this page.'))
+      return
+    }
+    const a = () => st.data.audio
+    const set = (fn: (x: ReturnType<typeof a>) => void) => { st.update((d) => fn(d.audio)); this.o.onAudio?.() }
+    const vol = (id: string, label: string, get: () => number, put: (v: number) => void, note?: string): HTMLElement[] =>
+      this.allow(id) ? [slider({ label, value: get(), min: 0, max: 1, step: 0.05, unit: '%', note, onInput: (v) => set(() => put(v)) })] : []
+    const rows = [
+      ...(this.allow('audio.mute') ? [toggle({ label: 'Mute', value: a().muted, note: 'silence, whatever the sliders say — the tab going to the background mutes on its own', onChange: (v) => set((x) => (x.muted = v)) })] : []),
+      ...vol('audio.master', 'Master', () => a().master, (v) => (a().master = v)),
+      ...vol('audio.engine', 'Engine', () => a().engine, (v) => (a().engine = v), 'over the ENGINE_MASTER knob in the tuning panel'),
+      ...vol('audio.sfx', 'Interface', () => a().sfx, (v) => (a().sfx = v), 'the menu blips'),
+    ]
+    if (!rows.length) {
+      host.append(empty('This level has switched the audio settings off.'))
+      return
+    }
+    const g = group('Volume')
+    bodyOf(g).append(...rows)
+    host.append(g)
   }
 
   private buildSite(host: HTMLElement) {
@@ -610,19 +709,55 @@ export class ViewerUI {
   private buildControls(host: HTMLElement) {
     let pref: string | null = null
     try { pref = localStorage.getItem('corridor.recoverRepairs') } catch { /* no storage */ }
-    host.append(
-      select({
-        label: 'R also repairs the car',
-        value: (pref === 'on' || pref === 'off' ? pref : 'level') as 'level' | 'on' | 'off',
-        options: [
-          { value: 'level', label: 'the level decides' },
-          { value: 'on', label: 'always' },
-          { value: 'off', label: 'never' },
-        ],
-        note: 'recover straightens the dents out, unless the game wants you to carry them',
-        onChange: (v) => { try { localStorage.setItem('corridor.recoverRepairs', v) } catch { /* no storage */ } },
-      }),
-    )
+    if (this.allow('controls.recover')) {
+      host.append(
+        select({
+          label: 'R also repairs the car',
+          value: (pref === 'on' || pref === 'off' ? pref : 'level') as 'level' | 'on' | 'off',
+          options: [
+            { value: 'level', label: 'the level decides' },
+            { value: 'on', label: 'always' },
+            { value: 'off', label: 'never' },
+          ],
+          note: 'recover straightens the dents out, unless the game wants you to carry them',
+          onChange: (v) => { try { localStorage.setItem('corridor.recoverRepairs', v) } catch { /* no storage */ } },
+        }),
+      )
+    }
+    const st = this.o.settings
+    if (st) {
+      const pad = [
+        ...(this.allow('controls.gamepad') ? [toggle({ label: 'Gamepad', value: st.data.gamepad, note: 'the first connected pad: triggers are the pedals, the left stick steers, Start pauses', onChange: (v) => { st.update((d) => (d.gamepad = v)); this.o.onBindings?.() } })] : []),
+        ...(this.allow('controls.haptics') ? [slider({ label: 'Rumble', value: st.data.haptics, min: 0, max: 1, step: 0.1, unit: '%', note: 'bumps, grass and impacts, on a pad that can', onInput: (v) => { st.update((d) => (d.haptics = v)); this.o.onBindings?.() } })] : []),
+      ]
+      if (pad.length) {
+        const g = group('Gamepad')
+        bodyOf(g).append(...pad)
+        host.append(g)
+      }
+      if (this.allow('controls.bindings')) {
+        // THE BINDINGS, live from the settings — not a table typed here that goes stale the first
+        // time somebody rebinds a key. Rebinding itself happens in the Escape menu, which has the
+        // capture (tap to set, hold to add) and is where a player will look for it.
+        const g = group('Bindings', {
+          actions: this.o.onRebind ? [button({ label: 'Rebind…', icon: 'adjustments-horizontal', onClick: () => this.o.onRebind!() })] : [],
+        })
+        const body = bodyOf(g)
+        body.classList.add('keys')
+        for (const a of ACTIONS) {
+          const row = el('div', 'key-row')
+          const ks = el('span', 'key-keys')
+          const keys = (st.data.keys[a] ?? []).map(keyLabel)
+          const pads = (st.data.pad[a] ?? []).map(padBindingLabel)
+          for (const part of keys) ks.append(el('kbd', '', part))
+          for (const part of pads) ks.append(el('kbd', 'pad', part))
+          if (!keys.length && !pads.length) ks.append(el('span', 'key-none', '—'))
+          row.append(ks, el('span', 'key-what', ACTION_LABELS[a]))
+          body.append(row)
+        }
+        host.append(g)
+      }
+    }
     for (const k of KEYS) {
       const g = group(k.group)
       const body = bodyOf(g)

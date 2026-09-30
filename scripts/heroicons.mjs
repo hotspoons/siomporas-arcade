@@ -37,6 +37,11 @@ const NAMES = [
   'arrow-down-tray', 'arrow-up-tray', 'queue-list', 'exclamation-triangle', 'folder-open',
   // back out of a panel, step back through a list, mark a level's finish
   'chevron-left', 'arrow-left', 'flag',
+  // the program editor's file tree: folders and files, new ones (these were added to icons.ts by
+  // hand once, and the next regeneration silently dropped them — the list here is the source)
+  'folder', 'folder-plus', 'document-text', 'document-plus',
+  // the viewer's game mode: the Audio tab, mute, the pause menu
+  'speaker-wave', 'speaker-x-mark', 'pause',
 ]
 
 /*

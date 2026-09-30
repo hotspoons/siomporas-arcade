@@ -44,6 +44,18 @@ function host(at: { x: number; y: number; z?: number } = { x: 0, y: 0 }) {
   return { h, state }
 }
 
+/** the interface, as a program shapes it: what the host was told, in order */
+function uiHost() {
+  const calls: string[] = []
+  const ui: NonNullable<ProgramHost['ui']> = {
+    mode: (m) => calls.push(`mode:${m}`),
+    allow: (what, ok) => calls.push(`allow:${what}:${ok}`),
+    settings: (ids, hidden) => calls.push(`${hidden ? 'hide' : 'show'}:${ids.join(',')}`),
+    hud: (part, on) => calls.push(`hud:${part}:${on}`),
+  }
+  return { ui, calls }
+}
+
 /** Play a game for `seconds` at 50 Hz, the same step the ActorWorld uses. */
 async function play(def: GameDef, h: ProgramHost, seconds: number, each?: (t: number, run: GameRun) => void) {
   const run = new GameRun(h, def)
@@ -77,6 +89,43 @@ describe('the declarative half', () => {
     expect([...state.hidden].sort()).toEqual(['minimap', 'street-names'])
     await play(defineGame({ setup: (api) => api.show('minimap') }), h, 0.1)
     expect([...state.hidden]).toEqual(['street-names'])
+  })
+
+  it('shapes the interface through the host: the view, the freedoms, the settings, the HUD', async () => {
+    const { h } = host()
+    const { ui, calls } = uiHost()
+    h.ui = ui
+    await play(defineGame({
+      setup: (api) => {
+        api.ui.mode('game')
+        api.ui.developer(false)
+        api.ui.teleport(false)
+        api.ui.transport(true)
+        api.ui.settings.hide('display.theme', 'audio')
+        api.ui.settings.show('audio')
+        api.ui.hud.hide('gear')
+        api.ui.hud.show('gear')
+      },
+    }), h, 0.1)
+    expect(calls).toEqual([
+      'mode:game', 'allow:developer:false', 'allow:teleport:false', 'allow:transport:true',
+      'hide:display.theme,audio', 'show:audio', 'hud:gear:false', 'hud:gear:true',
+    ])
+  })
+
+  it('answers every interface call harmlessly on a host with no interface (a dry run)', async () => {
+    const { h } = host()
+    const run = await play(defineGame({
+      setup: (api) => {
+        api.ui.mode('dev')
+        api.ui.developer(false)
+        api.ui.settings.hide('display')
+        api.ui.hud.hide('speed')
+        // and a mode that is not a mode is refused at the boundary, not passed on
+        ;(api.ui.mode as (m: string) => void)('banana')
+      },
+    }), h, 0.1)
+    expect(run.error).toBeNull()
   })
 
   it('offers a closed list of hideables and transports, so a typo cannot silently do nothing', () => {

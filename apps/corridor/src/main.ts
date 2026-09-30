@@ -68,6 +68,15 @@ import { WEATHER, WEATHERS, type Weather } from './weather'
 import { ViewerUI, restoreTheme, perfWanted, setPerfWanted } from './ui/viewer'
 import { TuneUI } from './ui/tune'
 import { installShellKeys, toast, status, clearStatus } from './ui/shell'
+import { LAYER_GROUPS, setTheme } from './ui/viewer'
+import { aaMode, setAAMode, type AAMode } from './render'
+import { STYLES } from './style'
+import { GameSettings, engineGain, sfxGain, type Action } from './gamesettings'
+import { GameInput } from './gameinput'
+import { GamePolicy, resolveUiMode, type UiMode } from './gamepolicy'
+import { GameHud } from './ui/gamehud'
+import { GameMenu } from './ui/gamemenu'
+import { UiSound } from './ui/uisound'
 import { downloadJSON, readJSONFile } from './ui/files'
 
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector<T>(sel)!
@@ -154,6 +163,40 @@ const attribution = new Attribution(document.body)
  * yesterday still open on today. TIME_RATE is how fast it runs.
  */
 const worldClock = new WorldClock()
+
+/*
+ * GAME MODE. Rich, 2026-09-30: "a game mode that is the default deployment style" — no bar, no
+ * picker, no search box, no readout, no corner buttons; a HUD in the lower left and an Escape
+ * menu instead, with the developer view an option in that menu. The pieces:
+ *
+ *   gamesettings.ts   the PLAYER's settings — bindings, volumes, rumble, units, which view
+ *   gamepolicy.ts     what a PROGRAM allows — the developer view, the map teleport, the transport
+ *                     switch, and which settings tabs and controls are shown at all
+ *   gameinput.ts      keys and the gamepad → pedals, sticks, menu edges; haptics
+ *   ui/gamehud.ts     the widget in the corner
+ *   ui/gamemenu.ts    the Escape menu, on the engine's MenuStack (Turbo Radrun's)
+ *
+ * `?ui=game` and `?ui=dev` override everything; otherwise the player's choice, else a production
+ * build is a game and the dev server is a workbench (`resolveUiMode`).
+ */
+const settings = new GameSettings()
+const policy = new GamePolicy()
+const input = new GameInput(settings.data.keys, settings.data.pad)
+input.attach(window)
+const sounds = new UiSound()
+const uiParam = new URLSearchParams(location.search).get('ui')
+let uiMode: UiMode = resolveUiMode({ param: uiParam, stored: settings.data.ui, prod: import.meta.env.PROD })
+/**
+ * The view actually shown. `?ui=` decided where this page STARTED (`resolveUiMode`); after that
+ * the Developer view toggle is the player's — a `?ui=game` link whose menu offered a toggle that
+ * did nothing was the first thing the probe found. A program that has taken the developer view
+ * away wins over the toggle, except for `?ui=dev`, which is the developer's own hatch into a
+ * level that forbids it.
+ */
+function effectiveUiMode(): UiMode {
+  if (!policy.developer && uiParam !== 'dev') return 'game'
+  return uiMode
+}
 
 // The interface. Built before anything else touches a tunable, because TuneUI's constructor
 // restores this browser's saved knobs and everything downstream reads them as its starting value.
@@ -262,23 +305,11 @@ const ui = new ViewerUI({
     history.replaceState(null, '', u.toString())
     void openLevel(id)
   },
-  onTrees: (t) => {
-    // two knobs, one choice: cards-only is TREE_SIMPLE, the editor's trees are TREE_LOLLIPOP
-    tuneKey('TREE_SIMPLE')?.set(t === 'cards' ? 1 : 0)
-    tuneKey('TREE_LOLLIPOP')?.set(t === 'lollipop' ? 1 : 0)
-    onTuneChange()
-  },
-  onRelief: (k) => {
-    reliefWanted = clampRelief(k)
-    const u = new URL(location.href)
-    if (reliefWanted === 1) u.searchParams.delete('relief')
-    else u.searchParams.set('relief', String(reliefWanted))
-    history.replaceState(null, '', u.toString())
-    if (site) void loadSite(site.manifest.slug)
-  },
+  onTrees: (t) => chooseTrees(t),
+  onRelief: (k) => chooseRelief(k),
   onWeather: (w) => setWeatherSelection(w),
   onLayers: () => applyLayers(),
-  onDrive: () => setDrive(!drive.on),
+  onDrive: () => hotkey('drive'),
   onPhoto: () => toPhoto(),
   onTop: () => toTop(),
   onStance: () => void copyStance(),
@@ -287,9 +318,186 @@ const ui = new ViewerUI({
   onPerf: (on) => perfHud.show(on),
   onGoto: (h) => gotoHit(h),
   onStructure: (i) => site && goToStructure(site.manifest.structures[i]),
+  // the game's pieces in the developer's dialog: the same policy, the same settings store
+  allow: (id) => policy.allows(id),
+  settings,
+  onAudio: () => applyAudio(),
+  onBindings: () => applyBindings(),
+  onRebind: () => { ui.settings.close(); pause(); menu.showAt('controls') },
+  uiMode: { get: () => effectiveUiMode(), set: (m) => chooseUiMode(m), offered: () => policy.developer || uiParam === 'dev' },
 })
 ui.describe = (s) => describe(s as Structure)
 installShellKeys(() => ui.drawer)
+
+// ---------------------------------------------------------------------------------------------
+// game mode: the HUD, the Escape menu, pause
+const gameHud = new GameHud()
+document.body.append(gameHud.root)
+/** the world stands still while the menu is up: no car, no traffic, no program clock */
+let paused = false
+const RELIEFS = ['1', '1.5', '2', '3', '5']
+const menu = new GameMenu({
+  settings,
+  policy,
+  input,
+  sounds,
+  resume: () => resumeGame(),
+  restart: () => restartLevel(),
+  mode: {
+    options: [{ value: 'game', label: 'game' }, { value: 'dev', label: 'developer' }],
+    get: () => effectiveUiMode(),
+    set: (m) => chooseUiMode(m),
+  },
+  tuning: () => { resumeGame(); tuneUI.toggle() },
+  transport: {
+    driving: () => drive.on,
+    setDriving: (on) => { if (on) { setCraft(null); setDrive(true) } else setDrive(false) },
+  },
+  race: {
+    active: () => { const ph = raceWorld?.state.phase; return ph === 'armed' || ph === 'countdown' || ph === 'running' },
+    abandon: () => { raceWorld?.session.abandon(); status('race abandoned — drive back into the ring to try again') },
+  },
+  display: {
+    season: { options: SEASONS.map((v) => ({ value: v, label: v })), get: () => season, set: (v) => setSeason(v as Season) },
+    style: { options: STYLES.map((v) => ({ value: v, label: v })), get: () => style, set: (v) => setStyle(v as Style) },
+    relief: {
+      options: RELIEFS.map((k) => ({ value: k, label: k === '1' ? 'as measured' : `${k}× hills` })),
+      get: () => (RELIEFS.includes(String(reliefWanted)) ? String(reliefWanted) : '1'),
+      set: (v) => chooseRelief(Number(v)),
+    },
+    trees: {
+      options: [{ value: 'realistic', label: 'realistic' }, { value: 'cards', label: 'cards' }, { value: 'lollipop', label: 'lollipops' }],
+      get: () => (T.TREE_SIMPLE > 0 ? 'cards' : T.TREE_LOLLIPOP > 0 ? 'lollipop' : 'realistic'),
+      set: (v) => chooseTrees(v as 'realistic' | 'cards' | 'lollipop'),
+    },
+    weather: { options: WEATHERS.map((v) => ({ value: v, label: v })), get: () => WEATHERS[Math.round(T.WEATHER)] ?? WEATHERS[0], set: (v) => setWeatherSelection(v as Weather) },
+    perf: { get: () => perfHud.open, set: (v) => { perfHud.show(v); setPerfWanted(v) } },
+    aa: {
+      options: (['auto', 'msaa', 'fxaa', 'smaa', 'off'] as AAMode[]).map((v) => ({ value: v, label: v })),
+      get: () => aaMode(),
+      set: (v) => chooseAA(v as AAMode),
+    },
+    theme: {
+      options: [{ value: 'dark', label: 'dark' }, { value: 'light', label: 'light' }],
+      get: () => document.documentElement.dataset.theme === 'light' ? 'light' : 'dark',
+      set: (v) => setTheme(v as 'dark' | 'light'),
+    },
+    interface: { get: () => document.body.classList.contains('chrome-off'), set: (v) => setChromeHidden(v) },
+  },
+  layers: {
+    list: () => LAYER_GROUPS.flatMap((g) => g.layers.map((l) => ({ id: l.id, label: l.label, group: g.title }))),
+    get: (id) => ui.layers()[id] ?? false,
+    set: (id, on) => { ui.setLayers({ [id]: on }); applyLayers() },
+  },
+  recover: {
+    options: [{ value: 'level', label: 'the level decides' }, { value: 'on', label: 'always' }, { value: 'off', label: 'never' }],
+    get: () => { let p: string | null = null; try { p = localStorage.getItem('corridor.recoverRepairs') } catch { /* no storage */ } return p === 'on' || p === 'off' ? p : 'level' },
+    set: (v) => { try { localStorage.setItem('corridor.recoverRepairs', v) } catch { /* no storage */ } },
+  },
+  applyAudio: () => applyAudio(),
+  applyBindings: () => applyBindings(),
+})
+// the policy moved — a program hid a tab, took the developer view away — and everything that
+// draws from it draws again
+policy.onChange = () => {
+  menu.policyChanged()
+  ui.refreshSettings()
+  gameHud.setParts(policy.hud)
+  applyUiMode()
+}
+
+/** the menu up and the world held still. Rendering goes on: the menu sits over the world. */
+function pause() {
+  if (paused) return
+  paused = true
+  input.suppressGameplay = true
+  input.menuOpened()
+  document.body.classList.add('paused')
+  drive.input.throttle = drive.input.brake = drive.input.steer = 0
+  drive.input.handbrake = false
+  ui.drawer.set(false)
+  menu.show()
+}
+function resumeGame() {
+  if (!paused) return
+  paused = false
+  input.suppressGameplay = false
+  // the key or button that chose Resume must not also be played
+  input.swallowFrames = 2
+  document.body.classList.remove('paused')
+  menu.close()
+}
+/**
+ * Restart: back to the start point, the car straightened, the race and the program from the top.
+ * A level is not reloadable in place, so this restarts the RUN, not the level's data.
+ */
+function restartLevel() {
+  resumeGame()
+  raceWorld?.session.reset()
+  if (playerModel) repairObject(playerModel.object)
+  goToStart(level?.mode ?? null)
+  if (level?.program) void startProgram(level.program)
+  else stopProgram()
+  toast('restarted', 'info', 1200)
+}
+/** the game's interface or the developer's, on the body and on the widgets */
+function applyUiMode() {
+  const m = effectiveUiMode()
+  document.body.classList.toggle('game-mode', m === 'game')
+  gameHud.show(m === 'game')
+  gameHud.setParts(policy.hud)
+  waypointHud.dock(m === 'game' ? gameHud.waypointSlot : null)
+  if (m === 'game') ui.drawer.set(false)
+}
+/** the player chose, in the menu or the dialog: remembered in this browser */
+function chooseUiMode(m: UiMode) {
+  uiMode = m
+  settings.update((d) => (d.ui = m))
+  applyUiMode()
+  if (menu.open) menu.refresh()
+  toast(m === 'game' ? 'game view — Esc for the menu' : 'developer view', 'info', 1800)
+}
+/** the player's volumes and mute, at the engine bus and the menu blips */
+function applyAudio() {
+  const a = settings.data.audio
+  engineSound.setUserAudio(engineGain({ ...a, muted: false }), a.muted)
+  sounds.gain = sfxGain(a)
+}
+/** the bindings, the pad switch and the rumble strength, at the input */
+function applyBindings() {
+  input.keys = settings.data.keys
+  input.pad = settings.data.pad
+  input.gamepadEnabled = settings.data.gamepad
+  input.haptics.strength = settings.data.haptics
+  if (menu.open) menu.refresh()
+}
+/** Display → Relief, from the dialog or the menu: the world reloads at the new exaggeration */
+function chooseRelief(k: number) {
+  reliefWanted = clampRelief(k)
+  const u = new URL(location.href)
+  if (reliefWanted === 1) u.searchParams.delete('relief')
+  else u.searchParams.set('relief', String(reliefWanted))
+  history.replaceState(null, '', u.toString())
+  if (site) void loadSite(site.manifest.slug)
+}
+/** Display → Trees: two knobs, one choice — cards-only is TREE_SIMPLE, the editor's are TREE_LOLLIPOP */
+function chooseTrees(t: 'realistic' | 'cards' | 'lollipop') {
+  tuneKey('TREE_SIMPLE')?.set(t === 'cards' ? 1 : 0)
+  tuneKey('TREE_LOLLIPOP')?.set(t === 'lollipop' ? 1 : 0)
+  onTuneChange()
+}
+/** Display → Anti-aliasing. Post-process AA rebuilds in place; MSAA is a context attribute and reloads. */
+function chooseAA(v: AAMode) {
+  setAAMode(v)
+  const slug = site?.manifest.slug ?? bootSlug()
+  if (antialiasFor(slug) !== renderer.getContext().getContextAttributes()?.antialias) {
+    const u = new URL(location.href)
+    u.searchParams.delete('aa')
+    location.replace(u.toString())
+    return
+  }
+  buildPostAA(postAAFor(slug))
+}
 let dragging = false, lastX = 0, lastY = 0, downAt = 0
 // drive mode: a real car (stuntin dynamics) on the corridor strip, chase camera behind it
 const drive = { on: false, cockpit: false, yaw: 0, pitch: 0, car: null as DrivableCar | null, input: { throttle: 0, brake: 0, steer: 0, handbrake: false } as CarInput, steerKey: 0 }
@@ -379,13 +587,6 @@ function holdToTrack(car: DrivableCar | null, dt: number): boolean {
   })
   return true
 }
-
-// M fires a missile — an edge, not a held key, so one press is one shot
-addEventListener('keydown', (e) => {
-  if ((e.key === 'm' || e.key === 'M') && !e.repeat && drive.on && !(document.activeElement instanceof HTMLInputElement) && !(document.activeElement instanceof HTMLTextAreaElement)) {
-    if (fireMissile()) e.preventDefault()
-  }
-})
 
 const perfMeter = new PerfMeter()
 const perfHud = new PerfHud(perfMeter)
@@ -681,6 +882,24 @@ async function loadSite(slug: string) {
     project: (lon: number, lat: number) => siteProjector(site!.manifest.frame as Parameters<typeof siteProjector>[0])(lon, lat),
     tuneDialog: tuneUI.dialog, // probes drive the panel's dock/float through this
     /**
+     * GAME MODE, for probes: which view is on, what the program has allowed, the player's
+     * settings, the Escape menu and the pause it holds. `chrome.mode` is what is SHOWN
+     * (`?ui=`, then the program, then the player's choice).
+     */
+    chrome: {
+      get mode() { return effectiveUiMode() },
+      set: (m: UiMode) => chooseUiMode(m),
+      policy,
+      settings,
+      input,
+      menu,
+      hud: gameHud,
+      pause: () => pause(),
+      resume: () => resumeGame(),
+      get paused() { return paused },
+      teleport: (x: number, y: number) => teleportTo(x, y),
+    },
+    /**
      * THE PRESETS API, which is also the scripting API a program layer calls:
      *
      *   __apex.preset('dusk-rain', { over: 8 })        // tween over eight real seconds
@@ -883,6 +1102,8 @@ async function loadSite(slug: string) {
   }
   attribution.set(manifest)
   minimap = new MiniMap(document.body, manifest)
+  minimap.onTeleport = (x, y) => teleportTo(x, y)
+  minimap.teleportAllowed = () => policy.teleport
   const st = readStanceParam()
   const resume = st && st.site === slug ? null : readResume(slug)
   if (st && st.site === slug) applyStance(st)
@@ -1158,9 +1379,16 @@ function watchPlayerImpacts(): void {
   if (!physics || !(drive.car instanceof RapierCar)) return
   const mine = drive.car.colliderHandle
   offPlayerImpact = physics.onImpact((im) => {
-    if (!playerModel || !drive.car) return
+    if (!drive.car) return
+    const ours = im.a.handle === mine || im.b.handle === mine
+    if (!ours) return
+    // the pad shakes with the hit: a kerb is a tap, a wall at speed is the whole controller.
+    // 6 kN·s is about the car into a wall at 30 mph — everything above that is 'all of it'
+    const hit = Math.min(1, im.peak / 6000)
+    if (hit > 0.04) input.haptics.rumble(hit, Math.min(1, hit * 1.5), 90 + hit * 260)
+    if (!playerModel) return
     if (im.a.handle === mine) dentObject(playerModel.object, im, false)
-    else if (im.b.handle === mine) dentObject(playerModel.object, im, true)
+    else dentObject(playerModel.object, im, true)
   })
 }
 /** the level's program, running: goal, score, outcome. Null when the level names none */
@@ -1171,6 +1399,10 @@ let hudHidden = false
 const waypointHud = new WaypointHud()
 document.body.append(waypointHud.root)
 let programWaypoint: Waypoint | null = null
+// the player's settings and the chosen view, applied once everything they touch exists
+applyAudio()
+applyBindings()
+applyUiMode()
 
 /**
  * Where the arrow points this frame. A program that set one owns it. Otherwise the races: before
@@ -1240,12 +1472,29 @@ async function startProgram(path: string): Promise<boolean> {
 
 function stopProgram() {
   programWaypoint = null
+  // a program's restrictions end with it: the developer view, the map, the settings all come back
+  policy.reset()
+  gameHud.setObjective(null)
   if (!game) return
   try { game.stop() } catch (e) { console.warn('program stop:', e) }
   game = null
   gameLine = ''
   hudHidden = false
   if (!drive.on) clearStatus()
+}
+
+/**
+ * The objective block of the game HUD, every frame: the program's goal, score and outcome, and
+ * the race in progress. `setObjective` writes the DOM only when something changed.
+ */
+function updateObjective() {
+  if (!gameHud.visible) return
+  const st = raceWorld?.state
+  const race = st && (st.phase === 'countdown' || st.phase === 'running')
+    ? `${st.course?.name ?? 'race'} · ${st.time.toFixed(1)} s${st.laps > 1 ? ` · lap ${st.lap}/${st.laps}` : ''}`
+    : null
+  if ((!game || hudHidden) && !race) { gameHud.setObjective(null); return }
+  gameHud.setObjective({ goal: hudHidden ? '' : (game?.goalText ?? ''), score: hudHidden ? 0 : (game?.score ?? 0), outcome: hudHidden ? null : (game?.outcome ?? null), race })
 }
 
 /**
@@ -1299,8 +1548,19 @@ function programHost(): ProgramHost {
       const t = presets.apply(id, opts)
       if (!t) onTuneChange()
     },
-    say: (text, kind) => toast(text, kind ?? 'info', 4000),
+    say: (text, kind) => { toast(text, kind ?? 'info', 4000); if (gameHud.visible) gameHud.note(text, kind ?? 'info') },
     waypoint: (at, text) => { programWaypoint = at ? { x: at.x, y: at.y, text } : null },
+    ui: {
+      // a program's choice of view is for this run: not remembered as the player's
+      mode: (m) => { uiMode = m; applyUiMode() },
+      allow: (what, ok) => policy.allow(what, ok),
+      settings: (ids, hidden) => {
+        if (hidden) policy.hide(...ids)
+        else policy.show(...ids)
+        if (policy.unknown.length) toast(`program: no such setting: ${policy.unknown.join(', ')}`, 'warn', 6000)
+      },
+      hud: (part, on) => policy.setHud(part, on),
+    },
     playerAt: siteAt,
     playerSpeed: () => Math.abs(drive.car?.speed ?? 0),
     setTime: (hhmm) => { worldClock.setLocal(siteZone(), undefined, hhmm); applySky(season, false) },
@@ -1680,7 +1940,7 @@ for (const b of document.querySelectorAll<HTMLButtonElement>('#drivepad button')
   }
   b.onclick = () => {
     switch (b.dataset.act) {
-      case 'drive': setDrive(!drive.on); break
+      case 'drive': hotkey('drive'); break
       case 'faster': if (!drive.on) setDrive(true); break
       case 'slower': break
       case 'photo': toPhoto(); break
@@ -1700,6 +1960,8 @@ canvas.addEventListener('touchend', () => { dragging = false }, { passive: true 
 // hold-to-move pad (phone). Velocity in the camera's horizontal frame; distance-scaled so it is
 // a stroll at street level and a glide from the air.
 const move = { fwd: 0, side: 0, up: 0 }
+/** the gamepad's share of the same motion (gameinput.ts `fly`), added to the pad's */
+const padMove = { fwd: 0, side: 0, up: 0 }
 for (const b of document.querySelectorAll<HTMLButtonElement>('#movepad button')) {
   const set = (on: boolean) => {
     const v = on ? 1 : 0
@@ -1716,7 +1978,8 @@ for (const b of document.querySelectorAll<HTMLButtonElement>('#movepad button'))
   for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) b.addEventListener(ev, () => set(false))
 }
 function applyMove(dt: number) {
-  if (drive.on || (!move.fwd && !move.side && !move.up)) return
+  const mf = move.fwd + padMove.fwd, ms = move.side + padMove.side, mu = move.up + padMove.up
+  if (drive.on || (!mf && !ms && !mu)) return
   const dist = camera.position.distanceTo(orbit.target)
   const speed = Math.max(4, dist * 0.6) * dt
   const fwd = new THREE.Vector3()
@@ -1724,7 +1987,7 @@ function applyMove(dt: number) {
   fwd.y = 0
   fwd.normalize()
   const side = fwd.clone().cross(up)
-  const d = fwd.multiplyScalar(move.fwd * speed).add(side.multiplyScalar(move.side * speed)).add(new THREE.Vector3(0, move.up * speed, 0))
+  const d = fwd.multiplyScalar(mf * speed).add(side.multiplyScalar(ms * speed)).add(new THREE.Vector3(0, mu * speed, 0))
   camera.position.add(d)
   orbit.target.add(d)
 }
@@ -2200,7 +2463,76 @@ function tuneKey(name: string) {
   return undefined
 }
 
-const held = new Set<string>()
+/**
+ * THE HOTKEYS, BY ACTION. The keyboard arrives here from the keydown handler below through
+ * `input.actionOf(code)`, the gamepad from the frame loop through `input.padHotkey(action)` — so
+ * a key rebound in the Escape menu and a pad button both land on the same switch. Returns true
+ * when the action was taken (the key event is then swallowed). The held actions — throttle,
+ * brake, steer, handbrake — are not here: the frame loop reads them.
+ */
+function hotkey(action: Action, shift = false): boolean {
+  switch (action) {
+    case 'drive':
+      // Rich: the transport switch is "disablable" by the program, and on by default
+      if (!policy.transport) { toast('this level keeps you where you are', 'info', 1200); return true }
+      setCraft(null)
+      setDrive(!drive.on)
+      return true
+    case 'craft':
+      if (!policy.transport) return true
+      cycleCraft(shift)
+      return true
+    case 'walk':
+      if (drive.on || !fly || !policy.transport) return false
+      setWalk(!fly.walk)
+      return true
+    case 'camera':
+      if (!drive.on) return false
+      drive.cockpit = !drive.cockpit
+      drive.car?.setCockpit(drive.cockpit)
+      return true
+    case 'map':
+      minimap?.setExpanded(!minimap.expanded)
+      return true
+    case 'fire':
+      return fireMissile()
+    case 'interface':
+      if (drive.on) return false
+      setChromeHidden(!document.body.classList.contains('chrome-off'))
+      return true
+    // L: the lights, on or off, over the automatic ones — which take over again at the next dusk
+    // or dawn. Rich: "keep automatic lights at night, but add a key shortcut, L".
+    case 'lights': {
+      if (!drive.car) return false
+      const lit = lightsLevel() > 0.05
+      lightsOverride = { on: lit ? 0 : 1, wasNight: skyNight > 0.5 }
+      applyLights()
+      toast(lit ? 'lights off' : 'lights on', 'info', 1000)
+      return true
+    }
+    // R backs you out the way you came (stuntin's recover); Shift+R is the old teleport to the
+    // photo station, kept for getting back to the start of the corridor
+    case 'recover':
+      if (!(drive.on && site && drive.car)) return false
+      if (shift) { const p = startPose(); drive.car.place(p.x, p.z, p.yaw) }
+      else {
+        drive.car.recover(T.CAR_RECOVER_BACK)
+        // Rich: "make recover car (r key) reset the damage (optionally, this should be per game but
+        // overridable in the options)". The level says; the settings dialog can overrule it.
+        if (recoverRepairs() && playerModel && repairObject(playerModel.object)) toast('straightened out', 'info', 900)
+      }
+      return true
+    case 'pause':
+      pause()
+      return true
+    default:
+      return false
+  }
+}
+/** the pad buttons that are hotkeys; the frame loop polls these */
+const PAD_HOTKEYS: Action[] = ['drive', 'recover', 'lights', 'camera', 'map', 'fire', 'craft', 'walk', 'interface']
+const HELD_ACTIONS: Action[] = ['throttle', 'brake', 'steerLeft', 'steerRight', 'handbrake']
+
 addEventListener('keydown', (e) => {
   const tgt = e.target as HTMLElement
   const inField = tgt.tagName === 'SELECT' || tgt.tagName === 'INPUT' || tgt.tagName === 'TEXTAREA'
@@ -2211,39 +2543,56 @@ addEventListener('keydown', (e) => {
     e.preventDefault()
   } else if (inField && !(tgt.tagName === 'INPUT' && (tgt as HTMLInputElement).type === 'range' && e.code === 'Tab')) return
   /*
-   * ESCAPE LEAVES THE RACE. Rich, 2026-09-29: *"the ability to exit the race"*.
+   * ESCAPE. The shell's capture-phase handler has already closed a dialog or the drawer if one was
+   * open and stopped the event; what reaches here is an Escape with nothing else to close.
    *
-   * It is checked before anything else a key might mean, and only while a race is actually on, so
-   * it cannot shadow whatever Escape does the rest of the time. Pressed again on the results it
-   * clears them and hands the world back.
+   *   the menu is up      back out one screen, or resume from the root
+   *   the map is up       the map's own handler shrinks it
+   *   game view           the pause menu (a race in progress gets "Abandon the race" in it)
+   *   developer view      LEAVE THE RACE first (Rich, 2026-09-29: "the ability to exit the race"),
+   *                       then the results are cleared, then the menu
    */
-  if (e.code === 'Escape' && raceWorld) {
-    const phase = raceWorld.state.phase
-    if (phase === 'armed' || phase === 'countdown' || phase === 'running') {
-      e.preventDefault()
-      raceWorld.session.abandon()
-      status('race abandoned — drive back into the ring to try again')
-      return
+  if (e.code === 'Escape') {
+    if (menu.open) { e.preventDefault(); menu.escape(); return }
+    if (minimap?.expanded) return
+    if (effectiveUiMode() === 'dev' && raceWorld) {
+      const phase = raceWorld.state.phase
+      if (phase === 'armed' || phase === 'countdown' || phase === 'running') {
+        e.preventDefault()
+        raceWorld.session.abandon()
+        status('race abandoned — drive back into the ring to try again')
+        return
+      }
+      if (phase === 'finished' || phase === 'abandoned') {
+        e.preventDefault()
+        raceWorld.session.reset()
+        status('')
+        return
+      }
     }
-    if (phase === 'finished' || phase === 'abandoned') {
-      e.preventDefault()
-      raceWorld.session.reset()
-      status('')
-      return
-    }
+    e.preventDefault()
+    pause()
+    return
   }
-  if (e.code === 'Tab') { e.preventDefault(); setDrive(!drive.on); return }
+  if (menu.open) {
+    // the menu reads its keys by polling (gameinput.ts); the page must not scroll under it
+    if (e.code.startsWith('Arrow') || e.code === 'Space' || e.code === 'Enter' || e.code === 'Tab') e.preventDefault()
+    return
+  }
   if (e.code === 'F6') { e.preventDefault(); tuneUI.toggle(); return }
-  held.add(e.code)
+  if (e.repeat) return
+  const action = input.actionOf(e.code, { driving: drive.on })
+  if (action && HELD_ACTIONS.includes(action)) {
+    if (drive.on) e.preventDefault()
+    return
+  }
+  if (action && hotkey(action, e.shiftKey)) { e.preventDefault(); return }
+  // the developer's own keys, not rebindable
   switch (e.code) {
     case 'KeyP': toPhoto(); break
     case 'KeyH': toTop(); break
-    case 'KeyC': if (drive.on) { drive.cockpit = !drive.cockpit; drive.car?.setCockpit(drive.cockpit); break } void copyStance(); break
+    case 'KeyC': if (!drive.on) void copyStance(); break
     case 'KeyX': void copyStance(); break
-    case 'KeyM': setChromeHidden(!document.body.classList.contains('chrome-off')); break
-    case 'KeyN': minimap?.setExpanded(!minimap.expanded); break
-    case 'KeyB': if (!drive.on && fly) setWalk(!fly.walk); break
-    case 'KeyV': cycleCraft(e.shiftKey); break
     case 'F7': {
       e.preventDefault()
       const on = perfHud.toggle()
@@ -2251,41 +2600,8 @@ addEventListener('keydown', (e) => {
       toast(on ? 'performance stats on' : 'performance stats off', 'info', 1200)
       break
     }
-    // R backs you out the way you came (stuntin's recover); Shift+R is the old teleport to the
-    // photo station, kept for getting back to the start of the corridor
-    // L: the lights, on or off, over the automatic ones — which take over again at the next dusk
-    // or dawn. Rich: "keep automatic lights at night, but add a key shortcut, L".
-    case 'KeyL': {
-      if (!drive.car) break
-      const lit = lightsLevel() > 0.05
-      lightsOverride = { on: lit ? 0 : 1, wasNight: skyNight > 0.5 }
-      applyLights()
-      toast(lit ? 'lights off' : 'lights on', 'info', 1000)
-      break
-    }
-    case 'KeyR':
-      if (!(drive.on && site && drive.car)) break
-      if (e.shiftKey) { const p = startPose(); drive.car.place(p.x, p.z, p.yaw) }
-      else {
-        drive.car.recover(T.CAR_RECOVER_BACK)
-        // Rich: "make recover car (r key) reset the damage (optionally, this should be per game but
-        // overridable in the options)". The level says; the settings dialog can overrule it.
-        if (recoverRepairs() && playerModel && repairObject(playerModel.object)) toast('straightened out', 'info', 900)
-      }
-      break
   }
-  if (drive.on && (['KeyW', 'KeyS', 'KeyA', 'KeyD', 'Space'].includes(e.code) || e.code.startsWith('Arrow'))) e.preventDefault()
 })
-addEventListener('keyup', (e) => held.delete(e.code))
-addEventListener('blur', () => held.clear())
-function readDriveKeys() {
-  const i = drive.input
-  i.throttle = Math.max(i.throttle, held.has('KeyW') || held.has('ArrowUp') ? 1 : 0)
-  i.brake = Math.max(i.brake, held.has('KeyS') || held.has('ArrowDown') ? 1 : 0)
-  const ks = Number(held.has('KeyD') || held.has('ArrowRight')) - Number(held.has('KeyA') || held.has('ArrowLeft'))
-  i.steer = THREE.MathUtils.clamp(ks || drive.steerKey, -1, 1)
-  i.handbrake = held.has('Space')
-}
 
 // drag to look around while driving; click a structure or crossing for its numbers
 canvas.addEventListener('pointerdown', (e) => { dragging = true; lastX = e.clientX; lastY = e.clientY; downAt = performance.now() })
@@ -2349,6 +2665,33 @@ function driveHere(e: PointerEvent): boolean {
   drive.yaw = 0
   drive.pitch = 0
   status(edge.d < 30 ? 'drive here — on the road' : 'drive here')
+  return true
+}
+/**
+ * DROP THE CAR HERE — the map's double-click (Rich, 2026-09-30). Site metres in; the car on the
+ * nearest road out, facing along it, the same gradient step `gotoHit` and `driveHere` take. If
+ * you were flying you are driving now, and the full-screen map closes so you can see where you
+ * landed. `policy.teleport` is asked by the map before this is ever called.
+ */
+function teleportTo(sx: number, sy: number): boolean {
+  if (!site) return false
+  const x = sx, z = -sy
+  if (site.groundAt(x, z) === null) { toast('off the edge of the world', 'warn', 1800); return false }
+  if (!drive.on) { setCraft(null); setDrive(true) }
+  if (!drive.car) return false
+  const edge = site.edgeInfo(x, z)
+  let px = x, pz = z, yaw = drive.car.yaw
+  if (Number.isFinite(edge.d) && edge.who >= 0) {
+    const back = Math.min(edge.d + 1.8, 60)
+    px = x - edge.gx * back
+    pz = z - edge.gz * back
+    yaw = Math.atan2(edge.gx, -edge.gz)
+  }
+  drive.car.place(px, pz, yaw)
+  drive.yaw = 0
+  drive.pitch = 0
+  if (minimap?.expanded) minimap.setExpanded(false)
+  toast(Number.isFinite(edge.d) && edge.d < 30 ? 'dropped on the road' : 'dropped here', 'ok', 1600)
   return true
 }
 /**
@@ -2419,6 +2762,14 @@ let lastSkyReal = -1e15
 function frame() {
   const real = clock.getDelta()
   const dt = Math.min(0.1, real)
+  /*
+   * THE INPUT, ONCE. Keys and the pad are polled here (the keyboard's hotkeys arrive by event, see
+   * the keydown handler); while the menu is up it gets the edges and the world gets nothing.
+   */
+  input.poll(dt)
+  if (menu.open) menu.handle(input.ui)
+  else if (input.ui.pause) pause()
+  if (!menu.open) for (const a of PAD_HOTKEYS) if (input.padHotkey(a)) hotkey(a)
   // the frame's own clock, for the performance panel: `real` is the gap between frames, and the
   // work we do inside this function is measured separately so the two can be compared
   const cpu0 = perfHud.open ? performance.now() : 0
@@ -2433,9 +2784,9 @@ function frame() {
    * `real`, not `dt`: the accumulator inside the physics world does its own capping, and handing it
    * an already-capped delta would make the simulation quietly run slow through every hitch.
    */
-  if (missiles) missiles.tick(real)
+  if (missiles && !paused) missiles.tick(real)
   // the traffic steps before the physics, so its bodies are where the cars are when the player hits one
-  if (traffic) {
+  if (traffic && !paused) {
     // the drivers see the player: where he is and how fast, in the site frame
     if (drive.on && drive.car) {
       const c = drive.car
@@ -2444,11 +2795,12 @@ function frame() {
     } else traffic.player = null
     traffic.tick(real, camera.position)
   }
-  if (game) {
+  if (game && !paused) {
     game.tick(real)
     showGame()
     if (game.error) { toast(`program: ${game.error}`, 'warn', 8000); game = null }
   }
+  updateObjective()
   // the waypoint arrow, from wherever the player is and whichever way they face
   if (site && drive.on && drive.car) {
     const at = { x: drive.car.pos.x, y: -drive.car.pos.z }
@@ -2463,7 +2815,7 @@ function frame() {
   } else if (waypointHud.current) {
     waypointHud.set(null)
   }
-  if (physics) physics.update(drive.car?.pos ?? camera.position, real)
+  if (physics && !paused) physics.update(drive.car?.pos ?? camera.position, real)
   // the dents the steps just made, to the GPU — a couple of meshes a frame, the rest wait a frame
   flushDents()
   // the world's clock, and the light that follows from it. applySky is cheap (no geometry), so it
@@ -2473,7 +2825,7 @@ function frame() {
   // and driving the animator off simulated time makes a transition that speeds up as it changes
   // the clock it is being measured against
   // the same cost as dragging a slider, and only while a transition is in flight
-  if (presets?.tick(real)) onTuneChange()
+  if (!paused && presets?.tick(real)) onTuneChange()
   worldClock.rate = T.TIME_RATE
   worldClock.tick(real) // real time, not the capped physics step: the sun does not care about hitches
   /*
@@ -2499,11 +2851,17 @@ function frame() {
   }
   if (site && drive.on && drive.car) {
     const car = drive.car
-    // keyboard is read fresh each frame; the phone pads have already set throttle/brake/steer
+    // keys and the pad are read fresh each frame; the phone pads have already set throttle/brake/steer
     const padT = drive.input.throttle, padB = drive.input.brake
-    readDriveKeys()
+    {
+      const r = input.drive()
+      drive.input.throttle = Math.max(padT, r.throttle)
+      drive.input.brake = Math.max(padB, r.brake)
+      drive.input.steer = THREE.MathUtils.clamp(r.steer || drive.steerKey, -1, 1)
+      drive.input.handbrake = r.handbrake
+    }
     // fixed-step sim at 120 Hz like stuntin, so speed does not depend on the frame rate
-    for (let acc = dt; acc > 0; acc -= 1 / 120) car.tick(Math.min(acc, 1 / 120), drive.input)
+    if (!paused) for (let acc = dt; acc > 0; acc -= 1 / 120) car.tick(Math.min(acc, 1 / 120), drive.input)
     /*
      * ON A STUNT FIXTURE, THE TRACK DECIDES WHICH WAY IS DOWN.
      *
@@ -2513,7 +2871,7 @@ function frame() {
      * carry the car round. Nothing happens anywhere else: `nearestPose` answers null off a fixture,
      * and on the flat run-in the correction is zero because the surface already agrees with gravity.
      */
-    holdToTrack(car, dt)
+    if (!paused) holdToTrack(car, dt)
     drive.input.throttle = padT
     drive.input.brake = padB
     // Site metres — x east, y north, z up — not three's axes. The conversion happens here, once.
@@ -2558,7 +2916,9 @@ function frame() {
       camera.position.lerp(want, 1 - Math.exp(-T.CHASE_LAG * dt))
       camera.lookAt(car.pos.clone().add(car.forward.clone().multiplyScalar(T.CHASE_LOOK_AHEAD)).add(chaseUp.clone().multiplyScalar(1.0)))
     }
-    if (car.event === 'bump') status('bump')
+    if (car.event === 'bump') { status('bump'); input.haptics.rumble(0.45, 0.3, 120) }
+    // the pad buzzes on the grass, quietly, the way the wheel would
+    if (car.onGrass && Math.abs(car.speed) > 3) input.haptics.rumble(0.04, 0.22, 80)
     // what road is this? The name comes from the same station grid the car stands on, so the
     // readout and the physics can never disagree about which road you are on (Rich, 2026-09-26).
     const on = T.HUD_ROAD_NAME > 0 ? site.roadAt(car.pos.x, car.pos.z) : null
@@ -2574,24 +2934,61 @@ function frame() {
     // Heading is a true bearing. World is (east, up, −north), so north is −z and the bearing is
     // atan2(east, north) — not atan2 of the raw x and z, which would read 90° out.
     let tele = ''
+    const gy = site.groundAt(car.pos.x, car.pos.z)
+    const brg = (Math.atan2(car.forward.x, -car.forward.z) * (180 / Math.PI) + 360) % 360
     if (T.HUD_TELEMETRY > 0) {
-      const gy = site.groundAt(car.pos.x, car.pos.z)
       const ft = Math.round((gy ?? car.pos.y) * 3.28084)
-      const brg = (Math.atan2(car.forward.x, -car.forward.z) * (180 / Math.PI) + 360) % 360
       const pt = COMPASS[Math.round(brg / 22.5) % 16]
       tele = ` · ${ft} ft · ${pt} ${brg.toFixed(0).padStart(3, '0')}°`
     }
     ui.setPos(`${(Math.abs(car.speed) * 2.237).toFixed(0)} mph · ${car.onGrass ? 'grass' : 'pavement'}${Math.abs(car.slide) > 1 ? ' · sliding' : ''}${road ? ` · ${road}` : ''}${tele}`)
+    // the game's dashboard: the same numbers, drawn for a player (ui/gamehud.ts)
+    if (gameHud.visible) {
+      const dtn = engineSound.drivetrain
+      const tags: string[] = []
+      if (car.onGrass) tags.push('grass')
+      if (Math.abs(car.slide) > 1) tags.push('sliding')
+      gameHud.setTelemetry({
+        speed: car.speed,
+        units: settings.data.units,
+        gear: playerEngine ? dtn.gear + 1 : null,
+        rpm: playerEngine ? dtn.rpm : null,
+        redline: playerEngine ? dtn.spec.redlineRpm : null,
+        heading: brg,
+        road,
+        elevation: gy ?? car.pos.y,
+        tags,
+        craft: null,
+      })
+    }
 
   } else if (craft && transport) {
-    transport.update(dt)
+    if (!paused) transport.update(dt)
     const r = transport.readout()
     ui.setPos(`${r.craft} · ${(r.speed * 2.237).toFixed(0)} mph · ${r.altitude.toFixed(0)} m${r.stalled ? ' · STALLED' : ''}${r.grounded ? ' · on the ground' : ''}`)
+    if (gameHud.visible) {
+      const look = camera.getWorldDirection(viewDir)
+      const tags: string[] = []
+      if (r.stalled) tags.push('stalled')
+      if (r.grounded) tags.push('on the ground')
+      gameHud.setTelemetry({
+        speed: r.speed, units: settings.data.units, gear: null, rpm: null, redline: null,
+        heading: (Math.atan2(look.x, -look.z) * (180 / Math.PI) + 360) % 360,
+        road: null, elevation: r.altitude, tags, craft: r.craft,
+      })
+    }
   } else {
-    fly?.update(dt)
-    applyMove(dt)
+    // the pad's sticks on the free camera: the left one moves it, the right one looks
+    const pf = input.fly()
+    padMove.fwd = pf.fwd
+    padMove.side = pf.side
+    padMove.up = pf.up
+    if (pf.lookYaw || pf.lookPitch) fly?.look(-pf.lookYaw * 2.4 * dt, -pf.lookPitch * 1.8 * dt)
+    if (!paused) fly?.update(dt)
+    if (!paused) applyMove(dt)
     orbit.update()
     ui.setPos('')
+    if (gameHud.visible) gameHud.setTelemetry(null)
   }
   /*
    * WHERE THE ENGINE IS, from wherever the camera ended up.

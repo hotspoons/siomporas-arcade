@@ -29,7 +29,17 @@ of the terrain vertices, 4k imagery, fewer near trees); touch devices get it aut
 | `src/main.ts` | UI, orbit/drive cameras, phone layout, picking |
 | `public/surfaces/` | texture sets from `tools/surfaces/gen.py` |
 
-Controls. **Fly** (trailworks scheme, `src/fly.ts`): WASD/arrows move along the view heading (speed
+**Game mode.** A production build opens as a GAME: no bar, a dashboard and the objective in the
+lower-left widget, and an Escape menu with the settings as screens (display, layers, audio,
+controls with key and pad rebinding, the tuning panel) and a Developer view toggle that brings
+the bar back. `?ui=game` / `?ui=dev` force either; the dev server opens as the developer view.
+The gamepad works in both (triggers pedals, left stick steers, Start pauses; the sticks fly the
+free camera), with rumble. Double-clicking the inset map drops the car there. A program may take
+the developer view, the teleport, the transport switch, and any settings tab or control away:
+`api.ui.*`. See `docs/corridor/GAME-MODE.md`; probe: `PORT=5185 node probes/corridor-gamemode.mjs`.
+
+Controls (the driving keys are rebindable in the Escape menu → Settings → Controls; these are the
+defaults). **Fly** (trailworks scheme, `src/fly.ts`): WASD/arrows move along the view heading (speed
 scales with distance to the orbit target, Shift sprints), Q/E turn the view about the camera, R/F
 dolly, T/G raise/lower, left-drag orbits, right-drag looks, wheel dollies; the target rides the
 ground. **Drive** (Tab; stuntin dynamics ported in `src/car.ts`): W/S throttle/brake, A/D steer,

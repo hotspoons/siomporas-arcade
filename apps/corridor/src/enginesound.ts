@@ -80,6 +80,16 @@ export class EngineSound {
   private gain: GainNode | null = null
   private voice: SpatialVoice | null = null
   private muted = false
+  /**
+   * The player's own volume (Settings → Audio: master × engine) and mute, over the F6 knob.
+   *
+   * `ENGINE_MASTER` is a fact about the world — a preset may carry it — and the slider in the menu
+   * is a fact about the person listening; the bus gets the product. The user mute is COMBINED
+   * with the tab-hidden mute (`setMuted`), never replaced by it: focus coming back to the tab
+   * must not unmute somebody who asked for silence.
+   */
+  private userGain = 1
+  private userMuted = false
   private suspendTimer: ReturnType<typeof setTimeout> | null = null
   /** what the spatialiser last decided — for the HUD, the tuning panel and probes */
   placement: Placement | null = null
@@ -194,6 +204,27 @@ export class EngineSound {
    * it is the one artefact a person would actually notice about this feature.
    */
   setMuted(muted: boolean): void {
+    this.hiddenMuted = muted
+    this.applyMute()
+  }
+
+  /** the tab is hidden or unfocused */
+  private hiddenMuted = false
+
+  /** the player asked for silence (or its end), and the level the bus plays at otherwise */
+  setUserAudio(gain: number, muted: boolean): void {
+    this.userGain = Number.isFinite(gain) ? Math.min(1, Math.max(0, gain)) : 1
+    this.userMuted = muted
+    this.applyMute()
+  }
+
+  /** what the bus should sit at when it is not muted */
+  private busGain(): number {
+    return T.ENGINE_MASTER * this.userGain
+  }
+
+  private applyMute(): void {
+    const muted = this.hiddenMuted || this.userMuted
     if (this.muted === muted) return
     this.muted = muted
     const ctx = this.context
@@ -209,7 +240,7 @@ export class EngineSound {
     } else {
       if (this.suspendTimer !== null) { clearTimeout(this.suspendTimer); this.suspendTimer = null }
       void ctx.resume()
-        .then(() => this.gain?.gain.setTargetAtTime(T.ENGINE_MASTER, ctx.currentTime, RAMP / 3))
+        .then(() => this.gain?.gain.setTargetAtTime(this.busGain(), ctx.currentTime, RAMP / 3))
         .catch(() => { /* the page is going away */ })
     }
   }
@@ -271,7 +302,7 @@ export class EngineSound {
         // NOT while muted: this runs every frame, and writing the master gain here would undo
         // the mute ramp on the very next one. The frame loop keeps running in a hidden tab — at
         // one frame a second rather than sixty, but it runs.
-        if (!this.muted) this.gain.gain.setTargetAtTime(T.ENGINE_MASTER, this.context.currentTime, 0.05)
+        if (!this.muted) this.gain.gain.setTargetAtTime(this.busGain(), this.context.currentTime, 0.05)
       }
       return // one voice
     }

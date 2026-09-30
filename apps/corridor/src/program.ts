@@ -27,6 +27,7 @@
 import { addComponent, addEntity, type World } from 'bitecs'
 import { Transform, Visual } from './actors'
 import type { ActorWorld } from './actorworld'
+import type { Freedom, HudPart, SettingId, UiMode } from './gamepolicy'
 
 /* ---- what a program can ask the world to do ---------------------------------------------- */
 
@@ -126,6 +127,28 @@ export interface ProgramHost {
   combat?: CombatHost
   /** the traffic zones and stunt fixtures this world was authored with */
   layers?: WorldLayersHost
+  /** the interface: which one, what the player may change, what the HUD shows */
+  ui?: UiHost
+}
+
+/**
+ * THE INTERFACE, as a program may shape it. Rich, 2026-09-30: the developer view, the map's
+ * double-click teleport and the transport switch are each "disableable via the game script",
+ * and "an API where we can turn off whole tabs or individual controls from the settings view".
+ *
+ * All optional on the host: a dry run has no interface and every call answers harmlessly. The
+ * ids and the freedoms are the closed lists in gamepolicy.ts, so the editor completes them and a
+ * typo is an error rather than a control that quietly stays on screen.
+ */
+export interface UiHost {
+  /** switch the interface: the game's HUD and Escape menu, or the developer's bar */
+  mode?: (m: UiMode) => void
+  /** grant or take away a freedom: the developer view, the map teleport, the transport switch */
+  allow?: (what: Freedom, allowed: boolean) => void
+  /** hide (or show again) settings tabs and controls by id */
+  settings?: (ids: string[], hidden: boolean) => void
+  /** switch a piece of the game HUD off or on */
+  hud?: (part: HudPart, on: boolean) => void
 }
 
 /** Site metres — x east, y north, z up. The frame every number in a program is in. */
@@ -297,6 +320,30 @@ export interface GameApi {
   say(text: string, kind?: 'info' | 'ok' | 'warn'): void
   time(hhmm: string): void
   weather(what: string): void
+
+  /**
+   * The interface. Everything here defaults to ON and to the player's own choice; a program
+   * takes things away, and they come back when it stops.
+   */
+  ui: {
+    /** force the game's interface or the developer's; the player's Escape-menu choice is overruled */
+    mode(m: UiMode): void
+    /** may the player switch to the developer view from the Escape menu? */
+    developer(allowed: boolean): void
+    /** may a double-click on the map drop the car there? */
+    teleport(allowed: boolean): void
+    /** may the player leave the car, fly, walk, or take a craft (Tab, V, B, the menu)? */
+    transport(allowed: boolean): void
+    settings: {
+      /** hide settings: a tab (`'display'`) or a control (`'display.theme'`) */
+      hide(...ids: SettingId[]): void
+      show(...ids: SettingId[]): void
+    }
+    hud: {
+      hide(part: HudPart): void
+      show(part: HudPart): void
+    }
+  }
 
   /*
    * THINGS THE EDITOR PLACED, AS ENTITIES.
@@ -525,6 +572,21 @@ export class GameRun {
       say: (t, k) => { this.messages.push({ text: t, kind: k ?? 'info', at: this.t }); H.say(t, k) },
       time: (hhmm) => H.setTime?.(hhmm),
       weather: (w) => H.setWeather?.(w),
+
+      ui: {
+        mode: (m) => { if (m === 'game' || m === 'dev') H.ui?.mode?.(m) },
+        developer: (ok) => H.ui?.allow?.('developer', !!ok),
+        teleport: (ok) => H.ui?.allow?.('teleport', !!ok),
+        transport: (ok) => H.ui?.allow?.('transport', !!ok),
+        settings: {
+          hide: (...ids) => H.ui?.settings?.(ids.filter((id) => typeof id === 'string'), true),
+          show: (...ids) => H.ui?.settings?.(ids.filter((id) => typeof id === 'string'), false),
+        },
+        hud: {
+          hide: (part) => H.ui?.hud?.(part, false),
+          show: (part) => H.ui?.hud?.(part, true),
+        },
+      },
 
       /*
        * NOTHING HERE THROWS AND NOTHING HERE ASSUMES.

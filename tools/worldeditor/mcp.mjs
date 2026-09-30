@@ -283,7 +283,11 @@ export async function handle(message, ctx) {
     try {
       if (TOOLS.some((t) => t.name === name)) return reply(await callTool(name, args, ctx))
       const own = extra.find((t) => t.name === name)
-      if (own) return reply(ok(JSON.stringify(await own.run(args), null, 2)))
+      if (own) {
+        const r = await own.run(args)
+        // a tool that made MCP content itself — an image — hands it over as it is
+        return reply(r && r.__mcp === 'content' && Array.isArray(r.content) ? { content: r.content } : ok(JSON.stringify(r, null, 2)))
+      }
       if (ctx.bridge?.has(name)) return reply(ok(JSON.stringify(await ctx.bridge.call(name, args), null, 2)))
       /*
        * A NAME THE BRIDGE WOULD OFFER IF A PAGE WERE OPEN is the single most likely miss here, and

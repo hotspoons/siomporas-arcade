@@ -153,3 +153,60 @@ export function slugify(s) {
     .replace(/^-+|-+$/g, '')
     .slice(0, 48)
 }
+
+/* ---- WGS84 → a baked site's metres --------------------------------------------------------- */
+// The SAME two projectors the viewer draws with (apps/corridor/src/minimap.ts), so a point an
+// agent projects here and the blue dot on the map cannot disagree. Ported rather than imported:
+// the service has no bundler and the app has no node.
+
+/**
+ * East/north metres on a local tangent plane about an anchor — the render frame of every bake
+ * since the frame went geodetic (docs/corridor/FRAME.md). Good to a few centimetres over a bake.
+ */
+export function enuProjector(lon0, lat0, h0 = 0) {
+  const A = 6378137, F = 1 / 298.257223563, E2 = F * (2 - F)
+  const D = Math.PI / 180
+  const ecef = (lon, lat, h) => {
+    const lo = lon * D, la = lat * D
+    const N = A / Math.sqrt(1 - E2 * Math.sin(la) ** 2)
+    return [(N + h) * Math.cos(la) * Math.cos(lo), (N + h) * Math.cos(la) * Math.sin(lo), (N * (1 - E2) + h) * Math.sin(la)]
+  }
+  const [x0, y0, z0] = ecef(lon0, lat0, h0)
+  const lo0 = lon0 * D, la0 = lat0 * D
+  const sLo = Math.sin(lo0), cLo = Math.cos(lo0), sLa = Math.sin(la0), cLa = Math.cos(la0)
+  return (lon, lat) => {
+    const [x, y, z] = ecef(lon, lat, 0)
+    const dx = x - x0, dy = y - y0, dz = z - z0
+    return [-sLo * dx + cLo * dy, -sLa * cLo * dx - sLa * sLo * dy + cLa * dz]
+  }
+}
+
+/** UTM easting/northing minus the origin (Krüger series, good to millimetres): the older bakes' frame. */
+export function utmProjector(epsg, ox, oy) {
+  const zone = epsg % 100
+  const south = Math.floor(epsg / 100) === 327
+  const lon0 = ((zone - 1) * 6 - 180 + 3) * (Math.PI / 180)
+  const a = 6378137, f = 1 / 298.257223563
+  const n = f / (2 - f), A = (a / (1 + n)) * (1 + n ** 2 / 4 + n ** 4 / 64)
+  const alpha = [n / 2 - (2 / 3) * n ** 2 + (5 / 16) * n ** 3, (13 / 48) * n ** 2 - (3 / 5) * n ** 3, (61 / 240) * n ** 3]
+  const k0 = 0.9996, E0 = 500000, N0 = south ? 10000000 : 0
+  return (lon, lat) => {
+    const phi = (lat * Math.PI) / 180, lam = (lon * Math.PI) / 180 - lon0
+    const t = Math.sinh(Math.atanh(Math.sin(phi)) - ((2 * Math.sqrt(n)) / (1 + n)) * Math.atanh(((2 * Math.sqrt(n)) / (1 + n)) * Math.sin(phi)))
+    const xi = Math.atan(t / Math.cos(lam)), eta = Math.atanh(Math.sin(lam) / Math.sqrt(1 + t * t))
+    let E = eta, N = xi
+    for (let j = 1; j <= 3; j++) {
+      E += alpha[j - 1] * Math.cos(2 * j * xi) * Math.sinh(2 * j * eta)
+      N += alpha[j - 1] * Math.sin(2 * j * xi) * Math.cosh(2 * j * eta)
+    }
+    return [E0 + k0 * A * E - ox, N0 + k0 * A * N - oy]
+  }
+}
+
+/** WGS84 → this site's metres, whichever frame its manifest holds. */
+export function siteProjector(frame) {
+  if (!frame) throw new Error('this bake has no frame in its manifest')
+  if (frame.kind === 'enu' && frame.anchor) return enuProjector(frame.anchor.lon, frame.anchor.lat, frame.anchor.h ?? 0)
+  if (frame.epsg && Array.isArray(frame.origin)) return utmProjector(frame.epsg, frame.origin[0], frame.origin[1])
+  throw new Error(`frame ${JSON.stringify(frame)} is neither enu nor utm`)
+}

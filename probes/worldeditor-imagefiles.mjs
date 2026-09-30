@@ -200,6 +200,17 @@ for (const b of [...bare].sort()) {
   console.log(`  ${b.padEnd(52)} ${ok ? 'copied in' : 'NOT IN THE IMAGE'}`)
   if (!ok) fail.push(`${entry} reaches an import of '${b}', which the runtime stage never copies — the service throws on startup`)
 }
+/*
+ * FILES THE SERVICE READS BY PATH, not by import: a `readFile` of something two directories up is
+ * invisible to the graph walk and was the third way this image shipped a feature that could not
+ * run (program_check: ENOENT on the declaration bundle, 2026-09-30).
+ */
+const READ_BY_PATH = ['apps/corridor/src/generated/program-types.json', 'packages/enginesim/wasm/engines.json']
+for (const f of READ_BY_PATH) {
+  const ok = runtime.some((c) => c.src === f || c.dest === f || f.startsWith(`${c.src}/`) || f.startsWith(`${c.dest}/`))
+  console.log(`  ${f.padEnd(52)} ${ok ? 'copied in' : 'NOT IN THE IMAGE'}`)
+  if (!ok) fail.push(`the service reads ${f} by path and the runtime stage never copies it`)
+}
 // this half of the check is worth nothing if the graph walk found nothing
 if (entry && serviceFiles.size < 5) {
   fail.push(`only ${serviceFiles.size} files were reached from ${entry} — the import graph walk is broken`)

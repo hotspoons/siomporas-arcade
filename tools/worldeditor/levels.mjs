@@ -71,10 +71,26 @@ function bad(msg) {
  */
 export const PROFILES = ['stunts', 'taxi', 'street', 'rush', 'sim']
 
+/** Everything a level document may say. A key not here is ignored by every loader, silently. */
+export const LEVEL_KEYS = [
+  'id', 'world', 'name', 'description', 'notes', 'created', 'updated',
+  'mode', 'start', 'player', 'recoverRepairs', 'program', 'preset', 'defaults',
+  'placements', 'splats', 'simulations', 'scenario',
+]
+
 export function validate(level) {
   const errors = []
   const warnings = []
   const E = (m) => errors.push(m)
+
+  /*
+   * A KEY NOBODY READS. `physics: true` and `ui: "game"` both validated clean on 2026-09-30 and
+   * did nothing: physics is implied by a traffic simulation and the interface is a program's
+   * `api.ui.mode`. A warning, not an error, because a level is also a place people leave notes.
+   */
+  for (const k of Object.keys(level ?? {})) {
+    if (!LEVEL_KEYS.includes(k)) warnings.push(`"${k}" is not something a level says — it is ignored. A level's keys: ${LEVEL_KEYS.join(', ')}`)
+  }
 
   if (!SLUG.test(level?.id ?? '')) E(`id ${JSON.stringify(level?.id)} is not a usable slug`)
   if (!SLUG.test(level?.world ?? '')) E(`world ${JSON.stringify(level?.world)} is not a usable slug`)

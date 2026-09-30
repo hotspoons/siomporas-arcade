@@ -417,12 +417,20 @@ const mcpBridge = new McpBridge({ log: console })
  * The service calling itself, so an MCP tool takes exactly the path the editor's own request does
  * — validation, warnings and all. One hop for one implementation of every rule.
  */
-async function apiFetch(method, apiPath, body) {
+const STARTED = new Date().toISOString()
+
+async function apiFetch(method, apiPath, body, opts = {}) {
   const r = await fetch(`http://127.0.0.1:${PORT}${apiPath}`, {
     method,
     headers: body === undefined ? {} : { 'Content-Type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
   })
+  // bytes, for a tool that hands an image back: an asset's drawn view
+  if (opts.raw) {
+    const buffer = Buffer.from(await r.arrayBuffer())
+    if (!r.ok) throw Object.assign(new Error(`HTTP ${r.status} from ${apiPath}`), { status: r.status })
+    return { buffer, contentType: r.headers.get('content-type') ?? '' }
+  }
   const text = await r.text()
   let parsed
   try { parsed = text ? JSON.parse(text) : null } catch { parsed = { raw: text.slice(0, 2000) } }
@@ -485,7 +493,11 @@ const server = http.createServer(async (req, res) => {
 
 async function api(req, res, seg, q) {
   /* ---- liveness, readiness, what this is pointed at ---- */
-  if (seg[0] === 'health') return json(res, 200, { ok: true, data: store.root })
+  if (seg[0] === 'health') {
+    // WHICH BUILD, because a program that typechecks against one editor can fail in another: the
+    // image sha (WORLDEDITOR_BUILD, from the Dockerfile's GIT_SHA) and the program API's hash
+    return json(res, 200, { ok: true, data: store.root, build: process.env.WORLDEDITOR_BUILD ?? null, programApi: await programs.apiHash().catch(() => null), node: process.version, started: STARTED })
+  }
   /*
    * How big a chunk may an upload send? THE SERVER SAYS, because only the server knows what is in
    * front of it. An ingress with `proxy-body-size: 64m` turns a 64 MiB chunk into a 413 three

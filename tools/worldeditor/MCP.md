@@ -85,7 +85,13 @@ the world editor"* rather than "no such tool", which would send an agent hunting
 | `splat_*` | gaussian training: plan, gpus, runs, start, delete, and the manifest a run *would* submit |
 | `capture_*` | the video a splat is trained from |
 | `place_*` | search the earth, and the saved place index |
-| `editor_config`, `editor_ready` | what is configured and what is answering — the first thing to call when something is refused |
+| `editor_config`, `editor_ready`, `editor_version` | what is configured, what is answering, and WHICH BUILD — a program that typechecks against one editor can fail in another |
+| `program_api` | the program API's declarations (`@apex/program` and the other importable modules) — read before writing a program; nothing else says what `api` can do |
+| `level_vocab` | the words a level and a program may use: weather, season, profiles, point kinds, hideables, transports, HUD parts, setting ids, every engine-sound setup |
+| `site_roads`, `site_road_polygon`, `site_road_gate` | the roads of a bake in site metres; a zone polygon along one; a race gate across one |
+| `site_project`, `address_search`, `point_add` | lat/lon → site metres through the bake's own frame; the bake's OSM addresses, places and roads by name; a named point (start, finish, home) into points.json — by metres, by lat/lon, or along a road |
+| `traffic_zone_add`, `course_save`, `vehicle_*`, `traffic_set_*` | zones, races, vehicle builds and traffic sets: the level's moving parts |
+| `asset_view` | **look** at a generated view, as an image — the only way to judge a drawing before meshing it |
 | `list/read/write_document`, `validate_level` | the original four, unchanged |
 
 ## Traps, measured

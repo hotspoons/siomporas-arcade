@@ -35,6 +35,36 @@ async function bundle() {
   return libs
 }
 
+/**
+ * The importable modules, by name: `@apex/program` is `program`, and so on. What `program_api`
+ * offers, read off the bundle rather than listed here so a new root in gen-program-types.mjs
+ * appears without a second edit.
+ */
+export async function modules() {
+  const libs = await bundle()
+  return [...libs.keys()].filter((k) => /^\/corridor\/[a-z]+\.d\.ts$/.test(k)).map((k) => k.slice('/corridor/'.length, -'.d.ts'.length)).sort()
+}
+
+/**
+ * One module's declarations as text — the program API an agent is written against. Rich,
+ * 2026-09-30: an agent had to read program.ts out of the repository to learn what `api` could do.
+ */
+export async function declarations(mod = 'program') {
+  const name = String(mod).replace(/^@apex\//, '').replace(/\.d\.ts$/, '')
+  const libs = await bundle()
+  const text = libs.get(`/corridor/${name}.d.ts`)
+  if (text === undefined) throw Object.assign(new Error(`no module "${mod}" — one of ${(await modules()).join(', ')}`), { status: 404 })
+  return { module: name, import: `@apex/${name}`, text }
+}
+
+/** A short hash of the whole bundle: which API this build checks against. */
+export async function apiHash() {
+  const { createHash } = await import('node:crypto')
+  const h = createHash('sha1')
+  for (const [k, v] of [...(await bundle()).entries()].sort()) h.update(k).update('\0').update(v).update('\0')
+  return h.digest('hex').slice(0, 12)
+}
+
 /** TypeScript to JavaScript, no checking. What the viewer runs. */
 export function transpile(source, fileName = 'program.ts') {
   const T = ts()

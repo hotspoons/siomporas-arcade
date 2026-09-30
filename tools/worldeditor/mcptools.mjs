@@ -118,9 +118,36 @@ export function serverTools({ apiFetch, root, siteDoc }) {
     T('asset_list', 'The generation catalog: described props and how far along each is — described, drawn, meshed, ready.', {}, [], () => get('/assetsvc/catalog')),
     T('asset_get', 'One generated asset: its prompt, its views, its mesh, and the provenance of every step.', { id: str('') }, ['id'], (a) => get(`/assetsvc/catalog/${a.id}`)),
     T(
+      'asset_view',
+      'LOOK at a generated asset: one of its drawn views, as an image — the chosen one unless `view` names another (a file name from asset_get). The only way to judge a drawing before meshing it, or to see which way a car’s nose came out. About a megabyte for a 1024² view.',
+      { id: str(''), view: str('a view file name, e.g. 0796343864.png; default: the chosen one, else the newest') },
+      ['id'],
+      async (a) => {
+        const item = await get(`/assetsvc/catalog/${encodeURIComponent(a.id)}`)
+        const view = a.view ?? item.chosen ?? item.views?.[item.views.length - 1]
+        if (!view) throw new Error(`${a.id} has no drawn views yet — asset_draw makes one`)
+        const r = await apiFetch('GET', `/assetsvc/catalog/${encodeURIComponent(a.id)}/file/views/${encodeURIComponent(view)}`, undefined, { raw: true })
+        if (!r?.buffer) throw new Error('this service cannot fetch bytes for a tool')
+        return {
+          __mcp: 'content',
+          content: [
+            { type: 'image', data: r.buffer.toString('base64'), mimeType: r.contentType?.split(';')[0] || 'image/png' },
+            { type: 'text', text: `${a.id}: views/${view}${view === item.chosen ? ' (chosen)' : ''} · ${r.buffer.length} bytes` },
+          ],
+        }
+      },
+    ),
+    T(
       'asset_describe',
       'Create or edit an asset’s SPEC — what it is, the prompt, what to avoid. Describing does not generate; asset_draw does.',
-      { id: str('lower-case, hyphens'), subject: str('the noun'), prompt: str('the full description'), negative: str('what must not appear'), tags: { type: 'array', items: { type: 'string' } } },
+      {
+        id: str('lower-case, hyphens'), subject: str('the noun'), prompt: str('the full description'), negative: str('what must not appear'),
+        tags: { type: 'array', items: { type: 'string' } },
+        kind: str('what sort of thing: prop (the default), hero-car, traffic, van, truck, bus, emergency, pedestrian, animal, furniture, building, signage, weapon — a vehicle build wants hero-car or traffic'),
+        type: str('prop | vehicle | actor | weapon | fixture; derived from kind when absent'),
+        size_m: obj('{ w, d, h } metres. A reconstruction has no scale of its own: without this a prop stands 2 m tall and a vehicle 1.5'),
+        notes: str(''),
+      },
       ['id'],
       (a) => post('/assetsvc/catalog', a),
     ),
@@ -291,6 +318,114 @@ export function serverTools({ apiFetch, root, siteDoc }) {
      * without seeing the map: which roads there are, a polygon along one, a gate across one.
      * Everything is in SITE METRES — x east, y north — which is the frame every site document uses.
      */
+    /* ---- what an agent needs to know before it writes anything ------------------------------ */
+    T(
+      'program_api',
+      'The program API’s declarations — the TypeScript a level program is written against: `@apex/program` (GameApi: objectives, models, player, zones, timers, physics, traffic, races, stunts, the interface). Read it before writing a program; program_check and the editor’s code_check check against exactly this text. `module` picks one of the other importable modules (actors, actorworld, ecsconfig, traffic, races, zones, stunts, objectives, vehicles, trafficsets).',
+      { module: str('default: program') },
+      [],
+      async (a) => ({ ...(await declarations(a.module ?? 'program')), modules: await modules() }),
+    ),
+    T(
+      'editor_version',
+      'Which build of the editor is answering: the git sha its image was built from, the hash of the program API it checks programs against, when it started. The first thing to check when a program that typechecks here fails in the viewer, or the other way round — the two can be different builds.',
+      {},
+      [],
+      async () => {
+        const h = await get('/api/health')
+        return { build: h.build ?? null, programApi: h.programApi ?? (await apiHash().catch(() => null)), node: h.node ?? null, started: h.started ?? null, data: h.data ?? null }
+      },
+    ),
+    T(
+      'level_vocab',
+      'The words a level and a program may use: weather and season names, drive profiles and modes, the point kinds, what a program may hide, the transports, the HUD parts and the setting ids it may switch off, and every engine-sound setup a vehicle build may name in audio.setup. The engine’s own lists, not a guess.',
+      {},
+      [],
+      () => vocab(),
+    ),
+    T(
+      'site_project',
+      'WGS84 → site metres (x east, y north) for a baked world, through the frame its manifest holds — the projector the viewer and the minimap use. One point (`lat`, `lon`) or several (`points`: [[lat, lon], …]). place_search answers in lat/lon; a level, a zone and a point all speak in these metres.',
+      { slug: str(''), lat: num(''), lon: num(''), points: { type: 'array', description: '[[lat, lon], …]', items: { type: 'array', items: { type: 'number' } } } },
+      ['slug'],
+      async (a) => {
+        const frame = await frameOf(root, a.slug)
+        const proj = siteProjector(frame)
+        const pts = a.points ?? (a.lat !== undefined && a.lon !== undefined ? [[a.lat, a.lon]] : null)
+        if (!pts) throw new Error('give lat and lon, or points [[lat, lon], …]')
+        return {
+          frame: frame.kind === 'enu' ? `enu about ${frame.anchor.lat}, ${frame.anchor.lon}` : `utm epsg:${frame.epsg}`,
+          points: pts.map(([lat, lon]) => { const [x, y] = proj(lon, lat); return { lat, lon, x: round(x), y: round(y) } }),
+        }
+      },
+    ),
+    T(
+      'address_search',
+      'Find an address, a named place or a road in a baked world, in site metres — the world’s own OSM extract, the file the viewer’s search box reads. `q` matches a house number and street ("2299 Johns Hopkins"), a name ("Mister Pizza") or a road. Up to `limit` hits (default 12), nearest to `near` [x, y] first when given, best match first otherwise. An address’s x, y is the BUILDING, not the street: for a drop-off on the kerb, snap to a road (site_roads).',
+      { slug: str(''), q: str(''), limit: num('default 12'), near: { type: 'array', description: '[x, y] site metres', items: { type: 'number' } } },
+      ['slug', 'q'],
+      async (a) => {
+        const index = await addressIndex(root, a.slug)
+        const q = String(a.q ?? '').toLowerCase().trim()
+        const words = q.split(/\s+/).filter(Boolean)
+        if (!words.length) throw new Error('q is empty')
+        const limit = Math.max(1, Math.min(50, Number(a.limit) || 12))
+        const near = Array.isArray(a.near) && a.near.length === 2 ? a.near : null
+        const hits = []
+        for (const e of index.entries) {
+          if (!words.every((w) => e.hay.includes(w))) continue
+          // the whole phrase, then the start of the label, then anywhere
+          const score = e.hay.startsWith(q) ? 3 : e.label.toLowerCase().includes(q) ? 2 : 1
+          const dist = near ? Math.hypot(e.x - near[0], e.y - near[1]) : null
+          hits.push({ kind: e.kind, label: e.label, detail: e.detail, x: e.x, y: e.y, ...(dist === null ? {} : { distance_m: round(dist) }), score })
+        }
+        hits.sort((p, r) => (near ? p.distance_m - r.distance_m : r.score - p.score || p.label.localeCompare(r.label)))
+        return { hits: hits.slice(0, limit).map(({ score, ...h }) => h), of: hits.length, indexed: index.counts }
+      },
+    ),
+    T(
+      'point_add',
+      'Add (or replace, by id) a named point in a world’s points.json: where a level starts or finishes, where the world opens. Give `at` [x, y] in site metres, or `lat`/`lon`, or a `road` (from site_roads) and `at_m` along it — the road gives the heading too, and `offset_m` moves the point to the right of the centreline (the shoulder of a two-lane road is about 5). `kind` is home | start | finish | checkpoint | spot; `mode` drive | walk | fly; `home: true` makes it the point the world opens at. A level names one in `start`.',
+      {
+        slug: str(''), id: str('lowercase, digits, dashes'), name: str(''), kind: str('home | start | finish | checkpoint | spot'), mode: str('drive | walk | fly'),
+        at: { type: 'array', description: '[x, y] site metres', items: { type: 'number' } }, lat: num(''), lon: num(''),
+        road: str('a road id from site_roads'), at_m: num('metres along the road'), offset_m: num('metres to the right of the centreline'),
+        yaw_deg: num('degrees anticlockwise from east; a road supplies it'), lift_m: num('metres above the ground, for a flying start'), note: str('shown on arrival'), home: bool('make it the world’s home point'),
+      },
+      ['slug', 'id', 'kind'],
+      async (a) => {
+        if (!/^[a-z0-9][a-z0-9_-]*$/.test(String(a.id))) throw new Error(`id ${JSON.stringify(a.id)} is lowercase letters, digits, dashes`)
+        if (!POINT_KINDS.includes(a.kind)) throw new Error(`kind is one of ${POINT_KINDS.join(', ')}`)
+        if (a.mode !== undefined && !POINT_MODES.includes(a.mode)) throw new Error(`mode is one of ${POINT_MODES.join(', ')}`)
+        let at
+        let yaw = a.yaw_deg
+        if (a.road) {
+          const r = await findRoad(root, a.slug, a.road)
+          const { p, d } = alongRoad(r.coords, a.at_m ?? 0)
+          const off = Number(a.offset_m) || 0
+          at = [p.x + d.y * off, p.y - d.x * off]
+          yaw ??= (Math.atan2(d.y, d.x) * 180) / Math.PI
+        } else if (Array.isArray(a.at) && a.at.length >= 2) {
+          at = [Number(a.at[0]), Number(a.at[1])]
+        } else if (a.lat !== undefined && a.lon !== undefined) {
+          at = siteProjector(await frameOf(root, a.slug))(Number(a.lon), Number(a.lat))
+        } else throw new Error('say where: at [x, y], lat/lon, or a road and at_m')
+        if (!at.every(Number.isFinite)) throw new Error('that position is not a number')
+        const doc = (await siteDoc.read(a.slug, 'points.json')) ?? { version: 1, points: [] }
+        doc.version = 1
+        doc.points ??= []
+        const point = { id: a.id, name: a.name ?? a.id, kind: a.kind, at: [round(at[0]), round(at[1])], yaw_deg: round(Number(yaw) || 0) }
+        if (a.mode) point.mode = a.mode
+        if (a.lift_m !== undefined) point.lift_m = Number(a.lift_m)
+        if (a.note) point.note = String(a.note)
+        const i = doc.points.findIndex((p) => p.id === a.id)
+        if (i >= 0) doc.points[i] = point
+        else doc.points.push(point)
+        if (a.home) doc.home = a.id
+        const wrote = await siteDoc.write(a.slug, 'points.json', doc)
+        return { point, replaced: i >= 0, points: doc.points.length, home: doc.home ?? null, wrote }
+      },
+    ),
     T(
       'site_roads',
       'The drivable roads of a baked world: id, name, ref (e.g. "MD 3"), class, lanes, length in metres, and where each starts and ends in site metres. Optional `q` filters by name or ref. The road ids are what site_road_polygon and site_road_gate take.',
@@ -390,6 +525,9 @@ export function serverTools({ apiFetch, root, siteDoc }) {
 
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
+import { siteProjector } from './geo.mjs'
+import { apiHash, declarations, modules } from './programs.mjs'
+import { POINT_KINDS, POINT_MODES, vocab } from './vocab.mjs'
 
 const round = (v) => Math.round(v * 10) / 10
 const clamp01 = (v) => Math.max(0, Math.min(1, Number(v) || 0))
@@ -525,4 +663,93 @@ function validateCourse(c) {
   if (c.entry !== undefined && !(Number.isFinite(c.entry?.x) && Number.isFinite(c.entry?.y))) errors.push('course.entry is { x, y, r } in site metres')
   if (c.laps !== undefined && !(Number.isInteger(c.laps) && c.laps > 0)) errors.push('course.laps is a whole number')
   return errors
+}
+
+/* ---- a bake's frame and its address book ------------------------------------------------------ */
+
+/** The frame a bake's manifest holds — where its metres are measured from. */
+async function frameOf(root, slug) {
+  if (!root) throw new Error('this tool needs the data root')
+  if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(String(slug))) throw new Error(`bad slug ${JSON.stringify(slug)}`)
+  for (const rel of ['web/manifest.json', 'manifest.json']) {
+    const text = await readFile(path.join(root, 'sites', slug, rel), 'utf8').catch(() => null)
+    if (!text) continue
+    const m = JSON.parse(text)
+    if (m.frame) return m.frame
+  }
+  throw new Error(`${slug} has no baked manifest with a frame — bake it first`)
+}
+
+/** the centroid of whatever geometry a feature has, lon/lat */
+function centroidOf(coords) {
+  const pts = []
+  const walk = (c) => {
+    if (!Array.isArray(c)) return
+    if (typeof c[0] === 'number') { pts.push(c); return }
+    for (const q of c) walk(q)
+  }
+  walk(coords)
+  if (!pts.length) return null
+  let sx = 0, sy = 0
+  for (const p of pts) { sx += p[0]; sy += p[1] }
+  return [sx / pts.length, sy / pts.length]
+}
+
+/** one index per world, kept while the service runs; a rebake writes a new osm.geojson and a new mtime */
+const addressIndexes = new Map()
+
+/**
+ * The address book of a bake: every `addr:housenumber` + `addr:street`, every named thing that is
+ * not a road, and every road once — the same three kinds the viewer's search box offers, projected
+ * into site metres with the same projector.
+ */
+async function addressIndex(root, slug) {
+  const frame = await frameOf(root, slug)
+  let file = null
+  for (const rel of ['osm.geojson', 'web/osm.geojson']) {
+    const f = path.join(root, 'sites', slug, rel)
+    if (await readFile(f, { encoding: 'utf8', flag: 'r' }).then(() => true, () => false)) { file = f; break }
+  }
+  if (!file) throw new Error(`${slug} has no osm.geojson — bake it first`)
+  const { stat } = await import('node:fs/promises')
+  const mtime = (await stat(file)).mtimeMs
+  const cached = addressIndexes.get(slug)
+  if (cached && cached.mtime === mtime) return cached
+  const proj = siteProjector(frame)
+  const gj = JSON.parse(await readFile(file, 'utf8'))
+  const entries = []
+  const counts = { address: 0, place: 0, road: 0 }
+  const roads = new Map()
+  for (const f of gj.features ?? []) {
+    const p = f.properties ?? {}
+    const c = f.geometry ? centroidOf(f.geometry.coordinates) : null
+    if (!c) continue
+    const [x, y] = proj(c[0], c[1])
+    const num = p['addr:housenumber'], street = p['addr:street'], name = p.name
+    if (num && street) {
+      const label = `${num} ${street}`
+      const detail = [name, p['addr:city'], p['addr:postcode']].filter(Boolean).join(' · ')
+      entries.push({ kind: 'address', label, detail, x: round(x), y: round(y), hay: `${label} ${name ?? ''} ${p['addr:city'] ?? ''}`.toLowerCase() })
+      counts.address++
+      continue
+    }
+    if (name && p.highway) {
+      const r = roads.get(name)
+      if (r) { r.x += x; r.y += y; r.n++ } else roads.set(name, { x, y, n: 1, cls: p.highway, ref: p.ref })
+      continue
+    }
+    if (name) {
+      const what = p.amenity ?? p.shop ?? p.leisure ?? p.tourism ?? p.building ?? p.landuse ?? 'place'
+      entries.push({ kind: 'place', label: name, detail: String(what).replace(/_/g, ' '), x: round(x), y: round(y), hay: `${name} ${what}`.toLowerCase() })
+      counts.place++
+    }
+  }
+  for (const [name, r] of roads) {
+    entries.push({ kind: 'road', label: name, detail: [r.ref, r.cls].filter(Boolean).join(' · '), x: round(r.x / r.n), y: round(r.y / r.n), hay: `${name} ${r.ref ?? ''}`.toLowerCase() })
+    counts.road++
+  }
+  const index = { mtime, entries, counts }
+  addressIndexes.set(slug, index)
+  if (addressIndexes.size > 4) addressIndexes.delete(addressIndexes.keys().next().value)
+  return index
 }

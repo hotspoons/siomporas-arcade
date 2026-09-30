@@ -146,6 +146,11 @@ COPY tools/rigging/ tools/rigging/
 COPY tools/sf2-probe/rigging/ tools/sf2-probe/rigging/
 
 COPY tools/worldeditor/ tools/worldeditor/
+# The program API's declaration bundle: programs.mjs typechecks a level's program against it
+# (program_check, and the viewer's own build route). The pod answered ENOENT for it on 2026-09-30 —
+# transpiling worked, checking did not. And the engine-sound list the vocabulary tool reads.
+COPY apps/corridor/src/generated/program-types.json apps/corridor/src/generated/program-types.json
+COPY packages/enginesim/wasm/engines.json packages/enginesim/wasm/engines.json
 COPY --from=app /src/node_modules/ws/ node_modules/ws/
 # TypeScript too: `programs.mjs` transpiles and typechecks a level's program on request (`?js=1`
 # is what the viewer asks for when a level names one), and it `require('typescript')`s lazily —
@@ -170,7 +175,11 @@ COPY apps/corridor/public/assets/catalog.json apps/corridor/public/assets/catalo
 
 USER 10001
 
-ENV WORLDEDITOR_DATA=/data \
+# Which commit this is, so /api/health and the editor_version tool can say. `dev` from a plain
+# `docker build`; the workflow passes the sha.
+ARG GIT_SHA=dev
+ENV WORLDEDITOR_BUILD=${GIT_SHA} \
+    WORLDEDITOR_DATA=/data \
     WORLDEDITOR_APP=/app/apps/corridor/dist \
     WORLDEDITOR_HOST=0.0.0.0 \
     WORLDEDITOR_PORT=8780 \

@@ -108,3 +108,11 @@ check('  and nothing is said about a rig', player({ vehicle: 'a-car-with-no-skel
 
 console.log(failed ? `\n${failed} failed` : '\nall passed')
 process.exit(failed ? 1 : 0)
+
+test('a key no loader reads is warned about by name, with the keys a level has', () => {
+  const v = validate({ id: 'x', world: 'w', physics: true, ui: 'game' })
+  assert.equal(v.ok, true)
+  assert.ok(v.warnings.some((w) => w.startsWith('"physics" is not something a level says')), v.warnings.join('\n'))
+  assert.ok(v.warnings.some((w) => w.startsWith('"ui" is not')))
+  assert.equal(validate({ id: 'x', world: 'w', name: 'n', description: 'd', program: 'a.ts' }).warnings.length, 0)
+})

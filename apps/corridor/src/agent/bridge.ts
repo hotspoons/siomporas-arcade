@@ -119,7 +119,7 @@ export class AgentBridge {
       {
         name: 'code_check',
         description:
-          'Typecheck a program against the real compilation — the program API’s declarations and every other program on the volume. Returns syntactic AND semantic problems with lines. This is how you find out whether an edit compiles; writing does not check.',
+          'Typecheck a program against the real compilation — the program API’s declarations and every other program on the volume. Returns syntactic AND semantic problems with lines. This is how you find out whether an edit compiles; writing does not check. It reads the program as THIS PAGE holds it, which can lag a program_write by a moment: pass `source` for the text you just wrote, or use program_check, which reads the volume.',
         inputSchema: { type: 'object', properties: { path: str('program path, e.g. levels/rooftop/run'), source: str('check this text instead of what is on disk') }, required: ['path'], additionalProperties: false },
         run: async (a) => {
           await compiled()

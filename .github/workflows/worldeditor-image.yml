@@ -79,6 +79,8 @@ jobs:
           platforms: ${{ matrix.platform }}
           load: true
           tags: worldeditor:smoke
+          build-args: |
+            GIT_SHA=${{ github.sha }}
           # a cache per architecture: one shared ref would have each overwrite the other
           cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache-${{ matrix.slug }}
           cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache-${{ matrix.slug }},mode=max
@@ -159,6 +161,8 @@ jobs:
           context: .
           file: tools/worldeditor/Dockerfile
           platforms: ${{ matrix.platform }}
+          build-args: |
+            GIT_SHA=${{ github.sha }}
           outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
           cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache-${{ matrix.slug }}
       - name: export digest

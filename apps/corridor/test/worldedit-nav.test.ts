@@ -10,7 +10,7 @@
 import { describe, expect, it } from 'vitest'
 import { fromUrl, resolve, toUrl } from '../src/worldedit/nav'
 
-const MODES = ['world', 'place', 'stage', 'assets', 'program', 'shell', 'agent', 'splats']
+const MODES = ['world', 'place', 'stage', 'assets', 'program', 'shell', 'splats', 'deploy']
 const STEPS = ['explore', 'places', 'define', 'bake']
 const WORLDS = ['crofton-triangle', 'arrowhead-farms']
 const valid = { modes: MODES, steps: STEPS, worlds: WORLDS }

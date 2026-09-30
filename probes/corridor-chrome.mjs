@@ -30,10 +30,11 @@ await page.waitForFunction(() => window.__we?.ready(), null, { timeout: 90000 })
 const bar = await page.$$eval('.topbar .seg', (b) => b.map((x) => x.dataset.value))
 say('the bar', bar)
 if (bar.length !== 8) fail.push(`${bar.length} items in the bar, not 8`)
-for (const gone of ['explore', 'index', 'define', 'bake']) {
+// …and the agent (2026-09-30): it is Settings → Agent, not a place you build a world
+for (const gone of ['explore', 'index', 'define', 'bake', 'agent']) {
   if (bar.includes(gone)) fail.push(`${gone} is still a top-level mode`)
 }
-for (const want of ['world', 'place', 'stage', 'assets', 'program', 'shell', 'agent', 'splats']) {
+for (const want of ['world', 'place', 'stage', 'assets', 'program', 'shell', 'splats', 'deploy']) {
   if (!bar.includes(want)) fail.push(`no ${want} in the bar`)
 }
 
@@ -91,6 +92,22 @@ for (const want of ['Git and LFS', 'Agent', 'Appearance', 'Services']) {
   if (!tabs.some((t) => t.includes(want))) fail.push(`Settings has no ${want} tab`)
 }
 // Services was a nine-second toast; it has to be readable twice
+/* ---- 4b · the agent lives in Settings now: its terminal and its sidebar, not a hint ---- */
+await page.click('.dialog .tab:has-text("Agent")')
+await page.waitForTimeout(800)
+const agent = await page.evaluate(() => {
+  const panel = document.querySelector('.dialog .tab-panel:not([hidden])')
+  const pane = panel?.querySelector('.agent-pane')
+  const side = panel?.querySelector('.agent-side')
+  const box = (e) => { const r = e?.getBoundingClientRect(); return r ? Math.round(r.width) : 0 }
+  return { pane: box(pane), side: box(side), term: !!pane?.querySelector('.term-input'), sideRows: side?.childElementCount ?? 0, hint: panel?.textContent.includes('Bar → Agent') ?? false }
+})
+say('the agent tab', agent)
+if (!agent.term) fail.push('the Agent tab has no terminal in it')
+if (agent.pane < 200 || agent.side < 200) fail.push(`the agent surface is not laid out (pane ${agent.pane}px, side ${agent.side}px)`)
+if (!agent.sideRows) fail.push('the agent sidebar is empty')
+if (agent.hint) fail.push('the Agent tab is still the placeholder hint')
+if (await page.evaluate(() => window.__we.mode()) === 'agent') fail.push('opening the Agent tab changed the mode')
 await page.click('.dialog .tab:has-text("Services")')
 // wait for the READOUTS, not for the placeholder to go: the panel starts as one <p> and becomes
 // six rows, and a text test on it passes the instant the fetch rejects and leaves it empty

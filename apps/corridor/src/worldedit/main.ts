@@ -65,7 +65,11 @@ import type { CourseDoc } from '../races'
  * first. They are steps inside `world` now, and `index` — which named itself after a data
  * structure — is "Places", which is what it holds.
  */
-const MODES = ['world', 'place', 'stage', 'assets', 'program', 'shell', 'agent', 'splats', 'deploy'] as const
+// THE AGENT IS NOT A MODE (Rich, 2026-09-30: "move the agents tab out of the main strip and into
+// the settings panel"). It never was a place you build a world; it is a client of this editor, and
+// it lives in Settings → Agent now, where its connection and MCP settings already pointed. A
+// `?mode=agent` link opens that tab.
+const MODES = ['world', 'place', 'stage', 'assets', 'program', 'shell', 'splats', 'deploy'] as const
 type Mode = (typeof MODES)[number]
 
 /** The stages of making a world, in the order you do them. */
@@ -296,9 +300,13 @@ const bridge = new AgentBridge({
 })
 const mcpPanel = new McpPanel(mcpSection, () => bridge)
 
+// the agent's two surfaces — the terminal and the sidebar with the picker, the session and the
+// MCP section — live in the Settings dialog's Agent tab (see `buildAgentSettings`)
+const agentHost = el('div', 'agent-pane')
+const agentSide = el('div', 'agent-side')
 const agentPanel = new AgentPanel({
-  host: pane('agent'),
-  transcriptHost: inspector,
+  host: agentHost,
+  transcriptHost: agentSide,
   shell: () => shellPanel.machine,
   extraSections: (host) => {
     host.append(mcpSection)
@@ -636,9 +644,8 @@ function buildBar() {
         { value: 'assets', label: 'Assets', icon: 'cube', key: '4' },
         { value: 'program', label: 'Program', icon: 'beaker', key: '5' },
         { value: 'shell', label: 'Shell', icon: 'server-stack', key: '6' },
-        { value: 'agent', label: 'Agent', icon: 'sparkles', key: '7' },
-        { value: 'splats', label: 'Splats', icon: 'camera', key: '8' },
-        { value: 'deploy', label: 'Deploy', icon: 'cloud-arrow-up', key: '9' },
+        { value: 'splats', label: 'Splats', icon: 'camera', key: '7' },
+        { value: 'deploy', label: 'Deploy', icon: 'cloud-arrow-up', key: '8' },
       ],
       onChange: (m) => setMode(m),
     }),
@@ -904,13 +911,13 @@ function buildDrawer() {
  * a remote URL.
  */
 let settingsDialog: Dialog | null = null
+let settingsTabs: Tabs | null = null
 let gitPanel: GitPanel | null = null
-function openSettings() {
+function openSettings(tab?: 'git' | 'agent' | 'look' | 'services') {
   drawer.set(false)
   if (!settingsDialog) {
     settingsDialog = new Dialog({ title: 'Settings', icon: 'cog-6-tooth', size: 'lg', movable: true })
-    settingsDialog.body.append(
-      new Tabs([
+    settingsTabs = new Tabs([
         {
           id: 'git',
           label: 'Git and LFS',
@@ -936,27 +943,28 @@ function openSettings() {
             buildSettings(form)
           },
         },
-      ]).root,
-    )
+      ])
+    settingsDialog.body.append(settingsTabs.root)
   }
+  if (tab) settingsTabs?.show(tab)
   settingsDialog.open()
   void gitPanel?.load()
 }
 
 /**
- * The agent's configuration — which is NOT here yet, on purpose.
+ * The agent, in Settings. The whole surface — the terminal on the left, and on the right the
+ * platform credential, the picker, the session and the MCP section the `agentmcp` lane hung on
+ * `extraSections`. It was the seventh tab of the bar until 2026-09-30, and it never belonged
+ * there: the bar is the pipeline for making a world, and the agent is a client of it.
  *
- * The `agentmcp` lane is inside `ui/agentpanel.ts` right now, adding an MCP section: a server URL,
- * a minted token, a status and the config JSON to paste into a client. Copying today's fields into
- * this tab would fork that work the day before it lands, and the copy would be the one that went
- * stale. They are adding `mountAgentSettings(host)` to their own file; this calls it the moment it
- * exists, and until then says where the settings are rather than pretending to be them.
+ * Built once (Tabs builds lazily) and kept: the panel draws into its two hosts on every `render`,
+ * and a session survives the dialog closing exactly as it survived leaving the tab.
  */
 function buildAgentSettings(host: HTMLElement) {
-  const p = el('p', 'panel-hint')
-  p.append(icon('information-circle', 14), el('span', '', 'The agent’s connection and MCP settings are in the Agent surface while that work lands.'))
-  host.append(p)
-  host.append(el('p', 'dim', 'Bar → Agent (7).'))
+  const wrap = el('div', 'agent-settings')
+  wrap.append(agentHost, agentSide)
+  host.append(wrap)
+  void agentPanel.render()
 }
 
 function buildAppearance(host: HTMLElement) {
@@ -1090,7 +1098,7 @@ function setMode(m: Mode) {
   showSiteEditor(m === 'place')
   // one pane, three things that want it: the map, the Place scene, and the code surface the
   // Program and Shell modes share
-  showCode(m === 'program' || m === 'shell' || m === 'agent')
+  showCode(m === 'program' || m === 'shell')
   showAssets(m === 'assets')
   // Define puts the map in draw mode; the panel switches it to `pick` itself when the world is a
   // named-roads one, because then clicking is choosing a road rather than dropping a vertex.
@@ -1203,7 +1211,7 @@ function showCode(on: boolean) {
   // mode that was never showing it
   if (mapCanvas && (on || mode !== 'place')) mapCanvas.hidden = on
   const title = document.getElementById('panel-title')
-  if (title && on) title.textContent = mode === 'shell' ? 'Shell' : mode === 'agent' ? 'Agent' : 'Program'
+  if (title && on) title.textContent = mode === 'shell' ? 'Shell' : 'Program'
   const readout = document.getElementById('readout')
   if (readout) readout.hidden = on || readout.hidden
 }
@@ -1259,10 +1267,6 @@ function renderPanel() {
   }
   if (mode === 'shell') {
     void shellPanel.render()
-    return
-  }
-  if (mode === 'agent') {
-    void agentPanel.render()
     return
   }
   if (mode === 'stage') {
@@ -1481,6 +1485,8 @@ async function boot() {
   renderWorldSelect()
   step = (want.step as Step) ?? 'explore'
   setMode((want.mode as Mode) ?? 'world')
+  // the agent was a mode until 2026-09-30; a link that still says so opens where it went
+  if (fromUrl(location.search).mode === 'agent') openSettings('agent')
   // LAST LINE OF BOOT, and it exists because `window.__we` is assigned when the module finishes
   // evaluating — long before this runs. A probe that waited for the handle and then set a mode
   // had it silently undone by the setMode above, and the failure was intermittent because it

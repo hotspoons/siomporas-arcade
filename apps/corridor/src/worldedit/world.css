@@ -154,9 +154,9 @@ body.worldedit {
 .code-tab-x.btn { padding: 2px 4px; opacity: 0.55; }
 .code-tab-x.btn:hover { opacity: 1; }
 /* with tabs in it the bar is the tab strip, so its own padding goes */
-#code .panel-bar:has(.code-tab) { padding-bottom: 0; }
+#code .panel-bar:has(.code-tab), .agent-pane .panel-bar:has(.code-tab) { padding-bottom: 0; }
 
-#code .panel-bar {
+#code .panel-bar, .agent-pane .panel-bar {
   display: flex;
   align-items: center;
   gap: var(--s2);
@@ -164,11 +164,11 @@ body.worldedit {
   border-bottom: 1px solid var(--line);
   background: var(--bg-1);
 }
-#code .panel-title {
+#code .panel-title, .agent-pane .panel-title {
   font-weight: 600;
   font-size: var(--fs-1);
 }
-#code .panel-bar-actions {
+#code .panel-bar-actions, .agent-pane .panel-bar-actions {
   display: flex;
   gap: var(--s1);
   margin-left: auto;
@@ -199,7 +199,7 @@ body.worldedit {
 
 /* The terminal, in the Shell mode. Same pane as the code editor, and the same grid: a bar, then
    the thing taking whatever is left. */
-#code .term {
+#code .term, .agent-pane .term {
   display: grid;
   grid-template-rows: minmax(0, 1fr) auto;
   min-height: 0;
@@ -207,7 +207,7 @@ body.worldedit {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: var(--fs-0);
 }
-#code .term-out {
+#code .term-out, .agent-pane .term-out {
   margin: 0;
   padding: var(--s3);
   overflow: auto;
@@ -216,7 +216,7 @@ body.worldedit {
   color: var(--fg-1);
   min-height: 0;
 }
-#code .term-line {
+#code .term-line, .agent-pane .term-line {
   display: flex;
   align-items: center;
   gap: var(--s1);
@@ -224,8 +224,8 @@ body.worldedit {
   border-top: 1px solid var(--line);
   background: var(--bg-1);
 }
-#code .term-prompt { color: var(--accent); }
-#code .term-input {
+#code .term-prompt, .agent-pane .term-prompt { color: var(--accent); }
+#code .term-input, .agent-pane .term-input {
   flex: 1;
   min-width: 0;
   border: 0;
@@ -685,3 +685,32 @@ canvas.drop-target { outline: 2px dashed var(--accent); outline-offset: -4px; }
 .deploy-row { display: grid; gap: 2px; padding: var(--s1) 0; border-bottom: 1px solid var(--line-2); }
 .deploy-row-main { font-size: var(--text-sm); color: var(--ink-1); }
 .deploy-row-note { font-size: var(--text-xs); color: var(--ink-3); overflow-wrap: anywhere; }
+
+/* Settings → Agent: the terminal beside its sidebar (the picker, the session, the MCP section).
+   The same `.term` and `.panel-bar` rules as the Shell mode, scoped above to `.agent-pane` as well
+   as `#code`, so moving the surface out of the bar did not mean restyling it. */
+.agent-settings {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 320px);
+  gap: var(--s3);
+  min-height: min(520px, 70vh);
+}
+.agent-pane {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--r2);
+  overflow: hidden;
+}
+.agent-side {
+  display: grid;
+  gap: var(--s3);
+  align-content: start;
+  min-width: 0;
+  overflow-y: auto;
+}
+@media (max-width: 760px) {
+  .agent-settings { grid-template-columns: minmax(0, 1fr); }
+}

@@ -55,6 +55,15 @@ body.paused .gamehud { opacity: 0.35; }
 .gh-goal:empty, .gh-race:empty, .gh-score:empty { display: none; }
 .gh-race { font-size: var(--text-sm); color: var(--ink-2); }
 .gh-score { font-size: var(--text-sm); color: var(--warn); }
+/* the objective list: a row each; the selected one carries the arrow, the done ones are struck */
+.gh-list { display: grid; gap: 1px; margin: 2px 0; }
+.gh-list[hidden] { display: none; }
+.gh-item { display: grid; gap: 0; padding: 2px var(--s2); border-radius: var(--r2); font-size: var(--text-sm); color: var(--ink-2); line-height: 1.3; }
+.gh-item.sel { color: var(--ink); background: var(--hud-line); }
+.gh-item.sel .gh-item-title::before { content: '▸ '; }
+.gh-item.done { opacity: 0.5; }
+.gh-item.done .gh-item-title { text-decoration: line-through; }
+.gh-item-detail { font-size: var(--text-sm); opacity: 0.8; }
 .gh-notes { display: grid; gap: 1px; }
 .gh-notes:empty { display: none; }
 .gh-note { font-size: var(--text-sm); color: var(--ink-2); line-height: 1.35; transition: opacity 600ms ease; }

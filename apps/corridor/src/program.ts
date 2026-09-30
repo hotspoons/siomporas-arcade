@@ -129,6 +129,78 @@ export interface ProgramHost {
   layers?: WorldLayersHost
   /** the interface: which one, what the player may change, what the HUD shows */
   ui?: UiHost
+  /** which way the player faces: a compass bearing, degrees, 0 = north. Absent: `player()` says 0 */
+  playerHeading?: () => number
+  /** the ground here, metres above the datum — site x east, y north. Null off the map */
+  ground?: (x: number, y: number) => number | null
+  /** models a program puts into the world itself, when the app can draw them */
+  models?: ModelHost
+  /** the objective list, as the HUD draws it */
+  objectives?: ObjectivesHost
+}
+
+/** Where the player is and what they are doing, in site metres. */
+export interface PlayerState {
+  x: number
+  y: number
+  z: number
+  /** compass bearing, degrees, 0 = north, 90 = east */
+  heading_deg: number
+  /** m/s, unsigned */
+  speed: number
+}
+
+/** Where a program-spawned model stands. `z` absent or null: on the ground there. */
+export interface ModelPose {
+  x: number
+  y: number
+  z?: number | null
+  /** degrees anticlockwise from east, the way every site document writes a heading */
+  yaw_deg?: number
+  scale?: number
+}
+
+/**
+ * MODELS A PROGRAM PUTS IN THE WORLD. Rich, 2026-09-30, after the pizza level had to reach
+ * `window.corridor.site.layers.placements` to hide a pizza stack and clone a wad of cash: the
+ * program API could name a placed thing and not show, hide, move or make one.
+ *
+ * Every member optional, like the physics: a dry run draws nothing and a program that spawns is
+ * still a program a test can step — `spawn` answers null there, and the rest answer false.
+ */
+export interface ModelHost {
+  /** put a catalog asset at a pose; the id to move it by, or null when there is no such asset */
+  spawn?: (asset: string, pose: ModelPose) => string | null
+  move?: (id: string, pose: ModelPose) => boolean
+  show?: (id: string, on: boolean) => boolean
+  remove?: (id: string) => boolean
+  /** where it is now, site metres */
+  where?: (id: string) => Vec3 | null
+}
+
+/**
+ * ONE THING TO DO, in a list the player can page through.
+ *
+ * Rich, 2026-09-30: *"we need to be able to cycle through objectives, so in the case of a pizza
+ * stack we should be able to have a list of objectives showing the pizza, how long ago it was
+ * ordered, and how far away the delivery address is — using the left and right D pad ... should
+ * cycle objectives by default ... selecting the objective should repoint the arrow."*
+ *
+ * `at` is what the arrow points at when this one is selected; `detail` is the second line, which
+ * a program rewrites as often as it likes ("ordered 14 min ago · 1.2 km"). `done` strikes it out
+ * and takes it out of the cycle.
+ */
+export interface ObjectiveItem {
+  id: string
+  title: string
+  detail?: string
+  at?: { x: number; y: number } | null
+  done?: boolean
+}
+
+export interface ObjectivesHost {
+  /** draw the list, with the selected one marked; an empty list takes it down */
+  show?: (items: ObjectiveItem[], selected: string | null) => void
 }
 
 /**
@@ -480,6 +552,41 @@ export interface GameApi {
   win(text?: string): void
   lose(text?: string): void
 
+  /** where the player is, which way they face, how fast — null with no player */
+  player(): PlayerState | null
+  /** the ground at a point, metres above the datum; null off the map or in a dry run */
+  ground(x: number, y: number): number | null
+
+  /**
+   * MODELS OF THE PROGRAM'S OWN: a pickup on the ground, a reward flying at the car. Assets are
+   * catalog ids (anything the editor could place). Safe with no host: `spawn` answers null.
+   */
+  readonly models: {
+    spawn(asset: string, pose: ModelPose): string | null
+    move(id: string, pose: ModelPose): boolean
+    show(id: string, on: boolean): boolean
+    remove(id: string): boolean
+    where(id: string): Vec3 | null
+  }
+
+  /**
+   * THE OBJECTIVE LIST. The HUD draws it, the D-pad (and Q / E) page through it, and the arrow
+   * points at whichever is selected. `set` replaces the list and keeps the selection when its id
+   * survives; `complete` strikes one out and moves the selection on. An explicit `waypoint()`
+   * call still wins until the selection next changes.
+   */
+  readonly objectives: {
+    set(items: ObjectiveItem[]): void
+    list(): ObjectiveItem[]
+    select(id: string | null): void
+    selected(): ObjectiveItem | null
+    next(): void
+    prev(): void
+    complete(id: string): void
+    /** told whenever the selection changes — by the program or by the player */
+    onSelect(fn: (item: ObjectiveItem | null) => void): void
+  }
+
   /** every frame, with the real delta */
   each(fn: (dt: number, facts: Facts) => void): void
   /** once, after `after` seconds of run time */
@@ -549,6 +656,10 @@ export class GameRun {
   score = 0
   goalText = ''
   outcome: Outcome | null = null
+  /** the objective list and which one the arrow follows; what a HUD and a probe read */
+  objectiveItems: ObjectiveItem[] = []
+  selectedObjective: string | null = null
+  private selectFns: ((item: ObjectiveItem | null) => void)[] = []
   /** what went wrong, if the program threw. A stopped program is not a silent one. */
   error: string | null = null
   readonly messages: { text: string; kind: string; at: number }[] = []
@@ -651,6 +762,38 @@ export class GameRun {
       win: (text) => this.finish('win', text),
       lose: (text) => this.finish('lose', text),
 
+      player: () => {
+        const at = H.playerAt()
+        if (!at) return null
+        return { x: at.x, y: at.y, z: at.z, heading_deg: H.playerHeading?.() ?? 0, speed: Math.abs(H.playerSpeed()) }
+      },
+      ground: (x, y) => (H.ground && finite(x) && finite(y) ? H.ground(x, y) : null),
+
+      models: {
+        spawn: (asset, pose) => (H.models?.spawn && typeof asset === 'string' && asset && pose && finite(pose.x) && finite(pose.y) ? H.models.spawn(asset, pose) : null),
+        move: (id, pose) => (H.models?.move && pose && finite(pose.x) && finite(pose.y) ? H.models.move(id, pose) : false),
+        show: (id, on) => H.models?.show?.(id, !!on) ?? false,
+        remove: (id) => H.models?.remove?.(id) ?? false,
+        where: (id) => H.models?.where?.(id) ?? null,
+      },
+
+      objectives: {
+        set: (items) => this.setObjectives(items),
+        list: () => this.objectiveItems.map((o) => ({ ...o })),
+        select: (id) => this.selectObjective(id),
+        selected: () => this.objectiveItems.find((o) => o.id === this.selectedObjective) ?? null,
+        next: () => this.cycleObjective(1),
+        prev: () => this.cycleObjective(-1),
+        complete: (id) => {
+          const o = this.objectiveItems.find((x) => x.id === id)
+          if (!o || o.done) return
+          o.done = true
+          if (this.selectedObjective === id) this.selectObjective(this.firstOpenObjective())
+          else this.showObjectives()
+        },
+        onSelect: (fn) => { this.selectFns.push(fn) },
+      },
+
       each: (fn) => { this.frameFns.push(fn) },
       after: (s, fn) => { this.timers.push({ at: this.t + s, every: null, fn }) },
       every: (s, fn) => { this.timers.push({ at: this.t + s, every: Math.max(1e-3, s), fn }) },
@@ -741,6 +884,55 @@ export class GameRun {
   /** The zones this program declared, by name — what a dry run reports and a HUD can list. */
   get zoneNames(): string[] {
     return [...this.zones.keys()]
+  }
+
+  /* ---- objectives ------------------------------------------------------------------------- */
+
+  private firstOpenObjective(): string | null {
+    return this.objectiveItems.find((o) => !o.done)?.id ?? this.objectiveItems[0]?.id ?? null
+  }
+
+  private setObjectives(items: ObjectiveItem[]): void {
+    this.objectiveItems = (Array.isArray(items) ? items : [])
+      .filter((o) => o && typeof o.id === 'string' && o.id)
+      .map((o) => ({ id: o.id, title: String(o.title ?? o.id), detail: o.detail, at: o.at && finite(o.at.x) && finite(o.at.y) ? { x: o.at.x, y: o.at.y } : null, done: !!o.done }))
+    const cur = this.objectiveItems.find((o) => o.id === this.selectedObjective)
+    // the same one stays selected while it is still open; otherwise the first open one
+    if (cur && !cur.done) this.selectObjective(cur.id, { keep: true })
+    else this.selectObjective(this.firstOpenObjective())
+  }
+
+  /**
+   * Select one. `keep` means the id did not change (a `set` refreshed the details): the HUD and
+   * the arrow's line are redrawn, but the program is not told of a selection that did not happen
+   * and an explicit waypoint is not overruled.
+   */
+  private selectObjective(id: string | null, opts: { keep?: boolean } = {}): void {
+    const item = this.objectiveItems.find((o) => o.id === id) ?? null
+    const changed = (item?.id ?? null) !== this.selectedObjective
+    this.selectedObjective = item?.id ?? null
+    this.showObjectives()
+    if (item?.at && (changed || opts.keep)) this.host.waypoint?.(item.at, item.detail ? `${item.title} · ${item.detail}` : item.title)
+    else if (changed && !item) this.host.waypoint?.(null)
+    if (changed) for (const fn of this.selectFns) this.guard(fn as () => void, item)
+  }
+
+  /**
+   * The player paged the list (the D-pad, Q / E): the next open objective in that direction,
+   * wrapping. With nothing open it pages through everything, so a finished list is still readable.
+   */
+  cycleObjective(dir: 1 | -1): void {
+    if (this.outcome || this.error) return
+    const open = this.objectiveItems.filter((o) => !o.done)
+    const ring = open.length ? open : this.objectiveItems
+    if (!ring.length) return
+    const i = ring.findIndex((o) => o.id === this.selectedObjective)
+    const j = i < 0 ? (dir > 0 ? 0 : ring.length - 1) : (i + dir + ring.length) % ring.length
+    this.selectObjective(ring[j].id)
+  }
+
+  private showObjectives(): void {
+    this.host.objectives?.show?.(this.objectiveItems.map((o) => ({ ...o })), this.selectedObjective)
   }
 
   facts(): Facts {
@@ -837,6 +1029,9 @@ export class GameRun {
   stop(): void {
     if (!this.outcome) this.finish('abandoned')
     this.guard(() => this.def.teardown?.(this.api))
+    this.objectiveItems = []
+    this.selectedObjective = null
+    this.host.objectives?.show?.([], null)
   }
 
   /** Run a program's callback; a throw stops the program and says so, and takes nothing with it. */

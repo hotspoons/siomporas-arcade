@@ -14,6 +14,7 @@
 // It has no idea what a race or a program is: `main.ts` hands it an objective and a telemetry
 // record and it draws them. `HudPart` from gamepolicy.ts is what a program switches off.
 import type { HudPart } from '../gamepolicy'
+import type { ObjectiveItem } from '../program'
 import { el } from './shell'
 
 export interface Telemetry {
@@ -54,6 +55,9 @@ export class GameHud {
   private score = el('div', 'gh-score mono')
   private outcome = el('div', 'gh-outcome')
   private race = el('div', 'gh-race')
+  /** the objective list: one row each, the selected one marked, the done ones struck */
+  private list = el('div', 'gh-list')
+  private lastList = ''
   private notes = el('div', 'gh-notes')
   private telemetry = el('div', 'gh-telemetry')
   private speedEl = el('div', 'gh-speed')
@@ -78,7 +82,8 @@ export class GameHud {
   private blank = true
 
   constructor() {
-    this.objective.append(this.outcome, this.goal, this.race, this.score, this.notes)
+    this.objective.append(this.outcome, this.goal, this.race, this.list, this.score, this.notes)
+    this.list.hidden = true
     this.speedEl.append(this.speedNum, this.speedUnit)
     this.revBar.append(this.revFill)
     this.gearEl.append(this.gearNum, this.revBar)
@@ -109,7 +114,27 @@ export class GameHud {
     this.elevEl.hidden = !parts.elevation
     this.waypointSlot.hidden = !parts.waypoint
     if (!parts.objectives) this.objective.hidden = true
-    else if (this.last.goal || this.last.score || this.notes.childElementCount) this.objective.hidden = false
+    else if (this.last.goal || this.last.score || this.notes.childElementCount || !this.list.hidden) this.objective.hidden = false
+  }
+
+  /**
+   * The objective list (program.ts `api.objectives`). Redrawn only when a row's text, its done
+   * mark or the selection changed — the program refreshes the details every second.
+   */
+  setObjectives(items: ObjectiveItem[], selected: string | null): void {
+    const key = items.map((o) => `${o.id}\u0001${o.title}\u0001${o.detail ?? ''}\u0001${o.done ? 1 : 0}\u0001${o.id === selected ? 1 : 0}`).join('\n')
+    if (key === this.lastList) return
+    this.lastList = key
+    this.list.replaceChildren(...items.map((o) => {
+      const row = el('div', `gh-item${o.id === selected ? ' sel' : ''}${o.done ? ' done' : ''}`)
+      row.append(el('span', 'gh-item-title', o.title))
+      if (o.detail) row.append(el('span', 'gh-item-detail', o.detail))
+      return row
+    }))
+    this.list.hidden = !items.length
+    if (items.length && this.parts.objectives) this.objective.hidden = false
+    else if (!items.length && !this.last.goal && !this.last.score && this.notes.childElementCount === 0) this.objective.hidden = true
+    this.dodge()
   }
 
   private write(key: string, node: HTMLElement, text: string): void {
@@ -170,7 +195,7 @@ export class GameHud {
       this.last.goal = this.last.score = this.last.race = this.last.outcome = ''
       this.goal.textContent = this.score.textContent = this.outcome.textContent = this.race.textContent = ''
       this.outcome.className = 'gh-outcome'
-      this.objective.hidden = this.notes.childElementCount === 0
+      this.objective.hidden = this.notes.childElementCount === 0 && this.list.hidden
       return
     }
     this.blank = false
@@ -197,7 +222,7 @@ export class GameHud {
       row.classList.add('fade')
       window.setTimeout(() => {
         row.remove()
-        if (!this.last.goal && !this.last.score && this.notes.childElementCount === 0) this.objective.hidden = true
+        if (!this.last.goal && !this.last.score && this.notes.childElementCount === 0 && this.list.hidden) this.objective.hidden = true
       }, 600)
     }, ms)
     this.noteTimers.push(t)

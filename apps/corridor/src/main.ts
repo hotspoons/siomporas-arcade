@@ -37,10 +37,10 @@ import { EMPTY_POINTS, loadPoints, startOf, type Point, type PointsDoc } from '.
 import { WaypointHud, type Waypoint } from './ui/waypoint'
 import { MissileLayer } from './missiles'
 import { dentObject, flushDents, repairObject } from './dents'
-import { GameRun, type ProgramHost } from './program'
+import { GameRun, type ModelHost, type ModelPose, type ProgramHost } from './program'
 import { loadGameModule } from './programload'
 import { profile as driveProfile } from '@apex/engine/physics/profiles'
-import { buildPlacements, loadCatalog } from './placements'
+import { buildPlacements, fitModel, loadAssetModel, loadCatalog, type CatalogEntry } from './placements'
 import { timeControls } from './ui/timecontrols'
 import { celestialToWorld, julianDate, moonPosition, radecToVec } from './celestial'
 import * as T from './tuning'
@@ -1440,6 +1440,8 @@ function raceWaypoint(at: { x: number; y: number }): Waypoint | null {
  */
 async function startProgram(path: string): Promise<boolean> {
   stopProgram()
+  // the catalog a program may spawn from, fresh: the library grows while the editor is open
+  placeCatalog = await loadCatalog().catch(() => placeCatalog)
   let js = ''
   try {
     const r = await fetch(`/api/programs/${path.split('/').map(encodeURIComponent).join('/')}?js=1`)
@@ -1475,6 +1477,8 @@ function stopProgram() {
   // a program's restrictions end with it: the developer view, the map, the settings all come back
   policy.reset()
   gameHud.setObjective(null)
+  gameHud.setObjectives([], null)
+  clearProgramModels()
   if (!game) return
   try { game.stop() } catch (e) { console.warn('program stop:', e) }
   game = null
@@ -1514,6 +1518,77 @@ function showGame() {
     if (game.outcome) toast(line, game.outcome === 'win' ? 'ok' : 'warn', 8000)
     else if (!first && game.score) toast(line, 'info', 2000)
   }
+}
+
+/*
+ * THE PROGRAM'S OWN MODELS. `api.models.spawn('pizza-stack', { x, y })` puts a catalog asset in
+ * the world under an id the program moves it by; the model arrives when it has loaded, the holder
+ * is there at once. Site metres in, three's frame here — (x, up, -y), once, in `poseModel`.
+ *
+ * Rich, 2026-09-30: the pizza level had to reach `window.corridor.site.layers.placements` to hide a
+ * stack and clone a wad of cash, because the API could name a placed thing and not make one.
+ */
+const programModelGroup = new THREE.Group()
+programModelGroup.name = 'program-models'
+scene.add(programModelGroup)
+const programModels = new Map<string, { holder: THREE.Group; entry: CatalogEntry; pose: ModelPose }>()
+let programModelSeq = 0
+/** the placement catalog — shipped kit plus the library — read when a program starts */
+let placeCatalog: Map<string, CatalogEntry> | null = null
+
+function poseModel(holder: THREE.Group, pose: ModelPose, entry: CatalogEntry): void {
+  // `z` is metres above the datum as the world draws it (what `api.ground` and `api.player` say)
+  const y = typeof pose.z === 'number' ? pose.z : (site?.groundAt(pose.x, -pose.y) ?? 0)
+  holder.position.set(pose.x, y, -pose.y)
+  holder.rotation.y = -(((pose.yaw_deg ?? 0) + (entry.yaw_offset_deg ?? 0)) * Math.PI) / 180
+  holder.scale.setScalar(pose.scale || 1)
+}
+
+const modelsHost: ModelHost = {
+  spawn: (asset, pose) => {
+    const entry = placeCatalog?.get(asset)
+    if (!entry) return null
+    const id = `m-${++programModelSeq}`
+    const holder = new THREE.Group()
+    holder.name = id
+    poseModel(holder, pose, entry)
+    programModelGroup.add(holder)
+    programModels.set(id, { holder, entry, pose: { ...pose } })
+    void loadAssetModel(entry).then((m) => {
+      // removed while it was loading: nothing to add it to
+      if (m && programModels.get(id)?.holder === holder) holder.add(fitModel(m, entry, entry.height_m))
+    })
+    return id
+  },
+  move: (id, pose) => {
+    const m = programModels.get(id)
+    if (!m) return false
+    m.pose = { ...m.pose, ...pose }
+    poseModel(m.holder, m.pose, m.entry)
+    return true
+  },
+  show: (id, on) => {
+    const m = programModels.get(id)
+    if (!m) return false
+    m.holder.visible = on
+    return true
+  },
+  remove: (id) => {
+    const m = programModels.get(id)
+    if (!m) return false
+    programModelGroup.remove(m.holder)
+    programModels.delete(id)
+    return true
+  },
+  where: (id) => {
+    const m = programModels.get(id)
+    return m ? { x: m.holder.position.x, y: -m.holder.position.z, z: m.holder.position.y } : null
+  },
+}
+
+function clearProgramModels(): void {
+  for (const m of programModels.values()) programModelGroup.remove(m.holder)
+  programModels.clear()
 }
 
 function programHost(): ProgramHost {
@@ -1563,6 +1638,14 @@ function programHost(): ProgramHost {
     },
     playerAt: siteAt,
     playerSpeed: () => Math.abs(drive.car?.speed ?? 0),
+    // a compass bearing: three's x is east and -z is north
+    playerHeading: () => {
+      const f = drive.car ? drive.car.forward : camera.getWorldDirection(new THREE.Vector3())
+      return ((Math.atan2(f.x, -f.z) * 180) / Math.PI + 360) % 360
+    },
+    ground: (x, y) => site?.groundAt(x, -y) ?? null,
+    models: modelsHost,
+    objectives: { show: (items, selected) => gameHud.setObjectives(items, selected) },
     setTime: (hhmm) => { worldClock.setLocal(siteZone(), undefined, hhmm); applySky(season, false) },
     setWeather: (w) => setWeatherSelection(w as Weather),
     physics: {
@@ -2525,12 +2608,18 @@ function hotkey(action: Action, shift = false): boolean {
     case 'pause':
       pause()
       return true
+    // the objective list pages: D-pad left / right, Q / E (Rich, 2026-09-30)
+    case 'objPrev':
+    case 'objNext':
+      if (!game) return false
+      game.cycleObjective(action === 'objNext' ? 1 : -1)
+      return true
     default:
       return false
   }
 }
 /** the pad buttons that are hotkeys; the frame loop polls these */
-const PAD_HOTKEYS: Action[] = ['drive', 'recover', 'lights', 'camera', 'map', 'fire', 'craft', 'walk', 'interface']
+const PAD_HOTKEYS: Action[] = ['drive', 'recover', 'lights', 'camera', 'map', 'fire', 'craft', 'walk', 'interface', 'objPrev', 'objNext']
 const HELD_ACTIONS: Action[] = ['throttle', 'brake', 'steerLeft', 'steerRight', 'handbrake']
 
 addEventListener('keydown', (e) => {

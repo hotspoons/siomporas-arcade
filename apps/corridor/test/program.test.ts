@@ -14,7 +14,7 @@ import { ActorWorld } from '../src/actorworld'
 import { Transform, Vehicle } from '../src/actors'
 import {
   GameRun, HIDEABLE, TRANSPORT, defineGame, inZone,
-  type GameDef, type ProgramHost, type Transport,
+  type GameApi, type GameDef, type ProgramHost, type Transport,
 } from '../src/program'
 
 /** A host with no renderer behind it: the player is wherever the test last put them. */
@@ -678,5 +678,119 @@ describe('combat, through the host', () => {
     await play({ setup: (api) => { left = api.hurt(2, 24); nan = api.hurt(2, NaN) } }, h, 0.2)
     expect(left).toBe(76)
     expect(nan).toBe(0)
+  })
+})
+
+describe('objectives', () => {
+  /** a host that draws the list and the arrow: what it was told, in order */
+  function listHost() {
+    const { h, state } = host()
+    const shown: string[] = []
+    const arrows: string[] = []
+    h.objectives = { show: (items, sel) => shown.push(items.map((o) => `${o.id}${o.done ? '✓' : ''}${o.id === sel ? '*' : ''}`).join(',')) }
+    h.waypoint = (at, text) => arrows.push(at ? `${at.x},${at.y}:${text ?? ''}` : 'none')
+    return { h, state, shown, arrows }
+  }
+  const three = () => [
+    { id: 'a', title: 'A', detail: 'first', at: { x: 10, y: 0 } },
+    { id: 'b', title: 'B', at: { x: 20, y: 0 } },
+    { id: 'c', title: 'C', at: { x: 30, y: 0 } },
+  ]
+
+  it('selects the first open one, draws the list, and points the arrow at it with its detail', async () => {
+    const { h, shown, arrows } = listHost()
+    let api!: GameApi
+    await new GameRun(h, defineGame({ setup: (a) => { api = a; a.objectives.set(three()) } })).start()
+    expect(shown.at(-1)).toBe('a*,b,c')
+    expect(arrows.at(-1)).toBe('10,0:A · first')
+    expect(api.objectives.selected()?.id).toBe('a')
+  })
+
+  it('pages with next and prev, wrapping, and the host can page it too (the D-pad)', async () => {
+    const { h, arrows } = listHost()
+    let api!: GameApi
+    const run = new GameRun(h, defineGame({ setup: (a) => { api = a; a.objectives.set(three()) } }))
+    await run.start()
+    api.objectives.next()
+    expect(api.objectives.selected()?.id).toBe('b')
+    expect(arrows.at(-1)).toBe('20,0:B')
+    api.objectives.prev()
+    api.objectives.prev()
+    expect(api.objectives.selected()?.id).toBe('c')
+    run.cycleObjective(1)
+    expect(api.objectives.selected()?.id).toBe('a')
+  })
+
+  it('completing one strikes it out, skips it in the cycle, and moves the selection on', async () => {
+    const { h, shown } = listHost()
+    let api!: GameApi
+    await new GameRun(h, defineGame({ setup: (a) => { api = a; a.objectives.set(three()) } })).start()
+    api.objectives.complete('a')
+    expect(shown.at(-1)).toBe('a✓,b*,c')
+    api.objectives.next()
+    api.objectives.next()
+    expect(api.objectives.selected()?.id).toBe('b') // a is done: b → c → b
+  })
+
+  it('keeps the selection across a set that refreshes the details, and refreshes the arrow line', async () => {
+    const { h, arrows } = listHost()
+    const chosen: (string | null)[] = []
+    let api!: GameApi
+    await new GameRun(h, defineGame({ setup: (a) => { api = a; a.objectives.onSelect((o) => chosen.push(o?.id ?? null)); a.objectives.set(three()) } })).start()
+    api.objectives.next()
+    const items = three()
+    items[1].detail = '3 min'
+    api.objectives.set(items)
+    expect(api.objectives.selected()?.id).toBe('b')
+    expect(arrows.at(-1)).toBe('20,0:B · 3 min')
+    // told of the two real selections (a at set, b at next) and not of the refresh
+    expect(chosen).toEqual(['a', 'b'])
+  })
+
+  it('answers harmlessly on a host that draws no list', async () => {
+    const { h } = host()
+    let api!: GameApi
+    await new GameRun(h, defineGame({ setup: (a) => { api = a; a.objectives.set(three()); a.objectives.next() } })).start()
+    expect(api.objectives.selected()?.id).toBe('b')
+    expect(api.objectives.list()).toHaveLength(3)
+  })
+})
+
+describe('the player and the models', () => {
+  it('reports where the player is, which way they face and how fast, and null with no player', async () => {
+    const { h, state } = host({ x: 5, y: 6, z: 7 })
+    state.speed = -3
+    h.playerHeading = () => 270
+    let api!: GameApi
+    await new GameRun(h, defineGame({ setup: (a) => { api = a } })).start()
+    expect(api.player()).toEqual({ x: 5, y: 6, z: 7, heading_deg: 270, speed: 3 })
+    h.playerAt = () => null
+    expect(api.player()).toBeNull()
+    expect(api.ground(1, 2)).toBeNull()
+    h.ground = (x, y) => x + y
+    expect(api.ground(1, 2)).toBe(3)
+  })
+
+  it('spawns, moves, shows and removes through the host, and answers null or false without one', async () => {
+    const { h } = host()
+    let api!: GameApi
+    await new GameRun(h, defineGame({ setup: (a) => { api = a } })).start()
+    expect(api.models.spawn('pizza-stack', { x: 1, y: 2 })).toBeNull()
+    expect(api.models.move('m-1', { x: 1, y: 2 })).toBe(false)
+    expect(api.models.where('m-1')).toBeNull()
+    const log: string[] = []
+    h.models = {
+      spawn: (asset, p) => { log.push(`spawn ${asset} ${p.x},${p.y}`); return 'm-1' },
+      move: (id, p) => { log.push(`move ${id} ${p.x},${p.y},${p.z ?? 'ground'}`); return true },
+      show: (id, on) => { log.push(`show ${id} ${on}`); return true },
+      remove: (id) => { log.push(`remove ${id}`); return true },
+      where: () => ({ x: 1, y: 2, z: 3 }),
+    }
+    expect(api.models.spawn('pizza-stack', { x: 1, y: 2 })).toBe('m-1')
+    expect(api.models.move('m-1', { x: 3, y: 4, z: 9 })).toBe(true)
+    expect(api.models.move('m-1', { x: NaN, y: 4 })).toBe(false)
+    api.models.show('m-1', false)
+    api.models.remove('m-1')
+    expect(log).toEqual(['spawn pizza-stack 1,2', 'move m-1 3,4,9', 'show m-1 false', 'remove m-1'])
   })
 })

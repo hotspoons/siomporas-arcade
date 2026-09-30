@@ -21,10 +21,12 @@ import type { UiMode } from './gamepolicy'
 export type Action =
   | 'throttle' | 'brake' | 'steerLeft' | 'steerRight' | 'handbrake'
   | 'drive' | 'recover' | 'lights' | 'camera' | 'map' | 'fire' | 'craft' | 'walk' | 'interface'
+  | 'objPrev' | 'objNext'
   | 'pause' | 'confirm'
 export const ACTIONS: Action[] = [
   'throttle', 'brake', 'steerLeft', 'steerRight', 'handbrake',
   'drive', 'recover', 'lights', 'camera', 'map', 'fire', 'craft', 'walk', 'interface',
+  'objPrev', 'objNext',
   'pause', 'confirm',
 ]
 export const ACTION_LABELS: Record<Action, string> = {
@@ -42,6 +44,8 @@ export const ACTION_LABELS: Record<Action, string> = {
   craft: 'Next craft (Shift: previous)',
   walk: 'On foot / fly',
   interface: 'Hide the interface',
+  objPrev: 'Previous objective',
+  objNext: 'Next objective',
   pause: 'Pause menu',
   confirm: 'Confirm',
 }
@@ -60,6 +64,9 @@ export const DEFAULT_KEYS: KeyBindings = {
   craft: ['KeyV'],
   walk: ['KeyB'],
   interface: ['KeyM'],
+  // the objective list pages with Q / E on the keyboard; the D-pad on a pad (Rich, 2026-09-30)
+  objPrev: ['KeyQ'],
+  objNext: ['KeyE'],
   pause: ['Escape'],
   confirm: ['Enter'],
 }
@@ -82,6 +89,8 @@ export const DEFAULT_PAD: PadBindings = {
   craft: ['b4'],
   walk: [],
   interface: [],
+  objPrev: ['b14'],
+  objNext: ['b15'],
   pause: ['b9'],
   confirm: ['b0'],
 }
@@ -99,6 +108,7 @@ export interface AudioSettings {
 
 export interface GameSettingsData {
   keysV?: number
+  padV?: number
   audio: AudioSettings
   keys: KeyBindings
   pad: PadBindings
@@ -112,10 +122,22 @@ export interface GameSettingsData {
 }
 
 export const SETTINGS_KEY = 'apex-corridor.settings.v1'
-const KEYS_VERSION = 1
+/** bump when a NEW default key arrives: saved key lists gain it (a player's own stay) */
+const KEYS_VERSION = 2
+/**
+ * Bump when the default pad LAYOUT changes: the saved pad is replaced by the new defaults.
+ *
+ * Replaced, not merged, because a pad layout is one thing rather than a list of extras — moving
+ * the throttle to the trigger is not a new binding to add beside the shoulder button. The
+ * deep-merge in SettingsStore kept an earlier session's pad under the new defaults, which is how
+ * the accelerator was still on the right shoulder after the defaults said trigger
+ * (Rich, 2026-09-30).
+ */
+const PAD_VERSION = 1
 
 export const DEFAULT_SETTINGS: GameSettingsData = {
   keysV: KEYS_VERSION,
+  padV: PAD_VERSION,
   audio: { master: 0.8, engine: 1, sfx: 0.7, muted: false },
   keys: DEFAULT_KEYS,
   pad: DEFAULT_PAD,
@@ -127,13 +149,22 @@ export const DEFAULT_SETTINGS: GameSettingsData = {
 
 export class GameSettings extends SettingsStore<GameSettingsData> {
   constructor(key = SETTINGS_KEY) {
-    const savedKeysV = Number(SettingsStore.stored(key)?.keysV ?? 0)
+    const stored = SettingsStore.stored(key)
+    const savedKeysV = Number(stored?.keysV ?? 0)
+    const savedPadV = Number(stored?.padV ?? 0)
     super(key, DEFAULT_SETTINGS)
+    let dirty = false
     if (savedKeysV < KEYS_VERSION) {
       mergeMissingKeys(this.data.keys, DEFAULT_KEYS)
       this.data.keysV = KEYS_VERSION
-      this.save()
+      dirty = true
     }
+    if (savedPadV < PAD_VERSION) {
+      this.data.pad = structuredClone(DEFAULT_PAD)
+      this.data.padV = PAD_VERSION
+      dirty = true
+    }
+    if (dirty) this.save()
   }
 
   resetBindings(): void {

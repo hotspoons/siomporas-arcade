@@ -80,3 +80,4 @@ packages/enginesim/packs/
 
 # the asset service's local catalog — a working store, never content
 tools/assetsvc/data/
+probes/.build/

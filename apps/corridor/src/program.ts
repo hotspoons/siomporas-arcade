@@ -54,14 +54,14 @@ export type Hideable = keyof typeof HIDEABLE
  * have a library of interaction types." `transport.ts` implements them; this names them.
  */
 export const TRANSPORT = [
-  'drive', 'walk', 'walk-third', 'fly', 'helicopter', 'omnicopter', 'ornithopter', 'plane', 'jet', 'ufo', 'parkour',
+  'drive', 'walk', 'walk-third', 'fly', 'helicopter', 'omnicopter', 'ornithopter', 'plane', 'jet', 'ufo',
 ] as const
 export type Transport = (typeof TRANSPORT)[number]
 
 /**
  * The ones `transport.ts` flies, as opposed to the ones the viewer already had.
  *
- * `drive` is the car, `fly` is the free camera and `parkour` is a game mode; the rest are craft
+ * `drive` is the car and `fly` is the free camera; the rest are craft
  * with physics. Kept here so a program's `api.transport(...)` and the viewer's switch agree about
  * which is which — a name in one list and not the other is a transport that silently does nothing.
  */
@@ -122,6 +122,8 @@ export interface ProgramHost {
   physics?: PhysicsHost
   /** weapons and damage, when the app has them */
   combat?: CombatHost
+  /** the traffic zones and stunt fixtures this world was authored with */
+  layers?: WorldLayersHost
 }
 
 /** Site metres — x east, y north, z up. The frame every number in a program is in. */
@@ -159,6 +161,46 @@ export interface PhysicsHost {
   onImpact?: (fn: (e: { a: number; b: number; point: Vec3; impulse: number }) => void) => void
   /** give one entity its own handling, for a chase car that is not the player's */
   setEntityProfile?: (entity: number, id: string, overrides?: Record<string, number>) => void
+}
+
+/**
+ * The TRAFFIC AREAS somebody painted, and the STUNT FIXTURES somebody placed.
+ *
+ * Rich, 2026-09-29: *"I don't see any of these placed assets like traffic or stunts appearing in
+ * the program editor. I would have presumed they would show up as placeable references in code so
+ * we do things like trigger traffic and show and hide stunts."*
+ *
+ * The same shape as `placed()` and for the same reason: the editor lists the ids beside the code,
+ * which is how you know what to type. Optional throughout, so a dry run with no world still steps.
+ */
+export interface WorldLayersHost {
+  /* ---- races ---------------------------------------------------------------------------------- */
+  /** the circuits and stages this world was authored with */
+  raceIds?: () => string[]
+  /** one of them, by id — its name, kind, laps, and how many gates */
+  race?: (id: string) => { id: string; name: string; kind: 'circuit' | 'stage'; laps: number; gates: number } | null
+  /** begin one without driving into its marker. False when there is no such race */
+  startRace?: (id: string) => boolean
+  /** give up whatever is running */
+  abandonRace?: () => void
+  /** what the race is doing now */
+  raceState?: () => { phase: string; course: string | null; time: number; penalties: number; lap: number; laps: number } | null
+
+  /** the ids of the painted traffic zones */
+  trafficIds?: () => string[]
+  /** how busy one is now, 0…1, or null when there is no such zone */
+  trafficDensity?: (id: string) => number | null
+  /** make one busier or clearer, optionally easing over `over` seconds. False when there is no such zone */
+  setTraffic?: (id: string, density: number, opts?: { over?: number }) => boolean
+  /** how busy it is at a point, whatever zone that is — 0 outside every one */
+  trafficAt?: (x: number, y: number) => number
+
+  /** the ids of the stunt fixtures standing on the road */
+  stuntIds?: () => string[]
+  showStunt?: (id: string, on: boolean) => boolean
+  stuntVisible?: (id: string) => boolean | null
+  /** where one is, so a program can put a camera, a checkpoint or a countdown on it */
+  stuntAt?: (id: string) => Vec3 | null
 }
 
 /**
@@ -280,6 +322,56 @@ export interface GameApi {
    * readers answer null, so a program that uses physics is still a program you can step in a test.
    * `available` is how a program asks rather than guesses.
    */
+  /**
+   * THE WORLD'S OWN LAYERS: the traffic somebody painted and the stunts somebody placed.
+   *
+   * Editor-placed things, as references a program can name — the same idea as `placed(id)` for a
+   * water tower, and the reason `ids()` exists is so a program can look rather than be told.
+   *
+   * SAFE WITH NO WORLD. A dry run has no zones and no fixtures; every setter answers false and
+   * every reader answers null or zero, so a program that closes a bridge is still a program you can
+   * step in a test.
+   */
+  readonly traffic: {
+    /** every painted zone, by id */
+    ids(): string[]
+    /** how busy one is now, 0…1 */
+    density(id: string): number | null
+    /**
+     * Make one busier or clearer. `over` eases it in seconds rather than in one frame, because a
+     * road that fills up between two frames looks like a bug rather than like a jam.
+     */
+    set(id: string, density: number, opts?: { over?: number }): boolean
+    /** how busy it is at a point — 0 outside every zone, which is what a world with none is */
+    at(x: number, y: number): number
+  }
+  /**
+   * THE RACES THIS WORLD WAS AUTHORED WITH.
+   *
+   * A program picks one by id and starts it, or watches the one the player drove into. The ids are
+   * what the editor lists beside the code — the same rule as `placed`, `traffic` and `stunts`.
+   */
+  readonly races: {
+    /** every circuit and stage, by id */
+    ids(): string[]
+    /** one of them: its name, kind, laps and gate count */
+    get(id: string): { id: string; name: string; kind: 'circuit' | 'stage'; laps: number; gates: number } | null
+    /** begin one. False when this world has no such race */
+    start(id: string): boolean
+    /** give up whatever is running */
+    abandon(): void
+    /** what is happening now — phase, elapsed time, penalties, lap */
+    state(): { phase: string; course: string | null; time: number; penalties: number; lap: number; laps: number } | null
+  }
+  readonly stunts: {
+    /** every fixture standing on the road, by id */
+    ids(): string[]
+    /** show or hide one. The baked road under it comes back when it is hidden */
+    show(id: string, on: boolean): boolean
+    visible(id: string): boolean | null
+    /** where it is, in site metres */
+    where(id: string): Vec3 | null
+  }
   readonly physics: {
     /** is there a physics world behind this run at all */
     available(): boolean
@@ -434,6 +526,28 @@ export class GameRun {
        * number that is not a number is refused here too: `explode` with a radius of NaN reaches
        * Rapier as a query over the whole world.
        */
+      traffic: {
+        ids: () => H.layers?.trafficIds?.() ?? [],
+        density: (id) => H.layers?.trafficDensity?.(id) ?? null,
+        set: (id, d, o) => (H.layers?.setTraffic && typeof id === 'string' && finite(d)
+          ? H.layers.setTraffic(id, Math.max(0, Math.min(1, d)), o)
+          : false),
+        at: (x, y) => (H.layers?.trafficAt && finite(x) && finite(y) ? H.layers.trafficAt(x, y) : 0),
+      },
+      races: {
+        ids: () => H.layers?.raceIds?.() ?? [],
+        get: (id) => H.layers?.race?.(id) ?? null,
+        start: (id) => (typeof id === 'string' && id ? H.layers?.startRace?.(id) ?? false : false),
+        abandon: () => H.layers?.abandonRace?.(),
+        state: () => H.layers?.raceState?.() ?? null,
+      },
+      stunts: {
+        ids: () => H.layers?.stuntIds?.() ?? [],
+        show: (id, on) => H.layers?.showStunt?.(id, !!on) ?? false,
+        visible: (id) => H.layers?.stuntVisible?.(id) ?? null,
+        where: (id) => H.layers?.stuntAt?.(id) ?? null,
+      },
+
       physics: {
         available: () => !!H.physics,
         profile: (id, o) => H.physics?.setProfile?.(id, o),

@@ -6,6 +6,8 @@
 // Point-in-polygon is even-odd (winding not guaranteed). Areas are few and long, so every query
 // goes through a bbox test first; callers that ask per tree or per grass blade should still cache.
 import { DATA_BASE } from './site'
+export { areaOf, inside } from './polygon'
+import { areaOf, inside } from './polygon'
 
 export interface Adjust {
   canopy_scale: number
@@ -122,17 +124,5 @@ export class Adjustments {
 }
 
 /** Even-odd point in polygon. */
-export function inside(poly: [number, number][], x: number, y: number): boolean {
-  let c = false
-  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-    const [xi, yi] = poly[i], [xj, yj] = poly[j]
-    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) c = !c
-  }
-  return c
-}
-
-export function areaOf(poly: [number, number][]): number {
-  let s = 0
-  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) s += poly[j][0] * poly[i][1] - poly[i][0] * poly[j][1]
-  return Math.abs(s) / 2
-}
+/* `inside` and `areaOf` moved to `polygon.ts` — see the note there — and are re-exported above
+   so every existing caller is unaffected. */

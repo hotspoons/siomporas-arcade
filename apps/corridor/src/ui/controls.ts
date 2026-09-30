@@ -244,6 +244,14 @@ export function textField(o: {
   /** a line under it, in the smaller ink — what the field is for, not what to type */
   note?: string
   onChange: (v: string) => void
+  /**
+   * Every keystroke, for a field whose whole job is to filter a list as you type.
+   *
+   * `onChange` fires on blur, which is right for a value being EDITED and wrong for a search box —
+   * you type three letters and nothing happens until you click elsewhere. `textArea` already had
+   * this pair for the same reason; this is the same shape, not a new idea.
+   */
+  onInput?: (v: string) => void
 }): HTMLElement {
   const wrap = el('label', 'field text')
   wrap.append(el('span', 'field-label', o.label))
@@ -255,6 +263,9 @@ export function textField(o: {
   i.value = o.value
   if (o.placeholder) i.placeholder = o.placeholder
   i.onchange = () => o.onChange(i.value)
+  if (o.onInput) i.oninput = () => o.onInput!(i.value)
+  // the library's own shortcuts must not fire while somebody is typing a search
+  i.onkeydown = (e) => e.stopPropagation()
   wrap.append(i)
   if (o.note) {
     wrap.classList.add('with-note')

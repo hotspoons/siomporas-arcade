@@ -38,6 +38,21 @@ function revRange(p: EngineProfile | null | undefined): { idle: number; redline:
   return { idle: Math.min(1200, Math.max(600, redline * 0.12)), redline }
 }
 
+/**
+ * The range to actually drive: the vehicle's when it has one, else the script's.
+ *
+ * CLAMPED TO THE SCRIPT. engine-sim's own governor and inertia belong to the script, and asking a
+ * 7000 rpm engine for 12000 does not make a higher note, it makes a limiter fight. So the vehicle's
+ * redline is honoured up to what the script can do and reported no higher.
+ */
+function wanted(revs: { idle: number; redline: number } | undefined | null, p: EngineProfile | null | undefined): { idle: number; redline: number } {
+  const script = revRange(p)
+  if (!revs || !(revs.redline > 0)) return script
+  const redline = Math.max(1000, Math.min(script.redline, revs.redline))
+  const idle = Math.max(300, Math.min(redline - 500, revs.idle > 0 ? revs.idle : script.idle))
+  return { idle, redline }
+}
+
 export interface ListenOptions {
   /** the engine script to load — a `path` from the enginesim catalog */
   setup: string
@@ -49,6 +64,19 @@ export interface ListenOptions {
   throttle?: number
   /** stop on its own after this long, seconds. 0 = until stopped */
   seconds?: number
+  /**
+   * The rev range from the VEHICLE, rpm — `engine.idle_rpm` and `engine.redline_rpm`.
+   *
+   * Rich, 2026-09-29: *"we need to apply the min and max RPMs from the engine config to the sound
+   * profile, and when we previs max revs would be what ever you entered, not what the engine
+   * profile has in it by default for max"*. Without this the bench revs to the SCRIPT's redline:
+   * you type 6000 for a diesel, drag the slider to the top, and hear an 8500 rpm V10, which is a
+   * bench that tells you about somebody else's engine.
+   *
+   * Left out, the script's own range is used, which is right for listening to a script you have not
+   * attached to anything yet.
+   */
+  revs?: { idle: number; redline: number }
   onState?: (s: ListenState) => void
 }
 
@@ -88,6 +116,8 @@ class Bench {
   private timer: ReturnType<typeof setTimeout> | null = null
   private token = 0
   private playing: string | null = null
+  /** the vehicle's rev range while one is attached, so `rev()` means the same as the form says */
+  private revs: { idle: number; redline: number } | null = null
 
   get running(): string | null {
     return this.playing
@@ -128,7 +158,8 @@ class Bench {
       sim.setStarter(true)
       sim.setFree({ dyno: true })
       setTimeout(() => sim.setStarter(false), 600)
-      const { idle, redline } = revRange(profile)
+      const { idle, redline } = wanted(o.revs, profile)
+      this.revs = { idle, redline }
       const t = Math.max(0, Math.min(1, o.throttle ?? 0.35))
       sim.drive(idle + (redline - idle) * t, t)
 
@@ -152,9 +183,19 @@ class Bench {
   /** Change the rev point without restarting: what a slider wants. */
   rev(t: number): void {
     if (!this.sim) return
-    const { idle, redline } = revRange(this.sim.profile)
+    const { idle, redline } = this.revs ?? revRange(this.sim.profile)
     const x = Math.max(0, Math.min(1, t))
     this.sim.drive(idle + (redline - idle) * x, x)
+  }
+
+  /** Retune the range while it is running — the redline field is a number people edit mid-listen. */
+  setRevs(revs: { idle: number; redline: number } | null): void {
+    this.revs = revs ? wanted(revs, this.sim?.profile) : null
+  }
+
+  /** What the rev slider's 0 and 1 currently mean, for a readout beside it. */
+  get revRangeNow(): { idle: number; redline: number } | null {
+    return this.revs
   }
 
   setGain(v: number): void {

@@ -26,6 +26,7 @@ import { SparkRenderer, SplatMesh } from '@sparkjsdev/spark'
 import { geodeticToEcef, enuBasis } from '@apex/engine/geo/wgs84'
 import { DATA_BASE } from './site'
 import * as T from './tuning'
+import { angleBetween, shouldResort } from './splatsort'
 
 /** `world.json` as gaussworks' merge writes it */
 interface SplatWorld {
@@ -101,6 +102,8 @@ interface Tile {
 }
 
 const SQ = (x: number) => x * x
+const SCRATCH_EYE = new THREE.Vector3()
+const SCRATCH_DIR = new THREE.Vector3()
 
 export class SplatField {
   readonly group = new THREE.Group()
@@ -123,6 +126,16 @@ export class SplatField {
   private loads = 0
   private fails = 0
   readonly id: string
+  /** where the camera was when the order was last rebuilt */
+  private sortedAt = new THREE.Vector3(Infinity, Infinity, Infinity)
+  /** when the order was last rebuilt, so the timer can be the floor it is meant to be */
+  private sortedAtMs = 0
+  /** which way the camera faced at the last sort: turning round presents unsorted gaussians */
+  private sortedDir = new THREE.Vector3(0, 0, -1)
+  /** something other than the camera changed — a tile arrived or went — so the order must be redone */
+  private dirty = true
+  /** how many re-sorts have been asked for, for the performance panel and for probes */
+  sorts = 0
 
   private constructor(id: string) {
     this.id = id
@@ -253,11 +266,85 @@ export class SplatField {
     // the capture on and off, and the p90 is 59 ms against 18 ms. See
     // SPLAT_SORT_MS in tuning.ts for the numbers.
     field.spark = new SparkRenderer({ renderer, minSortIntervalMs: T.SPLAT_SORT_MS })
+    /*
+     * WE DECIDE WHEN TO RE-SORT, NOT SPARK.
+     *
+     * Rich, 2026-09-29, from the performance panel: *"the splats sorting frequency seems to be
+     * driving the stalls… I don't understand why the sort needs to be run at all, or at least as
+     * often as it is."*
+     *
+     * It needs to run because gaussians are ALPHA-BLENDED: the blend is order-dependent, so they
+     * have to be drawn back-to-front from wherever you are standing. It ran as often as it did
+     * because Spark's own test for "the view changed" is `moved more than 1 mm, or turned more than
+     * 2.6°` — which in a moving car is true on every single frame, so `minSortIntervalMs` was the
+     * only thing holding it back.
+     *
+     * AND TURNING CANNOT CHANGE THE ORDER AT ALL. `sortRadial` sorts by DISTANCE from the camera,
+     * which is rotation-invariant; a car going round a bend re-sorted for nothing. So: auto-update
+     * off, and `step()` below asks for one only when the camera has TRANSLATED far enough to
+     * matter, where "enough" is a fraction of the distance to the nearest capture.
+     */
+    field.spark.autoUpdate = false
+    field.spark.sortRadial = true
     field.group.add(field.spark)
     return field
   }
 
   /** stream: the nearest unloaded tiles within range, and evict what has gone far away */
+  /**
+   * Decide whether the splat order needs rebuilding this frame, and rebuild it if so.
+   *
+   * THE COST IS NOT THE SORT. The sort itself runs in a worker. What a re-sort costs is a GPU pass
+   * that writes every gaussian's depth, a readback of that buffer to the CPU — about 10 MB with
+   * 2.5M gaussians resident — and an ordering texture of the same size uploaded back. A 20 MB round
+   * trip through the bus, per sort, on the frame that asks for it. That is the stall.
+   *
+   * THE RULE IS TWO GATES, and the TIMER is the one that matters at speed: a sort may happen at
+   * most once every `SPLAT_SORT_MS`, and only then if the camera has also moved far enough for the
+   * order to have changed. At 180 mph the timer decides everything; parked, the distance decides,
+   * and the answer is never. See `splatsort.ts` — the first version had only the distance gate,
+   * which fires MORE often the faster you drive, which is backwards for this game.
+   */
+  step(camera: THREE.Camera, scene: THREE.Scene) {
+    const spark = this.spark
+    if (!spark) return
+    /*
+     * OFF STILL NEEDS ONE MORE UPDATE. `update` drops every tile the moment the knob goes to zero,
+     * but Spark draws from what it was last handed, not from the scene graph — so with the sort
+     * skipped as well the dropped tiles kept being drawn until something else forced a sort, which
+     * in practice was a reload (Rich, 2026-09-30: "Splats can't be disabled unless you refresh").
+     * One update with the tiles gone is what tells it, and then it really is off.
+     */
+    if (!T.SPLAT_ENABLED) {
+      if (this.dirty) { this.dirty = false; spark.update({ scene, camera }) }
+      return
+    }
+    const eye = camera.getWorldPosition(SCRATCH_EYE)
+    const dir = camera.getWorldDirection(SCRATCH_DIR)
+    const now = performance.now()
+    const since = now - this.sortedAtMs
+    const turned = angleBetween(this.sortedDir, dir)
+    if (!this.dirty && !shouldResort(since, this.sortedAt.distanceTo(eye), turned, this.nearestLoaded(eye))) return
+    this.dirty = false
+    this.sortedAt.copy(eye)
+    this.sortedDir.copy(dir)
+    this.sortedAtMs = now
+    this.sorts++
+    spark.update({ scene, camera })
+  }
+
+  /** Metres to the nearest loaded tile's edge, or Infinity when none are loaded. */
+  private nearestLoaded(eye: THREE.Vector3): number {
+    let best = Infinity
+    const x = eye.x
+    const y = -eye.z
+    for (const t of this.tiles) {
+      if (!t.mesh) continue
+      best = Math.min(best, Math.max(0, Math.hypot(t.cx - x, t.cy - y) - t.r))
+    }
+    return best
+  }
+
   update(eyeSiteX: number, eyeSiteY: number) {
     if (!T.SPLAT_ENABLED) {
       for (const t of this.tiles) this.drop(t)
@@ -287,6 +374,7 @@ export class SplatField {
       const mesh = new SplatMesh({ url: `${DATA_BASE}${t.name}` })
       await mesh.initialized
       t.mesh = mesh
+      this.dirty = true
       t.bytes = t.gaussians * 32 // the packed form, near enough for a budget
       this.bytes += t.bytes
       this.loads++
@@ -302,6 +390,7 @@ export class SplatField {
 
   private drop(t: Tile) {
     if (!t.mesh) return
+    this.dirty = true
     this.group.remove(t.mesh)
     t.mesh.dispose?.()
     t.mesh = null

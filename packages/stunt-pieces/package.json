@@ -1,0 +1,11 @@
+{
+  "name": "@apex/stunt-pieces",
+  "private": true,
+  "version": "0.0.0",
+  "license": "Apache-2.0",
+  "type": "module",
+  "description": "The stunt-track vocabulary: loops, corkscrews, banked turns, jumps and tunnels as data plus a local path per lane, and the Hermite link that joins two of them. No renderer, no game loop, no dependencies.",
+  "exports": {
+    "./*": "./src/*.ts"
+  }
+}

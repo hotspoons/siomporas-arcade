@@ -16,7 +16,7 @@
 // way; the one case that will want them apart — a sensor volume that reports a hit without
 // pushing — is a sensor, which is a different flag entirely.
 
-/** A world role. One bit each; there is room for sixteen and eleven are spoken for. */
+/** A world role. One bit each; there is room for sixteen and twelve are spoken for. */
 export const LAYER = {
   /** the ground: heightfield tiles, the road surface, anything you drive ON */
   terrain: 1 << 0,
@@ -40,6 +40,24 @@ export const LAYER = {
   trigger: 1 << 9,
   /** water surfaces: queried for buoyancy, never solid */
   water: 1 << 10,
+  /**
+   * A stunt track: a drivable surface the WHEELS stand on and the BODY passes through.
+   *
+   * Rich, 2026-09-29, of a car stopping dead at the foot of a loop: *"it feels like an inelastic
+   * collision stopping the car in its tracks."* It was one. Measured at the stop: five contact
+   * points between the chassis cuboid and the track, with a contact normal of (−0.92, 0, −0.38) —
+   * dead horizontal, which is a WALL. And a wall is what a loop is, from the outside: the road
+   * stands up in front of you and you are meant to be carried up it by your wheels. A car is not
+   * pitched over far enough to meet it face-on until it is already climbing, so the bumper arrives
+   * first and the normal impulse takes the whole of the speed. Friction never gets a say, which is
+   * why a skid plate did not help.
+   *
+   * So the body does not collide with it at all. The wheel rays do — `QUERY.ground` includes this —
+   * and they are what hold the car on a surface, including upside down. It is the same bargain
+   * STUNTIN' itself makes with a car model that follows the lane, and the cost is honest: you
+   * cannot crash INTO the structure of a loop, only fall off it.
+   */
+  track: 1 << 11,
 } as const
 
 export type Layer = keyof typeof LAYER
@@ -76,6 +94,11 @@ const TOUCHES: Record<Layer, Layer[]> = {
   projectile: ['terrain', 'structure', 'prop', 'vehicle', 'character', 'limb', 'trigger'],
   trigger: ['vehicle', 'character', 'projectile'],
   water: ['vehicle', 'character', 'debris', 'projectile'],
+  /*
+   * NOT `vehicle`, and that is the whole point of the layer. Wheel colliders, where a game gives
+   * its wheels real shapes instead of rays, still meet it.
+   */
+  track: ['wheel'],
 }
 
 function mask(of: Layer[]): number {
@@ -109,8 +132,8 @@ export function queryGroups(...layers: Layer[]): number {
 
 /** Pre-built query masks for the three questions almost every game asks. */
 export const QUERY = {
-  /** what a wheel ray or a footstep should stand on */
-  ground: queryGroups('terrain', 'structure', 'prop'),
+  /** what a wheel ray or a footstep should stand on — including a stunt track the body ignores */
+  ground: queryGroups('terrain', 'structure', 'prop', 'track'),
   /** what stops a bullet or blocks line of sight for an explosion */
   solid: queryGroups('terrain', 'structure', 'prop', 'vehicle'),
   /** what an explosion should throw */

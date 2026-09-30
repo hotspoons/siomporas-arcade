@@ -52,6 +52,17 @@ export interface VehicleSpec {
   wheelRadius: number
   /** where the suspension mounts sit, relative to the body origin, m (negative = under the floor) */
   axleY?: number
+  /**
+   * The chassis collider's shape.
+   *
+   * `box` is a cuboid and is what every car had until the loop. `sled` is the same box with its
+   * underside cut like an off-road truck's: the bottom face is shorter and narrower than the top,
+   * so the belly meets the road at approach and departure angles rather than with a sharp edge,
+   * and every corner is rounded by `skidRadius`. See the constructor for why that matters.
+   */
+  shape?: 'box' | 'sled'
+  /** the sled's corner radius, m; also how far its bottom face is inset from its top, per metre of height */
+  skidRadius?: number
 }
 
 /** A sensible small saloon: the Kestrel-ish 4.4 × 1.9 m body the corridor already draws. */
@@ -65,6 +76,9 @@ export const DEFAULT_SPEC: VehicleSpec = {
   track: 1.8,
   wheelRadius: 0.34,
   axleY: -0.35,
+  // the skid-plate hull, for every car: see `chassisShape`. A box is still there for anything that asks.
+  shape: 'sled',
+  skidRadius: 0.18,
 }
 
 export interface VehicleInput {
@@ -163,14 +177,26 @@ export class Vehicle {
     // The chassis shape. A cuboid, not the silhouette: the mesh's raked screen and fastback change
     // nothing about how a car hits a wall, and a convex hull of the body costs more in every
     // contact test for a difference nobody can see. A game that wants a shaped shell passes its own.
-    const desc = R.ColliderDesc.cuboid(s.halfLength, s.halfHeight, s.halfWidth)
+    const desc = chassisShape(R, s)
       .setMassProperties(
         s.massKg,
         { x: s.comX ?? 0, y: s.comY ?? 0, z: 0 },
         boxInertia(s.massKg, s.halfLength * 2, s.halfHeight * 2, s.halfWidth * 2),
         { x: 0, y: 0, z: 0, w: 1 },
       )
-      .setFriction(0.4)
+      /*
+       * THE SKID PLATE. `chassisFriction` is how much the BODY grips what it scrapes, and it is low
+       * for a stunt car on purpose — see the note on the field. 0.4 is the old value and stays the
+       * default, so nothing that did not ask for a skid plate has changed.
+       */
+      .setFriction(profile.chassisFriction ?? 0.4)
+      /*
+       * AND THE SKID PLATE WINS. Rapier combines two colliders' friction by AVERAGING them unless
+       * told otherwise, so a 0.04 skid plate on a 1.1 stunt ribbon was really 0.57 — the plate
+       * was never doing what its number said. `Min` makes the lower of the two the one that
+       * applies, which is what a plate of steel under a car means.
+       */
+      .setFrictionCombineRule(R.CoefficientCombineRule.Min)
       .setRestitution(0.1)
     phys.describe(desc, 'vehicle')
     this.collider = phys.world.createCollider(desc, this.body)
@@ -206,6 +232,8 @@ export class Vehicle {
    */
   applyProfile(p: DriveProfile) {
     this.profile = p
+    // the skid plate too, so swapping profiles mid-drive really does swap all of the handling
+    this.collider?.setFriction(p.chassisFriction ?? 0.4)
     const c = this.controller
     for (let i = 0; i < 4; i++) {
       c.setWheelSuspensionRestLength(i, p.suspensionRest)
@@ -381,10 +409,24 @@ export class Vehicle {
     for (let i = 0; i < 4; i++) this.controller.setWheelEngineForce(i, 0)
     for (const i of driven) {
       const want = drive / driven.length
-      const load = this.controller.wheelSuspensionForce(i) || staticLoad
+      /*
+       * THE FLOOR UNDER THE LOAD. `wheelSuspensionForce` is an instantaneous reading and it falls to
+       * nearly nothing whenever a wheel goes light — over a crest, into a dip, and above all on the
+       * concave entry to a ramp, where the nose rises and the back unloads. Taken literally it sets
+       * the traction budget to zero and the engine delivers nothing at the exact moment the car is
+       * trying to climb. See `tractionFloor`.
+       */
+      const raw = this.controller.wheelSuspensionForce(i) || staticLoad
+      const load = Math.max(raw, staticLoad * (p.tractionFloor ?? 0.25))
       const budget = (this.controller.wheelFrictionSlip(i) ?? 1) * load
       const side = Math.abs(this.controller.wheelSideImpulse(i) ?? 0) / dt
-      const room = Math.sqrt(Math.max(0, budget * budget - side * side))
+      /*
+       * WHAT THE SIDE FORCE LEAVES — with a floor. See `driveShare`: at the limit the circle leaves
+       * nothing, and a car that cannot accelerate while it corners is a car that feels broken long
+       * before it feels realistic.
+       */
+      const circle = Math.sqrt(Math.max(0, budget * budget - side * side))
+      const room = Math.max(circle, budget * (p.driveShare ?? 0.33))
       const got = clamp(want, -room, room)
       demanded += Math.abs(want)
       delivered += Math.abs(got)
@@ -532,6 +574,95 @@ export class Vehicle {
   /* ---- damage ------------------------------------------------------------------------------ */
 
   /**
+   * Hold the car onto a surface that is not the ground: the inside of a loop, a banked corkscrew.
+   *
+   * WHY A RAY-CAST VEHICLE NEEDS THIS AT ALL. Each wheel casts a ray along the CHASSIS' own down
+   * axis, so a car whose body is level cannot feel a road that has stood up in front of it: the ray
+   * points at the field, not at the track. Left alone the car drives straight through a loop, which
+   * is exactly what it did once the body stopped colliding with it (Rich, 2026-09-29: *"the car just
+   * drove right through the loop"*). Align the body with the surface and the rays point INTO it, the
+   * suspension loads, and the wheels carry the car round — upside down included, which is the whole
+   * trick and is how every arcade racer has ever drawn a loop.
+   *
+   * TWO PARTS, AND BOTH ARE NEEDED:
+   *
+   *   ALIGN — turn the chassis so its up matches the surface's. A torque impulse about the axis
+   *   between the two, damped by however fast it is already turning that way, so it settles rather
+   *   than oscillates.
+   *
+   *   PULL — extra gravity along the surface's DOWN. Without it the car needs enough speed to hold
+   *   itself on by centripetal force alone, which for a forty-metre loop is 20 m/s at the top and
+   *   more than any suspension can take at the bottom. With it, a loop is drivable at the speed the
+   *   track was drawn for.
+   *
+   * `strength` fades both off at the edges of the assist's reach, so leaving a fixture hands the car
+   * back to ordinary gravity rather than dropping it.
+   */
+  stick(up: { x: number; y: number; z: number }, dt: number, opts: { strength?: number; align?: number; pull?: number } = {}): void {
+    const k = Math.max(0, Math.min(1, opts.strength ?? 1))
+    if (k <= 0 || dt <= 0) return
+    const R = rapier()
+    const len = Math.hypot(up.x, up.y, up.z)
+    if (!(len > 1e-6)) return
+    const tx = up.x / len
+    const ty = up.y / len
+    const tz = up.z / len
+
+    // the body's own up, from its rotation
+    const q = this.body.rotation()
+    const u = rotate(q, 0, 1, 0)
+
+    /*
+     * THE AXIS TO TURN ABOUT is u × target, whose length is the sine of the angle between them, and
+     * whose direction is the right-hand axis of the shorter rotation. Past 90° the sine falls again,
+     * so the angle comes from atan2 of the two — otherwise a car that is very nearly upside down
+     * corrects more and more weakly the more wrong it is.
+     */
+    const ax = u.y * tz - u.z * ty
+    const ay = u.z * tx - u.x * tz
+    const az = u.x * ty - u.y * tx
+    const sin = Math.hypot(ax, ay, az)
+    const cos = u.x * tx + u.y * ty + u.z * tz
+    const angle = Math.atan2(sin, cos)
+
+    /*
+     * THE ALIGNMENT ONLY APPLIES WHERE THE WHEELS CANNOT DO IT.
+     *
+     * A car with its tyres on the road is already turned by the road: that is what a suspension is.
+     * Applying a turning torque as well does not rotate the car — the tyres hold it — so the whole
+     * of it goes into dragging them sideways, and the drag stops the car. Measured on the loop's
+     * entry with the scenery cleared away: all four wheels down, the chassis touching NOTHING, and
+     * 29.8 m/s scrubbed off in a second and a half. Two g of braking out of an assist that was
+     * supposed to help.
+     *
+     * So it fades out as the wheels find the ground and comes back the moment they leave it, which
+     * is where a ray-cast car genuinely cannot turn itself: in the air, and on the way over the top
+     * of a loop.
+     */
+    let grounded = 0
+    for (let i = 0; i < 4; i++) if (this.controller.wheelIsInContact(i)) grounded++
+    const airborne = 1 - grounded / 4
+    const authority = AIR_ALIGN_FLOOR + (1 - AIR_ALIGN_FLOOR) * airborne
+
+    if (sin > 1e-6) {
+      const nx = ax / sin
+      const ny = ay / sin
+      const nz = az / sin
+      const w = this.body.angvel()
+      const along = w.x * nx + w.y * ny + w.z * nz
+      const gain = (opts.align ?? 6) * k * authority
+      // proportional to the error, damped by the rate: a spring, in the axis that matters
+      const impulse = (angle * gain - along * gain * 0.35) * this.spec.massKg * dt
+      this.body.applyTorqueImpulse({ x: nx * impulse, y: ny * impulse, z: nz * impulse }, true)
+    }
+
+    // and the pull, along the surface's down
+    const pull = (opts.pull ?? 12) * k * this.spec.massKg * dt
+    this.body.applyImpulse({ x: -tx * pull, y: -ty * pull, z: -tz * pull }, true)
+    void R
+  }
+
+  /**
    * Impacts on this chassis become damage.
    *
    * The scale: a 1400 kg car stopping dead from 10 m/s delivers 14,000 N·s, and that should be a
@@ -580,6 +711,65 @@ export class Vehicle {
  * centre of mass is what makes a profile's `antiRoll` and `airPitch` mean the same thing from one
  * car to the next.
  */
+/**
+ * How much of the alignment still applies with all four wheels down.
+ *
+ * Not zero: a little keeps the car settled onto a surface whose angle is changing under it. Not
+ * much: any more and the torque fights the tyres, which is a brake.
+ */
+const AIR_ALIGN_FLOOR = 0.12
+
+/** Rotate (x, y, z) by a quaternion. Written out because this is the only place that needs it. */
+function rotate(q: { x: number; y: number; z: number; w: number }, x: number, y: number, z: number): { x: number; y: number; z: number } {
+  const ix = q.w * x + q.y * z - q.z * y
+  const iy = q.w * y + q.z * x - q.x * z
+  const iz = q.w * z + q.x * y - q.y * x
+  const iw = -q.x * x - q.y * y - q.z * z
+  return {
+    x: ix * q.w + iw * -q.x + iy * -q.z - iz * -q.y,
+    y: iy * q.w + iw * -q.y + iz * -q.x - ix * -q.z,
+    z: iz * q.w + iw * -q.z + ix * -q.y - iy * -q.x,
+  }
+}
+
+/**
+ * The chassis collider.
+ *
+ * WHY A SLED AND NOT A BOX. Rich, 2026-09-29, on the loop: *"if that includes shaping the physical
+ * shape of the car for the physics engine like an offroad suv with skidplates to prevent chunking
+ * the road, let's do it."* It does. A loop's entry is a concave trough and the springs bottom out
+ * under five g, so the body meets the ribbon — and a flat-bottomed box meets a rising surface with
+ * its front bottom EDGE, which digs in. Cutting the underside back at each end (the approach and
+ * departure angles of an off-road truck) and rounding every corner means the body meets the road
+ * with a curve that rides up it, the way a skid plate is meant to, and the convex hull has no edge
+ * for a tessellated surface to catch.
+ *
+ * The hull is eight points on top and eight underneath, inset by the corner radius per metre of
+ * height, then rounded. It is still convex, so it costs what a box costs.
+ */
+function chassisShape(R: ReturnType<typeof rapier>, s: VehicleSpec) {
+  if (s.shape !== 'sled') return R.ColliderDesc.cuboid(s.halfLength, s.halfHeight, s.halfWidth)
+  const r = s.skidRadius ?? 0.18
+  const hl = s.halfLength - r
+  const hh = s.halfHeight - r
+  const hw = s.halfWidth - r
+  // the bottom is drawn in by the full height's worth of rake at each end, and a little across
+  const rake = Math.min(hl * 0.35, s.halfHeight * 1.2)
+  const tuck = Math.min(hw * 0.3, s.halfHeight * 0.4)
+  const pts: number[] = []
+  for (const sx of [-1, 1]) {
+    for (const sz of [-1, 1]) {
+      pts.push(sx * hl, hh, sz * hw)
+      pts.push(sx * (hl - rake), -hh, sz * (hw - tuck))
+      // a waist, so the sides stay vertical down to the sill and only the belly tucks in
+      pts.push(sx * hl, -hh * 0.2, sz * hw)
+    }
+  }
+  const hull = R.ColliderDesc.roundConvexHull(new Float32Array(pts), r)
+  if (!hull) throw new Error('vehicle: the sled hull is degenerate — halfLength/halfHeight/halfWidth must all exceed skidRadius')
+  return hull
+}
+
 function boxInertia(mass: number, l: number, h: number, w: number): { x: number; y: number; z: number } {
   const k = mass / 12
   return { x: k * (h * h + w * w), y: k * (l * l + w * w), z: k * (l * l + h * h) }

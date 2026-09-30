@@ -49,6 +49,7 @@ export const LAYER_GROUPS: { title: string; layers: { id: string; label: string;
     title: 'Nature',
     layers: [
       { id: 'trees', label: 'Trees', on: true },
+      { id: 'splats', label: 'Captured world (splats)', on: true },
       { id: 'grass', label: 'Grass & ground cover', on: true },
       { id: 'rocks', label: 'Rock faces', on: true },
       { id: 'water', label: 'Water', on: true },
@@ -131,8 +132,8 @@ const KEYS: { group: string; rows: [string, string][] }[] = [
     rows: [
       ['W A S D', 'move'],
       ['Q E', 'turn'],
-      ['R F', 'zoom'],
-      ['T G', 'up / down'],
+      ['R F', 'up / down'],
+      ['T G', 'zoom (the wheel does it too)'],
       ['Shift', 'faster'],
       ['drag', 'orbit · right-drag looks'],
     ],
@@ -155,10 +156,9 @@ const KEYS: { group: string; rows: [string, string][] }[] = [
       ['H', 'top down'],
       ['X', 'copy a link to this exact view'],
       ['F6', 'tuning'],
+      ['F7', 'performance stats'],
       ['M', 'hide the interface'],
       ['B', 'on foot / back to flying'],
-      ['G', 'Squishy Hunt on this site'],
-      ['P', 'Parkour on this site'],
       ['Esc', 'close what is open'],
     ],
   },
@@ -171,12 +171,17 @@ const AA_LABEL: Record<Exclude<AAMode, 'auto'>, string> = {
   off: 'none',
 }
 
+/** Settings → Display → Trees */
+export type TreeStyle = 'realistic' | 'cards' | 'lollipop'
+
 export interface ViewerUIOpts {
   /** the AA mode changed; MSAA needs a reload, the post-process ones do not */
   onAAChange?: (m: AAMode) => void
   onSite: (slug: string) => void
   onSeason: (s: Season) => void
   onStyle: (s: Style) => void
+  /** which trees to draw: models with cards beyond, cards only, or the editor's lollipops */
+  onTrees: (t: TreeStyle) => void
   onRelief: (k: number) => void
   onWeather: (w: Weather) => void
   onLayers: (layers: Record<string, boolean>) => void
@@ -185,6 +190,8 @@ export interface ViewerUIOpts {
   onTop: () => void
   onStance: () => void
   onTune: () => void
+  /** the performance panel was switched on or off */
+  onPerf?: (on: boolean) => void
   onStructure: (index: number) => void
   /** an address, place or road was picked from the search box: go there */
   onGoto: (hit: { label: string; x: number; z: number; kind: string }) => void
@@ -418,6 +425,16 @@ export class ViewerUI {
         options: RELIEFS.map((k) => ({ value: String(k), label: k === 1 ? '1× as measured' : `${k}× hills` })),
         onChange: (v) => this.o.onRelief(Number(v)),
       })),
+      select<TreeStyle>({
+        label: 'Trees',
+        value: 'realistic',
+        options: [
+          { value: 'realistic', label: 'Realistic — models, cards beyond' },
+          { value: 'cards', label: 'Basic — impostor cards only' },
+          { value: 'lollipop', label: 'Lollipops — the editor’s trees' },
+        ],
+        onChange: (v) => this.o.onTrees(v),
+      }),
       select<Weather>({
         label: 'Weather',
         value: WEATHERS[0],
@@ -430,6 +447,26 @@ export class ViewerUI {
     // Rendering, not tuning: MSAA is a WebGL context attribute, so unlike a tuning knob
     // it cannot be nudged while you watch it. The reasoning lives in render.ts; the panel
     // just says what is on.
+    /*
+     * THE PERFORMANCE PANEL. Rich, 2026-09-29: *"Can we add a setting to show a performance stats
+     * display that includes FPS, memory, p95/p99 info, cpu time, etc.?"* Here rather than in the
+     * tuning panel because it is a thing you SWITCH ON while you play, not a knob you sweep; and
+     * remembered, because the person who wants it wants it every time.
+     */
+    const p = group('Performance')
+    bodyOf(p).append(
+      toggle({
+        label: 'Show the stats panel',
+        value: perfWanted(),
+        note: 'frame rate, p95 and p99, the worst frame, stalls, draw calls and heap — F7',
+        onChange: (v) => {
+          try { localStorage.setItem(PERF_KEY, v ? '1' : '0') } catch { /* private window */ }
+          this.o.onPerf?.(v)
+        },
+      }),
+    )
+    host.append(p)
+
     const slug = this.manifest?.slug ?? ''
     const r = group('Rendering')
     const now = readout('Now', AA_LABEL[resolvedAA(slug)])
@@ -623,6 +660,24 @@ export class ViewerUI {
   setPos(text: string) {
     this.posEl.textContent = text
   }
+}
+
+const PERF_KEY = 'corridor.perf'
+
+/** Was the performance panel left on? Read at start-up and by the settings tab. */
+export function perfWanted(): boolean {
+  try {
+    return localStorage.getItem(PERF_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+/** Remember it, for the key that toggles it as well as for the switch. */
+export function setPerfWanted(on: boolean): void {
+  try {
+    localStorage.setItem(PERF_KEY, on ? '1' : '0')
+  } catch { /* private window */ }
 }
 
 /** Dark or light, remembered. Called from the drawer, the settings tab, and once at start-up. */

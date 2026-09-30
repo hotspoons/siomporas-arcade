@@ -25,6 +25,7 @@
 
 import * as THREE from 'three'
 import type { Vehicle } from '@apex/engine/physics/vehicle'
+import type { DriveProfile } from '@apex/engine/physics/profiles'
 import { Car, type CarEvent, type CarInput, type DrivableCar, type Surface } from './car'
 import * as T from './tuning'
 
@@ -48,18 +49,56 @@ export class RapierCar implements DrivableCar {
   /** what `place` should put the car back on, for `recover` */
   private lastInput: CarInput = { throttle: 0, brake: 0, steer: 0, handbrake: false }
 
-  constructor(vehicle: Vehicle, surface: Surface) {
+  constructor(vehicle: Vehicle, surface: Surface, model?: THREE.Object3D | null) {
     this.vehicle = vehicle
     this.surface = surface
     // The body. Given the same surface so nothing in it is holding a null, but never ticked — see
     // the header. `place` on it is called once, to put the mesh somewhere before the first frame.
     this.body = new Car(surface)
     this.mesh = this.body.mesh
+    // A level's chosen car, when the library could produce one. Without it this is the procedural
+    // wedge, which is what every level written before today gets and is a perfectly good car.
+    if (model) this.body.setBodyMesh(model)
     this.sync()
   }
 
   get slide(): number {
     return this.vehicle.state.slide
+  }
+
+  /**
+   * Change how it handles, now, without respawning it.
+   *
+   * `Vehicle.applyProfile` is built for exactly this — the only state that does not survive is the
+   * suspension's current compression, which resettles within a step. Rich, 2026-09-29: *"changing
+   * the car's performance stats from the tuner does not seem to alter the performance"*. It did not:
+   * the profile was read once, when the car was spawned, so every later change was a change to what
+   * the NEXT car would be like.
+   */
+  setProfile(p: DriveProfile): void {
+    this.vehicle.applyProfile(p)
+  }
+
+  /**
+   * Hold the car onto a surface that is not the ground — the inside of a loop, a banked corkscrew.
+   *
+   * `up` is in THREE's frame. The engine does the turning and the pulling (`Vehicle.stick`); what
+   * corridor knows, and the engine cannot, is WHICH surface you are on, which is why this is a
+   * pass-through rather than something the vehicle works out for itself.
+   */
+  hold(up: { x: number; y: number; z: number }, dt: number, opts: { strength?: number; align?: number; pull?: number } = {}): void {
+    this.vehicle.stick(up, dt, opts)
+  }
+
+  /** The body's own up, for deciding whether an assist has anything to do. */
+  get up(): { x: number; y: number; z: number } {
+    const v = new THREE.Vector3(0, 1, 0).applyQuaternion(this.mesh.quaternion)
+    return { x: v.x, y: v.y, z: v.z }
+  }
+
+  /** What it is driving as, so a picker can show the truth rather than what it last set. */
+  get profile(): DriveProfile {
+    return this.vehicle.profile
   }
 
   /** The vehicle underneath, for the F6 panel and for a probe that wants the real state. */

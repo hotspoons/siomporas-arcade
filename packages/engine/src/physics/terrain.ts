@@ -253,3 +253,62 @@ export function addTree(phys: PhysicsWorld, x: number, groundY: number, z: numbe
     friction: 0.9,
   })
 }
+
+/**
+ * A driveable surface from a triangle mesh: a stunt fixture's road.
+ *
+ * WHY THE HEIGHTFIELD CANNOT DO THIS. `Terrain` streams a heightfield, which is a function of x and
+ * z — one height per column — and the whole point of a loop is that the road is above itself. A
+ * trimesh is the only shape that can be its own ceiling, so it is what a stunt stands on.
+ *
+ * ONE-SIDED IS NOT AN OPTION EITHER. A car inside a loop is under the surface for half of it, and
+ * Rapier's trimesh is double-sided by default — which is exactly right here and is the reason a
+ * loop can be driven at all.
+ *
+ * NO CONTACT EVENTS BY DEFAULT. A road generates a contact every frame for every wheel; wiring
+ * those into the impact system would report the car crashing into the ground continuously. The
+ * profile's landing and grip machinery is what reads a road, not `onImpact`.
+ *
+ * `positions` and `indices` are the corridor's site frame — x east, y north, z up — because that is
+ * the frame the geometry is authored in. The conversion into the physics world's (x east, y up,
+ * z south) happens HERE, once, so no caller has to remember it.
+ */
+export function addSurface(
+  phys: PhysicsWorld,
+  positions: Float32Array,
+  indices: Uint32Array,
+  opts: { friction?: number; layer?: Layer; events?: boolean; flags?: number } = {},
+): Collider | null {
+  const R = rapier()
+  if (positions.length < 9 || indices.length < 3) return null
+  // site (x east, y north, z up) -> physics (x east, y up, z south)
+  const v = new Float32Array(positions.length)
+  for (let i = 0; i < positions.length; i += 3) {
+    v[i] = positions[i]
+    v[i + 1] = positions[i + 2]
+    v[i + 2] = -positions[i + 1]
+  }
+  const body = phys.world.createRigidBody(R.RigidBodyDesc.fixed())
+  /*
+   * INTERNAL EDGES ARE FIXED, and this is the line that made a loop drivable.
+   *
+   * A ribbon is a strip of thin quads, so a car standing on it straddles a triangle edge every
+   * half metre. Left alone, a convex shape sliding across those edges catches on them: the
+   * narrow phase sees the shape's corner past the edge of one triangle's plane and pushes it out
+   * the short way — sideways along the surface, not up out of it. Measured on the loop's entry
+   * with the chassis resting on the ribbon: the contact normal flipped from the road's up
+   * (−0.14, 0.99, 0) to straight backward (−1, −0.09, 0.04) and the car lost 29 m/s in a single
+   * physics step. Rich has been describing this since the first loop as *"weird friction"* and
+   * *"stops dead at the loop entry"*, and it is neither friction nor the entry — it is a ghost
+   * collision with an edge that only exists because the surface is tessellated.
+   *
+   * `FIX_INTERNAL_EDGES_TWO_SIDED` makes Rapier clamp each contact normal to the fan of the
+   * triangles' real normals around a shared edge (which needs `MERGE_DUPLICATE_VERTICES`, which
+   * the flag includes), and keeps contacts from the back of a triangle — a loop is driven on the
+   * INSIDE, so at the top the car is standing on what is the underside of the ribbon's winding.
+   */
+  const desc = R.ColliderDesc.trimesh(v, indices, opts.flags ?? R.TriMeshFlags.FIX_INTERNAL_EDGES_TWO_SIDED)
+  desc.setFriction(opts.friction ?? 1)
+  phys.describe(desc, opts.layer ?? 'terrain', { events: opts.events ?? false })
+  return phys.world.createCollider(desc, body)
+}

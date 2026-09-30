@@ -87,6 +87,35 @@ export const MESH_FILE: Record<MeshVariant, string> = {
   raw: 'mesh.glb',
 }
 
+/** The collections that hold a visual plus its configuration. */
+export type BuildKind = 'vehicles' | 'actors' | 'weapons' | 'presets' | 'traffic'
+
+/**
+ * One crafted thing: a chosen model, a preset it started from, and the document that configures it.
+ *
+ * `asset` may be null — a build can be given its numbers before anybody has drawn it, which is how
+ * an agent writes a dozen of these and a person picks the models later.
+ */
+export interface Build<Doc> {
+  id: string
+  name: string
+  /** a catalog id, or null while it has no model yet */
+  asset: string | null
+  /** which preset it started from, for the readout. Not a live link: the doc is the truth */
+  preset?: string | null
+  notes?: string
+  doc: Doc
+  created?: string
+  updated?: string
+  /**
+   * Only on a row in the `presets` collection: which of the three it is a starting point for.
+   *
+   * A preset is a build with no model, so it is the same record and the same routes; this is the
+   * one field that says a vehicle preset must not be offered when somebody is making a weapon.
+   */
+  for?: 'vehicle' | 'actor' | 'weapon'
+}
+
 export interface RigBinding {
   /** role → bone names, in the order the game expects them (wheels: FL, FR, RL, RR) */
   roles: Record<string, string[]>
@@ -118,10 +147,17 @@ function baseUrl(): string {
   if (q) return q.replace(/\/$/, '')
   const built = (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_ASSETSVC
   if (built) return built.replace(/\/$/, '')
-  // In the cluster the editor and the service sit behind one host, so a relative path is right and
-  // needs no CORS. On a laptop Vite is on another port and the service is on 8770.
-  if (location.port === '' || location.port === '443' || location.port === '80') return `${location.origin}/assetsvc`
-  return 'http://localhost:8770'
+  /*
+   * THROUGH THE EDITOR, ALWAYS. In the cluster the editor and the service sit behind one host, so
+   * a relative path is right and needs no CORS. In development Vite proxies `/assetsvc` to the
+   * world editor (`WORLDEDITOR=…`), which forwards to the service IT is configured for — and that
+   * is the one whose builds the editor screens write. This used to fall back to
+   * `http://localhost:8770` on a dev port, which is whichever asset service happens to be on 8770
+   * and was, measured, an older one with no `/traffic` route and a different data directory: the
+   * viewer could not read the traffic set the editor had just saved. One service, reached one way.
+   * `?assetsvc=` still overrides for a probe.
+   */
+  return `${location.origin}/assetsvc`
 }
 
 export const ASSETSVC = baseUrl()
@@ -207,6 +243,20 @@ export const assetsvc = {
   pull: () => call<{ pulled: string[]; skipped: string[] }>('/sync/pull', { method: 'POST' }),
 
   /** A URL the browser can put in an <img> or hand to GLTFLoader. */
+  /*
+   * BUILDS: a visual PLUS its configuration.
+   *
+   * Rich, 2026-09-29: the catalog is visuals; a vehicle is a visual plus dynamics, layout and
+   * configuration. So a build is its own record naming a catalog asset, which is what lets two
+   * builds share one model and lets a build outlive the model it started from.
+   */
+  builds: <T>(kind: BuildKind) => call<Record<string, T[]>>(`/${kind}`).then((r) => (r[kind] ?? []) as T[]),
+  saveBuild: <T>(kind: BuildKind, id: string, patch: Record<string, unknown>) =>
+    call<Record<string, T>>(`/${kind}/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(patch) })
+      .then((r) => Object.values(r)[0] as T),
+  deleteBuild: (kind: BuildKind, id: string) =>
+    call<{ ok: boolean }>(`/${kind}/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+
   fileUrl: (id: string, rel: string) => `${ASSETSVC}/catalog/${encodeURIComponent(id)}/file/${rel.split('/').map(encodeURIComponent).join('/')}`,
 
   /* ---- materials: the tileable surfaces half of the library ---------------------------------

@@ -2,6 +2,7 @@
 // Z = south — i.e. (x, y, z)_site -> (x, z, -y)_three, right-handed with Y up so nothing in
 // three's camera/controls code has to be told about Z-up.
 import * as THREE from 'three'
+import { inside } from './polygon'
 import { VegCover } from './vegmask'
 import { landuseZone, zoneOfRoad } from './zoning'
 import * as T from './tuning'
@@ -169,11 +170,46 @@ export interface Site {
   graded: () => { built: number; total: number; pendingNear: number; strips: number; buildings: number; ms: number; worstMs: number; worst: string }
   /** point + travel direction on the spine at along-track s (metres) */
   spineAt: (s: number) => { pos: THREE.Vector3; dir: THREE.Vector3 }
+  /**
+   * EVERY DRIVEABLE CHAIN, the spine first.
+   *
+   * `spineAt` answers for one road, and a network site is hundreds — so anything that wants to put
+   * something ON a road (a stunt fixture, a gate, a traffic plan) could only ever find the primary
+   * one. Rich, 2026-09-29: *"trying to place it on a secondary road in a network, it always goes to
+   * the spine road"*. It did, because the spine was the only thing anybody could ask about.
+   *
+   * Index 0 is the spine, and the rest are the branches in the order the manifest lists them, which
+   * is the numbering `OnRoad.chain` already uses.
+   */
+  /**
+   * Every drivable chain: the spine at index 0, then the branches. `at(s)` answers in three's
+   * frame (x east, y up, z south). `lanes`, `twoWay`, `half` (paved half-width, m) and `highway`
+   * are what a traffic plan needs to put cars in lanes and a race needs to lay a gate across the
+   * road; a chain that has not been measured reports the road builder's own defaults.
+   */
+  chains: () => { index: number; name: string; ref: string | null; length_m: number; lanes: number; twoWay: boolean; half: number; highway: string | null; at: (s: number) => { pos: THREE.Vector3; dir: THREE.Vector3 } }[]
   /** the terrain's texture, so the imagery toggle can swap it in and out */
   setImagery: (on: boolean) => void
   /** draw the terrain as a wireframe */
   setWire: (on: boolean) => void
   /** the canopy blanket: 72 MB and 1.05 M vertices, so it is not built until this is first called true */
+  /**
+   * Hide the baked road over these stations and rebuild it — see the note on the implementation.
+   *
+   * KNOWN GAP: only chain 0, the spine, is rebuilt. A branch's road is built lazily per chunk as
+   * the eye reaches it and cached, so suppressing one means invalidating that cache too. A fixture
+   * on a branch therefore links, renders and drives, with the baked tarmac still under it.
+   */
+  setRoadSkip: (fn: ((chain: number, s: number) => boolean) | null) => void
+  /**
+   * Ground where scenery must not exist — the footprints of this world's stunt fixtures.
+   *
+   * Trees stop being indexed for collision immediately, so a trunk inside a loop cannot be hit, and
+   * are replanted without them so it cannot be seen either. `sceneryCleared` is the same question
+   * for anything else that plants itself, which is how the props keep out.
+   */
+  setSceneryClear: (polys: [number, number][][]) => void
+  sceneryCleared: (x: number, y: number) => boolean
   setCanopy: (on: boolean) => THREE.Mesh | undefined
 }
 
@@ -883,15 +919,84 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
   }
 
   // the asphalt and paint are rebuilt when a road knob moves (F6 → road), so keep the builders
-  const roadBuilders: (() => THREE.Object3D)[] = [() => roadMesh(mainSt, lanesAt, classAt, surfaceSets!, 0.02, twoWayAt, paintOff, kerbedAt)]
+  /*
+   * WHERE THE BAKED ROAD IS NOT DRAWN, by station along the spine.
+   *
+   * A stunt fixture replaces a stretch of road rather than sitting on it (src/stunts.ts), so the
+   * two must not both exist. Mutable and re-read on every build, because fixtures are placed and
+   * dragged in the editor and the road has to follow without a reload.
+   */
+  let roadSkip: ((chain: number, s: number) => boolean) | null = null
+  // a builder takes the skip it should apply, so the same one makes the base road and the holed one
+  type RoadSkip = ((chain: number, s: number) => boolean) | null
+  const roadBuilders: ((skip: RoadSkip) => THREE.Object3D)[] = [
+    (skip) => roadMesh(mainSt, lanesAt, classAt, surfaceSets!, 0.02, twoWayAt, paintOff, kerbedAt, skip ? (s: number) => skip(0, s) : null),
+  ]
   let roadParts: THREE.Object3D[] = []
-  const buildRoads = () => {
-    for (const o of roadParts) {
-      road.remove(o)
-      disposeDeep(o)
+  /*
+   * THE BAKED ROAD IS A LAYER, AND A STUNT IS ANOTHER LAYER OVER IT.
+   *
+   * Rich, 2026-09-29: *"would require all of these fixtures to be layers on top of the map instead
+   * of baked into it, the underlying OSM data should exist and the stunts modify on top of the base
+   * data"*. He is right, and the first cut of this was wrong: `setRoadSkip` REBUILT the road with a
+   * hole in it, which makes a fixture's presence a property of the OSM geometry. A program that
+   * hides a loop at runtime would then have to rebuild the road to get its tarmac back, and the
+   * base data would only exist in whatever state the last fixture left it.
+   *
+   * So the whole road is built once and KEPT. When something asks for holes, a second version is
+   * built with them and the whole one is hidden — both are in the graph, the base is never
+   * destroyed, and clearing the skip is a visibility flip and a dispose rather than a rebuild.
+   */
+  let roadBase: THREE.Object3D[] = []
+  let roadHoled: THREE.Object3D[] = []
+  const forget = (o: THREE.Object3D) => {
+    road.remove(o)
+    disposeDeep(o)
+    const i = roadParts.indexOf(o)
+    if (i >= 0) roadParts.splice(i, 1)
+  }
+  /**
+   * `rebuildBase` throws the base away and builds it again — for a change of road WIDTH, which
+   * changes the geometry rather than what is hidden.
+   */
+  /*
+   * THE BRANCHES GET THEIR HOLES TOO. A branch's road is built lazily, one chunk at a time, as the
+   * eye reaches it — so the fixture placed on Patuxent River Road (Rich, 2026-09-30, with the road
+   * still drawn through his loop) has to hole a mesh that may not exist yet, and one that already
+   * does. `holeBranches` is filled in where the branches are built, below, and is called from
+   * `buildRoads` whenever the skip changes and from the lazy builder whenever a branch appears.
+   */
+  let holeBranches = () => {}
+  const buildRoads = (rebuildBase = false) => {
+    if (rebuildBase) {
+      for (const o of roadBase) forget(o)
+      roadBase = []
     }
-    roadParts = roadBuilders.map((b) => b())
-    for (const o of roadParts) road.add(o)
+    if (!roadBase.length) {
+      roadBase = roadBuilders.map((b) => b(null))
+      for (const o of roadBase) { road.add(o); roadParts.push(o) }
+    }
+    for (const o of roadHoled) forget(o)
+    roadHoled = []
+    if (!roadSkip) {
+      for (const o of roadBase) o.visible = true
+      holeBranches()
+      return
+    }
+    roadHoled = roadBuilders.map((b) => b(roadSkip))
+    for (const o of roadHoled) { road.add(o); roadParts.push(o) }
+    holeBranches()
+    /*
+     * ONLY THE BASE BUILDERS' OWN OUTPUT IS HIDDEN.
+     *
+     * `roadParts` is everything in the road group that has to be disposed with the site — and the
+     * BRANCH roads are appended to it lazily, one per chunk, as the eye reaches them. The first
+     * version of this hid all of `roadParts`, so putting a stunt anywhere made every secondary road
+     * in the world disappear while only the spine came back in its holed form (Rich, 2026-09-29:
+     * "placing stunts on secondary roads makes the secondary roads no longer render, just the stunt
+     * is there").
+     */
+    for (const o of roadBase) o.visible = false
   }
   // spine stations every 5 m, for "what is the road doing next to this point" lookups
   const spineSt: { x: number; z: number; y: number; s: number }[] = []
@@ -944,7 +1049,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
   // `road` builds the branch's asphalt and paint; it runs inside the branch's lazy unit, with its strip
   // one per branchAts entry, same order: the raw graded points and a way to rebuild the curve after they move
   const branchRaw: { br: NonNullable<Manifest['branches']>[number]; rawB: THREE.Vector3[]; dirty: boolean; recurve: () => void }[] = []
-  const branchAts: { at: (s: number) => { pos: THREE.Vector3; dir: THREE.Vector3 }; len: number; half: number; name: string; highway: string | null; road: () => THREE.Group; bounds: [number, number, number, number] }[] = []
+  const branchAts: { at: (s: number) => { pos: THREE.Vector3; dir: THREE.Vector3 }; len: number; half: number; name: string; ref: string | null; lanes: number; twoWay: boolean; highway: string | null; road: (skip?: ((s: number) => boolean) | null) => THREE.Group; bounds: [number, number, number, number] }[] = []
   for (const br of manifest.branches ?? []) {
     if (!br.coords || br.coords.length < 2) continue
     const rawB = br.coords.map(([x, y, z]) => toWorld(x, y, (Number.isFinite(z) ? z : heightAt(x, y)) + 0.4))
@@ -987,7 +1092,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
      */
     const bi = branchAts.length
     branchRaw.push({ br, rawB, dirty: false, recurve: () => { cB = new THREE.CatmullRomCurve3(rawB, false, 'centripetal'); cB.arcLengthDivisions = Math.max(100, rawB.length * 8); lenB = cB.getLength(); branchAts[bi].len = lenB } })
-    branchAts.push({ at: atB, len: lenB, half: halfB, name: br.name ?? br.ref ?? 'branch', highway: br.highway ?? null, bounds: [bx0, bz0, bx1, bz1], road: () => roadMesh(stations(atB, lenB, 6), () => lanesB, () => 'asphalt_aged', surfaceSets!, 0.02, () => twoWayB, paintOff, () => kerbedB) })
+    branchAts.push({ at: atB, len: lenB, half: halfB, name: br.name ?? br.ref ?? 'branch', ref: br.ref ?? null, lanes: lanesB, twoWay: twoWayB, highway: br.highway ?? null, bounds: [bx0, bz0, bx1, bz1], road: (skip = null) => roadMesh(stations(atB, lenB, 6), () => lanesB, () => 'asphalt_aged', surfaceSets!, 0.02, () => twoWayB, paintOff, () => kerbedB, skip) })
   }
   mark('paving: branch curves')
   // --- ROADS MEET AT THE SAME HEIGHT ---------------------------------------------------------
@@ -1152,6 +1257,28 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
   let grassRef: Grass | null = null
   // the near-tree set and the measured tree list, for probes/corridor-flora.mjs: which silhouettes
   // this site built and which one every one of its tens of thousands of trees drew
+  /**
+   * Where scenery must not exist: the footprints of the stunt fixtures standing in this world.
+   *
+   * Rich, 2026-09-29: a fixture is dropped into a wooded corridor and clears nothing, so a loop can
+   * have trees growing through it and fence posts inside it — invisible to the eye once you are on
+   * the ribbon, entirely solid to the car. The road is already suppressed under a fixture
+   * (`setRoadSkip`); this is the rest of that idea.
+   *
+   * SITE FRAME, x east, y north — the same as a footprint and a polygon everywhere else.
+   */
+  let clearPolys: [number, number][][] = []
+  /*
+   * Filled in when the trees are built. The Site surface is returned from the outer scope and the
+   * planting lives in the inner one, so clearing ground has to reach in through a pair of hooks —
+   * and they default to doing nothing, which is the right answer for a site with no trees at all.
+   */
+  let reindexTrees: () => void = () => {}
+  let replantNow: () => void = () => {}
+  const clearedAt = (x: number, y: number): boolean => {
+    for (const poly of clearPolys) if (inside(poly, x, y)) return true
+    return false
+  }
   let nearRef: NearTrees | null = null
   /** the impostor field, for the Site's setLight — a baked card lights itself */
   let impRef: Impostors | null = null
@@ -1491,6 +1618,28 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     // road) are built by whichever of its chunks the eye reaches first.
     const branchUnits: GradeUnit[] = []
     const roadBuilt = new Uint8Array(branchAts.length)
+    // the whole road of each built branch, and the copy with the fixtures cut out of it, if any
+    const branchRoad: { base: THREE.Object3D | null; holed: THREE.Object3D | null }[] = branchAts.map(() => ({ base: null, holed: null }))
+    const holeBranch = (i: number) => {
+      const r = branchRoad[i]
+      if (!r.base) return
+      if (r.holed) {
+        forget(r.holed)
+        roadParts = roadParts.filter((o) => o !== r.holed)
+        r.holed = null
+      }
+      const skip = roadSkip
+      let touched = false
+      if (skip) for (let s = 0; s <= branchAts[i].len && !touched; s += 6) touched = skip(i + 1, s)
+      if (!touched) { r.base.visible = true; return }
+      const rm = branchAts[i].road((s) => skip!(i + 1, s))
+      if (paintNow) repaintMarkings(rm, paintNow.centre, paintNow.edge)
+      road.add(rm)
+      roadParts.push(rm)
+      r.holed = rm
+      r.base.visible = false
+    }
+    holeBranches = () => { for (let i = 0; i < branchAts.length; i++) holeBranch(i) }
     const buildBranchRoad = (i: number) => {
       if (roadBuilt[i]) return
       roadBuilt[i] = 1
@@ -1498,6 +1647,8 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
       if (paintNow) repaintMarkings(rm, paintNow.centre, paintNow.edge)
       road.add(rm)
       roadParts.push(rm)
+      branchRoad[i].base = rm
+      holeBranch(i)
     }
     branchAts.forEach((b, i) => {
       // A station is left out only where another CARRIAGEWAY's strip covers it. The rule used to
@@ -1663,7 +1814,8 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
       placeBulbs()
       makeBulbs()
       makeDriveways()
-      buildRoads()
+      // a width change is new GEOMETRY, so the base is rebuilt rather than merely re-hidden
+      buildRoads(true)
       for (const st of liveStrips) {
         road.remove(st.mesh)
         st.mesh.geometry.dispose()
@@ -1693,6 +1845,8 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     const treeBudget = lite ? 25_000 : 120_000
     const t = treesFromCanopy(chm.data, chm.layer.size, chm.layer.bbox, chm.layer.res, heightAt, treeBudget, T.TREE_MIN_H, (x, y) => {
       if (roadDistance(x, -y) < 3) return true
+      // nothing grows through a stunt fixture
+      if (clearPolys.length && clearedAt(x, y)) return true
       if (!adjustments.active) return false
       const a = adjustments.at(x, y, treeAdj)
       // thin (or thicken, up to the canopy cells available) by a stable hash of position
@@ -1709,6 +1863,9 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     const indexTreeGrid = () => {
       treeGrid.clear()
       for (const r of t.records) {
+        // THE COLLIDERS GO FIRST. A record inside a fixture is not indexed, so the car cannot hit
+        // a trunk that is standing inside a loop even before the trees are replanted.
+        if (clearPolys.length && clearedAt(r.x, -r.z)) continue
         const k = `${Math.floor(r.x / tgCell)},${Math.floor(r.z / tgCell)}`
         const arr = treeGrid.get(k)
         const rec: [number, number, number] = [r.x, r.z, Math.max(0.25, r.h * 0.025)]
@@ -1717,6 +1874,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
       }
     }
     indexTreeGrid()
+    reindexTrees = indexTreeGrid
     treesNearWorld = (x, z, rad) => {
       const out: [number, number, number][] = []
       const cx = Math.floor(x / tgCell), cz = Math.floor(z / tgCell)
@@ -1857,7 +2015,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
       near.update(eye, true, fwd, pitch)
       // the coarse lollipops are only in the scene when there is no renderer (no impostors);
       // writing 120k instance matrices for a mesh nobody draws is the replant's whole cost
-      if (t.crowns.parent) t.refresh(near.near)
+      if (t.crowns.parent && t.crowns.visible) t.refresh(near.near)
       refreshFar(near.near, eye, fwd, pitch)
       replantStats.replants++
       replantStats.lastMs = Math.round(performance.now() - t0)
@@ -1865,6 +2023,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
       replantStats.centre = [+eye.x.toFixed(0), +(-eye.z).toFixed(0)]
     }
     const lastEye = new THREE.Vector3()
+    replantNow = () => replantTrees(lastEye)
     const replantIfMoved = (eye: THREE.Vector3, fwd?: THREE.Vector3, pitch = 0) => {
       lastEye.copy(eye)
       if (!(T.TREE_REPLANT_M > 0) || !(T.TREE_PLANT_RADIUS_M > 0)) return
@@ -1909,6 +2068,25 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
       }
       seatImpostors()
       reseat = seatImpostors
+      /*
+       * THE LOLLIPOPS ARE IN THE SCENE TOO, hidden, for `TREE_LOLLIPOP`: the editor's crowns and
+       * trunks, shown instead of the cards and the models when the knob is on. Their matrices are
+       * written only while they are shown — `refresh` walks every tree, and writing 16k matrices
+       * for a mesh nobody draws was once the whole cost of a replant.
+       */
+      t.crowns.visible = false
+      t.trunks.visible = false
+      trees.add(t.crowns, t.trunks)
+      let lollyWas = false
+      const lollipops = () => {
+        const lolly = T.TREE_LOLLIPOP >= 0.5
+        if (lolly === lollyWas) return
+        lollyWas = lolly
+        t.crowns.visible = lolly
+        t.trunks.visible = lolly
+        imp!.mesh.visible = !lolly
+        if (lolly) t.refresh(new Set())
+      }
       /**
        * Which far trees draw a card, and how solidly.
        *
@@ -1990,6 +2168,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
       }
       updateNear = (eye: THREE.Vector3, time: number, fwd?: THREE.Vector3, pitch = 0) => {
         replantIfMoved(eye, fwd, pitch)
+        lollipops()
         if (near.update(eye, false, fwd, pitch)) refreshFar(near.near, eye, fwd, pitch)
         grass.update(eye, fwd, pitch)
         grass.tick(time)
@@ -2433,6 +2612,32 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     heightAt,
     graded: () => ({ built: gradeStats.built, total: gradeUnits.length, pendingNear: pendingNear(), strips: gradeStats.strips, buildings: gradeStats.buildings, ms: Math.round(gradeStats.ms), worstMs: Math.round(gradeStats.worstMs), worst: gradeStats.worst }),
     spineAt,
+    chains: () => {
+      // the spine's tags are per segment; its middle stands for the whole for these numbers
+      const mid = curveLen / 2
+      const tg = segAt(mid)?.tags ?? {}
+      return [
+        { index: 0, name: tg.name ?? 'spine', ref: tg.ref ?? null, length_m: curveLen, lanes: lanesAt(mid), twoWay: twoWayAt(mid), half: pavedHalfAt(mid), highway: tg.highway ?? null, at: spineAt },
+        ...branchAts.map((b, i) => ({ index: i + 1, name: b.name, ref: b.ref, length_m: b.len, lanes: b.lanes, twoWay: b.twoWay, half: b.half, highway: b.highway, at: b.at })),
+      ]
+    },
+    /**
+     * Hide the baked road over these stations, and rebuild it.
+     *
+     * The seam for stunt fixtures. Passing null puts the whole road back, which is what happens
+     * when the last fixture on a site is deleted.
+     */
+    setSceneryClear: (polys: [number, number][][]) => {
+      clearPolys = polys ?? []
+      // the colliders go at once; the visible trees follow on the next replant, which this asks for
+      reindexTrees()
+      replantNow()
+    },
+    sceneryCleared: clearedAt,
+    setRoadSkip: (fn: ((chain: number, s: number) => boolean) | null) => {
+      roadSkip = fn
+      buildRoads()
+    },
     setImagery: (on) => {
       // A tile's map is its own — streamed 1 m NAIP, or the overview standing in until it lands —
       // so turning imagery off clears them all and turning it back on restores what each had.

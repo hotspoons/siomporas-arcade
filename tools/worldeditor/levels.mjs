@@ -131,9 +131,26 @@ export function validate(level) {
     if (!s?.run && !s?.id) E(`splats[${i}] names neither a run nor an id`)
   }
 
+  // a program is TypeScript under programs/, and the viewer builds and runs it when the level opens
+  if (level.program !== undefined && level.program !== null) {
+    if (typeof level.program !== 'string' || !/^[a-z0-9][a-z0-9-]*(\/[a-z0-9][a-z0-9-]*)*\.ts$/.test(level.program)) {
+      E(`program must be a path under programs/, like "crofton/jam.ts" — it is ${JSON.stringify(level.program)}`)
+    }
+  }
+
   for (const [i, s] of (level.simulations ?? []).entries()) {
     if (!s?.kind) E(`simulations[${i}] has no kind`)
     if (s?.seed !== undefined && !Number.isInteger(s.seed)) E(`simulations[${i}].seed must be a whole number — it is what makes a run repeatable`)
+    if (s?.kind === 'traffic') {
+      if (s.set !== undefined && typeof s.set !== 'string') E(`simulations[${i}].set names a traffic set build by id`)
+      // a number 0…1, or one of the map's own words (zones.ts TRAFFIC_LEVELS; `rush` is `slow`)
+      const words = ['clear', 'light', 'heavy', 'slow', 'jammed', 'rush']
+      if (s.density !== undefined && !((typeof s.density === 'number' && s.density >= 0 && s.density <= 1) || (typeof s.density === 'string' && words.includes(s.density)))) {
+        E(`simulations[${i}].density is 0…1 or one of ${words.join(', ')} (a world-wide floor under the painted zones)`)
+      }
+      if (s.max !== undefined && !(Number.isInteger(s.max) && s.max >= 0)) E(`simulations[${i}].max is a whole number of cars`)
+      if (s.set === undefined && s.density === undefined) warnings.push(`simulations[${i}]: traffic with no set and no density puts the default saloon only where zones are painted`)
+    }
   }
 
   const sc = level.scenario

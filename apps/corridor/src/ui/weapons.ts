@@ -8,48 +8,53 @@
 // in four hits over a third of a second, that the magazine lasts three and a third seconds, and
 // that the cone is 2 m across at its own maximum range. All of those are derived, all of them are
 // shown beside the fields they come from, and the raw spec is what you edit.
-import { assetsvc, type AssetItem, type RigBinding } from '../assetsvc'
+import { type AssetItem, type RigBinding } from '../assetsvc'
 import {
   burstDps, defaultWeapon, describeWeapon, dropAt, flightTime, magazineSeconds, shotsToKill,
   spreadRadiusAt, sustainedDps, validateWeapon, WEAPON_CLASS, WEAPON_KINDS, WEAPON_TEMPLATE_IDS,
   type WeaponDoc, type WeaponKind,
 } from '../weapons'
+import { weaponPresetDoc, weaponPresetsFor } from '../weaponpresets'
+import { CLASSES_BY_TYPE } from '../classes'
 import type { AssetDetailCtx } from './assets'
-import { bodyOf, empty, group, readout, select, setGroupError, slider, textField } from './controls'
-import { button, el, type Tab } from './shell'
+import { buildScreen, type BuildPreset, type BuildSpec } from './buildscreen'
+import { bodyOf, group, readout, select, setGroupError, slider, textField } from './controls'
+import { el, type Tab } from './shell'
 
 export function isWeapon(kind: string): boolean {
   return kind === WEAPON_CLASS
 }
 
-/** The Ballistics group. Renders nothing for anything that is not a weapon. */
-export function weaponDetail(item: AssetItem, host: HTMLElement, ctx: AssetDetailCtx): void {
-  if (!isWeapon(ctx.kind)) return
+export interface WeaponFormOpts {
+  /** bone roles the holder's rig binds, when anything knows them */
+  rigRoles?: string[]
+  onChange: (doc: WeaponDoc, live: boolean) => void
+  onReport?: (errors: number) => void
+}
 
-  const stored = item.weapon as WeaponDoc | null | undefined
-  let doc: WeaponDoc = stored ? structuredClone(stored) : defaultWeapon()
-  const fresh = !stored
-
-  const g = group('Ballistics', {
-    note: fresh ? 'no ballistics saved yet — these are pistol defaults, and nothing is stored until you save' : describeWeapon(doc),
-  })
-  const body = bodyOf(g)
-  host.append(g)
-
-  const roles = Object.keys((item.rig as RigBinding | null | undefined)?.roles ?? {})
-  const stage = () => { ctx.edit({ weapon: structuredClone(doc) }); render() }
-  const live = () => ctx.edit({ weapon: structuredClone(doc) })
+/**
+ * The whole ballistics editor, rendered into `host`. Returns a `rebuild`.
+ *
+ * ONE of it, used by the Weapons screen and by the detail pane, for the same reason as the vehicle
+ * and actor forms: two copies of a form over one document is two places for a field to go missing.
+ */
+export function weaponForm(host: HTMLElement, getDoc: () => WeaponDoc, opts: WeaponFormOpts): () => void {
+  const roles = opts.rigRoles ?? []
 
   function render() {
-    body.replaceChildren()
+    const doc = getDoc()
+    host.replaceChildren()
+    const body = host
     const report = validateWeapon(doc, { rigRoles: roles.length ? roles : undefined })
-    setGroupError(g, report.errors.length ? `${report.errors.length} problem${report.errors.length === 1 ? '' : 's'}` : null)
+    opts.onReport?.(report.errors.length)
     if (report.errors.length || report.warnings.length) {
       const box = el('div', 'panel-note')
       for (const e of report.errors) box.append(el('div', 'field-error', e))
       for (const w of report.warnings) box.append(el('div', 'field-note', w))
       body.append(box)
     }
+    const stage = () => { opts.onChange(doc, false); render() }
+    const live = () => opts.onChange(doc, true)
 
     const num = (into: HTMLElement, label: string, value: number, step: number, set: (v: number) => void, note?: string) => {
       into.append(textField({
@@ -110,81 +115,79 @@ export function weaponDetail(item: AssetItem, host: HTMLElement, ctx: AssetDetai
     hb.append(textField({ label: 'Reload sound', value: doc.audio.reload ?? '', onChange: (v) => { doc.audio.reload = v.trim() || undefined; stage() } }))
     body.append(hold)
 
-    const foot = el('div', 'panel-actions')
-    foot.append(select({
-      label: 'Start from', value: '',
-      options: [{ value: '', label: 'a template…' }, ...WEAPON_TEMPLATE_IDS.map((t) => ({ value: t, label: t }))],
-      onChange: (v) => { if (v) { doc = defaultWeapon(v); stage() } },
-    }))
-    body.append(foot)
   }
 
   render()
+  return render
 }
 
-/* ---- the roster -------------------------------------------------------------------------------- */
+/* ---- the detail pane: the same form, staged through the pane's own draft --------------------- */
 
-/**
- * The Weapons tab: the armoury, sorted by what it actually does per second.
- *
- * The across view again, and here it is the most useful of the three: a weapon is only ever
- * balanced against the other weapons, and `sustainedDps` side by side is the comparison that a
- * per-item pane cannot show and that burst damage actively misleads about.
- */
-export function weaponRosterTab(): Tab {
-  return { id: 'weapons', label: 'Weapons', icon: 'bolt', build: (host) => void renderRoster(host) }
-}
+/** The Ballistics group. Renders nothing for anything that is not a weapon. */
+export function weaponDetail(item: AssetItem, host: HTMLElement, ctx: AssetDetailCtx): void {
+  if (!isWeapon(ctx.kind)) return
 
-async function renderRoster(host: HTMLElement): Promise<void> {
-  host.replaceChildren(el('div', 'field-note', 'reading the library…'))
-  let items: AssetItem[]
-  try {
-    items = await assetsvc.list()
-  } catch (e) {
-    host.replaceChildren(empty(`No asset service: ${(e as Error).message}`))
-    return
-  }
-  const armoury = items.filter((it) => isWeapon(it.kind || ''))
-  host.replaceChildren()
-  if (!armoury.length) {
-    host.replaceChildren(empty(`Nothing in the library is a weapon yet. Give an asset the class "${WEAPON_CLASS}".`))
-    return
-  }
+  const stored = item.weapon as WeaponDoc | null | undefined
+  let doc: WeaponDoc = stored ? structuredClone(stored) : defaultWeapon()
 
-  let unset = 0
-  let broken = 0
-  const rows = el('div', 'asset-list')
-  for (const it of [...armoury].sort((a, b) => sustainedDps(docOf(b)) - sustainedDps(docOf(a)))) {
-    const doc = docOf(it)
-    const report = validateWeapon(doc)
-    if (!it.weapon) unset++
-    else if (!report.ok) broken++
-    const row = el('div', 'asset-row')
-    const head = el('div', 'asset-row-head')
-    head.append(el('strong', '', it.id), el('span', 'chip', doc.kind))
-    if (!it.weapon) head.append(el('span', 'chip state-spec', 'no ballistics'))
-    else if (!report.ok) head.append(el('span', 'chip state-spec', `${report.errors.length} problem${report.errors.length === 1 ? '' : 's'}`))
-    else head.append(el('span', 'chip state-finished', 'ready'))
-    row.append(head)
-    row.append(el('div', 'field-note', describeWeapon(doc)))
-    for (const e of report.errors.slice(0, 3)) row.append(el('div', 'field-error', e))
-    rows.append(row)
-  }
-
-  const summary = group('The armoury', {
-    note: `${armoury.length} weapon${armoury.length === 1 ? '' : 's'} · ${armoury.length - unset - broken} ready · ${unset} with no ballistics · ${broken} with problems · sorted by sustained damage per second`,
+  const g = group('Ballistics', {
+    note: stored ? describeWeapon(doc) : 'no ballistics saved yet — these are pistol defaults, and nothing is stored until you save',
   })
-  bodyOf(summary).append(rows)
-  host.append(summary)
+  const body = bodyOf(g)
+  host.append(g)
+
+  const roles = Object.keys((item.rig as RigBinding | null | undefined)?.roles ?? {})
+  const form = el('div')
+  body.append(form)
+  const rebuild = weaponForm(form, () => doc, {
+    rigRoles: roles,
+    onChange: (d) => ctx.edit({ weapon: structuredClone(d) }),
+    onReport: (n) => setGroupError(g, n ? `${n} problem${n === 1 ? '' : 's'}` : null),
+  })
+
   const foot = el('div', 'panel-actions')
-  foot.append(button({ label: 'Refresh', icon: 'arrow-path', variant: 'ghost', onClick: () => void renderRoster(host) }))
-  host.append(foot)
+  foot.append(select({
+    label: 'Start from', value: '',
+    options: [{ value: '', label: 'a template…' }, ...WEAPON_TEMPLATE_IDS.map((t) => ({ value: t, label: t }))],
+    onChange: (v) => { if (v) { doc = defaultWeapon(v); ctx.edit({ weapon: structuredClone(doc) }); rebuild() } },
+  }))
+  body.append(foot)
 }
 
-function docOf(it: AssetItem): WeaponDoc {
-  return (it.weapon as WeaponDoc | null | undefined) ?? defaultWeapon()
+/* ================================================================================================
+ * The armoury
+ * ============================================================================================= */
+
+/** What the Weapons screen needs to know about a weapon, and nothing else. */
+export const WEAPON_BUILD: BuildSpec<WeaponDoc> = {
+  kind: 'weapons',
+  noun: 'weapon',
+  assetType: 'weapon',
+  classes: CLASSES_BY_TYPE.weapon,
+  icon: 'bolt',
+  emptyTitle: 'No weapons yet',
+  emptyBlurb: 'A weapon is a model from the library plus what it does — damage, rate, magazine, '
+    + 'muzzle speed, spread and the impulse it delivers into the physics world. Actors carry these '
+    + 'and vehicles mount them, so nothing can be armed until one exists.',
+  presets: (kind) => weaponPresetsFor(kind).map((p): BuildPreset<WeaponDoc> => ({ id: p.id, name: p.name, note: p.note, doc: weaponPresetDoc(p.id) ?? p.doc })),
+  defaultDoc: () => defaultWeapon(),
+  describe: describeWeapon,
+  summary: (d) => `${d.damage} dmg · ${sustainedDps(d).toFixed(0)} dps · ${d.range_m} m`,
+  tags: (d) => {
+    const out: { text: string; cls?: string }[] = [{ text: d.kind }]
+    out.push(d.muzzle_ms > 0 ? { text: `${d.muzzle_ms} m/s` } : { text: 'hitscan', cls: 'none' })
+    if (d.magazine > 0) out.push({ text: `${d.magazine} rounds` })
+    if (d.impulse > 0) out.push({ text: `${d.impulse} N·s`, cls: 'ok' })
+    return out
+  },
+  form: (host, getDoc, onChange) => void weaponForm(host, getDoc, { onChange: (doc) => onChange(doc) }),
+  errors: (d) => validateWeapon(d).errors,
 }
 
-export function weaponExtension() {
-  return { tabs: [weaponRosterTab()], detail: weaponDetail }
+/** The extension object to hand `AssetCatalog`. */
+export function weaponExtension(): { tabs: Tab[]; detail: (item: AssetItem, host: HTMLElement, ctx: AssetDetailCtx) => void } {
+  return {
+    tabs: [{ id: 'weapons', label: 'Weapons', icon: 'bolt', build: (host) => buildScreen(host, WEAPON_BUILD) }],
+    detail: weaponDetail,
+  }
 }

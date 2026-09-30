@@ -12,7 +12,7 @@ import { fillMesh, handleMesh, outlineMesh, type HeightAt } from './drape'
 import { areaOf, frameMismatch, frameOf, inside, loadAdjustments, nextId, saveAdjustments, CROP_FIELDS, NEUTRAL, PICKERS, SLIDERS, type Adjust, type Adjustments, type Area } from './schema'
 import type { Site } from '../scene'
 import { bearingOf, nearestStation, normDeg } from './corridor'
-import { el, frameBanner, slider } from './ui'
+import { dragChip, el, frameBanner, paneTabs, slider } from './ui'
 
 const COLOR = { idle: 0x5c93c4, edited: 0xffdc00, selected: 0x2ee6c0, draw: 0xff8a2b }
 const MIN_VERTS = 3
@@ -182,6 +182,7 @@ export class AreaMode {
   }
 
   select(id: string | null) {
+    if (id) this.panelTab = 'placed'
     this.selected = id
     this.refreshColors()
     this.refreshHandles()
@@ -204,6 +205,29 @@ export class AreaMode {
 
   // --- input, delegated from main -------------------------------------------------------------
   /** A click on the ground: add a draw vertex, or select whatever polygon is under it. */
+  /**
+   * What is here, without selecting it — for the editor's cross-mode picking.
+   *
+   * Rich, 2026-09-29: *"would love to be able to click anything from the editor and have it
+   * highlighted in the place editor on the right."* That needs every mode to be able to answer
+   * "is one of mine under this point" WITHOUT taking the click, so the editor can ask them all and
+   * then decide which one wins.
+   *
+   * `size` is how big the thing is, so the smallest wins when several overlap — the same rule each
+   * mode already uses inside itself.
+   */
+  pick(pt: { x: number; y: number }): { id: string; size: number } | null {
+    const hits = this.doc.areas
+      .filter((a) => inside(a.polygon, pt.x, pt.y))
+      .sort((p, q) => areaOf(p.polygon) - areaOf(q.polygon))
+    return hits[0] ? { id: hits[0].id, size: areaOf(hits[0].polygon) } : null
+  }
+
+  /** Is this tool in the middle of something? Then the click is its own. */
+  get busy(): boolean {
+    return !!this.draw
+  }
+
   click(pt: { x: number; y: number } | null) {
     if (this.draw) {
       if (!pt) return
@@ -275,14 +299,52 @@ export class AreaMode {
   // --- panel ------------------------------------------------------------------------------------
   panel(root: HTMLElement, go: (a: Area) => void) {
     root.replaceChildren()
+    paneTabs(root, [{ id: 'draw', label: 'Draw' }, { id: 'placed', label: `Areas (${this.doc.areas.length})` }], this.panelTab, (id) => {
+      this.panelTab = id as 'draw' | 'placed'
+      this.onChange()
+    })
+    if (this.panelTab === 'draw') {
+      this.drawTab(root)
+      return
+    }
+    this.placedTab(root, go)
+  }
+
+  panelTab: 'draw' | 'placed' = 'draw'
+
+  /** A square dropped from the palette: an area of that size centred where it landed, neutral until tuned. */
+  dropAt(pt: { x: number; y: number }, what: string): boolean {
+    const size = what === 'square-large' ? 200 : what === 'square-small' ? 30 : 80
+    const h = size / 2
+    const polygon: [number, number][] = [[pt.x - h, pt.y - h], [pt.x + h, pt.y - h], [pt.x + h, pt.y + h], [pt.x - h, pt.y + h]].map(([x, y]) => [+x.toFixed(1), +y.toFixed(1)] as [number, number])
+    const id = nextId('a', this.doc.areas.map((a) => a.id))
+    const area: Area = { id, name: 'new area', polygon, adjust: { ...NEUTRAL } }
+    this.doc.areas.push(area)
+    this.dirty = true
+    this.addMesh(area)
+    this.select(id)
+    return true
+  }
+
+  private drawTab(root: HTMLElement) {
     if (this.frameWarning) root.append(frameBanner('adjustments.json', this.frameWarning))
+    root.append(el('p', 'dim', this.draw
+      ? `drawing… ${this.draw.length} pts — Enter closes it, Esc cancels`
+      : 'drag a square onto the world, or draw the outline by hand (N); tune what it adjusts once it is placed'))
+    const palette = el('div', 'palette')
+    for (const [id, label, note] of [['square-small', 'small square', '30 m — one house'], ['square', 'square', '80 m — a clearing'], ['square-large', 'large square', '200 m — a wood']] as const) {
+      palette.append(dragChip({ mode: 'areas', id, label, note, onClick: () => { this.startDraw() } }))
+    }
+    root.append(palette)
     const tools = el('div', 'row')
     const drawBtn = el('button')
-    drawBtn.textContent = this.draw ? `drawing… ${this.draw.length} pts (Enter close, Esc cancel)` : 'draw area (N)'
+    drawBtn.textContent = this.draw ? `drawing… ${this.draw.length} pts (Enter close, Esc cancel)` : 'draw an area (N)'
     drawBtn.onclick = () => (this.draw ? this.closeDraw() : this.startDraw())
     tools.append(drawBtn)
     root.append(tools)
+  }
 
+  private placedTab(root: HTMLElement, go: (a: Area) => void) {
     const list = el('div', 'list')
     for (const a of this.doc.areas) {
       const row = el('div', `item${a.id === this.selected ? ' sel' : ''}${isNeutral(a.adjust) ? '' : ' edited'}`)

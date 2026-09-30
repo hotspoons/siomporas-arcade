@@ -52,6 +52,8 @@ export interface Level {
    * before 2026-09-29 gets.
    */
   player?: { vehicle: string; profile?: string } | null
+  /** a program under programs/ (e.g. `crofton/jam.ts`), built and run by the viewer when the level opens */
+  program?: string | null
   mode?: 'drive' | 'fly' | 'walk'
   scenario?: unknown
 }
@@ -166,7 +168,8 @@ export async function applyLevel(level: Level, host: LevelHost): Promise<{ ok: b
 
   // simulations and the scenario are named here and run elsewhere: this reports what a level ASKS
   // for, so a person can see that a level wants traffic before anything can provide it
-  for (const s of level.simulations ?? []) skipped.push({ part: `simulation:${s.kind}`, why: 'not running yet — the simulation layer is the next step' })
+  // traffic runs (`trafficlayer.ts`, built by the app after this returns); anything else does not yet
+  for (const s of level.simulations ?? []) if (s.kind !== 'traffic') skipped.push({ part: `simulation:${s.kind}`, why: 'not running yet — only traffic is' })
   if (level.scenario) skipped.push({ part: 'scenario', why: 'not running yet — goals, events and scoring are the step after' })
 
   host.say(applied.length ? `${level.id}: ${applied.join(', ')}` : `${level.id}: nothing to apply`)

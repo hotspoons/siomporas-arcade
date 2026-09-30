@@ -131,6 +131,56 @@ export interface DriveProfile {
   rollResist: number
   /** landing: vertical speed, m/s, above which a landing does damage */
   landingTolerance: number
+  /**
+   * The share of a wheel's grip that stays available to the ENGINE however hard it is cornering.
+   *
+   * The traction model spends the friction circle side-force first and gives the engine what is
+   * left: `√(budget² − side²)`. Taken literally that reaches zero, and a wheel at the limit of its
+   * lateral grip delivers no drive at all — which is a real effect and, at full strength, a car
+   * that stops accelerating the moment it is asked to turn. Measured on the loop's entry: side
+   * 42,813 N against a budget of 42,813 N, drive cut to nothing, and thirty metres a second scrubbed
+   * off in half a second. Rich, 2026-09-29: *"it really feels like some weird friction, the kind I
+   * get when I try to turn while accelerating."*
+   *
+   * A third of the budget is reserved, so the throttle always does something. A sim profile can set
+   * it to 0 and have the textbook circle back.
+   */
+  driveShare?: number
+
+  /**
+   * The least share of a wheel's STATIC load that still counts toward its traction budget, 0…1.
+   *
+   * THE FAULT THIS FIXES. Drive is limited by `frictionSlip × suspensionForce`, and the suspension
+   * force is an instantaneous reading off a ray-cast wheel — it goes to nearly nothing whenever a
+   * wheel goes light, which on a ramp's concave entry is exactly what the DRIVEN wheels do as the
+   * nose rises. Budget zero means the engine delivers zero, so a car with 11 m/s² of power coasts
+   * up a fifteen-degree ramp and slows down. Rich, 2026-09-29: *"driving up the ramp feels like it
+   * is stuck and it can't accelerate with gobs of power, there is some weird friction happening."*
+   * There was: ours.
+   *
+   * A quarter of the static load is the floor, which is enough to keep a car driving over a crest
+   * and far too little to make a wheel in mid-air useful.
+   */
+  tractionFloor?: number
+
+  /**
+   * How much the body itself grips whatever it scrapes — the SKID PLATE.
+   *
+   * Rich, 2026-09-29, of a car stopping dead at the foot of a loop: *"it feels like an inelastic
+   * collision stopping the car in its tracks. We may need to tweak the bounding physics to give
+   * like a virtual skid plate for the geometry so the car can have its nose touch the ramp and then
+   * deflect without a full crash."* Exactly so. The chassis is a cuboid with friction 0.4, which is
+   * tarmac-on-rubber for a shape with no wheels: touch a ramp with the nose at 46 m/s and 0.4
+   * against several tonnes of normal force takes the whole of the forward momentum in a few
+   * milliseconds. The car does not crash into anything — it is held by its own bumper.
+   *
+   * Low here means the nose slides along what it touches and the wheels keep the car going, which
+   * is what a scrape is: sparks and a scar in the paint, not a wall. It does not make the car
+   * indestructible — impacts are read from the contact force and are unaffected.
+   *
+   * Absent means 0.4, which is what every profile had before this existed.
+   */
+  chassisFriction?: number
 }
 
 /* ================================================================================================
@@ -399,6 +449,21 @@ export const SIM: DriveProfile = {
   rollResist: 0,
   landingTolerance: 9,
 }
+
+/*
+ * THE STUNT CAR SCRAPES RATHER THAN CATCHES. A vocabulary built out of loops, corkscrews and jumps
+ * is a vocabulary where the body touches the road on purpose, several times a lap; 0.4 turns every
+ * one of those into a full stop. 0.04 is a skid plate — it slides.
+ */
+STUNTS.chassisFriction = 0.04
+/*
+ * AND IT DRIVES ALL FOUR. A car whose job is loops, corkscrews and banked sixths spends its time on
+ * surfaces where the load moves around wildly, and rear-wheel drive there means the drive cuts out
+ * every time the back goes light — which on the entry to a loop is precisely when you need it. The
+ * 1990 car it is named after was rear-driven and understeered; this one keeps the understeer and
+ * loses the moment where the throttle stops doing anything.
+ */
+STUNTS.drive = 'awd'
 
 export const PROFILES: Record<string, DriveProfile> = {
   stunts: STUNTS,

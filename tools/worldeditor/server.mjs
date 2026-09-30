@@ -41,6 +41,7 @@ import { attachAgentRelay } from './agentws.mjs'
 import { McpAuth } from './mcpauth.mjs'
 import { McpBridge } from './mcpbridge.mjs'
 import * as mcp from './mcp.mjs'
+import * as programs from './programs.mjs'
 import * as training from './training.mjs'
 import { Overpass, PUBLIC_MIRRORS } from './overpass.mjs'
 import { Tiles } from './tiles.mjs'
@@ -1100,7 +1101,20 @@ async function api(req, res, seg, q) {
     const id = seg.slice(1).map(decodeURIComponent).join('/')
     if (req.method === 'GET') {
       const p = await store.getProgram(id)
-      return p ? json(res, 200, p) : json(res, 404, { error: `no program ${id}` })
+      if (!p) return json(res, 404, { error: `no program ${id}` })
+      /*
+       * BUILT AND CHECKED HERE, on request. `?js=1` is what the VIEWER asks for when a level names a
+       * program — the JavaScript, transpiled with the same TypeScript the repo builds with, so a
+       * page needs no compiler. `?check=1` is the typecheck against the generated declaration
+       * bundle, for an agent with no editor tab open. Both are the Program pane's own questions
+       * with the browser taken out of the answer.
+       */
+      if (q.get('js')) {
+        const out = programs.transpile(p.source, id)
+        return json(res, 200, { id, js: out.js, errors: out.errors })
+      }
+      if (q.get('check')) return json(res, 200, { id, ...(await programs.check(p.source, id)) })
+      return json(res, 200, p)
     }
     if (req.method === 'PUT') {
       const body = await readJson(req)

@@ -21,7 +21,9 @@ import { serverTools } from './mcptools.mjs'
 export const PROTOCOL_VERSION = '2025-06-18'
 
 /** The authored documents beside a bake — the same list the projection and gitrepo.mjs use. */
-export const SITE_DOCS = ['tuning.json', 'presets.json', 'placements.json', 'adjustments.json', 'structures.json', 'dead_ends.json']
+// zones (traffic areas), courses (races) and stunts (fixtures) are authored beside the others and
+// are what a game is made of; an agent that could read tuning but not write a race was half a tool
+export const SITE_DOCS = ['tuning.json', 'presets.json', 'placements.json', 'adjustments.json', 'structures.json', 'dead_ends.json', 'zones.json', 'courses.json', 'stunts.json']
 
 /*
  * THE SERVICE'S OWN RULES, and they are not all the same one.
@@ -224,6 +226,27 @@ export async function callTool(name, args, { root, store, levels }) {
  * have, run one. Anything else gets a proper JSON-RPC "method not found" rather than a silence —
  * a client probing for prompts or resources should be told no, not left waiting.
  */
+/**
+ * Read and write one of a site's authored documents, for the tools that merge into one (a zone
+ * into zones.json, a course into courses.json) rather than replacing it whole.
+ */
+function siteDocAccess(ctx) {
+  return {
+    async read(slug, name) {
+      const at = resolveDoc(ctx.root, `sites/${slug}/${name}`)
+      if (!at) throw new Error(`sites/${slug}/${name} is not a document path`)
+      const text = await readFile(at.file, 'utf8').catch(() => null)
+      return text === null ? null : JSON.parse(text)
+    },
+    async write(slug, name, doc) {
+      const at = resolveDoc(ctx.root, `sites/${slug}/${name}`)
+      if (!at) throw new Error(`sites/${slug}/${name} is not a document path`)
+      await ctx.store.putAuthored(`${slug}/${name}`, Buffer.from(JSON.stringify(doc, null, 1)))
+      return `sites/${slug}/${name}`
+    },
+  }
+}
+
 export async function handle(message, ctx) {
   const { id, method, params } = message ?? {}
   const reply = (result) => ({ jsonrpc: '2.0', id, result })
@@ -248,7 +271,7 @@ export async function handle(message, ctx) {
    *                  service, the live view. Absent from the list when no page is attached,
    *                  because advertising a tool that must fail is worse than not having it.
    */
-  const extra = ctx.apiFetch ? serverTools({ apiFetch: ctx.apiFetch }) : []
+  const extra = ctx.apiFetch ? serverTools({ apiFetch: ctx.apiFetch, root: ctx.root, siteDoc: siteDocAccess(ctx) }) : []
   const bridged = ctx.bridge?.tools() ?? []
   // only the three fields MCP defines — `run` is ours and must not go over the wire
   const all = [...TOOLS, ...extra.map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema })), ...bridged]

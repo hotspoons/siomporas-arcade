@@ -43,8 +43,10 @@ interface Variant {
   leaves: THREE.InstancedMesh
   leavesFull: THREE.InstancedMesh // the sparse (density<1) leaf set is a second geometry with fewer leaves
   leavesSparse: THREE.InstancedMesh
+  /** the canopy a tree wears beyond `TREE_LEAF_LOD_M`: a few big leaves instead of many small ones */
+  leavesFar: THREE.InstancedMesh
   nativeHeight: number
-  leafMat: THREE.MeshStandardMaterial
+  leafMat: THREE.MeshLambertMaterial
   srcMap: THREE.Texture | null
   grey: boolean
 }
@@ -112,7 +114,19 @@ function buildVariant(a: Archetype, capacity: number, h: number): Variant {
   // draw at all. A plain material with the same leaf texture and alpha test does. The texture is
   // swapped for a greyscale mask on the first season change so the season tint IS the colour.
   const src = t.leavesMesh.material as THREE.MeshPhongMaterial
-  const leafMat = new THREE.MeshStandardMaterial({ map: src.map, color: src.color, side: THREE.DoubleSide, alphaTest: 0.5, roughness: 0.9, metalness: 0 })
+  /*
+   * LAMBERT, NOT STANDARD, and it is the single biggest frame-time decision in this app.
+   *
+   * Every leaf is an alpha-tested card, and the discard means the GPU shades every card fragment
+   * before it can reject it — so the cost of a canopy is its screen area times the price of the
+   * fragment shader, many layers deep. Measured on Rich's machine, stopped in the woods on
+   * arrowhead at 2560 × 1323: the same leaves with `MeshStandardMaterial` (roughness 0.9,
+   * metalness 0 — which is to say, Lambert with a PBR shader wrapped round it) cost 41.5 ms a
+   * frame; with `MeshLambertMaterial` 22.7 ms. Nothing else that was tried came close: single-sided
+   * cards saved 15 ms and lost half the leaves, a depth pre-pass made it worse, and halving the
+   * pixel count saved what halving the pixel count saves. A leaf has no specular worth the money.
+   */
+  const leafMat = new THREE.MeshLambertMaterial({ map: src.map, color: src.color, side: THREE.DoubleSide, alphaTest: 0.5 })
   const leavesFull = new THREE.InstancedMesh(t.leavesMesh.geometry, leafMat, capacity)
   // a thinner canopy for spring and autumn: same tree, a third of the leaves, same seed
   const sparseGeo = t.leavesMesh.geometry.clone()
@@ -126,12 +140,38 @@ function buildVariant(a: Archetype, capacity: number, h: number): Variant {
   }
   const leavesSparse = new THREE.InstancedMesh(sparseGeo, leafMat, capacity)
   leavesSparse.visible = false
-  for (const m of [branches, leavesFull, leavesSparse]) {
+  /*
+   * THE FAR CANOPY, and this is where the frame budget was going.
+   *
+   * Measured on Rich's machine (arrowhead, 2560 × 1323, 700 near trees): hiding the leaf meshes
+   * took the frame from 22.7 ms to the display's 16.7 ms floor, while hiding the BRANCHES — which
+   * are five million triangles to the leaves' three — saved 2.2 ms. Leaves are dear per triangle
+   * because each one is an alpha-tested, double-sided card: the discard defeats early depth
+   * rejection, so every leaf behind every other leaf is shaded and thrown away. That cost scales
+   * with how many cards there are, not with how big they are — and at a hundred metres a tree is
+   * fifty pixels tall, where forty big leaves and four hundred small ones are the same picture.
+   *
+   * So a tree past `TREE_LEAF_LOD_M` wears this set: `TREE_FAR_LEAF_SHARE` of the leaves at
+   * `TREE_FAR_LEAF_SIZE` times the size, same seed, same silhouette. The material is shared, so
+   * the season tints all three canopies at once.
+   */
+  const farGeo = t.leavesMesh.geometry.clone()
+  {
+    const t3 = new Tree()
+    t3.loadFromJson(optionsFor(a, h))
+    t3.options.leaves.count = Math.max(2, Math.round(fullCount * T.TREE_FAR_LEAF_SHARE))
+    t3.options.leaves.size *= 1.3 * T.TREE_FAR_LEAF_SIZE
+    t3.generate()
+    farGeo.copy(t3.leavesMesh.geometry)
+  }
+  const leavesFar = new THREE.InstancedMesh(farGeo, leafMat, capacity)
+  for (const m of [branches, leavesFull, leavesSparse, leavesFar]) {
     m.count = 0
     m.frustumCulled = false
     m.name = `near-tree:${a.id}`
   }
-  return { name: a.id, archetype: a, leaf: a.leaf, branches, leaves: leavesFull, leavesFull, leavesSparse, nativeHeight: Math.max(1, top), leafMat, srcMap: src.map, grey: false }
+  leavesFar.name = `near-tree:${a.id}:far`
+  return { name: a.id, archetype: a, leaf: a.leaf, branches, leaves: leavesFull, leavesFull, leavesSparse, leavesFar, nativeHeight: Math.max(1, top), leafMat, srcMap: src.map, grey: false }
 }
 
 /**
@@ -215,7 +255,7 @@ export class NearTrees {
     for (const a of paletteFor(this.flora, this.quantiles)) {
       const v = buildVariant(a, this.capacity, this.median)
       this.variants.push(v)
-      this.group.add(v.branches, v.leavesFull, v.leavesSparse)
+      this.group.add(v.branches, v.leavesFull, v.leavesSparse, v.leavesFar)
       await b.tick()
     }
     b.finish()
@@ -272,6 +312,7 @@ export class NearTrees {
       const sparse = !bare && leaf.density < 0.85
       v.leavesFull.visible = !bare && !sparse
       v.leavesSparse.visible = sparse
+      v.leavesFar.visible = !bare
       v.leaves = sparse ? v.leavesSparse : v.leavesFull
       if (bare) v.leaves.visible = false
     }
@@ -363,9 +404,35 @@ export class NearTrees {
     return this
   }
 
+  /** was the simple style on last time `update` ran, so switching it rebuilds the far set once */
+  private wasSimple = false
+
   update(eye: THREE.Vector3, force = false, fwd = new THREE.Vector3(1, 0, 0), pitch = 0): boolean {
+    /*
+     * LOLLIPOPS EVERYWHERE. `TREE_SIMPLE` drops the near set entirely — the far LOD then draws
+     * every tree, because it skips exactly the ones this set has claimed. Returning `true` on the
+     * frame the style CHANGES is what makes the far set rebuild its instances; returning it every
+     * frame would rebuild tens of thousands of matrices for ever.
+     */
+    const simple = T.TREE_SIMPLE >= 0.5 || T.TREE_LOLLIPOP >= 0.5
+    if (simple) {
+      this.group.visible = false
+      const changed = !this.wasSimple || this.near.size > 0
+      this.near.clear()
+      this.horizon = 0
+      this.wasSimple = true
+      return changed
+    }
+    if (this.wasSimple) {
+      this.group.visible = true
+      this.wasSimple = false
+      force = true // the near set has to be rebuilt from nothing
+    }
     const heading = Math.atan2(fwd.x, fwd.z)
-    const turned = Math.abs(heading - this.lastHeading) > 0.44
+    // with a view cone the set has to be refilled as the camera turns, well before the cone's edge shows
+    let dh = Math.abs(heading - this.lastHeading)
+    if (dh > Math.PI) dh = 2 * Math.PI - dh
+    const turned = dh > T.TREE_REFRESH_TURN
     if (!force && !turned && eye.distanceTo(this.last) < 15) return false
     this.last.copy(eye)
     this.lastHeading = heading
@@ -389,6 +456,10 @@ export class NearTrees {
     cands.sort((p, q) => p.d2 - q.d2)
     const total = Math.min(cands.length, cap * this.variants.length)
     const counts = this.variants.map(() => 0)
+    // the near canopy and the far canopy are separate instance lists; the branches carry both
+    const nearCounts = this.variants.map(() => 0)
+    const farCounts = this.variants.map(() => 0)
+    const lodM = T.TREE_LEAF_LOD_M
     const m = new THREE.Matrix4()
     const q = new THREE.Quaternion()
     const s = new THREE.Vector3()
@@ -408,19 +479,27 @@ export class NearTrees {
       p.set(t.x, t.y, t.z)
       m.compose(p, q, s)
       v.branches.setMatrixAt(counts[vi], m)
-      v.leavesFull.setMatrixAt(counts[vi], m)
-      v.leavesSparse.setMatrixAt(counts[vi], m)
+      if (Math.sqrt(cands[k].d2) > lodM) {
+        v.leavesFar.setMatrixAt(farCounts[vi], m)
+        farCounts[vi]++
+      } else {
+        v.leavesFull.setMatrixAt(nearCounts[vi], m)
+        v.leavesSparse.setMatrixAt(nearCounts[vi], m)
+        nearCounts[vi]++
+      }
       counts[vi]++
       this.near.add(i)
       this.horizon = Math.sqrt(cands[k].d2)
     }
     this.variants.forEach((v, vi) => {
       v.branches.count = counts[vi]
-      v.leavesFull.count = counts[vi]
-      v.leavesSparse.count = counts[vi]
+      v.leavesFull.count = nearCounts[vi]
+      v.leavesSparse.count = nearCounts[vi]
+      v.leavesFar.count = farCounts[vi]
       v.branches.instanceMatrix.needsUpdate = true
       v.leavesFull.instanceMatrix.needsUpdate = true
       v.leavesSparse.instanceMatrix.needsUpdate = true
+      v.leavesFar.instanceMatrix.needsUpdate = true
     })
     return true
   }

@@ -14,7 +14,8 @@ import { loadRapier, rapier } from '@apex/engine/physics/rapier'
 import { Vehicle } from '@apex/engine/physics/vehicle'
 import { PhysicsWorld } from '@apex/engine/physics/world'
 import {
-  cgHeightOf, defaultVehicle, describeVehicle, gearedTopSpeed, originHeight, overrideRange,
+  axleGrip, cgHeightOf, defaultVehicle, describeVehicle, finalDriveFor, FINAL_DRIVE_MIN, gearedTopSpeed,
+  mountPoint, mountYaw, originHeight, overrideRange, rebalanceGears,
   peakTorque, toDriveProfile, toEngineTuning, toVehicleSpec, tractiveForce, validateVehicle,
   VEHICLE_CLASSES, VEHICLE_TEMPLATE_IDS, wheelBoneCount, type VehicleDoc,
 } from '../src/vehicles'
@@ -377,5 +378,166 @@ describe('a level naming the car, and a car naming its own engine', () => {
     expect(Number.isFinite(p.powerPerKg)).toBe(true)
     expect(p.powerPerKg).toBeGreaterThan(0)
     expect(validateVehicle(defaultVehicle('hero-car')).ok).toBe(true)
+  })
+})
+
+/*
+ * WEAPON MOUNTS.
+ *
+ * The mount is a NAMED PLACE, not three numbers, so the thing worth testing is that the place moves
+ * with the car: a nose gun on a 5.9 m pickup must be further forward than one on a 3.4 m kei, and
+ * nobody should have to retype an offset when they change the length.
+ */
+describe('a weapon bolted to a car', () => {
+  const kei = { mass: 720, wheelbase: 2.4, track: 1.3, cgHeight: 0.52, wheelRadius: 0.28, drive: 'fwd' as const, length: 3.4, width: 1.48, height: 1.5 }
+  const truck = { ...kei, length: 5.9, width: 2.03, height: 1.95 }
+
+  it('puts each named place where the chassis says, and moves it when the car changes', () => {
+    expect(mountPoint(kei, 'nose').x).toBeCloseTo(1.7, 6)
+    expect(mountPoint(truck, 'nose').x).toBeCloseTo(2.95, 6)
+    expect(mountPoint(truck, 'nose').x).toBeGreaterThan(mountPoint(kei, 'nose').x)
+    // up is +Y, right is +Z, and the tail is behind the origin
+    expect(mountPoint(kei, 'roof').y).toBeCloseTo(0.75, 6)
+    expect(mountPoint(kei, 'underbody').y).toBeCloseTo(-0.75, 6)
+    expect(mountPoint(kei, 'right').z).toBeCloseTo(0.74, 6)
+    expect(mountPoint(kei, 'left').z).toBeCloseTo(-0.74, 6)
+    expect(mountPoint(kei, 'tail').x).toBeLessThan(0)
+  })
+
+  it('points a side gun sideways and a tail gun backwards unless told otherwise', () => {
+    expect(mountYaw({ weapon: 'minigun', at: 'roof' })).toBeCloseTo(0, 6)
+    expect(mountYaw({ weapon: 'minigun', at: 'right' })).toBeCloseTo(Math.PI / 2, 6)
+    expect(mountYaw({ weapon: 'minigun', at: 'left' })).toBeCloseTo(-Math.PI / 2, 6)
+    expect(mountYaw({ weapon: 'minigun', at: 'tail' })).toBeCloseTo(Math.PI, 6)
+    // an explicit angle wins, including an explicit zero on a side mount
+    expect(mountYaw({ weapon: 'minigun', at: 'right', yaw_deg: 0 })).toBeCloseTo(0, 6)
+  })
+
+  it('refuses a mount with nothing on it, and one naming a weapon that was never built', () => {
+    const v = defaultVehicle('hero-car')
+    v.mounts = [{ weapon: '', at: 'roof' }]
+    expect(validateVehicle(v).errors.join(' ')).toMatch(/no weapon chosen/)
+
+    v.mounts = [{ weapon: 'railgun', at: 'roof' }]
+    expect(validateVehicle(v, { weapons: ['minigun'] }).errors.join(' ')).toMatch(/not a built weapon/)
+    // and it passes when the armoury has it — the check can succeed as well as fail
+    expect(validateVehicle(v, { weapons: ['railgun'] }).errors).toEqual([])
+    // with no armoury passed there is nothing to check it against, so it must NOT invent a problem
+    expect(validateVehicle(v).errors).toEqual([])
+  })
+})
+
+/*
+ * THE GEARBOX SET BY ITS RESULT, AND THE TWO THINGS THAT MAKE A CAR HANDLE.
+ *
+ * Rich, 2026-09-29: top speed should be the field you edit and the final drive should follow;
+ * weight distribution and tyre width should reach the handling. All four are arithmetic, so all
+ * four are checked here rather than by driving.
+ */
+describe('gearing you set by the speed you want', () => {
+  it('finds the final drive that reaches a top speed, and the round trip lands back', () => {
+    const v = defaultVehicle('hero-car')
+    const want = 62 // m/s, about 139 mph
+    v.engine.final_drive = finalDriveFor(v.engine, v.spec.wheelRadius, want)
+    expect(gearedTopSpeed(v.engine, v.spec.wheelRadius)).toBeCloseTo(want, 6)
+    // and a bigger wheel needs a numerically higher diff to reach the same speed
+    const small = finalDriveFor(v.engine, 0.28, want)
+    const big = finalDriveFor(v.engine, 0.38, want)
+    expect(big).toBeGreaterThan(small)
+  })
+
+  it('calls an unreachable top speed an error rather than quietly gearing for it', () => {
+    const v = defaultVehicle('hero-car')
+    v.engine.final_drive = finalDriveFor(v.engine, v.spec.wheelRadius, 400) // 900 mph
+    expect(v.engine.final_drive).toBeLessThan(FINAL_DRIVE_MIN)
+    expect(validateVehicle(v).errors.join(' ')).toMatch(/final_drive/)
+    // and an ordinary one is not an error
+    v.engine.final_drive = finalDriveFor(v.engine, v.spec.wheelRadius, 62)
+    expect(validateVehicle(v).errors).toEqual([])
+  })
+
+  it('rebalances the middle gears geometrically and keeps the two ends', () => {
+    const six = rebalanceGears([3.4, 2.0, 1.4, 1.0, 0.82, 0.68], 6)
+    expect(six[0]).toBe(3.4)
+    expect(six[5]).toBe(0.68)
+    // every shift is the same proportional drop: that is what geometric means
+    const steps = six.slice(1).map((g, i) => six[i] / g)
+    for (const s of steps) expect(s).toBeCloseTo(steps[0], 3)
+
+    // adding one keeps the ends and re-spaces the rest
+    const seven = rebalanceGears(six, 7)
+    expect(seven).toHaveLength(7)
+    expect(seven[0]).toBe(3.4)
+    expect(seven[6]).toBe(0.68)
+    expect(seven[1]).toBeGreaterThan(six[1]) // a closer first shift
+    // removing one, likewise
+    const five = rebalanceGears(six, 5)
+    expect(five).toHaveLength(5)
+    expect(five[0]).toBe(3.4)
+    expect(five[4]).toBe(0.68)
+    // and the top speed is unchanged by any of it, because top and final drive are untouched
+    const e = { ...defaultVehicle('hero-car').engine, gears: six }
+    expect(gearedTopSpeed({ ...e, gears: seven }, 0.32)).toBeCloseTo(gearedTopSpeed(e, 0.32), 6)
+  })
+})
+
+describe('weight distribution and tyre width reach the handling', () => {
+  it('puts the centre of mass where the weight is', () => {
+    const v = defaultVehicle('hero-car')
+    expect(toVehicleSpec(v).comX).toBeCloseTo(0, 6)          // nothing said: 50/50
+    v.spec.weightFront = 0.6
+    expect(toVehicleSpec(v).comX).toBeCloseTo(v.spec.wheelbase * 0.1, 6) // forward, +X
+    v.spec.weightFront = 0.4
+    expect(toVehicleSpec(v).comX).toBeCloseTo(-v.spec.wheelbase * 0.1, 6)
+  })
+
+  /*
+   * THE BALANCE, not the level. `street` already has a rear end deliberately looser than its front
+   * (gripRear 1.25 against gripFront 1.35, which is the profile's power-on oversteer), so the thing
+   * to assert is that the chassis MOVES that balance — an absolute ordering would be testing the
+   * profile's opinion rather than this arithmetic.
+   */
+  const balance = (v: ReturnType<typeof defaultVehicle>) => {
+    const p = toDriveProfile(v)
+    return p.gripFront / p.gripRear
+  }
+
+  it('gives the loaded axle less grip — which is where understeer comes from', () => {
+    const stock = balance(defaultVehicle('hero-car'))
+    const nose = defaultVehicle('hero-car')
+    nose.spec.weightFront = 0.6
+    const tail = defaultVehicle('hero-car')
+    tail.spec.weightFront = 0.4
+    expect(balance(nose)).toBeLessThan(stock)     // weight on the front costs the front grip
+    expect(balance(tail)).toBeGreaterThan(stock)
+    // and it is a real difference, not a rounding one: about 10% across a 60/40 split
+    expect(balance(tail) / balance(nose)).toBeGreaterThan(1.08)
+  })
+
+  it('gives the wider end more, so 255f/305r moves the balance rearward', () => {
+    const stock = balance(defaultVehicle('hero-car'))
+    const staggered = defaultVehicle('hero-car')
+    staggered.spec.tyreFront_mm = 255
+    staggered.spec.tyreRear_mm = 305
+    expect(balance(staggered)).toBeLessThan(stock)
+
+    // wider all round is worth something, but not much — this is not a grip cheat code
+    const square = defaultVehicle('hero-car')
+    square.spec.tyreFront_mm = 305
+    square.spec.tyreRear_mm = 305
+    const wide = toDriveProfile(square)
+    const plain = toDriveProfile(defaultVehicle('hero-car'))
+    expect(wide.gripFront).toBeGreaterThan(plain.gripFront)
+    expect(wide.gripFront / plain.gripFront).toBeLessThan(1.15)
+    // and it does not disturb the balance, because both ends gained the same
+    expect(balance(square)).toBeCloseTo(stock, 6)
+  })
+
+  it('does not punish a bus for being heavy — the profile still sets the level', () => {
+    const bus = defaultVehicle('commercial-vehicle')
+    bus.spec.mass = 12000
+    const g = axleGrip(bus.spec)
+    expect(g.front).toBeCloseTo(1, 6)
+    expect(g.rear).toBeCloseTo(1, 6)
   })
 })

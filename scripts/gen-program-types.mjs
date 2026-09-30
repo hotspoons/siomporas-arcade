@@ -32,7 +32,23 @@ const OUT = join(ROOT, 'apps/corridor/src/generated/program-types.json')
  * reaches for when the declarative surface runs out — the components, the world, the spawn
  * helpers, the ECS config shapes.
  */
-const ROOTS = ['program.ts', 'actors.ts', 'actorworld.ts', 'ecsconfig.ts', 'traffic.ts']
+const ROOTS = [
+  'program.ts', 'actors.ts', 'actorworld.ts', 'ecsconfig.ts', 'traffic.ts',
+  /*
+   * THE THINGS A PROGRAM NAMES. Rich, 2026-09-29: *"make sure everything is listed in the code
+   * editor"*. `api.races.get(id)` hands back a `Course`, `api.traffic` talks about zones and
+   * `api.stunts` about fixtures — so a program that wants to read one needs its type, and without
+   * it the editor underlines a perfectly good line and offers no completion for the field you are
+   * reaching for.
+   */
+  'races.ts', 'racerun.ts', 'zones.ts', 'stunts.ts', 'trafficsets.ts', 'vehicles.ts',
+  /*
+   * THE HUNT PRIMITIVE. Rich, 2026-09-29: *"make sure some primitives for object hunting objectives
+   * with capture survive"* the removal of Squishy Hunt and Parkour. A program is where one gets
+   * built now, so its types have to be reachable from the editor or it may as well not exist.
+   */
+  'objectives.ts',
+]
 
 /** Where a file lands in the virtual filesystem Monaco is given. */
 const vpath = (p) => `file:///${p.split('\\').join('/')}`

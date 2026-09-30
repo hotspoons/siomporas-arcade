@@ -36,6 +36,10 @@ import { dockWidth } from '../ui/dockwidth'
 import { actorExtension } from '../ui/actors'
 import { weaponExtension } from '../ui/weapons'
 import { vehicleExtension } from '../ui/vehicles'
+import { worldThings, type PlacementDoc } from '../worldthings'
+import type { ZoneDoc } from '../zones'
+import type { StuntDoc } from '../stunts'
+import type { CourseDoc } from '../races'
 
 /**
  * The tabs, as one list.
@@ -143,6 +147,26 @@ function pane(name: string): HTMLElement {
   return p
 }
 
+/**
+ * One of a site's authored documents, or null.
+ *
+ * A 404 IS THE NORMAL CASE — a world nobody has painted has no `zones.json` — so it is not logged
+ * and not an error. The `{` check catches the other normal case: a dev server that answers every
+ * unknown path with index.html, which `JSON.parse` would otherwise report as a syntax error in a
+ * file that does not exist.
+ */
+async function siteDoc<T>(slug: string, name: string): Promise<T | null> {
+  try {
+    const r = await fetch(`/sites/${slug}/${name}`, { cache: 'no-cache' })
+    if (!r.ok) return null
+    const text = (await r.text()).trimStart()
+    if (!text.startsWith('{')) return null
+    return JSON.parse(text) as T
+  } catch {
+    return null
+  }
+}
+
 const programPanel = new ProgramPanel({
   host: pane('program'),
   reportHost: inspector,
@@ -160,14 +184,20 @@ const programPanel = new ProgramPanel({
    */
   instances: async () => {
     if (!selected) return { world: null, items: [] }
-    try {
-      const r = await fetch(`/sites/${selected}/placements.json`, { cache: 'no-cache' })
-      if (!r.ok) return { world: selected, items: [] }
-      const doc = (await r.json()) as { items?: { id: string; asset: string; tags?: string[] }[] }
-      return { world: selected, items: (doc.items ?? []).map((i) => ({ id: i.id, asset: i.asset, tags: i.tags ?? [] })) }
-    } catch {
-      return { world: selected, items: [] }
-    }
+    /*
+     * ALL FOUR LAYERS, not just the placements. Rich, 2026-09-29: *"Nothing shows up in the
+     * programming world listing except a set of apartments, no traffic zones, no stunts,
+     * nothing."* Each file is fetched independently and a missing one is simply absent — most
+     * worlds have no stunts and no races, and a list that fails because one file is a 404 shows
+     * nothing at all, which is exactly the symptom.
+     */
+    const [placements, zones, stunts, courses] = await Promise.all([
+      siteDoc<PlacementDoc>(selected, 'placements.json'),
+      siteDoc<ZoneDoc>(selected, 'zones.json'),
+      siteDoc<StuntDoc>(selected, 'stunts.json'),
+      siteDoc<CourseDoc>(selected, 'courses.json'),
+    ])
+    return { world: selected, items: worldThings({ placements, zones, stunts, courses }) }
   },
   makeDir: async (id) => { await api.makeProgramDir(id) },
   removeDir: async (id) => { await api.deleteProgramDir(id) },

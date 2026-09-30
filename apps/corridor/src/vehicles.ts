@@ -69,6 +69,33 @@ export interface VehicleChassis {
    * car whose sills are at knee height — see `originHeight`.
    */
   rideHeight?: number
+  /**
+   * The share of the car's weight on the FRONT axle, 0…1. Default 0.5.
+   *
+   * Rich, 2026-09-29: *"one thing notably missing is front/rear weight distribution, that will
+   * impact handling significantly"*. It does, and in two separate ways that this file keeps
+   * separate on purpose:
+   *
+   *   1. WHERE THE MASS IS. It becomes `comX` on the physics body, so a nose-heavy car pitches,
+   *      brakes and rotates differently for reasons Rapier works out rather than reasons we impose.
+   *   2. WHAT EACH AXLE CAN HOLD. A tyre's grip falls as the load on it rises — load sensitivity —
+   *      so the heavy axle has LESS grip per kilogram, which is why a front-engined car understeers
+   *      and why weight transfer under braking works at all. See `axleGrip`.
+   *
+   * A real front-engined saloon is about 0.55, a mid-engined car 0.42, a rear-engined 911 about
+   * 0.38, a loaded van 0.45, a cabover truck 0.62.
+   */
+  weightFront?: number
+  /**
+   * Tyre section width, mm, per axle. Default 225 both ends.
+   *
+   * Rich asked for "255f/305r" to mean something, and it does: a wider tyre carries the same load
+   * over more rubber, so the load per millimetre falls and the grip coefficient rises. It is the
+   * SAME calculation as the weight distribution, from the other side, which is why one function
+   * does both.
+   */
+  tyreFront_mm?: number
+  tyreRear_mm?: number
 }
 
 /** A handling profile by reference, plus the handful of numbers this car differs by. */
@@ -137,6 +164,11 @@ export interface VehicleDoc {
   engine: VehicleEngine
   audio: VehicleAudio
   wheels: VehicleWheels
+  /**
+   * Weapons bolted to the car, each at a named place on the chassis. Optional and usually absent:
+   * most cars are not armed, and an empty array on every document is noise in every file.
+   */
+  mounts?: MountedWeapon[]
 }
 
 /* ---- defaults, per class --------------------------------------------------------------------- */
@@ -152,11 +184,11 @@ export interface VehicleDoc {
  * mass and CG of an ordinary saloon.
  */
 export const VEHICLE_TEMPLATES: Record<string, VehicleDoc> = {
-  'hero-car': doc({ mass: 1420, wheelbase: 2.65, track: 1.55, cgHeight: 0.52, wheelRadius: 0.32, drive: 'rwd', length: 4.4, width: 1.9, height: 1.35 }, 'street', { power_kw: 205, redline_rpm: 7200, idle_rpm: 850, gears: [3.42, 2.05, 1.42, 1.0, 0.82, 0.68], final_drive: 3.7, brake_torque_nm: 2400, brake_bias: 0.62 }, 'inline-6-na'),
-  traffic: doc({ mass: 1500, wheelbase: 2.7, track: 1.56, cgHeight: 0.58, wheelRadius: 0.33, drive: 'fwd', length: 4.5, width: 1.82, height: 1.48 }, 'street', { power_kw: 110, redline_rpm: 6200, idle_rpm: 750, gears: [3.55, 1.95, 1.3, 0.95, 0.74], final_drive: 4.05, brake_torque_nm: 1900, brake_bias: 0.65 }, 'inline-4-na'),
-  van: doc({ mass: 2300, rideHeight: 0.24, wheelbase: 3.2, track: 1.7, cgHeight: 0.85, wheelRadius: 0.36, drive: 'rwd', length: 5.5, width: 2.0, height: 2.4 }, 'street', { power_kw: 96, redline_rpm: 4600, idle_rpm: 700, gears: [4.2, 2.3, 1.45, 1.0, 0.8, 0.66], final_drive: 3.9, brake_torque_nm: 2600, brake_bias: 0.6 }, 'diesel-4'),
-  truck: doc({ mass: 8000, rideHeight: 0.32, wheelbase: 4.8, track: 2.0, cgHeight: 1.25, wheelRadius: 0.52, drive: 'rwd', length: 9.0, width: 2.5, height: 3.4 }, 'street', { power_kw: 180, redline_rpm: 2600, idle_rpm: 600, gears: [7.2, 4.2, 2.6, 1.7, 1.0, 0.78], final_drive: 4.3, brake_torque_nm: 9000, brake_bias: 0.55 }, 'diesel-6'),
-  bus: doc({ mass: 12000, rideHeight: 0.3, wheelbase: 5.9, track: 2.1, cgHeight: 1.4, wheelRadius: 0.55, drive: 'rwd', length: 12.0, width: 2.55, height: 3.2 }, 'street', { power_kw: 210, redline_rpm: 2400, idle_rpm: 600, gears: [6.7, 3.8, 2.3, 1.5, 1.0], final_drive: 4.6, brake_torque_nm: 13000, brake_bias: 0.5 }, 'diesel-6'),
+  'hero-car': doc({ mass: 1420, wheelbase: 2.65, track: 1.55, cgHeight: 0.52, wheelRadius: 0.32, drive: 'rwd', length: 4.4, width: 1.9, height: 1.35 }, 'street', { power_kw: 205, redline_rpm: 7200, idle_rpm: 850, gears: [3.42, 2.05, 1.42, 1.0, 0.82, 0.68], final_drive: 3.7, brake_torque_nm: 2400, brake_bias: 0.62 }, 'engines/atg-video-2/03_2jz.mr'),
+  traffic: doc({ mass: 1500, wheelbase: 2.7, track: 1.56, cgHeight: 0.58, wheelRadius: 0.33, drive: 'fwd', length: 4.5, width: 1.82, height: 1.48 }, 'street', { power_kw: 110, redline_rpm: 6200, idle_rpm: 750, gears: [3.55, 1.95, 1.3, 0.95, 0.74], final_drive: 4.05, brake_torque_nm: 1900, brake_bias: 0.65 }, 'engines/atg-video-1/05_honda_vtec.mr'),
+  van: doc({ mass: 2300, rideHeight: 0.24, wheelbase: 3.2, track: 1.7, cgHeight: 0.85, wheelRadius: 0.36, drive: 'rwd', length: 5.5, width: 2.0, height: 2.4 }, 'street', { power_kw: 96, redline_rpm: 4600, idle_rpm: 700, gears: [4.2, 2.3, 1.45, 1.0, 0.8, 0.66], final_drive: 3.9, brake_torque_nm: 2600, brake_bias: 0.6 }, 'engines/atg-video-2/05_odd_fire_v6.mr'),
+  truck: doc({ mass: 8000, rideHeight: 0.32, wheelbase: 4.8, track: 2.0, cgHeight: 1.25, wheelRadius: 0.52, drive: 'rwd', length: 9.0, width: 2.5, height: 3.4 }, 'street', { power_kw: 180, redline_rpm: 2600, idle_rpm: 600, gears: [7.2, 4.2, 2.6, 1.7, 1.0, 0.78], final_drive: 4.3, brake_torque_nm: 9000, brake_bias: 0.55 }, 'engines/atg-video-2/07_gm_ls.mr'),
+  bus: doc({ mass: 12000, rideHeight: 0.3, wheelbase: 5.9, track: 2.1, cgHeight: 1.4, wheelRadius: 0.55, drive: 'rwd', length: 12.0, width: 2.55, height: 3.2 }, 'street', { power_kw: 210, redline_rpm: 2400, idle_rpm: 600, gears: [6.7, 3.8, 2.3, 1.5, 1.0], final_drive: 4.6, brake_torque_nm: 13000, brake_bias: 0.5 }, 'engines/atg-video-2/07_gm_ls.mr'),
 }
 
 function doc(spec: VehicleChassis, base: string, engine: VehicleEngine, setup: string): VehicleDoc {
@@ -221,7 +253,7 @@ export interface VehicleReport {
  * `rigWheels` is how many bones the asset's rig binds to the `wheel` role. Passing it is what turns
  * "your wheels will not turn" from something discovered while driving into a warning on the form.
  */
-export function validateVehicle(v: VehicleDoc | null | undefined, opts: { rigWheels?: number; audioSetups?: string[] } = {}): VehicleReport {
+export function validateVehicle(v: VehicleDoc | null | undefined, opts: { rigWheels?: number; audioSetups?: string[]; weapons?: string[] } = {}): VehicleReport {
   const errors: string[] = []
   const warnings: string[] = []
   if (!v) return { ok: true, errors, warnings }
@@ -285,6 +317,33 @@ export function validateVehicle(v: VehicleDoc | null | undefined, opts: { rigWhe
 
   if (opts.audioSetups && v.audio?.setup && !opts.audioSetups.includes(v.audio.setup)) {
     warnings.push(`audio.setup ${JSON.stringify(v.audio.setup)} is not an enginesim configuration this build has`)
+  }
+
+  if (e && Number.isFinite(e.final_drive)) {
+    if (e.final_drive < FINAL_DRIVE_MIN || e.final_drive > FINAL_DRIVE_MAX) {
+      errors.push(`engine.final_drive ${e.final_drive.toFixed(2)} is outside ${FINAL_DRIVE_MIN}…${FINAL_DRIVE_MAX} — no differential is geared like that, so the top speed it came from is not reachable`)
+    }
+  }
+
+  if (s && Number.isFinite(s.weightFront) && (s.weightFront! < 0.2 || s.weightFront! > 0.8)) {
+    errors.push(`spec.weightFront ${s.weightFront} is outside 0.2…0.8 — that is past anything with four wheels on the ground`)
+  }
+  for (const [name, mm] of [['tyreFront_mm', s?.tyreFront_mm], ['tyreRear_mm', s?.tyreRear_mm]] as const) {
+    if (mm === undefined) continue
+    if (!Number.isFinite(mm) || mm <= 0) errors.push(`spec.${name} must be a positive number of millimetres`)
+    else if (mm < 80 || mm > 600) warnings.push(`spec.${name} is ${mm} mm, which is not a tyre anybody fits`)
+  }
+
+  /*
+   * MOUNTED WEAPONS. An empty id is a picker somebody opened and did not fill in, which is an
+   * error; a name this build has never heard of is a weapon that silently does nothing, which is
+   * worse and is only checkable when the caller passes the armoury.
+   */
+  for (const [i, m] of (v.mounts ?? []).entries()) {
+    if (!m.weapon) errors.push(`mounts[${i}] has no weapon chosen`)
+    else if (opts.weapons && !opts.weapons.includes(m.weapon)) errors.push(`mounts[${i}] names ${JSON.stringify(m.weapon)}, which is not a built weapon`)
+    if (!(VEHICLE_MOUNTS as readonly string[]).includes(m.at)) errors.push(`mounts[${i}].at is ${JSON.stringify(m.at)}; it must be one of ${VEHICLE_MOUNTS.join(', ')}`)
+    if (m.yaw_deg !== undefined && !Number.isFinite(m.yaw_deg)) errors.push(`mounts[${i}].yaw_deg must be a number`)
   }
 
   return { ok: errors.length === 0, errors, warnings }
@@ -406,7 +465,11 @@ export function toVehicleSpec(v: VehicleDoc, p: DriveProfile = toDriveProfile(v)
     halfLength,
     halfHeight,
     halfWidth,
-    comX: 0,
+    // WHERE THE MASS SITS ALONG THE CAR. Forward is +X, the axles are half a wheelbase either side
+    // of the middle, so a car with `f` of its weight on the front has its centre of mass at
+    // `wheelbase × (f − ½)`. 50/50 gives zero, which is what this was before and why nothing about
+    // a nose-heavy car behaved like one.
+    comX: s.wheelbase * (frontShare(s) - 0.5),
     comY,
     wheelbase: s.wheelbase,
     track: s.track,
@@ -437,6 +500,20 @@ export function toDriveProfile(v: VehicleDoc): DriveProfile {
     derived.topSpeed = gearedTopSpeed(v.engine, v.spec.wheelRadius)
     derived.brakePerKg = v.engine.brake_torque_nm / Math.max(0.05, v.spec.wheelRadius) / v.spec.mass
   }
+  /*
+   * GRIP PER AXLE, from the weight it carries and the rubber under it.
+   *
+   * The profile's `gripFront`/`gripRear` say what the GAME is like — Crazy Taxi at 2.8, the
+   * simulator at 1.35 — and this scales them by what the CAR is like. A 60/40 saloon on equal
+   * tyres comes out with about 10% less grip at the front than the rear, which is understeer
+   * arriving from the spec sheet rather than from somebody typing a handling opinion.
+   *
+   * The profile still sets the LEVEL — every scale here is against this car on ordinary tyres with
+   * its weight in the middle, so a 12-tonne bus is not punished for being a bus.
+   */
+  const g = axleGrip(v.spec)
+  derived.gripFront = (p.gripFront ?? 1) * g.front
+  derived.gripRear = (p.gripRear ?? 1) * g.rear
   if (v.wheels?.steer_max_deg > 0) derived.steerMax = (v.wheels.steer_max_deg * Math.PI) / 180
   return { ...p, ...derived, ...(v.profile.overrides as Partial<DriveProfile>), id: `${v.profile.base}:vehicle` }
 }
@@ -492,8 +569,35 @@ export function cgHeightOf(body: { translation(): { y: number } }, spec: Vehicle
 /** A one-line summary for the list: what this car is, in the words a person would use. */
 export function describeVehicle(v: VehicleDoc): string {
   const hp = Math.round(v.engine.power_kw * 1.341)
-  const mph = Math.round(gearedTopSpeed(v.engine, v.spec.wheelRadius) * 2.237)
-  return `${v.spec.mass} kg · ${hp} hp · ${v.spec.drive.toUpperCase()} · ${v.engine.gears.length}-speed · ${mph} mph geared · ${v.profile.base}`
+  /*
+   * THE SPEED IT REACHES, not the speed its top gear allows.
+   *
+   * These are not close. A supercar's seventh is geared for 365 mph at the redline — real gearsets
+   * are, because nobody holds seventh to the limiter — while the profile's drag and `topSpeed` stop
+   * it at 139. Showing the geared figure on a card put "365 mph" beside a road car, which is the
+   * kind of number that makes somebody distrust every other number next to it.
+   */
+  const mph = Math.round(effectiveTopSpeed(v) * 2.237)
+  return `${v.spec.mass} kg · ${hp} hp · ${v.spec.drive.toUpperCase()} · ${v.engine.gears.length}-speed · ${mph} mph · ${v.profile.base}`
+}
+
+/**
+ * The speed it actually reaches, m/s: the lower of what the gearbox allows and what the power can
+ * push through the air.
+ *
+ * NOT `toDriveProfile(v).topSpeed` — that field is DERIVED from the gearbox (see above), so it is
+ * the same 365 mph and asking it cannot catch this. The limit that bites is drag: at a steady speed
+ * all the power goes into it, so `P = drag·m·v³` and the top speed is the cube root. That is one
+ * line of physics with no fudge in it, and it puts the presets where a person would expect — a
+ * supercar at 178, a kei at 87, a bus at 71.
+ */
+export function effectiveTopSpeed(v: VehicleDoc): number {
+  const geared = gearedTopSpeed(v.engine, v.spec.wheelRadius)
+  const p = toDriveProfile(v)
+  const dragged = p.dragPerKg > 0 && v.spec.mass > 0
+    ? Math.cbrt((v.engine.power_kw * 1000) / (p.dragPerKg * v.spec.mass))
+    : geared
+  return Math.min(geared, dragged)
 }
 
 /* ---- decisions the form makes, extracted so they can be tested without a browser --------------- */
@@ -532,4 +636,151 @@ export function wheelBoneCount(bound: string[] | undefined | null, guessed: numb
 export function overrideRange(def: number): { min: number; max: number; step: number } {
   const span = Math.max(Math.abs(def) * 2, 1)
   return { min: def >= 0 ? 0 : -span, max: span, step: span / 200 }
+}
+
+/* ---- the gearbox as a thing you set by its RESULT ---------------------------------------------- */
+
+/** The final drive that would make this gearbox reach `topSpeed` m/s at the redline in top. */
+export function finalDriveFor(e: VehicleEngine, wheelRadius: number, topSpeed: number): number {
+  const top = e.gears[e.gears.length - 1]
+  if (!(top > 0) || !(wheelRadius > 0) || !(topSpeed > 0) || !(e.redline_rpm > 0)) return e.final_drive
+  return ((e.redline_rpm / 60) * 2 * Math.PI * wheelRadius) / (top * topSpeed)
+}
+
+/**
+ * What a final drive may be before it is a mistake rather than a choice.
+ *
+ * Rich, 2026-09-29: *"if you edit it will change the final drive ratio to match, and bound it as an
+ * error condition if it is out of bounds"*. The bounds are real gearsets: a long-legged GT sits
+ * near 2.6, an ordinary car 3.5 to 4.1, a hot hatch 4.4, a truck's differential 5 to 7. Outside
+ * 1.5…12 the number is not a car any more — usually because a top speed was typed with the wrong
+ * unit — so it is an error, not a warning.
+ */
+export const FINAL_DRIVE_MIN = 1.5
+export const FINAL_DRIVE_MAX = 12
+
+/**
+ * Lay out `count` gears between the lowest and the highest, keeping both ends.
+ *
+ * Rich: *"when adding gears rebalance the other gears between the low and high gear. Removing gears
+ * do the same."* A GEOMETRIC progression, because that is what a real gearbox is: each shift is the
+ * same PROPORTIONAL drop in ratio, so the engine falls to the same rpm every time you change up.
+ * Spacing them arithmetically instead gives a box that drops 2000 rpm on the 1–2 shift and 400 on
+ * the 5–6, which is the thing everybody notices and nobody can name.
+ */
+export function rebalanceGears(gears: number[], count: number): number[] {
+  const n = Math.max(1, Math.round(count))
+  const first = gears[0]
+  const last = gears[gears.length - 1]
+  if (!(first > 0) || !(last > 0)) return gears.slice(0, n)
+  if (n === 1) return [+first.toFixed(3)]
+  if (n === 2) return [+first.toFixed(3), +last.toFixed(3)]
+  const step = (last / first) ** (1 / (n - 1))
+  const out: number[] = []
+  for (let i = 0; i < n; i++) out.push(+(first * step ** i).toFixed(3))
+  // the ends are the ones somebody chose, so they are not left to rounding
+  out[0] = +first.toFixed(3)
+  out[n - 1] = +last.toFixed(3)
+  return out
+}
+
+/* ---- weight, rubber and what each axle can hold ------------------------------------------------ */
+
+/** The share on the front axle, defaulted and clamped to something a car could be. */
+export function frontShare(s: VehicleChassis): number {
+  const f = s.weightFront
+  if (!Number.isFinite(f)) return 0.5
+  return Math.max(0.2, Math.min(0.8, f as number))
+}
+
+/** The tyre everything is measured against: an ordinary 225-section road tyre. */
+export const TYRE_REFERENCE_MM = 225
+
+/**
+ * The grip multiplier for each axle, from load sensitivity.
+ *
+ * A tyre's coefficient of friction FALLS as the load on it rises — doubling the load on a tyre does
+ * not double the grip it returns — so the axle carrying more of the car has less grip per kilogram
+ * of it. That single fact is where understeer, weight transfer under braking and the point of a
+ * staggered tyre set all come from, so it is worth having the real shape of it rather than a table
+ * of handling adjectives.
+ *
+ * `μ ∝ (load per mm of tread)^−¼`. The quarter power is a fit, not a law — published tyre data puts
+ * the exponent between about 0.15 and 0.35 depending on construction — and it is clamped either
+ * side, because the honest range of this model is ordinary cars and nothing stops somebody typing a
+ * 10 mm tyre on a bus.
+ *
+ * THE REFERENCE IS THIS CAR ON 225s, 50/50 — not a fixed 1400 kg car. That matters: measured
+ * against a fixed car a bus would come out at the bottom clamp on both axles and slide everywhere,
+ * which is a statement about the game's grip level, and the game's grip level is the profile's job.
+ * Measured against itself, a heavier car is not punished for being heavy, a 60/40 split moves grip
+ * to the light end, and fitting wider rubber all round is worth a real but modest gain — 305s
+ * everywhere come out about 8% up, which is roughly what they are worth.
+ */
+export function axleGrip(s: VehicleChassis): { front: number; rear: number } {
+  const f = frontShare(s)
+  const mass = Number.isFinite(s.mass) && s.mass > 0 ? s.mass : 1400
+  const reference = mass / (4 * TYRE_REFERENCE_MM)
+  const scale = (share: number, widthMm: number | undefined) => {
+    const w = Number.isFinite(widthMm) && (widthMm as number) > 0 ? (widthMm as number) : TYRE_REFERENCE_MM
+    const perMm = (mass * share) / (2 * w)
+    return Math.max(0.7, Math.min(1.35, (reference / perMm) ** 0.25))
+  }
+  return { front: scale(f, s.tyreFront_mm), rear: scale(1 - f, s.tyreRear_mm) }
+}
+
+/* ---- mounted weapons --------------------------------------------------------------------------- */
+
+/**
+ * WHERE A WEAPON GOES ON A CAR.
+ *
+ * Rich, 2026-09-29: *"we will be attaching weapons to both actors and cars"*. An actor already has
+ * somewhere to put one — a bone role on its rig, which is what `WeaponDoc.attach` names. A car has
+ * no rig, and almost none of the library's cars have a skeleton at all, so the answer cannot be a
+ * bone.
+ *
+ * It is also not a typed-in offset. Three numbers per mount, per car, in metres, in a frame most
+ * people would have to be told about (forward +X, up +Y, right +Z, origin at the middle of the
+ * body) is four chances to put a minigun inside the engine bay, and it is exactly the mistake the
+ * hand-typed width tables were. So a mount is a NAMED PLACE and the offset is derived from the
+ * chassis the document already carries: change the car's length and the nose gun moves with it.
+ */
+export const VEHICLE_MOUNTS = ['nose', 'bonnet', 'roof', 'boot', 'tail', 'left', 'right', 'underbody'] as const
+export type VehicleMount = (typeof VEHICLE_MOUNTS)[number]
+
+export interface MountedWeapon {
+  /** the id of a built weapon — `builds('weapons')`, not a catalog row */
+  weapon: string
+  at: VehicleMount
+  /** degrees clockwise from straight ahead, for a gun that does not point forward */
+  yaw_deg?: number
+}
+
+/**
+ * The offset of a named mount in the chassis frame, metres.
+ *
+ * Forward +X, up +Y, right +Z, origin at the centre of the collider — the same frame
+ * `toVehicleSpec` builds, so this lands where the physics body actually is rather than where the
+ * model happens to have been exported.
+ */
+export function mountPoint(v: VehicleChassis, at: VehicleMount): { x: number; y: number; z: number } {
+  const hl = (v.length ?? v.wheelbase * 1.6) / 2
+  const hw = (v.width ?? v.track * 1.2) / 2
+  const hh = (v.height ?? 1.4) / 2
+  switch (at) {
+    case 'nose': return { x: hl, y: 0, z: 0 }
+    case 'bonnet': return { x: hl * 0.55, y: hh, z: 0 }
+    case 'roof': return { x: 0, y: hh, z: 0 }
+    case 'boot': return { x: -hl * 0.6, y: hh, z: 0 }
+    case 'tail': return { x: -hl, y: 0, z: 0 }
+    case 'left': return { x: 0, y: 0, z: -hw }
+    case 'right': return { x: 0, y: 0, z: hw }
+    case 'underbody': return { x: 0, y: -hh, z: 0 }
+  }
+}
+
+/** Which way a mounted weapon points, as a yaw in radians in the chassis frame. */
+export function mountYaw(m: MountedWeapon): number {
+  const deg = m.yaw_deg ?? (m.at === 'left' ? -90 : m.at === 'right' ? 90 : m.at === 'tail' ? 180 : 0)
+  return (deg * Math.PI) / 180
 }

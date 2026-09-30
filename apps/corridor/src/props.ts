@@ -251,7 +251,16 @@ function blendFor(sets: Record<string, SurfaceSet>, from: string, to: string): T
  * (Rich, twice). The predicate is asked for each marking quad at its own lateral offset, so a
  * junction on the right erases the right-hand edge line and leaves the left one alone.
  */
-export function roadMesh(st: Station[], lanesAt: (s: number) => number, classAt: (s: number) => string = () => 'asphalt_aged', sets: Record<string, SurfaceSet> = {}, lift = 0.02, twoWayAt: (s: number) => boolean = () => false, paintOff: ((x: number, z: number) => boolean) | null = null, kerbedAt: (s: number) => boolean = () => false): THREE.Group {
+/**
+ * `skipAt` LEAVES A HOLE IN THE ROAD, by station.
+ *
+ * Rich, 2026-09-29, on stunt fixtures: *"don't render the openstreet map road underneath the
+ * stunt"*. A loop IS the road where it stands, so drawing both gives you a vertical circle with a
+ * strip of tarmac through the middle of it. Answering per QUAD rather than per vertex matters: a
+ * quad is trimmed at a class boundary and blended across it, so a vertex-level skip would leave
+ * half-quads and torn blend bands at the edge of every fixture.
+ */
+export function roadMesh(st: Station[], lanesAt: (s: number) => number, classAt: (s: number) => string = () => 'asphalt_aged', sets: Record<string, SurfaceSet> = {}, lift = 0.02, twoWayAt: (s: number) => boolean = () => false, paintOff: ((x: number, z: number) => boolean) | null = null, kerbedAt: (s: number) => boolean = () => false, skipAt: ((s: number) => boolean) | null = null): THREE.Group {
   const g = new THREE.Group()
   // one asphalt geometry per surface class, so each gets its own textured material
   const byClass: Record<string, { pos: number[]; uv: number[]; idx: number[] }> = {}
@@ -284,6 +293,9 @@ export function roadMesh(st: Station[], lanesAt: (s: number) => number, classAt:
 
   for (let i = 0; i < st.length - 1; i++) {
     const a0 = st[i], b0 = st[i + 1]
+    // A stunt fixture stands here and IS the road: drawing the baked tarmac as well puts a strip
+    // through the middle of a loop. Tested at the quad's midpoint, so a fixture takes whole quads.
+    if (skipAt && skipAt((a0.s + b0.s) / 2)) continue
     // half a band, but never more than 40% of the quad, so a short station interval stays sane
     const half = Math.min(T.ROAD_BLEND_M / 2, (b0.s - a0.s) * 0.4)
     const cutStart = i > 0 && quadClass[i - 1] !== quadClass[i] ? half : 0

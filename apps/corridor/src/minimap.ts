@@ -46,6 +46,10 @@ const DEFAULT = 240
 export class MiniMap {
   el: HTMLElement
   private canvas: HTMLCanvasElement
+  /** a program may hide the map (`api.hide('minimap')`) */
+  show(on: boolean): void {
+    this.el.style.display = on ? '' : 'none'
+  }
   private ctx: CanvasRenderingContext2D
   private imagery: HTMLImageElement | null = null
   private imgBbox: [number, number, number, number] | null = null
@@ -85,6 +89,9 @@ export class MiniMap {
   private grip: HTMLDivElement
   private ro: ResizeObserver
   private onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && this.expanded) this.setExpanded(false) }
+  /** the ratio the backing store was built for, so a change can be noticed */
+  private dpr = 1
+  private dprQuery: MediaQueryList | null = null
   expanded = false
 
   constructor(parent: HTMLElement, manifest: Manifest) {
@@ -152,6 +159,7 @@ export class MiniMap {
       this.draw(null)
     })
     this.ro.observe(this.el)
+    this.watchScale()
 
     this.canvas.addEventListener('wheel', (e) => {
       e.preventDefault()
@@ -187,10 +195,49 @@ export class MiniMap {
   /** the backing store follows the CSS size and the device pixel ratio */
   private fit() {
     const dpr = devicePixelRatio
+    this.dpr = dpr
     this.canvas.width = Math.round(this.w * dpr)
     this.canvas.height = Math.round(this.h * dpr)
     this.canvas.style.width = `${this.w}px`
     this.canvas.style.height = `${this.h}px`
+  }
+
+  /**
+   * Re-fit when the DEVICE PIXEL RATIO changes, which is what browser zoom is.
+   *
+   * Rich, 2026-09-29, with two screenshots: *"mini map does weird things when the browser zoom level
+   * changes"*. It did, and the `ResizeObserver` above could not catch it: zooming the browser leaves
+   * the panel exactly 240 CSS pixels wide, so the observer's own early-out — "the box has not
+   * changed, nothing to do" — was right about the box and wrong about the canvas. The backing store
+   * stayed at the old ratio and the browser resampled it: a smeared map, a rim that no longer met
+   * the rounded frame, and the scale bar drawn at a size the panel was not.
+   *
+   * A media query on the ratio is the way to hear about it — there is no `dprchange` event — and it
+   * has to be RE-ARMED after each change, because the query itself names the old value and can
+   * never match again.
+   */
+  private watchScale() {
+    const rearm = () => {
+      this.dprQuery?.removeEventListener('change', onChange)
+      this.dprQuery = matchMedia(`(resolution: ${devicePixelRatio}dppx)`)
+      this.dprQuery.addEventListener('change', onChange, { once: true })
+    }
+    const onChange = () => {
+      this.rescale()
+      rearm()
+    }
+    rearm()
+    // belt and braces: some browsers fire a resize for a zoom and some do not
+    addEventListener('resize', this.onResize)
+  }
+
+  private onResize = () => this.rescale()
+
+  /** Re-fit and redraw if the ratio moved. Cheap, and a no-op the rest of the time. */
+  private rescale() {
+    if (devicePixelRatio === this.dpr) return
+    this.fit()
+    this.draw(null)
   }
 
   /**
@@ -436,6 +483,8 @@ export class MiniMap {
   dispose() {
     this.ro.disconnect()
     removeEventListener('keydown', this.onKey)
+    removeEventListener('resize', this.onResize)
+    this.dprQuery = null
     this.el.remove()
   }
 }

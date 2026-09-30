@@ -153,14 +153,90 @@ export let GRASS_MS_PER_FRAME = 4
 /** evict cached tiles once the map holds this multiple of what the ring needs */
 export let GRASS_CACHE_SLACK = 1.4
 
+// --- traffic ------------------------------------------------------------------------------------
+/** never more traffic cars than this, whatever the zones and the level ask for */
+export let TRAFFIC_MAX = 240
+/** traffic cars further than this from the eye are simulated but not drawn (m) */
+export let TRAFFIC_DRAW_M = 700
+
 // --- trees --------------------------------------------------------------------------------------
-/** near-field radius (procedural models) — beyond it, impostors */
-export let TREE_NEAR_RADIUS = 240
+/**
+ * near-field radius (procedural models) — beyond it, impostors.
+ *
+ * WAS 240, WITH 140 MODELS A SPECIES: seven hundred full trees, which Rich (2026-09-29) called
+ * *"pretty insane, definitely the main thing that kills frame rate"*. Measured in dense woods on
+ * arrowhead at 2560 × 1323, stopped at the roadside, after the leaves went Lambert:
+ *
+ *     radius 240 × 140    700 trees   24.6 ms
+ *     radius 150 × 90     450 trees   21.2 ms
+ *     radius 120 × 100    285 trees   19.9 ms
+ *     radius 100 × 140    184 trees   18.0 ms
+ *     radius  90 × 60     140 trees   16.6 ms   (the display's 60 Hz floor)
+ *
+ * The cost is leaf FILL — the nearest trees' canopies over the whole screen — so it scales with
+ * how many trees are close, not with how many are drawn. These defaults sit just above the floor
+ * in the worst case that was found; the F6 trees tab has all of it.
+ */
+export let TREE_NEAR_RADIUS = 110
 /** the band just outside that radius over which the impostor card dissolves away, so a tree does
  *  not pop from card to model in one frame. 0 disables the fade (the old hard switch). */
 export let TREE_FADE_M = 30
 /** instanced models per variant in the near field (5 variants) */
-export let TREE_NEAR_CAPACITY = 140
+export let TREE_NEAR_CAPACITY = 90
+/**
+ * Beyond this distance a near tree wears its far canopy: a few big leaves rather than many small.
+ *
+ * Measured on Rich's machine, 2026-09-29: the full canopies of 700 near trees were the difference
+ * between 44 fps and the display's 60, and the branches were not (see `trees.ts` buildVariant).
+ */
+// OFF BY DEFAULT (past any near radius). Measured on Rich's machine the same night it was built:
+// leaf LOD at 1000, 90 and 0 m gave the same frame time, because a far tree is small on screen
+// and fill is what costs — and the few big leaves read as lollipops beside the real trees
+// (Rich, 2026-09-30: "I am still seeing both lollipop and regular trees"). The knob stays for
+// experiments; the look does not.
+export let TREE_LEAF_LOD_M = 400
+/** the far canopy's share of the leaves, and how much bigger each one is */
+export let TREE_FAR_LEAF_SHARE = 0.3
+export let TREE_FAR_LEAF_SIZE = 1.9
+/**
+ * The near set is a CONE in front of the camera, not a circle around it.
+ *
+ * Rich, 2026-09-29: *"It would be good to be able to render the trees in a projected cone covering
+ * the FOV off the camera instead of a circle like it does now."* A tree outside this half-angle
+ * counts `TREE_CONE_PENALTY` times further away than it is, so the near budget goes to what is on
+ * screen and the trees behind you are impostors until you turn round. 180 is the old circle. The
+ * default is wider than the widest view (a 2560-wide window at the 60° vertical FOV sees about
+ * 48° either side) by enough that a turn smaller than `TREE_REFRESH_TURN` cannot show the edge.
+ */
+export let TREE_CONE_DEG = 80
+/** how much further a tree outside the cone counts, as a multiple of its distance (0 = no cone) */
+export let TREE_CONE_PENALTY = 3
+/** the near set is refilled once the camera has turned this far (rad) */
+export let TREE_REFRESH_TURN = 0.22
+/**
+ * 1 = every tree is the far LOD lollipop, and the procedural models are never built.
+ *
+ * Rich, 2026-09-29: *"I kind of like the dumb preview trees, can we add an option for the tree
+ * renderer in the main game to be the preview trees instead of the procgen trees?"* The "preview
+ * trees" are this renderer's FAR level of detail — one instanced lollipop per canopy cell, tens of
+ * thousands of them, each at its measured lidar height. They read as a stylised wood rather than as
+ * a cheap one, and they cost almost nothing.
+ *
+ * It is not the same as setting `TREE_NEAR_RADIUS` to zero, although that has the same picture: the
+ * near set is skipped entirely rather than computed and found empty, and — more to the point —
+ * "trees ×" is a thing somebody has to be told to zero out, while this is a thing the panel offers.
+ */
+export let TREE_SIMPLE = 0
+/**
+ * 1 = the EDITOR's trees in the game: one faceted crown and a trunk per tree, the lollipops the
+ * site editor draws because it has no renderer to bake impostors with.
+ *
+ * Rich, 2026-09-30: *"the option to include the lollipop trees from the editor instead of realistic
+ * trees or basic trees in the settings."* `TREE_SIMPLE` was meant to be this and is not: with a
+ * renderer the far field is impostor cards, so it gives cards everywhere, not lollipops. This one
+ * shows the crown meshes and hides the cards and the models. Settings → Display → Trees sets both.
+ */
+export let TREE_LOLLIPOP = 0
 /** impostor cards lie flat above this view pitch (rad) */
 export let IMPOSTOR_FLAT_PITCH = 0.62
 
@@ -568,7 +644,81 @@ export let SPLAT_BUDGET_MB = 512
  * The visible cost of sorting less often is blend-order error while turning
  * quickly, which is much cheaper than a stutter you can feel.
  */
-export let SPLAT_SORT_MS = 200
+/* ---- stunt fixtures: holding a car to a loop ------------------------------------------------- */
+
+/**
+ * The assist that lets a car drive a loop at all, and the numbers behind it.
+ *
+ * A ray-cast vehicle feels the road along its own down axis, so it cannot climb a surface that has
+ * stood up in front of it — it needs to be TURNED to face the track before it gets there, and
+ * PULLED onto it once it is. Rich, 2026-09-29, through several rounds of this: the car stopped
+ * dead, then drove through, then stopped dead again.
+ *
+ * These are knobs because the right values are a matter of feel at a given speed and I would rather
+ * Rich swept them than took my guess. 0 on `STUNT_ASSIST` turns the whole thing off.
+ */
+export let STUNT_ASSIST = 1
+/**
+ * How hard the car is turned to match the track ahead, per kilogram.
+ *
+ * THE SCALE IT HAS TO WORK AT: a loop stands the road up in about twenty metres, which at 50 m/s is
+ * four tenths of a second to rotate a quarter turn — four radians a second. A gentle correction
+ * measured on a level car looks fine and turns it six degrees.
+ */
+export let STUNT_ALIGN = 40
+/**
+ * Extra gravity toward the track's surface, m/s² — what keeps the wheels loaded upside down.
+ *
+ * THE RIGHT VALUE IS ONE GRAVITY, and the arithmetic says so. What the assist has to supply is
+ * whatever ordinary gravity is NOT pressing into the surface: on the flat, gravity does all of it
+ * and the assist owes nothing; on a vertical wall gravity presses along the surface rather than
+ * into it, so the assist owes a full g; upside down gravity is pulling the car OFF at a g, so the
+ * assist owes two just to break even. `pullScale` is exactly that (1 − up.y), so this number is the
+ * net press it buys — and one g of net press is a car sitting on a road.
+ *
+ * It was 25, which is two and a half g of press everywhere but the flat. The suspension bottoms
+ * out, the body meets the track, and the solver spends every step shoving the car back out of a
+ * surface the assist is shoving it into. Rich, 2026-09-29, halfway up the loop: *"weird friction
+ * and the car got stuck partially pushed through the loop, like the loop was deformable."* It was
+ * not deformable; it was being leant on.
+ */
+export let STUNT_PULL = 11
+/** how many seconds ahead along the lane the car aims. More is earlier, and earlier is smoother */
+export let STUNT_AHEAD_S = 1.1
+/** full strength within this far of the lane, metres */
+export let STUNT_HOLD_M = 6
+/** and nothing at all beyond this */
+export let STUNT_RELEASE_M = 14
+
+export let SPLAT_SORT_MS = 500
+
+/**
+ * How far the camera may move, as a fraction of the distance to the nearest capture, before the
+ * gaussian order is rebuilt.
+ *
+ * Rich, 2026-09-29, reading the performance panel: *"the splats sorting frequency seems to be
+ * driving the stalls… I don't understand why the sort needs to be run at all, or at least as often
+ * as it is."* Spark's own test for a changed view is a MILLIMETRE of movement or 2.6° of turn, so
+ * in a car it re-sorted every frame and the interval was the only brake. Turning cannot change a
+ * radial order at all.
+ *
+ * 0.02 means two metres of travel with the capture a hundred metres off, twenty centimetres when
+ * you are parked in the middle of it.
+ */
+export let SPLAT_SORT_PARALLAX = 0.02
+/** never re-sort more often than this much travel, metres */
+export let SPLAT_SORT_MIN_M = 0.25
+/** always re-sort at least this often, metres of travel, however far away the capture is */
+export let SPLAT_SORT_MAX_M = 8
+/**
+ * How far the camera may TURN before the gaussians are re-sorted, degrees.
+ *
+ * A radial order does not depend on which way you face — but the set of splats that gets sorted
+ * does, because the generate pass is frustum-bound. Turn round and the screen fills with gaussians
+ * that were never in any ordering, which reads as distant trees drawn over near ones. Rich found it
+ * with the timer set high, which is exactly when it shows.
+ */
+export let SPLAT_SORT_TURN_DEG = 90
 export let WATER_LEVEL_M = 0
 export let WATER_LEVEL_SPAN = 30000
 
@@ -597,6 +747,15 @@ export let CHASE_BACK = 7.5
 export let CHASE_UP = 2.6
 export let CHASE_LOOK_AHEAD = 6
 export let CHASE_LAG = 8
+/**
+ * How much of the car's own up the chase camera takes on, 0…1.
+ *
+ * 1 rolls all the way round a loop with the car; 0 is the horizon-locked camera, which through a
+ * loop leaves you looking at an upside-down car and steering the wrong way (Rich, 2026-09-29).
+ */
+export let CHASE_ROLL = 1
+/** how quickly the camera's up follows the car's (1/s) — lower is a lazier, calmer roll */
+export let CHASE_ROLL_LAG = 6
 
 // --- street furniture ---------------------------------------------------------------------------
 /** the mast pole's height (m); the arm hangs its heads a little under the top */
@@ -817,6 +976,18 @@ export const TUNE_TABS: TuneTab[] = [
     name: 'environment',
     sections: [
       {
+        title: 'stunt fixtures',
+        collapsed: false,
+        keys: [
+          tune('STUNT_ASSIST', () => STUNT_ASSIST, (v) => (STUNT_ASSIST = v), [0, 1], 1, 'hold the car to a loop at all', { scope: 'world' }),
+          tune('STUNT_ALIGN', () => STUNT_ALIGN, (v) => (STUNT_ALIGN = v), [0, 120], 5, 'how hard the car is turned to face the track ahead \u2014 a loop needs a quarter turn in about four tenths of a second'),
+          tune('STUNT_PULL', () => STUNT_PULL, (v) => (STUNT_PULL = v), [0, 80], 2.5, 'extra gravity toward the track surface (m/s\u00b2). 9.81 is one g of net press \u2014 what a car on a road feels. Much more than that bottoms the suspension and pushes the body into the track'),
+          tune('STUNT_AHEAD_S', () => STUNT_AHEAD_S, (v) => (STUNT_AHEAD_S = v), [0, 1.5], 0.05, 'how far along the lane the car reads the surface, in seconds of travel \u2014 a loop runs flat for forty metres before it stands up, so this has to be long enough to see past that'),
+          tune('STUNT_HOLD_M', () => STUNT_HOLD_M, (v) => (STUNT_HOLD_M = v), [1, 30], 1, 'full assist within this far of the lane (m)'),
+          tune('STUNT_RELEASE_M', () => STUNT_RELEASE_M, (v) => (STUNT_RELEASE_M = v), [2, 60], 1, 'no assist at all beyond this (m) \u2014 the fade between the two is what stops it snatching'),
+        ],
+      },
+      {
         title: 'captures (gaussian splats)',
         collapsed: false,
         keys: [
@@ -826,7 +997,24 @@ export const TUNE_TABS: TuneTab[] = [
           tune('SPLAT_LOAD_M', () => SPLAT_LOAD_M, (v) => (SPLAT_LOAD_M = v), [50, 2000], 25, 'load a tile once it is this close (m)'),
           tune('SPLAT_KEEP_M', () => SPLAT_KEEP_M, (v) => (SPLAT_KEEP_M = v), [100, 4000], 25, 'drop it beyond this (m)'),
           tune('SPLAT_BUDGET_MB', () => SPLAT_BUDGET_MB, (v) => (SPLAT_BUDGET_MB = v), [64, 2048], 32, 'megabytes of gaussians that may be resident'),
-          tune('SPLAT_SORT_MS', () => SPLAT_SORT_MS, (v) => (SPLAT_SORT_MS = v), [0, 1000], 25, 'floor on how often Spark re-sorts the gaussians (ms) \u2014 0 is Spark\u2019s default and stutters'),
+          tune('SPLAT_SORT_MS', () => SPLAT_SORT_MS, (v) => (SPLAT_SORT_MS = v), [0, 5000], 50, 'the least time between re-sorts of the gaussians (ms). At speed this is the only thing deciding, so it is the knob to reach for when it stutters \u2014 0 is Spark\u2019s own default and stalls constantly'),
+          /*
+           * THE THREE THAT DECIDE WHEN A RE-SORT IS ASKED FOR AT ALL. The timer above is only a
+           * floor; these are the rule. A sort costs a GPU depth pass, a ~10 MB readback and a
+           * ~10 MB texture upload, so the question "does the order actually need rebuilding" is
+           * worth asking properly — see `splatsort.ts`.
+           */
+          tune('SPLAT_SORT_PARALLAX', () => SPLAT_SORT_PARALLAX, (v) => (SPLAT_SORT_PARALLAX = v), [0.002, 1], 0.002, 'how far the camera may move before the gaussians are re-sorted, as a fraction of the distance to the nearest capture'),
+          tune('SPLAT_SORT_MIN_M', () => SPLAT_SORT_MIN_M, (v) => (SPLAT_SORT_MIN_M = v), [0.05, 200], 0.05, 'never re-sort more often than this much travel (m) \u2014 the floor for a capture you are standing in'),
+          /*
+           * THE CEILING IS IN THE THOUSANDS, and it has to be. A 60 m cap was never reached: at
+           * 180 mph you cover 400 m between sorts on a 5 s timer, so the distance gate was always
+           * satisfied and could never skip anything. To be a brake at speed at all it has to be
+           * settable well past how far the car travels between sorts. Rich, 2026-09-29: *"max m
+           * needs to have the range cranked way up too."*
+           */
+          tune('SPLAT_SORT_TURN_DEG', () => SPLAT_SORT_TURN_DEG, (v) => (SPLAT_SORT_TURN_DEG = v), [10, 180], 5, 'turn this far and the gaussians are re-sorted, whatever the distance rule says \u2014 what was behind you was never in the ordering'),
+          tune('SPLAT_SORT_MAX_M', () => SPLAT_SORT_MAX_M, (v) => (SPLAT_SORT_MAX_M = v), [1, 4000], 10, 'always re-sort at least this often (m of travel), however far away the capture is \u2014 push it up to stop re-sorting on distance at all'),
         ],
       },
       {
@@ -976,9 +1164,19 @@ export const TUNE_TABS: TuneTab[] = [
       {
         title: 'LOD',
         keys: [
+          tune('TRAFFIC_MAX', () => TRAFFIC_MAX, (v) => (TRAFFIC_MAX = v), [0, 2000], 10, 'cap on traffic cars (reload the level)'),
+          tune('TRAFFIC_DRAW_M', () => TRAFFIC_DRAW_M, (v) => (TRAFFIC_DRAW_M = v), [100, 3000], 50, 'traffic further than this is simulated, not drawn'),
           tune('TREE_NEAR_RADIUS', () => TREE_NEAR_RADIUS, (v) => (TREE_NEAR_RADIUS = v), [30, 600], 5, 'procedural models inside, impostors beyond (m)'),
           tune('TREE_FADE_M', () => TREE_FADE_M, (v) => (TREE_FADE_M = v), [0, 120], 1, 'band outside that radius where the card dissolves; 0 = hard switch'),
           tune('TREE_NEAR_CAPACITY', () => TREE_NEAR_CAPACITY, (v) => (TREE_NEAR_CAPACITY = v), [10, 500], 5, 'models per species variant'),
+          tune('TREE_LEAF_LOD_M', () => TREE_LEAF_LOD_M, (v) => (TREE_LEAF_LOD_M = v), [0, 400], 5, 'beyond this a near tree wears the cheap far canopy (m)'),
+          tune('TREE_FAR_LEAF_SHARE', () => TREE_FAR_LEAF_SHARE, (v) => (TREE_FAR_LEAF_SHARE = v), [0.05, 1], 0.05, 'far canopy: share of the leaves (rebuild)'),
+          tune('TREE_FAR_LEAF_SIZE', () => TREE_FAR_LEAF_SIZE, (v) => (TREE_FAR_LEAF_SIZE = v), [1, 4], 0.1, 'far canopy: leaf size multiplier (rebuild)'),
+          tune('TREE_CONE_DEG', () => TREE_CONE_DEG, (v) => (TREE_CONE_DEG = v), [20, 180], 5, 'near set is a cone this many degrees either side of the view; 180 = circle'),
+          tune('TREE_CONE_PENALTY', () => TREE_CONE_PENALTY, (v) => (TREE_CONE_PENALTY = v), [0, 10], 0.25, 'a tree outside the cone counts this much further away'),
+          tune('TREE_REFRESH_TURN', () => TREE_REFRESH_TURN, (v) => (TREE_REFRESH_TURN = v), [0.05, 1.5], 0.01, 'refill the near set after turning this far (rad)'),
+          tune('TREE_SIMPLE', () => TREE_SIMPLE, (v) => (TREE_SIMPLE = v), [0, 1], 1, '1 = impostor cards everywhere — no procedural models at all'),
+          tune('TREE_LOLLIPOP', () => TREE_LOLLIPOP, (v) => (TREE_LOLLIPOP = v), [0, 1], 1, '1 = the editor’s lollipop trees instead of models and cards'),
           tune('IMPOSTOR_FLAT_PITCH', () => IMPOSTOR_FLAT_PITCH, (v) => (IMPOSTOR_FLAT_PITCH = v), [0.2, 1.5], 0.02, 'cards lie flat above this view pitch (rad)'),
         ],
       },
@@ -1322,6 +1520,8 @@ export const TUNE_TABS: TuneTab[] = [
           tune('CHASE_UP', () => CHASE_UP, (v) => (CHASE_UP = v), [0.5, 15], 0.1),
           tune('CHASE_LOOK_AHEAD', () => CHASE_LOOK_AHEAD, (v) => (CHASE_LOOK_AHEAD = v), [0, 40], 0.5),
           tune('CHASE_LAG', () => CHASE_LAG, (v) => (CHASE_LAG = v), [1, 30], 0.5, 'higher = stiffer'),
+          tune('CHASE_ROLL', () => CHASE_ROLL, (v) => (CHASE_ROLL = v), [0, 1], 0.05, 'camera up follows the car (1) or the horizon (0) — loops'),
+          tune('CHASE_ROLL_LAG', () => CHASE_ROLL_LAG, (v) => (CHASE_ROLL_LAG = v), [0.5, 30], 0.5, 'how fast the roll follows; lower = calmer'),
           tune('CAM_SIT_HEIGHT', () => CAM_SIT_HEIGHT, (v) => (CAM_SIT_HEIGHT = v), [0.25, 5], 0.05, 'eye height for G, sit on the road (m)'),
           tune('CAM_MIN_HEIGHT', () => CAM_MIN_HEIGHT, (v) => (CAM_MIN_HEIGHT = v), [0.05, 5], 0.05, 'fly camera floor above ground (m)'),
           tune('COCKPIT_EYE_UP', () => COCKPIT_EYE_UP, (v) => (COCKPIT_EYE_UP = v), [0.3, 3], 0.05),
@@ -1394,11 +1594,17 @@ export const TUNE_TABS: TuneTab[] = [
  */
 export function lodDistance(dx: number, dz: number, fwdX: number, fwdZ: number, pitch: number): number {
   const d = Math.hypot(dx, dz)
-  if (d < 1e-6 || LOD_BEHIND_PENALTY <= 0) return d
+  if (d < 1e-6 || (LOD_BEHIND_PENALTY <= 0 && TREE_CONE_PENALTY <= 0)) return d
   const cos = (dx * fwdX + dz * fwdZ) / d // 1 ahead, -1 behind
   const behind = (1 - cos) * 0.5 // 0 ahead … 1 behind
   const topdown = Math.min(1, Math.max(0, (pitch - LOD_TOPDOWN_PITCH * 0.7) / (LOD_TOPDOWN_PITCH * 0.3)))
-  return d * (1 + LOD_BEHIND_PENALTY * behind * (1 - topdown))
+  // the view cone: nothing inside it, a ramp over 12° at its edge, the full penalty beyond
+  let outside = 0
+  if (TREE_CONE_PENALTY > 0 && TREE_CONE_DEG < 180) {
+    const angle = (Math.acos(Math.max(-1, Math.min(1, cos))) * 180) / Math.PI
+    outside = Math.min(1, Math.max(0, (angle - TREE_CONE_DEG) / 12))
+  }
+  return d * (1 + (LOD_BEHIND_PENALTY * behind + TREE_CONE_PENALTY * outside) * (1 - topdown))
 }
 
 /** The drive profile `PHYS_PROFILE` names. The order is the engine's own `PROFILES` order. */

@@ -1,0 +1,239 @@
+/*
+ * The Vehicles, Actors and Weapons screens.
+ *
+ * ITS OWN FILE, imported by `ui/vehicles.ts`, for two reasons. `ui.css` and `editor/editor.css`
+ * belong to other lanes and helping myself to them is how two people end up editing one selector;
+ * and the first version of this screen set inline styles to fight `.asset-thumb`'s fixed 36 × 36,
+ * which produced exactly the empty grey letterboxes Rich saw. A screen with its own layout should
+ * have its own classes rather than borrow somebody else's and override half of them.
+ *
+ * Every colour here is a token from `tokens.css`, so this follows the theme rather than restating it.
+ */
+
+/* ---- the toolbar: search, filters and actions on ONE line ------------------------------------- */
+
+.bld-bar {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--s3);
+  flex-wrap: wrap;
+  padding-bottom: var(--s3);
+  border-bottom: 1px solid var(--line-1);
+  margin-bottom: var(--s3);
+}
+/* The shared `.field` is a full-width block, which stacked the three filters into three rows. */
+.bld-bar .field { flex: 0 0 auto; margin: 0; }
+.bld-bar .field.text { flex: 1 1 220px; min-width: 180px; }
+.bld-bar .field.select { flex: 0 0 auto; min-width: 150px; }
+.bld-bar .bld-spacer { flex: 1 1 auto; }
+
+.bld-count { color: var(--ink-3); font-size: var(--text-xs); margin-bottom: var(--s3); }
+
+/* ---- the grid ---------------------------------------------------------------------------------- */
+
+.bld-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: var(--s3);
+  align-content: start;
+}
+
+.bld-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+  text-align: left;
+  background: var(--bg-1);
+  border: 1px solid var(--line-1);
+  border-radius: var(--r2);
+  color: var(--ink-2);
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+.bld-card:hover { background: var(--bg-2); border-color: var(--line-2); color: var(--ink-1); }
+.bld-card.on { border-color: var(--accent-line); background: var(--accent-dim); color: var(--ink-1); }
+
+/*
+ * THE PREVIEW. 4:3, filling the card's width — which is the whole point, and what the shared
+ * `.asset-thumb` (36 × 36, for a list row) could never be.
+ */
+.bld-shot {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  display: grid;
+  place-items: center;
+  background: var(--bg-0);
+  border-bottom: 1px solid var(--line-1);
+  color: var(--ink-3);
+  overflow: hidden;
+}
+.bld-shot img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+.bld-meta { padding: var(--s2) var(--s3) var(--s3); display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.bld-name {
+  font-size: var(--text-sm); font-weight: 500; color: var(--ink-1);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.bld-sub { font-size: var(--text-xs); color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bld-tags { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 2px; }
+
+/*
+ * Small inline tags. NOT `.chip` — that one is a 28px interactive control with padding for a click
+ * target, and a row of them inside a card reads as a row of buttons you are meant to press.
+ */
+.bld-tag {
+  font-size: var(--text-xs); line-height: 1.6;
+  padding: 0 6px; border-radius: var(--r1);
+  background: var(--bg-2); border: 1px solid var(--line-1); color: var(--ink-3);
+  white-space: nowrap;
+}
+.bld-tag.ok { color: var(--ok, #6fcf97); border-color: color-mix(in srgb, var(--ok, #6fcf97) 35%, transparent); }
+.bld-tag.warn { color: var(--warn, #e2b34a); border-color: color-mix(in srgb, var(--warn, #e2b34a) 35%, transparent); }
+.bld-tag.none { color: var(--ink-3); border-style: dashed; }
+
+/* ---- the empty state, which is the FIRST thing anybody sees ------------------------------------ */
+
+.bld-empty {
+  display: flex; flex-direction: column; align-items: center; gap: var(--s3);
+  padding: var(--s6) var(--s4); text-align: center;
+  border: 1px dashed var(--line-2); border-radius: var(--r2); color: var(--ink-3);
+}
+.bld-empty h3 { margin: 0; font-size: var(--text-md); color: var(--ink-1); font-weight: 500; }
+.bld-empty p { margin: 0; max-width: 46ch; font-size: var(--text-sm); }
+
+/* ---- the wizard -------------------------------------------------------------------------------- */
+
+.bld-steps { display: flex; gap: var(--s2); align-items: center; margin-bottom: var(--s3); flex-wrap: wrap; }
+.bld-step { font-size: var(--text-xs); color: var(--ink-3); display: flex; align-items: center; gap: 6px; }
+.bld-step.on { color: var(--accent); }
+.bld-step.done { color: var(--ink-2); }
+.bld-step-dot {
+  width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center;
+  border: 1px solid currentColor; font-size: 10px;
+}
+.bld-step-sep { color: var(--ink-3); opacity: 0.5; }
+
+/* the preset cards in step 2 */
+.bld-presets { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: var(--s3); }
+.bld-preset {
+  border-radius: var(--r2);
+  background: var(--bg-1); border: 1px solid var(--line-1); color: var(--ink-2);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+/* the card is the button, except on a saved preset where the Delete sits under it */
+.bld-preset-pick {
+  text-align: left; padding: var(--s3); border: 0; background: none; color: inherit; font: inherit;
+  cursor: pointer; display: flex; flex-direction: column; gap: 4px; flex: 1 1 auto;
+}
+.bld-preset:hover { background: var(--bg-2); border-color: var(--line-2); }
+.bld-preset .panel-actions { padding: 0 var(--s3) var(--s3); margin: 0; }
+.bld-preset.on { border-color: var(--accent-line); background: var(--accent-dim); }
+.bld-preset-name { font-size: var(--text-sm); font-weight: 500; color: var(--ink-1); }
+.bld-preset-note { font-size: var(--text-xs); color: var(--ink-3); }
+.bld-preset-spec { font-size: var(--text-xs); color: var(--ink-2); font-family: var(--mono, monospace); }
+
+/* ---- the scroller ------------------------------------------------------------------------------ */
+
+/*
+ * THE TAB SCROLLS. `.tab-body` already says `overflow-y: auto`, but it only bites when something up
+ * the chain gives it a height — in a dialog that is `.dialog-body`, and in the world editor's pane
+ * it is a grid row. This screen owns a column layout with ONE scrolling row so it works in both,
+ * and does not depend on which container it was dropped into.
+ */
+/*
+ * The panel this screen is mounted into has to be a flex ITEM that stretches, not a block claiming
+ * `height: 100%`. A percentage height against a parent whose own height came from `flex: 1` is not
+ * definite, so `height: 100%` silently sized to content and the toolbar scrolled away with the
+ * grid. `:has()` reaches the one parent that matters without touching `.tab-body` for every other
+ * tab in the build.
+ */
+.tab-body:has(> .bld-screen) { display: flex; flex-direction: column; }
+.bld-screen { display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; }
+/*
+ * AND IT MUST STILL HIDE. `Tabs` hides a panel with the `hidden` ATTRIBUTE, which works because the
+ * browser's own stylesheet says `[hidden] { display: none }` — and any author rule that sets
+ * `display` beats it. The line above is such a rule, so Vehicles, Actors and Weapons all rendered
+ * at once, stacked, and switching tabs appeared to do nothing (Rich, 2026-09-29: "clicking actors
+ * and weapons stacks the tabs instead of switching them"). Every `display` rule on something that
+ * can be `hidden` needs this partner.
+ */
+.bld-screen[hidden] { display: none; }
+.bld-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; padding-right: var(--s2); }
+
+/* ---- the form's header: what this vehicle looks like, and the two ways to change it ------------ */
+
+/*
+ * The model is shown at the TOP of the configuration form and not as a line of text, because
+ * "change the model" and "apply a preset" are the two things Rich asked to be able to do from the
+ * edit screen, and a button is only findable next to the thing it changes.
+ */
+.bld-head {
+  display: flex; gap: var(--s3); align-items: stretch;
+  padding: var(--s3); margin-bottom: var(--s3);
+  background: var(--bg-1); border: 1px solid var(--line-1); border-radius: var(--r2);
+}
+.bld-head .bld-shot { width: 148px; flex: 0 0 148px; border: 1px solid var(--line-1); border-radius: var(--r1); }
+.bld-head-meta { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1 1 auto; }
+.bld-head-meta .bld-name { font-size: var(--text-md); white-space: normal; }
+.bld-head-meta .panel-actions { margin-top: auto; padding-top: var(--s2); }
+
+@media (max-width: 560px) {
+  .bld-head { flex-direction: column; }
+  .bld-head .bld-shot { width: 100%; flex: 0 0 auto; }
+}
+
+/*
+ * A WIDE TEXT FIELD THAT HAS A NOTE IS STILL WIDE.
+ *
+ * `.field.with-note` switches the row to `grid-template-columns: 1fr auto`, which is right for a
+ * number — the label takes the room and the box stays narrow — and wrong for a name: "Id" ended up
+ * a short box pushed to the right while "Name", which has no note, filled the row. Two fields one
+ * above the other, the same kind of value, laid out differently. Scoped to the wide inputs, and to
+ * this screen, because the dynamics form's forty numeric fields want the rule as it is.
+ */
+.bld-screen .field.text.with-note:has(> .input.wide) { grid-template-columns: auto minmax(0, 1fr); }
+
+/*
+ * THE FORM IS TWO COLUMNS IN A WIDE DIALOG.
+ *
+ * `.field.text` is label-left, box-right, which reads well in a 320px side panel and badly across
+ * a 1160px dialog: "Mass (kg)" at the far left and "1240" at the far right, eleven times down the
+ * page, with the eye crossing the whole screen for each one. Columns that collapse to one at
+ * narrow widths keep the label and its value near each other at any size.
+ *
+ * Sliders, text areas, readouts with a sentence in them and anything carrying a note span the row —
+ * a slider in a half-width column has no resolution left, and a note under one column reads as
+ * though it belongs to both.
+ */
+.bld-screen .group-body {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+  gap: var(--s2) var(--s5);
+  align-items: start;
+}
+.bld-screen .group-body > .group-note,
+.bld-screen .group-body > .field.area,
+.bld-screen .group-body > .field.slider,
+.bld-screen .group-body > .readout,
+.bld-screen .group-body > .panel-actions,
+.bld-screen .group-body > .panel-note { grid-column: 1 / -1; }
+
+/* ---- the configuration form's own tabs --------------------------------------------------------- */
+
+/*
+ * Rich, 2026-09-29: "instead of expando areas we had tabs". The strip is `ui.css`'s `.tab-strip`, so
+ * it looks like every other tab in the app; this is only the pane under it. No height and no
+ * overflow on purpose — the screen's own `.bld-scroll` is the scroller, and a second one inside it
+ * is two scrollbars for one form.
+ */
+.bld-screen .tab-strip { margin: var(--s3) 0 0; padding-left: 0; }
+.bld-formpane { padding-top: var(--s3); }
+.bld-formpane > .group:first-child { border-top: 0; }
+
+/* one gear per row: the ratio, what it means at 60 mph, and a way to take it out */
+.bld-gear { display: flex; align-items: flex-start; gap: var(--s2); }
+.bld-gear .field { flex: 1 1 auto; min-width: 0; margin: 0; }
+.bld-gear .btn { flex: 0 0 auto; margin-top: 2px; }

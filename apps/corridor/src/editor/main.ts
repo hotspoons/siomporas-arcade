@@ -7,6 +7,7 @@
 //
 // The scene itself is built by the viewer's own `buildSite`, read-only — the editor must be
 // looking at exactly what the game looks at, or it is correcting something else.
+import { DROP_TYPE } from './ui'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { buildSite, type Site } from '../scene'
@@ -76,16 +77,29 @@ const grow = new GrowMode(place, (structural) => refresh(structural))
 // ignore. Its own file (structures.json) and its own pointer/key handling, so below it is always
 // a `mode === 'structures'` branch ahead of the areas/place pair, never mixed into them.
 const structs = new StructureMode((structural) => refresh(structural))
+// Traffic zones: `zones` the document (src/zones.ts), `ZoneMode` the drawing of it.
+const traffic = new ZoneMode((structural) => refresh(structural))
+// Loops, corkscrews and jumps standing on the road (src/stunts.ts, src/editor/stuntmode.ts).
+const stunts = new StuntMode((structural) => refresh(structural))
+// Circuits and stages: the gates you cross (src/races.ts, src/editor/coursemode.ts).
+const races = new CourseMode((structural) => refresh(structural))
 import type { Mode } from '../ui/editor'
 import { actorExtension } from '../ui/actors'
 import { weaponExtension } from '../ui/weapons'
 import { vehicleExtension } from '../ui/vehicles'
+import { trafficExtension } from '../ui/trafficsets'
+import { ZoneMode } from './zones'
+import { StuntMode } from './stuntmode'
+import { CourseMode } from './coursemode'
+import { FlyCam } from './flycam'
+import { Zones } from '../zones'
+import { fixtureFootprint } from '../stunts'
 let mode: Mode = (location.hash.split(':')[1] as Mode) || 'areas'
 
 // The interface. Every callback here is a function declared later in this file, which is fine —
 // they are declarations, so they are hoisted, and none of them runs before the first event.
 restoreTheme()
-const assets = new AssetCatalog({ extensions: [vehicleExtension(), actorExtension(), weaponExtension()] })
+const assets = new AssetCatalog({ extensions: [vehicleExtension(), actorExtension(), weaponExtension(), trafficExtension()] })
 // A probe needs to open the library without hunting for the toolbar button; this is the one hook.
 ;(window as unknown as { __apexEditorAssets: () => void }).__apexEditorAssets = () => void assets.open()
 const ui = new EditorUI({
@@ -103,7 +117,14 @@ let season: Season = 'summer'
 scene.add(markOverlay(areas.group), markOverlay(place.group))
 // the move/rotate handles, now that there is a camera and a canvas to hang them on
 place.useGizmo(camera, canvas, (on) => { orbit.enabled = on })
+// stunt fixtures get the same handles: Rich, 2026-09-29 — "make sure the pieces can be moved and
+// rotated with a gizmo"
+stunts.useGizmo(camera, canvas, (on) => { orbit.enabled = on })
 scene.add(markOverlay(structs.group))
+scene.add(markOverlay(traffic.group))
+// NOT a mark overlay: a fixture is real road, so it is lit and occluded like the rest of the world
+scene.add(stunts.group)
+scene.add(markOverlay(races.group))
 // road cross-section preview: its own floating panel and its own overlay group, so it survives the
 // panel rebuilds in refresh() and touches nothing else here (road-and-car agent)
 const roadWidth = new RoadWidth(scene)
@@ -174,6 +195,9 @@ async function loadSite(slug: string, quality: 'edit' | 'preview' = 'edit') {
   const ground = (x: number, y: number) => site!.groundAt(x, -y) ?? site!.heightAt(x, y)
   await Promise.all([areas.load(slug, ground, site), place.load(slug, site, ground)])
   await structs.load(slug, site, place.catalog) // after place: it shares the catalog place loaded
+  await traffic.load(slug, ground, site)
+  await stunts.load(slug, ground, site)
+  await races.load(slug, ground, site)
   roadWidth.setSite(site)
   grow.adopt()
   ;(window as unknown as { corridor: unknown }).corridor = {
@@ -187,11 +211,29 @@ async function loadSite(slug: string, quality: 'edit' | 'preview' = 'edit') {
      * true of half a dozen different causes.
      */
     mode: () => mode,
+    setMode: (m: Mode) => setMode(m),
+    /**
+     * A click on the ground, exactly as the canvas delivers one.
+     *
+     * For probes: the routing — which tool keeps a click and which one takes it — is the part worth
+     * asserting, and it cannot be reached by synthesising a pointer event at a screen pixel without
+     * also testing the camera.
+     */
+    click: (pt: { x: number; y: number } | null) => routeClick(pt),
     orbit,
     groundAtPixel: (clientX: number, clientY: number) =>
       groundAt({ clientX, clientY } as PointerEvent),
   } // probes
   ;(window as unknown as { corridor: { structs: unknown } }).corridor.structs = structs
+  /*
+   * The traffic mode and the `Zones` class it writes for, so a probe can author a zone and then ask
+   * the lookup whether it actually covers the road. "The file was written" is not the question —
+   * a polygon drawn beside the road saves perfectly and does nothing.
+   */
+  ;(window as unknown as { corridor: { traffic: unknown; zonesModule: unknown } }).corridor.traffic = traffic
+  ;(window as unknown as { corridor: { zonesModule: unknown } }).corridor.zonesModule = { Zones }
+  ;(window as unknown as { corridor: { stunts: unknown } }).corridor.stunts = stunts
+  ;(window as unknown as { corridor: { races: unknown } }).corridor.races = races
   applyLayers()
   toTop()
   refresh()
@@ -212,6 +254,13 @@ function applyLayers() {
   areas.group.visible = on('areas')
   place.group.visible = on('placements')
   structs.group.visible = on('authored')
+  // traffic zones are only ever shown in their own mode: painted over every road, they hide the
+  // ground you are editing in every other one
+  traffic.group.visible = mode === 'traffic'
+  // stunts stay VISIBLE in every mode: they are part of the world, not an authoring overlay
+  stunts.group.visible = true
+  // gates are authoring marks, so they are shown only in their own mode
+  races.group.visible = mode === 'races'
 }
 
 /** Straight down, high enough that the whole baked corridor is in frame — both extents, not just
@@ -293,7 +342,7 @@ function groundAt(e: PointerEvent): { x: number; y: number } | null {
  * cannot break the drag.
  */
 canvas.addEventListener('dragover', (e) => {
-  if (!e.dataTransfer?.types.includes('text/apex-asset')) return
+  if (!e.dataTransfer?.types.includes('text/apex-asset') && !e.dataTransfer?.types.includes(DROP_TYPE)) return
   e.preventDefault()
   e.dataTransfer.dropEffect = 'copy'
   canvas.classList.add('drop-target')
@@ -301,6 +350,17 @@ canvas.addEventListener('dragover', (e) => {
 canvas.addEventListener('dragleave', () => canvas.classList.remove('drop-target'))
 canvas.addEventListener('drop', (e) => {
   canvas.classList.remove('drop-target')
+  const thing = e.dataTransfer?.getData(DROP_TYPE)
+  if (thing) {
+    e.preventDefault()
+    try {
+      const { mode: m, id } = JSON.parse(thing) as { mode: Mode; id: string }
+      if (!dropThing(m, id, e.clientX, e.clientY)) status('drop it on the ground — on the road, for a gate, a structure or a traffic level')
+    } catch (err) {
+      status(`drop: ${(err as Error).message}`)
+    }
+    return
+  }
   const id = e.dataTransfer?.getData('text/apex-asset')
   if (!id) return
   e.preventDefault()
@@ -308,6 +368,30 @@ canvas.addEventListener('drop', (e) => {
     if (!ok) status('drop it on the ground')
   })
 })
+
+/**
+ * Something from any mode's palette, let go on the world.
+ *
+ * Rich, 2026-09-30: *"we can drag out of the 'place' palette but no other palette."* One listener,
+ * one protocol (`DROP_TYPE`, a mode and an id), and the mode does what its own click would have
+ * done there — a piece lands on the road, a gate is laid square across it, a traffic level paints
+ * a strip of it. The editor switches to that mode, so what you dropped is what you are looking at.
+ */
+function dropThing(m: Mode, id: string, clientX: number, clientY: number): boolean {
+  if (!site) return false
+  const pt = groundAt({ clientX, clientY } as PointerEvent)
+  if (!pt) return false
+  if (m !== mode) setMode(m)
+  let ok = false
+  if (m === 'stunts') ok = stunts.dropAt(pt, id)
+  else if (m === 'races') ok = races.dropAt(pt, id)
+  else if (m === 'traffic') ok = traffic.dropAt(pt, id)
+  else if (m === 'areas') ok = areas.dropAt(pt, id)
+  else if (m === 'structures') ok = structs.dropAt(pt, id)
+  else if (m === 'place') { void dropAsset(id, clientX, clientY); return true }
+  refresh()
+  return ok
+}
 
 canvas.addEventListener('pointerdown', (e) => {
   down = { x: e.clientX, y: e.clientY }
@@ -317,8 +401,27 @@ canvas.addEventListener('pointerdown', (e) => {
     orbit.enabled = !grabbing
     return
   }
+  if (mode === 'traffic') {
+    grabbing = traffic.grab(r)
+    orbit.enabled = !grabbing
+    return
+  }
+  if (mode === 'stunts') {
+    grabbing = stunts.grab(r)
+    // a press on a gizmo handle belongs to the gizmo, not to the camera — see the note in place.ts
+    orbit.enabled = !grabbing && !stunts.onGizmo
+    return
+  }
+  if (mode === 'races') {
+    grabbing = races.grab(r)
+    orbit.enabled = !grabbing
+    return
+  }
   grabbing = mode === 'areas' ? areas.grab(r) : place.grab(r) // grow edits the same objects place does
-  orbit.enabled = !grabbing
+  // A PRESS ON A GIZMO HANDLE BELONGS TO THE GIZMO. `place.onGizmo` is set by a capture-phase
+  // listener that runs before this one; without the check, this line hands the camera straight back
+  // and OrbitControls takes the drag that was meant to move the object.
+  orbit.enabled = !grabbing && !place.onGizmo
 })
 /**
  * A click is a press and release that did not MOVE. How long you held it is not the question.
@@ -345,6 +448,9 @@ canvas.addEventListener('pointermove', (e) => {
   if (!grabbing) return
   const pt = groundAt(e)
   if (mode === 'areas') areas.dragTo(pt)
+  else if (mode === 'traffic') traffic.dragTo(pt)
+  else if (mode === 'stunts') stunts.dragTo(pt)
+  else if (mode === 'races') races.dragTo(pt)
   else place.dragTo(pt)
 })
 addEventListener('pointerup', (e) => {
@@ -362,6 +468,9 @@ addEventListener('pointerup', (e) => {
   if (grabbing) {
     grabbing = false
     if (mode === 'areas') areas.drop()
+    else if (mode === 'traffic') traffic.drop()
+    else if (mode === 'stunts') stunts.drop()
+    else if (mode === 'races') races.drop()
     else place.drop()
     down = null
     return
@@ -369,8 +478,7 @@ addEventListener('pointerup', (e) => {
   // a click is a click, not the end of an orbit drag — `isClick`, not a second copy of its rule
   if (isClick(e as PointerEvent)) {
     const pt = groundAt(e as PointerEvent)
-    if (mode === 'areas') areas.click(pt)
-    else place.click(pt)
+    routeClick(pt)
   }
   down = null
 })
@@ -404,6 +512,17 @@ addEventListener('keydown', (e) => {
     void doSave()
     return
   }
+  /*
+   * FLIGHT FIRST, and before every mode's own keys.
+   *
+   * W/A/S/D/Q/E belong to the camera in every mode now — which is why rotating a placement, a
+   * bridge and a stunt fixture all moved to Z and X. Ctrl+S is handled above so the flight keys
+   * cannot eat a save.
+   */
+  if (fly.down(e)) {
+    e.preventDefault()
+    return
+  }
   if (mode === 'structures') {
     if (structs.key(e)) {
       e.preventDefault()
@@ -411,8 +530,8 @@ addEventListener('keydown', (e) => {
       return
     }
     if (e.key.toLowerCase() === 'n') return structs.startPick()
-    if (e.key.toLowerCase() === 'f') return structs.flyToSelected(flyTo)
-  } else if ((mode === 'areas' ? areas.key(e) : place.key(e))) {
+    if (e.key.toLowerCase() === 'c') return structs.flyToSelected(flyTo) // C centres; F is the camera's drop
+  } else if (mode === 'races' ? races.key(e) : mode === 'stunts' ? stunts.key(e) : mode === 'traffic' ? traffic.key(e) : mode === 'areas' ? areas.key(e) : place.key(e)) {
     e.preventDefault()
     refresh()
     return
@@ -422,12 +541,19 @@ addEventListener('keydown', (e) => {
     return
   }
   switch (e.key.toLowerCase()) {
-    case 'n': if (mode === 'areas') areas.startDraw(); break // startDraw calls onChange, which is refresh
+    case 'n':
+      if (mode === 'areas') areas.startDraw() // startDraw calls onChange, which is refresh
+      else if (mode === 'traffic') traffic.startDraw()
+      break
     case 't': toTop(); break
     case 'v': void openPreview(); break
-    case 'f': {
+    // C CENTRES ON THE SELECTION. It was F, and F is now "drop" on the flown camera — a key that
+    // both flies you down and jumps you somewhere else is a key that does neither reliably.
+    case 'c': {
       const a = areas.doc.areas.find((x) => x.id === areas.selected)
+      const z = traffic.doc.zones.find((x) => x.id === traffic.selected)
       if (mode === 'areas' && a) flyTo(a.polygon)
+      else if (mode === 'traffic' && z) flyTo(z.polygon)
       else if (mode === 'place') place.flyToSelected(flyTo)
       break
     }
@@ -435,6 +561,9 @@ addEventListener('keydown', (e) => {
     case '2': setMode('place'); break
     case '3': setMode('grow'); break
     case '4': setMode('structures'); break
+    case '5': setMode('traffic'); break
+    case '6': setMode('stunts'); break
+    case '7': setMode('races'); break
   }
 })
 
@@ -444,6 +573,9 @@ function setMode(m: Mode) {
   mode = m
   if (site) location.hash = `${site.manifest.slug}:${m}`
   ui.setMode(m)
+  // The traffic overlay is shown only in its own mode, and `applyLayers` runs at load — so without
+  // this the zones were painted into the scene and never became visible until the next site load.
+  applyLayers()
   refresh()
 }
 // the road panel is not a mode — it overlays whatever mode you are in, so it gets its own button
@@ -451,7 +583,28 @@ roadWidth.mount(ui.modeHost)
 // the same handle the viewer exposes as window.corridor, so probes can drive the editor too
 ;(window as unknown as { __ed: unknown }).__ed = { scene, camera, orbit, tune: TUNE_TABS, get site() { return site } }
 
-const unsaved = () => areas.dirty || place.dirty || structs.dirty
+/*
+ * W/A/S/D across, Q/E down and up — Rich, 2026-09-29. It moves the orbit rather than replacing it,
+ * so a drag afterwards continues from where you flew to; see the note in `flycam.ts`.
+ */
+const fly = new FlyCam({
+  camera,
+  target: orbit.target,
+  // not while the preview owns the keyboard, not while a text field has it, and not while this
+  // editor is the hidden half of the world editor
+  active: () => active && !preview.open && !typingInAField(),
+  onMove: () => { /* the orbit reads camera.position and target directly */ },
+})
+addEventListener('keyup', (e) => fly.up_(e))
+// A window that loses focus mid-flight never sees the keyup, and the camera flies away for ever.
+addEventListener('blur', () => fly.release())
+
+function typingInAField(): boolean {
+  const t = document.activeElement as HTMLElement | null
+  return !!t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')
+}
+
+const unsaved = () => areas.dirty || place.dirty || structs.dirty || traffic.dirty || stunts.dirty || races.dirty
 
 // The loaded site was built from the files as they were on disk at load time. Anything saved
 // since means the scene in front of you is behind the JSON — which matters only for the preview,
@@ -463,6 +616,9 @@ async function saveBoth(): Promise<string> {
   if (areas.dirty) out.push(await areas.save())
   if (place.dirty) out.push(await place.save())
   if (structs.dirty) out.push(await structs.save())
+  if (traffic.dirty) out.push(await traffic.save())
+  if (stunts.dirty) out.push(await stunts.save())
+  if (races.dirty) out.push(await races.save())
   if (out.length) sitePredatesEdits = true
   return out.join(' · ')
 }
@@ -472,6 +628,72 @@ async function saveBoth(): Promise<string> {
  * height model as it decodes it, so there is no way to show edited canopy without a rebuild.
  * Save, reload, then hand the preview the very same site the editor is holding.
  */
+/**
+ * A click on the ground: to the tool that owns it, or to whatever was actually under the pointer.
+ *
+ * Rich, 2026-09-29: *"clicking stunts from the areas tab would focus the stunt and activate the
+ * stunts tab… would love to be able to click anything from the editor and have it highlighted in
+ * the place editor on the right."*
+ *
+ * THE ACTIVE TOOL STILL COMES FIRST, in two ways that matter. A tool in the middle of something —
+ * drawing a polygon, holding an armed piece, waiting for you to pick the road an end joins to —
+ * owns every click until it is finished; and a tool that finds one of its OWN things under the
+ * pointer keeps the click too, so clicking around inside the mode you are in behaves exactly as it
+ * did. Only when the active tool has nothing there does the editor look at what else is, and follow
+ * it — which is the case where you are looking at a loop, click it, and would like the loop's panel.
+ *
+ * SMALLEST WINS among the others, the same rule every mode already uses inside itself: a stunt
+ * fixture standing inside a big traffic zone is the thing you meant.
+ */
+function routeClick(pt: { x: number; y: number } | null) {
+  const give = (m: Mode) => {
+    if (m === 'areas') areas.click(pt)
+    else if (m === 'traffic') traffic.click(pt)
+    else if (m === 'stunts') stunts.click(pt)
+    else if (m === 'races') races.click(pt)
+    else place.click(pt)
+  }
+  const busy = mode === 'areas' ? areas.busy
+    : mode === 'traffic' ? traffic.busy
+      : mode === 'stunts' ? stunts.busy
+        : mode === 'races' ? false
+          : place.busy
+  if (!pt || busy) return give(mode)
+
+  /*
+   * THE SMALLEST THING WINS, across every mode — not the active tool's own answer.
+   *
+   * Preferring the active tool sounded safer and was useless: a canopy area covers the whole
+   * corridor, so in the areas tab the area always answered first and a loop standing in the middle
+   * of it could never be clicked. The rule each mode already uses inside itself is the right one
+   * between them too — a stunt fixture is 6,400 m², a canopy is a hundred times that, and the
+   * specific thing is the thing you were pointing at.
+   *
+   * The active mode wins a TIE, so clicking two things of the same size does not wander.
+   */
+  const order: Mode[] = ['races', 'stunts', 'place', 'traffic', 'areas']
+  const hits = ([
+    { m: 'races' as Mode, hit: races.pick(pt) },
+    { m: 'stunts' as Mode, hit: stunts.pick(pt) },
+    { m: 'place' as Mode, hit: place.pick(pt) },
+    { m: 'traffic' as Mode, hit: traffic.pick(pt) },
+    { m: 'areas' as Mode, hit: areas.pick(pt) },
+  ]).filter((x) => x.hit)
+  hits.sort((a, b) => (a.hit!.size - b.hit!.size) || (a.m === mode ? -1 : b.m === mode ? 1 : order.indexOf(a.m) - order.indexOf(b.m)))
+  const found = hits[0]
+  if (!found || found.m === mode) return give(mode)
+
+  setMode(found.m)
+  if (found.m === 'stunts') stunts.select(found.hit!.id)
+  else if (found.m === 'traffic') traffic.select(found.hit!.id)
+  else if (found.m === 'areas') areas.select(found.hit!.id)
+  else if (found.m === 'races') races.select(found.hit!.id)
+  else place.select(found.hit!.id)
+  // the panel that just opened shows the thing: its placed tab, the row highlighted and in view
+  refresh()
+  status(`${found.m}: ${found.hit!.id}`)
+}
+
 async function openPreview() {
   if (!site) return
   try {
@@ -489,8 +711,14 @@ async function openPreview() {
   }
   if (!site) return
   orbit.enabled = false
+  /*
+   * A WORLD WITH STUNTS GETS A PHYSICS PREVIEW. The fixtures come from the TOOL rather than from
+   * the file, so a loop you have just dropped is solid the first time you look at it — the save
+   * above has already written it, but the tool is the thing that knows what is on screen.
+   */
+  const withPhysics = await preview.usePhysics(site, stunts.doc.fixtures)
   preview.show(site, season)
-  status('')
+  status(withPhysics ?? '')
 }
 
 /**
@@ -524,23 +752,80 @@ function refresh(structural = true) {
   season = preview.season
   // the draw state changes from the panel, the keyboard and the canvas, so it is read here rather
   // than mirrored at each of those
-  holdTheCamera(mode === 'areas' && areas.drawing)
+  holdTheCamera((mode === 'areas' && areas.drawing) || (mode === 'traffic' && traffic.drawing))
   if (structural) {
     if (mode === 'areas') areas.panel(ui.inspector, (a: Area) => flyTo(a.polygon))
     else if (mode === 'grow') grow.panel(ui.inspector, site, place.assets, flyTo)
     else if (mode === 'structures') structs.panel(ui.inspector, flyTo)
+    else if (mode === 'traffic') traffic.panel(ui.inspector, (z) => flyTo(z.polygon))
+    else if (mode === 'stunts') stunts.panel(ui.inspector, (f) => flyTo(fixtureFootprint(f)))
+    else if (mode === 'races') races.panel(ui.inspector, (g) => flyTo([g.a, g.b]))
     else place.panel(ui.inspector, flyTo)
+    /*
+     * AND THE SELECTED ROW IS BROUGHT INTO VIEW. A panel that lists forty placements and selects
+     * the one you clicked somewhere below the fold has, from where you are sitting, done nothing.
+     * `nearest` rather than `center` so a row already on screen does not jump.
+     */
+    ui.inspector.querySelector('.item.sel, .row.sel, .sel')?.scrollIntoView({ block: 'nearest' })
   }
-  const what = mode === 'areas' ? 'areas' : mode === 'structures' ? 'structures' : 'place'
+  const what = mode === 'areas' ? 'areas' : mode === 'structures' ? 'structures' : mode === 'traffic' ? 'traffic' : mode === 'stunts' ? 'stunts' : mode === 'races' ? 'races' : 'place'
   ui.setDirty(CAN_SAVE && unsaved(), `Save ${what}`)
 }
 
+/**
+ * Save this mode's file, and REBUILD IF THE SAVE CHANGED THE WORLD.
+ *
+ * Rich, 2026-09-29: *"Clicking save areas should redraw everything, I have to reload the page to
+ * see the change applied with zeroing out the trees."*
+ *
+ * He is right and the reason is worth stating, because it decides which saves rebuild. An
+ * adjustment area is consumed at BUILD time: the trees are picked out of canopy cells during the
+ * "planting" phase and thinned there by `tree_density`, the ground is graded with
+ * `ground_offset_m`, the surface classes are baked into the road's material buckets. Nothing
+ * re-reads those per frame, so saving the file changed the file and nothing else — and the only
+ * way to see it was a reload, which is a reload somebody has to know to do.
+ *
+ * Placements, traffic zones and stunt fixtures are different: they are drawn from live objects that
+ * the editor already updates as you drag them, so rebuilding for those would be a minute of
+ * rebuilding to show what is already on screen.
+ */
 async function doSave() {
+  const rebuilds = mode === 'areas' || mode === 'structures'
+  let rebuild = false
   try {
-    status(mode === 'areas' ? await areas.save() : mode === 'structures' ? await structs.save() : await place.save())
+    if (rebuilds) {
+      /*
+       * SAVE EVERYTHING DIRTY, not only this mode's file.
+       *
+       * The rebuild goes through `loadSite`, which asks "discard your unsaved edits?" if anything
+       * is still dirty — so saving only the areas and then rebuilding would meet somebody who also
+       * had placements in flight with a dialog threatening to throw them away, in response to
+       * pressing Save. Everything here is an authored file; writing them all is never destructive.
+       */
+      status(await saveBoth())
+      rebuild = true
+    } else {
+      status(mode === 'traffic' ? await traffic.save()
+        : mode === 'stunts' ? await stunts.save()
+        : mode === 'races' ? await races.save()
+        : await place.save())
+    }
     sitePredatesEdits = true
   } catch (err) {
     toast(`save failed: ${(err as Error).message}`, 'danger')
+    refresh()
+    return
+  }
+  if (rebuild && site) {
+    // SAY SO. A rebuild is seconds on a corridor and over a minute on a network site, and an
+    // editor that goes quiet for a minute after a save looks like an editor that has crashed.
+    status('saved — rebuilding the world with your edits…')
+    try {
+      await loadSite(site.manifest.slug)
+      status('saved and rebuilt')
+    } catch (err) {
+      toast(`saved, but the rebuild failed: ${(err as Error).message}`, 'danger')
+    }
   }
   refresh()
 }
@@ -623,6 +908,9 @@ function frame() {
     preview.tick(dt, clock.elapsedTime)
     preview.render(renderer)
   } else {
+    // FLY BEFORE THE ORBIT UPDATES: the fly moves the camera and its target together, and the
+    // orbit's own `update` is what re-derives the transform from them and applies its damping.
+    fly.tick(dt)
     orbit.update()
     renderer.render(scene, camera)
   }

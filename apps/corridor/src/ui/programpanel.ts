@@ -17,14 +17,10 @@
 // no renderer behind it, steps it for a few simulated seconds, and reports what happened — the
 // zones declared, the goal set, the messages said, the outcome, and the throw if there was one.
 // That is the difference between "the compiler is happy" and "this is a level".
+import type { WorldThing, WorldThingKind } from '../worldthings'
 import { CodeEditor, forget, knowAbout, languageForPath, type Diagnostic } from './codeeditor'
-import * as bitecsApi from 'bitecs'
-import * as programApi from '../program'
-import * as actorsApi from '../actors'
-import * as actorworldApi from '../actorworld'
-import * as ecsconfigApi from '../ecsconfig'
-import * as trafficApi from '../traffic'
 import { GameRun, type GameDef, type ProgramHost, type Transport } from '../program'
+import { rewriteImports } from '../programload'
 import { ActorWorld } from '../actorworld'
 import { bodyOf, group, readout } from './controls'
 import { FileTree } from './filetree'
@@ -221,7 +217,14 @@ export interface ProgramPanelOpts {
    * instances listed in the editor we can reference from code by an id or something"). Without
    * this you would have to open placements.json to find out what `api.placed('…')` may be given.
    */
-  instances?: () => Promise<{ world: string | null; items: { id: string; asset: string; tags: string[] }[] }>
+  instances?: () => Promise<{ world: string | null; items: WorldThing[] }>
+}
+
+const KIND_LABEL: Record<WorldThingKind, string> = {
+  placement: 'Placed',
+  traffic: 'Traffic zones',
+  stunt: 'Stunt fixtures',
+  race: 'Races',
 }
 
 /** What a dry run found out. Every field is something a person would otherwise have to play for. */
@@ -319,56 +322,7 @@ export async function dryRun(js: string, { seconds = 5, step = 0.05 }: { seconds
  * The same five the type bundle declares (scripts/gen-program-types.mjs), so what the editor lets
  * you import and what the dry run can resolve are the same list.
  */
-const MODULES: Record<string, Record<string, unknown>> = {
-  // BITECS TOO, because a program that touches the ECS imports it directly — `addComponent`,
-  // `query`, `removeEntity`. Without it a dry run of anything real fails at module resolution
-  // with "failed to fetch dynamically imported module", which says nothing about the cause.
-  bitecs: bitecsApi as unknown as Record<string, unknown>,
-  '@apex/program': programApi as unknown as Record<string, unknown>,
-  '@apex/actors': actorsApi as unknown as Record<string, unknown>,
-  '@apex/actorworld': actorworldApi as unknown as Record<string, unknown>,
-  '@apex/ecsconfig': ecsconfigApi as unknown as Record<string, unknown>,
-  '@apex/traffic': trafficApi as unknown as Record<string, unknown>,
-}
-
-/** A blob module per specifier, made once and kept: creating one per run leaks a URL per run. */
-const shims = new Map<string, string>()
-
-/**
- * A URL that resolves `@apex/program` to the app's own live module.
- *
- * NOT a path like `/src/program.ts`. That works in dev, where Vite serves the sources, and is a
- * 404 in a production build where everything is bundled and hashed — which is the worst shape of
- * bug, because the feature is only ever exercised in dev until somebody uses it in the cluster.
- *
- * So the app hands the module over BY VALUE through a global, and the shim re-exports its keys.
- * The export list comes from the real module object, so it cannot drift from what the module
- * actually exports.
- */
-function shimFor(name: string): string | null {
-  const mod = MODULES[name]
-  if (!mod) return null
-  const cached = shims.get(name)
-  if (cached) return cached
-  const g = globalThis as unknown as { __APEX_PROGRAM_MODULES?: typeof MODULES }
-  g.__APEX_PROGRAM_MODULES ??= MODULES
-  const keys = Object.keys(mod).filter((k) => /^[A-Za-z_$][\w$]*$/.test(k))
-  const src = [
-    `const m = globalThis.__APEX_PROGRAM_MODULES[${JSON.stringify(name)}];`,
-    ...keys.map((k) => `export const ${k} = m[${JSON.stringify(k)}];`),
-  ].join('\n')
-  const url = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }))
-  shims.set(name, url)
-  return url
-}
-
-/** Point every `@apex/…` import at its shim. */
-function rewriteImports(js: string): string {
-  return js.replace(/(['"])(@apex\/[a-z]+|bitecs)\1/g, (m, q, name) => {
-    const url = shimFor(name)
-    return url ? `${q}${url}${q}` : m
-  })
-}
+// the module shims live in ../programload, shared with the viewer's own program runner
 
 /* ---- the panel ---------------------------------------------------------------------------- */
 /*
@@ -789,21 +743,34 @@ export class ProgramPanel {
    * Clicking one puts `api.placed('p-07')` at the caret, because the useful thing to do with an
    * id you just found is use it, and retyping it from a list is where the typo comes from.
    */
-  private instances: { id: string; asset: string; tags: string[] }[] = []
+  private instances: WorldThing[] = []
   private instanceWorld: string | null = null
   private drawInstances(into: HTMLElement): void {
     if (!this.o.instances) return
     const g = group(`In this world (${this.instances.length})`, { collapsed: !this.instances.length, note: this.instanceWorld ?? undefined })
     const b = bodyOf(g)
     if (!this.instances.length) {
-      b.append(el('p', 'note', this.instanceWorld ? 'Nothing placed yet. Place mode puts things here.' : 'No world open.'))
+      b.append(el('p', 'note', this.instanceWorld
+        ? 'Nothing in this world yet. Place things, paint traffic, stand up a stunt or lay out a race and they appear here.'
+        : 'No world open.'))
     }
-    for (const it of this.instances.slice(0, 200)) {
-      const row = el('button', 'row')
-      row.append(el('span', 'row-name', it.id), el('span', 'row-note', `${it.asset}${it.tags.length ? ` · ${it.tags.join(' ')}` : ''}`))
-      row.title = `insert api.placed('${it.id}')`
-      row.onclick = () => this.editor()?.insert(`api.placed('${it.id}')`)
-      b.append(row)
+    /*
+     * GROUPED BY LAYER, and each group is there only when the world has one. A heading that says
+     * "Traffic zones (0)" teaches you nothing; a world with three zones and no races should read as
+     * a world with three zones.
+     */
+    const kinds: WorldThingKind[] = ['placement', 'traffic', 'stunt', 'race']
+    for (const kind of kinds) {
+      const items = this.instances.filter((i) => i.kind === kind)
+      if (!items.length) continue
+      b.append(el('p', 'note dim', `${KIND_LABEL[kind]} (${items.length})`))
+      for (const it of items.slice(0, 200)) {
+        const row = el('button', 'row')
+        row.append(el('span', 'row-name', it.id), el('span', 'row-note', `${it.what}${it.tags.length ? ` · ${it.tags.join(' ')}` : ''}`))
+        row.title = `insert ${it.insert}`
+        row.onclick = () => this.editor()?.insert(it.insert)
+        b.append(row)
+      }
     }
     into.append(g)
   }

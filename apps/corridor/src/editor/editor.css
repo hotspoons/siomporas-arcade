@@ -14,6 +14,11 @@
 
 .list {
   display: flex; flex-direction: column;
+  /* A scroll container's automatic minimum is ZERO, and the inspector is a grid whose rows are
+     sized to content — so when a detail block followed the list, the grid gave the detail its
+     height and squeezed the list to its two borders (measured: 2 px tall, one 26 px item inside).
+     Rich, 2026-09-30: "The list of stunts disappears from the editor when you select one." */
+  min-height: min(34vh, 9.5em);
   max-height: 34vh; overflow: auto;
   border: 1px solid var(--line-1);
   border-radius: var(--r2);
@@ -378,8 +383,10 @@
    every plain button in the embedded editor was a raw browser button (Rich, 2026-09-29: "the
    buttons are unstyled"). Both sets are listed rather than the ids dropped, because the point of
    scoping is that nothing here reaches the shell's own controls. */
-#se-inspector button:not(.btn):not(.chip):not(.rig-bone):not(.tree-twist):not(.tree-open),
-.inspector-body button:not(.btn):not(.chip):not(.rig-bone):not(.tree-twist):not(.tree-open),
+/* `.tab` is excluded too: the panel tabs are the shell's own tab control and must look like it,
+   not like the inspector's grey buttons (Rich, 2026-09-30: "needs to be restyled to match proper tabs") */
+#se-inspector button:not(.btn):not(.chip):not(.tab):not(.rig-bone):not(.tree-twist):not(.tree-open),
+.inspector-body button:not(.btn):not(.chip):not(.tab):not(.rig-bone):not(.tree-twist):not(.tree-open),
 .pv-bar button:not(.btn),
 #se-actions button:not(.btn),
 #se-rail button:not(.btn):not(.seg) {
@@ -394,14 +401,14 @@
   white-space: nowrap;
   transition: background var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease), color var(--dur-1) var(--ease);
 }
-#se-inspector button:not(.btn):hover,
-.inspector-body button:not(.btn):hover,
+#se-inspector button:not(.btn):not(.tab):hover,
+.inspector-body button:not(.btn):not(.tab):hover,
 .pv-bar button:not(.btn):hover,
 #se-actions button:not(.btn):hover,
 #se-rail button:not(.btn):not(.seg):hover { background: var(--bg-3); }
 /* `.on` is what these files already set on the current mode and the armed asset */
-#se-inspector button.on:not(.btn):not(.chip),
-.inspector-body button.on:not(.btn):not(.chip),
+#se-inspector button.on:not(.btn):not(.chip):not(.tab),
+.inspector-body button.on:not(.btn):not(.chip):not(.tab),
 #se-actions button.on:not(.btn) { background: var(--accent-dim); border-color: var(--accent-line); color: var(--accent); }
 /* destructive ones say so — `danger` is the class they already use */
 #se-inspector button.danger:not(.btn),
@@ -511,3 +518,7 @@
 .setting-source.source-ui { color: var(--accent); border-color: var(--accent-line); background: var(--accent-dim); }
 .setting-source.source-env { color: var(--ink-2); }
 .setting-note { margin: 0; font-size: var(--text-xs); }
+
+/* the palette tab strip sits flush in the panel, no side padding of its own */
+.inspector-body > .tab-strip { padding-left: 0; padding-right: 0; }
+.inspector-body .palette .chip { min-height: 2.6em; }

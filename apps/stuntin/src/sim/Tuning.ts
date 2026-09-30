@@ -7,26 +7,15 @@ export const SIM_DT = 1 / SIM_HZ
 export const MAX_SUBSTEPS = 8
 
 // --- grid ---
-/** Side of one editor cell, metres. Every piece footprint is whole cells. */
-export const CELL = 40
-/** Height of one elevation level, metres. Ramps climb exactly one per cell. */
-export const LEVEL_H = 8
-/** Half the drivable road width. */
-export const ROAD_HALF_WIDTH = 5
-/** Curb width beyond the road edge (visual + rumble). */
-export const CURB_WIDTH = 0.8
+/*
+ * THE DIMENSIONS OF THE VOCABULARY MOVED to `packages/stunt-pieces/src/geometry.ts`, with the
+ * pieces they define — see the note in `./pieces.ts`. They are not knobs: changing one changes what
+ * every piece IS, which is why they do not belong in a file of two hundred car settings that a
+ * tuning panel edits live. Re-exported so every `from './Tuning'` in this game still works.
+ */
+export { CELL, CURB_WIDTH, CORK_RADIUS, LEVEL_H, LOOP_RADIUS, LOOP_SHIFT, ROAD_HALF_WIDTH, TUBE_RADIUS, TUBE_RAMP } from '@apex/stunt-pieces/geometry'
 /** Metres between baked path samples. */
 export const PATH_STEP = 1
-/** Radius of vertical loops and corkscrews. */
-export const LOOP_RADIUS = 18
-/** Corkscrew helix radius (metres). */
-export const CORK_RADIUS = 14
-/** Round tunnel radius (the road is the floor). */
-export const TUBE_RADIUS = 11
-/** Metres over which a tunnel's walls rise from curb height at each mouth (and sink again at the exit). */
-export const TUBE_RAMP = 18
-/** Lateral shift across a loop so the exit clears the entry, metres. */
-export const LOOP_SHIFT = CELL
 /** How far off the road (grass) you can wander on ground-level pieces before you are simply lost. */
 export const GRASS_LIMIT = 60
 

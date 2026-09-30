@@ -20,7 +20,7 @@ import type { CatalogEntry as ViewerCatalogEntry } from '../placements'
 import type { Catalog, CatalogEntry } from './catalog'
 import { handleMesh } from './drape'
 import { loadStructures, nextId, saveStructures, STRUCTURE_KINDS, type StructureItem, type StructureKind, type Structures } from './schema'
-import { el } from './ui'
+import { dragChip, el, paneTabs } from './ui'
 
 const COLOR: Record<StructureKind, number> = { bridge_over: 0xd98c3f, flatten: 0xffdc00, suppress: 0xe2564f }
 const SELECT = 0x2ee6c0
@@ -288,11 +288,11 @@ export class StructureMode {
     return this.catalog.assets.filter((a) => a.category === 'bridge')
   }
 
-  private async add(s0: number, s1: number) {
+  private async add(s0: number, s1: number, kind: StructureKind = 'bridge_over') {
     const a = Math.min(s0, s1), b = Math.max(s0, s1)
     if (b - a < 0.5) return
-    const it: StructureItem = { id: nextId('st', this.doc.items.map((i) => i.id)), name: this.nameFor(a, b, 'bridge_over'), kind: 'bridge_over', s_start: a, s_end: b }
-    this.bridgeDefaults(it)
+    const it: StructureItem = { id: nextId('st', this.doc.items.map((i) => i.id)), name: this.nameFor(a, b, kind), kind, s_start: a, s_end: b }
+    if (kind === 'bridge_over') this.bridgeDefaults(it)
     this.doc.items.push(it)
     this.dirty = true
     await this.remesh(it.id)
@@ -300,6 +300,7 @@ export class StructureMode {
   }
 
   select(id: string | null) {
+    if (id) this.panelTab = 'placed'
     this.selected = id
     this.refreshColors()
     this.refreshHandles()
@@ -415,8 +416,9 @@ export class StructureMode {
     switch (e.key) {
       case 'Delete': case 'Backspace': this.remove(this.selected); return true
       case 'Escape': this.select(null); return true
-      case 'q': case 'Q': this.spin(e.shiftKey ? -15 : -1); return true
-      case 'e': case 'E': this.spin(e.shiftKey ? 15 : 1); return true
+      // Z and X turn things; Q and E fly the camera. See the note in `place.ts`.
+      case 'z': case 'Z': this.spin(e.shiftKey ? -15 : -1); return true
+      case 'x': case 'X': this.spin(e.shiftKey ? 15 : 1); return true
     }
     return false
   }
@@ -450,18 +452,52 @@ export class StructureMode {
   // --- panel ------------------------------------------------------------------------------------------
   panel(root: HTMLElement, fly: (pts: [number, number][]) => void) {
     root.replaceChildren()
+    paneTabs(root, [{ id: 'kinds', label: 'Kinds' }, { id: 'placed', label: `Authored (${this.doc.items.length})` }], this.panelTab, (id) => {
+      this.panelTab = id as 'kinds' | 'placed'
+      this.onChange()
+    })
+    if (this.panelTab === 'kinds') {
+      this.kindsTab(root)
+      return
+    }
+    this.placedTab(root, fly)
+  }
+
+  panelTab: 'kinds' | 'placed' = 'kinds'
+
+  /** A kind dropped on the road: an interval eighty metres long, centred where it landed. */
+  dropAt(pt: { x: number; y: number }, kind: string): boolean {
+    if (!this.site || !STRUCTURE_KINDS.some((k) => k.kind === kind)) return false
+    const { s, lateral } = this.nearest(pt.x, pt.y)
+    if (Math.abs(lateral) > 60) return false
+    void this.add(s - 40, s + 40, kind as StructureKind)
+    this.panelTab = 'placed'
+    return true
+  }
+
+  private kindsTab(root: HTMLElement) {
+    root.append(el('p', 'dim', this.pick
+      ? (this.pick.s0 === null ? 'click the road where the interval STARTS (Esc cancels)' : `start s ${this.pick.s0.toFixed(1)} — click where it ENDS`)
+      : 'drag a kind onto the road for an 80 m interval there, or pick the interval by hand: two clicks, start then end'))
+    const palette = el('div', 'palette')
+    for (const k of STRUCTURE_KINDS) {
+      palette.append(dragChip({ mode: 'structures', id: k.kind, label: k.label, note: k.note, onClick: () => this.startPick() }))
+    }
+    root.append(palette)
     const tools = el('div', 'row')
     const pickBtn = el('button')
-    if (!this.pick) pickBtn.textContent = 'pick interval (N)'
-    else if (this.pick.s0 === null) pickBtn.textContent = 'click the road where the interval STARTS (Esc cancels)'
-    else pickBtn.textContent = `start s ${this.pick.s0.toFixed(1)} — click where it ENDS`
+    pickBtn.textContent = this.pick ? 'cancel the pick (Esc)' : 'pick an interval (N)'
     pickBtn.onclick = () => (this.pick ? this.cancelPick() : this.startPick())
     tools.append(pickBtn)
     root.append(tools)
     this.hover = el('p', 'dim mono')
     this.hover.style.minHeight = '1.2em'
     root.append(this.hover)
+  }
 
+  private placedTab(root: HTMLElement, fly: (pts: [number, number][]) => void) {
+    // the hover readout lives on the kinds tab; a placed-tab pick still needs somewhere to write
+    this.hover = el('p', 'dim mono')
     const list = el('div', 'list')
     for (const it of this.doc.items) {
       const row = el('div', `item${it.id === this.selected ? ' sel' : ''}`)

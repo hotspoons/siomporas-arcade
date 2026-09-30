@@ -59,7 +59,19 @@ function serveBake(): Plugin {
         // `dead_ends` is Rich's third editor ask, keyed on the OSM NODE ID rather than on `s` or a
         // chain id: the node id is in every dead_ends entry the bake emits and it survives a
         // re-bake, a re-chaining and a change of chain set, which stations and chain ids do not.
-        if (req.method === 'PUT' && prefix === '/sites/' && /^[a-z0-9-]+\/(adjustments|placements|structures|dead_ends|tuning|presets)\.json$/.test(rel.replaceAll('\\', '/'))) {
+        //
+        // `courses` is the circuits and stages — gates you cross, in order (src/races.ts).
+        //
+        // `stunts` is the loops, corkscrews and banked turns standing on the road (src/stunts.ts).
+        // A fixture REPLACES a stretch of the baked road rather than correcting it, which is why it
+        // is not an adjustment either.
+        //
+        // `zones` is gameplay bounds — traffic areas today, race gates next (src/zones.ts). NOT in
+        // `adjustments.json` although it is the same polygon: an adjustment says the bake got it
+        // wrong and is true for every game played on that ground, while a traffic zone belongs to
+        // one level, and a rally stage and a delivery game want different answers in the same
+        // field. The pod-side twin of this list is `AUTHORED` in tools/worldeditor/store.mjs.
+        if (req.method === 'PUT' && prefix === '/sites/' && /^[a-z0-9-]+\/(adjustments|placements|structures|dead_ends|tuning|presets|zones|stunts|courses)\.json$/.test(rel.replaceAll('\\', '/'))) {
           const chunks: Buffer[] = []
           req.on('data', (c) => chunks.push(c))
           req.on('end', () => {

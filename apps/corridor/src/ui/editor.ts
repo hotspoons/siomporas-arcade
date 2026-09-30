@@ -19,13 +19,21 @@ import { icon } from './icons'
 import { bodyOf, group, layerToggle, segmented, select } from './controls'
 import type { IndexEntry } from '../site'
 
-export type Mode = 'areas' | 'place' | 'grow' | 'structures'
+export type Mode = 'areas' | 'place' | 'grow' | 'structures' | 'traffic' | 'stunts' | 'races'
 
-const MODES: { value: Mode; label: string; icon: 'pencil-square' | 'map-pin' | 'sparkles' | 'rectangle-group'; key: string }[] = [
+const MODES: { value: Mode; label: string; icon: 'pencil-square' | 'map-pin' | 'sparkles' | 'rectangle-group' | 'map' | 'bolt' | 'flag'; key: string }[] = [
   { value: 'areas', label: 'Areas', icon: 'pencil-square', key: '1' },
   { value: 'place', label: 'Place', icon: 'map-pin', key: '2' },
   { value: 'grow', label: 'Grow', icon: 'sparkles', key: '3' },
   { value: 'structures', label: 'Structures', icon: 'rectangle-group', key: '4' },
+  // Traffic zones (src/editor/zones.ts): the same polygon tool, a different document. Painted with
+  // the map colours everybody reads, because the fill IS the value.
+  { value: 'traffic', label: 'Traffic', icon: 'map', key: '5' },
+  // Stunt fixtures (src/editor/stuntmode.ts): a loop, a corkscrew or a jump standing on the road,
+  // with its two ends linked back to the tarmac by a bezier.
+  { value: 'stunts', label: 'Stunts', icon: 'bolt', key: '6' },
+  // Circuits and stages (src/editor/coursemode.ts): gates across the road, crossed in order.
+  { value: 'races', label: 'Races', icon: 'flag', key: '7' },
 ]
 
 export const EDITOR_LAYERS: { title: string; layers: { id: string; label: string; on: boolean }[] }[] = [
@@ -53,11 +61,14 @@ export const EDITOR_LAYERS: { title: string; layers: { id: string; label: string
 const KEYS: Record<Mode | 'general', [string, string][]> = {
   general: [
     ['drag', 'orbit · wheel zooms'],
+    ['W A S D', 'fly the camera · shift sprints'],
+    ['Q E', 'turn left and right'],
+    ['R F', 'rise and drop'],
     ['T', 'top down'],
-    ['F', 'fly to the selection'],
+    ['C', 'centre on the selection'],
     ['V', 'preview — saves everything and rebuilds'],
     ['Ctrl S', 'save this mode’s file'],
-    ['1 2 3 4', 'switch mode'],
+    ['1 … 7', 'switch mode'],
   ],
   areas: [
     ['N', 'draw a new area'],
@@ -69,8 +80,9 @@ const KEYS: Record<Mode | 'general', [string, string][]> = {
   ],
   place: [
     ['pick', 'choose an asset, then click the ground'],
-    ['drag', 'move'],
-    ['Q E', 'rotate (or shift+wheel)'],
+    ['drag', 'the gizmo handles — move, or turn'],
+    ['G', 'swap the gizmo between move and turn'],
+    ['Z X', 'rotate (or shift+wheel)'],
     ['[ ]', 'scale'],
     ['Del', 'remove'],
   ],
@@ -82,7 +94,27 @@ const KEYS: Record<Mode | 'general', [string, string][]> = {
   structures: [
     ['N', 'then click the road twice — start, then end'],
     ['drag', 'move an end sphere'],
-    ['Q E', 'turn a bridge'],
+    ['Z X', 'turn a bridge'],
+    ['Del', 'remove'],
+  ],
+  races: [
+    ['pick', 'a gate kind, then click the road — it is laid square across it'],
+    ['arrow', 'which way counts; "turn it round" flips it'],
+    ['drag', 'a post moves that end'],
+    ['Del', 'remove the selected gate'],
+  ],
+  stunts: [
+    ['pick', 'choose a piece, then click the road'],
+    ['drag', 'the orange spheres move where it joins the road'],
+    ['Z X', 'turn it'],
+    ['Esc', 'put the piece back'],
+    ['Del', 'remove'],
+  ],
+  traffic: [
+    ['N', 'draw a zone over a stretch of road'],
+    ['click', 'add a vertex'],
+    ['Enter', 'close the ring (or click the first vertex)'],
+    ['colour', 'clear · light · heavy · slow · jammed'],
     ['Del', 'remove'],
   ],
 }

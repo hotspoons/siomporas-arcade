@@ -12,7 +12,7 @@ import { TransformControls } from 'three/addons/controls/TransformControls.js'
 import { instanceOf, loadCatalog, tintOf, type Catalog, type CatalogEntry } from './catalog'
 import { frameMismatch, frameOf, isGenerated, loadPlacements, nextId, savePlacements, type Placement, type Placements } from './schema'
 import { yawFacingRoad } from './corridor'
-import { el, frameBanner } from './ui'
+import { el, frameBanner, paneTabs } from './ui'
 import { MeshView } from '../ui/meshview'
 import type { Site } from '../scene'
 
@@ -52,6 +52,13 @@ export class PlaceMode {
    */
   private gizmo: TransformControls | null = null
   private gizmoMode: 'translate' | 'rotate' = 'translate'
+  /**
+   * True from the moment a press lands on a gizmo handle until it is released.
+   *
+   * The editor's own `pointerdown` sets `orbit.enabled = !grabbing`, which would undo the hold this
+   * put on the camera; it reads this instead. See the note in `useGizmo`.
+   */
+  onGizmo = false
   /** set while a handle is being dragged, so the ordinary pointer handling keeps out of the way */
   dragging = false
   /** `false` = only a value changed; the panel must not be rebuilt under the pointer. */
@@ -120,9 +127,49 @@ export class PlaceMode {
     o.scale.setScalar(p.scale)
   }
 
+  /**
+   * A stand-in for a placement whose asset this catalog has never heard of.
+   *
+   * WITHOUT ONE THE PLACEMENT DOES NOT EXIST IN THE EDITOR. `spawn` used to return early, so there
+   * was no object: nothing drawn, nothing to click, nothing for the gizmo to attach to — and no
+   * message either. Rich, 2026-09-29: *"drag and rotate handles (gizmo) for placed assets don't do
+   * anything"*. They were working perfectly on every placement that had a model; the ones without
+   * one were invisible to the whole tool, and the only symptom was a gizmo that never appeared.
+   *
+   * The viewer already draws a box in the same situation (`placements.ts`). This is the same
+   * admission, made selectable: you can still move it, turn it, delete it, and — the point — see
+   * that it is there at all while the asset service is sorted out.
+   */
+  private proxy(p: Placement): THREE.Object3D {
+    const g = new THREE.Group()
+    const box = new THREE.Mesh(
+      new THREE.BoxGeometry(2, 2, 2),
+      new THREE.MeshBasicMaterial({ color: 0xff8a2b, wireframe: true, depthTest: false }),
+    )
+    box.renderOrder = 10
+    g.add(box)
+    g.userData.proxyFor = p.asset
+    return g
+  }
+
+  /** Placements whose asset is missing from this catalog, for the panel to name. */
+  missingAssets(): { id: string; asset: string }[] {
+    return this.doc.items
+      .filter((p) => !this.entry(p.asset))
+      .map((p) => ({ id: p.id, asset: p.asset }))
+  }
+
   private async spawn(p: Placement) {
     const e = this.entry(p.asset)
-    if (!e) return
+    if (!e) {
+      const proxy = this.proxy(p)
+      proxy.userData.placeId = p.id
+      proxy.traverse((c) => (c.userData.placeId = p.id))
+      this.place(proxy, p)
+      this.objects.set(p.id, proxy)
+      this.group.add(proxy)
+      return
+    }
     const o = await instanceOf(e)
     o.userData.placeId = p.id
     o.traverse((c) => (c.userData.placeId = p.id))
@@ -189,16 +236,32 @@ export class PlaceMode {
      * pointer and only consults `enabled` when the gesture STARTS. So dragging a handle also spun
      * the world (Rich, 2026-09-28: "Clicking and dragging the gizmo also rotates the map").
      *
-     * A capture-phase listener runs before either of them. `axis` is non-null whenever the
-     * pointer is over a handle, which is exactly the condition for "this press belongs to the
-     * gizmo".
+     * A capture-phase listener runs before either of them. `axis` is non-null whenever the pointer
+     * is over a handle, which is exactly the condition for "this press belongs to the gizmo".
+     *
+     * AND IT MUST NOT CALL `stopPropagation`, which is what it did.
+     *
+     * Stopping propagation from a CAPTURE listener ON THE TARGET cancels that target's BUBBLE phase
+     * as well — the two phases are separate visits to the same node, and the stop flag is checked
+     * between them. TransformControls registers its own `pointerdown` without a capture flag, so it
+     * is a bubble listener on this very element, and it never ran. The gizmo highlighted on hover,
+     * because `pointermove` was untouched, and did nothing at all on press (Rich, 2026-09-29:
+     * "clicking and dragging does nothing. It highlights like it is going to do something but
+     * nothing happens").
+     *
+     * So the press is allowed through and the camera is held off by a FLAG instead: `onGizmo` is
+     * read by the editor's own pointerdown, which would otherwise re-enable the orbit a moment
+     * later. Three listeners on one event, and only one of them may own the gesture.
      */
-    dom.addEventListener('pointerdown', (e) => {
+    dom.addEventListener('pointerdown', () => {
       if (g.axis === null) return
+      this.onGizmo = true
       onOrbit(false)
-      e.stopPropagation()
     }, true)
-    addEventListener('pointerup', () => { if (!this.dragging) onOrbit(true) })
+    addEventListener('pointerup', () => {
+      this.onGizmo = false
+      if (!this.dragging) onOrbit(true)
+    })
 
     /*
      * SNAPPED BY DEFAULT, FREE WHILE SHIFT IS DOWN.
@@ -368,10 +431,41 @@ export class PlaceMode {
 
   // --- input -------------------------------------------------------------------------------------
   /** A single click SELECTS — or clears the selection. It never puts anything down. */
+  /**
+   * The placement nearest a ground point, within its own footprint — see `areas.pick`.
+   *
+   * By FOOTPRINT rather than by a fixed radius, because these range from a bollard to a barn and a
+   * radius that finds the barn also finds everything within ten metres of the bollard.
+   */
+  pick(pt: { x: number; y: number }): { id: string; size: number } | null {
+    let best: { id: string; size: number } | null = null
+    for (const p of this.doc.items) {
+      const e = this.entry(p.asset)
+      const w = e ? Math.max(e.footprint_m[0], e.footprint_m[1]) : 3
+      const reach = Math.max(1.5, w / 2)
+      const d = Math.hypot(pt.x - p.x, pt.y - p.y)
+      if (d > reach) continue
+      const size = w * w
+      if (!best || size < best.size) best = { id: p.id, size }
+    }
+    return best
+  }
+
+  get busy(): boolean {
+    return !!this.armed || this.dragging
+  }
+
   click(pt: { x: number; y: number } | null) {
     if (this.dragging) return
-    void pt
-    this.select(null)
+    /*
+     * A CLICK ON A PLACEMENT SELECTS IT. This used to deselect whatever the point was, because
+     * selection came only from clicking the OBJECT (the gizmo's own raycast) — so clicking the
+     * ground beside a thing you had selected threw the selection away, and clicking the thing's
+     * footprint did nothing at all. Rich, 2026-09-29: *"would love to be able to click anything
+     * from the editor and have it highlighted in the place editor on the right."*
+     */
+    const hit = pt ? this.pick(pt) : null
+    this.select(hit?.id ?? null)
   }
 
   /** A double click on the ground puts the armed asset there. */
@@ -427,13 +521,29 @@ export class PlaceMode {
     const spin = (d: number) => this.mutate((p) => (p.yaw_deg = (p.yaw_deg + d + 360) % 360))
     const zoom = (k: number) => this.mutate((p) => (p.scale = Math.max(0.1, Math.min(10, Math.round(p.scale * k * 100) / 100))))
     switch (e.key) {
-      case 'q': case 'Q': spin(e.shiftKey ? -45 : -5); return true
-      case 'e': case 'E': spin(e.shiftKey ? 45 : 5); return true
+      /*
+       * Z AND X TURN A PLACEMENT, not Q and E.
+       *
+       * Rich, 2026-09-29, asking for a flying camera: *"at least wasd + qe to translate and rotate
+       * the camera"* — and Q/E were taken by this. Z and X are the next pair everybody reaches for
+       * on a rotate, they are beside each other under the same hand, and they free the flight keys
+       * for the camera in every mode rather than only in the ones that do not rotate anything.
+       */
+      case 'z': case 'Z': spin(e.shiftKey ? -45 : -5); return true
+      case 'x': case 'X': spin(e.shiftKey ? 45 : 5); return true
       case '[': zoom(1 / 1.1); return true
       case ']': zoom(1.1); return true
       case 'Delete': case 'Backspace': this.remove(this.selected); return true
-      case 'g': case 'G': this.setGizmoMode('translate'); return true
-      case 'r': case 'R': this.setGizmoMode('rotate'); return true
+      /*
+       * ONE KEY, TOGGLING. It was G for move and R for rotate — and R is now the flying camera's
+       * "drop", so the rotate handles were unreachable from the keyboard while the camera sank.
+       * `place.key` never even saw it: flight is claimed first, deliberately, so that W/A/S/D mean
+       * the same thing in every mode. G toggles between the two sets, which is one key to remember
+       * instead of two and cannot collide with the camera.
+       */
+      case 'g': case 'G':
+        this.setGizmoMode(this.gizmoMode === 'translate' ? 'rotate' : 'translate')
+        return true
       case 'Escape': this.arm(null); this.select(null); return true
     }
     return false
@@ -466,6 +576,24 @@ export class PlaceMode {
     root.replaceChildren()
 
     /*
+     * SAY WHEN A PLACEMENT'S MODEL IS NOT HERE.
+     *
+     * It is drawn as an orange wireframe box and is fully editable, but the box is not the asset and
+     * nothing else on this screen would say so. The usual cause in development is the frozen
+     * placeable catalog — `/assets/catalog.json` is a static file under `public/` unless the dev
+     * server proxies it — so an asset ticked as placeable in the library is one the editor has
+     * never heard of.
+     */
+    const missing = this.missingAssets()
+    if (missing.length) {
+      const warn = el('div', 'framewarn')
+      warn.append(el('strong', '', `${missing.length} placement${missing.length === 1 ? '' : 's'} with no model in this catalog`))
+      warn.append(el('span', '', missing.slice(0, 6).map((m) => m.asset).join(', ') + (missing.length > 6 ? '…' : '')))
+      warn.append(el('span', 'dim', 'They are drawn as orange boxes and can still be moved, turned and deleted. Check that the asset service is reachable and that the catalog is not the frozen one under public/.'))
+      root.append(warn)
+    }
+
+    /*
      * TWO TABS, because they are two activities.
      *
      * Rich, 2026-09-28: "the assset listing and palette should be two tabs, the form jumps all
@@ -477,15 +605,10 @@ export class PlaceMode {
     // THE SAME TABS THE ASSET LIBRARY USES. Rich, 2026-09-28: "Tabs from assets should be used in
     // the place things editor tabs, not what ever this is." `tab-strip` / `tab` are what `Tabs`
     // in ui/shell.ts emits, so these are the same control by class rather than by resemblance.
-    const tabs = el('div', 'tab-strip')
-    for (const [id, label] of [['assets', 'Assets'], ['placed', `Placed (${this.doc.items.length})`]] as const) {
-      const b = el('button', `tab${this.panelTab === id ? ' on' : ''}`)
-      b.setAttribute('role', 'tab')
-      b.append(el('span', '', label))
-      b.onclick = () => { this.panelTab = id; this.onChange() }
-      tabs.append(b)
-    }
-    root.append(tabs)
+    paneTabs(root, [{ id: 'assets', label: 'Assets' }, { id: 'placed', label: `Placed (${this.doc.items.length})` }], this.panelTab, (id) => {
+      this.panelTab = id as 'assets' | 'placed'
+      this.onChange()
+    })
     // THE WARNING IS NOT THE FIRST THING. It was appended here, above the tab content, which put
     // it back on top of the preview the moment a world actually had a frame mismatch — so the
     // panel read exactly as it did before (Rich, 2026-09-28: "it should show a little preview at
@@ -635,9 +758,9 @@ export class PlaceMode {
      * placing a row of posts wants to type 12 rather than nudge towards it.
      */
     const handles = el('div', 'row')
-    for (const [mode, label, key] of [['translate', 'move', 'G'], ['rotate', 'rotate', 'R']] as const) {
+    for (const [mode, label] of [['translate', 'move'], ['rotate', 'turn']] as const) {
       const btn = el('button', this.gizmoModeNow === mode ? 'on' : '')
-      btn.textContent = `${label} (${key})`
+      btn.textContent = `${label} (G)`
       btn.onclick = () => this.setGizmoMode(mode)
       handles.append(btn)
     }
@@ -645,7 +768,7 @@ export class PlaceMode {
     det.append(handles)
     det.append(this.num('x (m east)', p.x, 0.5, (v) => this.mutate((q) => (q.x = v))))
     det.append(this.num('y (m north)', p.y, 0.5, (v) => this.mutate((q) => (q.y = v))))
-    det.append(this.num('yaw°  (Q/E, shift+wheel)', p.yaw_deg, 1, (v) => this.mutate((q) => (q.yaw_deg = v))))
+    det.append(this.num('yaw°  (Z/X, shift+wheel)', p.yaw_deg, 1, (v) => this.mutate((q) => (q.yaw_deg = v))))
     det.append(this.num('scale  ([ / ])', p.scale, 0.05, (v) => this.mutate((q) => (q.scale = v))))
 
     const snap = el('label', 'field')

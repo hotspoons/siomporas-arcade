@@ -50,6 +50,49 @@ if (placed?.items?.length) {
   else if (!listed.includes(placed.items[0].id)) fail.push(`the panel lists ${listed[0]}, the document has ${placed.items[0].id}`)
 }
 
+/*
+ * ---- and EVERY layer is listed, not just the placements ----
+ *
+ * Rich, 2026-09-29: *"Nothing shows up in the programming world listing except a set of apartments,
+ * no traffic zones, no stunts, nothing."* The list read `placements.json` alone, so a world with
+ * two painted zones and two loops in it looked like a world with one building. What is on disk is
+ * the control: every layer the site actually has must have a row you can click.
+ */
+const layers = {}
+for (const [name, file, key] of [['traffic', 'zones.json', 'zones'], ['stunt', 'stunts.json', 'fixtures'], ['race', 'courses.json', 'courses']]) {
+  const doc = await fetch(`http://localhost:${PORT}/sites/${WORLD}/${file}`).then((r) => (r.ok ? r.json() : null)).catch(() => null)
+  layers[name] = doc?.[key] ?? []
+}
+say('layers on disk', Object.fromEntries(Object.entries(layers).map(([k, v]) => [k, v.length])))
+
+const panel = await page.evaluate(() => {
+  const g = [...document.querySelectorAll('#panel .group')].find((x) => /In this world/.test(x.textContent ?? ''))
+  if (!g) return null
+  return {
+    headings: [...g.querySelectorAll('p.note')].map((n) => n.textContent),
+    ids: [...g.querySelectorAll('.row .row-name')].map((n) => n.textContent),
+    inserts: [...g.querySelectorAll('.row')].map((r) => r.title),
+  }
+})
+say('panel headings', panel?.headings ?? 'no group')
+for (const [name, items] of Object.entries(layers)) {
+  if (!items.length) continue
+  const id = items[0].id
+  if (!panel?.ids?.includes(id)) fail.push(`the world has ${items.length} ${name} on disk and the panel lists none of them (${id} missing)`)
+}
+/*
+ * AND EACH ROW INSERTS THE CALL THAT TAKES IT. A zone listed under `api.placed` is a row that
+ * teaches you the wrong thing, which is worse than no row.
+ */
+if (layers.traffic.length) {
+  const want = `insert api.traffic.set('${layers.traffic[0].id}'`
+  if (!panel?.inserts?.some((t) => t?.startsWith(want))) fail.push(`a traffic zone's row does not insert api.traffic.set (${panel?.inserts?.join(' | ')})`)
+}
+if (layers.stunt.length) {
+  const want = `insert api.stunts.show('${layers.stunt[0].id}'`
+  if (!panel?.inserts?.some((t) => t?.startsWith(want))) fail.push('a stunt fixture\'s row does not insert api.stunts.show')
+}
+
 /* ---- a new file starts as something that compiles and runs ---- */
 await page.locator('#panel .group header button, #panel .group-actions button').first().click()
 await page.waitForTimeout(700)

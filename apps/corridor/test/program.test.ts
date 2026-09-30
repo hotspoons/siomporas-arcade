@@ -89,13 +89,13 @@ describe('the declarative half', () => {
     const { h, state } = host()
     await play(defineGame({
       setup: (api) => {
-        api.transport('parkour')
+        api.transport('walk-third')
         api.time('21:30')
         api.weather('rain')
         api.preset('dusk-rain', { over: 8 })
       },
     }), h, 0.1)
-    expect(state.transport).toBe('parkour')
+    expect(state.transport).toBe('walk-third')
     expect(state.time).toBe('21:30')
     expect(state.weather).toBe('rain')
     expect(state.presets).toEqual(['dusk-rain'])
@@ -246,7 +246,7 @@ describe('a whole game', () => {
       setup: (api) => {
         api.goal('Reach the rooftop before the rain')
         api.hide('street-names')
-        api.transport('parkour')
+        api.transport('walk-third')
         api.zone('rooftop', { kind: 'circle', x: 0, y: 0, r: 8 })
         api.on('enters', 'rooftop', () => {
           api.award(50)

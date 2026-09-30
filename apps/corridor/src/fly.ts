@@ -24,7 +24,7 @@ export class FlyControls {
   /**
    * ON FOOT: the same keys and the same look, but the eye is pinned WALK_EYE above the ground
    * and moves at walking pace (Shift jogs); the dolly and lift keys do nothing. For the games
-   * (Squishy Hunt walks up to a store), and for looking at a kerb the way a person does.
+   * (walking up to a shop front), and for looking at a kerb the way a person does.
    */
   walk = false
   static WALK_EYE = 1.7
@@ -124,8 +124,18 @@ export class FlyControls {
       ctl.target.copy(cam.position).add(off)
       return
     }
-    const zoom = Number(k.has('KeyF')) - Number(k.has('KeyR'))
-    const lift = Number(k.has('KeyT')) - Number(k.has('KeyG'))
+    /*
+     * R AND F RAISE AND LOWER. Rich, 2026-09-29: *"Can we make R and F keys raise and lower the
+     * camera instead of zoom the camera in fly mode from the game"*. They were zoom, and zoom is
+     * the mouse wheel's job anyway — while height is the thing you constantly want and could only
+     * reach on T and G, which no other tool in this project uses for anything. The editor's flying
+     * camera has been R/F for height since it was written, and two cameras in one product with the
+     * same keys doing different things is worse than either choice.
+     *
+     * The old pair keeps zoom, so nothing that could be done can no longer be done.
+     */
+    const lift = Number(k.has('KeyR')) - Number(k.has('KeyF'))
+    const zoom = Number(k.has('KeyG')) - Number(k.has('KeyT'))
     if (yaw) this.lookBy(yaw * T.FLY_LOOK * (sprint ? T.FLY_SPRINT_X : 1) * d, 0)
     if (zoom) {
       const f = Math.exp(zoom * T.FLY_ZOOM * (sprint ? T.FLY_SPRINT_X : 1) * d)

@@ -28,7 +28,7 @@ import { loadRapier, rapier } from '@apex/engine/physics/rapier'
 import { QUERY } from '@apex/engine/physics/layers'
 import { PROFILES, profile, type DriveProfile } from '@apex/engine/physics/profiles'
 import { Breakables, type BreakEvent } from '@apex/engine/physics/destruction'
-import { addStatic, addTree, Terrain } from '@apex/engine/physics/terrain'
+import { addStatic, addSurface, addTree, Terrain } from '@apex/engine/physics/terrain'
 import { Vehicle } from '@apex/engine/physics/vehicle'
 import { PhysicsWorld } from '@apex/engine/physics/world'
 import type { Site } from './scene'
@@ -85,6 +85,15 @@ export interface CorridorPhysics {
    */
   spawnCar(at: { x: number; z: number; yaw?: number }, profileId?: string, doc?: VehicleDoc): Vehicle
   /**
+   * A body the simulation MOVES rather than the solver: a traffic car.
+   *
+   * Kinematic, position-based — Rapier reads where it was put each step and works out the
+   * velocity, so a player who hits one is hit back with the momentum a moving car has, and the
+   * traffic model keeps driving it without knowing physics exists. `move` takes the car's floor
+   * point and heading in three's frame; the box is lifted by half its height to sit on it.
+   */
+  spawnKinematic(half: { x: number; y: number; z: number }): { move: (x: number, y: number, z: number, yaw: number) => void; free: () => void }
+  /**
    * The breakables register, for whatever the game wants to knock down.
    *
    * Empty until something registers with it — trees deliberately are NOT in it. A mature trunk
@@ -105,6 +114,21 @@ export interface CorridorPhysics {
    * A summary rather than the list, because the list is thousands long and the question is always
    * "is anything absurd" — a 0 kg sign or a four-tonne one.
    */
+  /**
+   * Give a stunt fixture a surface you can actually drive on.
+   *
+   * Rich, 2026-09-29: *"the stunts are not drivable yet, we need to make them into actual roads"*.
+   * The heightfield cannot carry one — it is one height per column and a loop is above itself — so
+   * a fixture's road is a TRIMESH, which is the only shape that can be its own ceiling.
+   *
+   * Idempotent per id: calling it again with a moved fixture replaces the old collider, so the
+   * editor can drag one about without leaving invisible walls behind it.
+   */
+  setStuntSurface(id: string, positions: Float32Array, indices: Uint32Array): void
+  /** Take one away — the fixture was deleted. */
+  clearStuntSurface(id: string): void
+  /** How many fixtures currently have a collider, for a readout and for a probe. */
+  stuntSurfaces(): string[]
   propMasses(): Record<string, { count: number; min: number; max: number; mean: number; breakable: boolean }>
   /** what has come off and where it is now — the renderer half, for a probe to check end to end */
   detachedProps(): { kind: string; x: number; y: number; z: number }[]
@@ -258,7 +282,29 @@ export async function buildPhysics(site: Site, opts: { enabled?: boolean } = {})
    * the impulse that detaches it; a sign that comes off becomes a dynamic body AND leaves its
    * instance buffer for a standalone mesh, or it would topple invisibly.
    */
+  /**
+   * Is this point on a stunt fixture's drivable surface?
+   *
+   * The same footprints the site is told to clear of scenery — a fixture registers them when it
+   * builds — so there is one answer to "is there a fixture here" rather than two that can drift.
+   */
+  const onStuntSurface = (x: number, z: number): boolean => site.sceneryCleared(x, -z)
+
   let props: PropRecord[] | null = null
+  /**
+   * The props that may have colliders — everything the world placed, less whatever is standing
+   * inside a stunt fixture.
+   *
+   * FENCE POSTS, POLES, MAILBOXES AND SIGNS ALL GET COLLIDERS, and not one of them is touched by an
+   * area's tree density — so a loop dropped along a fence line has a row of invisible posts inside
+   * it, each a vertical face that stops a car dead at any speed. The road is already suppressed
+   * under a fixture and now so is everything growing or standing there.
+   *
+   * Three callers asked for this list and each built it for itself; they now share one, which is
+   * how the filter can be in a single place.
+   */
+  const propList = (): PropRecord[] =>
+    catalogue(site, { max: T.PHYS_PROP_CATALOGUE }).filter((p) => !site.sceneryCleared(p.x, -p.z))
   const standing = new Map<number, { rec: PropRecord; collider: ReturnType<typeof addStatic> }>()
   const detached: { mesh: THREE.Object3D; rec: PropRecord; collider: ReturnType<typeof addStatic> }[] = []
   let propsAt = { x: Infinity, z: Infinity }
@@ -266,7 +312,7 @@ export async function buildPhysics(site: Site, opts: { enabled?: boolean } = {})
 
   function refreshProps(x: number, z: number) {
     if (T.PHYS_PROPS <= 0) return
-    if (!props) props = catalogue(site, { max: T.PHYS_PROP_CATALOGUE })
+    if (!props) props = propList()
     const radius = T.PHYS_PROP_RADIUS_M
     if (Math.hypot(x - propsAt.x, z - propsAt.z) < radius * 0.25) return
     propsAt = { x, z }
@@ -346,6 +392,12 @@ export async function buildPhysics(site: Site, opts: { enabled?: boolean } = {})
     }
   }
 
+  /*
+   * The trimesh collider of each stunt fixture, by id. A map rather than a list because the editor
+   * moves one fixture at a time and every move has to replace exactly that surface.
+   */
+  const stuntCols = new Map<string, NonNullable<ReturnType<typeof addSurface>>>()
+
   return {
     phys,
     terrain,
@@ -384,7 +436,22 @@ export async function buildPhysics(site: Site, opts: { enabled?: boolean } = {})
        * on tarmac and two on grass is the interesting case and a hard step makes the car snatch as
        * it crosses a line it cannot see.
        */
+      /*
+       * WHAT THE TYRES ARE STANDING ON.
+       *
+       * `edgeDistance` is the signed distance to the nearest pavement edge of the BAKED ROAD
+       * NETWORK, and a stunt fixture's ribbon is not in that network — so the moment a car drove
+       * onto a loop the hook said "you have left the road" and cut its grip to about seventy per
+       * cent. Measured at the foot of the loop: friction slip 1.57 where the profile says 2.24, the
+       * car sliding sideways at 8.9 m/s with 8.6 kN through each front tyre and 75 N of forward
+       * force. Rich has been describing this all along as *"some weird friction"*, and it is: the
+       * game thought a loop-the-loop was a grass verge.
+       *
+       * A fixture IS road — better than road, since it is the surface the piece was drawn with — so
+       * standing on one reports full grip and the verge model is left for the verge.
+       */
       v.setSurface((x, _y, z) => {
+        if (onStuntSurface(x, z)) return 1
         const d = site.edgeDistance(x, z)
         if (!Number.isFinite(d)) return 1
         return 1 - Math.max(0, Math.min(1, (d - T.CAR_GRASS_EDGE) / 1))
@@ -394,11 +461,33 @@ export async function buildPhysics(site: Site, opts: { enabled?: boolean } = {})
       return v
     },
 
+    spawnKinematic(half) {
+      const body = phys.world.createRigidBody(R.RigidBodyDesc.kinematicPositionBased())
+      const desc = R.ColliderDesc.cuboid(half.x, half.y, half.z).setFriction(0.6)
+      phys.describe(desc, 'vehicle')
+      phys.world.createCollider(desc, body)
+      let alive = true
+      return {
+        move(x, y, z, yaw) {
+          if (!alive) return
+          const h = yaw * 0.5
+          // the same sign as `Vehicle.place`: yaw increases to the right, rotation about +Y does not
+          body.setNextKinematicTranslation({ x, y: y + half.y, z })
+          body.setNextKinematicRotation({ x: 0, y: Math.sin(-h), z: 0, w: Math.cos(-h) })
+        },
+        free() {
+          if (!alive) return
+          alive = false
+          phys.world.removeRigidBody(body)
+        },
+      }
+    },
+
     breakables,
     onBreak: (fn) => breakables.onBreak(fn),
 
     nearestProp(x, z, include = [], exclude = []) {
-      if (!props) props = catalogue(site, { max: T.PHYS_PROP_CATALOGUE })
+      if (!props) props = propList()
       let best: PropRecord | null = null
       let bestD = Infinity
       for (const p of props) {
@@ -410,12 +499,48 @@ export async function buildPhysics(site: Site, opts: { enabled?: boolean } = {})
       return best
     },
 
+    setStuntSurface(id, positions, indices) {
+      const had = stuntCols.get(id)
+      if (had) {
+        // the BODY goes with it: `addSurface` makes one per surface, and removing only the collider
+        // would leave a fixed body behind for every drag of every fixture
+        const body = had.parent()
+        if (body) phys.world.removeRigidBody(body)
+        stuntCols.delete(id)
+      }
+      /*
+       * SOLID TO THE BODY AS WELL AS TO THE WHEELS.
+       *
+       * This was briefly on the `track` layer, which the chassis cannot touch — the theory being
+       * that a loop is a wall from the outside and a car should not be stopped by its own bumper.
+       * It fixed that and broke something worse: the moment the wheels lost the surface for a step
+       * the car sank THROUGH the track and could never find it again, because the rays point down
+       * and the road was now above them. Rich, 2026-09-29: *"I drive straight through the ramp
+       * approaching the loop… a little friction then I fall straight through."*
+       *
+       * So the surface is solid again, and the wall problem is solved where it actually lives — in
+       * `stuntassist.ts`, which pitches the car to match the track it is ABOUT to reach, so the
+       * nose rises with the ramp instead of into it.
+       */
+      const c = addSurface(phys, positions, indices, { friction: 1.1 })
+      if (c) stuntCols.set(id, c)
+    },
+    clearStuntSurface(id) {
+      const had = stuntCols.get(id)
+      if (!had) return
+      const body = had.parent()
+      if (body) phys.world.removeRigidBody(body)
+      stuntCols.delete(id)
+    },
+    stuntSurfaces() {
+      return [...stuntCols.keys()]
+    },
     detachedProps() {
       return detached.map((d) => ({ kind: d.rec.kind, x: d.mesh.position.x, y: d.mesh.position.y, z: d.mesh.position.z }))
     },
 
     propMasses() {
-      if (!props) props = catalogue(site, { max: T.PHYS_PROP_CATALOGUE })
+      if (!props) props = propList()
       const out: Record<string, { count: number; min: number; max: number; mean: number; breakable: boolean }> = {}
       for (const p of props) {
         // by the batch's own name minus its index, so `furniture:signal:2` and `:3` are one row

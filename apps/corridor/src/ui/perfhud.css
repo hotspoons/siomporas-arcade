@@ -1,0 +1,70 @@
+/* The performance panel.
+ *
+ * ON THE SCENE, not in a dialog: you read it while you are flying, so it takes the HUD's own
+ * heavier scrim (`--hud-bg`) rather than a panel background, and it sits under the bar rather than
+ * over it. Below the drawer and the modals too — a performance reading is never the thing you are
+ * trying to click. */
+.perf-hud {
+  position: fixed;
+  top: calc(var(--bar-h) + 10px);
+  right: 10px;
+  z-index: var(--z-hud);
+  width: 240px;
+  padding: 8px 10px 9px;
+  border: 1px solid var(--hud-line);
+  border-radius: var(--r-2, 8px);
+  background: var(--hud-bg);
+  backdrop-filter: blur(8px);
+  color: var(--ink-1);
+  box-shadow: var(--shadow-2);
+  /* IT MUST NOT EAT CLICKS. It floats over the world and the world is draggable; the only thing in
+     here you can press is the reset button, which takes its events back. */
+  pointer-events: none;
+  user-select: none;
+}
+
+/* the author's `display` beats the UA's `[hidden]`, which a `.perf-hud { display: … }` rule would
+   otherwise defeat — the same trap that stacked the build screens */
+.perf-hud[hidden] { display: none; }
+
+.perf-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 5px;
+  color: var(--ink-3);
+  font-size: var(--text-xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.perf-head button {
+  pointer-events: auto;
+  padding: 1px 6px;
+  border: 1px solid var(--line-2);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ink-2);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.perf-head button:hover { background: var(--bg-3); color: var(--ink-1); }
+
+.perf-lines {
+  font-size: var(--text-xs);
+  line-height: 1.45;
+  color: var(--ink-1);
+}
+
+/* every line after the first is secondary: the first is the answer, the rest are the evidence */
+.perf-lines > div + div { color: var(--ink-2); }
+
+.perf-graph {
+  display: block;
+  width: 220px;
+  height: 34px;
+  margin-top: 6px;
+  border-radius: 4px;
+  background: rgb(0 0 0 / 28%);
+}

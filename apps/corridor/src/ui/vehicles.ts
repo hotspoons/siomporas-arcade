@@ -1,42 +1,45 @@
-// The Vehicles tab, and the Dynamics group on a vehicle's detail pane.
+// The Vehicles screen: find a car, see it, give it dynamics.
 //
-// docs/corridor/PLAN-VEHICLES-ACTORS.md §1. The document, its defaults, its validation and all of
-// its arithmetic are in `src/vehicles.ts` and none of it is repeated here — this file is a form over
-// that, and the division is what lets "does a 3.7 final drive give a sensible top speed" be a test
-// rather than something somebody checks by squinting at a panel.
+// Rich, 2026-09-29, on the first version of this: *"How do I attach dynamics to the cars? How do I
+// set their engine simulator config? ... how do I filter by class, how do I search, and why aren't
+// we using preview images if we have them? And why just a big old list"*
 //
-// IT PLUGS IN, IT DOES NOT FORK. `AssetCatalog` grew an `extensions` seam for exactly this (the
-// editor lane, 2026-09-28), so the search, the shared-versus-world scope, the model import and the
-// save bar are all theirs and there is one of each. Two things are added: a **Dynamics group** at
-// the bottom of a vehicle's detail pane, which is where the editing happens; and a **Vehicles tab**,
-// which is a ROSTER rather than a second catalog — every vehicle in the library with what it weighs,
-// what it makes, how it handles and whether its dynamics are saved and valid. That is the view that
-// answers "which of our cars still have no numbers", which no per-item pane ever can.
+// Every one of those was fair, and the first version was worse than it looked. It listed 120 cars,
+// none of which had a dynamics document, and rendered the CLASS TEMPLATE for each — so all 120 read
+// "1420 kg · 275 hp · RWD · 6-speed · 215 mph geared" and looked like data. Inventing a number and
+// putting it beside a real id is the worst thing a screen like this can do, so:
 //
-// EVERY EDIT GOES THROUGH `ctx.edit({ vehicle })`, AND THE WHOLE DOCUMENT GOES EVERY TIME. That is
-// the pane's own draft mechanism, so staging through it gets the Save button, the unsaved marker,
-// the confirmation before navigating away and Discard for free — and the service merges by
-// top-level field, so a partial `vehicle` would REPLACE the one on disk rather than merge into it.
+//   **NOTHING NUMERIC IS SHOWN FOR A CAR THAT HAS NO DOCUMENT.** It says "no dynamics yet" and
+//   offers to start one. A template is a thing you CHOOSE, with a button — not something the screen
+//   asserts on the car's behalf.
 //
-// THE OVERRIDES ARE GENERATED, NOT TYPED. `DriveProfile` is a flat record of numbers precisely so
-// this is a loop over its keys; forty hand-written fields is forty chances to name one wrong, and
-// the brief's own example gets one wrong (`rollStiffness`, which does not exist). A generated list
-// cannot go stale when the engine gains a knob.
+// The other half was that the tab could not DO anything: the editor lived on the Catalog tab's
+// detail pane, so "how do I attach dynamics" was answered by "go to a different tab and click the
+// item". The form is now shared — `dynamicsForm` — so there is one form and two doors to it.
+//
+// LAYOUT. Cards in a grid with the asset's own rendered view, a search box, a class filter and a
+// dynamics filter. The grid is laid out with inline styles rather than a class because `ui.css` is
+// the editor lane's file and a grid is four properties; if this screen earns a place in that
+// stylesheet it belongs there, but helping myself to somebody else's stylesheet for a first cut
+// does not.
 import { PROFILES, type DriveProfile } from '@apex/engine/physics/profiles'
-import { assetsvc, type AssetItem, type RigBinding } from '../assetsvc'
+import { assetsvc, type AssetItem, type Build, type RigBinding } from '../assetsvc'
 import {
-  defaultVehicle, describeVehicle, gearedTopSpeed, overrideRange, peakTorque, toDriveProfile,
-  tractiveForce, validateVehicle, VEHICLE_CLASSES, wheelBoneCount, type VehicleDoc,
+  axleGrip, defaultVehicle, describeVehicle, effectiveTopSpeed, finalDriveFor, FINAL_DRIVE_MAX,
+  FINAL_DRIVE_MIN, frontShare, gearedTopSpeed, mountPoint, mountYaw, overrideRange, peakTorque,
+  rebalanceGears, toDriveProfile, tractiveForce, TYRE_REFERENCE_MM, validateVehicle, VEHICLE_CLASSES,
+  VEHICLE_MOUNTS, VEHICLE_TEMPLATE_IDS, wheelBoneCount,
+  type VehicleDoc, type VehicleMount,
 } from '../vehicles'
+import { presetDoc, presetsFor } from '../vehiclepresets'
 import type { AssetDetailCtx } from './assets'
 import { bench, engineChoices, engineSetups, type ListenState } from './enginelisten'
-import { bodyOf, empty, group, readout, select, setGroupError, slider, textField, toggle } from './controls'
+import { bodyOf, group, readout, select, slider, textField } from './controls'
 import { button, el, type Tab } from './shell'
+import { icon } from './icons'
+import { CLASSES_BY_TYPE } from '../classes'
+import { buildScreen, type BuildPreset, type BuildSpec } from './buildscreen'
 
-/**
- * What the extension is handed. The pane's own type — a type-only import, so there is no runtime
- * cycle with `assets.ts` even though it imports this file back.
- */
 export type VehicleCtx = AssetDetailCtx
 
 /** Is this the kind of thing that has a vehicle document at all? */
@@ -44,136 +47,153 @@ export function isVehicle(kind: string): boolean {
   return VEHICLE_CLASSES.includes(kind)
 }
 
+/* ================================================================================================
+ * The form. ONE of it, used by the tab and by the detail pane.
+ * ============================================================================================= */
+
+export interface FormOpts {
+  /** how many bones the rig binds to the wheel role, or undefined for "cannot tell" */
+  rigWheels?: number
+  /** called on every edit. `live` is true for a drag, where the form must NOT be rebuilt */
+  onChange: (doc: VehicleDoc, live: boolean) => void
+}
+
 /**
- * The Dynamics group, appended to a vehicle's detail pane.
+ * The whole dynamics editor, rendered into `host`. Returns a `rebuild`.
  *
- * Returns nothing and renders nothing at all for a non-vehicle: an empty "Dynamics" group on a fire
- * hydrant is a form somebody will eventually fill in.
+ * A caller that replaces the document wholesale — starting from a template, discarding an edit —
+ * calls `rebuild`; everything else the form does to itself.
  */
-export function vehicleDetail(item: AssetItem, host: HTMLElement, ctx: VehicleCtx): void {
-  if (!isVehicle(ctx.kind)) return
-
-  // The document, or this class's defaults if it has none yet. NOT written back on render: an asset
-  // that has never been given dynamics should not acquire a draft just by being looked at, or every
-  // item you click becomes unsaved work.
-  const stored = item.vehicle as VehicleDoc | null | undefined
-  let doc: VehicleDoc = stored ? structuredClone(stored) : defaultVehicle(ctx.kind)
-  const fresh = !stored
-
-  const g = group('Dynamics', {
-    note: fresh ? `no dynamics saved yet — these are ${ctx.kind} defaults, and nothing is stored until you save` : describeVehicle(doc),
-  })
-  const body = bodyOf(g)
-  host.append(g)
+export function dynamicsForm(host: HTMLElement, getDoc: () => VehicleDoc, opts: FormOpts): () => void {
+  /*
+   * The armoury, for the mount picker. BUILT weapons, not catalog rows: a mount names something
+   * with damage and a rate of fire, and a bare catalog id has neither. Fetched once; a failure is a
+   * normal state (asset generation is off by default) and must not take the form down with it.
+   */
+  let weaponIds: string[] | undefined
+  void assetsvc.builds<Build<unknown>>('weapons')
+    .then((ws) => { weaponIds = ws.map((w) => w.id); render() })
+    .catch(() => { /* no service: the mount falls back to a text field */ })
 
   /*
-   * How many bones drive the wheels — and TWO DIFFERENT THINGS ANSWER THAT.
+   * WHICH SECTION IS OPEN, remembered across rebuilds.
    *
-   *   `item.rig.roles.wheel`  a `string[]`: the bones somebody SAID are the wheels, in the rig
-   *                           editor. Authoritative, stored with the asset, present with no preview.
-   *   `mesh3d.rig().roles`    a `Record<string, number>`: how many bones the viewer GUESSED from
-   *                           their names. A count, not names, and only while a preview is up.
+   * Rich, 2026-09-29: *"It would be great if instead of expando areas we had tabs"*. Forty fields
+   * in five collapsing groups means the one you want is either below the fold or behind a chevron,
+   * and every edit rebuilds the form, so the groups you opened close again. Tabs fix both: one
+   * screenful at a time, and the section you are working in survives its own edits.
    *
-   * The stored binding wins, because it is what the game will actually read. The guess is the
-   * fallback and it is better than nothing on an asset nobody has bound yet.
-   *
-   * `undefined` — neither answered — is NOT zero. "We cannot tell" must not be reported as "this
-   * car has no wheels", which would put a red warning on every asset whose preview is shut.
+   * These are `.tab-strip`/`.tab` from `ui.css`, so they look like every other tab in the app, but
+   * they are NOT the `Tabs` class — that one owns its height and its own scroller, which inside a
+   * screen that already scrolls produces two scrollbars for one form.
    */
-  const { count: rigWheels, guessed: rigGuessed } = wheelBoneCount(
-    (item.rig as RigBinding | null | undefined)?.roles?.wheel,
-    ctx.mesh3d?.rig()?.roles?.wheel,
-  )
-
-  /** Stage the change and rebuild the form — for edits that change what the form shows. */
-  const stage = () => {
-    ctx.edit({ vehicle: structuredClone(doc) })
-    render()
-  }
-  /**
-   * Stage WITHOUT rebuilding: what a slider wants.
-   *
-   * Rebuilding the form under a finger that is mid-drag replaces the control being dragged, and the
-   * drag stops. Every continuous control here uses this and the discrete ones use `stage`.
-   */
-  const live = () => ctx.edit({ vehicle: structuredClone(doc) })
+  const SECTIONS = [
+    { id: 'basic', label: 'Basic', icon: 'cube' as const },
+    { id: 'engine', label: 'Engine & gearing', icon: 'bolt' as const },
+    { id: 'sound', label: 'Sound', icon: 'play' as const },
+    { id: 'other', label: 'Weapons & overrides', icon: 'adjustments-horizontal' as const },
+  ]
+  let section = 'basic'
 
   function render() {
-    body.replaceChildren()
-    const report = validateVehicle(doc, { rigWheels, audioSetups: engineSetups() })
-    setGroupError(g, report.errors.length ? `${report.errors.length} problem${report.errors.length === 1 ? '' : 's'}` : null)
+    const doc = getDoc()
+    host.replaceChildren()
+    const report = validateVehicle(doc, { rigWheels: opts.rigWheels, audioSetups: engineSetups(), weapons: weaponIds })
 
-    /* ---- what is wrong, all of it, before anything else ---------------------------------- */
+    /*
+     * PROBLEMS STAY ABOVE THE TABS. A message about the gearbox shown only on the gearing tab is a
+     * message somebody reading the chassis tab cannot see, and the error they need is nearly always
+     * in the section they are not looking at.
+     */
     if (report.errors.length || report.warnings.length) {
       const box = el('div', 'panel-note')
       for (const e of report.errors) box.append(el('div', 'field-error', e))
       for (const w of report.warnings) box.append(el('div', 'field-note', w))
-      body.append(box)
+      host.append(box)
+    }
+
+    const strip = el('div', 'tab-strip')
+    for (const sec of SECTIONS) {
+      const b = el('button', `tab${section === sec.id ? ' on' : ''}`)
+      b.type = 'button'
+      b.append(icon(sec.icon, 16), el('span', '', sec.label))
+      b.onclick = () => { section = sec.id; render() }
+      strip.append(b)
+    }
+    host.append(strip)
+    const pane = el('div', 'bld-formpane')
+    host.append(pane)
+    /** every group goes into the open section's pane, and nowhere else */
+    const put = (which: string, node: HTMLElement) => { if (section === which) pane.append(node) }
+
+    /** stage and rebuild — for anything that changes what the form SHOWS */
+    const stage = () => { opts.onChange(doc, false); render() }
+    /** stage WITHOUT rebuilding — a slider's control has to survive its own drag */
+    const live = () => opts.onChange(doc, true)
+
+    const num = (into: HTMLElement, label: string, value: number, step: number, set: (v: number) => void, note?: string) => {
+      into.append(textField({
+        label, value: String(value), type: 'number', step, note,
+        onChange: (v) => { const n = Number(v); if (Number.isFinite(n)) { set(n); stage() } },
+      }))
     }
 
     /* ---- the chassis ---------------------------------------------------------------------- */
     const chassis = group('Chassis', { note: 'metres and kilograms' })
     const cb = bodyOf(chassis)
-    const num = (into: HTMLElement, label: string, value: number, step: number, onChange: (v: number) => void, note?: string) => {
-      into.append(textField({
-        label,
-        value: String(value),
-        type: 'number',
-        step,
-        note,
-        onChange: (v) => {
-          const n = Number(v)
-          if (Number.isFinite(n)) { onChange(n); stage() }
-        },
-      }))
-    }
     num(cb, 'Mass (kg)', doc.spec.mass, 10, (v) => (doc.spec.mass = v))
     num(cb, 'Wheelbase (m)', doc.spec.wheelbase, 0.05, (v) => (doc.spec.wheelbase = v))
     num(cb, 'Track (m)', doc.spec.track, 0.05, (v) => (doc.spec.track = v))
     num(cb, 'Wheel radius (m)', doc.spec.wheelRadius, 0.01, (v) => (doc.spec.wheelRadius = v))
+    num(cb, 'Length (m)', doc.spec.length ?? +(doc.spec.wheelbase * 1.6).toFixed(2), 0.05, (v) => (doc.spec.length = v), 'the model is scaled to this, so it decides how big the car looks')
+    num(cb, 'Width (m)', doc.spec.width ?? +(doc.spec.track * 1.2).toFixed(2), 0.05, (v) => (doc.spec.width = v))
+    num(cb, 'Height (m)', doc.spec.height ?? 1.4, 0.05, (v) => (doc.spec.height = v))
     num(cb, 'CG height (m)', doc.spec.cgHeight, 0.01, (v) => (doc.spec.cgHeight = v), 'above the ROAD, as a spec sheet gives it — not above the model origin')
     num(cb, 'Ride height (m)', doc.spec.rideHeight ?? 0.16, 0.01, (v) => (doc.spec.rideHeight = v), 'road to the bottom of the body; this is what positions the car')
     cb.append(select({
       label: 'Driven wheels',
       value: doc.spec.drive,
-      options: [{ value: 'rwd' as const, label: 'Rear' }, { value: 'fwd' as const, label: 'Front' }, { value: 'awd' as const, label: 'All four' }],
+      options: [{ value: 'rwd' as const, label: 'Rear (RWD)' }, { value: 'fwd' as const, label: 'Front (FWD)' }, { value: 'awd' as const, label: 'All four (AWD)' }],
       note: 'a fact about the car, so it beats whatever the handling profile says',
       onChange: (v) => { doc.spec.drive = v; stage() },
     }))
-    // The rollover number, shown rather than left to be discovered. Half the track over the CG
-    // height: under 1.0 a car tips before it slides.
+    /*
+     * WEIGHT DISTRIBUTION AND RUBBER — the two things that decide what the car does in a bend, and
+     * the two that were missing. Both are shown with what they DO beside them, because "0.6" and
+     * "255" are not numbers anybody can feel.
+     */
+    cb.append(slider({
+      label: 'Weight on the front axle', value: frontShare(doc.spec), min: 0.2, max: 0.8, step: 0.005,
+      neutral: 0.5, resettable: true,
+      note: 'a front-engined saloon is about 0.55, a mid-engined car 0.42, a 911 about 0.38',
+      onInput: (v) => { doc.spec.weightFront = +v.toFixed(3); live() },
+    }))
+    num(cb, 'Front tyres (mm)', doc.spec.tyreFront_mm ?? TYRE_REFERENCE_MM, 5, (v) => (doc.spec.tyreFront_mm = v))
+    num(cb, 'Rear tyres (mm)', doc.spec.tyreRear_mm ?? TYRE_REFERENCE_MM, 5, (v) => (doc.spec.tyreRear_mm = v), 'section width, as a tyre is written: 255 front, 305 rear')
+    const grip = axleGrip(doc.spec)
+    const bias = grip.front / grip.rear
+    cb.append(readout('Grip balance', `front ×${grip.front.toFixed(3)} · rear ×${grip.rear.toFixed(3)} — ${
+      Math.abs(bias - 1) < 0.01 ? 'even' : bias < 1 ? `${((1 / bias - 1) * 100).toFixed(0)}% toward understeer` : `${((bias - 1) * 100).toFixed(0)}% toward oversteer`}`))
+    const comCm = doc.spec.wheelbase * (frontShare(doc.spec) - 0.5) * 100
+    cb.append(readout('Mass sits', Math.abs(comCm) < 1 ? 'in the middle of the wheelbase'
+      : `${Math.abs(comCm).toFixed(0)} cm ${comCm > 0 ? 'ahead of' : 'behind'} the middle`))
     if (doc.spec.track > 0 && doc.spec.cgHeight > 0) {
       cb.append(readout('Stability factor', (doc.spec.track / 2 / doc.spec.cgHeight).toFixed(2)))
     }
-    body.append(chassis)
-
-    /* ---- the rig -------------------------------------------------------------------------- */
-    const rig = group('Wheels', {})
-    const rb = bodyOf(rig)
-    rb.append(toggle({
-      label: 'Take wheel bones from the rig',
-      value: doc.wheels.from_rig,
-      note: 'FL, FR, RL, RR — in that order',
-      onChange: (v) => { doc.wheels.from_rig = v; stage() },
-    }))
-    rb.append(readout('Wheel bones', rigWheels === undefined ? 'nothing bound, no preview open' : `${rigWheels}${rigGuessed ? ' (guessed from names — bind them in the rig editor)' : ''}`))
-    num(rb, 'Steering lock (°)', doc.wheels.steer_max_deg, 1, (v) => (doc.wheels.steer_max_deg = v))
-    body.append(rig)
+    put('basic', chassis)
 
     /* ---- handling ------------------------------------------------------------------------- */
     const handling = group('Handling', { note: 'a profile plus what this car differs by — never a copy of all forty numbers' })
     const hb = bodyOf(handling)
     const ids = Object.keys(PROFILES)
     hb.append(select({
-      label: 'Profile',
-      value: doc.profile.base,
+      label: 'Profile', value: doc.profile.base,
       options: ids.map((id) => ({ value: id, label: PROFILES[id].name })),
       note: PROFILES[doc.profile.base]?.note,
       onChange: (v) => { doc.profile.base = v; stage() },
     }))
     hb.append(select({
-      label: 'Blend toward',
-      value: doc.profile.blendWith ?? '',
+      label: 'Blend toward', value: doc.profile.blendWith ?? '',
       options: [{ value: '', label: 'nothing — use the profile as it is' }, ...ids.filter((id) => id !== doc.profile.base).map((id) => ({ value: id, label: PROFILES[id].name }))],
       note: 'for a car that wants to sit between two of them rather than pick a side',
       onChange: (v) => { if (v) doc.profile.blendWith = v; else { delete doc.profile.blendWith; delete doc.profile.blend }; stage() },
@@ -181,86 +201,111 @@ export function vehicleDetail(item: AssetItem, host: HTMLElement, ctx: VehicleCt
     if (doc.profile.blendWith) {
       hb.append(slider({
         label: `${PROFILES[doc.profile.base]?.name ?? doc.profile.base} → ${PROFILES[doc.profile.blendWith]?.name ?? doc.profile.blendWith}`,
-        value: doc.profile.blend ?? 0.5,
-        min: 0, max: 1, step: 0.01,
-        onInput: (v) => { doc.profile.blend = v; ctx.edit({ vehicle: structuredClone(doc) }) },
+        value: doc.profile.blend ?? 0.5, min: 0, max: 1, step: 0.01,
+        onInput: (v) => { doc.profile.blend = v; live() },
       }))
     }
-    body.append(handling)
-
-    /* ---- the overrides, GENERATED ---------------------------------------------------------- */
-    const base = PROFILES[doc.profile.base] ?? PROFILES.street
-    const over = group('Overrides', {
-      collapsed: !Object.keys(doc.profile.overrides ?? {}).length,
-      note: 'every number on the profile, generated from its own keys — a knob added to the engine appears here on its own',
-    })
-    const ob = bodyOf(over)
-    const resolved = toDriveProfile(doc)
-    for (const key of Object.keys(base) as (keyof DriveProfile)[]) {
-      const def = base[key]
-      if (typeof def !== 'number') continue
-      const set = doc.profile.overrides?.[key]
-      const live = (resolved[key] as number) ?? def
-      const range = overrideRange(def)
-      ob.append(slider({
-        label: key,
-        value: set ?? live,
-        min: range.min,
-        max: range.max,
-        step: range.step,
-        neutral: def,
-        resettable: true,
-        note: set === undefined ? `profile: ${round(live)}` : `overridden — profile says ${round(def)}`,
-        onInput: (v) => {
-          doc.profile.overrides ??= {}
-          if (Math.abs(v - def) < 1e-9) delete doc.profile.overrides[key]
-          else doc.profile.overrides[key] = v
-          ctx.edit({ vehicle: structuredClone(doc) })
-        },
-      }))
-    }
-    body.append(over)
+    put('basic', handling)
 
     /* ---- the drivetrain -------------------------------------------------------------------- */
     const eng = group('Engine, gearing and brakes', {})
     const eb = bodyOf(eng)
-    num(eb, 'Power (kW)', doc.engine.power_kw, 5, (v) => (doc.engine.power_kw = v))
-    num(eb, 'Peak torque (N·m)', doc.engine.torque_nm ?? Math.round(peakTorque(doc.engine).nm), 5, (v) => (doc.engine.torque_nm = v),
-      peakTorque(doc.engine).estimated ? 'ESTIMATED from power and redline — type a real one if you have it' : 'as given')
+    num(eb, 'Power (kW)', doc.engine.power_kw, 5, (v) => (doc.engine.power_kw = v), `${Math.round(doc.engine.power_kw * 1.341)} hp`)
+    const pt = peakTorque(doc.engine)
+    num(eb, 'Peak torque (N·m)', doc.engine.torque_nm ?? Math.round(pt.nm), 5, (v) => (doc.engine.torque_nm = v),
+      pt.estimated ? 'ESTIMATED from power and redline — type a real one if you have it' : 'as given')
     num(eb, 'Redline (rpm)', doc.engine.redline_rpm, 100, (v) => (doc.engine.redline_rpm = v))
     num(eb, 'Idle (rpm)', doc.engine.idle_rpm, 50, (v) => (doc.engine.idle_rpm = v))
-    num(eb, 'Final drive', doc.engine.final_drive, 0.01, (v) => (doc.engine.final_drive = v))
+    num(eb, 'Final drive', doc.engine.final_drive, 0.01, (v) => (doc.engine.final_drive = v),
+      `${FINAL_DRIVE_MIN}…${FINAL_DRIVE_MAX} is the range a differential is actually built in`)
+    /*
+     * THE FIELD PEOPLE ACTUALLY THINK IN, and it writes back.
+     *
+     * Rich, 2026-09-29: *"we should make the top speed calculated by the gearing like it is now,
+     * but if you edit it will change the final drive ratio to match, and bound it as an error
+     * condition if it is out of bounds"*. So this is derived until you type in it, at which point
+     * it solves for the final drive — wheel radius, redline and top gear all in the arithmetic —
+     * and an unreachable answer becomes an error on the form rather than a silently absurd diff.
+     */
+    const geared = gearedTopSpeed(doc.engine, doc.spec.wheelRadius)
     eb.append(textField({
-      label: 'Gears',
-      value: doc.engine.gears.join(', '),
-      note: 'first to top, comma separated',
+      label: 'Geared top speed (mph)', value: (geared * 2.237).toFixed(0), type: 'number', step: 1,
+      note: 'type a speed and the final drive is solved for it — at the redline in top gear',
       onChange: (v) => {
-        const gears = v.split(',').map((x) => Number(x.trim())).filter((x) => Number.isFinite(x))
-        if (gears.length) { doc.engine.gears = gears; stage() }
+        const mph = Number(v)
+        if (!Number.isFinite(mph) || mph <= 0) return
+        doc.engine.final_drive = +finalDriveFor(doc.engine, doc.spec.wheelRadius, mph / 2.237).toFixed(3)
+        stage()
       },
     }))
-    num(eb, 'Brake torque (N·m)', doc.engine.brake_torque_nm, 50, (v) => (doc.engine.brake_torque_nm = v))
-    eb.append(slider({
-      label: 'Brake bias (front)', value: doc.engine.brake_bias, min: 0, max: 1, step: 0.01,
-      onInput: (v) => { doc.engine.brake_bias = v; ctx.edit({ vehicle: structuredClone(doc) }) },
+    put('engine', eng)
+
+    /*
+     * THE GEARBOX: one field per gear, and add/remove.
+     *
+     * It was a comma-separated string, which is one typo away from silently losing a gearbox — and
+     * "how many gears has it got" is a thing somebody sets deliberately rather than by counting
+     * commas.
+     */
+    const gears = group(`Gearbox — ${doc.engine.gears.length} speed`, {})
+    const gb = bodyOf(gears)
+    // WHAT EACH GEAR IS GOOD FOR: the speed it reaches at the redline. "10938 rpm at 60 mph" is
+    // also true of first gear and reads like a fault; "up to 38 mph" is the gear chart everybody
+    // has seen, and a box whose gears do not climb evenly is obvious at a glance.
+    const topOf = (ratio: number) => (doc.engine.redline_rpm / 60) / (ratio * doc.engine.final_drive) * 2 * Math.PI * doc.spec.wheelRadius * 2.237
+    doc.engine.gears.forEach((ratio, i) => {
+      const row = el('div', 'bld-gear')
+      row.append(textField({
+        label: `Gear ${i + 1}${i === doc.engine.gears.length - 1 ? ' (top)' : ''}`,
+        value: String(ratio), type: 'number', step: 0.01,
+        // WHAT THE RATIO MEANS AT A SPEED YOU KNOW. 3.36 is not a number anybody feels; "4600 rpm
+        // at 60 mph" is, and it is what tells you the box is geared wrong before you drive it.
+        note: `up to ${topOf(ratio).toFixed(0)} mph`,
+        onChange: (v) => { const n = Number(v); if (Number.isFinite(n) && n > 0) { doc.engine.gears[i] = n; stage() } },
+      }))
+      row.append(button({
+        icon: 'trash', variant: 'ghost', title: `Remove gear ${i + 1}`,
+        disabled: doc.engine.gears.length <= 1,
+        onClick: () => { doc.engine.gears = rebalanceGears(doc.engine.gears, doc.engine.gears.length - 1); stage() },
+      }))
+      gb.append(row)
+    })
+    const gfoot = el('div', 'panel-actions')
+    gfoot.append(button({
+      label: 'Add a gear', icon: 'plus',
+      // REBALANCED, NOT APPENDED. Bolting another ratio onto the end lengthened the car's gearing
+      // every time — seven speeds and it was geared for 300 mph. Rich: "when adding gears rebalance
+      // the other gears between the low and high gear. Removing gears do the same." Both ends stay,
+      // the middle is re-spaced geometrically, and the top speed does not move.
+      onClick: () => { doc.engine.gears = rebalanceGears(doc.engine.gears, doc.engine.gears.length + 1); stage() },
     }))
-    // WHAT THE NUMBERS MEAN, computed rather than left to be found out by driving. These are the
-    // whole reason the gearing is not decoration.
+    gb.append(el('div', 'field-note', 'the first and last ratios are yours; adding or removing re-spaces the ones between them so every shift drops the same proportion of the revs'))
+    gb.append(gfoot)
+    put('engine', gears)
+
+    const brakes = group('Brakes', {})
+    const bb = bodyOf(brakes)
+    num(bb, 'Brake torque (N·m)', doc.engine.brake_torque_nm, 50, (v) => (doc.engine.brake_torque_nm = v))
+    bb.append(slider({
+      label: 'Brake bias (front)', value: doc.engine.brake_bias, min: 0, max: 1, step: 0.01,
+      onInput: (v) => { doc.engine.brake_bias = v; live() },
+    }))
+    // WHAT THE NUMBERS MEAN, computed rather than found out by driving.
+    const resolved = toDriveProfile(doc)
     const top = gearedTopSpeed(doc.engine, doc.spec.wheelRadius)
-    eb.append(readout('Geared top speed', `${(top * 2.237).toFixed(0)} mph · ${top.toFixed(1)} m/s`))
-    eb.append(readout('Pull in first', `${(tractiveForce(doc.engine, doc.spec.wheelRadius) / 1000).toFixed(1)} kN`))
-    eb.append(readout('Standing acceleration', `${(resolved.powerPerKg).toFixed(1)} m/s² before the tyres get a say`))
-    body.append(eng)
+    const reach = effectiveTopSpeed(doc)
+    bb.append(readout('Top speed', `${(reach * 2.237).toFixed(0)} mph · ${reach.toFixed(1)} m/s`))
+    bb.append(readout('Geared for', `${(top * 2.237).toFixed(0)} mph at the redline in top${top > reach + 0.5 ? ' — drag stops it first' : ' — the gearbox is what limits it'}`))
+    bb.append(readout('Pull in first', `${(tractiveForce(doc.engine, doc.spec.wheelRadius) / 1000).toFixed(1)} kN`))
+    bb.append(readout('Standing acceleration', `${resolved.powerPerKg.toFixed(1)} m/s² before the tyres get a say`))
+    put('engine', brakes)
 
     /* ---- audio ------------------------------------------------------------------------------ */
     const audio = group('Engine sound', {})
     const ab = bodyOf(audio)
     const choices = engineChoices()
-    // A PICKER, not a text field. `setup` names an engine script the build ships, and a typed name
-    // that does not exist is a car that falls back to silence with nothing saying why.
     ab.append(select({
-      label: 'enginesim setup',
-      value: doc.audio.setup,
+      label: 'enginesim setup', value: doc.audio.setup,
       options: choices.some((c) => c.value === doc.audio.setup) ? choices : [{ value: doc.audio.setup, label: `${doc.audio.setup} (not in this build)` }, ...choices],
       note: `${choices.length} engine scripts in this build`,
       onChange: (v) => { doc.audio.setup = v; stage() },
@@ -268,155 +313,201 @@ export function vehicleDetail(item: AssetItem, host: HTMLElement, ctx: VehicleCt
     ab.append(slider({ label: 'Gain', value: doc.audio.gain, min: 0, max: 1, step: 0.01, onInput: (v) => { doc.audio.gain = v; bench.setGain(v); live() } }))
     ab.append(slider({ label: 'Low-pass (Hz)', value: doc.audio.lowpass_hz, min: 200, max: 20000, step: 100, onInput: (v) => { doc.audio.lowpass_hz = v; bench.setLowpass(v); live() } }))
     ab.append(slider({ label: 'Heard from the cabin', value: doc.audio.cabin_mix, min: 0, max: 1, step: 0.01, onInput: (v) => { doc.audio.cabin_mix = v; live() } }))
-
-    /*
-     * LISTEN. The click IS the gesture a browser needs to start an AudioContext, so `bench.listen`
-     * is called straight out of the handler and there is no "enable audio" step.
-     *
-     * The gain and low-pass sliders above are wired into the live bench too, so tuning them is
-     * something you HEAR rather than something you set and find out about later — which was the
-     * whole argument for the button.
-     */
     const status = el('div', 'field-note', '')
     const say = (st: ListenState) => {
       status.textContent = st.at === 'running' ? `running — ${st.engine}`
         : st.at === 'starting' ? 'starting the audio worklet…'
-        : st.at === 'failed' ? `could not start: ${st.why}`
-        : ''
+        : st.at === 'failed' ? `could not start: ${st.why}` : ''
       status.classList.toggle('field-error', st.at === 'failed')
     }
-    const revs = slider({
-      label: 'Revs', value: 0.35, min: 0, max: 1, step: 0.01,
-      note: 'idle to redline, on the bench — this is a dyno and does not touch the saved numbers',
-      onInput: (v) => bench.rev(v),
-    })
     const row = el('div', 'panel-actions')
     row.append(button({
       label: 'Listen', icon: 'play',
-      onClick: () => {
-        void bench.listen({
-          setup: doc.audio.setup,
-          gain: doc.audio.gain,
-          lowpass: doc.audio.lowpass_hz,
-          throttle: 0.35,
-          // It stops on its own. A bench left running behind a closed pane is a car idling in
-          // somebody's headphones for the rest of the session.
-          seconds: 20,
-          onState: say,
-        })
-      },
+      // THE CAR'S REV RANGE, not the script's. Otherwise the slider's top is somebody else's
+      // redline and the bench describes an engine this car does not have.
+      onClick: () => void bench.listen({
+        setup: doc.audio.setup, gain: doc.audio.gain, lowpass: doc.audio.lowpass_hz,
+        revs: { idle: doc.engine.idle_rpm, redline: doc.engine.redline_rpm },
+        throttle: 0.35, seconds: 20, onState: say,
+      }),
     }))
     row.append(button({ label: 'Stop', variant: 'ghost', onClick: () => { void bench.stop().then(() => say({ at: 'stopped' })) } }))
-    ab.append(row, revs, status)
-    body.append(audio)
-
-    /* ---- start again ------------------------------------------------------------------------ */
-    const foot = el('div', 'panel-actions')
-    foot.append(button({
-      label: `Reset to ${ctx.kind} defaults`,
-      variant: 'ghost',
-      onClick: () => { doc = defaultVehicle(ctx.kind); stage() },
+    ab.append(row)
+    ab.append(slider({
+      label: `Revs — ${doc.engine.idle_rpm} to ${doc.engine.redline_rpm} rpm`, value: 0.35, min: 0, max: 1, step: 0.01,
+      note: 'this car’s own range on the bench — a dyno, and it does not touch the saved numbers',
+      onInput: (v) => { bench.setRevs({ idle: doc.engine.idle_rpm, redline: doc.engine.redline_rpm }); bench.rev(v) },
     }))
-    body.append(foot)
+    /*
+     * WHAT THE TOP OF THE SLIDER REALLY IS. A script's own redline is only known once it is
+     * loaded — the catalog carries a path, a group and a name and nothing else — so this can only
+     * be honest while the bench is running, and it says so rather than guessing beforehand.
+     */
+    const running = bench.revRangeNow
+    ab.append(readout('At the top of the slider', running
+      ? `${running.redline.toFixed(0)} rpm${running.redline < doc.engine.redline_rpm - 1
+        ? ` — your ${doc.engine.redline_rpm} held back to what this script revs to` : ''}`
+      : `${doc.engine.redline_rpm} rpm, this car's redline`))
+    ab.append(status)
+    put('sound', audio)
+
+    /* ---- mounted weapons -------------------------------------------------------------------- */
+    const arms = group(`Weapons${doc.mounts?.length ? ` — ${doc.mounts.length}` : ''}`, {
+      collapsed: !doc.mounts?.length,
+      note: weaponIds === undefined ? 'reading the armoury…'
+        : weaponIds.length ? `${weaponIds.length} built weapon${weaponIds.length === 1 ? '' : 's'} to choose from`
+        : 'none built yet — the Weapons tab is where one is made',
+    })
+    const wb = bodyOf(arms)
+    for (const [i, m] of (doc.mounts ?? []).entries()) {
+      const row = el('div', 'panel-actions')
+      if (weaponIds?.length) {
+        row.append(select({
+          value: m.weapon,
+          options: [...new Set([m.weapon, ...weaponIds])].filter(Boolean).map((id) => ({ value: id, label: id })),
+          onChange: (v) => { doc.mounts![i].weapon = v; stage() },
+        }))
+      } else {
+        row.append(textField({ label: `Weapon ${i + 1}`, value: m.weapon, onChange: (v) => { doc.mounts![i].weapon = v.trim(); stage() } }))
+      }
+      row.append(select({
+        value: m.at,
+        options: VEHICLE_MOUNTS.map((v) => ({ value: v, label: v })),
+        onChange: (v) => { doc.mounts![i].at = v as VehicleMount; stage() },
+      }))
+      row.append(button({ label: 'Remove', variant: 'ghost', onClick: () => { doc.mounts!.splice(i, 1); if (!doc.mounts!.length) delete doc.mounts; stage() } }))
+      wb.append(row)
+      // WHERE IT ACTUALLY ENDS UP, derived from this car's own chassis rather than typed in.
+      const at = mountPoint(doc.spec, m.at)
+      wb.append(readout(`  ${m.at}`, `${at.x.toFixed(2)} forward · ${at.y.toFixed(2)} up · ${at.z.toFixed(2)} right · pointing ${((mountYaw(m) * 180) / Math.PI).toFixed(0)}°`))
+    }
+    const wfoot = el('div', 'panel-actions')
+    wfoot.append(button({
+      label: 'Mount a weapon', icon: 'plus',
+      onClick: () => { (doc.mounts ??= []).push({ weapon: weaponIds?.[0] ?? '', at: 'roof' }); stage() },
+    }))
+    wb.append(wfoot)
+    put('other', arms)
+
+    /* ---- the overrides, GENERATED ---------------------------------------------------------- */
+    const base = PROFILES[doc.profile.base] ?? PROFILES.street
+    const setKeys = Object.keys(doc.profile.overrides ?? {})
+    const over = group(`Overrides${setKeys.length ? ` — ${setKeys.length} set` : ''}`, {
+      collapsed: !setKeys.length,
+      note: 'every number on the profile, generated from its own keys — a knob added to the engine appears here on its own',
+    })
+    const ob = bodyOf(over)
+    for (const key of Object.keys(base) as (keyof DriveProfile)[]) {
+      const def = base[key]
+      if (typeof def !== 'number') continue
+      const set = doc.profile.overrides?.[key]
+      const liveValue = (resolved[key] as number) ?? def
+      const range = overrideRange(def)
+      ob.append(slider({
+        label: key, value: set ?? liveValue,
+        min: range.min, max: range.max, step: range.step,
+        neutral: def, resettable: true,
+        note: set === undefined ? `profile: ${round(liveValue)}` : `overridden — profile says ${round(def)}`,
+        onInput: (v) => {
+          doc.profile.overrides ??= {}
+          if (Math.abs(v - def) < 1e-9) delete doc.profile.overrides[key]
+          else doc.profile.overrides[key] = v
+          live()
+        },
+      }))
+    }
+    put('other', over)
   }
 
   render()
+  return render
 }
 
 function round(n: number): string {
   return Math.abs(n) >= 100 ? n.toFixed(0) : Math.abs(n) >= 1 ? n.toFixed(2) : n.toFixed(4)
 }
 
-/**
- * The extension object to hand `AssetCatalog`.
- *
- * NO `tabs` ENTRY, deliberately, and this is a decision rather than an omission. The brief asks for
- * a Vehicles tab; the pane already has per-CLASS tabs over the same list, so a fourth top-level tab
- * showing the same items filtered the same way would be a second route to one place — and the two
- * would drift the first time somebody added a class. The Dynamics group appears on the items that
- * have one, which is what somebody actually wants when they click a car.
- *
- * If a top-level tab is wanted anyway, it is `tabs: [{ id: 'vehicles', … }]` here and a filtered
- * list in this file; the seam supports it and I would rather be told than guess.
- */
-export function vehicleExtension() {
-  return { tabs: [vehicleRosterTab()], detail: vehicleDetail }
+/** The buttons that start a document off. Named after what they are: a choice, not a guess. */
+function templatePicker(onPick: (t: string) => void): HTMLElement {
+  const row = el('div', 'panel-actions')
+  for (const t of VEHICLE_TEMPLATE_IDS) row.append(button({ label: t, onClick: () => onPick(t) }))
+  return row
 }
 
-/* ---- the roster ------------------------------------------------------------------------------- */
+/* ================================================================================================
+ * The detail pane extension — the same form, staged through the pane's own draft
+ * ============================================================================================= */
 
-/**
- * The Vehicles tab: every vehicle in the library, and whether it is finished.
+export function vehicleDetail(item: AssetItem, host: HTMLElement, ctx: VehicleCtx): void {
+  if (!isVehicle(ctx.kind)) return
+  const stored = item.vehicle as VehicleDoc | null | undefined
+  let doc: VehicleDoc | null = stored ? structuredClone(stored) : null
+
+  const g = group('Dynamics', { note: doc ? describeVehicle(doc) : undefined })
+  const body = bodyOf(g)
+  host.append(g)
+
+  const { count: rigWheels } = wheelBoneCount(
+    (item.rig as RigBinding | null | undefined)?.roles?.wheel,
+    ctx.mesh3d?.rig()?.roles?.wheel,
+  )
+
+  const draw = () => {
+    body.replaceChildren()
+    if (!doc) {
+      /*
+       * NOTHING IS INVENTED FOR A CAR THAT HAS NONE. The first version rendered the class template
+       * here, so an asset with no dynamics showed a full set of numbers that were not its own.
+       */
+      body.append(el('div', 'field-note', `No dynamics saved. This ${ctx.kind} drives the engine's default chassis — pick a starting point to give it its own.`))
+      body.append(templatePicker((t) => { doc = defaultVehicle(t); ctx.edit({ vehicle: structuredClone(doc) }); draw() }))
+      return
+    }
+    const form = el('div')
+    body.append(form)
+    dynamicsForm(form, () => doc!, { rigWheels, onChange: (d) => ctx.edit({ vehicle: structuredClone(d) }) })
+    const foot = el('div', 'panel-actions')
+    foot.append(button({
+      label: 'Start again from a template', variant: 'ghost',
+      onClick: () => { doc = null; draw() },
+    }))
+    body.append(foot)
+  }
+  draw()
+}
+
+
+/* ================================================================================================
+ * THE FLEET
  *
- * A ROSTER, NOT A SECOND CATALOG. The pane already has per-class tabs over the same list, so
- * reproducing the list, the search and the scope here would be a second route to one place and the
- * two would drift the first time somebody added a class. What this gives that no per-item pane can
- * is the ACROSS view: which cars have no dynamics at all, which have numbers that do not validate,
- * and what the fleet's spread of mass and power looks like. That is the question somebody opens a
- * Vehicles tab to answer.
- *
- * KNOWN GAP: clicking a row cannot select that item in the Catalog tab, because the seam exposes no
- * way to. It shows the id to search for instead, which is honest and a little annoying; one method
- * on `AssetDetailCtx`'s sibling would fix it and it is asked for rather than assumed.
- */
-export function vehicleRosterTab(): Tab {
+ * All the workflow is `buildScreen` — see the essay at the top of `ui/buildscreen.ts` for why a
+ * vehicle is not a catalog row. What is left here is what makes a vehicle a vehicle.
+ * ============================================================================================= */
+
+/** What the Vehicles screen needs to know about a vehicle, and nothing else. */
+export const VEHICLE_BUILD: BuildSpec<VehicleDoc> = {
+  kind: 'vehicles',
+  noun: 'vehicle',
+  assetType: 'vehicle',
+  classes: CLASSES_BY_TYPE.vehicle,
+  icon: 'cube',
+  emptyTitle: 'No vehicles yet',
+  emptyBlurb: 'A vehicle is a model from the library plus the dynamics that make it drive — mass, '
+    + 'drivetrain, gearing, handling and engine sound. The library’s cars are visuals; this is where '
+    + 'one becomes something you can drive.',
+  presets: (kind) => presetsFor(kind).map((p): BuildPreset<VehicleDoc> => ({ id: p.id, name: p.name, note: p.note, doc: presetDoc(p.id) ?? p.doc })),
+  defaultDoc: (kind) => defaultVehicle(kind ?? 'hero-car'),
+  describe: describeVehicle,
+  summary: (d) => `${d.spec.mass} kg · ${Math.round(d.engine.power_kw * 1.341)} hp · ${d.spec.drive.toUpperCase()}`,
+  tags: (d) => [{ text: `${d.engine.gears.length}-speed` }, { text: d.profile.base }],
+  form: (host, getDoc, onChange) => void dynamicsForm(host, getDoc, { onChange: (doc) => onChange(doc) }),
+  errors: (d) => validateVehicle(d, { audioSetups: engineSetups() }).errors,
+}
+
+/** What the asset library mounts: the fleet tab, and the dynamics section on a vehicle's detail pane. */
+export function vehicleExtension(): { tabs: Tab[]; detail: (item: AssetItem, host: HTMLElement, ctx: VehicleCtx) => void } {
   return {
-    id: 'vehicles',
-    label: 'Vehicles',
-    icon: 'bolt',
-    build: (host) => void renderRoster(host),
+    tabs: [{ id: 'vehicles', label: 'Vehicles', icon: 'cube', build: (host) => buildScreen(host, VEHICLE_BUILD) }],
+    detail: vehicleDetail,
   }
-}
-
-async function renderRoster(host: HTMLElement): Promise<void> {
-  host.replaceChildren(el('div', 'field-note', 'reading the library…'))
-  let items: AssetItem[]
-  try {
-    items = await assetsvc.list()
-  } catch (e) {
-    // Asset generation is off by default and the corridor works completely without it, so "no
-    // service" is a normal state and has to read like one rather than like a crash.
-    host.replaceChildren(empty(`No asset service: ${(e as Error).message}`))
-    return
-  }
-  const fleet = items.filter((it) => isVehicle(it.kind || ''))
-  host.replaceChildren()
-  if (!fleet.length) {
-    host.replaceChildren(empty(`Nothing in the library is a vehicle yet. Give an asset one of these classes: ${VEHICLE_CLASSES.join(', ')}.`))
-    return
-  }
-
-  let unset = 0
-  let broken = 0
-  const rows = el('div', 'asset-list')
-  for (const it of fleet) {
-    const stored = it.vehicle as VehicleDoc | null | undefined
-    const doc = stored ?? defaultVehicle(it.kind)
-    const report = validateVehicle(doc, { rigWheels: (it.rig as RigBinding | null | undefined)?.roles?.wheel?.length })
-    if (!stored) unset++
-    else if (!report.ok) broken++
-
-    const row = el('div', 'asset-row')
-    const head = el('div', 'asset-row-head')
-    head.append(el('strong', '', it.id))
-    head.append(el('span', 'chip', it.kind))
-    if (!stored) head.append(el('span', 'chip state-spec', 'no dynamics'))
-    else if (!report.ok) head.append(el('span', 'chip state-spec', `${report.errors.length} problem${report.errors.length === 1 ? '' : 's'}`))
-    else head.append(el('span', 'chip state-finished', 'ready'))
-    row.append(head)
-    row.append(el('div', 'field-note', describeVehicle(doc)))
-    for (const e of report.errors.slice(0, 3)) row.append(el('div', 'field-error', e))
-    rows.append(row)
-  }
-
-  // The summary first, because it is the answer: how much of the fleet is actually done.
-  const summary = group('The fleet', {
-    note: `${fleet.length} vehicle${fleet.length === 1 ? '' : 's'} · ${fleet.length - unset - broken} ready · ${unset} with no dynamics · ${broken} with problems`,
-  })
-  bodyOf(summary).append(rows)
-  host.append(summary)
-
-  const foot = el('div', 'panel-actions')
-  foot.append(button({ label: 'Refresh', icon: 'arrow-path', variant: 'ghost', onClick: () => void renderRoster(host) }))
-  host.append(foot)
 }

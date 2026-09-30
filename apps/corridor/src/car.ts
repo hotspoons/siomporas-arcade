@@ -94,6 +94,8 @@ export class Car {
   private interior: THREE.Group | null = null
   private shell: THREE.Object3D[] = []
   private steeringWheel: THREE.Object3D | null = null
+  /** a loaded model worn in place of the procedural shell; see `setBodyMesh` */
+  private bodyMesh: THREE.Object3D | null = null
   private surface: Surface
 
   constructor(surface: Surface) {
@@ -537,11 +539,41 @@ export class Car {
     return { each, on: this.lightsOn * Math.min(1, Math.max(0, T.HEADLIGHT)) }
   }
 
+  /**
+   * Wear somebody else's body.
+   *
+   * Hides the procedural shell — the wedge, the glasshouse — and parents `obj` in its place, so a
+   * level's chosen car is the thing you SEE while everything placed against this model's frame
+   * still works: the lamps and their beams, the dashboard, the wheels, the cockpit eye. Those are
+   * all positioned against a contact plane at local y = 0, which is why `carmodel.ts` seats a
+   * loaded model there rather than wherever the exporter left it.
+   *
+   * `null` puts the wedge back. The WHEELS are deliberately left alone: a loaded model brings its
+   * own, and the library's cars have no bones to turn them by, so the procedural wheels would be
+   * four black cylinders inside somebody's bodywork. A caller that knows better hides them itself.
+   */
+  setBodyMesh(obj: THREE.Object3D | null) {
+    if (this.bodyMesh) {
+      this.mesh.remove(this.bodyMesh)
+      this.bodyMesh = null
+    }
+    if (obj) {
+      this.bodyMesh = obj
+      this.mesh.add(obj)
+    }
+    const wearing = obj !== null
+    for (const o of this.shell) o.visible = !wearing
+    for (const w of this.wheels) w.visible = !wearing
+  }
+
   /** Inside or outside: swap the body shell for the dash, pillars and wheel. */
   setCockpit(on: boolean) {
     if (!this.interior || this.interior.visible === on) return
     this.interior.visible = on
-    for (const o of this.shell) o.visible = !on
+    // A car wearing a loaded model has no procedural shell to bring back — un-hiding it here would
+    // put the old wedge inside the new bodywork every time somebody pressed C.
+    for (const o of this.shell) o.visible = !on && !this.bodyMesh
+    if (this.bodyMesh) this.bodyMesh.visible = !on
   }
 
   private updateMesh() {

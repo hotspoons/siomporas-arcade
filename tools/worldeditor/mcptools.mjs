@@ -37,7 +37,7 @@ const obj = (description) => ({ type: 'object', description })
  * `apiFetch(method, path, body)` is the service calling itself — injected rather than imported so
  * this file has no opinion about ports, and so a test can hand it a fake.
  */
-export function serverTools({ apiFetch }) {
+export function serverTools({ apiFetch, root, siteDoc }) {
   const get = (p) => apiFetch('GET', p)
   const post = (p, b) => apiFetch('POST', p, b)
   const put = (p, b) => apiFetch('PUT', p, b)
@@ -77,7 +77,15 @@ export function serverTools({ apiFetch }) {
       ['level'],
       (a) => post('/api/levels/validate', a.level),
     ),
-    T('level_save', 'Create or replace a level. Validated first; an invalid level is refused with its problems rather than written.', { id: str(''), level: obj('') }, ['id', 'level'], (a) => put(`/api/levels/${a.id}`, a.level)),
+    T('level_save', 'Create or replace a level. Validated first; an invalid level is refused with its problems rather than written. A level names its world, an optional player { vehicle: <vehicle build or catalog id>, profile }, an optional program (a path under programs/), simulations such as [{ kind: "traffic", set, density?, max?, seed? }], defaults { time, weather, season }, placements and splats.', { id: str(''), level: obj('') }, ['id', 'level'], async (a) => {
+      // PUT replaces an existing level and 404s on a new one; a new one is a POST. One tool, either way.
+      try {
+        return await put(`/api/levels/${a.id}`, a.level)
+      } catch (e) {
+        if (e?.status !== 404) throw e
+        return post('/api/levels', { ...a.level, id: a.id })
+      }
+    }),
     T('level_delete', 'Delete a level.', { id: str('') }, ['id'], (a) => del(`/api/levels/${a.id}`)),
 
     /* ---- programs: the TypeScript beside the levels -------------------------------------------
@@ -217,8 +225,304 @@ export function serverTools({ apiFetch }) {
     T('blender_rig_vehicle', 'Cut a car’s wheels off its body and give each one a bone, in FL FR RL RR order. MINUTES, its own Blender. A reconstruction’s wheels are FUSED to the body — one connected component holds about 97% of the vertices — so this finds them by shape and REFUSES rather than half-rigging: an unrigged car drives perfectly well, and a wrongly rigged one steers with its back wheels with nothing downstream able to tell.', { src: str('absolute path to the car .glb'), out: str('what to call the result'), length: num('metres nose to tail, default 4.5 — the file’s own scale means nothing'), outboard: num('how far out sideways a tyre is, 0..1, default 0.8') }, ['src'], (a) => post('/api/blender/rig/vehicle', a)),
     T('blender_rig_character', 'Rigify a character: a watertight cage carries the bone-heat weights and the real mesh keeps its topology. MINUTES, its own Blender. The face bones are weighted from the real mesh afterwards, because a cage has no lip seam and leaves every lip bone at zero.', { src: str('absolute path to the character .glb'), out: str('what to call the result'), height: num('metres, head to floor, default 1.7'), noFace: bool('skip the face-weight pass') }, ['src'], (a) => post('/api/blender/rig/character', a)),
 
+    /* ---- vehicles and traffic sets: the builds ------------------------------------------------
+     * Rich, 2026-09-29: *"select a car or two as hero cars, define their performance, select say
+     * 10 cars to be a traffic library, configure them"*. A BUILD is a catalog model plus its
+     * dynamics (`vehicle_*`); a traffic SET is which builds a jam is made of and how common each
+     * is (`traffic_set_*`). Both live in the asset service beside the catalog, and both are what
+     * a level names: `player.vehicle` is a vehicle build id (or a bare catalog id, which drives
+     * the default chassis), `simulations[].set` is a traffic set id.
+     */
+    T('vehicle_list', 'Every vehicle build: id, name, the catalog model it wears, and its dynamics document. A build is a car you can drive or put in traffic; a catalog item alone is only a picture.', {}, [], () => get('/assetsvc/vehicles')),
+    T('vehicle_get', 'One vehicle build in full.', { id: str('build id') }, ['id'], async (a) => {
+      const r = await get('/assetsvc/vehicles')
+      const b = (r.vehicles ?? []).find((v) => v.id === a.id)
+      if (!b) throw new Error(`no vehicle build "${a.id}" — vehicle_list has them`)
+      return b
+    }),
+    T(
+      'vehicle_template',
+      'A starting dynamics document, by kind — hero-car, traffic, van, truck, bus. Copy it, change the numbers, and hand it to vehicle_save as `doc`. `profile.base` is the handling model (stunts | taxi | street | rush | sim) and `profile.overrides` tunes it; `engine` is power, redline, gears, final drive and brakes; `spec` is mass, wheelbase, track, centre of gravity and size.',
+      { kind: str('hero-car | traffic | van | truck | bus') },
+      ['kind'],
+      async (a) => {
+        const t = JSON.parse(await readFile(new URL('./vehicle-templates.json', import.meta.url), 'utf8'))
+        const doc = t[a.kind]
+        if (!doc) throw new Error(`no template "${a.kind}" — one of ${Object.keys(t).filter((k) => !k.startsWith('_')).join(', ')}`)
+        return { kind: a.kind, doc }
+      },
+    ),
+    T(
+      'vehicle_save',
+      'Create or update a vehicle build. MERGED: fields you leave out keep their value, so saving `{ doc }` later keeps the name and the model. `asset` is a catalog id from asset_list (kind hero-car or traffic); `doc` is a dynamics document shaped like vehicle_template; `preset` is a handling preset id, for the record. The id is what a level and a traffic set name.',
+      { id: str('lowercase, digits, dashes'), name: str(''), asset: str('catalog id of the model'), preset: str('optional preset id'), notes: str(''), doc: obj('the dynamics document') },
+      ['id'],
+      (a) => { const { id, ...patch } = a; return put(`/assetsvc/vehicles/${encodeURIComponent(id)}`, patch) },
+    ),
+    T('vehicle_delete', 'Delete a vehicle build. The catalog model stays; a level or set naming this id will fall back to the default car and say so.', { id: str('') }, ['id'], (a) => del(`/assetsvc/vehicles/${encodeURIComponent(a.id)}`)),
+
+    T('traffic_set_list', 'Every traffic set: which vehicle builds a jam is made of and how common each one is.', {}, [], () => get('/assetsvc/traffic')),
+    T('traffic_set_get', 'One traffic set in full.', { id: str('') }, ['id'], async (a) => {
+      const r = await get('/assetsvc/traffic')
+      const b = (r.traffic ?? []).find((v) => v.id === a.id)
+      if (!b) throw new Error(`no traffic set "${a.id}" — traffic_set_list has them`)
+      return b
+    }),
+    T(
+      'traffic_set_save',
+      'Create or update a traffic set. `doc.mix` is [{ vehicle: <vehicle build id>, weight: <relative share>, obeyRate? }]; `doc.obeyRate` (0…1, share of drivers who stop for a red) and `doc.speedFactor` (multiplier on the limit, 0.6 is a crawl) apply to the whole set. A level names the set in simulations[].set.',
+      { id: str(''), name: str(''), notes: str(''), doc: obj('{ mix: [{ vehicle, weight, obeyRate? }], obeyRate?, speedFactor? }') },
+      ['id', 'doc'],
+      async (a) => {
+        const mix = a.doc?.mix
+        if (!Array.isArray(mix) || !mix.length) throw new Error('doc.mix must list at least one { vehicle, weight }')
+        const have = new Set(((await get('/assetsvc/vehicles')).vehicles ?? []).map((v) => v.id))
+        const missing = mix.map((m) => m.vehicle).filter((v) => !have.has(v))
+        if (missing.length) throw new Error(`these are not vehicle builds: ${missing.join(', ')} — make them with vehicle_save first`)
+        const { id, ...patch } = a
+        return put(`/assetsvc/traffic/${encodeURIComponent(id)}`, patch)
+      },
+    ),
+    T('traffic_set_delete', 'Delete a traffic set.', { id: str('') }, ['id'], (a) => del(`/assetsvc/traffic/${encodeURIComponent(a.id)}`)),
+
+    /* ---- roads, zones and races: the world as a game board ------------------------------------
+     * Zones, courses and stunts are site documents (`sites/<slug>/zones.json` and so on, through
+     * read_document / write_document), and these are the helpers that make writing them possible
+     * without seeing the map: which roads there are, a polygon along one, a gate across one.
+     * Everything is in SITE METRES — x east, y north — which is the frame every site document uses.
+     */
+    T(
+      'site_roads',
+      'The drivable roads of a baked world: id, name, ref (e.g. "MD 3"), class, lanes, length in metres, and where each starts and ends in site metres. Optional `q` filters by name or ref. The road ids are what site_road_polygon and site_road_gate take.',
+      { slug: str('the world slug'), q: str('a name or ref to match, case-insensitive') },
+      ['slug'],
+      async (a) => {
+        const roads = await roadsOf(root, a.slug)
+        const q = (a.q ?? '').toLowerCase()
+        const hit = roads.filter((r) => !q || `${r.name ?? ''} ${r.ref ?? ''}`.toLowerCase().includes(q))
+        return { roads: hit.map(({ coords, ...r }) => ({ ...r, start: coords[0].slice(0, 2), end: coords[coords.length - 1].slice(0, 2) })), of: roads.length }
+      },
+    ),
+    T(
+      'site_road_polygon',
+      'A polygon hugging a stretch of road, for a traffic zone: from `from_m` to `to_m` along it (whole road by default), `width_m` wide (default: the lanes plus a verge). Hand the result to traffic_zone_add, or put it in zones.json yourself.',
+      { slug: str(''), road: str('a road id from site_roads'), from_m: num('start, metres along the road'), to_m: num('end, metres along the road'), width_m: num('total width, metres') },
+      ['slug', 'road'],
+      async (a) => {
+        const r = await findRoad(root, a.slug, a.road)
+        const width = a.width_m ?? r.lanes * 3.66 + 6
+        return { road: r.id, name: r.name, polygon: buffer(slice(r.coords, a.from_m ?? 0, a.to_m ?? Infinity), width / 2), length_m: r.length_m }
+      },
+    ),
+    T(
+      'site_road_gate',
+      'A race gate laid square across a road at `at_m` metres along it, the way one click in the editor lays it. Returns { a, b } endpoints in site metres, facing the road’s direction of travel; set `reverse` to face the other way. Put it in a course’s gates with a role (start | finish | startfinish | checkpoint | split).',
+      { slug: str(''), road: str('a road id from site_roads'), at_m: num('metres along the road'), reverse: bool('face against the road’s direction'), margin_m: num('extra width each side, default 6') },
+      ['slug', 'road', 'at_m'],
+      async (a) => {
+        const r = await findRoad(root, a.slug, a.road)
+        const { p, d } = alongRoad(r.coords, a.at_m)
+        const half = (r.lanes * 3.66) / 2 + (a.margin_m ?? 6)
+        const sgn = a.reverse ? -1 : 1
+        // a→b is the road's LEFT normal for forward travel: the crossing counts when you go a→b's right-hand way
+        const lx = -d.y * sgn
+        const ly = d.x * sgn
+        return { a: [round(p.x + lx * half), round(p.y + ly * half)], b: [round(p.x - lx * half), round(p.y - ly * half)], at: [round(p.x), round(p.y)], heading_deg: round((Math.atan2(d.y * sgn, d.x * sgn) * 180) / Math.PI) }
+      },
+    ),
+    T(
+      'traffic_zone_add',
+      'Add a traffic zone to a world’s zones.json (merged in; other zones are kept). Give a polygon, or a road and a stretch of it and the polygon is made for you. `density` 0…1 is how jammed: 0.3 flows, 0.6 is heavy, 0.9 crawls, 1 is stopped. `density_max` makes it swing between the two on each load. The zone takes effect when a level with a traffic simulation opens on this world.',
+      { slug: str(''), name: str(''), polygon: { type: 'array', description: '[[x, y], …] site metres', items: { type: 'array', items: { type: 'number' } } }, road: str('a road id, instead of a polygon'), from_m: num(''), to_m: num(''), width_m: num(''), density: num('0…1'), density_max: num('0…1, optional swing'), obey_rate: num('0…1'), speed_factor: num('multiplier on the limit') },
+      ['slug', 'density'],
+      async (a) => {
+        let polygon = a.polygon
+        if (!polygon) {
+          if (!a.road) throw new Error('give a polygon, or a road (from site_roads) and optionally from_m/to_m')
+          const r = await findRoad(root, a.slug, a.road)
+          polygon = buffer(slice(r.coords, a.from_m ?? 0, a.to_m ?? Infinity), (a.width_m ?? r.lanes * 3.66 + 6) / 2)
+        }
+        if (!Array.isArray(polygon) || polygon.length < 3) throw new Error('a zone needs at least three points')
+        const doc = (await siteDoc.read(a.slug, 'zones.json')) ?? { version: 1, zones: [] }
+        doc.zones ??= []
+        const id = nextId('z', doc.zones.map((z) => z.id))
+        const traffic = { density: clamp01(a.density) }
+        if (a.density_max !== undefined) traffic.densityMax = clamp01(a.density_max)
+        if (a.obey_rate !== undefined) traffic.obeyRate = clamp01(a.obey_rate)
+        if (a.speed_factor !== undefined) traffic.speedFactor = a.speed_factor
+        doc.zones.push({ id, name: a.name ?? id, kind: 'traffic', polygon: polygon.map(([x, y]) => [round(x), round(y)]), traffic })
+        const wrote = await siteDoc.write(a.slug, 'zones.json', doc)
+        return { id, zones: doc.zones.length, wrote }
+      },
+    ),
+    T(
+      'course_save',
+      'Add or replace a race course in a world’s courses.json (merged by id). A course is `kind` circuit (lapped; the start gate is the finish) or stage (start, checkpoints in order, finish; a missed checkpoint costs penalty_s), an `entry` ring {x, y, r} you drive into to commit, and `gates` [{ id?, name?, role, a: [x, y], b: [x, y], order?, optional? }] — site_road_gate makes a gate. Validated: a circuit needs one startfinish, a stage a start and a finish, every gate a and b.',
+      { slug: str(''), course: obj('{ id, name, kind, entry?, laps?, penalty_s?, gates, intro?, outro? }') },
+      ['slug', 'course'],
+      async (a) => {
+        const c = a.course
+        const errors = validateCourse(c)
+        if (errors.length) throw new Error(`the course does not validate:\n${errors.join('\n')}`)
+        const doc = (await siteDoc.read(a.slug, 'courses.json')) ?? { version: 1, courses: [] }
+        doc.courses ??= []
+        c.gates = c.gates.map((g, i) => ({ ...g, id: g.id ?? `g-${String(i + 1).padStart(2, '0')}`, name: g.name ?? `${g.role} ${i + 1}` }))
+        const at = doc.courses.findIndex((x) => x.id === c.id)
+        if (at >= 0) doc.courses[at] = c
+        else doc.courses.push(c)
+        const wrote = await siteDoc.write(a.slug, 'courses.json', doc)
+        return { id: c.id, courses: doc.courses.length, gates: c.gates.length, wrote }
+      },
+    ),
+
+    /* ---- programs: built and checked without a browser ---------------------------------------- */
+    T('program_check', 'Typecheck a program against the level API’s declarations — the same check the editor’s Program pane runs, with no tab open. Returns every problem with its line. A program that passes here loads in the viewer.', { path: str('e.g. crofton/jam.ts') }, ['path'], (a) => get(`/api/programs/${a.path}?check=1`)),
+    T('program_build', 'Transpile a program to the JavaScript the viewer runs. Mostly for seeing that it builds; the viewer asks for this itself when a level names the program.', { path: str('') }, ['path'], async (a) => { const r = await get(`/api/programs/${a.path}?js=1`); return { id: r.id, bytes: r.js.length, errors: r.errors } }),
+
     /* ---- the editor itself --------------------------------------------------------------------- */
     T('editor_config', 'How this editor is configured: which services it can reach, which cluster, what is enabled. The first thing to call when something is refused and you want to know whether it is even turned on.', {}, [], () => get('/api/config')),
     T('editor_ready', 'Whether the editor’s dependencies are answering right now.', {}, [], () => get('/api/ready')),
   ]
+}
+
+
+/* ---- road geometry, from the baked world's own manifest ------------------------------------------ */
+
+import { readFile } from 'node:fs/promises'
+import path from 'node:path'
+
+const round = (v) => Math.round(v * 10) / 10
+const clamp01 = (v) => Math.max(0, Math.min(1, Number(v) || 0))
+
+function nextId(prefix, taken) {
+  const have = new Set(taken)
+  for (let i = 1; i < 10000; i++) {
+    const id = `${prefix}-${String(i).padStart(2, '0')}`
+    if (!have.has(id)) return id
+  }
+  return `${prefix}-${Date.now()}`
+}
+
+/**
+ * The roads of a world, with their centrelines in site metres.
+ *
+ * From `web/manifest.json`, which is what the viewer itself loads: the spine (index 0, named by
+ * its first segment) and every branch. Lanes are the smallest of the tags a chain carries, which
+ * is how the viewer draws it too.
+ */
+async function roadsOf(root, slug) {
+  if (!root) throw new Error('site_roads needs the data root')
+  if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(String(slug))) throw new Error(`bad slug ${JSON.stringify(slug)}`)
+  const file = path.join(root, 'sites', slug, 'web', 'manifest.json')
+  const text = await readFile(file, 'utf8').catch(() => null)
+  if (!text) throw new Error(`${slug} has no baked manifest (sites/${slug}/web/manifest.json) — bake it first`)
+  const m = JSON.parse(text)
+  const lanesOf = (v) => {
+    if (typeof v === 'number') return v > 0 ? v : 2
+    if (typeof v === 'string') return Number(v) > 0 ? Number(v) : 2
+    if (Array.isArray(v)) { const ns = v.map(Number).filter((n) => n > 0); return ns.length ? Math.min(...ns) : 2 }
+    return 2
+  }
+  const out = []
+  const sp = m.spine ?? {}
+  if (Array.isArray(sp.coords) && sp.coords.length >= 2) {
+    const tg = sp.segments?.[0]?.tags ?? {}
+    out.push({ id: 'spine', chain: 0, name: tg.name ?? 'spine', ref: tg.ref ?? null, highway: tg.highway ?? null, lanes: lanesOf(tg.lanes), oneway: tg.oneway ?? null, length_m: round(sp.length_m ?? lengthOf(sp.coords)), coords: sp.coords })
+  }
+  for (const br of m.branches ?? []) {
+    if (!Array.isArray(br.coords) || br.coords.length < 2) continue
+    out.push({ id: br.id, name: br.name ?? null, ref: br.ref ?? null, highway: br.highway ?? null, lanes: lanesOf(br.lanes), oneway: br.oneway ?? null, length_m: round(br.length_m ?? lengthOf(br.coords)), coords: br.coords })
+  }
+  return out
+}
+
+async function findRoad(root, slug, id) {
+  const roads = await roadsOf(root, slug)
+  const r = roads.find((x) => x.id === id) ?? roads.find((x) => (x.name ?? '').toLowerCase() === String(id).toLowerCase())
+  if (!r) throw new Error(`no road "${id}" in ${slug} — site_roads lists them by id`)
+  return r
+}
+
+function lengthOf(coords) {
+  let l = 0
+  for (let i = 1; i < coords.length; i++) l += Math.hypot(coords[i][0] - coords[i - 1][0], coords[i][1] - coords[i - 1][1])
+  return l
+}
+
+/** The part of a polyline between two distances along it, resampled so both ends land exactly. */
+function slice(coords, from, to) {
+  const out = []
+  let run = 0
+  for (let i = 1; i < coords.length; i++) {
+    const a = coords[i - 1]
+    const b = coords[i]
+    const seg = Math.hypot(b[0] - a[0], b[1] - a[1])
+    const s0 = run
+    const s1 = run + seg
+    if (s1 >= from && s0 <= to) {
+      const t0 = Math.max(0, (from - s0) / seg)
+      const t1 = Math.min(1, (to - s0) / seg)
+      if (!out.length) out.push([a[0] + (b[0] - a[0]) * t0, a[1] + (b[1] - a[1]) * t0])
+      out.push([a[0] + (b[0] - a[0]) * t1, a[1] + (b[1] - a[1]) * t1])
+    }
+    run = s1
+  }
+  if (out.length < 2) throw new Error(`that stretch (${from}…${to} m) is not on the road, which is ${round(run)} m long`)
+  return out
+}
+
+/** A ribbon `half` metres either side of a polyline, as one closed polygon: left side out, right side back. */
+function buffer(line, half) {
+  const left = []
+  const right = []
+  for (let i = 0; i < line.length; i++) {
+    const a = line[Math.max(0, i - 1)]
+    const b = line[Math.min(line.length - 1, i + 1)]
+    const dx = b[0] - a[0]
+    const dy = b[1] - a[1]
+    const l = Math.hypot(dx, dy) || 1
+    const nx = -dy / l
+    const ny = dx / l
+    left.push([round(line[i][0] + nx * half), round(line[i][1] + ny * half)])
+    right.push([round(line[i][0] - nx * half), round(line[i][1] - ny * half)])
+  }
+  return [...left, ...right.reverse()]
+}
+
+/** The point `at` metres along a polyline and the unit direction there. */
+function alongRoad(coords, at) {
+  let run = 0
+  for (let i = 1; i < coords.length; i++) {
+    const a = coords[i - 1]
+    const b = coords[i]
+    const seg = Math.hypot(b[0] - a[0], b[1] - a[1])
+    if (run + seg >= at || i === coords.length - 1) {
+      const t = seg > 0 ? Math.max(0, Math.min(1, (at - run) / seg)) : 0
+      const l = seg || 1
+      return { p: { x: a[0] + (b[0] - a[0]) * t, y: a[1] + (b[1] - a[1]) * t }, d: { x: (b[0] - a[0]) / l, y: (b[1] - a[1]) / l } }
+    }
+    run += seg
+  }
+  throw new Error('an empty road')
+}
+
+const GATE_ROLES = ['start', 'finish', 'startfinish', 'checkpoint', 'split']
+function validateCourse(c) {
+  const errors = []
+  if (!c || typeof c !== 'object') return ['course must be an object']
+  if (!c.id || !/^[a-z0-9][a-z0-9-]{0,63}$/.test(c.id)) errors.push('course.id is lowercase, digits and dashes')
+  if (!c.name) errors.push('course.name is missing')
+  if (!['circuit', 'stage'].includes(c.kind)) errors.push('course.kind is circuit or stage')
+  if (!Array.isArray(c.gates) || c.gates.length < 2) errors.push('a course needs at least two gates')
+  const roles = new Map()
+  for (const [i, g] of (c.gates ?? []).entries()) {
+    if (!GATE_ROLES.includes(g?.role)) errors.push(`gates[${i}].role is one of ${GATE_ROLES.join(', ')}`)
+    for (const k of ['a', 'b']) if (!Array.isArray(g?.[k]) || g[k].length < 2 || !g[k].every(Number.isFinite)) errors.push(`gates[${i}].${k} is [x, y] in site metres`)
+    if (g?.role) roles.set(g.role, (roles.get(g.role) ?? 0) + 1)
+  }
+  if (c.kind === 'circuit' && roles.get('startfinish') !== 1) errors.push('a circuit has exactly one startfinish gate')
+  if (c.kind === 'stage' && (roles.get('start') !== 1 || roles.get('finish') !== 1)) errors.push('a stage has exactly one start and one finish gate')
+  if (c.entry !== undefined && !(Number.isFinite(c.entry?.x) && Number.isFinite(c.entry?.y))) errors.push('course.entry is { x, y, r } in site metres')
+  if (c.laps !== undefined && !(Number.isInteger(c.laps) && c.laps > 0)) errors.push('course.laps is a whole number')
+  return errors
 }

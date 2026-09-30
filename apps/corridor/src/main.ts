@@ -4,9 +4,16 @@ import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { buildSite, describe, type Site } from './scene'
 import { buildPhysics, type CorridorPhysics } from './physics'
+import { fetchStuntDoc, makeStuntWorld, type StuntWorld } from './stuntworld'
+import type { StuntDoc } from './stunts'
+import { loadRaceWorld, type RaceWorld } from './raceworld'
+import { PerfMeter } from './perf'
+import { assistAt, lookAhead, pullFor } from './stuntassist'
+import { PerfHud } from './ui/perfhud'
 import { RapierCar } from './rapiercar'
 import { assetsvc } from './assetsvc'
-import type { VehicleDoc } from './vehicles'
+import { defaultVehicle, type VehicleDoc } from './vehicles'
+import { loadCarModel, type CarModel } from './carmodel'
 import { Car, type CarInput, type DrivableCar } from './car'
 import { EngineSound, spawnPlayerEngine } from './enginesound'
 import { ActorWorld } from './actorworld'
@@ -24,11 +31,13 @@ import { Sky } from './sky'
 import { Stars } from './stars'
 import { MilkyWay } from './milkyway'
 import { applyLevel, loadLevel, type LevelPlacement } from './level'
+import { TrafficLayer, type TrafficSpec } from './trafficlayer'
+import { GameRun, type ProgramHost } from './program'
+import { loadGameModule } from './programload'
+import { profile as driveProfile } from '@apex/engine/physics/profiles'
 import { buildPlacements, loadCatalog } from './placements'
 import { timeControls } from './ui/timecontrols'
 import { celestialToWorld, julianDate, moonPosition, radecToVec } from './celestial'
-import { SquishyHunt } from './games/squishy'
-import { Parkour } from './games/parkour'
 import * as T from './tuning'
 import { TUNE_TABS } from './tuning'
 import { applySiteTuning, clearSiteTuning, saveSiteTuning } from './sitetuning'
@@ -51,7 +60,7 @@ import { rasteriseEnvelope, splatMaskUniforms } from './splatmask'
 import { Attribution } from './attribution'
 import { loadSiteTuning } from './sitetuning'
 import { WEATHER, WEATHERS, type Weather } from './weather'
-import { ViewerUI, restoreTheme } from './ui/viewer'
+import { ViewerUI, restoreTheme, perfWanted, setPerfWanted } from './ui/viewer'
 import { TuneUI } from './ui/tune'
 import { installShellKeys, toast, status, clearStatus } from './ui/shell'
 import { downloadJSON, readJSONFile } from './ui/files'
@@ -92,6 +101,14 @@ let site: Site | null = null
  * rather than a live-looking object that simulates nothing (see physics.ts).
  */
 let physics: CorridorPhysics | null = null
+/** this site's stunt fixtures, read before the physics so it knows whether it is needed */
+let stuntDoc: StuntDoc | null = null
+/** the world's loops and corkscrews, when it has any — for a probe and for a program */
+let stuntWorld: StuntWorld | null = null
+/** its circuits and stages, with the throbbers you drive into to start one */
+let raceWorld: RaceWorld | null = null
+/** the last race banner shown, so the same line is not re-posted every frame */
+let lastRaceBanner: string | null = null
 let minimap: MiniMap | null = null
 /**
  * The real sky, once loaded: 9,096 catalogue stars as one Points object turned by one matrix.
@@ -230,6 +247,12 @@ const ui = new ViewerUI({
   },
   onSeason: (s) => setSeason(s),
   onStyle: (s) => setStyle(s),
+  onTrees: (t) => {
+    // two knobs, one choice: cards-only is TREE_SIMPLE, the editor's trees are TREE_LOLLIPOP
+    tuneKey('TREE_SIMPLE')?.set(t === 'cards' ? 1 : 0)
+    tuneKey('TREE_LOLLIPOP')?.set(t === 'lollipop' ? 1 : 0)
+    onTuneChange()
+  },
   onRelief: (k) => {
     reliefWanted = clampRelief(k)
     const u = new URL(location.href)
@@ -245,6 +268,8 @@ const ui = new ViewerUI({
   onTop: () => toTop(),
   onStance: () => void copyStance(),
   onTune: () => tuneUI.toggle(),
+  // the performance panel, from Settings → Display. F7 does the same and remembers it too.
+  onPerf: (on) => perfHud.show(on),
   onGoto: (h) => gotoHit(h),
   onStructure: (i) => site && goToStructure(site.manifest.structures[i]),
 })
@@ -280,10 +305,70 @@ let fly: FlyControls | null = null
  */
 let transport: TransportControls | null = null
 let craft: CraftKind | null = null
-// the games ride on the viewer: ?game=squishy starts one when the site lands, G toggles it
-let game: SquishyHunt | null = null
-let parkour: Parkour | null = null
-const wantGame = new URLSearchParams(location.search).get('game')
+/*
+ * THE TWO BUILT-IN GAMES ARE GONE, and the hunt's bones are in `objectives.ts`.
+ *
+ * Rich, 2026-09-29: *"We should remove squishy hunt and parkour, they predate the game engine. Just
+ * make sure some primitives for object hunting objectives with capture survive."* They did predate
+ * it: each carried its own scoring, HUD, keys and idea of a level, none of which a program could
+ * reach — three ways of saying the same thing and no way to author a fourth. What was worth keeping
+ * — the spread across a town, the capture radius, the hints in words — is a module a program
+ * imports, listed in the code editor as `@apex/objectives`.
+ */
+
+/*
+ * THE PERFORMANCE PANEL. Rich, 2026-09-29: *"Can we add a setting to show a performance stats
+ * display that includes FPS, memory, p95/p99 info, cpu time, etc.?"*
+ *
+ * The meter is cheap and always exists; the panel only samples while it is open, which is why the
+ * frame loop asks `perfHud.open` before doing any of the work. A performance panel that costs a
+ * frame is a performance panel that lies.
+ */
+/**
+ * On a stunt fixture, the track decides which way is down.
+ *
+ * A ray-cast vehicle feels the road along its own down axis, so a level car cannot feel a loop that
+ * has stood up in front of it — it drove straight through (Rich, 2026-09-29). Turn the body to face
+ * the surface and the rays point into it, the suspension loads, and the wheels carry the car round.
+ *
+ * ONE FUNCTION, TWO CALLERS, and that is the point of it being one: the frame loop calls it, and so
+ * does `apex.assist(dt)` on the bridge. A probe that steps the car itself — which is how every
+ * driving measurement in this repo is made, because headless frames are far too slow — was
+ * measuring a car with no assist at all and reporting that the assist did nothing.
+ */
+function holdToTrack(car: DrivableCar | null, dt: number): boolean {
+  if (!car || !stuntWorld || !('hold' in car)) return false
+  const at = { x: car.pos.x, y: -car.pos.z, z: car.pos.y }
+  if (T.STUNT_ASSIST <= 0) return false
+  const hit = stuntWorld.nearestPose(at)
+  if (!hit) return false
+  /*
+   * AND WHERE THE CAR IS ABOUT TO BE — walked ALONG THE LANE, not searched for in space. A loop
+   * passes over itself, so the nearest lane point to somewhere ten metres in front of you on the
+   * run-in is the run-in, and an assist that samples space reads "flat" and holds the car flat into
+   * the wall. Measured, with the car level and all four wheels down at the moment it stopped.
+   */
+  const f = car.forward
+  const window = lookAhead(car.speed, { seconds: T.STUNT_AHEAD_S, min: 12, max: 90 })
+  const up = stuntWorld.upAhead(hit, window, { x: f.x, y: -f.z })
+  const reach = { hold_m: T.STUNT_HOLD_M, release_m: T.STUNT_RELEASE_M }
+  const here = assistAt(hit, reach)
+  if (!here) return false
+  // site frame (z up) to three's (y up), the same conversion `upOf` does for a pose
+  const a = { ...here, up: { x: up.x, y: up.z, z: -up.y } }
+  // the pull is only wanted where gravity is not enough: none on the flat, all of it on a wall
+  ;(car as RapierCar).hold(a.up, dt, {
+    strength: a.strength,
+    align: T.STUNT_ALIGN,
+    pull: pullFor(a.up, T.STUNT_PULL),
+  })
+  return true
+}
+
+const perfMeter = new PerfMeter()
+const perfHud = new PerfHud(perfMeter)
+// left on last time? then it comes back on, which is the whole point of remembering it
+if (perfWanted()) perfHud.show(true)
 
 /**
  * Post-process anti-aliasing, built only if a mode asks for it.
@@ -392,8 +477,12 @@ async function loadSite(slug: string) {
   // The physics world belongs to the SITE. A new site is a new world, not one carrying the old
   // world's heightfield tiles at the old site's origin — which would be ground in the right place
   // and the wrong bake.
+  stopProgram()
+  traffic?.dispose()
+  traffic = null
   physics?.free()
   physics = null
+  stuntDoc = null
   minimap?.dispose()
   minimap = null
   status(`loading ${slug}…`)
@@ -432,13 +521,74 @@ async function loadSite(slug: string) {
   // `?phys=1` / `?phys=0` beats the knob, because the knob is read once and this is the only hook
   // that runs before that happens. Same shape as the `relief` block above.
   const physParam = new URLSearchParams(location.search).get('phys')
-  physics = await buildPhysics(site, { enabled: physParam != null ? Number(physParam) > 0 : undefined }).catch((e) => {
+  /*
+   * A WORLD WITH STUNTS TURNS THE PHYSICS ON BY ITSELF.
+   *
+   * Rich, 2026-09-29: *"stunts still not drivable"*. They were solid in a probe and scenery in the
+   * game, and the reason is here: `PHYS_ENABLED` is 0, so there was no physics world, so a
+   * fixture's trimesh had nowhere to go — and the hand-written car follows `groundAt`, which is one
+   * height per column and cannot describe a loop at all.
+   *
+   * So the document decides. If somebody stood a loop up in this world, the world needs the
+   * machinery that can hold one; if nobody did, nothing changes and the viewer is as it was.
+   * `?phys=0` still wins, because an explicit flag must always beat an inference.
+   */
+  stuntDoc = await fetchStuntDoc(site.manifest.slug)
+  const stuntsNeedPhysics = !!stuntDoc?.fixtures?.length
+  /*
+   * AND SO DOES A LEVEL WITH TRAFFIC IN IT. The level opens after the site is built, but whether
+   * it wants traffic has to be known now — a traffic car is a kinematic body the player can hit,
+   * and a jam you drive straight through is not a jam. So the level named in the URL is read
+   * here, once, for that one fact; `openLevel` reads it again for everything else.
+   */
+  const levelId = new URLSearchParams(location.search).get('level')
+  const early = levelId ? await loadLevel(levelId).catch(() => null) : null
+  const trafficNeedsPhysics = !!early?.simulations?.some((x) => x.kind === 'traffic')
+  physics = await buildPhysics(site, {
+    enabled: physParam != null ? Number(physParam) > 0 : stuntsNeedPhysics || trafficNeedsPhysics || undefined,
+  }).catch((e) => {
     console.warn('physics: not started —', e)
     return null
   })
   if (physics) status(`physics: ${physics.phys.hz} Hz`)
   applySky(season)
   scene.add(site.group)
+  /*
+   * STUNT FIXTURES: the tarmac you see AND the surface you drive on.
+   *
+   * After the physics, because a fixture's collider is a trimesh in that world — a heightfield
+   * cannot hold a loop, since it is one height per column and a loop is above itself. After the
+   * site, because the ribbon is stood on the ground and hooked to the road.
+   *
+   * A site with no `stunts.json` resolves to null and nothing else happens; that is most worlds.
+   */
+  /*
+   * RACES. The throbber on the ground, the gates of whichever race you are in, and the clock.
+   *
+   * Loaded beside the stunts and for the same reasons: after the site, because the rings are laid
+   * on the ground, and tolerant of a world that has none, which is most of them.
+   */
+  void loadRaceWorld(site.manifest.slug, {
+    groundAt: (x, y) => site!.groundAt(x, -y) ?? site!.heightAt(x, y) ?? 0,
+    countdown: 3,
+  }).then((w) => {
+    if (!w) return
+    raceWorld = w
+    scene.add(w.group)
+    status(`races: ${w.courses.length}`)
+  }).catch((e) => console.warn('races:', e))
+
+  /*
+   * The document was already fetched, above, to decide about physics — building from it here
+   * rather than fetching it again is not only a saved request: two fetches can disagree, and a
+   * physics world started for fixtures that then fail to load is the worst of both.
+   */
+  const stuntsHere = makeStuntWorld(site, physics, stuntDoc)
+  if (stuntsHere) {
+    stuntWorld = stuntsHere
+    scene.add(stuntsHere.group)
+    status(`stunts: ${stuntsHere.count} fixture${stuntsHere.count === 1 ? '' : 's'}${physics ? '' : ' — no physics, so they are scenery'}`)
+  }
   // for probes and the console. `tune` is the same knob table the F6 panel drives, so a probe can
   // sweep a knob exactly as Rich would and see the same rebuild — the module's `export let`s
   // cannot be written from outside, and a dynamic import of tuning.ts under HMR is a dead copy.
@@ -463,6 +613,10 @@ async function loadSite(slug: string) {
      */
     get physics() {
       return physics
+    },
+    /** the level's traffic, or null: `count`, `problems`, `zones`, `entities` */
+    get traffic() {
+      return traffic
     },
     scene,
     camera,
@@ -645,11 +799,7 @@ async function loadSite(slug: string) {
   fillInfo(manifest)
   fly ??= new FlyControls(camera, orbit, canvas, (x, z) => site?.groundAt(x, z) ?? null)
   transport ??= new TransportControls(camera, orbit, canvas, (x, z) => site?.groundAt(x, z) ?? null)
-  game?.dispose()
-  game = null
-  endParkour()
-  if (wantGame === 'squishy') startSquishy()
-  if (wantGame === 'parkour') startParkour()
+
   // the captured world, if this site has one attached (or ?splats=<world> named one). It is a
   // skin over the bake, never the ground: see docs/corridor/PLAN-SPLAT-CORRIDORS.md.
   for (const f of splats) f.dispose()
@@ -770,14 +920,34 @@ async function openLevel(id: string) {
    * Refusing to drive because a catalog entry is missing would be the worst of the options.
    */
   playerVehicle = null
+  playerModel = null
   if (lvl.player?.vehicle) {
+    /*
+     * A BUILD FIRST, THEN A CATALOG ITEM. `player.vehicle` may name a vehicle build — a model plus
+     * the dynamics somebody tuned for it, which is what the vehicles screen and the `vehicle_save`
+     * tool make — or a bare catalog id, whose dynamics (if any) sit on the item itself. The build
+     * wins because it is the thing that was configured on purpose.
+     */
+    let modelId = lvl.player.vehicle
     try {
-      const item = await assetsvc.get(lvl.player.vehicle)
-      playerVehicle = (item?.vehicle as VehicleDoc | undefined) ?? null
+      const build = (await assetsvc.builds<{ id: string; asset: string | null; doc?: VehicleDoc }>('vehicles')).find((b) => b.id === lvl.player!.vehicle)
+      if (build) {
+        playerVehicle = build.doc ?? null
+        if (build.asset) modelId = build.asset
+      } else {
+        const item = await assetsvc.get(lvl.player.vehicle)
+        playerVehicle = (item?.vehicle as VehicleDoc | undefined) ?? null
+      }
       if (!playerVehicle) toast(`${lvl.player.vehicle} has no dynamics saved — driving the default chassis`, 'warn', 5000)
     } catch {
       toast(`could not read ${lvl.player.vehicle} — driving the default chassis`, 'warn', 5000)
     }
+    // The MODEL, fitted to whatever chassis we ended up with. Null for every ordinary reason — no
+    // mesh on the asset, a file that will not decode — and the wedge is the fallback, never no car.
+    const spec = (playerVehicle ?? defaultVehicle('hero-car')).spec
+    playerModel = await loadCarModel(modelId, spec)
+    if (playerModel) status(`car: ${lvl.player.vehicle} (${playerModel.variant}, ×${playerModel.scale.toFixed(2)}, ${playerModel.glazed} glazed)`)
+    else toast(`${lvl.player.vehicle} has no usable model — driving the default body`, 'warn', 5000)
   }
   const report = await applyLevel(lvl, {
     world: site?.manifest.slug ?? '',
@@ -823,10 +993,182 @@ async function openLevel(id: string) {
   })
   level = lvl
   for (const s of report.skipped) toast(`${lvl.id}: ${s.part} — ${s.why}`, 'warn', 6000)
+  /*
+   * THE TRAFFIC THE LEVEL ASKS FOR. Built here, after the site and after the level's own
+   * placements, because a car needs a road to stand on and a set to be made of. Physics was
+   * started for it at site build (see `trafficNeedsPhysics`); without it the cars still drive,
+   * they just cannot be hit.
+   */
+  traffic?.dispose()
+  traffic = null
+  const wantTraffic = lvl.simulations?.find((x) => x.kind === 'traffic') as TrafficSpec | undefined
+  if (wantTraffic && site) {
+    traffic = new TrafficLayer(site, actors, physics)
+    scene.add(traffic.group)
+    try {
+      const n = await traffic.load(site.manifest.slug, wantTraffic)
+      status(`traffic: ${n} cars`)
+      for (const p of traffic.problems) toast(`traffic: ${p}`, 'warn', 6000)
+      if (!n) toast(`${lvl.id}: traffic asked for, but no zone or density put a car anywhere`, 'warn', 6000)
+    } catch (e) {
+      toast(`traffic: ${String((e as Error).message ?? e)}`, 'warn', 8000)
+    }
+  }
+  // and the program, last: it may read the traffic and the races, so both are in place first
+  if (lvl.program) await startProgram(lvl.program)
+  else stopProgram()
 }
 
 /** the level in force, for the probe surface and for whatever runs simulations later */
 let level: Awaited<ReturnType<typeof loadLevel>> = null
+/** the level's traffic, once a level with a traffic simulation has opened */
+let traffic: TrafficLayer | null = null
+/** the level's program, running: goal, score, outcome. Null when the level names none */
+let game: GameRun | null = null
+let gameLine = ''
+let hudHidden = false
+
+/**
+ * Run the program a level names.
+ *
+ * THE VIEWER RUNS IT, and this is the piece the plan called "wiring ProgramHost.layers": until now
+ * a program could be written, checked, built and dry-run against a stub, and never driven. The
+ * JavaScript comes from the world editor (`?js=1`, the same TypeScript the repo builds with), the
+ * module loads through the same shims the Program pane uses, and the host below is the real one —
+ * the car, the clock, the presets, the races, the traffic zones and the stunts of the world on
+ * screen. Every failure is a toast and a null `game`, never a broken world.
+ */
+async function startProgram(path: string): Promise<boolean> {
+  stopProgram()
+  let js = ''
+  try {
+    const r = await fetch(`/api/programs/${path.split('/').map(encodeURIComponent).join('/')}?js=1`)
+    if (!r.ok) throw new Error(`HTTP ${r.status}`)
+    const body = (await r.json()) as { js: string; errors: { message: string; line: number | null }[] }
+    if (body.errors?.length) throw new Error(body.errors.map((e) => `${e.line ?? '?'}: ${e.message}`).join('; '))
+    js = body.js
+  } catch (e) {
+    toast(`program ${path}: could not build — ${String((e as Error).message ?? e)}`, 'warn', 8000)
+    return false
+  }
+  let def
+  try {
+    def = await loadGameModule(js)
+  } catch (e) {
+    toast(`program ${path}: ${String((e as Error).message ?? e)}`, 'warn', 8000)
+    return false
+  }
+  const run = new GameRun(programHost(), def)
+  const ok = await run.start()
+  if (!ok) {
+    toast(`program ${path}: setup threw — ${run.error}`, 'warn', 8000)
+    return false
+  }
+  game = run
+  gameLine = ''
+  showGame()
+  return true
+}
+
+function stopProgram() {
+  if (!game) return
+  try { game.stop() } catch (e) { console.warn('program stop:', e) }
+  game = null
+  gameLine = ''
+  hudHidden = false
+  if (!drive.on) clearStatus()
+}
+
+/** The goal and the score, on the readout, whenever they change; the outcome, once, as a toast. */
+function showGame() {
+  if (!game || hudHidden) return
+  const line = game.outcome
+    ? `${game.outcome === 'win' ? 'WIN' : game.outcome === 'lose' ? 'LOSE' : 'abandoned'} · ${game.score} pts`
+    : `${game.goalText || 'no goal yet'}${game.score ? ` · ${game.score} pts` : ''}`
+  if (line !== gameLine) {
+    gameLine = line
+    status(line)
+    if (game.outcome) toast(line, game.outcome === 'win' ? 'ok' : 'warn', 8000)
+  }
+}
+
+function programHost(): ProgramHost {
+  const siteAt = (): { x: number; y: number; z: number } | null => {
+    if (drive.car) return { x: drive.car.pos.x, y: -drive.car.pos.z, z: drive.car.pos.y }
+    return { x: camera.position.x, y: -camera.position.z, z: camera.position.y }
+  }
+  return {
+    actors,
+    hide: (what, hidden) => {
+      switch (what) {
+        case 'minimap': minimap?.show(!hidden); break
+        case 'street-names': {
+          tuneKey('HUD_ROAD_NAME')?.set(hidden ? 0 : 1)
+          if (site?.layers.blades) site.layers.blades.visible = !hidden
+          break
+        }
+        case 'hud': hudHidden = hidden; if (hidden) clearStatus(); else showGame(); break
+        case 'traffic': if (traffic) traffic.group.visible = !hidden; break
+        case 'signals': if (site?.layers.signals) site.layers.signals.visible = !hidden; break
+        case 'buildings': if (site?.layers.buildings) site.layers.buildings.visible = !hidden; break
+      }
+    },
+    transport: (mode) => {
+      if (mode === 'drive') { setCraft(null); setDrive(true); return }
+      if (mode === 'walk' || mode === 'walk-third') { setCraft(null); setDrive(false); setWalk(true); return }
+      if (mode === 'fly') { setDrive(false); setCraft(null); setWalk(false); return }
+      if ((CRAFT_KINDS as string[]).includes(mode)) setCraft(mode as CraftKind)
+    },
+    preset: (id, opts) => {
+      if (!presets) return
+      const t = presets.apply(id, opts)
+      if (!t) onTuneChange()
+    },
+    say: (text, kind) => toast(text, kind ?? 'info', 4000),
+    playerAt: siteAt,
+    playerSpeed: () => Math.abs(drive.car?.speed ?? 0),
+    setTime: (hhmm) => { worldClock.setLocal(siteZone(), undefined, hhmm); applySky(season, false) },
+    setWeather: (w) => setWeatherSelection(w as Weather),
+    physics: {
+      setProfile: (id, overrides) => {
+        if (drive.car instanceof RapierCar) drive.car.setProfile(driveProfile(id, overrides))
+      },
+      car: () => (drive.car ? { speed: drive.car.speed, slide: drive.car.slide ?? 0, airborne: false, damage: 0 } as never : null),
+    },
+    layers: {
+      raceIds: () => raceWorld?.courses.map((c) => c.id) ?? [],
+      race: (id) => {
+        const c = raceWorld?.courses.find((x) => x.id === id)
+        return c ? { id: c.id, name: c.name, kind: c.kind, laps: c.laps ?? 1, gates: c.gates.length } : null
+      },
+      startRace: (id) => raceWorld?.session.start(id) ?? false,
+      abandonRace: () => raceWorld?.session.abandon(),
+      raceState: () => {
+        const st = raceWorld?.state
+        return st ? { phase: st.phase, course: st.course?.id ?? null, time: st.time, penalties: st.penalties, lap: st.lap, laps: st.laps } : null
+      },
+      trafficIds: () => traffic?.zones.list.map((z) => z.id) ?? [],
+      trafficDensity: (id) => {
+        const i = traffic?.zones.list.findIndex((z) => z.id === id) ?? -1
+        return i >= 0 ? (traffic!.zones.rolled[i]?.density ?? null) : null
+      },
+      setTraffic: (id, density) => {
+        const i = traffic?.zones.list.findIndex((z) => z.id === id) ?? -1
+        if (i < 0) return false
+        traffic!.zones.setDensity(i, density)
+        return true
+      },
+      trafficAt: (x, y) => traffic?.zones.densityAt(x, y) ?? 0,
+      stuntIds: () => stuntWorld?.fixtures.map((f) => f.id) ?? [],
+      showStunt: () => false,
+      stuntVisible: (id) => (stuntWorld?.fixtures.some((f) => f.id === id) ? true : null),
+      stuntAt: (id) => {
+        const f = stuntWorld?.fixtures.find((x) => x.id === id)
+        return f ? { x: f.at[0], y: f.at[1], z: 0 } : null
+      },
+    },
+  }
+}
 /**
  * The dynamics of the car the open level names, fetched when the level opens.
  *
@@ -836,6 +1178,8 @@ let level: Awaited<ReturnType<typeof loadLevel>> = null
  * the same state as far as this is concerned: null, and the engine's default chassis.
  */
 let playerVehicle: VehicleDoc | null = null
+/** the level's car as a MODEL, loaded beside its numbers. Null = the procedural wedge */
+let playerModel: CarModel | null = null
 
 // ---------------------------------------------------------------------------------------------
 // layers
@@ -846,6 +1190,12 @@ function applyLayers() {
   site.setImagery(on('imagery'))
   site.setWire(on('wire'))
   site.setCanopy(on('canopy'))
+  // the captured world is a knob (it drops and reloads tiles), so the layer drives the knob
+  {
+    const k = tuneKey('SPLAT_ENABLED')
+    const want = on('splats') ? 1 : 0
+    if (k && k.get() !== want) { k.set(want); onTuneChange() }
+  }
   site.layers.buildings.visible = on('buildings')
   if (site.layers.power) site.layers.power.visible = on('power')
   if (site.layers.trees) site.layers.trees.visible = on('trees')
@@ -889,38 +1239,6 @@ function fillInfo(m: Manifest) {
 }
 // ---------------------------------------------------------------------------------------------
 // cameras
-/** Squishy Hunt on this site, on foot; G again ends it. */
-function startSquishy() {
-  if (!site) return
-  game?.dispose()
-  game = new SquishyHunt(site, document.body)
-  // ?room=name&player=Ava shares the hunt through the world-editor service's relay
-  const qs = new URLSearchParams(location.search)
-  const roomName = qs.get('room')
-  if (roomName) game.join(roomName, qs.get('player') ?? 'you')
-  setDrive(false)
-  setWalk(true)
-  toast(`Squishy Hunt: ${game.hauls.length} squishies hidden around town. Walk with W/A/S/D, look with the right mouse button.`, 'info', 6000)
-}
-/** Parkour on this site: the runner takes the camera; P again ends it. */
-function startParkour() {
-  if (!site || !fly) return
-  game?.dispose()
-  game = null
-  setDrive(false)
-  fly.setWalk(false)
-  fly.enabled = false
-  orbit.enabled = true
-  parkour = new Parkour(site, camera, orbit, canvas, document.body)
-  ;(window as unknown as { __parkour: Parkour }).__parkour = parkour // probes drive the tick directly
-  toast('Parkour: W/A/S/D run, Space jumps, A/D spin in the air, Space again to roll it out. F draws the bow.', 'info', 7000)
-}
-function endParkour() {
-  if (!parkour) return
-  parkour.dispose()
-  parkour = null
-  if (fly) fly.enabled = !drive.on
-}
 /**
  * Get into, or out of, one of the craft in the transport library.
  *
@@ -932,7 +1250,6 @@ function setCraft(kind: CraftKind | null) {
   if (!transport) return
   if (kind) {
     if (drive.on) setDrive(false)
-    if (parkour) endParkour()
     transport.take(kind)
     transport.enabled = true
     if (fly) fly.enabled = false
@@ -964,6 +1281,9 @@ function setWalk(on: boolean) {
 }
 function setDrive(on: boolean) {
   drive.on = on
+  // the chase camera may have rolled with the car; everything else expects the horizon
+  chaseUp.set(0, 1, 0)
+  camera.up.set(0, 1, 0)
   if (on) {
     // Entering drive mode is always a click or a keypress, which is the gesture the browser wants
     // before it will let an AudioContext make a sound. Starting anywhere else gets a context that
@@ -992,17 +1312,37 @@ function setDrive(on: boolean) {
       // `?car=rapier` beats the knob, for the same reason `?phys=1` does: this is read once, when
       // drive mode is first entered, and `tune.set` persists nothing across a reload.
       const carParam = new URLSearchParams(location.search).get('car')
-      const wantRapier = carParam ? /^(rapier|physics|1)$/i.test(carParam) : T.PHYS_CAR > 0
+      /*
+       * AND A WORLD WITH STUNTS DRIVES THE PHYSICS CAR, for the same reason it starts the physics
+       * at all: the kinematic car samples the terrain height under itself, so it drives THROUGH a
+       * loop rather than round it. Nobody who has just placed a loop wants to be told to set a
+       * knob, and `?car=` still wins.
+       */
+      // …and so does a level with traffic in it: the kinematic car cannot touch a traffic car, and a
+      // jam you drive through as if it were fog is not the game anybody authored
+      const wantRapier = carParam
+        ? /^(rapier|physics|1)$/i.test(carParam)
+        : T.PHYS_CAR > 0 || (stuntWorld?.count ?? 0) > 0 || (traffic?.count ?? 0) > 0
       if (physics && wantRapier) {
         // Spawned at the photo station, which is where `place` below puts it anyway — a car that
         // exists half a kilometre away for one frame is a heightfield tile built somewhere nobody
         // is ever going to drive.
         const at = site.spineAt(site.manifest.spine.photo_s)
-        // the level's choice of game, the asset's own engine — see `spawnCar`
-        const wantProfile = level?.player?.profile
+        /*
+         * The level's choice of game, the asset's own engine — see `spawnCar`.
+         *
+         * AND A STUNT WORLD GETS THE STUNT CAR when nothing else has said. Rich, 2026-09-29:
+         * *"that car needs a lot more power… can't get it fast enough to do a loop de loop"*. The
+         * `street` profile is 7.5 m/s² per kilo and 58 m/s; `stunts` is 11 and 82, and a loop is
+         * held by speed. A level that names a profile, or a knob somebody has moved off its
+         * default, still wins — an explicit choice always beats an inference.
+         */
+        const stuntish = (stuntWorld?.count ?? 0) > 0 && T.physProfileId() === 'street'
+        const wantProfile = level?.player?.profile ?? (stuntish ? 'stunts' : undefined)
         drive.car = new RapierCar(
           physics.spawnCar({ x: at.pos.x, z: at.pos.z, yaw: Math.atan2(at.dir.z, at.dir.x) }, wantProfile, playerVehicle ?? undefined),
           surface,
+          playerModel?.object,
         )
         status(`driving: rapier, ${wantProfile ?? T.physProfileId()}${playerVehicle ? `, ${level?.player?.vehicle}` : ''}`)
       } else {
@@ -1586,6 +1926,28 @@ addEventListener('keydown', (e) => {
     tgt.blur()
     e.preventDefault()
   } else if (inField && !(tgt.tagName === 'INPUT' && (tgt as HTMLInputElement).type === 'range' && e.code === 'Tab')) return
+  /*
+   * ESCAPE LEAVES THE RACE. Rich, 2026-09-29: *"the ability to exit the race"*.
+   *
+   * It is checked before anything else a key might mean, and only while a race is actually on, so
+   * it cannot shadow whatever Escape does the rest of the time. Pressed again on the results it
+   * clears them and hands the world back.
+   */
+  if (e.code === 'Escape' && raceWorld) {
+    const phase = raceWorld.state.phase
+    if (phase === 'armed' || phase === 'countdown' || phase === 'running') {
+      e.preventDefault()
+      raceWorld.session.abandon()
+      status('race abandoned — drive back into the ring to try again')
+      return
+    }
+    if (phase === 'finished' || phase === 'abandoned') {
+      e.preventDefault()
+      raceWorld.session.reset()
+      status('')
+      return
+    }
+  }
   if (e.code === 'Tab') { e.preventDefault(); setDrive(!drive.on); return }
   if (e.code === 'F6') { e.preventDefault(); tuneUI.toggle(); return }
   held.add(e.code)
@@ -1597,12 +1959,14 @@ addEventListener('keydown', (e) => {
     case 'KeyM': setChromeHidden(!document.body.classList.contains('chrome-off')); break
     case 'KeyN': minimap?.setExpanded(!minimap.expanded); break
     case 'KeyB': if (!drive.on && fly) setWalk(!fly.walk); break
-    case 'KeyG': if (game) { game.dispose(); game = null; toast('hunt over', 'info', 1200) } else startSquishy(); break
-    // KeyP IS TAKEN by the photo stance six lines up, and a `switch` runs the first matching case
-    // — so this was dead from the day it was written and parkour could not be started from the
-    // keyboard at all. K, which nothing else uses.
-    case 'KeyK': if (parkour) { endParkour(); toast('parkour over', 'info', 1200) } else startParkour(); break
     case 'KeyV': cycleCraft(e.shiftKey); break
+    case 'F7': {
+      e.preventDefault()
+      const on = perfHud.toggle()
+      setPerfWanted(on)
+      toast(on ? 'performance stats on' : 'performance stats off', 'info', 1200)
+      break
+    }
     // R backs you out the way you came (stuntin's recover); Shift+R is the old teleport to the
     // photo station, kept for getting back to the start of the corridor
     case 'KeyR':
@@ -1743,6 +2107,8 @@ function pick(e: PointerEvent): boolean {
 // frame loop
 const clock = new THREE.Clock()
 const up = new THREE.Vector3(0, 1, 0)
+/** the chase camera's own up: the horizon on a road, the car's roof through a loop (CHASE_ROLL) */
+const chaseUp = new THREE.Vector3(0, 1, 0)
 const viewDir = new THREE.Vector3()
 // The camera's ears. Reused rather than allocated, because this is every frame.
 const earDir = new THREE.Vector3()
@@ -1754,6 +2120,9 @@ let lastSkyReal = -1e15
 function frame() {
   const real = clock.getDelta()
   const dt = Math.min(0.1, real)
+  // the frame's own clock, for the performance panel: `real` is the gap between frames, and the
+  // work we do inside this function is measured separately so the two can be compared
+  const cpu0 = perfHud.open ? performance.now() : 0
   /*
    * The physics world, once a frame.
    *
@@ -1765,6 +2134,13 @@ function frame() {
    * `real`, not `dt`: the accumulator inside the physics world does its own capping, and handing it
    * an already-capped delta would make the simulation quietly run slow through every hitch.
    */
+  // the traffic steps before the physics, so its bodies are where the cars are when the player hits one
+  if (traffic) traffic.tick(real, camera.position)
+  if (game) {
+    game.tick(real)
+    showGame()
+    if (game.error) { toast(`program: ${game.error}`, 'warn', 8000); game = null }
+  }
   if (physics) physics.update(drive.car?.pos ?? camera.position, real)
   // the world's clock, and the light that follows from it. applySky is cheap (no geometry), so it
   // runs whenever the sun has moved enough to see — a degree of elevation is about four minutes of
@@ -1804,6 +2180,16 @@ function frame() {
     readDriveKeys()
     // fixed-step sim at 120 Hz like stuntin, so speed does not depend on the frame rate
     for (let acc = dt; acc > 0; acc -= 1 / 120) car.tick(Math.min(acc, 1 / 120), drive.input)
+    /*
+     * ON A STUNT FIXTURE, THE TRACK DECIDES WHICH WAY IS DOWN.
+     *
+     * A ray-cast vehicle feels the road along its own down axis, so a level car cannot feel a loop
+     * that has stood up in front of it — it drove straight through (Rich, 2026-09-29). Turn the
+     * body to face the surface and the rays point into it, the suspension loads, and the wheels
+     * carry the car round. Nothing happens anywhere else: `nearestPose` answers null off a fixture,
+     * and on the flat run-in the correction is zero because the surface already agrees with gravity.
+     */
+    holdToTrack(car, dt)
     drive.input.throttle = padT
     drive.input.brake = padB
     // Site metres — x east, y north, z up — not three's axes. The conversion happens here, once.
@@ -1813,6 +2199,18 @@ function frame() {
       Transform.z[playerEngine] = car.pos.y
       engineSound.syncFromCar(playerEngine, car, drive.input.throttle, dt)
     }
+    /*
+     * WHICH WAY IS UP FOR THE CAMERA. Rich, 2026-09-29, first time round the loop: *"when the car
+     * went upside down the camera stayed right side up and I got disoriented and drove off the
+     * loop."* So the camera's up follows the CAR's up — `CHASE_ROLL` of it, smoothed by
+     * `CHASE_ROLL_LAG` — and the rig is built in that frame: behind the car along its own floor,
+     * above it along its own roof. At 0 the old horizon-locked camera is back. The blend passes
+     * through zero length half way to inverted at 0.5, so a degenerate blend keeps the last frame's.
+     */
+    const carUp = car.right.clone().cross(car.forward).normalize()
+    const wantUp = up.clone().lerp(carUp, T.CHASE_ROLL)
+    if (wantUp.lengthSq() > 1e-4) chaseUp.lerp(wantUp.normalize(), 1 - Math.exp(-T.CHASE_ROLL_LAG * dt)).normalize()
+    camera.up.copy(chaseUp)
     // chase camera: behind and above, looking over the bonnet; drag adds a look-around yaw
     if (drive.cockpit) {
       // cockpit: eye at the driver's head, looking down the nose (stuntin's C view); drive.yaw/pitch look around.
@@ -1820,17 +2218,21 @@ function frame() {
       // site.updateNear (the grass, the trees, the tile stream and the grading pump all take the
       // eye from it) and the minimap. Pressing C stopped the world (Rich, 2026-09-26): the frames
       // kept coming, but nothing was ever told where the camera had got to.
-      const eye = car.pos.clone().add(new THREE.Vector3(0, T.COCKPIT_EYE_UP, 0)).add(car.forward.clone().multiplyScalar(T.COCKPIT_EYE_FWD))
+      // the head sits in the car, so it is the car's up — COCKPIT_ROLL of it — that lifts it off the seat
+      const headUp = up.clone().lerp(carUp, T.COCKPIT_ROLL).normalize()
+      const eye = car.pos.clone().add(headUp.clone().multiplyScalar(T.COCKPIT_EYE_UP)).add(car.forward.clone().multiplyScalar(T.COCKPIT_EYE_FWD))
       camera.position.copy(eye)
-      const ahead = car.forward.clone().applyAxisAngle(up, drive.yaw)
-      camera.lookAt(eye.clone().add(ahead.multiplyScalar(30)).add(new THREE.Vector3(0, -Math.tan(drive.pitch) * 30 + T.COCKPIT_LOOK_UP, 0)))
+      camera.up.copy(headUp)
+      const ahead = car.forward.clone().applyAxisAngle(headUp, drive.yaw)
+      camera.lookAt(eye.clone().add(ahead.multiplyScalar(30)).add(headUp.multiplyScalar(-Math.tan(drive.pitch) * 30 + T.COCKPIT_LOOK_UP)))
     } else {
-      const back = car.forward.clone().applyAxisAngle(up, drive.yaw).multiplyScalar(-T.CHASE_BACK)
-      const want = car.pos.clone().add(back).add(new THREE.Vector3(0, T.CHASE_UP + Math.tan(drive.pitch) * 4, 0))
-      const gy = site.groundAt(want.x, want.z)
+      const back = car.forward.clone().applyAxisAngle(chaseUp, drive.yaw).multiplyScalar(-T.CHASE_BACK)
+      const want = car.pos.clone().add(back).add(chaseUp.clone().multiplyScalar(T.CHASE_UP + Math.tan(drive.pitch) * 4))
+      // the ground clamp is for a camera under the road, which only means something while up is up
+      const gy = chaseUp.y > 0.5 ? site.groundAt(want.x, want.z) : null
       if (gy !== null && want.y < gy + 1.2) want.y = gy + 1.2
       camera.position.lerp(want, 1 - Math.exp(-T.CHASE_LAG * dt))
-      camera.lookAt(car.pos.clone().add(car.forward.clone().multiplyScalar(T.CHASE_LOOK_AHEAD)).add(new THREE.Vector3(0, 1.0, 0)))
+      camera.lookAt(car.pos.clone().add(car.forward.clone().multiplyScalar(T.CHASE_LOOK_AHEAD)).add(chaseUp.clone().multiplyScalar(1.0)))
     }
     if (car.event === 'bump') status('bump')
     // what road is this? The name comes from the same station grid the car stands on, so the
@@ -1856,9 +2258,7 @@ function frame() {
       tele = ` · ${ft} ft · ${pt} ${brg.toFixed(0).padStart(3, '0')}°`
     }
     ui.setPos(`${(Math.abs(car.speed) * 2.237).toFixed(0)} mph · ${car.onGrass ? 'grass' : 'pavement'}${Math.abs(car.slide) > 1 ? ' · sliding' : ''}${road ? ` · ${road}` : ''}${tele}`)
-  } else if (parkour) {
-    parkour.tick(dt)
-    ui.setPos(`${parkour.score} pts`)
+
   } else if (craft && transport) {
     transport.update(dt)
     const r = transport.readout()
@@ -1899,6 +2299,19 @@ function frame() {
       up: { x: earUp.x, y: -earUp.z, z: earUp.y },
     })
   }
+  if (raceWorld) {
+    /*
+     * THE PLAYER'S POSITION IN SITE METRES. `drive.car.pos` and the camera are both three vectors —
+     * x east, y up, z SOUTH — and every course is authored with y north. One conversion, here.
+     */
+    const p = drive.on && drive.car ? drive.car.pos : camera.position
+    const out = raceWorld.tick({ x: p.x, y: -p.z }, dt)
+    if (out.banner && out.banner !== lastRaceBanner) {
+      lastRaceBanner = out.banner
+      status(out.banner)
+    }
+    if (!out.banner) lastRaceBanner = null
+  }
   if (site) {
     // the canopy overhead changes as you drive; the light under it follows, smoothed
     const eye = drive.on && drive.car ? drive.car.pos : camera.position
@@ -1915,7 +2328,11 @@ function frame() {
     const pitch = Math.max(0, -Math.asin(THREE.MathUtils.clamp(fwd.y, -1, 1))) // 0 level, +down
     site.updateNear(camera.position, clock.elapsedTime, fwd, pitch)
     // splat tiles stream by locality like the imagery; site frame is x east, y north = -z
-    for (const f of splats) f.update(camera.position.x, -camera.position.z)
+    for (const f of splats) {
+      f.update(camera.position.x, -camera.position.z)
+      // and the ordering, which is asked for only when the camera has moved enough to need one
+      f.step(camera, scene)
+    }
     // the world looks wet while it is wet: the weather ramps it, the surfaces follow
     site.setWet(site.weather.wetness)
     // THE SKY TURNS. One matrix for nine thousand stars, rebuilt each frame from the clock — so
@@ -1941,8 +2358,6 @@ function frame() {
     const lamps = drive.car?.lamps()
     retro.setLamps(lamps?.each ?? [], lamps?.on ?? 0)
     retro.tick()
-    // the player is the car when driving, the eye on foot or in the air; heading is compass from north
-    if (game) game.tick(dt, drive.on && drive.car ? drive.car.pos : camera.position, drive.on && drive.car ? Math.atan2(drive.car.forward.x, -drive.car.forward.z) : Math.atan2(fwd.x, -fwd.z))
     // the inset map follows the car when driving, the camera when flying; site frame is x east, y north = -z
     if (drive.on && drive.car) minimap?.draw({ x: drive.car.pos.x, y: -drive.car.pos.z, yaw: Math.atan2(-drive.car.forward.z, drive.car.forward.x) })
     else minimap?.draw({ x: camera.position.x, y: -camera.position.z, yaw: Math.atan2(-fwd.z, fwd.x) })
@@ -1950,6 +2365,25 @@ function frame() {
   skyDome.tick(performance.now() / 1000)
   if (composer) composer.render()
   else renderer.render(scene, camera)
+  /*
+   * MEASURED AFTER THE RENDER CALL, which is the honest place: `renderer.info` holds the counts of
+   * the frame that has just been submitted, and the CPU time covers everything this function did
+   * including submitting it. What it does NOT include is the GPU actually finishing — the gap
+   * between `cpuMs` and the frame time is where that shows up.
+   */
+  if (perfHud.open) {
+    perfMeter.frame(real * 1000, performance.now() - cpu0)
+    const info = renderer.info
+    perfMeter.counts = {
+      calls: info.render.calls,
+      triangles: info.render.triangles,
+      lines: info.render.lines,
+      points: info.render.points,
+      geometries: info.memory.geometries,
+      textures: info.memory.textures,
+      programs: info.programs?.length ?? 0,
+    }
+  }
   requestAnimationFrame(frame)
 }
 
@@ -1973,6 +2407,34 @@ startDevBridge()
 registerBridgeContext({
   get site() {
     return site
+  },
+  /**
+   * The world's stunt fixtures, or null when it has none.
+   *
+   * `stuntSurfaces()` on the physics beside it is the pair that answers the only question that
+   * matters about a loop: is the thing you can see also a thing you can hit.
+   */
+  get stunts() {
+    return stuntWorld
+  },
+  /** the level's traffic layer, or null: `count`, `problems`, `zones`, `entities`, `tick(dt, eye)` */
+  get traffic() {
+    return traffic
+  },
+  /** the level's program run, or null: `goalText`, `score`, `outcome`, `error`, `messages` */
+  get game() {
+    return game
+  },
+  /** run a program by path, the way a level does — for a probe, and for trying one without a level */
+  startProgram: (path: string) => startProgram(path),
+  /**
+   * The world's races: the session, its courses and its markers.
+   *
+   * `races.session.start(id)` begins one without driving into its throbber, which is how a probe
+   * and a program both do it.
+   */
+  get races() {
+    return raceWorld
   },
   scene,
   camera,
@@ -2023,6 +2485,27 @@ registerBridgeContext({
    * 30 frames is half a second on a real card and fits inside the bridge's 5 s eval timeout; ask
    * for more with `apex.perf(120)` and pass `--timeout 30000` to the client.
    */
+  /**
+   * The performance panel's own meter and its panel, for probes and the console.
+   *
+   * `perf()` below is the bridge's one-shot frame sampler and predates this; the METER is the live
+   * window the panel reads — `apex.perfMeter.read()` is exactly what is on screen.
+   */
+  /**
+   * Hold the car to whatever stunt surface it is on, for one step.
+   *
+   * The frame loop does this every frame; a probe that steps the car itself has to call it too, or
+   * it is driving a car the game does not have.
+   */
+  assist: (dt = 1 / 60) => holdToTrack(drive.car, dt),
+
+  get perfMeter() {
+    return perfMeter
+  },
+  get perfHud() {
+    return perfHud
+  },
+
   perf: (frames = 30) =>
     new Promise<unknown>((resolve) => {
       const t: number[] = []

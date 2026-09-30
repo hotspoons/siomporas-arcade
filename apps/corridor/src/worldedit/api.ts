@@ -137,7 +137,7 @@ export interface Preview {
 
 export interface Run {
   id: string
-  kind: 'bake' | 'publish'
+  kind: 'bake' | 'publish' | 'deploy'
   slug: string
   label: string
   runner: 'kubernetes' | 'local'
@@ -224,6 +224,49 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
   }
   if (!r.ok) throw new Error((body as { error?: string })?.error ?? `${path}: HTTP ${r.status}`)
   return body as T
+}
+
+export interface DeployStatus {
+  token: { present: boolean; source: 'env' | 'entered' | null }
+  worlds: { slug: string; name: string }[]
+  app: string
+  defaults: { prefix: string; worker: string }
+}
+export interface DeployCloudflare {
+  accounts: { id: string; name: string }[]
+  account: string | null
+  zones: { id: string; name: string; status: string }[]
+  buckets: { name: string; created: string | null }[]
+  subdomain: string | null
+}
+export interface DeployPlan {
+  worlds: string[]
+  levels: string[]
+  assets: { items: string[]; builds: Record<string, string[]>; materials: string[] }
+  byGroup: Record<string, { objects: number; bytes: number }>
+  bytes: number
+  count: number
+  app: { files: number; bytes: number } | null
+  warnings: string[]
+  problems: string[]
+}
+export interface DeployRevision {
+  prefix: string
+  worlds: string[]
+  at: string
+  worker: string
+  objects: number
+  bytes: number
+}
+export interface DeployRequest {
+  worlds: string[]
+  account: string
+  bucket: string
+  createBucket?: boolean
+  prefix?: string
+  worker: { name: string; workersDev?: boolean; hostname?: string | null; zoneId?: string | null }
+  prune?: boolean
+  dryRun?: boolean
 }
 
 /* ---- what the new services return ------------------------------------------------------------ */
@@ -477,6 +520,19 @@ export const api = {
   run: (id: string) => call<{ run: Run }>(`/api/runs/${id}`),
   bake: (slug: string, opts: { skip?: string } = {}) => call<{ run: Run }>('/api/runs/bake', { method: 'POST', body: JSON.stringify({ slug, ...opts }) }),
   publish: (slug: string, opts: { dryRun?: boolean } = {}) => call<{ run: Run }>('/api/runs/publish', { method: 'POST', body: JSON.stringify({ slug, ...opts }) }),
+
+  /* ---- deploy: a world (or several) to Cloudflare — R2 for the data, a Worker for the app ----
+   * The token is POSTed once and held in the server's memory; `status` says whether one is there
+   * and where it came from, never what it is.
+   */
+  deployStatus: () => call<DeployStatus>('/api/deploy/status'),
+  deployToken: (token: string) => call<{ token: DeployStatus['token']; status?: string }>('/api/deploy/token', { method: 'POST', body: JSON.stringify({ token }) }),
+  deployForgetToken: () => call<{ token: DeployStatus['token'] }>('/api/deploy/token', { method: 'DELETE' }),
+  deployCloudflare: (account?: string | null) => call<DeployCloudflare>(`/api/deploy/cloudflare${account ? `?account=${encodeURIComponent(account)}` : ''}`),
+  deployCreateBucket: (account: string, name: string) => call<{ bucket: string }>('/api/deploy/bucket', { method: 'POST', body: JSON.stringify({ account, name }) }),
+  deployPlan: (worlds: string[]) => call<DeployPlan>('/api/deploy/plan', { method: 'POST', body: JSON.stringify({ worlds }) }),
+  deployRevisions: (account: string, bucket: string) => call<{ deployments: DeployRevision[] }>(`/api/deploy/revisions?account=${encodeURIComponent(account)}&bucket=${encodeURIComponent(bucket)}`),
+  deployStart: (body: DeployRequest) => call<{ run: Run; prefix: string; worker: string }>('/api/deploy/start', { method: 'POST', body: JSON.stringify(body) }),
   cancel: (id: string) => call<{ run: Run }>(`/api/runs/${id}/cancel`, { method: 'POST' }),
   /** Bytes from `offset`. The whole streaming protocol — see tools/worldeditor/runs.mjs. */
   log: (id: string, offset: number) => call<{ text: string; offset: number; size: number; truncated: boolean }>(`/api/runs/${id}/log?offset=${offset}`),

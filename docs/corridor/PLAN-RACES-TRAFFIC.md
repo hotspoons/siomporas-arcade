@@ -548,3 +548,19 @@ stop or slow down"; and at 12 fps "trying to straighten my car out was in slow m
 Measured here (swiftshader, 600 cars): traffic actors 0.7 ms, place 0.3 ms, physics 0.2 ms a
 frame. The main-loop cost Rich saw was the dents (a 130k-vertex walk per impact per mesh, every
 step of a resting pile) and the pile itself on the GPU; both are bounded now.
+
+## Stages from the viewer, L for the lights, and a deploy (2026-09-30, last)
+
+- **Stages.** The viewer's drawer has a Stages section: every level set in the world on screen,
+  the open one marked, "Free roam" to leave it. It reads `/api/levels` (the world editor's list,
+  or a static object at that path in a deployed copy). Opening a stage over a bare world happens
+  in place; leaving one or swapping is a reload — a level is not unloadable in place.
+- **L.** The headlights still follow the night; L flips them, and the override lasts until the
+  night changes (`lightsLevel` in main.ts). Listed in Settings → Controls.
+- **Deploy.** World editor mode 9: token (env or typed, in memory only) → worlds (one or several,
+  one URL) → query Cloudflare → worker name, workers.dev and/or a hostname in a zone, bucket (or a
+  new one), prefix `corridor/<world>-<stamp>`, prune older copies → plan → deploy as a run.
+  `tools/worldeditor/{cloudflare,deploy}.mjs`, `deploy/worker.mjs`; `docs/corridor/DEPLOY.md`.
+  Only what the worlds use goes up, measured by following ids through the documents and builds
+  (Route 3: 254 objects, 129 MB, 11 of the library's cars). No real deploy has been run: there is
+  no token here. Probes: `corridor-stages-lights.mjs`; tests: `cloudflare.test.mjs`, `deploy.test.mjs`.

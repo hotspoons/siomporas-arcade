@@ -32,6 +32,7 @@ import { McpPanel } from '../ui/mcppanel'
 import { fromUrl, load as loadNav, resolve as resolveNav, save as saveNav, toUrl } from './nav'
 import { ROOT, SITE_DOCS } from '../agent/projection'
 import { SplatsPanel } from './splats'
+import { DeployPanel } from './deploy'
 import { worldMenuTransfer } from './transfer'
 import { GitPanel } from './gitpanel'
 import { dockWidth } from '../ui/dockwidth'
@@ -64,7 +65,7 @@ import type { CourseDoc } from '../races'
  * first. They are steps inside `world` now, and `index` — which named itself after a data
  * structure — is "Places", which is what it holds.
  */
-const MODES = ['world', 'place', 'stage', 'assets', 'program', 'shell', 'agent', 'splats'] as const
+const MODES = ['world', 'place', 'stage', 'assets', 'program', 'shell', 'agent', 'splats', 'deploy'] as const
 type Mode = (typeof MODES)[number]
 
 /** The stages of making a world, in the order you do them. */
@@ -536,6 +537,8 @@ async function loadRoads(bbox: Box, zoom: number) {
 /* ---- panels -------------------------------------------------------------------------------- */
 
 const logs = new LogView()
+/** a world (or several) to Cloudflare: R2 for the data, a Worker for the app (deploy.ts) */
+const deployPanel = new DeployPanel({ host: inspector, logs })
 /**
  * THE ASSET LIBRARY IS A TAB, not a dialog over the map.
  *
@@ -635,6 +638,7 @@ function buildBar() {
         { value: 'shell', label: 'Shell', icon: 'server-stack', key: '6' },
         { value: 'agent', label: 'Agent', icon: 'sparkles', key: '7' },
         { value: 'splats', label: 'Splats', icon: 'camera', key: '8' },
+        { value: 'deploy', label: 'Deploy', icon: 'cloud-arrow-up', key: '9' },
       ],
       onChange: (m) => setMode(m),
     }),
@@ -1259,6 +1263,8 @@ function renderPanel() {
     void assets.open()
   } else if (mode === 'splats') {
     void splatsPanel.load()
+  } else if (mode === 'deploy') {
+    void deployPanel.load()
   } else if (at('places')) {
     renderIndex(inspector)
   } else if (at('define')) {
@@ -1413,7 +1419,7 @@ async function boot() {
     if (typing(e)) return
     // the number keys are the top bar, in the order it is drawn; the steps are not on keys,
     // because a wizard you bounce between with the mouse does not need eight shortcuts
-    const nth = '12345678'.indexOf(e.key)
+    const nth = '123456789'.indexOf(e.key)
     if (nth >= 0 && nth < MODES.length) setMode(MODES[nth])
     /*
      * NOT WHILE THE SITE EDITOR HAS THE KEYBOARD.

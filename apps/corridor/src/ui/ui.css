@@ -147,6 +147,9 @@ kbd {
 .drawer-item:hover .icon { color: var(--accent); }
 .drawer-item-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .drawer-item-hint { font-size: var(--text-xs); color: var(--ink-3); }
+/* the open stage, and a section with nothing in it yet */
+.drawer-item.on { background: var(--bg-2); box-shadow: inset 3px 0 0 var(--accent); }
+.drawer-note { font-size: var(--text-xs); color: var(--ink-3); padding: 6px 14px 8px; line-height: 1.4; }
 
 /* ---- dialog -------------------------------------------------------------------------------- */
 

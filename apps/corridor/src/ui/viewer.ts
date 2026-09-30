@@ -146,6 +146,7 @@ const KEYS: { group: string; rows: [string, string][] }[] = [
       ['A D', 'steer'],
       ['Space', 'handbrake'],
       ['R', 'reset the car'],
+      ['L', 'lights on or off (they follow the night until you press it)'],
       ['drag', 'look around'],
     ],
   },
@@ -190,6 +191,12 @@ export interface ViewerUIOpts {
   onTop: () => void
   onStance: () => void
   onTune: () => void
+  /**
+   * Open a stage (a level set in this world) by id, or null to go back to free roam. Rich,
+   * 2026-09-30: "we need a way to select stages from the viewer interface (currently no facility
+   * exists)" — the only way in was `?level=` in the address bar.
+   */
+  onOpenLevel: (id: string | null) => void
   /** the performance panel was switched on or off */
   onPerf?: (on: boolean) => void
   onStructure: (index: number) => void
@@ -266,12 +273,34 @@ export class ViewerUI {
     this.buildDrawer()
   }
 
+  private stagesSection: HTMLElement | null = null
+
+  /**
+   * The stages (levels) set in the world on screen, as drawer rows: free roam first, then each
+   * stage, the open one marked. An empty list says where a stage comes from rather than nothing.
+   */
+  setStages(levels: { id: string; world: string; name?: string | null }[], current: string | null) {
+    const s = this.stagesSection
+    if (!s) return
+    for (const c of [...s.children]) if (c.tagName !== 'H3') c.remove()
+    const mark = (b: HTMLButtonElement, on: boolean) => { b.classList.toggle('on', on); if (on) b.setAttribute('aria-current', 'true') }
+    if (current) mark(this.drawer.item(s, { id: 'stage-free', label: 'Free roam', icon: 'map', hint: 'leave the stage', onClick: () => this.o.onOpenLevel(null) }), false)
+    for (const l of levels) {
+      mark(this.drawer.item(s, { id: `stage-${l.id}`, label: l.name || l.id, icon: 'flag', hint: l.name ? l.id : 'stage', onClick: () => this.o.onOpenLevel(l.id) }), l.id === current)
+    }
+    if (!levels.length) s.append(el('div', 'drawer-note', 'No stages set in this world yet — the world editor’s Stage panel makes one.'))
+  }
+
   // ---- drawer ------------------------------------------------------------------------------
   private buildDrawer() {
     const nav = this.drawer.section('')
     this.drawer.item(nav, { id: 'settings', label: 'Settings', icon: 'cog-6-tooth', hint: 'layers, display, site, controls', onClick: () => this.settings.open() })
     this.drawer.item(nav, { id: 'tune', label: 'Tuning', icon: 'adjustments-horizontal', hint: 'live knobs over the world', key: 'F6', onClick: () => this.o.onTune() })
     this.drawer.item(nav, { id: 'editor', label: 'Editor', icon: 'pencil-square', hint: 'areas, placements, structures', onClick: () => (location.href = '/editor.html') })
+
+    // the stages set in this world; filled by `setStages` once the site (and its levels) are known
+    this.stagesSection = this.drawer.section('Stages')
+    this.setStages([], null)
 
     const view = this.drawer.section('View')
     this.drawer.item(view, { id: 'photo', label: 'Go to the photo', icon: 'camera', key: 'P', onClick: () => this.o.onPhoto() })

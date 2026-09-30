@@ -48,7 +48,7 @@ import { applySiteTuning, clearSiteTuning, saveSiteTuning } from './sitetuning'
 import { Presets, resolve, worldKnobs } from './presets'
 import { loadPresets, savePresets } from './presetstore'
 
-import { fetchJSON, type IndexEntry, type Manifest, type Structure, type Crossing } from './site'
+import { DATA_BASE, fetchJSON, type IndexEntry, type Manifest, type Structure, type Crossing } from './site'
 import { LOOK, SEASONS, type Season } from './season'
 import { STYLE, styled, isStyle, type Style } from './style'
 import { setRelief, relief, clampRelief, spineDatum, reliefManifest } from './relief'
@@ -251,6 +251,16 @@ const ui = new ViewerUI({
   },
   onSeason: (s) => setSeason(s),
   onStyle: (s) => setStyle(s),
+  onOpenLevel: (id) => {
+    const u = new URL(location.href)
+    if (id) u.searchParams.set('level', id)
+    else u.searchParams.delete('level')
+    // a stage over a bare world opens in place; leaving one, or swapping one for another, is a
+    // fresh page — a level is not unloadable in place, and a half-unloaded one is worse than a reload
+    if (!id || level) { location.href = u.toString(); return }
+    history.replaceState(null, '', u.toString())
+    void openLevel(id)
+  },
   onTrees: (t) => {
     // two knobs, one choice: cards-only is TREE_SIMPLE, the editor's trees are TREE_LOLLIPOP
     tuneKey('TREE_SIMPLE')?.set(t === 'cards' ? 1 : 0)
@@ -919,6 +929,25 @@ async function loadSite(slug: string) {
 
   const wantLevel = new URLSearchParams(location.search).get('level')
   if (wantLevel) await openLevel(wantLevel)
+  void refreshStages()
+}
+
+/**
+ * The stages set in the world on screen, for the drawer. `/api/levels` is the world editor's
+ * list (and a static object at the same path in a deployed bundle); no service is no stages,
+ * not an error.
+ */
+async function refreshStages() {
+  const slug = site?.manifest.slug
+  if (!slug) return
+  let levels: { id: string; world: string; name?: string | null }[] = []
+  try {
+    const r = await fetch(`${DATA_BASE}/api/levels`, { cache: 'no-cache' })
+    if (r.ok) levels = (((await r.json()) as { levels?: { id: string; world: string; name?: string | null }[] }).levels ?? []).filter((l) => l.world === slug)
+  } catch {
+    /* no editor behind this page */
+  }
+  ui.setStages(levels, level?.id ?? null)
 }
 
 /**
@@ -1025,6 +1054,7 @@ async function openLevel(id: string) {
     say: (m) => toast(m, 'ok', 4000),
   })
   level = lvl
+  void refreshStages()
   for (const s of report.skipped) toast(`${lvl.id}: ${s.part} — ${s.why}`, 'warn', 6000)
   /*
    * THE TRAFFIC THE LEVEL ASKS FOR. Built here, after the site and after the level's own
@@ -1872,7 +1902,8 @@ function applySky(s: Season, env = true) {
   if (env) skyEnvironment()
   else envDue = true
   // headlights follow the night, not the clock: they come on as the sun goes and off as it returns
-  drive.car?.setLights(night * (drive.on ? 1 : 0.6))
+  // — unless L has said otherwise, until the night changes (`lightsLevel`)
+  applyLights()
   // and the retroreflectors take the same day/night level as the grass and the impostors, so the
   // paint and the signs go dark with everything else and come back only in the beam (retro.ts)
   retro.setLight(
@@ -1882,6 +1913,18 @@ function applySky(s: Season, env = true) {
   // the knob is the single source of truth for road-and-car: car.ts reads T.WEATHER_GRIP_SCALE
   tuneKey('WEATHER_GRIP_SCALE')?.set(w.grip)
   site?.setWeather(weatherNow())
+}
+
+/** the L key's say over the headlights: null follows the night; 0/1 holds until the night changes */
+let lightsOverride: { on: 0 | 1; wasNight: boolean } | null = null
+/** how lit the headlamps should be, 0…1: the night, or the L key while the night it was pressed in lasts */
+function lightsLevel(): number {
+  if (lightsOverride && (skyNight > 0.5) !== lightsOverride.wasNight) lightsOverride = null
+  if (lightsOverride) return lightsOverride.on
+  return skyNight * (drive.on ? 1 : 0.6)
+}
+function applyLights() {
+  drive.car?.setLights(lightsLevel())
 }
 
 /** the weather the WEATHER knob selects */
@@ -2158,6 +2201,16 @@ addEventListener('keydown', (e) => {
     }
     // R backs you out the way you came (stuntin's recover); Shift+R is the old teleport to the
     // photo station, kept for getting back to the start of the corridor
+    // L: the lights, on or off, over the automatic ones — which take over again at the next dusk
+    // or dawn. Rich: "keep automatic lights at night, but add a key shortcut, L".
+    case 'KeyL': {
+      if (!drive.car) break
+      const lit = lightsLevel() > 0.05
+      lightsOverride = { on: lit ? 0 : 1, wasNight: skyNight > 0.5 }
+      applyLights()
+      toast(lit ? 'lights off' : 'lights on', 'info', 1000)
+      break
+    }
     case 'KeyR':
       if (!(drive.on && site && drive.car)) break
       if (e.shiftKey) { const p = site.spineAt(site.manifest.spine.photo_s); const side = p.dir.clone().cross(up).multiplyScalar(1.83); drive.car.place(p.pos.x + side.x, p.pos.z + side.z, Math.atan2(p.dir.z, p.dir.x)) }

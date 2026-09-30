@@ -1,0 +1,468 @@
+// Deploy: one or more baked worlds, as a running copy on Cloudflare — R2 for the data, a Worker
+// for the app.
+//
+// Rich, 2026-09-30: "from the world editor, if I want to bake a single world into something I
+// can deploy to Cloudflare using R2 for assets and tiles and CF workers for the main app … copy
+// just the assets used in the game, not the full library … support world multiplexing too so you
+// can deploy multiple worlds to one URL."
+//
+// TWO HALVES. `plan()` is pure: given the store, the asset service and a list of worlds it
+// produces the OBJECT LIST — every key the bucket will hold under the deploy's prefix, where each
+// one comes from (a file on the volume, a fetch from the asset service, or a JSON body made here),
+// and what it is for. The Deploy panel shows that list as a dry run. `run()` executes it: writes
+// the objects, records what it wrote, prunes what it was asked to, and publishes the Worker.
+//
+// THE KEYS ARE THE VIEWER'S OWN PATHS. `sites/<slug>/web/tiles/…`, `levels/<id>.json`,
+// `assetsvc/catalog/<id>/file/mesh.finished.glb`: exactly what the viewer fetches from its
+// origin today, so the Worker (deploy/worker.mjs) is a prefix and a lookup and the viewer is
+// deployed unchanged. Multiplexing is nothing extra: several worlds' `sites/<slug>/…` under one
+// prefix and one `sites/index.json` listing them, which is what the viewer's site picker reads.
+//
+// WHAT IS USED IS MEASURED, NOT LISTED. The asset closure is every string in the bundled
+// documents (site docs, levels, builds) that is a catalog id or a build id, followed through
+// builds to their assets until nothing new appears. No table of "fields that hold asset ids" —
+// the last four hand-typed tables in this repo are why things ended up in the road.
+
+import { readdir, readFile, stat } from 'node:fs/promises'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const HERE = path.dirname(fileURLToPath(import.meta.url))
+/** the Worker module, as published */
+export const WORKER_SOURCE = path.join(HERE, 'deploy', 'worker.mjs')
+/** the bucket-level ledger of every deploy made with this tool, so a prune knows what exists */
+export const LEDGER_KEY = 'corridor/deployments.json'
+
+export const BUILD_KINDS = ['vehicles', 'actors', 'weapons', 'presets', 'traffic']
+
+const TYPES = {
+  '.json': 'application/json',
+  '.geojson': 'application/geo+json',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.ktx2': 'image/ktx2',
+  '.pack': 'application/octet-stream',
+  '.bin': 'application/octet-stream',
+  '.glb': 'model/gltf-binary',
+  '.gltf': 'model/gltf+json',
+  '.js': 'application/javascript',
+  '.mjs': 'application/javascript',
+  '.css': 'text/css',
+  '.html': 'text/html',
+  '.svg': 'image/svg+xml',
+  '.wasm': 'application/wasm',
+  '.woff2': 'font/woff2',
+  '.woff': 'font/woff',
+  '.ttf': 'font/ttf',
+  '.txt': 'text/plain',
+  '.md': 'text/markdown',
+  '.ply': 'application/octet-stream',
+  '.splat': 'application/octet-stream',
+  '.ico': 'image/x-icon',
+  '.webmanifest': 'application/manifest+json',
+  '.map': 'application/json',
+}
+
+export function contentType(file) {
+  return TYPES[path.extname(file).toLowerCase()] ?? 'application/octet-stream'
+}
+
+/** the site's files the viewer can read: the export's `web/`, the manifest, the docs, the OSM */
+const SITE_TOP = new Set(['.json', '.geojson', '.png'])
+
+/** a default prefix: `corridor/<worlds>-<stamp>`, which is what Rich asked for */
+export function defaultPrefix(worlds, at = new Date()) {
+  const stamp = at.toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z').replace('T', '-')
+  const name = worlds.length === 1 ? worlds[0] : worlds.length ? `${worlds[0]}+${worlds.length - 1}` : 'empty'
+  return `corridor/${name}-${stamp}`
+}
+
+/** a Worker name Cloudflare accepts: lower-case, digits and dashes, 63 characters */
+export function workerName(s) {
+  return String(s).toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 63) || 'corridor'
+}
+
+async function walk(dir, rel = '') {
+  const out = []
+  for (const e of await readdir(dir, { withFileTypes: true }).catch(() => [])) {
+    const r = rel ? `${rel}/${e.name}` : e.name
+    if (e.isDirectory()) out.push(...(await walk(path.join(dir, e.name), r)))
+    else if (e.isFile() && !e.name.endsWith('.part')) out.push(r)
+  }
+  return out
+}
+
+/** every string in a JSON document, values and keys, once */
+export function stringsOf(doc, into = new Set()) {
+  if (typeof doc === 'string') into.add(doc)
+  else if (Array.isArray(doc)) for (const x of doc) stringsOf(x, into)
+  else if (doc && typeof doc === 'object') {
+    for (const [k, v] of Object.entries(doc)) {
+      into.add(k)
+      stringsOf(v, into)
+    }
+  }
+  return into
+}
+
+/**
+ * The plan.
+ *
+ * @param {object} o
+ * @param {import('./store.mjs').Store} o.store
+ * @param {string[]} o.worlds           slugs
+ * @param {string} o.assetsvc           the asset service's URL, or '' for none
+ * @param {(src: string, name: string) => { js: string, errors: unknown[] }} o.transpile
+ * @param {typeof fetch} [o.fetch]
+ * @param {string} [o.appDir]           the built app (dist); listed for the summary only
+ */
+export async function plan({ store, worlds, assetsvc = '', transpile, fetch = globalThis.fetch, appDir = null }) {
+  const objects = []
+  const warnings = []
+  const problems = []
+  const add = (o) => objects.push(o)
+  const slugs = [...new Set(worlds)].filter(Boolean)
+  if (!slugs.length) problems.push('no world chosen')
+  const docs = [] // every JSON document bundled, for the closure
+
+  /* ---- the worlds: the bake and the docs ------------------------------------------------- */
+  const baked = []
+  for (const slug of slugs) {
+    const dir = path.join(store.sites, slug)
+    const manifest = await store.readJson(path.join(dir, 'manifest.json'))
+    if (!manifest) {
+      problems.push(`${slug} is not baked (no sites/${slug}/manifest.json)`)
+      continue
+    }
+    baked.push(slug)
+    docs.push(manifest)
+    for (const rel of await walk(dir)) {
+      const top = !rel.includes('/')
+      if (top ? !SITE_TOP.has(path.extname(rel)) : !rel.startsWith('web/')) continue
+      const file = path.join(dir, rel)
+      const size = (await stat(file)).size
+      add({ key: `sites/${slug}/${rel}`, file, bytes: size, contentType: contentType(rel), group: rel.startsWith('web/') ? 'bake' : 'docs' })
+      if (top && rel.endsWith('.json') && rel !== 'manifest.json') docs.push(await store.readJson(file))
+    }
+  }
+
+  /* ---- the index the viewer's site picker reads: the chosen worlds only ------------------- */
+  const index = await store.readJson(path.join(store.sites, 'index.json'))
+  const entries = []
+  for (const slug of baked) {
+    const e = index?.sites?.find((s) => s.slug === slug)
+    if (e) entries.push(e)
+    else {
+      warnings.push(`${slug} is not in sites/index.json — listed from its manifest instead (run the export to fix)`)
+      const m = await store.readJson(path.join(store.sites, slug, 'manifest.json'))
+      entries.push({ slug, ident: m.ident ?? null, length_m: m.length_m ?? 0, structures: 0, formations: [], layers: m.layers ?? [], photos: [] })
+    }
+  }
+  const indexBody = JSON.stringify({ sites: entries })
+  add({ key: 'sites/index.json', body: indexBody, bytes: Buffer.byteLength(indexBody), contentType: 'application/json', group: 'docs' })
+
+  /* ---- levels and their programs ---------------------------------------------------------- */
+  const levels = (await store.listLevels()).filter((l) => baked.includes(l.world))
+  for (const l of levels) {
+    const body = JSON.stringify(l)
+    add({ key: `levels/${l.id}.json`, body, bytes: Buffer.byteLength(body), contentType: 'application/json', group: 'levels' })
+    docs.push(l)
+    if (l.program) {
+      const p = await store.getProgram(l.program)
+      if (!p) {
+        problems.push(`level ${l.id} names program ${l.program}, which does not exist`)
+        continue
+      }
+      const out = transpile(p.source, l.program)
+      if (out.errors?.length) problems.push(`program ${l.program} does not build: ${out.errors.map((e) => e.message ?? e).join('; ')}`)
+      const built = JSON.stringify({ id: l.program, js: out.js, errors: out.errors ?? [] })
+      add({ key: `api/programs/${l.program}`, body: built, bytes: Buffer.byteLength(built), contentType: 'application/json', group: 'levels' })
+    }
+  }
+  const list = JSON.stringify({ levels })
+  add({ key: 'api/levels', body: list, bytes: Buffer.byteLength(list), contentType: 'application/json', group: 'levels' })
+
+  /* ---- the placement catalog, as far as it is used ---------------------------------------- */
+  const catalogDoc = await store.catalog()
+
+  /* ---- the asset closure ------------------------------------------------------------------ */
+  const assets = { items: new Map(), builds: {}, materials: [] }
+  if (!assetsvc) {
+    warnings.push('no asset service configured — models, vehicle builds and traffic sets are not in this deploy')
+  } else {
+    const get = async (p) => {
+      const r = await fetch(`${assetsvc}${p}`)
+      if (!r.ok) throw new Error(`${assetsvc}${p}: HTTP ${r.status}`)
+      return r.json()
+    }
+    let items = []
+    try {
+      items = (await get('/catalog')).items ?? []
+    } catch (e) {
+      problems.push(`asset service: ${e.message ?? e}`)
+    }
+    const byId = new Map(items.map((it) => [it.id, it]))
+    const builds = {}
+    for (const kind of BUILD_KINDS) {
+      try {
+        builds[kind] = (await get(`/${kind}`))[kind] ?? []
+      } catch {
+        builds[kind] = []
+      }
+    }
+    // an id can name a catalog item or a build; builds are keyed by `id` or, older, by `asset`
+    const buildId = (b) => b.id ?? b.asset ?? b.name
+    const buildIndex = new Map()
+    for (const kind of BUILD_KINDS) for (const b of builds[kind]) buildIndex.set(buildId(b), { kind, build: b })
+
+    // THE FIXPOINT: strings of what is bundled → ids; ids that are builds → their documents'
+    // strings → more ids; until a pass adds nothing
+    const seen = new Set()
+    const usedBuilds = new Map()
+    let frontier = new Set()
+    for (const d of docs) stringsOf(d, frontier)
+    for (let pass = 0; pass < 8 && frontier.size; pass++) {
+      const next = new Set()
+      for (const s of frontier) {
+        if (seen.has(s)) continue
+        seen.add(s)
+        const b = buildIndex.get(s)
+        if (b && !usedBuilds.has(s)) {
+          usedBuilds.set(s, b)
+          stringsOf(b.build, next)
+        }
+        if (byId.has(s) && !assets.items.has(s)) {
+          assets.items.set(s, byId.get(s))
+          stringsOf(byId.get(s).use ?? null, next)
+        }
+      }
+      frontier = next
+    }
+    // also every catalog item whose `id` a placement names via the placement catalog
+    for (const e of catalogDoc.assets ?? []) if (seen.has(e.id) && byId.has(e.id) && !assets.items.has(e.id)) assets.items.set(e.id, byId.get(e.id))
+
+    for (const kind of BUILD_KINDS) {
+      const used = builds[kind].filter((b) => usedBuilds.has(buildId(b)))
+      assets.builds[kind] = used.map(buildId)
+      const body = JSON.stringify({ [kind]: used })
+      add({ key: `assetsvc/${kind}`, body, bytes: Buffer.byteLength(body), contentType: 'application/json', group: 'assets' })
+    }
+    for (const [id, it] of assets.items) {
+      const rec = JSON.stringify(it)
+      add({ key: `assetsvc/catalog/${id}`, body: rec, bytes: Buffer.byteLength(rec), contentType: 'application/json', group: 'assets' })
+      // the mesh the viewer would load (carmodel.ts `variantOf`: finished, else raw), and the
+      // glazed one when it exists — the raw 26 MB reconstruction only when nothing better does
+      const files = []
+      if (it.finished) files.push('mesh.finished.glb')
+      else if (it.mesh) files.push('mesh.glb')
+      if (it.glass) files.push('mesh.glass.glb')
+      if (!files.length) warnings.push(`${id} is used but has no mesh yet (${it.state ?? 'no state'})`)
+      for (const f of files) {
+        const url = `${assetsvc}/catalog/${encodeURIComponent(id)}/file/${f}`
+        let bytes = 0
+        try {
+          const h = await fetch(url, { method: 'HEAD' })
+          bytes = Number(h.headers.get('content-length') ?? 0) || 0
+        } catch {
+          /* sized at upload */
+        }
+        add({ key: `assetsvc/catalog/${id}/file/${f}`, url, bytes, contentType: contentType(f), group: 'assets' })
+      }
+    }
+    // materials, when a world names one
+    try {
+      const mats = (await get('/materials')).materials ?? []
+      for (const m of mats) {
+        if (!seen.has(m.id)) continue
+        assets.materials.push(m.id)
+        const rec = JSON.stringify({ material: m })
+        add({ key: `assetsvc/materials/${m.id}`, body: rec, bytes: Buffer.byteLength(rec), contentType: 'application/json', group: 'assets' })
+        for (const f of [m.albedo, m.normal, m.roughness].filter((x) => typeof x === 'string' && x)) {
+          add({ key: `assetsvc/materials/${m.id}/file/${f}`, url: `${assetsvc}/materials/${encodeURIComponent(m.id)}/file/${encodeURIComponent(f)}`, bytes: 0, contentType: contentType(f), group: 'assets' })
+        }
+      }
+    } catch {
+      /* no materials route on an older service */
+    }
+  }
+  const usedIds = new Set(assets.items.keys())
+  const placed = (catalogDoc.assets ?? []).filter((e) => usedIds.has(e.id) || stringsOf(docs, new Set()).has(e.id))
+  const catBody = JSON.stringify({ ...catalogDoc, assets: placed })
+  add({ key: 'assets/catalog.json', body: catBody, bytes: Buffer.byteLength(catBody), contentType: 'application/json', group: 'docs' })
+
+  /* ---- the app, for the summary --------------------------------------------------------- */
+  let app = null
+  if (appDir) {
+    const files = await walk(appDir)
+    if (!files.includes('index.html')) problems.push(`no built app at ${appDir} — build it first (npm run build -w apps/corridor)`)
+    else {
+      let bytes = 0
+      for (const f of files) bytes += (await stat(path.join(appDir, f))).size
+      app = { files: files.length, bytes }
+    }
+  }
+
+  const byGroup = {}
+  for (const o of objects) {
+    const g = (byGroup[o.group] ??= { objects: 0, bytes: 0 })
+    g.objects++
+    g.bytes += o.bytes
+  }
+  return {
+    worlds: baked,
+    levels: levels.map((l) => l.id),
+    assets: { items: [...assets.items.keys()], builds: assets.builds, materials: assets.materials },
+    objects,
+    byGroup,
+    bytes: objects.reduce((n, o) => n + o.bytes, 0),
+    app,
+    warnings,
+    problems,
+  }
+}
+
+/** the built app's files as Worker assets: everything under dist (the editor pages included; they are small) */
+export async function appAssets(appDir) {
+  const out = []
+  for (const rel of await walk(appDir)) {
+    out.push({ path: `/${rel}`, body: await readFile(path.join(appDir, rel)), contentType: contentType(rel) })
+  }
+  return out
+}
+
+/** one object's bytes, wherever the plan said they come from */
+async function bodyOf(o, fetch) {
+  if (o.body !== undefined) return Buffer.from(o.body)
+  if (o.file) return readFile(o.file)
+  const r = await fetch(o.url)
+  if (!r.ok) throw new Error(`${o.url}: HTTP ${r.status}`)
+  return Buffer.from(await r.arrayBuffer())
+}
+
+const mib = (n) => `${(n / 2 ** 20).toFixed(1)} MiB`
+
+/**
+ * Execute a plan.
+ *
+ * @param {object} o
+ * @param {import('./cloudflare.mjs').Cloudflare} o.cf
+ * @param {string} o.accountId
+ * @param {string} o.bucket
+ * @param {boolean} [o.createBucket]      make it when it does not exist
+ * @param {string} o.prefix               where under the bucket this deploy lives
+ * @param {Awaited<ReturnType<typeof plan>>} o.plan
+ * @param {{ name: string, workersDev?: boolean, hostname?: string|null, zoneId?: string|null }} o.worker
+ * @param {string} o.appDir
+ * @param {boolean} [o.prune]             delete older deploys of these worlds from the bucket afterwards
+ * @param {boolean} [o.dryRun]
+ * @param {(line: string) => void} o.log
+ * @param {typeof fetch} [o.fetch]
+ * @param {number} [o.concurrency]
+ */
+export async function run({ cf, accountId, bucket, createBucket = true, prefix, plan: p, worker, appDir, prune = false, dryRun = false, log, fetch = globalThis.fetch, concurrency = 4 }) {
+  const at = new Date().toISOString()
+  prefix = String(prefix).replace(/^\/+|\/+$/g, '')
+  if (!prefix) throw new Error('a prefix is required (the default is corridor/<world>-<stamp>)')
+  if (p.problems.length) throw new Error(`the plan has problems: ${p.problems.join('; ')}`)
+  for (const w of p.warnings) log(`warning: ${w}`)
+  log(`worlds: ${p.worlds.join(', ')} · levels: ${p.levels.length} · assets: ${p.assets.items.length} models · ${p.objects.length} objects, ${mib(p.bytes)} → r2://${bucket}/${prefix}/`)
+  if (dryRun) {
+    log('dry run: nothing written')
+    return { dryRun: true, prefix, objects: p.objects.length, bytes: p.bytes }
+  }
+
+  /* ---- the bucket ----------------------------------------------------------------------- */
+  const have = await cf.buckets(accountId)
+  if (!have.some((b) => b.name === bucket)) {
+    if (!createBucket) throw new Error(`no bucket ${bucket} in this account`)
+    log(`creating bucket ${bucket}`)
+    await cf.createBucket(accountId, bucket)
+  }
+
+  /* ---- the objects ---------------------------------------------------------------------- */
+  let sent = 0
+  let bytes = 0
+  const keys = []
+  const queue = [...p.objects]
+  const worker1 = async () => {
+    for (;;) {
+      const o = queue.shift()
+      if (!o) return
+      const body = await bodyOf(o, fetch)
+      const key = `${prefix}/${o.key}`
+      await cf.putObject(accountId, bucket, key, body, o.contentType)
+      keys.push(key)
+      sent++
+      bytes += body.byteLength
+      if (sent % 50 === 0 || body.byteLength > 4 * 2 ** 20) log(`  ${sent}/${p.objects.length}  ${o.key}  (${mib(body.byteLength)})`)
+    }
+  }
+  await Promise.all(Array.from({ length: Math.max(1, concurrency) }, worker1))
+  log(`uploaded ${sent} objects, ${mib(bytes)}`)
+
+  /* ---- the ledger: this deploy, and every one before it ---------------------------------- */
+  const manifestKey = `${prefix}/deploy.json`
+  const record = { prefix, worlds: p.worlds, levels: p.levels, at, worker: worker.name, objects: sent, bytes, keys: keys.map((k) => k.slice(prefix.length + 1)) }
+  await cf.putObject(accountId, bucket, manifestKey, JSON.stringify(record), 'application/json')
+  const ledger = (await cf.getJson(accountId, bucket, LEDGER_KEY)) ?? { deployments: [] }
+  ledger.deployments = ledger.deployments.filter((d) => d.prefix !== prefix)
+  ledger.deployments.push({ prefix, worlds: p.worlds, at, worker: worker.name, objects: sent, bytes })
+  await cf.putObject(accountId, bucket, LEDGER_KEY, JSON.stringify(ledger, null, 1), 'application/json')
+
+  /* ---- the worker ----------------------------------------------------------------------- */
+  const script = await readFile(WORKER_SOURCE, 'utf8')
+  const assets = await appAssets(appDir)
+  log(`app: ${assets.length} files, ${mib(assets.reduce((n, a) => n + a.body.byteLength, 0))}`)
+  await cf.deployWorker(accountId, worker.name, {
+    script,
+    assets,
+    bindings: [
+      { type: 'r2_bucket', name: 'DATA', bucket_name: bucket },
+      { type: 'plain_text', name: 'PREFIX', text: prefix },
+    ],
+    log,
+  })
+  const urls = []
+  if (worker.workersDev !== false) {
+    await cf.enableSubdomain(accountId, worker.name)
+    const sub = await cf.workersSubdomain(accountId)
+    if (sub) urls.push(`https://${worker.name}.${sub}.workers.dev`)
+    else log('workers.dev: the account has no subdomain set yet — pick one in the dashboard once, and the worker is reachable there')
+  }
+  if (worker.hostname && worker.zoneId) {
+    await cf.attachDomain(accountId, { zoneId: worker.zoneId, hostname: worker.hostname, service: worker.name })
+    urls.push(`https://${worker.hostname}`)
+  }
+  for (const u of urls) log(`live: ${u}`)
+
+  /* ---- older revisions of these worlds, if asked ---------------------------------------- */
+  let pruned = { deployments: 0, objects: 0 }
+  if (prune) {
+    const old = ledger.deployments.filter((d) => d.prefix !== prefix && (d.worker === worker.name || d.worlds.some((w) => p.worlds.includes(w))))
+    for (const d of old) {
+      const m = await cf.getJson(accountId, bucket, `${d.prefix}/deploy.json`)
+      const oldKeys = m?.keys ? m.keys.map((k) => `${d.prefix}/${k}`) : (await cf.listObjects(accountId, bucket, `${d.prefix}/`)).map((o) => o.key)
+      log(`pruning ${d.prefix} (${d.worlds.join(', ')}, ${d.at}): ${oldKeys.length} objects`)
+      const q = [...oldKeys, `${d.prefix}/deploy.json`]
+      const del = async () => {
+        for (;;) {
+          const k = q.shift()
+          if (!k) return
+          await cf.deleteObject(accountId, bucket, k)
+          pruned.objects++
+        }
+      }
+      await Promise.all(Array.from({ length: Math.max(1, concurrency) }, del))
+      pruned.deployments++
+    }
+    if (old.length) {
+      ledger.deployments = ledger.deployments.filter((d) => !old.includes(d))
+      await cf.putObject(accountId, bucket, LEDGER_KEY, JSON.stringify(ledger, null, 1), 'application/json')
+    }
+    log(`pruned ${pruned.deployments} older deploy${pruned.deployments === 1 ? '' : 's'}, ${pruned.objects} objects`)
+  }
+
+  return { prefix, objects: sent, bytes, urls, pruned }
+}

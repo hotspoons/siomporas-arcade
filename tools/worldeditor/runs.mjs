@@ -130,6 +130,39 @@ export class Runs {
     return this.#start({ kind: 'publish', slug, args, label: `publish ${slug}`, needsBucket: true })
   }
 
+  /**
+   * A run that is a FUNCTION in this process rather than a subprocess or a Job: the deploy. It
+   * gets the same record and the same log file as a bake, so the runs list, the log viewer and
+   * `cancel` (which flips its signal) all work on it without knowing the difference.
+   *
+   * @param {{ kind: string, slug: string, label: string, task: (ctx: { log: (line: string) => void, signal: AbortSignal }) => Promise<string | null | undefined> }} o
+   */
+  async startTask({ kind, slug, label, task }) {
+    const id = `${kind}-${slug}-${new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14)}-${randomUUID().slice(0, 4)}`
+    const run = { id, kind, slug, label, args: [], runner: 'local', state: 'running', started: now(), finished: null, detail: null, job: null, pod: null, lastStamp: null, exit: null }
+    await this.store.writeAtomic(this.store.runFile(id), Buffer.from(JSON.stringify(run, null, 1)))
+    await this.store.writeAtomic(this.store.logFile(id), Buffer.from(`=== ${label} (in-process) ${run.started}\n`))
+    const ac = new AbortController()
+    this.live.set(id, { stop: () => ac.abort() })
+    // appends are serialised: two log lines in the same tick must land in order
+    let chain = Promise.resolve()
+    const log = (line) => {
+      chain = chain.then(() => this.#append(id, `${String(line)}\n`)).catch(() => {})
+      return chain
+    }
+    void (async () => {
+      try {
+        const detail = await task({ log, signal: ac.signal })
+        await chain
+        await this.#finish(run, 'done', 0, detail ?? null)
+      } catch (e) {
+        await chain
+        await this.#finish(run, 'failed', 1, String(e?.message ?? e))
+      }
+    })()
+    return run
+  }
+
   async #start({ kind, slug, args, label, needsBucket = false }) {
     if (needsBucket && !this.cfg.bucket) {
       throw Object.assign(new Error('no bucket configured — set WORLDEDITOR_S3_BUCKET and mount the credentials Secret'), { status: 400 })

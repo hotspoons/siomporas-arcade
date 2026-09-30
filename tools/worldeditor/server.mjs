@@ -24,7 +24,7 @@
 
 import http from 'node:http'
 import { createReadStream } from 'node:fs'
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { createGzip, gzip } from 'node:zlib'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -54,6 +54,8 @@ import { Settings } from './settings.mjs'
 import { bboxOf, circleFor } from './geo.mjs'
 import * as worlds from './worlds.mjs'
 import * as rooms from './rooms.mjs'
+import { Cloudflare, TokenStore } from './cloudflare.mjs'
+import * as deploy from './deploy.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const REPO = path.resolve(HERE, '../..')
@@ -76,6 +78,8 @@ const APP = path.resolve(arg('app', env.WORLDEDITOR_APP ?? path.join(REPO, 'apps
  * `env` so a change in the editor's Settings takes effect without a restart.
  */
 const settings = await new Settings(DATA, env).load()
+/** the Cloudflare token: from the environment, or entered in the Deploy panel; in memory, never written, never returned */
+const cfTokens = new TokenStore(env)
 const assetsvcUrl = () => settings.get('assetsvc.url').replace(/\/$/, '')
 
 /**
@@ -1171,6 +1175,7 @@ async function api(req, res, seg, q) {
     if (req.method === 'GET') return json(res, 200, { settings: settings.describe() })
     if (req.method === 'PUT') return json(res, 200, await settings.set(await readJson(req)))
   }
+  if (seg[0] === 'deploy') return deployApi(req, res, seg.slice(1), q)
   /*
    * STARTING ONE, which until now nothing could do: the panel showed a manifest and said "not yet
    * created", because there was no route behind it.
@@ -1360,4 +1365,100 @@ for (const signal of ['SIGTERM', 'SIGINT']) {
       void flushed.finally(() => process.exit(0))
     })
   })
+}
+
+/**
+ * Deploy: a world (or several) to Cloudflare — R2 for the data, a Worker for the app.
+ *
+ *   GET    /api/deploy/status            token presence (never the token), baked worlds, defaults
+ *   POST   /api/deploy/token  {token}    hold a token in memory; DELETE forgets it
+ *   GET    /api/deploy/cloudflare        accounts, zones, buckets, the workers.dev subdomain
+ *   POST   /api/deploy/bucket {account, name}
+ *   POST   /api/deploy/plan   {worlds}   the object list, as a dry run
+ *   POST   /api/deploy/start  {...}      a run; its log is the deploy's progress
+ *   GET    /api/deploy/revisions?account=&bucket=   the ledger of deploys in a bucket
+ */
+async function deployApi(req, res, seg, q) {
+  const cfFor = () => new Cloudflare(() => cfTokens.use())
+  const fail = (e) => json(res, e.status ?? 500, { error: String(e.message ?? e), errors: e.errors ?? undefined })
+  try {
+    if (seg[0] === 'status' && req.method === 'GET') {
+      // WHAT IS BAKED, by the bake's own manifest — not by the world definitions, which a site
+      // baked from the command line (every one on this laptop) does not have
+      const named = new Map((await store.listWorlds()).map((w) => [w.slug, w.name ?? w.slug]))
+      const baked = []
+      for (const d of (await readdir(store.sites, { withFileTypes: true }).catch(() => [])).filter((e) => e.isDirectory())) {
+        const m = await store.readJson(path.join(store.sites, d.name, 'manifest.json'))
+        if (m) baked.push({ slug: d.name, name: named.get(d.name) ?? m.ident?.name ?? d.name })
+      }
+      baked.sort((a, b) => a.slug.localeCompare(b.slug))
+      return json(res, 200, { token: cfTokens.describe(), worlds: baked, app: APP, defaults: { prefix: deploy.defaultPrefix(baked.slice(0, 1).map((w) => w.slug)), worker: 'corridor' } })
+    }
+    if (seg[0] === 'token') {
+      if (req.method === 'POST') {
+        const body = await readJson(req)
+        cfTokens.set(body?.token)
+        // the one thing to check before the form goes on: is it a token Cloudflare accepts
+        try {
+          const v = await cfFor().verify()
+          return json(res, 200, { token: cfTokens.describe(), status: v?.status ?? 'active' })
+        } catch (e) {
+          cfTokens.clear()
+          return json(res, 401, { error: `Cloudflare did not accept that token: ${e.message}`, token: cfTokens.describe() })
+        }
+      }
+      if (req.method === 'DELETE') return json(res, 200, { token: cfTokens.clear() })
+    }
+    if (seg[0] === 'cloudflare' && req.method === 'GET') {
+      const cf = cfFor()
+      const accounts = await cf.accounts()
+      const account = q.get('account') || accounts[0]?.id || null
+      if (!account) return json(res, 200, { accounts, account: null, zones: [], buckets: [], subdomain: null })
+      const [zones, buckets, subdomain] = await Promise.all([cf.zones(account), cf.buckets(account), cf.workersSubdomain(account)])
+      return json(res, 200, { accounts, account, zones, buckets, subdomain })
+    }
+    if (seg[0] === 'bucket' && req.method === 'POST') {
+      const body = await readJson(req)
+      if (!/^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/.test(body?.name ?? '')) return json(res, 400, { error: 'a bucket name is 3–63 characters: lower-case letters, digits and dashes' })
+      await cfFor().createBucket(body.account, body.name)
+      return json(res, 201, { bucket: body.name })
+    }
+    if (seg[0] === 'plan' && req.method === 'POST') {
+      const body = await readJson(req)
+      const p = await deploy.plan({ store, worlds: body?.worlds ?? [], assetsvc: assetsvcUrl(), transpile: programs.transpile, appDir: APP })
+      // the object list is long; the panel wants the shape of it, and the keys only on request
+      return json(res, 200, { ...p, objects: body?.objects ? p.objects.map((o) => ({ key: o.key, bytes: o.bytes, group: o.group })) : undefined, count: p.objects.length })
+    }
+    if (seg[0] === 'revisions' && req.method === 'GET') {
+      const ledger = await cfFor().getJson(q.get('account'), q.get('bucket'), deploy.LEDGER_KEY)
+      return json(res, 200, { deployments: ledger?.deployments ?? [] })
+    }
+    if (seg[0] === 'start' && req.method === 'POST') {
+      const body = await readJson(req)
+      const worlds = body?.worlds ?? []
+      if (!worlds.length) return json(res, 400, { error: 'choose at least one world' })
+      if (!body.account || !body.bucket) return json(res, 400, { error: 'an account and a bucket are required' })
+      cfTokens.use() // fail now, not in the log
+      const name = deploy.workerName(body.worker?.name ?? `corridor-${worlds[0]}`)
+      const prefix = body.prefix || deploy.defaultPrefix(worlds)
+      const run = await runs.startTask({
+        kind: 'deploy',
+        slug: worlds.join('+'),
+        label: `deploy ${worlds.join(', ')} → ${name}`,
+        task: async ({ log }) => {
+          const p = await deploy.plan({ store, worlds, assetsvc: assetsvcUrl(), transpile: programs.transpile, appDir: APP })
+          const out = await deploy.run({
+            cf: cfFor(), accountId: body.account, bucket: body.bucket, createBucket: body.createBucket !== false, prefix, plan: p,
+            worker: { name, workersDev: body.worker?.workersDev !== false, hostname: body.worker?.hostname || null, zoneId: body.worker?.zoneId || null },
+            appDir: APP, prune: !!body.prune, dryRun: !!body.dryRun, log,
+          })
+          return out.dryRun ? `dry run: ${out.objects} objects, ${(out.bytes / 2 ** 20).toFixed(1)} MiB` : out.urls.length ? out.urls.join(' ') : `r2://${body.bucket}/${prefix}`
+        },
+      })
+      return json(res, 202, { run, prefix, worker: name })
+    }
+    return json(res, 404, { error: 'not found' })
+  } catch (e) {
+    return fail(e)
+  }
 }

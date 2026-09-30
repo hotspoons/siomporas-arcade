@@ -39,6 +39,7 @@ import { GitRepo, scan as gitScan } from './gitrepo.mjs'
 import { Platform } from './platform.mjs'
 import { attachAgentRelay } from './agentws.mjs'
 import { McpAuth } from './mcpauth.mjs'
+import { publicMcpUrl } from './publicurl.mjs'
 import { McpBridge } from './mcpbridge.mjs'
 import * as mcp from './mcp.mjs'
 import * as programs from './programs.mjs'
@@ -118,10 +119,9 @@ const platform = new Platform(DATA)
  * and resolves to the agent's own pod everywhere else. `WORLDEDITOR_PUBLIC_URL` overrides it for
  * the case where the agent comes in by a different route than the browser does.
  */
+/** the MCP URL as a client outside this page can open it — see publicurl.mjs for the forwarded headers */
 function mcpUrl(req) {
-  if (env.WORLDEDITOR_PUBLIC_URL) return `${env.WORLDEDITOR_PUBLIC_URL.replace(/\/$/, '')}/api/agent/mcp`
-  const host = req.headers.host ?? `localhost:${PORT}`
-  return `http://${host}/api/agent/mcp`
+  return publicMcpUrl(req.headers, env, PORT)
 }
 store.catalogSeed = path.join(REPO, 'apps/corridor/public/assets/catalog.json')
 await store.init()

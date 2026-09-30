@@ -19,6 +19,24 @@ import type { AgentBridge, BridgeStatus } from '../agent/bridge'
 import { bodyOf, group, readout } from './controls'
 import { button, el, toast } from './shell'
 
+/**
+ * The URL the service reports, on the scheme this page was actually opened with.
+ *
+ * The service answers from behind whatever terminated TLS and can only pass on what its proxy
+ * told it (publicurl.mjs). When the page and the service share a host, the page's own scheme is
+ * the ground truth — an https page handing out an http address is a snippet that will not
+ * connect (Rich, 2026-09-30). A different host is left alone: it may really be plain http.
+ */
+export function sameOriginScheme(url: string, loc: { protocol: string; host: string } = location): string {
+  try {
+    const u = new URL(url)
+    if (u.host === loc.host && u.protocol !== loc.protocol && /^https?:$/.test(loc.protocol)) u.protocol = loc.protocol
+    return u.toString()
+  } catch {
+    return url
+  }
+}
+
 export interface McpConfig {
   url: string
   auth: { required: boolean; source: 'env' | 'file' | 'minted' | 'none'; token: string | null }
@@ -126,7 +144,7 @@ export class McpPanel {
       ),
     )
 
-    b.append(readout('URL', cfg.url, true))
+    b.append(readout('URL', sameOriginScheme(cfg.url), true))
     b.append(readout('Auth', cfg.auth.required ? 'required' : 'off — anyone who can reach the URL can drive the editor', false))
 
     /* ---- the token ---- */
@@ -179,7 +197,7 @@ export class McpPanel {
         mcpServers: {
           'corridor-world-editor': {
             type: 'http',
-            url: cfg.url,
+            url: sameOriginScheme(cfg.url),
             ...(cfg.auth.required ? { headers: { Authorization: `Bearer ${input.value}` } } : {}),
           },
         },

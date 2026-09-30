@@ -8,6 +8,9 @@
       "path": "./packages/enginesim"
     },
     {
+      "path": "./packages/stunt-pieces"
+    },
+    {
       "path": "./apps/conduit"
     },
     {

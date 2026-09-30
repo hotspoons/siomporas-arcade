@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": { "tsBuildInfoFile": "../../node_modules/.tmp/stunt-pieces.tsbuildinfo" },
+  // ITS OWN, not the root's. With none here, Vite's transform walks up to the root tsconfig.json,
+  // whose references name every app, and the worldeditor image holds only the apps' manifests, so
+  // the build failed with "Tsconfig not found /src/apps/conduit" (2026-09-30).
+  "include": ["src", "test"],
+  // It reads the package's own files with node:fs to prove nothing outside it is imported. This is
+  // browser code and does not gain node types for one test (packages/engine does the same);
+  // vitest runs it regardless.
+  "exclude": ["test/standalone.test.ts"]
+}

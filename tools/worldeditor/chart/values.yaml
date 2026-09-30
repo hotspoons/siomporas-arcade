@@ -172,14 +172,20 @@ splat:
   # The image the run uses. Multi-arch; nothing here pins an architecture.
   image: ghcr.io/hotspoons/gaussworks:latest
   # THE BAKE CONFIG, settled by experiment by the splats lane: survey resolution with
-  # `cell_m: 120`. Seven of eight seams matched to within 3 cm between that and high resolution,
-  # and high resolution bought +0.7 dB of PSNR for 5.9x the bytes per square metre — at world
-  # scale, the difference between shippable and not. The path is inside the image
-  # (`COPY . /opt/splatpipe`), so it travels with the code that reads it.
+  # `cell_m: 120`, and since 2026-09-30 `poses.order: global` — the whole capture is solved
+  # ONCE, pulled onto the GPS with a weak prior, then cut into cells (gaussworks
+  # docs/SCALING-JOURNAL.md entry 5). Partition-first put 20 of 47 seams over 3 m on this
+  # neighbourhood; one model cuts at 0.02 m, and the cells score level with partition-first on
+  # the same held-out frames. Everything that changed lives in this file: the order, the GPS
+  # prior, the camera and point rules. The runner's command line did not change. The path is
+  # inside the image (`COPY . /opt/splatpipe`), so it travels with the code that reads it.
   config: /opt/splatpipe/configs/arrowhead-c120.yaml
-  # Worst acceptable seam, in metres. Neighbouring chunks are levelled independently, so they can
-  # disagree about the height of the same road — a step a driver hits. Carried on the run object;
-  # the pipeline gates on it once run.py calls `splatpipe seams` (noted to the splats lane).
+  # Worst acceptable seam, in metres. Under a partition-first config neighbouring chunks are
+  # levelled independently and can disagree about the height of the same road, and run.py
+  # refuses to train past this bar. Under `poses.order: global` the chunks share one model and
+  # cannot disagree, so the gate is ADVISORY there: measured, written to seam-gate.json with
+  # "advisory": true, never a failure. The check that CAN fail a global world is the residual
+  # against the GPS after the prior refine, which run.py prints.
   seamFailOver: 3.0
   # The commit the job must find on the volume, when the code lives there rather than in the
   # image. Empty means no check — and a job running stale code does not fail, it succeeds and

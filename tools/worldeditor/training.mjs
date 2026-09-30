@@ -88,7 +88,10 @@ export function normalise(run = {}) {
      *
      * Two roles because the pipeline has two shapes. The LEADER ingests, masks and chunks — serial,
      * once, and the only role that reads the video — then merges and writes the LOD levels at the
-     * end. A WORKER poses and trains, claiming chunks from a queue.
+     * end. A WORKER poses and trains, claiming chunks from a queue. Under a config with
+     * `poses.order: global` (arrowhead-c120 since 2026-09-30) the leader also solves the WHOLE
+     * capture and cuts it, and workers skip poses and wait for the cut; the command line is the
+     * same either way, which is the point of putting the order in the config.
      *
      * THE WORKER COUNT IS NOT A FUNCTION OF THE FOOTAGE. It is a function of free GPUs: a worker
      * that finds an empty queue finishes, and one that starts before the chunks exist waits. So
@@ -102,9 +105,9 @@ export function normalise(run = {}) {
     workers: Math.max(0, Number(run.workers ?? 0)),
     /*
      * THE BAKE CONFIG, settled by experiment by the splats lane: survey resolution with
-     * `cell_m: 120`. Seven of eight seams matched to within 3 cm between that and high
-     * resolution, and high resolution bought +0.7 dB of PSNR for 5.9x the bytes per square
-     * metre — at world scale, the difference between shippable and not.
+     * `cell_m: 120`, solved globally with a GPS prior, cut with the inria camera rule and every
+     * point the cameras see (gaussworks SCALING-JOURNAL entry 5). The order, the prior and the
+     * cut rules are all config keys, so a new lesson lands here as a config change.
      */
     config: run.config ?? cfg('WORLDEDITOR_SPLAT_CONFIG') ?? null,
     /*
@@ -126,7 +129,10 @@ export function normalise(run = {}) {
      * identical ground differed by 0.7 dB and by 3.4 m of worst seam.
      *
      * Passed through to the pipeline, which is where the gate belongs — before training, because
-     * the seam answer comes from `poses` and training is the expensive half.
+     * the seam answer comes from `poses` and training is the expensive half. Under
+     * `poses.order: global` the chunks share one model and the check passes by construction, so
+     * the pipeline records it as advisory ("advisory": true in seam-gate.json) rather than
+     * gating on it; a global world is judged by its residual against the GPS instead.
      */
     seamFailOver: run.seamFailOver == null ? Number(cfg('WORLDEDITOR_SPLAT_SEAM_MAX') ?? 3.0) : Number(run.seamFailOver),
     claim: run.claim ?? cfg('WORLDEDITOR_CLAIM') ?? 'worldeditor-data',

@@ -67,6 +67,25 @@ splatpipe merge    --chunks <work>/chunks --out <work>/world --prune-corridor
 splatpipe route    --world <work>/world                       # optional: the stage centreline
 ```
 
+**2026-09-30, neighbourhood scale: solve once, then cut.** `poses` above is partition-first:
+every chunk solved alone and aligned to its own GPS, which on the 49-cell neighbourhood put 20
+of 47 seams over 3 m (worst 67 m). The order that works is in `configs/arrowhead-c120.yaml`
+(`poses.order: global`), and `splatpipe run --config …` does it without a different command
+line. By hand it is:
+
+```
+splatpipe global-solve  --frames <work>/frames --mapper glomap       # ONE model, 17.7 h for 30k images on a GH200
+splatpipe global-refine --frames <work>/frames                       # GPS as a weak prior: a free solve drifted 350 m off the map
+splatpipe global-split  --frames <work>/frames --chunks <work>/chunks --rule inria --points seen --sparse <work>/frames/sparse/prior
+splatpipe seams         --chunks <work>/chunks                        # reads ~0.02 m BY CONSTRUCTION on one model: information, not a gate
+```
+
+Two things to not be fooled by, both in `ext/gaussworks/docs/SCALING-JOURNAL.md` entry 5:
+`seams` cannot fail a global world (the chunks share the drift), so judge it by the residual
+against the GPS that `global-refine` prints; and PSNRs are only comparable on the SAME held-out
+frames (`eval --names`), because the split is by frame number and each cut holds different
+images.
+
 Write `ext/gaussworks/configs/arrowhead.yaml` beside `md-backroads.yaml`. Start from that file —
 it is the same camera, the same county and the same protocol — and change the campaign block, the
 roads, and anything the neighbourhood needs (a 200 m cell is sized for open back roads; a dense

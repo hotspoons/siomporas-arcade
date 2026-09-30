@@ -233,6 +233,13 @@ export const assetsvc = {
   image: (id: string, opts: { prompt?: string; negative?: string; size?: string; steps?: number; seed?: number } = {}) =>
     call<AssetJob>(`/catalog/${encodeURIComponent(id)}/image`, { method: 'POST', body: JSON.stringify(opts) }),
 
+  /** pick the drawing TRELLIS meshes; a person's pick sticks through later draws */
+  choose: (id: string, view: string) =>
+    call<{ item: AssetItem }>(`/catalog/${encodeURIComponent(id)}/choose`, { method: 'POST', body: JSON.stringify({ view }) }),
+  /** delete one drawing; if it was the chosen one, the newest left takes over */
+  removeView: (id: string, view: string) =>
+    call<{ item: AssetItem }>(`/catalog/${encodeURIComponent(id)}/views/${encodeURIComponent(view)}`, { method: 'DELETE' }),
+
   mesh: (id: string, opts: { views?: string[]; seed?: number; finish?: boolean } = {}) =>
     call<AssetJob>(`/catalog/${encodeURIComponent(id)}/mesh`, { method: 'POST', body: JSON.stringify(opts) }),
 

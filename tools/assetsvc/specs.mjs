@@ -83,6 +83,24 @@ export async function spec(id) {
  *
  * `edited` travels with them because the catalog entry is what says how an asset was made.
  */
+/**
+ * The prompt a catalog item's draw uses: the one sent with the draw (the editor's unsaved draft),
+ * else the item's saved one. Blank is not a prompt; `null` back means there is nothing to draw.
+ *
+ * AN EMPTY PROMPT IS REFUSED, not passed on. flux given '' does not fail: it draws something
+ * arbitrary and plausible, which looks like a working generator that ignores you (Rich, 2026-09-30:
+ * a pizza-car prompt drew children jumping in a car park). The item had been created with
+ * `prompt: ''`, the typed prompt was still an unsaved draft, and `??` let '' through because '' is
+ * not nullish. The negative follows promptFor's rule: an empty one SENT is a choice.
+ */
+export function drawPrompt(item = {}, body = {}) {
+  const said = (v) => (typeof v === 'string' && v.trim() ? v : null)
+  return {
+    prompt: said(body.prompt) ?? said(item.prompt),
+    negative: typeof body.negative === 'string' ? body.negative : typeof item.negative === 'string' ? item.negative : '',
+  }
+}
+
 export function promptFor(recipe, body = {}) {
   const prompt = typeof body.prompt === 'string' && body.prompt.trim() ? body.prompt : recipe.prompt
   const negative = typeof body.negative === 'string' ? body.negative : recipe.negative

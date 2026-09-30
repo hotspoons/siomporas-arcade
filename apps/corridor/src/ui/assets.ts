@@ -712,6 +712,7 @@ export class AssetCatalog {
     if (it.views.length) {
       const strip = el('div', 'asset-views')
       for (const v of it.views) {
+        const card = el('div', `asset-view-card${v === it.chosen ? ' on' : ''}`)
         const a = el('button', `asset-view${v === it.chosen ? ' on' : ''}`)
         const img = el('img')
         img.src = assetsvc.fileUrl(it.id, `views/${v}`)
@@ -737,10 +738,22 @@ export class AssetCatalog {
           action: {
             label: 'Mesh this one',
             icon: 'cube',
-            onPick: (idx) => void this.save(it.id, { chosen: it.views[idx] }),
+            onPick: (idx) => void this.choose(it.id, it.views[idx]),
           },
         })
-        strip.append(a)
+        /*
+         * THE CHOICE AND THE DELETE ARE ON THE CARD, not only in the lightbox. Rich, 2026-09-30:
+         * "I can't select which photo to send to the trellis mesher ... there is no way to change
+         * it or delete it." Picking lived only inside the lightbox, whose button hides itself on
+         * the chosen view, and the chosen view is the first one you click, so it never showed.
+         */
+        const acts = el('div', 'asset-view-acts')
+        acts.append(v === it.chosen
+          ? el('span', 'chip state-drawn', 'will be meshed')
+          : button({ label: 'Mesh this', icon: 'cube', variant: 'ghost', title: `send ${v} to TRELLIS`, onClick: () => void this.choose(it.id, v) }))
+        acts.append(button({ icon: 'trash', variant: 'ghost', title: `delete ${v}`, onClick: () => void this.removeView(it.id, v) }))
+        card.append(a, acts)
+        strip.append(card)
       }
       drawnBody.append(strip)
     } else {
@@ -1064,14 +1077,7 @@ export class AssetCatalog {
     }
   }
 
-  private async save(id: string, spec: Partial<AssetItem>) {
-    try {
-      await assetsvc.put({ id, ...spec })
-      await this.refresh()
-    } catch (e) {
-      toast(`save: ${(e as Error).message}`, 'danger')
-    }
-  }
+
 
   /**
    * The materials browser: the other half of the library, and the same shape as the first half.
@@ -1947,7 +1953,51 @@ export class AssetCatalog {
    */
   private async draw(id: string) {
     const seed = this.seeds.get(id)
-    await this.run(() => assetsvc.image(id, seed === undefined ? {} : { seed }), `drawing ${id}`)
+    /*
+     * WHAT IS ON SCREEN IS WHAT DRAWS. The prompt box writes an unsaved draft, and Draw used to send
+     * only the seed, so the service drew from the SAVED prompt: for a new item, '' (Rich,
+     * 2026-09-30: a pizza-car prompt came back as children jumping in a car park). The draft is
+     * still only saved by Save; the view's own history records the prompt that drew it.
+     */
+    const it = this.items.find((x) => x.id === id)
+    const mine = id === this.selected ? this.draft : {}
+    const prompt = mine.prompt ?? it?.prompt ?? ''
+    const negative = mine.negative ?? it?.negative ?? ''
+    if (!prompt.trim()) return void toast('say what to draw: the prompt is empty', 'warn')
+    const unsaved = mine.prompt !== undefined || mine.negative !== undefined
+    await this.run(() => assetsvc.image(id, { prompt, negative, ...(seed === undefined ? {} : { seed }) }), `drawing ${id}${unsaved ? ' (with the unsaved prompt)' : ''}`)
+  }
+
+  private async choose(id: string, view: string) {
+    try {
+      await assetsvc.choose(id, view)
+      toast(`${id}: ${view} will be meshed`, 'ok')
+      await this.refresh()
+    } catch (e) {
+      toast(`choose: ${(e as Error).message}`, 'danger')
+    }
+  }
+
+  private async removeView(id: string, view: string) {
+    const it = this.items.find((x) => x.id === id)
+    const chosen = it?.chosen === view
+    const yes = await confirm({
+      title: `Delete ${view}?`,
+      message: chosen
+        ? `${view} is the drawing that would be meshed. The newest one left takes its place.`
+        : `${view} will be removed from ${id}.`,
+      ok: 'Delete',
+      danger: true,
+      icon: 'trash',
+    })
+    if (!yes) return
+    try {
+      await assetsvc.removeView(id, view)
+      toast(`${id}: deleted ${view}`, 'ok')
+      await this.refresh()
+    } catch (e) {
+      toast(`delete: ${(e as Error).message}`, 'danger')
+    }
   }
 
   private async mesh(id: string) {
@@ -1992,7 +2042,13 @@ function rowOf(...nodes: HTMLElement[]): HTMLElement {
   return r
 }
 
-/** A prompt is a paragraph, not a line — it gets a textarea that commits on blur. */
+/**
+ * A prompt is a paragraph, not a line — it gets a textarea.
+ *
+ * IT COMMITS AS YOU TYPE, not on blur. Committing shows the Save bar, and on blur that happened in
+ * the middle of the click on Draw: the button moved down under the pointer between mousedown and
+ * mouseup and the click never landed. Draw looked broken; really it had moved out from under the pointer.
+ */
 function promptField(label: string, value: string, onChange: (v: string) => void): HTMLElement {
   const wrap = el('label', 'field prompt')
   wrap.append(el('span', 'field-label', label))
@@ -2000,7 +2056,7 @@ function promptField(label: string, value: string, onChange: (v: string) => void
   t.value = value
   t.rows = 4
   t.spellcheck = false
-  t.onchange = () => onChange(t.value)
+  t.oninput = () => onChange(t.value)
   wrap.append(t)
   return wrap
 }

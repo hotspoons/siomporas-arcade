@@ -259,6 +259,11 @@
 .asset-view { padding: 0; background: none; border: 1px solid var(--line-2); border-radius: var(--r2); cursor: pointer; overflow: hidden; }
 .asset-view img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; }
 .asset-view.on { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-dim); }
+.asset-views:has(.asset-view-card) { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
+.asset-view-card { display: grid; gap: var(--s1); min-width: 0; }
+.asset-view-card .asset-view { width: 100%; }
+.asset-view-acts { display: flex; align-items: center; justify-content: space-between; gap: var(--s1); min-height: 28px; }
+.asset-view-acts .chip { font-size: var(--text-xs); white-space: nowrap; }
 
 .asset-row-actions { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; }
 .asset-row-actions .dim { color: var(--ink-3); font-size: var(--text-xs); }

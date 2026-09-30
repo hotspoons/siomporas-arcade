@@ -32,7 +32,7 @@ import { AssetSettings } from './settings.mjs'
 import { Catalog } from './catalog.mjs'
 import { Jobs } from './jobs.mjs'
 import { S3 } from './s3.mjs'
-import { promptFor, recipeFor, roster } from './specs.mjs'
+import { drawPrompt, promptFor, recipeFor, roster } from './specs.mjs'
 import { commitDraft, discardDraft, generateDraft, readDraft } from './materials.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
@@ -153,9 +153,12 @@ const MODEL_FORMATS = {
 /* ---- the work ------------------------------------------------------------------------------- */
 
 /** Draw a view for an item. Optionally from source images already in the item (an edit). */
-function startImage(id, opts) {
+async function startImage(id, opts) {
+  const { prompt, negative } = drawPrompt(await catalog.get(id), opts)
+  if (!prompt) {
+    throw Object.assign(new Error(`${id} has no prompt: say what to draw, and save it or send it with the draw`), { status: 400 })
+  }
   return jobs.start('image', `image ${id}`, async (report) => {
-    const item = await catalog.get(id)
     const model = registry.image
     report({ state: 'generating', model: model.id })
     const sources = []
@@ -163,8 +166,8 @@ function startImage(id, opts) {
       sources.push({ name, buf: await catalog.read(id, path.join('views', name)) })
     }
     const out = await model.generate({
-      prompt: opts.prompt ?? item.prompt,
-      negative: opts.negative ?? item.negative,
+      prompt,
+      negative,
       size: opts.size,
       steps: opts.steps,
       seed: opts.seed,
@@ -343,7 +346,16 @@ const server = http.createServer(async (req, res) => {
       const made = (item.history ?? []).filter((h) => h.file === `views/${view}` || h.name === view).pop()
       const seed = body.seed ?? made?.seed ?? null
       await catalog.record(id, { step: 'choose', file: `views/${view}`, seed })
-      return json(res, 200, { item: await catalog.put(id, { chosen: view, seed }) })
+      return json(res, 200, { item: await catalog.put(id, { chosen: view, chosenBy: 'person', seed }) })
+    }
+    /** delete one drawing; the choice moves to the newest left if it was this one */
+    if (seg[0] === 'catalog' && seg[2] === 'views' && seg.length === 4 && req.method === 'DELETE') {
+      try {
+        return json(res, 200, { item: await catalog.removeView(seg[1], decodeURIComponent(seg[3])) })
+      } catch (e) {
+        if (e.status) return json(res, e.status, { error: e.message })
+        throw e
+      }
     }
 
     if (seg[0] === 'jobs') {
@@ -384,7 +396,14 @@ const server = http.createServer(async (req, res) => {
           return json(res, e.status ?? 500, { error: String(e.message ?? e) })
         }
       }
-      if (seg.length === 3 && req.method === 'POST' && seg[2] === 'image') return json(res, 202, startImage(id, await readJson(req)))
+      if (seg.length === 3 && req.method === 'POST' && seg[2] === 'image') {
+        try {
+          return json(res, 202, await startImage(id, await readJson(req)))
+        } catch (e) {
+          if (e.status === 400) return json(res, 400, { error: e.message })
+          throw e
+        }
+      }
       if (seg.length === 3 && req.method === 'POST' && seg[2] === 'mesh') return json(res, 202, startMesh(id, await readJson(req)))
       /*
        * UPLOAD A MODEL SOMEBODY ALREADY HAS.

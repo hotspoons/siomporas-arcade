@@ -1,7 +1,7 @@
 // The asset service's own rules, where they are worth checking without a GPU.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { promptFor } from './specs.mjs'
+import { drawPrompt, promptFor } from './specs.mjs'
 
 /*
  * THE EDITED PROMPT IS THE ONE THAT RUNS, AND THE ONE THAT IS RECORDED.
@@ -37,4 +37,28 @@ test('a non-string is ignored rather than coerced', () => {
   // it arrives from a browser over JSON; `String(null)` would prompt flux with "null"
   for (const p of [null, 42, {}, []]) assert.equal(promptFor(RECIPE, { prompt: p }).prompt, RECIPE.prompt)
   for (const n of [null, 42, {}]) assert.equal(promptFor(RECIPE, { negative: n }).negative, RECIPE.negative)
+})
+
+/*
+ * A DRAW USES THE DRAFT, and never sends flux nothing. Rich, 2026-09-30: "Make this work on draft
+ * prompts, no need to require a save before generate." The editor sends what is in the box; the
+ * saved prompt is the fallback; and with neither there is no prompt, which the route refuses.
+ */
+const SAVED = { prompt: 'saved prompt', negative: 'saved negative' }
+
+test('a draw sends the draft over the saved prompt', () => {
+  assert.deepEqual(drawPrompt(SAVED, { prompt: 'the draft', negative: 'draft negative' }), { prompt: 'the draft', negative: 'draft negative' })
+})
+
+test('a draw with nothing sent uses what was saved', () => {
+  assert.deepEqual(drawPrompt(SAVED, {}), SAVED)
+})
+
+test('a new item with a blank prompt and no draft has nothing to draw', () => {
+  // exactly the pizza car: created with prompt '', drawn with only a seed
+  for (const p of ['', '  ', undefined, null]) assert.equal(drawPrompt({ prompt: '', negative: '' }, { prompt: p, seed: 3 }).prompt, null)
+})
+
+test('an empty negative sent with a draw is a choice', () => {
+  assert.equal(drawPrompt(SAVED, { prompt: 'x', negative: '' }).negative, '')
 })

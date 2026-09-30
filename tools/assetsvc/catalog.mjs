@@ -133,7 +133,10 @@ export class Catalog {
       negative: spec.negative ?? before.negative ?? '',
       notes: spec.notes ?? before.notes ?? '',
       tags: spec.tags ?? before.tags ?? [],
-      chosen: spec.chosen ?? before.chosen ?? null,
+      // `in`, not `??`: deleting the last drawing sets the choice to null, and `??` would keep the old one
+      chosen: 'chosen' in spec ? spec.chosen ?? null : before.chosen ?? null,
+      // 'person' when somebody picked it (/choose), 'draw' when it is the newest by default
+      chosenBy: 'chosenBy' in spec ? spec.chosenBy ?? null : before.chosenBy ?? null,
       /*
        * THE SEED IS PART OF THE ASSET, not a detail of the run that made it.
        *
@@ -244,10 +247,31 @@ export class Catalog {
     const name = `${String(Date.now()).slice(-10)}.png`
     await writeFile(path.join(dir, name), buf)
     const item = JSON.parse(await readFile(path.join(this.dir(id), 'item.json'), 'utf8'))
-    // The newest view becomes the chosen one unless somebody has deliberately chosen another.
-    if (!item.chosen) await this.put(id, { chosen: name })
+    /*
+     * The newest view becomes the chosen one unless somebody has deliberately chosen another.
+     *
+     * That comment was here, but the code under it said `if (!item.chosen)`, so the FIRST drawing
+     * stayed chosen however many came after it (Rich, 2026-09-30: "the first image stays put and
+     * there is no way to change it"). "Deliberately" is now a fact on the record, `chosenBy:
+     * 'person'`, set by /choose and nothing else.
+     */
+    if (!item.chosen || item.chosenBy !== 'person') await this.put(id, { chosen: name, chosenBy: 'draw' })
     await this.record(id, { step: 'image', file: `views/${name}`, ...meta })
     return name
+  }
+
+  /**
+   * Delete one drawing. If it was the chosen one, the newest remaining becomes the choice. That is a
+   * default, not a decision, so it is marked as the draw's rather than the person's.
+   */
+  async removeView(id, view) {
+    const item = await this.get(id)
+    if (!item.views.includes(view)) throw Object.assign(new Error(`${id} has no view ${JSON.stringify(view)}`), { status: 404 })
+    await rm(path.join(this.dir(id), 'views', view), { force: true })
+    const left = item.views.filter((v) => v !== view)
+    if (item.chosen === view) await this.put(id, { chosen: left.at(-1) ?? null, chosenBy: left.length ? 'draw' : null })
+    await this.record(id, { step: 'remove-view', file: `views/${view}` })
+    return this.get(id)
   }
 
   async writeFileFor(id, name, buf, meta) {

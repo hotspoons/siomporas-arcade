@@ -118,7 +118,11 @@ export class EngineSound {
     this.state = 'starting'
     try {
       const context = new AudioContext({ latencyHint: 'interactive' })
-      await context.resume()
+      // NOT awaited: with no user gesture yet the promise sits pending until one arrives, and
+      // `start()` never got past this line on a level that put the player in the car at load
+      // (Rich, 2026-09-30: "no sound"). The context is built suspended and `unlock()` resumes it
+      // from the first key or click.
+      void context.resume().catch(() => { /* not allowed yet; unlock() will */ })
 
       const master = context.createGain()
       master.gain.value = this.options.volume ?? 0.9
@@ -203,6 +207,12 @@ export class EngineSound {
    * waveform wherever it was and resuming steps straight back to it. That step is a click, and
    * it is the one artefact a person would actually notice about this feature.
    */
+  /** The first user gesture: a suspended context may start now. Harmless any other time. */
+  unlock(): void {
+    const ctx = this.context
+    if (ctx && ctx.state === 'suspended' && !this.muted) void ctx.resume().catch(() => { /* still not allowed */ })
+  }
+
   setMuted(muted: boolean): void {
     this.hiddenMuted = muted
     this.applyMute()

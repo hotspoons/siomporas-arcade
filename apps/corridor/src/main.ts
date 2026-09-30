@@ -2693,6 +2693,11 @@ function hotkey(action: Action, shift = false): boolean {
 const PAD_HOTKEYS: Action[] = ['drive', 'recover', 'lights', 'camera', 'map', 'fire', 'craft', 'walk', 'interface', 'objPrev', 'objNext']
 const HELD_ACTIONS: Action[] = ['throttle', 'brake', 'steerLeft', 'steerRight', 'handbrake']
 
+// THE FIRST GESTURE STARTS THE SOUND. A level that puts the player in the car at load builds the
+// engine's AudioContext before any click or key, and the browser holds it suspended until one
+// (Rich, 2026-09-30: "no sound"). Any key or pointer, anywhere, is the gesture.
+for (const ev of ['pointerdown', 'keydown'] as const) addEventListener(ev, () => engineSound.unlock(), { capture: true, passive: true })
+
 addEventListener('keydown', (e) => {
   const tgt = e.target as HTMLElement
   const inField = tgt.tagName === 'SELECT' || tgt.tagName === 'INPUT' || tgt.tagName === 'TEXTAREA'

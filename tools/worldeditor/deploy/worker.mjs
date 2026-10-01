@@ -29,6 +29,7 @@ function json(status, body) {
 /** the R2 key for a request path, or null when the path is the app's own */
 export function keyFor(pathname) {
   if (pathname === '/assets/catalog.json') return 'assets/catalog.json'
+  if (pathname === '/game.json') return 'game.json'
   if (pathname === '/api/levels') return 'api/levels'
   if (pathname.startsWith('/api/levels/')) return `levels/${pathname.slice('/api/levels/'.length)}.json`
   if (pathname.startsWith('/api/programs/')) return pathname.slice(1)

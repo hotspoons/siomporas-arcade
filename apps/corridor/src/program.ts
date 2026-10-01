@@ -76,6 +76,11 @@ export interface ProgramHost {
   hide: (what: Hideable, hidden: boolean) => void
   /** point the player somewhere, with a line about it; null takes it down and the races' own waypoints return */
   waypoint?: (at: { x: number; y: number } | null, text?: string) => void
+  /** a level-start post at a place. `kind` is start, pickup, dropoff, checkpoint, finish, goal. */
+  mark?: (id: string, at: { x: number; y: number }, kind?: string) => void
+  unmark?: (id: string) => void
+  /** the program ended: the viewer may open the next stage */
+  onFinish?: (outcome: 'win' | 'lose' | 'abandoned') => void
   /** swap the player's controller */
   transport: (mode: Transport) => void
   /** apply or tween a named look from the world's presets library */
@@ -549,6 +554,9 @@ export interface GameApi {
    * own (the entry ring, then the next gate).
    */
   waypoint(at: { x: number; y: number } | null, text?: string): void
+  /** the same post a level start uses, at a pickup or a drop-off */
+  mark(id: string, at: { x: number; y: number }, kind?: string): void
+  unmark(id: string): void
   win(text?: string): void
   lose(text?: string): void
 
@@ -759,6 +767,8 @@ export class GameRun {
       award: (p) => { this.score += p },
       goal: (text) => { this.goalText = text },
       waypoint: (at, text) => this.host.waypoint?.(at, text),
+      mark: (id, at, kind) => { if (id && at && Number.isFinite(at.x) && Number.isFinite(at.y)) this.host.mark?.(id, at, kind) },
+      unmark: (id) => { if (id) this.host.unmark?.(id) },
       win: (text) => this.finish('win', text),
       lose: (text) => this.finish('lose', text),
 
@@ -1024,6 +1034,7 @@ export class GameRun {
       this.host.say(text, outcome === 'win' ? 'ok' : 'warn')
     }
     for (const fn of this.endFns) this.guard(fn as () => void, outcome)
+    this.host.onFinish?.(outcome)
   }
 
   stop(): void {

@@ -20,8 +20,11 @@
 //
 // WHAT IS USED IS MEASURED, NOT LISTED. The asset closure is every string in the bundled
 // documents (site docs, levels, builds) that is a catalog id or a build id, followed through
-// builds to their assets until nothing new appears. No table of "fields that hold asset ids" —
-// the last four hand-typed tables in this repo are why things ended up in the road.
+// builds to their assets until nothing new appears. A program's quoted literals are in that set
+// too: `api.models.spawn('pizza-stack')` is one string inside the built file, and walking the
+// JSON would see the whole source as a single value and never the name. No table of "fields
+// that hold asset ids" — the last four hand-typed tables in this repo are why things ended up
+// in the road.
 
 import { readdir, readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
@@ -92,6 +95,27 @@ async function walk(dir, rel = '') {
     else if (e.isFile() && !e.name.endsWith('.part')) out.push(r)
   }
   return out
+}
+
+/**
+ * Quoted literals a program might name an asset by.
+ *
+ * The built program is stored as one JSON string. `stringsOf` would add that whole source as a
+ * single value, which is never a catalog id, so a prop a level only spawns — the pizza stack,
+ * the cash — never entered the deploy and drew as nothing on Cloudflare while the editor,
+ * which asks the live library, showed them.
+ */
+export function literalsOf(src, into = new Set()) {
+  if (typeof src !== 'string' || !src) return into
+  const re = /(['"`])((?:\\.|(?!\1)[^\\\n]){1,120})\1/g
+  let m
+  while ((m = re.exec(src))) {
+    let s = m[2]
+    if (s.includes('${')) continue
+    if (s.includes('\\')) s = s.replace(/\\(['"`\\])/g, '$1')
+    if (s && !/\s/.test(s)) into.add(s)
+  }
+  return into
 }
 
 /** every string in a JSON document, values and keys, once */
@@ -165,6 +189,7 @@ export async function plan({ store, worlds, assetsvc = '', transpile, fetch = gl
 
   /* ---- levels and their programs ---------------------------------------------------------- */
   const levels = (await store.listLevels()).filter((l) => baked.includes(l.world))
+  const namedInPrograms = new Set()
   for (const l of levels) {
     const body = JSON.stringify(l)
     add({ key: `levels/${l.id}.json`, body, bytes: Buffer.byteLength(body), contentType: 'application/json', group: 'levels' })
@@ -177,12 +202,18 @@ export async function plan({ store, worlds, assetsvc = '', transpile, fetch = gl
       }
       const out = transpile(p.source, l.program)
       if (out.errors?.length) problems.push(`program ${l.program} does not build: ${out.errors.map((e) => e.message ?? e).join('; ')}`)
+      literalsOf(p.source, namedInPrograms)
+      literalsOf(out.js, namedInPrograms)
       const built = JSON.stringify({ id: l.program, js: out.js, errors: out.errors ?? [] })
       add({ key: `api/programs/${l.program}`, body: built, bytes: Buffer.byteLength(built), contentType: 'application/json', group: 'levels' })
     }
   }
   const list = JSON.stringify({ levels })
   add({ key: 'api/levels', body: list, bytes: Buffer.byteLength(list), contentType: 'application/json', group: 'levels' })
+  const ordered = [...levels].sort((a, b) => (a.order ?? 1e9) - (b.order ?? 1e9) || String(a.id).localeCompare(String(b.id)))
+  const launch = ordered.find((l) => l.launch)?.id ?? ordered.find((l) => l.home)?.id ?? null
+  const game = JSON.stringify({ launch, order: ordered.map((l) => l.id) })
+  add({ key: 'game.json', body: game, bytes: Buffer.byteLength(game), contentType: 'application/json', group: 'levels' })
 
   /* ---- the placement catalog, as far as it is used ---------------------------------------- */
   const catalogDoc = await store.catalog()
@@ -223,6 +254,7 @@ export async function plan({ store, worlds, assetsvc = '', transpile, fetch = gl
     const usedBuilds = new Map()
     let frontier = new Set()
     for (const d of docs) stringsOf(d, frontier)
+    for (const s of namedInPrograms) frontier.add(s)
     for (let pass = 0; pass < 8 && frontier.size; pass++) {
       const next = new Set()
       for (const s of frontier) {
@@ -271,6 +303,11 @@ export async function plan({ store, worlds, assetsvc = '', transpile, fetch = gl
         add({ key: `assetsvc/catalog/${id}/file/${f}`, url, bytes, contentType: contentType(f), group: 'assets' })
       }
     }
+    // the list the viewer merges into the placeable catalog (`assetsvc.list()` → GET /assetsvc/catalog).
+    // individual item records are not that list: without it a deployed prop has a mesh in the bucket
+    // and still never appears, so spawn returns nothing
+    const catalogList = JSON.stringify({ items: [...assets.items.values()] })
+    add({ key: 'assetsvc/catalog', body: catalogList, bytes: Buffer.byteLength(catalogList), contentType: 'application/json', group: 'assets' })
     /*
      * MATERIALS. The viewer draws every road class, the verges and (when the world says so) the
      * buildings from the library's materials, so a deployed copy carries: every road, paving,

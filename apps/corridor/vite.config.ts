@@ -91,6 +91,9 @@ function serveBake(): Plugin {
         }
         if (!file.startsWith(roots[prefix])) return next()
         if (!existsSync(file) || !statSync(file).isFile()) {
+          // A world editor behind WORLDEDITOR owns the bake. Let the proxy answer; a local 404
+          // here would hide the remote file.
+          if (process.env.WORLDEDITOR) return next()
           // never fall through to Vite's SPA fallback: an optional JSON that does not exist yet must
           // be a 404, not index.html with a 200 (both agents lost time to `r.json()` on '<!doctype')
           res.statusCode = 404
@@ -147,6 +150,8 @@ export default defineConfig({
         proxy: {
           '/api': { target: process.env.WORLDEDITOR, ws: true, changeOrigin: true },
           '/assetsvc': { target: process.env.WORLDEDITOR, changeOrigin: true },
+          '/sites': { target: process.env.WORLDEDITOR, changeOrigin: true },
+          '/levels': { target: process.env.WORLDEDITOR, changeOrigin: true },
           /*
            * THE PLACEABLE CATALOG, and only that one file.
            *

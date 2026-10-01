@@ -168,6 +168,15 @@ export class GameMenu {
         set: (v) => { h.settings.update((d) => (d.audio.muted = v)); h.applyAudio() },
       })
     }
+    items.push({
+      kind: 'action',
+      label: document.fullscreenElement ? 'Leave full screen' : 'Full screen',
+      onSelect: () => {
+        if (document.fullscreenElement) void document.exitFullscreen()
+        else void document.documentElement.requestFullscreen()
+        h.resume()
+      },
+    })
     items.push({ kind: 'action', label: 'Settings', hint: 'display · layers · audio · controls', onSelect: () => this.stack.push(this.settings()) })
     if (p.allows('game.tuning')) items.push({ kind: 'action', label: 'Tuning panel', hint: 'F6 — the live knobs', onSelect: () => h.tuning() })
     if (p.developer && p.allows('game.developer')) {
@@ -268,6 +277,22 @@ export class GameMenu {
         hint: h.input.gamepad.connected ? `connected: ${h.input.gamepad.glyphs}` : 'none connected — press a button on it',
         get: () => s().gamepad,
         set: (v) => { h.settings.update((d) => (d.gamepad = v)); h.applyBindings() },
+      })
+    }
+    if (p.allows('controls.map')) {
+      items.push({
+        kind: 'toggle',
+        label: 'Expand the map',
+        hint: 'left stick click and N fill the screen. Off until you turn this on — Esc, N, or the stick closes it',
+        get: () => s().mapExpand,
+        set: (v) => { h.settings.update((d) => (d.mapExpand = v)); h.applyBindings() },
+      })
+      items.push({
+        kind: 'toggle',
+        label: 'Map follows heading',
+        hint: 'ahead is up. Off keeps north at the top',
+        get: () => s().mapHeading,
+        set: (v) => { h.settings.update((d) => (d.mapHeading = v)); h.applyBindings() },
       })
     }
     if (p.allows('controls.haptics')) items.push(slider('Rumble', () => s().haptics, (v) => { h.settings.update((d) => (d.haptics = v)); h.applyBindings() }))

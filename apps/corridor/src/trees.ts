@@ -33,6 +33,11 @@ export interface TreeRecord {
   y: number // ground
   h: number // canopy height, m
   species?: 'oak' | 'ash' | 'aspen' | 'pine' // an adjustment area's override; undefined = from the bake
+  /** canopy cell that grew this tree. A patch replant keeps the slot, so the index stays put. */
+  ci?: number
+  cj?: number
+  /** past the draw radius: the matrix is on the GPU and the card is hidden until the eye gets closer */
+  spare?: boolean
 }
 
 interface Variant {
@@ -277,6 +282,7 @@ export class NearTrees {
 
   private indexTrees(trees: TreeRecord[]) {
     trees.forEach((t, i) => {
+      if (!Number.isFinite(t.x)) return
       const k = `${Math.floor(t.x / this.cell)},${Math.floor(t.z / this.cell)}`
       const arr = this.grid.get(k)
       if (arr) arr.push(i)

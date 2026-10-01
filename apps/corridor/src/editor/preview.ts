@@ -172,7 +172,7 @@ export class Preview {
     close.textContent = 'close (Esc)'
     close.onclick = () => this.hide()
     bar.append(title, modeBtn, reset, season, carSel, close)
-    const help = el('div', 'pv-help', 'drive: W/S throttle & brake · A/D steer · Space handbrake · drag to look   ·   fly: W/A/S/D, Q/E down/up, drag to look, shift sprints   ·   R resets to the photo frame')
+    const help = el('div', 'pv-help', 'drive: W/S throttle & brake · A/D steer · Shift handbrake · drag to look   ·   fly: W/A/S/D, Q/E down/up, drag to look, shift sprints   ·   R resets to the photo frame')
     this.dlg.append(bar, this.viewport, this.hud, help)
     this.dlg.style.display = 'none'
     root.append(this.dlg)
@@ -467,7 +467,7 @@ export class Preview {
       this.input.throttle = k.has('KeyW') || k.has('ArrowUp') ? 1 : 0
       this.input.brake = k.has('KeyS') || k.has('ArrowDown') ? 1 : 0
       this.input.steer = (k.has('KeyD') || k.has('ArrowRight') ? 1 : 0) - (k.has('KeyA') || k.has('ArrowLeft') ? 1 : 0)
-      this.input.handbrake = k.has('Space')
+      this.input.handbrake = k.has('ShiftLeft') || k.has('ShiftRight')
       /*
        * THE KNOB IS LIVE NOW. `physProfileId()` is read every frame and pushed into the car the
        * moment it changes, so the F6 slider alters the car you are driving rather than the car you

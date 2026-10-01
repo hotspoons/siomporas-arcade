@@ -59,5 +59,7 @@ export function keyLabel(code: string): string {
   if (code.startsWith('Arrow')) return code.slice(5)
   if (code === 'Mouse0') return 'LMB'
   if (code === 'Mouse2') return 'RMB'
+  if (code === 'ControlLeft' || code === 'ControlRight') return 'Ctrl'
+  if (code === 'ShiftLeft' || code === 'ShiftRight') return 'Shift'
   return code.replace('Left', ' L').replace('Right', ' R')
 }

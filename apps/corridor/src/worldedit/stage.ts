@@ -12,7 +12,7 @@
 // front of the person writing it, instead of saving cleanly and never firing.
 
 import { button, el, toast } from '../ui/shell'
-import { bodyOf, empty, group, readout, select, textField } from '../ui/controls'
+import { bodyOf, empty, group, readout, select, textField, toggle } from '../ui/controls'
 import { icon } from '../ui/icons'
 import { api, type Level } from './api'
 import { assetsvc, type AssetItem } from '../assetsvc'
@@ -125,9 +125,11 @@ export class StagePanel {
       const list = group('Levels')
       const lb = bodyOf(list)
       if (!this.levels.length) lb.append(empty('no levels yet'))
-      for (const l of this.levels) {
+      const ordered = [...this.levels].sort((a, b) => (a.order ?? 1e9) - (b.order ?? 1e9) || a.id.localeCompare(b.id))
+      for (const l of ordered) {
+        const flags = [l.launch ? 'launch' : '', l.home ? 'home' : ''].filter(Boolean).join(', ')
         const row = el('button', 'row')
-        row.append(el('span', 'row-name', l.id), el('span', 'row-note', `${l.world}${l.defaults?.time ? ` · ${l.defaults.time}` : ''}${l.scenario ? ' · scenario' : ''}`))
+        row.append(el('span', 'row-name', l.id), el('span', 'row-note', `${l.world}${l.order != null ? ` · ${l.order}` : ''}${flags ? ` · ${flags}` : ''}${l.defaults?.time ? ` · ${l.defaults.time}` : ''}${l.scenario ? ' · scenario' : ''}`))
         row.onclick = () => this.edit(l)
         lb.append(row)
       }
@@ -196,13 +198,59 @@ export class StagePanel {
       },
     })
     wb.append(startSel)
+    const others = this.levels.filter((l) => l.id !== d.id)
+    const stageOpt = [
+      { value: '', label: 'stay on this stage' },
+      { value: 'home', label: 'back to the home stage' },
+      ...others.map((l) => ({ value: l.id, label: l.name ? `${l.name} (${l.id})` : l.id })),
+    ]
+    const game = group('Where it sits in the game')
+    const gb = bodyOf(game)
+    gb.append(
+      textField({
+        label: 'order',
+        value: d.order == null ? '' : String(d.order),
+        note: 'lower numbers come first. Blank leaves it at the end',
+        onChange: (v) => {
+          const n = Number(v)
+          if (v.trim() === '' || !Number.isFinite(n)) delete d.order
+          else d.order = n
+          this.mark(true)
+        },
+      }),
+      toggle({
+        label: 'home stage',
+        value: !!d.home,
+        note: 'a stage whose next says home comes back here',
+        onChange: (v) => { d.home = v; this.mark(true) },
+      }),
+      toggle({
+        label: 'launch into this',
+        value: !!d.launch,
+        note: 'the stage a deployed game opens on, when nobody named one in the address',
+        onChange: (v) => { d.launch = v; this.mark(true) },
+      }),
+      select({
+        label: 'after a win',
+        value: d.next ?? '',
+        options: stageOpt,
+        note: 'nothing chosen stays here. home returns to the launch stage',
+        onChange: (v) => { d.next = v || null; this.mark(true) },
+      }),
+      select({
+        label: 'after a loss',
+        value: d.onFail ?? '',
+        options: [{ value: '', label: 'the same as a win' }, ...stageOpt.filter((o) => o.value)],
+        onChange: (v) => { d.onFail = v || null; this.mark(true) },
+      }),
+    )
     if (!this.points.has(d.world)) {
       void fetch(`/sites/${d.world}/points.json`, { cache: 'no-cache' })
         .then(async (r) => (r.ok ? ((await r.json()) as { points?: { id: string; name: string; kind: string; mode?: string }[] }).points ?? [] : []))
         .catch(() => [])
         .then((pts) => { this.points.set(d.world, pts); this.render() })
     }
-    host.append(what)
+    host.append(what, game)
 
     /*
      * WHAT YOU DRIVE — the link that did not exist.

@@ -7,7 +7,7 @@ import { mkdtemp, mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { tmpdir } from 'node:os'
 import { Store } from './store.mjs'
-import { plan, run, defaultPrefix, workerName, stringsOf, LEDGER_KEY } from './deploy.mjs'
+import { plan, run, defaultPrefix, workerName, stringsOf, literalsOf, LEDGER_KEY } from './deploy.mjs'
 import { keyFor } from './deploy/worker.mjs'
 
 const transpile = (src, name) => (src.includes('BROKEN') ? { js: '', errors: [{ message: 'broken on purpose' }] } : { js: `// ${name}\n${src.replace(': number', '')}`, errors: [] })
@@ -129,6 +129,8 @@ test('the plan takes one world, its level, its program and only the assets they 
     assert.deepEqual(JSON.parse(p.objects.find((o) => o.key === 'assetsvc/vehicles').body).vehicles.map((b) => b.id).sort(), ['hero-1', 'traffic-pickup'])
     // the placement catalog too
     assert.deepEqual(JSON.parse(p.objects.find((o) => o.key === 'assets/catalog.json').body).assets.map((a) => a.id), ['gate-arch'])
+    // the library list the viewer merges at runtime — the same items, under the path assetsvc.list() asks for
+    assert.deepEqual(JSON.parse(p.objects.find((o) => o.key === 'assetsvc/catalog').body).items.map((a) => a.id).sort(), ['gate-arch', 'pickup', 'saloon'])
     // sizes came from HEAD
     assert.equal(p.objects.find((o) => o.key === 'assetsvc/catalog/pickup/file/mesh.glb').bytes, Buffer.byteLength('glb:pickup:mesh.glb'))
     assert.ok(p.bytes > 0)
@@ -152,6 +154,34 @@ test('several worlds share one index, and an unbaked one is a problem rather tha
   } finally {
     svc.close()
   }
+})
+
+test('a program that spawns a prop by name takes that prop, and nothing it merely mentions', async () => {
+  const { store } = await volume()
+  const svc = await assetService()
+  await writeFile(path.join(store.programs, 'alpha', 'jam.ts'), [
+    "api.models.spawn('lonely', { x: 1, y: 2 })",
+    "api.say('not-an-asset', 'ok')",
+    "const note = `hello ${name}`",
+    '',
+  ].join('\n'))
+  try {
+    const p = await plan({ store, worlds: ['alpha'], assetsvc: svc.url, transpile })
+    assert.deepEqual(p.problems, [])
+    assert.ok(p.assets.items.includes('lonely'), `program spawn was not closed over: ${[...p.assets.items]}`)
+    assert.ok(p.objects.some((o) => o.key === 'assetsvc/catalog/lonely/file/mesh.finished.glb'))
+    assert.ok(!p.assets.items.includes('not-an-asset'))
+    const listed = JSON.parse(p.objects.find((o) => o.key === 'assetsvc/catalog').body).items.map((a) => a.id)
+    assert.ok(listed.includes('lonely'))
+  } finally {
+    svc.close()
+  }
+})
+
+test('literalsOf keeps ids and drops sentences and interpolations', () => {
+  const s = new Set()
+  literalsOf("spawn('pizza-stack') say(\"cartoon-cash\") `wad ${n}` 'a whole sentence here'", s)
+  assert.deepEqual([...s].sort(), ['cartoon-cash', 'pizza-stack'])
 })
 
 test('a program that does not build is a problem, and a missing asset service a warning', async () => {
@@ -226,6 +256,7 @@ test('names, prefixes, strings and the worker key map', () => {
   assert.deepEqual([...stringsOf({ a: ['x', { b: 'y' }], c: 1 })].sort(), ['a', 'b', 'c', 'x', 'y'])
   // the worker maps the viewer's paths to keys exactly as the plan wrote them
   assert.equal(keyFor('/sites/alpha/web/tiles/0/0_0.pack'), 'sites/alpha/web/tiles/0/0_0.pack')
+  assert.equal(keyFor('/game.json'), 'game.json')
   assert.equal(keyFor('/api/levels'), 'api/levels')
   assert.equal(keyFor('/api/levels/alpha-jam'), 'levels/alpha-jam.json')
   assert.equal(keyFor('/api/programs/alpha/jam.ts'), 'api/programs/alpha/jam.ts')

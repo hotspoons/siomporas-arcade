@@ -55,14 +55,14 @@ export const DEFAULT_KEYS: KeyBindings = {
   brake: ['KeyS', 'ArrowDown'],
   steerLeft: ['KeyA', 'ArrowLeft'],
   steerRight: ['KeyD', 'ArrowRight'],
-  handbrake: ['Space'],
+  handbrake: ['ShiftLeft'],
   drive: ['Tab'],
   recover: ['KeyR'],
   lights: ['KeyL'],
   camera: ['KeyC'],
   map: ['KeyN'],
-  fire: ['KeyM'],
-  gun: ['KeyG'],
+  fire: ['ControlLeft'],
+  gun: ['Space'],
   craft: ['KeyV'],
   walk: ['KeyB'],
   interface: ['KeyM'],
@@ -78,7 +78,8 @@ export const DEFAULT_KEYS: KeyBindings = {
  *
  *   RT / LT        accelerate / brake            A   handbrake        Y   recover the car
  *   left stick     steer                         X   headlights       RB  missile   LB  machine gun
- *   right stick    look round the car (main.ts)  LS  the map          Start  pause
+ *   right stick    look round the car (main.ts)  LS  the map, once Expand the map is on
+ *                                                 Start  pause
  *   D-pad ◀ ▶      the objective list            View (the left centre button)  chase / cockpit
  *
  * B is the menus' "back" and is left free in play. Getting in and out of the car, the craft and
@@ -132,13 +133,20 @@ export interface GameSettingsData {
   units: 'mph' | 'kmh'
   /** the physics world in the plain viewer: the world's own default, or forced on or off */
   physics: 'world' | 'on' | 'off'
+  /**
+   * Left stick click and N grow the map to the whole screen. Off until asked: a click of the
+   * stick used to take the road away with no control a driver looks for.
+   */
+  mapExpand: boolean
+  /** the map turns so the direction of driving is up */
+  mapHeading: boolean
   /** the interface the player chose in the Escape menu; null = the deployment's default */
   ui: UiMode | null
 }
 
 export const SETTINGS_KEY = 'apex-corridor.settings.v1'
 /** bump when a NEW default key arrives: saved key lists gain it (a player's own stay) */
-const KEYS_VERSION = 3
+const KEYS_VERSION = 4
 /**
  * Bump when the default pad LAYOUT changes: the saved pad is replaced by the new defaults.
  *
@@ -161,6 +169,8 @@ export const DEFAULT_SETTINGS: GameSettingsData = {
   units: 'mph',
   physics: 'world',
   ui: null,
+  mapExpand: false,
+  mapHeading: false,
 }
 
 export class GameSettings extends SettingsStore<GameSettingsData> {
@@ -172,6 +182,14 @@ export class GameSettings extends SettingsStore<GameSettingsData> {
     let dirty = false
     if (savedKeysV < KEYS_VERSION) {
       mergeMissingKeys(this.data.keys, DEFAULT_KEYS)
+      // v4 moves the missile to Ctrl, the gun to Space, and the handbrake to Shift — but only
+      // where the saved binding is still the old default. A key the player chose stays.
+      if (savedKeysV < 4) {
+        const same = (a: string[] | undefined, b: string[]) => !!a && a.length === b.length && a.every((k, i) => k === b[i])
+        if (same(this.data.keys.fire, ['KeyM'])) this.data.keys.fire = ['ControlLeft']
+        if (same(this.data.keys.gun, ['KeyG'])) this.data.keys.gun = ['Space']
+        if (same(this.data.keys.handbrake, ['Space'])) this.data.keys.handbrake = ['ShiftLeft']
+      }
       this.data.keysV = KEYS_VERSION
       dirty = true
     }

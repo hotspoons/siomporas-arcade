@@ -506,7 +506,11 @@ export function toDriveProfile(v: VehicleDoc): DriveProfile {
     // acceleration in m/s², and first-gear tractive force over mass is exactly that.
     derived.powerPerKg = tractiveForce(v.engine, v.spec.wheelRadius) / v.spec.mass
     derived.topSpeed = gearedTopSpeed(v.engine, v.spec.wheelRadius)
-    derived.brakePerKg = v.engine.brake_torque_nm / Math.max(0.05, v.spec.wheelRadius) / v.spec.mass
+    // The spec's brake torque, as an acceleration. Rapier then quarters it across the wheels.
+    // Taken raw, a road car comes out around 4 m/s² against an accel near 11 — the pedal goes
+    // to the floor and the car barely slows. Three times the spec matches the accel the same
+    // sheet implies, and it is still THIS car's number, not the profile's.
+    derived.brakePerKg = 3 * v.engine.brake_torque_nm / Math.max(0.05, v.spec.wheelRadius) / v.spec.mass
   }
   /*
    * GRIP PER AXLE, from the weight it carries and the rubber under it.

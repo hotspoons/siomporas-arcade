@@ -494,7 +494,24 @@ export function repaintMarkings(road: THREE.Object3D, centre: THREE.Color, edge:
  * every tree back exactly where it was; only the set near the eye changes. `plant` may be called
  * again with a new centre (the meshes and the record array are allocated once, at `budget`, and
  * the array is MUTATED IN PLACE so NearTrees' reference stays live).
+ *
+ * `TREE_PATCH` keeps that slot: a cell that was already planted stays at the same index, and only
+ * the cells that entered or left are written. `TREE_SPARE_M` plants a ring past the draw radius
+ * into those same slots and marks it `spare` — uploaded, not drawn — and evicts a cell once it
+ * falls outside that ring so the budget is not spent on woods the eye has left.
  */
+export interface TreePatch {
+  /** the record list was rebuilt from scratch; every slot needs a matrix */
+  rebuilt: boolean
+  /** slots whose tree is new */
+  changed: number[]
+  /** slots that were freed */
+  removed: number[]
+  /** slots that left the spare ring and should be drawn */
+  shown: number[]
+  /** slots that fell into the spare ring and should hide */
+  hidden: number[]
+}
 export function treesFromCanopy(
   chm: Float32Array,
   size: [number, number],
@@ -516,7 +533,7 @@ export function treesFromCanopy(
     /** site (x, y) to plant around */
     centre?: [number, number]
   } = {},
-): { crowns: THREE.InstancedMesh; trunks: THREE.InstancedMesh; count: number; records: TreeRecord[]; refresh: (skip: Set<number>) => void; plant: (cx: number, cy: number) => number; stats: () => { count: number; cellM: number; radius: number; centre: [number, number]; capped: boolean } } {
+): { crowns: THREE.InstancedMesh; trunks: THREE.InstancedMesh; count: number; records: TreeRecord[]; refresh: (skip: Set<number>) => void; plant: (cx: number, cy: number) => number; patch: () => TreePatch; stats: () => { count: number; cellM: number; radius: number; centre: [number, number]; capped: boolean; spare: number; drawn: number; changed: number; evicted: number } } {
   const [w, h] = size
   const [xmin, , , ymax] = bbox
   const radius = opts.radius && opts.radius > 0 ? opts.radius : Infinity
@@ -543,54 +560,164 @@ export function treesFromCanopy(
     n = (Math.imul(n, 1274126177) ^ (n >>> 16)) >>> 0
     return n / 4294967296
   }
-  // the tree list: measured position and height, kept so the near-field LOD can pick from it
-  const records: (TreeRecord & { rad: number; hue: number })[] = []
+  // the tree list: measured position and height, kept so the near-field LOD can pick from it.
+  // A hole (x = NaN) is a freed slot waiting to be reused, so a tree that stays keeps its index.
+  type Rec = TreeRecord & { rad: number; hue: number; ci: number; cj: number; spare: boolean }
+  const records: Rec[] = []
+  const free: number[] = []
+  const cellCache = new Map<string, { x: number; y: number; rec: Rec | null }>()
+  let cacheStamp = ''
   let centre: [number, number] = opts.centre ?? [(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2]
   /** the cell and radius are read live at every plant, so F6 → trees → planting just replants */
   let capped = false
+  let liveCount = 0
+  let spareCount = 0
+  let lastChanged = 0
+  let lastEvicted = 0
+  let patchNote: TreePatch = { rebuilt: true, changed: [], removed: [], shown: [], hidden: [] }
+  const tally = () => {
+    liveCount = 0
+    spareCount = 0
+    for (const r of records) if (Number.isFinite(r.x)) { liveCount++; if (r.spare) spareCount++ }
+  }
+  /** the tree a cell grows, or null. Cached while patching so the next ring does not resample the woods already seen. */
+  const measure = (i: number, j: number, cellM: number, x0: number, y0: number, useCache: boolean): Rec | null => {
+    if (x0 < bbox[0] || x0 > bbox[2] || y0 < bbox[1] || y0 > bbox[3]) return null
+    const key = `${i},${j}`
+    if (useCache) {
+      const hit = cellCache.get(key)
+      if (hit) return hit.rec
+    }
+    const hgt = sample(x0, y0)
+    let rec: Rec | null = null
+    if (hgt >= Math.max(0.2, T.TREE_MIN_H || minH) && !(T.TREE_DENSITY < 1 && hash(i, j, 9) > T.TREE_DENSITY)) {
+      const jitter = cellM * 0.45
+      const x = x0 + (hash(i, j, 1) - 0.5) * 2 * jitter
+      const y = y0 + (hash(i, j, 2) - 0.5) * 2 * jitter
+      const H = hgt * (0.9 + hash(i, j, 3) * 0.2) * T.TREE_HEIGHT_SCALE
+      const rad = Math.min(7, Math.max(1.2, H * 0.28 * (0.8 + hash(i, j, 4) * 0.4)))
+      if (!exclude(x, y)) {
+        const sp = speciesAt?.(x, y) ?? undefined
+        rec = { x, z: -y, y: groundAt(x, y), h: H, rad, hue: 0.27 + (hash(i, j, 5) - 0.5) * 0.05, species: sp as TreeRecord['species'], ci: i, cj: j, spare: false }
+      }
+    }
+    if (useCache) cellCache.set(key, { x: x0, y: y0, rec })
+    return rec
+  }
   const plant = (cx: number, cy: number): number => {
     centre = [cx, cy]
     const cellM = Math.max(1, T.TREE_CELL_M || opts.cellM || 6)
-    const r = T.TREE_PLANT_RADIUS_M > 0 ? T.TREE_PLANT_RADIUS_M : Number.isFinite(radius) ? radius : Math.max(bbox[2] - bbox[0], bbox[3] - bbox[1])
-    const i0 = Math.floor((cx - r) / cellM), i1 = Math.ceil((cx + r) / cellM)
-    const j0 = Math.floor((cy - r) / cellM), j1 = Math.ceil((cy + r) / cellM)
-    const cand: { x: number; y: number; hgt: number; d2: number; i: number; j: number }[] = []
-    const r2 = r * r
+    const drawR = T.TREE_PLANT_RADIUS_M > 0 ? T.TREE_PLANT_RADIUS_M : Number.isFinite(radius) ? radius : Math.max(bbox[2] - bbox[0], bbox[3] - bbox[1])
+    const patch = T.TREE_PATCH > 0.5
+    const spareM = patch ? Math.max(0, T.TREE_SPARE_M) : 0
+    const contextR = drawR + spareM
+    const stamp = `${cellM}|${T.TREE_MIN_H}|${T.TREE_DENSITY}|${T.TREE_HEIGHT_SCALE}`
+    if (stamp !== cacheStamp) {
+      cellCache.clear()
+      cacheStamp = stamp
+      records.length = 0
+      free.length = 0
+    }
+    const i0 = Math.floor((cx - contextR) / cellM), i1 = Math.ceil((cx + contextR) / cellM)
+    const j0 = Math.floor((cy - contextR) / cellM), j1 = Math.ceil((cy + contextR) / cellM)
+    const draw2 = drawR * drawR
+    const context2 = contextR * contextR
+    const cand: { d2: number; rec: Rec; spare: boolean }[] = []
     for (let j = j0; j <= j1; j++) {
       for (let i = i0; i <= i1; i++) {
         const x0 = (i + 0.5) * cellM, y0 = (j + 0.5) * cellM
         const dx = x0 - cx, dy = y0 - cy
         const d2 = dx * dx + dy * dy
-        if (d2 > r2) continue
-        if (x0 < bbox[0] || x0 > bbox[2] || y0 < bbox[1] || y0 > bbox[3]) continue
-        const hgt = sample(x0, y0)
-        if (!(hgt >= Math.max(0.2, T.TREE_MIN_H || minH))) continue
-        // a stable thinning, so turning the density down takes trees away rather than reshuffling them
-        if (T.TREE_DENSITY < 1 && hash(i, j, 9) > T.TREE_DENSITY) continue
-        cand.push({ x: x0, y: y0, hgt, d2, i, j })
+        if (d2 > context2) continue
+        const rec = measure(i, j, cellM, x0, y0, patch)
+        if (!rec) continue
+        cand.push({ d2, rec, spare: d2 > draw2 })
       }
     }
     capped = cand.length > capacity
     if (capped) cand.sort((a, b) => a.d2 - b.d2)
-    records.length = 0
-    for (let k = 0; k < cand.length && records.length < capacity; k++) {
-      const c = cand[k]
-      const jitter = cellM * 0.45
-      const x = c.x + (hash(c.i, c.j, 1) - 0.5) * 2 * jitter
-      const y = c.y + (hash(c.i, c.j, 2) - 0.5) * 2 * jitter
-      const H = c.hgt * (0.9 + hash(c.i, c.j, 3) * 0.2) * T.TREE_HEIGHT_SCALE
-      const rad = Math.min(7, Math.max(1.2, H * 0.28 * (0.8 + hash(c.i, c.j, 4) * 0.4)))
-      if (exclude(x, y)) continue
-      const sp = speciesAt?.(x, y) ?? undefined
-      records.push({ x, z: -y, y: groundAt(x, y), h: H, rad, hue: 0.27 + (hash(c.i, c.j, 5) - 0.5) * 0.05, species: sp as TreeRecord['species'] })
+    const take = Math.min(cand.length, capacity)
+    if (!patch) {
+      cellCache.clear()
+      records.length = 0
+      free.length = 0
+      for (let k = 0; k < take; k++) records.push({ ...cand[k].rec, spare: false })
+      patchNote = { rebuilt: true, changed: [], removed: [], shown: [], hidden: [] }
+      lastChanged = records.length
+      lastEvicted = 0
+      tally()
+      return liveCount
     }
-    return records.length
+    const fresh = records.length === 0 || records.some((r) => Number.isFinite(r.x) && !Number.isFinite(r.ci))
+    if (fresh) {
+      records.length = 0
+      free.length = 0
+      for (let k = 0; k < take; k++) records.push({ ...cand[k].rec, spare: cand[k].spare })
+      patchNote = { rebuilt: true, changed: [], removed: [], shown: [], hidden: [] }
+      lastChanged = records.length
+      lastEvicted = 0
+      tally()
+      return liveCount
+    }
+    const want = new Map<string, { rec: Rec; spare: boolean }>()
+    for (let k = 0; k < take; k++) {
+      const c = cand[k]
+      want.set(`${c.rec.ci},${c.rec.cj}`, c)
+    }
+    const changed: number[] = []
+    const removed: number[] = []
+    const shown: number[] = []
+    const hidden: number[] = []
+    const keep = new Set<string>()
+    for (let i = 0; i < records.length; i++) {
+      const r = records[i]
+      if (!Number.isFinite(r.x)) continue
+      const key = `${r.ci},${r.cj}`
+      const next = want.get(key)
+      if (!next) {
+        r.x = NaN
+        free.push(i)
+        removed.push(i)
+        continue
+      }
+      keep.add(key)
+      if (r.spare !== next.spare) {
+        r.spare = next.spare
+        if (next.spare) hidden.push(i)
+        else shown.push(i)
+      }
+    }
+    for (const [key, next] of want) {
+      if (keep.has(key)) continue
+      const rec = { ...next.rec, spare: next.spare }
+      let i = free.pop()
+      if (i === undefined) {
+        if (records.length >= capacity) continue
+        i = records.length
+        records.push(rec)
+      } else records[i] = rec
+      changed.push(i)
+    }
+    patchNote = { rebuilt: false, changed, removed, shown, hidden }
+    lastChanged = changed.length
+    lastEvicted = removed.length
+    if (cellCache.size > 350000) {
+      const lim = contextR + Math.max(50, T.TREE_REPLANT_M) + cellM
+      const lim2 = lim * lim
+      for (const [k, v] of cellCache) {
+        const dx = v.x - cx, dy = v.y - cy
+        if (dx * dx + dy * dy > lim2) cellCache.delete(k)
+      }
+    }
+    tally()
+    return liveCount
   }
   const refresh = (skip: Set<number>) => {
     let k = 0
     for (let i = 0; i < records.length; i++) {
       if (skip.has(i)) continue
       const t = records[i]
+      if (!Number.isFinite(t.x) || t.spare) continue
       // crown: a squashed icosahedron whose top is at the canopy height
       m.compose(new THREE.Vector3(t.x, t.y + t.h - t.rad * 0.95, t.z), q, new THREE.Vector3(t.rad, t.rad * 1.05, t.rad))
       crowns.setMatrixAt(k, m)
@@ -611,7 +738,7 @@ export function treesFromCanopy(
   refresh(new Set())
   crowns.name = 'trees'
   trunks.name = 'trunks'
-  return { crowns, trunks, count: records.length, records, refresh, plant, stats: () => ({ count: records.length, cellM: Math.max(1, T.TREE_CELL_M || opts.cellM || 6), radius: T.TREE_PLANT_RADIUS_M, centre, capped }) }
+  return { crowns, trunks, count: liveCount, records, refresh, plant, patch: () => patchNote, stats: () => ({ count: liveCount, cellM: Math.max(1, T.TREE_CELL_M || opts.cellM || 6), radius: T.TREE_PLANT_RADIUS_M, centre, capped, spare: spareCount, drawn: liveCount - spareCount, changed: lastChanged, evicted: lastEvicted }) }
 }
 
 /** An overpass stand-in: a deck slab over our road on two piers down to the measured ground. */

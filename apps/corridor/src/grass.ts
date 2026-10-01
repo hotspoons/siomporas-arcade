@@ -182,6 +182,8 @@ export class Grass {
   private prevEye = new THREE.Vector3(NaN, NaN, NaN)
   private prevT = 0
   private motion = 1 // 1 still … 0 moving fast: scales the wind
+  /** above GRASS_WIND_STILL_BELOW the field is cards only: no blade geometry, no sway */
+  private spritesOnly = false
   private lastTile = 'none'
   private lastHeading = Infinity
   private lastPitch = Infinity
@@ -674,9 +676,10 @@ export class Grass {
   update(eye: THREE.Vector3, fwd = new THREE.Vector3(1, 0, 0), pitch = 0) {
     this.frame++
     const now = performance.now()
+    let speed = 0
     if (Number.isFinite(this.prevEye.x)) {
       const dt = Math.max(1e-3, (now - this.prevT) / 1000)
-      const speed = eye.distanceTo(this.prevEye) / dt
+      speed = eye.distanceTo(this.prevEye) / dt
       const still = T.GRASS_WIND_STILL_BELOW
       const target = still <= 0 ? 1 : 1 - Math.min(1, Math.max(0, (speed - still) / Math.max(0.1, still * 1.5)))
       this.motion += (target - this.motion) * Math.min(1, dt * 4)
@@ -686,10 +689,22 @@ export class Grass {
     this.eye.copy(eye)
     this.fwd.copy(fwd)
     this.pitch = pitch
+    // Driving does not get blades. The wind already goes to nothing above GRASS_WIND_STILL_BELOW;
+    // the cost that remains is generating and drawing the blade mesh, which a moving car cannot
+    // read as individuals. Cards cover the same ground. Slowing back down asks for the blades.
+    const still = T.GRASS_WIND_STILL_BELOW
+    const wantSprites = Number.isFinite(this.prevEye.x) && (this.spritesOnly ? speed > still * 0.6 : speed > still)
+    let modeChanged = false
+    if (wantSprites !== this.spritesOnly) {
+      this.spritesOnly = wantSprites
+      modeChanged = true
+      this.dirty = true
+      this.visStale = true
+    }
     const heading = Math.atan2(fwd.x, fwd.z)
     const tileKey = `${Math.floor(eye.x / TILE)},${Math.floor(eye.z / TILE)}`
     const turned = Math.abs(heading - this.lastHeading) > 0.25 || Math.abs(pitch - this.lastPitch) > 0.2
-    const moved = tileKey !== this.lastTile || turned
+    const moved = tileKey !== this.lastTile || turned || modeChanged
     if (moved || this.visStale) {
       this.lastTile = tileKey
       this.lastHeading = heading
@@ -722,7 +737,7 @@ export class Grass {
     const t1 = performance.now()
     if (made) this.dirty = true
     // assemble: every 4th frame while a burst is still filling, at once when it is complete
-    if (this.dirty && (this.pending.length === 0 || this.frame % 4 === 0)) {
+    if (this.dirty && (modeChanged || this.pending.length === 0 || this.frame % 4 === 0)) {
       this.assemble()
       this.dirty = this.pending.length > 0
     }
@@ -785,7 +800,7 @@ export class Grass {
     const rBlade = T.GRASS_RADIUS + TILE * 0.71
     this.pending = []
     for (const t of this.vis) {
-      const withBlades = t.d <= rBlade
+      const withBlades = !this.spritesOnly && t.d <= rBlade
       const have = this.tiles.get(t.key)
       if (!have || (withBlades && !have.hasBlades)) this.pending.push({ ...t, withBlades })
     }
@@ -965,11 +980,13 @@ export class Grass {
     let k = 0, kc = 0
     const rBlade = T.GRASS_RADIUS
     const rCard = T.GRASS_SPRITE_RADIUS
-    const cardFrom = T.GRASS_LOD_MID - 8
+    // Cards used to start where the blades thin out. With the blades put away they have to
+    // start at the eye, or the ground beside the car is bare until you slow down.
+    const cardFrom = this.spritesOnly ? 0 : T.GRASS_LOD_MID - 8
     for (const t of this.vis) {
       const tile = this.tiles.get(t.key)
       if (!tile) continue
-      if (t.d <= rBlade + TILE * 0.71 && tile.n) {
+      if (!this.spritesOnly && t.d <= rBlade + TILE * 0.71 && tile.n) {
         // density: LOD rings — full inside NEAR, MID_DENSITY to MID, FAR_DENSITY to the rim
         const falloff = t.d < T.GRASS_LOD_NEAR ? 1 : t.d < T.GRASS_LOD_MID ? T.GRASS_LOD_MID_DENSITY : T.GRASS_LOD_FAR_DENSITY
         const take = Math.min(tile.n, Math.round(tile.n * falloff), this.capacity - k)

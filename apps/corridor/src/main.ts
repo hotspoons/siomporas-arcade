@@ -7,6 +7,7 @@ import { buildPhysics, type CorridorPhysics } from './physics'
 import { fetchStuntDoc, makeStuntWorld, type StuntWorld } from './stuntworld'
 import type { StuntDoc } from './stunts'
 import { loadRaceWorld, type RaceWorld } from './raceworld'
+import { nextGate } from './racerun'
 import { PerfMeter } from './perf'
 import { assistAt, lookAhead, pullFor } from './stuntassist'
 import { PerfHud } from './ui/perfhud'
@@ -34,6 +35,7 @@ import { applyLevel, loadLevel, type LevelPlacement } from './level'
 import { TrafficLayer, type TrafficSpec } from './trafficlayer'
 import { FixtureLayer, loadFixtures, settingsOf, type FixtureDoc } from './fixtures'
 import { EMPTY_POINTS, loadPoints, startOf, type Point, type PointsDoc } from './points'
+import { ZoneMarks } from './markers'
 import { WaypointHud, type Waypoint } from './ui/waypoint'
 import { MissileLayer } from './missiles'
 import { GunLayer, builtinMissile, mountWeapons, type Mounted } from './weaponfx'
@@ -56,7 +58,7 @@ import { STYLE, styled, isStyle, type Style } from './style'
 import { setRelief, relief, clampRelief, spineDatum, reliefManifest } from './relief'
 import { WorldClock, sunPosition, sunVector } from './sun'
 import { SplatField, attachmentsFor } from './splats'
-import { antialiasFor, bootSlug, noteCaptureAttached, postAAFor } from './render'
+import { antialiasFor, bootSlug, hashWorld, noteCaptureAttached, postAAFor, setWorldHash } from './render'
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js'
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
@@ -291,7 +293,7 @@ const ui = new ViewerUI({
     buildPostAA(postAAFor(slug))
   },
   onSite: (slug) => {
-    location.hash = slug
+    setWorldHash(slug)
     void loadSite(slug)
   },
   onSeason: (s) => setSeason(s),
@@ -445,6 +447,8 @@ function restartLevel() {
 function applyUiMode() {
   const m = effectiveUiMode()
   document.body.classList.toggle('game-mode', m === 'game')
+  const fs = document.getElementById('fsbtn')
+  if (fs) fs.textContent = document.fullscreenElement ? 'Exit full screen' : 'Full screen'
   gameHud.show(m === 'game')
   gameHud.setParts(policy.hud)
   waypointHud.dock(m === 'game' ? gameHud.waypointSlot : null)
@@ -470,6 +474,8 @@ function applyBindings() {
   input.pad = settings.data.pad
   input.gamepadEnabled = settings.data.gamepad
   input.haptics.strength = settings.data.haptics
+  minimap?.setExpansionEnabled(!!settings.data.mapExpand)
+  minimap?.setHeadingUp(!!settings.data.mapHeading)
   if (menu.open) menu.refresh()
 }
 /** Display → Relief, from the dialog or the menu: the world reloads at the new exaggeration */
@@ -669,13 +675,13 @@ resize()
 // loading
 async function loadIndex() {
   const idx = await fetchJSON<{ sites: IndexEntry[] }>('/sites/index.json')
-  const want = readStanceParam()?.site || location.hash.slice(1) || idx.sites[0]?.slug
+  const want = readStanceParam()?.site || hashWorld() || idx.sites[0]?.slug
   ui.setSites(idx.sites, want ?? '')
   if (want) await loadSite(want)
 }
 
 async function loadSite(slug: string) {
-  location.hash = slug
+  setWorldHash(slug)
   ui.setSite(slug)
   if (site) {
     scene.remove(site.group)
@@ -812,6 +818,7 @@ async function loadSite(slug: string) {
    */
   fixtures = new FixtureLayer(site)
   worldPoints = await loadPoints(slug)
+  showWorldPoints()
   scene.add(fixtures.group)
   void loadFixtures(site.manifest.slug)
     .then(async (doc) => {
@@ -1112,6 +1119,8 @@ async function loadSite(slug: string) {
   minimap = new MiniMap(document.body, manifest)
   minimap.onTeleport = (x, y) => teleportTo(x, y)
   minimap.teleportAllowed = () => policy.teleport
+  minimap.setExpansionEnabled(!!settings.data.mapExpand)
+  minimap.setHeadingUp(!!settings.data.mapHeading)
   const st = readStanceParam()
   const resume = st && st.site === slug ? null : readResume(slug)
   if (st && st.site === slug) applyStance(st)
@@ -1161,7 +1170,24 @@ async function loadSite(slug: string) {
 
   const wantLevel = new URLSearchParams(location.search).get('level')
   if (wantLevel) await openLevel(wantLevel)
+  else {
+    const id = await publishedLaunch()
+    if (id) await openLevel(id)
+  }
   void refreshStages()
+}
+
+/** The stage a published game opens on. The editor does not serve this file, so a 404 or an HTML page is "no launch". */
+async function publishedLaunch(): Promise<string | null> {
+  try {
+    const r = await fetch('/game.json', { cache: 'no-cache' })
+    const type = r.headers.get('content-type') ?? ''
+    if (!r.ok || !/json/i.test(type)) return null
+    const j = await r.json() as { launch?: string | null }
+    return j.launch || null
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -1172,10 +1198,11 @@ async function loadSite(slug: string) {
 async function refreshStages() {
   const slug = site?.manifest.slug
   if (!slug) return
-  let levels: { id: string; world: string; name?: string | null }[] = []
+  let levels: { id: string; world: string; name?: string | null; launch?: boolean; home?: boolean }[] = []
   try {
     const r = await fetch(`${DATA_BASE}/api/levels`, { cache: 'no-cache' })
-    if (r.ok) levels = (((await r.json()) as { levels?: { id: string; world: string; name?: string | null }[] }).levels ?? []).filter((l) => l.world === slug)
+    if (r.ok) levels = (((await r.json()) as { levels?: { id: string; world: string; name?: string | null; launch?: boolean; home?: boolean }[] }).levels ?? []).filter((l) => l.world === slug)
+    launchLevelId = levels.find((l) => l.launch)?.id ?? levels.find((l) => l.home)?.id ?? null
   } catch {
     /* no editor behind this page */
   }
@@ -1333,6 +1360,20 @@ async function openLevel(id: string) {
 
 /** the level in force, for the probe surface and for whatever runs simulations later */
 let level: Awaited<ReturnType<typeof loadLevel>> = null
+/** the stage a finished or failed run returns to, when the level says `home` */
+let launchLevelId: string | null = null
+
+function advanceStage(outcome: 'win' | 'lose' | 'abandoned'): void {
+  if (outcome === 'abandoned' || !level) return
+  const raw = outcome === 'win' ? level.next : (level.onFail ?? level.next)
+  const go = raw === 'home' || raw === '' ? launchLevelId : typeof raw === 'string' ? raw : null
+  if (!go || go === level.id) return
+  window.setTimeout(() => {
+    const u = new URL(location.href)
+    u.searchParams.set('level', go)
+    location.href = u.toString()
+  }, 1400)
+}
 /** the level's traffic, once a level with a traffic simulation has opened */
 let traffic: TrafficLayer | null = null
 /** what the player fires (M), and the bang where it lands */
@@ -1598,6 +1639,38 @@ function showGame() {
  * Rich, 2026-09-30: the pizza level had to reach `window.corridor.site.layers.placements` to hide a
  * stack and clone a wad of cash, because the API could name a placed thing and not make one.
  */
+const zoneMarks = new ZoneMarks()
+scene.add(zoneMarks.group)
+function syncMap(): void {
+  if (!minimap) return
+  minimap.setHeadingUp(!!settings.data.mapHeading)
+  const marks = zoneMarks.list()
+  const targets = marks.map((m) => ({ x: m.x, y: m.y, kind: m.kind }))
+  let goal: { x: number; y: number } | null = null
+  const gate = raceWorld ? nextGate(raceWorld.state) : null
+  if (gate) {
+    const x = (gate.a[0] + gate.b[0]) / 2
+    const y = (gate.a[1] + gate.b[1]) / 2
+    targets.push({ x, y, kind: gate.role === 'finish' ? 'finish' : gate.role === 'start' ? 'start' : 'checkpoint' })
+    goal = { x, y }
+  }
+  if (!goal) {
+    const g = marks.find((m) => m.id === 'goal') ?? marks.find((m) => m.kind === 'dropoff' || m.kind === 'pickup' || m.kind === 'finish')
+    if (g) goal = { x: g.x, y: g.y }
+  }
+  minimap.setTargets(targets, goal)
+}
+
+function showWorldPoints(): void {
+  for (const id of zoneMarks.list().map((m) => m.id)) if (id.startsWith('point:')) zoneMarks.remove(id)
+  if (!site) return
+  for (const p of worldPoints.points) {
+    if (p.kind === 'spot') continue
+    const z = site.groundAt(p.at[0], -p.at[1]) ?? 0
+    zoneMarks.set(`point:${p.id}`, { x: p.at[0], y: p.at[1] }, p.kind, z + (p.lift_m ?? 0))
+  }
+}
+
 const programModelGroup = new THREE.Group()
 programModelGroup.name = 'program-models'
 scene.add(programModelGroup)
@@ -1694,7 +1767,14 @@ function programHost(): ProgramHost {
       if (!t) onTuneChange()
     },
     say: (text, kind) => { toast(text, kind ?? 'info', 4000); if (gameHud.visible) gameHud.note(text, kind ?? 'info') },
-    waypoint: (at, text) => { programWaypoint = at ? { x: at.x, y: at.y, text } : null },
+    waypoint: (at, text) => {
+      programWaypoint = at ? { x: at.x, y: at.y, text } : null
+      if (!at) zoneMarks.remove('goal')
+      else zoneMarks.set('goal', at, 'goal', site?.groundAt(at.x, -at.y) ?? 0)
+    },
+    mark: (id, at, kind) => zoneMarks.set(`mark:${id}`, at, kind || 'pickup', site?.groundAt(at.x, -at.y) ?? 0),
+    unmark: (id) => zoneMarks.remove(`mark:${id}`),
+    onFinish: (outcome) => advanceStage(outcome),
     ui: {
       // a program's choice of view is for this run: not remembered as the player's
       mode: (m) => { uiMode = m; applyUiMode() },
@@ -1715,7 +1795,11 @@ function programHost(): ProgramHost {
     },
     ground: (x, y) => site?.groundAt(x, -y) ?? null,
     models: modelsHost,
-    objectives: { show: (items, selected) => gameHud.setObjectives(items, selected) },
+    objectives: { show: (items, selected) => {
+      gameHud.setObjectives(items, selected)
+      for (const id of zoneMarks.list().map((m) => m.id)) if (id.startsWith('obj:')) zoneMarks.remove(id)
+      for (const item of items) if (item.at && !item.done) zoneMarks.set(`obj:${item.id}`, item.at, 'dropoff', site?.groundAt(item.at.x, -item.at.y) ?? 0)
+    } },
     setTime: (hhmm) => { worldClock.setLocal(siteZone(), undefined, hhmm); applySky(season, false) },
     setWeather: (w) => setWeatherSelection(w as Weather),
     physics: {
@@ -2085,6 +2169,43 @@ function goToStructure(st: Structure) {
 // phone: bottom-sheet panel and on-screen drive buttons. LITE is also how the scene builder
 // knows to hand a phone GPU a quarter of the vertices and a 4k texture instead of a 22 MP one.
 export const LITE = matchMedia('(pointer: coarse)').matches || innerWidth < 900 || new URLSearchParams(location.search).has('lite')
+document.getElementById('fsbtn')?.addEventListener('click', () => {
+  if (document.fullscreenElement) void document.exitFullscreen()
+  else void document.documentElement.requestFullscreen()
+})
+document.addEventListener('fullscreenchange', () => applyUiMode())
+
+/** phone tilt, degrees, and the zero a tap of TILT sets */
+let tiltGamma = 0
+let tiltZero = 0
+const radHold = { gun: false }
+addEventListener('deviceorientation', (e) => {
+  if (e.gamma == null) return
+  tiltGamma = e.gamma
+})
+for (const b of document.querySelectorAll<HTMLButtonElement>('#radpad button')) {
+  const act = b.dataset.act
+  if (act === 'missile') {
+    b.addEventListener('pointerdown', (e) => { e.preventDefault(); if (!drive.on) setDrive(true); fireMissile() })
+    continue
+  }
+  if (act === 'tilt') {
+    b.addEventListener('pointerdown', (e) => {
+      e.preventDefault()
+      const ask = (DeviceOrientationEvent as unknown as { requestPermission?: () => Promise<string> }).requestPermission
+      void (ask ? ask().catch(() => 'denied') : Promise.resolve('granted')).then(() => { tiltZero = tiltGamma })
+    })
+    continue
+  }
+  const set = (on: boolean) => {
+    if (act === 'gas') { if (on && !drive.on) setDrive(true); drive.input.throttle = on ? 1 : 0 }
+    else if (act === 'brake') drive.input.brake = on ? 1 : 0
+    else if (act === 'gun') radHold.gun = on
+  }
+  b.addEventListener('pointerdown', (e) => { e.preventDefault(); set(true) })
+  for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) b.addEventListener(ev, () => set(false))
+}
+
 for (const b of document.querySelectorAll<HTMLButtonElement>('#drivepad button')) {
   // + and − are hold-to-throttle / hold-to-brake while driving
   if (b.dataset.act === 'faster' || b.dataset.act === 'slower') {
@@ -2300,7 +2421,7 @@ let envDue = false
 function applySky(s: Season, env = true) {
   const look = styled(LOOK[s], style)
   const def = STYLE[style]
-  const w = WEATHER[weatherNow()]
+  const w = site?.weatherLook() ?? WEATHER[weatherNow()]
   const sunAt = sunNow()
   // day 1 → night 0, across civil twilight: the light changes fastest right at the horizon, which
   // is why the band is −6° to +4° and not something symmetric and tidy
@@ -2393,6 +2514,7 @@ function lightsLevel(): number {
   return skyNight * (drive.on ? 1 : 0.6)
 }
 function applyLights() {
+  traffic?.setNight(lightsLevel())
   drive.car?.setLights(lightsLevel())
 }
 
@@ -2608,7 +2730,7 @@ async function doClearSiteTuning() {
     toast(`clearing ${slug}/tuning.json: ${(e as Error).message}`, 'danger')
   }
 }
-// Tab toggles drive/fly. Driving: W/S throttle/brake, A/D steer, Space handbrake, R backs you out (Shift+R resets to the
+// Tab toggles drive/fly. Driving: W/S throttle/brake, A/D steer, Shift handbrake, Space gun, Ctrl missile, R backs you out (Shift+R resets to the
 // road. Flying: see fly.ts (WASD move, Q/E rotate, R/F dolly, T/G lift, right-drag look). P and
 // H (home = top) are shared.
 /** one knob of the F6 panel by name, wherever its tab is; undefined if there is no such knob */
@@ -2646,6 +2768,7 @@ function hotkey(action: Action, shift = false): boolean {
       drive.car?.setCockpit(drive.cockpit)
       return true
     case 'map':
+      if (!settings.data.mapExpand) return true
       minimap?.setExpanded(!minimap.expanded)
       return true
     case 'fire':
@@ -2691,7 +2814,7 @@ function hotkey(action: Action, shift = false): boolean {
 }
 /** the pad buttons that are hotkeys; the frame loop polls these */
 const PAD_HOTKEYS: Action[] = ['drive', 'recover', 'lights', 'camera', 'map', 'fire', 'craft', 'walk', 'interface', 'objPrev', 'objNext']
-const HELD_ACTIONS: Action[] = ['throttle', 'brake', 'steerLeft', 'steerRight', 'handbrake']
+const HELD_ACTIONS: Action[] = ['throttle', 'brake', 'steerLeft', 'steerRight', 'handbrake', 'gun']
 
 // THE FIRST GESTURE STARTS THE SOUND. A level that puts the player in the car at load builds the
 // engine's AudioContext before any click or key, and the browser holds it suspended until one
@@ -2745,6 +2868,8 @@ addEventListener('keydown', (e) => {
     return
   }
   if (e.code === 'F6') { e.preventDefault(); tuneUI.toggle(); return }
+  // Ctrl+W closes the tab. While driving, Ctrl is the missile and W is still the throttle.
+  if (drive.on && e.ctrlKey && e.code === 'KeyW') e.preventDefault()
   if (e.repeat) return
   const action = input.actionOf(e.code, { driving: drive.on })
   if (action && HELD_ACTIONS.includes(action)) {
@@ -2950,7 +3075,7 @@ function frame() {
    * an already-capped delta would make the simulation quietly run slow through every hitch.
    */
   if (missiles && !paused) missiles.tick(real)
-  if (!paused && !menu.open && drive.on && input.held('gun')) fireGun(real)
+  if (!paused && !menu.open && drive.on && (input.held('gun') || radHold.gun)) fireGun(real)
   if (gun && !paused) gun.tick(real)
   // the traffic steps before the physics, so its bodies are where the cars are when the player hits one
   if (traffic && !paused) {
@@ -3007,7 +3132,7 @@ function frame() {
    * stopped drawing entirely -- measured at 0 frames in 5 s.
    */
   const nowReal = performance.now()
-  if (Math.abs(worldClock.ms - lastSkyMs) > 20000) {
+  if (site?.weatherBlending() || Math.abs(worldClock.ms - lastSkyMs) > 20000) {
     lastSkyMs = worldClock.ms
     applySky(season, false)
   }
@@ -3024,7 +3149,8 @@ function frame() {
       const r = input.drive()
       drive.input.throttle = Math.max(padT, r.throttle)
       drive.input.brake = Math.max(padB, r.brake)
-      drive.input.steer = THREE.MathUtils.clamp(r.steer || drive.steerKey, -1, 1)
+      const tilt = matchMedia('(pointer: coarse)').matches ? Math.max(-1, Math.min(1, (tiltGamma - tiltZero) / 28)) : 0
+      drive.input.steer = THREE.MathUtils.clamp(r.steer || drive.steerKey || tilt, -1, 1)
       drive.input.handbrake = r.handbrake
     }
     // fixed-step sim at 120 Hz like stuntin, so speed does not depend on the frame rate
@@ -3270,6 +3396,7 @@ function frame() {
     retro.setLamps(lamps?.each ?? [], lamps?.on ?? 0)
     retro.tick()
     // the inset map follows the car when driving, the camera when flying; site frame is x east, y north = -z
+    syncMap()
     if (drive.on && drive.car) minimap?.draw({ x: drive.car.pos.x, y: -drive.car.pos.z, yaw: Math.atan2(-drive.car.forward.z, drive.car.forward.x) })
     else minimap?.draw({ x: camera.position.x, y: -camera.position.z, yaw: Math.atan2(-fwd.z, fwd.x) })
   }
@@ -3342,8 +3469,17 @@ registerBridgeContext({
   },
   /** a blast at a point (three frame): wakes the traffic in reach and throws everything dynamic */
   boom: (at: { x: number; y: number; z: number }, opts: { radius: number; impulse: number; lift?: number; breakAt?: number }) => boom(at, opts),
-  /** fire a missile from the player's car, as M does */
+  /** fire a missile from the player's car, as Ctrl does */
   fire: () => fireMissile(),
+  /**
+   * JPEG of the frame on screen. The bridge used to cut every string at 4000 characters, which
+   * made this useless; data-URL images now come back whole, and `scripts/bridge.mjs` writes them
+   * to a file instead of printing them.
+   */
+  screenshot(quality = 0.72): string {
+    renderer.render(scene, camera)
+    return renderer.domElement.toDataURL('image/jpeg', quality)
+  },
   get missiles() {
     return missiles
   },

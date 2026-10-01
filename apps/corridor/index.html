@@ -23,6 +23,16 @@
          the two touch pads, which exist only on a phone and need no JavaScript to lay out. -->
     <canvas id="gl"></canvas>
 
+    <button class="fsbtn" id="fsbtn" type="button">Full screen</button>
+
+    <div class="radpad" id="radpad">
+      <button type="button" data-act="brake" class="zone brake">BRAKE</button>
+      <button type="button" data-act="gas" class="zone gas">GAS</button>
+      <button type="button" data-act="gun" class="zone gun">GUN</button>
+      <button type="button" data-act="missile" class="zone missile">MISSILE</button>
+      <button type="button" data-act="tilt" class="zone tilt">TILT</button>
+    </div>
+
     <div class="drivepad" id="drivepad">
       <button data-act="drive" aria-label="drive">drive</button>
       <button data-act="faster" aria-label="faster">+</button>

@@ -20,7 +20,7 @@ import { siteLook, type Season } from './season'
 import { GRASS_TYPES, GROUND_COVER, floorTexture, siteCover } from './groundcover'
 import { loadFlora, type Flora } from './flora'
 import { CROP_TYPES, buildCrops, tickCrops, type CropType, type Field as CropField } from './crops'
-import { ACCUM_PARS, Precipitation, accumUniforms, type Weather } from './weather'
+import { ACCUM_PARS, Precipitation, WEATHER, accumUniforms, type Weather, type WeatherLook } from './weather'
 import { buildStrip, sinkUnderStrips } from './strip'
 import { Budget } from './budget'
 import { Adjustments, NEUTRAL as NEUTRAL_ADJ } from './adjust'
@@ -103,6 +103,9 @@ export interface Site {
   cropRows: Record<string, number>
   /** what is falling and what has settled */
   setWeather: (w: Weather) => void
+  /** the weather the sky should show, including a taper that is still in progress */
+  weatherLook: () => WeatherLook
+  weatherBlending: () => boolean
   weather: { current: Weather; settled: number; particles: number; wetness: number }
   /** per-frame: move the near-field tree models and the grass ring to follow the eye; fwd/pitch shape the LOD footprint */
   updateNear: (eye: THREE.Vector3, time: number, fwd?: THREE.Vector3, pitch?: number) => void
@@ -1831,7 +1834,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     // a road knob moved: every station's half width, the asphalt, then the strip that hugs it
     const roadSignature = () => `${T.LANE_WIDTH}|${T.SHOULDER_OUT}|${T.SHOULDER_IN}|${T.ROAD_BLEND_M}|${T.ROAD_TAPER_M}|${T.ROAD_ONEWAY_CENTRE}|${T.CULDESAC_RADIUS}`
     let roadSig = roadSignature()
-    const plantSignature = () => `${T.TREE_CELL_M}|${T.TREE_MIN_H}|${T.TREE_HEIGHT_SCALE}|${T.TREE_DENSITY}|${T.TREE_PLANT_RADIUS_M}`
+    const plantSignature = () => `${T.TREE_CELL_M}|${T.TREE_MIN_H}|${T.TREE_HEIGHT_SCALE}|${T.TREE_DENSITY}|${T.TREE_PLANT_RADIUS_M}|${T.TREE_PATCH}|${T.TREE_SPARE_M}|${T.MOBILE_TREE_BUDGET}`
     const shapeSignature = () => `${T.TREE_LEAF_COUNT}|${T.TREE_LEAF_SIZE}|${T.TREE_CROWN_SPREAD}|${T.TREE_BRANCH_COUNT}|${T.TREE_GNARLINESS}|${T.TREE_TAPER}|${T.TREE_TRUNK_RADIUS}|${T.TREE_DETAIL}|${T.TREE_SPECIES}|${T.TREE_SPECIES_LIMIT}`
     let treeSig = plantSignature()
     let treeShapeSig = shapeSignature()
@@ -1872,7 +1875,8 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     const canopyOf = tileSet ? tileSet.canopyAt : pyrSet ? pyrSet.canopyAt : (x: number, y: number) => overviewCanopy(x, y)
     // where the visit starts: the spine's photo station, which is where toPhoto() puts the camera
     const photo0 = spineAt(Math.min(curveLen, Math.max(0, manifest.spine.photo_s ?? curveLen / 2))).pos
-    const treeBudget = lite ? 25_000 : 120_000
+    const coarse = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches
+    const treeBudget = lite ? 25_000 : coarse ? Math.max(400, Math.round(T.MOBILE_TREE_BUDGET)) : 120_000
     const t = treesFromCanopy(chm.data, chm.layer.size, chm.layer.bbox, chm.layer.res, heightAt, treeBudget, T.TREE_MIN_H, (x, y) => {
       if (roadDistance(x, -y) < 3) return true
       // nothing grows through a stunt fixture
@@ -1895,6 +1899,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
       for (const r of t.records) {
         // THE COLLIDERS GO FIRST. A record inside a fixture is not indexed, so the car cannot hit
         // a trunk that is standing inside a loop even before the trees are replanted.
+        if (!Number.isFinite(r.x) || r.spare) continue
         if (clearPolys.length && clearedAt(r.x, -r.z)) continue
         const k = `${Math.floor(r.x / tgCell)},${Math.floor(r.z / tgCell)}`
         const arr = treeGrid.get(k)
@@ -2076,25 +2081,78 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
       // buffers, kept so a near-set move writes only the slots that changed.
       let shown = new Set<number>()
       let faded = new Set<number>()
+      const yawOf = (i: number) => ((i * 137) % 360) * (Math.PI / 180)
+      const writeSlot = (i: number, ranged: boolean) => {
+        const r = t.records[i]
+        if (!r || !Number.isFinite(r.x)) return
+        const v = near.variantFor(r, i)
+        sizes[i] = r.h * imp!.extents[v]
+        if (ranged) imp!.place(i, r.x, r.y, r.z, r.h, v, yawOf(i), m)
+        else imp!.set(i, r.x, r.y, r.z, r.h, v, yawOf(i), m)
+      }
+      const hideSlot = (i: number) => {
+        imp!.setVisible(i, false, sizes[i] || 1)
+        shown.add(i)
+        faded.delete(i)
+      }
       const seatImpostors = () => {
-        // a seat rewrites every matrix, and `commit` below tells the upload bookkeeping so —
-        // anything a partial upload had pending is carried by the full one
-        t.records.forEach((r, i) => {
-          const v = near.variantFor(r, i)
-          sizes[i] = r.h * imp!.extents[v]
-          imp!.set(i, r.x, r.y, r.z, r.h, v, ((i * 137) % 360) * (Math.PI / 180), m)
-        })
+        const note = t.patch()
+        const usePatch = T.TREE_PATCH > 0.5 && !note.rebuilt
+        if (!usePatch) {
+          // a full seat rewrites every matrix. `commit` tells the upload bookkeeping so a
+          // partial upload pending beside it is carried by the full one, not the other way round.
+          t.records.forEach((r, i) => {
+            if (!Number.isFinite(r.x)) {
+              imp!.setVisible(i, false, sizes[i] || 1)
+              return
+            }
+            writeSlot(i, false)
+          })
+          imp!.commit(t.records.length)
+          for (const i of faded) imp!.setFade(i, 1)
+          faded.clear()
+          shown.clear()
+          // spare trees were just written at full size; hide them. The pending full upload
+          // carries the scale of zero, so they are on the GPU and not drawn.
+          for (let i = 0; i < t.records.length; i++) if (t.records[i].spare) hideSlot(i)
+          return
+        }
+        const dirty = note.changed.length + note.removed.length
+        const ranged = dirty > 0 && dirty <= 600
+        const reveal = (i: number) => {
+          imp!.setVisible(i, true, sizes[i])
+          shown.delete(i)
+        }
+        if (ranged) {
+          for (const i of note.removed) {
+            imp!.setVisible(i, false, sizes[i] || 1)
+            sizes[i] = 0
+            shown.delete(i)
+            faded.delete(i)
+          }
+          for (const i of note.changed) {
+            writeSlot(i, true)
+            shown.delete(i)
+            if (t.records[i]?.spare) hideSlot(i)
+          }
+          for (const i of note.hidden) hideSlot(i)
+          for (const i of note.shown) reveal(i)
+          imp!.mesh.count = t.records.length
+          return
+        }
+        // enough slots moved that one upload of the buffer is cheaper than hundreds of ranges.
+        // The CPU array is only rewritten for the slots that changed; the rest is already right.
+        for (const i of note.changed) writeSlot(i, false)
         imp!.commit(t.records.length)
-        // `set` writes a FULL-SIZE matrix, so the seat has just made EVERY card visible again.
-        // The two sets above now describe a state that no longer exists, and refreshFar trusts
-        // them: `if (!shown.has(i)) setVisible(i, false)` skips hiding an index it believes is
-        // already hidden, leaving a solid card standing in the procedural model it was meant to
-        // hand over to. That is the doubled tree — it appeared after a replant, and only after a
-        // replant, which is why reloading the page cleared it. Re-state the cache to match what
-        // was actually written: all visible, all solid.
-        for (const i of faded) imp!.setFade(i, 1)
-        faded.clear()
-        shown.clear()
+        for (const i of note.removed) {
+          imp!.setVisible(i, false, sizes[i] || 1)
+          sizes[i] = 0
+          shown.delete(i)
+          faded.delete(i)
+        }
+        for (const i of note.changed) if (t.records[i]?.spare) hideSlot(i)
+        for (const i of note.hidden) hideSlot(i)
+        for (const i of note.shown) reveal(i)
       }
       seatImpostors()
       reseat = seatImpostors
@@ -2163,13 +2221,18 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
         if (band > 0 && eye && fwd) {
           for (const i of skip) {
             const r = t.records[i]
+            if (!r || !Number.isFinite(r.x) || r.spare) continue
             const d = T.lodDistance(r.x - eye.x, r.z - eye.z, fwd.x, fwd.z, pitch)
             if (d >= inner - band) keep.set(i, Math.min(1, Math.max(0, (d - (inner - band)) / band)))
           }
         }
         const hide = new Set<number>()
         for (const i of skip) if (!keep.has(i)) hide.add(i)
-        for (const i of shown) if (!hide.has(i)) imp!.setVisible(i, true, sizes[i])
+        const parked = (i: number) => {
+          const r = t.records[i]
+          return !r || !Number.isFinite(r.x) || r.spare === true
+        }
+        for (const i of shown) if (!hide.has(i) && !parked(i)) imp!.setVisible(i, true, sizes[i])
         for (const i of hide) if (!shown.has(i)) imp!.setVisible(i, false, sizes[i])
         shown = hide
         for (const [i, f] of keep) imp!.setFade(i, f)
@@ -2599,6 +2662,8 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     },
     cropRows: crops?.counts ?? {},
     setWeather: (w: Weather) => precip?.set(w),
+    weatherLook: () => precip?.presented() ?? WEATHER[precip?.current ?? 'clear'],
+    weatherBlending: () => precip?.blending ?? false,
     get weather() {
       return { current: precip?.current ?? ('clear' as Weather), settled: precip?.settled ?? 0, particles: precip?.count ?? 0, wetness: precip?.wetness ?? 0 }
     },

@@ -70,7 +70,7 @@ describe('GameInput', () => {
     padsAre([])
     inp.keyboard.press('KeyW')
     inp.keyboard.press('ArrowLeft')
-    inp.keyboard.press('Space')
+    inp.keyboard.press('ShiftLeft')
     inp.poll(1 / 60)
     expect(inp.drive()).toEqual({ steer: -1, throttle: 1, brake: 0, handbrake: true })
   })
@@ -87,11 +87,13 @@ describe('GameInput', () => {
     expect(inp.padConnected).toBe(true)
   })
 
-  it('maps a key code to its action, and M to fire from the seat but interface from the air', () => {
+  it('maps a key code to its action, and Ctrl to fire from the seat', () => {
     const inp = new GameInput(structuredClone(DEFAULT_KEYS), structuredClone(DEFAULT_PAD))
     expect(inp.actionOf('Tab')).toBe('drive')
     expect(inp.actionOf('KeyR')).toBe('recover')
-    expect(inp.actionOf('KeyM', { driving: true })).toBe('fire')
+    expect(inp.actionOf('ControlLeft', { driving: true })).toBe('fire')
+    expect(inp.actionOf('Space', { driving: true })).toBe('gun')
+    expect(inp.actionOf('KeyM', { driving: true })).toBe('interface')
     expect(inp.actionOf('KeyM', { driving: false })).toBe('interface')
     expect(inp.actionOf('KeyZ')).toBeNull()
     // a rebind is a change to the table, nothing else

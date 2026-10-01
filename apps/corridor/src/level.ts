@@ -62,6 +62,16 @@ export interface Level {
   mode?: 'drive' | 'fly' | 'walk'
   /** a point in the world's points.json to start at; absent: the world's home, else the bake's photo station */
   start?: string | null
+  /** sort order in the stage list and in a deployed game */
+  order?: number
+  /** the stage a run returns to when the next field says "home" */
+  home?: boolean
+  /** the stage a deployed game opens on */
+  launch?: boolean
+  /** level id to open after a win, or "home" to return to the launch stage. Absent: stay. */
+  next?: string | null
+  /** level id after a loss. Absent: the same as `next`. */
+  onFail?: string | null
   scenario?: unknown
 }
 

@@ -76,6 +76,7 @@ export const SETTING_CONTROLS = {
   'controls.haptics': 'rumble strength',
   'controls.recover': 'whether R also repairs the car',
   'controls.reset': 'reset bindings to the defaults',
+  'controls.map': 'left stick click and N fill the screen with the map',
   'game.tuning': 'the tuning panel (F6) entry',
   'game.developer': 'the developer view toggle',
   'game.restart': 'restart from the start point',

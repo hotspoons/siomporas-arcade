@@ -79,6 +79,15 @@ export class Impostors {
           // instance origin and scale
           vec4 origin = modelMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0);
           float s = length(vec3(instanceMatrix[0].x, instanceMatrix[0].y, instanceMatrix[0].z));
+          // a hidden card (near-set handover, or a spare tree past the draw radius) is on the GPU
+          // and not drawn. The instance is still visited; this sends it off-screen before the
+          // billboard work.
+          if (s < 1e-4) {
+            vUv = vec2(0.0);
+            vCardWorld = origin.xyz;
+            gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+            return;
+          }
           vec3 toCam = cameraPosition - origin.xyz;
           float ang = atan(toCam.x, toCam.z);
           float pitch = atan(toCam.y, length(toCam.xz)); // 0 = level with the tree, pi/2 = overhead
@@ -223,6 +232,22 @@ export class Impostors {
     renderer.setScissor(prevScissor)
     renderer.setScissorTest(prevScissorTest)
     renderer.setClearColor(prevClear, prevAlpha)
+  }
+
+  /**
+   * Place instance i and upload only that matrix.
+   *
+   * Not for a frame that also `commit`s: a range registered beside a full upload makes three send
+   * only the range. Call `set` and then `commit` when the whole buffer should go.
+   */
+  place(i: number, x: number, y: number, z: number, h: number, variant: number, yaw: number, m: THREE.Matrix4) {
+    this.set(i, x, y, z, h, variant, yaw, m)
+    const start = i * 16
+    this.matrixUploads.mark(start, 16)
+    if (this.matrixUploads.shouldRegister()) this.mesh.instanceMatrix.addUpdateRange(start, 16)
+    this.mesh.instanceMatrix.needsUpdate = true
+    this.aVariant.needsUpdate = true
+    this.aYaw.needsUpdate = true
   }
 
   /** Place instance i: a tree of height h at (x, ground y, z) drawn as variant v with base yaw. */

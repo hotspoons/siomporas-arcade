@@ -21,7 +21,12 @@ let started = false
  */
 function safe(v: unknown, depth = 0, seen = new WeakSet<object>()): unknown {
   if (v === null || typeof v === 'number' || typeof v === 'boolean' || v === undefined) return v
-  if (typeof v === 'string') return v.length > 4000 ? v.slice(0, 4000) + '…' : v
+  // A screenshot is a data URL. Cutting it at 4000 characters is a broken image, which is the
+  // one string this shell is asked to bring back whole.
+  if (typeof v === 'string') {
+    if (v.startsWith('data:image')) return v
+    return v.length > 4000 ? v.slice(0, 4000) + '…' : v
+  }
   if (typeof v === 'function') return `«fn ${(v as { name?: string }).name || 'anonymous'}»`
   if (typeof v === 'bigint') return String(v)
   if (typeof v !== 'object') return String(v)

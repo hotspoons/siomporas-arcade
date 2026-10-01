@@ -112,6 +112,27 @@ export function postAAFor(slug: string): 'fxaa' | 'smaa' | null {
   return m === 'fxaa' || m === 'smaa' ? m : null
 }
 
+/**
+ * The world named in the hash.
+ *
+ * `#/crofton` rather than `#crofton`. A bare hash is an anchor: if anything on the page has that
+ * id the browser scrolls to it, and a world slug is not a place in the document. The slash keeps
+ * the old links working — `#crofton` still names the world — and `setWorldHash` rewrites them.
+ */
+export function hashWorld(): string {
+  let h = ''
+  try { h = decodeURIComponent(location.hash.replace(/^#/, '')) } catch { h = location.hash.replace(/^#/, '') }
+  if (h.startsWith('/')) h = h.slice(1)
+  return h.split('?')[0].split(':')[0]
+}
+
+/** Point the hash at a world without scrolling the page to an element of that id. */
+export function setWorldHash(slug: string): void {
+  const next = `#/${slug}`
+  if (location.hash === next) return
+  history.replaceState(null, '', `${location.pathname}${location.search}${next}`)
+}
+
 /** The slug the page is about to load, as main.ts resolves it. */
 export function bootSlug(): string {
   try {
@@ -123,5 +144,5 @@ export function bootSlug(): string {
   } catch {
     /* a malformed stance must not stop the page booting */
   }
-  return location.hash.slice(1)
+  return hashWorld()
 }

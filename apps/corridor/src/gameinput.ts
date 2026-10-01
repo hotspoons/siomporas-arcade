@@ -172,7 +172,7 @@ export class GameInput {
     for (const [a, codes] of Object.entries(this.keys)) if (codes.includes(code)) hits.push(a as Action)
     if (hits.length === 0) return null
     if (hits.length === 1) return hits[0]
-    // M is both `fire` and `interface` by default: fire from the seat, hide the chrome from the air
+    // a key bound to both fire and interface: fire from the seat, hide the chrome from the air
     if (hits.includes('fire') && hits.includes('interface')) return opts.driving ? 'fire' : 'interface'
     return hits[0]
   }

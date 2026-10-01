@@ -82,6 +82,8 @@ interface Shown {
   chain: number
   limit: number
   obey: number
+  /** night beams, parented to the mesh. Hidden in daylight. */
+  lamps: THREE.Group
 }
 
 /** a chain the planner can use, plus what the follower needs that the planner does not */
@@ -96,6 +98,29 @@ interface Road extends RoadChain {
  * Posted limits by road class, m/s. OSM `maxspeed` is not baked into the chains, so this is the
  * best that can be said — and it is what a driver does on an unsigned road anyway.
  */
+/** Two bulbs and one beam, in the model's frame (nose is +X). Cheap enough to parent to every car; only a few are switched on. */
+function trafficLamps(mesh: THREE.Object3D, length: number, height: number): THREE.Group {
+  const g = new THREE.Group()
+  g.name = 'headlights'
+  g.visible = false
+  const bulb = new THREE.MeshBasicMaterial({ color: 0xfff1c9 })
+  const geo = new THREE.SphereGeometry(0.07, 6, 5)
+  const nose = length / 2 - 0.05
+  const up = height * 0.45
+  for (const side of [-0.55, 0.55]) {
+    const b = new THREE.Mesh(geo, bulb)
+    b.position.set(nose, up, side)
+    g.add(b)
+  }
+  const spot = new THREE.SpotLight(0xfff1c9, 0, 36, 0.45, 0.55, 1.4)
+  spot.position.set(nose, up, 0)
+  spot.target.position.set(nose + 12, up * 0.4, 0)
+  g.add(spot, spot.target)
+  g.userData.spot = spot
+  mesh.add(g)
+  return g
+}
+
 export function limitFor(highway: string | null): number {
   switch (highway) {
     case 'motorway': return 29
@@ -272,7 +297,7 @@ export class TrafficLayer {
       this.group.add(mesh)
       const half = { x: (m.doc.spec.length ?? 4.4) / 2, y: (m.doc.spec.height ?? 1.4) / 2, z: (m.doc.spec.width ?? 1.8) / 2 }
       const body = this.physics ? this.physics.spawnKinematic(half) : null
-      const shown: Shown = { e, mesh, body, massKg: m.doc.spec.mass ?? 1500, wrecked: false, hidden: false, chain: slot.chain, limit: SpeedLimit.v[e], obey: usable.mix.find((x) => x.vehicle === which)?.obeyRate ?? obey ?? 0.97 }
+      const shown: Shown = { e, mesh, body, massKg: m.doc.spec.mass ?? 1500, wrecked: false, hidden: false, chain: slot.chain, limit: SpeedLimit.v[e], obey: usable.mix.find((x) => x.vehicle === which)?.obeyRate ?? obey ?? 0.97, lamps: trafficLamps(mesh, m.doc.spec.length ?? 4.4, m.doc.spec.height ?? 1.4) }
       if (body) this.byCollider.set(body.colliderHandle, shown)
       this.shown.push(shown)
     }
@@ -542,6 +567,11 @@ export class TrafficLayer {
 
   /** what the last frame cost, ms, by part — for the perf panel and the bridge */
   readonly stats = { actorsMs: 0, placeMs: 0, steps: 0, systems: {} as Record<string, number>, dents: 0, impacts: 0 }
+  /** 0 day, 1 full night. Beams are only drawn on the nearest handful of cars. */
+  night = 0
+  setNight(n: number): void {
+    this.night = n
+  }
 
   /** Step the simulation and put every car where it now is. */
   tick(dt: number, eye: THREE.Vector3): void {
@@ -561,12 +591,14 @@ export class TrafficLayer {
 
   private place(all: boolean, eye?: THREE.Vector3): void {
     const drawM = T.TRAFFIC_DRAW_M
+    let beams = 0
     for (const s of this.shown) {
       const e = s.e
       if (s.wrecked && s.body) {
         // a loose body: the mesh follows the solver, and the entity follows the mesh
         const q = s.body.pose()
         s.mesh.visible = true
+        s.lamps.visible = false
         s.mesh.position.set(q.x, q.y, q.z)
         s.mesh.quaternion.set(q.qx, q.qy, q.qz, q.qw)
         Transform.x[e] = q.x
@@ -574,19 +606,27 @@ export class TrafficLayer {
         Transform.z[e] = q.y
         continue
       }
-      if (s.hidden) { s.mesh.visible = false; continue }
+      if (s.hidden) { s.mesh.visible = false; s.lamps.visible = false; continue }
       const x = Transform.x[e]
       const y = Transform.y[e]
       const yaw = Transform.yaw[e]
       // three: x east, y up, z south — the site's y is north
       const near = all || !eye || (eye.x - x) ** 2 + (eye.z + y) ** 2 < drawM * drawM
-      if (!near) { s.mesh.visible = false; s.body?.enable(false); continue }
+      if (!near) { s.mesh.visible = false; s.lamps.visible = false; s.body?.enable(false); continue }
       const g = this.site.groundAt(x, -y) ?? this.site.heightAt(x, y) ?? 0
       Transform.z[e] = g
       s.mesh.visible = true
       s.mesh.position.set(x, g, -y)
       // the model's nose is +X; three's rotation about +Y takes +X toward -Z, which is NORTH here
       s.mesh.rotation.set(0, yaw, 0)
+      const dist2 = eye ? (eye.x - x) ** 2 + (eye.z + y) ** 2 : 0
+      const beam = this.night > 0.08 && beams < 8 && dist2 < 90 * 90
+      s.lamps.visible = beam
+      if (beam) {
+        beams++
+        const spot = s.lamps.userData.spot as THREE.SpotLight | undefined
+        if (spot) spot.intensity = 7 * this.night
+      }
       if (s.body) {
         // a body only near the player: the rest of the solver's work on a kinematic car is a
         // broad-phase update a step, and there were six hundred of them

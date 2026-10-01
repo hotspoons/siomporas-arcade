@@ -728,6 +728,8 @@ export class ViewerUI {
     if (st) {
       const pad = [
         ...(this.allow('controls.gamepad') ? [toggle({ label: 'Gamepad', value: st.data.gamepad, note: 'the first connected pad: triggers are the pedals, the left stick steers, Start pauses', onChange: (v) => { st.update((d) => (d.gamepad = v)); this.o.onBindings?.() } })] : []),
+        ...(this.allow('controls.map') ? [toggle({ label: 'Expand the map', value: st.data.mapExpand, note: 'left stick click and N fill the screen. Off until this is on — Esc, N, or the stick closes it', onChange: (v) => { st.update((d) => (d.mapExpand = v)); this.o.onBindings?.() } })] : []),
+        ...(this.allow('controls.map') ? [toggle({ label: 'Map follows heading', value: st.data.mapHeading, note: 'ahead is up. Off keeps north at the top', onChange: (v) => { st.update((d) => (d.mapHeading = v)); this.o.onBindings?.() } })] : []),
         ...(this.allow('controls.haptics') ? [slider({ label: 'Rumble', value: st.data.haptics, min: 0, max: 1, step: 0.1, unit: '%', note: 'bumps, grass and impacts, on a pad that can', onInput: (v) => { st.update((d) => (d.haptics = v)); this.o.onBindings?.() } })] : []),
       ]
       if (pad.length) {

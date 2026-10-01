@@ -273,15 +273,71 @@ export class Precipitation {
     return this.weather
   }
 
-  set(w: Weather) {
-    this.weather = w
-    this.look = WEATHER[w]
+  /** the look the sky and the particles should show right now, mid-blend */
+  private fromLook: WeatherLook = WEATHER.clear
+  private toLook: WeatherLook = WEATHER.clear
+  private blend = 1
+  private blendAt = 0
+  private seen = false
+
+  /** Falling precipitation, sky and fog, mid-way between two weathers. Wetness is NOT blended here — tick already ramps it. */
+  presented(): WeatherLook {
+    const u = this.blend >= 1 ? 1 : Math.min(1, (performance.now() / 1000 - this.blendAt) / 7)
+    this.blend = u
+    if (u >= 1) return this.toLook
+    if (u <= 0) return this.fromLook
+    const n = (x: number, y: number) => x + (y - x) * u
+    return {
+      ...this.toLook,
+      density: n(this.fromLook.density, this.toLook.density),
+      box: n(this.fromLook.box, this.toLook.box),
+      fall: n(this.fromLook.fall, this.toLook.fall),
+      drift: n(this.fromLook.drift, this.toLook.drift),
+      length: n(this.fromLook.length, this.toLook.length),
+      width: n(this.fromLook.width, this.toLook.width),
+      opacity: n(this.fromLook.opacity, this.toLook.opacity),
+      flutter: n(this.fromLook.flutter, this.toLook.flutter),
+      fogScale: n(this.fromLook.fogScale, this.toLook.fogScale),
+      skyMix: n(this.fromLook.skyMix, this.toLook.skyMix),
+      grip: n(this.fromLook.grip, this.toLook.grip),
+      colour: this.fromLook.colour.clone().lerp(this.toLook.colour, u),
+      skyTint: this.fromLook.skyTint.clone().lerp(this.toLook.skyTint, u),
+      // wet and accum stay the destination: tick ramps those on its own clock
+      wet: this.toLook.wet,
+      accum: this.toLook.accum,
+    }
+  }
+
+  get blending(): boolean {
+    return this.blend < 1
+  }
+
+  private pushLook(look: WeatherLook) {
+    this.look = look
     const m = this.mat.uniforms
-    ;(m.uColour.value as THREE.Color).copy(this.look.colour)
-    m.uSize.value.set(this.look.width, this.look.length)
-    m.uFall.value = this.look.fall
-    m.uFlutter.value = this.look.flutter
-    for (const u of this.followers) (u.uAccumColour.value as THREE.Color).copy(this.look.accumColour)
+    ;(m.uColour.value as THREE.Color).copy(look.colour)
+    m.uSize.value.set(look.width, look.length)
+    m.uFall.value = look.fall
+    m.uFlutter.value = look.flutter
+    for (const u of this.followers) (u.uAccumColour.value as THREE.Color).copy(look.accumColour)
+  }
+
+  set(w: Weather) {
+    const next = WEATHER[w]
+    if (!this.seen) {
+      this.seen = true
+      this.weather = w
+      this.fromLook = this.toLook = next
+      this.blend = 1
+      this.pushLook(next)
+      return
+    }
+    if (this.weather === w) return
+    this.fromLook = this.presented()
+    this.weather = w
+    this.toLook = next
+    this.blendAt = performance.now() / 1000
+    this.blend = 0
   }
 
   /** the settled layer, 0…1 — probes and the HUD read it */
@@ -310,10 +366,12 @@ export class Precipitation {
     const side = this.look.box * T.WEATHER_BOX
     box.set(side, side * 0.6, side)
     m.uTime.value = time
-    m.uDrift.value = this.look.drift * T.WEATHER_WIND
+    const shown = this.presented()
+    this.pushLook(shown)
+    m.uDrift.value = shown.drift * T.WEATHER_WIND
     ;(m.uCam.value as THREE.Vector3).copy(eye)
-    m.uOpacity.value = this.look.opacity * T.WEATHER_OPACITY
-    const want = Math.min(this.capacity, Math.round(this.look.density * T.WEATHER_RATE * box.x * box.y * box.z))
+    m.uOpacity.value = shown.opacity * T.WEATHER_OPACITY
+    const want = Math.min(this.capacity, Math.round(shown.density * T.WEATHER_RATE * box.x * box.y * box.z))
     this.geo.instanceCount = want
 
     // settle and thaw on a clock, so a change of weather is a change of scene and not a cut. The

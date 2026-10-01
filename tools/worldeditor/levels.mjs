@@ -75,6 +75,7 @@ export const PROFILES = ['stunts', 'taxi', 'street', 'rush', 'sim']
 export const LEVEL_KEYS = [
   'id', 'world', 'name', 'description', 'notes', 'created', 'updated',
   'mode', 'start', 'player', 'recoverRepairs', 'program', 'preset', 'defaults',
+  'order', 'home', 'launch', 'next', 'onFail',
   'placements', 'splats', 'simulations', 'scenario',
 ]
 
@@ -96,6 +97,14 @@ export function validate(level) {
   if (!SLUG.test(level?.world ?? '')) E(`world ${JSON.stringify(level?.world)} is not a usable slug`)
   if (level.mode !== undefined && !MODES.includes(level.mode)) E(`mode ${JSON.stringify(level.mode)} is not one of ${MODES.join(', ')}`)
   if (level.start !== undefined && level.start !== null && !/^[a-z0-9][a-z0-9_-]*$/.test(String(level.start))) E(`start ${JSON.stringify(level.start)} names a point in the world's points.json by id`)
+  if (level.order !== undefined && (typeof level.order !== 'number' || !Number.isFinite(level.order))) E('order is a number')
+  if (level.home !== undefined && typeof level.home !== 'boolean') E('home is true or false')
+  if (level.launch !== undefined && typeof level.launch !== 'boolean') E('launch is true or false')
+  for (const k of ['next', 'onFail']) {
+    const v = level[k]
+    if (v === undefined || v === null || v === '' || v === 'home') continue
+    if (!SLUG.test(String(v))) E(`${k} ${JSON.stringify(v)} is a level id, "home", or empty`)
+  }
 
   /*
    * WHO YOU ARE DRIVING.

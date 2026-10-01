@@ -133,7 +133,10 @@ export let GRASS_HUE = 0
 export let GRASS_SAT = 0.9
 export let GRASS_LIGHT = 1.0
 export let GRASS_DRY_ADD = 0
-/** blades stop swaying above this eye speed (m/s): nobody sees wind from a moving car */
+/**
+ * Above this eye speed (m/s) the grass is static cards and nothing is generated as blades.
+ * Below it, the blades come back and the wind with them. Nobody sees either from a moving car.
+ */
 export let GRASS_WIND_STILL_BELOW = 4
 /**
  * Which grass grows here: -1 reads it off the bake (latitude, longitude and OSM land use, see
@@ -551,6 +554,18 @@ export let TREE_SPECIES = -1
 export let TREE_SPECIES_LIMIT = 6
 export let TREE_PLANT_RADIUS_M = 1400
 export let TREE_REPLANT_M = 350
+/**
+ * 1 = a replant keeps each tree in its slot and uploads only the cells that entered or left.
+ * 0 = the old path: throw the list away and rewrite every impostor.
+ */
+export let TREE_PATCH = 1
+/**
+ * Metres past the plant radius to keep on the GPU but not draw. 0 = off.
+ * A tree farther than plant + spare is evicted and its slot freed.
+ */
+export let TREE_SPARE_M = 600
+/** impostor budget on a phone. The desktop budget stays 120k; this is what a coarse pointer gets. Reload to apply. */
+export let MOBILE_TREE_BUDGET = 8000
 // grass grows only where the tile photo reads as vegetation (vegmask.ts): how far around the eye
 // the tile photos are classified, and the excess-green threshold (2G - R - B on 0..1 channels)
 export let VEG_RADIUS_M = 700
@@ -1121,7 +1136,7 @@ export const TUNE_TABS: TuneTab[] = [
           tune('GRASS_SAT', () => GRASS_SAT, (v) => (GRASS_SAT = v), [0, 2], 0.02),
           tune('GRASS_LIGHT', () => GRASS_LIGHT, (v) => (GRASS_LIGHT = v), [0.3, 2], 0.02),
           tune('GRASS_DRY_ADD', () => GRASS_DRY_ADD, (v) => (GRASS_DRY_ADD = v), [-1, 1], 0.02, 'straw on top of the season'),
-          tune('GRASS_WIND_STILL_BELOW', () => GRASS_WIND_STILL_BELOW, (v) => (GRASS_WIND_STILL_BELOW = v), [0, 40], 0.5, 'no sway above this speed (m/s)'),
+          tune('GRASS_WIND_STILL_BELOW', () => GRASS_WIND_STILL_BELOW, (v) => (GRASS_WIND_STILL_BELOW = v), [0, 40], 0.5, 'above this speed (m/s): static cards, no blades'),
           tune('GRASS_TYPE', () => GRASS_TYPE, (v) => (GRASS_TYPE = v), [-1, 6], 1, '-1 from the bake (LANDFIRE ground class); 0 common 1 wheat 2 bermuda 3 coastal 4 annual 5 meadow 6 heath'),
           tune('SEASON', () => SEASON, (v) => (SEASON = v), [-1, 3], 1, '-1 use the selector; 0 winter 1 spring 2 summer 3 autumn'),
         ],
@@ -1247,8 +1262,11 @@ export const TUNE_TABS: TuneTab[] = [
           tune('TREE_MIN_H', () => TREE_MIN_H, (v) => (TREE_MIN_H = v), [1, 14], 0.5, 'canopy height (m) that counts as a tree; lower plants the scrub the CHM sees'),
           tune('TREE_HEIGHT_SCALE', () => TREE_HEIGHT_SCALE, (v) => (TREE_HEIGHT_SCALE = v), [0.3, 2.5], 0.05, 'multiplies every measured height'),
           tune('TREE_DENSITY', () => TREE_DENSITY, (v) => (TREE_DENSITY = v), [0.05, 1], 0.05, '1 = every candidate; below that a stable hash thins them'),
-          tune('TREE_PLANT_RADIUS_M', () => TREE_PLANT_RADIUS_M, (v) => (TREE_PLANT_RADIUS_M = v), [200, 3000], 50, 'how far around the eye the budget is spent'),
+          tune('TREE_PLANT_RADIUS_M', () => TREE_PLANT_RADIUS_M, (v) => (TREE_PLANT_RADIUS_M = v), [200, 3000], 50, 'how far around the eye cards are drawn'),
           tune('TREE_REPLANT_M', () => TREE_REPLANT_M, (v) => (TREE_REPLANT_M = v), [50, 1200], 25, 'replant once the eye is this far from where it last planted'),
+          tune('TREE_PATCH', () => TREE_PATCH, (v) => (TREE_PATCH = v), [0, 1], 1, '1 = upload only the trees that entered or left; 0 = rewrite every card'),
+          tune('TREE_SPARE_M', () => TREE_SPARE_M, (v) => (TREE_SPARE_M = v), [0, 2000], 50, 'metres past the plant radius kept on the GPU but not drawn. 0 = off. Farther than this, the slot is freed'),
+          tune('MOBILE_TREE_BUDGET', () => MOBILE_TREE_BUDGET, (v) => (MOBILE_TREE_BUDGET = v), [400, 40000], 200, 'how many trees a phone plants. Reload to apply — the buffer is sized once'),
         ],
       },
       {

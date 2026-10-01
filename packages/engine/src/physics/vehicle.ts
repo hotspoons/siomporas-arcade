@@ -539,6 +539,17 @@ export class Vehicle {
         const t = -p.antiRollPerKg * mass * roll * dt
         body.applyTorqueImpulse({ x: fwd.x * t, y: fwd.y * t, z: fwd.z * t }, true)
       }
+      // A profile with no anti-roll (stunts) stays leaned after a sideways bump: the bar damps
+      // rate, not a static lean, and nothing puts the chassis back. A floor restores a small lean
+      // while the wheels are down. Profiles that already have a stronger bar are left alone.
+      const rollFloor = 13
+      if (grounded >= 3 && p.antiRollPerKg < rollFloor) {
+        const roll = Math.asin(clamp(rgt.y, -1, 1))
+        if (Math.abs(roll) < 0.4) {
+          const t = -(rollFloor - p.antiRollPerKg) * mass * roll * dt
+          body.applyTorqueImpulse({ x: fwd.x * t, y: fwd.y * t, z: fwd.z * t }, true)
+        }
+      }
       if (p.rollResist > 0) {
         const about = ang.x * fwd.x + ang.y * fwd.y + ang.z * fwd.z
         const cut = about * p.rollResist

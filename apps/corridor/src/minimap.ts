@@ -77,6 +77,11 @@ export class MiniMap {
   private pxPerM = 0.25 // zoom
   private centre = { x: 0, y: 0 } // site frame
   private follow = true
+  /** the map turns with the car so ahead is up */
+  private headingUp = false
+  private targets: { x: number; y: number; kind: string }[] = []
+  /** the one place the edge arrow points at, when it is off the map */
+  private goal: { x: number; y: number } | null = null
   private w = DEFAULT
   private h = DEFAULT
   private dragging = false
@@ -93,6 +98,8 @@ export class MiniMap {
   private dpr = 1
   private dprQuery: MediaQueryList | null = null
   expanded = false
+  /** full-screen is a player setting, off until they turn it on */
+  private expansionEnabled = false
   /**
    * A DOUBLE-CLICK DROPS THE CAR THERE. Rich, 2026-09-30: "Double clicking a spot on the break
    * out map should drop your car there instead of enlarging or shrinking the map (there is a
@@ -120,6 +127,7 @@ export class MiniMap {
     locate.classList.add('mm-locate')
     this.expandBtn = button({ icon: 'arrows-pointing-out', variant: 'ghost', title: 'the whole screen — double-click the map to drive there', key: 'N', onClick: () => this.setExpanded(!this.expanded) })
     this.expandBtn.classList.add('mm-expand')
+    this.expandBtn.hidden = true
     // THE GRIP IS AT THE TOP-LEFT. The panel is pinned to the bottom-right corner of the screen,
     // so the browser's own `resize: both` handle — always bottom-right — grew the map INTO the
     // corner it is anchored to: you drag down-right and the map grows up-left, which is backwards
@@ -360,6 +368,17 @@ export class MiniMap {
     }
   }
 
+  /** Ahead is up, instead of north. The chevron then points at the top of the map. */
+  setHeadingUp(on: boolean): void {
+    this.headingUp = on
+  }
+
+  /** Race starts, checkpoints, finishes, and the posts a program put down. `goal` is the one to chase. */
+  setTargets(list: { x: number; y: number; kind: string }[], goal: { x: number; y: number } | null): void {
+    this.targets = list
+    this.goal = goal
+  }
+
   /** Draw with the marker at site x,y heading `yaw` (radians, 0 = east, counter-clockwise). */
   draw(marker: { x: number; y: number; yaw: number } | null) {
     if (marker && this.follow) {
@@ -379,6 +398,11 @@ export class MiniMap {
     ctx.clip()
     ctx.fillStyle = '#1b2a1f'
     ctx.fillRect(0, 0, W, H)
+    if (this.headingUp && marker) {
+      ctx.translate(W / 2, H / 2)
+      ctx.rotate(marker.yaw - Math.PI / 2)
+      ctx.translate(-W / 2, -H / 2)
+    }
     const toPx = (x: number, y: number): [number, number] => [W / 2 + (x - this.centre.x) * this.pxPerM, H / 2 - (y - this.centre.y) * this.pxPerM]
     if (this.imagery && this.imgQuad) {
       // The photo is a ROTATED rectangle in this frame, and `drawImage` only draws upright ones —
@@ -421,6 +445,14 @@ export class MiniMap {
     ctx.strokeStyle = '#ff8c00'
     ctx.lineWidth = 2
     for (const s of this.siblings) this.stroke(s, toPx)
+    const DOT: Record<string, string> = { start: '#4fc3f7', finish: '#ff8a65', checkpoint: '#b39ddb', pickup: '#81c784', dropoff: '#ffb74d', goal: '#fff176', home: '#ffd54f' }
+    for (const t of this.targets) {
+      const [tx, ty] = toPx(t.x, t.y)
+      ctx.fillStyle = DOT[t.kind] ?? '#fff'
+      ctx.beginPath()
+      ctx.arc(tx, ty, 4, 0, Math.PI * 2)
+      ctx.fill()
+    }
     // marker: a chevron along the heading
     if (marker) {
       const [mx, my] = toPx(marker.x, marker.y)
@@ -441,6 +473,7 @@ export class MiniMap {
       ctx.restore()
     }
     ctx.restore()
+    this.edgeArrow(marker, W, H)
     // rim, north arrow, scale
     ctx.strokeStyle = 'rgba(255,255,255,0.6)'
     ctx.lineWidth = 1
@@ -451,7 +484,7 @@ export class MiniMap {
     ctx.fillStyle = '#fff'
     ctx.font = 'bold 11px "IBM Plex Sans", system-ui'
     ctx.textAlign = 'center'
-    ctx.fillText('N', W / 2, 14)
+    if (!this.headingUp) ctx.fillText('N', W / 2, 14)
     const barM = niceScale(60 / this.pxPerM)
     const barPx = barM * this.pxPerM
     ctx.fillStyle = 'rgba(255,255,255,0.85)'
@@ -464,7 +497,15 @@ export class MiniMap {
    * The whole screen or the corner. The scale (px/m) is kept, so expanding shows more ground
    * rather than a blown-up thumbnail; the corner size you dragged to is kept for when it shrinks.
    */
+  /** The Expand the map setting. Off hides the button and will not grow the map. */
+  setExpansionEnabled(on: boolean): void {
+    this.expansionEnabled = on
+    this.expandBtn.hidden = !on
+    if (!on && this.expanded) this.setExpanded(false)
+  }
+
   setExpanded(on: boolean) {
+    if (on && !this.expansionEnabled) return
     if (on === this.expanded) return
     this.expanded = on
     this.el.classList.toggle('expanded', on)
@@ -485,9 +526,51 @@ export class MiniMap {
     // bottom (Rich, 2026-09-26). Esc, N and a double-click still work.
     this.expandBtn.replaceChildren()
     this.expandBtn.append(iconOf(on ? 'x-mark' : 'arrows-pointing-out'))
-    this.expandBtn.title = on ? 'close the map (N or Esc)' : 'the whole screen (N) — double-click the map to drive there'
+    if (on) {
+      const label = document.createElement('span')
+      label.className = 'mm-close-label'
+      label.textContent = 'Close map'
+      this.expandBtn.append(label)
+    }
+    this.expandBtn.title = on ? 'close the map (N, Esc, or left stick)' : 'the whole screen (N) — double-click the map to drive there'
     this.fit()
     this.draw(null)
+  }
+
+  /** A tick on the rim toward the goal, when that goal is outside the map. */
+  private edgeArrow(marker: { x: number; y: number; yaw: number } | null, W: number, H: number): void {
+    const g = this.goal
+    if (!g) return
+    let px = W / 2 + (g.x - this.centre.x) * this.pxPerM
+    let py = H / 2 - (g.y - this.centre.y) * this.pxPerM
+    if (this.headingUp && marker) {
+      const a = marker.yaw - Math.PI / 2
+      const dx = px - W / 2
+      const dy = py - H / 2
+      const c = Math.cos(a)
+      const s = Math.sin(a)
+      px = W / 2 + dx * c - dy * s
+      py = H / 2 + dx * s + dy * c
+    }
+    const dx = px - W / 2
+    const dy = py - H / 2
+    const r = Math.min(W, H) / 2 - 18
+    if (dx * dx + dy * dy < r * r) return
+    const len = Math.hypot(dx, dy) || 1
+    const ex = W / 2 + (dx / len) * r
+    const ey = H / 2 + (dy / len) * r
+    const ctx = this.ctx
+    ctx.save()
+    ctx.translate(ex, ey)
+    ctx.rotate(Math.atan2(dy, dx) + Math.PI / 2)
+    ctx.fillStyle = '#fff176'
+    ctx.beginPath()
+    ctx.moveTo(0, -8)
+    ctx.lineTo(6, 6)
+    ctx.lineTo(-6, 6)
+    ctx.closePath()
+    ctx.fill()
+    ctx.restore()
   }
 
   private stroke(pts: Float32Array, toPx: (x: number, y: number) => [number, number]) {

@@ -290,10 +290,16 @@ export interface DeployRequest {
 export interface Level {
   id: string
   world: string
+  name?: string | null
   defaults?: { time?: string; weather?: string; season?: string }
   mode?: string
   /** a point id from the world's points.json: where the level starts; absent is the world's home */
   start?: string | null
+  order?: number
+  home?: boolean
+  launch?: boolean
+  next?: string | null
+  onFail?: string | null
   /**
    * The car you drive, as opposed to the cars standing around.
    *

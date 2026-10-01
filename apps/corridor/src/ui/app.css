@@ -248,7 +248,36 @@ body.chrome-off .drivepad { display: none; }
 @media (pointer: coarse) {
   .drivepad { display: flex; }
   .movepad { display: grid; }
+  body.game-mode .drivepad { display: none; }
+  body.game-mode .radpad { display: block; }
 }
+
+/* phone, in a game: tilt steers, the right thumb is gas, the left is brake */
+.radpad { display: none; position: fixed; inset: 0; z-index: var(--z-hud); pointer-events: none; }
+.radpad .zone {
+  pointer-events: auto; position: absolute;
+  display: flex; align-items: center; justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.28); border-radius: 14px;
+  color: rgba(255, 255, 255, 0.8); letter-spacing: 0.14em; font: inherit; font-size: 13px;
+  background: rgba(0, 0, 0, 0.28); touch-action: none;
+}
+.radpad .zone:active { background: rgba(255, 255, 255, 0.35); color: #111; }
+.radpad .brake { left: 2vw; bottom: 4vh; width: 22vw; height: 42vh; }
+.radpad .gas { right: 2vw; bottom: 4vh; width: 22vw; height: 42vh; }
+.radpad .gun { right: 2vw; bottom: 48vh; width: 20vw; height: 11vh; }
+.radpad .missile { right: 24vw; bottom: 48vh; width: 22vw; height: 11vh; }
+.radpad .tilt { left: 2vw; top: 10vh; width: 22vw; height: 8vh; }
+
+.fsbtn {
+  position: fixed; top: var(--s3); right: var(--s3); z-index: var(--z-hud);
+  display: none;
+  font: inherit; font-size: var(--text-sm);
+  color: var(--ink-1); background: var(--hud-bg);
+  border: 1px solid var(--hud-line); border-radius: var(--r3);
+  padding: 6px 10px; cursor: pointer;
+}
+body.game-mode .fsbtn { display: block; }
+@media (pointer: coarse) { .fsbtn { display: none !important; } }
 
 /* ---- minimap --------------------------------------------------------------------------------
    MiniMap sets `id="minimap"` and appends itself to <body>, so these are id rules. The first cut
@@ -297,8 +326,14 @@ body.chrome-off .drivepad { display: none; }
 #minimap.expanded canvas { box-shadow: none; }
 #minimap.expanded .btn.ghost { width: 40px; height: 40px; }
 #minimap.expanded .mm-locate { left: var(--s5); bottom: var(--s5); }
-/* close where a person looks for it: the top right of the screen */
-#minimap.expanded .mm-expand { top: calc(var(--bar-h, 48px) + var(--s3)); right: var(--s5); bottom: auto; opacity: 1; }
+/* close where a person looks for it: a labelled button at the top right, not a glyph */
+#minimap.expanded .mm-expand {
+  top: calc(var(--bar-h, 48px) + var(--s3)); right: var(--s5); bottom: auto; opacity: 1;
+  display: flex; align-items: center; gap: 6px;
+  width: auto; height: 40px; padding: 0 14px; border-radius: 999px;
+  font: 600 14px var(--font, system-ui, sans-serif);
+}
+#minimap.expanded .mm-close-label { line-height: 1; }
 
 /* ---- attribution ------------------------------------------------------------------------------
    Two of these are licence conditions (OSM's ODbL, Macrostrat's CC-BY), so the line is always on

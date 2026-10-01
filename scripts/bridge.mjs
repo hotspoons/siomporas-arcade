@@ -13,7 +13,7 @@
 // registered in src/game/Game.tsx (game, world, input, three, actions,
 // constants) — and everything on `window`.
 
-import { readFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 
 const token = process.env.APEX_BRIDGE
 if (!token) {
@@ -62,7 +62,23 @@ async function main() {
     console.error(body.error ?? body)
     process.exit(1)
   }
+  const shot = dataUrl(body.result)
+  if (shot) {
+    const file = `/tmp/corridor-shot.${shot.ext}`
+    writeFileSync(file, shot.bytes)
+    console.log(JSON.stringify({ screenshot: file, bytes: shot.bytes.length }))
+    return
+  }
   console.log(JSON.stringify(body.result, null, 2))
+}
+
+/** A screenshot comes back as a data URL. Write the bytes; do not print a megabyte of base64. */
+function dataUrl(v) {
+  if (typeof v !== 'string' || !v.startsWith('data:image')) return null
+  const m = /^data:image\/(\w+);base64,(.+)$/s.exec(v)
+  if (!m) return null
+  const ext = m[1] === 'jpeg' ? 'jpg' : m[1]
+  return { ext, bytes: Buffer.from(m[2], 'base64') }
 }
 
 main().catch((err) => {

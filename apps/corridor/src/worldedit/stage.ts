@@ -269,7 +269,7 @@ export class StagePanel {
       const who = group('What you drive')
       const pb = bodyOf(who)
       if (!this.vehicles.length) {
-        pb.append(hint('no vehicles in the library — anything classed hero-car, traffic, emergency or commercial-vehicle shows up here', true))
+        pb.append(hint('no vehicles in the library — anything classed hero-car, traffic, emergency, commercial-vehicle or motorcycle shows up here', true))
       } else {
         pb.append(
           select({

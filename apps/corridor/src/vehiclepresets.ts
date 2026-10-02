@@ -66,6 +66,18 @@ function make(
  */
 export const VEHICLE_PRESETS: VehiclePreset[] = [
   {
+    id: 'motorcycle',
+    name: 'Motorcycle',
+    note: 'One headlight and one tail light, on the centreline.',
+    suits: ['motorcycle', 'traffic'],
+    doc: make(
+      { mass: 190, wheelbase: 1.4, track: 0.18, cgHeight: 0.55, wheelRadius: 0.31, drive: 'rwd', length: 2.15, width: 0.75, height: 1.15, rideHeight: 0.14, headlights: 1, taillights: 1 },
+      'street',
+      { power_kw: 55, redline_rpm: 11000, idle_rpm: 1200, gears: [2.8, 2.0, 1.55, 1.25, 1.05, 0.9], final_drive: 3.2, brake_torque_nm: 800, brake_bias: 0.7 },
+      'engines/atg-video-1/02_kohler_ch750.mr', 32,
+    ),
+  },
+  {
     id: 'kei',
     name: 'Kei car',
     note: 'Tiny, light, barely any power. Everything feels fast at 30 mph.',

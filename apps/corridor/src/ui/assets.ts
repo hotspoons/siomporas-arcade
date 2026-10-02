@@ -79,7 +79,7 @@ function defaultVariantFor(kind: string | undefined, role: (typeof USE_ROLES)[nu
 /** What a thing of this class is usually used as, when nobody has said otherwise. */
 function roleForKind(kind: string | undefined): (typeof USE_ROLES)[number] {
   if (kind === 'hero-car' || kind === 'emergency') return 'hero'
-  if (kind === 'traffic' || kind === 'commercial-vehicle') return 'traffic'
+  if (kind === 'traffic' || kind === 'commercial-vehicle' || kind === 'motorcycle') return 'traffic'
   return 'scenery'
 }
 

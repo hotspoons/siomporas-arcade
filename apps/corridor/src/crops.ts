@@ -22,6 +22,7 @@
 import * as THREE from 'three'
 import type { Season } from './season'
 import * as T from './tuning'
+import { LAMP_PARS, retro } from './retro'
 
 export type CropType = 'corn' | 'soy' | 'wheat' | 'hay' | 'fallow'
 export const CROP_TYPES: CropType[] = ['corn', 'soy', 'wheat', 'hay', 'fallow']
@@ -305,6 +306,12 @@ export function buildCrops(
         uCover: { value: look0.cover },
         uTime: { value: 0 },
         uWind: { value: 1 },
+        uSun: { value: new THREE.Vector3(-0.51, 0.8, 0.31).normalize() },
+        uNightMul: { value: 1 },
+        uLightTint: { value: new THREE.Color(1, 1, 1) },
+        uGlow: { value: 0 },
+        uLampGain: { value: 1 },
+        ...retro.uniforms,
       },
       vertexShader: /* glsl */ `
         attribute vec3 aInfo; // heightFrac, rnd, isMat
@@ -315,6 +322,7 @@ export function buildCrops(
         varying float vT;
         varying float vRnd;
         varying float vMat;
+        varying vec3 vWorld;
         #include <common>
         #include <fog_pars_vertex>
         #include <logdepthbuf_pars_vertex>
@@ -335,7 +343,9 @@ export function buildCrops(
           p.xz += vec2(0.8, 0.5) * sway * uWind * lift * uHeight;
           // three's fog chunk reads a variable named exactly mvPosition; calling it anything else
           // compiles clean here and then fails inside the fog include
-          vec4 mvPosition = viewMatrix * vec4(p, 1.0);
+          vec4 world = modelMatrix * vec4(p, 1.0);
+          vWorld = world.xyz;
+          vec4 mvPosition = viewMatrix * world;
           gl_Position = projectionMatrix * mvPosition;
           #include <logdepthbuf_vertex>
           #include <fog_vertex>
@@ -350,9 +360,16 @@ export function buildCrops(
         varying float vT;
         varying float vRnd;
         varying float vMat;
+        varying vec3 vWorld;
+        uniform vec3 uSun;
+        uniform float uNightMul;
+        uniform vec3 uLightTint;
+        uniform float uGlow;
+        uniform float uLampGain;
         #include <fog_pars_fragment>
         #include <logdepthbuf_pars_fragment>
         ${GLSL_GRADE}
+        ${LAMP_PARS}
         void main() {
           #include <logdepthbuf_fragment>
           float a = 1.0;
@@ -369,7 +386,21 @@ export function buildCrops(
           vec3 col = gradeCrop(uBase, uTip, t, vRnd);
           // the furrow: the bottom of a row is in its own shadow
           col *= mix(0.55, 1.0, smoothstep(0.0, 0.45, vT));
-          gl_FragColor = vec4(col, 1.0);
+          // the same half-Lambert the grass uses. A ribbon has no normal attribute; the face of
+          // the quad is the derivative of its world position.
+          vec3 n = cross(dFdx(vWorld), dFdy(vWorld));
+          float nl = length(n);
+          n = nl > 1e-5 ? n / nl : vec3(0.0, 1.0, 0.0);
+          if (!gl_FrontFacing) n = -n;
+          float ndl = dot(n, uSun) * 0.5 + 0.5;
+          vec3 view = normalize(cameraPosition - vWorld);
+          float back = pow(max(0.0, dot(view, -uSun)), 4.0) * 0.35 * vT;
+          vec3 lit = col * (0.35 + 0.75 * ndl) + col * back;
+          // uGlow 1 is the old full-bright night. 0 is the grass's own night.
+          float night = mix(uNightMul, 1.0, clamp(uGlow, 0.0, 1.0));
+          vec3 outCol = lit * night * uLightTint;
+          outCol += col * lampDiffuse(vWorld, n, uLampGain);
+          gl_FragColor = vec4(outCol, 1.0);
           #include <fog_fragment>
           #include <colorspace_fragment>
         }
@@ -403,13 +434,30 @@ export function buildCrops(
   }
 }
 
-/** Advance the wind. */
+/** Advance the wind, and keep the night-glow knob live. */
 export function tickCrops(group: THREE.Group, time: number) {
   for (const ch of group.children) {
     const m = (ch as THREE.Mesh).material as THREE.ShaderMaterial
     if (m?.uniforms?.uTime) {
       m.uniforms.uTime.value = time
       m.uniforms.uWind.value = T.CROP_WIND
+      m.uniforms.uGlow.value = T.CROP_GLOW
+      m.uniforms.uLampGain.value = T.HEADLIGHT_BOUNCE
+    }
+  }
+}
+
+/** The grass's day/night level, its colour, and the real sun. A field with no light of its own stays noon-bright after dark. */
+export function setCropLight(group: THREE.Group, level: number, tint: THREE.Color, sun?: THREE.Vector3) {
+  for (const ch of group.children) {
+    const m = (ch as THREE.Mesh).material as THREE.ShaderMaterial
+    if (!m?.uniforms?.uNightMul) continue
+    m.uniforms.uNightMul.value = level
+    ;(m.uniforms.uLightTint.value as THREE.Color).copy(tint)
+    if (sun) {
+      const u = m.uniforms.uSun.value as THREE.Vector3
+      u.copy(sun)
+      if (u.lengthSq() > 1e-8) u.normalize()
     }
   }
 }

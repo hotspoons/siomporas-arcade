@@ -19,7 +19,7 @@ import { Grass } from './grass'
 import { siteLook, type Season } from './season'
 import { GRASS_TYPES, GROUND_COVER, floorTexture, siteCover } from './groundcover'
 import { loadFlora, type Flora } from './flora'
-import { CROP_TYPES, buildCrops, tickCrops, type CropType, type Field as CropField } from './crops'
+import { CROP_TYPES, buildCrops, setCropLight, tickCrops, type CropType, type Field as CropField } from './crops'
 import { ACCUM_PARS, Precipitation, WEATHER, accumUniforms, type Weather, type WeatherLook } from './weather'
 import { buildStrip, sinkUnderStrips } from './strip'
 import { Budget } from './budget'
@@ -37,6 +37,8 @@ import { STYLE, styled, type Style } from './style'
 import { buildRocks } from './rocks'
 import { buildWater } from './water'
 import { siteProjector } from './minimap'
+import { injectShade } from './shading'
+import { TreeShadowCasters } from './treeshadows'
 
 let surfaceSets: Record<string, SurfaceSet> | null = null
 
@@ -84,7 +86,7 @@ export interface Site {
   /** every measured tree's silhouette, counted — the whole species assignment as a histogram */
   treeSpecies: (legacy?: boolean) => Record<string, number>
   /** how the trees were planted and replanted: cell, radius, centre, count, and whether the budget capped it */
-  treePlanting: () => { count: number; cellM: number; radius: number; centre: [number, number]; capped: boolean; replants: number; lastMs: number }
+  treePlanting: () => { count: number; cellM: number; radius: number; centre: [number, number]; capped: boolean; replants: number; lastMs: number; pending: number }
   /**
    * The far-field invariant, read straight off the instance matrices: a tree the near set is
    * drawing as a MODEL must not also be drawing a CARD, unless it is inside the dissolve band.
@@ -120,8 +122,10 @@ export interface Site {
   /** the palette: realistic is the bake as measured; anything else is a place that is not this one */
   setStyle: (style: Style) => void
   /** the scene's day/night light level and colour, for the shaders that do their own lighting:
-   * the grass and the tree impostors, which would otherwise glow in the dark */
-  setLight: (level: number, tint: THREE.Color) => void
+   * the grass, the crops and the tree impostors, which would otherwise glow in the dark.
+   * `sun` is the real sun direction, so the grass and the fields follow the sky instead of a
+   * fixed corner of it. */
+  setLight: (level: number, tint: THREE.Color, sun?: THREE.Vector3) => void
   /**
    * How wet the world looks, 0…1 (weather.ts ramps it). Water lowers a surface's roughness, which
    * is the whole effect: with the sky in an environment map a wet road reflects it, and at night a
@@ -620,6 +624,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
         // there, not the overview's last row stretched across the rim; then the style's
         // desaturation of the photo (the material colour, the ground tint, multiplies after)
         .replace('#include <map_fragment>', '#include <map_fragment>\n#ifdef USE_MAP\nif (vMapUv.x < -0.01) diffuseColor.rgb = uBare;\ndiffuseColor.rgb = mix(diffuseColor.rgb, vec3(dot(diffuseColor.rgb, vec3(0.3, 0.5, 0.2))), uDesat);\n#endif\ndiffuseColor.rgb = applyWeather(diffuseColor.rgb, normalize(vWNormal), vWWorld);')
+      injectShade(shader)
     }
     m.customProgramCacheKey = () => 'corridor-terrain'
     return m
@@ -1315,6 +1320,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
   let nearRef: NearTrees | null = null
   /** the impostor field, for the Site's setLight — a baked card lights itself */
   let impRef: Impostors | null = null
+  let shadowRef: TreeShadowCasters | null = null
   /** every physical material that can be wet, with what it looks like dry */
   const wettable = new Map<THREE.MeshStandardMaterial, { roughness: number; metalness: number; env: number; colour: THREE.Color }>()
   let wetNow = 0
@@ -1328,7 +1334,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     })
   }
   let treeRecords: TreeRecord[] = []
-  let treePlantingRef: () => { count: number; cellM: number; radius: number; centre: [number, number]; capped: boolean; replants: number; lastMs: number } = () => ({ count: 0, cellM: 0, radius: 0, centre: [0, 0], capped: false, replants: 0, lastMs: 0 })
+  let treePlantingRef: () => { count: number; cellM: number; radius: number; centre: [number, number]; capped: boolean; replants: number; lastMs: number; pending: number } = () => ({ count: 0, cellM: 0, radius: 0, centre: [0, 0], capped: false, replants: 0, lastMs: 0, pending: 0 })
   let treeCardsRef: () => { nearSet: number; cards: number; inBand: number; doubled: number; band: number; replants: number; uploads: Record<string, number | boolean> | null } = () => ({ nearSet: 0, cards: 0, inBand: 0, doubled: 0, band: 0, replants: 0, uploads: null })
   let crops: ReturnType<typeof buildCrops> | null = null
   let precip: Precipitation | null = null
@@ -1500,6 +1506,29 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
       return { d: best, who, y, s: sOn, gx, gz }
     }
     const roadDistance = (x: number, z: number) => edgeDistance(x, z).d
+    /**
+     * Is pavement within `limit` metres? The tree planter asks this of every new cell. The full
+     * edge walk is a 7×7 of station cells plus the spline, which grass needs (gradient and height).
+     * A tree only needs a yes inside 3 m, and on these roads a station more than one 20 m cell
+     * away cannot be that close to the verge.
+     */
+    const withinPavement = (x: number, z: number, limit: number) => {
+      const cx = Math.floor(x / stCell), cz = Math.floor(z / stCell)
+      for (let a = -1; a <= 1; a++) {
+        for (let b = -1; b <= 1; b++) {
+          const arr = stGrid.get(`${cx + a},${cz + b}`)
+          if (!arr) continue
+          for (const p of arr) {
+            const ux = x - p.x, uz = z - p.z
+            const along = ux * p.dx + uz * p.dz
+            const lat = Math.abs(uz * p.dx - ux * p.dz - p.off)
+            const d = (Math.abs(along) <= T.EDGE_BAND_M ? lat : Math.hypot(ux, uz)) - p.half
+            if (d < limit) return true
+          }
+        }
+      }
+      return false
+    }
     // A CAR PARK IS NOT A VERGE. The grass planter only knows how far it is from the pavement
     // EDGE, and a lot sits beyond that edge, so turf was growing straight across the asphalt —
     // visible as green tufts over any open lot. Parking meshes are built much later than the
@@ -1835,9 +1864,19 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     const roadSignature = () => `${T.LANE_WIDTH}|${T.SHOULDER_OUT}|${T.SHOULDER_IN}|${T.ROAD_BLEND_M}|${T.ROAD_TAPER_M}|${T.ROAD_ONEWAY_CENTRE}|${T.CULDESAC_RADIUS}`
     let roadSig = roadSignature()
     const plantSignature = () => `${T.TREE_CELL_M}|${T.TREE_MIN_H}|${T.TREE_HEIGHT_SCALE}|${T.TREE_DENSITY}|${T.TREE_PLANT_RADIUS_M}|${T.TREE_PATCH}|${T.TREE_SPARE_M}|${T.MOBILE_TREE_BUDGET}`
-    const shapeSignature = () => `${T.TREE_LEAF_COUNT}|${T.TREE_LEAF_SIZE}|${T.TREE_CROWN_SPREAD}|${T.TREE_BRANCH_COUNT}|${T.TREE_GNARLINESS}|${T.TREE_TAPER}|${T.TREE_TRUNK_RADIUS}|${T.TREE_DETAIL}|${T.TREE_SPECIES}|${T.TREE_SPECIES_LIMIT}`
+    // Detail 0 is a display mode (cards only), not a new shape. Folding it into the signature
+    // would regrow the models and rebake a washed atlas just to hide them.
+    let shapeDetail = T.TREE_DETAIL > 0 ? T.TREE_DETAIL : 1
+    const shapeSignature = () => {
+      if (T.TREE_DETAIL > 0) shapeDetail = T.TREE_DETAIL
+      return `${T.TREE_LEAF_COUNT}|${T.TREE_LEAF_SIZE}|${T.TREE_CROWN_SPREAD}|${T.TREE_BRANCH_COUNT}|${T.TREE_GNARLINESS}|${T.TREE_TAPER}|${T.TREE_TRUNK_RADIUS}|${shapeDetail}|${T.TREE_SPECIES}|${T.TREE_SPECIES_LIMIT}`
+    }
+    // Knobs that only change which models are seated. Lighting and colour are not in here:
+    // invalidating the near set for those threw the models away and left the pale cards.
+    const seatSignature = () => `${T.TREE_NEAR_RADIUS}|${T.TREE_NEAR_CAPACITY}|${T.TREE_LEAF_LOD_M}|${T.TREE_CONE_DEG}|${T.TREE_CONE_PENALTY}|${T.TREE_SIMPLE}|${T.TREE_LOLLIPOP}|${T.TREE_DETAIL <= 0 ? 0 : 1}|${T.LOD_BEHIND_PENALTY}`
     let treeSig = plantSignature()
     let treeShapeSig = shapeSignature()
+    let seatSig = seatSignature()
     let treeTimer: ReturnType<typeof setTimeout> | undefined
     let roadTimer: ReturnType<typeof setTimeout> | undefined
     // async because the branch strips are budgeted: a knob change on a 427-branch network used to
@@ -1878,7 +1917,7 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     const coarse = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches
     const treeBudget = lite ? 25_000 : coarse ? Math.max(400, Math.round(T.MOBILE_TREE_BUDGET)) : 120_000
     const t = treesFromCanopy(chm.data, chm.layer.size, chm.layer.bbox, chm.layer.res, heightAt, treeBudget, T.TREE_MIN_H, (x, y) => {
-      if (roadDistance(x, -y) < 3) return true
+      if (withinPavement(x, -y, 3)) return true
       // nothing grows through a stunt fixture
       if (clearPolys.length && clearedAt(x, y)) return true
       if (!adjustments.active) return false
@@ -2061,10 +2100,32 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     replantNow = () => replantTrees(lastEye)
     const replantIfMoved = (eye: THREE.Vector3, fwd?: THREE.Vector3, pitch = 0) => {
       lastEye.copy(eye)
-      if (!(T.TREE_REPLANT_M > 0) || !(T.TREE_PLANT_RADIUS_M > 0)) return
-      const c = t.stats().centre
-      if (Math.hypot(eye.x - c[0], -eye.z - c[1]) < T.TREE_REPLANT_M) return
-      replantTrees(eye, fwd, pitch)
+      if (T.TREE_REPLANT_M > 0 && T.TREE_PLANT_RADIUS_M > 0) {
+        const c = t.stats().centre
+        if (Math.hypot(eye.x - c[0], -eye.z - c[1]) >= T.TREE_REPLANT_M) replantTrees(eye, fwd, pitch)
+      }
+      // The crescent fills a few ms a frame, and the first look walks it from the far side in.
+      // A tree that lands inside the model radius or the shadow box has to be seated this frame.
+      // Waiting for the 15 m gate is what left the road in cards until the car rolled forward.
+      if (!t.pump(T.TREE_PLANT_BUDGET_MS)) return
+      const note = t.patch()
+      const touch = (Math.max(T.TREE_NEAR_RADIUS, T.SHADOW_REACH) + 40) ** 2
+      let close = false
+      for (const i of note.changed) {
+        near.remember(i)
+        const r = t.records[i]
+        if (!r || !Number.isFinite(r.x) || r.spare) continue
+        const dx = r.x - eye.x, dz = r.z - eye.z
+        if (dx * dx + dz * dz <= touch) close = true
+        if (clearPolys.length && clearedAt(r.x, -r.z)) continue
+        const k = `${Math.floor(r.x / tgCell)},${Math.floor(r.z / tgCell)}`
+        const arr = treeGrid.get(k)
+        const rec: [number, number, number] = [r.x, r.z, Math.max(0.25, r.h * 0.025)]
+        if (arr) arr.push(rec)
+        else treeGrid.set(k, [rec])
+      }
+      if (close) near.invalidate()
+      reseat()
     }
     if (renderer) {
       // far field: the SAME models as impostors, one quad a tree, re-assigned as the eye moves
@@ -2073,6 +2134,8 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
       imp = new Impostors(renderer, near.sources(), treeBudget, fog)
       impRef = imp
       trees.add(imp.mesh)
+      shadowRef = new TreeShadowCasters(imp)
+      group.add(shadowRef.group)
       const m = new THREE.Matrix4()
       // every tree gets its impostor slot ONCE (slot = tree index); the near set only toggles
       const sizes = new Float32Array(treeBudget)
@@ -2117,12 +2180,22 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
           for (let i = 0; i < t.records.length; i++) if (t.records[i].spare) hideSlot(i)
           return
         }
-        const dirty = note.changed.length + note.removed.length
-        const ranged = dirty > 0 && dirty <= 600
         const reveal = (i: number) => {
+          // a reused slot can have been hidden with its size cleared. Restoring scale 0 leaves
+          // the card invisible; write the tree again before showing it.
+          if (!(sizes[i] > 1e-3)) writeSlot(i, true)
           imp!.setVisible(i, true, sizes[i])
           shown.delete(i)
         }
+        // spare flags alone: the matrices are already uploaded, only the scale changes. A full
+        // commit here would push every card because nothing was "dirty".
+        if (note.changed.length === 0 && note.removed.length === 0) {
+          for (const i of note.hidden) hideSlot(i)
+          for (const i of note.shown) reveal(i)
+          return
+        }
+        const dirty = note.changed.length + note.removed.length
+        const ranged = dirty > 0 && dirty <= 600
         if (ranged) {
           for (const i of note.removed) {
             imp!.setVisible(i, false, sizes[i] || 1)
@@ -2141,15 +2214,18 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
           return
         }
         // enough slots moved that one upload of the buffer is cheaper than hundreds of ranges.
-        // The CPU array is only rewritten for the slots that changed; the rest is already right.
-        for (const i of note.changed) writeSlot(i, false)
-        imp!.commit(t.records.length)
+        // Hide freed slots first, then write the new trees, so a slot that was emptied and
+        // reused in the same replant is not zeroed after its new matrix was written.
+        const changedSet = new Set(note.changed)
         for (const i of note.removed) {
+          if (changedSet.has(i)) continue
           imp!.setVisible(i, false, sizes[i] || 1)
           sizes[i] = 0
           shown.delete(i)
           faded.delete(i)
         }
+        for (const i of note.changed) writeSlot(i, false)
+        imp!.commit(t.records.length)
         for (const i of note.changed) if (t.records[i]?.spare) hideSlot(i)
         for (const i of note.hidden) hideSlot(i)
         for (const i of note.shown) reveal(i)
@@ -2232,7 +2308,13 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
           const r = t.records[i]
           return !r || !Number.isFinite(r.x) || r.spare === true
         }
-        for (const i of shown) if (!hide.has(i) && !parked(i)) imp!.setVisible(i, true, sizes[i])
+        for (const i of shown) {
+          if (hide.has(i) || parked(i)) continue
+          // a reused slot can have been hidden with its size cleared. Restoring scale 0 leaves
+          // the card invisible; write the tree again so turning back toward it can draw it.
+          if (!(sizes[i] > 1e-3)) writeSlot(i, true)
+          imp!.setVisible(i, true, sizes[i])
+        }
         for (const i of hide) if (!shown.has(i)) imp!.setVisible(i, false, sizes[i])
         shown = hide
         for (const [i, f] of keep) imp!.setFade(i, f)
@@ -2262,7 +2344,9 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
       updateNear = (eye: THREE.Vector3, time: number, fwd?: THREE.Vector3, pitch = 0) => {
         replantIfMoved(eye, fwd, pitch)
         lollipops()
-        if (near.update(eye, false, fwd, pitch)) refreshFar(near.near, eye, fwd, pitch)
+        const reseated = near.update(eye, false, fwd, pitch)
+        if (reseated) refreshFar(near.near, eye, fwd, pitch)
+        shadowRef?.update(near, t.records, eye, reseated, fwd)
         grass.update(eye, fwd, pitch)
         grass.tick(time)
         if (crops) tickCrops(crops.group, time)
@@ -2287,7 +2371,13 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
       void rebuildRoad()
     }
     retune = () => {
-      near.invalidate()
+      // Lighting, impostor grade and the shadow toggles are uniforms. Reseating here is what
+      // rebuilt the grass and dropped the models back to pale cards on every visuals slider.
+      const seat = seatSignature()
+      if (seat !== seatSig) {
+        seatSig = seat
+        near.invalidate()
+      }
       // F6 → trees. Planting knobs replant where the eye is; shape and palette knobs have to
       // regrow the ez-tree variants (~100 ms) and re-bake the impostor atlas off them, so both
       // are debounced the way the road's cross-section knobs are.
@@ -2619,7 +2709,13 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     waterStats: { lines: water.lines, areas: water.areas, falls: water.falls, length_m: water.length_m },
     junctionPaint: { bars: stopbars.counts, crosswalks: crosswalks.counts, arrows: arrows.counts },
     setStyle,
-    setLight: (level: number, tint: THREE.Color) => { grassRef?.setLight(level, tint); impRef?.setLight(level, tint) },
+    setLight: (level: number, tint: THREE.Color, sun?: THREE.Vector3) => {
+      grassRef?.setLight(level, tint)
+      if (sun) grassRef?.setSun(sun)
+      impRef?.setLight(level, tint)
+      if (sun) shadowRef?.setSun(sun)
+      if (crops) setCropLight(crops.group, level, tint, sun)
+    },
     setWet: (wet: number) => {
       const w = Math.min(1, Math.max(0, wet))
       if (Math.abs(w - wetNow) < 0.005) return

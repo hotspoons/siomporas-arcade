@@ -20,6 +20,7 @@
 //   * a tree keeps its identity across frames, because the draw is a stable hash of its index;
 //   * an adjustment area's `species` override still wins over the data.
 import * as THREE from 'three'
+import { leafShadowDepth, linearShadowDepth } from './shading'
 import { Budget } from './budget'
 import { Tree } from '@dgreenheck/ez-tree'
 import { Flora, type FloraSpecies, type SpeciesWeight } from './flora'
@@ -173,8 +174,15 @@ function buildVariant(a: Archetype, capacity: number, h: number): Variant {
   for (const m of [branches, leavesFull, leavesSparse, leavesFar]) {
     m.count = 0
     m.frustumCulled = false
+    m.castShadow = true
+    m.receiveShadow = true
     m.name = `near-tree:${a.id}`
   }
+  // regrow throws these meshes away. Arming them here, not in a one-time scene walk, is what
+  // keeps a tree-detail change from silently dropping the shadows.
+  branches.customDepthMaterial = linearShadowDepth
+  const leafDepth = leafShadowDepth(leafMat.map, leafMat.alphaTest)
+  for (const m of [leavesFull, leavesSparse, leavesFar]) m.customDepthMaterial = leafDepth
   leavesFar.name = `near-tree:${a.id}:far`
   return { name: a.id, archetype: a, leaf: a.leaf, branches, leaves: leavesFull, leavesFull, leavesSparse, leavesFar, nativeHeight: Math.max(1, top), leafMat, srcMap: src.map, grey: false }
 }
@@ -280,6 +288,28 @@ export class NearTrees {
     this.indexTrees(this.trees)
   }
 
+  /**
+   * One slot the crescent fill just wrote. The full grid rebuild happens when the centre jumps;
+   * between jumps the new trees are added here so a reused index does not keep the variant it
+   * had for the tree that left.
+   */
+  remember(i: number) {
+    const t = this.trees[i]
+    if (!t || !Number.isFinite(t.x)) return
+    if (i >= this.chosen.length) {
+      const next = new Int16Array(Math.max(this.trees.length, i + 1))
+      next.set(this.chosen)
+      next.fill(-1, this.chosen.length)
+      this.chosen = next
+    }
+    this.chosen[i] = -1
+    const k = `${Math.floor(t.x / this.cell)},${Math.floor(t.z / this.cell)}`
+    const arr = this.grid.get(k)
+    if (arr) {
+      if (!arr.includes(i)) arr.push(i)
+    } else this.grid.set(k, [i])
+  }
+
   private indexTrees(trees: TreeRecord[]) {
     trees.forEach((t, i) => {
       if (!Number.isFinite(t.x)) return
@@ -288,6 +318,62 @@ export class NearTrees {
       if (arr) arr.push(i)
       else this.grid.set(k, [i])
     })
+  }
+
+  /**
+   * Trees past the models, down the view, for the card and canopy shadows.
+   *
+   * Nothing inside `minDist` and nothing this set is already drawing: those trees cast from
+   * their own meshes, and a second caster there stacks a shadow on the same trunk. Slots are
+   * spread from that line out to `maxDist`, and each band keeps the trees closest to the view
+   * so the shade falls on the road.
+   */
+  shadowAhead(eye: THREE.Vector3, fwdX: number, fwdZ: number, minDist: number, maxDist: number, limit: number): number[] {
+    if (!(maxDist > minDist) || limit <= 0) return []
+    const fl = Math.hypot(fwdX, fwdZ) || 1
+    const ux = fwdX / fl
+    const uz = fwdZ / fl
+    const minD = Math.max(0, minDist)
+    const maxD = maxDist
+    const bands = 16
+    const buckets: { i: number; lat: number }[][] = []
+    for (let b = 0; b < bands; b++) buckets.push([])
+    const c0 = Math.floor(eye.x / this.cell)
+    const c1 = Math.floor(eye.z / this.cell)
+    const n = Math.ceil(maxD / this.cell)
+    for (let a = -n; a <= n; a++) {
+      for (let b = -n; b <= n; b++) {
+        const arr = this.grid.get(`${c0 + a},${c1 + b}`)
+        if (!arr) continue
+        for (const i of arr) {
+          if (this.near.has(i)) continue
+          const t = this.trees[i]
+          if (!t || !Number.isFinite(t.x) || t.spare) continue
+          const dx = t.x - eye.x
+          const dz = t.z - eye.z
+          const d = Math.hypot(dx, dz)
+          if (d <= minD || d > maxD) continue
+          const along = dx * ux + dz * uz
+          if (along <= 0) continue
+          const lat = Math.abs(dx * uz - dz * ux)
+          if (lat > 80 && lat > along * 0.55) continue
+          const u = (d - minD) / (maxD - minD)
+          buckets[Math.min(bands - 1, Math.floor(u * bands))].push({ i, lat })
+        }
+      }
+    }
+    const per = Math.max(1, Math.ceil(limit / bands))
+    const out: number[] = []
+    const rest: { i: number; lat: number }[] = []
+    for (const bucket of buckets) {
+      bucket.sort((p, q) => p.lat - q.lat)
+      const take = Math.min(per, bucket.length, limit - out.length)
+      for (let k = 0; k < take; k++) out.push(bucket[k].i)
+      for (let k = take; k < bucket.length; k++) rest.push(bucket[k])
+    }
+    rest.sort((p, q) => p.lat - q.lat)
+    for (let k = 0; k < rest.length && out.length < limit; k++) out.push(rest[k].i)
+    return out
   }
 
   /** What was built, for the F6 panel and the probes. */
@@ -420,7 +506,8 @@ export class NearTrees {
      * frame the style CHANGES is what makes the far set rebuild its instances; returning it every
      * frame would rebuild tens of thousands of matrices for ever.
      */
-    const simple = T.TREE_SIMPLE >= 0.5 || T.TREE_LOLLIPOP >= 0.5
+    // 0 on the detail slider is the same picture as cards-everywhere: no models, every tree a card.
+    const simple = T.TREE_DETAIL <= 0 || T.TREE_SIMPLE >= 0.5 || T.TREE_LOLLIPOP >= 0.5
     if (simple) {
       this.group.visible = false
       const changed = !this.wasSimple || this.near.size > 0
@@ -440,8 +527,6 @@ export class NearTrees {
     if (dh > Math.PI) dh = 2 * Math.PI - dh
     const turned = dh > T.TREE_REFRESH_TURN
     if (!force && !turned && eye.distanceTo(this.last) < 15) return false
-    this.last.copy(eye)
-    this.lastHeading = heading
     // radius and capacity are knobs (F6 → trees); the footprint is stretched behind the view
     const radius = T.TREE_NEAR_RADIUS
     const cap = Math.min(this.capacity, Math.round(T.TREE_NEAR_CAPACITY))
@@ -459,6 +544,11 @@ export class NearTrees {
         }
       }
     }
+    // The ring fills after the first look, far to near. Latching an empty pick here is what made
+    // the models wait until the car had rolled far enough to break the 15 m gate.
+    if (cands.length === 0 && this.near.size === 0) return false
+    this.last.copy(eye)
+    this.lastHeading = heading
     cands.sort((p, q) => p.d2 - q.d2)
     const total = Math.min(cands.length, cap * this.variants.length)
     const counts = this.variants.map(() => 0)

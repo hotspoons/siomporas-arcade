@@ -171,8 +171,15 @@ export class TuneUI {
     for (const g of this.groups) g.el.classList.toggle('changed', g.keys.some((k) => k.get() !== k.default))
   }
 
-  /** Apply everything saved for every tab. Called once, before anything caches a tunable. */
+  /**
+   * Apply everything saved for every tab. Called once, before anything caches a tunable.
+   *
+   * A knob is stored under the tab that held it. Sections move (lighting left environment for
+   * visuals), so the value is applied by name from every saved tab, and a later tab wins when
+   * both still have it.
+   */
   private restore() {
+    const savedAll: Record<string, number> = {}
     for (const tab of TUNE_TABS) {
       try {
         const raw = localStorage.getItem(storeKey(tab.name))
@@ -182,11 +189,12 @@ export class TuneUI {
         // it was something somebody moved, so they are all touched
         const saved = (doc as { v?: number }).v === 2 ? (doc as { values: Record<string, number> }).values : (doc as Record<string, number>)
         for (const n of (doc as { touched?: string[] }).touched ?? Object.keys(saved)) this.touched.add(n)
-        for (const s of tab.sections) for (const k of s.keys) if (typeof saved[k.name] === 'number') k.set(saved[k.name])
+        for (const [n, v] of Object.entries(saved)) if (typeof v === 'number') savedAll[n] = v
       } catch {
         /* a corrupt or blocked localStorage is not worth failing a page load over */
       }
     }
+    for (const tab of TUNE_TABS) for (const s of tab.sections) for (const k of s.keys) if (typeof savedAll[k.name] === 'number') k.set(savedAll[k.name])
   }
 
   /**

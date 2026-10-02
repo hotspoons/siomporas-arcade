@@ -104,6 +104,14 @@ export interface VehicleChassis {
    */
   tyreFront_mm?: number
   tyreRear_mm?: number
+  /**
+   * How many lamps across the front, and how many across the tail.
+   *
+   * Absent means two on anything as wide as a car, and one when the body is as narrow as a
+   * motorcycle. A saved number wins, so a bike can be given two and a car can be given one.
+   */
+  headlights?: number
+  taillights?: number
 }
 
 /** A handling profile by reference, plus the handful of numbers this car differs by. */
@@ -197,6 +205,7 @@ export const VEHICLE_TEMPLATES: Record<string, VehicleDoc> = {
   van: doc({ mass: 2300, rideHeight: 0.24, wheelbase: 3.2, track: 1.7, cgHeight: 0.85, wheelRadius: 0.36, drive: 'rwd', length: 5.5, width: 2.0, height: 2.4 }, 'street', { power_kw: 96, redline_rpm: 4600, idle_rpm: 700, gears: [4.2, 2.3, 1.45, 1.0, 0.8, 0.66], final_drive: 3.9, brake_torque_nm: 2600, brake_bias: 0.6 }, 'engines/atg-video-2/05_odd_fire_v6.mr'),
   truck: doc({ mass: 8000, rideHeight: 0.32, wheelbase: 4.8, track: 2.0, cgHeight: 1.25, wheelRadius: 0.52, drive: 'rwd', length: 9.0, width: 2.5, height: 3.4 }, 'street', { power_kw: 180, redline_rpm: 2600, idle_rpm: 600, gears: [7.2, 4.2, 2.6, 1.7, 1.0, 0.78], final_drive: 4.3, brake_torque_nm: 9000, brake_bias: 0.55 }, 'engines/atg-video-2/07_gm_ls.mr'),
   bus: doc({ mass: 12000, rideHeight: 0.3, wheelbase: 5.9, track: 2.1, cgHeight: 1.4, wheelRadius: 0.55, drive: 'rwd', length: 12.0, width: 2.55, height: 3.2 }, 'street', { power_kw: 210, redline_rpm: 2400, idle_rpm: 600, gears: [6.7, 3.8, 2.3, 1.5, 1.0], final_drive: 4.6, brake_torque_nm: 13000, brake_bias: 0.5 }, 'engines/atg-video-2/07_gm_ls.mr'),
+  motorcycle: doc({ mass: 190, rideHeight: 0.14, wheelbase: 1.4, track: 0.18, cgHeight: 0.55, wheelRadius: 0.31, drive: 'rwd', length: 2.15, width: 0.75, height: 1.15, headlights: 1, taillights: 1 }, 'street', { power_kw: 55, redline_rpm: 11000, idle_rpm: 1200, gears: [2.8, 2.0, 1.55, 1.25, 1.05, 0.9], final_drive: 3.2, brake_torque_nm: 800, brake_bias: 0.7 }, 'engines/atg-video-1/02_kohler_ch750.mr'),
 }
 
 function doc(spec: VehicleChassis, base: string, engine: VehicleEngine, setup: string): VehicleDoc {
@@ -220,7 +229,7 @@ export const VEHICLE_TEMPLATE_IDS = Object.keys(VEHICLE_TEMPLATES)
  * vocabulary invented here would simply match nothing, and the Vehicles tab would sit there
  * reporting an empty fleet while the library was full of cars.
  */
-export const VEHICLE_CLASSES = ['hero-car', 'traffic', 'emergency', 'commercial-vehicle']
+export const VEHICLE_CLASSES = ['hero-car', 'traffic', 'emergency', 'commercial-vehicle', 'motorcycle']
 
 /**
  * Which template a catalog class starts from.
@@ -235,12 +244,50 @@ const CLASS_TEMPLATE: Record<string, string> = {
   traffic: 'traffic',
   emergency: 'van',
   'commercial-vehicle': 'truck',
+  motorcycle: 'motorcycle',
 }
 
 /** A fresh document for a class or a template id, deep-copied so editing one does not edit the table. */
 export function defaultVehicle(kind: string): VehicleDoc {
   const id = CLASS_TEMPLATE[kind] ?? kind
   return structuredClone(VEHICLE_TEMPLATES[id] ?? VEHICLE_TEMPLATES['hero-car'])
+}
+
+/** Narrower than this, and an unset lamp count is a motorcycle's single lamp rather than a car's pair. */
+const MOTORCYCLE_WIDTH_M = 1
+
+/**
+ * How many headlights and tail lights this chassis shows.
+ *
+ * A number on the document wins. Otherwise a car is a pair and anything under a metre wide — a
+ * motorcycle — is one, on the centreline.
+ */
+export function lampCounts(spec: Pick<VehicleChassis, 'headlights' | 'taillights' | 'width'>): { headlights: number; taillights: number } {
+  const bike = (spec.width ?? 2) < MOTORCYCLE_WIDTH_M
+  const n = (v: number | undefined, fallback: number) => {
+    if (v == null || !Number.isFinite(v)) return fallback
+    return Math.max(0, Math.min(6, Math.round(v)))
+  }
+  return {
+    headlights: n(spec.headlights, bike ? 1 : 2),
+    taillights: n(spec.taillights, bike ? 1 : 2),
+  }
+}
+
+/**
+ * Where across the body those lamps sit, metres left and right of the centreline.
+ *
+ * One lamp is on the centre. Two or more share the width, inset so they sit on the corners of
+ * the body rather than past it.
+ */
+export function lampOffsets(count: number, width: number): number[] {
+  const n = Math.max(0, Math.min(6, Math.round(count)))
+  if (n === 0) return []
+  if (n === 1) return [0]
+  const half = Math.max(0.15, Math.max(0.4, width) * 0.36)
+  const out: number[] = []
+  for (let i = 0; i < n; i++) out.push(-half + (2 * half * i) / (n - 1))
+  return out
 }
 
 /* ---- validation ------------------------------------------------------------------------------- */
@@ -286,6 +333,12 @@ export function validateVehicle(v: VehicleDoc | null | undefined, opts: { rigWhe
     if (ssf > 2.5) warnings.push(`static stability factor ${ssf.toFixed(2)}: this cannot be made to roll at all`)
   }
   if (s?.wheelbase > 0 && s?.length && s.length < s.wheelbase) errors.push(`spec.length ${s.length} m is shorter than the wheelbase ${s.wheelbase} m`)
+  const lamps = (v: number | undefined, name: string) => {
+    if (v == null) return
+    if (!Number.isFinite(v) || v < 0 || v > 6) errors.push(`spec.${name} must be between 0 and 6`)
+  }
+  lamps(s?.headlights, 'headlights')
+  lamps(s?.taillights, 'taillights')
 
   // the profile
   if (!v.profile?.base) errors.push('profile.base is required — name one of ' + Object.keys(PROFILES).join(', '))

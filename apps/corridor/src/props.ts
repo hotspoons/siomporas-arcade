@@ -13,6 +13,7 @@ import { HEX_GLSL } from './hextile'
 import type { TreeRecord } from './trees'
 
 import * as T from './tuning'
+import { chainCompile, injectRelief, injectShade, injectWetStreak } from './shading'
 
 // road cross-section: knobs in tuning.ts (F6 → road); a change needs a site reload to rebuild
 /** @deprecated read T.LANE_WIDTH live — a knob changes it */
@@ -152,7 +153,7 @@ export interface SurfaceSet {
 export function blendMaterial(a: SurfaceSet, b: SurfaceSet): THREE.Material | null {
   if (!a.hex || !b.hex) return null
   const base = a.material as THREE.MeshStandardMaterial
-  const mat = new THREE.MeshStandardMaterial({ map: base.map, normalMap: base.normalMap, normalScale: new THREE.Vector2(0.6, 0.6), roughnessMap: base.roughnessMap, roughness: 1, metalness: 0, side: THREE.DoubleSide })
+  const mat = new THREE.MeshStandardMaterial({ map: base.map, normalMap: base.normalMap, normalScale: new THREE.Vector2(1.25, 1.25), roughnessMap: base.roughnessMap, roughness: 1, metalness: 0, side: THREE.DoubleSide })
   const A = a.hex, B = b.hex
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.hexAlbedo = { value: A.albedo }
@@ -226,6 +227,11 @@ vec4 hexSampleB(vec2 uv, out vec3 n) {
       .replace('#include <normal_fragment_maps>', THREE.ShaderChunk.normal_fragment_maps.replace('vec3 mapN = texture2D( normalMap, vNormalMapUv ).xyz * 2.0 - 1.0;', 'vec3 mapN = hexN;'))
   }
   mat.customProgramCacheKey = () => `road-blend-${a.name}>${b.name}`
+  chainCompile(mat, (shader) => {
+    injectRelief(shader)
+    injectShade(shader)
+    injectWetStreak(shader)
+  }, 'relief-shade-wet')
   return mat
 }
 
@@ -419,6 +425,7 @@ export function roadMesh(st: Station[], lanesAt: (s: number) => number, classAt:
     bg.computeVertexNormals()
     const mesh = new THREE.Mesh(bg, mat)
     mesh.name = `road:blend:${key}`
+    mesh.receiveShadow = true
     g.add(mesh)
   }
   for (const [cls, bk] of Object.entries(byClass)) {
@@ -430,6 +437,7 @@ export function roadMesh(st: Station[], lanesAt: (s: number) => number, classAt:
     const mat = sets[cls]?.material ?? fallbackMaterial(cls)
     const mesh = new THREE.Mesh(ag, mat)
     mesh.name = `road:${cls}`
+    mesh.receiveShadow = true
     g.add(mesh)
   }
   const mg = new THREE.BufferGeometry()
@@ -499,6 +507,12 @@ export function repaintMarkings(road: THREE.Object3D, centre: THREE.Color, edge:
  * the cells that entered or left are written. `TREE_SPARE_M` plants a ring past the draw radius
  * into those same slots and marks it `spare` — uploaded, not drawn — and evicts a cell once it
  * falls outside that ring so the budget is not spent on woods the eye has left.
+ *
+ * A later `plant` does not walk the disk again. Cells that stayed keep their slots; cells that
+ * left are freed; only the crescent that entered is measured, and `pump` does that a few
+ * milliseconds at a time. Those trees are out in the spare ring, so arriving over a second is
+ * invisible from the driver's seat. When the budget is already full the rim is the farthest
+ * set, so a new rim cell waits for a slot instead of sorting the whole disk.
  */
 export interface TreePatch {
   /** the record list was rebuilt from scratch; every slot needs a matrix */
@@ -533,7 +547,7 @@ export function treesFromCanopy(
     /** site (x, y) to plant around */
     centre?: [number, number]
   } = {},
-): { crowns: THREE.InstancedMesh; trunks: THREE.InstancedMesh; count: number; records: TreeRecord[]; refresh: (skip: Set<number>) => void; plant: (cx: number, cy: number) => number; patch: () => TreePatch; stats: () => { count: number; cellM: number; radius: number; centre: [number, number]; capped: boolean; spare: number; drawn: number; changed: number; evicted: number } } {
+): { crowns: THREE.InstancedMesh; trunks: THREE.InstancedMesh; count: number; records: TreeRecord[]; refresh: (skip: Set<number>) => void; plant: (cx: number, cy: number) => number; pump: (budgetMs: number) => boolean; patch: () => TreePatch; stats: () => { count: number; cellM: number; radius: number; centre: [number, number]; capped: boolean; spare: number; drawn: number; changed: number; evicted: number; pending: number } } {
   const [w, h] = size
   const [xmin, , , ymax] = bbox
   const radius = opts.radius && opts.radius > 0 ? opts.radius : Infinity
@@ -575,6 +589,36 @@ export function treesFromCanopy(
   let lastChanged = 0
   let lastEvicted = 0
   let patchNote: TreePatch = { rebuilt: true, changed: [], removed: [], shown: [], hidden: [] }
+  /** cells planted (or known empty) out to this centre. The next plant only queues the crescent past it. */
+  let settled: [number, number] | null = null
+  let settledR = 0
+  const liveKeys = new Set<string>()
+  /**
+   * The crescent still to measure. A capped wood can leave a thick unplanted ring, so this is a
+   * cursor, not a list: `pump` walks a few rows a frame instead of allocating every cell at once.
+   */
+  let scan: {
+    cx: number
+    cy: number
+    contextR: number
+    context2: number
+    cellM: number
+    ox: number
+    oy: number
+    settled2: number
+    j: number
+    jEnd: number
+    jStep: number
+    iStep: number
+    row: number
+    y0: number
+    dy2: number
+    spans: [number, number][]
+    span: number
+    i: number
+  } | null = null
+  /** a tree cell that did not fit in the budget; tried again before the cursor moves on */
+  let hold: { i: number; j: number; x0: number; y0: number } | null = null
   const tally = () => {
     liveCount = 0
     spareCount = 0
@@ -604,6 +648,212 @@ export function treesFromCanopy(
     if (useCache) cellCache.set(key, { x: x0, y: y0, rec })
     return rec
   }
+  const adopt = (cx: number, cy: number, cellM: number, contextR: number) => {
+    liveKeys.clear()
+    let max2 = 0
+    for (const r of records) {
+      if (!Number.isFinite(r.x) || !Number.isFinite(r.ci)) continue
+      liveKeys.add(`${r.ci},${r.cj}`)
+      if (!capped) continue
+      const dx = (r.ci + 0.5) * cellM - cx, dy = (r.cj + 0.5) * cellM - cy
+      const d2 = dx * dx + dy * dy
+      if (d2 > max2) max2 = d2
+    }
+    scan = null
+    hold = null
+    settled = [cx, cy]
+    // a capped plant kept the nearest trees only. Cells past the farthest one kept were not
+    // planted, so the next move has to be allowed to queue them. An uncapped plant covered the disk.
+    settledR = capped && max2 > 0 ? Math.sqrt(max2) : contextR
+  }
+  const trimCache = (cx: number, cy: number, contextR: number, cellM: number) => {
+    if (cellCache.size <= 350000) return
+    const lim = contextR + Math.max(50, T.TREE_REPLANT_M) + cellM
+    const lim2 = lim * lim
+    for (const [k, v] of cellCache) {
+      const dx = v.x - cx, dy = v.y - cy
+      if (dx * dx + dy * dy > lim2) cellCache.delete(k)
+    }
+  }
+  /**
+   * The eye moved. Trees already in a slot stay there. Cells that fell out of the ring are freed,
+   * spare flags follow the draw radius, and only the crescent that was not planted yet is queued.
+   * Measuring it happens in `pump`, a few milliseconds a frame.
+   */
+  const plantMoved = (cx: number, cy: number, cellM: number, drawR: number, contextR: number): number => {
+    const draw2 = drawR * drawR
+    const context2 = contextR * contextR
+    const removed: number[] = []
+    const shown: number[] = []
+    const hidden: number[] = []
+    const ox = settled![0], oy = settled![1]
+    const settled2 = settledR * settledR
+    for (let i = 0; i < records.length; i++) {
+      const r = records[i]
+      if (!Number.isFinite(r.x)) continue
+      const x0 = (r.ci + 0.5) * cellM, y0 = (r.cj + 0.5) * cellM
+      const dx = x0 - cx, dy = y0 - cy
+      const d2 = dx * dx + dy * dy
+      if (d2 > context2) {
+        if (r.spare) spareCount--
+        liveCount--
+        liveKeys.delete(`${r.ci},${r.cj}`)
+        r.x = NaN
+        free.push(i)
+        removed.push(i)
+        continue
+      }
+      const spare = d2 > draw2
+      if (r.spare !== spare) {
+        spareCount += spare ? 1 : -1
+        r.spare = spare
+        if (spare) hidden.push(i)
+        else shown.push(i)
+      }
+    }
+    // restart the cursor at the new centre. Cells already planted are in liveKeys; ones measured
+    // empty are in the cache. Either way the walk does not rebuild the list it has already passed.
+    const j0 = Math.floor((cy - contextR) / cellM)
+    const j1 = Math.ceil((cy + contextR) / cellM)
+    const dj = cy - oy, di = cx - ox
+    // walk the side the eye is moving toward first, so a full budget spends its slots on the
+    // woods ahead rather than on the ring being left behind
+    const jStep = dj >= Math.abs(di) ? -1 : 1
+    const iStep = di >= Math.abs(dj) ? -1 : 1
+    scan = {
+      cx, cy, contextR, context2, cellM, ox, oy, settled2,
+      j: jStep < 0 ? j1 : j0,
+      jEnd: jStep < 0 ? j0 : j1,
+      jStep, iStep,
+      row: 0, y0: 0, dy2: 0, spans: [], span: 0, i: 0,
+    }
+    hold = null
+    patchNote = { rebuilt: false, changed: [], removed, shown, hidden }
+    lastChanged = 0
+    lastEvicted = removed.length
+    return liveCount
+  }
+  /** the next unmeasured cell of the crescent, or null when the cursor is finished */
+  const nextCell = (): { i: number; j: number; x0: number; y0: number } | null => {
+    const s = scan
+    if (!s) return null
+    for (;;) {
+      if (s.span < s.spans.length) {
+        const [lo, hi] = s.spans[s.span]
+        const past = s.iStep > 0 ? s.i > hi : s.i < lo
+        if (!past) {
+          const i = s.i
+          s.i += s.iStep
+          return { i, j: s.row, x0: (i + 0.5) * s.cellM, y0: s.y0 }
+        }
+        s.span++
+        if (s.span < s.spans.length) {
+          const [nlo, nhi] = s.spans[s.span]
+          s.i = s.iStep > 0 ? nlo : nhi
+        }
+        continue
+      }
+      if (s.jStep > 0 ? s.j > s.jEnd : s.j < s.jEnd) {
+        scan = null
+        return null
+      }
+      const y0 = (s.j + 0.5) * s.cellM
+      const dy = y0 - s.cy
+      const dy2 = dy * dy
+      s.row = s.j
+      s.j += s.jStep
+      s.spans = []
+      s.span = 0
+      s.i = 0
+      if (dy2 > s.context2) continue
+      const half = Math.sqrt(s.context2 - dy2)
+      const iLo = Math.floor((s.cx - half) / s.cellM - 0.5) - 1
+      const iHi = Math.ceil((s.cx + half) / s.cellM - 0.5) + 1
+      const old2 = s.settled2 - (y0 - s.oy) * (y0 - s.oy)
+      if (!(old2 > 0)) s.spans.push([iLo, iHi])
+      else {
+        const oh = Math.sqrt(old2)
+        // shrink the skipped span by a cell so the boundary is decided by the distance test
+        const oLo = Math.ceil((s.ox - oh) / s.cellM - 0.5) + 1
+        const oHi = Math.floor((s.ox + oh) / s.cellM - 0.5) - 1
+        const leftHi = Math.min(iHi, oLo - 1)
+        const rightLo = Math.max(iLo, oHi + 1)
+        if (iLo <= leftHi) s.spans.push([iLo, leftHi])
+        if (rightLo <= iHi) s.spans.push([rightLo, iHi])
+      }
+      if (s.iStep < 0) s.spans.reverse()
+      if (!s.spans.length) continue
+      s.y0 = y0
+      s.dy2 = dy2
+      const sp = s.spans[0]
+      s.i = s.iStep > 0 ? sp[0] : sp[1]
+    }
+  }
+  /**
+   * Measure crescent cells until the time budget runs out, and never more than 480 trees:
+   * the seat uploads a partial range only up to 600 slots, and a full-buffer upload every frame
+   * while the ring fills would be its own hitch. A cell that does not fit stays on the cursor
+   * until a slot is freed, rather than sorting every tree in the disk.
+   */
+  const pump = (budgetMs: number): boolean => {
+    if (!scan || !settled) return false
+    const drawR = T.TREE_PLANT_RADIUS_M > 0 ? T.TREE_PLANT_RADIUS_M : Number.isFinite(radius) ? radius : Math.max(bbox[2] - bbox[0], bbox[3] - bbox[1])
+    const draw2 = drawR * drawR
+    const deadline = performance.now() + Math.max(0.25, budgetMs)
+    const cellM = scan.cellM
+    const scx = scan.cx
+    const scy = scan.cy
+    const context2 = scan.context2
+    const changed: number[] = []
+    let n = 0
+    let placed = 0
+    while ((hold || scan) && placed < 480) {
+      if ((n & 31) === 0 && performance.now() >= deadline) break
+      const c = hold ?? nextCell()
+      hold = null
+      n++
+      if (!c) break
+      const key = `${c.i},${c.j}`
+      if (liveKeys.has(key)) continue
+      const dx = c.x0 - scx, dy = c.y0 - scy
+      const d2 = dx * dx + dy * dy
+      if (d2 > context2) continue
+      const rec = measure(c.i, c.j, cellM, c.x0, c.y0, true)
+      if (!rec) continue
+      if (free.length === 0 && records.length >= capacity) {
+        // the rim waits for a slot freed by a tree that left the ring
+        hold = c
+        capped = true
+        break
+      }
+      const spare = d2 > draw2
+      const copy = { ...rec, spare }
+      let i = free.pop()
+      if (i === undefined) {
+        i = records.length
+        records.push(copy)
+      } else records[i] = copy
+      liveKeys.add(key)
+      liveCount++
+      if (spare) spareCount++
+      changed.push(i)
+      placed++
+    }
+    if (!scan && !hold && settled) {
+      settled = [centre[0], centre[1]]
+      const cellM = Math.max(1, T.TREE_CELL_M || opts.cellM || 6)
+      const spareM = T.TREE_PATCH > 0.5 ? Math.max(0, T.TREE_SPARE_M) : 0
+      const contextR = drawR + spareM
+      settledR = contextR
+      trimCache(centre[0], centre[1], contextR, cellM)
+      capped = false
+    }
+    if (!changed.length) return false
+    patchNote = { rebuilt: false, changed, removed: [], shown: [], hidden: [] }
+    lastChanged = changed.length
+    lastEvicted = 0
+    return true
+  }
   const plant = (cx: number, cy: number): number => {
     centre = [cx, cy]
     const cellM = Math.max(1, T.TREE_CELL_M || opts.cellM || 6)
@@ -617,6 +867,14 @@ export function treesFromCanopy(
       cacheStamp = stamp
       records.length = 0
       free.length = 0
+      liveKeys.clear()
+      scan = null
+      hold = null
+      settled = null
+      settledR = 0
+    }
+    if (patch && settled && records.length > 0 && !records.some((r) => Number.isFinite(r.x) && !Number.isFinite(r.ci))) {
+      return plantMoved(cx, cy, cellM, drawR, contextR)
     }
     const i0 = Math.floor((cx - contextR) / cellM), i1 = Math.ceil((cx + contextR) / cellM)
     const j0 = Math.floor((cy - contextR) / cellM), j1 = Math.ceil((cy + contextR) / cellM)
@@ -646,70 +904,17 @@ export function treesFromCanopy(
       lastChanged = records.length
       lastEvicted = 0
       tally()
+      adopt(cx, cy, cellM, contextR)
       return liveCount
     }
-    const fresh = records.length === 0 || records.some((r) => Number.isFinite(r.x) && !Number.isFinite(r.ci))
-    if (fresh) {
-      records.length = 0
-      free.length = 0
-      for (let k = 0; k < take; k++) records.push({ ...cand[k].rec, spare: cand[k].spare })
-      patchNote = { rebuilt: true, changed: [], removed: [], shown: [], hidden: [] }
-      lastChanged = records.length
-      lastEvicted = 0
-      tally()
-      return liveCount
-    }
-    const want = new Map<string, { rec: Rec; spare: boolean }>()
-    for (let k = 0; k < take; k++) {
-      const c = cand[k]
-      want.set(`${c.rec.ci},${c.rec.cj}`, c)
-    }
-    const changed: number[] = []
-    const removed: number[] = []
-    const shown: number[] = []
-    const hidden: number[] = []
-    const keep = new Set<string>()
-    for (let i = 0; i < records.length; i++) {
-      const r = records[i]
-      if (!Number.isFinite(r.x)) continue
-      const key = `${r.ci},${r.cj}`
-      const next = want.get(key)
-      if (!next) {
-        r.x = NaN
-        free.push(i)
-        removed.push(i)
-        continue
-      }
-      keep.add(key)
-      if (r.spare !== next.spare) {
-        r.spare = next.spare
-        if (next.spare) hidden.push(i)
-        else shown.push(i)
-      }
-    }
-    for (const [key, next] of want) {
-      if (keep.has(key)) continue
-      const rec = { ...next.rec, spare: next.spare }
-      let i = free.pop()
-      if (i === undefined) {
-        if (records.length >= capacity) continue
-        i = records.length
-        records.push(rec)
-      } else records[i] = rec
-      changed.push(i)
-    }
-    patchNote = { rebuilt: false, changed, removed, shown, hidden }
-    lastChanged = changed.length
-    lastEvicted = removed.length
-    if (cellCache.size > 350000) {
-      const lim = contextR + Math.max(50, T.TREE_REPLANT_M) + cellM
-      const lim2 = lim * lim
-      for (const [k, v] of cellCache) {
-        const dx = v.x - cx, dy = v.y - cy
-        if (dx * dx + dy * dy > lim2) cellCache.delete(k)
-      }
-    }
+    records.length = 0
+    free.length = 0
+    for (let k = 0; k < take; k++) records.push({ ...cand[k].rec, spare: cand[k].spare })
+    patchNote = { rebuilt: true, changed: [], removed: [], shown: [], hidden: [] }
+    lastChanged = records.length
+    lastEvicted = 0
     tally()
+    adopt(cx, cy, cellM, contextR)
     return liveCount
   }
   const refresh = (skip: Set<number>) => {
@@ -738,7 +943,7 @@ export function treesFromCanopy(
   refresh(new Set())
   crowns.name = 'trees'
   trunks.name = 'trunks'
-  return { crowns, trunks, count: liveCount, records, refresh, plant, patch: () => patchNote, stats: () => ({ count: liveCount, cellM: Math.max(1, T.TREE_CELL_M || opts.cellM || 6), radius: T.TREE_PLANT_RADIUS_M, centre, capped, spare: spareCount, drawn: liveCount - spareCount, changed: lastChanged, evicted: lastEvicted }) }
+  return { crowns, trunks, count: liveCount, records, refresh, plant, pump, patch: () => patchNote, stats: () => ({ count: liveCount, cellM: Math.max(1, T.TREE_CELL_M || opts.cellM || 6), radius: T.TREE_PLANT_RADIUS_M, centre, capped, spare: spareCount, drawn: liveCount - spareCount, changed: lastChanged, evicted: lastEvicted, pending: (scan ? Math.abs(scan.jEnd - scan.j) + 1 : 0) + (hold ? 1 : 0) }) }
 }
 
 /** An overpass stand-in: a deck slab over our road on two piers down to the measured ground. */
@@ -843,7 +1048,7 @@ export async function loadSurfaceSets(base = '/surfaces/'): Promise<Record<strin
   const normalChunk = THREE.ShaderChunk.normal_fragment_maps.replace('vec3 mapN = texture2D( normalMap, vNormalMapUv ).xyz * 2.0 - 1.0;', 'vec3 mapN = hexN;')
   for (const s of cat.sets) {
     // variant 0 stays on the material so three enables USE_MAP / USE_NORMALMAP and the uv varyings
-    const mat = new THREE.MeshStandardMaterial({ map: tex(s.albedo, true), normalMap: tex(s.normal, false), normalScale: new THREE.Vector2(0.6, 0.6), roughnessMap: tex(s.roughness, false), roughness: 1, metalness: 0, side: THREE.DoubleSide })
+    const mat = new THREE.MeshStandardMaterial({ map: tex(s.albedo, true), normalMap: tex(s.normal, false), normalScale: new THREE.Vector2(1.25, 1.25), roughnessMap: tex(s.roughness, false), roughness: 1, metalness: 0, side: THREE.DoubleSide })
     const variants = s.variants && s.variants.length > 1 ? s.variants : null
     let hex: SurfaceSet['hex'] | null = null
     if (variants) {
@@ -880,6 +1085,11 @@ export async function loadSurfaceSets(base = '/surfaces/'): Promise<Record<strin
       }
       mat.customProgramCacheKey = () => `road-hex-${s.name}`
     }
+    chainCompile(mat, (shader) => {
+      injectRelief(shader)
+      injectShade(shader)
+      injectWetStreak(shader)
+    }, 'relief-shade-wet')
     out[s.name] = { name: s.name, metresPerTile: s.metres_per_tile, material: mat, hex: hex ?? undefined }
   }
   return out

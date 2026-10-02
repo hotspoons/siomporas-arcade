@@ -16,7 +16,7 @@
 
 /** Every class an asset may be filed under. The library offers these plus whatever is already used. */
 export const KINDS = [
-  'hero-car', 'traffic', 'emergency', 'commercial-vehicle', 'pedestrian', 'animal',
+  'hero-car', 'traffic', 'emergency', 'commercial-vehicle', 'motorcycle', 'pedestrian', 'animal',
   'furniture', 'building', 'building-dressing', 'vegetation', 'signage', 'prop',
   'weapon',
   'race-gate', 'race-marker', 'stop-sign', 'give-way-sign', 'signal', 'power-pole', 'lamp-post', 'street-sign',
@@ -67,7 +67,7 @@ export const TYPE_LABEL: Record<AssetType, string> = {
 
 /** Which classes belong to which type. The ONLY copy of this mapping; the service does not have one. */
 export const CLASSES_BY_TYPE: Record<AssetType, string[]> = {
-  vehicle: ['hero-car', 'traffic', 'emergency', 'commercial-vehicle'],
+  vehicle: ['hero-car', 'traffic', 'emergency', 'commercial-vehicle', 'motorcycle'],
   actor: ['pedestrian', 'animal'],
   weapon: ['weapon'],
   prop: ['furniture', 'building', 'building-dressing', 'vegetation', 'signage', 'prop'],
@@ -92,7 +92,7 @@ const TYPE_OF_CLASS: Record<string, AssetType> = Object.fromEntries(
  * `size_m` (the asset form) — and a guess that is written down here is one that can be corrected.
  */
 const HEIGHT_OF_CLASS: Record<string, number> = {
-  'hero-car': 1.45, traffic: 1.5, emergency: 2.2, 'commercial-vehicle': 3.2,
+  'hero-car': 1.45, traffic: 1.5, emergency: 2.2, 'commercial-vehicle': 3.2, motorcycle: 1.15,
   pedestrian: 1.75, animal: 1.0,
   furniture: 1.0, building: 8, 'building-dressing': 3, vegetation: 8, signage: 2.5, prop: 2,
   weapon: 1,

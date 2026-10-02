@@ -59,7 +59,7 @@ export class Impostors {
     this.material = new THREE.ShaderMaterial({
       // merge() clones uniform values and cannot clone a render-target texture (it silently becomes
       // null and every quad is discarded); the atlas is attached after the merge instead
-      uniforms: { ...THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { cols: { value: COLS }, yaws: { value: YAWS }, rows: { value: rows }, flatPitch: { value: T.IMPOSTOR_FLAT_PITCH } }]), atlas: { value: this.target.texture }, uLight: { value: 1 }, uLightTint: { value: new THREE.Color(1, 1, 1) }, ...retro.uniforms, uLampGain: { value: 1 }, ...splatMaskUniforms() },
+      uniforms: { ...THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { cols: { value: COLS }, yaws: { value: YAWS }, rows: { value: rows }, flatPitch: { value: T.IMPOSTOR_FLAT_PITCH } }]), atlas: { value: this.target.texture }, uLight: { value: 1 }, uLightTint: { value: new THREE.Color(1, 1, 1) }, uMatch: { value: 1.65 }, uHue: { value: 0 }, uSat: { value: 1 }, ...retro.uniforms, uLampGain: { value: 1 }, ...splatMaskUniforms() },
       vertexShader: /* glsl */ `
         attribute float aVariant;
         attribute float aYaw;
@@ -122,6 +122,11 @@ export class Impostors {
         // everything else.
         uniform float uLight;
         uniform vec3 uLightTint;
+        // The atlas is baked under a dimmer sun than the live trees get, so a card of the same
+        // tree reads dark beside the mesh. uMatch is that gap, and only the cards see it.
+        uniform float uMatch;
+        uniform float uHue;
+        uniform float uSat;
         varying vec2 vUv;
         varying float vFade;
         varying vec3 vCardWorld;
@@ -143,10 +148,16 @@ export class Impostors {
           // stable, well-spread pattern per screen pixel in one dot product.
           float dith = fract(dot(gl_FragCoord.xy, vec2(0.75487766, 0.56984029)));
           if (c.a < 0.5 || vFade <= dith) discard;
-          // and the car's headlights: a card is a billboard, so it is lit as a surface facing the
-          // viewer rather than by a normal it does not have
+          // brightness, hue and colour gain are the panel's, so a card can be matched to the
+          // model beside it without rebaking the atlas
+          float ha = radians(uHue);
+          vec3 yiq = mat3(0.299, 0.596, 0.211, 0.587, -0.274, -0.523, 0.114, -0.322, 0.312) * c.rgb;
+          float hc = cos(ha), hs = sin(ha);
+          yiq.yz = vec2(yiq.y * hc - yiq.z * hs, yiq.y * hs + yiq.z * hc);
+          vec3 graded = mat3(1.0, 1.0, 1.0, 0.956, -0.272, -1.106, 0.621, -0.647, 1.703) * yiq;
+          graded = mix(vec3(dot(graded, vec3(0.299, 0.587, 0.114))), graded, uSat) * uMatch;
           vec3 lamp = c.rgb * lampDiffuse(vCardWorld, normalize(cameraPosition - vCardWorld), uLampGain);
-          gl_FragColor = vec4(c.rgb * uLight * uLightTint + lamp, 1.0);
+          gl_FragColor = vec4(graded * uLight * uLightTint + lamp, 1.0);
           #include <fog_fragment>
           #include <colorspace_fragment>
         }
@@ -269,7 +280,31 @@ export class Impostors {
 
   tick() {
     this.material.uniforms.flatPitch.value = T.IMPOSTOR_FLAT_PITCH
+    this.material.uniforms.uMatch.value = T.IMPOSTOR_LIGHT
+    this.material.uniforms.uHue.value = T.IMPOSTOR_HUE
+    this.material.uniforms.uSat.value = T.IMPOSTOR_COLOR
     this.material.uniforms.uLampGain.value = T.HEADLIGHT_BOUNCE
+  }
+
+  /** The baked atlas, so a shadow card can cast the same silhouette. */
+  get atlas(): THREE.Texture {
+    return this.target.texture
+  }
+
+  variantAt(i: number): number {
+    return this.aVariant.getX(i)
+  }
+
+  yawAt(i: number): number {
+    return this.aYaw.getX(i)
+  }
+
+  extentAt(variant: number): number {
+    return this.extents[variant] ?? 1
+  }
+
+  get rows(): number {
+    return Math.max(1, this.extents.length)
   }
 
   /**
@@ -281,6 +316,11 @@ export class Impostors {
    */
   commit(count: number) {
     this.mesh.count = count
+    // ranges registered earlier this frame would demote this rewrite to a partial upload
+    this.mesh.instanceMatrix.clearUpdateRanges()
+    this.aFade.clearUpdateRanges()
+    this.aVariant.clearUpdateRanges()
+    this.aYaw.clearUpdateRanges()
     this.matrixUploads.markAll()
     this.fadeUploads.markAll()
     this.mesh.instanceMatrix.needsUpdate = true

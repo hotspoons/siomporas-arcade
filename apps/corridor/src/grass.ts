@@ -86,8 +86,10 @@ function clumpTexture(): THREE.Texture {
   let seed = 7
   const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff)
   ctx.lineCap = 'round'
-  for (let i = 0; i < 90; i++) {
-    const x0 = S * (0.5 + (rnd() - 0.5) * 0.28)
+  // the strokes used to sit in the middle 28% of the card, so a clump was a thin wisp inside a
+  // mostly empty quad and the verge read as dirt with a few tufts. Spread them across the card.
+  for (let i = 0; i < 140; i++) {
+    const x0 = S * (0.5 + (rnd() - 0.5) * 0.7)
     const lean = (rnd() - 0.5) * 1.6
     const h = S * (0.45 + rnd() * 0.5)
     const w = 1.5 + rnd() * 4
@@ -182,7 +184,7 @@ export class Grass {
   private prevEye = new THREE.Vector3(NaN, NaN, NaN)
   private prevT = 0
   private motion = 1 // 1 still … 0 moving fast: scales the wind
-  /** above GRASS_WIND_STILL_BELOW the field is cards only: no blade geometry, no sway */
+  /** cards at every range: GRASS_CARDS, or the eye moving faster than GRASS_WIND_STILL_BELOW */
   private spritesOnly = false
   private lastTile = 'none'
   private lastHeading = Infinity
@@ -561,6 +563,7 @@ export class Grass {
     this.mesh.name = 'grass'
     this.mesh.add(this.blades, this.cards)
     this.sig = this.signature() // so the FIRST knob change is judged against the built tiles, not ''
+    this.lodSig = this.lodSignature()
   }
 
   /**
@@ -626,7 +629,9 @@ export class Grass {
       m.uniforms.uLight.value = T.GRASS_LIGHT
       m.uniforms.uLampGain.value = T.HEADLIGHT_BOUNCE
     }
-    this.cardMat.uniforms.uWidth.value = T.GRASS_SPRITE_WIDTH
+    // WIDTH_SCALE defaults to 0.55 and only used to size blades; cards ignored it, so the width
+    // knob never filled the tufts. Divide by that default and the same slider moves both.
+    this.cardMat.uniforms.uWidth.value = T.GRASS_SPRITE_WIDTH * (T.GRASS_WIDTH_SCALE / 0.55)
     this.cardMat.uniforms.uLean.value = T.GRASS_SPRITE_LEAN
   }
 
@@ -644,20 +649,30 @@ export class Grass {
       T.GRASS_SPRITE_SCALE, T.GRASS_MAX_SHELF, this.heightScale, this.type,
     ].join(',')
   }
+  /** LOD knobs only change how much of a cached tile is copied. They must not rebuild the tiles. */
+  private lodSignature(): string {
+    return [T.GRASS_LOD_NEAR, T.GRASS_LOD_MID, T.GRASS_LOD_MID_DENSITY, T.GRASS_LOD_FAR_DENSITY, T.GRASS_SPRITE_FAR_DENSITY].join(',')
+  }
   private sig = ''
+  private lodSig = ''
 
   /**
    * A knob or the season changed. `retune()` cannot know WHICH knob, so it calls this for all of
    * them — and a full cache clear is ~3 s of grass visibly growing back in. That is what made
    * tuning miserable: dragging the hue slider threw away every tile, though hue is a uniform.
    * So compare the signature first and only pay when the tiles would actually come out different.
+   * A lighting slider matches both signatures and does nothing here at all.
    */
   invalidate() {
     const sig = this.signature()
-    this.visStale = true // the LOD shape may have moved even when the tiles did not
-    this.dirty = true
-    if (sig === this.sig) return
+    const lod = this.lodSignature()
+    if (sig === this.sig && lod === this.lodSig && this.sig !== '') return
+    const contents = sig !== this.sig
     this.sig = sig
+    this.lodSig = lod
+    this.visStale = true
+    this.dirty = true
+    if (!contents) return
     this.tiles.clear()
     this.pending = []
     this.lastTile = 'none'
@@ -689,11 +704,14 @@ export class Grass {
     this.eye.copy(eye)
     this.fwd.copy(fwd)
     this.pitch = pitch
-    // Driving does not get blades. The wind already goes to nothing above GRASS_WIND_STILL_BELOW;
-    // the cost that remains is generating and drawing the blade mesh, which a moving car cannot
-    // read as individuals. Cards cover the same ground. Slowing back down asks for the blades.
+    // GRASS_CARDS keeps the distance cards everywhere, including beside the camera. With it off,
+    // a moving eye still drops the blade mesh: generating it is the hitch, and the cards cover
+    // the same ground. Slowing back down asks for the blades.
     const still = T.GRASS_WIND_STILL_BELOW
-    const wantSprites = Number.isFinite(this.prevEye.x) && (this.spritesOnly ? speed > still * 0.6 : speed > still)
+    // 0 means the blades stay, however fast the eye moves. A positive threshold is the old
+    // swap: cards while moving, blades once you slow down.
+    const bySpeed = still > 0 && Number.isFinite(this.prevEye.x) && (this.spritesOnly ? speed > still * 0.6 : speed > still)
+    const wantSprites = T.GRASS_CARDS > 0.5 || bySpeed
     let modeChanged = false
     if (wantSprites !== this.spritesOnly) {
       this.spritesOnly = wantSprites
@@ -782,6 +800,15 @@ export class Grass {
     }
   }
 
+  /** the real sun. The constructor default is a fixed corner of the sky and nothing else ever wrote it. */
+  setSun(dir: THREE.Vector3) {
+    const u = this.bladeMat.uniforms.uSun.value as THREE.Vector3
+    u.copy(dir)
+    if (u.lengthSq() > 1e-8) u.normalize()
+    const card = this.cardMat.uniforms.uSun.value as THREE.Vector3
+    if (card !== u) card.copy(u)
+  }
+
   /** forget the cached tiles inside a world box (x0, z0, x1, z1) so they regenerate: the vegetation mask for that ground just arrived */
   invalidateWithin(x0: number, z0: number, x1: number, z1: number) {
     let n = 0
@@ -824,7 +851,9 @@ export class Grass {
     const maxBlades = withBlades ? Math.ceil(TILE * TILE * perCellMax) + 64 : 0
     const blades = new Float32Array(maxBlades * BLADE_F)
     const rank = new Float32Array(maxBlades)
-    const maxCards = Math.ceil(TILE * TILE * T.GRASS_SPRITE_PER_M2) + 16
+    // cards scale with the blade density and with how little ground a short clump covers, so the
+    // buffer has to fit the densest cell, not the bare sprite count
+    const maxCards = Math.ceil(TILE * TILE * Math.min(18, T.GRASS_SPRITE_PER_M2 * (Math.max(T.GRASS_MOWN_PER_M2, T.GRASS_ROUGH_PER_M2) / 40) * 6 * 1.6)) + 16
     const cards = new Float32Array(maxCards * CARD_F)
     const crank = new Float32Array(maxCards)
     let n = 0, nc = 0, mownCells = 0, cells = 0
@@ -939,8 +968,14 @@ export class Grass {
           rank[n] = hash(cx * 41 + cz * 43 + b * 47)
           n++
         }
-        // clump cards: sparse, sized to the cover they stand in
-        const cardsHere = T.GRASS_SPRITE_PER_M2 * this.look.density * (0.7 + 0.6 * patch) * ad
+        // clump cards follow the same density as the blades. A short card covers less ground, so
+        // the mown strip (and a low height scale) plants more of them; GRASS_SPRITE_PER_M2 is the
+        // count at 40 blades/m² and a ~0.6 m clump, not a fixed number of tufts.
+        const bladePer = (mown ? T.GRASS_MOWN_PER_M2 : T.GRASS_ROUGH_PER_M2) * this.look.density * (0.7 + 0.6 * patch) * Math.max(0, ad)
+        const baseH = mown ? T.GRASS_MOWN_HEIGHT * 1.6 * this.look.mown : this.heightScale * T.GRASS_ROUGH_HEIGHT * tall * 0.8 * this.look.height
+        const sizeNom = Math.max(0.2, baseH * Math.max(0.15, ah) * T.GRASS_HEIGHT_SCALE * T.GRASS_SPRITE_SCALE)
+        const cover = Math.min(6, (0.85 / sizeNom) * (0.85 / sizeNom))
+        const cardsHere = Math.min(18, T.GRASS_SPRITE_PER_M2 * (bladePer / 40) * cover)
         const want = Math.floor(cardsHere) + (hash(cx * 61 + cz * 67) < cardsHere % 1 ? 1 : 0)
         for (let b = 0; b < want && nc < maxCards; b++) {
           const x = wx + (hash(cx * 71 + cz * 73 + b * 79) - 0.5) * cell, z = wz + (hash(cx * 83 + cz * 89 + b * 97) - 0.5) * cell
@@ -949,12 +984,12 @@ export class Grass {
           // inside the asphalt drew a tuft about 0.6 m out over the road, which at fifty metres
           // in headlights is exactly "grass growing through the road". Its half-width has to
           // clear the kerb, not its centre.
-          if (this.roadDistance(x, z) < this.pavedHalf + T.GRASS_ROAD_CLEAR + (T.GRASS_SPRITE_WIDTH * T.GRASS_SPRITE_SCALE) / 2) continue
+          const cardHalf = 0.5 * sizeNom * T.GRASS_SPRITE_WIDTH * (T.GRASS_WIDTH_SCALE / 0.55)
+          if (this.roadDistance(x, z) < this.pavedHalf + T.GRASS_ROAD_CLEAR + cardHalf) continue
           // a card is a metre across; its far edge must clear a mask too, not just its foot
           if (this.blockedAt && (this.blockedAt(x + 0.5, z) || this.blockedAt(x - 0.5, z) || this.blockedAt(x, z + 0.5) || this.blockedAt(x, z - 0.5))) continue
           const y = this.groundAt(x, -z) - 0.03
-          const base = (mown ? T.GRASS_MOWN_HEIGHT * 1.6 * this.look.mown : this.heightScale * T.GRASS_ROUGH_HEIGHT * tall * 0.8 * this.look.height)
-          const size = base * ah * T.GRASS_HEIGHT_SCALE * T.GRASS_SPRITE_SCALE * (0.75 + 0.5 * hash(cx * 101 + cz * 103 + b * 107))
+          const size = baseH * ah * T.GRASS_HEIGHT_SCALE * T.GRASS_SPRITE_SCALE * (0.75 + 0.5 * hash(cx * 101 + cz * 103 + b * 107))
           const o = nc * CARD_F
           cards[o] = x
           cards[o + 1] = y
@@ -1036,7 +1071,10 @@ export class Grass {
     this.aCard2.clearUpdateRanges()
     this.aCard2.addUpdateRange(0, kc * 2)
     this.aCard2.needsUpdate = true
-    this.cardMat.uniforms.uFadeIn.value = T.GRASS_LOD_MID
+    // The card shader shrinks a clump to nothing inside uFadeIn, so the blades can own the
+    // foreground. With the blades put away that shrink is the pop: the ground beside the car
+    // is empty until a clump crosses the ring. Cards that start at the eye have to be full size there.
+    this.cardMat.uniforms.uFadeIn.value = this.spritesOnly ? 0 : T.GRASS_LOD_MID
     this.cardMat.uniforms.uFadeOut.value = T.GRASS_SPRITE_RADIUS
   }
 

@@ -26,6 +26,7 @@ import { PROFILES, type DriveProfile } from '@apex/engine/physics/profiles'
 import { assetsvc, type AssetItem, type Build, type RigBinding } from '../assetsvc'
 import {
   axleGrip, defaultVehicle, describeVehicle, effectiveTopSpeed, finalDriveFor, FINAL_DRIVE_MAX,
+  lampCounts,
   FINAL_DRIVE_MIN, frontShare, gearedTopSpeed, mountPoint, mountYaw, overrideRange, peakTorque,
   rebalanceGears, toDriveProfile, tractiveForce, TYRE_REFERENCE_MM, validateVehicle, VEHICLE_CLASSES,
   VEHICLE_MOUNTS, VEHICLE_TEMPLATE_IDS, wheelBoneCount,
@@ -188,6 +189,13 @@ export function dynamicsForm(host: HTMLElement, getDoc: () => VehicleDoc, opts: 
       cb.append(readout('Stability factor', (doc.spec.track / 2 / doc.spec.cgHeight).toFixed(2)))
     }
     put('basic', chassis)
+
+    const lamps = lampCounts(doc.spec)
+    const lights = group('Lights', { note: 'night traffic. Two across a car, one on a motorcycle, unless you set them' })
+    const lb = bodyOf(lights)
+    num(lb, 'Headlights', doc.spec.headlights ?? lamps.headlights, 1, (v) => { doc.spec.headlights = Math.max(0, Math.round(v)) }, 'across the front. 0 is none')
+    num(lb, 'Tail lights', doc.spec.taillights ?? lamps.taillights, 1, (v) => { doc.spec.taillights = Math.max(0, Math.round(v)) }, 'across the rear, and they throw red light')
+    put('basic', lights)
 
     /* ---- handling ------------------------------------------------------------------------- */
     const handling = group('Handling', { note: 'a profile plus what this car differs by — never a copy of all forty numbers' })

@@ -16,7 +16,7 @@ import { PhysicsWorld } from '@apex/engine/physics/world'
 import {
   axleGrip, cgHeightOf, defaultVehicle, describeVehicle, finalDriveFor, FINAL_DRIVE_MIN, gearedTopSpeed,
   mountPoint, mountYaw, originHeight, overrideRange, rebalanceGears,
-  peakTorque, toDriveProfile, toEngineTuning, toVehicleSpec, tractiveForce, validateVehicle,
+  lampCounts, lampOffsets, peakTorque, toDriveProfile, toEngineTuning, toVehicleSpec, tractiveForce, validateVehicle,
   VEHICLE_CLASSES, VEHICLE_TEMPLATE_IDS, wheelBoneCount, type VehicleDoc,
 } from '../src/vehicles'
 
@@ -328,6 +328,26 @@ describe('the decisions the form makes', () => {
     expect(overrideRange(0).max).toBeGreaterThan(0)
     // and a negative one gets a symmetric range rather than a zero floor it cannot reach
     expect(overrideRange(-0.25).min).toBeLessThan(-0.25)
+  })
+})
+
+describe('lamps', () => {
+  it('defaults to a pair, and to one lamp on a motorcycle', () => {
+    expect(lampCounts(defaultVehicle('traffic').spec)).toEqual({ headlights: 2, taillights: 2 })
+    expect(lampCounts(defaultVehicle('motorcycle').spec)).toEqual({ headlights: 1, taillights: 1 })
+    // a narrow body that never had the fields filled in is still a motorcycle
+    expect(lampCounts({ width: 0.7 })).toEqual({ headlights: 1, taillights: 1 })
+    // a saved count wins over the width
+    expect(lampCounts({ width: 0.7, headlights: 2, taillights: 0 })).toEqual({ headlights: 2, taillights: 0 })
+  })
+
+  it('puts one lamp on the centreline and a pair out on the corners', () => {
+    expect(lampOffsets(1, 1.8)).toEqual([0])
+    expect(lampOffsets(0, 1.8)).toEqual([])
+    const pair = lampOffsets(2, 1.8)
+    expect(pair[0]).toBeLessThan(-0.4)
+    expect(pair[1]).toBeGreaterThan(0.4)
+    expect(pair[0]).toBeCloseTo(-pair[1])
   })
 })
 

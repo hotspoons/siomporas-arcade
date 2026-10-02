@@ -30,6 +30,7 @@ import * as THREE from 'three'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js'
 import { applyAlphaGlazing } from './glazing'
+import { applyCarShine } from './shading'
 import { assetsvc, MESH_FILE, type AssetItem, type MeshVariant } from './assetsvc'
 import type { VehicleChassis } from './vehicles'
 
@@ -118,6 +119,7 @@ export async function loadCarModel(assetId: string, spec: VehicleChassis): Promi
   const holder = new THREE.Group()
   holder.name = `car:${assetId}`
   holder.add(root)
+  applyCarShine(holder)
 
   return { object: holder, variant, rawSize: { x: raw.x, y: raw.y, z: raw.z }, scale: fit.scale, glazed }
 }

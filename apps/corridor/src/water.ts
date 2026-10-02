@@ -18,6 +18,7 @@
 import * as THREE from 'three'
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import * as T from './tuning'
+import { chainCompile, injectRelief, injectShade, injectSSR, noteShiny } from './shading'
 
 export interface WaterFall { i0: number; i1: number; drop_m: number; length_m: number; grade: number; kind: 'falls' | 'rapids' }
 export interface WaterLine {
@@ -66,13 +67,33 @@ function waterMaterial(uniforms: { uTime: { value: number } }, colour: number, o
           float h0 = WAVE(p);
           float hx = WAVE(p + vec2(e, 0.0));
           float hz = WAVE(p + vec2(0.0, e));
-          vec3 pert = normalize(vec3(-(hx - h0) / e * 0.18, 1.0, -(hz - h0) / e * 0.18));
-          normal = normalize(normal + (pert - vec3(0.0, 1.0, 0.0)) * 0.45);
+          vec3 pert = normalize(vec3(-(hx - h0) / e * 0.35, 1.0, -(hz - h0) / e * 0.35));
+          normal = normalize(normal + (pert - vec3(0.0, 1.0, 0.0)) * 1.15);
+        }
+        `,
+      )
+      .replace(
+        '#include <normal_fragment_maps>',
+        `
+        #include <normal_fragment_maps>
+        {
+          // from a car the water is seen at a slant. The sky reflection is that slant, not the
+          // sun's highlight, which at noon sits overhead and out of the windscreen. The normal
+          // is declared in normal_fragment_begin, which is why this cannot live in color_fragment.
+          float ndv = clamp(dot(normalize(normal), normalize(vViewPosition)), 0.0, 1.0);
+          float fres = pow(1.0 - ndv, 3.0);
+          diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(1.55, 1.7, 1.75), fres * 0.65);
         }
         `,
       )
   }
   mat.customProgramCacheKey = () => `corridor-water-${colour}`
+  noteShiny(mat)
+  chainCompile(mat, (shader) => {
+    injectSSR(shader)
+    injectRelief(shader)
+    injectShade(shader)
+  }, 'relief-ssr-shade')
   return mat
 }
 

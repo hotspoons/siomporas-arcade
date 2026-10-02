@@ -7,6 +7,7 @@
 // edge distance the blades use. The coarse terrain is sunk beneath it.
 import * as THREE from 'three'
 import { ACCUM_PARS, accumUniforms } from './weather'
+import { injectShade, injectWetStreak } from './shading'
 
 export interface Edge {
   d: number // signed distance to the nearest pavement edge (negative on the pavement)
@@ -252,10 +253,13 @@ export function buildStrip(
         #endif
         `,
       )
+    injectShade(shader)
+    injectWetStreak(shader)
   }
-  mat.customProgramCacheKey = () => 'corridor-strip'
+  mat.customProgramCacheKey = () => 'corridor-strip-shade-wet'
   const mesh = new THREE.Mesh(geo, mat)
   mesh.name = 'strip'
+  mesh.receiveShadow = true
   // the blend uniforms are merged into the compiled shader and otherwise unreachable from outside;
   // a probe that wants to switch the forest floor or the turf off to see what is under it (the
   // bisection in probes/corridor-stanceshot.mjs) finds them here

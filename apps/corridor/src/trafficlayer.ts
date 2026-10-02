@@ -38,7 +38,7 @@ import { loadZones } from './editor/zonestore'
 import { assetsvc, type Build } from './assetsvc'
 import { EMPTY_SET, pick, type TrafficSetDoc } from './trafficsets'
 import { loadCarModel } from './carmodel'
-import { defaultVehicle, type VehicleDoc } from './vehicles'
+import { defaultVehicle, lampCounts, lampOffsets, type VehicleDoc } from './vehicles'
 import type { Site } from './scene'
 import type { CorridorPhysics } from './physics'
 import * as T from './tuning'
@@ -98,25 +98,57 @@ interface Road extends RoadChain {
  * Posted limits by road class, m/s. OSM `maxspeed` is not baked into the chains, so this is the
  * best that can be said — and it is what a driver does on an unsigned road anyway.
  */
-/** Two bulbs and one beam, in the model's frame (nose is +X). Cheap enough to parent to every car; only a few are switched on. */
-function trafficLamps(mesh: THREE.Object3D, length: number, height: number): THREE.Group {
+const HEAD_BULB = new THREE.BoxGeometry(0.07, 0.1, 0.22)
+const TAIL_BULB = new THREE.BoxGeometry(0.05, 0.08, 0.16)
+const HEAD_BULB_MAT = new THREE.MeshBasicMaterial({ color: 0xfff1c9 })
+const TAIL_BULB_MAT = new THREE.MeshBasicMaterial({ color: 0xff1c14 })
+
+/** The spots a car may switch on. The bulbs are always in the group; the spots stay off until a frame spends budget on them. */
+interface LampRig { heads: THREE.SpotLight[]; tails: THREE.SpotLight[] }
+
+/**
+ * One lamp per side of the front, and red lamps across the tail, in the model's frame (nose is +X).
+ *
+ * The bulbs sit just proud of the body. A spot buried inside the mesh reads as a single glow in
+ * the middle, which is what a centred beam was doing. Only the nearest cars switch the spots on;
+ * the rest still show the bulbs.
+ */
+function trafficLamps(mesh: THREE.Object3D, doc: VehicleDoc): THREE.Group {
   const g = new THREE.Group()
   g.name = 'headlights'
   g.visible = false
-  const bulb = new THREE.MeshBasicMaterial({ color: 0xfff1c9 })
-  const geo = new THREE.SphereGeometry(0.07, 6, 5)
-  const nose = length / 2 - 0.05
-  const up = height * 0.45
-  for (const side of [-0.55, 0.55]) {
-    const b = new THREE.Mesh(geo, bulb)
-    b.position.set(nose, up, side)
-    g.add(b)
+  const spec = doc.spec
+  const length = spec.length ?? 4.4
+  const width = spec.width ?? 1.8
+  const height = spec.height ?? 1.4
+  const counts = lampCounts(spec)
+  const nose = length / 2 + 0.04
+  const up = Math.max(0.45, height * 0.42)
+  const heads: THREE.SpotLight[] = []
+  const tails: THREE.SpotLight[] = []
+  for (const z of lampOffsets(counts.headlights, width)) {
+    const bulb = new THREE.Mesh(HEAD_BULB, HEAD_BULB_MAT)
+    bulb.position.set(nose, up, z)
+    const spot = new THREE.SpotLight(0xfff1c9, 0, 32, 0.34, 0.45, 1.5)
+    spot.position.set(nose, up, z)
+    spot.target.position.set(nose + 18, up * 0.25, z)
+    spot.visible = false
+    spot.castShadow = false
+    g.add(bulb, spot, spot.target)
+    heads.push(spot)
   }
-  const spot = new THREE.SpotLight(0xfff1c9, 0, 36, 0.45, 0.55, 1.4)
-  spot.position.set(nose, up, 0)
-  spot.target.position.set(nose + 12, up * 0.4, 0)
-  g.add(spot, spot.target)
-  g.userData.spot = spot
+  for (const z of lampOffsets(counts.taillights, width)) {
+    const bulb = new THREE.Mesh(TAIL_BULB, TAIL_BULB_MAT)
+    bulb.position.set(-nose, up, z)
+    const spot = new THREE.SpotLight(0xff180c, 0, T.TAILLIGHT_RANGE, 0.22, 0.55, 2)
+    spot.position.set(-nose, up, z)
+    spot.target.position.set(-nose - Math.max(1.2, T.TAILLIGHT_RANGE * 0.65), 0.05, z)
+    spot.visible = false
+    spot.castShadow = false
+    g.add(bulb, spot, spot.target)
+    tails.push(spot)
+  }
+  g.userData.lamps = { heads, tails } satisfies LampRig
   mesh.add(g)
   return g
 }
@@ -297,7 +329,7 @@ export class TrafficLayer {
       this.group.add(mesh)
       const half = { x: (m.doc.spec.length ?? 4.4) / 2, y: (m.doc.spec.height ?? 1.4) / 2, z: (m.doc.spec.width ?? 1.8) / 2 }
       const body = this.physics ? this.physics.spawnKinematic(half) : null
-      const shown: Shown = { e, mesh, body, massKg: m.doc.spec.mass ?? 1500, wrecked: false, hidden: false, chain: slot.chain, limit: SpeedLimit.v[e], obey: usable.mix.find((x) => x.vehicle === which)?.obeyRate ?? obey ?? 0.97, lamps: trafficLamps(mesh, m.doc.spec.length ?? 4.4, m.doc.spec.height ?? 1.4) }
+      const shown: Shown = { e, mesh, body, massKg: m.doc.spec.mass ?? 1500, wrecked: false, hidden: false, chain: slot.chain, limit: SpeedLimit.v[e], obey: usable.mix.find((x) => x.vehicle === which)?.obeyRate ?? obey ?? 0.97, lamps: trafficLamps(mesh, m.doc) }
       if (body) this.byCollider.set(body.colliderHandle, shown)
       this.shown.push(shown)
     }
@@ -591,7 +623,7 @@ export class TrafficLayer {
 
   private place(all: boolean, eye?: THREE.Vector3): void {
     const drawM = T.TRAFFIC_DRAW_M
-    let beams = 0
+    const glow: { s: Shown; d2: number }[] = []
     for (const s of this.shown) {
       const e = s.e
       if (s.wrecked && s.body) {
@@ -620,13 +652,10 @@ export class TrafficLayer {
       // the model's nose is +X; three's rotation about +Y takes +X toward -Z, which is NORTH here
       s.mesh.rotation.set(0, yaw, 0)
       const dist2 = eye ? (eye.x - x) ** 2 + (eye.z + y) ** 2 : 0
-      const beam = this.night > 0.08 && beams < 8 && dist2 < 90 * 90
-      s.lamps.visible = beam
-      if (beam) {
-        beams++
-        const spot = s.lamps.userData.spot as THREE.SpotLight | undefined
-        if (spot) spot.intensity = 7 * this.night
-      }
+      // bulbs on anything close enough to read; the spots are spent afterwards, nearest first
+      const showLamps = this.night > 0.08 && dist2 < 80 * 80
+      s.lamps.visible = showLamps
+      if (showLamps) glow.push({ s, d2: dist2 })
       if (s.body) {
         // a body only near the player: the rest of the solver's work on a kinematic car is a
         // broad-phase update a step, and there were six hundred of them
@@ -635,6 +664,74 @@ export class TrafficLayer {
         s.body.enable(near)
         if (near) s.body.move(x, g, -y, -yaw)
       }
+    }
+    this.lightCars(glow)
+  }
+
+  /**
+   * Switch on the nearest cars' beams, and leave the rest as bulbs.
+   *
+   * Every visible spot lands in the standard shader, so a jam of pairs would be dozens of lights
+   * on every road fragment. Twelve is about what the old single centre beam was spending, now
+   * split across headlights and the red tails. A car is lit whole or not at all — half a pair
+   * is the one-headlight bug again.
+   */
+  private lightCars(glow: { s: Shown; d2: number }[]): void {
+    glow.sort((a, b) => a.d2 - b.d2)
+    let budget = 12
+    const night = this.night
+    // Same knob as the pool on the road, three times brighter on the lamp itself.
+    const lens = (T.TAILLIGHT / 0.025) * 3 * night
+    TAIL_BULB_MAT.color.setRGB(0.35 * lens, 0.045 * lens, 0.03 * lens)
+    for (const { s } of glow) {
+      const rig = s.lamps.userData.lamps as LampRig | undefined
+      const heads = rig?.heads ?? []
+      const tails = rig?.tails ?? []
+      const need = heads.length + tails.length
+      const on = need > 0 && need <= budget
+      if (on) budget -= need
+      for (const spot of heads) {
+        spot.visible = on && T.HEADLIGHT > 0.001
+        spot.intensity = on ? 9 * night * T.HEADLIGHT : 0
+      }
+      for (const spot of tails) {
+        spot.visible = on && T.TAILLIGHT > 0.001
+        spot.intensity = on ? 9 * night * T.TAILLIGHT : 0
+        spot.distance = T.TAILLIGHT_RANGE
+        spot.target.position.x = spot.position.x - Math.max(1.2, T.TAILLIGHT_RANGE * 0.65)
+        spot.target.position.y = 0.05
+      }
+    }
+  }
+
+  /**
+   * Lamps that are on, nearest first, for the wet-road streaks.
+   * Fills `into` up to `limit`. The pool on the road stays the spot; this is only the mirror line.
+   */
+  fillWet(into: { x: number; y: number; z: number; r: number; g: number; b: number; gain: number }[], limit: number, eye: THREE.Vector3): void {
+    if (into.length >= limit || this.night < 0.08) return
+    const cand: { d2: number; spot: THREE.SpotLight; tail: boolean }[] = []
+    for (const s of this.shown) {
+      if (!s.lamps.visible) continue
+      const rig = s.lamps.userData.lamps as LampRig | undefined
+      if (!rig) continue
+      const d2 = (s.mesh.position.x - eye.x) ** 2 + (s.mesh.position.z - eye.z) ** 2
+      if (d2 > 80 * 80) continue
+      for (const spot of rig.heads) if (spot.visible) cand.push({ d2, spot, tail: false })
+      for (const spot of rig.tails) if (spot.visible) cand.push({ d2, spot, tail: true })
+    }
+    cand.sort((a, b) => a.d2 - b.d2)
+    const p = new THREE.Vector3()
+    for (const c of cand) {
+      if (into.length >= limit) break
+      c.spot.getWorldPosition(p)
+      const gain = c.tail ? T.TAILLIGHT / 0.025 : T.HEADLIGHT / 2.7
+      if (gain < 0.02) continue
+      into.push({
+        x: p.x, y: p.y, z: p.z,
+        r: c.tail ? 1 : 1, g: c.tail ? 0.06 : 0.93, b: c.tail ? 0.03 : 0.72,
+        gain,
+      })
     }
   }
 

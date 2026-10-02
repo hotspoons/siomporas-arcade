@@ -26,6 +26,7 @@
 import * as THREE from 'three'
 import { clamp, expApproach } from '@apex/engine/math/scalar'
 import * as T from './tuning'
+import { applyCarShine } from './shading'
 
 export interface CarInput {
   throttle: number
@@ -88,6 +89,9 @@ export class Car {
   /** the headlamp meshes and their beams; setLights drives both (main.ts, from the sun's elevation) */
   private headLamps: THREE.Mesh[] = []
   private beams: THREE.SpotLight[] = []
+  /** the tail lamps and the red light they throw back down the road */
+  private tailLamps: THREE.Mesh[] = []
+  private tailBeams: THREE.SpotLight[] = []
   private lightSig = ''
   private lightsOn = 0
   /** dash, pillars and wheel: drawn only from inside (setCockpit) */
@@ -435,6 +439,17 @@ export class Car {
       const tail = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.12, 0.38), tailMat)
       tail.position.set(-2.2, 0.66, zz * 0.56)
       g.add(tail)
+      this.tailLamps.push(tail)
+      // Red, aimed back and a little down, so the road behind the car and the bumper actually
+      // catch it. The mesh alone is a photograph of a lamp.
+      // Aimed at the road a short way back. A level beam with a wide cone climbs the boot
+      // and lights the air above the car.
+      const tailBeam = new THREE.SpotLight(0xff180c, 0, T.TAILLIGHT_RANGE, 0.22, 0.55, 2)
+      tailBeam.position.set(-2.18, 0.66, zz * 0.56)
+      tailBeam.target.position.set(-2.18 - T.TAILLIGHT_RANGE * 0.65, 0.02, zz * 0.56)
+      tailBeam.castShadow = false
+      g.add(tailBeam, tailBeam.target)
+      this.tailBeams.push(tailBeam)
     }
     // The view from the driver's seat. Mesh-local y is height above the wheel contact, so with
     // CAR_RIDE 0.35 and COCKPIT_EYE_UP 1.15 the eye sits at local (0.35, 1.50, COCKPIT_EYE_SIDE),
@@ -484,6 +499,7 @@ export class Car {
       this.wheels.push(w)
     }
     g.name = 'car'
+    applyCarShine(g)
     return g
   }
 
@@ -497,7 +513,7 @@ export class Car {
     // The early-out has to watch the KNOBS as well as the level. It used to compare only `v`, so
     // turning HEADLIGHT down did nothing at all until the sun next moved — the panel moved, the
     // beam did not, and the only way to see the change was to wait for dusk (2026-09-27).
-    const sig = `${v.toFixed(3)}|${T.HEADLIGHT}|${T.HEADLIGHT_RANGE}|${T.HEADLIGHT_ANGLE}`
+    const sig = `${v.toFixed(3)}|${T.HEADLIGHT}|${T.TAILLIGHT}|${T.TAILLIGHT_RANGE}|${T.HEADLIGHT_RANGE}|${T.HEADLIGHT_ANGLE}`
     if (sig === this.lightSig) return
     this.lightSig = sig
     this.lightsOn = v
@@ -511,7 +527,20 @@ export class Car {
     }
     for (const m of this.headLamps) {
       const mat = m.material as THREE.MeshStandardMaterial
-      mat.emissiveIntensity = 0.35 + 2.2 * v
+      mat.emissiveIntensity = (0.35 + 2.2 * v) * (T.HEADLIGHT / 2)
+    }
+    for (const b of this.tailBeams) {
+      b.intensity = v * 140 * T.TAILLIGHT
+      b.distance = T.TAILLIGHT_RANGE
+      b.target.position.x = -2.18 - Math.max(1.2, T.TAILLIGHT_RANGE * 0.65)
+      b.target.position.y = 0.02
+      b.visible = v > 0.02 && T.TAILLIGHT > 0.001
+    }
+    for (const m of this.tailLamps) {
+      const mat = m.material as THREE.MeshStandardMaterial
+      // The spot above is the light on the road. The lens is the lamp, and it
+      // stays about three times that so the light on the car reads brighter than the pool behind it.
+      mat.emissiveIntensity = (0.12 + 0.55 * v) * (T.TAILLIGHT / 0.025) * 3
     }
   }
 
@@ -524,6 +553,25 @@ export class Car {
    * the retro cone and the visible beam cannot drift apart: there is one source of truth for
    * where the headlights are pointing, and it is the car.
    */
+  /**
+   * Headlights and tail lights that are actually on, for the wet-road streaks.
+   * The vectors are reused; a caller copies them before the next call.
+   */
+  streaks(): { pos: THREE.Vector3; tail: boolean }[] {
+    const lights: [THREE.SpotLight, boolean][] = []
+    for (const b of this.beams) if (b.visible) lights.push([b, false])
+    for (const b of this.tailBeams) if (b.visible) lights.push([b, true])
+    while (this.streakPos.length < lights.length) this.streakPos.push(new THREE.Vector3())
+    const out: { pos: THREE.Vector3; tail: boolean }[] = []
+    for (let i = 0; i < lights.length; i++) {
+      lights[i][0].getWorldPosition(this.streakPos[i])
+      out.push({ pos: this.streakPos[i], tail: lights[i][1] })
+    }
+    return out
+  }
+
+  private streakPos: THREE.Vector3[] = []
+
   lamps(): { each: { pos: THREE.Vector3; dir: THREE.Vector3 }[]; on: number } {
     const each: { pos: THREE.Vector3; dir: THREE.Vector3 }[] = []
     for (const b of this.beams) {
@@ -639,4 +687,6 @@ export interface DrivableCar {
   setLights(on: number): void
   setCockpit(on: boolean): void
   lamps(): { each: { pos: THREE.Vector3; dir: THREE.Vector3 }[]; on: number }
+  /** headlights and tail lights that are on, for the wet-road streaks */
+  streaks(): { pos: THREE.Vector3; tail: boolean }[]
 }

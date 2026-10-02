@@ -22,7 +22,7 @@ describe('the library', () => {
      * working, and the right assertion is that it fires on the tall ones and stays quiet on the
      * low ones — not that it never fires.
      */
-    const tippy = new Set(['van', 'box-truck', 'bus'])
+    const tippy = new Set(['van', 'box-truck', 'bus', 'motorcycle'])
     for (const p of VEHICLE_PRESETS) {
       const r = validateVehicle(p.doc)
       expect(r.errors, `${p.id} errors`).toEqual([])

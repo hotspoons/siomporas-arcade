@@ -47,6 +47,7 @@ import { buildPlacements, fitModel, loadAssetModel, loadCatalog, type CatalogEnt
 import { timeControls } from './ui/timecontrols'
 import { celestialToWorld, julianDate, moonPosition, radecToVec } from './celestial'
 import * as T from './tuning'
+import { captureSSR, chainCompile, injectShade, linearShadowDepth, setWetStreak, tickShading, type WetMark } from './shading'
 import { TUNE_TABS } from './tuning'
 import { applySiteTuning, clearSiteTuning, saveSiteTuning } from './sitetuning'
 import { Presets, resolve, worldKnobs } from './presets'
@@ -107,6 +108,28 @@ scene.add(ambient)
 const sun = new THREE.DirectionalLight(0xfff0d8, 2.0)
 sun.position.set(-3000, 4000, 2500)
 scene.add(sun)
+// A high sun on a flat road barely changes N·L, so the albedo and the height map only show when
+// the light rakes — sunset, or the headlights. This one stays at 22° on the real sun's bearing
+// and does not cast: it is there to read the surface, not to throw a second set of shadows.
+const rake = new THREE.DirectionalLight(0xfff0d8, 0)
+rake.position.set(-3000, 1600, 2500)
+scene.add(rake)
+const lastSunDir = new THREE.Vector3(-3000, 4000, 2500).normalize()
+renderer.shadowMap.enabled = true
+renderer.shadowMap.type = THREE.PCFSoftShadowMap
+sun.castShadow = true
+sun.shadow.mapSize.set(2048, 2048)
+sun.shadow.bias = -0.0004
+// a large normal bias lifts the sample off a flat road and the shadow never lands on the asphalt
+sun.shadow.normalBias = 0.006
+sun.shadow.camera.near = 1
+sun.shadow.camera.far = 520
+sun.shadow.camera.left = -55
+sun.shadow.camera.right = 55
+sun.shadow.camera.top = 55
+sun.shadow.camera.bottom = -55
+sun.shadow.camera.updateProjectionMatrix()
+scene.add(sun.target)
 // the dome behind everything; `scene.background` stays as the colour under it for the one frame
 // before the shader compiles and for anything that reads it
 const skyDome = new Sky()
@@ -796,6 +819,7 @@ async function loadSite(slug: string) {
   if (physics) status(`physics: ${physics.phys.hz} Hz`)
   applySky(season)
   scene.add(site.group)
+  armShadows(site.group)
   /*
    * STUNT FIXTURES: the tarmac you see AND the surface you drive on.
    *
@@ -2418,6 +2442,66 @@ let envDue = false
  * the dome and every light move on the frame the clock moves them, and only the prefiltered
  * irradiance lags — which is the one term that can lag without anyone seeing it.
  */
+/**
+ * Shadows stay with the camera. The box is SHADOW_REACH metres on a side, and grows to the
+ * canopy distance while that caster is on, so a crown down the road can land on the lane.
+ * Impostors, grass and crops stay out of the colour pass's shadow; the extra casters are their
+ * own meshes, and only for trees the models are not already drawing.
+ */
+function followShadow() {
+  sun.castShadow = T.SHADOW > 0.02
+  // the engine's intensity only removes the sun. Past 1 the shade uniform (tickShading) darkens
+  // the fill, which is what makes the shadow read on the road.
+  sun.shadow.intensity = Math.min(1, Math.max(0, T.SHADOW))
+  if (!sun.castShadow) return
+  const reach = Math.max(20, T.SHADOW_REACH, T.SHADOW_CANOPY >= 0.5 ? T.SHADOW_CANOPY_REACH : 0)
+  const dist = reach * 2.2
+  const cam = sun.shadow.camera
+  cam.left = -reach
+  cam.right = reach
+  cam.top = reach
+  cam.bottom = -reach
+  cam.near = Math.max(1, dist - reach * 1.2)
+  cam.far = dist + reach * 1.4
+  cam.updateProjectionMatrix()
+  sun.target.position.set(camera.position.x, camera.position.y - 1.2, camera.position.z)
+  sun.position.copy(sun.target.position).addScaledVector(lastSunDir, dist)
+  sun.target.updateMatrixWorld()
+}
+
+const SHADOW_CAST = new Set(['buildings', 'near-trees', 'car', 'traffic'])
+const SHADOW_RECEIVE = new Set(['road', 'terrain', 'water', 'buildings', 'near-trees', 'strip'])
+
+const shadeMats = new WeakSet<THREE.Material>()
+
+/** Mark the meshes that should cast or catch the sun. A card, a blade and a field do neither. */
+function armShadows(root: THREE.Object3D) {
+  root.traverse((o) => {
+    const mesh = o as THREE.Mesh
+    if (!mesh.isMesh) return
+    let cast = false
+    let receive = false
+    for (let p: THREE.Object3D | null = o; p; p = p.parent) {
+      if (p.name === 'impostors' || p.name === 'grass' || p.name === 'crops') return
+      if (p.name === 'tree-shadows') { cast = true; break }
+      if (SHADOW_CAST.has(p.name) || p.name.startsWith('car')) cast = true
+      if (SHADOW_RECEIVE.has(p.name) || p.name.startsWith('road')) receive = true
+    }
+    mesh.castShadow = cast
+    mesh.receiveShadow = receive
+    // a regrown tree and the shadow cards bring their own depth material. Overwriting it with the
+    // shared one is what made a tree-detail change stop casting.
+    if (cast && !mesh.customDepthMaterial) mesh.customDepthMaterial = linearShadowDepth
+    if (!receive || !mesh.material) return
+    for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
+      if (shadeMats.has(m)) continue
+      shadeMats.add(m)
+      const std = m as THREE.MeshStandardMaterial
+      if (std.isMeshStandardMaterial) chainCompile(std, injectShade, 'shade')
+    }
+  })
+}
+
 function applySky(s: Season, env = true) {
   const look = styled(LOOK[s], style)
   const def = STYLE[style]
@@ -2446,6 +2530,18 @@ function applySky(s: Season, env = true) {
   // the sun is a direction now, not a fixed corner of the sky; the light is 3 km out along it so
   // shadows and specular agree with the disc the dome draws
   sun.position.copy(sunAt.dir).multiplyScalar(5000)
+  lastSunDir.copy(sunAt.dir)
+  if (lastSunDir.lengthSq() > 1e-8) lastSunDir.normalize()
+  // the fill stays low even at noon, and drops out once the real sun is already oblique
+  {
+    const horiz = Math.hypot(sunAt.dir.x, sunAt.dir.z) || 1
+    const rakeEl = 22 * Math.PI / 180
+    rake.position.set(
+      (sunAt.dir.x / horiz) * Math.cos(rakeEl),
+      Math.sin(rakeEl),
+      (sunAt.dir.z / horiz) * Math.cos(rakeEl),
+    ).multiplyScalar(5000)
+  }
   skyNight = night
   skyCover = Math.min(1, 0.3 + (def.sky?.cloudBias ?? 0) + 0.7 * w.skyMix)
   skyDome.set({
@@ -2469,6 +2565,8 @@ function applySky(s: Season, env = true) {
   // overcast: the sun goes down and the sky comes up, which is what a grey day actually is
   const moonlight = T.MOON_LIGHT * sunAt.phase * moonUp
   sun.intensity = look.sun.intensity * (1 - 0.72 * w.skyMix) * (day + night * moonlight)
+  rake.color.copy(sun.color)
+  rake.intensity = sun.intensity * 0.42 * THREE.MathUtils.smoothstep(sunAt.el, 18, 50) * day * T.RAKE
   // at night the light comes from the whole sky, not from a lamp: the ambient carries it, cold and
   // dim, and the ground bounce all but disappears
   // A NIGHT YOU CAN SEE. There is no such thing as a black night outdoors — there is airglow, the
@@ -2485,6 +2583,7 @@ function applySky(s: Season, env = true) {
   site?.setLight(
     Math.max(0.03, day + night * (T.NIGHT_AMBIENT * 1.1 + 1.6 * moonlight)) * Math.max(0.05, T.AMBIENT_GAIN),
     new THREE.Color(1, 1, 1).lerp(new THREE.Color(0x7f93c4), night * 0.85),
+    sunAt.dir,
   )
   baseAmbient = ambient.intensity
   baseEnv = T.SKY_LIGHT * (day + night * (T.NIGHT_AMBIENT * 1.2 + 1.5 * moonlight))
@@ -3395,14 +3494,33 @@ function frame() {
     const lamps = drive.car?.lamps()
     retro.setLamps(lamps?.each ?? [], lamps?.on ?? 0)
     retro.tick()
+    // wet tarmac mirrors the lamps that are on: a long streak from each one toward the camera
+    const wetMarks: WetMark[] = []
+    if ((site?.weather.wetness ?? 0) > 0.02) {
+      for (const s of drive.car?.streaks() ?? []) {
+        const gain = s.tail ? T.TAILLIGHT / 0.025 : T.HEADLIGHT / 2.7
+        if (gain < 0.02) continue
+        const p = s.pos
+        wetMarks.push({
+          x: p.x, y: p.y, z: p.z,
+          r: 1, g: s.tail ? 0.06 : 0.93, b: s.tail ? 0.03 : 0.72,
+          gain,
+        })
+      }
+      traffic?.fillWet(wetMarks, 8, camera.position)
+    }
+    setWetStreak(site?.weather.wetness ?? 0, wetMarks)
     // the inset map follows the car when driving, the camera when flying; site frame is x east, y north = -z
     syncMap()
     if (drive.on && drive.car) minimap?.draw({ x: drive.car.pos.x, y: -drive.car.pos.z, yaw: Math.atan2(-drive.car.forward.z, drive.car.forward.x) })
     else minimap?.draw({ x: camera.position.x, y: -camera.position.z, yaw: Math.atan2(-fwd.z, fwd.x) })
   }
+  tickShading()
+  followShadow()
   skyDome.tick(performance.now() / 1000)
   if (composer) composer.render()
   else renderer.render(scene, camera)
+  captureSSR(renderer)
   /*
    * MEASURED AFTER THE RENDER CALL, which is the honest place: `renderer.info` holds the counts of
    * the frame that has just been submitted, and the CPU time covers everything this function did

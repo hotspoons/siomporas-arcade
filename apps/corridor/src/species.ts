@@ -391,7 +391,7 @@ function applyKnobs(o: any) {
   scale(o.branch?.gnarliness, T.TREE_GNARLINESS)
   scale(o.branch?.taper, T.TREE_TAPER)
   scale(o.branch?.radius, T.TREE_TRUNK_RADIUS)
-  if (T.TREE_DETAIL !== 1) {
+  if (T.TREE_DETAIL > 0 && T.TREE_DETAIL !== 1) {
     for (const key of ['sections', 'segments'] as const) {
       const obj = o.branch?.[key] as Record<string, number> | undefined
       if (!obj) continue

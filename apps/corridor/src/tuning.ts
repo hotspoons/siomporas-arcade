@@ -89,6 +89,11 @@ export let CROP_TEXTURE_M = 2
 /** no crop closer than this to a pavement edge (m) */
 export let CROP_MIN_FROM_ROAD = 2
 export let CROP_WIND = 1
+/**
+ * 1 = a field stays at full brightness after dark (the glow). 0 = it takes the same day and night
+ * light as the grass and the trees.
+ */
+export let CROP_GLOW = 0
 
 // --- weather ------------------------------------------------------------------------------------
 /** -1 = clear; 0 clear, 1 rain, 2 sleet, 3 snow, 4 ice (weather.ts) */
@@ -134,10 +139,17 @@ export let GRASS_SAT = 0.9
 export let GRASS_LIGHT = 1.0
 export let GRASS_DRY_ADD = 0
 /**
- * Above this eye speed (m/s) the grass is static cards and nothing is generated as blades.
- * Below it, the blades come back and the wind with them. Nobody sees either from a moving car.
+ * 0: dynamic blades up close, cards only in the distance. 1: the distance cards are the grass at
+ * every range, and nothing is generated as blades. GRASS_WIND_STILL_BELOW can still swap a moving
+ * eye over to cards while this is 0; 0 on that knob keeps the blades on at any speed.
  */
-export let GRASS_WIND_STILL_BELOW = 4
+export let GRASS_CARDS = 0
+/**
+ * Above this eye speed (m/s) the grass is static cards and nothing is generated as blades.
+ * Below it, the blades come back and the wind with them. 0 keeps the blades on at any speed.
+ * Ignored while GRASS_CARDS is on.
+ */
+export let GRASS_WIND_STILL_BELOW = 0
 /**
  * Which grass grows here: -1 reads it off the bake (latitude, longitude and OSM land use, see
  * groundcover.ts), 0…3 forces common / wheat / bermuda / coastal.
@@ -270,6 +282,33 @@ export let TREE_SIMPLE = 0
 export let TREE_LOLLIPOP = 0
 /** impostor cards lie flat above this view pitch (rad) */
 export let IMPOSTOR_FLAT_PITCH = 0.62
+/**
+ * Far tree cards are baked under a dimmer sun than the live models, so the same tree reads dark
+ * once it swaps to a card. This is that gap, and only the cards see it.
+ */
+export let IMPOSTOR_LIGHT = 1.65
+/** hue shift of a far card, degrees. 0 keeps the bake. */
+export let IMPOSTOR_HUE = 0
+/** colour gain of a far card. 1 is the bake, 0 is grey, above 1 pushes the green. */
+export let IMPOSTOR_COLOR = 1
+/**
+ * Half-size of the shadow map around the camera, in metres, and how far past the eye an extra
+ * tree caster is allowed. The near models cast inside it; cards or an invisible canopy take the
+ * trees the models never drew.
+ */
+export let SHADOW_REACH = 180
+/** 1 = impostor cards beyond the modelled trees cast a shadow. */
+export let SHADOW_CARDS = 1
+/** 1 = an invisible crown casts instead of the card, for the same trees. It wins over the cards. */
+export let SHADOW_CANOPY = 0
+/**
+ * How far the canopy shadows reach, in metres, measured from the eye. Casters start where the
+ * high-resolution trees stop, so the two shadows do not stack. While the canopy is on, the shadow
+ * map grows to this distance.
+ */
+export let SHADOW_CANOPY_REACH = 400
+/** invisible crown size as a fraction of the tree's height. */
+export let SHADOW_CANOPY_SCALE = 0.75
 
 // --- LOD shape ----------------------------------------------------------------------------------
 /** how much farther a thing BEHIND the view counts than one ahead (0 = circle, 1 = behind counts double) */
@@ -546,7 +585,10 @@ export let TREE_BRANCH_COUNT = 1
 export let TREE_GNARLINESS = 1
 export let TREE_TAPER = 1
 export let TREE_TRUNK_RADIUS = 1
-/** sections and segments per branch level: the cost knob, and how round a trunk looks close up */
+/**
+ * Sections and segments per branch. 0 hides the models and leaves every tree as an impostor
+ * card; it does not regrow or rebake. Above 0 it is the cost knob, and how round a trunk looks.
+ */
 export let TREE_DETAIL = 1
 /** -1 = the site's own species mix; 0..n forces one archetype everywhere (see species.ts ARCHETYPES) */
 export let TREE_SPECIES = -1
@@ -554,6 +596,11 @@ export let TREE_SPECIES = -1
 export let TREE_SPECIES_LIMIT = 6
 export let TREE_PLANT_RADIUS_M = 1400
 export let TREE_REPLANT_M = 350
+/**
+ * Milliseconds of crescent fill per frame. New trees are past the draw radius, so this can stay
+ * small; the hitch it removes is the one that used to measure the whole ring in one frame.
+ */
+export let TREE_PLANT_BUDGET_MS = 3
 /**
  * 1 = a replant keeps each tree in its slot and uploads only the cells that entered or left.
  * 0 = the old path: throw the list away and rewrite every impostor.
@@ -611,29 +658,69 @@ export let NIGHT_AMBIENT = 0.12
 export let SKY_LIGHT = 1
 /** everything ambient, multiplied: the one knob for "I cannot see" */
 export let AMBIENT_GAIN = 1
+/**
+ * A second sun, held at a low elevation on the real sun's bearing. A high sun on a flat road has
+ * almost the same brightness everywhere, which is why the albedo and the height map only show up
+ * at sunset and under the headlights. This one stays oblique, and it fades out once the real sun
+ * is already low enough to do that job.
+ */
+export let RAKE = 1
+/** how hard a normal map's tilt is added back on top of the ordinary lighting, on the road and the water */
+export let RELIEF = 1.6
+/**
+ * How dark the sun's shadows are. 0 skips the shadow pass. 1 already pulls the unshadowed fill
+ * down so a tree reads on the road; the range goes on up from there for a harder shade.
+ */
+export let SHADOW = 1
+/** clearcoat on the cars: a view-dependent sheen and a tight sun highlight */
+export let CAR_SHINE = 1
+/**
+ * Environment-map reflections on shiny surfaces (paint, glass, water). The sky is already an
+ * environment map; this is how hard those surfaces mirror it. Rough roads stay diffuse.
+ */
+export let REFLECT = 1.8
+/**
+ * Screen-space reflections on the same shiny surfaces: a short march through the previous frame,
+ * so a panel can pick up whatever is actually on screen. 0 leaves only the environment map.
+ */
+export let SSR = 1
+/**
+ * Screen height below which a reflection is ignored (0 is the bottom of the frame, 1 the top).
+ * The march starts on this line and walks upward, so a roof picks up trees and sky instead of
+ * the asphalt in front of the camera. Raise it until the road drops out of the reflection.
+ */
+export let SSR_BELT = 0.62
 /** how much a closed canopy takes out of the sky light under it; 0 = the wood is as bright as the field */
 export let CANOPY_SHADE = 0.75
-/** headlights while driving: intensity, and how far down the road they reach (m) */
-export let HEADLIGHT = 1
-export let HEADLIGHT_RANGE = 70
+/**
+ * Headlights and tail lights at night, on the hero car and on traffic.
+ *
+ * The same numbers for every car. Tail lights are on this scale too, and they are aimed down at
+ * the road for `TAILLIGHT_RANGE` metres so the red light stays behind the bumper.
+ */
+export let HEADLIGHT = 2.7
+export let TAILLIGHT = 0.025
+/** how far behind the car the red light reaches (m). Short, and aimed down, so it does not climb */
+export let TAILLIGHT_RANGE = 4
+export let HEADLIGHT_RANGE = 110
 /** the beam's half-angle, radians — the retro cone is this widened, so the two stay linked */
-export let HEADLIGHT_ANGLE = 0.42
+export let HEADLIGHT_ANGLE = 0.46
 /**
  * Retroreflection: how hard paint and sheeting throw your own headlights back at you.
  *
  * These are what make a dark road legible. Before them the markings were unlit and simply glowed
  * (Rich, 2026-09-27), which read as cyberpunk rather than as night.
  */
-export let RETRO_MARKINGS = 1.5
-export let RETRO_SIGNS = 2.2
+export let RETRO_MARKINGS = 2.6
+export let RETRO_SIGNS = 2.6
 /** the retro cone as a multiple of the beam's own angle: > 1 means the EDGE of the light answers */
-export let RETRO_SPREAD = 1.7
+export let RETRO_SPREAD = 1.4
 /**
  * How hard the headlamps light things that draw through their OWN shaders — grass and the tree
  * impostor cards. Those never see three.js's lights, so before this the beam swept over the verge
  * and nothing happened (Rich, 2026-09-27).
  */
-export let HEADLIGHT_BOUNCE = 1
+export let HEADLIGHT_BOUNCE = 1.8
 // --- splat corridors (splats.ts, docs/corridor/PLAN-SPLAT-CORRIDORS.md) -----------------------
 /** 0 turns the captured world off entirely and leaves the built one */
 /** show the name of the road you are on while driving; 0 hides it */
@@ -1038,6 +1125,14 @@ export const TUNE_TABS: TuneTab[] = [
     name: 'environment',
     sections: [
       {
+        title: 'season',
+        scope: 'world',
+        collapsed: false,
+        keys: [
+          tune('SEASON', () => SEASON, (v) => (SEASON = v), [-1, 3], 1, '-1 use the selector; 0 winter 1 spring 2 summer 3 autumn'),
+        ],
+      },
+      {
         title: 'stunt fixtures',
         collapsed: false,
         keys: [
@@ -1047,36 +1142,6 @@ export const TUNE_TABS: TuneTab[] = [
           tune('STUNT_AHEAD_S', () => STUNT_AHEAD_S, (v) => (STUNT_AHEAD_S = v), [0, 1.5], 0.05, 'how far along the lane the car reads the surface, in seconds of travel \u2014 a loop runs flat for forty metres before it stands up, so this has to be long enough to see past that'),
           tune('STUNT_HOLD_M', () => STUNT_HOLD_M, (v) => (STUNT_HOLD_M = v), [1, 30], 1, 'full assist within this far of the lane (m)'),
           tune('STUNT_RELEASE_M', () => STUNT_RELEASE_M, (v) => (STUNT_RELEASE_M = v), [2, 60], 1, 'no assist at all beyond this (m) \u2014 the fade between the two is what stops it snatching'),
-        ],
-      },
-      {
-        title: 'captures (gaussian splats)',
-        collapsed: false,
-        keys: [
-          tune('SPLAT_ENABLED', () => SPLAT_ENABLED, (v) => (SPLAT_ENABLED = v), [0, 1], 1, 'draw the captured world at all', { scope: 'world' }),
-          tune('SPLAT_WORLD_FADE', () => SPLAT_WORLD_FADE, (v) => (SPLAT_WORLD_FADE = v), [0, 1], 0.05, 'how hard the BUILT world dissolves where a capture takes over', { scope: 'world' }),
-          tune('SPLAT_MASK_CELL_M', () => SPLAT_MASK_CELL_M, (v) => (SPLAT_MASK_CELL_M = v), [1, 20], 1, 'the seam raster\u2019s cell (m) \u2014 reload to rebuild'),
-          tune('SPLAT_LOAD_M', () => SPLAT_LOAD_M, (v) => (SPLAT_LOAD_M = v), [50, 2000], 25, 'load a tile once it is this close (m)'),
-          tune('SPLAT_KEEP_M', () => SPLAT_KEEP_M, (v) => (SPLAT_KEEP_M = v), [100, 4000], 25, 'drop it beyond this (m)'),
-          tune('SPLAT_BUDGET_MB', () => SPLAT_BUDGET_MB, (v) => (SPLAT_BUDGET_MB = v), [64, 2048], 32, 'megabytes of gaussians that may be resident'),
-          tune('SPLAT_SORT_MS', () => SPLAT_SORT_MS, (v) => (SPLAT_SORT_MS = v), [0, 5000], 50, 'the least time between re-sorts of the gaussians (ms). At speed this is the only thing deciding, so it is the knob to reach for when it stutters \u2014 0 is Spark\u2019s own default and stalls constantly'),
-          /*
-           * THE THREE THAT DECIDE WHEN A RE-SORT IS ASKED FOR AT ALL. The timer above is only a
-           * floor; these are the rule. A sort costs a GPU depth pass, a ~10 MB readback and a
-           * ~10 MB texture upload, so the question "does the order actually need rebuilding" is
-           * worth asking properly — see `splatsort.ts`.
-           */
-          tune('SPLAT_SORT_PARALLAX', () => SPLAT_SORT_PARALLAX, (v) => (SPLAT_SORT_PARALLAX = v), [0.002, 1], 0.002, 'how far the camera may move before the gaussians are re-sorted, as a fraction of the distance to the nearest capture'),
-          tune('SPLAT_SORT_MIN_M', () => SPLAT_SORT_MIN_M, (v) => (SPLAT_SORT_MIN_M = v), [0.05, 200], 0.05, 'never re-sort more often than this much travel (m) \u2014 the floor for a capture you are standing in'),
-          /*
-           * THE CEILING IS IN THE THOUSANDS, and it has to be. A 60 m cap was never reached: at
-           * 180 mph you cover 400 m between sorts on a 5 s timer, so the distance gate was always
-           * satisfied and could never skip anything. To be a brake at speed at all it has to be
-           * settable well past how far the car travels between sorts. Rich, 2026-09-29: *"max m
-           * needs to have the range cranked way up too."*
-           */
-          tune('SPLAT_SORT_TURN_DEG', () => SPLAT_SORT_TURN_DEG, (v) => (SPLAT_SORT_TURN_DEG = v), [10, 180], 5, 'turn this far and the gaussians are re-sorted, whatever the distance rule says \u2014 what was behind you was never in the ordering'),
-          tune('SPLAT_SORT_MAX_M', () => SPLAT_SORT_MAX_M, (v) => (SPLAT_SORT_MAX_M = v), [1, 4000], 10, 'always re-sort at least this often (m of travel), however far away the capture is \u2014 push it up to stop re-sorting on distance at all'),
         ],
       },
       {
@@ -1118,8 +1183,41 @@ export const TUNE_TABS: TuneTab[] = [
           tune('NIGHT_AMBIENT', () => NIGHT_AMBIENT, (v) => (NIGHT_AMBIENT = v), [0, 1], 0.02, 'the light left at night with no moon'),
           tune('SKY_LIGHT', () => SKY_LIGHT, (v) => (SKY_LIGHT = v), [0, 3], 0.05, 'how hard the sky itself lights the world (the dome, as an environment map)'),
           tune('AMBIENT_GAIN', () => AMBIENT_GAIN, (v) => (AMBIENT_GAIN = v), [0.1, 5], 0.05, 'everything ambient, multiplied — the one knob for "I cannot see"'),
+        ],
+      },
+    ],
+  },
+  {
+    name: 'visuals',
+    sections: [
+      {
+        title: 'lighting',
+        scope: 'world',
+        collapsed: false,
+        keys: [
+          tune('RAKE', () => RAKE, (v) => (RAKE = v), [0, 2], 0.05, 'a low fill on the sun\'s bearing, so road grain and water still read when the sun is overhead'),
+          tune('RELIEF', () => RELIEF, (v) => (RELIEF = v), [0, 4], 0.05, 'how hard a normal map shows on the road and the water'),
           tune('CANOPY_SHADE', () => CANOPY_SHADE, (v) => (CANOPY_SHADE = v), [0, 1], 0.05, 'how much a closed canopy takes out of the sky light under it, allowing for leaf-off and evergreens'),
-          tune('HEADLIGHT', () => HEADLIGHT, (v) => (HEADLIGHT = v), [0, 4], 0.1, 'headlights while driving at night'),
+          tune('SHADOW', () => SHADOW, (v) => (SHADOW = v), [0, 4], 0.05, 'how dark sun shadows are, including on the road; 0 turns the shadow pass off'),
+          tune('SHADOW_REACH', () => SHADOW_REACH, (v) => (SHADOW_REACH = v), [40, 280], 5, 'metres of shadow around the camera, and how far the card shadows reach. Larger softens the map'),
+          tune('SHADOW_CARDS', () => SHADOW_CARDS, (v) => (SHADOW_CARDS = v), [0, 1], 1, 'impostor cards past the high-resolution trees cast a shadow. They do not cover the models'),
+          tune('SHADOW_CANOPY', () => SHADOW_CANOPY, (v) => (SHADOW_CANOPY = v), [0, 1], 1, 'an invisible crown casts instead of the card, past the high-resolution trees. On, this replaces the cards'),
+          tune('SHADOW_CANOPY_REACH', () => SHADOW_CANOPY_REACH, (v) => (SHADOW_CANOPY_REACH = v), [40, 1200], 10, 'how far the canopy shadows reach (m), starting where the high-resolution trees stop. Longer covers more of the road and softens the map while the canopy is on'),
+          tune('SHADOW_CANOPY_SCALE', () => SHADOW_CANOPY_SCALE, (v) => (SHADOW_CANOPY_SCALE = v), [0.3, 1.8], 0.05, 'invisible crown size, as a fraction of the tree height'),
+          tune('REFLECT', () => REFLECT, (v) => (REFLECT = v), [0, 4], 0.05, 'environment-map reflections on paint, glass and water'),
+          tune('SSR', () => SSR, (v) => (SSR = v), [0, 2], 0.05, 'screen-space reflections on those same surfaces; 0 is the sky map only'),
+          tune('SSR_BELT', () => SSR_BELT, (v) => (SSR_BELT = v), [0, 1], 0.01, 'reflection belt, as a fraction of the screen height; samples below it are ignored so a roof mirrors trees and sky instead of the road'),
+          tune('CAR_SHINE', () => CAR_SHINE, (v) => (CAR_SHINE = v), [0, 3], 0.05, 'clearcoat on the cars'),
+        ],
+      },
+      {
+        title: 'headlights',
+        scope: 'world',
+        collapsed: false,
+        keys: [
+          tune('HEADLIGHT', () => HEADLIGHT, (v) => (HEADLIGHT = v), [0, 8], 0.1, 'headlights at night, yours and the traffic'),
+          tune('TAILLIGHT', () => TAILLIGHT, (v) => (TAILLIGHT = v), [0, 0.075], 0.001, 'tail lights. The mark is half the old setting; the top of the slider is three times that'),
+          tune('TAILLIGHT_RANGE', () => TAILLIGHT_RANGE, (v) => (TAILLIGHT_RANGE = v), [1, 12], 0.5, 'how far the red light reaches behind the car (m). Aimed at the road, so it stays low'),
           tune('HEADLIGHT_RANGE', () => HEADLIGHT_RANGE, (v) => (HEADLIGHT_RANGE = v), [10, 200], 5, 'how far down the road they reach (m)'),
           tune('HEADLIGHT_ANGLE', () => HEADLIGHT_ANGLE, (v) => (HEADLIGHT_ANGLE = v), [0.1, 1.2], 0.02, 'the beam\u2019s half-angle (rad); the retro cone is this widened'),
           tune('RETRO_MARKINGS', () => RETRO_MARKINGS, (v) => (RETRO_MARKINGS = v), [0, 6], 0.1, 'how hard road paint throws your headlights back'),
@@ -1129,16 +1227,33 @@ export const TUNE_TABS: TuneTab[] = [
         ],
       },
       {
-        title: 'colour (over the season)',
-        scope: 'world',
+        title: 'captures (gaussian splats)',
+        collapsed: false,
         keys: [
-          tune('GRASS_HUE', () => GRASS_HUE, (v) => (GRASS_HUE = v), [-60, 60], 1, 'degrees'),
-          tune('GRASS_SAT', () => GRASS_SAT, (v) => (GRASS_SAT = v), [0, 2], 0.02),
-          tune('GRASS_LIGHT', () => GRASS_LIGHT, (v) => (GRASS_LIGHT = v), [0.3, 2], 0.02),
-          tune('GRASS_DRY_ADD', () => GRASS_DRY_ADD, (v) => (GRASS_DRY_ADD = v), [-1, 1], 0.02, 'straw on top of the season'),
-          tune('GRASS_WIND_STILL_BELOW', () => GRASS_WIND_STILL_BELOW, (v) => (GRASS_WIND_STILL_BELOW = v), [0, 40], 0.5, 'above this speed (m/s): static cards, no blades'),
-          tune('GRASS_TYPE', () => GRASS_TYPE, (v) => (GRASS_TYPE = v), [-1, 6], 1, '-1 from the bake (LANDFIRE ground class); 0 common 1 wheat 2 bermuda 3 coastal 4 annual 5 meadow 6 heath'),
-          tune('SEASON', () => SEASON, (v) => (SEASON = v), [-1, 3], 1, '-1 use the selector; 0 winter 1 spring 2 summer 3 autumn'),
+          tune('SPLAT_ENABLED', () => SPLAT_ENABLED, (v) => (SPLAT_ENABLED = v), [0, 1], 1, 'draw the captured world at all', { scope: 'world' }),
+          tune('SPLAT_WORLD_FADE', () => SPLAT_WORLD_FADE, (v) => (SPLAT_WORLD_FADE = v), [0, 1], 0.05, 'how hard the BUILT world dissolves where a capture takes over', { scope: 'world' }),
+          tune('SPLAT_MASK_CELL_M', () => SPLAT_MASK_CELL_M, (v) => (SPLAT_MASK_CELL_M = v), [1, 20], 1, 'the seam raster\u2019s cell (m) \u2014 reload to rebuild'),
+          tune('SPLAT_LOAD_M', () => SPLAT_LOAD_M, (v) => (SPLAT_LOAD_M = v), [50, 2000], 25, 'load a tile once it is this close (m)'),
+          tune('SPLAT_KEEP_M', () => SPLAT_KEEP_M, (v) => (SPLAT_KEEP_M = v), [100, 4000], 25, 'drop it beyond this (m)'),
+          tune('SPLAT_BUDGET_MB', () => SPLAT_BUDGET_MB, (v) => (SPLAT_BUDGET_MB = v), [64, 2048], 32, 'megabytes of gaussians that may be resident'),
+          tune('SPLAT_SORT_MS', () => SPLAT_SORT_MS, (v) => (SPLAT_SORT_MS = v), [0, 5000], 50, 'the least time between re-sorts of the gaussians (ms). At speed this is the only thing deciding, so it is the knob to reach for when it stutters \u2014 0 is Spark\u2019s own default and stalls constantly'),
+          /*
+           * THE THREE THAT DECIDE WHEN A RE-SORT IS ASKED FOR AT ALL. The timer above is only a
+           * floor; these are the rule. A sort costs a GPU depth pass, a ~10 MB readback and a
+           * ~10 MB texture upload, so the question "does the order actually need rebuilding" is
+           * worth asking properly — see `splatsort.ts`.
+           */
+          tune('SPLAT_SORT_PARALLAX', () => SPLAT_SORT_PARALLAX, (v) => (SPLAT_SORT_PARALLAX = v), [0.002, 1], 0.002, 'how far the camera may move before the gaussians are re-sorted, as a fraction of the distance to the nearest capture'),
+          tune('SPLAT_SORT_MIN_M', () => SPLAT_SORT_MIN_M, (v) => (SPLAT_SORT_MIN_M = v), [0.05, 200], 0.05, 'never re-sort more often than this much travel (m) \u2014 the floor for a capture you are standing in'),
+          /*
+           * THE CEILING IS IN THE THOUSANDS, and it has to be. A 60 m cap was never reached: at
+           * 180 mph you cover 400 m between sorts on a 5 s timer, so the distance gate was always
+           * satisfied and could never skip anything. To be a brake at speed at all it has to be
+           * settable well past how far the car travels between sorts. Rich, 2026-09-29: *"max m
+           * needs to have the range cranked way up too."*
+           */
+          tune('SPLAT_SORT_TURN_DEG', () => SPLAT_SORT_TURN_DEG, (v) => (SPLAT_SORT_TURN_DEG = v), [10, 180], 5, 'turn this far and the gaussians are re-sorted, whatever the distance rule says \u2014 what was behind you was never in the ordering'),
+          tune('SPLAT_SORT_MAX_M', () => SPLAT_SORT_MAX_M, (v) => (SPLAT_SORT_MAX_M = v), [1, 4000], 10, 'always re-sort at least this often (m of travel), however far away the capture is \u2014 push it up to stop re-sorting on distance at all'),
         ],
       },
     ],
@@ -1175,7 +1290,9 @@ export const TUNE_TABS: TuneTab[] = [
       {
         title: 'blades',
         scope: 'world',
+        collapsed: false,
         keys: [
+          tune('GRASS_CARDS', () => GRASS_CARDS, (v) => (GRASS_CARDS = v), [0, 1], 1, '0 = dynamic blades up close, 1 = the static cards at every distance'),
           tune('GRASS_MOWN_HEIGHT', () => GRASS_MOWN_HEIGHT, (v) => (GRASS_MOWN_HEIGHT = v), [0.05, 1], 0.01, 'm'),
           tune('GRASS_ROUGH_HEIGHT', () => GRASS_ROUGH_HEIGHT, (v) => (GRASS_ROUGH_HEIGHT = v), [0.2, 4], 0.05, 'm before the season multiplier'),
           tune('GRASS_LEAN', () => GRASS_LEAN, (v) => (GRASS_LEAN = v), [0, 1.5], 0.05),
@@ -1183,10 +1300,22 @@ export const TUNE_TABS: TuneTab[] = [
         ],
       },
       {
-        title: 'sprites (beyond the mid ring)',
+        title: 'colour (over the season)',
+        scope: 'world',
         keys: [
-          tune('GRASS_SPRITE_RADIUS', () => GRASS_SPRITE_RADIUS, (v) => (GRASS_SPRITE_RADIUS = v), [20, 1500], 10, 'clump cards out to here (m)'),
-          tune('GRASS_SPRITE_PER_M2', () => GRASS_SPRITE_PER_M2, (v) => (GRASS_SPRITE_PER_M2 = v), [0, 4], 0.05),
+          tune('GRASS_HUE', () => GRASS_HUE, (v) => (GRASS_HUE = v), [-60, 60], 1, 'degrees'),
+          tune('GRASS_SAT', () => GRASS_SAT, (v) => (GRASS_SAT = v), [0, 2], 0.02),
+          tune('GRASS_LIGHT', () => GRASS_LIGHT, (v) => (GRASS_LIGHT = v), [0.3, 2], 0.02),
+          tune('GRASS_DRY_ADD', () => GRASS_DRY_ADD, (v) => (GRASS_DRY_ADD = v), [-1, 1], 0.02, 'straw on top of the season'),
+          tune('GRASS_WIND_STILL_BELOW', () => GRASS_WIND_STILL_BELOW, (v) => (GRASS_WIND_STILL_BELOW = v), [0, 40], 0.5, 'with blades on: above this speed (m/s) the cards replace them. 0 keeps the blades on'),
+          tune('GRASS_TYPE', () => GRASS_TYPE, (v) => (GRASS_TYPE = v), [-1, 6], 1, '-1 from the bake (LANDFIRE ground class); 0 common 1 wheat 2 bermuda 3 coastal 4 annual 5 meadow 6 heath'),
+        ],
+      },
+      {
+        title: 'cards',
+        keys: [
+          tune('GRASS_SPRITE_RADIUS', () => GRASS_SPRITE_RADIUS, (v) => (GRASS_SPRITE_RADIUS = v), [20, 1500], 10, 'clump cards out to here (m). The blades/cards switch is GRASS_CARDS, in blades'),
+          tune('GRASS_SPRITE_PER_M2', () => GRASS_SPRITE_PER_M2, (v) => (GRASS_SPRITE_PER_M2 = v), [0, 4], 0.05, 'cards/m² at 40 blades/m² and a ~0.6 m clump; the mown and rough density knobs, and a shorter clump, scale this up'),
           tune('GRASS_SPRITE_FAR_DENSITY', () => GRASS_SPRITE_FAR_DENSITY, (v) => (GRASS_SPRITE_FAR_DENSITY = v), [0, 1], 0.05, 'share of cards kept at the far rim'),
           tune('GRASS_SPRITE_SCALE', () => GRASS_SPRITE_SCALE, (v) => (GRASS_SPRITE_SCALE = v), [0.3, 3], 0.05, 'height'),
           tune('GRASS_SPRITE_WIDTH', () => GRASS_SPRITE_WIDTH, (v) => (GRASS_SPRITE_WIDTH = v), [0.3, 3], 0.05, 'thickness'),
@@ -1194,16 +1323,6 @@ export const TUNE_TABS: TuneTab[] = [
           tune('GRASS_TILES_PER_FRAME', () => GRASS_TILES_PER_FRAME, (v) => (GRASS_TILES_PER_FRAME = v), [1, 64], 1, 'ceiling on tiles generated per frame'),
           tune('GRASS_MS_PER_FRAME', () => GRASS_MS_PER_FRAME, (v) => (GRASS_MS_PER_FRAME = v), [0.2, 12], 0.1, 'ms per frame spent generating them'),
           tune('GRASS_CACHE_SLACK', () => GRASS_CACHE_SLACK, (v) => (GRASS_CACHE_SLACK = v), [1, 4], 0.1, 'cached tiles as a multiple of the ring'),
-        ],
-      },
-      {
-        title: 'LOD cutoffs',
-        keys: [
-          tune('GRASS_RADIUS', () => GRASS_RADIUS, (v) => (GRASS_RADIUS = v), [10, 120], 1, 'no blades beyond this (m)'),
-          tune('GRASS_LOD_NEAR', () => GRASS_LOD_NEAR, (v) => (GRASS_LOD_NEAR = v), [2, 60], 1, 'full density inside (m)'),
-          tune('GRASS_LOD_MID', () => GRASS_LOD_MID, (v) => (GRASS_LOD_MID = v), [4, 100], 1, 'mid density inside (m)'),
-          tune('GRASS_LOD_MID_DENSITY', () => GRASS_LOD_MID_DENSITY, (v) => (GRASS_LOD_MID_DENSITY = v), [0, 1], 0.05),
-          tune('GRASS_LOD_FAR_DENSITY', () => GRASS_LOD_FAR_DENSITY, (v) => (GRASS_LOD_FAR_DENSITY = v), [0, 1], 0.05),
         ],
       },
       {
@@ -1216,6 +1335,7 @@ export const TUNE_TABS: TuneTab[] = [
           tune('CROP_TEXTURE_M', () => CROP_TEXTURE_M, (v) => (CROP_TEXTURE_M = v), [0.5, 8], 0.1, 'm of row per texture repeat'),
           tune('CROP_MIN_FROM_ROAD', () => CROP_MIN_FROM_ROAD, (v) => (CROP_MIN_FROM_ROAD = v), [0, 20], 0.5, 'm clear of the pavement'),
           tune('CROP_WIND', () => CROP_WIND, (v) => (CROP_WIND = v), [0, 3], 0.05),
+          tune('CROP_GLOW', () => CROP_GLOW, (v) => (CROP_GLOW = v), [0, 1], 1, '1 = fields stay bright at night; 0 = the same day and night light as the grass'),
         ],
       },
     ],
@@ -1224,34 +1344,18 @@ export const TUNE_TABS: TuneTab[] = [
     name: 'trees',
     sections: [
       {
-        title: 'LOD',
+        title: 'near field (models in front, cards beyond)',
+        scope: 'world',
+        collapsed: false,
         keys: [
-          tune('TRAFFIC_MAX', () => TRAFFIC_MAX, (v) => (TRAFFIC_MAX = v), [0, 2000], 10, 'cap on traffic cars (reload the level)'),
-          tune('TRAFFIC_WAKE_NS', () => TRAFFIC_WAKE_NS, (v) => (TRAFFIC_WAKE_NS = v), [200, 20000], 100, 'a hit harder than this (N·s) knocks a traffic car loose'),
-          tune('MISSILE_SPEED', () => MISSILE_SPEED, (v) => (MISSILE_SPEED = v), [20, 300], 5, 'm/s, plus the car’s own'),
-          tune('MISSILE_RADIUS', () => MISSILE_RADIUS, (v) => (MISSILE_RADIUS = v), [2, 30], 0.5, 'blast radius, m'),
-          tune('MISSILE_IMPULSE', () => MISSILE_IMPULSE, (v) => (MISSILE_IMPULSE = v), [1, 80], 1, 'm/s a car at the centre of the blast is given'),
-          tune('MISSILE_LIFT', () => MISSILE_LIFT, (v) => (MISSILE_LIFT = v), [0, 3], 0.05, 'how much of the throw points up'),
-          tune('GUN_RATE', () => GUN_RATE, (v) => (GUN_RATE = v), [2, 40], 1, 'rounds per second'),
-          tune('GUN_RANGE', () => GUN_RANGE, (v) => (GUN_RANGE = v), [30, 400], 10, 'm'),
-          tune('GUN_IMPULSE', () => GUN_IMPULSE, (v) => (GUN_IMPULSE = v), [0.5, 30], 0.5, 'm/s a car is given per round'),
-          tune('GUN_SPREAD', () => GUN_SPREAD, (v) => (GUN_SPREAD = v), [0, 0.1], 0.005),
-          tune('TRAFFIC_DRAW_M', () => TRAFFIC_DRAW_M, (v) => (TRAFFIC_DRAW_M = v), [100, 3000], 50, 'traffic further than this is simulated, not drawn'),
-          tune('TRAFFIC_PHYS_M', () => TRAFFIC_PHYS_M, (v) => (TRAFFIC_PHYS_M = v), [50, 1000], 10, 'traffic further than this has no body in the solver'),
-          tune('TRAFFIC_RESPAWN_M', () => TRAFFIC_RESPAWN_M, (v) => (TRAFFIC_RESPAWN_M = v), [50, 1000], 10, 'a car that ran off its road comes back at least this far away'),
-          tune('TRAFFIC_WRECKS_MAX', () => TRAFFIC_WRECKS_MAX, (v) => (TRAFFIC_WRECKS_MAX = v), [1, 400], 1, 'loose wrecks at once; the oldest is recycled into traffic'),
-          tune('TREE_NEAR_RADIUS', () => TREE_NEAR_RADIUS, (v) => (TREE_NEAR_RADIUS = v), [30, 600], 5, 'procedural models inside, impostors beyond (m)'),
-          tune('TREE_FADE_M', () => TREE_FADE_M, (v) => (TREE_FADE_M = v), [0, 120], 1, 'band outside that radius where the card dissolves; 0 = hard switch'),
-          tune('TREE_NEAR_CAPACITY', () => TREE_NEAR_CAPACITY, (v) => (TREE_NEAR_CAPACITY = v), [10, 500], 5, 'models per species variant'),
-          tune('TREE_LEAF_LOD_M', () => TREE_LEAF_LOD_M, (v) => (TREE_LEAF_LOD_M = v), [0, 400], 5, 'beyond this a near tree wears the cheap far canopy (m)'),
-          tune('TREE_FAR_LEAF_SHARE', () => TREE_FAR_LEAF_SHARE, (v) => (TREE_FAR_LEAF_SHARE = v), [0.05, 1], 0.05, 'far canopy: share of the leaves (rebuild)'),
-          tune('TREE_FAR_LEAF_SIZE', () => TREE_FAR_LEAF_SIZE, (v) => (TREE_FAR_LEAF_SIZE = v), [1, 4], 0.1, 'far canopy: leaf size multiplier (rebuild)'),
-          tune('TREE_CONE_DEG', () => TREE_CONE_DEG, (v) => (TREE_CONE_DEG = v), [20, 180], 5, 'near set is a cone this many degrees either side of the view; 180 = circle'),
-          tune('TREE_CONE_PENALTY', () => TREE_CONE_PENALTY, (v) => (TREE_CONE_PENALTY = v), [0, 10], 0.25, 'a tree outside the cone counts this much further away'),
-          tune('TREE_REFRESH_TURN', () => TREE_REFRESH_TURN, (v) => (TREE_REFRESH_TURN = v), [0.05, 1.5], 0.01, 'refill the near set after turning this far (rad)'),
-          tune('TREE_SIMPLE', () => TREE_SIMPLE, (v) => (TREE_SIMPLE = v), [0, 1], 1, '1 = impostor cards everywhere — no procedural models at all'),
-          tune('TREE_LOLLIPOP', () => TREE_LOLLIPOP, (v) => (TREE_LOLLIPOP = v), [0, 1], 1, '1 = the editor’s lollipop trees instead of models and cards'),
-          tune('IMPOSTOR_FLAT_PITCH', () => IMPOSTOR_FLAT_PITCH, (v) => (IMPOSTOR_FLAT_PITCH = v), [0.2, 1.5], 0.02, 'cards lie flat above this view pitch (rad)'),
+          tune('TREE_NEAR_RADIUS', () => TREE_NEAR_RADIUS, (v) => (TREE_NEAR_RADIUS = v), [30, 600], 5, 'the impostor line, in metres. High-resolution trees inside it, cards past it'),
+          tune('TREE_FADE_M', () => TREE_FADE_M, (v) => (TREE_FADE_M = v), [0, 120], 1, 'metres where the card dissolves off the model. 0 is a hard line'),
+          tune('TREE_CONE_DEG', () => TREE_CONE_DEG, (v) => (TREE_CONE_DEG = v), [20, 180], 5, 'cone angle: degrees either side of the view that stay high resolution. 180 is a full circle'),
+          tune('TREE_CONE_PENALTY', () => TREE_CONE_PENALTY, (v) => (TREE_CONE_PENALTY = v), [0, 10], 0.25, 'how hard that cone cuts. Higher sends trees outside the angle back to cards'),
+          tune('TREE_NEAR_CAPACITY', () => TREE_NEAR_CAPACITY, (v) => (TREE_NEAR_CAPACITY = v), [10, 500], 5, 'models per species. In a thick wood this, not the radius, is what ends the high-res line'),
+          tune('IMPOSTOR_LIGHT', () => IMPOSTOR_LIGHT, (v) => (IMPOSTOR_LIGHT = v), [0, 6], 0.05, 'brightness of the far tree cards'),
+          tune('IMPOSTOR_COLOR', () => IMPOSTOR_COLOR, (v) => (IMPOSTOR_COLOR = v), [0, 3], 0.05, 'saturation of the far tree cards. 1 is the bake, 0 is grey, above 1 pushes the colour'),
+          tune('IMPOSTOR_HUE', () => IMPOSTOR_HUE, (v) => (IMPOSTOR_HUE = v), [-60, 60], 1, 'hue of the far tree cards, degrees'),
         ],
       },
       {
@@ -1264,6 +1368,7 @@ export const TUNE_TABS: TuneTab[] = [
           tune('TREE_DENSITY', () => TREE_DENSITY, (v) => (TREE_DENSITY = v), [0.05, 1], 0.05, '1 = every candidate; below that a stable hash thins them'),
           tune('TREE_PLANT_RADIUS_M', () => TREE_PLANT_RADIUS_M, (v) => (TREE_PLANT_RADIUS_M = v), [200, 3000], 50, 'how far around the eye cards are drawn'),
           tune('TREE_REPLANT_M', () => TREE_REPLANT_M, (v) => (TREE_REPLANT_M = v), [50, 1200], 25, 'replant once the eye is this far from where it last planted'),
+          tune('TREE_PLANT_BUDGET_MS', () => TREE_PLANT_BUDGET_MS, (v) => (TREE_PLANT_BUDGET_MS = v), [0.5, 12], 0.5, 'ms per frame spent measuring trees that just entered the ring'),
           tune('TREE_PATCH', () => TREE_PATCH, (v) => (TREE_PATCH = v), [0, 1], 1, '1 = upload only the trees that entered or left; 0 = rewrite every card'),
           tune('TREE_SPARE_M', () => TREE_SPARE_M, (v) => (TREE_SPARE_M = v), [0, 2000], 50, 'metres past the plant radius kept on the GPU but not drawn. 0 = off. Farther than this, the slot is freed'),
           tune('MOBILE_TREE_BUDGET', () => MOBILE_TREE_BUDGET, (v) => (MOBILE_TREE_BUDGET = v), [400, 40000], 200, 'how many trees a phone plants. Reload to apply — the buffer is sized once'),
@@ -1280,7 +1385,7 @@ export const TUNE_TABS: TuneTab[] = [
           tune('TREE_GNARLINESS', () => TREE_GNARLINESS, (v) => (TREE_GNARLINESS = v), [0, 4], 0.05, 'how much a branch wanders as it grows'),
           tune('TREE_TAPER', () => TREE_TAPER, (v) => (TREE_TAPER = v), [0.3, 1.4], 0.02, 'how fast a branch thins along its length'),
           tune('TREE_TRUNK_RADIUS', () => TREE_TRUNK_RADIUS, (v) => (TREE_TRUNK_RADIUS = v), [0.3, 3], 0.05, 'trunk thickness'),
-          tune('TREE_DETAIL', () => TREE_DETAIL, (v) => (TREE_DETAIL = v), [0.35, 2], 0.05, 'sections and segments per branch: the cost knob'),
+          tune('TREE_DETAIL', () => TREE_DETAIL, (v) => (TREE_DETAIL = v), [0, 2], 0.05, '0 = impostor cards only, no 3D trees. Above that, sections and segments per branch'),
         ],
       },
       {
@@ -1294,8 +1399,54 @@ export const TUNE_TABS: TuneTab[] = [
     ],
   },
   {
+    name: 'lod',
+    sections: [
+      {
+        title: 'grass',
+        keys: [
+          tune('GRASS_RADIUS', () => GRASS_RADIUS, (v) => (GRASS_RADIUS = v), [10, 120], 1, 'no blades beyond this (m)'),
+          tune('GRASS_LOD_NEAR', () => GRASS_LOD_NEAR, (v) => (GRASS_LOD_NEAR = v), [2, 60], 1, 'full density inside (m)'),
+          tune('GRASS_LOD_MID', () => GRASS_LOD_MID, (v) => (GRASS_LOD_MID = v), [4, 100], 1, 'mid density inside (m)'),
+          tune('GRASS_LOD_MID_DENSITY', () => GRASS_LOD_MID_DENSITY, (v) => (GRASS_LOD_MID_DENSITY = v), [0, 1], 0.05),
+          tune('GRASS_LOD_FAR_DENSITY', () => GRASS_LOD_FAR_DENSITY, (v) => (GRASS_LOD_FAR_DENSITY = v), [0, 1], 0.05),
+        ],
+      },
+      {
+        title: 'trees',
+        keys: [
+          tune('TREE_LEAF_LOD_M', () => TREE_LEAF_LOD_M, (v) => (TREE_LEAF_LOD_M = v), [0, 400], 5, 'beyond this a near tree wears the cheap far canopy (m)'),
+          tune('TREE_FAR_LEAF_SHARE', () => TREE_FAR_LEAF_SHARE, (v) => (TREE_FAR_LEAF_SHARE = v), [0.05, 1], 0.05, 'far canopy: share of the leaves (rebuild)'),
+          tune('TREE_FAR_LEAF_SIZE', () => TREE_FAR_LEAF_SIZE, (v) => (TREE_FAR_LEAF_SIZE = v), [1, 4], 0.1, 'far canopy: leaf size multiplier (rebuild)'),
+          tune('TREE_REFRESH_TURN', () => TREE_REFRESH_TURN, (v) => (TREE_REFRESH_TURN = v), [0.05, 1.5], 0.01, 'refill the near set after turning this far (rad)'),
+          tune('TREE_SIMPLE', () => TREE_SIMPLE, (v) => (TREE_SIMPLE = v), [0, 1], 1, '1 = impostor cards everywhere — no procedural models at all'),
+          tune('TREE_LOLLIPOP', () => TREE_LOLLIPOP, (v) => (TREE_LOLLIPOP = v), [0, 1], 1, '1 = the editor’s lollipop trees instead of models and cards'),
+          tune('IMPOSTOR_FLAT_PITCH', () => IMPOSTOR_FLAT_PITCH, (v) => (IMPOSTOR_FLAT_PITCH = v), [0.2, 1.5], 0.02, 'cards lie flat above this view pitch (rad)'),
+        ],
+      },
+    ],
+  },
+  {
     name: 'world',
     sections: [
+      {
+        title: 'traffic',
+        keys: [
+          tune('TRAFFIC_MAX', () => TRAFFIC_MAX, (v) => (TRAFFIC_MAX = v), [0, 2000], 10, 'cap on traffic cars (reload the level)'),
+          tune('TRAFFIC_WAKE_NS', () => TRAFFIC_WAKE_NS, (v) => (TRAFFIC_WAKE_NS = v), [200, 20000], 100, 'a hit harder than this (N·s) knocks a traffic car loose'),
+          tune('MISSILE_SPEED', () => MISSILE_SPEED, (v) => (MISSILE_SPEED = v), [20, 300], 5, 'm/s, plus the car’s own'),
+          tune('MISSILE_RADIUS', () => MISSILE_RADIUS, (v) => (MISSILE_RADIUS = v), [2, 30], 0.5, 'blast radius, m'),
+          tune('MISSILE_IMPULSE', () => MISSILE_IMPULSE, (v) => (MISSILE_IMPULSE = v), [1, 80], 1, 'm/s a car at the centre of the blast is given'),
+          tune('MISSILE_LIFT', () => MISSILE_LIFT, (v) => (MISSILE_LIFT = v), [0, 3], 0.05, 'how much of the throw points up'),
+          tune('GUN_RATE', () => GUN_RATE, (v) => (GUN_RATE = v), [2, 40], 1, 'rounds per second'),
+          tune('GUN_RANGE', () => GUN_RANGE, (v) => (GUN_RANGE = v), [30, 400], 10, 'm'),
+          tune('GUN_IMPULSE', () => GUN_IMPULSE, (v) => (GUN_IMPULSE = v), [0.5, 30], 0.5, 'm/s a car is given per round'),
+          tune('GUN_SPREAD', () => GUN_SPREAD, (v) => (GUN_SPREAD = v), [0, 0.1], 0.005),
+          tune('TRAFFIC_DRAW_M', () => TRAFFIC_DRAW_M, (v) => (TRAFFIC_DRAW_M = v), [100, 3000], 50, 'traffic further than this is simulated, not drawn'),
+          tune('TRAFFIC_PHYS_M', () => TRAFFIC_PHYS_M, (v) => (TRAFFIC_PHYS_M = v), [50, 1000], 10, 'traffic further than this has no body in the solver'),
+          tune('TRAFFIC_RESPAWN_M', () => TRAFFIC_RESPAWN_M, (v) => (TRAFFIC_RESPAWN_M = v), [50, 1000], 10, 'a car that ran off its road comes back at least this far away'),
+          tune('TRAFFIC_WRECKS_MAX', () => TRAFFIC_WRECKS_MAX, (v) => (TRAFFIC_WRECKS_MAX = v), [1, 400], 1, 'loose wrecks at once; the oldest is recycled into traffic'),
+        ],
+      },
       {
         title: 'buildings (reload to redress)',
         scope: 'world',

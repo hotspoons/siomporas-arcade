@@ -6,12 +6,12 @@
 // carriageway, and the same seed opens the same level twice.
 import { describe, expect, it } from 'vitest'
 import { query } from 'bitecs'
-import { ActorWorld } from '../src/actorworld'
-import { Autonomous, Engine, Hostile, Human, OnRoad, Transform, Vehicle, Visual, Walking } from '../src/actors'
+import { ActorWorld } from '../src/game/actors/actorworld'
+import { Autonomous, Engine, Hostile, Human, OnRoad, Transform, Vehicle, Visual, Walking } from '../src/game/actors/actors'
 import {
   BRUSHES, COMPONENTS, MAX_POPULATION, applyEcs, planPopulations, populationCount, validateEcs,
   type EcsConfig, type PlaceCtx,
-} from '../src/ecsconfig'
+} from '../src/game/session/ecsconfig'
 
 /**
  * A straight 4 km road running EAST at y = 0, and a 1 km square site around it.

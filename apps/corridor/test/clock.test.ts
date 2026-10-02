@@ -8,7 +8,7 @@
 // These run against a fake `Date.now`, so "a frame" and "an hour in a background tab" are things
 // the test can simply say.
 import { describe, expect, it, vi, afterEach } from 'vitest'
-import { WorldClock } from '../src/sun'
+import { WorldClock } from '../src/visuals/sun'
 
 const at = (ms: number) => vi.spyOn(Date, 'now').mockReturnValue(ms)
 afterEach(() => vi.restoreAllMocks())

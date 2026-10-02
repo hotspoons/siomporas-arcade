@@ -13,16 +13,16 @@
 //
 // The old panel had all four of these in one always-on column, which is why finding anything in it
 // meant scrolling past everything else.
-import { aaMode, setAAMode, resolvedAA, type AAMode } from '../render'
+import { aaMode, setAAMode, resolvedAA, type AAMode } from '../visuals/render'
 import { Dialog, Drawer, Tabs, button, el, type Tab } from './shell'
 import { icon } from './icons'
 import { empty, group, bodyOf, layerToggle, readout, select, slider, toggle } from './controls'
-import type { IndexEntry, Manifest } from '../site'
-import type { UiMode } from '../gamepolicy'
-import { ACTIONS, ACTION_LABELS, type GameSettings } from '../gamesettings'
+import type { IndexEntry, Manifest } from '../world/site'
+import type { UiMode } from '../game/session/gamepolicy'
+import { ACTIONS, ACTION_LABELS, type GameSettings } from '../game/session/gamesettings'
 import { keyLabel, padBindingLabel } from '@apex/engine/input/bindings'
-import { SEASONS, type Season } from '../season'
-import { STYLES, type Style } from '../style'
+import { SEASONS, type Season } from '../visuals/season'
+import { STYLES, type Style } from '../visuals/style'
 
 /** the exaggerations offered; a URL may carry any value in 0.25–10 and the select grows to show it */
 const RELIEFS = [1, 1.5, 2, 3, 5]
@@ -30,7 +30,7 @@ const clampReliefParam = () => {
   const k = Number(new URLSearchParams(location.search).get('relief'))
   return Number.isFinite(k) && k > 0 ? Math.min(10, Math.max(0.25, k)) : 1
 }
-import { WEATHERS, type Weather } from '../weather'
+import { WEATHERS, type Weather } from '../visuals/weather'
 
 /**
  * Layers, grouped by what they are rather than by the order someone happened to add them.

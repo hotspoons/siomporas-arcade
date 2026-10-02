@@ -42,7 +42,10 @@ async function bundle() {
  */
 export async function modules() {
   const libs = await bundle()
-  return [...libs.keys()].filter((k) => /^\/corridor\/[a-z]+\.d\.ts$/.test(k)).map((k) => k.slice('/corridor/'.length, -'.d.ts'.length)).sort()
+  return [...libs.keys()]
+    .filter((k) => /^\/node_modules\/@apex\/[a-z0-9-]+\/index\.d\.ts$/.test(k))
+    .map((k) => k.slice('/node_modules/@apex/'.length, -'/index.d.ts'.length))
+    .sort()
 }
 
 /**
@@ -52,7 +55,8 @@ export async function modules() {
 export async function declarations(mod = 'program') {
   const name = String(mod).replace(/^@apex\//, '').replace(/\.d\.ts$/, '')
   const libs = await bundle()
-  const text = libs.get(`/corridor/${name}.d.ts`)
+  const key = [...libs.keys()].find((k) => k.startsWith('/corridor/') && k.endsWith(`/${name}.d.ts`))
+  const text = key ? libs.get(key) : undefined
   if (text === undefined) throw Object.assign(new Error(`no module "${mod}" — one of ${(await modules()).join(', ')}`), { status: 404 })
   return { module: name, import: `@apex/${name}`, text }
 }

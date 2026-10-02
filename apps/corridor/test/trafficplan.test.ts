@@ -5,9 +5,9 @@
 // checked against a metre rule rather than by looking at a screen, because "is that about right?"
 // is not a question a screenshot of forty cars can answer.
 import { describe, expect, it } from 'vitest'
-import { rng } from '../src/traffic'
-import { lanesPerDirection, planTraffic, summarise, type RoadChain } from '../src/trafficplan'
-import { vehiclesPerKm, Zones, type Zone } from '../src/zones'
+import { rng } from '../src/game/traffic/traffic'
+import { lanesPerDirection, planTraffic, summarise, type RoadChain } from '../src/game/traffic/trafficplan'
+import { vehiclesPerKm, Zones, type Zone } from '../src/game/world/zones'
 
 /** A straight road running east from the origin, so `at(s)` is trivially checkable. */
 const straight = (index: number, length: number, lanes = 2): RoadChain =>

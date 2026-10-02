@@ -2,82 +2,82 @@
 import { registerBridgeContext, startDevBridge } from 'virtual:dev-bridge'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
-import { buildSite, describe, type Site } from './scene'
-import { buildPhysics, type CorridorPhysics } from './physics'
-import { fetchStuntDoc, makeStuntWorld, type StuntWorld } from './stuntworld'
-import type { StuntDoc } from './stunts'
-import { loadRaceWorld, type RaceWorld } from './raceworld'
-import { nextGate } from './racerun'
-import { PerfMeter } from './perf'
-import { assistAt, lookAhead, pullFor } from './stuntassist'
+import { buildSite, describe, type Site } from './world/scene'
+import { buildPhysics, type CorridorPhysics } from './game/world/physics'
+import { fetchStuntDoc, makeStuntWorld, type StuntWorld } from './game/stunt/stuntworld'
+import type { StuntDoc } from './game/stunt/stunts'
+import { loadRaceWorld, type RaceWorld } from './game/race/raceworld'
+import { nextGate } from './game/race/racerun'
+import { PerfMeter } from './game/session/perf'
+import { assistAt, lookAhead, pullFor } from './game/stunt/stuntassist'
 import { PerfHud } from './ui/perfhud'
-import { RapierCar } from './rapiercar'
-import { assetsvc } from './assetsvc'
-import { defaultVehicle, type VehicleDoc } from './vehicles'
-import { loadCarModel, type CarModel } from './carmodel'
-import { Car, type CarInput, type DrivableCar } from './car'
-import { EngineSound, spawnPlayerEngine } from './enginesound'
-import { ActorWorld } from './actorworld'
-import { Transform } from './actors'
-import { retro } from './retro'
-import { SiteSearch } from './search'
+import { RapierCar } from './game/vehicle/rapiercar'
+import { assetsvc } from './assets/assetsvc'
+import { defaultVehicle, type VehicleDoc } from './game/vehicle/vehicles'
+import { loadCarModel, type CarModel } from './game/vehicle/carmodel'
+import { Car, type CarInput, type DrivableCar } from './game/vehicle/car'
+import { EngineSound, spawnPlayerEngine } from './game/vehicle/enginesound'
+import { ActorWorld } from './game/actors/actorworld'
+import { Transform } from './game/actors/actors'
+import { retro } from './visuals/retro'
+import { SiteSearch } from './game/move/search'
 
 /** 16-point compass, indexed by bearing/22.5 — N at 0, clockwise through E. */
 const COMPASS = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW']
-import { FlyControls } from './fly'
-import { TransportControls } from './transportcam'
-import { CRAFT, CRAFT_KINDS, type CraftKind } from './transport'
-import { MiniMap, siteProjector } from './minimap'
-import { Sky } from './sky'
-import { Stars } from './stars'
-import { MilkyWay } from './milkyway'
-import { applyLevel, loadLevel, type LevelPlacement } from './level'
-import { TrafficLayer, type TrafficSpec } from './trafficlayer'
-import { FixtureLayer, loadFixtures, settingsOf, type FixtureDoc } from './fixtures'
-import { EMPTY_POINTS, loadPoints, startOf, type Point, type PointsDoc } from './points'
-import { ZoneMarks } from './markers'
+import { FlyControls } from './game/move/fly'
+import { TransportControls } from './game/move/transportcam'
+import { CRAFT, CRAFT_KINDS, type CraftKind } from './game/move/transport'
+import { MiniMap, siteProjector } from './game/move/minimap'
+import { Sky } from './visuals/sky'
+import { Stars } from './visuals/stars'
+import { MilkyWay } from './visuals/milkyway'
+import { applyLevel, loadLevel, type LevelPlacement } from './game/world/level'
+import { TrafficLayer, type TrafficSpec } from './game/traffic/trafficlayer'
+import { FixtureLayer, loadFixtures, settingsOf, type FixtureDoc } from './game/world/fixtures'
+import { EMPTY_POINTS, loadPoints, startOf, type Point, type PointsDoc } from './game/world/points'
+import { ZoneMarks } from './game/world/markers'
 import { WaypointHud, type Waypoint } from './ui/waypoint'
-import { MissileLayer } from './missiles'
-import { GunLayer, builtinMissile, mountWeapons, type Mounted } from './weaponfx'
-import { dentObject, flushDents, repairObject } from './dents'
-import { GameRun, type ModelHost, type ModelPose, type ProgramHost } from './program'
-import { loadGameModule } from './programload'
+import { MissileLayer } from './game/combat/missiles'
+import { GunLayer, builtinMissile, mountWeapons, type Mounted } from './game/combat/weaponfx'
+import { dentObject, flushDents, repairObject } from './game/vehicle/dents'
+import { GameRun, type ModelHost, type ModelPose, type ProgramHost } from './game/session/program'
+import { loadGameModule } from './game/session/programload'
 import { profile as driveProfile } from '@apex/engine/physics/profiles'
-import { buildPlacements, fitModel, loadAssetModel, loadCatalog, type CatalogEntry } from './placements'
+import { buildPlacements, fitModel, loadAssetModel, loadCatalog, type CatalogEntry } from './world/placements'
 import { timeControls } from './ui/timecontrols'
-import { celestialToWorld, julianDate, moonPosition, radecToVec } from './celestial'
+import { celestialToWorld, julianDate, moonPosition, radecToVec } from './visuals/celestial'
 import * as T from './tuning'
-import { captureSSR, chainCompile, injectShade, linearShadowDepth, setWetStreak, tickShading, type WetMark } from './shading'
+import { captureSSR, chainCompile, injectShade, linearShadowDepth, setWetStreak, tickShading, type WetMark } from './visuals/shading'
 import { TUNE_TABS } from './tuning'
-import { applySiteTuning, clearSiteTuning, saveSiteTuning } from './sitetuning'
-import { Presets, resolve, worldKnobs } from './presets'
-import { loadPresets, savePresets } from './presetstore'
+import { applySiteTuning, clearSiteTuning, saveSiteTuning } from './world/sitetuning'
+import { Presets, resolve, worldKnobs } from './game/session/presets'
+import { loadPresets, savePresets } from './game/session/presetstore'
 
-import { DATA_BASE, fetchJSON, type IndexEntry, type Manifest, type Structure, type Crossing } from './site'
-import { LOOK, SEASONS, type Season } from './season'
-import { STYLE, styled, isStyle, type Style } from './style'
-import { setRelief, relief, clampRelief, spineDatum, reliefManifest } from './relief'
-import { WorldClock, sunPosition, sunVector } from './sun'
-import { SplatField, attachmentsFor } from './splats'
-import { antialiasFor, bootSlug, hashWorld, noteCaptureAttached, postAAFor, setWorldHash } from './render'
+import { DATA_BASE, fetchJSON, type IndexEntry, type Manifest, type Structure, type Crossing } from './world/site'
+import { LOOK, SEASONS, type Season } from './visuals/season'
+import { STYLE, styled, isStyle, type Style } from './visuals/style'
+import { setRelief, relief, clampRelief, spineDatum, reliefManifest } from './visuals/relief'
+import { WorldClock, sunPosition, sunVector } from './visuals/sun'
+import { SplatField, attachmentsFor } from './visuals/splats'
+import { antialiasFor, bootSlug, hashWorld, noteCaptureAttached, postAAFor, setWorldHash } from './visuals/render'
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js'
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
 import { FXAAPass } from 'three/examples/jsm/postprocessing/FXAAPass.js'
 import { SMAAPass } from 'three/examples/jsm/postprocessing/SMAAPass.js'
-import { rasteriseEnvelope, splatMaskUniforms } from './splatmask'
-import { Attribution } from './attribution'
-import { loadSiteTuning } from './sitetuning'
-import { WEATHER, WEATHERS, type Weather } from './weather'
+import { rasteriseEnvelope, splatMaskUniforms } from './visuals/splatmask'
+import { Attribution } from './world/attribution'
+import { loadSiteTuning } from './world/sitetuning'
+import { WEATHER, WEATHERS, type Weather } from './visuals/weather'
 import { ViewerUI, restoreTheme, perfWanted, setPerfWanted } from './ui/viewer'
 import { TuneUI } from './ui/tune'
 import { installShellKeys, toast, status, clearStatus } from './ui/shell'
 import { LAYER_GROUPS, setTheme } from './ui/viewer'
-import { aaMode, setAAMode, type AAMode } from './render'
-import { STYLES } from './style'
-import { GameSettings, engineGain, sfxGain, type Action } from './gamesettings'
-import { GameInput } from './gameinput'
-import { GamePolicy, resolveUiMode, type UiMode } from './gamepolicy'
+import { aaMode, setAAMode, type AAMode } from './visuals/render'
+import { STYLES } from './visuals/style'
+import { GameSettings, engineGain, sfxGain, type Action } from './game/session/gamesettings'
+import { GameInput } from './game/move/gameinput'
+import { GamePolicy, resolveUiMode, type UiMode } from './game/session/gamepolicy'
 import { GameHud } from './ui/gamehud'
 import { GameMenu } from './ui/gamemenu'
 import { UiSound } from './ui/uisound'
@@ -620,6 +620,16 @@ function holdToTrack(car: DrivableCar | null, dt: number): boolean {
 
 const perfMeter = new PerfMeter()
 const perfHud = new PerfHud(perfMeter)
+// Which pyramid tile is under the car, and how many of the finest tiles the view is holding.
+// The meter knows frames; the stream knows tiles. Read twice a second with the rest of the panel.
+perfHud.detail = () => {
+  const stream = site?.pyramidStream
+  if (!stream) return []
+  const p = drive.car ? drive.car.mesh.position : camera.position
+  return stream.hudLines(p.x, -p.z)
+}
+perfHud.tilesLegend = () => site?.pyramidStream?.legend() ?? []
+perfHud.onTiles = (on) => site?.pyramidStream?.setTint(on)
 // left on last time? then it comes back on, which is the whole point of remembering it
 if (perfWanted()) perfHud.show(true)
 
@@ -1776,7 +1786,7 @@ function programHost(): ProgramHost {
         case 'hud': hudHidden = hidden; if (hidden) clearStatus(); else showGame(); break
         case 'traffic': if (traffic) traffic.group.visible = !hidden; break
         case 'signals': if (site?.layers.signals) site.layers.signals.visible = !hidden; break
-        case 'buildings': if (site?.layers.buildings) site.layers.buildings.visible = !hidden; break
+        case 'buildings': if (site?.layers.buildings) { site.layers.buildings.userData.layerOn = !hidden; site.layers.buildings.visible = !hidden } break
       }
     },
     transport: (mode) => {
@@ -1984,10 +1994,12 @@ function applyLayers() {
     const want = on('splats') ? 1 : 0
     if (k && k.get() !== want) { k.set(want); onTuneChange() }
   }
+  site.layers.buildings.userData.layerOn = on('buildings')
   site.layers.buildings.visible = on('buildings')
   if (site.layers.power) site.layers.power.visible = on('power')
-  if (site.layers.trees) site.layers.trees.visible = on('trees')
-  if (site.layers.grass) site.layers.grass.visible = on('grass')
+  if (site.layers.trees) { site.layers.trees.userData.layerOn = on('trees'); site.layers.trees.visible = on('trees') }
+  if (site.layers.grass) { site.layers.grass.userData.layerOn = on('grass'); site.layers.grass.visible = on('grass') }
+  site.layers.road.userData.layerOn = on('road')
   site.layers.road.visible = on('road')
   if (site.layers.horizon) site.layers.horizon.visible = on('horizon')
   site.layers.structures.visible = on('structures')

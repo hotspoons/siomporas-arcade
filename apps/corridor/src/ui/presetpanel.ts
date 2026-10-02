@@ -13,7 +13,7 @@
 // AND WHAT IT SAYS ABOUT WHAT IT CANNOT DO. A preset that carries WEATHER cannot be interpolated
 // through sleet-and-a-half, so the row names the knobs that will snap. An author finds that out
 // here, while authoring, instead of in a cutscene.
-import type { Preset, Presets } from '../presets'
+import type { Preset, Presets } from '../game/session/presets'
 import { bodyOf, empty, group, readout, textField } from './controls'
 import { ask, button, confirm, el, toast } from './shell'
 

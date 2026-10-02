@@ -5,8 +5,8 @@
 // loader hands back an empty default for a document never written, and the check took "no stamp"
 // for "old".
 import { describe, expect, it } from 'vitest'
-import { frameMismatch } from '../src/editor/schema'
-import type { Manifest } from '../src/site'
+import { frameMismatch } from '../src/editor/store/schema'
+import type { Manifest } from '../src/world/site'
 
 const enu = { frame: { kind: 'enu', epsg: 32618, anchor: { lon: -76.7, lat: 39.0 } } } as unknown as Manifest
 

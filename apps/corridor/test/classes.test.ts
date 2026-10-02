@@ -1,7 +1,7 @@
 // Type and class are two questions, and collapsing them into one field is what emptied the fleet
 // roster beside a library of 120 cars. These assert the separation rather than the lists.
 import { describe, expect, it } from 'vitest'
-import { CLASSES_BY_TYPE, KINDS, TYPES, typeOf } from '../src/classes'
+import { CLASSES_BY_TYPE, KINDS, TYPES, typeOf } from '../src/assets/classes'
 
 describe('typeOf', () => {
   it('reads the type off the class when nothing says otherwise', () => {

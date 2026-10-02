@@ -316,6 +316,26 @@ export let LOD_BEHIND_PENALTY = 0.9
 /** above this camera pitch (rad, 0 = level, 1.57 = straight down) the LOD footprint becomes a circle */
 export let LOD_TOPDOWN_PITCH = 0.9
 
+// --- pyramid tiles ------------------------------------------------------------------------------
+/** metres a coarse tile sinks while a finer tile is drawn on top of it */
+export let PYR_DROP_M = 8
+/**
+ * A tile must split when one of its texels would cover more than this many screen pixels.
+ * Higher keeps fewer fine tiles.
+ */
+export let PYR_ERROR_PX = 1.6
+/** finest tiles only inside this angle of the view direction, degrees. 180 is the whole view. */
+export let PYR_CONE_DEG = 180
+/**
+ * Roads, houses, trees and grass draw only while the ground tile is this fine or finer.
+ * 0 draws them on every tile. Houses are per block; the other three follow the tile under the camera,
+ * except a short road, which follows the tile under itself.
+ */
+export let PYR_ROAD_Z = 14
+export let PYR_HOUSE_Z = 14
+export let PYR_TREE_Z = 14
+export let PYR_GRASS_Z = 14
+
 // --- road ---------------------------------------------------------------------------------------
 export let LANE_WIDTH = 3.66
 /** a street that dead-ends gets a turning bulb unless the bake or the editor says otherwise;
@@ -1413,6 +1433,18 @@ export const TUNE_TABS: TuneTab[] = [
   {
     name: 'lod',
     sections: [
+      {
+        title: 'tiles',
+        keys: [
+          tune('PYR_DROP_M', () => PYR_DROP_M, (v) => (PYR_DROP_M = v), [0, 200], 1, 'metres a coarse tile sinks while a finer one covers it. z10 still showing through wants more than 8'),
+          tune('PYR_ERROR_PX', () => PYR_ERROR_PX, (v) => (PYR_ERROR_PX = v), [0.4, 12], 0.1, 'split a tile when it would cover more than this many screen pixels. Higher keeps fewer fine tiles'),
+          tune('PYR_CONE_DEG', () => PYR_CONE_DEG, (v) => (PYR_CONE_DEG = v), [5, 180], 1, 'finest tiles only inside this angle of the view, degrees. 180 is the whole view. Height counts: a few miles up no longer forces z14'),
+          tune('PYR_ROAD_Z', () => PYR_ROAD_Z, (v) => (PYR_ROAD_Z = v), [0, 18], 1, 'draw roads on tiles this fine or finer. 0 = always. A long road follows the tile under the camera; a short one follows its own'),
+          tune('PYR_HOUSE_Z', () => PYR_HOUSE_Z, (v) => (PYR_HOUSE_Z = v), [0, 18], 1, 'draw a block of houses only while the tile under that block is this fine or finer. 0 = always'),
+          tune('PYR_TREE_Z', () => PYR_TREE_Z, (v) => (PYR_TREE_Z = v), [0, 18], 1, 'draw trees while the tile under the camera is this fine or finer. 0 = always'),
+          tune('PYR_GRASS_Z', () => PYR_GRASS_Z, (v) => (PYR_GRASS_Z = v), [0, 18], 1, 'draw grass while the tile under the camera is this fine or finer. 0 = always'),
+        ],
+      },
       {
         title: 'grass',
         keys: [

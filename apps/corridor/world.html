@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="/src/ui/tokens.css" />
     <link rel="stylesheet" href="/src/ui/ui.css" />
     <link rel="stylesheet" href="/src/ui/app.css" />
-    <link rel="stylesheet" href="/src/worldedit/world.css" />
+    <link rel="stylesheet" href="/src/editor/worldedit/world.css" />
     <!-- The site editor is a MODE here, not another page, so its stylesheet belongs to this one. -->
     <link rel="stylesheet" href="/src/editor/editor.css" />
     <script>
@@ -28,7 +28,7 @@
     </script>
   </head>
   <body class="worldedit">
-    <!-- The bar, the drawer and the dialogs are built in src/worldedit/main.ts. This file owns the
+    <!-- The bar, the drawer and the dialogs are built in src/editor/worldedit/main.ts. This file owns the
          map canvas, the docked inspector it renders into, and the coordinate readout. -->
     <canvas id="map"></canvas>
     <!-- The site editor's 3D scene. Present from the start because src/editor/main.ts takes its
@@ -58,6 +58,6 @@
          looking at a world — it is where you go to work on what worlds are made of. -->
     <div id="assets" hidden></div>
     <div id="readout" class="map-readout"></div>
-    <script type="module" src="/src/worldedit/main.ts"></script>
+    <script type="module" src="/src/editor/worldedit/main.ts"></script>
   </body>
 </html>

@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   BUDGET_MS, frameColour, perfLines, percentile, PerfMeter, short, STALL_MS, summarize,
-} from '../src/perf'
+} from '../src/game/session/perf'
 
 describe('percentiles', () => {
   it('reports a value that really happened, rather than interpolating one', () => {
@@ -151,7 +151,7 @@ describe('reading it at a glance', () => {
  */
 describe('how often a capture has to be re-sorted', () => {
   it('scales with how far away the capture is', async () => {
-    const { resortAfter } = await import('../src/splatsort')
+    const { resortAfter } = await import('../src/visuals/splatsort')
     // parked inside it: centimetres. A street away: metres.
     expect(resortAfter(5, { parallax: 0.02, min: 0.25, max: 8 })).toBeCloseTo(0.25, 6)
     expect(resortAfter(100, { parallax: 0.02, min: 0.25, max: 8 })).toBeCloseTo(2, 6)
@@ -159,7 +159,7 @@ describe('how often a capture has to be re-sorted', () => {
   })
 
   it('still re-sorts eventually when nothing is loaded near you', async () => {
-    const { resortAfter } = await import('../src/splatsort')
+    const { resortAfter } = await import('../src/visuals/splatsort')
     expect(resortAfter(Infinity, { parallax: 0.02, min: 0.25, max: 8 })).toBe(8)
   })
 })
@@ -172,7 +172,7 @@ describe('when a re-sort is actually asked for', () => {
    * which is the opposite of what a fast game wants. The timer has to be the floor.
    */
   it('never sorts more often than the timer, however fast you are going', async () => {
-    const { shouldResort } = await import('../src/splatsort')
+    const { shouldResort } = await import('../src/visuals/splatsort')
     const perFrame = 80 / 60 // metres covered in one frame at 180 mph
     expect(shouldResort(16, perFrame, 0, 100, opts)).toBe(false)
     expect(shouldResort(499, perFrame * 30, 0, 100, opts)).toBe(false)
@@ -180,14 +180,14 @@ describe('when a re-sort is actually asked for', () => {
   })
 
   it('and does not sort at all when the camera has not moved', async () => {
-    const { shouldResort } = await import('../src/splatsort')
+    const { shouldResort } = await import('../src/visuals/splatsort')
     // an hour parked, a centimetre of drift: a radial order has not changed
     expect(shouldResort(3_600_000, 0.01, 0, 100, opts)).toBe(false)
     expect(shouldResort(3_600_000, 0, 0, 5, opts)).toBe(false)
   })
 
   it('lets a slow crawl through a capture re-sort, because that is where parallax is', async () => {
-    const { shouldResort } = await import('../src/splatsort')
+    const { shouldResort } = await import('../src/visuals/splatsort')
     // half a metre at walking pace, with the capture right there
     expect(shouldResort(600, 0.5, 0, 5, opts)).toBe(true)
   })
@@ -203,7 +203,7 @@ describe('turning round', () => {
   const opts = { minMs: 500, parallax: 0.02, min: 0.25, max: 4000, turnDeg: 90 }
 
   it('forces a sort even with the distance gate turned off entirely', async () => {
-    const { shouldResort } = await import('../src/splatsort')
+    const { shouldResort } = await import('../src/visuals/splatsort')
     // four kilometres of ceiling: distance will never ask. A U-turn still must.
     expect(shouldResort(600, 1, 5, 100, opts)).toBe(false)
     expect(shouldResort(600, 1, 95, 100, opts)).toBe(true)
@@ -211,12 +211,12 @@ describe('turning round', () => {
   })
 
   it('but cannot beat the timer, or a spin at the wheel is a stall per frame', async () => {
-    const { shouldResort } = await import('../src/splatsort')
+    const { shouldResort } = await import('../src/visuals/splatsort')
     expect(shouldResort(100, 1, 180, 100, opts)).toBe(false)
   })
 
   it('measures the turn as the angle between two headings', async () => {
-    const { angleBetween } = await import('../src/splatsort')
+    const { angleBetween } = await import('../src/visuals/splatsort')
     expect(angleBetween({ x: 0, y: 0, z: -1 }, { x: 0, y: 0, z: -1 })).toBeCloseTo(0, 6)
     expect(angleBetween({ x: 0, y: 0, z: -1 }, { x: 1, y: 0, z: 0 })).toBeCloseTo(90, 4)
     expect(angleBetween({ x: 0, y: 0, z: -1 }, { x: 0, y: 0, z: 1 })).toBeCloseTo(180, 3)
@@ -230,12 +230,12 @@ describe('turning round', () => {
  */
 describe('how much extra gravity a stunt surface needs', () => {
   it('asks for none of it on the flat, where ordinary gravity already does the job', async () => {
-    const { pullScale } = await import('../src/stuntassist')
+    const { pullScale } = await import('../src/game/stunt/stuntassist')
     expect(pullScale({ x: 0, y: 1, z: 0 })).toBe(0)
   })
 
   it('all of it on a wall, and twice as much upside down', async () => {
-    const { pullScale } = await import('../src/stuntassist')
+    const { pullScale } = await import('../src/game/stunt/stuntassist')
     expect(pullScale({ x: 1, y: 0, z: 0 })).toBeCloseTo(1, 6)
     expect(pullScale({ x: 0, y: -1, z: 0 })).toBeCloseTo(2, 6)
     // and part way up a loop, part of it
@@ -245,7 +245,7 @@ describe('how much extra gravity a stunt surface needs', () => {
 
 describe('how hard the assist may press', () => {
   it('owes nothing on the flat, one gravity on a wall, two upside down', async () => {
-    const { pullFor, G } = await import('../src/stuntassist')
+    const { pullFor, G } = await import('../src/game/stunt/stuntassist')
     expect(pullFor({ x: 0, y: 1, z: 0 }, G)).toBeCloseTo(0, 6)
     expect(pullFor({ x: 1, y: 0, z: 0 }, G)).toBeCloseTo(G, 6)
     expect(pullFor({ x: 0, y: -1, z: 0 }, G)).toBeCloseTo(2 * G, 6)
@@ -257,7 +257,7 @@ describe('how hard the assist may press', () => {
    * is what "the loop was deformable" felt like.
    */
   it('never presses harder than a suspension can take', async () => {
-    const { pullFor, G } = await import('../src/stuntassist')
+    const { pullFor, G } = await import('../src/game/stunt/stuntassist')
     expect(pullFor({ x: 0, y: -1, z: 0 }, 100)).toBeLessThanOrEqual(G * 2.5)
   })
 })

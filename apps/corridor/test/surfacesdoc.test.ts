@@ -1,6 +1,6 @@
 // A world's textures lay over the defaults and never replace them with nothing.
 import { describe, expect, it } from 'vitest'
-import { pickFromPool, resolveSurfaceSets } from '../src/surfacesdoc'
+import { pickFromPool, resolveSurfaceSets } from '../src/assets/surfacesdoc'
 
 describe('resolveSurfaceSets', () => {
   const sets = { asphalt_aged: 'A', concrete: 'C', chipseal: 'S', grass_mown: 'M', grass_rough: 'R' }

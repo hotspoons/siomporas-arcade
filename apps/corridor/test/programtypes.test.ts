@@ -45,7 +45,7 @@ describe('the program type bundle', () => {
   })
 
   it('actually declares the API the editor completes against', () => {
-    const program = (bundle.libs as Record<string, string>)['file:///corridor/program.d.ts']
+    const program = (bundle.libs as Record<string, string>)['file:///corridor/game/program.d.ts']
     expect(program).toBeTruthy()
     // the three things a program's first line touches
     expect(program).toContain('defineGame')

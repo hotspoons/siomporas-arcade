@@ -13,7 +13,7 @@ import * as THREE from 'three'
 import { readFileSync } from 'node:fs'
 // THE LINES UNDER TEST ARE THE SOURCE'S OWN. A copy of them here would pass for ever after
 // someone edited car.ts; these are lifted out of updateMesh and evaluated.
-const src = readFileSync(new URL('../apps/corridor/src/car.ts', import.meta.url), 'utf8')
+const src = readFileSync(new URL('../apps/corridor/src/game/car.ts', import.meta.url), 'utf8')
 const lines = [...src.matchAll(/this\.mesh\.rotate([XZ])\(([^\n]+?)\)\n/g)].map((m) => `mesh.rotate${m[1]}(${m[2].replace(/this\./g, 'self.')})`)
 if (lines.length !== 2) { console.log(`FAIL could not find the two rotate lines in car.ts (found ${lines.length})`); process.exit(1) }
 console.log('car.ts:', lines.join('  '))

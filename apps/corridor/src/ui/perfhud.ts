@@ -18,7 +18,7 @@
 // It is a plain absolutely-positioned panel rather than a dialog: you read it while you are flying,
 // and a modal you have to close to see the world is no use for that.
 
-import { frameColour, perfLines, type PerfMeter } from '../perf'
+import { frameColour, perfLines, type PerfMeter } from '../game/session/perf'
 import './perfhud.css'
 
 const GRAPH_W = 220
@@ -30,9 +30,20 @@ export class PerfHud {
   readonly root = document.createElement('div')
   private lines = document.createElement('div')
   private canvas = document.createElement('canvas')
+  private legendEl = document.createElement('div')
   private meter: PerfMeter
   private timer: number | null = null
   private shownAt = 0
+  private tilesOn = false
+  /**
+   * Extra lines from the world, drawn under the frame numbers. The pyramid uses this to say which
+   * tile the eye is on and how many leaf tiles are in view — the meter itself does not know that.
+   */
+  detail: (() => string[]) | null = null
+  /** Swatches for the tile tint. Empty when the world has no pyramid. */
+  tilesLegend: (() => { color: string; text: string }[]) | null = null
+  /** Turn the tint on the terrain itself. The panel only draws the legend. */
+  onTiles: ((on: boolean) => void) | null = null
 
   constructor(meter: PerfMeter) {
     this.meter = meter
@@ -50,7 +61,19 @@ export class PerfHud {
       this.shownAt = performance.now()
       this.draw()
     }
-    head.append(reset)
+    const tiles = document.createElement('button')
+    tiles.textContent = 'tiles'
+    tiles.title = 'tint each pyramid level and show which colour is which'
+    tiles.onclick = () => {
+      this.tilesOn = !this.tilesOn
+      tiles.classList.toggle('on', this.tilesOn)
+      this.onTiles?.(this.tilesOn)
+      this.draw()
+    }
+    const actions = document.createElement('div')
+    actions.className = 'perf-actions'
+    actions.append(tiles, reset)
+    head.append(actions)
 
     this.lines.className = 'perf-lines mono'
     this.canvas.width = GRAPH_W * devicePixelRatio
@@ -58,7 +81,9 @@ export class PerfHud {
     this.canvas.className = 'perf-graph'
     this.canvas.title = 'one bar per frame, oldest on the left — green is inside 60 fps, amber inside 30'
 
-    this.root.append(head, this.lines, this.canvas)
+    this.legendEl.className = 'perf-legend'
+    this.legendEl.hidden = true
+    this.root.append(head, this.lines, this.canvas, this.legendEl)
     document.body.append(this.root)
   }
 
@@ -80,6 +105,11 @@ export class PerfHud {
       if (this.timer !== null) clearInterval(this.timer)
       this.timer = null
       this.meter.stopWatching()
+      if (this.tilesOn) {
+        this.tilesOn = false
+        this.root.querySelector('.perf-actions button')?.classList.remove('on')
+        this.onTiles?.(false)
+      }
     }
   }
 
@@ -97,6 +127,7 @@ export class PerfHud {
     if (!this.open) return
     const r = this.meter.read()
     const rows = perfLines(r)
+    for (const t of this.detail?.() ?? []) if (t) rows.push(t)
     const secs = (performance.now() - this.shownAt) / 1000
     rows.push(`window ${r.frames} frames · ${secs.toFixed(0)} s open`)
     // rebuilt as text rather than as elements: five short lines, and a diff is not worth the code
@@ -106,6 +137,24 @@ export class PerfHud {
       return d
     }))
     this.plot(this.meter.window())
+    this.drawLegend()
+  }
+
+  /** The level swatches. Hidden until the tiles button is on, which is also when the ground is tinted. */
+  private drawLegend() {
+    this.legendEl.hidden = !this.tilesOn
+    if (!this.tilesOn) {
+      this.legendEl.replaceChildren()
+      return
+    }
+    const rows = this.tilesLegend?.() ?? []
+    this.legendEl.replaceChildren(...rows.map((row) => {
+      const d = document.createElement('div')
+      const swatch = document.createElement('i')
+      swatch.style.background = row.color
+      d.append(swatch, document.createTextNode(row.text))
+      return d
+    }))
   }
 
   /**

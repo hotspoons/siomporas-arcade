@@ -12,7 +12,7 @@ import { describe, expect, it } from 'vitest'
 import {
   CRAFT, CRAFT_KINDS, G, NEUTRAL, angleOfAttack, axes, cameraFor, startState, step,
   type CraftKind, type CraftState, type Controls, type World,
-} from '../src/transport'
+} from '../src/game/move/transport'
 
 /** Flat ground at y = 0, everywhere. */
 const flat: World = { groundAt: () => 0 }
@@ -362,7 +362,7 @@ describe('the program layer and the library agree', () => {
     // `api.transport('helicopter')` in a program and `setCraft('helicopter')` in the viewer must
     // mean the same thing; a name in one list and not the other is a transport that silently does
     // nothing, and the program would be right to expect it to work
-    const { CRAFT_TRANSPORT, TRANSPORT } = await import('../src/program')
+    const { CRAFT_TRANSPORT, TRANSPORT } = await import('../src/game/session/program')
     expect([...CRAFT_TRANSPORT].sort()).toEqual([...CRAFT_KINDS].sort())
     for (const k of CRAFT_TRANSPORT) expect(TRANSPORT, k).toContain(k)
   })

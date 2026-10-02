@@ -16,7 +16,7 @@
 // What makes an edit clean is knowing the declarations and their spans (outline), what a name
 // means (hover), where it is defined (definition) and whether the result compiles (check). Those
 // are what this exposes.
-import { knowAbout, languageForPath, loadMonaco } from '../ui/codeeditor'
+import { knowAbout, languageForPath, loadMonaco } from '../editor/program/codeeditor'
 
 export interface LspDiagnostic {
   severity: 'error' | 'warning' | 'info'

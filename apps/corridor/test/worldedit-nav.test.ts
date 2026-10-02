@@ -8,7 +8,7 @@
 // throw your tab away because the link happened to be silent about it. And a remembered tab that
 // no longer exists must not open a page with no panel.
 import { describe, expect, it } from 'vitest'
-import { fromUrl, resolve, toUrl } from '../src/worldedit/nav'
+import { fromUrl, resolve, toUrl } from '../src/editor/worldedit/nav'
 
 const MODES = ['world', 'place', 'stage', 'assets', 'program', 'shell', 'splats', 'deploy']
 const STEPS = ['explore', 'define', 'bake']

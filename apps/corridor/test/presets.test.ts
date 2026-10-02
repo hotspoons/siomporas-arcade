@@ -14,9 +14,9 @@
 // it by hand and read the knobs.
 import { describe, expect, it } from 'vitest'
 import { tune } from '@apex/engine/app/TunePanel'
-import { Presets, capture, ease, knobs, lerpOf, resolve, scopeOf, worldKnobs } from '../src/presets'
+import { Presets, capture, ease, knobs, lerpOf, resolve, scopeOf, worldKnobs } from '../src/game/session/presets'
 import { TUNE_TABS, type TuneTab } from '../src/tuning'
-import type { TuneAccess } from '../src/sitetuning'
+import type { TuneAccess } from '../src/world/sitetuning'
 
 /** A tuning store with no browser and no renderer behind it. */
 function store(init: Record<string, number>): TuneAccess & { values: Record<string, number> } {

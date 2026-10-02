@@ -17,17 +17,17 @@ names. Pointing the page at a published bucket with `?data=` disables saving.
 | file | role |
 |---|---|
 | `main.ts` | scene, top-down orbit, one ground raycast per click, mode switching, save, preview |
-| `schema.ts` | both file formats, the vocabularies, load/save, point-in-polygon |
-| `areas.ts` | mode 1: draw, select, slide, delete |
-| `place.ts` | mode 2: arm an asset, click, drag, rotate, scale |
-| `structures.ts` | mode 4: two clicks on the road → an interval on the spine; a bridge over it, a grade to flatten, a detection to ignore |
-| `grow.ts` | mode 3: run autogen, and keep your corrections across a re-run |
-| `autogen.ts` | the rules from `tools/corridor/AUTOGEN.md`, over the bake's buildings/landuse/pois |
-| `preview.ts` | the dialog: the same site from the driver's seat |
-| `corridor.ts` | along-track/lateral coordinates, and every sign convention in one place |
-| `catalog.ts` | `public/assets/catalog.json` → a `.glb` or a labelled box at the real footprint |
-| `drape.ts` | polygons made to lie on the ground rather than hover over it |
-| `ui.ts` | the panel's sliders and rows |
+| `store/schema.ts` | both file formats, the vocabularies, load/save, point-in-polygon |
+| `author/areas.ts` | mode 1: draw, select, slide, delete |
+| `author/place.ts` | mode 2: arm an asset, click, drag, rotate, scale |
+| `author/structures.ts` | mode 4: two clicks on the road → an interval on the spine; a bridge over it, a grade to flatten, a detection to ignore |
+| `author/grow.ts` | mode 3: run autogen, and keep your corrections across a re-run |
+| `author/autogen.ts` | the rules from `tools/corridor/AUTOGEN.md`, over the bake's buildings/landuse/pois |
+| `view/preview.ts` | the dialog: the same site from the driver's seat |
+| `author/corridor.ts` | along-track/lateral coordinates, and every sign convention in one place |
+| `author/catalog.ts` | `public/assets/catalog.json` → a `.glb` or a labelled box at the real footprint |
+| `view/drape.ts` | polygons made to lie on the ground rather than hover over it |
+| `author/ui.ts` | the panel's sliders and rows |
 
 Keys: `1`/`2`/`3`/`4` mode · `T` top · `F` fly to selection · `V` preview · `Ctrl+S` save.
 **Areas**: `N` draw, click to add a vertex, click the first vertex or `Enter` to close, `Esc`

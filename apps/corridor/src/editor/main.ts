@@ -7,28 +7,28 @@
 //
 // The scene itself is built by the viewer's own `buildSite`, read-only — the editor must be
 // looking at exactly what the game looks at, or it is correcting something else.
-import { fixturesExtension } from '../ui/fixtures'
-import { loadFixtures, saveFixtures } from '../fixtures'
-import { DROP_TYPE } from './ui'
+import { fixturesExtension } from './library/fixtures'
+import { loadFixtures, saveFixtures } from '../game/world/fixtures'
+import { DROP_TYPE } from './author/ui'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
-import { buildSite, type Site } from '../scene'
-import { RoadWidth } from './roadwidth'
+import { buildSite, type Site } from '../world/scene'
+import { RoadWidth } from './view/roadwidth'
 import { TUNE_TABS } from '../tuning'
-import { fetchJSON, type IndexEntry, type Manifest } from '../site'
-import { AreaMode } from './areas'
-import { PlaceMode } from './place'
-import { StructureMode } from './structures'
-import { GrowMode } from './grow'
-import { Preview, markOverlay } from './preview'
-import { CAN_SAVE, type Area } from './schema'
-import { LOOK, type Season } from '../season'
-import { EditorUI } from '../ui/editor'
-import { AssetCatalog } from '../ui/assets'
+import { fetchJSON, type IndexEntry, type Manifest } from '../world/site'
+import { AreaMode } from './author/areas'
+import { PlaceMode } from './author/place'
+import { StructureMode } from './author/structures'
+import { GrowMode } from './author/grow'
+import { Preview, markOverlay } from './view/preview'
+import { CAN_SAVE, type Area } from './store/schema'
+import { LOOK, type Season } from '../visuals/season'
+import { EditorUI } from './chrome/editor'
+import { AssetCatalog } from './library/assets'
 import { confirm, el, installShellKeys, toast, status } from '../ui/shell'
 import { select } from '../ui/controls'
-import { assetsvc, type Material } from '../assetsvc'
-import { GROUND_CATEGORIES, ROAD_CATEGORIES, ROOF_CATEGORY_RE, WALL_CATEGORY_RE, saveSurfacesDoc } from '../surfacesdoc'
+import { assetsvc, type Material } from '../assets/assetsvc'
+import { GROUND_CATEGORIES, ROAD_CATEGORIES, ROOF_CATEGORY_RE, WALL_CATEGORY_RE, saveSurfacesDoc } from '../assets/surfacesdoc'
 import { restoreTheme } from '../ui/viewer'
 
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector<T>(sel)!
@@ -96,18 +96,18 @@ const points = new PointMode((structural) => refresh(structural))
 points.coursesTab = (root) => races.panel(root, (g) => flyTo([g.a, g.b]))
 /** the Courses tab of Points is showing: pointer and keys go to the race gates */
 const inCourses = () => mode === 'points' && points.panelTab === 'courses'
-import type { Mode } from '../ui/editor'
-import { actorExtension } from '../ui/actors'
-import { weaponExtension } from '../ui/weapons'
-import { vehicleExtension } from '../ui/vehicles'
-import { trafficExtension } from '../ui/trafficsets'
-import { ZoneMode } from './zones'
-import { StuntMode } from './stuntmode'
-import { CourseMode } from './coursemode'
-import { PointMode } from './pointmode'
-import { FlyCam } from './flycam'
-import { Zones } from '../zones'
-import { fixtureFootprint } from '../stunts'
+import type { Mode } from './chrome/editor'
+import { actorExtension } from './library/actors'
+import { weaponExtension } from './library/weapons'
+import { vehicleExtension } from './library/vehicles'
+import { trafficExtension } from './library/trafficsets'
+import { ZoneMode } from './author/zones'
+import { StuntMode } from './author/stuntmode'
+import { CourseMode } from './author/coursemode'
+import { PointMode } from './author/pointmode'
+import { FlyCam } from './view/flycam'
+import { Zones } from '../game/world/zones'
+import { fixtureFootprint } from '../game/stunt/stunts'
 // an old link's `:races` and `:grow` are the Points and Place tabs now
 const hashMode = location.hash.split(':')[1]
 let mode: Mode = (hashMode === 'races' ? 'points' : hashMode === 'grow' ? 'place' : (hashMode as Mode)) || 'areas'
@@ -298,7 +298,7 @@ function applyLayers() {
   const state = ui.layers()
   const on = (n: string) => state[n] ?? false
   site.setImagery(on('imagery'))
-  if (site.layers.trees) site.layers.trees.visible = on('trees')
+  if (site.layers.trees) { site.layers.trees.userData.layerOn = on('trees'); site.layers.trees.visible = on('trees') }
   site.layers.structures.visible = on('structures')
   site.layers.spine.visible = on('spine')
   if (site.layers.horizon) site.layers.horizon.visible = on('horizon')

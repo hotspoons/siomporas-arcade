@@ -38,6 +38,11 @@
   text-transform: uppercase;
 }
 
+.perf-actions {
+  display: flex;
+  gap: 4px;
+}
+
 .perf-head button {
   pointer-events: auto;
   padding: 1px 6px;
@@ -50,6 +55,33 @@
 }
 
 .perf-head button:hover { background: var(--bg-3); color: var(--ink-1); }
+
+.perf-head button.on {
+  color: var(--ink-1);
+  border-color: var(--ink-2);
+}
+
+.perf-legend {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--hud-line);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--ink-1);
+}
+
+.perf-legend div {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.perf-legend i {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  flex: none;
+}
 
 .perf-lines {
   font-size: var(--text-xs);

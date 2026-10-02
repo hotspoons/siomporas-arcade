@@ -181,6 +181,20 @@ def plan(bbox_wgs: tuple[float, float, float, float], zmax: int, zmin: int) -> l
 TILE_PX = 512  # samples a side, every level. z14 lands at ~1.9 x 2.4 m, near the 2 m we emit today.
 
 
+# One open dataset per source for the whole bake. Opening the 1 m DEM once per tile, per band,
+# is most of the wall time — trailworks resamples from a dataset it already holds.
+_OPEN: dict = {}
+
+
+def _dataset(src_path):
+    import rasterio
+
+    key = str(src_path)
+    if key not in _OPEN:
+        _OPEN[key] = rasterio.open(src_path) if src_path.exists() else None
+    return _OPEN[key]
+
+
 def _sample(src_path, w: float, s: float, e: float, n: float, px: int, nodata: float, band: int = 1):
     """Reproject one band of a source raster onto this tile's WGS84 grid. None if the file is absent."""
     import numpy as np
@@ -188,15 +202,15 @@ def _sample(src_path, w: float, s: float, e: float, n: float, px: int, nodata: f
     from rasterio.transform import from_bounds
     from rasterio.warp import Resampling, reproject
 
-    if not src_path.exists():
+    src = _dataset(src_path)
+    if src is None:
         return None
     dst = np.full((px, px), nodata, dtype=np.float32)
-    with rasterio.open(src_path) as src:
-        reproject(
-            rasterio.band(src, band), dst,
-            dst_transform=from_bounds(w, s, e, n, px, px), dst_crs="EPSG:4326",
-            resampling=Resampling.average, dst_nodata=nodata,
-        )
+    reproject(
+        rasterio.band(src, band), dst,
+        dst_transform=from_bounds(w, s, e, n, px, px), dst_crs="EPSG:4326",
+        resampling=Resampling.average, dst_nodata=nodata,
+    )
     return dst
 
 
@@ -206,16 +220,16 @@ def _sample_rgb(src_path, w: float, s: float, e: float, n: float, px: int):
     from rasterio.transform import from_bounds
     from rasterio.warp import Resampling, reproject
 
-    if not src_path.exists():
+    src = _dataset(src_path)
+    if src is None:
         return None
     dst = np.zeros((3, px, px), dtype=np.uint8)
-    with rasterio.open(src_path) as src:
-        for b in range(3):
-            reproject(
-                rasterio.band(src, b + 1), dst[b],
-                dst_transform=from_bounds(w, s, e, n, px, px), dst_crs="EPSG:4326",
-                resampling=Resampling.average, dst_nodata=0,
-            )
+    for b in range(3):
+        reproject(
+            rasterio.band(src, b + 1), dst[b],
+            dst_transform=from_bounds(w, s, e, n, px, px), dst_crs="EPSG:4326",
+            resampling=Resampling.average, dst_nodata=0,
+        )
     return dst
 
 
@@ -279,7 +293,8 @@ def bake(site_dir, web, frame, zmax: int | None = None, zmin: int | None = None,
     entries = []
     rev = int((site_dir / "manifest.json").stat().st_mtime) if (site_dir / "manifest.json").exists() else 0
     skipped = 0
-    for t in tiles:
+    print(f"pyramid: {len(tiles)} tiles z{zmin}..{zmax}", flush=True)
+    for i, t in enumerate(tiles):
         w, s, e, n = tile_bounds(t.z, t.x, t.y)
         parts: dict[str, bytes] = {}
         entry: dict = {"z": t.z, "x": t.x, "y": t.y}
@@ -323,6 +338,8 @@ def bake(site_dir, web, frame, zmax: int | None = None, zmin: int | None = None,
             if frac:
                 entry["naip_fill"] = round(frac, 3)
         entries.append(entry)
+        if (i + 1) % 8 == 0 or i + 1 == len(tiles):
+            print(f"pyramid: {i + 1}/{len(tiles)}", flush=True)
 
     return {
         "scheme": "geo-quadtree",   # 2^(z+1) lon cols, 2^z lat rows — same ids as trailworks

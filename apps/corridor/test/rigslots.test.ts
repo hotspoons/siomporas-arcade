@@ -2,7 +2,7 @@
 // about the ways it could be wrong QUIETLY: an axis convention it was not written for, names that
 // disagree with the geometry, a rig that is not four wheels at all.
 import { describe, expect, it } from 'vitest'
-import { guessWheelSlots, swapEnds, swapSides } from '../src/rigslots'
+import { guessWheelSlots, swapEnds, swapSides } from '../src/game/vehicle/rigslots'
 
 /** four wheels of a 2.6 m wheelbase, 1.5 m track car, laid out on whichever axes you name */
 function car(opts: { lon: 'x' | 'y' | 'z', lat: 'x' | 'y' | 'z', up: 'x' | 'y' | 'z', names: string[], flip?: boolean }) {

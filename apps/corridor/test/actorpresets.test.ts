@@ -4,10 +4,10 @@
 // claims about a spread, and a library where eleven of the twelve are near-copies is worse than
 // three honest ones. The interesting assertions are the SPANS.
 import { describe, expect, it } from 'vitest'
-import { ACTOR_PRESETS, actorPresetDoc, actorPresetsFor } from '../src/actorpresets'
-import { dps, hitsToKill, jumpHeight, validateActor } from '../src/actorspecs'
-import { WEAPON_PRESETS, weaponPresetDoc, weaponPresetsFor } from '../src/weaponpresets'
-import { sustainedDps, validateWeapon } from '../src/weapons'
+import { ACTOR_PRESETS, actorPresetDoc, actorPresetsFor } from '../src/game/actors/actorpresets'
+import { dps, hitsToKill, jumpHeight, validateActor } from '../src/game/actors/actorspecs'
+import { WEAPON_PRESETS, weaponPresetDoc, weaponPresetsFor } from '../src/game/combat/weaponpresets'
+import { sustainedDps, validateWeapon } from '../src/game/combat/weapons'
 
 describe('the actor presets', () => {
   it('are a dozen, all valid, and none of them share an id', () => {

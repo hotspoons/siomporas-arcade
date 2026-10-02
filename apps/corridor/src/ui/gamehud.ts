@@ -13,8 +13,8 @@
 //
 // It has no idea what a race or a program is: `main.ts` hands it an objective and a telemetry
 // record and it draws them. `HudPart` from gamepolicy.ts is what a program switches off.
-import type { HudPart } from '../gamepolicy'
-import type { ObjectiveItem } from '../program'
+import type { HudPart } from '../game/session/gamepolicy'
+import type { ObjectiveItem } from '../game/session/program'
 import { el } from './shell'
 
 export interface Telemetry {

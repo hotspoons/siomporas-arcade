@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest'
 import {
   BACKWARD, clock, crossing, describeCourse, FORWARD, gateForward, gateWidth, midpoint,
   NO_CROSSING, orderedGates, Run, sideOf, validateCourse, type Course, type Gate,
-} from '../src/races'
+} from '../src/game/race/races'
 
 /** A gate across the x axis at `x`, running from y=-10 to y=+10, so forward is +x. */
 const across = (id: string, x: number, role: Gate['role'] = 'checkpoint', order = 0): Gate =>

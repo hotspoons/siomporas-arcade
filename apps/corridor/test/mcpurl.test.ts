@@ -1,7 +1,7 @@
 // The MCP snippet must carry the scheme the page was opened with when the service is this page's
 // own host — the https page that handed out an http address (Rich, 2026-09-30).
 import { describe, expect, it } from 'vitest'
-import { sameOriginScheme } from '../src/ui/mcppanel'
+import { sameOriginScheme } from '../src/editor/agent/mcppanel'
 
 describe('sameOriginScheme', () => {
   const at = (protocol: string, host: string) => ({ protocol, host })

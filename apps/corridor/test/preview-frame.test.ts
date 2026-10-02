@@ -10,7 +10,7 @@
 // against a full-window canvas passes on the broken version, which is presumably why there wasn't
 // one.
 import { describe, expect, it } from 'vitest'
-import { insetOf, viewportOf, type Rect } from '../src/editor/preview'
+import { insetOf, viewportOf, type Rect } from '../src/editor/view/preview'
 
 const rect = (left: number, top: number, width: number, height: number): Rect =>
   ({ left, top, width, height, right: left + width, bottom: top + height })

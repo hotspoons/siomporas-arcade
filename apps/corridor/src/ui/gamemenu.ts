@@ -14,9 +14,9 @@ import { MenuStack, type MenuItem, type MenuScreen } from '@apex/engine/app/Menu
 import { BindingCapture, applyBinding, holdMeter } from '@apex/engine/app/BindingCapture'
 import { keyLabel, padBindingLabel } from '@apex/engine/input/bindings'
 import type { UiEdges } from '@apex/engine/input/UiEdges'
-import type { GameInput } from '../gameinput'
-import type { GamePolicy, UiMode } from '../gamepolicy'
-import { ACTIONS, ACTION_LABELS, type Action, type GameSettings } from '../gamesettings'
+import type { GameInput } from '../game/move/gameinput'
+import type { GamePolicy, UiMode } from '../game/session/gamepolicy'
+import { ACTIONS, ACTION_LABELS, type Action, type GameSettings } from '../game/session/gamesettings'
 import type { UiSound } from './uisound'
 
 /** a setting with a fixed set of values: the menu steps through them with ‹ › */

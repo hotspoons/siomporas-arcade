@@ -6,7 +6,7 @@
 // minutes, and everything is symmetric about solar noon. A bug in the declination, the hour angle
 // or the azimuth quadrant breaks at least one of them.
 //   npx tsx probes/corridor-sun.mjs
-import { sunPosition, sunVector, WorldClock } from '../apps/corridor/src/sun.ts'
+import { sunPosition, sunVector, WorldClock } from '../apps/corridor/src/visuals/sun.ts'
 
 let fails = 0
 const ok = (what, cond, detail = '') => { console.log(`${cond ? 'ok  ' : 'FAIL'} ${what}${detail ? ` — ${detail}` : ''}`); if (!cond) fails++ }

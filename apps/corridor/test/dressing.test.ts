@@ -14,7 +14,7 @@ import { describe, expect, it } from 'vitest'
 import {
   RoadIndex, classify, frontWall, normalOf, onWall, planDressing, spaceAlong, storeysOf, walls,
   type DressingPart, type DressingSite, type Footprint,
-} from '../src/dressing'
+} from '../src/world/dressing'
 
 const KIT: DressingPart[] = JSON.parse(
   readFileSync(fileURLToPath(new URL('../../../tools/assetlib/specs/buildings-dressing.json', import.meta.url)), 'utf8'),

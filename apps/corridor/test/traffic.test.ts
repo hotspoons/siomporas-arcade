@@ -6,10 +6,10 @@
 // correctly and nothing about whether a road works.
 import { describe, expect, it } from 'vitest'
 import { addComponent, addEntity, query } from 'bitecs'
-import { OnRoad, Transform, Vehicle, Velocity } from '../src/actors'
-import { ActorWorld, STEP_S, spawnVehicle } from '../src/actorworld'
-import { Driver, JamGap, SpeedLimit, driveSystem, idm, makeDriver, rng } from '../src/traffic'
-import { DUMB, GREEN, RED, SignalGroup, SignalHead, SignalPrograms, buildSignals, sameAxis, signalSystem, type SignalProgram } from '../src/signals-ecs'
+import { OnRoad, Transform, Vehicle, Velocity } from '../src/game/actors/actors'
+import { ActorWorld, STEP_S, spawnVehicle } from '../src/game/actors/actorworld'
+import { Driver, JamGap, SpeedLimit, driveSystem, idm, makeDriver, rng } from '../src/game/traffic/traffic'
+import { DUMB, GREEN, RED, SignalGroup, SignalHead, SignalPrograms, buildSignals, sameAxis, signalSystem, type SignalProgram } from '../src/game/traffic/signals-ecs'
 
 /** a straight road with one signal on it, and `n` cars queued back from the stop line */
 function road(n: number, opts: { obeyRate?: number; seed?: number } = {}) {

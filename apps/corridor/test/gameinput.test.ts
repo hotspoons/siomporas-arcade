@@ -1,8 +1,8 @@
 // Keys and pad → pedals, hotkeys and menu edges, played without a browser: the key tracker is
 // pressed directly and the gamepad is a stub of `navigator.getGamepads`.
 import { afterEach, describe, expect, it } from 'vitest'
-import { GameInput, KeyTracker, typing } from '../src/gameinput'
-import { DEFAULT_KEYS, DEFAULT_PAD, DEFAULT_SETTINGS, engineGain, sfxGain } from '../src/gamesettings'
+import { GameInput, KeyTracker, typing } from '../src/game/move/gameinput'
+import { DEFAULT_KEYS, DEFAULT_PAD, DEFAULT_SETTINGS, engineGain, sfxGain } from '../src/game/session/gamesettings'
 
 /** a standard-mapping pad with one button and one axis set */
 function fakePad(buttons: Record<number, number> = {}, axes: Record<number, number> = {}) {

@@ -5,8 +5,8 @@
 // not recognise turned a rename to `test.xyz` into `test.xyz.ts` — a file with a name nobody
 // typed, which is how you end up with two of everything.
 import { describe, expect, it } from 'vitest'
-import { extOf, withExt } from '../src/ui/programpanel'
-import { relativeSpecifier } from '../src/ui/codeeditor'
+import { extOf, withExt } from '../src/editor/program/programpanel'
+import { relativeSpecifier } from '../src/editor/program/codeeditor'
 
 describe('the extension a typed path ends up with', () => {
   it('a NEW file with no extension gets .ts, because most of them are', () => {

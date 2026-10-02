@@ -5,8 +5,8 @@
 // hostile person with ONE query that mentions none of them.
 import { describe, expect, it } from 'vitest'
 import { addComponent, addEntity, hasComponent, query, removeComponent, getRelationTargets, removeEntity } from 'bitecs'
-import { Animal, Armed, AttachedTo, Autonomous, DrivenBy, Health, Hostile, Human, MemberOf, PHYS_MODE, Physical, Player, SETS, Transform, Vehicle, Velocity, Visual, Walking } from '../src/actors'
-import { ActorWorld, STEP_S, arm, cooldowns, face, integrate, mortality, setPhysical, spawnActor, spawnPedestrian, spawnVehicle, walk } from '../src/actorworld'
+import { Animal, Armed, AttachedTo, Autonomous, DrivenBy, Health, Hostile, Human, MemberOf, PHYS_MODE, Physical, Player, SETS, Transform, Vehicle, Velocity, Visual, Walking } from '../src/game/actors/actors'
+import { ActorWorld, STEP_S, arm, cooldowns, face, integrate, mortality, setPhysical, spawnActor, spawnPedestrian, spawnVehicle, walk } from '../src/game/actors/actorworld'
 
 describe('an enemy can take any form', () => {
   it('one query finds hostiles whatever they are attached to', () => {

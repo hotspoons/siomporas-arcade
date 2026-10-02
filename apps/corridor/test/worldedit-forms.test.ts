@@ -11,8 +11,8 @@
 import { describe, expect, it } from 'vitest'
 // the service's own rule, imported straight out of the service
 import { slugify } from '../../../tools/worldeditor/geo.mjs'
-import { slugFromName } from '../src/worldedit/slug'
-import { elapsed } from '../src/worldedit/runs'
+import { slugFromName } from '../src/editor/worldedit/slug'
+import { elapsed } from '../src/editor/worldedit/runs'
 
 describe('slugFromName', () => {
   it('turns a name into a slug the way a person would expect', () => {

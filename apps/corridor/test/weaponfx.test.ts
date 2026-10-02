@@ -2,7 +2,7 @@
 // lifetime; and the hardware mounted on a chassis.
 import { describe, expect, it } from 'vitest'
 import * as THREE from 'three'
-import { GunLayer, builtinGun, builtinLauncher, builtinMissile, mountWeapons } from '../src/weaponfx'
+import { GunLayer, builtinGun, builtinLauncher, builtinMissile, mountWeapons } from '../src/game/combat/weaponfx'
 import * as T from '../src/tuning'
 
 describe('GunLayer', () => {

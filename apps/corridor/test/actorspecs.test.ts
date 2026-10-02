@@ -6,14 +6,14 @@
 // ragdoll built from an 86 kg document weighs 86 kg AND one built from a 22 kg document does not.
 
 import { beforeAll, describe, expect, it } from 'vitest'
-import { KINDS } from '../src/classes'
+import { KINDS } from '../src/assets/classes'
 import { loadRapier, rapier } from '@apex/engine/physics/rapier'
 import { Ragdoll } from '@apex/engine/physics/ragdoll'
 import { PhysicsWorld } from '@apex/engine/physics/world'
 import {
   ACTOR_CLASSES, ACTOR_TEMPLATE_IDS, damageAfterArmour, defaultActor, describeActor, dps, hitsToKill, jumpDistance,
   jumpHeight, toRagdollLimbs, toSpawnOpts, validateActor, type ActorDoc,
-} from '../src/actorspecs'
+} from '../src/game/actors/actorspecs'
 
 beforeAll(async () => {
   await loadRapier()

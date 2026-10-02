@@ -17,7 +17,7 @@ const knobs = vi.hoisted(() => ({
 }))
 vi.mock('../src/tuning', () => knobs)
 
-import { treesFromCanopy } from '../src/props'
+import { treesFromCanopy } from '../src/world/props'
 
 afterEach(() => {
   knobs.TREE_CELL_M = 10

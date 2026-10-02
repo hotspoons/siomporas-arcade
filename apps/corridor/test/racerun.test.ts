@@ -7,8 +7,8 @@
 // line, does sitting in the marker retrigger, does finishing a circuit inside its own marker
 // restart it — so the whole session is driven here from a list of coordinates.
 import { describe, expect, it } from 'vitest'
-import { RaceSession, resultLines } from '../src/racerun'
-import type { Course } from '../src/races'
+import { RaceSession, resultLines } from '../src/game/race/racerun'
+import type { Course } from '../src/game/race/races'
 
 /** A stage along the x axis: enter at 0, start at 100, checkpoints, finish at 500. */
 const stage = (over: Partial<Course> = {}): Course => ({

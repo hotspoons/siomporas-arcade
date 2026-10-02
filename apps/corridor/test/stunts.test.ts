@@ -12,7 +12,7 @@ import {
   linkLength, linkPath, linksTo, pieceOf, ribbonGeometry, setEnd, STUNT_CELL, Stunts, stuntPieces, tangentOf,
   toSite, validateStunts,
   type Pose, type StuntFixture,
-} from '../src/stunts'
+} from '../src/game/stunt/stunts'
 
 const loop = (over: Partial<StuntFixture> = {}): StuntFixture =>
   ({ id: 'l1', name: 'The loop', piece: 'loop', at: [1000, 500], yaw_deg: 0, ...over })

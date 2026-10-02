@@ -33,7 +33,7 @@ const OUT = join(ROOT, 'apps/corridor/src/generated/program-types.json')
  * helpers, the ECS config shapes.
  */
 const ROOTS = [
-  'program.ts', 'actors.ts', 'actorworld.ts', 'ecsconfig.ts', 'traffic.ts',
+  'game/session/program.ts', 'game/actors/actors.ts', 'game/actors/actorworld.ts', 'game/session/ecsconfig.ts', 'game/traffic/traffic.ts',
   /*
    * THE THINGS A PROGRAM NAMES. Rich, 2026-09-29: *"make sure everything is listed in the code
    * editor"*. `api.races.get(id)` hands back a `Course`, `api.traffic` talks about zones and
@@ -41,14 +41,17 @@ const ROOTS = [
    * it the editor underlines a perfectly good line and offers no completion for the field you are
    * reaching for.
    */
-  'races.ts', 'racerun.ts', 'zones.ts', 'stunts.ts', 'trafficsets.ts', 'vehicles.ts',
+  'game/race/races.ts', 'game/race/racerun.ts', 'game/world/zones.ts', 'game/stunt/stunts.ts', 'game/traffic/trafficsets.ts', 'game/vehicle/vehicles.ts',
   /*
    * THE HUNT PRIMITIVE. Rich, 2026-09-29: *"make sure some primitives for object hunting objectives
    * with capture survive"* the removal of Squishy Hunt and Parkour. A program is where one gets
    * built now, so its types have to be reachable from the editor or it may as well not exist.
    */
-  'objectives.ts',
+  'game/session/objectives.ts',
 ]
+
+/** `@apex/program`, not `@apex/game/program`: the folder is an implementation detail. */
+const modName = (r) => r.replace(/\.ts$/, '').split('/').pop()
 
 /** Where a file lands in the virtual filesystem Monaco is given. */
 const vpath = (p) => `file:///${p.split('\\').join('/')}`
@@ -150,11 +153,12 @@ function build() {
    */
   const alias = {}
   for (const r of ROOTS) {
-    const name = r.replace(/\.ts$/, '')
-    if (!libs[vpath(`corridor/${name}.d.ts`)]) continue
+    const rel = r.replace(/\.ts$/, '')
+    const name = modName(r)
+    if (!libs[vpath(`corridor/${rel}.d.ts`)]) continue
     // from node_modules/@apex/<name>/index.d.ts, `../../..` is the root
-    libs[vpath(`node_modules/@apex/${name}/index.d.ts`)] = `export * from '../../../corridor/${name}'\n`
-    alias[`@apex/${name}`] = vpath(`corridor/${name}.d.ts`)
+    libs[vpath(`node_modules/@apex/${name}/index.d.ts`)] = `export * from '../../../corridor/${rel}'\n`
+    alias[`@apex/${name}`] = vpath(`corridor/${rel}.d.ts`)
   }
   libs[vpath('node_modules/bitecs/package.json')] = JSON.stringify({ name: 'bitecs', types: 'dist/core/index.d.ts' }, null, 1)
 

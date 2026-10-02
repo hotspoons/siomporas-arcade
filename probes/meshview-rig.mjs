@@ -42,7 +42,7 @@ await new Promise((r) => server.listen(0, '127.0.0.1', r))
 const base = `http://127.0.0.1:${server.address().port}`
 
 /*
- * `./shell` IS STUBBED, and only because of what it drags in.
+ * The shell import is stubbed, and only because of what it drags in.
  *
  * meshview.ts uses exactly one thing from it — `el`, a two-line element helper — but shell.ts
  * pulls in the whole UI kit, and something in that graph constructs a `URL` at module-eval time
@@ -56,7 +56,7 @@ const base = `http://127.0.0.1:${server.address().port}`
 const shellStub = {
   name: 'shell-stub',
   setup(b) {
-    b.onResolve({ filter: /^\.\/shell$/ }, () => ({ path: 'shell-stub', namespace: 'stub' }))
+    b.onResolve({ filter: /(?:^|\/)shell$/ }, () => ({ path: 'shell-stub', namespace: 'stub' }))
     b.onLoad({ filter: /.*/, namespace: 'stub' }, () => ({
       contents: `export const el = (tag, cls = '', text = '') => {
         const n = document.createElement(tag)
@@ -70,7 +70,7 @@ const shellStub = {
 }
 
 const bundle = await build({
-  stdin: { contents: "export * from './meshview'", resolveDir: 'apps/corridor/src/ui', loader: 'ts' },
+  stdin: { contents: "export * from './meshview'", resolveDir: 'apps/corridor/src/editor/library', loader: 'ts' },
   bundle: true, format: 'iife', globalName: 'MV', write: false, target: 'es2020',
   plugins: [shellStub],
   /*

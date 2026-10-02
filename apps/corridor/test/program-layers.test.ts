@@ -9,8 +9,8 @@
 // has no zones and no fixtures, and a program that closes a bridge must still be a program you can
 // step. So half of this file is about the empty case.
 import { describe, expect, it, vi } from 'vitest'
-import { defineGame, GameRun, type GameApi, type ProgramHost, type WorldLayersHost } from '../src/program'
-import { ActorWorld } from '../src/actorworld'
+import { defineGame, GameRun, type GameApi, type ProgramHost, type WorldLayersHost } from '../src/game/session/program'
+import { ActorWorld } from '../src/game/actors/actorworld'
 
 /*
  * `start()` IS ASYNC and the program body runs inside it, behind a guard that swallows throws — so a

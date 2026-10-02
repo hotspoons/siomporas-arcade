@@ -5,7 +5,7 @@
 // list is that you do not have to open a JSON file to find out what a program may be given, so a
 // list that covers one layer of four is worse than none — it tells you the others are empty.
 import { describe, expect, it } from 'vitest'
-import { countByKind, worldThings } from '../src/worldthings'
+import { countByKind, worldThings } from '../src/game/world/worldthings'
 
 const docs = {
   placements: { items: [{ id: 'p-01', asset: 'apartments-02', tags: ['apartments'] }] },

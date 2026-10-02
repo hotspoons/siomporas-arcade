@@ -4,7 +4,7 @@
 // that swallows a sibling, a count that stops at one level, a path ending in a slash becoming a
 // file with no name.
 import { describe, expect, it } from 'vitest'
-import { countIn, treeOf } from '../src/ui/filetree'
+import { countIn, treeOf } from '../src/editor/program/filetree'
 
 const rows = (...p: string[]) => p.map((path) => ({ path }))
 

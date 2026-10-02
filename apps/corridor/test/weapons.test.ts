@@ -5,11 +5,11 @@
 // number that makes a shotgun and a rifle comparable at all.
 
 import { describe, expect, it } from 'vitest'
-import { KINDS } from '../src/classes'
+import { KINDS } from '../src/assets/classes'
 import {
   burstDps, defaultWeapon, describeWeapon, dropAt, flightTime, magazineSeconds, shotsToKill,
   spreadRadiusAt, sustainedDps, validateWeapon, WEAPON_CLASS, WEAPON_KINDS, WEAPON_TEMPLATE_IDS,
-} from '../src/weapons'
+} from '../src/game/combat/weapons'
 
 describe('the templates', () => {
   it('has one per kind and every one validates clean', () => {

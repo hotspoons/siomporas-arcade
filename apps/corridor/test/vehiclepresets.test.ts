@@ -4,9 +4,9 @@
 // preset with twelve names — so the assertions here are as much about SPREAD as about correctness.
 
 import { describe, expect, it } from 'vitest'
-import { KINDS } from '../src/classes'
-import { VEHICLE_TEMPLATES, describeVehicle, effectiveTopSpeed, toDriveProfile, toVehicleSpec, validateVehicle, gearedTopSpeed } from '../src/vehicles'
-import { presetDoc, presetsFor, vehiclePreset, VEHICLE_PRESETS, VEHICLE_PRESET_IDS } from '../src/vehiclepresets'
+import { KINDS } from '../src/assets/classes'
+import { VEHICLE_TEMPLATES, describeVehicle, effectiveTopSpeed, toDriveProfile, toVehicleSpec, validateVehicle, gearedTopSpeed } from '../src/game/vehicle/vehicles'
+import { presetDoc, presetsFor, vehiclePreset, VEHICLE_PRESETS, VEHICLE_PRESET_IDS } from '../src/game/vehicle/vehiclepresets'
 
 describe('the library', () => {
   it('has a dozen or so, with unique ids', () => {

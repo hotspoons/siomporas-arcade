@@ -2,7 +2,7 @@
 // No DOM in it, so the whole contract — which view, what is hidden, what a typo does — is played
 // here rather than discovered in a browser.
 import { describe, expect, it } from 'vitest'
-import { GamePolicy, HUD_PARTS, SETTING_CONTROLS, SETTING_IDS, SETTING_TABS, resolveUiMode } from '../src/gamepolicy'
+import { GamePolicy, HUD_PARTS, SETTING_CONTROLS, SETTING_IDS, SETTING_TABS, resolveUiMode } from '../src/game/session/gamepolicy'
 
 describe('resolveUiMode', () => {
   it('lets the URL win over everything', () => {

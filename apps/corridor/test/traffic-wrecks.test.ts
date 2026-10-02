@@ -6,9 +6,9 @@
 // cars keep piling up in a game mode where all of the drivers are blind".
 import { describe, expect, it } from 'vitest'
 import { addComponent, removeComponent } from 'bitecs'
-import { OnRoad, Vehicle } from '../src/actors'
-import { ActorWorld, STEP_S, spawnVehicle } from '../src/actorworld'
-import { Driver, SpeedLimit, driveSystem, makeDriver, rng } from '../src/traffic'
+import { OnRoad, Vehicle } from '../src/game/actors/actors'
+import { ActorWorld, STEP_S, spawnVehicle } from '../src/game/actors/actorworld'
+import { Driver, SpeedLimit, driveSystem, makeDriver, rng } from '../src/game/traffic/traffic'
 
 function lane(blind = false) {
   const aw = new ActorWorld()

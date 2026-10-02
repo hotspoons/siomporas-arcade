@@ -16,10 +16,10 @@
 //   WALLS=4 node probes/corridor-dressingcost.mjs  # all four, the worst case
 import { readFileSync } from 'node:fs'
 const m = JSON.parse(readFileSync('tools/corridor/data/sites/crofton-triangle/web/manifest.json', 'utf8'))
-const { planDressing, RoadIndex } = await import('../apps/corridor/src/dressing.ts').catch(async () => {
+const { planDressing, RoadIndex } = await import('../apps/corridor/src/world/dressing.ts').catch(async () => {
   // no TS loader: compile on the fly with esbuild, which the repo already has
   const { build } = await import('esbuild')
-  const r = await build({ entryPoints: ['apps/corridor/src/dressing.ts'], bundle: true, format: 'esm', write: false, platform: 'node' })
+  const r = await build({ entryPoints: ['apps/corridor/src/world/dressing.ts'], bundle: true, format: 'esm', write: false, platform: 'node' })
   const { pathToFileURL } = await import('node:url')
   const { writeFileSync } = await import('node:fs')
   writeFileSync('/tmp/_dress.mjs', r.outputFiles[0].text)

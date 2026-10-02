@@ -9,7 +9,7 @@
 
 import { beforeAll, describe, expect, it } from 'vitest'
 import { PROFILES } from '@apex/engine/physics/profiles'
-import { KINDS } from '../src/classes'
+import { KINDS } from '../src/assets/classes'
 import { loadRapier, rapier } from '@apex/engine/physics/rapier'
 import { Vehicle } from '@apex/engine/physics/vehicle'
 import { PhysicsWorld } from '@apex/engine/physics/world'
@@ -18,7 +18,7 @@ import {
   mountPoint, mountYaw, originHeight, overrideRange, rebalanceGears,
   lampCounts, lampOffsets, peakTorque, toDriveProfile, toEngineTuning, toVehicleSpec, tractiveForce, validateVehicle,
   VEHICLE_CLASSES, VEHICLE_TEMPLATE_IDS, wheelBoneCount, type VehicleDoc,
-} from '../src/vehicles'
+} from '../src/game/vehicle/vehicles'
 
 beforeAll(async () => {
   await loadRapier()

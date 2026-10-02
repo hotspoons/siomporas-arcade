@@ -10,12 +10,12 @@
 // So these tests write small games and play them.
 import { describe, expect, it, vi } from 'vitest'
 import { addComponent, addEntity, query } from 'bitecs'
-import { ActorWorld } from '../src/actorworld'
-import { Transform, Vehicle } from '../src/actors'
+import { ActorWorld } from '../src/game/actors/actorworld'
+import { Transform, Vehicle } from '../src/game/actors/actors'
 import {
   GameRun, HIDEABLE, TRANSPORT, defineGame, inZone,
   type GameApi, type GameDef, type ProgramHost, type Transport,
-} from '../src/program'
+} from '../src/game/session/program'
 
 /** A host with no renderer behind it: the player is wherever the test last put them. */
 function host(at: { x: number; y: number; z?: number } = { x: 0, y: 0 }) {

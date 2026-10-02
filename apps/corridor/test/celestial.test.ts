@@ -18,8 +18,8 @@
 
 import { describe, expect, it } from 'vitest'
 import * as THREE from 'three'
-import { altAzOf, celestialToWorld, julianDate, lmst, moonPosition, radecToVec, sunPositionEq } from '../src/celestial'
-import { sunPosition } from '../src/sun'
+import { altAzOf, celestialToWorld, julianDate, lmst, moonPosition, radecToVec, sunPositionEq } from '../src/visuals/celestial'
+import { sunPosition } from '../src/visuals/sun'
 
 /** Crofton, Maryland — the site most of this repo is built around. */
 const LAT = 39.004

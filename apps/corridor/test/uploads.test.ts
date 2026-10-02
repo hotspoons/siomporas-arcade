@@ -6,7 +6,7 @@
 // first's upload ranges, and a full re-seat that was demoted to a partial upload by the ranged
 // write that came after it.
 import { describe, expect, it } from 'vitest'
-import { Uploads } from '../src/uploads'
+import { Uploads } from '../src/assets/uploads'
 
 describe('Uploads', () => {
   it('starts with nothing pending', () => {

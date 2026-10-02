@@ -1,0 +1,498 @@
+// The Stage panel: a level — a baked world, dressed, and given something to do.
+//
+// Everything behind this has existed for hours and was reachable only with curl, which is the
+// same as not existing. `levels.mjs` validates, the viewer's `level.ts` applies, and this is the
+// surface: pick a world, set when it opens and what the weather is doing, name the simulations
+// running in it, write the scenario, and open it in the viewer.
+//
+// WHAT IT REFUSES IS THE INTERESTING PART. The validator's vocabulary — the facts a scenario may
+// test and the actions an event may take — comes from the SERVER, listed in `GET /api/levels`, so
+// the panel shows the same words the validator will accept rather than a copy that can drift from
+// them. An event testing `rage_meter` is refused with the list of facts that do exist, here, in
+// front of the person writing it, instead of saving cleanly and never firing.
+
+import { button, el, toast } from '../../ui/shell'
+import { bodyOf, empty, group, readout, select, textField, toggle } from '../../ui/controls'
+import { icon } from '../../ui/icons'
+import { api, type Level } from './api'
+import { assetsvc, type AssetItem } from '../../assets/assetsvc'
+import { typeOf } from '../../assets/classes'
+// PROFILES only — `profiles.ts` is pure data with no imports of its own, so the world editor does
+// not drag Rapier into its bundle to offer five strings, and there is no second copy to drift.
+import { PROFILES } from '@apex/engine/physics/profiles'
+
+const hint = (text: string, warn = false) => {
+  const p = el('div', `panel-hint${warn ? ' warn' : ''}`)
+  p.append(icon(warn ? 'exclamation-triangle' : 'information-circle', 14), el('span', '', text))
+  return p
+}
+
+export interface StageOpts {
+  host: HTMLElement
+  /** worlds that are actually baked on this volume — a level for anything else cannot open */
+  bakedWorlds: () => string[]
+  /** open the viewer on this level */
+  play: (level: Level) => void
+  onDirty: (dirty: boolean) => void
+}
+
+const WEATHERS = ['clear', 'cloud', 'overcast', 'rain', 'storm', 'wet', 'snow']
+const SEASONS = ['spring', 'summer', 'autumn', 'winter']
+
+export class StagePanel {
+  private levels: Level[] = []
+  private facts: Record<string, string> = {}
+  private actions: Record<string, string> = {}
+  private modes: string[] = ['drive', 'fly', 'walk']
+  /** the points of each world, fetched once per panel life */
+  private points = new Map<string, { id: string; name: string; kind: string; mode?: string }[]>()
+  /** what the library holds that can be driven; empty when the asset service is not configured */
+  private vehicles: AssetItem[] = []
+  private draft: Level | null = null
+  private dirty = false
+  private problems: { errors: string[]; warnings: string[] } = { errors: [], warnings: [] }
+
+  private o: StageOpts
+
+  constructor(o: StageOpts) {
+    this.o = o
+  }
+
+  async load() {
+    try {
+      const r = await api.levels()
+      this.levels = r.levels
+      this.facts = r.facts ?? {}
+      this.actions = r.actions ?? {}
+      this.modes = r.modes ?? this.modes
+      /*
+       * The library's vehicles, for the player picker. Fire and forget and never fatal: the asset
+       * service is optional, and a level whose car you cannot choose is still a level you can edit.
+       */
+      this.vehicles = await assetsvc.list().then((all) => all.filter((it) => typeOf(it) === 'vehicle')).catch(() => [])
+    } catch (e) {
+      this.levels = []
+      toast(`levels: ${(e as Error).message}`, 'warn', 5000)
+    }
+    this.render()
+  }
+
+  private mark(d: boolean) {
+    this.dirty = d
+    this.o.onDirty(d)
+  }
+
+  /** Ask the server, not a copy of its rules — the same call the agent makes before it writes. */
+  private async check() {
+    if (!this.draft) return
+    try {
+      const v = await api.validateLevel(this.draft)
+      this.problems = { errors: v.errors, warnings: v.warnings }
+    } catch (e) {
+      this.problems = { errors: [(e as Error).message], warnings: [] }
+    }
+    this.render()
+  }
+
+  private edit(l: Level | null) {
+    this.draft = l ? JSON.parse(JSON.stringify(l)) : null
+    this.problems = { errors: [], warnings: [] }
+    this.mark(false)
+    this.render()
+    if (this.draft) void this.check()
+  }
+
+  private blank() {
+    const baked = this.o.bakedWorlds()
+    this.edit({
+      id: '',
+      world: baked[0] ?? '',
+      defaults: { time: '17:30', weather: 'clear', season: 'summer' },
+      mode: 'drive',
+      placements: [],
+      splats: [],
+      simulations: [],
+      scenario: null,
+    })
+  }
+
+  render() {
+    const host = this.o.host
+    host.replaceChildren()
+
+    if (!this.draft) {
+      host.append(hint('A baked world with the lights set, things put in it, and something to do.'))
+      const list = group('Levels')
+      const lb = bodyOf(list)
+      if (!this.levels.length) lb.append(empty('no levels yet'))
+      const ordered = [...this.levels].sort((a, b) => (a.order ?? 1e9) - (b.order ?? 1e9) || a.id.localeCompare(b.id))
+      for (const l of ordered) {
+        const flags = [l.launch ? 'launch' : '', l.home ? 'home' : ''].filter(Boolean).join(', ')
+        const row = el('button', 'row')
+        row.append(el('span', 'row-name', l.id), el('span', 'row-note', `${l.world}${l.order != null ? ` · ${l.order}` : ''}${flags ? ` · ${flags}` : ''}${l.defaults?.time ? ` · ${l.defaults.time}` : ''}${l.scenario ? ' · scenario' : ''}`))
+        row.onclick = () => this.edit(l)
+        lb.append(row)
+      }
+      lb.append(button({ label: 'New level', icon: 'plus', onClick: () => this.blank() }))
+      host.append(list)
+      return
+    }
+
+    const d = this.draft
+    const baked = this.o.bakedWorlds()
+
+    /* what and where */
+    const what = group('The level')
+    const wb = bodyOf(what)
+    wb.append(
+      textField({
+        label: 'id',
+        value: d.id,
+        onChange: (v) => {
+          d.id = v.trim()
+          this.mark(true)
+          void this.check()
+        },
+      }),
+    )
+    if (baked.length) {
+      wb.append(
+        select({
+          label: 'world',
+          value: baked.includes(d.world) ? d.world : baked[0],
+          options: baked.map((w) => ({ value: w, label: w })),
+          onChange: (v) => {
+            d.world = v
+            this.mark(true)
+            void this.check()
+          },
+        }),
+      )
+    } else {
+      wb.append(hint('nothing is baked on this volume yet — bake a world first', true))
+    }
+    wb.append(
+      select({
+        label: 'mode',
+        value: d.mode ?? 'drive',
+        options: this.modes.map((m) => ({ value: m, label: m })),
+        onChange: (v) => {
+          d.mode = v
+          this.mark(true)
+        },
+      }),
+    )
+    /*
+     * WHERE YOU START: one of the world's points (the site editor's Points tab). Nothing chosen is
+     * the world's home, and a world with no home opens at the bake's photo station as it always
+     * did. The list is fetched for the level's world; a world with no points.json has none.
+     */
+    const startSel = select({
+      label: 'start at',
+      value: d.start ?? '',
+      options: [{ value: '', label: 'the world’s home' }, ...(this.points.get(d.world) ?? []).map((p) => ({ value: p.id, label: `${p.name} (${p.kind}${p.mode ? `, ${p.mode}` : ''})` }))],
+      note: 'a point from the world’s Points tab; the point’s own mode wins over the level’s',
+      onChange: (v) => {
+        d.start = v || null
+        this.mark(true)
+      },
+    })
+    wb.append(startSel)
+    const others = this.levels.filter((l) => l.id !== d.id)
+    const stageOpt = [
+      { value: '', label: 'stay on this stage' },
+      { value: 'home', label: 'back to the home stage' },
+      ...others.map((l) => ({ value: l.id, label: l.name ? `${l.name} (${l.id})` : l.id })),
+    ]
+    const game = group('Where it sits in the game')
+    const gb = bodyOf(game)
+    gb.append(
+      textField({
+        label: 'order',
+        value: d.order == null ? '' : String(d.order),
+        note: 'lower numbers come first. Blank leaves it at the end',
+        onChange: (v) => {
+          const n = Number(v)
+          if (v.trim() === '' || !Number.isFinite(n)) delete d.order
+          else d.order = n
+          this.mark(true)
+        },
+      }),
+      toggle({
+        label: 'home stage',
+        value: !!d.home,
+        note: 'a stage whose next says home comes back here',
+        onChange: (v) => { d.home = v; this.mark(true) },
+      }),
+      toggle({
+        label: 'launch into this',
+        value: !!d.launch,
+        note: 'the stage a deployed game opens on, when nobody named one in the address',
+        onChange: (v) => { d.launch = v; this.mark(true) },
+      }),
+      select({
+        label: 'after a win',
+        value: d.next ?? '',
+        options: stageOpt,
+        note: 'nothing chosen stays here. home returns to the launch stage',
+        onChange: (v) => { d.next = v || null; this.mark(true) },
+      }),
+      select({
+        label: 'after a loss',
+        value: d.onFail ?? '',
+        options: [{ value: '', label: 'the same as a win' }, ...stageOpt.filter((o) => o.value)],
+        onChange: (v) => { d.onFail = v || null; this.mark(true) },
+      }),
+    )
+    if (!this.points.has(d.world)) {
+      void fetch(`/sites/${d.world}/points.json`, { cache: 'no-cache' })
+        .then(async (r) => (r.ok ? ((await r.json()) as { points?: { id: string; name: string; kind: string; mode?: string }[] }).points ?? [] : []))
+        .catch(() => [])
+        .then((pts) => { this.points.set(d.world, pts); this.render() })
+    }
+    host.append(what, game)
+
+    /*
+     * WHAT YOU DRIVE — the link that did not exist.
+     *
+     * Rich, 2026-09-29: "I have no idea how to take a car model and attach a physics model to it,
+     * configure the engine sound and performance, overall car performance, and use it in a level."
+     * The last clause had no answer: a level could place a car as SCENERY, and the engine spawned
+     * a procedural box whatever the library held.
+     *
+     * THE HANDLING IS NOT HERE. Mass, wheelbase, gearing and the engine note are on the ASSET —
+     * they are facts about the car, and a level that copied them would go stale the moment
+     * somebody tuned it. Only the profile is a fact about the level, because the same car is a
+     * different game in `sim` and in `taxi`. The link below goes to where the numbers are.
+     */
+    if (d.mode === 'drive' || d.mode === undefined) {
+      const who = group('What you drive')
+      const pb = bodyOf(who)
+      if (!this.vehicles.length) {
+        pb.append(hint('no vehicles in the library — anything classed hero-car, traffic, emergency, commercial-vehicle or motorcycle shows up here', true))
+      } else {
+        pb.append(
+          select({
+            label: 'vehicle',
+            value: d.player?.vehicle ?? '',
+            options: [
+              { value: '', label: 'the engine\u2019s built-in car' },
+              ...this.vehicles.map((v) => ({ value: v.id, label: `${v.id} · ${v.kind}${v.vehicle ? '' : ' (no dynamics yet)'}` })),
+            ],
+            onChange: (v) => {
+              if (!v) delete d.player
+              else d.player = { ...(d.player ?? {}), vehicle: v }
+              this.mark(true)
+              this.render()
+              void this.check()
+            },
+          }),
+        )
+        if (d.player?.vehicle) {
+          const car = this.vehicles.find((v) => v.id === d.player!.vehicle)
+          pb.append(
+            select({
+              label: 'handling',
+              value: d.player.profile ?? 'street',
+              options: Object.keys(PROFILES).map((x) => ({ value: x, label: x })),
+              onChange: (v) => {
+                d.player = { ...(d.player ?? { vehicle: '' }), profile: v }
+                this.mark(true)
+                void this.check()
+              },
+            }),
+          )
+          /*
+           * SAY WHEN THE CAR HAS NO NUMBERS, and say where to put them. A vehicle with no
+           * dynamics document drives on its class defaults, which is a working car and not an
+           * error — but it is also the reason somebody would think the physics "does not work",
+           * so it is stated here rather than discovered at speed.
+           */
+          if (!car?.vehicle) {
+            pb.append(hint(`${d.player.vehicle} has no dynamics saved — it will drive on ${car?.kind ?? 'its class'} defaults. Assets \u2192 Vehicles \u2192 ${d.player.vehicle} \u2192 Dynamics.`, true))
+          }
+          // unrigged is FINE and must not read as a problem: the engine's wheels come from the
+          // wheelbase and track, and only the visible wheels ever needed bones
+          const wheels = (car?.rig?.roles?.wheel ?? []).length
+          pb.append(readout('wheels', wheels >= 4 ? `${wheels} bones — they will turn` : 'no rig — it drives the same, the wheels just will not turn'))
+        }
+      }
+      host.append(who)
+    }
+
+    /* what it opens like */
+    const look = group('What it opens like')
+    const kb = bodyOf(look)
+    d.defaults ??= {}
+    kb.append(
+      textField({
+        label: 'time',
+        value: d.defaults.time ?? '17:30',
+        onChange: (v) => {
+          d.defaults!.time = v.trim()
+          this.mark(true)
+          void this.check()
+        },
+      }),
+      select({
+        label: 'weather',
+        value: d.defaults.weather ?? 'clear',
+        options: WEATHERS.map((w) => ({ value: w, label: w })),
+        onChange: (v) => {
+          d.defaults!.weather = v
+          this.mark(true)
+        },
+      }),
+      select({
+        label: 'season',
+        value: d.defaults.season ?? 'summer',
+        options: SEASONS.map((s) => ({ value: s, label: s })),
+        onChange: (v) => {
+          d.defaults!.season = v
+          this.mark(true)
+        },
+      }),
+    )
+    host.append(look)
+
+    /* what is running in it */
+    const sim = group('Running in it')
+    const sb = bodyOf(sim)
+    d.simulations ??= []
+    if (!d.simulations.length) sb.append(empty('nothing running'))
+    for (const [i, s] of d.simulations.entries()) {
+      sb.append(readout(String(s.kind), `${s.density ?? 'normal'}${s.seed !== undefined ? ` · seed ${s.seed}` : ''}`))
+      sb.append(
+        button({
+          label: 'remove',
+          icon: 'trash',
+          onClick: () => {
+            d.simulations!.splice(i, 1)
+            this.mark(true)
+            void this.check()
+          },
+        }),
+      )
+    }
+    sb.append(
+      button({
+        label: 'Add traffic',
+        icon: 'plus',
+        onClick: () => {
+          // a seed, always: it is what makes a run repeatable, and the validator refuses a
+          // fractional one for the same reason
+          d.simulations!.push({ kind: 'traffic', density: 'rush', seed: Math.floor(Math.random() * 1000) })
+          this.mark(true)
+          void this.check()
+        },
+      }),
+    )
+    host.append(sim)
+
+    /* the scenario */
+    // NOT COLLAPSED WHEN THERE IS NOTHING IN IT. The first version collapsed this group when the
+    // level had no scenario — which hid the only button that adds one, precisely in the state
+    // where you need it. A section is collapsed because it is long, not because it is empty.
+    const sc = group('Something to do', {
+    })
+    const cb = bodyOf(sc)
+    if (!d.scenario) {
+      cb.append(
+        empty('no scenario: this is a world to drive around in'),
+        button({
+          label: 'Add a scenario',
+          icon: 'flag',
+          onClick: () => {
+            d.scenario = { goal: { type: 'score', target: 5000, time_s: 300 }, events: [], scoring: [{ event: 'wreck', points: 100 }] }
+            this.mark(true)
+            void this.check()
+          },
+        }),
+      )
+    } else {
+      const g = d.scenario.goal ?? { type: 'score' }
+      cb.append(
+        readout('goal', `${g.type}${g.target ? ` ${g.target}` : ''}${g.time_s ? ` in ${g.time_s}s` : ''}`),
+        readout('scoring', (d.scenario.scoring ?? []).map((r) => `${r.event} ${r.points}${r.per ? `/${r.per}` : ''}`).join(', ') || 'nothing'),
+      )
+      // THE FACTS COME FROM THE SERVER. A condition on something the engine does not measure
+      // saves cleanly and never fires, so the words it will accept are shown next to the field.
+      const facts = Object.keys(this.facts)
+      cb.append(hint(`Conditions read: ${facts.join(', ') || '(ask the server)'}`))
+      cb.append(hint(`Events may: ${Object.keys(this.actions).join(', ')}`))
+      for (const [i, ev] of (d.scenario.events ?? []).entries()) {
+        cb.append(readout(`when ${ev.when}`, `${ev.do}${ev.text ? ` “${String(ev.text).slice(0, 28)}”` : ''}`))
+        cb.append(button({ label: 'remove', icon: 'trash', onClick: () => { d.scenario!.events!.splice(i, 1); this.mark(true); void this.check() } }))
+      }
+      const whenF = textField({ label: 'when', value: '', placeholder: facts[0] ? `${facts[0]} >= 100` : 'score >= 100', onChange: () => {} })
+      const doF = textField({ label: 'message', value: '', placeholder: 'Traffic is now worse than you found it.', onChange: () => {} })
+      cb.append(whenF, doF)
+      cb.append(
+        button({
+          label: 'Add event',
+          icon: 'plus',
+          onClick: () => {
+            const when = (whenF.querySelector('input') as HTMLInputElement)?.value.trim()
+            const text = (doF.querySelector('input') as HTMLInputElement)?.value.trim()
+            if (!when) return toast('an event needs a condition', 'warn', 3000)
+            d.scenario!.events ??= []
+            d.scenario!.events.push({ when, do: 'message', text })
+            this.mark(true)
+            void this.check()
+          },
+        }),
+      )
+    }
+    host.append(sc)
+
+    /* what is wrong with it, said before it is saved */
+    if (this.problems.errors.length || this.problems.warnings.length) {
+      const bad = group(this.problems.errors.length ? 'This will not save' : 'Worth knowing')
+      const bb = bodyOf(bad)
+      for (const e of this.problems.errors) bb.append(hint(e, true))
+      for (const w of this.problems.warnings) bb.append(hint(w))
+      host.append(bad)
+    }
+
+    /* and the actions */
+    const acts = el('div', 'panel-actions')
+    acts.append(
+      button({
+        label: this.levels.some((l) => l.id === d.id) ? 'Save' : 'Create',
+        icon: 'check',
+        variant: 'primary',
+        onClick: () => {
+          if (this.problems.errors.length) return toast(this.problems.errors[0], 'warn', 6000)
+          void this.save()
+        },
+      }),
+      button({
+        label: 'Play',
+        icon: 'play',
+        onClick: () => {
+          if (this.problems.errors.length) return toast('this level does not validate yet', 'warn', 4000)
+          if (this.dirty) return toast('save it first — the viewer reads what is on the volume', 'warn', 4000)
+          this.o.play(d)
+        },
+      }),
+      button({ label: 'Close', icon: 'x-mark', onClick: () => this.edit(null) }),
+    )
+    host.append(acts)
+  }
+
+  private async save() {
+    const d = this.draft
+    if (!d) return
+    try {
+      const exists = this.levels.some((l) => l.id === d.id)
+      const r = exists ? await api.saveLevel(d.id, d) : await api.createLevel(d)
+      toast(`${r.level.id} saved`, 'ok', 2500)
+      for (const w of r.warnings ?? []) toast(w, 'warn', 5000)
+      this.mark(false)
+      await this.load()
+      this.edit(r.level)
+    } catch (e) {
+      toast(`could not save: ${(e as Error).message}`, 'danger', 6000)
+    }
+  }
+}

@@ -5,13 +5,13 @@
 // point outside gets nothing at all, a small zone inside a big one wins, and the same seed gives
 // the same rush hour twice.
 import { describe, expect, it } from 'vitest'
-import { ActorWorld } from '../src/actorworld'
-import { rng } from '../src/traffic'
-import { spawnZones, stateOf, TrafficArea, trigger, zoneSystem } from '../src/zones-ecs'
+import { ActorWorld } from '../src/game/actors/actorworld'
+import { rng } from '../src/game/traffic/traffic'
+import { spawnZones, stateOf, TrafficArea, trigger, zoneSystem } from '../src/game/world/zones-ecs'
 import {
   carsFor, describeTraffic, FREE_FLOW_PER_KM, JAM_PER_KM, levelOf, rollDensity, TRAFFIC_LEVELS,
   trafficColour, validateZones, vehiclesPerKm, Zones, type Zone,
-} from '../src/zones'
+} from '../src/game/world/zones'
 
 const box = (x0: number, y0: number, x1: number, y1: number): [number, number][] =>
   [[x0, y0], [x1, y0], [x1, y1], [x0, y1]]

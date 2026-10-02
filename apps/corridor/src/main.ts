@@ -2514,6 +2514,52 @@ function armShadows(root: THREE.Object3D) {
   })
 }
 
+/**
+ * Shift a colour in HSV. Hue is degrees, saturation and value are multiples of the colour as
+ * passed in, so 0 / 1 / 1 gives it back and value 0 is black.
+ */
+function shiftHsv(out: THREE.Color, hueDeg: number, sat: number, val: number): THREE.Color {
+  if (hueDeg === 0 && sat === 1 && val === 1) return out
+  const hsl = { h: 0, s: 0, l: 0 }
+  out.getHSL(hsl)
+  const l = hsl.l
+  const v = l + hsl.s * Math.min(l, 1 - l)
+  const sv = v <= 0 ? 0 : 2 * (1 - l / v)
+  const v2 = THREE.MathUtils.clamp(v * val, 0, 1)
+  const s2 = THREE.MathUtils.clamp(sv * sat, 0, 1)
+  const l2 = v2 * (1 - s2 / 2)
+  const sHsl = l2 <= 0 || l2 >= 1 ? 0 : (v2 - l2) / Math.min(l2, 1 - l2)
+  out.setHSL((hsl.h + hueDeg / 360 + 1) % 1, THREE.MathUtils.clamp(sHsl, 0, 1), l2)
+  return out
+}
+
+/** The night blue (0x05080f), shifted by the night-sky knobs. */
+function nightSkyColor(out: THREE.Color): THREE.Color {
+  out.setHex(0x05080f)
+  return shiftHsv(out, T.SKY_NIGHT_HUE, T.SKY_NIGHT_SAT, T.SKY_NIGHT_VAL)
+}
+
+/**
+ * Which cumulus deck is up. The three weights meet at the horizon, so sunrise and sunset share
+ * one setting and noon and midnight do not borrow it.
+ */
+function skyClouds(el: number): number {
+  const up = THREE.MathUtils.smoothstep(el, -2, 10)
+  const down = 1 - THREE.MathUtils.smoothstep(el, -8, 2)
+  const twi = Math.max(0, 1 - up - down)
+  const sum = up + down + twi || 1
+  return (up * T.SKY_CLOUDS_DAY + twi * T.SKY_CLOUDS_TWILIGHT + down * T.SKY_CLOUDS_NIGHT) / sum
+}
+
+/** Noise-space travel for one cloud layer. Heading is clockwise from north; speed 1 is `base`. */
+function cloudWind(headingDeg: number, speed: number, base: number, out: THREE.Vector2): THREE.Vector2 {
+  const rad = headingDeg * Math.PI / 180
+  return out.set(Math.sin(rad), -Math.cos(rad)).multiplyScalar(base * speed)
+}
+
+const cirrusWind = new THREE.Vector2()
+const cumulusWind = new THREE.Vector2()
+
 function applySky(s: Season, env = true) {
   const look = styled(LOOK[s], style)
   const def = STYLE[style]
@@ -2531,9 +2577,12 @@ function applySky(s: Season, env = true) {
   // These mixes happen in the renderer's LINEAR working space (three converts on setHex), so a
   // mix of 0.92 toward a dark blue still reads as a mid slate once it is written back out to
   // sRGB. The numbers are chosen against what the screen shows, not against the arithmetic.
-  const NIGHT_SKY = new THREE.Color(0x05080f)
-  const DUSK = new THREE.Color(0xe8a765)
-  const sky = look.sky.clone().lerp(w.skyTint, w.skyMix).lerp(DUSK, Math.min(0.9, golden * 0.45 * T.SUNSET_BOLD)).lerp(NIGHT_SKY, night * 0.985)
+  const NIGHT_SKY = nightSkyColor(new THREE.Color())
+  const DUSK = shiftHsv(new THREE.Color(0xe8a765), T.SKY_SUNSET_HUE, T.SKY_SUNSET_SAT, T.SKY_SUNSET_VAL)
+  const SUNSET = shiftHsv(new THREE.Color(0xff6b2a), T.SKY_SUNSET_HUE, T.SKY_SUNSET_SAT, T.SKY_SUNSET_VAL)
+  const SUNSET_LAMP = shiftHsv(new THREE.Color(0xff8a3d), T.SKY_SUNSET_HUE, T.SKY_SUNSET_SAT, T.SKY_SUNSET_VAL)
+  const dayBase = shiftHsv(look.sky.clone(), T.SKY_DAY_HUE, T.SKY_DAY_SAT, T.SKY_DAY_VAL)
+  const sky = dayBase.lerp(w.skyTint, w.skyMix).lerp(DUSK, Math.min(0.9, golden * 0.45 * T.SUNSET_BOLD)).lerp(NIGHT_SKY, night * 0.985)
   ;(scene.background as THREE.Color).copy(sky)
   ;(scene.fog as THREE.FogExp2).color.copy(sky)
   ;(scene.fog as THREE.FogExp2).density = look.fog * w.fogScale
@@ -2556,24 +2605,45 @@ function applySky(s: Season, env = true) {
   }
   skyNight = night
   skyCover = Math.min(1, 0.3 + (def.sky?.cloudBias ?? 0) + 0.7 * w.skyMix)
+  const zenith = shiftHsv(def.sky ? def.sky.zenith.clone() : look.sky.clone().lerp(new THREE.Color(0x4f86d2), 0.55), T.SKY_DAY_HUE, T.SKY_DAY_SAT, T.SKY_DAY_VAL).lerp(w.skyTint, w.skyMix).lerp(NIGHT_SKY, night * 0.99)
+  // The wash is the air at the horizon. By day it is its own colour. At night it is too, except
+  // while the sun is near the horizon: there it follows the zenith, which is already moving
+  // through the sunset, and eases back to the night colour as the sun drops.
+  const dayAtten = shiftHsv(new THREE.Color(0xc5daf2), T.SKY_DAY_ATTEN_HUE, T.SKY_DAY_ATTEN_SAT, T.SKY_DAY_ATTEN_VAL)
+  const nightAtten = shiftHsv(new THREE.Color(0x1a2844), T.SKY_NIGHT_ATTEN_HUE, T.SKY_NIGHT_ATTEN_SAT, T.SKY_NIGHT_ATTEN_VAL)
+  const track = Math.exp(-(sunAt.el * sunAt.el) / (2 * 7 * 7))
+  const atten = dayAtten.lerp(nightAtten.lerp(zenith, track), night)
+  const attenAmt = THREE.MathUtils.lerp(T.SKY_DAY_ATTEN, T.SKY_NIGHT_ATTEN, night)
+  const attenSlope = THREE.MathUtils.lerp(T.SKY_DAY_ATTEN_SLOPE, T.SKY_NIGHT_ATTEN_SLOPE, night)
+  const horizonFog = sky.clone().lerp(atten, attenAmt)
+  ;(scene.background as THREE.Color).copy(horizonFog)
+  ;(scene.fog as THREE.FogExp2).color.copy(horizonFog)
   skyDome.set({
-    zenith: (def.sky ? def.sky.zenith.clone() : look.sky.clone().lerp(new THREE.Color(0x4f86d2), 0.55)).lerp(w.skyTint, w.skyMix).lerp(NIGHT_SKY, night * 0.99),
+    zenith,
     horizon: sky,
     cover: skyCover,
     haze: Math.min(1, 0.35 + w.skyMix * 0.6),
     sunDir: sunAt.dir,
-    sunColour: look.sun.colour.clone().lerp(new THREE.Color(0xff6b2a), Math.min(0.95, golden * 0.8 * T.SUNSET_BOLD)),
+    sunColour: look.sun.colour.clone().lerp(SUNSET, Math.min(0.95, golden * 0.8 * T.SUNSET_BOLD)),
     night,
     // the dome's procedural stars are the FALLBACK: a hash has no Orion in it, so once the real
     // catalogue is loaded the dome draws none and `stars.ts` owns them
     stars: stars ? 0 : T.SKY_STARS,
     cirrus: T.SKY_CIRRUS * (1 - w.skyMix * 0.6),
+    cirrusAmt: T.SKY_CIRRUS_AMOUNT,
+    cirrusWind: cloudWind(T.SKY_CIRRUS_HEADING, T.SKY_CIRRUS_SPEED, 0.001709, cirrusWind),
+    clouds: skyClouds(sunAt.el),
+    cumulusAmt: T.SKY_CUMULUS_AMOUNT,
+    cumulusWind: cloudWind(T.SKY_CUMULUS_HEADING, T.SKY_CUMULUS_SPEED, 0.004272, cumulusWind),
+    atten,
+    attenSlope,
+    attenAmt,
     moonDir: sunAt.moon,
     moonPhase: sunAt.phase,
   })
   // the sun's own colour reddens as it drops, and it hands over to the moon below the horizon
   const moonUp = THREE.MathUtils.smoothstep(sunAt.moon.y, -0.05, 0.25)
-  sun.color.copy(look.sun.colour).lerp(new THREE.Color(0xff8a3d), Math.min(0.95, golden * 0.85 * T.SUNSET_BOLD)).lerp(new THREE.Color(0x9fb4de), night)
+  sun.color.copy(look.sun.colour).lerp(SUNSET_LAMP, Math.min(0.95, golden * 0.85 * T.SUNSET_BOLD)).lerp(new THREE.Color(0x9fb4de), night)
   // overcast: the sun goes down and the sky comes up, which is what a grey day actually is
   const moonlight = T.MOON_LIGHT * sunAt.phase * moonUp
   sun.intensity = look.sun.intensity * (1 - 0.72 * w.skyMix) * (day + night * moonlight)

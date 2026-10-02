@@ -21,7 +21,7 @@ import { GRASS_TYPES, GROUND_COVER, floorTexture, siteCover } from './groundcove
 import { loadFlora, type Flora } from './flora'
 import { CROP_TYPES, buildCrops, setCropLight, tickCrops, type CropType, type Field as CropField } from './crops'
 import { ACCUM_PARS, Precipitation, WEATHER, accumUniforms, type Weather, type WeatherLook } from '../visuals/weather'
-import { buildStrip, sinkUnderStrips } from './strip'
+import { buildStrip, refreshNormals, sinkUnderStrips } from './strip'
 import { Budget } from './budget'
 import { Adjustments, NEUTRAL as NEUTRAL_ADJ } from './adjust'
 import { buildPlacements, loadCatalog, loadPlacements } from './placements'
@@ -32,7 +32,7 @@ import { buildBarriers, buildFurniture, buildSidewalks, sidewalkCover } from './
 import { buildBlades, buildCrosswalks, buildLaneArrows, buildSignals, buildStopBars, junctionPaintCut, loadJunctionFacts, type ArrowsResult, type BarsResult, type CrosswalksResult } from './intersections'
 import { buildParking, parkingCover } from './parking'
 import { buildBridges, flattenSpine, loadStructureOverrides, suppressed } from './structures'
-import { isKerbed, loadSurfaceSets, overpassMesh, pavedOffset, pavedWidth, repaintMarkings, roadMesh, stations, taperedLanes, treesFromCanopy, type SurfaceSet } from './props'
+import { isKerbed, loadSurfaceSets, overpassMesh, pavedOffset, pavedWidth, repaintMarkings, roadMesh, roadMeshPaced, stations, taperedLanes, treesFromCanopy, type SurfaceSet } from './props'
 import { STYLE, styled, type Style } from '../visuals/style'
 import { buildRocks } from './rocks'
 import { buildWater } from './water'
@@ -1247,14 +1247,15 @@ if (uLodOn > 0.5) {
   let setSeason: (season: Season) => void = () => {}
   let groundAtWorld: (x: number, z: number) => number | null = (x, z) => heightAt(x, -z)
   // --- LAZY GRADING: the strips, the terrain sink and the buildings are built around the eye ---
-  // A unit is a chunk of the primary strip, one branch strip, or one 500 m cell of buildings. Each
-  // frame `gradeNear` builds the nearest unfinished units inside STREAM_BUILD_M for at most
-  // STREAM_BUDGET_MS. Nothing waits on them: the ground is a formula (gradedHeight below), so the
-  // car, the grass and the furniture stand on the graded surface before its mesh exists.
-  interface GradeUnit { key: string; x: number; z: number; r: number; done: boolean; run: () => void | Promise<void> }
+  // A unit is a chunk of the primary strip, one branch strip, or one 500 m cell of buildings.
+  // `gradeNear` starts the nearest unfinished unit inside STREAM_BUILD_M. The unit's own fill
+  // (vertices, the sink, a branch's asphalt) yields on the Budget it is handed, so one chunk
+  // cannot own the frame. Nothing waits on them: the ground is a formula (gradedHeight below),
+  // so the car, the grass and the furniture stand on the graded surface before its mesh exists.
+  interface GradeUnit { key: string; x: number; z: number; r: number; done: boolean; run: (budget: Budget) => void | Promise<void> }
   const gradeUnits: GradeUnit[] = []
-  // worstMs is the longest SYNCHRONOUS unit — the hitch a frame can feel; an async unit (a
-  // buildings cell) yields inside buildBuildings and its wall time is not a hitch
+  // worstMs is the longest unsliced stretch inside a unit — the hitch a frame can feel. A unit's
+  // wall time is not a hitch: the fill yields every STREAM_BUDGET_MS.
   const gradeStats = { built: 0, strips: 0, buildings: 0, ms: 0, worstMs: 0, worst: '' }
   // the style's road paint, applied to a road mesh that arrives after the style was set
   let paintNow: { centre: THREE.Color; edge: THREE.Color } | null = null
@@ -1273,32 +1274,28 @@ if (uLodOn > 0.5) {
   const pendingNear = () => { let n = 0; for (const u of gradeUnits) if (!u.done && Math.hypot(u.x - gradeEye.x, u.z - gradeEye.z) - u.r <= T.STREAM_BUILD_M) n++; return n }
   // THE PUMP IS A MACROTASK LOOP, NOT A FRAME HOOK. Building on requestAnimationFrame would tie
   // the build to the frame rate (a slow frame, a hidden tab: no build — see reference-raf-budget-
-  // deadlock), so the frame only tells the pump where the eye is; the pump then works in slices
-  // of STREAM_BUDGET_MS with a setTimeout(0) between them so rendering interleaves, and stops when
-  // nothing is left within range.
+  // deadlock), so the frame only tells the pump where the eye is. One unit runs at a time. Its
+  // fill yields on the Budget (rAF, or a timer if no frame is coming). The first slice is a
+  // setTimeout(0) so the frame that noticed the eye paints before any vertex is written. A hidden
+  // tab does not yield: setTimeout there is about 1 Hz and the build would never finish.
   const pump = async () => {
     if (gradePumping) return
     gradePumping = true
+    const visible = () => typeof document === 'undefined' || !document.hidden
     try {
+      if (visible()) await new Promise<void>((r) => setTimeout(r, 0))
       for (;;) {
-        const t0 = performance.now()
-        let any = false
-        while (performance.now() - t0 < T.STREAM_BUDGET_MS) {
-          const u = nextUnit()
-          if (!u) break
-          any = true
-          u.done = true
-          const u0 = performance.now()
-          const r = u.run()
-          const sync = !(r instanceof Promise)
-          if (!sync) await r
-          gradeStats.built++
-          const ms = performance.now() - u0
-          gradeStats.ms += ms
-          if (sync && ms > gradeStats.worstMs) { gradeStats.worstMs = ms; gradeStats.worst = u.key }
-        }
-        if (!any) return
-        await new Promise<void>((r) => setTimeout(r, 0))
+        const u = nextUnit()
+        if (!u) return
+        u.done = true
+        const budget = new Budget(T.STREAM_BUDGET_MS)
+        const u0 = performance.now()
+        await u.run(budget)
+        const slice = budget.finish().worstSliceMs
+        gradeStats.built++
+        gradeStats.ms += performance.now() - u0
+        if (slice > gradeStats.worstMs) { gradeStats.worstMs = slice; gradeStats.worst = u.key }
+        if (visible()) await new Promise<void>((r) => setTimeout(r, 0))
       }
     } finally {
       gradePumping = false
@@ -1307,6 +1304,24 @@ if (uLodOn > 0.5) {
   const gradeNear = (eye: THREE.Vector3) => {
     gradeEye.copy(eye)
     void pump()
+  }
+  // The overview is one mesh for the whole site. Rebuilding its normals per strip was the
+  // remaining hitch. Positions still sink; the normals wait until the mesh is actually drawn,
+  // and then on the same slice budget so coming back up onto it does not stop the frame.
+  let overviewNormalsDirty = false
+  let overviewNormalsRunning = false
+  const refreshOverviewNormals = async () => {
+    if (overviewNormalsRunning || !overview.visible) return
+    overviewNormalsRunning = true
+    try {
+      while (overviewNormalsDirty && overview.visible && !gradePumping) {
+        overviewNormalsDirty = false
+        const done = await refreshNormals(terrainGeo, new Budget(T.STREAM_BUDGET_MS), () => gradePumping || !overview.visible)
+        if (!done) overviewNormalsDirty = true
+      }
+    } finally {
+      overviewNormalsRunning = false
+    }
   }
   // the grass generator's road-distance answer, lifted out of the strip block for the Site's probes
   let grassRoadDistanceOut: (x: number, z: number) => number = () => Infinity
@@ -1653,7 +1668,7 @@ if (uLodOn > 0.5) {
       const off = offsetFn ? offsetFn(x, -z) * t : 0
       return (e.d < 0.6 ? e.y - 0.02 : (e.y - 0.02) * (1 - t) + heightAt(x, -z) * t) + off
     }
-    type LiveStrip = ReturnType<typeof buildStrip>
+    type LiveStrip = Awaited<ReturnType<typeof buildStrip>>
     const liveStrips: LiveStrip[] = []
     // the terrain surfaces a new strip must sink: every geometry whose box it touches, not all 60
     const terrainBoxes = terrainGeos.map((g) => { g.computeBoundingBox(); const b = g.boundingBox!; return { g, x0: b.min.x, z0: b.min.z, x1: b.max.x, z1: b.max.z } })
@@ -1664,15 +1679,19 @@ if (uLodOn > 0.5) {
       st.setImageryDesat(STYLE[currentStyle].desaturate)
       precip?.follow(st.weatherUniforms)
     }
-    const adoptStrip = (st: LiveStrip) => {
-      road.add(st.mesh)
-      liveStrips.push(st)
-      gradeStats.strips++
+    const adoptStrip = async (st: LiveStrip, budget: Budget) => {
+      // Sink before the mesh joins the scene. The terrain buffer is not uploaded until the sink
+      // finishes, so a yielded sink does not show a trench and the strip does not z-fight it.
       const [x0, z0, x1, z1] = st.bounds
       for (const b of terrainBoxes) {
         if (x1 + 10 < b.x0 || x0 - 10 > b.x1 || z1 + 10 < b.z0 || z0 - 10 > b.z1) continue
-        sinkUnderStrips(b.g, [st])
+        const overviewMesh = b.g === terrainGeo
+        await sinkUnderStrips(b.g, [st], 9, 3.5, budget, !overviewMesh)
+        if (overviewMesh) overviewNormalsDirty = true
       }
+      road.add(st.mesh)
+      liveStrips.push(st)
+      gradeStats.strips++
       dressStrip(st)
     }
     const edgeAt = (x: number, z: number) => edgeDistance(x, z)
@@ -1683,8 +1702,8 @@ if (uLodOn > 0.5) {
     for (let s0 = 0; s0 < curveLen; s0 += CHUNK) {
       const s1 = Math.min(curveLen, s0 + CHUNK)
       const mid = spineAt((s0 + s1) / 2).pos
-      spineUnits.push({ key: `spine:${Math.round(s0)}`, x: mid.x, z: mid.z, r: (s1 - s0) / 2 + VERGE + 60, done: false, run: () => {
-        adoptStrip(buildStrip((s) => spineAt(s0 + s), s1 - s0, -latMin + VERGE, latMax + VERGE, edgeAt, heightAt, imagery, manifest.bbox, grassTex('grass_mown'), grassTex('grass_rough'), lite ? 4 : 2, lite ? 2 : 1, offsetFn, null, (s) => stripEdgeLimitAt(s0 + s), stripCanopyAt, litter))
+      spineUnits.push({ key: `spine:${Math.round(s0)}`, x: mid.x, z: mid.z, r: (s1 - s0) / 2 + VERGE + 60, done: false, run: async (budget) => {
+        await adoptStrip(await buildStrip((s) => spineAt(s0 + s), s1 - s0, -latMin + VERGE, latMax + VERGE, edgeAt, heightAt, imagery, manifest.bbox, grassTex('grass_mown'), grassTex('grass_rough'), lite ? 4 : 2, lite ? 2 : 1, offsetFn, null, (s) => stripEdgeLimitAt(s0 + s), stripCanopyAt, litter, budget), budget)
       } })
     }
     mark('grade: sink primary')
@@ -1705,9 +1724,9 @@ if (uLodOn > 0.5) {
      * residential street anyway.
      */
     // A BRANCH LONGER THAN A CHUNK IS CHUNKED LIKE THE PRIMARY, so no unit is bigger than
-    // STREAM_CHUNK_M of road: the biggest branch on crownsville took 480 ms headless as one unit,
-    // and a unit is one synchronous hitch. The branch's asphalt and paint (one mesh for the whole
-    // road) are built by whichever of its chunks the eye reaches first.
+    // STREAM_CHUNK_M of road: the biggest branch on crownsville took 480 ms headless as one unit.
+    // The fill itself yields inside that chunk. The branch's asphalt and paint (one mesh for the
+    // whole road) are built by whichever of its chunks the eye reaches first, on the same budget.
     const branchUnits: GradeUnit[] = []
     const roadBuilt = new Uint8Array(branchAts.length)
     // the whole road of each built branch, and the copy with the fixtures cut out of it, if any
@@ -1732,10 +1751,11 @@ if (uLodOn > 0.5) {
       r.base.visible = false
     }
     holeBranches = () => { for (let i = 0; i < branchAts.length; i++) holeBranch(i) }
-    const buildBranchRoad = (i: number) => {
+    const buildBranchRoad = async (i: number, budget: Budget) => {
       if (roadBuilt[i]) return
       roadBuilt[i] = 1
-      const rm = branchAts[i].road()
+      const b = branchAts[i]
+      const rm = await roadMeshPaced(stations(b.at, b.len, 6), () => b.lanes, () => 'asphalt_aged', roadSets, 0.02, () => b.twoWay, paintOff, () => isKerbed(b.highway), null, budget)
       if (paintNow) repaintMarkings(rm, paintNow.centre, paintNow.edge)
       road.add(rm)
       roadParts.push(rm)
@@ -1762,9 +1782,9 @@ if (uLodOn > 0.5) {
           x0 = Infinity; z0 = Infinity; x1 = -Infinity; z1 = -Infinity
           for (let s = s0; s <= s1; s += 20) { const q = b.at(s).pos; if (q.x < x0) x0 = q.x; if (q.x > x1) x1 = q.x; if (q.z < z0) z0 = q.z; if (q.z > z1) z1 = q.z }
         }
-        branchUnits.push({ key: `branch:${i}:${k}`, x: (x0 + x1) / 2, z: (z0 + z1) / 2, r: Math.hypot(x1 - x0, z1 - z0) / 2 + T.BRANCH_VERGE + 20, done: false, run: () => {
-          buildBranchRoad(i)
-          adoptStrip(buildStrip((s) => b.at(s0 + s), s1 - s0, T.BRANCH_VERGE, T.BRANCH_VERGE, edgeAt, heightAt, imagery, manifest.bbox, grassTex('grass_mown'), grassTex('grass_rough'), lite ? 4 : 3, lite ? 3 : 2, offsetFn, (s) => skip(s0 + s)))
+        branchUnits.push({ key: `branch:${i}:${k}`, x: (x0 + x1) / 2, z: (z0 + z1) / 2, r: Math.hypot(x1 - x0, z1 - z0) / 2 + T.BRANCH_VERGE + 20, done: false, run: async (budget) => {
+          await buildBranchRoad(i, budget)
+          await adoptStrip(await buildStrip((s) => b.at(s0 + s), s1 - s0, T.BRANCH_VERGE, T.BRANCH_VERGE, edgeAt, heightAt, imagery, manifest.bbox, grassTex('grass_mown'), grassTex('grass_rough'), lite ? 4 : 3, lite ? 3 : 2, offsetFn, (s) => skip(s0 + s), null, null, null, budget), budget)
         } })
       }
     })
@@ -2614,8 +2634,8 @@ if (uLodOn > 0.5) {
     const roads = buildRoadIndex(manifest)
     for (const [k, list] of cells) {
       const [cx, cy] = k.split(',').map(Number)
-      gradeUnits.push({ key: `buildings:${k}`, x: cx * CELL + CELL / 2, z: -(cy * CELL + CELL / 2), r: CELL * 0.71 + 10, done: false, run: async () => {
-        const b = await buildBuildings({ ...manifest, buildings: list }, groundAtWorld, 4, { roads, pool: poolOf(surfacesDoc) })
+      gradeUnits.push({ key: `buildings:${k}`, x: cx * CELL + CELL / 2, z: -(cy * CELL + CELL / 2), r: CELL * 0.71 + 10, done: false, run: async (budget) => {
+        const b = await buildBuildings({ ...manifest, buildings: list }, groundAtWorld, T.STREAM_BUDGET_MS, { roads, pool: poolOf(surfacesDoc), budget })
         b.group.userData.enuX = cx * CELL + CELL / 2
         b.group.userData.enuY = cy * CELL + CELL / 2
         buildingsGroup.add(b.group)
@@ -2777,6 +2797,8 @@ if (uLodOn > 0.5) {
       // The overview mesh is the ground before a tile covers the camera. Once one does, drawing
       // both shades the same neighbourhood twice, which is most of the fill rate.
       overview.visible = !(pyrSet && pyrSet.covers(eye.x, -eye.z))
+      // After the pump is idle, so a normal pass never reads the overview while a strip is sinking it.
+      if (overview.visible && overviewNormalsDirty && !gradePumping) void refreshOverviewNormals()
       // Crop rows are full detail, and a county of them is in the frustum from anywhere in it.
       // Past this the photograph already shows the field.
       if (crops) {

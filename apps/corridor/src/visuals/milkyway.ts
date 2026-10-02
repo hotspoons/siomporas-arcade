@@ -83,7 +83,6 @@ export class MilkyWay {
       uniforms: this.u,
       vertexShader: VERT,
       fragmentShader: FRAG,
-      transparent: true,
       blending: THREE.AdditiveBlending,
       side: THREE.BackSide,
       depthWrite: false,
@@ -93,7 +92,9 @@ export class MilkyWay {
     // 32 segments is plenty: nothing here has an edge, and the mapping is per fragment anyway
     this.mesh = new THREE.Mesh(new THREE.SphereGeometry(1, 48, 32), mat)
     this.mesh.name = 'milkyway'
-    // after the dome (-1000) and before the stars (-999): the galaxy is behind them
+    // OPAQUE, with the dome. A transparent material is drawn after the world, and depthTest off
+    // then paints the galaxy over the trees. The dome is -1000; this is just after it and before
+    // the stars (-999), still before every piece of the world, which overwrites it.
     this.mesh.renderOrder = -999.5
     this.mesh.frustumCulled = false
     this.mesh.matrixAutoUpdate = false

@@ -405,7 +405,7 @@ async function texturePoolMaterial(mat: THREE.MeshStandardMaterial, pool: Textur
   mat.needsUpdate = true
 }
 
-export async function buildBuildings(manifest: Manifest, groundAt: (x: number, z: number) => number | null, sliceMs = 8, opts: { roads?: RoadIndex | null; dress?: boolean; pool?: TexturePool | null } = {}): Promise<{ group: THREE.Group; stats: BuildingStats; recolour: (walls: [number, number, number][], roofs: [number, number, number][]) => void }> {
+export async function buildBuildings(manifest: Manifest, groundAt: (x: number, z: number) => number | null, sliceMs = 8, opts: { roads?: RoadIndex | null; dress?: boolean; pool?: TexturePool | null; budget?: Budget } = {}): Promise<{ group: THREE.Group; stats: BuildingStats; recolour: (walls: [number, number, number][], roofs: [number, number, number][]) => void }> {
   const group = new THREE.Group()
   group.name = 'buildings'
   const list = manifest.buildings ?? []
@@ -420,7 +420,7 @@ export async function buildBuildings(manifest: Manifest, groundAt: (x: number, z
   let fromLidar = 0
   let dressed = 0
 
-  const budget = new Budget(sliceMs)
+  const budget = opts.budget ?? new Budget(sliceMs)
   for (const bd of list) {
     await budget.tick()
     const ring = (bd.ring ?? []) as [number, number][]

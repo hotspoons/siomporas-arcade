@@ -366,7 +366,7 @@ describe("corridor's real knobs", () => {
       expect(world, n).toContain(n)
     }
     // the machine's capabilities. A level that pins these is unplayable on a laptop.
-    for (const n of ['ENGINE_SIM_HZ', 'STAR_PIXELS', 'SPLAT_BUDGET_MB', 'SPLAT_SORT_MS']) {
+    for (const n of ['ENGINE_SIM_HZ', 'STAR_PIXELS', 'SPLAT_BUDGET_MB', 'SPLAT_SORT_MS', 'STREAM_BUDGET_MS', 'STREAM_CHUNK_M', 'STREAM_BUILD_M']) {
       expect(world, n).not.toContain(n)
     }
     expect(world.length).toBeGreaterThan(100)

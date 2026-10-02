@@ -28,8 +28,22 @@ export interface SkyLook {
   night?: number
   /** how many stars, 0 … 1; they are only drawn into the night part */
   stars?: number
-  /** high cirrus, 0 … 1 — the wispy layer above the cumulus */
+  /** high cirrus brightness, 0 … 1. Coverage is cirrusAmt */
   cirrus?: number
+  /** how much of the sky the wisps cover, 0 clear … 1 a deck */
+  cirrusAmt?: number
+  /** noise-units per second the high layer travels, already scaled by speed and heading */
+  cirrusWind?: THREE.Vector2
+  /** cumulus coverage, 0 clear … 1 a deck. The time-of-day cloud knobs scale it */
+  cumulusAmt?: number
+  /** noise-units per second the cumulus deck travels */
+  cumulusWind?: THREE.Vector2
+  /** the cumulus deck, 0 … 1. 0 removes the band on the horizon; cirrus does not */
+  clouds?: number
+  /** the horizon wash: colour, how tightly it sits on the horizon, how strongly it shows */
+  atten?: THREE.Color
+  attenSlope?: number
+  attenAmt?: number
   /** where the moon is; its elevation lights the night the way the sun lights the day */
   moonDir?: THREE.Vector3
   /** 0 new … 1 full */
@@ -59,6 +73,14 @@ const FRAG = /* glsl */ `
   uniform float uNight;
   uniform float uStars;
   uniform float uCirrus;
+  uniform float uCirrusAmt;
+  uniform vec2 uCirrusWind;
+  uniform float uCloud;
+  uniform float uCumulusAmt;
+  uniform vec2 uCumulusWind;
+  uniform vec3 uAtten;
+  uniform float uAttenSlope;
+  uniform float uAttenAmt;
   uniform vec3 uMoonDir;
   uniform float uMoonPhase;
   varying vec3 vDir;
@@ -103,7 +125,8 @@ const FRAG = /* glsl */ `
       vec3 q = d * scale;
       vec3 cell = floor(q);
       float h = starHash(cell);
-      if (h < mix(0.996, 0.972, amount)) continue;
+      // density stays in 0..1; amount above that is brightness, same as the catalogue gain
+      if (h < mix(0.996, 0.972, clamp(amount, 0.0, 1.0))) continue;
       vec3 centre = cell + 0.5 + 0.7 * (vec3(starHash(cell + 1.7), starHash(cell + 3.3), starHash(cell + 5.9)) - 0.5);
       // distance in PIXELS, near enough: the dome is drawn over the whole screen, so one cell is
       // about (screen height / scale) pixels and a star should be about one of them across
@@ -128,6 +151,11 @@ const FRAG = /* glsl */ `
     // the horizon reaches. A hazy day is pale a long way up; a crisp one turns blue fast.
     float t = pow(clamp(up, 0.0, 1.0), mix(0.55, 0.25, uHaze));
     vec3 sky = mix(uHorizon, uZenith, t);
+
+    // atmospheric wash: the air itself, paler toward the horizon. Slope is how tightly it sits
+    // there — high is a thin band, low reaches the zenith. Amount is how much of it shows.
+    float band = pow(1.0 - clamp(up, 0.0, 1.0), max(uAttenSlope, 0.05));
+    sky = mix(sky, uAtten, band * uAttenAmt);
 
     // STARS FIRST, under everything else: they are the background at night, so the sun's halo, the
     // moon and the clouds all draw over them. Clouds hide stars, which is most of what a cloudy
@@ -154,37 +182,38 @@ const FRAG = /* glsl */ `
       sky += vec3(0.95, 0.96, 0.9) * (mdisc * 2.2 * mix(0.05, 1.0, lit) + mhalo) * uNight;
     }
 
-    // cirrus: high, thin, stretched — the wispy layer, well above the cumulus and much flatter
-    if (up > 0.01 && uCirrus > 0.001) {
+    // cirrus: high, thin, stretched. Amount moves the threshold, so 0 is a clear sky and 1 fills
+    // it. Brightness only fades the same streaks, which is what made the layer look fixed.
+    if (up > 0.01 && uCirrus > 0.001 && uCirrusAmt > 0.001) {
       vec2 q = d.xz / max(up, 0.02) * 0.11;
-      vec2 drift = vec2(uTime * 0.0016, uTime * 0.0006);
+      vec2 drift = uCirrusWind * uTime;
       float f = fbm(vec2(q.x * 0.35, q.y * 2.6) + drift);
-      float streak = smoothstep(0.52, 0.86, f) * smoothstep(0.0, 0.25, up);
+      float thresh = mix(1.02, 0.08, uCirrusAmt);
+      float edge = mix(0.34, 0.12, uCirrusAmt);
+      float streak = smoothstep(thresh, thresh + edge, f) * smoothstep(0.0, 0.25, up);
       vec3 col = mix(vec3(0.86, 0.89, 0.94), uSunColour * 1.1, 0.35 * sunUp);
-      sky = mix(sky, mix(col, uHorizon, 0.35), streak * uCirrus * 0.7 * (1.0 - uNight * 0.55));
+      float gain = mix(0.35, 1.15, uCirrusAmt);
+      sky = mix(sky, mix(col, uHorizon, 0.35), streak * uCirrus * gain * (1.0 - uNight * 0.55));
     }
 
-    // clouds: the direction is projected onto a plane at cloud height so the field is flat, not
-    // painted on the sphere; near the horizon it compresses into a band, which is the look.
-    if (up > 0.01) {
+    // cumulus: projected onto a plane so the field is flat, and compressed into a band at the
+    // horizon. Amount is how much of that field is cloud. uCloud is the time-of-day scale.
+    if (up > 0.01 && uCloud > 0.001 && uCumulusAmt > 0.001) {
       vec2 p = d.xz / max(up, 0.02);
-      float far = 1.0 - exp(-length(p) * 0.35);           // thins the field toward the horizon
-      vec2 drift = vec2(uTime * 0.004, uTime * 0.0015);
-      float base = fbm(p * 0.35 + drift);
-      float detail = fbm(p * 1.4 - drift * 2.0 + 3.7);
+      float far = 1.0 - exp(-length(p) * 0.35);
+      vec2 wind = uCumulusWind * uTime;
+      float base = fbm(p * 0.35 + wind);
+      float detail = fbm(p * 1.4 - wind * 2.0 + 3.7);
       float field = base * 0.7 + detail * 0.3;
-      // cover moves the threshold: 0 cover leaves only the tallest tops, 1 fills the sky
-      float thresh = mix(0.68, 0.30, uCover);
-      float cloud = smoothstep(thresh, thresh + 0.16, field);
-      // lit from the sun side, grey underneath; an overcast sky goes flat and lowers the whole tone
+      float thresh = mix(1.05, 0.18, uCumulusAmt);
+      float edge = mix(0.28, 0.12, uCumulusAmt);
+      float cloud = smoothstep(thresh, thresh + edge, field);
       float lit = 0.55 + 0.45 * clamp(dot(normalize(vec3(uSunDir.x, 0.6, uSunDir.z)), vec3(0.0, 1.0, 0.0)), 0.0, 1.0);
       vec3 cloudCol = mix(vec3(0.62, 0.64, 0.68), vec3(1.0, 0.99, 0.97) * lit, 1.0 - uCover * 0.7);
       cloudCol = mix(cloudCol, uHorizon, far * 0.6);
-      // AT NIGHT A CLOUD IS DARKER THAN THE SKY, not brighter. Lit by nothing but the moon and the
-      // towns below, it reads as a hole in the stars — which is also how a night sky tells you it
-      // is cloudy. Left at its daytime grey it was a bright ceiling with no stars under it.
       cloudCol = mix(cloudCol, mix(vec3(0.05, 0.06, 0.09), vec3(0.20, 0.21, 0.26), uMoonPhase * 0.6), uNight);
-      sky = mix(sky, cloudCol, cloud * (1.0 - far * 0.5) * (0.85 + 0.15 * uCover));
+      float gain = mix(0.55, 1.05, uCumulusAmt);
+      sky = mix(sky, cloudCol, cloud * (1.0 - far * 0.5) * gain * uCloud);
     }
     gl_FragColor = vec4(sky, 1.0);
     #include <colorspace_fragment>
@@ -204,6 +233,14 @@ export class Sky {
     uNight: { value: 0 },
     uStars: { value: 0.7 },
     uCirrus: { value: 0.25 },
+    uCirrusAmt: { value: 0.55 },
+    uCirrusWind: { value: new THREE.Vector2(0.0016, 0.0006) },
+    uCloud: { value: 1 },
+    uCumulusAmt: { value: 0.55 },
+    uCumulusWind: { value: new THREE.Vector2(0.004, 0.0015) },
+    uAtten: { value: new THREE.Color(0xc5daf2) },
+    uAttenSlope: { value: 1.5 },
+    uAttenAmt: { value: 0 },
     uMoonDir: { value: new THREE.Vector3(0.3, 0.6, -0.7).normalize() },
     uMoonPhase: { value: 0.6 },
   }
@@ -237,6 +274,14 @@ export class Sky {
     this.u.uNight.value = look.night ?? 0
     this.u.uStars.value = look.stars ?? 0.7
     this.u.uCirrus.value = look.cirrus ?? 0.25
+    this.u.uCirrusAmt.value = look.cirrusAmt ?? 0.55
+    if (look.cirrusWind) this.u.uCirrusWind.value.copy(look.cirrusWind)
+    this.u.uCloud.value = look.clouds ?? 1
+    this.u.uCumulusAmt.value = look.cumulusAmt ?? 0.55
+    if (look.cumulusWind) this.u.uCumulusWind.value.copy(look.cumulusWind)
+    if (look.atten) this.u.uAtten.value.copy(look.atten)
+    this.u.uAttenSlope.value = look.attenSlope ?? 1.5
+    this.u.uAttenAmt.value = look.attenAmt ?? 0
     if (look.moonDir) this.u.uMoonDir.value.copy(look.moonDir).normalize()
     if (look.moonPhase !== undefined) this.u.uMoonPhase.value = look.moonPhase
   }

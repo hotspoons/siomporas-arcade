@@ -6,6 +6,7 @@
 // imagery everywhere, mown turf inside the mow line, rough grass beyond, blended by the same
 // edge distance the blades use. The coarse terrain is sunk beneath it.
 import * as THREE from 'three'
+import type { Budget } from './budget'
 import { ACCUM_PARS, accumUniforms } from '../visuals/weather'
 import { injectShade, injectWetStreak } from '../visuals/shading'
 
@@ -14,7 +15,7 @@ export interface Edge {
   y: number // road surface height at that station
 }
 
-export function buildStrip(
+export async function buildStrip(
   spineAt: (s: number) => { pos: THREE.Vector3; dir: THREE.Vector3 },
   length: number,
   left: number,
@@ -45,7 +46,9 @@ export function buildStrip(
   canopyAt: ((x: number, y: number) => number) | null = null,
   /** the forest-floor texture that replaces turf under canopy (groundcover.forestFloorTexture) */
   forestFloor: THREE.Texture | null = null,
-): {
+  /** when set, the station fill yields once the slice is spent so a chunk cannot own the frame */
+  budget?: Budget,
+): Promise<{
   mesh: THREE.Mesh
   heightAt: (x: number, z: number) => number | null
   /** where a coarse-terrain vertex goes under the strip's rim; null outside the strip */
@@ -58,7 +61,7 @@ export function buildStrip(
   setImageryDesat: (v: number) => void
   weatherUniforms: Record<string, THREE.IUniform>
   setTint: (c: THREE.Color, ground: THREE.Color) => void
-} {
+}> {
   const nS = Math.floor(length / along) + 1
   const skipped = new Uint8Array(nS)
   const offs: number[] = []
@@ -108,7 +111,10 @@ export function buildStrip(
       edge[k] = e.d
       canopy[k] = canopyAt ? canopyAt(x, -z) : 0
       k++
+      // a wide row is itself the hitch: one station of a primary strip is ~80 edgeDistance probes
+      if (budget && (k & 7) === 0) await budget.tick()
     }
+    if (budget) await budget.tick()
   }
   const idxAll = new Uint32Array((nS - 1) * (nL - 1) * 6)
   let n = 0
@@ -126,8 +132,10 @@ export function buildStrip(
       idxAll[n++] = a; idxAll[n++] = b; idxAll[n++] = c
       idxAll[n++] = b; idxAll[n++] = d; idxAll[n++] = c
     }
+    if (budget && (i & 7) === 7) await budget.tick()
   }
   const idx = n === idxAll.length ? idxAll : idxAll.slice(0, n)
+  if (budget) await budget.tick()
   const geo = new THREE.BufferGeometry()
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3))
   geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2))
@@ -460,7 +468,7 @@ export class BoundsIndex<T extends { bounds: [number, number, number, number] }>
  * targets, and keeps the deepest cover for the triangle test — a triangle buried under any strip
  * is dropped, which is what dropping it per strip used to achieve one strip at a time.
  */
-export function sinkUnderStrips(geo: THREE.BufferGeometry, strips: StripCover[], margin = 9, maxLift = 3.5) {
+export async function sinkUnderStrips(geo: THREE.BufferGeometry, strips: StripCover[], margin = 9, maxLift = 3.5, budget?: Budget, normals = true) {
   const pos = geo.getAttribute('position') as THREE.BufferAttribute
   if (!strips.length || !pos) return
   const cover = new Float32Array(pos.count).fill(-1)
@@ -508,6 +516,7 @@ export function sinkUnderStrips(geo: THREE.BufferGeometry, strips: StripCover[],
     }
     cover[i] = bestCover
     if (lowest < Infinity) pos.setY(i, Math.min(y0, lowest))
+    if (budget && (i & 63) === 63) await budget.tick()
   }
 
   const idx = geo.getIndex()
@@ -521,11 +530,73 @@ export function sinkUnderStrips(geo: THREE.BufferGeometry, strips: StripCover[],
       kept[n++] = a
       kept[n++] = b
       kept[n++] = c
+      if (budget && (t & 8191) === 8191) await budget.tick()
     }
     geo.setIndex(new THREE.BufferAttribute(kept.subarray(0, n), 1))
   }
   pos.needsUpdate = true
-  geo.computeVertexNormals()
+  // The site overview is up to a million vertices. Rebuilding its normals here is the ~100 ms
+  // hitch at the end of every strip. Callers that defer that pass pass `normals` false.
+  if (normals) geo.computeVertexNormals()
+}
+
+/**
+ * The same normal pass as `BufferGeometry.computeVertexNormals`, yielding on a budget.
+ *
+ * One call on the site overview is about 100 ms. Sliced, it spreads across frames instead of
+ * stopping the one that turned the mesh back on.
+ */
+export async function refreshNormals(geo: THREE.BufferGeometry, budget?: Budget, stop?: () => boolean): Promise<boolean> {
+  const posAttr = geo.getAttribute('position') as THREE.BufferAttribute | undefined
+  if (!posAttr) return false
+  let normalAttr = geo.getAttribute('normal') as THREE.BufferAttribute | undefined
+  if (!normalAttr || normalAttr.count !== posAttr.count) {
+    normalAttr = new THREE.BufferAttribute(new Float32Array(posAttr.count * 3), 3)
+    geo.setAttribute('normal', normalAttr)
+  }
+  const pos = posAttr.array as ArrayLike<number>
+  const nor = normalAttr.array as Float32Array
+  const pause = async () => {
+    if (stop?.()) return true
+    if (budget) await budget.tick()
+    return stop?.() ?? false
+  }
+  for (let i = 0; i < nor.length; i++) {
+    nor[i] = 0
+    if (budget && (i & 65535) === 65535 && await pause()) return false
+  }
+  const index = geo.getIndex()
+  const add = (ia: number, ib: number, ic: number) => {
+    const abx = pos[ia] - pos[ib], aby = pos[ia + 1] - pos[ib + 1], abz = pos[ia + 2] - pos[ib + 2]
+    const cbx = pos[ic] - pos[ib], cby = pos[ic + 1] - pos[ib + 1], cbz = pos[ic + 2] - pos[ib + 2]
+    const nx = cby * abz - cbz * aby
+    const ny = cbz * abx - cbx * abz
+    const nz = cbx * aby - cby * abx
+    nor[ia] += nx; nor[ia + 1] += ny; nor[ia + 2] += nz
+    nor[ib] += nx; nor[ib + 1] += ny; nor[ib + 2] += nz
+    nor[ic] += nx; nor[ic + 1] += ny; nor[ic + 2] += nz
+  }
+  if (index) {
+    const idx = index.array
+    for (let t = 0, n = 0; t < idx.length; t += 3, n++) {
+      add(idx[t] * 3, idx[t + 1] * 3, idx[t + 2] * 3)
+      if ((n & 4095) === 4095 && await pause()) return false
+    }
+  } else {
+    for (let i = 0, n = 0; i < posAttr.count; i += 3, n++) {
+      add(i * 3, (i + 1) * 3, (i + 2) * 3)
+      if ((n & 4095) === 4095 && await pause()) return false
+    }
+  }
+  for (let i = 0; i < nor.length; i += 3) {
+    const x = nor[i], y = nor[i + 1], z = nor[i + 2]
+    const len = Math.hypot(x, y, z)
+    if (len > 0) { nor[i] = x / len; nor[i + 1] = y / len; nor[i + 2] = z / len }
+    if (budget && (i & 65535) === 65535 && await pause()) return false
+  }
+  if (stop?.()) return false
+  normalAttr.needsUpdate = true
+  return true
 }
 
 /** One strip's worth of the above, for callers that have only one. */
@@ -537,5 +608,5 @@ export function sinkUnderStrip(
   maxLift = 3.5,
   bounds: [number, number, number, number] = [-Infinity, -Infinity, Infinity, Infinity],
 ) {
-  sinkUnderStrips(geo, [{ sinkAt: sinkTo, coverAt, bounds }], margin, maxLift)
+  void sinkUnderStrips(geo, [{ sinkAt: sinkTo, coverAt, bounds }], margin, maxLift)
 }

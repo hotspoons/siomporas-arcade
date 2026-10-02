@@ -582,8 +582,8 @@ export let WATER_OPACITY = 0.82
  * (m from the site centre) — 30 km by default so the ocean meets the horizon.
  */
 // --- lazy grading (scene.ts gradeNear): how far around the eye the strips and buildings are built,
-// how much of a frame each build may take, and how long a chunk of the primary strip is
-export let STREAM_BUILD_M = 1500
+// how long a slice of the vertex fill may run before it yields, and how long a chunk of the primary strip is
+export let STREAM_BUILD_M = 100
 export let STREAM_BUDGET_MS = 6
 export let STREAM_CHUNK_M = 250
 // trees (props.treesFromCanopy): a FIXED cell so density does not depend on how big the site is,
@@ -644,21 +644,63 @@ export let JUNCTION_MEET_M = 40
 export let TIME_RATE = 1
 /** stretches the sun's elevation about the horizon; 1 is the sky over this site as it really is */
 export let SUN_ARC = 1
-/** how many stars on a clear night, 0 … 1 */
 /**
  * How a catalogue star is drawn. The sprite is only big enough for the core and its halo — a star
  * is an unresolvable point, and a wide sprite over a coarse profile is what makes stars read as
- * fuzzy squares rather than as points.
+ * fuzzy squares rather than as points. Brightness is SKY_STARS, and it does not grow the sprite.
  */
-export let STAR_PIXELS = 2.2
+export let STAR_PIXELS = 5.9
 export let STAR_SIZE = 1
-/** faintest magnitude drawn. 6.5 is the naked-eye limit on a dark night; 4 is a city. */
-export let STAR_MAG_LIMIT = 6.5
-export let SKY_STARS = 0.8
-/** the Milky Way, 0 … 1. Dimmer than it looks in a photograph, because so is the real one. */
-export let SKY_MILKYWAY = 0.5
-/** the wispy high layer, 0 … 1; the cumulus layer is the weather's own cover */
-export let SKY_CIRRUS = 0.3
+/** faintest magnitude drawn. The catalogue ends near 6.5, so 8 already draws every star. */
+export let STAR_MAG_LIMIT = 8
+/** brightness of a catalogue star. 26 is a dark western-Maryland winter night; the slider runs past it. */
+export let SKY_STARS = 26
+/** the Milky Way, 0 … 2. Dimmer than it looks in a photograph, because so is the real one. */
+export let SKY_MILKYWAY = 0.1
+/** the wispy high layer's brightness, 0 … 1. How much sky it covers is SKY_CIRRUS_AMOUNT. */
+export let SKY_CIRRUS = 0.8
+/** how much of the sky the wisps cover. 0 is clear, 1 is a cirrus deck. */
+export let SKY_CIRRUS_AMOUNT = 0.55
+/** 1 is the high layer's present drift. 0 holds it still. */
+export let SKY_CIRRUS_SPEED = 1
+/** direction the high layer travels, degrees clockwise from north. */
+export let SKY_CIRRUS_HEADING = 111
+/** how much of the cumulus field is cloud. 0 is clear, 1 is a deck. Day, twilight, and night scale it. */
+export let SKY_CUMULUS_AMOUNT = 0.55
+/** 1 is the cumulus deck's present drift. 0 holds it still. */
+export let SKY_CUMULUS_SPEED = 1
+/** direction the cumulus deck travels, degrees clockwise from north. */
+export let SKY_CUMULUS_HEADING = 111
+/** cumulus while the sun is up. 1 is a normal deck; 0 clears it. */
+export let SKY_CLOUDS_DAY = 1
+/** cumulus at sunrise and at sunset. One setting for both. */
+export let SKY_CLOUDS_TWILIGHT = 0.4
+/** cumulus at night, including the band on the horizon. */
+export let SKY_CLOUDS_NIGHT = 0.1
+/** daytime sky, as HSV on the season colour. Hue 10 and saturation 2.36 are this sky. */
+export let SKY_DAY_HUE = 10
+export let SKY_DAY_SAT = 2.36
+export let SKY_DAY_VAL = 1
+/** daytime horizon wash. Slope is how tightly it sits on the horizon; the value is how strong it is. */
+export let SKY_DAY_ATTEN_SLOPE = 1.5
+export let SKY_DAY_ATTEN = 0
+export let SKY_DAY_ATTEN_HUE = 0
+export let SKY_DAY_ATTEN_SAT = 1
+export let SKY_DAY_ATTEN_VAL = 1
+/** sunset bloom, as HSV on the orange. 0 / 1 / 1 is the bloom as it is; value 0 kills it. */
+export let SKY_SUNSET_HUE = 0
+export let SKY_SUNSET_SAT = 1
+export let SKY_SUNSET_VAL = 1
+/** night-sky colour, as offsets on the built-in night blue. Hue 0 and value 1 keep that blue. */
+export let SKY_NIGHT_HUE = 0
+export let SKY_NIGHT_SAT = 1.44
+export let SKY_NIGHT_VAL = 1
+/** night horizon wash. At sunrise and sunset the colour follows the zenith instead of this. */
+export let SKY_NIGHT_ATTEN_SLOPE = 1.2
+export let SKY_NIGHT_ATTEN = 0
+export let SKY_NIGHT_ATTEN_HUE = 0
+export let SKY_NIGHT_ATTEN_SAT = 1
+export let SKY_NIGHT_ATTEN_VAL = 1
 /** moonlight at full moon, as a fraction of the sun's intensity */
 export let MOON_LIGHT = 0.06
 /** how hard the low sun paints the sky: 1 is what the air really does, higher is a postcard */
@@ -719,13 +761,13 @@ export let CANOPY_SHADE = 0.75
  * for `TAILLIGHT_RANGE` metres. `TAILLIGHT_ANGLE` is the half-angle of that wash; wide, so the
  * red light spreads across the lane instead of two tight cones.
  */
-export let HEADLIGHT = 2.7
+export let HEADLIGHT = 6.3
 export let TAILLIGHT = 0.025
 /** how far behind the car the red light reaches (m). Short, and aimed down, so it does not climb */
-export let TAILLIGHT_RANGE = 2.5
+export let TAILLIGHT_RANGE = 1.5
 /** tail-light half-angle, radians. Near π/2 the wash covers the whole road behind the bumper. */
 export let TAILLIGHT_ANGLE = 1.4
-export let HEADLIGHT_RANGE = 110
+export let HEADLIGHT_RANGE = 175
 /** the beam's half-angle, radians — the retro cone is this widened, so the two stay linked */
 export let HEADLIGHT_ANGLE = 0.46
 /**
@@ -734,8 +776,8 @@ export let HEADLIGHT_ANGLE = 0.46
  * These are what make a dark road legible. Before them the markings were unlit and simply glowed
  * (Rich, 2026-09-27), which read as cyberpunk rather than as night.
  */
-export let RETRO_MARKINGS = 2.6
-export let RETRO_SIGNS = 2.6
+export let RETRO_MARKINGS = 4.3
+export let RETRO_SIGNS = 3.9
 /** the retro cone as a multiple of the beam's own angle: > 1 means the EDGE of the light answers */
 export let RETRO_SPREAD = 1.4
 /**
@@ -743,13 +785,13 @@ export let RETRO_SPREAD = 1.4
  * impostor cards. Those never see three.js's lights, so before this the beam swept over the verge
  * and nothing happened (Rich, 2026-09-27).
  */
-export let HEADLIGHT_BOUNCE = 1.8
+export let HEADLIGHT_BOUNCE = 3
 /**
  * The wet-road streak a lamp paints when it is aimed at the camera.
- * 1 is the look as shipped. Spread below 1 is a thinner line.
+ * Spread below 1 is a thinner line.
  */
-export let WET_STREAK = 1
-export let WET_SPREAD = 1
+export let WET_STREAK = 0.15
+export let WET_SPREAD = 1.25
 // --- splat corridors (splats.ts, docs/corridor/PLAN-SPLAT-CORRIDORS.md) -----------------------
 /** 0 turns the captured world off entirely and leaves the built one */
 /** show the name of the road you are on while driving; 0 hides it */
@@ -1201,12 +1243,40 @@ export const TUNE_TABS: TuneTab[] = [
         keys: [
           tune('TIME_RATE', () => TIME_RATE, (v) => (TIME_RATE = v), [0, 3600], 1, 'simulated seconds per real second: 1 real time, 600 a day in four minutes, 0 stops the sun'),
           tune('SUN_ARC', () => SUN_ARC, (v) => (SUN_ARC = v), [0.2, 3], 0.05, 'stretches the sun\'s arc about the horizon; 1 is this latitude as it really is'),
-          tune('STAR_PIXELS', () => STAR_PIXELS, (v) => (STAR_PIXELS = v), [0.5, 8], 0.1, 'a star\u2019s sprite, in pixels at 900p', { scope: 'machine' }),
+          tune('STAR_PIXELS', () => STAR_PIXELS, (v) => (STAR_PIXELS = v), [0.5, 16], 0.1, 'a star\u2019s sprite, in pixels at 900p', { scope: 'machine' }),
           tune('STAR_SIZE', () => STAR_SIZE, (v) => (STAR_SIZE = v), [0.3, 3], 0.05, 'all of them, scaled'),
-          tune('STAR_MAG_LIMIT', () => STAR_MAG_LIMIT, (v) => (STAR_MAG_LIMIT = v), [1, 8], 0.1, 'faintest magnitude drawn \u2014 6.5 is a dark sky, 4 is a city'),
-          tune('SKY_STARS', () => SKY_STARS, (v) => (SKY_STARS = v), [0, 1], 0.05, 'how many stars on a clear night'),
+          tune('STAR_MAG_LIMIT', () => STAR_MAG_LIMIT, (v) => (STAR_MAG_LIMIT = v), [1, 10], 0.1, 'faintest magnitude drawn. The catalogue ends near 6.5, so 8 already draws every star'),
+          tune('SKY_STARS', () => SKY_STARS, (v) => (SKY_STARS = v), [0, 48], 0.5, 'how bright a star burns. 26 is a dark western-Maryland winter night; size stays a point'),
           tune('SKY_MILKYWAY', () => SKY_MILKYWAY, (v) => (SKY_MILKYWAY = v), [0, 2], 0.05, 'the Milky Way \u2014 the real isophotes, on the same sphere as the stars'),
-          tune('SKY_CIRRUS', () => SKY_CIRRUS, (v) => (SKY_CIRRUS = v), [0, 1], 0.05, 'the wispy high layer'),
+          tune('SKY_CIRRUS', () => SKY_CIRRUS, (v) => (SKY_CIRRUS = v), [0, 1], 0.05, 'how bright the wisps are. How many of them there are is the amount'),
+          tune('SKY_CIRRUS_AMOUNT', () => SKY_CIRRUS_AMOUNT, (v) => (SKY_CIRRUS_AMOUNT = v), [0, 1], 0.02, 'cirrus coverage. 0 is a clear sky, 1 is a deck of wisps'),
+          tune('SKY_CIRRUS_SPEED', () => SKY_CIRRUS_SPEED, (v) => (SKY_CIRRUS_SPEED = v), [0, 12], 0.05, 'how fast the high wisps travel. 1 is the present drift, 0 holds them still'),
+          tune('SKY_CIRRUS_HEADING', () => SKY_CIRRUS_HEADING, (v) => (SKY_CIRRUS_HEADING = v), [0, 360], 1, 'direction the high wisps travel, degrees clockwise from north'),
+          tune('SKY_CUMULUS_AMOUNT', () => SKY_CUMULUS_AMOUNT, (v) => (SKY_CUMULUS_AMOUNT = v), [0, 1], 0.02, 'cumulus coverage. 0 is clear, 1 is a deck. Day, twilight, and night scale how much shows'),
+          tune('SKY_CUMULUS_SPEED', () => SKY_CUMULUS_SPEED, (v) => (SKY_CUMULUS_SPEED = v), [0, 12], 0.05, 'how fast the cumulus deck travels. 1 is the present drift, 0 holds it still'),
+          tune('SKY_CUMULUS_HEADING', () => SKY_CUMULUS_HEADING, (v) => (SKY_CUMULUS_HEADING = v), [0, 360], 1, 'direction the cumulus deck travels, degrees clockwise from north'),
+          tune('SKY_CLOUDS_DAY', () => SKY_CLOUDS_DAY, (v) => (SKY_CLOUDS_DAY = v), [0, 1], 0.05, 'cumulus while the sun is up, including the band on the horizon'),
+          tune('SKY_CLOUDS_TWILIGHT', () => SKY_CLOUDS_TWILIGHT, (v) => (SKY_CLOUDS_TWILIGHT = v), [0, 1], 0.05, 'cumulus at sunrise and sunset, one setting for both'),
+          tune('SKY_CLOUDS_NIGHT', () => SKY_CLOUDS_NIGHT, (v) => (SKY_CLOUDS_NIGHT = v), [0, 1], 0.05, 'cumulus at night. 0 clears the horizon band'),
+          tune('SKY_DAY_HUE', () => SKY_DAY_HUE, (v) => (SKY_DAY_HUE = v), [-180, 180], 1, 'daytime sky hue, degrees off the season colour. 10 is this sky'),
+          tune('SKY_DAY_SAT', () => SKY_DAY_SAT, (v) => (SKY_DAY_SAT = v), [0, 4], 0.02, 'daytime sky saturation. 0 is grey, 1 is the season, 2.36 is this sky'),
+          tune('SKY_DAY_VAL', () => SKY_DAY_VAL, (v) => (SKY_DAY_VAL = v), [0, 3], 0.02, 'daytime sky value. 1 is the season as it is'),
+          tune('SKY_DAY_ATTEN_SLOPE', () => SKY_DAY_ATTEN_SLOPE, (v) => (SKY_DAY_ATTEN_SLOPE = v), [0.2, 24], 0.1, 'daytime wash slope. Low reaches the zenith, high is a thin band on the horizon'),
+          tune('SKY_DAY_ATTEN', () => SKY_DAY_ATTEN, (v) => (SKY_DAY_ATTEN = v), [0, 1], 0.02, 'daytime wash value. How strong the horizon air is; 0 leaves the sky as it is'),
+          tune('SKY_DAY_ATTEN_HUE', () => SKY_DAY_ATTEN_HUE, (v) => (SKY_DAY_ATTEN_HUE = v), [-180, 180], 1, 'daytime wash hue, degrees off a pale blue'),
+          tune('SKY_DAY_ATTEN_SAT', () => SKY_DAY_ATTEN_SAT, (v) => (SKY_DAY_ATTEN_SAT = v), [0, 4], 0.02, 'daytime wash saturation. 0 is grey, 1 is the pale blue'),
+          tune('SKY_DAY_ATTEN_VAL', () => SKY_DAY_ATTEN_VAL, (v) => (SKY_DAY_ATTEN_VAL = v), [0, 3], 0.02, 'daytime wash brightness. 0 is black, 1 is the pale blue'),
+          tune('SKY_SUNSET_HUE', () => SKY_SUNSET_HUE, (v) => (SKY_SUNSET_HUE = v), [-180, 180], 1, 'sunset bloom hue, degrees off the orange. Sunrise uses the same'),
+          tune('SKY_SUNSET_SAT', () => SKY_SUNSET_SAT, (v) => (SKY_SUNSET_SAT = v), [0, 4], 0.02, 'sunset bloom saturation. 0 is grey, 1 is the bloom as it is'),
+          tune('SKY_SUNSET_VAL', () => SKY_SUNSET_VAL, (v) => (SKY_SUNSET_VAL = v), [0, 3], 0.02, 'sunset bloom value. 0 kills it, 1 is the bloom as it is'),
+          tune('SKY_NIGHT_HUE', () => SKY_NIGHT_HUE, (v) => (SKY_NIGHT_HUE = v), [-180, 180], 1, 'night sky hue, degrees off the current blue'),
+          tune('SKY_NIGHT_SAT', () => SKY_NIGHT_SAT, (v) => (SKY_NIGHT_SAT = v), [0, 4], 0.02, 'night sky saturation. 0 is grey, 1 is the original blue, 1.44 is this sky'),
+          tune('SKY_NIGHT_VAL', () => SKY_NIGHT_VAL, (v) => (SKY_NIGHT_VAL = v), [0, 3], 0.02, 'night sky value. 0 is black, 1 is the sky as it is now'),
+          tune('SKY_NIGHT_ATTEN_SLOPE', () => SKY_NIGHT_ATTEN_SLOPE, (v) => (SKY_NIGHT_ATTEN_SLOPE = v), [0.2, 24], 0.1, 'night wash slope. Low reaches the zenith, high is a thin band on the horizon'),
+          tune('SKY_NIGHT_ATTEN', () => SKY_NIGHT_ATTEN, (v) => (SKY_NIGHT_ATTEN = v), [0, 1], 0.02, 'night wash value. How strong the horizon air is; 0 leaves the night sky as it is'),
+          tune('SKY_NIGHT_ATTEN_HUE', () => SKY_NIGHT_ATTEN_HUE, (v) => (SKY_NIGHT_ATTEN_HUE = v), [-180, 180], 1, 'night wash hue. At sunrise and sunset the wash follows the zenith instead'),
+          tune('SKY_NIGHT_ATTEN_SAT', () => SKY_NIGHT_ATTEN_SAT, (v) => (SKY_NIGHT_ATTEN_SAT = v), [0, 4], 0.02, 'night wash saturation. 0 is grey, 1 is a lifted night blue'),
+          tune('SKY_NIGHT_ATTEN_VAL', () => SKY_NIGHT_ATTEN_VAL, (v) => (SKY_NIGHT_ATTEN_VAL = v), [0, 3], 0.02, 'night wash brightness. 0 is black, 1 is a lifted night blue'),
           tune('MOON_LIGHT', () => MOON_LIGHT, (v) => (MOON_LIGHT = v), [0, 0.3], 0.01, 'moonlight at full moon, against the sun'),
           tune('SUNSET_BOLD', () => SUNSET_BOLD, (v) => (SUNSET_BOLD = v), [0, 3], 0.05, 'how hard a low sun paints the sky; 1 is what the air really does'),
           tune('NIGHT_AMBIENT', () => NIGHT_AMBIENT, (v) => (NIGHT_AMBIENT = v), [0, 1], 0.02, 'the light left at night with no moon'),
@@ -1286,6 +1356,16 @@ export const TUNE_TABS: TuneTab[] = [
            */
           tune('SPLAT_SORT_TURN_DEG', () => SPLAT_SORT_TURN_DEG, (v) => (SPLAT_SORT_TURN_DEG = v), [10, 180], 5, 'turn this far and the gaussians are re-sorted, whatever the distance rule says \u2014 what was behind you was never in the ordering'),
           tune('SPLAT_SORT_MAX_M', () => SPLAT_SORT_MAX_M, (v) => (SPLAT_SORT_MAX_M = v), [1, 4000], 10, 'always re-sort at least this often (m of travel), however far away the capture is \u2014 push it up to stop re-sorting on distance at all'),
+        ],
+      },
+      {
+        title: 'perf',
+        scope: 'machine',
+        collapsed: false,
+        keys: [
+          tune('STREAM_BUDGET_MS', () => STREAM_BUDGET_MS, (v) => (STREAM_BUDGET_MS = v), [1, 32], 0.5, 'ms a slice of the strip fill, the terrain sink, a branch road or a house cell may run before it yields. The next chunk picks this up'),
+          tune('STREAM_CHUNK_M', () => STREAM_CHUNK_M, (v) => (STREAM_CHUNK_M = v), [50, 2000], 25, 'metres of road in one unit. Reload to apply — the chunks are listed once, when the site opens'),
+          tune('STREAM_BUILD_M', () => STREAM_BUILD_M, (v) => (STREAM_BUILD_M = v), [100, 6000], 50, 'how far ahead of the car unfinished chunks are built (m). 100 is the chunk you are on; wider keeps the pump working the whole drive'),
         ],
       },
     ],

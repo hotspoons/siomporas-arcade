@@ -13,9 +13,10 @@
 // `celestial.ts`, applied to the whole Points object — which is both exact and what the sky is
 // actually doing. Nine thousand stars cost one matrix a frame.
 //
-// DRAWN AS BACKGROUND, like the dome it sits in: no depth test, no depth write, at the far edge of
-// clip space, just after the dome and before the world. The world then paints over it with its own
-// depth, which is what a star being behind a tree means.
+// DRAWN WITH THE DOME, in the opaque pass: no depth test, no depth write, at the far edge of
+// clip space, just after the dome and before the world. The world then paints over them. They
+// must stay opaque. A transparent material is drawn after the trees, and with depth testing off
+// that puts the stars in front of the canopy.
 
 import * as THREE from 'three'
 import { DATA_BASE } from '../world/site'
@@ -60,7 +61,9 @@ const VERT = /* glsl */ `
     // A STAR IS A POINT. The sprite is only big enough to hold the core and its halo, and the
     // bright ones get a little more room for the halo rather than a bigger disc — which is what a
     // lens does, and what stops Sirius reading as a planet.
-    gl_PointSize = uPixel * uSize * (1.0 + 0.55 * min(vBright, 3.0));
+    // Size is size. Brightness used to inflate the sprite, so turning the stars up made blobs
+    // instead of points. A bright star is a brighter pixel, not a bigger one.
+    gl_PointSize = max(1.25, uPixel * uSize);
   }
 `
 
@@ -82,14 +85,16 @@ const FRAG = /* glsl */ `
     float r = length(q) * 2.0;
     // the same profile the procedural version had: a tight core, and a faint halo only a bright
     // star shows. A wide smoothstep is what made stars read as fuzzy squares.
-    float core = pow(max(0.0, 1.0 - r), 6.0);
-    float halo = pow(max(0.0, 1.0 - r), 2.0) * 0.16 * min(vBright, 4.0);
+    // Tight core takes the gain, so a high SKY_STARS burns a point. The halo stays faint and does
+    // not grow with that gain — that growth is what read as a blob.
+    float core = pow(max(0.0, 1.0 - r), 8.0);
+    float halo = pow(max(0.0, 1.0 - r), 4.0) * 0.05 * min(vBright, 1.5);
     // twinkle: slow, per star, and stronger low down where there is more air to look through
     float air = mix(1.0, 0.45, smoothstep(0.35, 0.02, vAlt));
     float tw = 1.0 - air * 0.3 * (0.5 + 0.5 * sin(uTime * (1.2 + 2.2 * vSeed) + vSeed * 31.4));
     // extinction near the horizon, on top of the twinkle: the air dims as well as unsettles
     float ext = mix(0.35, 1.0, smoothstep(-0.01, 0.35, vAlt));
-    float a = (core + halo) * vBright * tw * ext * horizon * uNight * uStars * (1.0 - 0.85 * uCover);
+    float a = (core * vBright * uStars + halo) * tw * ext * horizon * uNight * (1.0 - 0.85 * uCover);
     if (a <= 0.002) discard;
     gl_FragColor = vec4(vTint * a, 1.0);
   }
@@ -115,7 +120,6 @@ export class Stars {
       uniforms: this.u,
       vertexShader: VERT,
       fragmentShader: FRAG,
-      transparent: true,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
       depthTest: false,
@@ -123,8 +127,6 @@ export class Stars {
     })
     this.points = new THREE.Points(geo, mat)
     this.points.name = 'stars'
-    // just after the dome (-1000) and well before the world, and never culled: the object is a
-    // whole celestial sphere and its bounding box says nothing useful once it is rotated
     this.points.renderOrder = -999
     this.points.frustumCulled = false
     this.points.matrixAutoUpdate = false

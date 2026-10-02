@@ -8,6 +8,7 @@
 // Everything is in the viewer's world frame (X east, Y up, Z south) and sized in metres, so
 // swapping a stand-in for a generated glb later is a one-line change per prop kind.
 import * as THREE from 'three'
+import type { Budget } from './budget'
 import { paintMaterial, retro } from '../visuals/retro'
 import { HEX_GLSL } from '../visuals/hextile'
 import type { TreeRecord } from './trees'
@@ -266,7 +267,7 @@ function blendFor(sets: Record<string, SurfaceSet>, from: string, to: string): T
  * quad is trimmed at a class boundary and blended across it, so a vertex-level skip would leave
  * half-quads and torn blend bands at the edge of every fixture.
  */
-export function roadMesh(st: Station[], lanesAt: (s: number) => number, classAt: (s: number) => string = () => 'asphalt_aged', sets: Record<string, SurfaceSet> = {}, lift = 0.02, twoWayAt: (s: number) => boolean = () => false, paintOff: ((x: number, z: number) => boolean) | null = null, kerbedAt: (s: number) => boolean = () => false, skipAt: ((s: number) => boolean) | null = null): THREE.Group {
+function* roadMeshGen(st: Station[], lanesAt: (s: number) => number, classAt: (s: number) => string = () => 'asphalt_aged', sets: Record<string, SurfaceSet> = {}, lift = 0.02, twoWayAt: (s: number) => boolean = () => false, paintOff: ((x: number, z: number) => boolean) | null = null, kerbedAt: (s: number) => boolean = () => false, skipAt: ((s: number) => boolean) | null = null): Generator<void, THREE.Group, void> {
   const g = new THREE.Group()
   // one asphalt geometry per surface class, so each gets its own textured material
   const byClass: Record<string, { pos: number[]; uv: number[]; idx: number[] }> = {}
@@ -411,7 +412,11 @@ export function roadMesh(st: Station[], lanesAt: (s: number) => number, classAt:
       bk2.bl.push(0, 0, 1, 1)
       bk2.idx.push(k, k + 1, k + 2, k + 1, k + 3, k + 2)
     }
+    // one quad, then the caller may yield. A whole carriageway in one turn is the drive hitch.
+    yield
   }
+  // the blend band and the paint are one more slice, not part of the last quad
+  yield
 
   for (const [key, bk2] of Object.entries(blends)) {
     const [from, to] = key.split('>')
@@ -458,6 +463,25 @@ export function roadMesh(st: Station[], lanesAt: (s: number) => number, classAt:
   marksMesh.userData.paintAsLaid = Float32Array.from(mcol)
   g.add(marksMesh)
   return g
+}
+
+/** The whole ribbon in one turn. Load time and a fixture hole, where nothing is driving. */
+export function roadMesh(st: Station[], lanesAt: (s: number) => number, classAt: (s: number) => string = () => 'asphalt_aged', sets: Record<string, SurfaceSet> = {}, lift = 0.02, twoWayAt: (s: number) => boolean = () => false, paintOff: ((x: number, z: number) => boolean) | null = null, kerbedAt: (s: number) => boolean = () => false, skipAt: ((s: number) => boolean) | null = null): THREE.Group {
+  const gen = roadMeshGen(st, lanesAt, classAt, sets, lift, twoWayAt, paintOff, kerbedAt, skipAt)
+  let step = gen.next()
+  while (!step.done) step = gen.next()
+  return step.value
+}
+
+/** The same ribbon, yielding every quad so a branch that comes online beside the car stays inside the frame budget. */
+export async function roadMeshPaced(st: Station[], lanesAt: (s: number) => number, classAt: (s: number) => string, sets: Record<string, SurfaceSet>, lift: number, twoWayAt: (s: number) => boolean, paintOff: ((x: number, z: number) => boolean) | null, kerbedAt: (s: number) => boolean, skipAt: ((s: number) => boolean) | null, budget: Budget): Promise<THREE.Group> {
+  const gen = roadMeshGen(st, lanesAt, classAt, sets, lift, twoWayAt, paintOff, kerbedAt, skipAt)
+  let step = gen.next()
+  while (!step.done) {
+    await budget.tick()
+    step = gen.next()
+  }
+  return step.value
 }
 
 /**

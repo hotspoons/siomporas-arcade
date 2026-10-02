@@ -465,10 +465,15 @@ def fetch_site(site: dict, half_width: float, lidar_half_width: float, skip: set
     lidar_corridor = unary_union([c["line"].buffer(lidar_half_width, cap_style="flat") for c in R["chains"]])
     print(f"  osm     {V['features']} features, {len(V['crossings'])} crossings on the primary; bbox {(bbox[2] - bbox[0]) / 1000:.1f} × {(bbox[3] - bbox[1]) / 1000:.1f} km, corridor {corridor.area / 1e6:.1f} km²" + (f", WORLD {region.area / 1e6:.1f} km² ({region.area / max(corridor.area, 1):.2f}x)" if world else ""), flush=True)
     prim = R["primary"]
-    tiled = bool(site.get("tiled")) or max(bbox[2] - bbox[0], bbox[3] - bbox[1]) > 6000.0
+    # `tiled` on the site is the editor's default: every world it bakes is cut into tiles,
+    # however small. The 6 km test remains for a site file that never said, so an old
+    # definition of a large world still tiles.
+    asked = bool(site.get("tiled"))
+    tiled = asked or max(bbox[2] - bbox[0], bbox[3] - bbox[1]) > 6000.0
     manifest["tiled"] = tiled
     if tiled:
-        print(f"  tiled   bbox over 6 km: rasters clipped to the corridor and cut into 1 km tiles", flush=True)
+        why = "editor bake" if asked else "bbox over 6 km"
+        print(f"  tiled   {why}: rasters clipped to the corridor and cut into 1 km tiles", flush=True)
     manifest["spine"] = {"ident": V["ident"], "nearest_way": prim["ways"][0]["id"], "snap_distance_m": round(float(prim["line"].distance(Point(*frame.origin))), 1), "photo_s": round(V["photo_s"], 1), "length_m": prim["length_m"], "trimmed": [False, False], "network": True, "roads": R["found"], "roads_missing": R["missing"], "chains": len(R["chains"])}
     manifest["osm"] = {"features": V["features"], "crossings": len(V["crossings"])}
 

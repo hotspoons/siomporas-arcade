@@ -207,10 +207,15 @@ export class Store {
    * overriding the image's baked-in copy, so nothing in the bake changes to accept a world that
    * was drawn ten seconds ago. The editor-only keys (`boundary`, `created`, `source`) ride along;
    * `cmd_fetch` reads by `slug` and hands the whole dict to `network.fetch_site`, which reads the
-   * keys it knows. Verified against the real thing by probe.mjs `--sitesjson`.
+   * keys it knows. Every world is written with `tiled: true`, which is what makes the bake cut
+   * rasters into tiles and then build the pyramid. The world file on disk is not rewritten.
+   * Verified against the real thing by probe.mjs `--sitesjson`.
    */
   async materialise() {
-    const worlds = await this.listWorlds()
+    // Every world the editor hands the bake is tiled. Under 6 km the bake would otherwise
+    // write one raster and the viewer would load it whole; `tiled` is what cuts that into
+    // the tiles the pyramid is built from. The world file itself is left alone.
+    const worlds = (await this.listWorlds()).map((w) => ({ ...w, tiled: true }))
     const file = path.join(this.root, 'sites.json')
     await this.writeAtomic(file, Buffer.from(JSON.stringify(worlds, null, 1)))
     return { file, count: worlds.length }

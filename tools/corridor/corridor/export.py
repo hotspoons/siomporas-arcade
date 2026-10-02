@@ -1067,8 +1067,11 @@ def export_site(site_dir: Path, web: Path | None = None) -> dict:
 
     # The LOD pyramid, beside the flat tiles rather than instead of them: a viewer that does not
     # know about `pyramid` keeps working off `tiles`, and one that does ignores `tiles` entirely.
-    # Opt-in because it is a second copy of the same ground and roughly doubles a site's bytes.
-    if tiled and os.environ.get("CORRIDOR_PYRAMID") == "1":
+    # This is the bake. It used to be opt-in (`CORRIDOR_PYRAMID=1`), and a job that forgot the
+    # variable shipped a monolith. Unset means on. `0` / `false` / `no` / `off` is the only opt-out,
+    # and the editor never sends one.
+    pyr = os.environ.get("CORRIDOR_PYRAMID", "1").strip().lower()
+    if tiled and pyr not in ("0", "false", "no", "off"):
         try:
             from . import pyramid as _pyr
 

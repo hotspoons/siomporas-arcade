@@ -582,6 +582,7 @@ const checkJobSpec = check('the Job this service builds is accepted by the real 
   // bake writes into a volume nobody reads.
   assert(spec.spec.template.spec.volumes[0].persistentVolumeClaim.claimName === 'probe-claim-not-the-default', 'the Job is not on the claim the pod serves from')
   assert(c.env.find((e) => e.name === 'CORRIDOR_SITES')?.value === '/data/sites.json', 'the Job would read the image’s sites.json, not the world just drawn')
+  assert(c.env.find((e) => e.name === 'CORRIDOR_PYRAMID')?.value === '1', 'a bake from the editor is a tile pyramid')
   assert(c.env.find((e) => e.name === 'PYTHONUNBUFFERED')?.value === '1', 'without this the log arrives in 4 KiB lumps, minutes late')
   assert(spec.spec.backoffLimit === 0, 'a retry would print the log twice and look like a hang')
   const file = path.join(store.root, 'job.json')

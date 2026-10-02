@@ -231,6 +231,9 @@ export class Runs {
    *     looks like a hang. Here, a failure is a failure and the person presses the button again.
    *   * `CORRIDOR_SITES=/data/sites.json` always, because the world being baked was drawn a minute
    *     ago and is not in the image.
+   *   * `CORRIDOR_PYRAMID=1` always. A bake from this editor is a tile pyramid. Leaving it unset
+   *     is how a world came out as one mesh: the bake image treats the variable as opt-in, and
+   *     nothing in the job used to set it. There is no switch in the panel to turn LOD off.
    *   * no ConfigMap: the chart mounts sites.json as one, which caps at 1 MiB and needs a fresh
    *     object per revision. The volume is already mounted and already holds the materialised list.
    */
@@ -241,6 +244,7 @@ export class Runs {
       { name: 'CORRIDOR_DATA', value: '/data' },
       { name: 'CORRIDOR_SITES', value: '/data/sites.json' },
       { name: 'CORRIDOR_HORIZON_M', value: String(this.cfg.horizonM ?? 30000) },
+      { name: 'CORRIDOR_PYRAMID', value: '1' },
       { name: 'PYTHONUNBUFFERED', value: '1' }, // or the log arrives in 4 KiB lumps, minutes late
     ]
     if (overpass) env.push({ name: 'CORRIDOR_OVERPASS_URL', value: overpass })
@@ -419,6 +423,8 @@ export class Runs {
       ...process.env,
       CORRIDOR_DATA: this.store.root,
       CORRIDOR_SITES: `${this.store.root}/sites.json`,
+      // same rule as the cluster Job: a bake from this editor is a pyramid, on a laptop too
+      CORRIDOR_PYRAMID: '1',
       PYTHONUNBUFFERED: '1',
       ...(overpass ? { CORRIDOR_OVERPASS_URL: overpass } : {}),
       ...(this.cfg.bucket

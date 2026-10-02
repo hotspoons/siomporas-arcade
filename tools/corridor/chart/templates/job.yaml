@@ -44,6 +44,10 @@ spec:
               value: /data
             - name: CORRIDOR_HORIZON_M
               value: {{ .Values.horizonRadiusM | quote }}
+            # A bake is a tile pyramid. The editor's Job sets the same variable; a chart bake
+            # that omitted it used to write one mesh.
+            - name: CORRIDOR_PYRAMID
+              value: "1"
             {{- if .Values.bake.sitesJson }}
             - name: CORRIDOR_SITES
               value: /config/sites.json

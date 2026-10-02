@@ -444,7 +444,7 @@ export class Car {
       // catch it. The mesh alone is a photograph of a lamp.
       // Aimed at the road a short way back. A level beam with a wide cone climbs the boot
       // and lights the air above the car.
-      const tailBeam = new THREE.SpotLight(0xff180c, 0, T.TAILLIGHT_RANGE, 0.22, 0.55, 2)
+      const tailBeam = new THREE.SpotLight(0xff180c, 0, T.TAILLIGHT_RANGE, T.TAILLIGHT_ANGLE, 0.55, 2)
       tailBeam.position.set(-2.18, 0.66, zz * 0.56)
       tailBeam.target.position.set(-2.18 - T.TAILLIGHT_RANGE * 0.65, 0.02, zz * 0.56)
       tailBeam.castShadow = false
@@ -513,7 +513,7 @@ export class Car {
     // The early-out has to watch the KNOBS as well as the level. It used to compare only `v`, so
     // turning HEADLIGHT down did nothing at all until the sun next moved — the panel moved, the
     // beam did not, and the only way to see the change was to wait for dusk (2026-09-27).
-    const sig = `${v.toFixed(3)}|${T.HEADLIGHT}|${T.TAILLIGHT}|${T.TAILLIGHT_RANGE}|${T.HEADLIGHT_RANGE}|${T.HEADLIGHT_ANGLE}`
+    const sig = `${v.toFixed(3)}|${T.HEADLIGHT}|${T.TAILLIGHT}|${T.TAILLIGHT_RANGE}|${T.TAILLIGHT_ANGLE}|${T.HEADLIGHT_RANGE}|${T.HEADLIGHT_ANGLE}`
     if (sig === this.lightSig) return
     this.lightSig = sig
     this.lightsOn = v
@@ -532,6 +532,7 @@ export class Car {
     for (const b of this.tailBeams) {
       b.intensity = v * 140 * T.TAILLIGHT
       b.distance = T.TAILLIGHT_RANGE
+      b.angle = T.TAILLIGHT_ANGLE
       b.target.position.x = -2.18 - Math.max(1.2, T.TAILLIGHT_RANGE * 0.65)
       b.target.position.y = 0.02
       b.visible = v > 0.02 && T.TAILLIGHT > 0.001

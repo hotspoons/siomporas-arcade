@@ -185,7 +185,7 @@ export class Grass {
   private prevT = 0
   private motion = 1 // 1 still … 0 moving fast: scales the wind
   /** cards at every range: GRASS_CARDS, or the eye moving faster than GRASS_WIND_STILL_BELOW */
-  private spritesOnly = false
+  private spritesOnly = T.GRASS_CARDS > 0.5
   private lastTile = 'none'
   private lastHeading = Infinity
   private lastPitch = Infinity

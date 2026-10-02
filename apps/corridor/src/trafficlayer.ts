@@ -140,7 +140,7 @@ function trafficLamps(mesh: THREE.Object3D, doc: VehicleDoc): THREE.Group {
   for (const z of lampOffsets(counts.taillights, width)) {
     const bulb = new THREE.Mesh(TAIL_BULB, TAIL_BULB_MAT)
     bulb.position.set(-nose, up, z)
-    const spot = new THREE.SpotLight(0xff180c, 0, T.TAILLIGHT_RANGE, 0.22, 0.55, 2)
+    const spot = new THREE.SpotLight(0xff180c, 0, T.TAILLIGHT_RANGE, T.TAILLIGHT_ANGLE, 0.55, 2)
     spot.position.set(-nose, up, z)
     spot.target.position.set(-nose - Math.max(1.2, T.TAILLIGHT_RANGE * 0.65), 0.05, z)
     spot.visible = false
@@ -698,6 +698,7 @@ export class TrafficLayer {
         spot.visible = on && T.TAILLIGHT > 0.001
         spot.intensity = on ? 9 * night * T.TAILLIGHT : 0
         spot.distance = T.TAILLIGHT_RANGE
+        spot.angle = T.TAILLIGHT_ANGLE
         spot.target.position.x = spot.position.x - Math.max(1.2, T.TAILLIGHT_RANGE * 0.65)
         spot.target.position.y = 0.05
       }

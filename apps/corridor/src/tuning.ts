@@ -139,11 +139,11 @@ export let GRASS_SAT = 0.9
 export let GRASS_LIGHT = 1.0
 export let GRASS_DRY_ADD = 0
 /**
- * 0: dynamic blades up close, cards only in the distance. 1: the distance cards are the grass at
- * every range, and nothing is generated as blades. GRASS_WIND_STILL_BELOW can still swap a moving
- * eye over to cards while this is 0; 0 on that knob keeps the blades on at any speed.
+ * 1: the distance cards are the grass at every range, and nothing is generated as blades.
+ * 0: dynamic blades up close, cards only in the distance. GRASS_WIND_STILL_BELOW can still swap a
+ * moving eye over to cards while this is 0; 0 on that knob keeps the blades on at any speed.
  */
-export let GRASS_CARDS = 0
+export let GRASS_CARDS = 1
 /**
  * Above this eye speed (m/s) the grass is static cards and nothing is generated as blades.
  * Below it, the blades come back and the wind with them. 0 keeps the blades on at any speed.
@@ -695,13 +695,16 @@ export let CANOPY_SHADE = 0.75
 /**
  * Headlights and tail lights at night, on the hero car and on traffic.
  *
- * The same numbers for every car. Tail lights are on this scale too, and they are aimed down at
- * the road for `TAILLIGHT_RANGE` metres so the red light stays behind the bumper.
+ * The same numbers for every car. Tail lights are on this scale too, aimed back along the road
+ * for `TAILLIGHT_RANGE` metres. `TAILLIGHT_ANGLE` is the half-angle of that wash; wide, so the
+ * red light spreads across the lane instead of two tight cones.
  */
 export let HEADLIGHT = 2.7
 export let TAILLIGHT = 0.025
 /** how far behind the car the red light reaches (m). Short, and aimed down, so it does not climb */
-export let TAILLIGHT_RANGE = 4
+export let TAILLIGHT_RANGE = 2.5
+/** tail-light half-angle, radians. Near π/2 the wash covers the whole road behind the bumper. */
+export let TAILLIGHT_ANGLE = 1.4
 export let HEADLIGHT_RANGE = 110
 /** the beam's half-angle, radians — the retro cone is this widened, so the two stay linked */
 export let HEADLIGHT_ANGLE = 0.46
@@ -839,7 +842,7 @@ export let SPLAT_SORT_PARALLAX = 0.02
 /** never re-sort more often than this much travel, metres */
 export let SPLAT_SORT_MIN_M = 0.25
 /** always re-sort at least this often, metres of travel, however far away the capture is */
-export let SPLAT_SORT_MAX_M = 8
+export let SPLAT_SORT_MAX_M = 11
 /**
  * How far the camera may TURN before the gaussians are re-sorted, degrees.
  *
@@ -1218,6 +1221,7 @@ export const TUNE_TABS: TuneTab[] = [
           tune('HEADLIGHT', () => HEADLIGHT, (v) => (HEADLIGHT = v), [0, 8], 0.1, 'headlights at night, yours and the traffic'),
           tune('TAILLIGHT', () => TAILLIGHT, (v) => (TAILLIGHT = v), [0, 0.075], 0.001, 'tail lights. The mark is half the old setting; the top of the slider is three times that'),
           tune('TAILLIGHT_RANGE', () => TAILLIGHT_RANGE, (v) => (TAILLIGHT_RANGE = v), [1, 12], 0.5, 'how far the red light reaches behind the car (m). Aimed at the road, so it stays low'),
+          tune('TAILLIGHT_ANGLE', () => TAILLIGHT_ANGLE, (v) => (TAILLIGHT_ANGLE = v), [0.15, 1.57], 0.02, 'tail-light half-angle (rad). 1.57 is a flat 180° wash out the back; the old cones were 0.22'),
           tune('HEADLIGHT_RANGE', () => HEADLIGHT_RANGE, (v) => (HEADLIGHT_RANGE = v), [10, 200], 5, 'how far down the road they reach (m)'),
           tune('HEADLIGHT_ANGLE', () => HEADLIGHT_ANGLE, (v) => (HEADLIGHT_ANGLE = v), [0.1, 1.2], 0.02, 'the beam\u2019s half-angle (rad); the retro cone is this widened'),
           tune('RETRO_MARKINGS', () => RETRO_MARKINGS, (v) => (RETRO_MARKINGS = v), [0, 6], 0.1, 'how hard road paint throws your headlights back'),

@@ -399,6 +399,27 @@ async function bodyOf(o, fetch) {
 
 const mib = (n) => `${(n / 2 ** 20).toFixed(1)} MiB`
 
+/** Every object under a prefix, from its deploy manifest or by listing. */
+async function deletePrefix(cf, accountId, bucket, prefix, concurrency) {
+  prefix = String(prefix).replace(/^\/+|\/+$/g, '')
+  const m = await cf.getJson(accountId, bucket, `${prefix}/deploy.json`)
+  const listed = m?.keys
+    ? m.keys.map((k) => `${prefix}/${k}`)
+    : (await cf.listObjects(accountId, bucket, `${prefix}/`)).map((o) => o.key)
+  const q = [...new Set([...listed, `${prefix}/deploy.json`])]
+  let n = 0
+  const del = async () => {
+    for (;;) {
+      const k = q.shift()
+      if (!k) return
+      await cf.deleteObject(accountId, bucket, k)
+      n++
+    }
+  }
+  await Promise.all(Array.from({ length: Math.max(1, concurrency) }, del))
+  return n
+}
+
 /**
  * Execute a plan.
  *
@@ -412,12 +433,14 @@ const mib = (n) => `${(n / 2 ** 20).toFixed(1)} MiB`
  * @param {{ name: string, workersDev?: boolean, hostname?: string|null, zoneId?: string|null }} o.worker
  * @param {string} o.appDir
  * @param {boolean} [o.prune]             delete older deploys of these worlds from the bucket afterwards
+ * @param {string|null} [o.replacePrefix] delete this prefix's objects before uploading, so a redeploy
+ *                                         replaces that deployment with the current bake
  * @param {boolean} [o.dryRun]
  * @param {(line: string) => void} o.log
  * @param {typeof fetch} [o.fetch]
  * @param {number} [o.concurrency]
  */
-export async function run({ cf, accountId, bucket, createBucket = true, prefix, plan: p, worker, appDir, prune = false, dryRun = false, log, fetch = globalThis.fetch, concurrency = 4 }) {
+export async function run({ cf, accountId, bucket, createBucket = true, prefix, plan: p, worker, appDir, prune = false, replacePrefix = null, dryRun = false, log, fetch = globalThis.fetch, concurrency = 4 }) {
   const at = new Date().toISOString()
   prefix = String(prefix).replace(/^\/+|\/+$/g, '')
   if (!prefix) throw new Error('a prefix is required (the default is corridor/<world>-<stamp>)')
@@ -435,6 +458,12 @@ export async function run({ cf, accountId, bucket, createBucket = true, prefix, 
     if (!createBucket) throw new Error(`no bucket ${bucket} in this account`)
     log(`creating bucket ${bucket}`)
     await cf.createBucket(accountId, bucket)
+  }
+
+  /* ---- replace one earlier deployment, before the new objects land -------------------- */
+  if (replacePrefix && !dryRun) {
+    const removed = await deletePrefix(cf, accountId, bucket, replacePrefix, concurrency)
+    log(`removed ${replacePrefix}: ${removed} objects`)
   }
 
   /* ---- the objects ---------------------------------------------------------------------- */
@@ -463,7 +492,7 @@ export async function run({ cf, accountId, bucket, createBucket = true, prefix, 
   const record = { prefix, worlds: p.worlds, levels: p.levels, at, worker: worker.name, objects: sent, bytes, keys: keys.map((k) => k.slice(prefix.length + 1)) }
   await cf.putObject(accountId, bucket, manifestKey, JSON.stringify(record), 'application/json')
   const ledger = (await cf.getJson(accountId, bucket, LEDGER_KEY)) ?? { deployments: [] }
-  ledger.deployments = ledger.deployments.filter((d) => d.prefix !== prefix)
+  ledger.deployments = ledger.deployments.filter((d) => d.prefix !== prefix && d.prefix !== replacePrefix)
   ledger.deployments.push({ prefix, worlds: p.worlds, at, worker: worker.name, objects: sent, bytes })
   await cf.putObject(accountId, bucket, LEDGER_KEY, JSON.stringify(ledger, null, 1), 'application/json')
 

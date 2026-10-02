@@ -21,7 +21,7 @@
 import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { createWriteStream, existsSync } from 'node:fs'
-import { open, stat } from 'node:fs/promises'
+import { open, rm, stat } from 'node:fs/promises'
 import { bboxOf } from './geo.mjs'
 import { mirrorsFor } from './overpass.mjs'
 
@@ -573,6 +573,43 @@ export class Runs {
 
   list(limit) {
     return this.store.listRuns(limit)
+  }
+
+  /**
+   * Drop a finished run's record and its log.
+   *
+   * A run that is still going is refused: deleting the file out from under a Job leaves the bake
+   * running and the list unable to say so. Cancel it first; this only removes history.
+   */
+  async remove(id) {
+    const run = await this.get(id)
+    if (!run) throw Object.assign(new Error(`no run ${id}`), { status: 404 })
+    if (run.state !== 'done' && run.state !== 'failed') {
+      throw Object.assign(new Error(`${run.label} is still ${run.state}`), { status: 409 })
+    }
+    this.live.delete(id)
+    this.done.delete(id)
+    this.following.delete(id)
+    this.finishedHooks.delete(id)
+    await rm(this.store.runFile(id), { force: true })
+    await rm(this.store.logFile(id), { force: true })
+    return { deleted: id }
+  }
+
+  /**
+   * Every finished run. Ones that are still going stay, so clearing the list cannot stop a bake.
+   */
+  async clearFinished() {
+    const all = await this.store.listRuns(1_000_000)
+    const deleted = []
+    const kept = []
+    for (const run of all) {
+      if (run.state === 'done' || run.state === 'failed') {
+        await this.remove(run.id)
+        deleted.push(run.id)
+      } else kept.push(run.id)
+    }
+    return { deleted: deleted.length, kept: kept.length }
   }
 }
 

@@ -10,7 +10,7 @@
 //
 // The poll also survives a reload and a pod restart: the log is a file on the volume, so the tail
 // picks up from byte 0 of whatever is there.
-import { Dialog, button, el, toast } from '../ui/shell'
+import { Dialog, button, confirm, el, toast } from '../ui/shell'
 import { bodyOf, empty, group, readout } from '../ui/controls'
 import { icon } from '../ui/icons'
 import { api, type Run, type World } from './api'
@@ -59,6 +59,16 @@ export class LogView {
     clearTimeout(this.timer)
     this.timer = 0
     this.id = null
+  }
+
+  /** The run whose log is on screen, if the viewer is open. */
+  showing(): string | null {
+    return this.id
+  }
+
+  /** Close the viewer when the run it is showing has been removed from the history. */
+  closeIf(id: string) {
+    if (this.id === id) this.dialog.close()
   }
 
   private async tick() {
@@ -326,16 +336,72 @@ export class RunsPanel {
     /* history */
     const hist = group('Runs')
     const hb = bodyOf(hist)
+    const finished = this.runs.filter((r) => r.state === 'done' || r.state === 'failed')
+    if (finished.length) {
+      const acts = el('div', 'panel-actions')
+      acts.append(button({
+        label: 'Clear history',
+        icon: 'trash',
+        variant: 'ghost',
+        title: 'remove every finished run. one that is still going stays',
+        onClick: () => void this.clearHistory(),
+      }))
+      hb.append(acts)
+    }
     if (!this.runs.length) hb.append(empty('Nothing has run yet'))
     for (const r of this.runs.slice(0, 20)) {
-      const row = el('button', 'run-row')
+      const row = el('div', 'run-row')
+      const open = el('button', 'run-open')
+      open.type = 'button'
       const meta = el('span', 'run-meta', when(r))
       meta.title = startedAt(r)
-      row.append(chip(r.state), el('span', 'run-title', r.label), meta)
-      row.onclick = () => void this.o.logs.open(r.id)
+      open.append(chip(r.state), el('span', 'run-title', r.label), meta)
+      open.onclick = () => void this.o.logs.open(r.id)
+      row.append(open)
+      if (r.state === 'done' || r.state === 'failed') {
+        row.append(button({
+          icon: 'x-mark',
+          variant: 'ghost',
+          title: 'Remove from history',
+          onClick: () => void this.drop(r),
+        }))
+      }
       hb.append(row)
     }
     host.append(hist)
+  }
+
+  private async drop(run: Run) {
+    try {
+      await api.deleteRun(run.id)
+      this.o.logs.closeIf(run.id)
+      await this.refresh()
+    } catch (e) {
+      toast((e as Error).message, 'danger', 6000)
+    }
+  }
+
+  private async clearHistory() {
+    const live = this.runs.filter((r) => r.state !== 'done' && r.state !== 'failed').length
+    const ok = await confirm({
+      title: 'Clear run history',
+      message: live
+        ? `Remove every finished run from this history? ${live} still running will stay.`
+        : 'Remove every finished run from this history?',
+      ok: 'Clear',
+      danger: true,
+      icon: 'trash',
+    })
+    if (!ok) return
+    const open = this.o.logs.showing()
+    try {
+      const r = await api.clearRuns()
+      await this.refresh()
+      if (open && !this.runs.some((run) => run.id === open)) this.o.logs.closeIf(open)
+      toast(r.kept ? `Cleared ${r.deleted}. ${r.kept} still running.` : `Cleared ${r.deleted}.`, 'ok')
+    } catch (e) {
+      toast((e as Error).message, 'danger', 6000)
+    }
   }
 }
 

@@ -256,7 +256,7 @@ export function buildStrip(
     injectShade(shader)
     injectWetStreak(shader)
   }
-  mat.customProgramCacheKey = () => 'corridor-strip-shade-wet'
+  mat.customProgramCacheKey = () => 'corridor-strip-shade-wet-vert'
   const mesh = new THREE.Mesh(geo, mat)
   mesh.name = 'strip'
   mesh.receiveShadow = true

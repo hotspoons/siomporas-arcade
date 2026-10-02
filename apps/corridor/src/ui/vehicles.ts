@@ -30,7 +30,7 @@ import {
   FINAL_DRIVE_MIN, frontShare, gearedTopSpeed, mountPoint, mountYaw, overrideRange, peakTorque,
   rebalanceGears, toDriveProfile, tractiveForce, TYRE_REFERENCE_MM, validateVehicle, VEHICLE_CLASSES,
   VEHICLE_MOUNTS, VEHICLE_TEMPLATE_IDS, wheelBoneCount,
-  type VehicleDoc, type VehicleMount,
+  type VehicleDoc, type VehicleMesh, type VehicleMount,
 } from '../vehicles'
 import { presetDoc, presetsFor } from '../vehiclepresets'
 import type { AssetDetailCtx } from './assets'
@@ -55,6 +55,11 @@ export function isVehicle(kind: string): boolean {
 export interface FormOpts {
   /** how many bones the rig binds to the wheel role, or undefined for "cannot tell" */
   rigWheels?: number
+  /**
+   * Which mesh files the chosen model has. Null means no model yet, so both choices stay open.
+   * Omitted means the caller does not know, and both stay open too.
+   */
+  meshes?: { finished: boolean; raw: boolean } | null
   /** called on every edit. `live` is true for a drag, where the form must NOT be rebuilt */
   onChange: (doc: VehicleDoc, live: boolean) => void
 }
@@ -138,6 +143,45 @@ export function dynamicsForm(host: HTMLElement, getDoc: () => VehicleDoc, opts: 
         onChange: (v) => { const n = Number(v); if (Number.isFinite(n)) { set(n); stage() } },
       }))
     }
+
+    /* ---- which file the world draws ------------------------------------------------------- */
+    const model = group('Model', { note: 'which mesh this vehicle draws in the world' })
+    const modelBody = bodyOf(model)
+    const available: VehicleMesh[] = opts.meshes
+      ? ([opts.meshes.finished ? 'finished' : null, opts.meshes.raw ? 'raw' : null].filter(Boolean) as VehicleMesh[])
+      : ['finished', 'raw']
+    const chosen: VehicleMesh = available.includes(doc.mesh ?? 'finished') ? (doc.mesh ?? 'finished') : (available[0] ?? 'finished')
+    if (!opts.meshes) {
+      modelBody.append(select({
+        label: 'Version',
+        value: chosen,
+        options: [
+          { value: 'finished' as const, label: 'Finished' },
+          { value: 'raw' as const, label: 'Raw' },
+        ],
+        note: 'finished is the simplified mesh. Raw is the reconstruction, with many more triangles. Choose a model and this list shrinks to the files it has',
+        onChange: (v) => { doc.mesh = v; stage() },
+      }))
+    } else if (available.length === 0) {
+      modelBody.append(el('div', 'field-note', 'This model has no mesh yet.'))
+    } else if (available.length === 1) {
+      modelBody.append(readout('Version', available[0] === 'raw' ? 'Raw' : 'Finished'))
+      modelBody.append(el('div', 'field-note', available[0] === 'raw'
+        ? 'The raw reconstruction is the mesh on this model, so that is what the world draws.'
+        : 'The finished mesh is the mesh on this model, so that is what the world draws.'))
+    } else {
+      modelBody.append(select({
+        label: 'Version',
+        value: chosen,
+        options: [
+          { value: 'finished' as const, label: 'Finished' },
+          { value: 'raw' as const, label: 'Raw' },
+        ],
+        note: 'finished is the simplified mesh. Raw is the full reconstruction. The world draws whichever you leave selected',
+        onChange: (v) => { doc.mesh = v; stage() },
+      }))
+    }
+    put('basic', model)
 
     /* ---- the chassis ---------------------------------------------------------------------- */
     const chassis = group('Chassis', { note: 'metres and kilograms' })
@@ -480,7 +524,11 @@ export function vehicleDetail(item: AssetItem, host: HTMLElement, ctx: VehicleCt
     }
     const form = el('div')
     body.append(form)
-    dynamicsForm(form, () => doc!, { rigWheels, onChange: (d) => ctx.edit({ vehicle: structuredClone(d) }) })
+    dynamicsForm(form, () => doc!, {
+      rigWheels,
+      meshes: { finished: !!item.finished, raw: !!item.mesh },
+      onChange: (d) => ctx.edit({ vehicle: structuredClone(d) }),
+    })
     const foot = el('div', 'panel-actions')
     foot.append(button({
       label: 'Start again from a template', variant: 'ghost',
@@ -515,7 +563,10 @@ export const VEHICLE_BUILD: BuildSpec<VehicleDoc> = {
   describe: describeVehicle,
   summary: (d) => `${d.spec.mass} kg · ${Math.round(d.engine.power_kw * 1.341)} hp · ${d.spec.drive.toUpperCase()}`,
   tags: (d) => [{ text: `${d.engine.gears.length}-speed` }, { text: d.profile.base }],
-  form: (host, getDoc, onChange) => void dynamicsForm(host, getDoc, { onChange: (doc) => onChange(doc) }),
+  form: (host, getDoc, onChange, asset) => void dynamicsForm(host, getDoc, {
+    meshes: asset ? { finished: !!asset.finished, raw: !!asset.mesh } : null,
+    onChange: (doc) => onChange(doc),
+  }),
   errors: (d) => validateVehicle(d, { audioSetups: engineSetups() }).errors,
 }
 

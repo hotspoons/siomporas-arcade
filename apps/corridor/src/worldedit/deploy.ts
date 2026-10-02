@@ -49,6 +49,8 @@ export class DeployPanel {
     host: '',
     prune: false,
   }
+  /** set for one start(): delete this prefix, then upload the current bake there */
+  private replacePrefix: string | null = null
 
   constructor(o: DeployOpts) {
     this.o = o
@@ -112,6 +114,8 @@ export class DeployPanel {
 
   private async start(dryRun: boolean) {
     const f = this.form
+    const replacePrefix = this.replacePrefix
+    this.replacePrefix = null
     if (!this.worlds.length) return toast('choose a world first', 'warn')
     // THE TOKEN IS IN THE SERVICE'S MEMORY, and the service restarts on every deploy of the editor
     // itself. Ask again before starting, so "no Cloudflare token" arrives as "enter it again"
@@ -141,6 +145,7 @@ export class DeployPanel {
         prefix: f.prefix,
         worker: { name: f.worker, workersDev: f.workersDev, hostname, zoneId: hostname ? f.zoneId : null },
         prune: f.prune,
+        replacePrefix,
         dryRun,
       })
       toast(`${run.label} started`, 'ok')
@@ -151,6 +156,21 @@ export class DeployPanel {
       this.busy = false
       this.render()
     }
+  }
+
+  /**
+   * Send this deployment again: same worker, same prefix, current bake.
+   * The objects under that prefix are deleted first, then the worlds as they are now are uploaded.
+   */
+  private async redeploy(d: DeployRecord) {
+    const named = new Set((this.status?.worlds ?? []).map((w) => w.slug))
+    const missing = d.worlds.filter((w) => !named.has(w))
+    if (missing.length) return toast(`${missing.join(', ')} is not in this site`, 'warn')
+    this.loadRecord(d)
+    this.form.prefix = d.prefix
+    this.form.prefixTouched = true
+    this.replacePrefix = d.prefix
+    await this.start(false)
   }
 
   /** Put a past deploy's choices back in the form: the worlds, the worker, its address, the bucket, pruning. */
@@ -166,7 +186,7 @@ export class DeployPanel {
     f.zoneId = d.worker.zoneId ?? ''
     f.host = d.worker.hostname ?? ''
     f.prune = d.prune
-    f.prefixTouched = false // a redeploy is a new revision under a fresh prefix
+    f.prefixTouched = false // Load starts a new revision. Redeploy sets the prefix back and replaces it.
     this.plan = null
     this.render()
     toast(`loaded: ${d.worlds.join(', ')} → ${d.worker.name}${d.worker.hostname ? ` at ${d.worker.hostname}` : ''}`, 'ok')
@@ -180,11 +200,13 @@ export class DeployPanel {
     this.defaults()
     const f = this.form
 
-    /* 0 · what was deployed before: load one back into the form, or redeploy it as it stands */
-    if (this.history.length) {
-      const past = group(`Past deployments (${this.history.length})`, { collapsed: true, note: 'load one to pre-select its worlds and address; Redeploy sends the worlds as they are now under a new prefix' })
+    /* 0 · what was deployed before, when its worlds are still in this site */
+    const named = new Set((st.worlds ?? []).map((w) => w.slug))
+    const usable = this.history.filter((d) => d.worlds.length > 0 && d.worlds.every((w) => named.has(w)))
+    if (usable.length) {
+      const past = group(`Past deployments (${usable.length})`, { collapsed: false, note: 'these contain worlds in this site. Redeploy deletes that copy in R2 and uploads the current bake in its place' })
       const pb = bodyOf(past)
-      for (const d of this.history.slice(0, 20)) {
+      for (const d of usable.slice(0, 20)) {
         const row = el('div', 'deploy-row')
         const when = d.at.slice(0, 16).replace('T', ' ')
         row.append(el('div', 'deploy-row-main', `${d.worlds.join(', ')} → ${d.worker.name}${d.worker.hostname ? ` · ${d.worker.hostname}` : ''}`))
@@ -192,7 +214,7 @@ export class DeployPanel {
         const acts = el('div', 'row')
         acts.append(
           button({ label: 'Load', icon: 'arrow-uturn-left', variant: 'ghost', onClick: () => this.loadRecord(d) }),
-          button({ label: 'Redeploy', icon: 'cloud-arrow-up', variant: 'ghost', disabled: this.busy || !st.token.present, onClick: () => { this.loadRecord(d); void this.start(false) } }),
+          button({ label: 'Redeploy', icon: 'cloud-arrow-up', variant: 'ghost', disabled: this.busy || !st.token.present, onClick: () => void this.redeploy(d) }),
         )
         if (d.urls?.[0]) acts.append(button({ label: 'Open', icon: 'arrow-top-right-on-square', variant: 'ghost', onClick: () => window.open(d.urls![0], '_blank', 'noopener') }))
         row.append(acts)

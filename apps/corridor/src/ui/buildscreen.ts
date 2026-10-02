@@ -60,8 +60,8 @@ export interface BuildSpec<Doc> {
   summary: (doc: Doc) => string
   /** the little tags along the bottom of a built card */
   tags: (doc: Doc) => { text: string; cls?: string }[]
-  /** the whole configuration form, rendered into `host` */
-  form: (host: HTMLElement, getDoc: () => Doc, onChange: (doc: Doc) => void) => void
+  /** the whole configuration form, rendered into `host`. `asset` is the model it is built on, when one is chosen */
+  form: (host: HTMLElement, getDoc: () => Doc, onChange: (doc: Doc) => void, asset?: AssetItem | null) => void
   /** what would make saving this a mistake. Empty means save it */
   errors: (doc: Doc) => string[]
 }
@@ -442,7 +442,7 @@ export function buildScreen<Doc>(host: HTMLElement, spec: BuildSpec<Doc>): void 
 
     const form = el('div')
     scroll.append(form)
-    spec.form(form, () => draft!.doc, (d) => { draft!.doc = d })
+    spec.form(form, () => draft!.doc, (d) => { draft!.doc = d }, item ?? null)
   }
 
   async function save() {

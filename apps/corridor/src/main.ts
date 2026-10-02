@@ -1290,7 +1290,7 @@ async function openLevel(id: string) {
     // The MODEL, fitted to whatever chassis we ended up with. Null for every ordinary reason — no
     // mesh on the asset, a file that will not decode — and the wedge is the fallback, never no car.
     const spec = (playerVehicle ?? defaultVehicle('hero-car')).spec
-    playerModel = await loadCarModel(modelId, spec)
+    playerModel = await loadCarModel(modelId, spec, playerVehicle?.mesh)
     if (playerModel) status(`car: ${lvl.player.vehicle} (${playerModel.variant}, ×${playerModel.scale.toFixed(2)}, ${playerModel.glazed} glazed)`)
     else toast(`${lvl.player.vehicle} has no usable model — driving the default body`, 'warn', 5000)
   }
@@ -3494,7 +3494,7 @@ function frame() {
     const lamps = drive.car?.lamps()
     retro.setLamps(lamps?.each ?? [], lamps?.on ?? 0)
     retro.tick()
-    // wet tarmac mirrors the lamps that are on: a long streak from each one toward the camera
+    // wet tarmac mirrors the lamps that are on: a vertical streak from each one down to the camera
     const wetMarks: WetMark[] = []
     if ((site?.weather.wetness ?? 0) > 0.02) {
       for (const s of drive.car?.streaks() ?? []) {
@@ -3503,13 +3503,14 @@ function frame() {
         const p = s.pos
         wetMarks.push({
           x: p.x, y: p.y, z: p.z,
+          dx: s.dir.x, dz: s.dir.z,
           r: 1, g: s.tail ? 0.06 : 0.93, b: s.tail ? 0.03 : 0.72,
           gain,
         })
       }
       traffic?.fillWet(wetMarks, 8, camera.position)
     }
-    setWetStreak(site?.weather.wetness ?? 0, wetMarks)
+    setWetStreak(site?.weather.wetness ?? 0, wetMarks, camera, renderer)
     // the inset map follows the car when driving, the camera when flying; site frame is x east, y north = -z
     syncMap()
     if (drive.on && drive.car) minimap?.draw({ x: drive.car.pos.x, y: -drive.car.pos.z, yaw: Math.atan2(-drive.car.forward.z, drive.car.forward.x) })

@@ -64,10 +64,19 @@ function gltf(): GLTFLoader {
   return loader
 }
 
-/** Which mesh file to prefer: the finished one, else the raw reconstruction. */
-function variantOf(item: AssetItem): MeshVariant | null {
-  if (item.finished) return 'finished'
-  if (item.mesh) return 'raw'
+/**
+ * Which mesh file to load.
+ *
+ * A vehicle can name `finished` or `raw`. Anything else, including a wish for a file this asset
+ * does not have, keeps the old rule: the finished mesh when it exists, otherwise the raw one.
+ */
+export function meshVariantOf(item: AssetItem, want?: 'finished' | 'raw' | null): MeshVariant | null {
+  const finished = !!item.finished
+  const raw = !!item.mesh
+  if (want === 'raw' && raw) return 'raw'
+  if (want === 'finished' && finished) return 'finished'
+  if (finished) return 'finished'
+  if (raw) return 'raw'
   return null
 }
 
@@ -78,14 +87,14 @@ function variantOf(item: AssetItem): MeshVariant | null {
  * mesh on it, a file that will not decode — because a level that names a car the library cannot
  * produce must still be driveable. The caller shows the procedural body and says so.
  */
-export async function loadCarModel(assetId: string, spec: VehicleChassis): Promise<CarModel | null> {
+export async function loadCarModel(assetId: string, spec: VehicleChassis, mesh?: 'finished' | 'raw' | null): Promise<CarModel | null> {
   let item: AssetItem | null = null
   try {
     item = await assetsvc.get(assetId)
   } catch {
     return null
   }
-  const variant = item ? variantOf(item) : null
+  const variant = item ? meshVariantOf(item, mesh) : null
   if (!item || !variant) return null
 
   let root: THREE.Object3D
@@ -146,7 +155,7 @@ export async function loadCarModel(assetId: string, spec: VehicleChassis): Promi
 export async function loadAssetGlb(assetId: string, heightM?: number): Promise<THREE.Object3D | null> {
   let item: AssetItem | null = null
   try { item = await assetsvc.get(assetId) } catch { return null }
-  const variant = item ? variantOf(item) : null
+  const variant = item ? meshVariantOf(item) : null
   if (!item || !variant) return null
   let root: THREE.Object3D
   try { root = (await gltf().loadAsync(assetsvc.fileUrl(item.id, MESH_FILE[variant]))).scene } catch { return null }

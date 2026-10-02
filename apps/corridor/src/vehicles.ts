@@ -174,6 +174,9 @@ export interface VehicleWheels {
   steer_max_deg: number
 }
 
+/** Which file the world draws. Absent means the finished mesh when that file exists. */
+export type VehicleMesh = 'finished' | 'raw'
+
 export interface VehicleDoc {
   spec: VehicleChassis
   profile: VehicleHandling
@@ -185,6 +188,11 @@ export interface VehicleDoc {
    * most cars are not armed, and an empty array on every document is noise in every file.
    */
   mounts?: MountedWeapon[]
+  /**
+   * Finished is the simplified mesh. Raw is the reconstruction, with many more triangles.
+   * Absent, the world draws finished when that file exists.
+   */
+  mesh?: VehicleMesh
 }
 
 /* ---- defaults, per class --------------------------------------------------------------------- */

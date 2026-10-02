@@ -172,9 +172,32 @@ export class Store {
     return true
   }
 
+  /**
+   * The definition and the bake.
+   *
+   * A definition with its site left behind comes straight back as a bake-only world, which is not
+   * a deletion. The slug is checked before either path is built: `rm` of a joined path is how a
+   * bad slug would walk out of the volume.
+   */
   async removeWorld(slug) {
+    if (!/^[a-z0-9][a-z0-9-]{1,63}$/.test(slug ?? '')) {
+      throw Object.assign(new Error(`"${slug}" is not a usable slug`), { status: 400 })
+    }
     await rm(path.join(this.worlds, `${slug}.json`), { force: true })
+    await rm(path.join(this.sites, slug), { recursive: true, force: true })
+    await this.#unindexSite(slug)
     await this.materialise()
+    return { deleted: slug }
+  }
+
+  /** Take one slug out of `sites/index.json`, which is what the viewer lists. */
+  async #unindexSite(slug) {
+    const file = path.join(this.sites, 'index.json')
+    const index = await this.readJson(file)
+    if (!index || !Array.isArray(index.sites)) return
+    const sites = index.sites.filter((s) => s?.slug !== slug)
+    if (sites.length === index.sites.length) return
+    await this.writeAtomic(file, Buffer.from(JSON.stringify({ ...index, sites }, null, 1)))
   }
 
   /**

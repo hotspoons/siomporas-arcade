@@ -37,8 +37,8 @@ export interface Nav {
  */
 const LEGACY_MODE_STEP: Record<string, { mode: string; step: string }> = {
   explore: { mode: 'world', step: 'explore' },
-  // "Index" never said what it was. It is the places you have kept.
-  index: { mode: 'world', step: 'places' },
+  // Index was the places list. That tab is gone; the link opens Explore.
+  index: { mode: 'world', step: 'explore' },
   define: { mode: 'world', step: 'define' },
   bake: { mode: 'world', step: 'bake' },
 }

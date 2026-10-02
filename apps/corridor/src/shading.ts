@@ -82,21 +82,34 @@ export function injectRelief(shader: { fragmentShader: string; uniforms: Record<
 /**
  * Wet-road streaks from the lamps that are actually on.
  *
- * A soaked road is a poor mirror stretched along the view: each headlight and tail light
- * paints a long coloured line from the lamp toward the camera, the way a wet lane does at
- * night. Eight lamps, unrolled, so the road shader does not grow a dynamic light loop.
+ * The streak is vertical in the image: it starts at the lamp and runs straight down the screen
+ * toward the camera, and only across the wet pavement that actually lies between the two.
+ * It is not a ribbon laid along the road in world space, so turning the camera does not tilt it.
+ * A lamp draws one only while its aim points at the camera. Headlights driving away, and tail
+ * lights seen from the front, throw their light the other way and leave no streak.
+ * Eight lamps, unrolled, so the road shader does not grow a dynamic light loop.
  * Dry pavement takes none of it (`uWetStreak` is the weather's wetness).
  */
 const WET_N = 8
 const wetAmount = { value: 0 }
+const wetGain = { value: 1 }
+const wetSpread = { value: 1 }
 const wetCount = { value: 0 }
+const wetSize = { value: new THREE.Vector2(1, 1) }
+const wetViewProj = { value: new THREE.Matrix4() }
 const wetLamp = Array.from({ length: WET_N }, () => new THREE.Vector4())
+const wetAim = Array.from({ length: WET_N }, () => new THREE.Vector2())
 const wetCol = Array.from({ length: WET_N }, () => new THREE.Vector3())
 
 const WET_DECL = /* glsl */ `
 uniform float uWetStreak;
+uniform float uWetGain;
+uniform float uWetSpread;
 uniform float uWetCount;
+uniform vec2 uWetSize;
+uniform mat4 uWetViewProj;
 uniform vec4 uWetLamp[8];
+uniform vec2 uWetAim[8];
 uniform vec3 uWetCol[8];
 `
 const WET_BODY = /* glsl */ `
@@ -106,23 +119,39 @@ const WET_BODY = /* glsl */ `
     vec3 nW = normalize(cross(dFdx(wp), dFdy(wp)));
     if (nW.y > 0.35) {
       float facing = clamp(dot(nW, normalize(cameraPosition - wp)), 0.0, 1.0);
-      float graze = pow(1.0 - facing, 1.2);
+      float graze = pow(1.0 - facing, 1.4);
+      vec2 fragPx = gl_FragCoord.xy;
       vec3 acc = vec3(0.0);
       #define WET_LAMP(IDX) \
         if (uWetCount > float(IDX)) { \
           vec3 lamp = uWetLamp[IDX].xyz; \
-          vec2 axis = cameraPosition.xz - lamp.xz; \
-          float axisL = length(axis); \
-          axis /= max(axisL, 1e-3); \
-          vec2 toF = wp.xz - lamp.xz; \
-          float along = dot(toF, axis); \
-          float lateral = length(toF - axis * along); \
-          float width = 0.16 + max(along, 0.0) * 0.028; \
-          float across = exp(-lateral * lateral / max(width * width, 1e-4)); \
-          float reach = 32.0; \
-          float span = smoothstep(-0.6, 0.5, along) * (1.0 - smoothstep(reach * 0.62, reach, along)); \
-          float body = exp(-max(along, 0.0) * 0.05); \
-          acc += uWetCol[IDX] * uWetLamp[IDX].w * across * span * body; \
+          vec2 aim = uWetAim[IDX]; \
+          float aimL = length(aim); \
+          aim /= max(aimL, 1e-3); \
+          vec2 toCam = cameraPosition.xz - lamp.xz; \
+          float toCamL = length(toCam); \
+          vec2 toCamN = toCam / max(toCamL, 1e-3); \
+          float toward = dot(aim, toCamN); \
+          if (toward > 0.2) { \
+            vec4 clip = uWetViewProj * vec4(lamp, 1.0); \
+            if (clip.w > 0.05) { \
+              vec2 ndc = clip.xy / clip.w; \
+              vec2 lampPx = (ndc * 0.5 + 0.5) * uWetSize; \
+              vec2 toF = wp.xz - lamp.xz; \
+              float side = dot(toF, toCam); \
+              float toCamL2 = toCamL * toCamL; \
+              float dx = fragPx.x - lampPx.x; \
+              float dy = lampPx.y - fragPx.y; \
+              float along = max(dy, 0.0); \
+              float width = (uWetSize.y * 0.005 + along * 0.01) * uWetSpread; \
+              float across = exp(-dx * dx / max(width * width, 0.25)); \
+              float onSeg = step(-0.4, side) * step(side, toCamL2 + 0.4); \
+              float span = smoothstep(-3.0, 10.0, dy) * (1.0 - smoothstep(toCamL2 * 0.82, toCamL2, side)); \
+              float body = exp(-along / max(uWetSize.y, 1.0) * 1.4); \
+              float aimed = smoothstep(0.2, 0.65, toward); \
+              acc += uWetCol[IDX] * uWetLamp[IDX].w * across * onSeg * span * body * aimed; \
+            } \
+          } \
         }
       WET_LAMP(0)
       WET_LAMP(1)
@@ -133,22 +162,28 @@ const WET_BODY = /* glsl */ `
       WET_LAMP(6)
       WET_LAMP(7)
       #undef WET_LAMP
-      gl_FragColor.rgb += acc * uWetStreak * (0.3 + 0.7 * graze);
+      gl_FragColor.rgb += acc * uWetStreak * uWetGain * (0.15 + 0.85 * graze);
     }
   }
 }
 `
 
-export interface WetMark { x: number; y: number; z: number; r: number; g: number; b: number; gain: number }
+export interface WetMark { x: number; y: number; z: number; dx: number; dz: number; r: number; g: number; b: number; gain: number }
 
 /** The lamps whose wet-road streaks are drawn this frame. Past eight, the farthest are dropped. */
-export function setWetStreak(wet: number, marks: readonly WetMark[]) {
+export function setWetStreak(wet: number, marks: readonly WetMark[], camera: THREE.Camera, renderer: THREE.WebGLRenderer) {
   wetAmount.value = wet
+  wetGain.value = T.WET_STREAK
+  wetSpread.value = T.WET_SPREAD
+  camera.updateMatrixWorld()
+  wetViewProj.value.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse)
+  renderer.getDrawingBufferSize(wetSize.value)
   const n = Math.min(WET_N, marks.length)
   wetCount.value = n
   for (let i = 0; i < n; i++) {
     const m = marks[i]
     wetLamp[i].set(m.x, m.y, m.z, m.gain)
+    wetAim[i].set(m.dx, m.dz)
     wetCol[i].set(m.r, m.g, m.b)
   }
 }
@@ -156,8 +191,13 @@ export function setWetStreak(wet: number, marks: readonly WetMark[]) {
 export function injectWetStreak(shader: { fragmentShader: string; uniforms: Record<string, { value: unknown }> }) {
   if (shader.fragmentShader.includes('uniform float uWetStreak')) return
   shader.uniforms.uWetStreak = wetAmount
+  shader.uniforms.uWetGain = wetGain
+  shader.uniforms.uWetSpread = wetSpread
   shader.uniforms.uWetCount = wetCount
+  shader.uniforms.uWetSize = wetSize
+  shader.uniforms.uWetViewProj = wetViewProj
   shader.uniforms.uWetLamp = { value: wetLamp }
+  shader.uniforms.uWetAim = { value: wetAim }
   shader.uniforms.uWetCol = { value: wetCol }
   shader.fragmentShader = shader.fragmentShader.includes('#include <common>')
     ? shader.fragmentShader.replace('#include <common>', `#include <common>\n${WET_DECL}`)

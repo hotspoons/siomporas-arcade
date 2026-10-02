@@ -724,6 +724,12 @@ export let RETRO_SPREAD = 1.4
  * and nothing happened (Rich, 2026-09-27).
  */
 export let HEADLIGHT_BOUNCE = 1.8
+/**
+ * The wet-road streak a lamp paints when it is aimed at the camera.
+ * 1 is the look as shipped. Spread below 1 is a thinner line.
+ */
+export let WET_STREAK = 1
+export let WET_SPREAD = 1
 // --- splat corridors (splats.ts, docs/corridor/PLAN-SPLAT-CORRIDORS.md) -----------------------
 /** 0 turns the captured world off entirely and leaves the built one */
 /** show the name of the road you are on while driving; 0 hides it */
@@ -1228,6 +1234,8 @@ export const TUNE_TABS: TuneTab[] = [
           tune('RETRO_SIGNS', () => RETRO_SIGNS, (v) => (RETRO_SIGNS = v), [0, 6], 0.1, 'how hard sign sheeting throws your headlights back'),
           tune('RETRO_SPREAD', () => RETRO_SPREAD, (v) => (RETRO_SPREAD = v), [1, 3], 0.05, 'retro cone as a multiple of the beam angle \u2014 above 1, the edge of the light lights things up'),
           tune('HEADLIGHT_BOUNCE', () => HEADLIGHT_BOUNCE, (v) => (HEADLIGHT_BOUNCE = v), [0, 4], 0.1, 'how hard the beam lights grass and tree cards'),
+          tune('WET_STREAK', () => WET_STREAK, (v) => (WET_STREAK = v), [0, 4], 0.05, 'how bright the vertical streak is. 0 hides it. It runs from a lamp aimed at you down toward the camera'),
+          tune('WET_SPREAD', () => WET_SPREAD, (v) => (WET_SPREAD = v), [0.15, 3], 0.05, 'how wide that vertical streak is. 1 is a thin line; lower is sharper'),
         ],
       },
       {

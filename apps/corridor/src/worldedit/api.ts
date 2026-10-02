@@ -282,6 +282,8 @@ export interface DeployRequest {
   prefix?: string
   worker: { name: string; workersDev?: boolean; hostname?: string | null; zoneId?: string | null }
   prune?: boolean
+  /** delete this prefix's objects, then upload the current bake in its place */
+  replacePrefix?: string | null
   dryRun?: boolean
 }
 
@@ -559,6 +561,10 @@ export const api = {
   deployHistory: () => call<{ deploys: DeployRecord[] }>('/api/deploy/history'),
   deployStart: (body: DeployRequest) => call<{ run: Run; prefix: string; worker: string }>('/api/deploy/start', { method: 'POST', body: JSON.stringify(body) }),
   cancel: (id: string) => call<{ run: Run }>(`/api/runs/${id}/cancel`, { method: 'POST' }),
+  /** Drop one finished run and its log. A run that is still going is refused. */
+  deleteRun: (id: string) => call<{ deleted: string }>(`/api/runs/${id}`, { method: 'DELETE' }),
+  /** Drop every finished run. Ones still going stay. */
+  clearRuns: () => call<{ deleted: number; kept: number }>('/api/runs', { method: 'DELETE' }),
   /** Bytes from `offset`. The whole streaming protocol — see tools/worldeditor/runs.mjs. */
   log: (id: string, offset: number) => call<{ text: string; offset: number; size: number; truncated: boolean }>(`/api/runs/${id}/log?offset=${offset}`),
 

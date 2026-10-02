@@ -1269,10 +1269,11 @@ async function api(req, res, seg, q) {
       return json(res, 200, { world: await store.putWorld(world), ...v, movedM: prev ? worlds.centreMoveM(prev, world) : 0 })
     }
     if (req.method === 'DELETE') {
-      // The DEFINITION only. A bake costs hours of somebody else's bandwidth and this endpoint
-      // will not delete one; removing a baked site is a decision made against the volume.
-      await store.removeWorld(slug)
-      return json(res, 200, { deleted: slug, note: 'the definition only — anything already baked under sites/ is untouched' })
+      // The definition and the bake. A bake that is still writing this site is refused: removing
+      // the directory under it leaves a Job with nowhere to put the rest.
+      const live = (await runs.list(200)).find((r) => r.slug === slug && r.state !== 'done' && r.state !== 'failed')
+      if (live) return json(res, 409, { error: `${slug} has a ${live.kind ?? 'run'} still ${live.state}` })
+      return json(res, 200, await store.removeWorld(slug))
     }
   }
 
@@ -1297,6 +1298,12 @@ async function api(req, res, seg, q) {
   }
   if (seg[0] === 'runs' && seg[2] === 'cancel' && req.method === 'POST') {
     return json(res, 200, { run: await runs.cancel(seg[1]) })
+  }
+  if (seg[0] === 'runs' && seg.length === 1 && req.method === 'DELETE') {
+    return json(res, 200, await runs.clearFinished())
+  }
+  if (seg[0] === 'runs' && seg.length === 2 && req.method === 'DELETE') {
+    return json(res, 200, await runs.remove(seg[1]))
   }
 
   /* ---- the placement catalog ---- */
@@ -1480,7 +1487,7 @@ async function deployApi(req, res, seg, q) {
           const p = await deploy.plan({ store, worlds, assetsvc: assetsvcUrl(), transpile: programs.transpile, appDir: APP })
           const out = await deploy.run({
             cf: cfFor(), accountId: body.account, bucket: body.bucket, createBucket: body.createBucket !== false, prefix, plan: p,
-            worker, appDir: APP, prune: !!body.prune, dryRun: !!body.dryRun, log,
+            worker, appDir: APP, prune: !!body.prune, replacePrefix: body.replacePrefix || null, dryRun: !!body.dryRun, log,
           })
           const detail = out.dryRun ? `dry run: ${out.objects} objects, ${(out.bytes / 2 ** 20).toFixed(1)} MiB` : out.urls.length ? out.urls.join(' ') : `r2://${body.bucket}/${prefix}`
           if (!out.dryRun) await amendDeploy(run.id, { state: 'done', urls: out.urls, objects: out.objects, bytes: out.bytes, finished: new Date().toISOString() }).catch(() => {})

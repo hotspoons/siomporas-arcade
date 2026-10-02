@@ -172,7 +172,15 @@ export class MapView {
   /** the ring being drawn, or the saved one being edited */
   ring: LonLat[] = []
   ringClosed = false
-  /** what the bake would take: drawn as BOTH the circle and the square, because it takes the square */
+  /**
+   * How the ring is drawn. A square is a drag with corner handles. Polygon is the placement
+   * editor's outline: click to drop a point, click the first to close, drag a point, click an
+   * edge to insert one. Switching to polygon keeps the square's four corners as vertices.
+   */
+  select: 'square' | 'polygon' = 'square'
+  /** the vertex Backspace removes */
+  activeVertex: number | null = null
+  /** a radius-only world (no ring): the square that extent describes. A closed ring is the bake. */
   extent: Extent | null = null
   /** other worlds, drawn faintly so a new one can be placed beside them rather than on them */
   others: { slug: string; centre: LonLat; radius_m: number; baked: boolean }[] = []
@@ -191,6 +199,7 @@ export class MapView {
   private settleTimer = 0
   private dragging:
     | { kind: 'pan'; x: number; y: number; moved: boolean }
+    | { kind: 'place'; x: number; y: number; moved: boolean }
     | { kind: 'vertex'; x: number; y: number; moved: boolean; vertex: number }
     | { kind: 'box'; x: number; y: number; moved: boolean; handle: Handle; anchor: LonLat; start: Box }
     | null = null
@@ -323,6 +332,11 @@ export class MapView {
    * still edits vertex by vertex; only a rectangular one gets handles.
    */
 
+  /** True when the ring is an axis-aligned rectangle the square tool can grab. */
+  isRect(): boolean {
+    return this.box() !== null
+  }
+
   /** The ring as a screen-space rectangle, when it is one. */
   private box(): Box | null {
     if (this.ring.length !== 4) return null
@@ -383,21 +397,48 @@ export class MapView {
   private bind() {
     const c = this.canvas
     c.addEventListener('pointerdown', (e) => {
+      // Middle and right start a pan. preventDefault keeps the middle button from autoscrolling
+      // and the right button from opening a menu over the drag.
+      if (e.button === 1 || e.button === 2) e.preventDefault()
       c.setPointerCapture(e.pointerId)
       const x = e.offsetX, y = e.offsetY
-      if (this.mode === 'draw') {
+      // Ctrl-drag, right-drag and middle-drag scroll. Left-drag is the selection.
+      const pan = e.button === 1 || e.button === 2 || (e.button === 0 && (e.ctrlKey || e.metaKey))
+      if (pan) {
+        this.dragging = { kind: 'pan', x, y, moved: false }
+        return
+      }
+      if (e.button !== 0) return
+      if (this.mode === 'draw' && this.select === 'square') {
         const b = this.box()
         const h = b ? this.handleAt(x, y) : null
         if (b && h) {
           this.dragging = { kind: 'box', x, y, moved: false, handle: h, anchor: this.toLonLat(x, y), start: b }
           return
         }
-        // Not on the box, or there is no box: start a new one from here. Dragging over the map in
-        // draw mode is always "draw a box" — panning is what the Explore mode and the wheel are
-        // for, and a drag that means two different things depending on what is underneath it is
-        // the thing that made this confusing.
+        // Not on the box, or there is no box: start a new one from here.
         const at = this.toLonLat(x, y)
         this.dragging = { kind: 'box', x, y, moved: false, handle: 'se', anchor: at, start: { west: at.lon, east: at.lon, south: at.lat, north: at.lat } }
+        return
+      }
+      if (this.mode === 'draw' && this.select === 'polygon') {
+        const v = this.vertexAt(x, y)
+        if (v != null) {
+          this.activeVertex = v
+          this.dragging = { kind: 'vertex', x, y, moved: false, vertex: v }
+          this.draw()
+          return
+        }
+        const edge = this.edgeAt(x, y)
+        if (edge) {
+          this.ring.splice(edge.at, 0, edge.p)
+          this.activeVertex = edge.at
+          this.dragging = { kind: 'vertex', x, y, moved: true, vertex: edge.at }
+          this.o.onBoundary(this.ring, this.ringClosed)
+          this.draw()
+          return
+        }
+        this.dragging = { kind: 'place', x, y, moved: false }
         return
       }
       const v = this.mode === 'pick' ? null : this.vertexAt(x, y)
@@ -436,7 +477,7 @@ export class MapView {
         } else if (this.dragging.kind === 'vertex') {
           this.ring[this.dragging.vertex] = p
           this.o.onBoundary(this.ring, this.ringClosed)
-        } else {
+        } else if (this.dragging.kind === 'pan') {
           const [cx, cy] = project(this.centre)
           this.centre = unproject(cx - dx / this.scale, cy - dy / this.scale)
           this.settle()
@@ -446,10 +487,14 @@ export class MapView {
         this.draw()
         return
       }
-      if (this.mode === 'draw') {
+      if (this.mode === 'draw' && this.select === 'square') {
         const h = this.handleAt(e.offsetX, e.offsetY)
         const want = h ? MapView.CURSOR[h] : 'crosshair'
         if (c.style.cursor !== want) c.style.cursor = want
+        return
+      }
+      if (this.mode === 'draw') {
+        if (c.style.cursor !== 'crosshair') c.style.cursor = 'crosshair'
         return
       }
       if (this.mode === 'pick') {
@@ -471,22 +516,29 @@ export class MapView {
         this.draw()
         return
       }
-      if (!drag || drag.moved) return
-      if (this.mode === 'draw') {
-        // A CLICK IS NOT A GESTURE HERE any more. It used to drop a vertex, which meant a stray
-        // click while reading the panel silently started a polygon.
+      if (drag?.kind === 'vertex' && !drag.moved && drag.vertex === 0 && !this.ringClosed && this.ring.length >= 3) {
+        this.closeRing()
         return
       }
+      if (drag?.kind === 'place' && !drag.moved && this.select === 'polygon' && !this.ringClosed) {
+        const p = this.toLonLat(e.offsetX, e.offsetY)
+        this.ring.push(p)
+        this.activeVertex = this.ring.length - 1
+        this.o.onBoundary(this.ring, false)
+        this.draw()
+        return
+      }
+      if (!drag || drag.moved) return
+      if (this.mode === 'draw') return
       if (this.mode === 'pick') {
         const w = this.wayAt(e.offsetX, e.offsetY)
         if (w) this.o.onPick(w, e.shiftKey)
       }
     })
     c.addEventListener('contextmenu', (e) => {
+      // Right-drag scrolls. A menu here would eat that gesture, and clearing the ring on the
+      // click that ends the drag would throw the selection away.
       e.preventDefault()
-      if (this.mode !== 'draw' || !this.ring.length) return
-      // one meaning: throw the box away and start again
-      this.clearRing()
     })
     c.addEventListener(
       'wheel',
@@ -519,8 +571,39 @@ export class MapView {
   clearRing() {
     this.ring = []
     this.ringClosed = false
+    this.activeVertex = null
     this.o.onBoundary(this.ring, false)
     this.draw()
+  }
+
+  /** Drop one vertex. With none named, the last point of an open ring goes. */
+  removeVertex(i: number | null = this.activeVertex) {
+    const at = i ?? this.ring.length - 1
+    if (at < 0 || at >= this.ring.length) return
+    this.ring.splice(at, 1)
+    if (this.ring.length < 3) this.ringClosed = false
+    this.activeVertex = this.ring.length ? Math.min(at, this.ring.length - 1) : null
+    this.o.onBoundary(this.ring, this.ringClosed)
+    this.draw()
+  }
+
+  /** The nearest edge, in screen pixels, and where a new vertex belongs along the ring. */
+  private edgeAt(x: number, y: number): { at: number; p: LonLat } | null {
+    if (this.ring.length < 2) return null
+    const n = this.ringClosed ? this.ring.length : this.ring.length - 1
+    let best = 64
+    let hit: { at: number; p: LonLat } | null = null
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % this.ring.length
+      const [ax, ay] = this.toScreen(this.ring[i])
+      const [bx, by] = this.toScreen(this.ring[j])
+      const d = segDist2(x, y, ax, ay, bx, by)
+      if (d < best) {
+        best = d
+        hit = { at: i + 1, p: this.toLonLat(x, y) }
+      }
+    }
+    return hit
   }
 
   private vertexAt(x: number, y: number): number | null {
@@ -1010,6 +1093,8 @@ export class MapView {
    * motorway that the bake then chains right through their town.
    */
   private paintExtent(g: CanvasRenderingContext2D) {
+    // A closed ring is the bake. The circle-and-square is only for a world that is still a radius.
+    if (this.ringClosed && this.ring.length >= 3) return
     if (!this.extent) return
     const { centre, radius_m } = this.extent
     const mpp = this.metresPerPixel
@@ -1079,7 +1164,7 @@ export class MapView {
     }
     g.stroke()
 
-    const box = this.box()
+    const box = this.select === 'square' ? this.box() : null
     if (box && this.mode === 'draw') {
       // EIGHT SQUARE HANDLES, the shape every selection tool uses, so it looks like something you
       // can grab before you try. Round dots read as vertices of a polygon, which is what this
@@ -1101,10 +1186,14 @@ export class MapView {
     } else {
       for (let i = 0; i < this.ring.length; i++) {
         const [x, y] = this.toScreen(this.ring[i])
+        const on = i === this.activeVertex
         g.beginPath()
-        g.arc(x, y, 4, 0, Math.PI * 2)
-        g.fillStyle = '#d9a441'
+        g.arc(x, y, on ? 6 : 4, 0, Math.PI * 2)
+        g.fillStyle = on ? '#fff4d2' : '#d9a441'
         g.fill()
+        g.lineWidth = 1
+        g.strokeStyle = '#1b1b1f'
+        g.stroke()
       }
     }
     g.restore()

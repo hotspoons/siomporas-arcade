@@ -231,7 +231,7 @@ vec4 hexSampleB(vec2 uv, out vec3 n) {
     injectRelief(shader)
     injectShade(shader)
     injectWetStreak(shader)
-  }, 'relief-shade-wet')
+  }, 'relief-shade-wet-vert')
   return mat
 }
 
@@ -1089,7 +1089,7 @@ export async function loadSurfaceSets(base = '/surfaces/'): Promise<Record<strin
       injectRelief(shader)
       injectShade(shader)
       injectWetStreak(shader)
-    }, 'relief-shade-wet')
+    }, 'relief-shade-wet-vert')
     out[s.name] = { name: s.name, metresPerTile: s.metres_per_tile, material: mat, hex: hex ?? undefined }
   }
   return out

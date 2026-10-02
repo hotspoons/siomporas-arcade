@@ -279,7 +279,7 @@ export class TrafficLayer {
       const b = builds.get(m.vehicle)
       if (!b) { this.problems.push(`traffic set names "${m.vehicle}", which is not a vehicle build`); continue }
       const doc = b.doc ?? defaultVehicle('traffic')
-      const model = b.asset ? await loadCarModel(b.asset, doc.spec).catch(() => null) : null
+      const model = b.asset ? await loadCarModel(b.asset, doc.spec, doc.mesh).catch(() => null) : null
       this.models.set(m.vehicle, { object: model?.object ?? placeholderCar(doc), doc })
       if (!model) this.problems.push(`"${m.vehicle}" has no usable model — drawn as a box`)
     }
@@ -709,7 +709,7 @@ export class TrafficLayer {
    * Lamps that are on, nearest first, for the wet-road streaks.
    * Fills `into` up to `limit`. The pool on the road stays the spot; this is only the mirror line.
    */
-  fillWet(into: { x: number; y: number; z: number; r: number; g: number; b: number; gain: number }[], limit: number, eye: THREE.Vector3): void {
+  fillWet(into: { x: number; y: number; z: number; dx: number; dz: number; r: number; g: number; b: number; gain: number }[], limit: number, eye: THREE.Vector3): void {
     if (into.length >= limit || this.night < 0.08) return
     const cand: { d2: number; spot: THREE.SpotLight; tail: boolean }[] = []
     for (const s of this.shown) {
@@ -723,13 +723,20 @@ export class TrafficLayer {
     }
     cand.sort((a, b) => a.d2 - b.d2)
     const p = new THREE.Vector3()
+    const aim = new THREE.Vector3()
     for (const c of cand) {
       if (into.length >= limit) break
       c.spot.getWorldPosition(p)
+      c.spot.target.getWorldPosition(aim)
+      aim.sub(p)
+      aim.y = 0
+      if (aim.lengthSq() < 1e-8) aim.set(1, 0, 0)
+      else aim.normalize()
       const gain = c.tail ? T.TAILLIGHT / 0.025 : T.HEADLIGHT / 2.7
       if (gain < 0.02) continue
       into.push({
         x: p.x, y: p.y, z: p.z,
+        dx: aim.x, dz: aim.z,
         r: c.tail ? 1 : 1, g: c.tail ? 0.06 : 0.93, b: c.tail ? 0.03 : 0.72,
         gain,
       })

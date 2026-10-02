@@ -1,14 +1,11 @@
 // Define a world: what a drawn boundary becomes, and the numbers that make that honest.
 //
 // The panel exists to answer three questions before anybody spends an hour of USGS bandwidth:
-//   1. WHERE — the smallest circle that contains what you drew, and the square the bake takes.
-//   2. HOW MUCH — ways and kilometres of centreline, inside the boundary AND inside the square,
-//      side by side, because the second is what actually gets baked and is routinely twice the
-//      first. A boundary drawn around the Crofton triangle holds 62 ways / 25.1 km; the square the
-//      bake takes holds 163 / 46.8 km.
+//   1. WHERE — the shape on the map. A square or a polygon, and the bake takes that shape.
+//   2. HOW MUCH — ways and kilometres of centreline inside it.
 //   3. WHICH ROAD IS THE SPINE — `primary` is not decoration: it becomes the spine, and the
 //      profile, the structures and every branch's `s_on_primary` are measured along it.
-import { button, el, toast } from '../ui/shell'
+import { button, confirm, el, toast } from '../ui/shell'
 import { bodyOf, empty, focusField, group, readout, segmented, select, setFieldError, setGroupError, slider, textField, toggle }
   from '../ui/controls'
 import { icon } from '../ui/icons'
@@ -38,6 +35,22 @@ import type { LonLat, MapView } from './map'
 
 const km = (m: number) => (m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m)} m`)
 
+/** Width and height of a ring, in metres. The bake's box is this, not the circle around it. */
+function ringSpan(ring: LonLat[]): { w: number; h: number } {
+  let south = 90, north = -90, west = 180, east = -180
+  for (const p of ring) {
+    south = Math.min(south, p.lat)
+    north = Math.max(north, p.lat)
+    west = Math.min(west, p.lon)
+    east = Math.max(east, p.lon)
+  }
+  const mid = (south + north) / 2
+  return {
+    h: (north - south) * 111132,
+    w: (east - west) * 111412.84 * Math.max(0.05, Math.cos((mid * Math.PI) / 180)),
+  }
+}
+
 export interface DefineOpts {
   map: MapView
   host: HTMLElement
@@ -45,8 +58,12 @@ export interface DefineOpts {
   onDirty: (dirty: boolean) => void
   /** the world list, for the import step */
   worlds: () => World[]
+  /** the world in the picker — the one Delete acts on */
+  selected: () => string | null
   /** a baked world arrived by upload: re-read the list and show it */
   onImported: () => Promise<void>
+  /** a world was deleted: drop it from the picker and re-read the list */
+  onDeleted: (slug: string) => Promise<void>
 }
 
 export class DefinePanel {
@@ -77,6 +94,7 @@ export class DefinePanel {
     this.roads.clear()
     this.preview = null
     this.o.map.clearRing()
+    this.o.map.select = 'square'
     this.o.map.picked = this.roads
     this.o.map.extent = null
     this.o.map.mode = 'draw'
@@ -91,6 +109,7 @@ export class DefinePanel {
     this.o.map.picked = this.roads
     this.o.map.ring = (w.boundary ?? []).map(([lon, lat]) => ({ lon, lat }))
     this.o.map.ringClosed = this.o.map.ring.length >= 3
+    this.o.map.select = this.o.map.ringClosed && !this.o.map.isRect() ? 'polygon' : 'square'
     this.o.map.extent = { centre: { lon: w.lon, lat: w.lat }, radius_m: w.radius_m }
     this.o.map.flyTo({ lon: w.lon, lat: w.lat }, zoomFor(w.radius_m))
     this.o.map.mode = 'draw'
@@ -159,7 +178,9 @@ export class DefinePanel {
       this.draft.lon = this.preview.circle.lon
       this.draft.radius_m = this.preview.circle.radius_m
       if (!this.draft.primary) this.draft.primary = this.preview.primary
-      this.o.map.extent = { centre: { lat: this.preview.circle.lat, lon: this.preview.circle.lon }, radius_m: this.preview.circle.radius_m }
+      // A closed ring is the bake. The circle-and-square overlay is only for a radius with no shape.
+      const shaped = ring.length >= 3 && this.o.map.ringClosed
+      this.o.map.extent = shaped ? null : { centre: { lat: this.preview.circle.lat, lon: this.preview.circle.lon }, radius_m: this.preview.circle.radius_m }
       this.o.map.draw()
     } catch (e) {
       toast((e as Error).message, 'danger')
@@ -179,9 +200,25 @@ export class DefinePanel {
     this.extentGroup = null
     const ring = this.o.map.ring
 
-    if (!this.preview && !this.o.map.ring.length) {
-      host.append(hint('Drag a box on the map. Drag its corners or edges to adjust.'))
-    }
+    const sel = group('Selection')
+    const sb0 = bodyOf(sel)
+    sb0.append(segmented({
+      value: this.o.map.select,
+      options: [
+        { value: 'square', label: 'Square' },
+        { value: 'polygon', label: 'Polygon' },
+      ],
+      onChange: (v) => {
+        this.o.map.select = v
+        this.o.map.mode = 'draw'
+        this.o.map.draw()
+        this.render()
+      },
+    }))
+    sb0.append(hint(this.o.map.select === 'polygon'
+      ? 'Click to place points. Click the first point to close. Drag a point to move it, click an edge to add one, Backspace removes the selected point. Ctrl-drag, right-drag or middle-drag scrolls.'
+      : 'Drag a box. Drag a corner or an edge to resize it, then switch to Polygon to add or remove corners. Ctrl-drag, right-drag or middle-drag scrolls.'))
+    host.append(sel)
 
     /* Name first. It used to be the last group on the form, below the extent, the contents, the
        roads and the look — so the two fields you have to fill in to save anything were the two
@@ -254,30 +291,34 @@ export class DefinePanel {
       )
     } else {
       const c = this.preview.circle
-      wb.append(
-        readout('centre', `${c.lat.toFixed(5)}, ${c.lon.toFixed(5)}`),
-        slider({
-          label: 'half-width',
-          value: c.radius_m,
-          min: 150,
-          max: 12000,
-          step: 50,
-          neutral: c.radius_m,
-          unit: 'm',
-          note: 'half the side of the square the bake takes',
-          onInput: (v) => {
-            this.draft.radius_m = v
-            this.o.map.extent = { centre: { lat: c.lat, lon: c.lon }, radius_m: v }
-            this.o.map.draw()
-            clearTimeout(this.pending)
-            this.pending = window.setTimeout(() => {
-              this.o.map.clearRing()
-              void this.refresh()
-            }, 500)
-          },
-        }),
-        readout('bake area', `${(c.radius_m * 2).toLocaleString()} m square · ${((c.radius_m * 2 / 1000) ** 2).toFixed(1)} km²`),
-      )
+      const shaped = ring.length >= 3 && this.o.map.ringClosed
+      wb.append(readout('centre', `${c.lat.toFixed(5)}, ${c.lon.toFixed(5)}`))
+      if (shaped) {
+        const span = ringSpan(ring)
+        wb.append(readout('bake area', `${Math.round(span.w).toLocaleString()} × ${Math.round(span.h).toLocaleString()} m · ${ring.length} points`))
+        wb.append(hint('The bake takes this shape. Ground outside it is not fetched.'))
+      } else {
+        wb.append(
+          slider({
+            label: 'half-width',
+            value: c.radius_m,
+            min: 150,
+            max: 12000,
+            step: 50,
+            neutral: c.radius_m,
+            unit: 'm',
+            note: 'half the side of the square the bake takes, when no shape is drawn',
+            onInput: (v) => {
+              this.draft.radius_m = v
+              this.o.map.extent = { centre: { lat: c.lat, lon: c.lon }, radius_m: v }
+              this.o.map.draw()
+              clearTimeout(this.pending)
+              this.pending = window.setTimeout(() => void this.refresh(), 500)
+            },
+          }),
+          readout('bake area', `${(c.radius_m * 2).toLocaleString()} m square · ${((c.radius_m * 2 / 1000) ** 2).toFixed(1)} km²`),
+        )
+      }
       for (const w of this.preview.warnings) wb.append(warn(w))
     }
     host.append(where)
@@ -296,13 +337,10 @@ export class DefinePanel {
       const s = this.preview.selection
       const size = group('Contents')
       const sb = bodyOf(size)
-      sb.append(readout('baked', `${s.square.ways.toLocaleString()} ways · ${km(s.square.metres)}`))
-      if (s.boundary) {
-        sb.append(readout('inside boundary', `${s.boundary.ways.toLocaleString()} ways · ${km(s.boundary.metres)}`))
-        const extra = s.square.metres - s.boundary.metres
-        // Actionable, and only when it is: the bake squares off your shape, and past a sixth of
-        // the total that is enough road to be worth tightening.
-        if (extra > s.boundary.metres * 0.15) sb.append(hint(`+${km(extra)} outside your boundary — the bake squares it off`))
+      if (s.boundary && ring.length >= 3) {
+        sb.append(readout('baked', `${s.boundary.ways.toLocaleString()} ways · ${km(s.boundary.metres)}`))
+      } else {
+        sb.append(readout('baked', `${s.square.ways.toLocaleString()} ways · ${km(s.square.metres)}`))
       }
       if (this.previewing) sb.append(hint('measuring…'))
       host.append(size)
@@ -491,6 +529,47 @@ export class DefinePanel {
       button({ label: 'Clear', icon: 'arrow-uturn-left', onClick: () => this.fresh() }),
     )
     host.append(acts)
+
+    /*
+     * DELETE, only for a world that has been baked.
+     *
+     * An unbaked definition is a drawing. A bake is the thing that fills the picker and the
+     * viewer, and it is the one there was no way to remove. It sits under the save row, named
+     * for the world, and asks before it does it.
+     */
+    const slug = this.o.selected()
+    const current = slug ? this.o.worlds().find((w) => w.slug === slug) : null
+    if (current?.baked) {
+      const danger = el('div', 'panel-actions')
+      danger.append(
+        button({
+          label: `Delete ${current.slug}`,
+          icon: 'trash',
+          variant: 'danger',
+          title: `delete ${current.slug} and its bake`,
+          onClick: () => void this.remove(current.slug),
+        }),
+      )
+      host.append(danger)
+    }
+  }
+
+  private async remove(slug: string) {
+    const yes = await confirm({
+      title: `Delete ${slug}?`,
+      message: `This removes ${slug} and its bake. It cannot be undone.`,
+      ok: 'Delete world',
+      danger: true,
+      icon: 'trash',
+    })
+    if (!yes) return
+    try {
+      await api.deleteWorld(slug)
+      toast(`${slug} deleted`, 'ok')
+      await this.o.onDeleted(slug)
+    } catch (e) {
+      toast((e as Error).message, 'danger', 8000)
+    }
   }
 
   private async save() {

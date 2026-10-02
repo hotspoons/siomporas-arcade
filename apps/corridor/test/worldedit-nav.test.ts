@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest'
 import { fromUrl, resolve, toUrl } from '../src/worldedit/nav'
 
 const MODES = ['world', 'place', 'stage', 'assets', 'program', 'shell', 'splats', 'deploy']
-const STEPS = ['explore', 'places', 'define', 'bake']
+const STEPS = ['explore', 'define', 'bake']
 const WORLDS = ['crofton-triangle', 'arrowhead-farms']
 const valid = { modes: MODES, steps: STEPS, worlds: WORLDS }
 
@@ -42,8 +42,8 @@ describe('a link written before the four became one', () => {
     expect(fromUrl('?mode=explore')).toEqual({ mode: 'world', step: 'explore', world: null })
   })
 
-  it('sends `index` to Places, which is what it always held', () => {
-    expect(fromUrl('?mode=index')).toEqual({ mode: 'world', step: 'places', world: null })
+  it('sends `index` to Explore — the places tab it used to open is gone', () => {
+    expect(fromUrl('?mode=index')).toEqual({ mode: 'world', step: 'explore', world: null })
   })
 
   it('and it survives `resolve`, which is where an unrecognised mode would have been dropped', () => {

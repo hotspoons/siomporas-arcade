@@ -33,6 +33,45 @@ const types: Record<string, string> = {
   '.ksplat': 'application/octet-stream',
 }
 
+/** localhost and 127.0.0.1 are this machine. Anything else is another install. */
+function localOrigin(url: string): boolean {
+  try {
+    const host = new URL(url).hostname
+    return host === 'localhost' || host === '127.0.0.1' || host === '::1'
+  } catch {
+    return false
+  }
+}
+
+/**
+ * What Vite forwards.
+ *
+ * Local `WORLDEDITOR` (the service on :8780) gets the editor's own state: worlds, runs, the bake,
+ * levels, and the placeable catalog. A remote one is the cluster, and the only thing forwarded
+ * there is `/assetsvc` — drawing and reconstruction. `/api` still goes to the local service.
+ */
+function proxyFor(worldeditor: string | undefined): { proxy?: Record<string, { target: string; ws?: boolean; changeOrigin: boolean }> } {
+  if (!worldeditor) return {}
+  const local = localOrigin(worldeditor)
+  const api = local ? worldeditor : 'http://127.0.0.1:8780'
+  return {
+    proxy: {
+      '/api': { target: api, ws: true, changeOrigin: true },
+      '/assetsvc': { target: worldeditor, changeOrigin: true },
+      ...(local
+        ? {
+            '/sites': { target: worldeditor, changeOrigin: true },
+            '/levels': { target: worldeditor, changeOrigin: true },
+            // The placeable catalog only. `/assets` as a whole stays here: the Draco decoder and
+            // the shipped models live under it, and a static public/assets/catalog.json never
+            // hears about a tick in the asset library.
+            '/assets/catalog.json': { target: worldeditor, changeOrigin: true },
+          }
+        : {}),
+    },
+  }
+}
+
 function serveBake(): Plugin {
   return {
     name: 'corridor-serve-bake',
@@ -91,9 +130,10 @@ function serveBake(): Plugin {
         }
         if (!file.startsWith(roots[prefix])) return next()
         if (!existsSync(file) || !statSync(file).isFile()) {
-          // A world editor behind WORLDEDITOR owns the bake. Let the proxy answer; a local 404
-          // here would hide the remote file.
-          if (process.env.WORLDEDITOR) return next()
+          // A local world editor owns the bake. Let that proxy answer a file this middleware
+          // does not have. A remote WORLDEDITOR is the cluster, and falling through to it is how
+          // a missing local file was replaced by the cluster's bake of the same slug.
+          if (process.env.WORLDEDITOR && localOrigin(process.env.WORLDEDITOR)) return next()
           // never fall through to Vite's SPA fallback: an optional JSON that does not exist yet must
           // be a 404, not index.html with a 200 (both agents lost time to `r.json()` on '<!doctype')
           res.statusCode = 404
@@ -144,30 +184,16 @@ export default defineConfig({
      * attached" while an editor sat attached to nothing. In the pod there is no proxy — the world
      * editor serves the page and the socket from one origin — so this is a development-only hole,
      * which is the kind that stays open longest.
+     *
+     * A REMOTE WORLDEDITOR IS ASSETSVC ONLY.
+     *
+     * Worlds, runs, levels and the bake are this machine's. Pointing `/api` and `/sites` at the
+     * cluster listed the cluster's worlds and then drew them with this machine's bake of the same
+     * slug — two crofton-triangles, one map. Image generation and reconstruction stay on that
+     * host, because those GPUs are not here. `WORLDEDITOR=http://localhost:8780` is the local
+     * service and still receives the whole set.
      */
-    ...(process.env.WORLDEDITOR
-      ? {
-        proxy: {
-          '/api': { target: process.env.WORLDEDITOR, ws: true, changeOrigin: true },
-          '/assetsvc': { target: process.env.WORLDEDITOR, changeOrigin: true },
-          '/sites': { target: process.env.WORLDEDITOR, changeOrigin: true },
-          '/levels': { target: process.env.WORLDEDITOR, changeOrigin: true },
-          /*
-           * THE PLACEABLE CATALOG, and only that one file.
-           *
-           * In a pod the world editor serves `/assets/catalog.json` from the volume, merged — it
-           * is what the "placeable" tick in the asset library writes into. In development Vite
-           * serves `public/assets/catalog.json`, a static file of 56 entries that nothing updates,
-           * so making an asset placeable appeared to do nothing: the editor said it had been added
-           * and the viewer had never heard of it. No error on either side.
-           *
-           * `/assets` as a whole must NOT be proxied — the built bundle, the Draco decoder and the
-           * shipped models all live under it. This is the one path whose meaning differs.
-           */
-          '/assets/catalog.json': { target: process.env.WORLDEDITOR, changeOrigin: true },
-        },
-      }
-      : {}),
+    ...proxyFor(process.env.WORLDEDITOR),
   },
   build: {
     target: 'es2022',

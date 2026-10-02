@@ -65,7 +65,7 @@ export function serverTools({ apiFetch, root, siteDoc }) {
       (a) => post('/api/worlds', a),
     ),
     T('world_save', 'Replace a world definition. LIVE: everyone with the editor open sees it. Moving a boundary after a bake reports how far it moved, because the bake no longer matches.', { slug: str(''), world: obj('the whole world document') }, ['slug', 'world'], (a) => put(`/api/worlds/${a.slug}`, a.world)),
-    T('world_delete', 'Delete a world definition. The baked output, if any, is left alone.', { slug: str('') }, ['slug'], (a) => del(`/api/worlds/${a.slug}`)),
+    T('world_delete', 'Delete a world: its definition and its bake. A bake that is still running is refused.', { slug: str('') }, ['slug'], (a) => del(`/api/worlds/${a.slug}`)),
 
     /* ---- levels: a stage set inside a world -------------------------------------------------- */
     T('level_list', 'Every level: id, the world it belongs to, and its scenario.', {}, [], () => get('/api/levels')),

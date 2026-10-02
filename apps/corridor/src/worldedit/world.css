@@ -517,11 +517,22 @@ body.worldedit .inspector {
 .run-row {
   display: flex;
   align-items: center;
-  gap: var(--s2);
+  gap: var(--s1);
   width: 100%;
-  padding: var(--s2) var(--s1);
-  border: 0;
+  padding: 0 var(--s1);
   border-radius: var(--r1);
+}
+.run-row:hover {
+  background: var(--bg-2);
+}
+.run-open {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  flex: 1;
+  min-width: 0;
+  padding: var(--s2) 0;
+  border: 0;
   background: none;
   color: var(--ink-2);
   font: inherit;
@@ -529,8 +540,8 @@ body.worldedit .inspector {
   text-align: left;
   cursor: pointer;
 }
-.run-row:hover {
-  background: var(--bg-2);
+.run-row .icon-only {
+  flex: none;
 }
 .run-title {
   flex: 1;

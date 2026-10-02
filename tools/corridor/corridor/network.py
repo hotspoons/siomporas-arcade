@@ -35,7 +35,7 @@ from pathlib import Path
 
 import numpy as np
 import shapely
-from shapely.geometry import LineString, MultiLineString, Point, box as shp_box, mapping
+from shapely.geometry import LineString, MultiLineString, Point, Polygon, box as shp_box, mapping
 from shapely.ops import linemerge, unary_union
 
 from . import osm
@@ -124,6 +124,31 @@ DRIVABLE = (
 UNNAMED = "«unnamed»"
 
 
+def selection_polygon(site: dict, frame: Frame):
+    """The drawn boundary, in the site frame, or None when the world is still a centre and a radius.
+
+    The bake used to throw this away and take the square around the smallest circle that contained
+    it. A long rectangle became a square on its diagonal, and everything outside the drawing was
+    fetched anyway. When a boundary is present it is the world: roads, imagery and the region.
+    """
+    ring = site.get("boundary") or []
+    if not isinstance(ring, list) or len(ring) < 3:
+        return None
+    pts = []
+    for p in ring:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = frame.from_wgs(float(p[0]), float(p[1]))
+            pts.append((float(x), float(y)))
+    if len(pts) < 3:
+        return None
+    poly = Polygon(pts)
+    if not poly.is_valid:
+        poly = poly.buffer(0)
+    if poly.is_empty or poly.geom_type != "Polygon" or poly.area <= 0:
+        return None
+    return poly
+
+
 def roads(site: dict, frame: Frame, cache: Path) -> dict:
     """Every chain of every road we want, with junctions, the primary picked out.
 
@@ -143,7 +168,13 @@ def roads(site: dict, frame: Frame, cache: Path) -> dict:
     names = {r for r in wanted if r not in refs}
     ox, oy = frame.origin
     R = float(site.get("radius_m", 9000))
-    w, s, e, n = frame.bbox_wgs(ox - R, oy - R, ox + R, oy + R)
+    sel = selection_polygon(site, frame)
+    if sel is not None:
+        minx, miny, maxx, maxy = sel.bounds
+        pad = 40.0  # a road that crosses the edge still arrives, then the polygon drops it
+        w, s, e, n = frame.bbox_wgs(minx - pad, miny - pad, maxx + pad, maxy + pad)
+    else:
+        w, s, e, n = frame.bbox_wgs(ox - R, oy - R, ox + R, oy + R)
     esc = lambda v: v.replace("(", "\\(").replace(")", "\\)").replace(".", "\\.")  # noqa: E731
     parts = []
     if all_streets:
@@ -182,6 +213,8 @@ def roads(site: dict, frame: Frame, cache: Path) -> dict:
                 "lanes": _chain_lanes(c, frame), "oneway": tags0.get("oneway"),
                 "nodes": {nid for w2 in c for nid in w2["nodes"]},
             })
+    if sel is not None:
+        chains = [c for c in chains if c["line"].intersects(sel)]
     if not chains:
         raise RuntimeError(f"no ways for roads {wanted} within {R:.0f} m of {site['lat']},{site['lon']}")
     # the primary: the longest chain of the primary identity (or the longest chain of all)
@@ -229,7 +262,7 @@ DEAD_END_DEFAULT = 9.0
 BOUNDARY_M = 60.0  # an end this close to the query box was CLIPPED by us, not built as a dead end
 
 
-def dead_ends(chains: list[dict], frame: Frame, cache: Path, radius_m: float, site_lat: float, site_lon: float) -> None:
+def dead_ends(chains: list[dict], frame: Frame, cache: Path, radius_m: float, site_lat: float, site_lon: float, clip=None) -> None:
     """Mark each chain end as a cul-de-sac, a true dead end, or neither (Rich, 2026-09-21).
 
     "If a street dead ends, assume a cul de sac, make it so this can be overridden into a true dead
@@ -292,8 +325,13 @@ def dead_ends(chains: list[dict], frame: Frame, cache: Path, radius_m: float, si
             if not osm_bulb and (node_routable.get(node, set()) - own):
                 continue
             p = c["line"].interpolate(s_at)
-            if min(abs(p.x - (ox - radius_m)), abs(p.x - (ox + radius_m)), abs(p.y - (oy - radius_m)), abs(p.y - (oy + radius_m))) < BOUNDARY_M:
-                continue  # clipped by our own query box: the road continues, our world does not
+            # clipped by the selection, or by the radius square when there is no selection: the
+            # road continues and our world does not, so it is not a cul-de-sac
+            if clip is not None:
+                if p.distance(clip.boundary) < BOUNDARY_M or not clip.covers(p):
+                    continue
+            elif min(abs(p.x - (ox - radius_m)), abs(p.x - (ox + radius_m)), abs(p.y - (oy - radius_m)), abs(p.y - (oy + radius_m))) < BOUNDARY_M:
+                continue
             rad = DEAD_END_RADIUS.get(c["highway"] or "", DEAD_END_DEFAULT)
             c["dead_ends"].append({
                 "s": round(s_at, 1), "kind": "cul_de_sac", "radius_m": round(rad, 1),
@@ -357,12 +395,18 @@ def write_vectors(site: dict, frame: Frame, R: dict, out: Path, half_width: floa
     #
     world = bool(site.get("world"))
     margin = float(site.get("world_margin_m", 300.0))
-    bbox = snap_bbox(corridor.buffer(margin).bounds if world else corridor.bounds)
-    region = shp_box(*bbox) if world else corridor
+    sel = selection_polygon(site, frame)
+    if sel is not None:
+        # the drawing is the world. No margin, and no square around the circle that contained it.
+        bbox = snap_bbox(sel.bounds)
+        region = sel
+    else:
+        bbox = snap_bbox(corridor.buffer(margin).bounds if world else corridor.bounds)
+        region = shp_box(*bbox) if world else corridor
     ident = {"ref": prim["ref"]} if prim["ref"] else {"name": prim["ident"]}
     site_json = {**site, "frame": {"epsg": frame.epsg, "origin": frame.origin}, "bbox_utm": bbox, "corridor": mapping(corridor), "region": mapping(region), "world": world, "ident": ident}
     (out / "site.json").write_text(json.dumps(site_json))
-    feats = osm.features(region.convex_hull if world else corridor.convex_hull, frame, cache)
+    feats = osm.features(sel if sel is not None else (region.convex_hull if world else corridor.convex_hull), frame, cache)
     (out / "osm.geojson").write_text(json.dumps(feats))
     cross = osm.crossings(line, feats, ident, frame, segs)
     (out / "crossings.json").write_text(json.dumps(cross, indent=1))
@@ -398,7 +442,7 @@ def fetch_site(site: dict, half_width: float, lidar_half_width: float, skip: set
     manifest |= {"slug": slug, "world": bool(site.get("world")), "kind": "network", "frame": {"epsg": frame.epsg, "origin": frame.origin}, "fetched": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "params": {"half_width_m": half_width, "lidar_half_width_m": lidar_half_width, "radius_m": site.get("radius_m"), "horizon_radius_m": 30000.0}}
     R = roads(site, frame, cache / "overpass")
     print(f"  roads   {summary(R)}", flush=True)
-    dead_ends(R["chains"], frame, cache / "overpass", float(site.get("radius_m", 9000)), site["lat"], site["lon"])
+    dead_ends(R["chains"], frame, cache / "overpass", float(site.get("radius_m", 9000)), site["lat"], site["lon"], clip=selection_polygon(site, frame))
     V = write_vectors(site, frame, R, out, half_width, cache / "overpass")
     corridor = V["corridor"]
     region = V["region"]
@@ -859,7 +903,7 @@ def revector(site: dict, data: Path, cache: Path) -> dict:
     old_spine = json.loads((out / "spine_utm.json").read_text()) if (out / "spine_utm.json").exists() else {}
     R = roads(site, frame, cache / "overpass")
     print(f"  roads   {summary(R)}", flush=True)
-    dead_ends(R["chains"], frame, cache / "overpass", float(site.get("radius_m", 9000)), site["lat"], site["lon"])
+    dead_ends(R["chains"], frame, cache / "overpass", float(site.get("radius_m", 9000)), site["lat"], site["lon"], clip=selection_polygon(site, frame))
     if old_spine.get("coords") and len(R["primary"]["line"].coords) != len(old_spine["coords"]):
         print(f"  WARNING the primary changed shape ({len(old_spine['coords'])} -> {len(R['primary']['line'].coords)} points): profiles are keyed to the OLD line, re-bake instead", flush=True)
     half_width = float((json.loads((out / "manifest.json").read_text()).get("params") or {}).get("half_width_m", 150.0))

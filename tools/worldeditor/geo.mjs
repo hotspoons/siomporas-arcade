@@ -93,7 +93,7 @@ export function minimumEnclosingCircle(points) {
  * The bake has no notion of an arbitrary boundary: `sites.json` is a point and a radius, and
  * `network.py` takes every road within it. So what the editor draws is a HINT, and this is where
  * that becomes honest — the UI draws this circle back on the map so what you get is what you see.
- * The polygon is kept on the definition as provenance, never as a clip.
+ * The polygon is what the bake clips to. The circle is only the centre the site file still stores.
  */
 export function circleFor(ring) {
   if (!ring.length) throw new Error('an empty boundary has no circle')

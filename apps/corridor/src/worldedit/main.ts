@@ -15,10 +15,10 @@
 import { fixturesExtension } from '../ui/fixtures'
 import { loadFixtures, saveFixtures } from '../fixtures'
 import { Dialog, Drawer, Tabs, button, el, installShellKeys, status, clearStatus, toast, typing } from '../ui/shell'
-import { bodyOf, empty, group, readout, segmented, select, textField } from '../ui/controls'
+import { empty, segmented, select } from '../ui/controls'
 import { icon, type IconName } from '../ui/icons'
 import { AssetCatalog } from '../ui/assets'
-import { api, type Config, type IndexedPlace, type Way, type World } from './api'
+import { api, type Config, type Way, type World } from './api'
 import { MapView, type LonLat } from './map'
 import { DefinePanel, zoomFor } from './define'
 import { LogView, RunsPanel } from './runs'
@@ -59,11 +59,11 @@ import type { CourseDoc } from '../races'
  * now. Index doesn't make any sense."
  *
  * Those four were never four things. They are what you do to ONE world, in order: find the place,
- * keep it, draw its boundary, bake it. A row of eleven peers said they were alternatives to each
- * other and to the Assets library, which is a different kind of thing entirely — so the top bar
- * read as a pile rather than as a pipeline, and there was nothing anywhere to say what to press
- * first. They are steps inside `world` now, and `index` — which named itself after a data
- * structure — is "Places", which is what it holds.
+ * draw its boundary, bake it. A row of eleven peers said they were alternatives to each other and
+ * to the Assets library, which is a different kind of thing entirely — so the top bar read as a
+ * pile rather than as a pipeline, and there was nothing anywhere to say what to press first. They
+ * are steps inside `world` now. The places list that sat between finding a place and drawing one
+ * is gone: it kept pins and nothing else used them.
  */
 // THE AGENT IS NOT A MODE (Rich, 2026-09-30: "move the agents tab out of the main strip and into
 // the settings panel"). It never was a place you build a world; it is a client of this editor, and
@@ -73,7 +73,7 @@ const MODES = ['world', 'place', 'stage', 'assets', 'program', 'shell', 'splats'
 type Mode = (typeof MODES)[number]
 
 /** The stages of making a world, in the order you do them. */
-const STEPS = ['explore', 'places', 'define', 'bake'] as const
+const STEPS = ['explore', 'define', 'bake'] as const
 type Step = (typeof STEPS)[number]
 
 /*
@@ -595,7 +595,15 @@ const define = new DefinePanel({
   },
   onDirty: (d) => setDirty(d, 'boundary'),
   worlds: () => worlds,
+  selected: () => selected,
   onImported: async () => {
+    await refreshWorlds()
+    renderWorldSelect()
+    renderPanel()
+  },
+  onDeleted: async (slug) => {
+    if (selected === slug) selected = null
+    define.fresh()
     await refreshWorlds()
     renderWorldSelect()
     renderPanel()
@@ -743,19 +751,7 @@ async function search(q: string) {
         searchResults.replaceChildren()
         searchInput.value = p.short
       }
-      // Keeping a place is one click from finding it — that is the whole point of an index.
-      const keep = button({
-        icon: 'plus',
-        variant: 'ghost',
-        title: `keep ${p.short} in the index`,
-        onClick: (ev) => {
-          ev.stopPropagation()
-          void keepPlace({ name: p.short, lat: p.lat, lon: p.lon, bbox: p.bbox, kind: p.kind, source: 'search', note: p.name })
-        },
-      })
-      const row = el('div', 'search-row-wrap')
-      row.append(b, keep)
-      searchResults.append(row)
+      searchResults.append(b)
     }
     if (cache === 'hit') searchResults.append(el('p', 'search-empty', 'from the cache'))
   } catch (e) {
@@ -781,98 +777,6 @@ function frame(p: { lat: number; lon: number; bbox: { south: number; west: numbe
   const zLon = Math.log2((r.w * 360) / (spanLon * 256))
   const zoom = Math.max(2, Math.min(17, Math.min(zLat, zLon) - 0.25))
   map.flyTo({ lat: (p.bbox.north + p.bbox.south) / 2, lon: (p.bbox.east + p.bbox.west) / 2 }, zoom)
-}
-
-/* ---- the index: places worth coming back to ------------------------------------------------- */
-
-let indexed: IndexedPlace[] = []
-
-async function refreshPlaces() {
-  indexed = (await api.places().catch(() => ({ places: [] }))).places
-  map.pins = indexed.map((p) => ({ id: p.id, name: p.name, lat: p.lat, lon: p.lon, world: !!p.world }))
-  map.draw()
-  if (at('explore')) renderExplore()
-}
-
-async function keepPlace(p: Partial<IndexedPlace>) {
-  try {
-    const { place } = await api.addPlace(p)
-    toast(`kept “${place.name}”`, 'ok')
-    await refreshPlaces()
-  } catch (e) {
-    toast((e as Error).message, 'danger', 6000)
-  }
-}
-
-/** The index, as a panel: what you have found, and what to do with it. */
-function renderIndex(host: HTMLElement) {
-  host.replaceChildren()
-  const hint = el('p', 'panel-hint')
-  hint.append(
-    icon('information-circle', 14),
-    el(
-      'span',
-      '',
-      'Places you have kept. Make a world from one when you want to bake it.',
-    ),
-  )
-  host.append(hint)
-
-  const acts = el('div', 'panel-actions')
-  acts.append(
-    button({
-      label: 'Keep this view',
-      icon: 'map-pin',
-      title: 'index the middle of the screen',
-      onClick: () => {
-        const b = map.bbox()
-        void keepPlace({ name: `${map.centre.lat.toFixed(4)}, ${map.centre.lon.toFixed(4)}`, lat: map.centre.lat, lon: map.centre.lon, bbox: b, source: 'view' })
-      },
-    }),
-  )
-  host.append(acts)
-
-  if (!indexed.length) {
-    host.append(empty('nothing indexed yet — search for somewhere, or keep this view'))
-    return
-  }
-  for (const p of indexed) {
-    const g = group(p.name, { collapsed: true })
-    const b = bodyOf(g)
-    b.append(readout('where', `${p.lat.toFixed(4)}, ${p.lon.toFixed(4)}`))
-    if (p.kind) b.append(readout('kind', p.kind))
-    if (p.world) b.append(readout('world', p.world))
-    if (p.note) b.append(el('p', 'panel-hint', p.note))
-    b.append(
-      textField({
-        label: 'note',
-        value: p.note ?? '',
-        onChange: (v) => void api.updatePlace(p.id, { note: v }).then(refreshPlaces),
-      }),
-    )
-    const row = el('div', 'panel-actions')
-    row.append(
-      button({ label: 'Go', icon: 'viewfinder-circle', onClick: () => frame({ lat: p.lat, lon: p.lon, bbox: p.bbox ?? null }) }),
-      button({
-        label: 'Make a world here',
-        icon: 'plus',
-        variant: 'primary',
-        onClick: () => {
-          frame({ lat: p.lat, lon: p.lon, bbox: p.bbox ?? null })
-          newWorld()
-          toast(`draw the extent for “${p.name}”`, 'info', 5000)
-        },
-      }),
-      button({
-        icon: 'trash',
-        variant: 'danger',
-        title: `forget ${p.name}`,
-        onClick: () => void api.deletePlace(p.id).then(refreshPlaces),
-      }),
-    )
-    b.append(row)
-    host.append(g)
-  }
 }
 
 /*
@@ -1140,7 +1044,6 @@ function setStep(s: Step) {
 
 const STEP_LABEL: Record<Step, { label: string; icon: IconName; hint: string }> = {
   explore: { label: 'Explore', icon: 'map', hint: 'find somewhere' },
-  places: { label: 'Places', icon: 'map-pin', hint: 'the ones you kept' },
   define: { label: 'Define', icon: 'pencil-square', hint: 'draw its boundary' },
   bake: { label: 'Bake', icon: 'play', hint: 'turn it into a world' },
 }
@@ -1279,8 +1182,6 @@ function renderPanel() {
     void splatsPanel.load()
   } else if (mode === 'deploy') {
     void deployPanel.load()
-  } else if (at('places')) {
-    renderIndex(inspector)
   } else if (at('define')) {
     // the texture library, for the per-world surface picker. Fire and forget: it re-renders when
     // it lands, and the form works without it.
@@ -1445,6 +1346,10 @@ async function boot() {
      */
     else if (e.key.toLowerCase() === 'n' && mode !== 'place') newWorld()
     else if (e.key === 'Enter' && at('define')) map.closeRing()
+    else if ((e.key === 'Backspace' || e.key === 'Delete') && at('define') && map.select === 'polygon') {
+      e.preventDefault()
+      map.removeVertex()
+    }
     else if (e.key === '/') {
       e.preventDefault()
       searchInput.focus()
@@ -1468,7 +1373,6 @@ async function boot() {
     toast(`the world editor service is not answering: ${(e as Error).message}`, 'danger', 0)
   }
   await refreshWorlds().catch(() => {})
-  await refreshPlaces().catch(() => {})
 
   /*
    * WHERE YOU WERE. The URL wins over this browser's memory, per field — a link that names a world

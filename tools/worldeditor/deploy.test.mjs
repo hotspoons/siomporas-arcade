@@ -225,6 +225,12 @@ test('the run writes every object under the prefix, keeps a ledger, publishes th
     const p2 = await plan({ store, worlds: ['alpha'], assetsvc: svc.url, transpile, appDir })
     const r2 = await run({ cf, accountId: 'acc', bucket: 'new-bucket', prefix: 'corridor/alpha-2', plan: p2, worker: { name: 'corridor-alpha' }, appDir, prune: true, log })
     assert.equal(r2.pruned.deployments, 1)
+    // redeploying that prefix deletes its objects, then writes the current bake back into it
+    const replaced = await run({ cf, accountId: 'acc', bucket: 'new-bucket', prefix: 'corridor/alpha-2', replacePrefix: 'corridor/alpha-2', plan: p2, worker: { name: 'corridor-alpha' }, appDir, log })
+    assert.ok(lines.some((l) => l.startsWith('removed corridor/alpha-2:')))
+    assert.ok(cf.objects.has('corridor/alpha-2/sites/alpha/web/tiles/0/0_0.pack'), 'the fresh tile is there')
+    assert.equal(JSON.parse(cf.objects.get(LEDGER_KEY).body).deployments.filter((d) => d.prefix === 'corridor/alpha-2').length, 1)
+    assert.ok(replaced.objects > 0)
     assert.ok(!cf.objects.has('corridor/alpha-1/sites/alpha/web/tiles/0/0_0.pack'), 'the old tile is gone')
     assert.ok(!cf.objects.has('corridor/alpha-1/deploy.json'))
     assert.ok(cf.objects.has('corridor/alpha-2/sites/alpha/web/tiles/0/0_0.pack'), 'the new one is not')

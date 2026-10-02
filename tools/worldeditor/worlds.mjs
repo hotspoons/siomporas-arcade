@@ -3,15 +3,15 @@
 // There is no new format here and that is the point. `tools/corridor/sites.json` is a JSON array
 // of dicts; `cmd_fetch` picks by `slug` and hands the whole dict to `network.fetch_site`, which
 // reads `lat`, `lon`, `radius_m`, `primary`, and either `all_streets` or `roads`. A world drawn in
-// the editor is one of those dicts with three extra keys the bake ignores — `boundary`, `created`
+// the editor is one of those dicts with extra keys. `boundary` is the bake: when it is present the
+// network stage clips roads, imagery and the region to it. `created`
 // and `source` — so the thing the editor writes is the thing a person could have typed.
 //
-// WHAT A BOUNDARY IS, EXACTLY. The bake has no concept of an arbitrary extent: `network.roads`
-// queries a bbox derived from a UTM square of side 2·radius_m, and there is no circular or
-// polygonal clip on roads anywhere in it. So a drawn polygon is reduced to the SMALLEST CIRCLE
-// THAT CONTAINS IT (geo.circleFor), and the editor draws the resulting square back on the map.
-// The polygon is kept for provenance and for re-editing, never as a clip, and the UI says so
-// rather than letting someone believe they cut a shape.
+// WHAT A BOUNDARY IS, EXACTLY. When the world has one, `network.selection_polygon` is the clip:
+// the road query is that shape's box, ways outside the polygon are dropped, and the region's
+// imagery is the polygon rather than the square around the circle that contained it. `circleFor`
+// still supplies the centre and `radius_m` the site file has always stored. A world with no
+// boundary is still a centre and a radius.
 //
 // AND `radius_m` IS A HALF-WIDTH. The name is wrong at the source — network.py's docstring says
 // "every drivable way in the radius" and its error says "within {R} m", and a square of side 2R is

@@ -558,20 +558,29 @@ export class Car {
    * Headlights and tail lights that are actually on, for the wet-road streaks.
    * The vectors are reused; a caller copies them before the next call.
    */
-  streaks(): { pos: THREE.Vector3; tail: boolean }[] {
+  streaks(): { pos: THREE.Vector3; dir: THREE.Vector3; tail: boolean }[] {
     const lights: [THREE.SpotLight, boolean][] = []
     for (const b of this.beams) if (b.visible) lights.push([b, false])
     for (const b of this.tailBeams) if (b.visible) lights.push([b, true])
     while (this.streakPos.length < lights.length) this.streakPos.push(new THREE.Vector3())
-    const out: { pos: THREE.Vector3; tail: boolean }[] = []
+    while (this.streakDir.length < lights.length) this.streakDir.push(new THREE.Vector3())
+    const out: { pos: THREE.Vector3; dir: THREE.Vector3; tail: boolean }[] = []
     for (let i = 0; i < lights.length; i++) {
-      lights[i][0].getWorldPosition(this.streakPos[i])
-      out.push({ pos: this.streakPos[i], tail: lights[i][1] })
+      const spot = lights[i][0]
+      spot.getWorldPosition(this.streakPos[i])
+      spot.target.getWorldPosition(this.streakTmp)
+      this.streakDir[i].subVectors(this.streakTmp, this.streakPos[i])
+      this.streakDir[i].y = 0
+      if (this.streakDir[i].lengthSq() < 1e-8) this.streakDir[i].set(1, 0, 0)
+      else this.streakDir[i].normalize()
+      out.push({ pos: this.streakPos[i], dir: this.streakDir[i], tail: lights[i][1] })
     }
     return out
   }
 
   private streakPos: THREE.Vector3[] = []
+  private streakDir: THREE.Vector3[] = []
+  private streakTmp = new THREE.Vector3()
 
   lamps(): { each: { pos: THREE.Vector3; dir: THREE.Vector3 }[]; on: number } {
     const each: { pos: THREE.Vector3; dir: THREE.Vector3 }[] = []
@@ -688,6 +697,6 @@ export interface DrivableCar {
   setLights(on: number): void
   setCockpit(on: boolean): void
   lamps(): { each: { pos: THREE.Vector3; dir: THREE.Vector3 }[]; on: number }
-  /** headlights and tail lights that are on, for the wet-road streaks */
-  streaks(): { pos: THREE.Vector3; tail: boolean }[]
+  /** headlights and tail lights that are on, and the way they point, for the wet-road streaks */
+  streaks(): { pos: THREE.Vector3; dir: THREE.Vector3; tail: boolean }[]
 }

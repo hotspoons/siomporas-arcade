@@ -66,6 +66,43 @@ export function serverTools({ apiFetch, root, siteDoc }) {
     ),
     T('world_save', 'Replace a world definition. LIVE: everyone with the editor open sees it. Moving a boundary after a bake reports how far it moved, because the bake no longer matches.', { slug: str(''), world: obj('the whole world document') }, ['slug', 'world'], (a) => put(`/api/worlds/${a.slug}`, a.world)),
     T('world_delete', 'Delete a world: its definition and its bake. A bake that is still running is refused.', { slug: str('') }, ['slug'], (a) => del(`/api/worlds/${a.slug}`)),
+    T(
+      'world_export',
+      'A bundle of world definitions and the levels set in them. A few hundred bytes: where the world is, and what you do there. Not the rasters — that is site_export. No slugs means every world. levels false leaves the stages out.',
+      {
+        slugs: { type: 'array', items: { type: 'string' }, description: 'which worlds; empty is all of them' },
+        levels: bool('include each world\'s stages. default true'),
+      },
+      [],
+      (a) => {
+        const q = new URLSearchParams()
+        for (const s of a.slugs ?? []) q.append('slug', s)
+        if (a.levels === false) q.set('levels', '0')
+        const query = q.toString()
+        return get(`/api/worlds/export${query ? `?${query}` : ''}`)
+      },
+    ),
+    T(
+      'world_import',
+      'Install a world_export bundle: the definitions and their levels. A world or level already here is skipped unless replace is set. This does not bring the bake.',
+      { bundle: obj('a world, an array of worlds, or { worlds, levels } from world_export'), replace: bool('overwrite a world or level that is already here') },
+      ['bundle'],
+      (a) => post(`/api/worlds/import${a.replace ? '?replace=1' : ''}`, a.bundle),
+    ),
+    T(
+      'site_export',
+      'A baked world as a zip. source false (the default) is the viewer half only — web/, most of the value and a fraction of the bytes. source true includes the rasters a rebake needs. The answer is the url, the file count and the size. Fetch the zip from the url; it does not fit in a tool result. overLimit means the zip would be refused and you should export without source, or publish to the bucket.',
+      { slug: str(''), source: bool('include the source rasters. default false') },
+      ['slug'],
+      (a) => get(`/api/sites/${encodeURIComponent(a.slug)}/archive?describe=1${a.source ? '' : '&web=1'}`),
+    ),
+    T(
+      'site_import',
+      'Install a baked world from an https zip — the url site_export returned, or any such zip of one site. replace overwrites a bake already here. The definition is not in the zip; world_import does that.',
+      { url: str('https url of the zip'), replace: bool('overwrite an existing bake') },
+      ['url'],
+      (a) => post(`/api/sites/import${a.replace ? '?replace=1' : ''}`, { url: a.url }),
+    ),
 
     /* ---- levels: a stage set inside a world -------------------------------------------------- */
     T('level_list', 'Every level: id, the world it belongs to, and its scenario.', {}, [], () => get('/api/levels')),
@@ -199,6 +236,38 @@ export function serverTools({ apiFetch, root, siteDoc }) {
     T('run_bake', 'Bake a world: OSM, terrain, imagery, lidar, and a tile pyramid. LOD is the bake — there is no monolithic one. HOURS, and it occupies the runner. Check run_list before starting another.', { slug: str('') }, ['slug'], (a) => post('/api/runs/bake', { slug: a.slug })),
     T('run_publish', 'Publish a baked world to the bucket the viewer reads.', { slug: str('') }, ['slug'], (a) => post('/api/runs/publish', { slug: a.slug })),
     T('run_cancel', 'Stop a running bake or publish.', { id: str('') }, ['id'], (a) => post(`/api/runs/${a.id}/cancel`, {})),
+
+    /* ---- publishing a world to Cloudflare ------------------------------------------------------
+     * The token is set in the editor and never comes back out. These tools ask whether one is
+     * there, what a deploy would upload, and then start it. The progress is a run.
+     */
+    T('deploy_status', 'Whether a Cloudflare token is configured — never the token itself — which worlds are baked, and the default worker name. Call this before deploy_start.', {}, [], () => get('/api/deploy/status')),
+    T('deploy_cloudflare', 'The Cloudflare accounts, zones and buckets this token can see. Leave account empty to use the first one.', { account: str('account id; empty is the first') }, [], (a) => get(`/api/deploy/cloudflare${a.account ? `?account=${encodeURIComponent(a.account)}` : ''}`)),
+    T(
+      'deploy_plan',
+      'What a deploy would upload, without uploading it. objects true includes every key; leave it off unless you need the list.',
+      { worlds: { type: 'array', items: { type: 'string' }, description: 'world slugs' }, objects: bool('include every object key') },
+      ['worlds'],
+      (a) => post('/api/deploy/plan', { worlds: a.worlds, objects: !!a.objects }),
+    ),
+    T(
+      'deploy_start',
+      'Publish baked worlds to Cloudflare: R2 for the data, a Worker for the app. A token must already be configured (deploy_status). Returns a run; follow it with run_get and run_log. dryRun uploads nothing.',
+      {
+        worlds: { type: 'array', items: { type: 'string' }, description: 'world slugs' },
+        account: str('Cloudflare account id'),
+        bucket: str('R2 bucket name'),
+        prefix: str('object prefix; empty is derived from the worlds'),
+        worker: obj('{ name, workersDev, hostname, zoneId }'),
+        prune: bool('delete objects in the prefix that this deploy does not write'),
+        dryRun: bool('count the upload and write nothing'),
+        createBucket: bool('create the bucket if it is missing. default true'),
+        replacePrefix: str('an old prefix to delete after a successful deploy'),
+      },
+      ['worlds', 'account', 'bucket'],
+      (a) => post('/api/deploy/start', a),
+    ),
+    T('deploy_history', 'Every deploy this editor has started: what was asked, and the URL it got.', {}, [], () => get('/api/deploy/history')),
 
     /* ---- gaussian splat training -------------------------------------------------------------- */
     T('splat_plan', 'What this cluster can actually run: which trainer, which GPUs, and whether the platform wrapper is available.', {}, [], () => get('/api/training/plan')),

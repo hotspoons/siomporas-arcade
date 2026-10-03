@@ -75,6 +75,28 @@ export class MissileLayer {
   }
 
   tick(dt: number): void {
+    // A hitch used to arrive here as the raw gap between frames. At 120 m/s that is a shape-cast
+    // hundreds of metres long through every heightfield tile along the way, which is the one- and
+    // two-second freeze on firing. The frame is capped, and each cast covers at most a few metres,
+    // so the query stays on the tiles the missile is actually crossing.
+    const total = Math.min(0.1, Math.max(0, dt))
+    let left = total
+    while (left > 1e-4 && this.live.length) {
+      const h = Math.min(left, this.slice(left))
+      left -= h
+      this.advance(h)
+    }
+    this.ageFlashes(total)
+  }
+
+  /** How long the fastest missile may fly before its cast would cover more than a few metres. */
+  private slice(left: number): number {
+    let speed = 1
+    for (const m of this.live) speed = Math.max(speed, m.vel.length())
+    return Math.min(left, 6 / speed)
+  }
+
+  private advance(dt: number): void {
     for (const m of [...this.live]) {
       const next = m.pos.clone().addScaledVector(m.vel, dt)
       // a touch of gravity, so a long shot drops; enough to feel, not enough to aim around
@@ -101,6 +123,9 @@ export class MissileLayer {
       m.mesh.position.copy(next)
       m.mesh.quaternion.setFromUnitVectors(m.axis, m.vel.clone().normalize())
     }
+  }
+
+  private ageFlashes(dt: number): void {
     for (const f of [...this.flashes]) {
       f.age += dt
       const t = f.age / 0.45

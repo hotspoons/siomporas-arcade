@@ -14,6 +14,7 @@ import { HEX_GLSL } from '../visuals/hextile'
 import type { TreeRecord } from './trees'
 
 import * as T from '../tuning'
+import { installRoadClip } from '../visuals/roadcover'
 import { chainCompile, injectRelief, injectShade, injectWetStreak } from '../visuals/shading'
 
 // road cross-section: knobs in tuning.ts (F6 → road); a change needs a site reload to rebuild
@@ -56,10 +57,9 @@ export function stations(spineAt: (s: number) => { pos: THREE.Vector3; dir: THRE
  * Sampled onto a dense array once and read by interpolation, because `edgeDistance` calls this for
  * every grass blade and every car tick.
  */
-export function taperedLanes(lanesAt: (s: number) => number, length: number, taper = T.ROAD_TAPER_M, step = 2): (s: number) => number {
-  const n = Math.max(2, Math.ceil(length / step) + 1)
+function taperSamples(lanesAt: (s: number) => number, s0: number, n: number, step: number, taper: number): Float32Array {
   const raw = new Float32Array(n)
-  for (let i = 0; i < n; i++) raw[i] = lanesAt(i * step)
+  for (let i = 0; i < n; i++) raw[i] = lanesAt(s0 + i * step)
   const out = Float32Array.from(raw)
   if (taper > 0) {
     const changes: { s: number; from: number; to: number }[] = []
@@ -76,6 +76,27 @@ export function taperedLanes(lanesAt: (s: number) => number, length: number, tap
       }
     })
   }
+  return out
+}
+
+export function taperedLanes(lanesAt: (s: number) => number, length: number, taper = T.ROAD_TAPER_M, step = 2): (s: number) => number {
+  // A coast-to-coast spine sampled every 2 m is millions of lanes. The ramp at s only depends on
+  // lane changes within `taper` of s, so a long road samples that window when it is asked.
+  // STREAM_LOCAL = 0 keeps the full table, which is what a short road still gets either way.
+  if (T.STREAM_LOCAL > 0 && length > 80_000) {
+    const span = Math.max(step, taper)
+    return (s) => {
+      const s0 = Math.max(0, s - span)
+      const s1 = Math.min(length, s + span)
+      const n = Math.max(2, Math.ceil((s1 - s0) / step) + 1)
+      const out = taperSamples(lanesAt, s0, n, step, taper)
+      const x = Math.min(n - 1, Math.max(0, (s - s0) / step))
+      const i = Math.floor(x), f = x - i
+      return out[i] * (1 - f) + out[Math.min(n - 1, i + 1)] * f
+    }
+  }
+  const n = Math.max(2, Math.ceil(length / step) + 1)
+  const out = taperSamples(lanesAt, 0, n, step, taper)
   return (s) => {
     const x = Math.min(n - 1, Math.max(0, s / step))
     const i = Math.floor(x), f = x - i
@@ -570,6 +591,11 @@ export function treesFromCanopy(
     radius?: number
     /** site (x, y) to plant around */
     centre?: [number, number]
+    /**
+     * Measure only this disc on the first plant, then let `pump` fill out to the draw radius.
+     * 0 keeps the old path: the whole disc is measured before the function returns.
+     */
+    seedM?: number
   } = {},
 ): { crowns: THREE.InstancedMesh; trunks: THREE.InstancedMesh; count: number; records: TreeRecord[]; refresh: (skip: Set<number>) => void; plant: (cx: number, cy: number) => number; pump: (budgetMs: number) => boolean; patch: () => TreePatch; forget: () => void; stats: () => { count: number; cellM: number; radius: number; centre: [number, number]; capped: boolean; spare: number; drawn: number; changed: number; evicted: number; pending: number } } {
   const [w, h] = size
@@ -586,8 +612,12 @@ export function treesFromCanopy(
   const crownGeo = new THREE.IcosahedronGeometry(1, 1)
   const trunkGeo = new THREE.CylinderGeometry(0.12, 0.22, 1, 5)
   trunkGeo.translate(0, 0.5, 0) // base at origin
-  const crowns = new THREE.InstancedMesh(crownGeo, new THREE.MeshStandardMaterial({ roughness: 0.9, flatShading: true }), capacity)
-  const trunks = new THREE.InstancedMesh(trunkGeo, new THREE.MeshStandardMaterial({ color: 0x4a3a2a, roughness: 1 }), capacity)
+  const crownMat = new THREE.MeshStandardMaterial({ roughness: 0.9, flatShading: true })
+  const trunkMat = new THREE.MeshStandardMaterial({ color: 0x4a3a2a, roughness: 1 })
+  installRoadClip(crownMat)
+  installRoadClip(trunkMat)
+  const crowns = new THREE.InstancedMesh(crownGeo, crownMat, capacity)
+  const trunks = new THREE.InstancedMesh(trunkGeo, trunkMat, capacity)
   const m = new THREE.Matrix4()
   const q = new THREE.Quaternion()
   const col = new THREE.Color()
@@ -900,10 +930,15 @@ export function treesFromCanopy(
     if (patch && settled && records.length > 0 && !records.some((r) => Number.isFinite(r.x) && !Number.isFinite(r.ci))) {
       return plantMoved(cx, cy, cellM, drawR, contextR)
     }
-    const i0 = Math.floor((cx - contextR) / cellM), i1 = Math.ceil((cx + contextR) / cellM)
-    const j0 = Math.floor((cy - contextR) / cellM), j1 = Math.ceil((cy + contextR) / cellM)
+    // The first plant measures a seed disc. pump() already walks the crescent out to the draw
+    // radius a few milliseconds at a time; doing the whole disc here is the startup hitch.
+    // seedM 0, or a seed that covers the disc, is the old path.
+    const seedM = opts.seedM && opts.seedM > 0 ? opts.seedM : 0
+    const measureR = seedM > 0 && seedM < contextR ? seedM : contextR
+    const i0 = Math.floor((cx - measureR) / cellM), i1 = Math.ceil((cx + measureR) / cellM)
+    const j0 = Math.floor((cy - measureR) / cellM), j1 = Math.ceil((cy + measureR) / cellM)
     const draw2 = drawR * drawR
-    const context2 = contextR * contextR
+    const context2 = measureR * measureR
     const cand: { d2: number; rec: Rec; spare: boolean }[] = []
     for (let j = j0; j <= j1; j++) {
       for (let i = i0; i <= i1; i++) {
@@ -939,6 +974,10 @@ export function treesFromCanopy(
     lastEvicted = 0
     tally()
     adopt(cx, cy, cellM, contextR)
+    if (measureR < contextR) {
+      settledR = measureR
+      plantMoved(cx, cy, cellM, drawR, contextR)
+    }
     return liveCount
   }
   const refresh = (skip: Set<number>) => {

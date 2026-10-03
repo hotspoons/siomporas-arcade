@@ -158,3 +158,31 @@ test('asset_describe can say what kind of thing an asset is and how big', () => 
   const props = tool('asset_describe').inputSchema.properties
   for (const k of ['kind', 'type', 'size_m', 'notes']) assert.ok(props[k], k)
 })
+
+test('export, import and deploy go through the editor routes, and a map export says whether the rasters come along', async () => {
+  const seen = []
+  const { tool } = toolsFor(volume(), {
+    apiFetch: async (method, p, body) => {
+      seen.push([method, p, body])
+      return { ok: true }
+    },
+  })
+  await tool('world_export').run({ slugs: ['crofton-triangle'], levels: false })
+  await tool('world_import').run({ bundle: { worlds: [{ slug: 'crofton-triangle' }] }, replace: true })
+  await tool('site_export').run({ slug: 'crofton-triangle' })
+  await tool('site_export').run({ slug: 'crofton-triangle', source: true })
+  await tool('site_import').run({ url: 'https://example.com/crofton.zip', replace: true })
+  await tool('deploy_plan').run({ worlds: ['crofton-triangle'] })
+  await tool('deploy_start').run({ worlds: ['crofton-triangle'], account: 'acc', bucket: 'maps', dryRun: true })
+  assert.deepEqual(seen.map(([m, p]) => `${m} ${p}`), [
+    'GET /api/worlds/export?slug=crofton-triangle&levels=0',
+    'POST /api/worlds/import?replace=1',
+    'GET /api/sites/crofton-triangle/archive?describe=1&web=1',
+    'GET /api/sites/crofton-triangle/archive?describe=1',
+    'POST /api/sites/import?replace=1',
+    'POST /api/deploy/plan',
+    'POST /api/deploy/start',
+  ])
+  assert.equal(seen[4][2].url, 'https://example.com/crofton.zip')
+  assert.equal(seen[6][2].dryRun, true)
+})

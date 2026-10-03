@@ -9,7 +9,11 @@ describe('GunLayer', () => {
   it('fires at GUN_RATE while held, alternating muzzles, and reports where each round lands', () => {
     const hits: { x: number; dirX: number }[] = []
     const gun = new GunLayer({
-      hitTest: (from, to) => (from.z < 0 ? new THREE.Vector3(from.x + 30, from.y, from.z) : null), // the left gun's rounds land on a car 30 m out
+      // The left gun's rounds land on a car 30 m out. `hitTest` is now called once per short
+      // segment of the ray, not once for the whole range, so the hit is the segment that REACHES
+      // the car — x spans 30 — and the corpus is on the left when the muzzle was (z < 0 at the
+      // crossing, which a right-muzzle shot never is because its spread cannot cross the axis).
+      hitTest: (from, to) => (from.x < 30 && to.x >= 30 && from.z < 0 ? new THREE.Vector3(30, from.y, from.z) : null),
       groundAt: () => -100, // no ground within reach: the right gun's rounds land nowhere
       onHit: (h) => hits.push({ x: h.at.x, dirX: h.dir.x }),
     })

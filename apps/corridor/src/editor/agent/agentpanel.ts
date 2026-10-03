@@ -152,9 +152,7 @@ export class AgentPanel {
       let base = ''
       let token = ''
       const baseField = textField({ label: 'platform', value: '', placeholder: 'https://platform.example.com', onChange: (v) => { base = v.trim(); setFieldError(baseField, null) } })
-      const tokField = textField({ label: 'token', value: '', placeholder: 'pat_…', onChange: (v) => { token = v; setFieldError(tokField, null) } })
-      const i = tokField.querySelector<HTMLInputElement>('input')
-      if (i) { i.type = 'password'; i.autocomplete = 'off' }
+      const tokField = textField({ label: 'token', value: '', placeholder: 'pat_…', secret: true, onChange: (v) => { token = v; setFieldError(tokField, null) } })
       b.append(baseField, tokField, button({
         label: 'Store it',
         icon: 'lock-closed',

@@ -231,9 +231,7 @@ export class DeployPanel {
       if (st.token.source === 'entered') tb.append(button({ label: 'Forget it', icon: 'trash', variant: 'ghost', onClick: async () => { await api.deployForgetToken(); this.cf = null; await this.load() } }))
     } else {
       let typed = ''
-      const field = textField({ label: 'API token', value: '', placeholder: 'a user token, or an account-owned token', note: 'Workers Scripts, R2 Storage and Account Settings read; kept in the server’s memory only — set CLOUDFLARE_API_TOKEN in the environment to skip this', onChange: (v) => (typed = v), onInput: (v) => (typed = v) })
-      const input = field.querySelector('input')
-      if (input) input.type = 'password'
+      const field = textField({ label: 'API token', value: '', placeholder: 'a user token, or an account-owned token', secret: true, note: 'Workers Scripts, R2 Storage and Account Settings read; kept in the server’s memory only — set CLOUDFLARE_API_TOKEN in the environment to skip this', onChange: (v) => (typed = v), onInput: (v) => (typed = v) })
       tb.append(
         field,
         button({

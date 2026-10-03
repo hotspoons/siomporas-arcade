@@ -21,6 +21,7 @@
 //   * an adjustment area's `species` override still wins over the data.
 import * as THREE from 'three'
 import { leafShadowDepth, linearShadowDepth } from '../visuals/shading'
+import { installRoadClip } from '../visuals/roadcover'
 import { Budget } from './budget'
 import { Tree } from '@dgreenheck/ez-tree'
 import { Flora, type FloraSpecies, type SpeciesWeight } from './flora'
@@ -133,6 +134,8 @@ function buildVariant(a: Archetype, capacity: number, h: number): Variant {
    * pixel count saved what halving the pixel count saves. A leaf has no specular worth the money.
    */
   const leafMat = new THREE.MeshLambertMaterial({ map: src.map, color: src.color, side: THREE.DoubleSide, alphaTest: 0.5 })
+  installRoadClip(leafMat)
+  installRoadClip(t.branchesMesh.material as THREE.Material)
   const leavesFull = new THREE.InstancedMesh(t.leavesMesh.geometry, leafMat, capacity)
   // a thinner canopy for spring and autumn: same tree, a third of the leaves, same seed
   const sparseGeo = t.leavesMesh.geometry.clone()

@@ -245,6 +245,14 @@ export function textField(o: {
   note?: string
   onChange: (v: string) => void
   /**
+   * A secret: masked, with a show/hide button once something is typed.
+   *
+   * It stays `type="text"`. A `type="password"` field is what Chrome's password manager claims,
+   * and it then offers to save and fill a token that is not a login. The discs are
+   * `-webkit-text-security`, which the manager does not treat as a password.
+   */
+  secret?: boolean
+  /**
    * Every keystroke, for a field whose whole job is to filter a list as you type.
    *
    * `onChange` fires on blur, which is right for a value being EDITED and wrong for a search box —
@@ -266,7 +274,42 @@ export function textField(o: {
   if (o.onInput) i.oninput = () => o.onInput!(i.value)
   // the library's own shortcuts must not fire while somebody is typing a search
   i.onkeydown = (e) => e.stopPropagation()
-  wrap.append(i)
+  if (o.secret) {
+    i.autocomplete = 'off'
+    i.spellcheck = false
+    i.autocapitalize = 'off'
+    i.setAttribute('autocorrect', 'off')
+    i.setAttribute('data-1p-ignore', '')
+    i.setAttribute('data-lpignore', 'true')
+    i.setAttribute('data-form-type', 'other')
+    const box = el('span', 'secret-box')
+    const reveal = el('button', 'btn ghost icon-only secret-reveal')
+    reveal.type = 'button'
+    let shown = false
+    const sync = () => {
+      const filled = i.value.length > 0
+      box.classList.toggle('has-value', filled)
+      i.classList.toggle('masked', !shown)
+      reveal.replaceChildren(icon(shown ? 'eye-slash' : 'eye', 16))
+      reveal.title = shown ? 'hide' : 'show'
+      reveal.setAttribute('aria-label', shown ? 'hide' : 'show')
+      reveal.setAttribute('aria-pressed', String(shown))
+      if (!filled) reveal.tabIndex = -1
+      else reveal.removeAttribute('tabindex')
+    }
+    reveal.onclick = (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      shown = !shown
+      sync()
+      i.focus()
+    }
+    i.addEventListener('input', sync)
+    box.append(i, reveal)
+    wrap.append(box)
+    wrap.classList.add('secret')
+    sync()
+  } else wrap.append(i)
   if (o.note) {
     wrap.classList.add('with-note')
     wrap.append(el('span', 'field-note', o.note))

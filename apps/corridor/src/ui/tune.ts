@@ -69,6 +69,9 @@ export class TuneUI {
       label: tab.name,
       build: (host) => {
         for (const sec of tab.sections) {
+          // A section that does not apply right now is not built at all — the car tab is the
+          // hand-written car OR the physics actor, never both.
+          if (sec.when && !sec.when()) continue
           // One section is one group. Sections with a handful of keys start open; the long ones
           // (car has thirty) start collapsed, so a tab opens as a readable list of headings.
           // Each group carries its own reset, and marks itself when anything inside it has moved
@@ -236,6 +239,7 @@ export class TuneUI {
     if (!tab) return
     let n = 0
     for (const s of tab.sections) {
+      if (s.when && !s.when()) continue
       for (const k of s.keys) {
         if (k.get() === k.default) continue
         k.set(k.default)
@@ -299,6 +303,17 @@ export class TuneUI {
    */
   invalidatePresets() {
     this.tabs.invalidate('presets')
+  }
+
+  /**
+   * Throw away a built tab so it is rebuilt on the next open.
+   *
+   * The car tab is two panes in one and the car is re-created when drive mode is re-entered or the
+   * level changes; without this the panel would keep showing the model that was current the first
+   * time it was opened.
+   */
+  invalidateTab(id: string) {
+    this.tabs.invalidate(id)
   }
 
   toggle() {

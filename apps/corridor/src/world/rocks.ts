@@ -20,6 +20,7 @@ import * as THREE from 'three'
 import * as T from '../tuning'
 import type { CatalogEntry } from './placements'
 import { loadAssetModel } from './placements'
+import { installRoadClip } from '../visuals/roadcover'
 
 export interface CutStation {
   s: number
@@ -211,7 +212,9 @@ export async function buildRocks(
           geo.scale(1 / size.y, 1 / size.y, 1 / size.y)
           geo.computeBoundingBox()
           geo.translate(-(geo.boundingBox!.min.x + geo.boundingBox!.max.x) / 2, -geo.boundingBox!.min.y, -(geo.boundingBox!.min.z + geo.boundingBox!.max.z) / 2)
-          const im = new THREE.InstancedMesh(geo, m.material, Math.max(1, Math.ceil(cap / Math.max(1, entries.length))))
+          const rockMat = (m.material as THREE.Material).clone()
+          installRoadClip(rockMat)
+          const im = new THREE.InstancedMesh(geo, rockMat, Math.max(1, Math.ceil(cap / Math.max(1, entries.length))))
           im.name = `rock:${type}:${e.id}`
           im.frustumCulled = false
           list.push({ entry: e, rockType: type, mesh: im, count: 0, nativeH: 1 })
@@ -221,6 +224,7 @@ export async function buildRocks(
     if (!list.length) {
       // procedural stand-ins: three shapes per type
       const mat = new THREE.MeshStandardMaterial({ color: ROCK_COLOUR[type] ?? ROCK_COLOUR.unknown, roughness: 0.95, metalness: 0, flatShading: true })
+      installRoadClip(mat)
       for (let v = 0; v < 3; v++) {
         const im = new THREE.InstancedMesh(boulderGeometry(v * 101 + type.length, type === 'shale' || type === 'sandstone' || type === 'limestone'), mat, Math.max(1, Math.ceil(cap / 3) + 1))
         im.name = `rock:${type}:procedural-${v}`

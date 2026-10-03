@@ -30,6 +30,8 @@ import type { Anchor } from '@apex/engine/geo/wgs84'
 import { RasterFrame } from '@apex/engine/geo/raster'
 import { latticeFor } from '@apex/engine/geo/pyramid'
 import { DATA_BASE, decodeHeights, decodeScalar, type Layer, type PyrEntry, type PyrIndex, type TileIndex, bilinear } from '../world/site'
+import { reliefHeights } from '../visuals/relief'
+import { STREAM_LOCAL } from '../tuning'
 import { loadBakedTexture } from '../assets/textures'
 
 export type { TileIndex, PyrEntry, PyrIndex }
@@ -509,6 +511,146 @@ export class PyramidSet {
  * tile that 404s is covered by its parent, which strict child-replaces-parent guarantees is still
  * resident.
  */
+/** A standalone copy of a pack view, so the worker can take the buffer without detaching the pack. */
+function copyBytes(view: Uint8Array): ArrayBuffer {
+  const buf = new ArrayBuffer(view.byteLength)
+  new Uint8Array(buf).set(view)
+  return buf
+}
+
+interface DecodedRasters {
+  dem: Float32Array
+  demSize: [number, number]
+  chm: Float32Array | null
+  chmSize: [number, number]
+}
+
+let decodeWorker: Worker | null = null
+let decodeSeq = 0
+const decodePending = new Map<number, { ok: (v: DecodedRasters) => void; fail: (e: Error) => void }>()
+let decodeWorkerBroken = false
+
+function tileWorker(): Worker | null {
+  if (decodeWorkerBroken || STREAM_LOCAL <= 0) return null
+  if (typeof Worker === 'undefined' || typeof OffscreenCanvas === 'undefined') return null
+  if (!decodeWorker) {
+    try {
+      decodeWorker = new Worker(new URL('./tiledecode.worker.ts', import.meta.url), { type: 'module' })
+    } catch (err) {
+      decodeWorkerBroken = true
+      console.warn('tile decode worker unavailable; decoding on the main thread', err)
+      return null
+    }
+    decodeWorker.onmessage = (ev: MessageEvent) => {
+      const pending = decodePending.get(ev.data.id as number)
+      if (!pending) return
+      decodePending.delete(ev.data.id as number)
+      if (ev.data.error) pending.fail(new Error(String(ev.data.error)))
+      else pending.ok({
+        dem: ev.data.dem as Float32Array,
+        demSize: [ev.data.demW as number, ev.data.demH as number],
+        chm: (ev.data.chm as Float32Array | null) ?? null,
+        chmSize: [ev.data.chmW as number, ev.data.chmH as number],
+      })
+    }
+    decodeWorker.onerror = (ev) => {
+      decodeWorkerBroken = true
+      console.warn('tile decode worker failed; decoding on the main thread', ev.message)
+      for (const pending of decodePending.values()) pending.fail(new Error(ev.message || 'tile worker'))
+      decodePending.clear()
+      decodeWorker?.terminate()
+      decodeWorker = null
+    }
+  }
+  return decodeWorker
+}
+
+function decodeOffThread(demBytes: Uint8Array, zmin: number, zscale: number, chmBytes: Uint8Array | undefined): Promise<DecodedRasters> {
+  const worker = tileWorker()
+  if (!worker) return Promise.reject(new Error('no worker'))
+  const id = ++decodeSeq
+  const dem = copyBytes(demBytes)
+  const chm = chmBytes ? copyBytes(chmBytes) : null
+  const transfer: Transferable[] = [dem]
+  if (chm) transfer.push(chm)
+  return new Promise((ok, fail) => {
+    const timer = setTimeout(() => {
+      if (!decodePending.has(id)) return
+      decodePending.delete(id)
+      fail(new Error('tile decode timed out'))
+    }, 20000)
+    decodePending.set(id, {
+      ok: (v) => { clearTimeout(timer); ok(v) },
+      fail: (e) => { clearTimeout(timer); fail(e) },
+    })
+    worker.postMessage({ id, dem, zmin, zscale, chm, chmScale: 0.25 }, transfer)
+  })
+}
+
+async function decodeOnMain(demBytes: Uint8Array, demLayer: Layer, chmBytes: Uint8Array | undefined): Promise<DecodedRasters> {
+  const demImg = await imageFrom(demBytes, 'image/png')
+  const dem = decodeHeights(demImg, demLayer)
+  let chm: Float32Array | null = null
+  let chmSize: [number, number] = [0, 0]
+  if (chmBytes) {
+    const chmImg = await imageFrom(chmBytes, 'image/png')
+    chmSize = [chmImg.naturalWidth, chmImg.naturalHeight]
+    chm = decodeScalar(chmImg, 0.25)
+  }
+  return { dem, demSize: [demImg.naturalWidth, demImg.naturalHeight], chm, chmSize }
+}
+
+function pyrTileFrom(
+  e: PyrEntry,
+  anchor: Anchor,
+  wireBytes: number,
+  decoded: DecodedRasters,
+): PyrTile {
+  const geo = latticeFor(e.z, e.x, e.y)
+  const demLayer: Layer = {
+    file: `${e.z}/${e.x}_${e.y}.dem.png`,
+    res: 0,
+    size: decoded.demSize,
+    bbox: [0, 0, 0, 0],
+    zmin: e.dem!.zmin,
+    zscale: e.dem!.zscale,
+    geo,
+  }
+  const rf = new RasterFrame({ size: decoded.demSize, geo }, anchor)
+  const dem: TileField = { layer: demLayer, data: decoded.dem, rf }
+  let chm: TileField | null = null
+  if (decoded.chm && decoded.chmSize[0] > 0) {
+    const chmLayer: Layer = { file: `${e.z}/${e.x}_${e.y}.chm.png`, res: 0, size: decoded.chmSize, bbox: [0, 0, 0, 0], scale: 0.25, geo }
+    chm = { layer: chmLayer, data: decoded.chm, rf: new RasterFrame({ size: decoded.chmSize, geo }, anchor) }
+  }
+  const bounds = enuBounds(rf)
+  return {
+    z: e.z,
+    x: e.x,
+    y: e.y,
+    dem,
+    chm,
+    bounds,
+    cx: (bounds[0] + bounds[2]) / 2,
+    cy: (bounds[1] + bounds[3]) / 2,
+    hasNaip: !!e.naip,
+    // The decoded rasters, not the wire bytes: this is what eviction has to bound, and a PNG that
+    // gzips to 40 kB is 512*512*4 in memory either way.
+    bytes: wireBytes + dem.data.byteLength + (chm ? chm.data.byteLength : 0),
+  }
+}
+
+/**
+ * Fetch and decode one pyramid tile.
+ *
+ * Returns null for a tile the bake marked `empty` and for one that will not load. Both are gaps,
+ * not failures: an empty tile is emitted only so quad closure can see the quad is complete, and a
+ * tile that 404s is covered by its parent, which strict child-replaces-parent guarantees is still
+ * resident.
+ *
+ * With STREAM_LOCAL the PNG decode runs in a worker and this function awaits it. STREAM_LOCAL = 0,
+ * or a worker that fails, decodes on the main thread the way it used to.
+ */
 export async function loadPyrTile(
   base: string,
   index: PyrIndex,
@@ -523,44 +665,28 @@ export async function loadPyrTile(
   const files = readPack(buf)
   const demBytes = files.get('dem.png')
   if (!demBytes) throw new Error('pack has no dem.png')
-
+  const chmBytes = files.get('chm.png')
   const geo = latticeFor(e.z, e.x, e.y)
-  const demImg = await imageFrom(demBytes, 'image/png')
-  const size: [number, number] = [demImg.naturalWidth, demImg.naturalHeight]
   const demLayer: Layer = {
     file: `${e.z}/${e.x}_${e.y}.dem.png`,
     res: 0,
-    size,
+    size: [0, 0],
     bbox: [0, 0, 0, 0],
     zmin: e.dem.zmin,
     zscale: e.dem.zscale,
     geo,
   }
-  const rf = new RasterFrame({ size, geo }, anchor)
-  const dem: TileField = { layer: demLayer, data: decodeHeights(demImg, demLayer), rf }
-
-  let chm: TileField | null = null
-  const chmBytes = files.get('chm.png')
-  if (chmBytes) {
-    const chmImg = await imageFrom(chmBytes, 'image/png')
-    const chmSize: [number, number] = [chmImg.naturalWidth, chmImg.naturalHeight]
-    const chmLayer: Layer = { file: `${e.z}/${e.x}_${e.y}.chm.png`, res: 0, size: chmSize, bbox: [0, 0, 0, 0], scale: 0.25, geo }
-    chm = { layer: chmLayer, data: decodeScalar(chmImg, 0.25), rf: new RasterFrame({ size: chmSize, geo }, anchor) }
+  let decoded: DecodedRasters
+  if (tileWorker()) {
+    try {
+      decoded = await decodeOffThread(demBytes, e.dem.zmin, e.dem.zscale, chmBytes)
+      reliefHeights(decoded.dem)
+    } catch (err) {
+      console.warn('tile worker decode failed; decoding on the main thread', err)
+      decoded = await decodeOnMain(demBytes, demLayer, chmBytes)
+    }
+  } else {
+    decoded = await decodeOnMain(demBytes, demLayer, chmBytes)
   }
-
-  const bounds = enuBounds(rf)
-  return {
-    z: e.z,
-    x: e.x,
-    y: e.y,
-    dem,
-    chm,
-    bounds,
-    cx: (bounds[0] + bounds[2]) / 2,
-    cy: (bounds[1] + bounds[3]) / 2,
-    hasNaip: !!e.naip,
-    // The decoded rasters, not the wire bytes: this is what eviction has to bound, and a PNG that
-    // gzips to 40 kB is 512*512*4 in memory either way.
-    bytes: buf.byteLength + dem.data.byteLength + (chm ? chm.data.byteLength : 0),
-  }
+  return pyrTileFrom(e, anchor, buf.byteLength, decoded)
 }

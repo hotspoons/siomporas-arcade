@@ -204,8 +204,21 @@ export class GunLayer {
       dir.y += (Math.random() - 0.5) * T.GUN_SPREAD
       dir.z += (Math.random() - 0.5) * T.GUN_SPREAD
       dir.normalize()
+      // One cast of the whole range sweeps every heightfield between here and the horizon.
+      // Short casts stop at the first thing they meet, and each one only overlaps the tiles
+      // along those few metres.
+      const STEP = 8
+      let at: THREE.Vector3 | null = null
+      let covered = 0
+      let cursor = from.clone()
+      while (covered < T.GUN_RANGE && !at) {
+        const n = Math.min(STEP, T.GUN_RANGE - covered)
+        const next = cursor.clone().addScaledVector(dir, n)
+        at = this.hitTest(cursor, next)
+        cursor = next
+        covered += n
+      }
       const far = from.clone().addScaledVector(dir, T.GUN_RANGE)
-      let at = this.hitTest(from, far)
       if (!at) {
         // the ground, by walking the ray: the sweep only knows what has a collider
         for (let s = 4; s < T.GUN_RANGE; s += 4) {

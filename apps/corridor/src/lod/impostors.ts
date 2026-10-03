@@ -6,6 +6,7 @@
 import * as THREE from 'three'
 import { LAMP_PARS, retro } from '../visuals/retro'
 import { SPLAT_MASK_PARS, splatMaskUniforms } from '../visuals/splatmask'
+import { ROAD_CLIP_PARS, roadClipUniforms } from '../visuals/roadcover'
 import * as T from '../tuning'
 import { Uploads } from '../assets/uploads'
 
@@ -59,7 +60,7 @@ export class Impostors {
     this.material = new THREE.ShaderMaterial({
       // merge() clones uniform values and cannot clone a render-target texture (it silently becomes
       // null and every quad is discarded); the atlas is attached after the merge instead
-      uniforms: { ...THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { cols: { value: COLS }, yaws: { value: YAWS }, rows: { value: rows }, flatPitch: { value: T.IMPOSTOR_FLAT_PITCH } }]), atlas: { value: this.target.texture }, uLight: { value: 1 }, uLightTint: { value: new THREE.Color(1, 1, 1) }, uMatch: { value: 1.65 }, uHue: { value: 0 }, uSat: { value: 1 }, ...retro.uniforms, uLampGain: { value: 1 }, ...splatMaskUniforms() },
+      uniforms: { ...THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { cols: { value: COLS }, yaws: { value: YAWS }, rows: { value: rows }, flatPitch: { value: T.IMPOSTOR_FLAT_PITCH } }]), atlas: { value: this.target.texture }, uLight: { value: 1 }, uLightTint: { value: new THREE.Color(1, 1, 1) }, uMatch: { value: 1.65 }, uHue: { value: 0 }, uSat: { value: 1 }, ...retro.uniforms, uLampGain: { value: 1 }, ...splatMaskUniforms(), ...roadClipUniforms },
       vertexShader: /* glsl */ `
         attribute float aVariant;
         attribute float aYaw;
@@ -132,10 +133,12 @@ export class Impostors {
         varying vec3 vCardWorld;
         ${LAMP_PARS}
         ${SPLAT_MASK_PARS}
+        ${ROAD_CLIP_PARS}
         uniform float uLampGain;
         #include <fog_pars_fragment>
         #include <logdepthbuf_pars_fragment>
         void main() {
+          if (roadCovered(vCardWorld)) discard;
           splatDissolve(vCardWorld);
           #include <logdepthbuf_fragment>
           vec4 c = texture2D(atlas, vUv);

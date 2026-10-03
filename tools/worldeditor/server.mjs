@@ -300,6 +300,29 @@ const json = (res, status, body) => {
   return true
 }
 
+/**
+ * An https zip another machine is offering. Credentials in the url, and a host that is this
+ * machine, are refused: the token that authorises the import is not a pass to read the pod.
+ */
+async function fetchArchive(raw, cap) {
+  let u
+  try { u = new URL(String(raw ?? '')) } catch { throw Object.assign(new Error('url is not a URL'), { status: 400 }) }
+  if (u.protocol !== 'https:' || u.username || u.password) throw Object.assign(new Error('an archive url is https, with no credentials in it'), { status: 400 })
+  const host = u.hostname.replace(/^\[|\]$/g, '').toLowerCase()
+  const privateHost = host === 'localhost' || host.endsWith('.local') || host === '0.0.0.0' || host === '::1'
+    || host.startsWith('127.') || host.startsWith('10.') || host.startsWith('192.168.') || host.startsWith('169.254.')
+    || /^172\.(1[6-9]|2\d|3[0-1])\./.test(host)
+  if (privateHost) throw Object.assign(new Error('an archive url is a public https host'), { status: 400 })
+  const r = await fetch(u, { redirect: 'follow' })
+  if (!r.url.startsWith('https://')) throw Object.assign(new Error('the archive url redirected off https'), { status: 400 })
+  if (!r.ok) throw Object.assign(new Error(`archive url answered ${r.status}`), { status: 502 })
+  const len = Number(r.headers.get('content-length') ?? 0)
+  if (len > cap) throw Object.assign(new Error(`archive is over the ${(cap / 2 ** 20).toFixed(0)} MiB limit`), { status: 413 })
+  const buf = Buffer.from(await r.arrayBuffer())
+  if (buf.length > cap) throw Object.assign(new Error(`archive is over the ${(cap / 2 ** 20).toFixed(0)} MiB limit`), { status: 413 })
+  return buf
+}
+
 async function readBody(req, limit = 8 * 1024 * 1024) {
   const chunks = []
   let n = 0
@@ -788,6 +811,21 @@ async function api(req, res, seg, q) {
     // 1 GiB site would be 1 GiB of Buffer in a pod with a memory limit, and the failure mode of
     // finding that out during a download is a restarted service.
     const cap = Number(env.WORLDEDITOR_ARCHIVE_MAX_MB ?? 1536) * 2 ** 20
+    // `describe=1` is what an agent asks: the url, the count and the size, not the zip. A zip
+    // does not fit in a tool result, and building one just to say how big it is is the cost
+    // this query exists to skip.
+    if (q.get('describe') === '1') {
+      const web = q.get('web') === '1'
+      return json(res, 200, {
+        slug,
+        source: !web,
+        files: files.length,
+        bytes: total,
+        overLimit: total > cap,
+        url: `/api/sites/${slug}/archive${web ? '?web=1' : ''}`,
+        ...(total > cap ? { hint: 'over the archive limit — export without source rasters, or publish to the bucket' } : {}),
+      })
+    }
     if (total > cap) {
       return json(res, 413, { error: `${slug} is ${(total / 2 ** 20).toFixed(0)} MiB, over the ${(cap / 2 ** 20).toFixed(0)} MiB archive limit`, hint: 'try ?web=1, or publish to the bucket instead', bytes: total, files: files.length })
     }
@@ -797,10 +835,15 @@ async function api(req, res, seg, q) {
     res.writeHead(200, { ...CORS, 'content-type': 'application/zip', 'content-length': String(zip.length), 'content-disposition': `attachment; filename="${slug}${q.get('web') === '1' ? '-web' : ''}.zip"` })
     return res.end(zip)
   }
-  /* and back in. The archive names its own site, so an upload needs no slug in the URL. */
+  /* and back in. The archive names its own site, so an upload needs no slug in the URL.
+     A JSON body `{ url }` is the same zip fetched from https, which is how an agent imports
+     one: the bytes do not fit in a tool argument any more than they fit in a tool result. */
   if (seg[0] === 'sites' && seg[1] === 'import' && req.method === 'POST') {
-    // the default body limit is 8 MiB, which is a rounding error against a baked world
-    const body = await readBody(req, Number(env.WORLDEDITOR_ARCHIVE_MAX_MB ?? 1536) * 2 ** 20)
+    const cap = Number(env.WORLDEDITOR_ARCHIVE_MAX_MB ?? 1536) * 2 ** 20
+    const jsonBody = /application\/json/i.test(req.headers['content-type'] ?? '')
+    const spec = jsonBody ? await readJson(req) : null
+    const body = spec ? await fetchArchive(spec.url, cap) : await readBody(req, cap)
+    if (spec?.replace) q.set('replace', '1')
     let entries
     try {
       entries = zipRead(body)

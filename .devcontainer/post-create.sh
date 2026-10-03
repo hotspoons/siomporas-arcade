@@ -84,6 +84,23 @@ if ! command -v cloudflared >/dev/null 2>&1; then
         || echo "WARN: cloudflared install failed — 'just tunnel' will not work"
 fi
 
+# opencode: the coding agent this workspace is driven from. The binary sits in the container layer
+# (~/.opencode/bin), so a rebuild drops it and leaves `opencode` missing until it's reinstalled by
+# hand. State (config, auth, sessions) is bind-mounted from the host — see devcontainer.json — but
+# the binary has to be fetched fresh for this container's architecture. Idempotent.
+if ! command -v opencode >/dev/null 2>&1 && [ ! -x "$HOME/.opencode/bin/opencode" ]; then
+    (curl -fsSL https://opencode.ai/install | bash) \
+        || echo "WARN: opencode install failed — run: curl -fsSL https://opencode.ai/install | bash"
+fi
+# ~/.bashrc lives in the container layer too, so the installer's PATH line goes with it. Re-add it.
+if [ -x "$HOME/.opencode/bin/opencode" ] && ! grep -q "\.opencode/bin" ~/.bashrc 2>/dev/null; then
+    cat >>~/.bashrc <<'EOF'
+
+# opencode
+export PATH="$HOME/.opencode/bin:$PATH"
+EOF
+fi
+
 # Blender, pinned by .devcontainer/blender.env. tools/rigging/rig_character.py needs >= 5.1 and
 # Debian ships 4.3, so this either fetches the official binary (x86_64) or builds from source
 # against Blender's own precompiled libraries (arm64, which blender.org does not ship).

@@ -6,7 +6,8 @@
 // the defaults — never type numbers from a screenshot.
 //
 // Tabs are the top-level groups below; each tab's sections are the panel's sub-groups.
-import { tune, type TuneSection } from '@apex/engine/app/TunePanel'
+import { tune, type TuneKey, type TuneSection } from '@apex/engine/app/TunePanel'
+import { PROFILES, type DriveProfile } from '@apex/engine/physics/profiles'
 
 // --- grass ------------------------------------------------------------------------------------
 /** blades per square metre in the mown strip beside the shoulder, and in the rough beyond */
@@ -586,6 +587,15 @@ export let WATER_OPACITY = 0.82
 export let STREAM_BUILD_M = 100
 export let STREAM_BUDGET_MS = 6
 export let STREAM_CHUNK_M = 250
+/**
+ * 1 = the coast-to-coast path. Startup builds a kilometre around the level's start point (else
+ * the world's home, else the photo station) and the rest arrives as the car gets there. Pyramid
+ * PNG decode runs in a worker.
+ * 0 = the previous path: every branch curve, the whole tree disc and every tile decode happen
+ * on the main thread before the first frame. Reload to apply — the choice is read once, as the
+ * site opens. Set this if the streamed path misbehaves; it is the old code, not a second bake.
+ */
+export let STREAM_LOCAL = 1
 // trees (props.treesFromCanopy): a FIXED cell so density does not depend on how big the site is,
 // the budget spent within TREE_PLANT_RADIUS_M of the eye, replanted when the eye leaves that
 // centre by TREE_REPLANT_M
@@ -1106,14 +1116,14 @@ export let DRESS_WINDOW_WALLS = 3
 /**
  * Rapier, on or off.
  *
- * OFF BY DEFAULT and `machine` scope, for two reasons. Rapier's compat build inlines its wasm as
- * base64 — 4.3 MB — so turning it on is a download, not a flag; and while the car still runs on
- * `car.ts` there is nothing for the physics world to do but build ground. It becomes a `world` knob
- * when a level can legitimately require it.
+ * ON BY DEFAULT, `machine` scope. The physics car is the default model now (PHYS_CAR), so the
+ * world has to have a physics world for it to drive in. Rapier's compat build inlines its wasm as
+ * base64 — 4.3 MB — so a world that does not need it pays a one-time download; `?phys=0`, the
+ * Escape menu's Physics setting, or this knob turned off in a site's tuning.json all avoid it.
  *
  * Changing it reloads nothing: the world is built with the site, so toggle it and reload.
  */
-export let PHYS_ENABLED = 0
+export let PHYS_ENABLED = 1
 /** fixed steps per second. 120 matches what the hand-written car already ran at */
 export let PHYS_HZ = 120
 /** most steps one frame may run before the rest of the backlog is DROPPED rather than banked */
@@ -1169,10 +1179,10 @@ export let PHYS_PROFILE = 2
 /**
  * Which model drives the player's car: 0 the hand-written one (`car.ts`), 1 Rapier (`rapiercar.ts`).
  *
- * Only has a choice when there is a physics world at all, so it needs `?phys=1` as well. Read when
- * drive mode is first entered, like `PHYS_ENABLED` and for the same reason — see `physProfileId`.
+ * RAPIER BY DEFAULT: it is the physical model, and the car tab's physics pane tunes it. `?car=arcade`
+ * or `?car=0` still drives the hand-written one for the Stunts back-to-back comparison.
  */
-export let PHYS_CAR = 0
+export let PHYS_CAR = 1
 /** 1 = trunks you can hit. The hand-written car has always collided with trees; so should this one */
 export let PHYS_TREES = 1
 /** how far from the player static props get colliders. Smaller than the ground's radius: trunks are dense */
@@ -1185,10 +1195,214 @@ export let PHYS_PROPS = 1
 export let PHYS_PROP_BUDGET = 400
 /** ceiling on the catalogue itself — memory, not a per-frame budget */
 export let PHYS_PROP_CATALOGUE = 20000
+/**
+ * The Rapier world's gravity, m/s² downward, applied live.
+ *
+ * One gravity for the car and everything it hits, so it lives with the physics knobs rather than
+ * with the hand-written car's `CAR_GRAVITY` (which only the kinematic model reads).
+ */
+export let PHYS_GRAVITY = 9.81
+
+/**
+ * Which driving model the hero car is on, so the car tab can show the right pane.
+ *
+ * `physics` is the Rapier actor and the default; `arcade` is the hand-written `Car` the Stunts
+ * profile was ported from. Set by main.ts when the car is built — the tab reads it live.
+ */
+export type CarModel = 'arcade' | 'physics'
+export let CAR_MODEL: CarModel = 'physics'
+export function setCarModel(m: CarModel): void { CAR_MODEL = m }
+
+/* ---- the physics car: the actor's DriveProfile, tunable live (F6 → car) ------------------------ */
+
+/**
+ * The physics actor's handling, by `DriveProfile` key.
+ *
+ * The car actor has ONE tunable surface — the profile — and `RapierCar.setProfile` applies it
+ * without a respawn, so the whole of it is here rather than a hand-picked three of it. The
+ * values are seeded from the hero document (`adoptPhysCar`) and the sliders write overrides on
+ * top, so what the panel shows is the car you are driving, not the `street` preset.
+ *
+ * The chassis and the drivetrain (mass, wheelbase, gearing, tyre widths) are NOT here: they are
+ * baked into the rigid body and the collider at spawn, and changing one is a respawn, which is
+ * the vehicles editor's job, not a slider's.
+ */
+interface PhysCarKnob { key: keyof DriveProfile & string; min: number; max: number; step: number; hint?: string }
+const PHYS_CAR_GROUPS: { title: string; collapsed?: boolean; keys: PhysCarKnob[] }[] = [
+  {
+    title: 'engine & brakes',
+    collapsed: false,
+    keys: [
+      { key: 'powerPerKg', min: 0, max: 30, step: 0.1, hint: 'tractive force at a standstill, N per kg of car. The document derives it from the gearing' },
+      { key: 'topSpeed', min: 10, max: 120, step: 1, hint: 'm/s drive tapers to nothing here — not a clamp on the speedometer' },
+      { key: 'brakePerKg', min: 0, max: 60, step: 0.5, hint: 'total braking force, N per kg' },
+      { key: 'handbrakePerKg', min: 0, max: 40, step: 0.5, hint: 'handbrake force on the rear axle, N per kg' },
+      { key: 'reverse', min: 0, max: 1, step: 0.02, hint: 'reverse as a share of forward power' },
+    ],
+  },
+  {
+    title: 'tyres & grip',
+    collapsed: false,
+    keys: [
+      { key: 'gripFront', min: 0.2, max: 4, step: 0.02, hint: 'front friction. Front < rear understeers; rear < front is a drift car' },
+      { key: 'gripRear', min: 0.2, max: 4, step: 0.02 },
+      { key: 'sideStiffness', min: 0, max: 4, step: 0.05, hint: 'how sharply the tyre answers a slip angle' },
+      { key: 'offroadGrip', min: 0, max: 1.5, step: 0.05, hint: 'what grip is multiplied by off the pavement' },
+    ],
+  },
+  {
+    title: 'steering & assists',
+    keys: [
+      { key: 'steerMax', min: 0.1, max: 1.2, step: 0.01, hint: 'road-wheel angle at a standstill, rad' },
+      { key: 'steerRate', min: 0.5, max: 10, step: 0.1, hint: 'how fast the wheel moves, rad/s' },
+      { key: 'steerAtSpeed', min: 0, max: 1, step: 0.02, hint: 'fraction of steerMax still available at topSpeed' },
+      { key: 'steerFullSpeed', min: 2, max: 40, step: 0.5, hint: 'm/s at which the steering has full authority' },
+      { key: 'counterSteer', min: 0, max: 1, step: 0.02, hint: 'how much of a slide the car corrects for you' },
+      { key: 'yawAssist', min: 0, max: 1, step: 0.02, hint: '0 = the tyres decide the yaw, 1 = the wheel does' },
+      { key: 'yawGripLimited', min: 0, max: 1, step: 1, hint: '1 = the imposed yaw is capped by grip (you turn less, you do not spin)' },
+    ],
+  },
+  {
+    title: 'drift & handbrake',
+    keys: [
+      { key: 'driftHold', min: 0, max: 1, step: 0.02, hint: 'share of sideways velocity that survives each second on the handbrake' },
+      { key: 'driftYaw', min: 0, max: 5, step: 0.05, hint: 'extra yaw rate the handbrake grants, rad/s at full lock' },
+      { key: 'slideDecay', min: 0, max: 8, step: 0.1, hint: 'how fast a slide bleeds off, 1/s' },
+    ],
+  },
+  {
+    title: 'suspension',
+    keys: [
+      { key: 'suspensionRest', min: 0.1, max: 0.8, step: 0.01, hint: 'rest length of the spring, m' },
+      { key: 'suspensionTravel', min: 0, max: 0.6, step: 0.01, hint: 'how far it may move either side of rest, m' },
+      { key: 'suspensionStiffness', min: 5, max: 200, step: 1, hint: 'spring rate, Rapier units' },
+      { key: 'compression', min: 0, max: 6, step: 0.1, hint: 'damping while compressing — too low and the car pogos' },
+      { key: 'relaxation', min: 0, max: 6, step: 0.1, hint: 'damping while extending' },
+      { key: 'maxSuspensionForce', min: 5000, max: 120000, step: 1000, hint: 'N a corner may push with — the kerb-launch ceiling' },
+    ],
+  },
+  {
+    title: 'aero & air',
+    keys: [
+      { key: 'rollingPerKg', min: 0, max: 3, step: 0.05, hint: 'm/s² of rolling resistance, constant with speed' },
+      { key: 'dragPerKg', min: 0, max: 0.004, step: 0.00005, hint: 'N per (m/s)² per kg' },
+      { key: 'downforcePerKg', min: 0, max: 0.005, step: 0.00005, hint: 'N per (m/s)² per kg pressing down' },
+      { key: 'airPitch', min: 0, max: 5, step: 0.05, hint: 'rad/s² the driver has about the pitch axis in the air' },
+      { key: 'airRoll', min: 0, max: 5, step: 0.05 },
+      { key: 'airYaw', min: 0, max: 3, step: 0.05 },
+      { key: 'airDamping', min: 0, max: 5, step: 0.05, hint: '1/s: how fast an uncommanded tumble settles' },
+    ],
+  },
+  {
+    title: 'stability & landings',
+    keys: [
+      { key: 'antiRollPerKg', min: 0, max: 20, step: 0.5, hint: 'N·m per rad of body roll, per kg' },
+      { key: 'rollResist', min: 0, max: 1, step: 0.02, hint: '0…1 of the roll-axis spin damped per step; 1 cannot be put on its roof' },
+      { key: 'landingTolerance', min: 0, max: 100, step: 1, hint: 'vertical m/s of a landing above which it does damage' },
+    ],
+  },
+  {
+    title: 'traction & scrape',
+    keys: [
+      { key: 'driveShare', min: 0, max: 1, step: 0.02, hint: 'share of a wheel’s grip reserved for the engine while cornering' },
+      { key: 'tractionFloor', min: 0, max: 1, step: 0.02, hint: 'least share of static load that still counts toward traction' },
+      { key: 'chassisFriction', min: 0, max: 1, step: 0.01, hint: 'the skid plate: how much the body grips what it scrapes' },
+    ],
+  },
+]
+
+const pcBase: Record<string, number> = {}
+const pcOver: Record<string, number> = {}
+let pcBaseProfile: DriveProfile | null = null
+const pcKeyByProfile = new Map<string, TuneKey>()
+
+/** `gripFront` → `GRIP_FRONT`: tune names are SCREAMING_SNAKE like every other knob here. */
+const knobName = (profileKey: string) => profileKey.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toUpperCase()
+
+for (const g of PHYS_CAR_GROUPS) {
+  for (const spec of g.keys) {
+    const def = (PROFILES.street as unknown as Record<string, number>)[spec.key] ?? 0
+    const k: TuneKey = {
+      name: `PHYS_CAR_${knobName(spec.key)}`,
+      get: () => pcOver[spec.key] ?? pcBase[spec.key] ?? def,
+      // An override equal to the adopted default is not an override: dropping it means Reset
+      // really returns to the car's own number rather than pinning it to the same number.
+      set: (v) => {
+        const cur = pcKeyByProfile.get(spec.key)
+        if (cur && v === cur.default) delete pcOver[spec.key]
+        else pcOver[spec.key] = v
+      },
+      default: def,
+      min: spec.min,
+      max: spec.max,
+      step: spec.step,
+      hint: spec.hint,
+    }
+    pcKeyByProfile.set(spec.key, k)
+  }
+}
+
+/**
+ * Seed the physics knobs from the profile the hero car actually spawned with.
+ *
+ * Called by main.ts the moment the Rapier actor exists, before the panel is opened, so the
+ * sliders read the car rather than the `street` fallback. The defaults move with it, which is
+ * what makes Reset return to THIS car's numbers and what the neutral dot compares against.
+ */
+export function adoptPhysCar(p: DriveProfile): void {
+  pcBaseProfile = { ...p }
+  for (const [key, k] of pcKeyByProfile) {
+    const v = (p as unknown as Record<string, number>)[key]
+    if (typeof v === 'number' && Number.isFinite(v)) {
+      pcBase[key] = v
+      k.default = v
+    }
+  }
+}
+
+/** The hero car's profile with the panel's overrides on top, for `RapierCar.setProfile`. */
+export function physCarProfile(fallback?: DriveProfile): DriveProfile {
+  const b = pcBaseProfile ?? fallback ?? PROFILES.street
+  return { ...b, ...(pcOver as Partial<DriveProfile>), id: `${b.id}:car` }
+}
+
+
+/**
+ * A section may say whether it applies right now.
+ *
+ * The car tab is two panes in one: the hand-written car's knobs and the physics actor's profile.
+ * Only the one matching the car you are driving is built, and the tab is invalidated when the car
+ * is (re)built so the next open picks the right one. `undefined` means always.
+ */
+export interface CorridorSection extends TuneSection {
+  when?: () => boolean
+}
 
 export interface TuneTab {
   name: string
-  sections: TuneSection[]
+  sections: CorridorSection[]
+}
+
+/**
+ * The car tab's physics pane: one section per group of the actor's `DriveProfile`, shown only
+ * when the hero car is the Rapier actor. The keys are built once above so persistence, Copy JSON
+ * and the site file all know them; this just groups them for the panel.
+ */
+export function physCarSections(): CorridorSection[] {
+  const out: CorridorSection[] = PHYS_CAR_GROUPS.map((g) => ({
+    title: `physics car — ${g.title}`,
+    collapsed: g.collapsed,
+    when: () => CAR_MODEL === 'physics',
+    keys: g.keys.map((s) => pcKeyByProfile.get(s.key)!),
+  }))
+  out.push({
+    title: 'physics car — gravity',
+    when: () => CAR_MODEL === 'physics',
+    keys: [
+      tune('PHYS_GRAVITY', () => PHYS_GRAVITY, (v) => (PHYS_GRAVITY = v), [0, 30], 0.01, 'm/s² down, the Rapier world. Applied live; 9.81 is Earth. This is the physics car pane, not the hand-written car’s CAR_GRAVITY'),
+    ],
+  })
+  return out
 }
 
 export const TUNE_TABS: TuneTab[] = [
@@ -1310,25 +1524,6 @@ export const TUNE_TABS: TuneTab[] = [
         ],
       },
       {
-        title: 'headlights',
-        scope: 'world',
-        collapsed: false,
-        keys: [
-          tune('HEADLIGHT', () => HEADLIGHT, (v) => (HEADLIGHT = v), [0, 8], 0.1, 'headlights at night, yours and the traffic'),
-          tune('TAILLIGHT', () => TAILLIGHT, (v) => (TAILLIGHT = v), [0, 0.075], 0.001, 'tail lights. The mark is half the old setting; the top of the slider is three times that'),
-          tune('TAILLIGHT_RANGE', () => TAILLIGHT_RANGE, (v) => (TAILLIGHT_RANGE = v), [1, 12], 0.5, 'how far the red light reaches behind the car (m). Aimed at the road, so it stays low'),
-          tune('TAILLIGHT_ANGLE', () => TAILLIGHT_ANGLE, (v) => (TAILLIGHT_ANGLE = v), [0.15, 1.57], 0.02, 'tail-light half-angle (rad). 1.57 is a flat 180° wash out the back; the old cones were 0.22'),
-          tune('HEADLIGHT_RANGE', () => HEADLIGHT_RANGE, (v) => (HEADLIGHT_RANGE = v), [10, 200], 5, 'how far down the road they reach (m)'),
-          tune('HEADLIGHT_ANGLE', () => HEADLIGHT_ANGLE, (v) => (HEADLIGHT_ANGLE = v), [0.1, 1.2], 0.02, 'the beam\u2019s half-angle (rad); the retro cone is this widened'),
-          tune('RETRO_MARKINGS', () => RETRO_MARKINGS, (v) => (RETRO_MARKINGS = v), [0, 6], 0.1, 'how hard road paint throws your headlights back'),
-          tune('RETRO_SIGNS', () => RETRO_SIGNS, (v) => (RETRO_SIGNS = v), [0, 6], 0.1, 'how hard sign sheeting throws your headlights back'),
-          tune('RETRO_SPREAD', () => RETRO_SPREAD, (v) => (RETRO_SPREAD = v), [1, 3], 0.05, 'retro cone as a multiple of the beam angle \u2014 above 1, the edge of the light lights things up'),
-          tune('HEADLIGHT_BOUNCE', () => HEADLIGHT_BOUNCE, (v) => (HEADLIGHT_BOUNCE = v), [0, 4], 0.1, 'how hard the beam lights grass and tree cards'),
-          tune('WET_STREAK', () => WET_STREAK, (v) => (WET_STREAK = v), [0, 4], 0.05, 'how bright the vertical streak is. 0 hides it. It runs from a lamp aimed at you down toward the camera'),
-          tune('WET_SPREAD', () => WET_SPREAD, (v) => (WET_SPREAD = v), [0.15, 3], 0.05, 'how wide that vertical streak is. 1 is a thin line; lower is sharper'),
-        ],
-      },
-      {
         title: 'captures (gaussian splats)',
         collapsed: false,
         keys: [
@@ -1366,6 +1561,7 @@ export const TUNE_TABS: TuneTab[] = [
           tune('STREAM_BUDGET_MS', () => STREAM_BUDGET_MS, (v) => (STREAM_BUDGET_MS = v), [1, 32], 0.5, 'ms a slice of the strip fill, the terrain sink, a branch road or a house cell may run before it yields. The next chunk picks this up'),
           tune('STREAM_CHUNK_M', () => STREAM_CHUNK_M, (v) => (STREAM_CHUNK_M = v), [50, 2000], 25, 'metres of road in one unit. Reload to apply — the chunks are listed once, when the site opens'),
           tune('STREAM_BUILD_M', () => STREAM_BUILD_M, (v) => (STREAM_BUILD_M = v), [100, 6000], 50, 'how far ahead of the car unfinished chunks are built (m). 100 is the chunk you are on; wider keeps the pump working the whole drive'),
+          tune('STREAM_LOCAL', () => STREAM_LOCAL, (v) => (STREAM_LOCAL = v), [0, 1], 1, '1 = build a kilometre around the level start, then the rest as you drive, tiles decoded in a worker. 0 = the old path, everything up front on the main thread. Reload to apply'),
         ],
       },
     ],
@@ -1707,8 +1903,28 @@ export const TUNE_TABS: TuneTab[] = [
     name: 'car',
     sections: [
       {
+        title: 'lights',
+        scope: 'world',
+        collapsed: false,
+        keys: [
+          tune('HEADLIGHT', () => HEADLIGHT, (v) => (HEADLIGHT = v), [0, 8], 0.1, 'headlights at night, yours and the traffic'),
+          tune('TAILLIGHT', () => TAILLIGHT, (v) => (TAILLIGHT = v), [0, 0.075], 0.001, 'tail lights. The mark is half the old setting; the top of the slider is three times that'),
+          tune('TAILLIGHT_RANGE', () => TAILLIGHT_RANGE, (v) => (TAILLIGHT_RANGE = v), [1, 12], 0.5, 'how far the red light reaches behind the car (m). Aimed at the road, so it stays low'),
+          tune('TAILLIGHT_ANGLE', () => TAILLIGHT_ANGLE, (v) => (TAILLIGHT_ANGLE = v), [0.15, 1.57], 0.02, 'tail-light half-angle (rad). 1.57 is a flat 180° wash out the back; the old cones were 0.22'),
+          tune('HEADLIGHT_RANGE', () => HEADLIGHT_RANGE, (v) => (HEADLIGHT_RANGE = v), [10, 200], 5, 'how far down the road they reach (m)'),
+          tune('HEADLIGHT_ANGLE', () => HEADLIGHT_ANGLE, (v) => (HEADLIGHT_ANGLE = v), [0.1, 1.2], 0.02, 'the beam\u2019s half-angle (rad); the retro cone is this widened'),
+          tune('RETRO_MARKINGS', () => RETRO_MARKINGS, (v) => (RETRO_MARKINGS = v), [0, 6], 0.1, 'how hard road paint throws your headlights back'),
+          tune('RETRO_SIGNS', () => RETRO_SIGNS, (v) => (RETRO_SIGNS = v), [0, 6], 0.1, 'how hard sign sheeting throws your headlights back'),
+          tune('RETRO_SPREAD', () => RETRO_SPREAD, (v) => (RETRO_SPREAD = v), [1, 3], 0.05, 'retro cone as a multiple of the beam angle \u2014 above 1, the edge of the light lights things up'),
+          tune('HEADLIGHT_BOUNCE', () => HEADLIGHT_BOUNCE, (v) => (HEADLIGHT_BOUNCE = v), [0, 4], 0.1, 'how hard the beam lights grass and tree cards'),
+          tune('WET_STREAK', () => WET_STREAK, (v) => (WET_STREAK = v), [0, 4], 0.05, 'how bright the vertical streak is. 0 hides it. It runs from a lamp aimed at you down toward the camera'),
+          tune('WET_SPREAD', () => WET_SPREAD, (v) => (WET_SPREAD = v), [0.15, 3], 0.05, 'how wide that vertical streak is. 1 is a thin line; lower is sharper'),
+        ],
+      },
+      {
         title: 'engine',
         scope: 'world',
+        when: () => CAR_MODEL === 'arcade',
         keys: [
           tune('CAR_TOP_SPEED', () => CAR_TOP_SPEED, (v) => (CAR_TOP_SPEED = v), [10, 150], 1, 'm/s'),
           tune('CAR_ACCEL', () => CAR_ACCEL, (v) => (CAR_ACCEL = v), [1, 40], 0.5, 'm/s² at low speed'),
@@ -1723,6 +1939,7 @@ export const TUNE_TABS: TuneTab[] = [
       {
         title: 'handling (the tyres deliver what grip allows)',
         scope: 'world',
+        when: () => CAR_MODEL === 'arcade',
         keys: [
           tune('CAR_STEER_RATE', () => CAR_STEER_RATE, (v) => (CAR_STEER_RATE = v), [0.5, 6], 0.1, 'rad/s of yaw asked for at full lock'),
           tune('CAR_STEER_FULL_SPEED', () => CAR_STEER_FULL_SPEED, (v) => (CAR_STEER_FULL_SPEED = v), [2, 40], 0.5, 'full authority below this (m/s); demand ramps up to it'),
@@ -1744,6 +1961,7 @@ export const TUNE_TABS: TuneTab[] = [
       {
         title: 'surface (grass = off the pavement)',
         scope: 'world',
+        when: () => CAR_MODEL === 'arcade',
         keys: [
           tune('CAR_GRASS_DRAG', () => CAR_GRASS_DRAG, (v) => (CAR_GRASS_DRAG = v), [0, 4], 0.05, 'extra m/s² of drag'),
           tune('CAR_GRASS_GRIP_SCALE', () => CAR_GRASS_GRIP_SCALE, (v) => (CAR_GRASS_GRIP_SCALE = v), [0.05, 1], 0.05, 'grip left on grass'),
@@ -1756,6 +1974,7 @@ export const TUNE_TABS: TuneTab[] = [
       {
         title: 'ride',
         scope: 'world',
+        when: () => CAR_MODEL === 'arcade',
         keys: [
           tune('CAR_RIDE', () => CAR_RIDE, (v) => (CAR_RIDE = v), [0.1, 1], 0.01, 'reference point above the surface (m)'),
           tune('CAR_RECOVER_BACK', () => CAR_RECOVER_BACK, (v) => (CAR_RECOVER_BACK = v), [0, 40], 1, 'metres R backs you out'),
@@ -1765,6 +1984,7 @@ export const TUNE_TABS: TuneTab[] = [
       {
         title: 'jumps (switches default off)',
         scope: 'world',
+        when: () => CAR_MODEL === 'arcade',
         keys: [
           tune('CAR_LAUNCH_MIN_SPEED', () => CAR_LAUNCH_MIN_SPEED, (v) => (CAR_LAUNCH_MIN_SPEED = v), [0, 40], 1, 'slower than this and a crest is just followed (m/s)'),
           tune('CAR_LAUNCH_GAP', () => CAR_LAUNCH_GAP, (v) => (CAR_LAUNCH_GAP = v), [0.02, 2], 0.02, 'ground must fall this far away before you are airborne (m)'),
@@ -1782,6 +2002,7 @@ export const TUNE_TABS: TuneTab[] = [
           tune('CAR_ROCKET_MIN_SPEED', () => CAR_ROCKET_MIN_SPEED, (v) => (CAR_ROCKET_MIN_SPEED = v), [0.5, 1], 0.02, 'share of top speed needed'),
         ],
       },
+      ...physCarSections(),
     ],
   },
   {
@@ -1905,7 +2126,7 @@ export const TUNE_TABS: TuneTab[] = [
       {
         title: 'the world (reload after changing any of these)',
         keys: [
-          tune('PHYS_ENABLED', () => PHYS_ENABLED, (v) => (PHYS_ENABLED = v), [0, 1], 1, 'Rapier at all. Read once, when the site builds \u2014 use ?phys=1 in the URL, this slider needs a reload and does not persist'),
+          tune('PHYS_ENABLED', () => PHYS_ENABLED, (v) => (PHYS_ENABLED = v), [0, 1], 1, 'Rapier at all, on by default. Read once, when the site builds \u2014 use ?phys=0 in the URL to skip the wasm; this slider needs a reload and does not persist'),
           tune('PHYS_HZ', () => PHYS_HZ, (v) => (PHYS_HZ = v), [30, 240], 10, 'fixed steps per second'),
           tune('PHYS_MAX_STEPS', () => PHYS_MAX_STEPS, (v) => (PHYS_MAX_STEPS = v), [1, 24], 1, 'a stall past this is dropped, never paid back'),
           tune('PHYS_STEP_BUDGET_MS', () => PHYS_STEP_BUDGET_MS, (v) => (PHYS_STEP_BUDGET_MS = v), [2, 30], 1, 'ms of a frame the steps may take; past it the backlog is dropped'),
@@ -1932,7 +2153,7 @@ export const TUNE_TABS: TuneTab[] = [
           tune('PHYS_PROPS', () => PHYS_PROPS, (v) => (PHYS_PROPS = v), [0, 1], 1, 'signs, masts, poles, fences and houses are solid', { scope: 'world', lerp: 'step' }),
           tune('PHYS_PROP_BUDGET', () => PHYS_PROP_BUDGET, (v) => (PHYS_PROP_BUDGET = v), [0, 3000], 25, 'nearest first'),
           tune('PHYS_TREE_BUDGET', () => PHYS_TREE_BUDGET, (v) => (PHYS_TREE_BUDGET = v), [0, 2000], 25, 'nearest first'),
-          tune('PHYS_CAR', () => PHYS_CAR, (v) => (PHYS_CAR = v), [0, 1], 1, '0 = the hand-written car, 1 = Rapier. Needs ?phys=1 and a fresh press of Tab', { scope: 'world', lerp: 'step' }),
+          tune('PHYS_CAR', () => PHYS_CAR, (v) => (PHYS_CAR = v), [0, 1], 1, '0 = the hand-written car, 1 = Rapier (default). Use ?car=arcade to force the hand-written one; a fresh press of Tab applies it', { scope: 'world', lerp: 'step' }),
           tune('PHYS_PROFILE', () => PHYS_PROFILE, (v) => (PHYS_PROFILE = v), [0, 4], 1, '0 stunts \u00b7 1 taxi \u00b7 2 street \u00b7 3 rush \u00b7 4 sim', { scope: 'world', lerp: 'step' }),
         ],
       },

@@ -152,11 +152,7 @@ export class GitPanel {
       let secret = ''
       const hostField = textField({ label: 'host', value: host_, placeholder: 'github.com', onChange: (v) => { host_ = v.trim(); setFieldError(hostField, null) } })
       const userField = textField({ label: 'username', value: user, placeholder: 'your-user', onChange: (v) => { user = v.trim(); setFieldError(userField, null) } })
-      const secretField = textField({ label: 'token', value: '', placeholder: 'ghp_…', onChange: (v) => { secret = v; setFieldError(secretField, null) } })
-      // a token is a password: the browser must not offer to remember it, and it must not be
-      // readable over somebody's shoulder
-      const input = secretField.querySelector<HTMLInputElement>('input')
-      if (input) { input.type = 'password'; input.autocomplete = 'off' }
+      const secretField = textField({ label: 'token', value: '', placeholder: 'ghp_…', secret: true, onChange: (v) => { secret = v; setFieldError(secretField, null) } })
       b.append(hostField, userField, secretField)
       b.append(button({
         label: 'Store it',

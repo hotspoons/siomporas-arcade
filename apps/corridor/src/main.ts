@@ -274,10 +274,12 @@ const tuneUI = new TuneUI({
         },
         setLocal: (date, time) => {
           worldClock.setLocal(siteZone(), date, time)
+          saveClockPin({ follow: 'set', date, time })
           applySky(season, false)
         },
         home: () => {
           worldClock.home()
+          saveClockPin({ follow: 'now' })
           applySky(season, false)
         },
       }).el,
@@ -530,7 +532,7 @@ function chooseAA(v: AAMode) {
 }
 let dragging = false, lastX = 0, lastY = 0, downAt = 0
 // drive mode: a real car (stuntin dynamics) on the corridor strip, chase camera behind it
-const drive = { on: false, cockpit: false, yaw: 0, pitch: 0, stickYaw: 0, stickPitch: 0, car: null as DrivableCar | null, input: { throttle: 0, brake: 0, steer: 0, handbrake: false } as CarInput, steerKey: 0 }
+const drive = { on: false, cockpit: false, yaw: 0, pitch: 0, stickYaw: 0, stickPitch: 0, snapCam: false, car: null as DrivableCar | null, input: { throttle: 0, brake: 0, steer: 0, handbrake: false } as CarInput, steerKey: 0 }
 
 /*
  * THE ENGINE YOU CAN HEAR.
@@ -786,7 +788,16 @@ async function loadSite(slug: string) {
   }
   retro.clear() // the previous site's paint and signs are gone
   ui.setSearch(null) // the old site's index is meaningless now
-  site = await buildSite(manifest, status, LITE, renderer, scene.fog as THREE.FogExp2, season, style)
+  // The start is known before the site is built, so the first kilometre is around the level's
+  // point (else the world's home) and not around the bake's photo station.
+  const levelIdEarly = new URLSearchParams(location.search).get('level') ?? await publishedLaunch()
+  const [pointsDoc, earlyLevel] = await Promise.all([
+    loadPoints(slug),
+    levelIdEarly ? loadLevel(levelIdEarly).catch(() => null) : Promise.resolve(null),
+  ])
+  worldPoints = pointsDoc
+  const startPt = startOf(worldPoints, earlyLevel?.start)
+  site = await buildSite(manifest, status, LITE, renderer, scene.fog as THREE.FogExp2, season, style, startPt ? { focus: { x: startPt.at[0], z: -startPt.at[1] } } : {})
   // Built AFTER the site and awaited, because it is bound to `site.groundAt` and because the first
   // thing it does is a 4.3 MB dynamic import. A failure here must not take the world with it: a
   // viewer with no physics is the viewer as it has always been, and a viewer that failed to load
@@ -815,7 +826,7 @@ async function loadSite(slug: string) {
    * here, once, for that one fact; `openLevel` reads it again for everything else.
    */
   const levelId = new URLSearchParams(location.search).get('level')
-  const early = levelId ? await loadLevel(levelId).catch(() => null) : null
+  const early = levelId && earlyLevel?.id === levelId ? earlyLevel : levelId ? await loadLevel(levelId).catch(() => null) : null
   const trafficNeedsPhysics = !!early?.simulations?.some((x) => x.kind === 'traffic')
   physics = await buildPhysics(site, {
     // `?phys=` first, then the player's own choice (Escape menu → Physics), then what the world
@@ -827,6 +838,8 @@ async function loadSite(slug: string) {
     return null
   })
   if (physics) status(`physics: ${physics.phys.hz} Hz`)
+  // the restored PHYS_GRAVITY knob, before anything falls
+  applyPhysicsCarTune()
   applySky(season)
   scene.add(site.group)
   armShadows(site.group)
@@ -851,7 +864,6 @@ async function loadSite(slug: string) {
    * here too, on top of the procedural ones the site just drew.
    */
   fixtures = new FixtureLayer(site)
-  worldPoints = await loadPoints(slug)
   showWorldPoints()
   scene.add(fixtures.group)
   void loadFixtures(site.manifest.slug)
@@ -1208,7 +1220,38 @@ async function loadSite(slug: string) {
     const id = await publishedLaunch()
     if (id) await openLevel(id)
   }
+  // after the level, so "now" wins over the level's saved clock and a pinned time wins over both
+  applyClockPin()
   void refreshStages()
+}
+
+/**
+ * The clock the tuner last asked for, kept across a reload.
+ *
+ * A level carries its own time and reapplies it on every load, which is why picking "now" only
+ * lasted until the next refresh. "now" stores a follow flag and the next load goes back to the
+ * wall clock. Setting a date or dragging the slider stores that instant instead, and the level's
+ * time only applies when nothing has been chosen yet.
+ */
+const CLOCK_KEY = 'apex-corridor-clock'
+type ClockPin = { follow: 'now' } | { follow: 'set'; date: string; time: string }
+function saveClockPin(pin: ClockPin) {
+  try { localStorage.setItem(CLOCK_KEY, JSON.stringify(pin)) } catch { /* private window */ }
+}
+function readClockPin(): ClockPin | null {
+  try {
+    const j = JSON.parse(localStorage.getItem(CLOCK_KEY) ?? 'null') as ClockPin | null
+    if (j?.follow === 'now') return j
+    if (j?.follow === 'set' && j.date && j.time) return j
+  } catch { /* corrupt or blocked */ }
+  return null
+}
+function applyClockPin() {
+  const pin = readClockPin()
+  if (!pin || !site) return
+  if (pin.follow === 'now') worldClock.home()
+  else worldClock.setLocal(siteZone(), pin.date, pin.time)
+  applySky(season, false)
 }
 
 /** The stage a published game opens on. The editor does not serve this file, so a 404 or an HTML page is "no launch". */
@@ -2153,6 +2196,16 @@ function setDrive(on: boolean) {
         if (playerModel) car.setBodyMesh(playerModel.object)
         drive.car = car
       }
+      /*
+       * THE CAR TAB FOLLOWS THE CAR. The physics pane seeds itself from the profile this actor
+       * actually spawned with (level's profile, then the document's own engine), and the tab is
+       * invalidated so the next open rebuilds with the right pane rather than whichever model was
+       * current the first time somebody opened it.
+       */
+      T.setCarModel(drive.car instanceof RapierCar ? 'physics' : 'arcade')
+      if (drive.car instanceof RapierCar) T.adoptPhysCar(drive.car.profile)
+      tuneUI.invalidateTab('car')
+      applyPhysicsCarTune()
       scene.add(drive.car.mesh)
       void armCar(drive.car)
       // at the level's start, the world's home, or the right-hand lane at the photo (startPose)
@@ -2745,7 +2798,21 @@ function onTuneChange() {
   engineSound.applyTuning()
   applySeasonKnob()
   applySky(season) // the WEATHER knob lives here: sky, fog, sun, grip and what is falling
+  applyPhysicsCarTune()
   site?.retune()
+}
+
+/**
+ * Push the physics knobs at the running world and car. Cheap and idempotent, so it runs on every
+ * tune change rather than trying to work out whether one of ours moved.
+ *
+ * The gravity is the Rapier world's, so it applies whether or not a car exists; the profile is
+ * the hero actor's, and `setProfile` re-derives the suspension and grip without a respawn.
+ */
+function applyPhysicsCarTune() {
+  const w = physics?.phys.world
+  if (w) w.gravity = { x: 0, y: -T.PHYS_GRAVITY, z: 0 }
+  if (drive.car instanceof RapierCar) drive.car.setProfile(T.physCarProfile())
 }
 
 // A STANCE is everything needed to reproduce what is on screen: site, season, mode, camera (or
@@ -2947,6 +3014,14 @@ function hotkey(action: Action, shift = false): boolean {
       if (!drive.on) return false
       drive.cockpit = !drive.cockpit
       drive.car?.setCockpit(drive.cockpit)
+      // A mouse drag leaves yaw and pitch where they were, and nothing else puts them back.
+      // Switching chase and cockpit is the moment the view should sit straight behind the car
+      // again, looking down the nose.
+      drive.yaw = 0
+      drive.pitch = 0
+      drive.stickYaw = 0
+      drive.stickPitch = 0
+      drive.snapCam = true
       return true
     case 'map':
       if (!settings.data.mapExpand) return true
@@ -3255,9 +3330,9 @@ function frame() {
    * `real`, not `dt`: the accumulator inside the physics world does its own capping, and handing it
    * an already-capped delta would make the simulation quietly run slow through every hitch.
    */
-  if (missiles && !paused) missiles.tick(real)
-  if (!paused && !menu.open && drive.on && (input.held('gun') || radHold.gun)) fireGun(real)
-  if (gun && !paused) gun.tick(real)
+  if (missiles && !paused) missiles.tick(dt)
+  if (!paused && !menu.open && drive.on && (input.held('gun') || radHold.gun)) fireGun(dt)
+  if (gun && !paused) gun.tick(dt)
   // the traffic steps before the physics, so its bodies are where the cars are when the player hits one
   if (traffic && !paused) {
     // the drivers see the player: where he is and how fast, in the site frame
@@ -3408,7 +3483,8 @@ function frame() {
       // the ground clamp is for a camera under the road, which only means something while up is up
       const gy = chaseUp.y > 0.5 ? site.groundAt(want.x, want.z) : null
       if (gy !== null && want.y < gy + 1.2) want.y = gy + 1.2
-      camera.position.lerp(want, 1 - Math.exp(-T.CHASE_LAG * dt))
+      camera.position.lerp(want, drive.snapCam ? 1 : 1 - Math.exp(-T.CHASE_LAG * dt))
+      drive.snapCam = false
       // the aim: the road ahead, or the car itself as the stick turns the view off the nose
       const onCar = Math.min(1, Math.abs(drive.stickYaw) / 0.35)
       camera.lookAt(car.pos.clone().add(car.forward.clone().multiplyScalar(T.CHASE_LOOK_AHEAD * (1 - onCar))).add(chaseUp.clone().multiplyScalar(1.0)))

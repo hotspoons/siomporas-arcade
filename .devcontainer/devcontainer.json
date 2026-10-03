@@ -13,7 +13,7 @@
 	"runArgs": ["--network=host"],
 	// Vite dev servers: conduit (5180), Stuntin’ (5181), coast/Turbo Radrun (5182).
 	"forwardPorts": [5180, 5181, 5182, 5185],
-	"initializeCommand": "cmd.exe /c powershell -NoProfile -Command \"$ErrorActionPreference='SilentlyContinue'; New-Item -ItemType Directory -Force -Path $env:USERPROFILE\\.kube, $env:USERPROFILE\\.claude | Out-Null; if (!(Test-Path $env:USERPROFILE\\.claude.json)) { Set-Content -Path $env:USERPROFILE\\.claude.json -Value '{}' }\" || sh -c 'mkdir -p \"$HOME/.kube\" \"$HOME/.claude\" && touch \"$HOME/.claude.json\"'",
+	"initializeCommand": "cmd.exe /c powershell -NoProfile -Command \"$ErrorActionPreference='SilentlyContinue'; New-Item -ItemType Directory -Force -Path $env:USERPROFILE\\.kube, $env:USERPROFILE\\.claude, $env:USERPROFILE\\.config\\opencode, $env:USERPROFILE\\.local\\share\\opencode | Out-Null; if (!(Test-Path $env:USERPROFILE\\.claude.json)) { Set-Content -Path $env:USERPROFILE\\.claude.json -Value '{}' }\" || sh -c 'mkdir -p \"$HOME/.kube\" \"$HOME/.claude\" \"$HOME/.config/opencode\" \"$HOME/.local/share/opencode\" && touch \"$HOME/.claude.json\"'",
 	"mounts": [
 		// Blender 5.1 is a from-source build on arm64 (see .devcontainer/build-blender.sh) and takes
 		// the better part of an hour. Everything under /home/node lives in the container layer, so
@@ -23,7 +23,13 @@
 		"source=apex-blender-build,target=/home/node/.cache/blender-source,type=volume",
 		"source=${localEnv:HOME}${localEnv:USERPROFILE}/.kube,target=/home/node/.kube,type=bind,consistency=cached",
 		"source=${localEnv:HOME}${localEnv:USERPROFILE}/.claude.json,target=/home/node/.claude.json,type=bind",
-		"source=${localEnv:HOME}${localEnv:USERPROFILE}/.claude,target=/home/node/.claude,type=bind"
+		"source=${localEnv:HOME}${localEnv:USERPROFILE}/.claude,target=/home/node/.claude,type=bind",
+		// opencode's state (~/.config/opencode, ~/.local/share/opencode) otherwise lives in the
+		// container layer and is wiped on rebuild — this keeps config, auth and session history.
+		// The binary itself is reinstalled by post-create.sh, so it is NOT mounted (a host binary
+		// would be the wrong architecture on macOS/Windows anyway).
+		"source=${localEnv:HOME}${localEnv:USERPROFILE}/.config/opencode,target=/home/node/.config/opencode,type=bind,consistency=cached",
+		"source=${localEnv:HOME}${localEnv:USERPROFILE}/.local/share/opencode,target=/home/node/.local/share/opencode,type=bind,consistency=cached"
 	],
 	"customizations": {
 		"vscode": {

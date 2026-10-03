@@ -35,6 +35,7 @@ import type { SeasonLook } from '../visuals/season'
 import { GRASS_LOOK, type GrassType } from './groundcover'
 import { ACCUM_PARS, accumUniforms } from '../visuals/weather'
 import * as T from '../tuning'
+import { ROAD_CLIP_PARS, roadClipUniforms } from '../visuals/roadcover'
 
 const SEGMENTS = 6
 const TILE = 8
@@ -260,6 +261,7 @@ export class Grass {
     this.bladeMat = new THREE.ShaderMaterial({
       uniforms: {
         ...THREE.UniformsUtils.merge([THREE.UniformsLib.fog]),
+        ...roadClipUniforms,
         uTime: { value: 0 },
         uWind: { value: 1 },
         uGrow: { value: 0.8 },
@@ -381,8 +383,10 @@ export class Grass {
   }
         ${LAMP_PARS}
         ${SPLAT_MASK_PARS}
+        ${ROAD_CLIP_PARS}
         uniform float uLampGain;
         void main() {
+          if (roadCovered(vWorld)) discard;
           splatDissolve(vWorld);
           #include <logdepthbuf_fragment>
           vec3 n = normalize(gl_FrontFacing ? vNormal : -vNormal);
@@ -430,6 +434,7 @@ export class Grass {
     this.cardMat = new THREE.ShaderMaterial({
       uniforms: {
         ...THREE.UniformsUtils.merge([THREE.UniformsLib.fog]),
+        ...roadClipUniforms,
         uTime: { value: 0 },
         uWind: { value: 1 },
         uGrow: { value: 0.8 },
@@ -528,8 +533,10 @@ export class Grass {
   }
         ${LAMP_PARS}
         ${SPLAT_MASK_PARS}
+        ${ROAD_CLIP_PARS}
         uniform float uLampGain;
         void main() {
+          if (roadCovered(vCardWorld)) discard;
           splatDissolve(vCardWorld);
           #include <logdepthbuf_fragment>
           vec4 s = texture2D(uMap, vUv);

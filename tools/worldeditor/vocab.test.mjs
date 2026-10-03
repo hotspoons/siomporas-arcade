@@ -26,15 +26,15 @@ function keys(file, name) {
 }
 
 test('weather, season, transport, hideable, hud parts and point kinds match the app', () => {
-  assert.deepEqual(V.WEATHERS, list('weather.ts', 'WEATHERS'))
-  assert.deepEqual(V.SEASONS, list('season.ts', 'SEASONS'))
-  assert.deepEqual(V.TRANSPORT, list('program.ts', 'TRANSPORT'))
-  assert.deepEqual(V.POINT_KINDS, list('points.ts', 'POINT_KINDS'))
-  assert.deepEqual(V.POINT_MODES, list('points.ts', 'POINT_MODES'))
-  assert.deepEqual(V.HIDEABLE, keys('program.ts', 'HIDEABLE'))
-  assert.deepEqual(V.HUD_PARTS, keys('gamepolicy.ts', 'HUD_PARTS'))
-  assert.deepEqual(V.SETTING_TABS, keys('gamepolicy.ts', 'SETTING_TABS'))
-  assert.deepEqual(V.SETTING_CONTROLS, keys('gamepolicy.ts', 'SETTING_CONTROLS'))
+  assert.deepEqual(V.WEATHERS, list('visuals/weather.ts', 'WEATHERS'))
+  assert.deepEqual(V.SEASONS, list('visuals/season.ts', 'SEASONS'))
+  assert.deepEqual(V.TRANSPORT, list('game/session/program.ts', 'TRANSPORT'))
+  assert.deepEqual(V.POINT_KINDS, list('game/world/points.ts', 'POINT_KINDS'))
+  assert.deepEqual(V.POINT_MODES, list('game/world/points.ts', 'POINT_MODES'))
+  assert.deepEqual(V.HIDEABLE, keys('game/session/program.ts', 'HIDEABLE'))
+  assert.deepEqual(V.HUD_PARTS, keys('game/session/gamepolicy.ts', 'HUD_PARTS'))
+  assert.deepEqual(V.SETTING_TABS, keys('game/session/gamepolicy.ts', 'SETTING_TABS'))
+  assert.deepEqual(V.SETTING_CONTROLS, keys('game/session/gamepolicy.ts', 'SETTING_CONTROLS'))
 })
 
 test('the engine-sound list is read from the catalog beside the wasm', async () => {

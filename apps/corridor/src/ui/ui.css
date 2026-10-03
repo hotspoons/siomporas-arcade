@@ -398,6 +398,14 @@ input.range::-moz-range-thumb { width: 13px; height: 13px; border: 0; border-rad
 .field.text .input:focus { border-color: var(--accent); }
 .input.wide { width: auto; flex: 1; min-width: 0; text-align: left; font-family: var(--font-body); }
 
+/* a secret is a text field wearing discs, not a password input — Chrome's manager claims those */
+.secret-box { position: relative; display: flex; flex: 1 1 auto; min-width: 0; align-items: center; }
+.secret-box .input { width: 100%; }
+.secret-box .input.masked { -webkit-text-security: disc; }
+.secret-reveal { display: none; position: absolute; right: 1px; padding: 3px; }
+.secret-box.has-value .secret-reveal { display: inline-flex; }
+.secret-box.has-value .input { padding-right: 28px; }
+
 /* a multi-line field: the label above, the box filling the width. A prompt is 1,600 characters and
    does not belong beside its own label. */
 .field.area { display: flex; flex-direction: column; align-items: stretch; gap: var(--s1); }

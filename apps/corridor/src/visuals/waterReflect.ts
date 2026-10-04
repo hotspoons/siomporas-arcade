@@ -20,7 +20,7 @@ export const waterReflectMatrix = { value: new THREE.Matrix4() }
 /** reflection share, 0..1; the live knob, read every frame from `WATER_REFLECT` */
 export const waterReflectStrength = { value: 0 }
 /** how far the wave normal smears the reflected image, in screen fractions */
-export const waterReflectRipple = { value: 0.04 }
+export const waterReflectRipple = { value: 0.1 }
 
 let planeY = 0
 let registered = false
@@ -139,8 +139,12 @@ const REFLECT_BODY = /* glsl */ `
 {
   if (uReflect > 0.001) {
     vec2 ruv = vReflectUv.xy / max(vReflectUv.w, 1e-4);
-    // smear the mirror with the live wave normal, or a calm sea becomes a perfect looking-glass
-    ruv += normalize(normal).xy * uReflectRipple;
+    // smear the mirror with the wave normal: the deviation from the FLAT-water normal, not the
+    // normal itself. At a grazing angle the flat normal already points across the screen, so
+    // offsetting by it slides the whole reflection off the shore into a gap; the deviation is the
+    // ripple alone and is zero on calm water.
+    vec3 flatN = normalize((viewMatrix * vec4(0.0, 1.0, 0.0, 0.0)).xyz);
+    ruv += (normalize(normal) - flatN).xy * uReflectRipple;
     if (ruv.x > 0.0 && ruv.x < 1.0 && ruv.y > 0.0 && ruv.y < 1.0) {
       vec3 refl = texture2D(uReflectMap, ruv).rgb;
       float ndv = clamp(dot(normalize(normal), normalize(vViewPosition)), 0.0, 1.0);

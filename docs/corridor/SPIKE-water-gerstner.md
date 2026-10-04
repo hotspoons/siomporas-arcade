@@ -49,6 +49,14 @@ Before / after at Braddock I-70 (Rock Creek), temperate look:
 - **Extinction.** `exp(-depth / extinct)` per channel (red dies first), mixed from a shore tint to
   a deep tint. `WATER_CLARITY` scales the distances: short is opaque mud, long is clear.
 - **Foam.** A noisy band in the first half-metre, racing with the flow, faded with range.
+- **Reflection.** A real planar reflection, not screen-space. `visuals/waterReflect.ts` renders the
+  scene once more from the camera mirrored across the water plane into a half-float linear target
+  (adapted from three.js `Reflector`: the mirror camera, an oblique clip plane so the seabed stays
+  out of the sky, and a projected sample), and the water reads it back with the screen coordinate of
+  each fragment. The plane is flat, so this is exact and needs no depth buffer, and it reflects the
+  coast, trees and rocks the sky env map cannot. The five-band wave normal smears the sample so a
+  calm sea is not a looking-glass, only deep water mirrors, and the whole pass is skipped at inland
+  sites. The old screen-space SSR belt-march is gone from water (it is still the car-paint shine).
 
 ## Knobs and per-body looks
 
@@ -58,7 +66,8 @@ there):
 `WATER_LOOK` (default preset) · `WATER_DEPTH` · `WATER_WIDTH_SCALE` · `WATER_SPEED` ·
 `WATER_OPACITY` · `WATER_WAVE_STRENGTH` · `WATER_WAVE_AMP` · `WATER_WAVE_LEN` ·
 `WATER_WAVE_STEEP` · `WATER_WAVE_FADE` · `WATER_WIND_DEG` · `WATER_CLARITY` · `WATER_FOAM` ·
-`WATER_FOAM_BAND` · `WATER_CROWN` · `WATER_LEVEL_M` · `WATER_LEVEL_SPAN`.
+`WATER_FOAM_BAND` · `WATER_CROWN` · `WATER_LEVEL_M` · `WATER_LEVEL_SPAN` · `WATER_REFLECT` ·
+`WATER_REFLECT_SCALE` · `WATER_REFLECT_RIPPLE`.
 
 The scalar knobs are global multipliers; changing `WATER_LOOK` is live for bodies that do not name
 their own look (the default change re-resolves per tick; the bank crown needs a reload).
@@ -92,10 +101,14 @@ road so shots take seconds instead of the minutes the full build takes under sof
 
 ## Open / next
 
+- Reflection is a flat-plane mirror, so only the sea (and any body at the water line) reflects
+  correctly; a stream at a different height reads the sea's reflection for the few pixels where its
+  depth is deep enough to show any. A refraction pass would fix that and give real see-through depth
+  at once.
 - No refraction or true water-column depth: on an area the depth is assumed, and a stream's depth is
   a shape rather than a measurement. tuxalin gets this from a refraction+depth render target. If the
   corridor renderer ever gains a scene-depth texture, feed it in and the extinction/foam become
-  measured.
+  measured — and the planar pass can become a proper depth-aware screen-space one.
 - `WATER_CROWN` is baked, so it needs a reload.
 - The look presets are corridor-local for now; if another game wants water, `waterShader.ts` is
   already self-contained and can move into the engine.

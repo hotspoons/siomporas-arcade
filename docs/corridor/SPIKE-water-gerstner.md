@@ -79,10 +79,16 @@ are unchanged, so `scene.ts`'s call sites are untouched. `WaterResult` only **ad
 
 ## Demo harness
 
-`apps/corridor/waterdemo.html` + `src/waterdemo.ts` build the water alone on a plain background —
-no terrain, trees or road — so the shader can be checked and shots taken in seconds instead of the
-minutes the full build takes under software GL. `probes/_wdemo.mjs` drives it:
-`PORT=5210 LOOK=swamp node probes/_wdemo.mjs braddock-i70 out.png`.
+`apps/corridor/waterdemo.html` + `src/waterdemo.ts` render the water without the terrain, trees or
+road so shots take seconds instead of the minutes the full build takes under software GL.
+
+- `?mode=lagoon` (default) — a wide shallow body over a sand bed under a real sky environment, so
+  both of the things that give water its look are present: the sky to **reflect** and the bed to
+  **see through**. This is the honest test of the shader.
+- `?mode=site&site=<slug>` — the real baked water of a site, over a plain bed.
+
+`probes/_wdemo.mjs` drives it:
+`PORT=5210 MODE=site LOOK=swamp node probes/_wdemo.mjs braddock-i70 out.png`.
 
 ## Open / next
 

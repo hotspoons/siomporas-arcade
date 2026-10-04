@@ -23,7 +23,7 @@
 import * as THREE from 'three'
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import * as T from '../tuning'
-import { chainCompile, injectRelief, injectShade, injectSSR, noteShiny } from '../visuals/shading'
+import { chainCompile, injectRelief, injectShade, noteShiny } from '../visuals/shading'
 import { WATER_ATTR, WATER_FRAG_COLOR, WATER_FRAG_NORMAL, WATER_FRAG_PARS, WATER_LOOK_NAMES, WATER_VERT_BODY, WATER_VERT_PARS, applyLookColours, lookOf, refreshLook, waterTints, writeWaterAttr, type WaterKnobs, type WaterLook, type WaterWaveUniforms } from './waterShader'
 
 export interface WaterFall { i0: number; i1: number; drop_m: number; length_m: number; grade: number; kind: 'falls' | 'rapids' }
@@ -43,6 +43,12 @@ export interface WaterLine {
 }
 export interface WaterArea { id: string; kind: string; name: string | null; area_m2: number; z: number; ring: [number, number][]; look?: string }
 export interface WaterLayer { lines: WaterLine[]; areas: WaterArea[]; summary?: Record<string, unknown> }
+
+/**
+ * How far above `WATER_LEVEL_M` the sea plane is drawn, in metres. A draw bias to beat z-fighting
+ * with the flat-at-zero coastal DEM; see `placeSea`.
+ */
+const SEA_DRAW_LIFT = 0.35
 
 const GLSL_NOISE = /* glsl */ `
   float wh21(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
@@ -134,11 +140,14 @@ function waterMaterial(shared: WaterShared, look: WaterLook, opacityMul = 1): TH
   }
   mat.customProgramCacheKey = () => `corridor-water-${look.colour}`
   noteShiny(mat)
+  // NO SSR. The screen-space pass marches to a fixed "belt" row and samples the previous frame at a
+  // linearly shifted X; over a body the size of the sea that X runs off the texture along a straight
+  // line, so half the water takes a smeared flat sample and half does not — a hard-edged plate laid
+  // on the ocean. The sky environment (REFLECT) already gives the water its reflection, cleanly.
   chainCompile(mat, (shader) => {
-    injectSSR(shader)
     injectRelief(shader)
     injectShade(shader)
-  }, 'relief-ssr-shade')
+  }, 'relief-shade')
   return mat
 }
 
@@ -178,9 +187,14 @@ function foamMaterial(uniforms: { uTime: { value: number } }): THREE.MeshBasicMa
  * one number (Rich, 2026-09-21). Two triangles, so the cost of having it always on is nothing.
  */
 function seaPlane(uniforms: WaterShared, look: WaterLook): THREE.Mesh {
-  const geo = new THREE.PlaneGeometry(1, 1, 1, 1)
+  // Tessellated, NOT one quad. A single 60 km triangle spends its precision on interpolation: the
+  // shared diagonal of the two triangles showed through as a hard edge with ripples on one side and
+  // flat water on the other, because world position and view distance are interpolated across an
+  // enormous triangle. 64 segments makes the longest edge under a kilometre, which the varyings
+  // carry exactly — and gives a mesh fine enough to displace for real swell later.
+  const geo = new THREE.PlaneGeometry(1, 1, 64, 64)
   geo.rotateX(-Math.PI / 2)
-  const mat = waterMaterial(uniforms, look, 1.1)
+  const mat = waterMaterial(uniforms, look, 1.18)
   const mesh = new THREE.Mesh(geo, mat)
   mesh.name = 'water:level'
   mesh.renderOrder = 1
@@ -294,7 +308,15 @@ export function buildWater(water: WaterLayer | null | undefined, groundAt: (x: n
   const seaMat = sea.material as THREE.MeshStandardMaterial
   waveMats.push({ u: (seaMat.userData.water as { u: WaterWaveUniforms }).u, look: defaultLook, name: defaultLookName, own: false, mat: seaMat, styleColoured: false })
   const placeSea = () => {
-    sea.position.set(0, T.WATER_LEVEL_M, 0)
+    // The sea sits a hand's width above the DEM it lies on. Over open water a coastal site's DEM is
+    // flat — there is no bathymetry to fetch — and it lands within a few centimetres of sea level,
+    // so the plane and the terrain graze each other and the depth test fights: patches of flat
+    // satellite-water win and the ripples blink out in hard-edged rectangles. glPolygonOffset
+    // cannot fix it because the renderer's logarithmic depth buffer writes gl_FragDepth in the
+    // shader, which disables polygon offset. A lift of a third of a metre clears the log-depth
+    // quantum out to the horizon and is invisible at the waterline. (WATER_LEVEL_M stays the sea
+    // level a game reasons about; this is a draw bias.)
+    sea.position.set(0, T.WATER_LEVEL_M + SEA_DRAW_LIFT, 0)
     sea.scale.set(T.WATER_LEVEL_SPAN * 2, 1, T.WATER_LEVEL_SPAN * 2)
   }
   placeSea()

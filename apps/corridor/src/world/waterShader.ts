@@ -75,12 +75,12 @@ export interface WaterLook {
  * ends so the dial is obvious.
  */
 export const WATER_PRESETS: Record<string, WaterLook> = {
-  temperate: { colour: 0x3d6b73, opacity: 0.82, roughness: 0.28, shore: 0xdfe9df, deep: 0x18323f, extinct: [6, 26, 70], shoreMix: 0.85, foam: 0.7, foamBand: 1, wave: 1, amp: 1, len: 1, steep: 1, crown: 0.9, pondDepth: 1.2 },
-  swamp: { colour: 0x2b3320, opacity: 0.9, roughness: 0.45, shore: 0x6b6f3a, deep: 0x10150b, extinct: [2.5, 5.5, 10], shoreMix: 1, foam: 0.45, foamBand: 1.5, wave: 0.5, amp: 0.55, len: 1.5, steep: 0.7, crown: 0.5, pondDepth: 0.9 },
-  black: { colour: 0x101812, opacity: 0.94, roughness: 0.35, shore: 0x39422f, deep: 0x05080a, extinct: [1.8, 5, 14], shoreMix: 1, foam: 0.3, foamBand: 1.7, wave: 0.4, amp: 0.4, len: 1.7, steep: 0.5, crown: 0.4, pondDepth: 0.8 },
-  caribbean: { colour: 0x2fb8c8, opacity: 0.84, roughness: 0.2, shore: 0xe6f7f0, deep: 0x0a4a6e, extinct: [16, 40, 92], shoreMix: 1, foam: 0.95, foamBand: 1.2, wave: 0.85, amp: 0.5, len: 1, steep: 0.55, crown: 1.1, pondDepth: 1.8 },
-  alpine: { colour: 0x2f6f86, opacity: 0.78, roughness: 0.16, shore: 0xbfd8d2, deep: 0x0c2c3d, extinct: [12, 34, 80], shoreMix: 1, foam: 0.4, foamBand: 0.9, wave: 1.3, amp: 1.2, len: 0.9, steep: 1.1, crown: 0.7, pondDepth: 1.5 },
-  mud: { colour: 0x5a4326, opacity: 0.93, roughness: 0.55, shore: 0x8a7350, deep: 0x2a1e10, extinct: [1.5, 4, 9], shoreMix: 1, foam: 0.55, foamBand: 1.6, wave: 0.6, amp: 0.5, len: 1.5, steep: 0.6, crown: 0.6, pondDepth: 0.9 },
+  temperate: { colour: 0x3d6b73, opacity: 0.82, roughness: 0.09, shore: 0xdfe9df, deep: 0x18323f, extinct: [6, 26, 70], shoreMix: 0.85, foam: 0.7, foamBand: 1, wave: 1, amp: 1, len: 1, steep: 1, crown: 0.9, pondDepth: 1.2 },
+  swamp: { colour: 0x2b3320, opacity: 0.9, roughness: 0.26, shore: 0x6b6f3a, deep: 0x10150b, extinct: [2.5, 5.5, 10], shoreMix: 1, foam: 0.45, foamBand: 1.5, wave: 0.5, amp: 0.55, len: 1.5, steep: 0.7, crown: 0.5, pondDepth: 0.9 },
+  black: { colour: 0x101812, opacity: 0.94, roughness: 0.16, shore: 0x39422f, deep: 0x05080a, extinct: [1.8, 5, 14], shoreMix: 1, foam: 0.3, foamBand: 1.7, wave: 0.4, amp: 0.4, len: 1.7, steep: 0.5, crown: 0.4, pondDepth: 0.8 },
+  caribbean: { colour: 0x2fb8c8, opacity: 0.84, roughness: 0.07, shore: 0xe6f7f0, deep: 0x0a4a6e, extinct: [16, 40, 92], shoreMix: 1, foam: 0.95, foamBand: 1.2, wave: 0.85, amp: 0.5, len: 1, steep: 0.55, crown: 1.1, pondDepth: 1.8 },
+  alpine: { colour: 0x2f6f86, opacity: 0.78, roughness: 0.06, shore: 0xbfd8d2, deep: 0x0c2c3d, extinct: [12, 34, 80], shoreMix: 1, foam: 0.4, foamBand: 0.9, wave: 1.3, amp: 1.2, len: 0.9, steep: 1.1, crown: 0.7, pondDepth: 1.5 },
+  mud: { colour: 0x5a4326, opacity: 0.93, roughness: 0.34, shore: 0x8a7350, deep: 0x2a1e10, extinct: [1.5, 4, 9], shoreMix: 1, foam: 0.55, foamBand: 1.6, wave: 0.6, amp: 0.5, len: 1.5, steep: 0.6, crown: 0.6, pondDepth: 0.9 },
 }
 
 /** the names, in a stable order a numeric tuning knob can index */
@@ -163,14 +163,15 @@ vec3 waterGerstnerNormal(vec2 p, vec2 flow, float t) {
   vec2 d0 = flow;
   vec2 d1 = normalize(vec2(d0.x * 0.88 - d0.y * 0.47, d0.x * 0.47 + d0.y * 0.88));
   vec2 d2 = normalize(vec2(d0.x * 0.88 + d0.y * 0.47, -d0.x * 0.47 + d0.y * 0.88));
-  // Four bands, the long ones along the flow and the short ones fanned across it. Each band takes a
-  // slowly-varying random phase offset, so its crests wander instead of lining up into corduroy —
-  // the irregularity a normal map would otherwise supply. The offset is added to the phase only,
-  // never to the analytic slope, so it cannot spike the normal.
-  WATER_BAND(d0,                  0.110, 17.0, 0.70, 0.05)
-  WATER_BAND(d1,                  0.060,  9.5, 0.60, 0.09)
-  WATER_BAND(d2,                  0.035,  5.1, 0.50, 0.16)
-  WATER_BAND(normalize(d0 + d1),  0.020,  2.9, 0.45, 0.30)
+  // Five bands — one more than tuxalin's four — so there is fine grain as well as swell. The
+  // amplitude of each is set so w*A lands near 0.10 for every band: a sum of a few sinusoids has a
+  // regular spectrum and reads as corduroy, so the bands are spread across a decade of wavelengths
+  // and each takes a slowly-varying random phase offset (added to the phase only, never the slope).
+  WATER_BAND(d0,                  0.300, 19.0, 0.75, 0.05)
+  WATER_BAND(d1,                  0.170, 10.5, 0.65, 0.09)
+  WATER_BAND(d2,                  0.100,  5.6, 0.55, 0.16)
+  WATER_BAND(normalize(d0 + d1),  0.055,  3.1, 0.50, 0.30)
+  WATER_BAND(normalize(d1 - d2),  0.030,  1.7, 0.45, 0.55)
   #undef WATER_BAND
   return normalize(n);
 }
@@ -190,8 +191,10 @@ export const WATER_FRAG_NORMAL = /* glsl */ `
   vec3 wn = waterGerstnerNormal(vWaterPos.xz, waterFlow(), uTime);
   vec3 wnView = normalize((viewMatrix * vec4(wn, 0.0)).xyz);
   // fade the wave tilt with range: an analytic normal has no mip, so a distant surface would
-  // shimmer. Keep a little tilt far out so the sea is not a mirror.
-  float wfade = mix(0.18, 1.0, 1.0 - smoothstep(90.0 * uWaveFade, 340.0 * uWaveFade, length(vViewPosition)));
+  // shimmer. Keep a third of the tilt far out, and start the fade beyond a quarter kilometre — an
+  // ocean is rippled all the way to the horizon, and fading it to a flat sheen by ~300 m (the first
+  // cut) left a hard edge where the fade floored and exposed whatever seam was underneath.
+  float wfade = mix(0.35, 1.0, 1.0 - smoothstep(300.0 * uWaveFade, 2600.0 * uWaveFade, length(vViewPosition)));
   normal = normalize(mix(normal, wnView, uWaveStrength * wfade));
 }
 `

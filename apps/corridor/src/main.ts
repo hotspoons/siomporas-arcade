@@ -8,7 +8,8 @@ import { fetchStuntDoc, makeStuntWorld, type StuntWorld } from './game/stunt/stu
 import type { StuntDoc } from './game/stunt/stunts'
 import { loadRaceWorld, type RaceWorld } from './game/race/raceworld'
 import { nextGate } from './game/race/racerun'
-import { PerfMeter } from './game/session/perf'
+import { PerfMeter, short } from './game/session/perf'
+import { GpuProfiler } from './game/session/gpuprofile'
 import { assistAt, lookAhead, pullFor } from './game/stunt/stuntassist'
 import { PerfHud } from './ui/perfhud'
 import { RapierCar } from './game/vehicle/rapiercar'
@@ -624,16 +625,142 @@ function holdToTrack(car: DrivableCar | null, dt: number): boolean {
 
 const perfMeter = new PerfMeter()
 const perfHud = new PerfHud(perfMeter)
+
+// GPU pass timings, created the first time the panel needs them — it takes the webgl context, and a
+// context without the timer extension (swiftshader) makes every call a no-op and draws no line.
+const GPU_LABELS = ['reflect', 'scene', 'ssr'] as const
+let gpuProf: GpuProfiler | null = null
+function gpuProfiler(): GpuProfiler {
+  if (!gpuProf) gpuProf = new GpuProfiler(renderer, GPU_LABELS)
+  return gpuProf
+}
+
+// Running averages for the world's own stages, sampled with the panel. The sources are
+// instantaneous (this tile's generation time, that stream's residency), so the smoothing HERE is
+// what turns them into a running average rather than a flicker.
+const stagedEma = new Map<string, number>()
+function avg(key: string, v: number): number {
+  const prev = stagedEma.get(key)
+  const n = prev === undefined ? v : prev * 0.75 + v * 0.25
+  stagedEma.set(key, n)
+  return n
+}
+
+// The light-budget ablation's latest result, filled by measureLights() below.
+let lightBudget: string[] = []
+
 // Which pyramid tile is under the car, and how many of the finest tiles the view is holding.
 // The meter knows frames; the stream knows tiles. Read twice a second with the rest of the panel.
 perfHud.detail = () => {
+  const rows: string[] = []
   const stream = site?.pyramidStream
-  if (!stream) return []
-  const p = drive.car ? drive.car.mesh.position : camera.position
-  return stream.hudLines(p.x, -p.z)
+  if (stream) {
+    const p = drive.car ? drive.car.mesh.position : camera.position
+    rows.push(...stream.hudLines(p.x, -p.z))
+  }
+  if (site?.grass) {
+    const g = site.grass.perf
+    rows.push(`grass gen ${avg('gen', g.genMs).toFixed(1)} · asm ${avg('asm', g.asmMs).toFixed(1)} ms · ${short(avg('gtris', g.triangles))} tris · pend ${g.pendingEmpty}`)
+  }
+  if (splats.length) {
+    let resident = 0, gauss = 0, mb = 0
+    for (const f of splats) {
+      const c = f.counts()
+      resident += c.resident
+      gauss += c.gaussians
+      mb += c.MB
+    }
+    rows.push(`splats ${avg('sres', resident).toFixed(0)} resident · ${short(avg('sgauss', gauss))} gauss · ${avg('smb', mb).toFixed(0)} MB`)
+  }
+  const tb = TREE_BUDGET.stats()
+  rows.push(`trees ${short(tb.count)} near · q ${tb.q.toFixed(2)} · med ${tb.medMs.toFixed(1)} ms`)
+  if (gpuProf?.available) {
+    rows.push('gpu ' + gpuProf.read().map((s) => `${s.label} ${s.ms.toFixed(1)}`).join(' · ') + ' ms')
+  }
+  rows.push(...lightBudget)
+  return rows
 }
 perfHud.tilesLegend = () => site?.pyramidStream?.legend() ?? []
 perfHud.onTiles = (on) => site?.pyramidStream?.setTint(on)
+perfHud.onMeasureLights = () => { void measureLights() }
+
+/**
+ * What each light family actually costs, by switching it off and timing the GPU.
+ *
+ * The forward renderer evaluates every visible spot for every lit fragment, so a family's cost is
+ * the difference its removal makes — there is no cheaper way to attribute it. Two things make the
+ * number trustworthy, both learned measuring this by hand: a light toggling in or out changes the
+ * light count and RECOMPILES every standard material, so the sampler waits for that to settle
+ * before it starts; and frame time on this hardware is dominated by throttling, so it takes the
+ * BEST of a run rather than the mean. The ablation is a button, not continuous, because doing the
+ * settle-and-recompile every frame would cost more than it measures.
+ */
+let measuring = false
+async function measureLights(): Promise<void> {
+  if (measuring) return
+  measuring = true
+  perfHud.lightsBusy(true, 'measuring…')
+  const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
+  try {
+    const gl = renderer.getContext() as WebGL2RenderingContext
+    const ext = gl.getExtension?.('EXT_disjoint_timer_query_webgl2') as { TIME_ELAPSED_EXT: number; GPU_DISJOINT_EXT: number } | null
+    if (!ext) { lightBudget = ['lights: no gpu timer on this context']; return }
+    const timedRender = (): Promise<number> => new Promise((resolve) => {
+      const q = gl.createQuery()
+      gl.beginQuery(ext.TIME_ELAPSED_EXT, q)
+      if (composer) composer.render()
+      else renderer.render(scene, camera)
+      gl.endQuery(ext.TIME_ELAPSED_EXT)
+      const poll = () => {
+        if (gl.getParameter(ext.GPU_DISJOINT_EXT)) { gl.deleteQuery(q); resolve(-1); return }
+        if (gl.getQueryParameter(q, gl.QUERY_RESULT_AVAILABLE)) {
+          resolve((gl.getQueryParameter(q, gl.QUERY_RESULT) as number) / 1e6)
+          gl.deleteQuery(q)
+        } else requestAnimationFrame(poll)
+      }
+      requestAnimationFrame(poll)
+    })
+    const sample = async (): Promise<number> => {
+      await wait(1600)
+      let best = Infinity
+      for (let i = 0; i < 22; i++) {
+        const ms = await timedRender()
+        if (ms > 0 && ms < best) best = ms
+      }
+      return best
+    }
+    const setKnob = (name: string, v: number) => {
+      if (tuneUI.access.set(name, v)) onTuneChange()
+    }
+    const saved = ['HERO_HEADLIGHTS_MODE', 'HERO_TAILLIGHTS_MODE', 'TRAFFIC_LIGHTS_MODE'].map((n) => tuneKey(n)?.get() ?? 0)
+    const flood = tuneKey('FAKE_LAMPS')?.get() ?? 0
+    const dash = (label: string, v: number) => `${label} −${(Math.max(0, v)).toFixed(1)}`
+    const all = await sample()
+    setKnob('HERO_HEADLIGHTS_MODE', 0)
+    const head = await sample()
+    setKnob('HERO_HEADLIGHTS_MODE', saved[0])
+    setKnob('HERO_TAILLIGHTS_MODE', 0)
+    const tail = await sample()
+    setKnob('HERO_TAILLIGHTS_MODE', saved[1])
+    setKnob('TRAFFIC_LIGHTS_MODE', 0)
+    const traffic = await sample()
+    setKnob('TRAFFIC_LIGHTS_MODE', saved[2])
+    setKnob('FAKE_LAMPS', 0)
+    const fake = await sample()
+    setKnob('FAKE_LAMPS', flood)
+    if (all > 0) {
+      lightBudget = [
+        `lights all ${all.toFixed(1)} ms · best of 22`,
+        `  ${dash('head', all - head)} · ${dash('tail', all - tail)} · ${dash('traffic', all - traffic)} · ${dash('flood', all - fake)} ms`,
+      ]
+    } else {
+      lightBudget = ['lights: timer unavailable under load']
+    }
+  } finally {
+    measuring = false
+    perfHud.lightsBusy(false, 'lights')
+  }
+}
 // left on last time? then it comes back on, which is the whole point of remembering it
 if (perfWanted()) perfHud.show(true)
 
@@ -3781,10 +3908,27 @@ function frame() {
   followShadow()
   skyDome.tick(performance.now() / 1000)
   // mirrored scene render for the water, before the frame itself; a no-op when WATER_REFLECT is 0
-  renderWaterReflection(renderer, scene, camera)
-  if (composer) composer.render()
-  else renderer.render(scene, camera)
-  captureSSR(renderer)
+  if (perfHud.open) {
+    // Time each pass as it is submitted. `poll` first collects whatever the GPU finished since last
+    // frame. The profiler skips a pass whose previous query has not landed, so it never stalls here.
+    const prof = gpuProfiler()
+    prof.poll()
+    prof.begin('reflect')
+    renderWaterReflection(renderer, scene, camera)
+    prof.end('reflect')
+    prof.begin('scene')
+    if (composer) composer.render()
+    else renderer.render(scene, camera)
+    prof.end('scene')
+    prof.begin('ssr')
+    captureSSR(renderer)
+    prof.end('ssr')
+  } else {
+    renderWaterReflection(renderer, scene, camera)
+    if (composer) composer.render()
+    else renderer.render(scene, camera)
+    captureSSR(renderer)
+  }
   /*
    * MEASURED AFTER THE RENDER CALL, which is the honest place: `renderer.info` holds the counts of
    * the frame that has just been submitted, and the CPU time covers everything this function did
@@ -3792,9 +3936,8 @@ function frame() {
    * between `cpuMs` and the frame time is where that shows up.
    */
   if (perfHud.open) {
-    perfMeter.frame(real * 1000, performance.now() - cpu0)
     const info = renderer.info
-    perfMeter.counts = {
+    perfMeter.frame(real * 1000, performance.now() - cpu0, {
       calls: info.render.calls,
       triangles: info.render.triangles,
       lines: info.render.lines,
@@ -3802,7 +3945,7 @@ function frame() {
       geometries: info.memory.geometries,
       textures: info.memory.textures,
       programs: info.programs?.length ?? 0,
-    }
+    })
   }
   requestAnimationFrame(frame)
 }

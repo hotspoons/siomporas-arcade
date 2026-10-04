@@ -29,6 +29,15 @@ export interface PerfSummary {
   /** how long the window covers, seconds */
   sec: number
   fps: number
+  /**
+   * THE RUNNING AVERAGE, which the percentiles beside it deliberately are not.
+   *
+   * The panel led with p50 because the average hides a hitch, and that is still true. But the
+   * average is the number that answers "what does the pipeline cost when it is behaving", and with
+   * the per-family light ablations beside it, it is the one you compare against. So it is here, and
+   * clearly labelled, rather than instead of the tail.
+   */
+  mean: number
   /** the median frame: what it is like most of the time */
   p50: number
   /** the tail: what it is like when it is bad, which is what you feel */
@@ -42,7 +51,7 @@ export interface PerfSummary {
 }
 
 export const EMPTY_SUMMARY: PerfSummary = {
-  frames: 0, sec: 0, fps: 0, p50: 0, p95: 0, p99: 0, max: 0, stalls: 0, stallMs: 0,
+  frames: 0, sec: 0, fps: 0, mean: 0, p50: 0, p95: 0, p99: 0, max: 0, stalls: 0, stallMs: 0,
 }
 
 /**
@@ -83,6 +92,7 @@ export function summarize(ms: readonly number[]): PerfSummary {
     // FRAMES OVER THE TIME THEY TOOK, not 1000 / mean: with a window of uneven frames the two
     // differ, and this one is the rate you would have measured with a stopwatch.
     fps: sec > 0 ? ms.length / sec : 0,
+    mean: total / ms.length,
     p50: percentile(ms, 0.5),
     p95: percentile(ms, 0.95),
     p99: percentile(ms, 0.99),
@@ -142,13 +152,23 @@ export class PerfMeter {
   private last = 0
   longTasks = 0
   lastLongMs = 0
+  /**
+   * The latest renderer counters, and their running average over the same window as the frames.
+   *
+   * `counts` is what the last frame drew; `countsSamples` is the ring the average is taken from.
+   * The panel wants the average (a single noisy frame of draw calls is not a useful reading), but
+   * keeps the instantaneous field because probes set it directly.
+   */
   counts: RenderCounts = { ...NO_COUNTS }
+  private countsSamples: (RenderCounts | undefined)[] = []
+  private countsFilled = 0
   private obs: { disconnect: () => void } | null = null
 
   constructor(capacity = 600) {
     this.capacity = Math.max(8, capacity)
     this.ms = new Array(this.capacity).fill(0)
     this.cpu = new Array(this.capacity).fill(0)
+    this.countsSamples = new Array(this.capacity)
   }
 
   /** Start counting long tasks. Safe where `PerformanceObserver` has no `longtask`, i.e. not Chrome. */
@@ -173,14 +193,42 @@ export class PerfMeter {
     this.obs = null
   }
 
-  /** One frame: how long it took, and how much of that was our own work. */
-  frame(ms: number, cpuMs = 0): void {
+  /** One frame: how long it took, how much of that was our own work, and what it drew. */
+  frame(ms: number, cpuMs = 0, counts?: RenderCounts): void {
     if (!(ms > 0) || !Number.isFinite(ms)) return
     this.ms[this.at] = ms
     this.cpu[this.at] = Number.isFinite(cpuMs) ? cpuMs : 0
+    if (counts) {
+      this.counts = counts
+      this.countsSamples[this.at] = counts
+      if (this.countsFilled < this.capacity) this.countsFilled++
+    }
     this.at = (this.at + 1) % this.capacity
     if (this.filled < this.capacity) this.filled++
     this.last = ms
+  }
+
+  /** The counters averaged over the window, or the last frame's when nothing was sampled yet. */
+  private avgCounts(): RenderCounts {
+    if (!this.countsFilled) return this.counts
+    let n = 0
+    const s = { ...NO_COUNTS }
+    for (const c of this.countsSamples) {
+      if (!c) continue
+      n++
+      s.calls += c.calls
+      s.triangles += c.triangles
+      s.lines += c.lines
+      s.points += c.points
+      s.geometries += c.geometries
+      s.textures += c.textures
+      s.programs += c.programs
+    }
+    if (!n) return this.counts
+    return {
+      calls: s.calls / n, triangles: s.triangles / n, lines: s.lines / n, points: s.points / n,
+      geometries: s.geometries / n, textures: s.textures / n, programs: s.programs / n,
+    }
   }
 
   /** Frame times in the window, oldest first — for a sparkline. */
@@ -196,8 +244,10 @@ export class PerfMeter {
   reset(): void {
     this.ms.fill(0)
     this.cpu.fill(0)
+    this.countsSamples.fill(undefined)
     this.at = 0
     this.filled = 0
+    this.countsFilled = 0
     this.longTasks = 0
     this.lastLongMs = 0
   }
@@ -211,7 +261,7 @@ export class PerfMeter {
       : 0
     return {
       ...summarize(win),
-      counts: this.counts,
+      counts: this.avgCounts(),
       heapMB: heap.usedMB,
       heapLimitMB: heap.limitMB,
       longTasks: this.longTasks,
@@ -248,9 +298,9 @@ export function short(n: number): string {
  */
 export function perfLines(r: PerfReading): string[] {
   const out = [
-    `${r.fps.toFixed(0)} fps · ${r.p50.toFixed(1)} ms median · cpu ${r.cpuMs.toFixed(1)} ms`,
+    `${r.fps.toFixed(0)} fps · avg ${r.mean.toFixed(1)} · p50 ${r.p50.toFixed(1)} · cpu ${r.cpuMs.toFixed(1)} ms`,
     `p95 ${r.p95.toFixed(1)} · p99 ${r.p99.toFixed(1)} · worst ${r.max.toFixed(0)} ms`,
-    `${short(r.counts.calls)} draws · ${short(r.counts.triangles)} tris · ${short(r.counts.geometries)} geom · ${short(r.counts.textures)} tex`,
+    `${short(r.counts.calls)} draws · ${short(r.counts.triangles)} tris · ${short(r.counts.geometries)} geom · ${short(r.counts.textures)} tex · ${short(r.counts.programs)} prog`,
   ]
   if (r.heapMB != null) out.push(`heap ${r.heapMB.toFixed(0)} MB${r.heapLimitMB ? ` of ${r.heapLimitMB.toFixed(0)}` : ''}`)
   // only when there is something to say: a line reading "0 stalls" every frame is a line you stop reading

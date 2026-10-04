@@ -568,7 +568,7 @@ const checkJobSpec = check('the Job this service builds is accepted by the real 
     image: 'ghcr.io/hotspoons/corridor:latest', claim: 'probe-claim-not-the-default', secretName: 'corridor-r2',
     bucket: 'apex-corridor', endpoint: '', region: 'auto', prefix: 'corridor',
     overpassUrl: 'https://overpass.example/api/interpreter', horizonM: 30000,
-    resources: { requests: { cpu: '4', memory: '32Gi' }, limits: { cpu: '16', memory: '128Gi' } },
+    resources: { requests: { cpu: '4', memory: '32Gi' }, limits: { cpu: '16', memory: '384Gi' } },
     python: 'x', cwd: 'x',
   })
   await runs.bake('crofton-triangle')

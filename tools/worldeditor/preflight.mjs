@@ -47,7 +47,7 @@ const GiB = (b) => b / 2 ** 30
 /**
  * What a deployment needs of a cluster.
  *
- * The numbers are the chart's and the bake's, not invented: a bake Job asks 16 CPU and 128 GiB,
+ * The numbers are the chart's and the bake's, not invented: a bake Job asks 16 CPU and 384 GiB,
  * the service itself is small, and the volume is ReadWriteMany because the bake Job, the training
  * pods and the editor all mount it at once.
  */
@@ -55,7 +55,7 @@ export const PROFILES = {
   default: {
     label: 'the cluster this was built on (GH200)',
     nodes: 1,
-    bake: { cpu: 16, memGiB: 128 },
+    bake: { cpu: 16, memGiB: 384 },
     service: { cpu: 2, memGiB: 2 },
     volumeGiB: 500,
     gpusWanted: 1,

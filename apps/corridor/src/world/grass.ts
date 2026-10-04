@@ -140,9 +140,9 @@ const GLSL_NOISE = /* glsl */ `
  * ShaderMaterials, which sit outside three's light/shadow system, so `receiveShadow` does nothing;
  * each samples the sun's own depth texture by hand. Four-tap hardware PCF — the depth texture is a
  * sampler2DShadow with a compare function, so each texture() is itself a comparison. Outside the
- * sun's frustum, or before the map exists, everything is lit. Returns the RAW mask; the caller
- * folds in the SHADOW knob. The `varying vec4 vSunShadow` is declared here; each vertex shader
- * declares its own and writes it.
+ * sun's frustum, or before the map exists, everything is lit, as is everything once the sun is
+ * below the horizon. Returns the RAW mask; the caller folds in the SHADOW knob. The `varying vec4
+ * vSunShadow` is declared here; each vertex shader declares its own and writes it.
  */
 const SUN_SHADOW_PARS = /* glsl */ `
   uniform sampler2DShadow uSunShadow;
@@ -154,6 +154,14 @@ const SUN_SHADOW_PARS = /* glsl */ `
   varying vec4 vSunShadow;
   float sunShadowMask() {
     if (uSunShadowOn < 0.5) return 1.0;
+    // THE SUN'S SHADOW IS THE SUN'S. Below civil twilight the sun light sits under the ground, so
+    // its depth map is a view from beneath the world and rakes long phantom shadows across grass
+    // that only the headlights are lighting — they read as "cast towards the headlights"
+    // (Rich, 2026-06-22). Fade the sun's shadow out with the sun, on the scene's own twilight
+    // curve: day is smoothstep(el, -6°, +4°), which is uSun.y across the same two elevations.
+    // (uSun is declared by each fragment before this block.)
+    float dayGate = smoothstep(-0.105, 0.070, uSun.y);
+    if (dayGate <= 0.001) return 1.0;
     vec3 sc = vSunShadow.xyz / vSunShadow.w;
     if (sc.x < 0.0 || sc.x > 1.0 || sc.y < 0.0 || sc.y > 1.0 || sc.z > 1.0) return 1.0;
     sc.z += uSunShadowBias;
@@ -164,7 +172,7 @@ const SUN_SHADOW_PARS = /* glsl */ `
     s += texture(uSunShadow, vec3(sc.xy + vec2( r, -r), sc.z));
     s += texture(uSunShadow, vec3(sc.xy + vec2(-r,  r), sc.z));
     s += texture(uSunShadow, vec3(sc.xy + vec2( r,  r), sc.z));
-    return s * 0.25;
+    return mix(1.0, s * 0.25, dayGate);
   }
 `
 

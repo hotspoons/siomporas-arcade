@@ -78,7 +78,7 @@ export const WATER_PRESETS: Record<string, WaterLook> = {
   temperate: { colour: 0x3d6b73, opacity: 0.82, roughness: 0.28, shore: 0xdfe9df, deep: 0x18323f, extinct: [6, 26, 70], shoreMix: 0.85, foam: 0.7, foamBand: 1, wave: 1, amp: 1, len: 1, steep: 1, crown: 0.9, pondDepth: 1.2 },
   swamp: { colour: 0x2b3320, opacity: 0.9, roughness: 0.45, shore: 0x6b6f3a, deep: 0x10150b, extinct: [2.5, 5.5, 10], shoreMix: 1, foam: 0.45, foamBand: 1.5, wave: 0.5, amp: 0.55, len: 1.5, steep: 0.7, crown: 0.5, pondDepth: 0.9 },
   black: { colour: 0x101812, opacity: 0.94, roughness: 0.35, shore: 0x39422f, deep: 0x05080a, extinct: [1.8, 5, 14], shoreMix: 1, foam: 0.3, foamBand: 1.7, wave: 0.4, amp: 0.4, len: 1.7, steep: 0.5, crown: 0.4, pondDepth: 0.8 },
-  caribbean: { colour: 0x2fb8c8, opacity: 0.72, roughness: 0.1, shore: 0xe6f7f0, deep: 0x0a4a6e, extinct: [16, 40, 92], shoreMix: 1, foam: 0.95, foamBand: 1.2, wave: 0.85, amp: 0.75, len: 1, steep: 0.9, crown: 1.1, pondDepth: 1.8 },
+  caribbean: { colour: 0x2fb8c8, opacity: 0.84, roughness: 0.2, shore: 0xe6f7f0, deep: 0x0a4a6e, extinct: [16, 40, 92], shoreMix: 1, foam: 0.95, foamBand: 1.2, wave: 0.85, amp: 0.5, len: 1, steep: 0.55, crown: 1.1, pondDepth: 1.8 },
   alpine: { colour: 0x2f6f86, opacity: 0.78, roughness: 0.16, shore: 0xbfd8d2, deep: 0x0c2c3d, extinct: [12, 34, 80], shoreMix: 1, foam: 0.4, foamBand: 0.9, wave: 1.3, amp: 1.2, len: 0.9, steep: 1.1, crown: 0.7, pondDepth: 1.5 },
   mud: { colour: 0x5a4326, opacity: 0.93, roughness: 0.55, shore: 0x8a7350, deep: 0x2a1e10, extinct: [1.5, 4, 9], shoreMix: 1, foam: 0.55, foamBand: 1.6, wave: 0.6, amp: 0.5, len: 1.5, steep: 0.6, crown: 0.6, pondDepth: 0.9 },
 }
@@ -135,6 +135,13 @@ float wshNoise(vec2 p) {
   vec2 u = f * f * (3.0 - 2.0 * f);
   return mix(mix(wshHash(i), wshHash(i + vec2(1, 0)), u.x), mix(wshHash(i + vec2(0, 1)), wshHash(i + vec2(1, 1)), u.x), u.y);
 }
+// Four-octave value-noise fBm. Used for the fine ripples: a sum of a few sinusoids has a regular
+// spectrum and reads as corduroy, while a noise field gives the irregular grain a normal map would.
+float wshFbm(vec2 p) {
+  float s = 0.0, a = 0.5;
+  for (int i = 0; i < 4; i++) { s += a * wshNoise(p); p = p * 2.07 + 11.3; a *= 0.5; }
+  return s;
+}
 
 // The summed Gerstner wave normal. Each band is a direction D, an amplitude A, a
 // wavelength L and a steepness Q; the surface derivative of a single Gerstner
@@ -144,9 +151,9 @@ float wshNoise(vec2 p) {
 // aligned with the flow and the short ones fanned across it.
 vec3 waterGerstnerNormal(vec2 p, vec2 flow, float t) {
   vec3 n = vec3(0.0, 1.0, 0.0);
-  #define WATER_BAND(D, A, L, Q) { \
+  #define WATER_BAND(D, A, L, Q, S) { \
     float w_ = 6.2831853 / ((L) * uWaveLen); \
-    float v_ = w_ * dot(p, (D)) - sqrt(9.81 * w_) * t; \
+    float v_ = w_ * dot(p, (D)) - sqrt(9.81 * w_) * t + wshNoise(p * (S) + (L)) * 6.2831853; \
     float c_ = cos(v_), s_ = sin(v_); \
     float wa_ = w_ * (A) * uWaveAmp; \
     n.x -= (D).x * wa_ * c_; \
@@ -156,10 +163,14 @@ vec3 waterGerstnerNormal(vec2 p, vec2 flow, float t) {
   vec2 d0 = flow;
   vec2 d1 = normalize(vec2(d0.x * 0.88 - d0.y * 0.47, d0.x * 0.47 + d0.y * 0.88));
   vec2 d2 = normalize(vec2(d0.x * 0.88 + d0.y * 0.47, -d0.x * 0.47 + d0.y * 0.88));
-  WATER_BAND(d0,                  0.120, 17.0, 0.70)
-  WATER_BAND(d1,                  0.070,  9.5, 0.60)
-  WATER_BAND(d2,                  0.045,  5.1, 0.50)
-  WATER_BAND(normalize(d0 + d1),  0.026,  2.6, 0.45)
+  // Four bands, the long ones along the flow and the short ones fanned across it. Each band takes a
+  // slowly-varying random phase offset, so its crests wander instead of lining up into corduroy —
+  // the irregularity a normal map would otherwise supply. The offset is added to the phase only,
+  // never to the analytic slope, so it cannot spike the normal.
+  WATER_BAND(d0,                  0.110, 17.0, 0.70, 0.05)
+  WATER_BAND(d1,                  0.060,  9.5, 0.60, 0.09)
+  WATER_BAND(d2,                  0.035,  5.1, 0.50, 0.16)
+  WATER_BAND(normalize(d0 + d1),  0.020,  2.9, 0.45, 0.30)
   #undef WATER_BAND
   return normalize(n);
 }
@@ -193,12 +204,13 @@ export const WATER_FRAG_NORMAL = /* glsl */ `
 export const WATER_FRAG_COLOR = /* glsl */ `
 {
   float depth = max(vWater.x, 0.0);
-  // Wavelength-dependent extinction: red is absorbed within metres, blue over
-  // tens. exp(...) is 1 at the shore and falls to 0 offshore.
-  vec3 ext = exp(-depth / uExtinct);
-  vec3 deepTint = uDepthColor * (0.35 + 0.65 * ext);
-  vec3 shoreTint = mix(uShoreColor, diffuseColor.rgb, smoothstep(0.0, 1.2, depth));
-  vec3 body = mix(shoreTint, deepTint, 1.0 - ext.g);
+  // The body is the water's own colour; it deepens with wavelength-dependent
+  // extinction (red absorbed first, blue last) and only the last few centimetres
+  // lift toward the shore colour. Getting this order wrong is what turns every
+  // shallow body into a white sheet.
+  vec3 ext = exp(-depth / uExtinct);              // 1 at the shore, 0 offshore
+  vec3 body = mix(diffuseColor.rgb, uDepthColor, 1.0 - ext.g);
+  body = mix(uShoreColor, body, smoothstep(0.0, 0.55 * uFoamBand, depth));
   diffuseColor.rgb = mix(diffuseColor.rgb, body, uShoreMix);
 
   // Shore foam: a noisy band in the first half-metre, racing with the flow.

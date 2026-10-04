@@ -3740,11 +3740,14 @@ function frame() {
         if (headFake || tailFake) {
           const head = level * Math.min(1, Math.max(0, T.HEADLIGHT))
           const tail = level * (T.TAILLIGHT / 0.025)
+          // the headlight cone is the beam's own, widened like the retro cone; the tail keeps its
+          // own wide angle so TAILLIGHT_ANGLE still means what it says in fake mode
+          const headAngle = Math.min(1.45, T.HEADLIGHT_ANGLE * T.RETRO_SPREAD)
           for (const l of car.floodLamps()) {
             if (l.tail) {
-              if (tailFake) flood.add(l.pos, l.dir, tail, tail * 0.06, tail * 0.03, T.TAILLIGHT_RANGE)
+              if (tailFake) flood.add(l.pos, l.dir, tail, tail * 0.06, tail * 0.03, T.TAILLIGHT_RANGE, T.TAILLIGHT_ANGLE)
             } else if (headFake) {
-              flood.add(l.pos, l.dir, head, head * 0.96, head * 0.87, T.HEADLIGHT_RANGE)
+              flood.add(l.pos, l.dir, head, head * 0.96, head * 0.87, T.HEADLIGHT_RANGE, headAngle)
             }
           }
         }

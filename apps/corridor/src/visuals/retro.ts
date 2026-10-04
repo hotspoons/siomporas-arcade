@@ -79,8 +79,8 @@ export const FLOOD_PARS = /* glsl */ `
   uniform vec3 uFloodDir[${FLOOD_LAMPS}];
   uniform vec3 uFloodCol[${FLOOD_LAMPS}];
   uniform float uFloodRange[${FLOOD_LAMPS}];
-  uniform float uFloodCosOuter;
-  uniform float uFloodCosInner;
+  uniform float uFloodCosOuter[${FLOOD_LAMPS}];
+  uniform float uFloodCosInner[${FLOOD_LAMPS}];
   uniform float uFloodGain;
 
   /** the beam's share at this point: cone x falloff, 0..1, per flood lamp */
@@ -90,7 +90,7 @@ export const FLOOD_PARS = /* glsl */ `
     dir = d / max(dist, 1e-4);
     float range = uFloodRange[k];
     if (dist > range) return 0.0;
-    float cone = smoothstep(uFloodCosOuter, uFloodCosInner, dot(dir, normalize(uFloodDir[k])));
+    float cone = smoothstep(uFloodCosOuter[k], uFloodCosInner[k], dot(dir, normalize(uFloodDir[k])));
     float fall = 1.0 - smoothstep(range * 0.35, range, dist);
     return cone * fall;
   }
@@ -413,8 +413,8 @@ export class FloodLamps {
     uFloodDir: { value: Array.from({ length: FLOOD_LAMPS }, () => new THREE.Vector3(1, 0, 0)) },
     uFloodCol: { value: Array.from({ length: FLOOD_LAMPS }, () => new THREE.Color(0, 0, 0)) },
     uFloodRange: { value: new Float32Array(FLOOD_LAMPS).fill(1) },
-    uFloodCosOuter: { value: 0.9 },
-    uFloodCosInner: { value: 0.99 },
+    uFloodCosOuter: { value: new Float32Array(FLOOD_LAMPS).fill(0.9) },
+    uFloodCosInner: { value: new Float32Array(FLOOD_LAMPS).fill(0.99) },
     uFloodGain: { value: 1 },
   }
   private n = 0
@@ -424,14 +424,19 @@ export class FloodLamps {
     this.n = 0
   }
 
-  /** add one lamp. r/g/b are the colour already scaled by how hard the lamp is on. */
-  add(pos: THREE.Vector3, dir: THREE.Vector3, r: number, g: number, b: number, range: number): void {
+  /**
+   * add one lamp. r/g/b are the colour already scaled by how hard the lamp is on; `angle` is the
+   * beam's own half-angle, so a wide tail wash and a narrow headlight cone coexist in one pool.
+   */
+  add(pos: THREE.Vector3, dir: THREE.Vector3, r: number, g: number, b: number, range: number, angle: number): void {
     if (this.n >= FLOOD_LAMPS) return
     const k = this.n++
     this.uniforms.uFloodPos.value[k].copy(pos)
     this.uniforms.uFloodDir.value[k].copy(dir)
     this.uniforms.uFloodCol.value[k].setRGB(r, g, b)
     this.uniforms.uFloodRange.value[k] = range
+    this.uniforms.uFloodCosOuter.value[k] = Math.cos(angle)
+    this.uniforms.uFloodCosInner.value[k] = Math.cos(angle * 0.35)
   }
 
   /** how many lamps this frame's fill actually placed */
@@ -439,16 +444,10 @@ export class FloodLamps {
     return this.n
   }
 
-  /** close the frame: publish the count and the knobs */
+  /** close the frame: publish the count and the knob. The cones are per lamp (see add). */
   end(): void {
-    const u = this.uniforms
-    u.uFloodCount.value = this.n
-    u.uFloodGain.value = T.FAKE_LAMPS
-    // one cone for the whole pool — the beam's own angle, widened like the retro cone, so a fake
-    // beam washes a pole the way the sign sheeting already answers a real one
-    const outer = Math.min(1.45, T.HEADLIGHT_ANGLE * T.RETRO_SPREAD)
-    u.uFloodCosOuter.value = Math.cos(outer)
-    u.uFloodCosInner.value = Math.cos(outer * 0.35)
+    this.uniforms.uFloodCount.value = this.n
+    this.uniforms.uFloodGain.value = T.FAKE_LAMPS
   }
 }
 

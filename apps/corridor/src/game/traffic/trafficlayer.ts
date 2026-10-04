@@ -720,7 +720,7 @@ export class TrafficLayer {
    * any overflow itself.
    */
   feedFlood(
-    pool: { count: number; add(pos: THREE.Vector3, dir: THREE.Vector3, r: number, g: number, b: number, range: number): void },
+    pool: { count: number; add(pos: THREE.Vector3, dir: THREE.Vector3, r: number, g: number, b: number, range: number, angle: number): void },
     eye: THREE.Vector3,
     limit: number,
   ): void {
@@ -738,6 +738,7 @@ export class TrafficLayer {
     cand.sort((a, b) => a.d2 - b.d2)
     const p = new THREE.Vector3()
     const aim = new THREE.Vector3()
+    const headAngle = Math.min(1.45, T.HEADLIGHT_ANGLE * T.RETRO_SPREAD)
     for (const c of cand) {
       if (pool.count >= limit) break
       c.spot.getWorldPosition(p)
@@ -748,8 +749,8 @@ export class TrafficLayer {
       else aim.normalize()
       const gain = c.tail ? T.TAILLIGHT / 0.025 : T.HEADLIGHT / 2.7
       if (gain < 0.02) continue
-      if (c.tail) pool.add(p, aim, 1 * gain, 0.06 * gain, 0.03 * gain, T.TAILLIGHT_RANGE)
-      else pool.add(p, aim, 1 * gain, 0.93 * gain, 0.72 * gain, T.HEADLIGHT_RANGE)
+      if (c.tail) pool.add(p, aim, 1 * gain, 0.06 * gain, 0.03 * gain, T.TAILLIGHT_RANGE, T.TAILLIGHT_ANGLE)
+      else pool.add(p, aim, 1 * gain, 0.93 * gain, 0.72 * gain, T.HEADLIGHT_RANGE, headAngle)
     }
   }
 

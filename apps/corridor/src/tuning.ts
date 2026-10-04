@@ -1041,7 +1041,7 @@ export let HEADLIGHT_ANGLE = 0.46
  *
  * FAKE lights the world from retro.ts's fixed analytic lamp pool instead — the same cheap path the
  * grass and the road paint already use, now flooded over every standard material too. It is a
- * fallback: no displacement, a softer shared cone, one range — but it costs a fraction and reads at
+ * fallback: no displacement, a softer cone, no shadowing — but it costs a fraction and reads at
  * speed. The emissive lens is untouched either way, so the car still looks lit.
  */
 export let HERO_HEADLIGHTS_MODE = 1

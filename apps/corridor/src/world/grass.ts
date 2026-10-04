@@ -1040,8 +1040,13 @@ export class Grass {
     for (let tx = tx0; tx <= tx1; tx++) {
       for (let tz = tz0; tz <= tz1; tz++) {
         const cx = (tx + 0.5) * TILE, cz = (tz + 0.5) * TILE
-        // the LOD footprint: stretched behind the view (tuning.ts), a circle when looking down
-        const d = T.lodDistance(cx - this.eye.x, cz - this.eye.z, this.fwd.x, this.fwd.z, this.pitch)
+        // The grass footprint is a true CIRCLE, not the tree view-cone. A tree can hide behind you;
+        // the verge cannot — the ground is grass-textured in every direction, so a cone-shaped ring
+        // left the median and the verge beside/behind the car as flat photo turf (Rich: "what's up
+        // with all this not grass?"). The ring is a thinning of blades, never of WHERE grass exists,
+        // so it has to surround the eye. The blade radius is small (GRASS_RADIUS) and the cards are
+        // cheap, so the circle costs little and guarantees the ground is grass all the way round.
+        const d = Math.hypot(cx - this.eye.x, cz - this.eye.z)
         if (d > r + TILE) continue
         out.push({ key: `${tx},${tz}`, tx, tz, d })
       }
@@ -1193,7 +1198,7 @@ export class Grass {
           const rnd = hash(cx * 29 + cz * 31 + b * 3)
           const shape = mown ? this.look.mown : this.look.height
           const height = (mown ? T.GRASS_MOWN_HEIGHT : this.heightScale * T.GRASS_ROUGH_HEIGHT * tall) * shape * ah * 1.5 * T.GRASS_HEIGHT * (0.6 + 0.8 * hash(cx * 3 + cz * 5 + b * 7))
-          const width = (mown ? 0.035 : 0.05 + 0.03 * rnd) * 0.55 * T.GRASS_THICK * this.look.width
+          const width = (mown ? 0.085 : 0.075 + 0.045 * rnd) * 0.55 * T.GRASS_THICK * this.look.width
           const lean = Math.max(0, 0.15 + this.look.lean + T.GRASS_LEAN * hash(cx * 11 + cz * 19 + b * 23))
           // A non-finite root (a groundAt miss just off the bake) makes a degenerate blade: the
           // vertex shader puts NaN in clip space and the rasteriser draws a giant black triangle.

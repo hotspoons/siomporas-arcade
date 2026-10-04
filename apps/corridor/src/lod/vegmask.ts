@@ -1,10 +1,13 @@
 // Where the air photo says "vegetation", from the 1 m tile photos the bake already ships.
 //
 // Rich, 2026-09-26: "parking lots are still overgrown with grass … I think we need to limit grass
-// growth to grassy textured areas." The lot in question is not in OSM, and the site-wide
-// classifier in scene.ts (pavedFromImagery) runs on the 4.7 m overview halved to ~9 m cells,
-// which cannot see a car park. The per-tile NAIP jpg is 0.6–1 m; decoded at half size that is a
-// 1.2–2 m mask, and a lot, a driveway apron or a bare yard all read at that scale.
+// growth to grassy textured areas." This class was the answer then: a grass gate derived from the
+// photo. It has since been retired as a gate — Rich, 2026-10-04: "we should be deciding where grass
+// grows based on where the grass texture is." The GROUND now decides (strip.ts paints the grass
+// texture by edge distance, and grass.ts plants on the same rule), because the photo and the
+// rendered turf disagreed over whole grass-textured medians and verges. The mask is still streamed:
+// its tiles land near the eye, invalidate the local grass and feed the `vegCover` diagnostic. The
+// classifier stays here (and in `classify` below) for probes.
 //
 // The classifier is excess green, ExG = 2G − R − B, on the normalised photo, with a 3 × 3
 // majority: grass and canopy are strongly positive, asphalt and concrete sit at zero, bare soil
@@ -13,8 +16,7 @@
 // `veg.png` per tile is the follow-up in docs/corridor/PLAN-STREAMING-WORLD.md.
 //
 // Lazy like everything else near the eye: `update(x, y)` fetches the nearest unloaded tile's
-// photo inside VEG_RADIUS_M, at most two in flight, and tells the caller which tile just landed
-// so the grass there can be regrown.
+// photo inside VEG_RADIUS_M, at most two in flight, and tells the caller which tile just landed.
 
 import type { Tile } from './tiles'
 import * as T from '../tuning'

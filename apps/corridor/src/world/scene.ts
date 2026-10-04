@@ -352,51 +352,6 @@ function gridGeometry(f: Field, stride: number, lift: (i: number, r: number, c: 
   return g
 }
 
-/**
- * Which pixels of an air photo are pavement — see the call site for why and the thresholds. Half
- * resolution (2 m on a 1 m overview) is plenty for a car park and a quarter of the work.
- */
-function pavedFromImagery(img: HTMLImageElement): Float32Array {
-  const w = Math.floor(img.naturalWidth / 2), h = Math.floor(img.naturalHeight / 2)
-  const c = document.createElement('canvas')
-  c.width = w
-  c.height = h
-  const ctx = c.getContext('2d', { willReadFrequently: true })!
-  ctx.drawImage(img, 0, 0, w, h)
-  const px = ctx.getImageData(0, 0, w, h).data
-  const raw = new Uint8Array(w * h)
-  for (let i = 0, k = 0; i < raw.length; i++, k += 4) {
-    const r = px[k] / 255, g = px[k + 1] / 255, b = px[k + 2] / 255
-    const luma = 0.299 * r + 0.587 * g + 0.114 * b
-    const chroma = Math.max(r, g, b) - Math.min(r, g, b)
-    const greenish = g - Math.max(r, b)
-    raw[i] = chroma < 0.14 && luma > 0.42 && luma < 0.92 && greenish < 0.02 ? 1 : 0
-  }
-  // 5x5 majority (>= 13 of 25), as two separable box sums
-  const rows = new Uint8Array(w * h)
-  for (let y = 0; y < h; y++) {
-    let s = 0
-    const o = y * w
-    for (let x = 0; x < Math.min(w, 2); x++) s += raw[o + x]
-    for (let x = 0; x < w; x++) {
-      if (x + 2 < w) s += raw[o + x + 2]
-      if (x - 3 >= 0) s -= raw[o + x - 3]
-      rows[o + x] = s
-    }
-  }
-  const out = new Float32Array(w * h)
-  for (let x = 0; x < w; x++) {
-    let s = 0
-    for (let y = 0; y < Math.min(h, 2); y++) s += rows[y * w + x]
-    for (let y = 0; y < h; y++) {
-      if (y + 2 < h) s += rows[(y + 2) * w + x]
-      if (y - 3 >= 0) s -= rows[(y - 3) * w + x]
-      out[y * w + x] = s >= 13 ? 1 : 0
-    }
-  }
-  return out
-}
-
 /** Pick a stride so a grid stays under `maxVerts` vertices. */
 const strideFor = (layer: Layer, maxVerts: number) => Math.max(1, Math.ceil(Math.sqrt((layer.size[0] * layer.size[1]) / maxVerts)))
 
@@ -606,24 +561,11 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     // NOTE: minimap.ts fetches layers.naip.file separately and that is not waste — it draws the
     // imagery into a 2D canvas, which cannot read a GPU-compressed texture.
   }
-  // PAVED, READ OFF THE PHOTO. OSM knows 64 of Crofton's car parks; the air photo shows every one,
-  // and Rich's "parking lots which are obviously parking lots are covered in grass" (2026-09-26)
-  // was the ones OSM does not have. So the overview is classified once, at half resolution: a
-  // pixel is paved when it is grey (low chroma), bright (a lot is lighter than a canopy, and the
-  // canopy was the false positive the first cut of this drowned in) and not green-on-top, then a
-  // 5x5 majority so a single grey pixel in a lawn is nothing. Measured on crofton-triangle: 3.5 %
-  // of the site, which is the roads, the lots and the roofs. The grass planter asks it per blade.
-  let pavedAt: ((x: number, y: number) => number) | null = null
-  // the per-tile vegetation mask (vegmask.ts); grass grows only where it says so
+  // The per-tile vegetation mask (vegmask.ts). It used to be a second gate on the grass on top of
+  // the ground's own "is this verge?" — asking the air photo "is this green?" and winning over whole
+  // grass-textured medians and verges (Rich 2026-10-04). The ground texture decides now, so this is
+  // streamed only for diagnostics; nothing gates the grass on it.
   let veg: VegCover | null = null
-  if (L.naip && !lite) {
-    try {
-      const img = await loadImage(base + L.naip.file)
-      pavedAt = sampler(framed({ ...L.naip, size: [Math.floor(img.naturalWidth / 2), Math.floor(img.naturalHeight / 2)], res: L.naip.res * 2 }, pavedFromImagery(img), anchor))
-    } catch (e) {
-      console.warn('paved-from-imagery skipped', e)
-    }
-  }
   const bare = new THREE.Color(0x6f6a5a)
   // the coarse terrain takes the settled layer as well, or snow stops at the strip's rim
   const terrainWeather = accumUniforms()
@@ -688,7 +630,9 @@ if (uLodOn > 0.5) {
     // their edge vertices and you get a lit crack between them at every boundary.
     const tileStride = strideFor(tileSet.tiles[0].dem.layer, lite ? 4_000 : 14_000)
     stream = new ImageryStream(base, L.tiles, renderer)
-    // the vegetation mask from the same tiles' photos: grass grows only where the photo is green
+    // The per-tile vegetation mask from the same tiles' photos. It is no longer a gate on the grass
+    // (the ground texture decides now — see the note at the `veg` declaration); the tiles still
+    // land through here and invalidate the local grass, so the stream is kept.
     veg = new VegCover(tileSet.tiles, (t) => `${DATA_BASE}${base}${L.tiles!.dir}/${t.x}_${t.y}.${L.tiles!.texture ?? 'naip.jpg'}`, (t) => {
       const [x0, y0, x1, y1] = t.bounds
       grassRef?.invalidateWithin(x0, -y1, x1, -y0)
@@ -1849,20 +1793,20 @@ if (uLodOn > 0.5) {
     // grass, so the cover comes from the manifest directly.
     const onParking = parkingCover(manifest)
     const onSidewalk = sidewalkCover(manifest)
-    // -1 means "do not plant here": a mapped lot, a walk, or anything the air photo says is paved
-    // -1 also where the tile photo says the ground is not vegetation (a lot OSM never mapped, an
-    // apron, bare dirt); the overview classifier is the fallback until that tile's photo is read
+    // -1 means "do not plant here": a mapped lot or a walk.
     /*
-     * WHERE GRASS MAY NOT GROW, other than the carriageway: a parking bay, a walk, ground the
-     * vegetation mask classified as bare, and imagery the paving classifier calls paved.
+     * WHERE GRASS MAY NOT GROW, decided by THE GROUND, not by a second opinion about the air photo.
      *
-     * Separated out because these are the DISCONTINUOUS half. The station field is smooth —
-     * measured at 0.35 m of change per half metre — which is what lets the grass planter place a
-     * blade's own distance by stepping along the gradient instead of walking the station grid
-     * again. A mask has no gradient at all: it is a raster with a hard edge, and a step along the
-     * geometry's gradient steps straight over it. So a blade has to ask this one directly.
+     * The verge is painted grass by strip.ts everywhere the pavement, a lot or a walk does not cover
+     * it, and grass should follow the same rule: plant it wherever that ground is grass-textured.
+     * The old test also consulted the vegetation mask and the paving classifier, and those were a
+     * THIRD verdict that disagreed with the picture the strip paints — whole grass-textured medians
+     * and verges were classified "not vegetation" or "paved" and left as flat photo turf with no
+     * blades (Rich 2026-10-04: "what's up with all this not grass?"; "decide where grass grows based
+     * on where the grass texture is"). A car park, a walk and the carriageway are explicit covers
+     * the grass already tests for, so keep those; drop the image classifiers.
      */
-    const grassBlocked = (x: number, z: number) => onParking(x, z) || onSidewalk(x, z) || (veg !== null && veg.at(x, -z) === 0) || (pavedAt !== null && pavedAt(x, -z) > 0.5)
+    const grassBlocked = (x: number, z: number) => onParking(x, z) || onSidewalk(x, z)
     // -1 is a SENTINEL here, not a distance: "no grass, whatever the geometry says".
     const grassRoadDistance = (x: number, z: number) => (grassBlocked(x, z) ? -1 : roadDistance(x, z))
     grassRoadDistanceOut = grassRoadDistance

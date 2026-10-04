@@ -11,21 +11,24 @@ import { PROFILES, type DriveProfile } from '@apex/engine/physics/profiles'
 
 // --- grass ------------------------------------------------------------------------------------
 /** blades per square metre in the mown strip beside the shoulder, and in the rough beyond */
-export let GRASS_MOWN_PER_M2 = 130
-export let GRASS_ROUGH_PER_M2 = 72
+export let GRASS_MOWN_PER_M2 = 240
+export let GRASS_ROUGH_PER_M2 = 130
 /**
- * THE BLADE RING and its LOD. From the eye outward the 3D blades are drawn thinner: full inside
- * GRASS_LOD_NEAR, GRASS_LOD_MID_DENSITY of them out to GRASS_LOD_MID, then GRASS_LOD_FAR_DENSITY out
- * to GRASS_RADIUS; past that the imposter cards carry the field. This is what keeps 3D grass
- * affordable — but it is a THINNING of geometry, not of ground coverage: the relief underlayment
- * (GRASS_GROUND 1) keeps the ground itself 100 % grass at any LOD, so turning these down never
- * leaves bare turf. Set them to 1 for the desert look, 0.55/0.6 for the shipping east-coast budget.
+ * THE BLADE RING and its LOD — the NEAR half of the two-tier grass. The 3D blades are drawn thinner
+ * from the eye outward: full inside GRASS_LOD_NEAR, GRASS_LOD_MID_DENSITY of them out to
+ * GRASS_LOD_MID, then GRASS_LOD_FAR_DENSITY out to GRASS_RADIUS. Past GRASS_RADIUS the imposter
+ * clump cards are the FAR tier and carry the field to GRASS_SPRITE_RADIUS. That pairing is the
+ * point: spend the geometry on the turf you can read up close, let the cheap impostors fill the
+ * distance, so the verge stays grass all the way out without paying for 3D blades to the horizon.
+ * A smaller GRASS_RADIUS is therefore CHEAPER and lets the near ring be denser — the blades are what
+ * the sun shadow pass re-renders, so pulling the ring in is the biggest single shadow win.
+ * (GRASS_GROUND 1 is a separate shader underlayment; it is opt-in and not what fills the default look.)
  */
-export let GRASS_RADIUS = 106
-export let GRASS_LOD_NEAR = 12
-export let GRASS_LOD_MID = 39
-export let GRASS_LOD_MID_DENSITY = 0.68
-export let GRASS_LOD_FAR_DENSITY = 0.7
+export let GRASS_RADIUS = 45
+export let GRASS_LOD_NEAR = 16
+export let GRASS_LOD_MID = 32
+export let GRASS_LOD_MID_DENSITY = 0.55
+export let GRASS_LOD_FAR_DENSITY = 0.3
 /**
  * THE SHAPE CONTROLS — one set, and they apply to every grass TYPE and every layer: the 3D blades
  * (GRASS_MODE 0), the imposter cards (both modes), and the relief underlayment (GRASS_GROUND 1).
@@ -98,7 +101,7 @@ export let GRASS_WIND = 0.45 // was 1.0: "way too much emphasis on its motion" (
 export let GRASS_PATCHINESS = 0
 export let GRASS_PATCH_SIZE = 6
 /** how far blades scatter around their clump centre (m), and the steepest turf slope (m/m) */
-export let GRASS_SCATTER = 0.7
+export let GRASS_SCATTER = 1.0
 export let GRASS_SLOPE_MAX = 0.7
 /** past the strip's blend band, no grass where the ground stands this far above the bare DEM (m): that is a shelf, not ground. 0 = off */
 export let GRASS_MAX_SHELF = 1.0
@@ -152,12 +155,12 @@ export let WEATHER_MELT_RATE = 0.06
 export let WEATHER_GRIP_SCALE = 1
 /** sprite clumps: from the mid ring out to this radius (m), cards per m², size multiplier */
 export let GRASS_SPRITE_RADIUS = 300
-export let GRASS_SPRITE_PER_M2 = 0.8
+export let GRASS_SPRITE_PER_M2 = 1.1
 export let GRASS_SPRITE_SCALE = 1.0
 /** sprite look: card width multiplier, lean (shear of the top), and the density kept at the far rim */
 export let GRASS_SPRITE_WIDTH = 1.2
 export let GRASS_SPRITE_LEAN = 0.25
-export let GRASS_SPRITE_FAR_DENSITY = 0.5 // was 0.25: the far rim was a quarter as dense as the near, and read as bare
+export let GRASS_SPRITE_FAR_DENSITY = 0.6 // was 0.25: the far rim was a quarter as dense as the near, and read as bare
 /** colour over the season palette: hue shift (deg), saturation, lightness, and extra straw/dryness
  *  (September verge grass is not April grass: default +0.3 dryness) */
 export let GRASS_HUE = 0
@@ -186,12 +189,15 @@ export function grassMode(): number {
  * owner asked for: the east-coast answer is full, dense turf everywhere, not bare turf between
  * blades.
  *
- *   0  STATIC TEXTURES: the baked photo turf (mown/rough albedo + clump decals) — nearly free, but
- *      it tiles and reads flat up close
+ *   0  STATIC TEXTURES (default): the baked photo turf (mown/rough albedo + clump decals) — nearly
+ *      free, but it tiles and reads flat up close
  *   1  RELIEF UNDERLAYMENT (grassrelief.ts): a dense, camera-facing, light-reactive grass surface
  *      painted on the ground itself — no geometry, fills 100 % of the band
+ *
+ * Default 0: the relief is a fallback that hides the ground, not the goal. The look is meant to be
+ * carried by the real 3D blades, so the shader turf is opt-in (GRASS_GROUND 1) for cheap distance.
  */
-export let GRASS_GROUND = 1
+export let GRASS_GROUND = 0
 /** The ground layer, normalised to 0/1. */
 export function grassGround(): number {
   return GRASS_GROUND >= 0.5 ? 1 : 0
@@ -218,12 +224,18 @@ export let GRASS_TAPER_SHORT = 0.85
 /** tip taper for long (rough) grass on both the relief and the 3-D blades, 0 = cut flat, 1 = point */
 export let GRASS_TAPER_LONG = 0.95
 /**
- * How far (m) the mown/rough turf stands PROUD of the pavement. A real turf lip: the raised band
- * plus the near-vertical face built for it (strip.ts) is what gives low-cut grass thickness and
- * makes the verge read as a slab of turf rather than a flat inset mat. BUILD-TIME: the strip
- * geometry is generated from this, so a change needs the world rebuilt.
+ * How far (m) the mown/rough turf stands PROUD of the pavement. DEFAULT OFF (0).
+ *
+ * This was 0.215 m: a raised band plus a near-vertical face, to give the ground plane a slab of
+ * thickness because a fragment shader cannot draw above its own pixel. That was a crutch for
+ * SHADER grass (GRASS_GROUND 1). Now that the real 3D blades carry the verge (GRASS_GROUND 0), the
+ * fake lip only fights them — it floats a flat slab over the blades' roots and reads as jello. With
+ * it at 0 the ground meets the asphalt flush and the blades define the edge themselves.
+ *
+ * Raise it only to rebuild the shader-grass lip. BUILD-TIME: the strip geometry is generated from
+ * it (and grassLipM() scales it by the grass height), so a change needs the world rebuilt.
  */
-export let GRASS_LIFT_M = 0.215
+export let GRASS_LIFT_M = 0
 /** horizontal run (m) of the raised grass face at the pavement — smaller is a steeper lip */
 export let GRASS_EDGE_M = 0.11
 /**
@@ -1787,8 +1799,8 @@ export const TUNE_TABS: TuneTab[] = [
           tune('GRASS_THICK', () => GRASS_THICK, (v) => (GRASS_THICK = v), [0.15, 3], 0.05, 'blade/tuft width ×'),
           tune('GRASS_HEIGHT', () => GRASS_HEIGHT, (v) => (GRASS_HEIGHT = v), [0.2, 3], 0.05, 'blade/tuft length ×'),
           tune('GRASS_WIND', () => GRASS_WIND, (v) => (GRASS_WIND = v), [0, 3], 0.05, 'sway ×'),
-          tune('GRASS_MOWN_PER_M2', () => GRASS_MOWN_PER_M2, (v) => (GRASS_MOWN_PER_M2 = v), [0, 120], 1, 'base blades/m² inside the mow line, before GRASS_DENSITY'),
-          tune('GRASS_ROUGH_PER_M2', () => GRASS_ROUGH_PER_M2, (v) => (GRASS_ROUGH_PER_M2 = v), [0, 80], 1, 'base blades/m² beyond it'),
+          tune('GRASS_MOWN_PER_M2', () => GRASS_MOWN_PER_M2, (v) => (GRASS_MOWN_PER_M2 = v), [0, 400], 1, 'base blades/m² inside the mow line, before GRASS_DENSITY'),
+          tune('GRASS_ROUGH_PER_M2', () => GRASS_ROUGH_PER_M2, (v) => (GRASS_ROUGH_PER_M2 = v), [0, 240], 1, 'base blades/m² beyond it'),
         ],
       },
       {

@@ -24,6 +24,7 @@ import * as THREE from 'three'
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import * as T from '../tuning'
 import { chainCompile, injectRelief, injectShade, noteShiny } from '../visuals/shading'
+import { configureWaterReflection, injectWaterReflect } from '../visuals/waterReflect'
 import { WATER_ATTR, WATER_FRAG_COLOR, WATER_FRAG_NORMAL, WATER_FRAG_PARS, WATER_LOOK_NAMES, WATER_VERT_BODY, WATER_VERT_PARS, applyLookColours, lookOf, refreshLook, waterTints, writeWaterAttr, type WaterKnobs, type WaterLook, type WaterWaveUniforms } from './waterShader'
 
 export interface WaterFall { i0: number; i1: number; drop_m: number; length_m: number; grade: number; kind: 'falls' | 'rapids' }
@@ -140,14 +141,15 @@ function waterMaterial(shared: WaterShared, look: WaterLook, opacityMul = 1): TH
   }
   mat.customProgramCacheKey = () => `corridor-water-${look.colour}`
   noteShiny(mat)
-  // NO SSR. The screen-space pass marches to a fixed "belt" row and samples the previous frame at a
-  // linearly shifted X; over a body the size of the sea that X runs off the texture along a straight
-  // line, so half the water takes a smeared flat sample and half does not — a hard-edged plate laid
-  // on the ocean. The sky environment (REFLECT) already gives the water its reflection, cleanly.
+  // The screen-space SSR pass is deliberately NOT used: it samples the previous frame along a
+  // linearly shifted screen row and smears a flat plate over a body the size of the sea. A real
+  // planar reflection (visuals/waterReflect.ts) replaces it — one mirrored scene render, tunable
+  // with WATER_REFLECT, and it can reflect the coast and trees that the sky env map cannot.
   chainCompile(mat, (shader) => {
+    injectWaterReflect(shader)
     injectRelief(shader)
     injectShade(shader)
-  }, 'relief-shade')
+  }, 'reflect-relief-shade')
   return mat
 }
 
@@ -300,6 +302,20 @@ export function buildWater(water: WaterLayer | null | undefined, groundAt: (x: n
     return mat
   }
 
+  // Does this site actually meet water? The sea plane is built for every site and lies hidden under
+  // the terrain inland; a planar reflection there would render the whole scene a second time for a
+  // mirror no one can see. Sample the ground once: if none of it is below the water line, stand the
+  // mirror down. `groundAt` returns null away from the loaded DEM, which is no evidence either way.
+  let minGround = Infinity
+  let sawGround = false
+  for (let i = 0; i <= 40; i++) {
+    for (let j = 0; j <= 40; j++) {
+      const g = groundAt((i / 40 - 0.5) * 20000, (j / 40 - 0.5) * 20000)
+      if (g !== null) { sawGround = true; if (g < minGround) minGround = g }
+    }
+  }
+  const seaVisible = () => !sawGround || minGround < T.WATER_LEVEL_M + SEA_DRAW_LIFT - 1.5
+
   const sea = seaPlane(uniforms, defaultLook)
   group.add(sea)
   // the sea is deep: no shore tint or foam anywhere on the plane itself (it meets land elsewhere)
@@ -318,6 +334,8 @@ export function buildWater(water: WaterLayer | null | undefined, groundAt: (x: n
     // level a game reasons about; this is a draw bias.)
     sea.position.set(0, T.WATER_LEVEL_M + SEA_DRAW_LIFT, 0)
     sea.scale.set(T.WATER_LEVEL_SPAN * 2, 1, T.WATER_LEVEL_SPAN * 2)
+    // tell the planar reflection where the mirror plane is, and what to leave out of its own view
+    configureWaterReflection(seaVisible() ? T.WATER_LEVEL_M + SEA_DRAW_LIFT : null, group)
   }
   placeSea()
   const advance = (t: number) => {

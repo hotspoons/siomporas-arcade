@@ -775,6 +775,15 @@ export let WATER_FOAM_BAND = 1.0
 /** bank-to-centre depth profile multiplier (baked, needs a reload) */
 export let WATER_CROWN = 1.0
 /**
+ * Planar water reflection, 0 off .. 1 full. Costs one more scene render per frame, so 0 is a real
+ * option; on a coast it is the difference between a blue sheet and an ocean. `WATER_REFLECT_SCALE`
+ * is the reflection buffer's resolution as a fraction of the frame — lower is cheaper and softer.
+ */
+export let WATER_REFLECT = 0.9
+export let WATER_REFLECT_SCALE = 0.5
+/** how far the wave normal smears the reflection, in screen fractions */
+export let WATER_REFLECT_RIPPLE = 0.04
+/**
  * The still-water line, metres NAVD88 — the sea at 0, and the flood control.
  *
  * One plane over the whole site at this height. Inland it sits under the terrain and nothing is
@@ -1754,6 +1763,9 @@ export const TUNE_TABS: TuneTab[] = [
           tune('WATER_FOAM', () => WATER_FOAM, (v) => (WATER_FOAM = v), [0, 2], 0.02, 'shore-foam coverage ×'),
           tune('WATER_FOAM_BAND', () => WATER_FOAM_BAND, (v) => (WATER_FOAM_BAND = v), [0.1, 3], 0.02, 'shore-foam band width ×'),
           tune('WATER_CROWN', () => WATER_CROWN, (v) => (WATER_CROWN = v), [0, 2], 0.02, 'bank-to-centre depth profile × (reload to re-bake)'),
+          tune('WATER_REFLECT', () => WATER_REFLECT, (v) => (WATER_REFLECT = v), [0, 1], 0.02, 'planar reflection: 0 off, 1 full — the scene is rendered once more mirrored in the water plane'),
+          tune('WATER_REFLECT_SCALE', () => WATER_REFLECT_SCALE, (v) => (WATER_REFLECT_SCALE = v), [0.2, 1], 0.05, 'reflection buffer resolution ×; lower is cheaper and softer'),
+          tune('WATER_REFLECT_RIPPLE', () => WATER_REFLECT_RIPPLE, (v) => (WATER_REFLECT_RIPPLE = v), [0, 0.15], 0.005, 'wave-normal smear on the reflection; 0 is a flat looking-glass'),
           tune('WATER_LEVEL_M', () => WATER_LEVEL_M, (v) => (WATER_LEVEL_M = v), [-20, 300], 0.5, 'still water / sea level (m); raise it to flood'),
           tune('WATER_LEVEL_SPAN', () => WATER_LEVEL_SPAN, (v) => (WATER_LEVEL_SPAN = v), [200, 60000], 100, 'how far the water plane reaches (m)'),
         ],

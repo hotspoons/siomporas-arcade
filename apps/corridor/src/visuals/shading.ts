@@ -329,12 +329,12 @@ export function captureSSR(renderer: THREE.WebGLRenderer) {
  * Chain a compile hook. Materials that already rewrite their shader (hex tiles, water, glass)
  * keep that rewrite; this only appends.
  */
-export function chainCompile(mat: THREE.Material, inject: (shader: { fragmentShader: string; uniforms: Record<string, { value: unknown }> }) => void, key: string) {
+export function chainCompile(mat: THREE.Material, inject: (shader: { vertexShader: string; fragmentShader: string; uniforms: Record<string, { value: unknown }> }) => void, key: string) {
   const prev = mat.onBeforeCompile
   const prevKey = mat.customProgramCacheKey?.bind(mat)
   mat.onBeforeCompile = (shader, renderer) => {
     prev?.call(mat, shader, renderer)
-    inject(shader as unknown as { fragmentShader: string; uniforms: Record<string, { value: unknown }> })
+    inject(shader as unknown as { vertexShader: string; fragmentShader: string; uniforms: Record<string, { value: unknown }> })
   }
   mat.customProgramCacheKey = () => `${prevKey?.() ?? ''}|${key}`
   mat.needsUpdate = true

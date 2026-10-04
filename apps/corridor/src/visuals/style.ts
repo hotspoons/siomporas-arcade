@@ -35,7 +35,7 @@ export interface StyleDef {
   sun?: THREE.Color
   /** 0 = the photo as shot, 1 = greyscale under the ground tint */
   desaturate: number
-  water: { stream: THREE.Color; still: THREE.Color; sea: THREE.Color; opacityBias: number }
+  water: { stream: THREE.Color; still: THREE.Color; sea: THREE.Color; opacityBias: number; look?: string }
   walls: [number, number, number][]
   roofs: [number, number, number][]
   /** road paint: the centre line and the edge line */

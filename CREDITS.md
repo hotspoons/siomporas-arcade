@@ -78,6 +78,26 @@ Our own code in `packages/enginesim` — the C API in `native/`, the worklet, th
 gearbox, the bench — is Apache-2.0 like the rest of this repository. We do not
 modify upstream's sources: the build fetches them and links against them.
 
+### Water
+
+Corridor's water shader is our own code, but three of its ideas are ported from
+[tuxalin/water-shader](https://github.com/tuxalin/water-shader), **MIT,
+Copyright (c) 2017 tuxalin**:
+
+- the summed **Gerstner wave** normal (from GPU Gems 1 ch. 1, the same source
+  tuxalin cites), which replaces the earlier scrolling value noise with waves
+  that travel along a wind — or, for a stream, along the channel itself;
+- **wavelength-dependent colour extinction** through the water column, so depth
+  darkens and blues the surface per channel instead of flattening it to one
+  albedo;
+- **shore foam** placed by water depth behind an animated noisy edge.
+
+No file, texture or shader source from that repository is used verbatim. The
+waves are evaluated analytically in `apps/corridor/src/world/waterShader.ts`,
+driven by a per-vertex `(depth, flow direction)` attribute corridor bakes at
+build time in `water.ts`, so a stream's ripples travel along its channel. The
+MIT notice travels in that file's header and in [NOTICE](NOTICE).
+
 ## Models and textures
 
 Turbo Radrun draws no hand-made sprite. It loads low-poly models at startup and

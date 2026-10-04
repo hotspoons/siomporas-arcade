@@ -40,6 +40,17 @@ Copyright 2022 AngeTheGreat (Ange Yaghi)
   software. They do: packages/enginesim/wasm/LICENSE-engine-sim.txt ships beside
   the binary and is served with it, and CREDITS.md says what is inside.
 
+Procedural Water — https://github.com/tuxalin/water-shader — MIT
+Copyright (c) 2017 tuxalin
+
+  The Gerstner wave normal, the wavelength-dependent colour extinction and the
+  shore-foam approach in corridor's water (apps/corridor/src/world/waterShader.ts,
+  wired into water.ts) are ported from this water shader. No file, texture or
+  shader source from it is used verbatim: the waves are evaluated analytically
+  here and driven by a per-vertex (depth, flow direction) attribute corridor
+  bakes at build time. The MIT notice travels in that file's header and is
+  restated in CREDITS.md.
+
 Third-party data and models carry their own terms and are credited in the
 viewer's attribution panel (apps/corridor/src/attribution.ts) — OpenStreetMap
 (ODbL), Macrostrat (CC BY 4.0), USGS 3DEP, USDA NAIP, LANDFIRE, the Yale Bright

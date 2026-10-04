@@ -753,6 +753,28 @@ export let WATER_WIDTH_SCALE = 1.0
 export let WATER_SPEED = 1.0
 export let WATER_OPACITY = 0.82
 /**
+ * Water look. `WATER_LOOK` picks the default WaterLook preset for bodies that do not name one,
+ * indexed into WATER_LOOK_NAMES (0 temperate, 1 swamp, 2 black, 3 caribbean, 4 alpine, 5 mud); a
+ * body can name its own look in the manifest. The rest are global multipliers over every look,
+ * so one dial moves the whole world from bog to reef.
+ */
+export let WATER_LOOK = 0
+export let WATER_WAVE_STRENGTH = 1.0
+export let WATER_WAVE_AMP = 1.0
+export let WATER_WAVE_LEN = 1.0
+export let WATER_WAVE_STEEP = 1.0
+/** how far waves stay crisp, ×: lower fades them to a still sheen sooner, for the aliasing at range */
+export let WATER_WAVE_FADE = 1.0
+/** wind heading for ponds and the sea, degrees clockwise from +X; a stream uses its own channel */
+export let WATER_WIND_DEG = 37
+/** extinction distance multiplier: low is opaque mud, high is clear */
+export let WATER_CLARITY = 1.0
+/** shore-foam coverage and band width multipliers */
+export let WATER_FOAM = 1.0
+export let WATER_FOAM_BAND = 1.0
+/** bank-to-centre depth profile multiplier (baked, needs a reload) */
+export let WATER_CROWN = 1.0
+/**
  * The still-water line, metres NAVD88 — the sea at 0, and the flood control.
  *
  * One plane over the whole site at this height. Inland it sits under the terrain and nothing is
@@ -1713,6 +1735,30 @@ export const TUNE_TABS: TuneTab[] = [
         ],
       },
       {
+        title: 'water',
+        scope: 'world',
+        collapsed: false,
+        keys: [
+          tune('WATER_LOOK', () => WATER_LOOK, (v) => (WATER_LOOK = v), [0, 5], 1, 'default water look: 0 temperate 1 swamp 2 black 3 caribbean 4 alpine 5 mud — a body can name its own look'),
+          tune('WATER_DEPTH', () => WATER_DEPTH, (v) => (WATER_DEPTH = v), [0, 2], 0.05, 'surface above the channel bottom (m)'),
+          tune('WATER_WIDTH_SCALE', () => WATER_WIDTH_SCALE, (v) => (WATER_WIDTH_SCALE = v), [0.3, 3], 0.05),
+          tune('WATER_SPEED', () => WATER_SPEED, (v) => (WATER_SPEED = v), [0, 4], 0.05, 'ripple speed'),
+          tune('WATER_OPACITY', () => WATER_OPACITY, (v) => (WATER_OPACITY = v), [0.2, 1], 0.02),
+          tune('WATER_WAVE_STRENGTH', () => WATER_WAVE_STRENGTH, (v) => (WATER_WAVE_STRENGTH = v), [0, 2], 0.02, 'how hard the Gerstner waves tilt the surface'),
+          tune('WATER_WAVE_AMP', () => WATER_WAVE_AMP, (v) => (WATER_WAVE_AMP = v), [0, 3], 0.02, 'wave amplitude ×'),
+          tune('WATER_WAVE_LEN', () => WATER_WAVE_LEN, (v) => (WATER_WAVE_LEN = v), [0.3, 3], 0.02, 'wavelength ×: short and choppy to long and glassy'),
+          tune('WATER_WAVE_STEEP', () => WATER_WAVE_STEEP, (v) => (WATER_WAVE_STEEP = v), [0, 1.5], 0.02, 'Gerstner steepness ×: sharp crests vs round swells'),
+          tune('WATER_WAVE_FADE', () => WATER_WAVE_FADE, (v) => (WATER_WAVE_FADE = v), [0.2, 4], 0.05, 'how far waves stay crisp ×; lower fades them to a still sheen sooner — the anti-shimmer dial'),
+          tune('WATER_WIND_DEG', () => WATER_WIND_DEG, (v) => (WATER_WIND_DEG = v), [0, 360], 1, 'wind heading for ponds and the sea, degrees; a stream uses its own channel'),
+          tune('WATER_CLARITY', () => WATER_CLARITY, (v) => (WATER_CLARITY = v), [0.2, 4], 0.02, 'extinction distance ×: low is opaque mud, high is clear'),
+          tune('WATER_FOAM', () => WATER_FOAM, (v) => (WATER_FOAM = v), [0, 2], 0.02, 'shore-foam coverage ×'),
+          tune('WATER_FOAM_BAND', () => WATER_FOAM_BAND, (v) => (WATER_FOAM_BAND = v), [0.1, 3], 0.02, 'shore-foam band width ×'),
+          tune('WATER_CROWN', () => WATER_CROWN, (v) => (WATER_CROWN = v), [0, 2], 0.02, 'bank-to-centre depth profile × (reload to re-bake)'),
+          tune('WATER_LEVEL_M', () => WATER_LEVEL_M, (v) => (WATER_LEVEL_M = v), [-20, 300], 0.5, 'still water / sea level (m); raise it to flood'),
+          tune('WATER_LEVEL_SPAN', () => WATER_LEVEL_SPAN, (v) => (WATER_LEVEL_SPAN = v), [200, 60000], 100, 'how far the water plane reaches (m)'),
+        ],
+      },
+      {
         title: 'time of day',
         scope: 'world',
         collapsed: false,
@@ -2116,15 +2162,9 @@ export const TUNE_TABS: TuneTab[] = [
         ],
       },
       {
-        title: 'water',
+        title: 'power lines',
         scope: 'world',
         keys: [
-          tune('WATER_DEPTH', () => WATER_DEPTH, (v) => (WATER_DEPTH = v), [0, 2], 0.05, 'surface above the channel bottom (m)'),
-          tune('WATER_WIDTH_SCALE', () => WATER_WIDTH_SCALE, (v) => (WATER_WIDTH_SCALE = v), [0.3, 3], 0.05),
-          tune('WATER_SPEED', () => WATER_SPEED, (v) => (WATER_SPEED = v), [0, 4], 0.05, 'ripple speed'),
-          tune('WATER_OPACITY', () => WATER_OPACITY, (v) => (WATER_OPACITY = v), [0.2, 1], 0.02),
-          tune('WATER_LEVEL_M', () => WATER_LEVEL_M, (v) => (WATER_LEVEL_M = v), [-20, 300], 0.5, 'still water / sea level (m); raise it to flood'),
-          tune('WATER_LEVEL_SPAN', () => WATER_LEVEL_SPAN, (v) => (WATER_LEVEL_SPAN = v), [200, 60000], 100, 'how far the water plane reaches (m)'),
           tune('POWER_HEIGHT_SCALE', () => POWER_HEIGHT_SCALE, (v) => (POWER_HEIGHT_SCALE = v), [0.3, 2], 0.05, 'pole and tower height'),
           tune('POWER_SAG', () => POWER_SAG, (v) => (POWER_SAG = v), [0, 0.12], 0.005, 'conductor sag as a fraction of the span'),
           tune('POWER_SAG_MAX', () => POWER_SAG_MAX, (v) => (POWER_SAG_MAX = v), [0, 20], 0.5, 'm'),

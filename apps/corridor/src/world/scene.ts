@@ -3210,6 +3210,7 @@ if (uLodOn > 0.5) {
     terrainDesat.value = def.desaturate
     built.recolour(def.walls, def.roofs)
     water.setColours(def.water.stream, def.water.still, def.water.sea, def.water.opacityBias)
+    water.setLook(def.water.look ?? null)
     paintNow = { centre: def.paint.centre, edge: def.paint.edge }
     repaintMarkings(road, def.paint.centre, def.paint.edge)
   }

@@ -198,8 +198,16 @@ export function grassMode(): number {
  * carried by the real 3D blades, so the shader turf is opt-in (GRASS_GROUND 1) for cheap distance.
  */
 export let GRASS_GROUND = 0
-/** The ground layer, normalised to 0/1. */
+/** The ground layer, normalised to 0/1.
+ *
+ * MODE 1 ALWAYS DRAWS THE RELIEF. The relief is the only thing that keeps the ground 100 % grass
+ * when the 3D blades are not the filler. Mode 0 carries the verge with real blades, so GRASS_GROUND
+ * is the owner's choice there (0 = static photo turf under the blades). Mode 1 is the cards-only
+ * cheap detent: with no blades, the cards alone read as flat static turf at a driving angle, so it
+ * brings the relief underlayment regardless of GRASS_GROUND. (This is why mode 1 stopped looking
+ * grassed when the default flipped to 0 — the relief it depended on had been switched off.) */
 export function grassGround(): number {
+  if (grassMode() === 1) return 1
   return GRASS_GROUND >= 0.5 ? 1 : 0
 }
 /** relief underlayment only: the pattern size — cells per metre */

@@ -1047,6 +1047,27 @@ export let HEADLIGHT_ANGLE = 0.46
 export let HERO_HEADLIGHTS_MODE = 1
 export let HERO_TAILLIGHTS_MODE = 1
 /**
+ * MERGED hero lamps, per family: one centred real SpotLight instead of the symmetric pair.
+ *
+ * Three's forward renderer evaluates every VISIBLE spot for every lit fragment of every standard
+ * material, so the pair costs two full-screen loop iterations even though the two pools sit a metre
+ * apart. Merging to one centred spot roughly halves that — measured with the GPU timer parked at
+ * night, 2560x1323, 2026-10-04: the two real tail spots go from ~1.9 ms to ~1.0 ms for the merged
+ * one, and the merged spot wears a `SpotLight.map` (a projected wide ellipse) so a single cone
+ * still covers the width the pair did: WIDER ACROSS THE CAR THAN IT IS DEEP. The BRDF is untouched
+ * — the map only multiplies the light's colour — so it stays a REAL lamp, not the analytic flood.
+ *
+ *   HERO_*_MERGE       0 = the pair (today), 1 = one centred lamp
+ *   HERO_*_MERGE_ANGLE the merged cone's half-angle, radians; wider than the pair's own so the one
+ *                      beam still reaches both sides
+ *   HERO_MERGE_WIDTH   how much wider than tall the projected ellipse is; 1 is a circle
+ */
+export let HERO_HEADLIGHTS_MERGE = 0
+export let HERO_TAILLIGHTS_MERGE = 0
+export let HERO_HEADLIGHTS_MERGE_ANGLE = 0.7
+export let HERO_TAILLIGHTS_MERGE_ANGLE = 1.4
+export let HERO_MERGE_WIDTH = 1.7
+/**
  * The analytic lamp flood: how hard the FAKE lamps light the world.
  *
  * Every standard material in the built world — asphalt, kerbs, buildings, power poles — takes this
@@ -2286,6 +2307,11 @@ export const TUNE_TABS: TuneTab[] = [
           tune('TRAFFIC_LIGHTS_MODE', () => TRAFFIC_LIGHTS_MODE, (v) => (TRAFFIC_LIGHTS_MODE = Math.round(v)), [0, 2], 1, 'traffic beams: 0 off, 1 real spot lights, 2 fake (analytic flood, no real spots)'),
           tune('HERO_HEADLIGHTS_MODE', () => HERO_HEADLIGHTS_MODE, (v) => (HERO_HEADLIGHTS_MODE = Math.round(v)), [0, 2], 1, 'YOUR headlights: 0 off, 1 real three.js spots, 2 fake (analytic flood, no real spots)'),
           tune('HERO_TAILLIGHTS_MODE', () => HERO_TAILLIGHTS_MODE, (v) => (HERO_TAILLIGHTS_MODE = Math.round(v)), [0, 2], 1, 'YOUR tail lights: 0 off, 1 real spots, 2 fake. Fake drops ~2 ms behind the car for a red flood instead'),
+          tune('HERO_HEADLIGHTS_MERGE', () => HERO_HEADLIGHTS_MERGE, (v) => (HERO_HEADLIGHTS_MERGE = Math.round(v)), [0, 1], 1, 'merge YOUR two headlight beams into one centred spot (halves the light-loop cost). Wears a wide elliptical cone'),
+          tune('HERO_TAILLIGHTS_MERGE', () => HERO_TAILLIGHTS_MERGE, (v) => (HERO_TAILLIGHTS_MERGE = Math.round(v)), [0, 1], 1, 'merge YOUR two tail washes into one centred spot. Wears a wide elliptical cone'),
+          tune('HERO_HEADLIGHTS_MERGE_ANGLE', () => HERO_HEADLIGHTS_MERGE_ANGLE, (v) => (HERO_HEADLIGHTS_MERGE_ANGLE = v), [0.1, 1.57], 0.02, 'merged headlamp cone half-angle (rad) \u2014 wider than the pair so one beam reaches both sides'),
+          tune('HERO_TAILLIGHTS_MERGE_ANGLE', () => HERO_TAILLIGHTS_MERGE_ANGLE, (v) => (HERO_TAILLIGHTS_MERGE_ANGLE = v), [0.15, 1.57], 0.02, 'merged tail-light cone half-angle (rad)'),
+          tune('HERO_MERGE_WIDTH', () => HERO_MERGE_WIDTH, (v) => (HERO_MERGE_WIDTH = v), [1, 3], 0.05, 'merged cone width: how much wider than tall the projected ellipse is. 1 is a circle'),
           tune('FAKE_LAMPS', () => FAKE_LAMPS, (v) => (FAKE_LAMPS = v), [0, 12], 0.25, 'brightness of the analytic lamp flood that the FAKE lamps (mode 2) light the world with. ~4 matches a real lamp. 0 disables it'),
           tune('RETRO_MARKINGS', () => RETRO_MARKINGS, (v) => (RETRO_MARKINGS = v), [0, 6], 0.1, 'how hard road paint throws your headlights back'),
           tune('RETRO_SIGNS', () => RETRO_SIGNS, (v) => (RETRO_SIGNS = v), [0, 6], 0.1, 'how hard sign sheeting throws your headlights back'),

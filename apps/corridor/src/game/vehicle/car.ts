@@ -51,6 +51,51 @@ export type CarEvent = 'none' | 'bump' | 'launch' | 'land' | 'crash' | 'rocket'
 // to tail — change it there.
 const CAR_HALF_WIDTH = 0.95
 
+/*
+ * THE MERGED LAMP'S CONE SHAPE.
+ *
+ * A three.js SpotLight cone is a circle, so collapsing the symmetric pair into one centred spot
+ * would leave a round pool narrower than the two it replaced. `SpotLight.map` projects a texture
+ * down the cone and multiplies the light's colour by it, which lets us cut a WIDE, SHORT ellipse
+ * out of that circle — the BRDF is untouched, so it stays a real lamp. The texture's u runs across
+ * the car and its v runs along the beam, so a wide ellipse in u is wider across than it is deep,
+ * which is what the pair of pools actually covered.
+ *
+ * A DataTexture, not a canvas: this module is imported by headless tests, and `document` is not
+ * there. Rebuilt only when HERO_MERGE_WIDTH changes, and the same map is shared by the head and
+ * tail merged lamps (the width is global).
+ */
+let lampMapTex: THREE.DataTexture | null = null
+let lampMapWidth = 0
+function lampMap(width: number): THREE.DataTexture {
+  if (lampMapTex && lampMapWidth === width) return lampMapTex
+  const S = 64
+  const data = new Uint8Array(S * S * 4)
+  const rx = 0.5
+  const ry = 0.5 / Math.max(1, width)
+  for (let y = 0; y < S; y++) {
+    for (let x = 0; x < S; x++) {
+      const u = (x + 0.5) / S - 0.5
+      const v = (y + 0.5) / S - 0.5
+      const d = Math.sqrt((u / rx) ** 2 + (v / ry) ** 2)
+      const a = d >= 1 ? 0 : d <= 0.35 ? 1 : 1 - (d - 0.35) / 0.65
+      const i = (y * S + x) * 4
+      const g = Math.round(Math.min(1, Math.max(0, a)) * 255)
+      data[i] = g
+      data[i + 1] = g
+      data[i + 2] = g
+      data[i + 3] = 255
+    }
+  }
+  const t = new THREE.DataTexture(data, S, S, THREE.RGBAFormat, THREE.UnsignedByteType)
+  t.minFilter = THREE.LinearFilter
+  t.magFilter = THREE.LinearFilter
+  t.needsUpdate = true
+  lampMapTex = t
+  lampMapWidth = width
+  return t
+}
+
 export class Car {
   pos = new THREE.Vector3()
   /** heading, rad; forward = (cos yaw, 0, sin yaw), so steering right increases it */
@@ -92,6 +137,9 @@ export class Car {
   /** the tail lamps and the red light they throw back down the road */
   private tailLamps: THREE.Mesh[] = []
   private tailBeams: THREE.SpotLight[] = []
+  /** the one centred lamp each family collapses to in merged mode; see HERO_*_MERGE */
+  private mergedBeam: THREE.SpotLight | null = null
+  private mergedTailBeam: THREE.SpotLight | null = null
   private lightSig = ''
   private lightsOn = 0
   /** dash, pillars and wheel: drawn only from inside (setCockpit) */
@@ -451,6 +499,24 @@ export class Car {
       g.add(tailBeam, tailBeam.target)
       this.tailBeams.push(tailBeam)
     }
+    // THE MERGED LAMPS. One centred spot per family, worn only in merged mode (HERO_*_MERGE) and
+    // hidden otherwise — an invisible spot is out of the light loop entirely, so the pair and the
+    // merged lamp never cost at the same time. The map (lampMap above) shapes the cone wide and
+    // short; setLights sizes it and stamps the map.
+    const mergedBeam = new THREE.SpotLight(0xfff4de, 0, T.HEADLIGHT_RANGE, T.HERO_HEADLIGHTS_MERGE_ANGLE, 0.55, 1.4)
+    mergedBeam.position.set(2.1, 0.7, 0)
+    mergedBeam.target.position.set(2.1 + T.HEADLIGHT_RANGE * 0.6, -T.HEADLIGHT_RANGE * 0.04, 0)
+    mergedBeam.castShadow = false
+    mergedBeam.visible = false
+    g.add(mergedBeam, mergedBeam.target)
+    this.mergedBeam = mergedBeam
+    const mergedTail = new THREE.SpotLight(0xff180c, 0, T.TAILLIGHT_RANGE, T.HERO_TAILLIGHTS_MERGE_ANGLE, 0.55, 2)
+    mergedTail.position.set(-2.18, 0.66, 0)
+    mergedTail.target.position.set(-2.18 - Math.max(1.2, T.TAILLIGHT_RANGE * 0.65), 0.02, 0)
+    mergedTail.castShadow = false
+    mergedTail.visible = false
+    g.add(mergedTail, mergedTail.target)
+    this.mergedTailBeam = mergedTail
     // The view from the driver's seat. Mesh-local y is height above the wheel contact, so with
     // CAR_RIDE 0.35 and COCKPIT_EYE_UP 1.15 the eye sits at local (0.35, 1.50, COCKPIT_EYE_SIDE),
     // and everything here is placed relative to THAT. Hidden until setCockpit(true), when the body
@@ -519,38 +585,65 @@ export class Car {
     // beam by zeroing `on` in lamps().
     const headReal = Math.round(T.HERO_HEADLIGHTS_MODE) === 1
     const tailReal = Math.round(T.HERO_TAILLIGHTS_MODE) === 1
-    const headSpots = headReal ? this.beams.length : 0
-    const tailSpots = tailReal ? this.tailBeams.length : 0
-    const sig = `${v.toFixed(3)}|${T.HEADLIGHT}|${T.TAILLIGHT}|${T.TAILLIGHT_RANGE}|${T.TAILLIGHT_ANGLE}|${T.HEADLIGHT_RANGE}|${T.HEADLIGHT_ANGLE}|${T.HERO_HEADLIGHTS_MODE}|${T.HERO_TAILLIGHTS_MODE}|${headSpots}|${tailSpots}`
+    // Merged mode replaces the pair with one centred spot per family; the merge knobs have to be in
+    // the early-out sig too, or flipping one while parked would do nothing (activeBeams reads them).
+    const sig = `${v.toFixed(3)}|${T.HEADLIGHT}|${T.TAILLIGHT}|${T.TAILLIGHT_RANGE}|${T.TAILLIGHT_ANGLE}|${T.HEADLIGHT_RANGE}|${T.HEADLIGHT_ANGLE}|${T.HERO_HEADLIGHTS_MODE}|${T.HERO_TAILLIGHTS_MODE}|${T.HERO_HEADLIGHTS_MERGE}|${T.HERO_TAILLIGHTS_MERGE}|${T.HERO_HEADLIGHTS_MERGE_ANGLE}|${T.HERO_TAILLIGHTS_MERGE_ANGLE}|${T.HERO_MERGE_WIDTH}|${headReal}|${tailReal}`
     if (sig === this.lightSig) return
     this.lightSig = sig
     this.lightsOn = v
-    this.beams.forEach((b, i) => {
-      b.intensity = v * 140 * T.HEADLIGHT
+    // The merged lamps wear the shared wide-ellipse map. Stamped here (not at build) so the width
+    // knob reaches it; an invisible light is out of three's light list, so it costs nothing until
+    // merged mode makes it visible.
+    const map = lampMap(T.HERO_MERGE_WIDTH)
+    if (this.mergedBeam && this.mergedBeam.map !== map) this.mergedBeam.map = map
+    if (this.mergedTailBeam && this.mergedTailBeam.map !== map) this.mergedTailBeam.map = map
+    // hide BOTH sets, then light only the active one — the pair and the merged lamp are never both
+    // in the loop.
+    for (const b of this.beams) b.visible = false
+    for (const b of this.tailBeams) b.visible = false
+    if (this.mergedBeam) this.mergedBeam.visible = false
+    if (this.mergedTailBeam) this.mergedTailBeam.visible = false
+    const headOn = v > 0.02 && T.HEADLIGHT > 0.001 && headReal
+    for (const b of this.activeBeams()) {
+      // the merged lamp carries the pair's two beams through its one cone, at the wider merged angle
+      b.intensity = v * 140 * T.HEADLIGHT * (b === this.mergedBeam ? 2 : 1)
       b.distance = T.HEADLIGHT_RANGE
-      b.angle = T.HEADLIGHT_ANGLE
+      b.angle = b === this.mergedBeam ? T.HERO_HEADLIGHTS_MERGE_ANGLE : T.HEADLIGHT_ANGLE
       b.target.position.x = 2.1 + T.HEADLIGHT_RANGE * 0.6
       b.target.position.y = -T.HEADLIGHT_RANGE * 0.04
-      b.visible = v > 0.02 && T.HEADLIGHT > 0.001 && i < headSpots
-    })
+      b.visible = headOn
+    }
     for (const m of this.headLamps) {
       const mat = m.material as THREE.MeshStandardMaterial
       mat.emissiveIntensity = (0.35 + 2.2 * v) * (T.HEADLIGHT / 2)
     }
-    this.tailBeams.forEach((b, i) => {
-      b.intensity = v * 140 * T.TAILLIGHT
+    const tailOn = v > 0.02 && T.TAILLIGHT > 0.001 && tailReal
+    for (const b of this.activeTailBeams()) {
+      b.intensity = v * 140 * T.TAILLIGHT * (b === this.mergedTailBeam ? 2 : 1)
       b.distance = T.TAILLIGHT_RANGE
-      b.angle = T.TAILLIGHT_ANGLE
+      b.angle = b === this.mergedTailBeam ? T.HERO_TAILLIGHTS_MERGE_ANGLE : T.TAILLIGHT_ANGLE
       b.target.position.x = -2.18 - Math.max(1.2, T.TAILLIGHT_RANGE * 0.65)
       b.target.position.y = 0.02
-      b.visible = v > 0.02 && T.TAILLIGHT > 0.001 && i < tailSpots
-    })
+      b.visible = tailOn
+    }
     for (const m of this.tailLamps) {
       const mat = m.material as THREE.MeshStandardMaterial
       // The spot above is the light on the road. The lens is the lamp, and it
       // stays about three times that so the light on the car reads brighter than the pool behind it.
       mat.emissiveIntensity = (0.12 + 0.55 * v) * (T.TAILLIGHT / 0.025) * 3
     }
+  }
+
+  /**
+   * The lamps actually in play this frame: the symmetric pair, or the one merged spot
+   * (HERO_HEADLIGHTS_MERGE / HERO_TAILLIGHTS_MERGE). Every reader — the retro cone, the wet
+   * streaks, the fake flood — goes through these, so merging never double-counts a lamp.
+   */
+  private activeBeams(): THREE.SpotLight[] {
+    return this.mergedBeam && Math.round(T.HERO_HEADLIGHTS_MERGE) === 1 ? [this.mergedBeam] : this.beams
+  }
+  private activeTailBeams(): THREE.SpotLight[] {
+    return this.mergedTailBeam && Math.round(T.HERO_TAILLIGHTS_MERGE) === 1 ? [this.mergedTailBeam] : this.tailBeams
   }
 
   /**
@@ -568,8 +661,8 @@ export class Car {
    */
   streaks(): { pos: THREE.Vector3; dir: THREE.Vector3; tail: boolean }[] {
     const lights: [THREE.SpotLight, boolean][] = []
-    for (const b of this.beams) if (b.visible) lights.push([b, false])
-    for (const b of this.tailBeams) if (b.visible) lights.push([b, true])
+    for (const b of this.activeBeams()) if (b.visible) lights.push([b, false])
+    for (const b of this.activeTailBeams()) if (b.visible) lights.push([b, true])
     while (this.streakPos.length < lights.length) this.streakPos.push(new THREE.Vector3())
     while (this.streakDir.length < lights.length) this.streakDir.push(new THREE.Vector3())
     const out: { pos: THREE.Vector3; dir: THREE.Vector3; tail: boolean }[] = []
@@ -592,7 +685,7 @@ export class Car {
 
   lamps(): { each: { pos: THREE.Vector3; dir: THREE.Vector3 }[]; on: number } {
     const each: { pos: THREE.Vector3; dir: THREE.Vector3 }[] = []
-    for (const b of this.beams) {
+    for (const b of this.activeBeams()) {
       const p = new THREE.Vector3()
       const t = new THREE.Vector3()
       b.getWorldPosition(p)
@@ -629,8 +722,8 @@ export class Car {
       b.target.getWorldPosition(t)
       out.push({ pos: p, dir: t.sub(p).normalize(), tail })
     }
-    for (const b of this.beams) add(b, false)
-    for (const b of this.tailBeams) add(b, true)
+    for (const b of this.activeBeams()) add(b, false)
+    for (const b of this.activeTailBeams()) add(b, true)
     return out
   }
 

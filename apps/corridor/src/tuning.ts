@@ -1053,24 +1053,28 @@ export let HERO_TAILLIGHTS_MODE = 1
  * material, so the pair costs two full-screen loop iterations even though the two pools sit a metre
  * apart. Merging to one centred spot roughly halves that — measured with the GPU timer parked at
  * night, 2560x1323, 2026-10-04: the two real tail spots go from ~1.9 ms to ~1.0 ms for the merged
- * one, and the merged spot wears a `SpotLight.map` (a projected wide ellipse) so a single cone
- * still covers the width the pair did: WIDER ACROSS THE CAR THAN IT IS DEEP. The BRDF is untouched
- * — the map only multiplies the light's colour — so it stays a REAL lamp, not the analytic flood.
+ * one. The merged spot wears a `SpotLight.map` (a projected wide ellipse, plus a seam and a top
+ * falloff — see car.ts) so a single cone still reads like the pair. The BRDF is untouched, so it
+ * stays a REAL lamp, not the analytic flood.
+ *
+ * EVERY SHAPE KNOB IS PER FAMILY, because the two lamps want different looks: the headlight pool is
+ * long and narrow, the tail wash is short and very wide. The first version shared one "width" knob
+ * that only changed the ellipse's aspect, so turning it up shortened the pool front-to-back and
+ * never widened it — a cone's width IS its half-angle, so WIDTH here moves the cone.
  *
  *   HERO_*_MERGE       0 = the pair (today), 1 = one centred lamp
- *   HERO_*_MERGE_ANGLE the merged cone's half-angle, radians; wider than the pair's own so the one
- *                      beam still reaches both sides
- *   HERO_MERGE_WIDTH   how much wider than tall the projected ellipse is; 1 is a circle
- *   HERO_MERGE_SEAM    how dark the valley down the middle is, so one cone reads as two lamps
- *   HERO_MERGE_TOP     how much the top of the projection falls off (+ top, − bottom, 0 even)
+ *   HERO_*_MERGE_WIDTH the merged cone's half-angle, DEGREES — the width of the pool
+ *   HERO_*_MERGE_SEAM  how dark the valley down the middle is, so one pool reads as two lamps
+ *   HERO_*_MERGE_TOP   how much the top of the projection falls off (+ top, − bottom, 0 even)
  */
 export let HERO_HEADLIGHTS_MERGE = 0
 export let HERO_TAILLIGHTS_MERGE = 0
-export let HERO_HEADLIGHTS_MERGE_ANGLE = 0.7
-export let HERO_TAILLIGHTS_MERGE_ANGLE = 1.4
-export let HERO_MERGE_WIDTH = 1.7
-export let HERO_MERGE_SEAM = 0.45
-export let HERO_MERGE_TOP = 0.5
+export let HERO_HEADLIGHTS_MERGE_WIDTH = 38
+export let HERO_TAILLIGHTS_MERGE_WIDTH = 70
+export let HERO_HEADLIGHTS_MERGE_SEAM = 0.35
+export let HERO_TAILLIGHTS_MERGE_SEAM = 0.4
+export let HERO_HEADLIGHTS_MERGE_TOP = 0.12
+export let HERO_TAILLIGHTS_MERGE_TOP = 0.05
 /**
  * The analytic lamp flood: how hard the FAKE lamps light the world.
  *
@@ -2311,13 +2315,14 @@ export const TUNE_TABS: TuneTab[] = [
           tune('TRAFFIC_LIGHTS_MODE', () => TRAFFIC_LIGHTS_MODE, (v) => (TRAFFIC_LIGHTS_MODE = Math.round(v)), [0, 2], 1, 'traffic beams: 0 off, 1 real spot lights, 2 fake (analytic flood, no real spots)'),
           tune('HERO_HEADLIGHTS_MODE', () => HERO_HEADLIGHTS_MODE, (v) => (HERO_HEADLIGHTS_MODE = Math.round(v)), [0, 2], 1, 'YOUR headlights: 0 off, 1 real three.js spots, 2 fake (analytic flood, no real spots)'),
           tune('HERO_TAILLIGHTS_MODE', () => HERO_TAILLIGHTS_MODE, (v) => (HERO_TAILLIGHTS_MODE = Math.round(v)), [0, 2], 1, 'YOUR tail lights: 0 off, 1 real spots, 2 fake. Fake drops ~2 ms behind the car for a red flood instead'),
-          tune('HERO_HEADLIGHTS_MERGE', () => HERO_HEADLIGHTS_MERGE, (v) => (HERO_HEADLIGHTS_MERGE = Math.round(v)), [0, 1], 1, 'merge YOUR two headlight beams into one centred spot (halves the light-loop cost). Wears a wide elliptical cone'),
-          tune('HERO_TAILLIGHTS_MERGE', () => HERO_TAILLIGHTS_MERGE, (v) => (HERO_TAILLIGHTS_MERGE = Math.round(v)), [0, 1], 1, 'merge YOUR two tail washes into one centred spot. Wears a wide elliptical cone'),
-          tune('HERO_HEADLIGHTS_MERGE_ANGLE', () => HERO_HEADLIGHTS_MERGE_ANGLE, (v) => (HERO_HEADLIGHTS_MERGE_ANGLE = v), [0.1, 1.57], 0.02, 'merged headlamp cone half-angle (rad) \u2014 wider than the pair so one beam reaches both sides'),
-          tune('HERO_TAILLIGHTS_MERGE_ANGLE', () => HERO_TAILLIGHTS_MERGE_ANGLE, (v) => (HERO_TAILLIGHTS_MERGE_ANGLE = v), [0.15, 1.57], 0.02, 'merged tail-light cone half-angle (rad)'),
-          tune('HERO_MERGE_WIDTH', () => HERO_MERGE_WIDTH, (v) => (HERO_MERGE_WIDTH = v), [1, 3], 0.05, 'merged cone width: how much wider than tall the projected ellipse is. 1 is a circle'),
-          tune('HERO_MERGE_SEAM', () => HERO_MERGE_SEAM, (v) => (HERO_MERGE_SEAM = v), [0, 1], 0.05, 'merged cone seam: how dark the valley down the middle is, so one cone reads as the two lamps it replaced. 0 is a solid pool'),
-          tune('HERO_MERGE_TOP', () => HERO_MERGE_TOP, (v) => (HERO_MERGE_TOP = v), [-1, 1], 0.05, 'merged cone top falloff: dim the top (+) or the bottom (−) of the projections. 0 is even'),
+          tune('HERO_HEADLIGHTS_MERGE', () => HERO_HEADLIGHTS_MERGE, (v) => (HERO_HEADLIGHTS_MERGE = Math.round(v)), [0, 1], 1, 'merge YOUR two headlight beams into one centred spot (halves the light-loop cost)'),
+          tune('HERO_TAILLIGHTS_MERGE', () => HERO_TAILLIGHTS_MERGE, (v) => (HERO_TAILLIGHTS_MERGE = Math.round(v)), [0, 1], 1, 'merge YOUR two tail washes into one centred spot'),
+          tune('HERO_HEADLIGHTS_MERGE_WIDTH', () => HERO_HEADLIGHTS_MERGE_WIDTH, (v) => (HERO_HEADLIGHTS_MERGE_WIDTH = v), [10, 90], 1, 'merged headlamp cone half-angle (deg) \u2014 the width of the pool. Wider so one beam reaches both sides'),
+          tune('HERO_TAILLIGHTS_MERGE_WIDTH', () => HERO_TAILLIGHTS_MERGE_WIDTH, (v) => (HERO_TAILLIGHTS_MERGE_WIDTH = v), [10, 90], 1, 'merged tail-light cone half-angle (deg) \u2014 the width of the wash'),
+          tune('HERO_HEADLIGHTS_MERGE_SEAM', () => HERO_HEADLIGHTS_MERGE_SEAM, (v) => (HERO_HEADLIGHTS_MERGE_SEAM = v), [0, 1], 0.05, 'merged headlight seam: how dark the valley down the middle is, so one pool reads as two'),
+          tune('HERO_TAILLIGHTS_MERGE_SEAM', () => HERO_TAILLIGHTS_MERGE_SEAM, (v) => (HERO_TAILLIGHTS_MERGE_SEAM = v), [0, 1], 0.05, 'merged tail seam: how dark the valley down the middle is'),
+          tune('HERO_HEADLIGHTS_MERGE_TOP', () => HERO_HEADLIGHTS_MERGE_TOP, (v) => (HERO_HEADLIGHTS_MERGE_TOP = v), [-1, 1], 0.05, 'merged headlight top falloff: dim the top (+) or the bottom (\u2212). 0 is even'),
+          tune('HERO_TAILLIGHTS_MERGE_TOP', () => HERO_TAILLIGHTS_MERGE_TOP, (v) => (HERO_TAILLIGHTS_MERGE_TOP = v), [-1, 1], 0.05, 'merged tail top falloff: dim the top (+) or the bottom (\u2212). 0 is even'),
           tune('FAKE_LAMPS', () => FAKE_LAMPS, (v) => (FAKE_LAMPS = v), [0, 12], 0.25, 'brightness of the analytic lamp flood that the FAKE lamps (mode 2) light the world with. ~4 matches a real lamp. 0 disables it'),
           tune('RETRO_MARKINGS', () => RETRO_MARKINGS, (v) => (RETRO_MARKINGS = v), [0, 6], 0.1, 'how hard road paint throws your headlights back'),
           tune('RETRO_SIGNS', () => RETRO_SIGNS, (v) => (RETRO_SIGNS = v), [0, 6], 0.1, 'how hard sign sheeting throws your headlights back'),

@@ -513,30 +513,34 @@ export class Car {
     // The early-out has to watch the KNOBS as well as the level. It used to compare only `v`, so
     // turning HEADLIGHT down did nothing at all until the sun next moved — the panel moved, the
     // beam did not, and the only way to see the change was to wait for dusk (2026-09-27).
-    const sig = `${v.toFixed(3)}|${T.HEADLIGHT}|${T.TAILLIGHT}|${T.TAILLIGHT_RANGE}|${T.TAILLIGHT_ANGLE}|${T.HEADLIGHT_RANGE}|${T.HEADLIGHT_ANGLE}`
+    // how many of each pair are REAL spots (HERO_HEADLIGHT_SPOTS / HERO_TAILLIGHT_SPOTS). An
+    // invisible spot leaves three's light loop entirely; the lens stays emissive either way.
+    const headSpots = Math.max(0, Math.min(this.beams.length, Math.round(T.HERO_HEADLIGHT_SPOTS)))
+    const tailSpots = Math.max(0, Math.min(this.tailBeams.length, Math.round(T.HERO_TAILLIGHT_SPOTS)))
+    const sig = `${v.toFixed(3)}|${T.HEADLIGHT}|${T.TAILLIGHT}|${T.TAILLIGHT_RANGE}|${T.TAILLIGHT_ANGLE}|${T.HEADLIGHT_RANGE}|${T.HEADLIGHT_ANGLE}|${headSpots}|${tailSpots}`
     if (sig === this.lightSig) return
     this.lightSig = sig
     this.lightsOn = v
-    for (const b of this.beams) {
+    this.beams.forEach((b, i) => {
       b.intensity = v * 140 * T.HEADLIGHT
       b.distance = T.HEADLIGHT_RANGE
       b.angle = T.HEADLIGHT_ANGLE
       b.target.position.x = 2.1 + T.HEADLIGHT_RANGE * 0.6
       b.target.position.y = -T.HEADLIGHT_RANGE * 0.04
-      b.visible = v > 0.02 && T.HEADLIGHT > 0.001
-    }
+      b.visible = v > 0.02 && T.HEADLIGHT > 0.001 && i < headSpots
+    })
     for (const m of this.headLamps) {
       const mat = m.material as THREE.MeshStandardMaterial
       mat.emissiveIntensity = (0.35 + 2.2 * v) * (T.HEADLIGHT / 2)
     }
-    for (const b of this.tailBeams) {
+    this.tailBeams.forEach((b, i) => {
       b.intensity = v * 140 * T.TAILLIGHT
       b.distance = T.TAILLIGHT_RANGE
       b.angle = T.TAILLIGHT_ANGLE
       b.target.position.x = -2.18 - Math.max(1.2, T.TAILLIGHT_RANGE * 0.65)
       b.target.position.y = 0.02
-      b.visible = v > 0.02 && T.TAILLIGHT > 0.001
-    }
+      b.visible = v > 0.02 && T.TAILLIGHT > 0.001 && i < tailSpots
+    })
     for (const m of this.tailLamps) {
       const mat = m.material as THREE.MeshStandardMaterial
       // The spot above is the light on the road. The lens is the lamp, and it

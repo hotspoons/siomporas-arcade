@@ -995,6 +995,23 @@ export let HEADLIGHT_RANGE = 175
 /** the beam's half-angle, radians — the retro cone is this widened, so the two stay linked */
 export let HEADLIGHT_ANGLE = 0.46
 /**
+ * THE HERO CAR'S OWN SPOTS — how many of them are REAL lights.
+ *
+ * Three's forward renderer evaluates every VISIBLE spot for every lit fragment of every standard
+ * material, and the cost is super-linear (see TRAFFIC_LIGHTS). The hero car runs four: two
+ * headlight beams and two red tail washes. Measured parked at night, 2560x1323, FXAA, 2026-10-04:
+ * the two headlights cost ~3.5 ms and the two tails ~2.2 ms of GPU — the tails more than half as
+ * much again as the beams that you steer by, for a wash a metre behind the bumper.
+ *
+ * An invisible spot drops out of the shader's light loop entirely, so these are honest savings.
+ * They never touch the grass / tree-card / retro lamps: `Car.lamps()` reads the beam POSITIONS
+ * directly and keeps handing the headlamps to those shaders either way. The lens stays emissive,
+ * so a car with its tail spots off still reads as a car with its lights on — it just stops
+ * painting the road behind it. Headlights are the last to go; 2 is today, 0 is emissive only.
+ */
+export let HERO_HEADLIGHT_SPOTS = 2
+export let HERO_TAILLIGHT_SPOTS = 2
+/**
  * How many traffic lights (head + tail slots) may be REAL spot lights at once. The forward renderer
  * evaluates every visible spot for every lit ground fragment, and the cost is super-linear:
  * measured at 2560x1323, 2 spots ~+2 ms, 10 spots ~+14 ms, 16 spots ~+32 ms. The nearest cars win
@@ -2193,6 +2210,8 @@ export const TUNE_TABS: TuneTab[] = [
           tune('HEADLIGHT_RANGE', () => HEADLIGHT_RANGE, (v) => (HEADLIGHT_RANGE = v), [10, 200], 5, 'how far down the road they reach (m)'),
           tune('HEADLIGHT_ANGLE', () => HEADLIGHT_ANGLE, (v) => (HEADLIGHT_ANGLE = v), [0.1, 1.2], 0.02, 'the beam\u2019s half-angle (rad); the retro cone is this widened'),
           tune('TRAFFIC_LIGHTS', () => TRAFFIC_LIGHTS, (v) => (TRAFFIC_LIGHTS = Math.round(v)), [0, 16], 1, 'how many traffic lights (head+tail slots) are real spot lights at once. Each one costs ground shading, super-linearly'),
+          tune('HERO_HEADLIGHT_SPOTS', () => HERO_HEADLIGHT_SPOTS, (v) => (HERO_HEADLIGHT_SPOTS = Math.round(v)), [0, 2], 1, 'how many of YOUR two headlight beams are real spot lights. The grass and the retro paint use the beam positions either way, so 0 = lamps glow but nothing is lit'),
+          tune('HERO_TAILLIGHT_SPOTS', () => HERO_TAILLIGHT_SPOTS, (v) => (HERO_TAILLIGHT_SPOTS = Math.round(v)), [0, 2], 1, 'how many of YOUR two tail washes are real spot lights. 0 keeps the red lens and drops ~2 ms of ground shading behind the car'),
           tune('RETRO_MARKINGS', () => RETRO_MARKINGS, (v) => (RETRO_MARKINGS = v), [0, 6], 0.1, 'how hard road paint throws your headlights back'),
           tune('RETRO_SIGNS', () => RETRO_SIGNS, (v) => (RETRO_SIGNS = v), [0, 6], 0.1, 'how hard sign sheeting throws your headlights back'),
           tune('RETRO_SPREAD', () => RETRO_SPREAD, (v) => (RETRO_SPREAD = v), [1, 3], 0.05, 'retro cone as a multiple of the beam angle \u2014 above 1, the edge of the light lights things up'),

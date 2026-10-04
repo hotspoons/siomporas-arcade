@@ -227,6 +227,18 @@ export let GRASS_LIFT_M = 0.215
 /** horizontal run (m) of the raised grass face at the pavement — smaller is a steeper lip */
 export let GRASS_EDGE_M = 0.11
 /**
+ * THE LIP HEIGHT THE GEOMETRY ACTUALLY USES. GRASS_LIFT_M is the lip at the reference grass height
+ * (GRASS_HEIGHT 1, GRASS_MOWN_HEIGHT 0.22); this scales it by the grass-height dials so the turf
+ * step grows and shrinks with the grass it carries. Drop GRASS_HEIGHT for a shave and the lip comes
+ * down with it, raise it and the step grows. The relief shader paints blades to 0.28·GRASS_HEIGHT on
+ * the surface but cannot extrude above its own pixel, so the geometry has to carry the height — a
+ * fixed step under taller grass reads as a bare slab of green, grass in a jello mould.
+ * BUILD-TIME: strip geometry, so it is in scene.ts's roadSignature along with the two dials.
+ */
+export function grassLipM(): number {
+  return GRASS_LIFT_M * GRASS_HEIGHT * (GRASS_MOWN_HEIGHT / 0.22)
+}
+/**
  * GRASS CASTS ON GRASS, fake and real:
  *   GRASS_CAST       the FAKE term, in the blade and card shaders with no depth pass. The turf is a
  *                    procedural canopy and a couple of samples are marched along the ground toward

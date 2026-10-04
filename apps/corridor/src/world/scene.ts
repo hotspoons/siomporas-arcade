@@ -1935,11 +1935,11 @@ if (uLodOn > 0.5) {
       if (primary && e.d > stripEdgeLimitAt(e.s)) return null
       const t = THREE.MathUtils.smoothstep(e.d, 0.6, 7.0)
       const off = offsetFn ? offsetFn(x, -z) * t : 0
-      // THE TURF LIP (buildStrip). The mesh stands GRASS_LIFT_M proud of the pavement over its ramp;
-      // if this model omits it, every blade (and the car) inside the ramp is placed UNDER the mesh and
-      // is never seen — which is why no blades ever defined the raised edge.
+      // THE TURF LIP (buildStrip). The mesh stands the grass-scaled lip proud of the pavement over
+      // its ramp; if this model omits it, every blade (and the car) inside the ramp is placed UNDER
+      // the mesh and is never seen — which is why no blades ever defined the raised edge.
       const ramp = primary ? 0.6 : 2.4
-      const lift = e.d > 0 ? T.GRASS_LIFT_M * Math.min(1, e.d / ramp) : 0
+      const lift = e.d > 0 ? T.grassLipM() * Math.min(1, e.d / ramp) : 0
       return (e.d < 0.6 ? e.y - 0.02 : (e.y - 0.02) * (1 - t) + heightAt(x, -z) * t) + off + lift
     }
     type LiveStrip = Awaited<ReturnType<typeof buildStrip>>
@@ -2261,8 +2261,9 @@ if (uLodOn > 0.5) {
     // a road knob moved: every station's half width, the asphalt, then the strip that hugs it.
     // GRASS_LIFT_M/GRASS_EDGE_M change the strip's own geometry (the turf lip and its face), which is
     // built here, so they belong in this signature too — otherwise the slider writes a value nothing
-    // re-reads and nothing moves.
-    const roadSignature = () => `${T.LANE_WIDTH}|${T.SHOULDER_OUT}|${T.SHOULDER_IN}|${T.ROAD_BLEND_M}|${T.ROAD_TAPER_M}|${T.ROAD_ONEWAY_CENTRE}|${T.CULDESAC_RADIUS}|${T.GRASS_LIFT_M}|${T.GRASS_EDGE_M}`
+    // re-reads and nothing moves. The lip is scaled by the grass-height dials (GRASS_HEIGHT,
+    // GRASS_MOWN_HEIGHT) via grassLipM(), so those have to rebuild the strip as well.
+    const roadSignature = () => `${T.LANE_WIDTH}|${T.SHOULDER_OUT}|${T.SHOULDER_IN}|${T.ROAD_BLEND_M}|${T.ROAD_TAPER_M}|${T.ROAD_ONEWAY_CENTRE}|${T.CULDESAC_RADIUS}|${T.GRASS_LIFT_M}|${T.GRASS_EDGE_M}|${T.GRASS_HEIGHT}|${T.GRASS_MOWN_HEIGHT}`
     let roadSig = roadSignature()
     const plantSignature = () => `${T.TREE_CELL_M}|${T.TREE_MIN_H}|${T.TREE_HEIGHT_SCALE}|${T.TREE_DENSITY}|${T.TREE_PLANT_RADIUS_M}|${T.TREE_PATCH}|${T.TREE_SPARE_M}|${T.MOBILE_TREE_BUDGET}|${T.TREE_ROAD_CLEAR_M}`
     // Detail 0 is a display mode (cards only), not a new shape. Folding it into the signature

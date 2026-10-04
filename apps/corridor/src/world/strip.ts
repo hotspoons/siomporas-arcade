@@ -73,6 +73,10 @@ export async function buildStrip(
   // pokes up through the asphalt (its own triangles are not edge-aligned); the fringe below owns the
   // crisp face and the raised top over this same run
   const liftRamp = Math.max(0.6, across + 0.2)
+  // THE LIP SCALES WITH THE GRASS. grassLipM() is GRASS_LIFT_M at the reference grass height, scaled
+  // by the grass-height dials; the blade roots in scene.ts's gradedHeight use the same value, so the
+  // mesh top and the blades stay together at any height. Read once, the strip is thousands of verts.
+  const lipM = T.grassLipM()
   const pos = new Float32Array(nS * nL * 3)
   const uv = new Float32Array(nS * nL * 2)
   const edge = new Float32Array(nS * nL)
@@ -114,8 +118,8 @@ export async function buildStrip(
       // A ground-plane shader cannot draw above its own pixel, so this real step plus the face built
       // below is what gives low-cut grass thickness. A hard step at the pavement edge, so the strip
       // is already at full lift by its first grass vertex and the face (below) covers the seam.
-      // BUILD-TIME (see GRASS_LIFT_M).
-      const y = base + T.GRASS_LIFT_M * Math.max(0, Math.min(1, e.d / liftRamp))
+      // BUILD-TIME, and the height is grassLipM() so the step tracks the grass-height dials.
+      const y = base + lipM * Math.max(0, Math.min(1, e.d / liftRamp))
       pos[k * 3] = x
       pos[k * 3 + 1] = y
       pos[k * 3 + 2] = z
@@ -360,14 +364,14 @@ export async function buildStrip(
   // to the next strip column, so the strip's own ramp is hidden underneath. It shares the strip's
   // material, so it is the same turf texture, tint, weather and light. Emitted with both windings:
   // the face is thin and the material is FrontSide, so this avoids a per-side winding guess.
-  if (T.GRASS_LIFT_M > 0) {
+  if (lipM > 0) {
     const fp: number[] = []
     const fuv: number[] = []
     const fn: number[] = []
     const fe: number[] = []
     const fc: number[] = []
     const fi: number[] = []
-    const lift0 = T.GRASS_LIFT_M
+    const lift0 = lipM
     // The face is the crisp lip: a near-vertical run from the pavement edge up to the turf. Keep it
     // steep — GRASS_EDGE_M is the horizontal run, so smaller is a sharper lip.
     const run = Math.max(0.02, Math.min(T.GRASS_EDGE_M, across * 0.5))

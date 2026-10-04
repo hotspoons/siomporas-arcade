@@ -1061,12 +1061,16 @@ export let HERO_TAILLIGHTS_MODE = 1
  *   HERO_*_MERGE_ANGLE the merged cone's half-angle, radians; wider than the pair's own so the one
  *                      beam still reaches both sides
  *   HERO_MERGE_WIDTH   how much wider than tall the projected ellipse is; 1 is a circle
+ *   HERO_MERGE_SEAM    how dark the valley down the middle is, so one cone reads as two lamps
+ *   HERO_MERGE_TOP     how much the top of the projection falls off (+ top, − bottom, 0 even)
  */
 export let HERO_HEADLIGHTS_MERGE = 0
 export let HERO_TAILLIGHTS_MERGE = 0
 export let HERO_HEADLIGHTS_MERGE_ANGLE = 0.7
 export let HERO_TAILLIGHTS_MERGE_ANGLE = 1.4
 export let HERO_MERGE_WIDTH = 1.7
+export let HERO_MERGE_SEAM = 0.45
+export let HERO_MERGE_TOP = 0.5
 /**
  * The analytic lamp flood: how hard the FAKE lamps light the world.
  *
@@ -2312,6 +2316,8 @@ export const TUNE_TABS: TuneTab[] = [
           tune('HERO_HEADLIGHTS_MERGE_ANGLE', () => HERO_HEADLIGHTS_MERGE_ANGLE, (v) => (HERO_HEADLIGHTS_MERGE_ANGLE = v), [0.1, 1.57], 0.02, 'merged headlamp cone half-angle (rad) \u2014 wider than the pair so one beam reaches both sides'),
           tune('HERO_TAILLIGHTS_MERGE_ANGLE', () => HERO_TAILLIGHTS_MERGE_ANGLE, (v) => (HERO_TAILLIGHTS_MERGE_ANGLE = v), [0.15, 1.57], 0.02, 'merged tail-light cone half-angle (rad)'),
           tune('HERO_MERGE_WIDTH', () => HERO_MERGE_WIDTH, (v) => (HERO_MERGE_WIDTH = v), [1, 3], 0.05, 'merged cone width: how much wider than tall the projected ellipse is. 1 is a circle'),
+          tune('HERO_MERGE_SEAM', () => HERO_MERGE_SEAM, (v) => (HERO_MERGE_SEAM = v), [0, 1], 0.05, 'merged cone seam: how dark the valley down the middle is, so one cone reads as the two lamps it replaced. 0 is a solid pool'),
+          tune('HERO_MERGE_TOP', () => HERO_MERGE_TOP, (v) => (HERO_MERGE_TOP = v), [-1, 1], 0.05, 'merged cone top falloff: dim the top (+) or the bottom (−) of the projections. 0 is even'),
           tune('FAKE_LAMPS', () => FAKE_LAMPS, (v) => (FAKE_LAMPS = v), [0, 12], 0.25, 'brightness of the analytic lamp flood that the FAKE lamps (mode 2) light the world with. ~4 matches a real lamp. 0 disables it'),
           tune('RETRO_MARKINGS', () => RETRO_MARKINGS, (v) => (RETRO_MARKINGS = v), [0, 6], 0.1, 'how hard road paint throws your headlights back'),
           tune('RETRO_SIGNS', () => RETRO_SIGNS, (v) => (RETRO_SIGNS = v), [0, 6], 0.1, 'how hard sign sheeting throws your headlights back'),

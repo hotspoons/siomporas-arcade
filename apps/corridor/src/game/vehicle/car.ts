@@ -61,24 +61,41 @@ const CAR_HALF_WIDTH = 0.95
  * the car and its v runs along the beam, so a wide ellipse in u is wider across than it is deep,
  * which is what the pair of pools actually covered.
  *
+ * TWO LAMPS IN ONE CONE. A smooth ellipse still reads as a single source. A valley down the middle
+ * (HERO_MERGE_SEAM) splits the pool into two lobes — the seam the pair would have where their cones
+ * met — and a falloff toward the top of the projection (HERO_MERGE_TOP) dims the far/topped part
+ * the way one lamp's spill does not. Both are just more of the same mask; the light stays real.
+ *
  * A DataTexture, not a canvas: this module is imported by headless tests, and `document` is not
- * there. Rebuilt only when HERO_MERGE_WIDTH changes, and the same map is shared by the head and
- * tail merged lamps (the width is global).
+ * there. Rebuilt only when one of the shape knobs changes, and the same map is shared by the head
+ * and tail merged lamps.
  */
 let lampMapTex: THREE.DataTexture | null = null
-let lampMapWidth = 0
-function lampMap(width: number): THREE.DataTexture {
-  if (lampMapTex && lampMapWidth === width) return lampMapTex
+let lampMapKey = ''
+function lampMap(width: number, seam: number, top: number): THREE.DataTexture {
+  const key = `${width}|${seam}|${top}`
+  if (lampMapTex && lampMapKey === key) return lampMapTex
   const S = 64
   const data = new Uint8Array(S * S * 4)
   const rx = 0.5
   const ry = 0.5 / Math.max(1, width)
+  // the seam's half-width in u: about the gap between the two real pools at the merged cone's angle
+  const sw = 0.13
+  const topMag = Math.min(1, Math.abs(top))
+  const topDir = top >= 0 ? 1 : -1
   for (let y = 0; y < S; y++) {
     for (let x = 0; x < S; x++) {
       const u = (x + 0.5) / S - 0.5
       const v = (y + 0.5) / S - 0.5
       const d = Math.sqrt((u / rx) ** 2 + (v / ry) ** 2)
-      const a = d >= 1 ? 0 : d <= 0.35 ? 1 : 1 - (d - 0.35) / 0.65
+      let a = d >= 1 ? 0 : d <= 0.35 ? 1 : 1 - (d - 0.35) / 0.65
+      if (a > 0) {
+        // a gaussian valley at u = 0, so the two lobes sit either side of the centreline
+        const seamMask = 1 - seam * Math.exp(-(u * u) / (2 * sw * sw))
+        // and a ramp to the chosen end of the beam; v/ry hits 1 at the ellipse's own edge
+        const t = Math.min(1, Math.max(0, (topDir * v) / ry))
+        a *= Math.max(0, seamMask * (1 - topMag * t))
+      }
       const i = (y * S + x) * 4
       const g = Math.round(Math.min(1, Math.max(0, a)) * 255)
       data[i] = g
@@ -92,7 +109,7 @@ function lampMap(width: number): THREE.DataTexture {
   t.magFilter = THREE.LinearFilter
   t.needsUpdate = true
   lampMapTex = t
-  lampMapWidth = width
+  lampMapKey = key
   return t
 }
 
@@ -587,14 +604,14 @@ export class Car {
     const tailReal = Math.round(T.HERO_TAILLIGHTS_MODE) === 1
     // Merged mode replaces the pair with one centred spot per family; the merge knobs have to be in
     // the early-out sig too, or flipping one while parked would do nothing (activeBeams reads them).
-    const sig = `${v.toFixed(3)}|${T.HEADLIGHT}|${T.TAILLIGHT}|${T.TAILLIGHT_RANGE}|${T.TAILLIGHT_ANGLE}|${T.HEADLIGHT_RANGE}|${T.HEADLIGHT_ANGLE}|${T.HERO_HEADLIGHTS_MODE}|${T.HERO_TAILLIGHTS_MODE}|${T.HERO_HEADLIGHTS_MERGE}|${T.HERO_TAILLIGHTS_MERGE}|${T.HERO_HEADLIGHTS_MERGE_ANGLE}|${T.HERO_TAILLIGHTS_MERGE_ANGLE}|${T.HERO_MERGE_WIDTH}|${headReal}|${tailReal}`
+    const sig = `${v.toFixed(3)}|${T.HEADLIGHT}|${T.TAILLIGHT}|${T.TAILLIGHT_RANGE}|${T.TAILLIGHT_ANGLE}|${T.HEADLIGHT_RANGE}|${T.HEADLIGHT_ANGLE}|${T.HERO_HEADLIGHTS_MODE}|${T.HERO_TAILLIGHTS_MODE}|${T.HERO_HEADLIGHTS_MERGE}|${T.HERO_TAILLIGHTS_MERGE}|${T.HERO_HEADLIGHTS_MERGE_ANGLE}|${T.HERO_TAILLIGHTS_MERGE_ANGLE}|${T.HERO_MERGE_WIDTH}|${T.HERO_MERGE_SEAM}|${T.HERO_MERGE_TOP}|${headReal}|${tailReal}`
     if (sig === this.lightSig) return
     this.lightSig = sig
     this.lightsOn = v
     // The merged lamps wear the shared wide-ellipse map. Stamped here (not at build) so the width
     // knob reaches it; an invisible light is out of three's light list, so it costs nothing until
     // merged mode makes it visible.
-    const map = lampMap(T.HERO_MERGE_WIDTH)
+    const map = lampMap(T.HERO_MERGE_WIDTH, T.HERO_MERGE_SEAM, T.HERO_MERGE_TOP)
     if (this.mergedBeam && this.mergedBeam.map !== map) this.mergedBeam.map = map
     if (this.mergedTailBeam && this.mergedTailBeam.map !== map) this.mergedTailBeam.map = map
     // hide BOTH sets, then light only the active one — the pair and the merged lamp are never both

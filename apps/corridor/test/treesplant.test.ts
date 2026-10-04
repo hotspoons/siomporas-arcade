@@ -13,6 +13,7 @@ const knobs = vi.hoisted(() => ({
   TREE_MIN_H: 3,
   TREE_DENSITY: 1,
   TREE_HEIGHT_SCALE: 1,
+  TREE_ROAD_CLEAR_M: 4.5,
   TREE_REPLANT_M: 30,
 }))
 vi.mock('../src/tuning', () => knobs)
@@ -87,5 +88,31 @@ describe('crescent replant', () => {
     expect(t.stats().count).toBeLessThanOrEqual(8)
     const note = t.patch()
     expect(note.changed.filter((i) => note.removed.includes(i))).toEqual([])
+  })
+
+  it('re-measures a standing tree when pavement arrives under it', () => {
+    // a lazy branch streams in beneath a tree already planted: the cell was never re-asked
+    const gone = new Set<string>()
+    const exclude = (x: number, y: number) => gone.has(`${Math.floor(x / 10)},${Math.floor(y / 10)}`)
+    const chm = new Float32Array(4)
+    const t = treesFromCanopy(chm, [2, 2], [-200, -200, 200, 200], 10, () => 0, 5000, 3, exclude, undefined, {
+      canopyAt: () => 8,
+      centre: [0, 0],
+      cellM: 10,
+      radius: 40,
+    })
+    drain(t)
+    const idx = t.records.findIndex((r) => Number.isFinite(r.x) && r.ci === 0 && r.cj === 0)
+    expect(idx).toBeGreaterThanOrEqual(0)
+    const rec = t.records[idx]
+    const before = t.stats().count
+    gone.add(`${rec.ci},${rec.cj}`)
+    t.invalidateRegion(rec.x, rec.z, rec.x, rec.z)
+    expect(Number.isFinite(t.records[idx].x)).toBe(false)
+    t.plant(0, 0)
+    drain(t)
+    const stillThere = t.records.some((r) => Number.isFinite(r.x) && r.ci === rec.ci && r.cj === rec.cj)
+    expect(stillThere).toBe(false)
+    expect(t.stats().count).toBeLessThan(before)
   })
 })

@@ -579,6 +579,44 @@ export class Vehicle {
       }
     }
 
+    /*
+     * THE FAN. Active ground effect, the Speirling's whole trick: pull the floor down hard whatever
+     * the speed, so the tyres can put down a brake force no wing car could.
+     *
+     * IT IS THE FIX FOR THE NOSE-OVER. A hard stop raises the brake force at the front contact
+     * patch, which shifts load forward, which raises the front brake force again — a runaway that
+     * pitches the car over its nose (measured on the street profile: brakePerKg 24 stops clean,
+     * 30 goes end over end). Downforce at the CoM raises grip but not the nose-over limit, because
+     * the overturning and the restoring moments both grow with it. Pressing BEHIND the CoM is what
+     * adds a restoring moment: the same fan that presses the tyres down also holds the tail down.
+     *
+     * It spools with what the driver asks for — brake, throttle, or simply speed — so a parked car
+     * is not glued and an airborne one gets nothing (a fan above the ground is a hovercraft).
+     */
+    if (p.fanPerKg > 0 && !st.airborne) {
+      // HORIZONTAL speed, not the full vector: a car dropped onto its springs has a vertical
+      // velocity for a moment, and a fan that spooled on that would press a parked car down and
+      // hold it below the ride height the suspension sag predicts.
+      const hSpeed = Math.hypot(lin.x, lin.z)
+      const spool = clamp(Math.max(this.input.brake, this.input.throttle, Math.min(1, hSpeed / 15)), 0, 1)
+      if (spool > 0) {
+        const fan = p.fanPerKg * mass * spool * dt
+        const rear = fan * clamp(p.fanRearBias, 0, 1)
+        const front = fan - rear
+        const t = body.translation()
+        const rot = body.rotation()
+        const half = this.spec.wheelbase / 2
+        const fwdPt = rotate(rot, half, 0, 0)
+        const rearPt = rotate(rot, -half, 0, 0)
+        if (front > 0) {
+          body.applyImpulseAtPoint({ x: -up.x * front, y: -up.y * front, z: -up.z * front }, { x: t.x + fwdPt.x, y: t.y + fwdPt.y, z: t.z + fwdPt.z }, true)
+        }
+        if (rear > 0) {
+          body.applyImpulseAtPoint({ x: -up.x * rear, y: -up.y * rear, z: -up.z * rear }, { x: t.x + rearPt.x, y: t.y + rearPt.y, z: t.z + rearPt.z }, true)
+        }
+      }
+    }
+
     st.wheelSpin += (vF / this.spec.wheelRadius) * dt
   }
 

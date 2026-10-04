@@ -4,11 +4,12 @@
 //              camera's distance from the target, Shift sprints
 //   A/D, ←/→   strafe
 //   Q/E        rotate the VIEW about the camera (FPS-style yaw), not about the target
-//   R/F        dolly in/out, exponential
-//   T/G        raise/lower the camera about the target
+//   R/F        raise/lower the camera (pure height: the target moves with it)
+//   T/G        dolly in/out, exponential (zoom)
 //   mouse      left-drag orbits (OrbitControls), right-drag looks (yaw+pitch about the camera),
 //              wheel dollies (OrbitControls, exponential)
-//   the target's height eases toward the ground under it, so a flight over a ridge follows it
+//   the target rides the CHANGE in the ground under it, so a flight over a ridge follows it without
+//   the target's height -- which is the look direction -- being pulled down to the dirt
 import * as THREE from 'three'
 import * as T from '../../tuning'
 import type { OrbitControls } from 'three/addons/controls/OrbitControls.js'
@@ -20,6 +21,9 @@ export class FlyControls {
   private looking = false
   private lastX = 0
   private lastY = 0
+  /** the ground under the target last frame, for following terrain WITHOUT touching the pitch */
+  private lastGround = 0
+  private groundSeen = false
   enabled = true
   /**
    * ON FOOT: the same keys and the same look, but the eye is pinned WALK_EYE above the ground
@@ -81,16 +85,22 @@ export class FlyControls {
     off.applyAxisAngle(UP, yaw)
     const right = off.clone().cross(UP).normalize()
     const len = off.length()
-    off.applyAxisAngle(right, pitch)
-    // keep the target from flipping over the pole
-    const el = Math.asin(THREE.MathUtils.clamp(off.y / len, -1, 1))
-    if (el > 1.45 || el < -1.45) off.applyAxisAngle(right, -pitch)
+    // Keep the target off the pole. `right` is horizontal and perpendicular to `off`, so rotating
+    // about it moves `off` on a vertical great circle and the elevation changes by exactly the
+    // rotation. Pre-clamp the ROTATION to the limit: if we applied the full pitch and then fixed
+    // up the wrapped result, a hard hold on "look up" would sail past vertical and come back down
+    // the far side. The old code undid the whole pitch instead, which stuck and jittered.
+    const LIM = 1.45
+    const e0 = Math.asin(THREE.MathUtils.clamp(off.y / len, -1, 1))
+    off.applyAxisAngle(right, THREE.MathUtils.clamp(pitch, -LIM - e0, LIM - e0))
     this.orbit.target.copy(this.camera.position).add(off)
   }
 
   /** put the eye on the ground where the camera is, keeping the look direction */
   setWalk(on: boolean) {
     this.walk = on
+    // the walk branch owns the ground; do not let a stale height follow us back into the air
+    this.groundSeen = false
     if (!on) return
     const cam = this.camera, ctl = this.orbit
     const off = ctl.target.clone().sub(cam.position)
@@ -149,7 +159,13 @@ export class FlyControls {
     }
     if (lift) {
       const dist = cam.position.distanceTo(ctl.target)
-      cam.position.y += lift * Math.max(dist, T.FLY_LIFT_FLOOR_M) * T.FLY_LIFT * (sprint ? T.FLY_SPRINT_X : 1) * d
+      // A PURE VERTICAL MOVE, not a dolly. Raising only the camera's Y leaves the target where it
+      // is, so the distance to it changes and the view reads as a zoom -- which is exactly why R/F
+      // and T/G felt like the same control. Move the target by the same amount so the view direction
+      // is untouched and R/F is genuinely "up/down". (Rich, 2026-10-03)
+      const dy = lift * Math.max(dist, T.FLY_LIFT_FLOOR_M) * T.FLY_LIFT * (sprint ? T.FLY_SPRINT_X : 1) * d
+      cam.position.y += dy
+      ctl.target.y += dy
     }
     let nx = ctl.target.x, nz = ctl.target.z
     if (fwd || strafe) {
@@ -167,17 +183,45 @@ export class FlyControls {
       cam.position.x += nx - ctl.target.x
       cam.position.z += nz - ctl.target.z
     }
-    // the target rides the ground; the camera keeps its offset
-    const gy = this.groundAt(nx, nz)
+    /*
+     * THE CAMERA RIDES THE TERRAIN BY THE CHANGE IN THE GROUND UNDER IT.
+     *
+     * Rich, 2026-10-03: "you get stuck in the grass and can't see anything when you try to look
+     * up." The old code eased target.y toward the ground under it every frame. But target.y IS the
+     * look direction: pitch the view up and a few frames later the target had sunk to the dirt,
+     * dragging the camera down onto the 0.4 m floor with it, so an upward look was impossible.
+     *
+     * Following the CAMERA'S OWN ground change keeps the promise the old code was reaching for --
+     * fly forward over a ridge and the view rides up with it -- because the camera moves sideways
+     * only when you translate (the `cam.position.x`/`.z` step above). Move the camera by the ground
+     * delta and the target by the same delta and the pitch is untouched; a look swings the target
+     * along its sphere but does not move the camera at all, so it sees a ground delta of zero and
+     * changes nothing.
+     */
+    const gy = this.groundAt(cam.position.x, cam.position.z)
     if (gy !== null) {
-      const ease = 1 - Math.exp(-2.5 * d)
-      const ny = ctl.target.y + (gy - ctl.target.y) * ease
-      cam.position.y += ny - ctl.target.y
-      ctl.target.set(nx, ny, nz)
-    } else ctl.target.set(nx, ctl.target.y, nz)
-    // never below the ground under the camera
+      // a big jump in the ground under the camera is a teleport, not a flight: restart the track
+      // rather than yanking the view by the difference
+      const dy = this.groundSeen && Math.abs(gy - this.lastGround) < 100 ? gy - this.lastGround : 0
+      this.lastGround = gy
+      this.groundSeen = true
+      cam.position.y += dy
+      ctl.target.set(nx, ctl.target.y + dy, nz)
+    } else {
+      this.groundSeen = false
+      ctl.target.set(nx, ctl.target.y, nz)
+    }
+    // NEVER BELOW THE GROUND UNDER THE CAMERA -- and when the floor catches it, lift the target
+    // with the camera, so being kept out of the dirt does not pitch the view down instead.
     const cy = this.groundAt(cam.position.x, cam.position.z)
-    if (cy !== null && cam.position.y < cy + T.CAM_MIN_HEIGHT) cam.position.y = cy + T.CAM_MIN_HEIGHT
+    if (cy !== null) {
+      const floor = cy + T.CAM_MIN_HEIGHT
+      if (cam.position.y < floor) {
+        const lift = floor - cam.position.y
+        cam.position.y = floor
+        ctl.target.y += lift
+      }
+    }
   }
 }
 
@@ -190,7 +234,7 @@ export class FlyControls {
  * The camera's near plane is 0.5 m and the vertical fov 60 degrees, so the ground first enters the
  * frustum 0.5 / sin(30 deg) = 1.0 m ahead of the eye horizontally; at any eye height above 0.25 m
  * the road surface is drawn right up to the bottom of the frame and nothing is clipped. Both
- * CAM_MIN_HEIGHT (0.4) and CAM_SIT_HEIGHT are comfortably above that.
+ * CAM_MIN_HEIGHT (1.0) and CAM_SIT_HEIGHT are comfortably above that.
  */
 export function sitOnRoad(
   camera: THREE.PerspectiveCamera,

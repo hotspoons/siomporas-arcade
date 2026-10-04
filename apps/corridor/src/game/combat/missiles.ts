@@ -30,14 +30,41 @@ interface Missile {
 
 interface Flash {
   mesh: THREE.Mesh
-  light: THREE.PointLight
+  /** a light from the fixed pool, or null once a newer flash has taken it over */
+  light: THREE.PointLight | null
   age: number
 }
+
+/**
+ * How many flash lights the pool keeps.
+ *
+ * ONE, not six. Three bakes the visible light COUNT into every material's shader and includes a
+ * light even at `intensity: 0`, so this pool is a permanent per-fragment cost for as long as the car
+ * is armed. Measured parked, same geometry, 2026-10-03: six lights cost ~13 ms/frame (~2.2 ms each),
+ * one costs ~0.9 ms. One still lights the ground under a missile without the bill; a second
+ * overlapping flash shares it (the newest takes it over). The count must still never change, which
+ * is the whole point of the pool.
+ */
+const FLASH_LIGHTS = 1
 
 export class MissileLayer {
   readonly group = new THREE.Group()
   private live: Missile[] = []
   private flashes: Flash[] = []
+  /**
+   * The flash lights, a FIXED pool made once and never removed.
+   *
+   * Three bakes the scene's light COUNT into every material's shader, so a `new PointLight` per
+   * explosion recompiled the whole world on that frame — a 200-280 ms stall on the first missile
+   * and on any new overlapping count after it. Holding `numPointLights` still (fade to zero,
+   * never remove) means a landing missile compiles nothing.
+   */
+  private readonly flashLights: THREE.PointLight[] = Array.from({ length: FLASH_LIGHTS }, () => {
+    const l = new THREE.PointLight(0xffaa55, 0, T.MISSILE_RADIUS * 4)
+    this.group.add(l)
+    return l
+  })
+  private flashCursor = 0
   /** the first solid thing along a segment, or null: the app supplies it from the physics world */
   private hitTest: (from: THREE.Vector3, to: THREE.Vector3) => THREE.Vector3 | null
   private groundAt: (x: number, z: number) => number | null
@@ -130,24 +157,30 @@ export class MissileLayer {
       f.age += dt
       const t = f.age / 0.45
       if (t >= 1) {
-        this.group.remove(f.mesh, f.light)
+        this.group.remove(f.mesh)
         f.mesh.geometry.dispose()
         ;(f.mesh.material as THREE.Material).dispose()
+        if (f.light) f.light.intensity = 0 // back to the pool: dim, never removed
         this.flashes.splice(this.flashes.indexOf(f), 1)
         continue
       }
       f.mesh.scale.setScalar(1 + t * T.MISSILE_RADIUS * 0.8)
       ;(f.mesh.material as THREE.MeshBasicMaterial).opacity = 0.9 * (1 - t)
-      f.light.intensity = 40 * (1 - t)
+      if (f.light) f.light.intensity = 40 * (1 - t)
     }
   }
 
   private flash(at: THREE.Vector3): void {
     const mesh = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12), new THREE.MeshBasicMaterial({ color: 0xffaa33, transparent: true, opacity: 0.9, depthWrite: false }))
     mesh.position.copy(at)
-    const light = new THREE.PointLight(0xffaa55, 40, T.MISSILE_RADIUS * 4)
+    // A light from the pool, round-robin. If every one is busy the oldest is taken over; the count
+    // is what matters and it never changes.
+    const light = this.flashLights[this.flashCursor++ % this.flashLights.length]
+    const taken = this.flashes.find((f) => f.light === light)
+    if (taken) taken.light = null
     light.position.copy(at)
-    this.group.add(mesh, light)
+    light.intensity = 40
+    this.group.add(mesh)
     this.flashes.push({ mesh, light, age: 0 })
   }
 
@@ -157,9 +190,9 @@ export class MissileLayer {
 
   dispose(): void {
     for (const m of this.live) this.group.remove(m.mesh)
-    for (const f of this.flashes) this.group.remove(f.mesh, f.light)
+    for (const f of this.flashes) this.group.remove(f.mesh)
     this.live = []
     this.flashes = []
-    this.group.removeFromParent()
+    this.group.removeFromParent() // the pool lights ride the group out
   }
 }

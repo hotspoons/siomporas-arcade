@@ -29,13 +29,14 @@
 // assembling the visible set is a typed-array copy of cached prefixes. Only tiles entering the
 // ring cost anything, and no more than GRASS_TILES_PER_FRAME of them per frame.
 import * as THREE from 'three'
-import { LAMP_PARS, retro } from '../visuals/retro'
+import { LAMPS, LAMP_PARS, retro } from '../visuals/retro'
 import { SPLAT_MASK_PARS, splatMaskUniforms } from '../visuals/splatmask'
 import type { SeasonLook } from '../visuals/season'
 import { GRASS_LOOK, type GrassType } from './groundcover'
 import { ACCUM_PARS, accumUniforms } from '../visuals/weather'
 import * as T from '../tuning'
 import { ROAD_CLIP_PARS, roadClipUniforms } from '../visuals/roadcover'
+import { grassReliefLook, grassReliefTick } from '../visuals/grassrelief'
 
 const SEGMENTS = 6
 const TILE = 8
@@ -134,6 +135,93 @@ const GLSL_NOISE = /* glsl */ `
   }
 `
 
+/**
+ * SUN-SHADOW RECEIVE, shared by the blade and card materials. Both light themselves in raw
+ * ShaderMaterials, which sit outside three's light/shadow system, so `receiveShadow` does nothing;
+ * each samples the sun's own depth texture by hand. Four-tap hardware PCF — the depth texture is a
+ * sampler2DShadow with a compare function, so each texture() is itself a comparison. Outside the
+ * sun's frustum, or before the map exists, everything is lit. Returns the RAW mask; the caller
+ * folds in the SHADOW knob. The `varying vec4 vSunShadow` is declared here; each vertex shader
+ * declares its own and writes it.
+ */
+const SUN_SHADOW_PARS = /* glsl */ `
+  uniform sampler2DShadow uSunShadow;
+  uniform vec2 uSunShadowSize;
+  uniform float uSunShadowBias;
+  uniform float uSunShadowRadius;
+  uniform float uSunShadowIntensity;
+  uniform float uSunShadowOn;
+  varying vec4 vSunShadow;
+  float sunShadowMask() {
+    if (uSunShadowOn < 0.5) return 1.0;
+    vec3 sc = vSunShadow.xyz / vSunShadow.w;
+    if (sc.x < 0.0 || sc.x > 1.0 || sc.y < 0.0 || sc.y > 1.0 || sc.z > 1.0) return 1.0;
+    sc.z += uSunShadowBias;
+    vec2 texel = vec2(1.0) / uSunShadowSize;
+    float r = uSunShadowRadius * texel.x;
+    float s = 0.0;
+    s += texture(uSunShadow, vec3(sc.xy + vec2(-r, -r), sc.z));
+    s += texture(uSunShadow, vec3(sc.xy + vec2( r, -r), sc.z));
+    s += texture(uSunShadow, vec3(sc.xy + vec2(-r,  r), sc.z));
+    s += texture(uSunShadow, vec3(sc.xy + vec2( r,  r), sc.z));
+    return s * 0.25;
+  }
+`
+
+/**
+ * GRASS CASTS ON ITSELF (fake) — shared by the blade and card materials. Real blade-on-blade
+ * shadowing wants a real depth pass over tens of thousands of blades (GRASS_CAST_REAL does that for
+ * the sun); this handles the rest — the headlamps, and the far cards — with no pass at all. Treat
+ * the turf as a procedural canopy height field and march two samples along the ground TOWARD THE
+ * BRIGHTEST LIGHT (the sun by day, the nearest headlamp by night); darken a fragment where the
+ * canopy up-light stands above it. It reads as clumps rather than uniform darkening. `mown` damps
+ * it: a mown blade has almost no canopy above it to shade it.
+ */
+const GRASS_CAST_PARS = /* glsl */ `
+  uniform float uCastStrength;
+  uniform float uCastFreq;
+  uniform float uCastReach;
+  uniform float uCastHeight;
+  float chash(vec2 p) {
+    vec3 q = fract(vec3(p.xyx) * 0.1031);
+    q += dot(q, q.yzx + 33.33);
+    return fract((q.x + q.y) * q.z);
+  }
+  float cnoise(vec2 p) {
+    vec2 i = floor(p), f = fract(p);
+    vec2 u = f * f * (3.0 - 2.0 * f);
+    return mix(mix(chash(i), chash(i + vec2(1, 0)), u.x), mix(chash(i + vec2(0, 1)), chash(i + vec2(1, 1)), u.x), u.y);
+  }
+  float grassCanopy(vec2 p) {
+    // 0 in the gaps, 1 in the tall clumps (same clumpy character as the turf lattice)
+    return smoothstep(0.45, 0.8, cnoise(p * uCastFreq));
+  }
+  vec2 brightLightXZ(vec3 w, float sunW) {
+    vec2 best = uSun.xz;
+    float bestW = sunW;
+    // the lamp loop is only worth its ALU once the headlights are actually on
+    if (uLampOn > 0.5) {
+      for (int k = 0; k < ${LAMPS}; k++) {
+        vec3 dir;
+        float reach = lampReach(w, k, dir) * uLampOn;
+        if (reach > bestW) { best = uLampPos[k].xz - w.xz; bestW = reach; }
+      }
+    }
+    return best * inversesqrt(max(dot(best, best), 1e-6));
+  }
+  float grassSelfShadow(vec3 w, float above, float mown) {
+    if (uCastStrength <= 0.001) return 1.0;
+    // how tall this fragment stands against the canopy: a short blade is shadowed by far
+    // more of the clumps up-light than a tip is
+    float hFrac = clamp(above / max(uCastHeight, 0.05), 0.0, 1.0);
+    vec2 d = brightLightXZ(w, uNightMul) * (uCastReach * 0.5);
+    float lo = hFrac + 0.03, hi = hFrac + 0.45;
+    float occ = smoothstep(lo, hi, grassCanopy(w.xz + d));
+    occ = max(occ, smoothstep(lo, hi, grassCanopy(w.xz + d * 2.0)));
+    return 1.0 - clamp(occ * uCastStrength * mix(1.0, 0.35, mown), 0.0, 1.0);
+  }
+`
+
 export class Grass {
   /** both tiers; scene adds this */
   mesh: THREE.Group
@@ -148,6 +236,8 @@ export class Grass {
   private aCard2: THREE.InstancedBufferAttribute // (rand, mown, born)
   private bladeMat: THREE.ShaderMaterial
   private cardMat: THREE.ShaderMaterial
+  /** depth-only twin of the blade vertex transform, for the sun's shadow map (GRASS_CAST_REAL) */
+  private bladeDepth: THREE.ShaderMaterial
   private capacity: number
   private cardCapacity: number
   private heightScale = 0.4
@@ -185,8 +275,8 @@ export class Grass {
   private prevEye = new THREE.Vector3(NaN, NaN, NaN)
   private prevT = 0
   private motion = 1 // 1 still … 0 moving fast: scales the wind
-  /** cards at every range: GRASS_CARDS, or the eye moving faster than GRASS_WIND_STILL_BELOW */
-  private spritesOnly = T.GRASS_CARDS > 0.5
+  /** cards at every range: GRASS_MODE 1, or the eye moving faster than GRASS_WIND_STILL_BELOW */
+  private spritesOnly = T.grassMode() === 1
   private lastTile = 'none'
   private lastHeading = Infinity
   private lastPitch = Infinity
@@ -266,6 +356,9 @@ export class Grass {
         uWind: { value: 1 },
         uGrow: { value: 0.8 },
         uRadius: { value: 40 },
+        // tip taper 0..1 (0 = cut flat, 1 = needle point), blended by the blade's mown flag
+        uTaperShort: { value: 0.25 },
+        uTaperLong: { value: 0.95 },
         uBase: { value: look.grass.base.clone() },
         uTip: { value: look.grass.tip.clone() },
         uDry: { value: look.grass.dry },
@@ -280,6 +373,27 @@ export class Grass {
         ...splatMaskUniforms(),
         uNightMul: { value: 1 },
         uLightTint: { value: new THREE.Color(1, 1, 1) },
+        // SUN SHADOW. The blades light themselves (half-Lambert), so they sit outside three's light
+        // system; `receiveShadow` does nothing for a raw ShaderMaterial. We sample the sun's own
+        // shadow map by hand — the same depth texture the strip and the trees use — so a tree, a
+        // building or the car drops a shadow across the blades. RECEIVE only: casting would mean a
+        // second depth pass over ~90k blades for a self-shadow that reads as noise.
+        uSunShadow: { value: null as THREE.Texture | null },
+        uSunShadowMatrix: { value: new THREE.Matrix4() },
+        uSunShadowSize: { value: new THREE.Vector2(1, 1) },
+        uSunShadowBias: { value: 0 },
+        uSunShadowRadius: { value: 1 },
+        uSunShadowIntensity: { value: 1 },
+        uSunShadowOn: { value: 0 },
+        // the strip's extras for `SHADOW` past 1 (visuals/shading.ts SHADE): crush the soft shadow
+        // mask and pull the whole fill down, so a shadowed blade matches the shadowed road
+        uShade: { value: 1 },
+        // FAKE grass-on-grass self-shadow (no depth pass): strength, canopy clump frequency, and
+        // how far up-light the canopy march reaches
+        uCastStrength: { value: 0.55 },
+        uCastFreq: { value: 0.8 },
+        uCastReach: { value: 1.8 },
+        uCastHeight: { value: 0.6 },
         ...this.weatherUniforms,
       },
       vertexShader: /* glsl */ `
@@ -290,10 +404,16 @@ export class Grass {
         uniform float uWind;
         uniform float uGrow;
         uniform float uRadius;
+        uniform float uTaperShort;
+        uniform float uTaperLong;
         varying float vT;
         varying float vRand;
+        varying float vMown;
         varying vec3 vNormal;
         varying vec3 vWorld;
+        varying vec4 vSunShadow;
+        varying float vAbove;
+        uniform mat4 uSunShadowMatrix;
         #include <common>
         #include <fog_pars_vertex>
         #include <logdepthbuf_pars_vertex>
@@ -302,6 +422,7 @@ export class Grass {
           float t = position.y;
           vT = t;
           vRand = aBlade.x;
+          vMown = aExtra.y;
           // NO POP AT THE RIM. Blade tiles are generated out to uRadius and used to appear there
           // at full height — "grass still pops in" (Rich, 2026-09-26). The height goes to zero
           // over the last 14 m before the radius, so a tile arriving at the rim arrives invisible
@@ -336,8 +457,10 @@ export class Grass {
           vec3 tangent = normalize(2.0 * it * (P1 - P0) + 2.0 * t * (P2 - P1));
           vec3 n = normalize(cross(side, tangent));
 
-          // taper, and a view-dependent thickening so edge-on blades keep a presence
-          float taper = 1.0 - t * t * 0.85;
+          // taper, and a view-dependent thickening so edge-on blades keep a presence.
+          // Short (mown) and long (rough) grass taper independently via GRASS_TAPER_SHORT/LONG.
+          float tipTaper = mix(uTaperLong, uTaperShort, aExtra.y);
+          float taper = 1.0 - t * t * tipTaper;
           vec3 toCam = normalize(cameraPosition - pOnCurve);
           float edgeOn = 1.0 - abs(dot(toCam, n));
           float w = width * taper * (1.0 + edgeOn * 0.7);
@@ -346,6 +469,8 @@ export class Grass {
           // curved cross-section: bend the normal toward the blade's side for a rounded look
           vNormal = normalize(n + side * position.x * 0.35);
           vWorld = world;
+          vAbove = world.y - root.y;
+          vSunShadow = uSunShadowMatrix * vec4(world, 1.0);
           vec4 mvPosition = viewMatrix * vec4(world, 1.0);
           gl_Position = projectionMatrix * mvPosition;
           #include <logdepthbuf_vertex>
@@ -364,10 +489,13 @@ export class Grass {
         // lights, so without this it glows in the dark (Rich, 2026-09-26)
         uniform float uNightMul;
         uniform vec3 uLightTint;
+        uniform float uShade;
         varying float vT;
         varying float vRand;
+        varying float vMown;
         varying vec3 vNormal;
         varying vec3 vWorld;
+        varying float vAbove;
         #include <fog_pars_fragment>
         #include <logdepthbuf_pars_fragment>
         ${ACCUM_PARS}
@@ -384,6 +512,8 @@ export class Grass {
         ${LAMP_PARS}
         ${SPLAT_MASK_PARS}
         ${ROAD_CLIP_PARS}
+        ${SUN_SHADOW_PARS}
+        ${GRASS_CAST_PARS}
         uniform float uLampGain;
         void main() {
           if (roadCovered(vWorld)) discard;
@@ -397,19 +527,28 @@ export class Grass {
           c = mix(c, c * vec3(1.15, 1.05, 0.65), uDry * (0.3 + 0.7 * vRand));
           // ambient occlusion at the root, where blades shade each other
           float ao = mix(0.35, 1.0, smoothstep(0.0, 0.6, vT));
-          // half-Lambert sun, sky ambient, and back-light translucency when the sun is behind
+          // half-Lambert sun, sky ambient, and back-light translucency when the sun is behind.
+          // Only the direct sun is shadowed; the 0.35 sky-ambient floor survives in shade, which
+          // is what stops a shadowed blade going black.
+          float selfSh = grassSelfShadow(vWorld, vAbove, vMown);
+          float shR = sunShadowMask();
+          float sh = mix(1.0, shR, uSunShadowIntensity) * selfSh;
           float ndl = dot(n, uSun) * 0.5 + 0.5;
           float back = pow(max(0.0, dot(v, -uSun)), 4.0) * 0.6 * vT;
-          vec3 lit = c * (0.35 + 0.75 * ndl) * ao + uTip * back;
+          vec3 lit = c * (0.35 + 0.75 * ndl * sh) * ao + uTip * back * sh;
           // a little specular sheen along the blade
           vec3 hvec = normalize(uSun + v);
-          lit += vec3(0.08) * pow(max(0.0, dot(n, hvec)), 24.0) * vT;
+          lit += vec3(0.08) * pow(max(0.0, dot(n, hvec)), 24.0) * vT * sh;
           vec3 outCol = grade(lit, uHue, uSat, uLight) * uNightMul * uLightTint;
           // and the car's headlights, which a self-lighting shader would otherwise never see
-          outCol += c * ao * lampDiffuse(vWorld, n, uLampGain);
+          outCol += c * ao * lampDiffuse(vWorld, n, uLampGain) * selfSh;
           // a blade catches the settled layer at its TIP, not at its root, so the normal it is
           // weighed by is faked upright near the top — the real one points sideways all the way up
           outCol = applyWeather(outCol, vec3(0.0, mix(0.1, 1.0, vT), 0.0), vWorld);
+          // the same extra darkening the strip gets (visuals/shading.ts SHADE): past SHADOW 1 the
+          // sun's own shadow is not enough, so crush the soft mask and pull the fill down, or a
+          // shadowed blade would sit brighter than the shadowed road beside it
+          outCol *= mix(1.0 / (1.0 + uShade * 3.0), 1.0, pow(clamp(shR, 0.0, 1.0), 1.0 + uShade * 2.0));
           gl_FragColor = vec4(outCol, 1.0);
           #include <fog_fragment>
           #include <colorspace_fragment>
@@ -421,6 +560,43 @@ export class Grass {
     this.blades = new THREE.Mesh(this.bladeGeo, this.bladeMat)
     this.blades.frustumCulled = false
     this.blades.name = 'grass-blades'
+    // REAL SUN CAST. A raw ShaderMaterial needs its own depth material — three's default knows
+    // nothing about aRoot/aBlade. This is the blade vertex transform with the wind, the rim fade
+    // and the edge-on widening stripped out: it only has to put the blade in the light's clip
+    // space. Casting is what lets the WORLD receive blade shadows; the color pass reads them back
+    // through the same map (SUN_SHADOW_PARS) for blade-on-blade.
+    this.bladeDepth = new THREE.ShaderMaterial({
+      uniforms: {
+        uTime: { value: 0 },
+        uGrow: { value: 0.8 },
+      },
+      vertexShader: /* glsl */ `
+        attribute vec3 aRoot;
+        attribute vec4 aBlade; // rand, height, width, lean
+        attribute vec2 aExtra; // born (uTime of the tile), mown
+        uniform float uTime;
+        uniform float uGrow;
+        void main() {
+          float t = position.y;
+          float h = aBlade.y * smoothstep(aExtra.x, aExtra.x + uGrow, uTime);
+          float lean = aBlade.w;
+          vec3 root = aRoot;
+          float yaw = aBlade.x * 6.2831853;
+          vec3 face = vec3(cos(yaw), 0.0, sin(yaw));
+          vec3 side = vec3(-face.z, 0.0, face.x);
+          vec3 P0 = root;
+          vec3 P2 = root + vec3(0.0, h, 0.0) + face * (lean * h);
+          vec3 P1 = root + vec3(0.0, h * 0.62, 0.0) + face * (lean * h * 0.25);
+          float it = 1.0 - t;
+          vec3 pOnCurve = it * it * P0 + 2.0 * it * t * P1 + t * t * P2;
+          vec3 world = pOnCurve + side * position.x * aBlade.z * 0.5;
+          gl_Position = projectionMatrix * viewMatrix * vec4(world, 1.0);
+        }
+      `,
+      fragmentShader: /* glsl */ `void main() { gl_FragColor = vec4(1.0); }`,
+      side: THREE.DoubleSide,
+    })
+    this.blades.customDepthMaterial = this.bladeDepth
 
     // --- clump cards ---------------------------------------------------------------------------
     this.cardGeo = cardGeometry()
@@ -457,6 +633,21 @@ export class Grass {
         ...splatMaskUniforms(),
         uNightMul: { value: 1 },
         uLightTint: { value: new THREE.Color(1, 1, 1) },
+        // sun-shadow RECEIVE and fake self-shadow, same chunks the blades use (see SUN_SHADOW_PARS
+        // / GRASS_CAST_PARS). Cards used to be outside the blade radius and skipped; now they fill
+        // the far field in every mode, so a shadowed card must go dark with the ground beside it.
+        uSunShadow: { value: null as THREE.Texture | null },
+        uSunShadowMatrix: { value: new THREE.Matrix4() },
+        uSunShadowSize: { value: new THREE.Vector2(1, 1) },
+        uSunShadowBias: { value: 0 },
+        uSunShadowRadius: { value: 1 },
+        uSunShadowIntensity: { value: 1 },
+        uSunShadowOn: { value: 0 },
+        uShade: { value: 1 },
+        uCastStrength: { value: 0.55 },
+        uCastFreq: { value: 0.8 },
+        uCastReach: { value: 1.8 },
+        uCastHeight: { value: 0.6 },
         ...this.weatherUniforms,
       },
       vertexShader: /* glsl */ `
@@ -473,6 +664,9 @@ export class Grass {
         varying float vRand;
         varying float vMown;
         varying vec3 vCardWorld;
+        varying vec4 vSunShadow;
+        varying float vAbove;
+        uniform mat4 uSunShadowMatrix;
         #include <common>
         #include <fog_pars_vertex>
         #include <logdepthbuf_pars_vertex>
@@ -496,6 +690,9 @@ export class Grass {
           vec3 world = root + right * (position.x * size * uWidth + lean * position.y * size) + vec3(0.0, position.y * size, 0.0)
                      + vec3(0.8, 0.0, 0.5) * gust * position.y * size;
           vCardWorld = world;
+          // above the root, for the fake self-shadow; and this fragment in the sun's shadow clip
+          vAbove = position.y * size;
+          vSunShadow = uSunShadowMatrix * vec4(world, 1.0);
           vec4 mvPosition = viewMatrix * vec4(world, 1.0);
           gl_Position = projectionMatrix * mvPosition;
           #include <logdepthbuf_vertex>
@@ -534,25 +731,37 @@ export class Grass {
         ${LAMP_PARS}
         ${SPLAT_MASK_PARS}
         ${ROAD_CLIP_PARS}
+        ${SUN_SHADOW_PARS}
+        ${GRASS_CAST_PARS}
         uniform float uLampGain;
         void main() {
           if (roadCovered(vCardWorld)) discard;
           splatDissolve(vCardWorld);
           #include <logdepthbuf_fragment>
-          vec4 s = texture2D(uMap, vUv);
-          if (s.a < 0.5) discard;
-          vec3 c = mix(uBase, uTip, smoothstep(0.1, 1.0, vUv.y));
+          vec3 c;
+          float shade;
+          {
+            vec4 s = texture2D(uMap, vUv);
+            if (s.a < 0.5) discard;
+            c = mix(uBase, uTip, smoothstep(0.1, 1.0, vUv.y));
+            shade = mix(0.55, 1.15, s.r);
+          }
           c *= 0.8 + 0.4 * vRand;
           c = mix(c, c * vec3(1.15, 1.05, 0.65), uDry * (0.3 + 0.7 * vRand));
-          // the baked shade carries root darkening and per-blade variation
-          float shade = mix(0.55, 1.15, s.r);
           // a mown card is a low even turf; keep it a touch darker like the strip's mown texture
           c *= shade * mix(1.0, 0.85, vMown);
           vec3 outCol = grade(c, uHue, uSat, uLight) * uNightMul * uLightTint;
           // a card is a billboard with no honest normal; light it as the turf it represents,
           // which is flat, so the beam rakes across it the way it rakes across the verge
           outCol += c * lampDiffuse(vCardWorld, vec3(0.0, 1.0, 0.0), uLampGain);
+          // RECEIVE the sun's shadow (tree/building/car) and ADD the fake self-shadow, so a card
+          // goes dark with the ground beside it and clumps cast on their neighbours
+          float shR = sunShadowMask();
+          float selfSh = grassSelfShadow(vCardWorld, vAbove, vMown);
+          outCol *= mix(1.0, shR, uSunShadowIntensity) * selfSh;
           outCol = applyWeather(outCol, vec3(0.0, mix(0.1, 1.0, vUv.y), 0.0), vCardWorld);
+          // the same extra crush the blades and the strip get past SHADOW 1
+          outCol *= mix(1.0 / (1.0 + uShade * 3.0), 1.0, pow(clamp(shR, 0.0, 1.0), 1.0 + uShade * 2.0));
           gl_FragColor = vec4(outCol, 1.0);
           #include <fog_fragment>
           #include <colorspace_fragment>
@@ -624,6 +833,8 @@ export class Grass {
 
   tick(t: number) {
     this.bladeMat.uniforms.uRadius.value = T.GRASS_RADIUS
+    this.bladeMat.uniforms.uTaperShort.value = T.GRASS_TAPER_SHORT
+    this.bladeMat.uniforms.uTaperLong.value = T.GRASS_TAPER_LONG
     this.now = t
     for (const m of [this.bladeMat, this.cardMat]) {
       m.uniforms.uTime.value = t
@@ -636,10 +847,50 @@ export class Grass {
       m.uniforms.uLight.value = T.GRASS_LIGHT
       m.uniforms.uLampGain.value = T.HEADLIGHT_BOUNCE
     }
-    // WIDTH_SCALE defaults to 0.55 and only used to size blades; cards ignored it, so the width
-    // knob never filled the tufts. Divide by that default and the same slider moves both.
-    this.cardMat.uniforms.uWidth.value = T.GRASS_SPRITE_WIDTH * (T.GRASS_WIDTH_SCALE / 0.55)
+    // SUN SHADOW: read the sun's live shadow map. It only exists after the first shadow render,
+    // and `castShadow` flips with the SHADOW knob, so this is a per-frame read rather than a
+    // one-time bind. BOTH the blades and the cards receive it (and fake-self-shadow).
+    {
+      const light = this.sunLight
+      const shadow = light && light.castShadow ? light.shadow : null
+      const map = shadow && shadow.map ? (shadow.map.depthTexture ?? shadow.map.texture) : null
+      const intensity = shadow ? ((shadow as THREE.LightShadow & { intensity?: number }).intensity ?? 1) : 1
+      for (const mat of [this.bladeMat, this.cardMat]) {
+        const u = mat.uniforms
+        u.uSunShadowOn.value = map ? 1 : 0
+        u.uSunShadow.value = map
+        u.uShade.value = T.SHADOW
+        u.uCastStrength.value = T.GRASS_CAST
+        u.uCastFreq.value = 1 / Math.max(0.05, T.GRASS_CAST_SCALE)
+        u.uCastReach.value = T.GRASS_CAST_REACH
+        u.uCastHeight.value = Math.max(0.15, this.heightScale * T.GRASS_ROUGH_HEIGHT * this.look.height)
+        if (map && shadow) {
+          u.uSunShadowMatrix.value.copy(shadow.matrix)
+          u.uSunShadowSize.value.set(shadow.mapSize.x, shadow.mapSize.y)
+          u.uSunShadowBias.value = shadow.bias
+          u.uSunShadowRadius.value = 1
+          u.uSunShadowIntensity.value = intensity
+        }
+      }
+    }
+    // REAL CAST: spool the blades into the sun's shadow map so the world receives them. The depth
+    // twin keeps its own clock; it is deliberately wind-free (imperceptible at shadow resolution).
+    this.blades.castShadow = T.GRASS_CAST_REAL > 0.02
+    this.bladeDepth.uniforms.uTime.value = t
+    this.bladeDepth.uniforms.uGrow.value = T.GRASS_GROW_S
+    // THICK is the same number on the blades and the cards; cards once ignored it, so the width
+    // knob never filled the tufts.
+    this.cardMat.uniforms.uWidth.value = T.GRASS_SPRITE_WIDTH * T.GRASS_THICK
     this.cardMat.uniforms.uLean.value = T.GRASS_SPRITE_LEAN
+    // mode 1 is cards only (assemble draws no blades anyway); mode 0 keeps the real 3D blades, as
+    // does the relief underlayment (GRASS_GROUND), which is a separate choice.
+    this.blades.visible = T.grassMode() !== 1
+    grassReliefLook(
+      this.bladeMat.uniforms.uBase.value as THREE.Color,
+      this.bladeMat.uniforms.uTip.value as THREE.Color,
+      this.bladeMat.uniforms.uDry.value as number,
+    )
+    grassReliefTick(t, this.look)
   }
 
   /**
@@ -652,7 +903,7 @@ export class Grass {
       T.GRASS_MOWN_PER_M2, T.GRASS_ROUGH_PER_M2, T.GRASS_RADIUS, T.GRASS_SPRITE_RADIUS,
       T.GRASS_SPRITE_PER_M2, T.GRASS_MOW_LINE, T.GRASS_MAX_FROM_ROAD, T.GRASS_PATCHINESS,
       T.GRASS_PATCH_SIZE, T.GRASS_SCATTER, T.GRASS_SLOPE_MAX, T.GRASS_MOWN_HEIGHT,
-      T.GRASS_ROUGH_HEIGHT, T.GRASS_LEAN, T.GRASS_HEIGHT_SCALE, T.GRASS_WIDTH_SCALE,
+      T.GRASS_ROUGH_HEIGHT, T.GRASS_LEAN, T.GRASS_HEIGHT, T.GRASS_THICK, T.GRASS_DENSITY,
       T.GRASS_SPRITE_SCALE, T.GRASS_MAX_SHELF, this.heightScale, this.type,
     ].join(',')
   }
@@ -711,14 +962,14 @@ export class Grass {
     this.eye.copy(eye)
     this.fwd.copy(fwd)
     this.pitch = pitch
-    // GRASS_CARDS keeps the distance cards everywhere, including beside the camera. With it off,
-    // a moving eye still drops the blade mesh: generating it is the hitch, and the cards cover
-    // the same ground. Slowing back down asks for the blades.
+    // GRASS_MODE 1 keeps the distance cards everywhere, including beside the camera. With the
+    // blade mode on, a moving eye can still drop the blade mesh (GRASS_WIND_STILL_BELOW): generating
+    // it is the hitch, and the cards cover the same ground. Slowing back down asks for the blades.
     const still = T.GRASS_WIND_STILL_BELOW
     // 0 means the blades stay, however fast the eye moves. A positive threshold is the old
     // swap: cards while moving, blades once you slow down.
     const bySpeed = still > 0 && Number.isFinite(this.prevEye.x) && (this.spritesOnly ? speed > still * 0.6 : speed > still)
-    const wantSprites = T.GRASS_CARDS > 0.5 || bySpeed
+    const wantSprites = T.grassMode() === 1 || bySpeed
     let modeChanged = false
     if (wantSprites !== this.spritesOnly) {
       this.spritesOnly = wantSprites
@@ -816,6 +1067,16 @@ export class Grass {
     if (card !== u) card.copy(u)
   }
 
+  private sunLight: THREE.DirectionalLight | null = null
+  /**
+   * The sun light itself, so the blades can RECEIVE its shadow. They light themselves with
+   * half-Lambert in a raw ShaderMaterial, which sits outside three's light/shadow system, so
+   * `receiveShadow` on the mesh does nothing — tick() samples the light's depth texture by hand.
+   */
+  setSunShadow(light: THREE.DirectionalLight | null) {
+    this.sunLight = light
+  }
+
   /** forget the cached tiles inside a world box (x0, z0, x1, z1) so they regenerate: the vegetation mask for that ground just arrived */
   invalidateWithin(x0: number, z0: number, x1: number, z1: number) {
     let n = 0
@@ -854,13 +1115,13 @@ export class Grass {
   /** One 8 m tile at full density. Deterministic in (tx, tz): the same tile always seeds alike. */
   private generate(tx: number, tz: number, withBlades: boolean): Tile {
     const cell = 1.0
-    const perCellMax = Math.max(T.GRASS_MOWN_PER_M2, T.GRASS_ROUGH_PER_M2)
+    const perCellMax = Math.max(T.GRASS_MOWN_PER_M2, T.GRASS_ROUGH_PER_M2) * T.GRASS_DENSITY
     const maxBlades = withBlades ? Math.ceil(TILE * TILE * perCellMax) + 64 : 0
     const blades = new Float32Array(maxBlades * BLADE_F)
     const rank = new Float32Array(maxBlades)
     // cards scale with the blade density and with how little ground a short clump covers, so the
     // buffer has to fit the densest cell, not the bare sprite count
-    const maxCards = Math.ceil(TILE * TILE * Math.min(18, T.GRASS_SPRITE_PER_M2 * (Math.max(T.GRASS_MOWN_PER_M2, T.GRASS_ROUGH_PER_M2) / 40) * 6 * 1.6)) + 16
+    const maxCards = Math.ceil(TILE * TILE * Math.min(18, T.GRASS_SPRITE_PER_M2 * (Math.max(T.GRASS_MOWN_PER_M2, T.GRASS_ROUGH_PER_M2) / 40) * 6 * 1.6 * T.GRASS_DENSITY)) + 16
     const cards = new Float32Array(maxCards * CARD_F)
     const crank = new Float32Array(maxCards)
     let n = 0, nc = 0, mownCells = 0, cells = 0
@@ -910,7 +1171,7 @@ export class Grass {
         if (mown) mownCells++
         // the editor's local corrections: [height multiplier, density multiplier]
         const [ah, ad] = this.adjustAt ? this.adjustAt(wx, -wz) : [1, 1]
-        const perCell = withBlades ? Math.round((mown ? T.GRASS_MOWN_PER_M2 : T.GRASS_ROUGH_PER_M2) * this.look.density * (0.7 + 0.6 * patch) * ad) : 0
+        const perCell = withBlades ? Math.round((mown ? T.GRASS_MOWN_PER_M2 : T.GRASS_ROUGH_PER_M2) * this.look.density * (0.7 + 0.6 * patch) * ad * T.GRASS_DENSITY) : 0
         // one clump centre per cell; blades scatter around it
         const ccx = wx + (hash(cx * 7919 + cz * 104729) - 0.5) * cell
         const ccz = wz + (hash(cx * 15485863 + cz * 32452843) - 0.5) * cell
@@ -931,8 +1192,8 @@ export class Grass {
           const y = this.groundAt(x, -z) - 0.02
           const rnd = hash(cx * 29 + cz * 31 + b * 3)
           const shape = mown ? this.look.mown : this.look.height
-          const height = (mown ? T.GRASS_MOWN_HEIGHT : this.heightScale * T.GRASS_ROUGH_HEIGHT * tall) * shape * ah * T.GRASS_HEIGHT_SCALE * (0.6 + 0.8 * hash(cx * 3 + cz * 5 + b * 7))
-          const width = (mown ? 0.035 : 0.05 + 0.03 * rnd) * T.GRASS_WIDTH_SCALE * this.look.width
+          const height = (mown ? T.GRASS_MOWN_HEIGHT : this.heightScale * T.GRASS_ROUGH_HEIGHT * tall) * shape * ah * 1.5 * T.GRASS_HEIGHT * (0.6 + 0.8 * hash(cx * 3 + cz * 5 + b * 7))
+          const width = (mown ? 0.035 : 0.05 + 0.03 * rnd) * 0.55 * T.GRASS_THICK * this.look.width
           const lean = Math.max(0, 0.15 + this.look.lean + T.GRASS_LEAN * hash(cx * 11 + cz * 19 + b * 23))
           // A BLADE'S TIP MUST CLEAR THE PAVEMENT, NOT JUST ITS ROOT. The cell and the clump were
           // tested, but a blade scatters up to GRASS_SCATTER/2 beyond the clump — measured on
@@ -978,9 +1239,9 @@ export class Grass {
         // clump cards follow the same density as the blades. A short card covers less ground, so
         // the mown strip (and a low height scale) plants more of them; GRASS_SPRITE_PER_M2 is the
         // count at 40 blades/m² and a ~0.6 m clump, not a fixed number of tufts.
-        const bladePer = (mown ? T.GRASS_MOWN_PER_M2 : T.GRASS_ROUGH_PER_M2) * this.look.density * (0.7 + 0.6 * patch) * Math.max(0, ad)
+        const bladePer = (mown ? T.GRASS_MOWN_PER_M2 : T.GRASS_ROUGH_PER_M2) * this.look.density * (0.7 + 0.6 * patch) * Math.max(0, ad) * T.GRASS_DENSITY
         const baseH = mown ? T.GRASS_MOWN_HEIGHT * 1.6 * this.look.mown : this.heightScale * T.GRASS_ROUGH_HEIGHT * tall * 0.8 * this.look.height
-        const sizeNom = Math.max(0.2, baseH * Math.max(0.15, ah) * T.GRASS_HEIGHT_SCALE * T.GRASS_SPRITE_SCALE)
+        const sizeNom = Math.max(0.2, baseH * Math.max(0.15, ah) * 1.5 * T.GRASS_HEIGHT * T.GRASS_SPRITE_SCALE)
         const cover = Math.min(6, (0.85 / sizeNom) * (0.85 / sizeNom))
         const cardsHere = Math.min(18, T.GRASS_SPRITE_PER_M2 * (bladePer / 40) * cover)
         const want = Math.floor(cardsHere) + (hash(cx * 61 + cz * 67) < cardsHere % 1 ? 1 : 0)
@@ -991,12 +1252,12 @@ export class Grass {
           // inside the asphalt drew a tuft about 0.6 m out over the road, which at fifty metres
           // in headlights is exactly "grass growing through the road". Its half-width has to
           // clear the kerb, not its centre.
-          const cardHalf = 0.5 * sizeNom * T.GRASS_SPRITE_WIDTH * (T.GRASS_WIDTH_SCALE / 0.55)
+          const cardHalf = 0.5 * sizeNom * T.GRASS_SPRITE_WIDTH * T.GRASS_THICK
           if (this.roadDistance(x, z) < this.pavedHalf + T.GRASS_ROAD_CLEAR + cardHalf) continue
           // a card is a metre across; its far edge must clear a mask too, not just its foot
           if (this.blockedAt && (this.blockedAt(x + 0.5, z) || this.blockedAt(x - 0.5, z) || this.blockedAt(x, z + 0.5) || this.blockedAt(x, z - 0.5))) continue
           const y = this.groundAt(x, -z) - 0.03
-          const size = baseH * ah * T.GRASS_HEIGHT_SCALE * T.GRASS_SPRITE_SCALE * (0.75 + 0.5 * hash(cx * 101 + cz * 103 + b * 107))
+          const size = baseH * ah * 1.5 * T.GRASS_HEIGHT * T.GRASS_SPRITE_SCALE * (0.75 + 0.5 * hash(cx * 101 + cz * 103 + b * 107))
           const o = nc * CARD_F
           cards[o] = x
           cards[o + 1] = y

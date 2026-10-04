@@ -678,7 +678,7 @@ export class TrafficLayer {
    */
   private lightCars(glow: { s: Shown; d2: number }[]): void {
     glow.sort((a, b) => a.d2 - b.d2)
-    let budget = 12
+    let budget = Math.max(0, Math.round(T.TRAFFIC_LIGHTS))
     const night = this.night
     // Same knob as the pool on the road, three times brighter on the lamp itself.
     const lens = (T.TAILLIGHT / 0.025) * 3 * night
@@ -690,13 +690,16 @@ export class TrafficLayer {
       const need = heads.length + tails.length
       const on = need > 0 && need <= budget
       if (on) budget -= need
+      // `visible`, not just intensity: an intensity-0 light still sits in the forward shader's light
+      // loop and costs ground shading, so the daytime must remove it, not dim it (measured 2026-10-04).
+      const lit = on && night > 0.02
       for (const spot of heads) {
-        spot.visible = on && T.HEADLIGHT > 0.001
-        spot.intensity = on ? 9 * night * T.HEADLIGHT : 0
+        spot.visible = lit && T.HEADLIGHT > 0.001
+        spot.intensity = lit ? 9 * night * T.HEADLIGHT : 0
       }
       for (const spot of tails) {
-        spot.visible = on && T.TAILLIGHT > 0.001
-        spot.intensity = on ? 9 * night * T.TAILLIGHT : 0
+        spot.visible = lit && T.TAILLIGHT > 0.001
+        spot.intensity = lit ? 9 * night * T.TAILLIGHT : 0
         spot.distance = T.TAILLIGHT_RANGE
         spot.angle = T.TAILLIGHT_ANGLE
         spot.target.position.x = spot.position.x - Math.max(1.2, T.TAILLIGHT_RANGE * 0.65)

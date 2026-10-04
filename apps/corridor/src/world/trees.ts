@@ -28,6 +28,7 @@ import { Flora, type FloraSpecies, type SpeciesWeight } from './flora'
 import { ARCHETYPES, archetypeFor, optionsFor, type Archetype, type LeafKind } from './species'
 import { greyscaleTexture, type SeasonLook } from '../visuals/season'
 import * as T from '../tuning'
+import { TREE_BUDGET } from './treebudget'
 
 export interface TreeRecord {
   x: number // world X (east)
@@ -134,7 +135,15 @@ function buildVariant(a: Archetype, capacity: number, h: number): Variant {
    * pixel count saved what halving the pixel count saves. A leaf has no specular worth the money.
    */
   const leafMat = new THREE.MeshLambertMaterial({ map: src.map, color: src.color, side: THREE.DoubleSide, alphaTest: 0.5 })
-  installRoadClip(leafMat)
+  /*
+   * BARK AND GROUND GET THE ROAD MASK; LEAVES DO NOT, and that is the whole point of the mask.
+   *
+   * It exists so a trunk or a rock does not stand in the lane where the station distance and the
+   * asphalt disagree. A crown arcing over the lane from a tree beside it is the picture, not the
+   * bug — and clipping the leaf material cut a hole in the canopy over every road instead. Bark
+   * keeps it; the near leaves, the far canopy and the impostors are all one leaf material and all
+   * come off it here (Rich, 2026-10-03).
+   */
   installRoadClip(t.branchesMesh.material as THREE.Material)
   const leavesFull = new THREE.InstancedMesh(t.leavesMesh.geometry, leafMat, capacity)
   // a thinner canopy for spring and autumn: same tree, a third of the leaves, same seed
@@ -226,6 +235,11 @@ export class NearTrees {
    * by distance, so the last one seated is the farthest, and that is where the handover is.
    */
   horizon = 0
+  /** the effective near radius the last seat used — the adaptive budget's answer, not the knob */
+  radiusNow = 0
+  /** trees detected inside the knob-level near footprint, and when it was last counted (ms) */
+  private detected = 0
+  private countedAt = 0
   private flora: Flora | null
   /** memoised variant per tree index: the draw is stable, so it is worth computing once */
   private chosen: Int16Array
@@ -250,6 +264,7 @@ export class NearTrees {
     this.quantiles = hs.length ? [q(0.2), q(0.55), q(0.9)] : []
     this.chosen = new Int16Array(trees.length).fill(-1)
     this.indexTrees(trees)
+    TREE_BUDGET.reset()
   }
 
   /**
@@ -502,6 +517,40 @@ export class NearTrees {
   /** was the simple style on last time `update` ran, so switching it rebuilds the far set once */
   private wasSimple = false
 
+  /**
+   * How many trees stand inside `radius` of the eye — the signal the adaptive budget reads.
+   *
+   * Euclidean, not `lodDistance`: this is a density reading, and the cone-stretched footprint the
+   * seating uses would make the number move with the view direction, which would make the radius it
+   * chooses chase the camera. Parked and moved trees are left out.
+   */
+  countWithin(eye: THREE.Vector3, radius: number): number {
+    const r = Math.ceil(radius / this.cell)
+    const c0 = Math.floor(eye.x / this.cell)
+    const c1 = Math.floor(eye.z / this.cell)
+    const r2 = radius * radius
+    let n = 0
+    for (let a = -r; a <= r; a++) {
+      for (let b = -r; b <= r; b++) {
+        const arr = this.grid.get(`${c0 + a},${c1 + b}`)
+        if (!arr) continue
+        for (const i of arr) {
+          const t = this.trees[i]
+          if (!t || !Number.isFinite(t.x) || t.spare) continue
+          const dx = t.x - eye.x
+          const dz = t.z - eye.z
+          if (dx * dx + dz * dz <= r2) n++
+        }
+      }
+    }
+    return n
+  }
+
+  /** the tree count last read by the budget, and the effective radius it chose */
+  detectedTrees(): { count: number; radius: number } {
+    return { count: this.detected, radius: this.radiusNow }
+  }
+
   update(eye: THREE.Vector3, force = false, fwd = new THREE.Vector3(1, 0, 0), pitch = 0): boolean {
     /*
      * LOLLIPOPS EVERYWHERE. `TREE_SIMPLE` drops the near set entirely — the far LOD then draws
@@ -529,10 +578,24 @@ export class NearTrees {
     let dh = Math.abs(heading - this.lastHeading)
     if (dh > Math.PI) dh = 2 * Math.PI - dh
     const turned = dh > T.TREE_REFRESH_TURN
-    if (!force && !turned && eye.distanceTo(this.last) < 15) return false
+    const moved = eye.distanceTo(this.last)
+    /*
+     * THE ADAPTIVE BUDGET. The radius and capacity below are the KNOBS; the seat uses what the
+     * budget makes of them from the tree count (see treebudget.ts). Counting is a grid walk, so it
+     * is throttled — and only runs on a frame that could reseat anyway.
+     */
+    if (force || turned || moved >= 15 || performance.now() - this.countedAt > 450) {
+      this.countedAt = performance.now()
+      this.detected = this.countWithin(eye, Math.min(T.TREE_NEAR_RADIUS, 200))
+      TREE_BUDGET.trees(this.detected, Math.min(this.capacity, T.TREE_NEAR_CAPACITY) * this.variants.length, T.TREE_NEAR_RADIUS)
+    }
     // radius and capacity are knobs (F6 → trees); the footprint is stretched behind the view
-    const radius = T.TREE_NEAR_RADIUS
-    const cap = Math.min(this.capacity, Math.round(T.TREE_NEAR_CAPACITY))
+    const radius = TREE_BUDGET.radius(T.TREE_NEAR_RADIUS)
+    const cap = Math.min(this.capacity, Math.round(TREE_BUDGET.capacity(T.TREE_NEAR_CAPACITY)))
+    // a material budget change reseats even from a standstill, or the new answer would wait for 15 m
+    const rChanged = this.radiusNow > 0 && Math.abs(radius - this.radiusNow) > Math.max(3, this.radiusNow * 0.08)
+    if (!force && !turned && moved < 15 && !rChanged) return false
+    this.radiusNow = radius
     const cands: { i: number; d2: number }[] = []
     const c0 = Math.floor(eye.x / this.cell), c1 = Math.floor(eye.z / this.cell)
     const n = Math.ceil((radius * (1 + T.LOD_BEHIND_PENALTY)) / this.cell)

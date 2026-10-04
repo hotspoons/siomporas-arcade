@@ -1,17 +1,27 @@
-// The Milky Way, from a map of the real one.
+// The Milky Way, from a photograph of the real one.
 //
 // Rich, 2026-09-27: "If there was a public dataset for the sky it would be awesome to use it to
-// draw stars and the Milky Way."
+// draw stars and the Milky Way." Then, 2026-10-03, looking at the old five-contour isophote map:
+// "the milky way sucks. I'd prefer we had an ultra high resolution actual raster of it".
 //
-// So this is not noise shaped like a band. It is the d3-celestial isophotes -- five nested
-// brightness contours of the real galaxy -- rasterised by `tools/sky/ingest.mjs` into an
-// equirectangular luminance map in equatorial coordinates, and sampled here on the same celestial
-// sphere the catalogue stars sit on, turned by the same matrix. The bulge is over Sagittarius
-// because that is where the bulge is; the Great Rift is dark because the dust is there.
+// So it is the real thing now: NASA's Deep Star Maps 2020, the Milky Way layer, a 4096 x 2048
+// equirectangular image in celestial coordinates -- dust lanes, the bulge over Sagittarius, both
+// Magellanic Clouds. NASA removed the bright Hipparcos/Tycho stars from this layer on purpose, so
+// it layers under this renderer's own catalogue stars instead of doubling them. `tools/sky/
+// ingest.mjs` decodes the OpenEXR, turns it into this file's equatorial convention, black-points
+// it and writes the committed JPEG; see that file for the source and the credit.
 //
-// VECTOR CONTOURS RATHER THAN A PHOTOGRAPH, deliberately. A Brunier panorama behind a stylised
-// dome reads as a photograph pasted behind a drawing. Contours blurred to about a degree give a
-// soft glow that sits with the stars, which is the look being kept.
+// KEYED ON BLACK. The ingest drives the empty sky to exactly zero before encoding, and this shader
+// keys on luminance as well. Between them the map can only ADD light to the dome: it never pastes
+// a black rectangle over the sky, and the soft key also swallows the JPEG's ringing around the
+// band. That is what "alpha key on black" has to mean for a bitmap this large without shipping a
+// second, six-megabyte alpha channel.
+//
+// THREE KNOBS, because the plate as ingested is only the start. SKY_MILKYWAY_SHARP is an unsharp
+// mask over the band's own texels, SKY_MILKYWAY_CONTRAST is a hue-preserving gamma on its light,
+// and SKY_MILKYWAY_BLUR is a nine-tap gaussian at a radius in texels. All three sit BELOW the
+// black key, so only the galaxy pays for them -- an empty sky is discarded before any is reached,
+// and a zero blur is not sampled at all.
 //
 // The geometry is a sphere and the mapping is computed in the shader from the direction itself
 // rather than from the sphere's own UVs: the equatorial frame here has +x at the vernal equinox
@@ -35,13 +45,18 @@ const VERT = /* glsl */ `
 
 const FRAG = /* glsl */ `
   uniform sampler2D uMap;
+  uniform vec2 uTexel;
   uniform float uNight;
   uniform float uGain;
   uniform float uCover;
+  uniform float uSharp;
+  uniform float uContrast;
+  uniform float uBlur;
   varying vec3 vDir;
   varying float vAlt;
 
   const float PI = 3.1415926535;
+  const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
 
   void main() {
     // below the horizon there is no sky, and the last half degree fades rather than cuts
@@ -52,29 +67,72 @@ const FRAG = /* glsl */ `
     float ra = atan(d.y, d.x);
     float dec = asin(clamp(d.z, -1.0, 1.0));
     vec2 uv = vec2(fract((ra + PI) / (2.0 * PI)), (0.5 * PI - dec) / PI);
-    float v = texture2D(uMap, uv).r;
-    if (v <= 0.002) discard;
-    // The map is a count of nested contours, so it is already a ramp -- but a linear ramp reads as
-    // a flat smear. Squaring it puts the light where the galaxy actually concentrates it and lets
-    // the faint outer contour fall away to nothing instead of ending at an edge.
-    float b = v * v;
+    // an sRGB texture, so this is already linear light
+    vec3 c = texture2D(uMap, uv).rgb;
+    float lum = dot(c, LUMA);
+    // THE KEY. Everything at or below the black is not sky and is thrown away, so nothing here
+    // can darken the dome; a soft shoulder keeps the band's faint edge instead of cutting it.
+    float key = smoothstep(0.003, 0.02, lum);
+    if (key <= 0.0) discard;
+    // BLUR. A nine-tap gaussian at a radius in texels, for a softer, deeper-sky band and to melt
+    // the grain and the one satellite trail NASA's composite still carries. Zero is a REAL zero:
+    // the branch is not taken and the taps are not paid at all.
+    if (uBlur > 0.0) {
+      vec2 r = uTexel * uBlur;
+      c = c * 0.25
+        + (texture2D(uMap, uv + vec2(r.x, 0.0)).rgb + texture2D(uMap, uv - vec2(r.x, 0.0)).rgb
+         + texture2D(uMap, uv + vec2(0.0, r.y)).rgb + texture2D(uMap, uv - vec2(0.0, r.y)).rgb) * 0.125
+        + (texture2D(uMap, uv + r).rgb + texture2D(uMap, uv - r).rgb
+         + texture2D(uMap, uv + vec2(r.x, -r.y)).rgb + texture2D(uMap, uv + vec2(-r.x, r.y)).rgb) * 0.0625;
+      lum = dot(c, LUMA);
+    }
+    // CONTRAST. A gamma on the band's own luminance, applied to the colour too so hue is kept:
+    // black stays black and only the midtones move, which is what lifts the mist off the dust.
+    if (uContrast != 1.0) {
+      float l2 = pow(max(lum, 1e-4), 1.0 / uContrast);
+      c *= l2 / max(lum, 1e-4);
+      lum = l2;
+    }
+    // SHARPNESS. Unsharp mask against the four-neighbour mean. It is BELOW the key on purpose:
+    // the empty sky is already gone by here, so the four extra taps are only paid over the band
+    // itself, which is a small part of the sphere.
+    if (uSharp > 0.0) {
+      vec3 blur = (
+        texture2D(uMap, uv + vec2(uTexel.x, 0.0)).rgb +
+        texture2D(uMap, uv - vec2(uTexel.x, 0.0)).rgb +
+        texture2D(uMap, uv + vec2(0.0, uTexel.y)).rgb +
+        texture2D(uMap, uv - vec2(0.0, uTexel.y)).rgb
+      ) * 0.25;
+      c = max(c + (c - blur) * uSharp, 0.0);
+    }
     // the same extinction the stars take: there is more air to look through low down
     float ext = mix(0.3, 1.0, smoothstep(-0.01, 0.35, vAlt));
-    float a = b * uNight * uGain * ext * horizon * (1.0 - 0.9 * uCover);
+    float a = key * uNight * uGain * ext * horizon * (1.0 - 0.9 * uCover);
     if (a <= 0.002) discard;
-    // a touch blue, and warmer toward the bright core, which is what the dust does to it
-    vec3 tint = mix(vec3(0.72, 0.78, 1.0), vec3(1.0, 0.94, 0.84), clamp(b * 1.6, 0.0, 1.0));
-    gl_FragColor = vec4(tint * a, 1.0);
+    gl_FragColor = vec4(c * a, 1.0);
   }
 `
+
+export interface MilkyWayLook {
+  night: number
+  gain: number
+  cover: number
+  sharp: number
+  contrast: number
+  blur: number
+}
 
 export class MilkyWay {
   readonly mesh: THREE.Mesh
   private readonly u = {
     uMap: { value: null as THREE.Texture | null },
+    uTexel: { value: new THREE.Vector2(1 / 4096, 1 / 2048) },
     uNight: { value: 0 },
-    uGain: { value: 0.5 },
+    uGain: { value: 0.05 },
     uCover: { value: 0 },
+    uSharp: { value: 1.2 },
+    uContrast: { value: 0.95 },
+    uBlur: { value: 0 },
   }
 
   private constructor(map: THREE.Texture) {
@@ -106,7 +164,7 @@ export class MilkyWay {
    */
   static async load(): Promise<MilkyWay | null> {
     try {
-      const r = await fetch(`${DATA_BASE}/assets/sky/milkyway.png`, { cache: 'force-cache' })
+      const r = await fetch(`${DATA_BASE}/assets/sky/milkyway.jpg`, { cache: 'force-cache' })
       if (!r.ok) return null
       const bitmap = await createImageBitmap(await r.blob(), { imageOrientation: 'none' })
       const tex = new THREE.Texture(bitmap)
@@ -122,9 +180,14 @@ export class MilkyWay {
       tex.minFilter = THREE.LinearMipmapLinearFilter
       tex.magFilter = THREE.LinearFilter
       tex.generateMipmaps = true
-      tex.colorSpace = THREE.NoColorSpace // a luminance map, not a picture: no sRGB decode
+      // the ingest wrote sRGB-encoded colour; decode it on sample so the maths below is in light
+      tex.colorSpace = THREE.SRGBColorSpace
       tex.needsUpdate = true
-      return new MilkyWay(tex)
+      const mw = new MilkyWay(tex)
+      // one texel, for the unsharp mask. Taken from the bitmap rather than assumed: the ingest can
+      // re-cut the plate at another size and this must follow it.
+      mw.u.uTexel.value.set(1 / bitmap.width, 1 / bitmap.height)
+      return mw
     } catch {
       return null
     }
@@ -136,10 +199,13 @@ export class MilkyWay {
     this.mesh.matrixWorldNeedsUpdate = true
   }
 
-  setLook(night: number, gain: number, cover: number) {
-    this.u.uNight.value = night
-    this.u.uGain.value = gain
-    this.u.uCover.value = cover
+  setLook(look: MilkyWayLook) {
+    this.u.uNight.value = look.night
+    this.u.uGain.value = look.gain
+    this.u.uCover.value = look.cover
+    this.u.uSharp.value = look.sharp
+    this.u.uContrast.value = look.contrast
+    this.u.uBlur.value = look.blur
   }
 
   dispose() {

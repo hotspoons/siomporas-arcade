@@ -14,9 +14,10 @@ import { loadRapier, rapier } from '@apex/engine/physics/rapier'
 import { Vehicle } from '@apex/engine/physics/vehicle'
 import { PhysicsWorld } from '@apex/engine/physics/world'
 import {
-  axleGrip, cgHeightOf, defaultVehicle, describeVehicle, finalDriveFor, FINAL_DRIVE_MIN, gearedTopSpeed,
+  axleGrip, cgHeightOf, defaultVehicle, describeVehicle, estimateVmax, finalDriveFor, FINAL_DRIVE_MIN, frontShare, gearedTopSpeed,
   mountPoint, mountYaw, originHeight, overrideRange, rebalanceGears,
   lampCounts, lampOffsets, peakTorque, toDriveProfile, toEngineTuning, toVehicleSpec, tractiveForce, validateVehicle,
+  vmaxFromProfile,
   VEHICLE_CLASSES, VEHICLE_TEMPLATE_IDS, wheelBoneCount, type VehicleDoc,
 } from '../src/game/vehicle/vehicles'
 
@@ -498,6 +499,58 @@ describe('gearing you set by the speed you want', () => {
     // and the top speed is unchanged by any of it, because top and final drive are untouched
     const e = { ...defaultVehicle('hero-car').engine, gears: six }
     expect(gearedTopSpeed({ ...e, gears: seven }, 0.32)).toBeCloseTo(gearedTopSpeed(e, 0.32), 6)
+  })
+})
+
+/*
+ * THE ESTIMATE YOU GEAR TO.
+ *
+ * `effectiveTopSpeed` is the constant-power card number; the sim caps the force the tyres can put
+ * down, so the real wall moves with grip and drag, not just power. `estimateVmax` is what the editor
+ * gears top gear to, so these check it is finite, ordered the way the physics says, and that gearing
+ * to it lands the redline exactly on it.
+ */
+describe('estimating the speed a car actually reaches', () => {
+  it('gears top gear to it so the redline lands at the wall', () => {
+    const v = defaultVehicle('hero-car')
+    const vmax = estimateVmax(v)
+    expect(vmax).toBeGreaterThan(20)
+    v.engine.final_drive = finalDriveFor(v.engine, v.spec.wheelRadius, vmax)
+    expect(gearedTopSpeed(v.engine, v.spec.wheelRadius)).toBeCloseTo(vmax, 6)
+  })
+
+  it('moves with drag, grip and power — not with power alone', () => {
+    const at = (over: Record<string, number>) => {
+      const v = defaultVehicle('hero-car')
+      v.profile.overrides = { ...v.profile.overrides, ...over }
+      return estimateVmax(v)
+    }
+    const base = at({})
+    expect(at({ dragPerKg: 0.00045 })).toBeGreaterThan(base)
+    expect(at({ powerPerKg: 45 })).toBeGreaterThan(base)
+    // a hugely grippier car cannot be slower — at worst the engine is the limit and it is unchanged
+    expect(at({ gripRear: 4 })).toBeGreaterThanOrEqual(base)
+  })
+
+  it('answers a finite speed for a document with nothing to work with', () => {
+    const zero = defaultVehicle('hero-car')
+    zero.spec.mass = 0
+    expect(estimateVmax(zero)).toBe(0)
+    const noDrag = defaultVehicle('hero-car')
+    noDrag.profile.overrides = { ...noDrag.profile.overrides, dragPerKg: 0 }
+    expect(Number.isFinite(estimateVmax(noDrag))).toBe(true)
+  })
+
+  it('exposes the same arithmetic over a live profile, and memoises it', () => {
+    // the F6 auto-gear switch calls this on every tuning change with the car's live profile
+    const v = defaultVehicle('hero-car')
+    const p = toDriveProfile(v)
+    const front = frontShare(v.spec)
+    const once = vmaxFromProfile(p, front)
+    expect(once).toBeCloseTo(estimateVmax(v), 9)
+    // the same numbers must come back without re-solving, and a moved knob must not
+    expect(vmaxFromProfile(p, front)).toBe(once)
+    expect(vmaxFromProfile({ ...p, dragPerKg: 0.00045 }, front)).toBeGreaterThan(once)
   })
 })
 

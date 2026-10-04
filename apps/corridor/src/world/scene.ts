@@ -1820,13 +1820,16 @@ if (uLodOn > 0.5) {
     /**
      * Is pavement within `limit` metres? The tree planter asks this of every new cell. The full
      * edge walk is a 7×7 of station cells plus the spline, which grass needs (gradient and height).
-     * A tree only needs a yes inside 3 m, and on these roads a station more than one 20 m cell
-     * away cannot be that close to the verge.
+     * A tree only needs a yes inside `TREE_ROAD_CLEAR_M`, so a smaller square of station cells is
+     * enough; it widens with the limit so the rule holds if the knob does.
      */
     const withinPavement = (x: number, z: number, limit: number) => {
       const cx = Math.floor(x / stCell), cz = Math.floor(z / stCell)
-      for (let a = -1; a <= 1; a++) {
-        for (let b = -1; b <= 1; b++) {
+      // a station within `limit` metres sits in this cell or one beside it, so the walk grows with
+      // the limit rather than being pinned to the old three-by-three
+      const n = Math.ceil(limit / stCell) + 1
+      for (let a = -n; a <= n; a++) {
+        for (let b = -n; b <= n; b++) {
           const arr = stGrid.get(`${cx + a},${cz + b}`)
           if (!arr) continue
           for (const p of arr) {
@@ -1932,7 +1935,12 @@ if (uLodOn > 0.5) {
       if (primary && e.d > stripEdgeLimitAt(e.s)) return null
       const t = THREE.MathUtils.smoothstep(e.d, 0.6, 7.0)
       const off = offsetFn ? offsetFn(x, -z) * t : 0
-      return (e.d < 0.6 ? e.y - 0.02 : (e.y - 0.02) * (1 - t) + heightAt(x, -z) * t) + off
+      // THE TURF LIP (buildStrip). The mesh stands GRASS_LIFT_M proud of the pavement over its ramp;
+      // if this model omits it, every blade (and the car) inside the ramp is placed UNDER the mesh and
+      // is never seen — which is why no blades ever defined the raised edge.
+      const ramp = primary ? 0.6 : 2.4
+      const lift = e.d > 0 ? T.GRASS_LIFT_M * Math.min(1, e.d / ramp) : 0
+      return (e.d < 0.6 ? e.y - 0.02 : (e.y - 0.02) * (1 - t) + heightAt(x, -z) * t) + off + lift
     }
     type LiveStrip = Awaited<ReturnType<typeof buildStrip>>
     const liveStrips: LiveStrip[] = []
@@ -2089,6 +2097,12 @@ if (uLodOn > 0.5) {
       if (de?.length) authored.set(branchWho0 + i, de)
       endsFor(branchWho0 + i)
       placeBulbs()
+      // The new asphalt (and its stations) can run under trees already planted in this box. Send
+      // them back to the planter's cursor so a trunk the pavement now covers is dropped instead of
+      // left standing in the lane for the mask to hide.
+      const [bx0, bz0, bx1, bz1] = b.bounds
+      t.invalidateRegion(bx0, bz0, bx1, bz1)
+      replantNow()
       queueBranch(i, gradeUnits)
       for (const w of warped) {
         if (!roadBuilt.has(w) || !branchRoad[w]?.base) continue
@@ -2244,10 +2258,13 @@ if (uLodOn > 0.5) {
     }
     makeBulbs()
     mark('grade: lazy — nothing built at load')
-    // a road knob moved: every station's half width, the asphalt, then the strip that hugs it
-    const roadSignature = () => `${T.LANE_WIDTH}|${T.SHOULDER_OUT}|${T.SHOULDER_IN}|${T.ROAD_BLEND_M}|${T.ROAD_TAPER_M}|${T.ROAD_ONEWAY_CENTRE}|${T.CULDESAC_RADIUS}`
+    // a road knob moved: every station's half width, the asphalt, then the strip that hugs it.
+    // GRASS_LIFT_M/GRASS_EDGE_M change the strip's own geometry (the turf lip and its face), which is
+    // built here, so they belong in this signature too — otherwise the slider writes a value nothing
+    // re-reads and nothing moves.
+    const roadSignature = () => `${T.LANE_WIDTH}|${T.SHOULDER_OUT}|${T.SHOULDER_IN}|${T.ROAD_BLEND_M}|${T.ROAD_TAPER_M}|${T.ROAD_ONEWAY_CENTRE}|${T.CULDESAC_RADIUS}|${T.GRASS_LIFT_M}|${T.GRASS_EDGE_M}`
     let roadSig = roadSignature()
-    const plantSignature = () => `${T.TREE_CELL_M}|${T.TREE_MIN_H}|${T.TREE_HEIGHT_SCALE}|${T.TREE_DENSITY}|${T.TREE_PLANT_RADIUS_M}|${T.TREE_PATCH}|${T.TREE_SPARE_M}|${T.MOBILE_TREE_BUDGET}`
+    const plantSignature = () => `${T.TREE_CELL_M}|${T.TREE_MIN_H}|${T.TREE_HEIGHT_SCALE}|${T.TREE_DENSITY}|${T.TREE_PLANT_RADIUS_M}|${T.TREE_PATCH}|${T.TREE_SPARE_M}|${T.MOBILE_TREE_BUDGET}|${T.TREE_ROAD_CLEAR_M}`
     // Detail 0 is a display mode (cards only), not a new shape. Folding it into the signature
     // would regrow the models and rebake a washed atlas just to hide them.
     let shapeDetail = T.TREE_DETAIL > 0 ? T.TREE_DETAIL : 1
@@ -2301,7 +2318,7 @@ if (uLodOn > 0.5) {
     const coarse = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches
     const treeBudget = lite ? 25_000 : coarse ? Math.max(400, Math.round(T.MOBILE_TREE_BUDGET)) : 120_000
     const t = treesFromCanopy(chm.data, chm.layer.size, chm.layer.bbox, chm.layer.res, heightAt, treeBudget, T.TREE_MIN_H, (x, y) => {
-      if (withinPavement(x, -y, 3)) return true
+      if (withinPavement(x, -y, T.TREE_ROAD_CLEAR_M)) return true
       // nothing grows through a stunt fixture
       if (clearPolys.length && clearedAt(x, y)) return true
       if (!adjustments.active) return false
@@ -2734,7 +2751,7 @@ if (uLodOn > 0.5) {
         // radius then selects no one and the card simply vanishes when the model appears. Taking
         // the smaller of the two puts the dissolve exactly at the edge of the models, wherever
         // that edge happens to be this frame.
-        const inner = Math.min(T.TREE_NEAR_RADIUS, near.horizon || T.TREE_NEAR_RADIUS)
+        const inner = Math.min(near.radiusNow || T.TREE_NEAR_RADIUS, near.horizon || near.radiusNow || T.TREE_NEAR_RADIUS)
         // near-set trees that should still show a dissolving card, and how solid it is
         const keep = new Map<number, number>()
         if (band > 0 && eye && fwd) {
@@ -2768,7 +2785,7 @@ if (uLodOn > 0.5) {
       // because the two sets above are the thing under suspicion.
       treeCardsRef = () => {
         const band = Math.max(0, T.TREE_FADE_M)
-        const inner = Math.min(T.TREE_NEAR_RADIUS, near.horizon || T.TREE_NEAR_RADIUS)
+        const inner = Math.min(near.radiusNow || T.TREE_NEAR_RADIUS, near.horizon || near.radiusNow || T.TREE_NEAR_RADIUS)
         const mat = imp!.mesh.instanceMatrix.array as Float32Array
         let cards = 0
         let inBand = 0
@@ -2850,7 +2867,11 @@ if (uLodOn > 0.5) {
         roadSig = roadSignature()
         clearTimeout(roadTimer)
         roadTimer = setTimeout(() => {
-          void rebuildRoad()
+          void rebuildRoad().then(() => {
+            // a wider lane or a new taper is new pavement under standing trees: measure them again
+            t.invalidateAll()
+            replantNow()
+          })
           grass.invalidate()
         }, 250)
       }

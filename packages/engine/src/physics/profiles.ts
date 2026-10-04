@@ -117,6 +117,19 @@ export interface DriveProfile {
   dragPerKg: number
   /** N per (m/s)² per kg pressing down. 0 for anything made before about 1985 */
   downforcePerKg: number
+  /**
+   * N per kg of ACTIVE fan downforce at full spool — the Speirling's ground effect.
+   *
+   * Wings need airspeed, and a wing that presses the car down also presses it DOWN at the CoM and
+   * lifts off above a bump. A fan does not: it pulls the floor toward the road whatever the speed,
+   * which is why the fan car could out-brake everything. In this model the fan spools with what the
+   * driver is asking for (brake, throttle, or simply speed), presses at BOTH axles so neither runs
+   * out of grip, and is biased rearward by `fanRearBias` so it also plants the back of the car
+   * against the nose-over that a hard stop otherwise causes. See `Vehicle.step`.
+   */
+  fanPerKg: number
+  /** 0 = the fan presses at the CoM; 1 = all of it at the rear axle. The share that is the anti-dive */
+  fanRearBias: number
   /** rad/s² the driver has in the air about each axis. 0 = a thrown brick */
   airPitch: number
   airRoll: number
@@ -233,6 +246,8 @@ export const STUNTS: DriveProfile = {
   rollingPerKg: 0.5, // CAR_DRAG_ROLLING
   dragPerKg: 0.0006, // CAR_DRAG_AERO
   downforcePerKg: 0,
+  fanPerKg: 0,
+  fanRearBias: 0.6,
   airPitch: 0,
   airRoll: 0,
   airYaw: 0,
@@ -283,6 +298,8 @@ export const TAXI: DriveProfile = {
   rollingPerKg: 0.6,
   dragPerKg: 0.0008,
   downforcePerKg: 0,
+  fanPerKg: 0,
+  fanRearBias: 0.6,
   airPitch: 0.6,
   airRoll: 0.6,
   airYaw: 0.4,
@@ -336,6 +353,13 @@ export const STREET: DriveProfile = {
   rollingPerKg: 0.45,
   dragPerKg: 0.0009,
   downforcePerKg: 0.0004,
+  // THE HERO CAR IS A FAN CAR. Broadly, `street` is the driven car: traffic is kinematic and never
+  // runs this step, so the fan lands on the player and little else. A plain street car has no
+  // downforce, and a hard stop at a brake force a fast one wants lifts the back axle and pitches it
+  // over the front (measured end over end on this file's own test bench). Six m/s² of fan downforce,
+  // biased rearward, plants the tyres and the tail.
+  fanPerKg: 6,
+  fanRearBias: 0.62,
   airPitch: 0.35,
   airRoll: 0.35,
   airYaw: 0.15,
@@ -386,6 +410,8 @@ export const RUSH: DriveProfile = {
   rollingPerKg: 0.4,
   dragPerKg: 0.0007,
   downforcePerKg: 0.0012,
+  fanPerKg: 0,
+  fanRearBias: 0.6,
   airPitch: 2.6, // the knob that is the whole game
   airRoll: 3.2,
   airYaw: 0.8,
@@ -441,6 +467,8 @@ export const SIM: DriveProfile = {
   rollingPerKg: 0.35,
   dragPerKg: 0.00055,
   downforcePerKg: 0.0018,
+  fanPerKg: 0,
+  fanRearBias: 0.6,
   airPitch: 0,
   airRoll: 0,
   airYaw: 0,

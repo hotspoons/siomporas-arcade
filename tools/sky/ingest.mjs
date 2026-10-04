@@ -23,16 +23,24 @@
 //   - every source has a `verify` that would fail on a wrong answer, and `--prove` feeds each one
 //     a broken input to show the check can go red. A check that cannot fail is decoration.
 //
-// WHY THE ASSETS ARE COMMITTED. They are small (about 110 kB), they never change — a star
-// catalogue from 1991 is not going to be revised — and a client served from a Worker should not
-// have to reach a university's FTP server to draw the sky.
+// WHY THE ASSETS ARE COMMITTED. The catalogue and the contours are small (about 110 kB), they
+// never change — a star catalogue from 1991 is not going to be revised — and a client served from
+// a Worker should not have to reach a university's FTP server to draw the sky. The real Milky Way
+// raster is the exception at a few megabytes: it is a photograph of the galaxy and there is no
+// way to hold one that small, so it is committed at a resolution the dome can actually use.
 
 import { createHash } from 'node:crypto'
-import { mkdir, writeFile, readFile, stat } from 'node:fs/promises'
-import { createGunzip, deflateSync, inflateSync } from 'node:zlib'
-const zlibSync = (b) => deflateSync(b, { level: 9 })
+import { mkdir, writeFile, readFile } from 'node:fs/promises'
+import { createGunzip } from 'node:zlib'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+// THE RASTER SOURCE IS THE ONE EXCEPTION to "no image library". A star catalogue can be parsed
+// with string and arithmetic; a 4k photographic galaxy cannot. So this source alone decodes its
+// OpenEXR with three's EXRLoader (three is already a dependency of the app) and encodes the
+// committed JPEG with sharp (already a root devDependency). Everything still runs under
+// `node tools/sky/ingest.mjs` with no external binary.
+import sharp from 'sharp'
+import { EXRLoader } from 'three/examples/jsm/loaders/EXRLoader.js'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const REPO = path.resolve(HERE, '../..')
@@ -44,210 +52,6 @@ const arg = (n) => {
   return i >= 0 ? (process.argv[i + 1]?.startsWith('--') ? true : (process.argv[i + 1] ?? true)) : false
 }
 
-
-/* ---- a PNG writer and a polygon rasteriser, so this tool needs no image library ------------- */
-
-/** 8-bit greyscale PNG, by hand. zlib is in node; an image dependency would not be. */
-function greyPng(w, h, data) {
-  const raw = Buffer.alloc((w + 1) * h)
-  for (let y = 0; y < h; y++) {
-    raw[y * (w + 1)] = 0 // filter: none
-    data.copy ? data.copy(raw, y * (w + 1) + 1, y * w, y * w + w) : Buffer.from(data.subarray(y * w, y * w + w)).copy(raw, y * (w + 1) + 1)
-  }
-  const chunk = (type, body) => {
-    const len = Buffer.alloc(4)
-    len.writeUInt32BE(body.length)
-    const td = Buffer.concat([Buffer.from(type, 'latin1'), body])
-    const crc = Buffer.alloc(4)
-    crc.writeUInt32BE(crc32(td) >>> 0)
-    return Buffer.concat([len, td, crc])
-  }
-  const ihdr = Buffer.alloc(13)
-  ihdr.writeUInt32BE(w, 0)
-  ihdr.writeUInt32BE(h, 4)
-  ihdr[8] = 8 // bit depth
-  ihdr[9] = 0 // colour type: greyscale
-  return Buffer.concat([
-    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-    chunk('IHDR', ihdr),
-    chunk('IDAT', zlibSync(raw)),
-    chunk('IEND', Buffer.alloc(0)),
-  ])
-}
-
-let CRC_TABLE = null
-function crc32(buf) {
-  if (!CRC_TABLE) {
-    CRC_TABLE = new Int32Array(256)
-    for (let n = 0; n < 256; n++) {
-      let c = n
-      for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1
-      CRC_TABLE[n] = c
-    }
-  }
-  let c = -1
-  for (let i = 0; i < buf.length; i++) c = CRC_TABLE[(c ^ buf[i]) & 0xff] ^ (c >>> 8)
-  return c ^ -1
-}
-
-/**
- * Fill one isophote — ALL of its rings together — into a wrapping equirectangular raster.
- *
- * SCANNED DOWN MERIDIANS, NOT ALONG ROWS, and that is the whole trick. The Milky Way's two outer
- * contours each CIRCLE THE SKY: unwrapped, they span a full 360 degrees with a net drift of -360,
- * so they are the northern and southern edges of a band rather than closed blobs. A row-wise
- * even-odd fill cannot cope with that — a horizontal line crosses such a curve an odd number of
- * times — and the first version of this flooded the whole sky, giving a "Milky Way" as bright at
- * the galactic pole as on the plane.
- *
- * A meridian crosses the band's boundary an even number of times, always, and declination does not
- * wrap. So the fill runs down columns, all rings of a level contribute crossings to the same
- * parity test, and the seam never enters into it.
- *
- * Each ring is unwrapped first so its own segments are continuous, and a column consults it at
- * whichever multiple of 360 degrees puts that longitude inside the ring's span.
- */
-function fillFeature(acc, w, h, rings, add) {
-  // segments, unwrapped per ring, bucketed by the columns they touch
-  const buckets = Array.from({ length: w }, () => [])
-  const segs = []
-  for (const ring of rings) {
-    let prev = null
-    const xs = []
-    const ys = []
-    for (const [lon, lat] of ring) {
-      let x = lon
-      if (prev !== null) {
-        while (x - prev > 180) x -= 360
-        while (prev - x > 180) x += 360
-      }
-      prev = x
-      xs.push(x)
-      ys.push(lat)
-    }
-    /*
-     * EVERY WRAP OF EVERY SEGMENT COUNTS, and the reason is worth keeping.
-     *
-     * One of these contours spans 361.3 degrees after unwrapping: it is a closed curve that winds
-     * once round the sky and, near its own start, wanders 1.2 degrees further west before coming
-     * back. Over that 1.2-degree stripe the curve genuinely crosses the meridian one more time,
-     * and an earlier version of this function -- which resolved each column to a single position
-     * in a 360-degree window, on the theory that the overlap was double counting -- threw that
-     * real crossing away and flipped the parity of everything above it. It drew a band from the
-     * galactic plane to the north celestial pole, 34 columns wide at longitude 77.5 to 83.3,
-     * which is exactly where that ring's seam falls.
-     *
-     * The intervals below are half-open, so a ring that closes on itself at some meridian counts
-     * there once rather than twice.
-     */
-    const base = Math.min(...xs)
-    /*
-     * A RING THAT CIRCLES THE SKY IS CLOSED AT THE POLE.
-     *
-     * The Milky Way's faintest contour is not a loop: its two edges each run right round the
-     * celestial sphere, winding -360 degrees, and in longitude/latitude they never close. Scanning
-     * a meridian then finds an ODD number of crossings from each, so pairing them from the south
-     * pole upward fills the complement of the band wherever the count goes wrong -- measured as a
-     * horizontal stripe right across declination +30, a second across -60, and a HOLE at the
-     * galactic anticentre where the band actually is.
-     *
-     * Closing each wrapping ring over the north pole fixes it by construction: the cap adds
-     * exactly one crossing per meridian, the count becomes even everywhere, and the pole itself is
-     * covered by both edges of the band, which cancel under even-odd. That is why the north
-     * galactic pole comes out black rather than merely dark.
-     */
-    let wind = 0
-    for (let i = 1; i < xs.length; i++) wind += xs[i] - xs[i - 1]
-    const wraps = Math.abs(wind) > 180
-    if (wraps) {
-      const s = segs.length
-      segs.push([base, 90, base + 360, 90])
-      for (let c = 0; c < w; c++) buckets[c].push(s)
-    }
-    // ...and the edge that would otherwise close it -- last vertex back to first -- is DROPPED.
-    // Unwrapped, that edge spans the whole 360 degrees, so it laid a crossing on every meridian at
-    // one almost-constant latitude: measured at declination +34.7 for one edge of the band and
-    // +26.5 for the other, which is exactly the horizontal stripe across the finished map and
-    // exactly the gap that swallowed the anticentre between them.
-    let j = wraps ? 0 : xs.length - 1
-    for (let i = wraps ? 1 : 0; i < xs.length; j = i++) {
-      const x0 = xs[j]
-      const x1 = xs[i]
-      if (x0 === x1) continue
-      const s = segs.length
-      segs.push([x0, ys[j], x1, ys[i]])
-      // every column this segment spans, at every wrap that lands it on the canvas
-      const lo = Math.min(x0, x1)
-      const hi = Math.max(x0, x1)
-      for (let k = -2; k <= 2; k++) {
-        const a = lo + 360 * k
-        const b = hi + 360 * k
-        if (b < -180 || a > 180) continue
-        const c0 = Math.max(0, Math.floor(((a + 180) / 360) * w))
-        const c1 = Math.min(w - 1, Math.ceil(((b + 180) / 360) * w))
-        for (let c = c0; c <= c1; c++) buckets[c].push(s)
-      }
-    }
-  }
-  const ys = []
-  for (let c = 0; c < w; c++) {
-    const lonBase = (c + 0.5) * (360 / w) - 180
-    ys.length = 0
-    for (const si of buckets[c]) {
-      const [x0, y0, x1, y1] = segs[si]
-      const lo = Math.min(x0, x1)
-      const hi = Math.max(x0, x1)
-      // this meridian at every wrap: a segment may be a turn of the sky away from the canvas
-      for (let k = -2; k <= 2; k++) {
-        const lon = lonBase + 360 * k
-        if (lon < lo || lon >= hi) continue
-        ys.push(y0 + ((lon - x0) / (x1 - x0)) * (y1 - y0))
-      }
-    }
-    if (ys.length < 2) continue
-    ys.sort((a, b) => a - b)
-    for (let k = 0; k + 1 < ys.length; k += 2) {
-      // Rows whose CENTRE lies between the two crossings, north at the top. Testing the centre
-      // rather than the edges is what makes a pair that spans no sky draw nothing -- the pole cap
-      // above closes every wrapping ring at declination 90 and would otherwise paint the whole top
-      // row of the map, a bright ring around the north celestial pole.
-      const r0 = Math.max(0, Math.ceil(((90 - ys[k + 1]) / 180) * h - 0.5))
-      const r1 = Math.min(h - 1, Math.floor(((90 - ys[k]) / 180) * h - 0.5))
-      for (let r = r0; r <= r1; r++) acc[r * w + c] += add
-    }
-  }
-}
-
-/** separable box blur, a few passes — a box blurred three times is a gaussian, near enough */
-function blur(src, w, h, radius, passes = 3) {
-  let a = Float32Array.from(src)
-  let b = new Float32Array(a.length)
-  for (let p = 0; p < passes; p++) {
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < w; x++) {
-        let s = 0
-        for (let k = -radius; k <= radius; k++) s += a[y * w + (((x + k) % w) + w) % w] // wraps in RA
-        b[y * w + x] = s / (2 * radius + 1)
-      }
-    }
-    ;[a, b] = [b, a]
-    for (let x = 0; x < w; x++) {
-      for (let y = 0; y < h; y++) {
-        let s = 0
-        let n = 0
-        for (let k = -radius; k <= radius; k++) {
-          const yy = y + k
-          if (yy < 0 || yy >= h) continue // clamps in declination: the sky has poles, not a seam
-          s += a[yy * w + x]
-          n++
-        }
-        b[y * w + x] = s / n
-      }
-    }
-    ;[a, b] = [b, a]
-  }
-  return a
-}
 
 /** galactic (l, b) to equatorial J2000, for checking the band lies on the galactic plane */
 function galacticToEquatorial(lDeg, bDeg) {
@@ -267,142 +71,188 @@ function galacticToEquatorial(lDeg, bDeg) {
 }
 
 
-/** read back an 8-bit greyscale PNG this tool wrote — `verify` must inspect the ASSET, not a variable */
-function decodeGreyPng(buf) {
-  if (buf.length < 8 || buf.readUInt32BE(0) !== 0x89504e47) return null
-  let off = 8
-  let w = 0
-  let h = 0
-  const idat = []
-  while (off + 8 <= buf.length) {
-    const len = buf.readUInt32BE(off)
-    const type = buf.toString('latin1', off + 4, off + 8)
-    const body = buf.subarray(off + 8, off + 8 + len)
-    if (type === 'IHDR') {
-      w = body.readUInt32BE(0)
-      h = body.readUInt32BE(4)
-      if (body[8] !== 8 || body[9] !== 0) return null
-    } else if (type === 'IDAT') idat.push(body)
-    else if (type === 'IEND') break
-    off += 12 + len
-  }
-  if (!w || !h) return null
-  const raw = inflateSync(Buffer.concat(idat))
-  const data = Buffer.alloc(w * h)
-  for (let y = 0; y < h; y++) {
-    if (raw[y * (w + 1)] !== 0) return null // this tool only ever writes filter 0
-    raw.copy(data, y * w, y * (w + 1) + 1, y * (w + 1) + 1 + w)
-  }
-  return { w, h, data }
-}
-
 /* ---- the sources -------------------------------------------------------------------------- */
 
 const col = (l, a, b) => l.slice(a - 1, b)
 
+/* ---- the raster's colour maths, small and standalone so they can be checked ------------------ */
+
+/** IEEE 754 half -> Number. three's EXRLoader hands back the raw Uint16 half-float samples. */
+function halfToFloat(h) {
+  const s = (h & 0x8000) >> 15
+  const e = (h & 0x7c00) >> 10
+  const f = h & 0x03ff
+  if (e === 0) return (s ? -1 : 1) * Math.pow(2, -14) * (f / 1024)
+  if (e === 31) return f ? NaN : s ? -Infinity : Infinity
+  return (s ? -1 : 1) * Math.pow(2, e - 15) * (1 + f / 1024)
+}
+
+/** linear -> sRGB transfer. The 8-bit asset is sRGB-encoded so the faint band keeps its detail. */
+const toSrgb = (c) => (c <= 0.0031308 ? 12.92 * c : 1.055 * Math.pow(c, 1 / 2.4) - 0.055)
+
+const clamp255 = (v) => Math.max(0, Math.min(255, Math.round(v * 255)))
+
+/**
+ * Where the empty sky is defined. The Deep Star Maps carries a faint all-sky floor and the whole
+ * field of stars below the bright-catalogue limit; at the black point used here the true
+ * background reads as exactly zero, so the band can be added to the dome and never drawn as a
+ * dark sheet over it. The gain then opens the band back up for an 8-bit file.
+ */
+const MW_BLACK = 0.016
+const MW_GAIN = 1.9
+
+/**
+ * A 3 x 3 median on each channel, run before the black point.
+ *
+ * The Deep Star Maps omits the BRIGHT stars, but it still carries every faint one, and at
+ * thousands of them a megapixel they read as grain over the whole sky -- and they are stars this
+ * renderer already draws from its own catalogue, so they are noise twice over. An isolated star
+ * is one or two pixels; the galaxy is a structure tens of pixels wide, so a median window takes
+ * the star and leaves the band. It also happens to remove most of the JPEG's high-frequency work:
+ * the cleaned plate encodes about half the size of the raw one.
+ */
+function median3(src, W, H) {
+  const out = new Float32Array(src.length)
+  const w = new Float32Array(9)
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      for (let c = 0; c < 3; c++) {
+        let k = 0
+        for (let dy = -1; dy <= 1; dy++) {
+          const yy = Math.min(H - 1, Math.max(0, y + dy))
+          for (let dx = -1; dx <= 1; dx++) w[k++] = src[(yy * W + ((x + dx + W) % W)) * 3 + c]
+        }
+        for (let i = 1; i < 9; i++) { const v = w[i]; let j = i - 1; while (j >= 0 && w[j] > v) { w[j + 1] = w[j]; j-- } w[j + 1] = v }
+        out[(y * W + x) * 3 + c] = w[4]
+      }
+    }
+  }
+  return out
+}
+
 const SOURCES = [
   {
     id: 'milkyway',
-    label: 'Milky Way isophotes (d3-celestial)',
-    url: 'https://raw.githubusercontent.com/ofrohn/d3-celestial/master/data/mw.json',
-    asset: 'milkyway.png',
-    credit: 'Milky Way outline: d3-celestial (Olaf Frohn, BSD 3-clause)',
+    label: 'Deep Star Maps 2020, Milky Way layer (NASA/Goddard SVS)',
+    url: 'https://svs.gsfc.nasa.gov/vis/a000000/a004800/a004851/milkyway_2020_4k.exr',
+    binary: true,
+    asset: 'milkyway.jpg',
+    credit:
+      'Milky Way: NASA/Goddard Space Flight Center Scientific Visualization Studio (Ernie Wright). ' +
+      'Gaia DR2: ESA/Gaia/DPAC.',
     note:
-      'Five nested brightness contours as GeoJSON in equatorial degrees, rasterised here into an ' +
-      'equirectangular luminance map. VECTOR rather than a photograph on purpose: the sky in this ' +
-      'renderer is stylised, and a Brunier panorama would look like a photograph pasted behind a ' +
-      'drawing. Contours give a soft band that sits with the stars.',
-    /** 2048 x 1024 is about 10 arcminutes a texel — far finer than a band with no edges needs. */
-    parse(text) {
-      const gj = JSON.parse(text)
-      const W = 2048
-      const H = 1024
-      const acc = new Float32Array(W * H)
-      const levels = (gj.features ?? []).length
-      if (!levels) throw new Error('no features in the Milky Way source')
-      // the contours NEST, from faintest and largest to brightest and smallest, so simply adding
-      // each one gives the ramp without any need to know which is which
-      let rings = 0
-      for (const f of gj.features) {
-        const polys = f.geometry.type === 'MultiPolygon' ? f.geometry.coordinates : [f.geometry.coordinates]
-        // PER POLYGON, not per level. A GeoJSON polygon is an exterior ring followed by its
-        // HOLES, and even-odd over exactly those rings is what that means. Flattening a level's
-        // polygons together throws the distinction away and lets one blob punch a hole in
-        // another — which is what put a bright patch on the north galactic pole and a gap at the
-        // anticentre. The band itself is one polygon whose exterior and hole both circle the sky.
-        for (const poly of polys) {
-          fillFeature(acc, W, H, poly, 1)
-          rings += poly.length
+      'The galaxy as an actual image, not contours: Deep Star Maps 2020 in celestial coordinates, ' +
+      'linear half-float OpenEXR, with the bright Hipparcos/Tycho stars removed by NASA precisely ' +
+      'so a star map can be layered under its own catalogue. Decoded here from the 4k EXR, rotated ' +
+      '180 degrees into this tool\'s equatorial convention (NASA centres on 0h with r.a. increasing ' +
+      'to the LEFT and the file runs south-first; ours runs r.a. to the right, north-first), ' +
+      'median-filtered to drop the faint stars NASA still leaves in, black-pointed so the empty sky ' +
+      'is exactly zero, then sRGB-encoded. The zero background is what lets it be added to the dome ' +
+      'instead of pasted over it, and the shader keys on luminance as well. JPEG rather than PNG: ' +
+      'lossless colour here is tens of megabytes and the band is soft enough that it does not need ' +
+      'them.',
+    async parse(input) {
+      // `--prove` hands back the raw EXR wrapped with `wrong`: this skips the rotation, so the
+      // band lands on the wrong great circle and the galactic check must go red.
+      const wrong = !Buffer.isBuffer(input)
+      const raw = wrong ? input.raw : input
+      const ab = raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength)
+      const exr = new EXRLoader().parse(ab)
+      const W = exr.width
+      const H = exr.height
+      const src = exr.data // Uint16 half-float, RGBA
+      // rotate into this tool's convention and un-half the samples first
+      const lin = new Float32Array(W * H * 3)
+      for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+          const sx = wrong ? x : W - 1 - x
+          const sy = wrong ? y : H - 1 - y
+          const si = (sy * W + sx) * 4
+          const o = (y * W + x) * 3
+          lin[o] = halfToFloat(src[si])
+          lin[o + 1] = halfToFloat(src[si + 1])
+          lin[o + 2] = halfToFloat(src[si + 2])
         }
       }
-      const soft = blur(acc, W, H, 6, 3)
-      let max = 0
-      for (const v of soft) if (v > max) max = v
-      const out = Buffer.alloc(W * H)
-      for (let i = 0; i < soft.length; i++) out[i] = Math.max(0, Math.min(255, Math.round((soft[i] / (max || 1)) * 255)))
-      return { buf: greyPng(W, H, out), meta: { width: W, height: H, levels, rings, projection: 'equirectangular, x = (RA + 180)/360, y = (90 - Dec)/180', blurTexels: 6 } }
+      // the faint catalogue stars go first, then the empty sky is driven to zero, then the band
+      // is opened back up for 8 bits
+      const clean = median3(lin, W, H)
+      const rgb = Buffer.alloc(W * H * 3)
+      for (let i = 0, o = 0; i < W * H; i++, o += 3) {
+        for (let c = 0; c < 3; c++) rgb[o + c] = clamp255(toSrgb(Math.max(0, (clean[o + c] - MW_BLACK) * MW_GAIN)))
+      }
+      const buf = await sharp(rgb, { raw: { width: W, height: H, channels: 3 } })
+        .jpeg({ quality: 90, chromaSubsampling: '4:4:4' })
+        .toBuffer()
+      return {
+        buf,
+        meta: {
+          width: W,
+          height: H,
+          format: 'jpeg',
+          blackPoint: MW_BLACK,
+          gain: MW_GAIN,
+          denoise: '3x3 median (drops the faint catalogue stars NASA leaves in)',
+          projection: 'equirectangular, x = (RA + 180)/360, y = (90 - Dec)/180',
+          rotationFromSource: wrong ? 'none (broken)' : '180 degrees',
+        },
+      }
     },
     /**
-     * The band must lie on the GALACTIC PLANE — which is a fact about the galaxy, not about this
-     * rasteriser. Sampled through the standard galactic-to-equatorial rotation: the plane has to
-     * be far brighter than the galactic poles, and the centre in Sagittarius brightest of all.
+     * The band must lie on the GALACTIC PLANE, and the galactic centre in Sagittarius must be the
+     * bright one. Both are facts about the galaxy, sampled through the standard galactic-to-
+     * equatorial rotation, so a wrong flip or a wrong rotation fails even though the picture
+     * still looks like a Milky Way. A JPEG is decoded with sharp (the one image library the tool
+     * uses) and the checks run on its luminance.
      */
-    verify(png) {
-      const g = decodeGreyPng(png)
-      if (!g) return { ok: false, why: 'the asset is not a greyscale PNG this tool can read back' }
+    async verify(buf) {
+      if (buf.length < 4 || buf[0] !== 0xff || buf[1] !== 0xd8) return { ok: false, why: 'the asset is not a JPEG' }
+      const { data, info } = await sharp(buf).raw().toBuffer({ resolveWithObject: true })
+      const w = info.width
+      const h = info.height
+      const ch = info.channels
       const at = (raDeg, decDeg) => {
-        const x = Math.min(g.w - 1, Math.max(0, Math.round((((raDeg + 180) % 360) / 360) * g.w)))
-        const y = Math.min(g.h - 1, Math.max(0, Math.round(((90 - decDeg) / 180) * g.h)))
-        return g.data[y * g.w + x]
+        const x = Math.min(w - 1, Math.max(0, Math.round(((((raDeg + 180) % 360) + 360) % 360) / 360 * w)))
+        const y = Math.min(h - 1, Math.max(0, Math.round(((90 - decDeg) / 180) * h)))
+        const o = (y * w + x) * ch
+        return 0.2126 * data[o] + 0.7152 * data[o + 1] + 0.0722 * data[o + 2]
       }
       const atGal = (l, b) => {
         const e = galacticToEquatorial(l, b)
         return at(e.raDeg, e.decDeg)
       }
       const mean = (a) => a.reduce((p, q) => p + q, 0) / a.length
-      // 1. the plane is bright and the centre in Sagittarius brightest of all
+      // 1. the plane is bright
       const onPlane = []
       for (let l = 0; l < 360; l += 15) onPlane.push(atGal(l, 0))
       const plane = mean(onPlane)
+      // 2. the centre in Sagittarius is the brightest part of it, and brighter than the anticentre
       const centre = atGal(0, 0)
-      // 2. THE POLES THEMSELVES, not merely high latitudes. Sampling b = +/-70 and +/-80 read 5
-      //    and passed while the north galactic pole itself read 38: the check was looking next to
-      //    the fault rather than at it. The maximum, not the mean, for the same reason -- the
-      //    fault is a bright patch somewhere and a mean averages one away against the dark half.
+      const anticentre = atGal(180, 0)
+      // 3. the POLES are dark on average. A mean, not a maximum: a real raster has a bright star
+      //    somewhere off the plane, and the fault this is looking for -- the band on the wrong
+      //    great circle -- moves the whole band and lights up the average.
       const atPoles = []
-      for (const b of [90, -90, 88, -88, 80, -80, 70, -70]) for (const l of [0, 90, 180, 270]) atPoles.push(atGal(l, b))
-      const poles = Math.max(...atPoles)
-      // 3. THE BAND GOES ALL THE WAY ROUND. The fault this replaced was a HOLE -- a stripe of sky
-      //    where the fill's parity had flipped, which read 1 at the galactic anticentre where the
-      //    band belongs. A mean over the plane survives a hole; a minimum does not. Ten degrees
-      //    either side, because these are brightness contours and toward the anticentre the band
-      //    is faint, narrow and sits a few degrees south of b = 0.
-      const round = []
+      for (const b of [90, -90, 88, -88, 80, -80, 70, -70]) for (const l of [0, 45, 90, 135, 180, 225, 270, 315]) atPoles.push(atGal(l, b))
+      const poles = mean(atPoles)
+      // 4. the band closes all the way round: at every longitude there is SOMETHING bright within
+      //    ten degrees of the plane. A minimum survives a faint anticentre; a mean would not.
+      let thinnest = 255
       for (let l = 0; l < 360; l += 5) {
         let m = 0
         for (let b = -10; b <= 10; b++) m = Math.max(m, atGal(l, b))
-        round.push(m)
+        thinnest = Math.min(thinnest, m)
       }
-      const thinnest = Math.min(...round)
-      // 4. NOTHING AT THE CELESTIAL POLES. Not an astronomical claim -- a rasteriser one. Closing
-      //    a ring that circles the sky has to happen over a pole, and every way of getting that
-      //    wrong paints the top or bottom row of an equirectangular map. It is the cheapest
-      //    possible test for the whole family of wrap faults, and it caught two of them.
-      let capRow = 0
-      for (let x = 0; x < g.w; x++) capRow = Math.max(capRow, g.data[x], g.data[(g.h - 1) * g.w + x])
-      const ok = plane > 60 && centre > plane && poles < 20 && plane > poles * 3 && thinnest > 20 && capRow === 0
-      const why = `plane ${plane.toFixed(0)}, centre ${centre}, brightest off-plane ${poles}, faintest along the band ${thinnest}, celestial-pole rows ${capRow}`
+      // 5. most of the sky is dark. Catches a flooded or inverted-keyed asset.
+      let sum = 0
+      for (let i = 0; i < data.length; i += ch) sum += 0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2]
+      const skyMean = sum / (w * h)
+      const ok = plane > poles * 2 && plane > 50 && centre > plane && centre > anticentre * 1.15 && thinnest > 25 && skyMean < 45
+      const why = `plane ${plane.toFixed(0)}, centre ${centre.toFixed(0)}, anticentre ${anticentre.toFixed(0)}, mean pole ${poles.toFixed(0)}, faintest along the band ${thinnest.toFixed(0)}, whole-sky mean ${skyMean.toFixed(0)}`
       return { ok, why, detail: why }
     },
-    /** what `--prove` feeds it: every contour flattened onto the celestial equator */
-    break: (text) => {
-      const gj = JSON.parse(text)
-      for (const f of gj.features) {
-        const polys = f.geometry.type === 'MultiPolygon' ? f.geometry.coordinates : [f.geometry.coordinates]
-        for (const poly of polys) for (const ring of poly) for (const p of ring) p[1] = p[1] * 0.02
-      }
-      return JSON.stringify(gj)
-    },
+    /** what `--prove` feeds it: the raw EXR with the orientation left off */
+    break: (raw) => ({ raw, wrong: true }),
   },
   {
     id: 'stars',
@@ -526,9 +376,10 @@ const gunzip = (raw) =>
 
 async function build(src, { refresh = false } = {}) {
   const { raw, cached, file } = await download(src, refresh)
-  const text = (src.gunzip ? await gunzip(raw) : raw).toString('latin1')
-  const { buf, meta } = src.parse(text)
-  const v = src.verify(buf)
+  const payload = src.gunzip ? await gunzip(raw) : raw
+  const input = src.binary ? payload : payload.toString('latin1')
+  const { buf, meta } = await src.parse(input)
+  const v = await src.verify(buf)
   if (!v.ok) throw new Error(`${src.id}: built asset failed its own check — ${v.why}`)
   await mkdir(OUT, { recursive: true })
   await writeFile(path.join(OUT, src.asset), buf)
@@ -563,7 +414,7 @@ if (arg('verify')) {
   for (const s of picked) {
     const buf = await readFile(path.join(OUT, s.asset)).catch(() => null)
     if (!buf) { console.error(`  MISSING ${s.asset} — run the ingest`); bad++; continue }
-    const v = s.verify(buf)
+    const v = await s.verify(buf)
     console.log(`  ${v.ok ? 'ok  ' : 'FAIL'} ${s.id}: ${v.detail ?? ''} (${v.why})`)
     if (!v.ok) bad++
   }
@@ -575,11 +426,12 @@ if (arg('prove')) {
   for (const s of picked) {
     if (!s.break) { console.log(`  SKIP ${s.id}: no negative defined`); continue }
     const { raw } = await download(s, false)
-    const text = (s.gunzip ? await gunzip(raw) : raw).toString('latin1')
+    const payload = s.gunzip ? await gunzip(raw) : raw
+    const input = s.binary ? payload : payload.toString('latin1')
     let red = false
     try {
-      const { buf } = s.parse(s.break(text))
-      red = !s.verify(buf).ok
+      const { buf } = await s.parse(s.break(input))
+      red = !(await s.verify(buf)).ok
     } catch {
       red = true
     }

@@ -25,7 +25,7 @@
 import { PROFILES, type DriveProfile } from '@apex/engine/physics/profiles'
 import { assetsvc, type AssetItem, type Build, type RigBinding } from '../../assets/assetsvc'
 import {
-  axleGrip, defaultVehicle, describeVehicle, effectiveTopSpeed, finalDriveFor, FINAL_DRIVE_MAX,
+  axleGrip, defaultVehicle, describeVehicle, estimateVmax, finalDriveFor, FINAL_DRIVE_MAX,
   lampCounts,
   FINAL_DRIVE_MIN, frontShare, gearedTopSpeed, mountPoint, mountYaw, overrideRange, peakTorque,
   rebalanceGears, toDriveProfile, tractiveForce, TYRE_REFERENCE_MM, validateVehicle, VEHICLE_CLASSES,
@@ -297,6 +297,30 @@ export function dynamicsForm(host: HTMLElement, getDoc: () => VehicleDoc, opts: 
         stage()
       },
     }))
+    /*
+     * GEAR FOR THE SPEED IT REALLY REACHES, not the speed you typed. The sim's top speed
+     * (`estimateVmax`) is set by power, grip and drag together; gearing top gear to it puts the
+     * redline at the wall instead of leaving the engine droning below it. Iterated because the
+     * final drive feeds back into the derived `topSpeed` the estimate reads, until it settles.
+     */
+    const vmax = estimateVmax(doc)
+    const vmaxMph = Math.round(vmax * 2.237)
+    eb.append(readout(
+      'Physics top speed',
+      vmax > 0 ? `${vmaxMph} mph · ${vmax.toFixed(1)} m/s` : 'no terminal speed — the profile has no drag',
+    ))
+    eb.append(button({
+      label: vmax > 0 ? `Gear top for ${vmaxMph} mph` : 'Gear top for the physical top speed',
+      title: 'sets the final drive so top gear redlines at the speed the car actually reaches',
+      disabled: !(vmax > 0),
+      onClick: () => {
+        // ONE pass. The final drive also feeds the derived `topSpeed` the estimate reads, so a
+        // second pass chases its own tail (shorter gearing raises first-gear force but lowers the
+        // ceiling); this lands top gear on the estimate as it stands.
+        doc.engine.final_drive = +finalDriveFor(doc.engine, doc.spec.wheelRadius, vmax).toFixed(3)
+        stage()
+      },
+    }))
     put('engine', eng)
 
     /*
@@ -352,9 +376,9 @@ export function dynamicsForm(host: HTMLElement, getDoc: () => VehicleDoc, opts: 
     // WHAT THE NUMBERS MEAN, computed rather than found out by driving.
     const resolved = toDriveProfile(doc)
     const top = gearedTopSpeed(doc.engine, doc.spec.wheelRadius)
-    const reach = effectiveTopSpeed(doc)
+    const reach = estimateVmax(doc)
     bb.append(readout('Top speed', `${(reach * 2.237).toFixed(0)} mph · ${reach.toFixed(1)} m/s`))
-    bb.append(readout('Geared for', `${(top * 2.237).toFixed(0)} mph at the redline in top${top > reach + 0.5 ? ' — drag stops it first' : ' — the gearbox is what limits it'}`))
+    bb.append(readout('Geared for', `${(top * 2.237).toFixed(0)} mph at the redline in top${top > reach + 0.5 ? ' — power, grip or drag stops it first' : ' — the gearbox is what limits it'}`))
     bb.append(readout('Pull in first', `${(tractiveForce(doc.engine, doc.spec.wheelRadius) / 1000).toFixed(1)} kN`))
     bb.append(readout('Standing acceleration', `${resolved.powerPerKg.toFixed(1)} m/s² before the tyres get a say`))
     put('engine', brakes)

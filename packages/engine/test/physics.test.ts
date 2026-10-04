@@ -255,6 +255,44 @@ describe('the vehicle', () => {
     phys.free()
   })
 
+  it('does not nose-over on a stop that would, because the fan plants the tail', () => {
+    /*
+     * THE NOSE-OVER, AND ITS NEGATIVE TWIN.
+     *
+     * A hard stop puts a forward force at the contact patches, which shifts load forward, which
+     * raises the front brake force again — a runaway. The street profile nose-overs somewhere
+     * between brakePerKg 24 (clean) and 30 (end over end in a third of a second), which is exactly
+     * the knob a fast hero car wants to be at. Downforce at the CoM does not help: the overturning
+     * and the restoring moments both grow with it. Downforce BEHIND the CoM does — the fan presses
+     * the tail down as well as the tyres — and that is what `fanPerKg`/`fanRearBias` are for.
+     *
+     * The check is the body's own up-vector: a car that has gone over has a negative one. The
+     * no-fan run IS the proof the assertion can fail, so this cannot pass by the brakes quietly
+     * doing nothing.
+     */
+    const minUpY = (fanPerKg: number) => {
+      const phys = new PhysicsWorld({ hz: 120 })
+      ground(phys)
+      const v = new Vehicle(phys, {}, profile('street', { brakePerKg: 30, fanPerKg }))
+      v.place(0, 1.0, 0, 0)
+      const frame = 1 / 60
+      for (let t = 0; t < 1; t += frame) phys.step(frame)
+      v.control({ throttle: 1, brake: 0, steer: 0, handbrake: false })
+      for (let t = 0; t < 6; t += frame) phys.step(frame)
+      v.control({ throttle: 0, brake: 1, steer: 0, handbrake: false })
+      let least = 1
+      for (let t = 0; t < 3; t += frame) {
+        phys.step(frame)
+        const q = v.body.rotation()
+        least = Math.min(least, 1 - 2 * (q.x * q.x + q.z * q.z))
+      }
+      phys.free()
+      return least
+    }
+    expect(minUpY(0)).toBeLessThan(0) // no fan: over the nose
+    expect(minUpY(6)).toBeGreaterThan(0.9) // the fan: same brakes, wheels down
+  })
+
   it('turns the way you steered — right is right — on every profile', () => {
     /*
      * THE SIGN, NOT THE MAGNITUDE.
@@ -355,7 +393,9 @@ describe('the vehicle', () => {
     const slide = (grip: number) => {
       const phys = new PhysicsWorld({ hz: 120 })
       ground(phys)
-      const v = new Vehicle(phys, {}, profile('street'))
+      // the fan OFF: this test is about the TRACTION model, and the fan presses the tyres down hard
+      // enough to make up the off-road grip deficit, which would hide the thing under test
+      const v = new Vehicle(phys, {}, profile('street', { fanPerKg: 0 }))
       v.setSurface(() => grip)
       v.place(0, 1, 0, 0)
       v.control({ throttle: 1, brake: 0, steer: 0, handbrake: false })

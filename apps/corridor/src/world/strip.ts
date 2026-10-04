@@ -9,6 +9,8 @@ import * as THREE from 'three'
 import type { Budget } from './budget'
 import { ACCUM_PARS, accumUniforms } from '../visuals/weather'
 import { injectShade, injectWetStreak } from '../visuals/shading'
+import { GRASS_RELIEF_PARS, grassReliefUniforms } from '../visuals/grassrelief'
+import * as T from '../tuning'
 
 export interface Edge {
   d: number // signed distance to the nearest pavement edge (negative on the pavement)
@@ -67,10 +69,16 @@ export async function buildStrip(
   const offs: number[] = []
   for (let o = -left; o <= right + 1e-6; o += across) offs.push(o)
   const nL = offs.length
+  // the lift ramps from zero at the pavement edge to full over this run, so the strip itself never
+  // pokes up through the asphalt (its own triangles are not edge-aligned); the fringe below owns the
+  // crisp face and the raised top over this same run
+  const liftRamp = Math.max(0.6, across + 0.2)
   const pos = new Float32Array(nS * nL * 3)
   const uv = new Float32Array(nS * nL * 2)
   const edge = new Float32Array(nS * nL)
   const canopy = new Float32Array(nS * nL)
+  /** the un-lifted ground height: the pavement edge face (below) starts from this */
+  const baseY = new Float32Array(nS * nL)
   const up = new THREE.Vector3(0, 1, 0)
   const [bx0, by0, bx1, by1] = bbox
   let k = 0
@@ -99,7 +107,15 @@ export async function buildStrip(
       // the editor's ground_offset_m raises or lowers the verge, never the pavement, fading in
       // over the same 0.6–7 m band the DEM blend uses
       const off = offsetAt ? offsetAt(x, -z) * t : 0
-      const y = (e.d < 0.6 ? e.y - 0.02 : (e.y - 0.02) * (1 - t) + dem * t) + off
+      const base = (e.d < 0.6 ? e.y - 0.02 : (e.y - 0.02) * (1 - t) + dem * t) + off
+      baseY[k] = base
+      // GRASS LIP. The mown/rough turf stands proud of the pavement: real mown grass beside asphalt
+      // forms a lip, and raising the whole band (not a thin skirt) makes the ground itself the slab.
+      // A ground-plane shader cannot draw above its own pixel, so this real step plus the face built
+      // below is what gives low-cut grass thickness. A hard step at the pavement edge, so the strip
+      // is already at full lift by its first grass vertex and the face (below) covers the seam.
+      // BUILD-TIME (see GRASS_LIFT_M).
+      const y = base + T.GRASS_LIFT_M * Math.max(0, Math.min(1, e.d / liftRamp))
       pos[k * 3] = x
       pos[k * 3 + 1] = y
       pos[k * 3 + 2] = z
@@ -158,6 +174,8 @@ export async function buildStrip(
     grassTint: { value: new THREE.Color(0xffffff) },
     /** a style's hold on the photo: 0 as shot, 1 greyscale under the ground tint */
     imageryDesat: { value: 0 },
+    // the relief underlayment (GRASS_GROUND 1), read by this material only
+    ...grassReliefUniforms,
   }
   mat.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms)
@@ -180,6 +198,12 @@ export async function buildStrip(
         varying vec3 vWorldXZ;
         varying vec3 vWorldN;
         ${ACCUM_PARS}
+        ${GRASS_RELIEF_PARS}
+        // the relief turf's world-space shading normal, written in map_fragment and consumed in
+        // normal_fragment_begin (a file-scope global; map_fragment runs first). gGRW is how much of
+        // it to apply, so the far photo turf keeps the ground's real upward normal.
+        vec3 gGRNormal = vec3(0.0, 1.0, 0.0);
+        float gGRW = 0.0;
         // TRIPLANAR. The ground textures used to be projected straight down — uv = worldXZ / 2 —
         // which is exact on the flat and degenerate on a cut face: a 40° bank gets a metre of uv
         // for every 1.3 m of slope, and a near-vertical one smears a single row of texels all the
@@ -205,23 +229,73 @@ export async function buildStrip(
           vec4 ground = img;
           if (hasGrass == 1) {
             vec3 n = normalize(vWorldN);
-            // two scales of each turf, the second four times larger and offset, mixed 40 %: a
-            // single 2 m tile repeats visibly from any height ("the repeating grass texture is
-            // terrible") and the product of two incommensurate periods does not
-            vec3 mown = mix(triplanar(grassMown, vWorldXZ, n, 0.5, vec2(0.0)), triplanar(grassMown, vWorldXZ, n, 0.137, vec2(0.31, 0.77)), 0.4);
-            vec3 rough = mix(triplanar(grassRough, vWorldXZ, n, 0.485, vec2(0.13, 0.41)), triplanar(grassRough, vWorldXZ, n, 0.121, vec2(0.62, 0.19)), 0.4);
-            // a style that greys the photo greys the turf too, or a lilac tint over a green
-            // texture is mud; greyscale turf under the tint IS lilac turf
-            mown = mix(mown, vec3(dot(mown, vec3(0.3, 0.5, 0.2))), imageryDesat);
-            rough = mix(rough, vec3(dot(rough, vec3(0.3, 0.5, 0.2))), imageryDesat);
-            // the mow line ~8 m out, rough grass to ~22 m, then the air photo takes over; the
-            // imagery's own brightness is kept as a large-scale modulation so fields and woods
-            // still read through the grass tiles
+            // the mow line ~8 m out, rough grass to ~22 m, then the air photo takes over
             float wMown = 1.0 - smoothstep(6.5, 9.5, vEdge);
             float wRough = smoothstep(6.5, 9.5, vEdge) * (1.0 - smoothstep(18.0, 26.0, vEdge));
-            float lum = clamp(dot(img.rgb, vec3(0.3, 0.5, 0.2)) * 2.2, 0.55, 1.35);
-            vec3 grass = (mown * wMown + rough * wRough) * grassTint * lum;
-            float wGrass = clamp(wMown + wRough, 0.0, 1.0);
+            vec3 grass;
+            float wGrass;
+            if (uGROn > 0.5) {
+              // RELIEF UNDERLAYMENT (GRASS_GROUND 1). A dense, camera-facing grass surface painted on
+              // the ground itself, lit by the scene through gGRNormal below. No cards, no geometry —
+              // the real 3D blades (GRASS_MODE 0) are drawn above it by grass.ts.
+              //
+              // REGION. The walk in grRelief is ~200 hash evaluations per fragment, and the strip is
+              // 5 km of ground, so the relief is only evaluated inside a cone AHEAD of the driver
+              // (GRASS_SHADER_CONE, out to GRASS_SHADER_RADIUS) plus a small circle all round
+              // (GRASS_SHADER_NEAR). Everything else keeps the static photo turf, which is a few
+              // texture fetches. reg is the blend weight, and it also weights the relief normal, so
+              // the far photo turf keeps the ground's real upward normal.
+              float distCam = distance(cameraPosition, vWorldXZ);
+              vec3 cf = -normalize(vec3(mat3(viewMatrix)[0].z, mat3(viewMatrix)[1].z, mat3(viewMatrix)[2].z));
+              vec2 camFwd = normalize(cf.xz + vec2(1e-4, 0.0));
+              vec2 toFrag = normalize(vWorldXZ.xz - cameraPosition.xz + vec2(1e-4, 0.0));
+              float facing = dot(toFrag, camFwd);
+              float rd = 1.0 - smoothstep(uGRFar * 0.75, uGRFar, distCam);
+              float rc = smoothstep(uGRCone - 0.15, uGRCone, facing);
+              float rn = 1.0 - smoothstep(uGRNear * 0.6, max(uGRNear, 1e-3), distCam);
+              float reg = max(rd * rc, rn);
+              if (reg > 0.01) {
+                vec3 V = normalize(cameraPosition - vWorldXZ);
+                float roughMix = wRough / max(wMown + wRough, 1e-4);
+                float cov;
+                vec3 rc0 = grRelief(vWorldXZ, V, roughMix, cov, gGRNormal);
+                vec3 relief = mix(uGRBase * 0.95, rc0, cov) * grassTint;
+                // the mode-0 photo turf underneath, for the fade and beyond
+                vec3 mown = mix(triplanar(grassMown, vWorldXZ, n, 0.5, vec2(0.0)), triplanar(grassMown, vWorldXZ, n, 0.137, vec2(0.31, 0.77)), 0.4);
+                vec3 roughTurf = mix(triplanar(grassRough, vWorldXZ, n, 0.485, vec2(0.13, 0.41)), triplanar(grassRough, vWorldXZ, n, 0.121, vec2(0.62, 0.19)), 0.4);
+                mown = mix(mown, vec3(dot(mown, vec3(0.3, 0.5, 0.2))), imageryDesat);
+                roughTurf = mix(roughTurf, vec3(dot(roughTurf, vec3(0.3, 0.5, 0.2))), imageryDesat);
+                float lum = clamp(dot(img.rgb, vec3(0.3, 0.5, 0.2)) * 2.2, 0.55, 1.35);
+                vec3 turf = (mown * wMown + roughTurf * wRough) * grassTint * lum;
+                grass = mix(turf, relief, reg);
+                gGRW = reg;
+              } else {
+                // outside the cone: plain mode-0 photo turf
+                vec3 mown = mix(triplanar(grassMown, vWorldXZ, n, 0.5, vec2(0.0)), triplanar(grassMown, vWorldXZ, n, 0.137, vec2(0.31, 0.77)), 0.4);
+                vec3 roughTurf = mix(triplanar(grassRough, vWorldXZ, n, 0.485, vec2(0.13, 0.41)), triplanar(grassRough, vWorldXZ, n, 0.121, vec2(0.62, 0.19)), 0.4);
+                mown = mix(mown, vec3(dot(mown, vec3(0.3, 0.5, 0.2))), imageryDesat);
+                roughTurf = mix(roughTurf, vec3(dot(roughTurf, vec3(0.3, 0.5, 0.2))), imageryDesat);
+                float lum = clamp(dot(img.rgb, vec3(0.3, 0.5, 0.2)) * 2.2, 0.55, 1.35);
+                grass = (mown * wMown + roughTurf * wRough) * grassTint * lum;
+                gGRW = 0.0;
+              }
+              wGrass = clamp(wMown + wRough, 0.0, 1.0);
+            } else {
+              // two scales of each turf, the second four times larger and offset, mixed 40 %: a
+              // single 2 m tile repeats visibly from any height ("the repeating grass texture is
+              // terrible") and the product of two incommensurate periods does not
+              vec3 mown = mix(triplanar(grassMown, vWorldXZ, n, 0.5, vec2(0.0)), triplanar(grassMown, vWorldXZ, n, 0.137, vec2(0.31, 0.77)), 0.4);
+              vec3 rough = mix(triplanar(grassRough, vWorldXZ, n, 0.485, vec2(0.13, 0.41)), triplanar(grassRough, vWorldXZ, n, 0.121, vec2(0.62, 0.19)), 0.4);
+              // a style that greys the photo greys the turf too, or a lilac tint over a green
+              // texture is mud; greyscale turf under the tint IS lilac turf
+              mown = mix(mown, vec3(dot(mown, vec3(0.3, 0.5, 0.2))), imageryDesat);
+              rough = mix(rough, vec3(dot(rough, vec3(0.3, 0.5, 0.2))), imageryDesat);
+              // the imagery's own brightness is kept as a large-scale modulation so fields and
+              // woods still read through the grass tiles
+              float lum = clamp(dot(img.rgb, vec3(0.3, 0.5, 0.2)) * 2.2, 0.55, 1.35);
+              grass = (mown * wMown + rough * wRough) * grassTint * lum;
+              wGrass = clamp(wMown + wRough, 0.0, 1.0);
+            }
             ground = vec4(mix(img.rgb, grass, wGrass), 1.0);
             // FOREST FLOOR. Under a closed canopy the verge is leaf litter, not turf: the same
             // CHM > 3 m that stops the grass generator putting a single blade here (68 % of the
@@ -261,12 +335,111 @@ export async function buildStrip(
         #endif
         `,
       )
+      // the relief turf replaces the surface normal so the scene's own lights (sun, sky, headlights)
+      // shade it as relief — the "reactive to light" half of the idea
+      .replace(
+        '#include <normal_fragment_begin>',
+        `#include <normal_fragment_begin>
+        if (uGROn > 0.5 && gGRW > 0.0) {
+          vec3 grN = normalize((viewMatrix * vec4(gGRNormal, 0.0)).xyz);
+          normal = normalize(mix(normal, grN, gGRW));
+        }`,
+      )
     injectShade(shader)
     injectWetStreak(shader)
   }
   mat.customProgramCacheKey = () => 'corridor-strip-shade-wet-vert'
   const mesh = new THREE.Mesh(geo, mat)
   mesh.name = 'strip'
+  // GRASS EDGE FACE. The lift above put the turf proud of the pavement; on its own that shows only
+  // as the strip's own 1 m triangle, which spreads a 7.5 cm rise into a 4° bevel nobody can see.
+  // This walks the pavement edges and drops a short, near-vertical face from each plus a shelf out
+  // to the next strip column, so the strip's own ramp is hidden underneath. It shares the strip's
+  // material, so it is the same turf texture, tint, weather and light. Emitted with both windings:
+  // the face is thin and the material is FrontSide, so this avoids a per-side winding guess.
+  if (T.GRASS_LIFT_M > 0) {
+    const fp: number[] = []
+    const fuv: number[] = []
+    const fe: number[] = []
+    const fc: number[] = []
+    const fi: number[] = []
+    const lift0 = T.GRASS_LIFT_M
+    // The face is the crisp lip: a near-vertical run from the pavement edge up to the turf. Keep it
+    // steep — GRASS_EDGE_M is the horizontal run, so smaller is a sharper lip.
+    const run = Math.max(0.02, Math.min(T.GRASS_EDGE_M, across * 0.5))
+    // The shelf is the turf top. It runs from the face out past the strip's FIRST grass column — the
+    // mesh only reaches full lift at a vertex, not at e.d = liftRamp, so a shelf that stops at
+    // liftRamp leaves the strip's own 1 m ramp poking through. It floats 4 mm above the strip so the
+    // two surfaces cannot z-fight where they meet.
+    const shelfOut = across + 0.3
+    const shelfUp = 0.004
+    const hash2 = (a: number, b: number): number => {
+      const s = Math.sin(a * 12.9898 + b * 78.233) * 43758.5453
+      return s - Math.floor(s)
+    }
+    const cross = (i: number, j: number): { x: number; y: number; z: number; ox: number; oz: number; h: number } | null => {
+      const k0 = i * nL + (j - 1), k1 = i * nL + j
+      if (dead[k0] || dead[k1]) return null
+      const d0 = edge[k0], d1 = edge[k1]
+      let sgn: number
+      if (d0 < 0 && d1 >= 0) sgn = 1 // pavement -> grass, outward is +side
+      else if (d0 >= 0 && d1 < 0) sgn = -1 // grass -> pavement, outward is -side
+      else return null
+      const f = d0 / (d0 - d1)
+      const o = offs[j - 1] + f * (offs[j] - offs[j - 1])
+      const o0 = origins[i], sd = sides[i]
+      // a per-crossing height jitter so the lip is TORN, not ruled: the last row of turf reads as
+      // blades defining the edge. 1.0…1.35, never below 1, so the shelf can never sink under the strip.
+      const h = 1.0 + 0.35 * hash2(i * 1.37 + (sgn > 0 ? 0.0 : 51.7), j * 2.11)
+      return {
+        x: o0.x + sd.x * o,
+        y: baseY[k0] * (1 - f) + baseY[k1] * f,
+        z: o0.z + sd.z * o,
+        ox: sd.x * sgn,
+        oz: sd.z * sgn,
+        h,
+      }
+    }
+    const push = (x: number, y: number, z: number): number => {
+      const vi = fp.length / 3
+      fp.push(x, y, z)
+      fuv.push(0, y)
+      fe.push(0)
+      fc.push(0)
+      return vi
+    }
+    for (let j = 1; j < nL; j++) {
+      for (let i = 0; i < nS - 1; i++) {
+        const c0 = cross(i, j), c1 = cross(i + 1, j)
+        if (!c0 || !c1) continue
+        const l0 = lift0 * c0.h, l1 = lift0 * c1.h
+        const a = push(c0.x, c0.y, c0.z)
+        const b = push(c0.x + c0.ox * run, c0.y + l0, c0.z + c0.oz * run)
+        const e = push(c1.x, c1.y, c1.z)
+        const f = push(c1.x + c1.ox * run, c1.y + l1, c1.z + c1.oz * run)
+        const g = push(c0.x + c0.ox * shelfOut, c0.y + l0 + shelfUp, c0.z + c0.oz * shelfOut)
+        const h = push(c1.x + c1.ox * shelfOut, c1.y + l1 + shelfUp, c1.z + c1.oz * shelfOut)
+        // BOTH WINDINGS. The material is FrontSide and which way the face looks depends on which side
+        // of the carriageway the edge is on, so picking one winding culled the lip on one side of
+        // every divided highway. The extra triangles are hidden back-faces.
+        fi.push(a, e, f, a, f, b, a, b, f, a, f, e)
+        fi.push(b, f, h, b, h, g, b, g, h, b, h, f)
+      }
+    }
+    if (fi.length) {
+      const fgeo = new THREE.BufferGeometry()
+      fgeo.setAttribute('position', new THREE.Float32BufferAttribute(fp, 3))
+      fgeo.setAttribute('uv', new THREE.Float32BufferAttribute(fuv, 2))
+      fgeo.setAttribute('aEdge', new THREE.Float32BufferAttribute(fe, 1))
+      fgeo.setAttribute('aCanopy', new THREE.Float32BufferAttribute(fc, 1))
+      fgeo.setIndex(fi)
+      fgeo.computeVertexNormals()
+      const fmesh = new THREE.Mesh(fgeo, mat)
+      fmesh.name = 'strip:edge'
+      fmesh.receiveShadow = true
+      mesh.add(fmesh)
+    }
+  }
   mesh.receiveShadow = true
   // the blend uniforms are merged into the compiled shader and otherwise unreachable from outside;
   // a probe that wants to switch the forest floor or the turf off to see what is under it (the

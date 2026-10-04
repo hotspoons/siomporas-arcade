@@ -15,11 +15,15 @@
 //   USGS / USDA        3DEP lidar, NAIP imagery, LANDFIRE vegetation. Public domain as US
 //                      federal works, so not a condition — but a world made of someone's survey
 //                      should say whose.
+//   NASA / Gaia        The Milky Way itself is a real image of the galaxy (Deep Star Maps 2020,
+//                      NASA/Goddard SVS, from Gaia data). Public domain, credited because a
+//                      picture of our galaxy should say who made it.
 //
 // WHAT IT SAYS IS WHAT THE SITE USED. A fixed blob of credits would name sources a given bake
 // never touched (and, worse, would quietly stop naming one that was added). Each line is keyed to
 // something the manifest actually records, so crofton-triangle credits its Maryland lidar and its
-// NAIP, and a European site credits Copernicus instead.
+// NAIP, and a European site credits Copernicus instead. The sky is the exception: it is the same
+// sky over every site, so its credit is not in the manifest and is always appended.
 
 import type { Manifest } from './site'
 
@@ -73,6 +77,18 @@ export function creditsFor(m: Manifest): Credit[] {
 }
 
 /**
+ * The sky belongs to every site, so its credit is not in any manifest. Appended after the site's
+ * own, always. Not `required`: NASA's visualisations are public domain, and this line is a
+ * courtesy — but it is the courtesy the viewer asked for when the galaxy became a real image.
+ */
+const SKY_CREDITS: Credit[] = [
+  {
+    label: 'Milky Way: NASA/Goddard SVS (Ernie Wright) · Gaia DR2: ESA/Gaia/DPAC',
+    href: 'https://svs.gsfc.nasa.gov/4851/',
+  },
+]
+
+/**
  * The small line in the corner, and the panel behind it.
  *
  * Small, because it is a credit and not a banner; always present, because two of these are licence
@@ -119,11 +135,11 @@ export class Attribution {
   private short: HTMLButtonElement
 
   set(m: Manifest) {
-    this.credits = creditsFor(m)
-    // the short line names the one that is always required and counts the rest
+    this.credits = [...creditsFor(m), ...SKY_CREDITS]
+    // the short line names the first credit and counts the rest
     const extra = this.credits.length - 1
     const label = this.short.querySelector('.attrib-label')
-    if (label) label.textContent = extra > 0 ? `© OpenStreetMap contributors + ${extra}` : '© OpenStreetMap contributors'
+    if (label) label.textContent = extra > 0 ? `${this.credits[0].label} + ${extra}` : this.credits[0].label
     this.list.replaceChildren()
     for (const c of this.credits) {
       const row = document.createElement('a')

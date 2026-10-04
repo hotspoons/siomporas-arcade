@@ -13,7 +13,7 @@ import { assistAt, lookAhead, pullFor } from './game/stunt/stuntassist'
 import { PerfHud } from './ui/perfhud'
 import { RapierCar } from './game/vehicle/rapiercar'
 import { assetsvc } from './assets/assetsvc'
-import { defaultVehicle, type VehicleDoc } from './game/vehicle/vehicles'
+import { defaultVehicle, frontShare, vmaxFromProfile, type VehicleDoc } from './game/vehicle/vehicles'
 import { loadCarModel, type CarModel } from './game/vehicle/carmodel'
 import { Car, type CarInput, type DrivableCar } from './game/vehicle/car'
 import { EngineSound, spawnPlayerEngine } from './game/vehicle/enginesound'
@@ -68,6 +68,7 @@ import { SMAAPass } from 'three/examples/jsm/postprocessing/SMAAPass.js'
 import { rasteriseEnvelope, splatMaskUniforms } from './visuals/splatmask'
 import { Attribution } from './world/attribution'
 import { loadSiteTuning } from './world/sitetuning'
+import { TREE_BUDGET } from './world/treebudget'
 import { WEATHER, WEATHERS, type Weather } from './visuals/weather'
 import { ViewerUI, restoreTheme, perfWanted, setPerfWanted } from './ui/viewer'
 import { TuneUI } from './ui/tune'
@@ -158,8 +159,8 @@ let minimap: MiniMap | null = null
  */
 let stars: Stars | null = null
 /**
- * And the galaxy they sit in: the real isophotes, on the same sphere and turned by the same
- * matrix. Null when the asset is absent, which is a sky with stars and no band in it.
+ * And the galaxy they sit in: a real 4096 x 2048 image of it, on the same sphere and turned by
+ * the same matrix. Null when the asset is absent, which is a sky with stars and no band in it.
  */
 let galaxy: MilkyWay | null = null
 /** what `applySky` last worked out, so the per-frame star turn matches the dome exactly */
@@ -1528,9 +1529,13 @@ function boom(at: { x: number; y: number; z: number }, opts: { radius: number; i
   return cars + physics.explode(at, opts)
 }
 
-/** Fire a missile from the player's bonnet, along the nose, at the missile speed plus the car's. */
-function fireMissile(): boolean {
-  if (!drive.on || !drive.car || !physics || !site) return false
+/**
+ * Build the missile layer once. Called when the car is armed, not when the first missile fires, so
+ * the layer's fixed pool of flash lights is already in the scene before any shot — adding lights
+ * mid-drive would recompile the world (the very stall this pool exists to avoid).
+ */
+function ensureMissiles(): MissileLayer | null {
+  if (!drive.car || !physics || !site) return null
   if (!missiles) {
     missiles = new MissileLayer({
       hitTest: (from, to) => {
@@ -1551,12 +1556,20 @@ function fireMissile(): boolean {
     missiles.model = () => weaponModels?.missile?.clone(true) ?? builtinMissile()
     scene.add(missiles.group)
   }
+  return missiles
+}
+
+/** Fire a missile from the player's bonnet, along the nose, at the missile speed plus the car's. */
+function fireMissile(): boolean {
+  if (!drive.on || !drive.car) return false
+  const layer = ensureMissiles()
+  if (!layer) return false
   const car = drive.car
   // from the bonnet, not the roof: the body origin is already a metre up, and a traffic car's box
   // tops out at a metre and a half — a missile launched from two metres sailed over every one
   const from = car.pos.clone().add(car.forward.clone().multiplyScalar(2.6)).add(new THREE.Vector3(0, 0.15, 0))
   const dir = car.forward.clone()
-  missiles.fire(from, dir, Math.max(0, car.speed))
+  layer.fire(from, dir, Math.max(0, car.speed))
   return true
 }
 
@@ -2208,6 +2221,7 @@ function setDrive(on: boolean) {
       applyPhysicsCarTune()
       scene.add(drive.car.mesh)
       void armCar(drive.car)
+      ensureMissiles() // the flash-light pool joins the scene now, not on the first shot
       // at the level's start, the world's home, or the right-hand lane at the photo (startPose)
       const p = startPose()
       drive.car.place(p.x, p.z, p.yaw)
@@ -2720,6 +2734,9 @@ function applySky(s: Season, env = true) {
     new THREE.Color(1, 1, 1).lerp(new THREE.Color(0x7f93c4), night * 0.85),
     sunAt.dir,
   )
+  // the grass blades receive the sun's shadow; they light themselves, so they need the light
+  // itself (for its depth map), not just the direction the shade uniform carries
+  site?.grass?.setSunShadow(sun)
   baseAmbient = ambient.intensity
   baseEnv = T.SKY_LIGHT * (day + night * (T.NIGHT_AMBIENT * 1.2 + 1.5 * moonlight))
   applyCanopyShade(true)
@@ -2793,13 +2810,36 @@ function applySeasonKnob() {
  * hook called `retune()` alone and the season knob silently did nothing under it.
  */
 function onTuneChange() {
+  applySeasonKnob()
+  applySky(season) // the WEATHER knob lives here: sky, fog, sun, grip and what is falling
+  // Gravity and the car profile, and — with the auto-gear switch on — the sound's final drive. It
+  // runs BEFORE `applyTuning`, which is what reads that final drive.
+  applyPhysicsCarTune()
   // The engine tab is live: the gearbox and the voicing take effect while you are driving, and
   // swapping ENGINE_INDEX recompiles in the audio thread. Cheap when nothing engine-shaped moved.
   engineSound.applyTuning()
-  applySeasonKnob()
-  applySky(season) // the WEATHER knob lives here: sky, fog, sun, grip and what is falling
-  applyPhysicsCarTune()
   site?.retune()
+}
+
+/**
+ * When `ENGINE_AUTO_GEAR` is on, gear the engine SOUND to the physics car's estimated top speed.
+ *
+ * The wall moves with the whole profile — power, grip and drag together (`vmaxFromProfile`) — and
+ * this reads the knobs' profile, which is exactly what the actor is driving. The estimate is
+ * memoised (see `vmaxFromProfile`), so a tuning change that does not touch the profile is one string
+ * compare.
+ */
+function applyAutoGear() {
+  if (!(T.ENGINE_AUTO_GEAR > 0) || !(drive.car instanceof RapierCar)) return
+  // `physCarProfile` is the knobs' profile — the same value `applyPhysicsCarTune` is about to hand
+  // the actor — so a knob moved this frame is read now, not on the next one.
+  const profile = T.physCarProfile()
+  const front = frontShare((playerVehicle ?? defaultVehicle('hero-car')).spec)
+  const vmax = vmaxFromProfile(profile, front)
+  // No drag means no terminal speed in the model at all — the 15% engine floor keeps pushing, so
+  // vmax is unbounded and gearing to it is meaningless. The only ceiling left is the engine's own
+  // taper top, so gear for that instead of silently doing nothing.
+  T.autoGearToVmax(vmax > 0 ? vmax : profile.topSpeed)
 }
 
 /**
@@ -2807,12 +2847,15 @@ function onTuneChange() {
  * tune change rather than trying to work out whether one of ours moved.
  *
  * The gravity is the Rapier world's, so it applies whether or not a car exists; the profile is
- * the hero actor's, and `setProfile` re-derives the suspension and grip without a respawn.
+ * the hero actor's, and `setProfile` re-derives the suspension and grip without a respawn. It also
+ * carries the auto-gear, so a car spawned while the switch is on gets the sound's gearing set before
+ * the audio ever starts.
  */
 function applyPhysicsCarTune() {
   const w = physics?.phys.world
   if (w) w.gravity = { x: 0, y: -T.PHYS_GRAVITY, z: 0 }
   if (drive.car instanceof RapierCar) drive.car.setProfile(T.physCarProfile())
+  applyAutoGear()
 }
 
 // A STANCE is everything needed to reproduce what is on screen: site, season, mode, camera (or
@@ -3319,6 +3362,9 @@ function frame() {
   // the frame's own clock, for the performance panel: `real` is the gap between frames, and the
   // work we do inside this function is measured separately so the two can be compared
   const cpu0 = perfHud.open ? performance.now() : 0
+  // the adaptive near-tree budget's clock: `dt` is the frame gap, capped, and the loop ignores a
+  // zero or non-finite delta (a tab that was hidden) so a stall cannot slam the trim
+  TREE_BUDGET.frame(dt * 1000)
   /*
    * The physics world, once a frame.
    *
@@ -3640,7 +3686,14 @@ function frame() {
       // the galaxy takes the same rotation: it is the same sky, and any second copy of that
       // arithmetic is a copy that can disagree with the first one
       galaxy?.setTransform(stars.points.matrix)
-      galaxy?.setLook(skyNight, T.SKY_MILKYWAY, skyCover)
+      galaxy?.setLook({
+        night: skyNight,
+        gain: T.SKY_MILKYWAY,
+        cover: skyCover,
+        sharp: T.SKY_MILKYWAY_SHARP,
+        contrast: T.SKY_MILKYWAY_CONTRAST,
+        blur: T.SKY_MILKYWAY_BLUR,
+      })
     }
     // where the headlamps are pointing THIS frame, straight off the car's own spot lights, so the
     // retro cone and the visible beam cannot drift apart (retro.ts, car.lamps)
@@ -3837,6 +3890,10 @@ registerBridgeContext({
 
   get perfMeter() {
     return perfMeter
+  },
+  /** the adaptive near-tree budget's live state — `count`, `feed`, `trim`, `q`, `radius`, frame times */
+  get treeBudget() {
+    return TREE_BUDGET.stats()
   },
   get perfHud() {
     return perfHud

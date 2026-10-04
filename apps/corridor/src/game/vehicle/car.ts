@@ -523,7 +523,7 @@ export class Car {
       b.angle = T.HEADLIGHT_ANGLE
       b.target.position.x = 2.1 + T.HEADLIGHT_RANGE * 0.6
       b.target.position.y = -T.HEADLIGHT_RANGE * 0.04
-      b.visible = v > 0.02
+      b.visible = v > 0.02 && T.HEADLIGHT > 0.001
     }
     for (const m of this.headLamps) {
       const mat = m.material as THREE.MeshStandardMaterial

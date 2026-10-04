@@ -597,7 +597,7 @@ export function treesFromCanopy(
      */
     seedM?: number
   } = {},
-): { crowns: THREE.InstancedMesh; trunks: THREE.InstancedMesh; count: number; records: TreeRecord[]; refresh: (skip: Set<number>) => void; plant: (cx: number, cy: number) => number; pump: (budgetMs: number) => boolean; patch: () => TreePatch; forget: () => void; stats: () => { count: number; cellM: number; radius: number; centre: [number, number]; capped: boolean; spare: number; drawn: number; changed: number; evicted: number; pending: number } } {
+): { crowns: THREE.InstancedMesh; trunks: THREE.InstancedMesh; count: number; records: TreeRecord[]; refresh: (skip: Set<number>) => void; plant: (cx: number, cy: number) => number; pump: (budgetMs: number) => boolean; patch: () => TreePatch; forget: () => void; invalidateRegion: (x0: number, z0: number, x1: number, z1: number) => void; invalidateAll: () => void; stats: () => { count: number; cellM: number; radius: number; centre: [number, number]; capped: boolean; spare: number; drawn: number; changed: number; evicted: number; pending: number } } {
   const [w, h] = size
   const [xmin, , , ymax] = bbox
   const radius = opts.radius && opts.radius > 0 ? opts.radius : Infinity
@@ -614,7 +614,7 @@ export function treesFromCanopy(
   trunkGeo.translate(0, 0.5, 0) // base at origin
   const crownMat = new THREE.MeshStandardMaterial({ roughness: 0.9, flatShading: true })
   const trunkMat = new THREE.MeshStandardMaterial({ color: 0x4a3a2a, roughness: 1 })
-  installRoadClip(crownMat)
+  // trunk only: the crown is a canopy and reaches over the road, which is what a tree is for
   installRoadClip(trunkMat)
   const crowns = new THREE.InstancedMesh(crownGeo, crownMat, capacity)
   const trunks = new THREE.InstancedMesh(trunkGeo, trunkMat, capacity)
@@ -915,7 +915,7 @@ export function treesFromCanopy(
     const patch = T.TREE_PATCH > 0.5
     const spareM = patch ? Math.max(0, T.TREE_SPARE_M) : 0
     const contextR = drawR + spareM
-    const stamp = `${cellM}|${T.TREE_MIN_H}|${T.TREE_DENSITY}|${T.TREE_HEIGHT_SCALE}`
+    const stamp = `${cellM}|${T.TREE_MIN_H}|${T.TREE_DENSITY}|${T.TREE_HEIGHT_SCALE}|${T.TREE_ROAD_CLEAR_M}`
     if (stamp !== cacheStamp) {
       cellCache.clear()
       cacheStamp = stamp
@@ -1015,7 +1015,58 @@ export function treesFromCanopy(
     cellCache.clear()
     settledR = 0
   }
-  return { crowns, trunks, count: liveCount, records, refresh, plant, pump, patch: () => patchNote, forget, stats: () => ({ count: liveCount, cellM: Math.max(1, T.TREE_CELL_M || opts.cellM || 6), radius: T.TREE_PLANT_RADIUS_M, centre, capped, spare: spareCount, drawn: liveCount - spareCount, changed: lastChanged, evicted: lastEvicted, pending: (scan ? Math.abs(scan.jEnd - scan.j) + 1 : 0) + (hold ? 1 : 0) }) }
+  /**
+   * The pavement under this ground changed — a lazy branch arrived, or a road-width knob moved.
+   * Forget the cells and the standing trees the box touches, and let the next `plant` measure
+   * them again.
+   *
+   * `pump` SKIPS any cell already in `liveKeys`, so a tree that was measured before the asphalt
+   * existed is never re-asked and stays standing in the lane; the road mask then hides it and it
+   * vanishes as the car reaches it (Rich, 2026-10-03). Freeing the slot and deleting the key puts
+   * the cell back on the cursor, and `settledR = 0` makes the scan walk the whole disc instead of
+   * the settled ring, so the re-measure is not skipped.
+   */
+  const invalidateRegion = (x0: number, z0: number, x1: number, z1: number) => {
+    const cellM = Math.max(1, T.TREE_CELL_M || opts.cellM || 6)
+    const m = Math.max(0, T.TREE_ROAD_CLEAR_M)
+    const ax0 = Math.min(x0, x1) - m, ax1 = Math.max(x0, x1) + m
+    const az0 = Math.min(z0, z1) - m, az1 = Math.max(z0, z1) + m
+    for (const [k] of cellCache) {
+      const [ki, kj] = k.split(',')
+      const cx = (Number(ki) + 0.5) * cellM, cz = (Number(kj) + 0.5) * cellM
+      if (cx >= ax0 && cx <= ax1 && cz >= az0 && cz <= az1) cellCache.delete(k)
+    }
+    for (let i = 0; i < records.length; i++) {
+      const r = records[i]
+      if (!Number.isFinite(r.x) || r.x < ax0 || r.x > ax1 || r.z < az0 || r.z > az1) continue
+      cellCache.delete(`${r.ci},${r.cj}`)
+      liveKeys.delete(`${r.ci},${r.cj}`)
+      if (r.spare) spareCount--
+      liveCount--
+      r.x = NaN
+      free.push(i)
+    }
+    settledR = 0
+    scan = null
+    hold = null
+  }
+  /** A width knob moved: re-measure every cell, not just one road's box. */
+  const invalidateAll = () => {
+    cellCache.clear()
+    for (let i = 0; i < records.length; i++) {
+      const r = records[i]
+      if (!Number.isFinite(r.x)) continue
+      liveKeys.delete(`${r.ci},${r.cj}`)
+      if (r.spare) spareCount--
+      liveCount--
+      r.x = NaN
+      free.push(i)
+    }
+    settledR = 0
+    scan = null
+    hold = null
+  }
+  return { crowns, trunks, count: liveCount, records, refresh, plant, pump, patch: () => patchNote, forget, invalidateRegion, invalidateAll, stats: () => ({ count: liveCount, cellM: Math.max(1, T.TREE_CELL_M || opts.cellM || 6), radius: T.TREE_PLANT_RADIUS_M, centre, capped, spare: spareCount, drawn: liveCount - spareCount, changed: lastChanged, evicted: lastEvicted, pending: (scan ? Math.abs(scan.jEnd - scan.j) + 1 : 0) + (hold ? 1 : 0) }) }
 }
 
 /** An overpass stand-in: a deck slab over our road on two piers down to the measured ground. */

@@ -1,7 +1,12 @@
-// The road mesh is the pavement. Grass, trees and the coarse terrain used to trust a station
+// The road mesh is the pavement. Grass, trunk bark and the coarse terrain used to trust a station
 // distance, and wherever that distance and the asphalt disagree a trunk or a triangle stands in
-// the lane. This draws the pavement into a top-down mask and every one of those materials
-// discards the fragments the mask covers, so the cut is the edge the road actually rendered.
+// the lane. This draws the pavement into a top-down mask and every one of those GROUND-LEVEL
+// materials discards the fragments the mask covers, so the cut is the edge the road actually
+// rendered.
+//
+// IT IS NOT FOR CANOPIES. A crown that reaches over the lane from a tree beside it is meant to be
+// there; clipping the leaf and impostor materials punched a hole in the trees above every road.
+// Only bark, trunk, grass, rocks and terrain take the mask now.
 import * as THREE from 'three'
 
 /** Half-width of the mask around the eye, metres. Past this, nothing is clipped. */

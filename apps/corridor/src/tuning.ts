@@ -11,17 +11,38 @@ import { PROFILES, type DriveProfile } from '@apex/engine/physics/profiles'
 
 // --- grass ------------------------------------------------------------------------------------
 /** blades per square metre in the mown strip beside the shoulder, and in the rough beyond */
-export let GRASS_MOWN_PER_M2 = 120
-export let GRASS_ROUGH_PER_M2 = 59
-/** the ring around the eye that carries blades at all (m), and the LOD rings inside it */
+export let GRASS_MOWN_PER_M2 = 90
+export let GRASS_ROUGH_PER_M2 = 55
+/**
+ * THE BLADE RING and its LOD. From the eye outward the 3D blades are drawn thinner: full inside
+ * GRASS_LOD_NEAR, GRASS_LOD_MID_DENSITY of them out to GRASS_LOD_MID, then GRASS_LOD_FAR_DENSITY out
+ * to GRASS_RADIUS; past that the imposter cards carry the field. This is what keeps 3D grass
+ * affordable — but it is a THINNING of geometry, not of ground coverage: the relief underlayment
+ * (GRASS_GROUND 1) keeps the ground itself 100 % grass at any LOD, so turning these down never
+ * leaves bare turf. Set them to 1 for the desert look, 0.55/0.6 for the shipping east-coast budget.
+ */
 export let GRASS_RADIUS = 106
 export let GRASS_LOD_NEAR = 12
 export let GRASS_LOD_MID = 39
 export let GRASS_LOD_MID_DENSITY = 0.55
 export let GRASS_LOD_FAR_DENSITY = 0.6
-/** blade size multipliers over the season palette */
-export let GRASS_HEIGHT_SCALE = 1.5
-export let GRASS_WIDTH_SCALE = 0.55
+/**
+ * THE SHAPE CONTROLS — one set, and they apply to every grass TYPE and every layer: the 3D blades
+ * (GRASS_MODE 0), the imposter cards (both modes), and the relief underlayment (GRASS_GROUND 1).
+ * Each is a plain multiplier over the per-type/season baseline, so 1 is today's look; DENSITY is
+ * blades per area, THICK is each blade's width, HEIGHT its length, and WIND its sway. The shader
+ * reads the same numbers.
+ */
+export let GRASS_DENSITY = 1
+export let GRASS_THICK = 1
+export let GRASS_HEIGHT = 1
+/**
+ * Relief underlayment only: how far the ground grass's blade faces turn toward the driver. 0 leaves
+ * each blade at its world azimuth (a flat hatch from above); 1 turns every face to the eye, so the
+ * underlayment reads as blades from the car. It is a shading normal, not geometry, so it can only
+ * go so far.
+ */
+export let GRASS_ALIGN = 1
 /** how far from the pavement edge the mow line runs, and where grass stops entirely */
 export let GRASS_MOW_LINE = 13
 // zoning (zoning.ts): in a RURAL zone only this much beside the pavement is mown, the rest grows
@@ -69,8 +90,12 @@ export let GRASS_ROUGH_HEIGHT = 1.8
 /** how far a blade's tip leans from its root (fraction of height), and how hard the wind blows */
 export let GRASS_LEAN = 0.45
 export let GRASS_WIND = 0.45 // was 1.0: "way too much emphasis on its motion" (Rich, 2026-09-26)
-/** bare patches: the share of patch cells left bare, and the patch size (m) */
-export let GRASS_PATCHINESS = 0.12
+/**
+ * BARE PATCHES — a desert/scrub dial, OFF by default. East-coast turf is dense and universal, so a
+ * blade is planted in every patch cell; raise this (and GRASS_PATCH_SIZE) to punch holes for the dry
+ * west. The share of patch cells left bare, and the patch size (m).
+ */
+export let GRASS_PATCHINESS = 0
 export let GRASS_PATCH_SIZE = 6
 /** how far blades scatter around their clump centre (m), and the steepest turf slope (m/m) */
 export let GRASS_SCATTER = 0.7
@@ -140,15 +165,97 @@ export let GRASS_SAT = 0.9
 export let GRASS_LIGHT = 1.0
 export let GRASS_DRY_ADD = 0
 /**
- * 1: the distance cards are the grass at every range, and nothing is generated as blades.
- * 0: dynamic blades up close, cards only in the distance. GRASS_WIND_STILL_BELOW can still swap a
- * moving eye over to cards while this is 0; 0 on that knob keeps the blades on at any speed.
+ * THE VEGETATION LAYER — how the grass ABOVE the ground is drawn. Independent of GRASS_GROUND,
+ * which chooses what the GROUND itself looks like.
+ *
+ *   0  dynamic 3D blades up close, cards only in the distance (GRASS_WIND_STILL_BELOW can still
+ *      swap a moving eye over to cards)
+ *   1  the static cards at every range and nothing generated as blades — the cheap detent
+ *
+ * Both read the SAME shape controls (GRASS_DENSITY/THICK/HEIGHT/WIND) plus the density, radius and
+ * LOD knobs above.
  */
-export let GRASS_CARDS = 1
+export let GRASS_MODE = 0
+/** The vegetation layer as 0/1. Only the cards detent is cards; anything else is the 3D blades,
+ * so a stale persisted value can never strand the user on cards. */
+export function grassMode(): number {
+  return Math.round(GRASS_MODE) === 1 ? 1 : 0
+}
+/**
+ * THE GROUND LAYER — the ground under the blades, independent of GRASS_MODE. This is the switch the
+ * owner asked for: the east-coast answer is full, dense turf everywhere, not bare turf between
+ * blades.
+ *
+ *   0  STATIC TEXTURES: the baked photo turf (mown/rough albedo + clump decals) — nearly free, but
+ *      it tiles and reads flat up close
+ *   1  RELIEF UNDERLAYMENT (grassrelief.ts): a dense, camera-facing, light-reactive grass surface
+ *      painted on the ground itself — no geometry, fills 100 % of the band
+ */
+export let GRASS_GROUND = 1
+/** The ground layer, normalised to 0/1. */
+export function grassGround(): number {
+  return GRASS_GROUND >= 0.5 ? 1 : 0
+}
+/** relief underlayment only: the pattern size — cells per metre */
+export let GRASS_SHADER_SCALE = 10.75
+/** relief underlayment only: how far (m) the relief turf is drawn before the static ground takes
+ * over. The POM walk is ~200 hash evaluations per fragment, so this is the relief's main dial. */
+export let GRASS_SHADER_RADIUS = 115
+/** relief underlayment only: half-angle (degrees) of the forward cone the relief is drawn in. The
+ * rest of the ground stays static, which is nearly free. */
+export let GRASS_SHADER_CONE = 30
+/** relief underlayment only: a full circle of relief this close (m), so looking down or beside the car still has it */
+export let GRASS_SHADER_NEAR = 16
+/** relief underlayment only: extra per-cell root offset as a fraction of a cell (roots cross cell borders) */
+export let GRASS_SHADER_JITTER = 0.75
+/** relief underlayment only: per-blade lean spread in radians (scaled down for long blades) */
+export let GRASS_SHADER_SPREAD = 0.45
+/** relief underlayment only: blade width in metres, before GRASS_THICK. The 3D blades take their
+ * width from the per-type look instead; this is the single number the ground shader draws at. */
+export let GRASS_RELIEF_WIDTH = 0.006
+/** tip taper for short (mown) grass on both the relief and the 3-D blades, 0 = cut flat, 1 = point */
+export let GRASS_TAPER_SHORT = 0.85
+/** tip taper for long (rough) grass on both the relief and the 3-D blades, 0 = cut flat, 1 = point */
+export let GRASS_TAPER_LONG = 0.95
+/**
+ * How far (m) the mown/rough turf stands PROUD of the pavement. Real mown grass beside asphalt forms
+ * a lip; raising the whole band and building a face at the pavement edge gives low-cut grass the
+ * look of a slab with thickness, which a ground-plane fragment shader cannot fake because it cannot
+ * draw above its own pixel. BUILD-TIME: the strip geometry is generated from this, so a change needs
+ * the world rebuilt (drive to a fresh chunk or reload).
+ */
+export let GRASS_LIFT_M = 0.215
+/** horizontal run (m) of the raised grass face at the pavement — smaller is a steeper lip */
+export let GRASS_EDGE_M = 0.11
+/**
+ * GRASS CASTS ON GRASS, fake and real:
+ *   GRASS_CAST       the FAKE term, in the blade and card shaders with no depth pass. The turf is a
+ *                    procedural canopy and a couple of samples are marched along the ground toward
+ *                    the brightest light (sun by day, nearest headlamp by night); a fragment darkens
+ *                    where the canopy up-light stands above it. 0 = off.
+ *   GRASS_CAST_REAL  the REAL term: the 3D blades also spool into the sun's shadow map (a depth-only
+ *                    twin of the blade shader), so the verge, road and world receive true blade
+ *                    shadows. Cannot do headlamps (they are shader lamps, not shadow-casting lights),
+ *                    so the fake term covers those and the billboard cards.
+ */
+export let GRASS_CAST = 0.55
+/** self-shadow: clump size (m) of the procedural canopy the fake shadow marches over */
+export let GRASS_CAST_SCALE = 1.3
+/** self-shadow: how far up-light (m) the canopy march reaches — longer is a softer, longer throw */
+export let GRASS_CAST_REACH = 1.8
+/**
+ * REAL sun cast. The 3D blades also cast into the sun's shadow map (a depth-only twin of the blade
+ * vertex shader), so the verge, the road and the world under a low sun receive true blade shadows —
+ * the fake term above handles the headlamps and the far cards, which a billboard can't cast well.
+ * 0 = fake only. This is a second vertex pass over the blade ring, so it is the costlier half.
+ */
+export let GRASS_CAST_REAL = 1
+/** dark/light spread of the shader turf (all modes): 1 is neutral, higher pushes roots and tips apart */
+export let GRASS_CONTRAST = 1.2
 /**
  * Above this eye speed (m/s) the grass is static cards and nothing is generated as blades.
  * Below it, the blades come back and the wind with them. 0 keeps the blades on at any speed.
- * Ignored while GRASS_CARDS is on.
+ * Ignored when GRASS_MODE is 1 (cards everywhere).
  */
 export let GRASS_WIND_STILL_BELOW = 0
 /**
@@ -221,7 +328,7 @@ export let GUN_SPREAD = 0.015
  * how many trees are close, not with how many are drawn. These defaults sit just above the floor
  * in the worst case that was found; the F6 trees tab has all of it.
  */
-export let TREE_NEAR_RADIUS = 110
+export let TREE_NEAR_RADIUS = 220
 /** the band just outside that radius over which the impostor card dissolves away, so a tree does
  *  not pop from card to model in one frame. 0 disables the fade (the old hard switch). */
 export let TREE_FADE_M = 30
@@ -257,6 +364,20 @@ export let TREE_CONE_DEG = 80
 export let TREE_CONE_PENALTY = 3
 /** the near set is refilled once the camera has turned this far (rad) */
 export let TREE_REFRESH_TURN = 0.22
+/**
+ * ATTENUATOR for the dynamic near-tree budget — the "r/l" adjustment (radius and per-species
+ * capacity) that `world/treebudget.ts` makes from the tree count around the eye.
+ *
+ * 0 is the designed amount: in a thick wood it brings the impostor line in until roughly
+ * `TREE_ADAPT_MODELS` trees wear models, and eases it back when the wood thins. -1 disables it
+ * (the near field is exactly the static knobs above); +1 doubles how far it departs from them,
+ * which is worth trying when a wood is heavy and the budget is still not enough.
+ */
+export let TREE_ADAPT = 0
+/** the models the feed-forward aims to seat. Above the capacity ceiling it is clamped down. */
+export let TREE_ADAPT_MODELS = 120
+/** the frame time the closed loop trims toward when the display itself is faster, ms */
+export let TREE_ADAPT_MS = 16
 /**
  * 1 = every tree is the far LOD lollipop, and the procedural models are never built.
  *
@@ -465,6 +586,34 @@ export let ENGINE_SHIFT_DOWN_RPM = 2200
 /** How long the clutch is out. Too short and a gearchange is a blip; too long and it is a lull. */
 export let ENGINE_SHIFT_SECONDS = 0.18
 
+/**
+ * 1 = gear the engine SOUND to the car's estimated top speed, live.
+ *
+ * The physics never reads a gear ratio — the profile carries `topSpeed`/`powerPerKg` directly — but
+ * the engine *voice* does, and when a car is tuned past its own gearing the needle sits low at the
+ * wall and drones. Switched on, every tuning change solves the same balance the simulation does
+ * (`vmaxFromProfile`) and sets the top-gear final drive below so the redline lands on that speed.
+ * Cosmetic only: it cannot change handling. 0 leaves `ENGINE_FINAL_DRIVE` to you.
+ */
+export let ENGINE_AUTO_GEAR = 0
+
+/**
+ * Put the sound's top gear at `vmax`, from the gearbox the voice is actually using.
+ *
+ * `final = (redline/60)·2πr / (topGear · vmax)` is the same arithmetic as `finalDriveFor`, over the
+ * ENGINE_* globals rather than a document, because those are what `enginesound.ts` builds its spec
+ * from. Returns the final drive it set, or the existing one when there is nothing to solve.
+ */
+export function autoGearToVmax(vmax: number): number {
+  const top = [ENGINE_GEAR_1, ENGINE_GEAR_2, ENGINE_GEAR_3, ENGINE_GEAR_4, ENGINE_GEAR_5, ENGINE_GEAR_6]
+    .filter((r) => r > 0.01)
+    .pop() ?? 0
+  if (!(vmax > 0) || !(top > 0) || !(ENGINE_REDLINE_RPM > 0) || !(ENGINE_TYRE_RADIUS > 0)) return ENGINE_FINAL_DRIVE
+  const final = ((ENGINE_REDLINE_RPM / 60) * 2 * Math.PI * ENGINE_TYRE_RADIUS) / (top * vmax)
+  ENGINE_FINAL_DRIVE = Math.max(1, Math.min(6, final))
+  return ENGINE_FINAL_DRIVE
+}
+
 /** 1 = the knobs below drive the synthesizer; 0 = whatever the engine script asked for. */
 export let ENGINE_VOICE_OVERRIDE = 0
 export let ENGINE_VOLUME = 0.25
@@ -606,6 +755,15 @@ export let TREE_MIN_H = 3
 export let TREE_HEIGHT_SCALE = 1
 /** 1 = every candidate cell gets its tree; below that a stable hash thins them */
 export let TREE_DENSITY = 1
+/**
+ * How far a trunk's base must be from the nearest PAVEMENT EDGE, metres.
+ *
+ * The planter drops any candidate closer than this. It is the "do not stand a tree in the lane"
+ * rule, asked of the same station field the road mesh is drawn from. 3 m was the old number and it
+ * is a trunk beside the kerb; a real verge is wider, and the car reaches the canopy before it
+ * reaches the trunk. Rich, 2026-10-03: the tree line was back on the white line.
+ */
+export let TREE_ROAD_CLEAR_M = 4.5
 // --- shape: multipliers over the ez-tree preset each archetype starts from (species.ts
 // optionsFor). A change regrows the variants, which is ~100 ms, so the panel debounces it.
 export let TREE_LEAF_COUNT = 1
@@ -619,7 +777,7 @@ export let TREE_TRUNK_RADIUS = 1
  * Sections and segments per branch. 0 hides the models and leaves every tree as an impostor
  * card; it does not regrow or rebake. Above 0 it is the cost knob, and how round a trunk looks.
  */
-export let TREE_DETAIL = 1
+export let TREE_DETAIL = 0.3
 /** -1 = the site's own species mix; 0..n forces one archetype everywhere (see species.ts ARCHETYPES) */
 export let TREE_SPECIES = -1
 /** how many variants the palette may hold */
@@ -665,12 +823,37 @@ export let STAR_SIZE = 1
 export let STAR_MAG_LIMIT = 8
 /** brightness of a catalogue star. 26 is a dark western-Maryland winter night; the slider runs past it. */
 export let SKY_STARS = 26
-/** the Milky Way, 0 … 2. Dimmer than it looks in a photograph, because so is the real one. */
-export let SKY_MILKYWAY = 0.1
+/**
+ * the Milky Way, 0 … 0.5. A real 4k image of the galaxy now, keyed on black; this is its brightness.
+ *
+ * Rich, 2026-10-03: the default is the value he dialled to for the stylised winter-desert look, and
+ * the slider is capped at 0.5 — "I can't imagine wanting more than 0.5 as a max". It cannot sit at
+ * the middle of that range: the gain multiplies an additive term and the shader discards below
+ * 0.002, so a negative gain is a dead half-slider. The floor is 0 and the value sits low in it.
+ */
+export let SKY_MILKYWAY = 0.25
+/**
+ * unsharp-mask strength on the galaxy, 0 … 2.4, sitting at the middle. 0 is the plate exactly as
+ * ingested; higher pulls the dust lanes and the nebulosity out against the band. The taps are only
+ * taken where the map is above the black key, so most of the sky never pays for them.
+ */
+export let SKY_MILKYWAY_SHARP = 1.2
+/**
+ * contrast on the galaxy's light, 0.3 … 1.6, sitting at the middle. A gamma on the band's own
+ * luminance (hue preserved), so black stays black and only the midtones move: >1 lifts the mist off
+ * the dust lanes, <1 lets the band's faint outer light up.
+ */
+export let SKY_MILKYWAY_CONTRAST = 0.95
+/**
+ * gaussian blur on the galaxy, in texels, 0 … 1. 0 is sharp and is the default. A fraction of a
+ * texel softens the JPEG grain and the one satellite trail NASA's composite still carries; the cap
+ * is 1, which is already a deep-sky glow rather than a band.
+ */
+export let SKY_MILKYWAY_BLUR = 0
 /** the wispy high layer's brightness, 0 … 1. How much sky it covers is SKY_CIRRUS_AMOUNT. */
 export let SKY_CIRRUS = 0.8
 /** how much of the sky the wisps cover. 0 is clear, 1 is a cirrus deck. */
-export let SKY_CIRRUS_AMOUNT = 0.55
+export let SKY_CIRRUS_AMOUNT = 0.16
 /** 1 is the high layer's present drift. 0 holds it still. */
 export let SKY_CIRRUS_SPEED = 1
 /** direction the high layer travels, degrees clockwise from north. */
@@ -780,6 +963,14 @@ export let TAILLIGHT_ANGLE = 1.4
 export let HEADLIGHT_RANGE = 175
 /** the beam's half-angle, radians — the retro cone is this widened, so the two stay linked */
 export let HEADLIGHT_ANGLE = 0.46
+/**
+ * How many traffic lights (head + tail slots) may be REAL spot lights at once. The forward renderer
+ * evaluates every visible spot for every lit ground fragment, and the cost is super-linear:
+ * measured at 2560x1323, 2 spots ~+2 ms, 10 spots ~+14 ms, 16 spots ~+32 ms. The nearest cars win
+ * the budget; the rest show only their emissive lamps and the wet-road streaks. The hero car's own
+ * beams are separate and always real.
+ */
+export let TRAFFIC_LIGHTS = 4
 /**
  * Retroreflection: how hard paint and sheeting throw your own headlights back at you.
  *
@@ -941,8 +1132,9 @@ export let POWER_SAG = 0.035
 export let POWER_SAG_MAX = 6
 
 // --- camera -------------------------------------------------------------------------------------
-/** the fly camera may not go below the ground under it by less than this (m) */
-export let CAM_MIN_HEIGHT = 0.4
+/** the fly camera may not go below the ground under it by less than this (m). Was 0.4, which is
+ *  literally eye-level with the grass; 1.0 keeps the camera out of the brush while staying low. */
+export let CAM_MIN_HEIGHT = 1.0
 /** m: eye height for the "sit on the road" key (G). Below ~0.25 m the 0.5 m near plane starts
  *  clipping the surface out of the bottom of the frame. */
 export let CAM_SIT_HEIGHT = 1.5
@@ -1233,8 +1425,10 @@ const PHYS_CAR_GROUPS: { title: string; collapsed?: boolean; keys: PhysCarKnob[]
     title: 'engine & brakes',
     collapsed: false,
     keys: [
-      { key: 'powerPerKg', min: 0, max: 30, step: 0.1, hint: 'tractive force at a standstill, N per kg of car. The document derives it from the gearing' },
-      { key: 'topSpeed', min: 10, max: 120, step: 1, hint: 'm/s drive tapers to nothing here — not a clamp on the speedometer' },
+      // max is 1.5× the hero car's own numbers, so the car sits at the 2/3 mark with the top third
+      // of the range free — headroom for the next two hypercar generations (Rich, 2026-10-03)
+      { key: 'powerPerKg', min: 0, max: 45, step: 0.1, hint: 'tractive force at a standstill, N per kg of car. The document derives it from the gearing' },
+      { key: 'topSpeed', min: 10, max: 180, step: 1, hint: 'm/s drive tapers to nothing here — not a clamp on the speedometer' },
       { key: 'brakePerKg', min: 0, max: 60, step: 0.5, hint: 'total braking force, N per kg' },
       { key: 'handbrakePerKg', min: 0, max: 40, step: 0.5, hint: 'handbrake force on the rear axle, N per kg' },
       { key: 'reverse', min: 0, max: 1, step: 0.02, hint: 'reverse as a share of forward power' },
@@ -1287,6 +1481,8 @@ const PHYS_CAR_GROUPS: { title: string; collapsed?: boolean; keys: PhysCarKnob[]
       { key: 'rollingPerKg', min: 0, max: 3, step: 0.05, hint: 'm/s² of rolling resistance, constant with speed' },
       { key: 'dragPerKg', min: 0, max: 0.004, step: 0.00005, hint: 'N per (m/s)² per kg' },
       { key: 'downforcePerKg', min: 0, max: 0.005, step: 0.00005, hint: 'N per (m/s)² per kg pressing down' },
+      { key: 'fanPerKg', min: 0, max: 30, step: 0.5, hint: 'active ground effect: N per kg pulling the car onto the road, spooled by brake/throttle/speed' },
+      { key: 'fanRearBias', min: 0, max: 1, step: 0.02, hint: '0 = the fan presses at the centre; 1 = all of it at the rear axle, which is the anti-nose-over' },
       { key: 'airPitch', min: 0, max: 5, step: 0.05, hint: 'rad/s² the driver has about the pitch axis in the air' },
       { key: 'airRoll', min: 0, max: 5, step: 0.05 },
       { key: 'airYaw', min: 0, max: 3, step: 0.05 },
@@ -1461,7 +1657,10 @@ export const TUNE_TABS: TuneTab[] = [
           tune('STAR_SIZE', () => STAR_SIZE, (v) => (STAR_SIZE = v), [0.3, 3], 0.05, 'all of them, scaled'),
           tune('STAR_MAG_LIMIT', () => STAR_MAG_LIMIT, (v) => (STAR_MAG_LIMIT = v), [1, 10], 0.1, 'faintest magnitude drawn. The catalogue ends near 6.5, so 8 already draws every star'),
           tune('SKY_STARS', () => SKY_STARS, (v) => (SKY_STARS = v), [0, 48], 0.5, 'how bright a star burns. 26 is a dark western-Maryland winter night; size stays a point'),
-          tune('SKY_MILKYWAY', () => SKY_MILKYWAY, (v) => (SKY_MILKYWAY = v), [0, 2], 0.05, 'the Milky Way \u2014 the real isophotes, on the same sphere as the stars'),
+          tune('SKY_MILKYWAY', () => SKY_MILKYWAY, (v) => (SKY_MILKYWAY = v), [0, 0.5], 0.05, 'the Milky Way \u2014 the real galaxy, on the same sphere as the stars'),
+          tune('SKY_MILKYWAY_SHARP', () => SKY_MILKYWAY_SHARP, (v) => (SKY_MILKYWAY_SHARP = v), [0, 2.4], 0.05, 'unsharp mask on the galaxy. 0 is the plate as ingested; higher pops the dust lanes'),
+          tune('SKY_MILKYWAY_CONTRAST', () => SKY_MILKYWAY_CONTRAST, (v) => (SKY_MILKYWAY_CONTRAST = v), [0.3, 1.6], 0.05, 'contrast on the band\u2019s light, hue preserved. >1 pulls the mist off the dust lanes'),
+          tune('SKY_MILKYWAY_BLUR', () => SKY_MILKYWAY_BLUR, (v) => (SKY_MILKYWAY_BLUR = v), [0, 1], 0.1, 'gaussian blur on the galaxy, in texels. 0 sharp; a fraction softens the grain, 1 is a glow'),
           tune('SKY_CIRRUS', () => SKY_CIRRUS, (v) => (SKY_CIRRUS = v), [0, 1], 0.05, 'how bright the wisps are. How many of them there are is the amount'),
           tune('SKY_CIRRUS_AMOUNT', () => SKY_CIRRUS_AMOUNT, (v) => (SKY_CIRRUS_AMOUNT = v), [0, 1], 0.02, 'cirrus coverage. 0 is a clear sky, 1 is a deck of wisps'),
           tune('SKY_CIRRUS_SPEED', () => SKY_CIRRUS_SPEED, (v) => (SKY_CIRRUS_SPEED = v), [0, 12], 0.05, 'how fast the high wisps travel. 1 is the present drift, 0 holds them still'),
@@ -1570,13 +1769,15 @@ export const TUNE_TABS: TuneTab[] = [
     name: 'ground',
     sections: [
       {
-        title: 'density',
+        title: 'shape (all modes + types)',
         scope: 'world',
         keys: [
-          tune('GRASS_MOWN_PER_M2', () => GRASS_MOWN_PER_M2, (v) => (GRASS_MOWN_PER_M2 = v), [0, 120], 1, 'blades/m² inside the mow line'),
-          tune('GRASS_ROUGH_PER_M2', () => GRASS_ROUGH_PER_M2, (v) => (GRASS_ROUGH_PER_M2 = v), [0, 80], 1, 'blades/m² beyond it'),
-          tune('GRASS_HEIGHT_SCALE', () => GRASS_HEIGHT_SCALE, (v) => (GRASS_HEIGHT_SCALE = v), [0.2, 3], 0.05),
-          tune('GRASS_WIDTH_SCALE', () => GRASS_WIDTH_SCALE, (v) => (GRASS_WIDTH_SCALE = v), [0.3, 3], 0.05),
+          tune('GRASS_DENSITY', () => GRASS_DENSITY, (v) => (GRASS_DENSITY = v), [0, 4], 0.05, 'blades/area × — drives 3D blades, imposter cards and shader turf alike'),
+          tune('GRASS_THICK', () => GRASS_THICK, (v) => (GRASS_THICK = v), [0.15, 3], 0.05, 'blade/tuft width ×'),
+          tune('GRASS_HEIGHT', () => GRASS_HEIGHT, (v) => (GRASS_HEIGHT = v), [0.2, 3], 0.05, 'blade/tuft length ×'),
+          tune('GRASS_WIND', () => GRASS_WIND, (v) => (GRASS_WIND = v), [0, 3], 0.05, 'sway ×'),
+          tune('GRASS_MOWN_PER_M2', () => GRASS_MOWN_PER_M2, (v) => (GRASS_MOWN_PER_M2 = v), [0, 120], 1, 'base blades/m² inside the mow line, before GRASS_DENSITY'),
+          tune('GRASS_ROUGH_PER_M2', () => GRASS_ROUGH_PER_M2, (v) => (GRASS_ROUGH_PER_M2 = v), [0, 80], 1, 'base blades/m² beyond it'),
         ],
       },
       {
@@ -1600,11 +1801,47 @@ export const TUNE_TABS: TuneTab[] = [
         scope: 'world',
         collapsed: false,
         keys: [
-          tune('GRASS_CARDS', () => GRASS_CARDS, (v) => (GRASS_CARDS = v), [0, 1], 1, '0 = dynamic blades up close, 1 = the static cards at every distance'),
-          tune('GRASS_MOWN_HEIGHT', () => GRASS_MOWN_HEIGHT, (v) => (GRASS_MOWN_HEIGHT = v), [0.05, 1], 0.01, 'm'),
-          tune('GRASS_ROUGH_HEIGHT', () => GRASS_ROUGH_HEIGHT, (v) => (GRASS_ROUGH_HEIGHT = v), [0.2, 4], 0.05, 'm before the season multiplier'),
-          tune('GRASS_LEAN', () => GRASS_LEAN, (v) => (GRASS_LEAN = v), [0, 1.5], 0.05),
-          tune('GRASS_WIND', () => GRASS_WIND, (v) => (GRASS_WIND = v), [0, 3], 0.05),
+          tune('GRASS_MODE', () => GRASS_MODE, (v) => (GRASS_MODE = v), [0, 1], 1, 'vegetation: 0 3D blades up close + cards in the distance | 1 imposter cards everywhere. The GROUND is separate: see GRASS_GROUND'),
+          tune('GRASS_MOWN_HEIGHT', () => GRASS_MOWN_HEIGHT, (v) => (GRASS_MOWN_HEIGHT = v), [0.05, 1], 0.01, 'short/mown blade height (m)'),
+          tune('GRASS_ROUGH_HEIGHT', () => GRASS_ROUGH_HEIGHT, (v) => (GRASS_ROUGH_HEIGHT = v), [0.2, 4], 0.05, 'tall/rough blade height (m), before the season multiplier'),
+          tune('GRASS_LEAN', () => GRASS_LEAN, (v) => (GRASS_LEAN = v), [0, 1.5], 0.05, 'how far a blade tip leans from its root, as a fraction of height'),
+        ],
+      },
+      {
+        title: 'ground layer (independent of mode)',
+        scope: 'world',
+        collapsed: false,
+        keys: [
+          tune('GRASS_GROUND', () => GRASS_GROUND, (v) => (GRASS_GROUND = v), [0, 1], 1, 'the GROUND under the blades: 0 static photo turf (tiles, flat up close) | 1 relief underlayment (dense shader turf, fills 100 %)'),
+        ],
+      },
+      {
+        title: 'shadows (grass casts & receives)',
+        scope: 'world',
+        keys: [
+          tune('GRASS_CAST', () => GRASS_CAST, (v) => (GRASS_CAST = v), [0, 1], 0.05, 'fake grass-on-grass shadow in the shader, along the brightest light (sun or headlamp). 0 = off'),
+          tune('GRASS_CAST_REAL', () => GRASS_CAST_REAL, (v) => (GRASS_CAST_REAL = v), [0, 1], 1, 'also CAST the real 3D blades into the sun shadow map, so the verge/road/world receive blade shadows. 0 = fake only'),
+          tune('GRASS_CAST_SCALE', () => GRASS_CAST_SCALE, (v) => (GRASS_CAST_SCALE = v), [0.3, 6], 0.1, 'fake self-shadow: clump size of the canopy marched over (m)'),
+          tune('GRASS_CAST_REACH', () => GRASS_CAST_REACH, (v) => (GRASS_CAST_REACH = v), [0.2, 8], 0.1, 'self-shadow: how far up-light the canopy march reaches (m)'),
+        ],
+      },
+      {
+        title: 'relief underlayment (GRASS_GROUND 1)',
+        scope: 'world',
+        keys: [
+          tune('GRASS_SHADER_SCALE', () => GRASS_SHADER_SCALE, (v) => (GRASS_SHADER_SCALE = v), [0.5, 20], 0.25, 'pattern size: cells per metre'),
+          tune('GRASS_SHADER_RADIUS', () => GRASS_SHADER_RADIUS, (v) => (GRASS_SHADER_RADIUS = v), [5, 300], 5, 'how far (m) the relief is drawn \u2014 the perf dial'),
+          tune('GRASS_SHADER_CONE', () => GRASS_SHADER_CONE, (v) => (GRASS_SHADER_CONE = v), [5, 75], 2, 'half-angle of the forward cone the relief is drawn in'),
+          tune('GRASS_SHADER_NEAR', () => GRASS_SHADER_NEAR, (v) => (GRASS_SHADER_NEAR = v), [0, 40], 2, 'a full circle of relief this close (m)'),
+          tune('GRASS_SHADER_JITTER', () => GRASS_SHADER_JITTER, (v) => (GRASS_SHADER_JITTER = v), [0, 1.5], 0.05, 'root offset across cells'),
+          tune('GRASS_SHADER_SPREAD', () => GRASS_SHADER_SPREAD, (v) => (GRASS_SHADER_SPREAD = v), [0, 1.5], 0.05, 'blade direction spread (radians)'),
+          tune('GRASS_RELIEF_WIDTH', () => GRASS_RELIEF_WIDTH, (v) => (GRASS_RELIEF_WIDTH = v), [0.002, 0.03], 0.001, 'relief blade width (m), before GRASS_THICK'),
+          tune('GRASS_TAPER_SHORT', () => GRASS_TAPER_SHORT, (v) => (GRASS_TAPER_SHORT = v), [0, 1], 0.05, 'tip taper of short/mown grass (relief + 3D blades)'),
+          tune('GRASS_TAPER_LONG', () => GRASS_TAPER_LONG, (v) => (GRASS_TAPER_LONG = v), [0, 1], 0.05, 'tip taper of long/rough grass (relief + 3D blades)'),
+          tune('GRASS_LIFT_M', () => GRASS_LIFT_M, (v) => (GRASS_LIFT_M = v), [0, 0.3], 0.005, 'grass turf lip above the pavement (m) — world rebuild'),
+          tune('GRASS_EDGE_M', () => GRASS_EDGE_M, (v) => (GRASS_EDGE_M = v), [0.04, 0.6], 0.01, 'run of the grass edge face at the pavement (m)'),
+          tune('GRASS_CONTRAST', () => GRASS_CONTRAST, (v) => (GRASS_CONTRAST = v), [0, 2], 0.05, 'dark/light spread of the relief turf'),
+          tune('GRASS_ALIGN', () => GRASS_ALIGN, (v) => (GRASS_ALIGN = v), [0, 1], 0.05, 'turn the relief blades\u2019 faces to the driver'),
         ],
       },
       {
@@ -1622,7 +1859,7 @@ export const TUNE_TABS: TuneTab[] = [
       {
         title: 'cards',
         keys: [
-          tune('GRASS_SPRITE_RADIUS', () => GRASS_SPRITE_RADIUS, (v) => (GRASS_SPRITE_RADIUS = v), [20, 1500], 10, 'clump cards out to here (m). The blades/cards switch is GRASS_CARDS, in blades'),
+          tune('GRASS_SPRITE_RADIUS', () => GRASS_SPRITE_RADIUS, (v) => (GRASS_SPRITE_RADIUS = v), [20, 1500], 10, 'clump cards out to here (m). The vegetation/ground switches are GRASS_MODE and GRASS_GROUND, in the grass tab'),
           tune('GRASS_SPRITE_PER_M2', () => GRASS_SPRITE_PER_M2, (v) => (GRASS_SPRITE_PER_M2 = v), [0, 4], 0.05, 'cards/m² at 40 blades/m² and a ~0.6 m clump; the mown and rough density knobs, and a shorter clump, scale this up'),
           tune('GRASS_SPRITE_FAR_DENSITY', () => GRASS_SPRITE_FAR_DENSITY, (v) => (GRASS_SPRITE_FAR_DENSITY = v), [0, 1], 0.05, 'share of cards kept at the far rim'),
           tune('GRASS_SPRITE_SCALE', () => GRASS_SPRITE_SCALE, (v) => (GRASS_SPRITE_SCALE = v), [0.3, 3], 0.05, 'height'),
@@ -1667,6 +1904,16 @@ export const TUNE_TABS: TuneTab[] = [
         ],
       },
       {
+        title: 'adaptive budget (models follow the tree count)',
+        scope: 'world',
+        collapsed: false,
+        keys: [
+          tune('TREE_ADAPT', () => TREE_ADAPT, (v) => (TREE_ADAPT = v), [-1, 1], 0.05, 'attenuator: 0 is the designed dynamic adjustment, -1 pins the near field to the knobs above, +1 doubles it'),
+          tune('TREE_ADAPT_MODELS', () => TREE_ADAPT_MODELS, (v) => (TREE_ADAPT_MODELS = v), [40, 900], 10, 'the models the tree count aims to seat near the eye'),
+          tune('TREE_ADAPT_MS', () => TREE_ADAPT_MS, (v) => (TREE_ADAPT_MS = v), [8, 33], 0.5, 'the frame time the closed loop trims toward (ms)'),
+        ],
+      },
+      {
         title: 'planting (replants around the eye)',
         scope: 'world',
         keys: [
@@ -1674,6 +1921,7 @@ export const TUNE_TABS: TuneTab[] = [
           tune('TREE_MIN_H', () => TREE_MIN_H, (v) => (TREE_MIN_H = v), [1, 14], 0.5, 'canopy height (m) that counts as a tree; lower plants the scrub the CHM sees'),
           tune('TREE_HEIGHT_SCALE', () => TREE_HEIGHT_SCALE, (v) => (TREE_HEIGHT_SCALE = v), [0.3, 2.5], 0.05, 'multiplies every measured height'),
           tune('TREE_DENSITY', () => TREE_DENSITY, (v) => (TREE_DENSITY = v), [0.05, 1], 0.05, '1 = every candidate; below that a stable hash thins them'),
+          tune('TREE_ROAD_CLEAR_M', () => TREE_ROAD_CLEAR_M, (v) => (TREE_ROAD_CLEAR_M = v), [1, 15], 0.5, 'metres a trunk stays back from the pavement edge, so it does not stand in the lane'),
           tune('TREE_PLANT_RADIUS_M', () => TREE_PLANT_RADIUS_M, (v) => (TREE_PLANT_RADIUS_M = v), [200, 3000], 50, 'how far around the eye cards are drawn'),
           tune('TREE_REPLANT_M', () => TREE_REPLANT_M, (v) => (TREE_REPLANT_M = v), [50, 1200], 25, 'replant once the eye is this far from where it last planted'),
           tune('TREE_PLANT_BUDGET_MS', () => TREE_PLANT_BUDGET_MS, (v) => (TREE_PLANT_BUDGET_MS = v), [0.5, 12], 0.5, 'ms per frame spent measuring trees that just entered the ring'),
@@ -1693,7 +1941,7 @@ export const TUNE_TABS: TuneTab[] = [
           tune('TREE_GNARLINESS', () => TREE_GNARLINESS, (v) => (TREE_GNARLINESS = v), [0, 4], 0.05, 'how much a branch wanders as it grows'),
           tune('TREE_TAPER', () => TREE_TAPER, (v) => (TREE_TAPER = v), [0.3, 1.4], 0.02, 'how fast a branch thins along its length'),
           tune('TREE_TRUNK_RADIUS', () => TREE_TRUNK_RADIUS, (v) => (TREE_TRUNK_RADIUS = v), [0.3, 3], 0.05, 'trunk thickness'),
-          tune('TREE_DETAIL', () => TREE_DETAIL, (v) => (TREE_DETAIL = v), [0, 2], 0.05, '0 = impostor cards only, no 3D trees. Above that, sections and segments per branch'),
+          tune('TREE_DETAIL', () => TREE_DETAIL, (v) => (TREE_DETAIL = v), [0, 1], 0.05, '0 = impostor cards only, no 3D trees. Above that, sections and segments per branch'),
         ],
       },
       {
@@ -1727,8 +1975,8 @@ export const TUNE_TABS: TuneTab[] = [
           tune('GRASS_RADIUS', () => GRASS_RADIUS, (v) => (GRASS_RADIUS = v), [10, 120], 1, 'no blades beyond this (m)'),
           tune('GRASS_LOD_NEAR', () => GRASS_LOD_NEAR, (v) => (GRASS_LOD_NEAR = v), [2, 60], 1, 'full density inside (m)'),
           tune('GRASS_LOD_MID', () => GRASS_LOD_MID, (v) => (GRASS_LOD_MID = v), [4, 100], 1, 'mid density inside (m)'),
-          tune('GRASS_LOD_MID_DENSITY', () => GRASS_LOD_MID_DENSITY, (v) => (GRASS_LOD_MID_DENSITY = v), [0, 1], 0.05),
-          tune('GRASS_LOD_FAR_DENSITY', () => GRASS_LOD_FAR_DENSITY, (v) => (GRASS_LOD_FAR_DENSITY = v), [0, 1], 0.05),
+          tune('GRASS_LOD_MID_DENSITY', () => GRASS_LOD_MID_DENSITY, (v) => (GRASS_LOD_MID_DENSITY = v), [0, 1], 0.05, 'share of blades kept between NEAR and MID \u2014 geometry only; the ground stays 100 % grass'),
+          tune('GRASS_LOD_FAR_DENSITY', () => GRASS_LOD_FAR_DENSITY, (v) => (GRASS_LOD_FAR_DENSITY = v), [0, 1], 0.05, 'share of blades kept between MID and RADIUS \u2014 geometry only'),
         ],
       },
       {
@@ -1913,6 +2161,7 @@ export const TUNE_TABS: TuneTab[] = [
           tune('TAILLIGHT_ANGLE', () => TAILLIGHT_ANGLE, (v) => (TAILLIGHT_ANGLE = v), [0.15, 1.57], 0.02, 'tail-light half-angle (rad). 1.57 is a flat 180° wash out the back; the old cones were 0.22'),
           tune('HEADLIGHT_RANGE', () => HEADLIGHT_RANGE, (v) => (HEADLIGHT_RANGE = v), [10, 200], 5, 'how far down the road they reach (m)'),
           tune('HEADLIGHT_ANGLE', () => HEADLIGHT_ANGLE, (v) => (HEADLIGHT_ANGLE = v), [0.1, 1.2], 0.02, 'the beam\u2019s half-angle (rad); the retro cone is this widened'),
+          tune('TRAFFIC_LIGHTS', () => TRAFFIC_LIGHTS, (v) => (TRAFFIC_LIGHTS = Math.round(v)), [0, 16], 1, 'how many traffic lights (head+tail slots) are real spot lights at once. Each one costs ground shading, super-linearly'),
           tune('RETRO_MARKINGS', () => RETRO_MARKINGS, (v) => (RETRO_MARKINGS = v), [0, 6], 0.1, 'how hard road paint throws your headlights back'),
           tune('RETRO_SIGNS', () => RETRO_SIGNS, (v) => (RETRO_SIGNS = v), [0, 6], 0.1, 'how hard sign sheeting throws your headlights back'),
           tune('RETRO_SPREAD', () => RETRO_SPREAD, (v) => (RETRO_SPREAD = v), [1, 3], 0.05, 'retro cone as a multiple of the beam angle \u2014 above 1, the edge of the light lights things up'),
@@ -2034,6 +2283,7 @@ export const TUNE_TABS: TuneTab[] = [
         title: 'gearbox (ours: the car has a speed, not a crankshaft)',
         scope: 'world',
         keys: [
+          tune('ENGINE_AUTO_GEAR', () => ENGINE_AUTO_GEAR, (v) => (ENGINE_AUTO_GEAR = v), [0, 1], 1, '1 = solve the car’s estimated top speed and set FINAL DRIVE so top gear redlines there — no drone at the wall. Cosmetics; the physics profile is untouched', { lerp: 'step' }),
           tune('ENGINE_GEAR_1', () => ENGINE_GEAR_1, (v) => (ENGINE_GEAR_1 = v), [0, 6], 0.01),
           tune('ENGINE_GEAR_2', () => ENGINE_GEAR_2, (v) => (ENGINE_GEAR_2 = v), [0, 6], 0.01),
           tune('ENGINE_GEAR_3', () => ENGINE_GEAR_3, (v) => (ENGINE_GEAR_3 = v), [0, 6], 0.01),

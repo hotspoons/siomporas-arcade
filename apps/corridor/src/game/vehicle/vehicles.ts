@@ -673,6 +673,78 @@ export function effectiveTopSpeed(v: VehicleDoc): number {
   return Math.min(geared, dragged)
 }
 
+/**
+ * Where a car really runs out of speed, m/s — the balance the SIMULATION solves, not the card's
+ * constant-power cube root.
+ *
+ * `effectiveTopSpeed` above is the honest "all the power goes into the air" law, `P = drag·m·v³`, but
+ * it leaves out the two things that bind in play. The engine force does not fade to nothing at the
+ * profile's `topSpeed` — it floors at 15% of `powerPerKg` — and the tyres cap what can be put down:
+ * each driven wheel passes at most `frictionSlip × load`, and downforce raises that load with speed.
+ * On a car whose tyres are the limiter the wall is
+ *
+ *     grip · axleShare · (m·g + downforce·m·v²) = drag·m·v²
+ *
+ * which has no power in it at all — which is exactly why "max power" stops mattering past a point.
+ *
+ * So this solves `min(engine, traction) = drag` and returns the speed. It is an ESTIMATE: weight
+ * transfer, the friction circle's side share and the road's own grip are left out, and the sim's
+ * per-wheel suspension load is approximated by the static axle share. But it is the number to gear
+ * top gear for, so the engine is at the redline at the speed the car actually reaches.
+ */
+export function estimateVmax(v: VehicleDoc): number {
+  // A malformed document has no speed to give: the arithmetic below does not read mass or wheel
+  // radius (both cancel), so the guard for them lives here rather than in the profile maths.
+  if (!(v.spec.mass > 0) || !(v.spec.wheelRadius > 0)) return 0
+  return vmaxFromProfile(toDriveProfile(v), frontShare(v.spec))
+}
+
+/** The memo for `vmaxFromProfile`. One entry is the whole cache: a live caller asks about the car it
+ *  is driving right now, and asks again only when a knob moves. */
+let vmaxKey = ''
+let vmaxVal = 0
+
+/**
+ * `estimateVmax`'s arithmetic, over a `DriveProfile` rather than a document, and MEMOISED.
+ *
+ * The F6 auto-gear switch calls this on every tuning change (a probe may call it every frame), and
+ * it is a handful of `Math.sqrt`s over the same numbers until a knob moves. The key is every number
+ * the arithmetic reads, so any knob that can move the wall misses the cache and the rest return the
+ * last answer without solving anything.
+ */
+export function vmaxFromProfile(p: DriveProfile, front: number): number {
+  const key = `${p.drive}|${p.powerPerKg}|${p.topSpeed}|${p.gripFront}|${p.gripRear}|${p.dragPerKg}|${p.downforcePerKg}|${front}`
+  if (key === vmaxKey) return vmaxVal
+  vmaxKey = key
+  vmaxVal = computeVmax(p, front)
+  return vmaxVal
+}
+
+function computeVmax(p: DriveProfile, front: number): number {
+  if (!(p.dragPerKg > 0) || !(p.topSpeed > 0) || !(p.powerPerKg > 0)) return 0
+  const g = 9.81
+  const share = p.drive === 'fwd' ? front : p.drive === 'awd' ? 1 : 1 - front
+  const grip = p.drive === 'fwd'
+    ? p.gripFront
+    : p.drive === 'awd'
+      ? p.gripFront * front + p.gripRear * (1 - front)
+      : p.gripRear
+  const down = p.downforcePerKg ?? 0
+
+  // the tyres: where drag catches the grip-and-downforce cap on the driven axle
+  const capDen = p.dragPerKg - grip * share * down
+  const vCap = capDen > 0 ? Math.sqrt((grip * share * g) / capDen) : Infinity
+
+  // the engine: the taper balance, or its 15% floor when that balance would sit below the floor
+  const taper2 = p.powerPerKg / (p.dragPerKg + p.powerPerKg / (p.topSpeed * p.topSpeed))
+  const vEng = taper2 <= 0.85 * p.topSpeed * p.topSpeed
+    ? Math.sqrt(taper2)
+    : Math.sqrt((0.15 * p.powerPerKg) / p.dragPerKg)
+
+  const vmax = Math.min(vCap, vEng)
+  return Number.isFinite(vmax) ? vmax : 0
+}
+
 /* ---- decisions the form makes, extracted so they can be tested without a browser --------------- */
 
 /**

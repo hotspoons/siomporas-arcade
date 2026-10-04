@@ -849,12 +849,14 @@ export let SKY_STARS = 26
 /**
  * the Milky Way, 0 … 0.5. A real 4k image of the galaxy now, keyed on black; this is its brightness.
  *
- * Rich, 2026-10-03: the default is the value he dialled to for the stylised winter-desert look, and
- * the slider is capped at 0.5 — "I can't imagine wanting more than 0.5 as a max". It cannot sit at
- * the middle of that range: the gain multiplies an additive term and the shader discards below
- * 0.002, so a negative gain is a dead half-slider. The floor is 0 and the value sits low in it.
+ * Rich, 2026-10-03: the slider is capped at 0.5 — "I can't imagine wanting more than 0.5 as a max",
+ * which is twice the old default. It cannot sit at the middle of that range: the gain multiplies an
+ * additive term and the shader discards below 0.002, so a negative gain is a dead half-slider.
+ *
+ * Rich, 2026-10-04: the default is 0.10 — at 0.25 the band dominated the sky. The interesting range
+ * is the bottom fifth, so the detent is 0.01 (not 0.05) up to 0.10.
  */
-export let SKY_MILKYWAY = 0.25
+export let SKY_MILKYWAY = 0.1
 /**
  * unsharp-mask strength on the galaxy, 0 … 2.4, sitting at the middle. 0 is the plate exactly as
  * ingested; higher pulls the dust lanes and the nebulosity out against the band. The taps are only
@@ -1680,7 +1682,7 @@ export const TUNE_TABS: TuneTab[] = [
           tune('STAR_SIZE', () => STAR_SIZE, (v) => (STAR_SIZE = v), [0.3, 3], 0.05, 'all of them, scaled'),
           tune('STAR_MAG_LIMIT', () => STAR_MAG_LIMIT, (v) => (STAR_MAG_LIMIT = v), [1, 10], 0.1, 'faintest magnitude drawn. The catalogue ends near 6.5, so 8 already draws every star'),
           tune('SKY_STARS', () => SKY_STARS, (v) => (SKY_STARS = v), [0, 48], 0.5, 'how bright a star burns. 26 is a dark western-Maryland winter night; size stays a point'),
-          tune('SKY_MILKYWAY', () => SKY_MILKYWAY, (v) => (SKY_MILKYWAY = v), [0, 0.5], 0.05, 'the Milky Way \u2014 the real galaxy, on the same sphere as the stars'),
+          tune('SKY_MILKYWAY', () => SKY_MILKYWAY, (v) => (SKY_MILKYWAY = v), [0, 0.5], 0.01, 'the Milky Way \u2014 the real galaxy, on the same sphere as the stars'),
           tune('SKY_MILKYWAY_SHARP', () => SKY_MILKYWAY_SHARP, (v) => (SKY_MILKYWAY_SHARP = v), [0, 2.4], 0.05, 'unsharp mask on the galaxy. 0 is the plate as ingested; higher pops the dust lanes'),
           tune('SKY_MILKYWAY_CONTRAST', () => SKY_MILKYWAY_CONTRAST, (v) => (SKY_MILKYWAY_CONTRAST = v), [0.3, 1.6], 0.05, 'contrast on the band\u2019s light, hue preserved. >1 pulls the mist off the dust lanes'),
           tune('SKY_MILKYWAY_BLUR', () => SKY_MILKYWAY_BLUR, (v) => (SKY_MILKYWAY_BLUR = v), [0, 1], 0.1, 'gaussian blur on the galaxy, in texels. 0 sharp; a fraction softens the grain, 1 is a glow'),

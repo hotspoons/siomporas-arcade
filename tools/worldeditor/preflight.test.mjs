@@ -43,9 +43,11 @@ console.log('preflight, against a cluster I do not have\n')
 /* 2. the DEFAULT profile on Sparks — which is how somebody would actually first try it */
 {
   const r = checks(sparks({ storageClasses: [{ name: 'nfs', provisioner: 'nfs.csi.k8s.io' }] }), PROFILES.default)
-  // it FITS — 20 >= 16 and 128 >= 48 — and it takes 80% of the node, which is the answer that
-  // matters and the one a yes/no check calls a pass
-  check('the default bake fits a Spark only just', find(r, 'a bake fits on one node').ok, null)
+  // IT DOES NOT FIT, and that is the honest answer: a Spark has 128 GiB of unified memory and the
+  // default bake now asks 384 (the 669 M-point network needs it for surface.measure). The fix
+  // names the knob, so the operator learns to use the spark profile's smaller limits rather than
+  // getting a Job that never schedules.
+  check('the default bake does NOT fit a Spark', find(r, 'a bake fits on one node').ok, false)
   console.log(`       ${find(r, 'a bake fits on one node').detail}`)
   console.log(`       ${find(r, 'a bake fits on one node').fix}`)
 }

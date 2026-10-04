@@ -10,7 +10,7 @@ import type { Budget } from './budget'
 import { ACCUM_PARS, accumUniforms } from '../visuals/weather'
 import { injectShade, injectWetStreak } from '../visuals/shading'
 import { GRASS_RELIEF_PARS, grassReliefUniforms } from '../visuals/grassrelief'
-import { injectGroundLamp } from '../visuals/retro'
+import { injectFloodLamp } from '../visuals/retro'
 import * as T from '../tuning'
 
 export interface Edge {
@@ -355,10 +355,9 @@ export async function buildStrip(
       )
     injectShade(shader)
     injectWetStreak(shader)
-    // OPTIMIZED PATH (GROUND_LAMP): the headlamp pool on the verge is the same fixed two-lamp
-    // analytic term the grass and the tree cards use. car.ts turns the real headlight spots off
-    // while this is on, so the two never double up.
-    injectGroundLamp(shader)
+    // OPTIMIZED PATH (FAKE lamps): the analytic flood also lights the verge. car.ts turns the real
+    // headlight spots off while they are fake, so the two never double up.
+    injectFloodLamp(shader)
   }
   mat.customProgramCacheKey = () => 'corridor-strip-shade-wet-vert'
   const mesh = new THREE.Mesh(geo, mat)

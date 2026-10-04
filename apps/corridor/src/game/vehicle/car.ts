@@ -513,14 +513,15 @@ export class Car {
     // The early-out has to watch the KNOBS as well as the level. It used to compare only `v`, so
     // turning HEADLIGHT down did nothing at all until the sun next moved — the panel moved, the
     // beam did not, and the only way to see the change was to wait for dusk (2026-09-27).
-    // how many of each pair are REAL spots (HERO_HEADLIGHT_SPOTS / HERO_TAILLIGHT_SPOTS). An
-    // invisible spot leaves three's light loop entirely; the lens stays emissive either way.
-    // GROUND_LAMP > 0 moves the ground's headlamp pool onto the analytic two-lamp shader, which
-    // reads the beam POSITIONS off lamps() regardless. Running the real headlight spots as well
-    // would light the ground twice, so the optimized path turns them off.
-    const headSpots = T.GROUND_LAMP > 0 ? 0 : Math.max(0, Math.min(this.beams.length, Math.round(T.HERO_HEADLIGHT_SPOTS)))
-    const tailSpots = Math.max(0, Math.min(this.tailBeams.length, Math.round(T.HERO_TAILLIGHT_SPOTS)))
-    const sig = `${v.toFixed(3)}|${T.HEADLIGHT}|${T.TAILLIGHT}|${T.TAILLIGHT_RANGE}|${T.TAILLIGHT_ANGLE}|${T.HEADLIGHT_RANGE}|${T.HEADLIGHT_ANGLE}|${headSpots}|${tailSpots}|${T.GROUND_LAMP}`
+    // 0 off / 1 real / 2 fake (HERO_HEADLIGHTS_MODE / HERO_TAILLIGHTS_MODE). Only mode 1 runs a
+    // real SpotLight; visible=false leaves the spot out of three's light loop entirely, and a
+    // fake lamp feeds the analytic flood instead (main.ts). Mode 0 also silences the retro / grass
+    // beam by zeroing `on` in lamps().
+    const headReal = Math.round(T.HERO_HEADLIGHTS_MODE) === 1
+    const tailReal = Math.round(T.HERO_TAILLIGHTS_MODE) === 1
+    const headSpots = headReal ? this.beams.length : 0
+    const tailSpots = tailReal ? this.tailBeams.length : 0
+    const sig = `${v.toFixed(3)}|${T.HEADLIGHT}|${T.TAILLIGHT}|${T.TAILLIGHT_RANGE}|${T.TAILLIGHT_ANGLE}|${T.HEADLIGHT_RANGE}|${T.HEADLIGHT_ANGLE}|${T.HERO_HEADLIGHTS_MODE}|${T.HERO_TAILLIGHTS_MODE}|${headSpots}|${tailSpots}`
     if (sig === this.lightSig) return
     this.lightSig = sig
     this.lightsOn = v
@@ -601,7 +602,36 @@ export class Car {
     // What the beam is really doing, knob included — retroreflection must follow the light that
     // is actually there, or turning the headlights down leaves the paint still answering them at
     // full strength. Scaled rather than switched, so half the beam gives half the answer back.
-    return { each, on: this.lightsOn * Math.min(1, Math.max(0, T.HEADLIGHT)) }
+    // Mode 0 (OFF) zeroes it: no real spot, no fake flood, nothing for the paint to answer.
+    const headOn = Math.round(T.HERO_HEADLIGHTS_MODE) === 0 ? 0 : 1
+    return { each, on: this.lightsOn * headOn * Math.min(1, Math.max(0, T.HEADLIGHT)) }
+  }
+
+  /**
+   * How hard the car's lamps are on this frame (the night fraction). Public so the flood fill in
+   * main.ts can scale a fake lamp the same way the real spot is scaled.
+   */
+  get lampLevel(): number {
+    return this.lightsOn
+  }
+
+  /**
+   * Every lamp on the car, on or not, in world space — the candidates the analytic flood draws
+   * from (main.ts). Head lamps first, then tails; `tail` is the colour the caller should use.
+   * Fresh vectors, so the pool can copy them and this can run every frame.
+   */
+  floodLamps(): { pos: THREE.Vector3; dir: THREE.Vector3; tail: boolean }[] {
+    const out: { pos: THREE.Vector3; dir: THREE.Vector3; tail: boolean }[] = []
+    const add = (b: THREE.SpotLight, tail: boolean) => {
+      const p = new THREE.Vector3()
+      const t = new THREE.Vector3()
+      b.getWorldPosition(p)
+      b.target.getWorldPosition(t)
+      out.push({ pos: p, dir: t.sub(p).normalize(), tail })
+    }
+    for (const b of this.beams) add(b, false)
+    for (const b of this.tailBeams) add(b, true)
+    return out
   }
 
   /**
@@ -706,4 +736,8 @@ export interface DrivableCar {
   lamps(): { each: { pos: THREE.Vector3; dir: THREE.Vector3 }[]; on: number }
   /** headlights and tail lights that are on, and the way they point, for the wet-road streaks */
   streaks(): { pos: THREE.Vector3; dir: THREE.Vector3; tail: boolean }[]
+  /** how hard the lamps are on this frame, for scaling a fake lamp in the analytic flood */
+  readonly lampLevel: number
+  /** every lamp, on or not, in world space, for the analytic flood */
+  floodLamps(): { pos: THREE.Vector3; dir: THREE.Vector3; tail: boolean }[]
 }

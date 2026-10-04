@@ -19,7 +19,7 @@ import { Car, type CarInput, type DrivableCar } from './game/vehicle/car'
 import { EngineSound, spawnPlayerEngine } from './game/vehicle/enginesound'
 import { ActorWorld } from './game/actors/actorworld'
 import { Transform } from './game/actors/actors'
-import { retro } from './visuals/retro'
+import { flood, injectFloodLamp, retro } from './visuals/retro'
 import { SiteSearch } from './game/move/search'
 
 /** 16-point compass, indexed by bearing/22.5 — N at 0, clockwise through E. */
@@ -918,6 +918,8 @@ async function loadSite(slug: string) {
     },
     scene,
     camera,
+    /** the analytic lamp pool (retro.ts), for probes of the FAKE lighting path */
+    flood,
     // probes that need to read PIXELS must render and call gl.readPixels in the same turn: the
     // viewer's renderer has no preserveDrawingBuffer, so a drawImage a frame later reads a
     // cleared buffer and every measurement comes back black
@@ -2554,6 +2556,14 @@ const SHADOW_RECEIVE = new Set(['road', 'terrain', 'water', 'buildings', 'near-t
 
 const shadeMats = new WeakSet<THREE.Material>()
 
+/**
+ * Every standard material that has taken the FAKE-lamp flood (retro.ts). One walk here wires the
+ * whole built world — the road and the verge signed up at their own factories, but buildings,
+ * poles, kerbs, signs and the odds and ends are made in a dozen modules, and this is the one place
+ * that already sees all of them.
+ */
+const floodMats = new WeakSet<THREE.Material>()
+
 /** Mark the meshes that should cast or catch the sun. A card, a blade and a field do neither. */
 function armShadows(root: THREE.Object3D) {
   root.traverse((o) => {
@@ -2572,11 +2582,18 @@ function armShadows(root: THREE.Object3D) {
     // a regrown tree and the shadow cards bring their own depth material. Overwriting it with the
     // shared one is what made a tree-detail change stop casting.
     if (cast && !mesh.customDepthMaterial) mesh.customDepthMaterial = linearShadowDepth
-    if (!receive || !mesh.material) return
+    if (!mesh.material) return
     for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
+      const std = m as THREE.MeshStandardMaterial
+      // the FAKE-lamp fallback (retro.ts): every standard material answers the analytic flood,
+      // shadow receiver or not — buildings, poles, kerbs and signs are the point of it
+      if (std.isMeshStandardMaterial && !floodMats.has(m)) {
+        floodMats.add(m)
+        chainCompile(std, injectFloodLamp, 'flood-lamp')
+      }
+      if (!receive) continue
       if (shadeMats.has(m)) continue
       shadeMats.add(m)
-      const std = m as THREE.MeshStandardMaterial
       if (std.isMeshStandardMaterial) chainCompile(std, injectShade, 'shade')
     }
   })
@@ -3706,6 +3723,35 @@ function frame() {
     const lamps = drive.car?.lamps()
     retro.setLamps(lamps?.each ?? [], lamps?.on ?? 0)
     retro.tick()
+    /*
+     * THE ANALYTIC FLOOD (retro.ts). Every standard material in the built world — asphalt, kerbs,
+     * buildings, poles — carries `floodDiffuse`, so this is where the FAKE lamps (mode 2) light it.
+     * The hero car's lamps first, then the nearest traffic, nearest-first; the pool is fixed, so a
+     * jam costs the same as an empty road. All real-mode lamps are real spots and never land here,
+     * so a fragment is only ever lit once.
+     */
+    flood.begin()
+    {
+      const car = drive.car
+      const level = car?.lampLevel ?? 0
+      if (car && level > 0.02) {
+        const headFake = Math.round(T.HERO_HEADLIGHTS_MODE) === 2 && T.HEADLIGHT > 0.001
+        const tailFake = Math.round(T.HERO_TAILLIGHTS_MODE) === 2 && T.TAILLIGHT > 0.001
+        if (headFake || tailFake) {
+          const head = level * Math.min(1, Math.max(0, T.HEADLIGHT))
+          const tail = level * (T.TAILLIGHT / 0.025)
+          for (const l of car.floodLamps()) {
+            if (l.tail) {
+              if (tailFake) flood.add(l.pos, l.dir, tail, tail * 0.06, tail * 0.03, T.TAILLIGHT_RANGE)
+            } else if (headFake) {
+              flood.add(l.pos, l.dir, head, head * 0.96, head * 0.87, T.HEADLIGHT_RANGE)
+            }
+          }
+        }
+      }
+      if (Math.round(T.TRAFFIC_LIGHTS_MODE) === 2) traffic?.feedFlood(flood, camera.position, Math.max(0, Math.round(T.TRAFFIC_LIGHTS)))
+    }
+    flood.end()
     // wet tarmac mirrors the lamps that are on: a vertical streak from each one down to the camera
     const wetMarks: WetMark[] = []
     if ((site?.weather.wetness ?? 0) > 0.02) {

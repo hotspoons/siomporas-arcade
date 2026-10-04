@@ -63,13 +63,56 @@ export interface RetroUniforms {
 export const LAMPS = 2
 
 /**
- * The ground strip's own headlamp-pool gain, shared by reference into the strip material.
+ * The analytic lamp flood: a fixed pool of lamps that standard materials light themselves with.
  *
- * Read every frame by `lampDiffuse` in the ground shader. 0 leaves the ground on three.js's real
- * spot lights; > 0 moves it onto the fixed two-lamp analytic path the grass already uses. See
- * `T.GROUND_LAMP`. Kept here beside the lamps because it is the same `uLampPos` / `uCosOuter` set.
+ * Separate from the two-lamp retro set above on purpose. That set is the hero HEADLAMPS and it is
+ * read by the grass, the tree cards and the road paint, which loop two lamps on every fragment.
+ * The flood is fatter — hero head and tail, traffic head and tail, up to FLOOD_LAMPS of them — but
+ * only standard materials evaluate it, and only the nearest lamps make the cut. One pool, filled
+ * once a frame (main.ts), consumed by every material `injectFloodLamp` has touched.
  */
-export const groundLamp = { value: 0 }
+export const FLOOD_LAMPS = 8
+
+export const FLOOD_PARS = /* glsl */ `
+  uniform int uFloodCount;
+  uniform vec3 uFloodPos[${FLOOD_LAMPS}];
+  uniform vec3 uFloodDir[${FLOOD_LAMPS}];
+  uniform vec3 uFloodCol[${FLOOD_LAMPS}];
+  uniform float uFloodRange[${FLOOD_LAMPS}];
+  uniform float uFloodCosOuter;
+  uniform float uFloodCosInner;
+  uniform float uFloodGain;
+
+  /** the beam's share at this point: cone x falloff, 0..1, per flood lamp */
+  float floodReach(vec3 worldPos, int k, out vec3 dir) {
+    vec3 d = worldPos - uFloodPos[k];
+    float dist = length(d);
+    dir = d / max(dist, 1e-4);
+    float range = uFloodRange[k];
+    if (dist > range) return 0.0;
+    float cone = smoothstep(uFloodCosOuter, uFloodCosInner, dot(dir, normalize(uFloodDir[k])));
+    float fall = 1.0 - smoothstep(range * 0.35, range, dist);
+    return cone * fall;
+  }
+
+  /**
+   * Diffuse light on a standard surface from the flood pool. Half-Lambert, like the lampDiffuse it
+   * mirrors, so a fake beam washes a wall rather than cutting a hard terminator across it. The pool
+   * is capped, so the loop stops at the count the frame actually filled.
+   */
+  vec3 floodDiffuse(vec3 worldPos, vec3 nrm) {
+    if (uFloodGain <= 0.0 || uFloodCount <= 0) return vec3(0.0);
+    vec3 sum = vec3(0.0);
+    for (int k = 0; k < ${FLOOD_LAMPS}; k++) {
+      if (k >= uFloodCount) break;
+      vec3 dir;
+      float reach = floodReach(worldPos, k, dir);
+      if (reach <= 0.0) continue;
+      sum += uFloodCol[k] * (reach * (dot(nrm, -dir) * 0.5 + 0.5));
+    }
+    return sum * uFloodGain;
+  }
+`
 
 export function retroUniforms(): RetroUniforms {
   return {
@@ -331,7 +374,6 @@ export class Retro {
 
   /** knobs, once a frame */
   tick(): void {
-    groundLamp.value = T.GROUND_LAMP
     const u = this.uniforms
     u.uLampRange.value = T.HEADLIGHT_RANGE
     // the retro cone is the beam's own angle, widened: the edge of the light is where a real
@@ -358,37 +400,89 @@ export class Retro {
 export const retro = new Retro()
 
 /**
- * GROUND_LAMP: put a standard material's headlamp pool on the analytic path.
+ * The flood pool, filled once a frame (main.ts) and read by every material on the fast path.
  *
- * The ground is millions of fragments, and three.js's forward renderer runs its whole PBR spot
- * loop on every one of them for every car in the beam. The grass, the tree cards and the paint
- * already light themselves with the fixed two-lamp `lampDiffuse` above; this hands a standard
- * material — the asphalt, the blend bands, the verge strip — the same shared uniforms and adds
- * that term after the opaque pass, so the pool costs a couple of ALU instead of a dynamic light.
+ * A fixed pool rather than a light per car: the shader loop is a compile-time constant, so lamps
+ * can come and go without a single recompile, and a jam costs the same as an empty road. The
+ * callers fill it nearest-first and it silently drops the overflow.
+ */
+export class FloodLamps {
+  readonly uniforms = {
+    uFloodCount: { value: 0 },
+    uFloodPos: { value: Array.from({ length: FLOOD_LAMPS }, () => new THREE.Vector3()) },
+    uFloodDir: { value: Array.from({ length: FLOOD_LAMPS }, () => new THREE.Vector3(1, 0, 0)) },
+    uFloodCol: { value: Array.from({ length: FLOOD_LAMPS }, () => new THREE.Color(0, 0, 0)) },
+    uFloodRange: { value: new Float32Array(FLOOD_LAMPS).fill(1) },
+    uFloodCosOuter: { value: 0.9 },
+    uFloodCosInner: { value: 0.99 },
+    uFloodGain: { value: 1 },
+  }
+  private n = 0
+
+  /** start a frame's fill */
+  begin(): void {
+    this.n = 0
+  }
+
+  /** add one lamp. r/g/b are the colour already scaled by how hard the lamp is on. */
+  add(pos: THREE.Vector3, dir: THREE.Vector3, r: number, g: number, b: number, range: number): void {
+    if (this.n >= FLOOD_LAMPS) return
+    const k = this.n++
+    this.uniforms.uFloodPos.value[k].copy(pos)
+    this.uniforms.uFloodDir.value[k].copy(dir)
+    this.uniforms.uFloodCol.value[k].setRGB(r, g, b)
+    this.uniforms.uFloodRange.value[k] = range
+  }
+
+  /** how many lamps this frame's fill actually placed */
+  get count(): number {
+    return this.n
+  }
+
+  /** close the frame: publish the count and the knobs */
+  end(): void {
+    const u = this.uniforms
+    u.uFloodCount.value = this.n
+    u.uFloodGain.value = T.FAKE_LAMPS
+    // one cone for the whole pool — the beam's own angle, widened like the retro cone, so a fake
+    // beam washes a pole the way the sign sheeting already answers a real one
+    const outer = Math.min(1.45, T.HEADLIGHT_ANGLE * T.RETRO_SPREAD)
+    u.uFloodCosOuter.value = Math.cos(outer)
+    u.uFloodCosInner.value = Math.cos(outer * 0.35)
+  }
+}
+
+export const flood = new FloodLamps()
+
+/**
+ * Put a standard material on the analytic flood path.
+ *
+ * Three's forward renderer runs its whole PBR spot loop, per fragment, over every lit standard
+ * material for every visible spot. That is fine when a couple of beams are on; it is what a jam of
+ * cars, or the FAKE fallback, cannot afford. This hands the material the shared flood pool and adds
+ * a couple of ALU after the opaque pass instead.
  *
  * The material needs nothing special: world position and normal are rebuilt from `vViewPosition`,
  * exactly as the wet streak already does. Safe to chain onto a material that has already had its
- * shader rewritten (it hangs the declarations on `#include <common>` and appends at opaque).
- *
- * Pair it with `T.GROUND_LAMP` and `Car.setLights`, which turns the real headlight spots off so
- * the two paths never light the same fragment twice.
+ * shader rewritten (it hangs the declarations on `#include <common>` and appends at opaque, and
+ * skips itself if the material already carries the term).
  */
-export function injectGroundLamp(shader: { fragmentShader: string; uniforms: Record<string, { value: unknown }> }): void {
-  if (shader.fragmentShader.includes('uniform float uGroundLamp')) return
-  for (const [k, v] of Object.entries(retro.uniforms)) shader.uniforms[k] = v
-  shader.uniforms.uGroundLamp = groundLamp
-  const pars = shader.fragmentShader.includes('uniform vec3 uLampPos') ? 'uniform float uGroundLamp;' : `uniform float uGroundLamp;\n${LAMP_PARS}`
-  shader.fragmentShader = shader.fragmentShader.includes('#include <common>')
-    ? shader.fragmentShader.replace('#include <common>', `#include <common>\n${pars}`)
-    : `${pars}\n${shader.fragmentShader}`
+export function injectFloodLamp(shader: { fragmentShader: string; uniforms: Record<string, { value: unknown }> }): void {
+  if (shader.fragmentShader.includes('uniform float uFloodGain')) return
+  for (const [k, v] of Object.entries(flood.uniforms)) shader.uniforms[k] = v
+  if (!shader.fragmentShader.includes('uniform vec3 uFloodPos')) {
+    shader.fragmentShader = shader.fragmentShader.includes('#include <common>')
+      ? shader.fragmentShader.replace('#include <common>', `#include <common>\n${FLOOD_PARS}`)
+      : `${FLOOD_PARS}\n${shader.fragmentShader}`
+  }
   shader.fragmentShader = shader.fragmentShader.replace(
     '#include <opaque_fragment>',
     `#include <opaque_fragment>
     {
-      mat4 lampInv = inverse(viewMatrix);
-      vec3 lampWp = (lampInv * vec4(-vViewPosition, 1.0)).xyz;
-      vec3 lampN = normalize((lampInv * vec4(normal, 0.0)).xyz);
-      gl_FragColor.rgb += diffuseColor.rgb * lampDiffuse(lampWp, lampN, uGroundLamp);
+      mat4 floodInv = inverse(viewMatrix);
+      vec3 floodWp = (floodInv * vec4(-vViewPosition, 1.0)).xyz;
+      vec3 floodN = normalize((floodInv * vec4(normal, 0.0)).xyz);
+      gl_FragColor.rgb += diffuseColor.rgb * floodDiffuse(floodWp, floodN);
     }`,
   )
 }

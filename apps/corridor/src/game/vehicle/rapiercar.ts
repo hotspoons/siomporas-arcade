@@ -200,6 +200,14 @@ export class RapierCar implements DrivableCar {
     return this.body.streaks()
   }
 
+  get lampLevel() {
+    return this.body.lampLevel
+  }
+
+  floodLamps() {
+    return this.body.floodLamps()
+  }
+
   /** Let it go. The vehicle's bodies belong to the physics world and have to be handed back. */
   free() {
     this.vehicle.free()

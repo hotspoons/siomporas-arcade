@@ -678,6 +678,9 @@ export class TrafficLayer {
    */
   private lightCars(glow: { s: Shown; d2: number }[]): void {
     glow.sort((a, b) => a.d2 - b.d2)
+    // mode 1 = real spot lights (budgeted); mode 2 = fake, so no real spots at all (the flood in
+    // main.ts picks them up); mode 0 = off. Only mode 1 can put a light in three's forward loop.
+    const real = Math.round(T.TRAFFIC_LIGHTS_MODE) === 1
     let budget = Math.max(0, Math.round(T.TRAFFIC_LIGHTS))
     const night = this.night
     // Same knob as the pool on the road, three times brighter on the lamp itself.
@@ -692,7 +695,7 @@ export class TrafficLayer {
       if (on) budget -= need
       // `visible`, not just intensity: an intensity-0 light still sits in the forward shader's light
       // loop and costs ground shading, so the daytime must remove it, not dim it (measured 2026-10-04).
-      const lit = on && night > 0.02
+      const lit = real && on && night > 0.02
       for (const spot of heads) {
         spot.visible = lit && T.HEADLIGHT > 0.001
         spot.intensity = lit ? 9 * night * T.HEADLIGHT : 0
@@ -705,6 +708,48 @@ export class TrafficLayer {
         spot.target.position.x = spot.position.x - Math.max(1.2, T.TAILLIGHT_RANGE * 0.65)
         spot.target.position.y = 0.05
       }
+    }
+  }
+
+  /**
+   * Fill the analytic flood with the nearest cars' lamps (TRAFFIC_LIGHTS_MODE 2).
+   *
+   * The fake counterpart of `lightCars`: no real spots at all, just positions handed to the pool
+   * every material on the fast path reads. The rig spots exist either way, so this reads their
+   * world transform exactly as `fillWet` does. Nearest-first up to `limit` lamps; the pool drops
+   * any overflow itself.
+   */
+  feedFlood(
+    pool: { count: number; add(pos: THREE.Vector3, dir: THREE.Vector3, r: number, g: number, b: number, range: number): void },
+    eye: THREE.Vector3,
+    limit: number,
+  ): void {
+    if (this.night < 0.08) return
+    const cand: { d2: number; spot: THREE.SpotLight; tail: boolean }[] = []
+    for (const s of this.shown) {
+      if (!s.lamps.visible) continue
+      const rig = s.lamps.userData.lamps as LampRig | undefined
+      if (!rig) continue
+      const d2 = (s.mesh.position.x - eye.x) ** 2 + (s.mesh.position.z - eye.z) ** 2
+      if (d2 > 80 * 80) continue
+      for (const spot of rig.heads) cand.push({ d2, spot, tail: false })
+      for (const spot of rig.tails) cand.push({ d2, spot, tail: true })
+    }
+    cand.sort((a, b) => a.d2 - b.d2)
+    const p = new THREE.Vector3()
+    const aim = new THREE.Vector3()
+    for (const c of cand) {
+      if (pool.count >= limit) break
+      c.spot.getWorldPosition(p)
+      c.spot.target.getWorldPosition(aim)
+      aim.sub(p)
+      aim.y = 0
+      if (aim.lengthSq() < 1e-8) aim.set(1, 0, 0)
+      else aim.normalize()
+      const gain = c.tail ? T.TAILLIGHT / 0.025 : T.HEADLIGHT / 2.7
+      if (gain < 0.02) continue
+      if (c.tail) pool.add(p, aim, 1 * gain, 0.06 * gain, 0.03 * gain, T.TAILLIGHT_RANGE)
+      else pool.add(p, aim, 1 * gain, 0.93 * gain, 0.72 * gain, T.HEADLIGHT_RANGE)
     }
   }
 

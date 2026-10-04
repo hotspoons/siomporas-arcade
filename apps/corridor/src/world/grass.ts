@@ -704,6 +704,7 @@ export class Grass {
         uniform vec3 uTip;
         uniform float uDry;
         uniform sampler2D uMap;
+        uniform vec3 uSun;
         uniform float uHue;
         uniform float uSat;
         uniform float uLight;
@@ -711,10 +712,12 @@ export class Grass {
         // lights, so without this it glows in the dark (Rich, 2026-09-26)
         uniform float uNightMul;
         uniform vec3 uLightTint;
+        uniform float uShade;
         varying vec2 vUv;
         varying float vRand;
         varying float vMown;
         varying vec3 vCardWorld;
+        varying float vAbove;
         #include <fog_pars_fragment>
         #include <logdepthbuf_pars_fragment>
         ${ACCUM_PARS}

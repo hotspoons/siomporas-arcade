@@ -33,10 +33,12 @@ bake:
   # extra CLI args, e.g. ["--lidar-half-width", "150"]
   args: []
   # a site is ~100 M points held in numpy while rasters are built; 16 Gi is the observed floor for
-  # the South Mountain corridor, 48 Gi leaves room for a wider one. CPU is mostly LAZ decode.
+  # the South Mountain corridor. A large `kind: network` world is heavier: bake 495 (the Capital
+  # Beltway, 514 km²) keeps every one of its ~669 M near-road returns for the structure tests and
+  # was OOM-killed at 48 Gi. gh200-1's nodes have 573 GiB, so the limit carries real headroom.
   resources:
-    requests: {cpu: "4", memory: 16Gi}
-    limits: {cpu: "16", memory: 48Gi}
+    requests: {cpu: "4", memory: 32Gi}
+    limits: {cpu: "16", memory: 128Gi}
   backoffLimit: 1
   ttlSecondsAfterFinished: 604800  # keep a week of logs
   # Override the sites.json baked into the image (a JSON array, see corridor/sites.py). Empty

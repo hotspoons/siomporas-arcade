@@ -5,6 +5,8 @@
     lidar/{dtm,dsm,chm}.vrt                                            gdalbuildvrt over the tiles
     lidar/corridor.laz                                                 the NEAR-ROAD points only
                                                                        (within BAND_M of any chain)
+    lidar/lidar.done.json                                              the point pass finished; a
+                                                                       rerun reuses the two above
     naip_1m.tif                                                        1 m, windowed writes, only the
                                                                        4 km service tiles that touch
                                                                        the corridor are fetched
@@ -52,6 +54,11 @@ TILE_M = 1000.0
 NAIP_RES_M = 0.6
 BAND_M = 15.0        # near-road points kept for the structure tests
 CHM_MAX = 80.0
+
+#: The six rasters written per 1 km tile, and the marker that says the lidar stage finished.
+_TILE_KINDS = ("dtm", "dsm", "chm", "deck_z", "deck_n", "building_n")
+_LIDAR_MARKER = "lidar.done.json"
+_LIDAR_MARKER_VERSION = 1
 
 
 class LazyRaster:
@@ -126,6 +133,9 @@ def lidar_tiled(frame: Frame, bbox, corridor, chains: list[dict], ldir: Path, ca
     ldir.mkdir(exist_ok=True)
     tdir = ldir / "tiles"
     tdir.mkdir(exist_ok=True)
+    done = _resume_lidar(frame, bbox, chains, ldir)
+    if done is not None:
+        return done
     (x0, y0), tiles = tile_index(bbox, corridor)
     n = int(TILE_M)
     acc: dict[tuple[int, int], dict[str, np.ndarray]] = {}
@@ -202,6 +212,8 @@ def lidar_tiled(frame: Frame, bbox, corridor, chains: list[dict], ldir: Path, ca
             near_parts.append({k2: v[keep] for k2, v in part.items()} | {"road": road[keep].astype(np.int16)})
         print(f"  lidar   {label}: {len(cls):,} pts in corridor, {int(keep.sum()):,} near a road", flush=True)
         del part
+    # the 2 m band was only for picking the near-road points; the tiles below are the peak
+    del band
     # write the tiles
     crs = frame.crs
     written = []
@@ -228,12 +240,34 @@ def lidar_tiled(frame: Frame, bbox, corridor, chains: list[dict], ldir: Path, ca
         lidar._write(Path(f"{stem}.deck_n.tif"), deck_n, tr, crs)
         lidar._write(Path(f"{stem}.building_n.tif"), a["bld_n"].reshape(n, n), tr, crs)
         written.append((tx, ty))
-    for kind in ("dtm", "dsm", "chm", "deck_z", "deck_n", "building_n"):
+    for kind in _TILE_KINDS:
         files = [str(tdir / f"{tx}_{ty}.{kind}.tif") for tx, ty in written]
         if files:
             subprocess.run(["gdalbuildvrt", "-q", "-overwrite", str(ldir / f"{kind}.vrt"), *files], check=True)
+    # The six accumulators are 643 tile squares of six arrays on a real network and are dead once
+    # the VRTs exist. Holding them through the near-road cloud below was half the peak that killed
+    # bake 495 at 48 GiB (the other half was the concatenate, see the assembly). Drop them first.
+    del acc
     # the near-road cloud
-    pts = {k: np.concatenate([p[k] for p in near_parts]) for k in near_parts[0]} if near_parts else None
+    #
+    # Assemble ONE copy, freeing each batch as its points are copied out. `np.concatenate` built a
+    # second full cloud while `near_parts` was still alive: 669 M points at 31 B each is ~21 GiB,
+    # so the concat alone needed ~42 GiB with the tile accumulators still resident. Fill a
+    # preallocated block instead and drop each source batch behind it, so the live set stays ~1x.
+    pts = None
+    if near_parts:
+        keys = list(near_parts[0].keys())
+        npts = sum(len(p["x"]) for p in near_parts)
+        pts = {k: np.empty(npts, dtype=near_parts[0][k].dtype) for k in keys}
+        off = 0
+        for i, p in enumerate(near_parts):
+            m = len(p["x"])
+            if m:
+                for k in keys:
+                    pts[k][off:off + m] = p[k]
+            off += m
+            near_parts[i] = None
+        del near_parts
     if pts is not None:
         import laspy
         import pyproj
@@ -248,7 +282,135 @@ def lidar_tiled(frame: Frame, bbox, corridor, chains: list[dict], ldir: Path, ca
         las.write(ldir / "corridor.laz")
     classes = {lidar.CLASS_NAMES.get(i, str(i)): int(c) for i, c in enumerate(counts) if c}
     zf = meta.pop("z_factor", 1.0)
-    return {**meta, "points_in_corridor": int(total), "near_road_points": int(len(pts["x"])) if pts else 0, "classes": classes, "classification": {"tiles_demoted_17_18": demoted, "class17_trusted": demoted == 0}, "z_factor": zf, "tiles": {"size_m": TILE_M, "origin": [x0, y0], "list": written}, "rasters": ["tiles/*.dtm.tif", "tiles/*.dsm.tif", "tiles/*.chm.tif", "dtm.vrt", "dsm.vrt", "chm.vrt"], "pts": pts}
+    result = {**meta, "points_in_corridor": int(total), "near_road_points": int(len(pts["x"])) if pts else 0, "classes": classes, "classification": {"tiles_demoted_17_18": demoted, "class17_trusted": demoted == 0}, "z_factor": zf, "tiles": {"size_m": TILE_M, "origin": [x0, y0], "list": written}, "rasters": ["tiles/*.dtm.tif", "tiles/*.dsm.tif", "tiles/*.chm.tif", "dtm.vrt", "dsm.vrt", "chm.vrt"]}
+    _mark_lidar_done(frame, bbox, chains, ldir, result, written, pts)
+    return {**result, "pts": pts}
+
+
+def _mark_lidar_done(frame: Frame, bbox, chains: list[dict], ldir: Path, result: dict, written: list, pts: dict | None) -> None:
+    """Record that the lidar stage finished, atomically, so a later run can reuse it.
+
+    The VRTs and the near-road cloud are the durable output but nothing said so: bake 495 wrote all
+    643 tiles and their VRTs at 04:04, died on `corridor.laz`, and the rerun could not tell the
+    difference between that and an empty directory, so it re-read 3.08 B cached EPT points and
+    rebuilt every tile. This marker is that difference. It is written last and replaced into place
+    in one step, so a run killed mid-write leaves either the old marker or none, never a half one.
+
+    `meta` is the whole manifest record, which is what lets a reuse return exactly what the bake
+    would have. It is JSON given `default=str`; a numpy scalar the source plan reports becomes a
+    string on the way back, which is what `manifest.json` already stores for the same values.
+    """
+    if not written:
+        return
+    laz = ldir / "corridor.laz"
+    marker = {
+        "version": _LIDAR_MARKER_VERSION,
+        "crs": frame.crs,
+        "bbox": [float(v) for v in bbox],
+        "origin": [float(v) for v in result["tiles"]["origin"]],
+        "tiles": [[int(a), int(b)] for a, b in written],
+        "chains": len(chains),
+        "chains_sig": _chains_signature(chains),
+        "near_road_points": int(result["near_road_points"]),
+        "laz_bytes": int(laz.stat().st_size) if pts is not None and laz.exists() else 0,
+        "meta": result,
+    }
+    tmp = ldir / f"{_LIDAR_MARKER}.part"
+    tmp.write_text(json.dumps(marker, default=str))
+    tmp.replace(ldir / _LIDAR_MARKER)
+
+
+def _chains_signature(chains: list[dict]) -> str:
+    """A digest of the chain geometry, so reuse is refused when the roads themselves differ.
+
+    Positional road indices are what the near-road band assigns and what `profile_tiled` reads, so
+    a chain that moved, split or was reordered makes the previous cloud the wrong shape. Count and
+    total length catch most of it; the digest catches a swap or a reshape that held both. Geometry
+    is rounded to 0.1 m so a re-bake of the same cached OSM does not reject itself on float noise.
+    """
+    import hashlib
+
+    h = hashlib.sha1()
+    for c in chains:
+        line = c["line"]
+        h.update(repr((len(line.coords), round(float(line.length), 1), tuple(round(float(v), 1) for v in line.bounds))).encode())
+    return h.hexdigest()
+
+
+def _resume_lidar(frame: Frame, bbox, chains: list[dict], ldir: Path) -> dict | None:
+    """The finished lidar stage read back from disk, or None when it must be rebuilt.
+
+    Reuse is only claimed for the SAME corridor: the marker records the frame, the snapped bbox and
+    a digest of the chain geometry, and every one has to match, because a site can be re-baked with
+    a wider half-width or a different primary and a tile grid from the old one is silently the
+    wrong shape (the same failure `rastercache.py` documents for a stale DEM). Every recorded tile
+    is also checked to still be present, so a delete or a partial volume is redone rather than
+    exported as holes.
+    """
+    marker = ldir / _LIDAR_MARKER
+    if not marker.exists():
+        return None
+    try:
+        saved = json.loads(marker.read_text())
+        if saved.get("version") != _LIDAR_MARKER_VERSION:
+            return None
+        if saved.get("crs") != frame.crs or int(saved.get("chains", -1)) != len(chains):
+            return None
+        if saved.get("chains_sig") != _chains_signature(chains):
+            return None
+        if [round(float(v), 2) for v in saved.get("bbox", [])] != [round(float(v), 2) for v in bbox]:
+            return None
+        tiles = [(int(t[0]), int(t[1])) for t in saved.get("tiles", [])]
+        if not tiles:
+            return None
+        for tx, ty in tiles:
+            for kind in _TILE_KINDS:
+                f = ldir / "tiles" / f"{tx}_{ty}.{kind}.tif"
+                if not f.exists() or f.stat().st_size == 0:
+                    print(f"  lidar   completion marker present but {f.name} is missing; redoing the point pass", flush=True)
+                    return None
+        near = int(saved.get("near_road_points", 0))
+        laz = ldir / "corridor.laz"
+        if near and (not laz.exists() or laz.stat().st_size == 0):
+            print("  lidar   completion marker present but corridor.laz is missing; redoing the point pass", flush=True)
+            return None
+        pts = _near_points_from_laz(bbox, chains, laz) if near else None
+        if pts is not None and len(pts["x"]) != near:
+            print(f"  lidar   completion marker says {near:,} near-road points but corridor.laz holds {len(pts['x']):,}; redoing the point pass", flush=True)
+            return None
+    except Exception as exc:
+        # Any doubt at all means rebuild. Reuse that is wrong is worse than a slow bake.
+        print(f"  lidar   could not reuse the finished stage ({exc}); redoing the point pass", flush=True)
+        return None
+    print(f"  lidar   point pass already done: reusing {near:,} near-road points over {len(tiles)} km tiles from disk", flush=True)
+    return {**(saved.get("meta") or {}), "pts": pts}
+
+
+def _near_points_from_laz(bbox, chains: list[dict], laz: Path) -> dict:
+    """Rebuild the near-road point dict from `corridor.laz`, road index and all.
+
+    The road index is not stored in the LAZ; it is recomputed here exactly as `lidar_tiled` made it
+    for the bake and as `reprofile` makes it for a rule change — the same 2 m band, the same chain
+    order, the same clipping — so `profile_tiled` sees the points it would have.
+    """
+    import laspy
+
+    las = laspy.read(laz)
+    pts = {
+        "x": np.asarray(las.x), "y": np.asarray(las.y), "z": np.asarray(las.z),
+        "cls": np.asarray(las.classification).astype(np.uint8),
+        "rn": np.asarray(las.return_number).astype(np.uint8),
+        "nr": np.asarray(las.number_of_returns).astype(np.uint8),
+        "i": np.asarray(las.intensity).astype(np.uint16),
+    }
+    bw = int(np.ceil((bbox[2] - bbox[0]) / 2.0))
+    bh = int(np.ceil((bbox[3] - bbox[1]) / 2.0))
+    btr = from_origin(bbox[0], bbox[3], 2.0, 2.0)
+    band = rasterize([(c["line"].buffer(BAND_M), i + 1) for i, c in enumerate(chains)], out_shape=(bh, bw), transform=btr, fill=0, dtype=np.int32)
+    br = np.clip(((bbox[3] - pts["y"]) / 2.0).astype(np.int64), 0, bh - 1)
+    bc = np.clip(((pts["x"] - bbox[0]) / 2.0).astype(np.int64), 0, bw - 1)
+    pts["road"] = band[br, bc].astype(np.int16)
+    return pts
 
 
 def naip_tiled(frame: Frame, bbox, corridor, out: Path, cache: Path, res: float = 1.0) -> dict:

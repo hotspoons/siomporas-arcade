@@ -27,8 +27,8 @@ data:
 
 worldeditor:
   # 8 of 20 cores, 32 of 128 GiB: two bakes can run on two nodes and neither starves its kubelet.
-  # The default (16 cpu, 48 GiB) schedules on a Spark and takes 80% of the node — preflight says
-  # so rather than letting you find out.
+  # The cluster default (16 cpu, 128 GiB) is sized for gh200-1's 573 GiB nodes and would take a
+  # Spark whole, so a Spark has to say so here; preflight flags it rather than letting you find out.
   bake:
     resources:
       requests: {cpu: "2", memory: 8Gi}

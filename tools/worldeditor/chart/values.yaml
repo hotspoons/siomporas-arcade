@@ -73,9 +73,23 @@ bake:
   # What a bake Job runs. The same image tools/corridor/chart uses, because it IS that Job.
   image: ghcr.io/hotspoons/corridor:latest
   # A site is ~100 M points held in numpy while rasters are built; 16 Gi is the observed floor.
+  #
+  # 48 Gi IS NOT ENOUGH FOR A BIG NETWORK, and bake 495 is the proof. 495 is the Capital Beltway
+  # `kind: network` world (514 km², 10,138 chains); its lidar stage keeps EVERY near-road return
+  # for the structure tests, and that cloud alone was 669 M points here. It died seconds after the
+  # point cloud finished fetching, in the in-memory assembly just before corridor.laz was written
+  # (all 643 tiles and their VRTs were already on disk) — the last log line is NOAA:9235 reporting
+  # "streets covered 100%", and the job then hit its backoff limit with no traceback.
+  #
+  # The stage's own memory is cut at the source now: network_tiles.lidar_tiled drops the tile
+  # accumulators once the VRTs exist, assembles the near-road cloud in one preallocated block and
+  # frees each batch behind it, so the peak is ~1x the cloud rather than ~2x it plus the tiles.
+  # The limit keeps real headroom above that: gh200-1's nodes have 573 GiB each, and no LimitRange
+  # or ResourceQuota caps this namespace. The request stays small relative to a node so a bake
+  # still schedules beside the editor and other work.
   resources:
-    requests: {cpu: "4", memory: 16Gi}
-    limits: {cpu: "16", memory: 48Gi}
+    requests: {cpu: "4", memory: 32Gi}
+    limits: {cpu: "16", memory: 128Gi}
   # keep a week of finished Jobs, so a log is still readable the next morning
   ttlSecondsAfterFinished: 604800
   horizonRadiusM: 30000

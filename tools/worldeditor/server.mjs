@@ -190,7 +190,7 @@ const runs = new Runs(store, k8s, {
   prefix: env.WORLDEDITOR_S3_PREFIX ?? 'corridor',
   overpassUrl: settings.get('overpass.url'),
   horizonM: Number(env.WORLDEDITOR_HORIZON_M ?? 30000),
-  resources: JSON.parse(env.WORLDEDITOR_BAKE_RESOURCES ?? '{"requests":{"cpu":"4","memory":"16Gi"},"limits":{"cpu":"16","memory":"48Gi"}}'),
+  resources: JSON.parse(env.WORLDEDITOR_BAKE_RESOURCES ?? '{"requests":{"cpu":"4","memory":"32Gi"},"limits":{"cpu":"16","memory":"128Gi"}}'),
   python: env.WORLDEDITOR_PYTHON ?? path.join(REPO, 'tools/corridor/.venv/bin/python'),
   cwd: env.WORLDEDITOR_CORRIDOR ?? path.join(REPO, 'tools/corridor'),
 })

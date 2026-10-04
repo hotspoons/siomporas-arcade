@@ -259,7 +259,9 @@ export async function buildStrip(
                 float roughMix = wRough / max(wMown + wRough, 1e-4);
                 float cov;
                 vec3 rc0 = grRelief(vWorldXZ, V, roughMix, cov, gGRNormal);
-                vec3 relief = mix(uGRBase * 0.95, rc0, cov) * grassTint;
+                // the blade colour only; coverage says how much of the pixel it covers. It is blended
+                // over the ground below, so the gaps between blades are real ground, not green gel.
+                vec3 relief = rc0 * grassTint;
                 // the mode-0 photo turf underneath, for the fade and beyond
                 vec3 mown = mix(triplanar(grassMown, vWorldXZ, n, 0.5, vec2(0.0)), triplanar(grassMown, vWorldXZ, n, 0.137, vec2(0.31, 0.77)), 0.4);
                 vec3 roughTurf = mix(triplanar(grassRough, vWorldXZ, n, 0.485, vec2(0.13, 0.41)), triplanar(grassRough, vWorldXZ, n, 0.121, vec2(0.62, 0.19)), 0.4);
@@ -267,8 +269,9 @@ export async function buildStrip(
                 roughTurf = mix(roughTurf, vec3(dot(roughTurf, vec3(0.3, 0.5, 0.2))), imageryDesat);
                 float lum = clamp(dot(img.rgb, vec3(0.3, 0.5, 0.2)) * 2.2, 0.55, 1.35);
                 vec3 turf = (mown * wMown + roughTurf * wRough) * grassTint * lum;
-                grass = mix(turf, relief, reg);
-                gGRW = reg;
+                float cw = clamp(reg * cov, 0.0, 1.0);
+                grass = mix(turf, relief, cw);
+                gGRW = cw;
               } else {
                 // outside the cone: plain mode-0 photo turf
                 vec3 mown = mix(triplanar(grassMown, vWorldXZ, n, 0.5, vec2(0.0)), triplanar(grassMown, vWorldXZ, n, 0.137, vec2(0.31, 0.77)), 0.4);
@@ -360,6 +363,7 @@ export async function buildStrip(
   if (T.GRASS_LIFT_M > 0) {
     const fp: number[] = []
     const fuv: number[] = []
+    const fn: number[] = []
     const fe: number[] = []
     const fc: number[] = []
     const fi: number[] = []
@@ -400,25 +404,44 @@ export async function buildStrip(
         h,
       }
     }
-    const push = (x: number, y: number, z: number): number => {
+    const push = (x: number, y: number, z: number, nx: number, ny: number, nz: number): number => {
       const vi = fp.length / 3
       fp.push(x, y, z)
-      fuv.push(0, y)
+      // WORLD imagery uv, the same mapping the strip itself uses. This used to be (0, y), which
+      // sampled a single column of the aerial photo down the whole fringe — the teal stripe and the
+      // crosshatch along the kerb.
+      fuv.push((x - bx0) / (bx1 - bx0), (-z - by0) / (by1 - by0))
+      // Fringe vertices carry their OWN normals; see the note where the geometry is finished for why
+      // computeVertexNormals() cannot work here.
+      fn.push(nx, ny, nz)
       fe.push(0)
       fc.push(0)
       return vi
+    }
+    // The lip's normal is kept CLOSE TO UP on purpose. The ground shader is triplanar: it blends the
+    // x/z world planes by pow(abs(normal), 4), so a normal with any real horizontal component makes
+    // the wall cross-fade two projections and beat into the crosshatch woven band along the kerb, and
+    // shades it like a separate surface. Near-vertical normals (true for this wall) are the worst case.
+    // Very nearly up keeps the xz sample dominant, so the lip is the same turf as the ground under it,
+    // while the slight outward tilt still lets the sun and headlights rake it.
+    const faceN = (c: { ox: number; oz: number }): [number, number, number] => {
+      const k = 0.35
+      const nx = -c.ox * k, ny = 1.0, nz = -c.oz * k
+      const s = 1 / Math.hypot(nx, ny, nz)
+      return [nx * s, ny * s, nz * s]
     }
     for (let j = 1; j < nL; j++) {
       for (let i = 0; i < nS - 1; i++) {
         const c0 = cross(i, j), c1 = cross(i + 1, j)
         if (!c0 || !c1) continue
         const l0 = lift0 * c0.h, l1 = lift0 * c1.h
-        const a = push(c0.x, c0.y, c0.z)
-        const b = push(c0.x + c0.ox * run, c0.y + l0, c0.z + c0.oz * run)
-        const e = push(c1.x, c1.y, c1.z)
-        const f = push(c1.x + c1.ox * run, c1.y + l1, c1.z + c1.oz * run)
-        const g = push(c0.x + c0.ox * shelfOut, c0.y + l0 + shelfUp, c0.z + c0.oz * shelfOut)
-        const h = push(c1.x + c1.ox * shelfOut, c1.y + l1 + shelfUp, c1.z + c1.oz * shelfOut)
+        const n0 = faceN(c0), n1 = faceN(c1)
+        const a = push(c0.x, c0.y, c0.z, n0[0], n0[1], n0[2])
+        const b = push(c0.x + c0.ox * run, c0.y + l0, c0.z + c0.oz * run, 0, 1, 0)
+        const e = push(c1.x, c1.y, c1.z, n1[0], n1[1], n1[2])
+        const f = push(c1.x + c1.ox * run, c1.y + l1, c1.z + c1.oz * run, 0, 1, 0)
+        const g = push(c0.x + c0.ox * shelfOut, c0.y + l0 + shelfUp, c0.z + c0.oz * shelfOut, 0, 1, 0)
+        const h = push(c1.x + c1.ox * shelfOut, c1.y + l1 + shelfUp, c1.z + c1.oz * shelfOut, 0, 1, 0)
         // BOTH WINDINGS. The material is FrontSide and which way the face looks depends on which side
         // of the carriageway the edge is on, so picking one winding culled the lip on one side of
         // every divided highway. The extra triangles are hidden back-faces.
@@ -429,11 +452,17 @@ export async function buildStrip(
     if (fi.length) {
       const fgeo = new THREE.BufferGeometry()
       fgeo.setAttribute('position', new THREE.Float32BufferAttribute(fp, 3))
+      fgeo.setAttribute('normal', new THREE.Float32BufferAttribute(fn, 3))
       fgeo.setAttribute('uv', new THREE.Float32BufferAttribute(fuv, 2))
       fgeo.setAttribute('aEdge', new THREE.Float32BufferAttribute(fe, 1))
       fgeo.setAttribute('aCanopy', new THREE.Float32BufferAttribute(fc, 1))
       fgeo.setIndex(fi)
-      fgeo.computeVertexNormals()
+      // NO computeVertexNormals. Every quad below is emitted twice with opposite windings (so the
+      // thin single-sided face is visible from either side of a divided highway). computeVertexNormals
+      // sums each face's area-weighted normal into its vertices, so the two copies of a quad cancel
+      // each other and every fringe normal collapses toward zero: the shader then triplanar-samples
+      // all three planes at random and the surface lights from nowhere. That is the black shard and
+      // the teal crosshatch in the lip. Normals are supplied per-vertex by push instead.
       const fmesh = new THREE.Mesh(fgeo, mat)
       fmesh.name = 'strip:edge'
       fmesh.receiveShadow = true

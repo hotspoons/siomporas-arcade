@@ -75,7 +75,7 @@ export function grassReliefTick(t: number, typeLook?: { height: number; width: n
   grassReliefUniforms.uGROn.value = on
   grassReliefUniforms.uGRScale.value = T.GRASS_SHADER_SCALE
   grassReliefUniforms.uGRHeight.value = 0.28 * T.GRASS_HEIGHT * (typeLook?.height ?? 1)
-  // ×3 so the shader field and the relief read the same "blades per cell" as the 3D blades' density
+  // ×4 so the shader field and the relief read the same "blades per cell" as the 3D blades' density
   grassReliefUniforms.uGRDensity.value = T.GRASS_DENSITY * 4 * (typeLook?.density ?? 1)
   grassReliefUniforms.uGRThick.value = T.GRASS_THICK * (typeLook?.width ?? 1)
   grassReliefUniforms.uGRWind.value = T.GRASS_WIND / 0.45
@@ -265,7 +265,6 @@ vec3 grRelief(vec3 world, vec3 V, float rough, out float cov, out vec3 nrm) {
   // real blade from bare turf, which the old always-zero hit never did.
   float tip = 0.0, seed = 0.0;
   float h = grH(p0, s, lenC, taper, rad, clump, bCap, tip, seed);
-  float hit = h > 0.0 ? 1.0 : -1.0;
 
   // BLADE NORMAL: mostly up so the sun and sky catch it, leaning toward the driver enough that the
   // light reads it as relief rather than as flat ground. World space; the strip converts it.
@@ -276,9 +275,6 @@ vec3 grRelief(vec3 world, vec3 V, float rough, out float cov, out vec3 nrm) {
   vec3 c = mix(uGRBase, uGRTip, 0.3 + 0.7 * tip);
   c = mix(c, c * vec3(1.15, 1.05, 0.65), uGRDry * (0.3 + 0.7 * seed));
   c *= mix(1.0, 1.2, tip) * (0.95 + 0.15 * seed);
-  // where the walk missed there is still turf — flat, unstreaked grass — so the field is a full
-  // green carpet with the blades standing out of it, never bare ground showing through
-  if (hit < 0.0) c = mix(uGRBase, uGRTip, 0.6);
   // clump tint: tufts are a touch darker and denser than the ground between them
   c *= mix(0.84, 1.12, clumpN);
   // GRASS_CONTRAST: push the dark roots and bright tips apart (or flatten them) around a mid luma
@@ -287,7 +283,11 @@ vec3 grRelief(vec3 world, vec3 V, float rough, out float cov, out vec3 nrm) {
   // shimmers, so pull it toward the mean. Close blades (a couple of pixels or more) are untouched —
   // an earlier version faded everything and washed the field out to flat green underfoot.
   c = mix(c, mix(uGRBase, uGRTip, 0.55), (1.0 - smoothstep(0.4, 1.2, bladePx)) * 0.5);
-  cov = 1.0;
+  // NO CARPET. cov is how much of this pixel is a blade, and the caller blends the blade over the
+  // real ground by it. The old version returned an opaque green "miss" colour wherever the field
+  // had a gap, which is exactly what read as a solid slab of green — grass in a jello mould. Bare
+  // turf now shows the ground (and the 3D blades behind it) through the gaps instead.
+  cov = clamp(h * 1.35, 0.0, 1.0);
   return c;
 }
 `

@@ -1195,6 +1195,11 @@ export class Grass {
           const height = (mown ? T.GRASS_MOWN_HEIGHT : this.heightScale * T.GRASS_ROUGH_HEIGHT * tall) * shape * ah * 1.5 * T.GRASS_HEIGHT * (0.6 + 0.8 * hash(cx * 3 + cz * 5 + b * 7))
           const width = (mown ? 0.035 : 0.05 + 0.03 * rnd) * 0.55 * T.GRASS_THICK * this.look.width
           const lean = Math.max(0, 0.15 + this.look.lean + T.GRASS_LEAN * hash(cx * 11 + cz * 19 + b * 23))
+          // A non-finite root (a groundAt miss just off the bake) makes a degenerate blade: the
+          // vertex shader puts NaN in clip space and the rasteriser draws a giant black triangle.
+          // Rich saw exactly that. Drop anything that is not a real, finite blade.
+          if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) continue
+          if (!Number.isFinite(height) || !Number.isFinite(width) || height > 12) continue
           // A BLADE'S TIP MUST CLEAR THE PAVEMENT, NOT JUST ITS ROOT. The cell and the clump were
           // tested, but a blade scatters up to GRASS_SCATTER/2 beyond the clump — measured on
           // 2026-09-26, blades stood at −0.13 m (on the asphalt) and 715 of 20,725 near an edge
@@ -1258,6 +1263,7 @@ export class Grass {
           if (this.blockedAt && (this.blockedAt(x + 0.5, z) || this.blockedAt(x - 0.5, z) || this.blockedAt(x, z + 0.5) || this.blockedAt(x, z - 0.5))) continue
           const y = this.groundAt(x, -z) - 0.03
           const size = baseH * ah * 1.5 * T.GRASS_HEIGHT * T.GRASS_SPRITE_SCALE * (0.75 + 0.5 * hash(cx * 101 + cz * 103 + b * 107))
+          if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z) || !Number.isFinite(size) || size > 12) continue
           const o = nc * CARD_F
           cards[o] = x
           cards[o + 1] = y

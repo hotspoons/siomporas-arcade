@@ -11,8 +11,8 @@ import { PROFILES, type DriveProfile } from '@apex/engine/physics/profiles'
 
 // --- grass ------------------------------------------------------------------------------------
 /** blades per square metre in the mown strip beside the shoulder, and in the rough beyond */
-export let GRASS_MOWN_PER_M2 = 90
-export let GRASS_ROUGH_PER_M2 = 55
+export let GRASS_MOWN_PER_M2 = 130
+export let GRASS_ROUGH_PER_M2 = 72
 /**
  * THE BLADE RING and its LOD. From the eye outward the 3D blades are drawn thinner: full inside
  * GRASS_LOD_NEAR, GRASS_LOD_MID_DENSITY of them out to GRASS_LOD_MID, then GRASS_LOD_FAR_DENSITY out
@@ -24,8 +24,8 @@ export let GRASS_ROUGH_PER_M2 = 55
 export let GRASS_RADIUS = 106
 export let GRASS_LOD_NEAR = 12
 export let GRASS_LOD_MID = 39
-export let GRASS_LOD_MID_DENSITY = 0.55
-export let GRASS_LOD_FAR_DENSITY = 0.6
+export let GRASS_LOD_MID_DENSITY = 0.68
+export let GRASS_LOD_FAR_DENSITY = 0.7
 /**
  * THE SHAPE CONTROLS — one set, and they apply to every grass TYPE and every layer: the 3D blades
  * (GRASS_MODE 0), the imposter cards (both modes), and the relief underlayment (GRASS_GROUND 1).
@@ -218,11 +218,10 @@ export let GRASS_TAPER_SHORT = 0.85
 /** tip taper for long (rough) grass on both the relief and the 3-D blades, 0 = cut flat, 1 = point */
 export let GRASS_TAPER_LONG = 0.95
 /**
- * How far (m) the mown/rough turf stands PROUD of the pavement. Real mown grass beside asphalt forms
- * a lip; raising the whole band and building a face at the pavement edge gives low-cut grass the
- * look of a slab with thickness, which a ground-plane fragment shader cannot fake because it cannot
- * draw above its own pixel. BUILD-TIME: the strip geometry is generated from this, so a change needs
- * the world rebuilt (drive to a fresh chunk or reload).
+ * How far (m) the mown/rough turf stands PROUD of the pavement. A real turf lip: the raised band
+ * plus the near-vertical face built for it (strip.ts) is what gives low-cut grass thickness and
+ * makes the verge read as a slab of turf rather than a flat inset mat. BUILD-TIME: the strip
+ * geometry is generated from this, so a change needs the world rebuilt.
  */
 export let GRASS_LIFT_M = 0.215
 /** horizontal run (m) of the raised grass face at the pavement — smaller is a steeper lip */

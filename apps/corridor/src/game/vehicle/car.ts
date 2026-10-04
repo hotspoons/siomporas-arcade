@@ -515,9 +515,12 @@ export class Car {
     // beam did not, and the only way to see the change was to wait for dusk (2026-09-27).
     // how many of each pair are REAL spots (HERO_HEADLIGHT_SPOTS / HERO_TAILLIGHT_SPOTS). An
     // invisible spot leaves three's light loop entirely; the lens stays emissive either way.
-    const headSpots = Math.max(0, Math.min(this.beams.length, Math.round(T.HERO_HEADLIGHT_SPOTS)))
+    // GROUND_LAMP > 0 moves the ground's headlamp pool onto the analytic two-lamp shader, which
+    // reads the beam POSITIONS off lamps() regardless. Running the real headlight spots as well
+    // would light the ground twice, so the optimized path turns them off.
+    const headSpots = T.GROUND_LAMP > 0 ? 0 : Math.max(0, Math.min(this.beams.length, Math.round(T.HERO_HEADLIGHT_SPOTS)))
     const tailSpots = Math.max(0, Math.min(this.tailBeams.length, Math.round(T.HERO_TAILLIGHT_SPOTS)))
-    const sig = `${v.toFixed(3)}|${T.HEADLIGHT}|${T.TAILLIGHT}|${T.TAILLIGHT_RANGE}|${T.TAILLIGHT_ANGLE}|${T.HEADLIGHT_RANGE}|${T.HEADLIGHT_ANGLE}|${headSpots}|${tailSpots}`
+    const sig = `${v.toFixed(3)}|${T.HEADLIGHT}|${T.TAILLIGHT}|${T.TAILLIGHT_RANGE}|${T.TAILLIGHT_ANGLE}|${T.HEADLIGHT_RANGE}|${T.HEADLIGHT_ANGLE}|${headSpots}|${tailSpots}|${T.GROUND_LAMP}`
     if (sig === this.lightSig) return
     this.lightSig = sig
     this.lightsOn = v

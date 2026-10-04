@@ -62,6 +62,15 @@ export interface RetroUniforms {
 
 export const LAMPS = 2
 
+/**
+ * The ground strip's own headlamp-pool gain, shared by reference into the strip material.
+ *
+ * Read every frame by `lampDiffuse` in the ground shader. 0 leaves the ground on three.js's real
+ * spot lights; > 0 moves it onto the fixed two-lamp analytic path the grass already uses. See
+ * `T.GROUND_LAMP`. Kept here beside the lamps because it is the same `uLampPos` / `uCosOuter` set.
+ */
+export const groundLamp = { value: 0 }
+
 export function retroUniforms(): RetroUniforms {
   return {
     uNight: { value: 1 },
@@ -322,6 +331,7 @@ export class Retro {
 
   /** knobs, once a frame */
   tick(): void {
+    groundLamp.value = T.GROUND_LAMP
     const u = this.uniforms
     u.uLampRange.value = T.HEADLIGHT_RANGE
     // the retro cone is the beam's own angle, widened: the edge of the light is where a real
@@ -346,3 +356,39 @@ export class Retro {
  * cost of that choice.
  */
 export const retro = new Retro()
+
+/**
+ * GROUND_LAMP: put a standard material's headlamp pool on the analytic path.
+ *
+ * The ground is millions of fragments, and three.js's forward renderer runs its whole PBR spot
+ * loop on every one of them for every car in the beam. The grass, the tree cards and the paint
+ * already light themselves with the fixed two-lamp `lampDiffuse` above; this hands a standard
+ * material — the asphalt, the blend bands, the verge strip — the same shared uniforms and adds
+ * that term after the opaque pass, so the pool costs a couple of ALU instead of a dynamic light.
+ *
+ * The material needs nothing special: world position and normal are rebuilt from `vViewPosition`,
+ * exactly as the wet streak already does. Safe to chain onto a material that has already had its
+ * shader rewritten (it hangs the declarations on `#include <common>` and appends at opaque).
+ *
+ * Pair it with `T.GROUND_LAMP` and `Car.setLights`, which turns the real headlight spots off so
+ * the two paths never light the same fragment twice.
+ */
+export function injectGroundLamp(shader: { fragmentShader: string; uniforms: Record<string, { value: unknown }> }): void {
+  if (shader.fragmentShader.includes('uniform float uGroundLamp')) return
+  for (const [k, v] of Object.entries(retro.uniforms)) shader.uniforms[k] = v
+  shader.uniforms.uGroundLamp = groundLamp
+  const pars = shader.fragmentShader.includes('uniform vec3 uLampPos') ? 'uniform float uGroundLamp;' : `uniform float uGroundLamp;\n${LAMP_PARS}`
+  shader.fragmentShader = shader.fragmentShader.includes('#include <common>')
+    ? shader.fragmentShader.replace('#include <common>', `#include <common>\n${pars}`)
+    : `${pars}\n${shader.fragmentShader}`
+  shader.fragmentShader = shader.fragmentShader.replace(
+    '#include <opaque_fragment>',
+    `#include <opaque_fragment>
+    {
+      mat4 lampInv = inverse(viewMatrix);
+      vec3 lampWp = (lampInv * vec4(-vViewPosition, 1.0)).xyz;
+      vec3 lampN = normalize((lampInv * vec4(normal, 0.0)).xyz);
+      gl_FragColor.rgb += diffuseColor.rgb * lampDiffuse(lampWp, lampN, uGroundLamp);
+    }`,
+  )
+}

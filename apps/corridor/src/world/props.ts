@@ -9,7 +9,7 @@
 // swapping a stand-in for a generated glb later is a one-line change per prop kind.
 import * as THREE from 'three'
 import type { Budget } from './budget'
-import { paintMaterial, retro } from '../visuals/retro'
+import { injectGroundLamp, paintMaterial, retro } from '../visuals/retro'
 import { HEX_GLSL } from '../visuals/hextile'
 import type { TreeRecord } from './trees'
 
@@ -253,6 +253,7 @@ vec4 hexSampleB(vec2 uv, out vec3 n) {
     injectRelief(shader)
     injectShade(shader)
     injectWetStreak(shader)
+    injectGroundLamp(shader)
   }, 'relief-shade-wet-vert')
   return mat
 }
@@ -1100,7 +1101,9 @@ export function overpassMesh(mid: Station, deckZ: number, deckLen: number, roadW
 /** Flat colours per surface class, for when the texture set has not been generated. */
 export function fallbackMaterial(cls: string): THREE.Material {
   const colour: Record<string, number> = { asphalt_new: 0x26262a, asphalt_aged: 0x4a4a4c, asphalt_patched: 0x3a3a3d, concrete: 0x9a9890, chipseal: 0x6b665c, unknown: 0x444446 }
-  return new THREE.MeshStandardMaterial({ color: colour[cls] ?? colour.unknown, roughness: 0.95, metalness: 0, side: THREE.DoubleSide })
+  const mat = new THREE.MeshStandardMaterial({ color: colour[cls] ?? colour.unknown, roughness: 0.95, metalness: 0, side: THREE.DoubleSide })
+  chainCompile(mat, (shader) => injectGroundLamp(shader), 'fallback-ground-lamp')
+  return mat
 }
 
 interface SurfaceEntry { name: string; albedo: string; normal: string; roughness: string; macro?: string; macro_metres?: number; metres_per_tile: number; variants?: { albedo: string; normal: string; roughness: string }[] }
@@ -1212,6 +1215,7 @@ export async function loadSurfaceSets(base = '/surfaces/'): Promise<Record<strin
       injectRelief(shader)
       injectShade(shader)
       injectWetStreak(shader)
+      injectGroundLamp(shader)
     }, 'relief-shade-wet-vert')
     out[s.name] = { name: s.name, metresPerTile: s.metres_per_tile, material: mat, hex: hex ?? undefined }
   }

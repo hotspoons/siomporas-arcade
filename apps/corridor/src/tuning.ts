@@ -1012,6 +1012,24 @@ export let HEADLIGHT_ANGLE = 0.46
 export let HERO_HEADLIGHT_SPOTS = 2
 export let HERO_TAILLIGHT_SPOTS = 2
 /**
+ * THE OPTIMIZED LIGHTING PATH. How hard the GROUND lights its own headlamp pool analytically.
+ *
+ * three.js evaluates every visible spot light, per fragment, over every lit standard material.
+ * That is not a three bug, it is forward rendering: the ground strip alone is millions of fragments
+ * and each one runs the whole PBR spot loop (cone, attenuation, GGX, shadow lookup) for each car.
+ * Measured parked at night, 2560x1323, FXAA: the hero car's two headlights are ~3.5 ms of GPU, and
+ * the ground is where almost all of it lands.
+ *
+ * This codebase already owns a cheaper path: retro.ts's fixed two-lamp `lampReach` / `lampDiffuse`,
+ * which grass, the tree cards, the crops and the road paint already light themselves with. It is a
+ * handful of ALU with no dynamic light loop and no shader recompile as lights come and go.
+ *
+ * > 0 puts the ground on that path (value = gain) and tells the hero car to run NO real headlight
+ * spots — the pool is analytic, so the two would otherwise double up. The emissive lamps and the
+ * grass / card / retro pool are untouched. 0 is today: real spots. Try ~1.0.
+ */
+export let GROUND_LAMP = 0
+/**
  * How many traffic lights (head + tail slots) may be REAL spot lights at once. The forward renderer
  * evaluates every visible spot for every lit ground fragment, and the cost is super-linear:
  * measured at 2560x1323, 2 spots ~+2 ms, 10 spots ~+14 ms, 16 spots ~+32 ms. The nearest cars win
@@ -2212,6 +2230,7 @@ export const TUNE_TABS: TuneTab[] = [
           tune('TRAFFIC_LIGHTS', () => TRAFFIC_LIGHTS, (v) => (TRAFFIC_LIGHTS = Math.round(v)), [0, 16], 1, 'how many traffic lights (head+tail slots) are real spot lights at once. Each one costs ground shading, super-linearly'),
           tune('HERO_HEADLIGHT_SPOTS', () => HERO_HEADLIGHT_SPOTS, (v) => (HERO_HEADLIGHT_SPOTS = Math.round(v)), [0, 2], 1, 'how many of YOUR two headlight beams are real spot lights. The grass and the retro paint use the beam positions either way, so 0 = lamps glow but nothing is lit'),
           tune('HERO_TAILLIGHT_SPOTS', () => HERO_TAILLIGHT_SPOTS, (v) => (HERO_TAILLIGHT_SPOTS = Math.round(v)), [0, 2], 1, 'how many of YOUR two tail washes are real spot lights. 0 keeps the red lens and drops ~2 ms of ground shading behind the car'),
+          tune('GROUND_LAMP', () => GROUND_LAMP, (v) => (GROUND_LAMP = v), [0, 3], 0.05, 'OPTIMIZED PATH: > 0 paints the ground headlamp pool with the analytic two-lamp shader (gain) and runs NO real headlight spots. 0 = real three.js spots'),
           tune('RETRO_MARKINGS', () => RETRO_MARKINGS, (v) => (RETRO_MARKINGS = v), [0, 6], 0.1, 'how hard road paint throws your headlights back'),
           tune('RETRO_SIGNS', () => RETRO_SIGNS, (v) => (RETRO_SIGNS = v), [0, 6], 0.1, 'how hard sign sheeting throws your headlights back'),
           tune('RETRO_SPREAD', () => RETRO_SPREAD, (v) => (RETRO_SPREAD = v), [1, 3], 0.05, 'retro cone as a multiple of the beam angle \u2014 above 1, the edge of the light lights things up'),

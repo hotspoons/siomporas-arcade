@@ -319,6 +319,19 @@ def measure(site_dir: Path, line: LineString | None = None, prof: dict | None = 
 _CUTS_CTX: dict = {}
 
 
+def _init_ctx(ctx: dict) -> None:
+    """Worker initializer: install the timestamped stream and take the shared region context.
+
+    `map_chunks` forks workers from a clean forkserver, so they do NOT inherit the parent's module
+    globals the way a plain fork did; the context has to be handed over through the initializer
+    (shapely geometries and the water STRtree pickle fine)."""
+    from . import progress
+
+    progress.install_timestamps()
+    global _CUTS_CTX
+    _CUTS_CTX = ctx
+
+
 def _cuts_worker(chunk: list) -> list:
     """One worker's slice of roads: open the DTM once, measure each, return `(ident, faces, thr)`."""
     from .water import _Heights
@@ -386,7 +399,7 @@ def measure_network(site_dir: Path) -> dict | None:
         from . import pool
 
         chunks = pool.chunk(list(range(len(jobs))), pool.default_jobs(len(jobs)))
-        parts = pool.map_chunks(_cuts_worker, chunks, "cuts")
+        parts = pool.map_chunks(_cuts_worker, chunks, "cuts", initializer=_init_ctx, initargs=(_CUTS_CTX,))
         out = [r for part in parts for r in part]
 
     faces: list[dict] = []

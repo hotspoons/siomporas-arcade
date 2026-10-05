@@ -40,14 +40,24 @@ def default_jobs(n_tasks: int) -> int:
     return max(1, min(16, os.cpu_count() or 1, n_tasks or 1))
 
 
-def map_chunks(fn, chunks: list, label: str, jobs: int | None = None):
-    """Run `fn(chunk)` for every chunk, forked across `jobs` processes, and return results in order.
+def map_chunks(fn, chunks: list, label: str, jobs: int | None = None,
+               initializer=None, initargs: tuple = ()):
+    """Run `fn(chunk)` for every chunk, across `jobs` worker processes, and return results in order.
 
     `chunks` is a list of argument tuples for `fn`. The work is split into `jobs` contiguous slices
     so each worker opens its rasters once; order is preserved by index, and a single element
     (`jobs == 1`) runs in-process with no pool at all, so a small site or a test never pays for a
     fork. A heartbeat (`progress.Progress`) prints one line a minute, so a stage that takes twenty
     minutes no longer looks like one that is wedged.
+
+    Workers are FORKSERVER forked from a clean, single-threaded server, not `fork`ed from this
+    process. By the time a large finalizer reaches `rock` the parent has accumulated every library
+    thread the earlier stages left behind (GDAL block caches, BLAS, PIL). A plain `fork` then
+    duplicates those threads' locks but not the threads, and a worker that takes one inside
+    `rasterio.open`/`laspy.read` blocks forever — the 2026-10-05 shard-smoke rock pool sat at 8/14
+    for half an hour with the load near zero while every child slept on a futex. A forkserver is
+    started fresh from `sys.executable`, so its children inherit none of it. The workers here open
+    their own rasters, so losing fork's copy-on-write costs nothing.
     """
     chunks = list(chunks)
     if not chunks:
@@ -63,17 +73,21 @@ def map_chunks(fn, chunks: list, label: str, jobs: int | None = None):
     from . import progress
 
     try:
-        ctx = mp.get_context("fork")
-    except ValueError:  # not Linux: no fork, run in-process rather than reimplement
-        return [fn(c) for c in chunks]
+        ctx = mp.get_context("forkserver")
+    except (ValueError, RuntimeError):  # no forkserver: fall back to fork, then in-process
+        try:
+            ctx = mp.get_context("fork")
+        except ValueError:
+            return [fn(c) for c in chunks]
     out: list = [None] * len(chunks)
-    with ProcessPoolExecutor(max_workers=jobs, mp_context=ctx) as ex:
-        # Fork every worker BEFORE this call's heartbeat thread exists, so `progress._LOCK` is not
-        # held here. That alone is not enough: the CALLER may already be inside an outer heartbeat
-        # (export.py wraps cuts/rock/water that way), and a child that inherits `_LOCK` held
-        # deadlocks on its first `print` or warning — which is how rock's pool sat at 9/14 for half
-        # an hour on the 2026-10-05 shard-smoke finalizer. `progress` registers an `os.register_at_fork`
-        # hook that hands every child a fresh lock, so the ordering here is a belt to that brace.
+    # `initializer` reinstalls the timestamped stdout in each fresh interpreter (a forkserver child
+    # does not inherit this process's wrapped stream). A caller that used to hand its region context
+    # to workers through a module global — inherited under fork, absent under forkserver — passes an
+    # initializer that stores it instead; see `cuts._init_ctx`.
+    if initializer is None:
+        initializer = progress.install_timestamps
+    with ProcessPoolExecutor(max_workers=jobs, mp_context=ctx,
+                             initializer=initializer, initargs=initargs) as ex:
         pending = {ex.submit(fn, c): i for i, c in enumerate(chunks)}
         p = progress.Progress(label, len(chunks))
         try:

@@ -365,6 +365,16 @@ def _bake_serial(site_dir, web, frame, zmax: int | None = None, zmin: int | None
 _PYR_CTX: dict = {}
 
 
+def _init_ctx(ctx: dict) -> None:
+    """Worker initializer: timestamped stream + the pyramid context (a forkserver child inherits no
+    module globals; see `pool.map_chunks`)."""
+    from . import progress
+
+    progress.install_timestamps()
+    global _PYR_CTX
+    _PYR_CTX = ctx
+
+
 def _bake_worker(tiles: list) -> dict:
     c = _PYR_CTX
     return _bake_serial(c["site_dir"], c["web"], c["frame"], c["zmax"], c["zmin"], c["vivid"], only_tiles=tiles)
@@ -394,7 +404,7 @@ def bake(site_dir, web, frame, zmax: int | None = None, zmin: int | None = None,
     global _PYR_CTX
     _PYR_CTX = {"site_dir": site_dir, "web": web, "frame": frame, "zmax": zmax, "zmin": zmin, "vivid": vivid}
     chunks = pool.chunk([(t.z, t.x, t.y) for t in tiles], pool.default_jobs(len(tiles)))
-    parts = pool.map_chunks(_bake_worker, chunks, "pyramid")
+    parts = pool.map_chunks(_bake_worker, chunks, "pyramid", initializer=_init_ctx, initargs=(_PYR_CTX,))
     entries: list = []
     empty = 0
     out = None

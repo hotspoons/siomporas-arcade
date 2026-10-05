@@ -511,6 +511,16 @@ def _tile_grid(site_dir: Path):
 _TILE_CTX: dict = {}
 
 
+def _init_ctx(ctx: dict) -> None:
+    """Worker initializer: timestamped stream + the tile context (a forkserver child inherits no
+    module globals; see `pool.map_chunks`)."""
+    from . import progress
+
+    progress.install_timestamps()
+    global _TILE_CTX
+    _TILE_CTX = ctx
+
+
 def _export_tiles_worker(tiles: list) -> dict:
     c = _TILE_CTX
     return _export_tiles_serial(c["site_dir"], c["web"], c["frame"], c["mask_shapes"], c["vivid"], only_tiles=tiles)
@@ -531,7 +541,7 @@ def export_tiles(site_dir: Path, web: Path, frame, mask_shapes: list, vivid) -> 
     global _TILE_CTX
     _TILE_CTX = {"site_dir": site_dir, "web": web, "frame": frame, "mask_shapes": mask_shapes, "vivid": vivid}
     chunks = pool.chunk(tiles, pool.default_jobs(len(tiles)))
-    parts = pool.map_chunks(_export_tiles_worker, chunks, "export")
+    parts = pool.map_chunks(_export_tiles_worker, chunks, "export", initializer=_init_ctx, initargs=(_TILE_CTX,))
     entries: list = []
     canopy = 0
     out = None

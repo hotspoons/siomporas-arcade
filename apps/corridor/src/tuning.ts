@@ -1146,7 +1146,7 @@ export let CAR_PROBES = 0
 export let CAR_PROBE_BLEND = 0.6
 /** fade distance (m) from the capture point; paint farther than this keeps the sky reflection */
 export let CAR_PROBE_REACH = 60
-/** probe cube face size (px). Higher is sharper and costs capture time + memory */
+/** probe cube face size (px). Higher is sharper and costs capture time + memory (a 2048 face is ~200 MB) */
 export let CAR_PROBE_RES = 64
 /** a probe renders only the world this far away (m) — the trees and bank that show, not the county */
 export let CAR_PROBE_FAR = 400
@@ -2052,8 +2052,8 @@ export const TUNE_TABS: TuneTab[] = [
           tune('CAR_SHINE', () => CAR_SHINE, (v) => (CAR_SHINE = v), [0, 3], 0.05, 'clearcoat on the cars'),
           tune('CAR_PROBES', () => CAR_PROBES, (v) => (CAR_PROBES = v), [0, 2], 1, 'car reflection probe: 0 off (sky map only), 1 live (re-captured as you drive), 2 hold (captured once)'),
           tune('CAR_PROBE_BLEND', () => CAR_PROBE_BLEND, (v) => (CAR_PROBE_BLEND = v), [0, 1], 0.05, 'how much the probe replaces the sky reflection on the paint, 0..1'),
-          tune('CAR_PROBE_REACH', () => CAR_PROBE_REACH, (v) => (CAR_PROBE_REACH = v), [0, 400], 5, 'paint farther than this from the capture point keeps the sky reflection (m)'),
-          tune('CAR_PROBE_RES', () => CAR_PROBE_RES, (v) => (CAR_PROBE_RES = v), [16, 256], 1, 'probe cube face px. Higher is sharper and costs capture time + memory'),
+          tune('CAR_PROBE_REACH', () => CAR_PROBE_REACH, (v) => (CAR_PROBE_REACH = v), [0, 400], 5, 'OTHER cars farther than this from the capture point keep the sky reflection (m): the hero car rides on the probe'),
+          tune('CAR_PROBE_RES', () => CAR_PROBE_RES, (v) => (CAR_PROBE_RES = v), [16, 2048], 8, 'probe cube face px. Higher is sharper and costs capture time + memory'),
           tune('CAR_PROBE_FAR', () => CAR_PROBE_FAR, (v) => (CAR_PROBE_FAR = v), [50, 3000], 25, 'how far a probe renders the world (m): the trees and bank that show, not the whole county'),
           tune('CAR_PROBE_LIFT', () => CAR_PROBE_LIFT, (v) => (CAR_PROBE_LIFT = v), [0, 5], 0.1, 'probe camera height above the car origin (m)'),
           tune('CAR_PROBE_REFRESH', () => CAR_PROBE_REFRESH, (v) => (CAR_PROBE_REFRESH = v), [0, 30], 0.1, 'live mode: seconds between re-captures; 0 re-captures on movement only'),

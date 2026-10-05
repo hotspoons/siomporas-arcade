@@ -26,6 +26,8 @@ export const carProbeCube = { value: null as THREE.Texture | null }
 export const carProbeOn = { value: 0 }
 /** how much the probe replaces the reflected colour, 0..1 */
 export const carProbeBlend = { value: 0 }
+/** the global REFLECT dial, clamped to 0..1: scales the probe so the reflect knob moves it too */
+export const carProbeGain = { value: 1 }
 /** fade distance (m) from the capture point; a car farther than this keeps the sky reflection */
 export const carProbeReach = { value: 60 }
 /** where the live probe was captured, world space; the shader fades against it */

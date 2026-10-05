@@ -16,7 +16,7 @@
 // so the map stays linear and the receivers' shadow coordinates match it.
 import * as THREE from 'three'
 import * as T from '../tuning'
-import { carProbeBlend, carProbeCube, carProbeOn, carProbeOrigin, carProbeReach } from './carProbe'
+import { carProbeBlend, carProbeCube, carProbeGain, carProbeOn, carProbeOrigin, carProbeReach } from './carProbe'
 import type { VehicleFinish } from '../game/vehicle/vehicles'
 
 /** shared so a knob moves every material that compiled with it, without a rebuild */
@@ -254,6 +254,12 @@ export function injectCoat(shader: { fragmentShader: string; uniforms: Record<st
  * shows what is actually around it. It fades out with world distance from the capture point, which
  * is what lets the shared traffic materials hold one probe: a car across the road keeps the sky
  * instead of a wrong reflection. `vCarWorld` carries the fragment's world position for that fade.
+ *
+ * How much the cube shows is the paint's own reflectance: a dielectric (paint) reflects ~4% head-on
+ * and everything at a grazing angle, a metal reflects at every angle. So a metal-finish car reads as
+ * a real mirror square-on instead of only glinting at its edges, and the captured sun is a sharp
+ * image rather than the standard material's roughness-blurred blob. `uCarProbeGain` folds in the
+ * global REFLECT dial so that knob moves the probe as well as the sky map it replaces.
  */
 const CAR_PROBE = /* glsl */ `
 {
@@ -261,11 +267,12 @@ const CAR_PROBE = /* glsl */ `
     vec3 cpN = normalize(normal);
     vec3 cpV = normalize(vViewPosition);
     float cpNdv = clamp(dot(cpN, cpV), 0.0, 1.0);
-    float cpFres = 0.08 + 0.92 * pow(1.0 - cpNdv, 3.0);
+    float cpBase = mix(0.04, 1.0, clamp(metalness, 0.0, 1.0));
+    float cpFres = cpBase + (1.0 - cpBase) * pow(1.0 - cpNdv, 5.0);
     vec3 cpW = transformDirectionByInverseViewMatrix(reflect(-cpV, cpN), viewMatrix);
     vec3 cpCol = textureCube(uCarProbe, cpW).rgb;
     float cpFade = 1.0 - smoothstep(uCarProbeReach * 0.5, uCarProbeReach, distance(vCarWorld, uCarProbeOrigin));
-    gl_FragColor.rgb = mix(gl_FragColor.rgb, cpCol, clamp(uCarProbeBlend * cpFres * cpFade, 0.0, 1.0));
+    gl_FragColor.rgb = mix(gl_FragColor.rgb, cpCol, clamp(uCarProbeBlend * cpFres * cpFade * uCarProbeGain, 0.0, 1.0));
   }
 }
 `
@@ -276,12 +283,13 @@ export function injectCarProbe(shader: { vertexShader: string; fragmentShader: s
   shader.uniforms.uCarProbe = carProbeCube
   shader.uniforms.uCarProbeOn = carProbeOn
   shader.uniforms.uCarProbeBlend = carProbeBlend
+  shader.uniforms.uCarProbeGain = carProbeGain
   shader.uniforms.uCarProbeReach = carProbeReach
   shader.uniforms.uCarProbeOrigin = carProbeOrigin
   shader.vertexShader = shader.vertexShader
     .replace('#include <common>', '#include <common>\nvarying vec3 vCarWorld;')
     .replace('#include <begin_vertex>', '#include <begin_vertex>\nvCarWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;')
-  const decl = 'uniform samplerCube uCarProbe;\nuniform float uCarProbeOn;\nuniform float uCarProbeBlend;\nuniform float uCarProbeReach;\nuniform vec3 uCarProbeOrigin;\nvarying vec3 vCarWorld;\n'
+  const decl = 'uniform samplerCube uCarProbe;\nuniform float uCarProbeOn;\nuniform float uCarProbeBlend;\nuniform float uCarProbeGain;\nuniform float uCarProbeReach;\nuniform vec3 uCarProbeOrigin;\nvarying vec3 vCarWorld;\n'
   shader.fragmentShader = shader.fragmentShader.includes('#include <common>')
     ? shader.fragmentShader.replace('#include <common>', `#include <common>\n${decl}`)
     : decl + shader.fragmentShader
@@ -369,8 +377,11 @@ export function applyCarShine(root: THREE.Object3D, finish?: VehicleFinish) {
       // one coat bag per material, so two vehicles can wear different gloss under one program
       const coatBag = { value: coat }
       chainCompile(std, (shader) => {
-        injectCoat(shader, coatBag)
+        // the probe goes on LAST: the cube is a mirror of the real surroundings, so it must replace
+        // the coat's soft sun blob rather than sit under it, which is what makes a metal-finish car
+        // read as an actual reflection instead of a matte highlight.
         injectCarProbe(shader)
+        injectCoat(shader, coatBag)
       }, 'car-gloss')
     }
   })
@@ -383,6 +394,7 @@ export function tickShading() {
   shadeUniform.value = T.SHADOW
   // as the car's probe takes over its reflection, the sky map it replaces steps back with it
   const carBlend = carProbeOn.value > 0.5 ? Math.max(0, Math.min(1, carProbeBlend.value)) : 0
+  carProbeGain.value = Math.max(0, Math.min(1, T.REFLECT))
   for (const m of shiny) {
     const finish = typeof m.userData.finishReflect === 'number' ? m.userData.finishReflect : 1
     m.envMapIntensity = T.REFLECT * finish * (m.userData.coat ? 1 - 0.65 * carBlend : 1)

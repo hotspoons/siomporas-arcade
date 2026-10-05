@@ -5,6 +5,8 @@
 
 import { describe, expect, it } from 'vitest'
 import * as THREE from 'three'
+import { injectCarProbe } from '../src/visuals/shading'
+import { carProbeGain } from '../src/visuals/carProbe'
 import { applyCarShine } from '../src/visuals/shading'
 
 function carBody(props: THREE.MeshStandardMaterialParameters = {}): { root: THREE.Group; mat: THREE.MeshStandardMaterial } {
@@ -53,5 +55,38 @@ describe('the car finish', () => {
     expect(tyre.userData.coat).toBeUndefined()
     expect(lamp.userData.coat).toBeUndefined()
     expect(paint.userData.coat).toBe(1)
+  })
+})
+
+describe('the car reflection probe', () => {
+  it('weights the cube by the paint\u2019s own reflectance and the global reflect dial', () => {
+    const shader = {
+      vertexShader: '#include <common>\n#include <begin_vertex>',
+      fragmentShader: '#include <common>\n#include <opaque_fragment>',
+      uniforms: {} as Record<string, { value: unknown }>,
+    }
+    injectCarProbe(shader)
+    // a dielectric reflects ~4% head-on, a metal on the whole face: this is what makes a shiny car
+    // read as a mirror square-on instead of only at its edges.
+    expect(shader.fragmentShader).toContain('mix(0.04, 1.0, clamp(metalness, 0.0, 1.0))')
+    // the global REFLECT dial reaches the probe, not just the sky map it replaces
+    expect(shader.uniforms.uCarProbeGain).toBe(carProbeGain)
+    expect(shader.vertexShader).toContain('varying vec3 vCarWorld;')
+    expect(shader.vertexShader).toContain('vCarWorld = (modelMatrix')
+  })
+
+  it('runs the mirror after the clearcoat, so it replaces the coat\u2019s soft sun blob', () => {
+    const { root, mat } = carBody()
+    applyCarShine(root)
+    const shader = {
+      vertexShader: '#include <common>\n#include <begin_vertex>',
+      fragmentShader: '#include <common>\n#include <opaque_fragment>',
+      uniforms: {} as Record<string, { value: unknown }>,
+    }
+    mat.onBeforeCompile(shader as never, {} as never)
+    const coat = shader.fragmentShader.indexOf('uShine * uCoat')
+    const probe = shader.fragmentShader.indexOf('textureCube(uCarProbe')
+    expect(coat).toBeGreaterThan(-1)
+    expect(probe).toBeGreaterThan(coat)
   })
 })

@@ -3466,9 +3466,12 @@ if (uLodOn > 0.5) {
   // terrain features (terrain-and-data agent): rock on the measured cut faces and outcrops, water in
   // the measured channels. Both stand on groundAt; the water's ripples tick with the near update.
   status('dressing…')
-  // A tiled world's rock was built per cell as each arrived (see `addRocksCell`); only an untiled
-  // one still builds the whole layer here.
-  if (!manifest.vt?.cells?.length) await buildRocksInto(manifest.cuts, manifest.rock)
+  // A tiled world's rock was built per cell as each arrived (see `addRocksCell`). An untiled world,
+  // or one tiled before rock streamed, still carries the arrays in the manifest — build those here,
+  // keyed on the data rather than the tile index so either schema draws.
+  if (manifest.cuts?.faces?.length || manifest.rock?.polygons?.length) {
+    await buildRocksInto(manifest.cuts, manifest.rock)
+  }
   group.add(rocks.group)
   const water = buildWater(manifest.water, groundAtWorld, lowestGround)
   /**

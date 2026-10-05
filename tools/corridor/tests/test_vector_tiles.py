@@ -76,6 +76,58 @@ class VectorTilesTest(unittest.TestCase):
             self.assertTrue((web / "vt" / "0" / "5_5.json").exists())
             self.assertEqual([(t["x"], t["y"]) for t in idx["buildings"]], [(5, 5)])
 
+    def test_every_streamed_shape_round_trips(self):
+        # One feature of every array the schema can carry, each in its own way, tiled and read back
+        # through `_load_tiled` — the reader a re-tile builds on. Bare polylines (`siblings`,
+        # `sidewalk_zones`) and the two `lines` leaves that carry their points differently are the
+        # ones a naive key would drop.
+        arrays = {
+            "buildings": [{"ring": [[10.0, 10.0], [20.0, 10.0], [20.0, 20.0]]}],
+            "sidewalks": [{"coords": [[15.0, 15.0, 0.0], [30.0, 15.0, 0.0]]}],
+            "driveways": [{"coords": [[40.0, 40.0, 0.0], [45.0, 40.0, 0.0]]}],
+            "stubs": [{"coords": [[41.0, 41.0, 0.0]]}],
+            "barriers": [{"coords": [[42.0, 42.0, 0.0]]}],
+            "parking": [{"ring": [[50.0, 50.0], [60.0, 50.0], [60.0, 60.0]]}],
+            "landuse": [{"class": "forest", "ring": [[70.0, 70.0], [80.0, 70.0], [80.0, 80.0]]}],
+            "pois": [{"x": 75.0, "y": 75.0, "kind": "school"}],
+            "branches": [{"coords": [[90.0, 90.0, 0.0], [95.0, 90.0, 0.0]]}],
+            "siblings": [[[110.0, 110.0], [120.0, 110.0]]],
+            "sidewalk_zones": [[[130.0, 130.0], [140.0, 130.0]]],
+            "power": {"lines": [{"coords": [[150.0, 150.0, 0.0], [160.0, 150.0, 0.0]]}], "supports": [{"x": 155.0, "y": 155.0}]},
+            "signals": {"masts": [{"x": 165.0, "y": 165.0}], "signs": [{"x": 166.0, "y": 166.0}], "bars": [{"x": 167.0, "y": 167.0}]},
+            "water": {"lines": [{"pts": [[170.0, 170.0, 0.0], [180.0, 170.0, 0.0]]}], "areas": [{"ring": [[175.0, 175.0], [185.0, 175.0], [185.0, 185.0]]}]},
+            "cuts": {"faces": [{"stations": [{"toe": [190.0, 190.0, 0.0], "top": [190.0, 195.0, 5.0]}]}]},
+            "rock": {"polygons": [{"ring": [[200.0, 200.0], [210.0, 200.0], [210.0, 210.0]]}]},
+            "intersections": {"list": [{"x": 220.0, "y": 220.0, "node": 7}]},
+        }
+        with tempfile.TemporaryDirectory() as d:
+            web = Path(d)
+            idx = export._vector_tiles(web, arrays)
+            back = export._load_tiled(web, idx)
+            self.assertEqual(len(back["buildings"]), 1)
+            self.assertEqual(len(back["driveways"]), 1)
+            self.assertEqual(len(back["stubs"]), 1)
+            self.assertEqual(len(back["siblings"]), 1)
+            self.assertEqual(back["siblings"][0][0], [110.0, 110.0])
+            self.assertEqual(back["sidewalk_zones"][0][0], [130.0, 130.0])
+            self.assertEqual(len(back["landuse"]), 1)
+            self.assertEqual(back["pois"][0]["kind"], "school")
+            self.assertEqual(len(back["branches"]), 1)
+            self.assertEqual(len(back["power"]["lines"]), 1)
+            self.assertEqual(len(back["power"]["supports"]), 1)
+            self.assertEqual(len(back["water"]["lines"]), 1)
+            self.assertEqual(len(back["water"]["areas"]), 1)
+            self.assertEqual(len(back["cuts"]["faces"]), 1)
+            self.assertEqual(len(back["rock"]["polygons"]), 1)
+            self.assertEqual(back["intersections"]["list"][0]["node"], 7)
+            # everything is within the same 1 km cell, so it is one tile carrying every leaf
+            self.assertEqual([(c["x"], c["y"]) for c in idx["cells"]], [(0, 0)])
+            cell = json.loads((web / "vt" / "0" / "0_0.json").read_text())
+            for leaf in ("buildings", "sidewalks", "driveways", "stubs", "barriers", "parking",
+                         "landuse", "pois", "branches", "siblings", "sidewalk_zones",
+                         "power", "signals", "water", "cuts", "rock", "intersections"):
+                self.assertIn(leaf, cell, leaf)
+
 
 if __name__ == "__main__":
     unittest.main()

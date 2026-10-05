@@ -4,8 +4,8 @@ A world exported before vector tiling existed still carries its footprints and s
 inline; `cmd_vectors` rewrites the manifest to the tiled shape so the viewer stops parsing them at
 load, without a rebake. This pins the outcomes: it tiles a big manifest, it writes the same schema
 `export_site` writes, it upgrades a world an earlier buildings-only backfill tiled by reading the
-footprints back out of the tiles, it leaves a small manifest inline, and it is a no-op on one
-already on the current schema.
+footprints back out of the tiles, it leaves a small manifest inline, and it reassembles what is
+already tiled so a re-run that grows the tiled set is additive rather than destructive.
 """
 from __future__ import annotations
 

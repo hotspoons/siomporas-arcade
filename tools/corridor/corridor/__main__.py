@@ -251,34 +251,29 @@ def cmd_vectors(a: argparse.Namespace) -> None:
             continue
         out = json.loads(man.read_text())
         vt = out.get("vt") or {}
-        if vt.get("cells"):
-            print(f"  {d.name}: already tiled ({vt.get('counts', {}).get('buildings', vt.get('count'))} footprints)")
-            continue
-        bs = out.get("buildings") or []
-        # an earlier buildings-only backfill moved them into tiles; read them back so the re-tile
-        # below keeps the footprints that are no longer in the manifest.
-        if not bs and vt.get("dir"):
-            for t in vt.get("buildings", []):
-                f = d / "web" / vt["dir"] / f"{t['x']}_{t['y']}.json"
-                if f.exists():
-                    bs.extend(json.loads(f.read_text()).get("buildings") or [])
+        web = d / "web"
+        # Reassemble whatever is already in tiles, then overlay the arrays still inline. A tree on
+        # the buildings-only schema has footprints in tiles and furniture inline; a tree on the
+        # current schema has both in tiles and nothing inline. `_load_tiled` is the one reader.
+        arrays = export._load_tiled(web, vt) if vt.get("dir") else {}
+        for name in export.TILED_FLAT:
+            inline = out.get(name)
+            if inline:
+                arrays[name] = inline
+        for name, leaves in export.TILED_NESTED.items():
+            node = out.get(name)
+            if not node:
+                continue
+            merged = arrays.setdefault(name, {})
+            for leaf in leaves:
+                if node.get(leaf):
+                    merged[leaf] = node[leaf]
+        bs = arrays.get("buildings") or []
         if len(bs) < export.VECTOR_TILE_MIN:
             print(f"  {d.name}: {len(bs)} footprints, below the tiling threshold, left inline")
             continue
-        out["vt"] = export._vector_tiles(d / "web", {
-            "buildings": bs,
-            "sidewalks": out.get("sidewalks"),
-            "parking": out.get("parking"),
-            "barriers": out.get("barriers"),
-            "power": out.get("power"),
-            "signals": out.get("signals"),
-        })
-        out["buildings"] = []
-        out["sidewalks"] = []
-        out["parking"] = []
-        out["barriers"] = []
-        out["power"] = None
-        out["signals"] = None
+        out["vt"] = export._vector_tiles(web, arrays)
+        export._empty_tiled(out)
         man.write_text(json.dumps(out, separators=(",", ":")))
         c = out["vt"]["counts"]
         print(f"  {d.name}: {len(out['vt']['cells'])} tiles / {c.get('buildings', 0)} footprints, {c.get('sidewalks', 0)} walks -> {man.stat().st_size / 1e6:.1f} MB manifest", flush=True)

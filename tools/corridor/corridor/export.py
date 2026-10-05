@@ -961,24 +961,115 @@ def _enu_derived(frame: Frame, derived: dict) -> dict:
 VECTOR_TILE_MIN = 50_000
 
 #: Where a feature lands, in SITE metres. The viewer buckets on the same grid (`floor(x / size_m)`),
-#: so a feature and the cell that rebuilds it agree by construction. Leaf names, because `power`
-#: and `signals` arrive as nested objects and are split into their own arrays.
+#: so a feature and the cell that rebuilds it agree by construction. A leaf is named by its own
+#: field and, where two parents share a leaf name (`power.lines` and `water.lines` carry their
+#: points in different fields), by `parent.leaf`.
 def _first_xy(coords):
     return (coords[0][0], coords[0][1]) if coords else None
 
 
+def _polyline_xy(f):
+    return (f[0][0], f[0][1]) if f else None
+
+
+def _cut_xy(f):
+    st = f.get("stations") or []
+    return (st[0]["toe"][0], st[0]["toe"][1]) if st else None
+
+
 _TILE_KEY = {
-    "buildings": lambda f: (f["ring"][0][0], f["ring"][0][1]) if f.get("ring") else None,
-    "parking": lambda f: (f["ring"][0][0], f["ring"][0][1]) if f.get("ring") else None,
+    # footprints and areas: the first ring vertex
+    "buildings": lambda f: _first_xy(f.get("ring")),
+    "parking": lambda f: _first_xy(f.get("ring")),
+    "landuse": lambda f: _first_xy(f.get("ring")),
+    "polygons": lambda f: _first_xy(f.get("ring")),   # rock
+    "areas": lambda f: _first_xy(f.get("ring")),      # water
+    # ways: the first coordinate, whatever the field is called
     "sidewalks": lambda f: _first_xy(f.get("coords")),
     "driveways": lambda f: _first_xy(f.get("coords")),
     "barriers": lambda f: _first_xy(f.get("coords")),
-    "lines": lambda f: _first_xy(f.get("coords")),
+    "stubs": lambda f: _first_xy(f.get("coords")),
+    "branches": lambda f: _first_xy(f.get("coords")),
+    "power.lines": lambda f: _first_xy(f.get("coords")),
+    "water.lines": lambda f: _first_xy(f.get("pts")),
+    # points
     "supports": lambda f: (f.get("x"), f.get("y")),
     "masts": lambda f: (f.get("x"), f.get("y")),
     "signs": lambda f: (f.get("x"), f.get("y")),
     "bars": lambda f: (f.get("x"), f.get("y")),
+    "pois": lambda f: (f.get("x"), f.get("y")),
+    "list": lambda f: (f.get("x"), f.get("y")),       # intersections
+    "faces": _cut_xy,                                   # cuts: the first station's toe
+    # bare polylines / rings, no wrapper object
+    "siblings": _polyline_xy,
+    "sidewalk_zones": _polyline_xy,
 }
+
+#: manifest field -> how `_vector_tiles` reads it. Flat fields are a list; the dicts are nested and
+#: only their listed sub-arrays are tiled (a top-level `summary`/`counts` stays in the manifest).
+#: This is the ONE list a new streamed array is added to, on the bake side and in the backfill.
+TILED_FLAT = ("buildings", "sidewalks", "driveways", "barriers", "parking", "landuse", "pois",
+              "branches", "stubs", "siblings", "sidewalk_zones")
+TILED_NESTED = {"power": ("lines", "supports"), "signals": ("masts", "signs", "bars"),
+                "water": ("lines", "areas"), "cuts": ("faces",), "rock": ("polygons",),
+                "intersections": ("list",)}
+#: The arrays the viewer streams today. Grows one group at a time as the viewer learns to rebuild
+#: that group per cell; `_load_tiled` reads whatever a tree already has, so old and new trees mix.
+TILED_ACTIVE = ("buildings", "sidewalks", "parking", "barriers", "power", "signals")
+
+
+def _tile_arrays(out: dict) -> dict:
+    """The manifest fields `TILED_ACTIVE` names, shaped for `_vector_tiles`."""
+    arrays: dict = {}
+    for name in TILED_FLAT:
+        if name in TILED_ACTIVE:
+            arrays[name] = out.get(name)
+    for name, leaves in TILED_NESTED.items():
+        if name not in TILED_ACTIVE:
+            continue
+        node = out.get(name)
+        arrays[name] = None if node is None else {k: node.get(k) for k in leaves if k in node}
+    return arrays
+
+
+def _empty_tiled(out: dict) -> None:
+    """Drop the tiled arrays from the manifest, keeping any non-tiled metadata beside them."""
+    for name in TILED_FLAT:
+        if name in TILED_ACTIVE:
+            out[name] = []
+    for name, leaves in TILED_NESTED.items():
+        if name not in TILED_ACTIVE:
+            continue
+        node = out.get(name)
+        if name == "intersections":
+            # `counts` is a summary the attribution reads; the list is the 30 MB that streams
+            out[name] = None if node is None else {**node, "list": []}
+        else:
+            out[name] = None
+
+
+def _load_tiled(web: Path, vt: dict) -> dict:
+    """Reassemble the arrays a tree already has in its tiles, for a re-tile to build on.
+
+    Reads both schemas: the current `cells` index, and the older `buildings`-only one (whose tile
+    files may still hold footprints after an earlier backfill moved them out of the manifest).
+    """
+    d = web / vt.get("dir", "vt/0")
+    cells = vt.get("cells") or vt.get("buildings") or []
+    arrays: dict = {}
+    for c in cells:
+        f = d / f"{c['x']}_{c['y']}.json"
+        if not f.exists():
+            continue
+        cell = json.loads(f.read_text())
+        for k, v in cell.items():
+            if isinstance(v, dict):
+                node = arrays.setdefault(k, {})
+                for sub, arr in v.items():
+                    node.setdefault(sub, []).extend(arr)
+            else:
+                arrays.setdefault(k, []).extend(v)
+    return arrays
 
 
 def _vector_tiles(web: Path, arrays: dict, size_m: float = 1000.0) -> dict:
@@ -1001,7 +1092,7 @@ def _vector_tiles(web: Path, arrays: dict, size_m: float = 1000.0) -> dict:
     cells: dict[tuple[int, int], dict] = {}
 
     def put(leaf: str, parent: str | None, item) -> None:
-        key = _TILE_KEY.get(leaf)
+        key = (_TILE_KEY.get(f"{parent}.{leaf}") if parent else None) or _TILE_KEY.get(leaf)
         xy = key(item) if key else None
         if not xy or xy[0] is None or xy[1] is None:
             return
@@ -1441,20 +1532,8 @@ def export_site(site_dir: Path, web: Path | None = None) -> dict:
     # `out` — tiling `signals` or `sidewalks` before them would hand those passes empty arrays.
     # Small sites stay inline, and the editor keeps reading `manifest.buildings`.
     if tiled and len(enu_derived["buildings"]) >= VECTOR_TILE_MIN:
-        out["vt"] = _vector_tiles(web, {
-            "buildings": enu_derived["buildings"],
-            "sidewalks": out["sidewalks"],
-            "parking": out["parking"],
-            "barriers": out["barriers"],
-            "power": out["power"],
-            "signals": out["signals"],
-        })
-        out["buildings"] = []
-        out["sidewalks"] = []
-        out["parking"] = []
-        out["barriers"] = []
-        out["power"] = None
-        out["signals"] = None
+        out["vt"] = _vector_tiles(web, _tile_arrays(out))
+        _empty_tiled(out)
         c = out["vt"]["counts"]
         print(f"  vt      {len(out['vt']['cells'])} tiles: {c.get('buildings', 0)} footprints, "
               f"{c.get('sidewalks', 0)} walks, {c.get('parking', 0)} lots, {c.get('masts', 0)} masts out of the manifest", flush=True)

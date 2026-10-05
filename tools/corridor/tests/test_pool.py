@@ -65,6 +65,47 @@ class MapChunksTest(unittest.TestCase):
                 os.environ["CORRIDOR_TILE_JOBS"] = old
 
 
+class ForkLockTest(unittest.TestCase):
+    def test_a_forked_child_gets_an_unlocked_stdout_lock(self):
+        # export.py wraps cuts/rock/water in an outer `heartbeat`, so a fork pool is created WHILE
+        # that heartbeat thread may hold progress._LOCK. A child that inherits the lock held has no
+        # thread to release it and deadlocks on its first print — which is how the rock pool sat at
+        # 9/14 for half an hour on the shard-smoke finalizer. `os.register_at_fork` must hand the
+        # child a fresh lock. The check is non-blocking so a regression fails rather than hangs.
+        import select
+
+        from corridor import progress
+
+        progress.install_timestamps()
+        progress._LOCK.acquire()  # pretend the outer heartbeat is mid-print at fork time
+        r, w = os.pipe()
+        try:
+            pid = os.fork()
+            if pid == 0:  # child
+                os.close(r)
+                got = progress._LOCK.acquire(blocking=False)
+                if got:
+                    progress._LOCK.release()
+                    sys.stdout.write("forked child line\n")
+                    sys.stdout.flush()
+                    os.write(w, b"ok")
+                else:
+                    os.write(w, b"locked")
+                os._exit(0)
+            os.close(w)
+            ready, _, _ = select.select([r], [], [], 10.0)
+            if not ready:
+                os.kill(pid, 9)
+                os.waitpid(pid, 0)
+                self.fail("the forked child deadlocked on the inherited stdout lock")
+            got = os.read(r, 16)
+            os.waitpid(pid, 0)
+            self.assertEqual(got, b"ok")
+        finally:
+            progress._LOCK.release()
+            os.close(r)
+
+
 class ReadStripsTest(unittest.TestCase):
     def _raster(self, path):
         import numpy as np

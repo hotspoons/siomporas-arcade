@@ -307,8 +307,6 @@ def cmd_finalize(a: argparse.Namespace) -> None:
         else:
             horizon.fetch_horizon(frame, site_dir / name, CACHE, radius_m=30000.0)
             print("  horizon global horizon for the merged world", flush=True)
-    nv = shards.rebuild_lidar_vrts(site_dir)
-    print(f"  merge   {nv} lidar VRTs rebuilt over the merged tiles")
 
     # A world bake's canopy overview comes from the global model, which is an S3 stream; fetch it
     # once here rather than N times, and only if the lidar gave us no CHM of our own.
@@ -333,6 +331,11 @@ def cmd_finalize(a: argparse.Namespace) -> None:
     shards.merge_geology(present, site_dir)
     stitched = shards.stitch_profile(present, site_dir)
     print(f"  merge   {nt} lidar files, {nw} tiles, {npg} pyramid files, {nb} branches; primary {'stitched' if stitched else 'MISSING'}")
+    # Every shard's `lidar/*.vrt` names only ITS OWN tiles, so the merge above leaves the merged
+    # world with a VRT covering one block. Rebuild them over the union AFTER the tiles are merged
+    # (doing it before mattered: it found no tiles and the world lost its point cloud).
+    nv = shards.rebuild_lidar_vrts(site_dir)
+    print(f"  merge   {nv} lidar VRTs rebuilt over the merged tiles")
     # surface.json is measured from the primary profile + rasters (a shard does not write it);
     # export_site reads it back for the manifest's `surface` block.
     try:

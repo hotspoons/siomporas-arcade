@@ -27,6 +27,7 @@ lock and the same timestamped stdout as everything else, so it can never split a
 from __future__ import annotations
 
 import math
+import os
 import sys
 import threading
 import time
@@ -35,6 +36,24 @@ import weakref
 # Reentrant: _emit takes it, then sys.stdout (the _StampStream) takes it again in write().
 _LOCK = threading.RLock()
 DEFAULT_EVERY = 60.0
+
+
+def _reinit_lock_after_fork() -> None:
+    """Give a forked child its own stdout lock.
+
+    `pool.map_chunks` forks its workers before starting its OWN heartbeat, but the caller may
+    already be inside an outer `heartbeat` (export.py wraps cuts/rock/water that way). If the fork
+    lands while that heartbeat thread holds `_LOCK`, the child inherits the lock held, with no
+    thread alive to release it, and deadlocks on its first `print`. A worker that hit a failing
+    tile only prints on the error path, so on the 2026-10-05 shard-smoke finalizer the rock pool
+    sat at 9/14 for half an hour with the load near zero. `os.register_at_fork` runs in the child
+    right after `fork`, so rebinding here leaves every worker with a usable lock.
+    """
+    global _LOCK
+    _LOCK = threading.RLock()
+
+
+os.register_at_fork(after_in_child=_reinit_lock_after_fork)
 
 
 def _clock() -> str:

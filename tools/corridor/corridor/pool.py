@@ -68,10 +68,12 @@ def map_chunks(fn, chunks: list, label: str, jobs: int | None = None):
         return [fn(c) for c in chunks]
     out: list = [None] * len(chunks)
     with ProcessPoolExecutor(max_workers=jobs, mp_context=ctx) as ex:
-        # Fork every worker BEFORE the heartbeat thread exists. `progress.install_timestamps`
-        # wraps stdout in a stream guarded by a module lock, and a child that inherits that lock
-        # while the heartbeat holds it deadlocks on its first print; starting the thread after the
-        # forks leaves the lock unlocked in every child.
+        # Fork every worker BEFORE this call's heartbeat thread exists, so `progress._LOCK` is not
+        # held here. That alone is not enough: the CALLER may already be inside an outer heartbeat
+        # (export.py wraps cuts/rock/water that way), and a child that inherits `_LOCK` held
+        # deadlocks on its first `print` or warning — which is how rock's pool sat at 9/14 for half
+        # an hour on the 2026-10-05 shard-smoke finalizer. `progress` registers an `os.register_at_fork`
+        # hook that hands every child a fresh lock, so the ordering here is a belt to that brace.
         pending = {ex.submit(fn, c): i for i, c in enumerate(chunks)}
         p = progress.Progress(label, len(chunks))
         try:

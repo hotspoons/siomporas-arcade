@@ -23,11 +23,23 @@
 // body a frame, and clipped to `WATER_PROBE_FAR` so only the near world is drawn. A capture is
 // cached and re-taken every `WATER_PROBE_REFRESH` seconds while near, so the reflection follows the
 // light. With the knob at 0 — the default — this module builds nothing and renders nothing.
+//
+// WHICH bodies are live is decided by the EYE, not by a build-time ranking. `WATER_PROBES` is a
+// budget of how many strips may hold a capture at once; each frame the NEAREST eligible body is
+// taken, and it displaces a live body only if that one is farther away. So `WATER_PROBES 1` means
+// "the lake I am standing at", which is what a person means when they turn it on — not "however
+// many bodies the bake happened to rank first".
 import * as THREE from 'three'
 import * as T from '../tuning'
 
-/** the most bodies that can ever carry a probe; `aProbe` is baked against this and does not change */
-export const MAX_WATER_PROBES = 32
+/**
+ * The most bodies that can carry a probe; `aProbe` is baked against this and does not change. It
+ * wants to be at least the number of inland bodies in the largest world (crofton has ~257), so that
+ * the lake the eye is actually at is a candidate rather than whichever ones a build-time ranking
+ * happened to favour. The atlas clamps its per-probe resolution to fit this many strips in one
+ * texture (`ensureTargets`), so a high cap costs capture time and memory, not correctness.
+ */
+export const MAX_WATER_PROBES = 512
 
 /** one inland body a probe can be placed at; built from the manifest by water.ts */
 export interface WaterProbeBody {
@@ -63,6 +75,8 @@ let cubeRT: THREE.WebGLCubeRenderTarget | null = null
 let cubeCam: THREE.CubeCamera | null = null
 /** what the current atlas/cube were built for, so a knob change rebuilds */
 let built = { res: 0, count: 0, far: 0 }
+/** the cube face actually allocated: `built.res`, clamped so count strips fit in one texture */
+let atlasFace = 0
 let lift = 1
 /** body indices whose strip holds a real capture */
 const ready = new Set<number>()
@@ -125,7 +139,12 @@ function disposeTargets() {
 function ensureTargets(renderer: THREE.WebGLRenderer, count: number, res: number, far: number) {
   if (atlas && built.count === count && built.res === res && built.far === far) return
   disposeTargets()
-  const face = Math.max(8, Math.round(res))
+  // one 2D strip per body, side by side: clamp the face so the whole atlas stays inside the driver's
+  // texture limit. With a handful of bodies this is just `res`; with a hundred, the strip gets shorter
+  // rather than the texture failing to allocate.
+  const cap = renderer.capabilities.maxTextureSize
+  const face = Math.max(8, Math.min(Math.round(res), Math.floor(cap / (2 * Math.max(1, count)))))
+  atlasFace = face
   const eqW = face * 2
   atlas = new THREE.WebGLRenderTarget(eqW * count, face, {
     type: THREE.HalfFloatType,
@@ -181,11 +200,11 @@ function captureProbe(renderer: THREE.WebGLRenderer, scene: THREE.Scene, i: numb
   convertMat.uniforms.uCube.value = cubeRT.texture
   const prevTarget = renderer.getRenderTarget()
   const prevAuto = renderer.autoClear
-  const eqW = built.res * 2
+  const eqW = atlasFace * 2
   // the quad spans the viewport, so the viewport IS the strip; no clear, or later strips would wipe
   renderer.autoClear = false
   renderer.setRenderTarget(atlas)
-  renderer.setViewport(i * eqW, 0, eqW, built.res)
+  renderer.setViewport(i * eqW, 0, eqW, atlasFace)
   renderer.render(convertScene, convertCam)
   renderer.setViewport(0, 0, atlas.width, atlas.height)
   renderer.autoClear = prevAuto
@@ -204,23 +223,27 @@ function captureProbe(renderer: THREE.WebGLRenderer, scene: THREE.Scene, i: numb
  * the frame's camera. A no-op — and free — while `WATER_PROBES` is 0 or the fancy water is off.
  */
 export function tickWaterProbes(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera) {
-  const want = T.WATER_FANCY >= 0.5 ? Math.max(0, Math.min(MAX_WATER_PROBES, bodies.length, Math.round(T.WATER_PROBES))) : 0
-  waterProbeCount.value = want
+  // every candidate gets a strip, so any body the eye nears can be captured; the knob is the number
+  // that may be LIVE at once, and the nearest wins the budget. A strip with alpha 0 is not live.
+  const depth = Math.min(MAX_WATER_PROBES, bodies.length)
+  const enabled = T.WATER_FANCY >= 0.5 && T.WATER_PROBES > 0 && depth > 0
+  waterProbeCount.value = enabled ? depth : 0
   waterProbeWeight.value = Math.max(0, Math.min(1, T.WATER_PROBE_WEIGHT))
-  if (want === 0) {
+  if (!enabled) {
     if (atlas) disposeTargets()
     return
   }
   const far = Math.max(20, T.WATER_PROBE_FAR)
-  ensureTargets(renderer, want, Math.max(16, Math.round(T.WATER_PROBE_RES)), far)
+  ensureTargets(renderer, depth, Math.max(16, Math.round(T.WATER_PROBE_RES)), far)
   lift = T.WATER_PROBE_LIFT
+  const budget = Math.max(1, Math.min(depth, Math.round(T.WATER_PROBES)))
 
   const now = performance.now()
   const refreshMs = T.WATER_PROBE_REFRESH > 0 ? T.WATER_PROBE_REFRESH * 1000 : Infinity
   const reach = T.WATER_PROBE_REACH
   let pick = -1
   let best = Infinity
-  for (let i = 0; i < want; i++) {
+  for (let i = 0; i < depth; i++) {
     const b = bodies[i]
     if (!b) continue
     const d = Math.hypot(b.x - camera.position.x, b.z - camera.position.z) - b.radius
@@ -231,5 +254,48 @@ export function tickWaterProbes(renderer: THREE.WebGLRenderer, scene: THREE.Scen
       pick = i
     }
   }
-  if (pick >= 0) captureProbe(renderer, scene, pick)
+  if (pick < 0) return
+  // a new body may only take a strip if the budget is free, or if a live body is FARTHER than the
+  // one we want. Displacing only farther bodies is what stops two nearby lakes from trading the
+  // strip every frame; the nearest budget's worth simply stays put.
+  if (!ready.has(pick) && ready.size >= budget && !evictFartherThan(renderer, camera, best)) return
+  captureProbe(renderer, scene, pick)
+}
+
+/** Free the strip of the farthest live body whose SHORE is farther than `d`, if any. True if freed. */
+function evictFartherThan(renderer: THREE.WebGLRenderer, camera: THREE.Camera, d: number): boolean {
+  let victim = -1
+  let victimD = d
+  for (const i of ready) {
+    const b = bodies[i]
+    if (!b) continue
+    const dist = Math.hypot(b.x - camera.position.x, b.z - camera.position.z) - b.radius
+    if (dist > victimD) {
+      victimD = dist
+      victim = i
+    }
+  }
+  if (victim < 0) return false
+  clearStrip(renderer, victim)
+  ready.delete(victim)
+  capturedAt.delete(victim)
+  return true
+}
+
+/** Blank one strip back to alpha 0, which is the shader's "this body has no probe". */
+function clearStrip(renderer: THREE.WebGLRenderer, i: number) {
+  if (!atlas) return
+  const eqW = atlasFace * 2
+  const prevTarget = renderer.getRenderTarget()
+  const prevColour = renderer.getClearColor(new THREE.Color())
+  const prevAlpha = renderer.getClearAlpha()
+  const prevScissor = renderer.getScissorTest()
+  renderer.setClearColor(0x000000, 0)
+  renderer.setRenderTarget(atlas)
+  renderer.setScissorTest(true)
+  renderer.setScissor(i * eqW, 0, eqW, atlasFace)
+  renderer.clear(true, false, false)
+  renderer.setScissorTest(prevScissor)
+  renderer.setRenderTarget(prevTarget)
+  renderer.setClearColor(prevColour, prevAlpha)
 }

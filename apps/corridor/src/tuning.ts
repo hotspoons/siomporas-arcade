@@ -889,10 +889,12 @@ export let WATER_SKY_REFLECT = 0.7
  * (Rich, 2026-10-05: "this lake is kind of lame"). A probe is a tiny cube render taken from the
  * water itself, so it holds whatever actually sits around THAT body — bank, trees, houses, the sun.
  *
- * This is the number of bodies, largest first, that get one; 0 is off and costs nothing. Each is
- * captured lazily, only once the eye comes within `WATER_PROBE_REACH`, at most one body a frame, so
- * a whole region of ponds never pays for all of them at boot. Captures are cached and re-taken every
- * `WATER_PROBE_REFRESH` seconds while you are near; the reflections update with the light.
+ * This is how many probes stay LIVE at once; 0 is off and costs nothing. Every inland body can hold
+ * one, but a body is only captured once the eye comes within `WATER_PROBE_REACH` of its shore, and
+ * at most one body a frame, so a whole region of ponds never pays for all of them at boot. The body
+ * you are at is the one taken, not a body chosen at build time: a new capture displaces a live probe
+ * only if that probe is farther away. Captures are cached and re-taken every `WATER_PROBE_REFRESH`
+ * seconds while you are near; the reflections update with the light.
  *
  * The capture is a cube camera six scene renders, which is not free — that is why it is opt-in and
  * why `WATER_PROBE_FAR` clips the probe to the near world. The bodies are the same ones the planar
@@ -1940,7 +1942,7 @@ export const TUNE_TABS: TuneTab[] = [
           tune('WATER_REFLECT_SCALE', () => WATER_REFLECT_SCALE, (v) => (WATER_REFLECT_SCALE = v), [0.2, 1], 0.05, 'reflection buffer resolution ×; lower is cheaper and softer'),
           tune('WATER_REFLECT_RIPPLE', () => WATER_REFLECT_RIPPLE, (v) => (WATER_REFLECT_RIPPLE = v), [0, 0.6], 0.02, 'wave-normal smear on the reflection; 0 is a flat looking-glass'),
           tune('WATER_SKY_REFLECT', () => WATER_SKY_REFLECT, (v) => (WATER_SKY_REFLECT = v), [0, 1.5], 0.05, 'sky/horizon reflection from the environment map, for ponds and streams the sea plane cannot mirror; 0 is the old flat sheet'),
-          tune('WATER_PROBES', () => WATER_PROBES, (v) => (WATER_PROBES = v), [0, 32], 1, 'reflection probes: the N largest inland bodies capture their own surroundings (trees, bank) lazily, so a lake mirrors what is around it, not just the sky. 0 off'),
+          tune('WATER_PROBES', () => WATER_PROBES, (v) => (WATER_PROBES = v), [0, 32], 1, 'reflection probes: how many inland lakes keep a live capture of their own surroundings (trees, bank) at once, nearest to the eye. 0 off; 1 is the lake you are at'),
           tune('WATER_PROBE_RES', () => WATER_PROBE_RES, (v) => (WATER_PROBE_RES = v), [16, 256], 1, 'probe cube face px; the stored equirect is 2× across. Higher is sharper and costs capture time + memory'),
           tune('WATER_PROBE_REACH', () => WATER_PROBE_REACH, (v) => (WATER_PROBE_REACH = v), [0, 3000], 25, 'a body is captured/refreshed only when the eye is this close to its shore (m)'),
           tune('WATER_PROBE_FAR', () => WATER_PROBE_FAR, (v) => (WATER_PROBE_FAR = v), [50, 6000], 25, 'how far a probe renders the world (m): the trees and bank that show, not the whole county'),

@@ -441,10 +441,11 @@ export function buildWater(water: WaterLayer | null | undefined, groundAt: (x: n
   }
 
   // WHICH BODIES GET A REFLECTION PROBE. The environment map is sky alone, so the trees and bank a
-  // lake should mirror come from a probe taken at the water itself (visuals/waterProbes.ts). The
-  // ranking is the largest inland bodies, capped, and fixed here at build; `aProbe` is baked per
-  // vertex so the merged shader can find a body's strip. The live WATER_PROBES knob decides how
-  // many of these are actually captured — 0, the default, captures none.
+  // lake should mirror come from a probe taken at the water itself (visuals/waterProbes.ts). Every
+  // inland body is a candidate (up to MAX_WATER_PROBES); `aProbe` is baked per vertex so the merged
+  // shader can find a body's strip. The live WATER_PROBES knob is how many probes may be captured at
+  // once — the nearest to the eye take them, so 1 means "the lake I am at", and 0, the default,
+  // captures none.
   const probeIndexOf = new Map<string, number>()
   const probeBodies: WaterProbeBody[] = []
   {

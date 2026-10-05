@@ -920,6 +920,12 @@ const syncAudible = () => engineSound.setMuted(!listening())
 for (const ev of ['visibilitychange', 'blur', 'focus'] as const) {
   addEventListener(ev, syncAudible, ev === 'visibilitychange' ? undefined : true)
 }
+/*
+ * AND A REGULAR POLL. The events miss transitions: a window manager moving focus, a background tab
+ * restored without a blur/focus pair, a page that starts unfocused. Asking on a timer is the belt to
+ * the events' braces — `applyMute` returns at once when the state has not moved, so this is cheap.
+ */
+setInterval(syncAudible, 1000)
 resize()
 
 // ---------------------------------------------------------------------------------------------

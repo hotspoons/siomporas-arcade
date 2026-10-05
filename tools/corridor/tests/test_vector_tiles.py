@@ -67,6 +67,23 @@ class VectorTilesTest(unittest.TestCase):
             self.assertEqual(idx["counts"]["masts"], 1)
             self.assertEqual(idx["buildings"], [{"x": 0, "y": 0, "n": 1}])
 
+    def test_empty_tiled_keeps_a_compact_junction_paint(self):
+        # the full intersection list streams; the paint facts the base road is cut around stay.
+        out = {
+            "intersections": {
+                "list": [{"id": "x", "nodes": [1], "x": 10.0, "y": 20.0,
+                          "approaches": [{"stop_x": 5.0, "stop_y": 6.0}, {"stop_x": 15.0, "stop_y": 16.0}]}],
+                "counts": {"approaches": 2},
+            },
+        }
+        export._empty_tiled(out)
+        self.assertEqual(out["intersections"]["list"], [])
+        self.assertEqual(out["intersections"]["counts"], {"approaches": 2})
+        self.assertEqual(out["intersections"]["paint"], [{"x": 10.0, "y": 20.0, "a": [[5.0, 6.0], [15.0, 16.0]]}])
+        # a re-tile (list already empty) keeps the paint it has
+        export._empty_tiled(out)
+        self.assertEqual(out["intersections"]["paint"], [{"x": 10.0, "y": 20.0, "a": [[5.0, 6.0], [15.0, 16.0]]}])
+
     def test_rerun_replaces_rather_than_merges(self):
         with tempfile.TemporaryDirectory() as d:
             web = Path(d)

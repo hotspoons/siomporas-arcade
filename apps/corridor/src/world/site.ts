@@ -232,6 +232,9 @@ export interface Manifest {
       corners: { x: number; y: number; why: string }[]
     }[]
     counts: Record<string, number>
+    /** compact per-arm junction cut, derived at bake from `list` and kept resident so the base road
+     *  — built before any tile streams — is painted around junctions; see `junctionPaintCut` */
+    paint?: { x: number; y: number; a: [number, number][] }[]
   } | null
   /** polygons inside which every street was given a sidewalk (walkways.py), for the minimap/editor */
   sidewalk_zones?: [number, number][][] | null

@@ -806,11 +806,19 @@ export function buildLaneArrows(manifest: Manifest, roadAt: (x: number, z: numbe
  * radius whatever its stop line said and left a bare disc with lines stopping short of it.
  */
 export function junctionPaintCut(manifest: Manifest): (x: number, z: number) => boolean {
-  const list = ((manifest.intersections?.list ?? []) as unknown as Junction[])
-  const J = list.map((X) => {
+  // A tiled world keeps only the compact `paint` facts (centre + arm stop points) resident, because
+  // `roadMesh` runs before any tile arrives; the full 30 MB `list` streams per cell.
+  const ix = manifest.intersections
+  const paint = ix?.paint
+  const src: { x: number; y: number; stops: [number, number][] }[] = paint?.length
+    ? paint.map((p) => ({ x: p.x, y: p.y, stops: p.a }))
+    : ((ix?.list ?? []) as unknown as Junction[]).map((X) => ({
+      x: X.x, y: X.y, stops: X.approaches.map((a) => [a.stop_x, a.stop_y] as [number, number]),
+    }))
+  const J = src.map((X) => {
     const c = toWorld(X.x, X.y)
-    const arms = X.approaches.map((a) => {
-      const s = toWorld(a.stop_x, a.stop_y)
+    const arms = X.stops.map(([sx, sy]) => {
+      const s = toWorld(sx, sy)
       const dx = s.x - c.x, dz = s.z - c.z
       const d = Math.hypot(dx, dz) || 1
       return { ox: dx / d, oz: dz / d, stop: d + 0.3 }

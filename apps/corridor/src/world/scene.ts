@@ -1071,7 +1071,7 @@ if (uLodOn > 0.5) {
    * With the bake's junction model the cut is per ARM, at that arm's stop line
    * (`junctionPaintCut`); the circles above are the fallback for a bake without one.
    */
-  const sectorCut = manifest.intersections?.list?.length ? junctionPaintCut(manifest) : null
+  const sectorCut = manifest.intersections && ((manifest.intersections.paint?.length ?? 0) || manifest.intersections.list?.length) ? junctionPaintCut(manifest) : null
   const paintGrid = new Map<string, { x: number; z: number; r: number }[]>()
   let paintReach = 1
   if (T.STREAM_LOCAL > 0 && junctions.length > 64) {
@@ -1366,13 +1366,15 @@ if (uLodOn > 0.5) {
   // the spine always, keep their grade.
   const junctionMeet = { junctions: 0, warped: 0, maxStep: 0, noTarget: 0 }
   let finishJunctions: () => number[] = () => []
+  // node -> junction, so a branch knows the priority facts at the node it meets. A tiled world adds
+  // to it as intersection tiles arrive (hydrateCell), and `finishJunctions` re-runs the meet.
+  const xByNode = new Map<number, NonNullable<Manifest['intersections']>['list'][number]>()
   {
     const RANK: Record<string, number> = { motorway: 0, trunk: 1, primary: 2, secondary: 3, tertiary: 4, unclassified: 5, residential: 6, living_street: 7, service: 8 }
     const rank = (hw?: string | null) => RANK[(hw ?? '').replace(/_link$/, '')] ?? 9
     const spineWays = new Set((manifest.spine.segments ?? []).map((g) => `r${(g as { osm_id?: number }).osm_id}`))
     const byId = new Map<string, number>()
     branchRaw.forEach((b, i) => { if (b.br.id) byId.set(b.br.id, i) })
-    const xByNode = new Map<number, NonNullable<Manifest['intersections']>['list'][number]>()
     for (const x of manifest.intersections?.list ?? []) for (const n of x.nodes ?? []) xByNode.set(n, x)
     /** a road's graded height at the raw vertex nearest (x, z) — at a node, that vertex IS the node */
     const heightOf = (i: number, x: number, z: number) => {
@@ -3063,6 +3065,10 @@ if (uLodOn > 0.5) {
     for (const d of dws) { (manifest.driveways ??= []).push(d); roads.addLine(d.coords) }
     for (const st of sts) { (manifest.stubs ??= []).push(st); roads.addLine(st.coords) }
     addDrivewaysBatch(dws, sts)
+    // junction facts, so a branch that meets here learns who has priority even though it was taken
+    // before this tile arrived (the meet re-runs when branches stream — see the branch pump)
+    const ixs = (files.intersections as Manifest['intersections'] | undefined)?.list ?? []
+    for (const x of ixs) for (const n of x.nodes ?? []) xByNode.set(n, x)
   }
   {
     // one index for the whole site, not one per cell: the cells slice the BUILDINGS, and a house
@@ -3295,7 +3301,7 @@ if (uLodOn > 0.5) {
       sidewalks: (tiled?.sidewalks as Manifest['sidewalks']) ?? b?.sidewalks ?? [],
       power: (tiled?.power as Manifest['power']) ?? (manifest.power ? { lines: b?.lines ?? [], supports: b?.supports ?? [] } : null),
       driveways: (tiled?.driveways as Manifest['driveways']) ?? b?.driveways ?? [],
-      intersections: manifest.intersections ? { ...manifest.intersections, list: b?.intersections ?? [] } : null,
+      intersections: (tiled?.intersections as Manifest['intersections']) ?? (manifest.intersections ? { ...manifest.intersections, list: b?.intersections ?? [] } : null),
     }
   }
   const builtStreet = new Set<string>()

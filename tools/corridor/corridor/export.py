@@ -1016,7 +1016,7 @@ TILED_NESTED = {"power": ("lines", "supports"), "signals": ("masts", "signs", "b
 #: The arrays the viewer streams today. Grows one group at a time as the viewer learns to rebuild
 #: that group per cell; `_load_tiled` reads whatever a tree already has, so old and new trees mix.
 TILED_ACTIVE = ("buildings", "sidewalks", "parking", "barriers", "power", "signals",
-                "driveways", "siblings", "stubs")
+                "driveways", "siblings", "stubs", "intersections")
 
 
 def _tile_arrays(out: dict) -> dict:
@@ -1043,8 +1043,19 @@ def _empty_tiled(out: dict) -> None:
             continue
         node = out.get(name)
         if name == "intersections":
-            # `counts` is a summary the attribution reads; the list is the 30 MB that streams
-            out[name] = None if node is None else {**node, "list": []}
+            # `counts` is a summary the attribution reads, and `paint` is the compact per-arm cut
+            # the road is painted around (`junctionPaintCut`): the full 30 MB list streams, but the
+            # base road is built before any tile arrives, so its paint facts stay resident. Derived
+            # from the list the first time; preserved on a re-tile, when the list is already empty.
+            if node is None:
+                out[name] = None
+            else:
+                paint = node.get("paint")
+                if paint is None and node.get("list"):
+                    paint = [{"x": j["x"], "y": j["y"],
+                              "a": [[a["stop_x"], a["stop_y"]] for a in j.get("approaches", [])]}
+                             for j in node["list"]]
+                out[name] = {**node, "list": [], "paint": paint}
         else:
             out[name] = None
 

@@ -70,6 +70,28 @@ def _make_site(root: Path, with_sibling: bool) -> Path:
     return site
 
 
+class WaterDistanceTest(unittest.TestCase):
+    def test_query_uses_a_geometry_not_a_bounds_tuple(self):
+        # The regression guard for a bug that zeroed EVERY face on the first real dc-metro cuts
+        # run: `STRtree.query((x0, y0, x1, y1))` reads the tuple as an array of geometries and
+        # raises "Array should be of object dtype". The query must be a box geometry.
+        import numpy as np
+        from shapely import STRtree
+        from shapely.geometry import LineString
+
+        waters = [LineString([(0, 105), (200, 105)])]
+        ctx = {"waters": waters, "tree": STRtree(waters)}
+        p = np.array([[10.0, 100.0], [100.0, 100.0]])
+        d = cuts._water_distance(ctx, p)
+        np.testing.assert_allclose(d, [5.0, 5.0], atol=0.2)
+
+    def test_no_waters_is_infinite(self):
+        import numpy as np
+
+        d = cuts._water_distance({"waters": [], "tree": None}, np.array([[0.0, 0.0]]))
+        self.assertTrue(np.isinf(d).all())
+
+
 class MeasureNetworkTest(unittest.TestCase):
     def _run(self, site: Path, jobs: int) -> dict:
         old = os.environ.get("CORRIDOR_TILE_JOBS")

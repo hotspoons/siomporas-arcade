@@ -168,7 +168,10 @@ def _water_distance(ctx: dict, p: np.ndarray) -> np.ndarray:
     tree = ctx["tree"]
     x0, y0 = float(p[:, 0].min()) - WATER_NEAR, float(p[:, 1].min()) - WATER_NEAR
     x1, y1 = float(p[:, 0].max()) + WATER_NEAR, float(p[:, 1].max()) + WATER_NEAR
-    cand = tree.query((x0, y0, x1, y1))
+    # STRtree.query wants a geometry (or an array of them), not a bounds tuple: a 4-float tuple is
+    # read as an array and raises "Array should be of object dtype" (caught per road, so the whole
+    # network silently came back with 0 faces on the first dc-metro cuts run, 2026-10-05).
+    cand = tree.query(shapely.box(x0, y0, x1, y1))
     if len(cand) == 0:
         return out
     pts = shapely.points(p[:, 0], p[:, 1])

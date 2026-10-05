@@ -29,6 +29,15 @@ Output `cuts.json` (and manifest key `cuts`, via export.py): one record per face
 along-track interval, side, class, toe/top/height/slope statistics, rock type, and a station
 list every 10 m with the toe and top as [x, y, z] RELATIVE TO THE SITE ORIGIN (z absolute,
 NAVD88) so the viewer can dress the face without re-sampling anything.
+
+WHY `measure_network` LOOKS THE WAY IT DOES (2026-10-05). The dc-metro-take-2 bake spent **8 h 22 m**
+in this stage. It was not the DTM walk: it was that the original `measure` re-read and re-parsed
+`osm.geojson` (193 MB) and re-opened the DTM **once per road** (~9,800 roads = ~1.9 TB of JSON),
+and rewrote `cuts.json` on every call. The region-wide shared inputs (`site.json`, the spine, the
+rulebook `geology.json`, the waterway lines, the DTM sampler) are now loaded ONCE and handed to a
+forked pool, exactly like `profile_many`: the pool is forked so the big read-only context is
+copy-on-write and never pickled, and each worker opens its own `_Heights` (a GDAL handle must not
+be shared across a fork).
 """
 from __future__ import annotations
 
@@ -36,8 +45,7 @@ import json
 from pathlib import Path
 
 import numpy as np
-import rasterio
-from shapely.geometry import LineString, shape
+from shapely.geometry import LineString
 
 STEP_M = 4.0
 OFFSETS = np.arange(2.0, 71.0, 1.0)
@@ -110,31 +118,25 @@ def _lith_at(geology: dict, s: float) -> tuple[str | None, str | None, str | Non
     return (pick.get("strat_name") or pick.get("name"), pick.get("lith"), pick.get("descrip")) if pick else (None, None, None)
 
 
-def measure(site_dir: Path, line: LineString | None = None, prof: dict | None = None, prefix: str = "") -> dict | None:
-    """Faces beside one road. `line`/`prof` default to the site's spine; a network passes each
-    chain in turn (see `measure_network`) and `prefix` keeps the face ids unique per road."""
+def _has_rasters(site_dir: Path) -> bool:
     dtm_p = site_dir / "lidar" / "dtm.tif"
     vrt_p = site_dir / "lidar" / "dtm.vrt"
-    if not ((dtm_p.exists() or vrt_p.exists()) and (site_dir / "profile.json").exists()):
-        return None
+    return bool((dtm_p.exists() or vrt_p.exists()) and (site_dir / "profile.json").exists())
+
+
+def _load_shared(site_dir: Path) -> dict:
+    """Every region-wide input `measure` used to re-read per road: the site, the spine, geology,
+    the mapped waterway lines (projected to the site UTM frame, with an STRtree so a road only
+    measures against the streams near it), and the primary's own line/profile."""
     site = json.loads((site_dir / "site.json").read_text())
     ox, oy = site["frame"]["origin"]
     sp = json.loads((site_dir / "spine_utm.json").read_text())
-    if prof is None:
-        prof = json.loads((site_dir / "profile.json").read_text())
     geology = json.loads((site_dir / "geology.json").read_text()) if (site_dir / "geology.json").exists() else {}
-    if line is None:
-        line = LineString(sp["coords"])
-    s = np.arange(0.0, line.length, STEP_M)
-    p = np.array([line.interpolate(v).coords[0] for v in s])
-    a = np.array([line.interpolate(min(v + 1.0, line.length)).coords[0] for v in s])
-    d = a - p
-    d /= np.maximum(np.linalg.norm(d, axis=1, keepdims=True), 1e-9)
-    normal = np.column_stack([-d[:, 1], d[:, 0]])  # left of travel
-    road_z = np.interp(s, prof["s"], prof["road_z"])
+    prof_p = site_dir / "profile.json"
+    primary_prof = json.loads(prof_p.read_text()) if prof_p.exists() else None
+    primary_line = LineString(sp["coords"]) if sp.get("coords") else None
 
-    # streams beside the road, for the natural/artificial call
-    waters: list[LineString] = []
+    waters: list = []
     osm_p = site_dir / "osm.geojson"
     if osm_p.exists():
         from .geo import Frame
@@ -145,127 +147,216 @@ def measure(site_dir: Path, line: LineString | None = None, prof: dict | None = 
                 c = np.array(f["geometry"]["coordinates"])
                 x, y = frame.from_wgs(c[:, 0], c[:, 1])
                 waters.append(LineString(np.column_stack([x, y])))
-    water_dist = np.full(len(s), np.inf)
+    tree = None
     if waters:
-        import shapely
+        from shapely import STRtree
 
-        pts = shapely.points(p[:, 0], p[:, 1])
-        for w in waters:
-            water_dist = np.minimum(water_dist, shapely.distance(pts, w))
+        tree = STRtree(waters)
+    return {"site_dir": site_dir, "site": site, "ox": ox, "oy": oy, "sp": sp, "geology": geology,
+            "primary_line": primary_line, "primary_prof": primary_prof, "waters": waters, "tree": tree}
 
-    # heights: the lidar DTM first, the bare-earth DEM where it has no data (Bonnie Branch's TNM
-    # bake covered a sliver of the corridor: 0.4 % valid DTM cells, 2026-09-21)
+
+def _water_distance(ctx: dict, p: np.ndarray) -> np.ndarray:
+    """Distance from each station to the nearest mapped stream, or inf where there is none within
+    `WATER_NEAR`. The STRtree keeps a road from measuring against every waterway in the region."""
+    waters = ctx["waters"]
+    out = np.full(len(p), np.inf)
+    if not waters:
+        return out
+    import shapely
+
+    tree = ctx["tree"]
+    x0, y0 = float(p[:, 0].min()) - WATER_NEAR, float(p[:, 1].min()) - WATER_NEAR
+    x1, y1 = float(p[:, 0].max()) + WATER_NEAR, float(p[:, 1].max()) + WATER_NEAR
+    cand = tree.query((x0, y0, x1, y1))
+    if len(cand) == 0:
+        return out
+    pts = shapely.points(p[:, 0], p[:, 1])
+    for i in cand:
+        out = np.minimum(out, shapely.distance(pts, waters[int(i)]))
+    return out
+
+
+def _faces_for(ctx: dict, line: LineString | None, prof: dict | None, prefix: str, hz) -> tuple[list[dict], dict]:
+    """Faces beside ONE road, against the shared context and an already-open DTM sampler.
+
+    This is the body of the old `measure` with the per-road I/O removed: no file is read here, and
+    nothing is written. `hz` (water._Heights) is passed in so a worker opens the DTM once for a whole
+    slice of roads rather than once per road; `line`/`prof` default to the site's primary.
+    """
+    ox, oy = ctx["ox"], ctx["oy"]
+    site = ctx["site"]
+    if line is None:
+        line = ctx["primary_line"]
+    if prof is None:
+        prof = ctx["primary_prof"]
+
+    s = np.arange(0.0, line.length, STEP_M)
+    p = np.array([line.interpolate(v).coords[0] for v in s])
+    a = np.array([line.interpolate(min(v + 1.0, line.length)).coords[0] for v in s])
+    d = a - p
+    d /= np.maximum(np.linalg.norm(d, axis=1, keepdims=True), 1e-9)
+    normal = np.column_stack([-d[:, 1], d[:, 0]])  # left of travel
+    road_z = np.interp(s, prof["s"], prof["road_z"])
+
+    # streams beside the road, for the natural/artificial call (context, measured once per region)
+    water_dist = _water_distance(ctx, p)
+
+    faces: list[dict] = []
+    per_side: dict[str, np.ndarray] = {}
+
+    def sample(xy: np.ndarray) -> np.ndarray:
+        return hz.at(xy[:, 0], xy[:, 1])
+
+    def detect(slope_min: float, rise_min: float, forced_class: str | None) -> None:
+        for side, sg in (("left", 1.0), ("right", -1.0)):
+            Z = np.zeros((len(s), len(OFFSETS)))
+            # CHUNKED ON PURPOSE: a network's sampler reads a window per call (water._Heights),
+            # so asking for one lateral offset down a 16 km road would read the whole raster 69
+            # times. One chunk of stations x every offset is a compact box.
+            CHUNK = 256
+            for i0 in range(0, len(s), CHUNK):
+                sl = slice(i0, min(len(s), i0 + CHUNK))
+                q = np.concatenate([p[sl] + normal[sl] * (sg * o) for o in OFFSETS])
+                Z[sl] = sample(q).reshape(len(OFFSETS), -1).T - road_z[sl, None]
+            with np.errstate(invalid="ignore"):
+                dz = (Z[:, WINDOW:] - Z[:, :-WINDOW]) / WINDOW  # slope of each 5 m window, at OFFSETS[:-WINDOW]
+            steep = np.nan_to_num(dz, nan=0.0) > slope_min
+            n_toe = int(np.searchsorted(OFFSETS, TOE_MAX))  # windows whose start is inside TOE_MAX
+            win = steep[:, :n_toe]
+            has = win.any(axis=1)
+            first = np.argmax(win, axis=1)
+            last = win.shape[1] - 1 - np.argmax(win[:, ::-1], axis=1)
+            toe = np.where(has, OFFSETS[first], np.nan)
+            top = np.where(has, OFFSETS[last] + WINDOW, np.nan)
+            rise = np.full(len(s), np.nan)
+            smax = np.full(len(s), np.nan)
+            for i in np.flatnonzero(has):
+                j0, j1 = int(first[i]), int(last[i]) + WINDOW
+                rise[i] = Z[i, j1] - Z[i, j0]
+                smax[i] = np.nanmax(dz[i, first[i] : last[i] + 1])
+            good = has & (np.nan_to_num(rise) >= rise_min)
+            if forced_class is None:
+                per_side[side] = good
+            for i0, i1 in _runs(good, GAP_STATIONS):
+                if s[i1] - s[i0] < RUN_MIN:
+                    continue
+                if forced_class is not None and any(f["side"] == side and f["s_start"] <= s[i1] and f["s_end"] >= s[i0] for f in faces):
+                    continue  # the steep pass already has this stretch
+                sl = slice(i0, i1 + 1)
+                toe_med = float(np.nanmedian(toe[sl]))
+                toe_std = float(np.nanstd(toe[sl]))
+                stations = []
+                for i in range(i0, i1 + 1, max(1, int(round(10.0 / STEP_M)))):
+                    if not good[i]:
+                        continue
+                    t_xy = p[i] + normal[i] * (sg * toe[i])
+                    u_xy = p[i] + normal[i] * (sg * top[i])
+                    stations.append({
+                        "s": round(float(s[i]), 1),
+                        "toe": [round(float(t_xy[0] - ox), 1), round(float(t_xy[1] - oy), 1), round(float(road_z[i] + Z[i, int(toe[i] - OFFSETS[0])]), 2)],
+                        "top": [round(float(u_xy[0] - ox), 1), round(float(u_xy[1] - oy), 1), round(float(road_z[i] + Z[i, int(top[i] - OFFSETS[0])]), 2)],
+                    })
+                near_water = float(np.mean(water_dist[sl] <= WATER_NEAR)) if ctx["waters"] else 0.0
+                mid = float((s[i0] + s[i1]) / 2)
+                strat, lith, descrip = _lith_at(ctx["geology"], mid)
+                faces.append({
+                    "id": f"cut-{prefix}{side[0]}-{int(round(float(s[i0]))):04d}",
+                    "side": side,
+                    "s_start": round(float(s[i0]), 1), "s_end": round(float(s[i1]), 1), "length_m": round(float(s[i1] - s[i0]), 1),
+                    "toe_m": round(toe_med, 1), "toe_std_m": round(toe_std, 1), "top_m": round(float(np.nanmedian(top[sl])), 1),
+                    "height_m": round(float(np.nanmedian(rise[sl])), 1), "height_max_m": round(float(np.nanmax(rise[sl])), 1),
+                    "slope": round(float(np.nanmedian(smax[sl])), 2), "slope_max": round(float(np.nanmax(smax[sl])), 2),
+                    "water_share": round(near_water, 2),
+                    "formation": strat, "lith": lith or (descrip or "")[:80] or None, "rock_type": rock_type(lith, descrip),
+                    "stations": stations, "pass": "steep" if forced_class is None else "gentle", "forced_class": forced_class,
+                })
+
+    detect(SLOPE_MIN, RISE_MIN, None)
+    detect(NATURAL_SLOPE_MIN, NATURAL_RISE_MIN, "natural")
+    # both sides rising over the same stations is a canyon, however straight
+    both = per_side["left"] & per_side["right"]
+    for f in faces:
+        i0, i1 = int(f["s_start"] / STEP_M), int(f["s_end"] / STEP_M)
+        two_sided = float(np.mean(both[i0 : i1 + 1]))
+        f["two_sided_share"] = round(two_sided, 2)
+        natural = f["toe_std_m"] > PARALLEL_STD or f["water_share"] >= 0.5 or (two_sided >= 0.5 and f["water_share"] > 0)
+        f["class"] = f.pop("forced_class") or ("natural" if natural else "artificial")
+    faces.sort(key=lambda f: f["s_start"])
+    thresholds = {"slope_min": SLOPE_MIN, "rise_min_m": RISE_MIN, "natural_slope_min": NATURAL_SLOPE_MIN, "natural_rise_min_m": NATURAL_RISE_MIN, "toe_max_m": TOE_MAX, "run_min_m": RUN_MIN, "window_m": WINDOW, "parallel_std_m": PARALLEL_STD, "water_near_m": WATER_NEAR}
+    return faces, thresholds
+
+
+def _summarize(faces: list[dict], roads: int | None = None) -> dict:
+    summary = {"faces": len(faces), "artificial": sum(f["class"] == "artificial" for f in faces), "natural": sum(f["class"] == "natural" for f in faces), "total_length_m": round(sum(f["length_m"] for f in faces), 1), "tallest_m": max((f["height_max_m"] for f in faces), default=0.0), "rock_types": sorted({f["rock_type"] for f in faces})}
+    if roads is not None:
+        summary["roads"] = roads
+    return summary
+
+
+def measure(site_dir: Path, line: LineString | None = None, prof: dict | None = None, prefix: str = "") -> dict | None:
+    """Faces beside one road for a small (single-corridor) site. `line`/`prof` default to the
+    site's spine. A network uses `measure_network`, which shares the per-region reads instead."""
+    if not _has_rasters(site_dir):
+        return None
     from .water import _Heights
 
+    ctx = _load_shared(site_dir)
     hz = _Heights(site_dir)
-    if True:
-        def sample(xy: np.ndarray) -> np.ndarray:
-            return hz.at(xy[:, 0], xy[:, 1])
-
-        faces: list[dict] = []
-        per_side: dict[str, np.ndarray] = {}
-
-        def detect(slope_min: float, rise_min: float, forced_class: str | None) -> None:
-            for side, sg in (("left", 1.0), ("right", -1.0)):
-                Z = np.zeros((len(s), len(OFFSETS)))
-                # CHUNKED ON PURPOSE: a network's sampler reads a window per call (water._Heights),
-                # so asking for one lateral offset down a 16 km road would read the whole raster 69
-                # times. One chunk of stations x every offset is a compact box.
-                CHUNK = 256
-                for i0 in range(0, len(s), CHUNK):
-                    sl = slice(i0, min(len(s), i0 + CHUNK))
-                    q = np.concatenate([p[sl] + normal[sl] * (sg * o) for o in OFFSETS])
-                    Z[sl] = sample(q).reshape(len(OFFSETS), -1).T - road_z[sl, None]
-                with np.errstate(invalid="ignore"):
-                    dz = (Z[:, WINDOW:] - Z[:, :-WINDOW]) / WINDOW  # slope of each 5 m window, at OFFSETS[:-WINDOW]
-                steep = np.nan_to_num(dz, nan=0.0) > slope_min
-                n_toe = int(np.searchsorted(OFFSETS, TOE_MAX))  # windows whose start is inside TOE_MAX
-                win = steep[:, :n_toe]
-                has = win.any(axis=1)
-                first = np.argmax(win, axis=1)
-                last = win.shape[1] - 1 - np.argmax(win[:, ::-1], axis=1)
-                toe = np.where(has, OFFSETS[first], np.nan)
-                top = np.where(has, OFFSETS[last] + WINDOW, np.nan)
-                rise = np.full(len(s), np.nan)
-                smax = np.full(len(s), np.nan)
-                for i in np.flatnonzero(has):
-                    j0, j1 = int(first[i]), int(last[i]) + WINDOW
-                    rise[i] = Z[i, j1] - Z[i, j0]
-                    smax[i] = np.nanmax(dz[i, first[i] : last[i] + 1])
-                good = has & (np.nan_to_num(rise) >= rise_min)
-                if forced_class is None:
-                    per_side[side] = good
-                for i0, i1 in _runs(good, GAP_STATIONS):
-                    if s[i1] - s[i0] < RUN_MIN:
-                        continue
-                    if forced_class is not None and any(f["side"] == side and f["s_start"] <= s[i1] and f["s_end"] >= s[i0] for f in faces):
-                        continue  # the steep pass already has this stretch
-                    sl = slice(i0, i1 + 1)
-                    toe_med = float(np.nanmedian(toe[sl]))
-                    toe_std = float(np.nanstd(toe[sl]))
-                    stations = []
-                    for i in range(i0, i1 + 1, max(1, int(round(10.0 / STEP_M)))):
-                        if not good[i]:
-                            continue
-                        t_xy = p[i] + normal[i] * (sg * toe[i])
-                        u_xy = p[i] + normal[i] * (sg * top[i])
-                        stations.append({
-                            "s": round(float(s[i]), 1),
-                            "toe": [round(float(t_xy[0] - ox), 1), round(float(t_xy[1] - oy), 1), round(float(road_z[i] + Z[i, int(toe[i] - OFFSETS[0])]), 2)],
-                            "top": [round(float(u_xy[0] - ox), 1), round(float(u_xy[1] - oy), 1), round(float(road_z[i] + Z[i, int(top[i] - OFFSETS[0])]), 2)],
-                        })
-                    near_water = float(np.mean(water_dist[sl] <= WATER_NEAR)) if waters else 0.0
-                    mid = float((s[i0] + s[i1]) / 2)
-                    strat, lith, descrip = _lith_at(geology, mid)
-                    faces.append({
-                        "id": f"cut-{prefix}{side[0]}-{int(round(float(s[i0]))):04d}",
-                        "side": side,
-                        "s_start": round(float(s[i0]), 1), "s_end": round(float(s[i1]), 1), "length_m": round(float(s[i1] - s[i0]), 1),
-                        "toe_m": round(toe_med, 1), "toe_std_m": round(toe_std, 1), "top_m": round(float(np.nanmedian(top[sl])), 1),
-                        "height_m": round(float(np.nanmedian(rise[sl])), 1), "height_max_m": round(float(np.nanmax(rise[sl])), 1),
-                        "slope": round(float(np.nanmedian(smax[sl])), 2), "slope_max": round(float(np.nanmax(smax[sl])), 2),
-                        "water_share": round(near_water, 2),
-                        "formation": strat, "lith": lith or (descrip or "")[:80] or None, "rock_type": rock_type(lith, descrip),
-                        "stations": stations, "pass": "steep" if forced_class is None else "gentle", "forced_class": forced_class,
-                    })
-
-        detect(SLOPE_MIN, RISE_MIN, None)
-        detect(NATURAL_SLOPE_MIN, NATURAL_RISE_MIN, "natural")
-        # both sides rising over the same stations is a canyon, however straight
-        both = per_side["left"] & per_side["right"]
-        for f in faces:
-            i0, i1 = int(f["s_start"] / STEP_M), int(f["s_end"] / STEP_M)
-            two_sided = float(np.mean(both[i0 : i1 + 1]))
-            f["two_sided_share"] = round(two_sided, 2)
-            natural = f["toe_std_m"] > PARALLEL_STD or f["water_share"] >= 0.5 or (two_sided >= 0.5 and f["water_share"] > 0)
-            f["class"] = f.pop("forced_class") or ("natural" if natural else "artificial")
-    hz.close()
-    faces.sort(key=lambda f: f["s_start"])
-    summary = {"faces": len(faces), "artificial": sum(f["class"] == "artificial" for f in faces), "natural": sum(f["class"] == "natural" for f in faces), "total_length_m": round(sum(f["length_m"] for f in faces), 1), "tallest_m": max((f["height_max_m"] for f in faces), default=0.0), "rock_types": sorted({f["rock_type"] for f in faces})}
-    out = {"step_m": STEP_M, "thresholds": {"slope_min": SLOPE_MIN, "rise_min_m": RISE_MIN, "natural_slope_min": NATURAL_SLOPE_MIN, "natural_rise_min_m": NATURAL_RISE_MIN, "toe_max_m": TOE_MAX, "run_min_m": RUN_MIN, "window_m": WINDOW, "parallel_std_m": PARALLEL_STD, "water_near_m": WATER_NEAR}, "faces": faces, "summary": summary}
+    try:
+        faces, thresholds = _faces_for(ctx, line, prof, prefix, hz)
+    finally:
+        hz.close()
+    out = {"step_m": STEP_M, "thresholds": thresholds, "faces": faces, "summary": _summarize(faces)}
     (site_dir / "cuts.json").write_text(json.dumps(out))
+    return out
+
+
+#: forked workers read the shared region context from here rather than receiving it through a pickle
+_CUTS_CTX: dict = {}
+
+
+def _cuts_worker(chunk: list) -> list:
+    """One worker's slice of roads: open the DTM once, measure each, return `(ident, faces, thr)`."""
+    from .water import _Heights
+
+    ctx = _CUTS_CTX
+    hz = _Heights(ctx["site_dir"])
+    out: list = []
+    try:
+        for i in chunk:
+            j = ctx["jobs"][i]
+            try:
+                faces, thresholds = _faces_for(ctx, j["line"], j["prof"], j["prefix"], hz)
+                out.append((j["ident"], faces, thresholds))
+            except Exception as exc:
+                print(f"  cuts    {j['ident']} failed: {exc}", flush=True)
+                out.append((j["ident"], [], {}))
+    finally:
+        hz.close()
     return out
 
 
 def measure_network(site_dir: Path) -> dict | None:
     """Every road of a network site, faces prefixed by chain id. The branches' own profiles give
-    each road its own driving surface, so a face is measured against the road beside it."""
+    each road its own driving surface, so a face is measured against the road beside it.
+
+    The region-wide inputs are read ONCE and the per-road walk is forked across the pool (see the
+    module docstring). The result is byte-identical to the old serial loop — same faces, same order
+    — because each road is independent and only the union is written here.
+    """
     sp_p, br_p = site_dir / "spine_utm.json", site_dir / "branches.json"
     if not sp_p.exists():
         return None
     sp = json.loads(sp_p.read_text())
     if not sp.get("network"):
         return measure(site_dir)
+    if not _has_rasters(site_dir):
+        return None
     branches = {b["id"]: b for b in json.loads(br_p.read_text())["branches"]} if br_p.exists() else {}
-    faces: list[dict] = []
-    thresholds: dict = {}
-    prim = measure(site_dir)
     prim_ident = (sp.get("primary") or {}).get("ident")
-    if prim:
-        thresholds = prim["thresholds"]
-        for f in prim["faces"]:
-            f["road"] = prim_ident  # every face names its road, primary included
-        faces += prim["faces"]
+
+    jobs: list[dict] = [{"prefix": "", "ident": prim_ident, "line": None, "prof": None}]
     for sib in sp.get("siblings", []):
         b = branches.get(sib.get("id"))
         if not b or not b.get("profile"):
@@ -275,21 +366,38 @@ def measure_network(site_dir: Path) -> dict | None:
         coords = [c for part in parts for c in part]
         if len(coords) < 2:
             continue
-        try:
-            r = measure(site_dir, LineString(coords), b["profile"], f"{sib['id']}-")
-        except Exception as exc:
-            print(f"  cuts    {sib.get('ident')} failed: {exc}")
-            continue
-        if r:
-            for f in r["faces"]:
-                f["road"] = sib.get("ident")
-            faces += r["faces"]
-            thresholds = thresholds or r["thresholds"]
+        jobs.append({"prefix": f"{sib['id']}-", "ident": sib.get("ident"), "line": LineString(coords), "prof": b["profile"]})
+
+    ctx = _load_shared(site_dir)
+    global _CUTS_CTX
+    _CUTS_CTX = {**ctx, "jobs": jobs}
+
+    from . import progress
+
+    if len(jobs) == 1:
+        p = progress.Progress("cuts", len(jobs))
+        out = _cuts_worker([0])
+        p.tick()
+        p.close()
+    else:
+        from . import pool
+
+        chunks = pool.chunk(list(range(len(jobs))), pool.default_jobs(len(jobs)))
+        parts = pool.map_chunks(_cuts_worker, chunks, "cuts")
+        out = [r for part in parts for r in part]
+
+    faces: list[dict] = []
+    thresholds: dict = {}
+    for ident, fcs, thr in out:
+        for f in fcs:
+            f["road"] = ident  # every face names its road, primary included
+        faces += fcs
+        thresholds = thresholds or thr
     faces.sort(key=lambda f: (f.get("road") or "", f["s_start"]))
-    summary = {"faces": len(faces), "artificial": sum(f["class"] == "artificial" for f in faces), "natural": sum(f["class"] == "natural" for f in faces), "total_length_m": round(sum(f["length_m"] for f in faces), 1), "tallest_m": max((f["height_max_m"] for f in faces), default=0.0), "rock_types": sorted({f["rock_type"] for f in faces}), "roads": len({f.get("road") for f in faces})}
-    out = {"step_m": STEP_M, "thresholds": thresholds, "faces": faces, "summary": summary}
-    (site_dir / "cuts.json").write_text(json.dumps(out))
-    return out
+    summary = _summarize(faces, roads=len({f.get("road") for f in faces}))
+    result = {"step_m": STEP_M, "thresholds": thresholds, "faces": faces, "summary": summary}
+    (site_dir / "cuts.json").write_text(json.dumps(result))
+    return result
 
 
 def main() -> None:

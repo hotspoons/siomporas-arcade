@@ -104,5 +104,21 @@ class VividPickleTest(unittest.TestCase):
         self.assertIs(pickle.loads(pickle.dumps(export.vivid)), export.vivid)
 
 
+class PyramidBakeTest(unittest.TestCase):
+    def test_bake_reads_site_json_without_a_namespace_error(self):
+        # `pyramid.bake` grew a `json.loads` in the Phase 0 fan-out while `import json` stayed
+        # local to `_bake_serial`; every large tiled bake since then SKIPPED the pyramid with a
+        # NameError and shipped without an LOD tree (dc-metro-take-2, 2026-10-05). A site with no
+        # bbox is the cheapest call that still parses site.json.
+        import json
+        import tempfile
+
+        from corridor import pyramid
+
+        with tempfile.TemporaryDirectory() as d:
+            Path(d, "site.json").write_text(json.dumps({"slug": "x"}))
+            self.assertEqual(pyramid.bake(Path(d), Path(d), None), {})
+
+
 if __name__ == "__main__":
     unittest.main()

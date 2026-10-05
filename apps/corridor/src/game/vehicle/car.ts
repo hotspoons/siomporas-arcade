@@ -665,7 +665,11 @@ export class Car {
     const tailOn = v > 0.02 && T.TAILLIGHT > 0.001 && tailReal
     for (const b of this.activeTailBeams()) {
       b.intensity = v * 140 * T.TAILLIGHT * (b === this.mergedTailBeam ? 2 : 1)
-      b.distance = T.TAILLIGHT_RANGE
+      // The pair's 1.5 m cutoff lands right where the merged lamp's map fades out, and at a grazing
+      // chase angle that window is a dead-straight line across the road (Rich, 2026-10-05). The two
+      // real spots mask it by overlapping; the single merged one has nothing to, so its cutoff sits
+      // out beyond the map's reach and the soft map/decay falloff draws the edge instead.
+      b.distance = b === this.mergedTailBeam ? Math.max(T.TAILLIGHT_RANGE * 2.5, 3.5) : T.TAILLIGHT_RANGE
       b.angle = b === this.mergedTailBeam ? Math.min(T.HERO_TAILLIGHTS_MERGE_WIDTH * DEG2RAD, MERGE_ANGLE_MAX) : T.TAILLIGHT_ANGLE
       b.target.position.x = -2.18 - Math.max(0.65, T.TAILLIGHT_RANGE * 0.5)
       b.target.position.y = 0.02

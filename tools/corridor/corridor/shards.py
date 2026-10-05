@@ -209,6 +209,29 @@ def merge_tree(parts: list[Path], dest: Path, sub: str) -> int:
     return n
 
 
+def mosaic_shard_raster(site_dir: Path, parts: list[Path], name: str) -> int:
+    """Build `site_dir/<name>` as a VRT over every shard's `<name>`, and return the source count.
+
+    Each shard fetches its block's `dem_1m.tif`/`naip_1m.tif`/`horizon_30m.tif`; the finalizer needs
+    the whole region's for `export_tiles`/`pyramid`/`overview`. Re-fetching is a waste AND a
+    redownload: `naip_tiled` keys its service tiles on the CALL's bbox origin, so a global fetch
+    shares nothing with the block fetches and re-downloads every JPEG (measured on shard-smoke,
+    2026-10-05). A VRT over the shard files is instant and offline. The blocks tile the world
+    contiguously (with a margin of overlap), and adjacent shards read the same source, so the
+    overlap is identical data.
+
+    GDAL identifies a VRT by content, not extension, so the file can keep the `.tif` name every
+    reader already opens.
+    """
+    import subprocess
+
+    src = [p / name for p in parts if (p / name).exists()]
+    if not src:
+        return 0
+    subprocess.run(["gdalbuildvrt", "-q", "-overwrite", str(site_dir / name), *[str(x) for x in sorted(src)]], check=True)
+    return len(src)
+
+
 def rebuild_lidar_vrts(site_dir: Path) -> int:
     """Rebuild each `lidar/<kind>.vrt` over EVERY merged `lidar/tiles/*.<kind>.tif`.
 

@@ -277,11 +277,12 @@ def cmd_finalize(a: argparse.Namespace) -> None:
     if not present:
         sys.exit(f"no shard directories under {site_dir / 'shards'}")
 
-    # The shards wrote `dem_1m.tif`/`naip_1m.tif` per BLOCK, but the merged `sites/<slug>/` needs the
-    # whole region's rasters for `export_tiles`/`pyramid.bake`/`overview` — the finalizer's job. The
-    # cache already holds every tile the shards fetched, so a global assembly is cheap. `lidar/`
-    # comes from the shards merged, but each shard's VRT names only its own tiles: rebuild over the
-    # union or the merged world silently shrinks to one block.
+    # The shards wrote `dem_1m.tif`/`naip_1m.tif`/`horizon_30m.tif` per BLOCK; the merged
+    # `sites/<slug>/` needs the whole region's for `export_tiles`/`pyramid.bake`/`overview` — the
+    # finalizer's job. Mosaic the shards' files with a VRT (instant, offline) rather than re-fetch:
+    # `naip_tiled` keys on the call bbox, so a global fetch would redownload every tile the shards
+    # already have. `lidar/` comes from the shards merged, but each shard's VRT names only its own
+    # tiles: rebuild over the union or the merged world silently shrinks to one block.
     from shapely.geometry import box as _box
 
     from . import dem, horizon, network_tiles
@@ -290,15 +291,22 @@ def cmd_finalize(a: argparse.Namespace) -> None:
     site = json.loads((site_dir / "site.json").read_text())
     frame = _Frame(site["frame"]["epsg"], tuple(site["frame"]["origin"]))
     bbox = tuple(site["bbox_utm"])
-    if not (site_dir / "dem_1m.tif").exists():
-        dem.fetch_dem(frame, bbox, site_dir / "dem_1m.tif", CACHE)
-        print("  dem     global mosaic for the merged world", flush=True)
-    if not (site_dir / "naip_1m.tif").exists():
-        network_tiles.naip_tiled(frame, bbox, _box(*bbox), site_dir / "naip_1m.tif", CACHE, res=network_tiles.NAIP_RES_M)
-        print("  naip    global mosaic for the merged world", flush=True)
-    if not (site_dir / "horizon_30m.tif").exists():
-        horizon.fetch_horizon(frame, site_dir / "horizon_30m.tif", CACHE, radius_m=30000.0)
-        print("  horizon global horizon for the merged world", flush=True)
+    for name in ("dem_1m.tif", "naip_1m.tif", "horizon_30m.tif"):
+        if (site_dir / name).exists():
+            continue
+        n = shards.mosaic_shard_raster(site_dir, present, name)
+        if n:
+            print(f"  mosaic  {name} from {n} shards", flush=True)
+            continue
+        if name == "dem_1m.tif":
+            dem.fetch_dem(frame, bbox, site_dir / name, CACHE)
+            print("  dem     global mosaic for the merged world", flush=True)
+        elif name == "naip_1m.tif":
+            network_tiles.naip_tiled(frame, bbox, _box(*bbox), site_dir / name, CACHE, res=network_tiles.NAIP_RES_M)
+            print("  naip    global mosaic for the merged world", flush=True)
+        else:
+            horizon.fetch_horizon(frame, site_dir / name, CACHE, radius_m=30000.0)
+            print("  horizon global horizon for the merged world", flush=True)
     nv = shards.rebuild_lidar_vrts(site_dir)
     print(f"  merge   {nv} lidar VRTs rebuilt over the merged tiles")
 

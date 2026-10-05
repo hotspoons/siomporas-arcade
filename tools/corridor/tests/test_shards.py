@@ -190,6 +190,35 @@ class RebuildLidarVrtsTest(unittest.TestCase):
             self.assertEqual(shards.rebuild_lidar_vrts(Path(d)), 0)
 
 
+class MosaicShardRasterTest(unittest.TestCase):
+    def test_vrt_mosaics_the_shards_and_opens_as_a_raster(self):
+        import numpy as np
+        import rasterio
+        from rasterio.transform import from_origin
+
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            parts = []
+            for i in range(2):
+                p = root / "shards" / str(i)
+                p.mkdir(parents=True)
+                with rasterio.open(p / "dem_1m.tif", "w", driver="GTiff", height=4, width=4, count=1,
+                                   dtype="float32", crs="EPSG:32618", transform=from_origin(i * 4, 4, 1, 1)) as ds:
+                    ds.write(np.full((4, 4), float(i), "float32"), 1)
+                parts.append(p)
+            self.assertEqual(shards.mosaic_shard_raster(root, parts, "dem_1m.tif"), 2)
+            # a VRT keeps the `.tif` name every reader already opens — GDAL goes by content
+            with rasterio.open(root / "dem_1m.tif") as ds:
+                self.assertEqual(ds.count, 1)
+                self.assertEqual(ds.width, 8)  # the two 4 px blocks side by side
+
+    def test_no_shard_raster_is_a_noop(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / "shards" / "0").mkdir(parents=True)
+            self.assertEqual(shards.mosaic_shard_raster(root, [root / "shards" / "0"], "dem_1m.tif"), 0)
+
+
 class PlanRoundTripTest(unittest.TestCase):
     def test_write_then_read(self):
         from shapely.geometry import LineString

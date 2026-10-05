@@ -53,6 +53,7 @@ import * as T from './tuning'
 import { captureSSR, chainCompile, injectShade, linearShadowDepth, setWetStreak, tickShading, type WetMark } from './visuals/shading'
 import { renderWaterReflection } from './visuals/waterReflect'
 import { tickWaterProbes } from './visuals/waterProbes'
+import { tickCarProbe } from './visuals/carProbe'
 import { TUNE_TABS } from './tuning'
 import { applySiteTuning, clearSiteTuning, saveSiteTuning } from './world/sitetuning'
 import { Presets, resolve, worldKnobs } from './game/session/presets'
@@ -4028,6 +4029,9 @@ function frame() {
   tickShading()
   followShadow()
   skyDome.tick(performance.now() / 1000)
+  // the car's own reflection probe: one cube render at the car, at most once a frame, and none
+  // unless CAR_PROBES > 0. The car is hidden from its own capture.
+  tickCarProbe(renderer, scene, drive.on && drive.car ? drive.car.pos : camera.position, drive.car?.mesh ?? null)
   // per-body reflection probes, at most one capture a frame and none unless WATER_PROBES > 0
   tickWaterProbes(renderer, scene, camera)
   // mirrored scene render for the water, before the frame itself; a no-op when WATER_REFLECT is 0

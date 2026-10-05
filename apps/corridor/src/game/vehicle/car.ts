@@ -61,12 +61,18 @@ const CAR_HALF_WIDTH = 0.95
  * the car and its v runs along the beam, so a wide ellipse in u is wider across than it is deep,
  * which is what the pair of pools actually covered.
  *
- * WIDTH LIVES ON THE CONE, NOT THE MAP. The map's lateral half-extent is pinned to the cone edge
- * (rx = 0.5), so no mask can ever make the pool wider than its cone. A knob that only squashed the
- * ellipse's v extent therefore changed the pool's DEPTH, not its width, and on the short tail wash
- * it looked dead (2026-10-04). So HERO_*_MERGE_WIDTH moves the cone's half-angle, in degrees, and
- * is per family: the headlight pool is long and narrow, the tail wash short and very wide. The
- * ellipse's fixed 1.7:1 aspect keeps either one wider across than deep.
+ * WIDTH LIVES ON THE CONE, DEPTH ON THE MASK. The map's lateral half-extent is pinned to the cone
+ * edge (rx = 0.5), so no mask can make the pool wider than its cone; a knob that only squashed the
+ * ellipse's v extent changed the pool's DEPTH, not its width, and looked dead on the short tail
+ * wash (2026-10-04). So HERO_*_MERGE_WIDTH moves the cone's half-angle, in degrees. But if the
+ * mask's v extent tracked the cone, widening it stretched the pool down the road too, and turning
+ * width up looked like the pool TRANSLATED toward the car instead of widening (2026-10-05). So the
+ * v extent is pinned to a fixed angular size, HERO_*_MERGE_DEPTH: `ry = depth / width`. The lit
+ * band stays the same front-to-back length however wide the cone gets, and only the sides grow.
+ *
+ * WIDTH is capped below 90°: a SpotLight's map is projected through the light's shadow camera,
+ * whose fov is `2 × angle`, and at 90° that fov is 180° — a singular matrix that smears the map
+ * over the screen (Rich saw exactly this at width 90, 2026-10-05).
  *
  * TWO LAMPS IN ONE CONE. A smooth ellipse still reads as a single source. A valley down the middle
  * (HERO_*_MERGE_SEAM) splits the pool into two lobes — the seam the pair would have where their
@@ -76,18 +82,17 @@ const CAR_HALF_WIDTH = 0.95
  * A DataTexture, not a canvas: this module is imported by headless tests, and `document` is not
  * there. Cached by shape so head and tail can carry different masks without rebaking every frame.
  */
-/** across-the-car : along-the-beam ratio of the projected ellipse, fixed so the pool stays wide */
-const MERGED_LAMP_ASPECT = 1.7
 const DEG2RAD = Math.PI / 180
+/** the map's projection camera fov is 2 × angle; keep it far from 180° where the matrix is singular */
+const MERGE_ANGLE_MAX = 80 * DEG2RAD
 const lampMaps = new Map<string, THREE.DataTexture>()
-function lampMap(seam: number, top: number): THREE.DataTexture {
-  const key = `${seam.toFixed(3)}|${top.toFixed(3)}`
+function lampMap(seam: number, top: number, ry: number): THREE.DataTexture {
+  const key = `${seam.toFixed(3)}|${top.toFixed(3)}|${ry.toFixed(4)}`
   const cached = lampMaps.get(key)
   if (cached) return cached
   const S = 128
   const data = new Uint8Array(S * S * 4)
   const rx = 0.5
-  const ry = 0.5 / MERGED_LAMP_ASPECT
   // the seam's half-width in u: about the gap between the two real pools at the merged cone's angle
   const sw = 0.13
   const topMag = Math.min(1, Math.abs(top))
@@ -528,14 +533,14 @@ export class Car {
     // hidden otherwise — an invisible spot is out of the light loop entirely, so the pair and the
     // merged lamp never cost at the same time. The map (lampMap above) shapes the cone wide and
     // short; setLights sizes it and stamps the map.
-    const mergedBeam = new THREE.SpotLight(0xfff4de, 0, T.HEADLIGHT_RANGE, T.HERO_HEADLIGHTS_MERGE_WIDTH * DEG2RAD, 0.55, 1.4)
+    const mergedBeam = new THREE.SpotLight(0xfff4de, 0, T.HEADLIGHT_RANGE, Math.min(T.HERO_HEADLIGHTS_MERGE_WIDTH * DEG2RAD, MERGE_ANGLE_MAX), 0.55, 1.4)
     mergedBeam.position.set(2.1, 0.7, 0)
     mergedBeam.target.position.set(2.1 + T.HEADLIGHT_RANGE * 0.6, -T.HEADLIGHT_RANGE * 0.04, 0)
     mergedBeam.castShadow = false
     mergedBeam.visible = false
     g.add(mergedBeam, mergedBeam.target)
     this.mergedBeam = mergedBeam
-    const mergedTail = new THREE.SpotLight(0xff180c, 0, T.TAILLIGHT_RANGE, T.HERO_TAILLIGHTS_MERGE_WIDTH * DEG2RAD, 0.55, 2)
+    const mergedTail = new THREE.SpotLight(0xff180c, 0, T.TAILLIGHT_RANGE, Math.min(T.HERO_TAILLIGHTS_MERGE_WIDTH * DEG2RAD, MERGE_ANGLE_MAX), 0.55, 2)
     mergedTail.position.set(-2.18, 0.66, 0)
     mergedTail.target.position.set(-2.18 - Math.max(1.2, T.TAILLIGHT_RANGE * 0.65), 0.02, 0)
     mergedTail.castShadow = false
@@ -612,16 +617,21 @@ export class Car {
     const tailReal = Math.round(T.HERO_TAILLIGHTS_MODE) === 1
     // Merged mode replaces the pair with one centred spot per family; the merge knobs have to be in
     // the early-out sig too, or flipping one while parked would do nothing (activeBeams reads them).
-    const sig = `${v.toFixed(3)}|${T.HEADLIGHT}|${T.TAILLIGHT}|${T.TAILLIGHT_RANGE}|${T.TAILLIGHT_ANGLE}|${T.HEADLIGHT_RANGE}|${T.HEADLIGHT_ANGLE}|${T.HERO_HEADLIGHTS_MODE}|${T.HERO_TAILLIGHTS_MODE}|${T.HERO_HEADLIGHTS_MERGE}|${T.HERO_TAILLIGHTS_MERGE}|${T.HERO_HEADLIGHTS_MERGE_WIDTH}|${T.HERO_TAILLIGHTS_MERGE_WIDTH}|${T.HERO_HEADLIGHTS_MERGE_SEAM}|${T.HERO_TAILLIGHTS_MERGE_SEAM}|${T.HERO_HEADLIGHTS_MERGE_TOP}|${T.HERO_TAILLIGHTS_MERGE_TOP}|${headReal}|${tailReal}`
+    const sig = `${v.toFixed(3)}|${T.HEADLIGHT}|${T.TAILLIGHT}|${T.TAILLIGHT_RANGE}|${T.TAILLIGHT_ANGLE}|${T.HEADLIGHT_RANGE}|${T.HEADLIGHT_ANGLE}|${T.HERO_HEADLIGHTS_MODE}|${T.HERO_TAILLIGHTS_MODE}|${T.HERO_HEADLIGHTS_MERGE}|${T.HERO_TAILLIGHTS_MERGE}|${T.HERO_HEADLIGHTS_MERGE_WIDTH}|${T.HERO_TAILLIGHTS_MERGE_WIDTH}|${T.HERO_HEADLIGHTS_MERGE_DEPTH}|${T.HERO_TAILLIGHTS_MERGE_DEPTH}|${T.HERO_HEADLIGHTS_MERGE_SEAM}|${T.HERO_TAILLIGHTS_MERGE_SEAM}|${T.HERO_HEADLIGHTS_MERGE_TOP}|${T.HERO_TAILLIGHTS_MERGE_TOP}|${headReal}|${tailReal}`
     if (sig === this.lightSig) return
     this.lightSig = sig
     this.lightsOn = v
     // The merged lamps wear their family's wide-ellipse map. Stamped here (not at build) so the
-    // seam/top knobs reach them; a hidden light is out of three's light list entirely, so it costs
-    // nothing until merged mode makes it visible.
-    const headMap = lampMap(T.HERO_HEADLIGHTS_MERGE_SEAM, T.HERO_HEADLIGHTS_MERGE_TOP)
+    // shape knobs reach them; a hidden light is out of three's light list entirely, so it costs
+    // nothing until merged mode makes it visible. The ellipse's vertical extent is the fixed DEPTH
+    // angle over the cone angle, so widening the cone only widens the pool, never deepens it.
+    const headAng = Math.min(T.HERO_HEADLIGHTS_MERGE_WIDTH * DEG2RAD, MERGE_ANGLE_MAX)
+    const headRy = Math.min(0.5, T.HERO_HEADLIGHTS_MERGE_DEPTH * DEG2RAD / headAng)
+    const headMap = lampMap(T.HERO_HEADLIGHTS_MERGE_SEAM, T.HERO_HEADLIGHTS_MERGE_TOP, headRy)
     if (this.mergedBeam && this.mergedBeam.map !== headMap) this.mergedBeam.map = headMap
-    const tailMap = lampMap(T.HERO_TAILLIGHTS_MERGE_SEAM, T.HERO_TAILLIGHTS_MERGE_TOP)
+    const tailAng = Math.min(T.HERO_TAILLIGHTS_MERGE_WIDTH * DEG2RAD, MERGE_ANGLE_MAX)
+    const tailRy = Math.min(0.5, T.HERO_TAILLIGHTS_MERGE_DEPTH * DEG2RAD / tailAng)
+    const tailMap = lampMap(T.HERO_TAILLIGHTS_MERGE_SEAM, T.HERO_TAILLIGHTS_MERGE_TOP, tailRy)
     if (this.mergedTailBeam && this.mergedTailBeam.map !== tailMap) this.mergedTailBeam.map = tailMap
     // hide BOTH sets, then light only the active one — the pair and the merged lamp are never both
     // in the loop.
@@ -634,7 +644,7 @@ export class Car {
       // the merged lamp carries the pair's two beams through its one cone, at the wider merged angle
       b.intensity = v * 140 * T.HEADLIGHT * (b === this.mergedBeam ? 2 : 1)
       b.distance = T.HEADLIGHT_RANGE
-      b.angle = b === this.mergedBeam ? T.HERO_HEADLIGHTS_MERGE_WIDTH * DEG2RAD : T.HEADLIGHT_ANGLE
+      b.angle = b === this.mergedBeam ? Math.min(T.HERO_HEADLIGHTS_MERGE_WIDTH * DEG2RAD, MERGE_ANGLE_MAX) : T.HEADLIGHT_ANGLE
       b.target.position.x = 2.1 + T.HEADLIGHT_RANGE * 0.6
       b.target.position.y = -T.HEADLIGHT_RANGE * 0.04
       b.visible = headOn
@@ -647,7 +657,7 @@ export class Car {
     for (const b of this.activeTailBeams()) {
       b.intensity = v * 140 * T.TAILLIGHT * (b === this.mergedTailBeam ? 2 : 1)
       b.distance = T.TAILLIGHT_RANGE
-      b.angle = b === this.mergedTailBeam ? T.HERO_TAILLIGHTS_MERGE_WIDTH * DEG2RAD : T.TAILLIGHT_ANGLE
+      b.angle = b === this.mergedTailBeam ? Math.min(T.HERO_TAILLIGHTS_MERGE_WIDTH * DEG2RAD, MERGE_ANGLE_MAX) : T.TAILLIGHT_ANGLE
       b.target.position.x = -2.18 - Math.max(1.2, T.TAILLIGHT_RANGE * 0.65)
       b.target.position.y = 0.02
       b.visible = tailOn

@@ -1058,12 +1058,22 @@ export let HERO_TAILLIGHTS_MODE = 1
  * stays a REAL lamp, not the analytic flood.
  *
  * EVERY SHAPE KNOB IS PER FAMILY, because the two lamps want different looks: the headlight pool is
- * long and narrow, the tail wash is short and very wide. The first version shared one "width" knob
- * that only changed the ellipse's aspect, so turning it up shortened the pool front-to-back and
- * never widened it — a cone's width IS its half-angle, so WIDTH here moves the cone.
+ * long and narrow, the tail wash is short and very wide.
+ *
+ * WIDTH AND DEPTH ARE SEPARATE AXES. A cone's lateral width is its half-angle, so WIDTH moves the
+ * cone — but if the mask's depth scaled with the cone too, widening the cone also pushed the pool
+ * down the road and it looked like the pool TRANSLATED toward the car rather than widening
+ * (Rich, 2026-10-05). So the mask's vertical extent is pinned to a fixed angular size (DEPTH,
+ * degrees): the lit band stays the same front-to-back length however wide the cone gets, and only
+ * the sides grow. The ellipse the map carves is `rx = half the cone`, `ry = depth / width`.
+ *
+ * WIDTH is capped below 90° on purpose: a SpotLight's map is projected with the light's shadow
+ * camera, whose fov is `2 × angle`, and at angle = 90° that fov is 180° — a singular matrix that
+ * smears the map across the whole screen. The control stops at 80°; the code clamps it anyway.
  *
  *   HERO_*_MERGE       0 = the pair (today), 1 = one centred lamp
  *   HERO_*_MERGE_WIDTH the merged cone's half-angle, DEGREES — the width of the pool
+ *   HERO_*_MERGE_DEPTH the lit band's front-to-back half-angle, degrees — pinned as width changes
  *   HERO_*_MERGE_SEAM  how dark the valley down the middle is, so one pool reads as two lamps
  *   HERO_*_MERGE_TOP   how much the top of the projection falls off (+ top, − bottom, 0 even)
  */
@@ -1071,6 +1081,8 @@ export let HERO_HEADLIGHTS_MERGE = 0
 export let HERO_TAILLIGHTS_MERGE = 0
 export let HERO_HEADLIGHTS_MERGE_WIDTH = 38
 export let HERO_TAILLIGHTS_MERGE_WIDTH = 70
+export let HERO_HEADLIGHTS_MERGE_DEPTH = 12
+export let HERO_TAILLIGHTS_MERGE_DEPTH = 22
 export let HERO_HEADLIGHTS_MERGE_SEAM = 0.35
 export let HERO_TAILLIGHTS_MERGE_SEAM = 0.4
 export let HERO_HEADLIGHTS_MERGE_TOP = 0.12
@@ -2317,8 +2329,10 @@ export const TUNE_TABS: TuneTab[] = [
           tune('HERO_TAILLIGHTS_MODE', () => HERO_TAILLIGHTS_MODE, (v) => (HERO_TAILLIGHTS_MODE = Math.round(v)), [0, 2], 1, 'YOUR tail lights: 0 off, 1 real spots, 2 fake. Fake drops ~2 ms behind the car for a red flood instead'),
           tune('HERO_HEADLIGHTS_MERGE', () => HERO_HEADLIGHTS_MERGE, (v) => (HERO_HEADLIGHTS_MERGE = Math.round(v)), [0, 1], 1, 'merge YOUR two headlight beams into one centred spot (halves the light-loop cost)'),
           tune('HERO_TAILLIGHTS_MERGE', () => HERO_TAILLIGHTS_MERGE, (v) => (HERO_TAILLIGHTS_MERGE = Math.round(v)), [0, 1], 1, 'merge YOUR two tail washes into one centred spot'),
-          tune('HERO_HEADLIGHTS_MERGE_WIDTH', () => HERO_HEADLIGHTS_MERGE_WIDTH, (v) => (HERO_HEADLIGHTS_MERGE_WIDTH = v), [10, 90], 1, 'merged headlamp cone half-angle (deg) \u2014 the width of the pool. Wider so one beam reaches both sides'),
-          tune('HERO_TAILLIGHTS_MERGE_WIDTH', () => HERO_TAILLIGHTS_MERGE_WIDTH, (v) => (HERO_TAILLIGHTS_MERGE_WIDTH = v), [10, 90], 1, 'merged tail-light cone half-angle (deg) \u2014 the width of the wash'),
+          tune('HERO_HEADLIGHTS_MERGE_WIDTH', () => HERO_HEADLIGHTS_MERGE_WIDTH, (v) => (HERO_HEADLIGHTS_MERGE_WIDTH = v), [10, 80], 1, 'merged headlamp cone half-angle (deg) \u2014 the width of the pool. Capped below 90 (the map projection goes singular)'),
+          tune('HERO_TAILLIGHTS_MERGE_WIDTH', () => HERO_TAILLIGHTS_MERGE_WIDTH, (v) => (HERO_TAILLIGHTS_MERGE_WIDTH = v), [10, 80], 1, 'merged tail-light cone half-angle (deg) \u2014 the width of the wash. Capped below 90'),
+          tune('HERO_HEADLIGHTS_MERGE_DEPTH', () => HERO_HEADLIGHTS_MERGE_DEPTH, (v) => (HERO_HEADLIGHTS_MERGE_DEPTH = v), [4, 60], 1, 'merged headlight lit-band depth (deg) \u2014 front-to-back size, held as width changes'),
+          tune('HERO_TAILLIGHTS_MERGE_DEPTH', () => HERO_TAILLIGHTS_MERGE_DEPTH, (v) => (HERO_TAILLIGHTS_MERGE_DEPTH = v), [4, 60], 1, 'merged tail lit-band depth (deg) \u2014 front-to-back size, held as width changes'),
           tune('HERO_HEADLIGHTS_MERGE_SEAM', () => HERO_HEADLIGHTS_MERGE_SEAM, (v) => (HERO_HEADLIGHTS_MERGE_SEAM = v), [0, 1], 0.05, 'merged headlight seam: how dark the valley down the middle is, so one pool reads as two'),
           tune('HERO_TAILLIGHTS_MERGE_SEAM', () => HERO_TAILLIGHTS_MERGE_SEAM, (v) => (HERO_TAILLIGHTS_MERGE_SEAM = v), [0, 1], 0.05, 'merged tail seam: how dark the valley down the middle is'),
           tune('HERO_HEADLIGHTS_MERGE_TOP', () => HERO_HEADLIGHTS_MERGE_TOP, (v) => (HERO_HEADLIGHTS_MERGE_TOP = v), [-1, 1], 0.05, 'merged headlight top falloff: dim the top (+) or the bottom (\u2212). 0 is even'),

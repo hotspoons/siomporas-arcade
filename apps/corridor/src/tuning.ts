@@ -148,10 +148,10 @@ export let GRASS_CONE_FADE = 4
  * tracked to what the generator actually clears (see GRASS_RIM_DRAIN), so raising this matters only
  * when the generator is fast enough to fill that far.
  */
-export let GRASS_FAST_SPEED = 80
+export let GRASS_FAST_SPEED = 175
 export let GRASS_FAST_THIN = 0.5
 export let GRASS_FAST_THIN_VMAX = 0.25
-export let GRASS_FAST_RANGE = 2
+export let GRASS_FAST_RANGE = 4.4
 export let GRASS_FAST_FADE = 40
 
 /**
@@ -520,7 +520,7 @@ export let IMPOSTOR_COLOR = 1
  * tree caster is allowed. The near models cast inside it; cards or an invisible canopy take the
  * trees the models never drew.
  */
-export let SHADOW_REACH = 180
+export let SHADOW_REACH = 95
 /** 1 = impostor cards beyond the modelled trees cast a shadow. */
 export let SHADOW_CARDS = 1
 /** 1 = an invisible crown casts instead of the card, for the same trees. It wins over the cards. */
@@ -595,7 +595,7 @@ export let ROAD_ONEWAY_CENTRE = 0
 
 /**
  * Which engine, as an index into the generated catalog (packages/enginesim/wasm/engines.json,
- * sorted by path). 14 is the GM LS. An index rather than a name because this panel is sliders and
+ * sorted by path). 5 is the Subaru EJ25. An index rather than a name because this panel is sliders and
  * numbers all the way down — and being able to walk through twenty engines with an arrow key while
  * driving is most of the point.
  *
@@ -603,7 +603,7 @@ export let ROAD_ONEWAY_CENTRE = 0
  * engine and the indices shift the car still starts on the right one and only the saved value in
  * someone's browser points somewhere new.
  */
-export let ENGINE_INDEX = 14
+export let ENGINE_INDEX = 5
 /** Master gain for the whole engine, after everything else. 0 is silence. */
 export let ENGINE_MASTER = 0.9
 /*
@@ -678,7 +678,7 @@ export let ENGINE_GEAR_3 = 1.62
 export let ENGINE_GEAR_4 = 1.24
 export let ENGINE_GEAR_5 = 1.0
 export let ENGINE_GEAR_6 = 0.82
-export let ENGINE_FINAL_DRIVE = 3.45
+export let ENGINE_FINAL_DRIVE = 1.3939
 /** Rolling radius, metres. car.ts spins the wheel meshes at 0.34, so they agree by default. */
 export let ENGINE_TYRE_RADIUS = 0.34
 export let ENGINE_IDLE_RPM = 850
@@ -697,7 +697,7 @@ export let ENGINE_SHIFT_SECONDS = 0.18
  * (`vmaxFromProfile`) and sets the top-gear final drive below so the redline lands on that speed.
  * Cosmetic only: it cannot change handling. 0 leaves `ENGINE_FINAL_DRIVE` to you.
  */
-export let ENGINE_AUTO_GEAR = 0
+export let ENGINE_AUTO_GEAR = 1
 
 /**
  * Put the sound's top gear at `vmax`, from the gearbox the voice is actually using.
@@ -737,9 +737,9 @@ export let ENGINE_SIM_HZ = 0
 
 // --- car (stuntin's Tuning.ts defaults and the Kestrel S9 spec; see apps/stuntin/src/sim) -------
 // engine (CarSpec 'kestrel' + longitudinal)
-export let CAR_TOP_SPEED = 82
-export let CAR_ACCEL = 11
-export let CAR_BRAKE = 24
+export let CAR_TOP_SPEED = 150
+export let CAR_ACCEL = 40
+export let CAR_BRAKE = 60
 /** reverse: share of accel the brake pedal gives you once stopped; handbrake: share of the brake force */
 export let CAR_REVERSE_ACCEL = 0.6
 export let CAR_HANDBRAKE_BRAKE = 0.6
@@ -843,7 +843,7 @@ export let WATER_FANCY = 1
  * body can name its own look in the manifest. The rest are global multipliers over every look,
  * so one dial moves the whole world from bog to reef.
  */
-export let WATER_LOOK = 0
+export let WATER_LOOK = 1
 export let WATER_WAVE_STRENGTH = 1.0
 export let WATER_WAVE_AMP = 1.0
 export let WATER_WAVE_LEN = 1.0
@@ -875,14 +875,14 @@ export let WATER_REFLECT_RIPPLE = 0.1
  * rippled anyway. The sky is unaffected — its shader pins it to the far plane — so the horizon still
  * reflects. Lower is cheaper; 0 is the honest full mirror.
  */
-export let WATER_REFLECT_FAR = 0
+export let WATER_REFLECT_FAR = 300
 /**
  * How close the eye must come to an inland body's shore for the planar mirror to aim at it instead
  * of the sea (m). 0 keeps the mirror on the sea alone, as it was. A pond is as flat as the sea, so
  * the one exact mirror plane serves it just as well — this is the reach at which the lake under your
  * nose takes the plane over, and its own trees and bank land in the water. The sea is the fallback.
  */
-export let WATER_REFLECT_REACH = 500
+export let WATER_REFLECT_REACH = 75
 /**
  * How far from the EYE the sea gate looks for ground at the waterline (m). The sea plane — and its
  * mirror — stands down when no held ground within this reach of the camera comes down to sea level.
@@ -906,7 +906,7 @@ export let WATER_SEA_REACH = 4000
  */
 export let WATER_SKY_REFLECT = 0.7
 /**
- * PER-BODY REFLECTION PROBES — opt-in, 0 off.
+ * PER-BODY REFLECTION PROBES. Default 1, so the lake you are at keeps a live capture; 0 is off.
  *
  * The sky reflection above knows no plane, but it also knows no trees: the environment map is the
  * sky dome alone, so an inland lake still mirrors a blue sheet and never the wood on its bank
@@ -924,7 +924,7 @@ export let WATER_SKY_REFLECT = 0.7
  * why `WATER_PROBE_FAR` clips the probe to the near world. The bodies are the same ones the planar
  * mirror cannot serve, so this is the trees on an inland pond, not a second copy of the sea.
  */
-export let WATER_PROBES = 0
+export let WATER_PROBES = 1
 /** probe cube face size (px); the equirect stored is 2× this across. Higher is sharper and slower */
 export let WATER_PROBE_RES = 64
 /** only bodies whose shore is within this many metres of the eye are captured or refreshed (m) */
@@ -1075,7 +1075,7 @@ export let SKY_CIRRUS_SPEED = 1
 /** direction the high layer travels, degrees clockwise from north. */
 export let SKY_CIRRUS_HEADING = 111
 /** how much of the cumulus field is cloud. 0 is clear, 1 is a deck. Day, twilight, and night scale it. */
-export let SKY_CUMULUS_AMOUNT = 0.55
+export let SKY_CUMULUS_AMOUNT = 0.56
 /** 1 is the cumulus deck's present drift. 0 holds it still. */
 export let SKY_CUMULUS_SPEED = 1
 /** direction the cumulus deck travels, degrees clockwise from north. */
@@ -1152,7 +1152,7 @@ export let CAR_SHINE = 1
  */
 export let CAR_CHROME = 0
 /**
- * CAR REFLECTION PROBES — opt-in, 0 off.
+ * CAR REFLECTION PROBES. Default 1 (live); 0 is off and builds nothing.
  *
  * The car reflects `scene.environment` (the sky dome alone) plus a screen-space pass of the previous
  * frame, so under a canopy or past a treeline the paint still mirrors blue sky. A probe is a cube
@@ -1164,21 +1164,21 @@ export let CAR_CHROME = 0
  * car: the shader fades it out with distance from the capture point (`CAR_PROBE_REACH`), so the
  * traffic around you shares the reflection while a car across the road keeps the sky map.
  */
-export let CAR_PROBES = 0
+export let CAR_PROBES = 1
 /** how much the probe replaces the reflected colour, 0..1; the sky map steps back as it rises */
 export let CAR_PROBE_BLEND = 0.6
 /** fade distance (m) from the capture point; paint farther than this keeps the sky reflection */
 export let CAR_PROBE_REACH = 60
 /** probe cube face size (px). Higher is sharper and costs capture time + memory (a 2048 face is ~200 MB) */
-export let CAR_PROBE_RES = 64
+export let CAR_PROBE_RES = 1048
 /** a probe renders only the world this far away (m) — the trees and bank that show, not the county */
 export let CAR_PROBE_FAR = 400
 /** how far above the car's origin the probe camera sits (m): a little up keeps the road out of it */
 export let CAR_PROBE_LIFT = 0.9
 /** live mode: seconds between re-captures; 0 never re-captures on time (movement still does) */
-export let CAR_PROBE_REFRESH = 1.5
+export let CAR_PROBE_REFRESH = 0.3
 /** live mode: metres the car may move before the probe is re-captured; 0 disables the movement gate */
-export let CAR_PROBE_MOVE = 40
+export let CAR_PROBE_MOVE = 25
 /**
  * Environment-map reflections on shiny surfaces (paint, glass, water). The sky is already an
  * environment map; this is how hard those surfaces mirror it. Rough roads stay diffuse.
@@ -2653,7 +2653,7 @@ export const TUNE_TABS: TuneTab[] = [
         title: 'which engine',
         scope: 'world',
         keys: [
-          tune('ENGINE_INDEX', () => ENGINE_INDEX, (v) => (ENGINE_INDEX = v), [0, 19], 1, 'index into the catalog; 14 is the GM LS'),
+          tune('ENGINE_INDEX', () => ENGINE_INDEX, (v) => (ENGINE_INDEX = v), [0, 19], 1, 'index into the catalog; 5 is the Subaru EJ25'),
           tune('ENGINE_MASTER', () => ENGINE_MASTER, (v) => (ENGINE_MASTER = v), [0, 1], 0.05, 'master gain'),
           tune('ENGINE_SIM_HZ', () => ENGINE_SIM_HZ, (v) => (ENGINE_SIM_HZ = v), [0, 48000], 500, 'physics steps/s; 0 = whatever the script asked for', { scope: 'machine' }),
         ],

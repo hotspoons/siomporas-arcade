@@ -397,7 +397,8 @@ describe('a level naming the car, and a car naming its own engine', () => {
     // the game changed
     expect(asStreet.yawAssist).toBe(PROFILES.street.yawAssist)
     expect(asTaxi.yawAssist).toBe(PROFILES.taxi.yawAssist)
-    expect(asTaxi.gripFront).toBe(PROFILES.taxi.gripFront)
+    // a value the hero's own document does not override, so it still tracks the base
+    expect(asTaxi.handbrakePerKg).toBe(PROFILES.taxi.handbrakePerKg)
 
     // the car did not: power, top speed and brakes still come from this car's own drivetrain
     expect(asTaxi.powerPerKg).toBeCloseTo(asStreet.powerPerKg, 9)
@@ -596,10 +597,13 @@ describe('weight distribution and tyre width reach the handling', () => {
   }
 
   it('gives the loaded axle less grip — which is where understeer comes from', () => {
-    const stock = balance(defaultVehicle('hero-car'))
-    const nose = defaultVehicle('hero-car')
+    // `traffic`, not `hero-car`: the hero's own handling document pins gripFront/gripRear (a typed
+    // override beats the spec sheet), so the chassis-driven balance is what this asserts, and it
+    // lives on a car that does not override grip.
+    const stock = balance(defaultVehicle('traffic'))
+    const nose = defaultVehicle('traffic')
     nose.spec.weightFront = 0.6
-    const tail = defaultVehicle('hero-car')
+    const tail = defaultVehicle('traffic')
     tail.spec.weightFront = 0.4
     expect(balance(nose)).toBeLessThan(stock)     // weight on the front costs the front grip
     expect(balance(tail)).toBeGreaterThan(stock)
@@ -608,18 +612,18 @@ describe('weight distribution and tyre width reach the handling', () => {
   })
 
   it('gives the wider end more, so 255f/305r moves the balance rearward', () => {
-    const stock = balance(defaultVehicle('hero-car'))
-    const staggered = defaultVehicle('hero-car')
+    const stock = balance(defaultVehicle('traffic'))
+    const staggered = defaultVehicle('traffic')
     staggered.spec.tyreFront_mm = 255
     staggered.spec.tyreRear_mm = 305
     expect(balance(staggered)).toBeLessThan(stock)
 
     // wider all round is worth something, but not much — this is not a grip cheat code
-    const square = defaultVehicle('hero-car')
+    const square = defaultVehicle('traffic')
     square.spec.tyreFront_mm = 305
     square.spec.tyreRear_mm = 305
     const wide = toDriveProfile(square)
-    const plain = toDriveProfile(defaultVehicle('hero-car'))
+    const plain = toDriveProfile(defaultVehicle('traffic'))
     expect(wide.gripFront).toBeGreaterThan(plain.gripFront)
     expect(wide.gripFront / plain.gripFront).toBeLessThan(1.15)
     // and it does not disturb the balance, because both ends gained the same

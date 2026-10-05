@@ -22,8 +22,8 @@ describe('the engine tuning tab', () => {
     expect(titles.some((t) => t.includes('voicing'))).toBe(true)
   })
 
-  it('ENGINE_INDEX still points at the GM LS', () => {
-    expect(ENGINES[ENGINE_INDEX]?.path).toBe('engines/atg-video-2/07_gm_ls.mr')
+  it('ENGINE_INDEX still points at the Subaru EJ25', () => {
+    expect(ENGINES[ENGINE_INDEX]?.path).toBe('engines/atg-video-1/06_subaru_ej25.mr')
   })
 
   it('keeps ENGINE_INDEX inside the catalog it indexes', () => {

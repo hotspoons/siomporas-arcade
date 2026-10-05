@@ -1687,6 +1687,20 @@ export let PHYS_RAY_FROM_M = 3000
  */
 export let PHYS_PROFILE = 2
 /**
+ * WHICH PROFILE THE WORLD'S PLAYER CAR ACTUALLY DRIVES.
+ *
+ * 0 (default) = the physics preset `PHYS_PROFILE` names, as it always has. 1 = the vehicle
+ * DOCUMENT the editor authored for the player: a level that names `player.vehicle` still wins, and
+ * with no vehicle named the world falls back to the hero-car template (`HERO_HANDLING`). The
+ * document is laid OVER the `PHYS_PROFILE` base, so the level still decides the game and the car
+ * keeps its own engine, grip and aero — the same layering `spawnCar` uses for a level-named car.
+ *
+ * The individual `PHYS_CAR_*` sliders still override on top either way, so this only picks what the
+ * car STARTS from. World scope: one world can drive the authored car while the next stays on the
+ * shared preset.
+ */
+export let PHYS_CAR_SOURCE = 0
+/**
  * Which model drives the player's car: 0 the hand-written one (`car.ts`), 1 Rapier (`rapiercar.ts`).
  *
  * RAPIER BY DEFAULT: it is the physical model, and the car tab's physics pane tunes it. `?car=arcade`
@@ -2797,6 +2811,7 @@ export const TUNE_TABS: TuneTab[] = [
           tune('PHYS_TREE_BUDGET', () => PHYS_TREE_BUDGET, (v) => (PHYS_TREE_BUDGET = v), [0, 2000], 25, 'nearest first'),
           tune('PHYS_CAR', () => PHYS_CAR, (v) => (PHYS_CAR = v), [0, 1], 1, '0 = the hand-written car, 1 = Rapier (default). Use ?car=arcade to force the hand-written one; a fresh press of Tab applies it', { scope: 'world', lerp: 'step' }),
           tune('PHYS_PROFILE', () => PHYS_PROFILE, (v) => (PHYS_PROFILE = v), [0, 4], 1, '0 stunts \u00b7 1 taxi \u00b7 2 street \u00b7 3 rush \u00b7 4 sim', { scope: 'world', lerp: 'step' }),
+          tune('PHYS_CAR_SOURCE', () => PHYS_CAR_SOURCE, (v) => (PHYS_CAR_SOURCE = v), [0, 1], 1, 'the player car\u2019s handling source: 0 the physics preset above \u00b7 1 the editor/vehicle-document profile (the hero car, or the level\u2019s vehicle). The PHYS_CAR_* sliders still override on top', { scope: 'world', lerp: 'step' }),
         ],
       },
     ],

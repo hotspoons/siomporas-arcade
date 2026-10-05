@@ -2440,12 +2440,22 @@ function setDrive(on: boolean) {
          */
         const stuntish = (stuntWorld?.count ?? 0) > 0 && T.physProfileId() === 'street'
         const wantProfile = level?.player?.profile ?? (stuntish ? 'stunts' : undefined)
+        /*
+         * WHICH HANDLING THE WORLD'S CAR STARTS ON — `PHYS_CAR_SOURCE`.
+         *
+         * A level that names a vehicle always drives that document. With none named, the world
+         * chooses: the physics preset (`PHYS_PROFILE`, the default), or the authored car — which for
+         * the base game is the hero-car template, the one place `HERO_HANDLING` lives. `spawnCar`
+         * lays the document over the preset base, so the world still picks the game and the car
+         * keeps its own engine, grip and aero. Either way the F6 `PHYS_CAR_*` sliders override on top.
+         */
+        const playerDoc = playerVehicle ?? (T.PHYS_CAR_SOURCE > 0 ? defaultVehicle('hero-car') : undefined)
         drive.car = new RapierCar(
-          physics.spawnCar({ x: at.x, z: at.z, yaw: at.yaw }, wantProfile, playerVehicle ?? undefined),
+          physics.spawnCar({ x: at.x, z: at.z, yaw: at.yaw }, wantProfile, playerDoc),
           surface,
           playerModel?.object,
         )
-        status(`driving: rapier, ${wantProfile ?? T.physProfileId()}${playerVehicle ? `, ${level?.player?.vehicle}` : ''}`)
+        status(`driving: rapier, ${wantProfile ?? T.physProfileId()}${playerDoc ? `, ${level?.player?.vehicle ?? 'hero-car'}` : ''}`)
         watchPlayerImpacts()
       } else {
         const car = new Car(surface)

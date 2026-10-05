@@ -3058,6 +3058,7 @@ if (uLodOn > 0.5) {
       // no longer carries the footprints, and load no longer buckets them all — see export._vector_tiles.
       const size = manifest.vt.size_m || 1000
       const dir = manifest.vt.dir
+      console.info(`[boot] ${manifest.slug}: ${manifest.vt.buildings.length} building tiles, ${manifest.vt.count ?? '?'} footprints — streamed, not resident`)
       for (const t of manifest.vt.buildings) {
         const cx = t.x * size + size / 2
         const cy = t.y * size + size / 2

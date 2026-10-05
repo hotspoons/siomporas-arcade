@@ -47,10 +47,32 @@ function localOrigin(url: string): boolean {
  * What Vite forwards.
  *
  * Local `WORLDEDITOR` (the service on :8780) gets the editor's own state: worlds, runs, the bake,
- * levels, and the placeable catalog. A remote one is the cluster, and the only thing forwarded
- * there is `/assetsvc` — drawing and reconstruction. `/api` still goes to the local service.
+ * levels, and the placeable catalog. A remote `WORLDEDITOR` is the cluster, and the only thing
+ * forwarded there is `/assetsvc` — drawing and reconstruction. `/api` still goes to the local
+ * service.
+ *
+ * `WORLDEDITOR_REMOTE` is the third shape, and it is the one to reach for when profiling: the
+ * local page against a deployed cluster as if it were the pod. Everything the pod serves from one
+ * origin — the bake (`/sites`), levels, photos, splats, the asset service and its catalogue — goes
+ * to that host. `/assets/` stays local: the Draco decoder and the shipped kit live in this tree
+ * and there is no reason to pull them over the wire. Nothing local answers for a bake, so what the
+ * page shows is exactly what the cluster holds. See `just corridor-remote`.
  */
-function proxyFor(worldeditor: string | undefined): { proxy?: Record<string, { target: string; ws?: boolean; changeOrigin: boolean }> } {
+function proxyFor(worldeditor: string | undefined, remote: string | undefined): { proxy?: Record<string, { target: string; ws?: boolean; changeOrigin: boolean }> } {
+  if (remote) {
+    const plain = { target: remote, changeOrigin: true }
+    return {
+      proxy: {
+        '/api': { target: remote, ws: true, changeOrigin: true },
+        '/sites': plain,
+        '/levels': plain,
+        '/photos': plain,
+        '/splats': plain,
+        '/assetsvc': plain,
+        '/assets/catalog.json': plain,
+      },
+    }
+  }
   if (!worldeditor) return {}
   const local = localOrigin(worldeditor)
   const api = local ? worldeditor : 'http://127.0.0.1:8780'
@@ -162,7 +184,7 @@ function serveBake(): Plugin {
 export default defineConfig({
   // devBridge is inert unless APEX_BRIDGE is set, and can never reach a build — see
   // packages/engine/src/dev/bridge-plugin.ts. `just bridge-dev corridor` turns it on.
-  plugins: [serveBake(), devBridge()],
+  plugins: [...(process.env.WORLDEDITOR_REMOTE ? [] : [serveBake()]), devBridge()],
   server: {
     // Keep in sync with the justfile (corridor viewer = 5185). CORRIDOR_PORT lets a second dev
     // server run this same app on another port — the world-editor lane runs it on 5212 against a
@@ -193,7 +215,7 @@ export default defineConfig({
      * host, because those GPUs are not here. `WORLDEDITOR=http://localhost:8780` is the local
      * service and still receives the whole set.
      */
-    ...proxyFor(process.env.WORLDEDITOR),
+    ...proxyFor(process.env.WORLDEDITOR, process.env.WORLDEDITOR_REMOTE),
   },
   build: {
     target: 'es2022',

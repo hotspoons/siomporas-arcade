@@ -179,6 +179,15 @@ worldeditor-svc:
 worldeditor-app:
     CORRIDOR_PORT=5212 WORLDEDITOR=http://localhost:8780 npm run dev -w apps/corridor
 
+# the local viewer against a REMOTE cluster backend, on :5186. The bake (/sites), levels, photos,
+# splats and the asset service all come from the cluster; the page and the Draco decoder plus the
+# shipped kit come from this tree. Nothing local answers for a bake, so what you see is the
+# deployed world — the way to profile the CPU a world costs with local tooling rather than guessing
+# from a deployed tab. Turn the operator shell on with `APEX_BRIDGE=apex-dev just corridor-remote`,
+# then drive it: `APEX_ORIGIN=http://localhost:5186 just bridge 'apex.perf()' corridor`.
+corridor-remote url="https://worldeditor.richard-siomporas.basedweights.com" port="5186":
+    WORLDEDITOR_REMOTE={{ url }} CORRIDOR_PORT={{ port }} APEX_BRIDGE="${APEX_BRIDGE}" npm run dev -w apps/corridor
+
 # `just worldeditor-probe` checks every claim in the README; `prove` runs the negatives instead —
 # each check fed something that must break it, which is the only reason to believe the rest.
 

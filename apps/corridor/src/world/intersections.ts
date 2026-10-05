@@ -525,10 +525,23 @@ export interface JunctionFacts {
   crossings: { lon: number; lat: number; marked: boolean }[]
 }
 
-/** osm.geojson, keyed by the bake's road id (`r<osm id>` ↔ `way/<osm id>`), plus the crossing nodes. */
+/** context.json (the bake's compact projection of osm.geojson), or the raw extract on old sites. */
 export async function loadJunctionFacts(slug: string, base = '/sites'): Promise<JunctionFacts> {
   const out: LaneInfoMap = new Map()
   const crossings: JunctionFacts['crossings'] = []
+  // context.json is tens of kB: lanes + crossings only. The raw osm.geojson is 389 MB on a
+  // network-sized world, and parsing it on the main thread is the "junction facts…" freeze.
+  try {
+    const r = await fetch(`${base}/${slug}/context.json`, { cache: 'force-cache' })
+    if (r.ok) {
+      const ctx = (await r.json()) as { lanes?: Record<string, LaneInfo>; crossings?: JunctionFacts['crossings'] }
+      for (const k of Object.keys(ctx.lanes ?? {})) out.set(k, ctx.lanes![k])
+      for (const c of ctx.crossings ?? []) crossings.push(c)
+      return { lanes: out, crossings }
+    }
+  } catch {
+    /* fall back to the raw extract */
+  }
   try {
     const r = await fetch(`${base}/${slug}/osm.geojson`, { cache: 'force-cache' })
     if (!r.ok) return { lanes: out, crossings }

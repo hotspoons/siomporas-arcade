@@ -108,6 +108,7 @@ def fetch_site(site: dict, half_length: float, half_width: float, lidar_half_wid
 
     feats = osm.features(corridor, frame, CACHE / "overpass")
     (out / "osm.geojson").write_text(json.dumps(feats))
+    osm.write_context(feats, out)
     cross = osm.crossings(line, feats, sp["ident"], frame, sp["segments"])
     (out / "crossings.json").write_text(json.dumps(cross, indent=1))
     print(f"  osm     {len(feats['features'])} features, {len(cross)} crossings: " + ", ".join(f"{c['kind']}@{c['s']:.0f}m {c['relation']}" for c in cross[:12]))
@@ -205,6 +206,27 @@ def cmd_fetch(a: argparse.Namespace) -> None:
     skip = set(filter(None, a.skip.split(",")))
     for s in wanted:
         fetch_site(s, a.half_length, a.half_width, a.lidar_half_width, skip)
+
+
+def cmd_context(a: argparse.Namespace) -> None:
+    """Write `context.json` from an existing `osm.geojson`.
+
+    The viewer builds its junction lane facts and minimap roads from `context.json` now, not the
+    raw extract. A site baked before it existed can be backfilled here without a rebake — the whole
+    point is that a tab stops pulling 389 MB of raw OSM to draw a handful of lanes.
+    """
+    if a.slug == "all":
+        sites = sorted(d for d in (DATA / "sites").glob("*") if (d / "osm.geojson").exists())
+    else:
+        sites = [DATA / "sites" / a.slug]
+    for d in sites:
+        gj = d / "osm.geojson"
+        if not gj.exists():
+            print(f"  {d.name}: no osm.geojson, skipped")
+            continue
+        prov = osm.write_context(json.loads(gj.read_text()), d)
+        ctx = d / "context.json"
+        print(f"  {d.name}: lanes={prov['lanes']} crossings={prov['crossings']} roads={prov['roads']} -> {ctx.stat().st_size / 1e6:.1f} MB (osm.geojson {gj.stat().st_size / 1e6:.0f} MB)", flush=True)
 
 
 def cmd_plan(a: argparse.Namespace) -> None:
@@ -519,6 +541,9 @@ def main() -> None:
     f.add_argument("--skip", default="", help="comma list of dem,naip,lidar,geology,horizon,surface")
     f.set_defaults(fn=cmd_fetch)
     sub.add_parser("report").set_defaults(fn=cmd_report)
+    ctx = sub.add_parser("context", help="write the compact context.json the viewer reads, from an existing osm.geojson")
+    ctx.add_argument("slug", nargs="?", default="all")
+    ctx.set_defaults(fn=cmd_context)
     ex = sub.add_parser("export", help="(re)write web/ layers + sites/index.json for the viewer")
     ex.add_argument("slug", nargs="?", default="all")
     ex.add_argument("--resurface", action="store_true", help="re-measure surface.json even if present")

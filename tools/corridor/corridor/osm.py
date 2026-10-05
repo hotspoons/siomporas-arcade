@@ -306,6 +306,78 @@ def features(corridor: Polygon, frame: Frame, cache: Path) -> dict:
     return {"type": "FeatureCollection", "features": feats}
 
 
+#: The minimap's own style table; the viewer keeps the same list. Only these classes are worth
+#: shipping to a browser, and dropping the rest is most of the size.
+_MINIMAP_CLASSES = {
+    "motorway", "trunk", "primary", "secondary", "tertiary", "motorway_link",
+    "residential", "unclassified", "service", "track", "railway", "waterway",
+}
+
+
+def _lane_num(v):
+    try:
+        n = int(str(v), 10)
+    except (TypeError, ValueError):
+        return None
+    return n if 0 < n < 16 else None
+
+
+def _split_lanes(v):
+    return [s.strip() for s in v.split("|")] if isinstance(v, str) and v else None
+
+
+def context(feats: dict) -> dict:
+    """Everything the VIEWER reads out of the raw OSM extract, as tens of kB, not hundreds of MB.
+
+    `features` keeps every raw tag for the bake itself (cuts, water, walkways, power, ...), but the
+    browser only ever wanted three small projections of it, and it used to build all three by
+    fetching and parsing the whole `osm.geojson` on the main thread:
+
+    - `lanes`    per-way lane facts for the junction model, keyed by the bake's road id (`r<osm id>`,
+      which is how `branches[].id` and the junction approaches name a way). Building this live is
+      the "junction facts…" step, and on a network-sized world it froze the tab.
+    - `crossings` `highway=crossing` nodes (WGS84) for the ladder crosswalks.
+    - `roads`    the drawable LineStrings for the minimap base, class already resolved, tags dropped.
+
+    Kept in step with `loadJunctionFacts`/`MiniMap.load` in apps/corridor.
+    """
+    lanes: dict = {}
+    crossings: list = []
+    roads: list = []
+    for f in feats.get("features", []):
+        geom = f.get("geometry") or {}
+        props = f.get("properties") or {}
+        gtype = geom.get("type")
+        if gtype == "Point" and props.get("highway") == "crossing":
+            lon, lat = geom["coordinates"]
+            crossings.append({"lon": lon, "lat": lat, "marked": props.get("crossing") != "unmarked"})
+            continue
+        if gtype != "LineString":
+            continue
+        fid = f.get("id") or ""
+        if fid.startswith("way/"):
+            lanes["r" + fid[4:]] = {
+                "lanes": _lane_num(props.get("lanes")),
+                "forward": _lane_num(props.get("lanes:forward")),
+                "backward": _lane_num(props.get("lanes:backward")),
+                "oneway": props.get("oneway") in ("yes", "-1") or props.get("highway") == "motorway",
+                "turn": _split_lanes(props.get("turn:lanes")),
+                "turnForward": _split_lanes(props.get("turn:lanes:forward")),
+                "turnBackward": _split_lanes(props.get("turn:lanes:backward")),
+            }
+        cls = props.get("highway") or ("railway" if props.get("railway") else ("waterway" if props.get("waterway") else None))
+        if cls in _MINIMAP_CLASSES and len(geom.get("coordinates") or []) > 1:
+            roads.append({"cls": cls, "name": props.get("name") or props.get("ref"), "coords": geom["coordinates"]})
+    return {"lanes": lanes, "crossings": crossings, "roads": roads}
+
+
+def write_context(feats: dict, out: Path) -> dict:
+    """Write `context.json` beside `osm.geojson` and return a small provenance dict."""
+    ctx = context(feats)
+    (out / "context.json").write_text(json.dumps(ctx, separators=(",", ":")))
+    return {"lanes": len(ctx["lanes"]), "crossings": len(ctx["crossings"]), "roads": len(ctx["roads"])}
+
+
 def crossings(spine_line: LineString, feats: dict, ident: dict, frame: Frame, segments: list[dict] | None = None) -> list[dict]:
     """Ways crossing the spine, with the best over/under call OSM alone supports.
 

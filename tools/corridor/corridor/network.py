@@ -409,6 +409,7 @@ def write_vectors(site: dict, frame: Frame, R: dict, out: Path, half_width: floa
     (out / "site.json").write_text(json.dumps(site_json))
     feats = osm.features(sel if sel is not None else (region.convex_hull if world else corridor.convex_hull), frame, cache)
     (out / "osm.geojson").write_text(json.dumps(feats))
+    osm.write_context(feats, out)
     cross = osm.crossings(line, feats, ident, frame, segs)
     (out / "crossings.json").write_text(json.dumps(cross, indent=1))
     return {"corridor": corridor, "region": region, "world": world, "bbox": bbox, "segments": segs, "crossings": cross, "features": len(feats["features"]), "ident": ident, "photo_s": photo_s}

@@ -338,29 +338,44 @@ export class MiniMap {
       img.src = `${DATA_BASE}/sites/${this.manifest.slug}/web/${L.file}`
     }
     try {
-      const r = await fetch(`${DATA_BASE}/sites/${this.manifest.slug}/osm.geojson`, { cache: 'force-cache' })
-      if (!r.ok) return
-      const gj = (await r.json()) as { features: { geometry: { type: string; coordinates: number[][] }; properties: Record<string, string> }[] }
-      // osm.geojson is WGS84; project with the site's frame. The manifest gives the origin in UTM;
-      // a local equirectangular fit is accurate to well under a metre over a 6 km corridor.
+      // context.json is the bake's compact projection of osm.geojson: class + coords only, tens of
+      // kB instead of 389 MB. Fall back to the raw extract for sites baked before it existed.
       const fr = this.manifest.frame as { epsg: number; origin: [number, number]; kind?: string; anchor?: { lon: number; lat: number; h?: number } }
       // WHICH METRES does this manifest hold? `frame.kind` is the only thing that says, and
       // guessing wrong rotates the overlay by the grid convergence — measured 12 m mean and 30 m
       // worst against the ENU bakes, which looks exactly like the imagery offset Rich chased for
       // hours. ENU is true north about the site anchor; the old bakes are UTM minus the origin.
       const proj = fr.kind === 'enu' && fr.anchor ? enuProjector(fr.anchor.lon, fr.anchor.lat, fr.anchor.h ?? 0) : utmProjector(fr.epsg, fr.origin[0], fr.origin[1])
+      const push = (coords: number[][], cls: string, name?: string) => {
+        const pts = new Float32Array(coords.length * 2)
+        coords.forEach(([lon, lat], i) => {
+          const [x, y] = proj(lon, lat)
+          pts[i * 2] = x
+          pts[i * 2 + 1] = y
+        })
+        this.roads.push({ pts, cls, name })
+      }
+      const rc = await fetch(`${DATA_BASE}/sites/${this.manifest.slug}/context.json`, { cache: 'force-cache' })
+      if (rc.ok) {
+        const ctx = (await rc.json()) as { roads?: { cls: string; name?: string | null; coords: number[][] }[] }
+        for (const rd of ctx.roads ?? []) {
+          if (!(rd.cls in CLASS_STYLE)) continue
+          push(rd.coords, rd.cls, rd.name ?? undefined)
+        }
+        this.draw(null)
+        return
+      }
+      const r = await fetch(`${DATA_BASE}/sites/${this.manifest.slug}/osm.geojson`, { cache: 'force-cache' })
+      if (!r.ok) return
+      const gj = (await r.json()) as { features: { geometry: { type: string; coordinates: number[][] }; properties: Record<string, string> }[] }
+      // osm.geojson is WGS84; project with the site's frame. The manifest gives the origin in UTM;
+      // a local equirectangular fit is accurate to well under a metre over a 6 km corridor.
       for (const f of gj.features) {
         if (f.geometry.type !== 'LineString') continue
         const p = f.properties
         const cls = p.highway ?? (p.railway ? 'railway' : p.waterway ? 'waterway' : null)
         if (!cls || !(cls in CLASS_STYLE)) continue
-        const pts = new Float32Array(f.geometry.coordinates.length * 2)
-        f.geometry.coordinates.forEach(([lon, lat], i) => {
-          const [x, y] = proj(lon, lat)
-          pts[i * 2] = x
-          pts[i * 2 + 1] = y
-        })
-        this.roads.push({ pts, cls, name: p.name ?? p.ref })
+        push(f.geometry.coordinates, cls, p.name ?? p.ref)
       }
       this.draw(null)
     } catch {

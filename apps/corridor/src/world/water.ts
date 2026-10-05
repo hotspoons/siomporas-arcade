@@ -98,6 +98,7 @@ const knobs = (): WaterKnobs => ({
   band: T.WATER_FOAM_BAND,
   clarity: T.WATER_CLARITY,
   fade: T.WATER_WAVE_FADE,
+  sky: T.WATER_SKY_REFLECT,
 })
 
 /** wind direction in the world XZ plane, from the compass-style knob */
@@ -121,6 +122,7 @@ function waterMaterial(shared: WaterShared, look: WaterLook, opacityMul = 1): TH
     uFoamBand: { value: 1 },
     uShoreMix: { value: look.shoreMix },
     uWaveFade: { value: 1 },
+    uSkyReflect: { value: look.sky * T.WATER_SKY_REFLECT },
   }
   applyLookColours(u, look)
   refreshLook(u, look, knobs())
@@ -140,6 +142,9 @@ function waterMaterial(shared: WaterShared, look: WaterLook, opacityMul = 1): TH
     shader.uniforms.uFoamBand = u.uFoamBand
     shader.uniforms.uShoreMix = u.uShoreMix
     shader.uniforms.uWaveFade = u.uWaveFade
+    // sky/horizon reflection is per body (look.sky × the global knob), bound here; injectWaterReflect
+    // only declares it and owns the shared roughness
+    shader.uniforms.uSkyReflect = u.uSkyReflect
     if (T.WATER_FANCY >= 0.5) {
       // the Gerstner surface: summed wave normal, depth extinction, shore foam, per-body looks
       shader.vertexShader = shader.vertexShader

@@ -21,6 +21,12 @@ export const waterReflectMatrix = { value: new THREE.Matrix4() }
 export const waterReflectStrength = { value: 0 }
 /** how far the wave normal smears the reflected image, in screen fractions */
 export const waterReflectRipple = { value: 0.1 }
+/**
+ * env-map roughness of the sky/horizon reflection. Low is a crisp sky, high a soft sheen. The
+ * reflection SHARE is per body (`WaterWaveUniforms.uSkyReflect`, bound in water.ts); this is only
+ * the blur, shared by every water material.
+ */
+const waterSkyRough = { value: 0.03 }
 
 let planeY = 0
 let registered = false
@@ -135,6 +141,39 @@ export function renderWaterReflection(renderer: THREE.WebGLRenderer, scene: THRE
   if (hide) hide.visible = wasVisible
 }
 
+/**
+ * The sky/horizon reflection, for the bodies the single sea-level plane cannot serve.
+ *
+ * The planar sample above needs a plane, and there is only one: at sea level. A pond or a stream at
+ * any other height projects through it onto the reflection of some other place, and inland — where
+ * the sea is not visible — the mirror is off entirely. The environment map (`scene.environment`, the
+ * prefiltered sky dome) knows no plane, so this samples it along the fragment's own reflected ray,
+ * which is sky, haze and cloud at any height. It is drawn BEFORE the planar mix, so wherever the
+ * mirror reaches the mirror still owns the pixel and the trees still show, while a pond keeps the
+ * sky. Fresnel and the depth fade keep the wet bank from turning into a mirror.
+ */
+const SKY_BODY = /* glsl */ `
+#ifdef USE_ENVMAP
+{
+  if (uSkyReflect > 0.001) {
+    vec3 skyV = normalize(vViewPosition);
+    vec3 skyN = normalize(normal);
+    // the environment's own radiance along the reflected ray: sky and horizon, no second render
+    vec3 sky = getIBLRadiance(skyV, skyN, uSkyRough);
+    // Schlick, softened. Real water only mirrors near grazing, but a pond read from a car is a
+    // narrow band at a moderate slant, and a strict fifth-power Fresnel left the sky all but
+    // invisible there. A small base sheen plus a third-power falloff reads as a mirror across the
+    // whole body while still going clear when you look straight down at it.
+    float skyNdv = clamp(dot(skyN, skyV), 0.0, 1.0);
+    float skyFres = 0.08 + 0.92 * pow(1.0 - skyNdv, 3.0);
+    // fade in past the waterline so the shingle and the foam edge stay dry
+    float skyWet = smoothstep(0.0, 0.8, max(vWater.x, 0.0));
+    gl_FragColor.rgb = mix(gl_FragColor.rgb, sky, clamp(uSkyReflect * skyFres * skyWet, 0.0, 1.0));
+  }
+}
+#endif
+`
+
 const REFLECT_BODY = /* glsl */ `
 {
   if (uReflect > 0.001) {
@@ -163,10 +202,11 @@ export function injectWaterReflect(shader: { vertexShader: string; fragmentShade
   shader.uniforms.uReflectMatrix = waterReflectMatrix
   shader.uniforms.uReflect = waterReflectStrength
   shader.uniforms.uReflectRipple = waterReflectRipple
+  shader.uniforms.uSkyRough = waterSkyRough
   shader.vertexShader = shader.vertexShader
     .replace('#include <common>', '#include <common>\nuniform mat4 uReflectMatrix;\nvarying vec4 vReflectUv;')
     .replace('#include <begin_vertex>', '#include <begin_vertex>\nvReflectUv = uReflectMatrix * vec4((modelMatrix * vec4(position, 1.0)).xyz, 1.0);')
   shader.fragmentShader = shader.fragmentShader
-    .replace('#include <common>', '#include <common>\nuniform sampler2D uReflectMap;\nuniform float uReflect;\nuniform float uReflectRipple;\nvarying vec4 vReflectUv;')
-    .replace('#include <opaque_fragment>', `#include <opaque_fragment>\n${REFLECT_BODY}`)
+    .replace('#include <common>', '#include <common>\nuniform sampler2D uReflectMap;\nuniform float uReflect;\nuniform float uReflectRipple;\nuniform float uSkyReflect;\nuniform float uSkyRough;\nvarying vec4 vReflectUv;')
+    .replace('#include <opaque_fragment>', `#include <opaque_fragment>\n${SKY_BODY}\n${REFLECT_BODY}`)
 }

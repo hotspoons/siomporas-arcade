@@ -869,6 +869,19 @@ export let WATER_REFLECT_SCALE = 0.5
 /** how far the wave normal smears the reflection, in screen fractions */
 export let WATER_REFLECT_RIPPLE = 0.1
 /**
+ * SKY AND HORIZON, for the water the one planar mirror cannot serve.
+ *
+ * The planar reflection is a single plane at sea level, so a pond or a stream at any other height
+ * projects through it to the wrong reflected ray — and on an inland site with no visible sea the
+ * mirror is stood down entirely, leaving the ponds with no reflection at all (Rich, 2026-10-05:
+ * the pond beside home "only reflects the world at world-scale water level, not localized bodies").
+ * This samples the ENVIRONMENT MAP — the sky dome, prefiltered — along the body's own reflected ray
+ * instead: sky, haze and cloud, at any height, with no second scene render. It is mixed under the
+ * planar reflection, so where the sea's mirror reaches it still wins and the trees still show; on a
+ * pond the sky is what you get. 0 is the old flat sheet, 1 a full sky mirror.
+ */
+export let WATER_SKY_REFLECT = 0.7
+/**
  * The still-water line, metres NAVD88 — the sea at 0, and the flood control.
  *
  * One plane over the whole site at this height. Inland it sits under the terrain and nothing is
@@ -1896,6 +1909,7 @@ export const TUNE_TABS: TuneTab[] = [
           tune('WATER_REFLECT', () => WATER_REFLECT, (v) => (WATER_REFLECT = v), [0, 1], 0.02, 'planar reflection: 0 off, 1 full — the scene is rendered once more mirrored in the water plane'),
           tune('WATER_REFLECT_SCALE', () => WATER_REFLECT_SCALE, (v) => (WATER_REFLECT_SCALE = v), [0.2, 1], 0.05, 'reflection buffer resolution ×; lower is cheaper and softer'),
           tune('WATER_REFLECT_RIPPLE', () => WATER_REFLECT_RIPPLE, (v) => (WATER_REFLECT_RIPPLE = v), [0, 0.6], 0.02, 'wave-normal smear on the reflection; 0 is a flat looking-glass'),
+          tune('WATER_SKY_REFLECT', () => WATER_SKY_REFLECT, (v) => (WATER_SKY_REFLECT = v), [0, 1.5], 0.05, 'sky/horizon reflection from the environment map, for ponds and streams the sea plane cannot mirror; 0 is the old flat sheet'),
           tune('WATER_LEVEL_M', () => WATER_LEVEL_M, (v) => (WATER_LEVEL_M = v), [-20, 300], 0.5, 'still water / sea level (m); raise it to flood'),
           tune('WATER_LEVEL_SPAN', () => WATER_LEVEL_SPAN, (v) => (WATER_LEVEL_SPAN = v), [200, 60000], 100, 'how far the water plane reaches (m)'),
         ],

@@ -67,6 +67,12 @@ export interface WaterLook {
   crown: number
   /** depth to shade a pond/area as (m) — the DEM has no bathymetry */
   pondDepth: number
+  /**
+   * How much of the sky/horizon the body mirrors from the environment map, × the global
+   * WATER_SKY_REFLECT. 0 is the old flat sheet; a clear lake is about 1, a peat bog well under.
+   * This is the reflection the single sea-level planar mirror cannot give a pond or a stream.
+   */
+  sky: number
 }
 
 /**
@@ -75,12 +81,12 @@ export interface WaterLook {
  * ends so the dial is obvious.
  */
 export const WATER_PRESETS: Record<string, WaterLook> = {
-  temperate: { colour: 0x3d6b73, opacity: 0.82, roughness: 0.09, shore: 0xdfe9df, deep: 0x18323f, extinct: [6, 26, 70], shoreMix: 0.85, foam: 0.7, foamBand: 1, wave: 1, amp: 1, len: 1, steep: 1, crown: 0.9, pondDepth: 1.2 },
-  swamp: { colour: 0x2b3320, opacity: 0.9, roughness: 0.26, shore: 0x6b6f3a, deep: 0x10150b, extinct: [2.5, 5.5, 10], shoreMix: 1, foam: 0.45, foamBand: 1.5, wave: 0.5, amp: 0.55, len: 1.5, steep: 0.7, crown: 0.5, pondDepth: 0.9 },
-  black: { colour: 0x101812, opacity: 0.94, roughness: 0.16, shore: 0x39422f, deep: 0x05080a, extinct: [1.8, 5, 14], shoreMix: 1, foam: 0.3, foamBand: 1.7, wave: 0.4, amp: 0.4, len: 1.7, steep: 0.5, crown: 0.4, pondDepth: 0.8 },
-  caribbean: { colour: 0x2fb8c8, opacity: 0.84, roughness: 0.07, shore: 0xe6f7f0, deep: 0x0a4a6e, extinct: [16, 40, 92], shoreMix: 1, foam: 0.95, foamBand: 1.2, wave: 0.85, amp: 0.5, len: 1, steep: 0.55, crown: 1.1, pondDepth: 1.8 },
-  alpine: { colour: 0x2f6f86, opacity: 0.78, roughness: 0.06, shore: 0xbfd8d2, deep: 0x0c2c3d, extinct: [12, 34, 80], shoreMix: 1, foam: 0.4, foamBand: 0.9, wave: 1.3, amp: 1.2, len: 0.9, steep: 1.1, crown: 0.7, pondDepth: 1.5 },
-  mud: { colour: 0x5a4326, opacity: 0.93, roughness: 0.34, shore: 0x8a7350, deep: 0x2a1e10, extinct: [1.5, 4, 9], shoreMix: 1, foam: 0.55, foamBand: 1.6, wave: 0.6, amp: 0.5, len: 1.5, steep: 0.6, crown: 0.6, pondDepth: 0.9 },
+  temperate: { colour: 0x3d6b73, opacity: 0.82, roughness: 0.09, shore: 0xdfe9df, deep: 0x18323f, extinct: [6, 26, 70], shoreMix: 0.85, foam: 0.7, foamBand: 1, wave: 1, amp: 1, len: 1, steep: 1, crown: 0.9, pondDepth: 1.2, sky: 1 },
+  swamp: { colour: 0x2b3320, opacity: 0.9, roughness: 0.26, shore: 0x6b6f3a, deep: 0x10150b, extinct: [2.5, 5.5, 10], shoreMix: 1, foam: 0.45, foamBand: 1.5, wave: 0.5, amp: 0.55, len: 1.5, steep: 0.7, crown: 0.5, pondDepth: 0.9, sky: 0.35 },
+  black: { colour: 0x101812, opacity: 0.94, roughness: 0.16, shore: 0x39422f, deep: 0x05080a, extinct: [1.8, 5, 14], shoreMix: 1, foam: 0.3, foamBand: 1.7, wave: 0.4, amp: 0.4, len: 1.7, steep: 0.5, crown: 0.4, pondDepth: 0.8, sky: 0.2 },
+  caribbean: { colour: 0x2fb8c8, opacity: 0.84, roughness: 0.07, shore: 0xe6f7f0, deep: 0x0a4a6e, extinct: [16, 40, 92], shoreMix: 1, foam: 0.95, foamBand: 1.2, wave: 0.85, amp: 0.5, len: 1, steep: 0.55, crown: 1.1, pondDepth: 1.8, sky: 1.3 },
+  alpine: { colour: 0x2f6f86, opacity: 0.78, roughness: 0.06, shore: 0xbfd8d2, deep: 0x0c2c3d, extinct: [12, 34, 80], shoreMix: 1, foam: 0.4, foamBand: 0.9, wave: 1.3, amp: 1.2, len: 0.9, steep: 1.1, crown: 0.7, pondDepth: 1.5, sky: 1.1 },
+  mud: { colour: 0x5a4326, opacity: 0.93, roughness: 0.34, shore: 0x8a7350, deep: 0x2a1e10, extinct: [1.5, 4, 9], shoreMix: 1, foam: 0.55, foamBand: 1.6, wave: 0.6, amp: 0.5, len: 1.5, steep: 0.6, crown: 0.6, pondDepth: 0.9, sky: 0.35 },
 }
 
 /** the names, in a stable order a numeric tuning knob can index */
@@ -243,6 +249,8 @@ export interface WaterWaveUniforms {
   uFoamBand: { value: number }
   uShoreMix: { value: number }
   uWaveFade: { value: number }
+  /** sky/horizon reflection share for this body: look.sky × WATER_SKY_REFLECT */
+  uSkyReflect: { value: number }
 }
 
 /** the global multipliers a live tuning pass applies on top of a look */
@@ -255,6 +263,7 @@ export interface WaterKnobs {
   band: number
   clarity: number
   fade: number
+  sky: number
 }
 
 /**
@@ -270,6 +279,7 @@ export function refreshLook(u: WaterWaveUniforms, look: WaterLook, k: WaterKnobs
   u.uFoamBand.value = look.foamBand * k.band
   u.uWaveFade.value = k.fade
   u.uShoreMix.value = look.shoreMix
+  u.uSkyReflect.value = look.sky * k.sky
   u.uExtinct.value.set(look.extinct[0] * k.clarity, look.extinct[1] * k.clarity, look.extinct[2] * k.clarity)
 }
 

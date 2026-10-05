@@ -324,8 +324,11 @@ def tnm_download(proj: str, tiles: list[dict], cache: Path, jobs: int = 16) -> l
     """
     from concurrent.futures import as_completed
 
-    from .dem import download
+    from .dem import download, sweep_partials
 
+    swept = sweep_partials(cache / "laz")
+    if swept:
+        print(f"  lidar   swept {swept} abandoned .part file(s)", flush=True)
     dest = [cache / "laz" / proj / it["downloadURL"].rsplit("/", 1)[1] for it in tiles]
     total = sum(it.get("sizeInBytes", 0) for it in tiles) / 2**20
     t0 = time.time()

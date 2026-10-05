@@ -36,6 +36,7 @@ import json
 import os
 import re
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -421,9 +422,12 @@ def _read_node(src: EptSource, key: str, cache: Path, tr: Transformer, zf: float
                 if attempt == 2:
                     raise
                 time.sleep(2 * (attempt + 1))
-        tmp = path.with_suffix(".part")
-        tmp.write_bytes(r.content)
-        tmp.replace(path)
+        tmp = path.with_name(f"{path.name}.{os.getpid()}.{uuid.uuid4().hex[:8]}.part")
+        try:
+            tmp.write_bytes(r.content)
+            tmp.replace(path)
+        finally:
+            tmp.unlink(missing_ok=True)
     las = laspy.read(path)
     x, y = tr.transform(np.asarray(las.x), np.asarray(las.y))
     x, y = np.asarray(x), np.asarray(y)

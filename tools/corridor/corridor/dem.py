@@ -12,7 +12,10 @@ or a tree, and the road on a bridge is exactly where DEM and driving surface dis
 from __future__ import annotations
 
 import os
+import re
 import subprocess
+import time
+import uuid
 from pathlib import Path
 
 import requests
@@ -38,33 +41,109 @@ def s3_mirror(url: str) -> str | None:
 
 
 def download(url: str, dest: Path, size: int | None = None) -> Path:
-    import time
+    """Fetch `url` to `dest`, reusing a complete copy and publishing it atomically.
 
+    THE CACHE IS READWRITE-MANY AND EVERY BAKE HOLDS IT AT ONCE, so two jobs can legitimately want
+    the same tile. Three rules make that safe WITHOUT a lock:
+
+      * a PRIVATE temp per writer — a shared `dest.part` is the trap: two writers interleave into
+        one file and the winner is a corrupt tile whose SIZE still matches, which the reuse check
+        below would then trust for ever;
+      * ONE atomic rename to publish — a reader sees either no `dest` or the whole of it, never a
+        partial, because POSIX `rename` within one filesystem (and CephFS's) is atomic;
+      * last-writer-wins is harmless because both writers produce the same bytes for the same URL.
+
+    A `.part` left by a killed job is not ours to delete here (it may belong to a live writer);
+    `sweep_partials` collects the abandoned ones at the top of a stage instead.
+    """
     if dest.exists() and (size is None or dest.stat().st_size == size):
         return dest
     dest.parent.mkdir(parents=True, exist_ok=True)
-    tmp = dest.with_suffix(dest.suffix + ".part")
+    tmp = dest.with_name(f"{dest.name}.{os.getpid()}.{uuid.uuid4().hex[:8]}.part")
     candidates = [u for u in (s3_mirror(url), url) if u]
     last: Exception | None = None
-    for u in candidates:
-        for attempt in range(3):
-            try:
-                with session.get(u, stream=True, timeout=600) as r:
-                    if r.status_code in (403, 404) and u != url:
-                        break  # not on the bucket; try the catalogued URL
-                    r.raise_for_status()
-                    with open(tmp, "wb") as f:
-                        for chunk in r.iter_content(1 << 20):
-                            f.write(chunk)
-                tmp.replace(dest)
-                return dest
-            except Exception as exc:  # a dropped connection mid-GB is ordinary; retry the same URL
-                last = exc
-                time.sleep(5 * (attempt + 1))
-    raise RuntimeError(f"download failed for {url}: {last}")
+    try:
+        for u in candidates:
+            for attempt in range(3):
+                try:
+                    with session.get(u, stream=True, timeout=600) as r:
+                        if r.status_code in (403, 404) and u != url:
+                            break  # not on the bucket; try the catalogued URL
+                        r.raise_for_status()
+                        with open(tmp, "wb") as f:
+                            for chunk in r.iter_content(1 << 20):
+                                f.write(chunk)
+                    os.replace(tmp, dest)
+                    return dest
+                except Exception as exc:  # a dropped connection mid-GB is ordinary; retry the same URL
+                    last = exc
+                    time.sleep(5 * (attempt + 1))
+        raise RuntimeError(f"download failed for {url}: {last}")
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def sweep_partials(root: Path, max_age_s: float = 6 * 3600) -> int:
+    """Delete abandoned `.part` temps under `root`, older than `max_age_s`. Returns how many.
+
+    Each writer's temp is unique now, so a job that dies leaves its own behind and nothing ever
+    overwrites it; without this they accumulate for the life of the shared volume. Age is the
+    guard: a `.part` younger than the window may belong to a live writer and is left alone.
+    """
+    if not root.exists():
+        return 0
+    deadline = time.time() - max_age_s
+    killed = 0
+    for p in root.rglob("*.part"):
+        try:
+            if p.stat().st_mtime < deadline:
+                p.unlink()
+                killed += 1
+        except OSError:
+            pass  # another job swept it first, or it vanished; either way it is gone
+    return killed
 
 
 ONE_METRE = "Digital Elevation Model (DEM) 1 meter"
+
+_TILE_RE = re.compile(r"x(\d+)y(\d+)", re.I)
+
+
+def _tile_of(it: dict) -> tuple[int, int] | None:
+    """The 10 km `x{n}y{m}` tile an item covers, or None when its name carries none.
+
+    THIS, NOT THE BOUNDING BOX, is the key that identifies one tile across vintages: the boxes of
+    two vintages of the same tile disagree in the third decimal (Sandy NCR `38.920` vs Fairfax
+    `38.918`), so a bbox key would not merge them. Every vintage names the tile the same way.
+    """
+    for s in (it.get("title"), it.get("downloadURL")):
+        m = _TILE_RE.search(s or "")
+        if m:
+            return int(m.group(1)), int(m.group(2))
+    return None
+
+
+def _newest_per_tile(items: list[dict]) -> list[dict]:
+    """One product per tile — the newest — instead of every vintage overlapping the bbox.
+
+    A multi-county bbox returns the same tile two to four times (Fairfax 2018, Sandy NCR 2014,
+    NorthernVA B22, Central Processing D24), so the bake downloads and caches several copies of
+    identical ground and 495's cached tiles look "not reused". `discover_1m` sorts oldest first so a
+    later warp paints on top; keeping the last per tile preserves that — the newest dataset still
+    wins — and drops only the copies it would have covered. Items with no tile name are kept, never
+    guessed away.
+    """
+    newest: dict[tuple[int, int], dict] = {}
+    unkeyed: list[dict] = []
+    for it in items:  # oldest -> newest, so the last write per tile is the newest product
+        t = _tile_of(it)
+        if t is None:
+            unkeyed.append(it)
+        else:
+            newest[t] = it
+    kept = [*newest.values(), *unkeyed]
+    kept.sort(key=lambda it: it.get("publicationDate", ""))
+    return kept
 
 
 def discover_1m(w: float, s: float, e: float, n: float, dataset: str = ONE_METRE) -> list[dict]:
@@ -76,7 +155,10 @@ def discover_1m(w: float, s: float, e: float, n: float, dataset: str = ONE_METRE
     r.raise_for_status()
     items = r.json().get("items", [])
     items.sort(key=lambda it: it.get("publicationDate", ""))  # newest LAST: gdalwarp paints later inputs on top
-    return items
+    kept = _newest_per_tile(items)
+    if len(kept) < len(items):
+        print(f"  dem     {len(items)} TNM products -> {len(kept)} tiles (newest vintage per tile)", flush=True)
+    return kept
 
 
 # 3DEP's 1 m layer is the best bare earth there is and it does not cover everything: the Oregon
@@ -155,6 +237,9 @@ VSICURL_ENV = {
 
 
 def fetch_dem(frame: Frame, bbox: tuple[float, float, float, float], out: Path, cache: Path) -> dict:
+    swept = sweep_partials(cache / "usgs1m")
+    if swept:
+        print(f"  dem     swept {swept} abandoned .part file(s)", flush=True)
     # only a cached DEM that COVERS this bbox is reused; see rastercache.py for the wall it built
     if rastercache.reuse(out, frame.crs, bbox, "dem"):
         return {"file": out.name, "cached": True}

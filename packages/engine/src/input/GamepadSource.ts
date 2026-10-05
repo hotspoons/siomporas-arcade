@@ -44,6 +44,13 @@ export function hatDirection(v: number): number {
   return Math.round((v + 1) * 3.5) % 8
 }
 
+/**
+ * Raw travel an axis must show before it is trusted (see `GamepadSource.calibrate`). A pad that has
+ * just connected can rest a stick anywhere, and applying that at once drove the car and scrolled the
+ * menus on its own; until it has swept this far the axis reads zero.
+ */
+export const AXIS_SWEEP = 0.5
+
 export class GamepadSource {
   pad: Gamepad | null = null
   glyphs: PadGlyphs = 'generic'
@@ -61,6 +68,13 @@ export class GamepadSource {
   /** which axis directions were past the press threshold last frame, so a push is one edge */
   private prevAxisOn = new Uint8Array(16)
   private rumbleUntil = 0
+  /** per stick axis: the raw span seen, and whether a sweep has trusted it yet */
+  private axisSeen = new Uint8Array(4)
+  private axisInit = new Uint8Array(4)
+  private axisMin = new Float32Array(4)
+  private axisMax = new Float32Array(4)
+  /** the pad the calibration belongs to: a different pad starts its sweep from scratch */
+  private padKey = ''
 
   attach(target: Window): void {
     target.addEventListener('gamepadconnected', this.onConnect)
@@ -96,6 +110,16 @@ export class GamepadSource {
     const id = pad.id.toLowerCase()
     this.glyphs = /xbox|xinput|045e|8bitdo|2dc8/.test(id) ? 'xbox' : /sony|dualsense|dualshock|054c|wireless controller/.test(id) ? 'ps' : 'generic'
     const L = (this.layout = layoutFor(pad))
+    // a fresh pad (or index) re-learns its axes rather than inheriting the last one's span
+    const key = `${pad.index}:${pad.id}`
+    if (key !== this.padKey) {
+      this.padKey = key
+      this.axisSeen.fill(0)
+      this.axisInit.fill(0)
+      this.axisMin.fill(0)
+      this.axisMax.fill(0)
+      this.prevAxisOn.fill(0)
+    }
 
     for (let i = 0; i < Math.min(32, L.buttons.length); i++) {
       const r = L.buttons[i]
@@ -131,10 +155,11 @@ export class GamepadSource {
     for (let i = 0; i < 4; i++) {
       const r = L.axes[i]
       const raw = r >= 0 && r < pad.axes.length ? pad.axes[r] : 0
-      this.axes[i] = shapeAxis(raw)
+      this.axes[i] = this.calibrate(i, raw)
       // A PUSH IS ONE EDGE, like a button: an axis held past the threshold — or resting there,
       // the way a trigger read raw does — must not be re-reported every frame, or a rebind takes
-      // it before anything is touched and nothing else can ever be bound.
+      // it before anything is touched and nothing else can ever be bound. Edges read the RAW axis,
+      // so a rebind still takes a fresh push before the axis has been swept.
       for (const sign of [1, -1] as const) {
         const k = i * 2 + (sign > 0 ? 0 : 1)
         const on = raw * sign > 0.7 ? 1 : 0
@@ -146,6 +171,39 @@ export class GamepadSource {
         this.prevAxisOn[k] = on
       }
     }
+  }
+
+  /**
+   * Shape one stick axis, learning its range first.
+   *
+   * An axis must be SWEPT before it is trusted. A pad that has just connected — or a level that has
+   * just loaded — can rest a stick anywhere (a misread trigger axis, a stick with a broken centre),
+   * and applying that raw value at once is what scrolled the menus by themselves and drove the car
+   * off on its own. Until the axis has moved `AXIS_SWEEP`, it reads zero.
+   *
+   * The two halves are calibrated APART, each normalized by the travel seen on its own side, so
+   * sweeping one half and homing does not then read the other: a single centre learned from a
+   * half-sweep would drive the opposite way the moment the stick returned to rest.
+   */
+  private calibrate(i: number, raw: number): number {
+    if (!this.axisSeen[i]) {
+      this.axisSeen[i] = 1
+      this.axisMin[i] = raw
+      this.axisMax[i] = raw
+    } else {
+      if (raw < this.axisMin[i]) this.axisMin[i] = raw
+      if (raw > this.axisMax[i]) this.axisMax[i] = raw
+    }
+    if (!this.axisInit[i] && this.axisMax[i] - this.axisMin[i] >= AXIS_SWEEP) this.axisInit[i] = 1
+    if (!this.axisInit[i]) return 0
+    // the centre is the end of the span nearest zero — a stick rests near zero — and the clamp keeps
+    // a one-sided axis (a trigger read as a stick) from being treated as centred when it is not
+    const center = Math.min(this.axisMax[i], Math.max(this.axisMin[i], 0))
+    const d = raw - center
+    const posRange = Math.max(AXIS_SWEEP, this.axisMax[i] - center)
+    const negRange = Math.max(AXIS_SWEEP, center - this.axisMin[i])
+    const v = d >= 0 ? d / posRange : d / negRange
+    return shapeAxis(Math.max(-1, Math.min(1, v)))
   }
 
   /** Analog value 0..1 for a binding (`b7`, `a1+`). */

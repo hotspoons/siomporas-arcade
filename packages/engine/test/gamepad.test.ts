@@ -64,6 +64,56 @@ describe('the macOS HID layout', () => {
   })
 })
 
+describe('a stick must be swept before it is trusted', () => {
+  it('reads zero on a pad that has just connected, even when an axis rests off centre', () => {
+    const g = new GamepadSource()
+    // a pad read through the wrong layout can rest a stick at a large value; it must not apply
+    padsAre([pad({ axes: [0.9, 0, 0, 0] })])
+    g.poll()
+    expect(g.value('a0+')).toBe(0)
+    expect(g.value('a0-')).toBe(0)
+  })
+
+  it('reads a swept axis, and zero when it homes again', () => {
+    const g = new GamepadSource()
+    padsAre([pad({ axes: [0, 0, 0, 0] })])
+    g.poll()
+    padsAre([pad({ axes: [0.8, 0, 0, 0] })])
+    g.poll()
+    expect(g.value('a0+')).toBeGreaterThan(0.5)
+    padsAre([pad({ axes: [0, 0, 0, 0] })])
+    g.poll()
+    expect(g.value('a0+')).toBe(0)
+    expect(g.value('a0-')).toBe(0)
+  })
+
+  it('calibrates the halves apart: sweeping one way and homing does not read the other', () => {
+    const g = new GamepadSource()
+    padsAre([pad({ axes: [0, 0, 0, 0] })])
+    g.poll()
+    // only the positive half is ever swept
+    padsAre([pad({ axes: [0.6, 0, 0, 0] })])
+    g.poll()
+    expect(g.value('a0+')).toBeGreaterThan(0)
+    padsAre([pad({ axes: [0, 0, 0, 0] })])
+    g.poll()
+    expect(g.value('a0-')).toBe(0)
+  })
+
+  it('re-learns on a different pad rather than inheriting the span', () => {
+    const g = new GamepadSource()
+    padsAre([pad({ axes: [0, 0, 0, 0] })])
+    g.poll()
+    padsAre([pad({ axes: [0.8, 0, 0, 0] })])
+    g.poll()
+    expect(g.value('a0+')).toBeGreaterThan(0.5)
+    // a different pad (a different index) starts over: its resting 0.9 is not trusted
+    padsAre([{ ...pad({ axes: [0.9, 0, 0, 0] }), index: 1 }])
+    g.poll()
+    expect(g.value('a0+')).toBe(0)
+  })
+})
+
 describe('presses are edges', () => {
   it('reports an axis push once, not every frame it is held, so a rebind waits for a fresh push', () => {
     const g = new GamepadSource()

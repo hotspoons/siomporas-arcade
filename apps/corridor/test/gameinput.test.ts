@@ -77,6 +77,9 @@ describe('GameInput', () => {
 
   it('reads the pad’s triggers as analog pedals and the stick as steering', () => {
     const inp = new GameInput(structuredClone(DEFAULT_KEYS), structuredClone(DEFAULT_PAD))
+    // the stick is swept from rest before it is trusted (GamepadSource.calibrate)
+    padsAre([fakePad({}, { 0: 0 })])
+    inp.poll(1 / 60)
     padsAre([fakePad({ 7: 0.6, 6: 0.25 }, { 0: 0.9 })])
     inp.poll(1 / 60)
     const d = inp.drive()
@@ -234,6 +237,9 @@ describe('the pad layout', () => {
 
   it('reads the right stick as a look that is active only off centre, and not while the menu is up', () => {
     const input = new GameInput(DEFAULT_KEYS, DEFAULT_PAD)
+    // the right stick is swept from rest before it is trusted (GamepadSource.calibrate)
+    padsAre([fakePad({}, { 2: 0, 3: 0 })])
+    input.poll(1 / 60)
     padsAre([fakePad({}, { 2: 0.8, 3: -0.5 })])
     input.poll(1 / 60)
     const l = input.look()

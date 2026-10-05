@@ -42,6 +42,8 @@ const SEGMENTS = 6
 const TILE = 8
 const BLADE_F = 8 // x y z | rand height width lean mown
 const CARD_F = 6 // x y z | size rand mown
+/** shared empty instance array: an off-road corridor tile and a bare one both want zero records */
+const EMPTY_RECORDS = new Float32Array(0)
 
 function bladeGeometry(): THREE.InstancedBufferGeometry {
   // strip: pairs of vertices up the blade, then the tip; x is ±1 (scaled by width in the shader), y = t
@@ -122,6 +124,8 @@ interface Tile {
   cards: Float32Array // CARD_F per card, in random-rank order
   nc: number
   mown: boolean // most of the tile inside the mow line (drives card look)
+  /** the fast-bias thin factor this tile was GENERATED at, so a slowed eye knows to regenerate it */
+  thin: number
   /** uTime when the tile was generated: its blades and cards grow in from then (GRASS_GROW_S) */
   born: number
 }
@@ -1166,11 +1170,16 @@ export class Grass {
 
   private queueMissing() {
     const rBlade = T.GRASS_RADIUS + TILE * 0.71
+    // a tile planted while fast was planted THIN; once the car slows and the bias lifts, the tile
+    // is under-dense and has to be asked for again. The margin stops a wobble around the threshold
+    // from re-queueing the whole ring every frame.
+    const wantThin = this.thinMul
     this.pending = []
     for (const t of this.vis) {
       const withBlades = !this.spritesOnly && t.d <= rBlade
       const have = this.tiles.get(t.key)
-      if (!have || (withBlades && !have.hasBlades)) this.pending.push({ ...t, withBlades })
+      const stale = !!have && wantThin > have.thin + 0.2
+      if (!have || (withBlades && !have.hasBlades) || stale) this.pending.push({ ...t, withBlades })
     }
   }
 
@@ -1187,7 +1196,37 @@ export class Grass {
 
   /** One 8 m tile at full density. Deterministic in (tx, tz): the same tile always seeds alike. */
   private generate(tx: number, tz: number, withBlades: boolean): Tile {
+    /*
+     * A CORRIDOR TILE AWAY FROM EVERY ROAD IS EMPTY, AND ONE QUERY SAYS SO.
+     *
+     * On a corridor bake grass only grows within GRASS_MAX_FROM_ROAD of the tarmac (the per-cell
+     * test further down), so the 64-cell walk below rejects every cell and pays a road/ground/canopy
+     * lookup to do it. A tile whose CENTRE is further than the band plus its own half-diagonal
+     * cannot touch the band at any cell, so it is empty by construction. The ring at speed is
+     * mostly off-road, and rejecting those tiles for the price of one query is what lets the
+     * 4 ms/frame budget reach the verge tiles the driver is actually heading at.
+     */
+    if (!this.world) {
+      const cx = tx * TILE + TILE * 0.5, cz = tz * TILE + TILE * 0.5
+      if (this.roadDistance(cx, cz) > this.pavedHalf + T.GRASS_MAX_FROM_ROAD + TILE * 0.71) {
+        return { hasBlades: withBlades, blades: EMPTY_RECORDS, n: 0, cards: EMPTY_RECORDS, nc: 0, mown: false, thin: this.thinMul, born: this.now }
+      }
+    }
     const cell = 1.0
+    /*
+     * THIN THE FIELD WHEN IT IS PLANTED, NOT ONLY WHEN IT IS DRAWN.
+     *
+     * GRASS_FAST_THIN used to be applied in `assemble`, so at speed the generator still built every
+     * card and the renderer threw most of them away — the knob bought drawing, not the generation
+     * headroom it was FOR. A card tile is ~4 ms (dominated by the per-card parking/sidewalk mask
+     * queries), the budget is GRASS_MS_PER_FRAME, and at 150 mph the verge cannot be planted faster
+     * than the car reaches it: the field only ever extends ~60 m ahead and the car outruns it
+     * (Rich, 2026-10-05). Planting `thinMul` of the cards instead makes the knob pay where the cost
+     * is, and it is visually the same — `assemble` keeps the same fraction, so the same density
+     * lands on screen. `tile.thin` records what a tile was planted at; when the car slows and
+     * `thinMul` rises, `queueMissing` asks for it again.
+     */
+    const thin = Math.max(0.05, this.thinMul)
     const perCellMax = Math.max(T.GRASS_MOWN_PER_M2, T.GRASS_ROUGH_PER_M2) * T.GRASS_DENSITY
     const maxBlades = withBlades ? Math.ceil(TILE * TILE * perCellMax) + 64 : 0
     const blades = new Float32Array(maxBlades * BLADE_F)
@@ -1244,7 +1283,7 @@ export class Grass {
         if (mown) mownCells++
         // the editor's local corrections: [height multiplier, density multiplier]
         const [ah, ad] = this.adjustAt ? this.adjustAt(wx, -wz) : [1, 1]
-        const perCell = withBlades ? Math.round((mown ? T.GRASS_MOWN_PER_M2 : T.GRASS_ROUGH_PER_M2) * this.look.density * (0.7 + 0.6 * patch) * ad * T.GRASS_DENSITY) : 0
+        const perCell = withBlades ? Math.round((mown ? T.GRASS_MOWN_PER_M2 : T.GRASS_ROUGH_PER_M2) * this.look.density * (0.7 + 0.6 * patch) * ad * T.GRASS_DENSITY * thin) : 0
         // one clump centre per cell; blades scatter around it
         const ccx = wx + (hash(cx * 7919 + cz * 104729) - 0.5) * cell
         const ccz = wz + (hash(cx * 15485863 + cz * 32452843) - 0.5) * cell
@@ -1321,7 +1360,7 @@ export class Grass {
         const baseH = mown ? T.GRASS_MOWN_HEIGHT * 1.6 * this.look.mown : this.heightScale * T.GRASS_ROUGH_HEIGHT * tall * 0.8 * this.look.height
         const sizeNom = Math.max(0.2, baseH * Math.max(0.15, ah) * 1.5 * T.GRASS_HEIGHT * T.GRASS_SPRITE_SCALE)
         const cover = Math.min(6, (0.85 / sizeNom) * (0.85 / sizeNom))
-        const cardsHere = Math.min(18, T.GRASS_SPRITE_PER_M2 * (bladePer / 40) * cover)
+        const cardsHere = Math.min(18, T.GRASS_SPRITE_PER_M2 * (bladePer / 40) * cover) * thin
         const want = Math.floor(cardsHere) + (hash(cx * 61 + cz * 67) < cardsHere % 1 ? 1 : 0)
         for (let b = 0; b < want && nc < maxCards; b++) {
           const x = wx + (hash(cx * 71 + cz * 73 + b * 79) - 0.5) * cell, z = wz + (hash(cx * 83 + cz * 89 + b * 97) - 0.5) * cell
@@ -1349,7 +1388,7 @@ export class Grass {
         }
       }
     }
-    return { hasBlades: withBlades, blades: sortByRank(blades, rank, n, BLADE_F), n, cards: sortByRank(cards, crank, nc, CARD_F), nc, mown: mownCells * 2 > cells, born: this.now }
+    return { hasBlades: withBlades, blades: sortByRank(blades, rank, n, BLADE_F), n, cards: sortByRank(cards, crank, nc, CARD_F), nc, mown: mownCells * 2 > cells, thin, born: this.now }
   }
 
   /** Copy the visible prefixes of the cached tiles into the instance buffers. */
@@ -1370,9 +1409,12 @@ export class Grass {
     for (const t of this.vis) {
       const tile = this.tiles.get(t.key)
       if (!tile) continue
+      // the tile was already planted `tile.thin` dense; keep `thinMul / tile.thin` of it so the bias
+      // is applied exactly once (a tile planted before the car slowed is drawn at full until regenerated)
+      const bias = Math.min(1, this.thinMul / Math.max(1e-3, tile.thin))
       if (!this.spritesOnly && t.d <= rBlade + TILE * 0.71 && tile.n) {
         // density: LOD rings — full inside NEAR, MID_DENSITY to MID, FAR_DENSITY to the rim
-        const falloff = (t.d < T.GRASS_LOD_NEAR ? 1 : t.d < T.GRASS_LOD_MID ? T.GRASS_LOD_MID_DENSITY : T.GRASS_LOD_FAR_DENSITY) * this.thinMul
+        const falloff = (t.d < T.GRASS_LOD_NEAR ? 1 : t.d < T.GRASS_LOD_MID ? T.GRASS_LOD_MID_DENSITY : T.GRASS_LOD_FAR_DENSITY) * bias
         const take = Math.min(tile.n, Math.round(tile.n * falloff), this.capacity - k)
         for (let i = 0; i < take; i++) {
           const o = i * BLADE_F
@@ -1391,7 +1433,7 @@ export class Grass {
       if (t.d >= cardFrom - TILE && t.d <= rCard + TILE * 0.71 && tile.nc) {
         // thin the cards toward the rim: full past the blades, GRASS_SPRITE_FAR_DENSITY at the far edge
         const u = Math.min(1, Math.max(0, (t.d - T.GRASS_LOD_MID) / Math.max(1, rCard - T.GRASS_LOD_MID)))
-        const keep = (1 + (T.GRASS_SPRITE_FAR_DENSITY - 1) * u * u) * this.thinMul
+        const keep = (1 + (T.GRASS_SPRITE_FAR_DENSITY - 1) * u * u) * bias
         const take = Math.min(tile.nc, Math.round(tile.nc * keep), this.cardCapacity - kc)
         for (let i = 0; i < take; i++) {
           const o = i * CARD_F

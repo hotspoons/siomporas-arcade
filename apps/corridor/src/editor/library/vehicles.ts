@@ -30,7 +30,7 @@ import {
   FINAL_DRIVE_MIN, frontShare, gearedTopSpeed, mountPoint, mountYaw, overrideRange, peakTorque,
   rebalanceGears, toDriveProfile, tractiveForce, TYRE_REFERENCE_MM, validateVehicle, VEHICLE_CLASSES,
   VEHICLE_MOUNTS, VEHICLE_TEMPLATE_IDS, wheelBoneCount,
-  type VehicleDoc, type VehicleMesh, type VehicleMount,
+  type VehicleDoc, type VehicleFinish, type VehicleMesh, type VehicleMount,
 } from '../../game/vehicle/vehicles'
 import { presetDoc, presetsFor } from '../../game/vehicle/vehiclepresets'
 import type { AssetDetailCtx } from './assets'
@@ -95,6 +95,7 @@ export function dynamicsForm(host: HTMLElement, getDoc: () => VehicleDoc, opts: 
    */
   const SECTIONS = [
     { id: 'basic', label: 'Basic', icon: 'cube' as const },
+    { id: 'finish', label: 'Finish', icon: 'swatch' as const },
     { id: 'engine', label: 'Engine & gearing', icon: 'bolt' as const },
     { id: 'sound', label: 'Sound', icon: 'play' as const },
     { id: 'other', label: 'Weapons & overrides', icon: 'adjustments-horizontal' as const },
@@ -265,6 +266,41 @@ export function dynamicsForm(host: HTMLElement, getDoc: () => VehicleDoc, opts: 
       }))
     }
     put('basic', handling)
+
+    /* ---- the finish ------------------------------------------------------------------------ */
+    /*
+     * THE MATERIAL, NOT A GAIN ON IT.
+     *
+     * Rich, 2026-10-05: *"the car seems to apply some sort of blur or matte effect on the
+     * environment reflections ... car shine just seems to change the reflection gain but not the
+     * material blend"*. Every car was forced to `roughness ≤ 0.28, metalness ≥ 0.5`, so the paint
+     * could only get brighter, never smoother — these four numbers are the surface itself. The F6
+     * REFLECT and CAR_SHINE dials still move the whole fleet; a value saved here multiplies them
+     * (reflect, shine) or replaces the forced default (roughness, metalness).
+     */
+    const finish = group('Finish', { note: 'what the paint is made of, per vehicle. F6 REFLECT and CAR_SHINE still move every car — these are this car’s own numbers' })
+    const fb = bodyOf(finish)
+    const fin = doc.finish ?? {}
+    const finishSlider = (label: string, key: keyof VehicleFinish, def: number, max: number, note: string) => {
+      fb.append(slider({
+        label, value: fin[key] ?? def, min: 0, max, step: 0.01,
+        neutral: def, resettable: true,
+        note: fin[key] === undefined ? `${note} — default` : note,
+        onInput: (v) => {
+          doc.finish ??= {}
+          if (Math.abs(v - def) < 1e-9) delete doc.finish[key]
+          else doc.finish[key] = v
+          if (doc.finish && !Object.keys(doc.finish).length) delete doc.finish
+          live()
+        },
+      }))
+    }
+    finishSlider('Paint roughness', 'roughness', 0.28, 1, '0 is a mirror, 1 is flat matte — the number that decides whether it reads as paint or plastic')
+    finishSlider('Paint metalness', 'metalness', 0.5, 1, '0 is plastic/dielectric, 1 is chrome')
+    finishSlider('Reflection strength', 'reflect', 1, 4, 'times the global REFLECT — raise it for a car that mirrors the world harder')
+    finishSlider('Clearcoat', 'shine', 1, 3, 'times the global CAR_SHINE — the wet-looking coat over the paint')
+    fb.append(el('div', 'field-note', 'a mirror-finish car is roughness near 0, metalness 1 and reflectance up; a matte wrap is roughness near 1, metalness 0'))
+    put('finish', finish)
 
     /* ---- the drivetrain -------------------------------------------------------------------- */
     const eng = group('Engine, gearing and brakes', {})

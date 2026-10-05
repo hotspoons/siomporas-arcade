@@ -294,7 +294,7 @@ export class TrafficLayer {
       const b = builds.get(m.vehicle)
       if (!b) { this.problems.push(`traffic set names "${m.vehicle}", which is not a vehicle build`); continue }
       const doc = b.doc ?? defaultVehicle('traffic')
-      const model = b.asset ? await loadCarModel(b.asset, doc.spec, doc.mesh).catch(() => null) : null
+      const model = b.asset ? await loadCarModel(b.asset, doc.spec, doc.mesh, doc.finish).catch(() => null) : null
       this.models.set(m.vehicle, { object: model?.object ?? placeholderCar(doc), doc })
       if (!model) this.problems.push(`"${m.vehicle}" has no usable model — drawn as a box`)
     }

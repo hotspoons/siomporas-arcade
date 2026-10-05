@@ -207,7 +207,7 @@ export const WATER_FRAG_NORMAL = /* glsl */ `
 
 /**
  * Appends to `<color_fragment>`: depth-driven colour extinction and shore foam.
- * Applied to `diffuseColor` so the standard lighting, SSR and fog still treat
+ * Applied to `diffuseColor` so the standard lighting and fog still treat
  * the water as an ordinary surface.
  */
 export const WATER_FRAG_COLOR = /* glsl */ `

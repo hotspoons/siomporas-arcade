@@ -7,9 +7,8 @@
 //   relief   the mapped normal's lighting minus the flat polygon's, added back on. The standard
 //            material already uses the mapped normal; this turns the difference up, which is the
 //            part a high sun shrinks to nothing.
-//   clearcoat  a view-dependent coat on the car, plus the sky environment (REFLECT) and a
-//            screen-space sample of the previous frame (SSR). The screen-space pass is a few
-//            taps of a texture that was already drawn, not a second scene.
+//   clearcoat  a view-dependent coat on the car, plus the environment map and a cube probe at the
+//            car (carProbe.ts) so the paint mirrors the trees and bank around it, not only the sky.
 //
 // Shadows and the logarithmic depth buffer do not agree. The shadow map is an orthographic
 // camera, whose clip-space w is 1, so the log-depth write stores the same depth for every
@@ -18,20 +17,14 @@
 import * as THREE from 'three'
 import * as T from '../tuning'
 import { carProbeBlend, carProbeCube, carProbeOn, carProbeOrigin, carProbeReach } from './carProbe'
+import type { VehicleFinish } from '../game/vehicle/vehicles'
 
 /** shared so a knob moves every material that compiled with it, without a rebuild */
 export const reliefUniform = { value: 1.6 }
 export const shineUniform = { value: 1 }
-const ssrUniform = { value: 1 }
-const ssrBelt = { value: 0.62 }
 /** extra darkening of shadowed pixels, past the sun's own shadow, so ambient and the rake don't wash it out */
 export const shadeUniform = { value: 1 }
-const ssrSize = { value: new THREE.Vector2(1, 1) }
-const ssrMap = { value: new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1) as THREE.Texture }
-ssrMap.value.needsUpdate = true
 const shiny: THREE.MeshStandardMaterial[] = []
-const drawSize = new THREE.Vector2()
-let ssrTex: THREE.FramebufferTexture | null = null
 
 const RELIEF = /* glsl */ `
 #if NUM_DIR_LIGHTS > 0
@@ -55,11 +48,14 @@ const COAT = /* glsl */ `
   vec3 viewV = normalize(vViewPosition);
   float ndv = clamp(dot(viewN, viewV), 0.0, 1.0);
   float fres = pow(1.0 - ndv, 4.0);
-  gl_FragColor.rgb += gl_FragColor.rgb * fres * uShine * 0.55;
+  // the global CAR_SHINE dial times this car's own clearcoat, so a vehicle can be glossier or
+  // flatter than the fleet without standing the fleet's dial down.
+  float coat = uShine * uCoat;
+  gl_FragColor.rgb += gl_FragColor.rgb * fres * coat * 0.55;
 #if NUM_DIR_LIGHTS > 0
   vec3 halfV = normalize(viewV + directionalLights[0].direction);
   float spec = pow(clamp(dot(viewN, halfV), 0.0, 1.0), 64.0);
-  gl_FragColor.rgb += directionalLights[0].color * spec * uShine * 0.45;
+  gl_FragColor.rgb += directionalLights[0].color * spec * coat * 0.45;
 #endif
 }
 `
@@ -232,9 +228,22 @@ export function injectShade(shader: { fragmentShader: string; uniforms: Record<s
   afterOpaque(shader, 'uShade', shadeUniform, SHADE)
 }
 
-/** Paint and glass: a clearcoat fresnel and a tight sun highlight. */
-export function injectCoat(shader: { fragmentShader: string; uniforms: Record<string, { value: unknown }> }) {
-  afterOpaque(shader, 'uShine', shineUniform, COAT)
+/**
+ * Paint and glass: a clearcoat fresnel and a tight sun highlight.
+ *
+ * `coat` is this car's own clearcoat multiplier, so two vehicles can wear different gloss while the
+ * global CAR_SHINE stays the fleet's dial. It defaults to the shared uniform, which is a no-op times
+ * one.
+ */
+export function injectCoat(shader: { fragmentShader: string; uniforms: Record<string, { value: unknown }> }, coat: { value: number } = shineUniform) {
+  if (shader.fragmentShader.includes('uniform float uShine')) return
+  shader.uniforms.uShine = shineUniform
+  shader.uniforms.uCoat = coat
+  const decl = 'uniform float uShine;\nuniform float uCoat;\n'
+  shader.fragmentShader = shader.fragmentShader.includes('#include <common>')
+    ? shader.fragmentShader.replace('#include <common>', `#include <common>\n${decl}`)
+    : decl + shader.fragmentShader
+  shader.fragmentShader = shader.fragmentShader.replace('#include <opaque_fragment>', `#include <opaque_fragment>\n${COAT}`)
 }
 
 /**
@@ -279,52 +288,6 @@ export function injectCarProbe(shader: { vertexShader: string; fragmentShader: s
   shader.fragmentShader = shader.fragmentShader.replace('#include <opaque_fragment>', `#include <opaque_fragment>\n${CAR_PROBE}`)
 }
 
-const SSR_BODY = /* glsl */ `
-{
-  if (uSSR > 0.001) {
-    vec3 ssrN = normalize(normal);
-    vec3 ssrV = normalize(vViewPosition);
-    vec3 ssrR = reflect(-ssrV, ssrN);
-    vec2 ssrUv = gl_FragCoord.xy / uSSRSize;
-    vec2 ssrStep = ssrR.xy * 0.05;
-    // a roof's reflection walks down the frame into the lane. Force the march up the screen
-    // and start it on the belt, so the first accepted sample is trees and sky, not asphalt.
-    if (ssrStep.y < 0.03) ssrStep.y = 0.03;
-    if (ssrUv.y < uSSRBelt) ssrUv += ssrStep * ((uSSRBelt - ssrUv.y) / ssrStep.y);
-    float ssrGot = 0.0;
-    vec3 ssrHit = vec3(0.0);
-    for (int s = 0; s < 8; s++) {
-      if (ssrUv.x < 0.0 || ssrUv.x > 1.0 || ssrUv.y > 1.0) break;
-      if (ssrUv.y >= uSSRBelt) {
-        ssrHit = texture2D(uSSRMap, ssrUv).rgb;
-        ssrGot = 1.0;
-        break;
-      }
-      ssrUv += ssrStep;
-    }
-    if (ssrGot > 0.5) {
-      ssrHit = pow(max(ssrHit, vec3(0.0)), vec3(2.2));
-      float ssrFres = pow(1.0 - clamp(dot(ssrN, ssrV), 0.0, 1.0), 3.0);
-      gl_FragColor.rgb = mix(gl_FragColor.rgb, ssrHit, ssrFres * clamp(uSSR, 0.0, 1.5) * 0.55);
-    }
-  }
-}
-`
-
-/** Paint, glass and water: sample the previous frame along the reflection. */
-export function injectSSR(shader: { fragmentShader: string; uniforms: Record<string, { value: unknown }> }) {
-  if (shader.fragmentShader.includes('uniform sampler2D uSSRMap')) return
-  shader.uniforms.uSSR = ssrUniform
-  shader.uniforms.uSSRBelt = ssrBelt
-  shader.uniforms.uSSRSize = ssrSize
-  shader.uniforms.uSSRMap = ssrMap
-  const decl = 'uniform float uSSR;\nuniform float uSSRBelt;\nuniform vec2 uSSRSize;\nuniform sampler2D uSSRMap;\n'
-  shader.fragmentShader = shader.fragmentShader.includes('#include <common>')
-    ? shader.fragmentShader.replace('#include <common>', `#include <common>\n${decl}`)
-    : decl + shader.fragmentShader
-  shader.fragmentShader = shader.fragmentShader.replace('#include <opaque_fragment>', `#include <opaque_fragment>\n${SSR_BODY}`)
-}
-
 /**
  * The shadow pass inherits the renderer's logarithmic depth, which flattens an orthographic
  * shadow map to a single value. This material writes ordinary window depth instead.
@@ -350,25 +313,6 @@ export function noteShiny(m: THREE.MeshStandardMaterial) {
 }
 
 /**
- * Copy the frame just drawn, so the next frame's shiny surfaces can reflect it.
- * One frame late, and only the pixels already on screen.
- */
-export function captureSSR(renderer: THREE.WebGLRenderer) {
-  if (T.SSR <= 0.001) return
-  renderer.getDrawingBufferSize(drawSize)
-  if (!ssrTex || ssrTex.image.width !== drawSize.x || ssrTex.image.height !== drawSize.y) {
-    ssrTex?.dispose()
-    ssrTex = new THREE.FramebufferTexture(drawSize.x, drawSize.y)
-    ssrMap.value = ssrTex
-    ssrSize.value.set(drawSize.x, drawSize.y)
-  }
-  const prev = renderer.getRenderTarget()
-  renderer.setRenderTarget(null)
-  renderer.copyFramebufferToTexture(ssrTex)
-  renderer.setRenderTarget(prev)
-}
-
-/**
  * Chain a compile hook. Materials that already rewrite their shader (hex tiles, water, glass)
  * keep that rewrite; this only appends.
  */
@@ -387,10 +331,18 @@ export function chainCompile(mat: THREE.Material, inject: (shader: { vertexShade
  * The car should read as paint, including a TRELLIS mesh whose one material arrived at roughness 1.
  *
  * Tyres and the dash are left alone: near-black and already rough. Lamps are left alone because
- * they are emissive. Everything else gets a lower roughness, a bit of metal, a stronger sky
+ * they are emissive. Everything else gets a lower roughness, a bit of metal, a stronger environment
  * reflection, and the clearcoat hook.
+ *
+ * `finish` is the vehicle document's own say, when it has one. Roughness and metalness are absolute
+ * — "this car's paint is a mirror" — and reflect/shine MULTIPLY the global F6 dials, so one car can
+ * be glossier than the fleet without standing the fleet's dial down.
  */
-export function applyCarShine(root: THREE.Object3D) {
+export function applyCarShine(root: THREE.Object3D, finish?: VehicleFinish) {
+  const rough = finish?.roughness
+  const metal = finish?.metalness
+  const reflect = Number.isFinite(finish?.reflect) ? Math.max(0, Math.min(8, finish!.reflect!)) : 1
+  const coat = Number.isFinite(finish?.shine) ? Math.max(0, Math.min(8, finish!.shine!)) : 1
   const seen = new Set<THREE.Material>()
   root.traverse((o) => {
     const mesh = o as THREE.Mesh
@@ -409,13 +361,15 @@ export function applyCarShine(root: THREE.Object3D) {
       // tyres: near-black and already rough. Paint that arrived at roughness 1 is the case this is for.
       if (c && c.r < 0.09 && c.g < 0.09 && c.b < 0.09 && std.roughness > 0.7) continue
       std.userData.coat = 1
-      std.roughness = Math.min(std.roughness, 0.28)
-      std.metalness = Math.max(std.metalness, 0.5)
-      std.envMapIntensity = T.REFLECT
+      std.userData.finishReflect = reflect
+      std.roughness = rough != null && Number.isFinite(rough) ? Math.max(0, Math.min(1, rough)) : Math.min(std.roughness, 0.28)
+      std.metalness = metal != null && Number.isFinite(metal) ? Math.max(0, Math.min(1, metal)) : Math.max(std.metalness, 0.5)
+      std.envMapIntensity = T.REFLECT * reflect
       noteShiny(std)
+      // one coat bag per material, so two vehicles can wear different gloss under one program
+      const coatBag = { value: coat }
       chainCompile(std, (shader) => {
-        injectSSR(shader)
-        injectCoat(shader)
+        injectCoat(shader, coatBag)
         injectCarProbe(shader)
       }, 'car-gloss')
     }
@@ -427,9 +381,10 @@ export function tickShading() {
   reliefUniform.value = T.RELIEF
   shineUniform.value = T.CAR_SHINE
   shadeUniform.value = T.SHADOW
-  ssrUniform.value = T.SSR
-  ssrBelt.value = T.SSR_BELT
   // as the car's probe takes over its reflection, the sky map it replaces steps back with it
   const carBlend = carProbeOn.value > 0.5 ? Math.max(0, Math.min(1, carProbeBlend.value)) : 0
-  for (const m of shiny) m.envMapIntensity = T.REFLECT * (m.userData.coat ? 1 - 0.65 * carBlend : 1)
+  for (const m of shiny) {
+    const finish = typeof m.userData.finishReflect === 'number' ? m.userData.finishReflect : 1
+    m.envMapIntensity = T.REFLECT * finish * (m.userData.coat ? 1 - 0.65 * carBlend : 1)
+  }
 }

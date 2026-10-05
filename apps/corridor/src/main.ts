@@ -50,7 +50,7 @@ import { buildPlacements, fitModel, loadAssetModel, loadCatalog, type CatalogEnt
 import { timeControls } from './ui/timecontrols'
 import { celestialToWorld, julianDate, moonPosition, radecToVec } from './visuals/celestial'
 import * as T from './tuning'
-import { captureSSR, chainCompile, injectShade, linearShadowDepth, setWetStreak, tickShading, type WetMark } from './visuals/shading'
+import { chainCompile, injectShade, linearShadowDepth, setWetStreak, tickShading, type WetMark } from './visuals/shading'
 import { renderWaterReflection } from './visuals/waterReflect'
 import { tickWaterProbes } from './visuals/waterProbes'
 import { tickCarProbe } from './visuals/carProbe'
@@ -1567,7 +1567,7 @@ async function openLevel(id: string) {
     // The MODEL, fitted to whatever chassis we ended up with. Null for every ordinary reason — no
     // mesh on the asset, a file that will not decode — and the wedge is the fallback, never no car.
     const spec = (playerVehicle ?? defaultVehicle('hero-car')).spec
-    playerModel = await loadCarModel(modelId, spec, playerVehicle?.mesh)
+    playerModel = await loadCarModel(modelId, spec, playerVehicle?.mesh, playerVehicle?.finish)
     if (playerModel) status(`car: ${lvl.player.vehicle} (${playerModel.variant}, ×${playerModel.scale.toFixed(2)}, ${playerModel.glazed} glazed)`)
     else toast(`${lvl.player.vehicle} has no usable model — driving the default body`, 'warn', 5000)
   }
@@ -4047,14 +4047,10 @@ function frame() {
     if (composer) composer.render()
     else renderer.render(scene, camera)
     prof.end('scene')
-    prof.begin('ssr')
-    captureSSR(renderer)
-    prof.end('ssr')
   } else {
     renderWaterReflection(renderer, scene, camera)
     if (composer) composer.render()
     else renderer.render(scene, camera)
-    captureSSR(renderer)
   }
   /*
    * MEASURED AFTER THE RENDER CALL, which is the honest place: `renderer.info` holds the counts of

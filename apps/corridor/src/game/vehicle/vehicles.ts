@@ -177,12 +177,43 @@ export interface VehicleWheels {
 /** Which file the world draws. Absent means the finished mesh when that file exists. */
 export type VehicleMesh = 'finished' | 'raw'
 
+/**
+ * What the paint is made of. This is the MATERIAL, not a gain on it — the F6 `CAR_SHINE` slider
+ * scales the whole fleet's clearcoat, and this is how one car differs from the fleet.
+ *
+ * The problem this exists for (Rich, 2026-10-05): every car was forced to `roughness ≤ 0.28`,
+ * `metalness ≥ 0.5`, so a "shine" dial could only make the coat brighter, never change the surface
+ * — the reflections stayed soft and matte and no setting reached a genuinely mirror-like paint.
+ * These four numbers are that surface. `roughness` and `metalness` are absolute facts about the
+ * paint; `reflect` and `shine` MULTIPLY the global dials so raising REFLECT or CAR_SHINE still
+ * moves every car at once.
+ *
+ * Absent is the old default (glossy paint: roughness 0.28 floor, metalness 0.5 floor, no scaling),
+ * so a document that says nothing keeps looking exactly as it did.
+ */
+export interface VehicleFinish {
+  /** 0 is a mirror, 1 is flat matte. Absent: the model's own roughness, floored at 0.28. */
+  roughness?: number
+  /** 0 is plastic/dielectric, 1 is chrome. Absent: the model's own metalness, floored at 0.5. */
+  metalness?: number
+  /** environment reflection strength, times the global `REFLECT`. Absent: 1 */
+  reflect?: number
+  /** clearcoat strength, times the global `CAR_SHINE`. Absent: 1 */
+  shine?: number
+}
+
 export interface VehicleDoc {
   spec: VehicleChassis
   profile: VehicleHandling
   engine: VehicleEngine
   audio: VehicleAudio
   wheels: VehicleWheels
+  /**
+   * How the paint looks: the material the car's surfaces are put into. Optional — absent is the
+   * old glossy default — so the world editor can set it per vehicle while every existing document
+   * keeps its look.
+   */
+  finish?: VehicleFinish
   /**
    * Weapons bolted to the car, each at a named place on the chassis. Optional and usually absent:
    * most cars are not armed, and an empty array on every document is noise in every file.
@@ -372,6 +403,22 @@ export function validateVehicle(v: VehicleDoc | null | undefined, opts: { rigWhe
   }
   lamps(s?.headlights, 'headlights')
   lamps(s?.taillights, 'taillights')
+
+  // the finish. roughness and metalness are 0…1 material facts; reflect and shine are multipliers
+  // and only have to be positive. A NaN here would silently poison a material, so it is an error.
+  const fin = v.finish
+  if (fin) {
+    const unit = (n: number | undefined, name: string) => {
+      if (n === undefined) return
+      if (!Number.isFinite(n) || n < 0 || n > 1) errors.push(`finish.${name} must be between 0 and 1`)
+    }
+    unit(fin.roughness, 'roughness')
+    unit(fin.metalness, 'metalness')
+    for (const [name, n] of [['reflect', fin.reflect], ['shine', fin.shine]] as const) {
+      if (n === undefined) continue
+      if (!Number.isFinite(n) || n < 0) errors.push(`finish.${name} must be a non-negative number`)
+    }
+  }
 
   // the profile
   if (!v.profile?.base) errors.push('profile.base is required — name one of ' + Object.keys(PROFILES).join(', '))

@@ -26,7 +26,7 @@
 import * as THREE from 'three'
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import * as T from '../tuning'
-import { chainCompile, injectRelief, injectSSR, injectShade, noteShiny } from '../visuals/shading'
+import { chainCompile, injectRelief, injectShade, noteShiny } from '../visuals/shading'
 import { configureWaterReflection, injectWaterReflect, registerWaterReflectBodies } from '../visuals/waterReflect'
 import { MAX_WATER_PROBES, registerWaterProbes, type WaterProbeBody } from '../visuals/waterProbes'
 import { WATER_ATTR, WATER_FRAG_COLOR, WATER_FRAG_NORMAL, WATER_FRAG_PARS, WATER_LOOK_NAMES, WATER_VERT_BODY, WATER_VERT_PARS, applyLookColours, lookOf, refreshLook, waterTints, writeWaterAttr, type WaterKnobs, type WaterLook, type WaterWaveUniforms } from './waterShader'
@@ -187,11 +187,10 @@ function waterMaterial(shared: WaterShared, look: WaterLook, opacityMul = 1): TH
   noteShiny(mat)
   // The reflection path is part of the switch. The Gerstner water takes the real planar reflection
   // (visuals/waterReflect.ts): one mirrored scene render, which is exactly the cost WATER_FANCY 0
-  // is meant to avoid. The old water takes the screen-space SSR pass — a few taps of the frame
-  // already drawn, no second scene.
+  // is meant to avoid. The old water keeps the environment map alone (noteShiny above): it mirrors
+  // the sky, not the trees.
   chainCompile(mat, (shader) => {
     if (T.WATER_FANCY >= 0.5) injectWaterReflect(shader)
-    else injectSSR(shader)
     injectRelief(shader)
     injectShade(shader)
   }, 'reflect-relief-shade')

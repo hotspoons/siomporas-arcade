@@ -32,7 +32,7 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js'
 import { applyAlphaGlazing } from '../../visuals/glazing'
 import { applyCarShine } from '../../visuals/shading'
 import { assetsvc, MESH_FILE, type AssetItem, type MeshVariant } from '../../assets/assetsvc'
-import type { VehicleChassis } from './vehicles'
+import type { VehicleChassis, VehicleFinish } from './vehicles'
 
 export interface CarModel {
   /** the fitted model, ready to be parented to the car's mesh group */
@@ -87,7 +87,7 @@ export function meshVariantOf(item: AssetItem, want?: 'finished' | 'raw' | null)
  * mesh on it, a file that will not decode — because a level that names a car the library cannot
  * produce must still be driveable. The caller shows the procedural body and says so.
  */
-export async function loadCarModel(assetId: string, spec: VehicleChassis, mesh?: 'finished' | 'raw' | null): Promise<CarModel | null> {
+export async function loadCarModel(assetId: string, spec: VehicleChassis, mesh?: 'finished' | 'raw' | null, finish?: VehicleFinish): Promise<CarModel | null> {
   let item: AssetItem | null = null
   try {
     item = await assetsvc.get(assetId)
@@ -128,7 +128,7 @@ export async function loadCarModel(assetId: string, spec: VehicleChassis, mesh?:
   const holder = new THREE.Group()
   holder.name = `car:${assetId}`
   holder.add(root)
-  applyCarShine(holder)
+  applyCarShine(holder, finish)
 
   return { object: holder, variant, rawSize: { x: raw.x, y: raw.y, z: raw.z }, scale: fit.scale, glazed }
 }

@@ -63,12 +63,23 @@ describe('validation', () => {
     expect(validateVehicle(v).errors).toEqual([])
   })
 
+  it('accepts a finish that is a material, and refuses one that is not', () => {
+    const v = clean()
+    v.finish = { roughness: 0.02, metalness: 1, reflect: 2.5, shine: 1.5 }
+    expect(validateVehicle(v).errors).toEqual([])
+    v.finish = { roughness: 1.4 }
+    expect(validateVehicle(v).errors.join(' ')).toMatch(/finish\.roughness must be between 0 and 1/)
+    v.finish = { metalness: -0.1 }
+    expect(validateVehicle(v).errors.join(' ')).toMatch(/finish\.metalness must be between 0 and 1/)
+    v.finish = { reflect: -1 }
+    expect(validateVehicle(v).errors.join(' ')).toMatch(/finish\.reflect must be a non-negative number/)
+  })
+
   it('refuses a profile that does not exist and accepts every one that does', () => {
     const v = clean()
     v.profile.base = 'gtaish'
     expect(validateVehicle(v).errors.join(' ')).toMatch(/not a drive profile/)
-    for (const id of Object.keys(PROFILES)) {
-      v.profile.base = id
+    for (const id of Object.keys(PROFILES)) {      v.profile.base = id
       expect(validateVehicle(v).errors, id).toEqual([])
     }
   })

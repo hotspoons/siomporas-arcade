@@ -1161,17 +1161,6 @@ export let CAR_PROBE_MOVE = 40
  * environment map; this is how hard those surfaces mirror it. Rough roads stay diffuse.
  */
 export let REFLECT = 1.8
-/**
- * Screen-space reflections on the same shiny surfaces: a short march through the previous frame,
- * so a panel can pick up whatever is actually on screen. 0 leaves only the environment map.
- */
-export let SSR = 1
-/**
- * Screen height below which a reflection is ignored (0 is the bottom of the frame, 1 the top).
- * The march starts on this line and walks upward, so a roof picks up trees and sky instead of
- * the asphalt in front of the camera. Raise it until the road drops out of the reflection.
- */
-export let SSR_BELT = 0.62
 /** how much a closed canopy takes out of the sky light under it; 0 = the wood is as bright as the field */
 export let CANOPY_SHADE = 0.75
 /**
@@ -2060,8 +2049,6 @@ export const TUNE_TABS: TuneTab[] = [
           tune('SHADOW_CANOPY_REACH', () => SHADOW_CANOPY_REACH, (v) => (SHADOW_CANOPY_REACH = v), [40, 1200], 10, 'how far the canopy shadows reach (m), starting where the high-resolution trees stop. Longer covers more of the road and softens the map while the canopy is on'),
           tune('SHADOW_CANOPY_SCALE', () => SHADOW_CANOPY_SCALE, (v) => (SHADOW_CANOPY_SCALE = v), [0.3, 1.8], 0.05, 'invisible crown size, as a fraction of the tree height'),
           tune('REFLECT', () => REFLECT, (v) => (REFLECT = v), [0, 4], 0.05, 'environment-map reflections on paint, glass and water'),
-          tune('SSR', () => SSR, (v) => (SSR = v), [0, 2], 0.05, 'screen-space reflections on those same surfaces; 0 is the sky map only'),
-          tune('SSR_BELT', () => SSR_BELT, (v) => (SSR_BELT = v), [0, 1], 0.01, 'reflection belt, as a fraction of the screen height; samples below it are ignored so a roof mirrors trees and sky instead of the road'),
           tune('CAR_SHINE', () => CAR_SHINE, (v) => (CAR_SHINE = v), [0, 3], 0.05, 'clearcoat on the cars'),
           tune('CAR_PROBES', () => CAR_PROBES, (v) => (CAR_PROBES = v), [0, 2], 1, 'car reflection probe: 0 off (sky map only), 1 live (re-captured as you drive), 2 hold (captured once)'),
           tune('CAR_PROBE_BLEND', () => CAR_PROBE_BLEND, (v) => (CAR_PROBE_BLEND = v), [0, 1], 0.05, 'how much the probe replaces the sky reflection on the paint, 0..1'),

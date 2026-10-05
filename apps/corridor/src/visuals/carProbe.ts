@@ -1,7 +1,7 @@
 // Car reflection probes.
 //
-// The car's paint and glass reflect `scene.environment` — the sky dome alone — plus a screen-space
-// pass of the previous frame (shading.ts). Neither knows the TREES: a car under a canopy, or one
+// The car's paint and glass reflect `scene.environment` — the sky dome alone — plus a cube probe at
+// the car (this file). Neither knows the TREES from the sky map alone: a car under a canopy, or one
 // driving past a treeline, mirrors blue sky where it should mirror leaves. Rich, 2026-10-05: *"add a
 // toggle for the car to use the same type of reflections instead of whatever crap is baked into the
 // car now."* This is that toggle.

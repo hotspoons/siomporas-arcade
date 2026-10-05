@@ -50,7 +50,6 @@ export let GRASS_ALIGN = 1
 export let GRASS_MOW_LINE = 13
 // zoning (zoning.ts): in a RURAL zone only this much beside the pavement is mown, the rest grows
 // GRASS_RURAL_TALL times the rough height; a KEPT zone is mown everywhere
-// how far a blade's ROOT stands back from the pavement edge, before its own lean is allowed for
 /**
  * Half the along-track band of a road station, metres.
  *
@@ -62,7 +61,16 @@ export let GRASS_MOW_LINE = 13
  * a stadium.
  */
 export let EDGE_BAND_M = 3.5
-export let GRASS_ROAD_CLEAR = 0.3
+/**
+ * How far a blade's or card's ROOT stands back from the pavement edge (m).
+ *
+ * This used to be the clearance for the leaning TIP: every blade was held far enough back that
+ * its tip, lean and wind could not cross the kerb, which left a bare 2–3 m margin and read as "the
+ * grass won't come right up to the road" (Rich, 2026-10-05). The root now sits at the edge and the
+ * tip is free to lean out over the asphalt, as verge grass does; only the root is kept off the
+ * pavement.
+ */
+export let GRASS_ROAD_CLEAR = 0.1
 /**
  * How near a road a blade has to be before its own position is checked against the MASKS
  * (parking, walks, bare ground, paved imagery) rather than extrapolated from its cell.
@@ -105,6 +113,36 @@ export let GRASS_SCATTER = 1.0
 export let GRASS_SLOPE_MAX = 0.7
 /** past the strip's blend band, no grass where the ground stands this far above the bare DEM (m): that is a shelf, not ground. 0 = off */
 export let GRASS_MAX_SHELF = 1.0
+
+/**
+ * THE DRIVING CONE — grass is focused where the car is going.
+ *
+ * The blade ring used to be a true circle: the ground is grass-textured in every direction, so a
+ * cone left the verge behind the car as flat photo turf (Rich, 2026-09-26). That is right when you
+ * are stopped, but at speed it spends the whole budget on the wake: the tiles behind get generated
+ * first and the grass you are driving toward is not there yet — "over ~180 mph the grass is always
+ * drawing behind us" (Rich, 2026-10-05). So the footprint MORPHS: a full circle at rest, tightening
+ * toward GRASS_CONE_DEG either side of the view as speed reaches GRASS_CONE_SPEED, and everything
+ * outside that cone counts GRASS_CONE_STRETCH times further away, so it falls out of the ring. The
+ * morph is what makes slowing back into a stop restore the all-round verge.
+ */
+export let GRASS_CONE_DEG = 70
+export let GRASS_CONE_STILL_DEG = 180
+export let GRASS_CONE_STRETCH = 2.5
+export let GRASS_CONE_SPEED = 8
+export let GRASS_CONE_FADE = 4
+/**
+ * THE FAST BIAS — thin and reach when the car outruns the generator.
+ *
+ * Above GRASS_FAST_SPEED the ring thins to GRASS_FAST_THIN of its density and its far cards reach
+ * GRASS_FAST_RANGE times further, ramping in over GRASS_FAST_FADE. The cone already points the
+ * budget forward; this keeps the field from lagging the car at 350 mph, where the tiles cannot be
+ * generated fast enough. Thin and range are separate dials (Rich, 2026-10-05).
+ */
+export let GRASS_FAST_SPEED = 80
+export let GRASS_FAST_THIN = 0.5
+export let GRASS_FAST_RANGE = 2
+export let GRASS_FAST_FADE = 40
 
 // --- crops --------------------------------------------------------------------------------------
 /** 1 = grow crops on every OSM farmland ring as well as on authored areas */
@@ -1966,6 +2004,7 @@ export const TUNE_TABS: TuneTab[] = [
         scope: 'world',
         keys: [
           tune('GRASS_MOW_LINE', () => GRASS_MOW_LINE, (v) => (GRASS_MOW_LINE = v), [0, 30], 0.5, 'mown strip width from the pavement edge (m)'),
+          tune('GRASS_ROAD_CLEAR', () => GRASS_ROAD_CLEAR, (v) => (GRASS_ROAD_CLEAR = v), [0, 3], 0.05, 'how far a grass ROOT stands back from the pavement edge (m). The tip may lean out over the kerb'),
           tune('GRASS_MAX_FROM_ROAD', () => GRASS_MAX_FROM_ROAD, (v) => (GRASS_MAX_FROM_ROAD = v), [10, 200], 1),
           tune('GRASS_PATCHINESS', () => GRASS_PATCHINESS, (v) => (GRASS_PATCHINESS = v), [0, 0.7], 0.01, 'share of patches left bare'),
           tune('GRASS_PATCH_SIZE', () => GRASS_PATCH_SIZE, (v) => (GRASS_PATCH_SIZE = v), [1, 30], 1, 'bare patch size (m)'),
@@ -1975,6 +2014,21 @@ export const TUNE_TABS: TuneTab[] = [
           tune('GRASS_MASK_CHECK_M', () => GRASS_MASK_CHECK_M, (v) => (GRASS_MASK_CHECK_M = v), [0, 40], 1, 'check each blade against the parking/walk/paving masks within this of a road (m)'),
           tune('GRASS_SLOPE_MAX', () => GRASS_SLOPE_MAX, (v) => (GRASS_SLOPE_MAX = v), [0.1, 3], 0.05, 'no turf steeper than this (m/m)'),
           tune('GRASS_MAX_SHELF', () => GRASS_MAX_SHELF, (v) => (GRASS_MAX_SHELF = v), [0, 8], 0.1, 'no turf this far above the bare DEM (m); 0 = off'),
+        ],
+      },
+      {
+        title: 'driving (cone + fast bias)',
+        scope: 'world',
+        keys: [
+          tune('GRASS_CONE_STILL_DEG', () => GRASS_CONE_STILL_DEG, (v) => (GRASS_CONE_STILL_DEG = v), [20, 180], 5, 'footprint half-angle at rest: 180 is the full all-round circle'),
+          tune('GRASS_CONE_DEG', () => GRASS_CONE_DEG, (v) => (GRASS_CONE_DEG = v), [20, 180], 5, 'footprint half-angle at speed: degrees either side of the view the grass stays full resolution'),
+          tune('GRASS_CONE_STRETCH', () => GRASS_CONE_STRETCH, (v) => (GRASS_CONE_STRETCH = v), [0, 10], 0.25, 'at speed, how much further outside-cone tiles count (0 = circle at every speed)'),
+          tune('GRASS_CONE_SPEED', () => GRASS_CONE_SPEED, (v) => (GRASS_CONE_SPEED = v), [1, 60], 0.5, 'speed (m/s) at which the cone is fully tightened'),
+          tune('GRASS_CONE_FADE', () => GRASS_CONE_FADE, (v) => (GRASS_CONE_FADE = v), [0, 30], 0.5, 'speed band (m/s) over which the cone morphs in as you pull away'),
+          tune('GRASS_FAST_SPEED', () => GRASS_FAST_SPEED, (v) => (GRASS_FAST_SPEED = v), [10, 200], 1, 'speed (m/s) at which the thin/range fast bias is full (~80 m/s = 180 mph)'),
+          tune('GRASS_FAST_THIN', () => GRASS_FAST_THIN, (v) => (GRASS_FAST_THIN = v), [0.05, 1], 0.05, 'density × at full fast bias (thins the field as you outrun the generator)'),
+          tune('GRASS_FAST_RANGE', () => GRASS_FAST_RANGE, (v) => (GRASS_FAST_RANGE = v), [1, 4], 0.1, 'far-card range × at full fast bias'),
+          tune('GRASS_FAST_FADE', () => GRASS_FAST_FADE, (v) => (GRASS_FAST_FADE = v), [0, 100], 1, 'speed band (m/s) over which the fast bias ramps in'),
         ],
       },
       {

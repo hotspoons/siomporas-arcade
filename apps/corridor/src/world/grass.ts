@@ -283,6 +283,18 @@ export class Grass {
   private prevEye = new THREE.Vector3(NaN, NaN, NaN)
   private prevT = 0
   private motion = 1 // 1 still … 0 moving fast: scales the wind
+  /** 0 at rest … 1 at GRASS_CONE_SPEED: how tightly the footprint is focused ahead of the car */
+  private speedFrac = 0
+  /** 0 normal … 1 at GRASS_FAST_SPEED: how hard the thin/range fast bias is applied */
+  private fastFrac = 0
+  private lastSpeedFrac = -1
+  private lastFastFrac = -1
+  /** the live footprint shape, rebuilt from speed each update: half-angle and behind stretch */
+  private coneDeg = 180
+  private coneStretch = 0
+  /** live fast-bias multipliers: blade/card density, and how far the far cards reach */
+  private thinMul = 1
+  private rangeMul = 1
   /** cards at every range: GRASS_MODE 1, or the eye moving faster than GRASS_WIND_STILL_BELOW */
   private spritesOnly = T.grassMode() === 1
   private lastTile = 'none'
@@ -912,7 +924,7 @@ export class Grass {
   private signature(): string {
     return [
       T.GRASS_MOWN_PER_M2, T.GRASS_ROUGH_PER_M2, T.GRASS_RADIUS, T.GRASS_SPRITE_RADIUS,
-      T.GRASS_SPRITE_PER_M2, T.GRASS_MOW_LINE, T.GRASS_MAX_FROM_ROAD, T.GRASS_PATCHINESS,
+      T.GRASS_SPRITE_PER_M2, T.GRASS_MOW_LINE, T.GRASS_ROAD_CLEAR, T.GRASS_MAX_FROM_ROAD, T.GRASS_PATCHINESS,
       T.GRASS_PATCH_SIZE, T.GRASS_SCATTER, T.GRASS_SLOPE_MAX, T.GRASS_MOWN_HEIGHT,
       T.GRASS_ROUGH_HEIGHT, T.GRASS_LEAN, T.GRASS_HEIGHT, T.GRASS_THICK, T.GRASS_DENSITY,
       T.GRASS_SPRITE_SCALE, T.GRASS_MAX_SHELF, this.heightScale, this.type,
@@ -973,6 +985,15 @@ export class Grass {
     this.eye.copy(eye)
     this.fwd.copy(fwd)
     this.pitch = pitch
+    // THE FOOTPRINT SHAPE, rebuilt from the live speed every frame. `speedFrac` morphs the ring
+    // from the all-round circle at rest to the forward cone at GRASS_CONE_SPEED; `fastFrac` ramps
+    // the thin/range bias in as the car outruns the tile generator. See GRASS_CONE_* / GRASS_FAST_*.
+    this.speedFrac = THREE.MathUtils.smoothstep(speed, T.GRASS_CONE_SPEED - Math.max(0.1, T.GRASS_CONE_FADE), Math.max(0.2, T.GRASS_CONE_SPEED))
+    this.fastFrac = THREE.MathUtils.smoothstep(speed, Math.max(0.2, T.GRASS_FAST_SPEED - Math.max(0.1, T.GRASS_FAST_FADE)), Math.max(0.4, T.GRASS_FAST_SPEED))
+    this.coneDeg = T.GRASS_CONE_STILL_DEG + (T.GRASS_CONE_DEG - T.GRASS_CONE_STILL_DEG) * this.speedFrac
+    this.coneStretch = T.GRASS_CONE_STRETCH * this.speedFrac
+    this.thinMul = 1 + (T.GRASS_FAST_THIN - 1) * this.fastFrac
+    this.rangeMul = 1 + (T.GRASS_FAST_RANGE - 1) * this.fastFrac
     // GRASS_MODE 1 keeps the distance cards everywhere, including beside the camera. With the
     // blade mode on, a moving eye can still drop the blade mesh (GRASS_WIND_STILL_BELOW): generating
     // it is the hitch, and the cards cover the same ground. Slowing back down asks for the blades.
@@ -992,16 +1013,19 @@ export class Grass {
     const tileKey = `${Math.floor(eye.x / TILE)},${Math.floor(eye.z / TILE)}`
     const turned = Math.abs(heading - this.lastHeading) > 0.25 || Math.abs(pitch - this.lastPitch) > 0.2
     const moved = tileKey !== this.lastTile || turned || modeChanged
-    if (moved || this.visStale) {
+    // the footprint changed SHAPE (speed) or REACH (fast bias): the visible set has to be rebuilt,
+    // or the ring keeps the old circle after the car has driven away from a stop
+    const reshaped = Math.abs(this.speedFrac - this.lastSpeedFrac) > 0.02 || Math.abs(this.fastFrac - this.lastFastFrac) > 0.02
+    if (moved || this.visStale || reshaped) {
       this.lastTile = tileKey
       this.lastHeading = heading
       this.lastPitch = pitch
+      this.lastSpeedFrac = this.speedFrac
+      this.lastFastFrac = this.fastFrac
       this.revisit()
-    }
-    if (moved) {
       this.dirty = true
-      // the eye moved to a new tile (or teleported: fly → drive): re-plan from here, nearest first,
-      // instead of finishing a queue that was planned for where we were
+      // the set of tiles that want blades changed with the footprint, so re-plan from here,
+      // nearest first, instead of finishing a queue that was planned for the old shape
       this.queueMissing()
     } else if (this.dirty && this.pending.length === 0) this.queueMissing()
     // Generate the nearest missing tiles until this frame's MILLISECOND budget is spent. A fixed
@@ -1043,7 +1067,7 @@ export class Grass {
    * the assembly and the eviction — they used to each rebuild it, three times a frame.
    */
   private revisit() {
-    const r = Math.max(T.GRASS_RADIUS, T.GRASS_SPRITE_RADIUS)
+    const r = Math.max(T.GRASS_RADIUS, T.GRASS_SPRITE_RADIUS * this.rangeMul)
     const out = this.vis
     out.length = 0
     const tx0 = Math.floor((this.eye.x - r) / TILE), tx1 = Math.floor((this.eye.x + r) / TILE)
@@ -1051,19 +1075,39 @@ export class Grass {
     for (let tx = tx0; tx <= tx1; tx++) {
       for (let tz = tz0; tz <= tz1; tz++) {
         const cx = (tx + 0.5) * TILE, cz = (tz + 0.5) * TILE
-        // The grass footprint is a true CIRCLE, not the tree view-cone. A tree can hide behind you;
-        // the verge cannot — the ground is grass-textured in every direction, so a cone-shaped ring
-        // left the median and the verge beside/behind the car as flat photo turf (Rich: "what's up
-        // with all this not grass?"). The ring is a thinning of blades, never of WHERE grass exists,
-        // so it has to surround the eye. The blade radius is small (GRASS_RADIUS) and the cards are
-        // cheap, so the circle costs little and guarantees the ground is grass all the way round.
-        const d = Math.hypot(cx - this.eye.x, cz - this.eye.z)
+        // THE FOOTPRINT MORPHS. At rest it is the true CIRCLE the verge wants: the ground is
+        // grass-textured in every direction, so a cone-shaped ring left the median and the verge
+        // beside the car as flat photo turf (Rich: "what's up with all this not grass?"). Once the
+        // car is moving, `coneDistance` stretches everything outside the forward cone (see
+        // GRASS_CONE_*), so the ring follows the driver's eye and the wake falls away without
+        // paying to plant blades the car will never look at. As the car slows, `speedFrac` fades
+        // the stretch out and the circle comes back.
+        const d = this.coneDistance(cx - this.eye.x, cz - this.eye.z)
         if (d > r + TILE) continue
         out.push({ key: `${tx},${tz}`, tx, tz, d })
       }
     }
     out.sort((a, b) => a.d - b.d)
     this.visStale = false
+  }
+
+  /**
+   * How far a point counts for the grass budget: Euclidean at rest, stretched behind the view once
+   * the car is moving. `coneDeg` is the half-angle that stays full resolution and `coneStretch` how
+   * much further an outside point counts, both rebuilt from speed in `update`. A steep view is a
+   * circle again, the same top-down escape `lodDistance` gives the trees.
+   */
+  private coneDistance(dx: number, dz: number): number {
+    const d = Math.hypot(dx, dz)
+    if (d < 1e-6 || this.coneStretch <= 1e-6) return d
+    const cos = (dx * this.fwd.x + dz * this.fwd.z) / d
+    let outside = 0
+    if (this.coneDeg < 179.5) {
+      const angle = (Math.acos(Math.max(-1, Math.min(1, cos))) * 180) / Math.PI
+      outside = Math.min(1, Math.max(0, (angle - this.coneDeg) / 12))
+    }
+    const topdown = Math.min(1, Math.max(0, (this.pitch - T.LOD_TOPDOWN_PITCH * 0.7) / (T.LOD_TOPDOWN_PITCH * 0.3)))
+    return d * (1 + this.coneStretch * outside * (1 - topdown))
   }
 
   /** the scene's day/night light level and its colour, for a shader that does its own lighting */
@@ -1147,7 +1191,7 @@ export class Grass {
       for (let cz = z0; cz < z0 + TILE; cz += cell) {
         const wx = cx + 0.5 * cell, wz = cz + 0.5 * cell
         const roadD = this.roadDistance(wx, wz)
-        if (roadD < this.pavedHalf + 0.3) continue // pavement
+        if (roadD < this.pavedHalf + T.GRASS_ROAD_CLEAR) continue // pavement
         /*
          * "Spend the budget on the verge, where the eye is" -- true of a CORRIDOR, false of a
          * WORLD.
@@ -1197,7 +1241,7 @@ export class Grass {
         // 1.5 m walk — "grass growing over the sidewalk" (Rich, 2026-09-26), measured as 289
         // blades inside one walk with the cover answering "sidewalk" at every point of it. Asked
         // at the clump, a clump on pavement or a walk grows nothing.
-        const clumpClear = this.roadDistance(ccx, ccz) >= this.pavedHalf + 0.3
+        const clumpClear = this.roadDistance(ccx, ccz) >= this.pavedHalf + T.GRASS_ROAD_CLEAR
         // the distance field near the road is linear, so a blade's own distance is the cell's plus
         // its offset along the gradient — a per-blade test for the price of one grid walk a cell
         const g = clumpClear && this.roadGrad ? this.roadGrad(wx, wz) : null
@@ -1216,13 +1260,13 @@ export class Grass {
           // Rich saw exactly that. Drop anything that is not a real, finite blade.
           if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) continue
           if (!Number.isFinite(height) || !Number.isFinite(width) || height > 12) continue
-          // A BLADE'S TIP MUST CLEAR THE PAVEMENT, NOT JUST ITS ROOT. The cell and the clump were
-          // tested, but a blade scatters up to GRASS_SCATTER/2 beyond the clump — measured on
-          // 2026-09-26, blades stood at −0.13 m (on the asphalt) and 715 of 20,725 near an edge
-          // leaned over it by up to 0.52 m. The root's own distance, and the bend the shader gives
-          // it (lean plus the wind's share, which a mown blade barely feels), both have to fit.
+          // THE ROOT REACHES THE KERB; THE TIP MAY LEAN OVER IT. The cell and the clump were
+          // tested, but a blade scatters up to GRASS_SCATTER/2 beyond the clump, so its own root
+          // needs the test. GRASS_ROAD_CLEAR is a ROOT clearance now, not the old TIP clearance:
+          // the guard used to hold every blade far enough back that its lean and wind could not
+          // cross the kerb, which left the verge 2–3 m short of the road (Rich, 2026-10-05). Verge
+          // grass leans out over the tarmac; only the root has to stay off it.
           if (g) {
-            const need = this.pavedHalf + T.GRASS_ROAD_CLEAR + height * (lean + (mown ? 0.05 : 0.3))
             /*
              * CLOSE IN, ASK. FURTHER OUT, STEP.
              *
@@ -1239,7 +1283,7 @@ export class Grass {
              * cell already within a few metres of pavement is near enough to matter.
              */
             const dRoot = roadD < T.GRASS_EXACT_M ? this.roadDistance(x, z) : roadD + (x - wx) * g[0] + (z - wz) * g[1]
-            if (dRoot < need) continue
+            if (dRoot < this.pavedHalf + T.GRASS_ROAD_CLEAR) continue
           }
           // and the masks at the blade's OWN feet, which no gradient can predict — a raster has a
           // hard edge and no gradient at all. Inside GRASS_EXACT_M the query above already asked
@@ -1304,7 +1348,9 @@ export class Grass {
     const card2Arr = this.aCard2.array as Float32Array
     let k = 0, kc = 0
     const rBlade = T.GRASS_RADIUS
-    const rCard = T.GRASS_SPRITE_RADIUS
+    // the fast bias reaches the far cards out further, and thins both tiers, when the car outruns
+    // the generator (GRASS_FAST_*); at rest rangeMul = thinMul = 1 and this is unchanged
+    const rCard = T.GRASS_SPRITE_RADIUS * this.rangeMul
     // Cards used to start where the blades thin out. With the blades put away they have to
     // start at the eye, or the ground beside the car is bare until you slow down.
     const cardFrom = this.spritesOnly ? 0 : T.GRASS_LOD_MID - 8
@@ -1313,7 +1359,7 @@ export class Grass {
       if (!tile) continue
       if (!this.spritesOnly && t.d <= rBlade + TILE * 0.71 && tile.n) {
         // density: LOD rings — full inside NEAR, MID_DENSITY to MID, FAR_DENSITY to the rim
-        const falloff = t.d < T.GRASS_LOD_NEAR ? 1 : t.d < T.GRASS_LOD_MID ? T.GRASS_LOD_MID_DENSITY : T.GRASS_LOD_FAR_DENSITY
+        const falloff = (t.d < T.GRASS_LOD_NEAR ? 1 : t.d < T.GRASS_LOD_MID ? T.GRASS_LOD_MID_DENSITY : T.GRASS_LOD_FAR_DENSITY) * this.thinMul
         const take = Math.min(tile.n, Math.round(tile.n * falloff), this.capacity - k)
         for (let i = 0; i < take; i++) {
           const o = i * BLADE_F
@@ -1332,7 +1378,7 @@ export class Grass {
       if (t.d >= cardFrom - TILE && t.d <= rCard + TILE * 0.71 && tile.nc) {
         // thin the cards toward the rim: full past the blades, GRASS_SPRITE_FAR_DENSITY at the far edge
         const u = Math.min(1, Math.max(0, (t.d - T.GRASS_LOD_MID) / Math.max(1, rCard - T.GRASS_LOD_MID)))
-        const keep = 1 + (T.GRASS_SPRITE_FAR_DENSITY - 1) * u * u
+        const keep = (1 + (T.GRASS_SPRITE_FAR_DENSITY - 1) * u * u) * this.thinMul
         const take = Math.min(tile.nc, Math.round(tile.nc * keep), this.cardCapacity - kc)
         for (let i = 0; i < take; i++) {
           const o = i * CARD_F
@@ -1365,7 +1411,7 @@ export class Grass {
     // foreground. With the blades put away that shrink is the pop: the ground beside the car
     // is empty until a clump crosses the ring. Cards that start at the eye have to be full size there.
     this.cardMat.uniforms.uFadeIn.value = this.spritesOnly ? 0 : T.GRASS_LOD_MID
-    this.cardMat.uniforms.uFadeOut.value = T.GRASS_SPRITE_RADIUS
+    this.cardMat.uniforms.uFadeOut.value = T.GRASS_SPRITE_RADIUS * this.rangeMul
   }
 
   /** counts for probes and the HUD */
@@ -1390,7 +1436,7 @@ export class Grass {
     // about rBlade. Only `nearestEmpty` says whether the eye can see a hole.
     let empty = Infinity, upgrade = Infinity, nEmpty = 0
     for (const p of this.pending) {
-      const d = T.lodDistance(p.tx * TILE + TILE / 2 - this.eye.x, p.tz * TILE + TILE / 2 - this.eye.z, this.fwd.x, this.fwd.z, this.pitch)
+      const d = this.coneDistance(p.tx * TILE + TILE / 2 - this.eye.x, p.tz * TILE + TILE / 2 - this.eye.z)
       if (this.tiles.has(p.key)) { if (d < upgrade) upgrade = d } else { nEmpty++; if (d < empty) empty = d }
     }
     return {

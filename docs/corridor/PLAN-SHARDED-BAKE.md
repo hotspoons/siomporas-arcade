@@ -104,6 +104,12 @@ or stitched **once**, after them.
 Phase 0 is a prerequisite and is worth shipping on its own: it makes the single-node dc-metro bake
 come in well under an hour and removes the two hangs.
 
+**Measured on dc-metro-take-2, 2026-10-05 (single Job, Phase 0 image).** The first hang is gone:
+the primary profile of the 62 km Capital Beltway took **5m04s** (it used to wedge for 210 min), and
+all **9,794 branches profiled in 6m16s at ~26/s** with the main process at Threads 65 and loadavg
+16–19 — the forked workers stayed busy instead of parking on an inherited lock. The second hang
+(`overview`) and the tail are what the remaining watcher is for.
+
 1. **Unfork the deadlock.** Set the single-thread environment before numpy is imported (in
    `corridor/__main__.py`, and in the Job env in `tools/worldeditor/runs.mjs` `#startJob` and
    `tools/corridor/chart/templates/job.yaml`). Then revisit `profile_many`: either keep the fork

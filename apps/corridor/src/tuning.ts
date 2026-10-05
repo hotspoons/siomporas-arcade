@@ -119,52 +119,51 @@ export let GRASS_MAX_SHELF = 1.0
  *
  * The blade ring used to be a true circle: the ground is grass-textured in every direction, so a
  * cone left the verge behind the car as flat photo turf (Rich, 2026-09-26). That is right when you
- * are stopped, but at speed it spends the whole budget on the wake: the tiles behind get generated
- * first and the grass you are driving toward is not there yet — "over ~180 mph the grass is always
- * drawing behind us" (Rich, 2026-10-05). So the footprint MORPHS: a full circle at rest, tightening
- * toward GRASS_CONE_DEG either side of the view as speed reaches GRASS_CONE_SPEED. Past that
- * half-angle (plus a 12° feather) the tiles are DROPPED, not merely sorted last — the ring was a
- * cone that still queued and planted its own wake, which is grass the driver can never see (Rich,
- * 2026-10-05: "it should not be a ring, it should be a cone facing in the direction of motion").
- * GRASS_CONE_STRETCH only softens the ordering inside the feather. The morph is what makes slowing
- * back into a stop restore the all-round verge.
+ * are stopped, but at speed it spends the whole budget on the wake. So the footprint MORPHS: a full
+ * circle at rest, tightening toward GRASS_CONE_DEG either side of the view as speed reaches
+ * GRASS_CONE_SPEED, then tightening FURTHER to GRASS_CONE_DEG_VMAX as speed reaches
+ * GRASS_CONE_TIGHTEN_SPEED. Past the half-angle (plus a 12° feather) tiles are DROPPED, not merely
+ * sorted last, so the wake is never queued or planted (Rich, 2026-10-05: "it should not be a ring,
+ * it should be a cone facing in the direction of motion").
+ *
+ * The second knee IS the forward-bias dial. A narrower wedge needs less area to cover the same
+ * distance ahead, so closing it as the car goes faster spends the same budget further out instead
+ * of falling behind — "draw a bit further ahead the faster you go".
  */
 export let GRASS_CONE_DEG = 70
 export let GRASS_CONE_STILL_DEG = 180
-export let GRASS_CONE_STRETCH = 2.5
+export let GRASS_CONE_DEG_VMAX = 40
 export let GRASS_CONE_SPEED = 8
+export let GRASS_CONE_TIGHTEN_SPEED = 160
 export let GRASS_CONE_FADE = 4
 /**
  * THE FAST BIAS — thin and reach when the car outruns the generator.
  *
- * Above GRASS_FAST_SPEED the ring thins to GRASS_FAST_THIN of its density and its far cards reach
- * GRASS_FAST_RANGE times further, ramping in over GRASS_FAST_FADE. The cone already points the
- * budget forward; this keeps the field from lagging the car. Thin and range are separate dials
- * (Rich, 2026-10-05).
+ * Above GRASS_FAST_SPEED the field thins to GRASS_FAST_THIN of its density, ramping in over
+ * GRASS_FAST_FADE, and thins FURTHER to GRASS_FAST_THIN_VMAX as the cone tightens at
+ * GRASS_CONE_TIGHTEN_SPEED. Thin and reach are separate dials (Rich, 2026-10-05); thinning is what
+ * actually buys the generator speed, so it is the other half of the forward bias.
  *
- * GRASS_FAST_RANGE is a FIXED multiplier, so it stops extending at the knee: at 195 mph the rim is
- * still GRASS_SPRITE_RADIUS × GRASS_FAST_RANGE metres ahead and the bare ground you are driving
- * toward is obvious (Rich, 2026-10-05: "still outrunning the grass, right around 195 mph").
- * GRASS_FAST_LEAD_S makes the rim lead the eye by at least that many SECONDS of travel instead, so
- * it stays ahead however fast the car goes. It ramps in with the same fast bias, so nothing below
- * the knee changes. 0 leaves the fixed multiplier alone.
+ * GRASS_FAST_RANGE is only a CEILING on how far the far cards may reach, not a promise: the rim is
+ * tracked to what the generator actually clears (see GRASS_RIM_DRAIN), so raising this matters only
+ * when the generator is fast enough to fill that far.
  */
 export let GRASS_FAST_SPEED = 80
 export let GRASS_FAST_THIN = 0.5
+export let GRASS_FAST_THIN_VMAX = 0.25
 export let GRASS_FAST_RANGE = 2
 export let GRASS_FAST_FADE = 40
-export let GRASS_FAST_LEAD_S = 6
 
 /**
  * How deep the queue is allowed to get, in FRAMES OF GENERATION, before the far rim is pulled in.
  *
- * The rim is a ceiling, not a promise: GRASS_FAST_RANGE / GRASS_FAST_LEAD_S say how far the far
- * cards MAY reach, but the generator can only hold a front so wide. Left at the ceiling, the eye
- * gets a hard edge where generation stopped and empty ground beyond it (the "rim" was a request the
- * generator never met). So once the car is moving, the rim is sized to what the generator is
- * actually clearing: while the queue is deeper than this many frames of work the rim contracts,
- * while it is nearly drained the rim grows back toward the ceiling. At rest the ceiling is the
- * circle GRASS_SPRITE_RADIUS. (Rich, 2026-10-05: "size the far rim to what is affordable".)
+ * The rim is a ceiling, not a promise: GRASS_FAST_RANGE says how far the far cards MAY reach, but
+ * the generator can only hold a front so wide. Left at the ceiling, the eye gets a hard edge where
+ * generation stopped and empty ground beyond it (the "rim" was a request the generator never met).
+ * So once the car is moving, the rim is sized to what the generator is actually clearing: while the
+ * queue is deeper than this many frames of work the rim contracts, while it is nearly drained the
+ * rim grows back toward the ceiling. At rest the ceiling is the circle GRASS_SPRITE_RADIUS.
+ * (Rich, 2026-10-05: "size the far rim to what is affordable".)
  */
 export let GRASS_RIM_DRAIN = 6
 
@@ -2057,15 +2056,16 @@ export const TUNE_TABS: TuneTab[] = [
         scope: 'world',
         keys: [
           tune('GRASS_CONE_STILL_DEG', () => GRASS_CONE_STILL_DEG, (v) => (GRASS_CONE_STILL_DEG = v), [20, 180], 5, 'footprint half-angle at rest: 180 is the full all-round circle'),
-          tune('GRASS_CONE_DEG', () => GRASS_CONE_DEG, (v) => (GRASS_CONE_DEG = v), [20, 180], 5, 'footprint half-angle at speed: degrees either side of the view the grass stays full resolution'),
-          tune('GRASS_CONE_STRETCH', () => GRASS_CONE_STRETCH, (v) => (GRASS_CONE_STRETCH = v), [0, 10], 0.25, 'at speed, how much further the 12° feather outside the cone counts for ordering (the footprint cut itself is GRASS_CONE_DEG)'),
-          tune('GRASS_CONE_SPEED', () => GRASS_CONE_SPEED, (v) => (GRASS_CONE_SPEED = v), [1, 60], 0.5, 'speed (m/s) at which the cone is fully tightened'),
+          tune('GRASS_CONE_DEG', () => GRASS_CONE_DEG, (v) => (GRASS_CONE_DEG = v), [20, 180], 5, 'footprint half-angle at GRASS_CONE_SPEED: degrees either side of the view the grass stays full resolution'),
+          tune('GRASS_CONE_DEG_VMAX', () => GRASS_CONE_DEG_VMAX, (v) => (GRASS_CONE_DEG_VMAX = v), [10, 180], 5, 'footprint half-angle at GRASS_CONE_TIGHTEN_SPEED: the forward-bias dial — a narrower wedge reaches further ahead'),
+          tune('GRASS_CONE_SPEED', () => GRASS_CONE_SPEED, (v) => (GRASS_CONE_SPEED = v), [1, 60], 0.5, 'speed (m/s) at which the cone first tightens to GRASS_CONE_DEG (~8 m/s = 18 mph)'),
+          tune('GRASS_CONE_TIGHTEN_SPEED', () => GRASS_CONE_TIGHTEN_SPEED, (v) => (GRASS_CONE_TIGHTEN_SPEED = v), [20, 250], 5, 'speed (m/s) at which the cone has tightened all the way to GRASS_CONE_DEG_VMAX (~160 m/s = 358 mph)'),
           tune('GRASS_CONE_FADE', () => GRASS_CONE_FADE, (v) => (GRASS_CONE_FADE = v), [0, 30], 0.5, 'speed band (m/s) over which the cone morphs in as you pull away'),
           tune('GRASS_FAST_SPEED', () => GRASS_FAST_SPEED, (v) => (GRASS_FAST_SPEED = v), [10, 200], 1, 'speed (m/s) at which the thin/range fast bias is full (~80 m/s = 180 mph)'),
           tune('GRASS_FAST_THIN', () => GRASS_FAST_THIN, (v) => (GRASS_FAST_THIN = v), [0.05, 1], 0.05, 'density × at full fast bias (thins the field as you outrun the generator)'),
-          tune('GRASS_FAST_RANGE', () => GRASS_FAST_RANGE, (v) => (GRASS_FAST_RANGE = v), [1, 4], 0.1, 'far-card range × at full fast bias'),
+          tune('GRASS_FAST_THIN_VMAX', () => GRASS_FAST_THIN_VMAX, (v) => (GRASS_FAST_THIN_VMAX = v), [0.02, 1], 0.01, 'density × once the cone is fully tightened: the other forward-bias dial — thinner grass is cheaper and reaches further'),
+          tune('GRASS_FAST_RANGE', () => GRASS_FAST_RANGE, (v) => (GRASS_FAST_RANGE = v), [1, 6], 0.1, 'CEILING on far-card range × at full fast bias (the tracked rim stays under this)'),
           tune('GRASS_FAST_FADE', () => GRASS_FAST_FADE, (v) => (GRASS_FAST_FADE = v), [0, 100], 1, 'speed band (m/s) over which the fast bias ramps in'),
-          tune('GRASS_FAST_LEAD_S', () => GRASS_FAST_LEAD_S, (v) => (GRASS_FAST_LEAD_S = v), [0, 20], 0.5, 'seconds of travel the far cards MAY lead the eye by above the fast knee, as a ceiling on the rim (0 = the fixed GRASS_FAST_RANGE only)'),
           tune('GRASS_RIM_DRAIN', () => GRASS_RIM_DRAIN, (v) => (GRASS_RIM_DRAIN = v), [1, 40], 1, 'queue depth, in frames of generation, before the far rim is pulled in to what the generator is actually clearing'),
         ],
       },

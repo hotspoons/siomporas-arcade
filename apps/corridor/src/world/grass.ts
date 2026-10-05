@@ -293,9 +293,11 @@ export class Grass {
   private fastFrac = 0
   private lastSpeedFrac = -1
   private lastFastFrac = -1
-  /** the live footprint shape, rebuilt from speed each update: half-angle and behind stretch */
+  /** the live footprint shape, rebuilt from speed each update: half-angle ahead of the car */
   private coneDeg = 180
-  private coneStretch = 0
+  /** 0 … 1 above GRASS_CONE_SPEED: how far the cone has closed toward GRASS_CONE_DEG_VMAX */
+  private tightenFrac = 0
+  private lastTightenFrac = -1
   /** live fast-bias multipliers: blade/card density, and how far the far cards reach */
   private thinMul = 1
   private rangeMul = 1
@@ -310,7 +312,6 @@ export class Grass {
   private frame = 0
   private eye = new THREE.Vector3()
   private fwd = new THREE.Vector3(1, 0, 0)
-  private pitch = 0
   /** the visible tile set for this eye/heading, nearest first; rebuilt only when the view moved */
   private vis: { key: string; tx: number; tz: number; d: number }[] = []
   private visStale = true
@@ -990,29 +991,25 @@ export class Grass {
     this.prevT = now
     this.eye.copy(eye)
     this.fwd.copy(fwd)
-    this.pitch = pitch
-    // THE FOOTPRINT SHAPE, rebuilt from the live speed every frame. `speedFrac` morphs the ring
-    // from the all-round circle at rest to the forward cone at GRASS_CONE_SPEED; `fastFrac` ramps
-    // the thin/range bias in as the car outruns the tile generator. See GRASS_CONE_* / GRASS_FAST_*.
+    // THE FOOTPRINT SHAPE, rebuilt from the live speed every frame. `speedFrac` opens from the
+    // all-round circle at rest to the first cone at GRASS_CONE_SPEED; `tightenFrac` then closes it
+    // further to GRASS_CONE_DEG_VMAX by GRASS_CONE_TIGHTEN_SPEED — the forward bias, a narrower
+    // wedge reaching further ahead the faster the car goes. `fastFrac` ramps the thin/range bias in
+    // as the car outruns the generator. See GRASS_CONE_* / GRASS_FAST_*.
     this.speedFrac = THREE.MathUtils.smoothstep(speed, T.GRASS_CONE_SPEED - Math.max(0.1, T.GRASS_CONE_FADE), Math.max(0.2, T.GRASS_CONE_SPEED))
     this.fastFrac = THREE.MathUtils.smoothstep(speed, Math.max(0.2, T.GRASS_FAST_SPEED - Math.max(0.1, T.GRASS_FAST_FADE)), Math.max(0.4, T.GRASS_FAST_SPEED))
-    this.coneDeg = T.GRASS_CONE_STILL_DEG + (T.GRASS_CONE_DEG - T.GRASS_CONE_STILL_DEG) * this.speedFrac
-    this.coneStretch = T.GRASS_CONE_STRETCH * this.speedFrac
-    this.thinMul = 1 + (T.GRASS_FAST_THIN - 1) * this.fastFrac
+    this.tightenFrac = T.GRASS_CONE_TIGHTEN_SPEED > T.GRASS_CONE_SPEED
+      ? THREE.MathUtils.smoothstep(speed, T.GRASS_CONE_SPEED, T.GRASS_CONE_TIGHTEN_SPEED)
+      : 0
+    this.coneDeg =
+      T.GRASS_CONE_STILL_DEG +
+      (T.GRASS_CONE_DEG - T.GRASS_CONE_STILL_DEG) * this.speedFrac +
+      (T.GRASS_CONE_DEG_VMAX - T.GRASS_CONE_DEG) * this.tightenFrac
+    // the second thin stage: keep dropping density as the cone closes, which buys the generator the
+    // headroom to actually cover the narrower wedge further out
+    const thinVmax = T.GRASS_FAST_THIN > 1e-6 ? 1 + (T.GRASS_FAST_THIN_VMAX / T.GRASS_FAST_THIN - 1) * this.tightenFrac : 1
+    this.thinMul = (1 + (T.GRASS_FAST_THIN - 1) * this.fastFrac) * thinVmax
     this.rangeMul = 1 + (T.GRASS_FAST_RANGE - 1) * this.fastFrac
-    /*
-     * THE RIM LEADS BY TIME, NOT DISTANCE.
-     *
-     * GRASS_FAST_RANGE is a fixed multiplier: it stops growing at the knee, so at 195 mph the far
-     * cards still end GRASS_SPRITE_RADIUS × GRASS_FAST_RANGE metres ahead and the car drives at
-     * bare ground. Above the knee, hold the rim GRASS_FAST_LEAD_S seconds of travel out instead.
-     * Scaled by `fastFrac` so it ramps in with the rest of the bias and nothing below the knee
-     * changes; capped so a teleport cannot ask for a ten-kilometre ring.
-     */
-    if (T.GRASS_FAST_LEAD_S > 0) {
-      const leadMul = (speed * T.GRASS_FAST_LEAD_S) / Math.max(1, T.GRASS_SPRITE_RADIUS)
-      this.rangeMul = Math.min(8, Math.max(this.rangeMul, 1 + (leadMul - 1) * this.fastFrac))
-    }
     // GRASS_MODE 1 keeps the distance cards everywhere, including beside the camera. With the
     // blade mode on, a moving eye can still drop the blade mesh (GRASS_WIND_STILL_BELOW): generating
     // it is the hitch, and the cards cover the same ground. Slowing back down asks for the blades.
@@ -1034,13 +1031,14 @@ export class Grass {
     const moved = tileKey !== this.lastTile || turned || modeChanged
     // the footprint changed SHAPE (speed) or REACH (fast bias): the visible set has to be rebuilt,
     // or the ring keeps the old circle after the car has driven away from a stop
-    const reshaped = Math.abs(this.speedFrac - this.lastSpeedFrac) > 0.02 || Math.abs(this.fastFrac - this.lastFastFrac) > 0.02
+    const reshaped = Math.abs(this.speedFrac - this.lastSpeedFrac) > 0.02 || Math.abs(this.fastFrac - this.lastFastFrac) > 0.02 || Math.abs(this.tightenFrac - this.lastTightenFrac) > 0.02
     if (moved || this.visStale || reshaped) {
       this.lastTile = tileKey
       this.lastHeading = heading
       this.lastPitch = pitch
       this.lastSpeedFrac = this.speedFrac
       this.lastFastFrac = this.fastFrac
+      this.lastTightenFrac = this.tightenFrac
       this.revisit()
       this.dirty = true
       // the set of tiles that want blades changed with the footprint, so re-plan from here,
@@ -1077,7 +1075,7 @@ export class Grass {
     /*
      * SIZE THE FAR RIM TO THE GENERATOR, NOT THE DRIVER.
      *
-     * `rangeMul` is the ceiling the fast bias asks for (GRASS_FAST_RANGE / GRASS_FAST_LEAD_S), but
+     * `rangeMul` is the ceiling the fast bias asks for (GRASS_FAST_RANGE), but
      * a wide-open cone at 160 mph needs far more front than the budget clears, so left at the
      * ceiling the eye sees a hard edge: cards to where generation stopped, then bare ground. Track
      * what the queue is actually draining instead. While the queue is deeper than GRASS_RIM_DRAIN
@@ -1125,43 +1123,21 @@ export class Grass {
         // ground is grass-textured in every direction, so a cone-shaped ring left the median and the
         // verge beside the car as flat photo turf (Rich: "what's up with all this not grass?"). Once
         // moving, the demand is a WEDGE facing the direction of travel — everything past the
-        // GRASS_CONE_DEG half-angle (plus the 12° feather `coneDistance` already uses) is dropped
-        // outright, not merely sorted last. The old soft version still queued and planted the whole
-        // wake behind the car, which at speed is a large share of the ring and grass the driver can
-        // never see; cutting it puts that budget in front, where the eye is. As the car slows,
-        // `speedFrac` fades `coneDeg` back toward GRASS_CONE_STILL_DEG (180 = all round) and the
-        // circle returns.
+        // `coneDeg` half-angle (plus a 12° feather) is dropped outright, not merely sorted last. The
+        // old soft version still queued and planted the whole wake behind the car, which at speed is
+        // a large share of the ring and grass the driver can never see; cutting it puts that budget
+        // in front, where the eye is. `coneDeg` itself closes further with speed (the forward bias,
+        // GRASS_CONE_DEG_VMAX), and at rest it is GRASS_CONE_STILL_DEG (180 = all round).
         if (this.coneDeg < 179.5 && dist > 1e-6) {
           const cos = (dx * this.fwd.x + dz * this.fwd.z) / dist
           const angle = (Math.acos(Math.max(-1, Math.min(1, cos))) * 180) / Math.PI
           if (angle >= this.coneDeg + 12) continue
         }
-        const d = this.coneDistance(dx, dz)
-        if (d > r + TILE) continue
-        out.push({ key: `${tx},${tz}`, tx, tz, d })
+        out.push({ key: `${tx},${tz}`, tx, tz, d: dist })
       }
     }
     out.sort((a, b) => a.d - b.d)
     this.visStale = false
-  }
-
-  /**
-   * How far a point counts for the grass budget: Euclidean at rest, stretched behind the view once
-   * the car is moving. `coneDeg` is the half-angle that stays full resolution and `coneStretch` how
-   * much further an outside point counts, both rebuilt from speed in `update`. A steep view is a
-   * circle again, the same top-down escape `lodDistance` gives the trees.
-   */
-  private coneDistance(dx: number, dz: number): number {
-    const d = Math.hypot(dx, dz)
-    if (d < 1e-6 || this.coneStretch <= 1e-6) return d
-    const cos = (dx * this.fwd.x + dz * this.fwd.z) / d
-    let outside = 0
-    if (this.coneDeg < 179.5) {
-      const angle = (Math.acos(Math.max(-1, Math.min(1, cos))) * 180) / Math.PI
-      outside = Math.min(1, Math.max(0, (angle - this.coneDeg) / 12))
-    }
-    const topdown = Math.min(1, Math.max(0, (this.pitch - T.LOD_TOPDOWN_PITCH * 0.7) / (T.LOD_TOPDOWN_PITCH * 0.3)))
-    return d * (1 + this.coneStretch * outside * (1 - topdown))
   }
 
   /** the scene's day/night light level and its colour, for a shader that does its own lighting */
@@ -1597,7 +1573,7 @@ export class Grass {
     // about rBlade. Only `nearestEmpty` says whether the eye can see a hole.
     let empty = Infinity, upgrade = Infinity, nEmpty = 0
     for (const p of this.pending) {
-      const d = this.coneDistance(p.tx * TILE + TILE / 2 - this.eye.x, p.tz * TILE + TILE / 2 - this.eye.z)
+      const d = Math.hypot(p.tx * TILE + TILE / 2 - this.eye.x, p.tz * TILE + TILE / 2 - this.eye.z)
       if (this.tiles.has(p.key)) { if (d < upgrade) upgrade = d } else { nEmpty++; if (d < empty) empty = d }
     }
     return {

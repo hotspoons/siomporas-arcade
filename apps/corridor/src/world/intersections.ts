@@ -619,6 +619,7 @@ export function buildCrosswalks(
   edgeDistance: (x: number, z: number) => number,
   onSidewalk: (x: number, z: number) => boolean,
   crossingNodes: { x: number; y: number; marked: boolean }[],
+  nearestDir?: (x: number, y: number) => THREE.Vector3 | null,
 ): CrosswalksResult {
   const group = new THREE.Group()
   group.name = 'crosswalks'
@@ -676,25 +677,37 @@ export function buildCrosswalks(
     }
   }
   // OSM crossing nodes not already covered by a signal's ladder: the direction comes from the
-  // nearest branch segment, because a node has no bearing of its own
+  // nearest branch segment, because a node has no bearing of its own.
+  //
+  // `nearestDir` is a spatially-indexed lookup the caller builds once (see scene.ts). The fallback
+  // below scans EVERY branch vertex for every node: 20,567 crossing nodes x 19,035 branches x ~50
+  // vertices is ~2e10 ops, measured at 244 s as "street: crosswalks" at load AND again for every
+  // far cell the pump reached — the teleport freeze. The caller also passes only the nodes in the
+  // slice being built, so a far cell never re-tests the whole world.
   const branches = ((manifest as unknown as { branches?: { coords: number[][] }[] }).branches ?? [])
   for (const n of crossingNodes) {
     if (!n.marked) continue
     const w = toWorld(n.x, n.y)
     if (placed.some((p) => p.distanceTo(w) < 10)) continue
-    let best = Infinity, dir: THREE.Vector3 | null = null
-    for (const b of branches) {
-      const c = b.coords
-      for (let k = 1; k < c.length; k++) {
-        const ax = c[k - 1][0], ay = c[k - 1][1], bx = c[k][0], by = c[k][1]
-        const dx = bx - ax, dy = by - ay
-        const l2 = dx * dx + dy * dy || 1
-        const t = Math.max(0, Math.min(1, ((n.x - ax) * dx + (n.y - ay) * dy) / l2))
-        const d = Math.hypot(ax + t * dx - n.x, ay + t * dy - n.y)
-        if (d < best) { best = d; dir = new THREE.Vector3(dx, 0, -dy).normalize() }
+    let dir: THREE.Vector3 | null = null
+    if (nearestDir) {
+      dir = nearestDir(n.x, n.y)
+    } else {
+      let best = Infinity
+      for (const b of branches) {
+        const c = b.coords
+        for (let k = 1; k < c.length; k++) {
+          const ax = c[k - 1][0], ay = c[k - 1][1], bx = c[k][0], by = c[k][1]
+          const dx = bx - ax, dy = by - ay
+          const l2 = dx * dx + dy * dy || 1
+          const t = Math.max(0, Math.min(1, ((n.x - ax) * dx + (n.y - ay) * dy) / l2))
+          const d = Math.hypot(ax + t * dx - n.x, ay + t * dy - n.y)
+          if (d < best) { best = d; dir = new THREE.Vector3(dx, 0, -dy).normalize() }
+        }
       }
+      if (best > 15) dir = null
     }
-    if (!dir || best > 15) { counts.skippedNoRoad++; continue }
+    if (!dir) { counts.skippedNoRoad++; continue }
     w.y = roadAt(w.x, w.z) ?? 0
     if (ladder(w, dir, 12, false)) counts.atNodes++
   }

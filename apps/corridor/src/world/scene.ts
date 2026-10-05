@@ -3124,6 +3124,43 @@ if (uLodOn > 0.5) {
       intersections: ix ? { ...ix, list: ix.list.filter((n) => keep(n.x, n.y) || n.corners.some((c) => keep(c.x, c.y))) } : ix,
     }
   }
+  // A branch-segment grid, built ONCE, so an OSM crossing node only tests the few segments near it
+  // instead of every branch vertex on the site. The old scan was ~2e10 ops on dc-metro and showed
+  // up as 244 s of "street: crosswalks" at load — and again for every far cell the pump reached.
+  const SEG_M = 250
+  type Seg = { ax: number; ay: number; dx: number; dy: number; l2: number }
+  const segGrid = new Map<number, Seg[]>()
+  for (const b of manifest.branches ?? []) {
+    const c = b.coords
+    if (!c) continue
+    for (let k = 1; k < c.length; k++) {
+      const ax = c[k - 1][0], ay = c[k - 1][1], bx = c[k][0], by = c[k][1]
+      const dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy || 1
+      const gx0 = Math.floor(Math.min(ax, bx) / SEG_M), gx1 = Math.floor(Math.max(ax, bx) / SEG_M)
+      const gy0 = Math.floor(Math.min(ay, by) / SEG_M), gy1 = Math.floor(Math.max(ay, by) / SEG_M)
+      for (let gx = gx0; gx <= gx1; gx++) for (let gy = gy0; gy <= gy1; gy++) {
+        const kk = gx * 100000 + gy
+        const seg: Seg = { ax, ay, dx, dy, l2 }
+        const arr = segGrid.get(kk)
+        if (arr) arr.push(seg)
+        else segGrid.set(kk, [seg])
+      }
+    }
+  }
+  const nearestBranchDir = (x: number, y: number): THREE.Vector3 | null => {
+    const gx = Math.floor(x / SEG_M), gy = Math.floor(y / SEG_M)
+    let best = Infinity, dir: THREE.Vector3 | null = null
+    for (let ix = gx - 1; ix <= gx + 1; ix++) for (let iy = gy - 1; iy <= gy + 1; iy++) {
+      const arr = segGrid.get(ix * 100000 + iy)
+      if (!arr) continue
+      for (const s of arr) {
+        const t = Math.max(0, Math.min(1, ((x - s.ax) * s.dx + (y - s.ay) * s.dy) / s.l2))
+        const d = Math.hypot(s.ax + t * s.dx - x, s.ay + t * s.dy - y)
+        if (d < best) { best = d; dir = new THREE.Vector3(s.dx, 0, -s.dy).normalize() }
+      }
+    }
+    return best <= 15 ? dir : null
+  }
   const wetExtra: THREE.Object3D[] = []
   let streetRoot: {
     power: ReturnType<typeof buildPower>
@@ -3137,7 +3174,7 @@ if (uLodOn > 0.5) {
     crosswalks: ReturnType<typeof buildCrosswalks>
     arrows: ReturnType<typeof buildLaneArrows>
   } | null = null
-  const addStreet = (m: Manifest) => {
+  const addStreet = (m: Manifest, xnodes: typeof crossingNodes) => {
     const first = !streetRoot
     const wrap = <T>(name: string, fn: () => T): T => (first ? detail(name, fn) : fn())
     const powerG = wrap('street: power', () => buildPower(m, groundAtWorld))
@@ -3147,7 +3184,7 @@ if (uLodOn > 0.5) {
     const sidewalksG = wrap('street: sidewalks', () => buildSidewalks(m, groundAtWorld, edgeDistanceWorld, roadInfoWorld))
     const signalsG = wrap('street: signals', () => buildSignals(m, furnitureG.placed))
     const stopbarsG = wrap('street: stopbars', () => buildStopBars(m, roadSurfaceAt, edgeDistanceWorld, facts.lanes))
-    const crosswalksG = wrap('street: crosswalks', () => buildCrosswalks(m, roadSurfaceAt, edgeDistanceWorld, sidewalkCover(m, 1.0), crossingNodes))
+    const crosswalksG = wrap('street: crosswalks', () => buildCrosswalks(m, roadSurfaceAt, edgeDistanceWorld, sidewalkCover(m, 1.0), xnodes, nearestBranchDir))
     const arrowsG = wrap('street: arrows', () => buildLaneArrows(m, roadSurfaceAt, facts.lanes))
     stopbarsG.group.add(crosswalksG.group)
     stopbarsG.group.add(arrowsG.group)
@@ -3171,7 +3208,7 @@ if (uLodOn > 0.5) {
     }
     wetExtra.push(parkingG.group, sidewalksG.group)
   }
-  addStreet(local ? streetSlice(true) : manifest)
+  addStreet(local ? streetSlice(true) : manifest, local ? crossingNodes.filter((n) => inDisc(n.x, n.y)) : crossingNodes)
   if (local && focus) {
     const far = streetSlice(false)
     const CELL = 1000
@@ -3196,6 +3233,15 @@ if (uLodOn > 0.5) {
     for (const p of far.power?.lines ?? []) { const q = p.coords[0]; if (q) bucket(q[0], q[1]).lines.push(p) }
     for (const p of far.power?.supports ?? []) bucket(p.x, p.y).supports.push(p)
     for (const p of far.intersections?.list ?? []) bucket(p.x, p.y).intersections.push(p)
+    // Crossing nodes are bucketed on the same 1 km grid, so a far cell only tests the crossings in
+    // its own cell rather than all 20k — the other half of the "street: crosswalks" freeze.
+    const crossingsByCell = new Map<string, typeof crossingNodes>()
+    for (const n of crossingNodes) {
+      const k = `${Math.floor(n.x / CELL)},${Math.floor(n.y / CELL)}`
+      const a = crossingsByCell.get(k)
+      if (a) a.push(n)
+      else crossingsByCell.set(k, [n])
+    }
     for (const [k, b] of buckets) {
       const [cx, cy] = k.split(',').map(Number)
       const m: Manifest = {
@@ -3214,7 +3260,7 @@ if (uLodOn > 0.5) {
         z: -(cy * CELL + CELL / 2),
         r: CELL * 0.75,
         done: false,
-        run: () => { addStreet(m) },
+        run: () => { addStreet(m, crossingsByCell.get(k) ?? []) },
       })
     }
   }

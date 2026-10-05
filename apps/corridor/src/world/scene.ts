@@ -2798,8 +2798,12 @@ if (uLodOn > 0.5) {
           void (async () => {
             if (regrowWanted) {
               await near.regrow()
-              imp?.rebake(near.sources())
+              // Season BEFORE the bake: `regrow` rebuilds the variants with the full green leaf set
+              // and the season's tint lives on the materials. Baking first left the atlas a summer
+              // tree while the near models beside it wore autumn, and the cards never caught up
+              // because only a later season change rebakes (Rich, 2026-10-05).
               near.setSeason(look(currentSeason))
+              imp?.rebake(near.sources())
             }
             if (replantWanted || regrowWanted) replantTrees(lastEye)
           })()

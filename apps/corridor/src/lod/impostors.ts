@@ -203,9 +203,15 @@ export class Impostors {
     const prevScissor = renderer.getScissor(new THREE.Vector4())
     const prevScissorTest = renderer.getScissorTest()
     renderer.setRenderTarget(this.target)
+    // Clear the WHOLE atlas, not just whatever viewport the renderer was left with. A rebake (a
+    // season change recolours the leaves) used to clear only the live view's corner, so the
+    // previous bake's trees survived in the rest of the target and a card sampled a stale trunk
+    // floating in empty sky (Rich, 2026-10-05). Point viewport and scissor at the target first.
+    renderer.setViewport(0, 0, this.target.width, this.target.height)
+    renderer.setScissor(0, 0, this.target.width, this.target.height)
+    renderer.setScissorTest(true)
     renderer.setClearColor(0x000000, 0)
     renderer.clear()
-    renderer.setScissorTest(true)
     sources.forEach((src, row) => {
       const group = new THREE.Group()
       group.add(new THREE.Mesh(src.branches.geometry, src.branches.material), new THREE.Mesh(src.leaves.geometry, src.leaves.material))

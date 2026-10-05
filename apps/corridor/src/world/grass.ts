@@ -1218,8 +1218,9 @@ export class Grass {
      *
      * GRASS_FAST_THIN used to be applied in `assemble`, so at speed the generator still built every
      * card and the renderer threw most of them away — the knob bought drawing, not the generation
-     * headroom it was FOR. A card tile is ~4 ms (dominated by the per-card parking/sidewalk mask
-     * queries), the budget is GRASS_MS_PER_FRAME, and at 150 mph the verge cannot be planted faster
+     * headroom it was FOR. A card tile is ~5 ms (dominated by a fresh road and ground walk per
+     * clump and per card; see the shared gradient and ground lattice below), the budget is
+     * GRASS_MS_PER_FRAME, and at 150 mph the verge cannot be planted faster
      * than the car reaches it: the field only ever extends ~60 m ahead and the car outruns it
      * (Rich, 2026-10-05). Planting `thinMul` of the cards instead makes the knob pay where the cost
      * is, and it is visually the same — `assemble` keeps the same fraction, so the same density
@@ -1239,6 +1240,65 @@ export class Grass {
     let n = 0, nc = 0, mownCells = 0, cells = 0
     const patchCells = Math.max(1, Math.round(T.GRASS_PATCH_SIZE))
     const x0 = tx * TILE, z0 = tz * TILE
+    /*
+     * ASK THE MASKS ONCE PER TILE, NOT ONCE PER BLADE.
+     *
+     * `blockedAt` (parking || sidewalk) used to be asked at every blade's own feet and at four
+     * corners of every card — measured at ~1800 calls for a single verge tile, each re-walking the
+     * same parking/walk bounds index. The per-call cost is small, but the count is not, so sample it
+     * once onto a half-metre lattice over the tile plus the reach the records can stray (a blade's
+     * scatter, a card's corners) and answer every later test from that. 0.5 m is the rounding error
+     * at most, and both covers already pad wider than that (a walk by 0.35 m, a lot by 3 m), so the
+     * lattice can never say "clear" over the surface of a walk it should keep grass off. Built
+     * lazily: a tile whose cells are all pavement, canopy or otherwise rejected never asks.
+     * (The bigger per-tile costs are the road and ground walks below — see the shared gradient and
+     * the ground lattice.)
+     */
+    const maskB = this.blockedAt
+    const maskStep = 0.5
+    const maskReach = 0.5 * cell + (T.GRASS_SCATTER * this.look.scatter) * 0.5
+    const maskMargin = Math.ceil(maskReach) + 0.5
+    const maskN = Math.round((TILE + maskMargin * 2) / maskStep) + 1
+    let mask: Uint8Array | null = null
+    const maskBlocked = (x: number, z: number): boolean => {
+      if (!maskB) return false
+      if (!mask) {
+        mask = new Uint8Array(maskN * maskN)
+        const ox = x0 - maskMargin, oz = z0 - maskMargin
+        for (let j = 0; j < maskN; j++) {
+          const zz = oz + j * maskStep, row = j * maskN
+          for (let i = 0; i < maskN; i++) if (maskB(ox + i * maskStep, zz)) mask[row + i] = 1
+        }
+      }
+      let i = Math.round((x - (x0 - maskMargin)) / maskStep)
+      let j = Math.round((z - (z0 - maskMargin)) / maskStep)
+      if (i < 0) i = 0; else if (i >= maskN) i = maskN - 1
+      if (j < 0) j = 0; else if (j >= maskN) j = maskN - 1
+      return mask[j * maskN + i] === 1
+    }
+    /*
+     * ONE GROUND HEIGHT PER CELL, NOT ONE PER BLADE.
+     *
+     * `groundAt` is `gradedHeight ?? heightAt` and `gradedHeight` walks the road station grid
+     * itself, so a fresh call per card and per blade was the other half of the per-tile cost
+     * (measured ~2.4 ms, alongside ~2.4 ms of road queries). The ground over a single 8 m tile is
+     * smooth, so sample it on the cell lattice (+ one row and column, for the slope test) and read
+     * the cell's value for everything that stands in that cell. Lazily, because a cell the canopy
+     * or the road rejects never needs a height. Within GRASS_EXACT_M of pavement the lip and the
+     * driveway aprons are NOT smooth, so blades and cards there still sample the ground exactly.
+     */
+    const GN = TILE + 1
+    const gy = new Float32Array(GN * GN).fill(NaN)
+    const gyAt = (i: number, j: number): number => {
+      if (i < 0) i = 0; else if (i >= GN) i = GN - 1
+      if (j < 0) j = 0; else if (j >= GN) j = GN - 1
+      const k = i * GN + j
+      let v = gy[k]
+      if (Number.isNaN(v)) { v = this.groundAt(x0 + i + 0.5, -(z0 + j + 0.5)); gy[k] = v }
+      return v
+    }
+    const cellGround = (x: number, z: number, exact: boolean): number =>
+      exact ? this.groundAt(x, -z) : gyAt(Math.round(x - (x0 + 0.5)), Math.round(z - (z0 + 0.5)))
     for (let cx = x0; cx < x0 + TILE; cx += cell) {
       for (let cz = z0; cz < z0 + TILE; cz += cell) {
         const wx = cx + 0.5 * cell, wz = cz + 0.5 * cell
@@ -1261,8 +1321,9 @@ export class Grass {
         if (!this.world && roadD > this.pavedHalf + T.GRASS_MAX_FROM_ROAD) continue
         if (this.canopyAt(wx, -wz) > 3.0) continue // a real crown
         // slope rejection: a cut face or a steep embankment is rock and scrub, not turf
-        const gy = this.groundAt(wx, -wz)
-        const slope = Math.max(Math.abs(this.groundAt(wx + 1, -wz) - gy), Math.abs(this.groundAt(wx, -wz - 1) - gy))
+        const ci = cx - x0, cj = cz - z0
+        const gy0 = gyAt(ci, cj)
+        const slope = Math.max(Math.abs(gyAt(ci + 1, cj) - gy0), Math.abs(gyAt(ci, cj + 1) - gy0))
         if (slope > T.GRASS_SLOPE_MAX) continue
         // NOTHING GROWS ON A SHELF. Past the strip's blend band the strip IS the DEM — both come
         // from the same raster — so any real gap there means this ground is not sitting on the
@@ -1270,7 +1331,7 @@ export class Grass {
         // been widened. Grass standing on it is grass in the air. Inside the band the strip is
         // between road grade and the DEM by construction, and a fill embankment lives there
         // legitimately, so the test only applies once the blend has finished.
-        if (this.demAt && T.GRASS_MAX_SHELF > 0 && roadD > this.pavedHalf + 8 && gy - this.demAt(wx, -wz) > T.GRASS_MAX_SHELF) continue
+        if (this.demAt && T.GRASS_MAX_SHELF > 0 && roadD > this.pavedHalf + 8 && gy0 - this.demAt(wx, -wz) > T.GRASS_MAX_SHELF) continue
         // bare patches: low-frequency hash noise thins the field where soil shows
         const patch = hash(Math.floor(cx / patchCells) * 971 + Math.floor(cz / patchCells) * 337)
         if (patch < T.GRASS_PATCHINESS) continue
@@ -1293,15 +1354,19 @@ export class Grass {
         // 1.5 m walk — "grass growing over the sidewalk" (Rich, 2026-09-26), measured as 289
         // blades inside one walk with the cover answering "sidewalk" at every point of it. Asked
         // at the clump, a clump on pavement or a walk grows nothing.
-        const clumpClear = this.roadDistance(ccx, ccz) >= this.pavedHalf + T.GRASS_ROAD_CLEAR
-        // the distance field near the road is linear, so a blade's own distance is the cell's plus
-        // its offset along the gradient — a per-blade test for the price of one grid walk a cell
-        const g = clumpClear && this.roadGrad ? this.roadGrad(wx, wz) : null
+        // ONE gradient walk per cell, shared by the clump and every card. The distance field near
+        // the road is linear, so any point in the cell is the cell's distance plus its offset along
+        // the gradient; a fresh roadDistance per clump and per card was ~half the per-tile cost.
+        // Exact within GRASS_EXACT_M, where the field bends harder than a straight line follows.
+        const grad = this.roadGrad ? this.roadGrad(wx, wz) : null
+        const distAt = (x: number, z: number): number =>
+          grad && roadD >= T.GRASS_EXACT_M ? roadD + (x - wx) * grad[0] + (z - wz) * grad[1] : this.roadDistance(x, z)
+        const clumpClear = !maskBlocked(ccx, ccz) && distAt(ccx, ccz) >= this.pavedHalf + T.GRASS_ROAD_CLEAR
         for (let b = 0; b < (clumpClear ? perCell : 0) && n < maxBlades; b++) {
           const h1 = hash(cx * 31 + cz * 17 + b * 101), h2 = hash(cx * 13 + cz * 29 + b * 53)
           const scatter = T.GRASS_SCATTER * this.look.scatter
           const x = ccx + (h1 - 0.5) * scatter, z = ccz + (h2 - 0.5) * scatter
-          const y = this.groundAt(x, -z) - 0.02
+          const y = cellGround(x, z, roadD < T.GRASS_EXACT_M) - 0.02
           const rnd = hash(cx * 29 + cz * 31 + b * 3)
           const shape = mown ? this.look.mown : this.look.height
           const height = (mown ? T.GRASS_MOWN_HEIGHT : this.heightScale * T.GRASS_ROUGH_HEIGHT * tall) * shape * ah * 1.5 * T.GRASS_HEIGHT * (0.6 + 0.8 * hash(cx * 3 + cz * 5 + b * 7))
@@ -1318,7 +1383,7 @@ export class Grass {
           // the guard used to hold every blade far enough back that its lean and wind could not
           // cross the kerb, which left the verge 2–3 m short of the road (Rich, 2026-10-05). Verge
           // grass leans out over the tarmac; only the root has to stay off it.
-          if (g) {
+          if (grad) {
             /*
              * CLOSE IN, ASK. FURTHER OUT, STEP.
              *
@@ -1334,13 +1399,14 @@ export class Grass {
              * So the blades that can be wrong pay for a real query and the rest do not. Only a
              * cell already within a few metres of pavement is near enough to matter.
              */
-            const dRoot = roadD < T.GRASS_EXACT_M ? this.roadDistance(x, z) : roadD + (x - wx) * g[0] + (z - wz) * g[1]
+            const dRoot = roadD < T.GRASS_EXACT_M ? this.roadDistance(x, z) : roadD + (x - wx) * grad[0] + (z - wz) * grad[1]
             if (dRoot < this.pavedHalf + T.GRASS_ROAD_CLEAR) continue
           }
           // and the masks at the blade's OWN feet, which no gradient can predict — a raster has a
           // hard edge and no gradient at all. Inside GRASS_EXACT_M the query above already asked
-          // them (roadDistance reports them as -1), so this is for the band beyond it.
-          if (this.blockedAt && roadD >= T.GRASS_EXACT_M && roadD < T.GRASS_MASK_CHECK_M && this.blockedAt(x, z)) continue
+          // them (roadDistance reports them as -1), so this is for the band beyond it. The answer
+          // comes from the tile's mask lattice, not a fresh query per blade.
+          if (roadD >= T.GRASS_EXACT_M && roadD < T.GRASS_MASK_CHECK_M && maskBlocked(x, z)) continue
           const o = n * BLADE_F
           blades[o] = x
           blades[o + 1] = y
@@ -1370,10 +1436,13 @@ export class Grass {
           // in headlights is exactly "grass growing through the road". Its half-width has to
           // clear the kerb, not its centre.
           const cardHalf = 0.5 * sizeNom * T.GRASS_SPRITE_WIDTH * T.GRASS_THICK
-          if (this.roadDistance(x, z) < this.pavedHalf + T.GRASS_ROAD_CLEAR + cardHalf) continue
+          // its foot from the lattice first (a fresh roadDistance would only fold the same masks
+          // in again), then from the field
+          if (maskBlocked(x, z)) continue
+          if (distAt(x, z) < this.pavedHalf + T.GRASS_ROAD_CLEAR + cardHalf) continue
           // a card is a metre across; its far edge must clear a mask too, not just its foot
-          if (this.blockedAt && (this.blockedAt(x + 0.5, z) || this.blockedAt(x - 0.5, z) || this.blockedAt(x, z + 0.5) || this.blockedAt(x, z - 0.5))) continue
-          const y = this.groundAt(x, -z) - 0.03
+          if (maskBlocked(x + 0.5, z) || maskBlocked(x - 0.5, z) || maskBlocked(x, z + 0.5) || maskBlocked(x, z - 0.5)) continue
+          const y = cellGround(x, z, roadD < T.GRASS_EXACT_M) - 0.03
           const size = baseH * ah * 1.5 * T.GRASS_HEIGHT * T.GRASS_SPRITE_SCALE * (0.75 + 0.5 * hash(cx * 101 + cz * 103 + b * 107))
           if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z) || !Number.isFinite(size) || size > 12) continue
           const o = nc * CARD_F

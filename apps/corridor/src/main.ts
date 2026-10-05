@@ -1436,6 +1436,12 @@ async function loadSite(slug: string) {
     const id = await publishedLaunch()
     if (id) await openLevel(id)
   }
+  // a BARE world with the knob already on: the switch is a world setting, so bring traffic up
+  // without waiting for the slider to move (a stage's own openLevel call has handled it above)
+  if (!level && !traffic && T.TRAFFIC_DENSITY > 0 && site) {
+    lastDensityKnob = T.TRAFFIC_DENSITY
+    void buildTraffic({ kind: 'traffic' })
+  }
   // after the level, so "now" wins over the level's saved clock and a pinned time wins over both
   applyClockPin()
   void refreshStages()
@@ -3060,8 +3066,10 @@ function onTuneChange() {
   // it builds one on the spot. Lowering it, or nudging any other knob, leaves the layer alone.
   if (T.TRAFFIC_DENSITY !== lastDensityKnob) {
     lastDensityKnob = T.TRAFFIC_DENSITY
-    if (!traffic && T.TRAFFIC_DENSITY > 0 && site && level) {
-      const lt = level.simulations?.find((x) => x.kind === 'traffic') as TrafficSpec | undefined
+    // the level is optional: a bare world (no stage opened) still has roads, and the knob is meant
+    // to put cars on every one of them. Only the site is required.
+    if (!traffic && T.TRAFFIC_DENSITY > 0 && site) {
+      const lt = level?.simulations?.find((x) => x.kind === 'traffic') as TrafficSpec | undefined
       void buildTraffic(lt ?? { kind: 'traffic' })
     }
   }

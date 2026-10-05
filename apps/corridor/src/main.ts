@@ -16,7 +16,7 @@ import { LightPanel } from './ui/lightpanel'
 import type { LightEntry, LightFamily, LightReport } from './ui/lightreport'
 import { RapierCar } from './game/vehicle/rapiercar'
 import { assetsvc } from './assets/assetsvc'
-import { defaultVehicle, frontShare, vmaxFromProfile, type VehicleDoc } from './game/vehicle/vehicles'
+import { defaultVehicle, frontShare, toDriveProfile, vmaxFromProfile, type VehicleDoc } from './game/vehicle/vehicles'
 import { loadCarModel, type CarModel } from './game/vehicle/carmodel'
 import { Car, type CarInput, type DrivableCar } from './game/vehicle/car'
 import { EngineSound, spawnPlayerEngine } from './game/vehicle/enginesound'
@@ -45,7 +45,7 @@ import { GunLayer, builtinMissile, mountWeapons, type Mounted } from './game/com
 import { dentObject, flushDents, repairObject } from './game/vehicle/dents'
 import { GameRun, type ModelHost, type ModelPose, type ProgramHost } from './game/session/program'
 import { loadGameModule } from './game/session/programload'
-import { profile as driveProfile } from '@apex/engine/physics/profiles'
+import { PROFILES, profile as driveProfile, type DriveProfile } from '@apex/engine/physics/profiles'
 import { buildPlacements, fitModel, loadAssetModel, loadCatalog, type CatalogEntry } from './world/placements'
 import { timeControls } from './ui/timecontrols'
 import { celestialToWorld, julianDate, moonPosition, radecToVec } from './visuals/celestial'
@@ -1398,18 +1398,21 @@ async function loadSite(slug: string) {
   minimap.teleportAllowed = () => policy.teleport
   minimap.setExpansionEnabled(!!settings.data.mapExpand)
   minimap.setHeadingUp(!!settings.data.mapHeading)
+  // Per-site knob overrides FIRST — before the car is built, because a knob read at spawn
+  // (`PHYS_CAR_SOURCE`, `PHYS_PROFILE`) would otherwise keep the old value until a reload. Still
+  // AFTER the panels restored this browser's values so the committed file wins, and still undoing
+  // whatever the previous site's file had set.
+  const tuned = await applySiteTuning(slug, siteTuneAccess)
+  const urlQ = new URLSearchParams(location.search)
   const st = readStanceParam()
   const resume = st && st.site === slug ? null : readResume(slug)
   if (st && st.site === slug) applyStance(st)
   else if (resume) applyStance(resume)
   else if (startOf(worldPoints, null)) goToStart(null)
   else toPhoto()
-  // per-site knob overrides, applied AFTER the panels have restored the browser's values so the
-  // committed file wins, and undoing whatever the previous site's file had set
-  const tuned = await applySiteTuning(slug, siteTuneAccess)
   // the world's own look (tuning.json `look`, written by the world editor): the URL's ?style and
-  // ?season win, so a shared link keeps saying what it said
-  const urlQ = new URLSearchParams(location.search)
+  // ?season win, so a shared link keeps saying what it said. Applied AFTER the stance, so a saved
+  // or shared view's style gives way to the world's, as before.
   if (tuned.look?.style && !urlQ.get('style') && isStyle(tuned.look.style) && tuned.look.style !== style) setStyle(tuned.look.style)
   if (tuned.look?.season && !urlQ.get('season') && SEASONS.includes(tuned.look.season as Season) && tuned.look.season !== season) setSeason(tuned.look.season as Season)
   if (tuned.applied || tuned.unknown.length || tuned.kept.length) {
@@ -2276,6 +2279,16 @@ async function applyFixtureDoc(doc: FixtureDoc): Promise<void> {
 }
 
 let playerVehicle: VehicleDoc | null = null
+/**
+ * The profile the player's Rapier car spawned on, as the id `spawnCar` resolved.
+ *
+ * Kept so a live `PHYS_CAR_SOURCE` change can rebuild the same base without a respawn: the level
+ * still decides the game (its `player.profile`, or `stunts` for a loop world), and only the
+ * document-vs-preset part moves with the knob.
+ */
+let playerSpawnBase: string | undefined = undefined
+/** the last `PHYS_CAR_SOURCE` the car was built for; a change re-adopts, a redraw does not */
+let lastCarSource = -1
 /** the level's car as a MODEL, loaded beside its numbers. Null = the procedural wedge */
 let playerModel: CarModel | null = null
 /** does R straighten the car's dents: the settings say, else the level, else yes */
@@ -2457,6 +2470,8 @@ function setDrive(on: boolean) {
          * keeps its own engine, grip and aero. Either way the F6 `PHYS_CAR_*` sliders override on top.
          */
         const playerDoc = playerVehicle ?? (T.PHYS_CAR_SOURCE > 0 ? defaultVehicle('hero-car') : undefined)
+        // remembered so a live `PHYS_CAR_SOURCE` change rebuilds the same base: see `playerSourceProfile`
+        playerSpawnBase = wantProfile
         drive.car = new RapierCar(
           physics.spawnCar({ x: at.x, z: at.z, yaw: at.yaw }, wantProfile, playerDoc),
           surface,
@@ -2478,7 +2493,10 @@ function setDrive(on: boolean) {
        * current the first time somebody opened it.
        */
       T.setCarModel(drive.car instanceof RapierCar ? 'physics' : 'arcade')
-      if (drive.car instanceof RapierCar) T.adoptPhysCar(drive.car.profile)
+      if (drive.car instanceof RapierCar) {
+        T.adoptPhysCar(drive.car.profile)
+        lastCarSource = T.PHYS_CAR_SOURCE
+      }
       tuneUI.invalidateTab('car')
       applyPhysicsCarTune()
       scene.add(drive.car.mesh)
@@ -3131,6 +3149,24 @@ function applyAutoGear() {
 }
 
 /**
+ * The base handling profile the player car should start from for the world's current
+ * `PHYS_CAR_SOURCE` — the same choice `spawnCar` makes, recomputed so a source change can be
+ * adopted without a respawn.
+ *
+ * A level that names a vehicle always drives it, whatever the knob says. With none named, source 0
+ * is the `PHYS_PROFILE` preset and source 1 lays the authored hero-car document over the same
+ * preset base — the level still picks the game, the car keeps its own engine, grip and aero.
+ */
+function playerSourceProfile(): DriveProfile {
+  const fromUrl = new URLSearchParams(location.search).get('profile')
+  const id = playerSpawnBase ?? (fromUrl && PROFILES[fromUrl] ? fromUrl : T.physProfileId())
+  const doc = playerVehicle ?? (T.PHYS_CAR_SOURCE > 0 ? defaultVehicle('hero-car') : null)
+  return doc
+    ? toDriveProfile({ ...doc, profile: { ...doc.profile, base: PROFILES[id] ? id : doc.profile.base } })
+    : (PROFILES[id] ? driveProfile(id) : driveProfile('street'))
+}
+
+/**
  * Push the physics knobs at the running world and car. Cheap and idempotent, so it runs on every
  * tune change rather than trying to work out whether one of ours moved.
  *
@@ -3138,11 +3174,23 @@ function applyAutoGear() {
  * the hero actor's, and `setProfile` re-derives the suspension and grip without a respawn. It also
  * carries the auto-gear, so a car spawned while the switch is on gets the sound's gearing set before
  * the audio ever starts.
+ *
+ * A change of `PHYS_CAR_SOURCE` is a change of the car's whole STARTING handling, not one slider:
+ * re-adopt the source profile so the panel's per-knob defaults and the overrides-on-top both move
+ * with it, then `setProfile` hands the result to the actor in place — driving the authored car and
+ * back stays a knob move rather than a reload.
  */
 function applyPhysicsCarTune() {
   const w = physics?.phys.world
   if (w) w.gravity = { x: 0, y: -T.PHYS_GRAVITY, z: 0 }
-  if (drive.car instanceof RapierCar) drive.car.setProfile(T.physCarProfile())
+  if (drive.car instanceof RapierCar) {
+    if (T.PHYS_CAR_SOURCE !== lastCarSource) {
+      lastCarSource = T.PHYS_CAR_SOURCE
+      T.adoptPhysCar(playerSourceProfile())
+      tuneUI.invalidateTab('car')
+    }
+    drive.car.setProfile(T.physCarProfile())
+  }
   applyAutoGear()
 }
 

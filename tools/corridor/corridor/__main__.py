@@ -246,6 +246,18 @@ def cmd_plan(a: argparse.Namespace) -> None:
             print(f"    shard {i:2d}  {bw / 1000:4.1f} × {bh / 1000:4.1f} km  tiles {counts[i]:3d}  chains {chains[i]:5d}")
 
 
+def cmd_shard(a: argparse.Namespace) -> None:
+    """STEP 2 of a sharded bake: the area stages for ONE block, into `sites/<slug>/shards/<i>/`."""
+    from . import network
+
+    sites = json.loads(SITES.read_text())
+    wanted = [s for s in sites if s["slug"] == a.slug]
+    if not wanted:
+        sys.exit(f"no site {a.slug!r}")
+    skip = set(filter(None, a.skip.split(",")))
+    network.fetch_shard(wanted[0], a.index, a.half_width, a.lidar_half_width, skip, DATA, CACHE)
+
+
 def cmd_finalize(a: argparse.Namespace) -> None:
     """STEP 3 of a sharded bake: union the shards' tiles/pyramid/vectors, stitch the primary, export.
 
@@ -288,6 +300,10 @@ def cmd_finalize(a: argparse.Namespace) -> None:
     shards.merge_geology(present, site_dir)
     stitched = shards.stitch_profile(present, site_dir)
     print(f"  merge   {nt} lidar files, {nw} tiles, {npg} pyramid files, {nb} branches; primary {'stitched' if stitched else 'MISSING'}")
+    # The export decides tiles-vs-overview off `manifest["tiled"]`; a sharded world is always tiled.
+    manifest = json.loads((site_dir / "manifest.json").read_text()) if (site_dir / "manifest.json").exists() else {}
+    manifest["tiled"] = True
+    (site_dir / "manifest.json").write_text(json.dumps(manifest, indent=1, default=str))
     ex = export.export_site(site_dir)
     export.write_index(DATA / "sites")
     print(f"  web     {', '.join(ex['layers'])} ({ex['bytes'] / 2**20:.1f} MiB) -> {site_dir / 'web'}")
@@ -492,6 +508,13 @@ def main() -> None:
     pl.add_argument("--max-side", type=float, default=8000.0, help="maximum shard side, metres")
     pl.add_argument("--max-shards", type=int, default=16, help="cap on the number of shards")
     pl.set_defaults(fn=cmd_plan)
+    sh = sub.add_parser("shard", help="sharded bake step 2: one block's area stages")
+    sh.add_argument("slug")
+    sh.add_argument("index", type=int)
+    sh.add_argument("--half-width", type=float, default=300.0, help="OSM/DEM/NAIP corridor half-width, metres")
+    sh.add_argument("--lidar-half-width", type=float, default=200.0, help="point-cloud corridor half-width, metres")
+    sh.add_argument("--skip", default="", help="comma list of dem,naip,lidar,geology,horizon")
+    sh.set_defaults(fn=cmd_shard)
     fn = sub.add_parser("finalize", help="sharded bake step 3: union the shards and export the world")
     fn.add_argument("slug")
     fn.set_defaults(fn=cmd_finalize)

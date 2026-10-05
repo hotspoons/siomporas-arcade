@@ -422,6 +422,11 @@ def summary(R: dict) -> str:
 # --- the bake ----------------------------------------------------------------------------------
 
 
+def branch_record(c: dict, prim: dict, bp: dict | None) -> dict:
+    """One `branches.json` entry (fetch_site's `branch_rec`, hoisted so a shard can reuse it)."""
+    return {"id": c["id"], "ident": c["ident"], "name": c["name"], "ref": c["ref"], "highway": c["highway"], "lanes": c["lanes"], "oneway": c["oneway"], "length_m": c["length_m"], "s_on_primary": round(float(prim["line"].project(c["line"].interpolate(0.5, normalized=True))), 1), "junctions": c["junctions"], "dead_ends": c.get("dead_ends", []), "profile": {"step_m": bp["step_m"], "s": bp["s"], "road_z": bp["road_z"]} if bp else None, "structures": bp["structures"] if bp else []}
+
+
 def fetch_site(site: dict, half_width: float, lidar_half_width: float, skip: set[str], data: Path, cache: Path) -> None:
     """A network site through the single-image pipeline: the union corridor's bbox is the raster
     extent (fine for a neighbourhood; the 18 km Crofton region goes through the tiled path). Every
@@ -525,7 +530,7 @@ def fetch_site(site: dict, half_width: float, lidar_half_width: float, skip: set
     branches: list[dict] = []
 
     def branch_rec(c: dict, bp: dict | None) -> dict:
-        return {"id": c["id"], "ident": c["ident"], "name": c["name"], "ref": c["ref"], "highway": c["highway"], "lanes": c["lanes"], "oneway": c["oneway"], "length_m": c["length_m"], "s_on_primary": round(float(prim["line"].project(c["line"].interpolate(0.5, normalized=True))), 1), "junctions": c["junctions"], "dead_ends": c.get("dead_ends", []), "profile": {"step_m": bp["step_m"], "s": bp["s"], "road_z": bp["road_z"]} if bp else None, "structures": bp["structures"] if bp else []}
+        return branch_record(c, prim, bp)
 
     #
     # NO LIDAR IS NOT A FAILED BAKE.
@@ -735,6 +740,131 @@ def fetch_site(site: dict, half_width: float, lidar_half_width: float, skip: set
         traceback.print_exc()
         print(f"  web export failed: {exc}")
     print(f"  done    {manifest['seconds']} s -> {out}")
+
+
+def fetch_shard(site: dict, index: int, half_width: float, lidar_half_width: float, skip: set[str], data: Path, cache: Path) -> None:
+    """A sharded bake's step 2: the area stages for ONE block, into `sites/<slug>/shards/<index>/`.
+
+    The global Network (`roads`, `dead_ends`, `site.json`, `spine_utm.json`, `osm.geojson`,
+    `crossings.json`) is already on disk from `corridor plan`; this re-derives `R` through the same
+    cached Overpass call so chain identity matches, keeps the primary plus the chains the plan
+    assigned to this block, and runs the same tiled pipeline over a block-sized bbox. The primary is
+    profiled WHOLE against this block's rasters with `fill=False`, so its out-of-block stations stay
+    NaN for the finalizer's stitch — see `shards.stitch_profile`.
+
+    The manifest/export are the finalizer's, not a shard's: a shard writes the raw rasters and the
+    per-block vectors, and nothing global.
+    """
+    from . import dem, geology, horizon
+    from . import shards as shardlib
+
+    slug = site["slug"]
+    lidar_half_width = min(lidar_half_width, half_width)
+    out = data / "sites" / slug
+    plan = shardlib.read_plan(out)
+    if plan is None:
+        raise RuntimeError(f"no plan for {slug!r}: run `corridor plan {slug}` first")
+    sdir = shardlib.shard_dir(out, index)
+    sdir.mkdir(parents=True, exist_ok=True)
+    gj = json.loads((out / "site.json").read_text())
+    frame = Frame(gj["frame"]["epsg"], tuple(gj["frame"]["origin"]))
+    t0 = time.time()
+    print(f"=== {slug}  shard {index}/{plan['n']}")
+
+    R = roads(site, frame, cache / "overpass")
+    prim = R["primary"]
+    assigned = {cid for cid, b in plan["chains"].items() if int(b) == index}
+    shard_chains = [prim] + [c for c in R["chains"] if c is not prim and str(c["id"]) in assigned]
+    # road index is the chain's POSITION in the list lidar_tiled sees, so the shard's own ordered
+    # list is its own index map — the primary is always 1.
+    idx = {c["id"]: i + 1 for i, c in enumerate(shard_chains)}
+    prim_idx = idx[prim["id"]]
+    print(f"  shard   {len(shard_chains) - 1} chains assigned, primary {prim['ident']} {prim['line'].length / 1000:.0f} km")
+
+    block = plan["blocks"][index]["bbox"]
+    margin = max(lidar_half_width, half_width) + shardlib.DEFAULT_MARGIN_M
+    bbox = snap_bbox((block[0] - margin, block[1] - margin, block[2] + margin, block[3] + margin))
+    region = shp_box(*bbox)
+    corridor = unary_union([c["line"].buffer(half_width, cap_style="flat") for c in shard_chains])
+    lidar_corridor = unary_union([c["line"].buffer(lidar_half_width, cap_style="flat") for c in shard_chains])
+
+    if "dem" not in skip:
+        dem.fetch_dem(frame, bbox, sdir / "dem_1m.tif", cache)
+    if "naip" not in skip:
+        from . import network_tiles
+
+        network_tiles.naip_tiled(frame, bbox, region, sdir / "naip_1m.tif", cache, res=network_tiles.NAIP_RES_M)
+    if "horizon" not in skip:
+        horizon.fetch_horizon(frame, sdir / "horizon_30m.tif", cache, radius_m=30000.0)
+    if "geology" not in skip:
+        g = geology.along_spine(prim["line"], frame, site, cache, sdir, step_m=250.0)
+        units = {u["map_id"]: u for u in g["units"]}
+        for c in shard_chains:
+            if c is prim:
+                continue
+            g2 = geology.along_spine(c["line"], frame, site, cache, sdir, step_m=500.0)
+            for u in g2["units"]:
+                units.setdefault(u["map_id"], u)
+        (sdir / "geology.json").write_text(json.dumps({"units": list(units.values()), "named_formations": sorted({u["strat_name"] for u in units.values() if u.get("strat_name")})}, indent=1))
+        print(f"  geology {len(units)} units", flush=True)
+
+    branches: list[dict] = []
+    no_lidar: str | None = None
+    if "lidar" not in skip:
+        from . import network_tiles
+
+        ldir = sdir / "lidar"
+        lbbox = snap_bbox(lidar_corridor.bounds)
+        try:
+            meta = network_tiles.lidar_tiled(frame, lbbox, lidar_corridor, shard_chains, ldir, cache)
+        except network_tiles.NoLidarHere as exc:
+            no_lidar = str(exc)
+            meta = None
+    else:
+        meta = None
+    if no_lidar is None and meta is not None:
+        pts = meta.pop("pts")
+        from . import network_tiles
+
+        with progress.heartbeat("profile", f"primary {prim['ident']} {prim['line'].length / 1000:.0f} km"):
+            prof = network_tiles.profile_tiled(prim["line"], ldir, pts, prim_idx, fill=False)
+        (sdir / "profile.json").write_text(json.dumps(prof))
+        manifest_lidar = meta
+        others = [c for c in shard_chains if c is not prim]
+        tasks = [(idx[c["id"]], c["ident"], c["line"]) for c in others]
+        for c, bp in zip(others, network_tiles.profile_many(tasks, ldir, pts)):
+            branches.append(branch_record(c, prim, bp))
+        print(f"  branch  {len(branches)} branches profiled, {sum(len(b['structures']) for b in branches)} structures", flush=True)
+    elif no_lidar:
+        from . import network_tiles
+
+        dem_p = sdir / "dem_1m.tif"
+        if not dem_p.exists():
+            raise RuntimeError("no lidar and no DEM: nothing can say how high the roads are")
+        prof = network_tiles.profile_from_dem(prim["line"], dem_p)
+        (sdir / "profile.json").write_text(json.dumps(prof))
+        manifest_lidar = {"source": "none", "why": no_lidar, "profiles_from": "dem", "structures": []}
+        for c in shard_chains:
+            if c is prim:
+                continue
+            try:
+                branches.append(branch_record(c, prim, network_tiles.profile_from_dem(c["line"], dem_p)))
+            except Exception:
+                branches.append(branch_record(c, prim, None))
+        print(f"  branch  {len(branches)} branches from the DEM", flush=True)
+    else:
+        prof = None
+        manifest_lidar = {}
+
+    (sdir / "branches.json").write_text(json.dumps({"frame": "enu", "branches": branches}))
+    manifest = {"slug": slug, "kind": "network", "tiled": True, "shard": index, "world": bool(site.get("world")),
+                "frame": {"epsg": frame.epsg, "origin": frame.origin},
+                "bbox_utm": list(bbox), "lidar": manifest_lidar,
+                "branches": {"count": len(branches), "structures": sum(len(b["structures"]) for b in branches)},
+                "seconds": round(time.time() - t0, 1)}
+    (sdir / "manifest.json").write_text(json.dumps(manifest, indent=1, default=str))
+    print(f"  done    shard {index} {manifest['seconds']} s -> {sdir}")
+
 
 
 def _enu_cols(frame, pts, zs=None, nd: int = 2) -> list:

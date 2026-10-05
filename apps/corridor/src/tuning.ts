@@ -869,6 +869,14 @@ export let WATER_REFLECT_SCALE = 0.5
 /** how far the wave normal smears the reflection, in screen fractions */
 export let WATER_REFLECT_RIPPLE = 0.1
 /**
+ * How far the mirrored scene is drawn, in metres; 0 uses the main camera's whole range. The mirror
+ * is a second full scene render, so this is its DETAIL dial: a shorter reach culls the distant
+ * terrain tiles, the horizon plate and the far tree LOD from the reflection, which is half-res and
+ * rippled anyway. The sky is unaffected — its shader pins it to the far plane — so the horizon still
+ * reflects. Lower is cheaper; 0 is the honest full mirror.
+ */
+export let WATER_REFLECT_FAR = 0
+/**
  * How close the eye must come to an inland body's shore for the planar mirror to aim at it instead
  * of the sea (m). 0 keeps the mirror on the sea alone, as it was. A pond is as flat as the sea, so
  * the one exact mirror plane serves it just as well — this is the reach at which the lake under your
@@ -1980,6 +1988,7 @@ export const TUNE_TABS: TuneTab[] = [
           tune('WATER_REFLECT', () => WATER_REFLECT, (v) => (WATER_REFLECT = v), [0, 1], 0.02, 'planar reflection: 0 off, 1 full — the scene is rendered once more mirrored in the water plane'),
           tune('WATER_REFLECT_SCALE', () => WATER_REFLECT_SCALE, (v) => (WATER_REFLECT_SCALE = v), [0.2, 1], 0.05, 'reflection buffer resolution ×; lower is cheaper and softer'),
           tune('WATER_REFLECT_RIPPLE', () => WATER_REFLECT_RIPPLE, (v) => (WATER_REFLECT_RIPPLE = v), [0, 0.6], 0.02, 'wave-normal smear on the reflection; 0 is a flat looking-glass'),
+          tune('WATER_REFLECT_FAR', () => WATER_REFLECT_FAR, (v) => (WATER_REFLECT_FAR = v), [0, 20000], 50, 'how far the mirrored scene is drawn (m): the mirror detail dial. Lower culls distant tiles/horizon/trees from the reflection; 0 draws the whole main range'),
           tune('WATER_REFLECT_REACH', () => WATER_REFLECT_REACH, (v) => (WATER_REFLECT_REACH = v), [0, 3000], 25, 'aim the planar mirror at the nearest inland body within this many metres of its shore (else the sea); 0 keeps it on the sea alone'),
           tune('WATER_SEA_REACH', () => WATER_SEA_REACH, (v) => (WATER_SEA_REACH = v), [0, 20000], 100, 'only show/mirror the sea when ground comes down to the waterline within this many metres of the eye; 0 uses the whole resident floor'),
           tune('WATER_SKY_REFLECT', () => WATER_SKY_REFLECT, (v) => (WATER_SKY_REFLECT = v), [0, 1.5], 0.05, 'sky/horizon reflection from the environment map, for ponds and streams the sea plane cannot mirror; 0 is the old flat sheet'),

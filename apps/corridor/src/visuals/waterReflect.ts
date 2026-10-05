@@ -169,10 +169,16 @@ export function renderWaterReflection(renderer: THREE.WebGLRenderer, scene: THRE
   virtualCamera.position.copy(view)
   virtualCamera.up.set(0, 1, 0).applyMatrix4(rotation).reflect(normal)
   virtualCamera.lookAt(targetPoint)
+  // the reflection camera, at the main camera's fov and aspect but a detail-limited far: a shorter
+  // reach culls the distant tiles/horizon/trees from the mirror, which is half-res and rippled
+  // anyway. Rebuilt rather than copied, because the copied projection carries the main camera's far.
   virtualCamera.near = camera.near
-  virtualCamera.far = camera.far
+  virtualCamera.far = T.WATER_REFLECT_FAR > 0 ? Math.max(camera.near + 1, Math.min(camera.far, T.WATER_REFLECT_FAR)) : camera.far
+  virtualCamera.fov = camera.fov
+  virtualCamera.aspect = camera.aspect
+  virtualCamera.zoom = camera.zoom
   virtualCamera.updateMatrixWorld()
-  virtualCamera.projectionMatrix.copy(camera.projectionMatrix)
+  virtualCamera.updateProjectionMatrix()
 
   // oblique near plane: clip everything below the water line, or the seabed reflects into the sky
   reflectorPlane.setFromNormalAndCoplanarPoint(normal, planePoint)

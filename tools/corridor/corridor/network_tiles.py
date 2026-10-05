@@ -474,7 +474,83 @@ def naip_tiled(frame: Frame, bbox, corridor, out: Path, cache: Path, res: float 
     return {"file": out.name, "res_m": res, "size": [width, height], "tiles_fetched": fetched}
 
 
+def _tile_grid(site_dir: Path):
+    """`(x0, y0, [(tx, ty), ...])` — the 1 km UTM tile grid for a site.
+
+    THE TILE GRID IS NOT THE LIDAR'S TO DECIDE. It was: the grid came from `manifest.lidar.tiles`,
+    so a bake without a point cloud produced no tiles, and therefore no per-tile elevation, imagery
+    or canopy — the whole streamed world, gone, because one optional stage was skipped. A WORLD bake
+    is exactly the case that does not want a point cloud (everything lidar is for is road-local, and
+    the canopy comes from the global model), so for one the grid comes from the site's own bbox,
+    which is what the grid was always describing.
+
+    ...and it is not the WORLD FLAG's to decide either. This fell back to the site's bbox only when
+    the site was marked `world`, and the world editor does not mark them, so a bake with no point
+    cloud — every bake outside the United States — would have produced no tiles, silently. The test
+    is now simply "the lidar did not give us a grid", which is the thing that actually matters.
+    """
+    man = json.loads((site_dir / "manifest.json").read_text()) if (site_dir / "manifest.json").exists() else {}
+    tinfo = (man.get("lidar") or {}).get("tiles") or {}
+    x0, y0 = tinfo.get("origin", [None, None])
+    tiles = [tuple(t) for t in tinfo.get("list", [])]
+    if x0 is None or not tiles:
+        site_cfg = json.loads((site_dir / "site.json").read_text()) if (site_dir / "site.json").exists() else {}
+        bx = site_cfg.get("bbox_utm")
+        if bx:
+            x0 = math.floor(bx[0] / TILE_M) * TILE_M
+            y0 = math.floor(bx[1] / TILE_M) * TILE_M
+            nx = int(math.ceil((bx[2] - x0) / TILE_M))
+            ny = int(math.ceil((bx[3] - y0) / TILE_M))
+            tiles = [(tx, ty) for ty in range(ny) for tx in range(nx)]
+            print(f"  tiles   no point cloud: {nx}x{ny} = {len(tiles)} tiles from the site's own bbox", flush=True)
+    return x0, y0, tiles
+
+
+#: Set in the parent before forking so every worker inherits `frame` (its pyproj Transformer cache
+#: is not picklable) and the mask shapes by copy-on-write, not through a pickle per task.
+_TILE_CTX: dict = {}
+
+
+def _export_tiles_worker(tiles: list) -> dict:
+    c = _TILE_CTX
+    return _export_tiles_serial(c["site_dir"], c["web"], c["frame"], c["mask_shapes"], c["vivid"], only_tiles=tiles)
+
+
 def export_tiles(site_dir: Path, web: Path, frame, mask_shapes: list, vivid) -> dict:
+    """Render every 1 km tile, forked across `pool` workers (one manifest merged from the slices).
+
+    The per-tile work is independent and writes disjoint files, so serialising it was never a
+    decision — it predates the pool. `_export_tiles_serial` still owns the format; this decides how
+    many slices to make, runs them, and concatenates their entries in grid order.
+    """
+    from . import pool
+
+    x0, y0, tiles = _tile_grid(site_dir)
+    if x0 is None or not tiles:
+        return {}
+    global _TILE_CTX
+    _TILE_CTX = {"site_dir": site_dir, "web": web, "frame": frame, "mask_shapes": mask_shapes, "vivid": vivid}
+    chunks = pool.chunk(tiles, pool.default_jobs(len(tiles)))
+    parts = pool.map_chunks(_export_tiles_worker, chunks, "export")
+    entries: list = []
+    canopy = 0
+    out = None
+    for r in parts:
+        if not r:
+            continue
+        out = out or r
+        entries.extend(r.get("list") or [])
+        canopy += int(r.get("_canopy") or 0)
+    if out is None:
+        return {}
+    if canopy:
+        print(f"  canopy  {canopy:,} tile cells outside the lidar band took the global canopy", flush=True)
+    out = {k: v for k, v in out.items() if k != "_canopy"}
+    out["list"] = entries
+    return out
+
+
+def _export_tiles_serial(site_dir: Path, web: Path, frame, mask_shapes: list, vivid, only_tiles=None) -> dict:
     """
     One pack + one texture per tile: web/tiles/0/<x>_<y>.pack and <x>_<y>.naip.jpg.
 
@@ -491,42 +567,12 @@ def export_tiles(site_dir: Path, web: Path, frame, mask_shapes: list, vivid) -> 
     from .export import _encode_height, _fill
     from .pack import write_pack
 
-    man = json.loads((site_dir / "manifest.json").read_text()) if (site_dir / "manifest.json").exists() else {}
-    lidar_meta = man.get("lidar", {})
-    tinfo = lidar_meta.get("tiles") or {}
-    x0, y0 = tinfo.get("origin", [None, None])
-    tiles = [tuple(t) for t in tinfo.get("list", [])]
-    #
-    # THE TILE GRID IS NOT THE LIDAR'S TO DECIDE.
-    #
-    # It was: the 1 km grid came from `manifest.lidar.tiles`, so a bake without a point cloud
-    # produced no tiles, and therefore no per-tile elevation, imagery or canopy -- the whole
-    # streamed world, gone, because one optional stage was skipped. A WORLD bake is exactly the
-    # case that does not want a point cloud (see network.py: everything lidar is for is
-    # road-local, and the canopy comes from the global model), so for one the grid comes from the
-    # site's own bbox, which is what the grid was always describing.
-    #
-    #
-    # ...and it is not the WORLD FLAG's to decide either.
-    #
-    # This fell back to the site's bbox only when the site was marked `world`, and the world editor
-    # does not mark them: Rich's Monte Bondone came through as a plain `kind: network` with
-    # `all_streets`, so a bake with no point cloud -- which is every bake outside the United States
-    # -- would have produced no tiles, no elevation, no imagery and no canopy, silently. The test
-    # is now simply "the lidar did not give us a grid", which is the thing that actually matters.
-    #
-    site_cfg = json.loads((site_dir / "site.json").read_text()) if (site_dir / "site.json").exists() else {}
-    if x0 is None or not tiles:
-        bx = site_cfg.get("bbox_utm")
-        if bx:
-            x0 = math.floor(bx[0] / TILE_M) * TILE_M
-            y0 = math.floor(bx[1] / TILE_M) * TILE_M
-            nx = int(math.ceil((bx[2] - x0) / TILE_M))
-            ny = int(math.ceil((bx[3] - y0) / TILE_M))
-            tiles = [(tx, ty) for ty in range(ny) for tx in range(nx)]
-            print(f"  tiles   no point cloud: {nx}x{ny} = {len(tiles)} tiles from the site's own bbox", flush=True)
+    x0, y0, tiles = _tile_grid(site_dir)
     if x0 is None or not tiles:
         return {}
+    if only_tiles is not None:
+        # a worker's slice; the parent resolved the grid, and every sibling resolves it identically
+        tiles = [(int(x), int(y)) for x, y in only_tiles]
     tdir = web / "tiles" / "0"
     tdir.mkdir(parents=True, exist_ok=True)
     n = int(TILE_M)
@@ -656,8 +702,6 @@ def export_tiles(site_dir: Path, web: Path, frame, mask_shapes: list, vivid) -> 
         entries.append(entry)
     p.close()
     naip_res_src = round(float(naip_ds.res[0]), 3) if naip_ds is not None else 1.0
-    if canopy_filled:
-        print(f"  canopy  {canopy_filled:,} tile cells outside the lidar band took the global canopy", flush=True)
     for ds in (dem_ds, chm_ds, naip_ds, dtm_ds, gchm_ds):
         if ds is not None:
             ds.close()
@@ -674,6 +718,7 @@ def export_tiles(site_dir: Path, web: Path, frame, mask_shapes: list, vivid) -> 
         "format": "pack-1",
         "texture": "naip.jpg",
         "list": entries,
+        "_canopy": canopy_filled,
     }
 
 
@@ -872,13 +917,17 @@ def profile_many(tasks: list, ldir: Path, pts: dict | None, jobs: int | None = N
     from concurrent.futures import as_completed
 
     out: list = [None] * total
-    p = progress.Progress("branch", total)
     with ProcessPoolExecutor(max_workers=jobs, mp_context=ctx) as ex:
+        # Fork the workers BEFORE the heartbeat thread starts (see pool.map_chunks): a child that
+        # inherits the stdout lock while the thread holds it deadlocks on its first print.
         pending = {ex.submit(_profile_worker, t): i for i, t in enumerate(tasks)}
-        for fut in as_completed(pending):
-            out[pending[fut]] = fut.result()
-            p.tick()
-    p.close()
+        p = progress.Progress("branch", total)
+        try:
+            for fut in as_completed(pending):
+                out[pending[fut]] = fut.result()
+                p.tick()
+        finally:
+            p.close()
     return out
 
 
@@ -1095,6 +1144,55 @@ OVERVIEW_DEM_M = 8.0
 OVERVIEW_MAX_PX = 4000
 
 
+def _read_strips(path: Path, bbox, res: float, count: int = 1, strips: int | None = None):
+    """Read a whole UTM bbox at `res`, one horizontal strip per THREAD, each its own GDAL handle.
+
+    `overview()` read each 1 m source in a single `rasterio.read` over the whole site, and for a
+    world those sources are VRTs of hundreds of 1 km tiles with no overviews — so GDAL decodes every
+    source pixel at full resolution to average it down. On the Capital Beltway's `naip_1m.tif` that
+    was hours in one call, with no log line between start and finish (corridor-bake-495, 2026-10-04,
+    silent for 3.4 h at "overview dem …"). The output rows are independent, so the read is split into
+    strips and run concurrently.
+
+    THREADS, NOT FORK. Each thread opens the dataset itself (a GDAL handle is not safe to read from
+    two threads, and a forked child would share the parent's file offset), and the decode/reproject
+    is in GDAL C, which releases the GIL. No process pool, so no pickling and no fork-of-threads.
+    """
+    import os
+
+    import rasterio
+    from rasterio.enums import Resampling
+    from rasterio.windows import from_bounds
+
+    with rasterio.open(path) as src:
+        w = int(round((bbox[2] - bbox[0]) / res))
+        h = int(round((bbox[3] - bbox[1]) / res))
+    if w <= 0 or h <= 0:
+        return None, (w, h)
+    n = strips or min(8, os.cpu_count() or 1)
+    n = max(1, min(n, h))
+    rows = [((i * h) // n, ((i + 1) * h) // n) for i in range(n)]
+    rows = [(r0, r1) for r0, r1 in rows if r1 > r0]
+
+    def one(r0: int, r1: int):
+        # output row r spans UTM y from bbox[3]-r*res (north) down; row 0 is the north edge
+        y_north, y_south = bbox[3] - r0 * res, bbox[3] - r1 * res
+        with rasterio.open(path) as s:
+            win = from_bounds(bbox[0], y_south, bbox[2], y_north, transform=s.transform)
+            fill = s.nodata if (s.nodata is not None and count == 1) else 0
+            return s.read(out_shape=(count, r1 - r0, w), window=win, resampling=Resampling.average, boundless=True, fill_value=fill)
+
+    if len(rows) <= 1:
+        a = one(*rows[0]) if rows else None
+    else:
+        from concurrent.futures import ThreadPoolExecutor
+
+        with ThreadPoolExecutor(max_workers=len(rows)) as ex:
+            parts = list(ex.map(lambda r: one(*r), rows))
+        a = np.concatenate(parts, axis=1)  # axis 1 is the row axis for both (1,h,w) and (3,h,w)
+    return (a[0] if (a is not None and count == 1) else a), (w, h)
+
+
 def overview(site_dir: Path, web: Path, frame, mask_shapes: list, vivid) -> dict:
     """A whole-region dem/chm/naip at coarse resolution, so a tiled site LOADS.
 
@@ -1122,12 +1220,7 @@ def overview(site_dir: Path, web: Path, frame, mask_shapes: list, vivid) -> dict
         return _enu_bbox(frame, b)
 
     def read(path: Path, res: float, count: int = 1):
-        with rasterio.open(path) as src:
-            w = int(round((bbox[2] - bbox[0]) / res))
-            h = int(round((bbox[3] - bbox[1]) / res))
-            win = rasterio.windows.from_bounds(*bbox, transform=src.transform)
-            a = src.read(out_shape=(count, h, w), window=win, resampling=Resampling.average, boundless=True, fill_value=src.nodata if src.nodata is not None and count == 1 else 0)
-        return (a[0] if count == 1 else a), (w, h)
+        return _read_strips(path, bbox, res, count)
 
     dem_p = site_dir / "dem_1m.tif"
     if dem_p.exists():

@@ -108,6 +108,25 @@ def _encode_height(z: np.ndarray) -> tuple[np.ndarray, float, float]:
     return rgb, zmin, scale
 
 
+def vivid(img, sat: float, con: float, green: float = 1.0):
+    """Saturation + contrast (+ optional green lift) for the drape.
+
+    MODULE-LEVEL ON PURPOSE. It used to be a closure inside `export_site`, which is fine for a
+    serial call but cannot be pickled to a forked tile worker. `network_tiles.export_tiles` and
+    `pyramid.bake` import it by name so their workers can call it without the caller passing a
+    closure across the process boundary.
+    """
+    from PIL import ImageEnhance
+
+    img = ImageEnhance.Color(img).enhance(sat)
+    img = ImageEnhance.Contrast(img).enhance(con)
+    if green != 1.0:
+        r, g, b = img.split()
+        g = g.point(lambda v: min(255, int(v * green)))
+        img = Image.merge("RGB", (r, g, b))
+    return img
+
+
 def _read_at(path: Path, res: float, bbox=None) -> tuple[np.ndarray, dict]:
     with rasterio.open(path) as src:
         b = src.bounds
@@ -1057,16 +1076,7 @@ def export_site(site_dir: Path, web: Path | None = None) -> dict:
     # mosaic at 60 m is a desaturated grey-green (35% grey on average). Under fog and a hemisphere
     # light it reads as beige. Push saturation and contrast at export so the drape carries the
     # colour the eye expects from a Maryland ridge; the GeoTIFF stays untouched for measurement.
-    from PIL import ImageEnhance
-
-    def vivid(img: Image.Image, sat: float, con: float, green: float = 1.0) -> Image.Image:
-        img = ImageEnhance.Color(img).enhance(sat)
-        img = ImageEnhance.Contrast(img).enhance(con)
-        if green != 1.0:
-            r, g, b = img.split()
-            g = g.point(lambda v: min(255, int(v * green)))
-            img = Image.merge("RGB", (r, g, b))
-        return img
+    # `vivid` is module-level now (see its definition) so the forked tile workers can pickle it.
 
     # The LOD pyramid, beside the flat tiles rather than instead of them: a viewer that does not
     # know about `pyramid` keeps working off `tiles`, and one that does ignores `tiles` entirely.

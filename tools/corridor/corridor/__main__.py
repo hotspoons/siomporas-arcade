@@ -31,7 +31,24 @@ import sys
 import time
 from pathlib import Path
 
-import numpy as np
+# NO BLAS / OpenMP / GDAL THREAD POOLS, SET BEFORE numpy IS IMPORTED.
+#
+# The long offline stages fan out across processes (network_tiles.profile_many, and the per-tile
+# export and pyramid pools) and the near-road cloud is 20+ GiB, so those pools must FORK to inherit
+# it copy-on-write rather than pickle it per task. But forking a process that has a BLAS thread pool
+# alive is a deadlock: the child inherits the pool's locks with no thread to release them, and parks
+# on a futex the first time it touches BLAS. That is exactly how `dc-metro-take-2` wedged on
+# 2026-10-05 (image cc45ba1e): ~120 OpenBLAS/GDAL threads in the parent, 32 idle forked children,
+# load average 0.01, 124 of 384 GiB used — a lock, not work, and 2.5 h of silence in `profile_many`.
+#
+# One thread here costs nothing: the parallelism the bake cares about is the PROCESS pool, and the
+# numeric stages are elementwise or KD-tree (not BLAS). `CORRIDOR_BLAS_THREADS` is the escape hatch
+# for a workstation that wants a threaded BLAS and does not fork.
+_blas = os.environ.get("CORRIDOR_BLAS_THREADS", "1").strip() or "1"
+for _v in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS", "VECLIB_MAXIMUM_THREADS", "GDAL_NUM_THREADS"):
+    os.environ.setdefault(_v, _blas)
+
+import numpy as np  # noqa: E402  (must come after the thread pool is pinned)
 
 HERE = Path(__file__).resolve().parent.parent
 # In the container these point at the mounted volume; in the devcontainer at tools/corridor/data.

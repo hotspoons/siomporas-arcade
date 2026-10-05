@@ -246,6 +246,15 @@ export class Runs {
       { name: 'CORRIDOR_HORIZON_M', value: String(this.cfg.horizonM ?? 30000) },
       { name: 'CORRIDOR_PYRAMID', value: '1' },
       { name: 'PYTHONUNBUFFERED', value: '1' }, // or the log arrives in 4 KiB lumps, minutes late
+      // No BLAS/GDAL thread pool, so the forked per-tile/profile pools cannot inherit a held lock.
+      // `corridor/__main__.py` sets the same defaults before numpy loads; these make it explicit in
+      // the manifest and cover a container that starts some other entrypoint. See the comment there
+      // (dc-metro-take-2 deadlocked in profile_many, 2026-10-05).
+      { name: 'OPENBLAS_NUM_THREADS', value: '1' },
+      { name: 'OMP_NUM_THREADS', value: '1' },
+      { name: 'MKL_NUM_THREADS', value: '1' },
+      { name: 'NUMEXPR_NUM_THREADS', value: '1' },
+      { name: 'GDAL_NUM_THREADS', value: '1' },
     ]
     if (overpass) env.push({ name: 'CORRIDOR_OVERPASS_URL', value: overpass })
     if (this.cfg.bucket) {

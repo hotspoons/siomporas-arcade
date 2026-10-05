@@ -48,6 +48,18 @@ spec:
             # that omitted it used to write one mesh.
             - name: CORRIDOR_PYRAMID
               value: "1"
+            # No BLAS/GDAL thread pool, so the forked profile/tile pools cannot inherit a held
+            # lock (corridor/__main__.py sets the same defaults before numpy loads).
+            - name: OPENBLAS_NUM_THREADS
+              value: "1"
+            - name: OMP_NUM_THREADS
+              value: "1"
+            - name: MKL_NUM_THREADS
+              value: "1"
+            - name: NUMEXPR_NUM_THREADS
+              value: "1"
+            - name: GDAL_NUM_THREADS
+              value: "1"
             {{- if .Values.bake.sitesJson }}
             - name: CORRIDOR_SITES
               value: /config/sites.json

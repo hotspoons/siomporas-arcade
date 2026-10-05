@@ -254,7 +254,7 @@ def fill_blank(rgb):
     return rgb, (nb / blank.size if blank.size else 0.0)
 
 
-def bake(site_dir, web, frame, zmax: int | None = None, zmin: int | None = None, vivid=None) -> dict:
+def _bake_serial(site_dir, web, frame, zmax: int | None = None, zmin: int | None = None, vivid=None, only_tiles: list | None = None) -> dict:
     """
     Emit the pyramid under `web/pyr/<z>/<x>_<y>.{pack,jpg}` and return the manifest block.
 
@@ -282,6 +282,9 @@ def bake(site_dir, web, frame, zmax: int | None = None, zmin: int | None = None,
     zmax = zmax if zmax is not None else leaf_level(lat)
     zmin = zmin if zmin is not None else root_level(bbox_wgs)
     tiles = plan(bbox_wgs, zmax=zmax, zmin=zmin)
+    if only_tiles is not None:
+        # a worker's slice: the parent decided the plan; a worker just renders its share
+        tiles = [Tile(int(z), int(x), int(y)) for z, x, y in only_tiles]
 
     dem_p = site_dir / "dem_1m.tif"
     chm_p = site_dir / "lidar" / "chm.vrt"
@@ -293,7 +296,6 @@ def bake(site_dir, web, frame, zmax: int | None = None, zmin: int | None = None,
     entries = []
     rev = int((site_dir / "manifest.json").stat().st_mtime) if (site_dir / "manifest.json").exists() else 0
     skipped = 0
-    print(f"pyramid: {len(tiles)} tiles z{zmin}..{zmax}", flush=True)
     from . import progress
 
     p = progress.Progress("pyramid", len(tiles))
@@ -355,3 +357,55 @@ def bake(site_dir, web, frame, zmax: int | None = None, zmin: int | None = None,
         "empty": skipped,
         "list": entries,
     }
+
+
+#: Set in the parent before forking so every worker inherits `frame` (its pyproj Transformer cache
+#: is not picklable) and the vivid filter by copy-on-write, not through a pickle.
+_PYR_CTX: dict = {}
+
+
+def _bake_worker(tiles: list) -> dict:
+    c = _PYR_CTX
+    return _bake_serial(c["site_dir"], c["web"], c["frame"], c["zmax"], c["zmin"], c["vivid"], only_tiles=tiles)
+
+
+def bake(site_dir, web, frame, zmax: int | None = None, zmin: int | None = None, vivid=None) -> dict:
+    """Render the pyramid, forked across `pool` workers (one manifest merged from the slices).
+
+    A pyramid tile is sampled from the same site rasters as its siblings and written to a file keyed
+    by its own (z, x, y), so the tiles are independent and the only shared state is the read-only
+    plan. On the Capital Beltway that was 1,272 tiles in a single `for` loop (corridor-bake-495,
+    ~60 min); the plan is unchanged, only who runs it is.
+    """
+    from . import pool
+
+    site = json.loads((site_dir / "site.json").read_text())
+    bb = site.get("bbox_utm")
+    if not bb:
+        return {}
+    bbox_wgs = frame.bbox_wgs(*bb)
+    zmax = zmax if zmax is not None else leaf_level(float(site["lat"]))
+    zmin = zmin if zmin is not None else root_level(bbox_wgs)
+    tiles = plan(bbox_wgs, zmax=zmax, zmin=zmin)
+    print(f"pyramid: {len(tiles)} tiles z{zmin}..{zmax}", flush=True)
+    if not tiles:
+        return {}
+    global _PYR_CTX
+    _PYR_CTX = {"site_dir": site_dir, "web": web, "frame": frame, "zmax": zmax, "zmin": zmin, "vivid": vivid}
+    chunks = pool.chunk([(t.z, t.x, t.y) for t in tiles], pool.default_jobs(len(tiles)))
+    parts = pool.map_chunks(_bake_worker, chunks, "pyramid")
+    entries: list = []
+    empty = 0
+    out = None
+    for r in parts:
+        if not r:
+            continue
+        out = out or r
+        entries.extend(r.get("list") or [])
+        empty += int(r.get("empty") or 0)
+    if out is None:
+        return {}
+    out = dict(out)
+    out["list"] = entries
+    out["empty"] = empty
+    return out

@@ -3209,60 +3209,99 @@ if (uLodOn > 0.5) {
     }
     wetExtra.push(parkingG.group, sidewalksG.group)
   }
-  addStreet(local ? streetSlice(true) : manifest, local ? crossingNodes.filter((n) => inDisc(n.x, n.y)) : crossingNodes)
-  if (local && focus) {
-    const far = streetSlice(false)
-    const CELL = 1000
-    type Bucket = { masts: NonNullable<Manifest['signals']>['masts']; signs: NonNullable<Manifest['signals']>['signs']; bars: NonNullable<NonNullable<Manifest['signals']>['bars']>; parking: NonNullable<Manifest['parking']>; barriers: NonNullable<Manifest['barriers']>; sidewalks: NonNullable<Manifest['sidewalks']>; driveways: NonNullable<Manifest['driveways']>; lines: NonNullable<Manifest['power']>['lines']; supports: NonNullable<Manifest['power']>['supports']; intersections: NonNullable<Manifest['intersections']>['list'] }
-    const buckets = new Map<string, Bucket>()
-    const bucket = (x: number, y: number): Bucket => {
-      const k = `${Math.floor(x / CELL)},${Math.floor(y / CELL)}`
-      let b = buckets.get(k)
-      if (!b) {
-        b = { masts: [], signs: [], bars: [], parking: [], barriers: [], sidewalks: [], driveways: [], lines: [], supports: [], intersections: [] }
-        buckets.set(k, b)
-      }
-      return b
+  // --- street furniture: where a cell's comes from ---------------------------------------------
+  // `sidewalks`, `parking`, `barriers`, `power` and `signals` are consumed only by the builders
+  // `addStreet` runs, so a tiled bake moves them into the per-1 km vector tiles (`vt.cells`) and the
+  // viewer fetches a cell's furniture when the pump reaches it — no longer 100 MB resident for one
+  // disc. `driveways` and `intersections` stay inline: `makeDriveways` lays every driveway as a
+  // road-group ribbon at load, and junction paint (`junctionPaintCut`) and the junction-meet pass
+  // (`xByNode`) need the whole intersection list. They are bucketed here — once — and merged with
+  // the tile, so a far cell still gets the driveways and junctions that fall in it.
+  const CELL = 1000
+  type Bucket = { masts: NonNullable<Manifest['signals']>['masts']; signs: NonNullable<Manifest['signals']>['signs']; bars: NonNullable<NonNullable<Manifest['signals']>['bars']>; parking: NonNullable<Manifest['parking']>; barriers: NonNullable<Manifest['barriers']>; sidewalks: NonNullable<Manifest['sidewalks']>; driveways: NonNullable<Manifest['driveways']>; lines: NonNullable<Manifest['power']>['lines']; supports: NonNullable<Manifest['power']>['supports']; intersections: NonNullable<Manifest['intersections']>['list'] }
+  const buckets = new Map<string, Bucket>()
+  const bucket = (x: number, y: number): Bucket => {
+    const k = `${Math.floor(x / CELL)},${Math.floor(y / CELL)}`
+    let b = buckets.get(k)
+    if (!b) {
+      b = { masts: [], signs: [], bars: [], parking: [], barriers: [], sidewalks: [], driveways: [], lines: [], supports: [], intersections: [] }
+      buckets.set(k, b)
     }
-    for (const p of far.signals?.masts ?? []) bucket(p.x, p.y).masts.push(p)
-    for (const p of far.signals?.signs ?? []) bucket(p.x, p.y).signs.push(p)
-    for (const p of far.signals?.bars ?? []) bucket(p.x, p.y).bars.push(p)
-    for (const p of far.parking ?? []) { const q = p.ring[0]; if (q) bucket(q[0], q[1]).parking.push(p) }
-    for (const p of far.barriers ?? []) { const q = p.coords[0]; if (q) bucket(q[0], q[1]).barriers.push(p) }
-    for (const p of far.sidewalks ?? []) { const q = p.coords[0]; if (q) bucket(q[0], q[1]).sidewalks.push(p) }
-    for (const p of far.driveways ?? []) { const q = p.coords[0]; if (q) bucket(q[0], q[1]).driveways.push(p) }
-    for (const p of far.power?.lines ?? []) { const q = p.coords[0]; if (q) bucket(q[0], q[1]).lines.push(p) }
-    for (const p of far.power?.supports ?? []) bucket(p.x, p.y).supports.push(p)
-    for (const p of far.intersections?.list ?? []) bucket(p.x, p.y).intersections.push(p)
-    // Crossing nodes are bucketed on the same 1 km grid, so a far cell only tests the crossings in
-    // its own cell rather than all 20k — the other half of the "street: crosswalks" freeze.
-    const crossingsByCell = new Map<string, typeof crossingNodes>()
-    for (const n of crossingNodes) {
-      const k = `${Math.floor(n.x / CELL)},${Math.floor(n.y / CELL)}`
-      const a = crossingsByCell.get(k)
-      if (a) a.push(n)
-      else crossingsByCell.set(k, [n])
+    return b
+  }
+  const tiledFurniture = manifest.vt?.cells?.length ? manifest.vt : null
+  const tiledCells = tiledFurniture?.cells ?? []
+  if ((local && focus) || tiledFurniture) {
+    // Tiled: every cell owns its inline driveways/junctions, home included, so bucket the whole
+    // array. Inline: only the far half is bucketed; the home disc is built eagerly below.
+    const spread = tiledFurniture ? manifest : streetSlice(false)
+    for (const p of spread.signals?.masts ?? []) bucket(p.x, p.y).masts.push(p)
+    for (const p of spread.signals?.signs ?? []) bucket(p.x, p.y).signs.push(p)
+    for (const p of spread.signals?.bars ?? []) bucket(p.x, p.y).bars.push(p)
+    for (const p of spread.parking ?? []) { const q = p.ring[0]; if (q) bucket(q[0], q[1]).parking.push(p) }
+    for (const p of spread.barriers ?? []) { const q = p.coords[0]; if (q) bucket(q[0], q[1]).barriers.push(p) }
+    for (const p of spread.sidewalks ?? []) { const q = p.coords[0]; if (q) bucket(q[0], q[1]).sidewalks.push(p) }
+    for (const p of spread.driveways ?? []) { const q = p.coords[0]; if (q) bucket(q[0], q[1]).driveways.push(p) }
+    for (const p of spread.power?.lines ?? []) { const q = p.coords[0]; if (q) bucket(q[0], q[1]).lines.push(p) }
+    for (const p of spread.power?.supports ?? []) bucket(p.x, p.y).supports.push(p)
+    for (const p of spread.intersections?.list ?? []) bucket(p.x, p.y).intersections.push(p)
+  }
+  // Crossing nodes are bucketed on the same 1 km grid, so a cell only tests the crossings in its own
+  // cell rather than all 20k — half of the "street: crosswalks" freeze before the nearestDir fix.
+  const crossingsByCell = new Map<string, typeof crossingNodes>()
+  for (const n of crossingNodes) {
+    const k = `${Math.floor(n.x / CELL)},${Math.floor(n.y / CELL)}`
+    const a = crossingsByCell.get(k)
+    if (a) a.push(n)
+    else crossingsByCell.set(k, [n])
+  }
+  /** A cell's Manifest: the bucket's inline arrays, a tiled bake's arrays fetched over the top (a
+   *  tiled bake ships the bucket's copies empty, so the tile is their only source). */
+  const cellManifest = (k: string, tiled: Record<string, unknown> | null): Manifest => {
+    const b = buckets.get(k)
+    return {
+      ...manifest,
+      signals: (tiled?.signals as Manifest['signals']) ?? { masts: b?.masts ?? [], signs: b?.signs ?? [], bars: b?.bars ?? [] },
+      parking: (tiled?.parking as Manifest['parking']) ?? b?.parking ?? [],
+      barriers: (tiled?.barriers as Manifest['barriers']) ?? b?.barriers ?? [],
+      sidewalks: (tiled?.sidewalks as Manifest['sidewalks']) ?? b?.sidewalks ?? [],
+      power: (tiled?.power as Manifest['power']) ?? (manifest.power ? { lines: b?.lines ?? [], supports: b?.supports ?? [] } : null),
+      driveways: b?.driveways ?? [],
+      intersections: manifest.intersections ? { ...manifest.intersections, list: b?.intersections ?? [] } : null,
     }
-    for (const [k, b] of buckets) {
-      const [cx, cy] = k.split(',').map(Number)
-      const m: Manifest = {
-        ...manifest,
-        signals: { masts: b.masts, signs: b.signs, bars: b.bars },
-        parking: b.parking,
-        barriers: b.barriers,
-        sidewalks: b.sidewalks,
-        driveways: b.driveways,
-        power: { lines: b.lines, supports: b.supports },
-        intersections: manifest.intersections ? { ...manifest.intersections, list: b.intersections } : null,
+  }
+  const builtStreet = new Set<string>()
+  const buildStreetCell = (cx: number, cy: number, tiled: Record<string, unknown> | null) => {
+    const k = `${cx},${cy}`
+    if (builtStreet.has(k)) return
+    builtStreet.add(k)
+    addStreet(cellManifest(k, tiled), crossingsByCell.get(k) ?? [])
+  }
+  if (tiledFurniture) {
+    const size = tiledFurniture.size_m || CELL
+    const dir = tiledFurniture.dir
+    const fc = tiledFurniture.counts
+    console.info(`[boot] ${manifest.slug}: ${tiledCells.length} furniture tiles${fc ? ` (${fc.sidewalks ?? 0} walks, ${fc.masts ?? 0} masts, ${fc.parking ?? 0} lots)` : ''} — streamed, not resident`)
+    // The home tiles NOW, so `streetRoot` exists for everything below; the rest through the pump,
+    // nearest first, exactly as the building tiles are. The home disc spans at most a 2x2 of tiles.
+    const home = local && focus
+      ? { x0: Math.floor((focus.x - HOME_M) / size), x1: Math.floor((focus.x + HOME_M) / size), y0: Math.floor((-focus.z - HOME_M) / size), y1: Math.floor((-focus.z + HOME_M) / size) }
+      : { x0: tiledCells[0].x, x1: tiledCells[0].x, y0: tiledCells[0].y, y1: tiledCells[0].y }
+    for (let cx = home.x0; cx <= home.x1; cx++) for (let cy = home.y0; cy <= home.y1; cy++) {
+      buildStreetCell(cx, cy, await loadVectorTile(manifest.slug, dir, cx, cy))
+    }
+    for (const c of tiledCells) {
+      const k = `${c.x},${c.y}`
+      if (builtStreet.has(k)) continue
+      gradeUnits.push({ key: `street:${k}`, x: c.x * size + size / 2, z: -(c.y * size + size / 2), r: size * 0.75, done: false, run: async () => { buildStreetCell(c.x, c.y, await loadVectorTile(manifest.slug, dir, c.x, c.y)) } })
+    }
+  } else {
+    addStreet(local ? streetSlice(true) : manifest, local ? crossingNodes.filter((n) => inDisc(n.x, n.y)) : crossingNodes)
+    if (local && focus) {
+      for (const [k] of buckets) {
+        const [cx, cy] = k.split(',').map(Number)
+        gradeUnits.push({ key: `street:${k}`, x: cx * CELL + CELL / 2, z: -(cy * CELL + CELL / 2), r: CELL * 0.75, done: false, run: () => { buildStreetCell(cx, cy, null) } })
       }
-      gradeUnits.push({
-        key: `street:${k}`,
-        x: cx * CELL + CELL / 2,
-        z: -(cy * CELL + CELL / 2),
-        r: CELL * 0.75,
-        done: false,
-        run: () => { addStreet(m, crossingsByCell.get(k) ?? []) },
-      })
     }
   }
   const power = streetRoot!.power

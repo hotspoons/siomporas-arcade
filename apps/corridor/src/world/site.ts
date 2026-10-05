@@ -304,6 +304,10 @@ export interface VectorTileIndex {
   buildings?: { x: number; y: number; n: number }[]
   /** total footprints across the tiles, so a caller can report a count without loading them */
   count?: number
+  /** every tile that holds any streamed vector, so a furniture-only tile is still reached */
+  cells?: { x: number; y: number }[]
+  /** per-array feature counts across the tiles, for the boot log and attribution without loading */
+  counts?: Record<string, number>
 }
 
 export interface IndexEntry {
@@ -325,15 +329,17 @@ export async function fetchJSON<T>(path: string): Promise<T> {
   return (await r.json()) as T
 }
 
-const _vtiles = new Map<string, Promise<Record<string, unknown[]>>>()
+const _vtiles = new Map<string, Promise<Record<string, unknown>>>()
 
-/** One vector tile, fetched once and cached for the life of the page. A missing tile is `{}`. */
-export function loadVectorTile(slug: string, dir: string, x: number, y: number): Promise<Record<string, unknown[]>> {
+/** One vector tile, fetched once and cached for the life of the page. A missing tile is `{}`.
+ *  A tile is a partial manifest: arrays (`buildings`, `sidewalks`) and nested objects
+ *  (`power`, `signals`) keyed exactly as the manifest field they replace. */
+export function loadVectorTile(slug: string, dir: string, x: number, y: number): Promise<Record<string, unknown>> {
   const url = `${DATA_BASE}/sites/${slug}/web/${dir}/${x}_${y}.json`
   let p = _vtiles.get(url)
   if (!p) {
     p = fetch(url, { cache: 'force-cache' })
-      .then((r) => (r.ok ? (r.json() as Promise<Record<string, unknown[]>>) : {}))
+      .then((r) => (r.ok ? (r.json() as Promise<Record<string, unknown>>) : {}))
       .catch(() => ({}))
     _vtiles.set(url, p)
   }

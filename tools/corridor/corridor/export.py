@@ -954,37 +954,88 @@ def _enu_derived(frame: Frame, derived: dict) -> dict:
     return out
 
 
-#: Above this many footprints, `buildings` moves out of the manifest into per-tile files. The
-#: threshold is not a tuning knob so much as "is this a world that freezes a tab": crofton-triangle
-#: is 28k and fine inline; dc-metro is 446k and 142 MB of a 346 MB manifest.
+#: Above this many footprints, the heavy spatial arrays move out of the manifest into per-tile
+#: files. The threshold is not a tuning knob so much as "is this a world that freezes a tab":
+#: crofton-triangle is 28k and fine inline; dc-metro is 446k, and `buildings` alone was 142 MB of a
+#: 346 MB manifest before the first array was tiled.
 VECTOR_TILE_MIN = 50_000
 
+#: Where a feature lands, in SITE metres. The viewer buckets on the same grid (`floor(x / size_m)`),
+#: so a feature and the cell that rebuilds it agree by construction. Leaf names, because `power`
+#: and `signals` arrive as nested objects and are split into their own arrays.
+def _first_xy(coords):
+    return (coords[0][0], coords[0][1]) if coords else None
 
-def _vector_tiles(web: Path, buildings: list, size_m: float = 1000.0) -> dict:
+
+_TILE_KEY = {
+    "buildings": lambda f: (f["ring"][0][0], f["ring"][0][1]) if f.get("ring") else None,
+    "parking": lambda f: (f["ring"][0][0], f["ring"][0][1]) if f.get("ring") else None,
+    "sidewalks": lambda f: _first_xy(f.get("coords")),
+    "driveways": lambda f: _first_xy(f.get("coords")),
+    "barriers": lambda f: _first_xy(f.get("coords")),
+    "lines": lambda f: _first_xy(f.get("coords")),
+    "supports": lambda f: (f.get("x"), f.get("y")),
+    "masts": lambda f: (f.get("x"), f.get("y")),
+    "signs": lambda f: (f.get("x"), f.get("y")),
+    "bars": lambda f: (f.get("x"), f.get("y")),
+}
+
+
+def _vector_tiles(web: Path, arrays: dict, size_m: float = 1000.0) -> dict:
     """Write the heavy spatial arrays as per-1 km-tile JSON, and return the manifest's tile index.
 
-    `buildings` alone is 142 MB of dc-metro's 346 MB manifest, and the viewer iterates all 446k of
-    them at load to bucket by 500 m cell. Tiled on the SAME site-metre grid the viewer buckets on
-    (`floor(ring[0][0] / size)`), the manifest carries a ~40 kB index and the viewer fetches only the
-    tiles near the eye — the lazy grading pump already knows which those are.
+    `buildings` alone was 142 MB of dc-metro's 346 MB manifest, and the viewer iterated all 446k of
+    them at load to bucket by 500 m cell — the freeze. Tiled on the SAME site-metre grid the viewer
+    buckets on (`floor(ring[0][0] / size)`), the manifest carries a ~40 kB index and the viewer
+    fetches only the tiles near the eye — the lazy grading pump already knows which those are.
+
+    `arrays` maps a manifest field to its features. A nested field (`power`, `signals`) is a dict of
+    its sub-arrays and is written back nested, so a tile is a partial manifest the viewer can spread
+    over the full one. `buildings` and `count` stay in the index for readers of the first schema.
     """
     dir_name = "vt/0"
     d = web / dir_name
     if d.exists():
         shutil.rmtree(d)
     d.mkdir(parents=True, exist_ok=True)
-    cells: dict[tuple[int, int], list] = {}
-    for b in buildings:
-        ring = b.get("ring") or []
-        if not ring:
+    cells: dict[tuple[int, int], dict] = {}
+
+    def put(leaf: str, parent: str | None, item) -> None:
+        key = _TILE_KEY.get(leaf)
+        xy = key(item) if key else None
+        if not xy or xy[0] is None or xy[1] is None:
+            return
+        cell = cells.setdefault((math.floor(xy[0] / size_m), math.floor(xy[1] / size_m)), {})
+        node = cell if parent is None else cell.setdefault(parent, {})
+        node.setdefault(leaf, []).append(item)
+
+    for name, items in arrays.items():
+        if items is None:
             continue
-        p0 = ring[0]
-        cells.setdefault((math.floor(p0[0] / size_m), math.floor(p0[1] / size_m)), []).append(b)
-    index = []
-    for (ix, iy), items in cells.items():
-        (d / f"{ix}_{iy}.json").write_text(json.dumps({"buildings": items}, separators=(",", ":")))
-        index.append({"x": ix, "y": iy, "n": len(items)})
-    return {"size_m": size_m, "dir": dir_name, "buildings": index}
+        if isinstance(items, dict):
+            for leaf, arr in items.items():
+                for item in arr or []:
+                    put(leaf, name, item)
+        else:
+            for item in items:
+                put(name, None, item)
+
+    index: list[dict] = []
+    building_index: list[dict] = []
+    counts: dict[str, int] = {}
+    for (ix, iy), cell in sorted(cells.items()):
+        (d / f"{ix}_{iy}.json").write_text(json.dumps(cell, separators=(",", ":")))
+        index.append({"x": ix, "y": iy})
+        if "buildings" in cell:
+            building_index.append({"x": ix, "y": iy, "n": len(cell["buildings"])})
+        for leaf, val in cell.items():
+            if isinstance(val, dict):
+                for sub, arr in val.items():
+                    counts[sub] = counts.get(sub, 0) + len(arr)
+            else:
+                counts[leaf] = counts.get(leaf, 0) + len(val)
+    return {"size_m": size_m, "dir": dir_name, "buildings": building_index,
+            "count": counts.get("buildings", 0), "cells": index, "counts": counts}
 
 
 def export_site(site_dir: Path, web: Path | None = None) -> dict:
@@ -1340,16 +1391,6 @@ def export_site(site_dir: Path, web: Path | None = None) -> dict:
         "rock": features.get("rock"),
         "water": features.get("water"),
     }
-    # --- vector tiling --------------------------------------------------------------------------
-    # `buildings` is 142 MB of dc-metro's 346 MB manifest, and the viewer iterates all 446k of them
-    # at load to bucket by 500 m cell — the freeze. Above the threshold they move to per-1 km-tile
-    # files; the manifest keeps a small index and the lazy grading pump fetches only the tiles near
-    # the eye. Small sites stay inline (and the editor keeps reading `manifest.buildings`).
-    if tiled and len(enu_derived["buildings"]) >= VECTOR_TILE_MIN:
-        out["vt"] = _vector_tiles(web, enu_derived["buildings"])
-        out["vt"]["count"] = len(enu_derived["buildings"])
-        out["buildings"] = []
-        print(f"  vt      {len(out['vt']['buildings'])} building tiles / {out['vt']['count']} footprints out of the manifest", flush=True)
     # intersections: who has priority, who stops, and what the blades say. Derived from the drawn
     # network rather than transcribed from OSM, because a US suburb maps almost none of it — 854
     # drivable ways inside crofton-triangle carry 3 stop nodes between them. Replaces the masts of
@@ -1388,6 +1429,35 @@ def export_site(site_dir: Path, web: Path | None = None) -> dict:
             out["branches"] = br
     except Exception as exc:
         print(f"  branches failed: {exc}")
+    # --- vector tiling --------------------------------------------------------------------------
+    # Every heavy spatial array that is consumed only by the builders the viewer runs per cell moves
+    # to per-1 km-tile files: footprints (142 MB of dc-metro), then the street furniture
+    # (`sidewalks` 43 MB, `driveways` 40 MB, …). The manifest keeps a tile index and the viewer
+    # fetches only the tiles near the eye. `driveways` and `intersections` are NOT tiled: the viewer
+    # lays every driveway as a road-group ribbon at load (makeDriveways) and needs the whole
+    # intersection list for junction paint, so those stay inline and are bucketed per cell there.
+    #
+    # This runs LAST, after intersections.merge_into and walkways.merge_into have written into
+    # `out` — tiling `signals` or `sidewalks` before them would hand those passes empty arrays.
+    # Small sites stay inline, and the editor keeps reading `manifest.buildings`.
+    if tiled and len(enu_derived["buildings"]) >= VECTOR_TILE_MIN:
+        out["vt"] = _vector_tiles(web, {
+            "buildings": enu_derived["buildings"],
+            "sidewalks": out["sidewalks"],
+            "parking": out["parking"],
+            "barriers": out["barriers"],
+            "power": out["power"],
+            "signals": out["signals"],
+        })
+        out["buildings"] = []
+        out["sidewalks"] = []
+        out["parking"] = []
+        out["barriers"] = []
+        out["power"] = None
+        out["signals"] = None
+        c = out["vt"]["counts"]
+        print(f"  vt      {len(out['vt']['cells'])} tiles: {c.get('buildings', 0)} footprints, "
+              f"{c.get('sidewalks', 0)} walks, {c.get('parking', 0)} lots, {c.get('masts', 0)} masts out of the manifest", flush=True)
     # compact separators: the manifest is the single biggest thing the viewer fetches (5.8 MB for
     # crofton-triangle, 18.3 MB for crofton-crownsville) and the default ", " / ": " is 0.7 MB and
     # 2.3 MB of pure whitespace. Most of that is recovered by gzip, but not the R2 storage or the

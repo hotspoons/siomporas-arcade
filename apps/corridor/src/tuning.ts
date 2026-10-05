@@ -136,13 +136,21 @@ export let GRASS_CONE_FADE = 4
  *
  * Above GRASS_FAST_SPEED the ring thins to GRASS_FAST_THIN of its density and its far cards reach
  * GRASS_FAST_RANGE times further, ramping in over GRASS_FAST_FADE. The cone already points the
- * budget forward; this keeps the field from lagging the car at 350 mph, where the tiles cannot be
- * generated fast enough. Thin and range are separate dials (Rich, 2026-10-05).
+ * budget forward; this keeps the field from lagging the car. Thin and range are separate dials
+ * (Rich, 2026-10-05).
+ *
+ * GRASS_FAST_RANGE is a FIXED multiplier, so it stops extending at the knee: at 195 mph the rim is
+ * still GRASS_SPRITE_RADIUS × GRASS_FAST_RANGE metres ahead and the bare ground you are driving
+ * toward is obvious (Rich, 2026-10-05: "still outrunning the grass, right around 195 mph").
+ * GRASS_FAST_LEAD_S makes the rim lead the eye by at least that many SECONDS of travel instead, so
+ * it stays ahead however fast the car goes. It ramps in with the same fast bias, so nothing below
+ * the knee changes. 0 leaves the fixed multiplier alone.
  */
 export let GRASS_FAST_SPEED = 80
 export let GRASS_FAST_THIN = 0.5
 export let GRASS_FAST_RANGE = 2
 export let GRASS_FAST_FADE = 40
+export let GRASS_FAST_LEAD_S = 6
 
 // --- crops --------------------------------------------------------------------------------------
 /** 1 = grow crops on every OSM farmland ring as well as on authored areas */
@@ -2041,6 +2049,7 @@ export const TUNE_TABS: TuneTab[] = [
           tune('GRASS_FAST_THIN', () => GRASS_FAST_THIN, (v) => (GRASS_FAST_THIN = v), [0.05, 1], 0.05, 'density × at full fast bias (thins the field as you outrun the generator)'),
           tune('GRASS_FAST_RANGE', () => GRASS_FAST_RANGE, (v) => (GRASS_FAST_RANGE = v), [1, 4], 0.1, 'far-card range × at full fast bias'),
           tune('GRASS_FAST_FADE', () => GRASS_FAST_FADE, (v) => (GRASS_FAST_FADE = v), [0, 100], 1, 'speed band (m/s) over which the fast bias ramps in'),
+          tune('GRASS_FAST_LEAD_S', () => GRASS_FAST_LEAD_S, (v) => (GRASS_FAST_LEAD_S = v), [0, 20], 0.5, 'seconds of travel the far cards lead the eye by above the fast knee, so the rim stays ahead at any speed (0 = the fixed GRASS_FAST_RANGE only)'),
         ],
       },
       {

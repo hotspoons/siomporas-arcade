@@ -994,6 +994,19 @@ export class Grass {
     this.coneStretch = T.GRASS_CONE_STRETCH * this.speedFrac
     this.thinMul = 1 + (T.GRASS_FAST_THIN - 1) * this.fastFrac
     this.rangeMul = 1 + (T.GRASS_FAST_RANGE - 1) * this.fastFrac
+    /*
+     * THE RIM LEADS BY TIME, NOT DISTANCE.
+     *
+     * GRASS_FAST_RANGE is a fixed multiplier: it stops growing at the knee, so at 195 mph the far
+     * cards still end GRASS_SPRITE_RADIUS × GRASS_FAST_RANGE metres ahead and the car drives at
+     * bare ground. Above the knee, hold the rim GRASS_FAST_LEAD_S seconds of travel out instead.
+     * Scaled by `fastFrac` so it ramps in with the rest of the bias and nothing below the knee
+     * changes; capped so a teleport cannot ask for a ten-kilometre ring.
+     */
+    if (T.GRASS_FAST_LEAD_S > 0) {
+      const leadMul = (speed * T.GRASS_FAST_LEAD_S) / Math.max(1, T.GRASS_SPRITE_RADIUS)
+      this.rangeMul = Math.min(8, Math.max(this.rangeMul, 1 + (leadMul - 1) * this.fastFrac))
+    }
     // GRASS_MODE 1 keeps the distance cards everywhere, including beside the camera. With the
     // blade mode on, a moving eye can still drop the blade mesh (GRASS_WIND_STILL_BELOW): generating
     // it is the hitch, and the cards cover the same ground. Slowing back down asks for the blades.

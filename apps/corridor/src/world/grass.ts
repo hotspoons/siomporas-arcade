@@ -299,6 +299,8 @@ export class Grass {
   /** live fast-bias multipliers: blade/card density, and how far the far cards reach */
   private thinMul = 1
   private rangeMul = 1
+  /** the far rim the generator can actually clear, as a fraction of GRASS_SPRITE_RADIUS (see GRASS_RIM_DRAIN) */
+  private rimMul = 1
   /** cards at every range: GRASS_MODE 1, or the eye moving faster than GRASS_WIND_STILL_BELOW */
   private spritesOnly = T.grassMode() === 1
   private lastTile = 'none'
@@ -1072,6 +1074,30 @@ export class Grass {
     this.genMs = t1 - t0
     this.asmMs = performance.now() - t1
     this.madeThisFrame = made
+    /*
+     * SIZE THE FAR RIM TO THE GENERATOR, NOT THE DRIVER.
+     *
+     * `rangeMul` is the ceiling the fast bias asks for (GRASS_FAST_RANGE / GRASS_FAST_LEAD_S), but
+     * a wide-open cone at 160 mph needs far more front than the budget clears, so left at the
+     * ceiling the eye sees a hard edge: cards to where generation stopped, then bare ground. Track
+     * what the queue is actually draining instead. While the queue is deeper than GRASS_RIM_DRAIN
+     * frames of work the rim contracts; while it is nearly empty the rim grows back toward the
+     * ceiling. The fade (uFadeOut) rides this rim, so the cards fade out where they END rather than
+     * at a distance nothing ever reached. At rest the queue empties and the rim returns to the
+     * ceiling — the all-round circle, not a shrunken one.
+     */
+    const rimFloor = T.GRASS_RADIUS / T.GRASS_SPRITE_RADIUS
+    if (speed < T.GRASS_CONE_SPEED) {
+      this.rimMul += (this.rangeMul - this.rimMul) * 0.08
+    } else {
+      // hold the queue at GRASS_RIM_DRAIN frames of generation: deeper, pull the rim in; emptier,
+      // let it out. A tiny proportional step, because the demand grows with the rim SQUARED — a
+      // bigger gain rings between a drained queue and an impossible one.
+      const target = Math.max(8, made * T.GRASS_RIM_DRAIN)
+      const err = Math.max(-1, Math.min(1, (this.pending.length - target) / target))
+      this.rimMul *= 1 - err * 0.012
+    }
+    this.rimMul = Math.min(this.rangeMul, Math.max(rimFloor, this.rimMul))
     // only worth walking the map when the cache holds appreciably more than the ring needs
     if (this.tiles.size > this.vis.length * T.GRASS_CACHE_SLACK + 64) this.evict()
   }
@@ -1084,7 +1110,7 @@ export class Grass {
    * the assembly and the eviction — they used to each rebuild it, three times a frame.
    */
   private revisit() {
-    const r = Math.max(T.GRASS_RADIUS, T.GRASS_SPRITE_RADIUS * this.rangeMul)
+    const r = Math.max(T.GRASS_RADIUS, T.GRASS_SPRITE_RADIUS * this.rimMul)
     const out = this.vis
     out.length = 0
     const tx0 = Math.floor((this.eye.x - r) / TILE), tx1 = Math.floor((this.eye.x + r) / TILE)
@@ -1092,14 +1118,25 @@ export class Grass {
     for (let tx = tx0; tx <= tx1; tx++) {
       for (let tz = tz0; tz <= tz1; tz++) {
         const cx = (tx + 0.5) * TILE, cz = (tz + 0.5) * TILE
-        // THE FOOTPRINT MORPHS. At rest it is the true CIRCLE the verge wants: the ground is
-        // grass-textured in every direction, so a cone-shaped ring left the median and the verge
-        // beside the car as flat photo turf (Rich: "what's up with all this not grass?"). Once the
-        // car is moving, `coneDistance` stretches everything outside the forward cone (see
-        // GRASS_CONE_*), so the ring follows the driver's eye and the wake falls away without
-        // paying to plant blades the car will never look at. As the car slows, `speedFrac` fades
-        // the stretch out and the circle comes back.
-        const d = this.coneDistance(cx - this.eye.x, cz - this.eye.z)
+        const dx = cx - this.eye.x, dz = cz - this.eye.z
+        const dist = Math.hypot(dx, dz)
+        if (dist > r + TILE) continue
+        // THE FOOTPRINT IS A CONE, NOT A RING. At rest it is the true CIRCLE the verge wants: the
+        // ground is grass-textured in every direction, so a cone-shaped ring left the median and the
+        // verge beside the car as flat photo turf (Rich: "what's up with all this not grass?"). Once
+        // moving, the demand is a WEDGE facing the direction of travel — everything past the
+        // GRASS_CONE_DEG half-angle (plus the 12° feather `coneDistance` already uses) is dropped
+        // outright, not merely sorted last. The old soft version still queued and planted the whole
+        // wake behind the car, which at speed is a large share of the ring and grass the driver can
+        // never see; cutting it puts that budget in front, where the eye is. As the car slows,
+        // `speedFrac` fades `coneDeg` back toward GRASS_CONE_STILL_DEG (180 = all round) and the
+        // circle returns.
+        if (this.coneDeg < 179.5 && dist > 1e-6) {
+          const cos = (dx * this.fwd.x + dz * this.fwd.z) / dist
+          const angle = (Math.acos(Math.max(-1, Math.min(1, cos))) * 180) / Math.PI
+          if (angle >= this.coneDeg + 12) continue
+        }
+        const d = this.coneDistance(dx, dz)
         if (d > r + TILE) continue
         out.push({ key: `${tx},${tz}`, tx, tz, d })
       }
@@ -1469,9 +1506,9 @@ export class Grass {
     const card2Arr = this.aCard2.array as Float32Array
     let k = 0, kc = 0
     const rBlade = T.GRASS_RADIUS
-    // the fast bias reaches the far cards out further, and thins both tiers, when the car outruns
-    // the generator (GRASS_FAST_*); at rest rangeMul = thinMul = 1 and this is unchanged
-    const rCard = T.GRASS_SPRITE_RADIUS * this.rangeMul
+    // the tracked rim (GRASS_RIM_DRAIN) says how far the far cards reach; the fast bias still thins
+    // both tiers when the car outruns the generator (GRASS_FAST_*); at rest rimMul = thinMul = 1
+    const rCard = T.GRASS_SPRITE_RADIUS * this.rimMul
     // Cards used to start where the blades thin out. With the blades put away they have to
     // start at the eye, or the ground beside the car is bare until you slow down.
     const cardFrom = this.spritesOnly ? 0 : T.GRASS_LOD_MID - 8
@@ -1535,7 +1572,7 @@ export class Grass {
     // foreground. With the blades put away that shrink is the pop: the ground beside the car
     // is empty until a clump crosses the ring. Cards that start at the eye have to be full size there.
     this.cardMat.uniforms.uFadeIn.value = this.spritesOnly ? 0 : T.GRASS_LOD_MID
-    this.cardMat.uniforms.uFadeOut.value = T.GRASS_SPRITE_RADIUS * this.rangeMul
+    this.cardMat.uniforms.uFadeOut.value = T.GRASS_SPRITE_RADIUS * this.rimMul
   }
 
   /** counts for probes and the HUD */

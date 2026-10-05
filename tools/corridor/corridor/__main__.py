@@ -256,18 +256,22 @@ def cmd_vectors(a: argparse.Namespace) -> None:
         # the buildings-only schema has footprints in tiles and furniture inline; a tree on the
         # current schema has both in tiles and nothing inline. `_load_tiled` is the one reader.
         arrays = export._load_tiled(web, vt) if vt.get("dir") else {}
-        for name in export.TILED_FLAT:
-            inline = out.get(name)
-            if inline:
-                arrays[name] = inline
-        for name, leaves in export.TILED_NESTED.items():
-            node = out.get(name)
-            if not node:
-                continue
-            merged = arrays.setdefault(name, {})
-            for leaf in leaves:
-                if node.get(leaf):
-                    merged[leaf] = node[leaf]
+        for name in export.TILED_ACTIVE:
+            if name in export.TILED_NESTED:
+                node = out.get(name)
+                if node:
+                    merged = arrays.setdefault(name, {})
+                    for leaf in export.TILED_NESTED[name]:
+                        if node.get(leaf):
+                            merged[leaf] = node[leaf]
+            else:
+                inline = out.get(name)
+                if inline:
+                    arrays[name] = inline
+        # Only the arrays the viewer streams today go back into tiles. An earlier run may have tiled
+        # a broader set (this bug once shipped `water`/`landuse`/`pois` into the tiles while leaving
+        # them inline); dropping them here re-tiles to exactly `TILED_ACTIVE` and stops the duplicate.
+        arrays = {k: v for k, v in arrays.items() if k in export.TILED_ACTIVE}
         bs = arrays.get("buildings") or []
         if len(bs) < export.VECTOR_TILE_MIN:
             print(f"  {d.name}: {len(bs)} footprints, below the tiling threshold, left inline")

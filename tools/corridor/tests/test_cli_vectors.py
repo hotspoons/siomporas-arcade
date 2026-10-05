@@ -78,6 +78,22 @@ class CmdVectorsTest(unittest.TestCase):
         self.assertEqual(len(cell["signals"]["masts"]), 1)
         self.assertEqual(out["vt"]["counts"]["buildings"], 2)
 
+    def test_does_not_tile_arrays_the_viewer_still_reads_inline(self):
+        # `TILED_ACTIVE` is the gate: a world's `landuse` stays in the manifest and out of the tiles,
+        # so the tiles carry only what the viewer streams and nothing is shipped twice.
+        web = self._data / "sites" / "mixed" / "web"
+        web.mkdir(parents=True)
+        (web / "manifest.json").write_text(json.dumps({
+            "slug": "mixed", "buildings": [_footprint(100, 100), _footprint(1900, 1900)],
+            "landuse": [{"class": "forest", "ring": [[100.0, 100.0], [200.0, 100.0], [200.0, 200.0]]}],
+        }))
+        cli.cmd_vectors(argparse.Namespace(slug="mixed"))
+        out = json.loads((web / "manifest.json").read_text())
+        self.assertEqual(len(out["landuse"]), 1)          # still resident
+        self.assertNotIn("landuse", out["vt"]["counts"])  # and not in the tiles
+        cell = json.loads((web / "vt" / "0" / "0_0.json").read_text())
+        self.assertNotIn("landuse", cell)
+
     def test_leaves_a_small_manifest_inline(self):
         web = self._site("small", [_footprint(100, 100)])
         cli.cmd_vectors(argparse.Namespace(slug="small"))

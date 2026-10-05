@@ -340,6 +340,9 @@ def cmd_publish(a: argparse.Namespace) -> None:
 
 
 def main() -> None:
+    from . import progress
+
+    progress.install_timestamps()  # every bake line gets a UTC clock, so "how long on this stage?" is answerable
     p = argparse.ArgumentParser(prog="corridor")
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("sites").set_defaults(fn=cmd_sites)

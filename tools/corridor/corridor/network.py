@@ -39,6 +39,7 @@ from shapely.geometry import LineString, MultiLineString, Point, Polygon, box as
 from shapely.ops import linemerge, unary_union
 
 from . import osm
+from . import progress
 from .geo import Frame, snap_bbox
 
 REF_RE = re.compile(r"^(MD|US|I|VA|PA|CA|OR|ME)[ -]?\d+[A-Z]?( Alt| Bus| Scenic| Toll)?$")
@@ -556,7 +557,8 @@ def fetch_site(site: dict, half_width: float, lidar_half_width: float, skip: set
     if no_lidar is None and "lidar" not in skip and tiled:
         pts = meta.pop("pts")
         idx = {c["id"]: i + 1 for i, c in enumerate(R["chains"])}
-        prof = network_tiles.profile_tiled(prim["line"], ldir, pts, idx[prim["id"]])
+        with progress.heartbeat("profile", f"primary {prim['ident']} {prim['line'].length / 1000:.0f} km"):
+            prof = network_tiles.profile_tiled(prim["line"], ldir, pts, idx[prim["id"]])
         (out / "profile.json").write_text(json.dumps(prof))
         cls = meta["classes"]
         print(f"  lidar   {meta['points_in_corridor']:,} pts in corridor over {len(meta['tiles']['list'])} km tiles; ground {cls.get('ground', 0):,} veg {cls.get('veg_high', 0) + cls.get('veg_med', 0) + cls.get('veg_low', 0):,} building {cls.get('building', 0):,} bridge_deck {cls.get('bridge_deck', 0):,}; {meta['near_road_points']:,} near-road points kept", flush=True)
@@ -617,6 +619,7 @@ def fetch_site(site: dict, half_width: float, lidar_half_width: float, skip: set
             prof = network_tiles.profile_from_dem(prim["line"], dem_p)
             (out / "profile.json").write_text(json.dumps(prof))
             manifest["lidar"] = {"source": "none", "why": str(exc), "profiles_from": "dem", "structures": []}
+            pbr = progress.Progress("branch", max(0, len(R["chains"]) - 1))
             for c in R["chains"]:
                 if c is prim:
                     continue
@@ -624,6 +627,8 @@ def fetch_site(site: dict, half_width: float, lidar_half_width: float, skip: set
                     branches.append(branch_rec(c, network_tiles.profile_from_dem(c["line"], dem_p)))
                 except Exception:
                     branches.append(branch_rec(c, None))
+                pbr.tick()
+            pbr.close()
             print(f"  branch  {len(branches)} branches profiled from the DEM; no structures", flush=True)
             pts = None
         if pts is not None:  # the lidar half; the DEM fallback above already wrote its profiles
@@ -634,17 +639,21 @@ def fetch_site(site: dict, half_width: float, lidar_half_width: float, skip: set
                 meta["z_factor"] = f
             meta["classification"] = lidar.classification_quality(pts)
             r = lidar.rasters(pts, lbbox, frame, lidar_corridor, ldir)
-            prof = lidar.profile(prim["line"], r["dtm"], r["chm"], r["transform"], r["pts"])
+            with progress.heartbeat("profile", f"primary {prim['ident']} {prim['line'].length / 1000:.0f} km"):
+                prof = lidar.profile(prim["line"], r["dtm"], r["chm"], r["transform"], r["pts"])
             (out / "profile.json").write_text(json.dumps(prof))
             cls = r["classes"]
             print(f"  lidar   {r['points_in_corridor']:,} pts in corridor; ground {cls.get('ground', 0):,} veg {cls.get('veg_high', 0) + cls.get('veg_med', 0) + cls.get('veg_low', 0):,} building {cls.get('building', 0):,} bridge_deck {cls.get('bridge_deck', 0):,}")
             for st in prof["structures"]:
                 print(f"  struct  {st['kind']:8s} s={st['s_start']:.0f}..{st['s_end']:.0f} m ({st['length_m']} m)  clearance={st['clearance_m']}  above_ground={st['height_above_ground_m']}")
             manifest["lidar"] = {**meta, "points_in_corridor": r["points_in_corridor"], "classes": cls, "rasters": r["rasters"], "structures": prof["structures"]}
+            pbr = progress.Progress("branch", max(0, len(R["chains"]) - 1))
             for c in R["chains"]:
                 if c is prim:
                     continue
                 branches.append(branch_rec(c, lidar.profile(c["line"], r["dtm"], r["chm"], r["transform"], r["pts"])))
+                pbr.tick()
+            pbr.close()
             print(f"  branch  {len(branches)} branches profiled, {sum(len(b['structures']) for b in branches)} structures on them", flush=True)
     else:
         # A partial re-run with lidar skipped ("a partial re-run updates the manifest it finds

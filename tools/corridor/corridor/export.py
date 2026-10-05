@@ -29,6 +29,7 @@ from PIL import Image
 from rasterio.enums import Resampling
 from shapely.geometry import LineString
 
+from . import progress
 from .geo import Frame
 
 
@@ -976,7 +977,9 @@ def export_site(site_dir: Path, web: Path | None = None) -> dict:
     # sites — found by the editor agent with probes/chm-buildings-check.py, 2026-09-21.)
     try:
         from . import buildings as bld
-        derived = bld.derive(site_dir)
+
+        with progress.heartbeat("buildings", "OSM footprints, landuse, POIs"):
+            derived = bld.derive(site_dir)
     except Exception as exc:
         print(f"  buildings failed: {exc}")
         derived = {"buildings": [], "landuse": [], "pois": [], "summary": {}}
@@ -1243,7 +1246,10 @@ def export_site(site_dir: Path, web: Path | None = None) -> dict:
         # its one DTM into an array. Same rules either way — see water._Heights for why.
         fn = getattr(mod, "measure_network", None) if tiled else None
         try:
-            features[name] = (fn or mod.measure)(site_dir)
+            # each of cuts/rock/water walks the rasters over the whole network and can run for
+            # minutes with nothing else on the line
+            with progress.heartbeat(name, "measuring"):
+                features[name] = (fn or mod.measure)(site_dir)
         except Exception as exc:
             import traceback
 

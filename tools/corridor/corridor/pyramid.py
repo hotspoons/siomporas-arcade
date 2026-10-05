@@ -294,7 +294,11 @@ def bake(site_dir, web, frame, zmax: int | None = None, zmin: int | None = None,
     rev = int((site_dir / "manifest.json").stat().st_mtime) if (site_dir / "manifest.json").exists() else 0
     skipped = 0
     print(f"pyramid: {len(tiles)} tiles z{zmin}..{zmax}", flush=True)
+    from . import progress
+
+    p = progress.Progress("pyramid", len(tiles))
     for i, t in enumerate(tiles):
+        p.tick()
         w, s, e, n = tile_bounds(t.z, t.x, t.y)
         parts: dict[str, bytes] = {}
         entry: dict = {"z": t.z, "x": t.x, "y": t.y}
@@ -338,8 +342,7 @@ def bake(site_dir, web, frame, zmax: int | None = None, zmin: int | None = None,
             if frac:
                 entry["naip_fill"] = round(frac, 3)
         entries.append(entry)
-        if (i + 1) % 8 == 0 or i + 1 == len(tiles):
-            print(f"pyramid: {i + 1}/{len(tiles)}", flush=True)
+    p.close()
 
     return {
         "scheme": "geo-quadtree",   # 2^(z+1) lon cols, 2^z lat rows — same ids as trailworks

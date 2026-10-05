@@ -33,6 +33,8 @@ import rasterio
 from shapely.geometry import LineString
 from shapely.ops import substring
 
+from . import progress
+
 LANE_M = 3.66
 STEP_M = 20.0
 
@@ -191,7 +193,9 @@ def measure(site_dir: Path) -> dict | None:
             bright = np.full(n, np.nan)
             chroma = np.full(n, np.nan)
             texture = np.full(n, np.nan)
+            p = progress.Progress("surface", n)
             for b in range(n):
+                p.tick()
                 s0 = s_arr[b]
                 # lane polygon for this station: the spine substring buffered to the lane half-width
                 sub = substring(line, s0, min(line.length, s0 + STEP_M))
@@ -215,6 +219,7 @@ def measure(site_dir: Path) -> dict | None:
                 bright[b] = float(np.median(lum))
                 chroma[b] = float(np.median(np.maximum.reduce([r, gch, bl]) - np.minimum.reduce([r, gch, bl])))
                 texture[b] = float(np.std(lum))
+            p.close()
         rec["naip_brightness"] = [None if np.isnan(v) else round(float(v), 1) for v in bright]
         rec["naip_chroma"] = [None if np.isnan(v) else round(float(v), 1) for v in chroma]
         rec["naip_texture"] = [None if np.isnan(v) else round(float(v), 1) for v in texture]

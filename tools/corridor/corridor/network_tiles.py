@@ -43,6 +43,7 @@ from scipy import ndimage
 from shapely.geometry import LineString, box
 
 from . import lidar
+from . import progress
 from .geo import Frame
 from . import rastercache
 
@@ -153,6 +154,9 @@ def lidar_tiled(frame: Frame, bbox, corridor, chains: list[dict], ldir: Path, ca
     meta: dict = {}
     # EPT (USGS, then NOAA) when it covers these streets, the TNM tiles otherwise — lidar.point_batches
     batches = lidar.point_batches(frame, bbox, cache, corridor, meta, lidar.dem_beside(ldir.parent))
+    # a single TNM LAZ tile is 300+ MB and can take minutes, so a per-batch count alone would still
+    # go quiet; the heartbeat prints "reading points, Ns in" if no batch lands within the interval
+    hb = progress.Progress("lidar", None)
     while True:
         try:
             label, part = next(batches)
@@ -165,6 +169,7 @@ def lidar_tiled(frame: Frame, bbox, corridor, chains: list[dict], ldir: Path, ca
             raise
         if not part:
             print(f"  lidar   {label}: outside the corridor", flush=True)
+            hb.tick(note=f"{label}: outside the corridor")
             continue
         cls = part["cls"]
         share17 = float((cls == 17).sum()) / max(1, len(cls))
@@ -211,13 +216,17 @@ def lidar_tiled(frame: Frame, bbox, corridor, chains: list[dict], ldir: Path, ca
         if keep.any():
             near_parts.append({k2: v[keep] for k2, v in part.items()} | {"road": road[keep].astype(np.int16)})
         print(f"  lidar   {label}: {len(cls):,} pts in corridor, {int(keep.sum()):,} near a road", flush=True)
+        hb.tick(note=f"{label}: {total / 1e6:.0f}M pts in corridor")
         del part
+    hb.close()
     # the 2 m band was only for picking the near-road points; the tiles below are the peak
     del band
     # write the tiles
     crs = frame.crs
     written = []
+    pw = progress.Progress("tiles", len(acc))
     for (tx, ty), a in acc.items():
+        pw.tick()
         dtm = a["dtm"].reshape(n, n)
         dtm[~np.isfinite(dtm)] = np.nan
         if np.isnan(dtm).all():
@@ -240,6 +249,7 @@ def lidar_tiled(frame: Frame, bbox, corridor, chains: list[dict], ldir: Path, ca
         lidar._write(Path(f"{stem}.deck_n.tif"), deck_n, tr, crs)
         lidar._write(Path(f"{stem}.building_n.tif"), a["bld_n"].reshape(n, n), tr, crs)
         written.append((tx, ty))
+    pw.close()
     for kind in _TILE_KINDS:
         files = [str(tdir / f"{tx}_{ty}.{kind}.tif") for tx, ty in written]
         if files:
@@ -260,13 +270,16 @@ def lidar_tiled(frame: Frame, bbox, corridor, chains: list[dict], ldir: Path, ca
         npts = sum(len(p["x"]) for p in near_parts)
         pts = {k: np.empty(npts, dtype=near_parts[0][k].dtype) for k in keys}
         off = 0
+        pa = progress.Progress("assemble", len(near_parts), unit=" batches")
         for i, p in enumerate(near_parts):
+            pa.tick()
             m = len(p["x"])
             if m:
                 for k in keys:
                     pts[k][off:off + m] = p[k]
             off += m
             near_parts[i] = None
+        pa.close()
         del near_parts
     if pts is not None:
         import laspy
@@ -537,7 +550,9 @@ def export_tiles(site_dir: Path, web: Path, frame, mask_shapes: list, vivid) -> 
     dtm_ds = rasterio.open(dtm_p) if (dtm_p.exists() and gchm_p.exists()) else None
     gchm_ds = rasterio.open(gchm_p) if gchm_p.exists() else None
     canopy_filled = 0
+    p = progress.Progress("export", len(tiles))
     for tx, ty in tiles:
+        p.tick()
         bx0, by0 = x0 + tx * TILE_M, y0 + ty * TILE_M
         bx1, by1 = bx0 + TILE_M, by0 + TILE_M
         entry: dict = {"x": tx, "y": ty}
@@ -639,6 +654,7 @@ def export_tiles(site_dir: Path, web: Path, frame, mask_shapes: list, vivid) -> 
         # where this tile's corners actually are on the ellipsoid
         entry["geo"] = frame.control_lattice((bx0, by0, bx1, by1), 3)
         entries.append(entry)
+    p.close()
     naip_res_src = round(float(naip_ds.res[0]), 3) if naip_ds is not None else 1.0
     if canopy_filled:
         print(f"  canopy  {canopy_filled:,} tile cells outside the lidar band took the global canopy", flush=True)
@@ -825,10 +841,15 @@ def profile_many(tasks: list, ldir: Path, pts: dict | None, jobs: int | None = N
     import multiprocessing as mp
     from concurrent.futures import ProcessPoolExecutor
 
+    tasks = list(tasks)
+    total = len(tasks)
     cache = build_road_index(pts)
     jobs = _default_jobs() if jobs is None else int(jobs)
-    jobs = max(1, min(jobs, len(tasks)))
+    jobs = max(1, min(jobs, total or 1))
+    # One status a minute beats an hour of silence: this is 10,137 independent profiles and the
+    # fork pool used to log only "done" (Rich, 2026-10-05, watching dc-metro-take-2 sit here).
     if jobs == 1:
+        p = progress.Progress("branch", total)
         out = []
         for road_index, ident, line in tasks:
             try:
@@ -836,6 +857,8 @@ def profile_many(tasks: list, ldir: Path, pts: dict | None, jobs: int | None = N
             except Exception as exc:
                 print(f"  branch  {ident} profile failed: {exc}", flush=True)
                 out.append(None)
+            p.tick()
+        p.close()
         return out
     global _PROFILE_CTX
     _PROFILE_CTX = {"ldir": ldir, "pts": pts, "cache": cache}
@@ -844,8 +867,19 @@ def profile_many(tasks: list, ldir: Path, pts: dict | None, jobs: int | None = N
     except ValueError:  # no fork (not Linux): fall back rather than pickle the cloud
         print("  branch  no fork available; profiling serially", flush=True)
         return profile_many(tasks, ldir, pts, jobs=1)
+    # submit + as_completed rather than map: the same output order (each future carries its index),
+    # but a result to tick on, so the pool reports "43% eta 30m" instead of going dark until the end
+    from concurrent.futures import as_completed
+
+    out: list = [None] * total
+    p = progress.Progress("branch", total)
     with ProcessPoolExecutor(max_workers=jobs, mp_context=ctx) as ex:
-        return list(ex.map(_profile_worker, tasks, chunksize=max(1, len(tasks) // (jobs * 8))))
+        pending = {ex.submit(_profile_worker, t): i for i, t in enumerate(tasks)}
+        for fut in as_completed(pending):
+            out[pending[fut]] = fut.result()
+            p.tick()
+    p.close()
+    return out
 
 
 def profile_from_dem(line: LineString, dem_path: Path, chm_path: Path | None = None) -> dict:

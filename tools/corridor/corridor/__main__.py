@@ -207,6 +207,92 @@ def cmd_fetch(a: argparse.Namespace) -> None:
         fetch_site(s, a.half_length, a.half_width, a.lidar_half_width, skip)
 
 
+def cmd_plan(a: argparse.Namespace) -> None:
+    """STEP 1 of a sharded bake: run the cheap global stages once and write `plan/shards.json`.
+
+    This is the part of `fetch_site` that must NOT be per-shard — `roads()`, `dead_ends()` and the
+    `write_vectors()` artifacts (`site.json`, `spine_utm.json`, `osm.geojson`, `crossings.json`) are
+    properties of the whole network. Doing them once, in one small Job, is what lets every shard be
+    a self-contained block with no shared mutable state.
+    """
+    from . import network, shards
+    from .geo import Frame
+
+    sites = json.loads(SITES.read_text())
+    wanted = sites if a.slug == "all" else [s for s in sites if s["slug"] == a.slug]
+    if not wanted:
+        sys.exit(f"no site {a.slug!r}")
+    for site in wanted:
+        slug = site["slug"]
+        out = DATA / "sites" / slug
+        out.mkdir(parents=True, exist_ok=True)
+        frame = Frame.at(site["lon"], site["lat"])
+        R = network.roads(site, frame, CACHE / "overpass")
+        print(f"  roads   {network.summary(R)}", flush=True)
+        network.dead_ends(R["chains"], frame, CACHE / "overpass", float(site.get("radius_m", 9000)), site["lat"], site["lon"], clip=network.selection_polygon(site, frame))
+        V = network.write_vectors(site, frame, R, out, a.half_width, CACHE / "overpass")
+        plan = shards.build_plan(slug, tuple(V["bbox"]), R["chains"], R["primary"], max_side_m=a.max_side, max_shards=a.max_shards)
+        shards.write_plan(out, plan)
+        counts = [len(plan["tiles"][str(i)]) for i in range(plan["n"])]
+        chains = [0] * plan["n"]
+        for bi in plan["chains"].values():
+            chains[bi] += 1
+        w = plan["bbox"][2] - plan["bbox"][0]
+        h = plan["bbox"][3] - plan["bbox"][1]
+        print(f"  plan    {plan['n']} shards over {w / 1000:.1f} × {h / 1000:.1f} km -> {out / 'plan' / 'shards.json'}")
+        for i, b in enumerate(plan["blocks"]):
+            bw = b["bbox"][2] - b["bbox"][0]
+            bh = b["bbox"][3] - b["bbox"][1]
+            print(f"    shard {i:2d}  {bw / 1000:4.1f} × {bh / 1000:4.1f} km  tiles {counts[i]:3d}  chains {chains[i]:5d}")
+
+
+def cmd_finalize(a: argparse.Namespace) -> None:
+    """STEP 3 of a sharded bake: union the shards' tiles/pyramid/vectors, stitch the primary, export.
+
+    The parent site directory already holds the global artifacts the plan step wrote; this merges
+    the per-shard trees into it, then runs the SAME `export.export_site` a single bake runs, so a
+    sharded world and an unsharded one produce byte-identical manifests and web trees.
+    """
+    from . import export, shards
+
+    slug = a.slug
+    site_dir = DATA / "sites" / slug
+    plan = shards.read_plan(site_dir)
+    if plan is None:
+        sys.exit(f"no plan for {slug!r}; run `corridor plan {slug}` first")
+    parts = [shards.shard_dir(site_dir, i) for i in range(plan["n"])]
+    present = [p for p in parts if p.exists()]
+    if not present:
+        sys.exit(f"no shard directories under {site_dir / 'shards'}")
+
+    # A world bake's canopy overview comes from the global model, which is an S3 stream; fetch it
+    # once here rather than N times, and only if the lidar gave us no CHM of our own.
+    if not (site_dir / "lidar" / "chm.tif").exists() and not (site_dir / "canopy_global.tif").exists():
+        try:
+            from . import canopy
+            from .geo import Frame
+
+            site = json.loads((site_dir / "site.json").read_text())
+            frame = Frame(site["frame"]["epsg"], tuple(site["frame"]["origin"]))
+            manifest = json.loads((site_dir / "manifest.json").read_text()) if (site_dir / "manifest.json").exists() else {}
+            manifest["canopy"] = canopy.fetch_chm(frame, tuple(site["bbox_utm"]), site_dir / "canopy_global.tif", CACHE, res=2.0)
+            (site_dir / "manifest.json").write_text(json.dumps(manifest, indent=1, default=str))
+            print("  canopy  global CHM for the merged world")
+        except Exception as exc:
+            print(f"  canopy  global CHM unavailable: {exc}")
+
+    nt = shards.merge_tree(present, site_dir, "lidar")
+    nw = shards.merge_tree(present, site_dir, "web/tiles")
+    npg = shards.merge_tree(present, site_dir, "web/pyr")
+    nb = shards.merge_branches(present, site_dir)
+    shards.merge_geology(present, site_dir)
+    stitched = shards.stitch_profile(present, site_dir)
+    print(f"  merge   {nt} lidar files, {nw} tiles, {npg} pyramid files, {nb} branches; primary {'stitched' if stitched else 'MISSING'}")
+    ex = export.export_site(site_dir)
+    export.write_index(DATA / "sites")
+    print(f"  web     {', '.join(ex['layers'])} ({ex['bytes'] / 2**20:.1f} MiB) -> {site_dir / 'web'}")
+
+
 def cmd_report(a: argparse.Namespace) -> None:
     for d in sorted((DATA / "sites").glob("*")):
         m = d / "manifest.json"
@@ -400,6 +486,15 @@ def main() -> None:
     pub.add_argument("--prefix", default=os.environ.get("CORRIDOR_S3_PREFIX", "corridor"))
     pub.add_argument("--dry-run", action="store_true")
     pub.set_defaults(fn=cmd_publish)
+    pl = sub.add_parser("plan", help="sharded bake step 1: one global plan (<= 8 km blocks) for a large world")
+    pl.add_argument("slug", nargs="?", default="all")
+    pl.add_argument("--half-width", type=float, default=300.0, help="OSM/DEM/NAIP corridor half-width, metres")
+    pl.add_argument("--max-side", type=float, default=8000.0, help="maximum shard side, metres")
+    pl.add_argument("--max-shards", type=int, default=16, help="cap on the number of shards")
+    pl.set_defaults(fn=cmd_plan)
+    fn = sub.add_parser("finalize", help="sharded bake step 3: union the shards and export the world")
+    fn.add_argument("slug")
+    fn.set_defaults(fn=cmd_finalize)
     a = p.parse_args()
     a.fn(a)
 

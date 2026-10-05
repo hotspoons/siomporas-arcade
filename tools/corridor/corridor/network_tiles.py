@@ -796,13 +796,19 @@ def _raster(ldir: Path, kind: str) -> Path:
 
 
 def profile_tiled(line: LineString, ldir: Path, pts: dict | None, road_index: int | None = None,
-                  road_index_cache: tuple | None = None) -> dict:
+                  road_index_cache: tuple | None = None, fill: bool = True) -> dict:
     """lidar.profile over the rasters with a LazyRaster, and only this road's near points.
 
     `road_index_cache` is `build_road_index(pts)`. Without it the road filter is `pts["road"] ==
     road_index`, which scans every one of the 669 M near-road points for EVERY chain — the
     Capital Beltway spent ~3.5 h of its bake in that scan. With it, the chain's points are a
     precomputed slice.
+
+    `fill=False` returns the raw along-track arrays with NaN where this shard's rasters have no
+    data, instead of interpolating across the gap. A shard bake wants that: it profiles the WHOLE
+    primary against its OWN block's rasters, so the stations outside the block must stay NaN for
+    `shards.stitch_profile` to hand them to the neighbouring shard rather than to a straight line
+    drawn across them.
     """
     dtm = LazyRaster(_raster(ldir, "dtm"))
     chm = LazyRaster(_raster(ldir, "chm"))
@@ -822,7 +828,8 @@ def profile_tiled(line: LineString, ldir: Path, pts: dict | None, road_index: in
                 sub = {k: v[m] for k, v in pts.items() if k != "road"}
         else:
             sub = {k: v for k, v in pts.items() if k != "road"}
-        return _fill_profile(lidar.profile(line, dtm, chm, dtm.transform, sub))
+        prof = lidar.profile(line, dtm, chm, dtm.transform, sub)
+        return _fill_profile(prof) if fill else prof
     finally:
         dtm.close()
         chm.close()

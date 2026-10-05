@@ -943,6 +943,9 @@ if (uLodOn > 0.5) {
   const pavedOffsetAt = (s: number) => pavedOffset(twoWayAt(s), kerbedAt(s))
   const road = new THREE.Group()
   road.name = 'road'
+  /** Set once `addDriveways` is defined inside the road block below; the tile pump calls it per
+   *  cell to lay a streamed world's driveways as its tiles arrive (the load path lays them all). */
+  let addDrivewaysBatch: (driveways: NonNullable<Manifest['driveways']>, stubs: NonNullable<Manifest['stubs']>) => void = () => {}
   const tSurfaceSets = performance.now()
   surfaceSets ??= await loadSurfaceSets()
   bootDetail.push({ phase: 'paving: surface sets (textures)', ms: Math.round(performance.now() - tSurfaceSets) })
@@ -2112,7 +2115,7 @@ if (uLodOn > 0.5) {
     driveGroup.name = 'driveways'
     road.add(driveGroup)
     const driveStations: St[] = []
-    const makeDriveways = () => {
+    const clearDriveways = () => {
       for (const o of [...driveGroup.children]) {
         driveGroup.remove(o)
         ;(o as THREE.Mesh).geometry.dispose()
@@ -2123,16 +2126,21 @@ if (uLodOn > 0.5) {
         if (arr && i >= 0) arr.splice(i, 1)
       }
       driveStations.length = 0
+    }
+    /** Lay one batch of driveways and stubs as road-group ribbons. Batched because a tiled world
+     *  streams them a cell at a time rather than holding 40 MB resident; the load path lays all of
+     *  them at once. Stations join `stGrid`, so grass, trees and the car know the asphalt is there. */
+    const addDriveways = (driveways: NonNullable<Manifest['driveways']>, stubs: NonNullable<Manifest['stubs']>) => {
       const set = surfaceSets?.asphalt_aged
       const mat = set ? set.material : new THREE.MeshStandardMaterial({ color: 0x3b3b3d, roughness: 1 })
       const mpt = set?.metresPerTile ?? 1
       const pos: number[] = [], uv: number[] = [], idx: number[] = []
       const ribbons: { coords: [number, number, number][]; width: number; flare?: boolean }[] = [
         // a driveway meets the road at a dropped kerb, not a flared mouth
-        ...(manifest.driveways ?? []).map((d) => ({ coords: d.coords, width: d.width_m ?? 3.6, flare: false })),
+        ...driveways.map((d) => ({ coords: d.coords, width: d.width_m ?? 3.6, flare: false })),
         // a road we do not model, stubbed in from the junction: full width, still unmarked —
         // paint on a 60 m stub that ends in nothing would draw the eye to the seam
-        ...(manifest.stubs ?? []).map((s) => ({ coords: s.coords, width: Math.max(5.5, (s.lanes ?? 2) * 3.1 + 0.8), flare: true })),
+        ...stubs.map((s) => ({ coords: s.coords, width: Math.max(5.5, (s.lanes ?? 2) * 3.1 + 0.8), flare: true })),
       ]
       for (const dw of ribbons) {
         const pts = (dw.coords ?? []).map(([x, y, z]) => toWorld(x, y, z))
@@ -2194,6 +2202,8 @@ if (uLodOn > 0.5) {
         driveGroup.add(mesh)
       }
     }
+    const makeDriveways = () => { clearDriveways(); addDriveways(manifest.driveways ?? [], manifest.stubs ?? []) }
+    addDrivewaysBatch = addDriveways
 
     const bulbGroup = new THREE.Group()
     bulbGroup.name = 'culdesacs'
@@ -3036,10 +3046,27 @@ if (uLodOn > 0.5) {
       for (const p of builtParts) p.recolour(walls, roofs)
     },
   }
+  // A tiled world streams its roads with its vector tiles. The index starts as the spine and grows
+  // as each tile arrives; the running manifest arrays (`siblings`, `driveways`, `stubs`) grow with
+  // it, so the once-only readers (the minimap, the editor) still see what is loaded. `addDriveways`
+  // lays each tile's ribbons as it comes. Idempotent per cell, because the building pump and the
+  // furniture pump both fetch the same tile (`loadVectorTile` caches it).
+  const roads = buildRoadIndex(manifest)
+  const hydrated = new Set<string>()
+  const hydrateCell = (key: string, files: Record<string, unknown>) => {
+    if (!manifest.vt?.cells?.length || hydrated.has(key)) return
+    hydrated.add(key)
+    const sibs = (files.siblings ?? []) as NonNullable<Manifest['siblings']>
+    const dws = (files.driveways ?? []) as NonNullable<Manifest['driveways']>
+    const sts = (files.stubs ?? []) as NonNullable<Manifest['stubs']>
+    for (const s of sibs) { (manifest.siblings ??= []).push(s); roads.addLine(s) }
+    for (const d of dws) { (manifest.driveways ??= []).push(d); roads.addLine(d.coords) }
+    for (const st of sts) { (manifest.stubs ??= []).push(st); roads.addLine(st.coords) }
+    addDrivewaysBatch(dws, sts)
+  }
   {
     // one index for the whole site, not one per cell: the cells slice the BUILDINGS, and a house
     // in the last cell still needs to know about the road in the first
-    const roads = buildRoadIndex(manifest)
     const build = async (list: NonNullable<Manifest['buildings']>, cx: number, cy: number, budget: Budget) => {
       const b = await buildBuildings({ ...manifest, buildings: list }, groundAtWorld, T.STREAM_BUDGET_MS, { roads, pool: poolOf(surfacesDoc), budget })
       b.group.userData.enuX = cx
@@ -3064,6 +3091,7 @@ if (uLodOn > 0.5) {
         const cy = t.y * size + size / 2
         gradeUnits.push({ key: `buildings:${t.x},${t.y}`, x: cx, z: -cy, r: size * 0.71 + 10, done: false, run: async (budget) => {
           const files = await loadVectorTile(manifest.slug, dir, t.x, t.y)
+          hydrateCell(`${t.x},${t.y}`, files)
           const list = (files.buildings ?? []) as NonNullable<Manifest['buildings']>
           if (!list.length) return
           // keep `manifest.buildings` a running view of what is loaded, so physics/attribution and
@@ -3266,7 +3294,7 @@ if (uLodOn > 0.5) {
       barriers: (tiled?.barriers as Manifest['barriers']) ?? b?.barriers ?? [],
       sidewalks: (tiled?.sidewalks as Manifest['sidewalks']) ?? b?.sidewalks ?? [],
       power: (tiled?.power as Manifest['power']) ?? (manifest.power ? { lines: b?.lines ?? [], supports: b?.supports ?? [] } : null),
-      driveways: b?.driveways ?? [],
+      driveways: (tiled?.driveways as Manifest['driveways']) ?? b?.driveways ?? [],
       intersections: manifest.intersections ? { ...manifest.intersections, list: b?.intersections ?? [] } : null,
     }
   }
@@ -3288,12 +3316,18 @@ if (uLodOn > 0.5) {
       ? { x0: Math.floor((focus.x - HOME_M) / size), x1: Math.floor((focus.x + HOME_M) / size), y0: Math.floor((-focus.z - HOME_M) / size), y1: Math.floor((-focus.z + HOME_M) / size) }
       : { x0: tiledCells[0].x, x1: tiledCells[0].x, y0: tiledCells[0].y, y1: tiledCells[0].y }
     for (let cx = home.x0; cx <= home.x1; cx++) for (let cy = home.y0; cy <= home.y1; cy++) {
-      buildStreetCell(cx, cy, await loadVectorTile(manifest.slug, dir, cx, cy))
+      const files = await loadVectorTile(manifest.slug, dir, cx, cy)
+      hydrateCell(`${cx},${cy}`, files)
+      buildStreetCell(cx, cy, files)
     }
     for (const c of tiledCells) {
       const k = `${c.x},${c.y}`
       if (builtStreet.has(k)) continue
-      gradeUnits.push({ key: `street:${k}`, x: c.x * size + size / 2, z: -(c.y * size + size / 2), r: size * 0.75, done: false, run: async () => { buildStreetCell(c.x, c.y, await loadVectorTile(manifest.slug, dir, c.x, c.y)) } })
+      gradeUnits.push({ key: `street:${k}`, x: c.x * size + size / 2, z: -(c.y * size + size / 2), r: size * 0.75, done: false, run: async () => {
+        const files = await loadVectorTile(manifest.slug, dir, c.x, c.y)
+        hydrateCell(k, files)
+        buildStreetCell(c.x, c.y, files)
+      } })
     }
   } else {
     addStreet(local ? streetSlice(true) : manifest, local ? crossingNodes.filter((n) => inDisc(n.x, n.y)) : crossingNodes)

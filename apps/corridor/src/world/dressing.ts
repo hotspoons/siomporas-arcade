@@ -456,20 +456,27 @@ export function planDressing(b: Footprint, kit: DressingPart[], opts: PlanOpts =
 export class RoadIndex {
   private cells = new Map<number, [number, number][]>()
   private cell: number
+  private step = 8
 
   constructor(lines: [number, number][][], { cell = 24, step = 8 } = {}) {
     this.cell = cell
-    for (const line of lines) {
-      for (let i = 0; i < line.length; i += 1) {
-        this.add(line[i])
-        const next = line[i + 1]
-        if (!next) continue
-        const d = Math.hypot(next[0] - line[i][0], next[1] - line[i][1])
-        const n = Math.floor(d / step)
-        for (let k = 1; k <= n; k += 1) {
-          const t = (k * step) / d
-          this.add([line[i][0] + (next[0] - line[i][0]) * t, line[i][1] + (next[1] - line[i][1]) * t])
-        }
+    this.step = step
+    for (const line of lines) this.addLine(line)
+  }
+
+  /** Add one more road to the index. A streamed world grows this as its vector tiles arrive. */
+  addLine(coords: [number, number, number][] | [number, number][] | undefined | null) {
+    if (!coords?.length) return
+    const line = coords.map(([x, y]) => [x, y] as [number, number])
+    for (let i = 0; i < line.length; i += 1) {
+      this.add(line[i])
+      const next = line[i + 1]
+      if (!next) continue
+      const d = Math.hypot(next[0] - line[i][0], next[1] - line[i][1])
+      const n = Math.floor(d / this.step)
+      for (let k = 1; k <= n; k += 1) {
+        const t = (k * this.step) / d
+        this.add([line[i][0] + (next[0] - line[i][0]) * t, line[i][1] + (next[1] - line[i][1]) * t])
       }
     }
   }

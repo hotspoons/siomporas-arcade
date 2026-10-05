@@ -161,7 +161,10 @@ export class MiniMap {
     this.el.append(this.canvas, locate, this.expandBtn, this.grip)
     parent.append(this.el)
     this.spine = new Float32Array(manifest.spine.coords.flatMap(([x, y]) => [x, y]))
-    this.siblings = manifest.siblings.map((s) => new Float32Array(s.flatMap(([x, y]) => [x, y])))
+    // `siblings` grows as a tiled world streams its carriageways (`manifest.siblings` is the running
+    // view); the non-tiled path is complete at construction. `refreshSiblings` appends the new ones.
+    this.siblings = []
+    this.refreshSiblings()
 
     // the remembered size, then let the CSS resize handle change it from there
     try {
@@ -394,8 +397,19 @@ export class MiniMap {
     this.goal = goal
   }
 
+  /** Append any carriageways that have arrived since the last draw. A tiled world grows
+   *  `manifest.siblings` as its vector tiles stream, so this is how the map keeps up. */
+  private refreshSiblings() {
+    const all = this.manifest.siblings ?? []
+    for (let i = this.siblings.length; i < all.length; i++) {
+      const s = all[i]
+      this.siblings.push(new Float32Array(s.flatMap(([x, y]) => [x, y])))
+    }
+  }
+
   /** Draw with the marker at site x,y heading `yaw` (radians, 0 = east, counter-clockwise). */
   draw(marker: { x: number; y: number; yaw: number } | null) {
+    this.refreshSiblings()
     if (marker && this.follow) {
       this.centre.x = marker.x
       this.centre.y = marker.y

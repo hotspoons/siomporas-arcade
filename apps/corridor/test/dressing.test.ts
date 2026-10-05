@@ -450,4 +450,22 @@ describe('RoadIndex', () => {
     expect(idx.size).toBe(0)
     expect(idx.nearest(0, 0)).toBeNull()
   })
+
+  it('grows by addLine the same as building it whole', () => {
+    // a streamed world feeds the index one vector tile at a time; addLine must land the same points
+    // the constructor would, so a house dressed later still faces the same street
+    const lines: [number, number][][] = [line([-300, 0], [300, 0]), [[0, 100], [0, 300]]]
+    const whole = new RoadIndex(lines, { step: 4 })
+    const grown = new RoadIndex([], { step: 4 })
+    grown.addLine(lines[0])
+    grown.addLine(lines[1])
+    expect(grown.size).toBe(whole.size)
+    for (const [x, y] of [[0, 10], [120, 40], [0, 200], [-250, -30]] as [number, number][]) {
+      expect(grown.nearest(x, y, 400)).toEqual(whole.nearest(x, y, 400))
+    }
+    // and a coords-3 line (the manifest shape) is accepted too
+    const three = new RoadIndex([], { step: 4 })
+    three.addLine([[-300, 0, 5], [300, 0, 6]])
+    expect(three.nearest(0, 20)).toBeTruthy()
+  })
 })

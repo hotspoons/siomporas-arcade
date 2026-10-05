@@ -1016,7 +1016,7 @@ TILED_NESTED = {"power": ("lines", "supports"), "signals": ("masts", "signs", "b
 #: The arrays the viewer streams today. Grows one group at a time as the viewer learns to rebuild
 #: that group per cell; `_load_tiled` reads whatever a tree already has, so old and new trees mix.
 TILED_ACTIVE = ("buildings", "sidewalks", "parking", "barriers", "power", "signals",
-                "driveways", "siblings", "stubs", "intersections")
+                "driveways", "siblings", "stubs", "intersections", "branches")
 
 
 def _tile_arrays(out: dict) -> dict:
@@ -1125,12 +1125,15 @@ def _vector_tiles(web: Path, arrays: dict, size_m: float = 1000.0) -> dict:
 
     index: list[dict] = []
     building_index: list[dict] = []
+    branch_index: list[dict] = []
     counts: dict[str, int] = {}
     for (ix, iy), cell in sorted(cells.items()):
         (d / f"{ix}_{iy}.json").write_text(json.dumps(cell, separators=(",", ":")))
         index.append({"x": ix, "y": iy})
         if "buildings" in cell:
             building_index.append({"x": ix, "y": iy, "n": len(cell["buildings"])})
+        if "branches" in cell:
+            branch_index.append({"x": ix, "y": iy, "n": len(cell["branches"])})
         for leaf, val in cell.items():
             if isinstance(val, dict):
                 for sub, arr in val.items():
@@ -1138,7 +1141,8 @@ def _vector_tiles(web: Path, arrays: dict, size_m: float = 1000.0) -> dict:
             else:
                 counts[leaf] = counts.get(leaf, 0) + len(val)
     return {"size_m": size_m, "dir": dir_name, "buildings": building_index,
-            "count": counts.get("buildings", 0), "cells": index, "counts": counts}
+            "branch": branch_index, "count": counts.get("buildings", 0),
+            "cells": index, "counts": counts}
 
 
 def export_site(site_dir: Path, web: Path | None = None) -> dict:

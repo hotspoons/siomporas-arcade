@@ -305,6 +305,8 @@ export interface VectorTileIndex {
   dir: string
   /** the building tiles, with their footprint counts */
   buildings?: { x: number; y: number; n: number }[]
+  /** the tiles that hold branches, so a tiled world knows which to fetch for the road network */
+  branch?: { x: number; y: number; n: number }[]
   /** total footprints across the tiles, so a caller can report a count without loading them */
   count?: number
   /** every tile that holds any streamed vector, so a furniture-only tile is still reached */

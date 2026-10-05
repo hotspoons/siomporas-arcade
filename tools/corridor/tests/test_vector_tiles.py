@@ -137,6 +137,8 @@ class VectorTilesTest(unittest.TestCase):
             self.assertEqual(len(back["cuts"]["faces"]), 1)
             self.assertEqual(len(back["rock"]["polygons"]), 1)
             self.assertEqual(back["intersections"]["list"][0]["node"], 7)
+            # a branch tile index, so a tiled world knows which tiles hold the road network
+            self.assertEqual(idx["branch"], [{"x": 0, "y": 0, "n": 1}])
             # everything is within the same 1 km cell, so it is one tile carrying every leaf
             self.assertEqual([(c["x"], c["y"]) for c in idx["cells"]], [(0, 0)])
             cell = json.loads((web / "vt" / "0" / "0_0.json").read_text())

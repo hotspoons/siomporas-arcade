@@ -39,9 +39,22 @@ import { buildRocks } from './rocks'
 import { buildWater } from './water'
 import { siteProjector } from '../game/move/minimap'
 import { injectShade } from '../visuals/shading'
+import { reliefManifest } from '../visuals/relief'
 import { TreeShadowCasters } from '../lod/treeshadows'
 
 let surfaceSets: Record<string, SurfaceSet> | null = null
+
+/**
+ * Streamed vector tiles are fetched *after* `reliefManifest(manifest)` ran at load, so a cell's
+ * heights have to be exaggerated once, the first time the tile is seen. `loadVectorTile` caches the
+ * parsed object, so a tile the building pump and the branch pump both reach is relieved exactly once.
+ */
+const relievedCells = new WeakSet<object>()
+function relieveCell(files: Record<string, unknown>): void {
+  if (relievedCells.has(files)) return
+  relievedCells.add(files)
+  reliefManifest(files as unknown as Manifest)
+}
 
 export const toWorld = (x: number, y: number, z: number) => new THREE.Vector3(x, z, -y)
 
@@ -946,6 +959,9 @@ if (uLodOn > 0.5) {
   /** Set once `addDriveways` is defined inside the road block below; the tile pump calls it per
    *  cell to lay a streamed world's driveways as its tiles arrive (the load path lays them all). */
   let addDrivewaysBatch: (driveways: NonNullable<Manifest['driveways']>, stubs: NonNullable<Manifest['stubs']>) => void = () => {}
+  /** Set at the branch-segment grid below; a streamed branch adds its segments as its tile arrives,
+   *  so the crosswalk pass finds the nearest road direction near a crossing node. */
+  let indexBranchSegment: (br: NonNullable<Manifest['branches']>[number]) => void = () => {}
   const tSurfaceSets = performance.now()
   surfaceSets ??= await loadSurfaceSets()
   bootDetail.push({ phase: 'paving: surface sets (textures)', ms: Math.round(performance.now() - tSurfaceSets) })
@@ -1348,10 +1364,29 @@ if (uLodOn > 0.5) {
     branchAts.push({ at: atB, len: lenB, half: halfB, name: br.name ?? br.ref ?? 'branch', ref: br.ref ?? null, lanes: lanesB, twoWay: twoWayB, highway: br.highway ?? null, bounds: [bx0, bz0, bx1, bz1], road: (skip = null) => roadMesh(stations(atB, lenB, 6), () => lanesB, () => 'asphalt_aged', roadSets, 0.02, () => twoWayB, paintOff, () => kerbedB, skip) })
     return true
   }
-  for (const br of manifest.branches ?? []) {
-    if (!br.coords || br.coords.length < 2) continue
-    if (local && chm && !takeNow.has(br)) { laterBranches.push(br); continue }
-    takeBranch(br)
+  const branchTiles = manifest.vt?.branch ?? []
+  const branchTiled = !!(manifest.vt?.cells?.length && branchTiles.length && manifest.vt.dir)
+  const branchSize = manifest.vt?.size_m || 1000
+  // A tiled world streams its branch network with its vector tiles: the home tiles are taken now,
+  // so the junction grade is settled before any asphalt is built, and the rest arrive through the
+  // pump and meet as they come (the `branch-cell` units listed at the end of the paving block). An
+  // untiled world still has every branch resident.
+  const inHomeBranchCell = (t: { x: number; y: number }) => !!focus
+    && t.x >= Math.floor((focus.x - HOME_M) / branchSize) && t.x <= Math.floor((focus.x + HOME_M) / branchSize)
+    && t.y >= Math.floor((-focus.z - HOME_M) / branchSize) && t.y <= Math.floor((-focus.z + HOME_M) / branchSize)
+  if (branchTiled) {
+    for (const t of branchTiles) {
+      if (!inHomeBranchCell(t)) continue
+      const files = await loadVectorTile(manifest.slug, manifest.vt!.dir, t.x, t.y)
+      relieveCell(files)
+      for (const br of (files.branches ?? []) as NonNullable<Manifest['branches']>) takeBranch(br)
+    }
+  } else {
+    for (const br of manifest.branches ?? []) {
+      if (!br.coords || br.coords.length < 2) continue
+      if (local && chm && !takeNow.has(br)) { laterBranches.push(br); continue }
+      takeBranch(br)
+    }
   }
   mark('paving: branch curves')
   // --- ROADS MEET AT THE SAME HEIGHT ---------------------------------------------------------
@@ -2105,6 +2140,30 @@ if (uLodOn > 0.5) {
         done: false,
         run: (budget) => adoptArriving(br, budget),
       })
+    }
+    if (branchTiled) {
+      // Every non-home branch tile becomes one pump unit. It hydrates the cell (relief, junction
+      // facts, driveways), indexes the cell's branch segments for the crosswalk pass, then adopts
+      // each branch: meet, stations, asphalt — exactly as `laterBranches` did for a resident world.
+      for (const t of branchTiles) {
+        if (inHomeBranchCell(t)) continue
+        const k = `${t.x},${t.y}`
+        gradeUnits.push({
+          key: `branch-cell:${k}`,
+          x: t.x * branchSize + branchSize / 2,
+          z: -(t.y * branchSize + branchSize / 2),
+          r: branchSize * 0.71 + 40,
+          done: false,
+          run: async (budget) => {
+            const files = await loadVectorTile(manifest.slug, manifest.vt!.dir, t.x, t.y)
+            hydrateCell(k, files)
+            for (const br of (files.branches ?? []) as NonNullable<Manifest['branches']>) {
+              indexBranchSegment(br)
+              await adoptArriving(br, budget)
+            }
+          },
+        })
+      }
     }
     gradeUnits.push(...spineUnits, ...branchUnits)
     mark('grade: units listed')
@@ -3058,6 +3117,7 @@ if (uLodOn > 0.5) {
   const hydrateCell = (key: string, files: Record<string, unknown>) => {
     if (!manifest.vt?.cells?.length || hydrated.has(key)) return
     hydrated.add(key)
+    relieveCell(files)
     const sibs = (files.siblings ?? []) as NonNullable<Manifest['siblings']>
     const dws = (files.driveways ?? []) as NonNullable<Manifest['driveways']>
     const sts = (files.stubs ?? []) as NonNullable<Manifest['stubs']>
@@ -3165,9 +3225,9 @@ if (uLodOn > 0.5) {
   const SEG_M = 250
   type Seg = { ax: number; ay: number; dx: number; dy: number; l2: number }
   const segGrid = new Map<number, Seg[]>()
-  for (const b of manifest.branches ?? []) {
+  const addBranchSegments = (b: NonNullable<Manifest['branches']>[number]) => {
     const c = b.coords
-    if (!c) continue
+    if (!c) return
     for (let k = 1; k < c.length; k++) {
       const ax = c[k - 1][0], ay = c[k - 1][1], bx = c[k][0], by = c[k][1]
       const dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy || 1
@@ -3182,6 +3242,11 @@ if (uLodOn > 0.5) {
       }
     }
   }
+  // A tiled world's far branches arrive later and add their own segments (`indexBranchSegment`); the
+  // ones taken at load (home) are already in `branchRaw`. An untiled world is complete in `branches`.
+  indexBranchSegment = addBranchSegments
+  if (branchTiled) { for (const b of branchRaw) addBranchSegments(b.br) }
+  else { for (const b of manifest.branches ?? []) addBranchSegments(b) }
   const nearestBranchDir = (x: number, y: number): THREE.Vector3 | null => {
     const gx = Math.floor(x / SEG_M), gy = Math.floor(y / SEG_M)
     let best = Infinity, dir: THREE.Vector3 | null = null

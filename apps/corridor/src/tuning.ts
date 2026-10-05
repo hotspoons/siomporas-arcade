@@ -753,6 +753,18 @@ export let WATER_WIDTH_SCALE = 1.0
 export let WATER_SPEED = 1.0
 export let WATER_OPACITY = 0.82
 /**
+ * The fancy water, in one switch: 1 the Gerstner-wave surface (depth extinction, shore foam,
+ * per-body looks) with the planar reflection, 0 the old scrolling-noise surface with no reflection
+ * at all.
+ *
+ * It exists because the planar reflection renders the whole scene a SECOND time every frame, and
+ * on a coast that is plausibly the longest pole in the tent (Rich, 2026-10-05). 0 is not a subtle
+ * degrade: the waves, the see-through depth, the foam and the mirror all go, and the surface is the
+ * two-scrolling-noise-layer sheet this world had before the water project. WATER_REFLECT still
+ * turns the mirror off on its own; this turns off the whole project.
+ */
+export let WATER_FANCY = 1
+/**
  * Water look. `WATER_LOOK` picks the default WaterLook preset for bodies that do not name one,
  * indexed into WATER_LOOK_NAMES (0 temperate, 1 swamp, 2 black, 3 caribbean, 4 alpine, 5 mud); a
  * body can name its own look in the manifest. The rest are global multipliers over every look,
@@ -1792,6 +1804,7 @@ export const TUNE_TABS: TuneTab[] = [
         scope: 'world',
         collapsed: false,
         keys: [
+          tune('WATER_FANCY', () => WATER_FANCY, (v) => (WATER_FANCY = v), [0, 1], 1, 'the whole fancy water: 1 Gerstner waves + depth/foam + the planar mirror (renders the scene twice) | 0 the old scrolling-noise sheet, no mirror. Hot-swaps without a reload'),
           tune('WATER_LOOK', () => WATER_LOOK, (v) => (WATER_LOOK = v), [0, 5], 1, 'default water look: 0 temperate 1 swamp 2 black 3 caribbean 4 alpine 5 mud — a body can name its own look'),
           tune('WATER_DEPTH', () => WATER_DEPTH, (v) => (WATER_DEPTH = v), [0, 2], 0.05, 'surface above the channel bottom (m)'),
           tune('WATER_WIDTH_SCALE', () => WATER_WIDTH_SCALE, (v) => (WATER_WIDTH_SCALE = v), [0.3, 3], 0.05),

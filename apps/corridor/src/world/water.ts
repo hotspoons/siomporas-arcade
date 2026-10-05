@@ -17,13 +17,16 @@
 //           ./waterShader.ts. A body's `look` names a WaterLook preset (`swamp`, `black`,
 //           `caribbean`, …) so a game can dial one stream or the whole sea from bog to reef; see
 //           WATER_PRESETS. The Environment ▸ water knobs scale every body at once.
+//           WATER_FANCY 0 throws all of that away for the old two-scrolling-noise sheet and stands
+//           the planar reflection down, so the scene is not rendered a second time — the switch for
+//           a machine (or a measurement) that cannot afford the water project.
 //
 // KNOWN GAP: within 0.6 m of any pavement the corridor strip sits at road height, so water under a
 // bridge we are on is hidden by the strip deck until the strip learns to open over decks (main's).
 import * as THREE from 'three'
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import * as T from '../tuning'
-import { chainCompile, injectRelief, injectShade, noteShiny } from '../visuals/shading'
+import { chainCompile, injectRelief, injectSSR, injectShade, noteShiny } from '../visuals/shading'
 import { configureWaterReflection, injectWaterReflect } from '../visuals/waterReflect'
 import { WATER_ATTR, WATER_FRAG_COLOR, WATER_FRAG_NORMAL, WATER_FRAG_PARS, WATER_LOOK_NAMES, WATER_VERT_BODY, WATER_VERT_PARS, applyLookColours, lookOf, refreshLook, waterTints, writeWaterAttr, type WaterKnobs, type WaterLook, type WaterWaveUniforms } from './waterShader'
 
@@ -58,6 +61,26 @@ const GLSL_NOISE = /* glsl */ `
     vec2 u = f * f * (3.0 - 2.0 * f);
     return mix(mix(wh21(i), wh21(i + vec2(1, 0)), u.x), mix(wh21(i + vec2(0, 1)), wh21(i + vec2(1, 1)), u.x), u.y);
   }
+`
+
+/**
+ * The OLD water surface, kept for `WATER_FANCY 0`: two scrolling value-noise layers, finite-
+ * differenced into a normal perturbation. No Gerstner sum, no depth extinction, no shore foam, and
+ * no `aWater` read — the flat polygon stands. This is byte-for-byte the look the world had before
+ * the water project (git af27f18), which is what "the terrible looking water" means.
+ */
+const WATER_NOISE_NORMAL = /* glsl */ `
+{
+  vec2 p = vWaterPos.xz;
+  float t = uTime;
+  float e = 0.15;
+  #define WAVE(q) (wnoise((q) * 1.7 + vec2(t * 0.35, t * 0.11)) * 0.6 + wnoise((q) * 4.3 - vec2(t * 0.22, -t * 0.4)) * 0.4)
+  float h0 = WAVE(p);
+  float hx = WAVE(p + vec2(e, 0.0));
+  float hz = WAVE(p + vec2(0.0, e));
+  vec3 pert = normalize(vec3(-(hx - h0) / e * 0.35, 1.0, -(hz - h0) / e * 0.35));
+  normal = normalize(normal + (pert - vec3(0.0, 1.0, 0.0)) * 1.15);
+}
 `
 
 interface WaterShared {
@@ -117,13 +140,26 @@ function waterMaterial(shared: WaterShared, look: WaterLook, opacityMul = 1): TH
     shader.uniforms.uFoamBand = u.uFoamBand
     shader.uniforms.uShoreMix = u.uShoreMix
     shader.uniforms.uWaveFade = u.uWaveFade
-    shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\n' + WATER_VERT_PARS)
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\n' + WATER_VERT_BODY)
+    if (T.WATER_FANCY >= 0.5) {
+      // the Gerstner surface: summed wave normal, depth extinction, shore foam, per-body looks
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', '#include <common>\n' + WATER_VERT_PARS)
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\n' + WATER_VERT_BODY)
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', '#include <common>\n' + WATER_FRAG_PARS)
+        .replace('#include <normal_fragment_begin>', '#include <normal_fragment_begin>\n' + WATER_FRAG_NORMAL)
+        .replace('#include <color_fragment>', '#include <color_fragment>\n' + WATER_FRAG_COLOR)
+    } else {
+      // WATER_FANCY 0: the old surface. No aWater read, so the crowned geometry's depth attribute
+      // is simply ignored and the polygon shades as it did before the water project.
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', '#include <common>\nvarying vec3 vWaterPos;')
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvWaterPos = (modelMatrix * vec4(position, 1.0)).xyz;')
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', '#include <common>\nuniform float uTime;\nvarying vec3 vWaterPos;\n' + GLSL_NOISE)
+        .replace('#include <normal_fragment_begin>', '#include <normal_fragment_begin>\n' + WATER_NOISE_NORMAL)
+    }
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', '#include <common>\n' + WATER_FRAG_PARS)
-      .replace('#include <normal_fragment_begin>', '#include <normal_fragment_begin>\n' + WATER_FRAG_NORMAL)
-      .replace('#include <color_fragment>', '#include <color_fragment>\n' + WATER_FRAG_COLOR)
       .replace(
         '#include <normal_fragment_maps>',
         `
@@ -139,14 +175,17 @@ function waterMaterial(shared: WaterShared, look: WaterLook, opacityMul = 1): TH
         `,
       )
   }
-  mat.customProgramCacheKey = () => `corridor-water-${look.colour}`
+  // the mode is in the key, so flipping WATER_FANCY compiles a different program; the tick sets
+  // needsUpdate on every water material when it changes
+  mat.customProgramCacheKey = () => `corridor-water-${look.colour}-${T.WATER_FANCY >= 0.5 ? 'gerstner' : 'noise'}`
   noteShiny(mat)
-  // The screen-space SSR pass is deliberately NOT used: it samples the previous frame along a
-  // linearly shifted screen row and smears a flat plate over a body the size of the sea. A real
-  // planar reflection (visuals/waterReflect.ts) replaces it — one mirrored scene render, tunable
-  // with WATER_REFLECT, and it can reflect the coast and trees that the sky env map cannot.
+  // The reflection path is part of the switch. The Gerstner water takes the real planar reflection
+  // (visuals/waterReflect.ts): one mirrored scene render, which is exactly the cost WATER_FANCY 0
+  // is meant to avoid. The old water takes the screen-space SSR pass — a few taps of the frame
+  // already drawn, no second scene.
   chainCompile(mat, (shader) => {
-    injectWaterReflect(shader)
+    if (T.WATER_FANCY >= 0.5) injectWaterReflect(shader)
+    else injectSSR(shader)
     injectRelief(shader)
     injectShade(shader)
   }, 'reflect-relief-shade')
@@ -334,10 +373,13 @@ export function buildWater(water: WaterLayer | null | undefined, groundAt: (x: n
     // level a game reasons about; this is a draw bias.)
     sea.position.set(0, T.WATER_LEVEL_M + SEA_DRAW_LIFT, 0)
     sea.scale.set(T.WATER_LEVEL_SPAN * 2, 1, T.WATER_LEVEL_SPAN * 2)
-    // tell the planar reflection where the mirror plane is, and what to leave out of its own view
-    configureWaterReflection(seaVisible() ? T.WATER_LEVEL_M + SEA_DRAW_LIFT : null, group)
+    // tell the planar reflection where the mirror plane is, and what to leave out of its own view.
+    // WATER_FANCY 0 stands the mirror down entirely: the old material never samples it, so an
+    // extra scene render would be pure waste — this is the cost the switch exists to remove.
+    configureWaterReflection(T.WATER_FANCY >= 0.5 && seaVisible() ? T.WATER_LEVEL_M + SEA_DRAW_LIFT : null, group)
   }
   placeSea()
+  let lastFancy = T.WATER_FANCY >= 0.5
   const advance = (t: number) => {
     uniforms.uTime.value = t * T.WATER_SPEED
     uniforms.uWind.value.copy(waterWind())
@@ -354,6 +396,13 @@ export function buildWater(water: WaterLayer | null | undefined, groundAt: (x: n
       refreshLook(wm.u, wm.look, k)
     }
     placeSea()
+    // WATER_FANCY flips the surface shader and the reflection path, both chosen at compile time.
+    // Recompile every water material on the frame the switch moves, so it is live, not reload-only.
+    const fancyNow = T.WATER_FANCY >= 0.5
+    if (fancyNow !== lastFancy) {
+      lastFancy = fancyNow
+      for (const wm of waveMats) wm.mat.needsUpdate = true
+    }
   }
   const streamMats: THREE.MeshStandardMaterial[] = []
   const stillMats: THREE.MeshStandardMaterial[] = []

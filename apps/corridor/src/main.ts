@@ -457,6 +457,7 @@ function pause() {
   drive.input.handbrake = false
   ui.drawer.set(false)
   menu.show()
+  syncAudible()
 }
 function resumeGame() {
   if (!paused) return
@@ -466,6 +467,7 @@ function resumeGame() {
   input.swallowFrames = 2
   document.body.classList.remove('paused')
   menu.close()
+  syncAudible()
 }
 /**
  * Restart: back to the start point, the car straightened, the race and the program from the top.
@@ -903,8 +905,8 @@ addEventListener('pagehide', saveResume)
 addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveResume() })
 
 /*
- * GO QUIET WHEN NOBODY IS LOOKING (Rich, 2026-09-27: "it would be great if we muted the corridor
- * UI when the tab isn't active. We do that for the other games here").
+ * GO QUIET WHEN NOBODY IS LOOKING OR THE GAME IS HELD (Rich, 2026-09-27: "it would be great if we
+ * muted the corridor UI when the tab isn't active. We do that for the other games here").
  *
  * BOTH SIGNALS, because they mean different things and the other games only listen for one.
  * stuntin and coast use window blur/focus, which catches switching tabs and switching apps but
@@ -912,10 +914,15 @@ addEventListener('visibilitychange', () => { if (document.visibilityState === 'h
  * background but not another application taking the foreground. Corridor wants both: hidden OR
  * unfocused is "nobody is listening".
  *
+ * AND THE PAUSE MENU, which is a third reason the same bus should be down: the world is held still
+ * and the engine would otherwise idle on under the menu. It rides the same mute so there is one
+ * place that decides whether the engine bus is up, and the menu's own blips stay audible on their
+ * separate context.
+ *
  * `document.hasFocus()` rather than a flag we keep ourselves — a page loaded in a background tab
  * never fires `blur`, so a flag that starts false would be wrong from the first frame.
  */
-const listening = () => document.visibilityState === 'visible' && document.hasFocus()
+const listening = () => document.visibilityState === 'visible' && document.hasFocus() && !paused
 const syncAudible = () => engineSound.setMuted(!listening())
 for (const ev of ['visibilitychange', 'blur', 'focus'] as const) {
   addEventListener(ev, syncAudible, ev === 'visibilitychange' ? undefined : true)

@@ -35,7 +35,7 @@ import { buildParking, parkingCover } from './parking'
 import { buildBridges, flattenSpine, loadStructureOverrides, suppressed } from './structures'
 import { isKerbed, loadSurfaceSets, overpassMesh, pavedOffset, pavedWidth, repaintMarkings, roadMesh, roadMeshPaced, stations, taperedLanes, treesFromCanopy, type SurfaceSet } from './props'
 import { STYLE, styled, type Style } from '../visuals/style'
-import { buildRocks } from './rocks'
+import { buildRocks, type RocksResult } from './rocks'
 import { buildWater } from './water'
 import { siteProjector } from '../game/move/minimap'
 import { injectShade } from '../visuals/shading'
@@ -3107,6 +3107,38 @@ if (uLodOn > 0.5) {
       for (const p of builtParts) p.recolour(walls, roofs)
     },
   }
+  // Cut-face and outcrop rock streams with the cell that owns it. `buildRocks` is pure — it makes a
+  // group and reads only the cut/rock arrays it is handed — so a cell can build its own with no
+  // global state, and a world with no tiles builds the lot in one call below. The group and the
+  // running counts are the same objects the rest of the file already reads (`layers.rocks`,
+  // `rockCounts`), so nothing downstream knows the difference.
+  const rocksGroup = new THREE.Group()
+  rocksGroup.name = 'rocks'
+  const rocksParts: RocksResult[] = []
+  const rocksBuilt = new Set<string>()
+  const buildRocksInto = async (cuts: Manifest['cuts'], rock: Manifest['rock']) => {
+    const r = await buildRocks(cuts, rock, catalog, groundAtWorld, edgeDistanceWorld)
+    if (r.faces || r.polygons || Object.keys(r.counts).length) {
+      rocksGroup.add(r.group)
+      rocksParts.push(r)
+    }
+  }
+  const addRocksCell = (key: string, cuts: Manifest['cuts'], rock: Manifest['rock']) => {
+    if (rocksBuilt.has(key)) return
+    if (!(cuts?.faces?.length) && !(rock?.polygons?.length)) return
+    rocksBuilt.add(key)
+    void buildRocksInto(cuts, rock)
+  }
+  const rocks: RocksResult = {
+    group: rocksGroup,
+    get counts() {
+      const out: Record<string, number> = {}
+      for (const r of rocksParts) for (const [k, v] of Object.entries(r.counts)) out[k] = (out[k] ?? 0) + v
+      return out
+    },
+    get faces() { return rocksParts.reduce((s, r) => s + r.faces, 0) },
+    get polygons() { return rocksParts.reduce((s, r) => s + r.polygons, 0) },
+  }
   // A tiled world streams its roads with its vector tiles. The index starts as the spine and grows
   // as each tile arrives; the running manifest arrays (`siblings`, `driveways`, `stubs`) grow with
   // it, so the once-only readers (the minimap, the editor) still see what is loaded. `addDriveways`
@@ -3121,6 +3153,8 @@ if (uLodOn > 0.5) {
     const sibs = (files.siblings ?? []) as NonNullable<Manifest['siblings']>
     const dws = (files.driveways ?? []) as NonNullable<Manifest['driveways']>
     const sts = (files.stubs ?? []) as NonNullable<Manifest['stubs']>
+    // cut faces and outcrops arrive with the cell; `relieveCell` above already lifted them
+    addRocksCell(key, files.cuts as Manifest['cuts'], files.rock as Manifest['rock'])
     for (const s of sibs) { (manifest.siblings ??= []).push(s); roads.addLine(s) }
     for (const d of dws) { (manifest.driveways ??= []).push(d); roads.addLine(d.coords) }
     for (const st of sts) { (manifest.stubs ??= []).push(st); roads.addLine(st.coords) }
@@ -3432,7 +3466,9 @@ if (uLodOn > 0.5) {
   // terrain features (terrain-and-data agent): rock on the measured cut faces and outcrops, water in
   // the measured channels. Both stand on groundAt; the water's ripples tick with the near update.
   status('dressing…')
-  const rocks = await buildRocks(manifest.cuts, manifest.rock, catalog, groundAtWorld, edgeDistanceWorld)
+  // A tiled world's rock was built per cell as each arrived (see `addRocksCell`); only an untiled
+  // one still builds the whole layer here.
+  if (!manifest.vt?.cells?.length) await buildRocksInto(manifest.cuts, manifest.rock)
   group.add(rocks.group)
   const water = buildWater(manifest.water, groundAtWorld, lowestGround)
   /**

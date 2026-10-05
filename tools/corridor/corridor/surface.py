@@ -30,12 +30,108 @@ from pathlib import Path
 import laspy
 import numpy as np
 import rasterio
-import shapely
 from shapely.geometry import LineString
 from shapely.ops import substring
 
 LANE_M = 3.66
 STEP_M = 20.0
+
+
+def _polyline_measures(coords, x, y, densify_m: float = 1.0, chunk: int = 8_000_000):
+    """Distance to a polyline and arc-length position, for hundreds of millions of points.
+
+    `shapely.distance` / `shapely.line_locate_point` scan every segment once PER POINT, so the
+    Capital Beltway's ~400 M ground returns against its 827-segment spine is ~3x10^11 segment
+    tests — the three hours `surface.measure` spent, and the thing that used 150 GiB building a
+    `Point` object for each return. Here the line is densified once and indexed with a KD-tree:
+    each point looks up its nearest sample, then is EXACTLY projected onto the few original
+    segments around that sample. O(points · log samples), a few GB instead of hundreds, and the
+    same distance and s to floating point.
+
+    The samples are EVERY polygon vertex plus a ~`densify_m` step between them. The vertices matter:
+    a run of segments shorter than the step would otherwise sit between two samples, and a point
+    nearest one of them could look several segments away from the sample it chose.
+
+    Points are handled in chunks so peak memory is bounded by `chunk`, not by the cloud's size.
+    """
+    from scipy.spatial import cKDTree
+
+    coords = np.asarray(coords, dtype=float)
+    # drop duplicate consecutive vertices; a zero-length segment makes arc length ambiguous
+    if coords.ndim != 2 or coords.shape[0] < 2:
+        z = np.zeros(np.shape(x), dtype=float)
+        return z, z
+    step = np.hypot(np.diff(coords[:, 0]), np.diff(coords[:, 1]))
+    p = coords[np.concatenate(([True], step > 0.0))]
+    if p.shape[0] < 2:
+        z = np.zeros(np.shape(x), dtype=float)
+        return z, z
+
+    seg = p[1:] - p[:-1]
+    seglen = np.hypot(seg[:, 0], seg[:, 1])
+    cum = np.concatenate(([0.0], np.cumsum(seglen)))
+    total = float(cum[-1])
+
+    # densify to ~densify_m samples, each remembering which ORIGINAL segment it lies on. Every
+    # vertex is a sample too, so short segments cannot fall between two samples.
+    ds = max(0.5, float(densify_m))
+    ns = max(2, int(np.ceil(total / ds)) + 1)
+    s_samp = np.unique(np.concatenate((np.linspace(0.0, total, ns), cum)))
+    seg_of = np.clip(np.searchsorted(cum, s_samp, side="right") - 1, 0, seglen.shape[0] - 1)
+    frac = (s_samp - cum[seg_of]) / seglen[seg_of]
+    samp = p[seg_of] + frac[:, None] * seg[seg_of]
+    tree = cKDTree(samp)
+
+    a, b = p[:-1], p[1:]
+    nseg = seglen.shape[0]
+    out_d = np.empty(x.shape, dtype=np.float64)
+    out_s = np.empty(x.shape, dtype=np.float64)
+    total_pts = int(x.shape[0])
+    for i0 in range(0, total_pts, max(1, chunk)):
+        i1 = min(total_pts, i0 + max(1, chunk))
+        q = np.column_stack((np.asarray(x[i0:i1], dtype=float), np.asarray(y[i0:i1], dtype=float)))
+        _, j = tree.query(q, k=1, workers=-1)
+        base = seg_of[j]
+        best_d = np.full(q.shape[0], np.inf)
+        best_s = np.zeros(q.shape[0])
+        # the nearest point is on the sample's own segment or the one beside it; +/-2 is margin
+        for off in (-2, -1, 0, 1, 2):
+            kk = np.clip(base + off, 0, nseg - 1)
+            ax, ay = a[kk, 0], a[kk, 1]
+            ex, ey = b[kk, 0] - ax, b[kk, 1] - ay
+            l2 = ex * ex + ey * ey
+            t = ((q[:, 0] - ax) * ex + (q[:, 1] - ay) * ey) / np.where(l2 == 0.0, 1.0, l2)
+            np.clip(t, 0.0, 1.0, out=t)
+            cxp, cyp = ax + t * ex, ay + t * ey
+            dd = np.hypot(q[:, 0] - cxp, q[:, 1] - cyp)
+            upd = dd < best_d
+            best_d[upd] = dd[upd]
+            best_s[upd] = (cum[kk] + t * seglen[kk])[upd]
+        out_d[i0:i1] = best_d
+        out_s[i0:i1] = best_s
+    return out_d, out_s
+
+
+def _bin_median(values, bins, n: int, min_count: int):
+    """`np.median` of `values` per bin 0..n-1, NaN where a bin holds fewer than `min_count`.
+
+    The old code looped `for b in range(n)` and rebuilt `m = mask & (bins == b)` every time — n
+    full-array passes (3,089 for this corridor). One argsort by bin and one median per contiguous
+    group is the same answer in a single pass over the points, plus n tiny groups.
+    """
+    out = np.full(n, np.nan)
+    if values.shape[0] == 0:
+        return out
+    order = np.argsort(bins, kind="stable")
+    b = bins[order]
+    v = values[order]
+    edges = np.flatnonzero(np.diff(b)) + 1
+    starts = np.concatenate(([0], edges))
+    ends = np.concatenate((edges, [b.shape[0]]))
+    for s0, e0 in zip(starts, ends):
+        if e0 - s0 >= min_count:
+            out[b[s0]] = np.median(v[s0:e0])
+    return out
 
 
 def measure(site_dir: Path) -> dict | None:
@@ -68,23 +164,17 @@ def measure(site_dir: Path) -> dict | None:
         las = laspy.read(laz)
         c = np.asarray(las.classification)
         g = c == 2
-        pts = shapely.points(np.asarray(las.x)[g], np.asarray(las.y)[g])
+        gx = np.asarray(las.x)[g]
+        gy = np.asarray(las.y)[g]
         inten = np.asarray(las.intensity)[g].astype(np.float64)
-        d = shapely.distance(pts, line)
-        s_of = shapely.line_locate_point(line, pts)
+        d, s_of = _polyline_measures(sp["coords"], gx, gy)
         bins = np.clip((s_of / STEP_M).astype(int), 0, n - 1)
-        half = np.array([lanes_at(v) * LANE_M / 2 for v in s_arr])[bins]
+        half_all = np.array([lanes_at(v) for v in s_arr], dtype=float) * (LANE_M / 2.0)
+        half = half_all[bins]
         lane = d <= half - 0.3
         verge = (d >= 12) & (d <= 30)
-        lane_med = np.full(n, np.nan)
-        verge_med = np.full(n, np.nan)
-        for b in range(n):
-            m = lane & (bins == b)
-            if m.sum() >= 30:
-                lane_med[b] = np.median(inten[m])
-            m2 = verge & (bins == b)
-            if m2.sum() >= 30:
-                verge_med[b] = np.median(inten[m2])
+        lane_med = _bin_median(inten[lane], bins[lane], n, 30)
+        verge_med = _bin_median(inten[verge], bins[verge], n, 30)
         rec["lidar_lane_intensity"] = [None if np.isnan(v) else round(float(v)) for v in lane_med]
         rec["lidar_verge_intensity"] = [None if np.isnan(v) else round(float(v)) for v in verge_med]
         verge_ref = float(np.nanmedian(verge_med)) if np.isfinite(np.nanmedian(verge_med)) else None

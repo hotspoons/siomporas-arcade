@@ -563,14 +563,12 @@ def fetch_site(site: dict, half_width: float, lidar_half_width: float, skip: set
         for st in prof["structures"]:
             print(f"  struct  {st['kind']:8s} s={st['s_start']:.0f}..{st['s_end']:.0f} m ({st['length_m']} m)  clearance={st['clearance_m']}  above_ground={st['height_above_ground_m']}")
         manifest["lidar"] = {**meta, "structures": prof["structures"]}
-        for c in R["chains"]:
-            if c is prim:
-                continue
-            try:
-                bp = network_tiles.profile_tiled(c["line"], ldir, pts, idx[c["id"]])
-            except Exception as exc:
-                print(f"  branch  {c['ident']} profile failed: {exc}")
-                bp = None
+        # Every branch is an independent profile, and there are 10,137 of them here — so they are
+        # fanned out across processes. `profile_many` groups the cloud once (the old loop rescanned
+        # all 669 M points per chain) and forks, so the cloud is shared copy-on-write, not pickled.
+        others = [c for c in R["chains"] if c is not prim]
+        tasks = [(idx[c["id"]], c["ident"], c["line"]) for c in others]
+        for c, bp in zip(others, network_tiles.profile_many(tasks, ldir, pts)):
             branches.append(branch_rec(c, bp))
         print(f"  branch  {len(branches)} branches profiled, {sum(len(b['structures']) for b in branches)} structures on them", flush=True)
     elif no_lidar:

@@ -83,18 +83,23 @@ bake:
   # accumulators once the VRTs exist, assembles the near-road cloud in one preallocated block and
   # frees each batch behind it, so the peak is ~1x the cloud rather than ~2x it plus the tiles.
   #
-  # 128 Gi got PAST lidar and died in `surface.measure`, which `laspy.read`s all 669 M points and
-  # then builds a shapely Point object for every ground return: measured at ~240 bytes per point,
-  # that is ~75 GiB at half ground and ~150 GiB worst case, before laspy's own ~20 GiB of point
-  # records and the scaled x/y materialisation. 128 was never going to hold it.
+  # 128 Gi got PAST lidar and died in `surface.measure`, which read all 669 M points and built a
+  # shapely Point object for every ground return: measured at ~240 bytes per point, ~150 GiB worst
+  # case before laspy's own ~20 GiB of records. That is fixed at the source now — surface.measure
+  # indexes the spine and projects points in numpy chunks (a few GB, and 3 h -> minutes) and the
+  # branch profiles group the cloud once instead of rescanning it per chain — so the memory limit
+  # has real headroom again rather than being the unblock.
   #
-  # 384 Gi (triple the old 128) clears the worst case with room to spare. gh200-1's nodes have
-  # 573 GiB each and no LimitRange or ResourceQuota caps this namespace. The request stays small
-  # relative to a node so a bake still schedules beside the editor and other work. The real fix is
-  # to stop building a shapely object per point in surface.py; the limit is the unblock.
+  # CPU IS THE OTHER HALF. The bake was single-threaded through its two longest stages (10,137
+  # branch profiles, then surface.measure): ~71 of these nodes' 72 cores sat idle for ~9 h. Those
+  # offline stages now run in a FORKED pool sized by CORRIDOR_JOBS (default min(cpu_count, 32)) —
+  # forked so the 669 M-point cloud is inherited copy-on-write, not pickled per task — so the CPU
+  # limit is raised to match. 384 GiB / 64 CPU fit a 573 GiB, 72-core node, and no LimitRange or
+  # ResourceQuota caps this namespace; the request stays small so a bake still schedules beside the
+  # editor and other work.
   resources:
-    requests: {cpu: "4", memory: 32Gi}
-    limits: {cpu: "16", memory: 384Gi}
+    requests: {cpu: "8", memory: 32Gi}
+    limits: {cpu: "64", memory: 384Gi}
   # keep a week of finished Jobs, so a log is still readable the next morning
   ttlSecondsAfterFinished: 604800
   horizonRadiusM: 30000

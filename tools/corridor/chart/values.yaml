@@ -34,12 +34,12 @@ bake:
   args: []
   # a site is ~100 M points held in numpy while rasters are built; 16 Gi is the observed floor for
   # the South Mountain corridor. A large `kind: network` world is heavier: bake 495 (the Capital
-  # Beltway, 514 km²) keeps every one of its 669 M near-road returns for the structure tests, and
-  # `surface.measure` turns each ground return into a shapely Point (~240 bytes) — ~150 GiB worst
-  # case, so 128 Gi OOM-killed the rerun there. 384 Gi clears it; gh200-1's nodes have 573 GiB.
+  # Beltway, 514 km²) keeps every one of its 669 M near-road returns for the structure tests. Its
+  # profile/surface stages are now a forked pool (CORRIDOR_JOBS, default min(cpu_count, 32)), so
+  # CPU is the point of the request: 64 CPU and 384 GiB fit gh200-1's 573 GiB / 72-core nodes.
   resources:
-    requests: {cpu: "4", memory: "32Gi"}
-    limits: {cpu: "16", memory: "384Gi"}
+    requests: {cpu: "8", memory: "32Gi"}
+    limits: {cpu: "64", memory: "384Gi"}
   backoffLimit: 1
   ttlSecondsAfterFinished: 604800  # keep a week of logs
   # Override the sites.json baked into the image (a JSON array, see corridor/sites.py). Empty

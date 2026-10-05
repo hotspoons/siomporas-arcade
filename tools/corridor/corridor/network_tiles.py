@@ -734,22 +734,118 @@ def _raster(ldir: Path, kind: str) -> Path:
     return vrt if vrt.exists() else ldir / f"{kind}.tif"
 
 
-def profile_tiled(line: LineString, ldir: Path, pts: dict | None, road_index: int | None = None) -> dict:
-    """lidar.profile over the rasters with a LazyRaster, and only this road's near points."""
+def profile_tiled(line: LineString, ldir: Path, pts: dict | None, road_index: int | None = None,
+                  road_index_cache: tuple | None = None) -> dict:
+    """lidar.profile over the rasters with a LazyRaster, and only this road's near points.
+
+    `road_index_cache` is `build_road_index(pts)`. Without it the road filter is `pts["road"] ==
+    road_index`, which scans every one of the 669 M near-road points for EVERY chain — the
+    Capital Beltway spent ~3.5 h of its bake in that scan. With it, the chain's points are a
+    precomputed slice.
+    """
     dtm = LazyRaster(_raster(ldir, "dtm"))
     chm = LazyRaster(_raster(ldir, "chm"))
     try:
         if pts is None:
             sub = {"x": np.zeros(0), "y": np.zeros(0), "z": np.zeros(0), "cls": np.zeros(0, np.uint8), "rn": np.zeros(0, np.uint8), "nr": np.zeros(0, np.uint8), "i": np.zeros(0, np.uint16)}
         elif road_index is not None and "road" in pts:
-            m = pts["road"] == road_index
-            sub = {k: v[m] for k, v in pts.items() if k != "road"}
+            span = road_index_cache[1].get(int(road_index)) if road_index_cache is not None else None
+            if span is not None:
+                a, b = span
+                # np.sort keeps the points in their original corridor.laz order, so a profile does
+                # not change just because the index exists
+                sel = np.sort(road_index_cache[0][a:b])
+                sub = {k: v[sel] for k, v in pts.items() if k != "road"}
+            else:
+                m = pts["road"] == road_index
+                sub = {k: v[m] for k, v in pts.items() if k != "road"}
         else:
             sub = {k: v for k, v in pts.items() if k != "road"}
         return _fill_profile(lidar.profile(line, dtm, chm, dtm.transform, sub))
     finally:
         dtm.close()
         chm.close()
+
+
+def build_road_index(pts: dict | None) -> tuple | None:
+    """`(order, {road_id: (start, end)})` — one sort, so each chain slices its own points.
+
+    The near-road cloud carries a `road` column naming the chain each point belongs to. Grouping it
+    once turns the per-chain scan (chains x points comparisons) into chains x (their own points).
+    """
+    if pts is None or "road" not in pts:
+        return None
+    road = np.asarray(pts["road"])
+    if road.shape[0] == 0:
+        return None
+    order = np.argsort(road)
+    sr = road[order]
+    change = np.flatnonzero(sr[1:] != sr[:-1]) + 1
+    starts = np.concatenate(([0], change))
+    ends = np.concatenate((change, [sr.shape[0]]))
+    bounds = {int(sr[s]): (int(s), int(e)) for s, e in zip(starts, ends)}
+    return order, bounds
+
+
+def _default_jobs() -> int:
+    """How many workers a profile pool may use: CORRIDOR_JOBS, else min(cpu_count, 32)."""
+    import os
+
+    env = os.environ.get("CORRIDOR_JOBS", "").strip()
+    if env:
+        try:
+            return max(1, int(env))
+        except ValueError:
+            pass
+    return max(1, min(32, os.cpu_count() or 1))
+
+
+#: forked workers read the cloud from here rather than receiving tens of GB through a pickle
+_PROFILE_CTX: dict = {}
+
+
+def _profile_worker(task: tuple) -> dict | None:
+    road_index, ident, line = task
+    ctx = _PROFILE_CTX
+    try:
+        return profile_tiled(line, ctx["ldir"], ctx["pts"], road_index, road_index_cache=ctx["cache"])
+    except Exception as exc:  # a bad branch must not take the bake down
+        print(f"  branch  {ident} profile failed: {exc}", flush=True)
+        return None
+
+
+def profile_many(tasks: list, ldir: Path, pts: dict | None, jobs: int | None = None) -> list:
+    """Profile `(road_index, ident, line)` tasks, forked across `jobs` processes when > 1.
+
+    The cloud is 669 M points / tens of GB; a pool that passed it through the pickle would copy it
+    per task. So the pool is FORKED and the cloud is a module global: every worker inherits it
+    copy-on-write, and only the (small) line is sent. Order is preserved; a failed profile returns
+    None and prints, exactly as the serial loop did.
+    """
+    import multiprocessing as mp
+    from concurrent.futures import ProcessPoolExecutor
+
+    cache = build_road_index(pts)
+    jobs = _default_jobs() if jobs is None else int(jobs)
+    jobs = max(1, min(jobs, len(tasks)))
+    if jobs == 1:
+        out = []
+        for road_index, ident, line in tasks:
+            try:
+                out.append(profile_tiled(line, ldir, pts, road_index, road_index_cache=cache))
+            except Exception as exc:
+                print(f"  branch  {ident} profile failed: {exc}", flush=True)
+                out.append(None)
+        return out
+    global _PROFILE_CTX
+    _PROFILE_CTX = {"ldir": ldir, "pts": pts, "cache": cache}
+    try:
+        ctx = mp.get_context("fork")
+    except ValueError:  # no fork (not Linux): fall back rather than pickle the cloud
+        print("  branch  no fork available; profiling serially", flush=True)
+        return profile_many(tasks, ldir, pts, jobs=1)
+    with ProcessPoolExecutor(max_workers=jobs, mp_context=ctx) as ex:
+        return list(ex.map(_profile_worker, tasks, chunksize=max(1, len(tasks) // (jobs * 8))))
 
 
 def profile_from_dem(line: LineString, dem_path: Path, chm_path: Path | None = None) -> dict:
@@ -840,8 +936,10 @@ def reprofile(site_dir: Path) -> dict:
         except Exception as exc:
             print(f"  reprofile ignoring unreadable branches.json ({exc})", flush=True)
     branches = []
-    for i, c in enumerate(chains):
-        prof = profile_tiled(c["line"], ldir, pts, i + 1)
+    profiles = profile_many([(i + 1, c["id"], c["line"]) for i, c in enumerate(chains)], ldir, pts)
+    if any(p is None for p in profiles):
+        raise RuntimeError("reprofile: a chain failed to profile (see the log above)")
+    for c, prof in zip(chains, profiles):
         if c["primary"]:
             (site_dir / "profile.json").write_text(json.dumps(prof))
             print(f"  reprofile primary {c['id']}: {len(prof['structures'])} structures", flush=True)

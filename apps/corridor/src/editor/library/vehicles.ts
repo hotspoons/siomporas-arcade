@@ -30,12 +30,12 @@ import {
   FINAL_DRIVE_MIN, frontShare, gearedTopSpeed, mountPoint, mountYaw, overrideRange, peakTorque,
   rebalanceGears, toDriveProfile, tractiveForce, TYRE_REFERENCE_MM, validateVehicle, VEHICLE_CLASSES,
   VEHICLE_MOUNTS, VEHICLE_TEMPLATE_IDS, wheelBoneCount,
-  type VehicleDoc, type VehicleFinish, type VehicleMesh, type VehicleMount,
+  type VehicleDoc, type VehicleMesh, type VehicleMount,
 } from '../../game/vehicle/vehicles'
 import { presetDoc, presetsFor } from '../../game/vehicle/vehiclepresets'
 import type { AssetDetailCtx } from './assets'
 import { bench, engineChoices, engineSetups, type ListenState } from './enginelisten'
-import { bodyOf, group, readout, select, slider, textField } from '../../ui/controls'
+import { bodyOf, group, readout, select, slider, textField, toggle } from '../../ui/controls'
 import { button, el, type Tab } from '../../ui/shell'
 import { icon } from '../../ui/icons'
 import { CLASSES_BY_TYPE } from '../../assets/classes'
@@ -281,7 +281,8 @@ export function dynamicsForm(host: HTMLElement, getDoc: () => VehicleDoc, opts: 
     const finish = group('Finish', { note: 'what the paint is made of, per vehicle. F6 REFLECT and CAR_SHINE still move every car — these are this car’s own numbers' })
     const fb = bodyOf(finish)
     const fin = doc.finish ?? {}
-    const finishSlider = (label: string, key: keyof VehicleFinish, def: number, max: number, note: string) => {
+    const isChrome = fin.chrome === true
+    const finishSlider = (label: string, key: 'roughness' | 'metalness' | 'reflect' | 'shine', def: number, max: number, note: string) => {
       fb.append(slider({
         label, value: fin[key] ?? def, min: 0, max, step: 0.01,
         neutral: def, resettable: true,
@@ -295,11 +296,33 @@ export function dynamicsForm(host: HTMLElement, getDoc: () => VehicleDoc, opts: 
         },
       }))
     }
-    finishSlider('Paint roughness', 'roughness', 0.28, 1, '0 is a mirror, 1 is flat matte — the number that decides whether it reads as paint or plastic')
-    finishSlider('Paint metalness', 'metalness', 0.5, 1, '0 is plastic/dielectric, 1 is chrome')
+    /*
+     * THE ONE-CLICK MIRROR. Rich, 2026-10-05: *"the chrome mirror look should be both a vehicle
+     * option and a tuning panel option, that is bad ass"*. The chrome flag is that vehicle option;
+     * F6 `CAR_CHROME` is the fleet-wide one. It overrides the two sliders below, so they are hidden
+     * while it is on rather than sitting there doing nothing.
+     */
+    fb.append(toggle({
+      label: 'Chrome mirror',
+      value: isChrome,
+      note: 'mirror-smooth and fully metallic, so the paint reflects the world like polished metal. Overrides roughness and metalness; turn on the F6 car probe to see the surroundings in it',
+      onChange: (v) => {
+        doc.finish ??= {}
+        if (v) doc.finish.chrome = true
+        else delete doc.finish.chrome
+        if (doc.finish && !Object.keys(doc.finish).length) delete doc.finish
+        stage()
+      },
+    }))
+    if (isChrome) {
+      fb.append(el('div', 'field-note', 'Chrome overrides paint roughness and metalness. Reflection strength and clearcoat below still multiply the global dials.'))
+    } else {
+      finishSlider('Paint roughness', 'roughness', 0.28, 1, '0 is a mirror, 1 is flat matte — the number that decides whether it reads as paint or plastic')
+      finishSlider('Paint metalness', 'metalness', 0.5, 1, '0 is plastic/dielectric, 1 is chrome')
+    }
     finishSlider('Reflection strength', 'reflect', 1, 4, 'times the global REFLECT — raise it for a car that mirrors the world harder')
     finishSlider('Clearcoat', 'shine', 1, 3, 'times the global CAR_SHINE — the wet-looking coat over the paint')
-    fb.append(el('div', 'field-note', 'a mirror-finish car is roughness near 0, metalness 1 and reflectance up; a matte wrap is roughness near 1, metalness 0'))
+    fb.append(el('div', 'field-note', 'a mirror-finish car is roughness near 0, metalness 1 and reflectance up (or just tick Chrome); a matte wrap is roughness near 1, metalness 0'))
     put('finish', finish)
 
     /* ---- the drivetrain -------------------------------------------------------------------- */

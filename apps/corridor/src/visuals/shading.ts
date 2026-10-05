@@ -336,6 +336,14 @@ export function chainCompile(mat: THREE.Material, inject: (shader: { vertexShade
 }
 
 /**
+ * What a chrome finish is: mirror-smooth and fully metallic. The per-vehicle `finish.chrome` flag and
+ * the live F6 `CAR_CHROME` dial both aim a car at these numbers, and the metalness-aware probe mix
+ * (`CAR_PROBE`) turns that into a real reflection of the world rather than a soft highlight.
+ */
+export const CHROME_ROUGHNESS = 0.03
+export const CHROME_METALNESS = 1
+
+/**
  * The car should read as paint, including a TRELLIS mesh whose one material arrived at roughness 1.
  *
  * Tyres and the dash are left alone: near-black and already rough. Lamps are left alone because
@@ -370,8 +378,15 @@ export function applyCarShine(root: THREE.Object3D, finish?: VehicleFinish) {
       if (c && c.r < 0.09 && c.g < 0.09 && c.b < 0.09 && std.roughness > 0.7) continue
       std.userData.coat = 1
       std.userData.finishReflect = reflect
-      std.roughness = rough != null && Number.isFinite(rough) ? Math.max(0, Math.min(1, rough)) : Math.min(std.roughness, 0.28)
-      std.metalness = metal != null && Number.isFinite(metal) ? Math.max(0, Math.min(1, metal)) : Math.max(std.metalness, 0.5)
+      // chrome wins over the two sliders: it is the mirror they can add up to, said in one word
+      const chrome = finish?.chrome === true
+      std.roughness = chrome ? CHROME_ROUGHNESS
+        : rough != null && Number.isFinite(rough) ? Math.max(0, Math.min(1, rough)) : Math.min(std.roughness, 0.28)
+      std.metalness = chrome ? CHROME_METALNESS
+        : metal != null && Number.isFinite(metal) ? Math.max(0, Math.min(1, metal)) : Math.max(std.metalness, 0.5)
+      // the base surface, before the global CAR_CHROME dial moves it each frame
+      std.userData.finishRough = std.roughness
+      std.userData.finishMetal = std.metalness
       std.envMapIntensity = T.REFLECT * reflect
       noteShiny(std)
       // one coat bag per material, so two vehicles can wear different gloss under one program
@@ -395,8 +410,16 @@ export function tickShading() {
   // as the car's probe takes over its reflection, the sky map it replaces steps back with it
   const carBlend = carProbeOn.value > 0.5 ? Math.max(0, Math.min(1, carProbeBlend.value)) : 0
   carProbeGain.value = Math.max(0, Math.min(1, T.REFLECT))
+  // the fleet-wide chrome dial: 0 leaves each car's own finish, 1 pushes every coat to a mirror
+  const chrome = Math.max(0, Math.min(1, T.CAR_CHROME))
   for (const m of shiny) {
     const finish = typeof m.userData.finishReflect === 'number' ? m.userData.finishReflect : 1
     m.envMapIntensity = T.REFLECT * finish * (m.userData.coat ? 1 - 0.65 * carBlend : 1)
+    if (m.userData.coat) {
+      const baseR = typeof m.userData.finishRough === 'number' ? m.userData.finishRough : m.roughness
+      const baseM = typeof m.userData.finishMetal === 'number' ? m.userData.finishMetal : m.metalness
+      m.roughness = baseR + (CHROME_ROUGHNESS - baseR) * chrome
+      m.metalness = baseM + (CHROME_METALNESS - baseM) * chrome
+    }
   }
 }

@@ -73,6 +73,11 @@ describe('validation', () => {
     expect(validateVehicle(v).errors.join(' ')).toMatch(/finish\.metalness must be between 0 and 1/)
     v.finish = { reflect: -1 }
     expect(validateVehicle(v).errors.join(' ')).toMatch(/finish\.reflect must be a non-negative number/)
+    v.finish = { chrome: true }
+    expect(validateVehicle(v).errors).toEqual([])
+    // chrome is a flag, not a number: 1 is the plausible wrong thing to write and must be refused
+    v.finish = { chrome: 1 as unknown as boolean }
+    expect(validateVehicle(v).errors.join(' ')).toMatch(/finish\.chrome must be true or false/)
   })
 
   it('refuses a profile that does not exist and accepts every one that does', () => {

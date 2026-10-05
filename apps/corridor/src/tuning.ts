@@ -1129,6 +1129,12 @@ export let SHADOW = 1
 /** clearcoat on the cars: a view-dependent sheen and a tight sun highlight */
 export let CAR_SHINE = 1
 /**
+ * Push the whole fleet's paint toward a chrome mirror, 0..1. 0 is each car's own finish; 1 makes every
+ * coat mirror-smooth and fully metallic, so with a car probe on they reflect the world like polished
+ * metal. A single vehicle can say the same thing for itself in the editor's Finish tab (`finish.chrome`).
+ */
+export let CAR_CHROME = 0
+/**
  * CAR REFLECTION PROBES — opt-in, 0 off.
  *
  * The car reflects `scene.environment` (the sky dome alone) plus a screen-space pass of the previous
@@ -2050,6 +2056,7 @@ export const TUNE_TABS: TuneTab[] = [
           tune('SHADOW_CANOPY_SCALE', () => SHADOW_CANOPY_SCALE, (v) => (SHADOW_CANOPY_SCALE = v), [0.3, 1.8], 0.05, 'invisible crown size, as a fraction of the tree height'),
           tune('REFLECT', () => REFLECT, (v) => (REFLECT = v), [0, 4], 0.05, 'environment-map reflections on paint, glass and water'),
           tune('CAR_SHINE', () => CAR_SHINE, (v) => (CAR_SHINE = v), [0, 3], 0.05, 'clearcoat on the cars'),
+          tune('CAR_CHROME', () => CAR_CHROME, (v) => (CAR_CHROME = v), [0, 1], 0.05, 'push the fleet to a chrome mirror: 0 is each car\u2019s own finish, 1 is all-mirror (best with CAR_PROBES on)'),
           tune('CAR_PROBES', () => CAR_PROBES, (v) => (CAR_PROBES = v), [0, 2], 1, 'car reflection probe: 0 off (sky map only), 1 live (re-captured as you drive), 2 hold (captured once)'),
           tune('CAR_PROBE_BLEND', () => CAR_PROBE_BLEND, (v) => (CAR_PROBE_BLEND = v), [0, 1], 0.05, 'how much the probe replaces the sky reflection on the paint, 0..1'),
           tune('CAR_PROBE_REACH', () => CAR_PROBE_REACH, (v) => (CAR_PROBE_REACH = v), [0, 400], 5, 'OTHER cars farther than this from the capture point keep the sky reflection (m): the hero car rides on the probe'),

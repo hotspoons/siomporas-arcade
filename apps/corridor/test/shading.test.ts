@@ -7,7 +7,8 @@ import { describe, expect, it } from 'vitest'
 import * as THREE from 'three'
 import { injectCarProbe } from '../src/visuals/shading'
 import { carProbeGain } from '../src/visuals/carProbe'
-import { applyCarShine } from '../src/visuals/shading'
+import { applyCarShine, CHROME_METALNESS, CHROME_ROUGHNESS, tickShading } from '../src/visuals/shading'
+import { TUNE_TABS } from '../src/tuning'
 
 function carBody(props: THREE.MeshStandardMaterialParameters = {}): { root: THREE.Group; mat: THREE.MeshStandardMaterial } {
   const mat = new THREE.MeshStandardMaterial({ color: 0x88331a, roughness: 1, metalness: 0, ...props })
@@ -34,6 +35,34 @@ describe('the car finish', () => {
     expect(mat.roughness).toBeCloseTo(0.02)
     expect(mat.metalness).toBeCloseTo(1)
     expect(mat.userData.finishReflect).toBe(2)
+  })
+
+  it('a chrome finish is the mirror shorthand and overrides the two sliders', () => {
+    const { root, mat } = carBody()
+    // the sliders say "matte plastic", chrome wins: it is the one-click version of the pair
+    applyCarShine(root, { chrome: true, roughness: 0.9, metalness: 0 })
+    expect(mat.roughness).toBeCloseTo(CHROME_ROUGHNESS)
+    expect(mat.metalness).toBeCloseTo(CHROME_METALNESS)
+    // and it is remembered as the base the global CAR_CHROME dial moves from
+    expect(mat.userData.finishRough).toBeCloseTo(CHROME_ROUGHNESS)
+    expect(mat.userData.finishMetal).toBeCloseTo(CHROME_METALNESS)
+  })
+
+  it('CAR_CHROME pushes the whole fleet to a mirror, and lets go again', () => {
+    const { root, mat } = carBody()
+    applyCarShine(root)
+    const baseR = mat.userData.finishRough as number
+    const baseM = mat.userData.finishMetal as number
+    const knob = TUNE_TABS.flatMap((t) => t.sections).flatMap((s) => s.keys).find((k) => k.name === 'CAR_CHROME')
+    expect(knob, 'CAR_CHROME is a tuning knob').toBeTruthy()
+    knob!.set(1)
+    tickShading()
+    expect(mat.roughness).toBeCloseTo(CHROME_ROUGHNESS)
+    expect(mat.metalness).toBeCloseTo(CHROME_METALNESS)
+    knob!.set(0)
+    tickShading()
+    expect(mat.roughness).toBeCloseTo(baseR)
+    expect(mat.metalness).toBeCloseTo(baseM)
   })
 
   it('never lowers a model that already arrived glossier than the default', () => {

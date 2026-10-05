@@ -184,7 +184,7 @@ export type VehicleMesh = 'finished' | 'raw'
  * The problem this exists for (Rich, 2026-10-05): every car was forced to `roughness ≤ 0.28`,
  * `metalness ≥ 0.5`, so a "shine" dial could only make the coat brighter, never change the surface
  * — the reflections stayed soft and matte and no setting reached a genuinely mirror-like paint.
- * These four numbers are that surface. `roughness` and `metalness` are absolute facts about the
+ * These four numbers are that surface, and `chrome` is the one-click mirror they can also add up to. `roughness` and `metalness` are absolute facts about the
  * paint; `reflect` and `shine` MULTIPLY the global dials so raising REFLECT or CAR_SHINE still
  * moves every car at once.
  *
@@ -200,6 +200,13 @@ export interface VehicleFinish {
   reflect?: number
   /** clearcoat strength, times the global `CAR_SHINE`. Absent: 1 */
   shine?: number
+  /**
+   * A chrome finish: mirror-smooth and fully metallic, so the paint reflects the world like polished
+   * metal. This is the one-click version of roughness ≈ 0 and metalness 1, and it wins over those two
+   * when set. `reflect` and `shine` still multiply the fleet dials on top, and the global F6
+   * `CAR_CHROME` can push any car this way live.
+   */
+  chrome?: boolean
 }
 
 export interface VehicleDoc {
@@ -414,6 +421,7 @@ export function validateVehicle(v: VehicleDoc | null | undefined, opts: { rigWhe
     }
     unit(fin.roughness, 'roughness')
     unit(fin.metalness, 'metalness')
+    if (fin.chrome !== undefined && typeof fin.chrome !== 'boolean') errors.push('finish.chrome must be true or false')
     for (const [name, n] of [['reflect', fin.reflect], ['shine', fin.shine]] as const) {
       if (n === undefined) continue
       if (!Number.isFinite(n) || n < 0) errors.push(`finish.${name} must be a non-negative number`)

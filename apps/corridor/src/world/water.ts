@@ -28,6 +28,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import * as T from '../tuning'
 import { chainCompile, injectRelief, injectSSR, injectShade, noteShiny } from '../visuals/shading'
 import { configureWaterReflection, injectWaterReflect } from '../visuals/waterReflect'
+import { MAX_WATER_PROBES, registerWaterProbes, type WaterProbeBody } from '../visuals/waterProbes'
 import { WATER_ATTR, WATER_FRAG_COLOR, WATER_FRAG_NORMAL, WATER_FRAG_PARS, WATER_LOOK_NAMES, WATER_VERT_BODY, WATER_VERT_PARS, applyLookColours, lookOf, refreshLook, waterTints, writeWaterAttr, type WaterKnobs, type WaterLook, type WaterWaveUniforms } from './waterShader'
 
 export interface WaterFall { i0: number; i1: number; drop_m: number; length_m: number; grade: number; kind: 'falls' | 'rapids' }
@@ -301,6 +302,12 @@ function ribbon(points: THREE.Vector3[], width: (i: number) => number, uvAttr?: 
   return g
 }
 
+/** Bake the per-body reflection-probe index onto a geometry; -1 is "this body has no probe". */
+function setProbeIndex(geo: THREE.BufferGeometry, index: number) {
+  const n = geo.getAttribute('position').count
+  geo.setAttribute('aProbe', new THREE.Float32BufferAttribute(new Float32Array(n).fill(index), 1))
+}
+
 export interface WaterResult {
   group: THREE.Group
   /** advance the ripples */
@@ -365,6 +372,7 @@ export function buildWater(water: WaterLayer | null | undefined, groundAt: (x: n
   // the sea is deep: no shore tint or foam anywhere on the plane itself (it meets land elsewhere)
   const seaWind = waterWind()
   writeWaterAttr(sea.geometry, () => [60, seaWind.x, seaWind.y])
+  setProbeIndex(sea.geometry, -1)
   const seaMat = sea.material as THREE.MeshStandardMaterial
   waveMats.push({ u: (seaMat.userData.water as { u: WaterWaveUniforms }).u, look: defaultLook, name: defaultLookName, own: false, mat: seaMat, styleColoured: false })
   const placeSea = () => {
@@ -427,7 +435,38 @@ export function buildWater(water: WaterLayer | null | undefined, groundAt: (x: n
   }
   const setLook = (name: string | null) => { defaultLookOverride = name }
   const empty: WaterResult = { group, tick: advance, lines: 0, areas: 0, falls: 0, length_m: 0, setColours, setLook, looks: [] }
-  if (!water || (!water.lines?.length && !water.areas?.length)) return empty
+  if (!water || (!water.lines?.length && !water.areas?.length)) {
+    registerWaterProbes([], group)
+    return empty
+  }
+
+  // WHICH BODIES GET A REFLECTION PROBE. The environment map is sky alone, so the trees and bank a
+  // lake should mirror come from a probe taken at the water itself (visuals/waterProbes.ts). The
+  // ranking is the largest inland bodies, capped, and fixed here at build; `aProbe` is baked per
+  // vertex so the merged shader can find a body's strip. The live WATER_PROBES knob decides how
+  // many of these are actually captured — 0, the default, captures none.
+  const probeIndexOf = new Map<string, number>()
+  const probeBodies: WaterProbeBody[] = []
+  {
+    const ranked = (water.areas ?? [])
+      .filter((a) => a.ring.length >= 3)
+      .slice()
+      .sort((a, b) => b.area_m2 - a.area_m2)
+      .slice(0, MAX_WATER_PROBES)
+    for (const a of ranked) {
+      let cx = 0
+      let cy = 0
+      for (const [x, y] of a.ring) {
+        cx += x
+        cy += y
+      }
+      cx /= a.ring.length
+      cy /= a.ring.length
+      probeIndexOf.set(a.id, probeBodies.length)
+      probeBodies.push({ id: a.id, x: cx, y: a.z + T.WATER_DEPTH * 0.5, z: -cy, radius: Math.sqrt(Math.max(1, a.area_m2) / Math.PI) })
+    }
+  }
+  registerWaterProbes(probeBodies, group)
 
   const foam = foamMaterial(uniforms)
   let nLines = 0, nFalls = 0, length = 0
@@ -457,7 +496,9 @@ export function buildWater(water: WaterLayer | null | undefined, groundAt: (x: n
       return new THREE.Vector3(x, g === null ? surf : Math.max(surf, g - 0.3), wz)
     })
     const w = Math.max(0.6, ln.width_m) * T.WATER_WIDTH_SCALE
-    b.lines.push(ribbon(pts, () => w, undefined, undefined, b.look.crown * T.WATER_CROWN))
+    const lineGeo = ribbon(pts, () => w, undefined, undefined, b.look.crown * T.WATER_CROWN)
+    setProbeIndex(lineGeo, probeIndexOf.get(ln.id) ?? -1)
+    b.lines.push(lineGeo)
     nLines++
     length += ln.length_m
     for (const f of ln.falls ?? []) {
@@ -480,6 +521,7 @@ export function buildWater(water: WaterLayer | null | undefined, groundAt: (x: n
     geo.computeVertexNormals()
     const depth = Math.max(0.3, b.look.pondDepth * T.WATER_CROWN)
     writeWaterAttr(geo, () => [depth, areaWind.x, areaWind.y])
+    setProbeIndex(geo, probeIndexOf.get(ar.id) ?? -1)
     b.areas.push(geo)
   }
 

@@ -52,6 +52,7 @@ import { celestialToWorld, julianDate, moonPosition, radecToVec } from './visual
 import * as T from './tuning'
 import { captureSSR, chainCompile, injectShade, linearShadowDepth, setWetStreak, tickShading, type WetMark } from './visuals/shading'
 import { renderWaterReflection } from './visuals/waterReflect'
+import { tickWaterProbes } from './visuals/waterProbes'
 import { TUNE_TABS } from './tuning'
 import { applySiteTuning, clearSiteTuning, saveSiteTuning } from './world/sitetuning'
 import { Presets, resolve, worldKnobs } from './game/session/presets'
@@ -4027,6 +4028,8 @@ function frame() {
   tickShading()
   followShadow()
   skyDome.tick(performance.now() / 1000)
+  // per-body reflection probes, at most one capture a frame and none unless WATER_PROBES > 0
+  tickWaterProbes(renderer, scene, camera)
   // mirrored scene render for the water, before the frame itself; a no-op when WATER_REFLECT is 0
   if (perfHud.open) {
     // Time each pass as it is submitted. `poll` first collects whatever the GPU finished since last

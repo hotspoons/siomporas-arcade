@@ -882,6 +882,36 @@ export let WATER_REFLECT_RIPPLE = 0.1
  */
 export let WATER_SKY_REFLECT = 0.7
 /**
+ * PER-BODY REFLECTION PROBES — opt-in, 0 off.
+ *
+ * The sky reflection above knows no plane, but it also knows no trees: the environment map is the
+ * sky dome alone, so an inland lake still mirrors a blue sheet and never the wood on its bank
+ * (Rich, 2026-10-05: "this lake is kind of lame"). A probe is a tiny cube render taken from the
+ * water itself, so it holds whatever actually sits around THAT body — bank, trees, houses, the sun.
+ *
+ * This is the number of bodies, largest first, that get one; 0 is off and costs nothing. Each is
+ * captured lazily, only once the eye comes within `WATER_PROBE_REACH`, at most one body a frame, so
+ * a whole region of ponds never pays for all of them at boot. Captures are cached and re-taken every
+ * `WATER_PROBE_REFRESH` seconds while you are near; the reflections update with the light.
+ *
+ * The capture is a cube camera six scene renders, which is not free — that is why it is opt-in and
+ * why `WATER_PROBE_FAR` clips the probe to the near world. The bodies are the same ones the planar
+ * mirror cannot serve, so this is the trees on an inland pond, not a second copy of the sea.
+ */
+export let WATER_PROBES = 0
+/** probe cube face size (px); the equirect stored is 2× this across. Higher is sharper and slower */
+export let WATER_PROBE_RES = 64
+/** only bodies whose shore is within this many metres of the eye are captured or refreshed (m) */
+export let WATER_PROBE_REACH = 400
+/** a probe renders only the world this far away (m) — the trees and bank that show, not the county */
+export let WATER_PROBE_FAR = 600
+/** how far above the waterline the probe camera sits (m): a little up shows the bank over its own surface */
+export let WATER_PROBE_LIFT = 1.0
+/** seconds between re-captures of a probe while near; 0 captures once and never again */
+export let WATER_PROBE_REFRESH = 2
+/** how much a captured probe replaces the sky reflection, 0..1 */
+export let WATER_PROBE_WEIGHT = 0.85
+/**
  * The still-water line, metres NAVD88 — the sea at 0, and the flood control.
  *
  * One plane over the whole site at this height. Inland it sits under the terrain and nothing is
@@ -1910,6 +1940,13 @@ export const TUNE_TABS: TuneTab[] = [
           tune('WATER_REFLECT_SCALE', () => WATER_REFLECT_SCALE, (v) => (WATER_REFLECT_SCALE = v), [0.2, 1], 0.05, 'reflection buffer resolution ×; lower is cheaper and softer'),
           tune('WATER_REFLECT_RIPPLE', () => WATER_REFLECT_RIPPLE, (v) => (WATER_REFLECT_RIPPLE = v), [0, 0.6], 0.02, 'wave-normal smear on the reflection; 0 is a flat looking-glass'),
           tune('WATER_SKY_REFLECT', () => WATER_SKY_REFLECT, (v) => (WATER_SKY_REFLECT = v), [0, 1.5], 0.05, 'sky/horizon reflection from the environment map, for ponds and streams the sea plane cannot mirror; 0 is the old flat sheet'),
+          tune('WATER_PROBES', () => WATER_PROBES, (v) => (WATER_PROBES = v), [0, 32], 1, 'reflection probes: the N largest inland bodies capture their own surroundings (trees, bank) lazily, so a lake mirrors what is around it, not just the sky. 0 off'),
+          tune('WATER_PROBE_RES', () => WATER_PROBE_RES, (v) => (WATER_PROBE_RES = v), [16, 256], 1, 'probe cube face px; the stored equirect is 2× across. Higher is sharper and costs capture time + memory'),
+          tune('WATER_PROBE_REACH', () => WATER_PROBE_REACH, (v) => (WATER_PROBE_REACH = v), [0, 3000], 25, 'a body is captured/refreshed only when the eye is this close to its shore (m)'),
+          tune('WATER_PROBE_FAR', () => WATER_PROBE_FAR, (v) => (WATER_PROBE_FAR = v), [50, 6000], 25, 'how far a probe renders the world (m): the trees and bank that show, not the whole county'),
+          tune('WATER_PROBE_LIFT', () => WATER_PROBE_LIFT, (v) => (WATER_PROBE_LIFT = v), [0, 10], 0.1, 'probe camera height above the waterline (m)'),
+          tune('WATER_PROBE_REFRESH', () => WATER_PROBE_REFRESH, (v) => (WATER_PROBE_REFRESH = v), [0, 120], 1, 'seconds between re-captures of a near probe; 0 captures once'),
+          tune('WATER_PROBE_WEIGHT', () => WATER_PROBE_WEIGHT, (v) => (WATER_PROBE_WEIGHT = v), [0, 1], 0.05, 'how much a captured probe replaces the sky reflection'),
           tune('WATER_LEVEL_M', () => WATER_LEVEL_M, (v) => (WATER_LEVEL_M = v), [-20, 300], 0.5, 'still water / sea level (m); raise it to flood'),
           tune('WATER_LEVEL_SPAN', () => WATER_LEVEL_SPAN, (v) => (WATER_LEVEL_SPAN = v), [200, 60000], 100, 'how far the water plane reaches (m)'),
         ],

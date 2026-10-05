@@ -12,6 +12,7 @@
 // projected sample are adapted from three.js `examples/jsm/objects/Reflector.js` (MIT).
 import * as THREE from 'three'
 import * as T from '../tuning'
+import { waterProbeAtlas, waterProbeCount, waterProbeWeight } from './waterProbes'
 
 /** the colour of the reflected scene, this frame; bound into the water material */
 export const waterReflectMap = { value: null as THREE.Texture | null }
@@ -155,20 +156,34 @@ export function renderWaterReflection(renderer: THREE.WebGLRenderer, scene: THRE
 const SKY_BODY = /* glsl */ `
 #ifdef USE_ENVMAP
 {
+  vec3 skyV = normalize(vViewPosition);
+  vec3 skyN = normalize(normal);
+  // Schlick, softened. Real water only mirrors near grazing, but a pond read from a car is a
+  // narrow band at a moderate slant, and a strict fifth-power Fresnel left the sky all but
+  // invisible there. A small base sheen plus a third-power falloff reads as a mirror across the
+  // whole body while still going clear when you look straight down at it.
+  float skyNdv = clamp(dot(skyN, skyV), 0.0, 1.0);
+  float skyFres = 0.08 + 0.92 * pow(1.0 - skyNdv, 3.0);
+  // fade in past the waterline so the shingle and the foam edge stay dry
+  float skyWet = smoothstep(0.0, 0.8, max(vWater.x, 0.0));
+  float skyShare = skyFres * skyWet;
   if (uSkyReflect > 0.001) {
-    vec3 skyV = normalize(vViewPosition);
-    vec3 skyN = normalize(normal);
     // the environment's own radiance along the reflected ray: sky and horizon, no second render
     vec3 sky = getIBLRadiance(skyV, skyN, uSkyRough);
-    // Schlick, softened. Real water only mirrors near grazing, but a pond read from a car is a
-    // narrow band at a moderate slant, and a strict fifth-power Fresnel left the sky all but
-    // invisible there. A small base sheen plus a third-power falloff reads as a mirror across the
-    // whole body while still going clear when you look straight down at it.
-    float skyNdv = clamp(dot(skyN, skyV), 0.0, 1.0);
-    float skyFres = 0.08 + 0.92 * pow(1.0 - skyNdv, 3.0);
-    // fade in past the waterline so the shingle and the foam edge stay dry
-    float skyWet = smoothstep(0.0, 0.8, max(vWater.x, 0.0));
-    gl_FragColor.rgb = mix(gl_FragColor.rgb, sky, clamp(uSkyReflect * skyFres * skyWet, 0.0, 1.0));
+    gl_FragColor.rgb = mix(gl_FragColor.rgb, sky, clamp(uSkyReflect * skyShare, 0.0, 1.0));
+  }
+  // A captured per-body probe (waterProbes.ts) layers over the sky: the trees and bank the sky dome
+  // cannot hold. The strip is transparent until captured — that is the "no probe" flag — so an
+  // uncaptured body keeps the sky with no branch on the CPU side. It has its own share, so it shows
+  // even on a look that has the sky reflection dialed out.
+  if (uProbeCount > 0.5) {
+    float pi = floor(vProbe + 0.5);
+    if (pi >= 0.0 && pi < uProbeCount) {
+      vec3 wr = transformDirectionByInverseViewMatrix(reflect(-skyV, skyN), viewMatrix);
+      vec2 euv = equirectUv(wr);
+      vec4 probe = texture2D(uProbeAtlas, vec2((pi + euv.x) / uProbeCount, euv.y));
+      if (probe.a > 0.5) gl_FragColor.rgb = mix(gl_FragColor.rgb, probe.rgb, clamp(uProbeWeight * skyShare, 0.0, 1.0));
+    }
   }
 }
 #endif
@@ -203,10 +218,13 @@ export function injectWaterReflect(shader: { vertexShader: string; fragmentShade
   shader.uniforms.uReflect = waterReflectStrength
   shader.uniforms.uReflectRipple = waterReflectRipple
   shader.uniforms.uSkyRough = waterSkyRough
+  shader.uniforms.uProbeAtlas = waterProbeAtlas
+  shader.uniforms.uProbeCount = waterProbeCount
+  shader.uniforms.uProbeWeight = waterProbeWeight
   shader.vertexShader = shader.vertexShader
-    .replace('#include <common>', '#include <common>\nuniform mat4 uReflectMatrix;\nvarying vec4 vReflectUv;')
-    .replace('#include <begin_vertex>', '#include <begin_vertex>\nvReflectUv = uReflectMatrix * vec4((modelMatrix * vec4(position, 1.0)).xyz, 1.0);')
+    .replace('#include <common>', '#include <common>\nuniform mat4 uReflectMatrix;\nattribute float aProbe;\nvarying vec4 vReflectUv;\nvarying float vProbe;')
+    .replace('#include <begin_vertex>', '#include <begin_vertex>\nvReflectUv = uReflectMatrix * vec4((modelMatrix * vec4(position, 1.0)).xyz, 1.0);\nvProbe = aProbe;')
   shader.fragmentShader = shader.fragmentShader
-    .replace('#include <common>', '#include <common>\nuniform sampler2D uReflectMap;\nuniform float uReflect;\nuniform float uReflectRipple;\nuniform float uSkyReflect;\nuniform float uSkyRough;\nvarying vec4 vReflectUv;')
+    .replace('#include <common>', '#include <common>\nuniform sampler2D uReflectMap;\nuniform float uReflect;\nuniform float uReflectRipple;\nuniform float uSkyReflect;\nuniform float uSkyRough;\nuniform sampler2D uProbeAtlas;\nuniform float uProbeCount;\nuniform float uProbeWeight;\nvarying vec4 vReflectUv;\nvarying float vProbe;')
     .replace('#include <opaque_fragment>', `#include <opaque_fragment>\n${SKY_BODY}\n${REFLECT_BODY}`)
 }

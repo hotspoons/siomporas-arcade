@@ -179,6 +179,8 @@ export interface Site {
   pyramidStream: PyramidStream | null
   /** ground height (m) at site x,y from the DEM layer */
   heightAt: (x: number, y: number) => number
+  /** the lowest elevation (m) among the terrain tiles now held; the sea plane's visibility gate */
+  lowestGround: () => number
   /** the lazy grading: how much of the site's strips and buildings exist yet, and what they cost */
   graded: () => { built: number; total: number; pendingNear: number; strips: number; buildings: number; ms: number; worstMs: number; worst: string }
   /** point + travel direction on the spine at along-track s (metres) */
@@ -528,6 +530,25 @@ export async function buildSite(manifestIn: Manifest, rawStatus: (s: string) => 
     }
   }
   const heightAt = pyrSet ? pyrSet.heightAt : tileSet ? tileSet.heightAt : overviewHeight
+
+  /**
+   * The lowest elevation of the terrain now HELD, in metres. This is the sea plane's gate: a water
+   * plane at `WATER_LEVEL_M` that is under every active tile is buried, so it need not be drawn and
+   * need not be mirrored. The pyramid loads and evicts tiles against the camera, so the floor rises
+   * as the eye leaves the low ground and falls when the coast streams back in; the flat loaders hold
+   * everything and answer a constant. This is a live read, asked each frame the water is placed.
+   */
+  const lowestGround = (): number => {
+    let lo = Infinity
+    if (pyrSet) {
+      for (const t of pyrSet.tiles.values()) { const z = t.dem.layer.zmin; if (z != null && z < lo) lo = z }
+    } else if (tileSet) {
+      for (const t of tileSet.tiles) { const z = t.dem.layer.zmin; if (z != null && z < lo) lo = z }
+    } else if (typeof L.dem?.zmin === 'number') {
+      lo = L.dem.zmin
+    }
+    return lo
+  }
 
   // --- near terrain, textured with the imagery -----------------------------------------------
   const stride = strideFor(L.dem, lite ? 300_000 : 1_100_000)
@@ -3201,7 +3222,7 @@ if (uLodOn > 0.5) {
   status('dressing…')
   const rocks = await buildRocks(manifest.cuts, manifest.rock, catalog, groundAtWorld, edgeDistanceWorld)
   group.add(rocks.group)
-  const water = buildWater(manifest.water, groundAtWorld)
+  const water = buildWater(manifest.water, groundAtWorld, lowestGround)
   /**
    * A style is the season re-applied (trees, grass, strips, terrain, horizon and impostors all
    * read the styled look), plus the four things a season never touched: the photo's
@@ -3445,6 +3466,7 @@ if (uLodOn > 0.5) {
     pyramid: pyr ? () => pyr.counts : null,
     pyramidStream: pyr,
     heightAt,
+    lowestGround,
     graded: () => ({ built: gradeStats.built, total: gradeUnits.length, pendingNear: pendingNear(), strips: gradeStats.strips, buildings: gradeStats.buildings, ms: Math.round(gradeStats.ms), worstMs: Math.round(gradeStats.worstMs), worst: gradeStats.worst }),
     spineAt,
     chains: () => {

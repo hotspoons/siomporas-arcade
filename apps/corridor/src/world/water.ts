@@ -328,8 +328,11 @@ export interface WaterResult {
 /**
  * Build the water. `groundAt(x, z)` is world-frame; used only to keep a ribbon from sinking under
  * the strip where the strip has re-graded the verge (the surface is max(channel, ground − 0.3)).
+ * `lowestGround()` returns the lowest elevation of the terrain now active (streamed tiles on a
+ * network), so the sea plane can be hidden — and its mirror stood down — when the water line cannot
+ * reach any held ground. See scene.ts `lowestGround`.
  */
-export function buildWater(water: WaterLayer | null | undefined, groundAt: (x: number, z: number) => number | null): WaterResult {
+export function buildWater(water: WaterLayer | null | undefined, groundAt: (x: number, z: number) => number | null, lowestGround?: () => number): WaterResult {
   const group = new THREE.Group()
   group.name = 'water'
   const uniforms: WaterShared = {
@@ -355,8 +358,12 @@ export function buildWater(water: WaterLayer | null | undefined, groundAt: (x: n
 
   // Does this site actually meet water? The sea plane is built for every site and lies hidden under
   // the terrain inland; a planar reflection there would render the whole scene a second time for a
-  // mirror no one can see. Sample the ground once: if none of it is below the water line, stand the
-  // mirror down. `groundAt` returns null away from the loaded DEM, which is no evidence either way.
+  // mirror no one can see, and the plane itself is a draw the GPU would rather skip. Sample the
+  // ground once as a fallback, and prefer the live floor of the terrain now ACTIVE (scene.ts
+  // lowestGround): a plane that cannot reach any held tile is buried, so it is neither drawn nor
+  // mirrored. The sample matters only for a site with no tile layer; `groundAt` returns null away
+  // from the loaded DEM, which is no evidence either way. This is asked every frame the sea is
+  // placed, so raising `WATER_LEVEL_M` or streaming the coast back in flips it live.
   let minGround = Infinity
   let sawGround = false
   for (let i = 0; i <= 40; i++) {
@@ -365,7 +372,14 @@ export function buildWater(water: WaterLayer | null | undefined, groundAt: (x: n
       if (g !== null) { sawGround = true; if (g < minGround) minGround = g }
     }
   }
-  const seaVisible = () => !sawGround || minGround < T.WATER_LEVEL_M + SEA_DRAW_LIFT - 1.5
+  const sampledFloor = sawGround ? minGround : -Infinity
+  const seaVisible = () => {
+    const active = lowestGround ? lowestGround() : Infinity
+    const floor = Number.isFinite(active) ? active : sampledFloor
+    // the tile floor is `floor(min height)`, so it reads at or below the true low: a small margin
+    // still errs toward drawing the sea (cheap) rather than hiding it over a real puddle.
+    return !Number.isFinite(floor) || floor < T.WATER_LEVEL_M + SEA_DRAW_LIFT - 0.5
+  }
 
   const sea = seaPlane(uniforms, defaultLook)
   group.add(sea)
@@ -384,12 +398,15 @@ export function buildWater(water: WaterLayer | null | undefined, groundAt: (x: n
     // shader, which disables polygon offset. A lift of a third of a metre clears the log-depth
     // quantum out to the horizon and is invisible at the waterline. (WATER_LEVEL_M stays the sea
     // level a game reasons about; this is a draw bias.)
+    const shown = seaVisible()
+    sea.visible = shown
     sea.position.set(0, T.WATER_LEVEL_M + SEA_DRAW_LIFT, 0)
     sea.scale.set(T.WATER_LEVEL_SPAN * 2, 1, T.WATER_LEVEL_SPAN * 2)
     // tell the planar reflection where the mirror plane is, and what to leave out of its own view.
     // WATER_FANCY 0 stands the mirror down entirely: the old material never samples it, so an
-    // extra scene render would be pure waste — this is the cost the switch exists to remove.
-    configureWaterReflection(T.WATER_FANCY >= 0.5 && seaVisible() ? T.WATER_LEVEL_M + SEA_DRAW_LIFT : null, group)
+    // extra scene render would be pure waste — this is the cost the switch exists to remove. A
+    // buried sea has no plane to mirror either, so it stands down with the mesh.
+    configureWaterReflection(T.WATER_FANCY >= 0.5 && shown ? T.WATER_LEVEL_M + SEA_DRAW_LIFT : null, group)
   }
   placeSea()
   let lastFancy = T.WATER_FANCY >= 0.5

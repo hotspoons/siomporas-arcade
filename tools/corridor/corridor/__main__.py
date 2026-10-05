@@ -229,6 +229,39 @@ def cmd_context(a: argparse.Namespace) -> None:
         print(f"  {d.name}: lanes={prov['lanes']} crossings={prov['crossings']} roads={prov['roads']} -> {ctx.stat().st_size / 1e6:.1f} MB (osm.geojson {gj.stat().st_size / 1e6:.0f} MB)", flush=True)
 
 
+def cmd_vectors(a: argparse.Namespace) -> None:
+    """Split `buildings` out of an already-exported manifest into per-1 km vector tiles.
+
+    A backfill for a world exported before `export._vector_tiles` existed — identical output to what
+    a fresh `export_site` writes, so the viewer stops parsing a 142 MB building array at load without
+    a full rebake. Sites already carrying a `vt` index, or small enough to stay inline, are skipped.
+    """
+    from . import export
+
+    if a.slug == "all":
+        sites = sorted(d for d in (DATA / "sites").glob("*") if (d / "web" / "manifest.json").exists())
+    else:
+        sites = [DATA / "sites" / a.slug]
+    for d in sites:
+        man = d / "web" / "manifest.json"
+        if not man.exists():
+            print(f"  {d.name}: no web/manifest.json, skipped")
+            continue
+        out = json.loads(man.read_text())
+        bs = out.get("buildings") or []
+        if out.get("vt"):
+            print(f"  {d.name}: already tiled ({out['vt'].get('count')} footprints)")
+            continue
+        if len(bs) < export.VECTOR_TILE_MIN:
+            print(f"  {d.name}: {len(bs)} footprints, below the tiling threshold, left inline")
+            continue
+        out["vt"] = export._vector_tiles(d / "web", bs)
+        out["vt"]["count"] = len(bs)
+        out["buildings"] = []
+        man.write_text(json.dumps(out, separators=(",", ":")))
+        print(f"  {d.name}: {len(out['vt']['buildings'])} tiles / {out['vt']['count']} footprints -> {man.stat().st_size / 1e6:.1f} MB manifest", flush=True)
+
+
 def cmd_plan(a: argparse.Namespace) -> None:
     """STEP 1 of a sharded bake: run the cheap global stages once and write `plan/shards.json`.
 
@@ -554,6 +587,9 @@ def main() -> None:
     ctx = sub.add_parser("context", help="write the compact context.json the viewer reads, from an existing osm.geojson")
     ctx.add_argument("slug", nargs="?", default="all")
     ctx.set_defaults(fn=cmd_context)
+    vec = sub.add_parser("vectors", help="split buildings out of an exported manifest into per-1 km vector tiles")
+    vec.add_argument("slug", nargs="?", default="all")
+    vec.set_defaults(fn=cmd_vectors)
     ex = sub.add_parser("export", help="(re)write web/ layers + sites/index.json for the viewer")
     ex.add_argument("slug", nargs="?", default="all")
     ex.add_argument("--resurface", action="store_true", help="re-measure surface.json even if present")

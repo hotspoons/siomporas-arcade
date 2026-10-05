@@ -289,6 +289,21 @@ export interface Manifest {
   cuts?: import('./rocks').CutsLayer | null
   rock?: import('./rocks').RockLayer | null
   water?: import('./water').WaterLayer | null
+  /** Above a threshold the bake moves `buildings` out of the manifest into per-1 km-tile files;
+   *  the viewer fetches only the tiles near the eye (see loadVectorTile). Absent on small sites. */
+  vt?: VectorTileIndex
+}
+
+/** `manifest.vt`: the bake's per-tile vector index. Tiles are keyed on SITE metres: a footprint at
+ *  (x, y) lives in tile `(floor(x / size_m), floor(y / size_m))`, exactly where the viewer buckets. */
+export interface VectorTileIndex {
+  size_m: number
+  /** `vt/0`; tiles are `<dir>/<ix>_<iy>.json` under `web/` */
+  dir: string
+  /** the building tiles, with their footprint counts */
+  buildings?: { x: number; y: number; n: number }[]
+  /** total footprints across the tiles, so a caller can report a count without loading them */
+  count?: number
 }
 
 export interface IndexEntry {
@@ -308,6 +323,21 @@ export async function fetchJSON<T>(path: string): Promise<T> {
   const r = await fetch(`${DATA_BASE}${path}`, { cache: 'no-cache' })
   if (!r.ok) throw new Error(`${path}: HTTP ${r.status}`)
   return (await r.json()) as T
+}
+
+const _vtiles = new Map<string, Promise<Record<string, unknown[]>>>()
+
+/** One vector tile, fetched once and cached for the life of the page. A missing tile is `{}`. */
+export function loadVectorTile(slug: string, dir: string, x: number, y: number): Promise<Record<string, unknown[]>> {
+  const url = `${DATA_BASE}/sites/${slug}/web/${dir}/${x}_${y}.json`
+  let p = _vtiles.get(url)
+  if (!p) {
+    p = fetch(url, { cache: 'force-cache' })
+      .then((r) => (r.ok ? (r.json() as Promise<Record<string, unknown[]>>) : {}))
+      .catch(() => ({}))
+    _vtiles.set(url, p)
+  }
+  return p
 }
 
 export function loadImage(path: string): Promise<HTMLImageElement> {

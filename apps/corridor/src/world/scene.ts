@@ -13,7 +13,7 @@ import { installRoadClip, RoadCover } from '../visuals/roadcover'
 import { ImageryStream, PyramidSet, TileSet, loadTiles } from '../lod/tiles'
 import { PyramidStream } from '../lod/pyramidstream'
 import { loadBakedTexture } from '../assets/textures'
-import { DATA_BASE, decodeHeights, decodeScalar, loadImage, type Layer, type Manifest, type Structure, bilinear } from './site'
+import { DATA_BASE, decodeHeights, decodeScalar, loadImage, loadVectorTile, type Layer, type Manifest, type Structure, bilinear } from './site'
 import { NearTrees, type TreeRecord } from './trees'
 import { Impostors } from '../lod/impostors'
 import { Grass } from './grass'
@@ -3037,34 +3037,55 @@ if (uLodOn > 0.5) {
     },
   }
   {
-    const CELL = 500
-    const cells = new Map<string, NonNullable<Manifest['buildings']>>()
-    for (const bd of manifest.buildings ?? []) {
-      const p0 = bd.ring?.[0]
-      if (!p0) continue
-      const k = `${Math.floor(p0[0] / CELL)},${Math.floor(p0[1] / CELL)}`
-      const arr = cells.get(k)
-      if (arr) arr.push(bd)
-      else cells.set(k, [bd])
-    }
     // one index for the whole site, not one per cell: the cells slice the BUILDINGS, and a house
     // in the last cell still needs to know about the road in the first
     const roads = buildRoadIndex(manifest)
-    for (const [k, list] of cells) {
-      const [cx, cy] = k.split(',').map(Number)
-      gradeUnits.push({ key: `buildings:${k}`, x: cx * CELL + CELL / 2, z: -(cy * CELL + CELL / 2), r: CELL * 0.71 + 10, done: false, run: async (budget) => {
-        const b = await buildBuildings({ ...manifest, buildings: list }, groundAtWorld, T.STREAM_BUDGET_MS, { roads, pool: poolOf(surfacesDoc), budget })
-        b.group.userData.enuX = cx * CELL + CELL / 2
-        b.group.userData.enuY = cy * CELL + CELL / 2
-        buildingsGroup.add(b.group)
-        builtParts.push(b)
-        if (palette) b.recolour(palette.walls, palette.roofs)
-        built.stats.count += b.stats.count
-        built.stats.gabled += b.stats.gabled
-        built.stats.fromLidar += b.stats.fromLidar
-        built.stats.dressed += b.stats.dressed
-        gradeStats.buildings += b.stats.count
-      } })
+    const build = async (list: NonNullable<Manifest['buildings']>, cx: number, cy: number, budget: Budget) => {
+      const b = await buildBuildings({ ...manifest, buildings: list }, groundAtWorld, T.STREAM_BUDGET_MS, { roads, pool: poolOf(surfacesDoc), budget })
+      b.group.userData.enuX = cx
+      b.group.userData.enuY = cy
+      buildingsGroup.add(b.group)
+      builtParts.push(b)
+      if (palette) b.recolour(palette.walls, palette.roofs)
+      built.stats.count += b.stats.count
+      built.stats.gabled += b.stats.gabled
+      built.stats.fromLidar += b.stats.fromLidar
+      built.stats.dressed += b.stats.dressed
+      gradeStats.buildings += b.stats.count
+    }
+    if (manifest.vt?.buildings?.length) {
+      // A tiled world: one unit per 1 km vector tile, fetched when the pump reaches it. The manifest
+      // no longer carries the footprints, and load no longer buckets them all — see export._vector_tiles.
+      const size = manifest.vt.size_m || 1000
+      const dir = manifest.vt.dir
+      for (const t of manifest.vt.buildings) {
+        const cx = t.x * size + size / 2
+        const cy = t.y * size + size / 2
+        gradeUnits.push({ key: `buildings:${t.x},${t.y}`, x: cx, z: -cy, r: size * 0.71 + 10, done: false, run: async (budget) => {
+          const files = await loadVectorTile(manifest.slug, dir, t.x, t.y)
+          const list = (files.buildings ?? []) as NonNullable<Manifest['buildings']>
+          if (!list.length) return
+          // keep `manifest.buildings` a running view of what is loaded, so physics/attribution and
+          // the editor see the near-eye footprints without a second pass
+          ;(manifest.buildings ??= []).push(...list)
+          await build(list, cx, cy, budget)
+        } })
+      }
+    } else {
+      const CELL = 500
+      const cells = new Map<string, NonNullable<Manifest['buildings']>>()
+      for (const bd of manifest.buildings ?? []) {
+        const p0 = bd.ring?.[0]
+        if (!p0) continue
+        const k = `${Math.floor(p0[0] / CELL)},${Math.floor(p0[1] / CELL)}`
+        const arr = cells.get(k)
+        if (arr) arr.push(bd)
+        else cells.set(k, [bd])
+      }
+      for (const [k, list] of cells) {
+        const [cx, cy] = k.split(',').map(Number)
+        gradeUnits.push({ key: `buildings:${k}`, x: cx * CELL + CELL / 2, z: -(cy * CELL + CELL / 2), r: CELL * 0.71 + 10, done: false, run: (budget) => build(list, cx * CELL + CELL / 2, cy * CELL + CELL / 2, budget) })
+      }
     }
   }
   group.add(built.group)

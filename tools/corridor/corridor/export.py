@@ -21,6 +21,7 @@ from __future__ import annotations
 import os
 import json
 import math
+import shutil
 from pathlib import Path
 
 import numpy as np
@@ -953,6 +954,39 @@ def _enu_derived(frame: Frame, derived: dict) -> dict:
     return out
 
 
+#: Above this many footprints, `buildings` moves out of the manifest into per-tile files. The
+#: threshold is not a tuning knob so much as "is this a world that freezes a tab": crofton-triangle
+#: is 28k and fine inline; dc-metro is 446k and 142 MB of a 346 MB manifest.
+VECTOR_TILE_MIN = 50_000
+
+
+def _vector_tiles(web: Path, buildings: list, size_m: float = 1000.0) -> dict:
+    """Write the heavy spatial arrays as per-1 km-tile JSON, and return the manifest's tile index.
+
+    `buildings` alone is 142 MB of dc-metro's 346 MB manifest, and the viewer iterates all 446k of
+    them at load to bucket by 500 m cell. Tiled on the SAME site-metre grid the viewer buckets on
+    (`floor(ring[0][0] / size)`), the manifest carries a ~40 kB index and the viewer fetches only the
+    tiles near the eye — the lazy grading pump already knows which those are.
+    """
+    dir_name = "vt/0"
+    d = web / dir_name
+    if d.exists():
+        shutil.rmtree(d)
+    d.mkdir(parents=True, exist_ok=True)
+    cells: dict[tuple[int, int], list] = {}
+    for b in buildings:
+        ring = b.get("ring") or []
+        if not ring:
+            continue
+        p0 = ring[0]
+        cells.setdefault((math.floor(p0[0] / size_m), math.floor(p0[1] / size_m)), []).append(b)
+    index = []
+    for (ix, iy), items in cells.items():
+        (d / f"{ix}_{iy}.json").write_text(json.dumps({"buildings": items}, separators=(",", ":")))
+        index.append({"x": ix, "y": iy, "n": len(items)})
+    return {"size_m": size_m, "dir": dir_name, "buildings": index}
+
+
 def export_site(site_dir: Path, web: Path | None = None) -> dict:
     """
     Write the viewer's `web/` tree for one site.
@@ -1306,6 +1340,16 @@ def export_site(site_dir: Path, web: Path | None = None) -> dict:
         "rock": features.get("rock"),
         "water": features.get("water"),
     }
+    # --- vector tiling --------------------------------------------------------------------------
+    # `buildings` is 142 MB of dc-metro's 346 MB manifest, and the viewer iterates all 446k of them
+    # at load to bucket by 500 m cell — the freeze. Above the threshold they move to per-1 km-tile
+    # files; the manifest keeps a small index and the lazy grading pump fetches only the tiles near
+    # the eye. Small sites stay inline (and the editor keeps reading `manifest.buildings`).
+    if tiled and len(enu_derived["buildings"]) >= VECTOR_TILE_MIN:
+        out["vt"] = _vector_tiles(web, enu_derived["buildings"])
+        out["vt"]["count"] = len(enu_derived["buildings"])
+        out["buildings"] = []
+        print(f"  vt      {len(out['vt']['buildings'])} building tiles / {out['vt']['count']} footprints out of the manifest", flush=True)
     # intersections: who has priority, who stops, and what the blades say. Derived from the drawn
     # network rather than transcribed from OSM, because a US suburb maps almost none of it — 854
     # drivable ways inside crofton-triangle carry 3 stop nodes between them. Replaces the masts of

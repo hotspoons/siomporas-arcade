@@ -41,7 +41,7 @@ export interface Credit {
 export function creditsFor(m: Manifest): Credit[] {
   const out: Credit[] = []
   const anyRoads = (m.spine?.segments?.length ?? 0) > 0 || (m.branches?.length ?? 0) > 0
-  if (anyRoads || m.buildings?.length || m.landuse?.length) {
+  if (anyRoads || m.buildings?.length || m.vt?.count || m.landuse?.length) {
     out.push({ label: '© OpenStreetMap contributors', licence: 'ODbL', href: 'https://www.openstreetmap.org/copyright', required: true })
   }
   // `units` is a list on a network bake and a count on an older one; either way, having any at

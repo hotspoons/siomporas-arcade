@@ -157,6 +157,13 @@ def derive(site_dir: Path) -> dict:
         landuse.append({"class": p["landuse"], "ring": [[round(x, 1), round(y, 1)] for x, y in g.simplify(1.0).exterior.coords[:-1]], "area_m2": round(float(g.area), 1), "crop": crops, "name": p.get("name")})
 
     pois = []
+    # POI → building containment used to be a linear scan of every footprint for every POI:
+    # 8,137 POIs x 215,894 buildings on dc-metro = 1.76 billion `contains`, tens of minutes of the
+    # 70 min `buildings` stage (dc-metro-take-2, 2026-10-05). Shape alone made that a predicate
+    # walk, not a geometry walk.
+    from shapely import STRtree
+
+    tree = STRtree([b["_geom"] for b in buildings]) if buildings else None
     for f in feats:
         p = f["properties"]
         kind = next((f"{k}={p[k]}" for k in POI_KEYS if k in p), None)
@@ -170,7 +177,7 @@ def derive(site_dir: Path) -> dict:
         if c is None:
             continue
         s, lat = corridor_pos(c)
-        bidx = next((i for i, b in enumerate(buildings) if b["_geom"].contains(c)), None)
+        bidx = next((int(i) for i in tree.query(c) if buildings[int(i)]["_geom"].contains(c)), None) if tree is not None else None
         pois.append({"x": round(c.x, 1), "y": round(c.y, 1), "s": s, "lat": lat, "kind": kind, "name": p.get("name"), "building": bidx})
         # a POI inside a footprint lends its tags to the building — the 85% tagged only building=yes
         if bidx is not None:

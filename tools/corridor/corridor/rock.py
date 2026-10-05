@@ -82,6 +82,23 @@ def attribute_to_roads(site_dir: Path, polygons: list[dict]) -> None:
         q["s"] = round(float(lines[k].project(pt)), 1)
 
 
+def _rock_tiles_worker(args) -> list:
+    """One worker's slice of 1 km tiles: measure each, in order, swallowing a bad tile.
+
+    Module-level so the fork pool can pickle it by reference; the args are paths and names, never
+    open datasets (each worker opens its own — a GDAL handle must not cross a fork).
+    """
+    site_dir, tdir, chunk = args
+    out: list = []
+    for t in chunk:
+        try:
+            out.append(measure(site_dir, Path(tdir) / f"{t}.dtm.tif", Path(tdir) / f"{t}.chm.tif", f"{t}-"))
+        except Exception as exc:
+            print(f"  rock    tile {t} failed: {exc}", flush=True)
+            out.append(None)
+    return out
+
+
 def measure_network(site_dir: Path) -> dict | None:
     """A tiled site, one 1 m raster tile at a time.
 
@@ -104,14 +121,16 @@ def measure_network(site_dir: Path) -> dict | None:
         return r
     polygons: list[dict] = []
     tiles = sorted({p.name.split(".")[0] for p in tdir.glob("*.dtm.tif")})
-    for t in tiles:
-        try:
-            r = measure(site_dir, tdir / f"{t}.dtm.tif", tdir / f"{t}.chm.tif", f"{t}-")
-        except Exception as exc:
-            print(f"  rock    tile {t} failed: {exc}")
-            continue
-        if r:
-            polygons += r["polygons"]
+    # Each tile is independent and opens its own rasters, so fan the loop across the fork pool: a
+    # 628-tile world took 22 min of one core on dc-metro-take-2 (2026-10-05).
+    from . import pool
+
+    chunks = pool.chunk(tiles, pool.default_jobs(len(tiles)))
+    args = [(site_dir, str(tdir), c) for c in chunks]
+    for part in pool.map_chunks(_rock_tiles_worker, args, "rock"):
+        for r in part:
+            if r:
+                polygons += r["polygons"]
     attribute_to_roads(site_dir, polygons)
     polygons.sort(key=lambda q: (str(q.get("road") or ""), q["s"]))
     by_type: dict[str, float] = {}

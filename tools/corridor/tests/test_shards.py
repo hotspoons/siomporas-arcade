@@ -164,6 +164,32 @@ class MergeTest(unittest.TestCase):
             self.assertEqual(out["named_formations"], ["A", "B"])
 
 
+class RebuildLidarVrtsTest(unittest.TestCase):
+    def test_vrt_covers_tiles_from_every_shard(self):
+        # merge_tree copies a shard's dtm.vrt first-writer-wins; the rebuild must cover the union or
+        # the merged world silently shrinks to one block.
+        import numpy as np
+        import rasterio
+        from rasterio.transform import from_origin
+
+        with tempfile.TemporaryDirectory() as d:
+            ldir = Path(d) / "lidar"
+            tdir = ldir / "tiles"
+            tdir.mkdir(parents=True)
+            for name in ("0_0.dtm.tif", "1_0.dtm.tif", "0_1.dtm.tif"):
+                with rasterio.open(tdir / name, "w", driver="GTiff", height=4, width=4, count=1,
+                                   dtype="float32", crs="EPSG:32618", transform=from_origin(0, 4, 1, 1)) as ds:
+                    ds.write(np.zeros((4, 4), "float32"), 1)
+            self.assertEqual(shards.rebuild_lidar_vrts(Path(d)), 1)
+            vrt = (ldir / "dtm.vrt").read_text()
+            for name in ("0_0.dtm.tif", "1_0.dtm.tif", "0_1.dtm.tif"):
+                self.assertIn(name, vrt)
+
+    def test_no_tiles_is_a_noop(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.assertEqual(shards.rebuild_lidar_vrts(Path(d)), 0)
+
+
 class PlanRoundTripTest(unittest.TestCase):
     def test_write_then_read(self):
         from shapely.geometry import LineString

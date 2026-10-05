@@ -277,6 +277,31 @@ def cmd_finalize(a: argparse.Namespace) -> None:
     if not present:
         sys.exit(f"no shard directories under {site_dir / 'shards'}")
 
+    # The shards wrote `dem_1m.tif`/`naip_1m.tif` per BLOCK, but the merged `sites/<slug>/` needs the
+    # whole region's rasters for `export_tiles`/`pyramid.bake`/`overview` — the finalizer's job. The
+    # cache already holds every tile the shards fetched, so a global assembly is cheap. `lidar/`
+    # comes from the shards merged, but each shard's VRT names only its own tiles: rebuild over the
+    # union or the merged world silently shrinks to one block.
+    from shapely.geometry import box as _box
+
+    from . import dem, horizon, network_tiles
+    from .geo import Frame as _Frame
+
+    site = json.loads((site_dir / "site.json").read_text())
+    frame = _Frame(site["frame"]["epsg"], tuple(site["frame"]["origin"]))
+    bbox = tuple(site["bbox_utm"])
+    if not (site_dir / "dem_1m.tif").exists():
+        dem.fetch_dem(frame, bbox, site_dir / "dem_1m.tif", CACHE)
+        print("  dem     global mosaic for the merged world", flush=True)
+    if not (site_dir / "naip_1m.tif").exists():
+        network_tiles.naip_tiled(frame, bbox, _box(*bbox), site_dir / "naip_1m.tif", CACHE, res=network_tiles.NAIP_RES_M)
+        print("  naip    global mosaic for the merged world", flush=True)
+    if not (site_dir / "horizon_30m.tif").exists():
+        horizon.fetch_horizon(frame, site_dir / "horizon_30m.tif", CACHE, radius_m=30000.0)
+        print("  horizon global horizon for the merged world", flush=True)
+    nv = shards.rebuild_lidar_vrts(site_dir)
+    print(f"  merge   {nv} lidar VRTs rebuilt over the merged tiles")
+
     # A world bake's canopy overview comes from the global model, which is an S3 stream; fetch it
     # once here rather than N times, and only if the lidar gave us no CHM of our own.
     if not (site_dir / "lidar" / "chm.tif").exists() and not (site_dir / "canopy_global.tif").exists():
@@ -300,6 +325,16 @@ def cmd_finalize(a: argparse.Namespace) -> None:
     shards.merge_geology(present, site_dir)
     stitched = shards.stitch_profile(present, site_dir)
     print(f"  merge   {nt} lidar files, {nw} tiles, {npg} pyramid files, {nb} branches; primary {'stitched' if stitched else 'MISSING'}")
+    # surface.json is measured from the primary profile + rasters (a shard does not write it);
+    # export_site reads it back for the manifest's `surface` block.
+    try:
+        from . import surface as _surface
+
+        _sf = _surface.measure(site_dir)
+        if _sf:
+            print(f"  surface {_sf['summary']}", flush=True)
+    except Exception as exc:
+        print(f"  surface failed: {exc}")
     # The export decides tiles-vs-overview off `manifest["tiled"]`; a sharded world is always tiled.
     manifest = json.loads((site_dir / "manifest.json").read_text()) if (site_dir / "manifest.json").exists() else {}
     manifest["tiled"] = True

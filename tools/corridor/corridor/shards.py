@@ -209,6 +209,30 @@ def merge_tree(parts: list[Path], dest: Path, sub: str) -> int:
     return n
 
 
+def rebuild_lidar_vrts(site_dir: Path) -> int:
+    """Rebuild each `lidar/<kind>.vrt` over EVERY merged `lidar/tiles/*.<kind>.tif`.
+
+    `merge_tree` copies a shard's VRT first-writer-wins, but that VRT names only the tiles THAT
+    shard wrote — using it would silently shrink the merged world to one block. The 1 km tile names
+    are on the global UTM grid (`network_tiles.tile_index`), so the union is just a glob + rebuild.
+    """
+    import subprocess
+
+    ldir = site_dir / "lidar"
+    tdir = ldir / "tiles"
+    if not tdir.exists():
+        return 0
+    kinds: dict[str, list[Path]] = {}
+    for f in tdir.glob("*.*.tif"):
+        kinds.setdefault(f.name.split(".", 1)[1][:-4], []).append(f)
+    n = 0
+    for kind, files in sorted(kinds.items()):
+        vrt = ldir / f"{kind}.vrt"
+        subprocess.run(["gdalbuildvrt", "-q", "-overwrite", str(vrt), *[str(x) for x in sorted(files)]], check=True)
+        n += 1
+    return n
+
+
 def merge_branches(parts: list[Path], dest: Path) -> int:
     """Union the shards' `branches.json`, keyed by chain id. Whole chains mean no real overlap."""
     by_id: dict[str, dict] = {}

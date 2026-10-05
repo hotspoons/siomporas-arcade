@@ -201,12 +201,15 @@ function captureProbe(renderer: THREE.WebGLRenderer, scene: THREE.Scene, i: numb
   const prevTarget = renderer.getRenderTarget()
   const prevAuto = renderer.autoClear
   const eqW = atlasFace * 2
-  // the quad spans the viewport, so the viewport IS the strip; no clear, or later strips would wipe
+  // The quad spans the viewport, so the viewport IS the strip; no clear, or later strips would wipe.
+  // Set it on the TARGET, not with renderer.setViewport: the latter rewrites the renderer's global
+  // viewport, and `setRenderTarget(null)` would then restore the main pass to the atlas's shape,
+  // squashing the whole world into a strip at the bottom of the screen.
   renderer.autoClear = false
+  atlas.viewport.set(i * eqW, 0, eqW, atlasFace)
+  atlas.scissor.set(i * eqW, 0, eqW, atlasFace)
   renderer.setRenderTarget(atlas)
-  renderer.setViewport(i * eqW, 0, eqW, atlasFace)
   renderer.render(convertScene, convertCam)
-  renderer.setViewport(0, 0, atlas.width, atlas.height)
   renderer.autoClear = prevAuto
   renderer.setRenderTarget(prevTarget)
 
@@ -289,13 +292,13 @@ function clearStrip(renderer: THREE.WebGLRenderer, i: number) {
   const prevTarget = renderer.getRenderTarget()
   const prevColour = renderer.getClearColor(new THREE.Color())
   const prevAlpha = renderer.getClearAlpha()
-  const prevScissor = renderer.getScissorTest()
   renderer.setClearColor(0x000000, 0)
+  // scissor on the TARGET (see captureProbe): renderer.setScissor would rewrite the global scissor
+  atlas.scissor.set(i * eqW, 0, eqW, atlasFace)
+  atlas.scissorTest = true
   renderer.setRenderTarget(atlas)
-  renderer.setScissorTest(true)
-  renderer.setScissor(i * eqW, 0, eqW, atlasFace)
   renderer.clear(true, false, false)
-  renderer.setScissorTest(prevScissor)
+  atlas.scissorTest = false
   renderer.setRenderTarget(prevTarget)
   renderer.setClearColor(prevColour, prevAlpha)
 }

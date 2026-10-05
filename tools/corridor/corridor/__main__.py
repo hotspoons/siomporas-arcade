@@ -358,6 +358,12 @@ def cmd_finalize(a: argparse.Namespace) -> None:
     # (doing it before mattered: it found no tiles and the world lost its point cloud).
     nv = shards.rebuild_lidar_vrts(site_dir)
     print(f"  merge   {nv} lidar VRTs rebuilt over the merged tiles")
+    # Overview the merged rasters BEFORE anything downsamples them. `pyramid._sample` (coarse
+    # tiles), `overview()` (8 m) and the canopy overview all read these VRTs decimated; without
+    # overviews GDAL decodes every full-resolution pixel under each destination.
+    ov = shards.add_overviews_all(site_dir)
+    if ov:
+        print(f"  ovr     {' '.join(f'{k}:{v}' for k, v in ov.items())}", flush=True)
     # surface.json is measured from the primary profile + rasters (a shard does not write it);
     # export_site reads it back for the manifest's `surface` block.
     try:
@@ -403,7 +409,7 @@ def cmd_export(a: argparse.Namespace) -> None:
     not match the rasters beside it. `--staged` builds into `web.staging` instead and leaves the
     served tree untouched until `corridor promote` swaps it in. `--promote` does both.
     """
-    from . import export, surface, swap
+    from . import export, shards, surface, swap
 
     staged = a.staged or a.promote
     touched = []
@@ -412,6 +418,10 @@ def cmd_export(a: argparse.Namespace) -> None:
             sf = surface.measure(d)
             if sf:
                 print(f"{d.name:24s} surface {sf['summary']}")
+        # A tiled site's dem/naip/lidar live as merged VRTs; the export downsamples them for the
+        # pyramid, the 8 m overview and the canopy mask. Overviews first, or every such read decodes
+        # full-resolution pixels (see shards.add_overviews).
+        shards.add_overviews_all(d)
         live = Path(a.out) if a.out else d / "web"
         target = swap.staging_dir(live) if staged else live
         if staged and target.exists():

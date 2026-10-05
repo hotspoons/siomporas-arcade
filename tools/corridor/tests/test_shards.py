@@ -219,6 +219,42 @@ class MosaicShardRasterTest(unittest.TestCase):
             self.assertEqual(shards.mosaic_shard_raster(root, [root / "shards" / "0"], "dem_1m.tif"), 0)
 
 
+class AddOverviewsTest(unittest.TestCase):
+    """The merged VRTs get external overviews, so a decimated read stops decoding full-res pixels."""
+
+    def _tile(self, path: Path, n: int = 2048):
+        import numpy as np
+        import rasterio
+        from rasterio.transform import from_origin
+
+        with rasterio.open(path, "w", driver="GTiff", height=n, width=n, count=1,
+                           dtype="uint8", crs="EPSG:32618", transform=from_origin(0, n, 1, 1)) as ds:
+            ds.write(np.zeros((1, n, n), "uint8"))
+
+    def test_vrt_gets_external_overviews_and_is_idempotent(self):
+        import rasterio
+
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / "a").mkdir()
+            self._tile(root / "a" / "dem_1m.tif")
+            self.assertEqual(shards.mosaic_shard_raster(root, [root / "a"], "dem_1m.tif"), 1)
+            # 2048 / 2 = 1024, /4 = 512, /8 = 256; /16 = 128 < 256 so it stops
+            self.assertEqual(shards.add_overviews(root / "dem_1m.tif"), 3)
+            self.assertTrue((root / "dem_1m.tif.ovr").exists())
+            with rasterio.open(root / "dem_1m.tif") as ds:
+                self.assertTrue(ds.overviews(1))
+            self.assertEqual(shards.add_overviews(root / "dem_1m.tif"), 0)  # already there
+
+    def test_tiny_raster_is_a_noop(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / "a").mkdir()
+            self._tile(root / "a" / "dem_1m.tif", n=64)
+            shards.mosaic_shard_raster(root, [root / "a"], "dem_1m.tif")
+            self.assertEqual(shards.add_overviews(root / "dem_1m.tif"), 0)
+
+
 class PlanRoundTripTest(unittest.TestCase):
     def test_write_then_read(self):
         from shapely.geometry import LineString

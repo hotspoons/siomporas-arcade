@@ -256,6 +256,58 @@ def rebuild_lidar_vrts(site_dir: Path) -> int:
     return n
 
 
+def add_overviews(path: Path, min_px: int = 256) -> int:
+    """Build external overviews (`<path>.ovr`) on a merged VRT/GeoTIFF; return how many levels.
+
+    The finalizer's merged `dem_1m.tif`/`naip_1m.tif`/`horizon_30m.tif` and lidar VRTs reference
+    hundreds of 1 km tiles. A decimated read of such a VRT with no overviews makes GDAL decode every
+    full-resolution pixel under the destination: `pyramid._sample` for the coarse z8–z11 tiles and
+    `overview()` at 8 m both did exactly that. Measured on dc-metro (2026-10-05) that was ~12 s a
+    tile in one pyramid chunk while the other fifteen finished in seconds, and a 134 MB `chm_2m.png`.
+    `gdaladdo` pays it once, offline, and every later reader uses the result.
+    """
+    import subprocess
+
+    import rasterio
+
+    if not path.exists():
+        return 0
+    factors: list[str] = []
+    try:
+        with rasterio.open(path) as ds:
+            if ds.overviews(1):
+                return 0  # already has them (a source that came with internal overviews, or a rerun)
+            w, h = ds.width, ds.height
+    except Exception:
+        return 0
+    f = 2
+    while min(w, h) // f >= min_px:
+        factors.append(str(f))
+        f *= 2
+    if not factors:
+        return 0
+    # `-r average`: the same resampling `_sample`/`overview` ask for, so the overview is the read
+    # they would have computed themselves, just precomputed.
+    subprocess.run(["gdaladdo", "-q", "-r", "average", str(path), *factors], check=True)
+    return len(factors)
+
+
+def add_overviews_all(site_dir: Path, lidar: bool = True) -> dict:
+    """Overview the merged rasters the finalizer/export downsample. Returns {name: levels}."""
+    out: dict[str, int] = {}
+    for name in ("dem_1m.tif", "naip_1m.tif", "horizon_30m.tif", "canopy_global.tif"):
+        n = add_overviews(site_dir / name)
+        if n:
+            out[name] = n
+    if lidar:
+        ldir = site_dir / "lidar"
+        for vrt in sorted(ldir.glob("*.vrt")) if ldir.exists() else []:
+            n = add_overviews(vrt)
+            if n:
+                out[f"lidar/{vrt.name}"] = n
+    return out
+
+
 def merge_branches(parts: list[Path], dest: Path) -> int:
     """Union the shards' `branches.json`, keyed by chain id. Whole chains mean no real overlap."""
     by_id: dict[str, dict] = {}

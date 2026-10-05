@@ -876,6 +876,15 @@ export let WATER_REFLECT_RIPPLE = 0.1
  */
 export let WATER_REFLECT_REACH = 500
 /**
+ * How far from the EYE the sea gate looks for ground at the waterline (m). The sea plane — and its
+ * mirror — stands down when no held ground within this reach of the camera comes down to sea level.
+ * Without it the gate reads the whole resident tile set, so one coastal tile kilometres away keeps
+ * the sea drawn (and the whole scene rendered a second time) while the eye is deep inland: measured
+ * 8 km from any waterline with the mirror still running. Near the coast the low ground comes within
+ * reach and the sea returns. 0 falls back to the site-wide floor.
+ */
+export let WATER_SEA_REACH = 4000
+/**
  * SKY AND HORIZON, for the water the one planar mirror cannot serve.
  *
  * The planar reflection is a single plane at sea level, so a pond or a stream at any other height
@@ -1972,6 +1981,7 @@ export const TUNE_TABS: TuneTab[] = [
           tune('WATER_REFLECT_SCALE', () => WATER_REFLECT_SCALE, (v) => (WATER_REFLECT_SCALE = v), [0.2, 1], 0.05, 'reflection buffer resolution ×; lower is cheaper and softer'),
           tune('WATER_REFLECT_RIPPLE', () => WATER_REFLECT_RIPPLE, (v) => (WATER_REFLECT_RIPPLE = v), [0, 0.6], 0.02, 'wave-normal smear on the reflection; 0 is a flat looking-glass'),
           tune('WATER_REFLECT_REACH', () => WATER_REFLECT_REACH, (v) => (WATER_REFLECT_REACH = v), [0, 3000], 25, 'aim the planar mirror at the nearest inland body within this many metres of its shore (else the sea); 0 keeps it on the sea alone'),
+          tune('WATER_SEA_REACH', () => WATER_SEA_REACH, (v) => (WATER_SEA_REACH = v), [0, 20000], 100, 'only show/mirror the sea when ground comes down to the waterline within this many metres of the eye; 0 uses the whole resident floor'),
           tune('WATER_SKY_REFLECT', () => WATER_SKY_REFLECT, (v) => (WATER_SKY_REFLECT = v), [0, 1.5], 0.05, 'sky/horizon reflection from the environment map, for ponds and streams the sea plane cannot mirror; 0 is the old flat sheet'),
           tune('WATER_PROBES', () => WATER_PROBES, (v) => (WATER_PROBES = v), [0, 32], 1, 'reflection probes: how many inland lakes keep a live capture of their own surroundings (trees, bank) at once, nearest to the eye. 0 off; 1 is the lake you are at'),
           tune('WATER_PROBE_RES', () => WATER_PROBE_RES, (v) => (WATER_PROBE_RES = v), [16, 256], 1, 'probe cube face px; the stored equirect is 2× across. Higher is sharper and costs capture time + memory'),

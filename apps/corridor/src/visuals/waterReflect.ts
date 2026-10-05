@@ -58,6 +58,11 @@ const cameraWorld = new THREE.Vector3()
 const rotation = new THREE.Matrix4()
 const lookAt = new THREE.Vector3()
 const view = new THREE.Vector3()
+/** scratch for pickPlane's frustum cull of the inland bodies */
+const bodySphere = new THREE.Sphere()
+const frustum = new THREE.Frustum()
+const projScreen = new THREE.Matrix4()
+const invWorld = new THREE.Matrix4()
 const targetPoint = new THREE.Vector3()
 const clipPlane = new THREE.Vector4()
 const q = new THREE.Vector4()
@@ -91,14 +96,26 @@ export function registerWaterReflectBodies(bodies: WaterReflectBody[]) {
 function pickPlane(camera: THREE.Camera): number | null {
   const reach = T.WATER_REFLECT_REACH
   if (reach > 0 && localBodies.length) {
+    // The camera's own frustum: a body behind the eye, or out to the side, is off screen, and aiming
+    // the one mirror there costs a second scene render for a reflection no one can see. The body
+    // discs are the real ones (unlike the merged water meshes, whose world-sized bounds test true
+    // for anything), so the frustum culls them honestly. `matrixWorld` is the frame's, as the mirror
+    // itself uses below.
+    invWorld.copy(camera.matrixWorld).invert()
+    projScreen.multiplyMatrices(camera.projectionMatrix, invWorld)
+    frustum.setFromProjectionMatrix(projScreen)
     let best = reach
     let bestY: number | null = null
     for (const b of localBodies) {
-      const d = Math.hypot(b.x - camera.position.x, b.z - camera.position.z) - b.radius
-      if (d < best) {
-        best = d
-        bestY = b.y
-      }
+      const dx = b.x - camera.position.x
+      const dz = b.z - camera.position.z
+      const d = Math.hypot(dx, dz) - b.radius
+      if (d >= best) continue
+      bodySphere.center.set(b.x, b.y, b.z)
+      bodySphere.radius = b.radius
+      if (!frustum.intersectsSphere(bodySphere)) continue
+      best = d
+      bestY = b.y
     }
     if (bestY !== null) return bestY
   }

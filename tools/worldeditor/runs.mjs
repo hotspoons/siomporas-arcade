@@ -21,7 +21,7 @@
 import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { createWriteStream, existsSync } from 'node:fs'
-import { open, rm, stat } from 'node:fs/promises'
+import { open, readFile, rm, stat } from 'node:fs/promises'
 import { bboxOf } from './geo.mjs'
 import { mirrorsFor } from './overpass.mjs'
 
@@ -87,11 +87,31 @@ export class Runs {
    * `sites/index.json` at the end (see `fetch_site`). There is no second export step to run, and
    * adding one would re-export every site on the volume.
    */
-  bake(slug, opts = {}) {
+  async bake(slug, opts = {}) {
+    // A WORLD TOO BIG FOR ONE JOB GOES PLAN -> SHARD -> FINALIZE (docs/corridor/PLAN-SHARDED-BAKE.md).
+    // The three phases are three sets of Jobs in one run: one cheap plan Job, N shard Jobs fanned
+    // across the cluster, one cheap finalizer. `run.phase`/`run.jobs` carry the state so a pod
+    // restart resumes at the phase it was in (reconcile below).
+    //
+    // Sharding is automatic above `shardAboveM` (a world half-width, metres): the dc-metro/495 site
+    // is radius_m 19933 and OOMs `lidar_tiled` as one Job. `sharded: false` forces the single Job
+    // back; `sharded: true` forces sharding on a small world (the spike/probe).
+    const sharded = opts.sharded ?? (await this.#shouldShard(slug))
+    if (sharded) {
+      return this.#start({ kind: 'bake', slug, args: [], label: `bake ${slug} (sharded)`, sharded: true, phaseArgs: opts })
+    }
     const args = ['fetch', slug]
     if (opts.skip) args.push('--skip', opts.skip)
     if (opts.halfWidth) args.push('--half-width', String(opts.halfWidth))
     return this.#start({ kind: 'bake', slug, args, label: `bake ${slug}` })
+  }
+
+  /** A world large enough that one Job's bbox is the problem: > `shardAboveM` half-width. */
+  async #shouldShard(slug) {
+    if (slug === 'all') return false
+    const world = await this.store.getWorld(slug).catch(() => null)
+    const r = Number(world?.radius_m)
+    return Number.isFinite(r) && r > (this.cfg.shardAboveM ?? 8000)
   }
 
   /**
@@ -171,7 +191,7 @@ export class Runs {
     this.finishedHooks.set(id, fn)
   }
 
-  async #start({ kind, slug, args, label, needsBucket = false }) {
+  async #start({ kind, slug, args, label, needsBucket = false, sharded = false, phaseArgs = {} }) {
     if (needsBucket && !this.cfg.bucket) {
       throw Object.assign(new Error('no bucket configured — set WORLDEDITOR_S3_BUCKET and mount the credentials Secret'), { status: 400 })
     }
@@ -191,12 +211,14 @@ export class Runs {
       pod: null,
       lastStamp: null,
       exit: null,
+      ...(sharded ? { sharded: true, phase: 'plan', phaseArgs, jobs: [], stamps: {} } : {}),
     }
     await this.store.writeAtomic(this.store.runFile(id), Buffer.from(JSON.stringify(run, null, 1)))
     await this.store.writeAtomic(this.store.logFile(id), Buffer.from(`=== ${label} (${run.runner}) ${run.started}\n`))
     // The world list the bake will read has to be on the volume BEFORE the Job starts.
     await this.store.materialise()
-    if (this.runner === 'kubernetes') await this.#startJob(run)
+    if (this.runner === 'kubernetes' && sharded) await this.#startPhase(run)
+    else if (this.runner === 'kubernetes') await this.#startJob(run)
     else await this.#startLocal(run)
     return run
   }
@@ -237,8 +259,8 @@ export class Runs {
    *   * no ConfigMap: the chart mounts sites.json as one, which caps at 1 MiB and needs a fresh
    *     object per revision. The volume is already mounted and already holds the materialised list.
    */
-  async #startJob(run) {
-    const name = `corridor-${run.kind}-${short(run.slug)}-${Date.now().toString(36)}`.slice(0, 60).replace(/-+$/, '')
+  async #jobSpec(run, args, { spread = false, tag = '' } = {}) {
+    const name = `corridor-${run.kind}-${tag ? `${tag}-` : ''}${short(run.slug)}-${Date.now().toString(36)}-${randomUUID().slice(0, 4)}`.slice(0, 60).replace(/-+$/, '')
     const overpass = await this.#overpassFor(run.slug)
     const env = [
       { name: 'CORRIDOR_DATA', value: '/data' },
@@ -284,7 +306,7 @@ export class Runs {
                 name: 'corridor',
                 image: this.cfg.image,
                 imagePullPolicy: 'Always',
-                command: ['python', '-m', 'corridor', ...run.args],
+                command: ['python', '-m', 'corridor', ...args],
                 env,
                 ...(this.cfg.secretName ? { envFrom: [{ secretRef: { name: this.cfg.secretName, optional: true } }] } : {}),
                 resources: this.cfg.resources,
@@ -293,15 +315,209 @@ export class Runs {
             ],
             volumes: [{ name: 'data', persistentVolumeClaim: { claimName: this.cfg.claim } }],
             ...(this.cfg.nodeSelector ? { nodeSelector: this.cfg.nodeSelector } : {}),
+            // Fan the shard Jobs across the nodes instead of letting the scheduler pile them on
+            // whichever node the API server happened to answer from. ScheduleAnyway: a world whose
+            // shards outnumber the nodes must still schedule, just unevenly.
+            ...(spread ? { topologySpreadConstraints: [{ maxSkew: 1, topologyKey: 'kubernetes.io/hostname', whenUnsatisfiable: 'ScheduleAnyway', labelSelector: { matchLabels: { 'worldeditor/run': run.id } } }] } : {}),
           },
         },
       },
     }
+    return { name, spec }
+  }
+
+  async #startJob(run) {
+    const { spec } = await this.#jobSpec(run, run.args)
     const made = await this.k8s.createJob(spec)
     run.job = made.metadata.name
     run.state = 'queued'
     await this.#save(run)
     this.#watchJob(run)
+  }
+
+  /* ---- the sharded runner: plan -> shard -> finalize ------------------------------------------ */
+
+  #phaseArgs(run, which, index = null) {
+    const o = run.phaseArgs ?? {}
+    if (which === 'plan') {
+      const out = ['plan', run.slug]
+      if (o.halfWidth) out.push('--half-width', String(o.halfWidth))
+      if (o.maxSide) out.push('--max-side', String(o.maxSide))
+      if (o.maxShards) out.push('--max-shards', String(o.maxShards))
+      return out
+    }
+    if (which === 'shard') {
+      const out = ['shard', run.slug, String(index)]
+      if (o.halfWidth) out.push('--half-width', String(o.halfWidth))
+      if (o.lidarHalfWidth) out.push('--lidar-half-width', String(o.lidarHalfWidth))
+      return out
+    }
+    return ['finalize', run.slug]
+  }
+
+  /** The plan the plan Job wrote: how many shards the world was cut into. */
+  async #readPlan(slug) {
+    try {
+      return JSON.parse(await readFile(`${this.store.sites}/${slug}/plan/shards.json`, 'utf8'))
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * Start the Jobs for the run's current phase and watch them.
+   *
+   * `plan` and `finalize` are one Job each; `shard` is N Jobs created together. N comes off the
+   * volume — the plan Job just wrote it — rather than from a guess made before the network was
+   * known. Whole-phase at a time: `run.jobs` is the set any one of which failing fails the run.
+   */
+  async #startPhase(run) {
+    const phase = run.phase ?? 'plan'
+    const created = []
+    if (phase === 'plan') {
+      const { spec } = await this.#jobSpec(run, this.#phaseArgs(run, 'plan'), { tag: 'plan' })
+      created.push((await this.k8s.createJob(spec)).metadata.name)
+    } else if (phase === 'shard') {
+      const plan = await this.#readPlan(run.slug)
+      const n = Number(plan?.n ?? 0)
+      if (!n) {
+        await this.#finish(run, 'failed', 1, 'the plan produced no shards')
+        return
+      }
+      run.shardCount = n
+      await this.#append(run.id, `\n=== shard phase: ${n} blocks, one Job each\n`)
+      for (let i = 0; i < n; i++) {
+        const { spec } = await this.#jobSpec(run, this.#phaseArgs(run, 'shard', i), { spread: true, tag: `shard-${i}` })
+        created.push((await this.k8s.createJob(spec)).metadata.name)
+      }
+    } else {
+      const { spec } = await this.#jobSpec(run, this.#phaseArgs(run, 'finalize'), { tag: 'finalize' })
+      created.push((await this.k8s.createJob(spec)).metadata.name)
+    }
+    run.jobs = created
+    run.job = created[0] ?? null
+    run.followed = {}
+    run.state = 'queued'
+    await this.#save(run)
+    this.#watchPhase(run)
+  }
+
+  /** Poll every Job in the phase; advance when all succeed, fail (and cancel the rest) on any failure. */
+  #watchPhase(run) {
+    let stopped = false
+    this.live.set(run.id, { stop: () => { stopped = true } })
+    const tick = async () => {
+      while (!stopped) {
+        try {
+          let allDone = true
+          let failed = null
+          let anyActive = false
+          run.followed ??= {}
+          for (const name of run.jobs) {
+            if (!run.followed[name]) {
+              const pods = await this.k8s.podsFor(name).catch(() => [])
+              const pod = pods.find((p) => p.status?.phase !== 'Pending') ?? pods[0]
+              if (pod) {
+                run.followed[name] = pod.metadata.name
+                await this.#save(run)
+                this.#followPhasePod(run, pod.metadata.name).catch((e) => void this.#append(run.id, `\n[worldeditor] log follow stopped: ${e.message}\n`))
+              }
+            }
+            const job = await this.k8s.getJob(name)
+            const s = job.status ?? {}
+            if (s.failed) { failed = name; break }
+            if (s.active) anyActive = true
+            if (!s.succeeded) allDone = false
+          }
+          if (run.state !== 'running' && anyActive) {
+            run.state = 'running'
+            await this.#save(run)
+          }
+          if (failed) {
+            for (const name of run.jobs) if (name !== failed) await this.k8s.deleteJob(name).catch(() => {})
+            await this.#finish(run, 'failed', 1, `${run.phase} Job ${failed} failed`)
+            return
+          }
+          if (allDone) {
+            await this.#advance(run)
+            return
+          }
+        } catch (e) {
+          await this.#append(run.id, `[worldeditor] watch: ${e.message}\n`)
+        }
+        await sleep(3000)
+      }
+    }
+    void tick()
+  }
+
+  async #advance(run) {
+    if (run.phase === 'plan') run.phase = 'shard'
+    else if (run.phase === 'shard') run.phase = 'finalize'
+    else {
+      await this.#finish(run, 'done', 0, null)
+      return
+    }
+    await this.#save(run)
+    await this.#startPhase(run)
+  }
+
+  /**
+   * Stream one shard Job's pod log, with a per-pod position.
+   *
+   * The single-Job follower keeps one `lastStamp` on the run because there is one pod. A shard
+   * phase has N pods writing the same log file, so the reconnect cursor has to be per pod or a
+   * reconnect on one shard would either replay or skip another shard's lines.
+   */
+  async #followPhasePod(run, pod) {
+    const key = `${run.id}:${pod}`
+    this.following.set(key, run)
+    try {
+      let savedAt = Date.now()
+      for (;;) {
+        if (!this.live.has(run.id)) return
+        const since = (run.stamps ?? {})[pod] ?? null
+        const res = await this.k8s.logStream(pod, { follow: true, sinceTime: since })
+        if (res.statusCode >= 400) {
+          res.resume()
+          await sleep(2000)
+          if (run.state === 'done' || run.state === 'failed') return
+          continue
+        }
+        const sink = createWriteStream(this.store.logFile(run.id), { flags: 'a' })
+        let carry = ''
+        await new Promise((resolve) => {
+          res.on('data', (chunk) => {
+            carry += chunk.toString('utf8')
+            const lines = carry.split('\n')
+            carry = lines.pop() ?? ''
+            let out = ''
+            for (const line of lines) {
+              const sp = line.indexOf(' ')
+              const stamp = sp > 0 ? line.slice(0, sp) : null
+              const text = sp > 0 ? line.slice(sp + 1) : line
+              const last = (run.stamps ?? {})[pod] ?? null
+              if (stamp && last && stamp <= last) continue
+              if (stamp) { run.stamps ??= {}; run.stamps[pod] = stamp }
+              out += `${text}\n`
+            }
+            if (out) sink.write(out)
+            if (out && Date.now() - savedAt >= SAVE_EVERY_MS) {
+              savedAt = Date.now()
+              void this.#save(run).catch(() => {})
+            }
+          })
+          res.on('end', resolve)
+          res.on('error', resolve)
+        })
+        sink.end()
+        await this.#save(run)
+        if (run.state === 'done' || run.state === 'failed') return
+        await sleep(1500)
+      }
+    } finally {
+      this.following.delete(key)
+    }
   }
 
   /** Poll the Job, attach to its pod's log, and stop when it ends. One of these per live run. */
@@ -533,7 +749,9 @@ export class Runs {
     if (run.state === 'done' || run.state === 'failed') return run
     this.live.get(id)?.stop?.()
     this.live.delete(id)
-    if (run.job && this.k8s.available) await this.k8s.deleteJob(run.job).catch(() => {})
+    for (const name of run.jobs?.length ? run.jobs : run.job ? [run.job] : []) {
+      if (this.k8s.available) await this.k8s.deleteJob(name).catch(() => {})
+    }
     return this.#finish(run, 'failed', -1, 'cancelled')
   }
 
@@ -547,14 +765,17 @@ export class Runs {
     const adopted = []
     for (const run of await this.store.listRuns(200)) {
       if (run.state === 'done' || run.state === 'failed') continue
-      if (run.runner === 'kubernetes' && run.job && this.k8s.available) {
-        const job = await this.k8s.getJob(run.job).catch(() => null)
-        if (!job) {
+      const names = run.jobs?.length ? run.jobs : run.job ? [run.job] : []
+      if (run.runner === 'kubernetes' && names.length && this.k8s.available) {
+        const jobs = await Promise.all(names.map((n) => this.k8s.getJob(n).catch(() => null)))
+        if (jobs.every((j) => !j)) {
           await this.#finish(run, 'failed', -1, 'the Job is gone — the pod restarted and it had already been cleaned up')
           continue
         }
         run.pod = null // re-attach to whatever pod is there now
-        this.#watchJob(run)
+        run.followed = {}
+        if (run.sharded) this.#watchPhase(run)
+        else this.#watchJob(run)
         adopted.push(run.id)
       } else {
         // a local child cannot outlive its parent

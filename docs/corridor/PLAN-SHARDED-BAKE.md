@@ -1,7 +1,15 @@
 # Baking a large world in pieces: plan → shard → finalize
 
-**Status:** plan, 2026-10-05. Phase 0 (the two hangs) is implemented alongside this document; Phases
-1–2 are not started.
+**Status:** Phase 0 (the two hangs) shipped. Phase 1 (plan → shard → finalize) shipped: the
+corridor engine (`corridor plan|shard|finalize`, `corridor/shards.py`) and the worldeditor
+orchestration (`runs.bake` fans plan → N shard Jobs → finalize above `shardAboveM`). Phase 2
+(cluster-aware sizing) is partially shipped — shards spread by `topologySpreadConstraints`, request
+sizing is still the one 384 Gi request.
+
+Known gaps vs the sections below: the shards write the per-block rasters, lidar, profiles and
+branches, but `export_tiles` / `pyramid.bake` / `overview` currently run in the FINALIZER over the
+merged site rather than per shard (they are pool-parallel after Phase 0, so this is a cost, not a
+bug); and none of it has been exercised against a real large world yet.
 
 ## What this is
 

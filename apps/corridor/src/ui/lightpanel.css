@@ -1,0 +1,83 @@
+/* The lighting panel, under the performance panel.
+ *
+ * Same scrim, same border and same non-eating-clicks rule as the perf panel — you read it while
+ * you fly. Its `top` is set from JavaScript to the perf panel's measured bottom, so the two move
+ * together instead of colliding when the perf graph or legend grows. */
+.light-hud {
+  position: fixed;
+  top: calc(var(--bar-h) + 10px);
+  right: 10px;
+  z-index: var(--z-hud);
+  width: 320px;
+  padding: 8px 10px 9px;
+  border: 1px solid var(--hud-line);
+  border-radius: var(--r-2, 8px);
+  background: var(--hud-bg);
+  backdrop-filter: blur(8px);
+  color: var(--ink-1);
+  box-shadow: var(--shadow-2);
+  pointer-events: none;
+  user-select: none;
+}
+
+/* the author's `display` beats the UA's `[hidden]` — the same trap the perf panel documents */
+.light-hud[hidden] { display: none; }
+
+.light-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 5px;
+  color: var(--ink-3);
+  font-size: var(--text-xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.light-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.light-head button {
+  pointer-events: auto;
+  padding: 1px 6px;
+  border: 1px solid var(--line-2);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ink-2);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.light-head button:hover { background: var(--bg-3); color: var(--ink-1); }
+
+.light-head button.on {
+  color: var(--ink-1);
+  border-color: var(--ink-2);
+}
+
+.light-head button:disabled { opacity: 0.6; cursor: default; }
+
+.light-lines {
+  font-size: var(--text-xs);
+  line-height: 1.45;
+  color: var(--ink-1);
+  white-space: pre;
+}
+
+/* the inventory is the answer; the family rows under it are the evidence */
+.light-lines > div + div { color: var(--ink-2); }
+
+.light-dump {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--hud-line);
+  max-height: 38vh;
+  overflow: auto;
+  pointer-events: auto;
+  font-size: var(--text-xs);
+  line-height: 1.4;
+  color: var(--ink-2);
+  white-space: pre;
+}

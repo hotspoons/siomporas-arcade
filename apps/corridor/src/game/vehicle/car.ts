@@ -517,6 +517,7 @@ export class Car {
       const beam = new THREE.SpotLight(0xfff4de, 0, 70, T.HEADLIGHT_ANGLE, 0.55, 1.4)
       beam.position.set(2.1, 0.7, zz * 0.52)
       beam.target.position.set(2.1 + 40, -2.5, zz * 0.52)
+      beam.userData.family = 'hero-head' // the lighting panel's per-light dump reads this
       g.add(beam, beam.target)
       this.beams.push(beam)
       const tail = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.12, 0.38), tailMat)
@@ -531,6 +532,7 @@ export class Car {
       tailBeam.position.set(-2.18, 0.66, zz * 0.56)
       tailBeam.target.position.set(-2.18 - T.TAILLIGHT_RANGE * 0.65, 0.02, zz * 0.56)
       tailBeam.castShadow = false
+      tailBeam.userData.family = 'hero-tail'
       g.add(tailBeam, tailBeam.target)
       this.tailBeams.push(tailBeam)
     }
@@ -543,6 +545,7 @@ export class Car {
     mergedBeam.target.position.set(2.1 + T.HEADLIGHT_RANGE * 0.6, -T.HEADLIGHT_RANGE * 0.04, 0)
     mergedBeam.castShadow = false
     mergedBeam.visible = false
+    mergedBeam.userData.family = 'hero-head'
     g.add(mergedBeam, mergedBeam.target)
     this.mergedBeam = mergedBeam
     const mergedTail = new THREE.SpotLight(0xff180c, 0, T.TAILLIGHT_RANGE, Math.min(T.HERO_TAILLIGHTS_MERGE_WIDTH * DEG2RAD, MERGE_ANGLE_MAX), 0.55, 2)
@@ -554,6 +557,7 @@ export class Car {
     mergedTail.target.position.set(-2.18 - Math.max(0.65, T.TAILLIGHT_RANGE * 0.5), 0.02, 0)
     mergedTail.castShadow = false
     mergedTail.visible = false
+    mergedTail.userData.family = 'hero-tail'
     g.add(mergedTail, mergedTail.target)
     this.mergedTailBeam = mergedTail
     // The view from the driver's seat. Mesh-local y is height above the wheel contact, so with

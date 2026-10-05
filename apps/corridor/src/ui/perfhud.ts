@@ -45,14 +45,10 @@ export class PerfHud {
   /** Turn the tint on the terrain itself. The panel only draws the legend. */
   onTiles: ((on: boolean) => void) | null = null
   /**
-   * Run the light-budget ablation: each real light family is briefly switched off and the frame
-   * timed, so the panel can say what the hero lamps, the traffic and the fake flood actually cost.
-   * It is a button rather than something continuous because switching a light off changes the
-   * light count and recompiles every standard material — doing that every frame would cost far more
-   * than it measures. Empty text means the world has no lights to measure.
+   * The panel was shown or hidden. The lighting panel hangs off this so the two appear together:
+   * a lighting report under a performance panel that is not on screen is not a report.
    */
-  onMeasureLights: (() => void) | null = null
-  private lightsBtn: HTMLButtonElement | null = null
+  onVisibility: ((on: boolean) => void) | null = null
 
   constructor(meter: PerfMeter) {
     this.meter = meter
@@ -81,12 +77,7 @@ export class PerfHud {
     }
     const actions = document.createElement('div')
     actions.className = 'perf-actions'
-    const lights = document.createElement('button')
-    lights.textContent = 'lights'
-    lights.title = 'measure what each light family costs: it switches each off for a few frames and times them (takes a few seconds)'
-    lights.onclick = () => this.onMeasureLights?.()
-    this.lightsBtn = lights
-    actions.append(tiles, lights, reset)
+    actions.append(tiles, reset)
     head.append(actions)
 
     this.lines.className = 'perf-lines mono'
@@ -125,19 +116,12 @@ export class PerfHud {
         this.onTiles?.(false)
       }
     }
+    this.onVisibility?.(on)
   }
 
   toggle(): boolean {
     this.show(!this.open)
     return this.open
-  }
-
-  /** Show the lights button as working (or done) while the ablation runs. */
-  lightsBusy(on: boolean, label = 'lights'): void {
-    if (!this.lightsBtn) return
-    this.lightsBtn.disabled = on
-    this.lightsBtn.textContent = label
-    this.lightsBtn.classList.toggle('on', on)
   }
 
   /** The text a probe or a console can read without going through the DOM. */

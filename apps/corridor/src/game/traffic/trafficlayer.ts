@@ -134,6 +134,7 @@ function trafficLamps(mesh: THREE.Object3D, doc: VehicleDoc): THREE.Group {
     spot.target.position.set(nose + 18, up * 0.25, z)
     spot.visible = false
     spot.castShadow = false
+    spot.userData.family = 'traffic-head' // the lighting panel's per-light dump reads this
     g.add(bulb, spot, spot.target)
     heads.push(spot)
   }
@@ -145,6 +146,7 @@ function trafficLamps(mesh: THREE.Object3D, doc: VehicleDoc): THREE.Group {
     spot.target.position.set(-nose - Math.max(1.2, T.TAILLIGHT_RANGE * 0.65), 0.05, z)
     spot.visible = false
     spot.castShadow = false
+    spot.userData.family = 'traffic-tail'
     g.add(bulb, spot, spot.target)
     tails.push(spot)
   }

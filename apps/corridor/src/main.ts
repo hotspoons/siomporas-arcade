@@ -12,6 +12,8 @@ import { PerfMeter, short } from './game/session/perf'
 import { GpuProfiler } from './game/session/gpuprofile'
 import { assistAt, lookAhead, pullFor } from './game/stunt/stuntassist'
 import { PerfHud } from './ui/perfhud'
+import { LightPanel } from './ui/lightpanel'
+import type { LightEntry, LightFamily, LightReport } from './ui/lightreport'
 import { RapierCar } from './game/vehicle/rapiercar'
 import { assetsvc } from './assets/assetsvc'
 import { defaultVehicle, frontShare, vmaxFromProfile, type VehicleDoc } from './game/vehicle/vehicles'
@@ -107,15 +109,18 @@ orbit.enableDamping = true
 orbit.maxPolarAngle = Math.PI - 0.05
 
 const ambient = new THREE.HemisphereLight(0xe9eef2, 0x7a6a50, 0.75)
+ambient.userData.family = 'ambient' // the lighting panel's per-light dump reads this
 scene.add(ambient)
 const sun = new THREE.DirectionalLight(0xfff0d8, 2.0)
 sun.position.set(-3000, 4000, 2500)
+sun.userData.family = 'sun'
 scene.add(sun)
 // A high sun on a flat road barely changes N·L, so the albedo and the height map only show when
 // the light rakes — sunset, or the headlights. This one stays at 22° on the real sun's bearing
 // and does not cast: it is there to read the surface, not to throw a second set of shadows.
 const rake = new THREE.DirectionalLight(0xfff0d8, 0)
 rake.position.set(-3000, 1600, 2500)
+rake.userData.family = 'rake'
 scene.add(rake)
 const lastSunDir = new THREE.Vector3(-3000, 4000, 2500).normalize()
 renderer.shadowMap.enabled = true
@@ -625,6 +630,9 @@ function holdToTrack(car: DrivableCar | null, dt: number): boolean {
 
 const perfMeter = new PerfMeter()
 const perfHud = new PerfHud(perfMeter)
+// The lighting report, hung under the perf panel and shown with it.
+const lightHud = new LightPanel(perfHud.root)
+perfHud.onVisibility = (on) => lightHud.show(on)
 
 // GPU pass timings, created the first time the panel needs them — it takes the webgl context, and a
 // context without the timer extension (swiftshader) makes every call a no-op and draws no line.
@@ -646,8 +654,77 @@ function avg(key: string, v: number): number {
   return n
 }
 
-// The light-budget ablation's latest result, filled by measureLights() below.
-let lightBudget: string[] = []
+// The light-budget ablation's latest result, filled by measureLights() below and kept on the
+// lighting panel as a standing report rather than a button label that flashes past.
+interface LightMeasure { all: number; head: number; tail: number; traffic: number; flood: number; at: number }
+let lightMeasure: LightMeasure | null = null
+let lightMeasureNote: string | null = null
+
+// three's light `.type` strings to the short names the panel prints.
+const LIGHT_TYPE: Record<string, string> = {
+  DirectionalLight: 'dir', SpotLight: 'spot', PointLight: 'point',
+  HemisphereLight: 'hemi', AmbientLight: 'ambient', RectAreaLight: 'area',
+}
+
+/**
+ * Everything the lighting panel reports, read fresh off the scene.
+ *
+ * The inventory and the per-light dump come from a `traverse`, so they cannot drift from what is
+ * really rendering — a lamp hidden by a mode change is `visible = false` and drops out of the loop
+ * count at the same instant. The family COSTS come from the last ablation, because a forward light's
+ * cost can only be attributed by removing it.
+ */
+function buildLightReport(): LightReport {
+  const byType = new Map<string, { n: number; on: number }>()
+  const entries: LightEntry[] = []
+  let shadowCasters = 0
+  let shadowMap = 0
+  scene.traverse((o) => {
+    const l = o as THREE.Light & { isLight?: boolean; shadow?: { mapSize: { width: number } } }
+    if (!l.isLight) return
+    const type = LIGHT_TYPE[l.type] ?? l.type
+    const c = byType.get(type) ?? { n: 0, on: 0 }
+    c.n += 1
+    if (l.visible) c.on += 1
+    byType.set(type, c)
+    const spot = l as THREE.SpotLight
+    const shadow = l.castShadow === true
+    if (shadow) {
+      shadowCasters += 1
+      const w = l.shadow?.mapSize.width ?? 0
+      if (w > shadowMap) shadowMap = w
+    }
+    entries.push({
+      type,
+      family: typeof l.userData.family === 'string' ? l.userData.family : '',
+      on: l.visible,
+      intensity: l.intensity,
+      distance: typeof spot.distance === 'number' ? spot.distance : 0,
+      angle: typeof spot.angle === 'number' ? (spot.angle * 180) / Math.PI : 0,
+      shadow,
+    })
+  })
+  const lampsOn = (prefix: string) => entries.filter((e) => e.family.startsWith(prefix) && e.on).length
+  const word = (mode: number, merged: boolean): string =>
+    mode === 0 ? 'off' : mode === 2 ? 'fake' : merged ? 'merged' : 'real'
+  const families: LightFamily[] = [
+    { name: 'head', mode: word(Math.round(T.HERO_HEADLIGHTS_MODE), Math.round(T.HERO_HEADLIGHTS_MERGE) === 1), lamps: lampsOn('hero-head'), cost: lightMeasure?.head ?? null },
+    { name: 'tail', mode: word(Math.round(T.HERO_TAILLIGHTS_MODE), Math.round(T.HERO_TAILLIGHTS_MERGE) === 1), lamps: lampsOn('hero-tail'), cost: lightMeasure?.tail ?? null },
+    { name: 'traffic', mode: word(Math.round(T.TRAFFIC_LIGHTS_MODE), false), lamps: lampsOn('traffic-'), cost: lightMeasure?.traffic ?? null },
+    { name: 'flood', mode: T.FAKE_LAMPS > 0.001 ? 'on' : 'off', lamps: flood.count, cost: lightMeasure?.flood ?? null },
+  ]
+  return {
+    counts: [...byType.entries()].map(([type, c]) => ({ type, n: c.n, on: c.on })),
+    shadowCasters,
+    shadowMap,
+    programs: renderer.info.programs?.length ?? 0,
+    families,
+    all: lightMeasure?.all ?? null,
+    measuredAt: lightMeasure?.at ?? null,
+    note: lightMeasureNote,
+    lights: entries,
+  }
+}
 
 // Which pyramid tile is under the car, and how many of the finest tiles the view is holding.
 // The meter knows frames; the stream knows tiles. Read twice a second with the rest of the panel.
@@ -677,12 +754,12 @@ perfHud.detail = () => {
   if (gpuProf?.available) {
     rows.push('gpu ' + gpuProf.read().map((s) => `${s.label} ${s.ms.toFixed(1)}`).join(' · ') + ' ms')
   }
-  rows.push(...lightBudget)
   return rows
 }
 perfHud.tilesLegend = () => site?.pyramidStream?.legend() ?? []
 perfHud.onTiles = (on) => site?.pyramidStream?.setTint(on)
-perfHud.onMeasureLights = () => { void measureLights() }
+lightHud.report = buildLightReport
+lightHud.onMeasure = () => { void measureLights() }
 
 /**
  * What each light family actually costs, by switching it off and timing the GPU.
@@ -699,12 +776,12 @@ let measuring = false
 async function measureLights(): Promise<void> {
   if (measuring) return
   measuring = true
-  perfHud.lightsBusy(true, 'measuring…')
+  lightHud.measureBusy(true, 'measuring…')
   const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
   try {
     const gl = renderer.getContext() as WebGL2RenderingContext
     const ext = gl.getExtension?.('EXT_disjoint_timer_query_webgl2') as { TIME_ELAPSED_EXT: number; GPU_DISJOINT_EXT: number } | null
-    if (!ext) { lightBudget = ['lights: no gpu timer on this context']; return }
+    if (!ext) { lightMeasure = null; lightMeasureNote = 'no gpu timer on this context'; return }
     const timedRender = (): Promise<number> => new Promise((resolve) => {
       const q = gl.createQuery()
       gl.beginQuery(ext.TIME_ELAPSED_EXT, q)
@@ -733,8 +810,7 @@ async function measureLights(): Promise<void> {
       if (tuneUI.access.set(name, v)) onTuneChange()
     }
     const saved = ['HERO_HEADLIGHTS_MODE', 'HERO_TAILLIGHTS_MODE', 'TRAFFIC_LIGHTS_MODE'].map((n) => tuneKey(n)?.get() ?? 0)
-    const flood = tuneKey('FAKE_LAMPS')?.get() ?? 0
-    const dash = (label: string, v: number) => `${label} −${(Math.max(0, v)).toFixed(1)}`
+    const floodKnob = tuneKey('FAKE_LAMPS')?.get() ?? 0
     const all = await sample()
     setKnob('HERO_HEADLIGHTS_MODE', 0)
     const head = await sample()
@@ -747,18 +823,25 @@ async function measureLights(): Promise<void> {
     setKnob('TRAFFIC_LIGHTS_MODE', saved[2])
     setKnob('FAKE_LAMPS', 0)
     const fake = await sample()
-    setKnob('FAKE_LAMPS', flood)
+    setKnob('FAKE_LAMPS', floodKnob)
     if (all > 0) {
-      lightBudget = [
-        `lights all ${all.toFixed(1)} ms · best of 22`,
-        `  ${dash('head', all - head)} · ${dash('tail', all - tail)} · ${dash('traffic', all - traffic)} · ${dash('flood', all - fake)} ms`,
-      ]
+      // keep each family's removal delta (never negative) as the standing report on the panel
+      lightMeasure = {
+        all,
+        head: Math.max(0, all - head),
+        tail: Math.max(0, all - tail),
+        traffic: Math.max(0, all - traffic),
+        flood: Math.max(0, all - fake),
+        at: Date.now(),
+      }
+      lightMeasureNote = null
     } else {
-      lightBudget = ['lights: timer unavailable under load']
+      lightMeasure = null
+      lightMeasureNote = 'timer unavailable under load'
     }
   } finally {
     measuring = false
-    perfHud.lightsBusy(false, 'lights')
+    lightHud.measureBusy(false)
   }
 }
 // left on last time? then it comes back on, which is the whole point of remembering it
@@ -4092,6 +4175,10 @@ registerBridgeContext({
   },
   get perfHud() {
     return perfHud
+  },
+  /** the lighting report panel, hung under the perf panel — `text()` is what is on screen */
+  get lightHud() {
+    return lightHud
   },
 
   perf: (frames = 30) =>

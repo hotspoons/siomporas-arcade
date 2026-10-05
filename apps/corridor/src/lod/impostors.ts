@@ -19,6 +19,16 @@ const YAWS = 8
 const TOP = YAWS // the extra column: straight down onto the crown
 const COLS = YAWS + 1
 const CELL = 256
+/**
+ * Texels of transparent gutter around every cell.
+ *
+ * The atlas is filtered (linear, mipmapped), so a card sampling the very edge of a cell could
+ * otherwise take in the neighbouring cell — the row above being a tree's flat-topped trunk base.
+ * The gutter keeps the nearest opaque neighbour a margin away. (The "floating trunks" themselves
+ * were the bake drawing each cell at the device pixel ratio's stride — see `bake`.)
+ */
+const PAD = 16
+
 
 export class Impostors {
   mesh: THREE.InstancedMesh
@@ -59,7 +69,7 @@ export class Impostors {
     this.material = new THREE.ShaderMaterial({
       // merge() clones uniform values and cannot clone a render-target texture (it silently becomes
       // null and every quad is discarded); the atlas is attached after the merge instead
-      uniforms: { ...THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { cols: { value: COLS }, yaws: { value: YAWS }, rows: { value: rows }, flatPitch: { value: T.IMPOSTOR_FLAT_PITCH } }]), atlas: { value: this.target.texture }, uLight: { value: 1 }, uLightTint: { value: new THREE.Color(1, 1, 1) }, uMatch: { value: 1.65 }, uHue: { value: 0 }, uSat: { value: 1 }, ...retro.uniforms, uLampGain: { value: 1 }, ...splatMaskUniforms() },
+      uniforms: { ...THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { cols: { value: COLS }, yaws: { value: YAWS }, rows: { value: rows }, flatPitch: { value: T.IMPOSTOR_FLAT_PITCH }, uAtlasPad: { value: PAD / CELL }, uAtlasInner: { value: (CELL - 2 * PAD) / CELL } }]), atlas: { value: this.target.texture }, uLight: { value: 1 }, uLightTint: { value: new THREE.Color(1, 1, 1) }, uMatch: { value: 1.65 }, uHue: { value: 0 }, uSat: { value: 1 }, ...retro.uniforms, uLampGain: { value: 1 }, ...splatMaskUniforms() },
       vertexShader: /* glsl */ `
         attribute float aVariant;
         attribute float aYaw;
@@ -70,6 +80,8 @@ export class Impostors {
         uniform float yaws;
         uniform float rows;
         uniform float flatPitch;
+        uniform float uAtlasPad;
+        uniform float uAtlasInner;
         varying vec2 vUv;
         #include <common>
         #include <fog_pars_vertex>
@@ -106,7 +118,7 @@ export class Impostors {
             float rel = ang - aYaw;
             k = mod(floor(rel / 6.2831853 * yaws + 0.5), yaws);
           }
-          vUv = vec2((k + uv.x) / cols, (aVariant + uv.y) / rows);
+          vUv = vec2((k + uAtlasPad + uv.x * uAtlasInner) / cols, (aVariant + uAtlasPad + uv.y * uAtlasInner) / rows);
           vCardWorld = world;
           vec4 mvPosition = viewMatrix * vec4(world, 1.0);
           gl_Position = projectionMatrix * mvPosition;
@@ -202,13 +214,19 @@ export class Impostors {
     const prevViewport = renderer.getViewport(new THREE.Vector4())
     const prevScissor = renderer.getScissor(new THREE.Vector4())
     const prevScissorTest = renderer.getScissorTest()
+    // `setViewport` is in CSS pixels and three scales it by the device pixel ratio, but the atlas
+    // is sized in texels. On a 1.25-DPR display every cell was drawn at 320 texels on a 320-texel
+    // stride while the card shader samples 256-texel cells: rows and columns drifted, so a card's
+    // top took in the previous row's flat trunk base — the bare "floating trunk" above the canopy.
+    // Hand three CSS pixels that scale back to the texel rect we actually want.
+    const dpr = renderer.getPixelRatio()
     renderer.setRenderTarget(this.target)
     // Clear the WHOLE atlas, not just whatever viewport the renderer was left with. A rebake (a
     // season change recolours the leaves) used to clear only the live view's corner, so the
     // previous bake's trees survived in the rest of the target and a card sampled a stale trunk
     // floating in empty sky (Rich, 2026-10-05). Point viewport and scissor at the target first.
-    renderer.setViewport(0, 0, this.target.width, this.target.height)
-    renderer.setScissor(0, 0, this.target.width, this.target.height)
+    renderer.setViewport(0, 0, this.target.width / dpr, this.target.height / dpr)
+    renderer.setScissor(0, 0, this.target.width / dpr, this.target.height / dpr)
     renderer.setScissorTest(true)
     renderer.setClearColor(0x000000, 0)
     renderer.clear()
@@ -220,27 +238,31 @@ export class Impostors {
       const w = Math.max(box.max.x - box.min.x, box.max.z - box.min.z)
       const e = Math.max(box.max.y, w) * 1.04
       this.extents[row] = e / src.nativeHeight
-      const cam = new THREE.OrthographicCamera(-e / 2, e / 2, e, 0, 0.1, e * 4)
+      // one cell is `e` world units across, drawn into CELL - 2*PAD texels, so the gutter is this
+      // many world units; the tree still spans [0, e] and the card maps uv to that inner band
+      const pad = (e * PAD) / (CELL - 2 * PAD)
+      const span = e + 2 * pad
+      const cam = new THREE.OrthographicCamera(-e / 2 - pad, e / 2 + pad, e + pad, -pad, 0.1, span * 4)
       for (let k = 0; k < YAWS; k++) {
         group.rotation.y = (k / YAWS) * Math.PI * 2
         cam.position.set(0, 0, e * 2)
         cam.lookAt(0, 0, 0)
         cam.position.y = 0
-        // look horizontally: the ortho frustum's vertical range [0, e] is set above
+        // look horizontally: the tree's range [0, e] sits inside the gutter in the frustum above
         cam.updateProjectionMatrix()
-        renderer.setViewport(k * CELL, row * CELL, CELL, CELL)
-        renderer.setScissor(k * CELL, row * CELL, CELL, CELL)
+        renderer.setViewport(k * CELL / dpr, row * CELL / dpr, CELL / dpr, CELL / dpr)
+        renderer.setScissor(k * CELL / dpr, row * CELL / dpr, CELL / dpr, CELL / dpr)
         renderer.render(scene, cam)
       }
       // the top cell: straight down, square e×e centred on the trunk
       group.rotation.y = 0
-      const top = new THREE.OrthographicCamera(-e / 2, e / 2, e / 2, -e / 2, 0.1, e * 4)
+      const top = new THREE.OrthographicCamera(-e / 2 - pad, e / 2 + pad, e / 2 + pad, -e / 2 - pad, 0.1, span * 4)
       top.position.set(0, e * 2, 0)
       top.up.set(0, 0, -1)
       top.lookAt(0, 0, 0)
       top.updateProjectionMatrix()
-      renderer.setViewport(TOP * CELL, row * CELL, CELL, CELL)
-      renderer.setScissor(TOP * CELL, row * CELL, CELL, CELL)
+      renderer.setViewport(TOP * CELL / dpr, row * CELL / dpr, CELL / dpr, CELL / dpr)
+      renderer.setScissor(TOP * CELL / dpr, row * CELL / dpr, CELL / dpr, CELL / dpr)
       renderer.render(scene, top)
       scene.remove(group)
     })
